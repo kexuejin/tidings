@@ -1,0 +1,5 @@
+{
+  "generatedAt": "2026-10-11T14:42:51",
+  "reason": "W1/W3/W5 的桌面帧落地后 5 条形态违规归零（d-emoji / d-reqscreen / d-sharescreen / d-viewscreen / d-settings-data），锁死；台账引用的帧名 0 条不存在",
+  "violations": []
+}

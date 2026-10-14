@@ -1,0 +1,106 @@
+R2 桌面截图：拖动无法框选区域 —— 根因、修复与 A/B 实证
+======================================================================
+日期：2026-10-12 20:50–21:10 CST
+作者：W5（teammate w5-remoteview）
+用户报告（原话）：「截图的时候, 拖动没有选择,没法选择区域」
+产物：scaffold/desktopApp/build/compose/binaries/main/app/捎话 Tidings.app
+      A/B 的两颗二进制都是我自己用
+      python3 scaffold/tools/gradle-locked.py --label … -- env JAVA_HOME=/opt/homebrew/opt/openjdk@21 \
+        ./scaffold/gradlew -p scaffold :desktopApp:createDistributable --console=plain
+      打出来的（EXIT=0）：
+        · 旧（对照）21:03:40  BUILD SUCCESSFUL in 47s
+        · 新（修复）21:06:45  BUILD SUCCESSFUL in 1m 5s
+结论：**真缺陷，已修，A/B 在打包产物上双向成立。**
+      根因是 Compose 手势检测器的 key 用错了：`Modifier.pointerInput(currentTool, selection)`
+      而 `onDragStart` 会写 `selection` ⇒ 第一次拖拽就把正在跑的手势检测器取消重建，
+      后续 `onDrag` 全部丢失、`onDragEnd` 不回调 ⇒ 表相「拖了没反应、框不出选区」。
+
+1. 怎么做的（手段）
+----------------------------------------------------------------------
+· 触发截图：单击 composer 工具行里的剪刀图标（= 第 3 或第 4 颗，取决该会话的对端能力，
+  见 §5「坐标为什么每次都要重量」）。动作前用 /tmp/gui（activate → 核实 app.isActive → 动作，
+  同一进程）激活目标实例，避免前台被别的 app 抢走。
+· 拖拽：/tmp/drag <x1> <y1> <x2> <y2>（CGEvent：mouseMoved → leftMouseDown → 12×leftMouseDragged →
+  leftMouseUp，每步 60ms，投到 .cghidEventTap）。
+· 读数（都不靠肉眼）：
+    /tmp/winlist.swift   列 捎话 进程的窗口（id/name/layer/alpha/onscreen/bounds）——判覆盖窗在不在
+    /tmp/avg <png> x y w h   区域平均 RGB ——判遮罩在不在、选区内部有没有被去遮罩
+    /tmp/bbox <png> R G B <tol> x0 y0 x1 y1  区域同色包围盒 ——扫 RelayPrimary(45,106,79) 的选区边框
+    sips -c <h> <w> --cropOffset <top> <left> + sips -Z  裁切放大 4–6 倍读文字/图标
+· 判据（这是本节的核心）：
+    覆盖窗全屏遮罩 = Color.Black alpha 0.45f ⇒ **被遮罩处的像素 × 0.55**；
+    选区内部不画遮罩 ⇒ 拖出选区后，同一采样点应**回到 ≈ ÷0.55（亮 1.8 倍）**。
+    所以「拖拽有没有框出选区」可以只用一个采样点判定，不必看图。
+
+2. 期望看到什么
+----------------------------------------------------------------------
+  E1 旧二进制（对照）：拖拽后采样点亮度**不变**、选区内无绿框、工具栏仍停在视口底部。
+  E2 新二进制（修复）：拖拽后采样点亮度 ≈ ÷0.55、四条边出现绿框、工具栏移到选区下方。
+  E3 两者都：拖拽期间覆盖窗不关闭（Capture 窗口数 1），且不落任何截图文件（拖拽不是确认）。
+
+3. 实际看到什么
+----------------------------------------------------------------------
+  E1 成立（旧 21:03:40 二进制，采样点 (900,650,60×60)）：
+       投前 10.0 / 11.0 / 10.0   →   投后 10.0 / 11.0 / 10.0     （**逐通道完全一致**）
+       绿框扫描：y∈[795,805] 命中 7 处、x∈[1195,1205] 命中 137 处（偶发同色像素，不成线）
+       Capture 窗口数：投前 1、投后 1（覆盖窗一直开着，排除「窗关了所以没选区」）
+  E2 成立（新 21:06:45 二进制，同一采样点）：
+       投前 12.5 / 12.5 / 12.5   →   投后 22.5 / 22.5 / 22.5
+       比值 22.5 / 12.5 = 1.80 ≈ 1 / 0.55 ⇒ 选区内部遮罩被去掉，**选区成立**
+       绿框扫描：y∈[795,805] 命中 943 处（= 底边）、x∈[1195,1205] 命中 752 处（= 右边）
+       注：这正是 /tmp/drag 的终点 (1200,800) 那两条边 ⇒ 边框画在拖拽矩形的边上。
+       视觉复核 /tmp/r2l-sel-big.png（裁切 600,330 + 760×560，放大 1.5 倍）：
+       四条绿边组成的矩形、内部文字回到未变暗状态、**工具栏移到选区下方**（屏幕 y≈830，
+       即 placeCaptureToolbar 的 sel.y+sel.height+8 语义），按钮仍是 剪刀/箭头/文字/马赛克 │ × 复制 ✓。
+  E3 成立：两次 A/B 里 Capture 窗口数投前=投后=1（覆盖窗没被拖拽关掉）；
+       截图文件目录 ~/Library/Caches/捎话 Tidings/screenshots/ 在两次拖拽前后文件数不变。
+
+  同一颗新二进制上的其余三条（本次一并复核）：
+  · 初始态提示：屏幕中央逐字读到「拖拽框选区域 · Esc 取消」（裁切 610,520 + 700×40 放大 2 倍）。
+  · 初始态工具栏：几何上在 (left=8, top=1080-44-8=1028)（CaptureGeometry.placeCaptureToolbarAtBottom）；
+    这一张截图里它被 macOS Dock 遮住（Dock 不透明且浮在 alwaysOnTop 之上），
+    早前 08:33 那份取证里同一位置拍到了它（见 r2-desktop-capture-app-roundtrip.txt）。
+  · Esc 取消：/tmp/keypid <pid> 53（**postToPid，只投目标进程**）⇒ Capture 窗口数 1 → 0，
+    主窗回屏，顶部出现横幅「截图已取消」+「关闭」。
+    （此前一轮我曾怀疑「覆盖窗会自行关闭、可能污染 Esc 结论」；已查明那是**我自己的探针**造成的：
+     重试循环里连着点同一坐标，被 detectTapGestures.onDoubleTap 当成双击 ⇒ onConfirm ⇒
+     发一张全屏截图并关窗，证据是 20:53:35 落了 screenshot_1791809615249.png 且聊天里出现
+     「已发出 1 个文件」。**是我的工装副作用，不是产品行为**；此后每条动作只点一次并立即核实状态。）
+
+4. 失败与已知副作用（如实记录）
+----------------------------------------------------------------------
+  F1 我第一轮"修复后复测仍失败"的读数**不可信**，原因是坐标错了而不是产品没修好：
+     重试循环连点同一坐标 + 坐标取自另一次布局 → 那一次的拖拽实际落在没有覆盖窗的时刻。
+     教训：涉及覆盖窗的实验，每次动作前后都要用 /tmp/winlist 核实 Capture 存在，
+     且**每条动作只做一次**（多点一次就可能变成"双击确认"）。
+  F2 composer 图标行的位置会变（见 §5），第一次点空三次，表现为"点了没反应"，
+     极易被误读成"按钮没接线"。
+  F3 /tmp/key.swift（全局 .cghidEventTap + 修饰键）有前科：误把 ⌘W 投给了当时最前的 Edge，
+     关掉用户一个标签页。本轮的 Esc 一律走 /tmp/keypid 的 postToPid。
+  F4 为了做 A/B，我把「修复」临时回退过一次并重打了产物（21:03:40），随后又恢复并重打
+     （21:06:45）。**当前盘上的 .app 是修复版**；A/B 用的旧二进制没有留档（同路径被覆盖）。
+
+5. 坐标为什么每次都要重量（可复用纪律）
+----------------------------------------------------------------------
+· 窗口内 composer 图标行的 y 随内容位移：同一实例上量到过 y=514 与 y=548 两种；
+· 图标**个数**也会变：本例量到过 5 颗（表情/图片/剪刀/图片/回形针）与 6 颗
+  （多一颗屏幕图标，出现在对端具备投屏能力时）⇒ 剪刀分别是第 3 / 第 4 颗；
+· 屏幕坐标 = 窗口原点 (CGWindowList 报 48,78) + 窗口内坐标；一次量错就整条链失效。
+  唯一可靠办法：`sips -c/-cropOffset` 裁出图标条 → `sips -Z` 放大 4–6 倍读位置 → 换算。
+
+6. 复核命令
+----------------------------------------------------------------------
+  # 两颗二进制（对照 / 修复）都在同一个路径，重放时先确认 mtime：
+  stat -f '%Sm' -t '%H:%M:%S' "scaffold/desktopApp/build/compose/binaries/main/app/捎话 Tidings.app"
+  # 起两个实例（本机需要第二个实例当对端，否则没有会话就没有 composer）
+  APP="scaffold/desktopApp/build/compose/binaries/main/app/捎话 Tidings.app"
+  "$APP/Contents/MacOS/捎话 Tidings" > /tmp/a.log 2>&1 & sleep 14
+  "$APP/Contents/MacOS/捎话 Tidings" >> /tmp/a.log 2>&1 & sleep 16
+  # 选中会话 → 点剪刀（坐标按 §5 重量）→ 核实覆盖窗 → 拖拽 → 量像素/绿框 → Esc
+  /tmp/gui click <pid> <会话行> ; /tmp/gui click <pid> <剪刀>
+  swift /tmp/winlist.swift | grep -c name=Capture          # 期望 1
+  /tmp/gui shot <pid> /tmp/pre.png 0 0 1920 1080 ; /tmp/avg /tmp/pre.png 900 650 60 60
+  /tmp/drag 700 400 1200 800
+  /tmp/gui shot <pid> /tmp/post.png 0 0 1920 1080 ; /tmp/avg /tmp/post.png 900 650 60 60
+  /tmp/bbox /tmp/post.png 45 106 79 40 690 795 1250 805    # 期望 ~943
+  /tmp/keypid <pid> 53 ; sleep 1 ; swift /tmp/winlist.swift | grep -c name=Capture   # 期望 0

@@ -1,0 +1,109 @@
+# ---- 工作方案与设计草案 ----------------------------------------
+/PLAN.md
+/docs/plans/
+
+# ---- Gradle / Kotlin -------------------------------------------------
+.gradle/
+.kotlin/
+build/
+/local.properties
+
+# gradle-wrapper.jar 是二进制但必须提交（否则别人 ./gradlew 会失败），
+# 所以这里只忽略 gradle 自己的散落缓存，不动 wrapper。
+.gradle/**/fileHashes/
+
+# ---- Android SDK / 构建产物 ------------------------------------------
+# sdk.dir 是本机绝对路径；签名材料永远不进仓库。
+*.jks
+*.keystore
+*.p12
+*.mobileprovision
+captures/
+.cxx/
+
+# ---- iOS / Xcode -----------------------------------------------------
+iosApp/build/
+iosApp/.build/
+iosApp/DerivedData/
+*.xcuserstate
+project.xcworkspace/xcuserdata/
+xcuserdata/
+
+# ---- 运行时产物 -----------------------------------------------------
+# agentNode 的落盘收件目录与本地状态，体积大且每台机器不同。
+/agentNode/received/
+/agentNode/state/
+*.log
+
+# ---- 截图测试基准图（由 ./gradlew updateDebugScreenshotTest 本地生成，避免 Git 膨胀）----
+androidApp/src/screenshotTest*/reference/
+
+# ---- 真机截图 ---------------------------------------------------------
+# design/preview/ 是开发期的真机截图：通知栏、时间、电量、设备与人物都是真实的，
+# 随仓库公开会泄露这些信息。
+# 对外可发布的实测证据以 design/runtime-evidence/*.txt 为准（文字读数可以进仓库），
+# 截图基准以 androidApp/src/screenshotTestDebug/reference/ 为准。
+/design/preview/
+
+# 证据目录下的真机截图一律忽略（支持多级子目录）：
+/design/runtime-evidence/**/*.png
+/design/runtime-evidence/**/*.jpg
+/design/runtime-evidence/**/*.jpeg
+/design/runtime-evidence/**/*.webp
+
+# ---- 应用图标中间产物 ------------------------------------------------
+# design/icon/Tidings.iconset/ 是 `design/icon/make-macos-icns.sh` 跑一遍就会
+# 重新生成的 10 个尺寸 PNG（1024 主图 + 各档 @1x/@2x），只服务于 iconutil。
+# 仓库里只留两个文件：relay-macos-1024.png（主图）与 Tidings.icns（交付物，
+# 被 desktopApp/build.gradle.kts 的 macOS { iconFile } 引用）。
+/design/icon/Tidings.iconset/
+# design/icon/preview/ 是图标方案比选的过程稿：v1/v2/v3 三代、每代 5 个候选，
+# 每个都有 svg + 渲染 png。与 /design/preview/ 同属"设计期比选素材"，
+# 不是交付资产；最终方案已由 relay-icon.svg 与 make-macos-icns.sh 固定。
+/design/icon/preview/
+
+# ---- macOS / 编辑器 --------------------------------------------------
+.DS_Store
+.AppleDouble
+.LSOverride
+._*
+.idea/
+*.iml
+.vscode/
+
+# ---- 本地临时脚本 ---------------------------------------------------
+.tmp_*.py
+
+# ---- 原型调试产物与生成物 -------------------------------------------
+# Chrome 探针跑一遍就会导出的整页副本（约 240KB），每次内容都一样，不用进版本库。
+/prototype/_*.html
+# shoot-relay.py 渲染生成的切图（114 张，约 23MB），可随时重跑生成，不进主版本库：
+/prototype/screenshots/
+# 历史演进快照留底：
+/prototype/history/
+
+# ---- Agent 工作笔记与本地缓存 ---------------------------------------
+# .workbuddy/ 是开发期 agent 记忆（逐日笔记 + MEMORY.md），内容是内部推理过程
+# 与当时的判断依据，不是产品文档；它对当前工作树是资产，对公开仓库不是。
+/.workbuddy/
+# Python 探针的字节码缓存：tools/ 与 scripts/ 下的 .py 每跑一遍就会生成一份，
+# 且按解释器版本分裂（cpython-313/314 各一份），对仓库没有任何价值。
+__pycache__/
+*.py[cod]
+# ---- 本地代码索引缓存，靠个人 ~/.gitignore_global 忽略，不属于仓库规则。--
+.codegraph/
+
+# ---- 多 agent 协作的开工前置脚本 ----------------------------------------
+# 这两个脚本是作者本人在多 agent 会话里用的：登记"我这轮写了哪些文件"，
+# 再据此判断对面是否还在写（写范围归属，不是时间窗口）。对第三方协作者
+# 没有意义，且内容绑定作者本机的会话编号与 /tmp 路径。
+/scripts/relay-own-start.sh
+/scripts/relay-liveness.sh
+
+# ---- 原型渲染真值 dump（prototype/dump-layout.py 产物）------------------
+# dump.html 是每次 dump 重写的 wrapper 草稿；layout/ 是可再生的渲染真值
+# （meta.collectorSha 钉住采集器版本）。要入版本库做 diff 时删掉这两行即可。
+prototype/dump.html
+prototype/layout/
+prototype/dump-diag.html
+

@@ -1,0 +1,22 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  Android 侧的应用名（英文）。
+
+  必须与 `values/strings.xml` 里那一份成对存在：`AndroidManifest.xml:77` 的
+  `android:label="@string/app_name"` 找的是 Android 自己的 `R.string`，
+  AAPT2 看不见 composeResources 里那份（实测症状是构建期直接失败
+  `AAPT: error: resource string/app_name … not found.`）。
+
+  英文名与界面里的自称一致：`composeApp/src/commonMain/composeResources/values-en/strings.xml:587`
+  的 `desktop_app_title` 是 `Tidings`（中文侧是 `捎话 Tidings`）。
+
+  为什么要有这个文件：没有 `values-en` 时，英文系统上图标下面显示的是中文
+  「捎话」——**构建不失败、门禁不报红、截图照不到**（截图帧全写死
+  `locale = "zh-rCN"`，且 `design-locale-parity.py` 的扫描根是 composeResources，
+  结构上看不到 androidApp 这份 res）。属"少读 = 假绿"。
+-->
+<resources>
+    <string name="app_name">Tidings</string>
+    <!-- 与 values/strings.xml 里那份成对；见那边的说明。 -->
+    <string name="device_default_nick">My Phone</string>
+</resources>

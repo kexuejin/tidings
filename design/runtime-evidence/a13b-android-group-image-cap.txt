@@ -1,0 +1,101 @@
+# Android 真机「群图 10MB 上限」证据（Pixel 6, SERIAL-TEST-01, 1080x2400, density 420）
+# 对端: 本仓 agentNode「证据节点」 aeb471f0-84da-43f3-8444-536719656776
+#       (Mac 192.168.2.82, UDP 17893 / HTTP 127.0.0.1:8799)
+# 取证时间: 2026-10-07 02:31–02:35
+
+# 这条验收要问的是一个**对照问题**：同一张 15MB 的图，私聊该被自动收下、群里该停下来等用户。
+# 以前答不了，因为发端恒发 null 的 groupId（见本批 core 的改动），根本造不出"群图"这个场景。
+
+$ adb shell getprop ro.product.model; adb shell getprop ro.build.version.release; adb shell wm density
+Pixel 6
+15
+Physical density: 420
+
+$ dd if=/dev/urandom of=/tmp/group-photo.webp bs=1m count=15
+$ ls -l /tmp/group-photo.webp; md5 -q /tmp/group-photo.webp
+-rw-r--r--@ 1 kexuejin  wheel  15728640 Oct  7 02:31 /tmp/group-photo.webp
+35d3d682e406d6a1a90a841206c7b89a
+
+# 判据（core/src/commonMain/kotlin/app/relay/core/protocol/FileTransfer.kt）：
+#   IMG_AUTO_ACCEPT       = 20MB  私聊图片
+#   GROUP_IMG_AUTO_ACCEPT = 10MB  群聊图片（决议 #33：超限按普通文件手动接收）
+# 15728640 字节 = 15MiB，落在两者之间 —— 正好把这条判据逼出来。
+
+# ── 对照 A：私聊图（不带 groupId），15MiB ──────────────────────────────────────
+
+$ curl -s -X POST http://127.0.0.1:8799/v1/send-file \
+    -H "Authorization: Bearer $(cat /tmp/relay-ev-token)" -H 'Content-Type: application/json' \
+    -d '{"to":"192.168.2.22","port":17878,"path":"/tmp/group-photo.webp","name":"private-15mb.webp","purpose":"image"}'
+{"status":"offered","to":"bc19885f-0775-47a5-8342-662ca227f769","toHost":"192.168.2.22","transferId":"cefba5c7-118c-42e4-9b14-6d21c437f33c","name":"private-15mb.webp","size":15728640,"note":"只是报价：对方接受后才开始传，进度与结果在对方界面上"}
+
+# 手机侧（12 秒后 dump，全程没有点过屏幕）：直接「已接收」，没有接收/拒绝按钮 ——
+# 20MB 以内的私聊图按协议免确认。
+text='private-15mb.webp'   [84,1548][405,1591]
+text='15 MB'               [84,1591][172,1625]
+text='已接收'               [84,1625][172,1665]
+text='已存到 /data/user/0/app.relay/files/relay/downloads/private-15mb.webp/private-15mb.webp'
+text='打开'                 [123,1805][197,1858]
+text='分享'                 [307,1805][381,1858]
+
+# 15MiB 真的传完了，且逐字节相同（不是"卡片上写着已接收"）：
+$ adb shell run-as app.relay ls -l files/relay/downloads/private-15mb.webp/
+-rw------- 1 u0_a2428 u0_a2428 15728640 2026-10-07 02:33 private-15mb.webp
+$ adb shell run-as app.relay cat files/relay/downloads/private-15mb.webp/private-15mb.webp | md5 -q
+35d3d682e406d6a1a90a841206c7b89a
+$ md5 -q /tmp/group-photo.webp
+35d3d682e406d6a1a90a841206c7b89a
+
+# ── 对照 B：群图（带 groupId/groupRev），同一个文件、同样的字节数 ──────────────
+
+$ curl -s -X POST http://127.0.0.1:8799/v1/send-file \
+    -H "Authorization: Bearer $(cat /tmp/relay-ev-token)" -H 'Content-Type: application/json' \
+    -d '{"to":"192.168.2.22","port":17878,"path":"/tmp/group-photo.webp","name":"group-15mb.webp","purpose":"image","groupId":"g-1","groupRev":1}'
+{"status":"offered","to":"bc19885f-0775-47a5-8342-662ca227f769","toHost":"192.168.2.22","transferId":"80c88f54-2e15-4ddb-852e-a60f1c9b0db6","name":"group-15mb.webp","size":15728640,"note":"只是报价：对方接受后才开始传，进度与结果在对方界面上"}
+
+# 手机侧：**停在待接收**，与对照 A 形成唯一差别 —— 唯一的变量就是那对 groupId/groupRev。
+text='group-15mb.webp'      [84,1734][386,1777]
+text='15 MB'                [84,1777][172,1811]
+text='对方发来的文件，等你接收'   [84,1811][436,1851]
+text='接收'                  [147,1909][221,1962]
+text='拒绝'                  [355,1909][429,1962]
+
+# 点「接收」后走完这条手动路径，字节数依旧逐字节相同：
+$ python3 /tmp/pxd.py tap '接收'
+tap '接收' 184 1935
+text='group-15mb.webp'   [84,1838][386,1881]
+text='已接收'             [84,1915][172,1955]
+$ adb shell run-as app.relay ls -l files/relay/downloads/group-15mb.webp/
+-rw------- 1 u0_a2428 u0_a2428 15728640 2026-10-07 02:34 group-15mb.webp
+$ adb shell run-as app.relay cat files/relay/downloads/group-15mb.webp/group-15mb.webp | md5 -q
+35d3d682e406d6a1a90a841206c7b89a
+
+# ── 对照 C：群图点「拒绝」── 一个字节都不该传 ────────────────────────────────
+
+$ curl -s -X POST http://127.0.0.1:8799/v1/send-file ... \
+    -d '{"…","name":"declined-15mb.webp","purpose":"image","groupId":"g-1","groupRev":1}'
+{"status":"offered",…,"transferId":"8cddabff-785e-4625-a559-409dd51c41f7","name":"declined-15mb.webp","size":15728640,…}
+$ python3 /tmp/pxd.py tap '拒绝'
+tap '拒绝' 392 1935
+text='declined-15mb.webp'   [84,1881][430,1924]
+text='对方已拒绝'            [84,1958][231,1998]
+
+$ adb shell run-as app.relay ls files/relay/downloads/
+a7-photo.png
+group-15mb.webp
+private-15mb.webp
+# declined-15mb.webp 不在其中：拒绝之后没有落盘，也没有半截 .part 留在 downloads 里。
+
+# ── 结论 ─────────────────────────────────────────────────────────────────────
+# 群图 10MB 上限在真机端到端成立：同一个 15MiB 文件，带群引用就停下来等用户，
+# 不带就自动收下；接收后 md5 与源文件一致，拒绝后不落盘。
+#
+# 发送侧本来发不出这个场景：TransferManager.offerFiles 恒发 null 的 groupId/groupRev，
+# 而 FileCtlOffer 线级模型早就有这两个字段 —— 收端规则正确，发端从不按规则标注。
+# 本批把 groupId/groupRev 一路接到 /v1/send-file（成对校验，只给一个就 400）。
+#
+# 仍未覆盖：
+#   * 群图的**发送侧 UI**：本客户端还没有群的模型（grp1 未声明），界面上发不出群图，
+#     这条验收走的是控制面。等群聊落地时，界面必须把 groupId 一起带上，否则同一条规则
+#     会在界面那条路径上重新失效。
+#   * `purpose` 为 sticker / update 时的内联上限（同一条 isMedia 分支，未在真机跑）。
+#   * 大文件续传（断点 .part 恢复）仍未真机跑过。

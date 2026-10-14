@@ -1,0 +1,379 @@
+// SPDX-License-Identifier: GPL-3.0-only
+
+package app.relay.core.transport
+
+import app.relay.core.nowMillis
+import app.relay.core.protocol.Codec
+import app.relay.core.protocol.DecodeResult
+import app.relay.core.protocol.DEFAULT_TIMINGS
+import app.relay.core.protocol.Envelope
+import app.relay.core.protocol.MsgTypes
+import app.relay.core.protocol.Profile
+import app.relay.core.protocol.Protocol
+import app.relay.core.protocol.Timings
+import app.relay.core.protocol.makeEnvelope
+import app.relay.core.protocol.newId
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Job
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.flow.collect
+import kotlinx.coroutines.launch
+import kotlinx.serialization.json.JsonObject
+import kotlinx.serialization.json.JsonPrimitive
+import kotlin.random.Random
+
+/**
+ * 手动节点：跨网段 / VPN（Tailscale、ZeroTier）/ 本机联调时直填 ip:port。
+ *
+ * **`port` 是 UDP 口，不是 TCP 口。** 发现层全程只走 UDP（entry / alive / presence / exit），
+ * 这个 port 最终落到 `transport.send(bytes, host, port)`，也就是 `DatagramSocket.send`。
+ *
+ * 写成 TCP 口不会有任何报错：桌面茶话间是 `TCP 17879` + `UDP 17878` 两个不同的监听，
+ * 往只开了 TCP 的 17879 发 UDP，内核回一个 ICMP port unreachable，而未 connect 的
+ * `DatagramSocket` 收下这个错误后只是让**下一次** receive 失败 —— 发送侧毫无感觉，
+ * 接收侧根本没人在 UDP 上听，于是**对端一声不吭**，与"网络不通"完全无法区分。
+ * 本机联调最容易踩：顺手把旁边那个正在 LISTEN 的 TCP 端口填进来。
+ */
+data class ManualPeer(val host: String, val udpPort: Int)
+
+/**
+ * 发现层：entry / alive / exit / presence。
+ *
+ * 对齐 TS `src/main/net/discovery.ts`。P0/P1 只实现真正需要的那部分：
+ * 主动 entry、对 entry 回 alive（带抖动与去重）、收 alive、周期 presence、定期 sweep、收 exit、
+ * 收 `profile` 资料变更、以及**资料版本失配时用定向 entry 换回全量资料**（见 [handlePresence]）。
+ *
+ * 仍然不做的两项（理由写在 [MsgTypes.UNHANDLED] 的 KDoc 里，并且 `onDatagram` 里有显式分支，
+ * 不让它们悄悄掉出 `when`）：gossip 摘要 `peers` 与网段分享 `scan-ranges` ——
+ * 手机端是叶子节点，不做节点表散播、也不扫描网段。
+ *
+ * **手机端不做扫描**（不逐个 IP 探活），但**会广播** —— 广播是"让对方主动发现你"的唯一路径。
+ *
+ * 这里曾经写成"手机端不发广播，只向已配置节点单播"，后果是真机可见的：只要用户在
+ * 「发现」页手动加过任何一个节点，本机就再也不广播，同网段其他节点再也发现不了它；
+ * 而它自己也会在 `offlineAfter` 之后，把那些**没手动配过、只是被动握过手**的节点判成离线，
+ * 于是回复消息全部进排队。真机复现并定位（见 docs/adr/ADR-008）。
+ *
+ * 修复后的发送侧与上游 TS `src/main/net/discovery.ts` 一致：**广播与单播是并列的，不是二选一**。
+ * 省掉的只是逐 IP 扫描；Android 的 `CHANGE_WIFI_MULTICAST_STATE` 仍未声明（发送广播不需要它，
+ * 接收广播在省电模式下会被过滤 —— 这条留待 mDNS 自动发现 P4 落地时一并验证）。
+ */
+class Discovery(
+    private val transport: UdpTransport,
+    private val registry: PeerRegistry,
+    /**
+     * 本节点身份。是函数不是值：`NodeRuntime.start()` 会在绑定失败后**改写**自己对外
+     * 声明的 `tcpPort`（见 `NodeRuntime.tcpBound`），而 Discovery 必须广播改写后的那一份
+     * —— 广播一个自己没拿到的端口，对端会照着连，连上的是别人。
+     */
+    private val selfProfile: () -> Profile,
+    private val timings: Timings = DEFAULT_TIMINGS,
+    private val manualPeers: List<ManualPeer> = emptyList(),
+    private val broadcastHost: String = "255.255.255.255",
+    private val broadcastPort: Int = Protocol.DEFAULT_UDP_PORT,
+    /**
+     * 发现层认得、但要交给**应用层**处理的 gossip 帧（目前只有 `scan-ranges`）。
+     *
+     * 必须在这里投递：`scan-ranges` 不在 [MsgTypes.RELIABLE] 里，所以
+     * `Messenger.onDatagram`（只投递可靠帧与 ACK）不会收它；发现层再把它当"有意不处理"
+     * 丢掉的话，`RelayControllerMessages` 的 `handleOnScanRangesReceived` 就是一段
+     * **永远不可达**的代码 —— 对端分享过来的网段永远不会被吸收，也不会再回发。
+     * 的真机读数正是如此：夹具发了 `10.99.195.0/24`，手机落盘的
+     * `settings.json` 里始终只有它自己手动加的那一条。
+     */
+    private val onGossip: (suspend (Envelope) -> Unit)? = null,
+) {
+
+    private var scope: CoroutineScope? = null
+    private val jobs = mutableListOf<Job>()
+    private val lastAliveReplyAt = HashMap<String, Long>()
+    private var presenceSeq = 0
+
+    /**
+     * 上次因"资料版本失配"给某节点补发 entry 的时刻（见 [handlePresence]）。
+     *
+     * 与 `lastAliveReplyAt` 分开记：那个管的是"回 alive 的去重窗口"，这个是"主动问资料"，
+     * 两件事的节流口径不同（前者防开机风暴，后者防版本号横跳）。
+     */
+    private val lastProfileRefreshAt = HashMap<String, Long>()
+
+    fun start(scope: CoroutineScope) {
+        if (this.scope != null) return
+        this.scope = scope
+        jobs += scope.launch { transport.incoming.collect { onDatagram(it) } }
+        jobs += scope.launch { presenceLoop() }
+        jobs += scope.launch { sweepLoop() }
+    }
+
+    fun stop() {
+        for (job in jobs) job.cancel()
+        jobs.clear()
+        scope = null
+    }
+
+    /**
+     * 主动握手：广播 entry **并且**给每个手动节点、以及**已经学到过的在线节点**单播一份
+     * （对齐 TS `discovery.ts:120-123` 的 `start()`）。三者是并列的：配了手动节点不代表
+     * 网段里没有别的节点。
+     *
+     * 第三项（`registry.values()`）是换网段时补上的：广播是受限广播（`255.255.255.255`），
+     * 只在**新**网段里有效；而"学到过但没手动配过"的节点（比如 agentNode 跑在 17891，
+     * 不在广播端口 17878 上）永远收不到广播。少了这一项，换网之后这类节点要等下一次
+     * presence（最多 `presenceInterval` = 30 秒）才知道我的新地址 —— 和
+     * "心跳漏掉被动握手的节点"是同一条规则。
+     */
+    suspend fun announce() {
+        val envelope = makeEnvelope(
+            MsgTypes.ENTRY,
+            selfProfile().nodeId,
+            Codec.profilePayload(selfProfile()),
+        )
+        val bytes = Codec.encodeToBytes(envelope)
+        for ((host, port) in broadcastTargets(broadcastHost, broadcastPort, manualPeers, registry.values())) {
+            sendRaw(bytes, host, port)
+        }
+    }
+
+    /** 只向一个节点握手（手机端的主路径：知道电脑 IP 即可建立双向在线）。 */
+    suspend fun announceTo(host: String, port: Int = Protocol.DEFAULT_UDP_PORT) {
+        val envelope = makeEnvelope(
+            MsgTypes.ENTRY,
+            selfProfile().nodeId,
+            Codec.profilePayload(selfProfile()),
+        )
+        sendRaw(Codec.encodeToBytes(envelope), host, port)
+    }
+
+    /**
+     * 告别：广播一条 `exit`，对端收到就把我们标成离线（[onDatagram] 的 `MsgTypes.EXIT`
+     * 分支走 `registry.markOffline`），不必等 `Timings.offlineAfter`（90 秒）的 presence 超时。
+     *
+     * 载荷是**空对象**，这是刻意的：`entry`/`alive` 靠载荷里的 profile 传递资料，而 `exit`
+     * 只是一个告别 —— 两端都不读它的载荷（我们的接收端只用信封的 `from`；TS 侧对它的校验
+     * 就是 `isRecord(payload)`）。
+     *
+     * 与 [announce] 用同一组目标：广播 + 手动节点 + 学到过的在线节点。少任何一类，
+     * 那一类对端就要等满 presence 超时才知道我们走了。
+     */
+    suspend fun announceExit() {
+        val envelope = makeEnvelope(MsgTypes.EXIT, selfProfile().nodeId, JsonObject(emptyMap()))
+        val bytes = Codec.encodeToBytes(envelope)
+        for ((host, port) in broadcastTargets(broadcastHost, broadcastPort, manualPeers, registry.values())) {
+            sendRaw(bytes, host, port)
+        }
+    }
+
+    private suspend fun sendRaw(bytes: ByteArray, host: String, port: Int) {
+        runCatching { transport.send(bytes, host, port) }
+    }
+
+    /**
+     * 周期 presence 的收件人：广播地址 + 手动节点 + **registry 里在线的节点**
+     * （对齐 TS `discovery.ts:229-237` 的 `sendPresence()`）。
+     *
+     * 第三项是这次真机缺陷的修复点：对方主动来握手、而我没手动加过它时，它只存在于
+     * registry 里 —— 这条单播是它唯一能收到的心跳。漏掉它 → `offlineAfter`（90 秒）后
+     * 被我方判离线 → 发给它的消息全部进排队而不是发出去。
+     */
+    private suspend fun presenceLoop() {
+        while (true) {
+            delay(timings.presenceInterval)
+            val envelope = makeEnvelope(
+                MsgTypes.PRESENCE,
+                selfProfile().nodeId,
+                Codec.presencePayload(presenceSeq++, selfProfile().profileRev),
+            )
+            val bytes = Codec.encodeToBytes(envelope)
+            for ((host, port) in broadcastTargets(broadcastHost, broadcastPort, manualPeers, registry.values())) {
+                sendRaw(bytes, host, port)
+            }
+        }
+    }
+
+    private suspend fun sweepLoop() {
+        while (true) {
+            delay(timings.sweepInterval)
+            registry.sweep(timings.offlineAfter)
+        }
+    }
+
+    private suspend fun onDatagram(datagram: ReceivedDatagram) {
+        val decoded = Codec.decode(datagram.bytes)
+        if (decoded !is DecodeResult.Ok) return
+        val envelope = decoded.env
+        if (envelope.from == selfProfile().nodeId) return
+        when (envelope.type) {
+            MsgTypes.ENTRY -> handleEntry(envelope, datagram)
+            MsgTypes.ALIVE -> handleAlive(envelope, datagram)
+            MsgTypes.PROFILE -> handleProfile(envelope, datagram)
+            MsgTypes.EXIT -> registry.markOffline(envelope.from)
+            MsgTypes.PRESENCE -> handlePresence(envelope, datagram)
+            // `peers` 是"认得、有意不处理"（理由见 `MsgTypes.UNHANDLED`，我们不做节点表散播）。
+            // `scan-ranges` **不是**这一类：应用层有处理它的代码（`handleOnScanRangesReceived`），
+            // 只是它不在可靠集里、Messenger 那条路收不到，所以必须从这里投递上去。
+            MsgTypes.PEERS -> Unit
+            MsgTypes.SCAN_RANGES -> onGossip?.invoke(envelope)
+        }
+    }
+
+    private suspend fun handleEntry(envelope: Envelope, datagram: ReceivedDatagram) {
+        val profile = profileOf(envelope) ?: return
+        registry.touch(
+            envelope.from,
+            datagram.host,
+            datagram.port,
+            profile,
+            envelope.ts,
+            confirmed = true,
+        )
+        scheduleAliveReply(envelope.from, datagram.host, datagram.port, probeIdOf(envelope))
+    }
+
+    private suspend fun handleAlive(envelope: Envelope, datagram: ReceivedDatagram) {
+        val profile = profileOf(envelope) ?: return
+        registry.touch(envelope.from, datagram.host, datagram.port, profile, envelope.ts)
+    }
+
+    /**
+     * 资料变更帧（协议 §6.1 表：`profile` = 昵称/公司/团队/头像变更的广播或单播）。
+     *
+     * 与 [handleAlive] 走同一条路，但**不传 `confirmed`**：这帧是对方主动上门、不是我们
+     * 定向握手换回来的，所以要不要采纳交给 `PeerRegistry` 的新旧判据（`profileRev` 更大
+     * 就收，相同版本才需要确认）。这样既能让"改了昵称"立刻生效，又不会因为一次乱序或
+     * 伪造的 UDP 包把资料钉回旧版本 —— 后者正是 `profileConfirmationOnly` 那道封印在防的事。
+     */
+    private suspend fun handleProfile(envelope: Envelope, datagram: ReceivedDatagram) {
+        val profile = profileOf(envelope) ?: return
+        registry.touch(envelope.from, datagram.host, datagram.port, profile, envelope.ts)
+    }
+
+    /**
+     * 心跳：续期，并在**资料版本对不上**时用一次定向 `entry` 把对方的最新资料换回来。
+     *
+     * 协议 §6.1：「`presence` 携带 `profileRev`：收端发现与本地缓存版本不一致 → 单播 `entry`，
+     * 对方按 §6.1 回 `alive`（带全量资料）即完成刷新。零新增报文类型。」这一条是**必须的**：
+     * 心跳本身不带资料，没有这次刷新，对端改了昵称/端口/能力之后，本机就会永远停在旧的那份上
+     * 并按旧端口去连 —— 机器没换、用的人换了，正是它要修的那种漂移（需求 F-DISC-7）。
+     *
+     * **"从没见过它的资料"（`profileRevOf` 返回 -1）也算对不上，同样要问。** 这条是真机验出来的：
+     * 被真机抓出来的：本机重启后节点表是空的（它是内存表），而对方**不会再发
+     * `entry`** —— 它只在启动/换网段时握手一次，之后每个周期只发 `presence`。于是"等它的 entry"
+     * 等于永远等不到：会话列表里那个人的名字一直停在 nodeId 前 8 位，直到对方重启。
+     * 协议 §6.2 的原话是「与本地缓存版本不一致 → 单播 `entry`」，"本地没有缓存"正是不一致。
+     *
+     * 唯一的克制：同一节点两次刷新至少隔 [PROFILE_REFRESH_MIN_INTERVAL_MS]（每节点
+     * 10 秒），否则一个版本号乱跳的对端能让本机每个心跳周期都发一次 entry。收件地址取的是
+     * **数据报的源地址**而不是载荷里的字段，所以不存在被伪造成反射放大器的问题。
+     */
+    private suspend fun handlePresence(envelope: Envelope, datagram: ReceivedDatagram) {
+        registry.touch(envelope.from, datagram.host, datagram.port, null, envelope.ts)
+        val theirRev = profileRevOf(envelope) ?: return
+        val knownRev = registry.profileRevOf(envelope.from)
+        if (knownRev == theirRev) return
+        val now = nowMillis()
+        val last = lastProfileRefreshAt[envelope.from]
+        if (last != null && now - last < PROFILE_REFRESH_MIN_INTERVAL_MS) return
+        lastProfileRefreshAt[envelope.from] = now
+        val entry = makeEnvelope(
+            MsgTypes.ENTRY,
+            selfProfile().nodeId,
+            Codec.profilePayload(selfProfile(), newId()),
+        )
+        sendRaw(Codec.encodeToBytes(entry), datagram.host, datagram.port)
+    }
+
+    /**
+     * 回 alive。两条路径的区别是刻意的（TS `scheduleAliveReply`）：
+     * - 定向 probe（带 probeId）→ 固定 `directedReplyInterval` 后回，不再去重；
+     * - 普通 entry → 抖动窗口内随机延迟，且同一节点在 `aliveDedupWindow` 内只回一次
+     *   （防开机风暴时整网同时应答）。
+     */
+    private fun scheduleAliveReply(nodeId: String, host: String, port: Int, probeId: String?) {
+        val now = nowMillis()
+        val directed = probeId != null
+        if (!directed) {
+            val last = lastAliveReplyAt[nodeId]
+            if (last != null && now - last < timings.aliveDedupWindow) return
+            lastAliveReplyAt[nodeId] = now
+        }
+        val delayMs = if (directed) {
+            timings.directedReplyInterval
+        } else {
+            val window = minOf(
+                timings.entryReplyJitterBase + (registry.onlineCount() / 100) * 1_000L,
+                timings.entryReplyJitterMax,
+            )
+            Random.nextLong(0L, maxOf(window, 1L))
+        }
+        val active = scope ?: return
+        active.launch {
+            delay(delayMs)
+            val alive = makeEnvelope(
+                MsgTypes.ALIVE,
+                selfProfile().nodeId,
+                Codec.profilePayload(selfProfile(), probeId),
+            )
+            sendRaw(Codec.encodeToBytes(alive), host, port)
+            lastAliveReplyAt[nodeId] = nowMillis()
+        }
+    }
+
+    private fun profileOf(envelope: Envelope): Profile? {
+        val payload = envelope.payload as? JsonObject ?: return null
+        val element = payload["profile"] ?: return null
+        return runCatching {
+            Codec.wireJson.decodeFromJsonElement(Profile.serializer(), element)
+        }.getOrNull()
+    }
+
+    private fun probeIdOf(envelope: Envelope): String? {
+        val payload = envelope.payload as? JsonObject ?: return null
+        val primitive = payload["probeId"] as? JsonPrimitive ?: return null
+        return if (primitive.isString) primitive.content else null
+    }
+
+    /** `presence` 载荷里的 `profileRev`（协议 §6.1：心跳只带版本号，不带资料本身）。 */
+    private fun profileRevOf(envelope: Envelope): Int? {
+        val payload = envelope.payload as? JsonObject ?: return null
+        val primitive = payload["profileRev"] as? JsonPrimitive ?: return null
+        return primitive.content.toIntOrNull()
+    }
+
+    private companion object {
+        /**
+         * 同一节点两次"资料版本失配 → 补一次 entry"之间的最短间隔。
+         *
+         * 协议定的是每节点 10 秒。没有它，一个 profileRev 反复横跳（或时钟回拨）的
+         * 对端能让本机每个心跳周期都发一次 entry —— 那是自己给自己造广播风暴。
+         */
+        const val PROFILE_REFRESH_MIN_INTERVAL_MS = 10_000L
+    }
+}
+
+/**
+ * 一次播报要把同一份字节发给哪些 `host:port`。
+ *
+ * 抽成顶层纯函数是刻意的：这里曾经出过一个真机可见的缺陷 —— 广播与单播被写成
+ * `if (manualPeers.isEmpty()) 广播 else 只发手动节点` 的二选一，于是"配置过一个手动节点"
+ * 就让本机彻底停止广播、同时也不再给被动握过手的节点发心跳。纯函数能让"广播永远在列表里"
+ * 这条不变量被单测直接钉住，不需要真的开 socket（见 `DiscoveryTargetsTest`）。
+ *
+ * 广播地址与某个手动节点 / 已知节点重合时会重复发一份，这是无害的：
+ * `PeerRegistry.touch` 是幂等的，上游 TS 同样不去重（`discovery.ts:234` 注释）。
+ *
+ * `knownPeers` 传 registry 的全量即可 —— 「只在线的才发」这条过滤放在函数内部，
+ * 调用点不再各自记得过滤（曾经正因为把这条规则留在调用点，才写漏了一整条心跳路径）。
+ */
+internal fun broadcastTargets(
+    broadcastHost: String,
+    broadcastPort: Int,
+    manualPeers: List<ManualPeer>,
+    knownPeers: List<PeerRecord>,
+): List<Pair<String, Int>> {
+    val targets = mutableListOf(broadcastHost to broadcastPort)
+    for (peer in manualPeers) targets += peer.host to peer.udpPort
+    for (record in knownPeers) {
+        if (record.online) targets += record.ip to record.udpPort
+    }
+    return targets
+}

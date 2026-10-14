@@ -1,0 +1,26 @@
+# P2-21 CJK 字面量基线（棘轮：只允许减少，不允许增加）
+#
+# 格式: <允许条数>\t<相对仓库根目录的路径>
+# 重新生成: ./gradlew :cjkLiteralGateBaseline
+# 生成时机: HEAD=b1e3819 (dirty), scope=composeApp/src/commonMain,composeApp/src/androidMain,composeApp/src/iosMain,composeApp/src/jvmMain,desktopApp/src/main
+# 命中总数: 139（文件数 19）
+#
+9	composeApp/src/androidMain/kotlin/app/relay/platform/AndroidMdnsAdvertiser.kt
+5	composeApp/src/androidMain/kotlin/app/relay/platform/AndroidMdnsBrowser.kt
+2	composeApp/src/androidMain/kotlin/app/relay/platform/AndroidPushNotificationHandler.kt
+7	composeApp/src/androidMain/kotlin/app/relay/platform/AndroidReceivedFileActions.kt
+1	composeApp/src/commonMain/kotlin/app/relay/app/RelaySettings.kt
+20	composeApp/src/commonMain/kotlin/app/relay/feature/settings/SettingsHomeScreen.kt
+5	composeApp/src/commonMain/kotlin/app/relay/feature/settings/SettingsProfileSubpage.kt
+4	composeApp/src/commonMain/kotlin/app/relay/platform/PlatformContracts.kt
+12	composeApp/src/commonMain/kotlin/app/relay/ui/components/AvatarPalette.kt
+1	composeApp/src/commonMain/kotlin/app/relay/ui/components/Common.kt
+1	composeApp/src/commonMain/kotlin/app/relay/ui/desktop/DesktopLayout.kt
+3	desktopApp/src/main/kotlin/app/relay/desktop/DesktopDragOut.kt
+3	desktopApp/src/main/kotlin/app/relay/desktop/DesktopHosting.kt
+9	desktopApp/src/main/kotlin/app/relay/desktop/DesktopLoginItem.kt
+6	desktopApp/src/main/kotlin/app/relay/desktop/DesktopPeerWindow.kt
+3	desktopApp/src/main/kotlin/app/relay/desktop/DesktopPlatform.kt
+9	desktopApp/src/main/kotlin/app/relay/desktop/DesktopServices.kt
+33	desktopApp/src/main/kotlin/app/relay/desktop/DesktopWindow.kt
+6	desktopApp/src/main/kotlin/app/relay/desktop/Main.kt

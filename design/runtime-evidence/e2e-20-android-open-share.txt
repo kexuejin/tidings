@@ -1,0 +1,81 @@
+# Android 真机「收到的文件能打开/分享」证据（Pixel 6, SERIAL-TEST-01, 1080x2400, density 420）
+# 对端: 本仓 agentNode「证据节点」 aeb471f0-84da-43f3-8444-536719656776
+#       (Mac 192.168.2.82, UDP 17893 / HTTP 127.0.0.1:8799)
+# 取证时间: 2026-10-07 02:21–02:24
+
+$ adb shell getprop ro.product.model; adb shell getprop ro.build.version.release
+Pixel 6
+15
+
+# 发送侧：控制面的新路由 POST /v1/send-file（本批新增）。只是报价，对方接受后才在 TCP 上真传。
+$ magick -size 320x200 xc:'#2D6A4F' -fill white -pointsize 22 -gravity center \
+      -annotate 0 'A7 真机文件验收' /tmp/a7-photo.png
+$ ls -l /tmp/a7-photo.png
+-rw-r--r--@ 1 kexuejin  wheel  2498 Oct  7 02:21 /tmp/a7-photo.png
+$ md5 -q /tmp/a7-photo.png
+5defe92c8ae7db9a5cb8249af042be9e
+
+$ curl -s -X POST http://127.0.0.1:8799/v1/send-file \
+    -H "Authorization: Bearer $(cat /tmp/relay-ev-token)" \
+    -H 'Content-Type: application/json' \
+    -d '{"to":"192.168.2.22","port":17878,"path":"/tmp/a7-photo.png","name":"a7-photo.png"}'
+{"status":"offered","to":"bc19885f-0775-47a5-8342-662ca227f769","toHost":"192.168.2.22","transferId":"98cd2dbf-2988-4b7a-bd35-3f25f752027f","name":"a7-photo.png","size":2498,"note":"只是报价：对方接受后才开始传，进度与结果在对方界面上"}
+
+# 手机侧：会话页（adb shell uiautomator dump，下同；只摘与文件卡有关的部分）。
+# 报价到了、但**没有替用户点头** —— 2 KB 的 png 在没有 purpose 时仍要用户按「接收」。
+text='a7-photo.png'      [84,1072][305,1115]
+text='2 KB'              [84,1115][148,1149]
+text='对方发来的文件，等你接收'   [84,1149][436,1189]
+text='接收'               [147,1247][221,1300]
+text='拒绝'               [355,1247][429,1300]
+
+# 点「接收」之后：
+text='a7-photo.png'      [84,1072][305,1115]
+text='2 KB'              [84,1115][148,1149]
+text='已接收'             [84,1149][172,1189]
+text='已存到 /data/user/0/app.relay/files/relay/downloads/a7-photo.png/a7-photo.png'  [84,1189][788,1271]
+text='打开'               [123,1329][197,1382]
+text='分享'               [307,1329][381,1382]
+
+# 落盘位置在应用内部目录，文件管理器看不见 —— 这正是 P0-4 那个缺口，
+# 也是为什么「打开 / 分享」这两个按钮必须有。字节数与原文件逐字节相同：
+$ adb shell run-as app.relay ls -lR files/relay/downloads/
+files/relay/downloads:
+total 3
+drwx------ 2 u0_a2428 u0_a2428 3452 2026-10-07 02:22 a7-photo.png
+
+files/relay/downloads/a7-photo.png:
+total 4
+-rw------- 1 u0_a2428 u0_a2428 2498 2026-10-07 02:22 a7-photo.png
+
+$ adb shell run-as app.relay cat files/relay/downloads/a7-photo.png/a7-photo.png | md5 -q
+5defe92c8ae7db9a5cb8249af042be9e
+（与 /tmp/a7-photo.png 的 md5 相同：5defe92c8ae7db9a5cb8249af042be9e）
+
+# 「打开」→ 系统里真有应用接下了这个 content:// URI。
+# 走的是 FileProvider（file:// 在 Android 7 起会 FileUriExposedException），
+# 所以前台换成 Photos 这个证据同时说明：authority 签发成功、读权限按次授予成功。
+$ adb shell dumpsys activity activities | grep topResumedActivity
+    topResumedActivity=ActivityRecord{263091224 u0 com.example.photoapp/.pager.HostPhotoPagerActivity t32056}
+
+# 「分享」→ 系统分享面板，标题带文件名，列表里是真正能收下这张图的 app。
+$ adb shell dumpsys activity activities | grep -A1 topResumedActivity
+    topResumedActivity=ActivityRecord{235547767 u0 com.android.intentresolver/.ChooserActivityLauncher t32057}
+      Intent { act=android.intent.action.CHOOSER flg=0x10800001 cmp=com.android.intentresolver/.ChooserActivityLauncher (has extras) }
+text='分享图片'   [42,1494][230,1567]
+text='快速分享'   [11,2154][205,2205]
+text='REDnote'  [227,2154][421,2201]
+text='微博'      [443,2154][637,2205]
+text='信息'      [659,2154][853,2205]
+text='Gmail'    [875,2154][1069,2201]
+
+# 没有出现 FileUriExposedException / ActivityNotFoundException / SecurityException：
+$ adb logcat -d | grep -iE "AndroidFileActions|FileUriExposed|ActivityNotFound|SecurityException"
+（无输出）
+
+# 未覆盖的部分，如实记在这里：
+# 1. 「打开」失败时退到分享面板那条分支（ActivityNotFoundException）没有造出来 ——
+#    需要一个系统里没有应用能打开的类型（例如 .xyz），本轮没测。
+# 2. 落在 file_paths.xml 声明目录之外的路径会如实放弃（用户在「另存为」里挑了自己目录时
+#    才会出现），同样没测：手机上的「另存为」入口这一轮没走。
+# 3. 只测了私聊、单文件、2 KB。群图 10MB（A13b）与大文件续传仍未在真机上跑。

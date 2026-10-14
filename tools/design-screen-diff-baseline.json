@@ -1,0 +1,1342 @@
+{
+  "generatedAt": "8f7b2d0c93a3",
+  "note": "逐屏差集棘轮：每个键的差集只许变小。--check 报「新增的值」。",
+  "reason": "原型复审第二轮修正：消息页签「工作区」段的行高再收紧（紧凑行）、离线组头后缀缩短到「12 分钟前在线」并禁止换行（组头不再折成两行），段高 521.5px → 430px；上限 3 行 + 尾巴不变。",
+  "rowCount": 70,
+  "signature": {
+    "d-agentdetail|__error__": [
+      "落点不存在：**待建**（2026-10-13 原型新增提案；代码侧本轮未适配）"
+    ],
+    "d-agents|font-size|proto": [
+      "11"
+    ],
+    "d-agents|font-weight|proto": [
+      "700"
+    ],
+    "d-agents|radius|proto": [
+      "6",
+      "999"
+    ],
+    "d-agents|spacing|proto": [
+      "1",
+      "1.5",
+      "2",
+      "3",
+      "4",
+      "5",
+      "9",
+      "11",
+      "13",
+      "14"
+    ],
+    "d-cabinet|font-size|code": [
+      "16",
+      "24"
+    ],
+    "d-cabinet|font-weight|code": [
+      "400",
+      "700"
+    ],
+    "d-cabinet|radius|proto": [
+      "12"
+    ],
+    "d-cabinet|spacing|code": [
+      "24"
+    ],
+    "d-cabinet|spacing|proto": [
+      "1",
+      "2",
+      "3",
+      "5",
+      "9",
+      "11",
+      "13",
+      "14"
+    ],
+    "d-capture-tools|font-size|proto": [
+      "11"
+    ],
+    "d-capture-tools|font-weight|proto": [
+      "600"
+    ],
+    "d-capture-tools|radius|proto": [
+      "2"
+    ],
+    "d-capture-tools|spacing|code": [
+      "6",
+      "12"
+    ],
+    "d-capture-tools|spacing|proto": [
+      "5",
+      "7",
+      "8",
+      "9",
+      "11",
+      "14",
+      "32"
+    ],
+    "d-capture|font-size|proto": [
+      "11"
+    ],
+    "d-capture|font-weight|proto": [
+      "600"
+    ],
+    "d-capture|radius|proto": [
+      "2"
+    ],
+    "d-capture|spacing|code": [
+      "6",
+      "12"
+    ],
+    "d-capture|spacing|proto": [
+      "5",
+      "7",
+      "8",
+      "9",
+      "11",
+      "14",
+      "32"
+    ],
+    "d-chat-group|font-size|code": [
+      "20",
+      "22"
+    ],
+    "d-chat-group|font-weight|code": [
+      "700"
+    ],
+    "d-chat-group|radius|code": [
+      "10",
+      "14",
+      "16"
+    ],
+    "d-chat-group|radius|proto": [
+      "8",
+      "12"
+    ],
+    "d-chat-group|spacing|code": [
+      "1.5",
+      "2",
+      "12",
+      "14",
+      "16",
+      "24"
+    ],
+    "d-chat-group|spacing|proto": [
+      "1",
+      "3",
+      "5",
+      "9",
+      "11",
+      "13"
+    ],
+    "d-chat|font-size|code": [
+      "22",
+      "24",
+      "28"
+    ],
+    "d-chat|font-weight|proto": [
+      "400"
+    ],
+    "d-chat|radius|code": [
+      "2",
+      "6",
+      "10",
+      "16",
+      "22"
+    ],
+    "d-chat|radius|proto": [
+      "20"
+    ],
+    "d-chat|spacing|code": [
+      "2",
+      "20"
+    ],
+    "d-chat|spacing|proto": [
+      "1",
+      "5",
+      "13",
+      "30"
+    ],
+    "d-drop|font-size|proto": [
+      "11",
+      "14"
+    ],
+    "d-drop|font-weight|proto": [
+      "400",
+      "500",
+      "600"
+    ],
+    "d-drop|radius|code": [
+      "14"
+    ],
+    "d-drop|radius|proto": [
+      "9",
+      "12",
+      "20"
+    ],
+    "d-drop|spacing|proto": [
+      "1",
+      "4",
+      "5",
+      "7",
+      "8",
+      "9",
+      "10",
+      "11",
+      "12",
+      "13",
+      "14",
+      "16",
+      "30"
+    ],
+    "d-emoji|font-size|code": [
+      "22",
+      "24",
+      "28",
+      "40"
+    ],
+    "d-emoji|font-weight|code": [
+      "700"
+    ],
+    "d-emoji|radius|code": [
+      "2",
+      "6",
+      "10",
+      "16",
+      "22"
+    ],
+    "d-emoji|spacing|code": [
+      "1.5",
+      "2",
+      "4",
+      "12",
+      "14",
+      "16",
+      "20",
+      "24"
+    ],
+    "d-emoji|spacing|proto": [
+      "1",
+      "5",
+      "13"
+    ],
+    "d-empty|font-size|code": [
+      "18",
+      "20"
+    ],
+    "d-empty|font-weight|code": [
+      "500"
+    ],
+    "d-empty|radius|code": [
+      "4",
+      "8",
+      "14"
+    ],
+    "d-empty|spacing|code": [
+      "2",
+      "4",
+      "5",
+      "6",
+      "8",
+      "10",
+      "16",
+      "24",
+      "32"
+    ],
+    "d-empty|spacing|proto": [
+      "9",
+      "34",
+      "40"
+    ],
+    "d-filesempty|spacing|code": [
+      "2",
+      "4",
+      "10",
+      "16",
+      "24"
+    ],
+    "d-filesempty|spacing|proto": [
+      "5",
+      "9",
+      "11",
+      "34",
+      "40"
+    ],
+    "d-files|font-size|code": [
+      "16"
+    ],
+    "d-files|font-weight|code": [
+      "700"
+    ],
+    "d-files|radius|proto": [
+      "999"
+    ],
+    "d-files|spacing|code": [
+      "2",
+      "24"
+    ],
+    "d-files|spacing|proto": [
+      "1",
+      "5",
+      "9",
+      "11",
+      "13"
+    ],
+    "d-folder|font-size|code": [
+      "16"
+    ],
+    "d-folder|font-weight|code": [
+      "700"
+    ],
+    "d-folder|spacing|code": [
+      "2",
+      "24"
+    ],
+    "d-folder|spacing|proto": [
+      "1",
+      "5",
+      "9",
+      "11",
+      "13"
+    ],
+    "d-groupcreate|font-size|code": [
+      "22",
+      "24",
+      "28"
+    ],
+    "d-groupcreate|font-weight|proto": [
+      "400"
+    ],
+    "d-groupcreate|radius|code": [
+      "2",
+      "6",
+      "8",
+      "10",
+      "16",
+      "22"
+    ],
+    "d-groupcreate|spacing|code": [
+      "2",
+      "3",
+      "20"
+    ],
+    "d-groupcreate|spacing|proto": [
+      "5",
+      "13",
+      "24",
+      "30"
+    ],
+    "d-histsearch|font-size|code": [
+      "22",
+      "24",
+      "28"
+    ],
+    "d-histsearch|font-weight|code": [
+      "400",
+      "700"
+    ],
+    "d-histsearch|radius|code": [
+      "2",
+      "6",
+      "10",
+      "16",
+      "22"
+    ],
+    "d-histsearch|radius|proto": [
+      "7"
+    ],
+    "d-histsearch|spacing|code": [
+      "20"
+    ],
+    "d-histsearch|spacing|proto": [
+      "1",
+      "5",
+      "13",
+      "15"
+    ],
+    "d-home-more|font-weight|code": [
+      "700"
+    ],
+    "d-home-more|radius|code": [
+      "4"
+    ],
+    "d-home-more|radius|proto": [
+      "8"
+    ],
+    "d-home-more|spacing|code": [
+      "2",
+      "4",
+      "12",
+      "14",
+      "16",
+      "24"
+    ],
+    "d-home-more|spacing|proto": [
+      "1",
+      "3",
+      "9",
+      "11",
+      "13"
+    ],
+    "d-nodes|font-size|proto": [
+      "24"
+    ],
+    "d-nodes|radius|proto": [
+      "9"
+    ],
+    "d-nodes|spacing|code": [
+      "4"
+    ],
+    "d-nodes|spacing|proto": [
+      "1",
+      "1.5",
+      "3",
+      "5",
+      "7",
+      "9",
+      "11",
+      "13"
+    ],
+    "d-nomatch|font-size|code": [
+      "14",
+      "18",
+      "20"
+    ],
+    "d-nomatch|radius|code": [
+      "4",
+      "8",
+      "11",
+      "12",
+      "14"
+    ],
+    "d-nomatch|radius|proto": [
+      "9"
+    ],
+    "d-nomatch|spacing|code": [
+      "2",
+      "4",
+      "8",
+      "10",
+      "12",
+      "14",
+      "16",
+      "24",
+      "32"
+    ],
+    "d-nomatch|spacing|proto": [
+      "7",
+      "9",
+      "11",
+      "13",
+      "34",
+      "40"
+    ],
+    "d-nosel|font-size|code": [
+      "18",
+      "20"
+    ],
+    "d-nosel|radius|code": [
+      "4",
+      "11",
+      "14"
+    ],
+    "d-nosel|spacing|code": [
+      "2",
+      "4",
+      "12",
+      "14",
+      "16",
+      "24",
+      "32"
+    ],
+    "d-nosel|spacing|proto": [
+      "1",
+      "3",
+      "7",
+      "9",
+      "11",
+      "13",
+      "34",
+      "40"
+    ],
+    "d-reqscreen|font-size|code": [
+      "14",
+      "22"
+    ],
+    "d-reqscreen|font-weight|proto": [
+      "700"
+    ],
+    "d-reqscreen|radius|code": [
+      "6",
+      "8",
+      "10",
+      "16"
+    ],
+    "d-reqscreen|radius|proto": [
+      "0",
+      "28"
+    ],
+    "d-reqscreen|spacing|code": [
+      "2",
+      "4",
+      "24"
+    ],
+    "d-reqscreen|spacing|proto": [
+      "6",
+      "7",
+      "9",
+      "10",
+      "11"
+    ],
+    "d-resume|font-size|code": [
+      "16"
+    ],
+    "d-resume|radius|proto": [
+      "2",
+      "6"
+    ],
+    "d-resume|spacing|code": [
+      "2",
+      "4",
+      "24"
+    ],
+    "d-resume|spacing|proto": [
+      "1",
+      "3",
+      "5",
+      "9",
+      "11",
+      "13"
+    ],
+    "d-search-empty|font-size|code": [
+      "16",
+      "18",
+      "20"
+    ],
+    "d-search-empty|font-size|proto": [
+      "24"
+    ],
+    "d-search-empty|font-weight|code": [
+      "500"
+    ],
+    "d-search-empty|font-weight|proto": [
+      "400"
+    ],
+    "d-search-empty|radius|code": [
+      "4",
+      "8",
+      "11",
+      "14"
+    ],
+    "d-search-empty|spacing|code": [
+      "4",
+      "14",
+      "24",
+      "32"
+    ],
+    "d-search-empty|spacing|proto": [
+      "9"
+    ],
+    "d-search|font-size|code": [
+      "16",
+      "18",
+      "20"
+    ],
+    "d-search|font-size|proto": [
+      "24"
+    ],
+    "d-search|font-weight|code": [
+      "500"
+    ],
+    "d-search|font-weight|proto": [
+      "400"
+    ],
+    "d-search|radius|code": [
+      "4",
+      "8",
+      "11",
+      "14"
+    ],
+    "d-search|spacing|code": [
+      "4",
+      "14",
+      "24",
+      "32"
+    ],
+    "d-search|spacing|proto": [
+      "9"
+    ],
+    "d-settings-data|font-size|code": [
+      "14",
+      "24"
+    ],
+    "d-settings-data|font-weight|code": [
+      "700"
+    ],
+    "d-settings-data|radius|proto": [
+      "8",
+      "9",
+      "12"
+    ],
+    "d-settings-data|spacing|code": [
+      "2"
+    ],
+    "d-settings-data|spacing|proto": [
+      "1",
+      "1.5",
+      "7",
+      "9",
+      "13"
+    ],
+    "d-settings-desk|radius|proto": [
+      "9",
+      "999"
+    ],
+    "d-settings-desk|spacing|code": [
+      "2"
+    ],
+    "d-settings-desk|spacing|proto": [
+      "1.5",
+      "3",
+      "5",
+      "10",
+      "12",
+      "16"
+    ],
+    "d-settings-ime|radius|proto": [
+      "8"
+    ],
+    "d-settings-ime|spacing|proto": [
+      "1",
+      "4",
+      "6"
+    ],
+    "d-settings|spacing|proto": [
+      "1.5",
+      "7",
+      "11"
+    ],
+    "d-sharescreen|font-size|code": [
+      "14",
+      "16",
+      "22"
+    ],
+    "d-sharescreen|radius|code": [
+      "6",
+      "10",
+      "16"
+    ],
+    "d-sharescreen|spacing|code": [
+      "2",
+      "4",
+      "16",
+      "24"
+    ],
+    "d-sharescreen|spacing|proto": [
+      "6",
+      "7",
+      "11"
+    ],
+    "d-transferlog|spacing|proto": [
+      "4"
+    ],
+    "d-tray|font-size|proto": [
+      "11",
+      "12",
+      "14"
+    ],
+    "d-tray|font-weight|proto": [
+      "700"
+    ],
+    "d-tray|radius|proto": [
+      "5",
+      "7",
+      "8",
+      "11",
+      "15"
+    ],
+    "d-tray|spacing|proto": [
+      "1",
+      "4",
+      "5",
+      "6",
+      "7",
+      "9",
+      "14",
+      "24"
+    ],
+    "d-viewscreen|font-size|code": [
+      "14",
+      "16",
+      "22"
+    ],
+    "d-viewscreen|radius|code": [
+      "6",
+      "10",
+      "16"
+    ],
+    "d-viewscreen|spacing|code": [
+      "2",
+      "4",
+      "8",
+      "12",
+      "16",
+      "24"
+    ],
+    "d-viewscreen|spacing|proto": [
+      "6",
+      "7",
+      "10",
+      "11",
+      "13"
+    ],
+    "d-workspacedetail|__error__": [
+      "落点不存在：**待建**（2026-10-13 原型新增提案；代码侧本轮未适配）"
+    ],
+    "m-addnode-fill|font-weight|code": [
+      "400"
+    ],
+    "m-addnode-fill|radius|code": [
+      "10"
+    ],
+    "m-addnode-fill|radius|proto": [
+      "0",
+      "2",
+      "16",
+      "28"
+    ],
+    "m-addnode-fill|spacing|code": [
+      "1",
+      "7",
+      "24",
+      "32"
+    ],
+    "m-addnode-fill|spacing|proto": [
+      "1.5",
+      "5",
+      "11"
+    ],
+    "m-addnode|font-weight|code": [
+      "400"
+    ],
+    "m-addnode|radius|code": [
+      "10"
+    ],
+    "m-addnode|radius|proto": [
+      "0",
+      "2",
+      "16",
+      "28"
+    ],
+    "m-addnode|spacing|code": [
+      "1",
+      "7",
+      "24",
+      "32"
+    ],
+    "m-addnode|spacing|proto": [
+      "1.5",
+      "5",
+      "11"
+    ],
+    "m-agentdetail|__error__": [
+      "落点不存在：**待建**（2026-10-13 原型新增提案；代码侧本轮未适配）"
+    ],
+    "m-agents-empty|__error__": [
+      "落点不存在：**待建**（2026-10-13 原型新增提案；代码侧本轮未适配）"
+    ],
+    "m-agents|font-weight|proto": [
+      "400"
+    ],
+    "m-agents|radius|code": [
+      "8"
+    ],
+    "m-agents|radius|proto": [
+      "16"
+    ],
+    "m-agents|spacing|code": [
+      "24"
+    ],
+    "m-agents|spacing|proto": [
+      "1",
+      "5",
+      "11",
+      "13"
+    ],
+    "m-cabinet|font-size|code": [
+      "16"
+    ],
+    "m-cabinet|spacing|code": [
+      "4"
+    ],
+    "m-chat-group|font-size|code": [
+      "16",
+      "22",
+      "28"
+    ],
+    "m-chat-group|font-weight|code": [
+      "500"
+    ],
+    "m-chat-group|radius|code": [
+      "2",
+      "10",
+      "16",
+      "22"
+    ],
+    "m-chat-group|radius|proto": [
+      "13",
+      "18"
+    ],
+    "m-chat-group|spacing|code": [
+      "9",
+      "11",
+      "20",
+      "24"
+    ],
+    "m-chat-group|spacing|proto": [
+      "5"
+    ],
+    "m-chat-solo|font-size|code": [
+      "22",
+      "28"
+    ],
+    "m-chat-solo|font-weight|proto": [
+      "400"
+    ],
+    "m-chat-solo|radius|code": [
+      "2",
+      "10",
+      "16",
+      "22"
+    ],
+    "m-chat-solo|radius|proto": [
+      "4",
+      "13",
+      "18",
+      "20"
+    ],
+    "m-chat-solo|spacing|code": [
+      "11",
+      "20"
+    ],
+    "m-chat-solo|spacing|proto": [
+      "1",
+      "5",
+      "13",
+      "30"
+    ],
+    "m-chat|font-size|code": [
+      "22",
+      "28"
+    ],
+    "m-chat|font-weight|proto": [
+      "400"
+    ],
+    "m-chat|radius|code": [
+      "2",
+      "10",
+      "16",
+      "22"
+    ],
+    "m-chat|radius|proto": [
+      "4",
+      "13",
+      "18",
+      "20"
+    ],
+    "m-chat|spacing|code": [
+      "11",
+      "20"
+    ],
+    "m-chat|spacing|proto": [
+      "1",
+      "5",
+      "13",
+      "30"
+    ],
+    "m-folderin|font-size|code": [
+      "16",
+      "22",
+      "28",
+      "40"
+    ],
+    "m-folderin|radius|code": [
+      "10",
+      "16",
+      "22"
+    ],
+    "m-folderin|radius|proto": [
+      "13",
+      "18"
+    ],
+    "m-folderin|spacing|code": [
+      "11",
+      "20",
+      "24"
+    ],
+    "m-folderin|spacing|proto": [
+      "5"
+    ],
+    "m-groupcreate|radius|code": [
+      "9"
+    ],
+    "m-groupcreate|radius|proto": [
+      "4",
+      "16"
+    ],
+    "m-groupcreate|spacing|proto": [
+      "5",
+      "11",
+      "13",
+      "24"
+    ],
+    "m-groupinfo|font-size|proto": [
+      "24"
+    ],
+    "m-groupinfo|font-weight|proto": [
+      "700"
+    ],
+    "m-groupinfo|radius|code": [
+      "4",
+      "8"
+    ],
+    "m-groupinfo|radius|proto": [
+      "12",
+      "16"
+    ],
+    "m-groupinfo|spacing|code": [
+      "1"
+    ],
+    "m-groupinfo|spacing|proto": [
+      "1.5",
+      "5",
+      "9",
+      "14",
+      "16"
+    ],
+    "m-gsearch-empty|font-size|proto": [
+      "24"
+    ],
+    "m-gsearch-empty|font-weight|proto": [
+      "400"
+    ],
+    "m-gsearch-empty|radius|code": [
+      "8"
+    ],
+    "m-gsearch-empty|radius|proto": [
+      "9"
+    ],
+    "m-gsearch-empty|spacing|code": [
+      "4",
+      "24"
+    ],
+    "m-gsearch-empty|spacing|proto": [
+      "14",
+      "29",
+      "32"
+    ],
+    "m-gsearch|font-size|proto": [
+      "24"
+    ],
+    "m-gsearch|font-weight|proto": [
+      "400"
+    ],
+    "m-gsearch|radius|code": [
+      "8"
+    ],
+    "m-gsearch|radius|proto": [
+      "9"
+    ],
+    "m-gsearch|spacing|code": [
+      "4",
+      "24"
+    ],
+    "m-gsearch|spacing|proto": [
+      "14",
+      "29",
+      "32"
+    ],
+    "m-histdate|font-size|code": [
+      "22",
+      "28"
+    ],
+    "m-histdate|font-weight|code": [
+      "400"
+    ],
+    "m-histdate|radius|code": [
+      "6",
+      "10",
+      "16",
+      "22"
+    ],
+    "m-histdate|radius|proto": [
+      "0",
+      "7",
+      "11",
+      "13",
+      "28"
+    ],
+    "m-histdate|spacing|code": [
+      "4",
+      "20"
+    ],
+    "m-histsearch|font-size|code": [
+      "16"
+    ],
+    "m-histsearch|font-size|proto": [
+      "24"
+    ],
+    "m-histsearch|font-weight|code": [
+      "400"
+    ],
+    "m-histsearch|radius|code": [
+      "2",
+      "6"
+    ],
+    "m-histsearch|radius|proto": [
+      "13"
+    ],
+    "m-histsearch|spacing|code": [
+      "4"
+    ],
+    "m-home-more|radius|proto": [
+      "4",
+      "8",
+      "16"
+    ],
+    "m-home-more|spacing|proto": [
+      "1",
+      "5",
+      "9",
+      "11",
+      "14"
+    ],
+    "m-home-recent|radius|proto": [
+      "4",
+      "16"
+    ],
+    "m-home-recent|spacing|proto": [
+      "1",
+      "5",
+      "9",
+      "11",
+      "14"
+    ],
+    "m-home-unread|radius|proto": [
+      "16"
+    ],
+    "m-home-unread|spacing|proto": [
+      "5",
+      "11",
+      "14"
+    ],
+    "m-insets|font-size|code": [
+      "16"
+    ],
+    "m-insets|font-size|proto": [
+      "11",
+      "24"
+    ],
+    "m-insets|font-weight|proto": [
+      "700"
+    ],
+    "m-insets|radius|proto": [
+      "16"
+    ],
+    "m-insets|spacing|proto": [
+      "2",
+      "5",
+      "9",
+      "14"
+    ],
+    "m-msgmenu|font-size|code": [
+      "22",
+      "28",
+      "40"
+    ],
+    "m-msgmenu|font-weight|proto": [
+      "400"
+    ],
+    "m-msgmenu|radius|code": [
+      "2",
+      "6",
+      "9",
+      "10",
+      "16",
+      "22"
+    ],
+    "m-msgmenu|radius|proto": [
+      "4",
+      "13",
+      "18",
+      "20"
+    ],
+    "m-msgmenu|spacing|code": [
+      "3",
+      "20"
+    ],
+    "m-msgmenu|spacing|proto": [
+      "1",
+      "5",
+      "13",
+      "30"
+    ],
+    "m-myqr|font-weight|code": [
+      "400"
+    ],
+    "m-myqr|radius|code": [
+      "8",
+      "10"
+    ],
+    "m-myqr|radius|proto": [
+      "0",
+      "2",
+      "16",
+      "28"
+    ],
+    "m-myqr|spacing|code": [
+      "1",
+      "3",
+      "7",
+      "24",
+      "32"
+    ],
+    "m-myqr|spacing|proto": [
+      "1.5",
+      "5",
+      "11"
+    ],
+    "m-nodedetail|font-weight|code": [
+      "400"
+    ],
+    "m-nodedetail|radius|code": [
+      "8",
+      "10"
+    ],
+    "m-nodedetail|radius|proto": [
+      "16"
+    ],
+    "m-nodedetail|spacing|code": [
+      "1",
+      "3",
+      "7",
+      "24",
+      "32"
+    ],
+    "m-nodedetail|spacing|proto": [
+      "5",
+      "11"
+    ],
+    "m-nodes-empty|font-weight|code": [
+      "400"
+    ],
+    "m-nodes-empty|radius|code": [
+      "8",
+      "10"
+    ],
+    "m-nodes-empty|radius|proto": [
+      "16"
+    ],
+    "m-nodes-empty|spacing|code": [
+      "1",
+      "3",
+      "7",
+      "32"
+    ],
+    "m-nodes-empty|spacing|proto": [
+      "5",
+      "11",
+      "48"
+    ],
+    "m-nodes|font-weight|code": [
+      "400"
+    ],
+    "m-nodes|radius|code": [
+      "8",
+      "10"
+    ],
+    "m-nodes|radius|proto": [
+      "16"
+    ],
+    "m-nodes|spacing|code": [
+      "1",
+      "3",
+      "7",
+      "9",
+      "24",
+      "32"
+    ],
+    "m-nodes|spacing|proto": [
+      "1.5",
+      "5",
+      "11"
+    ],
+    "m-screencard|font-size|code": [
+      "16",
+      "22",
+      "28",
+      "40"
+    ],
+    "m-screencard|radius|code": [
+      "10",
+      "16",
+      "22"
+    ],
+    "m-screencard|radius|proto": [
+      "4",
+      "13",
+      "18"
+    ],
+    "m-screencard|spacing|code": [
+      "20",
+      "24"
+    ],
+    "m-screencard|spacing|proto": [
+      "1",
+      "5"
+    ],
+    "m-sendfolder|font-size|code": [
+      "16",
+      "22",
+      "28",
+      "40"
+    ],
+    "m-sendfolder|radius|code": [
+      "10",
+      "16",
+      "22"
+    ],
+    "m-sendfolder|radius|proto": [
+      "13",
+      "18"
+    ],
+    "m-sendfolder|spacing|code": [
+      "11",
+      "20",
+      "24"
+    ],
+    "m-sendfolder|spacing|proto": [
+      "5"
+    ],
+    "m-set-appear|font-size|code": [
+      "14"
+    ],
+    "m-set-appear|radius|proto": [
+      "16"
+    ],
+    "m-set-appear|spacing|proto": [
+      "2",
+      "8"
+    ],
+    "m-set-avatar|font-size|code": [
+      "16"
+    ],
+    "m-set-avatar|font-size|proto": [
+      "12"
+    ],
+    "m-set-avatar|radius|proto": [
+      "16"
+    ],
+    "m-set-avatar|spacing|code": [
+      "4"
+    ],
+    "m-set-avatar|spacing|proto": [
+      "5",
+      "9",
+      "11"
+    ],
+    "m-set-caps|font-size|code": [
+      "14"
+    ],
+    "m-set-caps|font-weight|proto": [
+      "500"
+    ],
+    "m-set-caps|radius|proto": [
+      "12",
+      "13",
+      "16"
+    ],
+    "m-set-caps|spacing|code": [
+      "3",
+      "4"
+    ],
+    "m-set-caps|spacing|proto": [
+      "1.5",
+      "11"
+    ],
+    "m-set-conn|radius|code": [
+      "8"
+    ],
+    "m-set-conn|radius|proto": [
+      "16"
+    ],
+    "m-set-conn|spacing|code": [
+      "3",
+      "4"
+    ],
+    "m-set-conn|spacing|proto": [
+      "9"
+    ],
+    "m-set-data|font-size|code": [
+      "14"
+    ],
+    "m-set-data|radius|proto": [
+      "12",
+      "13",
+      "16"
+    ],
+    "m-set-data|spacing|code": [
+      "3",
+      "4"
+    ],
+    "m-set-data|spacing|proto": [
+      "1.5",
+      "9",
+      "11"
+    ],
+    "m-set-diag|spacing|code": [
+      "3",
+      "4"
+    ],
+    "m-set-diag|spacing|proto": [
+      "2",
+      "9",
+      "13"
+    ],
+    "m-set-notify|font-size|code": [
+      "14"
+    ],
+    "m-set-notify|radius|proto": [
+      "12",
+      "13",
+      "16"
+    ],
+    "m-set-notify|spacing|code": [
+      "3",
+      "4"
+    ],
+    "m-set-notify|spacing|proto": [
+      "11"
+    ],
+    "m-set-profile|radius|proto": [
+      "16"
+    ],
+    "m-set-profile|spacing|proto": [
+      "1.5",
+      "9",
+      "11"
+    ],
+    "m-settings|radius|proto": [
+      "0",
+      "16"
+    ],
+    "m-settings|spacing|proto": [
+      "2",
+      "5",
+      "13"
+    ],
+    "m-workspacedetail|__error__": [
+      "落点不存在：**待建**（2026-10-13 原型新增提案；代码侧本轮未适配）"
+    ]
+  }
+}

@@ -1,0 +1,549 @@
+-- MessageEntity table for message persistence
+CREATE TABLE MessageEntity (
+    id TEXT NOT NULL PRIMARY KEY,
+    conv_id TEXT NOT NULL,
+    peer_id TEXT NOT NULL,
+    sender_id TEXT,
+    mine INTEGER NOT NULL,
+    text TEXT NOT NULL,
+    timestamp INTEGER NOT NULL,
+    delivery TEXT,
+    notice TEXT,
+    file_json TEXT,
+    -- 屏幕协助历史卡（ScreenRecord 会话历史记录）。
+    -- 单独一列而不是搭 file_json 的车：搭车会让 searchFileMessages 把屏幕记录当成文件命中，
+    -- 也会让 decodeFileCard 去解析一个不是文件卡的结构。见 MessageUi.screen 的 KDoc。
+    screen_json TEXT
+);
+
+CREATE INDEX idx_message_conv_time ON MessageEntity(conv_id, timestamp);
+CREATE INDEX idx_message_peer ON MessageEntity(peer_id);
+
+-- FTS5 virtual table for full-text search with trigram tokenizer
+CREATE VIRTUAL TABLE MessageFts USING fts5(
+    text,
+    content='MessageEntity',
+    content_rowid='rowid',
+    tokenize='trigram'
+);
+
+CREATE TRIGGER message_after_insert AFTER INSERT ON MessageEntity BEGIN
+    INSERT INTO MessageFts(rowid, text) VALUES (new.rowid, new.text);
+END;
+
+CREATE TRIGGER message_after_delete AFTER DELETE ON MessageEntity BEGIN
+    INSERT INTO MessageFts(MessageFts, rowid, text) VALUES ('delete', old.rowid, old.text);
+END;
+
+CREATE TRIGGER message_after_update AFTER UPDATE ON MessageEntity BEGIN
+    INSERT INTO MessageFts(MessageFts, rowid, text) VALUES ('delete', old.rowid, old.text);
+    INSERT INTO MessageFts(rowid, text) VALUES (new.rowid, new.text);
+END;
+
+insertMessage:
+INSERT OR REPLACE INTO MessageEntity (
+    id, conv_id, peer_id, sender_id, mine, text, timestamp, delivery, notice, file_json, screen_json
+) VALUES (
+    ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?
+);
+
+selectMessagesByConv:
+SELECT * FROM MessageEntity
+WHERE conv_id = :convId
+ORDER BY timestamp ASC;
+
+selectAllMessages:
+SELECT * FROM MessageEntity
+ORDER BY timestamp ASC;
+
+updateDelivery:
+UPDATE MessageEntity
+SET delivery = :delivery
+WHERE id = :id;
+
+updateMessage:
+UPDATE MessageEntity
+SET text = :text, notice = :notice, file_json = :fileJson, screen_json = :screenJson, delivery = :delivery
+WHERE id = :id;
+
+deleteMessage:
+DELETE FROM MessageEntity
+WHERE id = :id;
+
+clearConv:
+DELETE FROM MessageEntity
+WHERE conv_id = :convId;
+
+clearAll:
+DELETE FROM MessageEntity;
+
+-- 屏幕协助历史卡（`MessageEntity.screen_json`）**不进任何一条正文检索**。
+--
+-- 那张卡的 `text` 是**机器生成的**状态长句（`screen_card_text_*`，例如「屏幕协助进行中」），
+-- 不是谁写的字。放它进检索会让搜「屏幕」把每一场协助都捞出来，用户写的那句话反而被埋掉。
+-- 历史记录检索语句规范：
+-- `AND m.kind IN ('text','pk')`，而屏幕记录落库时 `kind = 'system'`
+-- （`src/main/services/chat.ts:104-125`）⇒ system 行不进 FTS。
+--
+-- 本端没有 `kind` 列，屏幕记录靠 `screen_json IS NOT NULL` 认。六条正文检索都要带这一句：
+-- 三条 FTS 路径、三条 LIKE 兜底（Android 的框架 SQLite 没有 fts5，走的就是 LIKE）。
+-- 注意 `NULL LIKE '%x%'` 在 SQL 里是 NULL 不是 false，所以这一句**不能**省 —— 省了虽然
+-- 结果一样（NULL 不进结果集），但查询计划看不出这是个过滤条件。
+--
+-- 文件检索（`searchFileMessages`）不用加：它要求 `file_json IS NOT NULL`，而屏幕记录的
+-- `file_json` 是 NULL（`toStorable()` 把 `file` 抹成 null）。
+searchMessages:
+SELECT 
+    MessageEntity.id,
+    MessageEntity.conv_id,
+    MessageEntity.peer_id,
+    MessageEntity.sender_id,
+    MessageEntity.mine,
+    MessageEntity.timestamp,
+    snippet(MessageFts, 0, '【', '】', '…', 16) AS snippetText,
+    MessageEntity.file_json
+FROM MessageFts
+JOIN MessageEntity ON MessageEntity.rowid = MessageFts.rowid
+WHERE MessageFts MATCH :query
+  AND MessageEntity.screen_json IS NULL
+ORDER BY MessageEntity.timestamp DESC
+LIMIT :limit;
+
+searchMessagesLike:
+SELECT 
+    id,
+    conv_id,
+    peer_id,
+    sender_id,
+    mine,
+    timestamp,
+    text AS snippetText,
+    file_json
+FROM MessageEntity
+WHERE text LIKE :pattern
+  AND screen_json IS NULL
+ORDER BY timestamp DESC
+LIMIT :limit;
+
+-- 会话内检索（FTS5 路径，>= 3 字符）。
+-- 与全局那条的差别只有 `conv_id = :convId`：会话内检索是「先圈定会话，再在里头找」，
+-- 而全局那条要找遍所有会话。两条都留着而不是加一个可空参数，是因为 SQLDelight 里
+-- `WHERE (:convId IS NULL OR conv_id = :convId)` 会让 `idx_message_conv_time` 索引失效，
+-- 每次搜索退化成全表扫描 —— 会话内检索恰恰是最频繁的那条路径。
+--
+-- 日期与「只看带附件的」两个条件都写进 SQL 而不是取回来在 Kotlin 里筛：
+-- 在 Kotlin 里筛会让 LIMIT 先作用在**未筛**的结果上，于是「筛图片」实际是
+-- 「最近 50 条里恰好是图片的那几条」—— 一个聊了几百条的会话搜图片会搜出空列表，
+-- 而库里明明有图。`conv_id = :convId` 是索引首列，这两个附加条件不影响它走索引。
+--
+-- `:hasFile = 0 OR file_json IS NOT NULL` 这种写法是有意的：SQLDelight 里布尔要落成整数，
+-- 而 `file_json IS NOT NULL` 不能直接与参数做 AND（`NULL AND x` 是 NULL 不是 false）。
+searchMessagesInConv:
+SELECT
+    MessageEntity.id,
+    MessageEntity.conv_id,
+    MessageEntity.peer_id,
+    MessageEntity.sender_id,
+    MessageEntity.mine,
+    MessageEntity.timestamp,
+    snippet(MessageFts, 0, '【', '】', '…', 16) AS snippetText,
+    MessageEntity.file_json
+FROM MessageFts
+JOIN MessageEntity ON MessageEntity.rowid = MessageFts.rowid
+WHERE MessageFts MATCH :query
+  AND MessageEntity.conv_id = :convId
+  AND MessageEntity.screen_json IS NULL
+  AND (:fromAt IS NULL OR MessageEntity.timestamp >= :fromAt)
+  AND (:toAt IS NULL OR MessageEntity.timestamp <= :toAt)
+  AND (:hasFile = 0 OR MessageEntity.file_json IS NOT NULL)
+ORDER BY MessageEntity.timestamp DESC
+LIMIT :limit;
+
+searchMessagesInConvLike:
+SELECT
+    id,
+    conv_id,
+    peer_id,
+    sender_id,
+    mine,
+    timestamp,
+    text AS snippetText,
+    file_json
+FROM MessageEntity
+WHERE conv_id = :convId
+  AND (text LIKE :pattern OR (file_json IS NOT NULL AND file_json LIKE :pattern))
+  AND screen_json IS NULL
+  AND (:fromAt IS NULL OR timestamp >= :fromAt)
+  AND (:toAt IS NULL OR timestamp <= :toAt)
+  AND (:hasFile = 0 OR file_json IS NOT NULL)
+ORDER BY timestamp DESC
+LIMIT :limit;
+
+-- 全局检索的「聊天记录」段：按会话聚合，每会话一行（命中条数 + 最新命中时间 + 最新那条正文）。
+-- 聚合放在 SQL 里而不是取回一大串再在 Kotlin 里 groupBy，是因为全局搜索要的是
+-- 「哪些会话命中了几条」，条数必须来自**全部**命中而不是被 LIMIT 截断后的那一段 ——
+-- 取回再数的话，一个聊了几百条的会话会显示成「50 条相关」，而那是 LIMIT 的值。
+--
+-- `MessageEntity.text AS latestText` 是个**裸列**：SQLite 保证「查询里恰好有一个
+-- min()/max() 聚合时，所有裸列取的是那个极值所在行」。这里唯一的聚合是 MAX(timestamp)，
+-- 所以 latestText 就是**最新那条命中**的正文。这不是碰巧，是 SQLite 的成文行为
+-- （"Bare columns in an aggregate query"），但很反直觉，所以写在这里。
+-- 换成别的数据库（或 SQLite 将来改掉这条）时这里会静默返回任意一行，届时
+-- 要改成 `WHERE timestamp = (SELECT MAX(...) ...)` 的关联子查询。
+searchMessagesGrouped:
+SELECT
+    MessageEntity.conv_id,
+    COUNT(*) AS matchCount,
+    MAX(MessageEntity.timestamp) AS latestAt,
+    MessageEntity.text AS latestText
+FROM MessageFts
+JOIN MessageEntity ON MessageEntity.rowid = MessageFts.rowid
+WHERE MessageFts MATCH :query
+  AND MessageEntity.screen_json IS NULL
+GROUP BY MessageEntity.conv_id
+ORDER BY latestAt DESC
+LIMIT :limit;
+
+searchMessagesGroupedLike:
+SELECT
+    conv_id,
+    COUNT(*) AS matchCount,
+    MAX(timestamp) AS latestAt,
+    text AS latestText
+FROM MessageEntity
+WHERE text LIKE :pattern
+  AND screen_json IS NULL
+GROUP BY conv_id
+ORDER BY latestAt DESC
+LIMIT :limit;
+
+-- 全局检索的「文件」段：按**文件展示名**匹配。
+--
+-- 匹配的是 `file_json` 这一整块 JSON 而不是单独一列，因为文件元数据本来就以
+-- [FileCardUi] 的序列化形态存在这一列里（见 `MessageStore.json`），再拆一个
+-- `file_name` 列出来只为给 LIKE 用，就多了一份会跟 JSON 不同步的副本。
+--
+-- 代价是 LIKE 也会匹配到 JSON 里的**别的**字符串值（比如 `savedPaths` 里的路径）。
+-- 这是可接受的：搜「协议」而命中一个路径里带「协议」的文件，用户看到的仍是
+-- 一个文件名相关的文件，不是无关结果；反过来拆列则要处理两处不同步。
+--
+-- `file_json IS NOT NULL` 必须显式写：`NULL LIKE '%x%'` 在 SQL 里是 NULL 而不是 false，
+-- 不写这一句虽然结果一样（NULL 不进结果集），但会让查询计划看不出这一列是过滤条件。
+searchFileMessages:
+SELECT
+    id,
+    conv_id,
+    timestamp,
+    file_json
+FROM MessageEntity
+WHERE file_json IS NOT NULL AND file_json LIKE :pattern
+ORDER BY timestamp DESC
+LIMIT :limit;
+
+-- PPE-1 §9 Agent tables for isolated session and event persistence
+CREATE TABLE AgentSessionEntity (
+    node_id TEXT NOT NULL,
+    session_id TEXT NOT NULL,
+    alias TEXT,
+    agent_kind TEXT,
+    state TEXT,
+    title TEXT,
+    started_at INTEGER,
+    updated_at INTEGER NOT NULL,
+    announced INTEGER NOT NULL,
+    -- PPE-1 增补 D1/D6（agent-session 的四个可选键）。可空 = 「对端没报」，
+    -- 与空串不同：空串是一个真实取值，null 才如实表示没收到（父稿的降级铁律）。
+    agent_id TEXT,
+    ws_id TEXT,
+    ws_title TEXT,
+    ws_path TEXT,
+    -- 宿主侧这条会话的**活动时刻**（agent-session 尾键 `updatedAt`）= `max(createdAt, lastPromptAt)`。
+    --
+    -- 为什么不复用它上面那列：上面那列 `updated_at` 是**本端最后一次收到该会话帧的时刻**，
+    -- 落库后既要还原"刚刚"这句相对时间，又是分页 offset 的依据；而排序要问的是
+    -- "**在 DSH 里**它什么时候动过"。历史分页一页 20 条同在毫秒里到达，
+    -- 前者会全部并列、排序退化成到达顺序（用户原话：「跟 dsh 上显示的不一样，不是最新的」）。
+    -- 可空 = 对端没报这个尾键（老宿主），不是 0 —— 0 会被当成"1970 年动过"。
+    host_updated_at INTEGER,
+    -- PPE-1 可见性两键（agent-session 尾键 `origin` / `blank`）：DSH 自己按这两条决定
+    -- 一条会话该不该出现在工作区浏览器里（官方 `sessionVisible()`：子代理一律隐藏；
+    -- 空壳会话只要不是"当前会话"就隐藏）。
+    --
+    -- 为什么必须落库、且必须留给**展示层**过滤：这两键是后加的，此前落库的行
+    -- （真机实测 110 行里 68 行命中判据）没有任何撤回帧会再来碰它们，
+    -- `pruneEndedSessions` 又只 prune 内存态不删库 —— 只在入库时过滤的话，这批存量行永远留在手机上。
+    --
+    -- 列名不加 `host_` 前缀（与 `host_updated_at` 有别）是刻意的：那个前缀是给"时刻"防串用的，
+    -- 这里两列与线上的键逐字同名，反而更容易对上协议文档。
+    origin TEXT,
+    blank INTEGER,
+    PRIMARY KEY (node_id, session_id)
+);
+
+CREATE INDEX idx_agent_session_node ON AgentSessionEntity(node_id);
+
+CREATE TABLE AgentEventEntity (
+    node_id TEXT NOT NULL,
+    session_id TEXT NOT NULL,
+    cursor INTEGER NOT NULL,
+    event_type TEXT NOT NULL,
+    summary TEXT,
+    body TEXT,
+    ref TEXT,
+    at INTEGER NOT NULL,
+    PRIMARY KEY (node_id, session_id, cursor)
+);
+
+CREATE INDEX idx_agent_event_session ON AgentEventEntity(session_id, cursor);
+
+-- PPE-1 §6.3 / §6.4 / §6.5 / §6.7 的四张 agent 表。
+--
+-- 为什么它们必须落盘：审批的**处置结果**（approved / denied）是本端产生的、对端无从重算的状态；
+-- 只留在内存里，用户点完「允许」再重启，面板就又回到「待审批」，而那条 `agent-ack` 其实早就发过了。
+-- 前三张（session / event）当初就落盘了，这四张是补上同一条纪律的另一半。
+CREATE TABLE AgentApprovalEntity (
+    node_id TEXT NOT NULL,
+    approval_id TEXT NOT NULL,
+    session_id TEXT NOT NULL,
+    tool TEXT,
+    summary TEXT,
+    expires_at INTEGER NOT NULL,
+    choices TEXT,
+    -- NULL = 还没处置（≠ 被拒）。§10 不许把「没有回执」显示成任何结论，所以这一列可空。
+    status TEXT,
+    updated_at INTEGER NOT NULL,
+    PRIMARY KEY (node_id, approval_id)
+);
+
+CREATE INDEX idx_agent_approval_session ON AgentApprovalEntity(node_id, session_id);
+
+CREATE TABLE AgentTaskEntity (
+    node_id TEXT NOT NULL,
+    task_id TEXT NOT NULL,
+    -- NULL = 「待分配到新会话」（§6.3 原文），与 `AgentSessionRegistry` 里那个空串键对应。
+    session_id TEXT,
+    op TEXT NOT NULL,
+    prompt TEXT,
+    queued_at INTEGER NOT NULL,
+    PRIMARY KEY (node_id, task_id)
+);
+
+CREATE INDEX idx_agent_task_session ON AgentTaskEntity(node_id, session_id);
+
+CREATE TABLE AgentRunEntity (
+    node_id TEXT NOT NULL,
+    run_id TEXT NOT NULL,
+    session_id TEXT NOT NULL,
+    state TEXT NOT NULL,
+    at INTEGER NOT NULL,
+    note TEXT,
+    updated_at INTEGER NOT NULL,
+    PRIMARY KEY (node_id, run_id)
+);
+
+CREATE INDEX idx_agent_run_session ON AgentRunEntity(node_id, session_id);
+
+-- PPE-1 增补 D3 / D7：工作区宣告与授权状态两张表。
+--
+-- 为什么 `agent_key` 参与归组却**不进主键**：一个工作区的身份是 `(node_id, ws_id)`
+-- （父稿 §1：`wsId` 在同一 `(nodeId, agentId ?? agentKind)` 内唯一）。宿主把某个 agent
+-- 改名（换了 agentId/agentKind）时，那**还是同一个工作区**、只是换了归属 —— 若 agentKey
+-- 进主键，磁盘上就会留下两条同 wsId 的行，界面上"一行变两行"，而没有任何一条 SQL 能
+-- 说清哪条才是现在的真相。归组信息要留着（改名前后要知道它是谁的），但它不是身份。
+CREATE TABLE AgentWorkspaceEntity (
+    node_id TEXT NOT NULL,
+    agent_key TEXT,
+    -- D6 的 agent 实例身份原值。agent_key 是派生物（= agent_id ?? agent_kind），
+    -- 分开存是为了改名可迁移：换 agentId 是同一实例换名字，合并 prev 时旧值要读得回来。
+    agent_id TEXT,
+    ws_id TEXT NOT NULL,
+    ws_title TEXT,
+    ws_path TEXT,
+    agent_kind TEXT,
+    -- NULL = 宿主没报 `online`。这跟 0（false）是两件事：沉默不等于离线（父稿 §3.3 同规矩）。
+    online INTEGER,
+    -- NULL = 宿主没自报会话数；非空时也只是参考 —— 界面显示优先用本端自己数的（父稿 §2.2）。
+    session_count INTEGER,
+    -- DSH 注册表里的持久顺序（0 起，越小越靠前）；NULL = 宿主没报。
+    --
+    -- 为什么落库而不是"界面按收到的先后排"：注册表顺序是用户可手工拖的（DSH 的
+    -- `insertBefore`），它跟"最近活动"无关；而这张表读回来是 `ORDER BY updated_at DESC`
+    -- —— 到达序在重启后就被打乱了。顺序是宿主的事实，必须跟帧一起存下来。
+    host_order INTEGER,
+    updated_at INTEGER NOT NULL,
+    PRIMARY KEY (node_id, ws_id)
+);
+
+CREATE INDEX idx_agent_workspace_node ON AgentWorkspaceEntity(node_id);
+
+-- 授权状态（D7）。键 = (node_id, agent_key)，空串 agent_key = **整台设备**那一档
+-- （`scope = "all"` 的帧没有 agentKey）。用空串而不是 NULL 做主键成员：SQLite 里
+-- NULL 不参与唯一性判定（两条 NULL 主键行可以共存），拿它当"这一档"会让同一个节点
+-- 攒出多条设备级授权。读回来时把空串翻回 null，见 loadGrants。
+CREATE TABLE AgentGrantEntity (
+    node_id TEXT NOT NULL,
+    agent_key TEXT NOT NULL DEFAULT '',
+    scope TEXT NOT NULL,
+    state TEXT NOT NULL,
+    at INTEGER NOT NULL,
+    PRIMARY KEY (node_id, agent_key)
+);
+
+CREATE TABLE AgentArtifactEntity (
+    node_id TEXT NOT NULL,
+    artifact_id TEXT NOT NULL,
+    session_id TEXT NOT NULL,
+    file_id TEXT,
+    name TEXT NOT NULL,
+    bytes INTEGER,
+    mime TEXT,
+    at INTEGER NOT NULL,
+    PRIMARY KEY (node_id, artifact_id)
+);
+
+CREATE INDEX idx_agent_artifact_session ON AgentArtifactEntity(node_id, session_id);
+
+insertAgentSession:
+INSERT OR REPLACE INTO AgentSessionEntity (
+    node_id, session_id, alias, agent_kind, state, title, started_at, updated_at, announced,
+    agent_id, ws_id, ws_title, ws_path, host_updated_at, origin, blank
+) VALUES (
+    ?, ?, ?, ?, ?, ?, ?, ?, ?,
+    ?, ?, ?, ?, ?, ?, ?
+);
+
+selectAllAgentSessions:
+SELECT * FROM AgentSessionEntity
+ORDER BY updated_at DESC;
+
+selectAgentSessionsByNode:
+SELECT * FROM AgentSessionEntity
+WHERE node_id = :nodeId
+ORDER BY updated_at DESC;
+
+insertAgentEvent:
+INSERT OR REPLACE INTO AgentEventEntity (
+    node_id, session_id, cursor, event_type, summary, body, ref, at
+) VALUES (
+    ?, ?, ?, ?, ?, ?, ?, ?
+);
+
+selectAllAgentEvents:
+SELECT * FROM AgentEventEntity
+ORDER BY cursor ASC;
+
+selectAgentEventsBySession:
+SELECT * FROM AgentEventEntity
+WHERE node_id = :nodeId AND session_id = :sessionId
+ORDER BY cursor ASC;
+
+insertAgentApproval:
+INSERT OR REPLACE INTO AgentApprovalEntity (
+    node_id, approval_id, session_id, tool, summary, expires_at, choices, status, updated_at
+) VALUES (
+    ?, ?, ?, ?, ?, ?, ?, ?, ?
+);
+
+selectAllAgentApprovals:
+SELECT * FROM AgentApprovalEntity
+ORDER BY updated_at DESC;
+
+insertAgentTask:
+INSERT OR REPLACE INTO AgentTaskEntity (
+    node_id, task_id, session_id, op, prompt, queued_at
+) VALUES (
+    ?, ?, ?, ?, ?, ?
+);
+
+selectAllAgentTasks:
+SELECT * FROM AgentTaskEntity
+ORDER BY queued_at ASC;
+
+-- `op == "dequeue"` 与本地「取消排队」都会把任务移走（§6.3），持久层要跟得上，
+-- 否则重启后一条早就撤掉的任务又冒出来，用户以为它还在排。
+deleteAgentTask:
+DELETE FROM AgentTaskEntity
+WHERE node_id = :nodeId AND task_id = :taskId;
+
+insertAgentRun:
+INSERT OR REPLACE INTO AgentRunEntity (
+    node_id, run_id, session_id, state, at, note, updated_at
+) VALUES (
+    ?, ?, ?, ?, ?, ?, ?
+);
+
+selectAllAgentRuns:
+SELECT * FROM AgentRunEntity
+ORDER BY updated_at DESC;
+
+insertAgentWorkspace:
+INSERT OR REPLACE INTO AgentWorkspaceEntity (
+    node_id, agent_key, agent_id, ws_id, ws_title, ws_path, agent_kind, online, session_count,
+    host_order, updated_at
+) VALUES (
+    ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?
+);
+
+selectAllAgentWorkspaces:
+SELECT * FROM AgentWorkspaceEntity
+ORDER BY updated_at DESC;
+
+insertAgentGrant:
+INSERT OR REPLACE INTO AgentGrantEntity (
+    node_id, agent_key, scope, state, at
+) VALUES (
+    ?, ?, ?, ?, ?
+);
+
+selectAllAgentGrants:
+SELECT * FROM AgentGrantEntity
+ORDER BY at DESC;
+
+insertAgentArtifact:
+INSERT OR REPLACE INTO AgentArtifactEntity (
+    node_id, artifact_id, session_id, file_id, name, bytes, mime, at
+) VALUES (
+    ?, ?, ?, ?, ?, ?, ?, ?
+);
+
+selectAllAgentArtifacts:
+SELECT * FROM AgentArtifactEntity
+ORDER BY at DESC;
+
+clearAllAgentData:
+DELETE FROM AgentSessionEntity;
+DELETE FROM AgentEventEntity;
+DELETE FROM AgentApprovalEntity;
+DELETE FROM AgentTaskEntity;
+DELETE FROM AgentRunEntity;
+DELETE FROM AgentArtifactEntity;
+DELETE FROM AgentWorkspaceEntity;
+DELETE FROM AgentGrantEntity;
+
+cleanupDirtyDshSessions:
+UPDATE AgentSessionEntity
+SET ws_id = NULL
+WHERE (agent_kind = 'DSH' OR agent_kind IS NULL)
+  AND length(session_id) = 36
+  AND session_id NOT LIKE 'session-%'
+  AND ws_id IS NOT NULL;
+
+deleteProbeSessions:
+DELETE FROM AgentSessionEntity
+WHERE session_id LIKE 'probe-%' OR title LIKE 'Route this bounded%';
+
+deleteProbeWorkspaces:
+DELETE FROM AgentWorkspaceEntity
+WHERE ws_id LIKE 'ws-probe-%'
+   OR ws_id LIKE 'ws-plugin-%'
+   OR ws_id LIKE 'ws-tool-%'
+   OR ws_id LIKE 'ws-verify-%'
+   OR ws_id LIKE 'ws-port-%'
+   OR ws_id LIKE 'ws-deliver-%'
+   OR ws_id LIKE 'ws-full-%'
+   OR ws_title LIKE '%探针%'
+   OR ws_title LIKE '%测试%'
+   OR ws_title LIKE '%复现%'
+   OR ws_title LIKE '%核对%';
+
+

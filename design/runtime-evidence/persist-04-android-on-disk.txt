@@ -1,0 +1,37 @@
+# Android 真机落盘证据（Pixel 6, <设备序列号>, 1080x2400, density 420）
+# 对端: /Applications/Teahouse.app (pid 459, Mac 192.168.2.82, UDP *:17878 / TCP *:17879)
+# 取证时间: 2026-10-04 15:08–15:12
+
+$ adb shell run-as app.relay ls -l files/relay
+total 8
+-rw------- 1 u0_a2428 u0_a2428 375 2026-10-04 15:08 messages.json
+-rw------- 1 u0_a2428 u0_a2428 168 2026-10-04 15:06 settings.json
+
+$ adb shell run-as app.relay cat files/relay/messages.json
+{
+    "threads": {
+        "95d856ac-9974-438c-ab50-4f780cd5b4df": [
+            {
+                "id": "local-1-1791097703513",
+                "peerId": "95d856ac-9974-438c-ab50-4f780cd5b4df",
+                "mine": true,
+                "text": "persist-check-1507",
+                "at": 1791097703514,
+                "delivery": "Sent"
+            }
+        ]
+    }
+}
+$ adb shell run-as app.relay cat files/relay/settings.json
+{
+    "nodeId": "bc19885f-0775-47a5-8342-662ca227f769",
+    "manualPeers": [
+        {
+            "host": "192.168.2.82"
+        }
+    ],
+    "persistMessages": true
+}
+# 冷启动: am force-stop app.relay → pidof 为空 → am start -n app.relay/.app.MainActivity
+# 重启后消息列表仍显示 书房的电脑 / persist-check-1507 / 3 分钟前；
+# 线程详情仍显示 15:08 已送达，能力与 TCP 17879 均恢复。

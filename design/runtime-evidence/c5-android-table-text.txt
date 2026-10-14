@@ -1,0 +1,149 @@
+# Android 真机「表格图片文字视图 tbl1」证据（Pixel 6, SERIAL-TEST-01, 1080x2400, density 420）
+# 对端: 本仓 agentNode「证据节点」 aeb471f0-84da-43f3-8444-536719656776
+#       (Mac 192.168.2.82, UDP 17893 / HTTP 127.0.0.1:8799)
+# 取证时间: 2026-10-07 02:43–02:47
+
+# 这条验收问三件事：① 带 tableText 的图片报价，气泡里该出现「看表格文字」开关；
+# ② 不带 tableText 的普通图片，**不该**出现这个开关；③ 发送端截断过（>4096B）时，
+# 展开的文字下面该有一行如实说明。
+#
+# 以前造不出场景：TransferManager.offerFiles 根本没有 tableText 参数，
+# FileCtlOffer.tableText/tableTextTruncated 有线级字段、收端也组装进了 IncomingOffer，
+# 但发端写不出去 —— 于是这个开关在本机从来没有机会出现。本批把它一路接到 /v1/send-file。
+
+$ adb shell getprop ro.product.model; adb shell getprop ro.build.version.release
+Pixel 6
+15
+
+# 图片来源：A7 那条验收用过的那张 2KB PNG（内容不重要，这条钉的是文字视图那一段）。
+$ ls -l /tmp/a7-photo.png; md5 -q /tmp/a7-photo.png
+-rw-r--r--@ 1 kexuejin  wheel  2498 Oct  7 02:11 /tmp/a7-photo.png
+5defe92c8ae7db9a5cb8249af042be9e
+
+# 判据（core/src/commonMain/kotlin/app/relay/core/protocol/FileTransfer.kt）：
+#   TABLE_TEXT_LIMIT_BYTES = 4096
+# 超限时按 UTF-8 字节边界回退到最后一个完整字符，并把 tableTextTruncated 置 true；
+# 没截断就**不带这个键**（老端按 hasOnlyKeys 严格比对 key 集合，多一个键整帧丢弃）。
+
+# ── ① 带 tableText：开关出现、展开后是真制表符/换行 ──────────────────────────
+$ curl -s -X POST http://127.0.0.1:8799/v1/send-file \
+    -H "Authorization: Bearer $(cat /tmp/relay-ev-token)" \
+    -H 'Content-Type: application/json' \
+    -d '{"to":"192.168.2.22","port":17878,"path":"/tmp/a7-photo.png",
+         "name":"table-2026-10.png","purpose":"image",
+         "tableText":"月份\t收入\t支出\n1月\t12000\t8400\n2月\t9800\t10150\n3月\t15300\t7200"}'
+{"status":"offered","to":"bc19885f-0775-47a5-8342-662ca227f769","toHost":"192.168.2.22","transferId":"74d4728c-83c4-4fda-8d3f-cd1cd5cfda3f","name":"table-2026-10.png","size":2498,"note":"只是报价：对方接受后才开始传，进度与结果在对方界面上"}
+
+$ python3 /tmp/pxd.py dump        # 摘录
+text='table-2026-10.png'   [84,1603][389,1646]
+text='2 KB'                [84,1646][148,1680]
+text='看表格文字'            [87,1729][234,1769]      <-- 开关在这里
+text='已接收'               [84,1811][172,1851]
+text='已存到 /data/user/0/app.relay/files/relay/downloads/table-2026-10.png/table-2026-10.png'
+text='打开'                 [123,1991][197,2044]
+text='分享'                 [307,1991][381,2044]
+
+$ python3 /tmp/pxd.py tap '看表格文字'
+tap '看表格文字' 160 1749
+
+$ python3 /tmp/pxd.py dump        # 摘录：开关翻转，文字展开
+text='table-2026-10.png'   [84,1603][389,1646]
+text='2 KB'                [84,1646][148,1680]
+text='收起文字'              [102,1729][219,1769]      <-- 同一个开关，状态翻转
+text='月份&#9;收入&#9;支出&#10;1月&#9;12000&#9;8400&#10;2月&#9;9800&#9;10150&#10;3月&#9;15300&#9;7200'
+                           [105,1843][767,2014]
+# uiautomator 把制表符写成 &#9;、换行写成 &#10; —— 线上过来的确实是真空白字符，
+# 不是被转义过的字面量 "\t"。
+# 截图 /tmp/ev-c5-table.png（本机留档，不入库）：四行列目视对齐，
+# 月份 收入 支出 / 1月 12000 8400 / 2月 9800 10150 / 3月 15300 7200。
+
+# ── ② 负向对照：不带 tableText 的普通图片不该有这个开关 ──────────────────────
+$ curl -s -X POST http://127.0.0.1:8799/v1/send-file \
+    -H "Authorization: Bearer $(cat /tmp/relay-ev-token)" \
+    -H 'Content-Type: application/json' \
+    -d '{"to":"192.168.2.22","port":17878,"path":"/tmp/a7-photo.png",
+         "name":"plain-photo.png","purpose":"image"}'
+{"status":"offered","to":"bc19885f-0775-47a5-8342-662ca227f769","toHost":"192.168.2.22","transferId":"4b61073c-8acc-443b-9154-1bf3d1339e67","name":"plain-photo.png","size":2498,"note":"只是报价：对方接受后才开始传，进度与结果在对方界面上"}
+
+$ python3 /tmp/pxd.py dump        # 摘录
+text='plain-photo.png'     [84,1652][345,1695]
+text='2 KB'                [84,1695][148,1729]
+text='已接收'               [84,1729][172,1769]
+text='已存到 /data/user/0/app.relay/files/relay/downloads/plain-photo.png/plain-photo.png'
+text='打开'                 [123,1909][197,1962]
+text='分享'                 [307,1909][381,1962]
+# 同一屏上 table-big.png / table-cut.png 有「收起文字」，这一张没有 —— 对照成立。
+
+# ── ③ 截断分支：发送端超 4096 字节时，展开的文字下面有如实说明 ────────────────
+# 3a. 单行 4114 字节（高度小，说明行正好在屏幕内）
+$ python3 -c 'print("月份\t收入\t" + "x"*4100)' | wc -c
+    4114
+$ curl -s -X POST http://127.0.0.1:8799/v1/send-file ... \
+    -d '{"...","name":"table-cut.png","purpose":"image","tableText":"月份\t收入\txxx…"}'
+{"status":"offered",...,"name":"table-cut.png","size":2498,...}
+
+$ python3 /tmp/pxd.py tap '看表格文字'; python3 /tmp/pxd.py dump
+text='table-cut.png'   [84,1521][305,1564]
+text='收起文字'          [102,1647][219,1687]
+text='月份 收入 xxxxxx…'  [105,...]          # 长行按 horizontalScroll 单行截断显示，不折行
+text='文字已被发送端截断，图片是完整的。'  [84,1838][582,1878]
+
+# 3b. 多行 6695 字节：截断落在行中间
+#     展开后是 233月…246月 各一行，最后一行只剩一个孤立的 "2"，
+#     下面同样一行「文字已被发送端截断，图片是完整的。」
+#     截图 /tmp/ev-c5-truncated.png（本机留档，不入库）同屏可见 table-big.png 与 table-cut.png 两张。
+# 按字节边界截断而不是按行截断是**预期行为**：协议只给 4096 字节这一个上限，
+# 没有"按行"的概念，界面上那行说明就是用来解释这件事的。
+
+# ── 结论 ─────────────────────────────────────────────────────────────────────
+# tbl1 的文字视图在真机端到端成立：开关出现与翻转、真制表符/换行、列对齐、
+# 无 tableText 时开关不出现、超限时如实标注截断。
+#
+# 发端本来写不出这个场景：offerFiles 没有 tableText 参数，收端却一直在读。
+# 本批把 tableText 接到 /v1/send-file，截断归传输层（路由原样转发，不替它截）。
+# 顺带修掉一个自己引入的线级缺陷：truncateTableText 第一版在未截断时返回 false，
+# 于是 "tableTextTruncated":false 会出现在**每一个**报价上（含普通文件），
+# 老端整帧丢弃 —— 现在没截断就是 null，键不出现。
+
+# 仍未覆盖：
+#   * 横向滚动本身（长行是否真能拖动）没有单独验，只验了"不折行"。
+#   * C5 的**群 @ 我**那半条：见下面「群 @ 我」一节 —— 不是"还没跑"，是本机
+#     造不出发送端、而且界面上根本没有 @ 标记这个呈现。
+#   * `tableText` 只在 image 报价上有协议意义；其它 purpose 带它属于未定义组合，没有验。
+
+# ── C5 的「群 @ 我」那半条：为什么跑不了，以及它实际是什么 ────────────────────
+#
+# 结论：这一条不能靠"发一条群消息看有没有 @ 高亮"来验收，因为
+#   (1) 本机没有群消息发送端，(2) 聊天界面里根本没有 @ 高亮这个呈现。
+#
+# (1) 没有发送端（2026-10-07 复查）
+#   $ grep -rn 'groupTextPayload' scaffold --include=*.kt
+#   scaffold/core/src/commonMain/kotlin/app/relay/core/protocol/Codec.kt:392:    fun groupTextPayload(
+#   scaffold/core/src/commonTest/kotlin/app/relay/core/protocol/GoldenVectorTest.kt:137
+#   → 全仓只有「定义 + 一条测试调用」，**零生产调用方**：手机端发不出群消息。
+#   agentNode 控制面也没有群路由，只有
+#   POST /v1/send、/v1/send-file、/v1/nudge、/v1/agent/session、/v1/agent/event、GET /v1/inbox。
+#   所以"直接发一条带 mentions 的群消息"这条路在本机不存在。
+#
+# (2) 没有 @ 呈现
+#   $ grep -rn 'mentions\|MENTION_ALL\|mentioned' \
+#       scaffold/composeApp/src/commonMain/kotlin/app/relay/feature/ \
+#       scaffold/composeApp/src/commonMain/kotlin/app/relay/ui/ --include=*.kt
+#   → 0 命中。气泡里没有"@ 我"的视觉标记。这不是"还没验"，是当前产品没有这个呈现。
+#
+# 那么 mentions 在真机上到底影响什么？只有通知策略这一件事：
+#   scaffold/composeApp/src/commonMain/kotlin/app/relay/app/RelayController.kt:1154
+#     mentioned = mentionsSelf(envelope, _state.value.selfNodeId)
+#   RelayController.kt:1698  internal fun mentionsSelf(envelope: Envelope, selfNodeId: String): Boolean
+#   RelayController.kt:1704  id == selfNodeId || id == MENTION_ALL
+#   RelayController.kt:1712  internal const val MENTION_ALL: String = "@all"
+#   → 非静默时段，群消息默认不提醒，只有 @ 我（或 @all）才提醒。
+#   这半条的另一半（在会话列表上标出"有人 @ 我"）**没有实现**，
+#   代码里写明了：RelayController.kt:1725。
+#
+# 所以 C5 的「群 @ 我」能落到真机上的可观测行为只剩"通知策略里的群 mentionOnly 分支"，
+# 而通知策略本身已在 scaffold/design/runtime-evidence/notify-android-policy.txt
+# 里用三个开关（Agent 分类 / 静默时段 / 权限被拒）在真机判读过。
+# 群 mentionOnly 这一支在本机造不出发送端，因此不能单独复现 —— 如实记在这里，
+# 不假装跑过。@ 高亮与会话列表标记两项：代码层确认不存在/未实现，属产品现状，
+# 不是验收缺口。

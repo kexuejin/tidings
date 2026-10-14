@@ -1,0 +1,143 @@
+<?xml version="1.0" encoding="utf-8"?>
+<manifest xmlns:android="http://schemas.android.com/apk/res/android">
+
+    <!--
+        没有 INTERNET 时 DatagramSocket 会在真机上抛
+        `SocketException: Permission denied`，而构建与单元测试**全绿** ——
+        这是最容易被漏掉的一类缺陷，所以它必须写在清单里。
+    -->
+    <uses-permission android:name="android.permission.INTERNET" />
+    <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE" />
+
+    <!--
+        本地通知。Android 13+ 这是**运行时**权限且默认拒绝：不声明 + 不申请的话，
+        `NotificationManagerCompat.notify` 会抛 SecurityException（或被静默吞掉），
+        症状是"收到消息却什么都没弹"，而构建与单测全绿 —— 与上面 INTERNET 同一类缺陷，
+        2026-10-04 在 Pixel 6 上实测到的。
+    -->
+    <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
+
+    <!--
+        相机：扫码配对要它。与上面两条同一类缺陷 —— 不声明的话
+        `ActivityResultContracts.RequestPermission()` 会**立刻回调 false 且不弹窗**
+        （系统对未声明的权限直接拒绝），于是用户看到"相机权限被拒绝"，却从没被问过，
+        在系统设置里也找不到这个应用的相机开关。
+
+        uses-feature 显式写 required="false"：没有摄像头的设备（部分平板、电视盒子）
+        照样能装 —— 扫码只是"填对方地址"之外的一条捷径，不是这个应用的前提。
+    -->
+    <uses-permission android:name="android.permission.CAMERA" />
+    <uses-feature
+        android:name="android.hardware.camera"
+        android:required="false" />
+
+    <!--
+        语音录制：发送语音消息需要录音权限。
+        microphone uses-feature 声明 required="false"，没有麦克风的设备照常安装。
+    -->
+    <uses-permission android:name="android.permission.RECORD_AUDIO" />
+    <uses-feature
+        android:name="android.hardware.microphone"
+        android:required="false" />
+
+    <!--
+        投屏（MediaProjection 前台服务）。与 INTERNET / POST_NOTIFICATIONS 同一类缺陷：
+        少声明一条，构建与单测**全绿**，只有真机跑才暴露 —— 这里两条各管一件事：
+
+          · FOREGROUND_SERVICE：任何前台服务的前提（Android 9+）。少了它
+            startForeground 抛 SecurityException，症状是"点了投屏，几秒后静默结束"。
+          · FOREGROUND_SERVICE_MEDIA_PROJECTION：Android 14 起，mediaProjection 类型的
+            前台服务要这条专门权限。少了它，createVirtualDisplay 直接抛
+            IllegalStateException（而授权弹窗照样弹 —— 用户点了"立即开始"却什么都没发生，
+            最难归因的一种）。
+
+        MediaProjection 的**用户同意**不走 Manifest 权限，而是运行时 createScreenCaptureIntent
+        的系统确认框，所以这里没有 FOREGROUND_SERVICE_MEDIA_PROJECTION 之外的 uses-permission。
+    -->
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_MEDIA_PROJECTION" />
+
+    <!--
+        刻意**不**声明 CHANGE_WIFI_MULTICAST_STATE，但理由不是"手机端不广播" ——
+        那句话曾经写在这里，是错的，而且掩盖了一个真机缺陷（见 Discovery.kt 的类注释）。实际情况是：
+
+          · 手机端**只做发送侧广播**（entry / presence 发到 255.255.255.255:17878）。
+            发送广播不需要任何权限，也不需要 MulticastLock。
+          · 手机端不做逐 IP 扫描（那是省电与合规上的取舍），只靠"广播 + 手动节点单播"
+            两条路发现对方。
+          · MulticastLock 影响的是**接收**广播/组播：部分机型在 Wi-Fi 省电模式下会过滤
+            广播帧。这一条尚未在真机上验证过，等 mDNS 自动发现（P4）落地时一并测，
+            届时若确实收不到再回来加这个权限。
+    -->
+
+    <application
+        android:name=".RelayApplication"
+        android:icon="@mipmap/ic_launcher"
+        android:roundIcon="@mipmap/ic_launcher_round"
+        android:label="@string/app_name"
+        android:theme="@android:style/Theme.DeviceDefault.Light.NoActionBar">
+        <!--
+            windowSoftInputMode 必须显式声明，否则系统按 SOFT_INPUT_ADJUST_UNSPECIFIED
+            处理：真机 dumpsys window shows sim={adjust=pan}，键盘弹起时窗口整体上移而
+            不缩放，于是 Compose 根已经消费掉的 WindowInsets.safeDrawing（含 IME）
+            与窗口平移叠加 —— 聊天页出现「导航栏与键盘之间约 195dp 空白 + 顶栏被推出
+            屏幕」。
+
+            声明 adjustResize 后，窗口不再被平移；edge-to-edge 下 IME 高度以
+            WindowInsets.Type.ime() 下发，由 App.kt 根唯一消费（屏内一律不再使用
+            imePadding()/safeDrawingPadding()，见 SystemBarsInsetGuardTest）。
+        -->
+        <!--
+            `launchMode="singleTop"` 是点通知那件事需要的：应用已经在跑时，点通知必须走
+            `onNewIntent` 交给现有实例，而不是再起一个 —— 新实例的界面状态是空的，用户
+            看到的是"点通知把应用重启了"（会话没了、页面回到列表）。见 `MainActivity`
+            的 `handleNotificationFocus`。
+        -->
+        <activity
+            android:name=".MainActivity"
+            android:exported="true"
+            android:launchMode="singleTop"
+            android:windowSoftInputMode="adjustResize">
+            <intent-filter>
+                <action android:name="android.intent.action.MAIN" />
+                <category android:name="android.intent.category.LAUNCHER" />
+            </intent-filter>
+        </activity>
+
+        <!--
+            投屏采集的前台服务。`foregroundServiceType="mediaProjection"` 不是修饰词而是
+            硬前置：Android 14 起，没有这个类型的前台服务在跑时 createVirtualDisplay
+            直接抛 IllegalStateException（授权弹窗照样弹、用户点了"立即开始"却什么都不发生，
+            而且异常被服务里的 runCatching 吞掉后只剩"会话超时"这一个可见症状）。
+            exported=false：只由本应用自己经 ScreenShareServiceGate 拉起，
+            外部拉起它拿不到任何后果也不该拿到（projection 是一次性的、在内存里会合）。
+        -->
+        <service
+            android:name=".ScreenShareForegroundService"
+            android:exported="false"
+            android:foregroundServiceType="mediaProjection" />
+
+        <!--
+            收到的文件落在 filesDir/relay/downloads（应用内部目录），文件管理器看不见，
+            应用里也没有任何出口 —— 用户拿到了路径却打不开、分享不出去。
+
+            给别的应用递 file:// 在 Android 7 起会被系统拦下（FileUriExposedException），
+            所以只能由 FileProvider 签发 content:// URI，并按次授予读权限：
+
+              · exported=false + grantUriPermissions=true：只有拿到显式授权的接收方读得到；
+              · 能签发哪些目录由 @xml/file_paths 决定，那里只声明 relay/downloads，
+                不放 external-path（见该文件的注释）；
+              · authority 与 AndroidReceivedFileActions 里的
+                `packageName + ".fileprovider"` 必须一致。
+        -->
+        <provider
+            android:name="androidx.core.content.FileProvider"
+            android:authorities="${applicationId}.fileprovider"
+            android:exported="false"
+            android:grantUriPermissions="true">
+            <meta-data
+                android:name="android.support.FILE_PROVIDER_PATHS"
+                android:resource="@xml/file_paths" />
+        </provider>
+    </application>
+</manifest>

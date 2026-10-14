@@ -1,0 +1,130 @@
+# XcodeGen spec for the Tidings iOS shell.
+#
+# The shell is thin on purpose: it owns the app lifecycle and nothing else.
+# All product state, navigation, and UI live in `composeApp` and arrive as the
+# `RelayShared` framework.
+#
+# Regenerate the project after editing this file or adding Swift sources:
+#
+#     cd iosApp && xcodegen generate
+#
+# `Tidings.xcodeproj` is generated output and is committed so that opening the
+# app does not require XcodeGen; this spec is the source of truth.
+
+name: Tidings
+
+options:
+  createIntermediateGroups: true
+  deploymentTarget:
+    iOS: "16.0"
+  groupSortPosition: top
+  # 产品自身的默认语言就是中文：`composeResources/values/strings.xml:2` 的 `app_name` 是「捎话」，
+  # 仓库里没有 `values-en`。所以 development region 也声明成 zh-Hans，让 `Info.plist` 里那几处中文
+  # （`CFBundleDisplayName`、`NSLocalNetworkUsageDescription`、`NSCameraUsageDescription`）是**开发语言的值**，而不是一份
+  # 被硬塞进英文工程的译文。后者正是审计 2026-10-06 §②-22 记的问题：
+  # `knownRegions = (Base, en)` 没有 zh、也没有 `InfoPlist.strings`，英文设备上照样弹中文授权框。
+  # 英文设备拿英文由 `Resources/en.lproj/InfoPlist.strings` 提供。
+  #
+  # 改这里之后**必须重新 `xcodegen generate`**（见文件头）：`knownRegions`/`developmentRegion`
+  # 与 `InfoPlist.strings` 都只活在生成的 `Tidings.xcodeproj` 里，不重新生成就等于只改了源文件、
+  # 运行时行为一点没变。
+  developmentLanguage: zh-Hans
+
+targets:
+  Tidings:
+    type: application
+    platform: iOS
+    sources:
+      - path: iOSApp.swift
+      # The asset catalog is the icon's only consumer. It has to be listed here
+      # as well as pointed at by ASSETCATALOG_COMPILER_APPICON_NAME below —
+      # a catalog that is not in `sources` is simply not part of the target,
+      # and Xcode then builds a perfectly green app with the default blank icon.
+      - path: Assets.xcassets
+      # `InfoPlist.strings`（en / zh-Hans）。必须列**父目录**，不能逐个列 `Resources/en.lproj`：
+      # XcodeGen 只在扫描目录树时把同名 .lproj 合成 PBXVariantGroup 并挂进 Resources 构建阶段；
+      # 直接列 .lproj 只会得到一个普通文件夹引用，strings 永远编译不进 bundle，而工程看起来一切正常
+      # （2.46.0 实测，见 `Resources/en.lproj/InfoPlist.strings` 的注释）。
+      - path: Resources
+    settings:
+      base:
+        PRODUCT_NAME: Tidings
+        ASSETCATALOG_COMPILER_APPICON_NAME: AppIcon
+        PRODUCT_BUNDLE_IDENTIFIER: app.relay
+        INFOPLIST_FILE: Info.plist
+        GENERATE_INFOPLIST_FILE: NO
+        SWIFT_VERSION: "5.0"
+        TARGETED_DEVICE_FAMILY: "1,2"
+        # `composeApp` declares only `iosArm64` and `iosSimulatorArm64` — Compose
+        # Multiplatform no longer generates an `iosX64` target. A simulator build
+        # that also asks for an x86_64 slice therefore fails in the Compose
+        # resource-sync task with "Unknown iOS simulator arch: 'x86_64'".
+        # Pinning the simulator slice to arm64 is the honest encoding of what
+        # this project can actually produce.
+        "ARCHS[sdk=iphonesimulator*]": arm64
+        # The Kotlin framework is produced by the pre-build script below; this
+        # is where `embedAndSignAppleFrameworkForXcode` stages it for linking.
+        FRAMEWORK_SEARCH_PATHS:
+          - $(inherited)
+          - $(SRCROOT)/../composeApp/build/xcode-frameworks/$(CONFIGURATION)/$(SDK_NAME)
+        OTHER_LDFLAGS:
+          - $(inherited)
+          - -framework
+          - RelayShared
+        # The pre-build script shells out to Gradle, which writes outside the
+        # derived data directory.
+        ENABLE_USER_SCRIPT_SANDBOXING: NO
+        # Signing is product-owned; the smoke build must not require a team.
+        # 但投屏真机链路是**例外**：App Group 的共享容器只有签了 entitlements 才存在，
+        # CODE_SIGNING_ALLOWED=NO 的构建里 `containerURL(forSecurityApplicationGroupIdentifier:)`
+        # 恒为 nil —— 症状与 App Group 写错一模一样（扩展有帧、主 App 永远等不到）。
+        # 真机验收时必须在这里补 DEVELOPMENT_TEAM 并开启签名（产品侧的事，见 README）。
+        CODE_SIGNING_ALLOWED: NO
+        CODE_SIGNING_REQUIRED: NO
+        CODE_SIGN_IDENTITY: ""
+    entitlements:
+      path: Tidings.entitlements
+    preBuildScripts:
+      - name: Build RelayShared framework
+        basedOnDependencyAnalysis: false
+        script: |
+          set -e
+          cd "$SRCROOT/.."
+          # Xcode does not inherit the shell's JAVA_HOME, and this machine has
+          # no system Java.
+          export JAVA_HOME="${JAVA_HOME:-/opt/homebrew/opt/openjdk}"
+          ./gradlew :composeApp:embedAndSignAppleFrameworkForXcode
+    dependencies:
+      # 方向是**主 App 依赖扩展**（XcodeGen 由此在 App target 上生成
+      # PBXTargetDependency + Embed App Extensions 拷贝阶段，把 appex 装进
+      # App 的 Extensions/ 目录）。写成"扩展依赖主 App"是反的：构建全绿，
+      # appex 却躺在 BUILT_PRODUCTS_DIR 里永远进不了包 —— 系统屏幕广播选择器
+      # 里不会出现本扩展，主 App 的 canOpenURL 探针恒为 false，
+      # 症状是「投屏入口整个消失」。
+      - target: RelayBroadcastUpload
+    scheme:
+      testTargets: []
+
+  # ReplayKit 广播上传扩展：iOS 全屏镜像的唯一合法来源（应用内采集只出得了本 App
+  # 窗口）。纯 Swift、不链 RelayShared —— 它只把帧编成 JPEG 写进 App Group 帧槽，
+  # 主 App 轮询帧槽文件（两侧契约见 IosScreenShare 与 SampleHandler.swift 的注释）。
+  RelayBroadcastUpload:
+    type: app-extension
+    platform: iOS
+    sources:
+      - path: RelayBroadcastUpload
+    settings:
+      base:
+        PRODUCT_NAME: RelayBroadcastUpload
+        PRODUCT_BUNDLE_IDENTIFIER: app.relay.RelayBroadcastUpload
+        INFOPLIST_FILE: RelayBroadcastUpload/Info.plist
+        GENERATE_INFOPLIST_FILE: NO
+        SWIFT_VERSION: "5.0"
+        TARGETED_DEVICE_FAMILY: "1,2"
+        "ARCHS[sdk=iphonesimulator*]": arm64
+        # 与主 App 同一个 App Group：两份 .entitlements 的值必须逐字一致。
+        CODE_SIGN_ENTITLEMENTS: RelayBroadcastUpload/RelayBroadcastUpload.entitlements
+        # 同主 target 的如实边界：烟构建不签 = 容器不存在，真机验收前必须开签名。
+        CODE_SIGNING_ALLOWED: NO
+        CODE_SIGNING_REQUIRED: NO
+        CODE_SIGN_IDENTITY: ""

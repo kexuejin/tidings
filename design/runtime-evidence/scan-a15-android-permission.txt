@@ -1,0 +1,78 @@
+# Android 真机扫码授权与退路证据（Pixel 6, SERIAL-TEST-01, Android 15 / SDK 35, 1080x2400, density 420）
+# 构建: scaffold/androidApp/build/outputs/apk/debug/androidApp-debug.apk (44.8 MB, 2026-10-06 23:49)
+#       构建命令 /tmp/relay-gate.sh :androidApp:assembleDebug（日志 /tmp/relay-apk.log）
+# 对端: /Applications/Teahouse.app (Mac 192.168.2.82, UDP *:17878 / TCP *:17879)
+# 取证时间: 2026-10-06 23:49–23:54
+#
+# 本文件记录的是「扫码配对」里**不需要另一台设备对准镜头**就能验的部分：
+# 授权、相机真的打开、返回键、拒绝后的横幅与退路。真正扫到码的往返（ACCEPTANCE A15
+# 最后一步）需要人把手机摄像头对准屏幕上的二维码，本机无法代劳，另见文件末尾。
+
+$ adb install -r scaffold/androidApp/build/outputs/apk/debug/androidApp-debug.apk
+Success
+
+$ adb shell am force-stop app.relay && adb shell am start -n app.relay/.app.MainActivity
+# 冷启动后消息页仍是持久化的「mac mini / persist-check-1507 / 2 天前」。
+
+# —— A1：节点页自检（真机） ——
+# UI dump（adb shell uiautomator dump /sdcard/ui.xml）里的原文：
+#   mDNS 广播中 · UDP 17878 / TCP 17879
+#   本机地址      192.168.2.22:17878
+#   发现方式      mDNS _relay._udp · 每 5 秒
+#   状态          正常 · 本机防火墙已放行
+#   在线节点      1 / 1
+#   顶部计数      2 个已知 · 2 在线 · 0 离线
+
+# —— A14：我的二维码（真机画出，25 模块） ——
+#   content-desc  配对二维码，让对方用「节点 → 扫码配对」扫它
+#   下方原文      relay://192.168.2.22:17878
+#   说明原文      对方在「节点 → 扫码配对」里扫这张码，就会把你加进他的节点表。
+#                 两台设备要在同一个局域网里。
+
+# —— A15 步骤 1：首次扫码申请相机权限 ——
+$ adb shell dumpsys package app.relay | grep "android.permission.CAMERA:"
+        android.permission.CAMERA: granted=false, flags=[]
+# 点「打开相机扫码」→ 系统授权框原文：
+#   要允许“捎话”拍摄照片和录制视频吗？
+#   仅在使用该应用时允许 / 仅限这一次 / 不允许
+# 点「仅在使用该应用时允许」后：
+$ adb shell dumpsys package app.relay | grep "android.permission.CAMERA:"
+        android.permission.CAMERA: granted=true, flags=[ USER_SET|USER_SENSITIVE_WHEN_GRANTED]
+# 扫码页出现，且系统状态栏出现**绿色相机隐私指示**（相机确实在开，不是画了个框）。
+
+# —— 返回键不再退出应用（对抗性审查 P1-2） ——
+$ adb shell input keyevent 4
+# 回到节点页；同一个 Activity 仍是前台，进程还在：
+$ adb shell pidof app.relay
+25620
+$ adb shell dumpsys activity activities | grep ResumedActivity
+    ResumedActivity: ActivityRecord{267118868 u0 app.relay/.app.MainActivity t32044}
+
+# —— A15 反例：拒绝授权后的横幅与退路 ——
+$ adb shell pm revoke app.relay android.permission.CAMERA
+# 注意：pm revoke 会**杀掉应用进程**。上一步的点击会落到当时的前台应用上，
+# 必须先用 am start 把捎话拉回来再点。
+$ adb shell am start -n app.relay/.app.MainActivity
+# 节点页 → 右上 + → 「扫码配对」 → 「打开相机扫码」 → 再弹授权框 → 点「不允许」
+# 扫码页原文（逐字）：
+#   相机权限被拒绝，请在系统设置里开启后重试。        关闭
+#   把对方的节点码放进框里
+#   再试一次
+#   扫不到？回节点页填地址
+# 也就是说：失败有原因、有去处，不是一句「未知错误」。
+$ adb shell pm grant app.relay android.permission.CAMERA
+# 点「再试一次」→ 重新绑相机（attempt 递增，取景框重建），横幅保留到用户自己关掉。
+
+# —— 真机上暴露、已修的两处文案 ——
+# 1) 扫码段里曾画出「支持 IPv4 或 ip:port；不填端口时用 17878。」——那是「填地址」
+#    那一段的端口说明，摆在扫码段答非所问。已从扫码段移除（截图基线
+#    AddNodeSheetScanPhonePreview_nodes-add-sheet-scan 随之重录）。
+# 2) 「填地址」段里输入框还是空的时候就红字「地址看起来不对。」——空不等于错。
+#    已改成只在真的输入了不可用内容时才报（基线 AddNodeSheetPhonePreview 随之重录）。
+
+# —— 仍未完成：真正扫到码的往返 ——
+# 取景区在真机上是全黑（手机镜头朝下），无法据此判断「预览没挂上」还是「镜头对着暗处」。
+# 判断它只能让镜头对准一块屏：Mac 上已用 Safari 打开 /tmp/pair.html（820x820 白底，
+# 内容是 qrencode -l M -s 8 -m 4 'relay://192.168.2.82:17878' 生成的二维码，下方印原文）。
+# 手机扫中后会把它加成手动节点（Teahouse 正在跑，可直接验证在线与收发）。
+# 这一步需要人工把手机举起来对准屏幕，故 ACCEPTANCE A15 的这一步在真机上仍未打勾。

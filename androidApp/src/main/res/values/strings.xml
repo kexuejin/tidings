@@ -1,0 +1,28 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  Android 侧的应用名。
+
+  它必须单独存在：`composeApp/src/commonMain/composeResources/values/strings.xml`
+  里的 `app_name` 是 Compose Multiplatform 的资源，由 Compose 资源插件编译进
+  `app.relay.generated.resources`，**AAPT2 看不见它**。清单里写
+  `@string/app_name` 时找的是 Android 自己的 `R.string`，所以这里必须再声明一份。
+
+  两处名字要一起改：这一份决定桌面图标下的名字，Compose 那份决定界面里的自称。
+  实测过的症状是构建期直接失败，不是静默降级：
+  `AAPT: error: resource string/app_name (aka app.relay:string/app_name) not found.`
+-->
+<resources>
+    <string name="app_name">捎话</string>
+    <!--
+      首次运行时这台设备给自己起的显示名。
+
+      为什么它住在 Android 资源里而不是共享代码里：默认名是一句面向用户的文案，
+      必须能本地化（英文系统上写死中文会被动暴露，values-en 那份也不是装饰）。
+      而且共享代码里写一个词就是让所有宿主用同一个名字 —— 桌面端因此顶着
+      「我的手机」上局域网，节点列表里出现两条同名设备（2026-10-14 真机撞到）。
+
+      英文那份必须成对存在（同上一个 app_name 的教训，CJK 字面量门禁看不见
+      本文件所在目录，缺了不报红、只是英文系统上显示中文）。
+    -->
+    <string name="device_default_nick">我的手机</string>
+</resources>

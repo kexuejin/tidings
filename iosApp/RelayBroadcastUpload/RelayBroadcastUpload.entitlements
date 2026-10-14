@@ -1,0 +1,15 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<!--
+  广播扩展的 entitlements：与主 App 同一个 App Group（`group.app.relay`），
+  这是帧文件能从扩展进程递到主 App 的前提。两边值不一致时不会有任何报错——
+  扩展往自己的柜子里写，主 App 在另一个柜子里等首帧，等到超时。
+-->
+<plist version="1.0">
+<dict>
+    <key>com.apple.security.application-groups</key>
+    <array>
+        <string>group.app.relay</string>
+    </array>
+</dict>
+</plist>

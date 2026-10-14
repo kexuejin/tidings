@@ -1,0 +1,85 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+    <key>CFBundleDevelopmentRegion</key>
+    <string>$(DEVELOPMENT_LANGUAGE)</string>
+    <!-- 本工程是中文优先：`project.yml` 的 `options.developmentLanguage: zh-Hans` 把
+         DEVELOPMENT_LANGUAGE 定成 zh-Hans（`composeResources/values/strings.xml:2` 的 app_name
+         就是「捎话」，仓库里没有 values-en）。所以下面这两处中文是**开发语言的值**，不是漏翻。
+         英文设备拿到的英文在 `Resources/en.lproj/InfoPlist.strings` 里；
+         `Resources/zh-Hans.lproj/InfoPlist.strings` 是同一份中文的显式副本。
+         这两个键都是可在 InfoPlist.strings 里覆盖的，改任何一份都要保持两处一致。 -->
+    <key>CFBundleDisplayName</key>
+    <string>捎话</string>
+    <key>CFBundleExecutable</key>
+    <string>$(EXECUTABLE_NAME)</string>
+    <key>CFBundleIdentifier</key>
+    <string>app.relay</string>
+    <key>CFBundleInfoDictionaryVersion</key>
+    <string>6.0</string>
+    <key>CFBundleName</key>
+    <string>Tidings</string>
+    <key>CFBundlePackageType</key>
+    <string>$(PRODUCT_BUNDLE_PACKAGE_TYPE)</string>
+    <key>CFBundleShortVersionString</key>
+    <string>0.1.0</string>
+    <key>CFBundleVersion</key>
+    <string>1</string>
+    <!-- Compose Multiplatform 的启动自检（androidx.compose.ui.uikit.PlistSanityCheck）要求这一项：
+         缺了它或写成 false，DEBUG 构建会**在启动时直接抛异常崩溃**，而界面表现是"点了图标什么都没发生"
+         （真机/模拟器都是这个症状，2026-10-04 在 iPhone 17 Pro 模拟器上实测）。
+         它的实际含义是允许 ProMotion 高刷屏跑满帧率，所以这是真实的功能声明，不是为了让自检闭嘴。 -->
+    <key>CADisableMinimumFrameDurationOnPhone</key>
+    <true/>
+    <key>LSRequiresIPhoneOS</key>
+    <true/>
+    <!-- 本地网络与 Bonjour：iOS 14 起，没有这两项声明时局域网访问是被**系统直接拒绝**的，
+         而且连授权弹窗都不会出现——症状正是"自动发现永远搜不到任何东西"。
+         NSBonjourServices 必须逐个列出要浏览/发布的服务类型，不能用通配符。 -->
+    <key>NSLocalNetworkUsageDescription</key>
+    <string>捎话需要在同一个 Wi-Fi 下找到其他设备，才能自动发现并收发消息；不联网时不会有任何流量。</string>
+    <key>NSBonjourServices</key>
+    <array>
+        <string>_relay._udp</string>
+    </array>
+    <!-- 相机：扫码配对要用。缺了这一项时 iOS **不会**弹授权框，而是当场杀掉进程
+         （症状是"一点扫码 App 就闪退"，且没有崩溃日志可读——系统日志里才有）。
+         文案要说清用途：只用来读对方屏幕上的那张二维码，不拍照、不录像、不上传。 -->
+    <key>NSCameraUsageDescription</key>
+    <string>捎话要用相机扫对方屏幕上的配对二维码，把对方的地址加进节点表。不拍照、不录像，画面也不会离开这台设备。</string>
+    <!--
+        canOpenURL 的查询白名单。iOS 9 起，没在这里声明的 scheme **一律返回 false**
+        —— 不报错、不弹窗，就是 false。投屏的"这台设备装了我的广播扩展吗"探针
+        （IosScreenShare.EXTENSION_URL）靠它：漏了这一项的症状是投屏入口整个消失，
+        与"真没装扩展"同形，只有对比 plist 才能发现。
+    -->
+    <key>LSApplicationQueriesSchemes</key>
+    <array>
+        <string>app-app.relay.RelayBroadcastUpload</string>
+    </array>
+    <!--
+        canOpenURL 的查询白名单。iOS 9 起，没在这里声明的 scheme **一律返回 false**
+        —— 不报错、不弹窗，就是 false。投屏的"这台设备装了我的广播扩展吗"探针
+        （IosScreenShare.EXTENSION_URL）靠它：漏了这一项的症状是投屏入口整个消失，
+        与"真没装扩展"同形，只有对着 plist 才能查出来。
+    -->
+    <key>LSApplicationQueriesSchemes</key>
+    <array>
+        <string>app-app.relay.RelayBroadcastUpload</string>
+    </array>
+    <key>UIApplicationSceneManifest</key>
+    <dict>
+        <key>UIApplicationSupportsMultipleScenes</key>
+        <false/>
+    </dict>
+    <key>UILaunchScreen</key>
+    <dict/>
+    <key>UISupportedInterfaceOrientations</key>
+    <array>
+        <string>UIInterfaceOrientationPortrait</string>
+        <string>UIInterfaceOrientationLandscapeLeft</string>
+        <string>UIInterfaceOrientationLandscapeRight</string>
+    </array>
+</dict>
+</plist>

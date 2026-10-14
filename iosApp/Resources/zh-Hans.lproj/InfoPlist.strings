@@ -1,0 +1,19 @@
+/* Tidings — 简体中文，与 `Info.plist` 里的 development language 值逐字一致。
+ *
+ * 看起来是重复：`project.yml` 的 `options.developmentLanguage: zh-Hans` 已经把
+ * `Info.plist` 的字面值定成中文，不写这个文件也同样是中文。
+ * 之所以还是写出来，是为了让 zh-Hans 成为工程里**显式**的一个 region
+ * （否则 `knownRegions` 只靠 development region 推导），并且当英文/中文文案在
+ * 这里和 `Info.plist` 之间被改歪时，能一眼看出两份的差异。
+ *
+ * 改完要重新 `xcodegen generate`，否则不会进 Xcode 工程。
+ */
+
+/* 桌面图标名。 */
+"CFBundleDisplayName" = "捎话";
+
+/* 首次触及相机时系统弹的授权文案。与 `Info.plist` 里那一份逐字一致。 */
+"NSCameraUsageDescription" = "捎话要用相机扫对方屏幕上的配对二维码，把对方的地址加进节点表。不拍照、不录像，画面也不会离开这台设备。";
+
+/* 首次触及局域网时系统弹的授权文案。 */
+"NSLocalNetworkUsageDescription" = "捎话需要在同一个 Wi-Fi 下找到其他设备，才能自动发现并收发消息；不联网时不会有任何流量。";

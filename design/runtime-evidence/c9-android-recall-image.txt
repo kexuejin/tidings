@@ -1,0 +1,134 @@
+# Android 真机「自己发出的图片能撤回」证据（Pixel 6, SERIAL-TEST-01, Android 15 / SDK 35, 1080x2400, density 420）
+# 对端: 证据节点 aeb471f0-84da-43f3-8444-536719656776（Mac 192.168.2.82, UDP 17893 / TCP 17894）
+# 取证时间: 2026-10-07 03:25–03:35
+
+对应 ACCEPTANCE.md 的 C9。发送侧是装在 Pixel 6 上的 `app.relay`（真机界面点「发文件」走
+系统的文档选择器），接收侧是 Mac 上的 agentNode —— 选它是因为它能从控制面把**收到的帧原文**
+打出来，比"盯着桌面宿主的界面看图片消没消失"硬得多。
+
+本文件只记录原始命令与输出，结论写在 ACCEPTANCE.md 的 C9 一节。
+
+
+## 1. 把待发送的图片放进手机
+
+$ magick -size 400x260 xc:'#2D6A4F' -fill white -pointsize 26 -gravity center \
+      -annotate 0 'C9 recall' /tmp/c9-photo.png
+$ ls -l /tmp/c9-photo.png
+-rw-r--r--@ 1 kexuejin  wheel  6619 Oct  7 03:25 /tmp/c9-photo.png
+$ md5 -q /tmp/c9-photo.png
+645af527c3f23258965e7e8a5a9c3d24
+$ adb push /tmp/c9-photo.png /sdcard/Download/c9-photo.png
+/tmp/c9-photo.png: 1 file pushed, 0 skipped. 21.3 MB/s (6619 bytes in 0.000s)
+
+（`adb push` 到 /sdcard/Download 后立刻能在文档选择器的「下载」里看到，不需要等媒体扫描。）
+
+
+## 2. 手机界面：发文件
+
+$ adb shell am start -n app.relay/.app.MainActivity
+$ python3 /tmp/pxd.py dump | grep 发文件
+text=''                                           desc='发文件'     click=false [68,2172][115,2219]
+$ adb shell input tap 91 2195          # 点「发文件」
+$ adb shell dumpsys activity activities | grep -m1 topResumedActivity
+    topResumedActivity=ActivityRecord{90706789 u0 com.google.android.documentsui/com.android.documentsui.picker.PickActivity t32061}
+
+选择器开在「最近」，刚推进去的文件不在最近里，于是走抽屉：
+
+$ adb shell input tap 75 212           # 抽屉（汉堡）
+$ python3 /tmp/pxd.py dump | grep -E "^text='下载'"
+text='下载'                                         desc=''    click=false [168,999][709,1057]
+$ adb shell input tap 438 1028         # 下载
+$ python3 /tmp/pxd.py dump | grep -iE "c9-photo|中的文件"
+text='“下载”中的文件'                                   desc=''   click=false [63,506][890,664]
+text=''                                           desc='预览“c9-photo.png”文件'  click=true [403,1718][529,1844]
+text='c9-photo.png'                               desc=''    click=false [196,2204][426,2259]
+$ adb shell input tap 300 2230         # 选 c9-photo.png
+$ adb shell dumpsys activity activities | grep -m1 topResumedActivity
+    topResumedActivity=ActivityRecord{232545484 u0 app.relay/.app.MainActivity t32061}
+
+
+## 3. 第一次尝试失败（如实记录，不是本条的结论）
+
+第一次选完文件后，手机弹的是**失败**横幅：
+
+text='文件传输失败：offer-failed'                        desc=''  click=false [84,515][833,560]
+text='关闭'                                         desc=''  click=false [904,511][978,564]
+
+头部同时显示 `离线`，输入框提示「对方离线，消息会排队」。原因在 Mac 这一侧：取证前刚跑过
+Gradle 的干净门禁，构建过程重写了 `core/build/libs/core-jvm.jar`，正在跑的 agentNode 懒加载
+该类时读到不一致的 jar，`/healthz` 与 `/v1/inbox` 都回
+`{"ok":false,"error":"internal","message":"app/relay/core/transport/InMemoryMessageStore$sinceAll$$inlined$sortedBy$1"}`
+—— 手机于是把它当离线对端，报价发不出去。这是已知陷阱（脚本 KDoc 里写过），
+重启节点时带 `RELAY_SKIP_BUILD=1` 即可：
+
+$ lsof -ti :8799 | xargs kill; sleep 3
+$ RELAY_SKIP_BUILD=1 RELAY_DATA_DIR=/tmp/relay-ev-node RELAY_TOKEN_FILE=/tmp/relay-ev-token \
+    RELAY_LOG=/tmp/relay-ev-node.log ./run-agent-node.sh --background \
+    --udp-port 17893 --http-port 8799 --ws-port 0 --nick "证据节点"
+agentNode 已在后台启动，pid 41520，日志 /tmp/relay-ev-node.log
+$ curl -s http://127.0.0.1:8799/healthz -H "Authorization: Bearer $(cat /tmp/relay-ev-token)"
+{"ok":true,"nodeId":"aeb471f0-84da-43f3-8444-536719656776","nick":"证据节点","platform":"mac",
+ "udpPort":17893,"httpPort":8799,"peers":0,"online":0,"pending":0,"uptimeMs":3926}
+
+等 45 秒（跨一个心跳周期）后头部自己回到 `在线`：
+
+text='证据节点'                                       desc=''  click=false [306,166][452,218]
+text='在线'                                         desc=''  click=false [650,172][709,212]
+text='192.168.2.82 · TCP 17894 · 能力：ag1 tw1 agn1'  desc=''  click=false [306,218][796,258]
+
+
+## 4. 重发：报价带着 msgId 出去
+
+关掉失败横幅后重走一遍「发文件 → 下载 → c9-photo.png」：
+
+text='已发出 1 个文件（c9-photo.png）。'                   desc=''  click=false [84,515][833,560]
+text='c9-photo.png'                               desc=''  click=false [602,1881][823,1924]
+text='6 KB'                                       desc=''  click=false [602,1924][666,1958]
+text='已发出，等对方接收'                                  desc=''  click=false [602,1958][866,1998]
+text='03:30'                                      desc=''  click=false [602,2009][680,2043]
+
+对端（agentNode 控制面）收到的帧原文 —— 注意 `msgId` 在 `file-ctl offer` 里，
+撤回就是靠它认人的（修复前我方 offer 不带这个字段，长按自然也没有撤回入口）：
+
+$ curl -s "http://127.0.0.1:8799/v1/inbox?since=0&limit=6" \
+    -H "Authorization: Bearer $(cat /tmp/relay-ev-token)"
+seq 2 file-ctl {"op": "offer", "transferId": "1b98a20c-1358-4ef1-b59e-75a1febcfe5d",
+                "msgId": "1d2472a5-1c2e-472e-be37-fd0fdd2c1c94", "seq": 1, "total": 1,
+                "files": [{"fileId": "378e56a2-c4e4-480b-bd20-aa92bd446581",
+                           "path": "c9-photo.png", "size": 6619}],
+                "totalSize": 6619, "fileCount": 1, "rootName": "c9-photo.png",
+                "expiresAt": 1791401443308}
+
+
+## 5. 长按 → 撤回
+
+$ adb shell input swipe 700 1950 700 1950 900     # 长按那张卡片
+$ python3 /tmp/pxd.py dump | tail -1
+text='撤回'                                         desc=''  click=false [592,1739][666,1792]
+$ adb shell input tap 629 1765                    # 点「撤回」
+
+本端：卡片消失，原地留一行提示
+
+text='你撤回了一条消息'                                   desc=''  click=false [42,2024][1038,2064]
+
+对端：紧接着收到两条帧 —— 先 `cancel` 停掉这次传输，再 `msg kind=recall` 指向 offer 的 msgId：
+
+$ curl -s "http://127.0.0.1:8799/v1/inbox?since=1791315000000&limit=6" \
+    -H "Authorization: Bearer $(cat /tmp/relay-ev-token)"
+seq 3 file-ctl {"op": "cancel", "transferId": "1b98a20c-1358-4ef1-b59e-75a1febcfe5d"}
+seq 4 msg {"kind": "recall", "targetId": "1d2472a5-1c2e-472e-be37-fd0fdd2c1c94"}
+
+截图（留本机，不入库）：/tmp/ev-c9-recalled.png。
+
+
+## 6. 本文件没有覆盖的
+
+- **「撤回时对端还在拉取 → 停下并清掉 `.part`」没跑出来**：对端是 agentNode（没有界面，
+  也不会替人点头），卡片一直停在「已发出，等对方接收」，传输压根没开始，所以只有
+  `cancel` 这一帧、没有"半截文件被清掉"的现场。要在真机上造这个场景得让对端一边收
+  一边被撤回（局域网 6 KB 跑得太快），留给桌面宿主面或人工。
+- **「对端图片消失」是帧级证据，不是目视证据**：这里看到的是 `cancel` + `recall` 两条帧
+  到达对端；"对面界面上那张图没了"要在桌面宿主面（D 组）看。
+- 群图撤回、文本/语音撤回、以及**超过 5 分钟**之后长按是否真的不给撤回入口，都没跑。
+- 已经落到对端磁盘的文件**不会被删**（协议只要求隐藏消息），这是刻意的；本条也没有去
+  验证"磁盘上那份还在"（本次对端根本没接收）。

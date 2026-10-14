@@ -1,0 +1,69 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<!--
+  ReplayKit 广播上传扩展的 Info.plist。
+
+  NSExtensionPointIdentifier = com.apple.broadcast-services-upload 是本 target 存在的
+  理由：系统靠它把扩展列进屏幕广播选择器；写错成 watch-app 变体（broadcast-messages-app）
+  拿到的是 RPBroadcastMessageHandler，收不到任何像素 —— 构建全绿、面板里能选中、
+  然后一帧都没有（症状与 App Group 配错一模一样，所以这两处都要对着日志查）。
+
+  RPBroadcastProcessMode = SampleBuffer：直接给 CMSampleBuffer，是我们用的模式
+  （Interactive 是 ReplayKit 2 的 API，本仓不需要回写能力）。
+
+  CFBundleURLTypes 里的 `app-app.relay.RelayBroadcastUpload://` 不是给链接用的，
+  是广播扩展的**存在性探针**：主 App 的 canOpenURL 靠它如实回答"这台设备装了本 App 的
+  扩展"（见 IosScreenShare.EXTENSION_URL）。主 App 的 Info.plist 必须同步把它列进
+  LSApplicationQueriesSchemes，否则 canOpenURL 恒为 false，症状是"投屏入口整个消失"。
+-->
+<plist version="1.0">
+<dict>
+    <key>CFBundleDevelopmentRegion</key>
+    <string>$(DEVELOPMENT_LANGUAGE)</string>
+    <key>CFBundleDisplayName</key>
+    <string>捎话广播</string>
+    <key>CFBundleExecutable</key>
+    <string>$(EXECUTABLE_NAME)</string>
+    <key>CFBundleIdentifier</key>
+    <string>$(PRODUCT_BUNDLE_IDENTIFIER)</string>
+    <key>CFBundleInfoDictionaryVersion</key>
+    <string>6.0</string>
+    <key>CFBundleName</key>
+    <string>$(PRODUCT_NAME)</string>
+    <key>CFBundlePackageType</key>
+    <string>XPC!</string>
+    <key>CFBundleShortVersionString</key>
+    <string>0.1.0</string>
+    <key>CFBundleVersion</key>
+    <string>1</string>
+    <key>NSExtension</key>
+    <dict>
+        <key>NSExtensionPointIdentifier</key>
+        <string>com.apple.broadcast-services-upload</string>
+        <key>NSExtensionPrincipalClass</key>
+        <string>$(PRODUCT_NAME).SampleHandler</string>
+        <key>RPBroadcastProcessMode</key>
+        <string>RPBroadcastProcessModeSampleBuffer</string>
+    </dict>
+    <!--
+        remote-processing：广播扩展在用户切去别的 App 继续截帧时的合法后台身份。
+        缺了它，主 App 一旦退到后台、扩展进程会被系统很快挂起，帧流静默停止
+        ——而观看端只会看到"画面冻在最后一张"，没有任何错误。
+    -->
+    <key>UIBackgroundModes</key>
+    <array>
+        <string>remote-processing</string>
+    </array>
+    <key>CFBundleURLTypes</key>
+    <array>
+        <dict>
+            <key>CFBundleURLSchemes</key>
+            <array>
+                <string>app-app.relay.RelayBroadcastUpload</string>
+            </array>
+            <key>CFBundleURLName</key>
+            <string>app.relay.RelayBroadcastUpload</string>
+        </dict>
+    </CFBundleURLTypes>
+</dict>
+</plist>

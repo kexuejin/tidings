@@ -1,0 +1,89 @@
+# IPv6 通路复验 · 2026-10-04 20:40 CST
+
+结论：**这台机器确实有可用的 IPv6 出口**，且 WS 握手 + dgram 端到端在强制
+IPv6 下跑通。此前台账里「本机 curl -6 返回 IPv4 <你的公网 IPv4>，没有可确认的
+v6 出口」是**量具坏了**，不是网络不行 —— 详见下面「量具修正」。
+
+## 先验量具：前一次为什么读成「没有 v6 出口」
+
+    env | grep -i proxy
+      HTTP_PROXY=http://127.0.0.1:7890
+      HTTPS_PROXY=http://127.0.0.1:7890
+
+机器上有一个本地代理。带 `-6` 的 curl 仍然先连这个代理，于是它报的
+`remote_ip` 是代理地址而不是对端：
+
+    curl -6 https://<你的公网域名>/relay/v1/peers
+      → http=401  本地出口IP=::ffff:127.0.0.1  远端=::ffff:127.0.0.1
+
+`::ffff:127.0.0.1` 说明这一轮测的是「和本地代理的连接」，**网络一个字都没测到**。
+这是同一个老毛病的又一次发作：量具的输入不验一条已知答案，结论就是假的。
+
+## 绕过代理后的真实读数
+
+    curl -6 --noproxy '*' https://<你的公网域名>/relay/v1/peers
+      → http=401  远端=2606:4700:3031::ac43:b8ef  耗时=0.56s     (exit=0)
+
+    curl -6 --noproxy '*' https://api64.ipify.org
+      → <你的公网 IPv6>                 (exit=0)
+
+域名侧的 AAAA（Cloudflare）：
+
+    dig +short AAAA <你的公网域名>
+      2606:4700:3031::ac43:b8ef
+      2606:4700:3033::6815:1321
+
+## 端到端：强制 IPv6 的公网 dgram 通路
+
+为此给两个工具补了 `-4/-6`（见下节），跑：
+
+    python3 tools/ws-relay-probe.py \
+        "wss://<你的公网域名>/relay-ws/v1/dgram" -6 \
+        --entry --node-id "probe-v6-<HHMMSS>" --timeout 20
+
+    已连上 wss://<你的公网域名>/relay-ws/v1/dgram
+      （IPv6；本地 [fdfe:dcba:9876::1]:56307 → 对端 [2606:4700:3031::ac43:b8ef]:443）
+    ↑ 已发 322 字节（二进制帧）
+    ↓ 533 字节  {"type":"peers",…}
+    ↓ 396 字节  {"type":"alive","nick":"书房的电脑","platform":"mac","ver":"0.33.2",…}
+    ↓ 171 字节  {"type":"presence","seq":343,"profileRev":2}
+    合计下行 1100 字节
+
+握手打在 Cloudflare 的 **v6 地址**上，entry 帧送进去了、桌面节点的
+peers/alive/presence 三种帧都回来了 —— 通路是真的。
+
+## 对照：2 分钟 IPv6 保活
+
+    python3 tools/ws-soak.py "wss://<你的公网域名>/relay-ws/v1/dgram" \
+        -6 --minutes 2 --ping-every 30 --read-timeout 15
+
+    存活 120 秒 / 计划 120 秒
+    服务端 PING 4 次（均已回 PONG）
+    我们的 PING 得到 PONG 3 次
+    RTT 最小 318ms / 平均 352ms / 最大 405ms
+    结论：✅ 撑满了全程，期间没有一次断链或空闲超时
+
+## 这次仍然没验到的（别把它读过头）
+
+这台 Mac 是**双栈**：v4 和 v6 都在同一张网上。所以上面证明的是
+「**有可用的 v6 路径**」，**不是「v6-only 网络上能用」**。真正的 v6-only
+（完全没有 v4 通路）只能借别人的网络验，命令与判读口径见
+`scaffold/agentNode/tools/CROSS-NET-RUNBOOK.md` 第 1 节。
+
+另外注意方向性：上面 v6 只覆盖了**客户端 → Cloudflare** 这一段。出隧道方向
+（cloudflared → Cloudflare 边缘）走的是 v4（<你的公网 IPv4>）。这对客户端无感，
+但如果要让「隧道出口也是 v6」，那是服务端侧的事，不在这轮的范围内。
+
+## 工具改动（本轮新增，为了让上面这些命令可执行）
+
+`ws-relay-probe.py` 的 `connect()` 早就支持 `family=socket.AF_INET6`（函数
+docstring 里写明了为什么要它），但 `main()` 从没把这个参数暴露到命令行 ——
+能力在、入口没有，所以本机一直没法真的验 IPv6。已补：
+
+- `ws-relay-probe.py`：新增 `-4` / `-6`；连上后打印本地与对端地址，让
+  「我到底走的哪个地址族」写在证据里而不是靠推断。
+- `ws-soak.py`：同样新增 `-4` / `-6`，保证两个工具口径一致。
+- `net-shim.py`：新增 SIGTERM 处理器。后台起 shim 时 bash（非交互 shell、
+  无 job control）会把子进程的 SIGINT/SIG_IGN 掉，`kill -INT` 无反应；
+  等 SIGTERM 到达时进程直接死掉，`finally` 里的 `--stats` 统计**一个字节都
+  写不出来**。而「注了多少停顿」正是这条验收唯一能拿到的量化证据。

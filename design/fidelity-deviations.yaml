@@ -1,0 +1,51 @@
+#   note3: "**影响面与触发**：`AgentApprovalsSection` 被工作区看板（`feature/agents/AgentWorkspaceBoard.kt:371`）与会话详情（`feature/agents/AgentSessionDetail.kt:158`）共用；全量重录后只有 **2 张帧被改写**（`AgentsApprovalsQueuePhonePreview` 与 `ScreenshotPreviewsR2RemoteKt/R2DeskAgentsWindowPreview_r2-desk-agents-rich_66ee34d2_0.png`）。触发者是用户 2026-10-15 复看：「审批的卡片样式不对吧，太占地方了」—— 与原型那段注释是同一句判断。"
+#   approved_by: <人>
+#   date: 2026-10-15
+
+# ── G2 档位一次裁决（2026-10-15，「渲染真值逐槽位差集」批次）──────────────
+# 分母换轨：此前账本用 CSS 声明种数数「≥30 处=事实档位」，每种声明只数一次，
+# 5px 的 2488 处**渲染用量**根本不存在于那张表里。本轮起用 prototype/layout 的
+# 渲染整数档槽位数（tools/design-render-truth.py --offladder-md / --headline）。
+# 裁决入口：docs/plans/2026-10-15-relay-offladder-adjudication.md（39 值按组），
+# 用户在 GUI 选择「全部按推荐」= 对 A/B/C/D 四组推荐项的授权（ask_user_question
+# 记录在案，2026-10-15）。撤销时删行并重记基线。
+- kind: expand-token
+  dimension: 间距/gap
+  where: "维度:间距/gap"
+  design: "整数档 3/5/7/9/11/13 共 7074 处渲染槽位（rhythm 组：gap/padT/padB 为主；档外大户 5×2488、9×1378、3×1358、7×908、11×467、13×436）"
+  actual: "AppSpacing 11→17 档：新增 oxs3/oxs5/osm7/osm9/olg11/olg13（命名沿用 sm6/md10/lg14 先例=相邻语义名+数值）"
+  reason: "裁决 A：与 2026-10-09 裁决 #1-3 同一规矩（≥30 处且落两档之间=事实档位），但分母换成渲染用数后才把六个值全捞出来；snap 到偶数档会让 17 处已在跑的 9dp 等既成写法被改动（census 列），且同选择器邻档合流、层次消失。"
+  approved_by: "kexuejin（GUI 裁决 2026-10-15：全部按推荐）"
+  date: 2026-10-15
+- kind: expand-token
+  dimension: 圆角
+  where: "维度:圆角"
+  design: "9×1980（.fi2×504/.mav×444/.sm×436 等 8 个头像族）、11×672（620 处集中 .ri 行卡一族）、7×660（.hsdays×420 日期格族）"
+  actual: "新增 ShapeRoles.kt 三档：Avatar=9 / ListCard=11 / DayCell=7（M3 Shapes 五槽装不下语义角色，接线先例=IconSizes.kt）；2/6/5/13/20 等小项按裁决随并排截图就近归并，本轮不扩"
+  reason: "裁决 B：按**家族**聚合补语义角色，不逐值扩档——radius 11 与 radius 9 的家族集中度差一个数量级（620/672 vs 铺 8 族），逐值扩会重蹈 25 种取值灌档位的老路。"
+  approved_by: "kexuejin（GUI 裁决 2026-10-15：全部按推荐）"
+  date: 2026-10-15
+- kind: expand-token
+  dimension: 字重
+  where: "维度:字重"
+  design: "700×514 处（.mav×111/.tt×93/.dot×88/.ell×83：名字与条目标题的强调层）"
+  actual: "新增 TextWeights.kt：Emphasis=FontWeight.Bold(700)。M3 Typography 只有 15 个固定角色且已上线角色不许改权重（会动 shipped 观感），强调层走独立命名 token，接线先例=IconSizes.kt"
+  reason: "裁决 C：补 bold 落点而不是把现有角色改粗——后者等于静默重排已上线字阶。"
+  approved_by: "kexuejin（GUI 裁决 2026-10-15：全部按推荐）"
+  date: 2026-10-15
+- kind: converge-design
+  dimension: 字重
+  where: "维度:字重"
+  design: "900×30（.title 一处族）→ 并入 700；650×2 孤立半档 → 并入 600"
+  actual: "未改原型（改写与重拍随下一批原型侧动作一起做）"
+  reason: "裁决 D 之字重部分：900/650 是用量<50 的孤立档，不配新角色。"
+  approved_by: "kexuejin（GUI 裁决 2026-10-15：全部按推荐）"
+  date: 2026-10-15
+- kind: converge-design
+  dimension: 间距/gap
+  where: "维度:间距/gap"
+  design: "D 组 683 处：spacing 1px×481（.t2/.sidelist 描边补偿族，margin-top 为主）、20×39（.nav）、29/34/40/54/102/135/279/412 等 rare 值；font-size 13×91/21/23/25"
+  actual: "1px 族改 offset/描边表达（不进节奏档）；rare 值就近 snap；font-size 13 随字阶批裁（.kv/.v 键值行），21/23/25 为演示层孤值"
+  reason: "裁决 D 全部：不靠扩档解决；snap 与 offset 表达按 census 的既有字面量数改（多为 0-8 处，代价可控）。"
+  approved_by: "kexuejin（GUI 裁决 2026-10-15：全部按推荐）"
+  date: 2026-10-15

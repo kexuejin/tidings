@@ -1,0 +1,9 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  自适应图标（adaptive icon）的背景层。
+  取的是品牌主色 #2D6A4F，与 design/icon/relay-icon.svg 里的底色一致 —— 前景层只有
+  那只递卡的手，没有底色，所以这里必须补上，否则自适应图标会露出系统默认的灰底。
+-->
+<resources>
+    <color name="ic_launcher_background">#3A1C5A</color>
+</resources>

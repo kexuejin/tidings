@@ -1,0 +1,851 @@
+{
+ "source": {
+  "path": "prototype/relay.html",
+  "sha256": "4f46e83cfffd"
+ },
+ "strokeWidth": "1.7",
+ "sizeSlots": {
+  "13": 3,
+  "14": 5,
+  "11": 2,
+  "16": 12,
+  "12": 1,
+  "36": 1,
+  "15": 5,
+  "20": 4,
+  "21": 1,
+  "18": 6,
+  "22": 1,
+  "9": 1,
+  "17": 4,
+  "19": 1,
+  "30": 1
+ },
+ "dynamicCalls": 16,
+ "dynamicForms": {
+  "ic(a.icon)": 2,
+  "ic(n.icon)": 2,
+  "ic(v.icon)": 2,
+  "ic(icon)": 2,
+  "ic()": 2,
+  "ic(i)": 1
+ },
+ "symbolTags": 63,
+ "duplicateSymbols": {
+  "image": 2
+ },
+ "symbols": 62,
+ "calledSymbols": 57,
+ "unusedSymbols": [
+  "alert",
+  "box",
+  "filter",
+  "lock",
+  "sun"
+ ],
+ "calls": {
+  "chat": 12,
+  "group": 3,
+  "list": 3,
+  "lan": 8,
+  "terminal": 2,
+  "qr": 7,
+  "gear": 3,
+  "send": 8,
+  "clip": 2,
+  "plus": 5,
+  "minus": 1,
+  "smile": 2,
+  "search": 8,
+  "back": 4,
+  "chev": 15,
+  "chevd": 1,
+  "check": 5,
+  "clock": 1,
+  "alert": 0,
+  "bot": 2,
+  "user": 1,
+  "file": 5,
+  "folder": 18,
+  "box": 0,
+  "refresh": 8,
+  "info": 7,
+  "key": 2,
+  "shield": 3,
+  "bell": 2,
+  "moon": 3,
+  "sun": 0,
+  "trash": 4,
+  "warn": 2,
+  "link": 7,
+  "wifi": 4,
+  "batt": 2,
+  "lock": 0,
+  "close": 11,
+  "copy": 11,
+  "external": 9,
+  "down": 1,
+  "pk": 4,
+  "nudge": 1,
+  "scissors": 2,
+  "image": 5,
+  "up": 3,
+  "drop": 2,
+  "eye": 2,
+  "hdd": 9,
+  "window": 4,
+  "hand": 2,
+  "speaker": 1,
+  "grid": 2,
+  "more": 4,
+  "filter": 0,
+  "sort": 1,
+  "capture-select": 1,
+  "capture-rect": 4,
+  "capture-arrow": 1,
+  "capture-mosaic": 1,
+  "text-select": 1,
+  "screen": 2
+ },
+ "rows": [
+  {
+   "symbol": "alert",
+   "calls": 0,
+   "elements": {
+    "path": 2
+   },
+   "status": "未使用",
+   "target": "",
+   "note": "原型四种引用写法（ic('x') / icon:'x' / i:'x' / #i-x）一处都没有 ⇒ 无需代码对应物"
+  },
+  {
+   "symbol": "back",
+   "calls": 4,
+   "elements": {
+    "path": 1
+   },
+   "status": "复用",
+   "target": "vector:ic_arrow_back",
+   "note": "path 逐条一致"
+  },
+  {
+   "symbol": "batt",
+   "calls": 2,
+   "elements": {
+    "rect": 2,
+    "path": 1
+   },
+   "status": "复用",
+   "target": "vector:ic_batt",
+   "note": "stroke 语言与原型一致（circle/rect 已换算为等价 path）"
+  },
+  {
+   "symbol": "bell",
+   "calls": 2,
+   "elements": {
+    "path": 2
+   },
+   "status": "复用",
+   "target": "vector:ic_bell",
+   "note": "path 逐条一致"
+  },
+  {
+   "symbol": "bot",
+   "calls": 2,
+   "elements": {
+    "rect": 1,
+    "path": 1
+   },
+   "status": "复用",
+   "target": "vector:ic_bot",
+   "note": "stroke 语言与原型一致（circle/rect 已换算为等价 path）"
+  },
+  {
+   "symbol": "box",
+   "calls": 0,
+   "elements": {
+    "path": 2
+   },
+   "status": "未使用",
+   "target": "",
+   "note": "原型四种引用写法（ic('x') / icon:'x' / i:'x' / #i-x）一处都没有 ⇒ 无需代码对应物"
+  },
+  {
+   "symbol": "capture-arrow",
+   "calls": 1,
+   "elements": {
+    "path": 2
+   },
+   "status": "复用",
+   "target": "vector:ic_capture_arrow",
+   "note": "path 逐条一致"
+  },
+  {
+   "symbol": "capture-mosaic",
+   "calls": 1,
+   "elements": {
+    "path": 1
+   },
+   "status": "复用",
+   "target": "vector:ic_capture_mosaic",
+   "note": "path 逐条一致"
+  },
+  {
+   "symbol": "capture-rect",
+   "calls": 4,
+   "elements": {
+    "path": 2
+   },
+   "status": "复用",
+   "target": "vector:ic_capture_rect",
+   "note": "path 逐条一致"
+  },
+  {
+   "symbol": "capture-select",
+   "calls": 1,
+   "elements": {
+    "path": 1
+   },
+   "status": "复用",
+   "target": "vector:ic_capture_select",
+   "note": "path 逐条一致"
+  },
+  {
+   "symbol": "chat",
+   "calls": 12,
+   "elements": {
+    "path": 2
+   },
+   "status": "复用",
+   "target": "vector:ic_chat_bubble",
+   "note": "path 逐条一致"
+  },
+  {
+   "symbol": "check",
+   "calls": 5,
+   "elements": {
+    "path": 1
+   },
+   "status": "复用",
+   "target": "vector:ic_check_double",
+   "note": "path 逐条一致"
+  },
+  {
+   "symbol": "chev",
+   "calls": 15,
+   "elements": {
+    "path": 1
+   },
+   "status": "复用",
+   "target": "vector:ic_chev",
+   "note": "path 逐条一致"
+  },
+  {
+   "symbol": "chevd",
+   "calls": 1,
+   "elements": {
+    "path": 1
+   },
+   "status": "复用",
+   "target": "vector:ic_chevd",
+   "note": "path 逐条一致"
+  },
+  {
+   "symbol": "clip",
+   "calls": 2,
+   "elements": {
+    "path": 1
+   },
+   "status": "复用",
+   "target": "vector:ic_attachment",
+   "note": "path 逐条一致"
+  },
+  {
+   "symbol": "clock",
+   "calls": 1,
+   "elements": {
+    "circle": 1,
+    "path": 1
+   },
+   "status": "复用",
+   "target": "vector:ic_clock_pending",
+   "note": "stroke 语言与原型一致（circle/rect 已换算为等价 path）"
+  },
+  {
+   "symbol": "close",
+   "calls": 11,
+   "elements": {
+    "path": 1
+   },
+   "status": "复用",
+   "target": "vector:ic_close",
+   "note": "path 逐条一致"
+  },
+  {
+   "symbol": "copy",
+   "calls": 11,
+   "elements": {
+    "rect": 1,
+    "path": 1
+   },
+   "status": "复用",
+   "target": "vector:ic_copy",
+   "note": "stroke 语言与原型一致（circle/rect 已换算为等价 path）"
+  },
+  {
+   "symbol": "down",
+   "calls": 1,
+   "elements": {
+    "path": 2
+   },
+   "status": "复用",
+   "target": "vector:ic_down",
+   "note": "path 逐条一致"
+  },
+  {
+   "symbol": "drop",
+   "calls": 2,
+   "elements": {
+    "path": 1,
+    "rect": 1
+   },
+   "status": "复用",
+   "target": "vector:ic_drop",
+   "note": "stroke 语言与原型一致（circle/rect 已换算为等价 path）"
+  },
+  {
+   "symbol": "external",
+   "calls": 9,
+   "elements": {
+    "path": 2
+   },
+   "status": "复用",
+   "target": "vector:ic_external",
+   "note": "path 逐条一致"
+  },
+  {
+   "symbol": "eye",
+   "calls": 2,
+   "elements": {
+    "path": 1,
+    "circle": 1
+   },
+   "status": "复用",
+   "target": "vector:ic_eye",
+   "note": "stroke 语言与原型一致（circle/rect 已换算为等价 path）"
+  },
+  {
+   "symbol": "file",
+   "calls": 5,
+   "elements": {
+    "path": 2
+   },
+   "status": "复用",
+   "target": "vector:ic_file",
+   "note": "path 逐条一致"
+  },
+  {
+   "symbol": "filter",
+   "calls": 0,
+   "elements": {
+    "path": 1
+   },
+   "status": "未使用",
+   "target": "",
+   "note": "原型四种引用写法（ic('x') / icon:'x' / i:'x' / #i-x）一处都没有 ⇒ 无需代码对应物"
+  },
+  {
+   "symbol": "folder",
+   "calls": 18,
+   "elements": {
+    "path": 1
+   },
+   "status": "复用",
+   "target": "vector:ic_folder",
+   "note": "path 逐条一致"
+  },
+  {
+   "symbol": "gear",
+   "calls": 3,
+   "elements": {
+    "circle": 1,
+    "path": 1
+   },
+   "status": "复用",
+   "target": "vector:ic_settings",
+   "note": "stroke 语言与原型一致（circle/rect 已换算为等价 path）"
+  },
+  {
+   "symbol": "grid",
+   "calls": 2,
+   "elements": {
+    "rect": 4
+   },
+   "status": "复用",
+   "target": "vector:ic_grid",
+   "note": "stroke 语言与原型一致（circle/rect 已换算为等价 path）"
+  },
+  {
+   "symbol": "group",
+   "calls": 3,
+   "elements": {
+    "circle": 1,
+    "path": 2
+   },
+   "status": "复用",
+   "target": "vector:ic_groups",
+   "note": "stroke 语言与原型一致（circle/rect 已换算为等价 path）"
+  },
+  {
+   "symbol": "hand",
+   "calls": 2,
+   "elements": {
+    "path": 3
+   },
+   "status": "复用",
+   "target": "vector:ic_hand",
+   "note": "path 逐条一致"
+  },
+  {
+   "symbol": "hdd",
+   "calls": 9,
+   "elements": {
+    "rect": 1,
+    "path": 2,
+    "circle": 1
+   },
+   "status": "复用",
+   "target": "vector:ic_hdd",
+   "note": "stroke 语言与原型一致（circle/rect 已换算为等价 path）"
+  },
+  {
+   "symbol": "image",
+   "calls": 5,
+   "elements": {
+    "rect": 1,
+    "circle": 1,
+    "path": 1
+   },
+   "status": "复用",
+   "target": "vector:ic_image",
+   "note": "stroke 语言与原型一致（circle/rect 已换算为等价 path）"
+  },
+  {
+   "symbol": "info",
+   "calls": 7,
+   "elements": {
+    "circle": 1,
+    "path": 1
+   },
+   "status": "复用",
+   "target": "vector:ic_info",
+   "note": "stroke 语言与原型一致（circle/rect 已换算为等价 path）"
+  },
+  {
+   "symbol": "key",
+   "calls": 2,
+   "elements": {
+    "circle": 1,
+    "path": 1
+   },
+   "status": "复用",
+   "target": "vector:ic_key",
+   "note": "stroke 语言与原型一致（circle/rect 已换算为等价 path）"
+  },
+  {
+   "symbol": "lan",
+   "calls": 8,
+   "elements": {
+    "rect": 1,
+    "path": 2
+   },
+   "status": "复用",
+   "target": "vector:ic_lan_search",
+   "note": "stroke 语言与原型一致（circle/rect 已换算为等价 path）"
+  },
+  {
+   "symbol": "link",
+   "calls": 7,
+   "elements": {
+    "path": 2
+   },
+   "status": "复用",
+   "target": "vector:ic_link",
+   "note": "path 逐条一致"
+  },
+  {
+   "symbol": "list",
+   "calls": 3,
+   "elements": {
+    "path": 1
+   },
+   "status": "复用",
+   "target": "vector:ic_list",
+   "note": "path 逐条一致"
+  },
+  {
+   "symbol": "lock",
+   "calls": 0,
+   "elements": {
+    "rect": 1,
+    "path": 1
+   },
+   "status": "未使用",
+   "target": "",
+   "note": "原型四种引用写法（ic('x') / icon:'x' / i:'x' / #i-x）一处都没有 ⇒ 无需代码对应物"
+  },
+  {
+   "symbol": "minus",
+   "calls": 1,
+   "elements": {
+    "path": 1
+   },
+   "status": "复用",
+   "target": "vector:ic_minus",
+   "note": "path 逐条一致"
+  },
+  {
+   "symbol": "moon",
+   "calls": 3,
+   "elements": {
+    "path": 1
+   },
+   "status": "复用",
+   "target": "vector:ic_moon",
+   "note": "path 逐条一致"
+  },
+  {
+   "symbol": "more",
+   "calls": 4,
+   "elements": {
+    "circle": 3
+   },
+   "status": "复用",
+   "target": "vector:ic_more",
+   "note": "stroke 语言与原型一致（circle/rect 已换算为等价 path）"
+  },
+  {
+   "symbol": "nudge",
+   "calls": 1,
+   "elements": {
+    "rect": 1,
+    "path": 2
+   },
+   "status": "复用",
+   "target": "vector:ic_nudge",
+   "note": "stroke 语言与原型一致（circle/rect 已换算为等价 path）"
+  },
+  {
+   "symbol": "pk",
+   "calls": 4,
+   "elements": {
+    "rect": 1,
+    "circle": 3
+   },
+   "status": "复用",
+   "target": "vector:ic_pk",
+   "note": "stroke 语言与原型一致（circle/rect 已换算为等价 path）"
+  },
+  {
+   "symbol": "plus",
+   "calls": 5,
+   "elements": {
+    "path": 1
+   },
+   "status": "复用",
+   "target": "vector:ic_add_node",
+   "note": "path 逐条一致"
+  },
+  {
+   "symbol": "qr",
+   "calls": 7,
+   "elements": {
+    "rect": 3,
+    "path": 1
+   },
+   "status": "复用",
+   "target": "vector:ic_qr_code_scanner",
+   "note": "stroke 语言与原型一致（circle/rect 已换算为等价 path）"
+  },
+  {
+   "symbol": "refresh",
+   "calls": 8,
+   "elements": {
+    "path": 2
+   },
+   "status": "复用",
+   "target": "vector:ic_refresh",
+   "note": "path 逐条一致"
+  },
+  {
+   "symbol": "scissors",
+   "calls": 2,
+   "elements": {
+    "circle": 2,
+    "path": 1
+   },
+   "status": "复用",
+   "target": "vector:ic_scissors",
+   "note": "stroke 语言与原型一致（circle/rect 已换算为等价 path）"
+  },
+  {
+   "symbol": "screen",
+   "calls": 2,
+   "elements": {
+    "path": 2
+   },
+   "status": "复用",
+   "target": "vector:ic_screen_share",
+   "note": "path 逐条一致"
+  },
+  {
+   "symbol": "search",
+   "calls": 8,
+   "elements": {
+    "circle": 1,
+    "path": 1
+   },
+   "status": "复用",
+   "target": "vector:ic_search",
+   "note": "stroke 语言与原型一致（circle/rect 已换算为等价 path）"
+  },
+  {
+   "symbol": "send",
+   "calls": 8,
+   "elements": {
+    "path": 1
+   },
+   "status": "复用",
+   "target": "vector:ic_send",
+   "note": "path 逐条一致"
+  },
+  {
+   "symbol": "shield",
+   "calls": 3,
+   "elements": {
+    "path": 2
+   },
+   "status": "复用",
+   "target": "vector:ic_shield",
+   "note": "path 逐条一致"
+  },
+  {
+   "symbol": "smile",
+   "calls": 2,
+   "elements": {
+    "circle": 1,
+    "path": 2
+   },
+   "status": "复用",
+   "target": "vector:ic_smile",
+   "note": "stroke 语言与原型一致（circle/rect 已换算为等价 path）"
+  },
+  {
+   "symbol": "sort",
+   "calls": 1,
+   "elements": {
+    "path": 2
+   },
+   "status": "复用",
+   "target": "vector:ic_sort",
+   "note": "path 逐条一致"
+  },
+  {
+   "symbol": "speaker",
+   "calls": 1,
+   "elements": {
+    "path": 2
+   },
+   "status": "复用",
+   "target": "vector:ic_speaker",
+   "note": "path 逐条一致"
+  },
+  {
+   "symbol": "sun",
+   "calls": 0,
+   "elements": {
+    "circle": 1,
+    "path": 1
+   },
+   "status": "未使用",
+   "target": "",
+   "note": "原型四种引用写法（ic('x') / icon:'x' / i:'x' / #i-x）一处都没有 ⇒ 无需代码对应物"
+  },
+  {
+   "symbol": "terminal",
+   "calls": 2,
+   "elements": {
+    "rect": 1,
+    "path": 1
+   },
+   "status": "复用",
+   "target": "vector:ic_terminal",
+   "note": "stroke 语言与原型一致（circle/rect 已换算为等价 path）"
+  },
+  {
+   "symbol": "text-select",
+   "calls": 1,
+   "elements": {
+    "path": 3
+   },
+   "status": "复用",
+   "target": "vector:ic_text_select",
+   "note": "path 逐条一致"
+  },
+  {
+   "symbol": "trash",
+   "calls": 4,
+   "elements": {
+    "path": 1
+   },
+   "status": "复用",
+   "target": "vector:ic_trash",
+   "note": "path 逐条一致"
+  },
+  {
+   "symbol": "up",
+   "calls": 3,
+   "elements": {
+    "path": 2
+   },
+   "status": "复用",
+   "target": "vector:ic_up",
+   "note": "path 逐条一致"
+  },
+  {
+   "symbol": "user",
+   "calls": 1,
+   "elements": {
+    "circle": 1,
+    "path": 1
+   },
+   "status": "复用",
+   "target": "vector:ic_user",
+   "note": "stroke 语言与原型一致（circle/rect 已换算为等价 path）"
+  },
+  {
+   "symbol": "warn",
+   "calls": 2,
+   "elements": {
+    "circle": 1,
+    "path": 1
+   },
+   "status": "复用",
+   "target": "vector:ic_warn",
+   "note": "stroke 语言与原型一致（circle/rect 已换算为等价 path）"
+  },
+  {
+   "symbol": "wifi",
+   "calls": 4,
+   "elements": {
+    "path": 2
+   },
+   "status": "复用",
+   "target": "vector:ic_wifi",
+   "note": "path 逐条一致"
+  },
+  {
+   "symbol": "window",
+   "calls": 4,
+   "elements": {
+    "rect": 1,
+    "path": 1
+   },
+   "status": "复用",
+   "target": "vector:ic_window",
+   "note": "stroke 语言与原型一致（circle/rect 已换算为等价 path）"
+  }
+ ],
+ "unusedProtoNames": [],
+ "codeOnlyVectors": [
+  "ic_mic"
+ ],
+ "codeUsage": {
+  "Icons.Outlined.Folder": 13,
+  "Icons.Outlined.Search": 7,
+  "Res.drawable.ic_close": 6,
+  "Icons.Outlined.OpenInNew": 5,
+  "Res.drawable.ic_folder": 5,
+  "Icons.Outlined.Menu": 4,
+  "Icons.Outlined.Inventory2": 4,
+  "Icons.AutoMirrored.Outlined.ArrowBack": 4,
+  "Res.drawable.ic_pk": 3,
+  "Icons.Outlined.ContentCopy": 3,
+  "Icons.Outlined.Close": 3,
+  "Res.drawable.ic_link": 3,
+  "Icons.Outlined.Refresh": 3,
+  "Icons.Outlined.Chat": 3,
+  "Icons.AutoMirrored.Outlined.InsertDriveFile": 3,
+  "Icons.Outlined.Info": 3,
+  "Res.drawable.ic_screen_share": 3,
+  "Res.drawable.ic_check_double": 3,
+  "Icons.Outlined.EmojiEmotions": 2,
+  "Icons.Outlined.Crop": 2,
+  "Icons.Outlined.Devices": 2,
+  "Icons.Outlined.FolderOpen": 2,
+  "Icons.Outlined.MoreVert": 2,
+  "Res.drawable.ic_eye": 2,
+  "Res.drawable.ic_file": 2,
+  "Icons.Outlined.Image": 2,
+  "Icons.Outlined.FileUpload": 2,
+  "Icons.Outlined.InsertDriveFile": 2,
+  "Icons.Outlined.FileDownload": 2,
+  "Icons.Outlined.TouchApp": 2,
+  "Icons.Outlined.Mic": 2,
+  "Res.drawable.ic_groups": 2,
+  "Res.drawable.ic_arrow_back": 2,
+  "Res.drawable.ic_add_node": 2,
+  "Res.drawable.ic_hdd": 2,
+  "Icons.Outlined.ChevronRight": 2,
+  "Res.drawable.ic_clock_pending": 2,
+  "Icons.Filled.Check": 2,
+  "Icons.Outlined.DragHandle": 1,
+  "Icons.Outlined.Lan": 1,
+  "Icons.Outlined.Send": 1,
+  "Icons.Outlined.Terminal": 1,
+  "Icons.Outlined.Add": 1,
+  "Icons.Outlined.ViewList": 1,
+  "Icons.Outlined.GridView": 1,
+  "Icons.Outlined.GroupAdd": 1,
+  "Icons.Outlined.Stop": 1,
+  "Icons.Outlined.PlayArrow": 1,
+  "Res.drawable.ic_bot": 1,
+  "Res.drawable.ic_send": 1,
+  "Res.drawable.ic_chat_bubble": 1,
+  "Res.drawable.ic_lan_search": 1,
+  "Res.drawable.ic_terminal": 1,
+  "Res.drawable.ic_settings": 1,
+  "Icons.Outlined.Link": 1,
+  "Icons.Outlined.Notifications": 1,
+  "Icons.Outlined.DarkMode": 1,
+  "Icons.Outlined.Security": 1,
+  "Res.drawable.ic_attachment": 1,
+  "Res.drawable.ic_mic": 1,
+  "Res.drawable.ic_nudge": 1,
+  "Res.drawable.ic_image": 1,
+  "Res.drawable.ic_speaker": 1,
+  "Res.drawable.ic_qr_code_scanner": 1,
+  "Res.drawable.ic_external": 1,
+  "Res.drawable.ic_refresh": 1,
+  "Icons.Filled.KeyboardArrowDown": 1,
+  "Res.drawable.ic_key": 1,
+  "Res.drawable.ic_bell": 1,
+  "Res.drawable.ic_moon": 1,
+  "Res.drawable.ic_shield": 1,
+  "Res.drawable.ic_info": 1,
+  "Res.drawable.ic_window": 1,
+  "Icons.Outlined.Download": 1,
+  "Res.drawable.ic_scissors": 1,
+  "Res.drawable.ic_capture_arrow": 1,
+  "Res.drawable.ic_text_select": 1,
+  "Res.drawable.ic_capture_mosaic": 1,
+  "Icons.AutoMirrored.Outlined.Undo": 1,
+  "Res.drawable.ic_copy": 1
+ },
+ "callSites": {
+  "library": 98,
+  "resource": 62,
+  "total": 160,
+  "rate": 0.3875
+ }
+}

@@ -1,0 +1,93 @@
+R2-W5 桌面截图：覆盖窗初始态 + Esc 取消 + 取消横幅 —— 打包产物上的端到端取证
+日期: 2026-10-12 11:11–12:00 CST
+产物: scaffold/desktopApp/build/compose/binaries/main/app/捎话 Tidings.app （mtime 11:11:27，
+      `:desktopApp:createDistributable` 经 scaffold/tools/gradle-locked.py，EXIT=0，BUILD SUCCESSFUL in 1m 2s）
+进程: PID 97755（"捎话 Tidings.app/Contents/MacOS/捎话 Tidings"），主窗 id=134821 bounds=(48,78,1100,720)
+本文件取代 r2-desktop-capture-app-roundtrip.txt 第 3 节里「取消横幅未在屏取证」那句 —— 现在已在屏取证。
+
+────────────────────────────────────────────────────────────────────────
+1. 怎么做的（手段）
+
+1.1 只投给目标进程的按键注入 —— /tmp/keypid
+    用途：把按键**只投递给指定 pid**（`CGEvent.postToPid`），不经过全局事件流。
+    这正是 Lead 立的纪律「任何带修饰键的全局按键注入必须先核实 frontmost 且只在目标进程内投递」的实现：
+    不带修饰键的 Esc 也走同一条路，因为 postToPid 天然不受"别的 app 抢前台"影响。
+      用法: keypid <pid> <keycode> [cmd] [shift] [alt]
+
+1.2 把「激活 → 动作」压进同一个进程 —— /tmp/gui
+    本机前台会被别的 app（Edge/DSH GUI、WorkBuddy、scrcpy）在跨秒的空档里抢走，
+    所以"先 osascript 激活、再另起一条命令点击"会失败。改成：
+      gui shot  <pid> <out.png> <x> <y> <w> <h>   # 激活 → 核实 isActive → screencapture -R
+      gui click <pid> <x> <y>                     # 激活 → 核实 isActive → CGEvent 左键按下/抬起
+    内部 `NSRunningApplication.activate()` → 350ms → `guard app.isActive else abort`。
+
+1.3 坐标标定
+    窗口 bounds 由 /tmp/winlist.swift（CGWindowListCopyWindowInfo）读，窗口内 1px = 屏幕 1px。
+    `gui shot` 出的窗口图与屏幕 1:1；把窗口图局部裁切放大 5 倍读数取图标中心。
+    标定校验：点窗口内 (200,233)（会话列表第一行）→ 该会话被选中打开；点窗口内 (24,228)（文件页签）→ 切到文件页。
+
+────────────────────────────────────────────────────────────────────────
+2. 期望看到什么
+
+E1 点 composer 第 3 颗「截图」→ 出现一颗全屏置顶覆盖窗（name=Capture，layer=3，bounds=0,0,1920,1080），
+   主窗被隐藏（防穿帮）。
+E2 覆盖窗**初始态**（未框选）就要有：底部左侧工具条（原型 `.captbar.below`）+ 视口中央提示
+   「拖拽框选区域 · Esc 取消」。
+E3 按 Esc → 覆盖窗消失、主窗回来。
+E4 取消后主窗出现横幅「截图已取消」。
+
+────────────────────────────────────────────────────────────────────────
+3. 实际看到什么
+
+E1  ✅ 主窗 onscreen=false；`id=134923 name=Capture layer=3 alpha=1.0 onscreen=true bounds=0,0,1920,1080`。
+        （layer=3 即 alwaysOnTop；这条与 08:33 那次一致。）
+E2  ✅ 全屏截图 /tmp/r2-ov-1.png（1920×1080）量得：
+        · 工具条：左下角深色圆角条，左边缘 x=8，可辨出第 1 颗剪刀图标；
+          —— 位置与 `placeCaptureToolbarAtBottom(toolbar=400×44, viewport=1920×1080, margin=8)`
+             算出的 left=8 / top=1080-44-8=1028 一致。
+          裁切 (0,1000,460,90)×5 倍放大后可见 Left 端 icon；该区域与 macOS Dock 重叠（Dock 在更上层），
+          属桌面环境遮挡，不是布局错。
+        · 提示：裁切 (610,505,700,70)×2 倍放大后**逐字**读出「拖拽框选区域 · Esc 取消」，位于视口中央。
+E3  ✅ 投 Esc 前后各读一次窗口表：
+        before: 1 颗 name=Capture
+        `/tmp/keypid 97755 53` → posted vk=53 flags=0 to pid=97755
+        after : 0 颗 name=Capture；主窗 `id=134821 ... onscreen=true` 回来。
+E4  ✅ 取消后 0.5s 内抓主窗：顶部出现横幅「截图已取消」+ 右侧「关闭」。
+
+────────────────────────────────────────────────────────────────────────
+4. 结论
+
+4.1 三条验收点全部在**打包产物**上通过（不是 `:desktopApp:run`，不是源码推断）：
+    覆盖窗出现 / 初始态有工具条+提示 / Esc 真能取消。
+4.2 E4 是上一轮列在"未在屏取证"里的那条（r2-desktop-capture-app-roundtrip.txt 第 3 节），现已取证，
+    该条从"只有代码路径"升为"已在屏见"。
+4.3 本轮失败与弯路（留档，避免下一轮重复）：
+    F1 ⌘⇧A 走 postToPid 不触发截图：`/tmp/keypid 97755 0 cmd shift` 打印 posted，
+       app 日志同时出现 `IMKCFRunLoopWakeUpReliable`（说明按键到达了进程），但 4s 后仍无 Capture 窗；
+       即使先用 NSRunningApplication 激活、frontmost=捎话 Tidings 之后再投，仍然不触发。
+       改用 composer 那颗按钮（真实鼠标点击）即可 —— 根因待查，不属本轮写域。
+    F2 前两次点击落空：图标中心读偏了约 15px（我按整窗图目测 x=463，按 5 倍放大裁切实measure 是 x=448），
+       点到图标之间的空隙。**教训：坐标必须用裁切放大后量，不能整窗目测。**
+    F3 前台被抢：本机其他 app（Edge/DSH GUI、WorkBuddy、scrcpy）会在跨秒空档抢前台；
+       裸 `screencapture`（不先激活）拍到的是**别人的窗口**（一次裁切回来的是 DSH 的编辑器内容）。
+       ⇒ 所有截图/点击都必须走 /tmp/gui（激活+核实同进程内完成）。
+4.4 顺带发现的**不属于我写域**的缺陷（已报 Lead，未改）：
+    `composeApp/src/commonMain/kotlin/app/relay/ui/desktop/DesktopChrome.kt:127` —— 菜单栏
+    「编辑 → 截图 ⌘⇧A」的条目动作是 `{ onSelectView(DesktopView.Conversations) }`，
+    **只切到会话页、从不发起截图**；用户照着菜单点下去不会有覆盖窗。落点属 W4。
+
+────────────────────────────────────────────────────────────────────────
+5. 复核命令
+
+  # 打包（写 build 目录，必须走锁）
+  python3 scaffold/tools/gradle-locked.py --label "r2-w5-capture-esc" -- \
+      env JAVA_HOME=/opt/homebrew/opt/openjdk@21 ./scaffold/gradlew -p scaffold \
+      :desktopApp:createDistributable --console=plain
+  # 起
+  "scaffold/desktopApp/build/compose/binaries/main/app/捎话 Tidings.app/Contents/MacOS/捎话 Tidings" > /tmp/r2-app2.log 2>&1 &
+  # 打开一个会话并点那颗截图按钮（坐标随窗口布局，先 gui shot 量）
+  /tmp/gui click <pid> 248 311 ; /tmp/gui click <pid> 496 594
+  swift /tmp/winlist.swift | grep Capture          # 期望：name=Capture layer=3 bounds=0,0,1920,1080
+  screencapture -x /tmp/ov.png                     # 期望：中央「拖拽框选区域 · Esc 取消」
+  /tmp/keypid <pid> 53                             # Esc
+  swift /tmp/winlist.swift | grep Capture          # 期望：无输出

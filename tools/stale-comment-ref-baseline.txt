@@ -1,0 +1,4 @@
+# 注释里的 `X.kt:NN` 行号引用棘轮基线（stale-comment-ref gate）
+# 格式: <相对路径>\t<允许的 broken 条数>
+# 生成时机: HEAD=d4f29f5
+# 生成命令: python3 tools/stale-comment-ref.py --write

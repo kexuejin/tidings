@@ -1,0 +1,1266 @@
+<resources>
+
+    <!-- 导航 -->
+    <string name="screen_conversations">Messages</string>
+    <!-- 页签从五项收到四项之后，原来的「发现」和「加入」合成一个「节点」 -->
+    <string name="screen_discovery">Nodes</string>
+    <string name="screen_agents">Workspaces</string>
+    <string name="screen_settings">Settings</string>
+    <string name="action_back">Back</string>
+    <!-- 空状态上的出口：没会话/没 Agent 时唯一的下一步是去节点页 -->
+    <string name="action_find_nodes">Pair on Nodes page</string>
+    <!-- 页签徽标超过两位数就不再报准确值，避免把图标挤变形 -->
+    <string name="nav_badge_overflow">99+</string>
+
+    <!-- 通用 -->
+    <string name="common_cancel">Cancel</string>
+    <string name="common_confirm">Confirm</string>
+    <string name="common_remove">Delete</string>
+    <string name="common_close">Close</string>
+    <string name="common_online">Online</string>
+    <string name="common_offline">Offline</string>
+    <string name="common_agent">Agent</string>
+    <string name="common_human">Colleague</string>
+    <string name="common_unknown">Unknown</string>
+    <string name="common_never">Never</string>
+
+    <!-- 会话列表 -->
+    <string name="conv_title">Messages</string>
+    <string name="action_clear_search">Clear search</string>
+    <string name="conv_section_agents">Agent nodes</string>
+    <string name="conv_section_people">Colleagues</string>
+    <!-- 群单列一节：它不是人也不是 agent，塞进任一节都会让那一节的控件失效。 -->
+    <string name="conv_section_groups">Groups</string>
+    <string name="conv_new_group">New group</string>
+    <string name="conv_more_action">More</string>
+    <string name="conv_filter_all">All</string>
+    <string name="conv_filter_unread">Unread</string>
+    <string name="conv_filter_groups">Groups</string>
+    <string name="conv_filter_agents">Agent</string>
+    <string name="conv_filter_people">Colleagues</string>
+    <string name="conv_filter_workspaces">Workspaces</string>
+    <string name="conv_filter_empty_title">No conversations in this filter</string>
+    <string name="conv_filter_empty_action">Show all</string>
+    <string name="conv_subtitle_summary">%1$d conversations · %2$d unread</string>
+    <string name="conv_subtitle_summary_ws">%1$d conversations · %2$d workspaces · %3$d unread</string>
+    <string name="conv_no_groups">No groups yet. Tap "New group" in the top right to invite colleagues.</string>
+    <string name="conv_group_name">Group name</string>
+    <string name="conv_group_members_hint">Select members (you are included automatically)</string>
+    <string name="conv_group_no_peers">No other nodes found. Add nodes on the Nodes page before creating a group.</string>
+    <string name="action_create">Create</string>
+    <string name="conv_empty_title">No conversations yet</string>
+    <string name="conv_loading">Restoring conversations…</string>
+    <string name="conv_empty_message">Add an IP on the Nodes page, or wait for incoming messages.</string>
+    <string name="conv_empty_action">Go to Nodes</string>
+    <string name="conv_offline_banner">%1$d messages queued waiting for peer to come online; will retry automatically.</string>
+    <string name="conv_pending_count">%1$d pending</string>
+
+    <!-- 聊天 -->
+    <string name="chat_empty_title">No messages yet</string>
+    <string name="chat_empty_message">Send the first message. It will be queued even if the peer is offline.</string>
+    <string name="chat_first_message">Write the first message</string>
+    <string name="chat_no_selection_title">Select a conversation</string>
+    <string name="chat_no_selection_message">Select a colleague or Agent to start chatting.</string>
+    <string name="chat_composer_hint">Type a message…</string>
+    <string name="chat_send">Send</string>
+    <!-- 表情入口的无障碍朗读文本。两个壳共用一条：桌面浮层和手机托盘的布局不同，
+         但"这个图标是表情"是同一件事（同 chat_send 被两边共用）。 -->
+    <string name="chat_emoji">Emoji</string>
+    <string name="chat_more_actions">More actions</string>
+    <string name="chat_byte_hint">%1$d / %2$d bytes</string>
+    <string name="chat_byte_over">Exceeds message limit (%1$d bytes). Please split into multiple messages.</string>
+    <!-- 输入栏状态行的右半边：这条草稿实际会走哪条路。手机上没法像桌面那样把两条路摆成两个模式，
+         所以要说清楚"现在这样发出去是什么后果"，而不是只给一个字节数。 -->
+    <string name="chat_route_udp">Direct LAN · UDP unicast</string>
+    <string name="chat_route_tcp">Exceeds unicast limit, falling back to TCP</string>
+    <string name="chat_delivery_sent">Delivered</string>
+    <string name="chat_delivery_queued">Queued</string>
+    <string name="chat_delivery_failed">Failed</string>
+    <!-- 自己的消息被撤回后的投递态。时间线上那条会变成下面的系统提示行，所以这个标签
+         只出现在还需要显示"投递态"字样的地方（无障碍朗读等），保留它而不是留个孤儿键。 -->
+    <string name="chat_delivery_recalled">Recalled</string>
+    <string name="chat_delivery_resend">Resend</string>
+    <!-- 撤回。时间线上被撤回的那条不留气泡，只留一行居中的系统提示（协议 §8：
+         "本地隐藏原消息并插入系统提示行"），所以这里的两条是"谁撤回的"而不是"已撤回"。
+         `chat_recall` 同时是长按菜单的项名和入口的无障碍文本。 -->
+    <string name="chat_recall">Recall</string>
+    <string name="chat_copy">Copy</string>
+    <string name="chat_forward">Forward</string>
+    <string name="chat_recall_peer">The other party recalled a message</string>
+    <string name="chat_recall_self">You recalled a message</string>
+    <!-- 戳一碰。协议里它是"窗口震动"，手机上没有对应的动效，所以文案说的是"戳了一下"；
+         失败那条必须说清"不会补发"，否则用户会以为稍后能到（协议 §8 决议 #109）。 -->
+    <string name="chat_nudge">Nudge</string>
+    <string name="chat_nudge_peer">The other party nudged you</string>
+    <string name="chat_nudge_self">You nudged the other party</string>
+    <string name="chat_nudge_failed">Nudge failed: no response from peer. Nudges are not queued for retry.</string>
+    <string name="chat_nudge_throttled">Too frequent: max 2 nudges per 60s per peer, spaced at least 15s apart.</string>
+    <!-- Trailing hint of the composer tool row's left segment (the `.shint` in the
+         group variant of the prototype's `toolsRow`). -->
+    <string name="chat_group_media_hint">Only online members can receive images/files</string>
+    <string name="chat_folder_limit_hint">Up to 2,000 files at a time</string>
+
+    <string name="conv_subtitle_recent_suffix">, sorted by most recent message</string>
+    <string name="conv_subtitle_recent_suffix_ws">, sorted by recent activity</string>
+    <string name="conv_subtitle_unread">%1$d conversations unread · %2$d messages</string>
+    <string name="conv_menu_new_session">New conversation (go to pairing)</string>
+    <string name="conv_menu_only_unread">Unread only</string>
+    <string name="conv_menu_mark_all_read">Mark all as read</string>
+    <string name="conv_menu_sort_recent">Sort: most recent first</string>
+    <!-- Workspace section on the conversations tab (the second block of m-home-recent).
+         Stage one (no wsId on the wire yet) titles Agent rows; stage two titles workspace rows. -->
+    <string name="conv_inbox_ws_title">Workspaces</string>
+    <string name="conv_inbox_ws_count_short">%1$d</string>
+    <string name="conv_inbox_ws_count_short_agents">%1$d agents</string>
+    <string name="conv_inbox_ws_pending">%1$d awaiting approval</string>
+    <string name="conv_inbox_ws_group_counts">%1$d agents · %2$d workspaces</string>
+    <string name="conv_inbox_ws_group_offline"> · online %1$s</string>
+    <string name="conv_inbox_ws_row_agent_sessions">%1$d conversations · the peer never announced a workspace</string>
+    <string name="conv_inbox_ws_row_agent_none">No conversation announced yet</string>
+    <string name="conv_inbox_ws_row_unassigned">Unassigned conversations</string>
+    <!-- Sub-line of the unassigned row (prototype relay.html:4260 .t2). -->
+    <string name="conv_inbox_ws_row_unassigned_body">got the conversations, not which workspace they belong to</string>
+    <string name="conv_inbox_ws_row_unassigned_count">%1$d conversations did not report a workspace</string>
+    <string name="conv_inbox_ws_row_ws_sessions">%1$s · %2$d conversations</string>
+    <string name="conv_inbox_ws_row_unnamed">Unnamed workspace</string>
+    <string name="conv_inbox_ws_row_unnamed_hint">No workspace name received (we do not fall back to the path)</string>
+    <string name="conv_inbox_ws_badge_no_workspace">No workspace reported</string>
+    <string name="conv_inbox_ws_badge_unknown_kind">Type not reported</string>
+    <string name="conv_inbox_ws_pending_pill">%1$d to approve</string>
+    <string name="workspace_agent_section_sessions">%1$d conversations</string>
+    <string name="workspace_agent_section_none">The peer never announced a workspace</string>
+    <string name="workspace_agent_section_pending">%1$d to approve</string>
+    <string name="conv_inbox_ws_tail_title">%1$d more rows</string>
+    <string name="conv_inbox_ws_tail_body">See all in the workspace board</string>
+    <string name="conv_inbox_ws_tail_body_pending">%1$d awaiting approval · see all in the workspace board</string>
+    <string name="conv_inbox_ws_open_chat">Open chat</string>
+    <string name="conv_search_hint_global">Search</string>
+
+    <!-- 群聊。协议里没有「创建群」这个报文：建群就是把一份成员表逐成员发出去，
+         所以这里所有文案说的都是「通知」而不是「注册」或「创建」。 -->
+    <string name="banner_group_name_required">Please provide a name for the group.</string>
+    <string name="banner_group_name_too_long">Group name is too long (max %1$d characters).</string>
+    <string name="banner_group_needs_member">Select at least one other member.</string>
+    <string name="banner_group_created">"%1$s" created. Notifying %2$d members.</string>
+    <string name="banner_group_unknown">Group metadata not yet synchronized. Please wait or ask a member to send a message.</string>
+    <string name="banner_group_left">You have been removed from this group.</string>
+    <string name="banner_group_members_added">Added %1$d members. Notifying group.</string>
+    <string name="banner_group_member_removed">Member removed. Notifying group.</string>
+    <string name="banner_group_no_permission">Only the group owner or admins can remove members.</string>
+    <string name="chat_group_members_changed">Group members updated</string>
+    <string name="chat_group_renamed">Group renamed</string>
+    <string name="chat_group_removed">You have been removed from this group</string>
+    <!-- 群头部的两个数。分母是成员总数（含自己），分子是不含自己的在线人数 ——
+         「0/5 人在线」读起来是对的，「1/5」在只有自己在线时也不该出现。 -->
+    <string name="chat_group_online">%1$d/%2$d online</string>
+    <string name="chat_group_members">%1$d members</string>
+    <string name="chat_group_rev">rev %1$d</string>
+    <string name="chat_group_info_title">Group Info</string>
+    <string name="chat_group_members_action">Members</string>
+    <string name="chat_group_info_sub">Members and permissions are managed by owner and admins</string>
+    <string name="chat_group_owner_label">Owner</string>
+    <string name="chat_group_admin_label">Admin</string>
+    <string name="chat_group_desc_label">Description</string>
+    <string name="chat_group_announce_label">Announcement</string>
+    <string name="chat_group_id_label">groupId</string>
+    <string name="chat_group_members_header">Members (%1$d)</string>
+    <string name="chat_group_info_hint">Group metadata synchronizes across members only; invitations and removals adhere to group policies.</string>
+    <string name="chat_group_add_member">Add members</string>
+    <string name="chat_group_remove_member">Remove</string>
+    <string name="chat_group_add_title">Invite members to group</string>
+    <string name="chat_group_add_no_peers">No other nodes available to invite</string>
+    <string name="chat_group_confirm_remove">Remove this member from group?</string>
+    <string name="chat_image_preview_title">View Image</string>
+    <string name="chat_image_preview_close">Close Preview</string>
+    <string name="chat_mention_all">All</string>
+    <string name="chat_mention_title">Select member to @mention</string>
+    <!-- 群里有成员不在线时的输入栏提示。与 chat_peer_offline 分开：群消息走离线补发队列，离线成员上线后会收到，不是"发不出去"。 -->
+    <string name="chat_group_some_offline">Some members offline; they will receive messages upon reconnecting</string>
+    <string name="chat_peer_offline">Peer is offline; messages will be queued</string>
+    <string name="chat_restored_offline">Offline · Local conversation history</string>
+    <string name="chat_caps_label">Capabilities: %1$s</string>
+    <string name="chat_tcp_port">TCP %1$d</string>
+
+    <!-- 节点页（合并了原来的「发现」和「加入网络」两屏） -->
+    <string name="disc_title">Nodes</string>
+    <!-- 大标题下的副标题。三个数分开写而不做成「5 个已知 · 4 在线」这种拼接，
+         是因为拼接串在英文或其它语言下语序就崩了。 -->
+    <string name="nodes_subtitle">%1$d known · %2$d online · %3$d offline</string>
+    <string name="nodes_syncbar">mDNS broadcasting · UDP %1$d / TCP %2$d</string>
+    <string name="nodes_syncbar_down">Broadcasting stopped · UDP %1$d / TCP %2$d</string>
+    <string name="nodes_syncbar_refresh">Refresh</string>
+    <string name="nodes_local_card">Local Device</string>
+    <string name="nodes_local_address">Local address</string>
+    <!-- Prototype m10-nodes-empty writes the reason here instead of printing a dash. -->
+    <string name="nodes_local_address_missing">Local address not yet acquired</string>
+    <string name="nodes_local_discovery">Discovery method</string>
+    <string name="nodes_discovery_on">mDNS _relay._udp · every 5s</string>
+    <string name="nodes_discovery_off">Not broadcasting; hidden from others' node lists</string>
+    <string name="nodes_local_status">Status</string>
+    <string name="nodes_state_ok">Normal · Allowed by firewall</string>
+    <string name="nodes_state_starting">Listening on ports…</string>
+    <string name="nodes_loading">Starting node…</string>
+    <string name="nodes_state_failed">Startup failed · see details below</string>
+    <string name="node_state_stopped">Stopped</string>
+    <!-- Node detail (prototype m-nodedetail / d-nodes right pane, added 2026-10-12). -->
+    <string name="nodes_subtitle_short">%1$d peers · %2$d online</string>
+    <string name="node_detail_ungrouped">Ungrouped</string>
+    <string name="node_detail_remark_section">Note</string>
+    <string name="node_detail_remark_hint">Only visible to you — handy when names collide</string>
+    <string name="node_detail_remark_placeholder">Add a note for this node…</string>
+    <string name="node_detail_remark_save">Save note</string>
+    <string name="node_detail_info_section">Details</string>
+    <string name="node_detail_info_recent">Last seen</string>
+    <string name="node_detail_info_ip">IP address</string>
+    <string name="node_detail_info_host">Host</string>
+    <string name="node_detail_info_platform">Platform</string>
+    <string name="node_detail_recent_just_now">Just now</string>
+    <string name="node_detail_never_hint">This address has never connected. Check the network before sending a message.</string>
+    <string name="nodes_my_qr_title">My QR Code</string>
+    <string name="nodes_my_qr_desc">Pairing QR code for others to scan via "Nodes → Scan to Pair"</string>
+    <string name="nodes_my_qr_hint">Have others scan this code in "Nodes → Scan to Pair" to add you to their nodes list. Both devices must be on the same local network.</string>
+    <string name="nodes_my_qr_no_address">Local address not yet acquired; QR code cannot be generated yet.</string>
+    <string name="nodes_my_qr_too_long">Local address too long for QR code. Please enter the address manually.</string>
+    <string name="nodes_group_lan">LAN Discovery</string>
+    <string name="nodes_lan_empty">No other nodes discovered on LAN. Others must also run Tidings to be discovered.</string>
+    <string name="nodes_group_saved">Saved Nodes (Managed)</string>
+    <string name="nodes_add_manual_sub">IPv4 or ip:port; default port %1$d</string>
+    <!-- 分组标题把条数写进同一句：拼接出来的句子换个语序就散架，所以各留一个带参的 key。 -->
+    <string name="nodes_group_lan_count">LAN Discovery (%1$d)</string>
+    <string name="nodes_group_saved_count">Saved Nodes (Managed) (%1$d)</string>
+    <string name="nodes_saved_empty">No manually saved nodes. Desktop nodes will not appear automatically; add their address manually.</string>
+    <string name="nodes_group_add">Add Node</string>
+    <string name="nodes_scan_title">Scan to Pair</string>
+    <string name="nodes_scan_sub">Scan the QR code in the other party's "My QR Code"</string>
+    <string name="nodes_add_manual_title">Enter Peer Address</string>
+    <string name="nodes_footer">Up to %1$d manual nodes can be saved. Messages are queued when nodes are offline.</string>
+
+    <!--
+        节点页合并列表 / 行尾 ⋯ 菜单 / 「出示我的二维码」入口（W2 本轮落地）。
+        中文同步落在 values/strings.xml：英文缺键**不报错、静默回落中文**，
+        而所有截图帧写死 `locale = "zh-rCN"`，门禁与参考图都照不到 ⇒ 必须成对落。
+    -->
+    <string name="nodes_group_nodes_count">Nodes (%1$d)</string>
+    <string name="nodes_nodes_empty">No nodes found yet. Others on the same LAN must also have Tidings running to be discovered; if the peer device does not have automatic discovery enabled, add it with "Enter Peer Address" below.</string>
+    <string name="nodes_row_src_lan">LAN</string>
+    <string name="nodes_row_src_manual">Added manually</string>
+    <string name="nodes_row_offline_at">Offline %1$s</string>
+    <string name="nodes_row_menu">Node actions</string>
+    <string name="nodes_menu_message">Send Message</string>
+    <string name="nodes_menu_reconnect">Reconnect</string>
+    <string name="nodes_menu_copy">Copy Address</string>
+    <string name="nodes_menu_remove">Remove "%1$s"</string>
+    <string name="nodes_menu_copied">Address copied</string>
+    <string name="nodes_my_qr_entry_title">My QR Code</string>
+    <string name="nodes_my_qr_entry_sub">Have the other side scan it to add you to their node list</string>
+    <string name="nodes_my_qr_payload">Payload</string>
+    <string name="nodes_my_qr_payload_hint">If the camera is broken or the code is too far to scan, copy the line above to the other side — that works just as well.</string>
+    <string name="nodes_manual_name">Name (optional)</string>
+    <string name="nodes_manual_name_hint">Shown on this device only. After the handshake, the list shows the other side's own nickname.</string>
+
+    <!-- 添加节点底部弹层 -->
+    <string name="nodes_add_sheet_sub">Scan QR code or enter address manually</string>
+    <!-- 节点页空态入口行副行；与上面那条不是同一句（见 zh 版注释）。 -->
+    <string name="nodes_add_entry_sub">Scan a code or type their address</string>
+    <string name="nodes_seg_scan">Scan QR</string>
+    <string name="nodes_seg_manual">Enter Address</string>
+    <string name="nodes_scan_frame_hint">Align peer QR code within frame</string>
+
+    <!--
+        常驻扫码页（feature/scan/ScanScreen.kt）。取景框是页面级的常驻物，
+        理由见那个文件的 KDoc：Android 的检测跑在预览的分析器里、iOS 的会话就是预览层的数据源，
+        `scan()` 要等预览把结果回调进来 —— 弹层一关预览就没了，等待永远不会结束。
+    -->
+    <string name="scan_starting">Starting camera…</string>
+    <string name="scan_no_preview">No camera preview available. Please enter the address manually.</string>
+    <string name="scan_retry">Try again</string>
+    <string name="scan_import_image">Import QR from Image</string>
+    <string name="scan_manual_hint">Cannot scan? Enter address manually on Nodes page</string>
+    <string name="nodes_scan_action">Open Camera to Scan</string>
+    <string name="nodes_scan_unavailable">Camera permission required. Please switch to manual input.</string>
+    <string name="nodes_scan_field_host">Peer Address</string>
+    <string name="nodes_scan_field_host_hint">IPv4 or ip:port; defaults to %1$d if port omitted.</string>
+    <string name="nodes_port_label">Port</string>
+    <string name="nodes_port_ok">Port valid · Range 1–65535, defaults to %1$d.</string>
+    <string name="nodes_port_bad">Port must be between 1 and 65535.</string>
+    <string name="nodes_recognized">Recognized</string>
+    <string name="nodes_scan_connect">Connect</string>
+    <string name="nodes_error_host">Invalid address format.</string>
+    <string name="nodes_error_two_ports">Address already includes a port; leave port field empty.</string>
+    <string name="nodes_timeout">Peer did not respond within 3s. Ensure both devices are on the same Wi-Fi.</string>
+
+    <string name="disc_peers_online">Online Nodes</string>
+    <string name="disc_retry_start">Listen Again</string>
+    <string name="disc_connect">Connect</string>
+    <string name="disc_vpn_warning">VPN detected. LAN broadcasts may fail; enter address manually to connect.</string>
+    <string name="disc_invalid_host">Invalid IP or hostname.</string>
+    <string name="disc_duplicate">Node already exists in list.</string>
+    <string name="disc_added">Greeting sent to %1$s, awaiting response.</string>
+    <!--
+      底层异常连 message 都没有时的兜底（见 BannerMessage.UnknownError）。
+      只说"没拿到原因 + 下一步"，不编原因 —— 系统没告诉我们的事，界面也不该替它说。
+    -->
+    <string name="error_unknown">Operation failed for an unknown reason. Please try again later.</string>
+    <!--
+        手动节点的三种处境。分开写是因为它们对用户意味着完全不同的事：
+        「在线」能用；「离线」对方只是关机了，要留着；「没有回应」多半是地址写错或换了网段。
+    -->
+    <string name="disc_manual_online">Online</string>
+    <string name="disc_manual_offline">Offline</string>
+    <string name="disc_manual_unreachable">Unreachable</string>
+    <string name="disc_manual_unreachable_hint">This address has never responded. It may be obsolete after network changes.</string>
+    <string name="disc_cleanup_unreachable">Clean up unreachable (%1$d)</string>
+    <string name="disc_cleanup_none">No nodes need cleanup.</string>
+    <string name="disc_cleanup_done">Cleaned up %1$d unreachable nodes.</string>
+    <string name="banner_camera_denied">Camera permission denied. Please grant permission in system settings.</string>
+    <string name="banner_scan_failed">Scan failed: %1$s</string>
+    <!-- 权限给过了，但设备给不出画面：模拟器没相机、相机被别的应用占着、或者没有后摄。 -->
+    <string name="banner_camera_unavailable">Camera is currently unavailable.</string>
+    <string name="banner_invalid_qr">This QR code is not a valid Tidings pairing code.</string>
+    <!-- 码读出来了但内容不认识，与「图里根本没有码」是两件事，别合并。 -->
+    <string name="banner_no_qr_in_image">No QR code found in the image.</string>
+
+    <!-- 工作区看板与会话详情 -->
+    <string name="agent_title">Workspaces</string>
+    <string name="agent_subtitle_pending">%1$d approvals waiting</string>
+    <string name="workspace_global_pending_banner">%1$d operations pending approval</string>
+    <string name="workspace_active_session_label">Active Session</string>
+    <string name="workspace_no_sessions">No sessions</string>
+    <string name="workspace_sessions_not_synced">Sessions are not synced here yet (the host reports %1$d); opening this workspace pulls them.</string>
+    <string name="workspace_total_sessions_format">%1$d sessions · Latest activity %2$s</string>
+    <string name="workspace_board_queue_format">%1$d queued</string>
+    <string name="workspace_board_runs_format">%1$d running</string>
+    <string name="workspace_board_artifacts_format">%1$d artifacts</string>
+    <string name="session_detail_title">Session Detail</string>
+    <string name="session_detail_switch_action">Switch Session</string>
+    <string name="session_detail_pending_approval">Pending Approval</string>
+    <string name="agent_count_items">%1$s items</string>
+    <!-- Prototype wsCardHTML shows "online · ~/src/… · TCP 17879"; there is no path field in the
+         protocol, so this line carries the two parts it can, from real values. -->
+    <string name="agent_summary_line">%1$s · TCP %2$d</string>
+    <!-- Board header summary; prototype relay.html:4208-4211. -->
+    <string name="workspace_board_subtitle">%1$d devices · %2$d Agents · %3$d workspaces · %4$d sessions</string>
+<string name="agent_empty_subtitle">%1$d workspaces</string>
+    <!-- Empty state (prototype relay.html:4563-4579): warn banner + "Agent (0)" head + card body + "check nodes" row.
+         No wire key in the copy: prototype relay.html:4562 forbids printing `ag1`. -->
+    <string name="agent_empty_title">No Agent has reported yet</string>
+    <string name="agent_empty_message">The peer must run a version with Agent capability and be connected; its workspaces will show up here.</string>
+    <string name="agent_empty_section">Agent (0)</string>
+    <string name="agent_empty_card">No device has reported an Agent or workspace yet. Check the Nodes page to confirm the peer is online; once an Agent announces a workspace, cards grow here automatically.</string>
+    <string name="agent_empty_exit_title">Check the Nodes page</string>
+    <string name="agent_empty_exit_body">Confirm the peer is online, then come back</string>
+    <string name="agent_offline_title">Agent Offline</string>
+    <string name="agent_offline_message">Last seen %1$s. Messages will be queued and sent upon reconnect.</string>
+    <string name="agent_status_host">Host</string>
+    <string name="agent_status_port">TCP Port</string>
+    <string name="agent_status_last_seen">Last Seen</string>
+    <string name="agent_timeline_title">Event Stream</string>
+    <string name="agent_messages_title">Chat Messages</string>
+    <string name="agent_sessions_empty">No session announcements received. Peer must declare agn1 and send agent-session / agent-event frames.</string>
+    <string name="agent_sessions_memory_note">Events and sessions are stored persistently in isolated tables (PPE-1 §9).</string>
+    <string name="agent_session_load_more">Load more</string>
+    <string name="agent_session_load_more_busy">Loading…</string>
+    <string name="agent_session_load_more_hint">The host fetches conversation history only when you open a workspace</string>
+
+    <string name="agent_session_switch_title">Switch session</string>
+    <string name="agent_session_archived_section">Archived sessions (%1$d)</string>
+    <string name="agent_session_announced_missing">Events received without session announcement</string>
+    <string name="agent_session_state_idle">Idle</string>
+    <string name="agent_session_state_busy">Busy</string>
+    <string name="agent_session_state_done">Done</string>
+    <string name="agent_session_state_error">Error</string>
+    <string name="agent_session_state_archived">Archived</string>
+    <string name="agent_session_meta">%1$s · %2$s</string>
+    <string name="agent_session_started">Started at %1$s</string>
+    <string name="agent_session_events_count">%1$d events</string>
+    <string name="agent_session_events_shown">Showing latest %1$d events (of %2$d)</string>
+    <string name="agent_session_bar_label">Session</string>
+    <string name="agent_session_pending_count">%1$d pending</string>
+    <string name="agent_session_no_events">No events in this session.</string>
+    <!-- Shown when a session has neither an alias nor a title. We do not fall back to the
+         session id: that is an identity key, not a name (DSH itself shows "Untitled"). -->
+    <string name="agent_session_untitled">Untitled</string>
+    <string name="agent_event_cursor">Cursor %1$d</string>
+    <string name="agent_events_note">Chat history with this Agent (bubble stream), not structured events.</string>
+    <string name="agent_timeline_empty">No conversation with this Agent yet.</string>
+    <string name="agent_open_chat">Open Chat</string>
+    <string name="agent_event_count">%1$d messages</string>
+    <string name="agent_event_dir_out">Me → Agent</string>
+    <string name="agent_event_dir_in">Agent → Me</string>
+
+    <!-- 「加入网络」整屏随 feature/pairing/ 一起删掉了，文案并进上面的 nodes_* -->
+
+    <!-- 设置：屏1 身份与连接 -->
+    <string name="set_title">Settings</string>
+    <string name="set_title_sub">Identity &amp; Connection</string>
+    <string name="set_home_subtitle">Connection, notifications, appearance, capabilities, data &amp; diagnostics</string>
+    <string name="set_profile_title">My Profile</string>
+    <string name="set_nick">Nickname</string>
+    <string name="set_company">Company</string>
+    <string name="set_dept">Department</string>
+    <string name="set_team">Team</string>
+    <string name="set_avatar_label">Avatar %1$d</string>
+    <string name="set_avatar_custom">Custom</string>
+    <!-- 设置 · 上传头像（m-set-avatar / m15e-set-avatar-dark）。原型 relay.html:3735-3809；
+         三张卡 + 一段「协议没通」的说明，全部是页面正文，没有 CHROME 元素。 -->
+    <string name="set_avatar_page_title">Upload Avatar</string>
+    <string name="set_avatar_page_subtitle">Pick an image → crop square → hash → announce</string>
+    <string name="set_avatar_card_pick">Choose Image</string>
+    <string name="set_avatar_change">Change</string>
+    <string name="set_avatar_file_meta">Source 1920×1280 · 1.8 MB · JPEG</string>
+    <string name="set_avatar_reselect">Reselect</string>
+    <string name="set_avatar_pick_hint">Choose a local image via the system file picker. Image limits: dimension ≤ 8192, file size ≤ 20 MiB.</string>
+    <string name="set_avatar_step1_title">Pick a local image</string>
+    <string name="set_avatar_step1_desc">One entry point: “Upload Image” → the system file picker.</string>
+    <string name="set_avatar_step2_title">Crop to a square</string>
+    <string name="set_avatar_step2_desc">Any source ratio, center crop; fixed output 192×192 — not “up to 192”.</string>
+    <string name="set_avatar_step3_title">Encode + write to disk</string>
+    <string name="set_avatar_step3_desc">webp, non-animated, ≤ 32 KiB; the file name is sha256(bytes) and the path accepts only that hash.</string>
+    <string name="set_avatar_step4_title">Write to the profile</string>
+    <string name="set_avatar_step4_desc">profile.avatarHash = hash, profileRev +1, announceProfile is broadcast.</string>
+    <string name="set_avatar_steps_hint">These four are four segments of one line, not four parallel features: only after picking an image can you crop, only after cropping can you encode, and only after encoding is there a hash to write into the profile. The line between step 3 and step 4 is the real boundary — cross it and the other side sees nothing.</string>
+    <string name="set_avatar_hash_title">Only these 64 hex digits go over the wire</string>
+    <string name="set_avatar_hash_hint">The image body &lt;b&gt;never goes online&lt;/b&gt;; only this one hash travels with the profile. The peer sends avatar{op:"get"} on demand to fetch it — the images nobody could keep up with on a LAN never enter anyone’s bandwidth. The 32 KiB limit serves the same purpose: keeping the base64 envelope safely below one TCP control frame (64 KiB).</string>
+    <string name="set_avatar_protocol_title">Saving in this mode does nothing yet</string>
+    <string name="set_avatar_protocol_lead">Custom avatar network sync is not yet enabled.</string>
+    <string name="set_avatar_protocol_body">Custom avatar exchange (the av1 capability) requires on-demand fetch, caching, and framed chunk transfer. The current version prioritizes instant synchronization via preset avatars and initials; custom avatar network roaming will be enabled in a future release.</string>
+    <string name="set_avatar_save">Save Profile</string>
+    <string name="r2_set_avatar_mode_icon">Icon avatar</string>
+    <string name="r2_set_avatar_mode_initial">Initials</string>
+    <string name="r2_set_avatar_mode_upload">Upload image</string>
+    <string name="set_conn_subtitle">Default UDP port and reconnect</string>
+    <string name="set_home_broadcast_hint">After saving, the profile and the port are broadcast again — peers pick up the new version on their next presence.</string>
+    <string name="set_notify_card_title">Alerts</string>
+    <string name="set_notify_subtitle">Alert rules and quiet hours</string>
+    <string name="set_appear_card_title">Theme</string>
+    <string name="set_appear_subtitle">Theme</string>
+    <string name="set_caps_card_title">Claims</string>
+    <string name="set_data_card_title">Directories</string>
+    <string name="set_data_subtitle">Usage, partial transfers and retention</string>
+    <string name="set_diag_card_title">Live status</string>
+    <string name="set_diag_subtitle">Live status, not configuration</string>
+    <string name="set_update_subtitle">App version and update check</string>
+    <string name="desktop_ime_fields_head">Three input fields (same as in the product)</string>
+    <!-- 桌面设置窗外壳（d-settings / d-settings-desk）。左侧列表与「桌面」面板的
+         正文，来自 prototype/relay.html 的 DSET_GROUPS 与 screenDSettingsDesk。 -->
+    <string name="desk_settings_title">Tidings Settings</string>
+    <string name="desk_nav_group_conn">Connection &amp; notifications</string>
+    <string name="desk_nav_group_appear">Appearance &amp; capabilities</string>
+    <string name="desk_nav_group_data">Data &amp; diagnostics</string>
+    <string name="desk_nav_group_desk">This computer</string>
+    <string name="desk_nav_identity">Identity &amp; connection</string>
+    <string name="desk_nav_connection">Connection</string>
+    <string name="desk_nav_notifications">Notifications</string>
+    <string name="desk_nav_appearance">Appearance</string>
+    <string name="desk_nav_capabilities">Capabilities</string>
+    <string name="desk_nav_data">Data &amp; storage</string>
+    <string name="desk_nav_transfers">Transfer log</string>
+    <string name="desk_nav_diagnostics">Diagnostics</string>
+    <string name="desk_nav_desktop">Desktop</string>
+    <string name="desk_nav_ime">IME self-check</string>
+    <string name="desk_nav_desktop_only">Desktop only</string>
+    <string name="desk_nav_ghost_note">Same as phone</string>
+    <string name="desk_prefs_hint">Tray residency and background behaviour. These settings only affect this computer and are never synced to the other side — which is why they live under "This computer", a group that is not drawn on mobile.</string>
+    <string name="desk_prefs_power_title">Power saver background mode</string>
+    <string name="desk_prefs_power_subtitle">Once tucked into the tray, heartbeats and scans slow down 3× (heartbeat %1$ds → %2$ds, offline detection %3$ds → %4$ds). The cost is that others see you come online later — and you find peers later too.</string>
+    <string name="desk_prefs_autostart_title">Launch at login</string>
+    <string name="desk_prefs_autostart_subtitle">Start Tidings in the background at login (tucked into the tray, no window). Off by default — with it off, messages from others wait until you open the app by hand.</string>
+    <string name="desk_prefs_autostart_unsupported">This system does not let an application register a login item; use the system’s own “Login Items” setting.</string>
+    <string name="desk_switch_unavailable">Unavailable</string>
+    <string name="desk_autostart_error_title">Launch at login did not take effect</string>
+    <string name="desk_retry">Retry</string>
+    <string name="set_save_profile">Save Profile</string>
+    <string name="set_saved">Saved. Profile rev updated to %1$d; peers will see changes.</string>
+    <string name="set_invalid_nick">Nickname cannot be empty (max 32 characters).</string>
+    <string name="set_data_dir">Data Directory</string>
+    <string name="set_conn_title">Connection</string>
+    <string name="set_conn_reset">Restore Defaults</string>
+    <string name="set_conn_default_port">Default UDP Port</string>
+    <!-- 如实说明改端口的后果：Discovery 的广播端口是协议默认的 17878（见 core 的 Discovery.broadcastPort），
+         与本机监听端口无关，所以改完之后广播仍在 17878 发出、而本机只听新端口 —— 单向。 -->
+    <string name="set_conn_default_port_note">Broadcasting remains on 17878 while listening on the new port.</string>
+    <string name="set_conn_save">Save Connection Settings</string>
+    <string name="set_conn_reconnect">Reconnect</string>
+    <string name="set_conn_reconnecting">Restarting…</string>
+
+    <!-- The persistent "My QR Code" card on the Connection page (Gen2 moved it off the Nodes
+         screen). Title / usage hint / content description are reused from the Nodes screen. -->
+    <string name="set_conn_qr_payload">Payload</string>
+    <string name="set_conn_qr_no_address">The node has no local address yet, so no QR code can be printed. Come back to this card once the node is running.</string>
+    <string name="set_conn_qr_too_long">The local address is too long to fit a QR code. Ask the other side to enter the address and port manually.</string>
+    <string name="set_conn_qr_fallback">If the camera is broken or the code is too far to scan, read the string above to the other side — it works just as well.</string>
+
+    <!-- 设置：屏2 通知、外观、能力、数据与诊断 -->
+    <string name="set_more_subtitle">Notifications, appearance, capabilities, data &amp; diagnostics</string>
+    <string name="set_more_entry_title">More Settings</string>
+    <string name="set_more_entry_sub">Notifications, appearance, capabilities, data &amp; diagnostics</string>
+    <string name="set_more_notif_title">Notifications</string>
+    <string name="set_more_notif_agent">Agent Notifications</string>
+    <string name="set_more_notif_agent_sub">Notify on new messages in Agent sessions</string>
+    <string name="set_more_notif_mention">Notify only when @mentioned</string>
+    <string name="set_more_notif_mention_sub">Other messages enter inbox silently</string>
+    <string name="set_more_notif_quiet">Quiet Hours</string>
+    <string name="set_more_notif_quiet_sub">Do not disturb between 22:00 and 08:00</string>
+    <string name="set_more_appearance_title">Appearance</string>
+    <string name="set_more_appearance_hint">Status bar follows theme selection.</string>
+    <string name="set_theme_system">Follow System</string>
+    <string name="set_theme_light">Light</string>
+    <string name="set_theme_dark">Dark</string>
+    <string name="set_caps_title">Capability Declarations</string>
+    <string name="set_caps_peer_visible">Visible to peers</string>
+    <string name="set_caps_saved">Capabilities updated; node is rebroadcasting.</string>
+    <string name="set_cap_text_title">Queue Keep-Alive</string>
+    <string name="set_cap_text_sub">Keep connection alive during queueing; resume transfer if cancelled</string>
+    <!-- mrec1 的真身是**媒体撤回**，不是录音（上游协议 §3 决议 #188：offer 带 msgId、
+         双方声明后才能撤回图片/文件消息）。上一版写成"接收语音消息"是错的，见 ARCHITECTURE.md。 -->
+    <string name="set_cap_record_title">Media Recall</string>
+    <string name="set_cap_record_sub">Images and files recallable within 5 min (requires both parties)</string>
+    <string name="set_cap_file_title">Direct File Transfer</string>
+    <string name="set_cap_file_sub">Decided by receiver; mobile client does not declare proactively</string>
+    <string name="set_more_data_title">Data &amp; Storage</string>
+    <string name="set_storage_usage">Usage</string>
+    <string name="set_storage_usage_value">%1$s · Cache %2$s</string>
+    <!-- 名字是 counting 不是 unknown：`directoryUsageBytes` 三平台都只返回 Long（目录不存在就是 0），
+         不会失败，所以 null 只可能是"还在数"，不存在"数不了"这一态。写成"需要平台层统计后显示"
+         会让人以为缺了平台能力，其实只是没数完。 -->
+    <string name="set_storage_usage_counting">Calculating…</string>
+    <!-- 决议 #211：普通失败保留 .part 以便续传，只有用户明确放弃才删。
+         所以这行必须写清"删掉 = 放弃续传"，否则用户会以为那只是缓存垃圾。 -->
+    <string name="set_leftover_title">Transfer Partials</string>
+    <string name="set_leftover_sub">Incomplete downloads kept for resumption; deleting abandons them</string>
+    <string name="set_leftover_value">%1$d items · %2$s</string>
+    <string name="set_leftover_none">No partial files</string>
+    <!-- 同 set_storage_usage_counting：`leftoverParts()` 返回 List（拿不到运行时就是空表），
+         不会失败，null 只表示还在数。 -->
+    <string name="set_leftover_counting">Calculating…</string>
+    <string name="set_leftover_action">Clean up</string>
+    <string name="set_change_dir">Change Directory</string>
+    <string name="set_open_dir">Open</string>
+    <!-- 桌面数据页的卡内说明，原型 prototype/relay.html:5290-5292 逐字（英文按同义译）。
+         原型那句的括号里是内部键名 set_change_dir / set_open_dir，正式产品不印内部标识符，故删掉。 -->
+    <string name="settings_data_desktop_hint">"Change Directory" / "Open Directory" is a desktop-only exit — on mobile you get to files from the file card in a conversation, so those two buttons are not there.</string>
+    <!-- 手机数据页的卡内说明，原型 prototype/relay.html:3930-3931 逐字（英文按同义译）。与上面那句互斥。 -->
+    <string name="settings_data_phone_hint">On mobile you get to files from the file card in a conversation (open / share), so "Change Directory" and "Open" are not here.</string>
+
+    <!-- Round 2 (2026-10-13): prototype strings that round 1 missed (see values/strings.xml). -->
+    <string name="r2_set_conn_card_port">Port</string>
+    <string name="r2_set_conn_only_field">This card holds exactly one real field (udpPort) — which is why it deserves a page of its own instead of being squeezed into the profile page.</string>
+    <string name="r2_set_notify_hint">All three are really persisted (RelaySettings), and the policy is read the moment a message arrives — these are not switches that change nothing.</string>
+    <string name="r2_set_appear_hint">The choice is persisted immediately: without that, the next launch would fall back to the previous value and that three-way picker would look selectable while being meaningless.</string>
+    <string name="r2_set_caps_hint">The first two changes bump profileRev and restart the node, so peers learn our capabilities again from that.</string>
+    <!-- Round 2 m-set-profile: the five `.field`s and three hints at prototype/relay.html:3682-3714. -->
+    <string name="r2_set_nick_hint">Up to 32 characters, cannot be empty.</string>
+    <string name="r2_set_profile_avatar_label">Avatar</string>
+    <string name="r2_set_profile_org">Organization</string>
+    <string name="r2_set_profile_rev_chip">Profile v%1$d</string>
+    <string name="r2_set_profile_node_chip">Node %1$s</string>
+    <string name="r2_set_desk_tray_hint_lead">The tray menu title follows the state: </string>
+    <string name="r2_set_desk_tray_tag_msgs">3 new messages</string>
+    <string name="r2_set_desk_tray_tag_file">1 file received (12MB)</string>
+    <string name="r2_set_desk_tray_hint_tail">. AWT has no system bubble notifications, so for now we use the menu title plus menu-item badges, not a popup.</string>
+    <string name="r2_set_profile_team_hint">These three travel together in the profile broadcast; left blank they simply do not show on the peer — there is no "half filled" state.</string>
+    <string name="r2_set_profile_page_hint">Saving bumps profileRev, so the peer sees the new profile on its next presence.</string>
+    <string name="set_persist_title">Message Persistence</string>
+    <string name="set_persist_sub">When disabled, messages stay in memory and are lost on restart</string>
+    <string name="set_retention_title">Retention Days</string>
+    <string name="set_retention_sub">Retain offline queued messages for %1$d days</string>
+    <string name="set_retention_value">%1$d days</string>
+    <string name="set_clear_history_title">Clear Chat History</string>
+    <string name="set_clear_history_sub">Irreversible</string>
+    <string name="set_clear_history_action">Clear</string>
+    <string name="set_diag_title">Diagnostics</string>
+    <string name="set_node_id">Node ID</string>
+    <string name="set_peer_count">Known Nodes</string>
+    <string name="set_diag_selfcheck">Run Self-Check</string>
+    <string name="set_diag_protocol">Protocol</string>
+    <string name="set_diag_protocol_value">v1 · Compatible with desktop 0.61.1</string>
+    <string name="set_diag_peers_value">%1$d · %2$d online / %3$d offline</string>
+    <string name="set_diag_queued">Queued Messages</string>
+    <string name="set_diag_group_text">group-text</string>
+    <string name="set_diag_enabled">Enabled</string>
+    <string name="set_diag_disabled">Disabled</string>
+    <string name="set_diag_inset">Status Bar Inset</string>
+    <string name="set_diag_inset_value">24 dp · App rendered without system background</string>
+    <!-- 传输是否加密。协议层没有加密实现（明文 JSON），输入栏的「局域网直连」也不再暗示加密；
+         这一行是把"没加密"摆在用户能查到的地方，而不是靠没人注意就不说。 -->
+    <string name="set_diag_crypto">Transport Encryption</string>
+    <string name="set_diag_crypto_value">None · Plaintext on LAN</string>
+    <string name="set_diag_rerun">Rerun Diagnostics</string>
+    <string name="set_diag_selfcheck_unavailable">Diagnostics currently show live state; no rerun actions available.</string>
+    <!-- Round 2: the `.navrow` outside the diagnostics card (prototype relay.html:3966-3971). -->
+    <string name="r2_set_diag_insets_title">Adaptive check</string>
+    <string name="r2_set_diag_insets_sub">Top gap / navigation bar / status bar: real-device symptoms vs. current state</string>
+
+    <!-- App Update -->
+    <string name="set_update_title">Version &amp; Update</string>
+    <string name="set_update_app_version">App Version</string>
+    <string name="set_update_check_action">Check for Updates</string>
+    <string name="set_update_checking">Checking for updates…</string>
+    <string name="set_update_latest">You are using the latest version</string>
+    <string name="set_update_available">New version %1$s available</string>
+    <string name="set_update_open_action">Update Now</string>
+    <string name="set_update_failed">Update check failed: %1$s</string>
+
+    <!-- 节点状态 -->
+    <string name="node_bind_failed_reason">UDP port %1$d failed to bind (%2$s). The port may be in use.</string>
+    <string name="node_not_started">Node not started. Please start or retry in Settings.</string>
+
+    <!-- 控制器动作的反馈文案（由 BannerMessage 结构化传出来，在这里翻译） -->
+    <string name="chat_send_too_long">Message is %1$d bytes, exceeding the %2$d limit. Please split it.</string>
+    <string name="chat_send_failed">Failed to send: %1$s</string>
+    <string name="set_ports_saved">Ports saved: UDP %1$d / TCP %2$d; restarting listeners.</string>
+    <string name="file_pick_failed">Failed to open picker: %1$s</string>
+    <string name="file_transfer_failed">File transfer failed: %1$s</string>
+    <string name="file_offered">Sent %1$d files (%2$s).</string>
+    <!-- 不写死任何平台的设置路径：Android/iOS/桌面的菜单各不相同，这里只说"去哪做什么"。 -->
+    <string name="banner_notification_denied">Notifications disabled. You will not receive alerts for new messages.</string>
+
+    <!-- 文件卡片与传输状态 -->
+    <string name="file_bubble_count">%1$d files</string>
+    <string name="file_state_offered_in">Incoming file from peer, awaiting acceptance</string>
+    <string name="file_state_offered_out">Sent, awaiting peer acceptance</string>
+    <!-- 百分号写一个就行：CMP 的 replaceWithArgs 用正则 %(\d+)\$[ds] 替换，
+         不是 String.format，所以 %% 不会被还原成 %，会原样显示两个。 -->
+    <string name="file_state_active_in">Receiving %1$d%%</string>
+    <string name="file_state_active_out">Sending %1$d%%</string>
+    <string name="file_state_completed_in">Received</string>
+    <string name="file_state_completed_out">Delivered</string>
+    <string name="file_state_failed">Transfer failed: %1$s</string>
+    <string name="file_state_declined">Peer declined transfer</string>
+    <!-- Folder transfers split the meta row from the state row, as in the prototype's
+         folderCard (relay.html:4251-4275): progress in the meta row, a bare state word
+         in the state row. Single files keep the percent in the state row above. -->
+    <string name="r2_chat_folder_progress">%1$d% · %2$s / %3$s</string>
+    <string name="r2_chat_folder_sending">Sending</string>
+    <string name="r2_chat_folder_receiving">Receiving</string>
+    <string name="file_accept">Accept</string>
+    <string name="file_decline">Decline</string>
+    <string name="file_saved_to">Saved to %1$s</string>
+    <!-- 收到的文件落在应用内部目录，没有这两个出口用户就打不开、也分享不出去。 -->
+    <string name="file_open">Open</string>
+    <string name="file_share">Share</string>
+    <!-- 音频气泡的播放按钮。语义是"从头播一遍"，不是"开始/停止"切换：
+         三个平台的播放器都报不了"播完了"，做一个不会复位的切换按钮就是状态过期。
+         播放失败（桌面只有 WAV/AIFF/AU，m4a 会失败）必须说出来，不能静默。 -->
+    <string name="file_play_audio">Play</string>
+    <string name="file_audio_unsupported">Format unsupported on this device</string>
+    <!-- 表格图片的文字视图（协议 §3 / 决议 #190）。措辞不是"图片/文字切换"：
+         这段文字服务的是"数字要能选中复制"，图片（哪怕已经能内联预览）也做不到这件事，
+         所以这里只说文字这一件事。 -->
+    <string name="file_table_show_text">View table text</string>
+    <string name="file_table_hide_text">Hide text</string>
+    <string name="file_table_truncated">Text truncated by sender; image is complete.</string>
+    <string name="chat_attach">Attach File</string>
+    <string name="chat_image">Image</string>
+
+    <!-- 相对时间 -->
+    <string name="time_just_now">just now</string>
+    <string name="time_minutes_ago">%1$d min ago</string>
+    <string name="time_hours_ago">%1$d hours ago</string>
+    <string name="time_days_ago">%1$d days ago</string>
+
+    <!-- 会话 -->
+    <string name="conv_no_messages">No messages yet, say hi</string>
+
+    <!-- 通知渠道：这两个名字显示在「系统设置 → 应用 → 通知」里，由系统按渠道 id 缓存。
+         改文案必须同时改 AndroidPushNotificationHandler 的 CHANNEL_ID，否则老用户看到的还是旧名。 -->
+    <string name="notification_channel_messages">Tidings Messages</string>
+    <string name="notification_channel_messages_desc">Messages received from peers</string>
+
+    <!-- 桌面外壳（ui/desktop）：平板/桌面共用的这套 UI 是从 desktopApp 搬过来的，
+         文案和 desktopApp/src/main 里那份是两套，改一处要想着另一处。 -->
+    <!-- 视图名：DesktopView 的 label 字段与左侧导航条共用同一批 key -->
+    <string name="desktop_view_conversations">Conversations</string>
+    <!-- Sub-title of the full-width global-search page header (prototype `screenDSearch`,
+         `prototype/relay.html:4455`). Reports the conversation count only — no unread segment. -->
+    <string name="desktop_search_session_count">%1$d conversations</string>
+    <string name="desktop_view_files">Files</string>
+    <string name="desktop_view_nodes">Nodes</string>
+    <!-- View name (Workspaces): shared by the navigation rail and the View menu. The in-screen
+         heading is a separate key (agent_title) and happens to read the same. -->
+    <string name="desktop_view_agents">Workspaces</string>
+
+    <!-- 菜单栏、工具栏 -->
+    <string name="desktop_menu_new_conversation">New Conversation</string>
+    <string name="desktop_menu_import_files">Import Files…</string>
+    <string name="desktop_menu_agents">Workspaces</string>
+    <string name="desktop_menu_copy_node_id">Copy Node ID</string>
+    <string name="desktop_menu_theme_light">Light</string>
+    <string name="desktop_menu_theme_dark">Dark</string>
+    <string name="desktop_menu_refresh_nodes">Refresh Nodes</string>
+    <string name="desktop_menu_diagnostics">Diagnostics Package</string>
+    <string name="desktop_action_quit">Quit</string>
+    <string name="desktop_menu_file">File</string>
+    <string name="desktop_menu_edit">Edit</string>
+    <string name="desktop_menu_view">View</string>
+    <string name="desktop_menu_window">Window</string>
+    <string name="desktop_menu_help">Help</string>
+    <string name="desktop_toolbar_import">Import Files</string>
+    <string name="desktop_toolbar_search">Search</string>
+    <string name="desktop_toolbar_search_placeholder">Search conversations / files / nodes</string>
+    <string name="desktop_toolbar_open_new_window">Open in New Window</string>
+    <string name="desktop_toolbar_more">More</string>
+
+    <!-- 标题栏 -->
+    <string name="desktop_app_title">Tidings</string>
+    <string name="desktop_title_tagline">Direct LAN messaging and file transfers</string>
+    <string name="desktop_title_files">Saved and active files</string>
+    <string name="desktop_title_nodes">%1$d nodes online · Local %2$s</string>
+    <!-- Sub-title of the Workspaces view. The prototype's tsub() has no branch for d-agents
+         (it falls back to the nodes line); this one says what the screen is actually about. -->
+    <string name="desktop_title_agents">Workspaces and sessions reported</string>
+    <string name="desktop_peer_header">%1$s · %2$s · %3$s</string>
+    <string name="desktop_peer_connected">Connected</string>
+    <string name="desktop_peer_last_seen">Last seen %1$s</string>
+
+    <!-- 平板的工具栏溢出菜单：桌面上这些动作走菜单栏，不用这一组 -->
+    <string name="desktop_overflow_theme_light">Switch to Light</string>
+    <string name="desktop_overflow_theme_dark">Switch to Dark</string>
+    <string name="desktop_overflow_open_downloads">Open Downloads Folder</string>
+
+    <!-- 状态栏。第一条里是两个空格，和 desktopApp 原型一致，别顺手收成一个。 -->
+    <string name="desktop_status_connected">Connected to %1$d nodes</string>
+    <string name="desktop_status_waiting">Not connected · Waiting for peers</string>
+    <string name="desktop_status_local">Local %1$s · %2$s</string>
+    <string name="desktop_status_pending">Pending %1$d</string>
+    <string name="desktop_status_pairing_link">Pairing Link</string>
+    <string name="desktop_status_control_plane">Control Plane 127.0.0.1:%1$d</string>
+    <string name="desktop_status_control_plane_off">Control plane disabled</string>
+    <!-- 和 nodes_state_* 不是同一套：桌面上 Running 报的是「已连接」（状态栏已经在数节点），
+         所以启动中/已连接/启动失败各自独立。只有「已停止」两边同义，共用 node_state_stopped。 -->
+    <string name="desktop_phase_starting">Starting</string>
+    <string name="desktop_phase_running">Connected</string>
+    <string name="desktop_phase_failed">Startup Failed</string>
+
+    <!-- 节点面板 -->
+    <string name="desktop_nodes_local_id">Local Node ID</string>
+    <string name="desktop_nodes_copy_id">Copy Local Node ID</string>
+
+    <!-- 输入框 -->
+    <string name="desktop_composer_resize">Drag to resize input area</string>
+    <string name="desktop_composer_attach">Files…</string>
+    <!-- 原型的工具行这里是「端到端加密」+ 盾牌（prototype/desktop/index.html:712），
+         但协议层没有加密：线格式是明文 JSON（ARCHITECTURE.md:744/860，golden vector 就是明文），
+         全仓零加密实现。盾牌与这句话都是原型的 mock 遗留，已改成如实描述传输路径。
+         「局域网直连」只说真的：不经服务器、同一局域网内点对点。 -->
+    <string name="desktop_composer_e2e">Direct LAN</string>
+    <string name="desktop_composer_tcp_split">Over 800B · TCP split</string>
+    <string name="desktop_composer_placeholder">Write something…</string>
+    <string name="desktop_composer_draft">Draft %1$d / %2$d B · %3$s</string>
+    <string name="desktop_composer_send_hint">Send · Shift+Enter for newline</string>
+    <string name="desktop_composer_emoji_note">Emoji measured in UTF-8 · mostly 4 bytes</string>
+    <string name="desktop_composer_route_udp">UDP unicast</string>
+    <string name="desktop_composer_route_tcp">Auto TCP fallback</string>
+
+    <!-- 会话列表 -->
+    <string name="desktop_action_list">List</string>
+    <string name="desktop_action_copy_node_id_short">Copy Node ID</string>
+    <string name="desktop_action_open_in_new_window">Open in New Window</string>
+    <string name="desktop_no_match">No results matching "%1$s"</string>
+    <string name="desktop_conv_empty">No conversations yet</string>
+    <string name="desktop_conv_no_match_hint">Try other keywords or clear search to view all conversations.</string>
+    <string name="desktop_conv_empty_hint">Nodes appear here when online; or add address in Nodes view to pair.</string>
+    <string name="desktop_conv_go_pairing">Pair Nodes</string>
+    <string name="desktop_conv_no_preview">No chat history</string>
+    <string name="desktop_conv_pending">Queued %1$d</string>
+
+    <!-- First-run empty state (prototype screenDEmpty, prototype/relay.html:5124-5140).
+         The prototype's lede and footline each break across two lines inside one
+         paragraph; they are split into separate keys here and joined with an
+         AnnotatedString, because this repo's strings.xml never uses \n escapes. -->
+    <string name="r2_shell_empty_title">Not connected to any device yet</string>
+    <string name="r2_shell_empty_lede">Tidings moves files directly across your own LAN, without any server.</string>
+    <string name="r2_shell_empty_lede2">Three things can start right away: connect a phone, drop a file in, or just check how this computer is doing.</string>
+    <string name="r2_shell_empty_scan_title">Scan to connect a phone</string>
+    <string name="r2_shell_empty_scan_sub">Install Tidings on the phone and scan this code to pair</string>
+    <string name="r2_shell_empty_drop_title">Drop a file in</string>
+    <string name="r2_shell_empty_drop_sub">Send it to another device of yours first to prove the link</string>
+    <string name="r2_shell_empty_agent_title">This computer runs an Agent</string>
+    <string name="r2_shell_empty_agent_sub">It is already receiving files; open it for status and logs</string>
+    <string name="r2_shell_empty_footline">Devices with “Allow discovery” on in your LAN appear here automatically</string>
+    <string name="r2_shell_empty_footline_warn">On first run, if macOS asks to “allow incoming connections”, choose Allow</string>
+    <string name="r2_shell_empty_footline_tail"> — denying it looks like “the desktop cannot reach the phone”</string>
+
+    <!-- Files view left-column header (prototype sideFiles(sel) .sidehead, relay.html:4723;
+         CSS :680-682): the prototype says “全部文件” with a count on the right. -->
+    <string name="r2_shell_files_all">All files</string>
+
+    <!-- Third line of the no-selection state (prototype screenDNoSel, relay.html:5145-5151).
+         The first two lines reuse chat_no_selection_title / chat_no_selection_message.
+         This line exists only in the prototype (its own comment calls it a proposal),
+         but the drag-and-drop it describes does exist on desktop
+         (desktopApp/.../DesktopHosting.kt installs an AWT DropTarget). -->
+    <string name="r2_shell_nosel_hint">You can also drop a file straight into the window — Tidings will ask who to send it to.</string>
+
+    <!-- In-conversation history search, desktop overlay (d-histsearch; see r2 report §1.16).
+         These two are desktop-overlay-only and deliberately do not reuse hist_search_*:
+         · hist_search_title currently reads "查找聊天记录" while both prototype sides
+           (desktop :5012, phone annot :4638) say "搜索聊天记录"; changing the shared
+           value would move the two phone screens, so it is filed as D20 and the desktop
+           overlay carries its own copy meanwhile.
+         · The prototype puts a 12px "关键词" label above the keyword input (:5016-5018). -->
+    <string name="r2_shell_hist_title">Search Chat History</string>
+    <string name="r2_shell_hist_keyword">Keyword</string>
+
+    <!-- 文件页 -->
+    <string name="desktop_files_open_dir">Open Storage Folder</string>
+    <string name="desktop_action_refresh">Refresh</string>
+    <string name="desktop_files_empty">No files yet</string>
+    <string name="desktop_files_no_match_hint">Matched by filename; try other keywords or clear search.</string>
+    <string name="desktop_files_empty_hint">Transferred files appear here and are saved to the device download folder.</string>
+    <string name="desktop_files_select_hint">Select a file to view details</string>
+    <string name="desktop_files_meta">%1$s · %2$d files · %3$s · %4$s</string>
+    <string name="desktop_files_meta_single">%1$s · %2$s · %3$s</string>
+    <string name="desktop_files_jump">Back to Conversation</string>
+    <string name="desktop_files_to_peer">Sent to %1$s</string>
+    <string name="desktop_files_from_peer">Received from %1$s</string>
+    <string name="desktop_files_saved_card">Saved Files</string>
+    <string name="desktop_files_saved_empty">Not yet saved to disk. Files write to the device download folder upon completion.</string>
+    <string name="desktop_files_info_card">Transfer Details</string>
+    <string name="desktop_files_row_source">Source Node</string>
+    <string name="desktop_files_row_direction">Direction</string>
+    <string name="desktop_files_dir_out">Outgoing</string>
+    <string name="desktop_files_dir_in">Incoming</string>
+    <string name="desktop_files_row_transfer_id">Transfer ID</string>
+    <string name="desktop_files_row_progress">Progress</string>
+    <!-- 百分号不能写在资源里：CMP 的 replaceWithArgs 走正则替换，%% 不会还原成一个 %（见上面「控制器反馈」一节）。
+         所以 "45%" 整串由 Kotlin 侧拼好再当参数传进来。 -->
+    <string name="desktop_files_progress">%1$s (%2$s / %3$s)</string>
+    <string name="desktop_files_row_reason">Reason</string>
+    <string name="desktop_files_state_waiting_peer">Awaiting peer acceptance</string>
+    <string name="desktop_files_state_waiting_me">Awaiting your acceptance</string>
+    <!-- Plain state name, no percent: the prototype's FSTATE_TXT (prototype/relay.html:4841-4843)
+         and the detail chip (screenDFiles, :5076-5081) both read "Transferring"; the %
+         lives on the progress row only (desktop_files_row_progress). -->
+    <string name="desktop_files_state_active">Transferring</string>
+    <string name="desktop_files_state_done">Completed</string>
+    <string name="desktop_files_state_failed">Failed</string>
+
+    <!-- 系统托盘。模型只持「资源 + 参数」（AWT 侧要的是字符串，解析发生在 composable 里），
+         所以这里的插值一律走 %1$d / %1$s，不在 Kotlin 侧拼句子。 -->
+    <string name="desktop_tray_headline_unread">%1$d new messages</string>
+    <string name="desktop_tray_headline_files">Received %1$d files (%2$s)</string>
+    <string name="desktop_tray_open_main">Open Main Window</string>
+    <string name="desktop_tray_received_files">Received Files</string>
+    <string name="desktop_tray_received_files_count">Received Files (%1$d)</string>
+    <string name="desktop_tray_agent_running">Local Agent running</string>
+    <string name="desktop_tray_agent_stopped">Local Agent stopped</string>
+    <string name="desktop_tray_open_settings">Settings…</string>
+    <string name="desktop_tray_quit">Quit Tidings</string>
+
+    <!-- 输入法自检（桌面诊断页）。这一屏存在的理由：桌面输入法走 AWT/Skiko 桥接，
+         与系统原生输入框不是同一条路，出问题时「感觉不对」很难复述。把 Compose
+         真正持有的状态（文本 / 组合区间 / 选区）摆在屏上，人工签字和报 bug 才有
+         共同语言。判读标准见 design/host-surface-checklist.md。
+         文案必须走资源：CJK 棘轮门禁不允许新增 Kotlin 字面量，且棘轮只降不升。 -->
+    <string name="desktop_ime_tab">IME Diagnostics</string>
+    <string name="desktop_ime_title">IME Diagnostics</string>
+    <string name="desktop_ime_intro">Observability tool for inspecting Compose IME states (text, composing range, selection) to verify caret and candidate window tracking.</string>
+    <string name="desktop_ime_probe_head">Observatory</string>
+    <string name="desktop_ime_probe_text">Current Text</string>
+    <string name="desktop_ime_probe_composition">Composing Range</string>
+    <string name="desktop_ime_probe_selection">Selection Range</string>
+    <string name="desktop_ime_probe_commits">Commit Callbacks</string>
+    <string name="desktop_ime_probe_last_commit">Last Committed Text</string>
+    <string name="desktop_ime_probe_blur">Pre-blur → Post-blur</string>
+    <string name="desktop_ime_commits_value">%1$d times</string>
+    <string name="desktop_ime_empty">(empty)</string>
+    <string name="desktop_ime_not_composing">None (not composing)</string>
+    <string name="desktop_ime_composing">%1$d..%2$d (composing)</string>
+    <string name="desktop_ime_blur_pending">%1$s → awaiting post-blur value</string>
+    <string name="desktop_ime_blur_value">%1$s → %2$s</string>
+    <string name="desktop_ime_blur_no_callback">%1$s → no callback after blur (composition discarded)</string>
+    <string name="desktop_ime_blur_action">Clear Focus</string>
+    <string name="desktop_ime_reset_action">Reset Observatory</string>
+    <string name="desktop_ime_field_outlined">Single-line Input (Settings OutlinedTextField style)</string>
+    <string name="desktop_ime_field_multiline">Multiline Input (Settings multiline style)</string>
+    <string name="desktop_ime_field_basic">Borderless Input (Composer BasicTextField style)</string>
+    <string name="desktop_ime_field_hint">Type Chinese text here</string>
+
+    <!-- 公网中继 -->
+    <string name="banner_remote_relay_configured">Public relay configured: %1$s</string>
+    <string name="banner_remote_relay_cleared">Public relay configuration cleared.</string>
+
+    <!-- 历史消息全文搜索 -->
+    <string name="conv_search_messages_section">Chat History</string>
+    <string name="conv_search_messages_count">%1$d relevant messages</string>
+    <string name="conv_search_messages_empty">No relevant chat messages found</string>
+
+    <!-- 消息协作进阶：转发与群元数据编辑 -->
+    <string name="chat_forward_title">Forward message to</string>
+    <string name="chat_forward_success">Message forwarded</string>
+    <string name="chat_reply_action">Reply</string>
+    <string name="chat_reply_preview_prefix">Reply %1$s: %2$s</string>
+    <string name="chat_reply_cancel">Cancel reply</string>
+    <string name="chat_group_edit_meta">Edit Announcement &amp; Description</string>
+    <string name="chat_group_edit_save">Save</string>
+    <string name="chat_group_desc_hint">Enter group description (≤200 chars)</string>
+    <string name="chat_group_announce_hint">Enter group announcement (≤1024 chars)</string>
+    <string name="banner_group_meta_updated">Group info updated and synced to all members</string>
+
+    <!-- 共享文件柜 (Cabinet) -->
+    <string name="screen_cabinet">Cabinet</string>
+    <string name="desktop_view_cabinet">Cabinet</string>
+    <string name="cabinet_mine_title">My Cabinet</string>
+    <string name="cabinet_mine_subtitle_active">Sharing · Colleagues access by permissions below</string>
+    <string name="cabinet_mine_subtitle_inactive">Not enabled yet; colleagues cannot see any content</string>
+    <string name="cabinet_stop_share">Stop Sharing</string>
+    <string name="cabinet_not_configured_title">Cabinet not set up yet</string>
+    <string name="cabinet_not_configured_desc">Choose a folder so colleagues can fetch files directly without sending one by one.</string>
+    <string name="cabinet_pick_dir">Choose Shared Folder</string>
+    <string name="cabinet_share_dir_title">Shared Folder</string>
+    <string name="cabinet_open">Open</string>
+    <string name="cabinet_change">Change…</string>
+    <string name="cabinet_dir_hint">Colleagues only see files inside this directory, not its path on your disk.</string>
+    <string name="cabinet_perm_default_title">Default Permissions</string>
+    <string name="cabinet_mode_off">Off</string>
+    <string name="cabinet_mode_read">Read-only</string>
+    <string name="cabinet_mode_write">Read &amp; Write</string>
+    <string name="cabinet_hint_off">Hidden from everyone by default; grant specific colleagues below.</string>
+    <string name="cabinet_hint_read">Colleagues can browse and download, but cannot put files in.</string>
+    <string name="cabinet_hint_write">Colleagues can browse, download, and put new files in; cannot delete, rename, or overwrite.</string>
+    <string name="cabinet_grants_title">Customized Colleagues</string>
+    <string name="cabinet_grants_count">%1$d</string>
+    <string name="cabinet_grants_default_note">All colleagues follow default permissions</string>
+    <string name="cabinet_grants_remove">Remove override</string>
+    <string name="cabinet_recent_title">Recent Incoming Files</string>
+    <string name="cabinet_recent_empty">No one has put files into your cabinet yet</string>
+    <string name="cabinet_recent_row_desc">%1$s put in %2$d files · %3$s</string>
+    <string name="cabinet_recent_hint">Click any entry to open local folder. Browsing or downloading will not appear here.</string>
+    <string name="cabinet_peer_title">%1$s\'s Cabinet</string>
+    <string name="cabinet_peers_title">Colleagues\' Cabinets</string>
+    <string name="cabinet_peer_item_count">%1$s items</string>
+    <string name="cabinet_perm_badge_upload">Uploadable</string>
+    <string name="cabinet_perm_badge_readonly">Read-only</string>
+    <string name="cabinet_col_name">Name</string>
+    <string name="cabinet_col_size">Size</string>
+    <string name="cabinet_col_mtime">Modified</string>
+    <string name="cabinet_view_list">List</string>
+    <string name="cabinet_view_grid">Grid</string>
+    <string name="cabinet_crumbs_root">Cabinet</string>
+    <string name="cabinet_crumbs_up">Up</string>
+    <string name="cabinet_footer_selected">%1$s selected · %2$s</string>
+    <string name="cabinet_footer_unselected_hint">Click to select, double click to open folder</string>
+    <string name="cabinet_save_as">Save As…</string>
+    <string name="cabinet_download_count">Download %1$s</string>
+    <string name="cabinet_side_title">Cabinet</string>
+    <string name="cabinet_side_search_hint">Search colleagues</string>
+    <string name="cabinet_banner_dir_updated">Shared folder updated</string>
+    <string name="cabinet_banner_share_stopped">Sharing stopped</string>
+    <string name="cabinet_upload">Upload file</string>
+    <string name="cabinet_upload_pick">Upload</string>
+    <string name="cabinet_upload_started">Uploading to peer\'s cabinet</string>
+    <!--
+        Two applicable state slots the prototype never drew (`screenCabinetPeer` only has the
+        normal directory). Wording follows the app's existing empty/error conventions.
+    -->
+    <string name="cabinet_empty_dir">This folder is empty</string>
+    <string name="cabinet_empty_dir_hint">The other side hasn\'t put any files in this folder yet.</string>
+    <string name="cabinet_retry">Reload</string>
+
+    <!-- Network Range Scan & Sync -->
+    <string name="cidr_section_title">Network Discovery &amp; Sync</string>
+    <string name="cidr_section_sub">Cross-subnet discovery and CIDR range gossip</string>
+    <string name="cidr_input_label">Add CIDR Range</string>
+    <string name="cidr_input_hint">e.g. 192.168.2.0/24</string>
+    <string name="cidr_add_action">Add Range</string>
+    <string name="cidr_scan_now">Scan Now</string>
+    <string name="cidr_scanning">Scanning…</string>
+    <string name="cidr_scan_progress">Scanning %1$s: %2$d / %3$d (found %4$d)</string>
+    <string name="cidr_empty_ranges">No network ranges configured</string>
+    <string name="cidr_source_self">Manually added</string>
+    <string name="cidr_source_peer">From peer %1$s</string>
+    <string name="cidr_delete">Delete</string>
+    <string name="banner_scan_range_invalid">Invalid CIDR or host count exceeds 1024 limit (/22 to /30 supported)</string>
+    <string name="banner_scan_range_added">Added range %1$s</string>
+    <string name="banner_scan_range_triggered">Started background probe (%1$d hosts)</string>
+
+    <!-- Screen Capture -->
+    <string name="chat_toolbar_capture">Screenshot</string>
+    <string name="banner_capture_unavailable">Screen capture is unsupported or not permitted on current system</string>
+    <!-- Capture produced nothing: the user canceled, or the save failed. Both causes share this
+         line, so it says "canceled" and deliberately does NOT say "not saved". -->
+    <string name="banner_capture_canceled">Screenshot canceled</string>
+    <string name="capture_rect_tool">Rectangle</string>
+    <string name="capture_arrow_tool">Arrow</string>
+    <string name="capture_text_tool">Text</string>
+    <string name="capture_mosaic_tool">Mosaic</string>
+    <string name="capture_undo">Undo</string>
+    <string name="capture_cancel">Cancel (Esc)</string>
+    <string name="capture_copy">Copy to Clipboard</string>
+    <string name="capture_send">Send to Chat (Enter)</string>
+    <string name="capture_drag_hint">Drag to select an area · Esc to cancel</string>
+
+    <!-- Screen Remote View -->
+    <string name="screen_remote_view_action">Remote View</string>
+    <string name="screen_remote_view_title">Remote View · %1$s</string>
+    <string name="screen_remote_view_waiting_consent">Waiting for peer consent…</string>
+    <string name="screen_remote_view_consent_title">%1$s wants to view your screen</string>
+    <string name="screen_remote_view_consent_desc">%1$s requested to view your screen. Frames are transmitted strictly in local network.</string>
+    <string name="screen_remote_view_consent_accept">Start sharing</string>
+    <string name="screen_remote_view_consent_reject">Decline</string>
+    <string name="screen_remote_view_stop">Stop</string>
+    <string name="screen_remote_view_stop_viewing">Stop viewing</string>
+    <string name="screen_remote_view_fit">Fit to window</string>
+    <string name="screen_remote_view_actual_size">100%</string>
+    <string name="screen_remote_view_request_title">Request to view screen</string>
+    <string name="screen_remote_view_request_banner">Sharing starts only after the peer accepts and picks a screen. You can only view — you cannot control their computer, and either side can stop at any time.</string>
+    <string name="screen_remote_view_request_cancel">Cancel</string>
+    <string name="screen_remote_view_request_send">Send request</string>
+    <string name="screen_remote_view_sharing_hint">Sharing screen with %1$s</string>
+    <string name="screen_remote_view_mode_auto">Auto Quality</string>
+    <string name="screen_remote_view_mode_smooth">Smooth (10fps)</string>
+    <string name="screen_remote_view_mode_standard">Standard (5fps)</string>
+    <string name="screen_remote_view_mode_economy">Economy (3fps)</string>
+    <string name="screen_remote_view_sharing_notification">Screen sharing active (Tidings)</string>
+    <string name="screen_remote_view_sharing_notification_desc">A peer is viewing your screen live; tap to stop sharing.</string>
+    <string name="screen_remote_view_connecting">Connecting to screen…</string>
+    <string name="screen_remote_view_fps">Target %1$d fps</string>
+    <string name="screen_remote_view_viewer_footer">View only — guide the peer over chat</string>
+    <string name="screen_remote_view_error_title">Screen sharing with %1$s was interrupted</string>
+    <string name="screen_remote_view_error_protocol">Screen-sharing protocol error; the stream stopped</string>
+    <string name="screen_remote_view_error_capture_ended">The peer stopped screen sharing</string>
+    <string name="screen_remote_view_error_unknown">Screen sharing ended unexpectedly</string>
+    <string name="banner_screen_view_unavailable">Remote screen viewing is currently unavailable on peer or local device</string>
+    <string name="banner_screen_view_ended">Screen session ended (%1$s)</string>
+    <string name="screen_reason_declined">Peer declined</string>
+    <string name="screen_reason_busy">Peer is busy</string>
+    <string name="screen_reason_unsupported">Screen sharing unsupported</string>
+    <string name="screen_reason_permission_denied">Permission denied</string>
+    <string name="screen_reason_capture_failed">Screen capture failed</string>
+    <string name="screen_reason_timeout">Connection timed out</string>
+    <string name="screen_reason_disconnected">Disconnected</string>
+    <string name="screen_reason_user">Ended by user</string>
+    <string name="screen_reason_canceled">Peer cancelled</string>
+    <string name="screen_reason_locked">Peer locked the screen</string>
+    <string name="screen_reason_suspended">Peer suspended the device</string>
+    <string name="screen_reason_capture_ended">Screen capture stopped</string>
+    <string name="screen_reason_protocol_error">Screen sharing protocol error</string>
+    <string name="screen_reason_app_exit">Peer exited the app</string>
+    <string name="screen_reason_unknown">Unknown reason</string>
+
+    <!--
+      Screen-history card (prototype m-screencard). Aligns with UI specifications:
+      status words = src/renderer/src/utils/remote-view-text.ts screenStatusText();
+      body/a11y sentence = src/i18n/messages.ts screenRecordText();
+      surface = src/renderer/src/components/ScreenHistoryCard.vue.
+    -->
+    <string name="screen_card_title">Remote View</string>
+    <string name="screen_card_view_only">View only</string>
+    <string name="screen_card_duration">Duration %1$s</string>
+    <string name="screen_card_duration_unknown">unknown</string>
+    <string name="screen_card_role_viewer">You requested to view the peer's screen</string>
+    <string name="screen_card_role_sharer">The peer requested to view your screen</string>
+    <string name="screen_card_requested_at">Requested: %1$s</string>
+    <string name="screen_card_started_at">Started: %1$s</string>
+    <string name="screen_card_ended_at">Ended: %1$s</string>
+    <string name="screen_card_duration_at">Duration: %1$s</string>
+    <string name="screen_card_state_requesting">Waiting</string>
+    <string name="screen_card_state_awaiting_consent">Needs your consent</string>
+    <string name="screen_card_state_connecting">Connecting</string>
+    <string name="screen_card_state_active">In progress</string>
+    <string name="screen_card_state_declined_self">You declined</string>
+    <string name="screen_card_state_declined_peer">Peer declined</string>
+    <string name="screen_card_state_busy_self">This device is busy</string>
+    <string name="screen_card_state_busy_peer">Peer is busy</string>
+    <string name="screen_card_state_unsupported">Unsupported</string>
+    <string name="screen_card_state_permission_denied">No permission</string>
+    <string name="screen_card_state_capture_stopped">Capture stopped</string>
+    <string name="screen_card_state_timeout">Timed out</string>
+    <string name="screen_card_state_disconnected">Disconnected</string>
+    <string name="screen_card_state_locked">Ended by lock screen</string>
+    <string name="screen_card_state_suspended">Ended by sleep</string>
+    <string name="screen_card_state_protocol_error">Stream error</string>
+    <string name="screen_card_state_interrupted">Interrupted</string>
+    <string name="screen_card_state_canceled">Canceled</string>
+    <string name="screen_card_state_ended">Ended</string>
+    <string name="screen_card_text_requesting">Remote view: waiting for the peer to accept</string>
+    <string name="screen_card_text_awaiting_consent">Remote view: waiting for your consent</string>
+    <string name="screen_card_text_connecting">Remote view: connecting</string>
+    <string name="screen_card_text_active">Remote view in progress</string>
+    <string name="screen_card_text_declined_self">You declined the view request</string>
+    <string name="screen_card_text_declined_peer">The peer declined the view request</string>
+    <string name="screen_card_text_busy_self">You are in another remote-view session</string>
+    <string name="screen_card_text_busy_peer">The peer is in another remote-view session</string>
+    <string name="screen_card_text_unsupported">Remote view is unavailable on this system</string>
+    <string name="screen_card_text_permission_denied">Remote view has no screen-capture permission</string>
+    <string name="screen_card_text_capture_failed">Screen capture stopped or is unavailable; request again</string>
+    <string name="screen_card_text_timeout">Remote view timed out; the connection ended</string>
+    <string name="screen_card_text_disconnected">The screen connection dropped; request again</string>
+    <string name="screen_card_text_locked">Remote view ended because of the lock screen</string>
+    <string name="screen_card_text_suspended">Remote view ended because the computer went to sleep</string>
+    <string name="screen_card_text_protocol_error">Frame validation failed; the connection ended</string>
+    <string name="screen_card_text_interrupted">Remote view was interrupted; the end time is unknown</string>
+    <string name="screen_card_text_canceled">The remote-view request was canceled</string>
+    <string name="screen_card_text_ended">Remote view ended</string>
+
+    <!-- History Search -->
+    <string name="hist_search_title">Search Chat History</string>
+    <string name="hist_search_hint">Search chat messages</string>
+    <string name="hist_search_input_hint">Search this conversation</string>
+    <string name="hist_search_loading">Searching...</string>
+    <string name="hist_filter_all">All</string>
+    <string name="hist_filter_image">Media</string>
+    <string name="hist_filter_file">Files</string>
+    <string name="hist_filter_date">Date</string>
+    <string name="hist_filter_date_all">All Dates</string>
+    <string name="hist_filter_date_range">%1$s to %2$s</string>
+    <string name="hist_search_empty">No matching messages found</string>
+    <string name="hist_search_empty_hint">Try searching with different keywords</string>
+    <string name="hist_date_select_title">Search by Date</string>
+    <string name="hist_date_clear">Reset</string>
+    <string name="hist_date_confirm">Confirm</string>
+    <string name="hist_date_month_day">%1$d/%2$d</string>
+    <string name="hist_date_month_title">Month %1$d</string>
+    <!-- Hit-row secondary line = "name · relative day + clock"; mirrors the prototype's
+         "老周 · 昨天 18:02". Only yesterday is relative (today prints a bare clock), anything
+         older falls back to the month/day key (listTime relative timestamp semantics).
+         Keep the key set identical to values/strings.xml. -->
+    <string name="r2_chat_time_yesterday">Yesterday</string>
+    <string name="hist_quick_today">Today</string>
+    <string name="hist_quick_7days">Last 7 Days</string>
+    <string name="hist_quick_30days">Last 30 Days</string>
+    <string name="hist_search_filter_type">Type</string>
+    <string name="hist_search_filter_date">Date</string>
+    <string name="hist_search_results_count">%1$d Results</string>
+    <string name="hist_search_results_section">Results</string>
+    <string name="hist_search_clear_filter">Reset Filters</string>
+    <string name="hist_search_footer_hint">Showing %1$d results · up to 50 results</string>
+    <string name="hist_date_range_title">Date Range</string>
+    <string name="hist_date_start">Start</string>
+    <string name="hist_date_end">End</string>
+    <string name="hist_date_prev_month">Previous Month</string>
+    <string name="hist_date_next_month">Next Month</string>
+    <string name="hist_week_mon">M</string>
+    <string name="hist_week_tue">T</string>
+    <string name="hist_week_wed">W</string>
+    <string name="hist_week_thu">T</string>
+    <string name="hist_week_fri">F</string>
+    <string name="hist_week_sat">S</string>
+    <string name="hist_week_sun">S</string>
+
+    <!-- Global Search -->
+    <string name="global_search_title">Search</string>
+    <string name="global_search_hint">Search contacts, messages, files…</string>
+    <string name="global_search_section_contacts">Contacts</string>
+    <string name="global_search_section_messages">Messages</string>
+    <string name="global_search_section_files">Files</string>
+    <string name="global_search_loading">Searching…</string>
+    <string name="global_search_failed">Search failed, please retry with new keywords</string>
+    <string name="global_search_empty">No results found for \"%1$s\"</string>
+    <string name="global_search_empty_hint">Check for spelling errors or try different keywords</string>
+    <!-- 逐字照原型 `d26-search`（prototype/relay.html:4419-4425）与
+         `GlobalSearchFileHit.convTitle` 的 KDoc。 -->
+    <string name="global_search_more_messages">Chat with %1$s · %2$d hits</string>
+    <string name="global_search_from_chat">From chat with %1$s</string>
+    <!-- The prototype hardcodes this cell as 「今天 11:20」; the contact row has no
+         "last message" to derive a real time from, so we copy the same literal — but it is
+         user-visible text, so it must live in resources (see the zh comment for detail). -->
+    <string name="global_search_contact_time">Today 11:20</string>
+
+    <!-- Folder Transfer & Resume -->
+    <string name="transfer_folder_badge">Folder</string>
+    <string name="transfer_folder_count">%1$d files</string>
+    <string name="transfer_folder_summary">%1$s and %2$d more files</string>
+    <string name="composer_action_folder">Send Folder</string>
+    <string name="composer_folder_tooltip">Send Folder</string>
+    <string name="transfer_action_resume">Resume</string>
+    <string name="transfer_resume_hint">Resumable</string>
+
+    <!-- Transfer Logs -->
+    <string name="set_nav_transfers">Transfers</string>
+    <string name="transfer_log_group_head">Chat &amp; Files</string>
+    <string name="transfer_log_title">Transfer Records</string>
+    <string name="transfer_log_sub">Keeping up to 30 recent transfer records</string>
+    <string name="transfer_log_hint">This page has no column headers, no filters and no “Clear Records”. A row has only three things: name, status · size · time, plus an “Open” button (dimmed when there is no savedPath).</string>
+    <string name="transfer_log_clear">Clear Records</string>
+    <string name="transfer_log_empty">No transfer records</string>
+    <string name="transfer_log_direction_in">Received</string>
+    <string name="transfer_log_direction_out">Sent</string>
+    <!-- Transfer-record row status words: prototype `TSTAT` (prototype/relay.html:4330-4336) uses done:'完成'.
+         Kept distinct from the file-card vocabulary ('已完成' / '发送成功', :4351); this key is consumed only by DesktopTransferLogPane. -->
+    <string name="transfer_log_status_success">Done</string>
+    <string name="transfer_log_status_failed">Failed</string>
+    <string name="transfer_log_status_canceled">Canceled</string>
+
+    <!-- Avatar & Diagnostics -->
+    <string name="avatar_custom_title">Custom Avatar</string>
+    <string name="avatar_custom_pick">Choose Image</string>
+    <string name="avatar_custom_desc">Supports JPG, PNG, WebP; automatically cropped to 192×192</string>
+    <string name="avatar_preset_title">Preset Avatars</string>
+    <string name="diag_adaptive_title">Adaptive Layout Diagnostics</string>
+    <string name="diag_adaptive_desc">View current window size class, breakpoint matches, and responsive layout state</string>
+    <string name="r2_set_insets_goal">Goal: full-screen edge-to-edge. The root Surface fills the screen and paints the background; the safe area is applied exactly once inside the content, and the system window colour must never be visible.</string>
+    <string name="r2_set_insets_old_title">Old version (real-device symptoms)</string>
+    <string name="r2_set_insets_old_hint">enableEdgeToEdge missing + theme XML missing + Scaffold not taking over contentWindowInsets</string>
+    <string name="r2_set_insets_k_status_bar">Status bar</string>
+    <string name="r2_set_insets_old_status">System window colour #FFFFFF, different from the page surface</string>
+    <string name="r2_set_insets_k_bottom">Bottom</string>
+    <string name="r2_set_insets_old_bottom">3-button navigation bar not covered by the theme — a 48 dp white strip appears</string>
+    <string name="r2_set_insets_k_gap">Nature of the gap</string>
+    <string name="r2_set_insets_old_gap">A whole multiple of 24 dp = a repeated inset, not an ordinary layout mistake</string>
+    <string name="r2_set_insets_new_title">New version (current state)</string>
+    <string name="r2_set_insets_new_hint">MainActivity enableEdgeToEdge() + Scaffold(contentWindowInsets = WindowInsets(0)) + the root App.kt consumes safeDrawing exactly once</string>
+    <string name="r2_set_insets_new_status">Drawn by the app; background = page surface, the same colour as the content</string>
+    <string name="r2_set_insets_k_bottom_nav">Bottom navigation</string>
+    <string name="r2_set_insets_new_bottom">Sits above the safe area, with the app surface as its background too</string>
+    <string name="r2_set_insets_k_icon_brightness">Icon brightness</string>
+    <string name="r2_set_insets_new_brightness">windowLightStatusBar follows the theme (light theme = dark icons)</string>
+    <string name="r2_set_insets_k_ios">iOS</string>
+    <string name="r2_set_insets_new_ios">The host root VC does not apply the safe area — the guard is written explicitly as "applying it again adds one more white band"</string>
+    <string name="r2_set_insets_device_title">Real-device acceptance</string>
+    <string name="r2_set_insets_device_hint">Preview / the screenshot gate has no real system bars, so it cannot catch this class of defect</string>
+    <string name="r2_set_insets_k_pixel6">Pixel 6</string>
+    <string name="r2_set_insets_pixel6">Top 24 dp · bottom gesture 20 dp · 1080×2400 @2.75x</string>
+    <string name="r2_set_insets_k_iphone">iPhone 17 Pro</string>
+    <string name="r2_set_insets_iphone">Top 62 pt · bottom 34 pt</string>
+    <string name="r2_set_insets_k_gate">Gate</string>
+    <string name="r2_set_insets_gate">Requires a real-device screenshot plus pixel-ratio measurement; Preview alone is not enough</string>
+    <string name="menu_create_group">New Group</string>
+    <string name="menu_search">Search</string>
+
+    <!-- PK Games -->
+    <string name="chat_pk">PK (RPS / Dice)</string>
+    <string name="chat_pk_hint_offline">Available only when peer is online</string>
+    <string name="chat_pk_rps">Rock-Paper-Scissors</string>
+    <string name="chat_pk_dice">Roll Dice</string>
+    <string name="chat_pk_rock">Rock</string>
+    <string name="chat_pk_paper">Paper</string>
+    <string name="chat_pk_scissors">Scissors</string>
+    <string name="chat_pk_dice_val">%1$d</string>
+    <string name="chat_pk_title">Games</string>
+
+    <!-- Agent Approvals & Controls -->
+    <string name="agent_approval_title">Pending Approvals</string>
+    <string name="agent_approval_allow">Approve</string>
+    <string name="agent_approval_deny">Deny</string>
+    <string name="agent_approval_expired">Expired</string>
+    <string name="agent_approval_status_approved">Approved</string>
+    <string name="agent_approval_status_denied">Denied</string>
+    <string name="agent_approval_tool_label">Tool</string>
+    <string name="agent_approval_expires_label">Expires</string>
+    <string name="agent_queue_title">Task Queue</string>
+    <string name="agent_queue_empty">No tasks in queue</string>
+    <string name="agent_queue_cancel">Cancel task</string>
+    <string name="agent_runs_title">Runs</string>
+    <string name="agent_run_state_running">Running</string>
+    <string name="agent_run_state_succeeded">Succeeded</string>
+    <string name="agent_run_state_failed">Failed</string>
+    <string name="agent_run_state_cancelled">Cancelled</string>
+    <string name="agent_artifacts_title">Artifacts</string>
+    <string name="agent_artifact_no_file">Metadata only, no linked file</string>
+    <string name="chat_group_me">Me</string>
+    <string name="chat_group_none">None</string>
+    <string name="chat_group_leave">Leave group</string>
+    <string name="chat_group_confirm_leave">Are you sure you want to leave this group?</string>
+    <string name="chat_voice_record">Voice message</string>
+    <string name="chat_voice_start">Tap to record</string>
+    <string name="chat_voice_recording">Recording…</string>
+    <string name="chat_voice_stop">Finish recording</string>
+    <string name="chat_voice_rerecord">Re-record</string>
+    <string name="chat_voice_too_short">Recording too short</string>
+    <string name="chat_voice_failed">Recording failed</string>
+    <string name="chat_voice_permission_denied">Microphone permission required</string>
+</resources>
+
+

@@ -1,0 +1,19 @@
+/* Tidings — English overrides for Info.plist.
+ *
+ * `Info.plist` 的字面值是 **development language** 的值，本工程是 zh-Hans
+ * （`project.yml` 的 `options.developmentLanguage`），所以那份中文是"原文"而不是"漏翻"。
+ * 英文设备靠这里覆盖：没有这个文件时，系统拿不到 en 的键就退回 development language，
+ * 于是英文设备上弹出的本地网络授权框和桌面图标名都是中文 —— 审计 2026-10-06 §②-22。
+ *
+ * 生效前提：这两个 .lproj 必须在 Xcode 工程里被编成 PBXVariantGroup
+ * （`project.yml` 的 `sources: - path: Resources`），改完要重新 `xcodegen generate`。
+ */
+
+/* 桌面图标名。中文名「捎话」在 `Info.plist` 里；这里与 `CFBundleName`/`PRODUCT_NAME` 一致。 */
+"CFBundleDisplayName" = "Tidings";
+
+/* 首次触及相机时系统弹的授权文案，对应 `Info.plist` 的 `NSCameraUsageDescription`。 */
+"NSCameraUsageDescription" = "Tidings uses the camera to scan the pairing QR code on the other device's screen and add it to your node list. It does not take photos or record video, and the camera feed never leaves this device.";
+
+/* 首次触及局域网时系统弹的授权文案，对应 `Info.plist` 的 `NSLocalNetworkUsageDescription`。 */
+"NSLocalNetworkUsageDescription" = "Tidings needs to find other devices on the same Wi-Fi so it can discover them and send and receive messages automatically. No data is sent when you are offline.";

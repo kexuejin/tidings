@@ -1,0 +1,65 @@
+# Android 真机「收到文本 → 弹通知 → 落盘」证据（Pixel 6, SERIAL-TEST-01, Android 15 / SDK 35, 1080x2400, density 420）
+# 对端: 证据节点 aeb471f0-84da-43f3-8444-536719656776（Mac 192.168.2.82, UDP 17893 / TCP 17894）
+# 取证时间: 2026-10-07 02:08–02:10
+
+对应 ACCEPTANCE.md 的 A2（通知）与 A1 里「冷启动后恢复出上次的会话线程」那一条。
+发送侧是 Mac 上的 agentNode 控制面，接收侧是装在 Pixel 6 上的 `app.relay`。
+
+## 1. 发送（Mac → 手机，单播到手机的 UDP 17878）
+
+$ curl -sS -X POST http://127.0.0.1:8799/v1/send -H "Authorization: Bearer $RELAY_EV_TOKEN" \
+    -d '{"to":"192.168.2.22","port":17878,"text":"真机接收方向验收：这是一条从 Mac 上的 agentNode 发出的消息，用来验证 Pixel 6 能收到、能落盘、能弹通知。"}'
+{"status":"sent","to":"bc19885f-0775-47a5-8342-662ca227f769","toHost":"192.168.2.22","note":"对方已 ACK"}
+
+## 2. 系统通知真的弹了（A2）
+
+$ adb shell dumpsys notification --noredact | grep -A6 'pkg=app.relay'
+    NotificationRecord(... pkg=app.relay ... key=0|app.relay|1001|null|12428:
+        Notification(channel=relay_messages_v2 ... importance=3 ... vis=PRIVATE))
+            when=1791310092886/1791310092886
+                android.title=String (证据节点)
+                android.text=String (真机接收方向验收：这是一条从 Mac 上的 agentNode 发出的消息，用来验证 Pixel 6 能收到、能落盘、能弹通知。)
+
+读法：`importance=3`、`channel=relay_messages_v2`（Android 8+ 必须带渠道，渠道名见
+`P2-22`），标题是**对端昵称**而不是 nodeId。这一条是 ARCHITECTURE.md 里「接收方向没有真机
+跑过」的正面证据。
+
+## 3. 会话列表与会话页
+
+$ python3 /tmp/pxd.py dump | grep -E "证据节点|刚刚"
+text='证据节点'   desc=''  click=false [252,866][425,927]
+text='刚刚'      desc=''  click=false [937,872][996,912]
+$ （点进会话页）
+text='在线'                                            desc=''  click=false [650,172][709,212]
+text='192.168.2.82 · TCP 17894 · 能力：ag1 tw1 agn1'      desc=''  click=false [306,218][796,258]
+text='真机接收方向验收：这是一条从 Mac 上的 agentNode 发出的消息，用来验证 Pixel 6 能收到、能落盘、能弹通知。'
+
+## 4. 落盘（A1 的持久化）
+
+$ adb shell run-as app.relay ls -l files/relay/
+total 8
+-rw------- 1 u0_a2428 u0_a2428 1223 2026-10-07 02:08 messages.json
+-rw------- 1 u0_a2428 u0_a2428  189 2026-10-07 02:06 settings.json
+
+读法：消息库就是这一个 json（1223 字节，时间戳 02:08 与收到消息同分钟）。
+
+## 5. 冷启动后消息还在（标题会先退化成 nodeId 前 8 位，再由 presence 换回来）
+
+$ adb shell am force-stop app.relay
+$ adb shell am start -n app.relay/.app.MainActivity
+$ python3 /tmp/pxd.py dump | grep -E "aeb471f0|证据节点"      # 启动后 6 秒
+text='aeb471f0'   desc=''  click=false [252,1083][444,1132]
+$ sleep 40
+$ python3 /tmp/pxd.py dump | grep -E "aeb471f0|证据节点"      # 启动后 46 秒
+text='证据节点'   desc=''  click=false [252,866][425,927]
+
+读法：消息本体（预览文本、未读、时间）冷启动后仍在，退化的是**标题**，因为节点表是内存表、
+重启后为空 —— 对端资料靠 `presence` 换回来，取证与修法见
+`scaffold/design/runtime-evidence/profile-refresh-android-restart.txt`。
+
+## 备注
+- 截图不入库（按 ACCEPTANCE.md 的约定），本地留在 `/tmp/ev-recv.png`、`/tmp/ev-thread.png`。
+- 取证过程中还撞到一次 agentNode 的 `ClassNotFoundException`
+  （`app/relay/core/session/NodeRuntime$resolvePeerByHost$1`）：Gradle 重写
+  `core/build/libs/core-jvm.jar` 之后，**正在跑的** agentNode 会懒加载失败。重启该节点即恢复，
+  与手机端无关，记在这里以免下次误判成协议缺陷。

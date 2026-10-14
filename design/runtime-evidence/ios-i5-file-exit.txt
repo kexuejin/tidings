@@ -1,0 +1,95 @@
+iOS 收到的文件有没有出口（ACCEPTANCE.md §3 I5）
+================================================================
+
+要回答的问题
+----------------------------------------------------------------
+I5 原来的结论是「收得到，取不走」：文件确实落盘（I4 文件半已验证 sha256 与源逐字节相同），
+但 app 里除了一句「已存到 <路径>」之外没有任何出口 —— `receivedFileActions` 在 iOS 为
+`null`，界面据此不画「打开/分享」按钮，系统「文件」App 也看不见那些文件。
+
+本轮补上了这条出口（`scaffold/composeApp/src/iosMain/kotlin/app/relay/platform/IosReceivedFileActions.kt`），
+这份证据回答的是：**补上之后，两个按钮在真机（模拟器）上到底做了没有。**
+
+装置
+----------------------------------------------------------------
+- iPhone 17 Pro 模拟器 `00000000-FEF7-409D-AE33-803A77C62376`（iOS 26.2），bundle `app.relay`。
+- 构建：`cd scaffold/iosApp && export JAVA_HOME=/opt/homebrew/opt/openjdk@21 RELAY_MAVEN_MIRROR=aliyun && \
+  xcodebuild -project Tidings.xcodeproj -scheme Tidings -configuration Debug -sdk iphonesimulator \
+  -destination 'platform=iOS Simulator,id=00000000-FEF7-409D-AE33-803A77C62376' -derivedDataPath build/dd build`
+  → `** BUILD SUCCEEDED **`（`XCODE_EXIT=0`）。
+- 装：`xcrun simctl install $U .../Tidings.app`；容器 = `xcrun simctl get_app_container $U app.relay data`
+  → `.../Data/Application/64FF5712-9AA3-4EED-BA4C-5CBAD7315A55`
+  （**UUID 每次重装都变，必须现查**；写设置时给错容器是本轮之前踩过的坑）。
+- 发送端：证据节点控制面 `http://127.0.0.1:8799`，`Authorization: Bearer $(cat /tmp/relay-ev-token)`。
+- UI 驱动：`idb`（`export PATH="/Users/ci/Library/Python/3.9/bin:$PATH"`）；
+  `idb ui describe-all|tap --udid $U`，**坐标是 point 不是 pixel**。
+- 截图（不进仓库）：`/tmp/i5-share.png`、`/tmp/i5-open.png`，各自缩到 30% 后判读。
+
+方法
+----------------------------------------------------------------
+1. 造一个内容可辨认的文件当「收到的文件」：
+   `/opt/homebrew/bin/magick -size 240x160 gradient:'#2D6A4F-#95D5B2' -pointsize 22 -fill white \
+    -gravity center -annotate 0 'I5 exit' /tmp/ios-i5-file.png`（5104 字节）。
+2. 从控制面发过去（**只是报价，收端不自动接受**，这是设计）：
+   `POST /v1/send-file {"to":"27272e70-6c18-41e0-a3ee-569173f5eee6","path":"/tmp/ios-i5-file.png",
+   "name":"ios-i5-file.png","purpose":"share"}`
+   → `{"status":"offered","transferId":"a1d97515-b0d0-4972-a1ca-1b0bf3310a33","name":"ios-i5-file.png",
+   "size":5104,"note":"只是报价：对方接受后才开始传，进度与结果在对方界面上"}`
+3. `idb ui describe-all` 找到会话行 → `idb ui tap 201 285` 进会话 → 找到报价卡。
+4. 点「接收」（按钮 frame `{{32,688.67},{77,48}}`，中心 `(70,712)`）。
+5. 再 `describe-all`，看文件卡片上有没有出现「打开 / 分享」。
+6. 点「分享」（frame `{{102,720},{58,48}}`，中心 `(131,744)`）→ 截图。
+7. 关掉分享面板，点「打开」（frame `{{32,720},{58,48}}`，中心 `(61,744)`）→ 截图。
+8. 复核落盘文件的 sha256 与源是否一致，并确认 app 进程还活着。
+
+判读
+----------------------------------------------------------------
+**① 两个按钮真的画出来了**（修前这里是空的）——`idb ui describe-all` 在接收之后给出：
+
+    StaticText   'ios-i5-file.png'   {{32, 635.67}, {100.33, 16.67}}
+    StaticText   '已接收'            {{32, 665.33}, {35.33, 15.33}}
+    StaticText   '已存到 /Users/ci/Library/Developer/CoreSimulator/Devices/00000000-.../
+                  Library/Application Support/relay/downloads/ios-i5-file.png/ios-i5-file.png'
+    Button       '打开'              {{32, 720}, {58, 48}}
+    Button       '分享'              {{102, 720}, {58, 48}}
+
+**② 「分享」弹的是系统分享面板**（`UIActivityViewController`）——截图 `/tmp/i5-share.png`
+（缩略 `/tmp/i5-share-small.png`，sha256 `64b299ec282462e5afb314abdb033abbaa87b46aaf02e9ac10fbdd9055932af5`）显示：
+面板顶部是**这个文件自己的图标 + `ios-i5-file` / `PNG 图像 · 5 KB`**，下面一排
+「提醒事项 / 预览 / 更多」，再下面「拷贝 / 指定给联系人 / 打印 / 更多」。
+模拟器上没有登录任何账号，所以 AirDrop / 信息 / 邮件这些目标不出现 —— 那是模拟器的账号状态，
+不是面板没起来；**面板带的是这一份文件本身**，这一点从头部那行就看得出来。
+
+**③ 「打开」弹的是系统 Quick Look 预览**（`UIDocumentInteractionController.presentPreview`）——
+截图 `/tmp/i5-open.png`（缩略 `/tmp/i5-open-small.png`，sha256
+`a17e63ae581632f0ed8818ba169e15968978591fc290fe5e883ab91366e57a64`）显示整屏黑底中间就是那张图：
+绿到浅绿的渐变，正中白字 **「I5 exit」** —— 与第 1 步造出来的内容逐字一致。
+
+**④ 收到的字节与源逐字节相同**：
+
+    收到：.../downloads/ios-i5-file.png/ios-i5-file.png
+          7e58f635f68874953778950e8a5116d99ea14cce669c008933d6c6d9d613f7f4   5104 字节
+    源：  /tmp/ios-i5-file.png
+          7e58f635f68874953778950e8a5116d99ea14cce669c008933d6c6d9d613f7f4   5104 字节
+
+**⑤ 「不许抛异常」这条契约成立** —— 点完「分享」和「打开」之后进程还在：
+`pgrep -fl 'Tidings.app/Tidings'` → `8732 .../Bundle/Application/EEE72BCF-.../Tidings.app/Tidings`。
+两个动作都没把应用掀掉（`open` 失败时退到分享面板那条路本轮没造出场景，见下）。
+
+仍未覆盖
+----------------------------------------------------------------
+- **iPad 上的 popover 分支没验**：`UIActivityViewController` 在 iPad 上是 popover，
+  没有 `sourceView` 会直接崩；代码里已经按 `popoverPresentationController` 设了
+  `sourceView`/`sourceRect`，但本机只有 iPhone 尺寸的模拟器，这条分支没跑过。
+- **「打开」失败退到分享面板那条路没造出场景**：Quick Look 对图片必然成功，
+  要触发 `presentPreviewAnimated` 返回 false 得找一个系统里没有任何应用能预览的类型，
+  本轮没造。
+- **桌面侧的同一能力没有真跑**：`scaffold/desktopApp/src/main/kotlin/app/relay/desktop/
+  DesktopReceivedFileActions.kt` 有 9 条行为单测（`DesktopReceivedFileActionsTest`），
+  但「点一下真的把文件交给 Finder/默认应用」要在有桌面的机器上手工看一次，本轮没做。
+- **系统「文件」App 里仍然看不见这些文件**：出口走的是 app 内按钮 + 系统面板，
+  文件本身还在 `Library/Application Support/relay/downloads`。要让「文件」App 也看得见，
+  得开 `UIFileSharingEnabled` 并把落盘根换到 `Documents/` —— 那会动到 I4 已经验过的落盘路径
+  （`MessageStore` 同根、iCloud 备份），是另一个决定，本轮没动。
+- **「另存为」到别的目录之后再打开/分享没验**：Android 侧那条路会被 `file_paths.xml`
+  的目录限制挡住并留痕（有意堵目录穿越）；iOS 侧只检查文件在不在，理论上都能用，但没造过。

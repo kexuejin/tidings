@@ -1,0 +1,94 @@
+# Android 真机「戳一碰 → 弹通知 → 点通知落到那个会话」证据（Pixel 6, SERIAL-TEST-01, Android 15 / SDK 35, 1080x2400, density 420）
+# 对端: 证据节点 aeb471f0-84da-43f3-8444-536719656776（Mac 192.168.2.82, UDP 17893 / TCP 17894）
+# 取证时间: 2026-10-07 03:30–03:55
+
+对应 ACCEPTANCE.md 的 C8。发戳一碰的是 Mac 上的 agentNode 控制面 —— 本轮为它新加了
+`POST /v1/nudge`（戳一碰没有正文，投递语义也与 `msg` 不同：没 ACK 就是没送到、不进离线补发队列，
+所以塞不进 `/v1/send` 的 `text`）。接收侧是装在 Pixel 6 上的 `app.relay`。
+
+## 1. 前台：戳一碰会让界面自己落到那个会话
+
+$ adb shell am start -n app.relay/.app.MainActivity
+$ adb shell input tap 952 2211      # 底部第四个标签「设置」
+$ python3 /tmp/pxd.py dump | head -1
+text='设置'                                         desc=''   click=false [42,139][168,230]
+
+$ curl -sS -X POST http://127.0.0.1:8799/v1/nudge -H "Authorization: Bearer $RELAY_EV_TOKEN" \
+    -H 'Content-Type: application/json' -d '{"to":"192.168.2.22","port":17878}'
+{"status":"sent","to":"bc19885f-0775-47a5-8342-662ca227f769","toHost":"192.168.2.22","note":"对方已 ACK；按协议戳一碰不排队，没 ACK 就是没送到"}
+
+$ sleep 5; python3 /tmp/pxd.py dump | head -4
+text=''                                           desc='返回'   click=false [43,181][106,244]
+text='证据节点'                                       desc=''   click=false [306,166][452,218]
+text='Agent'                                      desc=''   click=false [489,175][571,209]
+text='在线'                                         desc=''   click=false [650,172][709,212]
+
+界面自己在「设置」页上切进了会话：`onNudged` → `requestFocus(envelope.from)` →
+`RelayUiState.focusRequest` → `App.kt` 的 `LaunchedEffect(focusRequest)` →
+`nav.openSession` + `controller.selectPeer` + `consumeFocusRequest`。
+
+## 2. 通知
+
+$ adb shell dumpsys notification --noredact | grep -E "NotificationRecord.*pkg=app.relay"
+    NotificationRecord(0x00195a76: pkg=app.relay user=UserHandle{0} id=1001 tag=null importance=3
+      key=0|app.relay|1001|null|12428: Notification(channel=relay_messages_v2 shortcut=null
+      contentView=null vibrate=null sound=null defaults=0 flags=AUTO_CANCEL color=0x00000000 vis=PRIVATE))
+
+$ adb shell dumpsys notification --noredact | grep -E "android.title=|android.text=" | head -2
+                android.title=String (证据节点)
+                android.text=String (对方戳了你一下)
+
+$ adb shell dumpsys notification --noredact | awk '/NotificationRecord.*pkg=app.relay/{f=1} f&&/contentIntent=/{print;exit}'
+            contentIntent=PendingIntent{539b274: PendingIntentRecord{1d2f525 app.relay startActivity
+              (allowlist: f29912f:+30s0ms/0/NOTIFICATION_SERVICE/NotificationManagerService)}}
+
+**修之前这一行是 `contentIntent=null`**（见第 4 节）：通知发得出去，但点它什么也不会发生。
+
+## 3. 点通知：应用被拉到前台，并且落在那个会话里
+
+$ adb shell input keyevent 4; adb shell input tap 952 2211     # 先回到「设置」页
+$ python3 /tmp/pxd.py dump | head -1
+text='设置'                                         desc=''   click=false [42,139][168,230]
+
+$ adb shell cmd statusbar expand-notifications; sleep 3
+$ python3 /tmp/pxd.py dump | grep -E "捎话|证据节点|戳了你一下"
+text='捎话'                                         desc=''   click=false [179,618][243,669]
+text='证据节点'                                       desc=''   click=false [179,701][996,767]
+text='对方戳了你一下'                                    desc=''   click=false [179,783][996,841]
+
+$ adb shell input tap 540 700
+$ adb shell dumpsys activity activities | grep -m1 topResumedActivity
+    topResumedActivity=ActivityRecord{232545484 u0 app.relay/.app.MainActivity t32061}
+$ python3 /tmp/pxd.py dump | head -3
+text=''                                           desc='返回'   click=false [43,181][106,244]
+text='证据节点'                                       desc=''   click=false [306,166][452,218]
+text='Agent'                                      desc=''   click=false [489,175][571,209]
+
+点的是通知卡本体。`android:launchMode="singleTop"` + `FLAG_ACTIVITY_SINGLE_TOP` 让它走
+`onNewIntent`，不会叠一个新实例把界面状态清空；extra 里的对端 id 由
+`MainActivity.handleNotificationFocus` 交给 `RelayController.requestFocus`。
+
+## 4. 修之前的样子（同一条路，反证）
+
+在 03:0x 那版（还没挂 `contentIntent`）的 APK 上做同一串动作：
+
+- 通知一样发得出来 —— `android.title=String (证据节点)`、`android.text=String (对方戳了你一下)`；
+- 但 `contentIntent=null`（全仓 `grep -rn "PendingIntent\|setContentIntent\|contentIntent"` 在
+  `composeApp/src/androidMain` + `androidApp/src/main` 里零命中）；
+- 点通知卡（本体、展开后点标题都试过）只让卡片展开/收起，`topResumedActivity` 不变、界面不动。
+
+## 5. 未覆盖 / 如实记下的限制
+
+- **应用在后台时戳不到**：按 HOME 之后戳一碰 → `{"status":"unreachable","to":"bc19885f-…",
+  "note":"对方没有 ACK，按协议不进入离线补发队列"}`，没有新通知，重新 `am start` 后界面留在原处。
+  协议不允许把戳一碰排队，所以这条如实报告是对的；成因推测是 Android 把 cached app 冻结了
+  （进程收不到 UDP）。**后果**：app 在后台时用户收不到「有人戳你」—— 这一条没有解决，记在这里。
+- **冷启动点通知没造出场景**：`adb shell am force-stop app.relay` 会把应用的通知一起撤掉
+  （`dumpsys notification | grep -c "NotificationRecord.*pkg=app.relay"` = 0），没有通知可点。
+  `onCreate` 里的 `handleNotificationFocus(intent)` 与 `onNewIntent` 共用同一个私有方法、逻辑等价，
+  但**没有在真机上走过 onCreate 那一次**。
+- **iOS / 桌面**：接口参数两个平台都接受但不生效（iOS 的 `UNUserNotificationCenterDelegate`
+  点击回调没接；桌面托盘气泡没有点击回调）。本文件只覆盖 Android。
+- 取证前要先关掉手机的「睡眠模式」（数字健康，07:00 前只收重要来电）：开着的时候普通通知
+  **在通知栏里看不见**（`dumpsys` 里有记录）。这是环境条件，不是产品缺陷。
+- 截图 `/tmp/ev-c8-thread.png`、`/tmp/ev-c8-focus.png`、`/tmp/ev-c8-shade3.png` 留在本机，不入库。

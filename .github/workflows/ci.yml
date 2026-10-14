@@ -1,0 +1,158 @@
+# SPDX-License-Identifier: GPL-3.0-only
+#
+# 门禁在 CI 上跑一遍。
+#
+# 为什么值得有：README 里那七条任务此前只有"人记得跑"这一种执行方式，
+# 而"记得跑"不是门禁，是纪律。截图门禁尤其如此 —— 它挡的是"改了界面没重录参考图"，
+# 恰恰是最容易被本地增量缓存掩盖的一类回归。
+#
+# 跑的就是 README:164-166 那七条，一个字都不多：
+#   :core:allTests :composeApp:allTests :desktopApp:test :agentNode:test
+#   :desktopApp:compileKotlin :androidApp:validateDebugScreenshotTest :cjkLiteralGate
+# 外加三条注释门禁，都来自 `docs/relay-comment-audit.md` §4 的政策 ——
+# 它们挡的不是代码错，是"注释会悄悄腐坏"这一类：
+#   :cjkLiteralGate            硬编码中文字面量（与 :constructionTraceGate 同构）
+#   :staleCommentRefGate       注释里的 `X.kt:NN` 行号引用（随重构腐坏，且毫无编译错误）
+#   :constructionTraceGate     注释里的日期 / 真机型号 / 内网地址 / 本机路径 / 决议号 /
+#                              指向 docs/plans/ 与 ARCHITECTURE.md 的死指针
+# 每条都有配套的 `…Baseline` 任务做棘轮重生成，只在有意为之且经评审时上调。
+# 外加一条不在 Gradle 里的：逐屏调色板对账（tools/check-design-palette.py）。
+# 截图门禁只保证"参考图和当前渲染一致"，不保证"参考图里是一屏对颜色"，这条补后者。
+#
+# 设计契约三条也挂在同一条 Gradle 链上（:designSpecDrift / :designTokenUsageGate /
+# :designStateSlotGate）。它们挡的是"颜色有门禁所以精致、间距没有门禁所以随手写字面量"
+# 那类不对称：spec 与代码逐键漂移、token 采用率回退、状态槽覆盖缩小，三者任一都报红。
+#
+# 代码侧的门禁管不到**设计源自己**：prototype/relay.html 有四个自检工具
+# （check-render / check-contrast / check-refs / shoot-relay --verify-only），
+# 2026-10-15 起接在本文件末尾。它们挡的是"稿子改了但验收图没重拍"这一整类。
+#
+# 不需要设备或模拟器：截图测试在宿主 JVM 上渲染 Compose 预览（README:171）。
+# 也不需要 -PrelayMirror=aliyun —— 那个开关是给连不上 dl.google.com 的开发机用的，
+# GitHub 的 runner 连得上官方源。
+#
+# 诚实说明：这份 workflow 是在开发机上写的，本地没有 runner，
+# 所以它"在 GitHub 上真的跑绿过"这件事还没有证据。第一次推上去要盯着看。
+
+name: gate
+
+on:
+  push:
+    branches: ["**"]
+  pull_request:
+  workflow_dispatch:
+
+# 同一分支的新推送取消上一次：门禁是幂等的，没必要排队跑过期的提交。
+concurrency:
+  group: gate-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  gate:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4
+
+      # README:150-151 钉的是 JDK 21（本地是 /opt/homebrew/opt/openjdk@21）。
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "21"
+
+      # :androidApp:* 需要 Android SDK。版本对齐 gradle/libs.versions.toml：
+      # compileSdk 36、buildToolsVersion 36.1.0。
+      - uses: android-actions/setup-android@v3
+        with:
+          packages: "platforms;android-36 build-tools;36.1.0"
+
+      # 截图门禁在 Linux 上渲染预览，界面里全是中文。
+      # 没有 CJK 字体时 Layoutlib 画出来的是豆腐块，参考图必然对不上 ——
+      # 那不是"界面改错了"，是环境缺字体，得在这里补上，别让它变成一条假红。
+      - name: 装 CJK 字体（截图门禁要渲染中文）
+        run: sudo apt-get update && sudo apt-get install -y fonts-noto-cjk
+
+      # 逐屏调色板对账读的是仓库里的参考图，不需要编译，所以它不是 Gradle 任务。
+      # 依赖只有 ImageMagick 的 magick；ubuntu-latest 一般自带，显式装一次免得靠运气。
+      - name: 装 ImageMagick（调色板对账要用 magick）
+        run: sudo apt-get install -y imagemagick
+
+      - uses: gradle/actions/setup-gradle@v4
+
+      - name: 门禁任务链（七条 + 设计契约三条）
+        run: |
+          chmod +x ./gradlew
+          # --no-build-cache：判"干净"就不能吃缓存（README:168-169）。
+          # 这里不写 --rerun-tasks：CI 每次都是全新检出，本来就没有增量状态，
+          # 加它只是让同样的活重跑一遍。
+          ./gradlew \
+            :core:allTests \
+            :composeApp:allTests \
+            :desktopApp:test \
+            :agentNode:test \
+            :desktopApp:compileKotlin \
+            :cjkLiteralGate \
+            :staleCommentRefGate \
+            :constructionTraceGate \
+            :designSpecDrift \
+            :designTokenUsageGate \
+            :designStateSlotGate \
+            --no-build-cache \
+            --console=plain \
+            --stacktrace
+
+      # 截图门禁只保证"参考图和当前渲染一致"，不保证"参考图里是一屏对颜色"。
+      # 这条补上后者：参考图里占比超过 0.5% 的每个色值都得说得出出处。
+      - name: 逐屏调色板对账
+        run: python3 tools/check-design-palette.py --strict
+
+      # Kotlin 编译器不为未使用的 import 报警告（只有 IDE 灰掉），所以搬运/拆分
+      # 留下的死 import 没有任何门禁看得见 —— 本仓真积过 711 条。这条补上。
+      - name: 未使用的 import
+        run: python3 tools/unused-imports.py --check
+
+      # ── 原型稿自己的门禁（2026-10-15 接入）──────────────────────────────
+      # 之前这四个工具只有「人记得跑」这一种执行方式。后果实测过：对比度曾在
+      # 10-09 收口到 0（prototype/README.md §12.3），10-14 的一次编辑把它带回 20 处，
+      # 没有任何东西变红 —— 因为验收图集也停在 10-13，没人再看第二眼。
+      # 详见 docs/plans/2026-10-15-relay-prototype-review.md。
+      - name: 原型稿 · 静态渲染体检（72 屏渲染函数 / symbol 与 class 引用完整性）
+        run: node prototype/check-render.mjs
+
+      - name: 原型稿 · 验收图集不许落后于稿子（manifest 过期检查）
+        # 挡的是 P0-3 那一类：改了 relay.html 却没重拍，于是「逐张人眼验收」
+        # 描述的是过去某一版稿子。纯文本+哈希，不需要浏览器。
+        run: python3 prototype/shoot-relay.py --verify-only
+
+      - name: 原型稿 · 逐屏对比度（WCAG AA）
+        # check-contrast 自己起 Chrome（CHROME 环境变量可覆盖路径），
+        # 但要一个 HTTP 服务：--headless 在 file:// + 查询串下会挂住（脚本头注明过）。
+        run: |
+          python3 -m http.server 4173 --bind 127.0.0.1 --directory prototype &
+          SRV=$!
+          trap 'kill $SRV 2>/dev/null || true' EXIT
+          sleep 2
+          CHROME="$(command -v google-chrome-stable || command -v google-chrome || command -v chromium)" \
+            node prototype/check-contrast.mjs
+
+      - name: 原型稿 · 锚点核对（稿子里的 Foo.kt:NNN 还指得准吗）
+        # 这些锚点是「设计决策 → 代码证据」的链条，漂了就等于证据链断掉。
+        # continue-on-error 是**临时的**：现存 53 处漂移是代码侧在途改动欠的账
+        # （不是本步引入），逐条修完后删掉这一行，让它变成硬门禁。
+        continue-on-error: true
+        run: python3 prototype/check-refs.py
+
+      - name: 失败时留下报告
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: test-reports
+          if-no-files-found: ignore
+          retention-days: 7
+          path: |
+            */build/reports/tests/**
+            androidApp/build/reports/screenshotTest/**
+            build/reports/problems/**

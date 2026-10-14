@@ -1,0 +1,68 @@
+# 逐屏调色板对账的白名单 —— scaffold/tools/check-design-palette.py 读这个文件。
+#
+# 格式：<#RRGGBB> <浅|深|两态> <理由>
+#
+# 只有「不是这套色板里的颜色，但确知它从哪来、而且不该改」才配进来。
+# 写不出理由的别往这儿放 —— 那说明它是缺陷，去改代码，不是来改这张表。
+# 这张表和 CJK 门禁的基线不同：它不按文件计数、也不许"只降不升"地漂，
+# 每一条都是一个人认过的具体色值。
+
+#2A2A2A 两态 截图夹具：取景区占位图的底色，只在截图里存在（androidApp/src/screenshotTest/kotlin/ScreenshotPreviewsExtra.kt:1107）
+#A9A9A9 两态 派生：ModalBottomSheet 的黑色遮罩叠在宿主默认底 #FAFAFA 上（250 × 0.68 ≈ 169）
+#000000 两态 刻意：取景区底色（feature/scan/ScanScreen.kt:127）与二维码模块（ui/components/QrCodeView.kt:57），不是漏配的 scrim
+#B3B3B3 两态 派生：取景框 Color.White.copy(alpha = 0.7f) 叠在纯黑上（255 × 0.7 ≈ 179）
+#BFBFBF 两态 派生：同上一条的抗锯齿边
+
+# 以下 8 档来自 AlertDialog（ConversationsGroupCreatePhonePreview）：遮罩是 Material 的，
+# 不是这套色板里的产品色，而全屏对话框必然带它。实测：页面底 #FAFAF8 被压到 #575756
+# （250 × 0.348 ≈ 87，`Color.kt:82` 的 scrim = #000000）。窗口外那 42/69 px 一圈只叠了
+# 平台层遮罩，比窗口内浅 1–5 级，`magick` 掩膜出来正是那条边界线 —— 所以后 7 档是
+# 同一层的边界与其圆角/文字抗锯齿，不是漏配的 scrim。
+#575756 两态 派生：AlertDialog 的 scrim 叠在页面底 #FAFAF8 上（250 → 87）
+#595958 两态 派生：窗口外那一圈的边界（同一条，浅 2 级）
+#5A5A59 两态 派生：同上一条
+#5A5A5A 两态 派生：同上一条
+#5B5B5A 两态 派生：同上一条
+#5C5C5B 两态 派生：同上一条
+#5C5C5C 两态 派生：同上一条
+#585858 两态 派生：同上一条
+
+# 以下 19 档是同一个机制的第二半：Material Dialog 的平台遮罩，底衬换成了
+# `Surface(color = colorScheme.surface)`（#FFFFFF）。新一批弹层预览统一这么铺底衬，
+# 而上面 8 档是按页面底 #FAFAF8 记的 —— 真机两层底衬并存（`App.kt:135-142`：外层
+# Surface 用 background 铺 inset，内层 Box 用 surface 铺安全区），所以两条都要有。
+# 实测同一个遮罩落在 #FFFFFF 上就是 #595959，落在 #FAFAF8 上才是 #575756，差 2 级。
+# 遮罩不是这套色板里的产品色，而全屏对话框必然带它；浅 1–5 级那几条与更深一档的桌面
+# modal 都是同一层的边界与圆角/文字抗锯齿，不是漏配的 scrim。
+#
+# 另外几条同理，都是「已声明色的叠色」，只是透明度不在门禁那 13 档 Material 海拔/
+# 状态表里（`ELEVATION_ALPHAS` 的公式与 Material 实际实现差一档：这几条到门禁派生集
+# 的最近距离都是 1 个通道步进，例如 `#E9EFEC` ↔ `#EAEFED`、`#F0F4F3` ↔ `#F0F5F3`、
+# `#3F5046` ↔ `#3E5147`，但精确匹配过不去）。括号里是实测叠法，均可复算。
+#595959 两态 派生：Dialog 平台遮罩叠底衬 surface（#000000 @0.65 over #FFFFFF）
+#5B5B5B 两态 派生：同上一条的边界（浅 1 级）
+#5D5D5D 两态 派生：同上一条（浅 3 级）
+#5E5E5E 两态 派生：同上一条（浅 4 级）
+#4A4A4A 两态 派生：桌面 modal（DesktopHistorySearchDialog / ChatDeskHistSearch）的遮罩，比手机档更深（#000000 @0.68 over #E8E8E6）
+#4B4B4B 两态 派生：同上一条的边界
+#4C4C4C 两态 派生：同上一条
+#4D4D4D 两态 派生：同上一条
+#4E4E4E 两态 派生：同上一条
+#333333 两态 派生：RemoteView 全屏取景层的遮罩，最深一档（#000000 @0.8 over #FFFFFF）
+#545351 两态 派生：遮罩叠 surfaceDim #EFEEE8（#000000 @0.65）
+#565654 两态 派生：遮罩叠 outline #D4D4D0（#000000 @0.64）
+#153025 两态 派生：遮罩叠头像渐变端 #3D8B6B（#000000 @0.652）
+#E9EFEC 两态 派生：surfaceTint #2D6A4F 的海拔色调层叠 surface（实测 @0.106，与海拔 6 的档位同量级）
+#F0F4F3 两态 派生：onPrimary #003826 的浅色调层叠 surface（实测 @0.057）
+#FCEFEC 两态 派生：errorContainer #FFDAD6 与 background #FAFAF8 的叠色（实测 @0.34）
+#34433A 两态 派生：online #6FD69A 叠 inverseSurface #2A2C2B（实测 @0.138）
+#3F5046 两态 派生：上一条那层再叠一层遮罩，两层叠出来的边界（#000000 @0.032 over [#3A3C3B @0.859 over #6FD69A]）
+#202120 两态 派生：遮罩叠 #A0A3A0（#000000 @0.8）
+
+# 下面这条是同一个平台遮罩的第二类落点：遮罩压在「深色文字」上（不是压在底色上）。
+# 2026-10-14 新增 AgentsSessionPickPhonePreview 帧（工作区「切换会话」浮层）后首次超过
+# 0.5% 阈值 —— 那一帧底下的会话正文是白气泡 + onSurface 文字，遮罩一压就是这一档。
+# 可复算：单层 #000000 @0.651 直接叠 #1A1C1A 得 9/10/9（差 1 个通道步进）；按「先叠
+# scrim @0.486、再叠窗口 dim @0.32、逐层 8 位取整」则 26→8 / 28→9 / 26→8 全部吻合，
+# 同一模型对白底给出 255→89（#595959）、对 #FAFAF8 给出 250→87（#575756），与上面两条一致。
+#080908 两态 派生：Dialog 平台遮罩叠 onSurface #1A1C1A 的文字像素（浅色实测）

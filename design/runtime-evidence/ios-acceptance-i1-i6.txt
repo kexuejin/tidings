@@ -1,0 +1,288 @@
+iOS 真机验收 I1–I6（2026-10-07，iPhone 17 Pro 模拟器）
+============================================================
+
+要回答的问题
+------------
+ACCEPTANCE.md §3「iOS 真机」的 I1–I6 六条，此前全部只有静态读码与「本机没有真机也没有
+模拟器」的托辞，没有任何一条在真机/模拟器上跑过。本文件把六条逐条跑掉或如实记下做不到的
+原因，并记录过程中查出的两个真缺陷（Bonjour 广播从来没成功过、前台通知被静默丢弃）。
+
+装置
+----
+- 模拟器：iPhone 17 Pro，UDID 00000000-FEF7-409D-AE33-803A77C62376，iOS 26.2，Booted。
+  （另一个 booted 的是 PigeonVerify 78487176-16EB-4416-B50A-78A5A819C5BB，本轮未用。）
+- 应用：bundle id app.relay，显示名「捎话」。进程名在系统日志里是 app.relay /
+  UIKitApplication:app.relay，不是 Tidings。
+- 构建（约 3 分钟）：
+    cd scaffold/iosApp && export JAVA_HOME=/opt/homebrew/opt/openjdk@21 RELAY_MAVEN_MIRROR=aliyun && \
+    xcodebuild -project Tidings.xcodeproj -scheme Tidings -configuration Debug -sdk iphonesimulator \
+      -destination 'platform=iOS Simulator,id=00000000-FEF7-409D-AE33-803A77C62376' \
+      -derivedDataPath build/dd build
+  RELAY_MAVEN_MIRROR=aliyun 是必需的：project.yml 的 preBuildScript 直接调 ./gradlew
+  :composeApp:embedAndSignAppleFrameworkForXcode，而 scaffold/settings.gradle.kts:11 读这个
+  环境变量；不加会去连 dl.google.com，得到 SSL peer shut down incorrectly、EXIT=65。
+- 装/启/停：xcrun simctl install|launch|terminate $U app.relay
+- 发送端：Mac 上的证据节点（agentNode 控制面 http://127.0.0.1:8799，
+  Authorization: Bearer $(cat /tmp/relay-ev-token)）。POST /v1/send
+  {"to":"27272e70-6c18-41e0-a3ee-569173f5eee6","text":"…"}；GET /v1/peers 列节点。
+- iOS 节点身份：nodeId 27272e70-6c18-41e0-a3ee-569173f5eee6，nick「iOS验收」，
+  udp 17888 / tcp 17889。
+- UI 驱动：idb（pip3 install --user fb-idb，客户端在 ~/Library/Python/3.9/bin/idb，
+  companion 由 idb list-targets 自动拉起）。idb ui describe-all 给无障碍树；
+  idb ui tap X Y --udid $U 用 point 不用 pixel（屏 402×874 pt = 1206×2622 px @3x）；
+  idb ui button HOME --udid $U 回桌面。osascript/System Events 在本机被 TCC 拒绝
+  （-10004），所以点击只能走 idb。
+
+方法学坑（两条，都踩过）
+------------------------
+1. iOS 的设置真身不是 JSON 文件，而是容器 plist 里的 relay.settings.json 字符串键
+   （scaffold/composeApp/src/iosMain/kotlin/app/relay/app/SettingsStore.ios.kt:15
+   UserDefaultsSettingsStore，key "relay.settings.json"）。要写它必须：
+     xcrun simctl terminate $U app.relay
+     xcrun simctl spawn $U defaults write "<container>/Library/Preferences/app.relay" \
+       relay.settings.json -string '<json>'
+   给 app.relay 而不给容器路径写，写的是模拟器全局 plist，应用读不到 —— 一开始就是这么
+   写的，于是「改了昵称但广播名不变」。容器路径必须每次现查：
+     xcrun simctl get_app_container $U app.relay data
+   容器 UUID 每次重装都变（本轮见过 B713427B… → 40F3E28A… → 07B6C851… → 44A08060…）。
+   曾因写死旧 UUID 而误判「iOS 出站播报一条不发」，实际上只是写错了容器。simctl install
+   覆盖同 bundle id 不清数据（重装后设置与 messages.json 都还在）。
+2. 想验证「iOS 有没有把 UDP 播报发出去」，用 python 监听 0.0.0.0:17894 并数包，比看
+   Bonjour 更快更硬。写对容器后 TOTAL=4：2 条 entry（t≈2.7s / 3.6s，长 397 字节）
+   之后每 30 秒一条 presence（长 169 字节），源端口 17888 —— iOS 出站到手动节点正常，
+   不存在发送缺陷。（第一版脚本的 TOTAL=0 是写错容器的假象。）
+
+I1 构建与首启 —— ✅ 通过
+--------------------------
+全新安装 + simctl launch，进程起来，截图 /tmp/ios-i1.png 显示「消息」页空态
+（「还没有会话 / 到「节点」页填上对方的 IP，或者等对方先发消息过来。/ 去节点页」）
+与底部四个标签（消息 / 节点 / Agent / 设置）。没有崩。
+机制核对：scaffold/iosApp/Info.plist 的 CADisableMinimumFrameDurationOnPhone => true
+（plutil -p 确认）。这一条是 DEBUG 构建启动即崩的那个坑，现在不成立。
+
+I2 本地网络授权弹窗 —— 模拟器不强制，只记现状（不可复现）
+-----------------------------------------------------------
+Info.plist 两个键都在（plutil -p）：
+  NSLocalNetworkUsageDescription = 「捎话需要在同一个 Wi-Fi 下找到其他设备，才能自动发现并
+    收发消息；不联网时不会有任何流量。」
+  NSBonjourServices = [0 => "_relay._udp"]
+代码侧 scaffold/composeApp/src/iosMain/kotlin/app/relay/platform/IosPlatform.kt 的
+localNetworkGate.ensureAccess() 无条件返回 true —— iOS 没有显式的「请求本地网络权限」API，
+弹窗由系统在首次真正使用本地网络时自己弹。
+现状：模拟器不强制本地网络隐私，装完直接跑，**没有出现弹窗**，也没有出现「搜不到」的
+反例（I3 的广播是成功的）。所以 I2 在模拟器上既不能证真也不能证伪，只能记录
+「键在位、代码不主动请求、模拟器不弹；真机上首次使用本地网络时系统会弹」。
+反例诊断路径（弹窗不出现且自动发现永远搜不到）在真机上才有意义。
+
+I3 Bonjour 发现 —— ✅ 广播与浏览两半都验证过
+------------------------------------------------
+这是本轮查出的第一个真缺陷：**iOS 的 Bonjour 广播从来没成功过**。
+
+症状（修前）：节点已经是 NodePhase.Running，UDP/TCP 都绑上了（lsof 见 UDP *:17888、
+TCP *:17889 LISTEN），但主机上 dns-sd -B _relay._udp local. 只列出安卓手机的
+「我的手机-bc1988」，本机服务一条都没有 —— 也就是别人永远发现不了这台 iOS。
+
+根因：NSNetService 的注册挂在**当前线程的 run loop** 上。publish() 把服务调度到调用线程的
+run loop，而 Kotlin/Native 协程跑在 Darwin 全局队列的工作线程上，那些线程没有 run loop 在
+转，注册请求排进去没人推，于是 withTimeoutOrNull(REGISTER_TIMEOUT_MS = 5_000) 超时，
+stop() 把服务撤下、mdnsAdvertised 落回 false。NSNetServiceBrowser 的
+searchForServicesOfType 是同一个毛病（浏览那半也一条结果收不到）。
+
+修法（两个文件，全部搬到主队列）：
+  scaffold/composeApp/src/iosMain/kotlin/app/relay/platform/IosMdnsAdvertiser.kt
+  scaffold/composeApp/src/iosMain/kotlin/app/relay/platform/IosMdnsBrowser.kt
+把「建 NSNetService / NSNetServiceBrowser + 设 delegate + publish() /
+searchForServicesOfType + stop()」整段放进 dispatch_async(dispatch_get_main_queue())，
+stop() 也排队执行（NSNetService 非线程安全，所有触碰必须在同一队列）。先例：
+scaffold/composeApp/src/iosMain/kotlin/app/relay/platform/IosQrScanner.kt 已经这么用
+dispatch 队列。两处 KDoc 改写成带日期与症状的如实版。
+
+验证（修后）：
+  dns-sd -B _relay._udp local.  → 出现「iOS验收-27272e」，flags 1/15/17（各网卡）+ 20 local
+  dns-sd -L "iOS验收-27272e" _relay._udp local.
+      → demo-mac-97.local.:17888（interface 20）Flags: 1
+修前/修后对照即 I3 广播半的验收证据。
+
+浏览半（iOS 作为 NSNetServiceBrowser 主动发现别人）—— ✅ 用假服务做了对照实验：
+把 iOS 的 manualPeers 清空为 []（强制只能靠 Bonjour 发现），在宿主机上注册一个
+**只有 Bonjour 广播、没有任何 UDP presence** 的假服务：
+
+  dns-sd -R "fake-bonjour-only" _relay._udp local. 17999
+  （宿主日志：Name now registered and active）
+
+等几秒后 dump iOS 节点页的无障碍树，结果：
+
+  fake-bonjour-only                       ← 出现在「局域网发现」列表里
+  demo-mac-97.local.:17999
+  [连接]  frame {{293,156},{77,48}}        ← 可点，和别的发现项一样
+
+同页还有 我的手机 192.168.2.82、我的手机 192.168.2.22、证据节点 127.0.0.1。
+页头仍是「3 个已知 · 3 在线 · 0 离线」—— mdnsServices 是纯 UI 的发现列表，
+和「N 个已知」那个 peer registry 分开计数，所以不涨到 4 是正常的，不是没发现。
+
+对照组（判据的另一半）：在宿主机上对 0.0.0.0:17999 跑 5 秒 UDP 监听 →
+
+  TOTAL_UDP_PACKETS_ON_17999=0
+
+也就是说这个假节点**一个 UDP 包都没发过**，iOS 仍然把它列了出来 —— 它只能是靠 mDNS
+被发现的。这一条把「浏览半是真的在工作」和「其实是靠 UDP presence 学到的」分开了。
+代码侧也对得上：RelayController.kt:507 startMdnsBrowsing() 里 onServiceFound 只做
+自过滤（:511 serviceName == selfMdnsLabel）就往 mdnsServices 里塞，**不做任何 UDP 存活校验**，
+所以假服务能进列表就足以证明浏览半本身在工作。
+
+清理：pkill -f 'dns-sd -R'、pkill -f 'udp-listen'；把 iOS 设置写回
+manualPeers:[{"host":"127.0.0.1","port":17893}]（写前先 terminate，路径给容器
+$C/Library/Preferences/app.relay），重启 app。
+
+I4 文本与文件 —— 两半都 ✅ 通过（文件半是补跑，见下）
+---------------------------------------------------------
+文本半：把 iOS 的 manualPeers 指向证据节点 127.0.0.1:17893 并重启后，
+GET /v1/peers 同时列出 iOS验收(127.0.0.1:17888) 与 我的手机(192.168.2.22:17878)。
+POST /v1/send 到 iOS 的 nodeId → {"status":"sent",...,"note":"对方已 ACK"}。
+截图 /tmp/ios-after.png 显示「消息」页出现新会话「证据节点」+ Agent 徽标 + 未读 1 +
+底部消息标签徽标 1。✅
+文件半：✅ 通过（补跑，见下）。
+先发一次报价：POST /v1/send-file 得到 {"status":"offered",...,"transferId":"85c6ce35-…",
+"name":"ios-send-test.txt","size":9,"note":"只是报价：对方接受后才开始传…"}。
+**收到文件不会自动接受**，必须在界面上点「接受」才开始传、才落盘 —— 这是设计，不是缺陷。
+补跑（2026-10-07 下午，装上 idb 之后才做得到）：
+  1. printf 'I4 文件半验收：这是从证据节点发来的一个文件。\n' > /tmp/ios-i4-file.txt  （67 字节）
+  2. POST /v1/send-file {"to":"27272e70-…","path":"/tmp/ios-i4-file.txt",
+     "name":"ios-i4-file.txt","purpose":"share"}
+     → {"status":"offered","transferId":"29437722-3112-4646-ba9b-66474f6f0c0b",
+        "name":"ios-i4-file.txt","size":67,"note":"只是报价：对方接受后才开始传…"}
+  3. idb ui describe-all 找到报价卡：AXLabel「ios-i4-file.txt」+「67 B」+
+     「对方发来的文件，等你接收」+ 按钮「接收」frame {{32,688.67},{77,48}}、「拒绝」{{121,688.67},{58,48}}
+  4. idb ui tap 70 712   （落在「接收」中心）
+  5. 界面状态从「等你接收」→「已接收」→「已存到 …/relay/downloads/ios-i4-file.txt/ios-i4-file.txt」
+  6. 容器内实测：…/Library/Application Support/relay/downloads/ios-i4-file.txt/ios-i4-file.txt
+     67 字节，内容 = 上面那行；sha256 d5ba271c83c946e89a54b22444990980164dc01af053629295d0991617e97aa9
+     **与源文件 /tmp/ios-i4-file.txt 逐字节相同**。
+因此 ACCEPTANCE.md §3 I4 里「iOS 收到的文件落在 Application Support/relay/downloads」这条
+**本轮取得证据**：落点确实在 downloads/ 下。注意路径多一层同名目录
+（downloads/ios-i4-file.txt/ios-i4-file.txt）—— **这是设计，不是 iOS 缺陷**：每个传输先按
+传输名建一个目录，文件再按相对路径放进去（TransferManager.kt:694-698 saveDir = pathJoin(root,
+safeRoot)、:739 saved += pathJoin(saveDir, it.relPath)），Android 端证据里是同样的嵌套
+（c5-android-table-text.txt:42 已存到 …/downloads/table-2026-10.png/table-2026-10.png、
+e2e-20-android-open-share.txt:36 …/downloads/a7-photo.png/a7-photo.png），两端一致，故按设计记录。
+（顺带确认：messages.json 在容器里真实存在且有内容 → **iOS 上「消息落盘」开关是生效的**。）
+
+I5 收到的文件有没有出口 —— 当前没有出口（如实记录）
+----------------------------------------------------
+scaffold/composeApp/src/commonMain/kotlin/app/relay/platform/PlatformContracts.kt 的
+AppPlatform.receivedFileActions 默认 null；iOS 没有覆写它。界面据此不画「打开 / 分享」
+按钮。Info.plist 里也没有 UIFileSharingEnabled（plutil -p 确认无此键），所以「文件」应用
+看不见这些文件。
+结论：iOS 上收到文件之后，用户**当前没有任何出口** —— 既不能在应用里打开/分享，也不能从
+系统「文件」应用里取走。这是已知缺口，本轮记录现状，不做修改（要做得先决定用
+UIDocumentInteractionController 分享面板还是 UIActivityViewController，属于产品决定）。
+补记（I4 文件半补跑之后）：文件本身**是收到了的**，就在
+Library/Application Support/relay/downloads/ios-i4-file.txt/ios-i4-file.txt（逐字节与源
+相同，见 I4）；缺的只是「把它交给别的应用」这一步 —— 应用内没按钮、系统「文件」应用也
+看不见这个目录。即：**收得到，取不走**。
+
+I6 通知 —— 三段：未授权不崩 ✅；前台横幅与点通知定位是**真缺陷，已修并验证**；
+后台不可达（与 Android C8 同一类，如实记录）
+------------------------------------------------------------------------------
+装置与判读手段：xcrun simctl io $U screenshot 拍屏；xcrun simctl spawn $U log show 查
+usernotificationsd；~/.Library/Developer/CoreSimulator/Devices/$U/data/Library/
+UserNotifications/*/DeliveredNotifications.plist 看投递；xcrun simctl push $U app.relay
+/tmp/push.json 作为「系统显示通路」的对照组。
+
+(a) 未授权不崩 —— ✅ 通过。权限未授予时应用照常运行、消息照收，不崩。
+
+(b) 权限本身不是问题：日志 [relay-notif] requestPermission granted；重装后没有弹框、
+自动授予（模拟器不强制通知隐私）。BulletinBoard/VersionedSectionInfo.plist 的 sectionInfo
+里 app.relay 是 1689B 的 NSKeyedArchiver 归档，解码后 authorizationStatus = 2（authorized）、
+pushSettings = 63、showsInNotificationCenter = True、showsInLockScreen = True。
+对照组：xcrun simctl push 能弹出「探针 / simctl push 测试：系统通知通路」横幅 —— 说明系统
+显示通路正常（注意 simctl push 绕过应用权限，所以它成功不能反过来证明应用权限已授予）。
+xcrun simctl privacy 的服务清单里没有 notifications 这个服务。
+
+(c) **前台横幅：修前是静默丢弃（真缺陷）**。插桩后日志显示应用确实调了：
+    [relay-notif] showNotification entered
+    [relay-notif] addNotificationRequest ok      ← error 为 nil，请求被接受
+但同一时间窗查 process == "usernotificationsd" 只有启动时的两条 xpc connection 行，
+投递窗口内**零记录**；UserNotifications 下约 60 个 UUID 目录的 DeliveredNotifications.plist
+几乎全是 135 字节的空归档，唯一非空的一条（4536B，mtime 12:33）来自那次 simctl push。
+根因：**没有装 UNUserNotificationCenterDelegate**。前台投递被 iOS 静默丢掉 —— 既不显示
+横幅也不进通知中心，而 addNotificationRequest 依然以 nil error 完成，看起来像「发了但没人
+收到」。
+修法：在 scaffold/composeApp/src/iosMain/kotlin/app/relay/platform/
+IosPushNotificationHandler.kt 里加 NSObject 子类 IosNotificationDelegate 实现
+UNUserNotificationCenterDelegateProtocol，willPresent 返回
+UNNotificationPresentationOptionBanner or List or Sound，并在 init 里
+UNUserNotificationCenter.currentNotificationCenter().delegate = delegate。
+**delegate 必须存成字段**：UNUserNotificationCenter.delegate 是 weak 引用，只设不存会立刻
+被回收，didReceive 永远不会触发。
+验证：重编重装后发一条消息，截图 /tmp/i6-fg-delegate.png 显示前台出现横幅
+「证据节点 / I6 前台横幅复测：delegate 已装上 / 现在」+ 应用图标。✅
+
+(d) **点通知定位到会话：修前完全空转，现已接上并验证 ✅**。
+修前：focusPeerId 在 iOS 上是空转的 —— didReceive 没接，点通知只把应用打开，不会跳到会话
+（契约 KDoc 当时就如实写了这一点，没有假装）。
+接法（三个文件）：
+  1. PlatformContracts.kt 的 PushNotificationHandler 加默认空实现
+     fun setOnNotificationTap(callback: ((focusPeerId: String) -> Unit)?) {}，
+     并把 showNotification 的 KDoc 里 iOS 那一条从「接受参数但目前不生效」改成实况。
+  2. IosPushNotificationHandler.kt：showNotification 里
+     content.setUserInfo(mapOf<Any?, Any?>(FOCUS_PEER_KEY to focusPeerId))；
+     didReceive 从 notification.request.content.userInfo[FOCUS_PEER_KEY] as? String 读回来，
+     交给 onTap；FOCUS_PEER_KEY 是文件级 private const（不能放 ObjC 子类的 companion ——
+     Kotlin/Native 报 "Fields are not supported for Companion of subclass of ObjC type"）。
+  3. scaffold/composeApp/src/iosMain/kotlin/MainViewController.kt 的 lazy 块里
+     platform.pushNotificationHandler.setOnNotificationTap { peerId ->
+       controller.requestFocus(peerId) } —— 只有这里同时拿得到 platform 与 controller。
+     Android 走的是 PendingIntent → MainActivity，两边终点是同一个
+     RelayController.requestFocus（RelayController.kt:1372），再经 App.kt 的
+     LaunchedEffect(state.focusRequest) 完成 nav.openSession + selectPeer。
+验证（复测二）：terminate + launch → POST /v1/send「I6 点通知定位复测二：点横幅应跳进会话」
+→ 截图 /tmp/i6b-before.png（应用在「消息」列表，顶部有系统横幅）→ idb ui tap 200 95
+→ 截图 /tmp/i6b-after.png：**应用已经跳进「证据节点」会话**，标题栏是
+「证据节点 / Agent / 在线 / 127.0.0.1 · TCP 17894 · 能力…」+ 右上「打开聊天」，
+消息列表里能看到刚发的那条。✅
+（第一次复测失败只是因为点击坐标打偏：横幅在 y≈67..122 pt，打 (200,70) 落在最上沿。
+(200,95) 才对。这是手法问题，不是代码问题。）
+
+(e) 后台不可达 —— 与 Android C8 同一类，如实记录，不改设计。
+HOME 切后台后 settle 3 秒再发，证据节点**收不到 ACK**（无响应体）→ 应用已被挂起、
+收不到局域网消息；而 HOME 后**立刻**发能在约 1 秒内拿到「对方已 ACK」，因为还在 iOS 的
+后台宽限窗口里。iOS 会在数秒内挂起没有申请后台执行的 app，所以「后台收到消息 → 弹通知」
+这条链在现有设计下**不可能成立**，需要 UIBackgroundModes / APNs 这类大改。
+这不假装通过。
+
+过程中顺带记录的两点（不是缺陷，但值得写下来）
+------------------------------------------------
+- 「我的手机」在会话列表里出现两行，一度以为重复渲染。查清后不是：RelaySettings 的默认
+  昵称就是「我的手机」，Mac 桌面端 settings.json 里只有 nodeId（没有 nick）→ 也默认成
+  「我的手机」，安卓手机同样是「我的手机」。三台机器里两台用默认名，于是两行同名但确实是
+  两个不同的节点。这是默认昵称的可辨识性问题（产品层），不是渲染缺陷。
+- Kotlin/Native 的三个坑（已写进代码 KDoc）：UNNotificationContent 的 title/body 是只读
+  属性，必须 setTitle()/setBody()（写 content.title = … 报 'val' cannot be reassigned）；
+  没有 System.currentTimeMillis()（JVM-only），标识符用 NSUUID；ObjC 子类不能有带字段的
+  companion object。另：NSObject 要从 platform.darwin 导入，不是 platform.Foundation。
+
+仍未覆盖（照实列，不夸大）
+--------------------------
+- I2：模拟器不强制本地网络隐私，弹窗不可复现；真机上才有意义。
+- I3 浏览半：本轮已用「只有 Bonjour 广播、零 UDP presence」的假服务验证过（见 I3 正文），
+  但没验「在发现列表里点『连接』真的能完成一次握手」这条。
+- I4 文件半：本轮补跑已通过（点「接受」→ 落盘 → sha256 与源文件一致），但那是人工点一次
+  的路径；「发来就自动收」这条没验（设计上就不自动收，见 I4 正文）。
+- I5：iOS 上收到文件当前没有出口（无 receivedFileActions、无 UIFileSharingEnabled）。
+  本轮把「收得到、取不走」这半验证完了（文件确实落盘），出口本身仍未实现。
+- I6 后台：应用被挂起后收不到局域网消息，「后台弹通知」在现有设计下不可能成立。
+- I6 通知点击的「深链」只做到应用内定位会话；应用被杀死时点通知只打开应用（冷启动的
+  focusRequest 通路没有单独验证）。本轮试过补这一条，**没验成，原因是工具限制，不是
+  应用缺陷**：先在前台收一条消息留下横幅，`xcrun simctl terminate $U app.relay` 杀掉，
+  再 `idb ui swipe 100 5 → 100 520` 拉下通知中心（截图确认横幅在，「证据节点 / I6 冷启动
+  复测… / 1 分钟前」），然后 `idb ui tap 201 485`。a11y 树里这条横幅确实是一个可点
+  `Button`（frame `{x:14,y:445.33,w:374,h:78.67}`，中心 ≈ (201,484.7)），但点了三次
+  （(201,485)、(200,505)、(44,495)）都没反应：`xcrun simctl spawn $U launchctl list |
+  grep -i relay` 只剩 `com.apple.certui.relay`，`pgrep -fl 'Tidings.app/Tidings'` 无进程，
+  截图仍是锁屏/通知中心。结论：`idb` 的 HID 事件到不了 SpringBoard 的锁屏/通知中心那一层，
+  模拟器上没法点系统通知（`osascript`/System Events 被 TCC 拒、`simctl` 没有点通知的 API、
+  `idb-repl` 报 `Transport became inactive`）。静态看代码通路是通的：delegate 在
+  `IosPushNotificationHandler.init` 里装（`IosPlatform` 在 `MainViewController` 的 lazy 块
+  里构造，即场景建立期），Apple 要求 delegate 在 `didFinishLaunchingWithOptions` 结束前装好，
+  所以 `didReceive` 应该来得及；但**没有真机或可驱动的点法能证明它**，故如实记为未验。

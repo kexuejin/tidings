@@ -1,0 +1,71 @@
+# Android 真机「对端资料多久跟上」证据（Pixel 6, SERIAL-TEST-01, Android 15 / SDK 35, 1080x2400, density 420）
+# 对端: 证据节点 aeb471f0-84da-43f3-8444-536719656776（Mac 192.168.2.82, UDP 17893 / TCP 17894, 控制面 http://127.0.0.1:8799）
+# 取证时间: 2026-10-07 02:06–02:12
+
+对应 ACCEPTANCE.md 的 A13c（对端改了资料/头像名，本端多久跟上）。本轮真机抓到两个让它
+**永远跟不上**的缺陷，修完之后在这里留下正面证据。
+
+## 1. 冷启动后节点表是空的 —— 只收到 presence 也要能换回完整资料
+
+$ adb shell am force-stop app.relay
+$ adb shell am start -n app.relay/.app.MainActivity
+Starting: Intent { cmp=app.relay/.app.MainActivity }
+$ python3 /tmp/pxd.py dump | grep -E "aeb471f0|证据节点"      # 启动后 6 秒
+text='aeb471f0'                                   desc=''  click=false [252,1083][444,1132]
+$ sleep 40                                                  # 跨一个心跳周期（5 秒一帧 presence）
+$ python3 /tmp/pxd.py dump | grep -E "aeb471f0|证据节点"      # 启动后 46 秒
+text='证据节点'                                       desc=''  click=false [252,866][425,927]
+
+读法：手机重启后 `PeerRegistry` 是内存表、已经清空；对端只在启动时握过一次手，之后每 5 秒
+只发 `presence`。修法见 `scaffold/core/src/commonMain/kotlin/app/relay/core/transport/Discovery.kt`
+的 `handlePresence`：协议 §6.2 说「与本地缓存版本不一致 → 单播 `entry`」，而「本地没有缓存」
+正是不一致，所以要问。旧判据 `if (knownRev == -1 || knownRev == theirRev) return` 把
+「从没见过」也当成一致，于是这一支永远不问，实测等 55 秒（跨两个心跳周期）名字都回不来。
+唯一的克制是 `PROFILE_REFRESH_MIN_INTERVAL_MS = 10_000L`（不会变成反射放大器：收件地址取的是
+数据报源地址，不是载荷里写的地址）。
+复现：`scaffold/core/src/commonTest/kotlin/app/relay/core/transport/DiscoveryProfileRefreshTest.kt`
+的 `aPresenceFromAPeerWeHaveNoProfileForAlsoMakesUsAsk`。
+
+## 2. 广播真的出网了（`SO_BROADCAST`）
+
+$ python3 /tmp/bcast-listen.py 120 17899                    # Mac 上监听 17899
+listening on 17899 for 120 s
+$ （在手机上把 255.255.255.255:17899 加成手动节点并点「连接」，监听端随即打印）
+192.168.2.22:17878 type=entry from=bc19885f nick=我的手机
+
+读法：`Discovery` 把手动节点也当发送目标，所以这条 `entry` 是手机**发给广播地址**的帧，Mac 上
+收到了 —— 证明 `scaffold/core/src/commonMain/kotlin/app/relay/core/transport/UdpTransport.kt`
+的 `start()` 里 `.bind(address) { broadcast = true }` 在真机生效。修之前这里一条都收不到：
+JVM 上 `DatagramChannel.send` 到 `255.255.255.255` 直接抛
+`java.net.BindException: Permission denied`，而 `Discovery.sendRaw` 用 `runCatching` 吞掉异常 ——
+局域网广播**静默地一条都发不出去**，且没有任何日志。
+复现：`scaffold/core/src/commonTest/kotlin/app/relay/core/transport/UdpTransportBroadcastTest.kt`
+的 `aRestrictedBroadcastIsActuallyDeliveredToALocalListener`（去掉 `{ broadcast = true }` 即红）。
+
+## 3. 「支持 IPv4 或 ip:port」这句提示现在是真的
+
+$ adb shell run-as app.relay cat files/relay/settings.json   # 修之前：整串被当成主机名
+    "manualPeers": [ { "host": "192.168.2.82" }, { "host": "255.255.255.255:17899" } ]
+$ （节点页「已保存的节点」那一行）
+text='255.255.255.255:17899:17878'  /  text='没有回应'
+$ adb shell run-as app.relay cat files/relay/settings.json   # 修之后：拆成 host + port
+    "manualPeers": [ { "host": "192.168.2.82" },
+                     { "host": "255.255.255.255", "port": 17899 } ]
+$ （弹层「已识别」卡）
+text='255.255.255.255:17899'
+
+读法：旧码把输入原样当主机名，`announceTo("255.255.255.255:17899", 17878)` 解析失败且静默，
+节点页显示成 `255.255.255.255:17899:17878`。顺带两处：端口框留空时弹层用**本机自己的**
+`udpPort` 兜底（本机改过端口就会连到 `host:<本机端口>`）；「已识别」卡对一个**从没联系过**的
+节点挂着写死的 `tw1` 能力标签，等于替对端声明能力。修法见
+`scaffold/composeApp/src/commonMain/kotlin/app/relay/app/RelayController.kt` 的
+`splitHostPort`（恰好一个冒号才算 `host:port`；两个以上是 IPv6 字面量、原样；两处都写了端口
+且不一致时返回 null 让 UI 报错，不替用户猜）+ `NodesScreen` 的卡片改成显示解析后的目标、
+去掉假能力标签。
+复现：`scaffold/composeApp/src/commonTest/kotlin/app/relay/app/RelayControllerHelpersTest.kt` 的
+`aHostWithAnInlinePortIsSplit` / `anIpv6LiteralIsNotSplit` / `twoPortsAreRefusedRatherThanGuessed` /
+`aMalformedInlinePortIsRefused`。
+
+## 备注
+- 截图不入库（按 ACCEPTANCE.md 的约定），本地留在 `/tmp/ev-recv.png`、`/tmp/ev-thread.png`。
+- 取证结束时手机上那条实验用手动节点已从设置里删掉，`manualPeers` 只剩 `192.168.2.82`。

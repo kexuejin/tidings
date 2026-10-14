@@ -1,0 +1,104 @@
+群聊真机双端验收：建群、群元数据扇出、双端发群消息、归属与署名
+2026-10-07  Pixel 6 (Android 15) + iPhone 17 Pro 模拟器 (iOS 26.2)
+
+要回答的问题
+  1. 建群之后，群元数据（`group` 帧 `op:"info"`）真的扇出到另一个端了吗？
+  2. 群消息发出去，收端归到的是"群会话"，还是发送者的 1:1 会话？
+  3. 收端气泡上有没有"谁说的"？
+  4. 界面上的说法（在线人数、离线提示、未读红点）是不是真的？
+  5. 会话标签条上的群标签长什么样？
+
+装置
+  Android   Pixel 6 / SERIAL-TEST-01 / Android 15 (SDK 35) / 1080x2400 / 密度 420
+            nodeId bc19885f-0775-47a5-8342-662ca227f769，昵称「我的手机」，192.168.2.22，udp 17878 / tcp 17879
+  iOS       iPhone 17 Pro 模拟器 / 00000000-FEF7-409D-AE33-803A77C62376 / iOS 26.2
+            屏 402x874 pt（1206x2622 px @3x）/ nodeId 27272e70-6c18-41e0-a3ee-569173f5eee6，昵称「iOS验收」
+  Mac 上的桌面端与 agentNode 控制面（HTTP 8799）作为第三方在场节点，让两端各自有别的会话可看，
+  免得"群里只有我们俩"掩盖归属判断。
+  构建：`:androidApp:installDebug`；iOS 走
+  `cd scaffold/iosApp && JAVA_HOME=/opt/homebrew/opt/openjdk@21 RELAY_MAVEN_MIRROR=aliyun \
+     xcodebuild -project Tidings.xcodeproj -scheme Tidings -configuration Debug -sdk iphonesimulator \
+     -destination 'platform=iOS Simulator,id=00000000-FEF7-409D-AE33-803A77C62376' -derivedDataPath build/dd build`
+
+方法
+  Android 用 `adb shell input tap/swipe/text` + `uiautomator dump` 取坐标；
+  iOS 用 `idb ui tap/describe-all`（坐标是 point，只吃整数）。
+  落盘真值一律从设备里读回来，不看界面猜：
+    Android  `adb shell run-as app.relay cat files/relay/settings.json` / `.../messages.json`
+    iOS      `xcrun simctl spawn $U defaults read "<容器>/Library/Preferences/app.relay" relay.settings.json`
+             （容器 UUID 每次重装都变，现查 `xcrun simctl get_app_container $U app.relay data`）
+  两个坑记在这里：`adb shell input text` 与 `idb ui text` 都注入不了中文
+  （`input text '周末爬山'` → `java.lang.NullPointerException: Attempt to get length of null array
+  at com.android.server.input.InputShellCommand.sendText(InputShellCommand.java:393)`），
+  所以真机建群用的是 ASCII 群名 `Weekend-Hike`；中文群名的渲染由截图参考图
+  `ConversationsGroupPhonePreview`（「周末爬山」）覆盖。
+  建群弹层里输入框一聚焦、软键盘弹出会把对话框整体上移约 395px，之前算好的行坐标全部作废，
+  每次打字后必须重新 dump 再取坐标。
+
+判读·建群与群元数据扇出（问题 1）
+  Android 消息页 →「群聊」节右上「建群」→ 群名 `Weekend-Hike` → 勾选「iOS验收」→ 创建。
+  横幅：「「Weekend-Hike」建好了，正在通知 1 位成员。」群行出现「Weekend-Hike / 1/2 人在线」。
+
+  Android `settings.json` 读回（群列表落在 settings.json，没有新增平台文件）：
+    groupId    "3ae78fe9-b605-4979-80d0-c608877b3cd8"
+    name       "Weekend-Hike"
+    members    ["bc19885f-0775-47a5-8342-662ca227f769", "27272e70-6c18-41e0-a3ee-569173f5eee6"]
+    rev        1
+    updatedBy / creatorId / ownerId  = bc19885f-…（自己）
+    adminIds   []      creatorIp ""      description ""
+
+  iOS `relay.settings.json` 读回：`groups` 与上面**逐字段相同**（同 groupId / name / members / rev /
+  updatedBy / ownerId / adminIds / creatorIp / description）。
+  时序要记一笔：iOS app 被 `simctl terminate` 之后 `groups` 还是 `null`，app 起来并收到一条群文本
+  之后才出现 —— 也就是说"离线成员回来即知道自己在群里"这条是靠群文本触发的
+  `group.need` → 对端 `group.info` 补齐的，不是靠启动时的什么扫描。
+
+判读·发与收（问题 2、3）
+  Android 在群里发 `hello-from-pixel`（`input text` 把连字符吃掉，落成 `hellofrom-pel`），
+  气泡显示「已送达」。
+  iOS 群里立刻出现：署名「我的手机」+ 文本 `hellofrom-pel` + 22:08。
+  iOS 回复 `reply-from-ios`，Android 群里出现：署名「iOS验收」+ 文本 + 22:08。
+
+  Android `messages.json` 的落盘结构（会话键是群，发言人是另一个字段）：
+    threads["group:3ae78fe9-b605-4979-80d0-c608877b3cd8"] = [
+      { senderId: "bc19885f-…", mine: true,  text: "hellofrom-pel",  delivery: "Sent" },
+      { senderId: "27272e70-…", mine: false, text: "reply-from-ios", delivery: null   }
+    ]
+  → 归到的是**群会话**，不是发送者的 1:1 会话；发言人存在 `senderId` 里。
+  → 收端气泡上确实有署名（自己发的那条没有）。
+
+判读·三处真缺陷（截图门禁与 900 条单测全绿时都看不见，只有两台设备真的连起来才显形）
+  ① 会话标签条把群画成 `group:3a`（两端都有）。
+     `NavChrome.kt` 的 `sessionTabsOf` 原来写 `peer?.displayName ?: sessionTabFallbackTitle(id)`，
+     而 `state.peer(id)` 对群会话键 `group:<groupId>` 永远查不到人，于是退化成 `id.take(8)`。
+     修法：标题走 `state.convTitle(id)`（它已经先查群名再查对端昵称）。
+     复验：Android「Weekend-Hike / 关闭 Weekend-Hike」；iOS「Weekend-Hike, 关闭 Weekend-Hike」。
+  ② 群里所有人都在线时仍说「有成员不在线，他们上线后会收到」——差自己那一个。
+     判据原来是 `memberOnlineCount < group.members.size`，而 `memberOnlineCount` 的 KDoc 写明
+     **不含自己**、`group.members` **含自己**。
+     修法：新增 `othersInGroup(group) = (group.members.size - 1).coerceAtLeast(0)`，拿它比。
+     复验：两端群会话里那句话都不再出现（页头仍是「1/2 人在线」，分子不含自己）。
+  ③ 停在会话里收到消息仍累加未读（标签条上挂一个永远不消的红点）。
+     `appendMessage` 里 `if (incoming) unread[...] += 1` 无条件加，而未读只在
+     `selectConversation` / `selectPeer` 里清零，也就是**只在打开/切换时清**。
+     修法：控制器记住 `visibleConversationId`（手机走 `App.kt` 的 `nav.activeSessionId`，
+     桌面壳走它自己的 `selectedPeerId`），正在看的那个会话收到消息不加未读。
+     复验（三帧对照）：
+       a. Android 停在群会话里，iOS 发 `second-from-ios` → 消息落进群（署名「iOS验收」），
+          标签条无红点。
+       b. Android 返回列表后 iOS 再发 `third-from-ios` → 群行立刻出现红点「1」
+          （反例成立：不是"永远不提醒"）。
+       c. iOS 停在群会话里，Android 发 `fourth-fro-pxel` → iOS 群里看到署名「我的手机」的那条，
+          标签条无红点。
+     这条对 1:1 同样成立，不是群独有。
+
+仍未覆盖（如实记，不当作已通过）
+  - 群成员变化（加人 / 移人）与随之而来的 `group.need` 重新同步没有在真机上制造过：
+    只验了"本地不认识的群，收到群文本后补齐元数据"这一条路径。
+  - 群里发文件没接：协议允许（媒体上下文带 `groupId`，收端按它归到群会话），但本端刻意
+    不在群会话里画附件按钮（`onAttachFile?.takeIf { group == null }`），这条出口没验过。
+  - `grp1`（实现里叫 `gr1`）整块不做：群主/管理员角色矩阵、管理密码、离组重邀的按步重放都没实现，
+    本端也**不声明** `gr1`。真机上没有制造过"对端改了角色"这类帧。
+  - 中文群名只能靠截图参考图覆盖（`input text` 注不进中文，见上）。
+  - 会话标签条的关闭/切换在群里没逐个点过（只验了标题、未读两件事）。
+  - 桌面端与平板的群画面只有截图参考图（`desk-group-expanded`），没有真机/真窗口验收。

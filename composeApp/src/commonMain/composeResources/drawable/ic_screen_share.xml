@@ -1,0 +1,24 @@
+<!-- 按原型 sprite `i-screen` 逐条搬运（path 逐字一致，只换成 stroke 语言）。
+     原型：<path d="M3 5h18v11H3z"/><path d="M9 20h6M12 16v4"/>
+     旧版是 Material `ScreenShare` 的 fill 单路径，且 fillColor 写成 #FFFFFFFF
+     （在浅色主题下等于不可见）；此处一并按 ic_folder/ic_search 同规格改回 stroke。 -->
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="24dp"
+    android:height="24dp"
+    android:viewportWidth="24"
+    android:viewportHeight="24">
+    <path
+        android:strokeColor="#000000"
+        android:strokeWidth="1.7"
+        android:strokeLineCap="round"
+        android:strokeLineJoin="round"
+        android:fillColor="#00000000"
+        android:pathData="M3 5h18v11H3z" />
+    <path
+        android:strokeColor="#000000"
+        android:strokeWidth="1.7"
+        android:strokeLineCap="round"
+        android:strokeLineJoin="round"
+        android:fillColor="#00000000"
+        android:pathData="M9 20h6M12 16v4" />
+</vector>

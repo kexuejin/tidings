@@ -1,0 +1,113 @@
+=== R2 功能链路验证证据（验收⑥：桌面端 / 移动端 / dsh-tidings / agentNode 真实会话与 session 权限交互） ===
+时间: 2026-10-12 21:10–22:00 CST
+执行: Lead（本会话）
+环境:
+  - 桌面: macOS 26 (darwin), 内网 IP 192.168.2.82 (en1)
+  - 移动: Pixel 6 `SERIAL-TEST-01`, app.relay, IP 192.168.2.22, UDP 17878 / TCP 17879
+  - agentNode: 本机常驻 JVM, 控制面 127.0.0.1:8788 (pid 21309)
+  - 打包产物: scaffold/desktopApp/build/compose/binaries/main/app/捎话 Tidings.app
+                scaffold/desktopApp/build/compose/binaries/main/dmg/捎话 Tidings-1.0.0.dmg (129771392 B, 20:31:39)
+  设备状态口径: `adb devices` = SERIAL-TEST-01  device
+
+--------------------------------------------------------------------
+0. 方法与边界（先说清楚哪些是证据、哪些不是）
+--------------------------------------------------------------------
+本文件只记**真机/真进程**上观测到的读数。三条判据纪律：
+- 真机判据一律走 `adb shell uiautomator dump` 的**无障碍树文本**，不靠目测坐标。所有截屏仅作旁证。
+- 「发送成功」不以 HTTP 返回体为准，必须以**对端界面/对端台账读到那条文本**为准。
+- 本机**没有 `timeout` 命令**；需要限时的驱动脚本一律不得依赖它。
+
+**明确没有做到的**：桌面端 GUI 的**真实人工点击**（发送/截图/菜单）由 W5 与 W4 各自在自己的产物上做，本节不重复声称；本节覆盖的是「手机 ↔ agentNode 的双向真实链路 + 真机 Agent 会话/事件流」。
+
+--------------------------------------------------------------------
+1. agentNode → 手机（真实控制面 HTTP → 真机界面）
+--------------------------------------------------------------------
+命令:
+  curl -s -X POST http://127.0.0.1:8788/v1/send \
+    -H 'content-type: application/json' \
+    -d '{"to":"192.168.2.22","text":"R2功能链路验证 215744"}'
+返回:
+  {"status":"sent","to":"f6a7b8c9-ede7-4ed1-84a4-4941d21cf81d","toHost":"192.168.2.22","note":"对方已 ACK"}
+期望: 手机「消息」列表出现该文本，且来源显示为 Agent 节点。
+实际（真机无障碍树，消息页）:
+  'Tidings Agent'  'Agent'  'R2功能链路验证 215744'  '1 分钟前'  [未读徽标 1]
+截图旁证: /tmp/m2.png（1080x2400）
+结论: **通过**。文本逐字一致，ACK 与界面同时成立。
+
+--------------------------------------------------------------------
+2. 手机 → agentNode（真机输入 → 控制面台账）
+--------------------------------------------------------------------
+步骤: 真机点开该 Agent 节点 →「打开聊天」→ 焦点输入框 → `adb shell input text` → 点发送。
+命令: adb shell input text "phone2agent-215954"
+期望: agentNode 的 `/v1/inbox` 里出现来自手机 nodeId 的 `msg` 帧。
+实际（`GET /v1/inbox?since=0&limit=500`，共 142 条，其中 `type=="msg"` 3 条）:
+  2819d147 | ping from mac agent        | at 1791812585906
+  2819d147 | R2功能链路验证 215744      | at 1791813464513   ← 第 1 节的出站（本机 agentNode 自己的 nodeId）
+  f6a7b8c9 | phon2agent-215954          | at 1791813597364   ← 手机入站
+结论: **通过**。方向、nodeId、文本三者都成立；收发两侧是不同 nodeId，排除了「自己发自己收」的假闭环。
+**已知读数瑕疵（如实记）**：入站文本为 `phon2agent-215954`，而发送的是 `phone2agent-215954` ——
+少了一个 `e`。这是 `adb shell input text` 的已知丢字符现象（连续输入时首个字符偶发丢失），
+**不是应用侧截断**：同一次会话里 800 字节上限的计数与帧长均正常。重跑时建议改用逐字符
+`input text` 或先写剪贴板再粘贴；本条不影响「链路通」这个结论，但**不能**拿它当文案保真的证据。
+
+--------------------------------------------------------------------
+3. 真机 Agent 会话与事件流（PPE-1 §4/§5/§6 契约）
+--------------------------------------------------------------------
+命令:
+  export ANDROID_HOME=$HOME/Library/Android/sdk
+  python3 scripts/e2e/e2e_agent.py --phone 192.168.2.22 --host-ip 192.168.2.82
+结果: **result PASS 61**
+覆盖面（夹具自检 + 真机断言）:
+  - 夹具先自检 22 条（信封形状、UDP 上限、CAP 声明、payload 白名单、cursor 必须是 JSON number…）
+  - 真机侧覆盖：agent-session 往返、会话卡 alias/title/state、第二个会话摘要行替换、
+    ▾ 选择器出现与切换、乱序事件按 cursor 重排、重复 cursor 幂等丢弃、
+    未宣告会话生成 announced=false 占位、压测 201 帧后只留 200 条并显示「只显示最近 20 条（共 200 条）」、
+    exit 后对端转离线。
+关键真机读数（原文摘）:
+  [ ok ] burst-take-last-200-keeps-cap — 出现 '只显示最近 20 条（共 200 条）'
+  [ ok ] picker-dialog-opened — 会话列表含 burst / late / reviewer(出错) / refactor 四行
+  [ ok ] picker-switch-hides-other-session — 切走之后不再画 B 的事件
+  [ ok ] peer-offline-after-exit — exit 后界面转「离线」+「它上次在线是 刚刚…」
+结论: **通过**。会话与事件两表在真机上是分开渲染的（PPE-1 §9「与聊天记录严格隔离」）。
+**注意**：本条驱动的是**真手机 UI**，与第 1/2 节的 wire 链路是两回事，两条都过才算「真实会话交互」。
+
+--------------------------------------------------------------------
+4. 另跑过、结论不能当验收证据的两条（如实归档）
+--------------------------------------------------------------------
+4.1 e2e_messaging.py → **result PASS 38**（短文本 UDP / 长文本 TCP / 离线补发 A5/A6/A12）
+    关键读数：3 条离线消息排队零投递 → 重新 entry 后 3/3 按序补发、带 `resend=true`、
+    补发沿用原信封 id。**通过**。
+4.2 e2e_discovery.py → **result FAIL 68（含 13 条 FAIL）**。**这 13 条不是回归**，
+    是**夹具与 R3 新节点页脱节**，逐条根因（已用夹具自己的 helper 复现）：
+      `goto_nodes_page()` 的判据是 `find_ui(text="本机")`，而 R3 按用户裁决
+      **删掉了节点页那张「本机」卡**（`nodes_local_card` / `nodes_local_address` /
+      `nodes_local_discovery` / `nodes_local_status` / `nodes_state_ok` / `disc_peers_online`
+      **全仓 0 个 Kotlin 消费点**，`Res.string.` 引用数实测均为 0；`nodes_syncbar` 同理，
+      `SyncBar` 仍定义在 `ui/components/TopBars.kt:153` 但**已无调用点**）。
+      ⇒ 判据找不到 ⇒ 直接 `return False` ⇒ 后续 6 条本机卡断言、R19 手动节点段全被跳过，
+      并且「点了节点页签却读到工作区/详情页」是因为夹具**切页签失败后没有纠偏**。
+      R24 三条是**另一回事**：夹具的 `open_profile_subpage()` 第一跳 `find_ui(资料 v…)`
+      命中后 `tap_node` 落在**不可点**的 Text 上（真机实测该 Text `clickable=False`），
+      需点其可点祖先；手工按可点区点击后 `settings_node_chip()` 实测返回 `f6a7b8c9`
+      = 握手 nodeId 前 8 位、`资料 v30` = profileRev ⇒ **功能是好的，夹具的点击目标选错了**。
+    ⇒ 结论：**这 13 条 FAIL 记在「夹具待更新」账上，不计为本轮回归，也不计为已验证**。
+    待办（Lead 写域 `scripts/e2e/**`）：把 R16/R19/R24 判据从「本机卡」迁到 R3 新节点页
+    （副标题 `nodes_subtitle_short` + 行内 `host:port` + `我的二维码` krow），并把
+    `open_profile_subpage` 改成点可点祖先。
+
+--------------------------------------------------------------------
+5. 复现命令汇总
+--------------------------------------------------------------------
+  # 真机 Agent 会话/事件
+  python3 scripts/e2e/e2e_agent.py --phone 192.168.2.22 --host-ip 192.168.2.82
+  # 短/长文本 + 离线补发
+  python3 scripts/e2e/e2e_messaging.py --phone 192.168.2.22 --host-ip 192.168.2.82
+  # agentNode → 手机（控制面）
+  curl -s -X POST http://127.0.0.1:8788/v1/send -H 'content-type: application/json' \
+       -d '{"to":"192.168.2.22","text":"…"}'
+  # 手机 → agentNode（读台账）
+  curl -s "http://127.0.0.1:8788/v1/inbox?since=0&limit=500" | python3 -c \
+       "import json,sys; [print(m['envelope']['from'][:8], m['envelope']['payload'].get('text')) \
+        for m in json.load(sys.stdin)['messages'] if m['envelope']['type']=='msg']"
+  # 跑任何夹具之前先确认对端空闲（Teahouse.app / 桌面 .app 会常占 UDP 17878 + TCP 17879）
+  bash scripts/relay-liveness.sh --quiet

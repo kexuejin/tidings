@@ -1,0 +1,2944 @@
+{
+  "app": {
+    "name": "Tidings",
+    "platforms": [
+      "android",
+      "ios"
+    ],
+    "package": "app.relay"
+  },
+  "targets": {
+    "sharedModule": "composeApp",
+    "androidShell": "androidApp",
+    "iosShell": "iosApp",
+    "commonUi": true,
+    "commonResources": true
+  },
+  "tokens": {
+    "colors": {
+      "agentAccent": "#6B4EE6",
+      "agentAccentContainer": "#E6E0FB",
+      "agentAccentText": "#5333C9",
+      "background": "#FAFAF8",
+      "badge": "#C1341F",
+      "cardShadow": "#A6101814",
+      "error": "#E63946",
+      "errorContainer": "#FFDAD6",
+      "inverseOnSurface": "#F0EFE9",
+      "inversePrimary": "#B7E4C7",
+      "inverseSurface": "#2A2C2B",
+      "onBackground": "#1A1C1A",
+      "onBadge": "#FFFFFF",
+      "onError": "#FFFFFF",
+      "onErrorContainer": "#93000A",
+      "onPrimary": "#FFFFFF",
+      "onPrimaryContainer": "#1B4332",
+      "onSecondary": "#FFFFFF",
+      "onSecondaryContainer": "#5C3D1E",
+      "onSurface": "#1A1C1A",
+      "onSurfaceVariant": "#5C5F5C",
+      "onTertiary": "#FFFFFF",
+      "online": "#2E9E5B",
+      "outline": "#D4D4D0",
+      "outlineVariant": "#12000000",
+      "primary": "#2D6A4F",
+      "primaryContainer": "#B7E4C7",
+      "scrim": "#000000",
+      "secondary": "#D4A373",
+      "secondaryContainer": "#F5E6D3",
+      "surface": "#FFFFFF",
+      "surface3": "#E4E9E7",
+      "surfaceBright": "#FFFFFF",
+      "surfaceContainer": "#F6F5F0",
+      "surfaceContainerHigh": "#F3F2EC",
+      "surfaceContainerHighest": "#F0EFE9",
+      "surfaceContainerLow": "#FAFAF8",
+      "surfaceContainerLowest": "#FFFFFF",
+      "surfaceDim": "#EFEEE8",
+      "surfaceTint": "#FFFFFF",
+      "surfaceVariant": "#F0EFE9",
+      "tertiary": "#457B9D"
+    },
+    "colorsDark": {
+      "agentAccent": "#B9A6FF",
+      "agentAccentContainer": "#312A52",
+      "agentAccentText": "#C9BCFF",
+      "background": "#121413",
+      "badge": "#FFB4AB",
+      "cardShadow": "#000000",
+      "error": "#FFB4AB",
+      "errorContainer": "#93000A",
+      "inverseOnSurface": "#2A2C2B",
+      "inversePrimary": "#2D6A4F",
+      "inverseSurface": "#E8E8E6",
+      "onBackground": "#E8E8E6",
+      "onBadge": "#5C0011",
+      "onError": "#690005",
+      "onErrorContainer": "#FFDAD6",
+      "onPrimary": "#003826",
+      "onPrimaryContainer": "#B7E4C7",
+      "onSecondary": "#3D2000",
+      "onSecondaryContainer": "#F5E6D3",
+      "onSurface": "#E8E8E6",
+      "onSurfaceVariant": "#A0A3A0",
+      "onTertiary": "#003542",
+      "online": "#6FD69A",
+      "outline": "#3A3C3B",
+      "outlineVariant": "#17FFFFFF",
+      "primary": "#74C69D",
+      "primaryContainer": "#1B4332",
+      "scrim": "#000000",
+      "secondary": "#E9C46A",
+      "secondaryContainer": "#5C3D1E",
+      "surface": "#1E201F",
+      "surface3": "#2B3331",
+      "surfaceBright": "#353837",
+      "surfaceContainer": "#222423",
+      "surfaceContainerHigh": "#262827",
+      "surfaceContainerHighest": "#2A2C2B",
+      "surfaceContainerLow": "#1E201F",
+      "surfaceContainerLowest": "#161817",
+      "surfaceDim": "#121413",
+      "surfaceTint": "#1E201F",
+      "surfaceVariant": "#2A2C2B",
+      "tertiary": "#89B4C8"
+    },
+    "colorNotes": {
+      "source": "浅色取 ui/theme/Color.kt 的 RelayLightColors，深色取 RelayDarkColors；agentAccent / agentAccentContainer / online 两态在 ui/theme/Accents.kt（M3 的 ColorScheme 没有对应槽，用 CompositionLocal 挂），queued 深色值 #E3B75A 来自原型、代码里还没有对应槽。",
+      "hairline": "outlineVariant 两态必须显式钉死（浅 #E4E9E7 / 深 #2B3331）：M3 默认值是紫调的 #CAC4D0 / #49454F，落在这套暖中性色板上会显脏。发丝线的低对比（深 1.47:1、浅 1.23:1）是设计意图，不计入无障碍缺陷。",
+      "textContrast": "文字与状态点必须 ≥4.5:1（大字 ≥3:1）。原型的深色值正是按这条选的：#B9A6FF on #312A52 = 6.29:1、#6FD69A on #121413 = 10.36:1、#E3B75A on #121413 = 9.85:1。排队色当文字时用 secondaryContainer/onSecondaryContainer 那对（浅 8.01:1），不要用 queued 本身（浅色下只有 1.60:1）。",
+      "palette": {
+        "note": "设计侧批准过的核心调色板角色。tokens.colors 现在是代码全量投影（42 键/主题），这个列表保留「哪些是设计明确批准过的」这一信息，不参与漂移比对。",
+        "roles": [
+          "primary",
+          "onPrimary",
+          "primaryContainer",
+          "onPrimaryContainer",
+          "secondary",
+          "secondaryContainer",
+          "tertiary",
+          "error",
+          "errorContainer",
+          "background",
+          "surface",
+          "surfaceVariant",
+          "onSurface",
+          "onSurfaceVariant",
+          "outline",
+          "outlineVariant",
+          "inverseSurface",
+          "inverseOnSurface",
+          "scrim",
+          "accent"
+        ]
+      }
+    },
+    "prototypeOnly": {
+      "note": "原型 prototype/relay.html（2026-10-07 起手机+平板+桌面三端合一；旧的双单端稿 prototype/index.html 与 prototype/desktop/index.html 已并入它并删除）里有、代码里没有对应 token 的项，按原型视觉保留。不要为了消除这个标记而硬造 schema。下面逐项登记 2026-10-05 收敛清单里的 6 项及其现状。",
+      "queued": {
+        "light": "#E9C46A",
+        "dark": "#E3B75A",
+        "status": "code-has-no-slot",
+        "why": "浅色 secondary 是 #D4A373、深色 secondary 是 #E9C46A，两边都不等于它；真要上排队徽标得先给这个槽定值，而不是在 accents 里再挂一份各说各话的。"
+      },
+      "menubarBg": {
+        "light": "#E4E7E6",
+        "dark": "#1B211F",
+        "status": "code-approximates",
+        "why": "桌面菜单栏用 surfaceVariant 近似，与原型有细微色差；菜单栏本身已随桌面壳落地，这个差值不值得为它加 token。"
+      },
+      "agentAccent": {
+        "light": "#6B4EE6",
+        "dark": "#B9A6FF",
+        "status": "adopted",
+        "where": "ui/theme/Accents.kt（RelayLightAccents / RelayDarkAccents）"
+      },
+      "agentAccentContainer": {
+        "light": "#E6E0FB",
+        "dark": "#312A52",
+        "status": "adopted",
+        "where": "ui/theme/Accents.kt"
+      },
+      "online": {
+        "light": "#2E9E5B",
+        "dark": "#6FD69A",
+        "status": "adopted",
+        "where": "ui/theme/Accents.kt（浅色即 RelaySuccess）"
+      },
+      "hairline": {
+        "light": "#E4E9E7",
+        "dark": "#2B3331",
+        "status": "adopted",
+        "where": "ui/theme/Color.kt 的 outlineVariant 两态"
+      },
+      "monoSmall": {
+        "status": "code-has-no-slot",
+        "declared": {
+          "sizeSp": 12,
+          "weight": "medium"
+        },
+        "why": "规范里声明了 monoSmall 字阶角色，代码 RelayTypography 的 15 个角色里没有它，全仓 0 处引用。代码表达等宽字用的是 FontFamily.Monospace（7 处），是字体族不是字阶角色。要么给 RelayTypography 补这个角色，要么从规范里删掉。"
+      }
+    },
+    "typography": {
+      "displayLarge": {
+        "weight": "regular",
+        "sizeSp": 57,
+        "lineHeightSp": 64,
+        "letterSpacingSp": -0.25
+      },
+      "displayMedium": {
+        "weight": "regular",
+        "sizeSp": 45,
+        "lineHeightSp": 52,
+        "letterSpacingSp": 0
+      },
+      "displaySmall": {
+        "weight": "regular",
+        "sizeSp": 36,
+        "lineHeightSp": 44,
+        "letterSpacingSp": 0
+      },
+      "headlineLarge": {
+        "weight": "semibold",
+        "sizeSp": 32,
+        "lineHeightSp": 40,
+        "letterSpacingSp": 0
+      },
+      "headlineMedium": {
+        "weight": "semibold",
+        "sizeSp": 28,
+        "lineHeightSp": 36,
+        "letterSpacingSp": 0
+      },
+      "headlineSmall": {
+        "weight": "semibold",
+        "sizeSp": 24,
+        "lineHeightSp": 32,
+        "letterSpacingSp": 0
+      },
+      "titleLarge": {
+        "weight": "semibold",
+        "sizeSp": 22,
+        "lineHeightSp": 28,
+        "letterSpacingSp": 0
+      },
+      "titleMedium": {
+        "weight": "medium",
+        "sizeSp": 16,
+        "lineHeightSp": 24,
+        "letterSpacingSp": 0.15
+      },
+      "titleSmall": {
+        "weight": "medium",
+        "sizeSp": 14,
+        "lineHeightSp": 20,
+        "letterSpacingSp": 0.1
+      },
+      "bodyLarge": {
+        "weight": "regular",
+        "sizeSp": 16,
+        "lineHeightSp": 24,
+        "letterSpacingSp": 0.5
+      },
+      "bodyMedium": {
+        "weight": "regular",
+        "sizeSp": 14,
+        "lineHeightSp": 20,
+        "letterSpacingSp": 0.25
+      },
+      "bodySmall": {
+        "weight": "regular",
+        "sizeSp": 12,
+        "lineHeightSp": 16,
+        "letterSpacingSp": 0.4
+      },
+      "labelLarge": {
+        "weight": "medium",
+        "sizeSp": 14,
+        "lineHeightSp": 20,
+        "letterSpacingSp": 0.1
+      },
+      "labelMedium": {
+        "weight": "medium",
+        "sizeSp": 12,
+        "lineHeightSp": 16,
+        "letterSpacingSp": 0.5
+      },
+      "labelSmall": {
+        "weight": "medium",
+        "sizeSp": 11,
+        "lineHeightSp": 16,
+        "letterSpacingSp": 0.5
+      }
+    },
+    "spacing": {
+      "xxs": 2,
+      "oxs3": 3,
+      "xs": 4,
+      "oxs5": 5,
+      "sm6": 6,
+      "osm7": 7,
+      "sm": 8,
+      "osm9": 9,
+      "md10": 10,
+      "olg11": 11,
+      "md": 12,
+      "olg13": 13,
+      "lg14": 14,
+      "lg": 16,
+      "xl": 24,
+      "xxl": 32,
+      "xxxl": 48
+    },
+    "shape": {
+      "extraSmall": 4,
+      "small": 8,
+      "medium": 12,
+      "large": 16,
+      "extraLarge": 28
+    },
+    "shapeSemantics": {
+      "bubble": {
+        "radiusDp": 12,
+        "scaleSlot": "medium",
+        "mode": "slot",
+        "note": "原规范写 bubble=18.dp，但代码里 0 处 18.dp：真实气泡圆角是 MaterialTheme.shapes.medium(12.dp)，证据 composeApp/src/commonMain/kotlin/app/relay/feature/chat/ChatScreen.kt:801。按权威源=代码收敛为 12/medium；若要恢复 18.dp 必须**先改代码再改规范**，不许反向覆盖。"
+      },
+      "card": {
+        "radiusDp": 16,
+        "scaleSlot": "large",
+        "mode": "raw",
+        "note": "卡片语义值 16.dp = shapes.large。实测代码里 3 处字面 16.dp + 2 处具名圆角 16.dp，走槽位(MaterialTheme.shapes.large) 0 处 —— 属「该走槽位却写了字面量」，所以 mode 记 raw 而不是 slot。"
+      },
+      "control": {
+        "radiusDp": 12,
+        "scaleSlot": "medium",
+        "mode": "slot",
+        "note": "按钮/输入框等控件圆角 12.dp = shapes.medium。已 12 处走槽位，是本仓库形状层唯一成规模消费的槽位。"
+      },
+      "chip": {
+        "radiusDp": 999,
+        "scaleSlot": null,
+        "mode": "circle",
+        "note": "胶囊/头像用全圆角，代码里以 CircleShape 表达（25 处），不是 999.dp 的数字写法。"
+      },
+      "sheet": {
+        "radiusDp": 28,
+        "scaleSlot": "extraLarge",
+        "mode": "m3-internal",
+        "note": "底部弹层 28.dp = shapes.extraLarge。代码里 0 处显式调用，由 M3 ModalBottomSheet 默认取 extraLarge 消费，属「M3 组件内部派生消费」。"
+      }
+    },
+    "elevation": {
+      "card": 1,
+      "sheet": 3,
+      "floating": 6
+    },
+    "iconSizes": {
+      "badge": 11,
+      "inline": 14,
+      "label": 16,
+      "body": 18,
+      "title": 20,
+      "hero": 30
+    },
+    "pendingNotes": {
+      "colors.inverseSurface": "为阻止 M3 基线紫回退而显式赋值的反色面（Snackbar/反色容器），由 M3 组件内部派生消费，无显式调用点。",
+      "colors.inverseOnSurface": "同上，反色面上的前景色，由 M3 组件内部派生消费。",
+      "colors.inversePrimary": "同上，反色面上的强调色，由 M3 组件内部派生消费。",
+      "colors.surfaceTint": "海拔叠层族：M3 组件按标高取 surfaceTint 叠层，无显式调用点；显式赋值是为了钉死浅色面不落回 M3 基线 #F3EDF7。",
+      "colors.surfaceBright": "海拔叠层族，同上，由 M3 内部派生消费。",
+      "colors.surfaceDim": "海拔叠层族，同上，由 M3 内部派生消费。",
+      "colors.surfaceContainerHigh": "海拔叠层族，同上，由 M3 内部派生消费。",
+      "colors.surfaceContainerLowest": "海拔叠层族，同上，由 M3 内部派生消费。",
+      "colors.secondary": "调色板里已定义但当前无显式消费点；M3 默认组件内部可能取用。要么用起来要么删，属待决欠债。",
+      "colors.onSecondary": "同上，secondary 的前景色，无显式消费点。",
+      "colors.onTertiary": "同上，tertiary 的前景色（tertiary 本身只有 1 处消费）。",
+      "colors.onBackground": "组件统一写 onSurface，onBackground 无显式调用点；两值相同（#1A1C1B）。",
+      "colors.onError": "错误色只用到 error / errorContainer / onErrorContainer，onError 无显式调用点。",
+      "typography.displayLarge": "字阶定义了但界面没有用到大号角色；要么用要么删，属待决欠债（display/headline 共 5 个角色全 pending）。",
+      "typography.displayMedium": "同上。",
+      "typography.displaySmall": "同上。",
+      "typography.headlineLarge": "同上。",
+      "typography.headlineMedium": "同上。",
+      "spacing.xxs": "旧档：迁移批次进行中（2026-10-10 起按屏逐文件迁 LocalAppSpacing.current.*），本档尚无消费点属计划内欠债，不是裁决遗留。",
+      "spacing.xs": "旧档：迁移批次进行中（2026-10-10 起按屏逐文件迁 LocalAppSpacing.current.*），本档尚无消费点属计划内欠债，不是裁决遗留。",
+      "spacing.sm": "旧档：迁移批次进行中（2026-10-10 起按屏逐文件迁 LocalAppSpacing.current.*），本档尚无消费点属计划内欠债，不是裁决遗留。",
+      "spacing.md": "旧档：迁移批次进行中（2026-10-10 起按屏逐文件迁 LocalAppSpacing.current.*），本档尚无消费点属计划内欠债，不是裁决遗留。",
+      "spacing.lg": "旧档：迁移批次进行中（2026-10-10 起按屏逐文件迁 LocalAppSpacing.current.*），本档尚无消费点属计划内欠债，不是裁决遗留。",
+      "spacing.xl": "旧档：迁移批次进行中（2026-10-10 起按屏逐文件迁 LocalAppSpacing.current.*），本档尚无消费点属计划内欠债，不是裁决遗留。",
+      "spacing.xxl": "旧档：迁移批次进行中（2026-10-10 起按屏逐文件迁 LocalAppSpacing.current.*），本档尚无消费点属计划内欠债，不是裁决遗留。",
+      "spacing.xxxl": "旧档：迁移批次进行中（2026-10-10 起按屏逐文件迁 LocalAppSpacing.current.*），本档尚无消费点属计划内欠债，不是裁决遗留。",
+      "shape.extraSmall": "槽位有值(4.dp)但代码写了 11 处字面 4.dp，走槽位 0 处。",
+      "shape.large": "槽位有值(16.dp)但代码写了 3 处字面 + 2 处具名圆角，走槽位 0 处。",
+      "shape.extraLarge": "槽位有值(28.dp)，代码 0 处显式调用；由 M3 ModalBottomSheet 内部取用（见 shapeSemantics.sheet）。",
+      "iconSizes.badge": "图标尺寸 token（2026-10-10 新增，原型 15 档归并为 6 档）。迁移批次进行中：优先迁干净文件（CaptureOverlayView 已迁 8 处），对面会话在途文件（CabinetScreen/PeerCabinetView 等）等其收尾后随屏迁。",
+      "iconSizes.inline": "图标尺寸 token（2026-10-10 新增，原型 15 档归并为 6 档）。迁移批次进行中：优先迁干净文件（CaptureOverlayView 已迁 8 处），对面会话在途文件（CabinetScreen/PeerCabinetView 等）等其收尾后随屏迁。",
+      "iconSizes.label": "图标尺寸 token（2026-10-10 新增，原型 15 档归并为 6 档）。迁移批次进行中：优先迁干净文件（CaptureOverlayView 已迁 8 处），对面会话在途文件（CabinetScreen/PeerCabinetView 等）等其收尾后随屏迁。",
+      "iconSizes.hero": "图标尺寸 token（2026-10-10 新增，原型 15 档归并为 6 档）。迁移批次进行中：优先迁干净文件（CaptureOverlayView 已迁 8 处），对面会话在途文件（CabinetScreen/PeerCabinetView 等）等其收尾后随屏迁。",
+      "spacing.oxs3": "G2 裁决 A 奇数节奏档（2026-10-15）：3px 渲染 1358 处、集中在 gap/padT/padB（.ri×360/.sender×218），最短发丝级的元素间距。尚未接消费点，随逐屏清扫落。",
+      "spacing.oxs5": "G2 裁决 A：5px 渲染 2488 处（档外第一大户，gap×1518）。随清扫落。",
+      "spacing.osm7": "G2 裁决 A：7px 渲染 908 处（.li×412 列表行内）。随清扫落。",
+      "spacing.osm9": "G2 裁决 A：9px 渲染 1378 处（.li×412/.sm×232）。随清扫落。",
+      "spacing.olg11": "G2 裁决 A：11px 渲染 467 处（.krow/.fchip 控件行内）。随清扫落。",
+      "spacing.olg13": "G2 裁决 A：13px 渲染 436 处（.padc/.titlebar 卡片与标题栏内边距）。随清扫落。",
+      "colors.cardShadow": "0 消费但必须保留的派生色（#A6101814 = 卡片投影色）：cardShadow 由 Card/relayCardShadow 容器派生使用，不是直接调用点。保留原因见 fidelity-deviations 影家族记录。",
+      "weights.emphasis": "字重语义角色（G2 裁决 C，2026-10-15 新增）：原型强调层 700×514 处（.mav/.tt/.dot/.ell 名字与标题族），M3 Typography 15 角色已上线且无 Bold，故走独立 token 而非改 shipped 权重。消费点随下一批功能改动落。",
+      "shapeRoles.dayCell": "G2 裁决 B 新增：原型 radius 7×660（420 处集中在 .hsdays 日期格族）。消费点 HistorySearchOverlay 的日期格——该文件本批已改，重新投影后 sites 会从 0 变正；记此条防 0 消费被误判为死 token。"
+    },
+    "usage": {
+      "note": "本段是投影，不是手写：sites 只数**真的引用了该 token** 的代码行（正则由 token 名推导）；status=enforced 表示有真实消费点，pending 表示 0 处消费、必须在 tokens.pendingNotes 里写明原因。",
+      "groups": {
+        "colors": {
+          "agentAccent": {
+            "sites": 1,
+            "status": "enforced",
+            "first": "composeApp/src/commonMain/kotlin/app/relay/ui/components/Common.kt:183"
+          },
+          "agentAccentContainer": {
+            "sites": 2,
+            "status": "enforced",
+            "first": "composeApp/src/commonMain/kotlin/app/relay/ui/components/Common.kt:177"
+          },
+          "agentAccentText": {
+            "sites": 1,
+            "status": "enforced",
+            "first": "composeApp/src/commonMain/kotlin/app/relay/ui/components/Common.kt:235"
+          },
+          "background": {
+            "sites": 8,
+            "status": "enforced",
+            "first": "composeApp/src/commonMain/kotlin/app/relay/ui/desktop/CabinetPane.kt:191"
+          },
+          "badge": {
+            "sites": 3,
+            "status": "enforced",
+            "first": "composeApp/src/commonMain/kotlin/app/relay/ui/desktop/DesktopNavigation.kt:172"
+          },
+          "cardShadow": {
+            "sites": 0,
+            "status": "pending"
+          },
+          "error": {
+            "sites": 37,
+            "status": "enforced",
+            "first": "composeApp/src/commonMain/kotlin/app/relay/ui/desktop/DesktopChrome.kt:508"
+          },
+          "errorContainer": {
+            "sites": 10,
+            "status": "enforced",
+            "first": "composeApp/src/commonMain/kotlin/app/relay/ui/components/Common.kt:404"
+          },
+          "inverseOnSurface": {
+            "sites": 0,
+            "status": "pending"
+          },
+          "inversePrimary": {
+            "sites": 0,
+            "status": "pending"
+          },
+          "inverseSurface": {
+            "sites": 0,
+            "status": "pending"
+          },
+          "onBackground": {
+            "sites": 0,
+            "status": "pending"
+          },
+          "onBadge": {
+            "sites": 3,
+            "status": "enforced",
+            "first": "composeApp/src/commonMain/kotlin/app/relay/ui/desktop/DesktopNavigation.kt:173"
+          },
+          "onError": {
+            "sites": 2,
+            "status": "enforced",
+            "first": "composeApp/src/commonMain/kotlin/app/relay/ui/components/VoiceRecordDialog.kt:162"
+          },
+          "onErrorContainer": {
+            "sites": 14,
+            "status": "enforced",
+            "first": "composeApp/src/commonMain/kotlin/app/relay/ui/desktop/DesktopSettingsChrome.kt:474"
+          },
+          "onPrimary": {
+            "sites": 14,
+            "status": "enforced",
+            "first": "composeApp/src/commonMain/kotlin/app/relay/ui/desktop/CabinetPane.kt:464"
+          },
+          "onPrimaryContainer": {
+            "sites": 21,
+            "status": "enforced",
+            "first": "composeApp/src/commonMain/kotlin/app/relay/ui/desktop/DesktopChrome.kt:656"
+          },
+          "onSecondary": {
+            "sites": 0,
+            "status": "pending"
+          },
+          "onSecondaryContainer": {
+            "sites": 13,
+            "status": "enforced",
+            "first": "composeApp/src/commonMain/kotlin/app/relay/ui/desktop/DesktopConversationWidgets.kt:376"
+          },
+          "onSurface": {
+            "sites": 70,
+            "status": "enforced",
+            "first": "composeApp/src/commonMain/kotlin/app/relay/ui/desktop/DesktopChrome.kt:251"
+          },
+          "onSurfaceVariant": {
+            "sites": 342,
+            "status": "enforced",
+            "first": "composeApp/src/commonMain/kotlin/app/relay/ui/AppStates.kt:104"
+          },
+          "onTertiary": {
+            "sites": 0,
+            "status": "pending"
+          },
+          "online": {
+            "sites": 9,
+            "status": "enforced",
+            "first": "composeApp/src/commonMain/kotlin/app/relay/ui/desktop/DesktopNodesPane.kt:345"
+          },
+          "outline": {
+            "sites": 19,
+            "status": "enforced",
+            "first": "composeApp/src/commonMain/kotlin/app/relay/ui/desktop/CabinetPane.kt:784"
+          },
+          "outlineVariant": {
+            "sites": 36,
+            "status": "enforced",
+            "first": "composeApp/src/commonMain/kotlin/app/relay/ui/desktop/DesktopChatPane.kt:202"
+          },
+          "primary": {
+            "sites": 77,
+            "status": "enforced",
+            "first": "composeApp/src/commonMain/kotlin/app/relay/ui/SectionCard.kt:72"
+          },
+          "primaryContainer": {
+            "sites": 29,
+            "status": "enforced",
+            "first": "composeApp/src/commonMain/kotlin/app/relay/ui/desktop/CabinetPane.kt:277"
+          },
+          "scrim": {
+            "sites": 1,
+            "status": "enforced",
+            "first": "desktopApp/src/main/kotlin/app/relay/desktop/DesktopHosting.kt:422"
+          },
+          "secondary": {
+            "sites": 0,
+            "status": "pending"
+          },
+          "secondaryContainer": {
+            "sites": 8,
+            "status": "enforced",
+            "first": "composeApp/src/commonMain/kotlin/app/relay/ui/desktop/CabinetPane.kt:318"
+          },
+          "surface": {
+            "sites": 103,
+            "status": "enforced",
+            "first": "composeApp/src/commonMain/kotlin/app/relay/App.kt:146"
+          },
+          "surface3": {
+            "sites": 7,
+            "status": "enforced",
+            "first": "composeApp/src/commonMain/kotlin/app/relay/ui/desktop/DesktopSettingsChrome.kt:276"
+          },
+          "surfaceBright": {
+            "sites": 0,
+            "status": "pending"
+          },
+          "surfaceContainer": {
+            "sites": 9,
+            "status": "enforced",
+            "first": "composeApp/src/commonMain/kotlin/app/relay/ui/desktop/DesktopChrome.kt:124"
+          },
+          "surfaceContainerHigh": {
+            "sites": 0,
+            "status": "pending"
+          },
+          "surfaceContainerHighest": {
+            "sites": 5,
+            "status": "enforced",
+            "first": "composeApp/src/commonMain/kotlin/app/relay/ui/desktop/DesktopChrome.kt:648"
+          },
+          "surfaceContainerLow": {
+            "sites": 2,
+            "status": "enforced",
+            "first": "composeApp/src/commonMain/kotlin/app/relay/ui/desktop/DesktopChrome.kt:423"
+          },
+          "surfaceContainerLowest": {
+            "sites": 0,
+            "status": "pending"
+          },
+          "surfaceDim": {
+            "sites": 0,
+            "status": "pending"
+          },
+          "surfaceTint": {
+            "sites": 0,
+            "status": "pending"
+          },
+          "surfaceVariant": {
+            "sites": 59,
+            "status": "enforced",
+            "first": "composeApp/src/commonMain/kotlin/app/relay/ui/desktop/CabinetPane.kt:277"
+          },
+          "tertiary": {
+            "sites": 1,
+            "status": "enforced",
+            "first": "composeApp/src/commonMain/kotlin/app/relay/ui/desktop/DesktopStatusBar.kt:64"
+          }
+        },
+        "typography": {
+          "bodyLarge": {
+            "sites": 6,
+            "status": "enforced",
+            "first": "composeApp/src/commonMain/kotlin/app/relay/ui/components/MessageComposer.kt:336"
+          },
+          "bodyMedium": {
+            "sites": 86,
+            "status": "enforced",
+            "first": "composeApp/src/commonMain/kotlin/app/relay/ui/AppStates.kt:73"
+          },
+          "bodySmall": {
+            "sites": 123,
+            "status": "enforced",
+            "first": "composeApp/src/commonMain/kotlin/app/relay/ui/desktop/CabinetPane.kt:328"
+          },
+          "displayLarge": {
+            "sites": 0,
+            "status": "pending"
+          },
+          "displayMedium": {
+            "sites": 0,
+            "status": "pending"
+          },
+          "displaySmall": {
+            "sites": 0,
+            "status": "pending"
+          },
+          "headlineLarge": {
+            "sites": 0,
+            "status": "pending"
+          },
+          "headlineMedium": {
+            "sites": 1,
+            "status": "enforced",
+            "first": "composeApp/src/commonMain/kotlin/app/relay/ui/components/VoiceRecordDialog.kt:202"
+          },
+          "headlineSmall": {
+            "sites": 5,
+            "status": "enforced",
+            "first": "composeApp/src/commonMain/kotlin/app/relay/ui/desktop/CabinetPane.kt:378"
+          },
+          "labelLarge": {
+            "sites": 15,
+            "status": "enforced",
+            "first": "composeApp/src/commonMain/kotlin/app/relay/ui/desktop/DesktopChrome.kt:672"
+          },
+          "labelMedium": {
+            "sites": 38,
+            "status": "enforced",
+            "first": "composeApp/src/commonMain/kotlin/app/relay/ui/desktop/CabinetPane.kt:305"
+          },
+          "labelSmall": {
+            "sites": 229,
+            "status": "enforced",
+            "first": "composeApp/src/commonMain/kotlin/app/relay/ui/desktop/CabinetPane.kt:292"
+          },
+          "titleLarge": {
+            "sites": 5,
+            "status": "enforced",
+            "first": "composeApp/src/commonMain/kotlin/app/relay/ui/components/PkPalette.kt:127"
+          },
+          "titleMedium": {
+            "sites": 26,
+            "status": "enforced",
+            "first": "composeApp/src/commonMain/kotlin/app/relay/ui/AppStates.kt:96"
+          },
+          "titleSmall": {
+            "sites": 24,
+            "status": "enforced",
+            "first": "composeApp/src/commonMain/kotlin/app/relay/ui/SectionCard.kt:79"
+          }
+        },
+        "spacing": {
+          "lg": {
+            "sites": 89,
+            "status": "enforced",
+            "first": "composeApp/src/commonMain/kotlin/app/relay/ui/AppStates.kt:63"
+          },
+          "lg14": {
+            "sites": 40,
+            "status": "enforced",
+            "first": "composeApp/src/commonMain/kotlin/app/relay/ui/desktop/DesktopConversationWidgets.kt:188"
+          },
+          "md": {
+            "sites": 85,
+            "status": "enforced",
+            "first": "composeApp/src/commonMain/kotlin/app/relay/ui/AppStates.kt:64"
+          },
+          "md10": {
+            "sites": 48,
+            "status": "enforced",
+            "first": "composeApp/src/commonMain/kotlin/app/relay/ui/desktop/CabinetPane.kt:283"
+          },
+          "olg11": {
+            "sites": 0,
+            "status": "pending"
+          },
+          "olg13": {
+            "sites": 0,
+            "status": "pending"
+          },
+          "osm7": {
+            "sites": 0,
+            "status": "pending"
+          },
+          "osm9": {
+            "sites": 0,
+            "status": "pending"
+          },
+          "oxs3": {
+            "sites": 0,
+            "status": "pending"
+          },
+          "oxs5": {
+            "sites": 0,
+            "status": "pending"
+          },
+          "sm": {
+            "sites": 119,
+            "status": "enforced",
+            "first": "composeApp/src/commonMain/kotlin/app/relay/ui/desktop/CabinetPane.kt:309"
+          },
+          "sm6": {
+            "sites": 59,
+            "status": "enforced",
+            "first": "composeApp/src/commonMain/kotlin/app/relay/ui/SectionCard.kt:75"
+          },
+          "xl": {
+            "sites": 14,
+            "status": "enforced",
+            "first": "composeApp/src/commonMain/kotlin/app/relay/ui/AppStates.kt:91"
+          },
+          "xs": {
+            "sites": 85,
+            "status": "enforced",
+            "first": "composeApp/src/commonMain/kotlin/app/relay/ui/desktop/CabinetPane.kt:313"
+          },
+          "xxl": {
+            "sites": 3,
+            "status": "enforced",
+            "first": "composeApp/src/commonMain/kotlin/app/relay/ui/desktop/DesktopGlobalSearch.kt:143"
+          },
+          "xxs": {
+            "sites": 29,
+            "status": "enforced",
+            "first": "composeApp/src/commonMain/kotlin/app/relay/ui/AppStates.kt:68"
+          },
+          "xxxl": {
+            "sites": 0,
+            "status": "pending"
+          }
+        },
+        "shape": {
+          "extraLarge": {
+            "sites": 2,
+            "status": "enforced",
+            "first": "composeApp/src/commonMain/kotlin/app/relay/ui/components/MessageComposer.kt:552"
+          },
+          "extraSmall": {
+            "sites": 0,
+            "status": "pending"
+          },
+          "large": {
+            "sites": 11,
+            "status": "enforced",
+            "first": "composeApp/src/commonMain/kotlin/app/relay/ui/components/MessageComposer.kt:607"
+          },
+          "medium": {
+            "sites": 66,
+            "status": "enforced",
+            "first": "composeApp/src/commonMain/kotlin/app/relay/ui/desktop/CabinetPane.kt:401"
+          },
+          "small": {
+            "sites": 12,
+            "status": "enforced",
+            "first": "composeApp/src/commonMain/kotlin/app/relay/ui/desktop/DesktopHistorySearch.kt:356"
+          }
+        },
+        "elevation": {
+          "card": {
+            "sites": 21,
+            "status": "enforced",
+            "first": "composeApp/src/commonMain/kotlin/app/relay/ui/desktop/DesktopChrome.kt:125"
+          },
+          "floating": {
+            "sites": 4,
+            "status": "enforced",
+            "first": "composeApp/src/commonMain/kotlin/app/relay/ui/desktop/DesktopChrome.kt:564"
+          },
+          "sheet": {
+            "sites": 1,
+            "status": "enforced",
+            "first": "composeApp/src/commonMain/kotlin/app/relay/ui/components/CompactScaffold.kt:113"
+          }
+        },
+        "iconSizes": {
+          "badge": {
+            "sites": 2,
+            "status": "enforced",
+            "first": "composeApp/src/commonMain/kotlin/app/relay/ui/desktop/CabinetPane.kt:794"
+          },
+          "body": {
+            "sites": 19,
+            "status": "enforced",
+            "first": "composeApp/src/commonMain/kotlin/app/relay/ui/desktop/CabinetPane.kt:712"
+          },
+          "hero": {
+            "sites": 0,
+            "status": "pending"
+          },
+          "inline": {
+            "sites": 11,
+            "status": "enforced",
+            "first": "composeApp/src/commonMain/kotlin/app/relay/ui/SectionCard.kt:73"
+          },
+          "label": {
+            "sites": 26,
+            "status": "enforced",
+            "first": "composeApp/src/commonMain/kotlin/app/relay/ui/desktop/DesktopAgentPane.kt:149"
+          },
+          "title": {
+            "sites": 8,
+            "status": "enforced",
+            "first": "composeApp/src/commonMain/kotlin/app/relay/ui/desktop/CabinetPane.kt:434"
+          }
+        },
+        "shapeRoles": {
+          "avatar": {
+            "sites": 11,
+            "status": "enforced",
+            "first": "composeApp/src/commonMain/kotlin/app/relay/ui/desktop/DesktopChrome.kt:421"
+          },
+          "dayCell": {
+            "sites": 0,
+            "status": "pending"
+          },
+          "listCard": {
+            "sites": 1,
+            "status": "enforced",
+            "first": "composeApp/src/commonMain/kotlin/app/relay/ui/desktop/DesktopConversationsPane.kt:477"
+          }
+        },
+        "weights": {
+          "emphasis": {
+            "sites": 0,
+            "status": "pending"
+          }
+        }
+      },
+      "adoption": {
+        "colors": "29/42",
+        "typography": "11/15",
+        "spacing": "10/17",
+        "shape": "4/5",
+        "elevation": "3/3",
+        "iconSizes": "5/6",
+        "shapeRoles": "2/3",
+        "weights": "0/1"
+      },
+      "shapeInventory": {
+        "rawRoundedCornerShape": {
+          "8": 20,
+          "5": 5,
+          "14": 2,
+          "12": 25,
+          "4": 7,
+          "22": 2,
+          "9": 2,
+          "16": 6,
+          "20": 1,
+          "10": 3,
+          "6": 7,
+          "2": 2,
+          "13": 1
+        },
+        "namedCornerRadii": {
+          "12": 6,
+          "6": 2,
+          "28": 2
+        },
+        "circleShapeSites": 65,
+        "offScale": {
+          "6": 7,
+          "5": 5,
+          "10": 3,
+          "14": 2,
+          "22": 2,
+          "9": 2,
+          "2": 2,
+          "20": 1,
+          "13": 1
+        },
+        "note": "offScale = 没有任何 M3 槽位能表达的半径，这些点只能靠字面量写出来，是「看着不精致」最直接的一类证据。"
+      },
+      "debt": {
+        "shape": 83,
+        "typography": 6,
+        "color": 13,
+        "elevation": 21,
+        "iconSizes": 43,
+        "dimension": 141,
+        "spacing": 123
+      },
+      "shapeSemantics": {
+        "bubble": {
+          "radiusDp": 12,
+          "scaleSlot": "medium",
+          "mode": "slot",
+          "rawSites": 25,
+          "slotSites": 66,
+          "circleShapeSites": 0
+        },
+        "card": {
+          "radiusDp": 16,
+          "scaleSlot": "large",
+          "mode": "raw",
+          "rawSites": 6,
+          "slotSites": 11,
+          "circleShapeSites": 0
+        },
+        "control": {
+          "radiusDp": 12,
+          "scaleSlot": "medium",
+          "mode": "slot",
+          "rawSites": 25,
+          "slotSites": 66,
+          "circleShapeSites": 0
+        },
+        "chip": {
+          "radiusDp": 999,
+          "scaleSlot": null,
+          "mode": "circle",
+          "rawSites": 0,
+          "slotSites": 0,
+          "circleShapeSites": 65
+        },
+        "sheet": {
+          "radiusDp": 28,
+          "scaleSlot": "extraLarge",
+          "mode": "m3-internal",
+          "rawSites": 0,
+          "slotSites": 2,
+          "circleShapeSites": 0
+        }
+      }
+    }
+  },
+  "componentSpecs": {
+    "note": "组件级规格：书写的是**意图**（属于哪些屏、涉及哪些状态、最少该绑定哪些 token），工具校验的是**证据**（requiredTokens 必须在 file 里真的有引用行，previews 必须是真实存在的预览函数）。对不上就是「该用 token 却写了字面量」的欠债，要么改代码要么改这份声明。expectGroups 是粗粒度意图检查：某组一个都没出现时，报告里会记为该组零绑定。",
+    "components": [
+      {
+        "id": "SectionCard",
+        "file": "composeApp/src/commonMain/kotlin/app/relay/ui/SectionCard.kt",
+        "screens": [
+          "settings",
+          "settings-more"
+        ],
+        "states": [
+          "normal",
+          "long_text"
+        ],
+        "previews": [],
+        "expectGroups": [
+          "colors",
+          "shape",
+          "typography",
+          "elevation",
+          "spacing"
+        ],
+        "requiredTokens": [
+          "colors.surface",
+          "shape.large",
+          "typography.titleSmall",
+          "elevation.card"
+        ],
+        "stress": [
+          "超长标题",
+          "深色主题",
+          "大字号"
+        ]
+      },
+      {
+        "id": "CommonWidgets",
+        "file": "composeApp/src/commonMain/kotlin/app/relay/ui/components/Common.kt",
+        "screens": [
+          "conversations",
+          "chat",
+          "nodes",
+          "agents",
+          "settings"
+        ],
+        "states": [
+          "normal",
+          "dark",
+          "long_text"
+        ],
+        "previews": [],
+        "expectGroups": [
+          "colors",
+          "shape",
+          "typography",
+          "elevation",
+          "spacing"
+        ],
+        "requiredTokens": [
+          "colors.onSurfaceVariant",
+          "typography.bodySmall",
+          "elevation.card"
+        ],
+        "stress": [
+          "长标签换行",
+          "离线状态色",
+          "深色主题"
+        ]
+      },
+      {
+        "id": "MessageComposer",
+        "file": "composeApp/src/commonMain/kotlin/app/relay/ui/components/MessageComposer.kt",
+        "screens": [
+          "chat"
+        ],
+        "states": [
+          "normal",
+          "long_text",
+          "offline_composing"
+        ],
+        "previews": [
+          "ChatComposerFont2xPreview",
+          "ChatComposerOverLimitPhonePreview"
+        ],
+        "expectGroups": [
+          "colors",
+          "shape",
+          "typography",
+          "spacing"
+        ],
+        "requiredTokens": [
+          "colors.surfaceVariant",
+          "colors.onSurfaceVariant",
+          "typography.bodyLarge"
+        ],
+        "stress": [
+          "超长输入",
+          "字数超限",
+          "大字号",
+          "IME 弹出"
+        ]
+      },
+      {
+        "id": "GroupInfoDialog",
+        "file": "composeApp/src/commonMain/kotlin/app/relay/ui/components/GroupInfoDialog.kt",
+        "screens": [
+          "chat"
+        ],
+        "states": [
+          "normal",
+          "long_text"
+        ],
+        "previews": [
+          "GroupInfoDialogPhonePreview"
+        ],
+        "expectGroups": [
+          "colors",
+          "shape",
+          "typography",
+          "spacing"
+        ],
+        "requiredTokens": [
+          "colors.primaryContainer",
+          "typography.labelSmall"
+        ],
+        "stress": [
+          "长群名",
+          "成员很多"
+        ]
+      },
+      {
+        "id": "PkPalette",
+        "file": "composeApp/src/commonMain/kotlin/app/relay/ui/components/PkPalette.kt",
+        "screens": [
+          "chat"
+        ],
+        "states": [
+          "normal"
+        ],
+        "previews": [],
+        "expectGroups": [
+          "colors",
+          "shape",
+          "typography",
+          "spacing"
+        ],
+        "requiredTokens": [
+          "colors.onSurface",
+          "typography.titleMedium"
+        ],
+        "stress": [
+          "候选很多时滚动"
+        ]
+      },
+      {
+        "id": "AvatarPalette",
+        "file": "composeApp/src/commonMain/kotlin/app/relay/ui/components/AvatarPalette.kt",
+        "screens": [
+          "conversations",
+          "chat",
+          "nodes",
+          "agents"
+        ],
+        "states": [
+          "normal",
+          "dark"
+        ],
+        "previews": [],
+        "expectGroups": [
+          "colors",
+          "shape",
+          "typography"
+        ],
+        "requiredTokens": [
+          "colors.primary",
+          "typography.labelSmall"
+        ],
+        "stress": [
+          "同名同首字母",
+          "深色主题对比度"
+        ]
+      },
+      {
+        "id": "EmojiPalette",
+        "file": "composeApp/src/commonMain/kotlin/app/relay/ui/components/EmojiPalette.kt",
+        "screens": [
+          "chat"
+        ],
+        "states": [
+          "normal"
+        ],
+        "previews": [
+          "ChatEmojiPhonePreview"
+        ],
+        "expectGroups": [
+          "colors",
+          "shape",
+          "spacing"
+        ],
+        "requiredTokens": [
+          "colors.surfaceVariant"
+        ],
+        "stress": [
+          "多分类滚动",
+          "深色主题"
+        ]
+      }
+    ]
+  },
+  "stateSlots": {
+    "note": "状态槽 = 适配完成度的**分母**（不是屏数）。scope=screen 的槽来自 screens[].states（规范声明过）；scope=cross-cutting 的槽是跨屏一致性维度（深色/大字号/横竖屏/平板三断点/IME/对话框/搜索），来自 previewMatrix。证据 = androidApp/src/screenshotTest/kotlin 下的 @Preview 函数名按 match 正则匹配。逐屏归属按屏名前缀，桌面端 Desk*/Window* 预览名归不到屏，报告里单独列为「归属不明的证据」，不计入屏分母。 2026-10-10 分母重建：按屏配对台账（65 屏/10 域）补入 4 个逻辑屏——cabinet/files/remote-view/capture，它们的原型屏在 spec 里此前没有归宿（文件柜 3 屏、文件 4 屏、屏幕协助 3 屏、截图 2 屏）。状态取自原型屏 id 与既有预览名，不凭代码预览反推；跨屏维度沿用原词表。",
+    "vocabulary": [
+      {
+        "id": "dark",
+        "scope": "cross-cutting",
+        "match": "(?i)dark",
+        "why": "深色主题：cover 所有屏"
+      },
+      {
+        "id": "large_font",
+        "scope": "cross-cutting",
+        "match": "(?i)font2x|largefont|maxsize",
+        "why": "大字号（fontScale 1.3+）：cover 所有屏"
+      },
+      {
+        "id": "landscape",
+        "scope": "cross-cutting",
+        "match": "(?i)landscape",
+        "why": "横屏断点"
+      },
+      {
+        "id": "compact",
+        "scope": "cross-cutting",
+        "match": "(?i)compact",
+        "why": "桌面/平板 compact 窗口"
+      },
+      {
+        "id": "medium",
+        "scope": "cross-cutting",
+        "match": "(?i)mediumpreview",
+        "why": "桌面/平板 medium 窗口"
+      },
+      {
+        "id": "expanded",
+        "scope": "cross-cutting",
+        "match": "(?i)expanded",
+        "why": "桌面/平板 expanded 窗口"
+      },
+      {
+        "id": "ime",
+        "scope": "cross-cutting",
+        "match": "(?i)ime|keyboard",
+        "why": "软键盘弹出（IME inset）"
+      },
+      {
+        "id": "dialog",
+        "scope": "cross-cutting",
+        "match": "(?i)dialog",
+        "why": "对话框形态"
+      },
+      {
+        "id": "search",
+        "scope": "cross-cutting",
+        "match": "(?i)search|nomatch",
+        "why": "会话内/全局搜索浮层"
+      },
+      {
+        "id": "normal",
+        "scope": "screen",
+        "match": "(?i)^(?:desk|tablet)?(conversations|chat|nodes|agents|settings|settingsmore|cabinet|files|remoteview|capture)[a-z0-9]*(phone|tablet|desktop)?preview$",
+        "why": "规范 screens.*.states 里声明过的 normal 态（覆盖全部 10 个逻辑屏）"
+      },
+      {
+        "id": "loading",
+        "scope": "screen",
+        "match": "(?i)loading",
+        "why": "规范 screens.conversations.states 里声明过的状态"
+      },
+      {
+        "id": "empty",
+        "scope": "screen",
+        "match": "(?i)empty",
+        "why": "规范 screens.conversations.states 里声明过的状态"
+      },
+      {
+        "id": "error",
+        "scope": "screen",
+        "match": "(?i)error|failed",
+        "why": "规范 screens.conversations.states 里声明过的状态"
+      },
+      {
+        "id": "long_text",
+        "scope": "screen",
+        "match": "(?i)longtext",
+        "why": "规范 screens.conversations.states 里声明过的状态"
+      },
+      {
+        "id": "offline_queue_banner",
+        "scope": "screen",
+        "match": "(?i)offline.*(banner|queue)|queued?[-_ ]?banner",
+        "why": "原型 relay.html:2239 的「2 条排队」是会话**行**的待发计数，代码里对应 ConversationsScreen.kt:225 的 `state.totalPending > 0` 横幅（conv_offline_banner）。**不能只写 `(?i)banner`**：同一屏 :221 还有一条`state.banner?.let { AppBanner(...) }`（错误/提示横幅），一个名字里只有 banner 的帧分不清这两条，会同时被算成本槽的证据。"
+      },
+      {
+        "id": "loading_history",
+        "scope": "screen",
+        "match": "(?i)history",
+        "why": "规范 screens.chat.states 里声明过的状态"
+      },
+      {
+        "id": "offline_composing",
+        "scope": "screen",
+        "match": "(?i)offline",
+        "why": "规范 screens.chat.states 里声明过的状态"
+      },
+      {
+        "id": "transfer_in_progress",
+        "scope": "screen",
+        "match": "(?i)transfer(?!failed|resume)",
+        "why": "规范 screens.chat.states 里声明过的状态"
+      },
+      {
+        "id": "transfer_failed",
+        "scope": "screen",
+        "match": "(?i)transferfailed|transfer.*fail",
+        "why": "规范 screens.chat.states 里声明过的状态"
+      },
+      {
+        "id": "scanning",
+        "scope": "screen",
+        "match": "(?i)scanning|scan|starting",
+        "why": "规范 screens.nodes.states 里声明过的状态"
+      },
+      {
+        "id": "sheet_open",
+        "scope": "screen",
+        "match": "(?i)sheet",
+        "why": "规范 screens.nodes.states 里声明过的状态"
+      },
+      {
+        "id": "agent_offline",
+        "scope": "screen",
+        "match": "(?i)selectedoffline|agentsoffline",
+        "why": "规范 screens.agents.states 里声明过的状态"
+      },
+      {
+        "id": "cabinet_peer",
+        "scope": "screen",
+        "match": "(?i)cabinetpeer",
+        "why": "原型 m-cabinet-peer：看同事的文件柜"
+      },
+      {
+        "id": "cabinet_unset",
+        "scope": "screen",
+        "match": "(?i)cabinetunset",
+        "why": "原型未设共享根的空态"
+      },
+      {
+        "id": "folder",
+        "scope": "screen",
+        "match": "(?i)folder",
+        "why": "原型 d-folder：文件夹卡片"
+      },
+      {
+        "id": "resume",
+        "scope": "screen",
+        "match": "(?i)resume",
+        "why": "原型 d-resume：断点续传（仅入站）"
+      },
+      {
+        "id": "unsaved",
+        "scope": "screen",
+        "match": "(?i)unsaved",
+        "why": "原型未保存提示条"
+      },
+      {
+        "id": "sharing",
+        "scope": "screen",
+        "match": "(?i)sharing",
+        "why": "原型 d-sharescreen：同意并选屏（被看方）"
+      },
+      {
+        "id": "viewing",
+        "scope": "screen",
+        "match": "(?i)viewing",
+        "why": "原型 d-viewscreen：观看屏幕（查看方）"
+      },
+      {
+        "id": "consent",
+        "scope": "screen",
+        "match": "(?i)consent",
+        "why": "原型 d-reqscreen：请求查看屏幕（征求同意）"
+      },
+      {
+        "id": "tools",
+        "scope": "screen",
+        "match": "(?i)tools",
+        "why": "原型 d-capture-tools：截图工具条"
+      },
+      {
+        "id": "wide",
+        "scope": "cross-cutting",
+        "match": "(?i)wide",
+        "why": "超宽窗口（≥1440）：桌面三栏"
+      },
+      {
+        "id": "two_pane_min",
+        "scope": "cross-cutting",
+        "match": "(?i)twopanemin",
+        "why": "两栏最小宽度临界（664×620，量具先验帧）"
+      },
+      {
+        "id": "host_800x580",
+        "scope": "cross-cutting",
+        "match": "(?i)host800x580",
+        "why": "平板宿主窗口（800×580 差额带）"
+      },
+      {
+        "id": "overlay",
+        "scope": "cross-cutting",
+        "match": "(?i)overlay",
+        "why": "整屏覆盖层形态（平板设置）"
+      },
+      {
+        "id": "shell",
+        "scope": "cross-cutting",
+        "match": "(?i)shell",
+        "why": "窗口壳（手机壳 620 高）"
+      },
+      {
+        "id": "portrait",
+        "scope": "cross-cutting",
+        "match": "(?i)portrait",
+        "why": "平板竖屏（宽度不足以进两栏）"
+      },
+      {
+        "id": "composer_limit",
+        "scope": "screen",
+        "match": "(?i)composerover|composeroverlimit",
+        "why": "输入超限提示（chat 屏）"
+      },
+      {
+        "id": "composer_tcp",
+        "scope": "screen",
+        "match": "(?i)composertcp",
+        "why": "TCP 直连提示条（chat 屏）"
+      }
+    ],
+    "perScreen": {
+      "conversations": [
+        {
+          "slot": "normal",
+          "applicableSource": "declared"
+        },
+        {
+          "slot": "loading",
+          "applicableSource": "declared"
+        },
+        {
+          "slot": "empty",
+          "applicableSource": "declared"
+        },
+        {
+          "slot": "error",
+          "applicableSource": "declared"
+        },
+        {
+          "slot": "long_text",
+          "applicableSource": "declared"
+        },
+        {
+          "slot": "offline_queue_banner",
+          "applicableSource": "declared"
+        },
+        {
+          "slot": "dark",
+          "applicableSource": "derived-keyword"
+        },
+        {
+          "slot": "large_font",
+          "applicableSource": "derived-keyword"
+        },
+        {
+          "slot": "landscape",
+          "applicableSource": "derived-keyword"
+        },
+        {
+          "slot": "compact",
+          "applicableSource": "derived-keyword"
+        },
+        {
+          "slot": "medium",
+          "applicableSource": "derived-keyword"
+        },
+        {
+          "slot": "expanded",
+          "applicableSource": "derived-keyword"
+        },
+        {
+          "slot": "ime",
+          "applicableSource": "derived-keyword"
+        },
+        {
+          "slot": "dialog",
+          "applicableSource": "derived-keyword"
+        },
+        {
+          "slot": "search",
+          "applicableSource": "derived-keyword"
+        }
+      ],
+      "chat": [
+        {
+          "slot": "normal",
+          "applicableSource": "declared"
+        },
+        {
+          "slot": "loading_history",
+          "applicableSource": "declared"
+        },
+        {
+          "slot": "empty",
+          "applicableSource": "declared"
+        },
+        {
+          "slot": "error",
+          "applicableSource": "declared"
+        },
+        {
+          "slot": "long_text",
+          "applicableSource": "declared"
+        },
+        {
+          "slot": "offline_composing",
+          "applicableSource": "declared"
+        },
+        {
+          "slot": "transfer_in_progress",
+          "applicableSource": "declared"
+        },
+        {
+          "slot": "transfer_failed",
+          "applicableSource": "declared"
+        },
+        {
+          "slot": "dark",
+          "applicableSource": "derived-keyword"
+        },
+        {
+          "slot": "large_font",
+          "applicableSource": "derived-keyword"
+        },
+        {
+          "slot": "landscape",
+          "applicableSource": "derived-keyword"
+        },
+        {
+          "slot": "compact",
+          "applicableSource": "derived-keyword"
+        },
+        {
+          "slot": "medium",
+          "applicableSource": "derived-keyword"
+        },
+        {
+          "slot": "expanded",
+          "applicableSource": "derived-keyword"
+        },
+        {
+          "slot": "ime",
+          "applicableSource": "derived-keyword"
+        },
+        {
+          "slot": "dialog",
+          "applicableSource": "derived-keyword"
+        },
+        {
+          "slot": "search",
+          "applicableSource": "derived-keyword"
+        },
+        {
+          "slot": "composer_limit",
+          "applicableSource": "derived-keyword"
+        },
+        {
+          "slot": "composer_tcp",
+          "applicableSource": "derived-keyword"
+        }
+      ],
+      "nodes": [
+        {
+          "slot": "normal",
+          "applicableSource": "declared"
+        },
+        {
+          "slot": "scanning",
+          "applicableSource": "declared"
+        },
+        {
+          "slot": "empty",
+          "applicableSource": "declared"
+        },
+        {
+          "slot": "error",
+          "applicableSource": "declared"
+        },
+        {
+          "slot": "long_text",
+          "applicableSource": "declared"
+        },
+        {
+          "slot": "sheet_open",
+          "applicableSource": "declared"
+        },
+        {
+          "slot": "dark",
+          "applicableSource": "derived-keyword"
+        },
+        {
+          "slot": "large_font",
+          "applicableSource": "derived-keyword"
+        },
+        {
+          "slot": "landscape",
+          "applicableSource": "derived-keyword"
+        },
+        {
+          "slot": "compact",
+          "applicableSource": "derived-keyword"
+        },
+        {
+          "slot": "medium",
+          "applicableSource": "derived-keyword"
+        },
+        {
+          "slot": "expanded",
+          "applicableSource": "derived-keyword"
+        },
+        {
+          "slot": "ime",
+          "applicableSource": "derived-keyword"
+        },
+        {
+          "slot": "dialog",
+          "applicableSource": "derived-keyword"
+        },
+        {
+          "slot": "search",
+          "applicableSource": "derived-keyword"
+        }
+      ],
+      "agents": [
+        {
+          "slot": "normal",
+          "applicableSource": "declared"
+        },
+        {
+          "slot": "loading",
+          "applicableSource": "declared"
+        },
+        {
+          "slot": "empty",
+          "applicableSource": "declared"
+        },
+        {
+          "slot": "error",
+          "applicableSource": "declared"
+        },
+        {
+          "slot": "long_text",
+          "applicableSource": "declared"
+        },
+        {
+          "slot": "agent_offline",
+          "applicableSource": "declared"
+        },
+        {
+          "slot": "dark",
+          "applicableSource": "derived-keyword"
+        },
+        {
+          "slot": "large_font",
+          "applicableSource": "derived-keyword"
+        },
+        {
+          "slot": "landscape",
+          "applicableSource": "derived-keyword"
+        },
+        {
+          "slot": "compact",
+          "applicableSource": "derived-keyword"
+        },
+        {
+          "slot": "medium",
+          "applicableSource": "derived-keyword"
+        },
+        {
+          "slot": "expanded",
+          "applicableSource": "derived-keyword"
+        },
+        {
+          "slot": "ime",
+          "applicableSource": "derived-keyword"
+        },
+        {
+          "slot": "dialog",
+          "applicableSource": "derived-keyword"
+        },
+        {
+          "slot": "search",
+          "applicableSource": "derived-keyword"
+        }
+      ],
+      "settings": [
+        {
+          "slot": "normal",
+          "applicableSource": "declared"
+        },
+        {
+          "slot": "loading",
+          "applicableSource": "declared"
+        },
+        {
+          "slot": "error",
+          "applicableSource": "declared"
+        },
+        {
+          "slot": "long_text",
+          "applicableSource": "declared"
+        },
+        {
+          "slot": "dark",
+          "applicableSource": "derived-keyword"
+        },
+        {
+          "slot": "large_font",
+          "applicableSource": "derived-keyword"
+        },
+        {
+          "slot": "landscape",
+          "applicableSource": "derived-keyword"
+        },
+        {
+          "slot": "compact",
+          "applicableSource": "derived-keyword"
+        },
+        {
+          "slot": "medium",
+          "applicableSource": "derived-keyword"
+        },
+        {
+          "slot": "expanded",
+          "applicableSource": "derived-keyword"
+        },
+        {
+          "slot": "ime",
+          "applicableSource": "derived-keyword"
+        },
+        {
+          "slot": "dialog",
+          "applicableSource": "derived-keyword"
+        },
+        {
+          "slot": "search",
+          "applicableSource": "derived-keyword"
+        }
+      ],
+      "settings-more": [
+        {
+          "slot": "normal",
+          "applicableSource": "declared"
+        },
+        {
+          "slot": "loading",
+          "applicableSource": "declared"
+        },
+        {
+          "slot": "error",
+          "applicableSource": "declared"
+        },
+        {
+          "slot": "long_text",
+          "applicableSource": "declared"
+        },
+        {
+          "slot": "dark",
+          "applicableSource": "derived-keyword"
+        },
+        {
+          "slot": "large_font",
+          "applicableSource": "derived-keyword"
+        },
+        {
+          "slot": "landscape",
+          "applicableSource": "derived-keyword"
+        },
+        {
+          "slot": "compact",
+          "applicableSource": "derived-keyword"
+        },
+        {
+          "slot": "medium",
+          "applicableSource": "derived-keyword"
+        },
+        {
+          "slot": "expanded",
+          "applicableSource": "derived-keyword"
+        },
+        {
+          "slot": "ime",
+          "applicableSource": "derived-keyword"
+        },
+        {
+          "slot": "dialog",
+          "applicableSource": "derived-keyword"
+        },
+        {
+          "slot": "search",
+          "applicableSource": "derived-keyword"
+        }
+      ],
+      "cabinet": [
+        {
+          "slot": "normal",
+          "applicableSource": "declared"
+        },
+        {
+          "slot": "cabinet_peer",
+          "applicableSource": "declared"
+        },
+        {
+          "slot": "cabinet_unset",
+          "applicableSource": "declared"
+        },
+        {
+          "slot": "loading",
+          "applicableSource": "declared"
+        },
+        {
+          "slot": "empty",
+          "applicableSource": "declared"
+        },
+        {
+          "slot": "error",
+          "applicableSource": "declared"
+        },
+        {
+          "slot": "dark",
+          "applicableSource": "derived-keyword"
+        },
+        {
+          "slot": "large_font",
+          "applicableSource": "derived-keyword"
+        },
+        {
+          "slot": "landscape",
+          "applicableSource": "derived-keyword"
+        },
+        {
+          "slot": "compact",
+          "applicableSource": "derived-keyword"
+        },
+        {
+          "slot": "medium",
+          "applicableSource": "derived-keyword"
+        },
+        {
+          "slot": "expanded",
+          "applicableSource": "derived-keyword"
+        },
+        {
+          "slot": "ime",
+          "applicableSource": "derived-keyword"
+        },
+        {
+          "slot": "dialog",
+          "applicableSource": "derived-keyword"
+        },
+        {
+          "slot": "search",
+          "applicableSource": "derived-keyword"
+        }
+      ],
+      "files": [
+        {
+          "slot": "normal",
+          "applicableSource": "declared"
+        },
+        {
+          "slot": "empty",
+          "applicableSource": "declared"
+        },
+        {
+          "slot": "folder",
+          "applicableSource": "declared"
+        },
+        {
+          "slot": "resume",
+          "applicableSource": "declared"
+        },
+        {
+          "slot": "unsaved",
+          "applicableSource": "declared"
+        },
+        {
+          "slot": "error",
+          "applicableSource": "declared"
+        },
+        {
+          "slot": "search",
+          "applicableSource": "declared"
+        },
+        {
+          "slot": "dark",
+          "applicableSource": "derived-keyword"
+        },
+        {
+          "slot": "large_font",
+          "applicableSource": "derived-keyword"
+        },
+        {
+          "slot": "landscape",
+          "applicableSource": "derived-keyword"
+        },
+        {
+          "slot": "compact",
+          "applicableSource": "derived-keyword"
+        },
+        {
+          "slot": "medium",
+          "applicableSource": "derived-keyword"
+        },
+        {
+          "slot": "expanded",
+          "applicableSource": "derived-keyword"
+        },
+        {
+          "slot": "ime",
+          "applicableSource": "derived-keyword"
+        },
+        {
+          "slot": "dialog",
+          "applicableSource": "derived-keyword"
+        },
+        {
+          "slot": "search",
+          "applicableSource": "derived-keyword"
+        }
+      ],
+      "remote-view": [
+        {
+          "slot": "normal",
+          "applicableSource": "declared"
+        },
+        {
+          "slot": "consent",
+          "applicableSource": "declared"
+        },
+        {
+          "slot": "sharing",
+          "applicableSource": "declared"
+        },
+        {
+          "slot": "viewing",
+          "applicableSource": "declared"
+        },
+        {
+          "slot": "error",
+          "applicableSource": "declared"
+        },
+        {
+          "slot": "dark",
+          "applicableSource": "derived-keyword"
+        },
+        {
+          "slot": "large_font",
+          "applicableSource": "derived-keyword"
+        },
+        {
+          "slot": "landscape",
+          "applicableSource": "derived-keyword"
+        },
+        {
+          "slot": "compact",
+          "applicableSource": "derived-keyword"
+        },
+        {
+          "slot": "medium",
+          "applicableSource": "derived-keyword"
+        },
+        {
+          "slot": "expanded",
+          "applicableSource": "derived-keyword"
+        },
+        {
+          "slot": "ime",
+          "applicableSource": "derived-keyword"
+        },
+        {
+          "slot": "dialog",
+          "applicableSource": "derived-keyword"
+        },
+        {
+          "slot": "search",
+          "applicableSource": "derived-keyword"
+        }
+      ],
+      "capture": [
+        {
+          "slot": "normal",
+          "applicableSource": "declared"
+        },
+        {
+          "slot": "tools",
+          "applicableSource": "declared"
+        },
+        {
+          "slot": "error",
+          "applicableSource": "declared"
+        },
+        {
+          "slot": "dark",
+          "applicableSource": "derived-keyword"
+        },
+        {
+          "slot": "large_font",
+          "applicableSource": "derived-keyword"
+        },
+        {
+          "slot": "landscape",
+          "applicableSource": "derived-keyword"
+        },
+        {
+          "slot": "compact",
+          "applicableSource": "derived-keyword"
+        },
+        {
+          "slot": "medium",
+          "applicableSource": "derived-keyword"
+        },
+        {
+          "slot": "expanded",
+          "applicableSource": "derived-keyword"
+        },
+        {
+          "slot": "ime",
+          "applicableSource": "derived-keyword"
+        },
+        {
+          "slot": "dialog",
+          "applicableSource": "derived-keyword"
+        },
+        {
+          "slot": "search",
+          "applicableSource": "derived-keyword"
+        }
+      ]
+    },
+    "screenPrefixes": {
+      "conversations": [
+        "Conversations"
+      ],
+      "chat": [
+        "Chat",
+        "Composer",
+        "Emoji",
+        "Pk",
+        "GroupInfo"
+      ],
+      "nodes": [
+        "Nodes",
+        "Node",
+        "AddNode",
+        "Network"
+      ],
+      "agents": [
+        "Agents",
+        "Agent"
+      ],
+      "settings": [
+        "Settings"
+      ],
+      "settings-more": [
+        "SettingsMore"
+      ],
+      "cabinet": [
+        "Cabinet",
+        "DeskCabinet",
+        "TabletCabinet"
+      ],
+      "files": [
+        "DeskFiles",
+        "TabletFiles",
+        "DeskTransferLog"
+      ],
+      "remote-view": [
+        "RemoteView"
+      ],
+      "capture": [
+        "Capture"
+      ]
+    },
+    "unattributablePrefixes": [
+      "Desk",
+      "Window",
+      "Dialog",
+      "Sheet",
+      "Adaptive"
+    ],
+    "renderTargets": {
+      "note": "归属的第一层判据：预览函数**实际渲染了哪个屏**，由函数体里调用了哪个屏级 Composable 机械判定（design_contract.scan_render_targets）。名字前缀是第二层，只在渲染目标判不出时使用。加这一层的原因：预览函数名会撒谎——实测 139 个预览里 58 个能判定唯一渲染目标，其中 4 个名字认领的屏 ≠ 实际渲染的屏（ChatFilesPhonePreview / ChatFolderPhonePreview / ChatTransferFailedPhonePreview / ChatTransferResumePhonePreview，体内都是 ChatScreen，却因 files 声明了 ChatFiles/ChatFolder/ChatTransfer 前缀而被判给 files）。名字前缀分不出「作者故意写的别名」与「意外嵌套」（settings ← SettingsMore* 就是意外嵌套），渲染目标可以。含 DesktopShell( 的帧一律跳过：桌面壳一壳多视图，Desk(filesView = true) 与 Desk() 是同一个 Composable，渲染目标不是屏的信号。**2026-10-10 收口**：那 4 个撒谎的名字不再借给 files —— 已从 `screenPrefixes.files` 删掉 ChatFiles/ChatFolder/ChatTransfer。当初保留它们是为了「别让 files 的覆盖掉」，而那两条覆盖本来就不是 files 的证据：真正钉 files 的 DeskFiles* 帧一直都在（DeskFilesExpanded/Folder/Resume/Banner），只是词表 `normal` 的锚定正则看不见 Desk/Tablet 前缀、`error` 正则看不见帧名里的 Banner。删掉错挂前缀后 files 六槽全部由 DeskFiles* 自己撑住，见第二十九个洞。",
+      "mapping": {
+        "conversations": "ConversationsScreen",
+        "chat": "ChatScreen",
+        "nodes": "NodesScreen",
+        "agents": "AgentConsoleScreen",
+        "settings": "SettingsScreen",
+        "settings-more": "SettingsNotifySubpage",
+        "cabinet": "CabinetScreen",
+        "remote-view": "RemoteViewScreen",
+        "capture": "CaptureOverlayView"
+      }
+    },
+    "notApplicable": {
+      "note": "这些槽的预览证据在原理上不可得，不计入分母（skill Step 7：宿主面/跨模块的东西 Preview 一个都不覆盖）。判据 = 证据来源模块与截图源集的可见性，不是「懒得做」。",
+      "rules": [
+        {
+          "screen": "capture",
+          "slots": [
+            "normal",
+            "tools",
+            "error"
+          ],
+          "reason": "CaptureOverlayView 在 desktopApp 模块，androidApp 的截图源集看不见它（合成期无该类）；且它挂 undecorated+alwaysOnTop 全屏覆盖窗，Layoutlib 没有「刚抓到的那一帧」可喂。验收走宿主面清单 B7 真窗。"
+        },
+        {
+          "screen": "(跨屏)",
+          "slots": [
+            "ime"
+          ],
+          "reason": "IME 候选窗/内联预编辑由平台输入法框架决定，无头环境没有输入法。验收走宿主面清单 A 节真机。"
+        }
+      ]
+    },
+    "implementationAnchors": {
+      "note": "缺口分档的判据：每个没有预览证据的状态槽，声明一个「代码里已有实现」的锚点（文件 + 正则），工具数命中数决定它属于「已实现未验证」（命中 > 0，补预览可转绿）还是「未实现」（命中 = 0，补预览只会渲染空气）。**没声明锚点的缺口一律按未实现计**，不许默认当已实现——这正是本表存在的理由：此前报告里的「已实现未验证」六条是手写的，逐条复算后三条对不上、三条是假阳性（按钮底色 / 表单校验标志被当成错误态），还有一条槽在相位机里根本没有对应枚举。",
+      "entries": [
+        {
+          "screen": "agents",
+          "slot": "error",
+          "file": "composeApp/src/commonMain/kotlin/app/relay/feature/agents/AgentConsoleScreen.kt",
+          "match": "agent_session_state_error",
+          "why": "SessionStateLabel 有 \"error\" -> stringResource(agent_session_state_error) 分支，另有 errorContainer/onErrorContainer 横幅。命中 > 0 ⇒ 已实现未验证。"
+        },
+        {
+          "screen": "chat",
+          "slot": "transfer_in_progress",
+          "file": "composeApp/src/commonMain/kotlin/app/relay/feature/chat/ChatScreen.kt",
+          "match": "TransferState\\.",
+          "why": "TransferState.Active -> LinearProgressIndicator(progress = card.fraction)；Offered/Active/Completed/Failed/Declined 五分支齐全。命中 > 0 ⇒ 已实现未验证。"
+        },
+        {
+          "screen": "settings-more",
+          "slot": "error",
+          "file": "composeApp/src/commonMain/kotlin/app/relay/feature/settings/SettingsUpdateSubpage.kt",
+          "match": "UpdateCheckStatus\\.Error",
+          "why": "SettingsUpdateSubpage 的 `when (updateState.status)` 里 UpdateCheckStatus.Error 分支配 updateState.errorMessage 与 set_update_failed 文案。命中 > 0 ⇒ 已实现未验证。"
+        },
+        {
+          "screen": "settings",
+          "slot": "error",
+          "file": "composeApp/src/commonMain/kotlin/app/relay/feature/settings/SettingsScreen.kt",
+          "match": "state\\.banner\\?\\.let",
+          "why": "真实渲染点是 SettingsScreen.kt:258 的 `state.banner?.let { AppBanner(it, onDismissBanner) }`，与 :260 的 settingsNote（Info）是相邻的两个 let，一帧证明不了另一帧。"
+        },
+        {
+          "screen": "cabinet",
+          "slot": "error",
+          "file": "composeApp/src/commonMain/kotlin/app/relay/feature/cabinet/PeerCabinetView.kt",
+          "match": "errorMessage",
+          "why": "CabinetUiState.errorMessage 由控制器写入（deny.reason），此前没有任何 UI 读它，唯一读取点是单测 —— 数据层有、UI 层零。落点在 PeerCabinetView.kt 的表头 item 之后（`val loadError = cabinet.errorMessage` → ErrorState + 重新加载）。锚点原先指向 CabinetScreen.kt 是**指错了文件**：该文件只做分发，目录列表渲染在 PeerCabinetView.kt。原型 screenCabinetPeer 没有画过错误态，取值走 App 既有 ErrorState 原语，不是从原型抄的。"
+        },
+        {
+          "screen": "cabinet",
+          "slot": "empty",
+          "file": "composeApp/src/commonMain/kotlin/app/relay/feature/cabinet/PeerCabinetView.kt",
+          "match": "entries\\.isEmpty\\(\\)",
+          "why": "此前 PeerCabinetView 是 items(cabinet.entries) 无空分支（settings.cabinetRecentUploads.isEmpty() 只管「最近上传」横条，不是目录空态）—— 空目录画出来只有一个表头，像卡住了。现已在同一处补 `cabinet.entries.isEmpty()` → EmptyState。锚点原先指向 CabinetScreen.kt 是**指错了文件**。原型 screenCabinetPeer 没有画过空态。"
+        },
+        {
+          "screen": "remote-view",
+          "slot": "error",
+          "file": "core/src/commonMain/kotlin/app/relay/core/protocol/ScreenPayload.kt",
+          "match": "ScreenPhase\\.(Error|Failed)",
+          "why": "ScreenPhase = Requesting/AwaitingConsent/Preparing/Connecting/Active/Ended，相位机里根本没有错误档，没有可渲染的错误态 ⇒ 未实现（要补的不只是预览，是枚举）。"
+        },
+        {
+          "screen": "conversations",
+          "slot": "error",
+          "file": "composeApp/src/commonMain/kotlin/app/relay/feature/conversations/ConversationsScreen.kt",
+          "match": "state\\.banner\\?\\.let",
+          "why": "真实渲染点就是 ConversationsScreen.kt:221 的 `state.banner?.let { AppBanner(it, …) }`；语气由 state 里的 `BannerUi.tone` 决定（`BannerTone.Error` 渲染红）。旧锚点写 `errorMessage|BannerTone\\.Error` 命中 0，是因为这一屏把语气放在状态里、屏内不出现这两个字面量——**锚点选错会把它误判成「代码里没实现」**。"
+        },
+        {
+          "screen": "agents",
+          "slot": "loading",
+          "file": "composeApp/src/commonMain/kotlin/app/relay/feature/agents/AgentConsoleScreen.kt",
+          "match": "Progress|loading|Loading",
+          "why": "整屏零进度/加载命中，没有任何 loading 态 ⇒ 未实现。"
+        },
+        {
+          "screen": "settings",
+          "slot": "loading",
+          "file": "composeApp/src/commonMain/kotlin/app/relay/feature/settings/SettingsScreen.kt",
+          "match": "state\\.restarting",
+          "why": "设置屏唯一的 loading 分支：SettingsScreen.kt:176 `initialSubpage = if (state.restarting) SUBPAGE_CONN` 与 :633 `AsyncButton(loading = state.restarting, loadingLabel = set_conn_reconnecting)`。**分支名叫 restarting，不叫 loading** —— 这正是词表按函数名找证据时会漏掉它的原因。"
+        },
+        {
+          "screen": "conversations",
+          "slot": "offline_queue_banner",
+          "file": "composeApp/src/commonMain/kotlin/app/relay/feature/conversations/ConversationsScreen.kt",
+          "match": "conv_offline_banner",
+          "why": "ConversationsScreen.kt:225-240 `if (state.totalPending > 0) { … conv_offline_banner … }`。旧口径把它算成「有证据已覆盖」，靠的是 `(?i)banner` 认领了 ConversationsBannerPhonePreview，而那一帧渲染的是 errorBannerState（tone = Error）⇒ 它钉的是 :221，不是 :225。收紧词表后本槽暴露为真缺口，这一条锚点让它落在「已实现未验证」而不是「未实现」。"
+        }
+      ]
+    },
+    "previewAliases": {
+      "note": "词表按**函数名**找证据，而作者对「这一帧钉的是哪个槽」的声明常常写在别处（夹具 KDoc、变量名、渲染目标）。名字对不上时，工具会把**已有的证据**报成缺口——这是第九个量具洞（与第六个洞方向相反：⑥是虚增，⑨是虚减）。别名是**逐 (屏, 槽)** 的显式声明，绕开词表与归属两层启发式，因此**不放松任何全局正则**（不会像前缀嵌套那样把证据漏给邻屏）。每条别名必须真的改变覆盖：没改变任何东西的别名会被 `design-state-slot-report.py --check` 判红（冗余的会误导下一个人去写更松的正则，指错的既不纠错也不报红）。",
+      "entries": [
+        {
+          "screen": "settings",
+          "slot": "loading",
+          "previews": [
+            "SettingsRestartingPreview"
+          ],
+          "why": "ScreenshotPreviews.kt:889-911 的夹具 KDoc 原文写着「设置屏的 loading：连接卡的「重连」正在跑（state.restarting），按钮换成「正在重启…」且不可再点」，夹具 `restartingState = normalState.copy(restarting = true)`（:472）的 KDoc 写着「这是设置屏**唯一**的 loading 渲染分支」。它不算覆盖，只因帧名里的 Restarting 对不上词表正则 `(?i)loading`。"
+        },
+        {
+          "screen": "conversations",
+          "slot": "error",
+          "previews": [
+            "ConversationsBannerPhonePreview"
+          ],
+          "why": "ScreenshotPreviewsExtra.kt:1467 这一帧渲染 `errorBannerState`（:1447 `banner = BannerUi(message = BannerMessage.BindFailed(17_878, \"Address already in use\"), tone = BannerTone.Error)`，夹具 KDoc 原文「会话页 / 设置页上真挂着一条错误横幅。语气是 Error（红），不是 Info。」）⇒ 它钉的是 ConversationsScreen.kt:221 的错误横幅。帧名里只有 Banner，旧词表把它认领给了 conversations/offline_queue_banner（另一条分支）。"
+        },
+        {
+          "screen": "settings",
+          "slot": "error",
+          "previews": [
+            "SettingsBannerPhonePreview"
+          ],
+          "why": "ScreenshotPreviewsExtra.kt:1703 与上一帧共用 `errorBannerState`，渲染的是SettingsScreen.kt:258 的错误横幅。旧口径下它归到 settings 屏、但该屏没声明`offline_queue_banner` ⇒ 这一帧**彻底不被解释**（既不养 error，也不养任何槽）。"
+        },
+        {
+          "screen": "files",
+          "slot": "error",
+          "previews": [
+            "DeskFilesBannerExpandedPreview"
+          ],
+          "why": "ScreenshotPreviewsDesktop.kt:456 `Desk(1100, 720, state = desktopPreviewFilesBannerState(), filesView = true)`，而 `desktopPreviewFilesBannerState`（composeApp/.../ui/desktop/PreviewState.kt:388）= `desktopPreviewFilesState().copy(banner = BannerUi(message = BannerMessage.TransferFailed(\"hash-mismatch\"), tone = BannerTone.Error))` ⇒ 它钉的就是文件屏那条 Error 横幅。帧名里只有 Banner，词表 `(?i)error|failed` 看不见它。这一槽此前靠 `ChatTransferFailedPhonePreview` 撑着，而那一帧渲染的是 ChatScreen —— 是邻屏的证据借了名字（第二十九个洞），去掉错挂的前缀后本槽诚实暴露为缺口，这条别名把它补回真证据。"
+        }
+      ]
+    }
+  },
+  "gates": {
+    "note": "门禁登记表：每条写清命令、基线文件、证明什么。CI 与本机都按这张表跑，新增门禁必须在这里登记，否则 --check 报错。",
+    "designSpecDrift": {
+      "command": "python3 tools/design-spec-project.py --check",
+      "baseline": "design/design-spec.json",
+      "proves": "spec 的 tokens/usage 与代码逐键一致，且书写段（componentSpecs/stateSlots/gates）引用完整。红了代表有人改了代码没重投影，或书写段引用了不存在的东西。"
+    },
+    "designTokenUsage": {
+      "command": "python3 tools/design-token-usage.py --check",
+      "baseline": "tools/design-token-usage-baseline.json",
+      "proves": "token 采用数不低于基线、字面量欠债不高于基线（棘轮：只降不升）。红了代表新代码绕开了 token 又写了一批字面量。"
+    },
+    "designStateSlotReport": {
+      "command": "python3 tools/design-state-slot-report.py --check",
+      "baseline": "tools/design-state-slot-baseline.json",
+      "proves": "状态槽覆盖数不低于基线。红了代表有屏/状态没有预览证据了。"
+    },
+    "designConverge": {
+      "command": "python3 tools/design-converge.py --repo . --check",
+      "baseline": "tools/design-converge-baseline.json",
+      "proves": "设计侧取值种数只许收敛，已走变量的部分不许退回字面量。红了代表原型新增了取值（或本工具口径变了），先看输出里的 sha256 是不是别人改原型造成的。"
+    },
+    "designStateSlotGate": {
+      "command": "python3 tools/design-state-slot-report.py --check",
+      "baseline": "tools/design-state-slot-baseline.json",
+      "proves": "与 designStateSlotReport 同一条棘轮，单独登记便于 Gradle 任务与 spec 键一一对应。"
+    }
+  },
+  "icons": [
+    {
+      "name": "ic_chat_bubble",
+      "semantic": "conversation",
+      "source": "material_symbols",
+      "target": "vector_xml",
+      "resourceSet": "commonMain",
+      "sizeDp": 24,
+      "tintable": true
+    },
+    {
+      "name": "ic_groups",
+      "semantic": "group",
+      "source": "material_symbols",
+      "target": "vector_xml",
+      "resourceSet": "commonMain",
+      "sizeDp": 24,
+      "tintable": true
+    },
+    {
+      "name": "ic_lan_search",
+      "semantic": "discovery",
+      "source": "material_symbols",
+      "target": "vector_xml",
+      "resourceSet": "commonMain",
+      "sizeDp": 24,
+      "tintable": true
+    },
+    {
+      "name": "ic_terminal",
+      "semantic": "agent_console",
+      "source": "material_symbols",
+      "target": "vector_xml",
+      "resourceSet": "commonMain",
+      "sizeDp": 24,
+      "tintable": true
+    },
+    {
+      "name": "ic_qr_code_scanner",
+      "semantic": "pairing",
+      "source": "material_symbols",
+      "target": "vector_xml",
+      "resourceSet": "commonMain",
+      "sizeDp": 24,
+      "tintable": true
+    },
+    {
+      "name": "ic_settings",
+      "semantic": "settings",
+      "source": "material_symbols",
+      "target": "vector_xml",
+      "resourceSet": "commonMain",
+      "sizeDp": 24,
+      "tintable": true
+    },
+    {
+      "name": "ic_send",
+      "semantic": "send",
+      "source": "material_symbols",
+      "target": "vector_xml",
+      "resourceSet": "commonMain",
+      "sizeDp": 24,
+      "tintable": true
+    },
+    {
+      "name": "ic_attachment",
+      "semantic": "attach_file",
+      "source": "material_symbols",
+      "target": "vector_xml",
+      "resourceSet": "commonMain",
+      "sizeDp": 24,
+      "tintable": true
+    },
+    {
+      "name": "ic_add_node",
+      "semantic": "add_manual_peer",
+      "source": "material_symbols",
+      "target": "vector_xml",
+      "resourceSet": "commonMain",
+      "sizeDp": 24,
+      "tintable": true
+    },
+    {
+      "name": "ic_check_double",
+      "semantic": "delivered",
+      "source": "material_symbols",
+      "target": "vector_xml",
+      "resourceSet": "commonMain",
+      "sizeDp": 24,
+      "tintable": true
+    },
+    {
+      "name": "ic_clock_pending",
+      "semantic": "queued",
+      "source": "material_symbols",
+      "target": "vector_xml",
+      "resourceSet": "commonMain",
+      "sizeDp": 24,
+      "tintable": true
+    },
+    {
+      "name": "ic_bot",
+      "semantic": "agent_peer",
+      "source": "material_symbols",
+      "target": "vector_xml",
+      "resourceSet": "commonMain",
+      "sizeDp": 24,
+      "tintable": true
+    }
+  ],
+  "screens": [
+    {
+      "id": "conversations",
+      "name": "Conversations",
+      "intent": "会话列表：人节点与 agent 节点、群聊、未读、草稿、离线暂存提示；紧凑宽度单列，宽屏列表-详情双栏",
+      "states": [
+        "normal",
+        "loading",
+        "empty",
+        "error",
+        "long_text",
+        "offline_queue_banner"
+      ],
+      "adaptive": {
+        "compact": {
+          "navigation": "bottom_bar",
+          "layout": "single_column",
+          "detail": "navigate"
+        },
+        "medium": {
+          "navigation": "navigation_rail",
+          "layout": "two_column",
+          "detail": "side_panel"
+        },
+        "expanded": {
+          "navigation": "navigation_rail",
+          "layout": "list_detail",
+          "detail": "persistent_pane"
+        }
+      },
+      "platformBoundaries": [],
+      "components": [
+        {
+          "type": "TopBar",
+          "id": "conv_topbar",
+          "title": "消息",
+          "actions": [
+            "search",
+            "add_peer"
+          ]
+        },
+        {
+          "type": "OfflineQueueBanner",
+          "id": "conv_offline_banner",
+          "visibleWhen": "queue_count > 0",
+          "stress": [
+            "many_queued"
+          ]
+        },
+        {
+          "type": "SectionHeader",
+          "id": "conv_section_agents",
+          "title": "Agent 节点"
+        },
+        {
+          "type": "ConversationList",
+          "id": "conv_list",
+          "stress": [
+            "long_title",
+            "many_items",
+            "mixed_peer_kinds"
+          ]
+        },
+        {
+          "type": "ConversationRow",
+          "id": "conv_row",
+          "contract": "avatar + name + preview + ts + unread_badge + delivery_state",
+          "stress": [
+            "long_name",
+            "long_preview",
+            "large_font"
+          ]
+        },
+        {
+          "type": "SearchField",
+          "id": "conv_search",
+          "stress": [
+            "long_query"
+          ]
+        }
+      ]
+    },
+    {
+      "id": "chat",
+      "name": "Chat",
+      "intent": "单聊/群聊消息流：文本、长文本、文件卡片、引用回复、送达状态（已送达/重试中/已暂存）、群内 @ 与撤回提示",
+      "states": [
+        "normal",
+        "loading_history",
+        "empty",
+        "error",
+        "long_text",
+        "offline_composing",
+        "transfer_in_progress",
+        "transfer_failed"
+      ],
+      "adaptive": {
+        "compact": {
+          "navigation": "top_bar_back",
+          "layout": "single_column",
+          "detail": "none"
+        },
+        "medium": {
+          "navigation": "navigation_rail",
+          "layout": "two_column",
+          "detail": "side_panel"
+        },
+        "expanded": {
+          "navigation": "navigation_rail",
+          "layout": "list_detail",
+          "detail": "persistent_pane"
+        }
+      },
+      "platformBoundaries": [
+        {
+          "capability": "pick_files_to_send",
+          "commonContract": "FilePicker",
+          "androidActual": true,
+          "iosActual": true
+        },
+        {
+          "capability": "choose_save_directory",
+          "commonContract": "SaveDirectoryPicker",
+          "androidActual": true,
+          "iosActual": true
+        }
+      ],
+      "components": [
+        {
+          "type": "ChatTopBar",
+          "id": "chat_topbar",
+          "contract": "title + online_state + capabilities_summary + actions[recall, files, info]",
+          "stress": [
+            "long_group_name"
+          ]
+        },
+        {
+          "type": "MessageList",
+          "id": "chat_list",
+          "stress": [
+            "many_items",
+            "long_text",
+            "mixed_bubble_width",
+            "large_font"
+          ]
+        },
+        {
+          "type": "MessageBubble",
+          "id": "chat_bubble",
+          "contract": "kind[text,file,image] + quoted + mentions + delivery_state + timestamp",
+          "stress": [
+            "max_text_length_800_bytes",
+            "long_url_without_spaces",
+            "long_filename"
+          ]
+        },
+        {
+          "type": "FileCard",
+          "id": "chat_file_card",
+          "contract": "icon + name + size + progress + accept/decline",
+          "stress": [
+            "very_long_filename",
+            "huge_size_value"
+          ]
+        },
+        {
+          "type": "DeliveryStateIndicator",
+          "id": "chat_delivery",
+          "contract": "sent | queued | failed | recalled"
+        },
+        {
+          "type": "ComposerBar",
+          "id": "chat_composer",
+          "contract": "attach + multiline_input + send",
+          "stress": [
+            "empty",
+            "very_long_draft",
+            "over_byte_limit_800"
+          ]
+        },
+        {
+          "type": "ByteLimitHint",
+          "id": "chat_byte_hint",
+          "visibleWhen": "draft exceeds udp limit",
+          "action": "auto_switch_to_tcp"
+        }
+      ]
+    },
+    {
+      "id": "nodes",
+      "name": "Nodes",
+      "intent": "一页看完局域网节点：自动发现的节点、已连上的节点、手动保存的节点；添加节点是底部 sheet，扫码和手填地址两个入口；发现结果可以直接发消息，不必先加入。",
+      "states": [
+        "normal",
+        "scanning",
+        "empty",
+        "error",
+        "long_text",
+        "sheet_open"
+      ],
+      "adaptive": {
+        "compact": "底部三段导航 · 单列 · 节点列表；添加节点用 AddNodeSheet",
+        "medium": "导航轨 · 列表 + 详情双栏",
+        "expanded": "导航轨 · 常驻列表-详情 · 详情可继续进入会话"
+      },
+      "platformBoundaries": [
+        {
+          "name": "LocalNetworkGate",
+          "android": "actual",
+          "ios": "actual"
+        },
+        {
+          "name": "QrScanner",
+          "android": "actual",
+          "ios": "actual"
+        },
+        {
+          "name": "CameraGate",
+          "android": "actual",
+          "ios": "actual"
+        }
+      ],
+      "components": [
+        {
+          "name": "TopBar",
+          "id": "nodes_topbar",
+          "contract": "标题 节点；副标题 <local_ip> · <udp_port>/<tcp_port>；操作区 刷新 / +"
+        },
+        {
+          "name": "NetworkStatusCard",
+          "id": "nodes_status",
+          "contract": "udp_port + tcp_port + local_ip + broadcast_state + peers_online"
+        },
+        {
+          "name": "PeerList",
+          "id": "nodes_peer_list",
+          "contract": "自动发现的节点、已连上的节点、手动保存的节点三段分组；stress: 节点很多 / 大量离线条目 / 昵称很长"
+        },
+        {
+          "name": "PeerRow",
+          "id": "nodes_peer_row",
+          "contract": "avatar + nick + ip + online_dot + kind_badge[human,agent] + caps_summary + 直接发消息；stress: 昵称很长 / 头像缺失"
+        },
+        {
+          "name": "AddNodeSheet",
+          "id": "nodes_add_sheet",
+          "contract": "底部 sheet：扫码 + 填地址两个分段；扫码框固定 + 提示 把对方的节点码放进框里；手填 ip_or_ip_port + 端口校验；握手进度 send_entry → await_alive → register → done；同 IP 3 秒内进表即算连上，否则关闭 sheet",
+          "replaces": "旧 Pairing 页",
+          "states": [
+            "qr_scanning",
+            "manual_entry",
+            "handshaking",
+            "success",
+            "error",
+            "invalid_qr"
+          ]
+        },
+        {
+          "name": "EmptyState",
+          "id": "nodes_empty",
+          "contract": "标题 还没发现节点；动作 add_node（打开 AddNodeSheet）"
+        }
+      ]
+    },
+    {
+      "id": "agents",
+      "name": "AgentConsole",
+      "intent": "Agent 控制台：本机 agent 节点在线状态、任务事件流（session 事件/任务完成/产物文件）、直接给 agent 发指令；这是本产品区别于普通 IM 的主界面",
+      "states": [
+        "normal",
+        "loading",
+        "empty",
+        "error",
+        "long_text",
+        "agent_offline"
+      ],
+      "adaptive": {
+        "compact": {
+          "navigation": "bottom_bar",
+          "layout": "single_column",
+          "detail": "navigate"
+        },
+        "medium": {
+          "navigation": "navigation_rail",
+          "layout": "two_column",
+          "detail": "side_panel"
+        },
+        "expanded": {
+          "navigation": "navigation_rail",
+          "layout": "list_detail",
+          "detail": "persistent_pane"
+        }
+      },
+      "platformBoundaries": [],
+      "components": [
+        {
+          "type": "TopBar",
+          "id": "agent_topbar",
+          "title": "Agent",
+          "actions": [
+            "refresh"
+          ]
+        },
+        {
+          "type": "AgentStatusCard",
+          "id": "agent_status",
+          "contract": "node_nick + online_state + host + tcp_port + last_seen"
+        },
+        {
+          "type": "EventTimeline",
+          "id": "agent_timeline",
+          "stress": [
+            "many_items",
+            "long_payload",
+            "mixed_event_kinds"
+          ]
+        },
+        {
+          "type": "EventCard",
+          "id": "agent_event_card",
+          "contract": "kind[session,tool,result,artifact,error] + timestamp + summary + expandable_payload",
+          "stress": [
+            "very_long_payload",
+            "large_font"
+          ]
+        },
+        {
+          "type": "ArtifactChip",
+          "id": "agent_artifact",
+          "contract": "filename + size + download",
+          "stress": [
+            "long_filename"
+          ]
+        },
+        {
+          "type": "AgentOfflineState",
+          "id": "agent_offline",
+          "action": "compose_queued_message"
+        }
+      ]
+    },
+    {
+      "id": "settings",
+      "name": "Settings",
+      "intent": "设置：资料（昵称/部门，改动会递增 profileRev）、网络端口、接收文件目录、能力声明说明、关于与诊断信息",
+      "states": [
+        "normal",
+        "loading",
+        "error",
+        "long_text"
+      ],
+      "adaptive": {
+        "compact": {
+          "navigation": "bottom_bar",
+          "layout": "single_column",
+          "detail": "navigate"
+        },
+        "medium": {
+          "navigation": "navigation_rail",
+          "layout": "single_column",
+          "detail": "navigate"
+        },
+        "expanded": {
+          "navigation": "navigation_rail",
+          "layout": "two_column",
+          "detail": "persistent_pane"
+        }
+      },
+      "platformBoundaries": [
+        {
+          "capability": "app_data_directory",
+          "commonContract": "DataDirectoryProvider",
+          "androidActual": true,
+          "iosActual": true
+        }
+      ],
+      "components": [
+        {
+          "type": "TopBar",
+          "id": "set_topbar",
+          "title": "设置"
+        },
+        {
+          "type": "ProfileEditor",
+          "id": "set_profile",
+          "contract": "avatar + nick + company + dept + team",
+          "stress": [
+            "max_length_32"
+          ]
+        },
+        {
+          "type": "PortSection",
+          "id": "set_ports",
+          "contract": "udp_port + tcp_port + rebind_result"
+        },
+        {
+          "type": "StorageSection",
+          "id": "set_storage",
+          "contract": "data_dir + cache_size + clear_cache + export_logs"
+        },
+        {
+          "type": "CapabilitiesCard",
+          "id": "set_caps",
+          "contract": "declared_caps + what_each_cap_grants + why_declared"
+        },
+        {
+          "type": "DiagnosticsCard",
+          "id": "set_diag",
+          "contract": "node_id + profile_rev + peer_count + queue_depth + log_tail"
+        }
+      ]
+    },
+    {
+      "id": "settings-more",
+      "name": "SettingsMore",
+      "intent": "从设置拆出的第二屏：通知与数据。能力声明从只读改为可开关，由接收方决定是否生效；说明数据目录、缓存与导出日志。",
+      "states": [
+        "normal",
+        "loading",
+        "error",
+        "long_text"
+      ],
+      "adaptive": {
+        "compact": "底部导航 · 单列",
+        "medium": "导航轨 · 单列",
+        "expanded": "导航轨 · 常驻双栏"
+      },
+      "platformBoundaries": [
+        {
+          "name": "DataDirectoryProvider",
+          "android": "actual",
+          "ios": "actual"
+        }
+      ],
+      "components": [
+        {
+          "name": "TopBar",
+          "id": "more_topbar",
+          "contract": "标题 通知与数据；操作 关闭"
+        },
+        {
+          "name": "CapabilitySwitches",
+          "id": "more_caps",
+          "contract": "declared_caps 逐项开关：tw1（排队保活）/ mrec1（媒体撤回）/ fd1（只读不声明）；每项写清 授予什么 / 为什么声明；fd1 由接收方决定是否生效"
+        },
+        {
+          "name": "StorageSection",
+          "id": "more_storage",
+          "contract": "data_dir + cache_size + clear_cache + export_logs"
+        },
+        {
+          "name": "DiagnosticsSection",
+          "id": "more_diag",
+          "contract": "node_id + profile_rev + 已知节点数 + 在线节点数 + 排队消息数"
+        }
+      ]
+    },
+    {
+      "id": "cabinet",
+      "name": "Cabinet",
+      "intent": "文件柜：共享根设置、按对端浏览、文件夹进入；桌面左栏与单栏互斥",
+      "states": [
+        "normal",
+        "cabinet_peer",
+        "cabinet_unset",
+        "loading",
+        "empty",
+        "error"
+      ],
+      "adaptive": {},
+      "platformBoundaries": [],
+      "components": []
+    },
+    {
+      "id": "files",
+      "name": "Files",
+      "intent": "文件视图：已收/已发列表、文件夹卡片、空态、搜索无结果、断点续传、未保存提示",
+      "states": [
+        "normal",
+        "empty",
+        "folder",
+        "resume",
+        "unsaved",
+        "error",
+        "search"
+      ],
+      "adaptive": {},
+      "platformBoundaries": [],
+      "components": []
+    },
+    {
+      "id": "remote-view",
+      "name": "RemoteView",
+      "intent": "屏幕协助：请求征求同意、被看方选屏、查看方观看",
+      "states": [
+        "normal",
+        "consent",
+        "sharing",
+        "viewing",
+        "error"
+      ],
+      "adaptive": {},
+      "platformBoundaries": [],
+      "components": []
+    },
+    {
+      "id": "capture",
+      "name": "Capture",
+      "intent": "截图：全屏冻结框选、工具条（选择/矩形/箭头/文字/马赛克）",
+      "states": [
+        "normal",
+        "tools",
+        "error"
+      ],
+      "adaptive": {},
+      "platformBoundaries": [],
+      "components": []
+    }
+  ],
+  "previewMatrix": [
+    {
+      "name": "Phone Portrait",
+      "widthDp": 393,
+      "heightDp": 852,
+      "layoutMode": "CompactSinglePane"
+    },
+    {
+      "name": "Phone Landscape",
+      "widthDp": 852,
+      "heightDp": 393,
+      "layoutMode": "CompactLandscape"
+    },
+    {
+      "name": "Tablet Portrait",
+      "widthDp": 800,
+      "heightDp": 1280,
+      "layoutMode": "MediumTwoPane"
+    },
+    {
+      "name": "Tablet Landscape",
+      "widthDp": 1280,
+      "heightDp": 800,
+      "layoutMode": "ExpandedListDetail"
+    },
+    {
+      "name": "Dark Mode",
+      "widthDp": 393,
+      "heightDp": 852,
+      "layoutMode": "CompactSinglePane",
+      "theme": "dark"
+    },
+    {
+      "name": "Large Font",
+      "widthDp": 393,
+      "heightDp": 852,
+      "layoutMode": "CompactSinglePane",
+      "fontScale": 1.3
+    }
+  ],
+  "verification": {
+    "required": [
+      ":core:allTests",
+      ":composeApp:allTests",
+      ":androidApp:assembleDebug",
+      ":composeApp:linkDebugFrameworkIosSimulatorArm64",
+      ":agentNode:test"
+    ],
+    "screenshot": "android_p0_matrix"
+  },
+  "architecture": {
+    "style": "thin_platform_shells",
+    "state": "common_state_holder_with_reducer_when_needed",
+    "navigation": "semantic_routes_with_adaptive_panes",
+    "designSystem": "common_tokens_and_component_contracts",
+    "platformContracts": [
+      "FilePicker",
+      "SaveDirectoryPicker",
+      "LocalNetworkGate",
+      "QrScanner",
+      "CameraGate",
+      "DataDirectoryProvider",
+      "NetworkMonitor",
+      "MdnsAdvertiser"
+    ],
+    "validation": [
+      "common_tests",
+      "golden_vector_parity_with_teahouse",
+      "android_screenshot_p0",
+      "ios_framework_link"
+    ]
+  },
+  "qualityGate": {
+    "targetLevel": "L3-adaptive-verified",
+    "pixelPerfect": false,
+    "p0PassRate": 1.0,
+    "p1PassRate": 0.95,
+    "majorRegionSimilarity": 0.88,
+    "spacingToleranceDp": 4,
+    "largeSurfaceSpacingToleranceDp": 8,
+    "typographyToleranceSp": 1,
+    "allowLineBreakDifferences": true,
+    "requiresDesignOwnerApprovalForL4": true,
+    "thresholdsNote": "majorRegionSimilarity / spacingToleranceDp / typographyToleranceSp 三个阈值至今零消费者，且 2026-10 实测 majorRegionSimilarity=0.88 没有分辨力：一张纯白图与 desk-conversations-expanded 的区域相似度是 0.961，比同屏跨引擎（0.930）还高，276 对里 77.2% 都\"通过\"。实际在用的对账是 tools/check-design-palette.py --strict（量颜色本身 + 用到却没赋值的 colorScheme 角色）。详见 docs/plans/2026-10-05-relay-desktop-screen-matrix.md §5。"
+  }
+}

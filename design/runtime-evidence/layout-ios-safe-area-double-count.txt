@@ -1,0 +1,58 @@
+# iOS 顶部留白证据（iPhone 17 Pro 模拟器 00000000-FEF7-409D-AE33-803A77C62376, iOS 26.x, 1206x2622 @3x）
+# 构建: scaffold/iosApp/build/dd/Build/Products/Debug-iphonesimulator/Tidings.app
+#       构建命令 /tmp/relay-xcode.sh -project Tidings.xcodeproj -scheme Tidings -configuration Debug
+#                 -sdk iphonesimulator -destination 'id=00000000-...' -derivedDataPath build/dd build
+# 取证时间: 2026-10-07 00:05–00:15
+#
+# 现象（用户报的）：「iOS 顶部怎么还有留白」。同一份 Compose 代码，iOS 上「消息」
+# 标题离状态栏明显比 Android 远一截。
+
+# —— 量出来的数字（暗行带 = 该行有 >=4 个 <120 的像素；脚本 /tmp/topgap.py） ——
+# iOS（@3x，1pt = 3px）：
+#   状态栏时间   y=79..116
+#   消息         y=436..503   → 顶边 145.3pt
+#   搜索会话     y=657..699
+#   同事         y=843..879
+# Android（Pixel 6，density 420，1dp = 2.625px）：
+#   状态栏时间   y=52..79
+#   消息         y=190..248   → 顶边 72.4dp
+#   搜索会话     y=381..418
+#   同事         y=542..573
+#
+# 元素之间的间距两端完全一致（消息→搜索 72.8dp vs 73.7pt，搜索→同事 61.3 vs 62.0，
+# 同事→首行 50.3 vs 50.0），说明页面内部的排版没有问题，差的只是**页面顶端的位置**。
+#
+# Android 的顶部 inset 来自挖孔，不是状态栏：
+$ adb shell dumpsys window displays | grep mDisplayCutout=
+      mDisplayCutout=DisplayCutout{insets=Rect(0, 128 - 0, 0) ...}
+# → 128px / 2.625 = 48.8dp。于是 Android 的页面自留白 = 190 - 128 = 62px = 23.6dp。
+# iOS 的顶部安全区（iPhone 17 Pro / Dynamic Island）= 62pt = 186px。
+# 若只消费一次，标题应在 186 + 23.6*3 = 257px；实测 436px，多出 186px = 62pt。
+# 436 ≈ 186（SwiftUI 缩进） + 186（Compose 根层再 pad） + 71（页面自留白）
+# → **同一份 safe area 被消费了两次**。
+
+# —— 修法：让窗口铺到系统栏后面，安全区只由 Compose 根层消费 ——
+# scaffold/iosApp/iOSApp.swift 原本只写 .ignoresSafeArea(.keyboard)，
+# 于是 SwiftUI 的 WindowGroup 先把子视图 frame 缩进安全区（顶部 62pt），
+# CMP 的 UIKitWindowInsetsManager 又把同一份 62pt 报进 Compose 的 WindowInsets，
+# RelayApp 根层再 windowInsetsPadding(safeDrawing) 一次。
+# 改成 .ignoresSafeArea()（.all 含 .container 与 .keyboard：容器与键盘都交给 Compose）。
+
+# —— 改后复测（同一台模拟器，同一份 UI） ——
+#   消息         y=250..317   （原 436..503，上移 186px = 62pt，正好一份安全区）
+#   搜索会话     y=471..513
+#   同事         y=657..693
+#   首行         y=807..904
+#   底部页签     y=2335..2390（原 2233..2288，下移 102px = 34pt，正好一份 home indicator 安全区）
+# 250px = 83.3pt ≈ 62（安全区） + 21.3（页面自留白），与 Android 的 48.8 + 23.6 同构。
+# 结论：顶部留白与底部页签离 home indicator 的距离都回到与 Android 一致。
+
+# —— 复现命令 ——
+# $ xcrun simctl install 00000000-FEF7-409D-AE33-803A77C62376 \
+#     scaffold/iosApp/build/dd/Build/Products/Debug-iphonesimulator/Tidings.app
+# $ xcrun simctl terminate 00000000-... app.relay; xcrun simctl launch 00000000-... app.relay
+# $ xcrun simctl io 00000000-... screenshot /tmp/sim-03.png
+# $ python3 /tmp/topgap.py /tmp/sim-03.png 20 400 120 4
+#
+# 注意：模拟器上装的必须是**当前构建**。改之前那台模拟器上装的是 2026-10-04 的旧包
+# （没有「我的二维码」卡），拿它量出来的数字不能用来判断今天的代码。

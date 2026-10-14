@@ -1,0 +1,175 @@
+# 投屏（screen mirroring）Android 真机双向验收 · 2026-10-09 17:4x CST
+
+结论：**通过（双向各一条）**。协议设计稿 §6.3 要求的「手机↔桌面双向各验一条」这一次是真跑出来的，
+不是推断。同时本轮在真机上抓出并修掉了**三个根因**——它们全都在「自动化测试全绿」的状态下
+让功能完全不可用，这三条是本文件的主要价值。
+
+    本文件覆盖：设计稿 docs/plans/2026-10-08-relay-screen-mirroring-design.md 的 §6.3
+    对端：真实桌面茶话间 Teahouse.app（0.61.1 协议权威版，PID 31861，占本机 UDP 17878 / TCP 17879）
+    设备：Pixel 6 / oriole（SERIAL-TEST-01，Android 15 / SDK 35，1080x2400 @420dpi）
+    包：app.relay versionCode=1 versionName=0.1.0，lastUpdateTime=2026-10-09 17:38:07
+    APK：scaffold/androidApp/build/outputs/apk/debug/androidApp-debug.apk（46272265 B，17:37 构建）
+
+## 三个根因（都在「门禁全绿」的前提下让功能 100% 不可用）
+
+### 根因 1 —— 手机生成的是本地序号 id，不是协议要求的 UUIDv4 / 32 位 hex
+
+`scaffold/composeApp/src/commonMain/kotlin/app/relay/app/RelayControllerScreen.kt` 原来用
+`localMessageId()`（形如 `local-1-1791535251098`）当 `sessionId`，又用
+`localMessageId().replace("-", "")`（形如 `local11791535251098`，含非 hex 字符、长度也不定）当一次性 token。
+
+茶话间侧 `isScreenSessionId` 要求严格 UUIDv4、`isScreenToken` 要求 `/^[0-9a-f]{32}$/`，
+不合格的帧在 `decodeEnvelopeObject` 阶段就被丢掉 —— **不弹邀请、不回 ACK**。
+发起端因此只能等到重传耗尽，报「屏幕协助已结束 (连接已断开)」，看起来像网络问题。
+
+修：
+- `scaffold/core/src/commonMain/kotlin/app/relay/core/protocol/Ids.kt:26` 新增
+  `fun newScreenToken(): String = Uuid.random().toString().replace("-", "")`；
+  `:28-30` 新增 `private val HEX32 = Regex("^[a-f0-9]{32}$")` 与 `fun isScreenToken(value: String)`。
+- `RelayControllerScreen.kt:82` `val sessionId = newId()`（原 `localMessageId()`）；
+  `:183` `val token = newScreenToken()`（原 `localMessageId().replace("-", "")`）。
+- 对称性缺口也一起收了：`scaffold/core/src/commonMain/kotlin/app/relay/core/protocol/Codec.kt:920`
+  的 `validateScreen` 原来只对 `sessionId` 做 `isStr`，现在取字符串后 `isUuidV4`，
+  四个 op 各钉精确键集（`ACCEPT` 额外判 `isScreenToken(token)`）——**否则本端自己发得出、收不下**。
+
+### 根因 2 —— `TransferServer.serve` 的 `firstFrame` 先清后判，`openScreen` 永不可达
+
+`scaffold/core/src/commonMain/kotlin/app/relay/core/transport/TransferServer.kt` 的 `serve()` 里：
+
+    val decoded = TcpFrames.decodeBody(text)
+    firstFrame = false                      // ← 先清
+    when (decoded) {
+        is TcpFrameDecode.Screen -> {
+            if (firstFrame && frame is ScreenTcpFrame.Open) {   // ← 后判 ⇒ 恒 false
+
+TS 参考实现（`/tmp/th_asar/out/main/index.js:2826-2831`，`FrameReader` 回调）是
+**判断通过之后才 `firstFrame = false`**。Kotlin 移植把两处合并成一行前置清除，语义就反了。
+后果：`lookup.openScreen(...)` 永远不被调用，每条入站 `screen-open` 连接都被 `return` 掉。
+
+症状：手机侧 accept 后 `phase=Connecting` 等 15s；对端 TCP 明明连上了（手机能抓到
+来自 192.168.2.82 的 TIME_WAIT），却始终等不到 `screen-ready`，最后
+`screen-phase ended reason=disconnected`（`/tmp/orch-out.txt` 实测：t+17.5s
+`"phase":"ended","reason":"disconnected"`）。
+
+修：留下 `val isFirstFrame = firstFrame` 再清标志，`if (isFirstFrame && frame is ScreenTcpFrame.Open)`。
+
+### 根因 3 —— ktor socket 的通道是一次性绑定的，处理器不能再自己开
+
+修完根因 2 之后 `openScreen` 能被调到了，但 `ScreenSender.start()` 内部还会
+`socket.openReadChannel()` / `socket.openWriteChannel()`。ktor 3.3.1 对同一条 socket
+**只允许绑定一次通道**，第二次抛 `compareAndSet` 相关异常 ⇒ `ScreenSender` 起来就断。
+
+修：把 `serve` 已经开好的 `read`/`write` 一路透传给投屏处理器（5 层签名）：
+`OutgoingLookup.openScreen(socket, open, remoteAddress, read, write)`（`TransferServer.kt:71-88`）
+→ `TransferManager.kt:258` → `NodeRuntime.kt:102` → `RelayController.kt:289-291`
+→ `handleOnIncomingScreenSocket(..., read, write)`（`RelayControllerScreen.kt:401`）
+→ `ScreenSender(readChannel = read, writeChannel = write)`（`RelayControllerScreen.kt:416`）。
+`ScreenStream.kt` 的 `ScreenSender` 收两个默认 null 的新参数，只在调用方没给时才自己开通道。
+
+同段还发现并修掉一条会泄漏连接的缺陷：`TransferServer.kt:250-267` 的 `acceptLoop`
+原先**无条件** `socket.close()`，会把刚交接给投屏处理器的 socket 当场掐断；
+现在按 `handedOff` 分流，交接后改为等 `socket.socketContext.join()` 再从 `sockets` 摘除。
+
+## 方向一：手机当 Sharer（对端 Viewer）—— 实跑 PASS 60 帧
+
+    python3 scripts/relay-screen-fixture.py viewer --phone 192.168.2.22 --secs 150 > /tmp/fixture-viewer2.log
+
+夹具（`scripts/relay-screen-fixture.py`，本仓新文件）是一台「看得懂 screen 的桌面茶话间」线协议替身。
+**为什么用夹具而不是真茶话间**：真茶话间 0.61.1 的桌面 GUI 只能当 Sharer（应答入站邀请），
+没有「请求查看对方屏幕」的入口（`DesktopConversationsPane.kt:289` 用 `showHeader = false`
+刻意绕过 `ChatHeader` 的 `screen_remote_view_action`，桌面宿主也不挂 `RelayApp` 而是直接挂
+`DesktopShell`），所以「手机当 Sharer」这条只能用替身发 `screen.request`。
+
+逐项读数（`/tmp/fixture-viewer2.log` 原样）：
+
+    phone-profile {"nodeId":"bc19885f-...","nick":"我的手机","host":"Google Pixel 6",
+                   "tcpPort":17879,"ver":"relay-0.1.0",
+                   "caps":["tw1","mrec1","agn1","tbl1","rv1","rvs1","shr1"]}
+    mode viewer（手机当 Sharer）
+    phone-screen {"op":"accept","sessionId":"15d5f44f-e5d5-4f09-94dd-b90c8c0680b6",
+                  "token":"fce3fac263734b9d8c475ed8ffc84867"}
+    tcp-open-sent 15d5f44f-e5d5-4f09-94dd-b90c8c0680b6
+    tcp-ready {"type":"screen-ready","sessionId":"15d5f44f-..."}
+    frame#1  864x1920 62196B jpeg-magic=ffd8
+    frame#2  864x1920 62196B jpeg-magic=ffd8
+    frame#10 864x1920 62097B jpeg-magic=ffd8
+    frame#30 864x1920 62220B jpeg-magic=ffd8
+    frames-total 60 distinct-sizes 7 sample [(864,1920,62196),(864,1920,62196),(864,1920,62196)]
+    result PASS frames 60
+
+**怎么做的**：先 `relay-screen-fixture.py viewer` 起替身发 `{"op":"request","sessionId":<uuid4>}` →
+手机上弹出「收到屏幕协助邀请 / 夹具桌面 请求查看你的屏幕画面」→ 点「同意共享」→
+Android 弹 MediaProjection 系统对话框「要与"捎话"共享屏幕吗？」→
+`共享一个应用 ▾` 选 **共享整个屏幕** → 点「共享屏幕」。
+
+**期望看到什么**：邀请能落地、系统授权能走通、替身侧收到 `accept`（带 32 位 hex token）、
+TCP `screen-open` 能被应答 `screen-ready`、之后持续收到真 JPEG 帧。
+
+**实际看到什么**：全部成立，60 帧、7 种尺寸、每帧 JPEG magic `ffd8`、分辨率 864x1920
+（= 1080x2400 按长边 ≤1920 缩放后的结果，与协议一致）。
+
+**结论：通过。**
+
+**操作坑（下次别踩）**：MediaProjection 对话框的按钮坐标必须用
+`adb shell uiautomator dump /sdcard/ui.xml` 解析 `bounds` 求得，不要靠截图目测 ——
+第一跑我就是靠目测点错、误触 `KEYCODE_BACK` 取消了授权。取消授权时夹具收到的是
+`{"op":"reject","reason":"capture-failed"}`（不是 `permission-denied`），
+手机横幅显示「屏幕协助已结束 (屏幕采集失败)」。
+
+## 方向二：手机当 Viewer（桌面当 Sharer）—— 实跑 PASS，8/8 帧各不相同
+
+**怎么做的**：手机聊天页右上角点「屏幕协助」→ 进入全屏「屏幕协助 · mac mini」等待页 →
+桌面茶话间弹出「我的手机 想查看你的屏幕 / 拒绝 · 选择屏幕」→
+用 CDP（renderer 带 `--remote-debugging-port=9222`）自动点「选择屏幕」→ 选「整个屏幕」→
+点「开始共享」。
+
+**期望看到什么**：桌面同意后手机全屏进入实时画面渲染，画面持续更新。
+
+**实际看到什么**：
+- 桌面侧 CDP 实读（`/tmp/th-auto3.log`）：
+  `[TH] picker-btn {"x":500,"y":451,"disabled":false}` →
+  `[TH] clicked 选择屏幕 @(500,451)` →
+  `[TH] source-tile {"text":"整个屏幕"}` → `[TH] clicked source '整个屏幕' @(148,323)` →
+  `[TH] share-btn {"disabled":false}` → `[TH] clicked 开始共享 @(500,451)` →
+  `[TH] after: "正在共享屏幕\n我的手机\n停止共享"` → `[TH] done phase=accepted`
+- 手机侧 0.7s 间隔连拍 8 张 `adb exec-out screencap`，**8 个 md5 全部不同**
+  （`01d0029d…`、`37990460…`、`5b893cfe…`、`81f0843d…`、`8603bf7d…`、`a0415cf5…`、
+  `cda3d16a…`、`e8130df6…`）⇒ 画面确实在更新，不是一张静止图。
+- 截图（本地，不入库）：画面里是桌面真实内容（macOS 菜单栏 / Dock / 浏览器 / iTerm 双栏），
+  手机顶部保留「屏幕协助 · mac mini / 自动画质 / ✕」这层自绘画布。
+- 桌面点「停止共享」后，手机返回会话页并显示横幅「屏幕协助已结束 (已主动结束)」。
+
+**结论：通过。**
+
+## 附带发现的非阻断项（未修，记录待处置）
+
+- **`screen_reason_permission_denied` 是死字符串**：`ScreenPayload.kt:24`
+  定义了 `PERMISSION_DENIED = "permission-denied"`，但代码在所有失败路径上只发
+  `CAPTURE_FAILED`（`"capture-failed"`）。本次实测两次取消授权全部得到 `capture-failed`。
+  设计稿 §5 写的是「权限拒绝 → reject `permission-denied`」，**文档与实现不一致**。
+- **不止一个 reason 会漏成英文 token**：`scaffold/composeApp/.../Common.kt:331` 是
+  `else -> reason` 的兜底分支，`capture-ended` 之类没有中文映射的理由会原样显示英文。
+- **桌面端无法发起投屏**：见上文方向一的说明。设计稿把桌面列为可发起方，实际只有手机能发起。
+
+## 文档面同步（本次一并改完）
+
+四处文档此前把投屏写成「不做」，与实现不符，**均已在同一批改掉**：
+
+- `ACCEPTANCE.md` A13 原把投屏列在「收到但不处理的帧」里，现已摘掉并加一句指向新章节；
+  新增 **A17 屏幕协助（投屏）双向**（A15 已被扫码配对占用，不能复用编号）承载本轮证据。
+- `ACCEPTANCE.md` C5 原写「`rv1`/`rvs1` 一律不声明……`screen` 有意不做」，
+  现改为「投屏现在都声明、也都做了」—— 实测手机广播
+  `["tw1","mrec1","agn1","tbl1","rv1","rvs1","shr1"]`，`rv1` 与 `rvs1` **都在**。
+- `README.md` 的「类型的实际支持范围」表里 `screen` 行由「只回 ACK 不投递 / 手机端没有投屏能力」
+  改为「精确实现 / 有 / 完整实现并双向真机验收通过」；「能力声明」表里 `rv1`、`rvs1` 两行由
+  「**在 `CAPS` 里，但不广播**」改为「**广播**」。
+- `PROTOCOL-COVERAGE.md` §4 把 `rv1`/`rvs1` 从不声明列表里移出并注明联动点，
+  §5 投屏行由「只回 ACK」改为「已全面落地并双向真机验收通过」；
+  顺带修正 §4「声明的」清单里一处**既有错误**：原文把 `av1` 列为已声明，
+  但 `MsgTypes.MOBILE_CAPS` 与真机实测 caps 都不含它，`README.md` 也一直写着「不声明」
+  —— 已改为正确的四位常量 + 三位动态追加。
+- `docs/plans/2026-10-08-relay-screen-mirroring-design.md`：§5 权限拒绝那条标注
+  `permission-denied` 是死字符串（真机实测只有 `capture-failed`）；§6.3 由「待验」改为
+  「✅ 已验」并附双向读数与未验项；§7 增加「桌面端 GUI 发起入口不做」及其代码依据。
+
+（`docs/plans/` 被 `.gitignore:9` 排除，是本地文档，不入库；证据 `.txt` 入库。）

@@ -1,0 +1,178 @@
+通知策略 · Android 真机验收（Pixel 6 / Android 15 / SDK 35 / app.relay 2026-10-07 11:17 构建）
+================================================================================
+
+本轮要回答的问题
+----------------
+ACCEPTANCE 的 A2 只跑过「授权后弹通知」的正向路径，P1-7 加的三个通知开关
+（notifyAgentMessages / notifyMentionOnly / notifyQuietHours）在真机上一次都没验过。
+这份证据把「开关真的改变行为」和「权限被拒时不崩、不静默」跑成可复述的事实。
+
+装置
+----
+- 手机：Pixel 6 `SERIAL-TEST-01`，app.relay 由 `:androidApp:assembleDebug` 现构建
+  （`adb install -r` → Success）。
+- 对端：Mac 上的 agentNode「证据节点」，nodeId `aeb471f0-84da-43f3-8444-536719656776`，
+  控制面 `http://127.0.0.1:8799`，token 在 `/tmp/relay-ev-token`。它对手机表现为
+  `caps = ag1 tw1 agn1`，所以 `PeerUi.isAgent = MsgTypes.CAP_AGENT in caps` 为真。
+- 发送一律用 `POST /v1/send` / `POST /v1/nudge`；读取一律用
+  `adb shell dumpsys notification --noredact` 与
+  `adb shell run-as app.relay cat files/relay/messages.json`。
+
+方法学上的两个坑（先记下来，否则结论是错的）
+--------------------------------------------
+1) **必须等 peer 表学到对端再验**。第一次测「Agent 开关关掉就不通知」时通知照样弹，
+   但 `android.title=String (aeb471f0-84da-43f3-8444-536719656776)` —— 是裸 nodeId，
+   不是昵称。原因是 app 刚启动 7 秒，对端还没进 peer 表，于是 `peer == null`，
+   `shouldNotify(fromAgent = peer?.isAgent == true, ...)` 里的 `fromAgent` 退化成 false，
+   这条 Agent 消息被当成人类消息处理。**等 30 秒**（mDNS presence 每 5 秒一帧）
+   并在会话页头部看到 `能力：ag1 tw1 agn1` 之后再发，才是有效测量。
+   这一条同时说明：昵称显示本身就是「peer 表已学到」的可视信号。
+
+2) **干净门禁会重建 agentNode 的 jar，打断常驻的证据节点**。门禁跑完后再 `POST /v1/send`
+   会连续报 internal error，日志里是
+   `NoClassDefFoundError: app/relay/core/transport/Discovery$scheduleAliveReply$1`
+   —— JVM 的 classpath 被抽掉了。跑真机取证之前先
+   `/tmp/relay-gate.sh :agentNode:installDist` 再用 `/tmp/ev-node-start.sh` 重启它。
+
+--------------------------------------------------------------------------------
+一、基线（默认设置）：收到文本 → 弹通知
+--------------------------------------------------------------------------------
+设置（装机默认，未注入任何开关）：
+  notifyAgentMessages = true / notifyMentionOnly = true / notifyQuietHours = false
+
+  POST /v1/send {"to":"192.168.2.22","port":17878,"text":"notify-t1-112400"}
+  → {"status":"sent","toHost":"192.168.2.22","note":"对方已 ACK"}
+
+  dumpsys notification --noredact:
+    NotificationRecord(... pkg=app.relay id=1001 importance=3
+                       channel=relay_messages_v2 flags=AUTO_CANCEL)
+      android.title=String (证据节点)
+      android.text =String (notify-t1-112400)
+
+判读：**通过**。正文是消息全文，标题是昵称（不是 nodeId），渠道是 relay_messages_v2。
+
+--------------------------------------------------------------------------------
+二、`notifyAgentMessages = false`：消息照收照存，只是不弹
+--------------------------------------------------------------------------------
+注入方式（settings.json 在 app 私有目录，只能走 run-as）：
+  adb shell am force-stop app.relay
+  adb push /tmp/set-agent-off.json /data/local/tmp/set.json
+  adb shell run-as app.relay cp /data/local/tmp/set.json files/relay/settings.json
+  adb shell am start -n app.relay/.app.MainActivity     # 重启后读新设置
+
+  POST /v1/send {"to":"192.168.2.22","port":17878,"text":"notify-t2-112730"}
+  → {"status":"sent",...,"note":"对方已 ACK"}
+
+  adb shell run-as app.relay grep -c notify-t2-112730 files/relay/messages.json  → 1
+  dumpsys notification --noredact | grep -c notify-t2-112730                    → 0
+
+判读：**通过**。开关关掉不等于消息丢了 —— 它只抑制通知，消息仍然落盘。
+这正是这条开关应有的语义（否则就变成「静音即丢消息」的谎）。
+
+--------------------------------------------------------------------------------
+三、`notifyQuietHours = true`：静默时段内不弹
+--------------------------------------------------------------------------------
+把设备本地小时挪进 22:00–08:00（静默区间是 `h >= 22 || h < 8`，跨零点）：
+  adb shell settings put global auto_time_zone 0
+  adb shell cmd alarm set-timezone Asia/Dubai        # UTC+4
+  adb shell date → Wed Oct  7 07:27:xx +04 2026      # 07:2x < 8 ✓
+
+  POST /v1/send {"to":"192.168.2.22","port":17878,"text":"notify-t3-1129xx"}
+  → {"status":"sent",...,"note":"对方已 ACK"}
+  messages.json grep -c → 1 ；dumpsys notification grep -c → 0
+
+对照（同一份设置，只把时区改回 Asia/Shanghai = 11:28，非静默）：
+  POST /v1/send → {"status":"queued",...,"note":"已入队，等对方上线后补发（不代表已读）"}
+  （此刻对端被判离线 —— 就是第四节那个冻结问题）
+  这条消息后来在 app 回到前台时补发：messages.json 里能 grep 到，通知也补上了。
+
+判读：**通过（对照组是间接的）**。对照组当时撞上后台冻结，所以不是「同一时刻、只差
+一个变量」的干净对照；但它证明了同一份设置下换个时间就能送达，抑制确实来自时间分支，
+而不是别的原因（比如开关没生效、或消息根本没到）。
+
+--------------------------------------------------------------------------------
+四、权限被拒：不弹、不崩、不静默吞掉（ACCEPTANCE A2 的「拒绝一次」那半条）
+--------------------------------------------------------------------------------
+  adb shell pm revoke app.relay android.permission.POST_NOTIFICATIONS
+  adb shell dumpsys package app.relay | grep POST_NOTIFICATIONS:
+    → granted=false, flags=[ USER_SET|USER_SENSITIVE_WHEN_GRANTED|USER_SENSITIVE_WHEN_DENIED]
+  重启 app、等 30 秒、HOME、再发：
+  POST /v1/send {"text":"notify-t6-113612"} → {"status":"sent",...,"note":"对方已 ACK"}
+
+  dumpsys notification grep -c notify-t6-113612 → 0     # 没弹
+  messages.json grep -c                          → 1     # 消息没丢
+  adb shell pidof app.relay                      → 9417  # 进程还活着，没崩
+  adb logcat -d | grep AndroidPushNotification:
+    10-07 11:36:41.801  9417  9468 W AndroidPushNotification: 通知未发出：通知权限未授予（系统设置里可改）
+
+判读：**通过**。这是 2026-10-04 在 Pixel 6 上实测到过的那类事故（`NotificationManagerCompat.notify`
+抛 `SecurityException`，或被静默吞掉，症状是「收到消息却什么都没弹」而构建与单测全绿）
+的**反向确认**：现在既不抛、也不静默 —— 有一条人能看见的日志说明为什么不弹。
+测完已 `pm grant` 复原。
+
+--------------------------------------------------------------------------------
+五、戳一碰（C8）：前台能到，后台要看冻结脸色
+--------------------------------------------------------------------------------
+前台（app 在前台）：
+  POST /v1/nudge {"to":"192.168.2.22","port":17878}
+  → {"status":"sent",...,"note":"对方已 ACK；按协议戳一碰不排队，没 ACK 就是没送到"}
+  dumpsys notification:
+    android.title=String (证据节点)
+    android.text =String (对方戳了你一下)
+
+判读：**通过**。协议原文（不排队）与实现在通知文案上一致。
+
+--------------------------------------------------------------------------------
+六、**新发现：后台被 Android 冻结，手机可能整段不可达**（比 ACCEPTANCE 记的更宽）
+--------------------------------------------------------------------------------
+ACCEPTANCE 的 C8 只记了「应用在后台时戳不到」。实测范围更大：**普通消息在后台也可能
+根本投不到**，发送端只能拿到 `queued`，要等 app 回到前台才补发 + 弹通知。
+
+冻结时的硬证据（`adb shell dumpsys activity processes` 里 app.relay 的 ProcessRecord）：
+  curProcState=15 mRepProcState=15 setProcState=15      # 15 = CACHED_ACTIVITY
+  isFreezeExempt=false isPendingFreeze=false isFrozen=true
+  trimMemoryLevel=0
+同时刻：
+  curl /v1/peers                → online=false
+  nc -z -G 3 192.168.2.22 17879 → 连不上（app 在前台时同一命令 TCP open）
+
+不是这两种常见嫌疑（都查了，都不是）：
+  adb shell am get-standby-bucket app.relay → 10（ACTIVE）
+  adb shell dumpsys deviceidle | grep mState → mState=ACTIVE（不在 Doze）
+
+**时机不确定，所以只能说「没有保证」，不能说「N 秒后必断」**：
+  第一轮：HOME 后每 10 秒采样 → +70s 仍 online，+80s 变 offline
+  另一轮：+30s 就已 offline（TCP 也不通）
+  最后一轮：+15s … +150s 全部 online，isFrozen=false curProcState=8
+            （8 = TRANSIENT_BACKGROUND，这种状态下系统不冻结它）
+
+根因：`scaffold/androidApp/src/main/AndroidManifest.xml` 里**没有任何 `<service>`**
+（权限只有 INTERNET / ACCESS_NETWORK_STATE / POST_NOTIFICATIONS / CAMERA），
+app 没有前台服务，进程一旦变成 cached 就会被 cached-app freezer 冻住。
+`RelayController.kt:1338-1348` 的注释本来就承认这件事：
+「手机端没有把应用从后台拉到前台的能力（Android 要 SYSTEM_ALERT_WINDOW 或前台服务，
+iOS 根本没有 API）」。
+
+**这是产品决定，不是本轮能顺手修的 bug**：要保证后台可达，得加前台服务 + 常驻通知
+（Android 14+ 还要 `foregroundServiceType` 与对应权限）；不加，就得承认
+「app 不在前台时，收消息可能延迟到下次打开」。对外材料不得写成「后台实时可达」。
+
+--------------------------------------------------------------------------------
+七、还原
+--------------------------------------------------------------------------------
+  adb shell settings put global auto_time_zone 1     # 时区回 Asia/Shanghai（CST）
+  adb shell am force-stop app.relay
+  adb shell run-as app.relay cp /data/local/tmp/set.json files/relay/settings.json
+    → {"nodeId":"bc19885f-...","manualPeers":[{"host":"192.168.2.82"}],
+       "profileRev":4,"persistMessages":true}        # 回到注入前的 4 个键
+  adb shell pm grant app.relay android.permission.POST_NOTIFICATIONS
+  adb shell am start -n app.relay/.app.MainActivity
+
+--------------------------------------------------------------------------------
+仍未覆盖（本机做不到，不是没做）
+--------------------------------------------------------------------------------
+- A15 步骤 2/3（取景画面、对准后自动返回节点页）：需要人把 Pixel 镜头对准 Mac 屏幕上的
+  `/tmp/pair.html`，见 `scan-a15-android-permission.txt`。
+- C5 群「有人 @ 我」那半条：本机没有群消息发送端 —— `Codec.kt:396 encodeGroupTextMsg`
+  在 `scaffold` 里**零生产调用方**（只有解码侧与测试造帧），agentNode 控制面也没有群路由。
+- 通知在**锁屏 / 通知栏折叠**下的表现：本轮只读 `dumpsys`，没有截图看通知栏外观。

@@ -1,0 +1,84 @@
+# 公网通路 30 分钟保活挂机 + 弱网下 5 分钟挂机 · 2026-10-04 20:33–21:04 CST
+
+结论：**两轮都撑满了全程，期间没有一次断链或空闲超时。**
+这是本项目跨网链路在**真公网**上第一次拿到时间维度的证据。
+
+## 轮次一：公网 dgram 通路挂 30 分钟（本机 → Cloudflare → tunnelmux → agentNode → 桌面）
+
+```bash
+export RELAY_AGENT_TOKEN="$(cat "$HOME/.relay/agent-token")"
+python3 tools/ws-soak.py "wss://<你的公网域名>/relay-ws/v1/dgram" \
+    --minutes 30 --ping-every 60 --read-timeout 15
+```
+
+    存活 1800 秒 / 计划 1800 秒
+    服务端 PING 60 次（均已回 PONG）
+    我们的 PING 得到 PONG 29 次
+    RTT 最小 310ms / 平均 353ms / 最大 434ms
+    结论：✅ 撑满了全程，期间没有一次断链或空闲超时
+
+逐分钟读数（每 60s 一行）全在 `/tmp/relay-verify/soak-public.log`，
+1800 秒里服务端发了 60 次 PING（约 30 秒一次，与实现一致）、每次都被回 PONG；
+客户端 29 次主动 PING 全部拿到 PONG，RTT 稳定在 310–434ms 之间，没有一次
+尖到读不出数（中途 `平均 nanms` 只出现在第 60s，因为那时还没发出第一个 PING）。
+
+### 这一轮真正排除了什么
+
+挂机要验的不是「能连上」，而是「**过一会儿不会自己断**」。链路上有三个地方
+会静默掐连接：
+
+1. Cloudflare 边缘的空闲回收；
+2. tunnelmux 自己的超时；
+3. agentNode 的空闲回收。
+
+任何一个触发，症状在手机上都是同一句「过一会儿就不会发消息了」，
+不挂够时间根本发现不了。1800 秒把这三个都压过去了。
+
+RTT 基线 **353ms** 是后面所有外网测量的参照：真机 4G 上如果明显高于这个数，
+先怀疑链路而不是怀疑代码。
+
+## 轮次二：把弱网插在「探针 → 公网」这一段，再挂 5 分钟
+
+```bash
+python3 tools/net-shim.py --listen 127.0.0.1:18951 --target 104.21.19.33:443 \
+    --delay-ms 150 --jitter-ms 40 --stall-ms 900 --stall-prob 0.12 \
+    --stats /tmp/relay-verify/shim-weak-soak-stats.log
+
+python3 tools/ws-soak.py "wss://<你的公网域名>/relay-ws/v1/dgram" \
+    --connect-to 127.0.0.1:18951 --minutes 5 --ping-every 10 --read-timeout 20
+```
+
+    存活 319 秒 / 计划 300 秒
+    服务端 PING 10 次（均已回 PONG）
+    我们的 PING 得到 PONG 29 次
+    RTT 最小 631ms / 平均 1024ms / 最大 1846ms
+    结论：✅ 撑满了全程，期间没有一次断链或空闲超时
+
+    net-shim: 转发 7345 字节 / 84 块，触发停顿 14 次，历时 336.6s
+
+14 次停顿 × 900ms ≈ 12.6 秒额外卡顿，摊在 5 分钟里。
+RTT 从轮次一的 353ms 抬到平均 1024ms、最大 1846ms —— **停顿确实注进去了**，
+不是「配了参数但没生效」。而在这 14 次卡顿之间，连接一次都没断。
+
+`--ping-every 10` 是刻意的：停顿按数据块算，8–12% 的概率，
+只有产生足够多的块才可能触发到。轮次一那种「连上就不说话」的挂法
+（每分钟一次 PING）整个 5 分钟也只有十几个块，期望值不到 1 次停顿，
+会得出「没卡过」这种看起来很好、其实什么都没验到的结论。
+
+## 判读口径
+
+- **必须出现 `结论：✅ 撑满了全程`。** 出现 `❌ 没撑住` 时要连
+  `断链：…` 那一行原文一起记：读失败（Connection reset）与
+  收到 CLOSE（code/reason）指向完全不同的原因，前者是网络/代理掐的，
+  后者是服务端主动收（空闲回收或心跳超时）。
+- **RTT 抬升幅度要留着。** 注了 300ms 双向 + 14 次 900ms 停顿之后平均 RTT
+  到了 1024ms，如果注了同样的东西而 RTT 纹丝不动，那说明 shim 没在链路上，
+  这次测量作废——不能只看「没断」就写通过。
+- **不只看断没断，也看有没有人应答。** 只挂不发，什么都证明不了；
+  这里靠服务端 PING 计数 + 客户端 PONG 计数互相印证。
+
+## 没验到的
+
+真丢包下的 TCP 重传正确性仍然没验（net-shim 注不了真丢包，要 raw socket + root，
+详见 `cross-net-01-latency-shim.txt` 末节）。本机做不了的那三项
+（IPv6-only / 跨出口 / 真机 4G）见 `scaffold/agentNode/tools/CROSS-NET-RUNBOOK.md`。
