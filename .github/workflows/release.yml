@@ -1,0 +1,202 @@
+# SPDX-License-Identifier: GPL-3.0-only
+#
+# 多平台安装包自动构建与 GitHub Release 发布工作流。
+#
+# 覆盖平台：
+#   - Android:  APK (signed with debug keystore for instant install)
+#   - macOS:    DMG (Compose Desktop standalone runtime, URL Schemes, custom ICNS)
+#   - Windows:  MSI (Compose Desktop native Windows installer)
+#   - Linux:    DEB (Compose Desktop Debian/Ubuntu package)
+
+name: release
+
+on:
+  push:
+    tags:
+      - 'v*'
+  workflow_dispatch:
+    inputs:
+      tag_name:
+        description: 'Release Tag (e.g. v0.1.0)'
+        required: true
+        default: 'v0.1.0'
+      draft:
+        description: 'Create as Draft Release'
+        type: boolean
+        default: false
+
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
+
+permissions:
+  contents: write
+
+jobs:
+  build-android:
+    name: Build Android APK
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "21"
+
+      - uses: android-actions/setup-android@v3
+        with:
+          packages: "platforms;android-36 build-tools;36.1.0"
+
+      - uses: gradle/actions/setup-gradle@v4
+
+      - name: Build Android Release APK
+        run: |
+          chmod +x ./gradlew
+          ./gradlew :androidApp:assembleRelease --no-build-cache
+
+      - name: Stage Android APK
+        run: |
+          mkdir -p dist
+          cp androidApp/build/outputs/apk/release/androidApp-release.apk dist/relay-android.apk
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: dist-android
+          path: dist/relay-android.apk
+          retention-days: 1
+
+  build-macos:
+    name: Build macOS DMG
+    runs-on: macos-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "21"
+
+      - uses: gradle/actions/setup-gradle@v4
+
+      - name: Package macOS DMG
+        run: |
+          chmod +x ./gradlew
+          ./gradlew :desktopApp:packageDmg --no-build-cache
+
+      - name: Stage macOS DMG
+        run: |
+          mkdir -p dist
+          cp desktopApp/build/compose/binaries/main/dmg/*.dmg dist/relay-macos.dmg
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: dist-macos
+          path: dist/relay-macos.dmg
+          retention-days: 1
+
+  build-windows:
+    name: Build Windows MSI
+    runs-on: windows-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "21"
+
+      - uses: gradle/actions/setup-gradle@v4
+
+      - name: Package Windows MSI
+        shell: bash
+        run: |
+          ./gradlew :desktopApp:packageMsi --no-build-cache
+
+      - name: Stage Windows MSI
+        shell: bash
+        run: |
+          mkdir -p dist
+          cp desktopApp/build/compose/binaries/main/msi/*.msi dist/relay-windows.msi
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: dist-windows
+          path: dist/relay-windows.msi
+          retention-days: 1
+
+  build-linux:
+    name: Build Linux DEB
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "21"
+
+      - uses: gradle/actions/setup-gradle@v4
+
+      - name: Package Linux DEB
+        run: |
+          chmod +x ./gradlew
+          ./gradlew :desktopApp:packageDeb --no-build-cache
+
+      - name: Stage Linux DEB
+        run: |
+          mkdir -p dist
+          cp desktopApp/build/compose/binaries/main/deb/*.deb dist/relay-linux.deb
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: dist-linux
+          path: dist/relay-linux.deb
+          retention-days: 1
+
+  publish:
+    name: Publish GitHub Release
+    needs: [build-android, build-macos, build-windows, build-linux]
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Download all platform artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: artifacts
+
+      - name: Collect and inspect release assets
+        run: |
+          mkdir -p release-assets
+          cp artifacts/dist-android/relay-android.apk release-assets/
+          cp artifacts/dist-macos/relay-macos.dmg release-assets/
+          cp artifacts/dist-windows/relay-windows.msi release-assets/
+          cp artifacts/dist-linux/relay-linux.deb release-assets/
+          ls -lh release-assets/
+
+      - name: Create GitHub Release
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          TAG="${{ github.event.inputs.tag_name || github.ref_name }}"
+          IS_DRAFT="${{ github.event.inputs.draft || 'false' }}"
+          
+          FLAGS="--title \"捎话 (Tidings) ${TAG}\" --generate-notes"
+          if [ "$IS_DRAFT" = "true" ]; then
+            FLAGS="$FLAGS --draft"
+          fi
+          
+          # If the release/tag already exists, update/upload assets; otherwise create it
+          if gh release view "$TAG" >/dev/null 2>&1; then
+            echo "Release $TAG exists, uploading assets..."
+            gh release upload "$TAG" release-assets/* --clobber
+          else
+            echo "Creating new release $TAG..."
+            eval gh release create "$TAG" release-assets/* $FLAGS
+          fi
