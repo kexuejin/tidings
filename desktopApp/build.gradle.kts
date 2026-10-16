@@ -96,9 +96,9 @@ compose.desktop {
         nativeDistributions {
             // 先产出可分发目录/DMG；签名与公证交给 DSL，不手工跑 xcrun。
             targetFormats(TargetFormat.Dmg, TargetFormat.Msi, TargetFormat.Deb)
-            packageName = "捎话 Tidings"
+            packageName = "Tidings"
             packageVersion = "1.0.0"
-            description = "局域网直连的消息与文件传输"
+            description = "Local-first peer-to-peer messaging and agent collaboration"
             vendor = "Tidings"
 
             // sqldelight 的 JDBC 驱动（`sqlite-driver` → `java.sql.DriverManager`）不在
@@ -163,7 +163,7 @@ compose.desktop {
                 fileAssociation(
                     mimeType = RELAY_MIME,
                     extension = MESSAGE_EXTENSION,
-                    description = "捎话消息",
+                    description = "Tidings Message",
                 )
             }
             windows {
@@ -172,7 +172,7 @@ compose.desktop {
                 fileAssociation(
                     mimeType = RELAY_MIME,
                     extension = MESSAGE_EXTENSION,
-                    description = "捎话消息",
+                    description = "Tidings Message",
                 )
             }
             linux {
@@ -180,7 +180,7 @@ compose.desktop {
                 fileAssociation(
                     mimeType = RELAY_MIME,
                     extension = MESSAGE_EXTENSION,
-                    description = "捎话消息",
+                    description = "Tidings Message",
                 )
             }
         }
