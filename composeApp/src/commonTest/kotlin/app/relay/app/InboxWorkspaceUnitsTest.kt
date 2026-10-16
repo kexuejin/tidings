@@ -170,6 +170,30 @@ class InboxWorkspaceUnitsTest {
         assertEquals("s-new", newest.active?.sessionId)
     }
 
+    @Test
+    fun activeSessionIgnoresStaleBusyWhenOlderThanTimeout() {
+        // 当 busy 会话距今已经超过 STALE_BUSY_TIMEOUT_MS，不再将其视为当前干活中，
+        // 而是退回挑更新时间最近的那条（防止异常终止的僵死 busy 永远霸占看板）。
+        val unit = state(
+            sessions = listOf(
+                session("s-stale-busy", state = "busy", updatedAt = 1_000L),
+                session("s-new-idle", state = "idle", updatedAt = 1_000L + STALE_BUSY_TIMEOUT_MS + 60_000L),
+            ),
+        ).firstUnit()
+        assertEquals("s-new-idle", unit.active?.sessionId)
+    }
+
+    @Test
+    fun singleStaleBusySessionNormalizesEffectiveStateToIdle() {
+        val unit = state(
+            sessions = listOf(
+                session("s-only-stale", state = "busy", updatedAt = 1_000L),
+            ),
+        ).inboxWorkspaceUnits(now = 1_000L + STALE_BUSY_TIMEOUT_MS + 60_000L).groups.single().units.single()
+        assertEquals("s-only-stale", unit.active?.sessionId)
+        assertEquals("idle", unit.active?.state)
+    }
+
     /**
      * 「最关键的那条会话」必须按**宿主活动时刻**挑，不是按"本端收到帧的时刻"。
      *

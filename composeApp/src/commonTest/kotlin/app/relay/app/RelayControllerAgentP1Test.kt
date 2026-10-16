@@ -199,5 +199,69 @@ class RelayControllerAgentP1Test {
         assertEquals(false, key in nextLoading, "匹配工作区的 sessionPageLoading 标记必须被清除")
         assertEquals(true, otherKey in nextLoading, "未匹配工作区的加载状态必须被保留")
     }
+
+    @Test
+    fun testApprovalAndFailedRunTriggerLocalNotifications() {
+        val notifications = mutableListOf<Triple<String, String, String?>>()
+        val testHandler = object : app.relay.platform.PushNotificationHandler {
+            override fun showNotification(title: String, body: String, focusPeerId: String?) {
+                notifications.add(Triple(title, body, focusPeerId))
+            }
+            override fun setOnNotificationTap(callback: ((focusPeerId: String) -> Unit)?) {}
+            override suspend fun requestPermission(): Boolean = true
+        }
+        val platform = InMemoryAppPlatform(pushNotificationHandler = testHandler)
+        val controller = RelayController(
+            platform = platform,
+            store = InMemorySettingsStore(),
+            scope = scope,
+        )
+
+        // 收到待审批帧 -> 应触发本地通知
+        val approvalEnv = makeEnvelope(
+            type = MsgTypes.AGENT_APPROVAL,
+            id = "env-appr-notif-1",
+            from = "agent-node-x",
+            ts = nowMillis(),
+            payload = Codec.agentApprovalPayload(
+                approvalId = "appr-n-1",
+                sessionId = "sess-n-1",
+                tool = "delete_file",
+                summary = "Delete build directory",
+                expiresAt = nowMillis() + 60_000L,
+            ),
+        )
+        controller.messagesCtl.handleOnInbound(approvalEnv)
+
+        assertEquals(1, notifications.size)
+        assertEquals("agent-no", notifications[0].first) // take(8)
+        assertEquals("delete_file: Delete build directory", notifications[0].second)
+
+        // 重复收到相同 approvalId -> 幂等去重，不应再弹通知
+        controller.messagesCtl.handleOnInbound(approvalEnv)
+        assertEquals(1, notifications.size)
+
+        // 收到 agent-run 失败帧 -> 应触发本地告警通知
+        val failedRunEnv = makeEnvelope(
+            type = MsgTypes.AGENT_RUN,
+            id = "env-run-fail-1",
+            from = "agent-node-x",
+            ts = nowMillis(),
+            payload = Codec.agentRunPayload(
+                sessionId = "sess-n-1",
+                runId = "run-f-1",
+                state = "failed",
+                note = "Compilation syntax error",
+            ),
+        )
+        controller.messagesCtl.handleOnInbound(failedRunEnv)
+
+        assertEquals(2, notifications.size)
+        assertEquals("Compilation syntax error", notifications[1].second)
+
+        // 重复收到相同 run-f-1 -> 幂等去重
+        controller.messagesCtl.handleOnInbound(failedRunEnv)
+        assertEquals(2, notifications.size)
+    }
 }
 

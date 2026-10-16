@@ -24,6 +24,10 @@ data class AgentApprovalUi(
     val expiresAt: Long = 0L,
     val choices: String? = null,
     val status: String = "pending",
+    /** 风险等级：L1（只读放行）、L2（修改确认）、L3（高危指令审批）。 */
+    val riskLevel: String? = null,
+    /** 参数或文本差异变更（Diff / JSON 参数预览）。 */
+    val diff: String? = null,
 )
 
 /** Agent 队列任务 UI 模型（PPE-1 §6.3）。 */
@@ -234,6 +238,10 @@ data class AgentSessionUi(
      * 这时**不能**编一个会话名出来，界面上要如实说"只看到事件，没收到宣告"。
      */
     val announced: Boolean = true,
+    /** 工作区关联的 Git 分支名称（如 "main", "dev"）。 */
+    val gitBranch: String? = null,
+    /** 会话分段 ID（重置 Prompt 上下文后开启新分段）。 */
+    val segmentId: String? = null,
 ) {
     /**
      * 会话在界面上的主标题；**两级回落 `alias` → `title`，都没有就是 `null`**。

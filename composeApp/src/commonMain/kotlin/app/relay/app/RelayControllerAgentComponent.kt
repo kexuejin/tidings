@@ -40,6 +40,8 @@ import kotlinx.serialization.json.JsonObject
 internal class RelayControllerAgentComponent(
     private val host: RelayController,
 ) {
+    private val notifiedApprovals = mutableSetOf<String>()
+    private val notifiedRuns = mutableSetOf<String>()
 
 /**
  * [RelayController] 的智能体（Agent A2A）域扩展。
@@ -416,8 +418,16 @@ fun handleOnAgentEvent(envelope: Envelope) {
 
 fun handlePruneAgentSessions(now: Long = nowMillis()) {
     host._state.update { s ->
-        val (prunedSessions, prunedEvents) = pruneEndedSessions(s.agentSessions, s.agentEvents, now)
-        if (prunedSessions.size == s.agentSessions.size && prunedEvents.size == s.agentEvents.size) {
+        val (healedSessions, healedList) = healStaleBusySessions(s.agentSessions, s.agentEvents, now)
+        if (healedList.isNotEmpty()) {
+            host.scope.launch {
+                healedList.forEach { healed ->
+                    runCatching { host.agentStore.saveSession(healed) }
+                }
+            }
+        }
+        val (prunedSessions, prunedEvents) = pruneEndedSessions(healedSessions, s.agentEvents, now)
+        if (prunedSessions.size == s.agentSessions.size && prunedEvents.size == s.agentEvents.size && healedList.isEmpty()) {
             s
         } else {
             s.copy(agentSessions = prunedSessions, agentEvents = prunedEvents)
@@ -481,6 +491,8 @@ fun handleOnAgentApproval(envelope: Envelope) {
     val summary = stringField(payload, "summary") ?: stringField(payload, "note")
     val expiresAt = longField(payload, "expiresAt") ?: 0L
     val choices = stringField(payload, "choices")
+    val riskLevel = stringField(payload, "riskLevel")
+    val diff = stringField(payload, "diff")
     val approvalUi = AgentApprovalUi(
         approvalId = approvalId,
         sessionId = sessionId,
@@ -490,6 +502,8 @@ fun handleOnAgentApproval(envelope: Envelope) {
         expiresAt = expiresAt,
         choices = choices,
         status = "pending",
+        riskLevel = riskLevel,
+        diff = diff,
     )
     host._state.update { s ->
         s.copy(agentApprovals = s.agentApprovals + (approvalId to approvalUi))
@@ -497,6 +511,13 @@ fun handleOnAgentApproval(envelope: Envelope) {
     // 落盘：审批的**处置结果**是本端产生的，对端无从重算 —— 不存就等于
     // 「点完允许、重启又回到待审批」，而那条 `agent-ack` 其实早就发过了。
     host.scope.launch { runCatching { host.agentStore.saveApproval(approvalUi) } }
+
+    // Goal 6: 零中心服务器离线消息与本地通知策略（幂等去重提醒）
+    if (notifiedApprovals.add(approvalId)) {
+        val peerName = host._state.value.peer(envelope.from)?.displayName ?: envelope.from.take(8)
+        val notifBody = listOfNotNull(tool, summary).joinToString(": ").ifBlank { approvalId }
+        host.showNotification(peerName, notifBody, envelope.from)
+    }
 }
 
 
@@ -586,6 +607,12 @@ fun handleOnAgentRun(envelope: Envelope) {
         s.copy(agentRuns = s.agentRuns + (AgentRunKey(envelope.from, runId) to run))
     }
     host.scope.launch { runCatching { host.agentStore.saveRun(run) } }
+
+    if (state == "failed" && notifiedRuns.add(runId)) {
+        val peerName = host._state.value.peer(envelope.from)?.displayName ?: envelope.from.take(8)
+        val notifBody = note ?: state
+        host.showNotification(peerName, notifBody, envelope.from)
+    }
 }
 
 /**
@@ -678,11 +705,11 @@ fun handleOnAgentArtifact(envelope: Envelope) {
 }
 
 
-fun handleRespondApproval(approvalId: String, allow: Boolean) {
+fun handleRespondApproval(approvalId: String, allow: Boolean, allowSession: Boolean = false) {
     val approval = host._state.value.agentApprovals[approvalId] ?: return
     val rt = host.runtime
-    val kind = if (allow) "approved" else "denied"
-    val nextStatus = if (allow) "approved" else "denied"
+    val kind = if (allowSession) "allow_session" else if (allow) "approved" else "denied"
+    val nextStatus = if (allowSession) "allow_session" else if (allow) "approved" else "denied"
     val decided = approval.copy(status = nextStatus)
     host._state.update { s ->
         s.copy(agentApprovals = s.agentApprovals + (approvalId to decided))
@@ -802,4 +829,35 @@ internal fun pruneEndedSessions(
 
     val keptEvents = events.filterKeys { it !in keysToRemove }
     return keptSessions to keptEvents
+}
+
+/**
+ * 自动识别并自愈僵死状态（Stale Busy）：
+ * 当会话标记为 busy，但无论宿主还是事件流在 [timeoutMs] 内没有任何新动作时，
+ * 自动将其状态恢复为 idle，防止因宿主异常退出/断网未送收尾帧导致永久冻结为 busy。
+ */
+internal fun healStaleBusySessions(
+    sessions: Map<AgentSessionKey, AgentSessionUi>,
+    events: Map<AgentSessionKey, List<AgentEventUi>>,
+    now: Long,
+    timeoutMs: Long = STALE_BUSY_TIMEOUT_MS,
+): Pair<Map<AgentSessionKey, AgentSessionUi>, List<AgentSessionUi>> {
+    val healedSessions = mutableMapOf<AgentSessionKey, AgentSessionUi>()
+    val healedList = mutableListOf<AgentSessionUi>()
+
+    for ((key, session) in sessions) {
+        if (session.state == "busy") {
+            val lastEventAt = events[key].orEmpty().maxOfOrNull { it.at } ?: 0L
+            val lastActivity = maxOf(session.sortActivityAt, lastEventAt)
+            if (lastActivity > 0L && (now - lastActivity) > timeoutMs) {
+                val healed = session.copy(state = "idle")
+                healedSessions[key] = healed
+                healedList.add(healed)
+                continue
+            }
+        }
+        healedSessions[key] = session
+    }
+
+    return healedSessions to healedList
 }

@@ -188,12 +188,18 @@ internal fun ChatApprovalBanner(
             verticalArrangement = Arrangement.spacedBy(LocalAppSpacing.current.xs),
         ) {
             approvals.forEach { approval ->
+                val risk = app.relay.feature.agents.resolveRiskLevel(approval.riskLevel, approval.tool)
                 Row(
                     modifier = Modifier.fillMaxWidth(),
                     verticalAlignment = Alignment.CenterVertically,
                     horizontalArrangement = Arrangement.SpaceBetween,
                 ) {
-                    Column(modifier = Modifier.weight(1f)) {
+                    Row(
+                        modifier = Modifier.weight(1f),
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(LocalAppSpacing.current.xs),
+                    ) {
+                        app.relay.feature.agents.RiskLevelBadge(risk)
                         Text(
                             text = "${approval.tool ?: "action"} · ${approval.sessionId}",
                             style = MaterialTheme.typography.bodyMedium,

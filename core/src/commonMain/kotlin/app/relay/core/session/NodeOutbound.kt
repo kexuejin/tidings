@@ -374,12 +374,14 @@ internal class NodeOutbound(
         summary: String? = null,
         expiresAt: Long,
         choices: String? = null,
+        riskLevel: String? = null,
+        diff: String? = null,
     ): SendOutcome = messenger.sendUserMessage(
         peerId,
         makeEnvelope(
             MsgTypes.AGENT_APPROVAL,
             selfId(),
-            Codec.agentApprovalPayload(approvalId, sessionId, tool, summary, expiresAt, choices),
+            Codec.agentApprovalPayload(approvalId, sessionId, tool, summary, expiresAt, choices, riskLevel, diff),
         ),
     )
 

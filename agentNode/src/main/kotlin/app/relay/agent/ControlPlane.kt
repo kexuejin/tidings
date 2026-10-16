@@ -1082,12 +1082,14 @@ class ControlPlane(
         val tool = obj["tool"]?.jsonPrimitive?.contentOrNull
         val summary = obj["summary"]?.jsonPrimitive?.contentOrNull
         val choices = obj["choices"]?.jsonPrimitive?.contentOrNull
+        val riskLevel = obj["riskLevel"]?.jsonPrimitive?.contentOrNull
+        val diff = obj["diff"]?.jsonPrimitive?.contentOrNull
         deliverAgentFrame(
             exchange = exchange,
             nodeId = nodeId,
             type = MsgTypes.AGENT_APPROVAL,
-            payload = Codec.agentApprovalPayload(approvalId, sessionId, tool, summary, expiresAt, choices),
-            send = { runtime.sendAgentApproval(nodeId, approvalId, sessionId, tool, summary, expiresAt, choices) },
+            payload = Codec.agentApprovalPayload(approvalId, sessionId, tool, summary, expiresAt, choices, riskLevel, diff),
+            send = { runtime.sendAgentApproval(nodeId, approvalId, sessionId, tool, summary, expiresAt, choices, riskLevel, diff) },
             onSent = {
                 sessions.recordApproval(
                     nodeId = nodeId,

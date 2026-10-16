@@ -401,6 +401,11 @@
     <!-- 页头汇总。原型 relay.html:4208-4211 的 sub =「N 台设备 · N 个 Agent · N 个工作区 · N 个会话[ · N 项待审批]」；
          代码此前只在有待批时印后半句，设备/Agent/工作区/会话四个数一个都没有。 -->
     <string name="workspace_board_subtitle">%1$d 台设备 · %2$d 个 Agent · %3$d 个工作区 · %4$d 个会话</string>
+    <string name="workspace_bar_title">当前工作区</string>
+    <string name="workspace_bar_switch">切换工作区</string>
+    <string name="workspace_new_segment">开启新分段</string>
+    <string name="workspace_branch_label">分支</string>
+    <string name="workspace_unassigned">未归属工作区</string>
 <!-- 空态页头。原型 screenAgentsEmpty（relay.html:4564）写死「0 个工作区」—— 四个零是噪音，
      空屏只报这一档。 -->
 <string name="agent_empty_subtitle">%1$d 个工作区</string>
@@ -451,6 +456,9 @@
     <string name="agent_event_count">%1$d 条消息</string>
     <string name="agent_event_dir_out">我 → Agent</string>
     <string name="agent_event_dir_in">Agent → 我</string>
+    <string name="agent_thought_process">思索过程</string>
+    <string name="agent_thought_process_elapsed">思索过程 (%1$s)</string>
+    <string name="agent_thought_thinking">思考中…</string>
 
     <!-- 「加入网络」整屏随 feature/pairing/ 一起删掉了，文案并进上面的 nodes_* -->
 
@@ -513,7 +521,6 @@
     <string name="desk_nav_desktop">桌面</string>
     <string name="desk_nav_ime">输入法自检</string>
     <string name="desk_nav_desktop_only">仅桌面端</string>
-    <string name="desk_nav_ghost_note">手机同款</string>
     <string name="desk_prefs_hint">托盘常驻与后台行为。这些设置只影响这台电脑，不会同步给对方 —— 所以它落在「这台电脑」这一组里，而这一组在移动端不画。</string>
     <string name="desk_prefs_power_title">省电后台档</string>
     <string name="desk_prefs_power_subtitle">收进托盘后把心跳与扫描放慢 3 倍（心跳 %1$ds → %2$ds，离线判定 %3$ds → %4$ds）。代价是别人看到你上线、以及你发现对方，都会更慢。</string>
@@ -1326,6 +1333,13 @@
     <string name="agent_approval_status_denied">已拒绝</string>
     <string name="agent_approval_tool_label">工具</string>
     <string name="agent_approval_expires_label">有效至</string>
+    <string name="agent_approval_allow_session">本次免审</string>
+    <string name="agent_approval_status_allowed_session">会话免审</string>
+    <string name="agent_approval_view_diff">查看详情</string>
+    <string name="agent_approval_diff_title">调用参数与变更详情</string>
+    <string name="agent_approval_risk_l1">L1 只读</string>
+    <string name="agent_approval_risk_l2">L2 修改</string>
+    <string name="agent_approval_risk_l3">L3 高危</string>
     <string name="agent_queue_title">任务队列</string>
     <string name="agent_queue_empty">暂无队列任务</string>
     <string name="agent_queue_cancel">取消任务</string>
@@ -1340,6 +1354,7 @@
     <string name="chat_group_none">无</string>
     <string name="chat_group_leave">退出群聊</string>
     <string name="chat_group_confirm_leave">确定要退出该群聊吗？</string>
+    <string name="chat_group_progress_working">%1$s 正在执行：%2$s</string>
     <string name="chat_voice_record">语音消息</string>
     <string name="chat_voice_start">点击开始录音</string>
     <string name="chat_voice_recording">正在录音…</string>
@@ -1348,6 +1363,22 @@
     <string name="chat_voice_too_short">说话时间太短</string>
     <string name="chat_voice_failed">录音失败</string>
     <string name="chat_voice_permission_denied">无法开始录音，请检查麦克风权限</string>
+    <string name="capability_settings_title">能力治理与权限</string>
+    <string name="capability_settings_subtitle">动态管理主机 MCP 与工具执行权限</string>
+    <string name="capability_category_system">系统工具</string>
+    <string name="capability_category_mcp">MCP 扩展</string>
+    <string name="capability_category_model">推理驱动</string>
+    <string name="capability_bash">终端命令行执行 (Bash)</string>
+    <string name="capability_bash_desc">允许 Agent 在主机工作区执行 Shell 脚本与命令</string>
+    <string name="capability_filesystem">工作区文件读写</string>
+    <string name="capability_filesystem_desc">允许 Agent 检视与修改当前绑定的代码目录</string>
+    <string name="capability_codesearch">代码图谱搜索 (Codegraph)</string>
+    <string name="capability_codesearch_desc">允许 Agent 执行符号引用、声明跳转与索引</string>
+    <string name="capability_websearch">网络检索</string>
+    <string name="capability_websearch_desc">允许 Agent 查询互联网公开资料</string>
+    <string name="capability_status_enabled">已启用</string>
+    <string name="capability_status_disabled">已禁用</string>
+    <string name="capability_save_toast">权限策略已即时下发</string>
 </resources>
 
 

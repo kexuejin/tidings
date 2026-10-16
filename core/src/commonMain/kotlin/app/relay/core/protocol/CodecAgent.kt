@@ -298,6 +298,8 @@ object CodecAgent {
         updatedAt: Long? = null,
         origin: String? = null,
         blank: Boolean? = null,
+        gitBranch: String? = null,
+        segmentId: String? = null,
     ): JsonElement = wireJson.encodeToJsonElement(
         AgentSessionPayload.serializer(),
         AgentSessionPayload(
@@ -314,6 +316,8 @@ object CodecAgent {
             updatedAt = updatedAt,
             origin = origin,
             blank = blank,
+            gitBranch = gitBranch,
+            segmentId = segmentId,
         ),
     )
 
@@ -371,9 +375,20 @@ object CodecAgent {
         summary: String? = null,
         expiresAt: Long,
         choices: String? = null,
+        riskLevel: String? = null,
+        diff: String? = null,
     ): JsonElement = wireJson.encodeToJsonElement(
         AgentApprovalPayload.serializer(),
-        AgentApprovalPayload(approvalId = approvalId, sessionId = sessionId, tool = tool, summary = summary, expiresAt = expiresAt, choices = choices),
+        AgentApprovalPayload(
+            approvalId = approvalId,
+            sessionId = sessionId,
+            tool = tool,
+            summary = summary,
+            expiresAt = expiresAt,
+            choices = choices,
+            riskLevel = riskLevel,
+            diff = diff,
+        ),
     )
 
     fun agentCancelPayload(

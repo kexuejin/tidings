@@ -616,6 +616,24 @@ class RelayControllerAgentSessionTest {
         }
     }
 
+    @Test
+    fun testHealStaleBusySessions() {
+        val peerA = "peer-a"
+        val now = 1_000_000_000L
+        val sessions = mapOf(
+            AgentSessionKey(peerA, "fresh-busy") to AgentSessionUi(peerId = peerA, sessionId = "fresh-busy", state = "busy", updatedAt = now - 5_000L),
+            AgentSessionKey(peerA, "stale-busy") to AgentSessionUi(peerId = peerA, sessionId = "stale-busy", state = "busy", updatedAt = now - (31 * 60 * 1000L)),
+            AgentSessionKey(peerA, "normal-idle") to AgentSessionUi(peerId = peerA, sessionId = "normal-idle", state = "idle", updatedAt = now - (60 * 60 * 1000L)),
+        )
+        val (healedMap, healedList) = healStaleBusySessions(sessions, emptyMap(), now)
+        assertEquals("busy", healedMap[AgentSessionKey(peerA, "fresh-busy")]?.state)
+        assertEquals("idle", healedMap[AgentSessionKey(peerA, "stale-busy")]?.state)
+        assertEquals("idle", healedMap[AgentSessionKey(peerA, "normal-idle")]?.state)
+        assertEquals(1, healedList.size)
+        assertEquals("stale-busy", healedList.single().sessionId)
+        assertEquals("idle", healedList.single().state)
+    }
+
     private suspend fun awaitUntil(what: String, condition: () -> Boolean) {
         val deadline = kotlin.time.TimeSource.Monotonic.markNow()
         while (!condition()) {

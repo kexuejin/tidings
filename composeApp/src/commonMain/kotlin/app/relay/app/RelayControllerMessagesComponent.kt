@@ -12,6 +12,8 @@ import app.relay.app.model.ConversationUi
 import app.relay.app.model.DeliveryState
 import app.relay.app.model.MessageUi
 import app.relay.app.model.NoticeKind
+import app.relay.app.model.parseThinkingContent
+import kotlinx.serialization.json.JsonObject
 import app.relay.app.model.PeerUi
 import app.relay.app.model.TransferState
 import app.relay.core.ioDispatcher
@@ -105,14 +107,16 @@ fun handleSend(peerId: String, text: String) {
                 )
             }
             .getOrNull() ?: return@launch
+        val (parsedReasoning, cleanedText) = parseThinkingContent(body)
         host.handleAppendMessage(
             MessageUi(
                 id = outcome.envelopeId,
                 peerId = peerId,
                 mine = true,
-                text = body,
+                text = cleanedText,
                 at = nowMillis(),
                 delivery = if (outcome.outcome == SendOutcome.SENT) DeliveryState.Sent else DeliveryState.Queued,
+                reasoning = parsedReasoning,
             ),
         )
     }
@@ -318,7 +322,12 @@ fun handleOnInbound(envelope: Envelope) {
             else -> Unit
         }
     }
-    val text = textOf(envelope) ?: return
+    val rawText = textOf(envelope) ?: return
+    val (parsedReasoning, cleanedText) = parseThinkingContent(rawText)
+    val payload = envelope.payload as? JsonObject
+    val explicitReasoning = payload?.let { stringField(it, "reasoning") }
+    val finalReasoning = explicitReasoning ?: parsedReasoning
+    val reasoningElapsedMs = payload?.let { longField(it, "reasoningElapsedMs") }
     val groupId = if (isGroupText(envelope)) groupIdOf(envelope) else null
     val convId = groupId?.let(ConvId::group) ?: envelope.from
     val peer = host._state.value.peers.firstOrNull { it.nodeId == envelope.from }
@@ -328,11 +337,13 @@ fun handleOnInbound(envelope: Envelope) {
             id = envelope.id,
             peerId = convId,
             mine = false,
-            text = text,
+            text = cleanedText,
             at = envelope.ts,
             delivery = null,
             senderId = if (groupId != null) envelope.from else null,
             replyTo = if (groupId != null) replyToOf(envelope) else null,
+            reasoning = finalReasoning,
+            reasoningElapsedMs = reasoningElapsedMs,
         ),
         incoming = true,
     )
@@ -348,7 +359,7 @@ fun handleOnInbound(envelope: Envelope) {
     ) {
         val group = host._state.value.groupOf(groupId)
         val title = group?.let { "${it.name} · $peerName" } ?: peerName
-        host.showNotification(title, text, convId)
+        host.showNotification(title, cleanedText, convId)
     }
 }
 

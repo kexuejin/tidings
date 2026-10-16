@@ -54,6 +54,7 @@ import app.relay.generated.resources.Res
 import app.relay.platform.ReceivedFileActions
 import app.relay.ui.components.PkCardView
 import app.relay.ui.components.PeerAvatar
+import app.relay.ui.components.ThinkingBlock
 import app.relay.ui.components.formatBytes
 import app.relay.ui.components.formatClock
 import app.relay.ui.theme.IconSizes
@@ -265,7 +266,17 @@ internal fun MessageBubble(
                 } else if (pk != null) {
                     PkCardView(pk = pk)
                 } else {
-                    Text(text = message.text, style = MaterialTheme.typography.bodyMedium)
+                    if (!message.reasoning.isNullOrBlank()) {
+                        ThinkingBlock(
+                            reasoning = message.reasoning,
+                            elapsedMs = message.reasoningElapsedMs,
+                            isStreaming = false,
+                            modifier = Modifier.padding(bottom = sp.xs),
+                        )
+                    }
+                    if (message.text.isNotBlank()) {
+                        Text(text = message.text, style = MaterialTheme.typography.bodyMedium)
+                    }
                 }
                 Row(
                     modifier = Modifier.padding(top = sp.xs),

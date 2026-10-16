@@ -340,6 +340,11 @@
     <string name="agent_summary_line">%1$s · TCP %2$d</string>
     <!-- Board header summary; prototype relay.html:4208-4211. -->
     <string name="workspace_board_subtitle">%1$d devices · %2$d Agents · %3$d workspaces · %4$d sessions</string>
+    <string name="workspace_bar_title">Active Workspace</string>
+    <string name="workspace_bar_switch">Switch Workspace</string>
+    <string name="workspace_new_segment">New Segment</string>
+    <string name="workspace_branch_label">Branch</string>
+    <string name="workspace_unassigned">Unassigned Workspace</string>
 <string name="agent_empty_subtitle">%1$d workspaces</string>
     <!-- Empty state (prototype relay.html:4563-4579): warn banner + "Agent (0)" head + card body + "check nodes" row.
          No wire key in the copy: prototype relay.html:4562 forbids printing `ag1`. -->
@@ -387,6 +392,9 @@
     <string name="agent_event_count">%1$d messages</string>
     <string name="agent_event_dir_out">Me → Agent</string>
     <string name="agent_event_dir_in">Agent → Me</string>
+    <string name="agent_thought_process">Thought process</string>
+    <string name="agent_thought_process_elapsed">Thought process (%1$s)</string>
+    <string name="agent_thought_thinking">Thinking…</string>
 
     <!-- 「加入网络」整屏随 feature/pairing/ 一起删掉了，文案并进上面的 nodes_* -->
 
@@ -459,7 +467,6 @@
     <string name="desk_nav_desktop">Desktop</string>
     <string name="desk_nav_ime">IME self-check</string>
     <string name="desk_nav_desktop_only">Desktop only</string>
-    <string name="desk_nav_ghost_note">Same as phone</string>
     <string name="desk_prefs_hint">Tray residency and background behaviour. These settings only affect this computer and are never synced to the other side — which is why they live under "This computer", a group that is not drawn on mobile.</string>
     <string name="desk_prefs_power_title">Power saver background mode</string>
     <string name="desk_prefs_power_subtitle">Once tucked into the tray, heartbeats and scans slow down 3× (heartbeat %1$ds → %2$ds, offline detection %3$ds → %4$ds). The cost is that others see you come online later — and you find peers later too.</string>
@@ -1239,6 +1246,13 @@
     <string name="agent_approval_status_denied">Denied</string>
     <string name="agent_approval_tool_label">Tool</string>
     <string name="agent_approval_expires_label">Expires</string>
+    <string name="agent_approval_allow_session">Allow Session</string>
+    <string name="agent_approval_status_allowed_session">Session Allowed</string>
+    <string name="agent_approval_view_diff">View Details</string>
+    <string name="agent_approval_diff_title">Parameters &amp; Diff Details</string>
+    <string name="agent_approval_risk_l1">L1 Read-Only</string>
+    <string name="agent_approval_risk_l2">L2 Modify</string>
+    <string name="agent_approval_risk_l3">L3 Danger</string>
     <string name="agent_queue_title">Task Queue</string>
     <string name="agent_queue_empty">No tasks in queue</string>
     <string name="agent_queue_cancel">Cancel task</string>
@@ -1253,6 +1267,7 @@
     <string name="chat_group_none">None</string>
     <string name="chat_group_leave">Leave group</string>
     <string name="chat_group_confirm_leave">Are you sure you want to leave this group?</string>
+    <string name="chat_group_progress_working">%1$s is running: %2$s</string>
     <string name="chat_voice_record">Voice message</string>
     <string name="chat_voice_start">Tap to record</string>
     <string name="chat_voice_recording">Recording…</string>
@@ -1261,6 +1276,22 @@
     <string name="chat_voice_too_short">Recording too short</string>
     <string name="chat_voice_failed">Recording failed</string>
     <string name="chat_voice_permission_denied">Microphone permission required</string>
+    <string name="capability_settings_title">Capability Governance</string>
+    <string name="capability_settings_subtitle">Manage host MCP and tool execution permissions</string>
+    <string name="capability_category_system">System Tools</string>
+    <string name="capability_category_mcp">MCP Extensions</string>
+    <string name="capability_category_model">Inference Drivers</string>
+    <string name="capability_bash">Terminal Execution (Bash)</string>
+    <string name="capability_bash_desc">Allow Agent to execute shell scripts and commands</string>
+    <string name="capability_filesystem">Workspace File Read &amp; Write</string>
+    <string name="capability_filesystem_desc">Allow Agent to inspect and modify workspace files</string>
+    <string name="capability_codesearch">Code Graph Search (Codegraph)</string>
+    <string name="capability_codesearch_desc">Allow Agent to lookup symbols and jump to definitions</string>
+    <string name="capability_websearch">Web Search</string>
+    <string name="capability_websearch_desc">Allow Agent to query public documentation</string>
+    <string name="capability_status_enabled">Enabled</string>
+    <string name="capability_status_disabled">Disabled</string>
+    <string name="capability_save_toast">ACL updated immediately</string>
 </resources>
 
 

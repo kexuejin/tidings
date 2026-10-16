@@ -22,6 +22,7 @@ import app.relay.app.model.WorkspaceUi
 import app.relay.app.model.FileCardUi
 import app.relay.app.model.MessageUi
 import app.relay.app.model.NoticeKind
+import app.relay.app.model.parseThinkingContent
 
 /**
  * 基于 SQLDelight + SQLite FTS5 (Trigram) 的消息持久化与全文检索存储。
@@ -92,7 +93,7 @@ class SqlDelightMessageStore(
                         peer_id = peerId,
                         sender_id = storable.senderId,
                         mine = if (storable.mine) 1L else 0L,
-                        text = storable.text,
+                        text = if (!storable.reasoning.isNullOrBlank()) "<think>\n${storable.reasoning}\n</think>\n${storable.text}" else storable.text,
                         timestamp = storable.at,
                         delivery = storable.delivery?.name,
                         notice = storable.notice?.name,
@@ -601,11 +602,12 @@ class SqlDelightAgentStore(
 }
 
 private fun app.relay.db.MessageEntity.toUi(): MessageUi {
+    val (parsedReasoning, cleanedText) = parseThinkingContent(text)
     return MessageUi(
         id = id,
         peerId = conv_id,
         mine = mine == 1L,
-        text = text,
+        text = cleanedText,
         at = timestamp,
         delivery = delivery?.let { runCatching { DeliveryState.valueOf(it) }.getOrNull() },
         senderId = sender_id,
@@ -616,6 +618,7 @@ private fun app.relay.db.MessageEntity.toUi(): MessageUi {
         // `decodeFileCard` 同一条规矩：老记录里可能有新版本不认识的形状，
         // 整条消息因此读不出来比少一张卡糟得多。
         screen = screen_json?.let { parseScreenRecordUi(it) },
+        reasoning = parsedReasoning,
     )
 }
 

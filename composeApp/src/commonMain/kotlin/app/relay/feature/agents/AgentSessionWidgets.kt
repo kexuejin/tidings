@@ -56,6 +56,7 @@ import app.relay.generated.resources.ic_chevd
 import app.relay.ui.components.RelayDialog
 import app.relay.ui.components.RelayDialogButton
 import app.relay.ui.components.SessionStateLabel
+import app.relay.ui.components.ThinkingBlock
 import app.relay.ui.components.formatClock
 import app.relay.ui.components.relativeTime
 import app.relay.ui.theme.LocalAppSpacing
@@ -189,16 +190,29 @@ private fun AgentEventRow(event: AgentEventUi) {
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
         }
-        event.summary?.let {
-            Text(text = it, style = MaterialTheme.typography.bodyMedium, modifier = Modifier.padding(top = LocalAppSpacing.current.xxs))
-        }
-        event.body?.let {
-            Text(
-                text = it,
-                style = MaterialTheme.typography.bodySmall,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
+        val isThought = event.eventType.contains("thought", ignoreCase = true) ||
+            event.eventType.contains("reasoning", ignoreCase = true)
+        if (isThought) {
+            val content = event.body?.takeIf { it.isNotBlank() }
+                ?: event.summary?.takeIf { it.isNotBlank() }
+                ?: ""
+            ThinkingBlock(
+                reasoning = content,
+                isStreaming = false,
                 modifier = Modifier.padding(top = LocalAppSpacing.current.xxs),
             )
+        } else {
+            event.summary?.let {
+                Text(text = it, style = MaterialTheme.typography.bodyMedium, modifier = Modifier.padding(top = LocalAppSpacing.current.xxs))
+            }
+            event.body?.let {
+                Text(
+                    text = it,
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    modifier = Modifier.padding(top = LocalAppSpacing.current.xxs),
+                )
+            }
         }
     }
 }

@@ -5,6 +5,7 @@ package app.relay.app
 import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertNull
+import kotlin.test.assertTrue
 
 /**
  * 「扫一下就能配对」是用户唯一看得见的一句话 —— 解析对了才有下文，解析错了用户只看到
@@ -177,5 +178,43 @@ class QrPairingTest {
             ),
             parsed,
         )
+    }
+
+    @Test
+    fun parseQrRecognizesBracketedPublicIpv6() {
+        val gua = "2001:db8:398:3201:1:2:3:4"
+        val expected = gua to 17878
+        assertEquals(expected, parseQrPayload("relay://[$gua]:17878"))
+        assertEquals(expected, parseQrPayload("[$gua]:17878"))
+
+        val parsed = parseQr("relay://[$gua]:17878?pin=sha256:abcd1234")
+        assertEquals(ParsedQr.LanPeer(gua, 17878, tlsPin = "sha256:abcd1234"), parsed)
+
+        // 生成也必须支持 GUA
+        val payload = pairingPayload(gua, 17878)
+        assertEquals("relay://[$gua]:17878", payload)
+        assertEquals(expected, parseQrPayload(payload!!))
+    }
+
+    @Test
+    fun parseQrRecognizesMultiCandidateJson() {
+        val candidates = listOf(
+            PeerCandidate(type = "lan_v4", host = "192.168.31.25", port = 17878),
+            PeerCandidate(type = "public_v6", host = "2001:db8:398:3201::1", port = 17878),
+        )
+        val json = multiCandidatePairingPayload(
+            nodeId = "desktop-node-1",
+            nick = "MyMacBook",
+            tlsPin = "sha256:7f9a1234",
+            candidates = candidates,
+        )
+        val parsed = parseQr(json)
+        assertTrue(parsed is ParsedQr.LanPeer)
+        assertEquals("192.168.31.25", parsed.host)
+        assertEquals(17878, parsed.port)
+        assertEquals("sha256:7f9a1234", parsed.tlsPin)
+        assertEquals(2, parsed.candidates.size)
+        assertEquals("public_v6", parsed.candidates[1].type)
+        assertEquals("2001:db8:398:3201::1", parsed.candidates[1].host)
     }
 }

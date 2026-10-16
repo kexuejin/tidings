@@ -213,6 +213,8 @@ internal fun agentSessionFrom(
         hostOrigin = if ("origin" in payload) stringField(payload, "origin") else prev?.hostOrigin,
         hostBlank = if ("blank" in payload) boolField(payload, "blank") else prev?.hostBlank,
         announced = true,
+        gitBranch = text("gitBranch", prev?.gitBranch),
+        segmentId = text("segmentId", prev?.segmentId),
     )
 }
 

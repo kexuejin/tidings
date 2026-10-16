@@ -48,6 +48,7 @@ import app.relay.ui.ContentWidths
 import app.relay.ui.EmptyState
 import app.relay.ui.centerCapped
 import app.relay.ui.components.SectionHeader
+import app.relay.ui.components.ThinkingBlock
 import app.relay.ui.components.formatClock
 import app.relay.ui.components.relativeTime
 import app.relay.ui.theme.LocalAppSpacing
@@ -235,6 +236,14 @@ internal fun SessionDetailView(
                                         text = if (event.mine) stringResource(Res.string.agent_event_dir_out) else stringResource(Res.string.agent_event_dir_in),
                                         style = MaterialTheme.typography.labelSmall,
                                         color = MaterialTheme.colorScheme.primary,
+                                    )
+                                }
+                                if (!event.reasoning.isNullOrBlank()) {
+                                    ThinkingBlock(
+                                        reasoning = event.reasoning,
+                                        elapsedMs = event.reasoningElapsedMs,
+                                        isStreaming = false,
+                                        modifier = Modifier.padding(top = LocalAppSpacing.current.xs),
                                     )
                                 }
                                 Text(

@@ -56,7 +56,16 @@ data class GroupMeta(
     val description: String? = null,
     /** 群公告；空串表示未设置。 */
     val announce: String? = null,
+    /** 虚拟 Agent 群成员列表（PPE-2 / Goal 5）。 */
+    val virtualAgents: List<VirtualAgentMember>? = null,
 ) {
+    /** 判断指定 nodeId / agentId 是否属于虚拟 Agent。 */
+    fun isVirtualAgent(nodeOrAgentId: String): Boolean =
+        virtualAgents?.any { it.agentId == nodeOrAgentId || "agent:${it.hostNodeId}:${it.agentId}" == nodeOrAgentId } == true
+
+    /** 获取虚拟 Agent 所属的宿主 nodeId。 */
+    fun hostNodeOf(nodeOrAgentId: String): String? =
+        virtualAgents?.firstOrNull { it.agentId == nodeOrAgentId || "agent:${it.hostNodeId}:${it.agentId}" == nodeOrAgentId }?.hostNodeId
     /** 自己是不是成员。不是成员的群不该留在本机（见 `GroupMerge.canApply`）。 */
     fun hasMember(nodeId: String): Boolean = members.contains(nodeId)
 
@@ -141,3 +150,12 @@ object GroupOps {
     const val INFO = "info"
     const val NEED = "need"
 }
+
+/** 虚拟 Agent 群成员元数据（PPE-2 / Goal 5）。 */
+@Serializable
+data class VirtualAgentMember(
+    val agentId: String,
+    val hostNodeId: String,
+    val name: String,
+    val role: String? = null,
+)

@@ -140,9 +140,12 @@ object Codec {
         updatedAt: Long? = null,
         origin: String? = null,
         blank: Boolean? = null,
+        gitBranch: String? = null,
+        segmentId: String? = null,
     ) = CodecAgent.agentSessionPayload(
         sessionId, alias, agentKind, state, title, startedAt,
         agentId, wsId, wsTitle, wsPath, updatedAt, origin, blank,
+        gitBranch, segmentId,
     )
 
     fun agentEventPayload(
@@ -177,7 +180,9 @@ object Codec {
         summary: String? = null,
         expiresAt: Long,
         choices: String? = null,
-    ) = CodecAgent.agentApprovalPayload(approvalId, sessionId, tool, summary, expiresAt, choices)
+        riskLevel: String? = null,
+        diff: String? = null,
+    ) = CodecAgent.agentApprovalPayload(approvalId, sessionId, tool, summary, expiresAt, choices, riskLevel, diff)
 
     fun agentCancelPayload(
         sessionId: String,

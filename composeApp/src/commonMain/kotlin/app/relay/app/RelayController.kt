@@ -416,6 +416,8 @@ class RelayController(
 
 
     override fun respondApproval(approvalId: String, allow: Boolean) = agentCtl.handleRespondApproval(approvalId, allow)
+    override fun respondApproval(approvalId: String, allow: Boolean, allowSession: Boolean) =
+        agentCtl.handleRespondApproval(approvalId, allow, allowSession)
     override fun cancelAgentTask(taskId: String) = agentCtl.handleCancelAgentTask(taskId)
 
     // ------------------------------------------------------------------ 生命周期
@@ -983,6 +985,26 @@ class RelayController(
         internal fun splitHostPort(rawHost: String, rawPort: String): Pair<String, String>? {
             val host = rawHost.trim()
             val port = rawPort.trim()
+
+            // 1. 方括号 IPv6: [240e:...]:17878 或 [240e:...]
+            if (host.startsWith("[")) {
+                val closeBracket = host.indexOf(']')
+                if (closeBracket <= 1) return null
+                val cleanHost = host.substring(1, closeBracket).trim()
+                val rest = host.substring(closeBracket + 1).trim()
+                if (rest.startsWith(":")) {
+                    val suffix = rest.removePrefix(":").trim()
+                    if (suffix.toIntOrNull()?.let { it in 1..65535 } != true) return null
+                    if (port.isNotEmpty() && port != suffix) return null
+                    return cleanHost to suffix
+                } else if (rest.isEmpty()) {
+                    return cleanHost to port
+                } else {
+                    return null
+                }
+            }
+
+            // 2. IPv4 或 主机名: host:port 或 裸 host
             val colon = host.indexOf(':')
             if (colon < 0 || host.indexOf(':', colon + 1) >= 0) return host to port
             val suffix = host.substring(colon + 1)

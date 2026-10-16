@@ -305,6 +305,15 @@ class RelayControllerHelpersTest {
         assertEquals("fe80::1" to "17878", RelayController.splitHostPort("fe80::1", "17878"))
     }
 
+    @Test
+    fun bracketedIpv6WithPortIsSplitCorrectly() {
+        assertEquals("2001:db8:398::1" to "17878", RelayController.splitHostPort("[2001:db8:398::1]:17878", ""))
+        assertEquals("2001:db8:398::1" to "17878", RelayController.splitHostPort("[2001:db8:398::1]", "17878"))
+        assertEquals("2001:db8:398::1" to "17878", RelayController.splitHostPort("[2001:db8:398::1]:17878", "17878"))
+        assertNull(RelayController.splitHostPort("[2001:db8:398::1]:17878", "17899"))
+        assertNull(RelayController.splitHostPort("[2001:db8:398::1]:invalid", ""))
+    }
+
     /** 两边都写了端口是歧义，交给 UI 报错，不替用户猜一个。 */
     @Test
     fun twoPortsAreRefusedRatherThanGuessed() {

@@ -32,8 +32,26 @@ import app.relay.generated.resources.agent_approval_deny
 import app.relay.generated.resources.agent_approval_expired
 import app.relay.generated.resources.agent_approval_status_approved
 import app.relay.generated.resources.agent_approval_status_denied
+import androidx.compose.foundation.clickable
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
+import androidx.compose.material3.TextButton
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
+import androidx.compose.ui.text.font.FontFamily
+import app.relay.ui.components.RelayDialog
+import app.relay.ui.components.RelayDialogButton
+import app.relay.generated.resources.agent_approval_allow_session
+import app.relay.generated.resources.agent_approval_diff_title
+import app.relay.generated.resources.agent_approval_risk_l1
+import app.relay.generated.resources.agent_approval_risk_l2
+import app.relay.generated.resources.agent_approval_risk_l3
+import app.relay.generated.resources.agent_approval_status_allowed_session
 import app.relay.generated.resources.agent_approval_title
 import app.relay.generated.resources.agent_approval_tool_label
+import app.relay.generated.resources.agent_approval_view_diff
 import app.relay.generated.resources.agent_artifact_no_file
 import app.relay.generated.resources.agent_artifacts_title
 import app.relay.generated.resources.agent_count_items
@@ -44,17 +62,18 @@ import app.relay.generated.resources.agent_run_state_failed
 import app.relay.generated.resources.agent_run_state_running
 import app.relay.generated.resources.agent_run_state_succeeded
 import app.relay.generated.resources.agent_runs_title
+import app.relay.generated.resources.common_close
 import app.relay.ui.components.SectionHeader
 import app.relay.ui.components.formatClock
 import app.relay.ui.components.formatCount
 import app.relay.ui.theme.LocalAppSpacing
 import app.relay.ui.theme.LocalCardShape
+import app.relay.ui.theme.relayCardShadow
 import org.jetbrains.compose.resources.stringResource
 import app.relay.app.model.AgentApprovalUi
 import app.relay.app.model.AgentArtifactUi
 import app.relay.app.model.AgentQueueTaskUi
 import app.relay.app.model.AgentRunUi
-import app.relay.ui.theme.relayCardShadow
 
 /**
  * 待处理 Agent 审批请求列表（PPE-1 §6.5）。
@@ -71,10 +90,55 @@ import app.relay.ui.theme.relayCardShadow
  * README §12）
  * 样式按原型收敛为单卡列表行结构以提升空间利用率。
  */
+internal fun resolveRiskLevel(risk: String?, tool: String?): String {
+    if (!risk.isNullOrBlank()) return risk.uppercase()
+    val t = tool?.lowercase().orEmpty()
+    return when {
+        t.contains("bash") || t.contains("exec") || t.contains("command") || t.contains("shell") || t.contains("terminal") -> "L3"
+        t.contains("write") || t.contains("edit") || t.contains("replace") || t.contains("delete") || t.contains("remove") -> "L2"
+        else -> "L1"
+    }
+}
+
+@Composable
+internal fun RiskLevelBadge(level: String, modifier: Modifier = Modifier) {
+    val (labelRes, containerColor, contentColor) = when (level) {
+        "L3" -> Triple(
+            Res.string.agent_approval_risk_l3,
+            MaterialTheme.colorScheme.errorContainer,
+            MaterialTheme.colorScheme.onErrorContainer,
+        )
+        "L2" -> Triple(
+            Res.string.agent_approval_risk_l2,
+            MaterialTheme.colorScheme.tertiaryContainer,
+            MaterialTheme.colorScheme.onTertiaryContainer,
+        )
+        else -> Triple(
+            Res.string.agent_approval_risk_l1,
+            MaterialTheme.colorScheme.primaryContainer,
+            MaterialTheme.colorScheme.onPrimaryContainer,
+        )
+    }
+    Surface(
+        shape = RoundedCornerShape(4.dp),
+        color = containerColor,
+        modifier = modifier,
+    ) {
+        Text(
+            text = stringResource(labelRes),
+            style = MaterialTheme.typography.labelSmall,
+            color = contentColor,
+            fontWeight = FontWeight.Bold,
+            modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp),
+        )
+    }
+}
+
 @Composable
 public fun AgentApprovalsSection(
     approvals: List<AgentApprovalUi>,
-    onRespond: ((approvalId: String, allow: Boolean) -> Unit)?,
+    onRespond: ((approvalId: String, allow: Boolean) -> Unit)? = null,
+    onRespondChoice: ((approvalId: String, allow: Boolean, allowSession: Boolean) -> Unit)? = null,
     modifier: Modifier = Modifier,
 ) {
     if (approvals.isEmpty()) return
@@ -83,8 +147,6 @@ public fun AgentApprovalsSection(
     Column(modifier = modifier.fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(spacing.sm)) {
         SectionHeader(
             text = stringResource(Res.string.agent_approval_title),
-            // 原型 `m11-agents` 在这一节右上角有「3 项」；空表时整段不画（上面已 return），
-            // 所以这里的计数只在"这一节真的在"的时候出现，与图一致。
             action = {
                 Text(
                     text = stringResource(Res.string.agent_count_items, formatCount(approvals.size.toLong())),
@@ -98,88 +160,163 @@ public fun AgentApprovalsSection(
         SectionListCard {
             approvals.forEachIndexed { index, approval ->
                 if (index > 0) SectionListDivider()
-                ApprovalRow(approval = approval, now = now, onRespond = onRespond)
+                ApprovalRow(
+                    approval = approval,
+                    now = now,
+                    onRespond = onRespond,
+                    onRespondChoice = onRespondChoice,
+                )
             }
         }
     }
 }
 
-/** 审批**一条**（行，不是卡）：`工具: {tool}` + 摘要 + 首行右端的两颗按钮 / 状态胶囊。 */
+/** 审批**一条**（行）：风险等级 + `工具: {tool}` + 摘要 + Diff查看 + 首行右端的按钮 / 状态胶囊。 */
 @Composable
 private fun ApprovalRow(
     approval: AgentApprovalUi,
     now: Long,
     onRespond: ((approvalId: String, allow: Boolean) -> Unit)?,
+    onRespondChoice: ((approvalId: String, allow: Boolean, allowSession: Boolean) -> Unit)? = null,
 ) {
     val spacing = LocalAppSpacing.current
     val isExpired = approval.expiresAt > 0L && now > approval.expiresAt
+    var showDiffDialog by remember { mutableStateOf(false) }
+
     val statusText = when {
         approval.status == "approved" -> stringResource(Res.string.agent_approval_status_approved)
+        approval.status == "allow_session" -> stringResource(Res.string.agent_approval_status_allowed_session)
         approval.status == "denied" -> stringResource(Res.string.agent_approval_status_denied)
         isExpired -> stringResource(Res.string.agent_approval_expired)
         else -> null
     }
 
-    Row(
+    val riskLevel = resolveRiskLevel(approval.riskLevel, approval.tool)
+
+    Column(
         modifier = Modifier
             .fillMaxWidth()
             .padding(horizontal = spacing.lg14, vertical = spacing.md10),
-        horizontalArrangement = Arrangement.spacedBy(spacing.md10),
     ) {
-        Column(modifier = Modifier.weight(1f)) {
-            Text(
-                text = "${stringResource(Res.string.agent_approval_tool_label)}: ${approval.tool ?: "—"}",
-                style = MaterialTheme.typography.titleSmall,
-                fontWeight = FontWeight.Bold,
-                color = MaterialTheme.colorScheme.primary,
-                maxLines = 1,
-                overflow = TextOverflow.Ellipsis,
-            )
-            approval.summary?.let { note ->
-                Text(
-                    text = note,
-                    style = MaterialTheme.typography.bodySmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    modifier = Modifier.padding(top = spacing.xxs),
-                )
-            }
-        }
-
-        // 首行右端那一格：有待办时是两颗按钮，办完了换成状态胶囊 —— 两种形态占同一格，
-        // 所以竖着扫下来这一列始终是一条直线（原型 `.appr .rt` 的注释，`prototype/relay.html:444`）。
         Row(
-            horizontalArrangement = Arrangement.spacedBy(spacing.sm6),
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.spacedBy(spacing.md10),
             verticalAlignment = Alignment.CenterVertically,
         ) {
-            if (approval.status == "pending" && !isExpired && onRespond != null) {
-                OutlinedButton(onClick = { onRespond(approval.approvalId, false) }) {
-                    Text(stringResource(Res.string.agent_approval_deny))
-                }
-                Button(onClick = { onRespond(approval.approvalId, true) }) {
-                    Text(stringResource(Res.string.agent_approval_allow))
-                }
-            } else if (statusText != null) {
-                Surface(
-                    shape = RoundedCornerShape(6.dp),
-                    color = if (approval.status == "approved") {
-                        MaterialTheme.colorScheme.primaryContainer
-                    } else {
-                        MaterialTheme.colorScheme.errorContainer
-                    },
+            Column(modifier = Modifier.weight(1f)) {
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(spacing.xs),
                 ) {
+                    RiskLevelBadge(riskLevel)
                     Text(
-                        text = statusText,
-                        style = MaterialTheme.typography.labelSmall,
-                        color = if (approval.status == "approved") {
-                            MaterialTheme.colorScheme.onPrimaryContainer
-                        } else {
-                            MaterialTheme.colorScheme.onErrorContainer
-                        },
-                        modifier = Modifier.padding(horizontal = spacing.sm, vertical = spacing.xxs),
+                        text = "${stringResource(Res.string.agent_approval_tool_label)}: ${approval.tool ?: "—"}",
+                        style = MaterialTheme.typography.titleSmall,
+                        fontWeight = FontWeight.Bold,
+                        color = MaterialTheme.colorScheme.primary,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis,
+                    )
+                }
+                approval.summary?.let { note ->
+                    Text(
+                        text = note,
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        modifier = Modifier.padding(top = spacing.xxs),
                     )
                 }
             }
+
+            // 首行右端：操作按钮或状态胶囊
+            Row(
+                horizontalArrangement = Arrangement.spacedBy(spacing.sm6),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                if (approval.status == "pending" && !isExpired && (onRespond != null || onRespondChoice != null)) {
+                    OutlinedButton(onClick = {
+                        if (onRespondChoice != null) onRespondChoice(approval.approvalId, false, false)
+                        else onRespond?.invoke(approval.approvalId, false)
+                    }) {
+                        Text(stringResource(Res.string.agent_approval_deny))
+                    }
+                    Button(onClick = {
+                        if (onRespondChoice != null) onRespondChoice(approval.approvalId, true, false)
+                        else onRespond?.invoke(approval.approvalId, true)
+                    }) {
+                        Text(stringResource(Res.string.agent_approval_allow))
+                    }
+                    if (onRespondChoice != null) {
+                        TextButton(onClick = {
+                            onRespondChoice(approval.approvalId, true, true)
+                        }) {
+                            Text(stringResource(Res.string.agent_approval_allow_session), style = MaterialTheme.typography.labelSmall)
+                        }
+                    }
+                } else if (statusText != null) {
+                    val badgeColor = when (approval.status) {
+                        "approved" -> MaterialTheme.colorScheme.primaryContainer
+                        "allow_session" -> MaterialTheme.colorScheme.secondaryContainer
+                        else -> MaterialTheme.colorScheme.errorContainer
+                    }
+                    val textColor = when (approval.status) {
+                        "approved" -> MaterialTheme.colorScheme.onPrimaryContainer
+                        "allow_session" -> MaterialTheme.colorScheme.onSecondaryContainer
+                        else -> MaterialTheme.colorScheme.onErrorContainer
+                    }
+                    Surface(
+                        shape = RoundedCornerShape(6.dp),
+                        color = badgeColor,
+                    ) {
+                        Text(
+                            text = statusText,
+                            style = MaterialTheme.typography.labelSmall,
+                            color = textColor,
+                            modifier = Modifier.padding(horizontal = spacing.sm, vertical = spacing.xxs),
+                        )
+                    }
+                }
+            }
         }
+
+        // 如果包含 diff / 详细参数变更，提供点击查看入口
+        if (!approval.diff.isNullOrBlank()) {
+            Text(
+                text = stringResource(Res.string.agent_approval_view_diff),
+                style = MaterialTheme.typography.labelSmall,
+                color = MaterialTheme.colorScheme.primary,
+                fontWeight = FontWeight.SemiBold,
+                modifier = Modifier
+                    .padding(top = spacing.xs)
+                    .clickable { showDiffDialog = true },
+            )
+        }
+    }
+
+    if (showDiffDialog) {
+        RelayDialog(
+            onDismissRequest = { showDiffDialog = false },
+            title = { Text(stringResource(Res.string.agent_approval_diff_title)) },
+            content = {
+                Column(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .verticalScroll(rememberScrollState()),
+                ) {
+                    Text(
+                        text = approval.diff.orEmpty(),
+                        style = MaterialTheme.typography.bodySmall.copy(fontFamily = FontFamily.Monospace),
+                        modifier = Modifier.padding(vertical = spacing.sm),
+                    )
+                }
+            },
+            confirmButton = {
+                RelayDialogButton(
+                    onClick = { showDiffDialog = false },
+                    text = stringResource(Res.string.common_close),
+                )
+            },
+        )
     }
 }
 

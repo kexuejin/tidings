@@ -4,6 +4,7 @@ package app.relay.app
 
 import app.relay.app.model.AgentSessionKey
 import app.relay.app.model.ConversationUi
+import app.relay.core.nowMillis
 /**
  * 消息页签「工作区」段的取数。
  *
@@ -331,9 +332,19 @@ public fun WorkspaceUnitGroupUi.unassignedSessions(): UnassignedSessionsUi {
     )
 }
 
-public fun RelayUiState.inboxWorkspaceUnits(limit: Int = INBOX_WS_LIMIT): InboxWorkspaceUnitsUi {
+public fun RelayUiState.inboxWorkspaceUnits(
+    limit: Int = INBOX_WS_LIMIT,
+    now: Long = 0L,
+): InboxWorkspaceUnitsUi {
     val agentNodes = peers.filter { it.isAgent }
     if (agentNodes.isEmpty()) return InboxWorkspaceUnitsUi(groups = emptyList(), totalUnits = 0)
+
+    val maxActivity = agentSessions.values.maxOfOrNull { it.sortActivityAt } ?: 0L
+    val referenceNow = when {
+        now > 0L -> now
+        maxActivity in 1L until 100_000_000_000L -> maxActivity
+        else -> nowMillis()
+    }
 
     val pendingApprovals = agentApprovals.values.filter { it.status == APPROVAL_PENDING }
 
@@ -425,11 +436,15 @@ public fun RelayUiState.inboxWorkspaceUnits(limit: Int = INBOX_WS_LIMIT): InboxW
                 announcement?.at ?: 0L,
             )
 
-            // 最关键的那条活跃会话：优先有未决审批 → 其次正在干活 → 其次最近更新（看板原文口径）。
+            // 最关键的那条活跃会话：优先有未决审批 → 其次正在干活（排除已超时的僵死 busy） → 其次最近更新（看板原文口径）。
             val active = sessions.firstOrNull { session ->
                 pendingApprovals.any { it.peerId == node.nodeId && it.sessionId == session.first }
-            } ?: sessions.firstOrNull { it.second.state == AGENT_STATE_BUSY }
-                ?: sessions.firstOrNull()
+            } ?: sessions.firstOrNull { session ->
+                val key = AgentSessionKey(node.nodeId, session.first)
+                val lastEventAt = agentEvents[key].orEmpty().maxOfOrNull { it.at } ?: 0L
+                val lastActivity = maxOf(session.second.sortActivityAt, lastEventAt)
+                session.second.state == AGENT_STATE_BUSY && !isStaleBusy(lastActivity, referenceNow)
+            } ?: sessions.firstOrNull()
             val activeEvent = active
                 ?.let { agentEvents[AgentSessionKey(node.nodeId, it.first)].orEmpty().lastOrNull() }
 
@@ -463,13 +478,21 @@ public fun RelayUiState.inboxWorkspaceUnits(limit: Int = INBOX_WS_LIMIT): InboxW
                 // 就是这一行在宿主台账里的那一份。多帧同名时取先到的那份（与 wsTitle 同纪律）。
                 hostOrder = announcement?.hostOrder,
                 active = active?.let { session ->
+                    val key = AgentSessionKey(node.nodeId, session.first)
+                    val lastEventAt = agentEvents[key].orEmpty().maxOfOrNull { it.at } ?: 0L
+                    val lastActivity = maxOf(session.second.sortActivityAt, lastEventAt)
+                    val effectiveState = if (session.second.state == AGENT_STATE_BUSY && isStaleBusy(lastActivity, referenceNow)) {
+                        "idle"
+                    } else {
+                        session.second.state
+                    }
                     WorkspaceUnitActiveUi(
                         sessionId = session.first,
                         // 回落（alias → title，都没有即 null）只在 `AgentSessionUi.displayTitle`
                         // 里实现一处 —— 这条线的第 5 个调用点（前 4 个在 UI 层，这处在派生层）。
                         // 漏掉 title 时，工作区卡片上那句「在干什么」就会显示成 session-3f2a…。
                         title = session.second.displayTitle,
-                        state = session.second.state,
+                        state = effectiveState,
                         summary = activeEvent?.summary ?: activeEvent?.body ?: session.second.title,
                         // 事件优先（它是实时到的，"最新活动"说的就是它）；无事件时用宿主动作时刻，
                         // 让分页拉回的历史会话说真话（详见 WorkspaceUnitActiveUi.at 的 KDoc）。
@@ -595,3 +618,19 @@ private const val APPROVAL_PENDING: String = "pending"
 
 /** 会话状态里表示「正在干活」的取值（PPE-1 §6.5）。看板挑活跃会话时用的就是它。 */
 private const val AGENT_STATE_BUSY: String = "busy"
+
+/**
+ * 僵死会话超时门限（默认 30 分钟）。
+ * 当会话标记为 busy 却在门限内没有任何事件或活动时，不再将其视为正在干活，
+ * 避免因宿主异常退出漏推收尾帧而永久霸占看板主位。
+ */
+public const val STALE_BUSY_TIMEOUT_MS: Long = 30 * 60 * 1000L
+
+public fun isStaleBusy(
+    lastActivityAt: Long,
+    now: Long,
+    timeoutMs: Long = STALE_BUSY_TIMEOUT_MS,
+): Boolean {
+    if (lastActivityAt <= 0L || now <= 0L) return false
+    return (now - lastActivityAt) > timeoutMs
+}

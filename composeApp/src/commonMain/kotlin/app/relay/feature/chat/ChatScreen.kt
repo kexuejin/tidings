@@ -324,6 +324,22 @@ fun ChatScreen(
             )
         }
 
+        // 群内 Agent 工作状态广播（Goal 5 / GroupProgress）
+        if (group != null) {
+            val activeAgentRun = state.agentRuns.values.firstOrNull { run ->
+                !run.isTerminal && group.virtualAgents?.any { it.hostNodeId == run.peerId } == true
+            }
+            if (activeAgentRun != null) {
+                val agentName = group.virtualAgents?.firstOrNull { it.hostNodeId == activeAgentRun.peerId }?.name
+                    ?: activeAgentRun.peerId.take(8)
+                GroupProgressBar(
+                    agentName = agentName,
+                    activeRun = activeAgentRun,
+                    modifier = Modifier.padding(horizontal = sp.lg, vertical = sp.xs),
+                )
+            }
+        }
+
         Box(Modifier.weight(1f).fillMaxWidth()) {
             if (messages.isEmpty()) {
                 // 空会话的下一步是打字：这个出口把光标直接送进下面的输入框，

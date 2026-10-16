@@ -378,3 +378,30 @@ budget 类断言（最坏样本落在 UDP 800 / TCP 4096 内）在
 | `agent-grant-list` | `agr1` | ~200 B | 静默丢弃 | ✅ | ✅ | ✅ |
 | `agent-session-page` | `agp1` | ~180 B | 静默丢弃 | ✅ | ✅ | ✅ |
 | `avatar` | `av1` | ~100 B~32 KB | 静默丢弃 | ✅ | ✅ | ✅ |
+
+---
+
+## 14. Phase 2.0 协议规范增补
+
+### 14.1 远场通信与智能候选池（IPv6 + SPKI Pinning）
+1. **URI 规范**：`relay://[2001:...]:17878?pin=sha256:...&cands=...`
+2. **地址识别**：纯 Kotlin 位运算严格过滤 IPv6 GUA（全球单播 `2000::/3`），坚决剔除 Link-Local（`fe80::/10`）。
+3. **安全锁定**：支持基于自签 ECDSA P-256 证书的公钥指纹恒定时间比对，杜绝中间人劫持。
+
+### 14.2 思考流增量与计时解耦
+1. **载荷解耦**：思考过程增量通过 `thought_delta` 独立派发，正文回答增量通过 `token_delta` 派发。
+2. **界面折叠**：手机端通过 `ThinkingBlock` 展示耗时并支持聚合折叠。
+
+### 14.3 人机回环审批流（HITL）
+1. **三级风险**：`agent-approval` 载荷扩展 `riskLevel`（L1 只读、L2 修改、L3 高危）。
+2. **Diff 详情**：`agent-approval` 载荷扩展 `diff` 字段，用于移动端展示待修改代码或入参差异。
+3. **5分钟超时保护**：审批挂起超过 300 秒无响应自动转为 `expired` 并在宿主端安全截断。
+
+### 14.4 工作区感知与会话分段
+1. **工作区扩展**：`agent-session` 扩展 `gitBranch` 与 `segmentId`。
+2. **分段重置**：切换工作区或会话分段时，宿主物理重置 Prompt 上下文，移动端保留完整滚动历史。
+
+### 14.5 群聊多 Agent 协同（Chief Pattern）
+1. **虚拟群成员**：`GroupMeta` 扩展 `virtualAgents: List<VirtualAgentMember>`。
+2. **精确路由**：群聊内遵循 `@Agent` 唤醒或 Chief 编排，未被唤醒时不消耗 Token。
+3. **工作态广播**：群内通过 `GroupProgress` 广播当前正在执行的任务状态。

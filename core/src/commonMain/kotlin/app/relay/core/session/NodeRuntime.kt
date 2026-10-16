@@ -500,13 +500,17 @@ class NodeRuntime(
         at: Long? = null,
         note: String? = null,) = outbound.sendAgentRun(peerId, sessionId, runId, state, at, note)
 
-    suspend fun sendAgentApproval(peerId: String,
+    suspend fun sendAgentApproval(
+        peerId: String,
         approvalId: String,
         sessionId: String,
         tool: String? = null,
         summary: String? = null,
         expiresAt: Long,
-        choices: String? = null,) = outbound.sendAgentApproval(peerId, approvalId, sessionId, tool, summary, expiresAt, choices)
+        choices: String? = null,
+        riskLevel: String? = null,
+        diff: String? = null,
+    ) = outbound.sendAgentApproval(peerId, approvalId, sessionId, tool, summary, expiresAt, choices, riskLevel, diff)
 
     suspend fun sendAgentCancel(peerId: String,
         sessionId: String,

@@ -255,6 +255,8 @@ data class RelaySettings(
         if (waitFrameCapability) add(MsgTypes.CAP_MOBILE_TEXT)
         if (recordMessageCapability) add(MsgTypes.CAP_MOBILE_RECORD)
         add(MsgTypes.CAP_AGENT_SESSION)
+        // 支持任务排队与审批交互（agent-approval、agent-ack、agent-queue、agent-run、agent-cancel）
+        add(MsgTypes.CAP_AGENT_QUEUE)
         // D1/D2/D3 已在 Codec 落地 ⇒ 如实声明 `aws1`（能收 agent-session 的四个新可选键
         // 与 `agent-workspace` 帧）。
         add(MsgTypes.CAP_AGENT_WORKSPACE)

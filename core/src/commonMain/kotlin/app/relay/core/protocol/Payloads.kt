@@ -166,6 +166,10 @@ data class AgentSessionPayload(
      * 三态，与 [origin] 同规矩：缺键 = 对端没报，不猜。
      */
     val blank: Boolean? = null,
+    /** 工作区关联的 Git 分支名称（如 "main", "dev"）。 */
+    val gitBranch: String? = null,
+    /** 会话分段 ID（重置 Prompt 上下文后开启新分段）。 */
+    val segmentId: String? = null,
 )
 
 /**
@@ -214,6 +218,8 @@ data class AgentApprovalPayload(
     val summary: String? = null,
     val expiresAt: Long,
     val choices: String? = null,
+    val riskLevel: String? = null,
+    val diff: String? = null,
 )
 
 /** PPE-1 §6.6 `agent-cancel`：取消（cap `agq1`）。 */

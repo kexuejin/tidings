@@ -166,7 +166,35 @@ data class MessageUi(
      * 而不是搭 `file_json` 的车（搭车会让 `searchFileMessages` 把屏幕记录当成文件命中）。
      */
     val screen: ScreenRecordUi? = null,
+    /** 深度思考过程文本（PPE-2 / DS-Bot 模式）。为 null 时不折叠思考流。 */
+    val reasoning: String? = null,
+    /** 思考过程耗时（毫秒）。为 null 时显示"思考中"或不显示耗时。 */
+    val reasoningElapsedMs: Long? = null,
 )
+
+/**
+ * 从文本中解析 `<think>...</think>` 推理内容与正式回答文本。
+ *
+ * 针对 DeepSeek-R1、Claude 等思考模型：
+ * - 如果包含 `<think>...</think>` 闭合标签，返回 `(reasoning, remainingText)`。
+ * - 如果包含未闭合的 `<think>...`（如流式传输中断），返回 `(reasoning, "")`。
+ * - 如果没有 `<think>` 标签，返回 `(null, rawText)`。
+ */
+fun parseThinkingContent(rawText: String): Pair<String?, String> {
+    val startIndex = rawText.indexOf("<think>")
+    if (startIndex < 0) return null to rawText
+    val endIndex = rawText.indexOf("</think>", startIndex + 7)
+    return if (endIndex >= 0) {
+        val reasoning = rawText.substring(startIndex + 7, endIndex).trim().takeIf { it.isNotBlank() }
+        val remaining = (rawText.substring(0, startIndex) + rawText.substring(endIndex + 8)).trim()
+        reasoning to remaining
+    } else {
+        val reasoning = rawText.substring(startIndex + 7).trim().takeIf { it.isNotBlank() }
+        val remaining = rawText.substring(0, startIndex).trim()
+        reasoning to remaining
+    }
+}
+
 
 /**
  * 屏幕协助历史卡的数据（茶话间 `ScreenHistoryCard.vue` 的 `ScreenRecord`）。

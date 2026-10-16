@@ -375,6 +375,7 @@ class AgentSessionRegistry(
     fun applyAckToApproval(nodeId: String, ackOf: String, kind: String, at: Long = System.currentTimeMillis()) {
         val status = when (kind) {
             "approved" -> "approved"
+            "allow_session" -> "allow_session"
             "denied" -> "denied"
             "cancelled" -> "cancelled"
             else -> return

@@ -64,7 +64,6 @@ import app.relay.generated.resources.desk_nav_data
 import app.relay.generated.resources.desk_nav_desktop
 import app.relay.generated.resources.desk_nav_desktop_only
 import app.relay.generated.resources.desk_nav_diagnostics
-import app.relay.generated.resources.desk_nav_ghost_note
 import app.relay.generated.resources.desk_nav_group_appear
 import app.relay.generated.resources.desk_nav_group_conn
 import app.relay.generated.resources.desk_nav_group_data
@@ -131,8 +130,7 @@ private const val GROUP_DESK = "desk"
 /**
  * 桌面端设置导航项，与 prototype/relay.html 的 DSET_GROUPS 对齐。
  *
- * [icon] 对应原型 `DSET_GROUPS[].entries[].icon`，渲染成 `.li .fi2` 那个 26×26 的
- * 圆角图标块。 [ghost] 对应原型里没有 `to` 的条目，行尾会多一个「手机同款」标记。
+ * [icon] 对应原型 `DSET_GROUPS[].entries[].icon`，渲染成 `.li .fi2` 那个 26×26 的圆角图标块。
  */
 public enum class DesktopSettingsNav(
     val id: String,
@@ -141,24 +139,23 @@ public enum class DesktopSettingsNav(
     val groupLabel: StringResource?,
     val icon: DrawableResource,
     val note: StringResource? = null,
-    val ghost: Boolean = false,
 ) {
     Identity("id", Res.string.desk_nav_identity, GROUP_ROOT, null, Res.drawable.ic_key),
     Connection(
         "conn", Res.string.desk_nav_connection, GROUP_CONN,
-        Res.string.desk_nav_group_conn, Res.drawable.ic_link, ghost = true,
+        Res.string.desk_nav_group_conn, Res.drawable.ic_link,
     ),
     Notifications(
         "notify", Res.string.desk_nav_notifications, GROUP_CONN,
-        Res.string.desk_nav_group_conn, Res.drawable.ic_bell, ghost = true,
+        Res.string.desk_nav_group_conn, Res.drawable.ic_bell,
     ),
     Appearance(
         "appear", Res.string.desk_nav_appearance, GROUP_APPEAR,
-        Res.string.desk_nav_group_appear, Res.drawable.ic_moon, ghost = true,
+        Res.string.desk_nav_group_appear, Res.drawable.ic_moon,
     ),
     Capabilities(
         "caps", Res.string.desk_nav_capabilities, GROUP_APPEAR,
-        Res.string.desk_nav_group_appear, Res.drawable.ic_shield, ghost = true,
+        Res.string.desk_nav_group_appear, Res.drawable.ic_shield,
     ),
     DataStorage(
         "data", Res.string.desk_nav_data, GROUP_DATA,
@@ -170,7 +167,7 @@ public enum class DesktopSettingsNav(
     ),
     Diagnostics(
         "diag", Res.string.desk_nav_diagnostics, GROUP_DATA,
-        Res.string.desk_nav_group_data, Res.drawable.ic_info, ghost = true,
+        Res.string.desk_nav_group_data, Res.drawable.ic_info,
     ),
     Desktop(
         "desk", Res.string.desk_nav_desktop, GROUP_DESK,
@@ -290,21 +287,13 @@ public fun DesktopSettingsSidebar(
                                 Text(
                                     text = stringResource(nav.title),
                                     style = MaterialTheme.typography.labelMedium,
-                                    fontWeight = if (nav.ghost) FontWeight.Medium else FontWeight.SemiBold,
-                                    color = if (nav.ghost) MaterialTheme.colorScheme.onSurfaceVariant else MaterialTheme.colorScheme.onSurface,
+                                    fontWeight = FontWeight.SemiBold,
+                                    color = MaterialTheme.colorScheme.onSurface,
                                 )
                             }
                             nav.note?.let {
                                 Text(
                                     text = stringResource(it),
-                                    style = MaterialTheme.typography.labelSmall,
-                                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                                    modifier = Modifier.alpha(0.7f),
-                                )
-                            }
-                            if (nav.ghost) {
-                                Text(
-                                    text = stringResource(Res.string.desk_nav_ghost_note),
                                     style = MaterialTheme.typography.labelSmall,
                                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                                     modifier = Modifier.alpha(0.7f),

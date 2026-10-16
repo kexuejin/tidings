@@ -198,6 +198,7 @@ public interface DesktopPaneActions {
 
     // ------------------------------------------------------------------ Agent 审批与控制
     fun respondApproval(approvalId: String, allow: Boolean): Unit = Unit
+    fun respondApproval(approvalId: String, allow: Boolean, allowSession: Boolean): Unit = Unit
     fun cancelAgentTask(taskId: String): Unit = Unit
 
     // ------------------------------------------------------------------ 群管理
