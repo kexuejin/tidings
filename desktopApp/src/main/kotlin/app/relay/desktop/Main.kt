@@ -70,7 +70,7 @@ fun main(args: Array<String>) {
         // 依托系统托盘与常驻能力，固定监听回环 8788 并广播 `ag1`，内嵌承载控制面。
         advertiseAgent = true,
     )
-    // 固定端口 8788：dsh-tidings 插件的 `baseUrl` 默认就是这个值，两边必须一致。
+    // 固定端口 8788：dsh-tidings-bridge 插件的 `baseUrl` 默认就是这个值，两边必须一致。
     // 传 `ControlPlane.DEFAULT_HTTP_PORT` 而不是字面量 8788 —— 单一定义点。
     val extension = DesktopExtension(
         controller = controller,
