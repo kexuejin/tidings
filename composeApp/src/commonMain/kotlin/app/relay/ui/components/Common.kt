@@ -36,7 +36,6 @@ import androidx.compose.foundation.clickable
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.layout.heightIn
-import androidx.compose.material3.AlertDialog
 import app.relay.generated.resources.chat_forward_title
 import app.relay.generated.resources.common_cancel
 import androidx.compose.ui.unit.sp

@@ -5,19 +5,14 @@ import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
-import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
-import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
-import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.Icon
-import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
@@ -36,10 +31,10 @@ import app.relay.generated.resources.Res
 import app.relay.generated.resources.common_close
 import app.relay.generated.resources.ic_chevd
 import app.relay.generated.resources.workspace_bar_switch
-import app.relay.generated.resources.workspace_bar_title
 import app.relay.generated.resources.workspace_branch_label
 import app.relay.generated.resources.workspace_new_segment
 import app.relay.generated.resources.workspace_unassigned
+import app.relay.ui.theme.IconSizes
 import app.relay.ui.theme.LocalAppSpacing
 import org.jetbrains.compose.resources.painterResource
 import org.jetbrains.compose.resources.stringResource
@@ -126,7 +121,7 @@ fun WorkspaceBar(
                     painter = painterResource(Res.drawable.ic_chevd),
                     contentDescription = stringResource(Res.string.workspace_bar_switch),
                     tint = MaterialTheme.colorScheme.onSurfaceVariant,
-                    modifier = Modifier.size(16.dp),
+                    modifier = Modifier.size(IconSizes.Label),
                 )
             }
         }

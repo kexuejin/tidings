@@ -22,8 +22,6 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.BasicTextField
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.automirrored.outlined.Chat
-import androidx.compose.material.icons.automirrored.outlined.InsertDriveFile
 import androidx.compose.material.icons.filled.ChevronRight
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.outlined.Image
@@ -92,6 +90,10 @@ import app.relay.generated.resources.hist_week_tue
 import app.relay.generated.resources.hist_week_wed
 import app.relay.generated.resources.r2_chat_time_yesterday
 import app.relay.generated.resources.ic_search
+import app.relay.generated.resources.ic_image
+import app.relay.generated.resources.ic_file
+import app.relay.generated.resources.ic_chat_bubble
+import org.jetbrains.compose.resources.painterResource
 import app.relay.ui.components.formatClock
 import app.relay.ui.theme.IconSizes
 import app.relay.ui.theme.LocalAppSpacing
@@ -487,10 +489,10 @@ internal fun HistoryHitItem(
         verticalAlignment = Alignment.Top,
         horizontalArrangement = Arrangement.spacedBy(sp.md10),
     ) {
-        val icon = when {
-            isImage -> Icons.Outlined.Image
-            isFile -> Icons.AutoMirrored.Outlined.InsertDriveFile
-            else -> Icons.AutoMirrored.Outlined.Chat
+        val iconRes = when {
+            isImage -> Res.drawable.ic_image
+            isFile -> Res.drawable.ic_file
+            else -> Res.drawable.ic_chat_bubble
         }
         // `.hst{width:34px;height:34px;border-radius:12px;flex:none;background:var(--surface-3);
         //   color:var(--on-2);display:grid;place-items:center}`（`--surface-3` 是**填充** token，
@@ -503,7 +505,7 @@ internal fun HistoryHitItem(
         ) {
             Box(contentAlignment = Alignment.Center) {
                 Icon(
-                    imageVector = icon,
+                    painter = painterResource(iconRes),
                     contentDescription = null,
                     tint = MaterialTheme.colorScheme.onSurfaceVariant,
                     modifier = Modifier.size(17.dp),

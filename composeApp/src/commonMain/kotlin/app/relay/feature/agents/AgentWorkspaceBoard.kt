@@ -51,7 +51,6 @@ import app.relay.ui.theme.LocalAppSpacing
 import app.relay.ui.theme.LocalCardShape
 import org.jetbrains.compose.resources.painterResource
 import org.jetbrains.compose.resources.stringResource
-import androidx.compose.foundation.layout.width
 import app.relay.generated.resources.conv_inbox_ws_badge_unknown_kind
 import app.relay.generated.resources.workspace_agent_section_pending
 import app.relay.generated.resources.workspace_agent_section_sessions

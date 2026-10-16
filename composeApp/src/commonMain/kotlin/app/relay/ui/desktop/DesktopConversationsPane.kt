@@ -308,7 +308,7 @@ public fun ConversationsPane(
  *    与 `MyQrSheet`（`feature/nodes/NodeSheets.kt`）同一取舍 ——
  *    宁可少一块，不印一张扫不出来的码。外径 132dp（116 + 8×2）＝ 原型 `.qrmock` 的尺寸。
  * 2. **第二张卡不可点**：`DesktopShellActions.onImportFiles` 收的是 `peerId`
- *    （`DesktopShell.kt:297`），一个对端都没有时没有收件人；「拖文件进窗口」是窗口级手势，
+ *    （[DesktopShellActions.onImportFiles]），一个对端都没有时没有收件人；「拖文件进窗口」是窗口级手势，
  *    不是这个 Composable 能接的能力。所以它画成卡片、不挂 onClick，登记为偏差。
  * 3. 第一/第三张卡是真动作：[onPair] 去「节点」视图（那里有扫码入口），
  *    [onOpenAgentConsole] 打开本机 Agent 控制台。

@@ -12,7 +12,6 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.material3.HorizontalDivider
-import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
@@ -24,7 +23,6 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 
@@ -184,7 +182,7 @@ public fun ChatPane(
             // 群主名：**本机群主先比对 `selfNodeId`，不能只查节点表** ——
             // `state.peers` 是远端节点表，本机不在里面，所以自己建的群在这里会静默丢掉
             // 整段「群主 X」（生产行为，不只是截图夹具）。回落链与手机端
-            // `ui/components/GroupInfoDialog.kt:74` 对齐：本机用自己设的昵称（取不到再退回
+            // `GroupInfoDialog` 对齐：本机用自己设的昵称（取不到再退回
             // 「我」），远端查不到就退 `nodeId` 前 8 字符，而不是整段消失。
             groupOwnerName = group?.ownerId?.let { owner ->
                 when (owner) {

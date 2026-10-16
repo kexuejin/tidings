@@ -29,7 +29,6 @@ import app.relay.feature.nodes.AddNodeEntryRow
 import app.relay.app.InboxWorkspaceUnitsUi
 import app.relay.app.WorkspaceUnitGroupUi
 import app.relay.app.WorkspaceUnitUi
-import androidx.compose.foundation.shape.RoundedCornerShape
 import app.relay.generated.resources.agent_session_untitled
 import app.relay.generated.resources.conv_inbox_ws_row_unassigned
 import app.relay.generated.resources.conv_inbox_ws_row_unassigned_body

@@ -4,7 +4,6 @@ package app.relay.agent
 
 import app.relay.core.protocol.AgentGrantPolicies
 import app.relay.core.protocol.AgentGrantScopes
-import app.relay.core.protocol.AgentGrantStates
 import java.io.File
 import java.util.concurrent.locks.ReentrantReadWriteLock
 import kotlin.concurrent.read
@@ -16,7 +15,6 @@ import kotlinx.serialization.json.JsonPrimitive
 import kotlinx.serialization.json.buildJsonArray
 import kotlinx.serialization.json.buildJsonObject
 import kotlinx.serialization.json.contentOrNull
-import kotlinx.serialization.json.jsonPrimitive
 import kotlinx.serialization.json.longOrNull
 
 /**

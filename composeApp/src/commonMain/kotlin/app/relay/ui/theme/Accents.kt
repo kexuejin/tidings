@@ -30,8 +30,8 @@ import androidx.compose.ui.graphics.Color
  *   计数徽标 / 搜索清除圆钮 / 图标砖 / 3px 进度轨，全稿 12 处没有一处是描边），与做描边的
  *   `--hair` 是两个 token，历史上被当成同一个用错。M3 没有可借的槽：语义最近的
  *   `surfaceContainerHighest` 已经被桌面外壳的「第三级容器」占用
- *   （`DesktopChrome.kt:643`、`DesktopConversationWidgets.kt:96`、`DesktopComposer.kt:423`、
- *   `DesktopStatusBar.kt:187`），改它会连带挪走那些面的底色。
+ *   （`DesktopChrome`、`DesktopConversationWidgets`、`DesktopComposer`、
+ *   `DesktopStatusBar`），改它会连带挪走那些面的底色。
  * - 排队色 → 原型的 `--queued-c` / `--on-queued-c` 恰好就是 Material 的
  *   `secondaryContainer` / `onSecondaryContainer`（浅 `#F5E6D3`/`#5C3D1E`，深 `#5C3D1E`/`#F5E6D3`），
  *   所以从 `colorScheme` 取即可。剩下的黄底 `--queued`（浅 `#E9C46A` / 深 `#E3B75A`）**不对应**

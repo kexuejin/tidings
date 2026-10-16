@@ -17,7 +17,6 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
-import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.selection.SelectionContainer
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.MaterialTheme
@@ -37,6 +36,9 @@ import app.relay.generated.resources.agent_thought_process_elapsed
 import app.relay.generated.resources.agent_thought_thinking
 import org.jetbrains.compose.resources.stringResource
 
+import androidx.compose.foundation.shape.CircleShape
+import app.relay.ui.theme.LocalAppSpacing
+
 /**
  * 思考流与推理交互折叠组件（Goal 2）。
  *
@@ -55,6 +57,7 @@ fun ThinkingBlock(
 ) {
     if (reasoning.isBlank() && !isStreaming) return
 
+    val sp = LocalAppSpacing.current
     var expanded by remember { mutableStateOf(initialExpanded) }
 
     val elapsedText = if (elapsedMs != null && elapsedMs > 0L) {
@@ -72,16 +75,16 @@ fun ThinkingBlock(
     Column(modifier = modifier.fillMaxWidth()) {
         Row(
             verticalAlignment = Alignment.CenterVertically,
-            horizontalArrangement = Arrangement.spacedBy(6.dp),
+            horizontalArrangement = Arrangement.spacedBy(sp.xs),
             modifier = Modifier
-                .clip(RoundedCornerShape(8.dp))
+                .clip(MaterialTheme.shapes.small)
                 .clickable { expanded = !expanded }
-                .padding(vertical = 4.dp, horizontal = 6.dp),
+                .padding(vertical = sp.xs, horizontal = sp.sm),
         ) {
             if (isStreaming) {
                 CircularProgressIndicator(
-                    modifier = Modifier.size(12.dp),
-                    strokeWidth = 1.5.dp,
+                    modifier = Modifier.size(ThinkingIndicatorSize),
+                    strokeWidth = ThinkingIndicatorStroke,
                     color = MaterialTheme.colorScheme.primary,
                 )
             } else {
@@ -106,15 +109,15 @@ fun ThinkingBlock(
             Row(
                 modifier = Modifier
                     .fillMaxWidth()
-                    .padding(start = 8.dp, top = 2.dp, bottom = 4.dp),
+                    .padding(start = sp.sm, top = sp.xxs, bottom = sp.xs),
             ) {
                 // 左侧纵向引用指示线
                 Box(
                     modifier = Modifier
-                        .width(2.dp)
+                        .width(ThinkingGuidelineWidth)
                         .background(
                             color = MaterialTheme.colorScheme.outlineVariant,
-                            shape = RoundedCornerShape(1.dp),
+                            shape = CircleShape,
                         ),
                 )
                 SelectionContainer {
@@ -122,7 +125,7 @@ fun ThinkingBlock(
                         text = reasoning,
                         style = MaterialTheme.typography.bodySmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
-                        modifier = Modifier.padding(start = 8.dp),
+                        modifier = Modifier.padding(start = sp.sm),
                     )
                 }
             }
@@ -139,3 +142,7 @@ internal fun formatElapsedSeconds(elapsedMs: Long): String {
     val frac = sec10 % 10L
     return if (frac == 0L) "${whole}s" else "$whole.${frac}s"
 }
+
+private val ThinkingIndicatorSize = 12.dp
+private val ThinkingIndicatorStroke = 1.5.dp
+private val ThinkingGuidelineWidth = 2.dp

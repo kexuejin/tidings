@@ -324,12 +324,7 @@ data class RelayUiState(
         if (peerId == null) emptyList() else agentWorkspaces.values
             .filter {
                 it.peerId == peerId && (agentKey == null || it.agentKey == agentKey) &&
-                    !it.wsId.startsWith("ws-probe-") && !it.wsId.startsWith("ws-plugin-") &&
-                    !it.wsId.startsWith("ws-tool-") && !it.wsId.startsWith("ws-verify-") &&
-                    !it.wsId.startsWith("ws-port-") && !it.wsId.startsWith("ws-deliver-") &&
-                    !it.wsId.startsWith("ws-full-") && !it.wsTitle.orEmpty().contains("探针") &&
-                    !it.wsTitle.orEmpty().contains("测试") && !it.wsTitle.orEmpty().contains("复现") &&
-                    !it.wsTitle.orEmpty().contains("核对")
+                    !isSyntheticWsId(it.wsId)
             }
             // 顺序 = DSH 注册表的持久序（用户能手工拖），**不是**"最近活动"——
             // 这是"跟 DSH 显示的不一样"的真因（真机反馈）。对端没报 order 的那些

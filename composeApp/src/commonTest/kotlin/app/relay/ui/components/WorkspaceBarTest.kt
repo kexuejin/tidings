@@ -2,7 +2,6 @@
 package app.relay.ui.components
 
 import app.relay.app.model.AgentSessionUi
-import app.relay.app.model.WorkspaceUi
 import app.relay.core.protocol.AgentSessionPayload
 import app.relay.core.protocol.Codec
 import kotlinx.serialization.json.Json

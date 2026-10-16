@@ -6,7 +6,6 @@ import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
-import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
@@ -38,7 +37,7 @@ fun GroupProgressBar(
 
     Surface(
         color = MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.6f),
-        shape = RoundedCornerShape(8.dp),
+        shape = MaterialTheme.shapes.small,
         modifier = modifier.fillMaxWidth(),
     ) {
         Row(
@@ -49,8 +48,8 @@ fun GroupProgressBar(
             horizontalArrangement = Arrangement.spacedBy(spacing.sm),
         ) {
             CircularProgressIndicator(
-                strokeWidth = 2.dp,
-                modifier = Modifier.size(14.dp),
+                strokeWidth = ProgressIndicatorStroke,
+                modifier = Modifier.size(ProgressIndicatorSize),
                 color = MaterialTheme.colorScheme.primary,
             )
             Text(
@@ -65,3 +64,6 @@ fun GroupProgressBar(
         }
     }
 }
+
+private val ProgressIndicatorStroke = 2.dp
+private val ProgressIndicatorSize = 14.dp

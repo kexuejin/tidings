@@ -360,13 +360,7 @@ public fun RelayUiState.inboxWorkspaceUnits(
         // 它们是**并集的另一半** —— 「工作区已存在、但还没有任何会话」这一档只有这帧能表达，
         // 光从会话派生就会让那种工作区整行消失（父稿 §2.2 的立论）。
         val declared = agentWorkspaces.values.filter {
-            it.peerId == node.nodeId &&
-                !it.wsId.startsWith("ws-probe-") && !it.wsId.startsWith("ws-plugin-") &&
-                !it.wsId.startsWith("ws-tool-") && !it.wsId.startsWith("ws-verify-") &&
-                !it.wsId.startsWith("ws-port-") && !it.wsId.startsWith("ws-deliver-") &&
-                !it.wsId.startsWith("ws-full-") && !it.wsTitle.orEmpty().contains("探针") &&
-                !it.wsTitle.orEmpty().contains("测试") && !it.wsTitle.orEmpty().contains("复现") &&
-                !it.wsTitle.orEmpty().contains("核对")
+            it.peerId == node.nodeId && !isSyntheticWsId(it.wsId)
         }
 
         // 行的分组键 = `(agentId ?? agentKind, wsId)`（父稿 §1 的四层模型）。
@@ -377,12 +371,7 @@ public fun RelayUiState.inboxWorkspaceUnits(
         val unitKeys = LinkedHashSet<WorkspaceRowKey>()
         nodeSessions.forEach { (_, s) ->
             val wsId = normalizeWsId(s.wsId)
-            val title = s.wsTitle.orEmpty()
-            if (wsId != null && (wsId.startsWith("ws-probe-") || wsId.startsWith("ws-plugin-") ||
-                    wsId.startsWith("ws-tool-") || wsId.startsWith("ws-verify-") ||
-                    wsId.startsWith("ws-port-") || wsId.startsWith("ws-deliver-") ||
-                    wsId.startsWith("ws-full-") || title.contains("探针") ||
-                    title.contains("测试") || title.contains("复现") || title.contains("核对"))) {
+            if (isSyntheticWsId(wsId)) {
                 return@forEach
             }
             unitKeys += WorkspaceRowKey(
@@ -633,4 +622,12 @@ public fun isStaleBusy(
 ): Boolean {
     if (lastActivityAt <= 0L || now <= 0L) return false
     return (now - lastActivityAt) > timeoutMs
+}
+
+public fun isSyntheticWsId(wsId: String?): Boolean {
+    if (wsId == null) return false
+    return wsId.startsWith("ws-probe-") || wsId.startsWith("ws-plugin-") ||
+        wsId.startsWith("ws-tool-") || wsId.startsWith("ws-verify-") ||
+        wsId.startsWith("ws-port-") || wsId.startsWith("ws-deliver-") ||
+        wsId.startsWith("ws-full-")
 }

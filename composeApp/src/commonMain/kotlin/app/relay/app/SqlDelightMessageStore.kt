@@ -458,14 +458,7 @@ class SqlDelightAgentStore(
     override fun loadWorkspaces(): Map<WorkspaceKey, WorkspaceUi> {
         runCatching { queries.deleteProbeWorkspaces() }
         return queries.selectAllAgentWorkspaces().executeAsList()
-            .filterNot { row ->
-                val id = row.ws_id
-                val title = row.ws_title.orEmpty()
-                id.startsWith("ws-probe-") || id.startsWith("ws-plugin-") || id.startsWith("ws-tool-") ||
-                    id.startsWith("ws-verify-") || id.startsWith("ws-port-") || id.startsWith("ws-deliver-") ||
-                    id.startsWith("ws-full-") || title.contains("探针") || title.contains("测试") ||
-                    title.contains("复现") || title.contains("核对")
-            }
+            .filterNot { row -> isSyntheticWsId(row.ws_id) }
             .associate { row ->
                 WorkspaceKey(
                     peerId = row.node_id,

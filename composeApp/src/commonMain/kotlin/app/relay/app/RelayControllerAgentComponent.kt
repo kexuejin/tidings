@@ -150,11 +150,7 @@ fun handleOnAgentSession(envelope: Envelope) {
 fun handleOnAgentWorkspace(envelope: Envelope) {
     val payload = envelope.payload as? JsonObject ?: return
     val rawWsId = stringField(payload, "wsId")?.takeIf { it.isNotBlank() } ?: return
-    val rawWsTitle = stringField(payload, "wsTitle").orEmpty()
-    if (rawWsId.startsWith("ws-probe-") || rawWsId.startsWith("ws-plugin-") || rawWsId.startsWith("ws-tool-") ||
-        rawWsId.startsWith("ws-verify-") || rawWsId.startsWith("ws-port-") || rawWsId.startsWith("ws-deliver-") ||
-        rawWsId.startsWith("ws-full-") || rawWsTitle.contains("探针") || rawWsTitle.contains("测试") ||
-        rawWsTitle.contains("复现") || rawWsTitle.contains("核对")) {
+    if (isSyntheticWsId(rawWsId)) {
         return
     }
     val at = nowMillis()
