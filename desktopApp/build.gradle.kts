@@ -168,6 +168,7 @@ compose.desktop {
             }
             windows {
                 menuGroup = "Tidings"
+                upgradeUuid = "5B72605E-B68C-4B9F-835A-3453D83D4822"
                 fileAssociation(
                     mimeType = RELAY_MIME,
                     extension = MESSAGE_EXTENSION,

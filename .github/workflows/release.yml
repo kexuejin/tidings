@@ -111,10 +111,27 @@ jobs:
 
       - uses: gradle/actions/setup-gradle@v4
 
+      - name: Add WiX Toolset to PATH
+        shell: pwsh
+        run: |
+          $wixPath = (Get-ChildItem "C:\Program Files (x86)\WiX Toolset v*" -ErrorAction SilentlyContinue | Select-Object -First 1).FullName
+          if ($wixPath) {
+            Write-Host "Found WiX at $wixPath\bin"
+            echo "$wixPath\bin" >> $env:GITHUB_PATH
+          } else {
+            Write-Host "WiX Toolset directory not found in Program Files (x86)"
+          }
+
       - name: Package Windows MSI
         shell: bash
         run: |
-          ./gradlew :desktopApp:packageMsi --no-build-cache
+          ./gradlew :desktopApp:packageMsi --no-build-cache -Pcompose.desktop.verbose=true --stacktrace
+
+      - name: Dump jpackage logs on failure
+        if: failure()
+        shell: bash
+        run: |
+          find desktopApp/build/compose/logs -type f -name "*.txt" -exec cat {} + || true
 
       - name: Stage Windows MSI
         shell: bash
