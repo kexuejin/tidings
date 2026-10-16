@@ -1,12 +1,12 @@
 # 捎话 (Tidings)
 
 <p align="center">
-  <img src="design/preview/ui-overview.png" alt="Tidings Overview" width="720"/>
+  <b>Local-First 去中心化端对点传讯与私有 Agent 协同底座（近场 LAN + 远场 IPv6 双模）</b><br>
+  无需公网服务端 · 端到端公钥指纹锁定 · 突破物理局域网 · 数据主权完全归属私有设备 · 跨平台 (Android / iOS / macOS / Linux / Windows)
 </p>
 
 <p align="center">
-  <b>Local-First 去中心化端对点传讯与私有 Agent 协同底座（近场 LAN + 远场 IPv6 双模）</b><br>
-  无需公网服务端 · 端到端公钥指纹锁定 · 突破物理局域网 · 数据主权完全归属私有设备 · 跨平台 (Android / iOS / macOS / Linux / Windows)
+  <a href="README.md"><b>简体中文</b></a> | <a href="README_EN.md"><b>English</b></a>
 </p>
 
 <p align="center">
