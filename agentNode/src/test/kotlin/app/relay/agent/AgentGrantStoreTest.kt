@@ -29,9 +29,12 @@ class AgentGrantStoreTest {
     }
 
     @Test
-    fun autoAllowsEverythingWhileOtherPoliciesDefaultDeny() {
+    fun requestPolicyDefaultsDenyWhileAutoAllowsEverything() {
         val store = AgentGrantStore(file)
-        assertEquals("auto", store.snapshot().policy, "出厂档 = 今天的零门控行为（零迁移）")
+        assertEquals("request", store.snapshot().policy, "出厂档默认闭合（request 申请制）")
+        assertFalse(store.allows("any-node", "dsh-cli"), "request 档缺省拒绝，需申请授权")
+
+        assertTrue(store.setPolicy("auto"))
         assertTrue(store.allows("any-node", "dsh-cli"), "auto 档任何设备可见")
 
         assertTrue(store.setPolicy("byDevice"))
@@ -110,14 +113,59 @@ class AgentGrantStoreTest {
     }
 
     @Test
-    fun aMissingFileIsFirstRunAndStaysAuto() {
-        // 区分「文件不存在」与「文件坏了」的第一半：**首次运行**没有台账是正常的，
-        // 出厂档 auto（今天的零门控行为，零迁移），且不该报 loadError。
+    fun aMissingFileIsFirstRunAndStaysRequest() {
+        // 区分「文件不存在」与「文件坏了」的第一半：首次运行没有台账是正常的，
+        // 出厂档 request（默认闭合，需设备申请），且不该报 loadError。
         assertFalse(file.exists())
         val fresh = AgentGrantStore(file)
-        assertEquals("auto", fresh.snapshot().policy, "文件不存在 = 首次运行，出厂档 auto")
+        assertEquals("request", fresh.snapshot().policy, "文件不存在 = 首次运行，出厂档 request")
         assertEquals(null, fresh.snapshot().loadError, "首次运行不是错误，不许报 loadError")
-        assertTrue(fresh.allows("any-node", "dsh-cli"))
+        assertFalse(fresh.allows("any-node", "dsh-cli"), "request 档缺省拒绝，需申请授权")
+    }
+
+    @Test
+    fun workspaceScopeAndAccessControlTested() {
+        val store = AgentGrantStore(file)
+        store.setPolicy("byDevice")
+
+        // 授予只读工作区权限
+        store.grant(
+            nodeId = "phone-1",
+            scope = "workspace",
+            agentKey = "dsh-cli",
+            wsId = "ws-relay",
+            access = "ro",
+            grantedBy = "admin",
+            at = 100L,
+        )
+
+        // 读权限检查
+        assertTrue(store.allows("phone-1", "dsh-cli", "ws-relay", requireRw = false), "同工作区只读放行")
+        assertFalse(store.allows("phone-1", "dsh-cli", "ws-other", requireRw = false), "不同工作区不放行")
+        assertFalse(store.allows("phone-1", "codex", "ws-relay", requireRw = false), "不同 agent 不放行")
+        assertFalse(store.allows("phone-2", "dsh-cli", "ws-relay", requireRw = false), "不同设备不放行")
+
+        // 写权限检查（ro 必须被拒绝）
+        assertFalse(store.allows("phone-1", "dsh-cli", "ws-relay", requireRw = true), "ro 权限在 requireRw 时必须拒绝")
+
+        // 升级为 rw 权限
+        store.grant(
+            nodeId = "phone-1",
+            scope = "workspace",
+            agentKey = "dsh-cli",
+            wsId = "ws-relay",
+            access = "rw",
+            grantedBy = "admin",
+            at = 200L,
+        )
+        assertTrue(store.allows("phone-1", "dsh-cli", "ws-relay", requireRw = true), "rw 权限在 requireRw 时放行")
+
+        // 测试跨重启保留 wsId 和 access
+        val reopened = AgentGrantStore(file)
+        assertTrue(reopened.allows("phone-1", "dsh-cli", "ws-relay", requireRw = true))
+        val grant = reopened.snapshot().grants.first { it.nodeId == "phone-1" && it.scope == "workspace" }
+        assertEquals("ws-relay", grant.wsId)
+        assertEquals("rw", grant.access)
     }
 
     @Test
@@ -217,6 +265,41 @@ class AgentGrantStoreTest {
         assertEquals(500, snap.grants.size, "装载后必须有界")
         assertTrue(snap.grants.any { it.nodeId == "p1199" }, "留下的必须是最新的那批")
         assertFalse(snap.grants.any { it.nodeId == "p0" }, "最旧的必须被丢掉（淘汰方向是收紧，不是放行）")
+    }
+
+    @Test
+    fun roleHierarchyAndDelegatedApprovalPermissions() {
+        val store = AgentGrantStore(file)
+        store.setPolicy("byDevice")
+
+        // 1. ro (旁观者)
+        store.grant("observer-node", "workspace", "codex", wsId = "ws-1", access = "ro", grantedBy = "host", at = 1L)
+        assertTrue(store.allows("observer-node", "codex", "ws-1", requireRw = false), "ro 可读")
+        assertFalse(store.allows("observer-node", "codex", "ws-1", requireRw = true), "ro 拒绝写入/发指令")
+        assertFalse(store.allows("observer-node", "codex", "ws-1", requireApproval = true), "ro 拒绝审批")
+
+        // 2. rw (普通协作者)
+        store.grant("collab-node", "workspace", "codex", wsId = "ws-1", access = "rw", grantedBy = "host", at = 2L)
+        assertTrue(store.allows("collab-node", "codex", "ws-1", requireRw = true), "rw 允许下发指令")
+        assertFalse(store.allows("collab-node", "codex", "ws-1", requireApproval = true), "rw 无权代批终端执行")
+
+        // 3. admin (管理员但未开启委托代批)
+        store.grant("admin-node", "workspace", "codex", wsId = "ws-1", access = "admin", isMyDevice = false, delegatedApproval = false, grantedBy = "host", at = 3L)
+        assertTrue(store.allows("admin-node", "codex", "ws-1", requireRw = true), "admin 允许下发指令")
+        assertFalse(store.allows("admin-node", "codex", "ws-1", requireApproval = true), "未开启委托审批时 admin 不可代批")
+
+        // 4. admin (开启委托代批)
+        store.grant("admin-delegated", "workspace", "codex", wsId = "ws-1", access = "admin", isMyDevice = false, delegatedApproval = true, grantedBy = "host", at = 4L)
+        assertTrue(store.allows("admin-delegated", "codex", "ws-1", requireApproval = true), "开启委托审批的 admin 允许代批")
+
+        // 5. myDevice (我的设备，私有信任圈)
+        store.grant("my-phone", "workspace", "codex", wsId = "ws-1", access = "rw", isMyDevice = true, delegatedApproval = false, grantedBy = "host", at = 5L)
+        assertTrue(store.allows("my-phone", "codex", "ws-1", requireApproval = true), "我的设备允许远程代批")
+
+        // 重启后验证盘上数据留存
+        val reopened = AgentGrantStore(file)
+        assertTrue(reopened.allows("admin-delegated", "codex", "ws-1", requireApproval = true), "委托审批配置跨重启持久化")
+        assertTrue(reopened.allows("my-phone", "codex", "ws-1", requireApproval = true), "我的设备配置跨重启持久化")
     }
 
     @Test

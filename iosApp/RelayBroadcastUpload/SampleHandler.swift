@@ -49,11 +49,12 @@ class SampleHandler: RPBroadcastSampleHandler {
               let pixelBuffer = CMSampleBufferGetImageBuffer(sampleBuffer)
         else { return }
         // 只取当前最新帧：排队积压会让画面越来越旧，宁可丢拍不可延迟。
-        // CVPixelBuffer 的引用要在这里就 retain 住（sampleBuffer 出了回调就失效）。
-        CVPixelBufferRetain(pixelBuffer)
+        //
+        // 这里**不要**手写 CVPixelBufferRetain/Release：Swift 里 Core Foundation 对象是自动
+        // 内存管理的（那两个函数在 Swift 里已被标为 unavailable），而闭包**捕获** pixelBuffer
+        // 本身就会把它 retain 到闭包结束 —— 手写反而编译不过。
         queue.async { [weak self] in
-            guard let self = self else { CVPixelBufferRelease(pixelBuffer); return }
-            defer { CVPixelBufferRelease(pixelBuffer) }
+            guard let self = self else { return }
             guard let jpeg = self.encode(pixelBuffer) else { return }
             self.writeAtomically(jpeg)
         }
@@ -68,7 +69,9 @@ class SampleHandler: RPBroadcastSampleHandler {
         let scale = min(1.0, Double(maxEdge) / Double(max(w, h)))
         let target = CIImage(cvPixelBuffer: buffer)
             .transformed(by: CGAffineTransform(scaleX: CGFloat(scale), y: CGFloat(scale)))
-        let ctx = CIContext(options: [.cacheInterpretation: false])
+        // CIContextOption 里没有 cacheInterpretation（那是老 API 的写法），
+        // 与它同义的是 cacheIntermediates = false。
+        let ctx = CIContext(options: [.cacheIntermediates: false])
         guard var data = ctx.jpegRepresentation(of: target,
                                                 colorSpace: CGColorSpaceCreateDeviceRGB(),
                                                 options: [kCGImageDestinationLossyCompressionQuality as CIImageRepresentationOption: 0.7])

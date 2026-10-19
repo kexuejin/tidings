@@ -2,8 +2,10 @@
 
 package app.relay.agent
 
+import app.relay.core.protocol.AgentGrantAccess
 import app.relay.core.protocol.AgentGrantPolicies
 import app.relay.core.protocol.AgentGrantScopes
+import app.relay.core.protocol.AgentEventAttachment
 import app.relay.core.protocol.AgentGrantStates
 import app.relay.core.protocol.AgentSessionStates
 import app.relay.core.protocol.Codec
@@ -35,10 +37,46 @@ import kotlinx.serialization.json.jsonPrimitive
 import kotlinx.serialization.json.longOrNull
 import kotlinx.serialization.json.put
 import kotlinx.serialization.json.putJsonArray
+import kotlinx.serialization.json.putJsonObject
 import java.io.File
 import java.net.InetSocketAddress
 import java.net.URLDecoder
 import java.util.concurrent.Executors
+
+/**
+ * 一次授权决定回给设备（agent-grant 帧）的结局。
+ *
+ * 存在的理由：**发帧这件事有两个调用方** —— 控制面的 PUT /v1/agent/grants，以及桌面端
+ * 「授信设备」面板上人按的按钮。面板此前只能写本机台账（AgentGrantStore），发帧的逻辑
+ * 埋在 HTTP 处理器里，界面够不到 ⇒ 用户点完手机看不到。把实现抽到
+ * [ControlPlane.sendGrantReply] 之后两处共用一份，而这个类型就是那份实现的返回值。
+ *
+ * 三个分支必须分开，因为它们对用户说的话完全不同：
+ *  - [Sent]：帧发出去了（对端 ACK）；
+ *  - [Unsupported]：对端没声明 agr1 —— **没发**。台账照写（那是本机事实），但界面不许说"已发送"；
+ *  - [Failed]：发失败（传输异常）。同样只写台账，不假装成功。
+ */
+sealed interface GrantReplyOutcome {
+    val nodeId: String
+
+    /** 一句如实的回执（HTTP 的 notes 直接用它，面板也按它区分成败）。 */
+    val note: String
+
+    data class Sent(override val nodeId: String) : GrantReplyOutcome {
+        override val note: String get() = "grantReply sent -> " + nodeId
+    }
+
+    data class Unsupported(override val nodeId: String, val cap: String) : GrantReplyOutcome {
+        override val note: String
+            get() = "grantReply 未发送：对方未声明 " + cap +
+                "（不认识 grant 帧）。台账已写，对方升级后再申请会拿到当前清单"
+    }
+
+    data class Failed(override val nodeId: String, val reason: String) : GrantReplyOutcome {
+        override val note: String
+            get() = "grantReply failed: " + reason + "（台账已写，对方下次申请会拿到当前清单）"
+    }
+}
 
 /**
  * agentNode 的 localhost HTTP 控制面。
@@ -117,7 +155,17 @@ class ControlPlane(
     fun start() {
         if (server != null) return
         val s = HttpServer.create(InetSocketAddress(LOOPBACK, httpPort), 16)
-        s.executor = Executors.newFixedThreadPool(4)
+        // **读路由必须永远有空线程**（task-35 真机）。
+        //
+        // 现场：手机切到移动网后，本机 127.0.0.1:8788 连续 5 次 HTTP 000、每次卡满 8.00s，
+        // 切回 WiFi 立刻恢复。8.00s 正是"给一个不可达对端发消息"的完整退避（UDP 1+2+4 秒 +
+        // TCP 兜底），而这些写路由的处理器是 `runBlocking { … }` —— 一个线程被按住整整 8 秒。
+        // 池子原来只有 4 条，几条这样的请求就能把 **/v1/peers** 一起饿死，而那正是观测跨网
+        // 状态、判断"长连接有没有建起来"的唯一手段（"暂不可读"就是这么来的）。
+        //
+        // 这里给 16 条：并发阻塞写最多几条，读路由仍然拿得到线程。回归测试见
+        // ControlPlaneTest.peersStaysFastEvenWhenBlockingSendsFillTheHandlerPool。
+        s.executor = Executors.newFixedThreadPool(HANDLER_THREADS)
         s.createContext("/") { exchange -> handle(exchange) }
         s.start()
         server = s
@@ -156,14 +204,19 @@ class ControlPlane(
                     runCatching {
                         val mine = snap.grants.filter { it.nodeId == envelope.from }
                         if (mine.isEmpty()) {
-                            runtime.sendAgentGrantList(envelope.from, AgentGrantScopes.ALL, null, 0)
+                            runtime.sendAgentGrantList(envelope.from, AgentGrantScopes.ALL, null, null, null, 0)
                         } else {
                             mine.forEach { g ->
                                 runtime.sendAgentGrantList(
                                     // total 是**给这台设备看的**清单长度（对方据此显示「共 N 条」）。
                                     // 传整份台账的 size 会把别台设备的授权算进来 ——
                                     // 同胞 /v1/agent/sessions 的 total 用的就是本设备的行数。
-                                    envelope.from, g.scope, g.agentKey, mine.size.toLong(),
+                                    peerId = envelope.from,
+                                    scope = g.scope,
+                                    agentKey = g.agentKey,
+                                    wsId = g.wsId,
+                                    access = g.access,
+                                    total = mine.size.toLong(),
                                 )
                             }
                         }
@@ -189,6 +242,7 @@ class ControlPlane(
                 path == "/v1/peers" && method == "GET" -> respond(exchange, 200, peersJson())
                 path == "/v1/send" && method == "POST" -> send(exchange)
                 path == "/v1/send-file" && method == "POST" -> sendFile(exchange)
+                path == "/v1/transfers" && method == "GET" -> transfers(exchange)
                 path == "/v1/nudge" && method == "POST" -> nudge(exchange)
                 path == "/v1/agent/session" && method == "POST" -> agentSession(exchange)
                 path == "/v1/agent/event" && method == "POST" -> agentEvent(exchange)
@@ -201,8 +255,8 @@ class ControlPlane(
                 path == "/v1/agent/sessions" && method == "GET" -> agentSessions(exchange)
                 path == "/v1/agent/workspace" && method == "POST" -> agentWorkspace(exchange)
                 path == "/v1/agent/workspaces" && method == "GET" -> agentWorkspaces(exchange)
-                // 宿主读待答的会话分页请求，答完再销掉（PPE-1 增补 D8）。
                 path == "/v1/agent/session-pages" && method == "GET" -> agentSessionPages(exchange)
+                path == "/v1/agent/session-pages" && method == "POST" -> createAgentSessionPage(exchange)
                 path == "/v1/agent/session-pages/resolve" && method == "POST" -> resolveAgentSessionPage(exchange)
                 path == "/v1/agent/grants" && method == "GET" -> readGrants(exchange)
                 path == "/v1/agent/grants" && method == "PUT" -> writeGrants(exchange)
@@ -270,6 +324,9 @@ class ControlPlane(
                 put("status", if (outcome == SendOutcome.SENT) "sent" else "queued")
                 put("to", nodeId)
                 put("toHost", to)
+                // task-62：把「为什么没送到」一起交出去（逐端点等了多久、有没有回退 TCP、
+                // 长连接当时通不通）—— 以前只有一句 queued，看不出卡在哪。
+                runtime.lastReliableSendDiagnostics()?.let { put("lastSend", it.summary()) }
                 put(
                     "note",
                     if (outcome == SendOutcome.SENT) {
@@ -429,9 +486,12 @@ class ControlPlane(
             return
         }
 
+        // task-62：**登记即返回**。原来这里调 offerFiles —— 它会逐片等 ACK（对端不可达时走完整
+        // 退避 + TCP 兜底，几十秒），于是这条路由在请求线程上阻塞到调用方超时。现在只做「登记」
+        // （不碰网络），投递在后台；结果从 GET /v1/transfers 与事件流读。
         val transferId = try {
             runBlocking {
-                runtime.offerFiles(
+                runtime.offerFilesAsync(
                     nodeId,
                     listOf(LocalFile(normalized, name, file.length())),
                     purpose,
@@ -459,17 +519,84 @@ class ControlPlane(
             exchange,
             200,
             buildJsonObject {
-                put("status", "offered")
+                // offering 而不是 offered：此刻只保证**已登记**，清单有没有送到对端由后台投递决定。
+                // 如实区分这两个词，是 async 之后不许再说谎的那一半。
+                put("status", "offering")
                 put("to", nodeId)
                 put("toHost", to)
                 put("transferId", transferId)
                 put("name", name)
                 put("size", file.length())
-                put("note", "只是报价：对方接受后才开始传，进度与结果在对方界面上")
+                put("note", "已登记，投递在后台；GET /v1/transfers 读投递状态（offered/ack-timeout）")
             },
         )
     }
 
+
+    /**
+     * `GET /v1/transfers` —— 报价的**投递状态**（只读，task-62）。
+     *
+     * 为什么必须有它：`/v1/send-file` 改成「登记即返回 offering」之后，「发出去没有」不能再靠
+     * 那次响应回答 —— 没有这个出口，async 就等于把「发不出去」变成「看起来发出去了」。
+     *
+     * 每条给：状态（offering / offered / ack-timeout）、投递耗时、对端有没有来拉（accepted）、
+     * 失败原因；再附一条**最近一次可靠投递的逐端点诊断**（哪个端点 no-ack、各花多久、有没有
+     * 回退 TCP、长连接通不通）—— 与 `link*` 同口径。
+     */
+    private fun transfers(exchange: HttpExchange) {
+        val deliveries = runBlocking { runtime.offerDeliveries() }
+        val last = runtime.lastReliableSendDiagnostics()
+        respond(
+            exchange,
+            200,
+            buildJsonObject {
+                putJsonArray("transfers") {
+                    deliveries.forEach { d ->
+                        addJsonObject {
+                            put("transferId", d.transferId)
+                            put("peerId", d.peerId)
+                            put("rootName", d.rootName)
+                            put("totalSize", d.totalSize)
+                            put("state", d.state)
+                            put("elapsedMs", d.elapsedMs)
+                            put("attempts", d.attempts)
+                            put("accepted", d.accepted)
+                            d.detail?.let { put("detail", it) }
+                            // 这一条**自己**的逐端点诊断（与全局 lastSend 区分：全局那个会被
+                            // 随后的成功投递覆盖 —— 真机上失败那两次就是这样被盖掉的）。
+                            d.lastSendSummary?.let { put("lastSend", it) }
+                            // task-65：**首次**尝试的诊断单独一个键（不合成）—— 否则「首次成功率」
+                            // 这个数看不出可行动的方向（首次是链路超时？还是 UDP 无应答？）。
+                            d.firstAttemptSummary?.let { put("firstAttempt", it) }
+                        }
+                    }
+                }
+                last?.let { diag ->
+                    putJsonObject("lastSend") {
+                        put("peerId", diag.peerId)
+                        put("outcome", diag.outcome)
+                        put("elapsedMs", diag.elapsedMs)
+                        put("linkConnected", diag.linkConnected)
+                        put("peerOnline", diag.peerOnline)
+                        put("tcpTried", diag.tcpTried)
+                        put("tcpOk", diag.tcpOk)
+                        put("tcpElapsedMs", diag.tcpElapsedMs)
+                        put("summary", diag.summary())
+                        putJsonArray("endpoints") {
+                            diag.endpoints.forEach { e ->
+                                addJsonObject {
+                                    put("host", e.host)
+                                    put("port", e.port)
+                                    put("acked", e.acked)
+                                    put("elapsedMs", e.elapsedMs)
+                                }
+                            }
+                        }
+                    }
+                }
+            },
+        )
+    }
     /**
      * 把 `to` 解析成 nodeId，失败时**自己回包**并返回 null。
      *
@@ -653,7 +780,7 @@ class ControlPlane(
             return
         }
         // cap 门控（aws1）已由 resolveAgentTarget 按帧类型查过（没声明 ⇒ 409 提前拒绝）。
-        val acked = try {
+        val acked = if (nodeId == runtime.nodeId) true else try {
             runBlocking {
                 runtime.sendAgentWorkspace(
                     nodeId, wsId, wsTitle, wsPath, agentId, agentKind, online, sessionCount, at, order,
@@ -672,6 +799,9 @@ class ControlPlane(
             agentKind = agentKind,
             online = online,
             sessionCount = sessionCount,
+            // 上面刚按 codec 校验过的 order 必须进台账：只发给对端、本机不记，
+            // 面板的「本宿主工作区」就永远排不出宿主自己的顺序（真机 15/15 NULL）。
+            order = order,
             outbound = true,
             at = at ?: System.currentTimeMillis(),
         )
@@ -771,6 +901,42 @@ class ControlPlane(
         )
     }
 
+    /** 写入一条会话分页请求（本地桌面端或外部发起的拉取会话请求）。 */
+    private fun createAgentSessionPage(exchange: HttpExchange) {
+        val obj = readJsonObject(exchange) ?: return
+        val wsId = obj["wsId"]?.jsonPrimitive?.contentOrNull?.trim().orEmpty()
+        if (wsId.isEmpty()) {
+            respond(exchange, 400, errorJson("bad-request", "缺少 wsId"))
+            return
+        }
+        val nodeId = obj["nodeId"]?.jsonPrimitive?.contentOrNull?.trim().orEmpty().ifEmpty { runtime.nodeId }
+        val offset = numberOrNull(obj["offset"]) ?: 0L
+        val limit = numberOrNull(obj["limit"])
+        sessionPages.record(
+            nodeId = nodeId,
+            wsId = wsId,
+            offset = offset,
+            limit = limit,
+            at = System.currentTimeMillis(),
+        )
+        respond(
+            exchange,
+            200,
+            buildJsonObject {
+                put("ok", true)
+                put("status", "recorded")
+                put("nodeId", nodeId)
+                put("wsId", wsId)
+                put("offset", offset)
+            },
+        )
+    }
+
+    /** 供宿主进程在进程内直调记录会话分页请求。 */
+    fun recordSessionPage(nodeId: String, wsId: String, offset: Long, limit: Long? = null) {
+        sessionPages.record(nodeId, wsId, offset, limit, System.currentTimeMillis())
+    }
+
     /** `GET /v1/agent/grants` —— 本宿主的策略与白名单 + 待办申请（桌面端授权页读数）。 */
     private fun readGrants(exchange: HttpExchange) {
         val snap = grants.snapshot()
@@ -788,6 +954,10 @@ class ControlPlane(
                             put("nodeId", g.nodeId)
                             put("scope", g.scope)
                             put("agentKey", g.agentKey)
+                            put("wsId", g.wsId)
+                            put("access", g.access)
+                            if (g.isMyDevice) put("isMyDevice", true)
+                            if (g.delegatedApproval) put("delegatedApproval", true)
                             put("grantedAt", g.grantedAt)
                             put("grantedBy", g.grantedBy)
                         }
@@ -798,6 +968,8 @@ class ControlPlane(
                         addJsonObject {
                             put("nodeId", r.nodeId)
                             put("agentKey", r.agentKey)
+                            put("wsId", r.wsId)
+                            put("access", r.access)
                             put("reason", r.reason)
                             put("at", r.at)
                         }
@@ -808,14 +980,69 @@ class ControlPlane(
     }
 
     /**
+     * 把一个授权决定回给设备（agent-grant 帧，宿主 → 设备，cap agr1）。
+     *
+     * 两个调用方共用这一份实现：控制面 PUT /v1/agent/grants 的 grantReply 分支，
+     * 与桌面端「授信设备」面板上人按的按钮（DesktopExtension 持有本控制面实例）。
+     * 抽出来的理由就是"只留一份"：发帧要查 cap、要等 ACK、要区分"未发送"与"发失败" ——
+     * 抄第二份必然漂移，而漂移的表现正是"界面说发了、手机没收到"。
+     *
+     * 调用方**必须先写台账**（AgentGrantStore.grant / revoke / rejectRequest）：决定是本机
+     * 事实，帧发不出去也不该丢。本方法只管"把已经记下的决定告诉对端"，不碰台账。
+     *
+     * @return [GrantReplyOutcome]：Sent / Unsupported（对端没声明 agr1，**没发**）/ Failed。
+     *   绝不把"没发出去"报成成功。
+     */
+    suspend fun sendGrantReply(
+        nodeId: String,
+        state: String,
+        scope: String,
+        agentKey: String? = null,
+        wsId: String? = null,
+        access: String? = null,
+        isMyDevice: Boolean? = null,
+        delegatedApproval: Boolean? = null,
+    ): GrantReplyOutcome {
+        // 取值域是封闭的（与 codec 同判据）：拼错一个等于语义不存在。HTTP 那一侧的
+        // 400 文案更具体；这里只兜底，宁可如实报失败也不发一条对端必然拒收的帧。
+        if (state !in AgentGrantStates.ALL || scope !in AgentGrantScopes.VALUES) {
+            return GrantReplyOutcome.Failed(nodeId, "state/scope 取值非法")
+        }
+        // cap 门控（父稿 §3.3）：对端没声明 agr1 就不发。发了它也不认，而 grant 帧在
+        // RELIABLE 里 ⇒ 等不到 ACK 会把一台**在线设备标成离线**并进离线补发队列
+        // （与 agent-workspace 首版同一个坑）。
+        if (!runtime.peerDeclares(nodeId, MsgTypes.CAP_AGENT_GRANT)) {
+            return GrantReplyOutcome.Unsupported(nodeId, MsgTypes.CAP_AGENT_GRANT)
+        }
+        return try {
+            runtime.sendAgentGrant(
+                nodeId, state, scope, agentKey, wsId, access, isMyDevice, delegatedApproval,
+                System.currentTimeMillis(),
+            )
+            GrantReplyOutcome.Sent(nodeId)
+        } catch (t: Throwable) {
+            GrantReplyOutcome.Failed(nodeId, t.message ?: "发送失败")
+        }
+    }
+
+    /**
      * `PUT /v1/agent/grants` —— 写策略 / 授权 / 撤销（**写入者 = 桌面端**，父稿 §3.3）。
      *
-     * body：`{policy?, grant?:{nodeId,scope,agentKey?,grantedBy?},
-     * revoke?:{nodeId,scope,agentKey?}, grantReply?:{nodeId,state,scope,agentKey?}}`
+     * body：`{policy?, grant?:{nodeId,scope,agentKey?,wsId?,access?,grantedBy?},
+     * revoke?:{nodeId,scope,agentKey?,wsId?}, grantReply?:{nodeId,state,scope,agentKey?,wsId?,access?}}`
      *
      * `grantReply` 把决定**回给设备**（`agent-grant` 帧，宿主 → 设备）：批准 / 拒绝 / 撤销
-     * 都是"有人按了按钮"，必须让对面知道 —— 否则手机端的四档状态永远停在「已申请待批」。
+     * 都是「有人按了按钮」，必须让对面知道 —— 否则手机端的四档状态永远停在「已申请待批」。
      * 撤销只拦未来投递（边界 1），回执文案如实写。
+     *
+     * ## 这条路的 access **照抄调用方**，与面板那条**策略不同**（task-60 审查标注，别互相「修」）
+     *
+     * 面板（`TrustedDeviceDecisions.approve`）按**按钮语义封顶**（协同 ⇒ 至多 RW），因为那面对的是
+     * **对端自己写进申请里的档位**；而这条路由的调用方是本机进程（控制面绑回环，见本文件顶部的
+     * 信任说明）—— 它代表用户本人在配置自己的台账，照抄才是对的，替它「封顶」会让显式配置失效。
+     *
+     * 两处策略不同是**有意**的：对端能影响的是**申请队列**（那里必须封顶），而这里没有任何对端输入
+     * （入站帧没有写台账的分支）。将来要改任何一边之前，先读这段。
      */
     private fun writeGrants(exchange: HttpExchange) {
         val obj = readJsonObject(exchange) ?: return
@@ -838,7 +1065,7 @@ class ControlPlane(
             val nodeId = g["nodeId"]?.jsonPrimitive?.contentOrNull
             val scope = g["scope"]?.jsonPrimitive?.contentOrNull
             if (nodeId == null || scope == null || scope !in AgentGrantScopes.VALUES) {
-                respond(exchange, 400, errorJson("bad-request", "grant 需要 nodeId 与 scope（all / agent）"))
+                respond(exchange, 400, errorJson("bad-request", "grant 需要 nodeId 与 scope（all / agent / workspace）"))
                 return
             }
             val agentKey = g["agentKey"]?.jsonPrimitive?.contentOrNull
@@ -846,19 +1073,45 @@ class ControlPlane(
                 respond(exchange, 400, errorJson("bad-request", "scope=agent 时 agentKey 必填（缺了它无法归组，不许按整台设备放行）"))
                 return
             }
-            grants.grant(nodeId, scope, agentKey, g["grantedBy"]?.jsonPrimitive?.contentOrNull, System.currentTimeMillis())
+            val wsId = g["wsId"]?.jsonPrimitive?.contentOrNull
+            if (scope == AgentGrantScopes.WORKSPACE && wsId.isNullOrEmpty()) {
+                respond(exchange, 400, errorJson("bad-request", "scope=workspace 时 wsId 必填"))
+                return
+            }
+            val access = g["access"]?.jsonPrimitive?.contentOrNull ?: AgentGrantAccess.RW
+            if (access !in AgentGrantAccess.VALUES) {
+                respond(exchange, 400, errorJson("bad-request", "access 只能是 " + AgentGrantAccess.VALUES.joinToString(" / ")))
+                return
+            }
+            val isMyDevice = (g["isMyDevice"] as? JsonPrimitive)?.booleanOrNull ?: false
+            val delegatedApproval = (g["delegatedApproval"] as? JsonPrimitive)?.booleanOrNull ?: false
+            grants.grant(
+                nodeId = nodeId,
+                scope = scope,
+                agentKey = agentKey,
+                wsId = wsId,
+                access = access,
+                isMyDevice = isMyDevice,
+                delegatedApproval = delegatedApproval,
+                grantedBy = g["grantedBy"]?.jsonPrimitive?.contentOrNull,
+                at = System.currentTimeMillis(),
+            )
             changed = true
-            notes += "granted " + nodeId + "/" + scope + if (agentKey != null) "/" + agentKey else ""
+            notes += "granted " + nodeId + "/" + scope + (if (agentKey != null) "/" + agentKey else "") +
+                (if (wsId != null) "/" + wsId else "") + " [" + access + "]" +
+                (if (isMyDevice) " (myDevice)" else "") + (if (delegatedApproval) " (delegatedApproval)" else "")
         }
 
         (obj["revoke"] as? JsonObject)?.let { r ->
             val nodeId = r["nodeId"]?.jsonPrimitive?.contentOrNull
             val scope = r["scope"]?.jsonPrimitive?.contentOrNull
             if (nodeId == null || scope == null || scope !in AgentGrantScopes.VALUES) {
-                respond(exchange, 400, errorJson("bad-request", "revoke 需要 nodeId 与 scope（all / agent）"))
+                respond(exchange, 400, errorJson("bad-request", "revoke 需要 nodeId 与 scope（all / agent / workspace）"))
                 return
             }
-            val removed = grants.revoke(nodeId, scope, r["agentKey"]?.jsonPrimitive?.contentOrNull)
+            val agentKey = r["agentKey"]?.jsonPrimitive?.contentOrNull
+            val wsId = r["wsId"]?.jsonPrimitive?.contentOrNull
+            val removed = grants.revoke(nodeId, scope, agentKey, wsId)
             changed = true
             notes += "revoked " + nodeId + "/" + scope + "（移除 " + removed + " 条；只拦未来投递，已送达的数据不回收）"
         }
@@ -874,23 +1127,17 @@ class ControlPlane(
                 return
             }
             val agentKey = rp["agentKey"]?.jsonPrimitive?.contentOrNull
-            // cap 门控（父稿 §3.3）：对端没声明 agr1 就**不发**这帧。发了它也不认，
-            // 而 grant 帧在 RELIABLE 里 ⇒ 等不到 ACK 会把一台**在线设备标成离线**并
-            // 入离线补发队列（与 agent-workspace 首版同一个坑）。授权决定照样写台账 ——
-            // 那是本机事实；对方升级到认识 agr1 之后再申请时会拿到当前清单。
-            if (!runtime.peerDeclares(nodeId, MsgTypes.CAP_AGENT_GRANT)) {
-                notes += "grantReply 未发送：对方未声明 " + MsgTypes.CAP_AGENT_GRANT +
-                    "（不认识 grant 帧）。台账已写，对方升级后再申请会拿到当前清单"
-            } else {
-                try {
-                    runBlocking {
-                        runtime.sendAgentGrant(nodeId, state, scope, agentKey, System.currentTimeMillis())
-                    }
-                    notes += "grantReply sent -> " + nodeId
-                } catch (t: Throwable) {
-                    notes += "grantReply failed: " + (t.message ?: "发送失败") + "（台账已写，对方下次申请会拿到当前清单）"
-                }
+            val wsId = rp["wsId"]?.jsonPrimitive?.contentOrNull
+            val access = rp["access"]?.jsonPrimitive?.contentOrNull
+            val isMyDevice = (rp["isMyDevice"] as? JsonPrimitive)?.booleanOrNull
+            val delegatedApproval = (rp["delegatedApproval"] as? JsonPrimitive)?.booleanOrNull
+            // 发帧只有一份实现（面板与这里共用同一份）：cap 门控、等 ACK、区分
+            // "未发送"与"发失败"都在 sendGrantReply 里。notes 直接用它那句如实的回执 ——
+            // 对端没声明 agr1 时写的是"未发送"，绝不写成 sent。
+            val outcome = runBlocking {
+                sendGrantReply(nodeId, state, scope, agentKey, wsId, access, isMyDevice, delegatedApproval)
             }
+            notes += outcome.note
         }
 
         if (!changed) {
@@ -937,12 +1184,35 @@ class ControlPlane(
         val summary = obj["summary"]?.jsonPrimitive?.contentOrNull
         val body = obj["body"]?.jsonPrimitive?.contentOrNull
         val ref = obj["ref"]?.jsonPrimitive?.contentOrNull
+        // 附件元数据（task-45，cap att1）。两件事在这里做：
+        //  ① 形状检查：attachment 在、但读不出 attachmentId + mediaType（或某个可选键类型不对）
+        //     ⇒ **整条请求 400**，不静默丢掉、也不在下面把类型错误洗成 null（那是放宽）；
+        //  ② **att1 闸门（fail-closed）**：对端没声明 att1 就整条附件不带 —— 帧里连键都没有，
+        //     手机看到的仍是 body 里的文本占位。闸门必须在宿主侧：桥看不到对端 caps
+        //     （它的源码自己写着控制面读不到），而宿主知道、也正是构帧的地方。
+        // 越界（id/name 长度、宽高、bytes）不在这里拦：交给 deliverAgentFrame 的本地自检
+        // 整帧拒收并回 400 —— 一处权威（Codec），两处判迟早漂。
+        val rawAttachment = obj["attachment"]
+        val hasAttachment = rawAttachment != null && rawAttachment !is kotlinx.serialization.json.JsonNull
+        val parsedAttachment = if (hasAttachment) parseAgentEventAttachment(rawAttachment) else null
+        if (hasAttachment && parsedAttachment == null) {
+            respond(
+                exchange,
+                400,
+                errorJson(
+                    "bad-request",
+                    "attachment 形状不对：需要 attachmentId 与 mediaType 两个字符串，width/height/bytes/name 可选但类型必须匹配",
+                ),
+            )
+            return
+        }
+        val attachment = gatedAttachment(parsedAttachment, runtime.peerDeclares(nodeId, MsgTypes.CAP_ATTACHMENT))
         deliverAgentFrame(
             exchange = exchange,
             nodeId = nodeId,
             type = MsgTypes.AGENT_EVENT,
-            payload = Codec.agentEventPayload(sessionId, cursor, eventType, summary, body, ref),
-            send = { runtime.sendAgentEvent(nodeId, sessionId, cursor, eventType, summary, body, ref) },
+            payload = Codec.agentEventPayload(sessionId, cursor, eventType, summary, body, ref, attachment),
+            send = { runtime.sendAgentEvent(nodeId, sessionId, cursor, eventType, summary, body, ref, attachment) },
             onSent = {
                 sessions.recordEvent(
                     nodeId = nodeId,
@@ -967,7 +1237,7 @@ class ControlPlane(
      */
     private fun agentQueue(exchange: HttpExchange) {
         val obj = readJsonObject(exchange) ?: return
-        val nodeId = resolveAgentTarget(exchange, obj, MsgTypes.CAP_AGENT_QUEUE) ?: return
+        val nodeId = resolveAgentTarget(exchange, obj, MsgTypes.CAP_AGENT_QUEUE, requireRw = true) ?: return
         val taskId = obj["taskId"]?.jsonPrimitive?.contentOrNull.orEmpty()
         if (taskId.isEmpty()) {
             respond(exchange, 400, errorJson("bad-request", "缺少 taskId（§6.3 的必填字段）"))
@@ -1059,7 +1329,7 @@ class ControlPlane(
      */
     private fun agentApproval(exchange: HttpExchange) {
         val obj = readJsonObject(exchange) ?: return
-        val nodeId = resolveAgentTarget(exchange, obj, MsgTypes.CAP_AGENT_QUEUE) ?: return
+        val nodeId = resolveAgentTarget(exchange, obj, MsgTypes.CAP_AGENT_QUEUE, requireRw = true) ?: return
         val approvalId = obj["approvalId"]?.jsonPrimitive?.contentOrNull.orEmpty()
         if (approvalId.isEmpty()) {
             respond(exchange, 400, errorJson("bad-request", "缺少 approvalId（§6.5 的必填字段）"))
@@ -1113,7 +1383,7 @@ class ControlPlane(
      */
     private fun agentCancel(exchange: HttpExchange) {
         val obj = readJsonObject(exchange) ?: return
-        val nodeId = resolveAgentTarget(exchange, obj, MsgTypes.CAP_AGENT_QUEUE) ?: return
+        val nodeId = resolveAgentTarget(exchange, obj, MsgTypes.CAP_AGENT_QUEUE, requireRw = true) ?: return
         val sessionId = obj["sessionId"]?.jsonPrimitive?.contentOrNull.orEmpty()
         if (sessionId.isEmpty()) {
             respond(exchange, 400, errorJson("bad-request", "缺少 sessionId（§6.6 的必填字段）"))
@@ -1415,8 +1685,12 @@ class ControlPlane(
          * 帧会发出去、被 ACK、然后在对端静默消失。
          */
         requiredCap: String,
+        requireRw: Boolean = false,
     ): String? {
         val to = obj["to"]?.jsonPrimitive?.contentOrNull?.trim().orEmpty()
+        if (to == runtime.nodeId || to == "self") {
+            return runtime.nodeId
+        }
         if (to.isEmpty()) {
             respond(exchange, 400, errorJson("bad-request", "缺少 to（对方 IP 或 nodeId）"))
             return null
@@ -1470,14 +1744,20 @@ class ControlPlane(
         // 两者都没报时按"整台设备"判（scope=agent 的授权不放行无身份的帧，不猜）。
         val agentKey = obj["agentId"]?.jsonPrimitive?.contentOrNull
             ?: obj["agentKind"]?.jsonPrimitive?.contentOrNull
-        if (!grants.allows(nodeId, agentKey)) {
+        val wsId = obj["wsId"]?.jsonPrimitive?.contentOrNull
+        if (!grants.allows(nodeId, agentKey, wsId, requireRw)) {
             val snap = grants.snapshot()
+            val reason = if (requireRw) {
+                "对方（$target）对该 agent/工作区仅有只读权限（ro），无法执行写操作或下发指令。"
+            } else {
+                "对方（$target）未被授权看这台宿主的 agent（策略 ${snap.policy}）。"
+            }
             respond(
                 exchange,
                 403,
                 errorJson(
                     "not-granted",
-                    "对方（$target）未被授权看这台宿主的 agent（策略 ${snap.policy}）。" +
+                    reason +
                         // 台账读不回来时，对方看到的是"被拒"，但真实原因是"宿主自己丢了决定"。
                         // 不说这件事，人会去改一台好设备的授权，而问题在这台宿主的文件上。
                         (snap.loadError?.let { "注意：本宿主这次启动没能读回授权台账（$it），因此按最严档运行。" } ?: "") +
@@ -1521,11 +1801,15 @@ class ControlPlane(
             respond(exchange, 400, errorJson("bad-request", "这一帧我们自己都拒收：${back.reason}"))
             return
         }
-        val outcome = try {
-            runBlocking { send() }
-        } catch (t: Throwable) {
-            respond(exchange, 502, errorJson("send-failed", t.message ?: "发送失败"))
-            return
+        val outcome = if (nodeId == runtime.nodeId) {
+            SendOutcome.SENT
+        } else {
+            try {
+                runBlocking { send() }
+            } catch (t: Throwable) {
+                respond(exchange, 502, errorJson("send-failed", t.message ?: "发送失败"))
+                return
+            }
         }
         // queued 也记账：帧已经交给重传队列，会话确实"存在"，只是还没送达。
         // 不记的话，对端离线时发的宣告在面板上凭空消失，用户会以为没发出去。
@@ -1673,6 +1957,8 @@ class ControlPlane(
     }
 
     private fun peersJson(): JsonObject = buildJsonObject {
+        // 长连接快照（只读，task-26 ③）：让"下行走的哪条路"一眼可见，而不是靠挡网络去猜。
+        val links = runtime.linkSnapshot()
         putJsonArray("peers") {
             runtime.peerList().forEach { peer ->
                 addJsonObject {
@@ -1685,8 +1971,38 @@ class ControlPlane(
                     put("online", peer.online)
                     put("lastSeen", peer.lastSeen)
                     put("profileRev", peer.profile.profileRev)
+                    // 这条 peer 现在是否有一条活着的长连接；有的话承载是 tls 还是明文。
+                    // null = 没有长连接（下行只能走 UDP/TCP 原路径）。
+                    val carrier = links.carrierOf(peer.profile.nodeId)
+                    put("linkConnected", carrier != null)
+                    put("linkCarrier", carrier)
+                    // 拨号诊断（只读，task-32 ③）：attempts=0 + skipReason = "没拨"（策略跳过）；
+                    // attempts>0 + failures>0 + lastError = "拨了连不上"（并给出最后拨的 host:port）。
+                    val dial = links.dialOf(peer.profile.nodeId)
+                    // 主机侧拒绝原因（只读，task-36 ①）：对端连进来了但我们为什么拒。
+                    // 与手机 diag 的 lastError 同口径 —— 两边对照就能定位是网络层还是策略层。
+                    put("linkDenyReason", links.denialOf(peer.profile.nodeId))
+                    // 连接结束原因 + 本端主动关闭次数（只读，task-40 ①）：
+                    // 真机上"谁先关的"就靠这两个字段判 —— dead-timeout/peer-closed 是对方或超时，
+                    // replaced/recheck/stopped 是我们自己关的。
+                    put("linkCloseReason", links.closeOf(peer.profile.nodeId))
+                    put("linkCloseCount", links.closeCountOf(peer.profile.nodeId))
+                    // 主动关闭时的**判据两元组**（task-40）：一眼看出是不是"明文 + 公网地址"这条。
+                    put("linkCloseDetail", links.closeDetailOf(peer.profile.nodeId))
+                    // pin 来源（task-38 底线③）：pairing = 配对带来（可信）；tofu = 降级路径（有竞态）。
+                    put("linkPinSource", links.pinSourceOf(peer.profile.nodeId))
+                    put("linkDialAttempts", dial?.attempts ?: 0)
+                    put("linkDialFailures", dial?.failures ?: 0)
+                    put("linkDialLastTarget", dial?.lastTarget)
+                    put("linkLastError", dial?.lastError)
+                    put("linkSkipReason", dial?.skipReason)
                 }
             }
+        }
+        // 本端当前长连接总数 + 对端清单（主机侧看这里 = "有没有人连上我的下行通道"）。
+        putJsonObject("links") {
+            put("count", links.total)
+            putJsonArray("peers") { links.carriers.keys.forEach { add(JsonPrimitive(it)) } }
         }
     }
 
@@ -1843,6 +2159,15 @@ class ControlPlane(
         const val LOOPBACK: String = "127.0.0.1"
         const val DEFAULT_HTTP_PORT: Int = 8788
 
+    /**
+     * 处理器线程数（task-35）。
+     *
+     * 为什么不是 4：写路由用 `runBlocking` 按住线程，最长一次是"给不可达对端发消息"的完整
+     * 退避（约 8 秒）。池子太小时，几条并发写就能把读路由（/v1/peers）饿死 —— 真机上表现为
+     * 回环控制面连续 8 秒超时、诊断手段被自己挡住。
+     */
+    private const val HANDLER_THREADS: Int = 16
+
         /**
          * 授权台账的默认落点（只在调用方没显式传 [AgentGrantStore] 时用到）。
          *
@@ -1876,5 +2201,60 @@ class ControlPlane(
 
         /** §6.8 的 `kind` 取值。 */
         private val ACK_KINDS = listOf("queued", "approved", "denied", "cancelled", "received")
+    }
+}
+
+/**
+ * 附件闸门（fail-closed）：对端没声明 att1 ⇒ 整条附件不带。
+ *
+ * 抽成纯函数是为了让它可单测：这条判据的方向性（不声明 ⇒ 一定不带）比实现更重要 ——
+ * 反了会让没声明 att1 的旧端收到一个它不认识的键，而 Codec 是严格白名单，整帧会被拒。
+ */
+internal fun gatedAttachment(parsed: AgentEventAttachment?, peerDeclaresAttachment: Boolean): AgentEventAttachment? =
+    if (peerDeclaresAttachment) parsed else null
+
+/**
+ * POST /v1/agent/event 的 attachment 字段 → 类型化对象（只读协议白名单里的六个键）。
+ *
+ * 返回 null = 这个字段**不成形状**：不是对象、缺 attachmentId/mediaType、或某个可选键的
+ * JSON 类型不对。调用方据此回 400（而不是当没带附件 —— 那会把一个错误洗成合法帧）。
+ * 多出来的键不进这一帧：白名单由 Codec 的 validateAgentEventAttachment 兜底，
+ * 这里按六个已知键重建，线上的帧因此永远是干净的。
+ */
+internal fun parseAgentEventAttachment(value: kotlinx.serialization.json.JsonElement?): AgentEventAttachment? {
+    val o = value as? kotlinx.serialization.json.JsonObject ?: return null
+    // 必填两键必须是**字符串**：JsonPrimitive 的 contentOrNull 会把数字 123 读成 "123"，
+    // 那等于把类型错误洗成合法帧（越界/形状都该由 Codec 一处裁决，不是在这里放宽）。
+    val id = (o["attachmentId"] as? kotlinx.serialization.json.JsonPrimitive)?.takeIf { it.isString }?.content ?: return null
+    val mediaType = (o["mediaType"] as? kotlinx.serialization.json.JsonPrimitive)?.takeIf { it.isString }?.content ?: return null
+    if (!jsonShapeOk(o["width"], int = true) || !jsonShapeOk(o["height"], int = true)) return null
+    if (!jsonShapeOk(o["bytes"], long = true)) return null
+    if (!jsonShapeOk(o["name"], text = true)) return null
+    return AgentEventAttachment(
+        attachmentId = id,
+        mediaType = mediaType,
+        width = o["width"]?.jsonPrimitive?.intOrNull,
+        height = o["height"]?.jsonPrimitive?.intOrNull,
+        bytes = o["bytes"]?.jsonPrimitive?.longOrNull,
+        name = (o["name"] as? kotlinx.serialization.json.JsonPrimitive)?.takeIf { it.isString }?.content,
+    )
+}
+
+/** 缺席 = 合法（可选键）；在场则类型必须匹配，否则整条 attachment 不成形状。 */
+private fun jsonShapeOk(
+    value: kotlinx.serialization.json.JsonElement?,
+    int: Boolean = false,
+    long: Boolean = false,
+    text: Boolean = false,
+): Boolean {
+    if (value == null || value is kotlinx.serialization.json.JsonNull) return true
+    val primitive = value as? kotlinx.serialization.json.JsonPrimitive ?: return false
+    return when {
+        // !isString：JsonPrimitive("920").intOrNull 会把 JSON 字符串当数字解析，
+        // 那样类型错误就被洗成合法了。
+        int -> !primitive.isString && primitive.intOrNull != null
+        long -> !primitive.isString && primitive.longOrNull != null
+        text -> primitive.isString
+        else -> false
     }
 }

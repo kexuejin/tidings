@@ -71,6 +71,10 @@ targets:
           - $(inherited)
           - -framework
           - RelayShared
+          # SQLiter（SQLDelight 的 iOS 驱动）在 cinterop 里直接调系统 sqlite3，符号由
+          # libsqlite3 提供。不显式链它，链接期会报一长串 _sqlite3_bind_* /
+          # _sqlite3_prepare_v2 未定义（框架里全在，但 App 没把库链进来）。
+          - -lsqlite3
         # The pre-build script shells out to Gradle, which writes outside the
         # derived data directory.
         ENABLE_USER_SCRIPT_SANDBOXING: NO

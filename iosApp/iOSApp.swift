@@ -1,8 +1,26 @@
 import SwiftUI
 import RelayShared
+import Foundation
 
 @main
 struct RelayApp: App {
+    /// TLS 自检入口（task-26 ①）：**只按启动参数触发**，不动正常 UI、不加可见按钮。
+    ///
+    ///   xcrun simctl launch <device> <bundle-id> --relay-tls-selftest
+    ///
+    /// 跑一次完整双向握手（Swift → composeApp 的一行包装 → core 的 IosTlsLinkTransport：
+    /// 起监听 + 客户端、正确 pin 必须成功、错误 pin 必须被拒），把报告打到 stdout 后退出；
+    /// 最后一行是 RESULT=PASS|FAIL。这一层**只能在 App 进程**里跑：Kotlin/Native 的测试
+    /// 二进制不是 app、拿不到 keychain（SecItemAdd → -25291），拿不到 sec_identity_t。
+    init() {
+        if ProcessInfo.processInfo.arguments.contains("--relay-tls-selftest") {
+            let report = RelayTlsSelfTestKt.relayTlsSelfTest()
+            print("[relay-tls-selftest]\n" + report)
+            fflush(stdout)
+            exit(0)
+        }
+    }
+
     var body: some Scene {
         WindowGroup {
             // 让窗口铺到系统栏后面，安全区**只由 Compose 根层消费一次**。

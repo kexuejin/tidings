@@ -31,6 +31,9 @@ kotlin {
         minSdk = libs.versions.android.minSdk.get().toInt()
         androidResources.enable = true
         withJava()
+        // 打开「宿主单测」编译：Android 平台实现（androidMain）里的 internal 只能由
+        // androidHostTest 看到 —— jvmTest 是另一条编译，覆盖不到它。
+        withHostTestBuilder {}.configure {}
     }
 
     listOf(
@@ -97,6 +100,21 @@ kotlin {
         }
         iosMain.dependencies {
             implementation(libs.sqldelight.native.driver)
+        }
+
+        // 源集名必须是 androidHostTest（:36 的 withHostTestBuilder 打开的那个）。
+        // 写成 androidUnitTest 会是一个**悬空源集**：Gradle 只报一句 warning，
+        // 那 5 条宿主单测（AndroidDefaultNickTest）**从来不跑** —— 提交前审查 B2。
+        val androidHostTest by getting {
+            dependencies {
+                // Android 平台实现住在 androidMain（AndroidPlatform 的默认名判定就是它），
+                // 而 jvmTest 跑的是 jvmMain/jvmShared 那条编译，看不到 androidMain 的 internal
+                // —— 所以这条测试要落在 Android 的**宿主单测**源集上，跑 AGP 的 JVM 单测任务。
+                //
+                // 用 kotlin-test-junit 而不是 libs.kotlin.test：KMP 工件在纯 Android 单测编译里
+                // 解析不到 jvm 变体时，前者能落到 JUnit4 实现（workspace-ia 的经验）。
+                implementation(kotlin("test-junit"))
+            }
         }
         commonTest.dependencies {
             implementation(libs.kotlin.test)

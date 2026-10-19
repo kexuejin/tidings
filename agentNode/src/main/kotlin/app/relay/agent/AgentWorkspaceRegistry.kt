@@ -27,7 +27,10 @@ import java.util.concurrent.ConcurrentHashMap
  *
  * @param maxWorkspaces 台账上限；超出按 updatedAt 淘汰最老的（防无界增长）。
  */
-class AgentWorkspaceRegistry(private val maxWorkspaces: Int = 200) {
+class AgentWorkspaceRegistry(
+    private val maxWorkspaces: Int = 200,
+    private val onRecord: ((WorkspaceRecord) -> Unit)? = null,
+) {
 
     /** 一个工作区的当前态。字段与 D3 帧一一对应（父稿 §2.2 的键表）。 */
     data class WorkspaceRecord(
@@ -43,6 +46,15 @@ class AgentWorkspaceRegistry(private val maxWorkspaces: Int = 200) {
         val online: Boolean?,
         /** 宿主自报的会话数；手机端自己数的优先（[mergeSessionCounts]）。 */
         val sessionCount: Long?,
+        /**
+         * 宿主的**注册表持久序**（AgentWorkspacePayload.order），null = 对端没报。
+         *
+         * 为什么这一列必须存在：它是工作区列表的稳定排序依据，而"按到达序"在重启后
+         * 会变。桌面端自己也是**宿主**（advertiseAgent = true），它的工作区台账走
+         * 同一条路 —— 这一列缺失时，桌面库里的 host_order 会整列 NULL（真机实测
+         * 15/15），于是同一批工作区在手机上按 order 排、在桌面上按到达序排，两边顺序不同。
+         */
+        val order: Long?,
         val updatedAt: Long,
     )
 
@@ -65,26 +77,44 @@ class AgentWorkspaceRegistry(private val maxWorkspaces: Int = 200) {
         agentKind: String? = null,
         online: Boolean? = null,
         sessionCount: Long? = null,
+        /** 宿主注册表持久序；null = 这一帧没带（保留旧值，见下面的合并纪律）。 */
+        order: Long? = null,
         outbound: Boolean,
         at: Long = System.currentTimeMillis(),
     ) {
         val key = Key(nodeId, agentKey, wsId)
-        val old = workspaces[key]
-        // outbound 标记**或**运算：与 SessionRecord 的两个 announced 标记同理，
-        // 但这里只有一列 —— 工作区没有"两侧各自宣告"的语义分叉需求，
-        // 面板要区分时看 updatedAt 与来源即可，多一列就多一个能说谎的地方。
-        workspaces[key] = WorkspaceRecord(
-            nodeId = nodeId,
-            agentKey = agentKey ?: old?.agentKey,
-            wsId = wsId,
-            wsTitle = wsTitle ?: old?.wsTitle,
-            wsPath = wsPath ?: old?.wsPath,
-            agentKind = agentKind ?: old?.agentKind,
-            online = online ?: old?.online,
-            sessionCount = sessionCount ?: old?.sessionCount,
-            updatedAt = maxOf(at, old?.updatedAt ?: at),
-        )
+        // **必须是 compute，不能是「读 old → 拼新 → 写回」**（task-60 审查修）。
+        //
+        // 控制面是 16 条线程的池，而入站帧（recordInboundWorkspace）与出站自宣告
+        // （ControlPlane 发完帧后记本宿主）可能**并发**落到同一个 key 上。读—改—写会让
+        // 两次合并各自基于过期快照：甲读到 order=null、乙读到 order=null，甲写 order=7、
+        // 乙紧接着写 order = (null ?: null) = **null** —— order 被抹掉，而这正是这一列
+        // 当初要修的那个真机缺陷（host_order 15/15 NULL）换了个形态回来。
+        //
+        // ConcurrentHashMap.compute 对**同一个 key** 是原子的：合并纪律（非空覆盖、空保留
+        // 旧值）在并发下也成立。兄弟台账 AgentSessionRegistry.recordSession 一直是
+        // synchronized(lockFor(key)) 的写法，这里此前漏了同一层保护。
+        val record = workspaces.compute(key) { _, old ->
+            // outbound 标记**或**运算：与 SessionRecord 的两个 announced 标记同理，
+            // 但这里只有一列 —— 工作区没有"两侧各自宣告"的语义分叉需求，
+            // 面板要区分时看 updatedAt 与来源即可，多一列就多一个能说谎的地方。
+            WorkspaceRecord(
+                nodeId = nodeId,
+                agentKey = agentKey ?: old?.agentKey,
+                wsId = wsId,
+                wsTitle = wsTitle ?: old?.wsTitle,
+                wsPath = wsPath ?: old?.wsPath,
+                agentKind = agentKind ?: old?.agentKind,
+                online = online ?: old?.online,
+                sessionCount = sessionCount ?: old?.sessionCount,
+                // order 与其它字段同一条合并纪律：**非空覆盖、空保留旧值**。
+                // 一条只更新 state 的收尾帧不带 order，抹掉它 = 顺序退回到达序。
+                order = order ?: old?.order,
+                updatedAt = maxOf(at, old?.updatedAt ?: at),
+            )
+        } ?: return
         evictIfNeeded()
+        onRecord?.invoke(record)
     }
 
     fun workspaces(): List<WorkspaceRecord> =

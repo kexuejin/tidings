@@ -802,6 +802,8 @@ private fun DeskSettingsIdentityPreview() {
                 // 与手机帧同理：第三档「上传图片」在生产侧有出口（`App.kt` 的
                 // `SETTINGS_PAGE_AVATAR`），不传就是画置灰态 —— 那不是产品。
                 onOpenAvatarPage = {},
+            // 武装这一支：可空出口不传则依赖它的界面根本不渲染（截图证据里没有它）。
+            onRemovePickedAvatar = {},
             )
         }
     }
@@ -887,6 +889,8 @@ private fun DeskSettingsDataPreview() {
                 persistMessagesEnabled = true,
                 onPersistMessagesEnabledChange = {},
                 onClearHistory = {},
+            // 武装这一支：可空出口不传则依赖它的界面根本不渲染（截图证据里没有它）。
+            onLinkDownlinkEnabledChange = {},
             )
         }
     }

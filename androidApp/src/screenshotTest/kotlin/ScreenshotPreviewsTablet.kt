@@ -148,8 +148,8 @@ private fun TabletFilesPortraitPreview() {
 // §11.3 要求形态矩阵覆盖「文件柜 × { phone, tablet 竖, tablet 横, 桌面
 // compact/medium/expanded }」。平板这两格此前**一帧都没有** —— 文件柜的
 // 平板形态从来没有被验过，而它恰好是「同一份 `CabinetPane`，壳不同」的样本：
-// 平板只扣工具栏（`TABLET_CHROME_PX = 46`），桌面扣满 138 —— 同样的窗口高度，
-// 平板留给内容的高度多 92px，档位判定可能因此不同。左栏该取 300 还是 240
+// 平板只扣工具栏（`TABLET_CHROME_PX = 46`），桌面扣满 112（菜单栏改由系统菜单栏承载后
+// 少了 26px）—— 同样的窗口高度，平板留给内容的高度多 66px，档位判定可能因此不同。左栏该取 300 还是 240
 // 取决于 `desktopWindowSizeClass` 判出来的档位（见下两帧的 KDoc）。
 
 /**
@@ -178,7 +178,7 @@ private fun TabletCabinetPortraitPreview() {
  * 所以是 Expanded，左栏取 `ContentWidths.Sidebar`（300dp）、右栏目录网格拿到最宽的一档。
  * 这一帧是文件柜在**平板**上唯一能拿到宽左栏的形态，也是 `GridCells.Adaptive(120.dp)`
  * 那个网格在平板宽度下的列数证据（桌面 1100×720 的 `desk-cabinet-peer-expanded`
- * 扣掉 138px chrome 后可用宽度比这一帧少，列数可能不同）。
+ * 扣掉 112px chrome 后可用宽度比这一帧少，列数可能不同）。
  *
  * 注意左栏宽度由 `CabinetPane` **自己按面板宽度**再判一次（`CabinetPane.kt:169-170`）：
  * 壳已在左侧切掉 64dp 竖导，所以这里判的是 1216 而不是 1280 —— 两档结论一致。
@@ -197,7 +197,7 @@ private fun TabletCabinetLandscapePreview() {
  * 在那之前平板这一套只有会话和文件：节点页和错误横幅在平板上**一帧都没有**，于是
  * 「同一个状态在三种壳下长得一样吗」这个问题在平板上根本没法回答 —— 缺的那两帧正是
  * 最可能出问题的地方：节点页在宽栏里会退化成稀疏单列，错误横幅会随可用宽度拉伸，
- * 而平板比桌面少扣 92px chrome（`TABLET_CHROME_PX` 只等于工具栏），留给内容的
+ * 而平板比桌面少扣 66px chrome（`TABLET_CHROME_PX` 只等于工具栏），留给内容的
  * 高度反而更多。两帧都用与桌面同一份 fixture，除 chrome 外的差异都算布局漂移。
  */
 @PreviewTest
@@ -325,6 +325,8 @@ private fun TabletSettingsOverlay(darkTheme: Boolean = false) {
                 onRestart = {},
                 onDismissBanner = {},
                 onClearNote = {},
+                // 武装这一支：可空出口不传则依赖它的界面根本不渲染（截图证据里没有它）。
+                onRemovePickedAvatar = {},
                 modifier = Modifier.fillMaxSize(),
             )
         }

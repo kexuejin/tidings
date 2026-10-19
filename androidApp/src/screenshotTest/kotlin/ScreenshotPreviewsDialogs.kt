@@ -132,22 +132,10 @@ private fun GroupCreateDialogPhonePreview() {
     }
 }
 
-// ── 自适应诊断（AlertDialog）─────────────────────────────────────────────────
-
-/**
- * 设置 › 更多 › 自适应诊断弹层。
- *
- * 内容来自运行时诊断快照，所以这一帧钉的是**布局与分组骨架**（各段标题、指标行、
- * 长值换行），到不了具体数值 —— 数值属于真机取证，不是参考图能负责的事。
- */
-@PreviewTest
-@Preview(name = "dialog-adaptive-diag", widthDp = 393, heightDp = 852, showBackground = true, locale = "zh-rCN")
-@Composable
-private fun AdaptiveDiagDialogPhonePreview() {
-    DialogBackdrop {
-        AdaptiveDiagDialog(onDismiss = {})
-    }
-}
+// ── 自适应诊断（AlertDialog）── 这一族只剩 `ChatInsetsPhonePreview`（`m-insets` 行）那张：
+// 原来这里还有一张 `AdaptiveDiagDialogPhonePreview`，它与 `ChatInsetsPhonePreview` **逐字节
+// 相同**（同一个 `AdaptiveDiagDialog` 全屏盖住背景），台账里**没有任何行**引用它 ⇒ 按
+// :designDupFrameGate 的判据「删掉那张已无独立证据价值的帧（连同 reference PNG）」删掉。
 
 // ── Pk 表情（androidx Dialog）────────────────────────────────────────────────
 

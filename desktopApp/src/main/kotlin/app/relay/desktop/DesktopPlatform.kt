@@ -3,9 +3,12 @@
 package app.relay.desktop
 
 import app.relay.core.fs.pathJoin
+import app.relay.core.protocol.IpAddressUtils
+import app.relay.core.protocol.Ipv6Scope
 import java.awt.FileDialog
 import java.awt.Frame
 import java.net.Inet4Address
+import java.net.Inet6Address
 import java.net.NetworkInterface
 import java.util.concurrent.CopyOnWriteArrayList
 
@@ -105,21 +108,36 @@ internal fun defaultCacheDirectory(): String {
 const val DESKTOP_APP_DIR: String = "捎话 Tidings"
 
 /**
- * 真实网卡枚举。只取 IPv4：Tidings 的广播与单播都是 IPv4（`PlatformContracts.kt`
- * 的 `NetworkSnapshot.withoutUsableAddress` 就是这个前提）。
+ * 真实网卡枚举。
+ *
+ * 快照里的 [NetworkSnapshot.localAddresses] 是**配对码的候选池**：IPv4 在前、IPv6（ULA /
+ * 公网 GUA）在后（见 [localCandidateAddresses]）。IPv4 在前的约定保证了 `firstOrNull()` 那些
+ * "只要一个地址"的调用点行为不变 —— 加 v6 不是替换，是追加。
  */
 class DesktopNetworkMonitor : app.relay.platform.NetworkMonitor {
     private val listeners = CopyOnWriteArrayList<(app.relay.platform.NetworkSnapshot) -> Unit>()
     private var poller: Thread? = null
 
     override fun rawSnapshot(): app.relay.platform.NetworkSnapshot {
-        val addresses = localIpv4Addresses()
+        // 过滤虚拟/隧道网卡之后**一个地址都不剩**时退回原列表：那时它们是这台机器唯一的地址，
+        // 报"没有可用地址"会让 `withoutUsableAddress` 把整台机器判成离线（假装离线比多两条
+        // 假候选坏得多）。只要还有一条真网卡地址，就按过滤后的来。
+        //
+        // 取舍说明（这个列表同时被 `choosePeerCandidate` 当"本机地址表"做同网段判断）：这里
+        // **有意**只保留"我们真的会广播出去的地址" —— 被过滤掉的隧道地址即使与某个候选同网段，
+        // 对端也拿不到它，匹配上反而会选错。真·私网（10/8、172.16/12、192.168/16）一个都不挡，
+        // 所以正常的"同处一网"判断不受影响。
+        val physical = localCandidateAddresses()
+        val addresses = physical.ifEmpty { localCandidateAddresses(includeVirtualInterfaces = true) }
         val online = addresses.isNotEmpty()
         return app.relay.platform.NetworkSnapshot(
             online = online,
             transport = if (online) app.relay.platform.Transport.Ethernet else app.relay.platform.Transport.None,
             localAddresses = addresses,
-            vpnActive = addresses.any { isVpnLike(it) },
+            // vpnActive 只看 IPv4：`isVpnLike` 对 IPv6 的判据是"以 fd 打头"（Tailscale/ZeroTier
+            // 的隧道段），而 ULA `fd00::/8` 同时也是**家用路由器常见的局域网段** —— 拿它当 VPN
+            // 会把"家里有 ULA"误报成"VPN 已启用"。原来的语义（只看 v4 表）在这里保持不变。
+            vpnActive = localIpv4Addresses().any { isVpnLike(it) },
         )
     }
 
@@ -156,14 +174,66 @@ class DesktopNetworkMonitor : app.relay.platform.NetworkMonitor {
     }
 }
 
-/** 枚举所有非回环、非虚拟网卡的 IPv4 地址。虚拟网卡会产生 198.18/10 之类的假地址。 */
-internal fun localIpv4Addresses(): List<String> = runCatching {
+/**
+ * 枚举本机 IPv4。默认**跳过虚拟/点对点网卡**（`utun*`/`feth*`/`tailscale*`，判据见
+ * [app.relay.app.isVirtualInterfaceName]）：它们会给出 `172.26.*`/`10.233.*` 这类"看着像
+ * 私网、其实只存在于本机网络栈"的地址，对端照它连过去必然失败。
+ *
+ * [includeVirtualInterfaces] = true 只在"过滤完一个地址都不剩"时兜底用（见 [DesktopNetworkMonitor.rawSnapshot]）。
+ */
+internal fun localIpv4Addresses(includeVirtualInterfaces: Boolean = false): List<String> = runCatching {
     NetworkInterface.getNetworkInterfaces().toList()
         .filter { it.isUp && !it.isLoopback }
+        .filter { includeVirtualInterfaces || !app.relay.app.isVirtualInterfaceName(it.name) }
         .flatMap { nic ->
             nic.inetAddresses.toList().filterIsInstance<Inet4Address>().map { it.hostAddress.orEmpty() }
         }
         .filter { it.isNotBlank() && !it.startsWith("127.") && !isVpnLike(it) }
+        .distinct()
+}.getOrElse { emptyList() }
+
+/**
+ * 配对码的候选地址：**IPv4 在前**，然后是本机可用的 IPv6（ULA `fc00::/7` 与公网 GUA `2000::/3`）。
+ *
+ * 三条约定：
+ *  - v4 在前：`firstOrNull()` 的调用点（"我的 IP"、手填提示、工作区直通码）拿到的是最稳的那条，
+ *    加 v6 只是追加候选，不改它们的行为；
+ *  - IPv6 只保留 [Ipv6Scope.GLOBAL] 与 [Ipv6Scope.UNIQUE_LOCAL]：链路本地 `fe80::/10`、回环、
+ *    未指定/组播的一律丢掉。
+ *
+ *    这里**不是**"链路本地跨设备不可路由"——那是错的：同一 L2 网段内 `fe80::/10` 是可用的，
+ *    只是要用 zone id（`fe80::1%en0`）才连得上，而候选池里存的是**裸地址**、我们拿不到 zone id，
+ *    所以准确的说法是"这条地址在我们手里用不了"，不是"它不能用"。把一个连不上的地址当候选，
+ *    只会让对端白试一次（注册表按回包源地址自纠，但那是多余的往返）。
+ *
+ *    另：带 `%网卡` 的**不是丢掉而是剥掉** —— macOS 的 JDK 会给**每个** IPv6 地址都加 scope 后缀，
+ *    见到 `%` 就丢会让候选里一个 v6 都不剩（见 [localIpv6CandidateAddresses] 里实测的那段）。
+ *  - 不再对 IPv6 套用 [isVpnLike]：它对 v6 的判据是"以 fd 打头"，会把**家用 ULA 网段**
+ *    整段误杀。隧道地址多出现在候选里是无害的（连不上就落到下一个候选，注册表按回包源地址自纠），
+ *    而"VPN 是否启用"另有 [NetworkSnapshot.vpnActive] 表达。
+ */
+internal fun localCandidateAddresses(includeVirtualInterfaces: Boolean = false): List<String> =
+    localIpv4Addresses(includeVirtualInterfaces) + localIpv6CandidateAddresses(includeVirtualInterfaces)
+
+/** 枚举本机可用的 IPv6 候选：ULA 与公网 GUA，丢掉链路本地/回环/未指定/带 scope 的。 */
+internal fun localIpv6CandidateAddresses(includeVirtualInterfaces: Boolean = false): List<String> = runCatching {
+    NetworkInterface.getNetworkInterfaces().toList()
+        .filter { it.isUp && !it.isLoopback }
+        .filter { includeVirtualInterfaces || !app.relay.app.isVirtualInterfaceName(it.name) }
+        .flatMap { nic -> nic.inetAddresses.toList().filterIsInstance<Inet6Address>() }
+        // macOS 的 JDK 会给**每个** IPv6 地址都带上 `%en1` 这样的 scope 后缀（不只是链路本地），
+        // 所以这里必须**剥掉**它，而不是"见到 % 就丢" —— 后者会让候选列表里一个 IPv6 都不剩
+        // （真机上实测：5 个公网 GUA 全被丢掉，配对码里只剩 IPv4）。剥掉之后链路本地仍会被
+        // 下面的 scope 判据挡掉（fe80::/10），语义不变。
+        .map { it.hostAddress.orEmpty().substringBefore('%').trim() }
+        .filter { it.isNotBlank() }
+        .filter { IpAddressUtils.isIpv6(it) }
+        .filter {
+            when (IpAddressUtils.getIpv6Scope(it)) {
+                Ipv6Scope.GLOBAL, Ipv6Scope.UNIQUE_LOCAL -> true
+                else -> false
+            }
+        }
         .distinct()
 }.getOrElse { emptyList() }
 

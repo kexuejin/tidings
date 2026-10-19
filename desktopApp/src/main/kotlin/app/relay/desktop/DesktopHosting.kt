@@ -3,8 +3,17 @@
 package app.relay.desktop
 
 import app.relay.generated.resources.Res
+import app.relay.generated.resources.chat_toolbar_capture
+import app.relay.generated.resources.desktop_action_quit
+import app.relay.generated.resources.desktop_app_title
+import app.relay.generated.resources.desktop_menu_diagnostics
+import app.relay.generated.resources.desktop_menu_file
+import app.relay.generated.resources.desktop_menu_import_files
+import app.relay.generated.resources.desktop_menu_new_conversation
 import app.relay.generated.resources.ic_down
+import app.relay.generated.resources.screen_settings
 import org.jetbrains.compose.resources.painterResource
+import org.jetbrains.compose.resources.stringResource
 import app.relay.ui.desktop.*
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
@@ -26,6 +35,7 @@ import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.VerticalDivider
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.getValue
@@ -40,8 +50,11 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.DpSize
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.input.key.Key
+import androidx.compose.ui.input.key.KeyShortcut
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.window.FrameWindowScope
+import androidx.compose.ui.window.MenuBar
 import androidx.compose.ui.window.Popup
 import androidx.compose.ui.window.PopupProperties
 import app.relay.app.RelayController
@@ -235,6 +248,126 @@ internal object DesktopTray {
     }
 }
 
+/**
+ * 主修饰键：macOS 是 ⌘(meta)，其它平台是 Ctrl。
+ *
+ * 与 [app.relay.ui.desktop.desktopShortcutFor] 的 `isPrimaryModifier` 同一条判据 ——
+ * 键盘处理那边接受 meta 或 ctrl 任一，菜单这边由平台决定印哪一个。
+ * 判据复用 `DesktopLoginItem` 里那个 `desktopOs(...)`，不另写一份平台判断。
+ */
+private val primaryModifierIsMeta: Boolean =
+    desktopOs(System.getProperty("os.name").orEmpty()) == DesktopOs.Macos
+
+/**
+ * **系统菜单栏**（用户裁决：窗口内那条 26px 自绘菜单栏整条删除）。
+ *
+ * ## 它取代了什么
+ *
+ * 此前窗口客户区里有一条 26px 的**自绘**菜单栏（`composeApp` 里那个已删除的自绘实现，
+ * 文件/编辑/视图/窗口/帮助共 16 条）。那 16 条里没有一条是独占能力（设置×3、视图与
+ * 左侧竖导重复、主题在设置里、刷新各页都有、诊断包在状态栏、退出有标题栏✕/托盘/⌘Q、
+ * 截图在输入栏、复制本机 ID 在节点页、导入文件与新建会话在工具栏），它唯一的价值是
+ * 当快捷键的说明书 —— 而快捷键由 `DesktopShell` 的键盘处理独立驱动，删了照样能用。
+ * 所以整条删掉，改由本函数提供 Compose 的 [MenuBar]：macOS 自动进屏幕顶部系统菜单栏，
+ * Windows/Linux 自动进窗口菜单。原型自己也是这个意思（`prototype/relay.html` 的
+ * `.menubar` 注释逐字「macOS 系统菜单栏（mac 上由系统提供；Win/Linux 上同一份 Compose
+ * 菜单落在 .titlebar）」）。
+ *
+ * ## 只留 6 条，且与既有行为逐字一致
+ *
+ * 传入 null 的那一项**不画**（与自绘版「没有能力就不留一个点了没反应的项」同一条规矩）：
+ * 主窗传全 6 条；会话独立窗没有视图切换、`onNewConversation`/`onImportFiles` 在那边
+ * 本来就是空/无收件人，于是只传 设置/截图/诊断包/退出 四条。
+ *
+ * 快捷键用 [KeyShortcut] 声明而不是手写字符串：印出来的组合由系统渲染（mac ⌘ / 其它 Ctrl），
+ * 与 `desktopShortcutFor` 的解析是否一致由单测钉住。
+ */
+@Composable
+internal fun FrameWindowScope.DesktopSystemMenuBar(
+    /** 「新建会话」：切到节点视图 + 宿主动作（与 ⌘N 同一条路）。null = 不画。 */
+    onNewConversation: (() -> Unit)? = null,
+    /** 「导入文件」：把文件发给当前会话。null = 不画（会话独立窗没有收件人）。 */
+    onImportFiles: (() -> Unit)? = null,
+    /** 当前有没有选中会话；false 时「导入文件」置灰（缺陷③）。 */
+    canImportFiles: Boolean = false,
+    onOpenSettings: (() -> Unit)? = null,
+    /** 「截图」：`controller.triggerScreenCapture(选中会话)`，与 ⌘⇧A 同一个表达式。 */
+    onScreenCapture: (() -> Unit)? = null,
+    onExportDiagnostics: (() -> Unit)? = null,
+    onQuit: (() -> Unit)? = null,
+) {
+    // macOS：把系统应用菜单里的 Quit 接到与这条菜单项、托盘、⌘Q 相同的退出路径上。
+    // 装一次即可（进程级设置，helper 内部幂等）；装不上就保持 JDK 默认行为。
+    if (onQuit != null) {
+        LaunchedEffect(onQuit) { installAwtQuitHandler(onQuit) }
+    }
+    MenuBar {
+        // 第一条 = 应用菜单：macOS 上就是屏幕顶部那一条（设置/退出按平台惯例住这里），
+        // Windows/Linux 上它落在窗口菜单的第一格。
+        // mnemonic = null：与自绘菜单栏一致（那版也没有助记键），不在 Windows/Linux 上
+        // 引入一套新的 Alt 导航 —— 菜单项的助记键与既有快捷键（见 desktopShortcutFor）
+        // 是两套东西，混在一起会出现「Alt+F 打开文件菜单」与「⌘F 做别的事」并存。
+        Menu(stringResource(Res.string.desktop_app_title), mnemonic = null) {
+            onOpenSettings?.let { open ->
+                Item(
+                    stringResource(Res.string.screen_settings),
+                    onClick = open,
+                    shortcut = KeyShortcut(Key.Comma, ctrl = !primaryModifierIsMeta, meta = primaryModifierIsMeta),
+                )
+            }
+            onExportDiagnostics?.let { export ->
+                Item(
+                    stringResource(Res.string.desktop_menu_diagnostics),
+                    onClick = export,
+                    shortcut = KeyShortcut(Key.D, ctrl = !primaryModifierIsMeta, meta = primaryModifierIsMeta, alt = true),
+                )
+            }
+            // 退出项**只在非 macOS** 上由我们提供。
+            //
+            // 真机证据（在 Mac 上用 System Events 读菜单栏）：
+            // 菜单栏四格 = Apple | Tidings（AWT 自带应用菜单：About/Services/Hide/Quit 捎话 Tidings）
+            // | 捎话 Tidings（我们的 Compose MenuBar 应用菜单：设置/诊断包/**退出**）| 文件。
+            // 即同一台机器上出现**两个退出项**。AWT 那份是 macOS 应用菜单的强制部分，删不掉；
+            // 所以删我们这条，并由 installAwtQuitHandler 把它的行为接到同一条退出路径上
+            // （默认策略会绕过 shutdown() 直接退出进程）。
+            // Windows/Linux 没有 AWT 应用菜单 ⇒ 这一条必须保留，否则那两处**没有退出入口**。
+            if (onQuit != null && showsOwnQuitItem(primaryModifierIsMeta)) {
+                Separator()
+                Item(
+                    stringResource(Res.string.desktop_action_quit),
+                    onClick = onQuit,
+                    shortcut = KeyShortcut(Key.Q, ctrl = !primaryModifierIsMeta, meta = primaryModifierIsMeta),
+                )
+            }
+        }
+        if (onNewConversation != null || onImportFiles != null || onScreenCapture != null) {
+            Menu(stringResource(Res.string.desktop_menu_file), mnemonic = null) {
+                onNewConversation?.let { start ->
+                    Item(
+                        stringResource(Res.string.desktop_menu_new_conversation),
+                        onClick = start,
+                        shortcut = KeyShortcut(Key.N, ctrl = !primaryModifierIsMeta, meta = primaryModifierIsMeta),
+                    )
+                }
+                onImportFiles?.let { import ->
+                    Item(
+                        stringResource(Res.string.desktop_menu_import_files),
+                        onClick = import,
+                        enabled = canImportFiles,
+                        shortcut = KeyShortcut(Key.O, ctrl = !primaryModifierIsMeta, meta = primaryModifierIsMeta),
+                    )
+                }
+                onScreenCapture?.let { capture ->
+                    Item(
+                        stringResource(Res.string.chat_toolbar_capture),
+                        onClick = capture,
+                        shortcut = KeyShortcut(Key.A, ctrl = !primaryModifierIsMeta, meta = primaryModifierIsMeta, shift = true),
+                    )
+                }
+            }
+        }
+    }
+}
 /**
  * 把 AWT 拖放接到 Compose 窗口上，并在拖动过程中给出一层「可以松手了」的覆盖层。
  *
@@ -558,12 +691,18 @@ internal fun DesktopSettingsPane(
                                     controller.saveProfile(n, c, d, t, a)
                                 },
                                 onBack = null,
-                                // 第三档「上传图片」的出口：桌面身份页也画了同一个 `avSeg()`
-                                // （原型 `screenDSettings()` 的 `${avSeg()}`，prototype/relay.html:5263），
-                                // 原型里它 `go('m-set-avatar')`（`:2122 avOpenUpload`）。桌面没有
-                                // `settingsPage` 那一层，所以在这一面内部就地切到同一张独立页 ——
-                                // 与手机端落到同一屏、同一个 Composable。
-                                onOpenAvatarPage = { showAvatarPage = true },
+                                onOpenAvatarPage = controller::pickAvatar,
+                                onRemovePickedAvatar = controller::removePickedAvatar,
+                            )
+                        }
+                        DesktopSettingsNav.TrustedDevices -> {
+                            DesktopTrustedDevicesPanel(
+                                state = state,
+                                controller = controller,
+                                grantStore = host.extension.grantStore,
+                                // 面板的每个决定都经这里回给设备（agent-grant 帧）。此前面板够不到
+                                // 发帧能力，只能写本机台账 ⇒ 用户点完手机看不到。
+                                grantReplySender = host.extension::sendGrantReply,
                             )
                         }
                         DesktopSettingsNav.Connection -> {
@@ -660,5 +799,49 @@ private fun openInFileManager(path: String) {
         java.awt.Desktop.getDesktop().open(dir)
     } catch (_: Exception) {
         // 无桌面环境（纯 SSH/容器）就当没点过。
+    }
+}
+
+/**
+ * 我们自己这条「退出」菜单项要不要画。
+ *
+ * macOS 上**不画**：AWT 应用菜单（屏幕菜单栏第 2 格，取进程名）自带 Quit，删不掉 ——
+ * 再画一条就是真机上那两个退出项（真机证据）。它的行为由
+ * [installAwtQuitHandler] 接到同一条退出路径上。
+ * Windows/Linux 上**要画**：那两处没有 AWT 应用菜单，删了就没有退出入口了。
+ */
+internal fun showsOwnQuitItem(isMacos: Boolean): Boolean = !isMacos
+
+/**
+ * 要不要装 AWT 的退出处理器（把系统应用菜单的 Quit 接到 [onQuit]）。
+ *
+ * 两个前置都要真：桌面 API 可用（headless / 精简 JRE 下不可用）、且该平台支持
+ * APP_QUIT_HANDLER（Windows/Linux 不支持，调用会抛 UnsupportedOperationException）。
+ * 判定抽成纯函数是为了让它可单测 —— 这行判断反了的表现是**启动即崩**或**退出不生效**。
+ */
+internal fun shouldInstallAwtQuitHandler(desktopSupported: Boolean, quitHandlerSupported: Boolean): Boolean =
+    desktopSupported && quitHandlerSupported
+
+private val awtQuitHandlerInstalled = java.util.concurrent.atomic.AtomicBoolean(false)
+
+/**
+ * macOS：把系统应用菜单里的 Quit 接到与菜单项、托盘、⌘Q 完全相同的退出路径上。
+ *
+ * 为什么必须接：JDK 默认的退出策略是直接结束 JVM，**绕过** [onQuit]（那里做摘控制面、
+ * 停运行时等收尾）。接上之后「只有一个退出项」与「退出行为一致」同时成立。
+ * 只装一次（进程级设置）；装不上就什么都不做 —— 那条路径退化成 JDK 默认行为，
+ * 与今天之前一字不差，不会更糟。
+ */
+internal fun installAwtQuitHandler(onQuit: () -> Unit) {
+    if (!awtQuitHandlerInstalled.compareAndSet(false, true)) return
+    runCatching {
+        val desktop = java.awt.Desktop.getDesktop()
+        val supported = java.awt.Desktop.isDesktopSupported() &&
+            desktop.isSupported(java.awt.Desktop.Action.APP_QUIT_HANDLER)
+        if (!shouldInstallAwtQuitHandler(java.awt.Desktop.isDesktopSupported(), supported)) return@runCatching
+        desktop.setQuitHandler { _, response ->
+            onQuit()
+            response.performQuit()
+        }
     }
 }

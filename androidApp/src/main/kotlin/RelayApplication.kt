@@ -30,6 +30,8 @@ class RelayApplication : Application() {
         AndroidAppPlatform(
             context = this,
             screenShareServiceClass = ScreenShareForegroundService::class.java,
+            // 后台保活的前台服务类，同样只能由宿主递进去（清单组件属于 APK）。
+            keepAliveServiceClass = ConnectionKeepAliveService::class.java,
             // 首次运行时的默认显示名：一句要本地化的文案，所以从 Android 资源读，
             // 而不是让共享代码里写死一个词（桌面端就是被那个词害得撞名的）。
             defaultNick = getString(R.string.device_default_nick),

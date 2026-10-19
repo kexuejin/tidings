@@ -3,6 +3,7 @@
 package app.relay.desktop
 
 import app.relay.ui.desktop.*
+import androidx.compose.foundation.isSystemInDarkTheme
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
@@ -21,6 +22,7 @@ import androidx.compose.ui.window.FrameWindowScope
 import androidx.compose.ui.window.Window
 import androidx.compose.ui.window.rememberWindowState
 import app.relay.core.transport.LocalFile
+import app.relay.ui.theme.ThemeMode
 import app.relay.ui.theme.AppTheme
 
 /**
@@ -95,6 +97,15 @@ private fun DesktopPeerWindow(
     val controller = host.controller
     val state by controller.state.collectAsState()
     val scope = rememberCoroutineScope()
+    val systemDark = isSystemInDarkTheme()
+    val effectiveDark = remember(state.settings.themeMode, systemDark) {
+        val wire = state.settings.themeMode
+        if (wire.isEmpty()) {
+            DesktopUiPrefs.loadDarkTheme(host.controller.dataDirectory, fallback = systemDark)
+        } else {
+            ThemeMode.fromWire(wire).resolve(systemDark)
+        }
+    }
 
     val conversation = state.conversations.firstOrNull { it.convId == peerId }
     // 会话可能还没落到 conversations 里（刚配对完就开窗）：退回节点昵称，再退回节点 ID。
@@ -122,7 +133,7 @@ private fun DesktopPeerWindow(
             // 覆盖层的收件人就是这扇窗口自己的会话，不用猜。
             recipientName = title,
             // 同主窗：覆盖层自己重铺主题，只能由调用点把真实偏好传下去。
-            darkTheme = host.darkTheme,
+            darkTheme = effectiveDark,
             onFiles = { files ->
                 controller.sendFiles(
                     peerId,
@@ -131,11 +142,11 @@ private fun DesktopPeerWindow(
             },
         )
 
-        AppTheme(darkTheme = host.darkTheme) {
-            val actions = remember(host, scope, peerId) {
+        AppTheme(darkTheme = effectiveDark) {
+            val actions = remember(host, scope, peerId, systemDark) {
                 DesktopShellActions(
                     onOpenSettings = { host.settingsOpen = true },
-                    onToggleTheme = { host.toggleTheme() },
+                    onToggleTheme = { host.toggleTheme(systemDark) },
                     onExportDiagnostics = { exportDiagnostics(host) },
                     onOpenDownloadsFolder = { openDownloadsFolder(controller.dataDirectory) },
                     onRefresh = { controller.handshake() },
@@ -158,6 +169,18 @@ private fun DesktopPeerWindow(
                 )
             }
 
+            // 会话独立窗的系统菜单栏：**精简版**（设置 / 截图 / 诊断包 / 退出）。
+            // 不画「新建会话」与「导入文件」—— 这扇窗没有视图切换，而 onNewConversation
+            // 在窗口层本来就是空实现、导入文件的收件人是主窗的选中项，在这扇窗上放它们
+            // 等于给一个点了没反应或点错人的入口（同「没有能力就不画」）。
+            // 截图打的是**这扇窗自己的会话**，不是主窗当前选中的那个。
+            DesktopSystemMenuBar(
+                onOpenSettings = actions.onOpenSettings,
+                onScreenCapture = { controller.triggerScreenCapture(peerId) },
+                onExportDiagnostics = actions.onExportDiagnostics,
+                onQuit = onExitApplication,
+            )
+
             Surface(Modifier.fillMaxSize(), color = MaterialTheme.colorScheme.background) {
                 // 拖出要原生 AWT 句柄，而 FrameWindowScope.window 只在这一层可见。
                 val windowSize = rememberDesktopWindowSizeDp()
@@ -168,7 +191,7 @@ private fun DesktopPeerWindow(
                             controller = controller,
                             windowWidthDp = windowSize.width,
                             windowHeightDp = windowSize.height,
-                            darkTheme = host.darkTheme,
+                            darkTheme = effectiveDark,
                             controlPlanePort = host.extension.controlPlanePort,
                             actions = actions,
                             initialPeerId = peerId,

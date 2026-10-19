@@ -50,6 +50,8 @@ class AgentSessionRegistry(
     private val maxSessions: Int = 200,
     private val maxEventsPerSession: Int = 200,
     private val maxAcks: Int = 500,
+    private val onRecordSession: ((SessionRecord) -> Unit)? = null,
+    private val onRecordEvent: ((EventRecord) -> Unit)? = null,
 ) {
 
     /** 一条 agent 会话的当前态。字段名对齐 PPE-1 §6.1 与客户端 `AgentSessionEntity`。 */
@@ -237,7 +239,7 @@ class AgentSessionRegistry(
         val key = Key(nodeId, sessionId)
         synchronized(lockFor(key)) {
             val old = sessions[key]
-            sessions[key] = SessionRecord(
+            val record = SessionRecord(
                 nodeId = nodeId,
                 sessionId = sessionId,
                 alias = alias ?: old?.alias,
@@ -255,6 +257,8 @@ class AgentSessionRegistry(
                 // 乱序/重放到达的旧宣告（at 更小）不该把一个活跃会话拉回「最旧」那一端。
                 updatedAt = maxOf(at, old?.updatedAt ?: at),
             )
+            sessions[key] = record
+            onRecordSession?.invoke(record)
         }
         evictIfNeeded()
     }
@@ -288,7 +292,25 @@ class AgentSessionRegistry(
         // 会话还没宣告就先来了事件（乱序到达）：补一条占位会话，否则面板只看到事件、看不到会话。
         ensureSession(nodeId, sessionId, at = at)
         evictIfNeeded()
+        onRecordEvent?.invoke(record)
     }
+
+    /**
+     * 按 **(nodeId, sessionId)** 查找会话 —— 台账的键就是这两个（见 [Key]），查找也必须同键。
+     *
+     * task-60 审查的裁决：**签名必须带 nodeId**。理由不是「多一层保险」，而是三条硬的：
+     *  1. 只按 sessionId 查与数据模型不一致 —— 跨设备的同 id 记录会被查出来，
+     *     调用方拿它补 wsPath 再去匹配群 ⇒ 甲仓库的活干进乙仓库的群；
+     *  2. 「只在调用点 fail-closed」只修了今天那一个调用点，却**留下 API 能把同一个 bug
+     *     再引进来**，而且是静默的；
+     *  3. 带 nodeId 的签名让错误调用**编译不过** —— 比任何运行时检查都早、都强。
+     *
+     * 优先返回带非空 wsPath 的那条（同一个 (node, session) 可能有多条宣告，命名帧通常更全）。
+     */
+    fun findSession(nodeId: String, sessionId: String): SessionRecord? =
+        sessions.values.firstOrNull {
+            it.nodeId == nodeId && it.sessionId == sessionId && !it.wsPath.isNullOrBlank()
+        } ?: sessions.values.firstOrNull { it.nodeId == nodeId && it.sessionId == sessionId }
 
     /** 记下一次任务入队 / 出队（§6.3）。同一 `taskId` 重投就地替换。 */
     fun recordQueue(

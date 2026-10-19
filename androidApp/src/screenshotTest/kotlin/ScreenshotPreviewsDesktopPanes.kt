@@ -161,7 +161,7 @@ private fun DeskConversationsPaneGroupPreview() {
             onSelect = {},
             onGoToPairing = {},
             now = PREVIEW_NOW,
-            onCreateGroup = { _, _ -> },
+            onCreateGroup = { _, _, _ -> null },
         )
     }
 }
@@ -206,7 +206,7 @@ private fun DeskConversationsPaneGroupRemoteOwnerPreview() {
             onSelect = {},
             onGoToPairing = {},
             now = PREVIEW_NOW,
-            onCreateGroup = { _, _ -> },
+            onCreateGroup = { _, _, _ -> null },
         )
     }
 }
@@ -247,7 +247,7 @@ private fun DeskConversationsPaneSearchPreview() {
             onSelect = {},
             onGoToPairing = {},
             now = PREVIEW_NOW,
-            onCreateGroup = { _, _ -> },
+            onCreateGroup = { _, _, _ -> null },
             initialGlobalSearch = DesktopPreviewSearchActions.searchGlobal("协议"),
         )
     }
@@ -284,7 +284,7 @@ private fun DeskConversationsPaneSearchEmptyPreview() {
             onSelect = {},
             onGoToPairing = {},
             now = PREVIEW_NOW,
-            onCreateGroup = { _, _ -> },
+            onCreateGroup = { _, _, _ -> null },
             initialGlobalSearch = GlobalSearchResult(query = "捎话"),
         )
     }
@@ -333,7 +333,7 @@ private fun DeskConversationsPaneNoMatchPreview() {
             onSelect = {},
             onGoToPairing = {},
             now = PREVIEW_NOW,
-            onCreateGroup = { _, _ -> },
+            onCreateGroup = { _, _, _ -> null },
             globalSearchEnabled = false,
         )
     }
@@ -568,8 +568,21 @@ private fun DeskAgentPaneExpandedPreview() {
             onRespondApproval = { _, _ -> },
             onCancelTask = {},
             onOpenChat = { _, _ -> },
+            // 桌面壳（DesktopShell 的 Agents 分支）**不接**手机那套子页导航出口 ⇒ 显式 null；
+            // onFindNodes/onRefresh 桌面壳是接的，必须武装，否则那一支不进图。
+            onFindNodes = {},
+            onRefresh = {},
+            onOpenSessionDetail = null,
+            onBackToBoard = null,
             modifier = Modifier.fillMaxSize(),
             now = PREVIEW_NOW,
+            // 按生产调用点（App.kt 的 AgentConsoleScreen 调用）逐参武装：这五个可空出口在生产侧都是
+            // 非 null 闭包，夹具不传就等于依赖它的那一支根本不渲染 —— 截图证据里也就没有它。
+            onOpenWorkspaceDetail = null,
+            onLeaveWorkspaceDetail = null,
+            onLeaveSessionDetail = null,
+            onLoadWorkspaceSessions = { _, _ -> },
+            onCreateWorkspaceGroup = {},
         )
     }
 }

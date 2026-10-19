@@ -2,6 +2,7 @@
 
 package app.relay.agent
 
+import app.relay.core.protocol.AgentGrantPolicies
 import app.relay.core.protocol.Codec
 import app.relay.core.protocol.MsgKinds
 import app.relay.core.protocol.MsgTypes
@@ -99,6 +100,7 @@ class ControlPlaneTest {
         // "A 用例把策略改成 byDevice"泄漏进 B 用例（同一条纪律：夹具假一点就测不出真故障）。
         workspaceRegistry = AgentWorkspaceRegistry()
         grantStore = AgentGrantStore(File(grantFile.absolutePath + "." + System.nanoTime()))
+        grantStore.setPolicy(AgentGrantPolicies.AUTO)
         scope.launch {
             desktop.inbound.collect { env ->
                 desktopFrames += Codec.wireJson.parseToJsonElement(Codec.encode(env)).jsonObject
@@ -478,7 +480,11 @@ class ControlPlaneTest {
         )
         assertEquals(200, res.first, res.second)
         val json = obj(res.second)
-        assertEquals("offered", json["status"]?.jsonPrimitive?.contentOrNull)
+        // task-62：这条路由改成「登记即返回」——响应只能说 offering（此刻只保证已登记），
+        // 清单有没有真的送到由**后台投递**决定。所以这里**不能**再断言 offered；
+        // 投递结果从只读出口 /v1/transfers 读（下面那段），那条断言比原来更强：
+        // 原来只验了响应里的一个字，现在验的是投递真的完成。
+        assertEquals("offering", json["status"]?.jsonPrimitive?.contentOrNull)
         assertEquals(desktop.nodeId, json["to"]?.jsonPrimitive?.contentOrNull)
         // name 缺省取路径末段：调用方不该被迫重复一次文件名。
         assertEquals(file.name, json["name"]?.jsonPrimitive?.contentOrNull)
@@ -488,7 +494,13 @@ class ControlPlaneTest {
             "应回一个 transferId：调用方要靠它对应界面上的卡片",
         )
 
-        // 关键断言：对端真的挂上了一个待处理报价，字段与协议一致。
+        // 关键断言①：**投递真的完成**（offering → offered），从只读出口读 ——
+        // 没有这条，「登记即返回」就可能把「发不出去」变成「看起来发出去了」。
+        val transferId = json["transferId"]!!.jsonPrimitive.content
+        val delivery = awaitDelivery(transferId)
+        assertEquals("offered", delivery["state"]?.jsonPrimitive?.contentOrNull, "投递应到达 offered：" + delivery)
+
+        // 关键断言②：对端真的挂上了一个待处理报价，字段与协议一致。
         val offer = runBlocking { awaitOffer() }
         assertTrue(offer != null, "对端应收到一条待处理报价")
         assertEquals(file.name, offer.rootName)
@@ -709,6 +721,23 @@ class ControlPlaneTest {
     }
 
     /** 等对端挂上一条待处理报价（文件报价走的是另一条通道，比文本帧慢半拍）。 */
+    /** 轮询只读出口，等某次报价的投递状态不再是 offering（task-62）。 */
+    private fun awaitDelivery(transferId: String, timeoutMs: Long = 5_000L): JsonObject {
+        val deadline = System.currentTimeMillis() + timeoutMs
+        var last: JsonObject? = null
+        while (System.currentTimeMillis() < deadline) {
+            val body = obj(get("/v1/transfers").second)
+            val row = body["transfers"]?.jsonArray?.map { it.jsonObject }
+                ?.firstOrNull { it["transferId"]?.jsonPrimitive?.contentOrNull == transferId }
+            if (row != null) {
+                last = row
+                if (row["state"]?.jsonPrimitive?.contentOrNull != "offering") return row
+            }
+            Thread.sleep(50)
+        }
+        return last ?: error("只读出口里没有这次报价：" + transferId)
+    }
+
     private suspend fun awaitOffer(timeoutMs: Long = 5_000L): IncomingOffer? {
         val deadline = System.currentTimeMillis() + timeoutMs
         while (System.currentTimeMillis() < deadline) {
@@ -772,9 +801,10 @@ class ControlPlaneTest {
         // grantReply 的回包发得出去。本用例直接 PUT grantReply 跳过了申请那步，
         // 所以必须自己把握手补上 —— 否则帧只会入队（QUEUED），桌面侧永远收不到。
         post("/v1/send", "{\"to\":\"127.0.0.1\",\"port\":${desktop.boundPort},\"text\":\"握手\"}")
-        // 默认策略 = auto（今天的零门控行为，零迁移）。
+        // 重设为出厂默认策略（request，闭合申请制）以检验默认读数
+        grantStore.setPolicy(AgentGrantPolicies.REQUEST)
         val before = obj(get("/v1/agent/grants").second)
-        assertEquals("auto", before["policy"]?.jsonPrimitive?.contentOrNull)
+        assertEquals("request", before["policy"]?.jsonPrimitive?.contentOrNull)
         assertEquals(0, before["grants"]!!.jsonArray.size)
         assertEquals(0, before["requests"]!!.jsonArray.size)
 
@@ -808,6 +838,48 @@ class ControlPlaneTest {
         val frames = awaitDesktop(MsgTypes.AGENT_GRANT)
         assertEquals(1, frames.size)
         assertEquals("revoked", frames[0]["payload"]!!.jsonObject["state"]?.jsonPrimitive?.contentOrNull)
+    }
+
+    @Test
+    fun workspaceScopeAndReadOnlyAccessRejectsMutation() {
+        post("/v1/send", "{\"to\":\"127.0.0.1\",\"port\":${desktop.boundPort},\"text\":\"握手\"}")
+        putJson("/v1/agent/grants", "{\"policy\":\"byDevice\"}")
+
+        // 授权只读工作区
+        val grantRo = putJson(
+            "/v1/agent/grants",
+            "{\"grant\":{\"nodeId\":\"${desktop.nodeId}\",\"scope\":\"workspace\",\"agentKey\":\"dsh\",\"wsId\":\"ws-1\",\"access\":\"ro\"}}",
+        )
+        assertEquals(200, grantRo.first, grantRo.second)
+
+        // 读操作（例如 session 宣告）允许通过
+        val sessionRes = post(
+            "/v1/agent/session",
+            "{\"to\":\"127.0.0.1\",\"port\":${desktop.boundPort},\"sessionId\":\"s-ro\",\"agentKind\":\"dsh\",\"wsId\":\"ws-1\"}",
+        )
+        assertEquals(200, sessionRes.first, "只读设备允许读取/监听 session：${sessionRes.second}")
+
+        // 写操作（例如 agent/queue 提交任务）必须被 403 拒绝
+        val queueRes = post(
+            "/v1/agent/queue",
+            "{\"to\":\"127.0.0.1\",\"port\":${desktop.boundPort},\"taskId\":\"t-ro\",\"sessionId\":\"s-ro\",\"op\":\"enqueue\",\"agentKind\":\"dsh\",\"wsId\":\"ws-1\"}",
+        )
+        assertEquals(403, queueRes.first, "只读设备不允许提交 queue 任务")
+        assertTrue(queueRes.second.contains("只读权限"), "错误文案指明只读限制：${queueRes.second}")
+
+        // 升级为读写权限
+        val grantRw = putJson(
+            "/v1/agent/grants",
+            "{\"grant\":{\"nodeId\":\"${desktop.nodeId}\",\"scope\":\"workspace\",\"agentKey\":\"dsh\",\"wsId\":\"ws-1\",\"access\":\"rw\"}}",
+        )
+        assertEquals(200, grantRw.first, grantRw.second)
+
+        // 再次提交 queue 任务，成功放行
+        val queueRwRes = post(
+            "/v1/agent/queue",
+            "{\"to\":\"127.0.0.1\",\"port\":${desktop.boundPort},\"taskId\":\"t-rw\",\"sessionId\":\"s-ro\",\"op\":\"enqueue\",\"agentKind\":\"dsh\",\"wsId\":\"ws-1\"}",
+        )
+        assertEquals(200, queueRwRes.first, "读写设备允许提交 queue 任务：${queueRwRes.second}")
     }
 
     @Test
@@ -940,8 +1012,52 @@ class ControlPlaneTest {
         return arr.map { it.jsonObject }
     }
 
+    /**
+     * task-35：**阻塞式 POST 占满处理器线程池时，/v1/peers 仍必须快**。
+     *
+     * 真机现场：手机切到移动网后，本机 127.0.0.1:8788 连续 5 次 HTTP 000、每次卡满 8.00s，
+     * 切回 WiFi 立刻恢复。**8.00s 正是"给一个不可达对端发消息"的完整退避**（UDP 1+2+4 秒
+     * 再加 TCP 兜底），而控制面的 POST 处理器是 `runBlocking { ... }` —— 一个线程被按住整整
+     * 8 秒。池子只有 4 条线程，几条这样的请求就能把**读**路由（/v1/peers）一起饿死，
+     * 而那正是观测跨网状态的唯一手段（"暂不可读"就是这么来的）。
+     */
+    @Test
+    fun peersStaysFastEvenWhenBlockingSendsFillTheHandlerPool() {
+        // 6 条并发 POST 全发往黑洞地址（TEST-NET-1，不会有 ACK）：每条按住一个线程约 8 秒。
+        val sender = java.util.concurrent.Executors.newFixedThreadPool(6)
+        val gate = java.util.concurrent.CountDownLatch(1)
+        val futures = (1..6).map {
+            sender.submit {
+                gate.await()
+                runCatching { post("/v1/send", """{"to":"192.0.2.1","port":17878,"text":"黑洞"}""") }
+            }
+        }
+        gate.countDown()
+        try {
+            // 让阻塞请求真的进到处理器里（runBlocking 已经开始按住线程）。
+            Thread.sleep(800)
+            val worst = (1..5).maxOf {
+                val startedAt = System.currentTimeMillis()
+                val res = get("/v1/peers")
+                val elapsed = System.currentTimeMillis() - startedAt
+                assertEquals(200, res.first, "阻塞发送占满处理器时 /v1/peers 也必须回 200")
+                elapsed
+            }
+            assertTrue(
+                worst < MAX_PEERS_MS,
+                "阻塞发送占满处理器时 /v1/peers 最慢 ${worst}ms（应 < ${MAX_PEERS_MS}ms）",
+            )
+        } finally {
+            futures.forEach { it.cancel(true) }
+            sender.shutdownNow()
+        }
+    }
+
     private companion object {
         const val LOOPBACK = "127.0.0.1"
+
+        /** 读路由的单次上限（真机验收是 < 200ms；这里给 CI 留余量）。 */
+        const val MAX_PEERS_MS = 1_000L
     }
 
 

@@ -3,8 +3,10 @@
 package app.relay.desktop
 
 import app.relay.ui.desktop.*
+import androidx.compose.foundation.isSystemInDarkTheme
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.material3.MaterialTheme
+import app.relay.ui.theme.ThemeMode
 import androidx.compose.material3.Surface
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.CompositionLocalProvider
@@ -192,17 +194,38 @@ internal class DesktopHost(
         filesViewTicks++
     }
 
-    fun toggleTheme() {
-        darkTheme = !darkTheme
-        DesktopUiPrefs.saveDarkTheme(controller.dataDirectory, darkTheme)
+    fun syncTheme(resolvedDark: Boolean) {
+        if (darkTheme != resolvedDark) {
+            darkTheme = resolvedDark
+            DesktopUiPrefs.saveDarkTheme(controller.dataDirectory, resolvedDark)
+        }
+    }
+
+    fun toggleTheme(systemDark: Boolean = darkTheme) {
+        val currentWire = controller.state.value.settings.themeMode
+        val currentMode = if (currentWire.isEmpty()) {
+            if (darkTheme) ThemeMode.Dark else ThemeMode.Light
+        } else {
+            ThemeMode.fromWire(currentWire)
+        }
+        val nextMode = when (currentMode) {
+            ThemeMode.Dark -> ThemeMode.Light
+            ThemeMode.Light -> ThemeMode.Dark
+            ThemeMode.System -> if (systemDark) ThemeMode.Light else ThemeMode.Dark
+        }
+        controller.updateThemeMode(nextMode.wire)
+        val resolved = nextMode.resolve(systemDark)
+        syncTheme(resolved)
     }
 }
 
 /**
  * 主窗 + 设置窗的宿主。
  *
- * 主窗的菜单栏由 [DesktopShell] 自己提供（26px 那一行），这里**不再**加第二层
- * MenuBar —— 两层菜单会让 macOS 菜单多出一整条空白。
+ * 菜单栏由这里的 [DesktopSystemMenuBar] 提供（用户裁决）：它是**系统**菜单栏 ——
+ * macOS 进屏幕顶部、Windows/Linux 进窗口菜单，不占窗口客户区高度。此前客户区里那条
+ * 26px 自绘菜单栏已整条删除，所以这里现在必须自己发一层 MenuBar，而不是像旧注释说的
+ * 「不再加第二层」（那时加会与自绘那条叠成两层，现在自绘那条已经不存在了）。
  */
 @Composable
 internal fun DesktopHostWindow(
@@ -212,6 +235,18 @@ internal fun DesktopHostWindow(
     val controller = host.controller
     val state by controller.state.collectAsState()
     val scope = rememberCoroutineScope()
+    val systemDark = isSystemInDarkTheme()
+    val effectiveDark = remember(state.settings.themeMode, systemDark) {
+        val wire = state.settings.themeMode
+        if (wire.isEmpty()) {
+            DesktopUiPrefs.loadDarkTheme(host.controller.dataDirectory, fallback = systemDark)
+        } else {
+            ThemeMode.fromWire(wire).resolve(systemDark)
+        }
+    }
+    LaunchedEffect(effectiveDark) {
+        host.syncTheme(effectiveDark)
+    }
 
     // 主窗可见性是 Compose 状态：关闭按钮只隐藏窗口（托盘常驻），托盘点击再恢复。
     // 用 AWT 的 isVisible 管这个会导致「隐藏后 Compose 失去窗口引用，无法再显示」。
@@ -303,7 +338,7 @@ internal fun DesktopHostWindow(
             enabled = true,
             // 覆盖层自己重铺了一套主题，而调用点在 AppTheme 之前，所以真实偏好只能
             // 从这里传下去；否则用户选深色、系统外观却是浅色时，遮罩会变成一张白卡片。
-            darkTheme = host.darkTheme,
+            darkTheme = effectiveDark,
             onFiles = { files ->
                 val peerId = host.selectedPeerId
                 if (peerId == null) {
@@ -317,14 +352,17 @@ internal fun DesktopHostWindow(
             },
         )
 
-        AppTheme(darkTheme = host.darkTheme) {
-            val actions = remember(host, scope) {
+        AppTheme(darkTheme = effectiveDark) {
+            val actions = remember(host, scope, systemDark) {
                 DesktopShellActions(
                     onOpenSettings = { host.settingsOpen = true },
-                    onToggleTheme = { host.toggleTheme() },
+                    onToggleTheme = { host.toggleTheme(systemDark) },
                     onExportDiagnostics = { exportDiagnostics(host) },
                     onOpenDownloadsFolder = { openDownloadsFolder(controller.dataDirectory) },
-                    onRefresh = { controller.handshake() },
+                    onRefresh = {
+                        controller.refreshPeers()
+                        controller.handshake()
+                    },
                     // 顶层视图路由归 DesktopShell：它自己先把视图切到「节点」再回调。
                     // 窗口层再写一次 view 会把那次路由覆盖掉 —— 顶层视图只有 shell 一个主人。
                     onNewConversation = {},
@@ -347,6 +385,25 @@ internal fun DesktopHostWindow(
                 )
             }
 
+            // 系统菜单栏：主窗给全 6 条（新建会话 / 导入文件 / 设置 / 截图 / 诊断包 / 退出）。
+            DesktopSystemMenuBar(
+                onNewConversation = {
+                    // 与 DesktopShell 的 ⌘N 逐字同一条路：切到节点视图 + 宿主动作。
+                    // view 归 shell 独占，窗口层用既有的一次性请求通道表达「切到节点」
+                    // （shell 的 LaunchedEffect(externalNodesRequest) 收到后自己切）。
+                    host.requestNodesView()
+                    actions.onNewConversation()
+                },
+                onImportFiles = { host.selectedPeerId?.let(actions.onImportFiles) },
+                canImportFiles = canImportFiles(host.selectedPeerId),
+                onOpenSettings = actions.onOpenSettings,
+                // 与 DesktopShell 的 ⌘⇧A 逐字同一个表达式：截图覆盖窗是独立窗，
+                // 不在这里顺带改视图（那条纪律原来写在自绘菜单栏上，见 task-25）。
+                onScreenCapture = { controller.triggerScreenCapture(host.selectedPeerId) },
+                onExportDiagnostics = actions.onExportDiagnostics,
+                onQuit = onExitApplication,
+            )
+
             Surface(Modifier.fillMaxSize(), color = MaterialTheme.colorScheme.background) {
                 // 文件卡片「拖出去」要原生 AWT 窗口句柄，而 FrameWindowScope.window
                 // 只在这一层可见，所以从这里往下提供，不必改 DesktopShell 的签名。
@@ -358,7 +415,7 @@ internal fun DesktopHostWindow(
                             controller = controller,
                             windowWidthDp = windowSize.width,
                             windowHeightDp = windowSize.height,
-                            darkTheme = host.darkTheme,
+                            darkTheme = effectiveDark,
                             controlPlanePort = host.extension.controlPlanePort,
                             actions = actions,
                             externalNodesRequest = host.nodesViewTicks,
@@ -407,7 +464,7 @@ internal fun DesktopHostWindow(
                 window.toFront()
                 window.requestFocus()
             }
-            AppTheme(darkTheme = host.darkTheme) {
+            AppTheme(darkTheme = effectiveDark) {
                 app.relay.desktop.capture.CaptureOverlayView(
                     rawImage = capture.image,
                     viewportWidth = capture.bounds.width.toFloat(),
@@ -498,6 +555,15 @@ private fun FrameWindowScope.DesktopWindowChrome(
 @Composable
 private fun DesktopSettingsWindow(host: DesktopHost, onClose: () -> Unit) {
     val state by host.controller.state.collectAsState()
+    val systemDark = isSystemInDarkTheme()
+    val effectiveDark = remember(state.settings.themeMode, systemDark) {
+        val wire = state.settings.themeMode
+        if (wire.isEmpty()) {
+            DesktopUiPrefs.loadDarkTheme(host.controller.dataDirectory, fallback = systemDark)
+        } else {
+            ThemeMode.fromWire(wire).resolve(systemDark)
+        }
+    }
     Window(
         onCloseRequest = onClose,
         state = rememberWindowState(
@@ -509,7 +575,7 @@ private fun DesktopSettingsWindow(host: DesktopHost, onClose: () -> Unit) {
         ),
         title = "捎话 设置",
     ) {
-        AppTheme(darkTheme = host.darkTheme) {
+        AppTheme(darkTheme = effectiveDark) {
             DesktopSettingsPane(state, host.controller, host, onClose = onClose)
         }
     }

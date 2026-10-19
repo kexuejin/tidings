@@ -198,6 +198,9 @@ fun AgentWorkspaceRegistry.recordInboundWorkspace(envelope: Envelope) {
         online = (p["online"] as? kotlinx.serialization.json.JsonPrimitive)
             ?.takeIf { !it.isString }?.let { it.content == "true" },
         sessionCount = p["sessionCount"]?.jsonPrimitive?.longOrNull,
+        // 宿主注册表持久序。入站这一路必须原样带上，否则工作区在宿主侧有 order、
+        // 到了设备侧却整列 NULL（真机症状：同一批工作区两边排序不同）。
+        order = p["order"]?.jsonPrimitive?.longOrNull,
         outbound = false,
         at = p["at"]?.jsonPrimitive?.longOrNull ?: System.currentTimeMillis(),
     )
@@ -218,6 +221,8 @@ fun AgentGrantStore.recordInboundGrant(envelope: Envelope): Boolean {
     recordRequest(
         nodeId = envelope.from,
         agentKey = p["agentKey"]?.jsonPrimitive?.contentOrNull,
+        wsId = p["wsId"]?.jsonPrimitive?.contentOrNull,
+        access = p["access"]?.jsonPrimitive?.contentOrNull,
         reason = p["reason"]?.jsonPrimitive?.contentOrNull,
         at = p["at"]?.jsonPrimitive?.longOrNull ?: System.currentTimeMillis(),
     )

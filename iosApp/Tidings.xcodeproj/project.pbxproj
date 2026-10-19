@@ -379,6 +379,7 @@
 					"$(inherited)",
 					"-framework",
 					RelayShared,
+					"-lsqlite3",
 				);
 				PRODUCT_BUNDLE_IDENTIFIER = app.relay;
 				PRODUCT_NAME = Tidings;
@@ -458,6 +459,7 @@
 					"$(inherited)",
 					"-framework",
 					RelayShared,
+					"-lsqlite3",
 				);
 				PRODUCT_BUNDLE_IDENTIFIER = app.relay;
 				PRODUCT_NAME = Tidings;

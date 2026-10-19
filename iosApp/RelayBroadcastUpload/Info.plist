@@ -64,6 +64,6 @@
             <key>CFBundleURLName</key>
             <string>app.relay.RelayBroadcastUpload</string>
         </dict>
-    </CFBundleURLTypes>
+    </array>
 </dict>
 </plist>

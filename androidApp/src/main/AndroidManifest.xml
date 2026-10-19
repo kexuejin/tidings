@@ -58,6 +58,14 @@
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE_MEDIA_PROJECTION" />
 
     <!--
+        后台接收（「保持连接」前台服务）。Android 14 起每个前台服务都必须声明类型，
+        而类型与这条权限必须成对出现：只写 android:foregroundServiceType="remoteMessaging"
+        而不声明 FOREGROUND_SERVICE_REMOTE_MESSAGING，startForeground 会抛
+        SecurityException —— 与上面投屏那两条同一类"构建全绿、真机才炸"的缺陷。
+    -->
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_REMOTE_MESSAGING" />
+
+    <!--
         刻意**不**声明 CHANGE_WIFI_MULTICAST_STATE，但理由不是"手机端不广播" ——
         那句话曾经写在这里，是错的，而且掩盖了一个真机缺陷（见 Discovery.kt 的类注释）。实际情况是：
 
@@ -102,6 +110,13 @@
                 <action android:name="android.intent.action.MAIN" />
                 <category android:name="android.intent.category.LAUNCHER" />
             </intent-filter>
+            <intent-filter>
+                <action android:name="android.intent.action.VIEW" />
+                <category android:name="android.intent.category.DEFAULT" />
+                <category android:name="android.intent.category.BROWSABLE" />
+                <data android:scheme="relay" />
+                <data android:scheme="relay-pair" />
+            </intent-filter>
         </activity>
 
         <!--
@@ -116,6 +131,44 @@
             android:name=".ScreenShareForegroundService"
             android:exported="false"
             android:foregroundServiceType="mediaProjection" />
+
+        <!--
+            「保持连接」前台服务：应用退到后台时用它把进程留在前台状态，免得被系统打成
+            cached 并收紧网络 —— 真机实测（2026-10-18 红米）：进程活着、UDP/TCP 端口仍绑着、
+            系统也没冻结它，但对端约 90 秒后就把它判成离线、消息全部积压（实测 40 条）；
+            切回前台后对端立刻重新发现它、新消息当场到达。
+
+            ## 为什么类型选 remoteMessaging（而不是 dataSync / connectedDevice / specialUse）
+
+              · 官方 FGS 类型表里 remoteMessaging 的**运行时前置条件为空**，配套权限只有
+                FOREGROUND_SERVICE_REMOTE_MESSAGING（普通权限，无运行时弹窗）；
+              · dataSync 从 Android 15 起有**每 24 小时累计 6 小时**的上限，到点被系统停掉 ——
+                对一个"常驻收消息"的信使，那是功能性的残缺，不是省电优化；
+              · connectedDevice 要求额外声明/申请一组前置权限（CHANGE_NETWORK_STATE、
+                CHANGE_WIFI_MULTICAST_STATE、蓝牙、UWB 等），而它的官方说明里明确写着
+                「如果应用做的是远程消息，请改用 remoteMessaging 类型」；
+              · specialUse 需要在清单里写 <property> 用途并在 Play 控制台申报、接受审核，
+                而我们这个用途**正好有专门类型**，不该占 specialUse 的额度。
+
+            remoteMessaging 的官方描述就是"在一台设备与另一台设备之间传递文本消息、
+            帮助用户在换设备时保持消息任务连续"—— 本应用（捎话）的 LAN 点对点收发正落在这里。
+            参考实现：third_source/DS-Bot-App 的 background-notifications 模块用的也是
+            remoteMessaging（Apache-2.0），声明与 startForeground 第三参写法一致。
+
+            刻意**不设** android:stopWithTask="true"：对信使类应用，"从最近任务划掉"不等于
+            "退出"——用户划掉它恰恰是希望它继续在后台收消息（原始诉求就是"手机收不到"）。
+            行为不是隐藏的：常驻通知一直在，正文写明"关掉「后台保持连接」即可停止"，
+            设置页也有同名开关。把划掉当停止反而与本功能的初衷相反。
+
+            exported=false：只由本应用经 ConnectionKeepAliveGate 拉起，外部拉不起也不该拉起。
+            这个服务与投屏那个是**两个独立的 service**（不是同一 service 的两个 action）：
+            两者的生命周期完全不同 —— 投屏随会话结束，保活是用户级开关且要跨会话常驻；
+            合并成一个会让"结束投屏"顺手把保活也停掉（反之亦然），而它们没有任何共同状态。
+        -->
+        <service
+            android:name=".ConnectionKeepAliveService"
+            android:exported="false"
+            android:foregroundServiceType="remoteMessaging" />
 
         <!--
             收到的文件落在 filesDir/relay/downloads（应用内部目录），文件管理器看不见，

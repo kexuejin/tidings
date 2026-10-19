@@ -2,6 +2,7 @@
 
 package app.relay.agent
 
+import app.relay.core.protocol.AgentGrantAccess
 import app.relay.core.protocol.AgentGrantPolicies
 import app.relay.core.protocol.AgentGrantScopes
 import java.io.File
@@ -14,6 +15,7 @@ import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.JsonPrimitive
 import kotlinx.serialization.json.buildJsonArray
 import kotlinx.serialization.json.buildJsonObject
+import kotlinx.serialization.json.booleanOrNull
 import kotlinx.serialization.json.contentOrNull
 import kotlinx.serialization.json.longOrNull
 
@@ -30,9 +32,9 @@ import kotlinx.serialization.json.longOrNull
  *
  * | 档 | 语义 |
  * |---|---|
- * | `auto`（默认） | 任何已添加的节点可见全部 agent —— 今天的零门控行为，零迁移 |
+ * | `auto` | 任何已添加的节点可见全部 agent —— 开放档 |
  * | `byDevice` | per-nodeId 白名单，缺省拒绝 |
- * | `request` | 未授权设备可申请 → 桌面端批准/拒绝；申请进 [requests] 队列 |
+ * | `request`（默认） | 默认闭合：未授权设备需发起申请 → 桌面端批准/拒绝；申请进 [requests] 队列 |
  *
  * 旧端（不声明 `agr1`）在 `byDevice`/`request` 下收不到 agent 数据：**沉默 = 未授权**，
  * 不猜、不默认放行（父稿 §3.3）。
@@ -40,8 +42,7 @@ import kotlinx.serialization.json.longOrNull
  * ## 两条诚实边界（写进这里，UI 文案必须带上）
  *
  * 1. **撤销不回收历史**：授权只拦未来的投递；已经投到对方设备上的数据就在对方本地库里。
- * 2. **默认 `auto` = 默认开放**：第一次收到某设备的申请/宣告时在 [requests] 留一条记录
- *    （谁、何时、要什么），别让"默认开放"变成"无声开放"。
+ * 2. **默认闭合**：首次运行默认策略为 `request`，确保安全闭环。
  *
  * ## 落盘
  *
@@ -50,7 +51,7 @@ import kotlinx.serialization.json.longOrNull
  * 不能又退回"未授权"，那等于把人的按钮抹掉；而 `auto` 档同样要记住（有人显式改回
  * `auto` 也是决定）。
  *
- * **读不回来时 fail-closed**：文件不存在 = 首次运行（出厂 `auto`）；文件在但读不出 /
+ * **读不回来时 fail-closed**：文件不存在 = 首次运行（出厂 `request`）；文件在但读不出 /
  * 解析不了 / 档位不合法 = 退回最严档 `request` 并把原因记进 [Snapshot.loadError]。
  * 绝不能"静默退回 `auto`" —— 那等于把文件写坏就能给自己发全量授权（见 [load]）。
  *
@@ -59,11 +60,15 @@ import kotlinx.serialization.json.longOrNull
  */
 class AgentGrantStore(private val file: File) {
 
-    /** 一条生效授权。scope=all 时 [agentKey] 为 null（整台设备）。 */
+    /** 一条生效授权。scope=all 时 agentKey 为 null；scope=workspace 时带有 wsId。 */
     data class Grant(
         val nodeId: String,
         val scope: String,
         val agentKey: String?,
+        val wsId: String? = null,
+        val access: String = AgentGrantAccess.RW,
+        val isMyDevice: Boolean = false,
+        val delegatedApproval: Boolean = false,
         val grantedAt: Long,
         val grantedBy: String?,
     )
@@ -72,6 +77,8 @@ class AgentGrantStore(private val file: File) {
     data class Request(
         val nodeId: String,
         val agentKey: String?,
+        val wsId: String? = null,
+        val access: String? = null,
         val reason: String?,
         val at: Long,
     )
@@ -91,7 +98,7 @@ class AgentGrantStore(private val file: File) {
     )
 
     private val rwLock = ReentrantReadWriteLock()
-    private var policy: String = AgentGrantPolicies.AUTO
+    private var policy: String = AgentGrantPolicies.REQUEST
     private var grants: MutableList<Grant> = mutableListOf()
     private var requests: MutableList<Request> = mutableListOf()
     private var loadError: String? = null
@@ -107,18 +114,41 @@ class AgentGrantStore(private val file: File) {
     /**
      * 投递前的门控（执行点）。
      *
-     * `auto` 恒真；`byDevice`/`request` 查白名单：`scope=all` 命中任何 agentKey，
-     * `scope=agent` 只在 [agentKey] **非空且逐字相等**时命中 —— 帧没带 agentKey 时
-     * 不许拿 scope=agent 的授权放行（那是"猜"，父稿的降级铁律：缺哪一层就退化到哪一层，
-     * 但**不退着放行**）。
+     * `auto` 恒真；`byDevice`/`request` 查白名单：
+     * - `scope=all` 命中任何 agentKey / wsId；
+     * - `scope=agent` 命中对应 agentKey 下的任意工作区；
+     * - `scope=workspace` 命中指定 wsId；
+     * - 当 [requireRw]=true 时，要求授权 access 必须具备读写能力（RW / ADMIN / OWNER）；
+     * - 当 [requireApproval]=true 时，要求是我的设备、OWNER、或开启委托审批的 ADMIN。
      */
-    fun allows(nodeId: String, agentKey: String?): Boolean = rwLock.read {
+    fun allows(
+        nodeId: String,
+        agentKey: String? = null,
+        wsId: String? = null,
+        requireRw: Boolean = false,
+        requireApproval: Boolean = false,
+    ): Boolean = rwLock.read {
         if (policy == AgentGrantPolicies.AUTO) return@read true
         grants.any { g ->
-            g.nodeId == nodeId && (
-                g.scope == AgentGrantScopes.ALL ||
-                    (g.scope == AgentGrantScopes.AGENT && agentKey != null && g.agentKey == agentKey)
-                )
+            if (g.nodeId != nodeId) return@any false
+            if (requireRw) {
+                val hasRw = g.access in setOf(AgentGrantAccess.RW, AgentGrantAccess.ADMIN, AgentGrantAccess.OWNER)
+                if (!hasRw) return@any false
+            }
+            if (requireApproval) {
+                val canApprove = g.isMyDevice || g.access == AgentGrantAccess.OWNER ||
+                    (g.access == AgentGrantAccess.ADMIN && g.delegatedApproval)
+                if (!canApprove) return@any false
+            }
+            when (g.scope) {
+                AgentGrantScopes.ALL -> true
+                AgentGrantScopes.AGENT -> agentKey != null && g.agentKey == agentKey
+                AgentGrantScopes.WORKSPACE -> {
+                    (agentKey == null || g.agentKey == null || g.agentKey == agentKey) &&
+                        (wsId != null && g.wsId == wsId)
+                }
+                else -> false
+            }
         }
     }
 
@@ -131,15 +161,57 @@ class AgentGrantStore(private val file: File) {
         return true
     }
 
-    /** 授权（幂等：同 (nodeId, scope, agentKey) 重入只刷新时间戳）。 */
-    fun grant(nodeId: String, scope: String, agentKey: String?, grantedBy: String?, at: Long): Grant? {
+    fun grant(nodeId: String, scope: String, agentKey: String?, grantedBy: String?, at: Long): Grant? =
+        grant(nodeId, scope, agentKey, wsId = null, access = AgentGrantAccess.RW, isMyDevice = false, delegatedApproval = false, grantedBy = grantedBy, at = at)
+
+    fun grant(
+        nodeId: String,
+        scope: String,
+        agentKey: String?,
+        wsId: String? = null,
+        access: String = AgentGrantAccess.RW,
+        grantedBy: String?,
+        at: Long,
+    ): Grant? = grant(nodeId, scope, agentKey, wsId, access, isMyDevice = false, delegatedApproval = false, grantedBy = grantedBy, at = at)
+
+    /** 授权（幂等：同 (nodeId, scope, agentKey, wsId) 重入只刷新时间戳与权限）。 */
+    fun grant(
+        nodeId: String,
+        scope: String,
+        agentKey: String?,
+        wsId: String? = null,
+        access: String = AgentGrantAccess.RW,
+        isMyDevice: Boolean = false,
+        delegatedApproval: Boolean = false,
+        grantedBy: String?,
+        at: Long,
+    ): Grant? {
         if (scope !in AgentGrantScopes.VALUES) return null
-        val g = Grant(nodeId, scope, if (scope == AgentGrantScopes.AGENT) agentKey else null, at, grantedBy)
+        val normalizedAccess = if (access in AgentGrantAccess.VALUES) access else AgentGrantAccess.RW
+        val finalAgentKey = if (scope == AgentGrantScopes.ALL) null else agentKey
+        val finalWsId = if (scope == AgentGrantScopes.WORKSPACE) wsId else null
+        val g = Grant(
+            nodeId = nodeId,
+            scope = scope,
+            agentKey = finalAgentKey,
+            wsId = finalWsId,
+            access = normalizedAccess,
+            isMyDevice = isMyDevice,
+            delegatedApproval = delegatedApproval,
+            grantedAt = at,
+            grantedBy = grantedBy,
+        )
         rwLock.write {
-            grants.removeAll { it.nodeId == g.nodeId && it.scope == g.scope && it.agentKey == g.agentKey }
+            grants.removeAll {
+                it.nodeId == g.nodeId && it.scope == g.scope && it.agentKey == g.agentKey && it.wsId == g.wsId
+            }
             grants += g
-            // 批完即从待办里摘掉这条申请（同 (nodeId, agentKey)）。
-            requests.removeAll { it.nodeId == nodeId && it.agentKey == g.agentKey }
+            // 批完即从待办里摘掉匹配的申请
+            requests.removeAll {
+                it.nodeId == nodeId &&
+                    (g.agentKey == null || it.agentKey == g.agentKey) &&
+                    (g.wsId == null || it.wsId == g.wsId)
+            }
             trimLocked()
             persistLocked()
         }
@@ -149,12 +221,13 @@ class AgentGrantStore(private val file: File) {
     /**
      * 撤销。**只拦未来**：已经投出去的数据在对方设备本地库里，这里不回收（边界 1）。
      */
-    fun revoke(nodeId: String, scope: String, agentKey: String?): Int {
+    fun revoke(nodeId: String, scope: String, agentKey: String?, wsId: String? = null): Int {
         var removed = 0
         rwLock.write {
             val doomed = grants.filter {
                 it.nodeId == nodeId && it.scope == scope &&
-                    (scope != AgentGrantScopes.AGENT || it.agentKey == agentKey)
+                    (scope != AgentGrantScopes.AGENT || it.agentKey == agentKey) &&
+                    (scope != AgentGrantScopes.WORKSPACE || (it.agentKey == agentKey && it.wsId == wsId))
             }
             removed = doomed.size
             grants.removeAll(doomed.toSet())
@@ -163,11 +236,43 @@ class AgentGrantStore(private val file: File) {
         return removed
     }
 
-    /** 记下一条入站申请（宿主侧）。同 (nodeId, agentKey) 重投就地替换（新 reason/at 覆盖）。 */
-    fun recordRequest(nodeId: String, agentKey: String?, reason: String?, at: Long) {
+    fun revokeAll(nodeId: String): Int {
+        var removed = 0
         rwLock.write {
-            requests.removeAll { it.nodeId == nodeId && it.agentKey == agentKey }
-            requests += Request(nodeId, agentKey, reason, at)
+            val doomed = grants.filter { it.nodeId == nodeId }
+            removed = doomed.size
+            grants.removeAll(doomed.toSet())
+            persistLocked()
+        }
+        return removed
+    }
+
+    fun rejectRequest(nodeId: String, agentKey: String? = null, wsId: String? = null) {
+        rwLock.write {
+            requests.removeAll {
+                it.nodeId == nodeId &&
+                    (agentKey == null || it.agentKey == agentKey) &&
+                    (wsId == null || it.wsId == wsId)
+            }
+            persistLocked()
+        }
+    }
+
+    fun recordRequest(nodeId: String, agentKey: String?, reason: String?, at: Long) =
+        recordRequest(nodeId, agentKey, wsId = null, access = null, reason = reason, at = at)
+
+    /** 记下一条入站申请（宿主侧）。同 (nodeId, agentKey, wsId) 重投就地替换（新 reason/at 覆盖）。 */
+    fun recordRequest(
+        nodeId: String,
+        agentKey: String?,
+        wsId: String? = null,
+        access: String? = null,
+        reason: String?,
+        at: Long,
+    ) {
+        rwLock.write {
+            requests.removeAll { it.nodeId == nodeId && it.agentKey == agentKey && it.wsId == wsId }
+            requests += Request(nodeId, agentKey, wsId, access, reason, at)
             trimLocked()
             persistLocked()
         }
@@ -236,12 +341,30 @@ class AgentGrantStore(private val file: File) {
                 val o = el as? JsonObject ?: return@mapNotNull null
                 val nodeId = o.str("nodeId") ?: return@mapNotNull null
                 val scope = o.str("scope")?.takeIf { it in AgentGrantScopes.VALUES } ?: return@mapNotNull null
-                Grant(nodeId, scope, o.str("agentKey"), (o["grantedAt"] as? JsonPrimitive)?.longOrNull ?: 0L, o.str("grantedBy"))
+                val access = o.str("access")?.takeIf { it in AgentGrantAccess.VALUES } ?: AgentGrantAccess.RW
+                Grant(
+                    nodeId = nodeId,
+                    scope = scope,
+                    agentKey = o.str("agentKey"),
+                    wsId = o.str("wsId"),
+                    access = access,
+                    isMyDevice = (o["isMyDevice"] as? JsonPrimitive)?.booleanOrNull ?: false,
+                    delegatedApproval = (o["delegatedApproval"] as? JsonPrimitive)?.booleanOrNull ?: false,
+                    grantedAt = (o["grantedAt"] as? JsonPrimitive)?.longOrNull ?: 0L,
+                    grantedBy = o.str("grantedBy"),
+                )
             }?.toMutableList() ?: mutableListOf()
             requests = (root["requests"] as? JsonArray)?.mapNotNull { el ->
                 val o = el as? JsonObject ?: return@mapNotNull null
                 val nodeId = o.str("nodeId") ?: return@mapNotNull null
-                Request(nodeId, o.str("agentKey"), o.str("reason"), (o["at"] as? JsonPrimitive)?.longOrNull ?: 0L)
+                Request(
+                    nodeId = nodeId,
+                    agentKey = o.str("agentKey"),
+                    wsId = o.str("wsId"),
+                    access = o.str("access"),
+                    reason = o.str("reason"),
+                    at = (o["at"] as? JsonPrimitive)?.longOrNull ?: 0L,
+                )
             }?.toMutableList() ?: mutableListOf()
             loadError = null
             // 文件是磁盘上的字节，谁都可能往里塞一百万条 —— 装载后立刻有界化。
@@ -292,6 +415,10 @@ class AgentGrantStore(private val file: File) {
                         put("nodeId", JsonPrimitive(g.nodeId))
                         put("scope", JsonPrimitive(g.scope))
                         g.agentKey?.let { put("agentKey", JsonPrimitive(it)) }
+                        g.wsId?.let { put("wsId", JsonPrimitive(it)) }
+                        put("access", JsonPrimitive(g.access))
+                        if (g.isMyDevice) put("isMyDevice", JsonPrimitive(true))
+                        if (g.delegatedApproval) put("delegatedApproval", JsonPrimitive(true))
                         put("grantedAt", JsonPrimitive(g.grantedAt))
                         g.grantedBy?.let { put("grantedBy", JsonPrimitive(it)) }
                     })
@@ -302,6 +429,8 @@ class AgentGrantStore(private val file: File) {
                     add(buildJsonObject {
                         put("nodeId", JsonPrimitive(r.nodeId))
                         r.agentKey?.let { put("agentKey", JsonPrimitive(it)) }
+                        r.wsId?.let { put("wsId", JsonPrimitive(it)) }
+                        r.access?.let { put("access", JsonPrimitive(it)) }
                         r.reason?.let { put("reason", JsonPrimitive(it)) }
                         put("at", JsonPrimitive(r.at))
                     })

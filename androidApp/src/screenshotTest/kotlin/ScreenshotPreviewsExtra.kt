@@ -424,6 +424,13 @@ private fun AgentsEmptyPhonePreview() {
                 onCancelTask = {},
                 onOpenSessionDetail = null,
                 onBackToBoard = null,
+                // 按生产调用点（App.kt 的 AgentConsoleScreen 调用）逐参武装：这五个可空出口在生产侧都是
+                // 非 null 闭包，夹具不传就等于依赖它的那一支根本不渲染 —— 截图证据里也就没有它。
+                onOpenWorkspaceDetail = { _, _ -> },
+                onLeaveWorkspaceDetail = {},
+                onLeaveSessionDetail = {},
+                onLoadWorkspaceSessions = { _, _ -> },
+                onCreateWorkspaceGroup = {},
                 modifier = inner,
                 now = PREVIEW_NOW_ODD,
             )
@@ -467,6 +474,13 @@ private fun AgentsSelectedOfflinePhonePreview() {
                 onCancelTask = {},
                 onOpenSessionDetail = null,
                 onBackToBoard = null,
+                // 按生产调用点（App.kt 的 AgentConsoleScreen 调用）逐参武装：这五个可空出口在生产侧都是
+                // 非 null 闭包，夹具不传就等于依赖它的那一支根本不渲染 —— 截图证据里也就没有它。
+                onOpenWorkspaceDetail = { _, _ -> },
+                onLeaveWorkspaceDetail = {},
+                onLeaveSessionDetail = {},
+                onLoadWorkspaceSessions = { _, _ -> },
+                onCreateWorkspaceGroup = {},
                 modifier = inner,
                 now = PREVIEW_NOW_ODD,
             )
@@ -501,6 +515,13 @@ private fun AgentsSessionsPhonePreview() {
                 onCancelTask = {},
                 onOpenSessionDetail = null,
                 onBackToBoard = null,
+                // 按生产调用点（App.kt 的 AgentConsoleScreen 调用）逐参武装：这五个可空出口在生产侧都是
+                // 非 null 闭包，夹具不传就等于依赖它的那一支根本不渲染 —— 截图证据里也就没有它。
+                onOpenWorkspaceDetail = { _, _ -> },
+                onLeaveWorkspaceDetail = {},
+                onLeaveSessionDetail = {},
+                onLoadWorkspaceSessions = { _, _ -> },
+                onCreateWorkspaceGroup = {},
                 modifier = inner,
                 now = PREVIEW_NOW_ODD,
             )
@@ -613,6 +634,13 @@ private fun AgentsSessionNoAliasPhonePreview() {
                 // 传上非 null 反而与生产不一致。
                 onOpenSessionDetail = null,
                 onBackToBoard = null,
+                // 按生产调用点（App.kt 的 AgentConsoleScreen 调用）逐参武装：这五个可空出口在生产侧都是
+                // 非 null 闭包，夹具不传就等于依赖它的那一支根本不渲染 —— 截图证据里也就没有它。
+                onOpenWorkspaceDetail = { _, _ -> },
+                onLeaveWorkspaceDetail = {},
+                onLeaveSessionDetail = {},
+                onLoadWorkspaceSessions = { _, _ -> },
+                onCreateWorkspaceGroup = {},
                 modifier = inner,
                 now = PREVIEW_NOW_ODD,
             )
@@ -657,8 +685,18 @@ private fun AgentsSessionPickPhonePreview() {
                 onBackToBoard = null,
                 // 直接落在二级会话详情台（生产靠点工作区卡才下钻），再让浮层默认打开。
                 // `initialSessionPickerOpen` 只给截图门禁用，生产侧一律默认 false。
-                inDetail = true,
+                                // 二级会话详情台要有 detailSessionId 才会渲染（否则落在看板上、浮层永远不打开 ⇒ 与
+                // AgentsSessionsPhonePreview 逐字节相同，重复帧门禁会红）。
+                detailSessionId = "s-pick01",
+inDetail = true,
                 initialSessionPickerOpen = true,
+                // 按生产调用点（App.kt 的 AgentConsoleScreen 调用）逐参武装：这五个可空出口在生产侧都是
+                // 非 null 闭包，夹具不传就等于依赖它的那一支根本不渲染 —— 截图证据里也就没有它。
+                onOpenWorkspaceDetail = { _, _ -> },
+                onLeaveWorkspaceDetail = {},
+                onLeaveSessionDetail = {},
+                onLoadWorkspaceSessions = { _, _ -> },
+                onCreateWorkspaceGroup = {},
                 modifier = inner,
                 now = PREVIEW_NOW_ODD,
             )
@@ -767,6 +805,8 @@ private fun SettingsMoreStoragePhonePreview() {
     AppTheme(darkTheme = false) {
         ExtraScreen(AppRoutes.SETTINGS, badges = navBadges(humanOnlyState)) { inner ->
             SettingsDataSubpage(
+                // 武装这一支：可空出口不传则依赖它的界面根本不渲染（截图证据里没有它）。
+                onLinkDownlinkEnabledChange = {},
                 modifier = inner,
                 dataDirectory = "/data/user/0/app.relay/files/relay",
                 cacheDirectory = "/data/user/0/app.relay/cache/relay",
@@ -815,6 +855,8 @@ private fun SettingsMoreLoadingPhonePreview() {
     AppTheme(darkTheme = false) {
         ExtraScreen(AppRoutes.SETTINGS, badges = navBadges(humanOnlyState)) { inner ->
             SettingsDataSubpage(
+                // 武装这一支：可空出口不传则依赖它的界面根本不渲染（截图证据里没有它）。
+                onLinkDownlinkEnabledChange = {},
                 modifier = inner,
                 dataDirectory = "/data/user/0/app.relay/files/relay",
                 cacheDirectory = "/data/user/0/app.relay/cache/relay",
@@ -1911,7 +1953,7 @@ private fun NodesLongTextPhonePreview() {
                 onCleanupUnreachable = {},
                 onRetryStart = {},
                 onDismissBanner = {},
-                modifier = inner,
+    modifier = inner,
             )
         }
     }
@@ -1934,6 +1976,13 @@ private fun AgentsLongTextPhonePreview() {
                 onCancelTask = {},
                 onOpenSessionDetail = null,
                 onBackToBoard = null,
+                // 按生产调用点（App.kt 的 AgentConsoleScreen 调用）逐参武装：这五个可空出口在生产侧都是
+                // 非 null 闭包，夹具不传就等于依赖它的那一支根本不渲染 —— 截图证据里也就没有它。
+                onOpenWorkspaceDetail = { _, _ -> },
+                onLeaveWorkspaceDetail = {},
+                onLeaveSessionDetail = {},
+                onLoadWorkspaceSessions = { _, _ -> },
+                onCreateWorkspaceGroup = {},
                 modifier = inner,
                 now = PREVIEW_NOW_ODD,
             )
@@ -1956,6 +2005,8 @@ private fun SettingsBannerPhonePreview() {
                 onRestart = {},
                 onDismissBanner = {},
                 onClearNote = {},
+                // 武装这一支：可空出口不传则依赖它的界面根本不渲染（截图证据里没有它）。
+                onRemovePickedAvatar = {},
                 modifier = inner,
             )
         }
@@ -1977,6 +2028,8 @@ private fun SettingsNotePhonePreview() {
                 onRestart = {},
                 onDismissBanner = {},
                 onClearNote = {},
+                // 武装这一支：可空出口不传则依赖它的界面根本不渲染（截图证据里没有它）。
+                onRemovePickedAvatar = {},
                 modifier = inner,
             )
         }
@@ -1998,6 +2051,8 @@ private fun SettingsLongTextPhonePreview() {
                 onRestart = {},
                 onDismissBanner = {},
                 onClearNote = {},
+                // 武装这一支：可空出口不传则依赖它的界面根本不渲染（截图证据里没有它）。
+                onRemovePickedAvatar = {},
                 modifier = inner,
             )
         }
@@ -2017,6 +2072,8 @@ private fun SettingsMoreLongTextPhonePreview() {
     AppTheme(darkTheme = false) {
         ExtraScreen(AppRoutes.SETTINGS, badges = navBadges(longProfileState)) { inner ->
             SettingsDataSubpage(
+                // 武装这一支：可空出口不传则依赖它的界面根本不渲染（截图证据里没有它）。
+                onLinkDownlinkEnabledChange = {},
                 modifier = inner,
                 dataDirectory = "/data/user/0/app.relay/files/relay/downloads/2026-10-07-quarterly-review",
                 cacheDirectory = "/data/user/0/app.relay/cache/relay/thumbs",

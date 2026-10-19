@@ -256,7 +256,11 @@ private fun AgentsSessionErrorPhonePreview() {
         StateSlotScreen(AppRoutes.AGENTS, badges = navBadges(state)) { inner ->
             AgentConsoleScreen(
                 state = state,
-                selectedAgentId = codexAgent.nodeId,
+                                // 状态槽要拍的是**会话详情**的错误态：不传 detailSessionId 会落在看板上，
+                // 与 AgentsLongTextPhonePreview 逐字节相同（重复帧门禁红）。
+                inDetail = true,
+                detailSessionId = "s-error01",
+selectedAgentId = codexAgent.nodeId,
                 onSelectAgent = {},
                 onOpenChat = { _, _ -> },
                 onFindNodes = {},
@@ -265,6 +269,13 @@ private fun AgentsSessionErrorPhonePreview() {
                 onCancelTask = {},
                 onOpenSessionDetail = null,
                 onBackToBoard = null,
+                // 按生产调用点（App.kt 的 AgentConsoleScreen 调用）逐参武装：这五个可空出口在生产侧都是
+                // 非 null 闭包，夹具不传就等于依赖它的那一支根本不渲染 —— 截图证据里也就没有它。
+                onOpenWorkspaceDetail = { _, _ -> },
+                onLeaveWorkspaceDetail = {},
+                onLeaveSessionDetail = {},
+                onLoadWorkspaceSessions = { _, _ -> },
+                onCreateWorkspaceGroup = {},
                 modifier = inner,
                 now = PREVIEW_NOW,
             )
@@ -700,6 +711,8 @@ private fun SettingsProfilePhonePreview() {
                 // **置灰态**，而置灰态不是产品 —— 原型 `avSeg()`（`prototype/relay.html:2149-2156`）
                 // 画的是三档等宽、第三档可点。不传 = 欠武装帧。
                 onOpenAvatarPage = {},
+                // 武装这一支：可空出口不传则依赖它的界面根本不渲染（截图证据里没有它）。
+                onRemovePickedAvatar = {},
                 modifier = inner,
             )
         }
@@ -725,7 +738,7 @@ private fun SettingsProfilePhonePreview() {
  *
  * ## 画幅就用标准手机屏（852dp）
  *
- * 代码这一页只有两张卡，852 装得下。**故意不再加高**：原型那张图
+ * 代码这一页只有两张卡（能力为真时三张，见下一段），852 装得下前两张。**故意不再加高**：原型那张图
  * （`prototype/screenshots/relay/m13b-set-conn.png`，890×1808）是固定视口，
  * 右边也用同一视口，并排时两栏同比例，人一眼就能看出"右图短一截 = 少一张二维码卡"，
  * 而不是被一个拉高的画幅骗成"内容一样多"。
@@ -738,6 +751,13 @@ private fun SettingsProfilePhonePreview() {
  * - `onAddScanRange` / `onRemoveScanRange` / `onTriggerCidrScan` 用默认空实现，
  *   与生产一致（移动端这三项没接）；`onRestart` 传空实现，
  *   因为这一帧要钉的是**版面**，不是"点重连会不会转圈"（那一支看 `settings-restarting`）。
+ *
+ * ## 「后台接收」那张卡**不在这帧里**（task-24）
+ *
+ * 它是这一页最后一张卡（task-15），393×852 的视口在「网段探测与同步」那一张就到底了 ——
+ * 实测：把本帧的参数改成 `keepAliveSupported = true` 后重录，参考图**逐字节不变**
+ * （参数改了、像素没变，因为那张卡整张在视口之外）。所以它有自己的加高帧
+ * `settings-conn-keepalive`；这一帧保持 852，与原型并排可比（理由见上一段）。
  */
 @PreviewTest
 @Preview(name = "settings-conn-phone", widthDp = 393, heightDp = 852, showBackground = true, locale = "zh-rCN")
@@ -755,6 +775,53 @@ private fun SettingsConnPhonePreview() {
                 defaultPort = null,
                 onSavePorts = { _, _ -> },
                 onRestart = {},
+                onBack = {},
+                modifier = inner,
+            )
+        }
+    }
+}
+
+/**
+ * 屏配对补充帧：设置二级页**连接**最底部的「后台接收」卡（task-24 补的截图缺口）。
+ *
+ * ## 为什么必须单独一帧、而且必须加高
+ *
+ * 这张卡（task-15 的前台服务保活开关）只在 `keepAliveSupported` 为真时画，而它的默认值是
+ * false —— 既有的 `settings-conn-phone` 一直不传，于是这张卡**从来没有进过任何一帧**。
+ * 只把那一帧的参数改成 true 也没用：它是这一页**最后**一张卡，393×852 的视口在
+ * 「网段探测与同步」那一张就到底了（实测：改完重录，参考图逐字节不变 —— 参数改了、像素没变）。
+ *
+ * 所以按本仓既有的做法给一张**加高帧**（先例：`settings-more-update-error` 的 KDoc
+ * 「画幅要够高 —— 而且『跟同屏其他帧一样高』不够」）：`heightDp = 1200`。
+ * 这个数不是拍的：录完用逐行色带量过 —— 内容（含这张卡的下圆角）到 1085dp 为止，
+ * 下面接底部导航栏；852 会把它整张切掉，1600 会在卡下留近 400dp 空白。
+ *
+ * ## 造假数据
+ *
+ * `keepAliveSupported = true` + `keepAliveEnabled = true`：Android 是唯一有这条能力的平台
+ * （`App.kt` 传 `controller.backgroundConnectionSupported`），开关默认开着。
+ * 其余参数与 `settings-conn-phone` 逐字一致（同一支夹具，只是画幅更高）。
+ */
+@PreviewTest
+@Preview(name = "settings-conn-keepalive", widthDp = 393, heightDp = 1200, showBackground = true, locale = "zh-rCN")
+@Composable
+private fun SettingsConnKeepAlivePhonePreview() {
+    val state = RelayUiState(
+        settings = selfSettings,
+        network = runningNetwork,
+        peers = listOf(humanPeer),
+    )
+    AppTheme(darkTheme = false) {
+        StateSlotScreen(AppRoutes.SETTINGS, badges = navBadges(state)) { inner ->
+            SettingsConnectionSubpage(
+                state = state,
+                defaultPort = null,
+                onSavePorts = { _, _ -> },
+                onRestart = {},
+                // Android 才有「后台接收」：按真机取值拍，开关默认开着。
+                keepAliveSupported = true,
+                keepAliveEnabled = true,
                 onBack = {},
                 modifier = inner,
             )

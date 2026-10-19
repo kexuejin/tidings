@@ -780,6 +780,13 @@ private fun AgentsPhonePreview() {
                 onCancelTask = {},
                 onOpenSessionDetail = null,
                 onBackToBoard = null,
+                // 按生产调用点（App.kt 的 AgentConsoleScreen 调用）逐参武装：这五个可空出口在生产侧都是
+                // 非 null 闭包，夹具不传就等于依赖它的那一支根本不渲染 —— 截图证据里也就没有它。
+                onOpenWorkspaceDetail = { _, _ -> },
+                onLeaveWorkspaceDetail = {},
+                onLeaveSessionDetail = {},
+                onLoadWorkspaceSessions = { _, _ -> },
+                onCreateWorkspaceGroup = {},
                 modifier = inner,
                 now = PREVIEW_NOW,
             )
@@ -897,6 +904,8 @@ private fun SettingsPhonePreview() {
                 onRestart = {},
                 onDismissBanner = {},
                 onClearNote = {},
+                // 武装这一支：可空出口不传则依赖它的界面根本不渲染（截图证据里没有它）。
+                onRemovePickedAvatar = {},
                 modifier = inner,
             )
         }
@@ -984,6 +993,8 @@ private fun SettingsRestartingPreview() {
                 onRestart = {},
                 onDismissBanner = {},
                 onClearNote = {},
+                // 武装这一支：可空出口不传则依赖它的界面根本不渲染（截图证据里没有它）。
+                onRemovePickedAvatar = {},
                 modifier = inner,
             )
         }
