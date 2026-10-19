@@ -216,6 +216,20 @@ data class Timings(
     /** 离线补发队列 TTL。 */
     val queueTtl: Long = 7L * 24 * 3_600_000,
     val queueMaxPerPeer: Int = 200,
+
+    /**
+     * 信封日志（`stores/messages.log`）的 TTL 与条数上限。
+     *
+     * 与 [queueTtl] / [queueMaxPerPeer] **分开取值**：队列是「必须送达的待发」
+     * （每对端 200 条），日志是「供 `/v1/inbox?since=` 续读的只读回放」——
+     * 后者没有理由留全量历史，但没有它就无法增量拉取。
+     *
+     * 两个上限任一触发就丢最旧的。7 天与队列同窗口，便于解释「为什么这条读不到了」；
+     * 2 万条在真机流量下约 10–30 MB，够覆盖一次长时间的离线。
+     */
+    val messageLogTtl: Long = 7L * 24 * 3_600_000,
+    val messageLogMaxRows: Int = 20_000,
+
     /** 去重窗口。 */
     val dedupTtl: Long = 24L * 3_600_000,
     /** 撤回窗口。 */

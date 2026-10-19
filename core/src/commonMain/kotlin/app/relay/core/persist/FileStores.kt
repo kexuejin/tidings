@@ -462,39 +462,72 @@ class FileMessageStore(
             .take(limit)
             .toList()
 
-    /** 超过 [maxRows] 条后丢最旧的（按 `at` 升序）。返回被丢掉的条数。 */
-    fun trimTo(maxRows: Int): Int {
-        if (rows.size <= maxRows) return 0
-        val drop = rows.sortedBy { it.at }.take(rows.size - maxRows)
-        for (r in drop) rows.remove(r)
+    /**
+     * 丢掉**过期的**（`at < now - ttl`）与**超量的**（只保留最新的 [maxRows] 条）。
+     *
+     * 两个条件**一次** `rewrite()` 完成 —— 分开做会把整份文件写两遍，而这份文件在真机上
+     * 可以到几十 MB。
+     *
+     * `ttl <= 0` = 不做时间裁剪。丢掉的都是**最旧的**：`/v1/inbox?since=` 是「从某个时刻
+     * 往后读」，砍掉最旧的一段只会让一个太旧的 `since` 少读到东西，不会读到错的。
+     */
+    override fun trim(now: Long, ttl: Long, maxRows: Int): Int {
+        if (rows.isEmpty()) return 0
+        val useTtl = ttl > 0
+        val cutoff = if (useTtl) now - ttl else Long.MIN_VALUE
+        val expired = if (useTtl) rows.count { it.at < cutoff } else 0
+        val overCap = (rows.size - expired - maxRows).coerceAtLeast(0)
+        if (expired == 0 && overCap == 0) return 0
+
+        val doomed = HashSet<Long>()
+        if (expired > 0) {
+            rows.asSequence().filter { it.at < cutoff }.forEach { doomed += it.seq }
+        }
+        if (overCap > 0) {
+            rows.asSequence()
+                .filter { it.seq !in doomed }
+                .sortedBy { it.at }
+                .take(overCap)
+                .forEach { doomed += it.seq }
+        }
+        val before = rows.size
+        rows.removeAll { it.seq in doomed }
         rewrite()
-        return drop.size
+        return before - rows.size
     }
+
+    /** 只按条数裁剪（不含 TTL）。生产路径用 [trim]；这条留给测试与手动整理。 */
+    fun trimTo(maxRows: Int): Int = trim(now = 0L, ttl = 0L, maxRows = maxRows)
 
     fun compact() = rewrite()
 
     private fun load() {
         val handle = openIfPresent(path) ?: return
-        val parsed = ArrayList<StoredMessage>()
         for (line in readLines(handle)) {
             val parts = line.split('\t')
             if (parts.size < 5) continue
+            val seq = parts[0].toLongOrNull()?.takeIf { it > 0L } ?: continue
             val at = parts[1].toLongOrNull() ?: continue
             val peerId = unescapeField(parts[2])
             val direction = unescapeField(parts[3])
             if (peerId.isEmpty()) continue
-            parsed += StoredMessage(0L, peerId, direction, parts.drop(4).joinToString("\t"), at)
+            rows += StoredMessage(seq, peerId, direction, parts.drop(4).joinToString("\t"), at)
         }
         runCatching { handle.close() }
-        // seq 按写入顺序重排：日志是追加写的，行序就是写入序。
-        parsed.forEachIndexed { i, m -> rows += m.copy(seq = i + 1L) }
-        nextSeq = rows.size + 1L
+        // `seq` **照读文件里写的那个**，不再按行号重排。
+        //
+        // 为什么：`seq` 是 `since(peerId, sinceSeq)` 的游标。按行号重排有两个后果 ——
+        //   ① 裁剪（`trim`）之后行号整体前移 ⇒ 调用方手里的游标指向错的行（重复或漏读）；
+        //   ② 每次重启都重排 ⇒ 同一份数据在两次运行里 `latestSeq` 不一样。
+        // 读文件里那个值、`nextSeq` 取最大值 + 1，`seq` 就成了跨重启、跨裁剪都稳定的游标。
+        nextSeq = (rows.maxOfOrNull { it.seq } ?: 0L) + 1L
     }
 
     private fun rewrite() {
         val body = StringBuilder()
-        rows.forEachIndexed { i, m ->
-            body.append(i + 1).append('\t').append(m.at).append('\t')
+        // 写**行自己的 seq**，不是行号：裁剪后行号会前移，而 seq 是给游标用的（见 [load]）。
+        rows.forEach { m ->
+            body.append(m.seq).append('\t').append(m.at).append('\t')
                 .append(escapeField(m.peerId)).append('\t').append(escapeField(m.direction))
                 .append('\t').append(m.envelopeJson).append('\n')
         }

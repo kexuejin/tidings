@@ -32,6 +32,7 @@ import app.relay.core.transport.MessageStatus
 import app.relay.core.transport.MessageStore
 import app.relay.core.transport.Messenger
 import app.relay.core.transport.NetworkWatch
+import app.relay.core.transport.PrunedMessage
 import app.relay.core.transport.startPlatformNetworkWatch
 import app.relay.core.transport.PeerEvent
 import app.relay.core.transport.PeerRecord
@@ -1199,8 +1200,22 @@ class NodeRuntime(
     fun history(peerId: String, sinceSeq: Long, limit: Int = 200): List<StoredMessage> =
         messageStore.since(peerId, sinceSeq, limit)
 
-    /** 剪枝离线队列与去重表；返回被剪掉的条目（上层据此把消息标为 failed）。 */
-    fun prune(now: Long = nowMillis()) = messenger.prune(now)
+    /**
+     * 周期维护：剪掉离线队列/去重表里过期的条目，并**裁剪信封日志**。
+     *
+     * 信封日志（`stores/messages.log`）的裁剪**不是**「待发」语义，所以它不进返回值 ——
+     * 返回值是「哪些待发消息被放弃了」（上层据此把气泡标成失败）；日志里被裁掉的行只影响
+     * `GET /v1/inbox?since=` 能回溯多远。
+     *
+     * 为什么必须在这里做：这份日志是追加写的，之前没有任何上限 —— 真机桌面端一天就长到
+     * 12.9 万行 / 72 MB，而同一时刻消息表只有 1235 条。`FileMessageStore.trim` 早就写好了，
+     * 只是**没人调用**。
+     */
+    fun prune(now: Long = nowMillis()): List<PrunedMessage> {
+        // 上限与队列**分开取值**（见 `Timings.messageLogTtl` / `messageLogMaxRows` 的 KDoc）。
+        messageStore.trim(now, timings.messageLogTtl, timings.messageLogMaxRows)
+        return messenger.prune(now)
+    }
 
     fun pendingCount(): Int = messenger.pendingCount()
 

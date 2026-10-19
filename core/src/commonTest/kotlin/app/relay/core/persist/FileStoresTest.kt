@@ -104,7 +104,7 @@ class FileStoresTest {
     // ---- 历史
 
     @Test
-    fun messagesGetMonotonicSeqPerProcessAndRestartRebuildsIt() {
+    fun messagesGetMonotonicSeqThatSurvivesARestart() {
         val s = FileMessageStore(p("m.log"))
         val a = s.append("peer-a", "in", "{}", 1)
         val b = s.append("peer-a", "out", "{}", 2)
@@ -161,15 +161,57 @@ class FileStoresTest {
     }
 
     @Test
-    fun trimToDropsTheOldestAndRenumbers() {
+    fun trimToDropsTheOldestAndKeepsTheSeqOfTheSurvivors() {
         val s = FileMessageStore(p("m.log"))
         repeat(10) { s.append("peer-a", "in", "{}", it.toLong()) }
         assertEquals(4, s.trimTo(6))
         val left = s.since("peer-a", 0, 100)
         assertEquals(6, left.size)
         assertEquals(listOf(4L, 5L, 6L, 7L, 8L, 9L), left.map { it.at })
+        // **幸存者的 seq 保持原样**（这里 5..10），不按行号重排。
+        assertEquals(listOf(5L, 6L, 7L, 8L, 9L, 10L), left.map { it.seq })
         val after = FileMessageStore(p("m.log"))
         assertEquals(6, after.since("peer-a", 0, 100).size, "删完落盘后重启也对得上")
+        assertEquals(listOf(5L, 6L, 7L, 8L, 9L, 10L), after.since("peer-a", 0, 100).map { it.seq })
+    }
+
+    /**
+     * 裁剪**不能**让调用方手里的游标失效。
+     *
+     * 这条钉的是「`seq` 是稳定游标」这个契约：原来 `load()` 与 `rewrite()` 都按**行号**重排
+     * `seq`，于是裁掉最旧的一段之后，剩下每一行的 seq 整体前移 —— 调用方拿着「我读到第 8 条」
+     * 再来问，会拿到错的行（重复或漏读）。现在 seq 写进文件、照读回来。
+     */
+    @Test
+    fun trimmingDoesNotInvalidateACursorHeldByTheCaller() {
+        val s = FileMessageStore(p("m.log"))
+        repeat(10) { s.append("peer-a", "in", "{}", it.toLong()) }
+        val cursor = s.latestSeq("peer-a") - 2
+        s.trim(now = 0, ttl = 0, maxRows = 6)
+        assertEquals(listOf(8L, 9L), s.since("peer-a", cursor, 100).map { it.at })
+        val after = FileMessageStore(p("m.log"))
+        assertEquals(listOf(8L, 9L), after.since("peer-a", cursor, 100).map { it.at },
+            "重启后同一个游标仍然只回它之后那两条")
+    }
+
+    @Test
+    fun trimDropsRowsOlderThanTheTtl() {
+        val s = FileMessageStore(p("m.log"))
+        s.append("peer-a", "in", "{}", 1_000)
+        s.append("peer-a", "in", "{}", 5_000)
+        s.append("peer-a", "in", "{}", 9_000)
+        assertEquals(1, s.trim(now = 10_000, ttl = 5_000, maxRows = 100), "只丢 1000 那条")
+        assertEquals(listOf(5_000L, 9_000L), s.since("peer-a", 0, 100).map { it.at })
+    }
+
+    @Test
+    fun trimIsANoOpWhenNothingIsOverTheLimits() {
+        val s = FileMessageStore(p("m.log"))
+        s.append("peer-a", "in", "{}", 5_000)
+        assertEquals(0, s.trim(now = 10_000, ttl = 60_000, maxRows = 100))
+        val before = readRaw(p("m.log"))
+        assertEquals(0, s.trim(now = 10_000, ttl = 60_000, maxRows = 100))
+        assertEquals(before, readRaw(p("m.log")), "没什么可丢就不该重写整份文件")
     }
 
     // ---- 路径

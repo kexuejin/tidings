@@ -249,7 +249,7 @@ data class Envelope(
 | `stores/peer-pins.json` | 每个 `nodeId` 的 TLS SPKI pin 与来源（`pairing` / `tofu`） | 见 §8.3 |
 | `stores/peer-endpoints.json` | 配对码带来的候选端点池（换网后按序兜底） | 对端每次宣告会覆盖 |
 | `stores/known-peers.json` | **曾经见过**的对端档案（nodeId / 昵称 / 最后地址 / 最后露面） | 90 天 TTL |
-| `stores/messages.log` | 信封追加日志，供 `/v1/inbox` 的 `since` / `cursor` 续读 | **当前无上限**（见下） |
+| `stores/messages.log` | 信封追加日志，供 `/v1/inbox?since=` 续读 | 7 天 / 2 万条（`Timings.messageLogTtl` / `messageLogMaxRows`，见下） |
 | `stores/queue.log` | 离线补发队列 | 7 天 TTL / 每对端 200 条 |
 
 `known-peers.json` 存在的理由只有一条：**重启后、对端还没被发现在线时，节点列表也要显示真名**。
@@ -257,10 +257,21 @@ data class Envelope(
 自己明明配对过的设备变成了陌生人。`PeerRegistry.restoreOffline` 只**想起它是谁**：
 `online = false`、不刷新 `lastSeen`、不产生事件、不覆盖已存在的实时记录。
 
-> **已知待办**：`FileMessageStore.trimTo(maxRows)` 已实现并单测，但**生产路径没有调用它** ——
-> `NodeRuntime.prune` 只清队列与去重表。于是 `messages.log` 会一直长（真机桌面端一天
-> 12.9 万行 / 72 MB，而消息表只有 1235 条：日志里还含 Agent 事件信封）。接线时要处理
-> 一个语义问题：`/v1/inbox` 的旧 `cursor` 可能指向被裁掉的行，需要约定「过期游标从最早一行续读」。
+**`messages.log` 的上限与队列分开取值**：队列是「必须送达的待发」（7 天 / 每对端 200 条），
+日志是「供只读回放的增量拉取」，没有理由留全量历史，但没有它就无法增量拉取。
+上限由 `NodeRuntime.prune`（每 10 分钟一次）施加，任一条件触发就丢**最旧的**。
+
+> 这条上限曾经是缺的：`FileMessageStore.trim` 早就实现并单测，但**生产路径一次都没调用过** ——
+> 真机桌面端一天就长到 **12.9 万行 / 72 MB**，而同一时刻消息表只有 1235 条（多出来的是
+> `agent-event` 信封，body 可以到 64 KiB）。功能写了不等于功能生效，所以现在有一条
+> **接线测试**（`NodeRuntimeMessageLogTrimTest`）钉住这根线。
+
+**`seq` 是稳定游标，不是行号。** `load()` 与 `rewrite()` 都写/读行自己的 `seq`，
+不按行号重排 —— 否则裁剪之后剩余行的序号整体前移，调用方手里的游标会指向错的行
+（重复或漏读）。
+
+`/v1/inbox?since=<epochMillis>` 按**写入时刻**裁剪，与 `seq` 无关：一个太旧的 `since`
+在裁剪后只会少读到东西，不会读到错的；`nextSince` 始终等于本批最后一行的 `at`。
 
 ### 8.5 全文检索索引（FTS5）的维护纪律
 

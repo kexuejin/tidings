@@ -84,6 +84,20 @@ interface MessageStore {
      * 朴素语义，够用即可；真正的全量同步属于 P1 之后的事。
      */
     fun sinceAll(sinceAt: Long, limit: Int = 200): List<StoredMessage>
+
+    /**
+     * 丢掉**过期的**与**超量的**行（按 `at` 升序丢最旧的），返回丢掉的条数。
+     *
+     * ## 为什么必须有人调用它
+     *
+     * 这份日志是**追加写**的，之前没有任何上限：真机桌面端一天就长到
+     * **12.9 万行 / 72 MB**，而同一时刻消息表只有 1235 条 —— 多出来的是 Agent 事件信封
+     * （`agent-event` 的 body 可以到 64 KiB）。它只服务 `GET /v1/inbox?since=` 这一个
+     * 只读出口，没有理由留全量历史。
+     *
+     * `ttl <= 0` = 不做时间裁剪（只按 [maxRows] 卡）。默认空实现：内存实现不需要上限。
+     */
+    fun trim(now: Long, ttl: Long, maxRows: Int): Int = 0
 }
 
 data class StoredMessage(
