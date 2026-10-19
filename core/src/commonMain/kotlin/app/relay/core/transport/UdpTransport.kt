@@ -57,8 +57,15 @@ class UdpTransport(
     private val port: Int,
     private val bindHost: String = "0.0.0.0",
 ) {
-    private val selector = SelectorManager(ioDispatcher)
-    private val scope = CoroutineScope(SupervisorJob() + ioDispatcher)
+    /**
+     * selector / scope 都在 [start] 里创建、在 [stop] 里销毁 —— **不再是一次性的**。
+     *
+     * 为什么必须可重建（task-29 真机）：手机侧的发现泵会彻底静默（没有异常、没有 TCP、
+     * 对端 lastSeen 不再更新），而 socket 一旦被关或坏掉，旧写法`send` 会抛异常、
+     * 被 `runCatching` 吞掉，于是**永远静默**。可重建 + 发送结果回传，才能自愈。
+     */
+    private var selector: SelectorManager? = null
+    private var scope: CoroutineScope? = null
 
     private var socket: BoundDatagramSocket? = null
     private var pump: Job? = null
@@ -83,11 +90,15 @@ class UdpTransport(
         // 症状是两台设备永远互相「离线」，只有手动填过地址的单播还能通
         // （真机上就是这样暴露的，见 docs/adr/ADR-010）。回归测试见
         // `UdpTransportBroadcastTest`。
-        val bound = aSocket(selector).udp()
+        val sel = SelectorManager(ioDispatcher)
+        val runScope = CoroutineScope(SupervisorJob() + ioDispatcher)
+        val bound = aSocket(sel).udp()
             .bind(InetSocketAddress(bindHost, port)) { broadcast = true }
+        selector = sel
+        scope = runScope
         socket = bound
         boundPort = (bound.localAddress as? InetSocketAddress)?.port ?: port
-        pump = scope.launch {
+        pump = runScope.launch {
             try {
                 for (dg in bound.incoming) {
                     val from = dg.address as? InetSocketAddress ?: continue
@@ -100,11 +111,20 @@ class UdpTransport(
         }
     }
 
-    /** 发一条裸报文。地址就是收包时看到的地址，不做任何解析。 */
-    suspend fun send(bytes: ByteArray, host: String, port: Int) {
-        val s = socket ?: error("UdpTransport 尚未 start()")
-        val buf = Buffer().apply { write(bytes) }
-        s.send(Datagram(buf, InetSocketAddress(host, port)))
+    /**
+     * 发一条裸报文。地址就是收包时看到的地址，不做任何解析。
+     *
+     * @return false = 这个包**没有交出去**（socket 没起来、已关、或内核拒绝）。
+     *   调用方据此自愈 —— 从前这里是 `error(...)`/抛异常，被发送侧的 `runCatching`
+     *   吞掉之后，一台设备的发现泵可以静默地彻底停摆（task-29 真机现场）。
+     */
+    suspend fun send(bytes: ByteArray, host: String, port: Int): Boolean {
+        val s = socket ?: return false
+        return runCatching {
+            val buf = Buffer().apply { write(bytes) }
+            s.send(Datagram(buf, InetSocketAddress(host, port)))
+            true
+        }.getOrDefault(false)
     }
 
     fun stop() {
@@ -112,7 +132,21 @@ class UdpTransport(
         pump = null
         runCatching { socket?.close() }
         socket = null
-        scope.cancel()
-        runCatching { selector.close() }
+        scope?.cancel()
+        scope = null
+        runCatching { selector?.close() }
+        selector = null
+    }
+
+    /**
+     * 自愈：把 socket / selector / scope 整体重建（等价 stop + start，幂等）。
+     *
+     * 只在"连续几轮一个包都发不出去"时由 [Discovery] 调用 —— 正常路径永远不会走到，
+     * 所以它不会打断一条健康的连接（入站报文流 [incoming] 是外部持有的 SharedFlow，
+     * 重建期间照旧收）。
+     */
+    suspend fun restart() {
+        stop()
+        start()
     }
 }

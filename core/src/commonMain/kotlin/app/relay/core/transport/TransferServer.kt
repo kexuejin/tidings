@@ -12,6 +12,7 @@ import app.relay.core.protocol.FileTransfer
 import app.relay.core.protocol.PullOkFrame
 import app.relay.core.protocol.ScreenTcpFrame
 import app.relay.core.protocol.TcpControlFrame
+import app.relay.core.protocol.LinkFrame
 import app.relay.core.protocol.TcpFrame
 import app.relay.core.protocol.TcpFrameDecode
 import app.relay.core.protocol.TcpFrameTypes
@@ -42,7 +43,6 @@ import kotlinx.coroutines.launch
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.Semaphore
 import kotlinx.coroutines.sync.withLock
-import kotlinx.coroutines.sync.withPermit
 import kotlinx.coroutines.withContext
 import kotlinx.coroutines.withTimeoutOrNull
 import kotlinx.serialization.builtins.serializer
@@ -62,6 +62,32 @@ data class OutgoingFile(
  */
 interface OutgoingLookup {
     fun resolve(transferId: String, fileId: String): OutgoingFile?
+
+    /**
+     * 与 [resolve] 相同，但允许**等一小会儿**让对端的 `accept` 赶到（task-61 真机竞态）。
+     *
+     * ## 为什么需要它
+     *
+     * 接收方的 `accept()` 是「先回 accept 帧、紧接着开 TCP 去 pull」——**两条不同的承载**，
+     * 谁先到没有保证。如果 pull 先到，发送侧看到的是「transfer 已知但还没 accepted」，
+     * 于是回 `err(not-found)`，接收方 UI 上就是 `peer:not-found` + 0 字节 `.part`
+     * （真机实测：同条件 2 次成功、1 次这个）。跨网时 accept 走长连接/UDP、pull 走新的 TLS
+     * 连接，竞态更容易出现。
+     *
+     * 默认实现 = 直接 [resolve]（旧实现与测试桩不受影响）；真正的实现应**只在
+     * 「transfer 已知但还没 accepted」时**等 —— 完全不认识的 transferId 立刻失败，
+     * 不把「没有这个传输」也拖成几秒。
+     */
+    suspend fun resolveAwaitingAccept(transferId: String, fileId: String, graceMs: Long): OutgoingFile? =
+        resolve(transferId, fileId)
+
+    /**
+     * 解析失败时的一句**诊断**（进 `err` 的 reason）：为什么没给。
+     *
+     * 默认空串 = 不额外说明；实现方可以给出 `transfer=known accepted=false file=f1` 这种
+     * 足以归因的字段。空串时 reason 仍是纯粹的 `not-found`（与旧行为逐字一致）。
+     */
+    fun describeRejection(transferId: String, fileId: String): String = ""
 
     /**
      * 对端在这条 TCP 连接上发来了 `msg` 帧（超长文本走 TCP 的入口）。
@@ -94,6 +120,21 @@ interface OutgoingLookup {
     ): Boolean = false
 
     /**
+     * 对端在这条 TCP 连接的首帧发来了长连接 hello（K1）。
+     * 返回 true 表示由长连接处理器接管此 socket（[TransferServer] 退出读取循环，**不得**再关它）。
+     *
+     * 与 [openScreen] 同一套交接纪律：[read]/[write] 是本端已打开的通道，处理器直接用。
+     */
+    suspend fun openLink(
+        socket: Socket,
+        hello: LinkFrame.Hello,
+        remoteHost: String,
+        remotePort: Int,
+        read: ByteReadChannel,
+        write: ByteWriteChannel,
+    ): Boolean = false
+
+    /**
      * 对端是否声明了 `tw1`（能收 wait 帧）。
      *
      * 老端遇到不认识的帧类型会直接断链，所以 **wait 只能发给 tw1 对端**。
@@ -104,6 +145,24 @@ interface OutgoingLookup {
 /** 发送侧护栏。默认值与 TS `DEFAULT_SERVER_LIMITS` 一致。 */
 data class TransferServerLimits(
     val maxConcurrentStreams: Int = 3,
+    /**
+     * 排队等流槽的**上限**（task-61）。
+     *
+     * 为什么必须有界：流槽可能被一条**对端已经不在**的连接长期占着（服务端的写没有写超时，
+     * 往死连接写会挂住），于是新来的 pull 一声不响地等 —— 客户端只能等满 60s 空闲超时，
+     * 真机症状就是「3MB 传一半变『传输失败：timeout』+ 0 字节 .part」，而且**无法归因**。
+     * 超时后回 `err(busy)`：客户端立刻拿到可读原因，还能换下一个候选重试。
+     *
+     * 10s 刻意小于客户端的 60s 空闲超时与 15s 握手超时 —— 排队的人不该比发送方更没耐心。
+     */
+    val streamQueueTimeoutMs: Long = 10_000L,
+    /**
+     * 等对端 `accept` 帧的**宽限**（task-61 真机竞态）。
+     *
+     * 接收方「先回 accept、再 pull」走两条承载，pull 可能先到。已知 transfer 但还没 accepted
+     * 时最多等这么久再判失败 —— 2.5s 远小于客户端 60s 空闲超时，但足够让 accept 赶到。
+     */
+    val acceptGraceMs: Long = 2_500L,
     val maxConnections: Int = 256,
     val handshakeTimeoutMs: Long = 15_000L,
     val idleTimeoutMs: Long = 60_000L,
@@ -195,6 +254,13 @@ class TransferServer(
         if (server != null) return true
         val sel = SelectorManager(ioDispatcher)
         selector = sel
+        // 绑定地址：显式给就用它；没给就用通配地址。
+        //
+        // 曾经怀疑过这里（task-63）：蜂窝侧 `nc` 到 17879 超时、而 17880/17881 可达，看起来像
+        // 「0.0.0.0 是 IPv4 only ⇒ 手机拿公网 IPv6 打不通」。**但那个假设被证伪了**：
+        // `TransferServerDualStackTest` 里，ktor 绑 0.0.0.0 的监听**能被 ::1 连上**（本机实测；
+        // 而 Python 绑 0.0.0.0 时 `nc -6 ::1` 不通 —— 说明差异在 ktor 的 bind 实现，不在这行代码）。
+        // 所以 17879 那个 rc=124 另有原因，别再照这个假设改这里。
         val bound = try {
             aSocket(sel).tcp().bind(InetSocketAddress(bindAddress ?: "0.0.0.0", port))
         } catch (e: Exception) {
@@ -340,6 +406,16 @@ class TransferServer(
                     }
                 }
 
+                is TcpFrameDecode.Link -> {
+                    val frame = decoded.frame
+                    if (isFirstFrame && frame is LinkFrame.Hello) {
+                        val host = hostOfRemoteAddress(socket.remoteAddress.toString())
+                        val port = portOfRemoteAddress(socket.remoteAddress.toString())
+                        if (lookup.openLink(socket, frame, host, port, read, write)) return true
+                    }
+                    return false
+                }
+
                 is TcpFrameDecode.MsgAck -> return false
 
                 is TcpFrameDecode.Rejected -> return false
@@ -350,13 +426,17 @@ class TransferServer(
                     }
 
                     is TcpControlFrame.Pull -> {
-                        val file = lookup.resolve(frame.transferId, frame.fileId)
+                        // 允许等 accept 帧的宽限（task-61 真机竞态：接收方先回 accept、再 pull，
+                        // 两条承载谁先到没保证）；失败时把「为什么」一起回给对端。
+                        val file = lookup.resolveAwaitingAccept(frame.transferId, frame.fileId, limits.acceptGraceMs)
                         if (file == null) {
-                            writeLock.withLock { writeObject(write, ErrFrame(type = TcpFrameTypes.ERR, reason = "not-found")) }
+                            writeLock.withLock {
+                                writeObject(write, ErrFrame(type = TcpFrameTypes.ERR, reason = rejectionReason(frame.transferId, frame.fileId)))
+                            }
                         } else if (frame.offset > file.size) {
                             writeLock.withLock { writeObject(write, ErrFrame(type = TcpFrameTypes.ERR, reason = "bad-offset")) }
                         } else {
-                            servePull(socket, read, write, writeLock, frame, file)
+                            servePull(read, write, writeLock, frame, file)
                         }
                     }
 
@@ -379,10 +459,56 @@ class TransferServer(
     /**
      * 服务一次 `pull`。
      *
-     * [socket]/[read] 目前只用于诊断与后续扩展；真正的读写都在 [write] 上。
+     * [read] 目前只用于诊断与后续扩展；真正的读写都在 [write] 上。
+     *
+     * 为什么不再收 `Socket`：F1 跨网那条路交进来的是**原始通道**（没有 ktor Socket），
+     * 而它本来就没参与数据面（原来只是被 `@Suppress("UNUSED_EXPRESSION")` 引用着）。
      */
+    /**
+     * F1（task-39）：在一条**已经打开**的原始通道上服务一次跨网文件拉取。
+     *
+     * 与明文监听器的区别只有「连接从哪来」：跨网文件那条连接只干一件事，所以这里不认
+     * screen/link/msg，只认首帧 `pull`。协议逐字复用 [servePull] —— **不另写一份服务端逻辑**，
+     * 那正是方案 B 便宜的理由。
+     *
+     * @return true = 这条通道已被本次服务用完（调用方负责关）；false = 首帧不是 pull。
+     */
+    /**
+     * 拒绝一次 pull 时给对端的原因：`not-found` 加上 [OutgoingLookup.describeRejection] 的字段。
+     *
+     * 保持 `not-found` 前缀（既有映射与日志依赖它），只在后面追加可归因的字段
+     * （例如 `transfer=known accepted=false file=f1`）—— 真机上正是这一串决定
+     * 「是竞态还是真没有这个传输」。
+     */
+    private fun rejectionReason(transferId: String, fileId: String): String {
+        val detail = lookup.describeRejection(transferId, fileId)
+        return if (detail.isEmpty()) "not-found" else "not-found " + detail
+    }
+
+    internal suspend fun servePullFrame(read: ByteReadChannel, write: ByteWriteChannel): Boolean {
+        val writeLock = Mutex()
+        val text = withTimeoutOrNull(limits.handshakeTimeoutMs) { readFrame(read) } ?: return false
+        val decoded = TcpFrames.decodeBody(text)
+        if (decoded !is TcpFrameDecode.Control) return false
+        val frame = decoded.frame
+        if (frame !is TcpControlFrame.Pull) return false
+        // 同 serve 那条路：等 accept 的宽限 + 可诊断的拒绝原因（task-61）。
+        val file = lookup.resolveAwaitingAccept(frame.transferId, frame.fileId, limits.acceptGraceMs)
+        if (file == null) {
+            writeLock.withLock {
+                writeObject(write, ErrFrame(type = TcpFrameTypes.ERR, reason = rejectionReason(frame.transferId, frame.fileId)))
+            }
+            return true
+        }
+        if (frame.offset > file.size) {
+            writeLock.withLock { writeObject(write, ErrFrame(type = TcpFrameTypes.ERR, reason = "bad-offset")) }
+            return true
+        }
+        servePull(read, write, writeLock, frame, file)
+        return true
+    }
+
     private suspend fun servePull(
-        socket: Socket,
         read: ByteReadChannel,
         write: ByteWriteChannel,
         writeLock: Mutex,
@@ -392,15 +518,30 @@ class TransferServer(
         val transferId = pull.transferId
         val wantsWait = lookup.supportsWait(pull.from)
 
-        // 续传（offset > 0）时先抢流槽；排队期间要发 wait，否则发送方 15s 握手超时会把连接掐掉。
-        val queuedHeartbeat = if (wantsWait && pull.offset > 0) {
-            startWaitHeartbeat(write, writeLock)
+        // 排队期间要发 wait，否则发送方 15s 握手超时会把连接掐掉。
+        //
+        // task-61：**fresh pull（offset == 0）此前完全没有排队心跳** —— 拿不到流槽时服务端
+        // 一声不响，客户端只能等满 60s 空闲超时（真机症状：3MB 变「timeout」+ 0 字节 .part）。
+        // 现在两种 pull 走同一条心跳；抢槽也变成**有界等待**（超时回 err(busy) 而不是无限等）。
+        val queuedHeartbeat = if (wantsWait) startWaitHeartbeat(write, writeLock) else null
+
+        val acquired = if (queuedHeartbeat != null) {
+            acquireStreamSlotOrNull(streamSlots, limits.streamQueueTimeoutMs)
         } else {
-            null
+            streamSlots.acquire()
+            true
+        }
+        if (!acquired) {
+            queuedHeartbeat?.cancel()
+            writeLock.withLock {
+                runCatching { writeObject(write, ErrFrame(type = TcpFrameTypes.ERR, reason = "busy")) }
+            }
+            return
         }
 
-        streamSlots.withPermit {
-            queuedHeartbeat?.cancel()
+        queuedHeartbeat?.cancel()
+        try {
+            bumpActive(transferId, +1)
             bumpActive(transferId, +1)
             try {
                 writeLock.withLock {
@@ -441,12 +582,14 @@ class TransferServer(
             } finally {
                 bumpActive(transferId, -1)
             }
+        } finally {
+            // 槽位**必须在 finally 里还**：这条路径上任何异常（对端断开、写失败）都不能把
+            // 一个槽漏给后续的 pull —— 漏一个就少一份并发，漏三个整台机器就再也传不了文件。
+            streamSlots.release()
         }
-        // read/socket 目前不参与数据面，保留参数是为了将来加"发送方主动取消"时不必改签名。
+        // read 目前不参与数据面，保留参数是为了将来加"发送方主动取消"时不必改签名。
         @Suppress("UNUSED_EXPRESSION")
         read
-        @Suppress("UNUSED_EXPRESSION")
-        socket
     }
 
     /** offset == 0 的快路径：边发边哈希，返回整文件摘要。 */
@@ -620,3 +763,36 @@ internal fun hostOfRemoteAddress(raw: String): String {
 /** `::ffff:192.168.2.22` 与 `192.168.2.22` 是同一个地址，资料里存的是后者。 */
 private fun String.removeIpv4MappedPrefix(): String =
     if (startsWith("::ffff:") && contains('.')) removePrefix("::ffff:") else this
+
+/**
+ * 从同一串里取出**端口**（诊断用；取不到返回 0）。
+ *
+ * 与 [hostOfRemoteAddress] 同一套形状处理：IPv6 是 `/[::1]:55106`，端口要在 `]` 之后取。
+ * 取不到只影响诊断字段，绝不能让一条连接因此建不起来。
+ */
+internal fun portOfRemoteAddress(raw: String): Int {
+    val unwrapped = raw.trim().removePrefix("InetSocketAddress(").removeSuffix(")")
+    val afterSlash = unwrapped.substringAfterLast('/')
+    val tail = if (afterSlash.startsWith("[")) {
+        val end = afterSlash.indexOf(']')
+        if (end <= 0) return 0
+        afterSlash.substring(end + 1)
+    } else {
+        afterSlash
+    }
+    return tail.substringAfterLast(':', "").toIntOrNull() ?: 0
+}
+
+/**
+ * 有界地抢一个流槽：拿到 true；超时 false（调用方据此回 `err(busy)`）。
+ *
+ * 为什么抽成函数（task-61）：真机那条「拿不到槽就**沉默**」的路径必须能被单测钉住 ——
+ * 否则它只能在真机上复现（一次 3MB 成功、一次 timeout + 0 字节 .part）。把信号量作为参数
+ * 传进来，测试就能用自己那个「已被占满」的信号量确定性地走这条分支，不需要造一条真的
+ * 卡住的流（那种测试是时序竞态，迟早变成假红）。
+ */
+internal suspend fun acquireStreamSlotOrNull(slots: Semaphore, timeoutMs: Long): Boolean =
+    withTimeoutOrNull(timeoutMs) {
+        slots.acquire()
+        true
+    } ?: false

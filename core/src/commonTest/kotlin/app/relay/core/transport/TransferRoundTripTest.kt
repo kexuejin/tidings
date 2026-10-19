@@ -3,12 +3,18 @@
 package app.relay.core.transport
 
 import app.relay.core.crypto.Sha256
+import app.relay.core.ioDispatcher
 import app.relay.core.fs.fileExists
 import app.relay.core.fs.fileSize
 import app.relay.core.fs.openRandomAccess
 import app.relay.core.fs.pathJoin
 import app.relay.core.testing.createTempDir
 import app.relay.core.testing.removeRecursively
+import io.ktor.network.selector.SelectorManager
+import io.ktor.network.sockets.InetSocketAddress
+import io.ktor.network.sockets.aSocket
+import io.ktor.network.sockets.openReadChannel
+import io.ktor.network.sockets.openWriteChannel
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
@@ -419,5 +425,121 @@ class TransferRoundTripTest {
         val payload = patternBytes(123_457, 17)
         assertEquals(oracleHex(payload), oracleHex(payload))
         assertTrue(fileSize("/definitely/not/here") == null)
+    }
+    /**
+     * F1 的原始字节流接缝（task-39）：把「连接从哪来」换成一个注入的 [RawPullConnector]，
+     * 协议（pull / pull-ok / 裸流 / done / finish）必须逐字照旧。
+     *
+     * 为什么必须有这条：跨网那一段的全部风险就在"换了连接来源、协议没换"。这里用一条真
+     * TCP 连接包出 [RawPullConnection]（**只交出 read/write 通道，不交出 ktor 的 Socket 句柄**），
+     * 就能证明裸流数据阶段确实走得通这条接缝 —— 而这正是方案 B 便宜的全部理由。
+     */
+    @Test
+    fun rawSeamCarriesTheSameProtocol() {
+        val srcDir = createTempDir("relay-src")
+        val dstDir = createTempDir("relay-dst")
+        val harness = Harness()
+        try {
+            val payload = patternBytes(250_000, 21)
+            val srcPath = pathJoin(srcDir, "cross.bin")
+            writeAll(srcPath, payload)
+            val lookup = StubLookup(
+                files = mapOf("f1" to OutgoingFile("f1", srcPath, payload.size.toLong())),
+                transferId = "t-raw",
+            )
+            val port = kotlinx.coroutines.runBlocking { harness.start(lookup) }
+
+            val dialed = mutableListOf<String>()
+            kotlinx.coroutines.runBlocking {
+                pullTransfer(
+                    PullOptions(
+                        host = "127.0.0.1",
+                        port = port,
+                        selfId = "self-1",
+                        transferId = "t-raw",
+                        files = listOf(IncomingFilePlan("f1", "cross.bin", payload.size.toLong())),
+                        saveDir = dstDir,
+                        supportsWait = true,
+                        connectRaw = { host, p ->
+                            dialed += "$host:$p"
+                            rawLoopback(host, p)
+                        },
+                    ),
+                )
+                assertContentEquals(payload, readAll(pathJoin(dstDir, "cross.bin")))
+                assertEquals(listOf("127.0.0.1:$port"), dialed, "拨号口必须被真的用上")
+                assertFalse(fileExists(pathJoin(dstDir, "cross.bin") + ".part"))
+            }
+        } finally {
+            kotlinx.coroutines.runBlocking { harness.stop() }
+            removeRecursively(srcDir)
+            removeRecursively(dstDir)
+        }
+    }
+
+    /**
+     * 多尝试路径（F1）：第一条（局域网明文）连不上时，必须自己走到第二条（这里是一条真 socket
+     * 冒充的"跨网"），而不是在第一条上耗到超时。
+     */
+    @Test
+    fun thePlanFallsThroughToTheNextAttempt() {
+        val srcDir = createTempDir("relay-src")
+        val dstDir = createTempDir("relay-dst")
+        val harness = Harness()
+        try {
+            val payload = patternBytes(64_000, 33)
+            val srcPath = pathJoin(srcDir, "fallback.bin")
+            writeAll(srcPath, payload)
+            val lookup = StubLookup(
+                files = mapOf("f1" to OutgoingFile("f1", srcPath, payload.size.toLong())),
+                transferId = "t-fallback",
+            )
+            val port = kotlinx.coroutines.runBlocking { harness.start(lookup) }
+
+            // 第一条指向一个**必然连不上**的端口（127.0.0.1:1），第二条才是真的。
+            val deadPort = 1
+            val plan = listOf(
+                PullAttempt("127.0.0.1", deadPort, PullAttemptTransport.Plaintext),
+                PullAttempt("127.0.0.1", port, PullAttemptTransport.Tls),
+            )
+            kotlinx.coroutines.runBlocking {
+                pullTransfer(
+                    PullOptions(
+                        host = "127.0.0.1",
+                        port = deadPort,
+                        selfId = "self-1",
+                        transferId = "t-fallback",
+                        files = listOf(IncomingFilePlan("f1", "fallback.bin", payload.size.toLong())),
+                        saveDir = dstDir,
+                        supportsWait = true,
+                        attempts = plan,
+                        connectTimeoutMs = 1_000,
+                        connectRaw = { host, p -> rawLoopback(host, p) },
+                    ),
+                )
+                assertContentEquals(payload, readAll(pathJoin(dstDir, "fallback.bin")))
+            }
+        } finally {
+            kotlinx.coroutines.runBlocking { harness.stop() }
+            removeRecursively(srcDir)
+            removeRecursively(dstDir)
+        }
+    }
+
+    /** 用一条真 TCP 连接包出 [RawPullConnection]（只交出通道，不交出 ktor 的 Socket 句柄）。 */
+    private suspend fun rawLoopback(host: String, port: Int): RawPullConnection? = try {
+        val selector = SelectorManager(ioDispatcher)
+        val socket = aSocket(selector).tcp().connect(InetSocketAddress(host, port))
+        object : RawPullConnection {
+            override val read = socket.openReadChannel()
+            override val write = socket.openWriteChannel(autoFlush = true)
+
+            override fun close() {
+                runCatching { socket.close() }
+                runCatching { selector.close() }
+            }
+        }
+    } catch (e: Exception) {
+        null
     }
 }

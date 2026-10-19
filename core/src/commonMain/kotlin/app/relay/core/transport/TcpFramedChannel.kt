@@ -46,7 +46,17 @@ class TcpFramedChannel(
     private fun selector(): SelectorManager =
         selector ?: SelectorManager(ioDispatcher).also { selector = it }
 
+    /**
+     * 上一次失败的原因（task-63）：`connect-failed: …` / `closed-before-ack` / `timeout`。
+     *
+     * 真机上「回退 TCP 连不上」（端口/地址在蜂窝侧不可达）与「连上了但对端不回」在诊断里
+     * 都只显示 `no-ack`，而这两件事的修法完全不同 ⇒ 必须分开说。
+     */
+    override var lastError: String? = null
+        private set
+
     override suspend fun sendAndAwaitAck(host: String, port: Int, envelope: Envelope): Boolean {
+        lastError = null
         val ok = withTimeoutOrNull(timeoutMs) {
             // `connect` **必须在 try 里**。它曾经在 try 之外，于是"对端 TCP 端口没开"这种
             // 再普通不过的情况（`java.net.ConnectException: Connection refused`）会一路穿过
@@ -62,19 +72,28 @@ class TcpFramedChannel(
 
                 val read = socket.openReadChannel()
                 while (true) {
-                    val text = readFrame(read) ?: return@withTimeoutOrNull false
+                    val text = readFrame(read)
+                    if (text == null) {
+                        lastError = "closed-before-ack"
+                        return@withTimeoutOrNull false
+                    }
                     if (ackFor(text) == envelope.id) return@withTimeoutOrNull true
                 }
                 @Suppress("UNREACHABLE_CODE")
                 false
-            } catch (_: Exception) {
+            } catch (e: Exception) {
                 // 连接被拒 / 对端提前关闭 / 帧非法：一律当作"没送到"，
                 // 交给上层入队，而不是抛出去中断发送流程。
+                // 但**原因要留下**（task-63）：蜂窝侧 17879 不可达时，这里会是
+                // `ConnectException: Connection refused` 或 connect 超时 —— 与"连上了不回"完全不同。
+                lastError = "connect-failed: " + (e.message ?: e::class.simpleName ?: "?")
                 false
             } finally {
                 runCatching { socket?.close() }
             }
         }
+        // withTimeoutOrNull 返回 null = 整段超时（没连上也没读到 ACK）。
+        if (ok == null) lastError = "timeout"
         return ok == true
     }
 

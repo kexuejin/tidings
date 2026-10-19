@@ -105,6 +105,14 @@ object TcpFrameTypes {
     const val SCREEN_READY = "screen-ready"
     const val SCREEN_NEXT = "screen-next"
     const val SCREEN_FRAME = "screen-frame"
+    const val LINK = "link"
+    const val LINK_OK = "link-ok"
+    const val LINK_DENY = "link-deny"
+    const val LINK_PING = "link-ping"
+    const val LINK_PONG = "link-pong"
+
+    /** 长连接族（K1）：握手与心跳，与文件传输/投屏互不相干。 */
+    val LINK_FRAMES: Set<String> = setOf(LINK, LINK_OK, LINK_DENY, LINK_PING, LINK_PONG)
 
     /** 文件传输族：只有这些帧参与 `TransferServer` 的 pull 状态机。 */
     val CONTROL: Set<String> = setOf(PULL, PULL_OK, DONE, FINISH, ERR, WAIT)
@@ -259,6 +267,9 @@ sealed interface TcpFrameDecode {
     data class Msg(val envelope: Envelope) : TcpFrameDecode
     data class MsgAck(val ackFor: String) : TcpFrameDecode
     data class Screen(val type: String, val screenFrame: ScreenTcpFrame? = null) : TcpFrameDecode
+
+    /** 长连接族帧（K1）。 */
+    data class Link(val frame: LinkFrame) : TcpFrameDecode
     data class Rejected(val reason: String) : TcpFrameDecode
 }
 
@@ -426,6 +437,34 @@ object TcpFrames {
                 val len = nonNegativeSafeInteger(o["len"])?.toInt()?.takeIf { it in 1..Limits.SCREEN_MAX_FRAME_BYTES } ?: return badShape()
                 if (!ScreenImageMetadata.isScreenSize(width, height)) return badShape()
                 TcpFrameDecode.Screen(type, ScreenTcpFrame.Frame(sessionId, seq, width, height, len))
+            }
+
+            TcpFrameTypes.LINK -> {
+                if (!hasOnlyKeys(o, setOf("type", "nodeId", "ver"))) return badShape()
+                val nodeId = boundedString(o["nodeId"], Limits.FROM) ?: return badShape()
+                val ver = nonNegativeSafeInteger(o["ver"])?.toInt() ?: return badShape()
+                TcpFrameDecode.Link(LinkFrame.Hello(nodeId, ver))
+            }
+
+            TcpFrameTypes.LINK_OK -> {
+                if (!hasOnlyKeys(o, setOf("type"))) return badShape()
+                TcpFrameDecode.Link(LinkFrame.Ok)
+            }
+
+            TcpFrameTypes.LINK_DENY -> {
+                if (!hasOnlyKeys(o, setOf("type", "reason"))) return badShape()
+                val reason = boundedString(o["reason"], Limits.ID) ?: return badShape()
+                TcpFrameDecode.Link(LinkFrame.Deny(reason))
+            }
+
+            TcpFrameTypes.LINK_PING -> {
+                if (!hasOnlyKeys(o, setOf("type"))) return badShape()
+                TcpFrameDecode.Link(LinkFrame.Ping)
+            }
+
+            TcpFrameTypes.LINK_PONG -> {
+                if (!hasOnlyKeys(o, setOf("type"))) return badShape()
+                TcpFrameDecode.Link(LinkFrame.Pong)
             }
 
             else -> TcpFrameDecode.Rejected(TcpRejectReason.BAD_FRAME_SHAPE)

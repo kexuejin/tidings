@@ -13,6 +13,7 @@ import app.relay.core.protocol.FileCtlSimple
 import app.relay.core.protocol.FileMeta
 import app.relay.core.protocol.FilePurpose
 import app.relay.core.protocol.FileTransfer
+import app.relay.core.protocol.LinkFrame
 import app.relay.core.protocol.MsgTypes
 import app.relay.core.protocol.ScreenTcpFrame
 import app.relay.core.nowMillis
@@ -30,6 +31,7 @@ import kotlinx.coroutines.flow.asSharedFlow
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
+import kotlinx.coroutines.withTimeoutOrNull
 import kotlinx.serialization.json.JsonElement
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.JsonPrimitive
@@ -57,6 +59,67 @@ private const val DIRECT_RETRY_MS: Long = 2_000L
  * **TCP 监听**：`start()` 会把 [TransferServer] 绑到 [tcpPort]。手机必须监听这一端口，
  * 否则不仅收不到文件，连桌面端发来的 >800 字节长文本（走 TCP 回退）也会失败。
  */
+/**
+ * 表格文字按**字节**截断，并如实报告"截过"。
+ *
+ * 上限是 `TABLE_TEXT_LIMIT_BYTES`（4096，与 TCP 控制帧体同限），而切点必须落在 UTF-8
+ * 字符边界上 —— 按字符数截断在中文表格上会切出比上限更大的帧，按字节硬切则会切出半个汉字，
+ * 收端拿到的是一段乱码文字，比截断本身更难查。
+ *
+ * 返回 `(上线用的文本, 是否截断)`，第二个值只有**真的截过**才是 `true`，其余都是 `null`：
+ * 没截断就**不带这个键**。老端按 `hasOnlyKeys` 严格比对 key 集合，多一个键整帧丢弃 ——
+ * 一个"顺手写上 `false`"就会让所有普通文件报价都多一个键。收端读的是 `== true`，
+ * 缺键与 `false` 行为完全一样，所以省略是安全的。
+ */
+internal fun truncateTableText(text: String?): Pair<String?, Boolean?> {
+    if (text == null) return null to null
+    val bytes = text.encodeToByteArray()
+    val limit = FileTransfer.TABLE_TEXT_LIMIT_BYTES
+    if (bytes.size <= limit) return text to null
+    var end = limit
+    // 退到最后一个 UTF-8 起始字节（续字节的高两位是 10）。
+    while (end > 0 && (bytes[end].toInt() and 0xC0) == 0x80) end--
+    return bytes.decodeToString(0, end) to true
+}
+
+/** 等 accept 时的轮询间隔。 */
+private const val ACCEPT_GRACE_POLL_MS: Long = 50L
+
+/**
+ * 「先回 accept、再 pull」的竞态兜底（task-61 真机发现）。
+ *
+ * ## 现场
+ *
+ * 接收方 `accept()` 是 `sendSimple(ACCEPT)` 之后**立刻** `pull()` —— 两条不同的承载
+ * （accept 走可靠 UDP / 长连接，pull 走新开的 TCP/TLS），谁先到没有保证。pull 先到时，
+ * 发送侧看到的是「transfer 已知、但 accepted 还是 false」，于是回 `err(not-found)`，
+ * 接收方 UI 上就是 `peer:not-found` + 0 字节 `.part`（真机实测：2 次成功、1 次这个）。
+ *
+ * ## 规矩
+ *
+ *  · **只等「已知但还没 accepted」**：完全不认识的 transferId 立刻返回 null ——
+ *    把「没有这个传输」也拖成几秒是另一种坏（对端白等、还掩盖了真正的错误）；
+ *  · 等满 [graceMs] 就放弃（2.5s 远小于接收方 60s 空闲超时，足够 accept 赶到）；
+ *  · 抽成纯函数是为了**可单测**：`sleep`/`now` 可注入 ⇒ 测试不用真等 2.5 秒，
+ *    也能钉住「认识的才等、不认识的立刻失败」这两条。
+ */
+internal suspend fun resolveAfterAcceptGrace(
+    graceMs: Long,
+    isKnown: () -> Boolean,
+    resolve: () -> OutgoingFile?,
+    sleep: suspend (Long) -> Unit = { delay(it) },
+    now: () -> Long = { nowMillis() },
+): OutgoingFile? {
+    resolve()?.let { return it }
+    if (!isKnown()) return null
+    val deadline = now() + graceMs
+    while (now() < deadline) {
+        sleep(ACCEPT_GRACE_POLL_MS)
+        resolve()?.let { return it }
+    }
+    return null
+}
+
 class TransferManager(
     private val selfId: String,
     private val scope: CoroutineScope,
@@ -65,8 +128,59 @@ class TransferManager(
     private val downloadDir: () -> String,
     /** 发一条可靠 UDP 帧（`file-ctl`）。返回 false 表示发送失败。 */
     private val sendReliable: suspend (peerId: String, payload: JsonElement) -> Boolean,
+    /**
+     * 读**最近一次可靠投递的逐端点诊断**（task-62 的关联补丁）。
+     *
+     * 为什么要单独一个回调：`sendReliable` 只回一个 Boolean，而「卡在哪个端点、等了多久」
+     * 在 Messenger 手里。真机证据：`/v1/transfers` 里 z1/z2 是 ack-timeout，但全局 `lastSend`
+     * 显示的是**最后一次成功**的 z3 —— 没有这条关联，读出来的诊断会被当成失败那几次的，
+     * **反而误导排查**（这正是当初「先不做关联」那条边界被真实数据推翻的地方）。
+     */
+    private val sendReliableDiagnostics: () -> ReliableSendDiagnostics? = { null },
+    /**
+     * 报价用的**快速**可靠发送（task-63）：只走最短退避、不入消息队列。
+     *
+     * 为什么报价要快：蜂窝下长连接会抖是**常态**，而报价在满退避下要等「候选数 × 每端点
+     * 满退避 + TCP」（真机实测 48s）。快速失败 + 由报价方自己排队重试才是对的形状 ——
+     * 默认与 [sendReliable] 相同 ⇒ 既有行为逐字不变。
+     */
+    private val sendReliableQuick: suspend (peerId: String, payload: JsonElement) -> Boolean = sendReliable,
+    /** 报价失败后的重试退避（毫秒，逐次翻倍）。测试注入小值。 */
+    private val offerRetryBackoffMs: Long = 2_000L,
+    /** 报价投递的**总预算**（毫秒）：超了记 `gave-up`，不再重试。 */
+    private val offerDeliveryBudgetMs: Long = 120_000L,
+    /**
+     * **单次尝试**的上限（毫秒，task-63 追加）。
+     *
+     * 为什么必须有：quickSchedule 只是把「每个端点的退避」缩短，但**端点数是会长的** ——
+     * 真机实测：6 个候选 × 快试 + TCP 兜底再遍历一遍候选 ⇒ 一次尝试仍可能几十秒，
+     * 于是 `/v1/transfers` 上一直停在 `offering`，读的人以为卡住。8s 之内必须给出一个结论
+     * （成功 / 入队），剩下的交给退避重试与 nudge。
+     */
+    private val offerAttemptTimeoutMs: Long = 8_000L,
     /** 查对端地址；查不到返回 null。 */
     private val peerAddress: (peerId: String) -> PeerEndpoint?,
+    /**
+     * F1（task-39）：这次拉取该试哪些连接（局域网直连 + 可选公网 TLS）。
+     *
+     * **null = 今天的行为**（单条明文直连，逐字不变）—— 这就是「关掉开关可回滚」的落点。
+     * 候选池、`tlsPort`、pin 都在 `NodeRuntime` 手里，所以由它把这几样闭包进来，
+     * 这里只问一句「这个 peer 该怎么拨」。
+     */
+    private val crossNetwork: CrossNetworkTransferPlanner? = null,
+    /**
+     * F1（task-39）：跨网文件的**主机侧原始 TLS 监听**（方案 B 的入口）。
+     *
+     * null = 不起这条入口 ⇒ 行为与今天一字不差（局域网原路径）。平台不支持 TLS 服务端
+     * （iOS，task-26 ① 落地前）或端口被占时，[CrossNetworkFileListener.start] 返回 null
+     * —— 那时**只是没有这条入口**，绝不降级明文。
+     */
+    private val crossNetworkListener: CrossNetworkFileListener? = null,
+    /**
+     * 跨网文件监听端口（对端按「对端 tlsPort + 1」来连，见 [crossNetworkFilePort]）。
+     * null = 不起这条入口。
+     */
+    private val crossNetworkFilePort: Int? = null,
     /** 对端是否声明了 `tw1`。只有声明者才允许收 `wait` 帧。 */
     private val peerSupportsWait: (peerId: String) -> Boolean = { false },
     /**
@@ -89,6 +203,12 @@ class TransferManager(
      */
     private val openScreen: suspend (Socket, ScreenTcpFrame.Open, String, ByteReadChannel, ByteWriteChannel) -> Boolean =
         { _, _, _, _, _ -> false },
+    /**
+     * TCP 监听器首帧收到长连接 hello 时的去处（K1 手机→主机下行通道的接入点）。
+     * 与 [openScreen] 同一套交接纪律：返回 true 表示所有权已交出去。
+     */
+    private val openLink: suspend (Socket, LinkFrame.Hello, String, Int, ByteReadChannel, ByteWriteChannel) -> Boolean =
+        { _, _, _, _, _, _ -> false },
     bindAddress: String? = null,
     limits: TransferServerLimits = TransferServerLimits(),
 ) {
@@ -98,6 +218,14 @@ class TransferManager(
 
     private val stateLock = Mutex()
     private val outgoing = mutableMapOf<String, OutgoingTransfer>()
+
+    /**
+     * 报价的**投递状态**（task-62 只读出口）：transferId → 状态，环形上限 [MAX_TRACKED_DELIVERIES]。
+     *
+     * 为什么必须有它：async 之后「发出去了没有」不能再靠 HTTP 响应回答 —— 没有这个出口，
+     * async 就等于把「发不出去」变成「看起来发出去了」。
+     */
+    private val deliveries = LinkedHashMap<String, OfferDelivery>()
     private val partials = mutableMapOf<String, PartialOffer>()
     private val offers = mutableMapOf<String, IncomingOffer>()
     private val acceptedOffers = mutableMapOf<String, IncomingOffer>()
@@ -121,6 +249,14 @@ class TransferManager(
     var lastAbandon: PendingAbandonReport? = null
         private set
 
+    /**
+     * F1：跨网文件监听**实际绑上**的端口（诊断/测试用）。null = 这条入口没起来
+     * （没注入监听器 / 平台不支持 / 端口被占）。
+     */
+    @Volatile
+    var crossNetworkBoundPort: Int? = null
+        private set
+
     private val server = TransferServer(
         scope = scope,
         lookup = object : OutgoingLookup {
@@ -128,6 +264,32 @@ class TransferManager(
                 val transfer = outgoing[transferId] ?: return null
                 if (!transfer.accepted) return null
                 return transfer.files.firstOrNull { it.fileId == fileId }
+            }
+
+            /**
+             * task-61 真机竞态：接收方「先回 accept、紧接着 pull」走**两条不同的承载**，
+             * pull 可能先到。这里只对「已知但还没 accepted」等一小会儿；
+             * 完全不认识的 transferId 立刻失败（不把「没有这个传输」拖成几秒）。
+             */
+            override suspend fun resolveAwaitingAccept(
+                transferId: String,
+                fileId: String,
+                graceMs: Long,
+            ): OutgoingFile? = resolveAfterAcceptGrace(
+                graceMs = graceMs,
+                isKnown = { outgoing[transferId] != null },
+                resolve = { resolve(transferId, fileId) },
+            )
+
+            /** 拒绝时的可归因字段：真机上正是这一串决定「是竞态还是真没有这个传输」。 */
+            override fun describeRejection(transferId: String, fileId: String): String {
+                val transfer = outgoing[transferId]
+                return when {
+                    transfer == null -> "transfer=unknown file=" + fileId
+                    !transfer.accepted -> "transfer=known accepted=false file=" + fileId
+                    transfer.files.none { it.fileId == fileId } -> "transfer=known accepted=true file=unknown"
+                    else -> "transfer=known accepted=true file=" + fileId
+                }
             }
 
             override fun supportsWait(peerId: String): Boolean = peerSupportsWait(peerId)
@@ -142,6 +304,15 @@ class TransferManager(
                 read: ByteReadChannel,
                 write: ByteWriteChannel,
             ): Boolean = this@TransferManager.openScreen(socket, open, remoteAddress, read, write)
+
+            override suspend fun openLink(
+                socket: Socket,
+                hello: LinkFrame.Hello,
+                remoteHost: String,
+                remotePort: Int,
+                read: ByteReadChannel,
+                write: ByteWriteChannel,
+            ): Boolean = this@TransferManager.openLink(socket, hello, remoteHost, remotePort, read, write)
         },
         bindAddress = bindAddress,
         limits = limits,
@@ -181,6 +352,17 @@ class TransferManager(
         if (!server.start(tcpPort) && (tcpPort == 0 || !server.start(0))) {
             started = false
             return false
+        }
+        // F1：跨网文件的独立 TLS 监听（与明文监听并存、互不影响）。
+        // 起不来（平台不支持 / 端口被占）就只是**没有这条入口** —— 局域网原路径不受影响。
+        val listener = crossNetworkListener
+        val filePort = crossNetworkFilePort
+        if (listener != null && filePort != null) {
+            crossNetworkBoundPort = listener.start(filePort) { connection ->
+                // 协议逐字复用：这里只负责「连接从哪来」，服务端逻辑全在 servePullFrame。
+                runCatching { server.servePullFrame(connection.read, connection.write) }
+                runCatching { connection.close() }
+            }
         }
         eventJob = scope.launch {
             server.events.collect { event ->
@@ -247,6 +429,8 @@ class TransferManager(
         eventJob?.cancel()
         eventJob = null
         server.stop()
+        runCatching { crossNetworkListener?.stop() }
+        crossNetworkBoundPort = null
         started = false
     }
 
@@ -266,6 +450,19 @@ class TransferManager(
      * [tableText] 是表格图片的文字视图。超上限时**在这里**按 UTF-8 边界截断，
      * 并把 `tableTextTruncated` 置真 —— 截断规则属于这条帧，不该指望每个调用方都记得。
      */
+    /**
+     * **同步**报价：逐片等 ACK，失败即返回 null（不排队）。
+     *
+     * task-63 起**报价有两条路，行为不同、且是有意的**：
+     *  · 这条（[offerFiles]）：调用方是**桌面 UI 的发送路径**（它需要一个即时的成功/失败来画卡片），
+     *    所以保留「等 ACK + 失败返回 null」；它跑在 UI 的协程里，不阻塞请求线程；
+     *  · [offerFilesAsync]：调用方是**控制面的 HTTP 路由**（不能阻塞请求线程），
+     *    登记即返回 + 后台快速投递 + 失败入队重试（状态在 [offerDeliveries] 里如实呈现）。
+     *
+     * 两条路都**不丢**：同步路失败时调用方拿得到 null（可以重试）；异步路自己入队重试。
+     * 之所以不把同步路也改成入队：那会改变 UI 的即时成功/失败语义，而 UI 的调用点在
+     * `composeApp`（本轮 scope 之外）—— 迁移时要一起改，别只改这里。
+     */
     suspend fun offerFiles(
         peerId: String,
         files: List<LocalFile>,
@@ -277,59 +474,22 @@ class TransferManager(
         isFolder: Boolean = false,
         folderRootName: String? = null,
     ): String? {
-        if (files.isEmpty() || files.size > FileTransfer.MAX_FILES_PER_TRANSFER) return null
-        if (files.any { it.size < 0 }) return null
-
-        val transferId = newId()
-        val outgoingFiles = files.map { OutgoingFile(fileId = newId(), absPath = it.path, size = it.size) }
-        val metas = files.zip(outgoingFiles) { local, out -> FileMeta(fileId = out.fileId, path = local.name, size = local.size) }
-        val totalSize = files.sumOf { it.size }
-        val rootName = folderRootName ?: if (isFolder && files.size > 1) "${files.first().name} 等 ${files.size} 个文件" else files.first().name
-        val isMedia = purpose == FilePurpose.IMAGE || purpose == FilePurpose.STICKER || purpose == FilePurpose.UPDATE
-        val (wireTableText, tableTruncated) = truncateTableText(tableText)
-
-        stateLock.withLock {
-            outgoing[transferId] = OutgoingTransfer(
-                transferId = transferId,
-                peerId = peerId,
-                rootName = rootName,
-                files = outgoingFiles,
-                totalSize = totalSize,
-            )
+        val prepared = prepareOffer(peerId, files, purpose, msgId, groupId, groupRev, tableText, isFolder, folderRootName)
+            ?: return null
+        val started = nowMillis()
+        val outcome = deliverOffer(prepared)
+        recordDelivery(
+            prepared = prepared,
+            state = if (outcome.ok) "offered" else "ack-timeout",
+            elapsedMs = nowMillis() - started,
+            detail = if (outcome.ok) null else "sendReliable=false（清单没有等到 ACK）",
+            lastSendSummary = outcome.lastSendSummary,
+        )
+        if (!outcome.ok) {
+            stateLock.withLock { outgoing.remove(prepared.transferId) }
+            return null
         }
-
-        val chunks = metas.chunked(FileTransfer.OFFER_FILES_PER_PACKET)
-        for ((index, chunk) in chunks.withIndex()) {
-            val offer = FileCtlOffer(
-                op = FileCtlOps.OFFER,
-                transferId = transferId,
-                msgId = msgId,
-                seq = index + 1,
-                total = chunks.size,
-                files = chunk,
-                totalSize = totalSize,
-                fileCount = metas.size,
-                rootName = rootName,
-                purpose = purpose,
-                expiresAt = if (isMedia) null else nowMillis() + FileTransfer.FILE_OFFER_TTL,
-                tableText = wireTableText,
-                tableTextTruncated = tableTruncated,
-                groupId = groupId,
-                groupRev = groupRev,
-                isFolder = if (isFolder) true else null,
-            )
-            val payload = Codec.wireJson.encodeToJsonElement(FileCtlOffer.serializer(), offer)
-            if (!sendReliable(peerId, payload)) {
-                stateLock.withLock { outgoing.remove(transferId) }
-                return null
-            }
-        }
-        // 清单发完（每条都等到 ACK）之后才请求免确认：晚一步的原因见 requestDirect 的注释。
-        if (peerSupportsDirect(peerId)) {
-            sendDirect(peerId, transferId)
-            scheduleDirectRetry(peerId, transferId)
-        }
-        return transferId
+        return prepared.transferId
     }
 
     /**
@@ -378,7 +538,21 @@ class TransferManager(
     /** 收到一份完整 offer、等用户决定的传输。 */
     suspend fun pendingOffers(): List<IncomingOffer> = pendingTransfers().offers
 
-    /** 同意接收：先回 `accept`，再开 TCP 去拉。 */
+    /**
+     * 同意接收：先回 `accept`，再开 TCP 去拉。
+     *
+     * ## 24 小时窗口（协议承诺 vs 此前无人执行）
+     *
+     * `FILE_OFFER_TTL` 一直写在 `expiresAt` 里，**却没有任何一处拿它比较过** ——
+     * 于是隔天再点「接收」照样发 accept，然后必然失败（对方那侧的报价早就不在了），
+     * 而界面上只有一句来路不明的错误。用户看到的是"这软件点了没反应"。
+     *
+     * 现在的行为：**报价已过期就不发 accept**，直接把这条标成失败并给出可归因的
+     * [EXPIRED_REASON]。不动 `expiresAt` 的语义、也不改协议 —— 这是纯本端判据。
+     *
+     * 注意 `expiresAt == null` 表示**没有窗口**（当前媒体类报价就是这样，见生成处
+     * 的 `if (prepared.isMedia) null else …`），不是"已过期"。
+     */
     fun accept(transferId: String) {
         scope.launch {
             val offer = stateLock.withLock {
@@ -386,6 +560,18 @@ class TransferManager(
                 if (off != null) acceptedOffers[transferId] = off
                 off
             } ?: return@launch
+            val expiresAt = offer.expiresAt
+            if (expiresAt != null && nowMillis() > expiresAt) {
+                _events.tryEmit(
+                    TransferEvent.Failed(
+                        transferId = transferId,
+                        peerId = offer.peerId,
+                        incoming = true,
+                        reason = EXPIRED_REASON,
+                    ),
+                )
+                return@launch
+            }
             sendSimple(offer.peerId, FileCtlOps.ACCEPT, transferId)
             pull(offer)
         }
@@ -609,6 +795,9 @@ class TransferManager(
         )
         stateLock.withLock { pulling[offer.transferId] = active }
 
+        // F1：宿主给的跨网计划。空表当「没有计划」——否则会一条都不试就直接失败。
+        val plan = crossNetwork?.plan(offer.peerId, endpoint)
+        val attempts = plan?.attempts?.takeIf { it.isNotEmpty() }
         try {
             pullTransfer(
                 PullOptions(
@@ -619,6 +808,8 @@ class TransferManager(
                     files = offer.files,
                     saveDir = saveDir,
                     cancelRef = cancelRef,
+                    attempts = attempts,
+                    connectRaw = plan?.connectRaw,
                     onProgress = { fileId, delta ->
                         val done = (received[fileId] ?: 0L) + delta
                         received[fileId] = done
@@ -867,27 +1058,389 @@ class TransferManager(
         /** 这次拉取会写的 `.part` 全路径（目录项不算）。 */
         val partPaths: List<String>,
     )
-}
 
-/**
- * 表格文字按**字节**截断，并如实报告"截过"。
- *
- * 上限是 `TABLE_TEXT_LIMIT_BYTES`（4096，与 TCP 控制帧体同限），而切点必须落在 UTF-8
- * 字符边界上 —— 按字符数截断在中文表格上会切出比上限更大的帧，按字节硬切则会切出半个汉字，
- * 收端拿到的是一段乱码文字，比截断本身更难查。
- *
- * 返回 `(上线用的文本, 是否截断)`，第二个值只有**真的截过**才是 `true`，其余都是 `null`：
- * 没截断就**不带这个键**。老端按 `hasOnlyKeys` 严格比对 key 集合，多一个键整帧丢弃 ——
- * 一个"顺手写上 `false`"就会让所有普通文件报价都多一个键。收端读的是 `== true`，
- * 缺键与 `false` 行为完全一样，所以省略是安全的。
- */
-internal fun truncateTableText(text: String?): Pair<String?, Boolean?> {
-    if (text == null) return null to null
-    val bytes = text.encodeToByteArray()
-    val limit = FileTransfer.TABLE_TEXT_LIMIT_BYTES
-    if (bytes.size <= limit) return text to null
-    var end = limit
-    // 退到最后一个 UTF-8 起始字节（续字节的高两位是 10）。
-    while (end > 0 && (bytes[end].toInt() and 0xC0) == 0x80) end--
-    return bytes.decodeToString(0, end) to true
+
+    /**
+     * **登记即返回**（task-62）：先登记 transfer、立刻把 transferId 交出去，投递（逐片等 ACK）
+     * 放到后台 —— 请求路径上不再等网络。
+     *
+     * 为什么可以：`offerFiles` 本来就在**发之前**把 transfer 登记进 `outgoing`，所以「登记」与
+     * 「投递」是两件事；协议要求的是**投递**要可靠（收端拿到完整 offer 才能 accept），不是
+     * 「HTTP 调用方必须等到 ACK」。
+     *
+     * 投递结果不在这里回，而是：① 进 [offerDeliveries] 的只读状态（`/v1/transfers`）；
+     * ② 走既有的 `TransferEvent` 流。**没有读出口的 async 等于把「发不出去」变成
+     * 「看起来发出去了」** —— 所以这两个出口是这条改动的硬要求。
+     */
+    suspend fun offerFilesAsync(
+        peerId: String,
+        files: List<LocalFile>,
+        purpose: String? = null,
+        msgId: String? = null,
+        groupId: String? = null,
+        groupRev: Int? = null,
+        tableText: String? = null,
+        isFolder: Boolean = false,
+        folderRootName: String? = null,
+    ): String? {
+        val prepared = prepareOffer(peerId, files, purpose, msgId, groupId, groupRev, tableText, isFolder, folderRootName)
+            ?: return null
+        recordDelivery(prepared, state = "offering", elapsedMs = 0L, detail = null)
+        scope.launch {
+            val started = nowMillis()
+            // 单次尝试有界（见 offerAttemptTimeoutMs）：到点就按「没拿到 ACK」处理，
+            // 状态立刻变成 queued-awaiting-reconnect，而不是让读的人看几十秒的 offering。
+            val outcome = withTimeoutOrNull(offerAttemptTimeoutMs) { deliverOffer(prepared, quick = true) }
+                ?: DeliverOutcome(ok = false, lastSendSummary = sendReliableDiagnostics()?.summary())
+            if (outcome.ok) {
+                recordDelivery(
+                    prepared = prepared,
+                    state = "offered",
+                    elapsedMs = nowMillis() - started,
+                    detail = null,
+                    lastSendSummary = outcome.lastSendSummary,
+                    attempts = 1,
+                    firstAttemptSummary = outcome.lastSendSummary,
+                )
+                return@launch
+            }
+            // task-63：**失败的报价不再丢掉** —— 长连接抖动是常态。这里入队（保留 transfer
+            // 登记，等对端恢复后补发），状态如实写 `queued-awaiting-reconnect`；
+            // 重试由 scheduleOfferRetry 用退避驱动，总预算用尽才记 `gave-up`。
+            recordDelivery(
+                prepared = prepared,
+                state = "queued-awaiting-reconnect",
+                elapsedMs = nowMillis() - started,
+                detail = "第一次投递未拿到 ACK，已入队等对端恢复（退避重试；换网会立刻重试）",
+                lastSendSummary = outcome.lastSendSummary,
+                attempts = 1,
+                firstAttemptSummary = outcome.lastSendSummary,
+            )
+            val queued = QueuedOffer(prepared, startedAt = started, attempt = 1, job = null)
+            stateLock.withLock { queuedOffers[prepared.transferId] = queued }
+            scheduleOfferRetry(queued, trigger = "backoff")
+        }
+        return prepared.transferId
+    }
+
+    /** 报价里「登记 + 组装」的部分：**不碰网络**，同步就能完成（sync/async 两条路共用）。 */
+    private class PreparedOffer(
+        val transferId: String,
+        val peerId: String,
+        val rootName: String,
+        val totalSize: Long,
+        val metas: List<FileMeta>,
+        val chunks: List<List<FileMeta>>,
+        val purpose: String?,
+        val msgId: String?,
+        val groupId: String?,
+        val groupRev: Int?,
+        val isMedia: Boolean,
+        val wireTableText: String?,
+        /** 只有**真的截过**才是 true，其余是 null（没截断就不带这个键 —— 老端按 key 集合严格比对）。 */
+        val tableTruncated: Boolean?,
+        val isFolder: Boolean,
+    )
+
+    private suspend fun prepareOffer(
+        peerId: String,
+        files: List<LocalFile>,
+        purpose: String?,
+        msgId: String?,
+        groupId: String?,
+        groupRev: Int?,
+        tableText: String?,
+        isFolder: Boolean,
+        folderRootName: String?,
+    ): PreparedOffer? {
+        if (files.isEmpty() || files.size > FileTransfer.MAX_FILES_PER_TRANSFER) return null
+        if (files.any { it.size < 0 }) return null
+
+        val transferId = newId()
+        val outgoingFiles = files.map { OutgoingFile(fileId = newId(), absPath = it.path, size = it.size) }
+        val metas = files.zip(outgoingFiles) { local, out -> FileMeta(fileId = out.fileId, path = local.name, size = local.size) }
+        val totalSize = files.sumOf { it.size }
+        val rootName = folderRootName ?: if (isFolder && files.size > 1) files.first().name + " 等 " + files.size + " 个文件" else files.first().name
+        val isMedia = purpose == FilePurpose.IMAGE || purpose == FilePurpose.STICKER || purpose == FilePurpose.UPDATE
+        val (wireTableText, tableTruncated) = truncateTableText(tableText)
+
+        stateLock.withLock {
+            outgoing[transferId] = OutgoingTransfer(
+                transferId = transferId,
+                peerId = peerId,
+                rootName = rootName,
+                files = outgoingFiles,
+                totalSize = totalSize,
+            )
+        }
+        return PreparedOffer(
+            transferId = transferId,
+            peerId = peerId,
+            rootName = rootName,
+            totalSize = totalSize,
+            metas = metas,
+            chunks = metas.chunked(FileTransfer.OFFER_FILES_PER_PACKET),
+            purpose = purpose,
+            msgId = msgId,
+            groupId = groupId,
+            groupRev = groupRev,
+            isMedia = isMedia,
+            wireTableText = wireTableText,
+            tableTruncated = tableTruncated,
+            isFolder = isFolder,
+        )
+    }
+
+    /** 逐片发 offer 并**等 ACK**（同步路径的全部耗时都在这里），然后请求 direct。 */
+    private suspend fun deliverOffer(prepared: PreparedOffer, quick: Boolean = false): DeliverOutcome {
+        // quick = 报价那条路：只走最短退避（失败得快而可见，重试由报价方排队驱动）。
+        val send: suspend (String, JsonElement) -> Boolean = if (quick) sendReliableQuick else sendReliable
+        for ((index, chunk) in prepared.chunks.withIndex()) {
+            val offer = FileCtlOffer(
+                op = FileCtlOps.OFFER,
+                transferId = prepared.transferId,
+                msgId = prepared.msgId,
+                seq = index + 1,
+                total = prepared.chunks.size,
+                files = chunk,
+                totalSize = prepared.totalSize,
+                fileCount = prepared.metas.size,
+                rootName = prepared.rootName,
+                purpose = prepared.purpose,
+                expiresAt = if (prepared.isMedia) null else nowMillis() + FileTransfer.FILE_OFFER_TTL,
+                tableText = prepared.wireTableText,
+                tableTextTruncated = prepared.tableTruncated,
+                groupId = prepared.groupId,
+                groupRev = prepared.groupRev,
+                isFolder = if (prepared.isFolder) true else null,
+            )
+            val payload = Codec.wireJson.encodeToJsonElement(FileCtlOffer.serializer(), offer)
+            if (!send(prepared.peerId, payload)) {
+                // 失败时把**这一次**的逐端点诊断取出来绑到这条 transfer 上 —— 全局 lastSend
+                // 会被随后的成功投递覆盖（真机里 z1/z2 就是这样被 z3 的诊断盖住的）。
+                return DeliverOutcome(ok = false, lastSendSummary = sendReliableDiagnostics()?.summary())
+            }
+        }
+        // 清单发完（每条都等到 ACK）之后才请求免确认：晚一步的原因见 sendDirect 的注释。
+        if (peerSupportsDirect(prepared.peerId)) {
+            sendDirect(prepared.peerId, prepared.transferId)
+            scheduleDirectRetry(prepared.peerId, prepared.transferId)
+        }
+        return DeliverOutcome(ok = true, lastSendSummary = sendReliableDiagnostics()?.summary())
+    }
+
+    /** 一次投递的结果：成功与否 + **这一次**的逐端点诊断摘要（可能为 null）。 */
+    private data class DeliverOutcome(val ok: Boolean, val lastSendSummary: String?)
+
+    /**
+     * 记一次报价投递状态。**必须 suspend**：`deliveries` 是普通 `LinkedHashMap`，所有访问都要在
+     * [stateLock] 里 —— 这里曾经是裸写，而 [offerDeliveries] 在锁内**迭代**它，两者在不同线程上
+     * 并发（投递协程 / 退避重试 / nudge / `/v1/transfers` 读口）⇒ 满量并行下 jvmTest 报
+     * `ConcurrentModificationException: LinkedHashIterator`（出现率 ~1/3）。**别用测试重试掩盖它。**
+     */
+    private suspend fun recordDelivery(
+        prepared: PreparedOffer,
+        state: String,
+        elapsedMs: Long,
+        detail: String?,
+        lastSendSummary: String? = null,
+        attempts: Int = 1,
+        /**
+         * **首次**尝试的逐端点诊断（task-65）。与 [lastSendSummary] **各留各的、不合成**。
+         *
+         * 为什么必须有：真机四次里两次是「第 2/3 次才成功」，而成功那次的诊断写着 `sent-via-link`
+         * ⇒ **第一次为什么失败完全看不出来**（`attempts=3` 只说试了几次）⇒ 首次成功率 50% 这个数
+         * 没有可行动的方向。留下首次的诊断，才能分清「首次是链路 5s ACK 超时」还是「UDP 无应答」。
+         */
+        firstAttemptSummary: String? = null,
+    ) {
+        stateLock.withLock {
+            // 首次的诊断**跨重试保留**：调用方通常只在第一次传它，后续重试传 null。
+            val firstSummary = firstAttemptSummary ?: deliveries[prepared.transferId]?.firstAttemptSummary
+            deliveries.remove(prepared.transferId)
+            deliveries[prepared.transferId] = OfferDelivery(
+                transferId = prepared.transferId,
+                peerId = prepared.peerId,
+                rootName = prepared.rootName,
+                totalSize = prepared.totalSize,
+                state = state,
+                elapsedMs = elapsedMs,
+                detail = detail,
+                lastSendSummary = lastSendSummary,
+                attempts = attempts,
+                firstAttemptSummary = firstSummary,
+            )
+            while (deliveries.size > MAX_TRACKED_DELIVERIES) {
+                val oldest = deliveries.keys.firstOrNull() ?: break
+                deliveries.remove(oldest)
+            }
+        }
+    }
+
+    /**
+     * 只读出口（task-62）：最近若干次报价的投递状态；`accepted` 取自当前登记表。
+     *
+     * 读 `outgoing` 必须拿锁（它是普通 MutableMap，跨线程裸读不安全）⇒ 这是个 suspend 函数；
+     * 控制面在 `runBlocking` 里调它，而这一步**不碰网络**，仍是毫秒级。
+     */
+    suspend fun offerDeliveries(): List<OfferDelivery> = stateLock.withLock {
+        deliveries.values.map { delivery ->
+            delivery.copy(accepted = outgoing[delivery.transferId]?.accepted == true)
+        }
+    }
+
+
+    /**
+     * 报价失败的**退避重试**（task-63）：失败不丢，等对端恢复后自动补发。
+     *
+     * 形状与消息队列同源：**幂等键**（transferId + seq，对端按 (transferId, seq) 组装，
+     * 重投是覆盖不是新增）、**水位**（attempts + 起始时刻算总预算）、**失败释放**（不占用、
+     * 下次接着试）。差别是它在报价方自己手里，不借消息队列 —— 报价不是一条聊天记录。
+     *
+     * 总预算 [offerDeliveryBudgetMs] 用尽 ⇒ `gave-up` 并摘掉 transfer（如实告诉读的人
+     * 「这次报价最终没送到」，而不是永远停在「等恢复」）。
+     */
+    /**
+     * 排队中的报价：重试所需的一切。
+     *
+     * 为什么要有这个对象：**网络一变就要立刻重试**（[retryQueuedOffersNow]），而它需要
+     * 「取消待触发的退避 Job + 拿到这次重试要用的 PreparedOffer」—— 这些原先都在闭包里，nudge 够不到。
+     */
+    private class QueuedOffer(
+        val prepared: PreparedOffer,
+        val startedAt: Long,
+        var attempt: Int,
+        var job: Job?,
+    )
+
+    /** transferId → 排队中的报价（只在 `queued-awaiting-reconnect` 期间存在）。 */
+    /**
+     * transferId → 排队中的报价。与其它共享状态一样用 [stateLock] 保护 ——
+     * commonMain 里没有 ConcurrentHashMap（iOS 目标），不能图省事用 java.util。
+     */
+    private val queuedOffers = mutableMapOf<String, QueuedOffer>()
+
+    /**
+     * **网络一变就立刻重试**（task-63 追加）：宿主在换网 / 长连接恢复时调它。
+     *
+     * 为什么值得接：退避上限 60s ⇒ 抖动的报价最慢要等一分钟，而 K1/K3 的换网恢复口径是
+     * **≤10s** —— 报价不该比长连接慢一个数量级。这里只把「到点的重试」提前触发一轮：
+     * 幂等键（transferId + seq）保证提前重试与退避重试**不会投出两份**。
+     */
+    suspend fun retryQueuedOffersNow() {
+        val queued = stateLock.withLock { queuedOffers.values.toList() }
+        queued.forEach { q ->
+            q.job?.cancel()
+            // 只是把到点的重试提前触发一轮；job 引用本身的竞争是无害的（只用于取消）。
+            q.job = scope.launch { attemptOfferRetry(q, trigger = "nudge") }
+        }
+    }
+
+    private fun scheduleOfferRetry(queued: QueuedOffer, trigger: String) {
+        val backoff = minOf(offerRetryBackoffMs shl (queued.attempt - 1), OFFER_RETRY_MAX_BACKOFF_MS)
+        queued.job = scope.launch {
+            delay(backoff)
+            attemptOfferRetry(queued, trigger)
+        }
+    }
+
+    /**
+     * 试一轮重试。[trigger] 会写进 detail：`backoff`（退避到点）或 `nudge`（换网触发）——
+     * 读的人据此知道「这次是等到的还是被推的」（task-63 的可诊断要求）。
+     */
+    private suspend fun attemptOfferRetry(queued: QueuedOffer, trigger: String) {
+        val prepared = queued.prepared
+        // 期间若已被成功投递（或已被摘掉）就不再重试。
+        val stillQueued = stateLock.withLock { deliveries[prepared.transferId]?.state == "queued-awaiting-reconnect" }
+        if (!stillQueued) return
+        val elapsed = nowMillis() - queued.startedAt
+        if (elapsed >= offerDeliveryBudgetMs) {
+            recordDelivery(
+                prepared = prepared,
+                state = "gave-up",
+                elapsedMs = elapsed,
+                detail = "重试预算用尽（" + offerDeliveryBudgetMs + "ms，尝试 " + queued.attempt + " 次）",
+                attempts = queued.attempt,
+            )
+            stateLock.withLock {
+                queuedOffers.remove(prepared.transferId)
+                outgoing.remove(prepared.transferId)
+            }
+            return
+        }
+        val outcome = withTimeoutOrNull(offerAttemptTimeoutMs) { deliverOffer(prepared, quick = true) }
+            ?: DeliverOutcome(ok = false, lastSendSummary = sendReliableDiagnostics()?.summary())
+        val next = queued.attempt + 1
+        queued.attempt = next
+        if (outcome.ok) {
+            recordDelivery(
+                prepared = prepared,
+                state = "offered",
+                elapsedMs = nowMillis() - queued.startedAt,
+                detail = "第 " + next + " 次投递成功（" + trigger + "）",
+                lastSendSummary = outcome.lastSendSummary,
+                attempts = next,
+            )
+            stateLock.withLock { queuedOffers.remove(prepared.transferId) }
+            return
+        }
+        recordDelivery(
+            prepared = prepared,
+            state = "queued-awaiting-reconnect",
+            elapsedMs = nowMillis() - queued.startedAt,
+            detail = "第 " + next + " 次投递仍未拿到 ACK（" + trigger + "），继续等对端恢复",
+            lastSendSummary = outcome.lastSendSummary,
+            attempts = next,
+        )
+        scheduleOfferRetry(queued, trigger = "backoff")
+    }
+    /** 一次报价投递的**只读**状态（task-62 的 `/v1/transfers` 出口）。 */
+    data class OfferDelivery(
+        val transferId: String,
+        val peerId: String,
+        val rootName: String,
+        val totalSize: Long,
+        /**
+         * offering / offered / queued-awaiting-reconnect / gave-up / ack-timeout（同步路径）。
+         *
+         * `queued-awaiting-reconnect` 是 task-63 加的：报价失败不再丢，而是入队等对端恢复；
+         * 重试预算用尽才记 `gave-up`（那时 transfer 会被摘掉）。
+         */
+        val state: String,
+        val elapsedMs: Long,
+        /** 已经尝试投递过几次（含首次）。 */
+        val attempts: Int = 1,
+        val detail: String? = null,
+        /**
+         * **这一次**投递的逐端点诊断摘要（task-62 关联补丁）。
+         *
+         * 与全局 `lastSend` 的区别：全局那个是「最近一次可靠投递」，会被随后的成功投递覆盖 ——
+         * 真机上 z1/z2 失败、z3 成功，全局只看到 z3，于是失败那两次的现场被盖掉。
+         */
+        val lastSendSummary: String? = null,
+        /**
+         * **首次**尝试的逐端点诊断（task-65）。与 [lastSendSummary] **各留各的**，不合成一个。
+         *
+         * 读法：`firstAttemptSummary` 说「为什么第一次没成」，`lastSendSummary` 说「最后那次怎么样」；
+         * 两次都一样时才是「一次就通」。合成一个字段的话，下次又有人把其中一个读成另一个。
+         */
+        val firstAttemptSummary: String? = null,
+        /** 对端有没有真的来拉（登记表里的 accepted）。 */
+        val accepted: Boolean = false,
+    )
+
+    private companion object {
+        /**
+         * 报价**已过 24 小时窗口**（`FILE_OFFER_TTL`）时，接收端不再发 accept 的原因码。
+         *
+         * 与其它失败原因一样是**机器码**：UI 层负责翻译成人话（见
+         * `app.relay.app.fileFailureReason`），core 不该知道中文怎么写。
+         */
+        const val EXPIRED_REASON = "offer-expired"
+
+        /** 只读状态里最多留多少次报价（环形，防长跑泄漏）。 */
+        const val MAX_TRACKED_DELIVERIES = 64
+        /** 报价重试退避的上限（逐次翻倍，到这里就不再拉长）。 */
+        const val OFFER_RETRY_MAX_BACKOFF_MS = 60_000L
+    }
 }

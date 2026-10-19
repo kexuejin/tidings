@@ -3,6 +3,7 @@
 package app.relay.core.transport
 
 import kotlin.concurrent.Volatile
+import kotlinx.serialization.Serializable
 
 /**
  * 传输层的**数据传输类**：进程内几张表里每一项的形状。
@@ -133,7 +134,13 @@ data class IncomingOffer(
     val isFolder: Boolean = false,
 )
 
-/** 对端在节点表里的可达地址。 */
+/**
+ * 对端在节点表里的可达地址。
+ *
+ * 同时也是配对码候选池（`addrs`）的纯值形态：`@Serializable` 是为了把那一池地址按 nodeId
+ * 存进 `stores/peer-endpoints.json`（见 [PeerEndpointStore]）—— 换网之后要靠它们兜底。
+ */
+@Serializable
 data class PeerEndpoint(val host: String, val port: Int)
 
 /** 传输层的对外事件。UI 只消费这个，不碰 TCP。 */

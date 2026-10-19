@@ -3,6 +3,7 @@
 package app.relay.core.transport
 
 import app.relay.core.crypto.Sha256
+import app.relay.core.crypto.TlsPin
 import app.relay.core.fs.deleteFile
 import app.relay.core.fs.fileExists
 import app.relay.core.fs.fileSize
@@ -83,7 +84,52 @@ class PullCancelRef {
 
     @Volatile
     var socket: Socket? = null
+
+    /**
+     * 跨网（F1）原始字节流那条路的连接；与 [socket] 二选一，由拉取会话挂上。
+     *
+     * 为什么要有它：取消一条正在裸流里阻塞的连接，光置 [canceled] 不够 —— 读要等
+     * 到数据或空闲超时（60s）才回来。有了它，[cancelNow] 能立刻把 socket 关掉。
+     */
+    @Volatile
+    var raw: RawPullConnection? = null
+
+    /** 立刻取消：置标志 + 关掉两条路里活着的那个连接。 */
+    fun cancelNow() {
+        canceled = true
+        runCatching { socket?.close() }
+        runCatching { raw?.close() }
+    }
 }
+
+/**
+ * 一条**原始字节流**连接（F1 跨网文件的接缝）。
+ *
+ * ## 为什么不是 [LinkConnection]
+ *
+ * 文件的数据阶段是**裸流**：`pull-ok` 之后紧跟 `len` 字节，不受帧上限约束
+ * （`FileTransfer.MAX_FRAME` 的 KDoc 逐字写明）。而 [LinkConnection] 只暴露
+ * `send(frame)` / `receiveFrame()` —— 把裸流塞进分帧就是协议变更（方案 A），
+ * 设计文档已经否掉。跨网真正需要的是「同一套 TLS 身份 + 双向 pin 之下的原始字节流」，
+ * 所以这里刻意只有 read / write / close 三件事。
+ */
+interface RawPullConnection {
+    val read: ByteReadChannel
+    val write: ByteWriteChannel
+
+    /** 对端证书的 SPKI pin（明文连接是 null）。诊断用，不参与判定。 */
+    val peerPin: TlsPin? get() = null
+
+    fun close()
+}
+
+/**
+ * 拨一条原始字节流连接；null = 拨不通。
+ *
+ * 调用方（跨网策略）负责"该不该用 TLS、pin 是什么"；这里只负责把结果交出来。
+ * 失败**绝不降级明文**：返回 null 就让这次拉取按 socket-error 失败。
+ */
+typealias RawPullConnector = suspend (host: String, port: Int) -> RawPullConnection?
 
 class PullOptions(
     val host: String,
@@ -103,6 +149,28 @@ class PullOptions(
     /** 收到 `wait` 且还没开始供流 → true；`pull-ok` 到达 → false。 */
     val onQueued: ((Boolean) -> Unit)? = null,
     val cancelRef: PullCancelRef = PullCancelRef(),
+    /**
+     * 原始连接的拨号口（F1 跨网文件）。**null = 走今天的明文 ktor socket 路径，逐字不变。**
+     *
+     * 跨网时由调用方注入「TLS + 双向 pin」的实现（`connectRaw` 的小工厂）；这里只负责用它，
+     * 不做任何策略判断 —— "该不该跨网、试哪个地址、要不要 TLS" 全在
+     * [CrossNetworkTransferPolicy] 里（纯逻辑、可单测）。
+     */
+    val connectRaw: RawPullConnector? = null,
+    /**
+     * 策略排好的尝试顺序（F1）。**null = 只用 [host]/[port] 走明文，逐字等于今天的行为。**
+     *
+     * 非 null 时 [host]/[port] 只作兜底与诊断，真正的拨号顺序看这张表
+     * （第一条通常是局域网明文，后面是公网 TLS）。
+     */
+    val attempts: List<PullAttempt>? = null,
+    /**
+     * 计划路径里**每一次明文尝试**的连接超时（毫秒）；null = 不设（今天的行为，交给系统）。
+     *
+     * 为什么要有它：手机在蜂窝上拨一个私网地址会一直等到系统级超时（可达 75s），
+     * 后面的公网尝试全被它挡住 —— 那正是"跨网文件传不动"的现场形态。
+     */
+    val connectTimeoutMs: Long? = 5_000L,
     val idleTimeoutMs: Long = FileTransfer.PULL_IDLE_TIMEOUT,
     /** 只有对端声明了 `tw1` 才允许发 `wait` 帧。未知能力一律当老端。 */
     val supportsWait: Boolean = false,
@@ -176,6 +244,8 @@ private class PullSession(private val opts: PullOptions) {
     private val writeLock = Mutex()
 
     private var socket: Socket? = null
+    /** 跨网那条路活着时的原始连接（与 [socket] 二选一）。 */
+    private var raw: RawPullConnection? = null
     private var read: ByteReadChannel? = null
     private var write: ByteWriteChannel? = null
 
@@ -207,13 +277,85 @@ private class PullSession(private val opts: PullOptions) {
 
     private suspend fun connect() {
         phase(PullStage.Connect)
-        val fresh = try {
-            aSocket(selector).tcp().connect(InetSocketAddress(opts.host, opts.port))
-        } catch (e: Exception) {
-            fail("socket-error", PullStage.Connect)
+        // F1：策略排好的多尝试路径（第一条通常是局域网明文，后面是公网 TLS）。
+        // attempts == null 时走下面那条**与今天逐字相同**的单条明文路径。
+        val plan = opts.attempts
+        if (plan != null) {
+            // task-61：**每条尝试都留痕**（拨了哪个 host:port、哪种传输、耗时、成败）。
+            // 真机上一次成功一次 timeout，而失败那次看不出拨的是哪个候选 —— 没有这段，
+            // 「是不是拨了陈旧地址」只能猜。失败原因里带着它，UI 与日志都能读到。
+            val tried = ArrayList<String>(plan.size)
+            for (attempt in plan) {
+                val started = nowMillis()
+                val ok = when (attempt.transport) {
+                    PullAttemptTransport.Plaintext ->
+                        dialPlaintext(attempt.host, attempt.port, opts.connectTimeoutMs)
+                    PullAttemptTransport.Tls -> dialRaw(attempt.host, attempt.port)
+                }
+                val elapsed = nowMillis() - started
+                tried += attempt.host + ":" + attempt.port + " " +
+                    (if (attempt.transport == PullAttemptTransport.Tls) "tls" else "plain") +
+                    " " + elapsed + "ms" + (if (ok) " ok" else "")
+                if (ok) {
+                    phase(PullStage.Connected)
+                    return
+                }
+            }
+            fail("socket-error: tried " + tried.joinToString(" | "), PullStage.Connect)
         }
+        // 跨网（F1）单条路径：调用方直接给一个原始拨号口（TLS + pin 在那一侧完成）。
+        // 协议一模一样 —— pull / pull-ok / 裸流 / done 全部照旧，只是字节从哪来不同。
+        if (opts.connectRaw != null) {
+            if (!dialRaw(opts.host, opts.port)) fail("socket-error", PullStage.Connect)
+            phase(PullStage.Connected)
+            return
+        }
+        if (!dialPlaintext(opts.host, opts.port, null)) fail("socket-error", PullStage.Connect)
         phase(PullStage.Connected)
-        attach(fresh)
+    }
+
+    /**
+     * 明文拨号；true = 已挂上（[attach]）。
+     *
+     * [timeoutMs] 为 null = 不设超时（今天的行为，交给操作系统）；计划路径会给一个短超时，
+     * 否则"手机在蜂窝上拨一个私网地址"要等到系统级超时（可达 75s）才轮到后面的公网尝试。
+     */
+    private suspend fun dialPlaintext(host: String, port: Int, timeoutMs: Long?): Boolean = try {
+        val fresh = if (timeoutMs == null) {
+            aSocket(selector).tcp().connect(InetSocketAddress(host, port))
+        } else {
+            withTimeoutOrNull(timeoutMs) {
+                aSocket(selector).tcp().connect(InetSocketAddress(host, port))
+            }
+        }
+        if (fresh != null) {
+            attach(fresh)
+            true
+        } else {
+            false
+        }
+    } catch (e: Exception) {
+        false
+    }
+
+    /** 原始字节流拨号（TLS + 双向 pin 由 [RawPullConnector] 那一侧完成）。 */
+    private suspend fun dialRaw(host: String, port: Int): Boolean {
+        val connector = opts.connectRaw ?: return false
+        val fresh = try {
+            connector(host, port)
+        } catch (e: Exception) {
+            null
+        } ?: return false
+        attachRaw(fresh)
+        return true
+    }
+
+    /** 挂上一条原始字节流连接（跨网路径）。取消句柄也一起挂，让取消能立刻断开。 */
+    private fun attachRaw(fresh: RawPullConnection) {
+        raw = fresh
+        opts.cancelRef.raw = fresh
+        read = fresh.read
+        write = fresh.write
     }
 
     private fun attach(fresh: Socket) {
@@ -225,10 +367,14 @@ private class PullSession(private val opts: PullOptions) {
 
     private fun closeSocket() {
         val closing = socket
+        val closingRaw = raw
         socket = null
+        raw = null
         read = null
         write = null
+        opts.cancelRef.raw = null
         runCatching { closing?.close() }
+        runCatching { closingRaw?.close() }
     }
 
     // ---------------------------------------------------------------- 单个文件
@@ -448,7 +594,12 @@ private class PullSession(private val opts: PullOptions) {
             // 对端提前关闭 / 连接被重置：TS 的 'close' 事件在这里对应成 closed。
             fail("closed")
         }
-        if (done != true) fail("timeout")
+        if (done != true) {
+            // task-61：区分**等对端第一帧（pull-ok）**与**数据阶段卡住** —— 两者原先都叫
+            // "timeout"，而真机上「0 字节 .part + timeout」到底是对端没应答还是传到一半断了，
+            // 正是要靠这个区分才能归因。stage 由 phase() 推进：数据阶段是 Receive。
+            fail(if (stage == PullStage.Receive) "timeout-data" else "timeout-waiting-pull-ok")
+        }
     }
 
     private suspend fun writeObject(frame: Any) {
