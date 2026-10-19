@@ -143,7 +143,7 @@ internal class NodeOutbound(
             MsgTypes.MSG,
             selfId(),
             Codec.groupTextPayload(
-                text, groupId, groupRev,
+                clampGroupText(text), groupId, groupRev,
                 mentions = mentions, replyTo = replyTo, senderId = senderId,
                 reasoning = clampGroupReasoning(reasoning),
             ),
@@ -611,9 +611,38 @@ internal class NodeOutbound(
  * 英文是 4 KB —— 用码元切会得到一个**比上限还大**的字符串。切点还必须落在码点边界上：
  * 从中间切开一个代理对会留下半个字符（界面显示成 U+FFFD 方块）。
  */
-internal fun clampGroupReasoning(reasoning: String?): String? {
-    val raw = reasoning?.takeIf { it.isNotBlank() } ?: return null
-    val limit = Limits.GROUP_REASONING_BYTES
+internal fun clampGroupReasoning(reasoning: String?): String? =
+    clampUtf8(reasoning?.takeIf { it.isNotBlank() }, Limits.GROUP_REASONING_BYTES)
+
+/**
+ * 群文本**正文**在发送前的截断（[Limits.GROUP_TEXT_TCP_LIMIT]）。
+ *
+ * 与思考过程同一个理由，只是上限不同：接收侧的正文校验一旦不过就是整帧丢弃，
+ * 而 4096 字节这个旧上限**真机上已经吃掉了 140 条群消息**（最大 9902 字节）。
+ * 上限抬到 32 KiB 之后仍要留一道截断，是为了让「发送侧永远不产出注定被拒的帧」
+ * 成为一条**不变量**，而不是「希望 agent 别写太长」。
+ *
+ * 只在超过上限时才截；正常长度的正文原样返回（不做任何 trim —— 那会改掉用户可见内容）。
+ */
+internal fun clampGroupText(text: String): String =
+    clampUtf8(text, Limits.GROUP_TEXT_TCP_LIMIT) ?: text
+
+/**
+ * 按 UTF-8 字节截断（超长则保留开头 + 省略号）。
+ *
+ * ## 为什么必须截，而不是「发出去再说」
+ *
+ * 接收侧对正文与思考过程做的都是**字节上限校验**，超限 = 整帧 `badPayload` 丢弃。
+ * 所以不截断的后果不是「对方显示得短一点」，而是**这条消息彻底不到**。
+ *
+ * ## 为什么按字节切而不是 `take(n)`
+ *
+ * `take(n)` 数的是 UTF-16 码元，中文一个字 3 字节：同样 4096 个码元，中文是 12 KB、
+ * 英文是 4 KB —— 用码元切会得到一个**比上限还大**的字符串。切点还必须落在码点边界上：
+ * 从中间切开一个代理对会留下半个字符（界面显示成 U+FFFD 方块）。
+ */
+internal fun clampUtf8(text: String?, limit: Int): String? {
+    val raw = text ?: return null
     if (Codec.utf8ByteLength(raw) <= limit) return raw
 
     val ellipsis = "…"

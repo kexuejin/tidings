@@ -95,6 +95,29 @@ object Limits {
     const val AGENT_BODY_TCP_LIMIT = 65536
 
     /**
+     * 群文本**正文**在 TCP 通道上的上限（UTF-8 字节）。
+     *
+     * ## 为什么不能继续用 4096
+     *
+     * `Protocol.TEXT_TCP_LIMIT = 4096` 是 UDP 时代的产物（UDP 800 防 IP 分片，TCP 翻 5 倍
+     * 而已）。但 agent 的长回复动辄 4000+ 字节：真机实测**140 条群消息**超过 4096
+     * （最大 9902 字节），全部被接收侧 `utf8ByteLength(text) > textLimit` 判成 bad-payload
+     * **整帧丢弃** —— 手机上一条都看不到，桌面端却好好地留着，用户描述成「没收到推送」。
+     * 用户明确问的那条「全部完成。」(2530 字 / **4239 字节**) 就是超了 143 字节。
+     *
+     * 反证很干净：手机侧**没有任何一条**超过 4096 字节，最大一条恰好 3970 字节 ——
+     * 不是「偶尔丢」，是「到 4096 就整齐地断掉」。
+     *
+     * ## 为什么是 32 KiB 而不是 65536
+     *
+     * 与 `agent-event` 的 body 同一档思路（那边早就放宽到 `AGENT_BODY_TCP_LIMIT`），
+     * 但一帧的硬上限是 64 KiB（`Link.MAX_FRAME_BYTES`），而群文本还可以同时带
+     * [GROUP_REASONING_BYTES]（24 KiB）的思考过程 —— 正文必须先给它们留出余量，
+     * 否则「正文 + 思考」合起来把整帧顶爆，等于把刚修好的路径又堵回去。
+     */
+    const val GROUP_TEXT_TCP_LIMIT = 32 * 1024
+
+    /**
      * 群消息可选字段 `reasoning`（思考过程）的 UTF-8 字节上限。
      *
      * 取 24 KiB 而不是跟 `text` 共用通道上限：一帧的硬上限是 64 KiB（`Link.MAX_FRAME_BYTES`），

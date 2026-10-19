@@ -627,7 +627,12 @@ class Messenger(
         if (!added) return
         try {
             for (item in queueStore.listByPeer(peerId)) {
-                val decoded = Codec.decode(item.envelopeJson)
+                // **必须用 TCP 的上限解码，不能用 `Codec.decode`（UDP 那套）**。
+                // 队列里存的是**已经发过一次**的信封，重放走的是链路 / TCP（见下面的分支），
+                // 不是数据报。用 UDP 的 800/4096 去卡它，会把一条 4239 字节的群消息判成
+                // 坏帧然后 `queueStore.remove` —— 比「发不出去」更糟：**它被悄悄删了**，
+                // 用户永远等不到，日志里也只有一次 decode 失败。
+                val decoded = Codec.decodeTcp(item.envelopeJson)
                 if (decoded !is DecodeResult.Ok) {
                     queueStore.remove(item.msgId, peerId)
                     continue
@@ -694,7 +699,9 @@ class Messenger(
      * @return 信封能否解码；`false` 表示这份落盘数据已经没救（调用方应把它标成 failed）。
      */
     suspend fun requeue(peerId: String, envelopeJson: String, createdAt: Long): Boolean {
-        val decoded = Codec.decode(envelopeJson)
+        // 与 [flushQueue] 同一条理由：落盘的信封是「重放素材」，按 TCP 上限读。
+        // 用 UDP 的上限读会把长群消息判成没救（`return false` ⇒ 调用方标 failed）。
+        val decoded = Codec.decodeTcp(envelopeJson)
         if (decoded !is DecodeResult.Ok) return false
         val id = decoded.env.id
         // enqueue 以 "peerId|msgId" 为键天然幂等；先看一眼只是为了不让重放把行"刷新"成新行。

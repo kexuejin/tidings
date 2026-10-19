@@ -87,6 +87,65 @@ class CodecTest {
         assertFalse(legacy.contains("reasoning"), "不传 reasoning 时载荷里不该出现这个键：" + legacy)
     }
 
+    /**
+     * 群文本在 **TCP** 上放宽到 `Limits.GROUP_TEXT_TCP_LIMIT`：真机丢掉的那条 4239 字节
+     * 「全部完成。」必须能过。
+     *
+     * 回归背景：`TEXT_TCP_LIMIT = 4096` 是 UDP 时代的产物，agent 的长回复动辄 4000+ 字节，
+     * 实测 **140 条群消息**超限被整帧丢弃（最大 9902 字节），手机上一条都看不到。
+     */
+    @Test
+    fun groupTextOverTheOldTcpLimitNowDecodes() {
+        val text = "全部完成。" + "汉".repeat(1400)
+        assertTrue(
+            Codec.utf8ByteLength(text) > Protocol.TEXT_TCP_LIMIT,
+            "样本必须真的超过旧的 4096 上限（实际 " + Codec.utf8ByteLength(text) + " 字节）",
+        )
+        assertTrue(Codec.utf8ByteLength(text) <= Limits.GROUP_TEXT_TCP_LIMIT)
+        val payload = Codec.groupTextPayload(text, "grp-1", 1).toString()
+        val decoded = Codec.decodeTcp(env("msg", payload)) as? DecodeResult.Ok
+            ?: fail("超 4096 字节的群文本在 TCP 上仍被拒：" + Codec.utf8ByteLength(text) + " 字节")
+        assertEquals(text, ((decoded.env.payload as JsonObject)["text"] as JsonPrimitive).content)
+    }
+
+    /** 但 **UDP** 侧不许跟着放宽：800 字节那条线仍然是 800（防 IP 分片）。 */
+    @Test
+    fun groupTextOverTheOldTcpLimitIsStillRejectedOnUdp() {
+        val text = "汉".repeat(400)
+        assertTrue(Codec.utf8ByteLength(text) > Protocol.TEXT_UDP_LIMIT)
+        val payload = Codec.groupTextPayload(text, "grp-1", 1).toString()
+        assertEquals(
+            RejectReason.badPayload(MsgTypes.MSG),
+            (Codec.decode(env("msg", payload)) as? DecodeResult.Rejected)?.reason,
+        )
+    }
+
+    /** 单聊文本不跟着放宽：用户手打的字，4096 足够，没必要放大攻击面。 */
+    @Test
+    fun directTextKeepsTheTcpLimit() {
+        val text = "汉".repeat(1500)
+        assertTrue(Codec.utf8ByteLength(text) > Protocol.TEXT_TCP_LIMIT)
+        val payload = Codec.textPayload(text).toString()
+        assertEquals(
+            RejectReason.badPayload(MsgTypes.MSG),
+            (Codec.decodeTcp(env("msg", payload)) as? DecodeResult.Rejected)?.reason,
+        )
+    }
+
+    /** 超过 32 KiB 的群文本在 TCP 上仍被拒 ⇒ 发送侧必须先截断（`clampGroupText`）。 */
+    @Test
+    fun groupTextOverTheNewLimitIsStillRejected() {
+        val payload = Codec.groupTextPayload(
+            "汉".repeat(Limits.GROUP_TEXT_TCP_LIMIT),
+            "grp-1",
+            1,
+        ).toString()
+        assertEquals(
+            RejectReason.badPayload(MsgTypes.MSG),
+            (Codec.decodeTcp(env("msg", payload)) as? DecodeResult.Rejected)?.reason,
+        )
+    }
+
     /** 超过上限的 reasoning 被整帧拒收 ⇒ 发送侧必须先截断（`clampGroupReasoning`）。 */
     @Test
     fun oversizedReasoningIsRejected() {

@@ -7,6 +7,7 @@ import app.relay.core.protocol.Codec
 import app.relay.core.protocol.Envelope
 import app.relay.core.protocol.MsgTypes
 import app.relay.core.protocol.Profile
+import app.relay.core.protocol.Protocol
 import app.relay.core.protocol.Timings
 import app.relay.core.protocol.makeEnvelope
 import kotlinx.coroutines.CoroutineScope
@@ -168,6 +169,77 @@ class MessengerReliabilityTest {
         // 补发成功后队列应被清空
         val remaining = queueStore.listByPeer("peer-1")
         assertEquals(0, remaining.size, "补发成功后队列应清空")
+
+        transport.stop()
+        messenger.stop()
+        scope.cancel()
+    }
+
+    /**
+     * 离线排队的**长群消息**必须补得出去，不能被队列的 decode 悄悄删掉。
+     *
+     * 回归背景：`flushQueue` 原来用 `Codec.decode`（UDP 那套 800/4096）读落盘信封，
+     * 于是一条 4239 字节的群消息重放时被判成坏帧，紧接着 `queueStore.remove` ——
+     * 不是「发不出去」，而是**被删了**。真机上 140 条超 4096 字节的群消息就是这么消失的。
+     */
+    @Test
+    fun anOverlongQueuedGroupMessageIsStillFlushed() = runBlocking {
+        val scope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
+        val transport = UdpTransport(port = 0, bindHost = "127.0.0.1")
+        val registry = PeerRegistry("self-node")
+        val queueStore = InMemoryQueueStore()
+        val dedupStore = InMemoryDedupStore()
+        val mockTcp = MockTcpFallback().apply { shouldSucceed = false }
+
+        val fastTimings = Timings(
+            ackRetrySchedule = listOf(50L),
+            tcpAckTimeout = 50L,
+        )
+
+        val messenger = Messenger(
+            transport = transport,
+            registry = registry,
+            selfNodeId = "self-node",
+            queueStore = queueStore,
+            dedupStore = dedupStore,
+            timings = fastTimings,
+            tcpFallback = mockTcp,
+        )
+
+        transport.start()
+        messenger.start(scope)
+
+        registry.touch("peer-1", "127.0.0.1", 17999, testProfile("peer-1"), profileTs = 1000L, confirmed = true)
+
+        // 4239 字节：正是真机上被丢掉的那条「全部完成。」的量级。
+        val head = "全部完成。"
+        val body = head + "汉".repeat((4239 - Codec.utf8ByteLength(head)) / 3)
+        assertTrue(Codec.utf8ByteLength(body) > Protocol.TEXT_TCP_LIMIT)
+        val env = makeEnvelope(
+            from = "self-node",
+            type = MsgTypes.MSG,
+            payload = Codec.groupTextPayload(body, "grp-1", 1),
+        )
+
+        assertEquals(SendOutcome.QUEUED, messenger.sendUserMessage("peer-1", env))
+        assertEquals(1, queueStore.listByPeer("peer-1").size)
+
+        // TCP 恢复。
+        //
+        // 这里**刻意不调 `registry.touch`**：`touch` 会触发一次 `scope.launch { flushQueue }`
+        // 的**异步**补发，跟下面的显式调用抢同一把 `flushing` 锁 —— 谁先跑完是随机的，
+        // 断言就会变成时绿时红。直接显式 flush 才钉得住这条路径。
+        //
+        // **清掉 lastEnvelope**：上面那次 `sendUserMessage` 的 TCP 回退已经记过一次，
+        // 不清的话下面的断言在「这条被 decode 删掉、什么都没补发」时也会通过 —— 假绿。
+        mockTcp.lastEnvelope = null
+        mockTcp.shouldSucceed = true
+        messenger.flushQueue("peer-1")
+
+        // 队列被清空有两种原因：**补发成功**，或**被判成坏帧删掉**。
+        // 只有「补发了同一条信封」才能区分它们 —— 这才是这条测试真正要钉的东西。
+        awaitUntil("长群消息必须被真的补发") { mockTcp.lastEnvelope?.id == env.id }
+        assertEquals(0, queueStore.listByPeer("peer-1").size, "补发成功后队列应清空")
 
         transport.stop()
         messenger.stop()

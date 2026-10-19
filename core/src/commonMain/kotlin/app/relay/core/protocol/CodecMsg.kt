@@ -37,6 +37,22 @@ object CodecMsg {
         "senderId", "reasoning",
     )
 
+    /**
+     * 正文实际上限：**群文本在 TCP 通道上放宽到 [Limits.GROUP_TEXT_TCP_LIMIT]**。
+     *
+     * 判据是 `textLimit > Protocol.TEXT_UDP_LIMIT`（即「这一帧是从 TCP 进来的」），
+     * 与 `CodecAgent` 给 `agent-event` 的 body 放宽用的是同一条判据 —— 两族文本在
+     * 「UDP 800 / TCP 放宽」这件事上不该有两套规矩。UDP 侧仍按调用方给的 800 卡死。
+     *
+     * 只放宽 `group-text`：单聊文本是用户手打的，4096 足够，没必要跟着放大攻击面。
+     */
+    internal fun textLimitFor(kind: String, textLimit: Int): Int =
+        if (kind == MsgKinds.GROUP_TEXT && textLimit > Protocol.TEXT_UDP_LIMIT) {
+            maxOf(textLimit, Limits.GROUP_TEXT_TCP_LIMIT)
+        } else {
+            textLimit
+        }
+
     internal fun validateMsg(o: JsonObject, textLimit: Int): Boolean {
         val kind = (o["kind"] as? JsonPrimitive)?.takeIf { it.isString }?.content ?: return false
         if (kind !in MsgKinds.ALL) return false
@@ -62,7 +78,7 @@ object CodecMsg {
         // 文本分支（text / group-text）。
         val text = (o["text"] as? JsonPrimitive)?.takeIf { it.isString }?.content
         if (text == null || text.isEmpty()) return false
-        if (utf8ByteLength(text) > textLimit) return false
+        if (utf8ByteLength(text) > textLimitFor(kind, textLimit)) return false
 
         if (kind != MsgKinds.GROUP_TEXT) return true
 
