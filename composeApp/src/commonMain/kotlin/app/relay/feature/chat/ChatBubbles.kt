@@ -66,6 +66,7 @@ import app.relay.app.model.DeliveryState
 import app.relay.app.model.FileCardUi
 import app.relay.app.model.MessageUi
 import app.relay.app.model.NoticeKind
+import app.relay.app.model.hasVisibleText
 import app.relay.app.model.TransferState
 import app.relay.generated.resources.chat_copy
 import app.relay.generated.resources.chat_delivery_resend
@@ -86,6 +87,18 @@ import app.relay.generated.resources.file_bubble_count
 import app.relay.generated.resources.file_decline
 import app.relay.generated.resources.file_open
 import app.relay.generated.resources.file_saved_to
+import app.relay.generated.resources.file_reason_offer_expired
+import app.relay.generated.resources.file_reason_peer_offline
+import app.relay.generated.resources.file_reason_hash_mismatch
+import app.relay.generated.resources.file_reason_size_mismatch
+import app.relay.generated.resources.file_reason_write_error
+import app.relay.generated.resources.file_reason_path_escape
+import app.relay.generated.resources.file_reason_busy
+import app.relay.generated.resources.file_reason_canceled
+import app.relay.generated.resources.file_reason_not_found
+import app.relay.generated.resources.file_reason_bad_frame
+import app.relay.generated.resources.file_reason_socket_error
+import app.relay.generated.resources.file_reason_timeout
 import app.relay.generated.resources.file_share
 import app.relay.generated.resources.file_state_active_in
 import app.relay.generated.resources.file_state_active_out
@@ -157,6 +170,16 @@ internal fun MessageBubble(
     onScrollToQuoted: (() -> Unit)? = null,
     onImageClick: ((String) -> Unit)? = null,
 ) {
+    // 空气泡防线：正文只有看不见的字符、又没有文件 / PK / 思考块可画时，整条不画。
+    // 判据只看"有没有东西可显示"，不看 delivery —— 待发/失败的文件消息有 file 卡，
+    // 不会被这条误伤。
+    if (!hasVisibleText(message.text) &&
+        message.file == null &&
+        message.pk == null &&
+        message.reasoning.isNullOrBlank()
+    ) {
+        return
+    }
     val sp = LocalAppSpacing.current
     val bubbleColor = if (message.mine) {
         MaterialTheme.colorScheme.primaryContainer
@@ -302,6 +325,9 @@ internal fun MessageBubble(
                             val tint = when (delivery) {
                                 DeliveryState.Failed -> MaterialTheme.colorScheme.error
                                 DeliveryState.Queued -> MaterialTheme.colorScheme.onSecondaryContainer
+                                // 「发送中」用与「已排队」同一档的弱色调：它既不是失败（不该红），
+                                // 也不是既成事实（不该用 primary 那种"已送达"的确定感）。
+                                DeliveryState.Sending -> MaterialTheme.colorScheme.onSecondaryContainer
                                 else -> MaterialTheme.colorScheme.primary
                             }
                             Row(
@@ -626,16 +652,27 @@ internal fun FileCardView(
                 )
                 // 只有对方发来的、还没被接收的才给按钮：自己的出价等对方点，
                 // 已经开始的传输再给"接收"只会让人以为点了能重来。
-                if (!card.mine) {
+                // 判据抽成 [fileCardShowsAccept] 是为了能被单测钉住 —— 尤其是
+                // 「进度态（Active）里绝不出现『接收』」这条，靠肉眼看布局迟早会漏。
+                if (fileCardShowsAccept(card)) {
                     Row(
                         modifier = Modifier.padding(top = sp.sm),
-                        horizontalArrangement = Arrangement.spacedBy(sp.md),
+                        horizontalArrangement = Arrangement.spacedBy(sp.sm),
+                        verticalAlignment = Alignment.CenterVertically,
                     ) {
-                        Button(onClick = { onAcceptTransfer(card.transferId) }) {
-                            Text(stringResource(Res.string.file_accept))
+                        // 主操作「接收」实心、次操作「拒绝」降级成文字 —— 与 Completed
+                        // 分支的「打开 / 分享」用同一条规矩，两张卡的手感才一致。
+                        Button(
+                            onClick = { onAcceptTransfer(card.transferId) },
+                            contentPadding = PaddingValues(horizontal = sp.md10, vertical = sp.xs),
+                        ) {
+                            Text(stringResource(Res.string.file_accept), style = MaterialTheme.typography.labelSmall)
                         }
-                        TextButton(onClick = { onDeclineTransfer(card.transferId) }) {
-                            Text(stringResource(Res.string.file_decline))
+                        TextButton(
+                            onClick = { onDeclineTransfer(card.transferId) },
+                            contentPadding = PaddingValues(horizontal = sp.sm, vertical = sp.xs),
+                        ) {
+                            Text(stringResource(Res.string.file_decline), style = MaterialTheme.typography.labelSmall)
                         }
                     }
                 }
@@ -737,11 +774,17 @@ internal fun FileCardView(
                 )
                 val savedPath = card.savedPaths.firstOrNull()
                 savedPath?.let { path ->
+                    // 「已存到 <路径>」是**事实陈述**，必须保留（见 [ReceivedFileActions] 的 KDoc：
+                    // 收下的文件落在应用内部目录，用户没有别的办法知道它在哪）。
+                    // 但完整路径是实现细节（`/data/user/0/app.relay/files/relay/downloads/…`）：
+                    // 它一折成两行就把卡片本身压住了，而用户真正要看的是**文件名那一段**。
+                    // 所以这里显示**省略过的**路径（中间用 `…` 标记、保留末尾），并且只占一行；
+                    // 完整路径在「打开 / 分享」交给系统之后仍然可见。
                     Text(
-                        text = stringResource(Res.string.file_saved_to, path),
+                        text = stringResource(Res.string.file_saved_to, elidePathTail(path)),
                         style = MaterialTheme.typography.labelSmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
-                        maxLines = 2,
+                        maxLines = 1,
                         overflow = TextOverflow.Ellipsis,
                     )
                 }
@@ -751,15 +794,27 @@ internal fun FileCardView(
                 if (!card.mine && receivedFileActions != null && savedPath != null) {
                     Row(
                         modifier = Modifier.padding(top = sp.sm),
-                        horizontalArrangement = Arrangement.spacedBy(sp.md),
+                        horizontalArrangement = Arrangement.spacedBy(sp.sm),
+                        verticalAlignment = Alignment.CenterVertically,
                     ) {
                         // 这里不猜"能不能打开"：按钮只是入口，真正的动作在平台层
                         // （Android 是 ACTION_VIEW / ACTION_SEND + FileProvider）。
-                        TextButton(onClick = { receivedFileActions.open(savedPath) }) {
-                            Text(stringResource(Res.string.file_open))
+                        //
+                        // **主次**：「打开」是这张卡的主操作（用户拿到文件后的下一步就是它），
+                        // 给实心 [Button]；「分享」是次要出口，降级成 [TextButton]。
+                        // 两个都是纯文字按钮时看不出该点哪个 —— 这与 Offered 分支的
+                        // 「接收（实心）/ 拒绝（文字）」是同一条规矩。
+                        Button(
+                            onClick = { receivedFileActions.open(savedPath) },
+                            contentPadding = PaddingValues(horizontal = sp.md10, vertical = sp.xs),
+                        ) {
+                            Text(stringResource(Res.string.file_open), style = MaterialTheme.typography.labelSmall)
                         }
-                        TextButton(onClick = { receivedFileActions.share(savedPath) }) {
-                            Text(stringResource(Res.string.file_share))
+                        TextButton(
+                            onClick = { receivedFileActions.share(savedPath) },
+                            contentPadding = PaddingValues(horizontal = sp.sm, vertical = sp.xs),
+                        ) {
+                            Text(stringResource(Res.string.file_share), style = MaterialTheme.typography.labelSmall)
                         }
                     }
                 }
@@ -769,7 +824,10 @@ internal fun FileCardView(
                 Text(
                     text = stringResource(
                         Res.string.file_state_failed,
-                        card.reason ?: stringResource(Res.string.common_unknown),
+                        // core 给的是**机器码**（socket-error / hash-mismatch / offer-expired…），
+                        // 直接印给用户等于让用户去猜"是我网坏了还是软件坏了"。
+                        // 这里翻译成人话；认不出的码**原样显示**（不吞掉事实，也不编一个说法）。
+                        transferFailureReason(card.reason) ?: stringResource(Res.string.common_unknown),
                     ),
                     style = MaterialTheme.typography.labelSmall,
                     color = MaterialTheme.colorScheme.error,
@@ -810,5 +868,84 @@ internal fun FileCardView(
             )
         }
     }
+    }
+}
+
+/**
+ * 把一条**实现细节**路径压成一行可读的尾巴：`…/downloads/q1.bin`。
+ *
+ * 为什么不是直接 `maxLines = 2`：文件卡里的完整路径是
+ * `/data/user/0/app.relay/files/relay/downloads/q1.bin` 这种应用内部目录，折成两行就把卡片
+ * 本身压住了；而按行尾截断（`TextOverflow.Ellipsis`）留下的恰恰是最没用的前缀。
+ * 所以这里**从中间省略**：留 `…` 标记 + 末尾一段（文件名所在处），并且**优先从 `/` 起**，
+ * 让结果读起来像一段路径而不是被切碎的字符串。
+ *
+ * 它是纯函数、没有平台依赖，所以能被单测直接钉住（见 `FileCardStyleTest`）。
+ *
+ * @param maxChars 展示上限（含 `…`）。默认值对应卡片里那一行的可用宽度。
+ */
+internal fun elidePathTail(path: String, maxChars: Int = 34): String {
+    if (path.length <= maxChars) return path
+    val tail = path.takeLast(maxChars - 1)
+    val slash = tail.indexOf('/')
+    val readable = if (slash > 0) tail.substring(slash) else tail
+    return "…" + readable
+}
+
+/**
+ * 这张文件卡要不要给「接收」按钮。
+ *
+ * 两条规矩，缺一不可：
+ *  · **对方发来的**才给（自己发出去的出价在等对方点，本端给「接收」没有意义）；
+ *  · 而且必须是**还没开始传**的 `Offered`。
+ *
+ * 第二条是需求里点名的那条：`Active`（正在接收 62%）时再出现一个「接收」按钮，用户会以为
+ * 点了能重来。抽成纯函数是为了让它**能被测到** —— 布局里"少画一个按钮"用肉眼迟早会漏。
+ */
+internal fun fileCardShowsAccept(card: FileCardUi): Boolean =
+    card.state == TransferState.Offered && !card.mine
+
+/**
+ * 把 core 的传输失败**机器码**翻译成人话；认不出时返回 null（调用方退回原文或"未知"）。
+ *
+ * ## 为什么必须有这一层
+ *
+ * `TransferState.Failed` 的 `reason` 是传输层造的诊断码（`socket-error`、`hash-mismatch`、
+ * `offer-expired`、`timeout-waiting-pull-ok`…）。它们对排障有价值、对用户毫无意义 ——
+ * 真机上用户看到的是「文件传输失败：socket-error」，第一反应是"这软件坏了还是我网坏了"，
+ * 而这恰恰是产品最该替他回答的问题。
+ *
+ * ## 两道纪律
+ *
+ * 1. **认不出的码原样显示**（返回 null ⇒ 调用方画 `common_unknown`）。绝不把不认识的码
+ *    硬塞进某个笼统说法里 —— 那是在替事实编故事。
+ * 2. **每条都要同时说"发生了什么"和"我该怎么办"**。只说"失败了"等于把问题原样退回给用户。
+ *
+ * 前缀匹配是刻意的：错误码族里有 `timeout` / `timeout-data` / `timeout-waiting-pull-ok`
+ * 这样的派生形态，逐个枚举迟早漏。
+ */
+@Composable
+internal fun transferFailureReason(reason: String?): String? {
+    val code = reason?.trim()?.lowercase().orEmpty()
+    if (code.isEmpty()) return null
+    return when {
+        code.startsWith("offer-expired") -> stringResource(Res.string.file_reason_offer_expired)
+        code.startsWith("peer-offline") -> stringResource(Res.string.file_reason_peer_offline)
+        code.startsWith("hash-mismatch") -> stringResource(Res.string.file_reason_hash_mismatch)
+        code.startsWith("size-mismatch") -> stringResource(Res.string.file_reason_size_mismatch)
+        code.startsWith("write-error") || code.startsWith("part-read-error") ->
+            stringResource(Res.string.file_reason_write_error)
+        code.startsWith("path-escape") -> stringResource(Res.string.file_reason_path_escape)
+        code.startsWith("busy") -> stringResource(Res.string.file_reason_busy)
+        code.startsWith("cancel") || code == "close" || code == "closed" ->
+            stringResource(Res.string.file_reason_canceled)
+        code.startsWith("not-found") -> stringResource(Res.string.file_reason_not_found)
+        code.startsWith("bad-frame") || code.startsWith("bad-offset") || code.startsWith("bad-msg") ->
+            stringResource(Res.string.file_reason_bad_frame)
+        code.startsWith("socket-error") || code.startsWith("disconnected") || code == "type" ->
+            stringResource(Res.string.file_reason_socket_error)
+        code.startsWith("timeout") || code.startsWith("ack-timeout") || code.startsWith("gave-up") ->
+            stringResource(Res.string.file_reason_timeout)
+        else -> null
     }
 }

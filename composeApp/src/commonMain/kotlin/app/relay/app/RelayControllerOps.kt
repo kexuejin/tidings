@@ -65,9 +65,23 @@ internal fun RelayController.handleAppendMessage(message: MessageUi, incoming: B
 
 
 internal fun RelayController.handleReplaceMessage(peerId: String, message: MessageUi) {
+    replaceMessage(peerId, message.id, message)
+}
+
+/**
+ * 把 [peerId] 线程里 id 为 [previousId] 的那条换成 [message]（**可以换 id**）。
+ *
+ * 为什么需要它：乐观插入（`DeliveryState.Sending`）先落一个**临时 id** 的气泡
+ * （`local-N-时间戳`），发送路径返回后才知道真实的 `envelopeId`。只按新 id 去找
+ * 会 `indexOfFirst` 落空 —— 于是替换**静默失败**，那条气泡永远停在「发送中」。
+ * 真机上这就是"发出去的消息一直转圈"，比不显示气泡更糟（它看起来像卡死）。
+ *
+ * 找到后整条替换（含 id），所以之后回执 / 撤回按真实 id 走都能对上。
+ */
+internal fun RelayController.replaceMessage(peerId: String, previousId: String, message: MessageUi) {
     val found = stateLock.withLock {
         val thread = core.threads[peerId] ?: return@withLock false
-        val index = thread.indexOfFirst { it.id == message.id }
+        val index = thread.indexOfFirst { it.id == previousId }
         if (index < 0) return@withLock false
         thread[index] = message
         true

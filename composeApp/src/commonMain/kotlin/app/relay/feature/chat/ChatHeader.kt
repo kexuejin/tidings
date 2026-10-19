@@ -55,6 +55,7 @@ import app.relay.generated.resources.chat_caps_label
 import app.relay.generated.resources.chat_group_info_title
 import app.relay.generated.resources.chat_group_members
 import app.relay.generated.resources.chat_group_online
+import app.relay.generated.resources.chat_clear_local_action
 import app.relay.generated.resources.chat_more_actions
 import app.relay.generated.resources.chat_nudge
 import app.relay.generated.resources.chat_restored_offline
@@ -67,6 +68,7 @@ import app.relay.generated.resources.ic_groups
 import app.relay.generated.resources.ic_nudge
 import app.relay.generated.resources.ic_screen_share
 import app.relay.generated.resources.ic_search
+import app.relay.generated.resources.ic_trash
 import app.relay.generated.resources.screen_remote_view_action
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.setValue
@@ -104,6 +106,14 @@ internal fun ChatHeader(
     memberOnlineCount: Int = 0,
     onOpenGroupInfo: (() -> Unit)? = null,
     onSearchHistory: (() -> Unit)? = null,
+    /**
+     * 「清空本会话聊天记录」。null = 不画这个入口。
+     *
+     * 它**只进 ⋮ 菜单**（见 [ChatHeaderAction.overflowOnly]）：破坏性动作不占常驻图标位 ——
+     * 常驻位上的一次误触没有第二次确认的机会。真正删除前还会过一次确认框
+     * （[ClearConversationDialog]，由 [ChatScreen] 持有）。
+     */
+    onClearMessages: (() -> Unit)? = null,
     onOpenSessionPicker: (() -> Unit)? = null,
     /**
      * 用户是从哪个**工作区**点进来的；null = 直接在跟这个节点聊。
@@ -345,13 +355,33 @@ internal fun ChatHeader(
                 )
             }
         }
+        onClearMessages?.let { clear ->
+            actions += ChatHeaderAction(
+                label = stringResource(Res.string.chat_clear_local_action),
+                onClick = clear,
+                // 只进 ⋮，不抢直出图标位：见形参 KDoc。
+                overflowOnly = true,
+            ) { size ->
+                Icon(
+                    painter = painterResource(Res.drawable.ic_trash),
+                    contentDescription = null,
+                    tint = MaterialTheme.colorScheme.onSurface,
+                    modifier = Modifier.size(size),
+                )
+            }
+        }
+        // 直出位只从**非** overflowOnly 的动作里取；overflowOnly 的一律进 ⋮。
+        // 分开算而不是"整体按顺序 take"：否则动作总数少于直出上限时，破坏性动作会被顶到
+        // 常驻图标位上（agent 会话只剩一个「切换会话」时就是这种情形）。
+        val inlineActions = actions.filterNot { it.overflowOnly }
+        val overflowActions = inlineActions.drop(ChatHeaderInlineActions) + actions.filter { it.overflowOnly }
         Row(
             verticalAlignment = Alignment.CenterVertically,
             // 原型 `.topbar .acts{gap:6px}`（`:580`）—— 动作方块之间 6px，
             // 与最外层那颗 Row 的 12dp（`.tbinner` 的元素间距）不是同一件事。
             horizontalArrangement = Arrangement.spacedBy(6.dp),
         ) {
-            actions.take(ChatHeaderInlineActions).forEach { action ->
+            inlineActions.take(ChatHeaderInlineActions).forEach { action ->
                 TopBarIconAction(
                     contentDescription = action.label,
                     onClick = action.onClick,
@@ -359,9 +389,9 @@ internal fun ChatHeader(
                     icon = { action.icon(ChatIbtnIconSize) },
                 )
             }
-            if (actions.size > ChatHeaderInlineActions) {
+            if (overflowActions.isNotEmpty()) {
                 TopBarOverflowAction(
-                    items = actions.drop(ChatHeaderInlineActions).map { action ->
+                    items = overflowActions.map { action ->
                         TopBarOverflowItem(
                             label = action.label,
                             onClick = action.onClick,
@@ -400,5 +430,13 @@ private const val ChatHeaderInlineActions = 2
 private class ChatHeaderAction(
     val label: String,
     val onClick: () -> Unit,
+    /**
+     * true = 永远只进「⋯」菜单，不参与前 [ChatHeaderInlineActions] 个直出图标位。
+     *
+     * 为什么需要它：直出位是给"看这个会话"的语境动作留的（切换会话 / 群成员 / 戳一碰 /
+     * 查看屏幕）。破坏性的「清空本会话记录」跟它们抢位置，就会长出一个"按一下、历史没了"
+     * 且没有第二道门的常驻图标。
+     */
+    val overflowOnly: Boolean = false,
     val icon: @Composable (Dp) -> Unit,
 )

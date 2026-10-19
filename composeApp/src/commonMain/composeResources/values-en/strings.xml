@@ -73,6 +73,7 @@
          所以要说清楚"现在这样发出去是什么后果"，而不是只给一个字节数。 -->
     <string name="chat_route_udp">Direct LAN · UDP unicast</string>
     <string name="chat_route_tcp">Exceeds unicast limit, falling back to TCP</string>
+    <string name="chat_delivery_sending">Sending</string>
     <string name="chat_delivery_sent">Delivered</string>
     <string name="chat_delivery_queued">Queued</string>
     <string name="chat_delivery_failed">Failed</string>
@@ -180,6 +181,25 @@
     <string name="chat_restored_offline">Offline · Local conversation history</string>
     <string name="chat_caps_label">Capabilities: %1$s</string>
     <string name="chat_tcp_port">TCP %1$d</string>
+    <!-- "Clear this chat" (chat header to overflow menu). Semantics: removes this conversation's
+         history on THIS device only, the other side is untouched; %1$s is the conversation name,
+         shown so the reader can confirm which chat is being cleared. -->
+    <string name="chat_clear_local_action">Clear chat</string>
+    <string name="chat_clear_local_title">Clear this chat's history</string>
+    <string name="chat_clear_local_body">Removes the history of “%1$s” on this device only; the other side is not affected. This cannot be undone.</string>
+    <string name="chat_clear_local_confirm">Clear</string>
+    <!-- Floating chip in the message stream (user report #5). The number is "unread at the
+         moment this conversation was opened" (ChatScreenState.unreadOnEntry, captured by the
+         shell before it clears the badge) plus messages that arrived afterwards; when neither
+         is known we write no number and keep only "Jump to latest". -->
+    <string name="chat_unread_jump">%1$d unread · Jump to latest</string>
+    <string name="chat_unread_jump_latest">Jump to latest</string>
+    <string name="chat_new_task_action">New task</string>
+    <string name="chat_task_divider_label">Task: %1$s</string>
+    <!-- Divider label for a new session whose title has not arrived yet (task-42 ④).
+         We do not fall back to the sessionId (an identity key is not a title), but we also
+         do not omit the divider — that would make a new session look like it never started. -->
+    <string name="chat_task_divider_new">New session</string>
 
     <!-- 节点页（合并了原来的「发现」和「加入网络」两屏） -->
     <string name="disc_title">Nodes</string>
@@ -217,6 +237,15 @@
     <string name="node_detail_recent_just_now">Just now</string>
     <string name="node_detail_never_hint">This address has never connected. Check the network before sending a message.</string>
     <string name="nodes_my_qr_title">My QR Code</string>
+    <!-- Confirmation for externally-sourced pairing (deep link / debug injection, task-54).
+         Copy discipline: never sound more certain than the facts — we only claim the key is
+         pinned when the payload actually carries one, and we say so when it cannot be parsed. -->
+    <string name="external_pairing_title">External pairing request</string>
+    <string name="external_pairing_body_node">This content came from outside the app (a link or a debug injection). Allowing it pairs this device with node %1$s and adds it to the local candidate list.</string>
+    <string name="external_pairing_body_pins_key">It also pins that node key: from then on this device verifies the peer against it (the trust root for fail-closed public connections).</string>
+    <string name="external_pairing_body_relay">This content configures a relay endpoint (url + token); it is written to settings only after you allow it.</string>
+    <string name="external_pairing_body_unknown">This device cannot tell which node this content refers to; allowing it runs the normal pairing flow.</string>
+    <string name="external_pairing_allow">Allow pairing</string>
     <string name="nodes_my_qr_desc">Pairing QR code for others to scan via "Nodes → Scan to Pair"</string>
     <string name="nodes_my_qr_hint">Have others scan this code in "Nodes → Scan to Pair" to add you to their nodes list. Both devices must be on the same local network.</string>
     <string name="nodes_my_qr_no_address">Local address not yet acquired; QR code cannot be generated yet.</string>
@@ -375,6 +404,13 @@
     <string name="agent_session_state_done">Done</string>
     <string name="agent_session_state_error">Error</string>
     <string name="agent_session_state_archived">Archived</string>
+    <!-- Agent status line right above the composer (user report #3). Each state appears only
+         on a real signal; the whole line is absent when there is no evidence — see
+         feature/chat/AgentComposerStatus.kt. -->
+    <string name="chat_composer_status_thinking">Agent is thinking / working…</string>
+    <string name="chat_composer_status_awaiting_approval">Waiting for your approval…</string>
+    <string name="chat_composer_status_unresponsive">Agent stopped responding (no recent activity)</string>
+    <string name="chat_composer_status_stopped">Agent stopped after an error</string>
     <string name="agent_session_meta">%1$s · %2$s</string>
     <string name="agent_session_started">Started at %1$s</string>
     <string name="agent_session_events_count">%1$d events</string>
@@ -437,6 +473,17 @@
     <string name="r2_set_avatar_mode_initial">Initials</string>
     <string name="r2_set_avatar_mode_upload">Upload image</string>
     <string name="set_conn_subtitle">Default UDP port and reconnect</string>
+    <!-- Background keep-alive (Android foreground service). Four strings, four real places:
+         the channel name is only used by system notification settings; the notification
+         title/body sit on the permanent notification and say "keeping the connection alive"
+         instead of pretending to be a message; the settings title/description state the cost
+         (permanent notification plus battery) and that turning it off stops the service. -->
+    <string name="keep_alive_channel_name">Background connection</string>
+    <string name="keep_alive_notification_title">Keeping the connection alive</string>
+    <string name="keep_alive_notification_body">so messages can still arrive, including over the cross-network downlink channel. Turn off "Background connection" to stop.</string>
+    <string name="set_keep_alive_card_title">Background reception</string>
+    <string name="set_keep_alive_title">Background connection</string>
+    <string name="set_keep_alive_desc">Keeps this device discoverable on the local network and able to receive messages while the app is in the background. Costs a permanent notification and extra battery use; turning it off stops the service immediately.</string>
     <string name="set_home_broadcast_hint">After saving, the profile and the port are broadcast again — peers pick up the new version on their next presence.</string>
     <string name="set_notify_card_title">Alerts</string>
     <string name="set_notify_subtitle">Alert rules and quiet hours</string>
@@ -457,6 +504,31 @@
     <string name="desk_nav_group_data">Data &amp; diagnostics</string>
     <string name="desk_nav_group_desk">This computer</string>
     <string name="desk_nav_identity">Identity &amp; connection</string>
+    <string name="desk_nav_trusted_devices">Trusted Devices &amp; Pairing</string>
+    <string name="trusted_devices_desc">LAN &amp; dual-stack trusted device management. Scan this QR code on your mobile device to pair.</string>
+    <string name="trusted_devices_qr_title">Pairing QR Code</string>
+    <string name="trusted_devices_qr_hint">Scan with mobile device in Nodes -> Scan QR Code to pair. Supports IPv4 &amp; IPv6 adaptive connection.</string>
+    <string name="trusted_devices_copy_node_id">Copy Node ID</string>
+    <string name="trusted_devices_copy_pairing_link">Copy Pairing Link</string>
+    <string name="trusted_devices_policy_title">Trust Policy</string>
+    <string name="trusted_devices_policy_request">Require Approval (New devices require confirmation)</string>
+    <string name="trusted_devices_policy_auto">Auto-Trust (Automatically trust discovered peers)</string>
+    <string name="trusted_devices_policy_by_device">Whitelist Only (Only devices marked as My Device)</string>
+    <string name="trusted_devices_list_title">Trusted Devices</string>
+    <string name="trusted_devices_list_empty">No trusted devices yet. Discovered or paired peers will appear here.</string>
+    <string name="trusted_devices_btn_mark_my">Mark as My Device</string>
+    <string name="trusted_devices_btn_revoke">Revoke Trust</string>
+    <string name="trusted_devices_requests_title">Pending Device Requests</string>
+    <string name="trusted_devices_requests_empty">No pending requests</string>
+    <string name="trusted_devices_approve_as_my">Approve as My Device (Full Trust)</string>
+    <string name="trusted_devices_approve_normal">Approve</string>
+    <string name="trusted_devices_request_access_label">Requested: %1$s</string>
+    <string name="trusted_devices_ceiling_hint">Button ceilings: Approve %1$s | Approve as My Device %2$s</string>
+    <string name="trusted_devices_access_ro">read-only (ro)</string>
+    <string name="trusted_devices_access_rw">read-write (rw)</string>
+    <string name="trusted_devices_access_admin">admin (admin)</string>
+    <string name="trusted_devices_access_owner">owner (owner)</string>
+    <string name="trusted_devices_reject">Reject</string>
     <string name="desk_nav_connection">Connection</string>
     <string name="desk_nav_notifications">Notifications</string>
     <string name="desk_nav_appearance">Appearance</string>
@@ -509,7 +581,6 @@
     <string name="set_more_notif_quiet">Quiet Hours</string>
     <string name="set_more_notif_quiet_sub">Do not disturb between 22:00 and 08:00</string>
     <string name="set_more_appearance_title">Appearance</string>
-    <string name="set_more_appearance_hint">Status bar follows theme selection.</string>
     <string name="set_theme_system">Follow System</string>
     <string name="set_theme_light">Light</string>
     <string name="set_theme_dark">Dark</string>
@@ -551,22 +622,12 @@
 
     <!-- Round 2 (2026-10-13): prototype strings that round 1 missed (see values/strings.xml). -->
     <string name="r2_set_conn_card_port">Port</string>
-    <string name="r2_set_conn_only_field">This card holds exactly one real field (udpPort) — which is why it deserves a page of its own instead of being squeezed into the profile page.</string>
-    <string name="r2_set_notify_hint">All three are really persisted (RelaySettings), and the policy is read the moment a message arrives — these are not switches that change nothing.</string>
-    <string name="r2_set_appear_hint">The choice is persisted immediately: without that, the next launch would fall back to the previous value and that three-way picker would look selectable while being meaningless.</string>
-    <string name="r2_set_caps_hint">The first two changes bump profileRev and restart the node, so peers learn our capabilities again from that.</string>
-    <!-- Round 2 m-set-profile: the five `.field`s and three hints at prototype/relay.html:3682-3714. -->
+    <!-- Round 2 m-set-profile: the five `.field`s at prototype/relay.html:3682-3714. -->
     <string name="r2_set_nick_hint">Up to 32 characters, cannot be empty.</string>
     <string name="r2_set_profile_avatar_label">Avatar</string>
     <string name="r2_set_profile_org">Organization</string>
     <string name="r2_set_profile_rev_chip">Profile v%1$d</string>
     <string name="r2_set_profile_node_chip">Node %1$s</string>
-    <string name="r2_set_desk_tray_hint_lead">The tray menu title follows the state: </string>
-    <string name="r2_set_desk_tray_tag_msgs">3 new messages</string>
-    <string name="r2_set_desk_tray_tag_file">1 file received (12MB)</string>
-    <string name="r2_set_desk_tray_hint_tail">. AWT has no system bubble notifications, so for now we use the menu title plus menu-item badges, not a popup.</string>
-    <string name="r2_set_profile_team_hint">These three travel together in the profile broadcast; left blank they simply do not show on the peer — there is no "half filled" state.</string>
-    <string name="r2_set_profile_page_hint">Saving bumps profileRev, so the peer sees the new profile on its next presence.</string>
     <string name="set_persist_title">Message Persistence</string>
     <string name="set_persist_sub">When disabled, messages stay in memory and are lost on restart</string>
     <string name="set_retention_title">Retention Days</string>
@@ -617,6 +678,18 @@
     <string name="chat_send_failed">Failed to send: %1$s</string>
     <string name="set_ports_saved">Ports saved: UDP %1$d / TCP %2$d; restarting listeners.</string>
     <string name="file_pick_failed">Failed to open picker: %1$s</string>
+    <string name="file_reason_offer_expired">This file's 24-hour receive window has passed. Ask the sender to send it again.</string>
+    <string name="file_reason_peer_offline">The other device is offline. Try again when it reconnects.</string>
+    <string name="file_reason_timeout">Connection timed out; their network may be unstable. You can retry.</string>
+    <string name="file_reason_hash_mismatch">The file failed its integrity check. Please receive it again.</string>
+    <string name="file_reason_size_mismatch">Received size does not match what was declared. Please receive it again.</string>
+    <string name="file_reason_socket_error">The connection dropped. You can retry.</string>
+    <string name="file_reason_write_error">Could not write to local disk. Check free space.</string>
+    <string name="file_reason_path_escape">The file name is not allowed; nothing was written.</string>
+    <string name="file_reason_busy">The other device is transferring something else. Try again shortly.</string>
+    <string name="file_reason_canceled">Canceled.</string>
+    <string name="file_reason_not_found">The sender no longer has this file. Ask them to resend.</string>
+    <string name="file_reason_bad_frame">Transfer data was malformed. You can retry.</string>
     <string name="file_transfer_failed">File transfer failed: %1$s</string>
     <string name="file_offered">Sent %1$d files (%2$s).</string>
     <!-- 不写死任何平台的设置路径：Android/iOS/桌面的菜单各不相同，这里只说"去哪做什么"。 -->
@@ -1253,6 +1326,20 @@
     <string name="agent_approval_risk_l1">L1 Read-Only</string>
     <string name="agent_approval_risk_l2">L2 Modify</string>
     <string name="agent_approval_risk_l3">L3 Danger</string>
+    <string name="agent_approval_readonly">Read-Only (No Approval Rights)</string>
+    <string name="workspace_host_badge">👑 Local Host</string>
+    <string name="workspace_remote_badge">🌐 Remote Workspace</string>
+    <string name="workspace_perm_ro">Read-Only (RO)</string>
+    <string name="workspace_perm_rw">Read-Write (RW)</string>
+    <!-- Short badges on the workspace card (task-79: moved out of hardcoded Chinese).
+         Read-Only / Read-Write follow the existing workspace_perm_* spelling. -->
+    <string name="workspace_badge_host">Host</string>
+    <string name="workspace_access_readonly">Read-Only</string>
+    <string name="workspace_access_readwrite">Read-Write</string>
+    <string name="workspace_qr_btn">Direct QR</string>
+    <string name="workspace_grant_mgr_btn">Permissions</string>
+    <string name="workspace_source_label">Source: %1$s</string>
+    <string name="workspace_perm_label">Permission: %1$s</string>
     <string name="agent_queue_title">Task Queue</string>
     <string name="agent_queue_empty">No tasks in queue</string>
     <string name="agent_queue_cancel">Cancel task</string>
@@ -1292,6 +1379,89 @@
     <string name="capability_status_enabled">Enabled</string>
     <string name="capability_status_disabled">Disabled</string>
     <string name="capability_save_toast">ACL updated immediately</string>
+
+    <!-- Workspace Group & Permission Governance -->
+    <string name="workspace_create_group_title">Link Workspace to Group</string>
+    <string name="workspace_create_group_quick_title">Quick create from existing workspaces (Recommended)</string>
+    <string name="workspace_create_group_dedup_hint">1:1 Path Binding Dedup</string>
+    <string name="workspace_create_group_in_group">Already in group</string>
+    <!-- 协同群 renders as Team elsewhere (workspace_group_default_name_fallback),
+         so this standalone label follows the existing translation instead of inventing one. -->
+    <string name="workspace_group_label">Team</string>
+    <string name="workspace_create_group_local_only">Local only</string>
+    <string name="workspace_create_group_enter_chat">Enter Chat</string>
+    <string name="workspace_create_group_share_qr">Share QR</string>
+    <string name="workspace_create_group_quick_btn">Create &amp; Share</string>
+    <string name="workspace_create_group_or_new">Or link a new local directory</string>
+    <string name="workspace_create_group_new_title">Link Local Directory</string>
+    <string name="workspace_create_group_browse">Browse…</string>
+    <string name="workspace_create_group_agent_label">Resident Bot</string>
+    <string name="workspace_create_group_name_label">Group Name</string>
+    <string name="workspace_create_group_sync_devices">Auto-sync to my devices (no QR needed)</string>
+    <string name="workspace_create_group_confirm">Create Collaboration Group</string>
+    <string name="workspace_dismiss_notice">Dismissing the group only removes remote collaboration channels; local code, git state and session history are completely preserved.</string>
+    <string name="workspace_role_owner">👑 Owner (Full Control rw)</string>
+    <string name="workspace_role_admin">🛡️ Admin</string>
+    <string name="workspace_role_collaborator">🧑‍💻 Collaborator (rw)</string>
+    <string name="workspace_role_observer">👀 Observer (ro)</string>
+    <string name="workspace_role_my_device">👤 My Device (Trust Circle · Auto-Sync)</string>
+    <string name="workspace_role_delegated_approval">Delegated Approval Enabled</string>
+    <string name="workspace_role_no_delegated_approval">Admin only (No delegated approval)</string>
+    <string name="agent_host_sleeping_banner">Host device is sleeping/offline · Commands safely queued, resuming on wake</string>
+    <string name="agent_interrupt_btn">⏹ Global Interrupt</string>
+    <string name="workspace_default_resident_agent">🤖 DSH (Default Host Agent)</string>
+    <string name="workspace_member_section_humans">Human Members (%1$d)</string>
+    <string name="workspace_member_section_agents">Resident Bots (%1$d)</string>
+    <string name="workspace_member_agent_dsh">DSH · Terminal &amp; Execution</string>
+    <string name="workspace_member_agent_gemini">Gemini · Review &amp; Architecture</string>
+    <string name="workspace_member_add_agent">+ Add Agent Bot…</string>
+    <string name="workspace_qr_dialog_desc">Scan this direct QR with Tidings on mobile to pair node and authorize workspace access. One-time credential, valid for 15 minutes.</string>
+    <string name="workspace_qr_no_address">Cannot obtain candidate addresses. Please make sure the network is connected and port is open.</string>
+    <string name="pairing_public_ipv6_hint">A public IPv6 candidate is included: whether it works depends on your router/host firewall allowing inbound connections. This app does not punch through NAT or change your network settings. LAN is preferred; the public address is the cross-network fallback.</string>
+    <string name="workspace_create_group_no_workspaces">No declared local workspaces yet. You can bind a new directory below.</string>
+    <string name="workspace_group_default_name">%1$s Team</string>
+    <string name="workspace_group_default_name_fallback">Team</string>
+    <string name="workspace_group_initial_greeting">🤖 [%1$s] Ready and resident in workspace "%2$s". Collaboration channel established. Send commands or assign tasks to begin.</string>
+    <string name="workspace_group_session_busy">Running</string>
+    <string name="workspace_group_session_ready">Ready</string>
+    <string name="workspace_group_session_brief">📋 Current workspace session: "%1$s" (%2$s)\nCollaboration channel connected; workspace events and progress will sync to this group in real time.</string>
+    <string name="agent_event_finished_fallback">Task completed</string>
+    <string name="agent_demo_driver_notice">Demo driver: no real task was executed and no model or tool was contacted.</string>
+    <string name="agent_event_error_fallback">Agent error</string>
+
+    <!-- ===== issue 6: workspace 3-level IA rework (workspace-ia, task-4) ===== -->
+    <string name="workspace_latest_activity_format">Latest activity %1$s</string>
+    <string name="workspace_recent_session_title">Recent Session</string>
+    <string name="workspace_recent_session_open">Open session</string>
+    <string name="workspace_driver_label">Driver: %1$s</string>
+    <string name="workspace_grant_section_title">Devices authorized for this workspace</string>
+    <string name="workspace_grant_none">No authorized devices yet (policy default applies)</string>
+    <string name="workspace_group_prompt_title">No collaboration group for this workspace</string>
+    <string name="workspace_group_prompt_body">“%1$s” is not bound to a collaboration group yet. Create one and nearby online devices can join to collaborate in this workspace.</string>
+    <string name="workspace_group_prompt_create">Create and enter</string>
+    <string name="workspace_group_prompt_skip">Chat without a group</string>
+    <!-- issue 6 leftovers: these keys live in values/ but had no English translation,
+         so English users silently fell back to Chinese (design-locale-parity gate). -->
+    <string name="workspace_sessions_section">Conversations (%1$d)</string>
+    <string name="workspace_events_section">Events (%1$d · %2$s)</string>
+    <string name="workspace_event_empty">No structured event stream yet</string>
+    <string name="workspace_no_title_banner">This workspace has no name. The peer reported only its identifier %1$s, no name — we will not pass that identifier off as a name; waiting for it to fill one in.</string>
+    <string name="workspace_session_pending_count">⚠️ %1$d pending</string>
+    <string name="workspace_session_warn_no_announce">Only events received, no session announcement</string>
+    <string name="workspace_unknown_task_desc">No specific task description</string>
+
+    <!-- ===== task-10: phone-side access request + remote workspace grants ===== -->
+    <string name="workspace_grant_request_btn">Request access</string>
+    <string name="workspace_grant_request_sent">Request sent; waiting for the peer to confirm.</string>
+    <string name="workspace_grant_request_pending">Requested; waiting for the peer…</string>
+    <string name="workspace_grant_request_no_runtime">This device's node isn't running, so the request wasn't sent. Try again shortly.</string>
+    <string name="workspace_grant_request_peer_not_agent">The peer doesn't declare ag1 (it isn't an agent node), so it can't receive access requests.</string>
+    <string name="workspace_grant_request_peer_no_loop">The peer doesn't declare agr1, so the request was blocked — sending it would wrongly mark the device offline.</string>
+    <string name="workspace_grant_remote_hint">This list shows the grants known on this device; permissions on the peer are decided by the peer.</string>
+    <string name="workspace_board_starting">Starting the node…</string>
+    <string name="workspace_board_starting_hint">Devices and their workspaces will appear here once startup finishes.</string>
+    <string name="workspace_board_discovering">Looking for devices…</string>
+    <string name="workspace_board_discovering_hint">No peer discovered yet. Make sure the other device is online, or add its address on the Nodes page.</string>
 </resources>
 
 

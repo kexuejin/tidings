@@ -21,6 +21,14 @@ data class NetworkUi(
     val localAddresses: List<String> = emptyList(),
     val vpnActive: Boolean = false,
     val boundUdpPort: Int = 0,
+    /**
+     * 本机 TLS pin（SPKI 指纹），印进配对二维码用（task-86）。
+     *
+     * 为什么必须印：公网长连接的拨号目标要求 `pin != null`（fail-closed），而二维码是
+     * 主机→手机单向的信任通道 —— 不印，手机就建不出公网目标，只剩局域网明文那条，
+     * 在蜂窝上一直 connect-timeout。null = 还没有身份/明文实现（降级，不假装）。
+     */
+    val selfTlsPin: String? = null,
     val failure: BannerMessage? = null,
     /**
      * mDNS 注册这一步本身的原始结果：`true` 注册成功、`false` 注册失败、`null` 未启动。

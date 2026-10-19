@@ -53,6 +53,21 @@ data class ChatScreenState(
      * 明确指定当前处于激活高亮状态的会话，避免仅以列表首项作为激活项导致状态失准。
      */
     val activeSessionId: String? = null,
+    /**
+     * 进入这个会话**那一刻**，它还有多少条没看过（真机反馈 #5 的屏外未读指示）。
+     *
+     * ## 为什么必须由壳在「清未读之前」采下来
+     *
+     * 这个数的真相来源是 `RelayUiState.unreadByPeer`，而壳在进入会话时会调
+     * `controller.selectConversation(convId)`，它**同步**把 `core.unread[convId]` 清零并
+     * publish —— ChatScreen 首次组合时那个数已经是 0，从这一层读不到「进入前」的值。
+     * 所以采集只能发生在壳里（App.kt 的 openChat / DesktopShell 的 onSelect），
+     * 这里是消费侧。
+     *
+     * 0 = 没有未读**或**壳没采到。两者都不编数字：指示条在拿不到数字时只显示「回到最新」，
+     * 不会写出一个假条数。
+     */
+    val unreadOnEntry: Int = 0,
     /** 默认真实时钟；截图夹具传固定值（见 [ChatScreen] 的 `now` 说明）。 */
     val now: Long = nowMillis(),
     val cacheDir: String? = null,
@@ -124,6 +139,20 @@ data class ChatScreenActions(
      * null = 不画这个浮层（预览、非 agent 对端不走这条路）。
      */
     val onSelectAgentSession: ((sessionId: String) -> Unit)? = null,
+    /**
+     * 「清空本会话聊天记录」—— 只清**本机**这个会话的历史，对方不受影响。
+     *
+     * ## 为什么是无参回调
+     *
+     * 会话键由**壳**掌握（手机是 `nav.activeSessionId`，桌面是 `selectedPeerId`）——
+     * 与"当前在看哪个会话"是同一个真相来源。在这一层再算一次（比如用 `peer.nodeId`）
+     * 就等于给同一个问题留了第二个答案，将来群会话键或占位对端的形状一变就会清错会话。
+     * 所以这里只表达"用户确认要清"，清哪一个由接线的那一层闭包决定。
+     *
+     * 当前实现走既有的 [app.relay.app.RelayController.clearMessages]（不是设置页那条
+     * `clearAllMessages`）。null = 头部不画这个入口（预览 / 没有这条能力的壳）。
+     */
+    val onClearMessages: (() -> Unit)? = null,
 )
 
 /**

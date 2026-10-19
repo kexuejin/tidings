@@ -6,7 +6,26 @@ import app.relay.core.protocol.ScreenPhase
 import app.relay.core.protocol.ScreenRole
 import app.relay.core.protocol.ScreenSessionState
 import kotlinx.serialization.Serializable
-enum class DeliveryState { Sent, Queued, Failed, Recalled }
+/**
+ * 一条消息**此刻**的投递状态。
+ *
+ * ## 为什么有 [Sending]
+ *
+ * 发送是**异步**的：`sendTextWithEnvelope` 要先在候选端点上跑 UDP 退避（1s/2s/4s）、
+ * 再对每个端点试一次 TCP（各 7s 超时）。跨网最坏情况能到 40 秒量级。
+ *
+ * 在 [Sending] 之前，这整段时间里界面上**什么都没有** —— 气泡不出现、发送按钮还能再点，
+ * 于是用户以为"没点上"，连点三次就发出去三条。真机上这是最容易让人认为"这软件坏了"的
+ * 一条路径（它还恰好是每天用得最多的那条）。
+ *
+ * 所以现在的顺序是：点发送 ⇒ **立刻**用 [Sending] 插一个气泡 ⇒ 等发送路径返回后
+ * 按结果把它换成 [Sent] / [Queued] / [Failed]（见 `RelayControllerMessagesComponent`
+ * 的乐观插入与 `handleReplaceMessage`）。
+ *
+ * [Sending] **不是协议状态**：它不上线、不落库语义、重启后不会残留（重启时未发出的
+ * 消息按 [Queued] 处理 —— 队列本来就是它的事实来源）。
+ */
+enum class DeliveryState { Sending, Sent, Queued, Failed, Recalled }
 
 /**
  * 一次文件传输在 UI 上的状态。
@@ -194,6 +213,29 @@ fun parseThinkingContent(rawText: String): Pair<String?, String> {
         reasoning to remaining
     }
 }
+
+/**
+ * 文本里是否**有可见内容**（即"值得在界面上留一条消息"）。
+ *
+ * ## 为什么不能直接用 isNotBlank()
+ *
+ * Kotlin 的 isBlank() 只认 Char.isWhitespace()，而零宽字符族（U+200B 零宽空格、
+ * U+200C 零宽非连接符、U+200D 零宽连接符、U+FEFF 字节序标记）都不在其中：
+ * 一个只含 U+200B 的字符串，isNotBlank() 是 **true**。于是"只有零宽字符"的事件会被
+ * 当成有内容的消息落库、落群 —— 真机反馈「部分消息还是显示空消息」就是它，
+ * 库里那些 length=1 的文本正是 U+200B。
+ *
+ * ## 为什么住在模型层
+ *
+ * 写它的是**产消息**的一侧（桌面 DSH 桥 DesktopExtension），消费的却是**画消息**的一侧
+ * （MessageBubble 的空气泡防线）。同一条判据在两处各写一遍迟早分叉 —— 本仓反复抓的
+ * 就是这类"两把尺子"，所以只留这一份。
+ */
+fun hasVisibleText(text: String?): Boolean =
+    text != null && text.replace(INVISIBLE_ONLY, "").isNotBlank()
+
+/** 零宽字符族。显式剔掉才判得出"看不见"，见 [hasVisibleText]。 */
+private val INVISIBLE_ONLY = Regex("[\\u200B\\u200C\\u200D\\uFEFF]")
 
 
 /**

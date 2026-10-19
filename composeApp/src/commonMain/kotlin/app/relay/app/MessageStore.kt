@@ -307,10 +307,16 @@ internal fun MessageUi.toStorable(): MessageUi = copy(file = null)
  * 用户想重发只能自己再发一条。
  */
 internal fun MessageUi.toRestored(): MessageUi =
-    if (mine && delivery == DeliveryState.Queued) {
-        copy(delivery = DeliveryState.Failed)
-    } else {
-        this
+    when {
+        // 重启后还停在「已排队」= 队列已经没了，它不会再发出去 ⇒ 折成既成事实的失败。
+        mine && delivery == DeliveryState.Queued -> copy(delivery = DeliveryState.Failed)
+        // 重启后还停在「发送中」是**更严重**的谎：那个状态连重试出口都没有（界面上只有
+        // Failed 才挂「重发」），用户会一直看着一条永远转下去的消息。进程都换了一个，
+        // 那次发送**必然**已经结束（成功或失败），无从恢复 ⇒ 如实折成失败。
+        //
+        // 这条不变量由 `Sending` 的 KDoc 承诺（"重启后不会残留"），这里就是它的实现点。
+        mine && delivery == DeliveryState.Sending -> copy(delivery = DeliveryState.Failed)
+        else -> this
     }
 
 /**

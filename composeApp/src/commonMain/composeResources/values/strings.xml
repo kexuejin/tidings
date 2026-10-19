@@ -73,6 +73,7 @@
          所以要说清楚"现在这样发出去是什么后果"，而不是只给一个字节数。 -->
     <string name="chat_route_udp">局域网直连 · 走 UDP 单播</string>
     <string name="chat_route_tcp">超出单播上限，自动改走 TCP</string>
+    <string name="chat_delivery_sending">发送中</string>
     <string name="chat_delivery_sent">已送达</string>
     <string name="chat_delivery_queued">已排队</string>
     <string name="chat_delivery_failed">发送失败</string>
@@ -201,6 +202,17 @@
     <string name="chat_restored_offline">离线 · 下面是本机存下来的历史</string>
     <string name="chat_caps_label">能力：%1$s</string>
     <string name="chat_tcp_port">TCP %1$d</string>
+    <!-- 「清空本会话聊天记录」（聊天页头部 → ⋮）。语义：只删**本机**这个会话的记录，
+         对方那里不受影响；%1$s 是会话显示名，写进正文是为了让人核对清的是哪一个。 -->
+    <string name="chat_clear_local_action">清空本会话记录</string>
+    <string name="chat_clear_local_title">清空本会话聊天记录</string>
+    <string name="chat_clear_local_body">只删除本机「%1$s」这个会话的记录，对方那里不受影响；删除后不可恢复。</string>
+    <string name="chat_clear_local_confirm">清空</string>
+    <!-- 消息流右下角那颗浮起胶囊（真机反馈 #5）。数字来自「进入会话那一刻的未读」
+         （ChatScreenState.unreadOnEntry，由壳在清未读之前采下）+「进入后新到的」；
+         两个都拿不到时**不写数字**，只留「回到最新」这一句。 -->
+    <string name="chat_unread_jump">%1$d 条未读 · 回到最新</string>
+    <string name="chat_unread_jump_latest">回到最新</string>
 
     <!-- 节点页（合并了原来的「发现」和「加入网络」两屏） -->
     <string name="disc_title">节点</string>
@@ -240,6 +252,14 @@
     <string name="node_detail_recent_just_now">刚刚</string>
     <string name="node_detail_never_hint">这条地址从未连通过，先确认网络再发消息。</string>
     <string name="nodes_my_qr_title">我的二维码</string>
+    <!-- 外部来源配对（deep link / 调试注入）的二次确认（task-54）。文案纪律：**别比事实更确定** ——
+         只有载荷里真的带 pin 时才说「固定它的密钥」；解析不出的载荷如实说解析不出。 -->
+    <string name="external_pairing_title">外部配对请求</string>
+    <string name="external_pairing_body_node">这条内容来自应用外部（链接或调试注入）。允许后会与节点 %1$s 配对，并把它写进本机候选地址。</string>
+    <string name="external_pairing_body_pins_key">并固定它的密钥：此后本机按它验证该对端（公网连接 fail-closed 的信任根）。</string>
+    <string name="external_pairing_body_relay">这条内容会把本机接到一个中继端点（url + token）；只有你点「允许」才会写入设置。</string>
+    <string name="external_pairing_body_unknown">这条内容本机解析不出具体节点；允许后按现有配对流程处理。</string>
+    <string name="external_pairing_allow">允许配对</string>
     <string name="nodes_my_qr_desc">配对二维码，让对方用「节点 → 扫码配对」扫它</string>
     <string name="nodes_my_qr_hint">对方在「节点 → 扫码配对」里扫这张码，就会把你加进他的节点表。两台设备要在同一个局域网里。</string>
     <string name="nodes_my_qr_no_address">节点还没拿到本机地址，现在印不出二维码。等上面「本机地址」出现再回来看。</string>
@@ -439,6 +459,12 @@
     <string name="agent_session_state_done">已完成</string>
     <string name="agent_session_state_error">出错</string>
     <string name="agent_session_state_archived">已归档</string>
+    <!-- 输入区正上方的 agent 状态（真机反馈 #3）。四个状态各自只在真实信号下出现，
+         没有证据时整行不画 —— 见 feature/chat/AgentComposerStatus.kt。 -->
+    <string name="chat_composer_status_thinking">Agent 正在思考 / 执行中…</string>
+    <string name="chat_composer_status_awaiting_approval">等待你审批工具调用…</string>
+    <string name="chat_composer_status_unresponsive">Agent 已停止响应（最近没有新动作）</string>
+    <string name="chat_composer_status_stopped">Agent 已停止（执行出错）</string>
     <string name="agent_session_meta">%1$s · %2$s</string>
     <string name="agent_session_started">开始于 %1$s</string>
     <string name="agent_session_events_count">%1$d 条事件</string>
@@ -459,6 +485,11 @@
     <string name="agent_thought_process">思索过程</string>
     <string name="agent_thought_process_elapsed">思索过程 (%1$s)</string>
     <string name="agent_thought_thinking">思考中…</string>
+    <string name="chat_new_task_action">新任务</string>
+    <string name="chat_task_divider_label">任务：%1$s</string>
+    <!-- 新会话还没有标题时的分段标记（task-42 ④）。不用 sessionId 兜底：身份键不是标题；
+         但也不能整条不画 —— 那会让「新建会话」看起来没有任何分段。 -->
+    <string name="chat_task_divider_new">新会话</string>
 
     <!-- 「加入网络」整屏随 feature/pairing/ 一起删掉了，文案并进上面的 nodes_* -->
 
@@ -502,6 +533,16 @@
     <string name="r2_set_avatar_mode_initial">昵称首字</string>
     <string name="r2_set_avatar_mode_upload">上传图片</string>
     <string name="set_conn_subtitle">默认 UDP 端口与重连</string>
+    <!-- 后台保持连接（Android 前台服务保活）。四条文案各自有真实落点：
+         · channel 名只被系统在「通知设置」里采用；
+         · 通知标题/正文是常驻通知上那句，必须如实说"在保持连接"而不是伪装成消息；
+         · 设置页标题/说明说清代价（常驻通知 + 耗电）与关掉即停。 -->
+    <string name="keep_alive_channel_name">后台保持连接</string>
+    <string name="keep_alive_notification_title">正在保持连接</string>
+    <string name="keep_alive_notification_body">以便接收消息（含跨网下行通道）；关掉「后台保持连接」即可停止</string>
+    <string name="set_keep_alive_card_title">后台接收</string>
+    <string name="set_keep_alive_title">后台保持连接</string>
+    <string name="set_keep_alive_desc">退到后台后仍能被局域网里的设备发现、仍能收到消息。代价是常驻一条通知并增加耗电；关掉立即停止。</string>
     <string name="set_home_broadcast_hint">保存后资料与端口会重新广播，对端下一次 presence 就能看到新版本。</string>
     <!-- 桌面设置窗外壳（d-settings / d-settings-desk）。左侧列表与「桌面」面板的
          正文，来自 prototype/relay.html 的 DSET_GROUPS 与 screenDSettingsDesk。 -->
@@ -511,6 +552,31 @@
     <string name="desk_nav_group_data">数据与诊断</string>
     <string name="desk_nav_group_desk">这台电脑</string>
     <string name="desk_nav_identity">身份与连接</string>
+    <string name="desk_nav_trusted_devices">可信设备与配对</string>
+    <string name="trusted_devices_desc">局域网与双栈可信设备管理。手机扫描此二维码即可快速配对加入信任圈。</string>
+    <string name="trusted_devices_qr_title">本机配对二维码</string>
+    <string name="trusted_devices_qr_hint">使用手机「节点 → 扫码配对」扫描此码即可添加本机。支持 IPv4 与 IPv6 智能自适应连接。</string>
+    <string name="trusted_devices_copy_node_id">复制节点 ID</string>
+    <string name="trusted_devices_copy_pairing_link">复制配对链接</string>
+    <string name="trusted_devices_policy_title">设备接入信任策略</string>
+    <string name="trusted_devices_policy_request">需审批（新设备发起申请后，需在此确认放行）</string>
+    <string name="trusted_devices_policy_auto">自动信任（局域网内开启发现的节点自动互信）</string>
+    <string name="trusted_devices_policy_by_device">白名单（仅限已显式标记为「我的设备」）</string>
+    <string name="trusted_devices_list_title">已授权与可信设备</string>
+    <string name="trusted_devices_list_empty">暂无可信设备记录。局域网发现节点或扫码后将在此管理。</string>
+    <string name="trusted_devices_btn_mark_my">设为我的设备</string>
+    <string name="trusted_devices_btn_revoke">撤销信任</string>
+    <string name="trusted_devices_requests_title">待处理设备申请</string>
+    <string name="trusted_devices_requests_empty">暂无待处理的接入申请</string>
+    <string name="trusted_devices_approve_as_my">批准为我的设备 (完全信任)</string>
+    <string name="trusted_devices_approve_normal">批准协同</string>
+    <string name="trusted_devices_request_access_label">对端申请：%1$s</string>
+    <string name="trusted_devices_ceiling_hint">按钮上限：「批准协同」%1$s ｜「批准为我的设备」%2$s</string>
+    <string name="trusted_devices_access_ro">只读 ro</string>
+    <string name="trusted_devices_access_rw">读写 rw</string>
+    <string name="trusted_devices_access_admin">管理员 admin</string>
+    <string name="trusted_devices_access_owner">所有者 owner</string>
+    <string name="trusted_devices_reject">拒绝</string>
     <string name="desk_nav_connection">连接</string>
     <string name="desk_nav_notifications">通知</string>
     <string name="desk_nav_appearance">外观</string>
@@ -572,7 +638,6 @@
     <!-- 原型这张卡的标题（prototype/relay.html:3892），与页面标题不是同一个词 -->
     <string name="set_appear_card_title">主题</string>
     <string name="set_appear_subtitle">主题</string>
-    <string name="set_more_appearance_hint">状态栏图标亮度跟随这里选的主题，系统栏不再留白。</string>
     <string name="set_theme_system">跟随系统</string>
     <string name="set_theme_light">浅色</string>
     <string name="set_theme_dark">深色</string>
@@ -624,23 +689,12 @@
          （:3829-3830）、notify 页级 .hint（:3882-3883）、appear 页级 .hint（:3898-3899）、
          caps 页级 .hint（:3914-3915）。对账见 docs/plans/2026-10-13-r2-W3-settings.md。 -->
     <string name="r2_set_conn_card_port">端口</string>
-    <string name="r2_set_conn_only_field">整张卡只有一个真字段（udpPort）—— 这就是它值得单开一页、而不是塞进资料页的理由。</string>
-    <string name="r2_set_notify_hint">三条都真的落盘（RelaySettings），策略在收到消息那一刻现读 —— 不是“拨了不改变行为”。</string>
-    <string name="r2_set_appear_hint">选完立刻落盘：不落盘的话下次启动又回到上一轮的值，那个三选一就成了“看着能选、其实白选”。</string>
-    <string name="r2_set_caps_hint">前两条改动会递增 profileRev 并重启节点，对端据此重新认识我们的能力。</string>
-    <!-- 第二轮 m-set-profile：原型 prototype/relay.html:3682-3714 的五个 `.field` 与三条 hint。 -->
+    <!-- 第二轮 m-set-profile：原型 prototype/relay.html:3682-3714 的五个 `.field`。 -->
     <string name="r2_set_nick_hint">最多 32 个字符，不能为空。</string>
     <string name="r2_set_profile_avatar_label">头像</string>
     <string name="r2_set_profile_org">组织</string>
     <string name="r2_set_profile_rev_chip">资料 v%1$d</string>
     <string name="r2_set_profile_node_chip">节点 %1$s</string>
-    <!-- 桌面「桌面」档页级 hint（原型 prototype/relay.html:5326-5328 的 .hint，不是 .annot）：「托盘图标菜单的标题会随状态变：<tag>3 条新消息</tag><tag>收到 1 个文件（12MB）</tag>。AWT 没有系统气泡通知，所以本期用菜单标题 + 菜单项角标，不做弹窗。」-->
-    <string name="r2_set_desk_tray_hint_lead">托盘图标菜单的标题会随状态变：</string>
-    <string name="r2_set_desk_tray_tag_msgs">3 条新消息</string>
-    <string name="r2_set_desk_tray_tag_file">收到 1 个文件（12MB）</string>
-    <string name="r2_set_desk_tray_hint_tail">。AWT 没有系统气泡通知，所以本期用菜单标题 + 菜单项角标，不做弹窗。</string>
-    <string name="r2_set_profile_team_hint">这三项一起装在 profile 里广播，空着就不在对端显示 —— 没有「只填一半」这种中间态。</string>
-    <string name="r2_set_profile_page_hint">保存即递增 profileRev，对端下一次 presence 就能看到新资料。</string>
     <string name="set_persist_title">消息落盘</string>
     <string name="set_persist_sub">关着时历史只在内存，重启即丢</string>
     <string name="set_retention_title">保留天数</string>
@@ -696,6 +750,21 @@
     <string name="chat_send_failed">发送失败：%1$s</string>
     <string name="set_ports_saved">端口已保存：UDP %1$d / TCP %2$d；正在重新监听。</string>
     <string name="file_pick_failed">打开选择器失败：%1$s</string>
+    <!-- 文件传输失败原因：把 core 的机器码翻译成人话。
+         真机上这些码是直接印给用户的（"socket-error" / "hash-mismatch"），
+         用户的反应是"这软件坏了还是我网坏了"。每一条都要说清"发生了什么 + 我该怎么办"。 -->
+    <string name="file_reason_offer_expired">这份文件的接收时限已过（24 小时），请让对方重新发一次</string>
+    <string name="file_reason_peer_offline">对方当前离线，等它上线后再试</string>
+    <string name="file_reason_timeout">连接超时，对方网络可能不稳定，可以重试</string>
+    <string name="file_reason_hash_mismatch">文件内容校验不一致，可能传坏了，请重新接收</string>
+    <string name="file_reason_size_mismatch">收到的字节数与声明不符，请重新接收</string>
+    <string name="file_reason_socket_error">网络连接中断，可以重试</string>
+    <string name="file_reason_write_error">写入本机磁盘失败，请检查剩余空间</string>
+    <string name="file_reason_path_escape">文件名不合法，已拒绝写入</string>
+    <string name="file_reason_busy">对方正在传别的文件，稍后再试</string>
+    <string name="file_reason_canceled">已被取消</string>
+    <string name="file_reason_not_found">对方那边已经没有这份文件了，请让对方重发</string>
+    <string name="file_reason_bad_frame">传输数据格式不对，可以重试</string>
     <string name="file_transfer_failed">文件传输失败：%1$s</string>
     <string name="file_offered">已发出 %1$d 个文件（%2$s）。</string>
     <!-- 不写死任何平台的设置路径：Android/iOS/桌面的菜单各不相同，这里只说"去哪做什么"。 -->
@@ -1340,6 +1409,19 @@
     <string name="agent_approval_risk_l1">L1 只读</string>
     <string name="agent_approval_risk_l2">L2 修改</string>
     <string name="agent_approval_risk_l3">L3 高危</string>
+    <string name="agent_approval_readonly">只读（无权审批）</string>
+    <string name="workspace_host_badge">👑 本机宿主</string>
+    <string name="workspace_remote_badge">🌐 远端工作区</string>
+    <string name="workspace_perm_ro">只读 (RO)</string>
+    <string name="workspace_perm_rw">读写 (RW)</string>
+    <!-- 工作区卡片上的短标签（task-79：从硬编码中文移进来，否则英文界面露中文） -->
+    <string name="workspace_badge_host">宿主</string>
+    <string name="workspace_access_readonly">只读</string>
+    <string name="workspace_access_readwrite">读写</string>
+    <string name="workspace_qr_btn">直通码</string>
+    <string name="workspace_grant_mgr_btn">权限管理</string>
+    <string name="workspace_source_label">来源: %1$s</string>
+    <string name="workspace_perm_label">当前权限: %1$s</string>
     <string name="agent_queue_title">任务队列</string>
     <string name="agent_queue_empty">暂无队列任务</string>
     <string name="agent_queue_cancel">取消任务</string>
@@ -1379,6 +1461,98 @@
     <string name="capability_status_enabled">已启用</string>
     <string name="capability_status_disabled">已禁用</string>
     <string name="capability_save_toast">权限策略已即时下发</string>
+
+    <!-- 协同群与权限进阶（群聊工作区协同体系） -->
+    <string name="workspace_create_group_title">关联工作区建群</string>
+    <string name="workspace_create_group_quick_title">从智能体已有工作区快速建群 (推荐)</string>
+    <string name="workspace_create_group_dedup_hint">目录 1:1 防重绑定</string>
+    <string name="workspace_create_group_in_group">已在协同群中</string>
+    <string name="workspace_group_label">协同群</string>
+    <string name="workspace_create_group_local_only">本地单机</string>
+    <string name="workspace_create_group_enter_chat">进入群聊</string>
+    <string name="workspace_create_group_share_qr">分享码</string>
+    <string name="workspace_create_group_quick_btn">一键建群 / 共享</string>
+    <string name="workspace_create_group_or_new">或关联本地全新目录</string>
+    <string name="workspace_create_group_new_title">关联本地新目录</string>
+    <string name="workspace_create_group_browse">浏览目录…</string>
+    <string name="workspace_create_group_agent_label">驻群智能体</string>
+    <string name="workspace_create_group_name_label">群聊名称 (自动联动)</string>
+    <string name="workspace_create_group_sync_devices">自动同步到我的移动设备 (免扫码)</string>
+    <string name="workspace_create_group_confirm">立即创建协同群</string>
+    <string name="workspace_dismiss_notice">解散群聊仅移除多端协同通道，本地代码文件、Git 状态与历史会话完好保留。</string>
+    <string name="workspace_role_owner">👑 拥有者 (完全控制 rw)</string>
+    <string name="workspace_role_admin">🛡️ 协同管理员</string>
+    <string name="workspace_role_collaborator">🧑‍💻 协同开发者 (rw)</string>
+    <string name="workspace_role_observer">👀 旁观者 (ro)</string>
+    <string name="workspace_role_my_device">👤 我的设备 (私有信任圈 · 自动自同步)</string>
+    <string name="workspace_role_delegated_approval">已开启终端代批 (Delegated Approval)</string>
+    <string name="workspace_role_no_delegated_approval">仅协同管理 (无代批权限)</string>
+    <string name="agent_host_sleeping_banner">宿主设备睡眠/离线中 · 命令已安全排队挂起，待宿主唤醒后自动断点续传</string>
+    <string name="agent_interrupt_btn">⏹ 全局打断</string>
+    <string name="workspace_default_resident_agent">🤖 DSH (默认本地执行助理)</string>
+    <string name="workspace_member_section_humans">协同人类成员 (%1$d)</string>
+    <string name="workspace_member_section_agents">入驻智能体 (%1$d)</string>
+    <string name="workspace_member_agent_dsh">DSH · 本地终端与执行引擎</string>
+    <string name="workspace_member_agent_gemini">Gemini · 架构设计与代码审阅</string>
+    <string name="workspace_member_add_agent">+ 邀请新智能体入驻…</string>
+    <string name="workspace_no_title_banner">这个工作区没有名字。对端只上报了它的标识 %1$s，没有上报名字 —— 我们不用那串标识冒充名字，等它补上。</string>
+    <string name="workspace_sessions_section">会话 (%1$d)</string>
+    <string name="workspace_events_section">事件流 (%1$d 条 · %2$s)</string>
+    <string name="workspace_session_warn_no_announce">只收到事件，没收到会话宣告</string>
+    <string name="workspace_session_pending_count">⚠️ %1$d 项待审</string>
+    <string name="workspace_unknown_task_desc">无特定任务描述</string>
+    <string name="workspace_event_empty">暂无结构化事件流</string>
+    <string name="workspace_qr_dialog_desc">手机使用「捎话」扫描工作区直通码，自动完成「节点配对 + 工作区授权」。一次性授权凭证 · 15分钟有效。</string>
+    <string name="workspace_qr_no_address">无法获取本机候选地址，请确保网络已连接并开放端口。</string>
+    <string name="pairing_public_ipv6_hint">本机有公网 IPv6 候选：能否直连取决于路由器/主机防火墙是否放行入站，本应用不做打洞、也不代你改网络设置。同网段优先，跨网络时才试公网地址。</string>
+    <string name="workspace_create_group_no_workspaces">暂无已宣告的本地工作区，可在下方直接关联新目录</string>
+    <string name="workspace_group_default_name">%1$s 协同群</string>
+    <string name="workspace_group_default_name_fallback">协同群</string>
+    <string name="workspace_group_initial_greeting">🤖 [%1$s] 已就绪并入驻当前工作区「%2$s」，协同通道已建立。输入消息或指派任务即可驱动执行。</string>
+    <string name="workspace_group_session_busy">执行中</string>
+    <string name="workspace_group_session_ready">就绪</string>
+    <string name="workspace_group_session_brief">📋 工作区当前会话: 「%1$s」 (%2$s)\n协同通道已连接，工作区事件与进度将实时同步至本群。</string>
+    <string name="agent_event_finished_fallback">任务已完成</string>
+    <string name="agent_demo_driver_notice">演示驱动：未执行真实任务，未连接任何模型或工具。</string>
+    <string name="agent_event_error_fallback">Agent 异常</string>
+
+    <!-- ===== issue 6：工作区三层 IA 重构（workspace-ia, task-4）===== -->
+    <!-- 卡片底栏那半句。此前是「共 N 个会话 · 最新活动 X」，按用户裁决去掉会话数：
+         这一行要回答的是"最新一次动在什么时候"。 -->
+    <string name="workspace_latest_activity_format">最新活动 %1$s</string>
+    <!-- 工作区详情（二级）= 工作区操作中心：最近会话入口。整段会话列表已按用户裁决删掉，
+         只留这一条"最关键会话"的入口，点它进三级会话详情（事件流 + 审批队列）。 -->
+    <string name="workspace_recent_session_title">最近会话</string>
+    <string name="workspace_recent_session_open">进入会话</string>
+    <!-- 会话详情原来那条宿主控制条（权限 + 直通码）搬到了工作区详情：
+         这三句此前是 Kotlin 里的硬编码中文，迁移时按 cjkLiteralGate 的棘轮换成资源。 -->
+    <string name="workspace_driver_label">驱动: %1$s</string>
+    <string name="workspace_grant_section_title">当前工作区授权设备及权限</string>
+    <string name="workspace_grant_none">暂无已授权设备（默认按策略管控）</string>
+    <!-- issue 7：在某个工作区点「打开聊天」但还没有绑定协同群时的提示。
+         此前桌面端会弹「所有工作区」列表对话框 —— 那是错的：用户要处理的是**当前这个**工作区。
+         那个列表对话框仍然保留，只能是独立入口（「协同群」按钮）。 -->
+    <string name="workspace_group_prompt_title">这个工作区还没有协同群</string>
+    <string name="workspace_group_prompt_body">「%1$s」还没有绑定协同群。建群后附近在线的设备会一起加入，就能在这个工作区里协同。</string>
+    <string name="workspace_group_prompt_create">建群并进入</string>
+    <string name="workspace_group_prompt_skip">先直接聊天</string>
+
+    <!-- ===== task-10：手机侧授权入口 + 远端工作区看授权 ===== -->
+    <!-- 工作区详情里那颗按钮：远端工作区才有（本机就是宿主本身）。 -->
+    <string name="workspace_grant_request_btn">申请授权</string>
+    <string name="workspace_grant_request_sent">申请已发出，等对端确认。</string>
+    <string name="workspace_grant_request_pending">已申请，等待对端确认…</string>
+    <!-- 返回 null 的三种处境各一句，**不许合并**：合成一句等于替对端说一个它没说过的结论。 -->
+    <string name="workspace_grant_request_no_runtime">本机节点还没起来，申请没发出去。稍后再试。</string>
+    <string name="workspace_grant_request_peer_not_agent">对端没有声明 ag1（它不是 agent 节点），收不到授权申请。</string>
+    <string name="workspace_grant_request_peer_no_loop">对端没有声明 agr1（不认识授权回路）；发过去会把一台在线设备误标成离线，已拦下。</string>
+    <!-- 授权清单对话框在**远端**工作区上多的一句说明（本机不画）。 -->
+    <string name="workspace_grant_remote_hint">这份清单是本端已知的授权；对端设备上的权限由对端决定。</string>
+    <!-- 工作区页的「还没到」态：与「还没有任何 Agent 上报」那个真·空态分开。 -->
+    <string name="workspace_board_starting">节点正在启动…</string>
+    <string name="workspace_board_starting_hint">启动完成后，设备和它们的工作区会出现在这里。</string>
+    <string name="workspace_board_discovering">正在查找设备…</string>
+    <string name="workspace_board_discovering_hint">还没有发现任何对端。确认对方在线；也可以去「节点」页手动填地址。</string>
 </resources>
 
 

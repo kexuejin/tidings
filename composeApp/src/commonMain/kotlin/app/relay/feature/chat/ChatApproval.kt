@@ -50,9 +50,11 @@ import app.relay.app.model.ConversationUi
 import app.relay.app.model.DeliveryState
 import app.relay.generated.resources.agent_approval_allow
 import app.relay.generated.resources.agent_approval_deny
+import app.relay.generated.resources.agent_approval_readonly
 import app.relay.generated.resources.chat_delivery_failed
 import app.relay.generated.resources.chat_delivery_queued
 import app.relay.generated.resources.chat_delivery_recalled
+import app.relay.generated.resources.chat_delivery_sending
 import app.relay.generated.resources.chat_delivery_sent
 import app.relay.generated.resources.file_audio_unsupported
 import app.relay.generated.resources.file_play_audio
@@ -144,6 +146,7 @@ internal val MAX_PREVIEW_SIDE = 240.dp
 /** 只对**已知**的投递状态取文案；`null`（文件气泡）在调用点就被跳过了。 */
 @Composable
 internal fun DeliveryState.label(): String = when (this) {
+    DeliveryState.Sending -> stringResource(Res.string.chat_delivery_sending)
     DeliveryState.Sent -> stringResource(Res.string.chat_delivery_sent)
     DeliveryState.Queued -> stringResource(Res.string.chat_delivery_queued)
     DeliveryState.Failed -> stringResource(Res.string.chat_delivery_failed)
@@ -176,6 +179,7 @@ internal fun ChatApprovalBanner(
     approvals: List<AgentApprovalUi>,
     onRespond: (approvalId: String, allow: Boolean) -> Unit,
     modifier: Modifier = Modifier,
+    isReadOnly: ((AgentApprovalUi) -> Boolean)? = null,
 ) {
     Surface(
         color = MaterialTheme.colorScheme.errorContainer.copy(alpha = 0.35f),
@@ -189,6 +193,7 @@ internal fun ChatApprovalBanner(
         ) {
             approvals.forEach { approval ->
                 val risk = app.relay.feature.agents.resolveRiskLevel(approval.riskLevel, approval.tool)
+                val readOnly = isReadOnly?.invoke(approval) == true
                 Row(
                     modifier = Modifier.fillMaxWidth(),
                     verticalAlignment = Alignment.CenterVertically,
@@ -208,18 +213,32 @@ internal fun ChatApprovalBanner(
                             overflow = TextOverflow.Ellipsis,
                         )
                     }
-                    Row(horizontalArrangement = Arrangement.spacedBy(LocalAppSpacing.current.xs)) {
-                        OutlinedButton(
-                            onClick = { onRespond(approval.approvalId, false) },
-                            contentPadding = PaddingValues(horizontal = 8.dp, vertical = 2.dp),
+                    if (readOnly) {
+                        Surface(
+                            shape = RoundedCornerShape(6.dp),
+                            color = MaterialTheme.colorScheme.surfaceVariant,
                         ) {
-                            Text(stringResource(Res.string.agent_approval_deny), style = MaterialTheme.typography.labelSmall)
+                            Text(
+                                text = stringResource(Res.string.agent_approval_readonly),
+                                style = MaterialTheme.typography.labelSmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                modifier = Modifier.padding(horizontal = 8.dp, vertical = 2.dp),
+                            )
                         }
-                        Button(
-                            onClick = { onRespond(approval.approvalId, true) },
-                            contentPadding = PaddingValues(horizontal = 8.dp, vertical = 2.dp),
-                        ) {
-                            Text(stringResource(Res.string.agent_approval_allow), style = MaterialTheme.typography.labelSmall)
+                    } else {
+                        Row(horizontalArrangement = Arrangement.spacedBy(LocalAppSpacing.current.xs)) {
+                            OutlinedButton(
+                                onClick = { onRespond(approval.approvalId, false) },
+                                contentPadding = PaddingValues(horizontal = 8.dp, vertical = 2.dp),
+                            ) {
+                                Text(stringResource(Res.string.agent_approval_deny), style = MaterialTheme.typography.labelSmall)
+                            }
+                            Button(
+                                onClick = { onRespond(approval.approvalId, true) },
+                                contentPadding = PaddingValues(horizontal = 8.dp, vertical = 2.dp),
+                            ) {
+                                Text(stringResource(Res.string.agent_approval_allow), style = MaterialTheme.typography.labelSmall)
+                            }
                         }
                     }
                 }

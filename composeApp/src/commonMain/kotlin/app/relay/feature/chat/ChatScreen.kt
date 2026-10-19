@@ -3,6 +3,8 @@
 package app.relay.feature.chat
 
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.ui.ExperimentalComposeUiApi
+import androidx.compose.ui.backhandler.BackHandler
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
@@ -17,12 +19,14 @@ import androidx.compose.material3.HorizontalDivider
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.derivedStateOf
+import androidx.compose.runtime.key
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.focus.FocusRequester
+import androidx.compose.ui.unit.dp
 import app.relay.app.MessageSearchResult
 import app.relay.app.canRecall
 import app.relay.app.sessionPageKeyOf
@@ -43,9 +47,11 @@ import app.relay.ui.theme.LocalAppSpacing
 import app.relay.ui.EmptyState
 import kotlinx.coroutines.launch
 import org.jetbrains.compose.resources.stringResource
+import app.relay.app.model.AgentSessionKey
 import app.relay.app.model.MessageUi
 import app.relay.app.model.PeerUi
 import app.relay.app.model.TransferState
+import app.relay.core.protocol.AgentGrantAccess
 import app.relay.generated.resources.action_find_nodes
 import app.relay.generated.resources.chat_attach
 import app.relay.generated.resources.chat_empty_message
@@ -66,10 +72,30 @@ import app.relay.generated.resources.ic_attachment
 import app.relay.generated.resources.ic_image
 import app.relay.generated.resources.ic_mic
 import app.relay.generated.resources.ic_nudge
+import app.relay.generated.resources.agent_host_sleeping_banner
+import app.relay.generated.resources.ic_moon
 import app.relay.generated.resources.ic_pk
 import app.relay.generated.resources.ic_search
+import app.relay.generated.resources.ic_down
+import app.relay.generated.resources.chat_unread_jump
+import app.relay.generated.resources.chat_unread_jump_latest
+import androidx.compose.foundation.layout.Row
+import androidx.compose.material3.Text
+import androidx.compose.material3.Icon
+import androidx.compose.material3.Surface
+import androidx.compose.material3.MaterialTheme
+import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextOverflow
+import org.jetbrains.compose.resources.painterResource
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.setValue
+import app.relay.generated.resources.ic_terminal
+import app.relay.generated.resources.ic_plus
+import app.relay.generated.resources.chat_new_task_action
+import app.relay.generated.resources.chat_task_divider_label
+import app.relay.generated.resources.chat_task_divider_new
 
 
 /**
@@ -78,6 +104,9 @@ import androidx.compose.runtime.setValue
  * 投递状态与点对点协议标准语义一致：`已送达` = 对方 ACK 过；`已排队` = 只是进了补发队列，
  * **对方还没收到**。把这两个混成一个"已发送"是这类应用最常见的谎。
  */
+// `BackHandler`（`androidx.compose.ui.backhandler`）目前还是实验 API。
+// 与 `App.kt` 里那两处同一写法：在**这个组合函数**上 OptIn，而不是散在每个调用点。
+@OptIn(ExperimentalComposeUiApi::class)
 @Composable
 fun ChatScreen(
     data: ChatScreenState,
@@ -110,6 +139,7 @@ fun ChatScreen(
     val onSendVoice = actions.onSendVoice
     val onRespondApproval = actions.onRespondApproval
     val onSearchInConversation = actions.onSearchInConversation
+    val onClearMessages = actions.onClearMessages
     val onAddGroupMembers = groupActions.onAddGroupMembers
     val onRemoveGroupMember = groupActions.onRemoveGroupMember
     val onUpdateGroupMeta = groupActions.onUpdateGroupMeta
@@ -170,25 +200,65 @@ fun ChatScreen(
             it.isFolder && (it.state == TransferState.Offered || it.state == TransferState.Active)
         } == true
     }
-    val listState = rememberLazyListState()
+    // 按**会话**重建滚动状态：不加这层 key 时，从会话 A 切到 B 会继承 A 的偏移，
+    // 初始锚定一旦没落到底，用户看到的就是"A 的位置"（真机反馈 #5 的另一种表现）。
+    val listState = key(peerId) { rememberLazyListState() }
     val coroutineScope = rememberCoroutineScope()
     var draft by remember(peerId) { mutableStateOf(initialDraft) }
     var replyingToMessage by remember(peerId) { mutableStateOf<MessageUi?>(null) }
     var forwardingMessage by remember { mutableStateOf<MessageUi?>(null) }
     var showGroupInfo by remember(peerId) { mutableStateOf(false) }
+    // 「清空本会话记录」的确认框开合。动作来自头部（⋮），确认框画在这一层 —— 桌面壳的
+    // 头部不进 ChatScreen，它自己那份确认框在 DesktopChatPane 里。
+    var showClearConfirm by remember(peerId) { mutableStateOf(false) }
     var showVoiceRecord by remember(peerId) { mutableStateOf(false) }
     var previewingImagePath by remember { mutableStateOf<String?>(null) }
     var showHistorySearch by remember(peerId) { mutableStateOf(initialHistorySearch) }
     var showPkPicker by remember { mutableStateOf(false) }
-    // 会话切换浮层的开合跟着**工作区**走，不只跟 peerId：列表本身按 data.wsId 收窄
-    // （见下面 agentSessions 的 remember），浮层却只认 peerId 的话，从工作区 A 点开浮层
-    // 后切到同一节点的 B，浮层仍开着、内容却已换成 B 的会话 —— 用户会以为在看 A 的列表。
-    var showSessionPicker by remember(peerId, data.wsId) { mutableStateOf(false) }
+    // 会话切换浮层的开合跟着**工作区**走，不只跟 peerId：列表本身按 effectiveWsId 收窄
+    val matchedWs = remember(group, state.agentWorkspaces) {
+        if (group == null) null
+        else state.agentWorkspaces.values.firstOrNull { ws ->
+            val desc = group.description.orEmpty()
+            val pathMatch = ws.wsPath?.isNotBlank() == true && (desc.contains(ws.wsPath) || desc == ws.wsPath)
+            val idMatch = ws.wsId?.isNotBlank() == true && (desc.contains(ws.wsId) || desc == ws.wsId)
+            val titleMatch = ws.wsTitle?.isNotBlank() == true && group.name.contains(ws.wsTitle)
+            pathMatch || idMatch || titleMatch
+        }
+    }
+    val effectiveWsId = data.wsId ?: matchedWs?.wsId
+    var showSessionPicker by remember(peerId, effectiveWsId) { mutableStateOf(false) }
+
+    // ## 浮层必须吃返回键（UX 审计 §5 的 P0）
+    //
+    // 这些浮层盖在聊天页**之上**，但此前没有一处接管返回键 —— 于是用户在任意一个浮层上
+    // 按返回，事件直接穿到最外层，**整个聊天页被关掉**（在手机上等于退回列表、在桌面壳里
+    // 等于丢掉当前选中）。用户的心智是"关掉眼前这个框"，不是"退出这个会话"。
+    //
+    // 顺序是**层叠深度倒序**：越晚打开、越靠上的先关。这里刻意排成一条 when，
+    // 而不是每个浮层各挂一个 BackHandler —— 多个 enabled=true 的 BackHandler 同时存在时，
+    // 谁先收到事件取决于组合顺序，那是一种"看运气"的行为。
+    BackHandler(
+        enabled = forwardingMessage != null || previewingImagePath != null ||
+            showClearConfirm || showGroupInfo || showVoiceRecord || showPkPicker ||
+            showHistorySearch || showSessionPicker,
+    ) {
+        when {
+            forwardingMessage != null -> forwardingMessage = null
+            previewingImagePath != null -> previewingImagePath = null
+            showClearConfirm -> showClearConfirm = false
+            showGroupInfo -> showGroupInfo = false
+            showVoiceRecord -> showVoiceRecord = false
+            showPkPicker -> showPkPicker = false
+            showHistorySearch -> showHistorySearch = false
+            showSessionPicker -> showSessionPicker = false
+        }
+    }
     // 空会话那条状态要把光标直接送进输入框（见下面 messages.isEmpty() 分支）。
     // 桌面壳自己提供的输入卡片有自己的焦点管理，所以只在用内置输入栏时才建这个请求器。
     val composerFocus = remember { FocusRequester() }
     // 会话切换条（`.swbar`）与切换对话框共用同一份列表，按当前对端 nodeId 收窄：
-    // 会话列表按**工作区**收窄：`data.wsId` 为空 = 不按工作区收窄（直接在跟节点聊），
+    // 会话列表按**工作区**收窄：`effectiveWsId` 为空 = 不按工作区收窄（直接在跟节点聊），
     // 非空则只要属于该工作区的会话。
     //
     // 为什么用 `filter` 而不是新增一个 `agentSessionsOf(peerId, wsId)`：这一屏是那个口径的
@@ -198,14 +268,25 @@ fun ChatScreen(
     // **不是** `agentSessionsOf` —— 后者是未过滤的原始表，分页游标要用它（见 RelayUiState 的 KDoc）。
     // 真机实测：111 行落库会话里 68 行是 DSH 自己一定不显示的（子代理 19 + 空壳 49），
     // 它们成批出现在这个浮层里，而用户的原话是「怎么都是 Route this bounded MEMORY…」。
-    val agentSessions = remember(state.agentSessions, peer.nodeId, data.wsId) {
-        state.visibleAgentSessionsOf(peer.nodeId).let { all ->
-            if (data.wsId == null) all else all.filter { it.wsId == data.wsId }
+    val isWorkspaceGroup = group != null && effectiveWsId != null
+    val agentSessions = remember(state.agentSessions, peer.nodeId, effectiveWsId) {
+        if (effectiveWsId != null) {
+            state.agentSessions.values
+                .filter { it.wsId == effectiveWsId && !it.isSubagent && !it.isArchived && it.title?.isNotBlank() == true }
+                .distinctBy { it.sessionId }
+        } else {
+            state.visibleAgentSessionsOf(peer.nodeId)
         }
     }
-    val archivedSessions = remember(state.agentSessions, peer.nodeId, data.wsId) {
-        state.agentSessionsOf(peer.nodeId).filter {
-            it.isArchived && !it.isSubagent && (data.wsId == null || it.wsId == data.wsId)
+    val archivedSessions = remember(state.agentSessions, peer.nodeId, effectiveWsId) {
+        if (effectiveWsId != null) {
+            state.agentSessions.values
+                .filter { it.wsId == effectiveWsId && !it.isSubagent && it.isArchived }
+                .distinctBy { it.sessionId }
+        } else {
+            state.agentSessionsOf(peer.nodeId).filter {
+                it.isArchived && !it.isSubagent
+            }
         }
     }
     // 当前会话：**用户选的那条优先**，只在没选或它不属于这一屏的集合时才退回第一条。
@@ -218,38 +299,131 @@ fun ChatScreen(
             ?: archivedSessions.firstOrNull()
     }
 
+    // agent 会话的「输入提示」数据（真机反馈 #3）。三样都是既有事实：
+    // 会话状态、事件流的最近时刻、有没有在跑的 run / 待审批 —— 取不到就沉默。
+    val activeSessionEvents = remember(state.agentEvents, activeSession) {
+        state.agentEventsOf(activeSession)
+    }
+    val sessionHasPendingApproval = remember(state.agentApprovals, activeSession, peer.nodeId) {
+        state.agentApprovals.values.any { approval ->
+            approval.status == "pending" && when {
+                activeSession != null ->
+                    approval.peerId == activeSession.peerId && approval.sessionId == activeSession.sessionId
+                else -> approval.peerId == peer.nodeId
+            }
+        }
+    }
+    val sessionActiveRun = remember(state.agentRuns, activeSession, peer.nodeId) {
+        state.agentRuns.values.firstOrNull { run ->
+            !run.isTerminal && when {
+                activeSession != null ->
+                    run.peerId == activeSession.peerId && run.sessionId == activeSession.sessionId
+                else -> run.peerId == peer.nodeId
+            }
+        }
+    }
+    // 最近一次动过的时刻：会话活动时刻、事件流最近到达、run 的自报/收帧时刻取大。
+    // 只回答「多久没动了」，不用于显示时间（与协议对 `at` 的既有纪律同一条）。
+    val sessionLastActivityAt = remember(activeSession, activeSessionEvents, sessionActiveRun) {
+        maxOf(
+            activeSession?.sortActivityAt ?: 0L,
+            activeSessionEvents.maxOfOrNull { it.at } ?: 0L,
+            sessionActiveRun?.at ?: 0L,
+            sessionActiveRun?.updatedAt ?: 0L,
+        )
+    }
+
     // 打开这个 agent 会话时，向宿主要该工作区第一页历史会话（PPE-1 增补 D8）。
     //
     // 为什么挂在「打开」而不是启动时全量推：用户裁决原话 ——「正常其实用户只有在需要
     // 打开这个工作区的时候，同步下会话就好吧」。历史可能有上百条，启动时全推既慢又
     // 没必要；打开时才要，代价恰好付在想看的东西上。
-    //
-    // ## 要哪个工作区：直接用 `data.wsId`，**不再从会话列表里推**
-    //
-    // 直接从会话列表推会导致零会话工作区陷入死锁，因此必须显式传入 data.wsId。
-    // 工作区过滤会话，所以一个本地还没有会话的工作区拿到的是空列表 ⇒ wsId 为 null ⇒
-    // 请求根本不发 ⇒ 那个工作区**永远**拉不出它的历史会话（真机实测：点开只有 1 条会话的
-    // 工作区能拉，点开零会话的没反应）。
-    //
-    // 而「用户点的是哪个工作区」在进入这一屏时就已经知道了（`data.wsId`，由工作区列表给出）——
-    // 从会话反推它，既是绕路也是错路。`data.wsId == null`（直接跟节点聊）时本来就不该拉。
     val openHistory = actions.onOpenAgentHistory
-    val requestWsId = data.wsId
-    LaunchedEffect(peer.nodeId, requestWsId, openHistory) {
+    val requestWsId = effectiveWsId
+    val historyTargetNodeId = remember(peer.nodeId, requestWsId, state.agentSessions, state.agentWorkspaces) {
+        if (requestWsId != null) {
+            state.agentWorkspaces.values.firstOrNull { it.wsId == requestWsId }?.peerId
+                ?: state.agentSessions.values.firstOrNull { it.wsId == requestWsId }?.peerId
+                ?: peer.nodeId
+        } else {
+            peer.nodeId
+        }
+    }
+    LaunchedEffect(historyTargetNodeId, requestWsId, openHistory) {
         if (openHistory != null && requestWsId != null) {
-            openHistory(peer.nodeId, requestWsId)
+            openHistory(historyTargetNodeId, requestWsId)
         }
     }
     // 新消息到达时**只在已经贴底时**才自动滚。原来的写法无条件滚，于是用户往上翻旧消息
     // 时，任何一条新消息（包括屏幕协助记下来的那条）都会把视图拽回底部 —— 读旧消息这件事
-    // 就没法做了。判据用 `canScrollForward`：它同时覆盖"内容还没占满一屏"（本来就不能滚，
-    // 视为贴底，短会话照样自动滚到底）与"用户往上翻过了"（能往前滚 ⇒ 不打扰）。
+    // 就没法做了。判据提在 [isNearBottomAfterLayout]（纯函数、有单测）：它同时覆盖
+    // "内容还没占满一屏"（本来就不能滚，视为贴底，短会话照样自动滚到底）、
+    // "布局还没量过"（进入会话的头一两帧，此时也必须当成贴底，否则新到的消息永远不滚 ——
+    // 真机反馈 #5 的根因就在旧判据那句 `?: 0` 兜底里）与"用户往上翻过了"（能往前滚 ⇒ 不打扰）。
     //
     // 用 derivedStateOf 而不是在 effect 里现读：effect 只在 messages.size 变化时重启，
     // 而"是否贴底"是随滚动持续变化的，必须在滚动时就更新，否则拿到的是上一次的快照。
-    val atBottom by remember { derivedStateOf { !listState.canScrollForward } }
+    // 最后可见索引**不要用 `?: 0` 兜底**：那会把"还没量过"说成"可见的是第 0 条"。
+    val lastVisibleIndex by remember(listState) {
+        derivedStateOf { listState.layoutInfo.visibleItemsInfo.lastOrNull()?.index }
+    }
+    val isNearBottom by remember(messages.size) {
+        derivedStateOf {
+            isNearBottomAfterLayout(
+                itemCount = messages.size,
+                totalItemCount = listState.layoutInfo.totalItemsCount,
+                lastVisibleIndex = lastVisibleIndex,
+                canScrollForward = listState.canScrollForward,
+            )
+        }
+    }
+    // 进入这一屏时屏外的未读。数字只来自壳在清未读**之前**采下的值
+    // （ChatScreenState.unreadOnEntry），拿不到就是 0 —— 指示条会退化成不带数字的
+    // 「回到最新」，绝不编一个条数。
+    var unreadOnEntry by remember(peerId) { mutableStateOf(data.unreadOnEntry) }
+    // 进入之后、用户不在底部时新到的条数。
+    var unseenWhileAway by remember(peerId) { mutableStateOf(0) }
+    var previousMessageCount by remember(peerId) { mutableStateOf(messages.size) }
+    var hasInitialScrolled by remember(peerId) { mutableStateOf(false) }
+
+    // 进入会话：**第一次拿到消息就滚到最新**。不能只在"首帧就非空"时滚 ——
+    // 冷启动 MessageStore 是异步恢复的（RelayControllerMessagesComponent.handleRestoreMessages
+    // 里 scope.launch + withContext(io) 之后才 publish），消息常常在第一帧之后才落进
+    // core.threads；旧实现把闩锁设在第一个非空帧上，之后的增长只剩"贴底才滚"这一条路。
+    LaunchedEffect(peerId, messages.isEmpty()) {
+        if (messages.isEmpty()) {
+            // 会话被清空（或本来就空）：把锚定状态复位，下一条消息到达时重新落到底。
+            // 没有这一支的话，「清空本会话记录」之后 hasInitialScrolled 仍是 true，
+            // 之后的新消息只会画出来、不滚 —— 用户会以为清空把会话弄坏了。
+            hasInitialScrolled = false
+            previousMessageCount = 0
+            unseenWhileAway = 0
+            return@LaunchedEffect
+        }
+        if (hasInitialScrolled) return@LaunchedEffect
+        hasInitialScrolled = true
+        previousMessageCount = messages.size
+        listState.scrollToItem(messages.lastIndex)
+    }
+
     LaunchedEffect(messages.size) {
-        if (messages.isNotEmpty() && atBottom) listState.animateScrollToItem(messages.lastIndex)
+        val newAdded = (messages.size - previousMessageCount).coerceAtLeast(0)
+        previousMessageCount = messages.size
+        if (newAdded <= 0) return@LaunchedEffect
+        val lastMsgIsMine = messages.lastOrNull()?.mine == true
+        unseenWhileAway = unseenAfterGrowth(unseenWhileAway, newAdded, isNearBottom, lastMsgIsMine)
+        if (shouldFollowLatest(isNearBottom, lastMsgIsMine)) {
+            listState.animateScrollToItem(messages.lastIndex)
+        }
+    }
+
+    LaunchedEffect(isNearBottom, hasInitialScrolled) {
+        if (!hasInitialScrolled || !isNearBottom) return@LaunchedEffect
+        // 锚定真的落到底 = 最新那条已经在眼前，进入时采下的 N 条未读**不再在屏幕外**，
+        // 计数到此为止。放掉它而不是留着：否则用户之后往上翻旧消息时，胶囊会拿一个
+        // 早就看过的旧数字来骗他。
+        unseenWhileAway = 0
+        unreadOnEntry = 0
     }
 
     Column(modifier.fillMaxSize()) {
@@ -260,9 +434,9 @@ fun ChatScreen(
                 // 工作区名从**宣告台账**取（`agentWorkspaces` 是 D3 帧的落点，带 wsTitle）。
                 // 取不到就不传 —— 那时副标题只画会话名与在线态，不编一个名字（父稿 §0 的降级铁律）。
                 activeSession = activeSession,
-                workspaceName = data.wsId?.let { ws ->
+                workspaceName = effectiveWsId?.let { ws ->
                     state.agentWorkspaces.values
-                        .firstOrNull { it.peerId == peer.nodeId && it.wsId == ws }
+                        .firstOrNull { it.wsId == ws }
                         ?.wsTitle
                 },
                 onOpenAgentConsole = onOpenAgentConsole ?: {},
@@ -279,6 +453,9 @@ fun ChatScreen(
                 memberOnlineCount = memberOnlineCount,
                 onOpenGroupInfo = if (group != null) ({ showGroupInfo = true }) else null,
                 onSearchHistory = null,
+                // 「清空本会话记录」：只在壳真的接了这条动作时画（null = 不画），
+                // 点了先开确认框，确认后才真的清（见 ClearConversationDialog）。
+                onClearMessages = onClearMessages?.let { { showClearConfirm = true } },
                 onOpenSessionPicker = if (group == null && peer.isAgent) ({ showSessionPicker = true }) else null,
                 // 「切换会话」的资格与选择器列表必须同集合：这里传的就是下面
                 // `agentSessions` 那份（已 visible 过滤 + 已按 wsId 收窄）。
@@ -289,10 +466,8 @@ fun ChatScreen(
             HorizontalDivider()
         }
 
-        // Agent 会话切换条（原型 `.swbar`）：标题栏正下方显示当前会话名与状态，
-        // 多会话时可点击唤起切换对话框。消息流本身尚无 sessionId 维度（D3 提案），
-        // 但会话条是「当前在和哪个会话交互」的信息展示，是合理的只读信息，非虚假交互。
-        if (showHeader && group == null && peer.isAgent && (agentSessions.isNotEmpty() || archivedSessions.isNotEmpty())) {
+        // Agent 会话切换条（原型 `.swbar`）：仅在 1对1 Agent 私聊时显示；协同群聊中彻底移除
+        if (group == null && peer.isAgent && (agentSessions.isNotEmpty() || archivedSessions.isNotEmpty())) {
             val sessionPendingCount = remember(state.agentApprovals, agentSessions) {
                 activeSession?.sessionId?.let { sid ->
                     state.agentApprovals.values.count { it.sessionId == sid && it.status == "pending" }
@@ -313,15 +488,69 @@ fun ChatScreen(
         }
 
         // Workspace / Agent 待审批 Banner：作为 IM 插件的直接替代体验，在会话中直接展示待批复工具调用
-        val agentApprovals = remember(state.agentApprovals, peer.nodeId) {
-            state.agentApprovals.values.filter { it.peerId == peer.nodeId && it.status == "pending" }
+        val agentApprovals = remember(state.agentApprovals, peer.nodeId, isWorkspaceGroup, agentSessions, archivedSessions) {
+            if (isWorkspaceGroup) {
+                val sessionIds = (agentSessions + archivedSessions).map { it.sessionId }.toSet()
+                state.agentApprovals.values.filter {
+                    it.status == "pending" && (it.sessionId in sessionIds || it.peerId == peer.nodeId)
+                }
+            } else {
+                state.agentApprovals.values.filter { it.peerId == peer.nodeId && it.status == "pending" }
+            }
         }
-        if (peer.isAgent && agentApprovals.isNotEmpty() && onRespondApproval != null) {
+        if ((peer.isAgent || isWorkspaceGroup) && agentApprovals.isNotEmpty() && onRespondApproval != null) {
             ChatApprovalBanner(
                 approvals = agentApprovals,
                 onRespond = onRespondApproval,
+                isReadOnly = { appr ->
+                    val session = state.agentSessions[AgentSessionKey(appr.peerId, appr.sessionId)]
+                    val grant = state.grantFor(appr.peerId, session?.let { it.agentId ?: it.agentKind }, session?.wsId)
+                    val canApprove = (appr.peerId == state.selfNodeId) ||
+                        (grant?.isMyDevice == true) ||
+                        (grant?.access == AgentGrantAccess.OWNER) ||
+                        (grant?.access == AgentGrantAccess.ADMIN && grant.delegatedApproval)
+                    !canApprove
+                },
                 modifier = Modifier.padding(horizontal = sp.lg, vertical = sp.xs),
             )
+        }
+
+        // 宿主设备睡眠/离线感知 Banner（工作区协同规范 v3.1）
+        val isHostSleeping = if (group != null) {
+            val hostNodes = group.virtualAgents?.mapNotNull { it.hostNodeId } ?: emptyList()
+            hostNodes.isNotEmpty() && hostNodes.all { hostId ->
+                val p = state.peer(hostId)
+                p != null && !p.online
+            }
+        } else if (peer.isAgent) {
+            !peer.online
+        } else false
+
+        if (isHostSleeping) {
+            androidx.compose.material3.Surface(
+                color = androidx.compose.material3.MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.7f),
+                shape = androidx.compose.foundation.shape.RoundedCornerShape(8.dp),
+                border = androidx.compose.foundation.BorderStroke(1.dp, androidx.compose.material3.MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.5f)),
+                modifier = Modifier.padding(horizontal = sp.lg, vertical = sp.xs).fillMaxWidth(),
+            ) {
+                androidx.compose.foundation.layout.Row(
+                    modifier = Modifier.padding(horizontal = sp.md, vertical = sp.xs),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(sp.xs),
+                ) {
+                    androidx.compose.material3.Icon(
+                        painter = org.jetbrains.compose.resources.painterResource(Res.drawable.ic_moon),
+                        contentDescription = null,
+                        tint = androidx.compose.material3.MaterialTheme.colorScheme.onSurfaceVariant,
+                        modifier = Modifier.size(14.dp),
+                    )
+                    androidx.compose.material3.Text(
+                        text = org.jetbrains.compose.resources.stringResource(Res.string.agent_host_sleeping_banner),
+                        style = androidx.compose.material3.MaterialTheme.typography.labelSmall,
+                        color = androidx.compose.material3.MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                }
+            }
         }
 
         // 群内 Agent 工作状态广播（Goal 5 / GroupProgress）
@@ -335,6 +564,7 @@ fun ChatScreen(
                 GroupProgressBar(
                     agentName = agentName,
                     activeRun = activeAgentRun,
+                    onInterrupt = { onSend(peer.nodeId, "/cancel", null) },
                     modifier = Modifier.padding(horizontal = sp.lg, vertical = sp.xs),
                 )
             }
@@ -354,6 +584,7 @@ fun ChatScreen(
                     modifier = Modifier.fillMaxWidth().align(Alignment.Center),
                 )
             } else {
+                val sessionTransitions = remember(messages) { sessionTransitionIds(messages) }
                 LazyColumn(
                     state = listState,
                     modifier = Modifier.fillMaxSize(),
@@ -363,6 +594,14 @@ fun ChatScreen(
                     verticalArrangement = Arrangement.spacedBy(sp.md10),
                 ) {
                     items(messages, key = { it.id }) { message ->
+                        if (message.id in sessionTransitions) {
+                            val sid = extractSessionId(message.id)
+                            if (sid != null) {
+                                val s = state.agentSessions.values.firstOrNull { it.sessionId == sid && it.title?.isNotBlank() == true }
+                                    ?: state.agentSessions.values.firstOrNull { it.sessionId == sid }
+                                SessionDivider(sessionTitle = s?.title)
+                            }
+                        }
                         val notice = message.notice
                         if (notice != null) {
                             // 系统提示行不是消息：撤回与戳一碰都只留一行居中的灰字（协议 §8）。
@@ -446,7 +685,66 @@ fun ChatScreen(
                     }
                 }
             }
+
+            // **下方还有消息**时的浮起胶囊（真机反馈 #5）。判据就是「贴底」的反面：
+            // 已经贴底 = 最新那条在眼前、下方没有东西，这时不画（画了会盖住最新那条气泡）。
+            // - 进入时采下的未读（unreadOnEntry）> 0 = 初始锚定没落到底（旧 bug 或竞态），
+            //   此时下面确实压着 N 条没看过 → 「N 条未读 · 回到最新」；
+            // - 进入后、用户不在底部时新到的（unseenWhileAway）同理；
+            // - 两个数字都没有、只是用户往上翻 → 只说「回到最新」，**不写条数**（不编）。
+            // 点它或自己滚到底即清除。
+            val unseenTotal = unreadOnEntry + unseenWhileAway
+            if (messages.isNotEmpty() && !isNearBottom) {
+                Surface(
+                    onClick = {
+                        unreadOnEntry = 0
+                        unseenWhileAway = 0
+                        coroutineScope.launch {
+                            if (messages.isNotEmpty()) listState.animateScrollToItem(messages.lastIndex)
+                        }
+                    },
+                    shape = CircleShape,
+                    color = MaterialTheme.colorScheme.primaryContainer,
+                    contentColor = MaterialTheme.colorScheme.onPrimaryContainer,
+                    shadowElevation = 4.dp,
+                    modifier = Modifier
+                        .align(Alignment.BottomCenter)
+                        .padding(bottom = sp.md),
+                ) {
+                    Row(
+                        modifier = Modifier.padding(horizontal = sp.lg14, vertical = sp.sm6),
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(sp.xs),
+                    ) {
+                        Icon(
+                            painter = painterResource(Res.drawable.ic_down),
+                            contentDescription = null,
+                            modifier = Modifier.size(14.dp),
+                        )
+                        Text(
+                            text = if (unseenTotal > 0) {
+                                stringResource(Res.string.chat_unread_jump, unseenTotal)
+                            } else {
+                                stringResource(Res.string.chat_unread_jump_latest)
+                            },
+                            style = MaterialTheme.typography.labelMedium,
+                            fontWeight = FontWeight.Medium,
+                        )
+                    }
+                }
+            }
         }
+
+        // agent 会话的输入提示：放在输入区正上方。两条壳（手机内置输入栏 / 桌面 composerSlot）
+        // 共用这一个调用点 —— 以后要挪位置只动这一行（见 ComposerStatusLine 的 KDoc）。
+        ComposerStatusLine(
+            agentInvolved = peer.isAgent || isWorkspaceGroup,
+            sessionState = activeSession?.state,
+            lastActivityAt = sessionLastActivityAt,
+            hasPendingApproval = sessionHasPendingApproval,
+            hasActiveRun = sessionActiveRun != null,
+            now = data.now,
+        )
 
         if (composerSlot != null) {
             // 草稿仍由 ChatScreen 持有（remember(peerId)），所以切换会话时桌面输入卡片也不会串内容。
@@ -533,6 +831,20 @@ fun ChatScreen(
                             onPick = { showVoiceRecord = true },
                         )
                     },
+                    if (isWorkspaceGroup) {
+                        ComposerCapability(
+                            id = "new_task",
+                            label = Res.string.chat_new_task_action,
+                            icon = Res.drawable.ic_plus,
+                            onPick = {
+                                val prefix = "@dsh "
+                                if (!draft.startsWith(prefix)) {
+                                    draft = "$prefix$draft"
+                                }
+                                composerFocus.requestFocus()
+                            },
+                        )
+                    } else null,
                 ),
                 // 右端那颗：会话内历史搜索。原型把它放在这一排的**右端**，并在注释里写明
                 // 「源码手机端开在头部（`ChatHeader` 的 onSearchHistory），原型
@@ -625,6 +937,19 @@ fun ChatScreen(
         )
     }
 
+    if (showClearConfirm && onClearMessages != null) {
+        // 会话名取 peer.displayName：群是群名、单聊是对端名、agent 是 agent 名 ——
+        // 与头部/会话列表同一个叫法（写进确认正文，让用户核对清的是哪一个）。
+        ClearConversationDialog(
+            conversationName = peer.displayName,
+            onDismiss = { showClearConfirm = false },
+            onConfirm = {
+                showClearConfirm = false
+                onClearMessages()
+            },
+        )
+    }
+
     if (showHistorySearch && onSearchInConversation != null) {
         HistorySearchOverlay(
             onDismiss = { showHistorySearch = false },
@@ -643,14 +968,14 @@ fun ChatScreen(
         )
     }
 
-    if (showSessionPicker && peer.isAgent && (agentSessions.isNotEmpty() || archivedSessions.isNotEmpty())) {
+    if (showSessionPicker && group == null && peer.isAgent && (agentSessions.isNotEmpty() || archivedSessions.isNotEmpty())) {
         // 「加载更多」的落点：要的是**当前会话所属工作区**的下一页。
         // 用第一条会话的 wsId 而不是"用户选中的"：选择器列出的是同一个工作区里的会话
         // （会话就是按工作区归拢的），所以这一组共用一个 wsId。
         // 优先用「用户点进来的那个工作区」（`data.wsId`）：它是这一屏过滤会话的依据本身，
         // 拿它当分页的归属不会自相矛盾。会话列表里的 wsId 只是兜底 —— 直接跟节点聊
         // （`data.wsId == null`）时，列表才可能横跨多个工作区。
-        val pickerWsId = data.wsId ?: (agentSessions + archivedSessions).firstOrNull { it.wsId != null }?.wsId
+        val pickerWsId = effectiveWsId ?: (agentSessions + archivedSessions).firstOrNull { it.wsId != null }?.wsId
         AgentSessionPickerDialog(
             sessions = agentSessions,
             // 高亮**用户选的那条**，与头部显示的那条一致（原先各自 firstOrNull）。
@@ -668,12 +993,12 @@ fun ChatScreen(
             // 工作区）、而且宿主自报的会话数确实比本地多（真的还有下一页）。
             // 缺任何一个都**不画** —— 三种坏按钮：点了没反应、点了重复拉同一页、点了永远空。
             onLoadMore = actions.onLoadMoreAgentSessions?.takeIf {
-                pickerWsId != null && hasMoreSessionsLocal(state, peer.nodeId, pickerWsId)
+                pickerWsId != null && hasMoreSessionsLocal(state, historyTargetNodeId, pickerWsId)
             }?.let { load ->
-                { load(peer.nodeId, pickerWsId!!) }
+                { load(historyTargetNodeId, pickerWsId!!) }
             },
             loadingMore = pickerWsId != null &&
-                sessionPageKeyOf(peer.nodeId, pickerWsId) in state.sessionPageLoading,
+                sessionPageKeyOf(historyTargetNodeId, pickerWsId) in state.sessionPageLoading,
         )
     }
 }
@@ -699,4 +1024,118 @@ private fun hasMoreSessionsLocal(state: RelayUiState, peerId: String, wsId: Stri
         ?: return false
     // 与分页 offset 同一把尺子：数**未过滤**原始表（见 `agentSessionCountOf` 的 KDoc）。
     return state.agentSessionCountOf(peerId, wsId) < declared
+}
+
+/**
+ * 消息流里每段会话的**第一条**消息 id —— 也就是分隔线的落点（task-42 ④）。
+ *
+ * 判据是「这条消息的会话 id 与上一条不同」：会话 id 相同的一段算同一段，换段就是新一段。
+ * 抽成纯函数是为了能被单测钉住：新会话是否真的会产生一条分隔线，不该只能靠真机肉眼确认。
+ */
+internal fun sessionTransitionIds(messages: List<MessageUi>): Set<String> {
+    val transitions = mutableSetOf<String>()
+    var lastSessionId: String? = null
+    for (m in messages) {
+        val sid = extractSessionId(m.id)
+        if (sid != null && sid != lastSessionId) {
+            transitions.add(m.id)
+            lastSessionId = sid
+        }
+    }
+    return transitions
+}
+
+/**
+ * 分隔线上要写的会话标题；null = 标题还没到（调用方画中性文案「新会话」）。
+ *
+ * 空白串与 null 是同一档：它们都表示「这条会话现在没有可写的名字」，而不是一个真标题。
+ * 这里**不**退回 sessionId —— 身份键不是标题（AgentSessionUi.displayTitle 的 KDoc）。
+ */
+internal fun sessionDividerTitle(sessionTitle: String?): String? =
+    sessionTitle?.takeIf { it.isNotBlank() }
+
+internal fun extractSessionId(msgId: String): String? {
+    if (!msgId.startsWith("agent-ev-")) return null
+    val rest = msgId.removePrefix("agent-ev-")
+    val parts = rest.split("-")
+    if (parts.size >= 3) {
+        val last = parts.last().toLongOrNull()
+        val secondLast = parts[parts.size - 2].toLongOrNull()
+        // 格式为 agent-ev-${sessionId}-${cursor}-${at}，其中 at 是毫秒级时间戳（> 1e12）
+        if (last != null && last > 1_000_000_000_000L && secondLast != null) {
+            return parts.dropLast(2).joinToString("-")
+        }
+    }
+    if (parts.size >= 2) {
+        val last = parts.last().toLongOrNull()
+        if (last != null) {
+            return parts.dropLast(1).joinToString("-")
+        }
+    }
+    return rest
+}
+
+@Composable
+private fun SessionDivider(
+    sessionTitle: String?,
+    modifier: Modifier = Modifier,
+) {
+    // 没有标题也**必须画这条分隔线**（task-42 ④）。
+    //
+    // 早先这里是「标题为空就 return」：本意是不让「任务：868856e1」这种把身份键当标题的
+    // 东西上屏（那条规矩仍然成立，见 AgentSessionUi.displayTitle 的 KDoc）。但它把
+    // **新建会话**这一档也一起吞了 —— 新会话先到消息、后到（甚至一直没到）带标题的
+    // agent-session 帧，于是用户看到的是「有新消息，却没有任何分段标记」，而分段标记
+    // 恰恰是他要的那个东西。
+    //
+    // 现在的取舍：**线永远画**；标题没到时用一句中性文案「新会话」，标题到齐后同一帧
+    // 自然升级成真标题（标题来自 state，会触发重组）。仍然**不**退回 sessionId 前 8 位。
+    val displayTitle = sessionDividerTitle(sessionTitle)
+    val titleText = if (displayTitle != null) {
+        stringResource(Res.string.chat_task_divider_label, displayTitle)
+    } else {
+        stringResource(Res.string.chat_task_divider_new)
+    }
+    Row(
+        modifier = modifier.fillMaxWidth().padding(vertical = 8.dp),
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.Center,
+    ) {
+        HorizontalDivider(
+            modifier = Modifier.weight(1f).padding(end = 12.dp),
+            color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.35f),
+        )
+        Surface(
+            shape = RoundedCornerShape(12.dp),
+            color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f),
+            border = androidx.compose.foundation.BorderStroke(
+                1.dp,
+                MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.35f),
+            ),
+        ) {
+            Row(
+                modifier = Modifier.padding(horizontal = 10.dp, vertical = 4.dp),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(6.dp),
+            ) {
+                Icon(
+                    painter = painterResource(Res.drawable.ic_terminal),
+                    contentDescription = null,
+                    tint = MaterialTheme.colorScheme.primary,
+                    modifier = Modifier.size(13.dp),
+                )
+                Text(
+                    text = titleText,
+                    style = MaterialTheme.typography.labelSmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                )
+            }
+        }
+        HorizontalDivider(
+            modifier = Modifier.weight(1f).padding(start = 12.dp),
+            color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.35f),
+        )
+    }
 }

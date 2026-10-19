@@ -7,10 +7,13 @@ import app.relay.core.protocol.FilePurpose
 import app.relay.core.protocol.MsgKinds
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.JsonPrimitive
+import kotlinx.serialization.json.booleanOrNull
+import app.relay.app.model.AgentAttachmentUi
 import app.relay.app.model.AgentEventUi
 import app.relay.app.model.AgentSessionUi
 import app.relay.app.model.GrantUi
 import app.relay.app.model.WorkspaceUi
+import app.relay.core.protocol.AgentGrantAccess
 import app.relay.core.protocol.AgentGrantStates
 import app.relay.app.model.MessageUi
 import app.relay.app.model.TransferState
@@ -290,6 +293,10 @@ internal fun grantFrom(payload: JsonObject, peerId: String, at: Long): GrantUi? 
         scope = scope,
         state = state,
         at = at,
+        wsId = stringField(payload, "wsId")?.takeIf { it.isNotBlank() },
+        access = stringField(payload, "access")?.takeIf { it.isNotBlank() } ?: AgentGrantAccess.RW,
+        isMyDevice = (payload["isMyDevice"] as? JsonPrimitive)?.booleanOrNull ?: false,
+        delegatedApproval = (payload["delegatedApproval"] as? JsonPrimitive)?.booleanOrNull ?: false,
     )
 }
 
@@ -312,6 +319,8 @@ internal fun grantListEntryFrom(payload: JsonObject, peerId: String, at: Long): 
         scope = scope,
         state = AgentGrantStates.APPROVED,
         at = at,
+        wsId = stringField(payload, "wsId")?.takeIf { it.isNotBlank() },
+        access = stringField(payload, "access")?.takeIf { it.isNotBlank() } ?: AgentGrantAccess.RW,
     )
 }
 
@@ -350,6 +359,28 @@ internal fun agentEventFrom(payload: JsonObject, peerId: String, at: Long): Agen
         body = stringField(payload, "body")?.takeIf { it.isNotBlank() },
         ref = stringField(payload, "ref")?.takeIf { it.isNotBlank() },
         at = at,
+        attachment = agentAttachmentFrom(payload["attachment"]),
+    )
+}
+
+/**
+ * 解附件元数据（task-45）。**形状不对就返回 null** —— 事件本身照常显示（退回文本占位），
+ * 不因为一张卡片画不出来就丢掉整条事件。
+ *
+ * 与协议侧的严格校验分工：那边越界/多键会**整帧拒**（半张卡片比占位更糟），
+ * 这里只是"这一端画不画得出卡片"的最后一层宽容。
+ */
+internal fun agentAttachmentFrom(element: kotlinx.serialization.json.JsonElement?): AgentAttachmentUi? {
+    val o = element as? JsonObject ?: return null
+    val attachmentId = stringField(o, "attachmentId")?.takeIf { it.isNotBlank() } ?: return null
+    val mediaType = stringField(o, "mediaType")?.takeIf { it.isNotBlank() } ?: return null
+    return AgentAttachmentUi(
+        attachmentId = attachmentId,
+        mediaType = mediaType,
+        width = longField(o, "width")?.toInt()?.takeIf { it > 0 },
+        height = longField(o, "height")?.toInt()?.takeIf { it > 0 },
+        bytes = longField(o, "bytes")?.takeIf { it >= 0 },
+        name = stringField(o, "name")?.takeIf { it.isNotBlank() },
     )
 }
 

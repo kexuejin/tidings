@@ -4,6 +4,7 @@ package app.relay.app
 
 import app.relay.app.RelayController.Companion.CHAT_INBOUND_TYPES
 import app.relay.app.RelayController.Companion.groupIdOf
+import app.relay.app.RelayController.Companion.groupSenderIdOf
 import app.relay.app.RelayController.Companion.isGroupText
 import app.relay.app.RelayController.Companion.mentionsSelf
 import app.relay.app.RelayController.Companion.replyToOf
@@ -79,16 +80,22 @@ fun handleSend(peerId: String, text: String) {
             }
             host.scope.launch {
                 val id = host.localMessageId()
+                // 乐观插入：**先让气泡出现**，再等网络（见 DeliveryState.Sending 的 KDoc）。
+                val optimistic = MessageUi(
+                    id = id,
+                    peerId = peerId,
+                    mine = true,
+                    text = body,
+                    at = nowMillis(),
+                    delivery = DeliveryState.Sending,
+                )
+                host.handleAppendMessage(optimistic)
                 val success = client.sendMessage(peerId, body)
-                host.handleAppendMessage(
-                    MessageUi(
-                        id = id,
-                        peerId = peerId,
-                        mine = true,
-                        text = body,
-                        at = nowMillis(),
-                        delivery = if (success) DeliveryState.Sent else DeliveryState.Failed,
-                    ),
+                // 结果就地替换同一条：用户看到的是那个气泡从"发送中"变成"已送达/失败"，
+                // 而不是先消失再出现（也绝不会出现两条）。
+                host.handleReplaceMessage(
+                    peerId,
+                    optimistic.copy(delivery = if (success) DeliveryState.Sent else DeliveryState.Failed),
                 )
                 if (!success) {
                     host.warn(BannerMessage.SendFailed("Tidings send failed"))
@@ -100,25 +107,56 @@ fun handleSend(peerId: String, text: String) {
         return
     }
     host.scope.launch {
+        val (optimisticReasoning, optimisticText) = parseThinkingContent(body)
+        // 乐观插入（P0，见 DeliveryState.Sending 的 KDoc）：发送路径最坏要等 40 秒量级
+        // （多端点 UDP 退避 + 每端点 TCP 7s），那段时间界面原本**什么都不显示** ——
+        // 用户会以为没点上而重复发送。先插一个 Sending 气泡，结果回来后就地改写它。
+        //
+        // 临时 id 用 `local-` 前缀（`localMessageId()`）：真实 id 要等发送路径返回才有
+        // （`outcome.envelopeId`）。成功后按临时 id 找到这一条、换成真实 id 与终态 ——
+        // 仍然只有一条气泡，且 id 从此与协议一致（回执 / 撤回都靠它）。
+        val optimistic = MessageUi(
+            id = host.localMessageId(),
+            peerId = peerId,
+            mine = true,
+            text = optimisticText,
+            at = nowMillis(),
+            delivery = DeliveryState.Sending,
+            reasoning = optimisticReasoning,
+        )
+        host.handleAppendMessage(optimistic)
         val outcome = runCatching { rt.sendTextWithEnvelope(peerId, body) }
             .onFailure {
                 host.warn(
                     it.messageOrNull()?.let(BannerMessage::SendFailed) ?: BannerMessage.UnknownError,
                 )
             }
-            .getOrNull() ?: return@launch
+            .getOrNull()
+        if (outcome == null) {
+            // 发送路径自己抛了：**必须**把那个"发送中"收尾成失败，否则它会永远转下去
+            // （那是比"不显示气泡"更糟的谎）。
+            host.replaceMessage(peerId, optimistic.id, optimistic.copy(delivery = DeliveryState.Failed))
+            return@launch
+        }
         val (parsedReasoning, cleanedText) = parseThinkingContent(body)
-        host.handleAppendMessage(
-            MessageUi(
+        // 按**临时 id** 定位再换 id：只按新 id 找会落空，气泡就永远停在「发送中」。
+        host.replaceMessage(
+            peerId,
+            optimistic.id,
+            optimistic.copy(
                 id = outcome.envelopeId,
-                peerId = peerId,
-                mine = true,
                 text = cleanedText,
-                at = nowMillis(),
                 delivery = if (outcome.outcome == SendOutcome.SENT) DeliveryState.Sent else DeliveryState.Queued,
                 reasoning = parsedReasoning,
             ),
         )
+        if (RelayController.isMentioningDsh(body)) {
+            val prompt = RelayController.extractDshPrompt(body)
+            val self = host._state.value.selfNodeId
+            host.scope.launch {
+                host.onAgentPrompt?.invoke(peerId, self, prompt, outcome.envelopeId)
+            }
+        }
     }
 }
 
@@ -340,7 +378,15 @@ fun handleOnInbound(envelope: Envelope) {
             text = cleanedText,
             at = envelope.ts,
             delivery = null,
-            senderId = if (groupId != null) envelope.from else null,
+            // **说话者归属**（真机缺陷）：群消息不能直接用信封 `from`。
+            //
+            // `from` 永远是**发送这台设备**，而设备可能在代别人说话 —— DSH 的 agent 事件由
+            // 桌面端转发到群里，`from` 是桌面端的 nodeId，于是手机把 agent 说的话显示成
+            // 「桌面端发的」。而桌面端自己按 `agent:<kind>` 落库 ⇒ 同一个群两端发送者不一致。
+            //
+            // payload 里的 `senderId` 才是真正说话的那一方（旧端不发 ⇒ 退回 `from`，
+            // 与以前完全一致）。形态与桌面端本地落库同一套：真人 = nodeId，agent = `agent:<kind>`。
+            senderId = if (groupId != null) (groupSenderIdOf(envelope) ?: envelope.from) else null,
             replyTo = if (groupId != null) replyToOf(envelope) else null,
             reasoning = finalReasoning,
             reasoningElapsedMs = reasoningElapsedMs,
@@ -348,6 +394,13 @@ fun handleOnInbound(envelope: Envelope) {
         incoming = true,
     )
     if (groupId != null) host.runtime?.let { host.groupsCtl.handleSyncGroupMetaIfNeeded(it, envelope) }
+    val isWs = groupId != null && host.isWorkspaceGroup(groupId)
+    if (RelayController.isMentioningDsh(cleanedText) || isWs) {
+        val prompt = RelayController.extractDshPrompt(cleanedText)
+        host.scope.launch {
+            host.onAgentPrompt?.invoke(convId, envelope.from, prompt, envelope.id)
+        }
+    }
     if (
         shouldNotify(
             settings = host._state.value.settings,

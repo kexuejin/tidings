@@ -22,15 +22,22 @@ import app.relay.generated.resources.chat_group_progress_working
 import app.relay.ui.theme.LocalAppSpacing
 import org.jetbrains.compose.resources.stringResource
 
+import androidx.compose.foundation.layout.PaddingValues
+import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.material3.OutlinedButton
+import app.relay.generated.resources.agent_interrupt_btn
+
 /**
- * 群顶部 Agent 协同工作状态指示条（Goal 5 / PPE-2）：
- * 当群内有活跃的 Agent 正在执行任务时，在群聊顶部常驻展示动态工作指示，如 `[Coder 正在编译核心模块...]`。
+ * 群顶部 Agent 协同工作状态指示条（Goal 5 / PPE-2 / 规范 v3.1）：
+ * 当群内有活跃的 Agent 正在执行任务时，在群聊顶部常驻展示动态工作指示，如 `[Coder 正在编译核心模块...]`，
+ * 并支持全局一键打断。
  */
 @Composable
 fun GroupProgressBar(
     agentName: String,
     activeRun: AgentRunUi,
     modifier: Modifier = Modifier,
+    onInterrupt: (() -> Unit)? = null,
 ) {
     val spacing = LocalAppSpacing.current
     val taskSummary = activeRun.note?.takeIf { it.isNotBlank() } ?: activeRun.state
@@ -61,6 +68,20 @@ fun GroupProgressBar(
                 overflow = TextOverflow.Ellipsis,
                 modifier = Modifier.weight(1f),
             )
+            if (onInterrupt != null) {
+                OutlinedButton(
+                    onClick = onInterrupt,
+                    contentPadding = PaddingValues(horizontal = 8.dp, vertical = 2.dp),
+                    shape = RoundedCornerShape(4.dp),
+                ) {
+                    Text(
+                        text = stringResource(Res.string.agent_interrupt_btn),
+                        style = MaterialTheme.typography.labelSmall,
+                        color = MaterialTheme.colorScheme.error,
+                        fontWeight = FontWeight.SemiBold,
+                    )
+                }
+            }
         }
     }
 }

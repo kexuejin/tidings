@@ -3,6 +3,7 @@
 package app.relay.app.model
 
 import kotlinx.serialization.Serializable
+import app.relay.core.protocol.AgentGrantAccess
 import app.relay.core.protocol.AgentGrantStates
 import app.relay.core.protocol.AgentSessionStates
 
@@ -355,7 +356,58 @@ data class AgentEventUi(
     val body: String? = null,
     val ref: String? = null,
     val at: Long,
+    /**
+     * 附件卡片模型（task-45，cap `att1`）。null ⇒ 退回现有的文本占位。
+     *
+     * 这里只带**元数据**：字节走既有文件传输路径。卡片的显示文案由
+     * [agentAttachmentCaption] 这个纯函数算，UI 不自己拼字符串。
+     */
+    val attachment: AgentAttachmentUi? = null,
 )
+
+/** agent 事件的附件卡片模型（与 DSH 侧 content 块同口径，task-45）。 */
+data class AgentAttachmentUi(
+    val attachmentId: String,
+    val mediaType: String,
+    val width: Int? = null,
+    val height: Int? = null,
+    val bytes: Long? = null,
+    val name: String? = null,
+)
+
+/** 图片类附件可以就地预览（决定卡片左侧图标与"能不能直接打开"）。 */
+internal fun agentAttachmentIsImage(attachment: AgentAttachmentUi): Boolean =
+    attachment.mediaType.startsWith("image/")
+
+/**
+ * 卡片上那一行说明：**名字 · 尺寸 · 大小**（纯函数，便于单测）。
+ *
+ * 名字缺失时退回 MIME 的子类型（`image/png` → `png`）：卡片上总得有个名字，
+ * 而"未知文件"这种话对用户毫无信息量。
+ */
+internal fun agentAttachmentCaption(attachment: AgentAttachmentUi): String {
+    val parts = mutableListOf<String>()
+    parts += attachment.name?.takeIf { it.isNotBlank() }
+        ?: attachment.mediaType.substringAfter('/', attachment.mediaType)
+    val width = attachment.width
+    val height = attachment.height
+    if (width != null && height != null && width > 0 && height > 0) parts += "$width×$height"
+    attachment.bytes?.takeIf { it >= 0 }?.let { parts += humanBytes(it) }
+    return parts.joinToString(" · ")
+}
+
+/** 人类可读的大小：B / KB / MB（KB 及以上保留一位小数，整数时不显示 .0）。 */
+internal fun humanBytes(bytes: Long): String = when {
+    bytes < 1024 -> "$bytes B"
+    bytes < 1024L * 1024 -> formatOneDecimal(bytes / 1024.0, "KB")
+    else -> formatOneDecimal(bytes / (1024.0 * 1024.0), "MB")
+}
+
+private fun formatOneDecimal(value: Double, unit: String): String {
+    val rounded = kotlin.math.round(value * 10) / 10
+    val whole = rounded.toLong()
+    return if (rounded == whole.toDouble()) "$whole $unit" else "$rounded $unit"
+}
 
 /**
  * 一个被宣告的工作区的复合主键 `(peerId, agentKey, wsId)`（PPE-1 增补 D3，父稿 §1 的四层模型）。
@@ -458,12 +510,20 @@ data class GrantUi(
      * null = **整台设备**（`scope = "all"` 那一档没有 agentKey）。
      */
     val agentKey: String?,
-    /** `all` | `agent`（原样保留，理由见类 KDoc）。 */
+    /** `all` | `agent` | `workspace`（原样保留，理由见类 KDoc）。 */
     val scope: String,
     /** `approved` | `denied` | `revoked`（原样保留）。 */
     val state: String,
     /** 本端收到这一刻（宿主 `at` 只用于排序，不显示 —— 同 [WorkspaceUi.at]）。 */
     val at: Long,
+    /** 工作区范围时的 wsId；null = 非工作区范围（或全工作区）。 */
+    val wsId: String? = null,
+    /** 访问权限：ro (只读) | rw (读写) | admin (管理员) | owner (群主)。默认 rw。 */
+    val access: String = AgentGrantAccess.RW,
+    /** 是否属于我的设备（私有信任圈）。 */
+    val isMyDevice: Boolean = false,
+    /** 是否已开启高危终端执行委托审批。 */
+    val delegatedApproval: Boolean = false,
 )
 
 /**
@@ -519,6 +579,15 @@ data class ConversationUi(
     val title: String,
     /** null 表示“还没聊过”；文案由 UI 层翻译，不在这里写死中文。 */
     val preview: String?,
+    /**
+     * 会话行右侧那一格"最近时间"的**兼容兜底值**：有消息时 = [lastMessageAt]，
+     * 没消息时 = [presenceAt]。
+     *
+     * 为什么还留着一个语义混着的字段：桌面会话面板（`ui/desktop/DesktopConversationWidgets.kt`）
+     * 直接 `relativeTime(conv.at, now)` 且**没有 0 守卫**，把它改成 0 会把"还没聊过"印成
+     * 1970 年。手机端的 `ConversationRow` 已改读 [lastMessageAt]，所以**新代码不要再用它
+     * 判断"有没有聊过"** —— 那正是"没聊过的在线对端被印成刚刚"的旧口径。
+     */
     val at: Long,
     val unread: Int,
     val isAgent: Boolean,
@@ -541,8 +610,22 @@ data class ConversationUi(
     val memberCount: Int = 0,
     /** 对端头像（仅对端为真实节点时有效，群为 null）。 */
     val avatar: Int? = null,
-    /** 可比的纯时间戳，与 prototype 对齐。 */
-    val ts: Long = at,
+    /**
+     * 最近一条消息的时间；**0 = 这个会话一条消息都没有**（"还没聊过"）。
+     *
+     * 会话排序的第一把尺子（有消息的排在没消息的前面，组内按它倒序），也是手机端
+     * 决定"要不要印时间"的判据。单独一格而不是复用 [at]：`at` 里混着对端的
+     * `lastSeenAt`，而局域网发现会持续刷新它 —— 混用正是"从没聊过被当成刚刚"的根源。
+     */
+    val lastMessageAt: Long = 0L,
+    /**
+     * 对端的最后在线时间（群取 `updatedTs`，协议里没有"群最后在线"）；**0 = 不知道**。
+     *
+     * 只在 [lastMessageAt] == 0 的那一档里当排序尺子：没聊过的会话不能因为对端在线
+     * 就冒到有消息的会话前面，但它们之间仍要有个说得通的先后（最近还在线的靠前）。
+     * 也是 [at] 在没有消息时的兜底来源。
+     */
+    val presenceAt: Long = 0L,
 )
 
 /**
