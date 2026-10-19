@@ -124,6 +124,29 @@
 
 ---
 
+## 模块 4：公网 TLS / 长连接 / 跨网文件（2026-10-18 新增）
+
+### 4.1 实验设备与拓扑
+
+- 主机（桌面端）接**家庭宽带**，确认路由器放行 IPv6 入站；手机切到**蜂窝数据**（或另一张 Wi-Fi）。
+- 两端都能读诊断：宿主 `GET /v1/peers`；手机 `adb exec-out run-as app.relay cat files/relay/diag/link.json`。
+
+### 4.2 标准操作规程 (SOP)
+
+1. **配对**：主机出码 → 手机扫码。期望确认框（走深链/广播注入时必现，见 `ACCEPTANCE.md` N5）；允许后 `stores/peer-pins.json` 出现该 nodeId，来源为 `pairing`（新×新）或 `tofu`（老端单向码）。
+2. **建连**：手机侧打开长连接开关。期望 `/v1/peers` 的 `linkConnected=true`、`linkCarrier=tls`；手机 `link.json` 的 `pinSource` 与上一步一致。
+3. **反例（必做）**：把主机 pin 改成错误值后重连 ⇒ 必须 `pin-mismatch`，且**不回退明文**；把手机切回与主机同一 Wi-Fi ⇒ `linkCarrier` 应为 `plaintext`（K1 局域网明文）。
+4. **换网**：断开 Wi-Fi 切蜂窝，计时到 `linkConnected` 恢复。**要求 ≤10s**（2026-10-18 真机 ≈3s）。
+5. **跨网文件**：不同网络下互发 ≥50MB 文件，中途断网再续。期望断点续传、SHA-256 校验通过、**尾部不丢字节**。
+6. **留痕**：把两端的 `link*` 字段与 `closeReason` / `closeDetail` / `pinSource` 抄进记录表。
+
+### 4.3 本轮已知留白
+
+- 跨网**屏幕**协助不可用（仍要求同一局域网），不要按「投屏」去验收跨网。
+- iOS 端到端 TLS 需要**签过名**的构建（烟测构建没有 keychain 容器，`SecItemAdd` 返回 `-25291`）。
+
+---
+
 ## 4. 物理验收签署与留痕清单
 
 每次发版或阶段交付前，由测试执行人员在真机与真实桌面上完成走查，并在下表签字归档：
@@ -137,3 +160,7 @@
 | **Finder 文件打开与定位** | macOS 15 (Apple Silicon) | `[x]` | `desktop-d6b-file-exit.txt` | 通过 | 核心团队 / 2026-10-08 |
 | **ImeSmokePane 6 大边界** | macOS 15 系统拼音 | `[x]` | `host-surface-checklist.md` (A1–A6) | 通过 | 核心团队 / 2026-10-08 |
 | **群文件端到端分发** | JVM Controller + Desktop + Mobile | `[x]` | `RelayControllerGroupTest` | 通过 | 核心团队 / 2026-10-08 |
+
+> **2026-10-18 证据核对**：上表引用的证据文件逐个 `ls` 过 —— **17 份存在**（`design/runtime-evidence/` 下），
+> **只有 `desktop-d6b-file-exit.txt` 已不存在**。该行「Finder 文件打开与定位 / 通过」的结论**保留不重写**，
+> 但**证据链已断**：今天谁也拿不出那份原始输出。补证据时把新文件放回同一目录并在此更新文件名。

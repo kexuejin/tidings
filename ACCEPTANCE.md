@@ -157,12 +157,16 @@ Wi-Fi 省电模式下能否收到、TCP 直连、托盘/深链/多窗口、通�
 - 说明：正常退出会尽力广播 `exit` 告别帧；但**手机端没有生命周期钩子**，
   所以手机侧这条告别帧实际发不出去 —— 90 秒超时才是手机的真实路径。**这是已知现状，不是缺陷**。
 
-### A13 表格图/头像等「收到但不处理」的帧
+### A13 表格图/头像等「收到但不处理」的帧（2026-10-18 复核：标题里的「头像」已过时）
 - 期望：对端发这些时本端**不崩、不回错误、不显示半截内容**（按 README 的「不做的理由」处理）。
-- 详见 [`PROTOCOL-COVERAGE.md`](PROTOCOL-COVERAGE.md) 第三节与
-  [README 的能力声明一节](README.md#能力声明caps声明了什么没声明什么)。
+- 详见 [`PROTOCOL-COVERAGE.md`](PROTOCOL-COVERAGE.md) 第一节（会处理的）与第三节（有意不处理的），
+  以及 [README 的能力声明一节](README.md#能力声明caps声明了什么没声明什么)。
 - 表格图**例外**：对端发带 `tableText` 的图片 offer 时，本端应当能展开看那段文字（见 C5）。
 - **投屏已不再是「不处理」**：`screen` 已完整实现并双向真机验收通过（见 A17）。
+- **头像也已不再是「不处理」**（2026-10-18 复核）：`avatar` 的 `op:get` / `op:data` / `op:miss` 已在
+  `RelayControllerAvatarComponent` 闭环（含 SHA-256 缓存），能力位 `av1` 随「自定义头像」开关声明。
+- **今天真正「有意不处理」的只有两种**：`update`（局域网 P2P 更新源）与 `peers`（gossip 摘要）——
+  见 `MsgTypes.UNHANDLED`。另有一种特殊形态：`share` 只在**传输层**被 ACK，业务层至今只有壳。
 
 ### A13b 群图片的 10MB 上限 ✅ 已跑（2026-10-07）
 - 步骤：桌面端在一个群里发一张 15MB 的图片（群图协议上限 10MB）。
@@ -177,9 +181,11 @@ Wi-Fi 省电模式下能否收到、TCP 直连、托盘/深链/多窗口、通�
 - 这一项**以前造不出场景**：收端一直按 `groupId` 判群聊，但发端 `TransferManager.offerFiles`
   恒发 null，本客户端根本发不出一条协议认可的群图。本批把 `groupId`/`groupRev` 接到
   `offerFiles` → `NodeRuntime` → `POST /v1/send-file`（成对校验，只给一个就 400）。
-- 仍未覆盖：界面上的**群图/群文件发送**（群文本已经能收能发，但聊天页对群会话刻意不画
-  附件按钮 —— `attach` 走的是"发给一个节点"），
-  以及 `purpose` 为 sticker / update 时的内联上限。
+- **已更正（2026-10-18 复核）：界面上的群图/群文件发送已经打通** —— 附件按钮对群会话照画
+  （`ChatScreen` 的 `onAttachFile` 在移动端与桌面端都是无条件传入），`handlePickAndSendFiles`
+  有 `groupId` 分支：先校验群存在与「自己是成员」，再逐成员扇出。原文写的「聊天页对群会话
+  刻意不画附件按钮」已经不成立。
+- 仍未覆盖：`purpose` 为 sticker / update 时的内联上限。
 
 ### A13c 对端改了资料/头像名，本端多久跟上 ✅ 已跑（2026-10-07）
 - 步骤：对端改自己的显示名（触发 `profileRev` +1），**不发任何消息**，只等心跳。
@@ -276,8 +282,11 @@ Wi-Fi 省电模式下能否收到、TCP 直连、托盘/深链/多窗口、通�
 - 命令与原始输出见
   [`design/runtime-evidence/group-chat-acceptance.txt`](design/runtime-evidence/group-chat-acceptance.txt)。
 - **仍未覆盖**（同一份证据文件里也写了）：群成员变化（加人/移人）与随之而来的 `group.need`
-  重新同步没在真机上制造过；群里发文件没接（聊天页对群会话刻意不画附件按钮）；
+  重新同步没在真机上制造过；
   `gr1` 角色矩阵整块不做；中文群名只能靠截图参考图覆盖
+- **已更正（2026-10-18 复核）**：原文写「群里发文件没接（聊天页对群会话刻意不画附件按钮）」，
+  现在**已经接上** —— 附件按钮对群会话照画，`handlePickAndSendFiles` 先校验群与成员身份再扇出
+  （同一处更正见 A13b）。
   （`adb shell input text` 与 `idb ui text` 都注入不了中文：`input text '周末爬山'` →
   `NullPointerException at InputShellCommand.sendText`）。
 
@@ -671,6 +680,8 @@ Wi-Fi 省电模式下能否收到、TCP 直连、托盘/深链/多窗口、通�
   （`relay: ...`），它区分了「没有桌面环境（headless）」「宿主不支持这个动作」「动作抛异常」
   三种情况。
 - 证据写进 `design/runtime-evidence/desktop-d6b-file-exit.txt`，截图留本地。
+  > **2026-10-18 核对**：这份证据文件**已不存在** —— `design/runtime-evidence/` 下查无 `desktop-d6b-file-exit.txt`（该目录现有 80 个文件，含 `r2-desktop-capture-*` 等，但没有这一份）。
+  > 本条结论**保持原样**（不重写历史），只如实标注：证据链已断，D6b 这条现在只有文字结论、没有可核对的原始输出。
 
 ### D7 拖出文件
 - 期望：把文件卡拖到系统文件管理器/聊天窗口，能落成真实文件。
@@ -752,6 +763,47 @@ messaging **PASS 38**（`/tmp/messaging-run14.log`），全量套件 **run11 9/9
 - 手机侧进程被杀时的告别帧（A12，没有生命周期钩子）。
 - 外网侧的 IPv6 / 跨出口链路 —— 那部分有单独的手册：
   [agentNode/tools/CROSS-NET-RUNBOOK.md](agentNode/tools/CROSS-NET-RUNBOOK.md)。
+
+## 8. 公网（TLS + pin）、长连接与跨网文件（2026-10-18 新增）
+
+> 与 A 系列同格式。**没跑过的如实标「未跑」** —— 单测绿 ≠ 真机通过。
+
+### N1 公网直连走 TLS + 双向 pin —— 单测绿，真机未跑
+- 判据（单测）：`LinkAcceptPolicyTest`（接受裁决表）、`TlsPinTest`、`LinkCloseReasonTest`。
+- 步骤：两台设备分处不同网络（蜂窝 ↔ 家庭宽带），手机扫码配对 ⇒ `/v1/peers` 应 `linkConnected=true`、`linkCarrier=tls`，`linkDenyReason` 为空。
+- 反例检查：故意把主机 pin 换成错的 ⇒ 必须 `pin-mismatch`，且**不回退明文**。
+- 状态：**真机未跑**（需要两台不同网络的设备，且主机 `tlsPort` 从公网可达）。
+
+### N2 明文永不出局域网 —— 单测绿
+- `plaintextLinkForbidden` 走 `isLanAddress`；公网对端的明文连接在 accept 被回 `not-lan`；地址变化后的复查**只**摘「声明明文且已不在局域网」的连接。
+- 证据：`IpAddressPrivateTest`、`LinkAcceptPolicyTest`、`CapabilityDeclarationTest` 里那条「GUA-同/64 是局域网、真公网明文必摘」。
+
+### N3 换网立即重连（要求 ≤10s）—— 真机已跑 ≈3s
+- 步骤：长连接建立后关 Wi-Fi 切蜂窝（或反向），读 `/v1/peers` 的 `linkDialAttempts` 与 `linkConnected` 恢复时间。
+- 证据：task-37 真机实测 ≈3s；设计与治理见 [`docs/cross-network-keepalive-design.md`](docs/cross-network-keepalive-design.md)。
+
+### N4 跨网文件传输 —— 代码链路绿，真机未跑
+- 步骤：不同网络的手机与主机互发 ≥50MB 文件，中途断网再续 ⇒ 断点续传生效、SHA-256 校验通过、尾部不丢字节。
+- 证据（单测）：`CrossNetworkTransferPolicyTest`、`CrossNetworkTlsTransferTest`。
+- 状态：**真机发文件未跑**（这是本轮明确留白的验收项）。
+
+### N5 外部来源配对必须二次确认 —— 真机已跑（2026-10-18）
+- 步骤：`adb shell am broadcast -a app.relay.TEST_INJECT_QR --es qr relay://<ip>:<port>`，再 `am start -a android.intent.action.VIEW -d relay://<ip>:<port>`。
+- 期望：出现确认框；**点「取消」后 `settings.json` 的 `manualPeers` 不变**；再注入并点「允许」才出现新节点。
+- 证据：task-54 真机逐条验证；e2e 里是 `scripts/e2e/e2e_workspace_collaboration.py` 的 `qr-pairing-confirmed`（脚本**真的点**确认框，不用后门）。
+
+### N6 长连接的「谁先关的」可诊断 —— 单测绿
+- `closeReason`（`dead-timeout` / `peer-closed` / `replaced` / `recheck` / `stopped`）+ `closeCount` + `closeDetail` 三个字段同时出现在宿主 `/v1/peers` 与手机 `files/relay/diag/link.json`。
+- 证据：`LinkCloseReasonTest`。
+
+## 9. 本轮新增的「无法在本机验证」项（补充 §6）
+
+- **公网 TLS 的真实握手**（N1）：需要两台不同网络的设备与可达的 `tlsPort`。
+- **跨网大文件的真机传输**（N4）：代码与单测已绿，真机未跑。
+- **iOS 端到端 TLS**：烟测构建（`CODE_SIGNING_ALLOWED=NO`）没有 keychain 容器，`SecItemAdd` 返回 `-25291` ⇒ 必须有**签过名**的构建才能验；在此之前 iOS 侧没有 TLS 传输，公网长连接被策略层拒绝（fail-closed）。
+- **路由器 IPv6 入站放行**：属于用户网络环境，本应用不做打洞；换一个网络就要重新确认。
+
+---
 
 ## 7. 单条记录模板
 

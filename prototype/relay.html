@@ -1878,7 +1878,7 @@ const peerOf = id => PEERS.find(p => p.nodeId === id) || UNKNOWN_PEER;
 /* 群：members 里含自己（成员表没有自己的群，协议上就是"我已经退群"，发不出任何东西）。
    online 是**除自己以外**在线的成员数 —— 一个布尔装不下"5 个人里 2 个在线"。 */
 const GROUPS = [
-  {groupId:'pub', name:'茶话间 · 发布值班', rev:7, ownerId:NID.ka, adminIds:[NID.lin],
+  {groupId:'pub', name:'项目研发 · 发布值班', rev:7, ownerId:NID.ka, adminIds:[NID.lin],
    creatorId:NID.ka, creatorIp:'192.168.1.31',
    members:[ME.nodeId, NID.ka, NID.lin, NID.huang, NID.build],
    description:'发版窗口、灰度、回滚都在这里说。',
@@ -1899,7 +1899,7 @@ const memberOnlineCount = g => g ? g.members.filter(m => m !== ME.nodeId && peer
    它上面还压着一条 11 小时前的 Lin。这是"排序键只看在线和时间"的直接后果，
    也是提案那一屏要拿来对照的那一对行。 */
 const CONVS = [
-  {convId:'group:pub', title:'茶话间 · 发布值班', isGroup:true, ts:112,
+  {convId:'group:pub', title:'项目研发 · 发布值班', isGroup:true, ts:112,
    preview:'insets 截图已贴',
    at:'13:08', unread:0, pendingCount:0},
   {convId:NID.ka,    title:'老周', isAgent:false, online:true, ts:29,
@@ -1974,15 +1974,17 @@ const NOTICE = {
    曾经这里写的是「今天」，与代码不符，已按代码改。 */
 const MSGS_AGENT = [
   {day:'14:02'},
+  {ini:'手', c:'#10B981', sender:'📱 我的 iPhone 15',
+   text:'@Codex 早，今天的 golden vector 状态如何？我手机上刚看到报警。'},
   {ini:'AI', c:'#6B4EE6', sender:'teahouse-mobile',
-   text:'早，今天的 golden vector 又挂了：\n:core:compileKotlinJvm 通过\n:composeApp:linkDebugFrameworkIos 通过\ngolden vector parity 失败'},
+   text:'收到。今天的 golden vector parity 失败：\n:core:compileKotlinJvm 通过\n:composeApp:linkDebugFrameworkIos 通过\ngolden vector parity 校验失败，原因已排查到。'},
   {ini:'AI', c:'#6B4EE6', sender:'teahouse-mobile',
    text:'原因找到了：codec.ts 对 group-text 用 hasOnlyKeys 校验，对端多解一个 "type" 字段就整包丢弃。我把校验放宽成未知键透传。'},
   {mine:true, text:'重新跑一遍全量向量，我这边看 desktop 侧的消息列表是不是也补齐了。'},
   {ini:'AI', c:'#6B4EE6', sender:'teahouse-mobile',
    file:{name:'build-jvm.log', size:'2.4 MB', meta:'2.4 MB · 1284 行', pct:64, mine:false,
          state:'active-in', purpose:'file'}},
-  {notice:'NudgedByPeer'},
+  {notice:'GroupMembersChanged'},
   {ini:'AI', c:'#6B4EE6', sender:'teahouse-mobile',
    text:'桌面端发的那条 group-text 我这边当时没收到，现在已同步。'},
   {mine:true, text:'ci-runner 现在还离线，这条它自己排着，等上线会补发。'},
@@ -1990,7 +1992,7 @@ const MSGS_AGENT = [
   {notice:'RecalledBySelf'},
 ];
 
-/* 群聊（茶话间 · 发布值班）。群消息必须署名：会话键是 `group:<groupId>`，
+/* 群聊（项目研发 · 发布值班）。群消息必须署名：会话键是 `group:<groupId>`，
    气泡左右只分得出"是不是我发的"。 */
 const MSGS_GROUP = [
   {day:'14:02'},
@@ -2208,9 +2210,10 @@ function eventRowHTML(e){
    按钮只在 `pending && !过期` 时画（`:118`），顺序 **`拒绝`(描边) → `批准`(实心)**。
    区别只有一处：源码按钮另起一行（`:120-135`），这里并到首行右端 —— 理由见 `.lst` 上面的注释。 */
 function apprRowHTML(a){
-  const st = a.status === 'approved' ? ['ok','已批准']
-           : a.status === 'denied'   ? ['no','已拒绝']
-           : a.expired               ? ['no','已过期'] : null;
+  const decided = a.decidedBy ? ` · 由 ${a.decidedBy} 操作` : '';
+  const st = a.status === 'approved' ? ['ok', `已批准${decided}`]
+           : a.status === 'denied'   ? ['no', `已拒绝${decided}`]
+           : a.expired               ? ['no', '已过期'] : null;
   return `<div class="appr">
     <div class="bd">
       <div class="tl">工具: ${a.tool || '—'}</div>
@@ -2301,7 +2304,7 @@ const AGENT_APPROVALS = [
    summary:'npm run deploy --prod', expiresAt:'5 分钟后', status:'pending'},
   // 终态：源码 `status` 非 pending 时也照画（`approvals.forEach` 不过滤），只是不画按钮。
   {approvalId:'ap-3', sessionId:'s-8843', tool:'Write',
-   summary:'把纪要草稿写进「本周纪要」笔记', status:'approved'},
+   summary:'把纪要草稿写进「本周纪要」笔记', status:'approved', decidedBy:'💻 MacBook Pro'},
   {approvalId:'ap-4', sessionId:'s-9001', tool:'Bash',
    summary:'重跑失败的集成测试（2 项待复核）', expiresAt:'9 分钟后', status:'pending'},
   /* 过期：`expiresAt > 0 && now > expiresAt` 时胶囊显示「已过期」、**按钮消失**（:60 / :118）。
@@ -2908,6 +2911,8 @@ const SCREENS = [
   {id:'m-chat-solo',      form:'mobile',  label:'聊天·会话切换', tab:'conversations', full:true},
   {id:'m-chat-group',     form:'mobile',  label:'聊天·群聊',       tab:'conversations', full:true},   {id:'m-chat-group-more', form:'mobile', label:'聊天·群聊·更多功能', tab:'conversations', full:true},
   {id:'m-groupcreate',    form:'mobile',  label:'建群对话框',      tab:'conversations'},
+  {id:'m-createws',       form:'mobile',  label:'关联工作区建群',   tab:'conversations'},
+  {id:'m-chat-workspace', form:'mobile',  label:'工作区协同群聊',   tab:'conversations', full:true},
   {id:'m-msgmenu',        form:'mobile',  label:'长按消息菜单',    tab:'conversations', full:true},
   {id:'m-groupinfo',      form:'mobile',  label:'群信息与成员',    tab:'conversations', full:true},
   {id:'m-nodes',          form:'mobile',  label:'节点',            tab:'nodes'},
@@ -2944,6 +2949,9 @@ const SCREENS = [
   {id:'d-histsearch',     form:'desktop', label:'会话内历史搜索（桌面·居中 dialog）'},  {id:'d-home-more',      form:'desktop', label:'平板宿主·工具栏更多菜单'},
   {id:'d-chat-group',     form:'desktop', label:'会话视图·群聊'},
   {id:'d-groupcreate',    form:'desktop', label:'建群对话框'},
+  {id:'d-createws',       form:'desktop', label:'关联工作区建群（桌面）'},
+  {id:'d-wsgrant',        form:'desktop', label:'工作区权限与协同管理（桌面）'},
+  {id:'d-grantqr',        form:'desktop', label:'工作区直通码（桌面）'},
   {id:'d-files',          form:'desktop', label:'文件视图'},
   {id:'d-cabinet',        form:'desktop', label:'文件柜视图'},
   {id:'d-nodes',          form:'desktop', label:'节点视图'},
@@ -3540,7 +3548,8 @@ function screenGroupCreate(){
     <h2>建群</h2>
     <div class="dbody">
       <div class="field"><label>群名</label>
-        <input class="inp" value="茶话间 · 发布值班"/></div>
+        <input class="inp" value="项目研发 · 协同群"/></div>
+      <div style="font-size:12px;margin:8px 0;padding:6px 10px;background:var(--surface-2);border-radius:8px;display:flex;justify-content:space-between;align-items:center"><span>要协同本地代码工作区？</span><a style="color:var(--primary);font-weight:600;cursor:pointer" onclick="go('m-createws')">关联工作区建群 &gt;</a></div>
       <div class="avedit-lb" style="margin-bottom:4px">选成员（自己一定在里面）</div>
       ${rows.map(p=>`<div class="mem" role="checkbox" aria-checked="${chosen.includes(p.nodeId)}">
         <span class="cb">${ic('check')}</span>
@@ -3556,6 +3565,90 @@ function screenGroupCreate(){
       <button class="btn pri">创建</button>
     </div>
   </div></div>`)}`;
+}
+
+/** 移动端 · 关联工作区建群（双分支弹窗）。
+    分支 B (推荐)：智能体已有工作区一键建群 / 进入群聊；
+    分支 A：关联本地新目录快速建群，自动联动群名，默认勾选免扫码自同步。 */
+function screenMCreateWs(){
+  return `${screenHomeRecent()}
+  ${overlay(`<div class="dialog" style="align-items:flex-end"><div class="dlg gc" style="max-width:100%;border-radius:16px 16px 0 0;max-height:85vh;overflow-y:auto">
+    <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:10px">
+      <h2 style="margin:0">关联工作区建群</h2>
+      <button class="ibtn" onclick="go('m-home-recent')">${ic('close')}</button>
+    </div>
+    <div class="dbody">
+      <div class="grphead" style="color:var(--primary);display:flex;justify-content:space-between">
+        <span>从智能体已有工作区快速建群 (推荐)</span>
+        <span style="font-size:11px;color:var(--on-2)">1:1 目录防重</span>
+      </div>
+      <div class="card" style="margin-bottom:8px;padding:10px;background:var(--surface-2)">
+        <div style="font-weight:600;display:flex;align-items:center;gap:6px">
+          ${ic('folder')} teahouse-mobile
+          <span class="tag ok sm">已在协同群中</span>
+        </div>
+        <div class="mono" style="font-size:11px;color:var(--on-2);margin:4px 0 8px">🤖 Codex · /workspace/src/teahouse-mobile · 3 会话</div>
+        <div style="display:flex;gap:6px">
+          <button class="btn sm pri" style="flex:1" onclick="go('m-chat-workspace')">${ic('chat')} 进入协同群</button>
+          <button class="btn sm" onclick="go('d-grantqr')">${ic('qr')} 直通码</button>
+        </div>
+      </div>
+      <div class="card" style="margin-bottom:12px;padding:10px;background:var(--surface-2)">
+        <div style="font-weight:600;display:flex;align-items:center;gap:6px">
+          ${ic('folder')} dsh-server
+          <span class="tag sm muted">本地单机</span>
+        </div>
+        <div class="mono" style="font-size:11px;color:var(--on-2);margin:4px 0 8px">🤖 Codex · ~/source/dsh · 1 会话</div>
+        <button class="btn sm pri" style="width:100%">${ic('plus')} 一键建群 / 共享</button>
+      </div>
+
+      <div class="grphead">或关联本地全新目录</div>
+      <div style="display:flex;gap:6px;margin-bottom:8px">
+        <input class="inp mono" style="flex:1;font-size:12px" value="/Users/work/new-feature" readonly />
+        <button class="btn sm">选目录</button>
+      </div>
+      <div class="field" style="margin-bottom:8px">
+        <label style="font-size:11px">群聊名称 (自动联动)</label>
+        <input class="inp" style="width:100%;font-size:12px" value="new-feature 协同群" />
+      </div>
+      <div style="font-size:12px;color:var(--on-2);display:flex;align-items:center;gap:6px;margin-bottom:12px">
+        <input type="checkbox" checked id="ck_sync_m" />
+        <label for="ck_sync_m">自动同步到信任圈移动设备 (免扫码)</label>
+      </div>
+    </div>
+    <div class="acts" style="justify-content:space-between">
+      <button class="btn" onclick="go('m-home-recent')">取消</button>
+      <button class="btn pri">立即创建协同群</button>
+    </div>
+  </div></div>`)}`;
+}
+
+/** 移动端 · 工作区协同群聊。
+    顶部常驻两道感知横幅：执行中互斥条（带 [⏹ 全局打断]）与宿主休眠微光柔性感知横幅。
+    审批卡严格区分 4 级角色权限（拥有者/代批管理员允许审批，协作者/旁观者只读）。 */
+function screenMChatWorkspace(){
+  const w = WORKSPACES[0];
+  const gName = `${w.name} 协同群`;
+  return `${topbar(gName, '4 位成员 · 🤖 Codex 驻群',
+      [{icon:'info', label:'群信息与成员', to:'m-groupinfo'}], true, 'chat',
+      headAv('协', '#3F6FA8'),
+      '<span class="tag agent">工作区协同</span><span class="tag ok">3人在线</span>')}
+  <div style="background:var(--surface-2);border-bottom:1px solid var(--border);padding:6px 12px;font-size:12px;display:flex;align-items:center;justify-content:space-between">
+    <div style="display:flex;align-items:center;gap:6px;color:var(--primary);font-weight:600">
+      <span>${ic('refresh')} Codex 正在执行重构任务...</span>
+    </div>
+    <button class="btn sm danger" style="padding:2px 8px;font-size:11px">⏹ 全局打断</button>
+  </div>
+  <div style="background:var(--surface-3);border-bottom:1px solid var(--border);padding:6px 12px;font-size:11px;color:var(--on-2);display:flex;align-items:center;gap:6px">
+    <span>🌙 宿主设备睡眠/离线中 · 命令已安全排队挂起，待宿主唤醒后自动断点续传</span>
+  </div>
+  <div class="scroll"><div class="msgs">${msgsOf(MSGS_GROUP)}</div></div>
+  ${mobileComposer({ group: true, histTo: 'm-histsearch', moreOpen: false })}
+  <div class="annot" style="flex:none;margin:8px 12px 10px">
+    <b>工作区协同群（带执行感知与审批门控）：</b><br>
+    顶部常驻两道感知横幅：执行中互斥条（带 <code>[⏹ 全局打断]</code>）与宿主休眠柔性提示条（排队挂起）。<br>
+    群内审批卡片严格按 4 级角色放行：宿主/拥有者/委托审批管理员可执行审批，外部协作者与旁观者只读无权点击。
+  </div>`;
 }
 
 /** 长按消息菜单。协议只定义了**两条**消息级动作：撤回（5 分钟窗）与戳一碰（仅单聊），
@@ -3798,8 +3891,21 @@ function screenGroupInfo(){
           等对端在群里说话时顺带带过来。改群名、加人、移人都不在本端。</div>
       </div>
     </div>
-    <div class="grphead">成员<span class="cnt">${g.members.length}</span></div>
+    <div class="grphead">协同人类成员<span class="cnt">${g.members.length}</span></div>
     <div class="card">${rows}</div>
+    <div class="grphead" style="margin-top:10px">入驻智能体<span class="cnt">2</span></div>
+    <div class="card">
+      <div class="row" style="cursor:default">
+        <div class="av" style="background:#4A6B82">🤖</div>
+        <div class="bd"><div class="t1"><span class="ell">DSH · 本地终端执行</span><span class="tag ok">在线</span><span class="tag">默认助理</span></div>
+          <div class="t2 mono">宿主本地内核 · 会话执行与文件系统交互</div></div>
+      </div>
+      <div class="row" style="cursor:default">
+        <div class="av" style="background:#6B4A82">🤖</div>
+        <div class="bd"><div class="t1"><span class="ell">Gemini · 架构与代码审阅</span><span class="tag ok">在线</span></div>
+          <div class="t2 mono">方案审查、Diff 风险评估与测试生成</div></div>
+      </div>
+    </div>
     <div class="card"><div class="padc">
       <div class="kv" style="padding:4px 0"><span class="k">退出群聊</span>
         <span class="v">本端没有这条出口</span></div>
@@ -4109,10 +4215,169 @@ function sessionPickerHTML(w){
           </div>`;
         }).join('')}
       </div>
-      <div class="acts"><button class="btn" onclick="closeSessionPicker()">关闭</button></div>
+      <div class="acts" style="justify-content:space-between">
+        <button class="btn pri sm" onclick="closeSessionPicker()">${ic('plus')} 新建任务会话</button>
+        <button class="btn sm" onclick="closeSessionPicker()">关闭</button>
+      </div>
     </div>
   </div>`;
 }
+
+function grantModalHTML(w, open){
+  return `<div class="dialog pickz${open ? ' on' : ''}" id="asgrant" onclick="closeGrantModal()" style="${open ? 'display:grid' : ''}">
+    <div class="dlg" onclick="event.stopPropagation()" style="max-width:520px">
+      <h2>工作区协同管理 · ${wsName(w)}</h2>
+      <div class="dbody">
+        <div class="banner" style="margin-bottom:12px;display:flex;gap:8px">${ic('lock')}
+          <div><b>当前策略：申请审批制 (request)</b><br>
+          <span style="font-size:12px;color:var(--on-2)">解散群聊仅移除多端协同通道，本地代码文件、Git 状态与历史会话完好保留。</span></div></div>
+        
+        <div class="grphead">👤 我的设备 (私有信任圈 · 自动自同步)</div>
+        <div class="krow" style="padding:8px 0;align-items:center">
+          <div class="av" style="background:var(--surface-2);color:var(--primary)">${ic('lan')}</div>
+          <div class="bd">
+            <div class="t1">我的 iPhone 15 <span class="tag ok sm">👑 拥有者 (完全控制 rw)</span></div>
+            <div class="t2 mono">已绑定 · 允许远程执行与代为审批 · 群聊自动同步</div>
+          </div>
+          <span class="hint sm">本机信任</span>
+        </div>
+
+        <div class="grphead" style="margin-top:12px">👥 协同成员与外部设备（2）</div>
+        <div class="krow" style="padding:8px 0;align-items:center">
+          <div class="av" style="background:var(--surface-2);color:var(--primary)">${ic('lan')}</div>
+          <div class="bd">
+            <div class="t1">老周的 ThinkPad <span class="tag sm" style="background:var(--surface-3);color:var(--primary);font-weight:600">🛡️ 协同管理员</span></div>
+            <div class="t2 mono">最后活跃：5 分钟前 · 已开启终端代批 (Delegated Approval)</div>
+          </div>
+          <button class="btn sm">权限设置</button>
+        </div>
+        <div class="krow" style="padding:8px 0;align-items:center">
+          <div class="av" style="background:var(--surface-2);color:var(--on-2)">${ic('lan')}</div>
+          <div class="bd">
+            <div class="t1">张三的 Mac <span class="tag sm">👀 旁观者 (ro)</span></div>
+            <div class="t2 mono">最后活跃：10 分钟前 · 仅可查阅与检索 · 禁用高危审批</div>
+          </div>
+          <button class="btn sm">设为协作者</button>
+        </div>
+
+        <div class="grphead" style="margin-top:12px">⏳ 待处理申请（1）</div>
+        <div class="krow" style="padding:8px 0;align-items:center">
+          <div class="av" style="background:var(--surface-2);color:var(--on-queued-c)">${ic('warn')}</div>
+          <div class="bd">
+            <div class="t1">李四的平板 <span class="tag q sm">申请访问</span></div>
+            <div class="t2">申请理由：排查前端联调接口问题</div>
+          </div>
+          <div style="display:flex;gap:4px">
+            <button class="btn sm pri">同意 (rw)</button>
+            <button class="btn sm">同意 (ro)</button>
+            <button class="btn sm danger-o">拒绝</button>
+          </div>
+        </div>
+      </div>
+      <div class="acts" style="justify-content:space-between">
+        <button class="btn danger-o sm" onclick="alert('解散群聊仅移除协同通道，本地代码文件保留在本地。');closeGrantModal()">解散协同群</button>
+        <button class="btn" onclick="closeGrantModal()">关闭</button>
+      </div>
+    </div>
+  </div>`;
+}
+
+function grantQrModalHTML(w, open){
+  return `<div class="dialog pickz${open ? ' on' : ''}" id="asgrantqr" onclick="closeGrantQrModal()" style="${open ? 'display:grid' : ''}">
+    <div class="dlg" onclick="event.stopPropagation()" style="max-width:380px;text-align:center">
+      <h2>扫码直达工作区</h2>
+      <div class="dbody">
+        <div class="qrmock" style="margin:12px auto;width:180px;height:180px"></div>
+        <div class="t1" style="font-weight:600;margin-bottom:4px">${wsName(w)}</div>
+        <div class="t2" style="font-size:12px;color:var(--on-2);line-height:1.5">
+          手机使用「捎话」扫描此二维码，<br>一步自动完成<b>「节点配对 + 工作区读写授权」</b>。
+        </div>
+        <div style="margin-top:8px"><span class="tag ok sm">一次性授权凭证 · 15分钟有效</span></div>
+      </div>
+      <div class="acts" style="justify-content:center">
+        <button class="btn pri" onclick="closeGrantQrModal()">完成</button>
+      </div>
+    </div>
+  </div>`;
+}
+
+function createWsModalHTML(w, open){
+  return `<div class="dialog pickz${open ? ' on' : ''}" id="ascreatews" onclick="closeCreateWsModal()" style="${open ? 'display:grid' : ''}">
+    <div class="dlg" onclick="event.stopPropagation()" style="max-width:540px">
+      <h2>关联工作区建群</h2>
+      <div class="dbody">
+        <div class="grphead" style="color:var(--primary);display:flex;justify-content:space-between">
+          <span>从智能体已有工作区快速建群 (推荐)</span>
+          <span style="font-weight:400;font-size:12px;color:var(--on-2)">目录 1:1 防重绑定</span>
+        </div>
+        <div class="card" style="margin-bottom:8px;padding:10px;background:var(--surface-2)">
+          <div style="display:flex;justify-content:space-between;align-items:center">
+            <div>
+              <div style="font-weight:600;display:flex;align-items:center;gap:6px">
+                ${ic('folder')} teahouse-mobile
+                <span class="tag ok sm">已在协同群中</span>
+              </div>
+              <div class="mono" style="font-size:11px;color:var(--on-2);margin-top:2px">🤖 Codex · /workspace/src/teahouse-mobile · 3 会话</div>
+            </div>
+            <div style="display:flex;gap:4px">
+              <button class="btn sm pri" onclick="closeCreateWsModal()">${ic('chat')} 进入群聊</button>
+              <button class="btn sm" onclick="closeCreateWsModal();openGrantQrModal()">${ic('qr')} 分享码</button>
+            </div>
+          </div>
+        </div>
+        <div class="card" style="margin-bottom:12px;padding:10px;background:var(--surface-2)">
+          <div style="display:flex;justify-content:space-between;align-items:center">
+            <div>
+              <div style="font-weight:600;display:flex;align-items:center;gap:6px">
+                ${ic('folder')} dsh-server
+                <span class="tag sm muted">本地单机</span>
+              </div>
+              <div class="mono" style="font-size:11px;color:var(--on-2);margin-top:2px">🤖 Codex · ~/source/dsh · 1 会话</div>
+            </div>
+            <button class="btn sm pri" onclick="closeCreateWsModal()">${ic('plus')} 一键建群 / 共享</button>
+          </div>
+        </div>
+
+        <div style="text-align:center;color:var(--on-3);font-size:12px;margin:8px 0;position:relative">
+          <span style="background:var(--surface);padding:0 8px;position:relative;z-index:1">或关联本地全新目录</span>
+          <div style="position:absolute;top:50%;left:0;right:0;height:1px;background:var(--border);z-index:0"></div>
+        </div>
+
+        <div class="grphead">关联本地新目录</div>
+        <div style="display:flex;gap:6px;margin-bottom:8px">
+          <input class="inp mono" style="flex:1;font-size:12px" value="/workspace/src/new-feature-repo" readonly />
+          <button class="btn sm">浏览目录...</button>
+        </div>
+        <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-bottom:8px">
+          <div>
+            <label style="font-size:11px;color:var(--on-2);display:block;margin-bottom:2px">驻群智能体</label>
+            <select class="inp" style="width:100%;font-size:12px"><option>🤖 DSH (默认本地执行助理)</option><option>🤖 Gemini (架构审阅参谋)</option></select>
+          </div>
+          <div>
+            <label style="font-size:11px;color:var(--on-2);display:block;margin-bottom:2px">群聊名称 (自动联动)</label>
+            <input class="inp" style="width:100%;font-size:12px" value="new-feature-repo 协同群" />
+          </div>
+        </div>
+        <div style="font-size:12px;color:var(--on-2);display:flex;align-items:center;gap:6px">
+          <input type="checkbox" checked id="ck_sync_mydev" />
+          <label for="ck_sync_mydev">自动同步到我的移动设备 (iPhone 15 免扫码)</label>
+        </div>
+      </div>
+      <div class="acts" style="justify-content:space-between">
+        <button class="btn" onclick="closeCreateWsModal()">取消</button>
+        <button class="btn pri" onclick="closeCreateWsModal()">立即创建协同群</button>
+      </div>
+    </div>
+  </div>`;
+}
+
+function openGrantModal(){ const el=document.getElementById('asgrant'); if(el) el.classList.add('on'); }
+function closeGrantModal(){ const el=document.getElementById('asgrant'); if(el) el.classList.remove('on'); }
+function openGrantQrModal(){ const el=document.getElementById('asgrantqr'); if(el) el.classList.add('on'); }
+function closeGrantQrModal(){ const el=document.getElementById('asgrantqr'); if(el) el.classList.remove('on'); }
+function openCreateWsModal(){ const el=document.getElementById('ascreatews'); if(el) el.classList.add('on'); }
+function closeCreateWsModal(){ const el=document.getElementById('ascreatews'); if(el) el.classList.remove('on'); }
+
 
 /* 「会话」**一行**切换条（`.swbar`）—— 手机聊天屏、手机 Agent 控制台、桌面聊天窗、
    桌面 Agent 控制台，四处共用同一份，两端才逐字同款（README §10.9 的 A 类共享）。
@@ -4978,6 +5243,7 @@ const SCREENFN = {
   'm-gsearch':() => screenGSearch('协议'), 'm-gsearch-empty':() => screenGSearch('捎话', true),
   'm-chat':screenChat, 'm-chat-more':screenChatMore, 'm-chat-solo':() => screenChat(true),
   'm-chat-group':screenChatGroup, 'm-chat-group-more':() => screenChatGroup(true), 'm-groupcreate':screenGroupCreate,
+  'm-createws':screenMCreateWs, 'm-chat-workspace':screenMChatWorkspace,
   'm-msgmenu':screenMsgMenu, 'm-groupinfo':screenGroupInfo,
   'm-nodes':screenNodes, 'm-addnode':screenAddNode, 'm-addnode-fill':() => screenAddNode(2),
   'm-nodes-empty':screenNodesEmpty,
@@ -5987,67 +6253,102 @@ function screenDNodes(){
 function sideWorkspaces(selW, selS){
   const total = WORKSPACES.reduce((n, w) => n + w.sessions.length, 0)
               + PEERS.reduce((n, p) => n + (p.unassigned || []).length, 0);
-  return `<div class="sidebody">
-    <div class="sidehead">工作区与会话<span class="cnt">${total}</span></div>
-    <div class="sidelist">
-      ${boardGroups().map(g => {
-        const un = g.agents.reduce((n, a) => n + unassignedOf(a.nodeId, a.key).length, 0);
-        const unOwner = g.agents.find(a => unassignedOf(a.nodeId, a.key).length) || g.prim;
-        return `
-        <div class="grphead" role="button" style="cursor:pointer"
-             onclick="openAgentD('${g.prim.nodeId}')">
-          <span class="av" style="width:12px;height:12px;background:${
-            g.online ? 'var(--online)' : (g.never ? 'var(--error)' : 'var(--on-2)')}"></span>
-          <span class="ell">${g.name} · ${g.plat}</span>
-          <span class="cnt">${g.agentCount} 个 Agent · ${g.wss.length} 个工作区${
-            g.online ? '' : ` · 最后在线 ${g.lastSeen}`}</span>
+  const groups = boardGroups();
+  const localGroups = groups.filter(g => g.prim.nodeId === NID.agent);
+  const remoteGroups = groups.filter(g => g.prim.nodeId !== NID.agent);
+
+  const renderG = (g, isLocal) => {
+    const un = g.agents.reduce((n, a) => n + unassignedOf(a.nodeId, a.key).length, 0);
+    const unOwner = g.agents.find(a => unassignedOf(a.nodeId, a.key).length) || g.prim;
+    return `
+    <div class="grphead" role="button" style="cursor:pointer"
+         onclick="openAgentD('${g.prim.nodeId}')">
+      <span class="av" style="width:12px;height:12px;background:${
+        g.online ? 'var(--online)' : (g.never ? 'var(--error)' : 'var(--on-2)')}"></span>
+      <span class="ell">${isLocal ? '🏠 ' : ''}${g.name} · ${g.plat}</span>
+      <span class="cnt">${isLocal ? '<span class="tag ok sm">宿主</span>' : '<span class="tag sm">对端</span>'}</span>
+    </div>
+    ${g.wss.map(w => {
+      const wi = WORKSPACES.indexOf(w);
+      const isOwner = w.agentNodeId === NID.agent;
+      return `
+      <div class="li" ${wi === selW ? 'aria-selected="true"' : ''}
+           onclick="openWsD('${w.wsId}')">
+        <div class="fi2" style="font-size:14px;color:var(--agent)">${ic('terminal')}</div>
+        <div class="bd">
+          <div class="t1"><span class="ell">${wsName(w)}</span>${
+            isOwner ? '<span class="tag ok sm">宿主</span>' : `<span class="tag sm">${w.authorized || '只读'}</span>`}${
+            kindsOfWs(w).map(k => `<span class="tag sm">${k}</span>`).join('')}</div>
+          <div class="t2" title="${w.wsPath || ''}">${w.sessions.length} 个会话 · ${w.wsPath || '—'}</div>
         </div>
-        ${g.wss.map(w => {
-          const wi = WORKSPACES.indexOf(w);
-          return `
-          <div class="li" ${wi === selW ? 'aria-selected="true"' : ''}
-               onclick="openWsD('${w.wsId}')">
-            <div class="fi2" style="font-size:14px;color:var(--agent)">${ic('terminal')}</div>
-            <div class="bd">
-              <div class="t1"><span class="ell">${wsName(w)}</span>${
-                kindsOfWs(w).map(k => `<span class="tag sm">${k}</span>`).join('')}</div>
-              <div class="t2" title="${w.wsPath || ''}">${w.sessions.length} 个会话 · ${w.wsPath || '—'}</div>
-            </div>
+      </div>
+      ${w.sessions.map((s, si) => {
+        const sel = (wi === selW && si === selS);
+        const pCnt = pendingOf(s.sessionId);
+        return `<div class="li" ${sel ? 'aria-selected="true"' : ''} onclick="pickWorkspaceSession(${wi}, ${si})">
+          <div class="fi2" style="font-size:14px;color:var(--agent)">${ic('terminal')}</div>
+          <div class="bd">
+            <div class="t1"><span class="ell">${s.alias || s.sessionId}</span>${pcountHTML(pCnt)}</div>
+            <div class="t2">${s.title || (s.events && s.events[0] ? s.events[0].summary : '')}</div>
+            <div class="t3">${stateLabelHTML(s.state)} · ${s.updatedAt || ''}</div>
           </div>
-          ${w.sessions.map((s, si) => {
-            const sel = (wi === selW && si === selS);
-            const pCnt = pendingOf(s.sessionId);
-            return `<div class="li" ${sel ? 'aria-selected="true"' : ''} onclick="pickWorkspaceSession(${wi}, ${si})">
-              <div class="fi2" style="font-size:14px;color:var(--agent)">${ic('terminal')}</div>
-              <div class="bd">
-                <div class="t1"><span class="ell">${s.alias || s.sessionId}</span>${pcountHTML(pCnt)}</div>
-                <div class="t2">${s.title || (s.events && s.events[0] ? s.events[0].summary : '')}</div>
-                <div class="t3">${stateLabelHTML(s.state)} · ${s.updatedAt || ''}</div>
-              </div>
-            </div>`;
-          }).join('')}`;
-        }).join('')}
-        ${un > 0 ? `<div class="li" onclick="openUnassignedD('${unOwner.nodeId}', 0)">
-          <div class="fi2" style="font-size:14px;color:var(--primary)">${ic('list')}</div>
-          <div class="bd"><div class="t1"><span class="ell">未归属会话</span>
-            <span class="tag muted">${un}</span></div>
-            <div class="t2">收到了会话，但没收到它属于哪个工作区</div></div>
-        </div>` : ''}`;
-      }).join('')}
+        </div>`;
+      }).join('')}`;
+    }).join('')}
+    ${un > 0 ? `<div class="li" onclick="openUnassignedD('${unOwner.nodeId}', 0)">
+      <div class="fi2" style="font-size:14px;color:var(--primary)">${ic('list')}</div>
+      <div class="bd"><div class="t1"><span class="ell">未归属会话</span>
+        <span class="tag muted">${un}</span></div>
+        <div class="t2">收到了会话，但没收到它属于哪个工作区</div></div>
+    </div>` : ''}`;
+  };
+
+  return `<div class="sidebody">
+    <div class="sidehead" style="display:flex;align-items:center;justify-content:space-between">
+      <span>工作区与会话<span class="cnt">${total}</span></span>
+      <button class="btn sm pri" onclick="openCreateWsModal()">${ic('plus')} 新建协同群</button>
+    </div>
+    <div class="sidelist">
+      ${localGroups.length ? `<div class="grphead" style="font-size:11px;font-weight:700;color:var(--primary);margin-top:4px">🏠 本机工作区 (HOST)</div>` + localGroups.map(g => renderG(g, true)).join('') : ''}
+      ${remoteGroups.length ? `<div class="grphead" style="font-size:11px;font-weight:700;color:var(--on-2);margin-top:10px">🌐 局域网对端 (REMOTE)</div>` + remoteGroups.map(g => renderG(g, false)).join('') : ''}
     </div>
   </div>`;
 }
 
 /* 工作区控制台（桌面档，左侧设备→工作区→会话树 + 右侧会话详情台）。 */
-function screenDAgents(){
-  /* 走 `currentWs()`：从侧栏点一条**未归属会话**进来时，右栏要画它的会话详情 ——
-     未归属会话只是没挂在工作区下（§2.5），不是进不来的二等公民。 */
+function screenDAgents(modalMode){
   const w = currentWs();
   const s = w.sessions[wsSessionIdx];
   const name = s.alias || s.sessionId;
   const apprs = approvalsOf(w, s.sessionId);
+  const isOwner = w.agentNodeId === NID.agent;
+
+  const headerControls = isOwner ? `
+    <div class="card" style="margin-bottom:12px;background:var(--surface)"><div class="padc">
+      <div style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:8px">
+        <div style="display:flex;align-items:center;gap:6px;flex-wrap:wrap">
+          <span class="tag ok">👑 本机宿主</span>
+          <span class="tag agent">驱动: DSH (DeepSeek-R1)</span>
+          <span class="tag muted">🟢 共享中 · 2 台设备已授权</span>
+        </div>
+        <div style="display:flex;gap:6px">
+          <button class="btn sm" onclick="openGrantQrModal()">${ic('qr')} 直通码</button>
+          <button class="btn sm pri" onclick="openGrantModal()">${ic('lock')} 权限管理</button>
+        </div>
+      </div>
+    </div></div>` : `
+    <div class="card" style="margin-bottom:12px;background:var(--surface)"><div class="padc">
+      <div style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:8px">
+        <div style="display:flex;align-items:center;gap:6px">
+          <span class="tag muted">🌐 远端工作区</span>
+          <span class="hint" style="font-size:12px">来源: ${peerOf(w.agentNodeId)?.nick || '对端设备'}</span>
+        </div>
+        <span class="tag ok">当前权限: ${w.authorized || '只读 (RO)'}</span>
+      </div>
+    </div></div>`;
 
   return dwin('chat', `<div class="dbody">
+    ${headerControls}
     <div class="card" style="margin-bottom:12px"><div class="padc">
       <div class="krow dis">
         <div class="av" style="background:#6B4EE6">AI<span class="p"
@@ -6084,8 +6385,17 @@ function screenDAgents(){
         <button class="btn sm pri">${ic('send')} 发送</button>
       </div>
     </div></div>
-  </div>`, {side: sideWorkspaces(wsIdx, wsSessionIdx), view:'chat'});
+  </div>` + sessionPickerHTML(w) + grantModalHTML(w, modalMode === 'grant') + grantQrModalHTML(w, modalMode === 'grantqr') + createWsModalHTML(w, modalMode === 'createws'), {side: sideWorkspaces(wsIdx, wsSessionIdx), view:'agents'});
 }
+
+/** 桌面端 · 关联工作区建群（双分支独立视效）。 */
+function screenDCreateWs(){ return screenDAgents('createws'); }
+
+/** 桌面端 · 工作区权限与协同管理（4级权限、信任圈、代批弹窗）。 */
+function screenDWsGrant(){ return screenDAgents('grant'); }
+
+/** 桌面端 · 扫码直达工作区二维码。 */
+function screenDGrantQr(){ return screenDAgents('grantqr'); }
 
 /* 桌面 Agent 详情 / 工作区详情（§3.2 新增两屏，**不新增顶层导航格**：它们挂在
    「工作区」那一格里，view 与 `d-agents` 一致）。
@@ -6399,7 +6709,8 @@ function screenDGroupCreate(){
     transform:translate(-50%,-50%);z-index:40">
     <h2>建群</h2>
     <div class="dbody">
-      <div class="field"><label>群名</label><input class="inp" value="茶话间 · 发布值班"/></div>
+      <div class="field"><label>群名</label><input class="inp" value="项目研发 · 协同群"/></div>
+      <div style="font-size:12px;margin:8px 0;padding:6px 10px;background:var(--surface-2);border-radius:8px;display:flex;justify-content:space-between;align-items:center"><span>要协同本地代码工作区？</span><a style="color:var(--primary);font-weight:600;cursor:pointer" onclick="go('d-createws')">关联工作区建群 &gt;</a></div>
       <div class="avedit-lb" style="margin-bottom:4px">选成员（自己一定在里面）</div>
       ${PEERS.slice().sort((a,b)=>(b.online?1:0)-(a.online?1:0)).map(p=>`
         <div class="mem" role="checkbox" aria-checked="${[NID.ka, NID.lin, NID.huang].includes(p.nodeId)}">
@@ -6416,6 +6727,7 @@ function screenDGroupCreate(){
 }
 const SCREENFN_D = {
   'd-chat':screenDChat, 'd-chat-group':screenDChatGroup, 'd-groupcreate':screenDGroupCreate,
+  'd-createws':screenDCreateWs, 'd-wsgrant':screenDWsGrant, 'd-grantqr':screenDGrantQr,
   'd-files':screenDFiles, 'd-nodes':screenDNodes, 'd-agents':screenDAgents,
   'd-agentdetail':screenDAgentDetail, 'd-workspacedetail':screenDWorkspaceDetail,
   'd-cabinet':screenDCabinet,
@@ -6640,8 +6952,10 @@ const nodeQ = Q.get('node');
 if (nodeQ && PEERS.some(p => p.nodeId === nodeQ)) selNode = nodeQ;
 const amQ = Q.get('actmore');
 if (amQ) actMax = Math.max(1, parseInt(amQ, 10) || 1);
-render();
 if (Q.get('sessionpick') === '1') openSessionPicker();
+if (Q.get('grant') === '1') openGrantModal();
+if (Q.get('grantqr') === '1') openGrantQrModal();
+if (Q.get('createws') === '1') openCreateWsModal();
 /* 钩子开着时把菜单也展开，截图里才看得到菜单内容。 */
 if (amQ) document.querySelectorAll('.hdmore').forEach(x => x.classList.add('on'));
 </script>

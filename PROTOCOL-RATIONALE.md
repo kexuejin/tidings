@@ -415,4 +415,82 @@ agent 档案多声明 `CAP_AGENT`，桌面端一行都不用改。
 
 **为什么**：`C:/` 是 Windows 绝对前缀，会让路径逃逸检查（`path-escape`）误判。
 
+---
+
+## 12. 传输安全与长连接（2026-10-18）
+
+### lan-predicate-single-source
+
+**约束**：判断一个对端是不是「局域网」**只有一条实现**：`IpAddressUtils.isLanAddress(peer, locals)`
+（私网/回环 ∨ 链路本地 ∨ ULA ∨ 与本机某个地址**同 /64**）。拨号、拨号诊断、接受裁决、地址复查四处必须共用它。
+
+**为什么**：这四处曾经各写各的。只认私网的那版会让家庭 LAN（IPv6 GUA、与本机同 /64）**一个目标都不拨**，
+诊断还只说 `public-address-needs-tls` —— K1 被静默关掉，用户只看到「跨网连不上」。详见 `docs/public-transport-security.md` §11。
+
+**症状**：判据一漂移，症状不在报错里，而在「明明在同一个网里却连不上」这种没有错误码的现象里。
+
+### plaintext-never-off-lan（接受严格、复查保守，方向相反是刻意的）
+
+**约束**：接受一条**明文**长连接时按 `!isSecure` 判（认不出安全就不许从公网明文接进来，fail-closed）；
+地址变化后的复查按 `isPlaintext` 判（认不出明文就**不摘**，fail-safe）。
+
+**为什么**：两个方向相反对应两种代价。接受侧错放的代价是「公网上出现明文」；复查侧错摘的代价是
+「把一条合法连接反复摘掉、两端互相重拨」（task-40 真机实测：每摘一次手机就重拨一次）。
+
+**症状**：复查侧写严了会看到 `close=recheck` 反复出现而链路建不稳。
+
+### tls-never-falls-back-to-plaintext
+
+**约束**：TLS 验不过（没证书 / 没期望 pin / pin 不一致）⇒ **拒**，绝不退回明文。
+
+**为什么**：`peerPinAccepted` 的三条 fail-closed 是公网段的全部安全依据；「验不过就退回明文」等于把
+公网流量降级成明文，而且用户完全看不出来。
+
+### tofu-must-be-diagnosable
+
+**约束**：TOFU 首次固定必须**记录来源**（`pairing` / `tofu`）并落盘（`stores/peer-pins.json`）；
+诊断里能读到 `pinSource`；旧文件没有该键时一律读成 `unknown`，**绝不假装 `pairing`**。
+
+**为什么**：TOFU 有首次使用竞态（谁先答谁被固定），它作为降级路径可以存在，但**不能变成新的静默**。
+
+**症状**：读不到来源时，一台「其实还在 TOFU」的设备看起来和正常配对完全一样。
+
+### external-pairing-needs-confirmation
+
+**约束**：来自 App 自身 UI **之外**的配对入口（`relay://` / `relay-pair://` 深链、debug 的
+`TEST_INJECT_QR` 广播）只登记、不落盘；用户确认才写节点/候选池/pin，**拒绝零副作用**。
+
+**为什么**：外部输入的密钥一旦存下就是**信任根**，属于不可逆的信任建立 —— 用户点了一条链接 ≠ 同意固定一枚密钥。
+
+**症状**：不给这条闸门，设备上任意应用（debug 包里 adb 谁都能发广播）都能让本机与它控制的节点配对。
+
+### no-confirm-broadcast-bypass
+
+**约束**：**不**提供「确认广播」这类自动化后门；测试与 e2e 也要**真的点**那个确认框。
+
+**为什么**：debug 包里能发注入就能发确认，后门一开闸门立刻变成摆设。点得通 = 真实用户点得通，顺带把闸门也测了。
+
+### flush-before-close
+
+**约束**：关连接前必须**排空**：`flush` → `channel.close()`（让写泵读到 EOF 把剩余字节写完）→ **等泵退出** → 关 socket。
+
+**为什么**：函数返回 ≠ 字节已发出。第一版是「关通道 → 取消泵 → 关 socket」，跨网大文件**尾部总丢一段**
+（客户端读到一半拿到 `PullException: closed`），真机表现就是「大文件总是差最后一段」。
+
+### cap-list-single-source
+
+**约束**：每新增一个能力位，必须能指出**唯一真源**，或让每一份清单都被测试钉住。
+
+**为什么**：今天两次同形状事故（`lnk1`、`att1`）都是「代码支持、只加进了某一份清单、线上永远不生效」。
+**症状**：表现是「对端说我们没这个能力」，而本端代码里明明有实现。守卫见 `CapabilityDeclarationTest`（core 台账）
+与 `CapabilityDeclarationSourceTest`（源码级枚举）。
+
+### keepalive-idle-only-when-quiet
+
+**约束**：有数据往来时**不发心跳**；保底 Ping 兜底（心跳 15s、45s 判死 ⇒ 判死 > 2×心跳）；Doze 用
+`isDeviceIdleMode` 判，**不用息屏**。
+
+**为什么**：息屏时 NAT 映射往往还活着，为了省电拉长心跳反而更容易被中间设备判死；反过来，一直在
+发心跳会让「有流量」这件事失去信息量。
+
 **症状**：Windows 节点发来的路径被拒收（表现为 `PullException` 的 `path-escape`）。

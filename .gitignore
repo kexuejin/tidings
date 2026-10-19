@@ -107,3 +107,14 @@ prototype/dump.html
 prototype/layout/
 prototype/dump-diag.html
 
+
+# 测试跑出来的 TLS 链接身份（私钥/证书/公钥）——绝不入库
+link-key.pk8
+link-cert.der
+link-pub.spki
+
+# ---- 工作材料（不是产品的一部分）------------------------------------------
+# 现场留档（真机读数、复现步骤）与一次性调研。验收证据的正式去处是
+# design/runtime-evidence/（那是入库的）；docs/ 下这两份是干活时的草稿。
+/docs/runtime-evidence/
+/docs/research/

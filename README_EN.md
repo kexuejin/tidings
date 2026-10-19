@@ -2,7 +2,7 @@
 
 <p align="center">
   <b>Local-First Decentralized Peer-to-Peer Messaging & Private Agent Collaboration Platform (Dual-Mode: Near-Field LAN + Wide-Area IPv6)</b><br>
-  Zero Public Servers · End-to-End SPKI Pinning · Breaking Physical LAN Limits · 100% Data Sovereignty on Private Devices · Multiplatform (Android / iOS / macOS / Linux / Windows)
+  Zero Public Servers · TLS + Mutual SPKI Pinning on Public Routes (plaintext stays on the LAN) · Breaking Physical LAN Limits · 100% Data Sovereignty on Private Devices · Multiplatform (Android / iOS / macOS / Linux / Windows)
 </p>
 
 <p align="center">
@@ -22,9 +22,11 @@
 **Tidings (捎话)** is a **Local-First, decentralized peer-to-peer messaging and private Agent collaboration infrastructure** built with Kotlin Multiplatform (KMP) and Compose Multiplatform:
 
 1. **Core Runtime (`:core`)**: Pure Kotlin implementation of a peer-to-peer communication runtime (UDP rapid discovery & status synchronization, TCP authoritative large message / file block streaming, and PPE-1 Phase 2.0 Agent collaboration bus). Decoupled from UI frameworks for cross-platform reuse.
-2. **Dual-Mode Communication (Near-Field + Wide-Area)**:
-   - **Near-Field Mode**: Zero-configuration automatic discovery via UDP broadcast and mDNS on local networks, establishing direct peer-to-peer links within milliseconds.
-   - **Wide-Area Mode**: Native direct connection via Global Unicast IPv6 (`2000::/3`), secured by ECDSA P-256 self-signed certificates and SPKI public key pinning. Intelligent composite QR code candidate pools dynamically select optimal routes, completely overcoming physical LAN boundaries without central relay servers.
+2. **Dual-Mode Communication (Near-Field + Wide-Area), with two transport-security tiers**:
+   - **Near-Field (LAN)**: zero-configuration discovery via UDP broadcast and mDNS, direct peer-to-peer within milliseconds. Traffic on the LAN is **plaintext**, and plaintext never leaves the LAN.
+   - **Wide-Area (public IPv6)**: native direct connection over Global Unicast IPv6, secured by **TLS with mutual SPKI pinning** and **fail-closed** — if verification fails we do not connect, and we never fall back to plaintext over the internet. The identity is an EC P-256 self-signed certificate (stable private key, certificate re-issued automatically on expiry). The QR code hands the host pin to the phone, and a composite QR carries a candidate pool (`lan_v4` / `lan_v6` / `public_v6`) that picks the best route automatically.
+   - **One single definition of "LAN"**: `isLanAddress` (private ∨ shares a /64 with one of our own addresses ∨ link-local/ULA). **An IPv6 GUA is not the same thing as public reachability**: a typical Chinese home broadband LAN hands out global addresses such as `2408:...::/64`, which look public by classification yet are the same local segment. Judging by private ranges alone silently switches the LAN plaintext long connection off (see `docs/public-transport-security.md` §11).
+   - **Precondition for public direct connection**: the remote router must allow inbound IPv6. This app does no NAT traversal and does not change your network settings.
 3. **Mobile App (`:composeApp` / `:androidApp` / `:iosApp`)**: Built on Compose Multiplatform, delivering native UX, responsive adaptive layout, and sandboxed storage across Android and iOS devices.
 4. **Desktop App (`:desktopApp`)**: Standalone Compose Desktop client sharing core business state and UI components, optimized for widescreen split-pane workflows, window management, and background tray execution.
 5. **Headless Agent Node & Pluggable Drivers (`:agentNode`)**: Decouples network communication from LLM inference engines. Supports `NativeRelayDriver`, `DsBotDriver`, `OpenAiDriver`, and MCP (Model Context Protocol) tool extensions via a local loopback HTTP control plane (`127.0.0.1:8788`) and WebSocket gateway.
@@ -40,7 +42,9 @@
 - **Decentralized Multi-Agent Group Collaboration**: Models local agents as virtual group members (`VirtualAgentMember`), supporting `@Agent` routing, Chief coordination, and real-time task progress broadcasting (`GroupProgress`).
 - **Mobile MCP Governance & Dynamic ACLs**: Inspect host MCP tools from mobile devices and toggle dynamic permission ACLs (e.g., disabling Bash execution while away from desk) without restarting host services.
 - **Zero-Server Native System Notifications**: Uses offline cursor syncing and native OS notification APIs (Android Notifications / iOS UserNotifications / Desktop Tray alerts) to deliver timely task completion and approval wakeups without third-party push servers.
-- **Resilient File Transfer & Resume**: Streaming chunked transfer for large files with SHA-256 checksums, sandboxed opening, system share integration, and inline image/audio preview.
+- **Resilient File Transfer & Resume (including cross-network)**: streaming chunked transfer with resume, sandboxed opening, system share integration, and inline image/audio preview. **Cross-network file transfer is implemented** (on public routes a second TCP connection reuses `file-ctl` / the raw stream / resume, and public routes must use TLS + mutual pin) — the code path and its unit tests are green, while **the end-to-end send on a real device is still pending acceptance**.
+- **Long-connection downlink (K1 / K2)**: the phone dials the host and keeps one TCP long connection for downlink push and low-latency control. K1 = LAN plaintext (off by default, switchable in Settings); K2 = public TLS + mutual pin. Connecting refreshes the peer address and reconnects automatically after a drop; **a network switch (Wi-Fi ↔ cellular) redials immediately** (measured about 3s on a real device; the requirement is ≤10s).
+- **Background keep-alive and battery**: an Android foreground service (`remoteMessaging`) keeps the app reachable in the background; Doze lowers the frequency; **heartbeats are skipped while data is flowing**, with a fallback ping (dead after 45s, more than 2× the heartbeat) so a live connection is neither killed by mistake nor drained by idle chatter.
 - **Strictly Ordered Offline Queue & Reliable Delivery**: Messages sent while a peer is offline are preserved in transactional local queues and automatically flushed upon handshake re-establishment.
 
 ---
@@ -145,7 +149,9 @@ Tidings enforces strict engineering standards with automated verification gates.
 
 ## Protocol & Specifications
 
-Tidings uses UDP unicast + JSON envelopes for low-latency transmission, automatically switching to TCP byte streams for long payloads and file chunks.
+Tidings uses UDP unicast + JSON envelopes for low-latency transmission, automatically switching to TCP byte streams for long payloads and file chunks. In addition there is a **phone-to-host long connection** (`lnk1`, below) that carries downlink push and cross-network direct traffic.
+
+**Public routes must use TLS + mutual pin** (an optional `tlsPort` key, with no after-the-fact sniffing): without a pin the host refuses to carry content, and a TLS failure never falls back to plaintext. Plaintext is allowed on the LAN only, judged by the single `isLanAddress` predicate (`docs/public-transport-security.md` §11).
 
 ### Base Protocol Frame Support Matrix
 
@@ -160,9 +166,21 @@ Tidings uses UDP unicast + JSON envelopes for low-latency transmission, automati
 | `file-ctl` | Strict Validation | ✅ Full Support | File transfer signaling (offer / accept / decline / cancel) |
 | `screen` | Strict Validation | ✅ Full Support | Real-time LAN screen mirroring control and streaming |
 | `group` | Strict Validation | ✅ Core Support | Group metadata snapshot & sync (`op:info` / `op:need`) |
+| `link` frame family | Strict Validation | ✅ Full Support | Long-connection handshake and downlink push from phone to host (capability `lnk1`); public routes use TLS + mutual pin |
+| `agent-workspace` / `agent-grant-*` / `agent-session-page` | Strict Validation | ✅ Full Support | Workspace identity (`aws1`), grant loop (`agr1`), session paging (`agp1`); only **optional** keys are added, so older peers ignore them |
 | `avatar` `update` `share` | Compatibility Mode | ACK / Discard | Graceful acknowledgment to maintain backwards compatibility |
 
 For the complete protocol specification, see [PROTOCOL-COVERAGE.md](PROTOCOL-COVERAGE.md).
+
+### Capability declarations (caps): what we announce and what we do not
+
+The capability bits the phone broadcasts are assembled **explicitly** by `RelaySettings.caps()` (`composeApp/.../RelaySettings.kt:300-340`); the full table lives in [PROTOCOL-COVERAGE.md](PROTOCOL-COVERAGE.md) section 4. The essentials:
+
+- **Always announced**: `agn1` (agent session frames), `agq1` (queue and approvals), `aws1` (workspace identity), `agr1` (grant loop), `agp1` (session paging), `tbl1` (table-image text view), `att1` (agent-event attachment cards). `tw1` / `mrec1` each have a settings switch and are dropped when it is off.
+- **Conditionally announced**: `rv1` / `rvs1` (screen sharing, where the platform supports it), `shr1` (a shared directory is configured), `av1` (custom avatar is enabled). `ag1` and `lnk1` are announced **only by a host that carries agents** (the phone is the dialing side and does not announce them).
+- **Read-only, never announced**: `fd1` — we read the peer flag to decide whether to add `file-ctl direct` after an `offer`, and we never promise silent writes to our own storage.
+- **Never announced**: `age1` (batch delivery and cursor resume are not implemented), `upd1` (LAN P2P update source, see PROTOCOL-COVERAGE.md section 3), `gr1` / `dp1` / `img1` (half-implemented, or not a real bit in the implementation).
+- **Discipline**: announcing a capability we do not implement means the peer sends frames in a shape we silently swallow. Every bit therefore needs a single source of truth, pinned by the core-side ledger tests (`CapabilityDeclarationTest` / `CapabilityDeclarationSourceTest`).
 
 ### PPE-1 & Phase 2.0 Local Agent Collaboration Bus
 
@@ -174,6 +192,19 @@ Tidings implements local agent collaboration capabilities with 8 specialized age
 - **Physical Data Isolation**: Agent envelopes bypass standard chat stores and are persisted in dedicated SQLDelight tables to prevent polluting user communication logs.
 
 For detailed design specifications, see [PROTOCOL-EXTENSION.md](PROTOCOL-EXTENSION.md).
+
+---
+
+## Known Limitations (stated honestly)
+
+- **Cross-network screen assistance is unavailable**: screen mirroring / assistance still requires both ends to be on the **same LAN**. Cross-network support covers **files** only.
+- **Tapping an attachment to download it is not implemented**: agent-event attachments currently carry only an `attachmentId`, without a `fileId` or path, so the card renders but cannot yet be opened to disk.
+- **Cloud push is not implemented**: the design is delivered (`docs/cloud-push-design.md`) but no code has landed; background wakeups currently rely on the Android foreground service plus offline incremental cursor sync.
+- **The iOS end-to-end TLS handshake needs a signed build**: a smoke build (`CODE_SIGNING_ALLOWED=NO`) has no keychain container and `SecItemAdd` returns `-25291`. In that state the iOS side has **no TLS transport at all**, so public long connections are refused by policy (fail-closed) rather than downgraded to plaintext.
+- **Changes to the bridge (`dsh-tidings`) require reloading the DSH host**: adapter edits take effect only after the host restarts.
+- **No session events while DSH is queued**: a message sent while DSH is queueing only shows up on the phone when the next round begins.
+- **The demo driver does not pretend**: it is not selected by default, and while running it says honestly that no real task was executed, with `totalTokens = 0`.
+- **No forward secrecy and no key-rotation UI**: a pin covers the SPKI of a long-lived self-signed identity; the private key stays stable and the certificate is re-issued automatically, while rotation and expiry prompts are still planned (P4).
 
 ---
 

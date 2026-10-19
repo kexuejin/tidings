@@ -2,7 +2,7 @@
 
 <p align="center">
   <b>Local-First 去中心化端对点传讯与私有 Agent 协同底座（近场 LAN + 远场 IPv6 双模）</b><br>
-  无需公网服务端 · 端到端公钥指纹锁定 · 突破物理局域网 · 数据主权完全归属私有设备 · 跨平台 (Android / iOS / macOS / Linux / Windows)
+  无需公网服务端 · 公网通道 TLS + 双向公钥指纹锁定（局域网走明文） · 突破物理局域网 · 数据主权完全归属私有设备 · 跨平台 (Android / iOS / macOS / Linux / Windows)
 </p>
 
 <p align="center">
@@ -22,9 +22,11 @@
 **捎话 (Tidings)** 是一套基于 Kotlin Multiplatform 与 Compose Multiplatform 构建的 **Local-First 去中心化端对点传讯与私有 Agent 协同底座**：
 
 1. **核心协议（Core Runtime）**：纯 Kotlin 实现的点对点通讯协议运行时（UDP 快速发现与状态同步、TCP 权威长报文/文件块流、基于 PPE-1 Phase 2.0 的 Agent 协同总线），与 UI 框架完全解耦，支持跨端复用。
-2. **近场 + 远场双模通信**：
-   - **近场模式**：局域网内通过 UDP 广播与 mDNS 无感知零配置自动发现，毫秒级点对点直连；
-   - **远场模式**：支持全球单播 IPv6（GUA 2000::/3）直连，结合 ECDSA P-256 自签名证书与 SPKI 公钥指纹锁定，复合二维码智能候选池自动优选路由，彻底突破物理局域网限制。
+2. **近场 + 远场双模通信，传输安全分两档**：
+   - **近场（局域网）**：UDP 广播 + mDNS 零配置发现，毫秒级直连；局域网内走**明文**，明文永不出局域网；
+   - **远场（公网 IPv6）**：全球单播 IPv6（GUA）直连，走 **TLS + 双向 SPKI pin**，**fail-closed** —— 验不过就不连，绝不退回明文出网。身份是 EC P-256 自签名证书（私钥不变、证书到期自动续签）；二维码把主机 pin 交给手机，复合二维码内置候选池（`lan_v4` / `lan_v6` / `public_v6`）自动优选路由。
+   - **「局域网」只有一条判据**：`isLanAddress`（私网 ∨ 与本机同 /64 ∨ 链路本地/ULA）。**IPv6 的 GUA ≠ 公网可达**：中国宽带家庭 LAN 常分配 `2408:...::/64` 这类全局地址，按地址分类它「像公网」，其实与本机同段网 —— 只认私网会把局域网明文长连接**静默关掉**（详见 `docs/public-transport-security.md` §11）。
+   - **公网直连的前提**：对端路由器放行 IPv6 入站。本应用不做打洞、不代改网络设置。
 3. **移动端（Mobile App）**：基于 Compose Multiplatform 开发，面向 Android 与 iOS 平台提供符合原生设计规范与安全沙盒机制的现代移动界面。
 4. **自研桌面端（Compose Desktop）**：独立桌面客户端（`desktopApp`），共享底层业务状态与组件库，支持宽屏自适应双栏交互与多任务操作。
 5. **无头 Agent 节点与可插拔驱动（Agent Node & Drivers）**：解耦底层通信与模型运行时，支持 `NativeRelayDriver`、`DsBotDriver`、`OpenAiDriver` 及 MCP 扩展工具接入，提供本地 HTTP 控制面与 WebSocket 网关。
@@ -40,7 +42,9 @@
 - **去中心化群聊人机混合协同**：将本地 Agent 抽象为虚拟群成员（Virtual Peer），支持 `@Agent` 意图精准路由、Chief 编排调度与群顶部实时工作态广播（`GroupProgress`）。
 - **移动端 MCP 治理与动态 ACL**：可视化检视主机加载的 MCP 工具与执行能力，支持手机端下发动态 ACL 开关（如外出禁用 Bash 执行），即时生效无需重启。
 - **零服务器本地系统通知**：基于离线增量游标同步与 Android / iOS 系统原生通知通道，在完全无公网推送服务下实现任务完成与审批唤醒。
-- **大文件安全传输与断点续传**：支持大文件分块流式传输；接收端支持沙盒文件打开与系统级分享，支持媒体图片与音频原位预览。
+- **大文件安全传输与断点续传（含跨网）**：支持大文件分块流式传输与断点续传；接收端支持沙盒文件打开与系统级分享，支持媒体图片与音频原位预览。**跨网文件传输已实现**（公网场景另开第二条 TCP、复用 `file-ctl` / 裸流 / 断点续传，公网必须 TLS + 双向 pin）——代码链路与单测全绿，**真机发文件验收尚待执行**。
+- **长连接下行通道（K1 / K2）**：手机主动拨主机，建立一条 TCP 长连接，用于下行推送与低延迟控制。K1 = 局域网明文（默认关闭，可在设置里开）；K2 = 公网 TLS + 双向 pin。建连即更新对端地址、断线自动重连；**换网（Wi-Fi ↔ 蜂窝）立即重拨**（真机实测 ≈3s，要求 ≤10s）。
+- **后台保活与省电**：Android 前台服务（`remoteMessaging`）保证后台可达；Doze 期间降频；**有数据往来时免心跳**，并保留保底 Ping（2×心跳 < 45s 判死），既不误杀也不白耗电。
 - **离线排队与可靠投递**：对端离线期间消息严格保序入队，对端上线握手后自动发起可靠补发。
 - **本地系统通知**：支持跨平台系统级通知（Android Notification / iOS UserNotifications / 桌面通知），支持静音时段与专注模式，无需公网推送服务器。
 
@@ -147,7 +151,9 @@ open Tidings.xcodeproj
 
 ## 协议与规范
 
-捎话采用 UDP 单播 + JSON 信封作为基础传输层，超长报文与二进制数据切换至独立的 TCP 流传输通道。
+捎话采用 UDP 单播 + JSON 信封作为基础传输层，超长报文与二进制数据切换至独立的 TCP 流传输通道；此外还有一条**手机→主机的长连接**（`lnk1`，见下）承载下行推送与跨网直连。
+
+**公网通道必须 TLS + 双向 pin**（`tlsPort` 可选键，不做事后嗅探）：没 pin 就拒绝承载内容；TLS 验不过不回退明文。明文只允许局域网，判据统一为 `isLanAddress`（`docs/public-transport-security.md` §11）。
 
 ### 基础协议帧类型支持概览
 
@@ -162,9 +168,21 @@ open Tidings.xcodeproj
 | `file-ctl` | 严格校验 | ✅ 完整支持 | 文件传输控制信令（offer / accept / decline / cancel） |
 | `screen` | 严格校验 | ✅ 完整支持 | 局域网投屏控制与实时数据流传输（支持 `rv1` / `rvs1`） |
 | `group` | 严格校验 | ✅ 核心支持 | 群元数据全量快照与增量请求（`op:info` / `op:need`） |
+| `link` 帧族 | 严格校验 | ✅ 完整支持 | 手机→主机的长连接握手与下行推送（能力位 `lnk1`）；公网段走 TLS + 双向 pin |
+| `agent-workspace` / `agent-grant-*` / `agent-session-page` | 严格校验 | ✅ 完整支持 | 工作区身份（`aws1`）、授权回路（`agr1`）、会话分页（`agp1`）；只加**可选**键，旧端忽略即兼容 |
 | `avatar` `update` `share` | 基础协议兼容 | 保持 ACK / 忽略 | 移动端不作为更新源或文件柜，协议层优雅解包回执以维持对端兼容 |
 
 完整的协议支持矩阵与设计细节请参阅 [PROTOCOL-COVERAGE.md](PROTOCOL-COVERAGE.md)。
+
+### 能力声明（caps）：声明了什么、没声明什么
+
+手机端广播的能力位由 `RelaySettings.caps()` **显式拼出**（`composeApp/.../RelaySettings.kt:300-340`），完整清单见 [`PROTOCOL-COVERAGE.md`](PROTOCOL-COVERAGE.md) 第四节。要点：
+
+- **固定声明**：`agn1`（agent 会话帧）、`agq1`（队列与审批）、`aws1`（工作区身份）、`agr1`（授权回路）、`agp1`（会话分页）、`tbl1`（表格图片文字视图）、`att1`（agent 事件附件卡片）。`tw1` / `mrec1` 各有一个设置开关，关掉即移除。
+- **按条件声明**：`rv1` / `rvs1`（投屏，平台支持时）、`shr1`（配置了共享目录时）、`av1`（「自定义头像」打开时）。`ag1` 与 `lnk1` **只有承载 agent 的主机声明**（手机是拨号侧，不声明）。
+- **只读不声明**：`fd1` —— 读对端的 `fd1` 决定要不要在 `offer` 后补 `file-ctl direct`，本机不承诺免确认写盘。
+- **不声明**：`age1`（批量投递与游标续读未实现）、`upd1`（局域网 P2P 更新源，理由见 `PROTOCOL-COVERAGE.md` 第三节）、`gr1` / `dp1` / `img1`（只做了半边，或实现里根本没有这一位）。
+- **纪律**：声明了却没实现 = 对端按「你能收」发过来却被静默吞掉。所以每个能力位都必须有唯一真源，并由 core 侧台账测试钉住（`CapabilityDeclarationTest` / `CapabilityDeclarationSourceTest`）。
 
 ### PPE-1 本地 Agent 协同总线
 
@@ -176,6 +194,19 @@ open Tidings.xcodeproj
 - **数据物理隔离**：Agent 交互信封全流程物理旁路隔离于普通聊天消息，通过 SQLDelight 独立分表维护，避免污染用户通讯记录。
 
 关于 Agent 协议设计的详细设计规范与控制面定义，请参阅 [PROTOCOL-EXTENSION.md](PROTOCOL-EXTENSION.md)。
+
+---
+
+## 已知限制（如实）
+
+- **跨网屏幕协助不可用**：屏幕投屏/协助仍要求两端在**同一局域网**；跨网只做**文件**传输。
+- **附件「点开下载」未实现**：agent 事件的附件目前只带 `attachmentId` 元数据，缺 `fileId`/路径，因此卡片能渲染、还不能点开落盘。
+- **云推送未实现**：设计已交付（`docs/cloud-push-design.md`），代码未落地；当前后台唤醒靠 Android 前台服务 + 离线增量游标同步。
+- **iOS 端到端 TLS 握手需要签过名的构建**：烟测构建（`CODE_SIGNING_ALLOWED=NO`）没有 keychain 容器，`SecItemAdd` 会返回 `-25291`；此时 iOS 侧**没有 TLS 传输**，公网长连接被策略层拒绝（fail-closed），不会降级成明文出网。
+- **桥（`dsh-tidings`）改动需重载 DSH host**：适配器改动要重启宿主才生效。
+- **DSH 入队期没有会话事件**：在 DSH 排队期间发出的消息，要到下一轮开始才会出现在手机上。
+- **演示驱动不假装**：演示驱动默认不选中；运行时如实标注「未执行真实任务」，`totalTokens = 0`。
+- **无前向保密 / 无密钥轮换 UI**：pin 固定的是长期自签身份的 SPKI；私钥不变、证书自动续签，轮换与到期提示仍在计划中（P4）。
 
 ---
 

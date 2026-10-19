@@ -1,0 +1,91 @@
+# 全功能 e2e + 门禁 完整测试报告（2026-10-16）
+
+结论 → 链路 → 参数 → 逐项读数。原始日志：/tmp/relay-e2e-full.log（run1）、/tmp/relay-e2e-rerun.log（run2）、
+/tmp/relay-gates.log、/tmp/relay-jvm-rerun.log、/tmp/relay-screenshot.log、/tmp/relay-palette.log。
+
+## 0. 总结论
+
+- 门禁流水线（README 12 项）：**11 绿 1 红**。红的是调色板对账（真实主题缺陷，见 §2.3）。
+- 截图基线门禁（--rerun 真跑）：**71/225 红**。逐张定位后判定为「基线过期」而非渲染 bug：
+  全部红图落在左侧导航条标签（「工作区」改名）与 Agent 屏，基线录于 10-15 16:43，
+  而 da8e002 / ea0aa8d（10-16）改了这些屏。需要人工审后 updateDebugScreenshotTest 重录。
+- 真机 e2e 夹具（9 个，Pixel 6 SERIAL-TEST-01）：**messaging、screen 绿**；其余 7 个红，
+  但红的主因是**夹具期望过期**（Phase 2.0 改版后导航结构/页签文案/本机卡被撤）+
+  share 夹具的「诚实负向」条目，而不是新引入的功能崩溃。
+- 两个环境混淆变量已在测试中排除：①设备上 10:09 的旧 APK（早于功能提交 da8e002 10:26）——
+  重装 HEAD 包后 discovery 的 R16 定向握手 9 条断言由红转绿，证明 run1 那批失败是旧包所致；
+  ②本机常驻「捎话 Tidings.app」占着 UDP *:17878 / TCP *:17879（liveness 脚本只查文件写入，不查端口）。
+
+## 1. 门禁流水线（HEAD=2f3c4d7，工作树 clean）
+
+| 门禁 | 结果 | 读数 |
+|---|---|---|
+| :core:allTests | ✅ | jvm 235（18:08 强制重跑）+ iosSim 228（18:02）= 463，0 失败 |
+| :composeApp:allTests | ✅ | jvm 410（强制重跑）+ iosSim 269 = 679，0 失败 |
+| :desktopApp:test | ✅ | 72，0 失败（18:02 实跑） |
+| :agentNode:test | ✅ | 63，0 失败（18:06 实跑） |
+| :desktopApp:compileKotlin | ✅ | |
+| :cjkLiteralGate | ✅ | 当前 138 ≤ 基线 139（RelaySettings.kt 可下调基线） |
+| :staleCommentRefGate | ✅ | 基线 0 / 无新增 |
+| :constructionTraceGate | ✅ | 基线 0 / 无新增 |
+| :designSpecDrift | ✅ | tokens 逐键一致；39 状态槽 |
+| :designTokenUsageGate | ✅ | colors 29/42 等，在基线内 |
+| :designStateSlotGate | ✅ | 67/67 覆盖 |
+| tools/unused-imports.py --check | ✅ | 无未使用 import |
+| tools/check-design-palette.py --strict | ❌ | 见 §2.3 |
+
+注：core/composeApp 的 jvmTest 首轮被 build-cache 判 UP-TO-DATE（时间戳 10:21/10:52），
+已用 --rerun-tasks 强制真跑（18:08 全绿）后才计入。这是「量具假绿」的已知形态。
+
+## 2. 真实缺陷（本轮新确证，需要修）
+
+### 2.1 截图基线过期（71/225）
+- 复跑：./gradlew :androidApp:validateDebugScreenshotTest --rerun → 225 例 71 失败。
+- 逐张像素定位（自写 PNG 解码 + numpy 差分）：43 张桌面图的红区固定在
+  y:944-1026 x:41-126（左侧导航条一格里，0.03% 像素）= screen_agents 改名「工作区」；
+  12 张平板图同区（y:771-853）；Settings 三张 0.22%（DesktopSettingsChrome 改版）；
+  R2DeskAgentsWindow 5.22%（Agent 窗口重构）。
+- 判据：git log 显示基线（10-15 16:43 录制）之后 da8e002/ea0aa8d 恰好改了这些屏。
+  属「预期漂移待重录」，不是渲染 bug。重录是人工决策（先看 diff 再 update）。
+
+### 2.2 节点页「本机」卡被撤，但 ACCEPTANCE/夹具仍按旧布局写
+- NodesScreen.kt:366-373 注释明确：「本机」卡被原型撤掉，身份改由「我的二维码」承担。
+- e2e_discovery 的 R16 状态卡 8 条 + R19 全部因此恒红（run2 新包上仍红）。
+- 处置方向：夹具改判据（从「我的二维码」入口读地址），或产品恢复读数面。二选一，不能双方都装作绿。
+
+### 2.3 调色板门禁红：tertiaryContainer 未赋值（真缺陷）
+- AgentApprovalCards.kt:113-114（L2 风险卡片）用 colorScheme.tertiaryContainer /
+  onTertiaryContainer，但主题只赋了 tertiary，没赋容器对 → 必然回退 Material 基线色，
+  品牌色板说不出来源。与既有「#2E9E5B 小字对比度」同类：应上报，不该静默改。
+- 修法建议：给 light/dark 两套色板补 tertiaryContainer/onTertiaryContainer（可复用
+  RelayInfo 的容器对），或 L2 换用已赋值的容器对。
+
+## 3. 真机 e2e 夹具逐项
+
+| 夹具 | run1(旧包) | run2(HEAD新包) | 定性 |
+|---|---|---|---|
+| messaging | ✅ PASS 38 | 未重跑（已绿） | 短文本 UDP/长文本 TCP/离线补发/A5/A6/C2 全通 |
+| screen | ✅ PASS 22 | — | 真机部分只有握手+caps（19/22 是本地自检）；帧流在 relay-screen-fixture.py，浅绿 |
+| discovery | ❌ 9 红 | ❌ 9 红（换了一批） | run1 的 R16 握手 9 条=旧包所致，新包转绿；剩 nodes-page 8+1 条=§2.2 布局撤卡 |
+| files | ❌ 8 红 | ❌ 8 红（同） | UI 断言（拒绝钮/撤回态/文件夹徽标/继续钮）。文案键都在 strings.xml；两跑同红=非包版本问题，疑似 Phase2.0 会话列表工作区分组后夹具导航漂移，待逐条 triage |
+| media | ❌ 11 红 | ❌ 11 红（同） | 撤回提示/戳一碰/PK 气泡。同上：字符串存在（对方撤回了一条消息/戳了你一下），✊ 在代码 pkEmojiPreview 不在 strings；待 triage |
+| group | ❌ 7 红 | ❌ 7 红（同） | 群信息入口/扇出/移出提示。同上 |
+| share | ❌ 12 红 | ❌ 12 红（同） | r88/r89 是夹具自设的**诚实负向**（共享文件柜功能未实现，见 e2e_share.py 文件头五条核证）；r90 CIDR 区块在设置页改版后不可达（strings.xml:1046-1051 文案仍在）= 导航漂移 |
+| agent | ❌ 14 红 | ❌ 14 红（同） | 夹具找底部页签 "Agent"（e2e_agent.py:456 引 AppNavigation.kt:95-99），现名「工作区」（strings screen_agents）⇒ 页签文案漂移，第一条红则全链红 |
+| search | ❌ 4 红 | ❌ 4 红（同） | 夹具头自己承认「三次真机跑都恒红」（e2e_search.py:384），入口改版后判据未跟上 |
+
+## 4. 覆盖缺口（机器覆盖不到的，照旧要人工）
+
+- 覆盖矩阵 §3：24 条必须人工/硬件（相机取景真实画面、系统文件出口、通知栏观感、输入法、
+  托盘/深链/多窗口、iOS 本地网络授权、省电模式广播帧…）。
+- §4：14 条零覆盖（U1 改归档目录死代码、U3 表格横向滚动、U7 打开失败退分享分支…），
+  其中 6 条是「刻意不做」。design/host-surface-checklist.md 第 6 节空表仍未填。
+
+## 5. 建议的下一步（按优先级）
+
+1. 修 §2.3 主题 tertiaryContainer（门禁立刻可转绿，改动小）。
+2. 人工审 71 张 diff（都在预期清单内）→ updateDebugScreenshotTest 重录 → 门禁转绿。
+3. 修夹具导航层以对齐 Phase 2.0 改版（agent 页签文案、discovery 本机卡判据、
+   files/media/group 的进入会话路径），预期能把 7 红里的大部分转绿；剩余真红再立缺陷。
+4. run_all 前置检查加一条「UDP 17878/TCP 17879 未被占用」（liveness 只查文件写入查不到它）。
+5. 把「被测包必须是当前 HEAD 构建」写进夹具环境前提表（本轮 run1 的 9 条握手红纯属旧包）。

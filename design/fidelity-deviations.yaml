@@ -49,3 +49,11 @@
   reason: "裁决 D 全部：不靠扩档解决；snap 与 offset 表达按 census 的既有字面量数改（多为 0-8 处，代价可控）。"
   approved_by: "kexuejin（GUI 裁决 2026-10-15：全部按推荐）"
   date: 2026-10-15
+- kind: deviation
+  dimension: 断点/tier
+  where: "prototype/relay.html:652"
+  design: "桌面外壳五段：窗口内一条 26px 自绘菜单栏（.menubar，文件/编辑/视图/窗口/帮助共 16 条）+ 标题栏 40 + 工具栏 46 + 状态栏 26，chrome 预算 138px"
+  actual: "菜单栏整条移除，改由系统菜单栏承载（Compose MenuBar：macOS 进屏幕顶部、Win/Linux 进窗口菜单），只留 6 条（新建会话/导入文件/设置/截图/诊断包/退出）；chrome 预算 138→112px"
+  reason: "用户 2026-10-18 裁决「改成系统菜单栏」。16 条里没有一条是独占能力（设置×3、视图与左侧竖导重复、主题在设置里、刷新各页都有、诊断包在状态栏、退出有标题栏✕/托盘/⌘Q、截图在输入栏、复制本机 ID 在节点页、导入文件与新建会话在工具栏），它唯一的价值是当快捷键的说明书，而快捷键由 DesktopShell 的键盘处理独立驱动。原型自己就把这 26px 标成「macOS 系统菜单栏（mac 上由系统提供；Win/Linux 上同一份 Compose 菜单落在 .titlebar）」（prototype/relay.html:651），代码此前把这段示意当成了窗口内的一行。"
+  approved_by: "kexuejin（用户 2026-10-18 裁决：改成系统菜单栏，经 Lead 转述）"
+  date: 2026-10-18

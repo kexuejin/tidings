@@ -2,17 +2,92 @@
 
 ## 1. Threat Model & Trust Boundaries
 
-Tidings (`捎话`) is a decentralized, local-area-network (LAN) peer-to-peer messaging and file transfer protocol.
+Tidings (`捎话`) is a decentralized peer-to-peer messaging, file-transfer, screen-sharing and
+agent protocol. It runs on a **local network** *and* **directly across the public internet**
+(public IPv6), with two distinct transport-security tiers. There is still no centralized
+authentication authority, directory server, or cloud signaling gateway.
 
-### Trust Assumptions
-- **Local Network Perimeter**: The protocol assumes nodes reside on a trusted local network (LAN / Wi-Fi). By design, there is no centralized authentication authority, directory server, or cloud signaling gateway.
-- **Identity via UUIDv4**: Peer identities (`nodeId`) are randomly generated UUIDv4 strings. In the current iteration (PPE-1 / core transport), peer identities are verified through dynamic hello handshakes and ephemeral IP/port mappings.
-- **Agent Sandbox & Approvals**: External or local agent execution relies on host approvals. Unapproved actions and unauthorized control frames are blocked at the capability layer (`CAP_AGENT_QUEUE`).
-- **File Transfers**: Large file transfers require explicit user action ("Accept" or "Decline") prior to disk streaming and are strictly constrained to application sandboxes (`downloads/`).
+### 1.1 Two transport tiers, one judgement
+
+| Tier | When | Protection |
+| :--- | :--- | :--- |
+| **Plaintext** | peer is on the **LAN** | local network only — plaintext never leaves the LAN |
+| **TLS + mutual pin** | peer is on the **public internet** | TLS with a pinned peer key (SPKI), **fail-closed** |
+
+The LAN/public judgement has exactly **one** implementation:
+`IpAddressUtils.isLanAddress(peer, localAddresses)` — private/loopback (RFC1918, `127/8`)
+∨ link-local (`fe80::/10`) ∨ ULA (`fc00::/7`) ∨ **the peer IPv6 shares a /64 with one of our own
+addresses**. It is shared by dialing, dial diagnostics, link acceptance and the post-change
+re-check; see `docs/public-transport-security.md` §11 for the four call sites and why they must
+not drift apart.
+
+**Key fact: an IPv6 GUA is not the same thing as "reachable from the public internet".**
+A typical Chinese home broadband LAN hands out global unicast addresses (measured on a real
+device: `2001:db8:2020:cb44::/64`) — classified by address alone they "are public", yet they
+are the same local segment as us. Judging by `isPrivateOrLocal` alone silently switched K1 off
+in exactly those networks. The other half is **not** relaxed: a peer that is neither private nor
+on our own /64 still **must** use TLS + mutual pin.
+
+What enforces it (`core/.../transport/Link.kt`):
+- the dialer only ever produces a **plaintext** target for an `isLanAddress` peer, otherwise only TLS;
+- acceptance (`linkDenyDiagnostic`) answers `not-lan` to any plaintext link from a non-LAN peer (fail-closed);
+- after a peer address change, the re-check (`enforcePlaintextPolicy`) only drops a connection that
+  declares itself plaintext **and** is provably no longer on the LAN (fail-safe — never drops a TLS one).
+
+**iOS has no TLS link transport yet**, so public long connections are refused by policy rather
+than downgraded to plaintext (`LinkTransportFactory.ios.kt`; `docs/spike-kmp-tls.md`).
+
+### 1.2 Trust roots: how a peer key becomes trusted
+
+- A **pin** is `sha256:` + SHA-256 of the peer's SubjectPublicKeyInfo (DER), 64 hex chars.
+  `TlsPin.parse` is strict; a malformed pin is *dropped* rather than failing the pairing.
+- The pairing QR is **one-way**: it carries the host pin to the phone. When the host has never
+  seen the phone's key it falls back to **TOFU** (trust-on-first-use), persists it to
+  `stores/peer-pins.json`, and records its **source**. Once the phone also carries its pin in
+  the pairing payload, new×new pairings are `pairing`-sourced and no longer TOFU.
+- **TOFU is a documented downgrade path** (it has a first-use race: whoever answers first gets
+  pinned). It must therefore stay diagnosable: `pinSource` (`pairing` / `tofu` / `unknown`) is
+  reported by the host (`/v1/peers`) and by the phone (`files/relay/diag/link.json`). Pin files
+  written before this key existed read back as `unknown` — never reported as `pairing`.
+- **Verification is fail-closed** (`peerPinAccepted`): no peer certificate, no expected pin, or a
+  mismatching pin all mean *reject*. A TLS failure never falls back to plaintext.
+- **No forward secrecy, no rotation UI yet**: the pin is the SPKI of a long-lived self-signed
+  identity. The private key stays stable and the certificate is re-issued automatically when it
+  expires; key rotation / user-facing expiry prompts are still planned (P4).
+
+### 1.3 Pairing from outside the app requires explicit confirmation
+
+`relay://` and `relay-pair://` deep links (`exported=true` + BROWSABLE) and the debug
+`app.relay.TEST_INJECT_QR` broadcast are **outside the app's own UI**. They no longer pair on
+arrival: the payload is only *registered*, the user sees a confirmation dialog stating which
+node it is and — only when the payload really carries one — that its key will be pinned.
+**Declining has zero side effects** (no node, no candidate pool, no pin). Storing an externally
+supplied key as a trust root is an irreversible trust decision, so it is treated as a
+destructive action: conservative, never implicit.
+
+### 1.4 Agent sandbox & grants
+
+- External or local agent execution relies on host approvals; unapproved actions and unauthorized
+  control frames are blocked at the capability layer (`CAP_AGENT_QUEUE`).
+- Authorization is fine-grained per workspace and per access level (`agr1`). The host filters
+  before delivery, so **silence means unauthorized** (no data, no request flow, no guessing).
+- A button's wording caps what it can grant: "collaborate" is at most read/write, only
+  "my devices" reaches owner.
+- Workspace→group binding matches on three keys; an ambiguous match is dropped (fail-closed)
+  rather than delivered to a guessed group.
 
 ### Known Protocol Scope & Non-Goals
-- **No Global Public Internet Routing**: Tidings does not provide end-to-end encryption across untrusted public relays or WAN NAT-traversal by default. Running Tidings across an untrusted shared network without VPN tunneling is not recommended.
-- **No Forward Secrecy / Asymmetric Identity**: PPE-1 focuses on LAN discovery and zero-setup coordination. Cryptographic asymmetric keypairs and message signing are scheduled for future protocol iterations.
+
+- **No centralized routing / cloud signaling.** Public reachability uses direct IPv6; we do no
+  NAT traversal or hole punching. The peer's router must allow inbound IPv6 — that is the user's
+  network to configure, not ours.
+- **Cloud push is designed, not implemented** (`docs/cloud-push-design.md`).
+- **Cross-network screen sharing is not implemented** — screen assistance still requires the same
+  LAN. Cross-network *file* transfer is implemented (second TCP connection, reusing `file-ctl` /
+  raw stream / resume); the end-to-end send on a real device is still pending acceptance.
+- **Opening an attachment by tapping it is not implemented** (we carry `attachmentId` but no
+  `fileId`/path yet).
+- **No forward secrecy / asymmetric message signing**; key rotation is planned (P4).
 
 ---
 

@@ -149,6 +149,29 @@ data class Envelope(
    - 发送方回执 `pull-ok` 后无缝切换为原始二进制流直传。
    - 传输过程中未完成的文件暂存为 `.part` 文件，校验 SHA-256 完整通过后重命名为正式文件。
 
+### 5.4 长连接下行通道（K1 / K2）与传输安全两档
+
+手机主动拨主机，建立一条 TCP 长连接（能力位 `lnk1`，由**主机**声明；手机据此决定要不要拨号 —— 不声明就按老端对待，一个拨号都不发）：
+
+| 档 | 条件 | 承载 |
+|---|---|---|
+| **K1 明文** | 对端在局域网（`isLanAddress`） | 局域网内长连接；**默认关闭**（开关在发起侧的手机上） |
+| **K2 TLS** | 公网对端 | TLS + 双向 SPKI pin，**fail-closed** |
+
+- **「局域网」判据唯一**：`IpAddressUtils.isLanAddress(peer, localAddresses)` = 私网/回环 ∨ 链路本地（`fe80::/10`）∨ ULA ∨ **与本机某个地址同 /64**。拨号、拨号诊断、接受裁决、地址复查四处共用它（曾经不一致，后果是把 K1 静默关掉 —— 见 `docs/public-transport-security.md` §11）。**IPv6 的 GUA ≠ 公网可达**：家庭 LAN 常分配 `2408:...::/64` 这类全局地址，只认私网判据会让 K1 一个目标都不拨。
+- **fail-closed**（`peerPinAccepted`）：对端没给证书 / 本机没有期望 pin / pin 不一致 ⇒ **拒**；TLS 验不过**不回退明文**。明文只允许局域网：接受侧对非局域网的明文连接回 `not-lan`；地址变化后的复查侧只摘「声明自己是明文**且**已不在局域网」的那条（fail-safe，不误摘 TLS 连接）。
+- **身份与 pin**：EC P-256（secp256r1）自签证书，SAN 含本机地址；pin = `sha256:` + SHA-256(SPKI DER)。私钥不变，证书到期**自动续签**（轮换与到期提示仍在计划中，P4）。
+- **建连即更新对端地址**；断线自恢复（退避 1s→60s，±20%）。`NetworkWatch`（Android `ConnectivityManager` 回调 / iOS `NWPathMonitor`）在换网时**立即重拨**（真机实测 ≈3s，要求 ≤10s）。
+- **免心跳与省电**：有数据往来时不发心跳，保底 Ping 兜底（心跳 15s、45s 判死 ⇒ 判死阈值 > 2×心跳）；Doze（`PowerManager.isDeviceIdleMode`）时降频。**不用息屏作判据** —— 息屏时 NAT 映射往往还活着，拉长心跳反而更容易掉线。
+
+### 5.5 跨网（公网 IPv6）直连与候选池
+
+- **候选池**：配对码可携带 `lan_v4` / `lan_v6` / `public_v6` 三类候选；按本机地址表决定先打哪个（同网段优先 lan，跨网才用 public_v6）。
+- **地址漂移重学**：对端地址变化后按新地址重建拨号目标，并复查明文策略（§5.4 的复查侧）。
+- **离线积压补发**：出站可靠帧进持久队列；对端上线握手后按序补发。
+- **跨网文件传输**：公网场景**另开第二条 TCP**，复用 `file-ctl` / 裸流 / 断点续传；公网必须 TLS + 双向 pin。**屏幕投屏仍仅局域网**（跨网屏幕未实现）。
+- **前提**：对端路由器放行 IPv6 入站。本应用不做打洞、不代改网络设置。
+
 ---
 
 ## 6. 平台契约设计 (`PlatformContracts`)
@@ -205,6 +228,10 @@ data class Envelope(
 - **`peers`**：节点 Profile 缓存（NodeId、名称、IP、端口、caps、更新版本）。
 - **`send_queue`**：离线暂存队列，存储尚未完成 ACK 确认的报文。
 - **`dedup`**：基于 `(msg_id, peer_id)` 的滑动窗口去重表。
+
+### 8.3 TLS pin 存储（`stores/peer-pins.json`）
+
+每个 `nodeId` 一条 pin，**并记录它的来源**（`pairing` / `tofu`）。旧文件没有 sources 键 ⇒ 一律读成 `unknown`，**绝不假装 `pairing`**。诊断出口两处：宿主 `/v1/peers` 与手机 `files/relay/diag/link.json` 的 `pinSource`。TOFU 是**降级路径**（首次使用竞态），所以它必须可诊断 —— 这是它留在实现里的唯一前提。
 
 ### 8.2 Agent 独立分表
 
