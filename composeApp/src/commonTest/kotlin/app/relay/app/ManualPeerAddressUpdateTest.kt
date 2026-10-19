@@ -94,6 +94,53 @@ class ManualPeerAddressUpdateTest {
         assertEquals("demo-mac-97", updated?.get(0)?.name)
     }
 
+    // ---- 启动对账：地址没变也要把合成名换掉（否则用户得重新扫一次码）----
+
+    private fun record(nodeId: String, nick: String, ip: String, port: Int = 17878) =
+        app.relay.core.transport.PeerRecord(
+            profile = app.relay.core.protocol.Profile(
+                nodeId = nodeId,
+                nick = nick,
+                company = "",
+                dept = "",
+                team = "",
+                avatar = 0,
+                profileRev = 1,
+                host = "h",
+                platform = "linux",
+                tcpPort = 17879,
+                ver = "relay-0.1.0",
+                caps = emptyList(),
+            ),
+            ip = ip,
+            udpPort = port,
+            lastSeen = 1L,
+            online = true,
+        )
+
+    @Test
+    fun startupReconciliationUpgradesSyntheticLabelsWithoutRepairing() {
+        val entries = listOf(
+            ManualPeerEntry("2001:db8::1", 17878, "node-a1b2c3d4"),
+            ManualPeerEntry("192.168.2.9", 17878, "老周的旧笔记本"),
+            ManualPeerEntry("10.0.0.9", 17878),
+        )
+        val renamed = manualPeersWithRealNames(
+            entries,
+            listOf(record("a1b2c3d4", "demo-mac-97", "2001:db8::1")),
+        )
+        assertEquals("demo-mac-97", renamed[0].name, "启动时对账，不该等用户再扫一次码")
+        assertEquals("老周的旧笔记本", renamed[1].name, "用户自己起的便条不动")
+        assertNull(renamed[2].name, "没握手过的地址保持原样")
+    }
+
+    @Test
+    fun startupReconciliationIsANoOpWhenNothingNeedsRenaming() {
+        val entries = listOf(ManualPeerEntry("2001:db8::1", 17878, "demo-mac-97"))
+        val same = manualPeersWithRealNames(entries, listOf(record("a1b2c3d4", "demo-mac-97", "2001:db8::1")))
+        assertSame(entries, same, "没什么可改就不该触发一次落盘")
+    }
+
     @Test
     fun theReplacementRuleOnlyTouchesEmptyOrSyntheticLabels() {
         assertEquals(true, shouldReplacePeerLabel(null, "demo-mac-97"))

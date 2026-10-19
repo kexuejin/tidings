@@ -876,6 +876,11 @@ class RelayController(
     fun handshake() {
         val rt = runtime ?: return
         val peers = _state.value.settings.manualPeers
+        // 先对一遍账：节点表里已经有真名的，就把便条上的合成名换掉。
+        // 这一趟必须**不依赖用户再扫一次码** —— 改名原来只发生在「重新配对且地址变了」
+        // 那条路上，于是配对当天写下的 `node-a1b2c3d4` 会一直留着（真机红米就是）。
+        val renamed = manualPeersWithRealNames(peers, rt.peerList())
+        if (renamed != peers) handlePersist(_state.value.settings.copy(manualPeers = renamed))
         scope.launch {
             if (peers.isEmpty()) return@launch
             for (peer in peers) {
@@ -1436,6 +1441,32 @@ internal fun manualPeersWithUpdatedAddress(
     val updated = entries.toMutableList()
     updated[index] = renamed.copy(host = newHost, port = newPort)
     return updated
+}
+
+/**
+ * 用**对端声明的昵称**顶掉便条上的合成名（`node-<8 位>`）。
+ *
+ * 与 [manualPeersWithUpdatedAddress] 的分工：那个管「地址变了，那一行原地改写」，
+ * 这个管「地址没变，但我知道它叫什么了」。两个都要有 —— 只有前者时，用户不重新配对
+ * 就永远看不到真名。
+ */
+internal fun manualPeersWithRealNames(
+    entries: List<ManualPeerEntry>,
+    records: List<app.relay.core.transport.PeerRecord>,
+): List<ManualPeerEntry> {
+    var out = entries
+    for (r in records) {
+        val next = manualPeersWithUpdatedAddress(
+            entries = out,
+            oldHost = r.ip,
+            oldPort = r.udpPort,
+            newHost = r.ip,
+            newPort = r.udpPort,
+            newName = r.profile.nick,
+        ) ?: continue
+        out = next
+    }
+    return out
 }
 
 /**
