@@ -84,6 +84,12 @@ PX = re.compile(r"^(-?\d+(?:\.\d+)?)px$")
 DP_LIT = re.compile(r"(\d+(?:\.\d+)?)\.dp\b")
 SP_LIT = re.compile(r"(\d+(?:\.\d+)?)\.sp\b")
 SHAPE_LIT = re.compile(r"RoundedCornerShape\(\s*(\d+(?:\.\d+)?)\.dp")
+
+# ShapeRoles.kt 里的圆角角色属性（val X: Shape = RoundedCornerShape(N.dp)）；键名降首字母，
+# 与 design_contract._parse_object_dp 的产物形态一致。
+SHAPE_ROLE_PROP = re.compile(
+    r"val\s+(\w+)\s*:\s*\w+\s*=\s*RoundedCornerShape\(\s*(\d+(?:\.\d+)?)\.dp\s*\)"
+)
 # **第十九个洞**：药丸圆角没有数字对应物。原型写 `border-radius:999px`（`--r-chip`），
 # Compose 的惯用写法是 `CircleShape` —— 量具只认数字圆角，于是**恒挂一条「只原型 999」**。
 # 实测 33 屏报这一条（m-chat / m-msgmenu / m-agents / d-cabinet / d-nodes …），
@@ -1170,6 +1176,13 @@ def code_tokens(repo):
                     "weight": float(FONT_WEIGHTS.get(fw.group(1), 400)) if fw else 400.0,
                 }
         shapes = {role: float(v) for role, v in KT_SHAPE.findall(src)}
+    # ShapeRoles（Avatar 9 / ListCard 11 / DayCell 7）是 M3 五槽之外的圆角角色，定义在
+    # ShapeRoles.kt。不并进来，用角色 token 写的圆角在代码侧会凭空消失 —— 与第二十六个洞同族：
+    # 量具只看得见自己看得见的形态。
+    p = os.path.join(repo, 'composeApp/src/commonMain/kotlin/app/relay/ui/theme/ShapeRoles.kt')
+    if os.path.exists(p):
+        for role, v in SHAPE_ROLE_PROP.findall(open(p, encoding='utf-8').read()):
+            shapes.setdefault(role[:1].lower() + role[1:], float(v))
     return spacing, typo, shapes
 
 
@@ -1250,10 +1263,14 @@ def code_values(slices, tokens):
         # 圆角：只认 RoundedCornerShape 与 shapes.<role>
         for n in SHAPE_LIT.findall(src):
             values["radius"].add(float(n))
-        for m in re.finditer(r"shapes\.(\w+)", src):
+        # 三种写法都收：MaterialTheme.shapes.<slot> / RelayShapes.<slot> / ShapeRoles.<role>。
+        # 后两种是 task-30 把圆角字面量 token 化之后的主流写法；旧模式只认小写 shapes.，
+        # 于是「换成 token」会让这些值从代码侧消失、差集凭空变大（同第二十六个洞）。
+        for m in re.finditer(r"(?<![\w.])(?:MaterialTheme\.shapes|RelayShapes|ShapeRoles)\.(\w+)", src):
             role = m.group(1)
-            if role in shapes:
-                values["radius"].add(shapes[role])
+            key = role if role in shapes else role[:1].lower() + role[1:]
+            if key in shapes:
+                values["radius"].add(shapes[key])
             else:
                 unparsed["radius"].add(f"shapes.{role}")
 

@@ -335,6 +335,7 @@ def main(argv=None):
     # 增补 D1：工作区三键。wsId 用 sha256(路径) 前 12 位 hex（稳定、可重算、不拿路径原文当 id）；
     # wsTitle 取路径末段（这是**宿主自己**的工作区，不是"UI 拿 path 末段猜对端的"那一条禁令）。
     ws_id = "ws-" + hashlib.sha256(str(workspace).encode("utf-8")).hexdigest()[:12]
+    mtime_ms = int(archive.stat().st_mtime * 1000)
     session_payload = {
         "to": phone_node_id,
         "sessionId": session_id,
@@ -346,6 +347,8 @@ def main(argv=None):
         "wsId": ws_id,
         "wsTitle": Path(workspace).name,
         "wsPath": str(workspace),
+        "updatedAt": mtime_ms,
+        "startedAt": mtime_ms,
     }
     event_payloads = [
         {"to": phone_node_id, "sessionId": session_id, "cursor": i,

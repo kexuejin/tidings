@@ -1,14 +1,14 @@
 {
   "source": {
     "path": "prototype/relay.html",
-    "sha256": "527058a8a810"
+    "sha256": "d96d85c3d4e0"
   },
   "dimensions": {
     "spacing": {
-      "distinct": 36,
-      "afterDistinct": 12,
+      "distinct": 37,
+      "afterDistinct": 18,
       "variable": 4,
-      "review": 5,
+      "review": 6,
       "special": 6
     },
     "radius": {

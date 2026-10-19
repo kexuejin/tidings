@@ -179,8 +179,9 @@ object KotlinCjkLexer {
 // ---------------------------------------------------------------------------
 
 class CjkGateConfig(
-    val scaffoldDir: File,
-    /** 相对 scaffold/ 的生产源码根。刻意不含 core/ 与 agentNode/：它们的中文是异常/日志/CLI 文本， */
+    val sourceRoot: File,
+    /** 相对**仓库根**的生产源码根（变量名曾是 scaffoldDir —— 代码早期住在 scaffold/ 下，
+     *  目录重组后已搬到仓库根；值就是 projectDir）。刻意不含 core/ 与 agentNode/：它们的中文是异常/日志/CLI 文本， */
     /** 且本轮由其他通道在改；纳入会得到一个噪声基线而不是一条文案门禁。 */
     val scanRoots: List<String>,
     val baselineFile: File,
@@ -210,13 +211,13 @@ object CjkGate {
     fun scan(config: CjkGateConfig): Map<String, List<CjkLiteralHit>> {
         val result = LinkedHashMap<String, List<CjkLiteralHit>>()
         config.scanRoots.forEach { rootName ->
-            val root = File(config.scaffoldDir, rootName)
+            val root = File(config.sourceRoot, rootName)
             if (!root.isDirectory) return@forEach
             root.walkTopDown()
                 .filter { it.isFile && it.name.endsWith(".kt") }
                 .sortedBy { it.absolutePath }
                 .forEach { file ->
-                    val relative = file.relativeTo(config.scaffoldDir).invariantSeparatorsPath
+                    val relative = file.relativeTo(config.sourceRoot).invariantSeparatorsPath
                     if (!isProductionSource(relative)) return@forEach
                     val hits = KotlinCjkLexer.scan(file.readText())
                     if (hits.isNotEmpty()) result[relative] = hits
@@ -252,7 +253,7 @@ object CjkGate {
         val body = buildString {
             appendLine(HEADER)
             appendLine("#")
-            appendLine("# 格式: <允许条数>\\t<相对 scaffold/ 的路径>")
+            appendLine("# 格式: <允许条数>\\t<相对仓库根的路径>")
             appendLine("# 重新生成: ./gradlew :cjkLiteralGateBaseline")
             appendLine("# 生成时机: $note")
             appendLine("# 命中总数: $total（文件数 ${current.size}）")
@@ -272,7 +273,7 @@ object CjkGate {
 
 val cjkBaselineFile = File(project.projectDir, "tools/cjk-literal-baseline.txt")
 val cjkConfig = CjkGateConfig(
-    scaffoldDir = project.projectDir,
+    sourceRoot = project.projectDir,
     scanRoots = listOf(
         "composeApp/src/commonMain",
         "composeApp/src/androidMain",

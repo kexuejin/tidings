@@ -1,33 +1,34 @@
 {
-  "generatedAt": "8f7b2d0c93a3",
+  "generatedAt": "d96d85c3d4e0",
   "note": "逐屏差集棘轮：每个键的差集只许变小。--check 报「新增的值」。",
-  "reason": "原型复审第二轮修正：消息页签「工作区」段的行高再收紧（紧凑行）、离线组头后缀缩短到「12 分钟前在线」并禁止换行（组头不再折成两行），段高 521.5px → 430px；上限 3 行 + 尾巴不变。",
+  "reason": "台账 d-agents 行的落点由 ui/desktop/DesktopAgentPane.kt（**该文件已不存在**）改为 feature/agents/AgentConsoleScreen.kt（agents 重构后的真实实现）。落点换了文件 ⇒ 该行 4 个键的差集按新落点重算（d-agents|spacing|proto / radius|proto / radius|code / font-size|code），不是代码漂移。",
   "rowCount": 70,
   "signature": {
     "d-agentdetail|__error__": [
       "落点不存在：**待建**（2026-10-13 原型新增提案；代码侧本轮未适配）"
     ],
-    "d-agents|font-size|proto": [
-      "11"
+    "d-agents|font-size|code": [
+      "24"
     ],
-    "d-agents|font-weight|proto": [
-      "700"
+    "d-agents|radius|code": [
+      "4",
+      "8"
     ],
     "d-agents|radius|proto": [
-      "6",
+      "9",
+      "20",
       "999"
     ],
     "d-agents|spacing|proto": [
       "1",
       "1.5",
-      "2",
       "3",
-      "4",
       "5",
+      "7",
       "9",
       "11",
       "13",
-      "14"
+      "30"
     ],
     "d-cabinet|font-size|code": [
       "16",
@@ -36,9 +37,6 @@
     "d-cabinet|font-weight|code": [
       "400",
       "700"
-    ],
-    "d-cabinet|radius|proto": [
-      "12"
     ],
     "d-cabinet|spacing|code": [
       "24"
@@ -98,33 +96,33 @@
       "32"
     ],
     "d-chat-group|font-size|code": [
-      "20",
-      "22"
+      "18",
+      "20"
     ],
     "d-chat-group|font-weight|code": [
       "700"
     ],
     "d-chat-group|radius|code": [
-      "10",
-      "14",
-      "16"
+      "6",
+      "11"
     ],
     "d-chat-group|radius|proto": [
-      "8",
-      "12"
+      "9"
     ],
     "d-chat-group|spacing|code": [
-      "1.5",
       "2",
+      "4",
       "12",
       "14",
       "16",
-      "24"
+      "24",
+      "32"
     ],
     "d-chat-group|spacing|proto": [
       "1",
       "3",
       "5",
+      "7",
       "9",
       "11",
       "13"
@@ -138,7 +136,7 @@
       "400"
     ],
     "d-chat|radius|code": [
-      "2",
+      "4",
       "6",
       "10",
       "16",
@@ -154,6 +152,7 @@
     "d-chat|spacing|proto": [
       "1",
       "5",
+      "7",
       "13",
       "30"
     ],
@@ -192,50 +191,43 @@
     "d-emoji|font-size|code": [
       "22",
       "24",
-      "28",
-      "40"
+      "28"
     ],
     "d-emoji|font-weight|code": [
       "700"
     ],
     "d-emoji|radius|code": [
-      "2",
+      "4",
       "6",
       "10",
       "16",
       "22"
     ],
     "d-emoji|spacing|code": [
-      "1.5",
       "2",
       "4",
       "12",
       "14",
       "16",
-      "20",
-      "24"
+      "20"
     ],
     "d-emoji|spacing|proto": [
       "1",
       "5",
+      "7",
       "13"
     ],
     "d-empty|font-size|code": [
       "18",
       "20"
     ],
-    "d-empty|font-weight|code": [
-      "500"
-    ],
     "d-empty|radius|code": [
-      "4",
-      "8",
-      "14"
+      "6",
+      "8"
     ],
     "d-empty|spacing|code": [
       "2",
       "4",
-      "5",
       "6",
       "8",
       "10",
@@ -308,7 +300,7 @@
       "400"
     ],
     "d-groupcreate|radius|code": [
-      "2",
+      "4",
       "6",
       "8",
       "10",
@@ -322,8 +314,8 @@
     ],
     "d-groupcreate|spacing|proto": [
       "5",
+      "7",
       "13",
-      "24",
       "30"
     ],
     "d-histsearch|font-size|code": [
@@ -336,7 +328,7 @@
       "700"
     ],
     "d-histsearch|radius|code": [
-      "2",
+      "4",
       "6",
       "10",
       "16",
@@ -346,11 +338,14 @@
       "7"
     ],
     "d-histsearch|spacing|code": [
-      "20"
+      "1.5",
+      "20",
+      "24"
     ],
     "d-histsearch|spacing|proto": [
       "1",
       "5",
+      "7",
       "13",
       "15"
     ],
@@ -358,10 +353,9 @@
       "700"
     ],
     "d-home-more|radius|code": [
-      "4"
-    ],
-    "d-home-more|radius|proto": [
-      "8"
+      "4",
+      "6",
+      "16"
     ],
     "d-home-more|spacing|code": [
       "2",
@@ -403,11 +397,10 @@
       "20"
     ],
     "d-nomatch|radius|code": [
-      "4",
+      "6",
       "8",
       "11",
-      "12",
-      "14"
+      "12"
     ],
     "d-nomatch|radius|proto": [
       "9"
@@ -424,6 +417,7 @@
       "32"
     ],
     "d-nomatch|spacing|proto": [
+      "5",
       "7",
       "9",
       "11",
@@ -436,9 +430,8 @@
       "20"
     ],
     "d-nosel|radius|code": [
-      "4",
-      "11",
-      "14"
+      "6",
+      "11"
     ],
     "d-nosel|spacing|code": [
       "2",
@@ -452,6 +445,7 @@
     "d-nosel|spacing|proto": [
       "1",
       "3",
+      "5",
       "7",
       "9",
       "11",
@@ -516,17 +510,13 @@
     "d-search-empty|font-size|proto": [
       "24"
     ],
-    "d-search-empty|font-weight|code": [
-      "500"
-    ],
     "d-search-empty|font-weight|proto": [
       "400"
     ],
     "d-search-empty|radius|code": [
-      "4",
+      "6",
       "8",
-      "11",
-      "14"
+      "11"
     ],
     "d-search-empty|spacing|code": [
       "4",
@@ -535,6 +525,7 @@
       "32"
     ],
     "d-search-empty|spacing|proto": [
+      "5",
       "9"
     ],
     "d-search|font-size|code": [
@@ -545,17 +536,13 @@
     "d-search|font-size|proto": [
       "24"
     ],
-    "d-search|font-weight|code": [
-      "500"
-    ],
     "d-search|font-weight|proto": [
       "400"
     ],
     "d-search|radius|code": [
-      "4",
+      "6",
       "8",
-      "11",
-      "14"
+      "11"
     ],
     "d-search|spacing|code": [
       "4",
@@ -564,6 +551,7 @@
       "32"
     ],
     "d-search|spacing|proto": [
+      "5",
       "9"
     ],
     "d-settings-data|font-size|code": [
@@ -588,6 +576,9 @@
       "9",
       "13"
     ],
+    "d-settings-desk|font-weight|proto": [
+      "500"
+    ],
     "d-settings-desk|radius|proto": [
       "9",
       "999"
@@ -611,8 +602,13 @@
       "4",
       "6"
     ],
+    "d-settings|font-size|proto": [
+      "16"
+    ],
     "d-settings|spacing|proto": [
       "1.5",
+      "3",
+      "5",
       "7",
       "11"
     ],
@@ -647,6 +643,9 @@
     ],
     "d-tray|font-weight|proto": [
       "700"
+    ],
+    "d-tray|radius|code": [
+      "12"
     ],
     "d-tray|radius|proto": [
       "5",
@@ -693,6 +692,9 @@
     "d-workspacedetail|__error__": [
       "落点不存在：**待建**（2026-10-13 原型新增提案；代码侧本轮未适配）"
     ],
+    "m-addnode-fill|font-size|proto": [
+      "16"
+    ],
     "m-addnode-fill|font-weight|code": [
       "400"
     ],
@@ -702,19 +704,23 @@
     "m-addnode-fill|radius|proto": [
       "0",
       "2",
+      "8",
       "16",
       "28"
     ],
     "m-addnode-fill|spacing|code": [
       "1",
-      "7",
       "24",
       "32"
     ],
     "m-addnode-fill|spacing|proto": [
       "1.5",
       "5",
+      "9",
       "11"
+    ],
+    "m-addnode|font-size|proto": [
+      "16"
     ],
     "m-addnode|font-weight|code": [
       "400"
@@ -725,18 +731,19 @@
     "m-addnode|radius|proto": [
       "0",
       "2",
+      "8",
       "16",
       "28"
     ],
     "m-addnode|spacing|code": [
       "1",
-      "7",
       "24",
       "32"
     ],
     "m-addnode|spacing|proto": [
       "1.5",
       "5",
+      "9",
       "11"
     ],
     "m-agentdetail|__error__": [
@@ -749,16 +756,19 @@
       "400"
     ],
     "m-agents|radius|code": [
+      "4",
       "8"
     ],
     "m-agents|radius|proto": [
-      "16"
+      "16",
+      "999"
     ],
     "m-agents|spacing|code": [
       "24"
     ],
     "m-agents|spacing|proto": [
       "1",
+      "1.5",
       "5",
       "11",
       "13"
@@ -770,31 +780,32 @@
       "4"
     ],
     "m-chat-group|font-size|code": [
-      "16",
       "22",
       "28"
     ],
-    "m-chat-group|font-weight|code": [
-      "500"
+    "m-chat-group|font-weight|proto": [
+      "400"
     ],
     "m-chat-group|radius|code": [
-      "2",
+      "8",
       "10",
       "16",
       "22"
     ],
     "m-chat-group|radius|proto": [
       "13",
-      "18"
+      "20"
     ],
     "m-chat-group|spacing|code": [
       "9",
       "11",
-      "20",
-      "24"
+      "20"
     ],
     "m-chat-group|spacing|proto": [
-      "5"
+      "1",
+      "5",
+      "13",
+      "30"
     ],
     "m-chat-solo|font-size|code": [
       "22",
@@ -804,18 +815,17 @@
       "400"
     ],
     "m-chat-solo|radius|code": [
-      "2",
+      "8",
       "10",
       "16",
       "22"
     ],
     "m-chat-solo|radius|proto": [
-      "4",
       "13",
-      "18",
       "20"
     ],
     "m-chat-solo|spacing|code": [
+      "9",
       "11",
       "20"
     ],
@@ -833,18 +843,17 @@
       "400"
     ],
     "m-chat|radius|code": [
-      "2",
+      "8",
       "10",
       "16",
       "22"
     ],
     "m-chat|radius|proto": [
-      "4",
       "13",
-      "18",
       "20"
     ],
     "m-chat|spacing|code": [
+      "9",
       "11",
       "20"
     ],
@@ -857,32 +866,36 @@
     "m-folderin|font-size|code": [
       "16",
       "22",
-      "28",
-      "40"
+      "28"
     ],
     "m-folderin|radius|code": [
+      "4",
+      "8",
       "10",
       "16",
       "22"
     ],
     "m-folderin|radius|proto": [
-      "13",
-      "18"
+      "2",
+      "13"
     ],
     "m-folderin|spacing|code": [
+      "4",
       "11",
-      "20",
-      "24"
+      "20"
     ],
     "m-folderin|spacing|proto": [
+      "1.5",
       "5"
     ],
     "m-groupcreate|radius|code": [
       "9"
     ],
     "m-groupcreate|radius|proto": [
-      "4",
       "16"
+    ],
+    "m-groupcreate|spacing|code": [
+      "1"
     ],
     "m-groupcreate|spacing|proto": [
       "5",
@@ -893,15 +906,12 @@
     "m-groupinfo|font-size|proto": [
       "24"
     ],
-    "m-groupinfo|font-weight|proto": [
-      "700"
-    ],
     "m-groupinfo|radius|code": [
       "4",
-      "8"
+      "8",
+      "20"
     ],
     "m-groupinfo|radius|proto": [
-      "12",
       "16"
     ],
     "m-groupinfo|spacing|code": [
@@ -910,8 +920,6 @@
     "m-groupinfo|spacing|proto": [
       "1.5",
       "5",
-      "9",
-      "14",
       "16"
     ],
     "m-gsearch-empty|font-size|proto": [
@@ -964,6 +972,7 @@
       "400"
     ],
     "m-histdate|radius|code": [
+      "4",
       "6",
       "10",
       "16",
@@ -977,8 +986,13 @@
       "28"
     ],
     "m-histdate|spacing|code": [
+      "1.5",
       "4",
-      "20"
+      "20",
+      "24"
+    ],
+    "m-histdate|spacing|proto": [
+      "7"
     ],
     "m-histsearch|font-size|code": [
       "16"
@@ -999,36 +1013,47 @@
     "m-histsearch|spacing|code": [
       "4"
     ],
+    "m-home-more|radius|code": [
+      "4"
+    ],
     "m-home-more|radius|proto": [
-      "4",
       "8",
       "16"
     ],
+    "m-home-more|spacing|code": [
+      "1"
+    ],
     "m-home-more|spacing|proto": [
-      "1",
       "5",
       "9",
-      "11",
-      "14"
+      "11"
+    ],
+    "m-home-recent|radius|code": [
+      "4"
     ],
     "m-home-recent|radius|proto": [
-      "4",
       "16"
     ],
+    "m-home-recent|spacing|code": [
+      "1"
+    ],
     "m-home-recent|spacing|proto": [
-      "1",
       "5",
       "9",
-      "11",
-      "14"
+      "11"
+    ],
+    "m-home-unread|radius|code": [
+      "4"
     ],
     "m-home-unread|radius|proto": [
       "16"
     ],
+    "m-home-unread|spacing|code": [
+      "1"
+    ],
     "m-home-unread|spacing|proto": [
       "5",
-      "11",
-      "14"
+      "11"
     ],
     "m-insets|font-size|code": [
       "16"
@@ -1037,28 +1062,24 @@
       "11",
       "24"
     ],
-    "m-insets|font-weight|proto": [
-      "700"
+    "m-insets|radius|code": [
+      "20"
     ],
     "m-insets|radius|proto": [
       "16"
     ],
     "m-insets|spacing|proto": [
       "2",
-      "5",
-      "9",
-      "14"
+      "5"
     ],
     "m-msgmenu|font-size|code": [
       "22",
-      "28",
-      "40"
+      "28"
     ],
     "m-msgmenu|font-weight|proto": [
       "400"
     ],
     "m-msgmenu|radius|code": [
-      "2",
       "6",
       "9",
       "10",
@@ -1066,9 +1087,7 @@
       "22"
     ],
     "m-msgmenu|radius|proto": [
-      "4",
       "13",
-      "18",
       "20"
     ],
     "m-msgmenu|spacing|code": [
@@ -1077,15 +1096,19 @@
     ],
     "m-msgmenu|spacing|proto": [
       "1",
+      "1.5",
       "5",
       "13",
+      "24",
       "30"
+    ],
+    "m-myqr|font-size|proto": [
+      "16"
     ],
     "m-myqr|font-weight|code": [
       "400"
     ],
     "m-myqr|radius|code": [
-      "8",
       "10"
     ],
     "m-myqr|radius|proto": [
@@ -1097,20 +1120,22 @@
     "m-myqr|spacing|code": [
       "1",
       "3",
-      "7",
       "24",
       "32"
     ],
     "m-myqr|spacing|proto": [
       "1.5",
       "5",
+      "9",
       "11"
+    ],
+    "m-nodedetail|font-size|proto": [
+      "16"
     ],
     "m-nodedetail|font-weight|code": [
       "400"
     ],
     "m-nodedetail|radius|code": [
-      "8",
       "10"
     ],
     "m-nodedetail|radius|proto": [
@@ -1119,12 +1144,13 @@
     "m-nodedetail|spacing|code": [
       "1",
       "3",
-      "7",
       "24",
       "32"
     ],
     "m-nodedetail|spacing|proto": [
+      "1.5",
       "5",
+      "9",
       "11"
     ],
     "m-nodes-empty|font-weight|code": [
@@ -1174,48 +1200,49 @@
     "m-screencard|font-size|code": [
       "16",
       "22",
-      "28",
-      "40"
+      "28"
     ],
     "m-screencard|radius|code": [
+      "8",
       "10",
       "16",
       "22"
     ],
     "m-screencard|radius|proto": [
-      "4",
-      "13",
-      "18"
+      "2",
+      "13"
     ],
     "m-screencard|spacing|code": [
-      "20",
-      "24"
+      "20"
     ],
     "m-screencard|spacing|proto": [
       "1",
+      "1.5",
       "5"
     ],
     "m-sendfolder|font-size|code": [
       "16",
       "22",
-      "28",
-      "40"
+      "28"
     ],
     "m-sendfolder|radius|code": [
+      "4",
+      "8",
       "10",
       "16",
       "22"
     ],
     "m-sendfolder|radius|proto": [
-      "13",
-      "18"
+      "2",
+      "13"
     ],
     "m-sendfolder|spacing|code": [
+      "4",
       "11",
-      "20",
-      "24"
+      "20"
     ],
     "m-sendfolder|spacing|proto": [
+      "1.5",
       "5"
     ],
     "m-set-appear|font-size|code": [
@@ -1264,6 +1291,9 @@
       "1.5",
       "11"
     ],
+    "m-set-conn|font-size|proto": [
+      "16"
+    ],
     "m-set-conn|radius|code": [
       "8"
     ],
@@ -1271,10 +1301,10 @@
       "16"
     ],
     "m-set-conn|spacing|code": [
-      "3",
       "4"
     ],
     "m-set-conn|spacing|proto": [
+      "5",
       "9"
     ],
     "m-set-data|font-size|code": [
@@ -1319,6 +1349,7 @@
       "11"
     ],
     "m-set-profile|radius|proto": [
+      "8",
       "16"
     ],
     "m-set-profile|spacing|proto": [

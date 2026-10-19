@@ -19,12 +19,7 @@ DECLARATIONS = {
     "DesktopView": "DesktopShell.kt",
     "DesktopShellActions": "DesktopShell.kt",
     "DesktopShell": "DesktopShell.kt",
-    # 菜单栏 / 标题栏 / 工具栏
-    "DesktopMenuBar": "DesktopChrome.kt",
-    "MenuGroup": "DesktopChrome.kt",
-    "DesktopMenu": "DesktopChrome.kt",
-    "MenuItem": "DesktopChrome.kt",
-    "MenuLabel": "DesktopChrome.kt",
+    # 标题栏 / 工具栏（自绘菜单栏已删，改由系统菜单栏承载 —— 见 DesktopSystemMenuBar）
     "DesktopTitleBar": "DesktopChrome.kt",
     "DesktopToolbar": "DesktopChrome.kt",
     "ViewChip": "DesktopChrome.kt",

@@ -1422,9 +1422,11 @@ def goto_messages_list(max_back=5):
                 time.sleep(0.4)
             press_back()
             time.sleep(0.8)
-            continue
-        if find_node(nodes, text="搜索会话", exact=False) or \
-           find_node(nodes, text="个会话", exact=False):
+        # 若在工作区看板（顶栏标着「工作区」），必须切回消息底栏
+        ws_header = find_node(nodes, text="工作区", exact=True)
+        is_ws_tab = ws_header and ws_header.center and ws_header.center[1] < 600
+        if not is_ws_tab and (find_node(nodes, text="搜索会话", exact=False) or \
+           find_node(nodes, text="个会话", exact=False)):
             return True
         tab = find_node(nodes, text="消息", bottom=True)
         if tab and tab.center and tab.center[1] > 1200:
@@ -1434,7 +1436,9 @@ def goto_messages_list(max_back=5):
         press_back()
         time.sleep(1.0)
     nodes = ui_all()
-    return bool(find_node(nodes, text="搜索会话", exact=False)
+    ws_header = find_node(nodes, text="工作区", exact=True)
+    is_ws_tab = ws_header and ws_header.center and ws_header.center[1] < 600
+    return not is_ws_tab and bool(find_node(nodes, text="搜索会话", exact=False)
                 or find_node(nodes, text="个会话", exact=False))
 
 
