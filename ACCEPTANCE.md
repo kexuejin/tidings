@@ -88,10 +88,18 @@ Wi-Fi 省电模式下能否收到、TCP 直连、托盘/深链/多窗口、通�
 - 步骤：发一条 **>800 字节**的文本（例如 1000 个汉字）。
 - 期望：对端完整收到，本端状态从「等待中」变「已送达」。
 - 反例：卡在「等待中」甚至入队 —— 说明 TCP 兜底没生效（UDP 单包 800 字节预算）。
+- **群文本另有一条预算**（2026-10-19 真机）：单聊 TCP 上限 4096 字节，**群文本放宽到 32 KiB**
+  （`Limits.GROUP_TEXT_TCP_LIMIT`）。所以「>4096 字节被拒」只对单聊成立；群里的长回复
+  （agent 答的，真机上 5.4 KB 级别）必须完整到达。判读点：收端库里那条的
+  **UTF-8 字节数**要等于发端发出的，不是「看起来差不多」。
 
 ### A6 离线队列补发
 - 步骤：把对端手机切飞行模式 → 本端发 3 条 → 对端恢复网络。
 - 期望：恢复后自动补发，顺序不乱、不重复；对端在线时本端顶部不显示「离线」横幅。
+- **反方向也要跑**（2026-10-19 真机，红米）：**手机自己在断网时发** —— 开飞行模式，在群里发一条，
+  再关飞行模式。期望：本地那条立刻出现（id 形如 `group-local-<seq>-<ts>-QUEUED-<n>`），
+  恢复网络后 40 秒内对端库里出现同一条（`conv_id` 是群、`sender_id` 是手机 nodeId）。
+  判读点：**用户不需要重发**。
 
 ### A7 收到的文件能打开、能分享 ✅ 已跑（2026-10-07）
 - 步骤：对端发一张图片和一个文件 → 在本端文件卡上点「打开」「分享」。
@@ -338,6 +346,34 @@ Wi-Fi 省电模式下能否收到、TCP 直连、托盘/深链/多窗口、通�
   `ChatHeader` 的入口，桌面宿主不挂 `RelayApp`）⇒ 方向一必须借替身，不是真桌面发的邀请；
   ②取消系统授权时对端收到的是 `capture-failed`，`permission-denied` 这条 reason 没有生产路径；
   ③iOS 真机广播链路未验（模拟器编译就绪）。
+
+### A18 跨网无感与真名（2026-10-19 真机：红米 K80 `<device-serial>` + 桌面端）
+
+这一组是「用户只关心哪张网都能无感连上」的正面验收。**判据只有一个**：`diag/link.json` 里
+`closeCount` 全程为 0（链路一次都没被判死重拨），`linkConnected=true`、`carrier` 随网络自动切换。
+
+| 场景 | 实测 |
+|---|---|
+| WiFi 冷启动 | `carrier=plaintext connected=true closeCount=0` |
+| 关 WiFi（只留蜂窝） | 8 秒内 `carrier=tls`（公网 IPv6 直连），`closeCount=0` |
+| 恢复 WiFi | 仍 `tls`、`connected=true`、`closeCount=0` |
+| 飞行模式 开→关 | 关掉后 40s 内 `tls connected=true closeCount=0` |
+| **只留蜂窝 + 杀进程 + 冷启动** | **15 秒内** `tls connected=true`，会话与真名都在 |
+| 飞行模式 30/60s | `online=true`（在 90s 阈值内，符合 A12） |
+| 飞行模式 **100s** | **`online=false`**（90s 超时如实生效） |
+
+**真名**：节点页显示 `demo-mac-97` / `Pixel 6`，**不是** `node-a1b2c3d4`。
+这一条要**在飞行模式里重启后再看** —— 那时对端根本不可达，名字只能来自
+`stores/known-peers.json`（`PeerRegistry.restoreOffline`）。没有它，冷启动会先造一个合成名。
+
+**群消息的发送者归属**：用户自己在群里打的话，在别人设备上要挂在**用户**名下
+（载荷 `senderId` = 用户 nodeId），不能显示成 agent；agent 答的才是 `agent:<小写 kind>`。
+真机反例（已修）：红米库里那条用户消息被存成 `senderId=agent:dsh`。
+
+- 背景证据：[`design/runtime-evidence/link-idle-drop-20261019.md`](design/runtime-evidence/link-idle-drop-20261019.md)
+  （`closeCount` 这条判据的来历：空闲 5 秒被读超时误判成对端关闭，每 8.1 秒断一次）。
+- 库那条不变量与它的两次翻车见
+  [`design/runtime-evidence/relay-db-bloat-20261019.md`](design/runtime-evidence/relay-db-bloat-20261019.md)。
 
 ## 3. iOS 真机
 

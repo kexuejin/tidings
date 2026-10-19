@@ -273,7 +273,8 @@ nodeId 只会让那条气泡挂在别人名下（本协议不防冒名，群内�
 | 事实 | 值 | 来源 |
 |---|---|---|
 | UDP 单包硬上限 | **800 字节** | `TEXT_UDP_LIMIT` |
-| TCP 文本上限 | 4096 字节 | `TEXT_TCP_LIMIT` |
+| TCP 文本上限（单聊 `kind:"text"`） | 4096 字节 | `TEXT_TCP_LIMIT` |
+| TCP 文本上限（**群文本** `kind:"group-text"`） | **32 KiB** | `Limits.GROUP_TEXT_TCP_LIMIT`，见 **§7.1** |
 | 上限判定单位 | **UTF-8 字节数**，不是字符数 | 已对上游源码核实 |
 | 超限行为 | 自动由 UDP 回退 TCP 17879（4 字节大端长度前缀） | 本项目实测 |
 
@@ -428,6 +429,11 @@ CREATE TABLE agent_approvals (
 budget 类断言（最坏样本落在 UDP 800 / TCP 4096 内）在
 `AgentFramesTest.kt` 的 `aTypicalEventFitsInOneUdpDatagram` / `aMaxSummaryEventMustGoOverTcp` /
 `bodyIsBoundedByTheChannelNotByAFieldLimit` 三条用例里。
+
+**群文本是另一条预算**（§7.1）：`CodecTest.groupTextOverTheOldTcpLimitNowDecodes` /
+`groupTextOverTheNewLimitIsStillRejected` / `directTextKeepsTheTcpLimit` 三条钉住
+「TCP 放宽到 32 KiB、UDP 仍 800、单聊不跟着放宽」；
+`GroupTextClampTest` 另外钉住发送侧截断与「正文 + 思考仍在 64 KiB 整帧内」。
 
 保留既有的"意外序列化字段"golden 覆盖（即 `group-text` 多出 `type` 键的失败用例），
 它是 §2 铁律一的活体守卫。

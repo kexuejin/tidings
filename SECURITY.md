@@ -37,6 +37,21 @@ What enforces it (`core/.../transport/Link.kt`):
 **iOS has no TLS link transport yet**, so public long connections are refused by policy rather
 than downgraded to plaintext (`LinkTransportFactory.ios.kt`; `docs/spike-kmp-tls.md`).
 
+### 1.1.1 Frame budgets are part of the attack surface
+
+The largest thing a peer can make us accept in one frame is a budget, and budgets are chosen,
+not inherited. Three of them are worth stating explicitly:
+
+| Frame | Budget | Why |
+| :--- | :--- | :--- |
+| `msg` / `group-text` text | UDP 800 B, **TCP 32 KiB** | 4096 B was a UDP-era number; agent replies routinely exceed it, and a rejected frame is silently lost. 32 KiB leaves room for the 24 KiB `reasoning` field inside one 64 KiB frame. |
+| `agent-event` body | TCP 64 KiB | code blocks, diffs, deep reasoning |
+| one-to-one `kind:"text"` | 4096 B (unchanged) | hand-typed text; no reason to widen the surface |
+
+A sender that does not check the receiver's budget does not get an error — the receiver drops the
+whole frame (`bad-payload`). So `NodeOutbound.clampGroupText` / `clampGroupReasoning` exist to make
+"we never emit a frame that is guaranteed to be rejected" an invariant rather than a hope.
+
 ### 1.2 Trust roots: how a peer key becomes trusted
 
 - A **pin** is `sha256:` + SHA-256 of the peer's SubjectPublicKeyInfo (DER), 64 hex chars.

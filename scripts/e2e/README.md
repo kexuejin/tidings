@@ -251,7 +251,8 @@ echo "$out" | tail -1
 - `v` 必须严格等于 `1`（`PROTOCOL_VERSION`），对不上手机整帧丢弃、**连 reason 都只在日志里**。
 - 信封六个字段一个都不能少：`v / type / id / from / ts / payload`。
 - `id` 每帧唯一：手机侧 `dedupStore` 按它去重，重复 id 会被当重传。
-- 文本判据是 **UTF-8 字节**不是字符：`> 800 B` 走 TCP 17879，`> 4096 B` 被拒。
+- 文本判据是 **UTF-8 字节**不是字符：`> 800 B` 走 TCP 17879；**单聊** `> 4096 B` 被拒，
+  **群文本** `> 32 KiB` 才被拒（`Limits.GROUP_TEXT_TCP_LIMIT`，见 `PROTOCOL-EXTENSION.md` §7.1）。
 - 出站单包上限 1200 B、入站硬上限 4096 B（`UDP_MAX_PAYLOAD` / `UDP_MAX_INBOUND`）。
 - 文本走 TCP 后要等 `msg-ack`，精确超时 **7000 ms**（`TCP_ACK_TIMEOUT_MS`）。
 - `entry` 的 `profile.host` 必须非空字符串，否则手机看不懂整帧。

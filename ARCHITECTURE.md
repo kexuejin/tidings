@@ -240,6 +240,49 @@ data class Envelope(
 - **`agent_events`**：Agent 执行流水线增量事件，支持按 `(sessionId, cursor)` 快速续读与分页。
 - **`agent_tasks`**：任务执行单元表，维护队列调度与终态记录。
 
+### 8.4 `stores/` 下的旁路存档（JSON / 追加日志）
+
+不是所有状态都值得进 SQLite。这几份是**旁路存档**，各有自己的失效语义：
+
+| 文件 | 内容 | 失效/上限 |
+|---|---|---|
+| `stores/peer-pins.json` | 每个 `nodeId` 的 TLS SPKI pin 与来源（`pairing` / `tofu`） | 见 §8.3 |
+| `stores/peer-endpoints.json` | 配对码带来的候选端点池（换网后按序兜底） | 对端每次宣告会覆盖 |
+| `stores/known-peers.json` | **曾经见过**的对端档案（nodeId / 昵称 / 最后地址 / 最后露面） | 90 天 TTL |
+| `stores/messages.log` | 信封追加日志，供 `/v1/inbox` 的 `since` / `cursor` 续读 | **当前无上限**（见下） |
+| `stores/queue.log` | 离线补发队列 | 7 天 TTL / 每对端 200 条 |
+
+`known-peers.json` 存在的理由只有一条：**重启后、对端还没被发现在线时，节点列表也要显示真名**。
+没有它时，冷启动会先按 nodeId 前 8 位造一个合成名（`node-a1b2c3d4`），用户看到的是一台
+自己明明配对过的设备变成了陌生人。`PeerRegistry.restoreOffline` 只**想起它是谁**：
+`online = false`、不刷新 `lastSeen`、不产生事件、不覆盖已存在的实时记录。
+
+> **已知待办**：`FileMessageStore.trimTo(maxRows)` 已实现并单测，但**生产路径没有调用它** ——
+> `NodeRuntime.prune` 只清队列与去重表。于是 `messages.log` 会一直长（真机桌面端一天
+> 12.9 万行 / 72 MB，而消息表只有 1235 条：日志里还含 Agent 事件信封）。接线时要处理
+> 一个语义问题：`/v1/inbox` 的旧 `cursor` 可能指向被裁掉的行，需要约定「过期游标从最早一行续读」。
+
+### 8.5 全文检索索引（FTS5）的维护纪律
+
+`MessageFts` 是**外部内容表**（`content='MessageEntity'` + `tokenize='trigram'`），
+索引**不是**自己维护的，靠三条触发器。它们守的是一条不变量：
+
+> `MessageFts_docsize` 的行数必须**恒等于** `MessageEntity` 的行数。
+
+两条真机上翻过车的坑，都写在触发器旁边：
+
+1. `INSERT OR REPLACE` 走的是「隐式删除 + 插入」，而**隐式删除不激活 `AFTER DELETE`** ⇒
+   旧行的索引条目留下来、新行又插一条，每条被重复写入的消息留一个孤儿。
+   修法：写消息前**显式**执行 `insertMessageDropStaleIndex`（FTS5 的 `'delete'` 命令）。
+2. `AFTER UPDATE` 必须**只**在 `text` 真的变了时才动索引（`WHEN old.text IS NOT new.text`）。
+   交付状态/回执/文件卡片这些与检索无关的更新，原来每次都会重建一遍索引。
+
+这两条叠加时索引长到 **4,554,999 行 / 21 GB**（真实消息 941 条）。
+排查与修复过程见 [`design/runtime-evidence/relay-db-bloat-20261019.md`](design/runtime-evidence/relay-db-bloat-20261019.md)。
+
+**改触发器时要留意**：`.sq` 里的 `CREATE TRIGGER` 只在**新建库**时执行；已存在的库不会
+因为装了新版本就换掉旧触发器 —— 修完代码还要对存量库做一次替换 + 重建索引。
+
 ---
 
 ## 9. 响应式 UI 与自适应布局

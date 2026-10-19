@@ -68,7 +68,7 @@
 | kind | 处置 | 说明 |
 |---|---|---|
 | `text` | 收发都有 | 严格校验 |
-| `group-text` | 收发都有 | 群文本是 `msg` 的一个 kind，**不是** `group` 报文。收端按 `groupId` 归到 `group:<groupId>` 会话、并把 `envelope.from` 存成发言人，发端一个信封扇出 N 份逐成员单播（采用群聊 v0.3 简化策略：不做按成员回执）。`mentions` 里的本机 nodeId 与保留值 `"@all"` 都算"点到我了"，只影响提醒、不影响投递（协议 §3、`:176`、`:584`）；本端没有 @ 入口，从不产生 `mentions` |
+| `group-text` | 收发都有 | 群文本是 `msg` 的一个 kind，**不是** `group` 报文。收端按 `groupId` 归到 `group:<groupId>` 会话、并把**发言人**存下来 —— 优先用载荷里的 `senderId`（设备可能在代别人说话：DSH 事件由桌面端转发进群，`envelope.from` 只是那台发送设备），没带才退回 `envelope.from`（`PROTOCOL-EXTENSION.md` §6.10），发端一个信封扇出 N 份逐成员单播（采用群聊 v0.3 简化策略：不做按成员回执）。`mentions` 里的本机 nodeId 与保留值 `"@all"` 都算"点到我了"，只影响提醒、不影响投递（协议 §3、`:176`、`:584`）；本端没有 @ 入口，从不产生 `mentions` |
 | `recall` | 收发都有 | 自己 5 分钟内的文本**和媒体**都能撤回；媒体要求发出的 `offer` 带过 `msgId`，撤回时先取消进行中的传输再发 `recall`，本地隐藏原消息（不删用户已落盘的文件）。收到对端撤回 → 隐藏原消息、留一行提示；乱序到达会挂起等原消息入库 |
 | `nudge` | 收发都有 | 仅单聊、可靠 ACK、**不入离线队列**；限流同一对端 60 秒 2 次、相邻 ≥15 秒。**收端**：限流通过后除了写本地提示行，还会发系统通知并把界面定位到该会话（`focusRequest`），静音时段内不打扰（`shouldNotifyNudge`）。通知本身**可点**（Android 挂 `PendingIntent` + `launchMode="singleTop"` + `onNewIntent`，点开直接落在那个会话；iOS/桌面收下参数但不生效）。已知未解决：应用在后台被系统冻结时戳不到（协议不允许排队，所以没有 ACK 就没有通知） |
 | `pk` | 不做 | `Codec.validateMsg` 直接 `return false`（失败关闭），不放坏形状通过 |
