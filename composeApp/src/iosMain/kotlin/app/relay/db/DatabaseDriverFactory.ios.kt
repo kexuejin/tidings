@@ -6,7 +6,10 @@ import app.cash.sqldelight.db.SqlDriver
 import app.cash.sqldelight.driver.native.NativeSqliteDriver
 import app.relay.platform.AppPlatform
 
-actual fun createDatabaseDriver(platform: AppPlatform): SqlDriver {
+internal actual fun openPlatformDatabase(platform: AppPlatform): SqlDriver {
     // 系统 libsqlite3 通不通常带 fts5 不该靠猜：探针说有就原样建，没有就跳过那几张虚拟表。
-    return NativeSqliteDriver(FtsTolerantSchema(), "relay.db")
+    val driver = NativeSqliteDriver(FtsTolerantSchema(), "relay.db")
+    // task-14：与桌面同一条口径 —— 开库即设 WAL 与 busy_timeout。
+    applySqlitePragmas(driver)
+    return driver
 }

@@ -8,6 +8,7 @@ import app.cash.sqldelight.db.SqlSchema
 import app.cash.sqldelight.driver.jdbc.sqlite.JdbcSqliteDriver
 import app.relay.platform.AppPlatform
 import java.io.File
+import java.util.Properties
 
 /**
  * 打开桌面端的库：**按观察到的库状态决定动作，而不是按文件是否存在。**
@@ -34,14 +35,32 @@ import java.io.File
  * 对后者再跑一次 `1.sqm` 就是 `duplicate column name: screen_json` —— 所以 0 这一档
  * 必须先看一眼列在不在，不能一律迁移。
  */
-actual fun createDatabaseDriver(platform: AppPlatform): SqlDriver {
+internal actual fun openPlatformDatabase(platform: AppPlatform): SqlDriver {
     val dir = File(platform.dataDirectory.dataDirectory())
     dir.mkdirs()
     val dbFile = File(dir, "relay.db")
-    val driver = JdbcSqliteDriver("jdbc:sqlite:${dbFile.absolutePath}")
+    // busy_timeout **必须经 JDBC 属性下发**，不能只跑一次 PRAGMA：
+    // sqlite-jdbc 的 ThreadedConnectionManager 是每线程一条连接（ThreadLocal），
+    // 而 busy_timeout 是连接级设置 —— 只对建驱动那条连接跑 PRAGMA，真正并发写的
+    // worker 线程各自新建连接时它仍是 0，于是立刻 SQLITE_BUSY，两个写者互等。
+    // 属性会随每一条新连接交给 DriverManager.getConnection(url, properties)（task-14）。
+    // 注意：**只下发 busy_timeout**。journal_mode 是**库文件级**的持久属性（设一次就写进
+    // 文件头），把它当"每条连接都设一遍"的属性下发，会在并发写时踩到"新连接要拿排他锁
+    // 改 journal_mode、而旧连接正持有写锁" ⇒ SQLITE_BUSY **立即**返回（busy handler 不生效）。
+    // WAL 由下面的 applySqlitePragmas 在建驱动这条连接上设一次。
+    val properties = Properties().apply {
+        setProperty("busy_timeout", SQLITE_BUSY_TIMEOUT_MS.toString())
+    }
+    val driver = JdbcSqliteDriver("jdbc:sqlite:${dbFile.absolutePath}", properties)
     // 与 Android 走同一条路：桌面这份 sqlite-jdbc 带 fts5，探针为真 ⇒ 原样建表。
     // 统一用一个 schema 包装，是为了不靠"平台猜"来决定 fts5 在不在。
+    //
+    // 建表/迁移在这里跑**一次**：createDatabaseDriver 按库路径缓存驱动，所以
+    // message store 与 agent store 共用这一条，迁移不会再走第二遍（task-14 的要求③）。
     openDesktopDatabase(driver)
+    // 兜底与自证：让建驱动这条连接上 PRAGMA 的返回值立刻可读（属性那条路若被
+    // sqlite-jdbc 忽略，单测会在另一条线程上暴露出来）。
+    applySqlitePragmas(driver)
     return driver
 }
 

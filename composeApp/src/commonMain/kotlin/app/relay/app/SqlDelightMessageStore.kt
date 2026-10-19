@@ -19,6 +19,7 @@ import app.relay.app.model.DeliveryState
 import app.relay.app.model.GrantUi
 import app.relay.app.model.WorkspaceKey
 import app.relay.app.model.WorkspaceUi
+import app.relay.core.protocol.AgentGrantAccess
 import app.relay.app.model.FileCardUi
 import app.relay.app.model.MessageUi
 import app.relay.app.model.NoticeKind
@@ -87,6 +88,15 @@ class SqlDelightMessageStore(
             for ((peerId, list) in threads) {
                 for (message in list) {
                     val storable = message.toStorable()
+                    // 同 id 重写时，`INSERT OR REPLACE` 的**隐式删除不触发 DELETE 触发器**，
+                    // 旧 FTS 条目会留下来 —— 真机上这条把索引写到 4,554,999 行、库长到 21 GB
+                    // （见 RelayDatabase.sq 里那三条触发器的 KDoc）。所以先显式删掉旧索引条目，
+                    // 再写新行；两句在同一个事务里，中途崩不会留下半套。
+                    //
+                    // 必须包 runCatching：**没有 fts5 的机器上这张表根本不存在**（Android 框架
+                    // SQLite，见 FtsTolerantSchema），那时这一句会抛 no such table。吞掉它是
+                    // 正确的 —— 那种机器本来就没有索引要维护，而写消息本身不能被它带崩。
+                    runCatching { queries.insertMessageDropStaleIndex(storable.id) }
                     queries.insertMessage(
                         id = storable.id,
                         conv_id = storable.peerId,
@@ -494,12 +504,16 @@ class SqlDelightAgentStore(
             // 空串是"整台设备"那一档的**编码**（见 .sq 的注释：SQLite NULL 不参与主键唯一性），
             // 读回来必须翻回 null，否则 UI 上会多出一条"agentKey = """ 的假条目。
             val key = row.agent_key.takeIf { it.isNotBlank() }
-            grantKeyOf(row.node_id, key) to GrantUi(
+            val wsId = row.ws_id.takeIf { it.isNotBlank() }
+            val access = row.access.takeIf { it.isNotBlank() } ?: AgentGrantAccess.RW
+            grantKeyOf(row.node_id, key, wsId) to GrantUi(
                 peerId = row.node_id,
                 agentKey = key,
                 scope = row.scope,
                 state = row.state,
                 at = row.at,
+                wsId = wsId,
+                access = access,
             )
         }
 
@@ -530,6 +544,8 @@ class SqlDelightAgentStore(
             scope = grant.scope,
             state = grant.state,
             at = grant.at,
+            ws_id = grant.wsId ?: "",
+            access = grant.access,
         )
     }
 

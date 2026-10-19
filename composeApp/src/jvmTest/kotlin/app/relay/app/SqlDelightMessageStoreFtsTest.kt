@@ -67,6 +67,67 @@ class SqlDelightMessageStoreFtsTest {
         assertTrue(searchNone.isEmpty())
     }
 
+    /**
+     * **索引条目数必须等于消息数**（真机缺陷的回归门）。
+     *
+     * 现场：真实消息 941 条，`MessageFts` 里却有 **4,554,999** 条，库长到 **21 GB**。
+     * 两个成因：① `INSERT OR REPLACE` 的隐式删除**不触发** DELETE 触发器 ⇒ 每次
+     * 重写同一条消息就留一个孤儿；② `updateDelivery` 只改状态，但 AFTER UPDATE 触发器
+     * 无条件重建索引 ⇒ 每次状态变化再留一个。
+     *
+     * 这里反复重写同一批消息（含正文变化与纯状态变化两种），要求索引条目数始终 = 消息数。
+     * 这条如果变红，说明索引又在积累孤儿 —— 那正是把磁盘吃光的那个 bug。
+     */
+    @Test
+    fun rewritingMessagesDoesNotAccumulateOrphanIndexRows() {
+        fun indexCount(): Long = driver.executeQuery(
+            null,
+            "SELECT count(*) FROM MessageFts_docsize",
+            { cursor -> app.cash.sqldelight.db.QueryResult.Value(if (cursor.next().value) cursor.getLong(0)!! else 0L) },
+            0,
+        ).value
+
+        fun messageCount(): Long = driver.executeQuery(
+            null,
+            "SELECT count(*) FROM MessageEntity",
+            { cursor -> app.cash.sqldelight.db.QueryResult.Value(if (cursor.next().value) cursor.getLong(0)!! else 0L) },
+            0,
+        ).value
+
+        val base = MessageUi(id = "m1", peerId = "peer-1", mine = false, text = "第一版正文", at = 1000)
+        store.save(mapOf("peer-1" to listOf(base)))
+        assertEquals(1L, messageCount())
+        assertEquals(1L, indexCount(), "首次插入：一条消息对应一条索引")
+
+        // ① 同 id 重写 30 次（模拟会话每次落盘都会把整段线程重写一遍）。
+        repeat(30) { i ->
+            store.save(mapOf("peer-1" to listOf(base.copy(text = "第 " + i + " 版正文"))))
+        }
+        assertEquals(1L, messageCount())
+        assertEquals(
+            1L,
+            indexCount(),
+            "重写 30 次后仍必须只有 1 条索引（OR REPLACE 的隐式删除不触发触发器，这里靠显式清理）",
+        )
+
+        // ② 只改 delivery（正文没变）：不该产生任何新索引条目。
+        repeat(10) {
+            store.save(
+                mapOf(
+                    "peer-1" to listOf(
+                        base.copy(text = "第 29 版正文", delivery = app.relay.app.model.DeliveryState.Sent),
+                    ),
+                ),
+            )
+        }
+        assertEquals(1L, messageCount())
+        assertEquals(1L, indexCount(), "只改发送状态不该重建索引")
+
+        // 正文改了之后，检索必须命中**新**内容，且不命中旧内容。
+        store.save(mapOf("peer-1" to listOf(base.copy(text = "全新的内容在这里"))))
+        assertEquals(1, store.search("全新的内容").size, "改过正文后必须能搜到新内容")
+        assertTrue(store.search("第 29 版正文").isEmpty(), "旧正文必须从索引里消失")
+    }
     @Test
     fun smoothMigrationFromLegacyJsonStore() {
         val legacyData = mapOf(

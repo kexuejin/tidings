@@ -27,6 +27,21 @@ CREATE VIRTUAL TABLE MessageFts USING fts5(
     tokenize='trigram'
 );
 
+-- ## 这三个触发器守的是"索引条目数必须 == 消息数"这条不变量
+--
+-- 曾经它们把一个 21 GB 的库写了出来（真实消息 941 条，FTS 索引里却有 4,554,999 条），
+-- 两个成因都必须在这里挡住，否则索引会以"每条消息一个孤儿"的速度无限膨胀：
+--
+-- ① **REPLACE 不触发 DELETE 触发器**。SQLite 的 `INSERT OR REPLACE` 在撞主键时走的是
+--    "隐式删除 + 插入"，而隐式删除**不会**触发 `AFTER DELETE`。于是每存一次同一个 id，
+--    旧 FTS 行就永久留下一条孤儿。`insertMessage` 用的正是 OR REPLACE。
+-- ② **改了与正文无关的列也会重建索引**。`updateDelivery` 只动 `delivery`（发送状态
+--    Sending→Sent 之类），正文没变，但 AFTER UPDATE 无条件 delete+insert —— 于是每改一次
+--    状态就多一条（在 ① 的作用下，那条 delete 还可能删错行）。
+--
+-- 所以：插入用 `INSERT OR REPLACE` 的同时，**显式维护 FTS**（见 insertMessage 那条语句）；
+-- UPDATE 触发器则只在 `text` 真的变了时才动索引。
+
 CREATE TRIGGER message_after_insert AFTER INSERT ON MessageEntity BEGIN
     INSERT INTO MessageFts(rowid, text) VALUES (new.rowid, new.text);
 END;
@@ -35,10 +50,32 @@ CREATE TRIGGER message_after_delete AFTER DELETE ON MessageEntity BEGIN
     INSERT INTO MessageFts(MessageFts, rowid, text) VALUES ('delete', old.rowid, old.text);
 END;
 
-CREATE TRIGGER message_after_update AFTER UPDATE ON MessageEntity BEGIN
+-- 只有正文变了才重建：`delivery` / `notice` / `file_json` / `screen_json` 的更新
+-- 与检索内容无关，动索引只会白写一遍（并且把 ① 的孤儿放大成每秒好几条）。
+CREATE TRIGGER message_after_update AFTER UPDATE OF text ON MessageEntity
+WHEN old.text IS NOT new.text
+BEGIN
     INSERT INTO MessageFts(MessageFts, rowid, text) VALUES ('delete', old.rowid, old.text);
     INSERT INTO MessageFts(rowid, text) VALUES (new.rowid, new.text);
 END;
+
+-- 为什么不是一条 `INSERT OR REPLACE` 了：
+--
+-- 同 id 再来一次时，`OR REPLACE` 走的是"隐式删除 + 插入"，而**隐式删除不会触发
+-- `AFTER DELETE`**（SQLite 文档：REPLACE 的删除路径不激活触发器）。所以旧行的 FTS
+-- 索引条目会留下来，而新行又插一条 ⇒ 每条被重复写入的消息都留下一个孤儿。
+-- 真机上这条把索引写到了 4,554,999 行（真实消息 941 条），库长到 21 GB。
+--
+-- 修法：**显式**做掉 REPLACE 隐式删除本该触发的那一次 FTS 维护，再走普通的 UPSERT。
+-- 用 FTS5 的 `'delete'` 命令（而不是 `DELETE FROM MessageFts`）是必须的 ——
+-- 外部内容表（content='MessageEntity'）只能靠这条命令维护索引，直接 DELETE 会让
+-- 索引与内容表不一致，之后 `integrity-check` 会报错、检索结果也会错。
+--
+-- 两次写入都在同一个事务里（写消息的调用方包了事务，见 SqlDelightMessageStore）：
+-- 顺序 = 先按**旧正文**删索引，再写新行。首次插入时子查询为空 ⇒ 不删任何东西。
+insertMessageDropStaleIndex:
+INSERT INTO MessageFts(MessageFts, rowid, text)
+SELECT 'delete', m.rowid, m.text FROM MessageEntity m WHERE m.id = ?;
 
 insertMessage:
 INSERT OR REPLACE INTO MessageEntity (
@@ -386,7 +423,9 @@ CREATE TABLE AgentGrantEntity (
     scope TEXT NOT NULL,
     state TEXT NOT NULL,
     at INTEGER NOT NULL,
-    PRIMARY KEY (node_id, agent_key)
+    ws_id TEXT NOT NULL DEFAULT '',
+    access TEXT NOT NULL DEFAULT 'rw',
+    PRIMARY KEY (node_id, agent_key, ws_id)
 );
 
 CREATE TABLE AgentArtifactEntity (
@@ -490,9 +529,9 @@ ORDER BY updated_at DESC;
 
 insertAgentGrant:
 INSERT OR REPLACE INTO AgentGrantEntity (
-    node_id, agent_key, scope, state, at
+    node_id, agent_key, scope, state, at, ws_id, access
 ) VALUES (
-    ?, ?, ?, ?, ?
+    ?, ?, ?, ?, ?, ?, ?
 );
 
 selectAllAgentGrants:
