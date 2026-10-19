@@ -47,11 +47,13 @@ class DiscoveryTargetsTest {
     private fun targets(
         manual: List<ManualPeer> = emptyList(),
         peers: List<PeerRecord> = emptyList(),
+        candidates: List<Pair<String, Int>> = emptyList(),
     ) = broadcastTargets(
         broadcastHost = "255.255.255.255",
         broadcastPort = 17878,
         manualPeers = manual,
         knownPeers = peers,
+        candidateEndpoints = candidates,
     )
 
     @Test
@@ -80,6 +82,15 @@ class DiscoveryTargetsTest {
             ("192.168.2.99" to 17878) in result,
             "被动学到的在线节点必须收到 presence，否则 90 秒后会被误判离线：$result",
         )
+    }
+
+    @Test
+    fun candidateEndpointsAreAlwaysIncluded() {
+        // task-20：手机只留移动网时，桌面在 registry 里的地址可能是上一次被采纳的局域网
+        // 地址（不可达）；而配对码里存的公网 IPv6 明明通。心跳必须也发候选，否则手机
+        // 永远送不出 presence、桌面也就永远学不到手机的运营商地址 —— 两边互相显示离线。
+        val result = targets(candidates = listOf("2001:db8::1" to 17878))
+        assertTrue(("2001:db8::1" to 17878) in result, "候选端点必须进收件人：$result")
     }
 
     @Test

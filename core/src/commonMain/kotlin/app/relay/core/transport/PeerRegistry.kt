@@ -51,6 +51,20 @@ class PeerRegistry(private val selfNodeId: String) {
      */
     private val profileConfirmationOnly = HashSet<String>()
 
+    /** nodeId → 配对码里存下来的候选端点（不含当前地址，当前地址在 [PeerRecord] 里）。 */
+    private val candidateEndpoints = HashMap<String, List<PeerEndpoint>>()
+
+    /**
+     * nodeId → 对端的 TLS pin（wire 形态 `sha256:<64 hex>`）。
+     *
+     * 只有**配对码带过 pin** 的节点才会在这里；没有 = 不知道对方身份，K2 的公网长连接
+     * 因此**不建**（fail-closed：有 pin 必须验，没 pin 不许连）。
+     */
+    private val peerPins = HashMap<String, String>()
+
+    /** nodeId → pin 的来源（`pairing` / `tofu`）—— 见 [setPin] 的 KDoc。 */
+    private val pinSources = HashMap<String, String>()
+
     private val listeners = mutableListOf<(PeerEvent) -> Unit>()
     private val _events = MutableSharedFlow<PeerEvent>(extraBufferCapacity = 64)
 
@@ -104,10 +118,10 @@ class PeerRegistry(private val selfNodeId: String) {
             return record
         }
 
-        val sameAddress = existing.ip == ip && existing.udpPort == udpPort
+        val sameAddress = (existing.ip == ip || app.relay.core.protocol.IpAddressUtils.isSameHost(existing.ip, ip)) && existing.udpPort == udpPort
         if (!sameAddress) {
-            // 已在线节点不接受源地址漂移；离线节点带完整 profile 可以重新握手（切网）。
-            if (existing.online) return null
+            // 已在线节点不接受源地址漂移；离线节点带完整 profile、或定向握手（confirmed = true 且带完整 profile）允许换地址。
+            if (existing.online && !confirmed) return null
             if (profile == null) return null
         }
 
@@ -116,7 +130,19 @@ class PeerRegistry(private val selfNodeId: String) {
             val newer = profile.profileRev > existing.profile.profileRev
             val lastTs = profileTimes[nodeId]
             val ordered = profileTs == null || lastTs == null || profileTs > lastTs
-            val accept = newer ||
+            // **合成名必须能被真名顶替**（真机反馈：扫码后节点表一直显示 `node-a1b2c3d4`）。
+            //
+            // 成因：扫码那一刻只有 nodeId（二维码曾经不带昵称），`rememberPairedPeer` 于是
+            // 造了一个 `node-<前8位>` 的**合成名**并记为 `profileRev = 0`。而对端真实的
+            // profile 也常常就是 `profileRev = 0`（老端不累加），且 `profileTs` 未必更大 ⇒
+            // `newer=false`、`ordered=false`、`confirmed=false` ⇒ **永远替换不掉**。
+            //
+            // 判据刻意写得很窄：只有"当前名字是合成名"且"新名字不是合成名"时才越过版本
+            // 检查。这不放宽任何真实资料的新旧纪律 —— 它只是承认一件事：**我们从来没拿到过
+            // 这个节点的真名**，所以没有"更新的资料"要保护。
+            val replacesSyntheticName = isSyntheticNick(existing.profile.nick) &&
+                !isSyntheticNick(profile.nick)
+            val accept = newer || replacesSyntheticName ||
                 (sameRevision && ((ordered && !profileConfirmationOnly.contains(nodeId)) || confirmed))
             if (accept) {
                 // 真正的新版本要**解除**这个节点之前的"只认确认"封印（对齐 TS
@@ -143,7 +169,174 @@ class PeerRegistry(private val selfNodeId: String) {
         existing
     }
 
+    /**
+     * 把一个**已落盘**的对端恢复成**离线**记录（task-80 ①）。
+     *
+     * ## 为什么单独一个入口，而不是走 [touch]
+     *
+     * [touch] 的语义是"**现在**收到了一帧"：它会更新 lastSeen = now、置 online = true、
+     * 发 Online 事件。用它在启动时恢复历史记录，等于对全世界宣布"这些设备现在都在线"——
+     * 而蜂窝下它们可能根本不可达，消息会进一条通不了的队列。
+     *
+     * 这里只做"想起来它是谁"：profile、地址、上次露面时间照原样放回，**online = false**、
+     * 不刷新 lastSeen、不发任何事件（启动阶段没有订阅者，发了也没人听）。
+     *
+     * 已存在的记录**不覆盖**：启动顺序上 discovery 可能先跑起来并真的收到了某台设备的帧，
+     * 那条实时记录比盘上的旧记录新，不能被历史盖掉。
+     */
+    fun restoreOffline(
+        profile: Profile,
+        ip: String,
+        udpPort: Int,
+        lastSeen: Long,
+    ): PeerRecord? = lock.withLock {
+        if (profile.nodeId == selfNodeId) return null
+        if (peers.containsKey(profile.nodeId)) return null
+        val record = PeerRecord(
+            profile = profile,
+            ip = ip,
+            udpPort = udpPort,
+            lastSeen = lastSeen,
+            online = false,
+        )
+        peers[profile.nodeId] = record
+        profileTimes[profile.nodeId] = lastSeen
+        record
+    }
+
     fun get(nodeId: String): PeerRecord? = lock.withLock { peers[nodeId] }
+
+    companion object {
+        /** pin 来源：配对流程带来（可信路径）。 */
+        const val PIN_SOURCE_PAIRING = "pairing"
+
+        /** pin 来源：TOFU 首次固定（**降级路径**，有首次使用竞态）。 */
+        const val PIN_SOURCE_TOFU = "tofu"
+
+        /** pin 来源：没记录（旧库文件，或调用方没传）。 */
+        const val PIN_SOURCE_UNKNOWN = "unknown"
+
+        /** 候选池里最多留几条「见到过」的源地址（配对码给的那几条排在前面、优先保留）。 */
+        const val MAX_REMEMBERED_SOURCES = 8
+    }
+
+    /**
+     * 记下一个节点的**候选端点**（配对码里那一池地址）。
+     *
+     * 与 [PeerRecord] 里的 `ip`/`udpPort` 分开：那是"当前正在用的那一个"，这是"还有哪些
+     * 可以试"。发送失败时按序兜底（见 `Messenger.sendAwaitAck`），心跳也按它们全发一份
+     * （见 `Discovery.broadcastTargets`）—— 手机只留移动网时，它给桌面发 presence 必须能
+     * 到达桌面的**公网**地址，否则桌面永远学不到手机的运营商地址。
+     */
+    fun setCandidates(nodeId: String, endpoints: List<PeerEndpoint>) {
+        lock.withLock {
+            if (endpoints.isEmpty()) {
+                candidateEndpoints.remove(nodeId)
+            } else {
+                candidateEndpoints[nodeId] = endpoints
+            }
+        }
+    }
+
+    /**
+     * 记下「刚刚从这个地址收到过它的报文」——收进**候选池**，不动当前地址。
+     *
+     * 为什么必须记（task-28 真机）：[touch] 的漂移规则不允许用一条不带资料的 presence 改写
+     * 当前地址（这是对的，TS 同款），所以对端换网之后本机可能长时间停在旧地址上；如果反向的
+     * entry/alive 那一跳（UDP 单播）被网络过滤，本机就**永远**学不到新地址 —— 表现为
+     * 「ip 停在运营商地址、online=false、队列只涨不降」。
+     *
+     * 把数据报源地址收进候选池之后，出站重试（Messenger 的「离线但有候选也试」）就能打到新
+     * 地址；对端的 ACK 再经 [setActiveEndpoint] 把当前地址翻正。**不依赖任何反向 UDP 路径**，
+     * 也不需要放宽漂移规则。
+     *
+     * 上限 [MAX_REMEMBERED_SOURCES]：保留配对码给的那几条（更可靠），只在其后追加最近看到的。
+     */
+    fun rememberSource(nodeId: String, host: String, port: Int) {
+        if (nodeId.isBlank() || host.isBlank() || port !in 1..65535) return
+        lock.withLock {
+            val existing = candidateEndpoints[nodeId].orEmpty()
+            if (existing.any { it.host == host && it.port == port }) return
+            candidateEndpoints[nodeId] =
+                (existing.take(MAX_REMEMBERED_SOURCES - 1) + PeerEndpoint(host, port))
+        }
+    }
+
+    /**
+     * 记下对端的 TLS pin（配对码里那一枚，或 TOFU 首次固定学到的）。传 null/空串 = 删除。
+     *
+     * [source] 是**可诊断性**的关键（task-38）：`pairing` = 配对流程带来的（可信路径，无竞态）；
+     * `tofu` = 首次固定学到的（**降级路径**，有首次使用竞态）。让"其实还在 TOFU"看得见，
+     * 而不是又一次静默 —— 今天已经在 `lnk1`/`att1` 上栽过两次同类。
+     */
+    fun setPin(nodeId: String, pin: String?, source: String = PIN_SOURCE_UNKNOWN) {
+        lock.withLock {
+            val clean = pin?.trim().orEmpty()
+            if (clean.isEmpty()) {
+                peerPins.remove(nodeId)
+                pinSources.remove(nodeId)
+            } else {
+                peerPins[nodeId] = clean
+                pinSources[nodeId] = source
+            }
+        }
+    }
+
+    /** 这枚 pin 是哪来的：`pairing` / `tofu` / `unknown`（旧库、或没记录来源）。 */
+    fun pinSourceOf(nodeId: String): String? = lock.withLock { pinSources[nodeId] }
+
+    /** 全部 pin 来源（落盘用）。 */
+    fun allPinSources(): Map<String, String> = lock.withLock { pinSources.toMap() }
+
+    /** 对端的 TLS pin；没配对过就是 null（公网长连接会因此拒绝建立）。 */
+    fun pinOf(nodeId: String): String? = lock.withLock { peerPins[nodeId] }
+
+    /** 全部 pin（落盘用）。 */
+    fun allPins(): Map<String, String> = lock.withLock { peerPins.toMap() }
+
+    /** 该节点的候选端点（按配对码给的顺序）；没存过就是空表。 */
+    fun candidatesOf(nodeId: String): List<PeerEndpoint> = lock.withLock { candidateEndpoints[nodeId].orEmpty() }
+
+    /** 全部节点的候选端点 —— 心跳要把它们都发一份。 */
+    fun allCandidates(): Map<String, List<PeerEndpoint>> = lock.withLock { candidateEndpoints.toMap() }
+
+    /**
+     * 一次**成功的发送**证明了这个端点可达：把它提升为当前地址。
+     *
+     * 与 [touch] 的区别：touch 的地址来自入站数据报（可能被"拒绝漂移"挡掉），这里来自
+     * "我们刚从这个地址收到了 ACK" —— 那是比任何入站帧都硬的事实，所以直接改。
+     */
+    /**
+     * 长连接建立后调用：**只更新地址**，保留 [PeerRecord.udpPort]。
+     *
+     * 为什么不能直接用 [setActiveEndpoint]：那条连接的远端端口是一个**临时 TCP 端口**，
+     * 把它写进 udpPort 会让之后所有 UDP 发送都发到一个没人听的端口。长连接证明的是
+     * "这台设备现在从这个 IP 可达"，UDP 端口仍取它自己声明的那个。
+     */
+    fun setLinkedAddress(nodeId: String, host: String) {
+        val record = lock.withLock {
+            val r = peers[nodeId] ?: return
+            if (r.ip == host && r.online) return
+            r.ip = host
+            r.lastSeen = nowMillis()
+            r.online = true
+            r
+        }
+        emit(PeerEvent.Updated(record))
+    }
+
+    fun setActiveEndpoint(nodeId: String, host: String, port: Int) {
+        val record = lock.withLock {
+            val r = peers[nodeId] ?: return
+            if (r.ip == host && r.udpPort == port && r.online) return
+            r.ip = host
+            r.udpPort = port
+            r.lastSeen = nowMillis()
+            r.online = true
+            r
+        }
+        emit(PeerEvent.Updated(record))
+    }
 
     /** 未知节点返回 -1（与 TS `profileRevOf` 一致）。 */
     fun profileRevOf(nodeId: String): Int = lock.withLock { peers[nodeId]?.profile?.profileRev ?: -1 }
@@ -192,3 +385,22 @@ class PeerRegistry(private val selfNodeId: String) {
     /** 热路径用：保持插入顺序，不做排序。 */
     fun values(): List<PeerRecord> = lock.withLock { peers.values.toList() }
 }
+
+/**
+ * 这个名字是不是**我们自己合成的**（`node-<nodeId 前 8 位>`）？
+ *
+ * 扫码配对时二维码可能只带 nodeId（老载荷不带昵称），那时只能先造一个占位名。
+ * 合成名**不是对端的资料**，所以它不该挡住真名进来（见 `touch` 里的
+ * `replacesSyntheticName`）。判据收在这里，是因为生成点（`NodeRuntime.rememberPairedPeer`、
+ * `RelayController.handleQrCode`）有两处，而"什么算合成名"必须只有一个定义 ——
+ * 两处各写一遍，迟早出现一处认不出、于是那条 nodeId 永远卡在占位名上。
+ */
+fun isSyntheticNick(nick: String?): Boolean {
+    val text = nick?.trim().orEmpty()
+    if (text.length != SYNTHETIC_NICK_PREFIX.length + 8) return false
+    if (!text.startsWith(SYNTHETIC_NICK_PREFIX)) return false
+    return text.substringAfter(SYNTHETIC_NICK_PREFIX).all { it.isDigit() || it in 'a'..'f' }
+}
+
+/** 合成名字前缀。生成与识别**共用**这一个常量（两处各写一遍就会漂移）。 */
+const val SYNTHETIC_NICK_PREFIX: String = "node-"

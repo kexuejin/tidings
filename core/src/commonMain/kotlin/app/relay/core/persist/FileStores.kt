@@ -58,6 +58,17 @@ data class PersistPaths(
     val dedupLog: String,
     /** 消息历史日志。 */
     val messageLog: String,
+    /** 每个节点学到的候选端点（配对码里那一池地址）。 */
+    val peerEndpointsLog: String,
+    /** 每个节点记住的 TLS pin（配对码里带的 tlsPin）。 */
+    val peerPinsLog: String,
+    /**
+     * 「已知对端」名录（task-80 ①）：nodeId → 昵称 / 平台 / 最近端点。
+     *
+     * 与 [peerEndpointsLog] 分工：那个是"换网兜底的一池地址"（30 天过期），
+     * 这个是**身份**（90 天过期）—— 重启后节点表里那台机器叫什么、是什么系统，从这里恢复。
+     */
+    val knownPeersLog: String,
 ) {
     companion object {
         /**
@@ -74,6 +85,9 @@ data class PersistPaths(
                 queueLog = pathJoin(dir, "queue.log"),
                 dedupLog = pathJoin(dir, "dedup.log"),
                 messageLog = pathJoin(dir, "messages.log"),
+                peerEndpointsLog = pathJoin(dir, "peer-endpoints.json"),
+                peerPinsLog = pathJoin(dir, "peer-pins.json"),
+                knownPeersLog = pathJoin(dir, "known-peers.json"),
             )
         }
     }
@@ -132,33 +146,112 @@ internal fun unescapeField(raw: String): String {
     return sb.toString()
 }
 
-/** 一行一个 UTF-8 字段，读到末尾为止。 */
+/**
+ * 一行一个 UTF-8 字段，读到末尾为止。
+ *
+ * ## 为什么按**字节**找行边界，再对整行解码
+ *
+ * 这里曾经写的是 `chunk[i].toInt().toChar()`。`Byte.toInt()` 会**符号扩展**：0xE7 这个
+ * 字节是 -25，`(-25).toChar()` 得到 U+FFE7。于是任何 ≥ 0x80 的字节都变成 `U+FF00 | b`，
+ * 一条中文群消息读回来就是「￧ﾾﾤ￦ﾶﾈ…」——真机反馈里那串 `U+FFxx` 乱码的出处。
+ * 更坏的是结构（花括号、引号、键名）全是 ASCII，JSON 照样解析得动，乱码于是被当成
+ * 正文补发/落库，一路传到手机上。
+ *
+ * 修法：`\n`（0x0A）**不会出现在 UTF-8 多字节序列内部**，所以可以放心地在字节层找行，
+ * 再对每一行的完整字节做一次 `decodeToString()`（UTF-8）。跨 64KiB 块被切开的那半行
+ * 必须按**原始字节**留到下一块 —— 先解码再拼的话，半个多字节字符解出来是 U+FFFD，
+ * 只是把乱码换了个样子。
+ */
 internal fun readLines(file: RandomAccessFile): List<String> {
     val out = ArrayList<String>()
     val size = file.size
     if (size <= 0) return out
     val chunk = ByteArray(minOf(size, CHUNK).toInt())
     var at = 0L
-    var cur = StringBuilder()
+    // 当前这一行还没写完的字节，**增量**累积（ByteArrayOutputStream）。
+    //
+    // 为什么不是 carry + chunk 那种"上一块的尾巴拼上新块"：文件里长时间没有换行时，
+    // 那个写法每轮都要把越来越长的尾巴重新拷贝+重扫一遍 ⇒ O(n²)。桌面端 1.24GB 的
+    // messages.log 恰好几乎没有换行（旧 append 的截断 bug 会把行尾的 \n 一起吃掉），
+    // 于是启动时在 98% CPU 上空转、运行时永远起不来（真机现场实测）。
+    // 这一行的字节分片；行结束时拼一次再解码。每块只拷一次，整体仍是 O(n)。
+    val parts = ArrayList<ByteArray>()
+    var lineBytes = 0
+    // 这一行是不是已经超过上限、正在被丢弃（见 MAX_LINE_BYTES）。
+    var oversized = false
     while (at < size) {
         val want = minOf(chunk.size.toLong(), size - at).toInt()
         val got = file.read(chunk, at, want)
         if (got <= 0) break
-        for (i in 0 until got) {
-            val ch = chunk[i].toInt().toChar()
-            if (ch == '\n') {
-                out += cur.toString()
-                cur = StringBuilder()
-            } else {
-                cur.append(ch)
+        var start = 0
+        var i = 0
+        while (i < got) {
+            if (chunk[i] == NEWLINE) {
+                if (!oversized) {
+                    val add = i - start
+                    if (lineBytes + add > MAX_LINE_BYTES) {
+                        oversized = true
+                        parts.clear()
+                        lineBytes = 0
+                    } else {
+                        if (add > 0) {
+                            parts += chunk.copyOfRange(start, i)
+                            lineBytes += add
+                        }
+                        out += concatParts(parts).decodeToString()
+                    }
+                }
+                parts.clear()
+                lineBytes = 0
+                oversized = false
+                start = i + 1
+            }
+            i++
+        }
+        // 段尾那半行留到下一块；仍按原始字节，先解码再拼会把多字节字符切成 U+FFFD。
+        if (!oversized) {
+            val add = got - start
+            if (lineBytes + add > MAX_LINE_BYTES) {
+                oversized = true
+                parts.clear()
+                lineBytes = 0
+            } else if (add > 0) {
+                parts += chunk.copyOfRange(start, got)
+                lineBytes += add
             }
         }
         at += got
     }
     // 末尾没有换行符的那一行照样算一条 —— 进程被 kill 时的常态。
-    if (cur.isNotEmpty()) out += cur.toString()
+    if (!oversized && lineBytes > 0) out += concatParts(parts).decodeToString()
     return out
 }
+
+/** 把一行的分片拼成一个数组。单片时直接返回，不做多余拷贝。 */
+private fun concatParts(parts: List<ByteArray>): ByteArray {
+    if (parts.size == 1) return parts[0]
+    var total = 0
+    for (p in parts) total += p.size
+    val out = ByteArray(total)
+    var at = 0
+    for (p in parts) {
+        p.copyInto(out, at)
+        at += p.size
+    }
+    return out
+}
+
+/**
+ * 单行的字节上限。
+ *
+ * 正常一行（一条消息的信封）是几百字节到几 KB。超过 8MiB 只有两种可能：文件已经被写坏，
+ * 或者有人把二进制塞了进来。这时**丢掉这一行**而不是把它拼成一个几亿字符的 String ——
+ * 后者会直接 OOM，把"文件坏了"升级成"应用起不来"。
+ */
+private const val MAX_LINE_BYTES: Int = 8 * 1024 * 1024
+
+/** 行分隔符的字节值。UTF-8 里 0x0A 只可能是换行本身，不会出现在多字节字符内部。 */
+private const val NEWLINE: Byte = 0x0A
 
 internal const val CHUNK: Long = 64L * 1024
 
@@ -299,7 +392,11 @@ class FileQueueStore(
         val handle = log ?: runCatching { openRandomAccess(path, forWrite = true) }.getOrNull() ?: return
         log = handle
         runCatching {
-            handle.append((line + "\n").encodeToByteArray(), line.length + 1)
+            // 长度必须是**字节数**，不能给 `line.length`（字符数）：一条中文信封的 JSON
+            // 180 字符 / 194 字节，给字符数会把行尾 13 个字节切掉，落盘的就是半条 JSON，
+            // 重启后 `Codec.decode` 失败、队列直接把这条丢掉（消息静默丢失）。
+            val bytes = (line + "\n").encodeToByteArray()
+            handle.append(bytes, bytes.size)
             handle.flush()
         }
     }
@@ -409,7 +506,9 @@ class FileMessageStore(
     private fun appendLine(line: String) {
         val handle = runCatching { openRandomAccess(path, forWrite = true) }.getOrNull() ?: return
         runCatching {
-            handle.append((line + "\n").encodeToByteArray(), line.length + 1)
+            // 与 [FileQueueStore.appendLine] 同一条：给字节数，不给字符数。
+            val bytes = (line + "\n").encodeToByteArray()
+            handle.append(bytes, bytes.size)
             handle.flush()
         }
     }

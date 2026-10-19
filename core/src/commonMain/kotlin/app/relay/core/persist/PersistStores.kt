@@ -2,7 +2,13 @@
 
 package app.relay.core.persist
 
+import app.relay.core.transport.InMemoryPeerEndpointStore
+import app.relay.core.transport.KnownPeerStore
+import app.relay.core.transport.NoKnownPeerStore
+import app.relay.core.transport.InMemoryPeerPinStore
 import app.relay.core.transport.MessageStore
+import app.relay.core.transport.PeerPinStore
+import app.relay.core.transport.PeerEndpointStore
 import app.relay.core.transport.QueueStore
 
 /**
@@ -21,6 +27,15 @@ class PersistStores(
     val queue: QueueStore,
     /** 会话历史（供 `GET /v1/inbox?since=` 增量拉取）。 */
     val messages: MessageStore,
+    /** 每个节点学到的候选端点（配对码里那一池地址），发送失败时的兜底。 */
+    val peerEndpoints: PeerEndpointStore = InMemoryPeerEndpointStore(),
+    /** 每个节点记住的 TLS pin（配对码里带的 tlsPin），公网长连接的信任根。 */
+    val peerPins: PeerPinStore = InMemoryPeerPinStore(),
+    /**
+     * 「已知对端」名录（task-80 ①）：重启后节点**身份**还在，只是以离线态出现。
+     * 没有它，手机 kill 一次之后节点表里那台 Mac 就只剩 `node-a1b2c3d4` 这个合成名。
+     */
+    val knownPeers: KnownPeerStore = NoKnownPeerStore,
 ) {
     companion object {
         fun under(dataDir: String): PersistStores {
@@ -28,6 +43,9 @@ class PersistStores(
             return PersistStores(
                 queue = FileQueueStore(paths.queueLog),
                 messages = FileMessageStore(paths.messageLog),
+                peerEndpoints = FilePeerEndpointStore(paths.peerEndpointsLog),
+                peerPins = FilePeerPinStore(paths.peerPinsLog),
+                knownPeers = FileKnownPeerStore(paths.knownPeersLog),
             )
         }
     }

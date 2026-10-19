@@ -5,9 +5,17 @@ package app.relay.core.persist
 import app.relay.core.fs.deleteFile
 import app.relay.core.fs.fileExists
 import app.relay.core.fs.makeDirectories
+import app.relay.core.fs.openRandomAccess
 import app.relay.core.fs.pathJoin
+import app.relay.core.fs.readFileBytes
+import app.relay.core.protocol.Codec
+import app.relay.core.protocol.DecodeResult
+import app.relay.core.protocol.MsgTypes
+import app.relay.core.protocol.makeEnvelope
 import app.relay.core.testing.createTempDir
 import app.relay.core.testing.removeRecursively
+import kotlinx.serialization.json.JsonObject
+import kotlinx.serialization.json.JsonPrimitive
 import kotlin.test.AfterTest
 import kotlin.test.Test
 import kotlin.test.assertEquals
@@ -174,6 +182,115 @@ class FileStoresTest {
         assertTrue(paths.queueLog.endsWith("stores/queue.log"))
         assertTrue(paths.dedupLog.endsWith("stores/dedup.log"))
         assertTrue(paths.messageLog.endsWith("stores/messages.log"))
+    }
+
+    // ---- 非 ASCII：UTF-8 必须逐字节原样往返（真机群消息乱码的回归）
+    //
+    // 真机现象：桌面排队的一条中文群消息，重启后补发到手机上变成 `U+FFxx` 乱码
+    // （`￯﾿ﾯ￯ﾾ﾿…`），而桌面 relay.db 里同一批消息是正常中文。根因在这两个 store：
+    //   1. `readLines` 用 `chunk[i].toInt().toChar()`，Byte→Int 的**符号扩展**把每个
+    //      ≥0x80 的字节变成 `U+FF00|b`（0xE7 → U+FFE7）；JSON 结构是 ASCII，照样解析得动，
+    //      乱码于是被当成正文补发。
+    //   2. `appendLine` 给 `append` 传的是 `line.length + 1`（字符数）而不是字节数，
+    //      中文行被截断，重启后 JSON 解析失败、队列直接丢掉这条。
+    // 下面几条都用**中文群文本的真实信封**，断言"逐字节原样"，ASCII 夹具永远测不出来。
+
+    private fun groupTextJson(text: String): String =
+        Codec.encode(makeEnvelope(MsgTypes.MSG, "desk-node", Codec.groupTextPayload(text, "g-1", 1)))
+
+    @Test
+    fun aNonAsciiQueueRowRoundTripsByteForByte() {
+        val text = "群消息正常中文"
+        val json = groupTextJson(text)
+        FileQueueStore(p("q-cn.log")).enqueue("m-cn", "group:g-1", json, 100)
+
+        val reopened = FileQueueStore(p("q-cn.log")).listByPeer("group:g-1").single()
+
+        assertEquals(json, reopened.envelopeJson, "信封必须逐字节原样读回，不能被符号扩展成 U+FFxx")
+        val decoded = Codec.decode(reopened.envelopeJson)
+        assertTrue(decoded is DecodeResult.Ok, "读回来必须还是能解析的信封：$decoded")
+        val payload = (decoded as DecodeResult.Ok).env.payload as JsonObject
+        assertEquals(text, (payload["text"] as JsonPrimitive).content, "正文不能被符号扩展")
+    }
+
+    @Test
+    fun aNonAsciiHistoryRowRoundTripsByteForByte() {
+        val json = groupTextJson("群消息正常中文")
+        FileMessageStore(p("m-cn.log")).append("group:g-1", "out", json, 100)
+
+        val after = FileMessageStore(p("m-cn.log"))
+
+        assertEquals(json, after.since("group:g-1", 0, 10).single().envelopeJson)
+    }
+
+    @Test
+    fun aNonAsciiRowIsWrittenInFullNotTruncatedToItsCharacterCount() {
+        val json = groupTextJson("群消息正常中文")
+        FileQueueStore(p("q-full.log")).enqueue("m-cn", "group:g-1", json, 100)
+
+        val raw = readFileBytes(p("q-full.log"))!!.decodeToString()
+
+        assertTrue(raw.endsWith("}\n"), "整行必须以 JSON 收尾符加换行结束，实际结尾：${raw.takeLast(24)}")
+        assertEquals(json, raw.removeSuffix("\n").substringAfterLast('\t'))
+    }
+
+    @Test
+    fun aNonAsciiQueueRowSurvivesSeveralRestartsWithoutMojibake() {
+        val json = groupTextJson("群消息正常中文")
+        FileQueueStore(p("q-restart.log")).enqueue("m-cn", "group:g-1", json, 100)
+
+        // 连开三次 = 连重启三次。旧实现每读一次就把字节再符号扩展一层，
+        // 乱码会一层套一层（真机上那串 ￯﾿ﾯ… 正是这么来的）。
+        var store = FileQueueStore(p("q-restart.log"))
+        repeat(2) { store = FileQueueStore(p("q-restart.log")) }
+
+        assertEquals(json, store.listByPeer("group:g-1").single().envelopeJson)
+    }
+
+    @Test
+    fun readLinesDecodesUtf8AcrossTheChunkBoundary() {
+        // 让一个三字节汉字正好跨在 64KiB 读块边界上：先解码半块再拼会得到 U+FFFD。
+        val text = "a".repeat(CHUNK.toInt() - 1) + "群尾"
+        writeRaw(p("boundary.log"), text + "\n")
+
+        val handle = openRandomAccess(p("boundary.log"), forWrite = false)
+        val lines = readLines(handle)
+        handle.close()
+
+        assertEquals(listOf(text), lines, "跨块的多字节字符必须按原始字节接到下一块再解码")
+    }
+
+    /**
+     * 没有换行的超大行必须**线性读完**，而不是把尾巴越拼越长。
+     *
+     * 现场（2026-10-18）：桌面端 1.24GB 的 messages.log 几乎没有换行 —— 旧 appendLine 把
+     * line.length + 1（字符数）当字节数传，行尾那个 \n 被一起截掉了。第一版修复用
+     * carry + chunk 拼行，在这种文件上每轮都要重拷重扫越来越长的尾巴（O(n²)），于是启动时
+     * 在 98% CPU 空转、节点运行时永远起不来。这条测试钉住"线性读完 + 超限行丢弃"。
+     */
+    @Test
+    fun aNewlineSparseFileIsReadWithoutQuadraticBlowup() {
+        val path = p("sparse.log")
+        // 一条 9MiB 的"行"（超过单行上限 8MiB）+ 一条正常行。
+        val huge = "a".repeat(9 * 1024 * 1024)
+        writeRaw(path, huge + "\n" + "ok\tline\n")
+
+        val handle = openRandomAccess(path, forWrite = true)
+        val lines = try { readLines(handle) } finally { handle.close() }
+
+        assertEquals(listOf("ok\tline"), lines, "超过单行上限的那一行要被丢掉，而不是拼成 String 把堆撑爆")
+    }
+
+    @Test
+    fun aLineSpanningManyChunksKeepsItsUtf8Tail() {
+        val path = p("longline.log")
+        val body = "x".repeat(200 * 1024) + "中文尾巴"
+        writeRaw(path, body + "\n")
+
+        val handle = openRandomAccess(path, forWrite = true)
+        val lines = try { readLines(handle) } finally { handle.close() }
+
+        assertEquals(listOf(body), lines, "跨多个 64KiB 块的行必须按原始字节累积，尾部多字节字符不能变成 U+FFFD")
     }
 
     private fun readRaw(path: String): String {

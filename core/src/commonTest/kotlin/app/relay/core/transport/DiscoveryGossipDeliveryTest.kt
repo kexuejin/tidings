@@ -77,13 +77,21 @@ class DiscoveryGossipDeliveryTest {
         }
 
         try {
-            send(
-                MsgTypes.SCAN_RANGES,
-                Codec.scanRangesPayload(listOf(ScanRangeSummary(cidr = "10.99.195.0/24", addedAt = 1L))),
-            )
-            awaitTrue(what = "发现层没把入站 scan-ranges 递上来（应用层那段处理代码就是死的）") {
-                got.any { it.type == MsgTypes.SCAN_RANGES }
+            // **重发**而不是只发一次：SharedFlow 没有 replay，订阅之前 emit 的帧会被直接丢掉
+            // （不是缓冲），而 Discovery.start 是 scope.launch 异步订阅的 —— 单跑时调度来得及，
+            // 全量跑（负载高、launch 晚一步）时会偶发超时（2026-10-18 全量跑红过两次、单跑绿）。
+            // 每 20ms 重发一次直到收到，这条断言就变成确定性的，不靠 sleep 猜。
+            var delivered = false
+            repeat(150) {
+                if (delivered) return@repeat
+                send(
+                    MsgTypes.SCAN_RANGES,
+                    Codec.scanRangesPayload(listOf(ScanRangeSummary(cidr = "10.99.195.0/24", addedAt = 1L))),
+                )
+                delay(20)
+                delivered = got.any { it.type == MsgTypes.SCAN_RANGES }
             }
+            assertTrue(delivered, "发现层没把入站 scan-ranges 递上来（应用层那段处理代码就是死的）")
 
             // 递上来的那一帧必须是应用层**能用**的：载荷能解回同一条网段。
             val envelope = got.first { it.type == MsgTypes.SCAN_RANGES }

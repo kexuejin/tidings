@@ -82,6 +82,11 @@ class Discovery(
      * `settings.json` 里始终只有它自己手动加的那一条。
      */
     private val onGossip: (suspend (Envelope) -> Unit)? = null,
+    /**
+     * 对端资料里带了它的 TLS pin 时的去处（task-38）—— 主机据此**在配对时就固定**正确的 pin，
+     * 不再依赖 TOFU 的首次固定（那个有首次使用竞态）。
+     */
+    private val onPeerPin: (String, String) -> Unit = { _, _ -> },
 ) {
 
     private var scope: CoroutineScope? = null
@@ -100,7 +105,10 @@ class Discovery(
     fun start(scope: CoroutineScope) {
         if (this.scope != null) return
         this.scope = scope
-        jobs += scope.launch { transport.incoming.collect { onDatagram(it) } }
+        // 每条报文单独兜底：一条坏帧（或应用层的 gossip 处理器抛异常）绝不能把整个发现层
+        // 的收包协程带走 —— 那会让本机从此收不到任何 presence/entry/alive，表现就是
+        // 「换了网之后永远不自愈」（task-28 真机的症状之一）。
+        jobs += scope.launch { transport.incoming.collect { runCatching { onDatagram(it) } } }
         jobs += scope.launch { presenceLoop() }
         jobs += scope.launch { sweepLoop() }
     }
@@ -129,7 +137,15 @@ class Discovery(
             Codec.profilePayload(selfProfile()),
         )
         val bytes = Codec.encodeToBytes(envelope)
-        for ((host, port) in broadcastTargets(broadcastHost, broadcastPort, manualPeers, registry.values())) {
+        for ((host, port) in broadcastTargets(
+            broadcastHost = broadcastHost,
+            broadcastPort = broadcastPort,
+            manualPeers = manualPeers,
+            knownPeers = registry.values(),
+            // 候选端点也要发：手机只留移动网时，它给桌面发 presence 必须能到达桌面的**公网**
+            // 地址，否则桌面永远学不到手机的运营商地址（task-20 那条死锁）。
+            candidateEndpoints = candidateTargets(),
+        )) {
             sendRaw(bytes, host, port)
         }
     }
@@ -158,14 +174,22 @@ class Discovery(
     suspend fun announceExit() {
         val envelope = makeEnvelope(MsgTypes.EXIT, selfProfile().nodeId, JsonObject(emptyMap()))
         val bytes = Codec.encodeToBytes(envelope)
-        for ((host, port) in broadcastTargets(broadcastHost, broadcastPort, manualPeers, registry.values())) {
+        for ((host, port) in broadcastTargets(
+            broadcastHost = broadcastHost,
+            broadcastPort = broadcastPort,
+            manualPeers = manualPeers,
+            knownPeers = registry.values(),
+            // 候选端点也要发：手机只留移动网时，它给桌面发 presence 必须能到达桌面的**公网**
+            // 地址，否则桌面永远学不到手机的运营商地址（task-20 那条死锁）。
+            candidateEndpoints = candidateTargets(),
+        )) {
             sendRaw(bytes, host, port)
         }
     }
 
-    private suspend fun sendRaw(bytes: ByteArray, host: String, port: Int) {
-        runCatching { transport.send(bytes, host, port) }
-    }
+    /** @return false = 这个包没交出去（见 UdpTransport.send）。 */
+    private suspend fun sendRaw(bytes: ByteArray, host: String, port: Int): Boolean =
+        transport.send(bytes, host, port)
 
     /**
      * 周期 presence 的收件人：广播地址 + 手动节点 + **registry 里在线的节点**
@@ -176,18 +200,62 @@ class Discovery(
      * 被我方判离线 → 发给它的消息全部进排队而不是发出去。
      */
     private suspend fun presenceLoop() {
+        // 连续几轮一个包都没交出去 ⇒ 判定发现泵已停摆（socket 被关/坏），重建 transport。
+        var deadRounds = 0
         while (true) {
             delay(timings.presenceInterval)
-            val envelope = makeEnvelope(
-                MsgTypes.PRESENCE,
-                selfProfile().nodeId,
-                Codec.presencePayload(presenceSeq++, selfProfile().profileRev),
-            )
-            val bytes = Codec.encodeToBytes(envelope)
-            for ((host, port) in broadcastTargets(broadcastHost, broadcastPort, manualPeers, registry.values())) {
-                sendRaw(bytes, host, port)
+            val sent = presenceRound()
+            deadRounds = if (sent > 0) 0 else deadRounds + 1
+            if (deadRounds >= STALLED_ROUNDS_BEFORE_RESTART) {
+                deadRounds = 0
+                runCatching { transport.restart() }
             }
         }
+    }
+
+    /**
+     * 一个心跳周期：发 presence（广播 + 手动 + 在线节点 + 候选），再给候选补一帧 entry。
+     *
+     * @return 这一轮**真正交出去**的包数。0 = socket 已经发不出任何东西（task-29 的静默停摆）。
+     */
+    private suspend fun presenceRound(): Int {
+        val envelope = makeEnvelope(
+            MsgTypes.PRESENCE,
+            selfProfile().nodeId,
+            Codec.presencePayload(presenceSeq++, selfProfile().profileRev),
+        )
+        val bytes = Codec.encodeToBytes(envelope)
+        val candidates = candidateTargets()
+        var sent = 0
+        for ((host, port) in broadcastTargets(
+                broadcastHost = broadcastHost,
+                broadcastPort = broadcastPort,
+                manualPeers = manualPeers,
+                knownPeers = registry.values(),
+                // 候选端点也要发：手机只留移动网时，它给桌面发 presence 必须能到达桌面的**公网**
+                // 地址，否则桌面永远学不到手机的运营商地址（task-20 那条死锁）。
+            candidateEndpoints = candidates,
+        )) {
+            if (sendRaw(bytes, host, port)) sent++
+        }
+            // 候选地址上再补一帧 **entry**（带全量资料）。
+            //
+            // 为什么不能只发 presence：presence 不带 profile，收端在「已在线但源地址变了」或
+            // 「离线且没有资料」这两种情况下都会拒绝它（PeerRegistry 的漂移规则），只能靠收端
+            // 反向发 entry、我们再回 alive 来刷新 —— 而那条**反向 UDP** 在运营商侧可能被过滤。
+            // task-21 真机就是这一档：候选生效、ip 学到了，但 online 一直是 False、队列不动。
+            // entry 带全量资料，收端用 confirmed = true **直接采纳**新地址（连 online 一起翻回来），
+            // 不依赖任何反向路径。
+        if (candidates.isNotEmpty()) {
+            val entry = makeEnvelope(
+                MsgTypes.ENTRY,
+                selfProfile().nodeId,
+                Codec.profilePayload(selfProfile()),
+            )
+            val entryBytes = Codec.encodeToBytes(entry)
+            for ((host, port) in candidates) if (sendRaw(entryBytes, host, port)) sent++
+        }
+        return sent
     }
 
     private suspend fun sweepLoop() {
@@ -202,6 +270,9 @@ class Discovery(
         if (decoded !is DecodeResult.Ok) return
         val envelope = decoded.env
         if (envelope.from == selfProfile().nodeId) return
+        // 任何一条入站报文都在告诉我们「它现在从这个地址可达」——收进候选池。
+        // 不改当前地址（漂移规则仍由 touch 把关），只让出站重试多一条能打的路（task-28）。
+        registry.rememberSource(envelope.from, datagram.host, datagram.port)
         when (envelope.type) {
             MsgTypes.ENTRY -> handleEntry(envelope, datagram)
             MsgTypes.ALIVE -> handleAlive(envelope, datagram)
@@ -216,8 +287,20 @@ class Discovery(
         }
     }
 
+    /**
+     * 资料里带了 `tlsPin` 就交给上层固定（task-38）。
+     *
+     * 形状不对（`TlsPin.parse` 不认）就当**没有**这个键：坏值绝不静默变成"信任的 pin"。
+     */
+    private fun learnPin(profile: Profile) {
+        val raw = profile.tlsPin ?: return
+        if (app.relay.core.crypto.TlsPin.parse(raw) == null) return
+        onPeerPin(profile.nodeId, raw)
+    }
+
     private suspend fun handleEntry(envelope: Envelope, datagram: ReceivedDatagram) {
         val profile = profileOf(envelope) ?: return
+        learnPin(profile)
         registry.touch(
             envelope.from,
             datagram.host,
@@ -231,7 +314,8 @@ class Discovery(
 
     private suspend fun handleAlive(envelope: Envelope, datagram: ReceivedDatagram) {
         val profile = profileOf(envelope) ?: return
-        registry.touch(envelope.from, datagram.host, datagram.port, profile, envelope.ts)
+        learnPin(profile)
+        registry.touch(envelope.from, datagram.host, datagram.port, profile, envelope.ts, confirmed = true)
     }
 
     /**
@@ -244,6 +328,7 @@ class Discovery(
      */
     private suspend fun handleProfile(envelope: Envelope, datagram: ReceivedDatagram) {
         val profile = profileOf(envelope) ?: return
+        learnPin(profile)
         registry.touch(envelope.from, datagram.host, datagram.port, profile, envelope.ts)
     }
 
@@ -261,15 +346,28 @@ class Discovery(
      * 等于永远等不到：会话列表里那个人的名字一直停在 nodeId 前 8 位，直到对方重启。
      * 协议 §6.2 的原话是「与本地缓存版本不一致 → 单播 `entry`」，"本地没有缓存"正是不一致。
      *
+     * **源地址漂移也算「对不上」。** 这条是跨网真机验出来的：手机在「局域网 IPv6 ↔
+     * 运营商 IPv6」之间切换时，`PeerRegistry.touch` 会拒绝在线节点的地址漂移，而心跳
+     * 又不带资料 ⇒ 旧代码里 `knownRev == theirRev` 直接 return，本机永远停在旧地址上、
+     * 发给它的消息全进队列。现在只要 `touch` 没采纳（地址漂移/未知节点）就问一次资料。
+     *
      * 唯一的克制：同一节点两次刷新至少隔 [PROFILE_REFRESH_MIN_INTERVAL_MS]（每节点
      * 10 秒），否则一个版本号乱跳的对端能让本机每个心跳周期都发一次 entry。收件地址取的是
      * **数据报的源地址**而不是载荷里的字段，所以不存在被伪造成反射放大器的问题。
      */
     private suspend fun handlePresence(envelope: Envelope, datagram: ReceivedDatagram) {
-        registry.touch(envelope.from, datagram.host, datagram.port, null, envelope.ts)
+        // touch 返回 null 有两种「我们其实认得它、但它换了源地址」的情况：
+        //  · 它已经在线、源地址变了（PeerRegistry 拒绝在线节点漂移）；
+        //  · 它离线后换了地址，而 presence **不带资料**（换地址必须带完整资料）。
+        // 两种都必须**主动要一份资料**：定向 entry → 对方回 alive（confirmed = true）→ 新地址被采纳。
+        // 不这么做的话，节点在「局域网 IPv6 ↔ 运营商 IPv6」之间切换时，本机永远停在旧地址上，
+        // 发给它的消息只会进队列 —— 真机现场：网络层双向可达（nc rc=0）、/v1/peers 甚至出现过
+        // 运营商地址，queue.log 却从 15 涨到 18，切回 WiFi 才清空。
+        val accepted = registry.touch(envelope.from, datagram.host, datagram.port, null, envelope.ts)
         val theirRev = profileRevOf(envelope) ?: return
         val knownRev = registry.profileRevOf(envelope.from)
-        if (knownRev == theirRev) return
+        // 版本一致、且源地址也被采纳：这条心跳没有新信息。
+        if (knownRev == theirRev && accepted != null) return
         val now = nowMillis()
         val last = lastProfileRefreshAt[envelope.from]
         if (last != null && now - last < PROFILE_REFRESH_MIN_INTERVAL_MS) return
@@ -318,6 +416,10 @@ class Discovery(
         }
     }
 
+    /** 全部已存节点的候选端点，摊平成 (host, port) 列表。 */
+    private fun candidateTargets(): List<Pair<String, Int>> =
+        registry.allCandidates().values.flatten().map { it.host to it.port }
+
     private fun profileOf(envelope: Envelope): Profile? {
         val payload = envelope.payload as? JsonObject ?: return null
         val element = payload["profile"] ?: return null
@@ -347,6 +449,15 @@ class Discovery(
          * 对端能让本机每个心跳周期都发一次 entry —— 那是自己给自己造广播风暴。
          */
         const val PROFILE_REFRESH_MIN_INTERVAL_MS = 10_000L
+
+        /**
+         * 连续几轮"一个包都没发出去"就把 transport 重建一次。
+         *
+         * 2 轮 = 2 × presenceInterval（默认 60 秒）：一轮里连广播都发不出去，只可能是
+         * socket 已经不可用（UDP 发送失败是内核层面的，不存在"网络不好所以没交出去"）。
+         * 取 2 而不是 1，是为了不在一次瞬时错误上就重建连接。
+         */
+        const val STALLED_ROUNDS_BEFORE_RESTART = 2
     }
 }
 
@@ -369,11 +480,20 @@ internal fun broadcastTargets(
     broadcastPort: Int,
     manualPeers: List<ManualPeer>,
     knownPeers: List<PeerRecord>,
+    /**
+     * 各节点存下来的**候选端点**（配对码里那一池地址），由调用方从 registry 摊平。
+     *
+     * 为什么心跳也要发候选：手机只留移动网时，桌面在 registry 里的地址可能是它上一次
+     * 被采纳的局域网地址（不可达）；而配对码里的公网 IPv6 明明通。心跳如果只发"当前地址"，
+     * 手机就永远送不出 presence、桌面也就永远学不到手机的运营商地址 —— 两边互相显示离线。
+     */
+    candidateEndpoints: List<Pair<String, Int>> = emptyList(),
 ): List<Pair<String, Int>> {
     val targets = mutableListOf(broadcastHost to broadcastPort)
     for (peer in manualPeers) targets += peer.host to peer.udpPort
     for (record in knownPeers) {
         if (record.online) targets += record.ip to record.udpPort
     }
+    targets += candidateEndpoints
     return targets
 }
