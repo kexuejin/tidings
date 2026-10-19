@@ -51,8 +51,9 @@ internal fun manualPeerStatuses(
     entries: List<ManualPeerEntry>,
     peers: List<PeerUi>,
 ): List<ManualPeerStatus> = entries.map { entry ->
-    val match = peers.firstOrNull { it.ip == entry.host && it.udpPortMatches(entry.port) }
+    val match = peers.firstOrNull { (it.ip == entry.host || app.relay.core.protocol.IpAddressUtils.isSameHost(it.ip, entry.host)) && it.udpPortMatches(entry.port) }
         ?: peers.firstOrNull { it.host == entry.host && it.udpPortMatches(entry.port) }
+        ?: peers.firstOrNull { entry.name?.contains(it.nodeId) == true || entry.name?.contains(it.nodeId.take(6)) == true }
     ManualPeerStatus(
         entry = entry,
         nodeId = match?.nodeId,

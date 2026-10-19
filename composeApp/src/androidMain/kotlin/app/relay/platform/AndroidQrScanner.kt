@@ -104,6 +104,11 @@ class AndroidQrScanner(
         }
     }
 
+    // 这里曾有 `injectScanResultForTesting`：把内容直接喂给等着的 [scan] 续体，等于"假装相机扫到了"。
+    // 它是一条**绕过外部配对二次确认**的现成旁路（task-54 裁决删除），留着的唯一后果就是给下一个人
+    // 一个 footgun。将来若再需要测试钩子：必须走 MainActivity 的外部配对闸门（登记 → 用户确认 →
+    // 才落盘），不许再形成第二条直达配对的分支。
+
     /** Compose 组件：显示相机预览，并在 [scan] 挂起期间把检测到的码交给它。 */
     @Composable
     fun QrScannerPreview(modifier: Modifier = Modifier) {
