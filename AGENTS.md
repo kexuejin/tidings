@@ -201,9 +201,16 @@ python3 tools/unused-imports.py --check
   - APK：`adb -s <serial> install -r -d <apk>`；
     桌面端：`osascript -e 'quit app "Tidings"'` → 替换 `/Applications/Tidings.app` → `open -a`。
   - **不要只看「装上了」**：在新产物里 grep 一个只有新代码才有的符号名，证明装的是新的。
-  - 手机状态探针：`files/relay/diag/link.json`（链路）、`files/relay/messages.json`（会话）、
-    `files/relay/stores/known-peers.json`（已知对端）、`files/relay/stores/messages.log`（原始信封）。
+  - 手机状态探针（`run-as` 可读）：
+    - `files/relay/diag/link.json` —— 链路（`closeCount` / `carrier` / `lastError`）
+    - `files/relay/stores/known-peers.json` —— 已知对端与真名
+    - `files/relay/stores/messages.log` —— 原始信封（**落库时刻在 `at` 列**，不是信封 `ts`）
+    - **会话的真身是 `databases/relay.db`（SQLDelight）**；`files/relay/messages.json` 只是它的
+      导出，改它没用（应用会按库重新导出）。手机侧**没有 FTS 表** —— FTS 只在桌面端。
 - 桌面库在 `~/Library/Application Support/捎话 Tidings/`：`relay.db` 是 SQLite，可以直接 `sqlite3` 查。
+- 改手机侧的库要**先 `am force-stop`**，再用 `exec-out run-as cat` 拉、改、`push` 到
+  `/data/local/tmp/` 后 `run-as cp` 写回，并删掉 `relay.db-wal` / `relay.db-shm`（否则旧的
+  WAL 会把改动盖回去）。
 
 ---
 
