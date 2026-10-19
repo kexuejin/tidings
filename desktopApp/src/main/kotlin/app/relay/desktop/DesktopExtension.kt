@@ -9,6 +9,7 @@ import app.relay.agent.ControlPlane
 import app.relay.agent.GrantReplyOutcome
 import app.relay.app.RelayController
 import app.relay.app.model.hasVisibleText
+import app.relay.core.protocol.AGENT_SENDER_PREFIX
 import app.relay.core.session.NodeRuntime
 import app.relay.generated.resources.Res
 import app.relay.generated.resources.agent_demo_driver_notice
@@ -1065,7 +1066,7 @@ internal fun agentChatMessageFor(
  * kind 为空时退回 `agent:dsh`：宁可显示一个通用 agent 名，也不要退回成"桌面端"这个**错的人**。
  */
 internal fun agentSenderIdFor(agentKind: String?): String =
-    "agent:" + (agentKind?.trim()?.takeIf { it.isNotBlank() } ?: "dsh").lowercase()
+    AGENT_SENDER_PREFIX + (agentKind?.trim()?.takeIf { it.isNotBlank() } ?: "dsh").lowercase()
 
 internal fun eventDiagnosticLine(
     type: String,

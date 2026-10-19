@@ -99,6 +99,16 @@ data class GroupTextMsgPayload(
 )
 
 /**
+ * agent 作为群消息发送者时的**前缀**（完整形态 `agent:<小写 kind>`）。
+ *
+ * 为什么提到 core：这个字符串有**三个生产点**（宿主侧的 `agentSenderIdFor`、
+ * 应用侧两条群内播报）与**两个消费点**（判断「这条是不是 agent 说的」、
+ * `shouldTriggerAgent` 的接话判据）。各写一份已经漂过一次 —— 真机库里
+ * `agent:DSH` 与 `agent:dsh` 各 801 / 113 条，同一个 agent 显示成两个人。
+ */
+const val AGENT_SENDER_PREFIX: String = "agent:"
+
+/**
  * msg kind=recall。
  *
  * key 顺序对齐 TS 侧白名单 `kind|targetId|groupId|groupRev`（协议文档 §8 `msg.payload`）：

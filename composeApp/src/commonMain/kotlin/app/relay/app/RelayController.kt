@@ -15,6 +15,7 @@ import app.relay.core.protocol.ConvId
 import app.relay.core.protocol.DEFAULT_TIMINGS
 import app.relay.core.protocol.Envelope
 import app.relay.core.protocol.MsgKinds
+import app.relay.core.protocol.AGENT_SENDER_PREFIX
 import app.relay.core.protocol.MsgTypes
 import app.relay.core.protocol.Protocol
 import app.relay.core.protocol.Timings
@@ -1299,6 +1300,41 @@ class RelayController(
 
         fun isMentioningDsh(text: String): Boolean =
             text.contains(DSH_MENTION_REGEX)
+
+        /** 这条消息是不是 agent 说的（`senderId` 形如 `agent:<kind>`）。 */
+        fun isAgentAuthored(message: MessageUi?): Boolean =
+            message?.senderId?.startsWith(AGENT_SENDER_PREFIX) == true
+
+        /**
+         * 这条消息要不要触发**宿主侧**的 agent 执行？
+         *
+         * 判据是「**这条消息是不是在跟 agent 说话**」，不是「会话是什么类型」：
+         *
+         * - **1:1**（`groupId == null`）：**每条都触发**。点进这个会话本身就是在指名 agent，
+         *   而且没有第三方旁观 —— 误触发的代价最低，再要求一个 `@dsh` 只是摩擦。
+         * - **群**：`@dsh` 点名；**工作区群**里「回复 agent 那条」也算 —— 接话不必再 @ 一遍。
+         * - **普通群**：只有 `@dsh`。
+         *
+         * ## 为什么不再「工作区群里每条都触发」
+         *
+         * 触发之后跑的是**宿主本地的执行能力**（默认驱动 `NativeRelayDriver`：`bash` /
+         * 文件读写 / 代码搜索，受 ACL 约束）。工作区群恰恰是**人最多**的那个频道 ——
+         * 让任何人的任意一句话都拉起它，等于把最宽的能力面挂在最公开的地方。
+         * 真机实测：一条不带 @ 的群消息，1 秒后 `agent:native` 就回了一条。
+         *
+         * **判据只有这一份**：三个触发点（收方 / 本机发方 / 群发方）都调它，
+         * 任何一处都不许自己重写一遍条件。
+         */
+        fun shouldTriggerAgent(
+            text: String,
+            groupId: String?,
+            isWorkspaceGroup: Boolean,
+            repliedToIsAgent: Boolean,
+        ): Boolean {
+            if (groupId == null) return true
+            if (isMentioningDsh(text)) return true
+            return isWorkspaceGroup && repliedToIsAgent
+        }
 
         /**
          * 去掉 @dsh mention，**其余文本原样保留**，并归一化空白。
