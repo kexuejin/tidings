@@ -196,6 +196,20 @@ open Tidings.xcodeproj
 
 关于 Agent 协议设计的详细设计规范与控制面定义，请参阅 [PROTOCOL-EXTENSION.md](PROTOCOL-EXTENSION.md)。
 
+### 与 DeepSeek Harness 的桥（[`dsh-tidings-bridge`](https://github.com/kexuejin/dsh-tidings-bridge)）
+
+本仓持有**协议与运行时**：发现、握手、离线补发队列、`agent-*` 信封族，以及桌面端由托盘常驻的
+`agentNode` 回环控制面（`127.0.0.1:8788`）。真正让 **DeepSeek Harness** 的会话接上这个节点的，
+是配套插件 **[`dsh-tidings-bridge`](https://github.com/kexuejin/dsh-tidings-bridge)**：
+
+- 它**只**说控制面的回环 HTTP，从不直接碰线协议 —— 线协议的一切都留在本仓；
+- 方向一：把控制面投影进 DSH（九个 agent 工具：节点状态、邻居、收发消息、宣告会话/工作区）；
+- 方向二：把 DSH 的会话与工作区状态推回控制面，于是手机上能看到这个会话在工作、
+  并收到它的思考与正文。
+
+**两边要一起用**：只有本仓，宿主是空的（没有 DSH 会话可桥）；只有插件，没有节点可接。
+装法与配置见那个仓的 README。
+
 ---
 
 ## 已知限制（如实）

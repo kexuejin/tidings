@@ -194,6 +194,23 @@ Tidings implements local agent collaboration capabilities with 8 specialized age
 
 For detailed design specifications, see [PROTOCOL-EXTENSION.md](PROTOCOL-EXTENSION.md).
 
+### The bridge to DeepSeek Harness ([`dsh-tidings-bridge`](https://github.com/kexuejin/dsh-tidings-bridge))
+
+This repository owns the **protocol and runtime**: discovery, handshake, the offline resend queue, the
+`agent-*` envelope family, and the loopback `agentNode` control plane (`127.0.0.1:8788`) that the desktop
+app keeps resident from its tray. What connects a **DeepSeek Harness** session to that node is the
+companion plugin **[`dsh-tidings-bridge`](https://github.com/kexuejin/dsh-tidings-bridge)**:
+
+- it speaks **only** the control plane's loopback HTTP and never touches the wire protocol — every wire
+  concern stays in this repository;
+- one direction: projects the control plane into DSH (nine agent tools: node status, peers, send/receive,
+  announcing sessions and workspaces);
+- the other: pushes DSH's session and workspace state back, so the phone can see the session working and
+  receive its reasoning and answers.
+
+**They are used together**: this repository alone leaves the host empty (no DSH session to bridge), and the
+plugin alone has no node to connect to. See that repository's README for install and configuration.
+
 ---
 
 ## Known Limitations (stated honestly)
