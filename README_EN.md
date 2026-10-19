@@ -66,6 +66,7 @@
 ├── PROTOCOL-COVERAGE.md           # Base protocol compatibility and frame support matrix
 ├── PROTOCOL-EXTENSION.md          # PPE-1 & Phase 2.0 Agent protocol extensions specification
 ├── CONTRIBUTING.md                # Community contribution guidelines and quality standards
+├── AGENTS.md                      # Constraints for anyone (agent or human) changing this repo
 └── SECURITY.md                    # Responsible vulnerability disclosure policy
 ```
 
@@ -212,7 +213,9 @@ For detailed design specifications, see [PROTOCOL-EXTENSION.md](PROTOCOL-EXTENSI
 
 We welcome contributions to Tidings in all forms (bug reports, feature proposals, pull requests, and documentation improvements).
 
-- Please review [CONTRIBUTING.md](CONTRIBUTING.md) for commit conventions and code style.
+- Please review [CONTRIBUTING.md](CONTRIBUTING.md) for commit conventions and code style,
+  and [AGENTS.md](AGENTS.md) — the list of practices in this repo that fail a gate, lose data
+  silently, or have already burned someone on a real device.
 - Ensure all quality gates pass before submitting a PR.
 - For security vulnerabilities, follow the disclosure policy in [SECURITY.md](SECURITY.md).
 

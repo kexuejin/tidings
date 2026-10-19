@@ -67,6 +67,7 @@
 ├── PROTOCOL-COVERAGE.md           # 基础协议兼容度与帧类型支持规范
 ├── PROTOCOL-EXTENSION.md          # PPE-1 Agent 协议扩展规范定义
 ├── CONTRIBUTING.md                # 社区贡献指南与规范
+├── AGENTS.md                      # 在本仓动手的约束（会判红 / 会静默丢数据 / 翻过车的做法）
 └── SECURITY.md                    # 安全漏洞披露政策
 ```
 
@@ -217,7 +218,8 @@ open Tidings.xcodeproj
 
 我们欢迎社区对捎话项目的任何形式的贡献（包括但不限于发现 Bug、提交 PR、完善文档或设计提出建议）。
 
-- 在提交代码前，请仔细阅读 [CONTRIBUTING.md](CONTRIBUTING.md) 了解代码风格与提交要求。
+- 在提交代码前，请仔细阅读 [CONTRIBUTING.md](CONTRIBUTING.md) 了解代码风格与提交要求，
+  以及 [AGENTS.md](AGENTS.md) —— 后者记着本仓「会判红 / 会静默丢数据 / 真机上翻过车」的做法清单。
 - 提交前请务必运行全量门禁流水线以确保各项质量门禁均为绿色。
 - 如发现安全相关漏洞，请参考 [SECURITY.md](SECURITY.md) 中的指引进行负责任的私下披露。
 
