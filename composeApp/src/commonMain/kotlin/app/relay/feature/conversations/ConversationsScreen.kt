@@ -174,18 +174,17 @@ fun ConversationsScreen(
     val showWorkspaces = onOpenWorkspaceUnit != null && onOpenWorkspaceBoard != null
 
     val allFeedItems = remember(conversations, workspaceUnits, showWorkspaces) {
-        buildList<InboxFeedItem> {
-            conversations.forEach { add(InboxFeedItem.Conversation(it)) }
-            if (showWorkspaces) {
-                workspaceUnits.groups.forEach { group ->
-                    group.units.forEach { unit ->
-                        add(InboxFeedItem.Workspace(unit, group))
+        orderInboxFeed(
+            buildList {
+                conversations.forEach { add(InboxFeedItem.Conversation(it)) }
+                if (showWorkspaces) {
+                    workspaceUnits.groups.forEach { group ->
+                        group.units.forEach { unit ->
+                            add(InboxFeedItem.Workspace(unit, group))
+                        }
                     }
                 }
-            }
-        }.sortedWith(
-            compareByDescending<InboxFeedItem> { it.pendingCount > 0 }
-                .thenByDescending { it.timestamp }
+            },
         )
     }
 
@@ -371,10 +370,14 @@ fun ConversationsScreen(
         }
 
         when {
-            allFeedItems.isEmpty() && state.network.phase == NodePhase.Starting -> LoadingState(
-                label = stringResource(Res.string.conv_loading),
-                modifier = Modifier.fillMaxWidth(),
-            )
+            // 「正在恢复会话…」只在**真的会去恢复**时画：关掉落盘（`persistMessages = false`）
+            // 时应用一个字节都不读，画一句"正在恢复"就是在说一件没发生的事（问题 #2 要求 b）。
+            // 这一档直接落到下面的空态 —— 那句话说清了"怎么才会有会话"，没有骗人。
+            allFeedItems.isEmpty() && state.network.phase == NodePhase.Starting && state.settings.persistMessages ->
+                LoadingState(
+                    label = stringResource(Res.string.conv_loading),
+                    modifier = Modifier.fillMaxWidth(),
+                )
 
             allFeedItems.isEmpty() -> EmptyState(
                 title = stringResource(Res.string.conv_empty_title),
@@ -414,14 +417,35 @@ fun ConversationsScreen(
     }
 }
 
+/**
+ * feed 的一行：会话或工作区。
+ *
+ * `timestamp` / `pendingCount` **只服务于 [orderInboxFeed] 的混排**，不是这两个概念在
+ * 型号上的全量语义：会话已经有 `ConversationUi.lastMessageAt` 与 `pendingCount`
+ * （待发条数），工作区有自己的 `lastActivityAt` / `pendingCount`（待审批条数）。
+ */
 internal sealed interface InboxFeedItem {
     val key: String
+
+    /**
+     * 混排用的时间键。会话取 [ConversationUi.lastMessageAt]（**没聊过是 0**，不是对端的
+     * 最后在线时间）；工作区取最近活动。两把尺子各自成立，但都不再用"对端刚刚在线"。
+     */
     val timestamp: Long
+
+    /** 混排用的"待处理置顶"键。工作区 = 待审批条数；会话恒 0（理由见下）。 */
     val pendingCount: Int
 
     data class Conversation(val conv: ConversationUi) : InboxFeedItem {
         override val key: String get() = "conv_${conv.convId}"
-        override val timestamp: Long get() = conv.at
+
+        // 取 lastMessageAt 而不是 at：at 在"没聊过"时会退回对端 lastSeenAt，
+        // 而局域网发现持续刷新它 —— 用它当键会把没聊过的在线对端一次次顶到最前（反馈 #1）。
+        override val timestamp: Long get() = conv.lastMessageAt
+
+        // 恒 0 是**对的**，不是漏了一个赋值：这里的 pendingCount 表达"待处理、该置顶"，
+        // 会话的 ConversationUi.pendingCount 是"没发出去的消息"（ConversationRow 画徽标），
+        // 两者不是一个概念。它若参与置顶，用户自己发的一条离线消息就会把会话顶到最上面。
         override val pendingCount: Int get() = 0
     }
 
@@ -429,9 +453,28 @@ internal sealed interface InboxFeedItem {
         val unit: WorkspaceUnitUi,
         val group: WorkspaceUnitGroupUi,
     ) : InboxFeedItem {
-        override val key: String get() = "ws_${unit.wsId ?: "${unit.peerId}_${unit.agentKind}"}"
+        override val key: String get() = "ws_${unit.peerId}_${unit.agentKind.orEmpty()}_${unit.wsId.orEmpty()}"
         override val timestamp: Long get() = unit.lastActivityAt
         override val pendingCount: Int get() = unit.pendingCount
     }
 }
+
+/**
+ * feed 的混排顺序：**只有工作区段在这里参与排序**。
+ *
+ * 会话段的顺序权威在 [RelayUiState.conversations]（按最近一条消息时间降序，见那里的 KDoc）。
+ * 这里刻意不再给会话按时间重排一次 —— [InboxFeedItem.Conversation.timestamp] 取的是
+ * [ConversationUi.lastMessageAt]（没聊过是 0），配合 `sortedWith` 的**稳定**特性，
+ * 会话项之间只会保留派生好的顺序；不可能出现"没聊过的在线对端顶到有消息的会话前面"
+ * （真机反馈 #1 的另一半）。工作区段仍是它自己的两把尺子：待处理的置顶，其余按最近活动。
+ *
+ * 抽成顶层函数是因为它原来埋在一个 `remember {}` 里，排序纪律改错了没人拦得住；
+ * 现在可以直接对拍（见 `app.relay.feature.conversations.ConversationsFeedOrderTest`）。
+ */
+internal fun orderInboxFeed(items: List<InboxFeedItem>): List<InboxFeedItem> =
+    items.distinctBy { it.key }
+        .sortedWith(
+            compareByDescending<InboxFeedItem> { it.pendingCount > 0 }
+                .thenByDescending { it.timestamp },
+        )
 

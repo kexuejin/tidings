@@ -3,6 +3,7 @@
 package app.relay.feature.agents
 
 import androidx.compose.foundation.background
+import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -52,6 +53,8 @@ import app.relay.generated.resources.agent_session_pending_count
 import app.relay.generated.resources.common_close
 import app.relay.generated.resources.ic_check_double
 import app.relay.generated.resources.ic_chevd
+import app.relay.generated.resources.ic_file
+import app.relay.generated.resources.ic_image
 import app.relay.ui.components.RelayDialog
 import app.relay.ui.components.RelayDialogButton
 import app.relay.ui.components.SessionStateLabel
@@ -62,8 +65,11 @@ import app.relay.ui.theme.LocalAppSpacing
 import app.relay.ui.theme.RelayElevations
 import org.jetbrains.compose.resources.painterResource
 import org.jetbrains.compose.resources.stringResource
+import app.relay.app.model.AgentAttachmentUi
 import app.relay.app.model.AgentEventUi
 import app.relay.app.model.AgentSessionUi
+import app.relay.app.model.agentAttachmentCaption
+import app.relay.app.model.agentAttachmentIsImage
 
 @Composable
 internal fun AgentSessionCard(
@@ -97,9 +103,14 @@ internal fun AgentSessionCard(
                 }
             }
 
-            session.title?.let { title ->
+            val subtitle = session.title?.trim()?.takeIf {
+                it.isNotBlank() &&
+                !it.equals(session.displayTitle?.trim(), ignoreCase = true) &&
+                !it.equals(session.alias?.trim(), ignoreCase = true)
+            }
+            if (subtitle != null) {
                 Text(
-                    text = title,
+                    text = subtitle,
                     style = MaterialTheme.typography.bodyMedium,
                     modifier = Modifier.padding(top = LocalAppSpacing.current.xs),
                 )
@@ -213,6 +224,47 @@ private fun AgentEventRow(event: AgentEventUi) {
                 )
             }
         }
+        // task-45：附件信息卡（有元数据就画；没有就只留上面的文本占位）。
+        event.attachment?.let { AgentAttachmentCard(it) }
+    }
+}
+
+/**
+ * 附件**信息卡**（task-45）：文件名 + 尺寸 + 大小，纯只读。
+ *
+ * 为什么不做"点开下载/预览"：附件元数据里只有 `attachmentId`，**没有**既有传输路径需要的
+ * `fileId`/相对路径 —— 桥侧的字节通道还没定。先把"能看到附件本身是什么"做出来，
+ * "点开"等字节通道定了再补（已记成已知限制）。
+ *
+ * 文案全部来自载荷（[agentAttachmentCaption]），所以这里**不需要新增任何字符串资源**；
+ * 图标是纯装饰（`contentDescription = null`），信息已经在右边那行字里。
+ */
+@Composable
+private fun AgentAttachmentCard(attachment: AgentAttachmentUi) {
+    val sp = LocalAppSpacing.current
+    Row(
+        modifier = Modifier
+            .padding(top = sp.xxs)
+            .border(1.dp, MaterialTheme.colorScheme.outlineVariant, MaterialTheme.shapes.medium)
+            .padding(horizontal = sp.md10, vertical = sp.xxs),
+        horizontalArrangement = Arrangement.spacedBy(sp.sm),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Icon(
+            painter = painterResource(
+                if (agentAttachmentIsImage(attachment)) Res.drawable.ic_image else Res.drawable.ic_file,
+            ),
+            contentDescription = null,
+            tint = MaterialTheme.colorScheme.primary,
+            modifier = Modifier.size(18.dp),
+        )
+        Text(
+            text = agentAttachmentCaption(attachment),
+            style = MaterialTheme.typography.bodySmall,
+            color = MaterialTheme.colorScheme.onSurface,
+            maxLines = 1,
+            overflow = TextOverflow.Ellipsis,
+        )
     }
 }
 

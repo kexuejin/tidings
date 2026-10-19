@@ -58,9 +58,11 @@ import app.relay.generated.resources.desktop_conv_no_match_hint
 import app.relay.generated.resources.desktop_conv_no_preview
 import app.relay.generated.resources.chat_group_online
 import app.relay.generated.resources.desktop_conv_pending
+import app.relay.generated.resources.ic_folder
 import app.relay.generated.resources.desktop_peer_connected
 import app.relay.generated.resources.desktop_peer_last_seen
 import app.relay.generated.resources.desktop_view_conversations
+import app.relay.generated.resources.workspace_group_label
 import app.relay.generated.resources.ic_close
 import app.relay.generated.resources.ic_groups
 import app.relay.ui.theme.IconSizes
@@ -146,6 +148,7 @@ public fun ConversationSidebar(
      * 用户在列表为空时也看得见它 —— 而这恰恰是最需要它的时候。
      */
     onCreateGroup: (() -> Unit)? = null,
+    onCreateWorkspaceGroup: (() -> Unit)? = null,
     /**
      * 历史消息全文搜索接口。null = 预览或不启用。
      */
@@ -190,6 +193,13 @@ public fun ConversationSidebar(
         ) {
             Text(stringResource(Res.string.desktop_view_conversations), style = MaterialTheme.typography.labelLarge)
             Spacer(Modifier.weight(1f))
+            onCreateWorkspaceGroup?.let { createWs ->
+                TextButton(onClick = createWs) {
+                    Icon(painterResource(Res.drawable.ic_folder), contentDescription = null, modifier = Modifier.size(IconSizes.Label))
+                    Spacer(Modifier.width(LocalAppSpacing.current.xs))
+                    Text(stringResource(Res.string.workspace_group_label), style = MaterialTheme.typography.labelMedium)
+                }
+            }
             onCreateGroup?.let { create ->
                 // 图标 + 文字都要：这一列里没有任何别的按钮，光一个「+」说不清是加会话
                 // 还是加节点。窄侧栏（240dp）也放得下两个字。
@@ -360,7 +370,11 @@ public fun ConversationRow(conv: ConversationUi, selected: Boolean, now: Long, o
         }
         Column(horizontalAlignment = Alignment.End) {
             Text(
-                relativeTime(conv.at, now),
+                // 与手机侧 `ConversationRow` 同一口径：只用**最近一条消息**的时间。
+                // `conv.at` 只是兼容兜底值（没消息时会退回对端 lastSeenAt / 群 updatedTs），
+                // 局域网发现一刷新就变成「刚刚」—— 那正是"没聊过的会话一直顶在最上面"的一半。
+                // 没聊过（lastMessageAt == 0）就整格留空，不拿 presenceAt 去冒充活跃。
+                text = if (conv.lastMessageAt > 0) relativeTime(conv.lastMessageAt, now) else "",
                 style = MaterialTheme.typography.labelSmall,
                 color = fgMuted,
             )

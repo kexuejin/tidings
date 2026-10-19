@@ -176,6 +176,170 @@ fun handleOnAgentWorkspace(envelope: Envelope) {
     }
 }
 
+fun handleRecordLocalWorkspace(
+    wsId: String,
+    wsTitle: String?,
+    wsPath: String?,
+    agentKey: String?,
+    agentKind: String?,
+    online: Boolean?,
+    sessionCount: Long?,
+    order: Long?,
+    at: Long,
+) {
+    if (isSyntheticWsId(wsId)) return
+    var saved: WorkspaceUi? = null
+    host._state.update { s ->
+        val selfId = s.selfNodeId
+        val prevEntry = s.agentWorkspaces.entries.firstOrNull { entry ->
+            entry.key.peerId == selfId && entry.key.wsId == wsId &&
+                (agentKey == null || entry.key.agentKey == agentKey)
+        }
+        val workspace = WorkspaceUi(
+            peerId = selfId,
+            agentKey = agentKey ?: agentKind,
+            agentId = null,
+            wsId = wsId,
+            wsTitle = wsTitle ?: prevEntry?.value?.wsTitle,
+            wsPath = wsPath ?: prevEntry?.value?.wsPath,
+            agentKind = agentKind ?: prevEntry?.value?.agentKind,
+            online = online ?: prevEntry?.value?.online ?: true,
+            sessionCount = sessionCount ?: prevEntry?.value?.sessionCount,
+            at = at,
+            hostOrder = order ?: prevEntry?.value?.hostOrder,
+        )
+        val key = WorkspaceKey(selfId, workspace.agentKey, wsId)
+        val stale = prevEntry?.key?.takeIf { it != key }
+        val kept = stale?.let { s.agentWorkspaces - it } ?: s.agentWorkspaces
+        saved = workspace
+        s.copy(agentWorkspaces = kept + (key to workspace))
+    }
+    saved?.let { ws ->
+        host.scope.launch {
+            runCatching { host.agentStore.saveWorkspace(ws) }
+        }
+        host.groupsCtl.handleSyncWorkspaceGroups()
+    }
+}
+
+fun handleRecordLocalSession(
+    sessionId: String,
+    alias: String?,
+    agentKind: String?,
+    state: String?,
+    title: String?,
+    startedAt: Long?,
+    agentId: String?,
+    wsId: String?,
+    wsTitle: String?,
+    wsPath: String?,
+    updatedAt: Long?,
+) {
+    var saved: AgentSessionUi? = null
+    host._state.update { s ->
+        val selfId = s.selfNodeId
+        val key = AgentSessionKey(peerId = selfId, sessionId = sessionId)
+        val existing = s.agentSessions[key]
+        val updated = AgentSessionUi(
+            peerId = selfId,
+            sessionId = sessionId,
+            alias = alias ?: existing?.alias,
+            agentKind = agentKind ?: existing?.agentKind,
+            state = state ?: existing?.state,
+            title = title ?: existing?.title,
+            startedAt = startedAt ?: existing?.startedAt,
+            agentId = agentId ?: existing?.agentId,
+            wsId = wsId ?: existing?.wsId,
+            wsTitle = wsTitle ?: existing?.wsTitle,
+            wsPath = wsPath ?: existing?.wsPath,
+            updatedAt = updatedAt ?: existing?.updatedAt ?: nowMillis(),
+            hostUpdatedAt = updatedAt ?: existing?.hostUpdatedAt,
+            announced = true,
+        )
+        saved = updated
+        val isNew = key !in s.agentSessions
+        val pageKey = updated.wsId?.let { sessionPageKeyOf(selfId, it) }
+        val nextLoading = if (pageKey != null && pageKey in s.sessionPageLoading) {
+            s.sessionPageLoading - pageKey
+        } else {
+            s.sessionPageLoading
+        }
+        val nextExhausted = if (pageKey != null && isNew) {
+            s.sessionPageExhausted - pageKey
+        } else {
+            s.sessionPageExhausted
+        }
+        s.copy(
+            agentSessions = s.agentSessions + (key to updated),
+            sessionPageLoading = nextLoading,
+            sessionPageExhausted = nextExhausted,
+        )
+    }
+    saved?.let { session ->
+        host.scope.launch {
+            runCatching { host.agentStore.saveSession(session) }
+        }
+    }
+}
+
+fun handleRecordLocalEvent(
+    nodeId: String,
+    sessionId: String,
+    cursor: Long,
+    eventType: String,
+    summary: String?,
+    body: String?,
+    ref: String?,
+    at: Long,
+) {
+    val incoming = AgentEventUi(
+        peerId = nodeId,
+        sessionId = sessionId,
+        cursor = cursor,
+        eventType = eventType,
+        summary = summary,
+        body = body,
+        ref = ref,
+        at = at,
+    )
+    var savedEvent: AgentEventUi? = null
+    var updatedSession: AgentSessionUi? = null
+    host._state.update { s ->
+        val key = AgentSessionKey(peerId = nodeId, sessionId = sessionId)
+        val merged = mergeAgentEvent(
+            existing = s.agentEvents[key].orEmpty(),
+            incoming = incoming,
+            max = MAX_AGENT_EVENTS,
+        ) ?: return@update s
+        savedEvent = incoming
+        val sessions = if (key in s.agentSessions) {
+            val existing = s.agentSessions.getValue(key)
+            val updated = existing.copy(updatedAt = at)
+            updatedSession = updated
+            s.agentSessions + (key to updated)
+        } else {
+            val autoCreated = AgentSessionUi(
+                peerId = nodeId,
+                sessionId = sessionId,
+                updatedAt = at,
+                announced = false,
+            )
+            updatedSession = autoCreated
+            s.agentSessions + (key to autoCreated)
+        }
+        s.copy(
+            agentEvents = s.agentEvents + (key to merged),
+            agentSessions = sessions,
+        )
+    }
+    savedEvent?.let { event ->
+        host.scope.launch {
+            updatedSession?.let { session -> runCatching { host.agentStore.saveSession(session) } }
+            runCatching { host.agentStore.saveEvent(event) }
+        }
+    }
+}
+
 /**
  * 入站 `agent-grant`（PPE-1 增补 D7）：宿主对"这台设备能不能看我的 agent"表了态。
  *
@@ -195,7 +359,7 @@ fun handleOnAgentGrant(envelope: Envelope) {
         val grant = grantFrom(payload, envelope.from, at) ?: return@update s
         saved = grant
         s.copy(
-            agentGrants = s.agentGrants + (grantKeyOf(grant.peerId, grant.agentKey) to grant),
+            agentGrants = s.agentGrants + (grantKeyOf(grant.peerId, grant.agentKey, grant.wsId) to grant),
             pendingGrantRequests = s.pendingGrantRequests.filterNot { it.startsWith(envelope.from + "/") }.toSet(),
         )
     }
@@ -224,7 +388,7 @@ fun handleOnAgentGrantList(envelope: Envelope) {
         val grant = grantListEntryFrom(payload, envelope.from, at) ?: return@update s
         saved = grant
         s.copy(
-            agentGrants = s.agentGrants + (grantKeyOf(grant.peerId, grant.agentKey) to grant),
+            agentGrants = s.agentGrants + (grantKeyOf(grant.peerId, grant.agentKey, grant.wsId) to grant),
             pendingGrantRequests = s.pendingGrantRequests.filterNot { it.startsWith(envelope.from + "/") }.toSet(),
         )
     }
@@ -253,6 +417,8 @@ suspend fun handleSendGrantRequest(
     peerId: String,
     agentKey: String? = null,
     reason: String? = null,
+    wsId: String? = null,
+    access: String? = null,
 ): SendOutcome? {
     val rt = host.runtime ?: return null
     if (!rt.peerDeclares(peerId, MsgTypes.CAP_AGENT)) return null
@@ -263,10 +429,10 @@ suspend fun handleSendGrantRequest(
     // （core 侧 `ReliableNoQueueTest` 钉住通道语义；这里是同一判据的发送侧落点）。
     // UI 侧的对应处理：此时「申请查看」按钮应禁用并给原因，而不是按了没反应。
     if (!rt.peerDeclares(peerId, MsgTypes.CAP_AGENT_GRANT)) return null
-    val outcome = rt.sendAgentGrantRequest(peerId, agentKey, reason, nowMillis())
+    val outcome = rt.sendAgentGrantRequest(peerId, agentKey, wsId, access, reason, nowMillis())
     // SENT 与 QUEUED 都算"这条申请已经交出去了"：QUEUED 是离线补发队列，
     // 帧本身没有丢，界面上"已申请待批"说的是这件事，不是"对方已经收到"。
-    val key = grantKeyOf(peerId, agentKey)
+    val key = grantKeyOf(peerId, agentKey, wsId)
     host._state.update { s -> s.copy(pendingGrantRequests = s.pendingGrantRequests + key) }
     // 超时自愈保底（与 [handleRequestSessionPage] 同一条纪律）：宿主**沉默**是常态 ——
     // `auto` 档的宿主根本不答，用户也可能永远不去桌面端点那个按钮。而 PENDING 记账
@@ -312,9 +478,13 @@ suspend fun handleSendGrantRequest(
  * @return false = 没发出去（对端不声明 `agp1`、或没有 runtime）。
  */
 suspend fun handleRequestSessionPage(peerId: String, wsId: String, offset: Long, limit: Long? = null): Boolean {
-    val rt = host.runtime ?: return false
-    if (!rt.peerDeclares(peerId, MsgTypes.CAP_AGENT)) return false
-    if (!rt.peerDeclares(peerId, MsgTypes.CAP_AGENT_SESSION_PAGE)) return false
+    val isLocal = peerId == host._state.value.selfNodeId
+    val rt = host.runtime
+    if (!isLocal) {
+        if (rt == null) return false
+        if (!rt.peerDeclares(peerId, MsgTypes.CAP_AGENT)) return false
+        if (!rt.peerDeclares(peerId, MsgTypes.CAP_AGENT_SESSION_PAGE)) return false
+    }
     // 先挂上「加载中」再发。反过来（先发再挂）在快速返回时会漏掉一次 UI 状态更新，
     // 表现是按钮闪一下又变回可点。
     val key = sessionPageKeyOf(peerId, wsId)
@@ -330,7 +500,11 @@ suspend fun handleRequestSessionPage(peerId: String, wsId: String, offset: Long,
             sessionPageExhausted = if (isFirstPage) s.sessionPageExhausted - key else s.sessionPageExhausted,
         )
     }
-    val sent = rt.sendAgentSessionPage(peerId, wsId, offset, limit, nowMillis())
+    val sent = if (isLocal) {
+        host.onLocalSessionPageRequest?.invoke(peerId, wsId, offset, limit) ?: false
+    } else {
+        rt?.sendAgentSessionPage(peerId, wsId, offset, limit, nowMillis()) ?: false
+    }
     if (!sent) {
         // 没发出去就立刻摘掉标记：留着它等于向用户承诺一件不会发生的事。
         host._state.update { it.copy(sessionPageLoading = it.sessionPageLoading - key) }
@@ -387,7 +561,10 @@ fun handleOnAgentEvent(envelope: Envelope) {
         ) ?: return@update s
         savedEvent = incoming
         val sessions = if (key in s.agentSessions) {
-            s.agentSessions
+            val existing = s.agentSessions.getValue(key)
+            val updated = existing.copy(updatedAt = at)
+            updatedSession = updated
+            s.agentSessions + (key to updated)
         } else {
             val autoCreated = AgentSessionUi(
                 peerId = envelope.from,
@@ -475,6 +652,7 @@ fun handleRestoreAgentData() {
                 agentGrants = loadedGrants + s.agentGrants,
             )
         }
+        host.groupsCtl.handleSyncWorkspaceGroups()
     }
 }
 

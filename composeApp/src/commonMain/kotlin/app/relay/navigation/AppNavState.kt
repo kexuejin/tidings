@@ -61,8 +61,14 @@ data class AppNavState(
      */
     val detailPeerId: String? = null,
     /**
+     * 工作区详情页正看着哪个工作区；null = 停在工作区看板（雷达）里。
+     * 对齐原型 `m-workspacedetail`（标记 `full:true`），全屏呈现，不画底部导航栏。
+     */
+    val detailWorkspaceId: String? = null,
+    /**
      * 工作区会话详情页正看着哪个会话；null = 停在工作区看板（雷达）里。
      * 保持与 detailPeerId 相同的范式：单列下钻，宽屏/平板分栏。
+     * 对齐原型 `m-session-detail`（标记 `full:true`），全屏呈现，不画底部导航栏。
      */
     val detailAgentSessionId: String? = null,
     /**
@@ -83,15 +89,29 @@ data class AppNavState(
     /** 节点详情是否正停在节点页签里。 */
     val inPeerDetail: Boolean get() = detailPeerId != null
 
-    /** 工作区会话详情是否正打开。 */
+    /** 工作区详情（二级）是否正打开。 */
+    val inAgentWorkspaceDetail: Boolean get() = detailWorkspaceId != null
+
+    /** 工作区会话详情（三级）是否正打开。 */
     val inAgentSessionDetail: Boolean get() = detailAgentSessionId != null
+
+    /** 是否处于工作区或会话详情子页中（两屏均对应原型 full:true，全屏无底导）。 */
+    val inAgentSubpage: Boolean get() = inAgentWorkspaceDetail || inAgentSessionDetail
+
+    /** 进入某个工作区详情（二级）。 */
+    fun openAgentWorkspaceDetail(peerId: String, wsId: String): AppNavState =
+        copy(detailPeerId = peerId, detailWorkspaceId = wsId, detailAgentSessionId = null)
+
+    /** 退出工作区详情，回到工作区看板（一级）。 */
+    fun leaveAgentWorkspaceDetail(): AppNavState =
+        if (detailWorkspaceId == null) this else copy(detailWorkspaceId = null, detailAgentSessionId = null)
 
     /** 进入某个工作区会话的详情。 */
     fun openAgentSessionDetail(sessionId: String): AppNavState =
         if (detailAgentSessionId == sessionId && activeAgentSessionId == sessionId) this
         else copy(detailAgentSessionId = sessionId, activeAgentSessionId = sessionId)
 
-    /** 退出工作区会话详情，回到工作区看板。 */
+    /** 退出工作区会话详情，回到工作区详情或看板。 */
     fun leaveAgentSessionDetail(): AppNavState =
         if (detailAgentSessionId == null) this else copy(detailAgentSessionId = null)
 
@@ -162,7 +182,14 @@ data class AppNavState(
         if (AppNavItems.none { it.id == tabId }) {
             this
         } else {
-            copy(selectedTabId = tabId, activeSessionId = null, scanning = false, detailPeerId = null, detailAgentSessionId = null)
+            copy(
+                selectedTabId = tabId,
+                activeSessionId = null,
+                scanning = false,
+                detailPeerId = null,
+                detailAgentSessionId = null,
+                detailWorkspaceId = null,
+            )
         }
 
     /** 打开扫码页（幂等：已经在扫就原样返回，免得重组时把会话重新起一遍）。 */

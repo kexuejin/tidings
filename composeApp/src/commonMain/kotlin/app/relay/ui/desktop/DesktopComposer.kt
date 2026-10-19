@@ -63,6 +63,7 @@ import app.relay.ui.components.EMOJI_PALETTE
 import app.relay.ui.theme.IconSizes
 import app.relay.ui.theme.LocalAppSpacing
 import app.relay.ui.theme.RelayElevations
+import app.relay.ui.theme.RelayShapes
 import app.relay.generated.resources.Res
 import app.relay.generated.resources.chat_attach
 import app.relay.generated.resources.chat_byte_over
@@ -88,6 +89,10 @@ import app.relay.generated.resources.ic_pk
 import app.relay.generated.resources.ic_scissors
 import app.relay.generated.resources.ic_search
 import app.relay.generated.resources.ic_smile
+import app.relay.generated.resources.ic_plus
+import app.relay.generated.resources.chat_new_task_action
+import androidx.compose.material3.Surface
+import androidx.compose.ui.text.font.FontWeight
 import app.relay.ui.components.PkPickerDialog
 import app.relay.app.model.PeerUi
 import org.jetbrains.compose.resources.painterResource
@@ -179,7 +184,7 @@ public fun DesktopComposer(
             Box(
                 Modifier
                     .fillMaxWidth()
-                    .height(10.dp)
+                    .height(LocalAppSpacing.current.md10)
                     .draggable(
                         orientation = Orientation.Vertical,
                         state = rememberDraggableState { delta ->
@@ -248,7 +253,7 @@ public fun DesktopComposer(
                             // 原型注释逐字「窗口震动（nudge）只在单聊出现，群里对『群』做震动没有
                             // 收件人」（`relay.html:1588`）。本端在这条规则上再窄一格：**Agent 会话
                             // 也不画**（震动要落到一个具体窗口上），判据与手机端那两颗逐字同源
-                            // （`feature/chat/ChatScreen.kt:427` 与 `:603` 都是
+                            // （ChatScreen 里内置输入栏与头部两处 onNudge 的武装判据都是
                             // `takeIf { group == null && !peer.isAgent }`）。
                             // 桌面头里原先那颗已按原型撤掉（`DesktopConversationsPane.kt`），
                             // 所以整屏只剩这一处。原型 d-chat 那一屏画了对端 Agent 的震动 ——
@@ -290,6 +295,41 @@ public fun DesktopComposer(
                                     overflow = TextOverflow.Ellipsis,
                                     modifier = Modifier.padding(start = LocalAppSpacing.current.sm6),
                                 )
+                                Surface(
+                                    shape = RoundedCornerShape(6.dp),
+                                    color = MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.5f),
+                                    modifier = Modifier
+                                        .padding(start = LocalAppSpacing.current.sm)
+                                        .clickable {
+                                            val prefix = "@dsh "
+                                            val currentText = value.text
+                                            if (!currentText.startsWith(prefix)) {
+                                                val newText = "$prefix$currentText"
+                                                value = value.copy(text = newText, selection = TextRange(newText.length))
+                                                onDraftChange(newText)
+                                            }
+                                            focusRequester.requestFocus()
+                                        },
+                                ) {
+                                    Row(
+                                        modifier = Modifier.padding(horizontal = 8.dp, vertical = 3.dp),
+                                        verticalAlignment = Alignment.CenterVertically,
+                                        horizontalArrangement = Arrangement.spacedBy(4.dp),
+                                    ) {
+                                        Icon(
+                                            painter = painterResource(Res.drawable.ic_plus),
+                                            contentDescription = null,
+                                            tint = MaterialTheme.colorScheme.primary,
+                                            modifier = Modifier.size(12.dp),
+                                        )
+                                        Text(
+                                            text = stringResource(Res.string.chat_new_task_action),
+                                            style = MaterialTheme.typography.labelSmall,
+                                            color = MaterialTheme.colorScheme.primary,
+                                            fontWeight = FontWeight.Medium,
+                                        )
+                                    }
+                                }
                             }
                             // 历史搜索排**行尾**：原型用 `.tools .tsep{flex:1 1 auto}`
                             // （`relay.html:1145`）把它推到最右，而不是摆在中间。
@@ -424,9 +464,9 @@ public fun Button2(label: String, icon: androidx.compose.ui.graphics.vector.Imag
     val fg = if (enabled) MaterialTheme.colorScheme.onPrimary else MaterialTheme.colorScheme.onSurfaceVariant
     Row(
         Modifier
-            .background(bg, RoundedCornerShape(8.dp))
+            .background(bg, RelayShapes.small)
             .clickable(enabled = enabled, onClick = onClick)
-            .padding(horizontal = LocalAppSpacing.current.lg, vertical = 7.dp),
+            .padding(horizontal = LocalAppSpacing.current.lg, vertical = LocalAppSpacing.current.osm7),
         verticalAlignment = Alignment.CenterVertically,
         horizontalArrangement = Arrangement.spacedBy(LocalAppSpacing.current.sm6),
     ) {
@@ -475,7 +515,7 @@ public fun EmojiPopup(onPick: (String) -> Unit, onDismiss: () -> Unit) {
 public fun EmojiPanel(onPick: (String) -> Unit) {
     Card(
         elevation = CardDefaults.cardElevation(defaultElevation = RelayElevations.Floating),
-        shape = RoundedCornerShape(12.dp),
+        shape = RelayShapes.medium,
     ) {
         Column(Modifier.width(270.dp).padding(start = LocalAppSpacing.current.sm, end = LocalAppSpacing.current.sm, top = LocalAppSpacing.current.sm, bottom = LocalAppSpacing.current.sm6)) {
             EMOJI_PALETTE.chunked(8).forEach { row ->
@@ -484,7 +524,7 @@ public fun EmojiPanel(onPick: (String) -> Unit) {
                         Box(
                             Modifier
                                 .weight(1f)
-                                .height(30.dp)
+                                .height(IconSizes.Hero)
                                 .clickable { onPick(item) },
                             contentAlignment = Alignment.Center,
                         ) {

@@ -35,6 +35,7 @@ import app.relay.generated.resources.chat_group_owner_label
 import app.relay.generated.resources.chat_group_rev
 import app.relay.core.protocol.GroupMeta
 import app.relay.feature.chat.ChatScreen
+import app.relay.feature.chat.ClearConversationDialog
 import app.relay.feature.chat.ChatScreenActions
 import app.relay.feature.chat.ChatScreenChrome
 import app.relay.feature.chat.ChatScreenGroupActions
@@ -52,11 +53,13 @@ import app.relay.generated.resources.screen_remote_view_action
 import app.relay.generated.resources.desktop_action_copy_node_id_short
 import app.relay.generated.resources.desktop_action_list
 import app.relay.generated.resources.desktop_action_open_in_new_window
+import app.relay.generated.resources.chat_clear_local_action
 import app.relay.generated.resources.chat_group_online
 import app.relay.generated.resources.ic_copy
 import app.relay.generated.resources.ic_external
 import app.relay.generated.resources.ic_groups
 import app.relay.generated.resources.ic_list
+import app.relay.generated.resources.ic_trash
 import org.jetbrains.compose.resources.stringResource
 
 import app.relay.ui.theme.LocalAppSpacing
@@ -78,6 +81,17 @@ public fun ChatPane(
     onBack: (() -> Unit)? = null,
     /** 输入框预置草稿，只给截图门禁用（见 [ChatScreen.initialDraft]）。 */
     initialDraft: String = "",
+    selectedWsId: String? = null,
+    activeSessionId: String? = null,
+    onSelectAgentSession: ((String) -> Unit)? = null,
+    /**
+     * 进入这个会话**那一刻**的未读条数（真机反馈 #5 的屏外未读指示）。
+     *
+     * 由壳在调 `controller.selectConversation` 清未读**之前**采下，再原样透传给
+     * [ChatScreenState.unreadOnEntry] —— 采集为什么只能发生在壳里，见该字段的 KDoc。
+     * 默认 0 = 没有未读或没采到：指示条会退化成不带数字的「回到最新」，不编条数。
+     */
+    unreadOnEntry: Int = 0,
 ) {
     // 群没有 PeerUi（协议里群不是节点），所以群会话要用占位对端。
     // 与手机端 `ChatScreen` 同一条路径：`chatPeer` 靠历史兜底，`groupPeer` 靠成员表。
@@ -91,11 +105,15 @@ public fun ChatPane(
             data = ChatScreenState(
                 state = state,
                 peerId = selectedPeerId,
+                wsId = selectedWsId,
+                activeSessionId = activeSessionId,
+                unreadOnEntry = unreadOnEntry,
                 cacheDir = null,
             ),
             actions = ChatScreenActions(
                 onSend = controller::sendToConversation,
                 onOpenAgentConsole = onSelect,
+                onSelectAgentSession = onSelectAgentSession,
                 onDismissBanner = controller::dismissBanner,
                 onAttachFile = controller::pickAndSendFiles,
                 onAcceptTransfer = controller::acceptTransfer,
@@ -115,6 +133,13 @@ public fun ChatPane(
                 onNudge = controller::nudge,
                 onRequestScreenView = controller::requestScreenView,
                 onRespondApproval = controller::respondApproval,
+                onOpenAgentHistory = { peerId, wsId ->
+                    controller.requestAgentSessionPage(peerId, wsId, offset = 0)
+                },
+                onLoadMoreAgentSessions = { peerId, wsId ->
+                    val known = state.agentSessionsOf(peerId).count { it.wsId == wsId }
+                    controller.requestAgentSessionPage(peerId, wsId, offset = known.toLong())
+                },
             ),
             groupActions = ChatScreenGroupActions(
                 onAddGroupMembers = controller::addGroupMembers,
@@ -159,6 +184,9 @@ public fun ChatPane(
         return
     }
     var showGroupInfo by remember(selectedPeerId) { mutableStateOf(false) }
+    // 「清空本会话记录」的确认框开合。桌面头部（DesktopChatHeader）画在这一层之下，
+    // 所以触发与确认框都由本层持有；手机那条壳的同类确认框在 ChatScreen 里。
+    var showClearConfirm by remember(selectedPeerId) { mutableStateOf(false) }
     Column(modifier) {
         DesktopChatHeader(
             peer = peer,
@@ -196,6 +224,10 @@ public fun ChatPane(
                 }
             },
             onViewGroupInfo = if (group != null) ({ showGroupInfo = true }) else null,
+            // 「清空本会话记录」：会话键直接用 selectedPeerId（私聊=对方 nodeId、
+            // 群=group:<groupId>）—— 与 ChatScreenActions 里别的回调同一口径。
+            // 与手机端共用同一个确认框（见 ClearConversationDialog）。
+            onClearMessages = { showClearConfirm = true },
         )
         HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
         chat(Modifier.weight(1f).fillMaxWidth())
@@ -210,6 +242,18 @@ public fun ChatPane(
                 onRemoveMember = { member -> controller.removeGroupMember(group.groupId, member) },
                 onUpdateMeta = controller::updateGroupMeta,
                 onLeaveGroup = { controller.leaveGroup(group.groupId); onBack?.invoke() },
+            )
+        }
+        if (showClearConfirm) {
+            ClearConversationDialog(
+                conversationName = peer.displayName,
+                onDismiss = { showClearConfirm = false },
+                onConfirm = {
+                    showClearConfirm = false
+                    // 只清本机：走既有 RelayController.clearMessages（不是 clearAllMessages）。
+                    // selectedPeerId 可空，这里已在"有会话"的分支里（peer 非空），再 let 一次即可。
+                    selectedPeerId?.let { controller.clearMessages(it) }
+                },
             )
         }
     }
@@ -269,6 +313,14 @@ public fun DesktopChatHeader(
     /** 群主的显示名（`group.ownerId` 在节点表里的 `displayName`）。取不到时第二行只省掉「群主 X」那一段。 */
     groupOwnerName: String? = null,
     onViewGroupInfo: (() -> Unit)? = null,
+    /**
+     * 「清空本会话聊天记录」。null = 不画这个入口。
+     *
+     * 与手机端 ChatHeader 的同名动作同一语义：确认框由**调用方**持有
+     * （这里触发、[ChatPane] 画 [ClearConversationDialog]），这样"头部负责表达意图、
+     * 壳负责确认与执行"在两条壳上是同一条规矩。
+     */
+    onClearMessages: (() -> Unit)? = null,
 ) {
     // 「请求查看屏幕」的确认表单：以前点那颗图标按钮**直接发请求**，原型 d30-reqscreen
     // 在中间有一张确认卡（说明 + 取消 / 发送请求）。改成先开表单、确认后才发。
@@ -433,6 +485,15 @@ public fun DesktopChatHeader(
                             TopBarIconAction(Res.drawable.ic_external, stringResource(Res.string.desktop_action_open_in_new_window), onOpenInNewWindow)
                         } else {
                             ToolbarButton(stringResource(Res.string.desktop_action_open_in_new_window), painterResource(Res.drawable.ic_external), onOpenInNewWindow)
+                        }
+                    }
+                    // 「清空本会话记录」排在末尾：它是低频 + 破坏性动作，跟"复制 / 在新窗口打开"
+                    // 一样按窄档退成图标（内容描述即标签）。点了先过确认框，不直接删。
+                    onClearMessages?.let { clear ->
+                        if (iconOnlyActions) {
+                            TopBarIconAction(Res.drawable.ic_trash, stringResource(Res.string.chat_clear_local_action), clear)
+                        } else {
+                            ToolbarButton(stringResource(Res.string.chat_clear_local_action), painterResource(Res.drawable.ic_trash), clear)
                         }
                     }
                 }

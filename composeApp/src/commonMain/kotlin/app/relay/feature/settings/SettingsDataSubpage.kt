@@ -83,6 +83,11 @@ fun SettingsDataSubpage(
     onOpenDataDirectory: (() -> Unit)? = null,
     persistMessagesEnabled: Boolean = false,
     onPersistMessagesEnabledChange: ((Boolean) -> Unit)? = null,
+    /**
+     * K1 长连接（跨网下行通道）开关。**默认关**，且只对**局域网**对端生效：
+     * 公网要等 K2 的 TLS + 双向 pin（明文长连接只允许局域网，与今天的 LAN 明文路径风险相同）。
+     */
+    onLinkDownlinkEnabledChange: ((Boolean) -> Unit)? = null,
     retentionDays: Int = DEFAULT_RETENTION_DAYS,
     onRetentionDaysChange: ((Int) -> Unit)? = null,
     onClearHistory: (() -> Unit)? = null,
@@ -197,6 +202,11 @@ fun SettingsDataSubpage(
                     onPersistMessagesEnabledChange?.invoke(next)
                 },
             )
+
+            // 「跨网通道」开关**已移除**：用户的心智是"移动网 / WiFi / 内网都能无感连上"，
+            // 不是"我要不要开一条长连接"。而且关掉它并不回滚到可用状态 —— 是**不拨号**，
+            // 只剩等对端连入，在移动网 / NAT 下就是"怎么都连不上"（真机缺陷）。
+            // 安全边界（公网必须 TLS + 双向 pin）在传输层，与这个开关无关。
 
             SettingRow(
                 title = stringResource(Res.string.set_retention_title),

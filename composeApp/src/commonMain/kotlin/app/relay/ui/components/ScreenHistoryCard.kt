@@ -84,6 +84,7 @@ import app.relay.generated.resources.screen_card_view_only
 import app.relay.ui.theme.IconSizes
 import app.relay.ui.theme.LocalAppSpacing
 import app.relay.ui.theme.accents
+import app.relay.ui.theme.RelayShapes
 import app.relay.app.model.MessageUi
 import app.relay.app.model.ScreenRecordUi
 import org.jetbrains.compose.resources.StringResource

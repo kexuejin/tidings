@@ -4,6 +4,7 @@ package app.relay.app
 
 import app.relay.core.protocol.ConvId
 import app.relay.core.protocol.GroupMeta
+import app.relay.core.protocol.MsgTypes
 import app.relay.app.model.*
 import app.relay.app.model.AgentApprovalUi
 import app.relay.app.model.AgentArtifactKey
@@ -162,11 +163,34 @@ data class RelayUiState(
 
     val onlineCount: Int get() = peers.count { it.online }
 
-    val agentPeers: List<PeerUi> get() = peers.filter { it.isAgent }
+    val agentPeers: List<PeerUi> get() {
+        val hostNode = if (agentWorkspaces.keys.any { it.peerId == selfNodeId }) {
+            PeerUi(
+                nodeId = selfNodeId,
+                nick = settings.nick.ifBlank { selfNodeId.take(8) },
+                platform = "",
+                caps = listOf(MsgTypes.CAP_AGENT, MsgTypes.CAP_AGENT_WORKSPACE),
+                online = true,
+            )
+        } else null
+        return peers.filter { it.isAgent } + listOfNotNull(hostNode)
+    }
 
     val humanPeers: List<PeerUi> get() = peers.filterNot { it.isAgent }
 
-    fun peer(nodeId: String?): PeerUi? = nodeId?.let { id -> peers.firstOrNull { it.nodeId == id } }
+    fun peer(nodeId: String?): PeerUi? = nodeId?.let { id ->
+        if (id == selfNodeId) {
+            PeerUi(
+                nodeId = selfNodeId,
+                nick = settings.nick.ifBlank { selfNodeId.take(8) },
+                platform = "",
+                caps = listOf(MsgTypes.CAP_AGENT, MsgTypes.CAP_AGENT_WORKSPACE),
+                online = true,
+            )
+        } else {
+            peers.firstOrNull { it.nodeId == id }
+        }
+    }
 
     /**
      * 打开某个会话时用它：对端还在线/已知就返回真实记录，**只剩落盘历史时返回一个占位对端**。
@@ -208,6 +232,20 @@ data class RelayUiState(
     /** 按会话键取群：`group:<groupId>` → [GroupMeta]。私聊键恒返回 null。 */
     fun groupOfConv(convId: String?): GroupMeta? = groupOf(convId?.let { ConvId.groupIdOf(it) })
 
+    /** 该群绑定的工作区；未绑定或未宣告时返回 null。 */
+    fun workspaceOfGroup(groupId: String?): WorkspaceUi? {
+        val meta = groupOf(groupId) ?: return null
+        val desc = meta.description.orEmpty().trim()
+        return agentWorkspaces.values.firstOrNull { ws ->
+            (desc.isNotBlank() && (desc == ws.wsPath || desc == ws.wsId || (ws.wsPath?.isNotBlank() == true && desc.contains(ws.wsPath)))) ||
+                (ws.wsTitle?.isNotBlank() == true && meta.name.contains(ws.wsTitle))
+        }
+    }
+
+    /** 该会话绑定的工作区：`group:<groupId>` → [WorkspaceUi]。私聊键恒返回 null。 */
+    fun workspaceOfConv(convId: String?): WorkspaceUi? =
+        workspaceOfGroup(convId?.let { ConvId.groupIdOf(it) })
+
     /**
      * 群里当前在线的人数（**不含自己**）。
      *
@@ -226,7 +264,12 @@ data class RelayUiState(
      * 不让同一个人在两处显示成两个样子。
      */
     fun senderName(senderId: String?): String? = senderId?.let { id ->
-        if (id == selfNodeId) null else peer(id)?.displayName ?: id.take(8)
+        if (id == selfNodeId) null
+        else if (id.startsWith("agent:")) {
+            val name = id.substringAfter("agent:")
+            if (name.equals("dsh", ignoreCase = true)) "DSH Agent" else "Agent ($name)"
+        }
+        else peer(id)?.displayName ?: id.take(8)
     }
 
     /**
@@ -243,7 +286,14 @@ data class RelayUiState(
     fun agentSessionsOf(peerId: String?): List<AgentSessionUi> =
         peerId?.let { id -> agentSessions.filterKeys { it.peerId == id }.values }
             .orEmpty()
-            .sortedByDescending { it.sortActivityAt }
+            .sortedWith(
+                compareByDescending<AgentSessionUi> { session ->
+                    val key = AgentSessionKey(session.peerId, session.sessionId)
+                    val lastEventAt = agentEvents[key]?.maxOfOrNull { it.at } ?: 0L
+                    maxOf(session.sortActivityAt, lastEventAt)
+                }.thenByDescending { it.startedAt ?: 0L }
+                 .thenByDescending { it.sessionId },
+            )
 
     /**
      * 某个节点名下**该显示**的会话（已按 DSH 可见性两键过滤），活动倒序在前。
@@ -313,12 +363,22 @@ data class RelayUiState(
         }
 
     /**
-     * 某个 agent 节点名下**宣告过**的工作区，最近收到在前（PPE-1 增补 D3，父稿 §5）。
+     * 某个 agent 节点名下**宣告过**的工作区，按**稳定序**在前（PPE-1 增补 D3，父稿 §5）。
      *
      * `agentKey` = `agentId ?? agentKind`；传 null = 不过滤，返回该节点全部工作区。
      * 注意这里只包含 `agent-workspace` 帧宣告的那些 —— **只从会话派生出来的**工作区
      * （会话带了 `wsId` 而对端从没发过宣告帧）不在这张表里，界面上要画工作区一律走
      * `inboxWorkspaceUnits()` 的并集，别拿这个函数当"全部工作区"。
+     *
+     * ## 排序与 `inboxWorkspaceUnits()` 必须**同一把尺子**
+     *
+     * 顺序 = DSH 注册表的持久序（用户能手工拖，`hostOrder`）；对端没报 order 的那些
+     * （宿主桥不发 `order` / 本地台账兜底路）退回 [workspaceSortName]（标题 → 路径末段 →
+     * wsId）→ `wsId`。
+     *
+     * 此前这里退的是**收到时刻倒序**（`-at`）：每来一次宣告帧都可能重排，而且与工作区
+     * 看板用的那把尺子（待审批 → 最近活动）不同 —— 同一份数据在两屏两个顺序，正是本仓
+     * 反复抓过的"两把尺子"。两者现在都收敛到同一个稳定键。
      */
     fun workspacesOf(peerId: String?, agentKey: String? = null): List<WorkspaceUi> =
         if (peerId == null) emptyList() else agentWorkspaces.values
@@ -326,11 +386,13 @@ data class RelayUiState(
                 it.peerId == peerId && (agentKey == null || it.agentKey == agentKey) &&
                     !isSyntheticWsId(it.wsId)
             }
-            // 顺序 = DSH 注册表的持久序（用户能手工拖），**不是**"最近活动"——
-            // 这是"跟 DSH 显示的不一样"的真因（真机反馈）。对端没报 order 的那些
-            // （老宿主 / 本地台账兜底路）退回收到时刻倒序：**沉默不猜**，但也不让它们
-            // 全部并列在一起（并列会让顺序退化成 map 的插入序，看上去随机）。
-            .sortedWith(compareBy({ it.hostOrder ?: Long.MAX_VALUE }, { -it.at }))
+            .sortedWith(
+                compareBy(
+                    { it.hostOrder ?: Long.MAX_VALUE },
+                    { workspaceSortName(it.wsTitle, it.wsPath, it.wsId) },
+                    { it.wsId },
+                ),
+            )
 
     /**
      * 我对某个节点（可选细到某个 agent）的申请状态，四档见 [GrantRequestStatus]。
@@ -339,21 +401,34 @@ data class RelayUiState(
      * 画出「已申请待批」压住「已授权」那种谎 —— 宿主批完一定会发 `agent-grant` 或清单，
      * 那一行才是事实，而 PENDING 只是本端的一次乐观记账。
      */
-    fun grantStatusOf(peerId: String, agentKey: String? = null): GrantRequestStatus {
-        grantFor(peerId, agentKey)?.let { return grantStateToStatus(it.state) }
-        if (grantKeyOf(peerId, agentKey) in pendingGrantRequests) return GrantRequestStatus.PENDING
+    /**
+     * 我对某个节点（可选细到某个 agent，可选细到某个工作区）的申请状态，四档见 [GrantRequestStatus]。
+     *
+     * 判序是**宿主的结论优先于我的等待**：先查生效授权，再问是不是在等回复。反过来会
+     * 画出「已申请待批」压住「已授权」那种谎 —— 宿主批完一定会发 `agent-grant` 或清单，
+     * 那一行才是事实，而 PENDING 只是本端的一次乐观记账。
+     */
+    fun grantStatusOf(peerId: String, agentKey: String? = null, wsId: String? = null): GrantRequestStatus {
+        grantFor(peerId, agentKey, wsId)?.let { return grantStateToStatus(it.state) }
+        if (grantKeyOf(peerId, agentKey, wsId) in pendingGrantRequests) return GrantRequestStatus.PENDING
+        if (wsId != null && grantKeyOf(peerId, agentKey, null) in pendingGrantRequests) return GrantRequestStatus.PENDING
         return GrantRequestStatus.NONE
     }
 
     /**
-     * 生效授权条目：先查 agent 级，再退到整台设备（`scope = "all"` 那一档）。
+     * 生效授权条目：先查工作区级，再退到 agent 级，再退到整台设备（`scope = "all"` 那一档）。
      *
      * 顺序不能反：设备级授权覆盖 agent 级，反过来会让"批了整台机器"显示成"没批"。
      * 两处都没有 = null ⇒ 界面上是沉默（NONE），不是拒绝（父稿 §3.3）。
      */
-    fun grantFor(peerId: String, agentKey: String? = null): GrantUi? {
-        if (agentKey != null) agentGrants[grantKeyOf(peerId, agentKey)]?.let { return it }
-        return agentGrants[grantKeyOf(peerId, null)]
+    fun grantFor(peerId: String, agentKey: String? = null, wsId: String? = null): GrantUi? {
+        if (wsId != null) {
+            agentGrants[grantKeyOf(peerId, agentKey, wsId)]?.let { return it }
+        }
+        if (agentKey != null) {
+            agentGrants[grantKeyOf(peerId, agentKey, null)]?.let { return it }
+        }
+        return agentGrants[grantKeyOf(peerId, null, null)]
     }
 
     /** 某个会话的产物，最近收到在前（PPE-1 §6.7）。 */
@@ -369,7 +444,24 @@ data class RelayUiState(
     val totalPending: Int get() = pendingByPeer.values.sum()
 
     /**
-     * 会话列表：有消息往来的对端 + 已知但还没说过话的对端（在线优先、再按时间倒序）。
+     * 会话列表：有消息往来的对端 + 已知但还没说过话的对端 + 认识的群。
+     *
+     * ## 排序：**按最近一条消息时间降序**，未读只做视觉标记
+     *
+     * 这是真机反馈 #1 的落点：过去这里先按"有未读"置顶、再用一个混着装了对端 `lastSeenAt`
+     * 的时间戳排序，于是局域网发现每刷新一次，没聊过的在线对端就被顶到最前
+     * （它的时间戳恒等于"刚刚"）。现在：
+     *
+     * 1. 有消息的会话在前（[ConversationUi.lastMessageAt] > 0），按它倒序；
+     * 2. 没消息的整档排在**所有**有消息的会话之后，档内按 [ConversationUi.presenceAt]
+     *    （对端最后在线 / 群 `updatedTs`）倒序 —— 最近还在线的靠前，但永远压不过任何
+     *    一条真实消息；
+     * 3. 未读**不参与排序**（[ConversationUi.unread] 只给会话行画红点）。
+     *
+     * 排序的**唯一真源是本派生**：会话屏的 feed 混排对会话项用的键就是
+     * [ConversationUi.lastMessageAt]、且是稳定排序，不可能把这里的顺序改写成相反的样子。
+     *
+     * ## 来源
      *
      * 把"还没说过话的在线节点"也放进来是刻意的 —— 刚配对完的电脑必须立刻出现在
      * 会话列表里，否则用户会以为配对失败。
@@ -391,8 +483,21 @@ data class RelayUiState(
             val groupsByConv = settings.groups.associateBy { ConvId.group(it.groupId) }
             // 先认识到的对端在前，消息独有的会话排后面；去重靠 map，天然只留一条。
             val ids = LinkedHashSet<String>().apply {
-                addAll(real.keys)
-                addAll(messages.keys)
+                // 对端（task-42 ③）：**agent 节点**只有在「有可见会话」或「有消息」时才算
+                // 一条会话。为什么只对 agent 收紧：agent 节点的全部内容都在 agentSessions
+                // 与消息里，两者都空的行点进去既没有会话也没有消息 —— 用户问的「这几个没聊过
+                // 的会话为什么在」就是它们（它们是「被发现的节点」，不是一个会话）。
+                // 人类对端**保持原样**：刚配对完的电脑必须立刻出现在列表里，否则用户会以为
+                // 配对失败（见本属性 KDoc 的「来源」一节）。
+                addAll(real.keys.filter { id ->
+                    val p = real[id]
+                    p?.isAgent != true ||
+                        messages[id].orEmpty().isNotEmpty() ||
+                        visibleAgentSessionsOf(id).isNotEmpty()
+                })
+                addAll(messages.keys.filter { key ->
+                    groupsByConv.containsKey(key) || real.containsKey(key) || (!app.relay.core.protocol.IpAddressUtils.isIpv4(key) && !app.relay.core.protocol.IpAddressUtils.isIpv6(key) && !key.contains(':'))
+                })
                 addAll(groupsByConv.keys)
             }
             return ids
@@ -401,13 +506,18 @@ data class RelayUiState(
                     val peer = real[id]
                     val thread = messages[id].orEmpty()
                     val last = thread.lastOrNull()
-                    val ts = last?.at ?: group?.updatedTs ?: peer?.lastSeenAt ?: 0L
+                    val lastMessageAt = last?.at ?: 0L
+                    // 对端最后在线（群没有"在线"这个概念，退回建群/更新时间 updatedTs）。
+                    // 只有"还没聊过"那一档才拿它当尺子，见 ConversationUi.presenceAt 的 KDoc。
+                    val presenceAt = group?.updatedTs ?: peer?.lastSeenAt ?: 0L
                     ConversationUi(
                         convId = id,
                         title = convTitle(id),
                         // 文件消息没有正文，列表预览要退回文件名，否则会话行是空白。
                         preview = last?.let { it.text.ifBlank { it.file?.name } },
-                        at = ts,
+                        // 兼容兜底：桌面会话面板直接 relativeTime(at)，没有 0 守卫，
+                        // 所以这里保持"有消息用消息时间、没有用在线时间"，语义见 at 的 KDoc。
+                        at = if (lastMessageAt > 0) lastMessageAt else presenceAt,
                         unread = unreadByPeer[id] ?: 0,
                         isAgent = peer?.isAgent ?: false,
                         online = peer?.online ?: false,
@@ -416,16 +526,19 @@ data class RelayUiState(
                         memberOnlineCount = memberOnlineCount(group),
                         memberCount = group?.members?.size ?: 0,
                         avatar = peer?.avatar,
-                        ts = ts,
+                        lastMessageAt = lastMessageAt,
+                        presenceAt = presenceAt,
                     )
                 }
-                // 提案对齐（prototype/README.md §9.2）：
-                // 「最近会话」的主语是会话而不是在线状态，按未读优先/纯时间倒序排布，
-                // 群时间戳取最后一条消息或建群/更新时间 updatedTs，避免刚建的群沉底。
+                // 排序口径见本属性的 KDoc：有消息的在前、按最后一条消息倒序；没消息的整档
+                // 沉底、档内按最后在线倒序。刻意**不**含 unread —— 未读只做视觉标记。
+                //
+                // 群用 updatedTs 作 presenceAt（"避免刚建的群沉底"）：刚建的群没有消息，
+                // 于是落进没消息那一档，靠建群时间在档内靠前，但不会压过任何有消息的会话。
                 .sortedWith(
-                    compareByDescending<ConversationUi> { it.unread > 0 }
-                        .thenByDescending { it.ts }
-                        .thenByDescending { it.online || it.memberOnlineCount > 0 },
+                    compareByDescending<ConversationUi> { it.lastMessageAt > 0 }
+                        .thenByDescending { it.lastMessageAt }
+                        .thenByDescending { it.presenceAt },
                 )
         }
 
@@ -455,12 +568,12 @@ data class RelayUiState(
 }
 
 /**
- * [RelayUiState.agentGrants] 的键 = `peerId + "/" + (agentKey ?: "")`。
+ * [RelayUiState.agentGrants] 的键 = `peerId + "/" + (agentKey ?: "") + if (wsId != null) "/ws/$wsId" else ""`。
  *
  * 空串后缀代表整台设备那一档（`scope = "all"` 的帧没有 `agentKey`）。写成唯一的构造函数
  * 而不是让入站处理、查询、落库三处各拼一遍：拼错一处就是两条会互相看不见的记录
  * （症状是"批了却还显示未申请"，最难查的那类）。
  */
-internal fun grantKeyOf(peerId: String, agentKey: String?): String =
-    peerId + "/" + (agentKey ?: "")
+internal fun grantKeyOf(peerId: String, agentKey: String? = null, wsId: String? = null): String =
+    peerId + "/" + (agentKey ?: "") + if (wsId != null) "/ws/$wsId" else ""
 

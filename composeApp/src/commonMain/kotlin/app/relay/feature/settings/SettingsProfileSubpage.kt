@@ -36,8 +36,6 @@ import app.relay.generated.resources.r2_set_profile_avatar_label
 import app.relay.generated.resources.r2_set_profile_node_chip
 import app.relay.generated.resources.r2_set_profile_rev_chip
 import app.relay.generated.resources.r2_set_profile_org
-import app.relay.generated.resources.r2_set_profile_page_hint
-import app.relay.generated.resources.r2_set_profile_team_hint
 import app.relay.generated.resources.set_save_profile
 import app.relay.generated.resources.set_company
 import app.relay.generated.resources.set_dept
@@ -92,6 +90,7 @@ fun SettingsProfileSubpage(
     onBack: (() -> Unit)? = null,
     /** 头像分段控件第三档「上传图片」的出口；null = 没接线，该档置灰。 */
     onOpenAvatarPage: (() -> Unit)? = null,
+    onRemovePickedAvatar: (() -> Unit)? = null,
     modifier: Modifier = Modifier,
 ) {
     val settings = state.settings
@@ -160,7 +159,7 @@ fun SettingsProfileSubpage(
                     verticalAlignment = Alignment.CenterVertically,
                     horizontalArrangement = Arrangement.spacedBy(LocalAppSpacing.current.lg14),
                 ) {
-                    PeerAvatar(name = nick, size = 54.dp, avatar = avatar)
+                    PeerAvatar(name = nick, size = 54.dp, avatar = avatar, avatarBytes = state.pickedAvatarBytes)
                     Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(LocalAppSpacing.current.xs)) {
                         Text(
                             text = nick.ifBlank { "我的昵称" },
@@ -212,7 +211,9 @@ fun SettingsProfileSubpage(
                 AvatarPicker(
                     avatar = avatar,
                     nick = nick,
+                    pickedAvatarBytes = state.pickedAvatarBytes,
                     onAvatarChange = { avatar = it },
+                    onRemovePickedAvatar = onRemovePickedAvatar,
                     onOpenAvatarPage = onOpenAvatarPage,
                 )
 
@@ -248,7 +249,6 @@ fun SettingsProfileSubpage(
                     value = team,
                     onValueChange = { team = it },
                     modifier = Modifier.fillMaxWidth(),
-                    supporting = stringResource(Res.string.r2_set_profile_team_hint),
                     maxLength = RelaySettings.LIMIT_TEAM,
                 )
 
@@ -260,14 +260,6 @@ fun SettingsProfileSubpage(
                     Text(stringResource(Res.string.set_save_profile))
                 }
             }
-
-            // 卡外页级 hint（原型 `padding:0 4px;margin-top:12px`）。
-            Text(
-                text = stringResource(Res.string.r2_set_profile_page_hint),
-                style = MaterialTheme.typography.bodySmall,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-                modifier = Modifier.padding(horizontal = LocalAppSpacing.current.xs),
-            )
 
         }
     }

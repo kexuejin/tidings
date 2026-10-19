@@ -76,6 +76,10 @@ fun SettingsScreen(
     onAddScanRange: (String) -> Unit = {},
     onRemoveScanRange: (String) -> Unit = {},
     onTriggerCidrScan: (String?) -> Unit = {},
+    /** 「后台保持连接」：本平台有没有这条能力（Android 有）、当前开关值、以及改动出口。 */
+    keepAliveSupported: Boolean = false,
+    keepAliveEnabled: Boolean = true,
+    onKeepAliveChange: (Boolean) -> Unit = {},
     onDismissBanner: () -> Unit,
     onClearNote: () -> Unit,
     modifier: Modifier = Modifier,
@@ -84,8 +88,9 @@ fun SettingsScreen(
     defaultPort: String? = null,
     /** 进入第二屏；参数是页键（`SETTINGS_PAGE_*`）。null 时底部不画入口。 */
     onOpenPage: ((String) -> Unit)? = null,
-    /** 资料页头像分段控件第三档「上传图片」的出口（接 `SetAvatarPage`）。null = 该档置灰。 */
+    /** 资料页头像分段控件第三档「上传图片」的出口。null = 该档置灰。 */
     onOpenAvatarPage: (() -> Unit)? = null,
+    onRemovePickedAvatar: (() -> Unit)? = null,
     initialSubpage: String? = if (state.restarting) SUBPAGE_CONN else null,
 ) {
     var subpage by rememberSaveable(initialSubpage) { mutableStateOf(initialSubpage) }
@@ -104,6 +109,7 @@ fun SettingsScreen(
                 },
                 onBack = { subpage = null },
                 onOpenAvatarPage = onOpenAvatarPage,
+                onRemovePickedAvatar = onRemovePickedAvatar,
                 modifier = modifier,
             )
         }
@@ -116,6 +122,9 @@ fun SettingsScreen(
                 onAddScanRange = onAddScanRange,
                 onRemoveScanRange = onRemoveScanRange,
                 onTriggerCidrScan = onTriggerCidrScan,
+                keepAliveSupported = keepAliveSupported,
+                keepAliveEnabled = keepAliveEnabled,
+                onKeepAliveChange = onKeepAliveChange,
                 onBack = { subpage = null },
                 modifier = modifier,
             )

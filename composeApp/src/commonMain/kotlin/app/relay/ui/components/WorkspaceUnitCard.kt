@@ -36,12 +36,15 @@ import app.relay.generated.resources.agent_session_state_error
 import app.relay.generated.resources.agent_session_state_idle
 import app.relay.generated.resources.ic_chat_bubble
 import app.relay.generated.resources.ic_chev
+import app.relay.generated.resources.workspace_access_readonly
+import app.relay.generated.resources.workspace_access_readwrite
+import app.relay.generated.resources.workspace_badge_host
 import app.relay.generated.resources.workspace_board_artifacts_format
 import app.relay.generated.resources.workspace_board_queue_format
 import app.relay.generated.resources.workspace_board_runs_format
 import app.relay.generated.resources.workspace_no_sessions
 import app.relay.generated.resources.workspace_sessions_not_synced
-import app.relay.generated.resources.workspace_total_sessions_format
+import app.relay.generated.resources.workspace_latest_activity_format
 import app.relay.ui.theme.IconSizes
 import app.relay.ui.theme.LocalAppSpacing
 import app.relay.ui.theme.LocalCardShape
@@ -94,13 +97,15 @@ internal data class WorkspaceUnitCardUi(
     /**
      * 这个工作区一共有几个会话（宿主在宣告帧里自报的数，来自 DSH 权威台账）。
      *
-     * ## 为什么要它
+     * ## 为什么要它（在"行上不再印会话数"之后仍然要）
      *
-     * 明确区分「没有会话」（0）与「尚未同步」（>0），避免显示自相矛盾。
+     * 本地一条会话都没拿到时，靠它区分「没有会话」（0，可以断言）与「还没同步」（>0，
+     * 只能如实说）。**这不是一个计数徽标**：它只在错误态出现一次，是那句"还没同步到"
+     * 的理由，所以不在 issue 6 「行/组头不再数量」的范围内。
      */
     val sessionCount: Int = 0,
-    /** 这一行下的会话总数（底栏那半句「共 N 个会话」）。 */
-    val sessionTotal: Int = 0,
+    val isHost: Boolean = false,
+    val access: String? = null,
 )
 
 /** 卡片里那一段活跃会话。 */
@@ -167,6 +172,39 @@ internal fun WorkspaceUnitCard(
                             modifier = Modifier.weight(1f, fill = false),
                         )
                         if (ui.kindBadge) KindBadge(true)
+                        if (ui.isHost) {
+                            Surface(
+                                shape = RoundedCornerShape(4.dp),
+                                color = MaterialTheme.colorScheme.primaryContainer,
+                            ) {
+                                Text(
+                                    text = stringResource(Res.string.workspace_badge_host),
+                                    style = MaterialTheme.typography.labelSmall,
+                                    color = MaterialTheme.colorScheme.onPrimaryContainer,
+                                    fontWeight = FontWeight.Bold,
+                                    modifier = Modifier.padding(horizontal = 4.dp, vertical = 1.dp),
+                                )
+                            }
+                        } else if (ui.access != null) {
+                            Surface(
+                                shape = RoundedCornerShape(4.dp),
+                                color = MaterialTheme.colorScheme.surfaceVariant,
+                            ) {
+                                Text(
+                                    text = stringResource(
+                                        if (ui.access == "ro") {
+                                            Res.string.workspace_access_readonly
+                                        } else {
+                                            Res.string.workspace_access_readwrite
+                                        },
+                                    ),
+                                    style = MaterialTheme.typography.labelSmall,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                    fontWeight = FontWeight.Medium,
+                                    modifier = Modifier.padding(horizontal = 4.dp, vertical = 1.dp),
+                                )
+                            }
+                        }
                         ui.mutedTag?.let { MutedTag(it) }
                     }
                     Text(
@@ -254,7 +292,7 @@ internal fun WorkspaceUnitCard(
                         ui.pendingLabel?.let { PendingPill(it) }
                     }
 
-                    if (session.summary != null) {
+                    if (session.summary != null && session.summary != session.title) {
                         Text(
                             text = session.summary,
                             style = MaterialTheme.typography.bodySmall,
@@ -278,9 +316,11 @@ internal fun WorkspaceUnitCard(
                             // （`AgentSessionUi.sortActivityAt`）—— 无事件的会话基本都是分页拉回来的
                             // 历史，用本端到达时刻会让"越久没碰的工作区越写刚刚"。
                             // 卡片这一层不参与口径决定，只是照着画。
+                            //
+                            // 不再前缀「共 N 个会话」（issue 6）：这一行要回答的是"最新一次动在
+                            // 什么时候"，会话数在段/页层面已经有了。
                             text = stringResource(
-                                Res.string.workspace_total_sessions_format,
-                                ui.sessionTotal,
+                                Res.string.workspace_latest_activity_format,
                                 relativeTime(session.at, now),
                             ),
                             style = MaterialTheme.typography.labelSmall,

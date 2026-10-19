@@ -30,6 +30,7 @@ import app.relay.generated.resources.Res
 import app.relay.generated.resources.agent_approval_allow
 import app.relay.generated.resources.agent_approval_deny
 import app.relay.generated.resources.agent_approval_expired
+import app.relay.generated.resources.agent_approval_readonly
 import app.relay.generated.resources.agent_approval_status_approved
 import app.relay.generated.resources.agent_approval_status_denied
 import androidx.compose.foundation.clickable
@@ -139,6 +140,7 @@ public fun AgentApprovalsSection(
     approvals: List<AgentApprovalUi>,
     onRespond: ((approvalId: String, allow: Boolean) -> Unit)? = null,
     onRespondChoice: ((approvalId: String, allow: Boolean, allowSession: Boolean) -> Unit)? = null,
+    isReadOnly: ((AgentApprovalUi) -> Boolean)? = null,
     modifier: Modifier = Modifier,
 ) {
     if (approvals.isEmpty()) return
@@ -165,6 +167,7 @@ public fun AgentApprovalsSection(
                     now = now,
                     onRespond = onRespond,
                     onRespondChoice = onRespondChoice,
+                    isReadOnly = isReadOnly?.invoke(approval) == true,
                 )
             }
         }
@@ -178,6 +181,7 @@ private fun ApprovalRow(
     now: Long,
     onRespond: ((approvalId: String, allow: Boolean) -> Unit)?,
     onRespondChoice: ((approvalId: String, allow: Boolean, allowSession: Boolean) -> Unit)? = null,
+    isReadOnly: Boolean = false,
 ) {
     val spacing = LocalAppSpacing.current
     val isExpired = approval.expiresAt > 0L && now > approval.expiresAt
@@ -233,7 +237,19 @@ private fun ApprovalRow(
                 horizontalArrangement = Arrangement.spacedBy(spacing.sm6),
                 verticalAlignment = Alignment.CenterVertically,
             ) {
-                if (approval.status == "pending" && !isExpired && (onRespond != null || onRespondChoice != null)) {
+                if (approval.status == "pending" && !isExpired && isReadOnly) {
+                    Surface(
+                        shape = RoundedCornerShape(6.dp),
+                        color = MaterialTheme.colorScheme.surfaceVariant,
+                    ) {
+                        Text(
+                            text = stringResource(Res.string.agent_approval_readonly),
+                            style = MaterialTheme.typography.labelSmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            modifier = Modifier.padding(horizontal = spacing.sm, vertical = spacing.xxs),
+                        )
+                    }
+                } else if (approval.status == "pending" && !isExpired && (onRespond != null || onRespondChoice != null)) {
                     OutlinedButton(onClick = {
                         if (onRespondChoice != null) onRespondChoice(approval.approvalId, false, false)
                         else onRespond?.invoke(approval.approvalId, false)

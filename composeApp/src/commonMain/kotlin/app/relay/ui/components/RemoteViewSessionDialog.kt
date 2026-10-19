@@ -82,6 +82,9 @@ import org.jetbrains.compose.resources.painterResource
 import org.jetbrains.compose.resources.stringResource
 
 import app.relay.ui.theme.LocalAppSpacing
+import app.relay.ui.theme.IconSizes
+import app.relay.ui.theme.RelayElevations
+import app.relay.ui.theme.RelayShapes
 import app.relay.app.model.ScreenSessionUiState
 
 /**
@@ -117,9 +120,9 @@ fun RemoteViewSessionDialog(
             properties = DialogProperties(dismissOnBackPress = false, dismissOnClickOutside = false),
         ) {
             Surface(
-                shape = RoundedCornerShape(16.dp),
+                shape = RelayShapes.large,
                 color = MaterialTheme.colorScheme.surface,
-                shadowElevation = 6.dp,
+                shadowElevation = RelayElevations.Floating,
                 modifier = Modifier.padding(LocalAppSpacing.current.lg),
             ) {
                 Column(
@@ -164,7 +167,7 @@ fun RemoteViewSessionDialog(
             properties = DialogProperties(dismissOnBackPress = false, dismissOnClickOutside = false),
         ) {
             Surface(
-                shape = RoundedCornerShape(12.dp),
+                shape = RelayShapes.medium,
                 color = MaterialTheme.colorScheme.primaryContainer,
                 modifier = Modifier.padding(LocalAppSpacing.current.lg),
             ) {
@@ -174,7 +177,7 @@ fun RemoteViewSessionDialog(
                     horizontalArrangement = Arrangement.spacedBy(LocalAppSpacing.current.md),
                 ) {
                     CircularProgressIndicator(
-                        modifier = Modifier.size(16.dp),
+                        modifier = Modifier.size(LocalAppSpacing.current.lg),
                         strokeWidth = 2.dp,
                         color = MaterialTheme.colorScheme.primary,
                     )
@@ -345,7 +348,7 @@ fun RemoteViewSessionDialog(
                                 painter = painterResource(Res.drawable.ic_close),
                                 contentDescription = stringResource(Res.string.common_close),
                                 tint = Color.White,
-                                modifier = Modifier.size(18.dp),
+                                modifier = Modifier.size(IconSizes.Body),
                             )
                         }
                     }
@@ -360,7 +363,7 @@ fun RemoteViewSessionDialog(
                     ) {
                         Row(
                             modifier = Modifier
-                                .background(Color.White.copy(alpha = 0.12f), RoundedCornerShape(8.dp))
+                                .background(Color.White.copy(alpha = 0.12f), RelayShapes.small)
                                 .padding(LocalAppSpacing.current.xxs),
                         ) {
                             RemoteViewZoomOption(
@@ -424,9 +427,9 @@ fun ScreenRequestConfirmDialog(
         properties = DialogProperties(dismissOnBackPress = true, dismissOnClickOutside = false),
     ) {
         Surface(
-            shape = RoundedCornerShape(16.dp),
+            shape = RelayShapes.large,
             color = MaterialTheme.colorScheme.surface,
-            shadowElevation = 6.dp,
+            shadowElevation = RelayElevations.Floating,
             modifier = Modifier.padding(LocalAppSpacing.current.lg),
         ) {
             Column(
@@ -449,7 +452,7 @@ fun ScreenRequestConfirmDialog(
                             painter = painterResource(Res.drawable.ic_close),
                             contentDescription = stringResource(Res.string.common_close),
                             tint = MaterialTheme.colorScheme.onSurfaceVariant,
-                            modifier = Modifier.size(18.dp),
+                            modifier = Modifier.size(IconSizes.Body),
                         )
                     }
                 }
@@ -466,7 +469,7 @@ fun ScreenRequestConfirmDialog(
                             painter = painterResource(Res.drawable.ic_screen_share),
                             contentDescription = null,
                             tint = MaterialTheme.colorScheme.onSurfaceVariant,
-                            modifier = Modifier.size(16.dp),
+                            modifier = Modifier.size(IconSizes.Label),
                         )
                         Text(
                             text = stringResource(Res.string.screen_remote_view_request_banner),
@@ -536,9 +539,9 @@ private fun RemoteViewErrorDialog(session: ScreenSessionState, onDismiss: () -> 
             contentAlignment = Alignment.Center,
         ) {
             Surface(
-                shape = RoundedCornerShape(16.dp),
+                shape = RelayShapes.large,
                 color = MaterialTheme.colorScheme.errorContainer,
-                tonalElevation = 6.dp,
+                tonalElevation = RelayElevations.Floating,
                 modifier = Modifier.padding(LocalAppSpacing.current.lg),
             ) {
                 Column(

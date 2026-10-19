@@ -54,7 +54,7 @@ class RelayUiStateTest {
     }
 
     @Test
-    fun unreadPrioritySortsBeforeRead() {
+    fun unreadDoesNotChangeTheOrderItOnlyMarksTheRow() {
         val state = RelayUiState(
             peers = listOf(
                 peer("a", "甲", online = false, lastSeenAt = 9_000L),
@@ -62,8 +62,52 @@ class RelayUiStateTest {
             ),
             unreadByPeer = mapOf("b" to 1),
         )
-        // 未读优先级压过时间倒序
-        assertEquals(listOf("b", "a"), state.conversations.map { it.convId })
+        // 未读只做视觉标记（ConversationRow 画红点），**不参与排序**：
+        // 乙有未读也不能压过更近的甲 —— 真机反馈 #1 的另一半
+        // （旧口径是"有未读的会话无条件置顶"，与"按最近聊天时间排"矛盾）。
+        assertEquals(listOf("a", "b"), state.conversations.map { it.convId })
+    }
+
+    @Test
+    fun aPeerThatJustCameOnlineCannotOutrankAConversationWithMessages() {
+        // 真机反馈 #1：局域网发现每轮都会刷新在线对端的 `lastSeenAt`，旧排序把它当成"刚刚"，
+        // 于是从没聊过的会话一直顶在有消息的会话上面。没消息的会话必须整档沉底。
+        val state = RelayUiState(
+            peers = listOf(
+                peer("fresh", "刚配对的电脑", online = true, lastSeenAt = 99_000L),
+                peer("talked", "聊过的电脑", online = false, lastSeenAt = 50_000L),
+            ),
+            messages = mapOf("talked" to listOf(message("m1", "talked", "在吗", at = 1_000L))),
+        )
+        assertEquals(listOf("talked", "fresh"), state.conversations.map { it.convId })
+    }
+
+    @Test
+    fun conversationsWithMessagesSortByTheirLastMessageTimeNotPresence() {
+        val state = RelayUiState(
+            // 对端在线时间与消息时间**反向**：排序只能认消息，否则这条会翻过来。
+            peers = listOf(
+                peer("a", "甲", online = false, lastSeenAt = 1L),
+                peer("b", "乙", online = true, lastSeenAt = 9_999L),
+            ),
+            messages = mapOf(
+                "a" to listOf(message("a1", "a", "更近的一条", at = 2_000L)),
+                "b" to listOf(message("b1", "b", "更早的一条", at = 500L)),
+            ),
+        )
+        assertEquals(listOf("a", "b"), state.conversations.map { it.convId })
+    }
+
+    @Test
+    fun theNoMessageBucketSortsAmongItselfByLastSeenDescending() {
+        val state = RelayUiState(
+            peers = listOf(
+                peer("old", "很久没见", online = false, lastSeenAt = 100L),
+                peer("recent", "刚刚见过", online = true, lastSeenAt = 900L),
+            ),
+        )
+        // 没聊过的那一档内部仍要有说得通的先后：最近还在线的靠前。
+        assertEquals(listOf("recent", "old"), state.conversations.map { it.convId })
     }
 
     @Test
@@ -88,7 +132,13 @@ class RelayUiStateTest {
         assertEquals("fresh", row.convId)
         assertEquals("刚配对的电脑", row.title)
         assertNull(row.preview, "还没聊过时 preview 必须是 null，文案交给 UI 翻译")
-        assertEquals(4_200L, row.at, "没有消息时时间戳退回 lastSeenAt")
+        assertEquals(0L, row.lastMessageAt, "没有消息时 lastMessageAt 必须是 0 —— 0 就是'没聊过'")
+        assertEquals(4_200L, row.presenceAt, "对端最后在线时间单独记在 presenceAt")
+        assertEquals(
+            4_200L,
+            row.at,
+            "at 保留为兼容兜底值（桌面会话面板直接 relativeTime(at) 且没有 0 守卫）",
+        )
     }
 
     @Test
@@ -104,7 +154,9 @@ class RelayUiStateTest {
         )
         val row = state.conversations.single()
         assertEquals("最后一条", row.preview)
-        assertEquals(7_000L, row.at, "有消息时用最后一条消息的时间，而不是 lastSeenAt")
+        assertEquals(7_000L, row.lastMessageAt, "有消息时用最后一条消息的时间，而不是 lastSeenAt")
+        assertEquals(99_000L, row.presenceAt, "对端在线时间照常单独记着，只是不参与这一档的排序")
+        assertEquals(7_000L, row.at, "有消息时 at 等于最后一条消息的时间")
     }
 
     @Test
@@ -130,6 +182,10 @@ class RelayUiStateTest {
                 peer("a1", "codex·终端", caps = listOf(MsgTypes.CAP_AGENT, MsgTypes.CAP_MOBILE_TEXT)),
                 peer("h2", "书房的电脑", caps = listOf("fd1", "mrec1")),
             ),
+            // task-42 ③ 之后，一条**什么都没发生过**的 agent 节点不再进会话列表
+            // （它不是一个会话，见 ConversationSourceTest）。这里给它一条消息，
+            // 让下面两条断言测的仍然只是「能力位怎么分人/agent」，而不是列表准入规则。
+            messages = mapOf("a1" to listOf(message("m-a1", "a1", "在吗", 1L))),
         )
         // 判据只有 ag1 这一个能力位 —— 不靠昵称、不靠 host。
         assertEquals(listOf("a1"), state.agentPeers.map { it.nodeId })
@@ -184,6 +240,7 @@ class RelayUiStateTest {
         assertEquals("2819d147", row.title)
         // 预览/时间取恢复出来的最后一条消息，未读与排队数照常挂在这个 peerId 上。
         assertEquals("刚发的那条", row.preview)
+        assertEquals(200L, row.lastMessageAt)
         assertEquals(200L, row.at)
         assertEquals(2, row.unread)
         assertEquals(1, row.pendingCount)
@@ -387,6 +444,38 @@ class RelayUiStateTest {
         assertEquals("3ae78fe9", title)
         assertFalse(title.startsWith("group:"))
     }
+
+    @Test
+    fun aGroupWithoutMessagesSortsBelowAnyConversationWithMessages() {
+        // 群时间的兜底是建群/更新时间 updatedTs（旧注释里的"避免刚建的群沉底"）——
+        // 它现在只在**没消息那一档**里当尺子：刚建的群靠 updatedTs 在档内靠前，
+        // 但压不过任何一条真实消息，也不会因为"刚建"就冒到有消息的会话前面。
+        val groupId = "3ae78fe9-b605-4979-80d0-c608877b3cd8"
+        val state = RelayUiState(
+            peers = listOf(peer("talked", "聊过的电脑", lastSeenAt = 1L)),
+            messages = mapOf("talked" to listOf(message("m1", "talked", "在吗", at = 1_000L))),
+            settings = RelaySettings.firstRun().copy(
+                groups = listOf(
+                    GroupMeta(
+                        groupId = groupId,
+                        name = "刚建的群",
+                        members = listOf("me", "you"),
+                        rev = 1,
+                        updatedBy = "me",
+                        updatedTs = 99_000L,
+                    ),
+                ),
+            ),
+        )
+        assertEquals(
+            listOf("talked", ConvId.group(groupId)),
+            state.conversations.map { it.convId },
+        )
+        val groupRow = state.conversations.last()
+        assertEquals(0L, groupRow.lastMessageAt, "群里还没说过话")
+        assertEquals(99_000L, groupRow.presenceAt, "群没有'最后在线'，退回 updatedTs")
+    }
+
     /**
      * 会话列表的顺序必须跟着**宿主的活动时刻**走，不是"本端收到帧的时刻"。
      *

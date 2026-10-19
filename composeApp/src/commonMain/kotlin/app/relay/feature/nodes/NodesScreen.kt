@@ -521,6 +521,13 @@ fun NodesScreen(
             host = network.localAddresses.firstOrNull(),
             port = udpPort,
             onDismiss = { myQrOpen = false },
+            // 带全部候选：手机「我的二维码」也要能跨网络被找到（见 pairingQrPayloadFor）。
+            addresses = network.localAddresses,
+            nodeId = state.selfNodeId,
+            // task-86：还要带 pin，否则跨网手机建不出公网 TLS 目标（真机就死在这一格）。
+            tlsPin = network.selfTlsPin,
+            // 带昵称：对方扫完立刻看见真名，而不是 node-a1b2c3d4。
+            nick = state.settings.nick,
         )
     }
 }

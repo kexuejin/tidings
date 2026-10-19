@@ -7,10 +7,12 @@ import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
+import androidx.compose.material3.Button
 import androidx.compose.material3.Card
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.HorizontalDivider
@@ -38,12 +40,16 @@ import app.relay.generated.resources.agent_events_note
 import app.relay.generated.resources.agent_messages_title
 import app.relay.generated.resources.agent_offline_message
 import app.relay.generated.resources.agent_offline_title
+import app.relay.generated.resources.agent_open_chat
 import app.relay.generated.resources.cidr_scan_progress
 import app.relay.generated.resources.agent_sessions_empty
 import app.relay.generated.resources.agent_sessions_memory_note
+import app.relay.generated.resources.agent_session_untitled
 import app.relay.generated.resources.agent_timeline_empty
+import app.relay.core.protocol.AgentGrantAccess
 import app.relay.generated.resources.common_never
 import app.relay.generated.resources.ic_arrow_back
+import app.relay.generated.resources.ic_chat_bubble
 import app.relay.ui.ContentWidths
 import app.relay.ui.EmptyState
 import app.relay.ui.centerCapped
@@ -52,6 +58,7 @@ import app.relay.ui.components.ThinkingBlock
 import app.relay.ui.components.formatClock
 import app.relay.ui.components.relativeTime
 import app.relay.ui.theme.LocalAppSpacing
+import app.relay.ui.theme.LocalCardShape
 import app.relay.ui.theme.RelayElevations
 import org.jetbrains.compose.resources.painterResource
 import org.jetbrains.compose.resources.stringResource
@@ -61,7 +68,13 @@ import app.relay.app.model.ScanProgressUi
 
 
 /**
- * 会话详情工作台视图（第二级，下钻详情）。
+ * 会话详情工作台视图（**第三级**，下钻详情）。
+ *
+ * ## 三级 IA 里的位置（issue 6，用户裁决）
+ *
+ * ① 工作区看板 → ② 工作区操作中心（直通码 / 权限管理 / 最近会话入口）→ ③ **本屏**。
+ * 事件流与审批队列归这一屏；直通码与权限管理**不在**这里（它们按工作区授权，已搬到二级，
+ * 见 `WorkspaceDetailView` 里那段权限与宿主控制条）。
  */
 @Composable
 internal fun SessionDetailView(
@@ -88,7 +101,7 @@ internal fun SessionDetailView(
             .fillMaxSize()
             .centerCapped(ContentWidths.Pane),
     ) {
-        // 常驻置顶顶栏：返回键 + 会话标题与所属工作区
+        // 常驻置顶顶栏：返回键 + 会话标题与所属工作区 + 快捷打开聊天
         Row(
             modifier = Modifier
                 .fillMaxWidth()
@@ -108,32 +121,49 @@ internal fun SessionDetailView(
                     )
                 }
                 Column {
+                    val sTitle = activeSession?.displayTitle ?: stringResource(Res.string.agent_session_untitled)
                     Text(
-                        text = peer.displayName,
+                        text = sTitle,
                         style = MaterialTheme.typography.titleMedium,
                         fontWeight = FontWeight.SemiBold,
                         maxLines = 1,
                         overflow = TextOverflow.Ellipsis,
                     )
+                    val subWs = activeSession?.wsTitle?.takeIf { it.isNotBlank() } ?: peer.displayName
+                    val subKind = activeSession?.agentKind ?: ""
+                    Text(
+                        text = if (subKind.isNotEmpty()) "$subWs · $subKind" else subWs,
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis,
+                    )
                 }
+            }
+            IconButton(onClick = { onOpenChat(peer.nodeId) }) {
+                Icon(
+                    painter = painterResource(Res.drawable.ic_chat_bubble),
+                    contentDescription = stringResource(Res.string.agent_open_chat),
+                    tint = MaterialTheme.colorScheme.primary,
+                )
             }
         }
 
-        // 会话切换条（原型 `.swbar`）：标题栏下方一行，显示当前会话名与状态，
-        // 多会话时可点击打开切换对话框。
-        val sessionPendingCount = remember(state.agentApprovals, activeSession?.sessionId) {
-            activeSession?.sessionId?.let { sid ->
-                state.agentApprovals.values.count { it.sessionId == sid && it.status == "pending" }
-            } ?: 0
+        // 会话切换条（原型 `.swbar`）：仅在多会话时呈现，单会话时不画冗余条目
+        if (sessions.size > 1) {
+            val sessionPendingCount = remember(state.agentApprovals, activeSession?.sessionId) {
+                activeSession?.sessionId?.let { sid ->
+                    state.agentApprovals.values.count { it.sessionId == sid && it.status == "pending" }
+                } ?: 0
+            }
+            AgentSessionBar(
+                sessions = sessions,
+                activeSession = activeSession,
+                pendingCount = sessionPendingCount,
+                onClick = { picking = true },
+            )
+            HorizontalDivider()
         }
-        AgentSessionBar(
-            sessions = sessions,
-            activeSession = activeSession,
-            pendingCount = sessionPendingCount,
-            onClick = { if (sessions.size > 1) picking = true },
-        )
-
-        HorizontalDivider()
 
         Column(
             modifier = Modifier
@@ -149,6 +179,19 @@ internal fun SessionDetailView(
                     modifier = Modifier.fillMaxWidth(),
                 )
             } else {
+                val isHost = peer.nodeId == state.selfNodeId || peer.ip == "127.0.0.1" || peer.host == "localhost" || peer.host == "127.0.0.1"
+                val sessionGrant = state.grantFor(peer.nodeId, activeSession.agentId ?: activeSession.agentKind, activeSession.wsId)
+                val canApprove = isHost ||
+                    (sessionGrant?.isMyDevice == true) ||
+                    (sessionGrant?.access == AgentGrantAccess.OWNER) ||
+                    (sessionGrant?.access == AgentGrantAccess.ADMIN && sessionGrant.delegatedApproval)
+                val isReadOnly = !canApprove
+
+                // 权限与宿主控制条已按 task-4 D 整体搬到**工作区详情**（WorkspaceDetailView）：
+                // 授权是按工作区给的，不是按某一轮会话给的 —— 挂在会话详情上意味着
+                // "换一条会话就换一套权限显示"，而且没有会话时那一栏整块消失。
+                // 这一屏现在只留会话自己的东西：身份概览 / 审批 / 队列 / 执行 / 产物 / 消息流。
+
                 // 会话身份概览卡片
                 AgentSessionCard(
                     session = activeSession,
@@ -160,7 +203,11 @@ internal fun SessionDetailView(
                 val sessionApprovals = state.agentApprovals.values.filter {
                     it.peerId == peer.nodeId && it.sessionId == activeSession.sessionId
                 }
-                AgentApprovalsSection(approvals = sessionApprovals, onRespond = onRespondApproval)
+                AgentApprovalsSection(
+                    approvals = sessionApprovals,
+                    onRespond = onRespondApproval,
+                    isReadOnly = { isReadOnly },
+                )
 
                 // 专属队列卡片
                 val sessionTasks = state.agentTasks.values.filter {
@@ -254,6 +301,21 @@ internal fun SessionDetailView(
                             }
                         }
                     }
+                }
+                Button(
+                    onClick = { onOpenChat(peer.nodeId) },
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(vertical = LocalAppSpacing.current.md),
+                    shape = LocalCardShape.current,
+                ) {
+                    Icon(
+                        painter = painterResource(Res.drawable.ic_chat_bubble),
+                        contentDescription = null,
+                        modifier = Modifier.size(18.dp),
+                    )
+                    Spacer(Modifier.size(LocalAppSpacing.current.xs))
+                    Text(stringResource(Res.string.agent_open_chat))
                 }
             }
 

@@ -129,8 +129,12 @@ internal fun SettingsHomeScreen(
                             maxLines = 1,
                             overflow = TextOverflow.Ellipsis,
                         )
+                        val orgInfo = listOf(settings.company, settings.dept, settings.team)
+                            .map { it.trim() }
+                            .filter { it.isNotEmpty() }
+                            .joinToString(" · ")
                         Text(
-                            text = "${settings.company} · ${settings.dept} · ${settings.team}".trim().ifBlank { "未填写组织信息" },
+                            text = orgInfo.ifEmpty { "未填写组织信息" },
                             style = MaterialTheme.typography.bodySmall,
                             color = MaterialTheme.colorScheme.onSurfaceVariant,
                             maxLines = 1,

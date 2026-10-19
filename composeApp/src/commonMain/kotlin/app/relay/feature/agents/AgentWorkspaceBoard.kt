@@ -12,8 +12,13 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.layout.PaddingValues
+import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.width
+import androidx.compose.material3.Button
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
+import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
@@ -30,6 +35,8 @@ import app.relay.app.RelayUiState
 import app.relay.app.WorkspaceAgentSectionUi
 import app.relay.app.agentSections
 import app.relay.app.inboxWorkspaceUnits
+import app.relay.app.model.AgentSessionKey
+import app.relay.core.protocol.AgentGrantAccess
 import app.relay.feature.conversations.InboxUnitRow
 import app.relay.generated.resources.Res
 import app.relay.generated.resources.agent_empty_card
@@ -44,20 +51,24 @@ import app.relay.generated.resources.agent_title
 import app.relay.generated.resources.desktop_action_refresh
 import app.relay.generated.resources.ic_chev
 import app.relay.generated.resources.ic_lan_search
+import app.relay.generated.resources.ic_plus
 import app.relay.generated.resources.ic_refresh
 import app.relay.generated.resources.ic_warn
+import app.relay.generated.resources.workspace_board_discovering
+import app.relay.generated.resources.workspace_board_discovering_hint
+import app.relay.generated.resources.workspace_board_starting
+import app.relay.generated.resources.workspace_board_starting_hint
 import app.relay.generated.resources.workspace_board_subtitle
+import app.relay.generated.resources.workspace_create_group_title
 import app.relay.ui.theme.LocalAppSpacing
 import app.relay.ui.theme.LocalCardShape
 import org.jetbrains.compose.resources.painterResource
 import org.jetbrains.compose.resources.stringResource
 import app.relay.generated.resources.conv_inbox_ws_badge_unknown_kind
 import app.relay.generated.resources.workspace_agent_section_pending
-import app.relay.generated.resources.workspace_agent_section_sessions
 import app.relay.ui.theme.IconSizes
 import app.relay.feature.conversations.UnassignedSessionsRow
 import app.relay.app.unassignedSessions
-import app.relay.generated.resources.conv_inbox_ws_group_counts
 import app.relay.generated.resources.conv_inbox_ws_group_offline
 import app.relay.generated.resources.conv_inbox_ws_pending
 import app.relay.ui.components.StatusDot
@@ -84,11 +95,15 @@ import app.relay.ui.theme.relayCardShadow
  *
  * ## 点击语义（与消息页同一条）
  *
- * - 点**行** → 进聊天页（`onOpenChat(nodeId)`）。这是「我要跟它说话」；
- * - 行尾那颗聊天按钮是同一件事（`WorkspaceUnitCard.onOpenChat`）—— 同一行点两处去同一地；
+ * 三级 IA 之下，**整张卡与行尾按钮不再是同一件事**（issue 6）：
+ *
+ * - 点**行**（卡身）→ 进**工作区操作中心**（二级，`onOpenWorkspace` →
+ *   `nav.openAgentWorkspaceDetail`）：直通码 / 权限管理 / 最近会话入口；
+ * - 行尾那颗聊天按钮（`WorkspaceUnitCard.onOpenChat`）→ 进聊天（"我要跟它说话"）。
+ *   没有绑定协同群时，两条壳都是**针对这一行的工作区**提示建群并进入（issue 7），
+ *   不再弹「所有工作区」列表（那是独立入口「协同群」的事）；
  * - 待审批由 `AgentApprovalsSection` 逐条画（处置就在卡里）；
- *   `onOpenSession` 仍是工作区行 / 未归属行进会话的路径；
- * - `m-workspacedetail` 那屏代码侧还没有落点（已登记为偏差），所以这里不编一个到不了的位置。
+ *   `onOpenSession` 仍是工作区行 / 未归属行进**三级会话详情**的路径。
  *
  * `onSelectAgent` 只在**有会话要选中**时才用：进聊天页后聊天页要停在那条会话上。
  * 它是「选中哪个 agent」，不是「切换视图」。
@@ -101,7 +116,7 @@ internal fun WorkspaceBoardView(
     showHeader: Boolean,
     now: Long,
     onSelectAgent: (String) -> Unit,
-    onOpenSession: (peerId: String, sessionId: String) -> Unit,
+    onOpenWorkspace: (peerId: String, wsId: String?, sessionId: String?) -> Unit,
     /**
      * 点一行进聊天页。`wsId` 非空 = 用户点的是**某个工作区**，聊天页要收窄到它
      * （与消息页「工作区」段的 `onOpenWorkspaceUnit` 同一语义）。
@@ -114,6 +129,7 @@ internal fun WorkspaceBoardView(
     onFindNodes: (() -> Unit)?,
     onRefresh: (() -> Unit)?,
     onRespondApproval: ((approvalId: String, allow: Boolean) -> Unit)?,
+    onCreateWorkspaceGroup: (() -> Unit)? = null,
 ) {
     // 与消息页同一份派生（排序 / 上限 / 待审批 join / 降级都在里面做完）。
     // **这一屏是清单页，不设上限**。
@@ -187,14 +203,28 @@ internal fun WorkspaceBoardView(
                     modifier = Modifier.padding(top = LocalAppSpacing.current.xxs),
                 )
             }
-            if (onRefresh != null) {
-                // 原型这颗是 .ibtn（浅色圆角方块 + --on 图标），不是裸图标、更不是 primary：
-                // 原型截图 m11-agents.png 顶栏右侧就是一颗 #F0EFE9 的 34×34 方块。
-                TopBarIconAction(
-                    icon = Res.drawable.ic_refresh,
-                    contentDescription = stringResource(Res.string.desktop_action_refresh),
-                    onClick = onRefresh,
-                )
+            Row(
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(LocalAppSpacing.current.xs),
+            ) {
+                onCreateWorkspaceGroup?.let { createWs ->
+                    Button(
+                        onClick = createWs,
+                        contentPadding = PaddingValues(horizontal = 8.dp, vertical = 4.dp),
+                        shape = RoundedCornerShape(8.dp),
+                    ) {
+                        Icon(painterResource(Res.drawable.ic_plus), contentDescription = null, modifier = Modifier.size(13.dp))
+                        Spacer(Modifier.width(4.dp))
+                        Text(stringResource(Res.string.workspace_create_group_title), style = MaterialTheme.typography.labelSmall)
+                    }
+                }
+                if (onRefresh != null) {
+                    TopBarIconAction(
+                        icon = Res.drawable.ic_refresh,
+                        contentDescription = stringResource(Res.string.desktop_action_refresh),
+                        onClick = onRefresh,
+                    )
+                }
             }
         }
     }
@@ -206,9 +236,31 @@ internal fun WorkspaceBoardView(
     // 注：agents / selectedAgent 两个形参留给**桌面壳**（它仍走二级下钻），手机侧这条
     // 路径不用它们 —— 见 AgentConsoleScreen 的 isViewingDetail 分支。
     if (units.isEmpty) {
+        // task-10：切过来的头几秒先别下「还没有任何 Agent 上报」这个结论 —— 节点还没起来、
+        // 或一个对端都还没发现时，那不是**空**，是**还没到**。分档规则抽成纯函数
+        // [boardEmptyStage]，单测才钉得住"加载态与真·空态有区分"。
+        //
+        // 为什么不用「等 N 秒就转空态」：mDNS 是持续发现，没有"发现完成"这个事件；
+        // 拿一个计时器猜，等于用一个假事件去替一个真状态。
+        val stage = boardEmptyStage(
+            nodeRunning = state.network.isRunning,
+            scanning = state.scanProgress != null,
+            peerCount = state.peers.size,
+        )
         val scanning = state.scanProgress
-        if (scanning != null) {
+        if (stage == BoardEmptyStage.Scanning && scanning != null) {
             AgentLoadingState(progress = scanning, modifier = Modifier.fillMaxWidth())
+        } else if (stage == BoardEmptyStage.NodeStarting || stage == BoardEmptyStage.Discovering) {
+            val starting = stage == BoardEmptyStage.NodeStarting
+            AgentBoardWaitingState(
+                title = stringResource(
+                    if (starting) Res.string.workspace_board_starting else Res.string.workspace_board_discovering
+                ),
+                hint = stringResource(
+                    if (starting) Res.string.workspace_board_starting_hint else Res.string.workspace_board_discovering_hint
+                ),
+                modifier = Modifier.fillMaxWidth(),
+            )
         } else {
             // 空态照原型 relay.html:4563-4579 screenAgentsEmpty 的四段形状画：
             // 警告条（.banner warn = secondaryContainer，原型 :33 注释自己把
@@ -330,6 +382,11 @@ internal fun WorkspaceBoardView(
         AgentApprovalsSection(
             approvals = pendingApprovals,
             onRespond = onRespondApproval,
+            isReadOnly = { appr ->
+                val session = state.agentSessions[AgentSessionKey(appr.peerId, appr.sessionId)]
+                val grant = state.grantFor(appr.peerId, session?.let { it.agentId ?: it.agentKind }, session?.wsId)
+                grant?.access == AgentGrantAccess.RO
+            },
         )
     }
 
@@ -349,12 +406,9 @@ internal fun WorkspaceBoardView(
                             unit = unit,
                             online = group.online,
                             now = now,
-                            // 点行 = 进聊天页（不是进事件流调试台）。先把该行那条活跃会话选中，
-                            // 聊天页进去就停在它上面（聊天页对 agent 节点本来就有会话切换条）。
                             onOpenUnit = {
                                 onSelectAgent(unit.peerId)
-                                unit.active?.let { active -> onOpenSession(unit.peerId, active.sessionId) }
-                                onOpenChat(unit.peerId, unit.wsId)
+                                onOpenWorkspace(unit.peerId, unit.wsId, null)
                             },
                             onOpenChat = {
                                 onSelectAgent(unit.peerId)
@@ -373,9 +427,7 @@ internal fun WorkspaceBoardView(
                         onOpenChat = unassigned.peerId?.let { peerId ->
                             {
                                 onSelectAgent(peerId)
-                                unassigned.active?.let { active -> onOpenSession(peerId, active.sessionId) }
-                                // 未归属会话没有工作区可收窄 —— 传 null 是如实的（父稿 §2.5）。
-                                onOpenChat(peerId, null)
+                                onOpenWorkspace(peerId, null, unassigned.active?.sessionId)
                             }
                         },
                     )
@@ -386,7 +438,13 @@ internal fun WorkspaceBoardView(
 }
 
 /**
- * Agent 段头：一枚小小的身份行（身份键 + 「N 个会话」+ 可选待审批）。
+ * Agent 段头：一枚小小的身份行（身份键 + 可选待审批）。
+ *
+ * ## 为什么不再挂「N 个会话」（issue 6，用户裁决）
+ *
+ * 会话数是**实现细节**：同一件事在段头、组头、页头、卡片底栏各印一遍，屏上一半的字
+ * 都在数数（用户反馈「工作区行/组头全是数字」）。工作区行自己会用「活跃会话」
+ * 说出真正要紧的那条，段头只需要回答"这是谁的"。
  *
  * 它不是可点的对象：点它没有比"点它名下的工作区行"更明确的落点 ——
  * 而「打开聊天」这件事在每一行都有自己的按钮。
@@ -408,12 +466,6 @@ private fun AgentSectionHead(section: WorkspaceAgentSectionUi) {
             color = MaterialTheme.colorScheme.primary,
             maxLines = 1,
             overflow = TextOverflow.Ellipsis,
-        )
-        Text(
-            text = stringResource(Res.string.workspace_agent_section_sessions, section.sessionCount),
-            style = MaterialTheme.typography.labelSmall,
-            color = MaterialTheme.colorScheme.onSurfaceVariant,
-            maxLines = 1,
         )
         if (section.pendingCount > 0) {
             Text(
@@ -442,12 +494,8 @@ private fun BoardGroupHead(group: app.relay.app.WorkspaceUnitGroupUi, now: Long)
         group.lastSeenAt == 0L -> MaterialTheme.colorScheme.error
         else -> onSurfaceVariant
     }
-    // 计数口径 = **本屏画出来的东西**（父稿 §2.2：未归属桶不参与计数，所以不能数 units）。
-    // Agent 数 = 画了几个 Agent 段（不是"带 wsId 的 agent 行"：一个 agent 只要有一个
-    // 工作区就成段，而它名下可能一条"agent 行"都没有 —— 真机上这里报过「0 个 Agent」
-    // 而上面明明画着 dsh-cli 那一段）。
-    val agentCount = group.agentSections().size
-    val workspaceCount = group.units.count { it.wsId != null }
+    // 计数已按 issue 6 的裁决整体移除（组头不再印「N 个 Agent · M 个工作区」）：
+    // 组头要回答的是"这些是谁的"，数量是段/页层面的事，不该在每一台设备的抬头再数一遍。
     Row(
         modifier = Modifier
             .fillMaxWidth()
@@ -466,12 +514,14 @@ private fun BoardGroupHead(group: app.relay.app.WorkspaceUnitGroupUi, now: Long)
         )
         Text(
             text = buildString {
-                append(stringResource(Res.string.conv_inbox_ws_group_counts, agentCount, workspaceCount))
+                // 离线时间与"归不到 Agent 的待审批"都保留：它们不是数量噪音，而是
+                // 组头必须替那些行说出来的状态（join 不到 Agent 的审批只能写在节点级）。
                 if (!group.online && group.lastSeenAt > 0L) {
                     append(stringResource(Res.string.conv_inbox_ws_group_offline, relativeTime(group.lastSeenAt, now)))
                 }
                 if (group.unattributedApprovals > 0) {
-                    append(" · " + stringResource(Res.string.conv_inbox_ws_pending, group.unattributedApprovals))
+                    if (isNotEmpty()) append(" · ")
+                    append(stringResource(Res.string.conv_inbox_ws_pending, group.unattributedApprovals))
                 }
             },
             style = MaterialTheme.typography.labelSmall,
@@ -480,4 +530,75 @@ private fun BoardGroupHead(group: app.relay.app.WorkspaceUnitGroupUi, now: Long)
             overflow = TextOverflow.Ellipsis,
         )
     }
+}
+
+/**
+ * 工作区页的「还没到」态（task-10）：与「真·空」态分开。
+ *
+ * 空态是一个**结论**（还没有任何 Agent 上报），它带着「去看看节点」那条出路；而这一档是
+ * **过渡**：节点还没起来，或一个对端都还没发现 —— 这时候下结论会让用户以为"这功能是空的"，
+ * 而他其实只等了半秒。所以这里只给转圈 + 一句说明，不给那条出路（还没有证据说节点页有问题）。
+ */
+@Composable
+private fun AgentBoardWaitingState(
+    title: String,
+    hint: String,
+    modifier: Modifier = Modifier,
+) {
+    Surface(
+        color = MaterialTheme.colorScheme.surfaceVariant,
+        shape = RoundedCornerShape(12.dp),
+        modifier = modifier,
+    ) {
+        Row(
+            modifier = Modifier.padding(LocalAppSpacing.current.lg),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(LocalAppSpacing.current.md),
+        ) {
+            CircularProgressIndicator(
+                strokeWidth = 2.dp,
+                modifier = Modifier.size(18.dp),
+                color = MaterialTheme.colorScheme.primary,
+            )
+            Column {
+                Text(
+                    text = title,
+                    style = MaterialTheme.typography.bodyMedium,
+                    fontWeight = FontWeight.SemiBold,
+                )
+                Text(
+                    text = hint,
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+            }
+        }
+    }
+}
+
+/**
+ * 工作区页「一行都没有」时该画哪一档（task-10）。
+ *
+ * 抽成纯函数是为了可测：这条规则的全部内容就是"什么时候还不到下结论的时候"，
+ * 而它此前埋在一个 `if (scanning != null)` 里，没有任何测试盯得住。
+ */
+internal enum class BoardEmptyStage {
+    /** 正在扫描网段（有进度可报）。 */
+    Scanning,
+
+    /** 本机节点还没起来 —— 数据不可能到，等它。 */
+    NodeStarting,
+
+    /** 节点在跑，但一个对端都还没发现 —— 这是"网络上还没有人"，不是"没有工作区"。 */
+    Discovering,
+
+    /** 节点在跑、也发现过对端，只是没有一个 agent/工作区 —— 这才是真·空。 */
+    TrulyEmpty,
+}
+
+internal fun boardEmptyStage(nodeRunning: Boolean, scanning: Boolean, peerCount: Int): BoardEmptyStage = when {
+    scanning -> BoardEmptyStage.Scanning
+    !nodeRunning -> BoardEmptyStage.NodeStarting
+    peerCount == 0 -> BoardEmptyStage.Discovering
+    else -> BoardEmptyStage.TrulyEmpty
 }

@@ -22,6 +22,11 @@ import app.relay.app.model.AgentRunKey
 import app.relay.app.model.AgentRunUi
 import app.relay.app.model.AgentSessionKey
 import app.relay.app.model.AgentSessionUi
+import app.relay.app.model.GrantRequestStatus
+import app.relay.app.model.GrantUi
+import app.relay.core.protocol.AgentGrantAccess
+import app.relay.core.protocol.AgentGrantScopes
+import app.relay.core.protocol.AgentGrantStates
 
 /**
  * `AgentStore` 的**跨重启**契约（PPE-1 §6.3–§6.7 的四张表）。
@@ -483,6 +488,135 @@ class AgentStorePersistenceTest {
             assertEquals(false, backKnown?.hostBlank, "blank=false 读回来变成了 " + backKnown?.hostBlank)
             assertNull(backUnknown?.hostOrigin, "没听宿主说过的会话 origin 该是 NULL")
             assertNull(backUnknown?.hostBlank, "没听宿主说过的会话 blank 该是 NULL，不是 false")
+        }
+    }
+
+    /**
+     * 授权细化到工作区与读写级别后（`9.sqm`）：
+     * 1. 跨重启必须存活，且 `wsId` 与 `access` 原样保真；
+     * 2. `RelayUiState.grantFor` 必须正确执行三级回退寻址（workspace -> agent -> device-wide）。
+     */
+    @Test
+    fun agentGrantWithWorkspaceAndAccessSurvivesAReopen() {
+        val wsGrant = GrantUi(
+            peerId = "peer-ws",
+            agentKey = "codex",
+            scope = AgentGrantScopes.WORKSPACE,
+            state = AgentGrantStates.APPROVED,
+            at = 1_700_000_000_100L,
+            wsId = "ws-project-1",
+            access = AgentGrantAccess.RO,
+        )
+        val devGrant = GrantUi(
+            peerId = "peer-all",
+            agentKey = null,
+            scope = AgentGrantScopes.ALL,
+            state = AgentGrantStates.APPROVED,
+            at = 1_700_000_000_200L,
+            wsId = null,
+            access = AgentGrantAccess.RW,
+        )
+        reopen { driver ->
+            val store = SqlDelightAgentStore(RelayDatabase(driver))
+            store.saveGrant(wsGrant)
+            store.saveGrant(devGrant)
+        }
+        reopen { driver ->
+            val store = SqlDelightAgentStore(RelayDatabase(driver))
+            val grants = store.loadGrants()
+            val loadedWs = grants[grantKeyOf("peer-ws", "codex", "ws-project-1")]
+            assertEquals("ws-project-1", loadedWs?.wsId, "wsId 没跨重启存活")
+            assertEquals(AgentGrantAccess.RO, loadedWs?.access, "access 没跨重启存活")
+            assertEquals("codex", loadedWs?.agentKey)
+            assertEquals(AgentGrantStates.APPROVED, loadedWs?.state)
+
+            val loadedDev = grants[grantKeyOf("peer-all", null, null)]
+            assertNull(loadedDev?.wsId, "设备级授权的 wsId 应当为 null")
+            assertEquals(AgentGrantAccess.RW, loadedDev?.access)
+            assertNull(loadedDev?.agentKey)
+            assertEquals(AgentGrantScopes.ALL, loadedDev?.scope)
+
+            // 验证 RelayUiState 的三级回退寻址
+            val uiState = RelayUiState(agentGrants = grants)
+            // 1. 精确命中工作区授权（只读）
+            assertEquals(AgentGrantAccess.RO, uiState.grantFor("peer-ws", "codex", "ws-project-1")?.access)
+            assertEquals(GrantRequestStatus.GRANTED, uiState.grantStatusOf("peer-ws", "codex", "ws-project-1"))
+
+            // 2. 访问未单独授权的工作区时，无 agent/device 兜底 => null
+            assertNull(uiState.grantFor("peer-ws", "codex", "other-ws"))
+            assertEquals(GrantRequestStatus.NONE, uiState.grantStatusOf("peer-ws", "codex", "other-ws"))
+
+            // 3. 设备级授权全局兜底（读写）
+            assertEquals(AgentGrantAccess.RW, uiState.grantFor("peer-all", "any-agent", "any-ws")?.access)
+            assertEquals(GrantRequestStatus.GRANTED, uiState.grantStatusOf("peer-all", "any-agent", "any-ws"))
+        }
+    }
+
+    /**
+     * 停在第 9 版的老库打开后升级到第 10 版（跑 `9.sqm`），
+     * `AgentGrantEntity` 必须扩充出 `ws_id` 与 `access` 列，老数据一行不丢且默认赋为 rw。
+     */
+    @Test
+    fun anOlderGrantTableGainsWorkspaceAndAccessColumnsOnOpen() {
+        val driver = JdbcSqliteDriver("jdbc:sqlite:${dbFile.absolutePath}")
+        try {
+            driver.execute(
+                null,
+                """
+                CREATE TABLE MessageEntity (
+                    id TEXT NOT NULL PRIMARY KEY,
+                    conv_id TEXT NOT NULL,
+                    peer_id TEXT NOT NULL,
+                    sender_id TEXT,
+                    mine INTEGER NOT NULL,
+                    text TEXT NOT NULL,
+                    timestamp INTEGER NOT NULL,
+                    delivery TEXT,
+                    notice TEXT,
+                    file_json TEXT,
+                    screen_json TEXT
+                )
+                """.trimIndent(),
+                0,
+            )
+            // 第 9 版的老 AgentGrantEntity（无 ws_id, access）
+            driver.execute(
+                null,
+                """
+                CREATE TABLE AgentGrantEntity (
+                    node_id TEXT NOT NULL,
+                    agent_key TEXT NOT NULL DEFAULT '',
+                    scope TEXT NOT NULL,
+                    state TEXT NOT NULL,
+                    at INTEGER NOT NULL,
+                    PRIMARY KEY (node_id, agent_key)
+                )
+                """.trimIndent(),
+                0,
+            )
+            driver.execute(
+                null,
+                "INSERT INTO AgentGrantEntity (node_id, agent_key, scope, state, at) " +
+                    "VALUES ('peer-old', 'agent-old', 'agent', 'approved', 12345)",
+                0,
+            )
+            driver.execute(null, "PRAGMA user_version = 9", 0)
+
+            openDesktopDatabase(driver)
+
+            val cols = columns(driver, "AgentGrantEntity")
+            assertTrue("ws_id" in cols, "9.sqm 没把 ws_id 建出来：$cols")
+            assertTrue("access" in cols, "9.sqm 没把 access 建出来：$cols")
+            assertEquals(RelayDatabase.Schema.version, readUserVersion(driver), "迁移完要盖章")
+
+            val store = SqlDelightAgentStore(RelayDatabase(driver))
+            val grant = store.loadGrants()[grantKeyOf("peer-old", "agent-old", null)]
+            assertEquals("peer-old", grant?.peerId)
+            assertEquals("agent-old", grant?.agentKey)
+            assertNull(grant?.wsId, "空串 ws_id 应当回填为 null")
+            assertEquals(AgentGrantAccess.RW, grant?.access, "老记录默认权限为 rw")
+        } finally {
+            driver.close()
         }
     }
 

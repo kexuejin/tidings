@@ -133,7 +133,7 @@ class InMemoryAgentStore : AgentStore {
     }
 
     override fun saveGrant(grant: GrantUi) {
-        grants[grantKeyOf(grant.peerId, grant.agentKey)] = grant
+        grants[grantKeyOf(grant.peerId, grant.agentKey, grant.wsId)] = grant
     }
 
     override fun clear() {

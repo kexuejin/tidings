@@ -16,6 +16,7 @@ import kotlinx.coroutines.withTimeoutOrNull
 import kotlin.test.AfterTest
 import kotlin.test.Test
 import kotlin.test.assertEquals
+import kotlin.test.assertFalse
 import kotlin.test.assertNull
 import kotlin.test.assertTrue
 import app.relay.app.model.MessageUi
@@ -30,6 +31,12 @@ import app.relay.app.model.MessageUi
  * 测不到"具体哪几条消息被写下去"：[RelayController.onInbound] 是私有的，
  * 往内存里塞消息只能起真实节点（真 socket），那是集成测试的活。
  * 这里守住的是**时序**——写与不写、什么时候写、写几次。
+ *
+ * 另一半是**默认值与迁移**（真机反馈 #2）：默认改成开启，且老库只迁移一次；
+ * 用户显式关掉之后任何一次启动都不能被迁移重新打开。这两条都在这里。
+ *
+ * 边界：真正"重启后从磁盘读回消息"的端到端在 `FileMessageStoreTest`（它用真文件），
+ * 这里用替身 store 只验证控制器的时序与设置文件的内容。
  */
 class MessagePersistenceTest {
 
@@ -48,6 +55,21 @@ class MessagePersistenceTest {
         scope = scope,
         messageStore = store,
     )
+
+    /**
+     * 一个"用户已经把开关显式关掉"的设置替身。
+     *
+     * `persistMessagesDecided = true` 必须一起给：新格式里"显式关闭"就是这两个字段的组合，
+     * 只有值不给决定位的话，构造期的 [migrateRelaySettings] 会把它当成老库而重新打开 ——
+     * 那正是这个迁移要避免的事。
+     */
+    private fun explicitOff(): RecordingSettingsStore = RecordingSettingsStore().apply {
+        current = RelaySettings(
+            nodeId = "node-1",
+            persistMessages = false,
+            persistMessagesDecided = true,
+        )
+    }
 
     /**
      * 真的等一段时间，而不是用 [kotlinx.coroutines.test] 的虚拟时间。
@@ -73,25 +95,29 @@ class MessagePersistenceTest {
     }
 
     @Test
-    fun persistIsOffByDefaultAndTheStoreIsNeverTouched() = runTest {
+    fun persistIsOnByDefaultSoAnOfflineLaunchStillHasHistory() = runTest {
+        // 真机反馈 #2：默认不落盘 ⇒ 冷启动时消息表是空的，会话列表只能等局域网发现。
+        // 默认改成"存"之后，离线打开也先读到历史。
         val store = RecordingMessageStore()
         val controller = controller(store)
 
-        // 默认就是关的：不声明也不该有任何写盘动作，行为与这个功能落地之前完全一致。
-        assertEquals(false, controller.persistMessages, "默认必须是不落盘，否则等于替用户改了主意")
+        assertEquals(true, controller.persistMessages, "默认必须落盘，否则离线冷启动看不到历史会话")
 
-        controller.clearMessages("peer-never-talks")
+        // 另一半承诺没变：用户关掉之后必须一个字节都不碰（连读都不读）。
         controller.updatePersistMessages(false)
+        store.arm()
+        controller.clearMessages("peer-never-talks")
+        controller.clearAllMessages()
 
         assertNothingHappens { store.awaitAnyCall() }
-        assertEquals(0, store.saveCount, "save 调用数")
-        assertEquals(0, store.clearCount, "clear 调用数")
+        assertEquals(0, store.saveCount, "关着时 save 调用数")
+        assertEquals(0, store.clearCount, "关着时 clear 调用数")
     }
 
     @Test
     fun turningPersistOnWritesImmediatelyAndOnlyOnce() = runTest {
         val store = RecordingMessageStore()
-        val controller = controller(store)
+        val controller = controller(store, explicitOff())
 
         // 开的那一刻就必须写一次：不这样做的话，用户在开关打开前聊的那些消息
         // 永远存不进去，而界面上看不出任何区别。
@@ -111,7 +137,7 @@ class MessagePersistenceTest {
     @Test
     fun turningPersistOffStopsWritingButKeepsWhatIsAlreadyThere() = runTest {
         val store = RecordingMessageStore()
-        val controller = controller(store)
+        val controller = controller(store, explicitOff())
 
         controller.updatePersistMessages(true)
         awaitReal { store.awaitSave() }
@@ -129,7 +155,7 @@ class MessagePersistenceTest {
     @Test
     fun clearAllAsksTheStoreToDropItsFilesRatherThanSaveAnEmptyMap() = runTest {
         val store = RecordingMessageStore()
-        val controller = controller(store)
+        val controller = controller(store, explicitOff())
 
         controller.updatePersistMessages(true)
         awaitReal { store.awaitSave() }
@@ -147,10 +173,10 @@ class MessagePersistenceTest {
     @Test
     fun theSwitchItselfIsSavedSoItSurvivesARestart() = runTest {
         val messages = RecordingMessageStore()
-        val settings = RecordingSettingsStore()
+        // 从一个"已经显式关掉"的文件开始：这样两次切换都是真的变化，
+        // 数得清"只有值变了才写设置"。构造期（迁移/补默认名）的写盘不算进这个功能。
+        val settings = explicitOff()
         val controller = controller(messages, settings)
-        // 构造时若没有设置文件会先存一份首次运行设置，那是启动行为、不属于这个功能，
-        // 所以按"切换前后的增量"来数，不把启动那次算进来。
         val savesBefore = settings.saveCount
 
         // 只存到内存里的话，重启后开关会自己弹回「关」—— 用户明明开过，
@@ -169,13 +195,95 @@ class MessagePersistenceTest {
 
     @Test
     fun aControllerRebuiltFromSavedSettingsStartsWithTheSwitchWhereTheUserLeftIt() = runTest {
-        val saved = RecordingSettingsStore().apply {
-            current = RelaySettings(nodeId = "node-1", persistMessages = true)
+        val on = RecordingSettingsStore().apply {
+            current = RelaySettings(
+                nodeId = "node-1",
+                persistMessages = true,
+                persistMessagesDecided = true,
+            )
         }
+        val off = explicitOff()
 
-        val controller = controller(RecordingMessageStore(), saved)
+        assertEquals(
+            true,
+            controller(RecordingMessageStore(), on).persistMessages,
+            "开着就要一直开着，不能每次启动都从关开始",
+        )
+        assertEquals(
+            false,
+            controller(RecordingMessageStore(), off).persistMessages,
+            "关着就要一直关着，不能被默认值或迁移改写",
+        )
+    }
 
-        assertEquals(true, controller.persistMessages, "开关必须来自设置，而不是每次启动都从关开始")
+    @Test
+    fun legacySettingsFileWithoutTheKeyMigratesToPersistOn() = runTest {
+        // 旧 settings.json 的实况（design/runtime-evidence/persist-04-android-on-disk.txt:33）：
+        // 这个键只在为 true 时才写（encodeDefaults = false），所以从没设过的老用户文件里
+        // 根本没有它。这是"从没设过"那一档，必须迁移到开启。
+        val legacy = SettingsStore.json.decodeFromString(
+            RelaySettings.serializer(),
+            """{ "nodeId": "node-legacy" }""",
+        )
+        assertTrue(legacy.persistMessages, "解码后先落到新默认值：开启")
+        assertFalse(legacy.persistMessagesDecided, "旧文件里没有决定位")
+
+        val settings = RecordingSettingsStore().apply { current = legacy }
+        val controller = controller(RecordingMessageStore(), settings)
+
+        assertEquals(true, controller.persistMessages, "老用户升级后默认落盘，离线也看得到历史")
+        assertEquals(true, settings.current?.persistMessagesDecided, "迁移必须把决定位写回文件")
+        assertEquals(1, settings.saveCount, "一次性迁移只写这一次")
+    }
+
+    @Test
+    fun theMigrationRunsOnceAndAnExplicitOffSurvivesEveryLaterLaunch() = runTest {
+        val legacy = SettingsStore.json.decodeFromString(
+            RelaySettings.serializer(),
+            """{ "nodeId": "node-legacy" }""",
+        )
+        val settings = RecordingSettingsStore().apply { current = legacy }
+
+        // 第一次启动：迁移并写回。
+        controller(RecordingMessageStore(), settings)
+        assertEquals(1, settings.saveCount, "迁移写一次")
+
+        // 用户在新版本里关掉它（这一下会写第二次）。
+        controller(RecordingMessageStore(), settings).updatePersistMessages(false)
+        assertEquals(2, settings.saveCount, "显式关掉要落盘")
+
+        // 第三次启动：决定位已经在文件里，迁移不能再把开关打开。
+        val third = controller(RecordingMessageStore(), settings)
+        assertEquals(false, third.persistMessages, "显式关闭必须跨启动留住")
+        assertEquals(2, settings.saveCount, "已经决定过就不该再写迁移")
+    }
+
+    @Test
+    fun theNewFormatCanAlwaysRecordAnExplicitOff() = runTest {
+        // 这条守的是"可判别"本身：新默认值是 true ⇒ false ≠ 默认值 ⇒ 一定会写进文件。
+        // 谁要是把默认值改回 false，或者打开 encodeDefaults，这条会红 ——
+        // 那两种改法都会让"用户关掉了"再次变成不可判别。
+        val written = SettingsStore.json.encodeToString(
+            RelaySettings.serializer(),
+            RelaySettings(nodeId = "node-1", persistMessages = false, persistMessagesDecided = true),
+        )
+        assertTrue(written.contains("\"persistMessages\": false"), "显式关闭必须真的落进文件：$written")
+        assertTrue(written.contains("\"persistMessagesDecided\": true"), "决定位也要落进文件：$written")
+    }
+
+    @Test
+    fun anExplicitOffWrittenByTheNewFormatIsHonouredAfterADecode() = runTest {
+        val raw = SettingsStore.json.encodeToString(
+            RelaySettings.serializer(),
+            RelaySettings(nodeId = "node-1", persistMessages = false, persistMessagesDecided = true),
+        )
+        val decoded = SettingsStore.json.decodeFromString(RelaySettings.serializer(), raw)
+        val controller = controller(
+            RecordingMessageStore(),
+            RecordingSettingsStore().apply { current = decoded },
+        )
+
+        assertEquals(false, controller.persistMessages, "跨一次编码/解码，显式关闭不能退化")
     }
 
     /**

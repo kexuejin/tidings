@@ -60,6 +60,8 @@ import app.relay.feature.settings.SettingsNotifySubpage
 import app.relay.feature.settings.SetAvatarPage
 import app.relay.feature.settings.SettingsUpdateSubpage
 import app.relay.feature.settings.SettingsScreen
+import app.relay.generated.resources.Res
+import app.relay.generated.resources.workspace_group_default_name
 import app.relay.navigation.AppLayoutMode
 import app.relay.navigation.AppNavItems
 import app.relay.navigation.AppNavState
@@ -118,8 +120,8 @@ fun RelayApp(
     // 用户选过深色，重启就该还是深色。这里刻意不用 rememberSaveable —— 那会变成第二个
     // 事实来源（配置变更时快照和设置文件各说各话）。进程重建后本函数重新组合，
     // 从设置里读回来的就是对的。
-    var themeMode by remember {
-        mutableStateOf(ThemeMode.fromWire(controller.state.value.settings.themeMode))
+    val themeMode = remember(state.settings.themeMode) {
+        ThemeMode.fromWire(state.settings.themeMode)
     }
     val dark = themeMode.resolve(darkTheme)
 
@@ -176,9 +178,18 @@ fun RelayApp(
                 // 戳一碰要求"定位到该会话"（协议 §8）：控制器只放一个一次性请求，
                 // 外壳消费一次就清掉 —— 留着它，用户手动切走之后又会被拽回来。
                 // 宽屏那条路不吃 nav，所以同时把值交给 [DesktopShell]（它自己管选中项）。
+                // task-2 接线：进入会话**那一刻**的未读条数。必须在 controller.selectConversation
+                // （它会清零未读）**之前**采下 —— 采晚了永远是 0，屏外未读指示就只剩一个不带
+                // 数字的「回到最新」。采集只能发生在壳里：只有壳知道用户点了哪一行。
+                // 声明在这里（而不是 openChat 旁边）：通知焦点请求那条路比 openChat 先用到它。
+                var chatUnreadOnEntry by remember { mutableStateOf(0) }
+
                 val focusRequest = state.focusRequest
                 LaunchedEffect(focusRequest) {
                     if (focusRequest == null) return@LaunchedEffect
+                    // 通知点进来也是一次"进入会话"：同样要在清未读**之前**把那一刻的未读采下，
+                    // 否则从通知进来的那一屏永远拿不到屏外未读指示。
+                    chatUnreadOnEntry = state.unreadByPeer[focusRequest] ?: 0
                     nav = nav.openSession(focusRequest)
                     // 焦点请求现在也可能是群会话键（群消息的通知落点是 `group:<groupId>`），
                     // 所以这里与 openChat 走同一个入口，不能再用只认节点 id 的 selectPeer
@@ -226,6 +237,7 @@ fun RelayApp(
                 // 它不是任何一个节点。清未读也必须按会话键清 —— `selectPeer` 清的是
                 // 节点 id，对群会话是另一个键，结果是"看着消息却还挂着红点"。
                 val openChat: (String) -> Unit = { convId ->
+                    chatUnreadOnEntry = state.unreadByPeer[convId] ?: 0
                     nav = nav.openSession(convId)
                     controller.selectConversation(convId)
                 }
@@ -248,9 +260,19 @@ fun RelayApp(
                 val peerDetailOnTop = nav.inPeerDetail && !twoPane
                 BackKeyHandler(enabled = peerDetailOnTop) { nav = nav.leavePeerDetail() }
 
-                // 工作区会话详情也要接管返回键：从详情退出回到工作区看板，而不是退出应用
-                val agentSessionDetailOnTop = nav.inAgentSessionDetail && !twoPane
-                BackKeyHandler(enabled = agentSessionDetailOnTop) { nav = nav.leaveAgentSessionDetail() }
+                // 浏览同事文件柜时也要接管返回键：从同事文件列表回到我的文件柜，避免直接退出应用
+                val peerCabinetOnTop = state.cabinet.activePeerId != null && !twoPane
+                BackKeyHandler(enabled = peerCabinetOnTop) { controller.selectCabinetPeer(null) }
+
+                // 工作区详情与会话详情也要接管返回键：从会话详情回到工作区详情，从工作区详情回到看板
+                val agentSubpageOnTop = nav.inAgentSubpage && !twoPane
+                BackKeyHandler(enabled = agentSubpageOnTop) {
+                    if (nav.inAgentSessionDetail) {
+                        nav = nav.leaveAgentSessionDetail()
+                    } else if (nav.inAgentWorkspaceDetail) {
+                        nav = nav.leaveAgentWorkspaceDetail()
+                    }
+                }
 
                 // 扫码入口只在**真的画得出取景框**的平台上出现（见 `AppPlatform.qrScannerPreview`）：
                 // 传 null 时弹层里那段会自己改成"这台设备扫不了，请走填地址"。以前这里按布局
@@ -266,6 +288,13 @@ fun RelayApp(
                 val importQrFromImage: (suspend () -> Boolean)? =
                     if (controller.qrScannerPreview != null) controller::importQrImage else null
 
+                var showCreateWsDialog by remember { mutableStateOf(false) }
+                var showWsQrFor by remember { mutableStateOf<app.relay.app.model.WorkspaceUi?>(null) }
+                // issue 7：某个工作区"没有绑定协同群"时的建群提示对象。
+                // 与 showCreateWsDialog（「所有工作区」列表，独立入口）分开两格 —— 两者是
+                // 两个不同的动作：一个是"挑一个工作区建群"，另一个是"就这个工作区建群"。
+                var groupPromptFor by remember { mutableStateOf<app.relay.app.model.WorkspaceUi?>(null) }
+
                 val chatPanel: @Composable (Modifier, Boolean) -> Unit = { panelModifier, showHeader ->
                     ChatScreen(
                         data = ChatScreenState(
@@ -277,6 +306,8 @@ fun RelayApp(
                             // 用户选中的会话（导航状态里一直有它，这一屏此前没读 —— 于是头部、
                             // 切换条、选择器各自拿「第一条」当当前会话，互相不一致）。
                             activeSessionId = nav.activeAgentSessionId,
+                            // task-2：进入这一刻的未读（在 openChat / 下钻入口清未读之前采下）。
+                            unreadOnEntry = chatUnreadOnEntry,
                             cacheDir = controller.cacheDirectory,
                         ),
                         actions = ChatScreenActions(
@@ -329,6 +360,13 @@ fun RelayApp(
                             onSendPk = controller::sendPk,
                             onSendVoice = { targetId, filePath, _ -> controller.sendVoice(targetId, filePath) },
                             onRespondApproval = controller::respondApproval,
+                            // 「清空本会话记录」：会话键就是 nav.activeSessionId
+                            // （私聊=对方 nodeId、群=group:<groupId>），与 openChat /
+                            // onSearchInConversation 用的是同一个键。只清本机，走既有的
+                            // controller.clearMessages（不是设置页那条 clearAllMessages）。
+                            onClearMessages = {
+                                nav.activeSessionId?.let { convId -> controller.clearMessages(convId) }
+                            },
                         ),
                         groupActions = ChatScreenGroupActions(
                             onAddGroupMembers = controller::addGroupMembers,
@@ -409,9 +447,6 @@ fun RelayApp(
                             onBack = { settingsPage = null },
                             themeMode = themeMode.wire,
                             onThemeModeChange = { wire ->
-                                themeMode = ThemeMode.fromWire(wire)
-                                // 选择的档位立刻落盘：不落盘的话下次启动又回到上一轮的值，
-                                // 那个三选一就成了"看着能选、其实白选"。
                                 controller.updateThemeMode(wire)
                             },
                         )
@@ -443,6 +478,8 @@ fun RelayApp(
                             onBack = { settingsPage = null },
                             persistMessagesEnabled = controller.persistMessages,
                             onPersistMessagesEnabledChange = controller::updatePersistMessages,
+                            // 「跨网通道」开关已移除（长连接恒开）。用户的心智是"哪张网都能
+                            // 无感连上"，不是"我要不要开一条长连接"；而关掉它反而是不拨号。
                             onClearHistory = controller::clearAllMessages,
                         )
 
@@ -486,11 +523,16 @@ fun RelayApp(
                             onAddScanRange = controller::addScanRange,
                             onRemoveScanRange = controller::removeScanRange,
                             onTriggerCidrScan = controller::triggerCidrScan,
+                            // 「后台保持连接」（task-15）：能力在 Android 上为 true，桌面/iOS
+                            // 为 false ⇒ 设置页不画那个开关（能力不存在就不画入口）。
+                            keepAliveSupported = controller.backgroundConnectionSupported,
+                            keepAliveEnabled = state.settings.keepConnectionAlive,
+                            onKeepAliveChange = controller::updateKeepConnectionAlive,
                             onDismissBanner = controller::dismissBanner,
                             onClearNote = controller::clearSettingsNote,
                             onOpenPage = { settingsPage = it },
-                            // 资料页头像分段控件第三档「上传图片」的出口（见上面那一支）。
-                            onOpenAvatarPage = { settingsPage = SETTINGS_PAGE_AVATAR },
+                            onOpenAvatarPage = controller::pickAvatar,
+                            onRemovePickedAvatar = controller::removePickedAvatar,
                             modifier = settingsModifier,
                         )
                     }
@@ -585,25 +627,66 @@ fun RelayApp(
 
                                 AppRoutes.AGENTS -> AgentConsoleScreen(
                                     state = state,
-                                    selectedAgentId = selectedAgentId,
+                                    selectedAgentId = nav.detailPeerId ?: selectedAgentId,
                                     onSelectAgent = { selectedAgentId = it },
                                     selectedAgentSessionId = nav.activeAgentSessionId,
                                     onSelectAgentSession = { nav = nav.selectAgentSession(it) },
-                                    inDetail = false,
-                                    onOpenSessionDetail = null,
-                                    onBackToBoard = null,
+                                    inDetail = nav.inAgentSubpage,
+                                    detailWsId = nav.detailWorkspaceId,
+                                    detailSessionId = nav.detailAgentSessionId,
+                                    onOpenWorkspaceDetail = { peerId, wsId ->
+                                        selectedAgentId = peerId
+                                        nav = nav.openAgentWorkspaceDetail(peerId, wsId)
+                                    },
+                                    onLeaveWorkspaceDetail = {
+                                        nav = nav.leaveAgentWorkspaceDetail()
+                                    },
+                                    onOpenSessionDetail = { peerId, sessionId ->
+                                        selectedAgentId = peerId
+                                        nav = nav.openAgentSessionDetail(sessionId)
+                                    },
+                                    onLeaveSessionDetail = {
+                                        nav = nav.leaveAgentSessionDetail()
+                                    },
+                                    onBackToBoard = {
+                                        nav = nav.leaveAgentWorkspaceDetail()
+                                    },
                                     onOpenChat = { peerId, wsId ->
                                         selectedAgentId = peerId
-                                        // 与消息页「工作区」段**同一条落点**：带 wsId 就收窄到它。
-                                        // 这一屏是同一意图的入口，传入 wsId 收窄会话。
-                                        nav = wsId?.let { ws -> nav.openWorkspaceChat(peerId, ws) }
-                                            ?: nav.openSession(peerId)
-                                        controller.selectConversation(peerId)
+                                        val ws = state.agentWorkspaces.values.firstOrNull { it.wsId == wsId }
+                                        val boundGroup = state.settings.groups.firstOrNull { g ->
+                                            val matchPath = ws?.wsPath?.isNotBlank() == true && g.description?.contains(ws.wsPath) == true
+                                            val matchTitle = ws?.wsTitle?.isNotBlank() == true && g.name.contains(ws.wsTitle)
+                                            matchPath || matchTitle
+                                        }
+                                        if (boundGroup != null) {
+                                            openChat(app.relay.core.protocol.ConvId.group(boundGroup.groupId))
+                                        } else if (ws != null) {
+                                            // issue 7：没有绑定群时**针对这一个工作区**提示建群并进入。
+                                            // 桌面端此前弹的是「所有工作区」列表（用户要处理的是当前这一行，
+                                            // 那张列表跟他点的那一行无关）；手机端此前直接进聊天，等于
+                                            // 根本没给建群这条路。两条壳现在走同一个对话框。
+                                            groupPromptFor = ws
+                                        } else {
+                                            // 没有 wsId 的 Agent 行：这台设备上没有"某个工作区"这回事，
+                                            // 直接进这个节点的会话（与桌面壳同一条）。
+                                            nav = wsId?.let { w -> nav.openWorkspaceChat(peerId, w) }
+                                                ?: nav.openSession(peerId)
+                                            chatUnreadOnEntry = state.unreadByPeer[peerId] ?: 0
+                                            controller.selectConversation(peerId)
+                                        }
+                                    },
+                                    onLoadWorkspaceSessions = { peerId, wsId ->
+                                        controller.requestAgentSessionPage(peerId, wsId, offset = 0)
                                     },
                                     onFindNodes = { nav = nav.selectTab(AppRoutes.NODES) },
                                     onRespondApproval = controller::respondApproval,
                                     onCancelTask = controller::cancelAgentTask,
+                                    // task-10：手机是「客户端」，申请授权只能由组合根接线 ——
+                                    // 接口留在 feature/agents，能力从哪儿来在这里给。
+                                    onRequestGrant = controller::sendAgentGrantRequest,
                                     onRefresh = { controller.refreshPeers() },
+                                    onCreateWorkspaceGroup = if (twoPane) { { showCreateWsDialog = true } } else null,
                                     modifier = Modifier.weight(1f),
                                 )
 
@@ -625,45 +708,36 @@ fun RelayApp(
                                     // （`prototype/relay.html:2861`，菜单共 6 项 + 2 条分隔线）。
                                     // 走 `controller.markAllRead()` 而不是
                                     // `conversations.forEach { selectConversation(it.convId) }`：
-                                    // 后者效果对（`selectConversation` 顺手清零 unread，
-                                    // `RelayController.kt:186`），但那是**借了别人的副作用** ——
+                                    // 后者效果对（`selectConversation` 顺手清零 unread），
+                                    // 但那是**借了别人的副作用** ——
                                     // 一个叫 `selectConversation` 的方法被当"批量标已读"用。
                                     // 裁决：给它一个说得出名字的入口。
                                     // （字段名是 `convId` 不是 `peerId`，理由见 `ConversationUi.convId`
                                     // 的 KDoc；`App.kt` 是组合根，一处调用补一行都要 Lead 点名授权。）
                                     onMarkAllRead = controller::markAllRead,
-                                    // 「工作区」段的两颗入口：
-                                    // 行 → 下钻、尾巴 → 看板。**行与看板卡片点同一处** ——
-                                    // 这一段的每一行现在就是看板那张卡（`WorkspaceUnitCard`），
-                                    // 同一条 item 点出两种落点会让人以为是两个对象。
-                                    // 卡片自带 `active`（最活跃会话）时直接落到该会话详情，
-                                    // 拿不到时才退回「工作区页签 + 选中这个 Agent」。
-                                    // `m-agentdetail` / `m-workspacedetail` 两屏代码侧还没有落点，
-                                    // 已登记为偏差；传 null 时整段不画，所以预览里要自己传这两个 lambda。
-                                    // 「工作区」段的行 → **直接进聊天页**。
+                                    // ## 手机端**不画**「工作区」段（用户裁决：对齐桌面）
                                     //
-                                    // 之前这里是 selectTab(AGENTS) + selectAgentSession：切到 Agent 页签、
-                                    // 再停在它一级的**看板**上 —— 用户点一行工作区的意图是「我要跟它说话」，
-                                    // 落点却是一张雷达卡片，还得再点一次才进得去。聊天页对 agent 节点本来
-                                    // 就是完整的（会话切换条 + 会话选择器 + 待审批横幅，见 ChatScreen 的
-                                    // peer.isAgent 分支），所以这里直接走 openChat —— 与「从节点页点一行」
-                                    // 是同一条路。
+                                    // 这两颗 lambda 一起决定那一段画不画（见 `ConversationsScreen`
+                                    // 的 `showWorkspaces`）。这里**都不传**，于是：
+                                    //   · 会话列表只剩「会话」——群、同事、agent 节点的对话；
+                                    //   · agent 的工作区行不再混进来（真机上它们是
+                                    //     `care-in-china · Agent · dsh-… · 27 个会话` 这种行，
+                                    //     而**桌面端的会话列表从来没有这一段** —— 两端不一致本身就是缺陷）。
                                     //
-                                    // selectedAgentId 仍记一笔：Agent 页签是它自己那一屏，用户从聊天页顶栏
-                                    // 点「控制台」时要落在刚看过的这个节点上。
-                                    onOpenWorkspaceUnit = { unit ->
-                                        selectedAgentId = unit.peerId
-                                        unit.active?.let { active -> nav = nav.selectAgentSession(active.sessionId) }
-                                        // 用 `openWorkspaceChat` 而不是 `openChat`：这一屏要**收窄到这个
-                                        // 工作区**，否则点任何一行看到的都是同一份「节点全部会话」。
-                                        // 只有行上带 wsId 时才收窄；不带（阶段一的 Agent 行）走普通聊天。
-                                        nav = unit.wsId?.let { ws -> nav.openWorkspaceChat(unit.peerId, ws) }
-                                            ?: nav.openSession(unit.peerId)
-                                        controller.selectConversation(unit.peerId)
-                                    },
-                                    // 段尾「还有 N 行」→ 工作区页签（那是「全部工作区」的清单页）。
-                                    // 这条**保持切页签**：它的语义是「去看完整列表」，不是「进某个会话」。
-                                    onOpenWorkspaceBoard = { nav = nav.selectTab(AppRoutes.AGENTS) },
+                                    // ## 工作区内容去哪了：一个字都没少
+                                    //
+                                    // 底部 **Agents 页签**就是「全部工作区」的清单页，而且用的是
+                                    // **同一个** `state.inboxWorkspaceUnits()` 派生（`limit = Int.MAX_VALUE`
+                                    // ⇒ 比这一段的裁剪版更全）。从那里点进去仍然是完整的工作区详情 /
+                                    // 聊天 / 直通码 / 权限管理。
+                                    //
+                                    // 为什么不留一段「只读摘要」：那正是用户看腻的那几行。列表的职责是
+                                    // 「谁刚跟我说过话」，工作区的职责是「我在哪几个仓库里干活」——
+                                    // 两件事各自有一屏，混在一屏只会让两边都不清楚。
+                                    //
+                                    // 传给 ConversationsScreen 的那两个参数保持 `null`（默认值即 null），
+                                    // 段、段头、以及副标里的「N 个工作区」会**一起**消失（它们同源，见
+                                    // `showWorkspaces` 的 KDoc：判据只有这一处）。
                                     modifier = Modifier.weight(1f),
                                 )
                             }
@@ -694,7 +768,6 @@ fun RelayApp(
                             } else {
                                 ThemeMode.Dark
                             }
-                            themeMode = next
                             controller.updateThemeMode(next.wire)
                         },
                         onRefresh = controller::handshake,
@@ -742,8 +815,8 @@ fun RelayApp(
                         modifier = Modifier.fillMaxSize(),
                         importFromImage = importQrFromImage,
                     )
-                } else if (chatDetailOnTop || agentSessionDetailOnTop) {
-                    // 紧凑布局下的聊天详情与会话详情均是**整屏全屏**（原型 m-chat 与 m-session-detail 均标记 full:true）。
+                } else if (chatDetailOnTop || agentSubpageOnTop) {
+                    // 紧凑布局下的聊天详情与 Agent 子页（工作区详情、会话详情）均是**整屏全屏**（原型 m-chat、m-workspacedetail 与 m-session-detail 均标记 full:true）。
                     // 详情页底下不画底部导航栏，避免侵占屏幕空间及误触；详情页退出靠顶栏返回或系统返回键回到看板。
                     mobileContent(Modifier.fillMaxSize())
                 } else {
@@ -767,6 +840,90 @@ fun RelayApp(
                     onStop = { controller.stopScreenView() },
                     onSetMode = { controller.setScreenViewMode(it) },
                 )
+
+                if (showCreateWsDialog) {
+                    val defaultGroupNameFormat = org.jetbrains.compose.resources.stringResource(
+                        app.relay.generated.resources.Res.string.workspace_group_default_name,
+                        "%s",
+                    )
+                    app.relay.ui.components.WorkspaceGroupCreateDialog(
+                        workspaces = state.agentWorkspaces.values.toList(),
+                        groups = state.settings.groups,
+                        onDismiss = { showCreateWsDialog = false },
+                        onOpenChat = { groupId ->
+                            showCreateWsDialog = false
+                            openChat(app.relay.core.protocol.ConvId.group(groupId))
+                        },
+                        onShowQr = { ws ->
+                            showWsQrFor = ws
+                        },
+                        onQuickCreate = { ws, _ ->
+                            showCreateWsDialog = false
+                            val title = ws.wsTitle ?: ws.wsId
+                            val name = defaultGroupNameFormat.replace("%s", title)
+                            val members = state.peers.filter { it.online }.map { it.nodeId }
+                            val gid = controller.createGroup(name, members, ws.wsPath ?: ws.wsId)
+                            if (gid != null) {
+                                openChat(app.relay.core.protocol.ConvId.group(gid))
+                            }
+                        },
+                        onCreateNew = { path, _, groupName, _ ->
+                            showCreateWsDialog = false
+                            val members = state.peers.filter { it.online }.map { it.nodeId }
+                            val gid = controller.createGroup(groupName, members, path)
+                            if (gid != null) {
+                                openChat(app.relay.core.protocol.ConvId.group(gid))
+                            }
+                        },
+                    )
+                }
+
+                // issue 7：某个工作区没有绑定协同群时的建群提示。
+                // 群名/成员与上面「快速建群」同一口径（默认名 + 当前在线设备）。
+                groupPromptFor?.let { ws ->
+                    val defaultGroupNameFormat = org.jetbrains.compose.resources.stringResource(
+                        app.relay.generated.resources.Res.string.workspace_group_default_name,
+                        "%s",
+                    )
+                    app.relay.ui.components.WorkspaceGroupPromptDialog(
+                        workspace = ws,
+                        onDismiss = { groupPromptFor = null },
+                        onCreate = {
+                            groupPromptFor = null
+                            val name = defaultGroupNameFormat.replace("%s", ws.wsTitle ?: ws.wsId)
+                            val members = state.peers.filter { it.online }.map { it.nodeId }
+                            val gid = controller.createGroup(name, members, ws.wsPath ?: ws.wsId)
+                            if (gid != null) {
+                                openChat(app.relay.core.protocol.ConvId.group(gid))
+                            }
+                        },
+                        onOpenWithoutGroup = {
+                            groupPromptFor = null
+                            nav = nav.openWorkspaceChat(ws.peerId, ws.wsId)
+                            chatUnreadOnEntry = state.unreadByPeer[ws.peerId] ?: 0
+                            controller.selectConversation(ws.peerId)
+                        },
+                    )
+                }
+
+                showWsQrFor?.let { ws ->
+                    app.relay.ui.components.WorkspaceQrDialog(
+                        wsTitle = ws.wsTitle ?: ws.wsId,
+                        wsId = ws.wsId,
+                        wsPath = ws.wsPath,
+                        host = state.network.localAddresses.firstOrNull()
+                            ?: state.peers.firstOrNull { it.online }?.let { it.host.ifBlank { it.ip } },
+                        port = state.network.boundUdpPort.takeIf { it > 0 } ?: state.settings.udpPort,
+                        // 全部候选：跨网络的手机才能靠这张码找到本机（公网 v6 在二维码预算内）。
+                        addresses = state.network.localAddresses,
+                        nodeId = state.selfNodeId,
+                        // task-86：直通码也必须带 pin，否则手机建不出公网 TLS 目标。
+                        tlsPin = state.network.selfTlsPin,
+                        // 带昵称：扫完立刻是真名，不是 node-a1b2c3d4。
+                        nick = state.settings.nick,
+                        onDismiss = { showWsQrFor = null },
+                    )
+                }
             }
         }
     }

@@ -79,7 +79,7 @@ public interface DesktopPaneActions {
      *
      * @return 新群的 groupId；名字为空或一个成员都没选时返回 null（控制器已经弹过横幅）。
      */
-    fun createGroup(name: String, memberIds: List<String>): String?
+    fun createGroup(name: String, memberIds: List<String>, description: String = ""): String?
 
     /**
      * 邀请新成员加入群聊。
@@ -151,7 +151,7 @@ public interface DesktopPaneActions {
      * **全局**检索：一页里的三块（联系人 / 聊天记录 / 文件）。
      *
      * 与 [searchHistoricalMessages] 并存而不是取代它：后者只查聊天记录、返回明细，
-     * 是会话列表那个筛选框在用的（`DesktopConversationsPane.kt:513`）；这一条是三段聚合，
+     * 是会话列表那个筛选框在用的（`ConversationSidebar` 的 `onSearchMessages`）；这一条是三段聚合，
      * 供全局搜索面板用。合并的话，会话列表为了拿"聊天记录那一段"得去构造一个
      * 只有一块有值的 `GlobalSearchResult`，而那个空壳的三个空 list 又要被它自己忽略。
      */
@@ -200,6 +200,24 @@ public interface DesktopPaneActions {
     fun respondApproval(approvalId: String, allow: Boolean): Unit = Unit
     fun respondApproval(approvalId: String, allow: Boolean, allowSession: Boolean): Unit = Unit
     fun cancelAgentTask(taskId: String): Unit = Unit
+    fun requestAgentSessionPage(peerId: String, wsId: String, offset: Long = 0, limit: Long? = null): Unit = Unit
+
+    // ------------------------------------------------------------------ 会话与节点
+    fun selectConversation(convId: String): Unit = Unit
+    fun refreshPeers(): Unit = Unit
+
+    /**
+     * 「清空本会话聊天记录」：只清**本机**这个会话的历史，对方那里不受影响。
+     *
+     * 键是**会话键**（私聊 = 对方 nodeId、群 = `group:<groupId>`），与 [sendToConversation] /
+     * [selectConversation] 同一口径 —— 参数名因此叫 convId，不叫 peerId。
+     *
+     * 没有默认体：它是不可恢复的破坏性动作，必须由每个实现者明确表态（生产侧
+     * [app.relay.app.RelayController] 补 override、预览侧 [DesktopPreviewActions] 补空实现），
+     * 与 [setPeerRemark] 同一条规矩 —— 静默继承一个"什么都不做"的默认体，会把
+     * "桌面能不能清会话"变成运行期才发现的事。
+     */
+    fun clearMessages(convId: String)
 
     // ------------------------------------------------------------------ 群管理
     fun leaveGroup(groupId: String): Unit = Unit
@@ -244,7 +262,7 @@ public object DesktopPreviewActions : DesktopPaneActions {
      * 会当成"没建成"，而参考图要拍的正是"对话框关掉、群出现在列表里"之后的画面。
      * 回一个固定的假 id，让这条路径在预览里也能走完。
      */
-    override fun createGroup(name: String, memberIds: List<String>): String? = "preview-group"
+    override fun createGroup(name: String, memberIds: List<String>, description: String): String? = "preview-group"
 
     override fun addGroupMembers(groupId: String, newMemberIds: List<String>): Unit = Unit
 
@@ -270,6 +288,8 @@ public object DesktopPreviewActions : DesktopPaneActions {
 
     // 预览里没有真控制器，也就没有未读可清；不做事，参考图的未读数字由夹具给定。
     override fun setVisibleConversation(convId: String?): Unit = Unit
+
+    override fun clearMessages(convId: String): Unit = Unit
 
     override fun searchHistoricalMessages(query: String, limit: Long): List<app.relay.app.MessageSearchResult> = emptyList()
 

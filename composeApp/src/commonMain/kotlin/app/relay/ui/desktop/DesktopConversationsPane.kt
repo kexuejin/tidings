@@ -48,12 +48,17 @@ import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
-import app.relay.app.pairingPayload
-
+import app.relay.app.PeerCandidateTypes
+import app.relay.app.model.WorkspaceUi
+import app.relay.app.qrCandidatesFor
+import app.relay.app.qrPairingPayloadForAddresses
 import app.relay.app.RelayUiState
 import app.relay.ui.components.GroupCreateDialog
+import app.relay.ui.components.WorkspaceGroupCreateDialog
+import app.relay.ui.components.WorkspaceQrDialog
 import app.relay.generated.resources.chat_no_selection_message
 import app.relay.generated.resources.chat_no_selection_title
+import app.relay.generated.resources.workspace_group_default_name
 import app.relay.core.qr.QrEncoder
 import app.relay.feature.chat.ChatScreen
 import app.relay.ui.ContentWidths
@@ -62,6 +67,7 @@ import app.relay.ui.components.QrCodeView
 import app.relay.generated.resources.Res
 import app.relay.generated.resources.desktop_conv_empty
 import app.relay.generated.resources.nodes_my_qr_desc
+import app.relay.generated.resources.pairing_public_ipv6_hint
 import app.relay.generated.resources.r2_shell_empty_agent_sub
 import app.relay.generated.resources.r2_shell_empty_agent_title
 import app.relay.generated.resources.r2_shell_empty_drop_sub
@@ -82,6 +88,7 @@ import app.relay.ui.theme.LocalAppSpacing
 import app.relay.app.model.ConversationUi
 import app.relay.app.model.NodePhase
 import app.relay.ui.theme.ShapeRoles
+import app.relay.ui.theme.RelayShapes
 
 /**
  * 空态副题的收栏宽度：原型 `.emptyd .lede{max-width:460px}`（`prototype/relay.html:775`），
@@ -116,7 +123,7 @@ public fun ConversationsPane(
      * 与手机端同一条规矩：按钮长在**会话列表**上，因为群就是列表里的第三种行；
      * 而"没有群"那一节仍要画出来，它是这个按钮唯一的落点。
      */
-    onCreateGroup: ((String, List<String>) -> Unit)? = null,
+    onCreateGroup: ((name: String, members: List<String>, description: String) -> String?)? = null,
     /** 冷启动时预置的全局搜索结果，只给截图门禁用（见 [DesktopShell.initialGlobalSearch]）。 */
     initialGlobalSearch: app.relay.app.GlobalSearchResult? = null,
     /**
@@ -140,16 +147,81 @@ public fun ConversationsPane(
      * 名字留作 `onOpenAgentConsole`：工作区为平级视图，该回调负责切换视图。
      */
     onOpenAgentConsole: (() -> Unit)? = null,
+    selectedWsId: String? = null,
+    activeSessionId: String? = null,
+    onSelectAgentSession: ((String) -> Unit)? = null,
+    /**
+     * 进入当前会话那一刻的未读条数（task-2 接线，见 [ChatPane.unreadOnEntry]）。
+     *
+     * 壳在 `controller.selectConversation` 清未读**之前**采下，再原样透传到这里 ——
+     * 这一层只搬运，不做判断。
+     */
+    unreadOnEntry: Int = 0,
 ) {
     var creatingGroup by remember { mutableStateOf(false) }
+    var creatingWorkspaceGroup by remember { mutableStateOf(false) }
+    var showWsQrFor by remember { mutableStateOf<WorkspaceUi?>(null) }
     if (creatingGroup && onCreateGroup != null) {
         GroupCreateDialog(
             peers = state.peers,
             onDismiss = { creatingGroup = false },
             onConfirm = { name, members ->
                 creatingGroup = false
-                onCreateGroup(name, members)
+                val gid = onCreateGroup(name, members, "")
+                if (gid != null) {
+                    onSelect(app.relay.core.protocol.ConvId.group(gid))
+                }
             },
+        )
+    }
+    if (creatingWorkspaceGroup && onCreateGroup != null) {
+        val defaultGroupNameFormat = stringResource(Res.string.workspace_group_default_name, "%s")
+        WorkspaceGroupCreateDialog(
+            workspaces = state.agentWorkspaces.values.toList(),
+            groups = state.settings.groups,
+            onDismiss = { creatingWorkspaceGroup = false },
+            onOpenChat = { groupId ->
+                creatingWorkspaceGroup = false
+                onSelect(app.relay.core.protocol.ConvId.group(groupId))
+            },
+            onShowQr = { ws ->
+                showWsQrFor = ws
+            },
+            onQuickCreate = { ws, _ ->
+                creatingWorkspaceGroup = false
+                val name = defaultGroupNameFormat.replace("%s", ws.wsTitle ?: ws.wsId)
+                val members = state.peers.filter { it.online }.map { it.nodeId }
+                val gid = onCreateGroup(name, members, ws.wsPath ?: ws.wsId)
+                if (gid != null) {
+                    onSelect(app.relay.core.protocol.ConvId.group(gid))
+                }
+            },
+            onCreateNew = { path, _, groupName, _ ->
+                creatingWorkspaceGroup = false
+                val members = state.peers.filter { it.online }.map { it.nodeId }
+                val gid = onCreateGroup(groupName, members, path)
+                if (gid != null) {
+                    onSelect(app.relay.core.protocol.ConvId.group(gid))
+                }
+            },
+        )
+    }
+    showWsQrFor?.let { ws ->
+        WorkspaceQrDialog(
+            wsTitle = ws.wsTitle ?: ws.wsId,
+            wsId = ws.wsId,
+            wsPath = ws.wsPath,
+            host = state.network.localAddresses.firstOrNull()
+                ?: state.peers.firstOrNull { it.online }?.let { it.host.ifBlank { it.ip } },
+            port = state.network.boundUdpPort.takeIf { it > 0 } ?: state.settings.udpPort,
+            // 给多候选能力：有本机地址时直通码也带上全部候选（公网 v6 在跨网时才可能连通）。
+            addresses = state.network.localAddresses,
+            nodeId = state.selfNodeId,
+            // task-86：直通码也必须带 pin，否则手机建不出公网 TLS 目标。
+            tlsPin = state.network.selfTlsPin,
+            // 带昵称：扫完立刻是真名，不是 node-a1b2c3d4。
+            nick = state.settings.nick,
+            onDismiss = { showWsQrFor = null },
         )
     }
     val chatPane: @Composable (Modifier, (() -> Unit)?) -> Unit = { paneModifier, back ->
@@ -166,6 +238,10 @@ public fun ConversationsPane(
             onOpenInNewWindow = onOpenInNewWindow,
             onBack = back,
             modifier = paneModifier,
+            selectedWsId = selectedWsId,
+            activeSessionId = activeSessionId,
+            unreadOnEntry = unreadOnEntry,
+            onSelectAgentSession = onSelectAgentSession,
         )
     }
 
@@ -209,7 +285,10 @@ public fun ConversationsPane(
     // `NodePhase.Starting` 让位给侧栏那句「正在启动」（见 `ConversationSidebar`）。
     if (sessions.isEmpty() && state.peers.isEmpty() && state.network.phase != NodePhase.Starting) {
         DesktopEmptyOnboarding(
-            host = state.network.localAddresses.firstOrNull(),
+            selfTlsPin = state.network.selfTlsPin,
+            nodeId = state.selfNodeId,
+            nick = state.settings.nick,
+            addresses = state.network.localAddresses,
             port = state.network.boundUdpPort,
             onPair = onGoToPairing,
             onOpenAgentConsole = onOpenAgentConsole,
@@ -230,6 +309,7 @@ public fun ConversationsPane(
                 now = now,
                 modifier = Modifier.width(DesktopMetrics.SIDEBAR_PX.dp),
                 onCreateGroup = onCreateGroup?.let { { creatingGroup = true } },
+                onCreateWorkspaceGroup = onCreateGroup?.let { { creatingWorkspaceGroup = true } },
                 onSearchMessages = controller::searchHistoricalMessages,
                 onSearchGlobal = if (globalSearchEnabled) controller::searchGlobal else null,
                 initialGlobalSearch = initialGlobalSearch,
@@ -254,6 +334,7 @@ public fun ConversationsPane(
                 now = now,
                 modifier = Modifier.width(240.dp),
                 onCreateGroup = onCreateGroup?.let { { creatingGroup = true } },
+                onCreateWorkspaceGroup = onCreateGroup?.let { { creatingWorkspaceGroup = true } },
                 onSearchMessages = controller::searchHistoricalMessages,
                 onSearchGlobal = if (globalSearchEnabled) controller::searchGlobal else null,
                 initialGlobalSearch = initialGlobalSearch,
@@ -284,6 +365,7 @@ public fun ConversationsPane(
                         now = now,
                         modifier = Modifier.fillMaxSize(),
                         onCreateGroup = onCreateGroup?.let { { creatingGroup = true } },
+                        onCreateWorkspaceGroup = onCreateGroup?.let { { creatingWorkspaceGroup = true } },
                         onSearchMessages = controller::searchHistoricalMessages,
                         onSearchGlobal = if (globalSearchEnabled) controller::searchGlobal else null,
                 initialGlobalSearch = initialGlobalSearch,
@@ -323,14 +405,31 @@ public fun ConversationsPane(
  */
 @Composable
 private fun DesktopEmptyOnboarding(
-    host: String?,
+    nodeId: String,
+    nick: String?,
+    addresses: List<String>,
     port: Int,
+    /** 本机 TLS pin：必须印进码里（task-86），否则手机建不出公网 TLS 目标。 */
+    selfTlsPin: String?,
     onPair: () -> Unit,
     onOpenAgentConsole: (() -> Unit)?,
     modifier: Modifier = Modifier,
 ) {
     val sp = LocalAppSpacing.current
-    val payload = host?.let { pairingPayload(it, port) }
+    // 二维码载荷：按前缀折叠 + 按类型轮转 + 裁到二维码容量内（见 `qrPairingPayloadForAddresses`）。
+    // 只印一个 IPv4 时，手机一换网络就只剩"手动填地址"；全量塞进去又超容量 ⇒ 编码器直接抛异常。
+    val payload = qrPairingPayloadForAddresses(
+        nodeId = nodeId,
+        addresses = addresses,
+        port = port,
+        tlsPin = selfTlsPin,
+        nick = nick,
+    )
+    // 有公网 v6 才提示"要放行入站"：没有公网地址时提示它只会变成一句无用的噪声。
+    // 判据取**二维码里真的带着**的那一份：预算必须与上面那次生成**同一组参数**（含 pin 与昵称），
+    // 否则裁剪结果会不一样，提示就会指着一个已经被裁掉的候选说"要放行它"。
+    val hasPublicV6 = qrCandidatesFor(addresses, port, nodeId, tlsPin = selfTlsPin, nick = nick)
+        .any { it.type == PeerCandidateTypes.PUBLIC_V6 }
     // 编码器对超长内容抛异常（它拒绝截断），地址为空时 payload 也是 null：两种情况都不画码。
     val code = payload?.let { runCatching { QrEncoder.encode(it) }.getOrNull() }
     val lede = stringResource(Res.string.r2_shell_empty_lede) + "\n" +
@@ -357,6 +456,17 @@ private fun DesktopEmptyOnboarding(
                         modifier = Modifier.padding(sp.sm).size(116.dp),
                     )
                 }
+            }
+            // 如实说明：码里有公网地址**不等于**能连上 —— 主机所在网络必须允许入站。
+            // 不写这一句，用户会以为"扫了就该通"，然后在真机上得到一次超时。
+            if (code != null && hasPublicV6) {
+                Text(
+                    text = stringResource(Res.string.pairing_public_ipv6_hint),
+                    style = MaterialTheme.typography.labelSmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    textAlign = TextAlign.Center,
+                    modifier = Modifier.padding(top = sp.xs).widthIn(max = EmptyLedeMaxWidth),
+                )
             }
             Text(
                 text = stringResource(Res.string.r2_shell_empty_title),

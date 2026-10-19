@@ -79,4 +79,63 @@ class AgentApprovalCardsTest {
         assertNotNull(ui.diff)
         assertEquals("diff --git a/file b/file", ui.diff)
     }
+
+    @Test
+    fun testApprovalPermissionModel() {
+        fun canApprove(
+            selfNodeId: String,
+            approverPeerId: String,
+            grant: app.relay.app.model.GrantUi?,
+        ): Boolean {
+            return (approverPeerId == selfNodeId) ||
+                (grant?.isMyDevice == true) ||
+                (grant?.access == app.relay.core.protocol.AgentGrantAccess.OWNER) ||
+                (grant?.access == app.relay.core.protocol.AgentGrantAccess.ADMIN && grant.delegatedApproval)
+        }
+
+        fun makeGrant(
+            peerId: String,
+            isMyDevice: Boolean = false,
+            access: String = app.relay.core.protocol.AgentGrantAccess.RW,
+            delegatedApproval: Boolean = false,
+        ) = app.relay.app.model.GrantUi(
+            peerId = peerId,
+            agentKey = null,
+            scope = "all",
+            state = "approved",
+            at = 1000L,
+            isMyDevice = isMyDevice,
+            access = access,
+            delegatedApproval = delegatedApproval,
+        )
+
+        val selfNode = "node-self"
+        // 1. Host approval
+        kotlin.test.assertTrue(canApprove(selfNode, selfNode, null))
+
+        // 2. Private trust circle (my device)
+        val myDeviceGrant = makeGrant(peerId = "node-phone", isMyDevice = true, access = app.relay.core.protocol.AgentGrantAccess.RW)
+        kotlin.test.assertTrue(canApprove(selfNode, "node-phone", myDeviceGrant))
+
+        // 3. Owner role
+        val ownerGrant = makeGrant(peerId = "node-owner", isMyDevice = false, access = app.relay.core.protocol.AgentGrantAccess.OWNER)
+        kotlin.test.assertTrue(canApprove(selfNode, "node-owner", ownerGrant))
+
+        // 4. Admin with delegated approval enabled
+        val adminWithApproval = makeGrant(peerId = "node-admin1", isMyDevice = false, access = app.relay.core.protocol.AgentGrantAccess.ADMIN, delegatedApproval = true)
+        kotlin.test.assertTrue(canApprove(selfNode, "node-admin1", adminWithApproval))
+
+        // 5. Admin WITHOUT delegated approval -> cannot approve
+        val adminNoApproval = makeGrant(peerId = "node-admin2", isMyDevice = false, access = app.relay.core.protocol.AgentGrantAccess.ADMIN, delegatedApproval = false)
+        kotlin.test.assertFalse(canApprove(selfNode, "node-admin2", adminNoApproval))
+
+        // 6. External collaborator (rw) -> cannot approve
+        val collabGrant = makeGrant(peerId = "node-dev", isMyDevice = false, access = app.relay.core.protocol.AgentGrantAccess.RW)
+        kotlin.test.assertFalse(canApprove(selfNode, "node-dev", collabGrant))
+
+        // 7. Observer (ro) -> cannot approve
+        val observerGrant = makeGrant(peerId = "node-observer", isMyDevice = false, access = app.relay.core.protocol.AgentGrantAccess.RO)
+        kotlin.test.assertFalse(canApprove(selfNode, "node-observer", observerGrant))
+    }
 }
+

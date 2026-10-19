@@ -14,7 +14,9 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.backhandler.BackHandler
 import app.relay.app.RelayUiState
+import app.relay.app.pickActiveSession
 import app.relay.core.nowMillis
 import app.relay.navigation.resolveAgentSessionId
 import app.relay.ui.ContentWidths
@@ -24,10 +26,14 @@ import app.relay.ui.theme.LocalAppSpacing
 /**
  * 工作区（原 Agent）控制台，对齐 DSH 看板与会话详情台。
  *
- * 两级架构：
- * 1. 一级：工作区看板（WorkspaceBoardView）——轻量监控雷达，每个工作区一张卡，展示活跃会话与全局审批 Banner；
- * 2. 二级：会话详情台（SessionDetailView）——沉浸式全屏视图，常驻置顶栏（返回 + 会话名 + 切换会话），下方滚动事件流与审批队列。
+ * 三级架构（issue 6，用户裁决）：
+ * 1. 一级：工作区看板（WorkspaceBoardView）——按设备列工作区，每行展示活跃会话与待审批；
+ * 2. 二级：工作区操作中心（WorkspaceDetailView）——直通码 / 权限管理 / 最近会话入口，
+ *    **不再整段列会话**（会话列表与事件流都归三级）；
+ * 3. 三级：会话详情台（SessionDetailView）——沉浸式全屏视图，常驻置顶栏（返回 + 会话名 +
+ *    切换会话），下方滚动事件流与审批队列。
  */
+@OptIn(androidx.compose.ui.ExperimentalComposeUiApi::class)
 @Composable
 fun AgentConsoleScreen(
     state: RelayUiState,
@@ -36,7 +42,12 @@ fun AgentConsoleScreen(
     selectedAgentSessionId: String? = null,
     onSelectAgentSession: (String) -> Unit = {},
     inDetail: Boolean = false,
+    detailWsId: String? = null,
+    detailSessionId: String? = null,
+    onOpenWorkspaceDetail: ((peerId: String, wsId: String) -> Unit)? = null,
+    onLeaveWorkspaceDetail: (() -> Unit)? = null,
     onOpenSessionDetail: ((peerId: String, sessionId: String) -> Unit)? = null,
+    onLeaveSessionDetail: (() -> Unit)? = null,
     onBackToBoard: (() -> Unit)? = null,
     /** 与 `WorkspaceBoardView` 同签名：wsId 非空 = 要收窄到那个工作区（见那里的 KDoc）。 */
     onOpenChat: (peerId: String, wsId: String?) -> Unit,
@@ -47,21 +58,59 @@ fun AgentConsoleScreen(
     onRespondApproval: ((approvalId: String, allow: Boolean) -> Unit)? = null,
     onCancelTask: ((taskId: String) -> Unit)? = null,
     onRefresh: (() -> Unit)? = null,
+    onCreateWorkspaceGroup: (() -> Unit)? = null,
     // 只给截图门禁用，见 `SessionDetailView(initialPicking = …)`。
     initialSessionPickerOpen: Boolean = false,
+    onLoadWorkspaceSessions: ((peerId: String, wsId: String) -> Unit)? = null,
+    /**
+     * 「申请授权」（task-10）：照 `RelayController.sendAgentGrantRequest(peerId, agentKey,
+     * reason, wsId, access)` 的签名，返回 null = 没发出去（没有运行时 / 对端没声明 ag1 / agr1）。
+     *
+     * 组合根（手机 = `App.kt`）把它接到 `controller::sendAgentGrantRequest`。默认 null =
+     * 本宿主没有这条能力 ⇒ 工作区详情的远端分支不画「申请授权」按钮。
+     */
+    onRequestGrant: (suspend (
+        peerId: String,
+        agentKey: String?,
+        reason: String?,
+        wsId: String?,
+        access: String?,
+    ) -> app.relay.core.transport.SendOutcome?)? = null,
 ) {
     val agents = state.agentPeers
     val selected = agents.firstOrNull { it.nodeId == selectedAgentId } ?: agents.firstOrNull()
 
     // 内部备选下钻状态：桌面端壳或未接入外层导航时提供自驱下钻支持
     var localDetailSessionId by remember { mutableStateOf<String?>(null) }
-    val isViewingDetail = inDetail || (onOpenSessionDetail == null && localDetailSessionId != null)
+    var localDetailWsId by remember { mutableStateOf<String?>(null) }
 
-    if (isViewingDetail && selected != null) {
-        // 与手机其余屏同口径：子代理会话与空壳会话不显示（见 AgentUi.visibleInDsh）。
-        val sessions = state.visibleAgentSessionsOf(selected.nodeId)
+    val effectiveWsId = detailWsId ?: localDetailWsId
+    val effectiveSessionId = detailSessionId ?: localDetailSessionId
+
+    val backEnabled = (localDetailSessionId != null || localDetailWsId != null) &&
+        (onLeaveWorkspaceDetail == null && onLeaveSessionDetail == null)
+    BackHandler(enabled = backEnabled) {
+        if (localDetailSessionId != null) {
+            localDetailSessionId = null
+            if (localDetailWsId == null) {
+                onBackToBoard?.invoke()
+            }
+        } else if (localDetailWsId != null) {
+            localDetailWsId = null
+            onBackToBoard?.invoke()
+        }
+    }
+
+    // 三级导航：工作区看板 -> 工作区详情 -> 会话详情
+    if (selected != null && effectiveSessionId != null) {
+        val allSessions = state.visibleAgentSessionsOf(selected.nodeId)
+        val sessions = if (effectiveWsId != null) {
+            allSessions.filter { it.wsId == effectiveWsId }
+        } else {
+            allSessions
+        }
         val currentSessionId = resolveAgentSessionId(
-            selectedAgentSessionId ?: localDetailSessionId,
+            selectedAgentSessionId ?: effectiveSessionId,
             sessions.map { it.sessionId },
         )
         val activeSession = sessions.firstOrNull { it.sessionId == currentSessionId } ?: sessions.firstOrNull()
@@ -73,21 +122,99 @@ fun AgentConsoleScreen(
             state = state,
             now = now,
             onBack = {
-                localDetailSessionId = null
-                onBackToBoard?.invoke()
+                if (onLeaveSessionDetail != null) {
+                    onLeaveSessionDetail()
+                } else {
+                    localDetailSessionId = null
+                    if (localDetailWsId == null) {
+                        onBackToBoard?.invoke()
+                    }
+                }
             },
             onSelectSession = { sessionId ->
-                localDetailSessionId = sessionId
+                if (onOpenSessionDetail != null) {
+                    onOpenSessionDetail(selected.nodeId, sessionId)
+                } else {
+                    localDetailSessionId = sessionId
+                }
                 onSelectAgentSession(sessionId)
             },
-            // 详情页是**会话级**视图（`resolveAgentSessionId` 挑一条会话），它不知道母工作区，
-            // 所以收窄参数传 null —— 那里点开会话就是直接跟这个节点聊。
-            // 要带上 wsId 的是看板那一层（它按工作区画行）。
-            onOpenChat = { sessionPeerId -> onOpenChat(sessionPeerId, null) },
+            onOpenChat = { sessionPeerId ->
+                activeSession?.let { onSelectAgentSession(it.sessionId) }
+                onOpenChat(sessionPeerId, effectiveWsId)
+            },
             onRespondApproval = onRespondApproval,
             onCancelTask = onCancelTask,
             modifier = modifier,
             initialPicking = initialSessionPickerOpen,
+        )
+    } else if (selected != null && effectiveWsId != null) {
+        val allSessions = state.visibleAgentSessionsOf(selected.nodeId)
+        val sessions = allSessions.filter { it.wsId == effectiveWsId }
+        val workspace = state.agentWorkspaces.values.firstOrNull { it.wsId == effectiveWsId }
+
+        WorkspaceDetailView(
+            wsId = effectiveWsId,
+            workspace = workspace,
+            peer = selected,
+            sessions = sessions,
+            state = state,
+            now = now,
+            onBack = {
+                if (onLeaveWorkspaceDetail != null) {
+                    onLeaveWorkspaceDetail()
+                } else {
+                    localDetailWsId = null
+                    onBackToBoard?.invoke()
+                }
+            },
+            onOpenSession = { sessionId ->
+                if (onOpenSessionDetail != null) {
+                    onOpenSessionDetail(selected.nodeId, sessionId)
+                } else {
+                    localDetailSessionId = sessionId
+                }
+                onSelectAgentSession(sessionId)
+            },
+            onOpenChat = {
+                // 进聊天前把"要停在哪条会话"记下来。挑法与工作区卡片、会话详情**同源**
+                // （pickActiveSession 是唯一一处规则）：此前这里是第三份手抄的
+                // 「pending → busy → first」，没有 stale-busy 判定、first 也依赖调用方列表顺序，
+                // 于是"从卡片点进来"与"卡片上显示的那条"可以是两条不同的会话。
+                pickActiveSession(
+                    sessions = sessions,
+                    lastEventAtOf = { s -> state.agentEventsOf(s).maxOfOrNull { it.at } ?: 0L },
+                    pendingSessionIds = state.agentApprovals.values
+                        .filter { it.peerId == selected.nodeId && it.status == "pending" }
+                        .map { it.sessionId }
+                        .toSet(),
+                    now = now,
+                )?.let { onSelectAgentSession(it.sessionId) }
+                onOpenChat(selected.nodeId, effectiveWsId)
+            },
+            onOpenSessionChat = { sessionId ->
+                onSelectAgentSession(sessionId)
+                onOpenChat(selected.nodeId, effectiveWsId)
+            },
+            onRespondApproval = onRespondApproval,
+            onRefresh = onRefresh,
+            // 把 (peerId, agentKey, wsId) 在这里绑死，屏内只留"点一下"这件事。
+            // agentKey 取工作区宣告的身份键，拿不到再退到该工作区第一条会话的身份 ——
+            // 与 `grantFor` 的键口径一致（`agentId ?? agentKind`）。
+            onRequestGrant = onRequestGrant?.let { send ->
+                suspend {
+                    send(
+                        selected.nodeId,
+                        workspace?.agentKey
+                            ?: sessions.firstOrNull()?.agentId
+                            ?: sessions.firstOrNull()?.agentKind,
+                        null,
+                        effectiveWsId,
+                        null,
+                    )
+                }
+            },
+            modifier = modifier,
         )
     } else {
         Column(
@@ -105,19 +232,30 @@ fun AgentConsoleScreen(
                 showHeader = showHeader,
                 now = now,
                 onSelectAgent = onSelectAgent,
-                onOpenSession = { peerId, sessionId ->
+                onOpenWorkspace = { peerId, wsId, sessionId ->
                     onSelectAgent(peerId)
-                    if (onOpenSessionDetail != null) {
-                        onOpenSessionDetail(peerId, sessionId)
+                    if (wsId != null && onOpenWorkspaceDetail != null) {
+                        onOpenWorkspaceDetail(peerId, wsId)
                     } else {
-                        localDetailSessionId = sessionId
+                        localDetailWsId = wsId
+                    }
+                    if (sessionId != null) {
+                        if (onOpenSessionDetail != null) {
+                            onOpenSessionDetail(peerId, sessionId)
+                        } else {
+                            localDetailSessionId = sessionId
+                        }
                         onSelectAgentSession(sessionId)
+                    }
+                    if (wsId != null) {
+                        onLoadWorkspaceSessions?.invoke(peerId, wsId)
                     }
                 },
                 onOpenChat = onOpenChat,
                 onFindNodes = onFindNodes,
                 onRefresh = onRefresh,
                 onRespondApproval = onRespondApproval,
+                onCreateWorkspaceGroup = onCreateWorkspaceGroup,
             )
 
             Column(Modifier.padding(bottom = LocalAppSpacing.current.xl)) {}

@@ -179,6 +179,45 @@ class FileMessageStoreTest {
         }
     }
 
+    @Test
+    fun aLegacySettingsFileWithoutTheSwitchKeyStillBringsHistoryBack() = runBlocking {
+        // 老库升级的端到端：settings.json 里**没有** persistMessages 这个键
+        // （旧默认值是 false，encodeDefaults=false 下根本不会写进文件），而磁盘上还有当年
+        // 开过开关时留下的 messages.json。迁移把默认补成开启之后，这份历史必须读得回来 ——
+        // 否则"离线也能看到历史会话"只兑现了策略、没兑现结果。
+        createMessageStore(platform).save(
+            mapOf(
+                "peer-legacy" to listOf(
+                    MessageUi(id = "m1", peerId = "peer-legacy", mine = false, text = "老库的历史", at = 5),
+                ),
+            ),
+        )
+
+        val controller = RelayController(
+            platform = platform,
+            store = object : SettingsStore {
+                override fun load(): RelaySettings? = SettingsStore.json.decodeFromString(
+                    RelaySettings.serializer(),
+                    """{ "nodeId": "node-1", "udpPort": 0, "tcpPort": 0 }""",
+                )
+
+                override fun save(settings: RelaySettings) = Unit
+            },
+            scope = scope,
+            version = "relay-test",
+            messageStore = createMessageStore(platform),
+        )
+        try {
+            controller.start()
+            awaitUntil("老库升级后也能读回历史") {
+                controller.state.value.messages["peer-legacy"]?.isNotEmpty() == true
+            }
+            assertEquals(true, controller.persistMessages, "迁移后默认落盘")
+        } finally {
+            controller.stop()
+        }
+    }
+
     private fun controller(persistMessages: Boolean) = RelayController(
         platform = platform,
         store = FixedSettingsStore(persistMessages),
@@ -200,6 +239,9 @@ class FileMessageStoreTest {
             udpPort = 0,
             tcpPort = 0,
             persistMessages = persistMessages,
+            // 决定位必须显式给：只有"已经决定过"的 false 才不会被
+            // migrateRelaySettings 当成老库而重新打开（见那个函数的 KDoc）。
+            persistMessagesDecided = true,
         )
 
         override fun save(settings: RelaySettings) = Unit

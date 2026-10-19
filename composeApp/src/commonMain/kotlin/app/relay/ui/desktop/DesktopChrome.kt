@@ -19,7 +19,6 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.lazy.items
-import androidx.compose.material3.Card
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.HorizontalDivider
@@ -52,21 +51,8 @@ import app.relay.ui.theme.RelayElevations
 import app.relay.generated.resources.Res
 import app.relay.generated.resources.action_clear_search
 import app.relay.generated.resources.common_offline
-import app.relay.generated.resources.desktop_action_quit
 import app.relay.generated.resources.desktop_app_title
-import app.relay.generated.resources.desktop_menu_agents
-import app.relay.generated.resources.desktop_menu_copy_node_id
-import app.relay.generated.resources.desktop_menu_diagnostics
-import app.relay.generated.resources.desktop_menu_edit
-import app.relay.generated.resources.desktop_menu_file
-import app.relay.generated.resources.desktop_menu_help
-import app.relay.generated.resources.desktop_menu_import_files
 import app.relay.generated.resources.desktop_menu_new_conversation
-import app.relay.generated.resources.desktop_menu_refresh_nodes
-import app.relay.generated.resources.desktop_menu_theme_dark
-import app.relay.generated.resources.desktop_menu_theme_light
-import app.relay.generated.resources.desktop_menu_view
-import app.relay.generated.resources.desktop_menu_window
 import app.relay.generated.resources.desktop_peer_connected
 import app.relay.generated.resources.desktop_peer_header
 import app.relay.generated.resources.desktop_peer_last_seen
@@ -79,184 +65,15 @@ import app.relay.generated.resources.desktop_toolbar_more
 import app.relay.generated.resources.desktop_toolbar_open_new_window
 import app.relay.generated.resources.desktop_toolbar_search
 import app.relay.generated.resources.desktop_toolbar_search_placeholder
-import app.relay.generated.resources.desktop_view_agents
 import app.relay.generated.resources.desktop_view_cabinet
-import app.relay.generated.resources.desktop_view_conversations
-import app.relay.generated.resources.desktop_view_files
-import app.relay.generated.resources.desktop_view_nodes
-import app.relay.generated.resources.screen_settings
-import app.relay.generated.resources.chat_toolbar_capture
 import app.relay.generated.resources.ic_add_node
 import app.relay.generated.resources.ic_close
 import app.relay.generated.resources.ic_external
 import app.relay.generated.resources.ic_folder
 import app.relay.generated.resources.ic_more
 import app.relay.generated.resources.ic_search
-import org.jetbrains.compose.resources.StringResource
 import org.jetbrains.compose.resources.stringResource
 import app.relay.ui.theme.ShapeRoles
-
-// ------------------------------------------------------------------ 菜单栏
-
-@Composable
-public fun DesktopMenuBar(
-    darkTheme: Boolean,
-    onOpenSettings: () -> Unit,
-    onToggleTheme: () -> Unit,
-    onExportDiagnostics: (() -> Unit)?,
-    onRefresh: () -> Unit,
-    onQuit: (() -> Unit)?,
-    onOpenAgents: () -> Unit,
-    onNewConversation: () -> Unit,
-    onCopyNodeId: () -> Unit,
-    onImportFiles: () -> Unit,
-    onSelectView: (DesktopView) -> Unit,
-    /**
-     * 「编辑 → 截图 ⌘⇧A」。
-     *
-     * 必须是一个**真动作**，不能拿「切到会话视图」当替身：截图覆盖窗是独立窗
-     * （`controller.triggerScreenCapture`），顺带切视图会让用户按菜单截图时主窗被莫名改掉。
-     * 壳里这条与 [DesktopShortcut.ScreenCapture] 那条快捷键走的是**同一个** lambda，
-     * 两条入口必须逐字一致 —— 之前这里只切视图，键盘能截、菜单不能（task-25）。
-     */
-    onScreenCapture: () -> Unit,
-) {
-    Surface(
-        color = MaterialTheme.colorScheme.surfaceContainer,
-        tonalElevation = RelayElevations.Card,
-    ) {
-        Row(
-            Modifier.fillMaxWidth().height(DesktopMetrics.MENUBAR_PX.dp).padding(horizontal = LocalAppSpacing.current.md10),
-            verticalAlignment = Alignment.CenterVertically,
-        ) {
-            // 条目挂在菜单模型上（而不是写在 when 里），否则同一个分支值会出现两次，
-            // when 只取先匹配的那个，「退出」就永远点不到。
-            val menus = listOfNotNull(
-                DesktopMenu.File to listOf(
-                    MenuItem(stringResource(Res.string.desktop_menu_new_conversation), DesktopShortcut.NewConversation.display, onNewConversation),
-                    // 导入文件必须也在菜单里：工具栏只在 Expanded 出现（原型稿 Medium/Compact
-                    // 都没有那一行），没有这条命令窄窗就没有任何发文件的入口。
-                    MenuItem(stringResource(Res.string.desktop_menu_import_files), DesktopShortcut.ImportFiles.display, onImportFiles),
-                ),
-                DesktopMenu.Edit to listOf(
-                    MenuItem(stringResource(Res.string.desktop_menu_agents), DesktopShortcut.OpenAgents.display, onOpenAgents),
-                    MenuItem(stringResource(Res.string.desktop_menu_copy_node_id), DesktopShortcut.CopyNodeId.display, onCopyNodeId),
-                    // 截图走 `onScreenCapture`（= 壳里 `DesktopShortcut.ScreenCapture` 那条快捷键的同一个
-                    // lambda）。原先这里写的是 `{ onSelectView(DesktopView.Conversations) }`：按菜单只切了视图、
-                    // 从不发起截图，键盘却能截 —— 同一个组合键两条入口两种行为（task-25）。
-                    MenuItem(stringResource(Res.string.chat_toolbar_capture), DesktopShortcut.ScreenCapture.display, onScreenCapture),
-                ),
-                DesktopMenu.View to listOf(
-                    // 四个视图平权；原型 `.dtop` 写的就是「视图 ⌘1…4」。
-                    MenuItem(stringResource(Res.string.desktop_view_conversations), DesktopShortcut.ViewConversations.display) {
-                        onSelectView(DesktopView.Conversations)
-                    },
-                    MenuItem(stringResource(Res.string.desktop_view_files), DesktopShortcut.ViewFiles.display) {
-                        onSelectView(DesktopView.Files)
-                    },
-                    MenuItem(stringResource(Res.string.desktop_view_cabinet), DesktopShortcut.ViewCabinet.display) {
-                        onSelectView(DesktopView.Cabinet)
-                    },
-                    MenuItem(stringResource(Res.string.desktop_view_nodes), DesktopShortcut.ViewNodes.display) {
-                        onSelectView(DesktopView.Nodes)
-                    },
-                    MenuItem(stringResource(Res.string.desktop_view_agents), DesktopShortcut.ViewAgents.display) {
-                        onSelectView(DesktopView.Agents)
-                    },
-                    MenuItem(if (darkTheme) stringResource(Res.string.desktop_menu_theme_light) else stringResource(Res.string.desktop_menu_theme_dark), DesktopShortcut.ToggleTheme.display, onToggleTheme),
-                    MenuItem(stringResource(Res.string.desktop_menu_refresh_nodes), DesktopShortcut.RefreshNodes.display, onRefresh),
-                ),
-                // 退出 / 诊断包是桌面专属能力：调用方给 null 表示本设备没有这个能力，
-                // 菜单项直接不画——留在屏上点了没反应比没有更糟。
-                listOfNotNull(
-                    MenuItem(stringResource(Res.string.screen_settings), DesktopShortcut.OpenSettings.display, onOpenSettings),
-                    onQuit?.let { MenuItem(stringResource(Res.string.desktop_action_quit), DesktopShortcut.Quit.display, it) },
-                ).takeIf { it.isNotEmpty() }?.let { DesktopMenu.Window to it },
-                listOfNotNull(
-                    onExportDiagnostics?.let {
-                        MenuItem(stringResource(Res.string.desktop_menu_diagnostics), DesktopShortcut.ExportDiagnostics.display, it)
-                    },
-                ).takeIf { it.isNotEmpty() }?.let { DesktopMenu.Help to it },
-            )
-            menus.forEach { (menu, items) ->
-                MenuGroup(menu, items)
-                Spacer(Modifier.width(LocalAppSpacing.current.lg))
-            }
-            Spacer(Modifier.weight(1f))
-            if (onQuit != null) {
-                IconButton(onClick = onQuit, modifier = Modifier.size(18.dp)) {
-                    Icon(
-                        painterResource(Res.drawable.ic_close),
-                        contentDescription = stringResource(Res.string.desktop_action_quit),
-                        modifier = Modifier.size(12.dp),
-                        tint = MaterialTheme.colorScheme.onSurfaceVariant,
-                    )
-                }
-            }
-        }
-    }
-}
-
-/**
- * 一个菜单组：标题 + 下拉条目。
- *
- * 早先这里把**所有命令**平铺在菜单栏那一行（标题 + 竖线 + 每条命令的快捷键），
- * 1100px 勉强放得下，800px 就换行、560px 直接被截断在「视图」处 —— 那半行字
- * 既点不到也读不出是什么。改成下拉之后，这一行在任何档位都只占五个标题的宽度，
- * 而且语义回到了菜单栏本来的样子：标题点开才有条目（原型稿那行菜单本来就是
- * 系统的菜单栏，不是一墙命令）。
- *
- * 快捷键提示放在条目右侧而不是标题上：看不见的快捷键写出来只是噪声。
- */
-@Composable
-public fun MenuGroup(menu: DesktopMenu, items: List<MenuItem>) {
-    var open by remember { mutableStateOf(false) }
-    Box {
-        MenuLabel(stringResource(menu.title), muted = true, onClick = { open = true })
-        DropdownMenu(expanded = open, onDismissRequest = { open = false }) {
-            items.forEach { item ->
-                DropdownMenuItem(
-                    text = { Text(item.label) },
-                    trailingIcon = {
-                        Text(
-                            item.shortcut,
-                            style = MaterialTheme.typography.labelSmall,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant,
-                        )
-                    },
-                    onClick = {
-                        // 先收起再执行：命令自己可能弹出窗口（设置窗），
-                        // 菜单留在屏幕上会盖住它刚打开的这东西。
-                        open = false
-                        item.onClick()
-                    },
-                )
-            }
-        }
-    }
-}
-
-public enum class DesktopMenu(val title: StringResource) {
-    File(Res.string.desktop_menu_file),
-    Edit(Res.string.desktop_menu_edit),
-    View(Res.string.desktop_menu_view),
-    Window(Res.string.desktop_menu_window),
-    Help(Res.string.desktop_menu_help),
-}
-
-/** 菜单里的一条命令：显示名 + 快捷键提示 + 点击行为。 */
-public class MenuItem(val label: String, val shortcut: String, val onClick: () -> Unit)
-
-@Composable
-public fun MenuLabel(text: String, muted: Boolean = false, onClick: () -> Unit = {}) {
-    Text(
-        text = text,
-        style = MaterialTheme.typography.labelMedium,
-        color = if (muted) MaterialTheme.colorScheme.onSurfaceVariant else MaterialTheme.colorScheme.onSurface,
-        fontWeight = if (muted) FontWeight.Normal else FontWeight.Medium,
-        modifier = Modifier.clickable(onClick = onClick),
-    )
-}
 
 // ------------------------------------------------------------------ 标题栏
 
@@ -365,6 +182,15 @@ public fun DesktopToolbar(
     onQueryChange: (String) -> Unit,
     onImportFiles: () -> Unit,
     onNewConversation: () -> Unit,
+    /**
+     * 「导入文件」这一颗能不能按（缺陷③）。
+     *
+     * 没有选中会话时它是灰的：onImportFiles 的实现是「把文件发给当前会话」，
+     * 没会话时按下去是静默无效 —— 一个点下去什么都不发生的按钮比一个灰按钮更糟
+     * （同排的「新窗口」早就有正确的 enabled 判据，这一颗漏了）。
+     * 判据由 canImportFiles() 统一给，与系统菜单栏那一项同源。
+     */
+    canImportFiles: Boolean = true,
     canOpenInNewWindow: Boolean,
     // 传 null 表示本设备没有多窗口能力（手机/平板），按钮直接不画：留一个永远灰着的
     // 按钮等于告诉用户「这里有个功能，只是你点不了」。
@@ -442,7 +268,12 @@ public fun DesktopToolbar(
                     )
                 }
                 Spacer(Modifier.weight(1f))
-                ToolbarButton(stringResource(Res.string.desktop_toolbar_import), painterResource(Res.drawable.ic_folder), onImportFiles)
+                ToolbarButton(
+                    stringResource(Res.string.desktop_toolbar_import),
+                    painterResource(Res.drawable.ic_folder),
+                    onImportFiles,
+                    enabled = canImportFiles,
+                )
                 if (onOpenInNewWindow != null) {
                     ToolbarButton(
                         label = stringResource(Res.string.desktop_toolbar_open_new_window),

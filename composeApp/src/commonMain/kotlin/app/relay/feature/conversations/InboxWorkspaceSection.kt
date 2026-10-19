@@ -39,16 +39,13 @@ import app.relay.generated.resources.conv_inbox_ws_badge_no_workspace
 import app.relay.generated.resources.conv_inbox_ws_badge_unknown_kind
 import app.relay.generated.resources.conv_inbox_ws_count_short
 import app.relay.generated.resources.conv_inbox_ws_count_short_agents
-import app.relay.generated.resources.conv_inbox_ws_group_counts
 import app.relay.generated.resources.conv_inbox_ws_group_offline
 import app.relay.generated.resources.conv_inbox_ws_open_chat
 import app.relay.generated.resources.conv_inbox_ws_pending
 import app.relay.generated.resources.conv_inbox_ws_pending_pill
 import app.relay.generated.resources.conv_inbox_ws_row_agent_none
-import app.relay.generated.resources.conv_inbox_ws_row_agent_sessions
 import app.relay.generated.resources.conv_inbox_ws_row_unnamed
 import app.relay.generated.resources.conv_inbox_ws_row_unnamed_hint
-import app.relay.generated.resources.conv_inbox_ws_row_ws_sessions
 import app.relay.generated.resources.conv_inbox_ws_tail_body
 import app.relay.generated.resources.conv_inbox_ws_tail_body_pending
 import app.relay.generated.resources.conv_inbox_ws_tail_title
@@ -211,20 +208,17 @@ internal fun InboxGroupHead(group: WorkspaceUnitGroupUi, now: Long) {
         group.lastSeenAt == 0L -> MaterialTheme.colorScheme.error
         else -> onSurfaceVariant
     }
+    // 计数已按 issue 6 的裁决整体移除（组头不再印「N 个 Agent · M 个工作区」）：
+    // 组头要回答的是"这些是谁的"，数量是段/页层面的事，不该在每一台设备的抬头再数一遍。
+    // 离线时间与"归不到 Agent 的待审批"保留 —— 它们不是数量噪音，而是组头必须替
+    // 那些行说出来的状态（join 不到 Agent 的审批只能写在节点级，父稿 §4.2）。
     val counts = buildString {
-        append(
-            stringResource(
-                Res.string.conv_inbox_ws_group_counts,
-                group.agentCount,
-                group.workspaceCount,
-            ),
-        )
         if (!group.online && group.lastSeenAt > 0L) {
             append(stringResource(Res.string.conv_inbox_ws_group_offline, relativeTime(group.lastSeenAt, now)))
         }
-        // join 不到 Agent 的审批只记到节点级（父稿 §4.2）：宁可写在组头上，也不猜它是谁的。
         if (group.unattributedApprovals > 0) {
-            append(" · " + stringResource(Res.string.conv_inbox_ws_pending, group.unattributedApprovals))
+            if (isNotEmpty()) append(" · ")
+            append(stringResource(Res.string.conv_inbox_ws_pending, group.unattributedApprovals))
         }
     }
     Row(
@@ -319,10 +313,12 @@ internal fun InboxUnitRow(
             ?: stringResource(Res.string.conv_inbox_ws_row_unnamed)
         else -> agentKey
     }
+    // 副行只说"这一行是谁的"，不再数会话（issue 6 用户裁决）：
+    // · 工作区行 → 归属的 Agent 身份键；
+    // · Agent 行（对端从没带过 wsId）→「对端还没宣告过工作区」这句如实的说明。
+    // 会话数曾经把这两句都挤成数字，而真正要紧的那条由卡片下半的「活跃会话」说。
     val subtitle = if (unit.isWorkspace) {
-        stringResource(Res.string.conv_inbox_ws_row_ws_sessions, agentKey, unit.sessionCount)
-    } else if (unit.sessionCount > 0) {
-        stringResource(Res.string.conv_inbox_ws_row_agent_sessions, unit.sessionCount)
+        agentKey
     } else {
         stringResource(Res.string.conv_inbox_ws_row_agent_none)
     }
@@ -367,7 +363,9 @@ internal fun InboxUnitRow(
                     at = active.at,
                 )
             },
-            sessionTotal = unit.sessionCount,
+
+            isHost = unit.isHost,
+            access = unit.access,
         ),
         now = now,
         onClick = { onOpenUnit(unit) },

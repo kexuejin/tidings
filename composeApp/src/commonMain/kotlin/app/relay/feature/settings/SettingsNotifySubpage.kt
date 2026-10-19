@@ -19,10 +19,7 @@ import app.relay.generated.resources.set_more_notif_quiet_sub
 import app.relay.generated.resources.set_more_notif_title
 import app.relay.generated.resources.set_notify_card_title
 import app.relay.generated.resources.set_notify_subtitle
-import app.relay.generated.resources.r2_set_notify_hint
 import app.relay.ui.SectionCard
-import app.relay.ui.theme.LocalAppSpacing
-import androidx.compose.foundation.layout.padding
 import org.jetbrains.compose.resources.stringResource
 
 /**
@@ -95,11 +92,5 @@ fun SettingsNotifySubpage(
                 },
             )
         }
-        // 原型 `screenSetNotify()` 的**页级** `.hint`（`prototype/relay.html:3882-3883`，
-        // 在卡外、`padding:0 4px`）：第一轮只画了卡，这句一直缺。
-        Hint(
-            text = stringResource(Res.string.r2_set_notify_hint),
-            modifier = Modifier.padding(horizontal = LocalAppSpacing.current.xs),
-        )
     }
 }

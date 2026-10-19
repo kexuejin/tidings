@@ -64,12 +64,12 @@ public enum class DesktopWindowSizeClass {
 /**
  * 外壳要不要带桌面 chrome。
  *
- * 桌面和平板复用同一个 [DesktopShell]，但只有桌面有系统级外壳：菜单栏、标题栏、
- * 状态栏，以及（在 desktopApp 里）托盘、拖放导出、独立设置窗口。平板把这些全部拿掉，
+ * 桌面和平板复用同一个 [DesktopShell]，但只有桌面有系统级外壳：标题栏、状态栏，
+ * 以及（在 desktopApp 里）系统菜单栏、托盘、拖放导出、独立设置窗口。平板把这些全部拿掉，
  * 只保留工具栏——它是内容导航（三视图 + 搜索 + 新建），不是桌面 chrome。
  */
 public enum class DesktopChromeMode {
-    /** 桌面：菜单栏 + 标题栏 + 工具栏 + 状态栏。 */
+    /** 桌面：标题栏 + 工具栏 + 状态栏（菜单栏由系统/窗口提供，不占客户区高度）。 */
     Desktop,
 
     /** 平板：只有工具栏，其余 chrome 全部不渲染。 */
@@ -85,14 +85,23 @@ public fun desktopChromeModeFor(isDesktop: Boolean): DesktopChromeMode =
 
 /** 桌面 chrome 高度，逐条对齐原型 CSS 变量，不是随手取的数。 */
 public object DesktopMetrics {
-    const val MENUBAR_PX = 26
     const val TITLEBAR_PX = 40
     const val TOOLBAR_PX = 46
     const val STATUSBAR_PX = 26
     const val SIDEBAR_PX = 300
 
-    /** 26 + 40 + 46 + 26 = 138。这条不是随手加的，是设计稿里明确要求纳入预算的。 */
-    const val CHROME_PX = MENUBAR_PX + TITLEBAR_PX + TOOLBAR_PX + STATUSBAR_PX
+    /**
+     * 40 + 46 + 26 = 112。
+     *
+     * 原值 138 里还含一条 26px 的**窗口内自绘菜单栏**；那条按用户裁决整条删掉
+     * 改由系统菜单栏承载（Compose 的 `MenuBar`：macOS 进屏幕顶部、Win/Linux 进窗口菜单）。
+     * 系统菜单栏在窗口客户区**之外**，所以它不该再从这个预算里扣。
+     *
+     * 原型自己也是这么写的：`prototype/relay.html` 的 `.menubar` 注释逐字
+     * 「macOS 系统菜单栏（mac 上由系统提供；Win/Linux 上同一份 Compose 菜单落在 .titlebar）」
+     * —— 那 26px 本来就是**示意**系统菜单栏，代码把它当成了窗口内的一行。
+     */
+    const val CHROME_PX = TITLEBAR_PX + TOOLBAR_PX + STATUSBAR_PX
 
     const val MEDIUM_RAIL_PX = 64
     const val COMPACT_NAV_PX = 60
@@ -129,8 +138,8 @@ public object DesktopMetrics {
     const val SETTINGS_WINDOW_HEIGHT_PX = 560
 
     /**
-     * 平板只留工具栏，所以可用高度要按 46 扣而不是 138。
-     * 不按 chromeMode 扣会让 800×1280 的平板凭空少 92dp，竖向判定跟着漂。
+     * 平板只留工具栏，所以可用高度要按 46 扣而不是 112。
+     * 不按 chromeMode 扣会让 800×1280 的平板凭空少 66dp，竖向判定跟着漂。
      */
     const val TABLET_CHROME_PX = TOOLBAR_PX
 

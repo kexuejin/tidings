@@ -4,7 +4,11 @@ package app.relay.app
 
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Modifier
+import app.relay.core.fs.deleteFile
+import app.relay.core.fs.makeDirectories
+import app.relay.core.fs.openRandomAccess
 import app.relay.core.fs.pathJoin
+import app.relay.core.fs.use
 import app.relay.core.ioDispatcher
 import app.relay.core.nowMillis
 import app.relay.core.protocol.ConvId
@@ -20,11 +24,15 @@ import app.relay.core.transport.DedupStore
 import app.relay.core.transport.LocalFile
 import app.relay.core.transport.ManualPeer
 import app.relay.core.transport.PartFile
+import app.relay.core.crypto.TlsPin
+import app.relay.core.transport.PeerEndpoint
+import app.relay.core.transport.SYNTHETIC_NICK_PREFIX
 import app.relay.core.transport.PeerEvent
 import app.relay.core.transport.PeerRecord
 import app.relay.core.transport.SendOutcome
 import app.relay.core.transport.TransferEvent
 import app.relay.core.transport.dedupLogPath
+import app.relay.core.transport.linkDiagnosticsJson
 import app.relay.platform.AppPlatform
 import app.relay.platform.CameraUnavailableException
 import app.relay.platform.NetworkSnapshot
@@ -35,6 +43,7 @@ import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.isActive
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.update
@@ -58,6 +67,63 @@ import app.relay.app.model.NodePhase
 import app.relay.app.model.PeerUi
 
 const val APP_VERSION: String = "relay-0.1.0"
+
+/**
+ * 一条**外部来源**配对载荷的只读预览（task-54）。
+ *
+ * 字段就是确认框要如实说出来的事实：
+ * - [nodeId] / [nick]：这条内容会让本机与**谁**配对（解析得出才有值）；
+ * - [hasPin]：载荷里**真的**带了一枚 TLS pin 吗 —— 只有 true 时确认框才允许说
+ *   「并固定它的密钥」。带不带是两件事，文案不许比事实更确定；
+ * - [address]：这条内容指向的地址（`host:port` 或中继 url）—— 载荷里没有昵称/ID 时，
+ *   确认框至少能说出「要与哪一条地址配对」，而不是一句含糊的"某个节点"；
+ * - [kind]：`lan-peer` / `remote-relay`；null = 解析不出（确认框如实说解析不出）。
+ */
+data class ExternalPairingPreview(
+    val nodeId: String?,
+    val nick: String?,
+    val address: String?,
+    val hasPin: Boolean,
+    val kind: String?,
+)
+
+/**
+ * 只读解析：把一条外部配对载荷翻译成确认框要展示的事实。
+ *
+ * ## 硬纪律：只读、无副作用、**不得落盘**
+ *
+ * 它只调 [parseQr]（纯函数），**不建节点、不写候选池、不存 pin、不改设置**。
+ * 唯一有副作用的那条路是 [RelayController.handleQrCodeAsync]（新增/改写手动节点、写候选池、
+ * 落对端 pin），只有用户在确认框上点「允许」之后才允许走它。
+ *
+ * 抽成顶层纯函数（而不是只做控制器方法）是为了能被单测直接钉住 —— 外部来源的信任建立
+ * 是安全边界，判据要有一处可测的实现。
+ */
+// public 而不是 internal：宿主 `androidApp` 的单测（另一个 Gradle 模块）要直接钉它 ——
+// 外部来源的信任建立是安全边界，判据必须有一处**跨模块可测**的实现。
+public fun parseExternalPairingPreview(
+    raw: String,
+    myAddresses: List<String>,
+): ExternalPairingPreview? = when (val parsed = parseQr(raw, myAddresses = myAddresses)) {
+    is ParsedQr.LanPeer -> ExternalPairingPreview(
+        nodeId = parsed.nodeId,
+        nick = parsed.nick,
+        address = parsed.host + ":" + parsed.port,
+        hasPin = !parsed.tlsPin.isNullOrBlank(),
+        kind = "lan-peer",
+    )
+
+    is ParsedQr.RemoteRelay -> ExternalPairingPreview(
+        nodeId = parsed.nodeId,
+        nick = parsed.nick,
+        address = parsed.url,
+        // 中继载荷不带对端 pin：这里**必须**是 false，否则确认框会凭空承诺固定密钥。
+        hasPin = false,
+        kind = "remote-relay",
+    )
+
+    null -> null
+}
 
 /**
  * 把 [NodeRuntime] 接到 Compose 上的唯一状态持有者与门面协调器（Facade Coordinator）。
@@ -96,7 +162,11 @@ class RelayController(
         // 首次运行的默认设备名按**宿主**给（2026-10-14 修真机撞名）：桌面端与手机是同一份
         // 模型的两个宿主，默认名不同。`advertiseAgent` 就是区分它们的那个标志（见它的 KDoc）。
         RelayUiState(
-            settings = (store.load() ?: RelaySettings.firstRun()).let { loaded ->
+            settings = (store.load() ?: RelaySettings.firstRun()).let { raw ->
+                // 一次性迁移（真机反馈 #2）：老库没有 persistMessagesDecided 这一位，
+                // 而旧文件里"从没设过"与"显式关掉"是同一串字节 —— 按"从没设过"补成开启。
+                // 只认这一位，所以跑过一次就再也不会重来（详见 migrateRelaySettings 的 KDoc）。
+                val loaded = migrateRelaySettings(raw)
                 // 两个宿主各自的默认名在这里补齐（2026-10-14 修真机撞名）。
                 //
                 // 为什么不能只在 `firstRun()` 里给：**已经建过 settings.json 的老库**不会走
@@ -109,19 +179,35 @@ class RelayController(
                 // 的文案，属于平台层；写在这份共享代码里就只能所有宿主共用一个词，
                 // 而那正是这次撞名的来源。
                 val fallback = platform.deviceDefaultNick.ifBlank { platform.deviceInfo.hostName() }
-                if (loaded.nick.isBlank()) loaded.copy(nick = fallback).also(store::save) else loaded
+                val next = if (platform.isDefaultNick(loaded.nick)) loaded.copy(nick = fallback) else loaded
+                // 迁移与补默认名都必须落盘：不写的话下次启动读到还是同一份老文件，
+                // "一次性"就变成每次启动都重来一遍。
+                if (next != raw) store.save(next)
+                next
             },
         ),
     )
     val state: StateFlow<RelayUiState> = _state.asStateFlow()
 
     val dataDirectory: String = platform.dataDirectory.dataDirectory()
+
+    /**
+     * 手机侧长连接诊断文件的路径（task-34）：`<dataDir>/diag/link.json`。
+     *
+     * 为什么需要它：**拨号发生在手机**，而 `/v1/peers` 是宿主侧的控制面 —— 手机为什么没拨、
+     * 拨了为什么连不上，在宿主那边永远看不到（宿主只会显示 skipReason=peer-has-no-lnk1，
+     * 因为按设计只有宿主声明 lnk1）。这个文件只读、只在本机应用私有目录、不含任何凭据，
+     * 供 `adb shell run-as app.relay cat files/relay/diag/link.json` 读取。
+     */
+    val linkDiagnosticsPath: String get() = pathJoin(dataDirectory, "diag", "link.json")
     val cacheDirectory: String = platform.dataDirectory.cacheDirectory()
 
     fun activeRuntime(): NodeRuntime? = runtime
 
     internal var runtime: NodeRuntime? = null
     internal var jobs = mutableListOf<Job>()
+    var onLocalSessionPageRequest: ((peerId: String, wsId: String, offset: Long, limit: Long?) -> Boolean)? = null
+    var onAgentPrompt: (suspend (convId: String, senderPeerId: String, prompt: String, replyToId: String?) -> Unit)? = null
 
     /**
      * 控制器持有的可变会话表。搬出本类是为了让「这张表归谁」写在类型上，
@@ -148,7 +234,7 @@ class RelayController(
 
     // ---- 横切操作（实现在 RelayControllerOps.kt，被 Groups / Transfers / Cidr / Cabinet 共用）----
     internal fun persist(settings: RelaySettings) = handlePersist(settings)
-    internal fun appendMessage(message: MessageUi, incoming: Boolean = false) = handleAppendMessage(message, incoming)
+    fun appendMessage(message: MessageUi, incoming: Boolean = false) = handleAppendMessage(message, incoming)
     internal fun replaceMessage(peerId: String, message: MessageUi) = handleReplaceMessage(peerId, message)
     internal fun persistThreads() = handlePersistThreads()
 
@@ -172,6 +258,16 @@ class RelayController(
     internal var lastRemoteSeq: Long = 0L
     internal var localSeq: Int = 0
 
+    /**
+     * 中继是不是**真的活着**（[RemoteRelayClient.checkHealth] 的结果）。
+     *
+     * 为什么必须有它：原来 [refreshPeers] 只要配置了中继就无条件塞一条 online = true
+     * 的 PeerUi，而唯一的判活函数 checkHealth() 全仓无人调用 —— 中继挂了界面上照样
+     * 显示「在线」，用户以为消息能到。真机验证（2026-10-18）把这条记成「假在线」。
+     * 写入方是中继轮询协程，读取方是 [refreshPeers]，所以与 [lastRemoteSeq] 同款裸 var。
+     */
+    internal var remoteRelayHealthy: Boolean = false
+
     // ------------------------------------------------------------------ 委托动作：设置
     fun updatePersistMessages(enabled: Boolean) = settingsCtl.handleUpdatePersistMessages(enabled)
     fun updateThemeMode(wire: String) = settingsCtl.handleUpdateThemeMode(wire)
@@ -180,6 +276,17 @@ class RelayController(
     fun updateNotifyAgentMessages(enabled: Boolean) = settingsCtl.handleUpdateNotifyAgentMessages(enabled)
     fun updateNotifyMentionOnly(enabled: Boolean) = settingsCtl.handleUpdateNotifyMentionOnly(enabled)
     fun updateNotifyQuietHours(enabled: Boolean) = settingsCtl.handleUpdateNotifyQuietHours(enabled)
+    fun updateKeepConnectionAlive(enabled: Boolean) = settingsCtl.handleUpdateKeepConnectionAlive(enabled)
+
+    /**
+     * 本平台有没有「后台保持连接」这条能力（设置页据此决定画不画那个开关）。
+     *
+     * 桌面端与 iOS 的进程模型不需要它 → false，设置页不画 —— 与"能力不存在就不画入口"
+     * 同一条规矩（一个按下去没反应的开关比没有更糟）。
+     */
+    val backgroundConnectionSupported: Boolean
+        get() = platform.backgroundConnection?.isSupported == true
+
     fun saveProfile(nick: String, company: String, dept: String, team: String, avatar: Int) =
         settingsCtl.handleSaveProfile(nick, company, dept, team, avatar)
 
@@ -230,7 +337,7 @@ class RelayController(
     }
     override fun recall(message: MessageUi) = messagesCtl.handleRecall(message)
     override fun nudge(peerId: String) = messagesCtl.handleNudge(peerId)
-    fun clearMessages(peerId: String) = messagesCtl.handleClearMessages(peerId)
+    override fun clearMessages(convId: String) = messagesCtl.handleClearMessages(convId)
     fun clearAllMessages() = messagesCtl.handleClearAllMessages()
     override fun searchHistoricalMessages(query: String, limit: Long): List<MessageSearchResult> =
         messageStore.search(query, limit)
@@ -244,7 +351,7 @@ class RelayController(
     internal fun onInbound(envelope: Envelope) = messagesCtl.handleOnInbound(envelope)
 
     // ------------------------------------------------------------------ 委托动作：群组
-    override fun createGroup(name: String, memberIds: List<String>): String? = groupsCtl.handleCreateGroup(name, memberIds)
+    override fun createGroup(name: String, memberIds: List<String>, description: String): String? = groupsCtl.handleCreateGroup(name, memberIds, description)
     override fun addGroupMembers(groupId: String, newMemberIds: List<String>) = groupsCtl.handleAddGroupMembers(groupId, newMemberIds)
     override fun removeGroupMember(groupId: String, memberId: String) = groupsCtl.handleRemoveGroupMember(groupId, memberId)
     override fun leaveGroup(groupId: String) = groupsCtl.handleLeaveGroup(groupId)
@@ -257,7 +364,7 @@ class RelayController(
      * 所以这个名字指的是调用点在做的事（用户点了某条会话），不是这个方法做的全部事。
      * 别把它当"标为已读"的通用入口用：批量标已读是 [markAllRead]。
      */
-    fun selectConversation(convId: String) {
+    override fun selectConversation(convId: String) {
         stateLock.withLock { core.unread[convId] = 0 }
         publish()
     }
@@ -278,6 +385,10 @@ class RelayController(
 
     override fun setVisibleConversation(convId: String?) {
         core.visibleConversationId = convId
+        if (convId != null && (core.unread[convId] ?: 0) > 0) {
+            stateLock.withLock { core.unread[convId] = 0 }
+            publish()
+        }
     }
 
     // ------------------------------------------------------------------ 委托动作：文件传输
@@ -398,7 +509,9 @@ class RelayController(
         peerId: String,
         agentKey: String? = null,
         reason: String? = null,
-    ): SendOutcome? = agentCtl.handleSendGrantRequest(peerId, agentKey, reason)
+        wsId: String? = null,
+        access: String? = null,
+    ): SendOutcome? = agentCtl.handleSendGrantRequest(peerId, agentKey, reason, wsId, access)
 
     /**
      * 向宿主要一页该工作区的历史会话（PPE-1 增补 D8）。
@@ -407,7 +520,18 @@ class RelayController(
      * `limit` 交给宿主自定（它才知道一帧装得下几条）。返回 false = 没发出去
      * （对端不声明 `agp1`、或节点没起来）—— 调用方据此决定画不画「加载更多」。
      */
-    suspend fun requestAgentSessionPage(
+    override fun requestAgentSessionPage(
+        peerId: String,
+        wsId: String,
+        offset: Long,
+        limit: Long?,
+    ) {
+        scope.launch {
+            agentCtl.handleRequestSessionPage(peerId, wsId, offset, limit)
+        }
+    }
+
+    suspend fun fetchAgentSessionPage(
         peerId: String,
         wsId: String,
         offset: Long,
@@ -420,6 +544,50 @@ class RelayController(
         agentCtl.handleRespondApproval(approvalId, allow, allowSession)
     override fun cancelAgentTask(taskId: String) = agentCtl.handleCancelAgentTask(taskId)
 
+    fun recordLocalWorkspace(
+        wsId: String,
+        wsTitle: String?,
+        wsPath: String?,
+        agentKey: String?,
+        agentKind: String?,
+        online: Boolean? = null,
+        sessionCount: Long? = null,
+        order: Long? = null,
+        at: Long = app.relay.core.nowMillis(),
+    ) = agentCtl.handleRecordLocalWorkspace(wsId, wsTitle, wsPath, agentKey, agentKind, online, sessionCount, order, at)
+
+    fun recordLocalSession(
+        sessionId: String,
+        alias: String? = null,
+        agentKind: String? = null,
+        state: String? = null,
+        title: String? = null,
+        startedAt: Long? = null,
+        agentId: String? = null,
+        wsId: String? = null,
+        wsTitle: String? = null,
+        wsPath: String? = null,
+        updatedAt: Long? = null,
+    ) = agentCtl.handleRecordLocalSession(
+        sessionId, alias, agentKind, state, title, startedAt,
+        agentId, wsId, wsTitle, wsPath, updatedAt,
+    )
+
+    fun recordLocalEvent(
+        nodeId: String,
+        sessionId: String,
+        cursor: Long,
+        eventType: String,
+        summary: String? = null,
+        body: String? = null,
+        ref: String? = null,
+        at: Long = app.relay.core.nowMillis(),
+    ) = agentCtl.handleRecordLocalEvent(nodeId, sessionId, cursor, eventType, summary, body, ref, at)
+
+    fun isWorkspaceGroup(groupId: String): Boolean = groupsCtl.isWorkspaceGroup(groupId)
+
+    fun workspaceOfGroup(groupId: String): app.relay.app.model.WorkspaceUi? = groupsCtl.workspaceOfGroup(groupId)
+
     // ------------------------------------------------------------------ 生命周期
     fun start() {
         if (runtime != null) {
@@ -429,9 +597,17 @@ class RelayController(
         if (_state.value.network.phase == NodePhase.Starting) return
         val restored = messagesCtl.handleRestoreMessages()
         agentCtl.handleRestoreAgentData()
+        groupsCtl.handleSyncWorkspaceGroups()
         val settings = _state.value.settings
         for (group in settings.groups) core.groupNeeds.noteKnown(group.groupId, group.rev)
         _state.update { it.copy(network = it.network.copy(phase = NodePhase.Starting, failure = null)) }
+
+        // 「后台保持连接」在每次节点启动时按设置**重新对齐**一次：
+        // 这是"应用启动后重新把保活拉起来"的唯一入口（进程被杀过、服务跟着没了，
+        // 下一次启动必须自己回来）。关掉时 setEnabled(false) 只是 stopService，
+        // 不会把没在跑的服务拉起来（见 ConnectionKeepAliveGate.stop 的注释）。
+        // 这里只在真的启动了节点的那条路上执行 —— start() 提前 return 的两支不碰它。
+        scope.launch { platform.backgroundConnection?.setEnabled(settings.keepConnectionAlive) }
 
         val isShareSupported = platform.screenSharing?.isShareSupported() == true
         val profile = settings.toProfile(
@@ -448,16 +624,32 @@ class RelayController(
             manualPeers = settings.manualPeers.map { ManualPeer(it.host, it.port) },
             tcpPort = settings.tcpPort,
             downloadDir = { pathJoin(dataDirectory, "downloads") },
+            // K2：自签身份的落盘目录 + 本机当前地址（进证书 SAN）。
+            linkIdentityDir = { pathJoin(dataDirectory, "link-identity") },
+            localAddresses = { _state.value.network.localAddresses },
             // 三个存储契约都用落盘实现：离线待发队列与会话历史跨重启，
             // 去重表本来就落盘（见 dedupStore）。内存版只留给测试与预览。
             queueStore = persist.queue,
             dedupStore = dedupStore,
             messageStore = persist.messages,
+            // 配对码里那一池候选地址（按 nodeId 存）：换网之后发送/心跳的兜底。
+            peerEndpointStore = persist.peerEndpoints,
+            // 配对码里那枚 tlsPin：K2 公网长连接的信任根（没它就不建公网连接）。
+            peerPinStore = persist.peerPins,
+            // 「已知对端」名录（task-80 ①）：重启后**身份**还在（以离线态），
+            // 否则节点表里那台 Mac 只剩 node-a1b2c3d4 这种合成名（真机缺陷）。
+            knownPeerStore = persist.knownPeers,
             timings = timings,
             onOpenScreen = { socket, open, remoteAddress, read, write ->
                 screenCtl.handleOnIncomingScreenSocket(socket, open, remoteAddress, read, write)
             },
         )
+        // K1：长连接**恒开**（不再是用户设置）。见 RelaySettings.linkDownlink 的 KDoc：
+        // 关掉它不是"回滚到可用状态"，而是"不拨号" —— 移动网 / NAT 下就是永远连不上。
+        // 长连接**不再是用户开关**（见 RelaySettings.linkDownlink 的 KDoc）：
+        // 关掉它等于"只等对端连入"，在移动网 / NAT 下就是"永远连不上"。
+        // 安全边界在 LinkClient.linkTargets（公网必须 TLS + pin），与这里无关。
+        rt.linkEnabled = true
 
         scope.launch {
             try {
@@ -484,12 +676,22 @@ class RelayController(
                         localAddresses = snapshot.localAddresses,
                         vpnActive = snapshot.vpnActive,
                         boundUdpPort = rt.boundPort,
+                        // 印码要用（task-86）：主机必须把本机 pin 交给手机，否则公网目标建不出来。
+                        selfTlsPin = rt.localTlsPin(),
                         failure = null,
                     ),
                     restarting = false,
                 )
             }
             observe(rt)
+            // 手机侧诊断出口（task-34）：每 5 秒把同一批 link* 字段落成 JSON 文件。
+            // 只读、本机、无凭据；不监听端口、不进协议（约束：不要开放到局域网）。
+            jobs += scope.launch {
+                while (isActive) {
+                    writeLinkDiagnostics()
+                    delay(5_000)
+                }
+            }
             restored.join()
             // 屏幕协助历史卡：先做启动卫生（把上次没走完的会话标成 interrupted），
             // 再开始订阅相位变化。顺序不能反 —— 反了的话，卫生那一步写进去的
@@ -578,6 +780,30 @@ class RelayController(
         }
     }
 
+    /**
+     * 把长连接诊断写成本机 JSON（task-34）。任何异常都吞掉 —— 诊断绝不能影响连接本身。
+     */
+    private fun writeLinkDiagnostics() {
+        val rt = runtime ?: return
+        runCatching {
+            val text = linkDiagnosticsJson(
+                selfNodeId = rt.nodeId,
+                linkEnabled = rt.linkEnabled,
+                snapshot = rt.linkSnapshot(),
+                peers = rt.peerList(),
+                now = nowMillis(),
+            )
+            val directory = pathJoin(dataDirectory, "diag")
+            makeDirectories(directory)
+            // 整份重写：先删再建（append 句柄 + unlink 的坑见 FileStores.rewriteLog 的 KDoc）。
+            deleteFile(linkDiagnosticsPath)
+            openRandomAccess(linkDiagnosticsPath, forWrite = true).use { file ->
+                val bytes = text.encodeToByteArray()
+                file.append(bytes, bytes.size)
+            }
+        }
+    }
+
     private fun onNetworkChanged(snapshot: NetworkSnapshot) {
         _state.update {
             it.copy(
@@ -589,6 +815,9 @@ class RelayController(
             )
         }
         val rt = runtime ?: return
+        // K3 ①：网络一变就**立刻**重拨长连接（清掉 1s→60s 的退避）+ 排空一次离线队列；
+        // UDP 那条重播照旧。两件事都必须做：前者铺路、后者把积压的消息真的送出去。
+        rt.requestLinkReconnectNow()
         scope.launch { runCatching { rt.announce() } }
     }
 
@@ -750,10 +979,73 @@ class RelayController(
         return handleQrCode(content)
     }
 
-    private suspend fun handleQrCode(raw: String): Boolean {
-        when (val parsed = parseQr(raw)) {
+    fun handleQrCodeAsync(raw: String) {
+        scope.launch {
+            handleQrCode(raw)
+        }
+    }
+
+    /**
+     * 确认框用的只读预览（task-54）：见顶层 [parseExternalPairingPreview] 的纪律。
+     *
+     * 这里只多给一样东西 —— 本机当前地址表（多候选码要按它决定先打哪个候选）。
+     * 除此之外与那个纯函数逐字同源，**没有任何副作用**。
+     */
+    fun previewExternalPairing(raw: String): ExternalPairingPreview? =
+        parseExternalPairingPreview(raw, _state.value.network.localAddresses)
+
+    internal suspend fun handleQrCode(raw: String): Boolean {
+        // 本机地址表只用来决定"多候选码里先打哪个"（同网段优先 lan、跨网选 public_v6）；
+        // 单地址码与手填那条路不看它。
+        when (val parsed = parseQr(raw, myAddresses = _state.value.network.localAddresses)) {
             is ParsedQr.LanPeer -> {
-                addManualPeer(parsed.host, parsed.port.toString())
+                val peerName = parsed.nick ?: parsed.nodeId?.let { SYNTHETIC_NICK_PREFIX + it.take(8) }
+                // 同一个 nodeId 重新配对：**更新它那一条的地址**，而不是新增一行 / 只报
+                // 「已经在列表里」。nodeId 才是身份 —— peerId、群成员、会话与消息都挂在它
+                // 上面；manualPeers 只是「这个身份上次是从哪个地址找到的」的通讯录，
+                // 地址变了（比如从局域网 IPv6 换成公网 IPv6）就该原地改。
+                val known = parsed.nodeId?.let { id ->
+                    runtime?.peerList()?.firstOrNull { it.profile.nodeId == id }
+                }
+                val rewritten = known?.let { record ->
+                    manualPeersWithUpdatedAddress(
+                        entries = _state.value.settings.manualPeers,
+                        oldHost = record.ip,
+                        oldPort = record.udpPort,
+                        newHost = parsed.host,
+                        newPort = parsed.port,
+                    )
+                }
+                if (rewritten == null) {
+                    addNamedManualPeer(parsed.host, parsed.port.toString(), peerName)
+                } else if (rewritten != _state.value.settings.manualPeers) {
+                    handlePersist(_state.value.settings.copy(manualPeers = rewritten))
+                }
+                // 候选池 + TLS pin 存进 core（都按 nodeId）：换网之后发送/心跳按序兜底，
+                // 公网长连接则靠这枚 pin 做证书固定（K2）。
+                parsed.nodeId?.let { nodeId ->
+                    runtime?.setPeerEndpoints(nodeId, parsed.candidates.map { PeerEndpoint(it.host, it.port) })
+                    // 只存**能解析**的 pin：乱格式直接丢弃（少一枚安全声明，不让配对失败）。
+                    val parsedPin = TlsPin.parse(parsed.tlsPin)?.wire
+                    parsedPin?.let { pin -> runtime?.setPeerPin(nodeId, pin) }
+                    // task-86（真机）：给这个 nodeId 一条**可拨的最小档案**。
+                    // 二维码是主机→手机单向的 ⇒ 手机只知道地址与 pin；而长连接的拨号目标
+                    // 要求「有 profile 且声明 lnk1」⇒ 不补这一条，手机 linkTargets 恒为空、
+                    // 一个目标都拨不出去（真机 `linkEnabled=true` 但 `linkTotal=0`），
+                    // 而主机因 peer-has-no-lnk1 也不拨 ⇒ 双方都不拨、永远「没有回应」。
+                    runtime?.rememberPairedPeer(
+                        nodeId = nodeId,
+                        nick = parsed.nick,
+                        host = parsed.host,
+                        udpPort = parsed.port,
+                        tlsPin = parsedPin,
+                    )
+                }
+                for (candidate in parsed.candidates) {
+                    if (candidate.host != parsed.host || candidate.port != parsed.port) {
+                        runtime?.let { rt -> scope.launch { runCatching { rt.announceTo(candidate.host, candidate.port) } } }
+                    }
+                }
                 return true
             }
             is ParsedQr.RemoteRelay -> {
@@ -792,6 +1084,22 @@ class RelayController(
 
     internal fun showNotification(title: String, body: String, focusPeerId: String? = null) {
         platform.pushNotificationHandler.showNotification(title, body, focusPeerId)
+    }
+
+    /**
+     * K1 长连接开关（设置页「数据与存储」）。
+     *
+     * 关掉 = 立即断开现有连接、回到今天的 UDP+TCP+队列 —— 这就是回滚开关，不需要重启。
+     */
+    /**
+     * **已废弃**：长连接不再是用户设置（见 [app.relay.app.RelaySettings.linkDownlink] 的 KDoc）。
+     *
+     * 保留空实现只为二进制兼容（旧界面/测试若还调它，也不该让应用崩）。新代码不要调它 ——
+     * `NodeRuntime.linkEnabled` 恒为 true。
+     */
+    @Deprecated("Link is always enabled; this toggle is not user-facing")
+    fun updateLinkDownlink(enabled: Boolean) {
+        runtime?.linkEnabled = true
     }
 
     override fun addManualPeer(rawHost: String, rawPort: String) =
@@ -872,25 +1180,14 @@ class RelayController(
         _state.update { it.copy(focusRequest = null) }
     }
 
-    internal fun refreshPeers() {
+    override fun refreshPeers() {
         val rt = runtime
         val records: List<PeerRecord> = rt?.peerList() ?: emptyList()
         val peers = records.map { it.toUi() }.toMutableList()
-        val remoteConfig = _state.value.settings.remoteRelay
-        if (remoteConfig != null && remoteConfig.enabled && remoteConfig.nodeId != null) {
-            val exists = peers.any { it.nodeId == remoteConfig.nodeId }
-            if (!exists) {
-                peers.add(
-                    PeerUi(
-                        nodeId = remoteConfig.nodeId,
-                        nick = remoteConfig.nick ?: "Remote Tidings",
-                        host = remoteConfig.url,
-                        ip = remoteConfig.url,
-                        online = true,
-                        caps = listOf(MsgTypes.CAP_AGENT),
-                    ),
-                )
-            }
+        // 中继节点：**在线与否取健康检查的结果**，不是"配置了就在线"（见 remoteRelayHealthy）。
+        // 判据抽成纯函数 remoteRelayPeer 是为了能被单测钉住。
+        remoteRelayPeer(_state.value.settings.remoteRelay, remoteRelayHealthy)?.let { relayPeer ->
+            if (peers.none { it.nodeId == relayPeer.nodeId }) peers.add(relayPeer)
         }
         // 本机备注在这一层贴上去，而不是让 `PeerRecord.toUi()` 去读设置：
         // 备注的权威源是 `RelaySettings.peerRemarks`，节点记录里根本没有这个字段
@@ -928,7 +1225,7 @@ class RelayController(
     internal fun warn(message: BannerMessage) = _state.update { it.copy(banner = BannerUi(message, BannerTone.Warn)) }
     internal fun info(message: BannerMessage) = _state.update { it.copy(banner = BannerUi(message, BannerTone.Info)) }
 
-    internal fun localMessageId(): String {
+    fun localMessageId(): String {
         localSeq++
         return "local-$localSeq-${nowMillis()}"
     }
@@ -955,6 +1252,25 @@ class RelayController(
             return (payload["groupId"] as? JsonPrimitive)?.takeIf { it.isString }?.content
         }
 
+        /**
+         * 群消息**真正的说话者**（可选键 `senderId`）；没有就返回 null，调用方退回 [Envelope.from]。
+         *
+         * 为什么需要：`from` 永远是**发送这台设备**，而设备可能在代别人说话 —— DSH 的 agent
+         * 事件由桌面端转发到群里。不读这个键，手机端就会把 agent 说的话显示成「桌面端发的」，
+         * 而桌面端自己按 `agent:<kind>` 落库 ⇒ 同一个群两端发送者不一致（真机缺陷）。
+         *
+         * 宽松解析：非字符串/空串一律当没带（旧端与坏帧都不该让发送者变成空）。
+         */
+        internal fun groupSenderIdOf(envelope: Envelope): String? {
+            if (!isGroupText(envelope)) return null
+            val payload = envelope.payload as? JsonObject ?: return null
+            return (payload["senderId"] as? JsonPrimitive)
+                ?.takeIf { it.isString }
+                ?.content
+                ?.trim()
+                ?.ifBlank { null }
+        }
+
         internal fun replyToOf(envelope: Envelope): String? {
             if (!isGroupText(envelope)) return null
             val payload = envelope.payload as? JsonObject ?: return null
@@ -972,6 +1288,23 @@ class RelayController(
         }
 
         internal const val MENTION_ALL: String = "@all"
+        private val DSH_MENTION_REGEX = Regex("(?i)@DSH\\b")
+
+        fun isMentioningDsh(text: String): Boolean =
+            text.contains(DSH_MENTION_REGEX)
+
+        /**
+         * 去掉 @dsh mention，**其余文本原样保留**，并归一化空白。
+         *
+         * 归一化只收**空格与制表符**（不收换行）：删掉 mention 会在原位置留下双空格
+         * （"Hey @dsh what…" 变成 "Hey  what…"），那是这个函数该收拾的，不该由调用方或测试替它擦。
+         * 也**不**剥 mention 之外的前缀 —— "Hey" 可能是用户有意写的。
+         */
+        fun extractDshPrompt(text: String): String =
+            text.replace(DSH_MENTION_REGEX, "")
+                .replace(Regex("[ \t]+"), " ")
+                .trim()
+                .ifBlank { text }
 
         internal fun isGroupText(envelope: Envelope): Boolean =
             envelope.type == MsgTypes.MSG && msgKindOf(envelope) == MsgKinds.GROUP_TEXT
@@ -1037,3 +1370,47 @@ private fun PeerRecord.toUi(): PeerUi = PeerUi(
 )
 
 internal fun Throwable.messageOrNull(): String? = message?.takeIf { it.isNotBlank() }
+
+/**
+ * 中继节点该长什么样 —— 抽成纯函数，好让「在线与否」这条判据被单测钉住。
+ *
+ * online 取**健康检查的结果**，不是「配置了就在线」：中继是另一台机器上的服务，它挂了
+ * 的时候这里必须如实说离线（真机反馈的「假在线」）。没配 / 没 nodeId ⇒ null（不注入）。
+ */
+internal fun remoteRelayPeer(config: RemoteRelayConfig?, healthy: Boolean): PeerUi? {
+    if (config == null || !config.enabled) return null
+    val nodeId = config.nodeId ?: return null
+    return PeerUi(
+        nodeId = nodeId,
+        nick = config.nick ?: "Remote Tidings",
+        host = config.url,
+        ip = config.url,
+        online = healthy,
+        caps = listOf(MsgTypes.CAP_AGENT),
+    )
+}
+/**
+ * 重新配对同一个 nodeId 时，把它在通讯录里的**那一条地址**原地改掉。
+ *
+ * 为什么不新增一条：nodeId 才是身份，[ManualPeerEntry] 只是「这个身份上次是从哪个地址
+ * 找到的」。地址变了就更新那一行，否则同一个设备会在节点列表里留下 `192.168.x.x:17878`、
+ * `[2408:...]:17878` 两行 —— 而群成员表、会话、消息都只认 nodeId 一份，用户却以为有两台机器。
+ *
+ * @param oldHost/oldPort 这个身份**当前**被采纳的地址（来自 registry，不是通讯录自己猜的）。
+ * @return 改过之后的新列表；没有与 (oldHost, oldPort) 对应的条目时返回 null（调用方走新增）。
+ *   地址本来就一致时返回**原列表**（调用方据此跳过落盘）。
+ */
+internal fun manualPeersWithUpdatedAddress(
+    entries: List<ManualPeerEntry>,
+    oldHost: String,
+    oldPort: Int,
+    newHost: String,
+    newPort: Int,
+): List<ManualPeerEntry>? {
+    val index = entries.indexOfFirst { it.host == oldHost && it.port == oldPort }
+    if (index < 0) return null
+    if (oldHost == newHost && oldPort == newPort) return entries
+    val updated = entries.toMutableList()
+    updated[index] = updated[index].copy(host = newHost, port = newPort)
+    return updated
+}

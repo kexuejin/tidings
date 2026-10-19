@@ -10,7 +10,6 @@ import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.ExperimentalLayoutApi
-import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxHeight
@@ -22,7 +21,6 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
-import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
@@ -44,7 +42,6 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.em
 import app.relay.core.protocol.DEFAULT_TIMINGS
-import app.relay.feature.settings.TagPill
 import app.relay.generated.resources.Res
 import app.relay.generated.resources.ic_bell
 import app.relay.generated.resources.ic_clock_pending
@@ -60,6 +57,7 @@ import app.relay.generated.resources.desk_autostart_error_title
 import app.relay.generated.resources.desk_nav_appearance
 import app.relay.generated.resources.desk_nav_capabilities
 import app.relay.generated.resources.desk_nav_connection
+import app.relay.generated.resources.desk_nav_trusted_devices
 import app.relay.generated.resources.desk_nav_data
 import app.relay.generated.resources.desk_nav_desktop
 import app.relay.generated.resources.desk_nav_desktop_only
@@ -81,10 +79,6 @@ import app.relay.generated.resources.desk_prefs_power_title
 import app.relay.generated.resources.desk_retry
 import app.relay.generated.resources.desk_settings_title
 import app.relay.generated.resources.desk_switch_unavailable
-import app.relay.generated.resources.r2_set_desk_tray_hint_lead
-import app.relay.generated.resources.r2_set_desk_tray_hint_tail
-import app.relay.generated.resources.r2_set_desk_tray_tag_file
-import app.relay.generated.resources.r2_set_desk_tray_tag_msgs
 import app.relay.ui.theme.LocalAppSpacing
 import app.relay.ui.theme.LocalCardShape
 import app.relay.ui.theme.RelayElevations
@@ -95,6 +89,7 @@ import org.jetbrains.compose.resources.DrawableResource
 import org.jetbrains.compose.resources.painterResource
 import org.jetbrains.compose.resources.stringResource
 import app.relay.ui.theme.ShapeRoles
+import app.relay.ui.theme.IconSizes
 
 /**
  * 桌面设置窗里「桌面」档（[DesktopPrefsPanel]）需要的宿主能力。
@@ -141,6 +136,10 @@ public enum class DesktopSettingsNav(
     val note: StringResource? = null,
 ) {
     Identity("id", Res.string.desk_nav_identity, GROUP_ROOT, null, Res.drawable.ic_key),
+    TrustedDevices(
+        "trusted", Res.string.desk_nav_trusted_devices, GROUP_CONN,
+        Res.string.desk_nav_group_conn, Res.drawable.ic_shield,
+    ),
     Connection(
         "conn", Res.string.desk_nav_connection, GROUP_CONN,
         Res.string.desk_nav_group_conn, Res.drawable.ic_link,
@@ -193,7 +192,7 @@ public fun DesktopSettingsTitleBar(modifier: Modifier = Modifier) {
         Row(
             modifier = Modifier
                 .height(40.dp)
-                .padding(horizontal = 13.dp),
+                .padding(horizontal = LocalAppSpacing.current.olg13),
             verticalAlignment = Alignment.CenterVertically,
         ) {
             Text(
@@ -238,7 +237,7 @@ public fun DesktopSettingsSidebar(
                         fontWeight = FontWeight.SemiBold,
                         letterSpacing = 0.06.em,
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
-                        modifier = Modifier.padding(start = 9.dp, end = 9.dp, top = sp.xs, bottom = sp.xxs),
+                        modifier = Modifier.padding(start = LocalAppSpacing.current.osm9, end = LocalAppSpacing.current.osm9, top = sp.xs, bottom = sp.xxs),
                     )
                 }
                 items.forEach { nav ->
@@ -251,7 +250,7 @@ public fun DesktopSettingsSidebar(
                     }
                     Surface(
                         color = bg,
-                        shape = RoundedCornerShape(12.dp),
+                        shape = RelayShapes.medium,
                         border = stroke,
                         modifier = Modifier
                             .fillMaxWidth()
@@ -271,7 +270,7 @@ public fun DesktopSettingsSidebar(
                         ) {
                             Surface(
                                 color = if (sel) MaterialTheme.colorScheme.primary else MaterialTheme.accents.surface3,
-                                shape = RoundedCornerShape(8.dp),
+                                shape = RelayShapes.small,
                                 modifier = Modifier.size(26.dp),
                             ) {
                                 Box(contentAlignment = Alignment.Center, modifier = Modifier.fillMaxSize()) {
@@ -400,7 +399,7 @@ public fun DesktopPrefsPanel(
             Column(
                 modifier = Modifier
                     .fillMaxWidth()
-                    .padding(start = 13.dp, top = sp.sm6, end = 13.dp, bottom = 13.dp),
+                    .padding(start = LocalAppSpacing.current.olg13, top = sp.sm6, end = LocalAppSpacing.current.olg13, bottom = LocalAppSpacing.current.olg13),
             ) {
                 PrefRow(
                     title = stringResource(Res.string.desk_prefs_power_title),
@@ -454,7 +453,7 @@ public fun DesktopPrefsPanel(
                 Column(
                     modifier = Modifier
                         .fillMaxWidth()
-                        .padding(start = 13.dp, top = sp.sm, end = 13.dp, bottom = 13.dp),
+                        .padding(start = LocalAppSpacing.current.olg13, top = sp.sm, end = LocalAppSpacing.current.olg13, bottom = LocalAppSpacing.current.olg13),
                 ) {
                     Text(
                         text = stringResource(Res.string.desk_autostart_error_title),
@@ -471,7 +470,7 @@ public fun DesktopPrefsPanel(
                     OutlinedButton(
                         onClick = { host.applyLaunchAtLogin(true) },
                         shape = ShapeRoles.Avatar,
-                        contentPadding = PaddingValues(horizontal = 9.dp, vertical = 5.dp),
+                        contentPadding = PaddingValues(horizontal = LocalAppSpacing.current.osm9, vertical = LocalAppSpacing.current.oxs5),
                         modifier = Modifier.padding(top = sp.sm),
                     ) {
                         Text(
@@ -481,29 +480,6 @@ public fun DesktopPrefsPanel(
                     }
                 }
             }
-        }
-        // 原型 `prototype/relay.html:5326-5328` 是页级 `.hint`（不是 `.annot`，所以要渲染）：
-        // 「托盘图标菜单的标题会随状态变：<tag>3 条新消息</tag><tag>收到 1 个文件（12MB）</tag>。
-        //  AWT 没有系统气泡通知，所以本期用菜单标题 + 菜单项角标，不做弹窗。」
-        FlowRow(
-            modifier = Modifier.padding(top = sp.sm),
-            horizontalArrangement = Arrangement.spacedBy(sp.xs),
-            verticalArrangement = Arrangement.spacedBy(sp.xxs),
-        ) {
-            Text(
-                text = stringResource(Res.string.r2_set_desk_tray_hint_lead),
-                style = MaterialTheme.typography.labelSmall,
-                lineHeight = 1.5.em,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-            )
-            TagPill(stringResource(Res.string.r2_set_desk_tray_tag_msgs))
-            TagPill(stringResource(Res.string.r2_set_desk_tray_tag_file))
-            Text(
-                text = stringResource(Res.string.r2_set_desk_tray_hint_tail),
-                style = MaterialTheme.typography.labelSmall,
-                lineHeight = 1.5.em,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-            )
         }
     }
 }
@@ -520,7 +496,7 @@ private fun PrefRow(
         Row(
             modifier = Modifier
                 .fillMaxWidth()
-                .padding(vertical = 9.dp),
+                .padding(vertical = LocalAppSpacing.current.osm9),
             horizontalArrangement = Arrangement.spacedBy(sp.md),
             verticalAlignment = Alignment.CenterVertically,
         ) {
@@ -578,8 +554,8 @@ private fun RelaySwitch(
     ) {
         Box(
             modifier = Modifier
-                .padding(start = knobOffset, top = 3.dp)
-                .size(18.dp)
+                .padding(start = knobOffset, top = LocalAppSpacing.current.oxs3)
+                .size(IconSizes.Body)
                 .background(Color.White, CircleShape),
         )
     }

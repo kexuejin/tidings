@@ -319,7 +319,9 @@ public fun FilesPane(
                             onBack = { selectedTransferId = null },
                             // 入站失败的续传出口。生产由 DesktopShell 传
                             // `controller::resumeTransfer` / `controller::cancelTransfer`
-                            // （`ui/desktop/DesktopShell.kt:529-530`）；帧里传 `{}` 也走同一支。
+                            // （`DesktopShell` 里接 `controller::resumeTransfer` / `controller::cancelTransfer`
+                            // 的那两处实参）；帧里传 `{}` 也走同一支。
+                            // 注：原来这里写的是行号，DesktopShell 一改行就失效 —— 换成符号名。
                             onResumeTransfer = onResumeTransfer,
                             onCancelTransfer = onCancelTransfer,
                         )
@@ -531,7 +533,7 @@ public fun FileDetailPane(
     modifier: Modifier = Modifier,
     onBack: (() -> Unit)? = null,
     // 入站失败的续传出口（d-resume）：必传才画「继续 / 取消」那一行。生产由 FilesPane 从
-    // `DesktopShell.kt:529-530` 接过来（`controller::resumeTransfer` / `::cancelTransfer`）。
+    // `DesktopShell` 接过来（`controller::resumeTransfer` / `::cancelTransfer`）。
     onResumeTransfer: ((String) -> Unit)? = null,
     onCancelTransfer: ((String) -> Unit)? = null,
 ) {
@@ -548,7 +550,7 @@ public fun FileDetailPane(
                     painterResource(Res.drawable.ic_folder),
                     contentDescription = null,
                     tint = MaterialTheme.colorScheme.onPrimaryContainer,
-                    modifier = Modifier.size(18.dp),
+                    modifier = Modifier.size(IconSizes.Body),
                 )
             }
             Spacer(Modifier.width(LocalAppSpacing.current.md))

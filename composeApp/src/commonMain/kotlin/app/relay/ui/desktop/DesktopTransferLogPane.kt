@@ -14,7 +14,6 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
-import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
@@ -48,6 +47,8 @@ import app.relay.ui.theme.LocalAppSpacing
 import app.relay.app.model.TransferRecordUi
 import org.jetbrains.compose.resources.stringResource
 import app.relay.ui.theme.ShapeRoles
+import app.relay.ui.theme.IconSizes
+import app.relay.ui.theme.RelayShapes
 
 /**
  * 桌面端传输记录面板 (d-transferlog)。
@@ -98,7 +99,7 @@ fun DesktopTransferLogPane(
             style = MaterialTheme.typography.labelSmall.copy(letterSpacing = 0.06.em),
             fontWeight = FontWeight.SemiBold,
             color = MaterialTheme.colorScheme.onSurfaceVariant,
-            modifier = Modifier.padding(start = 3.dp, top = sp.md, end = 3.dp, bottom = 5.dp),
+            modifier = Modifier.padding(start = LocalAppSpacing.current.oxs3, top = sp.md, end = LocalAppSpacing.current.oxs3, bottom = LocalAppSpacing.current.oxs5),
         )
 
         // 卡 1：`.card > .padc`（`.win` 档 `padding:8px 13px 13px`，原型内联再把底边压到 10px）
@@ -109,7 +110,7 @@ fun DesktopTransferLogPane(
             modifier = Modifier.fillMaxWidth(),
         ) {
             Column(
-                modifier = Modifier.padding(start = 13.dp, top = sp.sm, end = 13.dp, bottom = sp.md10),
+                modifier = Modifier.padding(start = LocalAppSpacing.current.olg13, top = sp.sm, end = LocalAppSpacing.current.olg13, bottom = sp.md10),
             ) {
                 // `.tt b`：12px / 600
                 Text(
@@ -192,15 +193,15 @@ private fun TransferRecordRow(
         modifier = modifier
             .fillMaxWidth()
             .heightIn(min = 52.dp)
-            .padding(horizontal = 11.dp, vertical = 9.dp),
+            .padding(horizontal = LocalAppSpacing.current.olg11, vertical = LocalAppSpacing.current.osm9),
         verticalAlignment = Alignment.CenterVertically,
         horizontalArrangement = Arrangement.spacedBy(sp.md10),
     ) {
         // `.tlist .fi2`：30×30 / radius 8 / `--surface-3` 底 / 16px 图标
         Box(
             modifier = Modifier
-                .size(30.dp)
-                .background(MaterialTheme.colorScheme.surfaceVariant, RoundedCornerShape(8.dp)),
+                .size(IconSizes.Hero)
+                .background(MaterialTheme.colorScheme.surfaceVariant, RelayShapes.small),
             contentAlignment = Alignment.Center,
         ) {
             Icon(
@@ -215,7 +216,7 @@ private fun TransferRecordRow(
                     else -> painterResource(Res.drawable.ic_file)
                 },
                 contentDescription = null,
-                modifier = Modifier.size(16.dp),
+                modifier = Modifier.size(IconSizes.Label),
                 tint = MaterialTheme.colorScheme.onSurfaceVariant,
             )
         }
@@ -244,7 +245,7 @@ private fun TransferRecordRow(
                 onClick = { record.path?.let { onOpenFile(it) } },
                 enabled = record.path != null,
                 shape = ShapeRoles.Avatar,
-                contentPadding = PaddingValues(horizontal = 9.dp, vertical = 5.dp),
+                contentPadding = PaddingValues(horizontal = LocalAppSpacing.current.osm9, vertical = LocalAppSpacing.current.oxs5),
             ) {
                 Text(
                     text = stringResource(Res.string.file_open),

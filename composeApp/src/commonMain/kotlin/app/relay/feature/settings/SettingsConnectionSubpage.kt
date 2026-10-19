@@ -25,6 +25,7 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -32,7 +33,7 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import app.relay.app.RelayUiState
-import app.relay.app.pairingPayload
+import app.relay.app.pairingQrPayloadFor
 import app.relay.core.protocol.Protocol
 import app.relay.core.qr.QrEncoder
 import app.relay.generated.resources.Res
@@ -48,7 +49,6 @@ import app.relay.generated.resources.cidr_section_title
 import app.relay.generated.resources.cidr_source_peer
 import app.relay.generated.resources.cidr_source_self
 import app.relay.generated.resources.r2_set_conn_card_port
-import app.relay.generated.resources.r2_set_conn_only_field
 import app.relay.generated.resources.ic_link
 import app.relay.generated.resources.nodes_my_qr_desc
 import app.relay.generated.resources.nodes_my_qr_hint
@@ -64,6 +64,9 @@ import app.relay.generated.resources.set_conn_reconnecting
 import app.relay.generated.resources.set_conn_reset
 import app.relay.generated.resources.set_conn_save
 import app.relay.generated.resources.set_conn_title
+import app.relay.generated.resources.set_keep_alive_card_title
+import app.relay.generated.resources.set_keep_alive_desc
+import app.relay.generated.resources.set_keep_alive_title
 import app.relay.generated.resources.set_conn_subtitle
 import app.relay.ui.ContentWidths
 import app.relay.ui.SectionCard
@@ -84,12 +87,22 @@ fun SettingsConnectionSubpage(
     onAddScanRange: (String) -> Unit = {},
     onRemoveScanRange: (String) -> Unit = {},
     onTriggerCidrScan: (String?) -> Unit = {},
+    /**
+     * 「后台保持连接」这条能力本平台有没有（Android 有；桌面端与 iOS 的进程模型不需要它）。
+     * false = 整张卡不画 —— 一个按下去没反应的开关比没有更糟。
+     */
+    keepAliveSupported: Boolean = false,
+    keepAliveEnabled: Boolean = true,
+    onKeepAliveChange: (Boolean) -> Unit = {},
     onBack: (() -> Unit)? = null,
     modifier: Modifier = Modifier,
 ) {
     val settings = state.settings
     val portSeed = defaultPort ?: settings.udpPort.toString()
     var portText by remember(portSeed) { mutableStateOf(portSeed) }
+    // 本地状态：回调接上后它会被外部的值覆盖，没接上时交互仍然是真的
+    // （与 SettingsNotifySubpage 那三个开关同一套写法）。
+    var keepAlive by rememberSaveable(keepAliveEnabled) { mutableStateOf(keepAliveEnabled) }
 
     Column(modifier = modifier.fillMaxSize()) {
         LargeTitleBar(
@@ -173,20 +186,26 @@ fun SettingsConnectionSubpage(
                 }
             }
 
-            // 原型页级 `.hint`（`prototype/relay.html:3829-3830`，卡外、`padding:0 4px`）。
-            Hint(
-                text = stringResource(Res.string.r2_set_conn_only_field),
-                modifier = Modifier.padding(horizontal = LocalAppSpacing.current.xs),
-            )
-
             // 「我的二维码」。这张码原来常驻节点页，原型 Gen2 把它搬到了这一页
             // （`prototype/relay.html:3437-3448` 的 KDoc）：它本身不是「节点」，是**本机的
             // 身份凭证**，占节点页一整张卡（实测 276px）会把「有哪些节点」这个主任务挤到
             // 第二屏。节点页只留「添加节点」里那一条入口，两个方向仍在同一屏。
             // 位置也照原型：卡二，夹在「端口」与「网段探测与同步」之间。
             SectionCard(title = stringResource(Res.string.nodes_my_qr_title)) {
-                val qrPayload = state.network.localAddresses.firstOrNull()
-                    ?.let { pairingPayload(it, settings.udpPort) }
+                // 带全部候选（多候选二维码载荷）：只给一个 IPv4 时，跨网络的对方扫了也没用。
+                // 没有可用候选时退回单地址形态，与旧行为一致。
+                // task-86：这张常驻码也必须带 pin，否则跨网手机建不出公网 TLS 目标
+                // （真机症状：dialLastTarget 一直是局域网明文口 ⇒ connect-timeout）。
+                val qrPayload = pairingQrPayloadFor(
+                    host = state.network.localAddresses.firstOrNull(),
+                    addresses = state.network.localAddresses,
+                    port = settings.udpPort,
+                    nodeId = state.selfNodeId,
+                    // task-86：**必须**带 pin（公网目标要求 pin != null，fail-closed）。
+                    tlsPin = state.network.selfTlsPin,
+                    // 带昵称：对方扫完立刻看见真名，而不是 node-a1b2c3d4。
+                    nick = state.settings.nick,
+                )
                 // 编码器对超长内容抛异常（它拒绝截断）；这里既不能让它把整屏打崩，
                 // 也绝不画一张「能扫、但内容是错的」码 —— 三种情况各自说清。
                 val qrCode = qrPayload?.let { runCatching { QrEncoder.encode(it) }.getOrNull() }
@@ -344,6 +363,26 @@ fun SettingsConnectionSubpage(
                     ) {
                         Text(stringResource(if (state.scanProgress != null) Res.string.cidr_scanning else Res.string.cidr_scan_now))
                     }
+                }
+            }
+
+            // 「后台保持连接」（Android 前台服务保活）。放在这一页最后一张卡：
+            // 它是"退到后台还能不能被找到"的行为开关，与前面的端口 / 二维码 / 网段
+            // 都不是同一件事，但都属于"连接"这个语境。能力不存在时整张卡不画。
+            if (keepAliveSupported) {
+                SectionCard(
+                    title = stringResource(Res.string.set_keep_alive_card_title),
+                    icon = Res.drawable.ic_link,
+                ) {
+                    SettingSwitchRow(
+                        title = stringResource(Res.string.set_keep_alive_title),
+                        subtitle = stringResource(Res.string.set_keep_alive_desc),
+                        checked = keepAlive,
+                        onCheckedChange = { next ->
+                            keepAlive = next
+                            onKeepAliveChange(next)
+                        },
+                    )
                 }
             }
 

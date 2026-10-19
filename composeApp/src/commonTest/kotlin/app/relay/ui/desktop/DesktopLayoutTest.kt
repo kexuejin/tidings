@@ -48,24 +48,25 @@ class DesktopLayoutTest {
     fun theWideTierStillHasRoomForTheChatPane() {
         // 这条就是计划文档里悬着的那个问题：1440×900 扣掉 chrome 之后还剩多少。
         val usable = 900 - DesktopMetrics.CHROME_PX
-        assertEquals(762, usable, "1440×900 减 chrome 138")
+        assertEquals(788, usable, "1440×900 减 chrome 112")
         assertTrue(
             usable >= DesktopMetrics.MIN_CHAT_HEIGHT_PX,
             "聊天区只剩 $usable px，低于输入区浮起阈值 ${DesktopMetrics.MIN_CHAT_HEIGHT_PX}",
         )
         // 顺带把 1280×800 也钉住：注释里那句「还剩约 660px」得是真的。
-        assertEquals(800 - DesktopMetrics.CHROME_PX, 662)
+        assertEquals(800 - DesktopMetrics.CHROME_PX, 688)
         assertTrue(800 - DesktopMetrics.CHROME_PX >= DesktopMetrics.MIN_CHAT_HEIGHT_PX)
     }
 
     @Test
-    fun theChromeBudgetIsTheSumOfItsFourStrips() {
+    fun theChromeBudgetIsTheSumOfItsThreeStrips() {
+        // 2026-10-18：菜单栏那一段（26px）整条删掉，改由系统菜单栏承载 —— 它在窗口
+        // 客户区之外，不再从这个预算里扣。于是四段变三段、138 变 112。
         assertEquals(
-            DesktopMetrics.MENUBAR_PX + DesktopMetrics.TITLEBAR_PX +
-                DesktopMetrics.TOOLBAR_PX + DesktopMetrics.STATUSBAR_PX,
+            DesktopMetrics.TITLEBAR_PX + DesktopMetrics.TOOLBAR_PX + DesktopMetrics.STATUSBAR_PX,
             DesktopMetrics.CHROME_PX,
         )
-        assertEquals(138, DesktopMetrics.CHROME_PX, "设计稿写死的数，改动要连着设计稿一起改")
+        assertEquals(112, DesktopMetrics.CHROME_PX, "设计稿写死的数，改动要连着设计稿一起改")
     }
 
     @Test
@@ -107,7 +108,7 @@ class DesktopLayoutTest {
 
     @Test
     fun theTabletDeductsItsOwnChromeNotTheDesktops() {
-        // 平板只留工具栏：按 138 扣会让 800×1280 凭空少 92dp，竖向判定跟着漂。
+        // 平板只留工具栏：按 112 扣会让 800×1280 凭空少 66dp，竖向判定跟着漂。
         assertEquals(DesktopMetrics.TOOLBAR_PX, DesktopMetrics.TABLET_CHROME_PX)
         assertEquals(
             DesktopWindowSizeClass.Expanded,

@@ -118,6 +118,7 @@ import org.jetbrains.compose.resources.stringResource
 
 import app.relay.ui.theme.LocalAppSpacing
 import app.relay.ui.theme.relayCardShadow
+import app.relay.ui.theme.RelayShapes
 
 /**
  * 桌面端共享文件柜视图（原型 d-cabinet，对齐茶话间 CabinetList + CabinetPane）。
@@ -314,7 +315,7 @@ private fun CabinetSidebar(
             items(peers) { peer ->
                 val isSelected = cabinet.activePeerId == peer.nodeId
                 Row(
-                    Modifier.fillMaxWidth().clip(RoundedCornerShape(8.dp))
+                    Modifier.fillMaxWidth().clip(RelayShapes.small)
                         .background(if (isSelected) MaterialTheme.colorScheme.secondaryContainer else MaterialTheme.colorScheme.surface)
                         .clickable { onSelect(peer.nodeId) }
                         .padding(horizontal = LocalAppSpacing.current.sm, vertical = LocalAppSpacing.current.sm6),
@@ -591,7 +592,7 @@ private fun PeerCabinetBrowser(
             // 它们之间的 10dp 来自 `.cbhead{gap:10px}`（prototype/relay.html:285）。
             Row(
                 verticalAlignment = Alignment.CenterVertically,
-                horizontalArrangement = Arrangement.spacedBy(10.dp),
+                horizontalArrangement = Arrangement.spacedBy(LocalAppSpacing.current.md10),
             ) {
                 if (cabinet.currentPerm == "write" && cabinet.activePeerId != null) {
                     TopBarIconAction(Res.drawable.ic_up, stringResource(Res.string.cabinet_upload), onClick = { controller.uploadToCabinet(cabinet.activePeerId) })
@@ -655,7 +656,7 @@ private fun PeerCabinetBrowser(
                     items(cabinet.entries) { entry ->
                         val isSelected = entry.name in cabinet.selectedNames
                         Column(
-                            Modifier.clip(RoundedCornerShape(8.dp))
+                            Modifier.clip(RelayShapes.small)
                                 .background(if (isSelected) MaterialTheme.colorScheme.primaryContainer else MaterialTheme.colorScheme.surface)
                                 .clickable {
                                     if (entry.isDir) {
@@ -776,7 +777,7 @@ private fun CabinetSelectionBox(selected: Boolean) {
     val primary = MaterialTheme.colorScheme.primary
     Box(
         modifier = Modifier
-            .size(16.dp)
+            .size(LocalAppSpacing.current.lg)
             .clip(shape)
             .then(if (selected) Modifier.background(primary) else Modifier)
             .border(

@@ -62,7 +62,7 @@ import app.relay.ui.theme.accents
 import app.relay.app.ManualPeerEntry
 import app.relay.app.RelayController
 import app.relay.app.RelayUiState
-import app.relay.app.pairingPayload
+import app.relay.app.pairingQrPayloadFor
 import app.relay.core.protocol.Protocol
 import app.relay.core.qr.QrEncoder
 import app.relay.generated.resources.Res
@@ -855,11 +855,33 @@ fun MyQrSheet(
     port: Int,
     onDismiss: () -> Unit,
     sheetState: SheetState? = null,
+    /**
+     * 本机全部配对候选（`state.network.localAddresses`）与自己的 nodeId，可选。
+     *
+     * 给了就走多候选载荷（二维码预算版：内网一条 + 公网 v6 一条）—— 跨网络的对方才能靠
+     * 这张码找到我；不给则沿用旧的单地址形态（旧调用点与截图夹具行为不变）。
+     */
+    addresses: List<String> = emptyList(),
+    nodeId: String = "",
+    /** 本机 TLS pin（`state.network.selfTlsPin`）；不传则码里没有 pin，跨网手机建不出公网目标。 */
+    tlsPin: String? = null,
+    /**
+     * 本机昵称（`state.settings.nick`）。带上它，对方节点表里**第一眼**就是真名，
+     * 而不是 `node-a1b2c3d4` 这种合成名（见 `qrPairingPayloadForAddresses` 的 KDoc）。
+     */
+    nick: String? = null,
 ) {
     val sp = LocalAppSpacing.current
     val ownSheetState = rememberModalBottomSheetState()
     val sheet = sheetState ?: ownSheetState
-    val payload = host?.let { pairingPayload(it, port) }
+    val payload = pairingQrPayloadFor(
+        host = host,
+        addresses = addresses,
+        port = port,
+        nodeId = nodeId,
+        tlsPin = tlsPin,
+        nick = nick,
+    )
     // 编码器对超长内容会抛异常（它拒绝截断）；这里不能让它把整屏打崩，
     // 但也绝不"画一张能扫、内容却是错的码"。
     val code = payload?.let { runCatching { QrEncoder.encode(it) }.getOrNull() }

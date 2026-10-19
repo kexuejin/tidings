@@ -129,7 +129,7 @@ public fun ImeSmokePane(
             style = MaterialTheme.typography.labelSmall.copy(letterSpacing = 0.06.em),
             fontWeight = FontWeight.SemiBold,
             color = MaterialTheme.colorScheme.onSurfaceVariant,
-            modifier = Modifier.padding(start = 3.dp, end = 3.dp, bottom = 5.dp),
+            modifier = Modifier.padding(start = LocalAppSpacing.current.oxs3, end = LocalAppSpacing.current.oxs3, bottom = LocalAppSpacing.current.oxs5),
         )
         // `.hint`：`font-size:var(--fs-hint)`=11px、`color:var(--on-2)`、
         // `.win .hint{line-height:1.55}`，本屏内联 `margin:0 0 10px`。
@@ -148,7 +148,7 @@ public fun ImeSmokePane(
             Column(
                 modifier = Modifier
                     .fillMaxWidth()
-                    .padding(start = 13.dp, top = sp.sm, end = 13.dp, bottom = 13.dp),
+                    .padding(start = LocalAppSpacing.current.olg13, top = sp.sm, end = LocalAppSpacing.current.olg13, bottom = LocalAppSpacing.current.olg13),
                 verticalArrangement = Arrangement.spacedBy(sp.md),
             ) {
                 ProbeField(
@@ -189,7 +189,7 @@ public fun ImeSmokePane(
                 },
                 // `.win .btn.sm{padding:5px 9px;font-size:11px;border-radius:9px}`
                 shape = ShapeRoles.Avatar,
-                contentPadding = PaddingValues(horizontal = 9.dp, vertical = 5.dp),
+                contentPadding = PaddingValues(horizontal = LocalAppSpacing.current.osm9, vertical = LocalAppSpacing.current.oxs5),
             ) {
                 Text(
                     stringResource(Res.string.desktop_ime_blur_action),
@@ -199,7 +199,7 @@ public fun ImeSmokePane(
             TextButton(
                 onClick = { active.reset() },
                 shape = ShapeRoles.Avatar,
-                contentPadding = PaddingValues(horizontal = 9.dp, vertical = 5.dp),
+                contentPadding = PaddingValues(horizontal = LocalAppSpacing.current.osm9, vertical = LocalAppSpacing.current.oxs5),
             ) {
                 Text(
                     stringResource(Res.string.desktop_ime_reset_action),
@@ -291,7 +291,7 @@ private fun PaneCard(title: String, content: @Composable () -> Unit) {
                 style = MaterialTheme.typography.labelSmall.copy(letterSpacing = 0.04.em),
                 fontWeight = FontWeight.SemiBold,
                 color = MaterialTheme.colorScheme.primary,
-                modifier = Modifier.padding(start = 13.dp, top = 11.dp, end = 13.dp),
+                modifier = Modifier.padding(start = LocalAppSpacing.current.olg13, top = LocalAppSpacing.current.olg11, end = LocalAppSpacing.current.olg13),
             )
             content()
         }
@@ -305,7 +305,7 @@ private fun ProbeCard(probe: ImeProbe) {
         Column(
             modifier = Modifier
                 .fillMaxWidth()
-                .padding(start = 13.dp, top = sp.sm, end = 13.dp, bottom = 13.dp),
+                .padding(start = LocalAppSpacing.current.olg13, top = sp.sm, end = LocalAppSpacing.current.olg13, bottom = LocalAppSpacing.current.olg13),
         ) {
             val empty = stringResource(Res.string.desktop_ime_empty)
 
@@ -383,7 +383,7 @@ private fun ProbeRow(label: String, value: String, last: Boolean = false) {
     val sp = LocalAppSpacing.current
     Column(Modifier.fillMaxWidth()) {
         Row(
-            modifier = Modifier.fillMaxWidth().padding(horizontal = 13.dp, vertical = 7.dp),
+            modifier = Modifier.fillMaxWidth().padding(horizontal = LocalAppSpacing.current.olg13, vertical = LocalAppSpacing.current.osm7),
             horizontalArrangement = Arrangement.spacedBy(sp.md),
             verticalAlignment = Alignment.Bottom,
         ) {
@@ -421,7 +421,7 @@ private fun ProbeField(
 ) {
     val sp = LocalAppSpacing.current
     // `.field label{font-size:12px;color:var(--on-2);margin-bottom:5px}`
-    Column(Modifier.fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(5.dp)) {
+    Column(Modifier.fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(LocalAppSpacing.current.oxs5)) {
         Text(
             text = label,
             style = MaterialTheme.typography.bodySmall,
@@ -439,7 +439,7 @@ private fun ProbeField(
                     .then(focusModifier)
                     .background(MaterialTheme.colorScheme.surfaceContainer, MaterialTheme.shapes.medium)
                     // `.win .inp{font-size:14px;padding:8px 11px}`（本框内联清掉了边框与底色）
-                    .padding(horizontal = 11.dp, vertical = sp.sm),
+                    .padding(horizontal = LocalAppSpacing.current.olg11, vertical = sp.sm),
                 // `.inp{font-size:var(--fs-body)}` = 14px（`.win .inp` 同样是 14px），
                 // 不是 `bodyLarge` 的 16sp —— 差集里那一处「只代码 16」就是这里来的。
                 textStyle = MaterialTheme.typography.bodyMedium.copy(

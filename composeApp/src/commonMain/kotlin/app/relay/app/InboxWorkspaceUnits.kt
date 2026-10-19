@@ -3,7 +3,9 @@
 package app.relay.app
 
 import app.relay.app.model.AgentSessionKey
+import app.relay.app.model.AgentSessionUi
 import app.relay.app.model.ConversationUi
+import app.relay.app.model.PeerUi
 import app.relay.core.nowMillis
 /**
  * 消息页签「工作区」段的取数。
@@ -116,6 +118,10 @@ public data class WorkspaceUnitUi(
      *
      * null 的行**排在所有已知顺序的行之后**（而不是当成 0 混进最前面）：沉默不猜，
      * 而且把"不知道"当成"排第一"会让老宿主的行插进用户手工排好的序列里。
+     *
+     * 缺失时的兜底键是 [workspaceSortName]（标题 → 路径末段 → wsId），**不再是**
+     * 待审批 / 最近活动：那两把尺子都随实时帧变，宿主桥又不发 order（真机库里 15/15 是
+     * NULL），于是它们从"次级判据"变成了实际主键 —— 列表每收一帧就重排。
      */
     val hostOrder: Long? = null,
     /**
@@ -147,6 +153,8 @@ public data class WorkspaceUnitUi(
      * （父稿 §2.2），所以这个标志位是那一档在界面上的落点，不是装饰。
      */
     val declaredOnly: Boolean = false,
+    val isHost: Boolean = false,
+    val access: String? = null,
 ) {
     /** 这一行代表的是工作区还是 Agent。 */
     val isWorkspace: Boolean get() = wsId != null
@@ -258,8 +266,6 @@ public data class InboxWorkspaceUnitsUi(
 public data class WorkspaceAgentSectionUi(
     /** Agent 身份键 = `agentId ?? agentKind`；null = 对端两个都没报（「未上报类型」）。 */
     val agentKey: String?,
-    /** 该 Agent 名下带工作区的会话总数（其各行之和）。 */
-    val sessionCount: Int,
     /** 该 Agent 名下的待审批条数。 */
     val pendingCount: Int,
     /** 该 Agent 名下最后一次活动。 */
@@ -304,7 +310,6 @@ public fun WorkspaceUnitGroupUi.agentSections(): List<WorkspaceAgentSectionUi> {
     return byAgent.map { (agentKey, rows) ->
         WorkspaceAgentSectionUi(
             agentKey = agentKey,
-            sessionCount = rows.sumOf { it.sessionCount },
             pendingCount = rows.sumOf { it.pendingCount },
             lastActivityAt = rows.maxOfOrNull { it.lastActivityAt } ?: 0L,
             workspaces = rows,
@@ -332,11 +337,84 @@ public fun WorkspaceUnitGroupUi.unassignedSessions(): UnassignedSessionsUi {
     )
 }
 
+/**
+ * 一条会话的「最新活动时刻」——**全仓唯一口径**。
+ *
+ * = max(宿主动作时刻 [AgentSessionUi.sortActivityAt], 最新一条事件的到达时刻 [lastEventAt])。
+ *
+ * ## 为什么必须把事件也算进来
+ *
+ * 宿主只在 `agent-session` 帧里报 `hostUpdatedAt`，而 agent 连续干活时**推的是事件**：
+ * 事件实时到、会话帧可能好几分钟没再来过。只看 `sortActivityAt` 会把「正在干活的那条」
+ * 判成比「刚被分页拉回来、宿主动作很旧的会话」更旧 —— 用户看到卡片主位那条「不是最新的」，
+ * 而 DSH 里明明是最新的。
+ *
+ * 反过来，事件时刻是本端到达时刻：它是实时推来的，那个「刚刚」是真的
+ * （见 [WorkspaceUnitActiveUi.at] 的 KDoc），所以取两者较大者不失真。
+ */
+public fun AgentSessionUi.latestActivityAt(lastEventAt: Long): Long =
+    maxOf(sortActivityAt, lastEventAt)
+
+/**
+ * 按「最新活动」降序排一批会话 —— 与 `RelayUiState.agentSessionsOf` 同一把尺子。
+ *
+ * 键序列逐字对齐那个方法：`max(sortActivityAt, lastEventAt)` → `startedAt` → `sessionId`。
+ * 两处一旦分叉，同一个工作区在「卡片主位」与「会话详情第一条」就会是不同的会话 ——
+ * 这正是用户反馈的那件事，所以它必须只有这一处实现。
+ */
+public fun List<AgentSessionUi>.sortedByLatestActivity(
+    lastEventAtOf: (AgentSessionUi) -> Long,
+): List<AgentSessionUi> =
+    sortedWith(
+        compareByDescending<AgentSessionUi> { it.latestActivityAt(lastEventAtOf(it)) }
+            .thenByDescending { it.startedAt ?: 0L }
+            .thenByDescending { it.sessionId },
+    )
+
+/**
+ * 一个工作区里「最关键的那条活跃会话」——**唯一一处挑选规则**。
+ *
+ * 顺序（看板原文口径，消息页与看板共用）：
+ * 1. 有未决审批的会话 —— 「有一项等你批」比「正在干活」更该被看见，且不论它多旧；
+ * 2. 未超时的 `busy` —— [isStaleBusy] 挡掉宿主异常退出时留下的僵死 busy，
+ *    否则它会永远霸占主位；
+ * 3. 最新活动的那条（同层内按 [sortedByLatestActivity] 排，所以它就是真正最新的那条）。
+ *
+ * ## 为什么必须收敛到这一处
+ *
+ * 此前有三份各自实现的挑选：这里、`WorkspaceDetailView`、`AgentConsoleScreen.onOpenChat`；
+ * 三份的排序键与 busy 判定各差一点，于是同一个工作区在两屏显示不同的「最新会话」。
+ * 现在三处都调这一个函数，行与行之间的差异只剩「传进来的候选集」。
+ */
+public fun pickActiveSession(
+    sessions: List<AgentSessionUi>,
+    lastEventAtOf: (AgentSessionUi) -> Long,
+    pendingSessionIds: Set<String>,
+    now: Long,
+): AgentSessionUi? {
+    if (sessions.isEmpty()) return null
+    val ordered = sessions.sortedByLatestActivity(lastEventAtOf)
+    return ordered.firstOrNull { it.sessionId in pendingSessionIds }
+        ?: ordered.firstOrNull {
+            it.state == AGENT_STATE_BUSY && !isStaleBusy(it.latestActivityAt(lastEventAtOf(it)), now)
+        }
+        ?: ordered.first()
+}
+
 public fun RelayUiState.inboxWorkspaceUnits(
     limit: Int = INBOX_WS_LIMIT,
     now: Long = 0L,
 ): InboxWorkspaceUnitsUi {
-    val agentNodes = peers.filter { it.isAgent }
+    val hostNode = if (agentWorkspaces.keys.any { it.peerId == selfNodeId }) {
+        PeerUi(
+            nodeId = selfNodeId,
+            nick = settings.nick.ifBlank { selfNodeId.take(8) },
+            platform = "",
+            caps = listOf(app.relay.core.protocol.MsgTypes.CAP_AGENT, app.relay.core.protocol.MsgTypes.CAP_AGENT_WORKSPACE),
+            online = true,
+        )
+    } else null
+    val agentNodes = peers.filter { it.isAgent } + listOfNotNull(hostNode)
     if (agentNodes.isEmpty()) return InboxWorkspaceUnitsUi(groups = emptyList(), totalUnits = 0)
 
     val maxActivity = agentSessions.values.maxOfOrNull { it.sortActivityAt } ?: 0L
@@ -354,7 +432,7 @@ public fun RelayUiState.inboxWorkspaceUnits(
         // 「同一工作区里还有没有别的可见会话」，要看着整个节点的会话才能回答。
         // 真机实测 111 行落库会话里 68 行是 DSH 自己一定不显示的（子代理静默会话 + 空壳），
         // 它们此前会在这里派生出成批的工作区行/看板卡片。
-        val nodeSessions = visibleAgentSessionsOfNode(node.nodeId).map { it.sessionId to it }
+        val nodeSessions = visibleAgentSessionsOfNode(node.nodeId)
 
         // PPE-1 增补 D3：`agent-workspace` 宣告台账里属于这个节点的那些行。
         // 它们是**并集的另一半** —— 「工作区已存在、但还没有任何会话」这一档只有这帧能表达，
@@ -369,7 +447,7 @@ public fun RelayUiState.inboxWorkspaceUnits(
         // 顺序 = 会话帧的上报顺序；一个会话都没有时仍然给一行「未上报」，
         // 否则"声明了 ag1 却一条帧都没收到"的设备会整台消失（原型 agentsOfNode 同此）。
         val unitKeys = LinkedHashSet<WorkspaceRowKey>()
-        nodeSessions.forEach { (_, s) ->
+        nodeSessions.forEach { s ->
             val wsId = normalizeWsId(s.wsId)
             if (isSyntheticWsId(wsId)) {
                 return@forEach
@@ -389,61 +467,68 @@ public fun RelayUiState.inboxWorkspaceUnits(
 
         val units = unitKeys.map { rowKey ->
             val kind = rowKey.agentKey
-            // 会话帧的上报顺序不可靠，这里按 `sortActivityAt` 重排成"最近活动在前" ——
-            // 看板用的 `agentSessionsOf()` 就是这个顺序，"第一条"的含义必须一致。
+            // 这一行名下会话的**唯一**排序口径：最新活动在前 —— 宿主动作时刻与最新事件
+            // 到达时刻取大（见 sortedByLatestActivity）。此前这里只按 `sortActivityAt` 排，
+            // 而 agentSessionsOf 用的是含事件的键：agent 连续推事件、会话帧却久未更新时，
+            // 两处会排出两个不同的"第一条"，同一个工作区在两屏显示不同会话。
             //
-            // 键必须与看板**同源**：这里若退回本端收帧时刻 `updatedAt`，历史分页那 20 条
-            // （同一个 TCP tick 到达）会全部并列，而"第一条"= 卡片主位那句会话名 ——
+            // 键必须与看板/会话详情**同源**：这里若退回本端收帧时刻 `updatedAt`，历史分页那
+            // 20 条（同一个 TCP tick 到达）会全部并列，而"第一条"= 卡片主位那句会话名 ——
             // 于是卡片标题会随 map 的插入序乱跳，与用户在 DSH 里看到的不是同一条。
+            val lastEventAtOf: (AgentSessionUi) -> Long = { session ->
+                agentEvents[AgentSessionKey(node.nodeId, session.sessionId)]
+                    .orEmpty().maxOfOrNull { it.at } ?: 0L
+            }
             val sessions = nodeSessions
                 .filter {
-                    (it.second.agentId ?: normalizeAgentKind(it.second.agentKind)) == kind &&
-                        normalizeWsId(it.second.wsId) == rowKey.wsId
+                    (it.agentId ?: normalizeAgentKind(it.agentKind)) == kind &&
+                        normalizeWsId(it.wsId) == rowKey.wsId
                 }
-                .sortedByDescending { it.second.sortActivityAt }
+                .sortedByLatestActivity(lastEventAtOf)
             // 这一行的宣告侧（同键的那条 `agent-workspace` 帧）；没有会话、只有它 = 空工作区行。
             val announcement = declared.firstOrNull {
                 it.agentKey == kind && normalizeWsId(it.wsId) == rowKey.wsId
             }
-            val sessionIds = sessions.map { it.first }.toSet()
+            val sessionIds = sessions.map { it.sessionId }.toSet()
             val pending = pendingApprovals.count { it.peerId == node.nodeId && it.sessionId in sessionIds }
             // 最近活动 = 会话/事件的最近时刻 ∪ 宣告帧的收到时刻：一个刚宣告出来的空工作区
             // 也有"什么时候出现在我屏幕上的"这件事，恒 0 会让它永远排在有活动的行后面。
             //
-            // 会话项用 `sortActivityAt`（宿主动作时刻优先），**不是**本端收帧时刻 —— 这一列既要
-            // 排序又会被消息页那一行直接印成"N 分钟前"。用本端时刻的话，用户点开一个三天没动过的
+            // 会话项用 `latestActivityAt`（宿主动作时刻与最新事件时刻取大），**不是**本端收帧
+            // 时刻 —— 这一列既要排序又会被消息页那一行直接印成"N 分钟前"。用本端时刻的话，
+            // 用户点开一个三天没动过的
             // 工作区，那一页 20 条帧"刚刚"到达，行上就会写「刚刚」；而且这是**系统性**的假话：
             // 越久没碰的工作区越会这样说，而用户在 DSH 里看到的是「3 天前」。
             // 两台机器的钟差是各仓都在用的既有前提（agent-workspace.at 一直是宿主时钟），
             // 量级是秒；而"我什么时候拉到这一页"可以是几天 —— 两害相权，取宿主时刻。
             // 事件项 `at` 是本端到达时刻：事件是实时推的，那个"刚刚"是真的。
             val lastAt = maxOf(
-                sessions.maxOfOrNull { session ->
-                    val key = AgentSessionKey(node.nodeId, session.first)
-                    maxOf(session.second.sortActivityAt, agentEvents[key].orEmpty().maxOfOrNull { it.at } ?: 0L)
-                } ?: 0L,
+                sessions.maxOfOrNull { it.latestActivityAt(lastEventAtOf(it)) } ?: 0L,
                 announcement?.at ?: 0L,
             )
 
-            // 最关键的那条活跃会话：优先有未决审批 → 其次正在干活（排除已超时的僵死 busy） → 其次最近更新（看板原文口径）。
-            val active = sessions.firstOrNull { session ->
-                pendingApprovals.any { it.peerId == node.nodeId && it.sessionId == session.first }
-            } ?: sessions.firstOrNull { session ->
-                val key = AgentSessionKey(node.nodeId, session.first)
-                val lastEventAt = agentEvents[key].orEmpty().maxOfOrNull { it.at } ?: 0L
-                val lastActivity = maxOf(session.second.sortActivityAt, lastEventAt)
-                session.second.state == AGENT_STATE_BUSY && !isStaleBusy(lastActivity, referenceNow)
-            } ?: sessions.firstOrNull()
+            // 最关键的那条活跃会话：唯一一处挑选规则（见本文件顶部的 pickActiveSession）。
+            // 此前这里、WorkspaceDetailView、AgentConsoleScreen 各算一遍，三份的排序键与
+            // busy 判定各差一点 —— 同一个工作区在两屏显示不同会话就是这么来的。
+            val active = pickActiveSession(
+                sessions = sessions,
+                lastEventAtOf = lastEventAtOf,
+                pendingSessionIds = pendingApprovals
+                    .filter { it.peerId == node.nodeId }
+                    .map { it.sessionId }
+                    .toSet(),
+                now = referenceNow,
+            )
             val activeEvent = active
-                ?.let { agentEvents[AgentSessionKey(node.nodeId, it.first)].orEmpty().lastOrNull() }
+                ?.let { agentEvents[AgentSessionKey(node.nodeId, it.sessionId)].orEmpty().lastOrNull() }
 
             // 工作区名/路径取组内第一个非空值（同一 wsId 的多条会话理应同名；
             // 不一致时先到先得，与 recordSession 的合并纪律同口径）；
             // 会话侧一个都没有时（零会话行）退回宣告帧带来的那一份 —— 名字与路径
             // 不要求先有一条会话才存在。
-            val wsTitle = sessions.firstOrNull { !it.second.wsTitle.isNullOrBlank() }?.second?.wsTitle
+            val wsTitle = sessions.firstOrNull { !it.wsTitle.isNullOrBlank() }?.wsTitle
                 ?: announcement?.wsTitle
-            val wsPath = sessions.firstOrNull { !it.second.wsPath.isNullOrBlank() }?.second?.wsPath
+            val wsPath = sessions.firstOrNull { !it.wsPath.isNullOrBlank() }?.wsPath
                 ?: announcement?.wsPath
             WorkspaceUnitUi(
                 peerId = node.nodeId,
@@ -466,26 +551,24 @@ public fun RelayUiState.inboxWorkspaceUnits(
                 // 顺序只有宣告帧带得回来（会话帧没有这个键）—— 同键的那条 agent-workspace 帧
                 // 就是这一行在宿主台账里的那一份。多帧同名时取先到的那份（与 wsTitle 同纪律）。
                 hostOrder = announcement?.hostOrder,
-                active = active?.let { session ->
-                    val key = AgentSessionKey(node.nodeId, session.first)
-                    val lastEventAt = agentEvents[key].orEmpty().maxOfOrNull { it.at } ?: 0L
-                    val lastActivity = maxOf(session.second.sortActivityAt, lastEventAt)
-                    val effectiveState = if (session.second.state == AGENT_STATE_BUSY && isStaleBusy(lastActivity, referenceNow)) {
+                active = active?.let { activeSession ->
+                    val lastActivity = activeSession.latestActivityAt(lastEventAtOf(activeSession))
+                    val effectiveState = if (activeSession.state == AGENT_STATE_BUSY && isStaleBusy(lastActivity, referenceNow)) {
                         "idle"
                     } else {
-                        session.second.state
+                        activeSession.state
                     }
                     WorkspaceUnitActiveUi(
-                        sessionId = session.first,
+                        sessionId = activeSession.sessionId,
                         // 回落（alias → title，都没有即 null）只在 `AgentSessionUi.displayTitle`
                         // 里实现一处 —— 这条线的第 5 个调用点（前 4 个在 UI 层，这处在派生层）。
                         // 漏掉 title 时，工作区卡片上那句「在干什么」就会显示成 session-3f2a…。
-                        title = session.second.displayTitle,
+                        title = activeSession.displayTitle,
                         state = effectiveState,
-                        summary = activeEvent?.summary ?: activeEvent?.body ?: session.second.title,
+                        summary = activeEvent?.summary ?: activeEvent?.body ?: activeSession.title,
                         // 事件优先（它是实时到的，"最新活动"说的就是它）；无事件时用宿主动作时刻，
                         // 让分页拉回的历史会话说真话（详见 WorkspaceUnitActiveUi.at 的 KDoc）。
-                        at = activeEvent?.at ?: session.second.sortActivityAt,
+                        at = activeEvent?.at ?: activeSession.sortActivityAt,
                     )
                 },
                 queueCount = agentTasks.values.count { it.peerId == node.nodeId },
@@ -494,12 +577,14 @@ public fun RelayUiState.inboxWorkspaceUnits(
                 // 空工作区行的判据：**有宣告、零会话**。有会话时宣告只是补充信息，
                 // 那一行按普通工作区行画（副行有会话数、底栏有活跃会话）。
                 declaredOnly = announcement != null && sessions.isEmpty(),
+                isHost = node.nodeId == selfNodeId || node.ip == "127.0.0.1" || node.host == "localhost" || node.host == "127.0.0.1",
+                access = grantFor(node.nodeId, kind, rowKey.wsId)?.access,
             )
         }.sortedWith(unitOrder)
 
         if (units.isEmpty()) continue
 
-        val joined = nodeSessions.map { it.first }.toSet()
+        val joined = nodeSessions.map { it.sessionId }.toSet()
         val unattributed = pendingApprovals.count { it.peerId == node.nodeId && it.sessionId !in joined }
 
         full += WorkspaceUnitGroupUi(
@@ -517,17 +602,18 @@ public fun RelayUiState.inboxWorkspaceUnits(
 
     // 跨组排序：组的**宿主顺序最小值**决定它在段里的位置 —— 一个节点自己从 0 编号，
     // 所以"这个节点里排第一的那个工作区"就是这一组的序（多节点同时接入时按这个序交错，
-    // 每个节点的 0 号工作区并列，由后面两把尺子分开，不会让某台设备的全部工作区挤成一坨）。
+    // 每个节点的 0 号工作区并列，由后面那把尺子分开，不会让某台设备的全部工作区挤成一坨）。
     //
-    // 组内没有一条带顺序时（老宿主 / 只有会话没有宣告）退回原口径：待审批降序 → 最近活动降序。
-    // 用"组里最强的那一行"而不是"节点是否在线"：一台 0 个待审批的在线设备不该压住
-    // 一台有 2 项待审批的离线设备（原型实测过这个反例）。
+    // 组内没有一条带顺序时（宿主桥不发 order / 只有会话没有宣告）退回**同一把稳定尺子**：
+    // 组内最小的稳定名（= 这一组排第一的那个工作区的名字）→ 节点 id。
+    // 与行内排序同源，也与 RelayUiState.workspacesOf 同源 —— 两屏各用一把尺子正是本仓
+    // 反复抓过的那类分叉。待审批与最近活动**不参与**（理由见 unitOrder 的 KDoc）。
     val ordered = full.sortedWith(
         compareBy<WorkspaceUnitGroupUi> { group ->
             group.units.minOf { unit -> unit.hostOrder ?: Long.MAX_VALUE }
         }
-            .thenByDescending { it.units.maxOf { unit -> unit.pendingCount } }
-            .thenByDescending { it.units.maxOf { unit -> unit.lastActivityAt } },
+            .thenBy { group -> group.units.minOf { it.sortName() } }
+            .thenBy { group -> group.peerId },
     )
 
     val totalUnits = ordered.sumOf { it.units.size }
@@ -546,23 +632,61 @@ public fun RelayUiState.inboxWorkspaceUnits(
 }
 
 /**
- * 行的排序：**宿主顺序** → 待审批条数降序 → 最近活动降序。
+ * 工作区的**稳定排序名** —— 全仓唯一口径（[unitOrder]、组间排序、`RelayUiState.workspacesOf`
+ * 三处都调它）。
  *
- * 第一把尺子是这一轮补上的（真机反馈「工作区的排序跟 DSH 不一样」）：宿主把 DSH 注册表的
- * 持久序当成事实送过来，它对**用户可见的顺序**有最终解释权 —— 那是用户自己拖出来的排列，
- * 手机不该用"哪个项目刚干过活"去覆盖它。缺这把尺子（null）的行排在所有已知顺序之后，
- * 再按下面两把老尺子排：沉默不猜，但也不让它们与已知顺序的行交错。
+ * 取 `wsTitle` → `wsPath` 末段 → `wsId`。三段都是**宣告帧自带、与活动无关**的值。
  *
- * 后两把尺子是原型的既有口径，保留给"顺序未知"那一档，以及同一行里多个 agent/工作区
- * 抢同一个序号时（同一台宿主上不会发生，多台宿主各自从 0 编号时会）当稳定的次级判据。
+ * ## 为什么排序需要它（真机反馈「列表变来变去」）
  *
- * 两把老尺子都是**计数与时间**，不是布尔。原型第一版用 `if (pending) 1 else 0` 排摊平后的行，
- * 与组用的"条数"尺子不一致 —— 后果是一个只有 1 项待审批的行会排在 2 项的前面。
+ * 宿主侧的桥**从不发 `order`**（真机库里 15/15 工作区的 `host_order` 是 NULL），于是行的
+ * 第一把尺子全体并列，真正决定顺序的退化成「待审批 → 最近活动」。而最近活动是**实时事件**
+ * 驱动的：谁刚干活谁窜到最前，下一秒又换。标题（或路径末段）只在工作区真的改名时才变，
+ * 用它当兜底键，顺序才是可预期的。
+ *
+ * ## 为什么末段要同时吃 `/` 与 `\`
+ *
+ * `wsPath` 是宿主报的本地路径，Windows 宿主报的是反斜杠。只切 `/` 会把整条
+ * `C:\src\foo` 当成名字 —— 多数时候它与目录名同序、看不出错，直到两台机器的路径前缀不同。
+ */
+public fun workspaceSortName(wsTitle: String?, wsPath: String?, wsId: String?): String {
+    wsTitle?.takeIf { it.isNotBlank() }?.let { return it }
+    wsPath?.takeIf { it.isNotBlank() }?.let { path ->
+        val segment = path.trimEnd('/', '\\').substringAfterLast('/').substringAfterLast('\\')
+        if (segment.isNotBlank()) return segment
+    }
+    return wsId?.takeIf { it.isNotBlank() } ?: ""
+}
+
+/**
+ * 这一行在稳定排序里的名字：工作区行 = [workspaceSortName]；Agent 行（没有 wsId）=
+ * 身份键（`agentKind`）—— 那种行没有目录名可排，身份键就是它的名字。
+ */
+public fun WorkspaceUnitUi.sortName(): String =
+    if (isWorkspace) workspaceSortName(wsTitle, wsPath, wsId) else agentKind.orEmpty()
+
+/**
+ * 行的排序：**宿主顺序 → 稳定名（标题 → 路径末段 → wsId）→ 最终稳定键**。
+ *
+ * ## 为什么不再用「待审批 / 最近活动」（用户裁决）
+ *
+ * 两者都是**实时变化**的量：审批来一条、某个 agent 推一条事件，行的位置就变一次。
+ * 真机库里 15/15 工作区的 `host_order` 是 NULL（宿主桥不发 `order`），于是这两把尺子从
+ * "次级判据"变成了**实际主键** —— 列表每收一帧就重排，用户看到的就是"变来变去"。
+ *
+ * 待审批**不置顶**是有意的，不是漏了：它已经有两处不受行序影响的露出 —— 看板顶部的
+ * `AgentApprovalsSection` 逐条画全部待审批，消息页段头的「· N 项待审批」与段尾的
+ * 「还有 N 行 · 其中 M 项待审批」；行内 `pendingLabel` 徽标也照画。把它当排序键换不来
+ * 更多可见性，只会换来跳动。
+ *
+ * 第一把尺子（宿主序）保留原语义：有顺序的行按它排，null 的行排在其后 —— 沉默不猜，
+ * 也不让老宿主的行插进用户手工排好的序列里。最后一档 `wsId ?: agentKind` 是**不可变**的
+ * 身份键，专门用来把同名行钉死（同名工作区在排序里必须仍然有确定次序）。
  */
 private val unitOrder: Comparator<WorkspaceUnitUi> =
     compareBy<WorkspaceUnitUi> { it.hostOrder ?: Long.MAX_VALUE }
-        .thenByDescending { it.pendingCount }
-        .thenByDescending { it.lastActivityAt }
+        .thenBy { it.sortName() }
+        .thenBy { it.wsId ?: it.agentKind ?: "" }
 
 /** 取全量顺序里的前 [limit] 行，按组收回去（组一旦没有行就不再出现）。 */
 private fun capGroups(

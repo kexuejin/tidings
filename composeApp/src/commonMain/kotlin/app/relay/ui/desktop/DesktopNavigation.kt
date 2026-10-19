@@ -20,6 +20,7 @@ import androidx.compose.material.icons.automirrored.outlined.Chat
 import androidx.compose.material.icons.outlined.Devices
 import androidx.compose.material.icons.outlined.Folder
 import androidx.compose.material.icons.outlined.Inventory2
+import androidx.compose.material.icons.outlined.Settings
 import androidx.compose.material.icons.outlined.Terminal
 import androidx.compose.material3.Badge
 import androidx.compose.material3.BadgedBox
@@ -40,6 +41,8 @@ import app.relay.ui.theme.LocalAppSpacing
 import app.relay.ui.theme.accents
 import app.relay.app.model.FileCardUi
 import app.relay.app.model.TransferState
+import app.relay.generated.resources.Res
+import app.relay.generated.resources.screen_settings
 import org.jetbrains.compose.resources.StringResource
 import org.jetbrains.compose.resources.stringResource
 
@@ -88,6 +91,7 @@ public fun NavigationRail(
     view: DesktopView,
     onViewChange: (DesktopView) -> Unit,
     badges: Map<DesktopView, Int> = emptyMap(),
+    onOpenSettings: (() -> Unit)? = null,
 ) {
     Column(
         Modifier.width(DesktopMetrics.MEDIUM_RAIL_PX.dp).fillMaxHeight().background(MaterialTheme.colorScheme.surface),
@@ -102,6 +106,16 @@ public fun NavigationRail(
                 onClick = { onViewChange(item) },
                 badge = badges[item] ?: 0,
             )
+        }
+        if (onOpenSettings != null) {
+            Spacer(Modifier.weight(1f))
+            RailButton(
+                label = stringResource(Res.string.screen_settings),
+                icon = Icons.Outlined.Settings,
+                selected = false,
+                onClick = onOpenSettings,
+            )
+            Spacer(Modifier.height(LocalAppSpacing.current.md10))
         }
     }
 }

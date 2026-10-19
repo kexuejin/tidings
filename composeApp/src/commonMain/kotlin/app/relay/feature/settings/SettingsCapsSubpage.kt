@@ -22,10 +22,7 @@ import app.relay.generated.resources.set_caps_card_title
 import app.relay.generated.resources.set_caps_peer_visible
 import app.relay.generated.resources.set_caps_saved
 import app.relay.generated.resources.set_caps_title
-import app.relay.generated.resources.r2_set_caps_hint
-import androidx.compose.foundation.layout.padding
 import app.relay.ui.SectionCard
-import app.relay.ui.theme.LocalAppSpacing
 import org.jetbrains.compose.resources.stringResource
 
 /**
@@ -107,10 +104,5 @@ fun SettingsCapsSubpage(
             // 原型这一句在三条 srow **之后**（卡内 `.hint`），不是在卡头。
             CardHeaderNote(stringResource(Res.string.set_caps_saved))
         }
-        // 原型 `screenSetCaps()` 的**页级** `.hint`（`prototype/relay.html:3914-3915`）。
-        Hint(
-            text = stringResource(Res.string.r2_set_caps_hint),
-            modifier = Modifier.padding(horizontal = LocalAppSpacing.current.xs),
-        )
     }
 }

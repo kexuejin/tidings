@@ -25,7 +25,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.dp
 import app.relay.ui.theme.LocalAppSpacing
-import app.relay.app.pairingPayload
+import app.relay.app.pairingPayloadForAddresses
 
 import app.relay.app.RelayUiState
 import app.relay.ui.components.StatusDot
@@ -72,14 +72,22 @@ public fun DesktopStatusBar(
     // **在生产里从来没画出来过**（原型 `prototype/relay.html:2611-2622` 的 `dstatusbar()` 有它）。
     // 现照仓里同一份取法改写：`DesktopConversationsPane` 的首启空态、
     // `feature/nodes/NodeDetail.kt`、`feature/settings/SettingsHomeScreen.kt` 都是这么取的。
-    val selfHost = state.network.localAddresses.firstOrNull()
     // 端口取真正绑上的那个；`boundUdpPort == 0`（网络还没起来）时退回设置里配的那个
     // —— `feature/nodes/NodeDetail.kt` 里有个同款 `Int.ifZero`，现在它是 internal 的，
     // 这里仍然把同一个表达式写开（桌面状态栏与节点详情不是一个特性包）。
     val selfPort = state.network.boundUdpPort.takeIf { it != 0 } ?: state.settings.udpPort
-    // 用权威构造器而不是手拼字符串：它会拒空 host、含冒号的 host 与越界端口，
-    // 所以拿不到地址时宁可不给这个按钮，也不让用户复制走一条 `relay://:0`。
-    val pairingLink = selfHost?.let { pairingPayload(it, selfPort) }
+    // 配对链接用**全部候选**（lan_v4 / lan_v6 / public_v6）：只印一个 IPv4 时，手机换到
+    // 移动网就只剩"手动填地址"一条路。仍走权威构造器：它判类型、给 IPv6 加方括号、丢掉
+    // link-local，并且**一个可用地址都没有时返回 null** —— 那时宁可不给这颗按钮，
+    // 也不让用户复制走一条 `relay://:0`。
+    val pairingLink = pairingPayloadForAddresses(
+        nodeId = state.selfNodeId,
+        nick = state.settings.nick,
+        addresses = state.network.localAddresses,
+        port = selfPort,
+        // task-86：复制链接这条路也要带 pin —— 公网目标要求 pin != null（fail-closed）。
+        tlsPin = state.network.selfTlsPin,
+    )
     Surface(color = MaterialTheme.colorScheme.surfaceContainer, tonalElevation = RelayElevations.Card) {
         Row(
             Modifier.fillMaxWidth().height(DesktopMetrics.STATUSBAR_PX.dp).padding(horizontal = LocalAppSpacing.current.md),

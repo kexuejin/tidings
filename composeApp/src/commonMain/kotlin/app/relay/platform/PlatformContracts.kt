@@ -43,7 +43,13 @@ enum class Transport { Wifi, Cellular, Ethernet, Vpn, None }
 /**
  * 本机网络快照。
  *
- * [localAddresses] 是 UI 要显示给用户看的"我的 IP"，也是手填配对时的提示值。
+ * [localAddresses] 是 UI 要显示给用户看的"我的 IP"，也是手填配对时的提示值，**同时**是
+ * 配对码的候选池来源（[app.relay.app.peerCandidatesFrom]）。因此它的约定是：
+ *  - **IPv4 在前、IPv6 在后**：`firstOrNull()` 那些"只要一个地址"的调用点拿到的是最稳的那条
+ *    （v4 单播路径最成熟），加 v6 不会改它们的语义；
+ *  - 允许出现多网卡、多地址（macOS 上还会有临时/隐私 IPv6）：要"全部候选"的调用点自己遍历；
+ *  - 空列表 = 确实没有可用地址（[withoutUsableAddress] 据此说"没有网络"）。
+ *
  * [vpnActive] 单独拎出来是因为 Tailscale / ZeroTier 场景下**局域网广播不过去**，
  * 只能单播握手。
  */
@@ -297,6 +303,9 @@ interface AppPlatform {
     val deviceDefaultNick: String
         get() = ""
 
+    /** 判定某个昵称是否为平台未定制的默认昵称，若是且平台有更精准的设备名则可升级。 */
+    fun isDefaultNick(nick: String): Boolean = nick.isBlank()
+
     val localNetworkGate: LocalNetworkGate
     val filePicker: FilePicker
     val saveDirectoryPicker: SaveDirectoryPicker
@@ -354,6 +363,45 @@ interface AppPlatform {
      */
     val screenSharing: ScreenSharingService?
         get() = null
+
+    /**
+     * 「后台保持连接」：让节点在应用退到后台时仍能被局域网发现、仍能收发消息。
+     *
+     * 为什么只有 Android 需要它：Android 把退到后台的进程打成 cached 并收紧其网络
+     * （真机实测：进程活着、UDP/TCP 端口仍绑着、系统也没冻结它，但对端约 90 秒后
+     * 就把它判成离线 —— 因为广播发不出去、presence 收不到），桌面端与 iOS 的进程
+     * 模型不吃这一套。所以这是一个**可空槽**：null = 本平台没有这条能力，设置页据此
+     * 不画那个开关（与 [qrScannerPreview] / [receivedFileActions] 同一条规矩：
+     * 能力不存在就不给一个按下去没反应的开关）。
+     */
+    val backgroundConnection: BackgroundConnectionService?
+        get() = null
+}
+
+/**
+ * 「后台保持连接」的平台能力面（Android 侧是一个常驻通知的前台服务）。
+ *
+ * 语义边界写清楚，免得实现者猜：
+ * - 它**只保证进程在后台不被 cached 冻结、网络不被收紧**；它不搬运任何消息，
+ *   消息仍然走原来的 UDP/TCP 通路；
+ * - 它是**用户可见且有代价**的（一条常驻通知 + 额外耗电），所以开关必须能在界面上管，
+ *   关掉必须真的停服务（[setEnabled] 传 false 之后 [isEnabled] 应当变成 false）。
+ */
+interface BackgroundConnectionService {
+    /** 本平台是否真的能提供这条能力。false = 设置页不画这个开关。 */
+    val isSupported: Boolean
+
+    /** 服务**当前**是否在跑（不是"用户上次拨到哪"）：常驻通知的真身就是它。 */
+    fun isEnabled(): Boolean
+
+    /**
+     * 开/关。true = 拉起常驻通知的前台服务；false = 立刻停掉。
+     *
+     * suspend：Android 侧的通知文案取自 Compose 资源（getString 是挂起函数），
+     * 服务在宿主 APK 里、AAPT2 看不见那些资源，只能由平台层读好递进去
+     * （与 AndroidScreenSharingService.serviceNotificationTexts 同一条边界）。
+     */
+    suspend fun setEnabled(enabled: Boolean)
 }
 
 interface ScreenSharingService {

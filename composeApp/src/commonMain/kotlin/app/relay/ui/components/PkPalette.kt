@@ -15,7 +15,6 @@ import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.shape.CircleShape
-import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.FilledTonalButton
@@ -47,6 +46,7 @@ import app.relay.generated.resources.common_cancel
 import org.jetbrains.compose.resources.stringResource
 
 import app.relay.ui.theme.LocalAppSpacing
+import app.relay.ui.theme.RelayShapes
 import app.relay.app.model.PkCardUi
 
 /**
@@ -75,7 +75,7 @@ public fun PkCardView(
     val emoji = pkEmojiPreview(pk.game, pk.value)
 
     Surface(
-        shape = RoundedCornerShape(12.dp),
+        shape = RelayShapes.medium,
         color = MaterialTheme.colorScheme.surface.copy(alpha = 0.55f),
         modifier = modifier.fillMaxWidth(),
     ) {
@@ -114,7 +114,7 @@ public fun PkPickerDialog(
 ) {
     Dialog(onDismissRequest = onDismiss) {
         Card(
-            shape = RoundedCornerShape(16.dp),
+            shape = RelayShapes.large,
             colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
             modifier = Modifier.fillMaxWidth().padding(horizontal = LocalAppSpacing.current.lg),
         ) {
@@ -180,7 +180,7 @@ public fun PkPickerDialog(
                         Box(
                             modifier = Modifier
                                 .size(40.dp)
-                                .clip(RoundedCornerShape(8.dp))
+                                .clip(RelayShapes.small)
                                 .background(MaterialTheme.colorScheme.surfaceVariant)
                                 .clickable {
                                     onPick(PkGames.DICE, v)
@@ -188,7 +188,7 @@ public fun PkPickerDialog(
                                 },
                             contentAlignment = Alignment.Center,
                         ) {
-                            Text(text = face, fontSize = 24.sp)
+                            Text(text = face, fontSize = MaterialTheme.typography.headlineSmall.fontSize)
                         }
                     }
                 }
@@ -225,7 +225,7 @@ private fun RpsChoiceButton(
     Column(
         horizontalAlignment = Alignment.CenterHorizontally,
         modifier = Modifier
-            .clip(RoundedCornerShape(12.dp))
+            .clip(RelayShapes.medium)
             .clickable(onClick = onClick)
             .padding(LocalAppSpacing.current.sm),
     ) {
@@ -236,7 +236,7 @@ private fun RpsChoiceButton(
                 .background(MaterialTheme.colorScheme.surfaceVariant),
             contentAlignment = Alignment.Center,
         ) {
-            Text(text = emoji, fontSize = 28.sp)
+            Text(text = emoji, fontSize = MaterialTheme.typography.headlineMedium.fontSize)
         }
         Spacer(Modifier.height(LocalAppSpacing.current.xs))
         Text(

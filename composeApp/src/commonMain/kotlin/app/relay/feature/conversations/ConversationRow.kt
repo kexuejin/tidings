@@ -138,7 +138,10 @@ internal fun ConversationRow(row: ConversationUi, now: Long, onOpenChat: (String
 
             Column(horizontalAlignment = Alignment.End, verticalArrangement = Arrangement.spacedBy(LocalAppSpacing.current.sm)) {
                 Text(
-                    text = if (row.at > 0) relativeTime(row.at, now) else "",
+                    // 只用**最近一条消息**的时间：没聊过的会话（lastMessageAt == 0）整格留空。
+                    // 不能用 row.at —— 它在没消息时会退回对端 lastSeenAt，局域网发现一刷新
+                    // 就变成"刚刚"，正是用户反馈的"没聊过的会话一直顶在最上面"的一半。
+                    text = if (row.lastMessageAt > 0) relativeTime(row.lastMessageAt, now) else "",
                     style = MaterialTheme.typography.labelSmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )

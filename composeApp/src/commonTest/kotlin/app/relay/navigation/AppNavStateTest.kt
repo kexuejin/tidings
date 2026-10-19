@@ -209,4 +209,57 @@ class AppNavStateTest {
         assertFalse(after.inAgentSessionDetail)
         assertNull(after.detailAgentSessionId)
     }
+
+    @Test
+    fun agentWorkspaceDetailOpensAndLeavesCorrectly() {
+        val fresh = AppNavState()
+        assertFalse(fresh.inAgentWorkspaceDetail)
+        assertFalse(fresh.inAgentSubpage)
+        assertNull(fresh.detailWorkspaceId)
+
+        val openWs = fresh.openAgentWorkspaceDetail("node-1", "ws-1")
+        assertTrue(openWs.inAgentWorkspaceDetail)
+        assertFalse(openWs.inAgentSessionDetail)
+        assertTrue(openWs.inAgentSubpage)
+        assertEquals("ws-1", openWs.detailWorkspaceId)
+        assertEquals("node-1", openWs.detailPeerId)
+
+        // 幂等性
+        assertEquals(openWs, openWs.openAgentWorkspaceDetail("node-1", "ws-1"))
+
+        // 在工作区详情中进入会话详情（从 L2 进 L3）
+        val openSession = openWs.openAgentSessionDetail("s1")
+        assertTrue(openSession.inAgentSessionDetail)
+        assertTrue(openSession.inAgentWorkspaceDetail) // 仍然保留处于工作区详情的上下文
+        assertTrue(openSession.inAgentSubpage)
+        assertEquals("ws-1", openSession.detailWorkspaceId)
+        assertEquals("s1", openSession.detailAgentSessionId)
+
+        // 退出会话详情回到工作区详情（从 L3 退回 L2）
+        val backToWs = openSession.leaveAgentSessionDetail()
+        assertFalse(backToWs.inAgentSessionDetail)
+        assertTrue(backToWs.inAgentWorkspaceDetail)
+        assertTrue(backToWs.inAgentSubpage)
+        assertEquals("ws-1", backToWs.detailWorkspaceId)
+        assertNull(backToWs.detailAgentSessionId)
+
+        // 退出工作区详情回到看板（从 L2 退回 L1）
+        val backToBoard = backToWs.leaveAgentWorkspaceDetail()
+        assertFalse(backToBoard.inAgentWorkspaceDetail)
+        assertFalse(backToBoard.inAgentSessionDetail)
+        assertFalse(backToBoard.inAgentSubpage)
+        assertNull(backToBoard.detailWorkspaceId)
+        assertNull(backToBoard.detailAgentSessionId)
+    }
+
+    @Test
+    fun switchingTabsClosesAgentWorkspaceDetail() {
+        val nav = AppNavState().openAgentWorkspaceDetail("node-1", "ws-1")
+        assertTrue(nav.inAgentWorkspaceDetail)
+        assertTrue(nav.inAgentSubpage)
+        val after = nav.selectTab(AppRoutes.CABINET)
+        assertFalse(after.inAgentWorkspaceDetail)
+        assertFalse(after.inAgentSubpage)
+        assertNull(after.detailWorkspaceId)
+    }
 }

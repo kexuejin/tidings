@@ -32,7 +32,12 @@ internal class RelayControllerSettingsComponent(
 fun handleUpdatePersistMessages(enabled: Boolean) {
     if (host.persistMessages == enabled) return
     host.persistMessages = enabled
-    host.handlePersist(host._state.value.settings.copy(persistMessages = enabled))
+    // persistMessagesDecided 必须一起写：它是"用户显式做过选择"的唯一记录，
+    // 也是 migrateRelaySettings 唯一认的判据。只写值不写这一位的话，用户关掉之后
+    // 下次启动仍会被当成"从没设过"而补回开启 —— 开关就又骗人了。
+    host.handlePersist(
+        host._state.value.settings.copy(persistMessages = enabled, persistMessagesDecided = true),
+    )
     if (enabled) host.handlePersistThreads()
 }
 
@@ -74,6 +79,25 @@ fun handleUpdateNotifyMentionOnly(enabled: Boolean) {
 
 fun handleUpdateNotifyQuietHours(enabled: Boolean) {
     updateNotificationPreference { it.copy(notifyQuietHours = enabled) }
+}
+
+
+/**
+ * 「后台保持连接」开关（Android 专属能力，见 RelaySettings.keepConnectionAlive）。
+ *
+ * 两件事分开做、且都必须做：
+ * 1. 落盘 —— 这是用户偏好，重启后必须还在这儿（否则开关在骗人）；
+ * 2. 平台动作 —— 拉起/停掉常驻通知的前台服务。**关掉必须真的停服务**，
+ *    设置页那句"关掉立即停止"就是这么承诺的。
+ *
+ * 平台动作用 host.scope.launch：setEnabled 是挂起函数（Android 侧要读 Compose
+ * 资源当通知文案），而这里在 UI 的事件回调里，不能挂起。
+ */
+fun handleUpdateKeepConnectionAlive(enabled: Boolean) {
+    val current = host._state.value.settings
+    if (current.keepConnectionAlive == enabled) return
+    host.handlePersist(current.copy(keepConnectionAlive = enabled))
+    host.scope.launch { host.platform.backgroundConnection?.setEnabled(enabled) }
 }
 
 private fun updateNotificationPreference(transform: (RelaySettings) -> RelaySettings) {
@@ -227,9 +251,16 @@ fun handleStartRemoteRelay(config: RemoteRelayConfig) {
     val client = RemoteRelayClient(config, host.platform.httpClient)
     host.remoteRelayClient = client
     host.refreshPeers()
+    // 起点如实：还没探活之前不算在线（第一轮探活前显示离线，而不是先骗一次在线）。
+    host.remoteRelayHealthy = false
     host.remotePollingJob = host.scope.launch {
+        var tick = 0
         while (isActive) {
             runCatching {
+                // 每 5 个周期（≈15s）探一次活。轮询本身只拉 inbox，而 fetchInbox 把失败
+                // 吞成空列表 —— 与"真的没消息"不可分，所以判活只能靠 checkHealth。
+                if (tick % 5 == 0) host.remoteRelayHealthy = client.checkHealth()
+                tick++
                 val items = client.fetchInbox(since = host.lastRemoteSeq)
                 for (item in items) {
                     if (item.seq > host.lastRemoteSeq) {
@@ -248,6 +279,8 @@ fun handleStopRemoteRelay() {
     host.remotePollingJob?.cancel()
     host.remotePollingJob = null
     host.remoteRelayClient = null
+    // 停掉之后不能留着上一次的"健康"：否则那条注入的 PeerUi 会继续显示在线。
+    host.remoteRelayHealthy = false
     host.refreshPeers()
 }
 

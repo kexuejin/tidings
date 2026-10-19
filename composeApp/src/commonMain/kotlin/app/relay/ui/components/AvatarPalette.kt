@@ -17,8 +17,9 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.shape.CircleShape
-import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
@@ -35,8 +36,11 @@ import app.relay.generated.resources.Res
 import app.relay.generated.resources.r2_set_avatar_mode_icon
 import app.relay.generated.resources.r2_set_avatar_mode_initial
 import app.relay.generated.resources.r2_set_avatar_mode_upload
+import app.relay.generated.resources.set_avatar_change
+import app.relay.generated.resources.set_avatar_file_meta
 import app.relay.ui.theme.LocalAppSpacing
 import app.relay.ui.theme.RelayElevations
+import app.relay.ui.theme.RelayShapes
 import org.jetbrains.compose.resources.stringResource
 
 /**
@@ -111,38 +115,71 @@ fun AvatarPicker(
     avatar: Int,
     nick: String,
     onAvatarChange: (Int) -> Unit,
+    pickedAvatarBytes: ByteArray? = null,
+    onRemovePickedAvatar: (() -> Unit)? = null,
     /** 第三档「上传图片」的出口；null = 没接线，该档置灰。 */
     onOpenAvatarPage: (() -> Unit)? = null,
     modifier: Modifier = Modifier,
 ) {
     val sp = LocalAppSpacing.current
-    val isInitialMode = avatar == AVATAR_LEGACY_INITIAL_VALUE || avatar !in 0..AVATAR_ANIMAL_MAX_VALUE
-    val currentColorIdx = AvatarPalette.colorIndex(if (isInitialMode) 0 else avatar, nick)
-    val currentAnimalIdx = AvatarPalette.animalIndex(if (isInitialMode) 0 else avatar)
+    val hasCustomAvatar = pickedAvatarBytes != null
+    val isInitialMode = !hasCustomAvatar && (avatar == AVATAR_LEGACY_INITIAL_VALUE || avatar !in 0..AVATAR_ANIMAL_MAX_VALUE)
+    val currentColorIdx = AvatarPalette.colorIndex(if (isInitialMode || hasCustomAvatar) 0 else avatar, nick)
+    val currentAnimalIdx = AvatarPalette.animalIndex(if (isInitialMode || hasCustomAvatar) 0 else avatar)
 
     Column(
         modifier = modifier.fillMaxWidth(),
         verticalArrangement = Arrangement.spacedBy(sp.md10),
     ) {
-        // 模式切换：图标头像 / 昵称首字 / 上传图片。
-        //
-        // 原型 `prototype/relay.html:2149-2156 avSeg()` 是**一条 `.seg` 单容器三档等宽**，
-        // 规格在 `:311-315`：容器 `background:var(--surface-2)` + `border-radius:12px` +
-        // `padding:3px` + `gap:3px`；按钮 `flex:1` + `font-size:12px` + `border-radius:8px`；
-        // 选中态 `background:var(--surface)` + `color:var(--on)` + `font-weight:600`。
-        // 代码原来是两颗 M3 `FilterChip`（胶囊形、且没有第三档），形态与原型不同。
-        //
-        // 第三档在原型里点了会跳到说明这一屏（`m-set-avatar` 屏内 annot `:3802-3808`：
-        // 「编辑器里这一档点了会跳到说明这一屏」），由 `onOpenAvatarPage` 承接；
-        // **没接线时该档置灰** —— 不画一颗点了没反应的按钮。
         AvatarModeSegments(
             isInitialMode = isInitialMode,
-            onSelectIcon = { onAvatarChange(AvatarPalette.encode(currentColorIdx, currentAnimalIdx)) },
-            onSelectInitial = { onAvatarChange(AVATAR_LEGACY_INITIAL_VALUE) },
+            hasCustomAvatar = hasCustomAvatar,
+            onSelectIcon = {
+                onRemovePickedAvatar?.invoke()
+                onAvatarChange(AvatarPalette.encode(currentColorIdx, currentAnimalIdx))
+            },
+            onSelectInitial = {
+                onRemovePickedAvatar?.invoke()
+                onAvatarChange(AVATAR_LEGACY_INITIAL_VALUE)
+            },
             onOpenAvatarPage = onOpenAvatarPage,
         )
 
-        if (!isInitialMode) {
+        if (hasCustomAvatar) {
+            Surface(
+                color = MaterialTheme.colorScheme.surfaceVariant,
+                shape = MaterialTheme.shapes.medium,
+                modifier = Modifier.fillMaxWidth(),
+            ) {
+                Row(
+                    modifier = Modifier.padding(sp.md).fillMaxWidth(),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(sp.md),
+                ) {
+                    PeerAvatar(name = nick, size = 48.dp, avatarBytes = pickedAvatarBytes)
+                    Column(modifier = Modifier.weight(1f)) {
+                        Text(
+                            text = stringResource(Res.string.r2_set_avatar_mode_upload),
+                            style = MaterialTheme.typography.bodyMedium,
+                            fontWeight = FontWeight.SemiBold,
+                        )
+                        Text(
+                            text = stringResource(Res.string.set_avatar_file_meta),
+                            style = MaterialTheme.typography.labelSmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        )
+                    }
+                    if (onOpenAvatarPage != null) {
+                        OutlinedButton(
+                            onClick = onOpenAvatarPage,
+                            contentPadding = PaddingValues(horizontal = sp.md10, vertical = sp.xs),
+                        ) {
+                            Text(stringResource(Res.string.set_avatar_change), style = MaterialTheme.typography.labelSmall)
+                        }
+                    }
+                }
+            }
+        } else if (!isInitialMode) {
             // 底色选择：原型 `.avedit-cs{display:flex;flex-wrap:wrap;gap:8px}` +
             // `.avedit-c{width:24px;height:24px;border:2px solid var(--surface);border-radius:50%;
             // box-shadow:0 0 0 1px var(--hair)}`，选中换成 `box-shadow:0 0 0 2px var(--primary)`，
@@ -157,11 +194,11 @@ fun AvatarPicker(
                     val isSelected = idx == currentColorIdx
                     Box(
                         modifier = Modifier
-                            .size(24.dp)
+                            .size(LocalAppSpacing.current.xl)
                             .clip(CircleShape)
                             .background(color.bg)
                             .border(
-                                width = 2.dp,
+                                width = LocalAppSpacing.current.xxs,
                                 color = if (isSelected) {
                                     MaterialTheme.colorScheme.primary
                                 } else {
@@ -177,7 +214,7 @@ fun AvatarPicker(
                         if (isSelected) {
                             Box(
                                 modifier = Modifier
-                                    .size(8.dp)
+                                    .size(LocalAppSpacing.current.sm)
                                     .clip(CircleShape)
                                     .background(Color.White),
                             )
@@ -234,7 +271,7 @@ fun AvatarPicker(
                                         .clip(CircleShape)
                                         .background(AvatarPalette.COLORS[currentColorIdx].bg)
                                         .border(
-                                            width = 2.dp,
+                                            width = LocalAppSpacing.current.xxs,
                                             color = if (isSelected) {
                                                 MaterialTheme.colorScheme.primary
                                             } else {
@@ -271,15 +308,16 @@ fun AvatarPicker(
 @Composable
 private fun AvatarModeSegments(
     isInitialMode: Boolean,
+    hasCustomAvatar: Boolean = false,
     onSelectIcon: () -> Unit,
     onSelectInitial: () -> Unit,
     onOpenAvatarPage: (() -> Unit)?,
 ) {
     val sp = LocalAppSpacing.current
     val options = listOf(
-        Triple(stringResource(Res.string.r2_set_avatar_mode_icon), !isInitialMode, onSelectIcon),
-        Triple(stringResource(Res.string.r2_set_avatar_mode_initial), isInitialMode, onSelectInitial),
-        Triple(stringResource(Res.string.r2_set_avatar_mode_upload), false, onOpenAvatarPage ?: {}),
+        Triple(stringResource(Res.string.r2_set_avatar_mode_icon), !isInitialMode && !hasCustomAvatar, onSelectIcon),
+        Triple(stringResource(Res.string.r2_set_avatar_mode_initial), isInitialMode && !hasCustomAvatar, onSelectInitial),
+        Triple(stringResource(Res.string.r2_set_avatar_mode_upload), hasCustomAvatar, onOpenAvatarPage ?: {}),
     )
     Surface(
         color = MaterialTheme.colorScheme.surfaceVariant,
@@ -295,7 +333,7 @@ private fun AvatarModeSegments(
                 val enabled = index < 2 || onOpenAvatarPage != null
                 Surface(
                     color = if (active) MaterialTheme.colorScheme.surface else Color.Transparent,
-                    shape = RoundedCornerShape(8.dp),
+                    shape = RelayShapes.small,
                     shadowElevation = if (active) RelayElevations.Card else 0.dp,
                     modifier = Modifier.weight(1f),
                 ) {

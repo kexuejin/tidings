@@ -432,4 +432,230 @@ class InboxWorkspaceUnitsTest {
         assertEquals("把消息页签的工作区段接进 Compose", titled.copy(alias = "   ").displayTitle)
         assertNull(base.copy(title = "  ").displayTitle, "title 是空白 = 还是没有名字")
     }
+
+    /**
+     * 多 Agent 协同在同一个工作区下的消歧与共存：
+     * 同一个 wsId 下，DSH 和 Gemini 作为不同的入驻 Agent 各自产生任务会话，
+     * 派生层按 `(agentId ?? agentKind, wsId)` 分别归组，互不覆盖，且 key 唯一。
+     */
+    @Test
+    fun multipleAgentsCanCoexistInTheSameWorkspaceDisambiguatedByAgentKey() {
+        val s = state(
+            sessions = listOf(
+                AgentSessionUi(
+                    peerId = peerA, sessionId = "s-dsh-1", agentKind = "DSH", agentId = "dsh-engine",
+                    wsId = "ws-collab", wsTitle = "Collab Repo", alias = "DSH 重构任务", updatedAt = 2000L,
+                ),
+                AgentSessionUi(
+                    peerId = peerA, sessionId = "s-gemini-1", agentKind = "Gemini", agentId = "gemini-reviewer",
+                    wsId = "ws-collab", wsTitle = "Collab Repo", alias = "Gemini 架构审阅", updatedAt = 1000L,
+                ),
+            ),
+        )
+        val units = s.inboxWorkspaceUnits().groups.single().units
+        assertEquals(2, units.size, "同一个工作区下的两个 Agent 会话各成独立单元")
+        val dshUnit = units.first { it.agentKind == "dsh-engine" }
+        val geminiUnit = units.first { it.agentKind == "gemini-reviewer" }
+        assertEquals("ws-collab", dshUnit.wsId)
+        assertEquals("ws-collab", geminiUnit.wsId)
+        assertEquals("s-dsh-1", dshUnit.active?.sessionId)
+        assertEquals("s-gemini-1", geminiUnit.active?.sessionId)
+
+        // 验证 Compose LazyColumn key 格式完全正交无冲突
+        val dshKey = "ws_${dshUnit.peerId}_${dshUnit.agentKind.orEmpty()}_${dshUnit.wsId.orEmpty()}"
+        val geminiKey = "ws_${geminiUnit.peerId}_${geminiUnit.agentKind.orEmpty()}_${geminiUnit.wsId.orEmpty()}"
+        assertTrue(dshKey != geminiKey, "同一工作区不同 Agent 派生出的列表键严格互斥: $dshKey vs $geminiKey")
+    }
+    /**
+     * **回归（用户反馈「工作区最新会话显示错误」）**：卡片主位必须跟着**实时事件**走，
+     * 不能只看宿主动作时刻。
+     *
+     * 真机形状：agent 正在连续干活（事件实时推、at 是刚刚），而 agent-session 帧
+     * 的 hostUpdatedAt 停在很久以前；同时同一工作区里还有一条刚被分页拉回来、
+     * hostUpdatedAt 很新的旧会话。
+     *
+     * 修前：inboxWorkspaceUnits 只按 sortActivityAt 排，sessions.firstOrNull() 挑到
+     * 那条「旧、但对本端接收来说很新」的分页会话 —— 而 RelayUiState.agentSessionsOf
+     * （会话详情/聊天第一条）一直是 max(sortActivityAt, lastEventAt)，于是同一个工作区
+     * 在两屏显示两条不同的会话。
+     */
+    @Test
+    fun theActiveSessionFollowsLiveEventsNotJustTheHostSessionFrame() {
+        val chatted = AgentSessionKey(peerA, "s-chatty")
+        val unit = state(
+            sessions = listOf(
+                // 正在干活的那条：会话帧很久没更新，但事件刚刚到。
+                session("s-chatty", state = "idle", updatedAt = 1_000L, hostUpdatedAt = 1_000L),
+                // 刚被分页拉回来的旧会话：宿主动作时刻很新（本端也在同一秒收到）。
+                session("s-paged", state = "idle", updatedAt = 9_000_000L, hostUpdatedAt = 9_000_000L),
+            ),
+            events = mapOf(
+                chatted to listOf(
+                    AgentEventUi(
+                        sessionId = "s-chatty",
+                        peerId = peerA,
+                        cursor = 1,
+                        eventType = "note",
+                        summary = "刚刚推的一条",
+                        at = 9_500_000L,
+                    ),
+                ),
+            ),
+        ).firstUnit()
+
+        assertEquals("s-chatty", unit.active?.sessionId, "事件实时到的那条才是最新会话")
+        assertEquals(9_500_000L, unit.active?.at, "最新活动时刻取事件到达时刻")
+        assertEquals("刚刚推的一条", unit.active?.summary)
+    }
+
+    /**
+     * 同一把尺子还必须是**排序**尺子、不只是挑选尺子：多条都没有 busy/待批时，
+     * sortedByLatestActivity 的键序列与 RelayUiState.agentSessionsOf 逐字一致
+     * （活动降序 → startedAt 降序 → sessionId 降序）。
+     */
+    @Test
+    fun latestActivityOrderingMatchesTheSessionListOrdering() {
+        val a = AgentSessionUi(peerId = peerA, sessionId = "s-a", updatedAt = 1_000L)
+        val b = AgentSessionUi(peerId = peerA, sessionId = "s-b", updatedAt = 2_000L)
+        val c = AgentSessionUi(peerId = peerA, sessionId = "s-c", updatedAt = 3_000L)
+        val ordered = listOf(a, b, c).sortedByLatestActivity { 0L }
+        assertEquals(listOf("s-c", "s-b", "s-a"), ordered.map { it.sessionId })
+
+        // 事件把一条更老的会话顶上来（同一处口径的排序侧）。
+        val withEvent = listOf(a.copy(hostUpdatedAt = 1_000L), b.copy(hostUpdatedAt = 5_000L))
+            .sortedByLatestActivity { s -> if (s.sessionId == "s-a") 9_000L else 0L }
+        assertEquals(listOf("s-a", "s-b"), withEvent.map { it.sessionId })
+    }
+
+    // ---- 排序稳定性（真机反馈「工作区列表变来变去」）----
+
+    /**
+     * **回归**：无宿主序时，行序由**稳定键**（标题）决定，事件不断到达也不改变它。
+     *
+     * 真机形状：宿主桥从不发 `order`（库里 15/15 工作区的 host_order 是 NULL），于是第一把
+     * 尺子全体并列，真正生效的是「待审批 → 最近活动」—— 而最近活动是实时事件驱动的，
+     * 谁刚干活谁窜到最前。这条测试就是钉住「事件到达不重排」。
+     */
+    @Test
+    fun workspaceRowsKeepTheTitleOrderWhileEventsKeepArriving() {
+        fun wsSession(id: String, wsId: String, title: String) = AgentSessionUi(
+            peerId = peerA, sessionId = id, agentKind = "DSH", agentId = "dsh-main",
+            wsId = wsId, wsTitle = title, updatedAt = 1L,
+        )
+        fun event(sessionId: String, at: Long) = AgentEventUi(
+            sessionId = sessionId, peerId = peerA, cursor = 1, eventType = "note", at = at,
+        )
+        fun orderAt(zetaEventAt: Long, alphaEventAt: Long): List<String?> = state(
+            sessions = listOf(
+                wsSession("s-zeta", "ws-zeta", "Zeta"),
+                wsSession("s-alpha", "ws-alpha", "Alpha"),
+            ),
+            workspaces = listOf(
+                workspace("ws-zeta", agentId = "dsh-main", agentKind = "DSH", title = "Zeta"),
+                workspace("ws-alpha", agentId = "dsh-main", agentKind = "DSH", title = "Alpha"),
+            ),
+            events = mapOf(
+                AgentSessionKey(peerA, "s-zeta") to listOf(event("s-zeta", zetaEventAt)),
+                AgentSessionKey(peerA, "s-alpha") to listOf(event("s-alpha", alphaEventAt)),
+            ),
+        ).inboxWorkspaceUnits().groups.single().units.map { it.wsId }
+
+        assertEquals(listOf("ws-alpha", "ws-zeta"), orderAt(1_000L, 1_000L), "无宿主序 ⇒ 按标题字典序")
+        // Zeta 那边的事件一路往前（每次派生都比上一次新）：顺序必须还是 Alpha, Zeta。
+        listOf(2_000L, 5_000L, 50_000L, 900_000L).forEach { at ->
+            assertEquals(
+                listOf("ws-alpha", "ws-zeta"),
+                orderAt(at, 1_000L),
+                "事件到达不该改变行序（zeta event at=$at）",
+            )
+        }
+    }
+
+    /**
+     * 宿主序存在时**仍以它为准**（设计本意：DSH 里的顺序是用户自己拖出来的）。
+     * 这里故意让宿主序与标题字典序**相反**，两种口径才分得开。
+     */
+    @Test
+    fun hostOrderStillWinsOverTheTitleRuler() {
+        val units = state(
+            sessions = listOf(
+                AgentSessionUi(
+                    peerId = peerA, sessionId = "s-z", agentKind = "DSH", agentId = "dsh-main",
+                    wsId = "ws-zeta", wsTitle = "Zeta", updatedAt = 1L,
+                ),
+                AgentSessionUi(
+                    peerId = peerA, sessionId = "s-a", agentKind = "DSH", agentId = "dsh-main",
+                    wsId = "ws-alpha", wsTitle = "Alpha", updatedAt = 1L,
+                ),
+            ),
+            workspaces = listOf(
+                workspace("ws-zeta", agentId = "dsh-main", agentKind = "DSH", title = "Zeta").copy(hostOrder = 0L),
+                workspace("ws-alpha", agentId = "dsh-main", agentKind = "DSH", title = "Alpha").copy(hostOrder = 5L),
+            ),
+        ).inboxWorkspaceUnits().groups.single().units
+
+        assertEquals(listOf("ws-zeta", "ws-alpha"), units.map { it.wsId }, "宿主序优先于标题")
+    }
+
+    /** 组间排序与行内排序必须**同一把尺子**：无宿主序时按组内最小的稳定名。 */
+    @Test
+    fun groupsFollowTheSameTitleRulerWhenHostOrderIsMissing() {
+        val peerB = "peer-b"
+        fun declared(peerId: String, wsId: String, title: String) = WorkspaceUi(
+            peerId = peerId, agentKey = "DSH", wsId = wsId, wsTitle = title,
+            wsPath = "/src/" + wsId, agentKind = "DSH", online = true, sessionCount = 0, at = 1L,
+        )
+        val s = RelayUiState(
+            peers = listOf(agentPeer(peerA, "开发机"), agentPeer(peerB, "另一台")),
+            agentWorkspaces = listOf(
+                declared(peerA, "ws-zeta", "Zeta"),
+                declared(peerB, "ws-alpha", "Alpha"),
+            ).associateBy { WorkspaceKey(it.peerId, it.agentKey, it.wsId) },
+        )
+        assertEquals(
+            listOf(peerB, peerA),
+            s.inboxWorkspaceUnits().groups.map { it.peerId },
+            "组间也按稳定名（Alpha 那一组在前），与行内同一把尺子",
+        )
+    }
+
+    /** 稳定名的三段回落：标题 → 路径末段（两种分隔符）→ wsId。 */
+    @Test
+    fun workspaceSortNameFallsBackFromTitleToPathSegmentToId() {
+        assertEquals("标题优先", workspaceSortName("标题优先", "/src/path-name", "ws-1"))
+        assertEquals("path-name", workspaceSortName(null, "/src/path-name", "ws-1"))
+        assertEquals("path-name", workspaceSortName("   ", "/src/path-name/", "ws-1"), "空白标题不算标题")
+        assertEquals("path-name", workspaceSortName(null, "C:\\src\\path-name", "ws-1"), "Windows 反斜杠也要切")
+        assertEquals("ws-1", workspaceSortName(null, null, "ws-1"))
+        assertEquals("ws-1", workspaceSortName("", "", "ws-1"))
+        assertEquals("", workspaceSortName(null, null, null))
+    }
+
+    /**
+     * `RelayUiState.workspacesOf` 的无 order 回退必须与看板**同一把尺子**：
+     * 此前它按"收到时刻倒序"（-at），每来一帧都可能重排，且与看板不同序。
+     */
+    @Test
+    fun workspacesOfUsesTheSameStableRulerWhenHostOrderIsMissing() {
+        fun declared(wsId: String, title: String, at: Long) = WorkspaceUi(
+            peerId = peerA, agentKey = "DSH", wsId = wsId, wsTitle = title,
+            wsPath = "/src/" + wsId, agentKind = "DSH", online = true, sessionCount = 0, at = at,
+        )
+        val s = RelayUiState(
+            peers = listOf(agentPeer(peerA, "开发机")),
+            agentWorkspaces = listOf(
+                declared("ws-zeta", "Zeta", at = 9_000L),
+                declared("ws-alpha", "Alpha", at = 1_000L),
+            ).associateBy { WorkspaceKey(peerA, it.agentKey, it.wsId) },
+        )
+        // 旧口径（-at）会把 Zeta 排在前面；新口径按标题 = Alpha 在前。
+        assertEquals(listOf("ws-alpha", "ws-zeta"), s.workspacesOf(peerA).map { it.wsId })
+        // 再收一帧宣告（Zeta 的 at 变得更新）也不改顺序。
+        val s2 = s.copy(
+            agentWorkspaces = s.agentWorkspaces.mapValues { (_, w) ->
+                if (w.wsId == "ws-zeta") w.copy(at = 99_000L) else w
+            },
+        )
+        assertEquals(listOf("ws-alpha", "ws-zeta"), s2.workspacesOf(peerA).map { it.wsId })
+    }
 }

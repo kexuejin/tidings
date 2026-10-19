@@ -36,10 +36,15 @@ import app.relay.ui.theme.LocalAppSpacing
 
 import app.relay.app.GlobalSearchResult
 import app.relay.app.RelayUiState
+import app.relay.app.model.WorkspaceUi
 import app.relay.core.nowMillis
 import app.relay.feature.agents.AgentConsoleScreen
 import app.relay.feature.chat.ChatScreen
 import app.relay.ui.components.AppBanner
+import app.relay.generated.resources.workspace_group_default_name
+import app.relay.ui.components.WorkspaceGroupCreateDialog
+import app.relay.ui.components.WorkspaceGroupPromptDialog
+import app.relay.ui.components.WorkspaceQrDialog
 import app.relay.ui.components.relativeTime
 import app.relay.ui.theme.LocalCardShape
 import app.relay.ui.theme.RelayShapes
@@ -131,9 +136,14 @@ public class DesktopShellActions(
 /**
  * 桌面壳主体。
  *
- * 结构自上而下固定四段：菜单栏 26px / 标题栏 40px / 工具栏 46px / 内容 / 状态栏 26px，
- * 总计 [DesktopMetrics.CHROME_PX] = 138px。这条预算一开始就写死了：
+ * 结构自上而下固定三段：标题栏 40px / 工具栏 46px / 内容 / 状态栏 26px，
+ * 总计 [DesktopMetrics.CHROME_PX] = 112px。这条预算一开始就写死了：
  * 原型第一版把侧栏 300px 也算进高度，结果输入框被挤出可视区。
+ *
+ * 原先还有第四段：窗口内那条 26px 自绘菜单栏。它按用户裁决整条删掉，
+ * 改由系统菜单栏承载（`desktopApp` 窗口里的 Compose `MenuBar`，见
+ * `DesktopWindow.kt`）—— 原型自己就写着那 26px 是 macOS 系统菜单栏的示意
+ * （`prototype/relay.html` 的 `.menubar` 注释）。
  */
 @Composable
 public fun DesktopShell(
@@ -276,10 +286,29 @@ public fun DesktopShell(
         if (externalFilesRequest > 0) view = DesktopView.Files
     }
     var selectedPeerId by remember { mutableStateOf(initialPeerId) }
+    var selectedWsId by remember { mutableStateOf<String?>(null) }
+    var selectedAgentSessionId by remember(selectedPeerId) { mutableStateOf<String?>(null) }
+    var showWsQrFor by remember { mutableStateOf<WorkspaceUi?>(null) }
     var query by remember { mutableStateOf(initialQuery) }
     // 窄档搜索面板的展开态由壳持有，工具栏只负责呈现这个开关。
     // 面板收起后 query 仍保留：否则用户点一下「关闭」就把正在用的筛选无声清空了。
     var searching by remember { mutableStateOf(false) }
+    var showCreateWsDialog by remember { mutableStateOf(false) }
+    // task-2 接线：进入会话**那一刻**的未读条数。必须在 controller.selectConversation
+    // （它会清零未读）之前采下，否则永远是 0 —— 屏外未读指示就只能退化成一个没有数字的
+    // 「回到最新」。采集只能发生在壳里：只有壳知道"用户点了哪一行"，控制器在清完未读之后
+    // 已经拿不到原值了。
+    var desktopChatUnreadOnEntry by remember { mutableStateOf(0) }
+    // 所有"打开一个会话"的路径都走它：先采未读，再真正切换。分散写 controller.selectConversation
+    // 的地方有十来处，漏掉任何一处都会让那一处进来的会话丢指示。
+    val openConversation: (String) -> Unit = { convId ->
+        desktopChatUnreadOnEntry = state.unreadByPeer[convId] ?: 0
+        controller.selectConversation(convId)
+    }
+    // issue 7：某个工作区没有绑定协同群时的建群提示对象。
+    // 与 showCreateWsDialog（「所有工作区」列表，独立入口「协同群」）分开两格 ——
+    // 那是"挑一个工作区建群"，这是"就这一行工作区建群"，两个动作不能共用一个开关。
+    var groupCreatePromptFor by remember { mutableStateOf<WorkspaceUi?>(null) }
     // 工作区是**第五个平级视图**，统一通过切换到 [DesktopView.Agents] 呈现。
     //
     // 顺带删掉了 `DesktopAgentPane`：它存在的唯一理由就是给那个浮层做外壳
@@ -290,9 +319,11 @@ public fun DesktopShell(
     // 往窗口层报当前会话，供拖放接收与托盘跳转使用。见 [DesktopShellActions.onSelectionChange]。
     // 同一条变化线也把"正看着谁"推给控制器：桌面壳不走 `nav`，控制器自己看不见选中项，
     // 不推的话停在一个会话上收消息会留下一个不消的未读（手机/平板是同一条规矩）。
-    LaunchedEffect(selectedPeerId) {
-        actions.onSelectionChange(selectedPeerId)
-        controller.setVisibleConversation(selectedPeerId)
+    // 当视图不在会话页时视为空，切回会话页时恢复并清空未读。
+    val currentVisibleConvId = if (view == DesktopView.Conversations) selectedPeerId else null
+    LaunchedEffect(currentVisibleConvId) {
+        actions.onSelectionChange(currentVisibleConvId)
+        controller.setVisibleConversation(currentVisibleConvId)
     }
 
     // 戳一碰的"定位到该会话"：切到会话视图并选中它。请求由外壳消费一次就清掉
@@ -301,6 +332,7 @@ public fun DesktopShell(
         val target = focusPeerId ?: return@LaunchedEffect
         view = DesktopView.Conversations
         selectedPeerId = target
+        selectedWsId = null
     }
 
     val sessions = remember(state.conversations, query) {
@@ -314,10 +346,22 @@ public fun DesktopShell(
     // 所以根先于输入框看到按键。必须 `.focusable()` —— 不在焦点路径上的 Column 收不到
     // 预览事件；但刻意**不** requestFocus：父级的 LaunchedEffect 比子级后跑，抢焦点会把
     // 输入框的启动自动聚焦顶掉，窗口一打开就打不了字。
+    // 「新建会话」的**唯一**实现（缺陷②）：切到节点视图 + 宿主动作。
+    //
+    // 为什么必须只有这一处：此前菜单写的是「view = Nodes + actions.onNewConversation()」，
+    // 而宿主注入的 `onNewConversation` 是空实现 —— 于是"新建会话"看起来有用全靠那次
+    // 顺带切视图；同一个命令的第二条入口（⌘N）如果只调动作、不切视图，用户按下去
+    // 就什么都不发生。同一个命令两条入口两种行为，正是要消掉的那类分叉。
+    // 现在快捷键、工具栏、系统菜单栏都从这一份语义出发（菜单栏在窗口层，用
+    // `host.requestNodesView()` + 同一个 `actions.onNewConversation()` 表达同一件事）。
+    val newConversation: () -> Unit = {
+        view = DesktopView.Nodes
+        actions.onNewConversation()
+    }
+
     fun handleShortcut(shortcut: DesktopShortcut): Boolean = when (shortcut) {
         DesktopShortcut.NewConversation -> {
-            view = DesktopView.Nodes
-            actions.onNewConversation()
+            newConversation()
             true
         }
 
@@ -443,28 +487,6 @@ public fun DesktopShell(
                 handleShortcut(shortcut)
             },
     ) {
-        // 菜单栏是桌面 chrome 里的第一段；平板把它整条拿掉（见 [DesktopChromeMode]）。
-        if (chromeMode.showsDesktopChrome) {
-            DesktopMenuBar(
-                darkTheme = darkTheme,
-                onOpenSettings = actions.onOpenSettings,
-                onToggleTheme = actions.onToggleTheme,
-                onExportDiagnostics = actions.onExportDiagnostics,
-                onRefresh = actions.onRefresh,
-                onQuit = actions.onQuit,
-                onOpenAgents = openAgents,
-                onCopyNodeId = { actions.onCopyNodeId(state.selfNodeId) },
-                onNewConversation = {
-                    view = DesktopView.Nodes
-                    actions.onNewConversation()
-                },
-                onImportFiles = { selectedPeerId?.let(actions.onImportFiles) },
-                onSelectView = { view = it },
-                // 与上面 [DesktopShortcut.ScreenCapture] 那条快捷键**逐字同一个**表达式：同一个组合键
-                // 两条入口必须同一种行为（task-25）。不在这里顺带 `view = …`，截图覆盖窗是独立窗。
-                onScreenCapture = { controller.triggerScreenCapture(selectedPeerId) },
-            )
-        }
         // 窗口级标题栏只在 Expanded/Medium 画 —— 窄窗（Compact，< DesktopMetrics.MEDIUM_MIN_PX）
         // 不画它：右栏自带的 `.dhead` 里已经有身份与复制按钮，再叠一行「捎话 Tidings」就是
         // 同一份信息占掉两行高度。原型见 `prototype/relay.html?size=compact`。
@@ -485,7 +507,9 @@ public fun DesktopShell(
                 query = query,
                 onQueryChange = { query = it },
                 onImportFiles = { selectedPeerId?.let(actions.onImportFiles) },
-                onNewConversation = { view = DesktopView.Nodes; actions.onNewConversation() },
+                onNewConversation = newConversation,
+                // 缺陷③：没选中会话时「导入文件」置灰（判据与系统菜单栏那一项同源）。
+                canImportFiles = canImportFiles(selectedPeerId),
                 // 没有选中会话时按钮是灰的：开一扇空窗口对用户没有意义。
                 canOpenInNewWindow = selectedPeerId != null && actions.onOpenPeerWindow != null,
                 onOpenInNewWindow = { selectedPeerId?.let { id -> actions.onOpenPeerWindow?.invoke(id) } },
@@ -514,18 +538,37 @@ public fun DesktopShell(
                             sizeClass = sizeClass,
                             sessions = sessions,
                             selectedPeerId = selectedPeerId,
+                            selectedWsId = selectedWsId,
+                            activeSessionId = selectedAgentSessionId,
+                            onSelectAgentSession = { selectedAgentSessionId = it },
+                            unreadOnEntry = desktopChatUnreadOnEntry,
                             query = query,
                             onClearQuery = { query = "" },
                             onCopyPeerId = { actions.onCopyNodeId(it) },
                             onOpenInNewWindow = actions.onOpenPeerWindow,
-                            onSelect = { id -> selectedPeerId = id },
+                            onSelect = { id ->
+                                val ws = state.workspaceOfConv(id)
+                                selectedPeerId = id
+                                selectedWsId = ws?.wsId
+                                selectedAgentSessionId = null
+                                openConversation(id)
+                            },
                             onGoToPairing = { view = DesktopView.Nodes },
                             now = now,
                             initialDraft = initialDraft,
                             initialGlobalSearch = initialGlobalSearch,
-                            // 返回值（新群的 groupId）在这里没用：选中新群由控制器自己
-                            // 通过会话列表把它摆出来，壳不需要跳转。
-                            onCreateGroup = { name, members -> controller.createGroup(name, members) },
+                            onCreateGroup = { name, members, description ->
+                                val gid = controller.createGroup(name, members, description)
+                                if (gid != null) {
+                                    val convId = app.relay.core.protocol.ConvId.group(gid)
+                                    val ws = state.workspaceOfGroup(gid)
+                                    selectedPeerId = convId
+                                    selectedWsId = ws?.wsId ?: description.takeIf { it.isNotBlank() }
+                                    selectedAgentSessionId = null
+                                    openConversation(convId)
+                                }
+                                gid
+                            },
                             // 首启空态第三张卡（"看看工作区"）：切到工作区视图，见 [openAgents]。
                             onOpenAgentConsole = openAgents,
                         )
@@ -537,8 +580,12 @@ public fun DesktopShell(
                             onDismissBanner = controller::dismissBanner,
                             onOpenFolder = actions.onOpenDownloadsFolder,
                             onJumpToConversation = { id ->
+                                val ws = state.workspaceOfConv(id)
                                 selectedPeerId = id
+                                selectedWsId = ws?.wsId
+                                selectedAgentSessionId = null
                                 view = DesktopView.Conversations
+                                openConversation(id)
                             },
                             onRefresh = actions.onRefresh,
                             now = now,
@@ -559,22 +606,109 @@ public fun DesktopShell(
                             // 横幅是**窗口级**提示（断线、传输失败…），它跟随当前视图。
                             // 浮层时代由 AgentPane 画，现在这一屏自己画 —— 少了这一行，
                             // 用户在工作区屏就看不到任何横幅了（其它 pane 都各自画了）。
+                            if (showCreateWsDialog) {
+                                val groupNameFormat = org.jetbrains.compose.resources.stringResource(
+                                    app.relay.generated.resources.Res.string.workspace_group_default_name,
+                                    "%s",
+                                )
+                                WorkspaceGroupCreateDialog(
+                                    workspaces = state.agentWorkspaces.values.toList(),
+                                    groups = state.settings.groups,
+                                    onDismiss = { showCreateWsDialog = false },
+                                    onOpenChat = { groupId ->
+                                        showCreateWsDialog = false
+                                        val convId = app.relay.core.protocol.ConvId.group(groupId)
+                                        val ws = state.workspaceOfGroup(groupId)
+                                        selectedPeerId = convId
+                                        selectedWsId = ws?.wsId
+                                        selectedAgentSessionId = null
+                                        view = DesktopView.Conversations
+                                        openConversation(convId)
+                                    },
+                                    onShowQr = { ws ->
+                                        showWsQrFor = ws
+                                    },
+                                    onQuickCreate = { ws, _ ->
+                                        showCreateWsDialog = false
+                                        // 群名走共享资源（原来这里是硬编码的"… 协同群"）：
+                                        // 手机壳一直用 workspace_group_default_name，两条壳的默认名
+                                        // 必须同源 —— 否则同一次建群在两端叫两个名字。
+                                        val name = groupNameFormat.replace("%s", ws.wsTitle ?: ws.wsId)
+                                        val members = state.peers.filter { it.online }.map { it.nodeId }
+                                        val gid = controller.createGroup(name, members, ws.wsPath ?: ws.wsId)
+                                        if (gid != null) {
+                                            val convId = app.relay.core.protocol.ConvId.group(gid)
+                                            selectedPeerId = convId
+                                            selectedWsId = ws.wsId
+                                            selectedAgentSessionId = null
+                                            view = DesktopView.Conversations
+                                            openConversation(convId)
+                                        }
+                                    },
+                                    onCreateNew = { path, _, groupName, _ ->
+                                        showCreateWsDialog = false
+                                        val members = state.peers.filter { it.online }.map { it.nodeId }
+                                        val gid = controller.createGroup(groupName, members, path)
+                                        if (gid != null) {
+                                            val convId = app.relay.core.protocol.ConvId.group(gid)
+                                            val ws = state.workspaceOfGroup(gid)
+                                            selectedPeerId = convId
+                                            selectedWsId = ws?.wsId
+                                            selectedAgentSessionId = null
+                                            view = DesktopView.Conversations
+                                            openConversation(convId)
+                                        }
+                                    },
+                                )
+                            }
                             state.banner?.let { AppBanner(it, onDismiss = controller::dismissBanner) }
                             AgentConsoleScreen(
                                 state = state,
                                 selectedAgentId = selectedPeerId,
                                 onSelectAgent = { selectedPeerId = it },
-                                // 壳的视图路由是**它自己**管的（视图路由归 shell 独占），
-                                // 它没有 nav 对象。所以这里不传 wsId —— 桌面壳的聊天窗本来就是
-                                // 分栏的，左栏一直在，用户不会「进去之后不知道在哪个工作区」。
-                                // 要补收窄得先给这个壳一套工作区选择，那是另一件事。
-                                onOpenChat = { id, _ ->
-                                    selectedPeerId = id
-                                    view = DesktopView.Conversations
+                                onOpenChat = { id, wsId ->
+                                    val ws = state.agentWorkspaces.values.firstOrNull { it.wsId == wsId }
+                                    val boundGroup = state.settings.groups.firstOrNull { g ->
+                                        val matchPath = ws?.wsPath?.isNotBlank() == true && g.description?.contains(ws.wsPath) == true
+                                        val matchTitle = ws?.wsTitle?.isNotBlank() == true && g.name.contains(ws.wsTitle)
+                                        matchPath || matchTitle
+                                    }
+                                    if (boundGroup != null) {
+                                        val groupConvId = app.relay.core.protocol.ConvId.group(boundGroup.groupId)
+                                        selectedPeerId = groupConvId
+                                        view = DesktopView.Conversations
+                                        openConversation(groupConvId)
+                                    } else if (ws != null) {
+                                        // issue 7：这一行是某个具体工作区且没有绑定群 ⇒ **针对它**
+                                        // 提示建群并进入。此前这里是 `id == state.selfNodeId` 时
+                                        // `showCreateWsDialog = true` —— 弹出一张跟这一行无关的
+                                        // 「所有工作区」列表，用户点的那一行在列表里还要自己再找一遍。
+                                        // 那张列表仍然保留，但只能是独立入口（会话栏的「协同群」按钮）。
+                                        groupCreatePromptFor = ws
+                                    } else {
+                                        // 没有 wsId 的 Agent 行（或者工作区对象还没到）：直接进这个
+                                        // 节点的会话，与手机壳同一条 —— 不再因为"是本机"就换一条路。
+                                        selectedPeerId = id
+                                        selectedWsId = wsId
+                                        selectedAgentSessionId = null
+                                        view = DesktopView.Conversations
+                                        openConversation(id)
+                                        if (wsId != null) {
+                                            controller.requestAgentSessionPage(id, wsId, offset = 0)
+                                        }
+                                    }
+                                },
+                                onLoadWorkspaceSessions = { id, wsId ->
+                                    controller.requestAgentSessionPage(id, wsId, offset = 0)
                                 },
                                 onFindNodes = { view = DesktopView.Nodes },
                                 onRespondApproval = controller::respondApproval,
                                 onCancelTask = controller::cancelAgentTask,
+                                onCreateWorkspaceGroup = { showCreateWsDialog = true },
+                                onRefresh = {
+                                    controller.refreshPeers()
+                                    actions.onRefresh()
+                                },
                                 modifier = Modifier.fillMaxSize(),
                                 now = now,
                             )
@@ -601,7 +735,9 @@ public fun DesktopShell(
                             // 是「点了没反应」，与早期只改浮层开关而不换视图那次同一个形状。
                             onOpenChat = { peerId ->
                                 selectedPeerId = peerId
+                                selectedWsId = null
                                 view = DesktopView.Conversations
+                                openConversation(peerId)
                             },
                             // 壳已扣过 chrome，这里不能再扣一次。
                             sizeClass = sizeClass,
@@ -624,7 +760,7 @@ public fun DesktopShell(
                 DesktopWindowSizeClass.Expanded,
                 DesktopWindowSizeClass.Medium,
                 -> Row(Modifier.fillMaxSize()) {
-                    NavigationRail(view = view, onViewChange = { view = it }, badges = desktopNavBadges(state))
+                    NavigationRail(view = view, onViewChange = { view = it }, badges = desktopNavBadges(state), onOpenSettings = actions.onOpenSettings)
                     Box(Modifier.weight(1f).fillMaxHeight()) { viewContent() }
                 }
 
@@ -660,6 +796,60 @@ public fun DesktopShell(
             onStop = { controller.stopScreenView() },
             onSetMode = { controller.setScreenViewMode(it) },
         )
+
+        showWsQrFor?.let { ws ->
+            WorkspaceQrDialog(
+                wsTitle = ws.wsTitle ?: ws.wsId,
+                wsId = ws.wsId,
+                wsPath = ws.wsPath,
+                host = state.network.localAddresses.firstOrNull()
+                    ?: state.peers.firstOrNull { it.online }?.let { it.host.ifBlank { it.ip } },
+                port = state.network.boundUdpPort.takeIf { it > 0 } ?: state.settings.udpPort,
+                // 全部候选：跨网络的手机才能靠这张码找到本机（公网 v6 在二维码预算内）。
+                addresses = state.network.localAddresses,
+                nodeId = state.selfNodeId,
+                // task-86：直通码也必须带 pin，否则手机建不出公网 TLS 目标。
+                tlsPin = state.network.selfTlsPin,
+                // 带昵称：扫完立刻是真名，不是 node-a1b2c3d4。
+                nick = state.settings.nick,
+                onDismiss = { showWsQrFor = null },
+            )
+        }
+
+        // issue 7：某个工作区没有绑定协同群时的建群提示（与手机壳同一支对话框）。
+        // 群名/成员与「快速建群」同一口径：默认名格式 + 当前在线设备。
+        groupCreatePromptFor?.let { ws ->
+            val groupNameFormat = org.jetbrains.compose.resources.stringResource(
+                app.relay.generated.resources.Res.string.workspace_group_default_name,
+                "%s",
+            )
+            WorkspaceGroupPromptDialog(
+                workspace = ws,
+                onDismiss = { groupCreatePromptFor = null },
+                onCreate = {
+                    groupCreatePromptFor = null
+                    val name = groupNameFormat.replace("%s", ws.wsTitle ?: ws.wsId)
+                    val members = state.peers.filter { it.online }.map { it.nodeId }
+                    val gid = controller.createGroup(name, members, ws.wsPath ?: ws.wsId)
+                    if (gid != null) {
+                        val convId = app.relay.core.protocol.ConvId.group(gid)
+                        selectedPeerId = convId
+                        selectedWsId = ws.wsId
+                        selectedAgentSessionId = null
+                        view = DesktopView.Conversations
+                        openConversation(convId)
+                    }
+                },
+                onOpenWithoutGroup = {
+                    groupCreatePromptFor = null
+                    selectedPeerId = ws.peerId
+                    selectedWsId = ws.wsId
+                    selectedAgentSessionId = null
+                    view = DesktopView.Conversations
+                    openConversation(ws.peerId)
+                },
+            )
+        }
     }
 
         if (overflowPanelPreview && overflowItems.isNotEmpty()) {
