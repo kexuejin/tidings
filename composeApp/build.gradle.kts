@@ -84,6 +84,13 @@ kotlin {
             implementation(compose.materialIconsExtended)
             implementation(libs.sqldelight.runtime)
             implementation(libs.sqldelight.coroutines)
+            // 聊天正文的 Markdown 渲染（见 feature/chat/MarkdownMessage.kt）。
+            // 只加 base + m3：m3 那个才有按 Material3 主题取色/取字阶的入口。
+            // **不加 -code**（围栏代码的语法高亮）：它拖进来的 dev.snipme:highlights
+            // 没有 Android 产物（要靠 AGP 的 jvm→androidJvm 兼容规则回退），而且整个
+            // jar 都是 Java 21 字节码 —— 这两条都得先在真机上验过再说，而正文渲染不需要它。
+            implementation(libs.markdown.renderer)
+            implementation(libs.markdown.renderer.m3)
         }
         androidMain.dependencies {
             implementation(libs.compose.ui.tooling.preview)

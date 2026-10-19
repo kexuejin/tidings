@@ -24,6 +24,17 @@ kotlinx-coroutines = "1.11.0"
 kotlinx-serialization = "1.11.0"
 ktor = "3.3.1"
 sqldelight = "2.0.2"
+# 聊天消息的富文本渲染（agent 回复本来就是 Markdown）。见 feature/chat/MarkdownMessage.kt。
+#
+# **为什么钉 0.41.0 而不是最新**：从 0.42.0 起这个库的 AAR 声明 `minCompileSdk=37`，
+# 而本仓库 compileSdk 是 36 —— 装上红在 `:androidApp:checkDebugAarMetadata`（不是编译错，
+# 是 AAR 元数据检查），本机 SDK 也还没有 android-37 可装。0.41.0 是最后一个 `minCompileSdk=36` 的版本。
+#
+# 升级条件（两条一起满足再动这个号）：
+#   ① compileSdk 升到 37；
+#   ② Compose 那条线也对齐 —— 0.44.0 起上游的 android 运行面会声明 compose.foundation:1.12.x，
+#      而本仓库没有 resolutionStrategy/force 钉版本，会静默把 Compose 栈抬到 1.12（编译面却停在 1.11）。
+markdown-renderer = "0.41.0"
 
 [libraries]
 kotlin-test = { module = "org.jetbrains.kotlin:kotlin-test", version.ref = "kotlin" }
@@ -64,6 +75,11 @@ sqldelight-coroutines = { module = "app.cash.sqldelight:coroutines-extensions", 
 sqldelight-android-driver = { module = "app.cash.sqldelight:android-driver", version.ref = "sqldelight" }
 sqldelight-sqlite-driver = { module = "app.cash.sqldelight:sqlite-driver", version.ref = "sqldelight" }
 sqldelight-native-driver = { module = "app.cash.sqldelight:native-driver", version.ref = "sqldelight" }
+# --- 富文本 ---
+# -m3 才有按 Material3 主题取色的 markdownColor()/markdownTypography()；
+# base 模块只给渲染器与 AST。
+markdown-renderer = { module = "com.mikepenz:multiplatform-markdown-renderer", version.ref = "markdown-renderer" }
+markdown-renderer-m3 = { module = "com.mikepenz:multiplatform-markdown-renderer-m3", version.ref = "markdown-renderer" }
 
 [plugins]
 kotlinMultiplatform = { id = "org.jetbrains.kotlin.multiplatform", version.ref = "kotlin" }

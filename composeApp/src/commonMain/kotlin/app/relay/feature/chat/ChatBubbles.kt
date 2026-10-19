@@ -169,6 +169,13 @@ internal fun MessageBubble(
     quotedMessage: MessageUi? = null,
     onScrollToQuoted: (() -> Unit)? = null,
     onImageClick: ((String) -> Unit)? = null,
+    /**
+     * 正文按 Markdown 渲染。
+     *
+     * 只有 **agent 发的**消息为真（判据在调用方：私聊看会话对端，群聊看发送者）。
+     * 人发的消息保持纯文本 —— 用户打的 `*星号*` 就该原样显示，而不是被当成强调。
+     */
+    renderMarkdown: Boolean = false,
 ) {
     // 空气泡防线：正文只有看不见的字符、又没有文件 / PK / 思考块可画时，整条不画。
     // 判据只看"有没有东西可显示"，不看 delivery —— 待发/失败的文件消息有 file 卡，
@@ -298,7 +305,11 @@ internal fun MessageBubble(
                         )
                     }
                     if (message.text.isNotBlank()) {
-                        Text(text = message.text, style = MaterialTheme.typography.bodyMedium)
+                        if (renderMarkdown) {
+                            MarkdownMessage(message.text)
+                        } else {
+                            Text(text = message.text, style = MaterialTheme.typography.bodyMedium)
+                        }
                     }
                 }
                 Row(

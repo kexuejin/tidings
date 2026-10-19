@@ -680,6 +680,17 @@ fun ChatScreen(
                                     }
                                 },
                                 onImageClick = { previewingImagePath = it },
+                                // agent 的回复本身就是 Markdown（标题/列表/代码块/表格/链接），
+                                // 纯文本渲染会让用户看到 ** 与 - 的字面量。人发的消息不转，
+                                // 否则用户打的星号会被当成强调。
+                                renderMarkdown = shouldRenderMarkdown(
+                                    mine = message.mine,
+                                    senderIsAgent = if (group != null) {
+                                        state.peer(message.senderId)?.isAgent == true
+                                    } else {
+                                        peer.isAgent
+                                    },
+                                ),
                             )
                         }
                     }
