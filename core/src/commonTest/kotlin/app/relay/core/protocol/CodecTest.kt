@@ -2,6 +2,8 @@
 
 package app.relay.core.protocol
 
+import kotlinx.serialization.json.JsonObject
+import kotlinx.serialization.json.JsonPrimitive
 import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertFalse
@@ -12,6 +14,94 @@ import kotlin.test.fail
  * 协议层边界测试：TS 侧没有 golden vector 覆盖、但错了会在真实网络上翻车的地方。
  */
 class CodecTest {
+
+    /**
+     * 群文本的 `senderId`（可选）：**不传时载荷必须与以前逐字节相同**。
+     *
+     * 这条是向后兼容的门：旧端不认识这个键，但我们的 golden vector 是一串固定的 JSON ——
+     * 默认 `null` 若被序列化成 `"senderId":null`，所有老端的 golden 断言都会红，
+     * 而且线上帧会白白胖 18 字节。
+     */
+    @Test
+    fun groupTextWithoutSenderIdKeepsTheOldShape() {
+        val legacy = Codec.groupTextPayload("hi", "grp-1", 1).toString()
+        assertFalse(legacy.contains("senderId"), "不传 senderId 时载荷里不该出现这个键：" + legacy)
+    }
+
+    /** 传了就必须写进去，而且读得回来（`agent:` 形态原样保留，不做大小写或前缀改写）。 */
+    @Test
+    fun groupTextCarriesSenderIdWhenProvided() {
+        val json = Codec.groupTextPayload(
+            text = "这是 agent 说的",
+            groupId = "grp-1",
+            groupRev = 1,
+            senderId = "agent:dsh",
+        ).toString()
+        assertTrue(json.contains("\"senderId\""), json)
+        assertTrue(json.contains("agent:dsh"), "agent: 前缀必须原样保留：" + json)
+    }
+
+    /**
+     * 带 `senderId` 的群文本必须**过得了入站校验**。
+     *
+     * 这条是回归测试：`senderId` 曾经只加进了 data class 与编码器，**漏加进
+     * `CodecMsg.GROUP_TEXT_KEYS` 白名单** ⇒ 对端 `hasOnlyKeys` 判成 extra-field 整帧拒收。
+     * 症状极具迷惑性：发送侧编码成功、本地落库成功、发送返回 SENT，接收侧却一条都没有。
+     * 所以断言必须走**解码**这条路，只断言「JSON 里有这个键」是抓不住的。
+     */
+    @Test
+    fun groupTextWithSenderIdSurvivesInboundValidation() {
+        val payload = Codec.groupTextPayload(
+            text = "hi",
+            groupId = "grp-1",
+            groupRev = 1,
+            senderId = "agent:dsh",
+        ).toString()
+        val decoded = Codec.decodeTcp(env("msg", payload)) as? DecodeResult.Ok
+            ?: fail("带 senderId 的群文本被入站校验拒了：$payload")
+        val obj = decoded.env.payload as JsonObject
+        assertEquals("agent:dsh", (obj["senderId"] as JsonPrimitive).content)
+    }
+
+    /** 思考过程随群文本一起走，且**不混进 `text`**（正文与思考各有各的上限）。 */
+    @Test
+    fun groupTextCarriesReasoningAlongsideTheAnswer() {
+        val payload = Codec.groupTextPayload(
+            text = "答案",
+            groupId = "grp-1",
+            groupRev = 1,
+            reasoning = "先看 A 再看 B",
+        ).toString()
+        assertTrue(payload.contains("\"reasoning\""), payload)
+        val decoded = Codec.decodeTcp(env("msg", payload)) as? DecodeResult.Ok
+            ?: fail("带 reasoning 的群文本被入站校验拒了：$payload")
+        val obj = decoded.env.payload as JsonObject
+        assertEquals("先看 A 再看 B", (obj["reasoning"] as JsonPrimitive).content)
+        assertEquals("答案", (obj["text"] as JsonPrimitive).content)
+    }
+
+    /** 不传 reasoning 时载荷与以前逐字节相同（键缺席，不是 `"reasoning":null`）。 */
+    @Test
+    fun groupTextWithoutReasoningKeepsTheOldShape() {
+        val legacy = Codec.groupTextPayload("hi", "grp-1", 1).toString()
+        assertFalse(legacy.contains("reasoning"), "不传 reasoning 时载荷里不该出现这个键：" + legacy)
+    }
+
+    /** 超过上限的 reasoning 被整帧拒收 ⇒ 发送侧必须先截断（`clampGroupReasoning`）。 */
+    @Test
+    fun oversizedReasoningIsRejected() {
+        val payload = Codec.groupTextPayload(
+            text = "hi",
+            groupId = "grp-1",
+            groupRev = 1,
+            reasoning = "汉".repeat(Limits.GROUP_REASONING_BYTES),
+        ).toString()
+        assertEquals(
+            RejectReason.badPayload(MsgTypes.MSG),
+            (Codec.decodeTcp(env("msg", payload)) as? DecodeResult.Rejected)?.reason,
+        )
+    }
+
 
     private companion object {
         const val ID = "33333333-3333-4333-8333-333333333333"

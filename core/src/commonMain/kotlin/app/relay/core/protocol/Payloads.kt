@@ -41,9 +41,14 @@ data class TextMsgPayload(
 /**
  * msg kind=group-text。
  *
- * key 顺序对齐 TS 侧白名单 `kind|text|groupId|groupRev|mentions|resend|replyTo`：
+ * key 顺序对齐 TS 侧白名单 `kind|text|groupId|groupRev|mentions|resend|replyTo`，
+ * 之后是本仓扩展的 `senderId` / `reasoning`。
+ *
  * 老节点对群消息做**严格字段白名单**校验，多一个 key 就整帧丢弃（golden vector
- * `neg-group-text-extra-field` 覆盖了这条）。
+ * `neg-group-text-extra-field` 覆盖了这条）⇒ **每加一个可选键，必须同步加进
+ * `CodecMsg.GROUP_TEXT_KEYS`**，否则本端发得出去、对端整帧拒收（`senderId` 就踩过这个坑：
+ * 键加进了 data class 却漏进白名单，于是 agent 转发进群的每一条都被对端判成 extra-field
+ * 丢掉，用户看到的是「桌面看得见、手机永远收不到」）。
  */
 @Serializable
 data class GroupTextMsgPayload(
@@ -54,6 +59,43 @@ data class GroupTextMsgPayload(
     val mentions: List<String>? = null,
     val resend: Boolean? = null,
     val replyTo: String? = null,
+    /**
+     * 这条群消息**真正的说话者**，当它不等于信封 `from` 时使用（可选）。
+     *
+     * ## 为什么需要它（真机缺陷）
+     *
+     * 信封上的 `from` 永远是**发送这台设备**，而这台设备可能在**代别人说话**：
+     * DSH 的 agent 事件由桌面端转发到群里，信封 `from` 是桌面端的 nodeId。
+     * 于是手机端把 agent 说的话显示成「**桌面端**发的」——
+     * 而桌面端自己是按 `agent:DSH` 落库的，**同一个群两端显示不同的发送者**。
+     *
+     * 取值约定：与桌面端本地落库的 `MessageUi.senderId` 同一形态 ——
+     * 真人用 nodeId，agent 用 `agent:<kind>`。旧端不发这个键 ⇒ 接收方按 `from` 处理
+     * （与以前完全一致，不会更差）。
+     *
+     * **安全边界**：这只是**显示归属**，不参与鉴权。任何成员本来就能在群里说任何话，
+     * 把 senderId 写成别人的 nodeId 只会让那条气泡挂在别人名下 —— 与"冒名发言"同级，
+     * 而这个协议本来就没有防冒名（群内成员互信）。所以这里不做额外校验，
+     * 只限制长度形态（见 `CodecMsg.validateMsg`）。
+     */
+    val senderId: String? = null,
+    /**
+     * 这条群消息的**思考过程**（可选，就是 `MessageUi.reasoning` 那一份）。
+     *
+     * ## 为什么需要它（用户可见缺陷）
+     *
+     * 桌面端把 agent 事件转发进群时，此前只发**剥掉思考块之后的正文**：思考过程
+     * 只落在桌面自己的库里，于是同一个群里桌面端的气泡有「思考」折叠块、手机端没有 ——
+     * 用户看到的是「过程在桌面，手机上只剩最后一句」。
+     *
+     * 这里把思考过程作为**独立字段**送过来（而不是把 ` thinking…` 原样塞回 `text`）：
+     * 正文与思考各有各的上限，混在 `text` 里会让正文顶到 4096 的通道上限而被整帧拒收 ——
+     * 那正是此前「带思考的原文发出去、对端反而收不到」的形态。
+     *
+     * 超长由发送侧截断到 [Limits.GROUP_REASONING_BYTES]（UTF-8 字节）。
+     * 旧接收端不认识这个键 ⇒ 整帧丢弃；两端需同版本（与 `senderId` 同一取舍）。
+     */
+    val reasoning: String? = null,
 )
 
 /**
@@ -187,6 +229,29 @@ data class AgentEventPayload(
     val summary: String? = null,
     val body: String? = null,
     val ref: String? = null,
+    /**
+     * 附件元数据（task-45，cap `att1`）—— **追加在最后**，旧字段的线上键序一字不变。
+     *
+     * 为什么需要它：在此之前图片只能以**文本占位**（"🖼 图片: image.png (920×412, 30 KB)"）
+     * 出现在手机上。占位比丢帧好，但用户要的是看到附件本身。这里只带**元数据**
+     * （id/类型/尺寸/大小/文件名），字节仍走既有的文件传输路径（file-msg / file-ctl）——
+     * 与 DSH 侧 `user/message` 的 content 块同口径。
+     *
+     * 缺这个键 ⇒ 退回文本占位（旧端兼容）；带了这个键但形状不对 ⇒ 整帧拒（见
+     * [app.relay.core.protocol.CodecAgent.validateAgentEvent]）。
+     */
+    val attachment: AgentEventAttachment? = null,
+)
+
+/** agent 事件的附件元数据（与 DSH 侧 content 块同口径，task-45）。 */
+@Serializable
+data class AgentEventAttachment(
+    val attachmentId: String,
+    val mediaType: String,
+    val width: Int? = null,
+    val height: Int? = null,
+    val bytes: Long? = null,
+    val name: String? = null,
 )
 
 /** PPE-1 §6.3 `agent-queue`：任务入队 / 出队（cap `agq1`）。 */
@@ -236,6 +301,7 @@ data class AgentAckPayload(
     val ackOf: String,
     val kind: String,
     val at: Long? = null,
+    val decidedBy: String? = null,
 )
 
 /**
@@ -295,6 +361,8 @@ data class AgentWorkspacePayload(
 @Serializable
 data class AgentGrantRequestPayload(
     val agentKey: String? = null,
+    val wsId: String? = null,
+    val access: String? = null,
     val reason: String? = null,
     val at: Long? = null,
 )
@@ -310,6 +378,10 @@ data class AgentGrantPayload(
     val state: String,
     val scope: String,
     val agentKey: String? = null,
+    val wsId: String? = null,
+    val access: String? = null,
+    val isMyDevice: Boolean? = null,
+    val delegatedApproval: Boolean? = null,
     val at: Long? = null,
 )
 
@@ -318,6 +390,8 @@ data class AgentGrantPayload(
 data class AgentGrantListPayload(
     val scope: String,
     val agentKey: String? = null,
+    val wsId: String? = null,
+    val access: String? = null,
     /** 宿主自报的条目总数（让手机端能显示"共 N 条"而不必等齐）。 */
     val total: Long? = null,
     val at: Long? = null,

@@ -58,7 +58,14 @@
 | `ag1` | **agent 节点身份标记**（已有实现，本表原先漏记） | 不携带任何帧语义，只用于在节点列表/会话列表里把 agent 节点与人对端区分开（`MsgTypes.CAP_AGENT`、`Profile.isAgentNode()`）。它**不能**替代 `agn1` 做帧能力协商 |
 | `agn1` | **agent 会话语义基线**（必选前置） | 任何 `agent-*` 帧发送给新节点前，必须先确认对方声明了 `agn1` |
 | `agq1` | 任务队列 + 审批语义 | `agent-queue`、`agent-run`、`agent-approval`、`agent-cancel`、`agent-ack` |
-| `age1` | 可恢复事件流 / 游标语义 | `agent-event` 批量投递、`GET /v1/inbox?cursor=` |
+| `age1` | 可恢复事件流 / 游标语义 | `agent-event` 批量投递、`GET /v1/inbox?cursor=`（**仍未声明**，见下） |
+| `aws1` | 工作区身份与宣告帧（D1/D2/D3） | `agent-session` 的四个可选键 + `agent-workspace` 帧（见 `docs/PROTOCOL-AGENT-WORKSPACE.md`） |
+| `agr1` | 授权回路（D7） | 三张 grant 帧；**宿主在投递 agent 帧前按策略过滤** —— 没授权 = 没数据，沉默 ≠ 拒绝 |
+| `agp1` | 会话分页（D8） | `agent-session-page`：设备向宿主要一页历史会话（与 `agn1` 是两个方向的能力） |
+| `att1` | agent 事件附件卡片（task-45） | 发送方据此决定要不要在 `agent-event` 里带 `attachment`；**不声明就只发文本占位** |
+| `lnk1` | 长连接下行（K1/K2） | 由**主机**声明；手机据此决定要不要拨号（见 `ARCHITECTURE.md` §5.4） |
+
+> 兼容规则不变，但补一条**主动**保障：新字段只在「对端声明了对应 cap」时才发。`att1` 就是这么用的 —— 不靠"指望旧端恰好宽容"，而是先看 caps 再决定带不带。
 
 规则：
 
@@ -177,6 +184,87 @@
 | `ackOf` | string | ✅ | 被确认的 `msgId` |
 | `kind` | string | ✅ | `queued` \| `approved` \| `denied` \| `cancelled` \| `received` |
 | `at` | int | | epoch ms |
+
+### 6.9 `group` 的 `memberNicks`（可选键，**纯展示**）
+
+**背景**：群成员在每台设备上只有 nodeId。要让成员列表显示真名，只能靠"自己发现过那个节点"
+（同网段 mDNS / 曾经直连）。跨网时不成立 —— 真机现场：红米走蜂窝加入群，成员列表里
+`demo-mac-97` 正常（配对过），另外两人只显示 `f6a7b8c9` / `a7b8c9da` 这样的前 8 位；
+**而桌面端四个都正常**，因为它同一时刻在局域网里认识所有人。同一个群两端显示不一致。
+
+**做法**：`group{op:"info"}` 的 `group` 对象里加一个可选键：
+
+```json
+{"op":"info","group":{
+  "groupId":"…","name":"…","members":["A","B","C"],"rev":3,"updatedBy":"A","updatedTs":1789…,
+  "memberNicks":{"A":"demo-mac-97","B":"panda"}
+}}
+```
+
+| 方面 | 约定 |
+|---|---|
+| 类型 | 对象，`nodeId → 昵称` |
+| 必填 | **否**。旧端不发 ⇒ 成员行退回 nodeId 前 8 位（与以前一致，不更差） |
+| 键约束 | **必须属于 `members`**；越界键 ⇒ 整帧不合法 |
+| 值约束 | `Limits.NICK`（32 字符）；超长/非串 ⇒ 整帧不合法（不截断） |
+| 空对象 | 等同"没带" ⇒ 解码为 null |
+| 语义 | **只用于显示**。不参与成员判定、不参与权限 —— 成员身份永远只认 `members` / `ownerId` / `adminIds`，伪造昵称没有任何特权收益 |
+| 发送侧 | 只填**本机确实知道**的昵称（自己的 + 认识的对端）；不知道的不编，由接收方自己补或降级 |
+| 接收侧优先级 | 自己 > 本机认识的对端 > `memberNicks` > nodeId 前 8 位（本机知识更新鲜） |
+
+**为什么越界键要拒整帧而不是丢弃那个键**：前端拿到 `memberNicks` 会把它们当"群成员"显示，
+一个越界键等于让对端往我的成员列表里塞一个不存在的成员。拒整帧比"悄悄丢掉一个键"
+更容易在联调时暴露问题。
+
+测试：`core/src/commonTest/.../GroupProtocolTest.kt` 的 `memberNicks*` 五条
+（往返 / 缺省为 null / 越界键拒帧 / 形状与长度拒帧 / 空对象为 null）。
+
+### 6.10 群文本的 `senderId` / `reasoning`（可选键，**纯展示**）
+
+**背景（两个用户可见缺陷，同一条根因）**：agent 事件由桌面端转发进群时，信封 `from` 永远是
+**桌面这台设备**，而这条话其实是 agent 说的；同时转发只带**剥掉思考块之后的正文**，
+思考过程只落在桌面自己的库里。于是同一个群：
+
+1. 手机端把 agent 的话显示成「桌面端发的」，桌面端显示 `agent:DSH` —— 两端发送者不一致，
+   用户以为群里多了一个人；
+2. 桌面端气泡有「思考」折叠块，手机端没有 —— 用户看到的是「过程只在桌面，手机只剩最后一句」。
+
+**做法**：`msg`/`kind:"group-text"` 的载荷加两个可选键：
+
+```json
+{"kind":"group-text","text":"1509 项测试全部通过。","groupId":"…","groupRev":7,
+ "senderId":"agent:dsh","reasoning":"先把 FTS 的写入路径读一遍…"}
+```
+
+| 方面 | `senderId` | `reasoning` |
+|---|---|---|
+| 类型 | 字符串 | 字符串 |
+| 必填 | 否（旧端不发 ⇒ 接收方按信封 `from` 处理，与以前一致） | 否（旧端不发 ⇒ 没有思考块） |
+| 取值 | 真人 = nodeId；agent = `agent:<小写 kind>` | 就是桌面端 `MessageUi.reasoning` 那一份 |
+| 约束 | `Limits.ID`（64 字符）、非空 | UTF-8 字节 ≤ `Limits.GROUP_REASONING_BYTES`（24 KiB）、非空 |
+| 语义 | **只用于显示归属**，不参与鉴权 | **只用于显示**，不参与任何判定 |
+| 超长 | 拒帧 | 拒帧；发送侧必须先截断（`NodeOutbound.clampGroupReasoning`） |
+
+**⚠️ 加可选键必须同步加进 `CodecMsg.GROUP_TEXT_KEYS`。** 群文本走的是**严格字段白名单**
+（多一个键整帧丢弃，golden vector `neg-group-text-extra-field` 守着这条）。
+`senderId` 第一版就踩了这个坑：键加进了 data class 与编码器，**漏进白名单**，
+于是 agent 转发进群的每一条都被对端判成 extra-field 丢掉 ——
+发送侧编码成功、本地落库成功、`SendOutcome.SENT`，接收侧一条都没有。
+
+**为什么 `reasoning` 是独立字段，而不是把 ` thinking…</think>` 塞回 `text`**：正文与思考各有各的
+上限。混在 `text` 里时，正文 + 思考一起顶到通道上限（UDP 800 / TCP 4096 字节）会被整帧拒收 ——
+那正是「带思考的原文发出去、对端反而收不到」的形态。分开之后思考有 24 KiB 预算，
+正文仍受原上限约束，两者互不挤占。
+
+**安全边界**：两个键都只影响显示。任何群成员本来就能在群里说任何话，把 `senderId` 写成别人的
+nodeId 只会让那条气泡挂在别人名下（本协议不防冒名，群内成员互信）；`reasoning` 同理，
+伪造一个思考块没有任何特权收益。所以只校验长度形态，不做归属校验。
+
+测试：`core/src/commonTest/.../CodecTest.kt` 的
+`groupTextWithSenderIdSurvivesInboundValidation`（**回归：走解码而不是只断言 JSON 里有键**）、
+`groupTextCarriesReasoningAlongsideTheAnswer`、`groupTextWithoutReasoningKeepsTheOldShape`、
+`oversizedReasoningIsRejected`；`GroupReasoningClampTest.kt` 四条（原样 / 空为 null /
+按字节截断且过校验 / 不在代理对中间切）。
 
 ---
 

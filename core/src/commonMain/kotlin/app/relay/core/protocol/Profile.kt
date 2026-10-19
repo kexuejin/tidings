@@ -25,6 +25,25 @@ data class Profile(
     val host: String,
     val platform: String,
     val tcpPort: Int,
+    /**
+     * K2 的 TLS 监听端口（可选键）。null = 这个节点不提供 TLS 长连接。
+     *
+     * 为什么单独一个端口而不是复用 [tcpPort] 做嗅探：老对端在这条连接上发的是
+     * 4 字节长度前缀，而 TLS 记录以 0x16 开头 —— 混在一起是事故（task-13 裁决 ③）。
+     * 有默认值 ⇒ 老节点的档案里没有它，读出来是 null，行为一字不变。
+     */
+    val tlsPort: Int? = null,
+    /**
+     * 本机的 TLS pin（SPKI 指纹，`sha256:<hex>`）——**配对时随资料带过来**（task-38）。
+     *
+     * 为什么放在档案里：二维码是**主机→手机单向**的，手机扫完只拿到主机的 pin；主机要验手机的
+     * 客户端证书，就必须有手机的 pin。把手机自己的 pin 随 entry/alive/profile 带过去，主机在
+     * **首次收到该 nodeId 的合法配对信息**时就能固定正确的 pin ⇒ TOFU 的首次使用竞态窗口消失。
+     *
+     * 可选键（默认 null）：旧端不认它（[validateProfile] 逐字段校验、不整帧白名单），
+     * 老手机不发它 ⇒ 主机退回 TOFU（**如实记为降级路径**，见 `PeerRegistry` 的 pin 来源）。
+     */
+    val tlsPin: String? = null,
     val ver: String,
     val caps: List<String>,
 ) {
@@ -40,6 +59,8 @@ data class Profile(
             nick: String,
             host: String,
             tcpPort: Int = Protocol.DEFAULT_TCP_PORT,
+            tlsPort: Int? = null,
+            tlsPin: String? = null,
             ver: String,
             profileRev: Int = 0,
             avatar: Int = -1,
@@ -52,6 +73,8 @@ data class Profile(
             nick = nick,
             host = host,
             tcpPort = tcpPort,
+            tlsPort = tlsPort,
+            tlsPin = tlsPin,
             ver = ver,
             profileRev = profileRev,
             avatar = avatar,
@@ -78,6 +101,8 @@ data class Profile(
             nick: String,
             host: String,
             tcpPort: Int = Protocol.DEFAULT_TCP_PORT,
+            tlsPort: Int? = null,
+            tlsPin: String? = null,
             ver: String,
             profileRev: Int = 0,
             avatar: Int = -1,
@@ -90,6 +115,8 @@ data class Profile(
             nick = nick,
             host = host,
             tcpPort = tcpPort,
+            tlsPort = tlsPort,
+            tlsPin = tlsPin,
             ver = ver,
             profileRev = profileRev,
             avatar = avatar,
@@ -105,6 +132,8 @@ data class Profile(
             nick: String,
             host: String,
             tcpPort: Int,
+            tlsPort: Int?,
+            tlsPin: String?,
             ver: String,
             profileRev: Int,
             avatar: Int,
@@ -124,6 +153,8 @@ data class Profile(
             host = host,
             platform = platform,
             tcpPort = tcpPort,
+            tlsPort = tlsPort,
+            tlsPin = tlsPin,
             ver = ver,
             caps = caps,
         )

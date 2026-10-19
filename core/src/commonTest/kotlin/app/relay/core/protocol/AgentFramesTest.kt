@@ -15,9 +15,10 @@ import kotlin.test.fail
  *
  * 规范里没有对应实现的那些帧，`GoldenVectorTest` 用真实 TS 向量守；这里守的是**我们自己**
  * 定下的三条规矩：
- *  1. §5 字段集合白名单 —— 少一个必填键整帧拒收；`agent-event` 等帧多一个键也整帧拒收，
- *     `agent-session` 自增补 D2 起改为「必需子集 + 忽略预算内的未知键」（见
- *     [agentSessionToleratesUnknownKeysWithinBudget]）；
+ *  1. §5 字段集合白名单 —— 少一个必填键整帧拒收；多一个键的行为**逐帧切换**：
+ *     `agent-session` 自增补 D2 起、`agent-event` 自 task-45（附件元数据）起，都是
+ *     「必需子集 + 忽略预算内的未知键」（见 [agentSessionToleratesUnknownKeysWithinBudget] 与
+ *     [agentEventToleratesUnknownKeysButKeepsTheAttachmentObjectStrict]）；其余 `agent-*` 仍严格；
  *  2. 取值域**故意留宽容** —— 对端将来多一个 `state` / `eventType` 不该让整帧作废
  *     （拒收会让它一直重传到入队，而 `summary` / `title` 本来就够 UI 显示）；
  *  3. §7 `body` 受**通道**预算约束，不受某个字段上限约束 —— 同一帧走 TCP 收得下、走 UDP 会被拒。
@@ -144,18 +145,55 @@ class AgentFramesTest {
     }
 
     @Test
-    fun anExtraKeyRefusesTheWholeFrame() {
-        // D2 之前 agent-session 与 agent-event 同规矩：多一个键整帧丢弃。
-        // D2 之后 agent-event **仍是**严格白名单（父稿 §2.3 只给 agent-session 开了口子，
-        // 其余帧各自等自己的加键需求再逐帧切换），这条守的就是它。
+    fun agentEventToleratesUnknownKeysButKeepsTheAttachmentObjectStrict() {
+        // task-45：agent-event 也按 D2 的规矩切成「必需子集 + 忽略预算内的未知键」——
+        // 这正是父稿 §2.3 说的「其余帧各自等自己的加键需求再逐帧切换」，附件元数据就是那个需求。
+        // 守三件事：① 未知顶层键被忽略；② 预算仍然管着它；③ attachment 对象**自己**仍严格。
+        val withUnknown = accept(
+            frame(
+                MsgTypes.AGENT_EVENT,
+                """{"sessionId":"s-1","cursor":1,"eventType":"tool.started","seq":1}""",
+            ),
+        )
+        assertTrue(withUnknown.known, "未知顶层键应被忽略，而不是整帧拒")
+
+        // 预算：8 个未知键仍收，第 9 个拒（宽容是给扩展的，不是给放大的）。
+        val eight = (1..8).joinToString(",") { """"k$it":$it""" }
+        assertTrue(
+            accept(
+                frame(
+                    MsgTypes.AGENT_EVENT,
+                    """{"sessionId":"s-1","cursor":1,"eventType":"tool.started",$eight}""",
+                ),
+            ).known,
+        )
+        val nine = (1..9).joinToString(",") { """"k$it":$it""" }
         assertEquals(
             "bad-payload:agent-event",
             reject(
                 frame(
                     MsgTypes.AGENT_EVENT,
-                    """{"sessionId":"s-1","cursor":1,"eventType":"tool.started","seq":1}""",
+                    """{"sessionId":"s-1","cursor":1,"eventType":"tool.started",$nine}""",
                 ),
             ),
+        )
+
+        // 附件对象自己仍是**严格**白名单：多一个键整帧拒（半张卡片比文本占位更糟）。
+        assertEquals(
+            "bad-payload:agent-event",
+            reject(
+                frame(
+                    MsgTypes.AGENT_EVENT,
+                    """{"sessionId":"s-1","cursor":1,"eventType":"tool.started",""" +
+                        """"attachment":{"attachmentId":"a","mediaType":"image/png","x":1}}""",
+                ),
+            ),
+        )
+
+        // 必填项仍然必填：宽容只给扩展键，不给漏字段。
+        assertEquals(
+            "bad-payload:agent-event",
+            reject(frame(MsgTypes.AGENT_EVENT, """{"sessionId":"s-1","eventType":"tool.started"}""")),
         )
     }
 
@@ -483,7 +521,27 @@ class AgentFramesTest {
         assertTrue(accept(list).known)
         assertEquals(list, Codec.encode(accept(list).env))
 
-        // 封闭取值：拼错的 state / scope 整帧拒收（与 agent-session 的开放域相反）。
+        // 增补：工作区范围（workspace）与访问级别（ro / rw / admin / owner）及委托审批往返
+        val wsGrant = Codec.encode(
+            makeEnvelope(
+                MsgTypes.AGENT_GRANT, PEER,
+                Codec.agentGrantPayload(
+                    state = "approved",
+                    scope = "workspace",
+                    agentKey = "dsh-main",
+                    wsId = "ws-relay",
+                    access = "admin",
+                    isMyDevice = true,
+                    delegatedApproval = true,
+                    at = TS,
+                ),
+                ID, TS,
+            ),
+        )
+        assertTrue(accept(wsGrant).known)
+        assertEquals(wsGrant, Codec.encode(accept(wsGrant).env))
+
+        // 封闭取值：拼错的 state / scope / access 整帧拒收（与 agent-session 的开放域相反）。
         assertEquals(
             "bad-payload:agent-grant",
             reject(frame(MsgTypes.AGENT_GRANT, """{"state":"granted","scope":"all"}""")),
@@ -491,6 +549,10 @@ class AgentFramesTest {
         assertEquals(
             "bad-payload:agent-grant",
             reject(frame(MsgTypes.AGENT_GRANT, """{"state":"approved","scope":"everything"}""")),
+        )
+        assertEquals(
+            "bad-payload:agent-grant",
+            reject(frame(MsgTypes.AGENT_GRANT, """{"state":"approved","scope":"workspace","access":"super-admin"}""")),
         )
         // 撤销 = 同一帧 state=revoked，不另开类型。
         assertTrue(accept(frame(MsgTypes.AGENT_GRANT, """{"state":"revoked","scope":"all"}""")).known)
@@ -545,7 +607,7 @@ class AgentFramesTest {
         val ack = Codec.encode(
             makeEnvelope(
                 MsgTypes.AGENT_ACK, PEER,
-                Codec.agentAckPayload("msg-1", "approved", TS),
+                Codec.agentAckPayload("msg-1", "approved", TS, decidedBy = "📱 我的 iPhone 15"),
                 ID, TS,
             ),
         )

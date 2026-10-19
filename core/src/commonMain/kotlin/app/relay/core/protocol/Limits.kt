@@ -68,6 +68,20 @@ object Limits {
     const val AGENT_STATE = 16
     const val AGENT_TITLE = 200
     const val AGENT_EVENT_TYPE = 32
+
+    /** 档案里的 TLS pin（`sha256:<64 hex>` = 71 字符，留一倍余量）。 */
+    const val TLS_PIN = 128
+
+    // ---- agent-event 的附件元数据（task-45）----
+    /** 附件 id（与 DSH 侧 content 块的 attachmentId 同口径）。 */
+    const val AGENT_ATTACHMENT_ID = 128
+    /** MIME 类型，如 image/png。 */
+    const val AGENT_MEDIA_TYPE = 64
+    /** 展示用文件名（可空）。 */
+    const val AGENT_ATTACHMENT_NAME = 128
+    /** 尺寸/大小上限：宽高 ≤ 32768、字节 ≤ 512 MiB —— 超出只能是坏载荷。 */
+    const val AGENT_ATTACHMENT_DIMENSION_MAX = 32768
+    const val AGENT_ATTACHMENT_BYTES_MAX = 512L * 1024 * 1024
     const val AGENT_SUMMARY = 200
     const val AGENT_REF = 64
     const val AGENT_TASK_ID = 64
@@ -77,6 +91,17 @@ object Limits {
     const val AGENT_NOTE = 200
     const val AGENT_PROMPT = 4096
     const val AGENT_CHOICES = 64
+    /** Agent 事件的 body 在 TCP 通道上的上限（64 KB，给代码块、diff、深度思考、任务总结充足预算）。 */
+    const val AGENT_BODY_TCP_LIMIT = 65536
+
+    /**
+     * 群消息可选字段 `reasoning`（思考过程）的 UTF-8 字节上限。
+     *
+     * 取 24 KiB 而不是跟 `text` 共用通道上限：一帧的硬上限是 64 KiB（`Link.MAX_FRAME_BYTES`），
+     * 正文本身还可以占到 4 KiB，留足余量才能保证「正文 + 思考过程」不会把整帧顶爆。
+     * 超长由发送侧截断（见 `NodeOutbound.sendGroupText`），接收侧按同一数值校验。
+     */
+    const val GROUP_REASONING_BYTES = 24 * 1024
 
     /**
      * PPE-1 增补 D1/D6（`docs/PROTOCOL-AGENT-WORKSPACE.md`）：

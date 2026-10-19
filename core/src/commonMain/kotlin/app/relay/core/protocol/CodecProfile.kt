@@ -59,6 +59,8 @@ object CodecProfile {
         if (tcpPort < 1 || tcpPort > 65535) return false
 
         if (!isStrAllowEmpty(o["ver"], Limits.VER)) return false
+        // task-38：可选的本机 TLS pin（配对时随资料带过来）。旧端没有这个键 ⇒ 跳过。
+        if (o.containsKey("tlsPin") && !isStr(o["tlsPin"], Limits.TLS_PIN)) return false
 
         val caps = o["caps"] as? JsonArray ?: return false
         if (caps.size > Limits.CAPS) return false

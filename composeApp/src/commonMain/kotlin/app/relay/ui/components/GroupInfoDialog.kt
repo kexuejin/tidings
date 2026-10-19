@@ -11,7 +11,6 @@ import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
-import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
@@ -46,9 +45,13 @@ import app.relay.generated.resources.chat_group_remove_member
 import app.relay.generated.resources.common_close
 import app.relay.generated.resources.common_offline
 import app.relay.generated.resources.common_online
+import app.relay.generated.resources.workspace_member_add_agent
+import app.relay.generated.resources.workspace_member_section_agents
+import app.relay.generated.resources.workspace_member_section_humans
 import org.jetbrains.compose.resources.stringResource
 
 import app.relay.ui.theme.LocalAppSpacing
+import app.relay.ui.theme.RelayShapes
 import app.relay.app.model.PeerUi
 
 /**
@@ -68,9 +71,22 @@ fun GroupInfoDialog(
     onLeaveGroup: (() -> Unit)? = null,
 ) {
     val peerMap = peers.associateBy { it.nodeId }
+    /**
+     * 成员名的解析顺序：**自己 > 本机认识的对端 > 群元数据带来的昵称 > nodeId 前 8 位**。
+     *
+     * 中间那一档（`group.memberNicks`）是为了跨网场景：手机走蜂窝时发现不到群里的其他人，
+     * `peers` 里根本没有他们，于是整列只剩 `f6a7b8c9` 这种十六进制 —— 而桌面端因为同一时刻
+     * 在局域网里认识所有人，四个成员都显示正常。**同一个群两端显示不一致**本身就是缺陷。
+     *
+     * 顺序不能反：本机的知识比群元数据新鲜（对方改名、我给对方起过备注，都只在本机），
+     * 所以 `peers` 优先；群元数据只在"本机不认识"时兜底。
+     */
+    val groupNicks = group.memberNicks.orEmpty()
+    fun memberNick(id: String): String? =
+        peerMap[id]?.displayName?.takeIf { it.isNotBlank() } ?: groupNicks[id]?.takeIf { it.isNotBlank() }
     val meText = stringResource(Res.string.chat_group_me)
     val noneText = stringResource(Res.string.chat_group_none)
-    val ownerNick = group.ownerId?.let { if (it == selfNodeId) meText else peerMap[it]?.displayName ?: it.take(8) } ?: noneText
+    val ownerNick = group.ownerId?.let { if (it == selfNodeId) meText else memberNick(it) ?: it.take(8) } ?: noneText
 
     var showAddDialog by remember { mutableStateOf(false) }
     var showEditMetaDialog by remember { mutableStateOf(false) }
@@ -79,6 +95,10 @@ fun GroupInfoDialog(
     val isSelfOwner = group.ownerId == selfNodeId || (group.ownerId == null && group.creatorId == selfNodeId)
     val isSelfAdmin = group.adminIds?.contains(selfNodeId) == true
     val canManageMembers = isSelfOwner || isSelfAdmin
+
+    val (agentMembers, humanMembers) = remember(group.members, peerMap) {
+        group.members.partition { peerMap[it]?.isAgent == true }
+    }
 
     // 骨架（底色 / 20dp 圆角 / 16sp·700 标题 / 描边按钮）见同目录 `RelayDialog.kt`。
     RelayDialog(
@@ -104,7 +124,7 @@ fun GroupInfoDialog(
                 item {
                     Surface(
                         color = MaterialTheme.colorScheme.surfaceVariant,
-                        shape = RoundedCornerShape(8.dp),
+                        shape = RelayShapes.small,
                         modifier = Modifier.fillMaxWidth(),
                     ) {
                         Column(Modifier.padding(LocalAppSpacing.current.md), verticalArrangement = Arrangement.spacedBy(LocalAppSpacing.current.sm6)) {
@@ -129,7 +149,7 @@ fun GroupInfoDialog(
                                         horizontalArrangement = Arrangement.spacedBy(LocalAppSpacing.current.sm6),
                                         modifier = Modifier.padding(top = LocalAppSpacing.current.xxs),
                                     ) {
-                                        Surface(color = MaterialTheme.colorScheme.primaryContainer, shape = RoundedCornerShape(4.dp)) {
+                                        Surface(color = MaterialTheme.colorScheme.primaryContainer, shape = RelayShapes.extraSmall) {
                                             Text(
                                                 text = "rev ${group.rev}",
                                                 style = MaterialTheme.typography.labelSmall,
@@ -137,7 +157,7 @@ fun GroupInfoDialog(
                                                 modifier = Modifier.padding(horizontal = LocalAppSpacing.current.xs, vertical = LocalAppSpacing.current.xxs),
                                             )
                                         }
-                                        Surface(color = MaterialTheme.colorScheme.surface, shape = RoundedCornerShape(4.dp)) {
+                                        Surface(color = MaterialTheme.colorScheme.surface, shape = RelayShapes.extraSmall) {
                                             Text(
                                                 text = "${stringResource(Res.string.chat_group_owner_label)} $ownerNick",
                                                 style = MaterialTheme.typography.labelSmall,
@@ -223,7 +243,11 @@ fun GroupInfoDialog(
                         verticalAlignment = Alignment.CenterVertically,
                     ) {
                         Text(
-                            text = stringResource(Res.string.chat_group_members_header, group.members.size),
+                            text = if (agentMembers.isNotEmpty()) {
+                                stringResource(Res.string.workspace_member_section_humans, humanMembers.size)
+                            } else {
+                                stringResource(Res.string.chat_group_members_header, group.members.size)
+                            },
                             style = MaterialTheme.typography.labelMedium,
                             fontWeight = FontWeight.SemiBold,
                             color = MaterialTheme.colorScheme.onSurfaceVariant,
@@ -236,10 +260,10 @@ fun GroupInfoDialog(
                     }
                 }
 
-                items(group.members) { id ->
+                items(humanMembers) { id ->
                     val isMe = id == selfNodeId
                     val peer = peerMap[id]
-                    val nick = if (isMe) meText else peer?.displayName ?: id.take(8)
+                    val nick = if (isMe) meText else memberNick(id) ?: id.take(8)
                     val online = if (isMe) true else peer?.online ?: false
                     val isOwner = id == group.ownerId
                     val isAdmin = group.adminIds?.contains(id) == true
@@ -251,7 +275,7 @@ fun GroupInfoDialog(
                         verticalAlignment = Alignment.CenterVertically,
                         horizontalArrangement = Arrangement.spacedBy(LocalAppSpacing.current.md10),
                     ) {
-                        PeerAvatar(name = nick, isAgent = peer?.isAgent ?: false, size = 32.dp, avatar = peer?.avatar)
+                        PeerAvatar(name = nick, isAgent = false, size = 32.dp, avatar = peer?.avatar)
                         Column(Modifier.weight(1f)) {
                             Row(
                                 verticalAlignment = Alignment.CenterVertically,
@@ -264,7 +288,7 @@ fun GroupInfoDialog(
                                     overflow = TextOverflow.Ellipsis,
                                 )
                                 if (isMe) {
-                                    Surface(color = MaterialTheme.colorScheme.primaryContainer, shape = RoundedCornerShape(4.dp)) {
+                                    Surface(color = MaterialTheme.colorScheme.primaryContainer, shape = RelayShapes.extraSmall) {
                                         Text(
                                             text = meText,
                                             style = MaterialTheme.typography.labelSmall,
@@ -274,7 +298,7 @@ fun GroupInfoDialog(
                                     }
                                 }
                                 if (isOwner) {
-                                    Surface(color = MaterialTheme.colorScheme.surfaceVariant, shape = RoundedCornerShape(4.dp)) {
+                                    Surface(color = MaterialTheme.colorScheme.surfaceVariant, shape = RelayShapes.extraSmall) {
                                         Text(
                                             text = stringResource(Res.string.chat_group_owner_label),
                                             style = MaterialTheme.typography.labelSmall,
@@ -282,7 +306,7 @@ fun GroupInfoDialog(
                                         )
                                     }
                                 } else if (isAdmin) {
-                                    Surface(color = MaterialTheme.colorScheme.surfaceVariant, shape = RoundedCornerShape(4.dp)) {
+                                    Surface(color = MaterialTheme.colorScheme.surfaceVariant, shape = RelayShapes.extraSmall) {
                                         Text(
                                             text = stringResource(Res.string.chat_group_admin_label),
                                             style = MaterialTheme.typography.labelSmall,
@@ -308,6 +332,87 @@ fun GroupInfoDialog(
                                     style = MaterialTheme.typography.labelSmall,
                                     color = MaterialTheme.colorScheme.error,
                                 )
+                            }
+                        }
+                    }
+                }
+
+                if (agentMembers.isNotEmpty() || canManageMembers) {
+                    item {
+                        Row(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .padding(top = LocalAppSpacing.current.sm),
+                            horizontalArrangement = Arrangement.SpaceBetween,
+                            verticalAlignment = Alignment.CenterVertically,
+                        ) {
+                            Text(
+                                text = stringResource(Res.string.workspace_member_section_agents, agentMembers.size),
+                                style = MaterialTheme.typography.labelMedium,
+                                fontWeight = FontWeight.SemiBold,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            )
+                            if (canManageMembers && onAddMembers != null) {
+                                TextButton(onClick = { showAddDialog = true }) {
+                                    Text(
+                                        text = stringResource(Res.string.workspace_member_add_agent),
+                                        style = MaterialTheme.typography.labelSmall,
+                                    )
+                                }
+                            }
+                        }
+                    }
+
+                    items(agentMembers) { id ->
+                        val peer = peerMap[id]
+                        val nick = memberNick(id) ?: id.take(8)
+                        val online = peer?.online ?: false
+
+                        Row(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .padding(vertical = LocalAppSpacing.current.xs),
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(LocalAppSpacing.current.md10),
+                        ) {
+                            PeerAvatar(name = nick, isAgent = true, size = 32.dp, avatar = peer?.avatar)
+                            Column(Modifier.weight(1f)) {
+                                Row(
+                                    verticalAlignment = Alignment.CenterVertically,
+                                    horizontalArrangement = Arrangement.spacedBy(LocalAppSpacing.current.sm6),
+                                ) {
+                                    Text(
+                                        text = nick,
+                                        style = MaterialTheme.typography.bodyMedium,
+                                        maxLines = 1,
+                                        overflow = TextOverflow.Ellipsis,
+                                    )
+                                    Surface(color = MaterialTheme.colorScheme.tertiaryContainer, shape = RelayShapes.extraSmall) {
+                                        Text(
+                                            text = "🤖 Agent Bot",
+                                            style = MaterialTheme.typography.labelSmall,
+                                            color = MaterialTheme.colorScheme.tertiary,
+                                            modifier = Modifier.padding(horizontal = LocalAppSpacing.current.xs, vertical = 1.dp),
+                                        )
+                                    }
+                                }
+                                Text(
+                                    text = "$id · ${if (online) stringResource(Res.string.common_online) else stringResource(Res.string.common_offline)}",
+                                    style = MaterialTheme.typography.labelSmall,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                )
+                            }
+
+                            if (canManageMembers && onRemoveMember != null) {
+                                TextButton(
+                                    onClick = { memberToRemove = id },
+                                ) {
+                                    Text(
+                                        text = stringResource(Res.string.chat_group_remove_member),
+                                        style = MaterialTheme.typography.labelSmall,
+                                        color = MaterialTheme.colorScheme.error,
+                                    )
+                                }
                             }
                         }
                     }
@@ -356,7 +461,7 @@ fun GroupInfoDialog(
     val removeMember = onRemoveMember
     val targetId = memberToRemove
     if (targetId != null && removeMember != null) {
-        val targetNick = peerMap[targetId]?.displayName ?: targetId.take(8)
+        val targetNick = memberNick(targetId) ?: targetId.take(8)
         ConfirmRemoveMemberDialog(
             targetNick = targetNick,
             onDismiss = { memberToRemove = null },

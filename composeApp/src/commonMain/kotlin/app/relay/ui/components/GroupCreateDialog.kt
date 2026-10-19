@@ -35,6 +35,8 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import app.relay.ui.theme.LocalAppSpacing
+import app.relay.ui.theme.IconSizes
+import app.relay.ui.theme.ShapeRoles
 import app.relay.generated.resources.Res
 import app.relay.generated.resources.action_create
 import app.relay.generated.resources.common_cancel
@@ -151,7 +153,7 @@ public fun GroupCreateDialog(
                                     name = peer.displayName,
                                     isAgent = peer.isAgent,
                                     size = 30.dp,
-                                    shape = RoundedCornerShape(9.dp),
+                                    shape = ShapeRoles.Avatar,
                                 )
                                 Column(Modifier.weight(1f)) {
                                     Text(
@@ -210,13 +212,13 @@ public fun GroupCreateDialog(
 private fun MemberCheckbox(checked: Boolean) {
     Box(
         modifier = Modifier
-            .size(20.dp)
+            .size(IconSizes.Title)
             .clip(RoundedCornerShape(5.dp))
             .background(if (checked) MaterialTheme.colorScheme.primary else Color.Transparent)
             .border(
-                width = 2.dp,
+                width = LocalAppSpacing.current.xxs,
                 color = if (checked) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.outline,
-                shape = RoundedCornerShape(5.dp),
+                shape = RoundedCornerShape(LocalAppSpacing.current.oxs5),
             ),
         contentAlignment = Alignment.Center,
     ) {

@@ -548,4 +548,84 @@ class GroupProtocolTest {
         assertTrue(tracker.beginRequest(GROUP, 4), "真的有更新的 rev，还是要问")
         assertFalse(tracker.beginRequest(GROUP, 4), "而且这次也记下了")
     }
+
+    // ------------------------------------------------------------ memberNicks（跨网成员真名）
+
+    /**
+     * 群元数据可以带成员昵称，**并且真的能读回来**。
+     *
+     * 真机缺陷：手机走蜂窝加入群后，成员列表里另外两个人只显示 `f6a7b8c9` 这种 nodeId 前 8 位
+     * —— 因为它发现不到他们（不同网段、也从没直连过），而桌面端同一时刻在局域网里认识所有人。
+     * 同一个群两端显示不一致，那一端看到的是十六进制。
+     */
+    @Test
+    fun memberNicksRoundTripThroughGroupInfo() {
+        val payload = buildJsonObject {
+            put("op", GroupOps.INFO)
+            putJsonObject("group") {
+                put("groupId", GROUP)
+                put("name", "项目组")
+                putJsonArray("members") { listOf(OWNER, ADMIN, BOB, SELF).forEach { add(JsonPrimitive(it)) } }
+                put("rev", 1)
+                put("updatedBy", OWNER)
+                put("updatedTs", TS)
+                putJsonObject("memberNicks") {
+                    put(OWNER, "demo-mac-97")
+                    put(ADMIN, "panda")
+                }
+            }
+        }
+        assertTrue(Codec.validateGroup(payload), "带 memberNicks 的 info 帧必须合法")
+        val meta = Codec.decodeGroupInfo(payload)
+        assertEquals("demo-mac-97", meta?.memberNicks?.get(OWNER))
+        assertEquals("panda", meta?.memberNicks?.get(ADMIN))
+    }
+
+    /** 旧端不发这个键 ⇒ null，成员行退回 nodeId 前 8 位（与以前一致，不更差）。 */
+    @Test
+    fun missingMemberNicksIsNullNotAnError() {
+        val payload = infoPayload { }
+        assertTrue(Codec.validateGroup(payload))
+        assertNull(Codec.decodeGroupInfo(payload)?.memberNicks, "旧端不发 = 没有昵称，不是坏帧")
+    }
+
+    /**
+     * **键必须属于 members**：不属于的人不能借这个字段混进成员列表（解码侧按 members 过滤）。
+     *
+     * 这一条是边界而不是洁癖：前端拿到 memberNicks 会把它们显示成"群成员"。
+     * 一个越界键就等于让对端往我的成员列表里塞一个不存在的成员。
+     */
+    @Test
+    fun memberNicksKeyOutsideMembersIsRejected() {
+        val payload = infoPayload {
+            putJsonObject("memberNicks") { put(EVE, "我不是成员") }
+        }
+        assertFalse(Codec.validateGroup(payload), "键不在 members 里 ⇒ 整帧不合法")
+    }
+
+    /** 昵称是纯展示数据：超长/非串一律拒帧，而不是截断成半截名字。 */
+    @Test
+    fun malformedMemberNicksIsRejected() {
+        val tooLong = "x".repeat(Limits.NICK + 1)
+        assertFalse(
+            Codec.validateGroup(infoPayload {
+                putJsonObject("memberNicks") { put(OWNER, tooLong) }
+            }),
+            "超长昵称不许被截断后接受",
+        )
+        assertFalse(
+            Codec.validateGroup(infoPayload {
+                put("memberNicks", "not-an-object")
+            }),
+            "形状不对就该拒",
+        )
+    }
+
+    /** 一个昵称都没有时等同"没带"：null，而不是空 map（空 map 会让调用方以为"有信息但全空"）。 */
+    @Test
+    fun emptyMemberNicksIsNull() {
+        val payload = infoPayload { putJsonObject("memberNicks") { } }
+        assertTrue(Codec.validateGroup(payload))
+        assertNull(Codec.decodeGroupInfo(payload)?.memberNicks)
+    }
 }

@@ -25,9 +25,16 @@ import app.relay.core.protocol.CodecWire.wireJson
  */
 object CodecMsg {
 
-    /** group-text 的严格字段白名单 —— 多一个字段整帧丢弃（对应 `hasOnlyKeys`）。 */
+    /**
+     * group-text 的严格字段白名单 —— 多一个字段整帧丢弃（对应 `hasOnlyKeys`）。
+     *
+     * **加可选键时必须同时加进这里**。只加 data class 属性而不加白名单，本端编码得出、
+     * 对端 `hasOnlyKeys` 直接判成 extra-field 整帧拒收 —— 表现为「发送侧一切正常、
+     * 接收侧什么都没有」，比编译错误难查得多（`senderId` 曾经就是这样漏掉的）。
+     */
     private val GROUP_TEXT_KEYS = setOf(
         "kind", "text", "groupId", "groupRev", "mentions", "resend", "replyTo",
+        "senderId", "reasoning",
     )
 
     internal fun validateMsg(o: JsonObject, textLimit: Int): Boolean {
@@ -75,6 +82,18 @@ object CodecMsg {
             if (!isStrAllowEmpty(o["replyTo"], Limits.ID)) return false
         }
 
+        // 真正的说话者（可选）：真人 = nodeId，agent = `agent:<kind>`。
+        if (o.containsKey("senderId")) {
+            if (!isStr(o["senderId"], Limits.ID)) return false
+        }
+
+        // 思考过程（可选）：按**字节**而非码元校验，与发送侧的截断口径一致。
+        if (o.containsKey("reasoning")) {
+            val reasoning = (o["reasoning"] as? JsonPrimitive)?.takeIf { it.isString } ?: return false
+            if (reasoning.content.isEmpty()) return false
+            if (utf8ByteLength(reasoning.content) > Limits.GROUP_REASONING_BYTES) return false
+        }
+
         // 严格字段白名单：多一个字段整帧丢弃（neg-group-text-extra-field 就是这条）。
         return hasOnlyKeys(o, GROUP_TEXT_KEYS)
     }
@@ -102,6 +121,16 @@ object CodecMsg {
         mentions: List<String>? = null,
         resend: Boolean? = null,
         replyTo: String? = null,
+        /**
+         * 真正的说话者（可选）。非空且与信封 `from` 不同时，接收方用它做发送者归属。
+         * agent 转发的消息用 `agent:<kind>`，与桌面端本地落库同形态。
+         */
+        senderId: String? = null,
+        /**
+         * 思考过程（可选）。调用方应保证已按 [Limits.GROUP_REASONING_BYTES] 截断 ——
+         * 这里不截，超限的帧接收侧会整帧拒收。
+         */
+        reasoning: String? = null,
     ): JsonElement = wireJson.encodeToJsonElement(
         GroupTextMsgPayload.serializer(),
         GroupTextMsgPayload(
@@ -112,6 +141,8 @@ object CodecMsg {
             mentions = mentions,
             resend = resend,
             replyTo = replyTo,
+            senderId = senderId,
+            reasoning = reasoning,
         ),
     )
 

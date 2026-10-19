@@ -43,20 +43,26 @@ object CodecAgent {
 
     private val AGENT_EVENT_EXPECTED_KEYS = setOf(
         "sessionId", "cursor", "eventType", "summary", "body", "ref",
+        // task-45：附件元数据。追加在尾部，旧字段键序不变。
+        "attachment",
     )
+
+    /** 附件对象自己的白名单（与 DSH 侧 content 块同口径）。 */
+    private val AGENT_ATTACHMENT_EXPECTED_KEYS =
+        setOf("attachmentId", "mediaType", "width", "height", "bytes", "name")
 
     private val AGENT_QUEUE_EXPECTED_KEYS = setOf("taskId", "sessionId", "op", "prompt", "queuedAt")
     private val AGENT_RUN_EXPECTED_KEYS = setOf("sessionId", "runId", "state", "at", "note")
     private val AGENT_APPROVAL_EXPECTED_KEYS = setOf("approvalId", "sessionId", "tool", "summary", "expiresAt", "choices")
     private val AGENT_CANCEL_EXPECTED_KEYS = setOf("sessionId", "runId", "reason")
-    private val AGENT_ACK_EXPECTED_KEYS = setOf("ackOf", "kind", "at")
+    private val AGENT_ACK_EXPECTED_KEYS = setOf("ackOf", "kind", "at", "decidedBy")
 
     // PPE-1 增补 D3 / D7。键序 = `Payloads.kt` 声明序 = 线上键序。
     internal val AGENT_WORKSPACE_EXPECTED_KEYS =
         setOf("wsId", "wsTitle", "wsPath", "agentId", "agentKind", "online", "sessionCount", "at", "order")
-    internal val AGENT_GRANT_REQUEST_EXPECTED_KEYS = setOf("agentKey", "reason", "at")
-    internal val AGENT_GRANT_EXPECTED_KEYS = setOf("state", "scope", "agentKey", "at")
-    internal val AGENT_GRANT_LIST_EXPECTED_KEYS = setOf("scope", "agentKey", "total", "at")
+    internal val AGENT_GRANT_REQUEST_EXPECTED_KEYS = setOf("agentKey", "wsId", "access", "reason", "at")
+    internal val AGENT_GRANT_EXPECTED_KEYS = setOf("state", "scope", "agentKey", "wsId", "access", "isMyDevice", "delegatedApproval", "at")
+    internal val AGENT_GRANT_LIST_EXPECTED_KEYS = setOf("scope", "agentKey", "wsId", "access", "total", "at")
     internal val AGENT_SESSION_PAGE_EXPECTED_KEYS = setOf("wsId", "offset", "limit", "at")
     internal val AGENT_ARTIFACT_EXPECTED_KEYS = setOf("sessionId", "artifactId", "fileId", "name", "bytes", "mime")
 
@@ -114,10 +120,44 @@ object CodecAgent {
         if (o.containsKey("summary") && !isStrAllowEmpty(o["summary"], Limits.AGENT_SUMMARY)) return false
         if (o.containsKey("body")) {
             val body = (o["body"] as? JsonPrimitive)?.takeIf { it.isString }?.content ?: return false
-            if (utf8ByteLength(body) > textLimit) return false
+            val effectiveLimit = if (textLimit > Protocol.TEXT_UDP_LIMIT) maxOf(textLimit, Limits.AGENT_BODY_TCP_LIMIT) else textLimit
+            if (utf8ByteLength(body) > effectiveLimit) return false
         }
         if (o.containsKey("ref") && !isStr(o["ref"], Limits.AGENT_REF)) return false
-        return hasOnlyKeys(o, AGENT_EVENT_EXPECTED_KEYS)
+        // task-45：附件元数据（可选）。**形状不对就整帧拒** —— 半张卡片比占位更糟。
+        if (o.containsKey("attachment")) {
+            if (!validateAgentEventAttachment(o["attachment"])) return false
+        }
+        // D2 起 agent-session 的规矩（必需子集 + 忽略未知键，带预算），task-45 把它也用在
+        // agent-event 上：这样**本接收端**遇到将来新增的键不会整帧丢掉。
+        // 注意兼容性是**双向**的：只有声明了 cap `att1` 的接收方才该收到 attachment
+        // （发送方按 cap 决定发不发），旧接收端（严格白名单）不会收到带该键的帧。
+        return tolerantKeys(
+            o,
+            required = setOf("sessionId", "cursor", "eventType"),
+            known = AGENT_EVENT_EXPECTED_KEYS,
+        )
+    }
+
+    /** 附件元数据的形状校验（字段集合 + 逐个按界）。 */
+    private fun validateAgentEventAttachment(value: kotlinx.serialization.json.JsonElement?): Boolean {
+        val o = value as? JsonObject ?: return false
+        if (!isStr(o["attachmentId"], Limits.AGENT_ATTACHMENT_ID)) return false
+        if (!isStr(o["mediaType"], Limits.AGENT_MEDIA_TYPE)) return false
+        if (o.containsKey("width")) {
+            val width = intOf(o["width"]) ?: return false
+            if (width <= 0 || width > Limits.AGENT_ATTACHMENT_DIMENSION_MAX) return false
+        }
+        if (o.containsKey("height")) {
+            val height = intOf(o["height"]) ?: return false
+            if (height <= 0 || height > Limits.AGENT_ATTACHMENT_DIMENSION_MAX) return false
+        }
+        if (o.containsKey("bytes")) {
+            val bytes = intOf(o["bytes"]) ?: return false
+            if (bytes < 0 || bytes > Limits.AGENT_ATTACHMENT_BYTES_MAX) return false
+        }
+        if (o.containsKey("name") && !isStrAllowEmpty(o["name"], Limits.AGENT_ATTACHMENT_NAME)) return false
+        return hasOnlyKeys(o, AGENT_ATTACHMENT_EXPECTED_KEYS)
     }
 
     internal fun validateAgentQueue(o: JsonObject): Boolean {
@@ -163,6 +203,7 @@ object CodecAgent {
         val kind = (o["kind"] as? JsonPrimitive)?.takeIf { it.isString }?.content ?: return false
         if (kind !in setOf("queued", "approved", "denied", "cancelled", "received")) return false
         if (o.containsKey("at") && intOf(o["at"]) == null) return false
+        if (o.containsKey("decidedBy") && !isStrAllowEmpty(o["decidedBy"], Limits.NICK)) return false
         return hasOnlyKeys(o, AGENT_ACK_EXPECTED_KEYS)
     }
 
@@ -214,6 +255,11 @@ object CodecAgent {
      */
     internal fun validateAgentGrantRequest(o: JsonObject): Boolean {
         if (o.containsKey("agentKey") && !isStr(o["agentKey"], Limits.AGENT_GRANT_AGENT_KEY)) return false
+        if (o.containsKey("wsId") && !isStr(o["wsId"], Limits.AGENT_WS_ID)) return false
+        if (o.containsKey("access")) {
+            val access = (o["access"] as? JsonPrimitive)?.takeIf { it.isString }?.content ?: return false
+            if (access !in AgentGrantAccess.VALUES) return false
+        }
         if (o.containsKey("reason") && !isStrAllowEmpty(o["reason"], Limits.AGENT_GRANT_REASON)) return false
         if (o.containsKey("at") && intOf(o["at"]) == null) return false
         return hasOnlyKeys(o, AGENT_GRANT_REQUEST_EXPECTED_KEYS)
@@ -225,6 +271,13 @@ object CodecAgent {
         val scope = (o["scope"] as? JsonPrimitive)?.takeIf { it.isString }?.content ?: return false
         if (scope !in AgentGrantScopes.VALUES) return false
         if (o.containsKey("agentKey") && !isStr(o["agentKey"], Limits.AGENT_GRANT_AGENT_KEY)) return false
+        if (o.containsKey("wsId") && !isStr(o["wsId"], Limits.AGENT_WS_ID)) return false
+        if (o.containsKey("access")) {
+            val access = (o["access"] as? JsonPrimitive)?.takeIf { it.isString }?.content ?: return false
+            if (access !in AgentGrantAccess.VALUES) return false
+        }
+        if (o.containsKey("isMyDevice") && boolOf(o["isMyDevice"]) == null) return false
+        if (o.containsKey("delegatedApproval") && boolOf(o["delegatedApproval"]) == null) return false
         if (o.containsKey("at") && intOf(o["at"]) == null) return false
         return hasOnlyKeys(o, AGENT_GRANT_EXPECTED_KEYS)
     }
@@ -233,6 +286,11 @@ object CodecAgent {
         val scope = (o["scope"] as? JsonPrimitive)?.takeIf { it.isString }?.content ?: return false
         if (scope !in AgentGrantScopes.VALUES) return false
         if (o.containsKey("agentKey") && !isStr(o["agentKey"], Limits.AGENT_GRANT_AGENT_KEY)) return false
+        if (o.containsKey("wsId") && !isStr(o["wsId"], Limits.AGENT_WS_ID)) return false
+        if (o.containsKey("access")) {
+            val access = (o["access"] as? JsonPrimitive)?.takeIf { it.isString }?.content ?: return false
+            if (access !in AgentGrantAccess.VALUES) return false
+        }
         if (o.containsKey("total")) {
             val n = intOf(o["total"]) ?: return false
             if (n < 0) return false
@@ -334,6 +392,7 @@ object CodecAgent {
         summary: String? = null,
         body: String? = null,
         ref: String? = null,
+        attachment: AgentEventAttachment? = null,
     ): JsonElement = wireJson.encodeToJsonElement(
         AgentEventPayload.serializer(),
         AgentEventPayload(
@@ -343,6 +402,7 @@ object CodecAgent {
             summary = summary,
             body = body,
             ref = ref,
+            attachment = attachment,
         ),
     )
 
@@ -404,9 +464,10 @@ object CodecAgent {
         ackOf: String,
         kind: String,
         at: Long? = null,
+        decidedBy: String? = null,
     ): JsonElement = wireJson.encodeToJsonElement(
         AgentAckPayload.serializer(),
-        AgentAckPayload(ackOf = ackOf, kind = kind, at = at),
+        AgentAckPayload(ackOf = ackOf, kind = kind, at = at, decidedBy = decidedBy),
     )
 
     /**
@@ -458,11 +519,13 @@ object CodecAgent {
     /** PPE-1 增补 D7：设备发起授权申请（cap `agr1`）。 */
     fun agentGrantRequestPayload(
         agentKey: String? = null,
+        wsId: String? = null,
+        access: String? = null,
         reason: String? = null,
         at: Long? = null,
     ): JsonElement = wireJson.encodeToJsonElement(
         AgentGrantRequestPayload.serializer(),
-        AgentGrantRequestPayload(agentKey, reason, at),
+        AgentGrantRequestPayload(agentKey, wsId, access, reason, at),
     )
 
     /** PPE-1 增补 D7：宿主的授权决定（cap `agr1`）。 */
@@ -470,21 +533,27 @@ object CodecAgent {
         state: String,
         scope: String,
         agentKey: String? = null,
+        wsId: String? = null,
+        access: String? = null,
+        isMyDevice: Boolean? = null,
+        delegatedApproval: Boolean? = null,
         at: Long? = null,
     ): JsonElement = wireJson.encodeToJsonElement(
         AgentGrantPayload.serializer(),
-        AgentGrantPayload(state, scope, agentKey, at),
+        AgentGrantPayload(state, scope, agentKey, wsId, access, isMyDevice, delegatedApproval, at),
     )
 
     /** PPE-1 增补 D7：宿主逐条回授权清单（cap `agr1`）。 */
     fun agentGrantListPayload(
         scope: String,
         agentKey: String? = null,
+        wsId: String? = null,
+        access: String? = null,
         total: Long? = null,
         at: Long? = null,
     ): JsonElement = wireJson.encodeToJsonElement(
         AgentGrantListPayload.serializer(),
-        AgentGrantListPayload(scope, agentKey, total, at),
+        AgentGrantListPayload(scope, agentKey, wsId, access, total, at),
     )
 
     /**

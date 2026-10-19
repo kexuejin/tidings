@@ -108,7 +108,9 @@ object Codec {
         mentions: List<String>? = null,
         resend: Boolean? = null,
         replyTo: String? = null,
-    ) = CodecMsg.groupTextPayload(text, groupId, groupRev, mentions, resend, replyTo)
+        senderId: String? = null,
+        reasoning: String? = null,
+    ) = CodecMsg.groupTextPayload(text, groupId, groupRev, mentions, resend, replyTo, senderId, reasoning)
 
     fun recallPayload(targetId: String, groupId: String? = null, groupRev: Int? = null) = CodecMsg.recallPayload(targetId, groupId, groupRev)
 
@@ -155,7 +157,8 @@ object Codec {
         summary: String? = null,
         body: String? = null,
         ref: String? = null,
-    ) = CodecAgent.agentEventPayload(sessionId, cursor, eventType, summary, body, ref)
+        attachment: AgentEventAttachment? = null,
+    ) = CodecAgent.agentEventPayload(sessionId, cursor, eventType, summary, body, ref, attachment)
 
     fun agentQueuePayload(
         taskId: String,
@@ -194,7 +197,8 @@ object Codec {
         ackOf: String,
         kind: String,
         at: Long? = null,
-    ) = CodecAgent.agentAckPayload(ackOf, kind, at)
+        decidedBy: String? = null,
+    ) = CodecAgent.agentAckPayload(ackOf, kind, at, decidedBy)
 
     fun agentArtifactPayload(
         sessionId: String,
@@ -222,25 +226,33 @@ object Codec {
     /** PPE-1 增补 D7：授权申请（设备 → 宿主，cap `agr1`）。 */
     fun agentGrantRequestPayload(
         agentKey: String? = null,
+        wsId: String? = null,
+        access: String? = null,
         reason: String? = null,
         at: Long? = null,
-    ) = CodecAgent.agentGrantRequestPayload(agentKey, reason, at)
+    ) = CodecAgent.agentGrantRequestPayload(agentKey, wsId, access, reason, at)
 
     /** PPE-1 增补 D7：授权决定（宿主 → 设备，cap `agr1`）。 */
     fun agentGrantPayload(
         state: String,
         scope: String,
         agentKey: String? = null,
+        wsId: String? = null,
+        access: String? = null,
+        isMyDevice: Boolean? = null,
+        delegatedApproval: Boolean? = null,
         at: Long? = null,
-    ) = CodecAgent.agentGrantPayload(state, scope, agentKey, at)
+    ) = CodecAgent.agentGrantPayload(state, scope, agentKey, wsId, access, isMyDevice, delegatedApproval, at)
 
     /** PPE-1 增补 D7：授权清单条目（宿主 → 设备，cap `agr1`）。 */
     fun agentGrantListPayload(
         scope: String,
         agentKey: String? = null,
+        wsId: String? = null,
+        access: String? = null,
         total: Long? = null,
         at: Long? = null,
-    ) = CodecAgent.agentGrantListPayload(scope, agentKey, total, at)
+    ) = CodecAgent.agentGrantListPayload(scope, agentKey, wsId, access, total, at)
 
     /** PPE-1 增补 D8：`agent-session-page` 的门面透传（见 CodecAgent 的同名 builder）。 */
     fun agentSessionPagePayload(

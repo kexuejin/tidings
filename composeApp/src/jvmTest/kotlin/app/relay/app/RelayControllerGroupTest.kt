@@ -160,7 +160,7 @@ class RelayControllerGroupTest {
 
     @Test
     fun incomingGroupTextWithANewerNumericRevAsksForMeta() = runBlocking {
-        // `groupRev` 在协议里是**数字**：`Codec.intOf` 对字符串一律返回 null（Codec.kt:122-126），
+        // `groupRev` 在协议里是**数字**：`Codec.intOf` 对字符串一律返回 null（见 `CodecWire.intOf`），
         // 群文本消息的载荷校验（`CodecMsg.validateMsg`）就是用它判合法性的，发送侧也写数字。
         // `syncGroupMetaIfNeeded` 原来把 rev 读成 `takeIf { it.isString }` ⇒ 真机上的数字 rev
         // 一律变成 0 ⇒ `beginRequest(groupId, 0)` 在游标已经登记过本地 rev 之后恒为假 ——
@@ -444,6 +444,17 @@ class RelayControllerGroupTest {
         controller.onInbound(groupText("g-1", rev = 1, text = "第二条"))
 
         assertEquals(1, controller.state.value.unreadByPeer[convId])
+    }
+
+    @Test
+    fun enteringConversationClearsExistingUnreadCount() = runBlocking {
+        val controller = controller()
+        val convId = ConvId.group("g-1")
+        controller.onInbound(groupText("g-1", rev = 1, text = "未读消息"))
+        assertEquals(1, controller.state.value.unreadByPeer[convId], "未查看时应有1条未读")
+
+        controller.setVisibleConversation(convId)
+        assertEquals(0, controller.state.value.unreadByPeer[convId], "进入会话后未读应立刻被清零")
     }
 
     // ---- 发送 ----

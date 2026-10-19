@@ -18,9 +18,15 @@ import app.relay.core.protocol.Protocol
 import app.relay.core.protocol.newId
 import app.relay.core.session.NodeRuntime
 import app.relay.core.transport.SendOutcome
+import app.relay.generated.resources.Res
+import app.relay.generated.resources.workspace_group_initial_greeting
+import app.relay.generated.resources.workspace_group_session_brief
+import app.relay.generated.resources.workspace_group_session_busy
+import app.relay.generated.resources.workspace_group_session_ready
 import kotlinx.coroutines.launch
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.JsonPrimitive
+import org.jetbrains.compose.resources.getString
 
 /**
  * 群聊：建群、入退群、改群资料、发群公告，以及群消息的入站处理。
@@ -39,13 +45,54 @@ internal class RelayControllerGroupsComponent(
     private val host: RelayController,
 ) {
 
+fun isWorkspaceGroup(groupId: String): Boolean {
+    val meta = host._state.value.settings.groups.firstOrNull { it.groupId == groupId } ?: return false
+    val desc = meta.description.orEmpty().trim()
+    return host._state.value.agentWorkspaces.values.any { ws ->
+        (desc.isNotBlank() && (desc == ws.wsPath || desc == ws.wsId || (ws.wsPath?.isNotBlank() == true && desc.contains(ws.wsPath)))) ||
+            (ws.wsTitle?.isNotBlank() == true && meta.name.contains(ws.wsTitle))
+    }
+}
+
+fun workspaceOfGroup(groupId: String): app.relay.app.model.WorkspaceUi? {
+    val meta = host._state.value.settings.groups.firstOrNull { it.groupId == groupId } ?: return null
+    val desc = meta.description.orEmpty().trim()
+    return host._state.value.agentWorkspaces.values.firstOrNull { ws ->
+        (desc.isNotBlank() && (desc == ws.wsPath || desc == ws.wsId || (ws.wsPath?.isNotBlank() == true && desc.contains(ws.wsPath)))) ||
+            (ws.wsTitle?.isNotBlank() == true && meta.name.contains(ws.wsTitle))
+    }
+}
+
+fun handleSyncWorkspaceGroups() {
+    val settings = host._state.value.settings
+    var changed = false
+    val updated = settings.groups.map { group ->
+        if (group.description.isNullOrBlank()) {
+            val matchedWs = host._state.value.agentWorkspaces.values.firstOrNull { ws ->
+                ws.wsTitle?.isNotBlank() == true && group.name.contains(ws.wsTitle)
+            }
+            if (matchedWs != null) {
+                changed = true
+                group.copy(description = matchedWs.wsPath ?: matchedWs.wsId ?: "")
+            } else {
+                group
+            }
+        } else {
+            group
+        }
+    }
+    if (changed) {
+        host.handlePersist(settings.copy(groups = updated))
+    }
+}
+
 /**
  * [RelayController] 的群组域处理扩展。
  *
  * 覆盖建群、邀请/移出成员、群文本发送、GroupNeed/GroupInfo 协议协商与同步。
  */
 
-fun handleCreateGroup(name: String, memberIds: List<String>): String? {
+fun handleCreateGroup(name: String, memberIds: List<String>, description: String = ""): String? {
     val trimmed = name.trim()
     if (trimmed.isEmpty()) {
         host.warn(BannerMessage.GroupNameRequired)
@@ -61,12 +108,19 @@ fun handleCreateGroup(name: String, memberIds: List<String>): String? {
         host.warn(BannerMessage.GroupNeedsMember)
         return null
     }
+    val autoDesc = if (description.isNotBlank()) description.trim() else {
+        val foundWs = host._state.value.agentWorkspaces.values.firstOrNull { ws ->
+            ws.wsTitle?.isNotBlank() == true && trimmed.contains(ws.wsTitle)
+        }
+        foundWs?.wsPath ?: foundWs?.wsId ?: ""
+    }
     val meta = GroupMeta.create(
         groupId = newId(),
         name = trimmed,
         members = others,
         selfId = self,
         updatedTs = nowMillis(),
+        description = autoDesc,
     )
     host.handlePersist(host._state.value.settings.copy(groups = host._state.value.settings.groups + meta))
     // 建群这条路径也要把 rev 登记进 need 游标：我们**刚刚**有这个群的元数据了。
@@ -75,6 +129,64 @@ fun handleCreateGroup(name: String, memberIds: List<String>): String? {
     // 则**每条**群消息都带上这一问（对端在线却从不回 host.info 的情形）。
     // 另外三条写元数据的路径（加人/移人/收到 host.info）都登记了，只有这里是漏的。
     host.core.groupNeeds.noteKnown(meta.groupId, meta.rev)
+
+    val targetWs = if (autoDesc.isNotBlank()) {
+        host._state.value.agentWorkspaces.values.firstOrNull { ws ->
+            autoDesc == ws.wsPath || autoDesc == ws.wsId || (ws.wsPath?.isNotBlank() == true && autoDesc.contains(ws.wsPath))
+        }
+    } else {
+        host._state.value.agentWorkspaces.values.firstOrNull { ws ->
+            ws.wsTitle?.isNotBlank() == true && trimmed.contains(ws.wsTitle)
+        }
+    }
+
+    if (targetWs != null) {
+        val wsName = targetWs.wsTitle ?: targetWs.wsId ?: autoDesc.substringAfterLast('/').substringAfterLast('\\')
+        val agentKind = targetWs.agentKind ?: "DSH"
+        host.scope.launch {
+            val greeting = runCatching {
+                getString(Res.string.workspace_group_initial_greeting, agentKind, wsName)
+            }.getOrNull() ?: "[$agentKind] $wsName"
+            host.handleAppendMessage(
+                MessageUi(
+                    id = host.localMessageId(),
+                    peerId = ConvId.group(meta.groupId),
+                    mine = false,
+                    text = greeting,
+                    at = nowMillis(),
+                    delivery = null,
+                    senderId = "agent:${agentKind.lowercase()}",
+                ),
+            )
+            // 同步工作区当前活跃会话状态到群聊
+            val activeSession = host._state.value.agentSessions.values.firstOrNull {
+                it.wsId == targetWs.wsId && !it.isArchived && it.state == "busy"
+            } ?: host._state.value.agentSessions.values.firstOrNull {
+                it.wsId == targetWs.wsId && !it.isArchived && it.title?.isNotBlank() == true
+            }
+            if (activeSession != null) {
+                val stateText = if (activeSession.state == "busy") {
+                    getString(Res.string.workspace_group_session_busy)
+                } else {
+                    getString(Res.string.workspace_group_session_ready)
+                }
+                val sessionTitle = activeSession.title ?: activeSession.alias ?: activeSession.sessionId
+                val brief = getString(Res.string.workspace_group_session_brief, sessionTitle, stateText)
+                host.handleAppendMessage(
+                    MessageUi(
+                        id = host.localMessageId(),
+                        peerId = ConvId.group(meta.groupId),
+                        mine = false,
+                        text = brief,
+                        at = nowMillis() + 10,
+                        delivery = null,
+                        senderId = "agent:${agentKind.lowercase()}",
+                    ),
+                )
+            }
+        }
+    }
+
     val rt = host.runtime
     if (rt == null) {
         host.info(BannerMessage.GroupCreated(meta.name, others.size))
@@ -83,7 +195,7 @@ fun handleCreateGroup(name: String, memberIds: List<String>): String? {
     }
     host.scope.launch {
         for (member in others) {
-            runCatching { rt.sendGroupInfo(member, meta) }
+            runCatching { rt.sendGroupInfo(member, host.groupMetaWithNicks(meta)) }
         }
         host.refreshPeers()
     }
@@ -124,7 +236,7 @@ fun handleAddGroupMembers(groupId: String, newMemberIds: List<String>) {
     val recipients = updatedMeta.recipientsExcluding(self)
     host.scope.launch {
         for (member in recipients) {
-            runCatching { rt.sendGroupInfo(member, updatedMeta) }
+            runCatching { rt.sendGroupInfo(member, host.groupMetaWithNicks(updatedMeta)) }
         }
         host.refreshPeers()
     }
@@ -173,7 +285,7 @@ fun handleRemoveGroupMember(groupId: String, memberId: String) {
     val notifyList = oldMembers.filter { it != self }
     host.scope.launch {
         for (m in notifyList) {
-            runCatching { rt.sendGroupInfo(m, updatedMeta) }
+            runCatching { rt.sendGroupInfo(m, host.groupMetaWithNicks(updatedMeta)) }
         }
         host.refreshPeers()
     }
@@ -211,7 +323,7 @@ fun handleLeaveGroup(groupId: String) {
     val notifyList = oldMembers.filter { it != self }
     host.scope.launch {
         for (m in notifyList) {
-            runCatching { rt.sendGroupInfo(m, updatedMeta) }
+            runCatching { rt.sendGroupInfo(m, host.groupMetaWithNicks(updatedMeta)) }
         }
         host.refreshPeers()
     }
@@ -260,7 +372,7 @@ fun handleUpdateGroupMeta(
     val recipients = updatedMeta.recipientsExcluding(self)
     host.scope.launch {
         for (m in recipients) {
-            runCatching { rt.sendGroupInfo(m, updatedMeta) }
+            runCatching { rt.sendGroupInfo(m, host.groupMetaWithNicks(updatedMeta)) }
         }
         host.refreshPeers()
     }
@@ -317,6 +429,14 @@ fun handleSendToGroup(
                 replyTo = replyTo,
             ),
         )
+        val isWs = isWorkspaceGroup(groupId)
+        if (RelayController.isMentioningDsh(body) || isWs) {
+            val prompt = RelayController.extractDshPrompt(body)
+            val self = host._state.value.selfNodeId
+            host.scope.launch {
+                host.onAgentPrompt?.invoke(ConvId.group(groupId), self, prompt, null)
+            }
+        }
     }
 }
 
@@ -397,6 +517,33 @@ fun handleOnGroupControl(envelope: Envelope) {
     }
 }
 
+
+/**
+ * 发群元数据时**带上本机已知的成员昵称**（`GroupMeta.memberNicks`）。
+ *
+ * ## 为什么在发送侧补，而不是在元数据生成时写死
+ *
+ * 昵称不是群的属性，是**本机知识**：同一份 `GroupMeta` 在不同设备上能填出来的成员昵称不一样
+ * （谁认识谁取决于各自的发现历史）。写进群元数据并随 `group.info` 同步，正是为了让**跨网、
+ * 发现不到对方的设备**也能显示出真名 —— 真机现场（红米走蜂窝）此前只能显示 `f6a7b8c9`
+ * 这样的 nodeId 前 8 位，而桌面端四个成员都正常。
+ *
+ * 这里只填**本机确实知道**的那些；不知道的不编（对方会用自己的知识补，或者退回 nodeId —— 
+ * 那是诚实的降级，不是谎）。自己一定在 `members` 里，所以自己的昵称也带上。
+ */
+private fun RelayController.groupMetaWithNicks(meta: GroupMeta): GroupMeta {
+    val state = _state.value
+    val known = buildMap {
+        put(state.selfNodeId, state.settings.nick.ifBlank { "" })
+        for (peer in state.peers) put(peer.nodeId, peer.displayName)
+    }
+    val nicks = meta.members.mapNotNull { id ->
+        val nick = known[id]?.trim().orEmpty()
+        if (nick.isEmpty()) null else id to nick
+    }.toMap()
+    if (nicks.isEmpty()) return meta
+    return meta.copy(memberNicks = nicks)
+}
 
 fun handleNotice(convId: String, kind: NoticeKind) {
     host.handleAppendMessage(

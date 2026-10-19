@@ -2,7 +2,9 @@
 
 package app.relay.core.session
 
+import app.relay.core.protocol.AgentEventAttachment
 import app.relay.core.protocol.Codec
+import app.relay.core.protocol.Limits
 import app.relay.core.protocol.MsgTypes
 import app.relay.core.protocol.ConvId
 import app.relay.core.protocol.Profile
@@ -127,11 +129,24 @@ internal class NodeOutbound(
         members: List<String>,
         mentions: List<String>? = null,
         replyTo: String? = null,
+        /** 真正的说话者（可选）。见 `GroupTextMsgPayload.senderId` 的 KDoc。 */
+        senderId: String? = null,
+        /**
+         * 思考过程（可选）。见 `GroupTextMsgPayload.reasoning` 的 KDoc。
+         *
+         * 超长在这里截断（[Limits.GROUP_REASONING_BYTES]，UTF-8 字节）：接收侧把超限的帧
+         * 整帧拒收，所以「不截就发」的后果不是显示变短，而是**这条消息彻底不到**。
+         */
+        reasoning: String? = null,
     ): SendOutcome {
         val envelope = makeEnvelope(
             MsgTypes.MSG,
             selfId(),
-            Codec.groupTextPayload(text, groupId, groupRev, mentions = mentions, replyTo = replyTo),
+            Codec.groupTextPayload(
+                text, groupId, groupRev,
+                mentions = mentions, replyTo = replyTo, senderId = senderId,
+                reasoning = clampGroupReasoning(reasoning),
+            ),
         )
         messageStore.append(
             peerId = ConvId.group(groupId),
@@ -325,12 +340,19 @@ internal class NodeOutbound(
         summary: String? = null,
         body: String? = null,
         ref: String? = null,
+        /**
+         * 附件元数据（task-45，cap `att1`）。**默认 null ⇒ 既有行为逐字不变**。
+         *
+         * 闸门不在这里：调用方（`agentNode` 的控制面）先按对端 caps 判断要不要带，
+         * 只有对端声明了 `att1` 才传下来 —— 旧端因此不会收到带这个键的帧。
+         */
+        attachment: AgentEventAttachment? = null,
     ): SendOutcome = messenger.sendUserMessage(
         peerId,
         makeEnvelope(
             MsgTypes.AGENT_EVENT,
             selfId(),
-            Codec.agentEventPayload(sessionId, cursor, eventType, summary, body, ref),
+            Codec.agentEventPayload(sessionId, cursor, eventType, summary, body, ref, attachment),
         ),
     )
 
@@ -495,6 +517,8 @@ internal class NodeOutbound(
     suspend fun sendAgentGrantRequest(
         peerId: String,
         agentKey: String? = null,
+        wsId: String? = null,
+        access: String? = null,
         reason: String? = null,
         at: Long? = null,
     ): SendOutcome = messenger.sendUserMessage(
@@ -502,7 +526,7 @@ internal class NodeOutbound(
         makeEnvelope(
             MsgTypes.AGENT_GRANT_REQUEST,
             selfId(),
-            Codec.agentGrantRequestPayload(agentKey, reason, at),
+            Codec.agentGrantRequestPayload(agentKey, wsId, access, reason, at),
         ),
     )
 
@@ -512,13 +536,17 @@ internal class NodeOutbound(
         state: String,
         scope: String,
         agentKey: String? = null,
+        wsId: String? = null,
+        access: String? = null,
+        isMyDevice: Boolean? = null,
+        delegatedApproval: Boolean? = null,
         at: Long? = null,
     ): SendOutcome = messenger.sendUserMessage(
         peerId,
         makeEnvelope(
             MsgTypes.AGENT_GRANT,
             selfId(),
-            Codec.agentGrantPayload(state, scope, agentKey, at),
+            Codec.agentGrantPayload(state, scope, agentKey, wsId, access, isMyDevice, delegatedApproval, at),
         ),
     )
 
@@ -527,6 +555,8 @@ internal class NodeOutbound(
         peerId: String,
         scope: String,
         agentKey: String? = null,
+        wsId: String? = null,
+        access: String? = null,
         total: Long? = null,
         at: Long? = null,
     ): SendOutcome = messenger.sendUserMessage(
@@ -534,7 +564,7 @@ internal class NodeOutbound(
         makeEnvelope(
             MsgTypes.AGENT_GRANT_LIST,
             selfId(),
-            Codec.agentGrantListPayload(scope, agentKey, total, at),
+            Codec.agentGrantListPayload(scope, agentKey, wsId, access, total, at),
         ),
     )
 
@@ -564,4 +594,55 @@ internal class NodeOutbound(
             Codec.avatarMissPayload(hash),
         ),
     )
+}
+
+/**
+ * 把思考过程截到 [Limits.GROUP_REASONING_BYTES] 个 UTF-8 字节以内（超长则保留开头 + 省略号）。
+ *
+ * ## 为什么必须截，而不是「发出去再说」
+ *
+ * 接收侧对 `reasoning` 做的是**字节上限校验**，超限 = 整帧 `badPayload` 丢弃。
+ * 所以不截断的后果不是「对方显示得短一点」，而是**这条消息彻底不到** ——
+ * 与「正文顶到 4096 上限被拒收」是同一类静默丢失。
+ *
+ * ## 为什么按字节切而不是 `take(n)`
+ *
+ * `take(n)` 数的是 UTF-16 码元，中文一个字 3 字节：同样 4096 个码元，中文是 12 KB、
+ * 英文是 4 KB —— 用码元切会得到一个**比上限还大**的字符串。切点还必须落在码点边界上：
+ * 从中间切开一个代理对会留下半个字符（界面显示成 U+FFFD 方块）。
+ */
+internal fun clampGroupReasoning(reasoning: String?): String? {
+    val raw = reasoning?.takeIf { it.isNotBlank() } ?: return null
+    val limit = Limits.GROUP_REASONING_BYTES
+    if (Codec.utf8ByteLength(raw) <= limit) return raw
+
+    val ellipsis = "…"
+    val budget = limit - Codec.utf8ByteLength(ellipsis)
+    val kept = StringBuilder()
+    var used = 0
+    var i = 0
+    while (i < raw.length) {
+        val head = raw[i]
+        val pair = head.isHighSurrogate() && i + 1 < raw.length && raw[i + 1].isLowSurrogate()
+        val codePoint = if (pair) {
+            0x10000 + ((head.code - 0xD800) shl 10) + (raw[i + 1].code - 0xDC00)
+        } else {
+            head.code
+        }
+        val width = utf8Width(codePoint)
+        if (used + width > budget) break
+        val step = if (pair) 2 else 1
+        kept.append(raw, i, i + step)
+        used += width
+        i += step
+    }
+    return kept.toString() + ellipsis
+}
+
+/** 一个码点编成 UTF-8 要几个字节（与 `Codec.utf8ByteLength` 同一口径）。 */
+private fun utf8Width(codePoint: Int): Int = when {
+    codePoint < 0x80 -> 1
+    codePoint < 0x800 -> 2
+    codePoint < 0x10000 -> 3
+    else -> 4
 }

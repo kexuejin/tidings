@@ -52,6 +52,14 @@ object CodecGroup {
         if (meta.containsKey("creatorIp") && !isStrAllowEmpty(meta["creatorIp"], Limits.IP)) return false
         if (meta.containsKey("creatorId") && !isStrAllowEmpty(meta["creatorId"], Limits.FROM)) return false
 
+        // memberNicks（可选）：nodeId → 昵称。只做**形状**校验（对象、键是成员、值是受限串），
+        // 不做语义判断 —— 昵称是纯展示数据，越界的键在解码侧会被 members 过滤掉。
+        if (meta.containsKey("memberNicks")) {
+            val nicks = meta["memberNicks"] as? JsonObject ?: return false
+            if (nicks.size > GROUP_MAX_MEMBERS) return false
+            if (!nicks.all { (k, v) -> k in members && isStr(v, Limits.NICK) }) return false
+        }
+
         // ownerId 与 adminIds 必须成对出现：只给一个就拒（TS: hasOwnerId !== hasAdminIds）。
         val hasOwnerId = meta.containsKey("ownerId")
         val hasAdminIds = meta.containsKey("adminIds")
@@ -131,6 +139,15 @@ object CodecGroup {
             adminHint = strAllowEmptyOrNull(meta["adminHint"], Limits.GROUP_ADMIN_HINT),
             description = strAllowEmptyOrNull(meta["description"], Limits.GROUP_DESCRIPTION),
             announce = strAllowEmptyOrNull(meta["announce"], Limits.GROUP_ANNOUNCE),
+            // 只收**属于 members** 的键：越界键一律丢掉（它们不可能是这个群的成员，
+            // 留着只会在界面上凭空多出一行）。一个都没有就是 null —— 与"旧端不发"同义。
+            memberNicks = (meta["memberNicks"] as? JsonObject)
+                ?.mapNotNull { (k, v) ->
+                    val nick = strOrNull(v, Limits.NICK) ?: return@mapNotNull null
+                    if (k in members) k to nick else null
+                }
+                ?.takeIf { it.isNotEmpty() }
+                ?.toMap(),
         )
     }
 

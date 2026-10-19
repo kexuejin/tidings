@@ -137,6 +137,9 @@ object MsgTypes {
         listOf(
             CAP_MOBILE_TEXT, CAP_MOBILE_RECORD, CAP_AGENT_SESSION, CAP_AGENT_QUEUE, CAP_AGENT_WORKSPACE,
             CAP_AGENT_GRANT, CAP_AGENT_SESSION_PAGE, CAP_TABLE_TEXT,
+            // task-45：手机能把 agent 事件的附件元数据渲染成卡片 ⇒ 如实声明。
+            // 发送方（桥/宿主）据此决定 agent-event 里带不带 attachment；不声明就只发文本占位。
+            CAP_ATTACHMENT,
         )
 
     /**
@@ -217,9 +220,19 @@ object MsgTypes {
     const val CAP_AGENT_QUEUE = "agq1"
 
     /**
-     * `ams1` = **消息级 agent 会话关联能力**（PPE-1 §6 扩展）。
-     * 声明本能力表示节点支持在 `msg` 文本/富文本帧中携带可选 `agentSessionId`，
-     * 用于将 IM 文本流关联到具体的 Agent 会话线索（Thread）中。
+     * `ams1` = **消息级 agent 会话关联能力**（PPE-1 §6 扩展）：声明本能力表示节点支持在
+     * `msg` 文本/富文本帧中携带可选 `agentSessionId`，把 IM 文本流关联到具体 Agent 会话线索。
+     *
+     * ## 本仓状态：**保留给茶话间互通；既不声明也不消费（0/0）**
+     *
+     * 全仓核对（task-51）：这个常量在本仓**没有任何**声明点（不在
+     * [MOBILE_CAPS] / [AGENT_CAPS] / `RelaySettings.caps()` 里）也没有任何消费点
+     * （没有一处校验/读取它）—— 是**唯一**一个 0/0 的 `CAP_*`。
+     *
+     * **刻意保留、不删**：它对应茶话间（对端实现）的互通约定，删掉这个常量就等于
+     * 从我们这边抹掉那条约定的名字，将来对接时要重新发明一次。留着的代价只是一个常量。
+     * 需要它的时候（真要发 `agentSessionId`）再按"声明 + 消费"两处一起补 —— 只补一处
+     * 就是今天栽过两次的那种静默（`lnk1` / `att1` 都曾只加进清单、没进 `caps()`）。
      */
     const val CAP_MSG_AGENT_SESSION = "ams1"
 
@@ -258,13 +271,32 @@ object MsgTypes {
     const val CAP_AGENT_SESSION_PAGE = "agp1"
 
     /**
+     * 能力声明 `lnk1`：本机**能接受一条长连接**（K1 的手机→主机下行通道）。
+     *
+     * 由**主机**声明（桌面/agentNode），手机据此决定"这台机器可以建长连接"。不声明 = 按老端
+     * 对待（手机不会去连）。与 `ag1` 同层：它声明的是"我这边有一个可接受连接的 TCP 监听"，
+     * 不是用户偏好 —— 所以没有开关（开关在**发起侧**的手机上）。
+     */
+    const val CAP_LINK = "lnk1"
+
+    /**
+     * 能力声明 `att1`：本机**能把 agent 事件的附件元数据渲染成附件卡片**（task-45）。
+     *
+     * 由**接收方**（手机）声明。发送方（桥/宿主）据此决定要不要在 `agent-event` 里带
+     * `attachment`：对端不声明就只发文本占位 —— 这样"旧端忽略未知字段"这条兼容性
+     * 就有了**主动**保障（而不是指望旧端恰好宽容）。
+     */
+    const val CAP_ATTACHMENT = "att1"
+
+    /**
      * agent 节点的 caps：`ag1`（身份）+ 一个人类节点也会有的文本能力 + `agn1`（会话帧）
-     * + `aws1`（工作区键与宣告帧，D1/D2/D3 已实现）+ `agr1`（授权回路，D7 已实现）。
+     * + `aws1`（工作区键与宣告帧，D1/D2/D3 已实现）+ `agr1`（授权回路，D7 已实现）
+     * + `lnk1`（长连接下行，K1 已实现）。
      */
     val AGENT_CAPS: List<String> =
         listOf(
             CAP_AGENT, CAP_MOBILE_TEXT, CAP_AGENT_SESSION, CAP_AGENT_QUEUE,
-            CAP_AGENT_WORKSPACE, CAP_AGENT_GRANT, CAP_AGENT_SESSION_PAGE,
+            CAP_AGENT_WORKSPACE, CAP_AGENT_GRANT, CAP_AGENT_SESSION_PAGE, CAP_LINK,
         )
 
     /**
@@ -362,7 +394,21 @@ object AgentGrantScopes {
     const val ALL = "all"
     /** 单个 agent（`nodeId` + `agentKey`）。 */
     const val AGENT = "agent"
-    val VALUES: Set<String> = setOf(ALL, AGENT)
+    /** 单个工作区（`nodeId` + `agentKey` + `wsId`）。 */
+    const val WORKSPACE = "workspace"
+    val VALUES: Set<String> = setOf(ALL, AGENT, WORKSPACE)
+}
+
+object AgentGrantAccess {
+    /** 只读：仅可浏览工作区、跟踪产物和会话流，不可下发任务或审批。 */
+    const val RO = "ro"
+    /** 读写：具备完整交互能力。 */
+    const val RW = "rw"
+    /** 协同管理员：具备治理与任务调度权限。 */
+    const val ADMIN = "admin"
+    /** 群主/宿主：物理工作区拥有者。 */
+    const val OWNER = "owner"
+    val VALUES: Set<String> = setOf(RO, RW, ADMIN, OWNER)
 }
 
 object AgentGrantPolicies {

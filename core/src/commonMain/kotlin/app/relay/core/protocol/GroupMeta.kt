@@ -58,6 +58,26 @@ data class GroupMeta(
     val announce: String? = null,
     /** 虚拟 Agent 群成员列表（PPE-2 / Goal 5）。 */
     val virtualAgents: List<VirtualAgentMember>? = null,
+    /**
+     * nodeId → 昵称（**可选**，随 `group.info` 一起同步）。
+     *
+     * ## 为什么群元数据里要带成员昵称
+     *
+     * 群成员在每台设备上只有 nodeId。要让成员列表显示真名，此前只能靠**自己发现**那个节点
+     * （同网段 mDNS / 曾经直连过）—— 而跨网场景下手机根本发现不了另外两个成员：
+     * 它们既不在同一个局域网，也从来没有直接跟这台手机通过信。真机现场（红米走蜂窝）：
+     * 群主正常（配对过），另外两个只显示 nodeId 前 8 位；而桌面端四个都正常 —— 因为它
+     * 同一时刻在局域网里认识所有人。**同一个群，两端显示不一致**，且不一致的那一端看到的是
+     * "一串十六进制"。这就是这一列的存在理由。
+     *
+     * ## 边界
+     *
+     * - **可选**：旧端不发它就是 null，成员行退回 nodeId 前 8 位（与以前一致，不更差）；
+     * - **只用于显示**：不参与成员判定、不参与权限 —— 成员身份永远只认 [members] 与
+     *   [ownerId] / [adminIds]，昵称是纯展示数据（伪造它没有任何特权收益）；
+     * - 键必须属于 [members]（解码侧会按 members 过滤掉越界键）。
+     */
+    val memberNicks: Map<String, String>? = null,
 ) {
     /** 判断指定 nodeId / agentId 是否属于虚拟 Agent。 */
     fun isVirtualAgent(nodeOrAgentId: String): Boolean =
