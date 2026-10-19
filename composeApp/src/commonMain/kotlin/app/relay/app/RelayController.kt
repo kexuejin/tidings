@@ -1014,6 +1014,8 @@ class RelayController(
                         oldPort = record.udpPort,
                         newHost = parsed.host,
                         newPort = parsed.port,
+                        // 顺手把合成名换成对端声明的真名（见该函数的 KDoc）。
+                        newName = record.profile.nick,
                     )
                 }
                 if (rewritten == null) {
@@ -1406,11 +1408,46 @@ internal fun manualPeersWithUpdatedAddress(
     oldPort: Int,
     newHost: String,
     newPort: Int,
+    /**
+     * 对端**自己声明的**昵称（可选）。
+     *
+     * 为什么要在改地址时顺手换名字：便条上的名字是「我给这条地址起的」——
+     * 早先配对时对端还没在二维码里带昵称，于是写进去的是合成名 `node-a1b2c3d4`。
+     * 那个名字只在「还没握上手」时顶替 `host:port` 显示，可一旦对端换了地址、
+     * 这条便条被改写，合成名就跟着一直留着 —— 真机红米的 `manualPeers[0].name`
+     * 就是 `node-a1b2c3d4`，而它明明已经认识对方叫 `demo-mac-97`。
+     *
+     * 只换**空的或合成名**：用户自己起的便条（原型里的「老周的旧笔记本」）不许被覆盖。
+     */
+    newName: String? = null,
 ): List<ManualPeerEntry>? {
     val index = entries.indexOfFirst { it.host == oldHost && it.port == oldPort }
     if (index < 0) return null
-    if (oldHost == newHost && oldPort == newPort) return entries
+    val current = entries[index]
+    val renamed = if (newName != null && shouldReplacePeerLabel(current.name, newName)) {
+        current.copy(name = newName)
+    } else {
+        current
+    }
+    if (oldHost == newHost && oldPort == newPort) {
+        // 地址没变也要能改名：地址换了才改，合成名就永远留在没换过地址的那些便条上。
+        return if (renamed === current) entries else entries.toMutableList().also { it[index] = renamed }
+    }
     val updated = entries.toMutableList()
-    updated[index] = updated[index].copy(host = newHost, port = newPort)
+    updated[index] = renamed.copy(host = newHost, port = newPort)
     return updated
+}
+
+/**
+ * 便条上的名字该不该换成对端声明的昵称。
+ *
+ * 只有**没名字**或**合成名**（`node-<8 位>`）才换 —— 用户自己起的便条不动，
+ * 那是他的东西，不是对端的身份。
+ */
+internal fun shouldReplacePeerLabel(stored: String?, real: String): Boolean {
+    val target = real.trim()
+    if (target.isEmpty()) return false
+    if (target.startsWith(SYNTHETIC_NICK_PREFIX)) return false
+    val current = stored?.trim().orEmpty()
+    return current.isEmpty() || current.startsWith(SYNTHETIC_NICK_PREFIX)
 }

@@ -49,4 +49,59 @@ class ManualPeerAddressUpdateTest {
         val entries = listOf(ManualPeerEntry("10.0.0.9", 17878))
         assertNull(manualPeersWithUpdatedAddress(entries, "192.168.2.82", 17878, "2001:db8::1", 17878))
     }
+
+    // ---- 合成名便条：`node-<8 位>` 不该一直留着（真机红米 manualPeers[0].name 就是它）----
+
+    @Test
+    fun aSyntheticLabelIsUpgradedWhenTheAddressChanges() {
+        val entries = listOf(ManualPeerEntry("2001:db8::1", 17878, "node-a1b2c3d4"))
+        val updated = manualPeersWithUpdatedAddress(
+            entries = entries,
+            oldHost = "2001:db8::1",
+            oldPort = 17878,
+            newHost = "2001:db8:2020:cb44::9",
+            newPort = 17878,
+            newName = "demo-mac-97",
+        )
+        assertEquals("demo-mac-97", updated?.get(0)?.name, "对端报了真名，合成名就该被顶掉")
+        assertEquals("2001:db8:2020:cb44::9", updated?.get(0)?.host)
+    }
+
+    @Test
+    fun aSyntheticLabelIsUpgradedEvenWhenTheAddressIsUnchanged() {
+        val entries = listOf(ManualPeerEntry("2001:db8::1", 17878, "node-a1b2c3d4"))
+        val updated = manualPeersWithUpdatedAddress(
+            entries, "2001:db8::1", 17878, "2001:db8::1", 17878, newName = "demo-mac-97",
+        )
+        assertEquals("demo-mac-97", updated?.get(0)?.name, "地址没变也要能改名，否则合成名永远留在便条上")
+    }
+
+    @Test
+    fun aUserChosenLabelIsNeverOverwritten() {
+        val entries = listOf(ManualPeerEntry("2001:db8::1", 17878, "老周的旧笔记本"))
+        val updated = manualPeersWithUpdatedAddress(
+            entries, "2001:db8::1", 17878, "2001:db8::1", 17878, newName = "demo-mac-97",
+        )
+        assertSame(entries, updated, "用户自己起的便条不许被对端的昵称覆盖（那是他的东西）")
+    }
+
+    @Test
+    fun aMissingLabelIsFilledIn() {
+        val entries = listOf(ManualPeerEntry("2001:db8::1", 17878))
+        val updated = manualPeersWithUpdatedAddress(
+            entries, "2001:db8::1", 17878, "2001:db8::1", 17878, newName = "demo-mac-97",
+        )
+        assertEquals("demo-mac-97", updated?.get(0)?.name)
+    }
+
+    @Test
+    fun theReplacementRuleOnlyTouchesEmptyOrSyntheticLabels() {
+        assertEquals(true, shouldReplacePeerLabel(null, "demo-mac-97"))
+        assertEquals(true, shouldReplacePeerLabel("  ", "demo-mac-97"))
+        assertEquals(true, shouldReplacePeerLabel("node-a1b2c3d4", "demo-mac-97"))
+        assertEquals(false, shouldReplacePeerLabel("书房的电脑", "demo-mac-97"))
+        // 对端自己也只有合成名时不动：换了等于没换，还会把用户的便条洗掉。
+        assertEquals(false, shouldReplacePeerLabel("node-a1b2c3d4", "node-abcdef12"))
+        assertEquals(false, shouldReplacePeerLabel("书房的电脑", ""))
+    }
 }

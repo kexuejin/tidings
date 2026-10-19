@@ -357,8 +357,11 @@ internal class DesktopExtension(
                                             // 信封 `from` 永远是发送设备，不传 senderId，手机端就把
                                             // agent 的话显示成「桌面端发的」，而桌面端自己按
                                             // `agent:<kind>` 落库 ⇒ 同一个群两端发送者不一致。
-                                            // 形态与桌面端本地落库一致（`agent:<小写 kind>`）。
-                                            senderId = agentSenderIdFor(agentKind),
+                                            // **必须传 `agentSenderId`，不能再算一遍。**
+                                            // 本机落库用的就是它（用户自己发的话 = 用户 nodeId，agent 答的 = `agent:<小写 kind>`），
+                                            // 而这里原来无条件写 `agentSenderIdFor(agentKind)` ⇒ 用户自己在群里
+                                            // 打的字，在别人设备上显示成「agent 说的」（真机红米库里就是这么存的）。
+                                            senderId = agentSenderId,
                                             // 思考过程**跟着一起进群**：只发正文的话，同一个群里
                                             // 桌面端的气泡有「思考」折叠块、手机端没有 —— 用户看到
                                             // 的就是「过程只在桌面、手机只剩最后一句」。
@@ -764,7 +767,9 @@ internal class DesktopExtension(
                                     groupId = group.groupId,
                                     groupRev = group.rev,
                                     members = group.members,
-                                    senderId = agentSenderIdFor(backfillKind),
+                                    // 与实时那条同源：用共用构造算出来的发送者，
+                                    // 而不是按 kind 现拼（用户自己的话同样会拼错）。
+                                    senderId = message.senderId,
                                     // 补发与实时必须带同一份思考过程：只补正文会让
                                     // 「离线一会儿回来」的那条在手机上比别人的短一截。
                                     reasoning = message.reasoning,
@@ -1036,7 +1041,11 @@ internal fun agentChatMessageFor(
         text = finalAnswer,
         reasoning = parsedReasoning,
         isUserPrompt = isUserPrompt,
-        senderId = if (isUserPrompt) selfNodeId else "agent:" + agentKind,
+        // agent 的标签**必须**走 `agentSenderIdFor`（它会把 kind 统一成小写）。
+        // 这里原来写的是 `"agent:" + agentKind`，而线上那条路用的是 `agentSenderIdFor` ——
+        // 同一个说话者在桌面端落库成 `agent:DSH`、在手机端落库成 `agent:dsh`，
+        // 一个 agent 在群里显示成两个人（真机库里两种拼写各 801 / 113 条）。
+        senderId = if (isUserPrompt) selfNodeId else agentSenderIdFor(agentKind),
     )
 }
 

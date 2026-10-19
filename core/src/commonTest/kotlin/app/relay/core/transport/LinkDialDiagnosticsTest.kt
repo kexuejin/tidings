@@ -3,8 +3,11 @@
 package app.relay.core.transport
 
 import app.relay.core.crypto.TlsPin
+import app.relay.core.protocol.LinkFrame
+import app.relay.core.protocol.LinkFrames
 import app.relay.core.protocol.MsgTypes
 import app.relay.core.protocol.Profile
+import app.relay.core.protocol.TcpFrame
 import io.ktor.network.sockets.Socket
 import io.ktor.utils.io.ByteReadChannel
 import io.ktor.utils.io.ByteWriteChannel
@@ -14,8 +17,10 @@ import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.cancel
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.runBlocking
+import kotlinx.coroutines.withTimeout
 import kotlin.test.Test
 import kotlin.test.assertEquals
+import kotlin.test.assertNull
 import kotlin.test.assertTrue
 
 /**
@@ -183,5 +188,80 @@ class LinkDialDiagnosticsTest {
 
         val stats = client.dialStats()["peer"]
         assertEquals("peer-has-no-lnk1", stats?.skipReason, "task-31 那类静默必须能从诊断里一眼看出")
+    }
+
+    /** 先失败一次、再成功；成功之后连接立刻可用（读一帧 Ok 就交给 pump）。 */
+    private class FlakyTransport(override val isSecure: Boolean) : LinkTransport {
+        @Volatile
+        var succeed = false
+        override val lastError: String? get() = "tls-handshake-failed"
+        override suspend fun connect(host: String, port: Int, expectedPin: TlsPin?, timeoutMs: Long): LinkConnection? =
+            if (succeed) FakeConnection(host, port) else null
+        override suspend fun accept(
+            socket: Socket,
+            read: ByteReadChannel,
+            write: ByteWriteChannel,
+            remoteHost: String,
+            remotePort: Int,
+            expectedPin: TlsPin?,
+        ): LinkConnection? = null
+    }
+
+    private class FakeConnection(override val remoteHost: String, override val remotePort: Int) : LinkConnection {
+        override val isSecure: Boolean get() = true
+        private var reads = 0
+        override suspend fun send(frame: ByteArray) = Unit
+        override suspend fun receiveFrame(): ByteArray? {
+            reads++
+            // 第一帧 = 握手应答 Ok；之后返回 null = 连接结束，让 pump 正常退出。
+            //
+            // 注意剥掉长度前缀：`receiveFrame` 的契约是**帧体**（前缀由通道层吃掉），
+            // 直接把 `LinkFrames.encode` 的整帧丢回去会被解成坏帧 ⇒ 变成 hello-rejected。
+            if (reads > 1) return null
+            val framed = LinkFrames.encode(LinkFrame.Ok)
+            val len = TcpFrame.decodeLength(framed)
+            return framed.copyOfRange(TcpFrame.LENGTH_PREFIX_BYTES, TcpFrame.LENGTH_PREFIX_BYTES + len)
+        }
+        override fun close() = Unit
+    }
+
+    /**
+     * 建连成功必须**清掉上一次的失败原因**。
+     *
+     * 真机形态（换网重连之后）：`linkConnected=true` 与 `lastError=connect-timeout`
+     * **同时**出现 —— 诊断自相矛盾，看的人只会以为链路还在坏。
+     * 历史并不因此丢掉：失败**次数**留在 `dialFailures` 里，那才是累计量。
+     */
+    @Test
+    fun aSuccessfulDialClearsThePreviousFailureReason() = runBlocking {
+        val scope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
+        val registry = PeerRegistry("self")
+        registry.touch("peer", publicAddress, 17878, profile("peer"), 1L, confirmed = true)
+        registry.setPin("peer", "sha256:" + "a".repeat(64))
+        val transport = FlakyTransport(isSecure = true)
+        val client = LinkClient(
+            registry = registry,
+            transport = transport,
+            plaintextTransport = transport,
+            scope = scope,
+            selfNodeId = { "self" },
+            enabled = { true },
+            tickMs = 20,
+            connectTimeoutMs = 50,
+        )
+        client.start()
+        // ① 先失败一次（否则后面「变 null」什么也证明不了）。
+        withTimeout(5_000) {
+            while ((client.dialStats()["peer"]?.failures ?: 0) == 0) delay(10)
+        }
+        // 停掉 tick：每 20ms 一次的失败会把退避推到 60s 上限，
+        // 那样「让它连上」就得等一分钟 —— 不是这条测试要证明的东西。
+        client.stop()
+        assertEquals("tls-handshake-failed", client.dialStats()["peer"]?.lastError, "失败原因必须先出现")
+        // ② 让它连上：`redialNow` 会清掉退避并立刻拨一次，失败原因必须随之消失。
+        transport.succeed = true
+        client.redialNow("peer")
+        assertNull(client.dialStats()["peer"]?.lastError, "建连成功必须把上一次的失败原因清掉")
+        scope.cancel()
     }
 }

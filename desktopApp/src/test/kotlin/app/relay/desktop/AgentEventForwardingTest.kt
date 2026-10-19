@@ -68,6 +68,30 @@ class AgentEventForwardingTest {
         }
     }
 
+    /**
+     * 转发**不许另算发送者**：本机落库用什么，线上就必须用什么。
+     *
+     * 原来实时那条无条件写 `agentSenderIdFor(agentKind)` ⇒ 用户自己在群里打的字，
+     * 在别人设备上显示成「agent 说的」（真机红米库里就是这么存的）。
+     */
+    @Test
+    fun everyGroupForwardPathUsesTheSameSenderAsTheLocalRecord() {
+        val source = File("src/main/kotlin/app/relay/desktop/DesktopExtension.kt")
+            .takeIf { it.isFile }
+            ?: File("desktopApp/src/main/kotlin/app/relay/desktop/DesktopExtension.kt")
+        val argLists = groupTextArgumentLists(source.readText())
+        assertTrue(argLists.size >= 3, "转发路径应当至少三条，实测 " + argLists.size)
+        argLists.forEachIndexed { index, args ->
+            // 只看**活代码**：解释这条纪律的注释里正当地提到了那个函数名，
+            // 不剥掉的话守卫会被自己的说明文字绊倒。
+            val code = args.lines().joinToString("\n") { it.substringBefore("//") }
+            assertTrue(
+                !code.contains("agentSenderIdFor("),
+                "第 " + (index + 1) + " 条 sendGroupText 又自己算了一遍发送者（用户的话会被记成 agent）：" + args,
+            )
+        }
+    }
+
     /** 切出每个 `sendGroupText(` 的完整参数表（按括号配平，能跨多行）。 */
     private fun groupTextArgumentLists(src: String): List<String> {
         val needle = "sendGroupText("

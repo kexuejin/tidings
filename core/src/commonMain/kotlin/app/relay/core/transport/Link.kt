@@ -939,6 +939,11 @@ class LinkClient(
         }
         // 候选上建连成功 ⇒ 它就是这台主机现在可达的地址（验收要求：registry 当前地址跟着更新）。
         registry.setLinkedAddress(peerId, target.host)
+        // **把上一次的失败原因清掉**。它记的是「这一次拨号成没成」，而这里已经成了 ——
+        // 不清的话诊断会同时给出 `connected=true` 与 `lastError=connect-timeout`
+        // （真机换网重连之后就是这个形态），看的人只会以为链路还在坏。
+        // 历史不是丢掉：失败**次数**留在 `dialFailures` 里，那个才是累计量。
+        lock.withLock { dialLastError.remove(peerId) }
         pump(peerId, connection)
         return true
     }

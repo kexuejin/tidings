@@ -2,8 +2,9 @@
 
 package app.relay.desktop
 
-import app.relay.agent.AgentSessionRegistry
 import java.io.File
+
+import app.relay.agent.AgentSessionRegistry
 import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertNull
@@ -73,6 +74,32 @@ class AgentChatMessageConvergenceTest {
             format = { r, _ -> r.body },
         )
         assertNull(message, "只有零宽字符的事件不该产出气泡（空气泡那条）")
+    }
+
+    /**
+     * agent 的发送者标签**只有一个来源**（`agentSenderIdFor`）。
+     *
+     * 这里原来写的是 `"agent:" + agentKind`，而线上那条路用的是 `agentSenderIdFor`（会转小写）——
+     * 同一个说话者在桌面端落库成 `agent:DSH`、在手机端落库成 `agent:dsh`，
+     * 一个 agent 在群里显示成两个人（真机库里两种拼写各 801 / 113 条）。
+     */
+    @Test
+    fun theAgentLabelHasASingleSourceOfTruth() {
+        val source = File("src/main/kotlin/app/relay/desktop/DesktopExtension.kt")
+            .takeIf { it.isFile }
+            ?: File("desktopApp/src/main/kotlin/app/relay/desktop/DesktopExtension.kt")
+        // 只看 `agentSenderIdFor` **定义之前**的代码：那个函数自己的实现里当然有 `"agent:" +`，
+        // 它是唯一合法的现拼处；别的任何地方现拼都是同一个 bug 的复发。
+        val beforeDefinition = source.readText().substringBefore("internal fun agentSenderIdFor")
+        val codeLines = beforeDefinition.lines().map { it.substringBefore("//") }
+        // 唯一允许的第二处现拼是**本地驱动**那条：它答的就是它自己（`agent:<driverId>`，
+        // 与事件转发那条不是同一个说话者），这是有意的、也写明了理由。
+        val offenders = codeLines.filter { it.contains("\"agent:\" +") && !it.contains("driver.driverId") }
+        assertTrue(
+            offenders.isEmpty(),
+            "agent 标签只许由 agentSenderIdFor 生成（本地驱动那处除外）；现拼会得到两种拼写，" +
+                "同一个 agent 显示成两个人：" + offenders,
+        )
     }
 
     @Test
