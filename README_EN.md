@@ -42,8 +42,8 @@
 - **Decentralized Multi-Agent Group Collaboration**: Models local agents as virtual group members (`VirtualAgentMember`), supporting `@Agent` routing, Chief coordination, and real-time task progress broadcasting (`GroupProgress`).
 - **Mobile MCP Governance & Dynamic ACLs**: Inspect host MCP tools from mobile devices and toggle dynamic permission ACLs (e.g., disabling Bash execution while away from desk) without restarting host services.
 - **Zero-Server Native System Notifications**: Uses offline cursor syncing and native OS notification APIs (Android Notifications / iOS UserNotifications / Desktop Tray alerts) to deliver timely task completion and approval wakeups without third-party push servers.
-- **Resilient File Transfer & Resume (including cross-network)**: streaming chunked transfer with resume, sandboxed opening, system share integration, and inline image/audio preview. **Cross-network file transfer is implemented** (on public routes a second TCP connection reuses `file-ctl` / the raw stream / resume, and public routes must use TLS + mutual pin) — the code path and its unit tests are green, while **the end-to-end send on a real device is still pending acceptance**.
-- **Long-connection downlink (K1 / K2)**: the phone dials the host and keeps one TCP long connection for downlink push and low-latency control. K1 = LAN plaintext (off by default, switchable in Settings); K2 = public TLS + mutual pin. Connecting refreshes the peer address and reconnects automatically after a drop; **a network switch (Wi-Fi ↔ cellular) redials immediately** (measured about 3s on a real device; the requirement is ≤10s).
+- **Resilient File Transfer & Resume (including cross-network)**: streaming chunked transfer with resume, sandboxed opening, system share integration, and inline image/audio preview. Cross-network transfer opens a second TCP connection that reuses the same machinery (`file-ctl` / the raw stream / resume), and public routes must use TLS with a pinned peer key.
+- **Long-connection downlink (K1 / K2)**: the phone dials the host and keeps one TCP long connection for downlink push and low-latency control. LAN traffic uses plaintext (K1); public traffic uses TLS with a pinned peer key (K2) — **public routes must use TLS, and a failed pin check is refused**, never downgraded to plaintext. There is nothing for you to configure: whichever network the phone is on picks the route, and switching networks (Wi-Fi ↔ cellular ↔ airplane mode) happens automatically with no manual redial.
 - **Background keep-alive and battery**: an Android foreground service (`remoteMessaging`) keeps the app reachable in the background; Doze lowers the frequency; **heartbeats are skipped while data is flowing**, with a fallback ping (dead after 45s, more than 2× the heartbeat) so a live connection is neither killed by mistake nor drained by idle chatter.
 - **Strictly Ordered Offline Queue & Reliable Delivery**: Messages sent while a peer is offline are preserved in transactional local queues and automatically flushed upon handshake re-establishment.
 
@@ -198,13 +198,13 @@ For detailed design specifications, see [PROTOCOL-EXTENSION.md](PROTOCOL-EXTENSI
 ## Known Limitations (stated honestly)
 
 - **Cross-network screen assistance is unavailable**: screen mirroring / assistance still requires both ends to be on the **same LAN**. Cross-network support covers **files** only.
-- **Tapping an attachment to download it is not implemented**: agent-event attachments currently carry only an `attachmentId`, without a `fileId` or path, so the card renders but cannot yet be opened to disk.
-- **Cloud push is not implemented**: the design is delivered (`docs/cloud-push-design.md`) but no code has landed; background wakeups currently rely on the Android foreground service plus offline incremental cursor sync.
-- **The iOS end-to-end TLS handshake needs a signed build**: a smoke build (`CODE_SIGNING_ALLOWED=NO`) has no keychain container and `SecItemAdd` returns `-25291`. In that state the iOS side has **no TLS transport at all**, so public long connections are refused by policy (fail-closed) rather than downgraded to plaintext.
-- **Changes to the bridge (`dsh-tidings`) require reloading the DSH host**: adapter edits take effect only after the host restarts.
-- **No session events while DSH is queued**: a message sent while DSH is queueing only shows up on the phone when the next round begins.
-- **The demo driver does not pretend**: it is not selected by default, and while running it says honestly that no real task was executed, with `totalTokens = 0`.
-- **No forward secrecy and no key-rotation UI**: a pin covers the SPKI of a long-lived self-signed identity; the private key stays stable and the certificate is re-issued automatically, while rotation and expiry prompts are still planned (P4).
+- **A large cross-network file transfer has never been run end to end on a real device**: the code path and its unit tests exist; real-device acceptance is what is missing.
+- **Attachments from an agent can be viewed but not saved**: the card renders, but tapping it cannot write the file to disk yet.
+- **No cloud push**: background wakeups rely on the Android foreground service plus offline incremental sync, with no third-party push service involved. The trade-off is that an app the system has fully frozen receives no timely alert.
+- **iOS needs a signed build for cross-network long connections**: an unsigned build has no keychain container and therefore no TLS transport, so public long connections are refused (fail-closed, never downgraded to plaintext).
+- **Messages do not appear while DSH is queued**: a message sitting in the host's queue reaches the phone when the next round begins.
+- **The demo driver does not pretend**: it is off by default, and when selected it states plainly that no real task was executed and counts no tokens.
+- **No forward secrecy and no key-rotation entry point**: a pin covers the SPKI of a long-lived self-signed identity — the private key stays stable and the certificate is re-issued automatically, while rotation and expiry prompts are not offered yet.
 
 ---
 

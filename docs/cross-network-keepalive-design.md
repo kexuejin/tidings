@@ -1,5 +1,18 @@
 # 手机主动长连接（跨网下行）设计（task-20 ③）
 
+> **这是设计阶段的提案，不是落地现状。**
+> §3 的协议草案、§7 的分期、§8 的未决问题都已被后续实现取代或裁决；
+> 落地后的形态看 [`ARCHITECTURE.md`](../ARCHITECTURE.md) §5.4（K1/K2 与传输安全两档）、
+> §5.5（跨网直连与候选池）与 [`README.md`](../README.md) 的「长连接下行通道」。
+> 两条设计阶段没预料到、真机上才暴露的坑记在这里，供后来者别重踩：
+>
+> 1. **空闲 5 秒被读超时误判成对端关闭**：握手用的 `socket.soTimeout` 建连后没有复位，
+>    于是每条连接每 8.1 秒断一次。修法是握手后 `soTimeout = 0`（`LinkTls.jvmShared.kt`）。
+>    证据：[`design/runtime-evidence/link-idle-drop-20261019.md`](../design/runtime-evidence/link-idle-drop-20261019.md)。
+> 2. **手机在 Wi-Fi 上够不到 IPv6 的对端**：Android 的路由主表只装默认网络，
+>    换到蜂窝之后到对端那条路不在表里。修法是 `NetworkBinder` —— 公网地址先用
+>    `ConnectivityManager` 找到能走那张网的 `Network`，再 `bindSocket`（`AndroidNetworkBinder`）。
+
 > 状态：**设计稿，未实现**。本文件只描述形态、与现有路径的关系、NAT/保活/重连与风险。
 > 相关：task-19（源地址漂移的刷新）、task-20 ①②（候选池兜底 / 重复配对更新地址）、
 > task-13（公网传输安全 + pin）、task-15（Android 后台保活）。
