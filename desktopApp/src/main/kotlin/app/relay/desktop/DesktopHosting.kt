@@ -171,6 +171,44 @@ internal object DesktopUiPrefs {
 }
 
 /**
+ * 一次「已经落到原生对象上」的渲染。
+ *
+ * 用它和下一份渲染做差，避免把没有变化的原生写操作重做一遍 —— 每一次
+ * `icon.image =` / `icon.popupMenu =` 都会让系统重算菜单栏里那个状态项的几何。
+ */
+internal data class TrayAppliedState(
+    val model: TrayMenuModel,
+    val hasUnread: Boolean,
+)
+
+/** 一份渲染相对上一份，哪些原生写操作真的需要重做。 */
+internal data class TrayPatch(
+    val rebuildMenu: Boolean,
+    val updateToolTip: Boolean,
+    val updateImage: Boolean,
+)
+
+/**
+ * 算出这一份渲染相对上一份的最小改动作业。
+ *
+ * [previous] 为 null 表示还没画过（首次安装），三项全做。
+ *
+ * 判据逐项独立，而不是「模型变了就全做」：
+ * - 菜单只认 [TrayMenuModel.items]：条目文案、置灰、动作、顺序。只有它们变了才换
+ *   `PopupMenu`（换一次就等于让系统重建一条原生菜单）。
+ * - 提示语只认 [TrayMenuModel.title]。
+ * - 图标只认 [TrayAppliedState.hasUnread]：角标红点只该换一张图。
+ *
+ * 这三件事互不蕴含（标题变了条目不一定变、条目变了标题不一定变），所以不能合成一个
+ * 布尔量 —— 合成之后任何一处变化都会把另外两处也重写一遍。
+ */
+internal fun trayPatch(previous: TrayAppliedState?, next: TrayAppliedState): TrayPatch = TrayPatch(
+    rebuildMenu = previous == null || previous.model.items != next.model.items,
+    updateToolTip = previous == null || previous.model.title != next.model.title,
+    updateImage = previous == null || previous.hasUnread != next.hasUnread,
+)
+
+/**
  * 托盘图标。
  *
  * 桌面端关窗不是退出 —— 用户点叉号后进程还得留着收消息，所以必须有一块"召回"
@@ -181,28 +219,60 @@ internal class DesktopTrayHandle internal constructor(
     private val onAction: (TrayAction) -> Unit,
 ) {
 
+    /** 上一次成功落到原生对象上的渲染。null = 还没画过。 */
+    private var applied: TrayAppliedState? = null
+
     /**
      * 按 [model] 重画菜单。
      *
-     * 每次整份换一个新的 `PopupMenu`，而不是就地增删条目：有的平台把
+     * 结构变了就整份换一个新的 `PopupMenu`，而不是就地增删条目：有的平台把
      * `popupMenu` 取走时就固化了原生菜单对象（macOS 尤其），就地改 AWT 列表
      * 未必反映到屏幕上。菜单只有几项，整份换的代价可以忽略。
+     *
+     * 没变的部分不重写（见 [trayPatch]）：重组一次就重写一次原生对象的话，每一次
+     * 未读数字跳动都会让菜单栏重排一遍，而这条路上的代价由 WindowServer 付。
      */
     fun apply(model: TrayMenuModel, hasUnread: Boolean = false) {
-        val menu = PopupMenu()
-        model.items.forEach { item ->
-            MenuItem(item.label).apply {
-                isEnabled = item.enabled
-                item.action?.let { a -> addActionListener { onAction(a) } }
-            }.let(menu::add)
-        }
-        // TrayIcon.popupMenu 只接受 PopupMenu（不是 Menu），否则类型不匹配。
-        icon.popupMenu = menu
-        // 菜单标题本身在 AWT 里没有位置（NSStatusItem 的 title 不是可移植能力），
-        // 所以同一句话写进 tooltip：它是唯一跨平台可见的"标题"位置。
-        icon.toolTip = model.title
-        icon.image = DesktopNotifications.trayIconImage(hasUnread)
+        val next = TrayAppliedState(model, hasUnread)
+        val patch = trayPatch(applied, next)
+        val ok = runCatching {
+            if (patch.rebuildMenu) {
+                val menu = PopupMenu()
+                model.items.forEach { item ->
+                    MenuItem(item.label).apply {
+                        isEnabled = item.enabled
+                        item.action?.let { a -> addActionListener { onAction(a) } }
+                    }.let(menu::add)
+                }
+                // TrayIcon.popupMenu 只接受 PopupMenu（不是 Menu），否则类型不匹配。
+                icon.popupMenu = menu
+            }
+            if (patch.updateToolTip) {
+                // 菜单标题本身在 AWT 里没有位置（NSStatusItem 的 title 不是可移植能力），
+                // 所以同一句话写进 tooltip：它是唯一跨平台可见的"标题"位置。
+                icon.toolTip = model.title
+            }
+            if (patch.updateImage) {
+                icon.image = DesktopNotifications.trayIconImage(hasUnread)
+            }
+        }.isSuccess
+        // 写失败就不记账：下一次 apply 会把它当"没画过"重做一遍，而不是沉默地留一个
+        // 与事实不符的 applied（那会让后续同值状态永远不再重试）。
+        if (ok) applied = next
     }
+
+    /**
+     * 在**这个常驻图标**上弹一条气泡。返回 false 表示这条路用不了。
+     *
+     * 为什么通知必须复用常驻图标，而不是自己 add 一个临时 `TrayIcon`：临时图标
+     * 要 add + 定时 remove，而 macOS 的 WindowServer 在**移除**状态项时走的是
+     * `RemovePendingStatusItems` → 状态栏全量重建（`RepositionAndClipStatusItemList`），
+     * 主线程被拖住就是一次系统级卡死。复用常驻图标时没有 add/remove，只有一条气泡。
+     */
+    fun showMessage(title: String, body: String): Boolean = runCatching {
+        icon.displayMessage(title, body, TrayIcon.MessageType.INFO)
+        true
+    }.getOrDefault(false)
 
     fun focusMainWindow(window: java.awt.Window) {
         window.isVisible = true
@@ -212,11 +282,33 @@ internal class DesktopTrayHandle internal constructor(
     }
 
     fun dispose() {
-        SystemTray.getSystemTray().remove(icon)
+        runCatching { SystemTray.getSystemTray().remove(icon) }
+        DesktopTray.forget(this)
     }
 }
 
 internal object DesktopTray {
+
+    /**
+     * 当前挂着的常驻图标。
+     *
+     * 存在的唯一理由是**通知复用**：气泡必须打在这一个状态项上，而不是每条通知
+     * 都临时 add 一个再 remove（见 [DesktopTrayHandle.showMessage]）。
+     * 只记账、不持有生命周期 —— 谁 install 谁 dispose，dispose 时自己摘掉。
+     */
+    private var mounted: DesktopTrayHandle? = null
+
+    /** 装托盘图标。 */
+    private fun mount(handle: DesktopTrayHandle) {
+        mounted = handle
+    }
+
+    fun forget(handle: DesktopTrayHandle) {
+        if (mounted === handle) mounted = null
+    }
+
+    /** 当前有没有可用的常驻图标（通知能不能复用）。 */
+    internal fun current(): DesktopTrayHandle? = mounted
 
     /**
      * 装托盘图标。返回 null 表示这台机器没有可用托盘（部分 Linux 桌面），
@@ -240,6 +332,7 @@ internal object DesktopTray {
             val handle = DesktopTrayHandle(icon, onAction)
             handle.apply(model)
             tray.add(icon)
+            mount(handle)
             handle
         } catch (_: Exception) {
             // 无托盘环境直接放弃，不影响主窗。

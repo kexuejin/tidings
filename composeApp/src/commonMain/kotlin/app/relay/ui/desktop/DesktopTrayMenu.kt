@@ -100,6 +100,23 @@ private fun TrayText.resolve(): String =
  * 标题优先报未读消息而不是新文件：消息是有人在对你说活，文件是东西到了 ——
  * 前者更该把人叫回来，而两个都在时也只能显示一个。
  *
+ * ## 未读数**不进** [TrayMenuSpec.items]
+ *
+ * 未读数是**每收一条消息就变**的量。它一旦出现在条目里，条目表就跟着变，AWT 那侧
+ * 就得整份重建原生菜单 —— 而重建一次状态项菜单会让菜单栏重排几何，代价由
+ * WindowServer 主线程付。于是「每来一条消息，系统菜单栏被重排一次」。
+ *
+ * 所以未读数只走两处**不改变菜单结构**的地方：
+ * - [title]（落到 tooltip，它是 AWT 里唯一能显示"标题"的位置）；
+ * - 图标角标（`hasUnread`，那张图由 `DesktopNotifications.trayIconImage` 画）。
+ *
+ * 「为什么这个图标在闪」仍然能被回答：tooltip 写着「3 条新消息」，角标是红的。
+ * 条目里那条重复的说明性句子被删掉，是因为它和 tooltip 说同一件事，却要每次
+ * 未读数跳动时让系统重建一份菜单。
+ *
+ * 文件数留在条目里（「收到的文件 (3)」）：它是**命令**而不是新闻，而且文件落盘是
+ * 低频事件，不会形成每条消息一次的抖动。
+ *
  * [agentRunning] 说的是**本机控制面**（菜单里的「Agent 控制台」）有没有在监听，
  * 不是"本机存在某个叫 Agent 的对端"。控制面端口为 0 时如实说未运行，
  * 而不是不管什么状态都写「运行中」。
@@ -117,9 +134,9 @@ public fun trayMenuSpec(
         else -> null
     }
     val items = buildList {
-        // 说明性条目排在最前：它是"为什么这个图标在闪"的答案，沉到菜单底部
-        // 就等于没说。
-        if (headline != null) add(TrayMenuItemSpec(headline, enabled = false))
+        // 这里刻意**没有**那条说明性头条（未读数 / 文件数）。理由见上面 KDoc：
+        // 头条只进 title（tooltip）与图标角标，不进条目表 —— 条目表一旦含未读数，
+        // 每收一条消息就要重建一次原生菜单。
         add(TrayMenuItemSpec(TrayText(Res.string.desktop_tray_open_main), action = TrayAction.ShowMain))
         add(TrayMenuItemSpec(TrayText(Res.string.desktop_menu_new_conversation), action = TrayAction.NewConversation))
         add(

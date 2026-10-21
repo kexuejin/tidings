@@ -23,7 +23,6 @@ import app.relay.generated.resources.desktop_tray_received_files_count
 import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertFalse
-import kotlin.test.assertNull
 import kotlin.test.assertTrue
 
 /**
@@ -71,9 +70,23 @@ class DesktopTrayMenuTest {
         val model = menuOf(unread = 3, files = 1, bytes = 12L * 1024 * 1024)
         val expected = TrayText(Res.string.desktop_tray_headline_unread, listOf(3))
         assertEquals(expected, model.title)
-        assertEquals(expected, model.items.first().label)
-        assertFalse(model.items.first().enabled, "说明性条目不该可点")
-        assertNull(model.items.first().action)
+    }
+
+    @Test
+    fun `未读数不进条目表`() {
+        // 未读数是每收一条消息就变的量。它要是进了条目表，AWT 那侧每收一条消息
+        // 就得整份重建原生菜单 —— 而重建一次状态项菜单会让菜单栏重排几何，
+        // 代价由 WindowServer 主线程付（真机上表现为系统卡死）。
+        //
+        // 判据：条目表在未读数不同时**完全一致**，只有标题跟着变。
+        val none = menuOf(unread = 0, files = 1)
+        val one = menuOf(unread = 1, files = 1)
+        val many = menuOf(unread = 99, files = 1)
+        assertEquals(none.items, one.items, "未读 0→1 不该改动条目表")
+        assertEquals(none.items, many.items, "未读 1→99 不该改动条目表")
+        // 头条仍然要说出来 —— 只是换到了 title（tooltip）上。
+        assertEquals(TrayText(Res.string.desktop_tray_headline_unread, listOf(1)), one.title)
+        assertEquals(TrayText(Res.string.desktop_tray_headline_unread, listOf(99)), many.title)
     }
 
     @Test

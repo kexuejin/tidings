@@ -53,10 +53,32 @@ internal object DesktopDialogs {
         FileNameExtensionFilter(name, *extensions.toTypedArray())
 }
 
-/** 通知走 AWT 系统托盘气泡；没有托盘（部分 Linux/远程会话）时静默跳过，不抛异常。 */
+/**
+ * 通知走 AWT 系统托盘气泡；没有托盘（部分 Linux/远程会话）时静默跳过，不抛异常。
+ *
+ * ## 为什么必须打在**常驻图标**上
+ *
+ * 一条气泡不是「画个框」那么简单：AWT 的实现是往系统托盘里 **add 一个 TrayIcon**，
+ * 弹完再定时 **remove**。而 macOS 在移除状态项时走的是 WindowServer 的
+ * `RemovePendingStatusItems` → **状态栏全量重建**（`PKGSystemStatusBarFullRebuild` →
+ * `RepositionAndClipStatusItemList` → `CGXWindow::set_shape_internal`），
+ * 主线程被拖住超过看门狗阈值就是一次系统级卡死。
+ *
+ * 所以「每条消息弹一次 = 每收一条消息就建/删一次状态项」这条路径必须停掉：
+ * 有常驻图标时，气泡直接打在它上面（[DesktopTrayHandle.showMessage]），
+ * 整个过程没有 add/remove。
+ *
+ * 只有**常驻图标还没装好**的那一小段时间（启动瞬间）才退回临时图标 ——
+ * 那时一次进程生命周期最多几次，与「每条消息一次」不是同一个量级。
+ */
 internal object DesktopNotifications {
 
     fun show(title: String, body: String) {
+        // 首选：复用常驻图标，全程不碰状态项的生命周期。
+        val mounted = DesktopTray.current()
+        if (mounted != null && mounted.showMessage(title, body)) return
+
+        // 退路：托盘还没挂上。建一个一次性图标，弹完摘掉。
         val tray = runCatching { SystemTray.getSystemTray() }.getOrNull() ?: return
         val image = trayIconImage()
         runCatching {
