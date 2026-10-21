@@ -93,6 +93,43 @@ compose.desktop {
     application {
         mainClass = "app.relay.desktop.MainKt"
 
+        // 堆上限。**不设这一项时 JVM 用的是自己的默认规则**：最大堆 = 物理内存 / 4。
+        // 这台机器 24 GB ⇒ 默认上限 6 GB，于是 GC 几乎不感到压力、堆一路长到 1 GB+
+        // 才回收。实测（jpackage 产物，启动 15 分钟、无显式上限）：
+        //
+        //   footprint 917 MB → 999 MB → 915 MB → 1127 MB → 1173 MB
+        //
+        // 构成里 380 MB 是图形侧（Skia 的 Owned physical footprint 240 MB +
+        // IOSurface 128 MB + IOAccelerator 12 MB），那部分是 Compose 渲染的固有成本，
+        // **改代码省不掉**，也不随堆上限变化；剩下的 VM_ALLOCATE 486 MB +
+        // MALLOC_SMALL 252 MB 才是这几条参数能压的部分。
+        //
+        // 所以别指望压到两三百 MB：Compose Desktop 常驻 600~700 MB 是正常水位。
+        //
+        // 768m 是「够用且逼 GC 干活」的起点：512m 对 Compose + Skia 偏紧（会频繁 GC
+        // 卡顿），1g 又贴回默认值附近、起不到约束作用。这个数字必须靠真机读数复核，
+        // 不能当成定论：装上去连续 footprint，稳定在 600~700 MB 且界面不卡才算成立。
+        //
+        // `+UseSerialGC`：桌面端是 GUI 应用，堆压在几百 MB 时 SerialGC 的停顿与
+        // 并行 GC 差别不大，但它没有额外的 GC 线程栈与元数据开销 —— 那部分在
+        // footprint 里是实打实的（并发 GC 每个线程都要预留栈与本地缓冲）。
+        //
+        // `-Xss512k`：线程栈。默认 1 MB，而进程里的 Java 线程在崩溃报告里数到过 91 个
+        // （AWT-EventQueue / relay-network-poll / DefaultDispatcher-worker-N / 各 GC 与
+        // 编译器线程）。91 × 1 MB ≈ 91 MB 的栈常驻，降到 512k 约省 45 MB —— 这是
+        // footprint 里实打实的一项，而且与堆上限互不影响。Compose 的 UI 递归深度
+        // 远达不到 512k 的极限；真溢出会是一次明确的 StackOverflowError，不是静默降级。
+        //
+        // `-XX:MaxMetaspaceSize`：元数据区无上限时，长时间运行的 GUI 应用会持续加载
+        // 类（协程、序列化、Ktor 反射）把它们留在元空间里。192m 对桌面端够用，
+        // 而且超限会是可诊断的 OutOfMemoryError: Metaspace，而不是慢慢吃满整个内存。
+        jvmArgs += listOf(
+            "-Xmx768m",
+            "-XX:+UseSerialGC",
+            "-Xss512k",
+            "-XX:MaxMetaspaceSize=192m",
+        )
+
         nativeDistributions {
             // 先产出可分发目录/DMG；签名与公证交给 DSL，不手工跑 xcrun。
             targetFormats(TargetFormat.Dmg, TargetFormat.Msi, TargetFormat.Deb)
