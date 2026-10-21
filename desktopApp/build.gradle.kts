@@ -114,11 +114,17 @@ compose.desktop {
         // 并行 GC 差别不大，但它没有额外的 GC 线程栈与元数据开销 —— 那部分在
         // footprint 里是实打实的（并发 GC 每个线程都要预留栈与本地缓冲）。
         //
-        // `-Xss512k`：线程栈。默认 1 MB，而进程里的 Java 线程在崩溃报告里数到过 91 个
-        // （AWT-EventQueue / relay-network-poll / DefaultDispatcher-worker-N / 各 GC 与
-        // 编译器线程）。91 × 1 MB ≈ 91 MB 的栈常驻，降到 512k 约省 45 MB —— 这是
-        // footprint 里实打实的一项，而且与堆上限互不影响。Compose 的 UI 递归深度
-        // 远达不到 512k 的极限；真溢出会是一次明确的 StackOverflowError，不是静默降级。
+        // `-Xss512k`：线程栈。默认 1 MB，进程里的 Java 线程实测 88 个（AWT-EventQueue /
+        // relay-network-poll / DefaultDispatcher-worker-N / ControlPlane 的 pool-1-thread-N
+        // / 各编译器线程）。
+        //
+        // **注意别按「线程数 × 栈上限」估收益**：栈是按需换入的，不是每线程实占常驻。
+        // 实测 footprint 里的 stack 项只有 6528 KB（88 个线程的合计 ≈ 6.4 MB），
+        // 所以这一条的真实收益是 5~10 MB 量级。早期曾按 91 × 1 MB 估算成 45 MB，
+        // 那是错的；真正的大头是 -Xmx768m 与 UseSerialGC。
+        //
+        // 安全性有实测依据：用产物同款参数跑探针，512k 栈仍可递归 3607 层；
+        // Compose 的 UI 递归深度远达不到，真溢出会是一次明确的 StackOverflowError。
         //
         // `-XX:MaxMetaspaceSize`：元数据区无上限时，长时间运行的 GUI 应用会持续加载
         // 类（协程、序列化、Ktor 反射）把它们留在元空间里。192m 对桌面端够用，
