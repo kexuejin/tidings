@@ -148,6 +148,10 @@ class SqlDelightMessageStore(
                         // 就没了。而手机端连 id 前缀那条回退也用不上（`agent-ev-` 是桌面端
                         // 本地构造消息的副产物，转发进群时不带过去）。
                         agent_session_id = message.agentSessionId,
+                        // 标题必须一起落库：分段线重启后要还显示得出「任务：xxx」，
+                        // 而不是退回「新会话」。它与 agent_session_id 同一条纪律 ——
+                        // 只活在内存的字段，重新打开聊天就没了。
+                        agent_session_title = message.agentSessionTitle,
                     )
                 }
             }
@@ -667,6 +671,7 @@ private fun app.relay.db.MessageEntity.toUi(): MessageUi {
         // 老库这一列是 NULL（迁移补列、不回填）：那确实不知道，与「这条不属于任何会话」
         // 是同一档，`sessionIdOf` 会继续退回 id 前缀那条旧判据。
         agentSessionId = agent_session_id,
+        agentSessionTitle = agent_session_title,
     )
 }
 

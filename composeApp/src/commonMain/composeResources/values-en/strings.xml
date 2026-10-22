@@ -209,7 +209,11 @@
     <string name="chat_unread_jump">%1$d unread · Jump to latest</string>
     <string name="chat_unread_jump_latest">Jump to latest</string>
     <string name="chat_new_task_action">New task</string>
-    <string name="chat_task_divider_label">Task: %1$s</string>
+    <!-- Not "Task:". This label is the session's FIRST user message (the relay plugin
+         derives it from the first `user/message` text block and pins it), not the work
+         currently in progress. DSH does have a real session title, but it lives in the
+         log-only `session/title` event and never reaches the plugin's subscription. -->
+    <string name="chat_task_divider_label">Session start: %1$s</string>
     <!-- Divider label for a new session whose title has not arrived yet (task-42 ④).
          We do not fall back to the sessionId (an identity key is not a title), but we also
          do not omit the divider — that would make a new session look like it never started. -->

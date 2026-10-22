@@ -531,6 +531,9 @@ fun handleOnInbound(envelope: Envelope) {
             // 会话归属：协议字段（旧端不发 ⇒ null ⇒ 分段线按 id 前缀回退，与以前一致）。
             // 有它之后，手机端才画得出桌面端一直有的那条「任务分段线」。
             agentSessionId = payload?.let { stringField(it, "agentSessionId") },
+            // 标题跟着消息来（不是另一次会话元数据同步）：分段线要显示「任务：xxx」。
+            // 缺省 null ⇒ 界面显示「新会话」那句中性说明，而不是静默不画线。
+            agentSessionTitle = payload?.let { stringField(it, "agentSessionTitle") },
             replyTo = if (groupId != null) replyToOf(envelope) else null,
             reasoning = finalReasoning,
             reasoningElapsedMs = reasoningElapsedMs,

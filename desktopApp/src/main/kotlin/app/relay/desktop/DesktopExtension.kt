@@ -397,6 +397,7 @@ internal class DesktopExtension(
                                             // 此前只写进本地消息 id 前缀、转发时没带 —— 于是桌面有
                                             // 「任务分段线」、手机一条都没有（同一件事两端两个样）。
                                             agentSessionId = message.agentSessionId,
+                                            agentSessionTitle = message.agentSessionTitle,
                                             agentCursor = message.agentCursor,
                                         )
                                         // 交给运行时之后才记水位：rt == null（或发送抛错）时**不记**，
@@ -803,6 +804,11 @@ internal class DesktopExtension(
                                     // 补发与实时必须带同一份思考过程：只补正文会让
                                     // 「离线一会儿回来」的那条在手机上比别人的短一截。
                                     reasoning = message.reasoning,
+                                    // 补发与实时必须带同一个标题：只带正文会让「离线一会儿回来」
+                                    // 的那条在手机上显示成「新会话」，而实时的显示真标题。
+                                    agentSessionId = message.agentSessionId,
+                                    agentSessionTitle = message.agentSessionTitle,
+                                    agentCursor = message.agentCursor,
                                 )
                                 ledger.mark(rec.sessionId, group.groupId, rec.cursor)
                             }
@@ -1092,6 +1098,13 @@ internal data class AgentChatMessage(
      * 迟早有一处漏掉 —— 而漏掉的表现是「实时有分段线、补发没有」，只在断网重连后才看得见。
      */
     val agentSessionId: String? = null,
+    /**
+     * 该会话的标题 —— 分段线在**对端**显示「任务：xxx」的唯一来源。
+     *
+     * 标题本来是本机私有数据（`agentSessions` 从没同步过对端），真机上手机侧那张表
+     * 是空的 ⇒ 它那边所有分段线只能显示「新会话」。跟着消息走之后单帧自包含。
+     */
+    val agentSessionTitle: String? = null,
     /** 会话内游标（与 [agentSessionId] 配对）。 */
     val agentCursor: Long? = null,
 )
@@ -1127,6 +1140,7 @@ internal fun agentChatMessageFor(
         // 会话归属：`rec` 就是这条路唯一的事实来源，两条路（实时/补发）都从这里取，
         // 所以不会出现「实时有分段线、补发没有」。
         agentSessionId = rec.sessionId,
+        agentSessionTitle = sessionTitle,
         agentCursor = rec.cursor,
     )
 }

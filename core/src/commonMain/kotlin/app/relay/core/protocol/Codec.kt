@@ -112,9 +112,10 @@ object Codec {
         reasoning: String? = null,
         agentSessionId: String? = null,
         agentCursor: Long? = null,
+        agentSessionTitle: String? = null,
     ) = CodecMsg.groupTextPayload(
         text, groupId, groupRev, mentions, resend, replyTo, senderId, reasoning,
-        agentSessionId, agentCursor,
+        agentSessionId, agentCursor, agentSessionTitle,
     )
 
     fun recallPayload(targetId: String, groupId: String? = null, groupRev: Int? = null) = CodecMsg.recallPayload(targetId, groupId, groupRev)

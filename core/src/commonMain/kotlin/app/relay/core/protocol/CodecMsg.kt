@@ -38,6 +38,9 @@ object CodecMsg {
         // 会话归属（agent 事件的群转发用）：让接收端能画出「任务分段线」，
         // 而不是靠猜消息 id 前缀。**没加进这里的可选键 = 对端整帧拒收**。
         "agentSessionId", "agentCursor",
+        // 会话标题：分段线要显示「任务：xxx」，而那个标题是宿主本机的数据，不跟着消息走
+        // 就永远只能是「新会话」。
+        "agentSessionTitle",
     )
 
     /**
@@ -124,6 +127,12 @@ object CodecMsg {
             val cursor = intOf(o["agentCursor"]) ?: return false
             if (cursor < 0) return false
         }
+        // 标题可选，但**不能在没有 agentSessionId 的帧里出现** —— 那句话没有主语，
+        // 接收端只能忽略它（静默丢弃一段事实，比直接拒更糟）。
+        if (o.containsKey("agentSessionTitle")) {
+            if (!hasSession) return false
+            if (!isStr(o["agentSessionTitle"], Limits.GROUP_NAME)) return false
+        }
 
         // 严格字段白名单：多一个字段整帧丢弃（neg-group-text-extra-field 就是这条）。
         return hasOnlyKeys(o, GROUP_TEXT_KEYS)
@@ -169,6 +178,8 @@ object CodecMsg {
         agentSessionId: String? = null,
         /** 会话内游标（可选，与 [agentSessionId] 配对）。 */
         agentCursor: Long? = null,
+        /** 会话标题（可选）。分段线显示「任务：xxx」用它；缺省时界面显示「新会话」。 */
+        agentSessionTitle: String? = null,
     ): JsonElement = wireJson.encodeToJsonElement(
         GroupTextMsgPayload.serializer(),
         GroupTextMsgPayload(
@@ -183,6 +194,7 @@ object CodecMsg {
             reasoning = reasoning,
             agentSessionId = agentSessionId,
             agentCursor = agentCursor,
+            agentSessionTitle = agentSessionTitle,
         ),
     )
 

@@ -51,6 +51,25 @@ private class GroupFanOutJob(
 )
 
 /**
+ * 会话标题的长度截断。
+ *
+ * 与 `clampGroupText` / `clampGroupReasoning` 同一条纪律：**发送侧不产出注定被拒的帧**。
+ * 接收侧用 `isStr(o["agentSessionTitle"], Limits.GROUP_NAME)` 校验，超限整帧拒收，
+ * 而发送侧拿不到任何错误 —— 表现为「对方没收到」。
+ *
+ * 空白标题当没有：界面那边「有标题」与「没标题」是两种渲染（真标题 / 「新会话」），
+ * 一个空串会让它既不显示标题、又不走缺省那一档。
+ */
+internal fun clampGroupTitle(raw: String?): String? {
+    val t = raw?.trim().orEmpty()
+    if (t.isEmpty()) return null
+    if (app.relay.core.protocol.Codec.utf8ByteLength(t) <= Limits.GROUP_NAME) return t
+    var out = t
+    while (out.isNotEmpty() && app.relay.core.protocol.Codec.utf8ByteLength(out) > Limits.GROUP_NAME) out = out.dropLast(1)
+    return out.ifEmpty { null }
+}
+
+/**
  * 群文本的**并发扇出**：把 [members]（跳过 [selfId]）逐成员的信封同时投出去，并有总预算。
  *
  * 旧实现是 `for (member in members) { sendUserMessage(...) }` —— 串行 await，一个离线成员
@@ -173,6 +192,14 @@ internal fun groupTextVariants(
     agentSessionId: String? = null,
     /** 会话内游标（可选，与 [agentSessionId] 配对）。 */
     agentCursor: Long? = null,
+    /**
+     * 会话标题（可选）。分段线显示「任务：xxx」用它。
+     *
+     * 跟着消息走而不是另开一条会话元数据同步：标题是**本机私有**数据，跨设备从没同步过，
+     * 真机上手机侧 `agentSessions` 是空的 ⇒ 所有分段线只能显示「新会话」。
+     * 详情见 `GroupTextMsgPayload.agentSessionTitle` 的 KDoc。
+     */
+    agentSessionTitle: String? = null,
     resend: Boolean? = null,
     id: String = newId(),
     ts: Long = nowMillis(),
@@ -203,6 +230,7 @@ internal fun groupTextVariants(
             reasoning = reasoning,
             agentSessionId = agentSessionId,
             agentCursor = agentCursor,
+            agentSessionTitle = clampGroupTitle(agentSessionTitle),
         ),
         id = id,
         ts = ts,
@@ -406,6 +434,8 @@ internal class NodeOutbound(
         agentSessionId: String? = null,
         /** 会话内游标（可选，与 [agentSessionId] 配对）。 */
         agentCursor: Long? = null,
+        /** 会话标题（可选）。见 `GroupTextMsgPayload.agentSessionTitle`。 */
+        agentSessionTitle: String? = null,
         /**
          * 这次发送用的信封 id；**不传就生成一个**。
          *
@@ -427,6 +457,7 @@ internal class NodeOutbound(
             reasoning = clampGroupReasoning(reasoning),
             agentSessionId = agentSessionId,
             agentCursor = agentCursor,
+            agentSessionTitle = clampGroupTitle(agentSessionTitle),
         )
         messageStore.append(
             peerId = ConvId.group(groupId),

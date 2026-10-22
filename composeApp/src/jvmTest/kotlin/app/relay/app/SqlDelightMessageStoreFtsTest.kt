@@ -153,7 +153,10 @@ class SqlDelightMessageStoreFtsTest {
         //
         // 这是夹具的假设问题，不是迁移的缺陷：生产路径按 `user_version` 只跑一次，
         // 老库上那一列确实不存在。夹具要模拟的是**老库**，所以得先退回旧形状。
+        // 每加一条 `ALTER TABLE ADD COLUMN` 迁移，这里就要多退一列 —— 否则下面只跑
+        // 「最后一条迁移之后」的那一段时，列已存在 ⇒ duplicate column name。
         runCatching { driver.execute(null, "ALTER TABLE MessageEntity DROP COLUMN agent_session_id", 0) }
+        runCatching { driver.execute(null, "ALTER TABLE MessageEntity DROP COLUMN agent_session_title", 0) }
         driver.execute(
             null,
             """

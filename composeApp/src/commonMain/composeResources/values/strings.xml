@@ -510,7 +510,21 @@
     <string name="agent_thought_process_elapsed">思索过程 (%1$s)</string>
     <string name="agent_thought_thinking">思考中…</string>
     <string name="chat_new_task_action">新任务</string>
-    <string name="chat_task_divider_label">任务：%1$s</string>
+    <!--
+      分割线上那句标签。**不要说「任务：」。**
+
+      这里显示的是**会话的第一条用户消息**（`dsh-tidings` 的 `titleFrom` 从 `user/message`
+      取第一个文本块，取到即固定、不再随内容更新），不是「当前正在做的任务」。
+
+      DSH 自己确实有真正的会话标题（`sessionTitle` service，LLM 生成、可被用户固定），
+      但它落在 `session/title` 事件里 —— 那是一条 **log-only** 记录、不进 surface 流，
+      所以插件从 `session/event` 订阅里根本收不到。
+
+      用「任务：」会让用户以为标签跟得上当前话题。真机上出现过：会话从「跑终端」开始、
+      后来聊插件能力，分割线仍然写「任务：已跑终端」。改成「会话起点：」如实表达它是
+      那一句话。
+    -->
+    <string name="chat_task_divider_label">会话起点：%1$s</string>
     <!-- 新会话还没有标题时的分段标记（task-42 ④）。不用 sessionId 兜底：身份键不是标题；
          但也不能整条不画 —— 那会让「新建会话」看起来没有任何分段。 -->
     <!-- 聊天流的日期分隔：今天 / 昨天 / 具体日期（yyyy-MM-dd 由 UI 拼，不写死在这里）。 -->

@@ -757,9 +757,18 @@ fun ChatScreen(
                             // 永远画不出那条线，而数据是对的。这正是用户报的「桌面有、移动端没有」。
                             val sid = sessionIdOf(message)
                             if (sid != null) {
+                                // **标题优先用消息自带的那一份。**
+                                //
+                                // `state.agentSessions` 是**本机私有**数据：它只由本机 agent 宿主
+                                // 写入（`saveSession`），从来没有同步到对端 —— 真机读数：手机侧那张
+                                // 表是**空的**（count=0），所以它那边每条线都只能显示「新会话」。
+                                //
+                                // 转发时把标题一并带上之后，对端也拿得到真标题。查本地表那一步
+                                // 保留着：桌面上 agent 会话就是本机的，表里有更权威（会随标题更新
+                                // 而刷新）。两者都没有才退回「新会话」那句中性说明。
                                 val s = state.agentSessions.values.firstOrNull { it.sessionId == sid && it.title?.isNotBlank() == true }
                                     ?: state.agentSessions.values.firstOrNull { it.sessionId == sid }
-                                SessionDivider(sessionTitle = s?.title)
+                                SessionDivider(sessionTitle = message.agentSessionTitle ?: s?.title)
                             }
                         }
                         val notice = message.notice

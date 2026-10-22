@@ -172,6 +172,16 @@ data class MessageUi(
      */
     val agentSessionId: String? = null,
     /**
+     * 该 agent 会话的**标题**（协议 `agentSessionTitle`）。
+     *
+     * 分段线显示「任务：xxx」用它；null 时显示「新会话」那句中性说明。
+     *
+     * 为什么标题跟着消息走：它本来是**本机私有**数据（`agentSessions` 只由本机 agent
+     * 宿主写入、从没同步过对端），真机上手机侧那张表是空的 ⇒ 所有分段线只能显示
+     * 「新会话」。跟着消息走则单帧自包含，不存在「元数据到了、消息没到」的时序缺口。
+     */
+    val agentSessionTitle: String? = null,
+    /**
      * 出站排队时为 [DeliveryState.Queued]，其余为 null —— 一个徽标，别的什么都不存。
      *
      * 这里**曾经**有一个 `outgoingEnvelope: String?`，存的是整条已编码信封，

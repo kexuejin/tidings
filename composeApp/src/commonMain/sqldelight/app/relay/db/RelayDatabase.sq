@@ -20,7 +20,11 @@ CREATE TABLE MessageEntity (
     -- 以前它只活在内存的 MessageUi 里，**一落库就丢**：实时看得到分段线，
     -- 重新打开聊天就没有了。而手机端连 id 前缀那条回退也用不上
     -- （`agent-ev-` 是桌面端本地构造消息的副产物，转发进群时不带过去）。
-    agent_session_id TEXT
+    agent_session_id TEXT,
+    -- 会话标题：分段线显示「任务：xxx」用它。**标题是跟着消息走的**协议事实
+    -- （`agentSessionTitle`），不是本机会话表里的那一份 —— 后者从不跨设备同步，
+    -- 真机上手机侧那张表是空的，只靠它的话对端每条线都只能显示「新会话」。
+    agent_session_title TEXT
 );
 
 CREATE INDEX idx_message_conv_time ON MessageEntity(conv_id, timestamp);
@@ -87,9 +91,9 @@ SELECT 'delete', m.rowid, m.text FROM MessageEntity m WHERE m.id = ?;
 insertMessage:
 INSERT OR REPLACE INTO MessageEntity (
     id, conv_id, peer_id, sender_id, mine, text, timestamp, delivery, notice, file_json, screen_json,
-    agent_session_id
+    agent_session_id, agent_session_title
 ) VALUES (
-    ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?
+    ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?
 );
 
 selectMessagesByConv:
