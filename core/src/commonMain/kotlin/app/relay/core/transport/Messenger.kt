@@ -87,6 +87,21 @@ class Messenger(
      * 而它真正上线时 `Online` 事件会自己触发一次补发 —— 两条路各管一段。
      */
     private val queueRetryIntervalMs: Long = DEFAULT_QUEUE_RETRY_INTERVAL_MS,
+    /**
+     * **该不该为这个 peer 排队。** 返回 false ⇒ 那一帧**不入队**（直接丢弃）。
+     *
+     * ## 为什么需要它
+     *
+     * 队列原先无条件入队。于是「目标设备早就不存在」的那类帧会**持续累积**：真机现场
+     * `pending` 里 165 条是把群元数据发给一台已消失设备的（`05607a4e`），而且它还在
+     * 某个群的成员表里 —— 每一轮群广播就给队列添一条，永远发不出去、永远不会被删。
+     *
+     * 单纯靠 `prune` 拦不住：那批条目总是**新鲜的**（最新一条只有十几分钟），TTL 永远
+     * 碰不到它们。所以必须在**入队那一刻**就判断「这个对端还值得为它留消息吗」。
+     *
+     * null = 不做判断（测试与老调用点行为一字不变）。
+     */
+    private val acceptQueueFor: ((String) -> Boolean)? = null,
 ) {
 
     private val _incoming = MutableSharedFlow<Envelope>(extraBufferCapacity = 128)
@@ -428,7 +443,13 @@ class Messenger(
             _status.tryEmit(MessageStatus(peerId, envelope.id, "sent"))
             return SendOutcome.SENT
         }
-        queueStore.enqueue(envelope.id, peerId, Codec.encode(envelope), nowMillis())
+        // **入队前的闸门**：目标设备若已永久消失，这一帧就不该占队列 —— 否则每一轮群广播
+        // 都给一台不存在的设备添一条，永远发不出去、也永远新鲜到碰不到 TTL。
+        // 见 `acceptQueueFor` 的 KDoc。注意**只拦这一处**：下面 `requeueOne` 那条是重放
+        // 已经排过队的条目，拦它会丢用户的消息。
+        if (acceptQueueFor?.invoke(peerId) != false) {
+            queueStore.enqueue(envelope.id, peerId, Codec.encode(envelope), nowMillis())
+        }
         registry.markOffline(peerId)
         _status.tryEmit(MessageStatus(peerId, envelope.id, "queued"))
         return SendOutcome.QUEUED

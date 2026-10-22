@@ -214,7 +214,16 @@ data class Timings(
     /** TCP 回退等待 ACK 的超时（精确值，来自 messenger.ts:225-264）。 */
     val tcpAckTimeout: Long = 7_000,
     /** 离线补发队列 TTL。 */
-    val queueTtl: Long = 7L * 24 * 3_600_000,
+    /**
+     * 待发条目的存活时长。
+     *
+     * 7 天 → **3 天**：用户的取舍是「更短」。三天内回来的设备还能收到积压的消息；
+     * 超过三天仍未出现的对端，那条消息对用户来说已经过期了。
+     *
+     * 这条只按时间淘汰，不知道「目标还在不在」—— 后者由
+     * `FileQueueStore.pruneVanishedPeers` 补上（目标不在已知集合里 + 超时才删）。
+     */
+    val queueTtl: Long = 3L * 24 * 3_600_000,
     val queueMaxPerPeer: Int = 200,
 
     /**

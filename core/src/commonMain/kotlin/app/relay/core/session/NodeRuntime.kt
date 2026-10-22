@@ -187,6 +187,16 @@ class NodeRuntime(
      * 子网广播有直连路由（`192.168.2.0/24`，前缀更长），抢不走。
      */
     private val subnetBroadcasts: () -> List<String> = { emptyList() },
+    /**
+     * **该不该为一个 peer 的发送失败排队。** 返回 false ⇒ 那一帧不入队。
+     *
+     * 由上层（它掌握 known-peers）回答「这台设备还可能回来吗」。默认 null = 不判断，
+     * 行为与加这个参数之前一字不差。
+     *
+     * 为什么需要：真机上队列里有 165 条是把群元数据发给一台**已消失**设备的，而且它还在
+     * 某个群的成员表里 —— 每一轮群广播都给它添一条，永远发不出去、也永远新鲜到碰不到 TTL。
+     */
+    private val acceptQueueFor: ((String) -> Boolean)? = null,
     /** 连接层（K2 的接缝）。默认取平台实现：JVM/Android = TLS，iOS = 明文（公网被策略拒绝）。 */
     private val linkTransport: LinkTransport = createPlatformLinkTransport(linkIdentityDir, localAddresses),
     /**
@@ -284,6 +294,7 @@ class NodeRuntime(
         dedupStore = dedupStore,
         timings = timings,
         tcpFallback = tcp,
+        acceptQueueFor = acceptQueueFor,
     )
     private val outbound = NodeOutbound(
         messenger = messenger,
@@ -1035,10 +1046,16 @@ class NodeRuntime(
          */
         agentSessionId: String? = null,
         /** 会话内游标（可选，与 [agentSessionId] 配对）。 */
-        agentCursor: Long? = null,) =
+        agentCursor: Long? = null,
+        /** 会话标题（可选）。分段线在对端显示「任务：xxx」的唯一来源。 */
+        agentSessionTitle: String? = null,) =
+        // **位置参数**：顺序必须与 `NodeOutbound.sendGroupText` 的形参表一致
+        // （agentSessionId, agentCursor, agentSessionTitle, envelopeId）。
+        // 这里用位置而不是命名，是为了让两处一旦顺序不同就编译失败 —— 命名参数反而
+        // 会把这个约束藏起来。
         outbound.sendGroupText(
             text, groupId, groupRev, members, mentions, replyTo, senderId, reasoning,
-            agentSessionId, agentCursor, envelopeId,
+            agentSessionId, agentCursor, agentSessionTitle, envelopeId,
         )
 
     suspend fun sendPk(peerId: String,

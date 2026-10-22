@@ -283,6 +283,39 @@ internal fun rewriteLog(log: RandomAccessFile?, path: String, body: StringBuilde
 }
 
 /**
+ * 待发队列的淘汰策略。
+ *
+ * ## 为什么必须有它
+ *
+ * 队列原先**既没有上限也没有淘汰**：`enqueue` 只追加，`remove` 只在发送成功时调用。
+ * 于是「目标节点已经不存在」的帧会永久留在队列里。
+ *
+ * 真机读数：`pending: 476`，其中 201 条的目标 `05607a4e` **不在 peers、
+ * 也不在 known-peers 里** —— 那台设备早就不用了。它们永远发不出去，却每次启动都被
+ * 重扫一遍，并且一直占着磁盘。
+ *
+ * ## 两条判据（缺一不可）
+ *
+ * 1. **目标设备已消失**：peer 既不在「已知对端」里，条目又已经超过 [ttlMillis]。
+ *    单独用「不在已知对端里」会误删**刚配对、还没见过面**的对端 —— 那是合法待发。
+ *    单独用 TTL 会删掉**只是长期离线**的对端 —— 它回来时那条消息本该还在。
+ * 2. **硬上限**：任何情况下条目数不超过 [maxItems]，超出按入队先后砍最旧的。
+ *    这条是兜底：判据 1 依赖外部喂进来的「已知对端」，那个集合本身可能因为别的原因
+ *    为空（比如还没完成发现），那时只有上限能防失控。
+ *
+ * ## 为什么是 3 天
+ *
+ * 用户的取舍：「更短，3天」。三天内回来的设备还能收到积压的消息；
+ * 超过三天仍未出现的对端，那条消息对用户来说已经过期了。
+ */
+data class QueueRetention(
+    /** 目标对端不在已知集合里、且条目比这更旧 ⇒ 淘汰。 */
+    val ttlMillis: Long = 3L * 24 * 60 * 60 * 1000,
+    /** 硬上限（按条目）。超出按入队先后砍最旧的。 */
+    val maxItems: Int = 500,
+)
+
+/**
  * 出站可靠消息的落盘队列。
  *
  * ## 磁盘格式
@@ -301,6 +334,8 @@ internal fun rewriteLog(log: RandomAccessFile?, path: String, body: StringBuilde
 class FileQueueStore(
     private val path: String,
     private val compactEvery: Int = DEFAULT_COMPACT_EVERY,
+    /** 淘汰策略；默认值与真机现状一致（见 [QueueRetention] 的 KDoc）。 */
+    private val retention: QueueRetention = QueueRetention(),
 ) : QueueStore {
 
     /** key = 转义后的 `peerId \t msgId`，值 = 入队时刻。 */
@@ -310,6 +345,11 @@ class FileQueueStore(
 
     init {
         load()
+        // 启动时清一次：队列原先**没有任何上限也没有淘汰**，真机上攒到 478 条，
+        // 其中 201 条的目标节点早已消失（不在 peers / known-peers 里）—— 它们永远
+        // 发不出去、也不会被删，只是每次启动都被重扫一遍。详见 [QueueRetention]。
+        // knownPeer 此刻还不可用（上层要在构造之后才能回答「哪些 peer 还可能回来」），
+        // 所以这里只做一次「不认识的 peer + 超时」的保守清理，真正的淘汰由 RelayController 触发。
     }
 
     override fun enqueue(msgId: String, peerId: String, envelopeJson: String, created: Long) {
@@ -364,6 +404,42 @@ class FileQueueStore(
 
     /** 把当前内存状态整份重写。进程退出前调一次，把追加写的冗余压掉。 */
     fun compact() = rewrite()
+
+
+    /**
+     * **外部喂进来的「这台设备还可能回来吗」的判据**。
+     *
+     * 由 `RelayController` 在启动时设入（它同时掌握 `peers` 与 `known-peers`）。
+     * null = 还没拿到这份信息 ⇒ **不做这一路淘汰**（只留硬上限）：宁可多留，
+     * 也不要在「我还没加载完」的时候把合法消息删掉。
+     */
+    var knownPeer: ((String) -> Boolean)? = null
+
+    /**
+     * **淘汰「目标设备已消失」的条目。**
+     *
+     * ## 它与 [prune] 的分工
+     *
+     * [prune] 只看**时间**与**每 peer 条数**。两者都拦不住真机上的一类积压：目标节点
+     * 早就不存在了，但条目本身不满 7 天、也没超过每 peer 200 条 —— 于是它永远留在队列里。
+     * 真机读数：`pending: 476`，其中 201 条的目标 `05607a4e` **不在 peers、
+     * 也不在 known-peers 里**；它恰好卡在 200 条的限额上，TTL 也还没到期。
+     *
+     * 判据是**两个条件的合取**：`超过 TTL` **且** `目标不在已知集合里`。
+     *  - 只用前者会删掉「只是长期离线」的设备的消息 —— 它回来时那条本该还在；
+     *  - 只用后者会删掉「刚配对、还没见过面」的对端 —— 那是合法待发。
+     *
+     * @param now 当前时刻（测试注入）
+     * @return 删掉的条数
+     */
+    override fun pruneVanishedPeers(now: Long, ttl: Long, knownPeer: (String) -> Boolean): Int {
+        val cutoff = now - ttl
+        val before = items.size
+        items.entries.removeAll { (_, m) -> m.created < cutoff && !knownPeer(m.peerId) }
+        val removed = before - items.size
+        if (removed > 0) rewrite()
+        return removed
+    }
 
     private fun load() {
         val read = openIfPresent(path) ?: return

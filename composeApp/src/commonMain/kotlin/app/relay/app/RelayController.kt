@@ -271,6 +271,50 @@ class RelayController(
      */
     private val persist: PersistStores = PersistStores.under(dataDirectory)
 
+        /**
+     * **这个对端是否已经等了超过 [graceMs]。**
+     *
+     * 判据取队列里**最旧**的那一条 —— 那才是「我第一次为它排队」的时刻。
+     * 用 `pendingAll()` 而不是 `listByPeer()`：后者已经是按 peer 过滤的，但这里要的正是
+     * 「这个 peer 最早什么时候开始积压」，两者等价，用 listByPeer 更直接。
+     *
+     * 队列里一条都没有 ⇒ 从没为它排过队 ⇒ **不超过**（首次投递正是这个形态）。
+     */
+    private fun hasWaitedBeyond(peerId: String, graceMs: Long): Boolean {
+        val oldest = runCatching {
+            persist.queue.listByPeer(peerId).minOfOrNull { it.created }
+        }.getOrNull() ?: return false
+        return nowMillis() - oldest > graceMs
+    }
+/**
+     * **清掉「目标设备已消失」的待发条目。**
+     *
+     * 队列原先只有 `prune`（按时间 + 每 peer 条数），拦不住真机上的一类积压：目标节点早就
+     * 不存在了，但条目不满 TTL、也没超过每 peer 上限 —— 于是它永远留在队列里，每次启动
+     * 都被重扫一遍。真机读数（2026-10-22）：`pending: 476`，其中 201 条的目标 `05607a4e`
+     * 既不在 `peers`、也不在 `known-peers` 里。
+     *
+     * 判据是**两个条件的合取**：超过 TTL **且** 目标不在「已知对端」里。
+     *  - 只看时间会删掉「只是长期离线」的设备的消息 —— 它回来时那条本该还在；
+     *  - 只看「不在已知里」会删掉「刚配对、还没见过面」的对端 —— 那是合法待发。
+     *
+     * 「已知对端」= known-peers 名录 ∪ 当前 peers ∪ 本机自己（自己发给自己是合法的）。
+     * known-peers 是**落盘的**，所以重启后那台只是离线的设备仍然算「已知」。
+     */
+    internal fun pruneVanishedQueuedMessages() {
+        val st = _state.value
+        val known = persist.knownPeers.load().mapNotNull { it.profile.nodeId.takeIf { id -> id.isNotBlank() } }.toSet() +
+            st.peers.map { it.nodeId } +
+            st.selfNodeId
+        runCatching {
+            persist.queue.pruneVanishedPeers(
+                now = nowMillis(),
+                ttl = Timings().queueTtl,
+                knownPeer = { id -> id in known },
+            )
+        }
+    }
+
     val themeMode: String get() = _state.value.settings.themeMode
     internal var messagesRestored: Boolean = false
     internal val persistMutex = Mutex()
@@ -687,6 +731,36 @@ class RelayController(
             // 子网广播：受限广播在 TUN 环境下会被代理的 `/1` 路由接走，子网广播抢不走。
             // 平台没提供（Android/iOS 尚未接）时为空 —— 行为与改动前一字不差。
             subnetBroadcasts = { platform.subnetBroadcastAddresses() },
+            // **入队闸门**：只对「这台设备是否还可能回来」说不。
+            //
+            // 判据刻意**宽**：known-peers（落盘的名录，包含只是离线的设备）、当场 peers、
+            // 本机自己、以及「它在某个群的成员表里」—— 任一条命中就允许排队。最后那条是
+            // 给「群主拉进来的第三台设备」留的：那种对端还没握过手，消息该留着等它。
+            //
+            // 只有**四者都不在**时才拒绝。那正是真机上的情形：`05607a4e` 早已不是任何
+            // 活着的设备，却还留在 `deepseek-harness 协同群` 的成员表里 —— 每一轮群广播
+            // 都给它添一条，永远发不出去、也永远新鲜到碰不到 TTL。
+            acceptQueueFor = { peerId ->
+                val st = _state.value
+                // **四个「确定还活着 / 曾经活着」的来源** —— 命中任一就直接允许，与时效无关。
+                val certainlyKnown = peerId == st.selfNodeId ||
+                    st.peers.any { it.nodeId == peerId } ||
+                    persist.knownPeers.load().any { it.profile.nodeId == peerId }
+                // **只剩「在群成员表里」这一个理由时，只给首次投递留一个宽限窗口。**
+                //
+                // 群成员表是**协议事实**（谁在这个群），不是「这台设备还活着」的证据。
+                // 真机上 `05607a4e` 早已不在 peers、也不在 known-peers，却还留在
+                // `deepseek-harness 协同群` 的成员表里 —— 每一轮群广播都给它添一条，
+                // 永远发不出去、也永远新鲜到碰不到 TTL（最新一条只有十几分钟）。
+                //
+                // 但也不能一律拒：**群主刚拉进来、还没握过手的第三台设备**只满足这一条，
+                // 它的第一条消息必须留着等它。所以给 24 小时：窗口内允许排队，
+                // 过了窗口就认为「这台设备不会来了」，不再为它积压。
+                certainlyKnown || (
+                    st.settings.groups.any { peerId in it.members } &&
+                        !hasWaitedBeyond(peerId, FIRST_DELIVERY_GRACE_MS)
+                    )
+            },
             // 三个存储契约都用落盘实现：离线待发队列与会话历史跨重启，
             // 去重表本来就落盘（见 dedupStore）。内存版只留给测试与预览。
             queueStore = persist.queue,
@@ -928,10 +1002,16 @@ class RelayController(
             }
         }
         jobs += scope.launch {
+            // **先做一次「目标设备已消失」的清理**，再进周期循环：真机上启动时队列里躺着
+            // 201 条发不出去的帧（目标 `05607a4e` 早就不存在），它们不满 TTL、也没超每 peer
+            // 上限，`prune` 永远不会碰它们。
+            runCatching { pruneVanishedQueuedMessages() }
             while (true) {
                 val pruned = withContext(ioDispatcher) {
                     runCatching { rt.prune() }.getOrDefault(emptyList())
                 }
+                // 周期里也清一次：运行中也可能有对端被永久移除。
+                runCatching { pruneVanishedQueuedMessages() }
                 messagesCtl.handleOnPruned(pruned)
                 agentCtl.handlePruneAgentSessions()
                 delay(PRUNE_INTERVAL_MS)
@@ -1683,3 +1763,14 @@ internal fun shouldReplacePeerLabel(stored: String?, real: String): Boolean {
     val current = stored?.trim().orEmpty()
     return current.isEmpty() || current.startsWith(SYNTHETIC_NICK_PREFIX)
 }
+
+/**
+ * **首次投递宽限窗口**：一个「只在群成员表里、从未被真的见过」的对端，最多为它留 24 小时。
+ *
+ * 为什么需要窗口而不是一刀切：群主刚拉进来、还没握过手的设备只满足「在成员表里」这一条，
+ * 它的第一条消息必须留着等它；但真机上 `05607a4e` 这种早就消失的设备也满足同一条 ——
+ * 区别只在**等了多久**。
+ *
+ * 24 小时是取舍：一天内没出现的对端，那条消息对用户来说已经过期了。
+ */
+private const val FIRST_DELIVERY_GRACE_MS: Long = 24L * 3_600_000

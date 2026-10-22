@@ -57,6 +57,24 @@ interface QueueStore {
      * @return 被剪掉的项，供上层标记 failed。
      */
     fun prune(now: Long, ttl: Long, maxPerPeer: Int): List<PrunedMessage>
+
+    /**
+     * **淘汰「目标设备已消失」的条目**；返回删掉的条数。
+     *
+     * ## 为什么它与 [prune] 是两件事
+     *
+     * [prune] 只看**时间**与**每 peer 条数**。两者都拦不住真机上的一类积压：目标节点
+     * 早就不存在了，但条目不满 TTL、也没超过每 peer 上限 —— 于是它永远留在队列里。
+     * 真机读数：`pending: 476`，其中 201 条的目标节点既不在 `peers`、
+     * 也不在 `known-peers` 里；它恰好卡在 200 条限额上，TTL 也没到期。
+     *
+     * @param knownPeer 该 peerId 是不是一台**还可能回来**的设备（由上层用它掌握的
+     *   peers + known-peers 回答）。
+     * @param ttl 超过这么久没送出去才算「真的没了」—— 只是长期离线的设备回来时，
+     *   那条消息本该还在。
+     * @return 删掉的条数
+     */
+    fun pruneVanishedPeers(now: Long, ttl: Long, knownPeer: (String) -> Boolean): Int = 0
 }
 
 /** 入站去重（同一 msg_id + peer_id 只投递一次）。 */
