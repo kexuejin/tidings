@@ -68,12 +68,16 @@ import app.relay.app.model.DeliveryState
 import app.relay.app.model.FileCardUi
 import app.relay.app.model.MessageUi
 import app.relay.app.model.NoticeKind
+import app.relay.app.model.NoticeDetail
 import app.relay.app.model.hasVisibleText
 import app.relay.app.model.TransferState
 import app.relay.generated.resources.chat_copy
 import app.relay.generated.resources.chat_delivery_resend
 import app.relay.generated.resources.chat_forward
 import app.relay.generated.resources.chat_group_members_changed
+import app.relay.generated.resources.chat_group_member_removed
+import app.relay.generated.resources.chat_group_member_added
+import app.relay.generated.resources.common_name_list_separator
 import app.relay.generated.resources.chat_group_removed
 import app.relay.generated.resources.chat_group_renamed
 import app.relay.generated.resources.chat_nudge_peer
@@ -569,7 +573,21 @@ public fun MessagePressActions(
  * 裸文字。`.daysep`（日期分隔条）用的是同一条形状，只差没有 `gap`。
  */
 @Composable
-internal fun NoticeLine(kind: NoticeKind) {
+internal fun NoticeLine(
+    kind: NoticeKind,
+    /**
+     * 通知细节（谁把谁加/移了）。**null 或没有可用细节时退回那句中性文案** ——
+     * 老库里的记录没有这一列，不能因为它们就把这条通知画不出来。
+     */
+    detail: NoticeDetail? = null,
+    /**
+     * nodeId → 展示名。查不到时调用方负责退回 8 位短 id（与成员面板同一取舍）。
+     *
+     * 传函数而不是在这里查：`SenderIdentityContext` 在 `ChatScreen` 那一层，
+     * 而这个组件不该知道身份解析的全部规则。
+     */
+    displayNameOf: ((String) -> String)? = null,
+) {
     val sp = LocalAppSpacing.current
     Row(
         modifier = Modifier.fillMaxWidth(),
@@ -582,17 +600,7 @@ internal fun NoticeLine(kind: NoticeKind) {
             modifier = Modifier.padding(vertical = sp.xs),
         ) {
             Text(
-                text = stringResource(
-                    when (kind) {
-                        NoticeKind.RecalledByPeer -> Res.string.chat_recall_peer
-                        NoticeKind.RecalledBySelf -> Res.string.chat_recall_self
-                        NoticeKind.NudgedByPeer -> Res.string.chat_nudge_peer
-                        NoticeKind.NudgedBySelf -> Res.string.chat_nudge_self
-                        NoticeKind.GroupMembersChanged -> Res.string.chat_group_members_changed
-                        NoticeKind.GroupRenamed -> Res.string.chat_group_renamed
-                        NoticeKind.RemovedFromGroup -> Res.string.chat_group_removed
-                    },
-                ),
+                text = noticeText(kind, detail, displayNameOf),
                 style = MaterialTheme.typography.labelSmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
                 modifier = Modifier.padding(horizontal = sp.md10, vertical = 3.dp),
@@ -601,6 +609,54 @@ internal fun NoticeLine(kind: NoticeKind) {
     }
 }
 
+/**
+ * 一条通知要显示的文字。
+ *
+ * **有细节就说具体的，没有就退回中性文案** ——「%1$s邀请%2$s加入群聊」比「群成员有变化」
+ * 多说的是「谁做的、涉及谁」，而这两件事正是用户想知道的。
+ *
+ * 细节缺席有两种合法来源：老的落库记录（那一列是后加的），以及真的无从判断（对端只
+ * 发了一个新快照、我们又拿不到旧成员表）。两种都该安静地退回中性文案，而不是报错或留空。
+ */
+@Composable
+private fun noticeText(
+    kind: NoticeKind,
+    detail: NoticeDetail?,
+    displayNameOf: ((String) -> String)?,
+): String {
+    if (kind == NoticeKind.GroupMembersChanged && detail != null && displayNameOf != null) {
+        val actor = detail.actor?.takeIf { it.isNotBlank() }
+        // 「谁做的」不知道时，宁可退回中性文案，也不要编一个主语 ——
+        // 「某人邀请你加入群聊」这种半截话比不说更让人困惑。
+        if (actor != null) {
+            val separator = stringResource(Res.string.common_name_list_separator)
+            val names = { ids: List<String> -> ids.joinToString(separator) { displayNameOf(it) } }
+            when {
+                detail.added.isNotEmpty() -> return stringResource(
+                    Res.string.chat_group_member_added,
+                    displayNameOf(actor),
+                    names(detail.added),
+                )
+                detail.removed.isNotEmpty() -> return stringResource(
+                    Res.string.chat_group_member_removed,
+                    displayNameOf(actor),
+                    names(detail.removed),
+                )
+            }
+        }
+    }
+    return stringResource(
+        when (kind) {
+            NoticeKind.RecalledByPeer -> Res.string.chat_recall_peer
+            NoticeKind.RecalledBySelf -> Res.string.chat_recall_self
+            NoticeKind.NudgedByPeer -> Res.string.chat_nudge_peer
+            NoticeKind.NudgedBySelf -> Res.string.chat_nudge_self
+            NoticeKind.GroupMembersChanged -> Res.string.chat_group_members_changed
+            NoticeKind.GroupRenamed -> Res.string.chat_group_renamed
+            NoticeKind.RemovedFromGroup -> Res.string.chat_group_removed
+        },
+    )
+}
 /**
  * 文件气泡。
  *

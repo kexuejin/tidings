@@ -9,6 +9,9 @@ CREATE TABLE MessageEntity (
     timestamp INTEGER NOT NULL,
     delivery TEXT,
     notice TEXT,
+    -- 通知细节（谁把谁加/移了）：JSON，`NoticeDetail` 的序列化。
+    -- 不塞进 `text`：那一列进 FTS 索引，结构化的 JSON 会让搜索命中一堆碎片。
+    notice_detail TEXT,
     file_json TEXT,
     -- 屏幕协助历史卡（ScreenRecord 会话历史记录）。
     -- 单独一列而不是搭 file_json 的车：搭车会让 searchFileMessages 把屏幕记录当成文件命中，
@@ -90,10 +93,10 @@ SELECT 'delete', m.rowid, m.text FROM MessageEntity m WHERE m.id = ?;
 
 insertMessage:
 INSERT OR REPLACE INTO MessageEntity (
-    id, conv_id, peer_id, sender_id, mine, text, timestamp, delivery, notice, file_json, screen_json,
+    id, conv_id, peer_id, sender_id, mine, text, timestamp, delivery, notice, notice_detail, file_json, screen_json,
     agent_session_id, agent_session_title
 ) VALUES (
-    ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?
+    ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?
 );
 
 selectMessagesByConv:

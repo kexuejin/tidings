@@ -165,6 +165,9 @@
     <string name="banner_group_member_removed">Member removed. Notifying group.</string>
     <string name="banner_group_no_permission">Only the group owner or admins can remove members.</string>
     <string name="chat_group_members_changed">Group members updated</string>
+    <string name="common_name_list_separator">, </string>
+    <string name="chat_group_member_added">%1$s invited %2$s to the group</string>
+    <string name="chat_group_member_removed">%1$s removed %2$s from the group</string>
     <string name="chat_group_renamed">Group renamed</string>
     <string name="chat_group_removed">You have been removed from this group</string>
     <!-- 群头部的两个数。分母是成员总数（含自己），分子是不含自己的在线人数 ——

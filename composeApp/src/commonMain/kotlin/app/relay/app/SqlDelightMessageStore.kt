@@ -23,6 +23,7 @@ import app.relay.core.protocol.AgentGrantAccess
 import app.relay.app.model.FileCardUi
 import app.relay.app.model.MessageUi
 import app.relay.app.model.NoticeKind
+import app.relay.app.model.NoticeDetail
 import app.relay.app.model.parseThinkingContent
 
 /**
@@ -132,6 +133,10 @@ class SqlDelightMessageStore(
                         timestamp = storable.at,
                         delivery = storable.delivery?.name,
                         notice = storable.notice?.name,
+                        // 通知细节：JSON 一列。null 与 `"null"` 都要落成 null —— 老数据没有它。
+                        notice_detail = storable.noticeDetail
+                            ?.takeIf { !it.isEmpty }
+                            ?.let { runCatching { MessageStore.json.encodeToString(NoticeDetail.serializer(), it) }.getOrNull() },
                         file_json = message.file?.let {
                             runCatching { MessageStore.json.encodeToString(it) }.getOrNull()
                         },
@@ -657,6 +662,10 @@ private fun app.relay.db.MessageEntity.toUi(): MessageUi {
         delivery = delivery?.let { runCatching { DeliveryState.valueOf(it) }.getOrNull() },
         senderId = sender_id,
         notice = notice?.let { runCatching { NoticeKind.valueOf(it) }.getOrNull() },
+        // 解不出来就当没有细节：渲染端会退回中性文案，不会因为一条坏数据画不出通知。
+        noticeDetail = notice_detail?.let {
+            runCatching { MessageStore.json.decodeFromString(NoticeDetail.serializer(), it) }.getOrNull()
+        },
         file = null,
         // 屏幕协助记录**是**读回来的（与 `file` 相反）：它是本地历史，重启之后卡片还得在。
         // 解析失败当"不是屏幕协助记录"（`parseScreenRecordUi` 返回 null），不抛 —— 与

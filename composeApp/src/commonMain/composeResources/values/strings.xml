@@ -184,6 +184,18 @@
     <string name="banner_group_member_removed">已将该成员移出群聊，正在通知全群。</string>
     <string name="banner_group_no_permission">只有群主或管理员有权移出成员。</string>
     <string name="chat_group_members_changed">群成员有变化</string>
+    <!--
+         成员变动**带上谁做的、涉及谁**。
+
+         只有「群成员有变化」时用户得自己去成员表比对才知道发生了什么；同类产品写的是
+         「张三邀请李四加入群聊」。参数：%1$s = 操作者昵称，%2$s = 涉及的成员（多个用「、」连）。
+
+         查不到昵称时用 8 位短 id（与成员面板同一取舍：如实，不编名字）。
+    -->
+    <!-- 多个名字之间的分隔符。中文用顿号，英文用逗号加空格（见 values-en）。 -->
+    <string name="common_name_list_separator">、</string>
+    <string name="chat_group_member_added">%1$s邀请%2$s加入群聊</string>
+    <string name="chat_group_member_removed">%1$s将%2$s移出群聊</string>
     <string name="chat_group_renamed">群名改了</string>
     <string name="chat_group_removed">你已被移出这个群</string>
     <!-- 群头部的两个数。分母是成员总数（含自己），分子是不含自己的在线人数 ——

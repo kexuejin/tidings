@@ -743,7 +743,14 @@ fun ChatScreen(
                         val notice = message.notice
                         if (notice != null) {
                             // 系统提示行不是消息：撤回与戳一碰都只留一行居中的灰字（协议 §8）。
-                            NoticeLine(notice)
+                            NoticeLine(
+                                kind = notice,
+                                // 细节（谁把谁加/移了）。老库记录没有它 ⇒ 组件退回中性文案。
+                                detail = message.noticeDetail,
+                                // 名字在**这一层**解析：身份规则全在 SenderIdentityContext，
+                                // 组件自己不该知道。查不到就退回 8 位短 id（成员面板同一取舍）。
+                                displayNameOf = { id -> resolveNodeIdentity(id, bubbleCtx).displayName },
+                            )
                         } else if (message.screen != null) {
                             // 屏幕协助历史卡：它是**独立的一条消息**，不是气泡的附件
                             // （交互规范中将其渲染成 `.message-stack` 的第一个

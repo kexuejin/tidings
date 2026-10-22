@@ -104,6 +104,35 @@ data class FileCardUi(
 }
 
 /**
+ * **一条系统通知的细节**：谁做的、涉及谁。
+ *
+ * ## 为什么通知需要带数据
+ *
+ * 原先只有 [NoticeKind] 一个枚举，于是「群里的人变了」这句话**不说是谁把谁加/移了**。
+ * 真机现场：桌面端与手机上都只有「群成员有变化」这句，用户得自己去成员表里比对才知道
+ * 发生了什么 —— 而同类产品（茶话间）写的是「张三邀请李四加入群聊」。
+ *
+ * ## 为什么成员存 nodeId 而不是昵称
+ *
+ * 昵称会改（`profileRev` 就是为了它），而这条通知是**历史事实**。存 nodeId、渲染时
+ * 现查昵称，改过名之后看历史仍然是「当时那个人」，且不会出现两个说法。
+ *
+ * 查不到昵称时退回 8 位短 id —— 与成员面板同一取舍（如实，而不是编一个名字）。
+ */
+@Serializable
+data class NoticeDetail(
+    /** 执行者（nodeId）。退群那条是自己，加/移人是操作者。 */
+    val actor: String? = null,
+    /** 被加进群的成员（nodeId）。 */
+    val added: List<String> = emptyList(),
+    /** 被移出群/主动退出的成员（nodeId）。 */
+    val removed: List<String> = emptyList(),
+) {
+    /** 没有任何可展示的细节 ⇒ 渲染端退回那句中性文案。 */
+    val isEmpty: Boolean get() = actor == null && added.isEmpty() && removed.isEmpty()
+}
+
+/**
  * 时间线上的一条**系统提示行**（不是聊天气泡）。
  *
  * 协议把「撤回」「戳一碰」都定义成"本地插入一条 system 提示行"，所以这里给的是**原因**而不是
@@ -195,6 +224,13 @@ data class MessageUi(
      */
     /** 非 null 时这条不画气泡，画一行居中的系统提示。 */
     val notice: NoticeKind? = null,
+    /**
+     * 通知的细节（谁把谁加/移了）。null = 老数据或没有细节 ⇒ 渲染端用中性文案。
+     *
+     * 与 [notice] 分开而不是塞进 `text`：`text` 进 FTS 索引，把一段结构化 JSON 塞进去
+     * 会让搜索命中一堆 `{"actor":...}` 碎片。
+     */
+    val noticeDetail: NoticeDetail? = null,
     /** 被引用的源消息 ID（协议 §7.1 / Payloads.replyTo）。 */
     val replyTo: String? = null,
     /** PK 猜拳/掷骰子卡片。为 null 时不是 PK 消息。 */

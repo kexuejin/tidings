@@ -5,6 +5,7 @@ package app.relay.app
 import app.relay.app.model.DeliveryState
 import app.relay.app.model.MessageUi
 import app.relay.app.model.NoticeKind
+import app.relay.app.model.NoticeDetail
 import app.relay.core.nowMillis
 import app.relay.core.protocol.resolveVirtualAgentKey
 import app.relay.core.protocol.Codec
@@ -244,7 +245,12 @@ fun handleAddGroupMembers(groupId: String, newMemberIds: List<String>) {
     val updatedGroups = settings.groups.map { if (it.groupId == groupId) updatedMeta else it }
     host.handlePersist(settings.copy(groups = updatedGroups))
     host.core.groupNeeds.noteKnown(updatedMeta.groupId, updatedMeta.rev)
-    handleNotice(ConvId.group(groupId), NoticeKind.GroupMembersChanged)
+    handleNotice(
+        ConvId.group(groupId),
+        NoticeKind.GroupMembersChanged,
+        // 「谁把谁加进来了」—— 只说「群成员有变化」时用户得自己去成员表比对。
+        NoticeDetail(actor = self, added = toAdd),
+    )
     host.info(BannerMessage.GroupMembersAdded(toAdd.size))
     host.publish()
 
@@ -293,7 +299,11 @@ fun handleRemoveGroupMember(groupId: String, memberId: String) {
     val updatedGroups = settings.groups.map { if (it.groupId == groupId) updatedMeta else it }
     host.handlePersist(settings.copy(groups = updatedGroups))
     host.core.groupNeeds.noteKnown(updatedMeta.groupId, updatedMeta.rev)
-    handleNotice(ConvId.group(groupId), NoticeKind.GroupMembersChanged)
+    handleNotice(
+        ConvId.group(groupId),
+        NoticeKind.GroupMembersChanged,
+        NoticeDetail(actor = self, removed = listOf(memberId)),
+    )
     host.info(BannerMessage.GroupMemberRemoved)
     host.publish()
 
@@ -579,7 +589,19 @@ fun handleApplyGroupMeta(local: GroupMeta?, next: GroupMeta, from: String) {
     if (local != null) {
         val kind = if (local.name != next.name) NoticeKind.GroupRenamed
         else NoticeKind.GroupMembersChanged
-        handleNotice(convId, kind)
+        // **细节用差集算**，不信任何载荷里自报的「我加了谁」——
+        // 那一份可能与实际的成员表不一致，而这里拿到的是落库前的两份真值。
+        val before = local.members.toSet()
+        val after = next.members.toSet()
+        handleNotice(
+            convId,
+            kind,
+            NoticeDetail(
+                actor = next.updatedBy,
+                added = (after - before).toList(),
+                removed = (before - after).toList(),
+            ),
+        )
     }
     host.refreshPeers()
     if (from.isEmpty()) return
@@ -626,7 +648,7 @@ fun handleOnGroupControl(envelope: Envelope) {
 
 
 
-fun handleNotice(convId: String, kind: NoticeKind) {
+fun handleNotice(convId: String, kind: NoticeKind, detail: NoticeDetail? = null) {
     host.handleAppendMessage(
         MessageUi(
             id = host.localMessageId(),
@@ -635,6 +657,8 @@ fun handleNotice(convId: String, kind: NoticeKind) {
             text = "",
             at = nowMillis(),
             notice = kind,
+            // 细节是可选的：老的落库记录没有它，渲染端会退回那句中性文案。
+            noticeDetail = detail?.takeIf { !it.isEmpty },
         ),
     )
 }

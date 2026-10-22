@@ -157,6 +157,7 @@ class SqlDelightMessageStoreFtsTest {
         // 「最后一条迁移之后」的那一段时，列已存在 ⇒ duplicate column name。
         runCatching { driver.execute(null, "ALTER TABLE MessageEntity DROP COLUMN agent_session_id", 0) }
         runCatching { driver.execute(null, "ALTER TABLE MessageEntity DROP COLUMN agent_session_title", 0) }
+        runCatching { driver.execute(null, "ALTER TABLE MessageEntity DROP COLUMN notice_detail", 0) }
         driver.execute(
             null,
             """

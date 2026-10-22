@@ -207,7 +207,7 @@ class ScreenHistoryRecordTest {
         RelayDatabase.Schema.migrate(driver, 1, RelayDatabase.Schema.version)
         // 这条**故意**写死数字：它是一个提醒 —— 每加一个 `.sqm` 都要回来把它 +1，
         // 顺便逼人想一遍"老库上这一级迁移会不会丢东西"。（`2.sqm` 加的就是那四张 agent 表。）
-        assertEquals(13L, RelayDatabase.Schema.version, "迁移文件数 + 1 —— 加一个 .sqm 就得同步改这条")
+        assertEquals(14L, RelayDatabase.Schema.version, "迁移文件数 + 1 —— 加一个 .sqm 就得同步改这条")
 
         val database = RelayDatabase(driver)
         val old = database.relayDatabaseQueries.selectMessagesByConv("peer-1").executeAsList().single()
@@ -225,6 +225,7 @@ class ScreenHistoryRecordTest {
             timestamp = 20,
             delivery = null,
             notice = null,
+            notice_detail = null,
             file_json = null,
             screen_json = MessageStore.json.encodeToString(activeRecord()),
             agent_session_id = null,
