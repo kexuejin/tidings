@@ -175,6 +175,17 @@ data class MessageUi(
     val mine: Boolean,
     val text: String,
     val at: Long,
+    /**
+     * 落库时分配的会话内序号 —— 分页游标。**不是** UI 概念，只在「翻更早的消息」时用。
+     *
+     * 为什么必须让它跟着消息走进内存：向上翻页的游标是「当前窗口最老那条的 seq」。
+     * 内存里没有它就只能拿 at（时间戳）当游标 —— 同一毫秒的多条消息会重复或漏掉，
+     * 而那正是 agent 流式回复的常态（真机上 172 KB 那几条都落在同一秒内）。
+     *
+     * null 表示「这条还没落过库」：本地刚构造、尚未 save 的消息没有 seq，
+     * 它必然在窗口尾部，不影响向上翻页。
+     */
+    val seq: Long? = null,
     val delivery: DeliveryState? = null,
     /** 文件消息。为 null 时是纯文本消息。 */
     val file: FileCardUi? = null,

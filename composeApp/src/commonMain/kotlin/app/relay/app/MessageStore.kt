@@ -61,6 +61,17 @@ interface MessageStore {
             .mapValues { (_, list) -> list.takeLast(limitPerConversation.coerceAtLeast(0)) }
             .filterValues { it.isNotEmpty() }
 
+    /**
+     * 读某个会话里**比 [beforeSeq] 更早**的 [limit] 条（游标向上翻页）。
+     *
+     * 为什么用 seq 而不是时间戳：同一毫秒可能有多条（agent 流式回复尤甚），
+     * 拿 at 当游标会重复或漏。seq 在会话内单调递增，游标天然无重无漏。
+     *
+     * 返回按时间升序（与 [loadRecent] 一致），调用方直接插到窗口头部即可。
+     * 默认空实现：整份读的存储没有"更早"这一说（[loadRecent] 已经给了全部能给的）。
+     */
+    fun loadOlder(convId: String, beforeSeq: Long, limit: Int): List<MessageUi> = emptyList()
+
 
     /**
      * 清空全部历史。

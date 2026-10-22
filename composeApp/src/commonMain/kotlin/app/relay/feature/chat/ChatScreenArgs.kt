@@ -91,6 +91,14 @@ data class ChatScreenActions(
      * 没有按原 id 重放的能力，那就退回旧行为（红字仍可点，但会新发一条）。
      */
     val onRetryMessage: ((MessageUi) -> Unit)? = null,
+    /**
+     * 向上翻页：把更早的一页读进内存。null = 这个壳不做分页（预览/截图夹具）。
+     *
+     * 为什么由壳传进来而不是 ChatScreen 自己调控制器：聊天屏是**共享内容层**，
+     * 它不认识 RelayController（手机与桌面各自装配）。读库是宿主的动作，
+     * 所以走这条已有的 actions 接缝。
+     */
+    val onLoadOlder: (() -> Unit)? = null,
     val onOpenAgentConsole: ((String) -> Unit)? = null,
     val onDismissBanner: (() -> Unit)? = null,
     /** null = 输入栏不画附件图标。 */

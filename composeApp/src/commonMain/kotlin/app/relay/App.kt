@@ -336,6 +336,11 @@ fun RelayApp(
                             // 「重发」按原消息 id 重放（core 的 replayOutgoing）：换 id 重发会让
                             // 对端多落一条（真机现场同一句话两个 id）。
                             onRetryMessage = controller::retryMessage,
+                            // 向上翻页：滚到历史顶端时读更早的一页（与桌面端同一条路径）。
+                            // 会话键与 ChatScreenState.peerId 取同一个值。
+                            onLoadOlder = {
+                                nav.activeSessionId?.let { controller.loadOlderMessages(it) }
+                            },
                             onOpenAgentConsole = { nav = nav.selectTab(AppRoutes.AGENTS) },
                             // 打开与 agent 的会话时，向宿主要该工作区**第一页**历史会话
                             // （PPE-1 增补 D8）。用户裁决：

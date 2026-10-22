@@ -67,6 +67,13 @@ public interface DesktopPaneActions {
      * 与手机端同一个入口（`RelayController.retryMessage`）。
      */
     fun retryMessage(message: MessageUi)
+    /**
+     * 向上翻页：把某个会话里更早的一页读进内存。
+     *
+     * 默认空实现是**正当**的：预览/截图夹具与「不落盘」的壳本来就没有更早的历史可翻。
+     * 真正持久化的宿主（RelayController）必须覆盖它，否则用户滚到顶就再也看不到更早的消息。
+     */
+    fun loadOlderMessages(convId: String) = Unit
 
     /**
      * 发起 PK 小游戏（猜拳 / 骰子）。

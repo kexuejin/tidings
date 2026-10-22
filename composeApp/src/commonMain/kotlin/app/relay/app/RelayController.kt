@@ -424,6 +424,14 @@ class RelayController(
     override fun deleteMessage(convId: String, messageId: String) =
         messagesCtl.handleDeleteMessage(convId, messageId)
     fun clearAllMessages() = messagesCtl.handleClearAllMessages()
+
+    /**
+     * 向上翻页：把更早的一页读进内存（UI 在会话滚动到顶部时调）。
+     *
+     * 读不到更多时什么都不发生 —— 不要据此在界面上谎报「还有更多」。
+     */
+    override fun loadOlderMessages(convId: String) = messagesCtl.handleLoadOlderMessages(convId)
+
     override fun searchHistoricalMessages(query: String, limit: Long): List<MessageSearchResult> =
         messageStore.search(query, limit)
     override fun searchGlobal(query: String): GlobalSearchResult = messagesCtl.handleSearchGlobalInternal(query)

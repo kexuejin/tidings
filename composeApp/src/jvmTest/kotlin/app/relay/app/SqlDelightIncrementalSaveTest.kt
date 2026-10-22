@@ -184,6 +184,24 @@ class SqlDelightIncrementalSaveTest {
     }
 
     @Test
+    fun loadOlder_按seq游标取更早的一页且不重复不遗漏() {
+        // 游标必须无重无漏 —— 用时间戳当游标时，同毫秒的多条会重复或跳过。
+        val all = (1..30).map { msg("m" + it, at = 1000L * it) }
+        store.save(mapOf("peer-1" to all))
+
+        val window = store.loadRecent(10).getValue("peer-1")
+        assertEquals((21..30).map { "m" + it }, window.map { it.id }, "首屏应当是最近 10 条")
+
+        val page1 = store.loadOlder("peer-1", window.first().seq!!, 10)
+        assertEquals((11..20).map { "m" + it }, page1.map { it.id }, "上一页必须正好接在前面，不重不漏")
+
+        val page2 = store.loadOlder("peer-1", page1.first().seq!!, 10)
+        assertEquals((1..10).map { "m" + it }, page2.map { it.id })
+
+        assertEquals(0, store.loadOlder("peer-1", page2.first().seq!!, 10).size, "到头时必须返回空，界面据此不再谎报还有更多")
+    }
+
+    @Test
     fun save_不再按快照反推删除() {
         // 这条钉的是**契约变更**，不是实现细节：
         // 旧 save() 扫全表、把「内存里没有的 id」DELETE 掉。内存是全部历史时那是对的；

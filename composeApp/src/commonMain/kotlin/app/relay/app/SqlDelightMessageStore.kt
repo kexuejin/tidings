@@ -70,6 +70,12 @@ class SqlDelightMessageStore(
     override fun loadRecent(limitPerConversation: Int): Map<String, List<MessageUi>> =
         loadInternal(limitPerConversation)
 
+    override fun loadOlder(convId: String, beforeSeq: Long, limit: Int): List<MessageUi> =
+        queries.selectMessagesBefore(convId, beforeSeq, limit.toLong()).executeAsList()
+            // 与 loadRecent 同一种排序，调用方可以直接插到窗口头部。
+            .map { it.toUi() }
+            .sortedBy { it.at }
+
     /**
      * [limitPerConversation] 为 null 时读全部（[load]），否则每个会话只读最近 N 条。
      *
@@ -707,6 +713,8 @@ private fun app.relay.db.MessageEntity.toUi(): MessageUi {
         mine = mine == 1L,
         text = cleanedText,
         at = timestamp,
+        // seq 带进内存：向上翻页靠它当游标（时间戳在同毫秒下会重复/漏）。
+        seq = seq,
         delivery = delivery?.let { runCatching { DeliveryState.valueOf(it) }.getOrNull() },
         senderId = sender_id,
         notice = notice?.let { runCatching { NoticeKind.valueOf(it) }.getOrNull() },

@@ -23,6 +23,7 @@ import androidx.compose.runtime.key
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.runtime.snapshotFlow
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.focus.FocusRequester
@@ -259,6 +260,30 @@ fun ChatScreen(
     // 按**会话**重建滚动状态：不加这层 key 时，从会话 A 切到 B 会继承 A 的偏移，
     // 初始锚定一旦没落到底，用户看到的就是"A 的位置"（真机反馈 #5 的另一种表现）。
     val listState = key(peerId) { rememberLazyListState() }
+    // 向上翻页：滚到历史顶端时读更早的一页。
+    //
+    // 位置判据：reverseLayout=true ⇒ 索引 0 是最新一条，**索引最大**那头才是历史顶端。
+    // 所以判的是 max(visibleItems.index) 靠近 total-1，而不是 firstVisibleItemIndex。
+    //
+    // 防抖：一次只申请一页。请求置位后要等 messages.size 真的变多（effect 重启）
+    // 才允许再申请；读到尽头时 size 不变 ⇒ 自然停下，不会每帧打一次数据库。
+    var olderPageRequested by remember(peerId) { mutableStateOf(false) }
+    LaunchedEffect(listState, messages.size, actions.onLoadOlder) {
+        val loadOlder = actions.onLoadOlder ?: return@LaunchedEffect
+        olderPageRequested = false
+        if (messages.isEmpty()) return@LaunchedEffect
+        snapshotFlow {
+            val info = listState.layoutInfo
+            val lastVisible = info.visibleItemsInfo.maxOfOrNull { it.index } ?: -1
+            lastVisible to info.totalItemsCount
+        }.collect { (lastVisible, total) ->
+            // 距末尾还有 3 条就预取：等真滚到底再加载会看到明显空窗。
+            if (!olderPageRequested && total > 0 && lastVisible >= total - 3) {
+                olderPageRequested = true
+                loadOlder()
+            }
+        }
+    }
     val coroutineScope = rememberCoroutineScope()
     var draft by remember(peerId) { mutableStateOf(initialDraft) }
     var replyingToMessage by remember(peerId) { mutableStateOf<MessageUi?>(null) }

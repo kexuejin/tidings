@@ -128,6 +128,10 @@ public fun ChatPane(
                 onDeclineTransfer = controller::declineTransfer,
                 // 与手机端同一个入口：按原 id 重放，不新发一条。
                 onRetryMessage = controller::retryMessage,
+                // 向上翻页：滚到历史顶端时读更早的一页（与手机端同一条路径）。
+                onLoadOlder = {
+                    selectedPeerId?.let { controller.loadOlderMessages(it) }
+                },
                 // 撤回自己发出的、还在传的文件。以前这条没接：桌面上文件卡片根本没有取消按钮，
                 // 点了「发送」就只能等它自己失败（审计 P1-13）。移动端那条路一直有。
                 onCancelTransfer = controller::cancelTransfer,

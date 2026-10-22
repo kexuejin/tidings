@@ -764,6 +764,47 @@ fun handleRestoreMessages(): Job {
  * 锁内只读 `core.threads` 取候选（不挂起），锁外做 `rt.pendingOutgoingMessages()`
  * 的 suspend 调用。
  */
+/**
+ * 向上翻页：把某会话里比当前窗口更早的一页读进来，插到窗口头部。
+ *
+ * 游标是**当前窗口最老那条的 seq**（不是时间戳）：同一毫秒多条消息时，
+ * 时间戳游标会重复或漏，而那正是 agent 流式回复的常态。
+ *
+ * 边界：
+ * - 没有持久化（persistMessages=false）⇒ 内存就是全部，没什么可翻的；
+ * - 窗口最老那条没有 seq（本地刚构造、还没落库）⇒ 不翻，等它落库后自然会带上；
+ * - 读回来 0 条 ⇒ 到历史尽头了，什么都不做（不要在 UI 上谎报「还有更多」）。
+ */
+fun handleLoadOlderMessages(convId: String) {
+    if (!host.persistMessages) return
+    val oldestSeq = host.stateLock.withLock {
+        host.core.threads[convId]?.firstOrNull()?.seq
+    } ?: return
+    val target = host.messageStore
+    host.scope.launch {
+        val older = withContext(ioDispatcher) {
+            runCatching {
+                target.loadOlder(convId, oldestSeq, MessageStore.MESSAGE_PAGE_SIZE)
+            }.getOrNull()
+        } ?: return@launch
+        if (older.isEmpty()) return@launch
+        val added = host.stateLock.withLock {
+            val thread = host.core.threads.getOrPut(convId) { mutableListOf() }
+            val known = thread.mapTo(HashSet()) { it.id }
+            // 去重：翻页与实时消息可能同时到达，同一条不能出现两次。
+            val fresh = older.filter { it.id !in known }
+            if (fresh.isEmpty()) {
+                0
+            } else {
+                // 插到头部：older 已按时间升序，接在现有窗口之前即可保持整体有序。
+                thread.addAll(0, fresh)
+                fresh.size
+            }
+        }
+        if (added > 0) host.publish()
+    }
+}
+
 suspend fun handleRestoreQueuedFrom(rt: NodeRuntime) {
     val stillQueued = rt.pendingOutgoingMessages().map { it.msgId }.toHashSet()
     if (stillQueued.isEmpty()) {
