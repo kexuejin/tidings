@@ -22,7 +22,6 @@ import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
-import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -55,6 +54,8 @@ import app.relay.generated.resources.ic_check_double
 import app.relay.generated.resources.ic_chevd
 import app.relay.generated.resources.ic_file
 import app.relay.generated.resources.ic_image
+import app.relay.ui.components.AppButtonSize
+import app.relay.ui.components.AppTextButton
 import app.relay.ui.components.RelayDialog
 import app.relay.ui.components.RelayDialogButton
 import app.relay.ui.components.SessionStateLabel
@@ -331,15 +332,14 @@ internal fun AgentSessionPickerDialog(
                             modifier = Modifier.padding(horizontal = LocalAppSpacing.current.xs),
                         )
                     } else {
-                        TextButton(
+                        // 列表末尾的「加载更多」：行内动作，且原代码显式用了 labelMedium
+                        // —— 那正是小档的字阶，迁到按钮族后由 Small 档承担。
+                        AppTextButton(
+                            text = stringResource(Res.string.agent_session_load_more),
                             onClick = onLoadMore,
                             modifier = Modifier.fillMaxWidth(),
-                        ) {
-                            Text(
-                                text = stringResource(Res.string.agent_session_load_more),
-                                style = MaterialTheme.typography.labelMedium,
-                            )
-                        }
+                            size = AppButtonSize.Small,
+                        )
                     }
                 }
                 // 已归档会话折叠区：默认折叠，点开显示历史归档的会话。

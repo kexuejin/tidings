@@ -7,17 +7,13 @@ import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
-import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
-import androidx.compose.material3.Button
 import androidx.compose.material3.Card
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.HorizontalDivider
-import androidx.compose.material3.Icon
-import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
@@ -53,18 +49,19 @@ import app.relay.generated.resources.ic_chat_bubble
 import app.relay.ui.ContentWidths
 import app.relay.ui.EmptyState
 import app.relay.ui.centerCapped
+import app.relay.ui.components.AppIconButton
+import app.relay.ui.components.AppButton
 import app.relay.ui.components.SectionHeader
 import app.relay.ui.components.ThinkingBlock
 import app.relay.ui.components.formatClock
 import app.relay.ui.components.relativeTime
 import app.relay.ui.theme.LocalAppSpacing
-import app.relay.ui.theme.LocalCardShape
 import app.relay.ui.theme.RelayElevations
-import org.jetbrains.compose.resources.painterResource
 import org.jetbrains.compose.resources.stringResource
 import app.relay.app.model.AgentSessionUi
 import app.relay.app.model.PeerUi
 import app.relay.app.model.ScanProgressUi
+import app.relay.ui.components.AppButtonTone
 
 
 /**
@@ -114,12 +111,11 @@ internal fun SessionDetailView(
                 horizontalArrangement = Arrangement.spacedBy(LocalAppSpacing.current.xs),
                 modifier = Modifier.weight(1f),
             ) {
-                IconButton(onClick = onBack) {
-                    Icon(
-                        painter = painterResource(Res.drawable.ic_arrow_back),
-                        contentDescription = stringResource(Res.string.action_back),
-                    )
-                }
+                AppIconButton(
+                    icon = Res.drawable.ic_arrow_back,
+                    contentDescription = stringResource(Res.string.action_back),
+                    onClick = onBack,
+                )
                 Column {
                     val sTitle = activeSession?.displayTitle ?: stringResource(Res.string.agent_session_untitled)
                     Text(
@@ -140,13 +136,12 @@ internal fun SessionDetailView(
                     )
                 }
             }
-            IconButton(onClick = { onOpenChat(peer.nodeId) }) {
-                Icon(
-                    painter = painterResource(Res.drawable.ic_chat_bubble),
-                    contentDescription = stringResource(Res.string.agent_open_chat),
-                    tint = MaterialTheme.colorScheme.primary,
-                )
-            }
+            AppIconButton(
+                icon = Res.drawable.ic_chat_bubble,
+                contentDescription = stringResource(Res.string.agent_open_chat),
+                onClick = { onOpenChat(peer.nodeId) },
+                tone = AppButtonTone.Primary,
+            )
         }
 
         // 会话切换条（原型 `.swbar`）：仅在多会话时呈现，单会话时不画冗余条目
@@ -302,21 +297,17 @@ internal fun SessionDetailView(
                         }
                     }
                 }
-                Button(
+                // 原型这颗是 `.btn.block.pri`（标准档、通栏、`--r-ctl` 12dp 圆角）。
+                // 原来用 `LocalCardShape`（16dp 卡圆角）+ 18dp 图标，两处都偏离原型；
+                // 迁到按钮族后由 Medium 档统一给 12dp 圆角与 16dp 图标。
+                AppButton(
+                    text = stringResource(Res.string.agent_open_chat),
                     onClick = { onOpenChat(peer.nodeId) },
                     modifier = Modifier
                         .fillMaxWidth()
                         .padding(vertical = LocalAppSpacing.current.md),
-                    shape = LocalCardShape.current,
-                ) {
-                    Icon(
-                        painter = painterResource(Res.drawable.ic_chat_bubble),
-                        contentDescription = null,
-                        modifier = Modifier.size(18.dp),
-                    )
-                    Spacer(Modifier.size(LocalAppSpacing.current.xs))
-                    Text(stringResource(Res.string.agent_open_chat))
-                }
+                    leadingIcon = Res.drawable.ic_chat_bubble,
+                )
             }
 
             Column(Modifier.padding(bottom = LocalAppSpacing.current.xl)) {}

@@ -15,13 +15,11 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
-import androidx.compose.material3.Button
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
@@ -72,6 +70,9 @@ import app.relay.generated.resources.workspace_grant_request_sent
 import app.relay.generated.resources.workspace_grant_none
 import app.relay.generated.resources.workspace_grant_section_title
 import app.relay.generated.resources.workspace_host_badge
+import app.relay.generated.resources.workspace_detail_empty_back
+import app.relay.generated.resources.workspace_detail_empty_body
+import app.relay.generated.resources.workspace_detail_empty_title
 import app.relay.generated.resources.workspace_no_sessions
 import app.relay.generated.resources.workspace_no_title_banner
 import app.relay.generated.resources.workspace_perm_label
@@ -92,7 +93,12 @@ import app.relay.generated.resources.workspace_session_pending_count
 import app.relay.generated.resources.workspace_session_warn_no_announce
 import app.relay.generated.resources.workspace_source_label
 import app.relay.ui.ContentWidths
+import app.relay.ui.EmptyState
 import app.relay.ui.centerCapped
+import app.relay.ui.components.AppIconButton
+import app.relay.ui.components.AppButton
+import app.relay.ui.components.AppButtonSize
+import app.relay.ui.components.AppOutlinedButton
 import app.relay.ui.components.PendingPill
 import app.relay.ui.components.RelayDialog
 import app.relay.ui.components.RelayDialogButton
@@ -150,6 +156,17 @@ fun WorkspaceDetailView(
     onRespondApproval: ((approvalId: String, allow: Boolean) -> Unit)? = null,
     onRefresh: (() -> Unit)? = null,
     /**
+     * **谁能用这个 agent 干活** —— 逐设备的勾选状态；null = 这个宿主不提供该配置
+     * （如手机端连别人的机器：那是对方的主权，我配不了）。
+     *
+     * 数据由 `execDeviceRows(selfNodeId, agentKey, knownDevices, grants)` 算出。
+     */
+    execDevices: List<ExecDeviceRow>? = null,
+    /** 勾选 / 取消某台设备：(nodeId, checked) -> Unit。 */
+    onToggleExecDevice: ((String, Boolean) -> Unit)? = null,
+    /** 「添加设备」的出口；null = 不提供（例如没有可加的候选）。 */
+    onAddExecDevice: (() -> Unit)? = null,
+    /**
      * 「申请授权」：调用宿主的 `sendAgentGrantRequest(peerId, agentKey, reason, wsId, access)`
      * （task-10）。组合根（手机 = `App.kt`）把它接到 `controller::sendAgentGrantRequest`；
      * 桌面壳那条调用点暂时不接（task-9 在改 desktopApp，避免撞车），所以桌面侧没有这个入口。
@@ -165,6 +182,9 @@ fun WorkspaceDetailView(
     val kind = workspace?.agentKind ?: sessions.firstOrNull()?.agentKind ?: ""
 
     // 宿主判据与派生层（InboxWorkspaceUnits 的 isHost）同一份：本机节点 / 回环地址。
+    // 「添加设备」弹层的开关。只在用户点那颗入口时打开 —— 新增执行授权是一次显式动作。
+    var showAddExecDevice by remember(wsId) { mutableStateOf(false) }
+
     val isHost = peer != null && (
         peer.nodeId == state.selfNodeId ||
             peer.ip == "127.0.0.1" || peer.host == "localhost" || peer.host == "127.0.0.1"
@@ -225,12 +245,11 @@ fun WorkspaceDetailView(
                 horizontalArrangement = Arrangement.spacedBy(LocalAppSpacing.current.xs),
                 modifier = Modifier.weight(1f),
             ) {
-                IconButton(onClick = onBack) {
-                    Icon(
-                        painter = painterResource(Res.drawable.ic_arrow_back),
-                        contentDescription = stringResource(Res.string.action_back),
-                    )
-                }
+                AppIconButton(
+                    icon = Res.drawable.ic_arrow_back,
+                    contentDescription = stringResource(Res.string.action_back),
+                    onClick = onBack,
+                )
                 Column {
                     Text(
                         text = wsTitle,
@@ -276,6 +295,22 @@ fun WorkspaceDetailView(
                 .padding(horizontal = LocalAppSpacing.current.lg, vertical = LocalAppSpacing.current.md),
             verticalArrangement = Arrangement.spacedBy(LocalAppSpacing.current.md),
         ) {
+            // **整屏空态**：工作区对象不存在 + 一条会话都没有。
+            //
+            // 此前这一屏在这个组合下什么都不画：全文件只有一个 `wsGrants.isEmpty()` 的
+            // 行内提示和一张写着「暂无会话」的小卡，**撑不起整屏** —— 用户看到的就是
+            // 「工作区页面空白，没有空屏效果」。空态还必须带**出路**（回工作区列表），
+            // 否则用户只能靠猜返回。
+            if (workspace == null && sessions.isEmpty()) {
+                EmptyState(
+                    title = stringResource(Res.string.workspace_detail_empty_title),
+                    message = stringResource(Res.string.workspace_detail_empty_body),
+                    actionLabel = stringResource(Res.string.workspace_detail_empty_back),
+                    onAction = onBack,
+                    modifier = Modifier.fillMaxWidth(),
+                )
+                return@Column
+            }
             // 异常态：未命名工作区横幅
             if (workspace != null && workspace.wsTitle.isNullOrBlank()) {
                 Surface(
@@ -405,6 +440,34 @@ fun WorkspaceDetailView(
                 }
             }
 
+            // ===== 执行范围：谁能让这个 agent 干活（按 agent 一份，不是按工作区）=====
+            //
+            // 为什么挂在这里：这一屏是**这个 agent 在这个工作区**的详情，`workspace.agentKey`
+            // 手到擒来；而 `AgentExecPolicyStore` 的键就是 agentKey。
+            //
+            // 为什么只对**本机**显示：那条策略说的是「我的机器允许谁让它干活」，
+            // 配的是自己的台账。别人的那台机器轮不到我配 —— 那是他的主权。
+            if (execDevices != null && onToggleExecDevice != null && isHost) {
+                Card(
+                    modifier = Modifier.fillMaxWidth(),
+                    colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
+                    shape = LocalCardShape.current,
+                    elevation = CardDefaults.cardElevation(defaultElevation = RelayElevations.Card),
+                ) {
+                    // 勾选列表：逐设备决定谁能用这个 agent。
+                    // 数据由调用方算好传进来（`execDeviceRows`），这里只渲染。
+                    AgentExecDeviceChecklist(
+                        devices = execDevices.orEmpty(),
+                        onToggle = { nodeId, checked -> onToggleExecDevice?.invoke(nodeId, checked) },
+                        onAddDevice = onAddExecDevice?.let { { showAddExecDevice = true } },
+                        modifier = Modifier.padding(
+                            horizontal = LocalAppSpacing.current.lg14,
+                            vertical = LocalAppSpacing.current.md10,
+                        ),
+                    )
+                }
+            }
+
             // ===== 操作中心：权限与宿主控制条（从会话详情迁移，task-4 D）=====
             // 授权是按工作区给的，不是按某一轮会话给的：同一工作区里换一条会话不该换一套权限，
             // 也不该让"要看权限"这件事依赖"先挑一条会话"。所以它必须挂在工作区这一层。
@@ -499,16 +562,23 @@ fun WorkspaceDetailView(
                         horizontalArrangement = Arrangement.spacedBy(LocalAppSpacing.current.xs),
                         verticalAlignment = Alignment.CenterVertically,
                     ) {
+                        // 原型这三颗都是 `.btn sm` / `.btn sm pri`（`prototype/relay.html:6335-6336`）：
+                        // 卡内第三行的密排动作条。原代码各自压了一次 labelSmall，正是小档。
                         if (isHost) {
-                            OutlinedButton(onClick = { showQrDialog = true }) {
-                                Text(stringResource(Res.string.workspace_qr_btn), style = MaterialTheme.typography.labelSmall)
-                            }
+                            AppOutlinedButton(
+                                text = stringResource(Res.string.workspace_qr_btn),
+                                onClick = { showQrDialog = true },
+                                size = AppButtonSize.Small,
+                            )
                         }
-                        Button(onClick = { showGrantDialog = true }) {
-                            Text(stringResource(Res.string.workspace_grant_mgr_btn), style = MaterialTheme.typography.labelSmall)
-                        }
+                        AppButton(
+                            text = stringResource(Res.string.workspace_grant_mgr_btn),
+                            onClick = { showGrantDialog = true },
+                            size = AppButtonSize.Small,
+                        )
                         if (!isHost && onRequestGrant != null) {
-                            OutlinedButton(
+                            AppOutlinedButton(
+                                text = stringResource(Res.string.workspace_grant_request_btn),
                                 onClick = {
                                     scope.launch {
                                         val outcome = onRequestGrant?.invoke()
@@ -522,9 +592,8 @@ fun WorkspaceDetailView(
                                     }
                                 },
                                 enabled = grantEntry == GrantRequestEntry.Ready,
-                            ) {
-                                Text(stringResource(Res.string.workspace_grant_request_btn), style = MaterialTheme.typography.labelSmall)
-                            }
+                                size = AppButtonSize.Small,
+                            )
                         }
                     }
 
@@ -728,21 +797,15 @@ fun WorkspaceDetailView(
             }
 
             // 底部「打开聊天」动作按钮
-            Button(
+            // 原型这颗是 `.btn.block.pri`（标准档、通栏、`--r-ctl` 12dp 圆角）。
+            AppButton(
+                text = stringResource(Res.string.agent_open_chat),
                 onClick = onOpenChat,
                 modifier = Modifier
                     .fillMaxWidth()
                     .padding(vertical = LocalAppSpacing.current.md),
-                shape = LocalCardShape.current,
-            ) {
-                Icon(
-                    painter = painterResource(Res.drawable.ic_chat_bubble),
-                    contentDescription = null,
-                    modifier = Modifier.size(18.dp),
-                )
-                Spacer(Modifier.size(LocalAppSpacing.current.xs))
-                Text(stringResource(Res.string.agent_open_chat))
-            }
+                leadingIcon = Res.drawable.ic_chat_bubble,
+            )
 
             Spacer(Modifier.height(LocalAppSpacing.current.xl))
         }
@@ -780,6 +843,21 @@ fun WorkspaceDetailView(
     }
 
     // ===== 权限管理（从会话详情迁移）=====
+
+    // 「添加设备」：从**还没在名单里**的人中选一个。
+    //
+    // 候选只列「还没勾上的」—— 已经能用的设备再列一遍只会让列表变长，
+    // 而这一屏的用途是「加一个还不行的」。
+    if (showAddExecDevice) {
+        AgentExecAddDeviceDialog(
+            candidates = execDevices.orEmpty().filter { !it.checked && !it.isSelf },
+            onPick = { nodeId ->
+                onToggleExecDevice?.invoke(nodeId, true)
+                showAddExecDevice = false
+            },
+            onDismiss = { showAddExecDevice = false },
+        )
+    }
     if (showGrantDialog) {
         WorkspaceGrantDialog(
             peer = peer,

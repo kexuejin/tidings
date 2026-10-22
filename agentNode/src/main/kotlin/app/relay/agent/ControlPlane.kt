@@ -2,12 +2,15 @@
 
 package app.relay.agent
 
+import app.relay.core.protocol.mentionedVirtualAgent
 import app.relay.core.protocol.AgentGrantAccess
 import app.relay.core.protocol.AgentGrantPolicies
 import app.relay.core.protocol.AgentGrantScopes
 import app.relay.core.protocol.AgentEventAttachment
 import app.relay.core.protocol.AgentGrantStates
+import app.relay.core.protocol.AgentSessionPick
 import app.relay.core.protocol.AgentSessionStates
+import app.relay.core.protocol.sameAgent
 import app.relay.core.protocol.Codec
 import app.relay.core.protocol.DecodeResult
 import app.relay.core.protocol.MsgTypes
@@ -108,6 +111,13 @@ sealed interface GrantReplyOutcome {
  * @param httpPort 监听端口；传 0 表示由系统分配，实际端口读 [boundPort]。
  * @param token    空字符串 = 回环放行。
  */
+/** 取 JsonElement 里的字符串内容；不是字符串就 null（不抛）。 */
+private fun JsonElement.jsonPrimitiveOrNull(): JsonPrimitive? =
+    (this as? JsonPrimitive)?.takeIf { it.isString }
+
+private val JsonPrimitive.contentOrNull: String?
+    get() = if (isString) content else null
+
 class ControlPlane(
     private val runtime: NodeRuntime,
     private val httpPort: Int,
@@ -142,6 +152,27 @@ class ControlPlane(
     private val grants: AgentGrantStore = AgentGrantStore(defaultGrantFile()),
     /** PPE-1 增补 D8：设备发来的会话分页请求，留给宿主答（见 AgentSessionPageStore 的 KDoc）。 */
     private val sessionPages: AgentSessionPageStore = AgentSessionPageStore(),
+    /**
+     * `/v1/inbox` 的注入判定附加信息。null = 不提供（纯聊天用途，行为与改动前一致）。
+     *
+     * 为什么要由 Tidings 侧注入：判据（`shouldTriggerAgent`）只有一份，它在 composeApp 里、
+     * 依赖 `settings.groups` 与 `agentWorkspaces`，agentNode 拿不到。让桥接侧自己再判一次
+     * 会让两边慢慢分叉，最终是「手机上显示已 @、宿主没执行」的静默（AGENTS §2.4）。
+     */
+    private val inboxEnricher: AgentInboxEnricher? = null,
+    /**
+     * **每个 agent 各自的执行范围**（key = agentKey）。落盘保存，见 [AgentExecPolicyStore]。
+     *
+     * ## 为什么按 agent 而不是按宿主
+     *
+     * 一台机器可以同时装 dsh 与 codex（`RelayUiState.agentKindsByHost` 就是「宿主 → 多个 kind」）。
+     * 宿主级一份配置做不到「允许群主用 dsh、但不允许用 codex」。
+     *
+     * ## 缺省 = 最严
+     *
+     * 表里没有的 agent 一律 `HOST_ONLY`（由 store 兜底）。新装的 agent 因此自动安全。
+     */
+    private val execPolicies: AgentExecPolicyStore = AgentExecPolicyStore(File(defaultGrantFile().parentFile, "agent-exec-policies.json")),
 ) {
 
     private val json = Json { ignoreUnknownKeys = true }
@@ -244,6 +275,8 @@ class ControlPlane(
                 path == "/v1/send-file" && method == "POST" -> sendFile(exchange)
                 path == "/v1/transfers" && method == "GET" -> transfers(exchange)
                 path == "/v1/nudge" && method == "POST" -> nudge(exchange)
+                path == "/v1/announce" && method == "POST" -> announce(exchange)
+                path == "/v1/candidates" && method == "GET" -> candidates(exchange)
                 path == "/v1/agent/session" && method == "POST" -> agentSession(exchange)
                 path == "/v1/agent/event" && method == "POST" -> agentEvent(exchange)
                 path == "/v1/agent/queue" && method == "POST" -> agentQueue(exchange)
@@ -260,6 +293,12 @@ class ControlPlane(
                 path == "/v1/agent/session-pages/resolve" && method == "POST" -> resolveAgentSessionPage(exchange)
                 path == "/v1/agent/grants" && method == "GET" -> readGrants(exchange)
                 path == "/v1/agent/grants" && method == "PUT" -> writeGrants(exchange)
+                // 每个 agent 的执行范围（谁能让它干活）。与 grants 分开：那条是白名单，这条是策略。
+                path == "/v1/agent/exec-policies" && method == "GET" -> readExecPolicies(exchange)
+                path == "/v1/agent/exec-policies" && method == "PUT" -> writeExecPolicies(exchange)
+                // 某个 agent 的执行名单（谁能让它干活）—— 逐设备勾选。
+                path == "/v1/agent/exec-devices" && method == "GET" -> readExecDeviceList(exchange)
+                path == "/v1/agent/exec-devices" && method == "PUT" -> writeExecDevice(exchange)
                 (path == "/v1/inbox" || path == "/v1/messages") && method == "GET" -> inbox(exchange)
                 else -> respond(
                     exchange,
@@ -352,6 +391,89 @@ class ControlPlane(
      * 这条路由的存在也让 C8（戳一碰收到时弹通知并落到那个会话）可以被人或脚本驱动，
      * 而不必先起一个桌面宿主、再用鼠标点它的头部手指图标。
      */
+    /**
+     * `POST /v1/announce` —— **向一个具体地址握手一次**（`{"host":"100.x.y.z","port":17878}`）。
+     *
+     * ## 为什么需要这条
+     *
+     * 对端地址原先只来自「发现包的源地址」。而 UDP 广播**不跨 VPN 网段**（Tailscale/
+     * ZeroTier 是点对点三层隧道），于是两边各自切到 VPN 后，**双方都还记着对方已不可达的
+     * 局域网地址**，而广播到不了新地址 —— 形成死锁：谁都收不到谁的包，所以谁都学不到
+     * 谁的新地址。
+     *
+     * 真机现场：红米 30 分钟一个包都没到本机（`lastSeen` 停在 30 分钟前），
+     * 而本机 `ping` 它的 Tailscale 地址 2.2 秒就通 —— **网络通、协议不知道怎么走**。
+     *
+     * 这条路由打破死锁：只要有一方知道对方的可达地址，戳一下，
+     * 对方的回包就会走 `PeerRegistry.rememberSource` 进候选池，之后自动恢复。
+     * 它是**运维/诊断入口**，不是日常路径 —— 比它更重要的是 Profile 带 `addresses`。
+     */
+    private fun announce(exchange: HttpExchange) {
+        val obj = readJsonObject(exchange) ?: return
+        val host = obj["host"]?.jsonPrimitive?.contentOrNull?.trim().orEmpty()
+        if (host.isEmpty()) {
+            respond(exchange, 400, errorJson("bad-request", "缺少 host（对方可达地址）"))
+            return
+        }
+        val port = obj["port"]?.jsonPrimitive?.intOrNull ?: Protocol.DEFAULT_UDP_PORT
+        if (port !in 1..65535) {
+            respond(exchange, 400, errorJson("bad-request", "port 越界：$port"))
+            return
+        }
+        val sent = try {
+            runBlocking { runtime.announceTo(host, port) }
+            true
+        } catch (t: Throwable) {
+            respond(exchange, 502, errorJson("announce-failed", t.message ?: "握手失败"))
+            return
+        }
+        respond(
+            exchange,
+            200,
+            buildJsonObject {
+                put("status", if (sent) "sent" else "unreachable")
+                put("host", host)
+                put("port", port)
+                // 诚实说明它能治什么、不能治什么：这是「把包送到」，不是「对方已经认了我」。
+                put(
+                    "note",
+                    "握手包已发出。对方的回包会被记进候选地址；若对方仍在线，几秒内应恢复。",
+                )
+            },
+        )
+    }
+
+    /**
+     * `GET /v1/candidates` —— 每个对端**当前记着的候选地址**。
+     *
+     * 与 `/v1/peers` 的分工：那里只有「正在用的那一个」（`ip`），这里是「还可以试哪些」。
+     * 排查「换了网就连不上」时，先看这里有没有对方的 VPN 地址 —— 没有就说明
+     * 死锁还没破（见 [announce] 的 KDoc）。
+     */
+    private fun candidates(exchange: HttpExchange) {
+        val all = runtime.candidateEndpoints()
+        respond(
+            exchange,
+            200,
+            buildJsonObject {
+                putJsonArray("candidates") {
+                    all.forEach { (nodeId, list) ->
+                        addJsonObject {
+                            put("nodeId", nodeId)
+                            putJsonArray("endpoints") {
+                            list.forEach { ep ->
+                                addJsonObject {
+                                    put("host", ep.component1())
+                                    put("port", ep.component2())
+                                }
+                            }
+                            }
+                        }
+                    }
+                }
+            },
+        )
+    }
     private fun nudge(exchange: HttpExchange) {
         val obj = readJsonObject(exchange) ?: return
         val to = obj["to"]?.jsonPrimitive?.contentOrNull?.trim().orEmpty()
@@ -1044,6 +1166,155 @@ class ControlPlane(
      * 两处策略不同是**有意**的：对端能影响的是**申请队列**（那里必须封顶），而这里没有任何对端输入
      * （入站帧没有写台账的分支）。将来要改任何一边之前，先读这段。
      */
+
+    /**
+     * 读每个 agent 的执行范围。
+     *
+     * 返回**全部已配置项**；没配过的 agent 不在里面 —— 调用方按最严一档处理
+     * （`AgentExecPolicies.normalize(null)` 会兜底）。
+     *
+     * 为什么不像 grants 那样列全量：agent 的清单会随宿主装了什么而变，
+     * 由调用方（面板）拿它自己的 agent 列表来对照，比这里猜一份更准。
+     */
+    private fun readExecPolicies(exchange: HttpExchange) {
+        respond(
+            exchange,
+            200,
+            buildJsonObject {
+                putJsonObject("policies") {
+                    execPolicies.snapshot().toSortedMap().forEach { (agentKey, policy) ->
+                        put(agentKey, JsonPrimitive(policy))
+                    }
+                }
+                // 可取值一并给出：面板不必硬编码四档，取值域只有一个来源。
+                putJsonArray("values") {
+                    app.relay.core.protocol.AgentExecPolicies.VALUES.sorted().forEach { add(JsonPrimitive(it)) }
+                }
+            },
+        )
+    }
+
+    /**
+     * 写某个 agent 的执行范围。`{"agentKey":"dsh","policy":"trustedDevices"}`；
+     * `policy` 传空串表示**清除**（回到最严一档）。
+     *
+     * 非法档位一律 400 且**不做任何修改** —— 不静默写成默认，
+     * 那会让用户以为自己配了某个档，实际是默认档。
+     */
+
+    /**
+     * 某个 agent 的执行名单：**谁能让它干活**。
+     *
+     * 与 `/v1/agent/grants`（全量授权表）分开：那条回答「谁能看」，这条只回答「谁能执行」，
+     * 而且按 agent 切好 —— 面板一次只配一个 agent，不该让它读整张表再自己筛。
+     */
+    private fun readExecDeviceList(exchange: HttpExchange) {
+        val query = parseQuery(exchange.requestURI.rawQuery)
+        val agentKey = query["agentKey"]?.trim()
+        if (agentKey.isNullOrEmpty()) {
+            respond(exchange, 400, errorJson("bad-request", "agentKey 不能为空"))
+            return
+        }
+        val snapshot = grants.snapshot()
+        respond(
+            exchange,
+            200,
+            buildJsonObject {
+                put("agentKey", agentKey)
+                // 名单 = `scope=AGENT` 且 agentKey 匹配的那些节点。
+                // **只给这个集合**，不给整张表：面板拿它做勾选状态，多的信息只会让它自己再筛一遍。
+                putJsonArray("allowedNodeIds") {
+                    snapshot.grants
+                        .filter {
+                            it.scope == app.relay.core.protocol.AgentGrantScopes.AGENT &&
+                                it.agentKey == agentKey
+                        }
+                        .map { it.nodeId }
+                        .distinct()
+                        .sorted()
+                        .forEach { add(JsonPrimitive(it)) }
+                }
+                // 可信设备（`scope=ALL`）：面板据此把它们列出来、标上「可信」。
+                putJsonArray("trustedNodeIds") {
+                    snapshot.grants
+                        .filter { it.scope == app.relay.core.protocol.AgentGrantScopes.ALL }
+                        .map { it.nodeId }
+                        .distinct()
+                        .sorted()
+                        .forEach { add(JsonPrimitive(it)) }
+                }
+            },
+        )
+    }
+
+    /**
+     * 勾选 / 取消某台设备对这个 agent 的执行权。
+     *
+     * `{"agentKey":"dsh","nodeId":"node-a","allowed":true}`
+     *
+     * ## 只动 `scope=AGENT` 这一档
+     *
+     * 取消时**不碰** `scope=ALL` 的可信设备记录 —— 「不许它执行这个 agent」与「不再信任这台设备」
+     * 是两件事。前者是收紧一个 agent，后者会连带影响查看与其它 agent；
+     * 混在一起的后果是用户取消一个勾，结果把人整台设备都踢了。
+     */
+    private fun writeExecDevice(exchange: HttpExchange) {
+        val obj = readJsonObject(exchange) ?: return
+        val agentKey = obj["agentKey"]?.jsonPrimitive?.contentOrNull?.trim()
+        val nodeId = obj["nodeId"]?.jsonPrimitive?.contentOrNull?.trim()
+        val allowed = (obj["allowed"] as? JsonPrimitive)?.booleanOrNull
+        if (agentKey.isNullOrEmpty() || nodeId.isNullOrEmpty() || allowed == null) {
+            respond(
+                exchange,
+                400,
+                errorJson("bad-request", "需要 agentKey / nodeId / allowed 三个字段"),
+            )
+            return
+        }
+        if (allowed) {
+            grants.grant(
+                nodeId = nodeId,
+                scope = app.relay.core.protocol.AgentGrantScopes.AGENT,
+                agentKey = agentKey,
+                grantedBy = "panel",
+                at = System.currentTimeMillis(),
+            )
+        } else {
+            grants.revoke(
+                nodeId = nodeId,
+                scope = app.relay.core.protocol.AgentGrantScopes.AGENT,
+                agentKey = agentKey,
+            )
+        }
+        respond(exchange, 200, buildJsonObject { put("ok", true) })
+    }
+    private fun writeExecPolicies(exchange: HttpExchange) {
+        val obj = readJsonObject(exchange) ?: return
+        val agentKey = obj["agentKey"]?.jsonPrimitive?.contentOrNull?.trim()
+        if (agentKey.isNullOrEmpty()) {
+            respond(exchange, 400, errorJson("bad-request", "agentKey 不能为空"))
+            return
+        }
+        val policy = obj["policy"]?.jsonPrimitive?.contentOrNull?.trim().orEmpty()
+        if (policy.isEmpty()) {
+            execPolicies.clear(agentKey)
+            respond(exchange, 200, buildJsonObject { put("ok", true) })
+            return
+        }
+        if (!execPolicies.set(agentKey, policy)) {
+            respond(
+                exchange,
+                400,
+                errorJson(
+                    "bad-request",
+                    "policy 只能是 " + app.relay.core.protocol.AgentExecPolicies.VALUES.sorted()
+                        .joinToString(" / ") + "；收到「" + policy + "」",
+                ),
+            )
+            return
+        }
+        respond(exchange, 200, buildJsonObject { put("ok", true) })
+    }
     private fun writeGrants(exchange: HttpExchange) {
         val obj = readJsonObject(exchange) ?: return
         var changed = false
@@ -1850,11 +2121,130 @@ class ControlPlane(
                             put("peerId", row.peerId)
                             put("direction", row.direction)
                             put("at", row.at)
-                            put(
-                                "envelope",
-                                runCatching { json.parseToJsonElement(row.envelopeJson) }
-                                    .getOrElse { JsonNull },
-                            )
+                            val envelopeElement = runCatching {
+                                json.parseToJsonElement(row.envelopeJson)
+                            }.getOrElse { JsonNull }
+                            put("envelope", envelopeElement)
+                            // **注入判定随消息一起给出**（见 [AgentInboxEnricher] 的 KDoc）。
+                            // 只在 enricher 非空且真的判出「这是给 agent 的」时才写这个键 ——
+                            // 不写比写 null 更有信息量：旧桥接侧看到的是「没有这个键」，
+                            // 与「有键但为 null」区分得开。
+                            inboxEnricher?.let { enricher ->
+                                val payload = (envelopeElement as? JsonObject)
+                                    ?.get("payload") as? JsonObject
+                                val view = JsonObjectLike(
+                                    text = (payload?.get("text") as? JsonPrimitive)
+                                        ?.takeIf { it.isString }?.content,
+                                    groupId = (payload?.get("groupId") as? JsonPrimitive)
+                                        ?.takeIf { it.isString }?.content,
+                                    agentSessionId = (payload?.get("agentSessionId") as? JsonPrimitive)
+                                        ?.takeIf { it.isString }?.content,
+                                    senderId = (payload?.get("senderId") as? JsonPrimitive)
+                                        ?.takeIf { it.isString }?.content,
+                                )
+                                // **发送者取「真正的说话者」，不是「发送这台设备」**。
+                                //
+                                // 三个字段的含义不同（真机实测）：
+                                //
+                                //   `from`               = 发送**这台设备**（永远是本机 nodeId）
+                                //   `payload.senderId`   = **谁在说话**（原样透传，可能是 `agent:*`）
+                                //   `row.peerId`         = 会话键（群里是 `group:xxx`）
+                                //
+                                // 原先只取 `from`，于是**agent 自己发的群消息**被判成「人发的」：
+                                // `senderIsAgent=false` ⇒ 桥接侧的回声判据失效 ⇒ 它把自己刚才那段
+                                // 回复里提到的 `@dsh` 当成新指令，**再注入给自己** —— 自激循环。
+                                // 真机症状：群里出现大量 agent 的回复被反复转发，用户说「这不是我发的」。
+                                //
+                                // 与 AGENTS.md §2.4 同一条纪律：用户自己说的话 = 用户的 nodeId；
+                                // 转发进群时**不要另算发送者**，原样用 payload.senderId。
+                                //
+                                // 老端不带 `senderId` 时退回 `from`（那时群里只有人，没有 agent 转发）。
+                                val envelopeObj = envelopeElement as? JsonObject
+                                val payloadObj = envelopeObj?.get("payload") as? JsonObject
+                                val senderId = payloadObj
+                                    ?.get("senderId")?.jsonPrimitiveOrNull()?.contentOrNull
+                                    ?.takeIf { it.isNotBlank() }
+                                    ?: envelopeObj?.get("from")?.jsonPrimitiveOrNull()?.contentOrNull
+                                    ?: row.peerId
+                                // **判定在这里做**：本类持有权威授权表（[grants]），
+                                // 是「投递前的门控」的执行点。桌面端只提供群元数据。
+                                val meta = runCatching { enricher.groupMetaOf(view) }.getOrNull()
+                                // 先算「@ 到的是哪个 agent」—— 它是台账里的 agentKey。
+                                val grantsAgentKey = runCatching {
+                                    meta?.let { m ->
+                                        val agents = m.virtualAgents.orEmpty()
+                                        m.mentionedVirtualAgent(view.text.orEmpty(), agents.map { it.name })
+                                            ?.let { hit -> hit.agentId.ifBlank { hit.name } }
+                                    }
+                                }.getOrNull()
+                                val hint = resolveAgentInboxHint(
+                                    meta = meta,
+                                    senderId = senderId,
+                                    text = view.text.orEmpty(),
+                                    // 显式授权那一档：`requireRw = true` —— 只读授权不含「下发任务」。
+                                    // **按 agent 授权**：能不能执行绑在 agent 上，不是绑在宿主上。
+                                    // 一台机器上跑着 dsh 与 codex，允许谁用哪一个必须分别配。
+                                    // `agentKey` 用 `@` 到的那个 token（与 VirtualAgentMember.name 同源）。
+                                    grantAllows = { nodeId ->
+                                        grants.allows(
+                                            nodeId = nodeId,
+                                            agentKey = grantsAgentKey,
+                                            wsId = null,
+                                            requireRw = true,
+                                            // **执行面**：`scope=ALL`（整台设备）不自动覆盖具体 agent。
+                                            // 批准一台设备的初心可能是「让他用 dsh」；装了 codex 之后
+                                            // 不该让它自动继承执行权。
+                                            forExecution = true,
+                                        )
+                                    },
+                                    // 宿主配的执行范围；没配过 = 最严一档（只有本机用户能执行）。
+                                    execPolicy = execPolicies.policyOf(grantsAgentKey),
+                                    // **本机 nodeId**：判据据此认「我在自己机器上」。
+                                    // 缺了它，本机用户在自己机器上 @ 自己的 agent 会被判成没授权。
+                                    selfNodeId = runtime.nodeId,
+                                    // **候选会话**：`AgentSessionPick` 要用它算 `targetSessionId`。
+                                    // 缺了它 targetSessionId 恒为 null ⇒ 注入永远被拒（「发消息不执行」）。
+                                    //
+                                    // 匹配口径要宽松：入驻时写进群的 agentId 可能是 `DSH`（agentKind 兜底），
+                                    // 而会话报的是 `dsh-029bbbf3`。两者是同一个 agent 的不同精度，
+                                    // 只认其中一个会让「刚入驻的 agent 找不到自己的会话」。
+                                    candidates = runCatching {
+                                        sessions.sessions()
+                                            .filter { rec ->
+                                                !rec.synthesized && sameAgent(
+                                                    candidate = rec.agentId,
+                                                    kind = rec.agentKind,
+                                                    wanted = grantsAgentKey,
+                                                )
+                                            }
+                                            .sortedByDescending { rec -> rec.updatedAt }
+                                            .map { rec ->
+                                                AgentSessionPick.Candidate(
+                                                    sessionId = rec.sessionId,
+                                                    wsId = rec.wsId,
+                                                )
+                                            }
+                                    }.getOrElse { emptyList() },
+                                )
+                                if (hint != null) {
+                                    putJsonObject("agentHint") {
+                                        put("addressedToAgent", hint.addressedToAgent)
+                                        hint.boundWsId?.let { put("boundWsId", it) }
+                                        hint.requestedSessionId?.let { put("requestedSessionId", it) }
+                                        hint.agentName?.let { put("agentName", it) }
+                                        // 授权结论随行：桥接侧据此决定投不投，并在拒绝时能说出为什么。
+                                        put("senderMayExecute", hint.senderMayExecute)
+                                        hint.denyReason?.let { put("denyReason", it) }
+                                        // **目标会话**：判定已由 Tidings 侧算好（core 的 AgentSessionPick）。
+                                        // 桥接侧直接用它，不用自己再算一遍策略。
+                                        hint.targetSessionId?.let { put("targetSessionId", it) }
+                                        // **发送者是不是 agent**：桥接侧用它判「回声」，而不是只看方向。
+                                        // 本机用户 @ 自己的 agent 时 direction=out，但那不是回声 ——
+                                        // 只看方向会让这条消息第一条就被跳过（真机症状）。
+                                        put("senderIsAgent", hint.senderIsAgent)
+                                    }
+                                }
+                            }
                         }
                     }
                 }

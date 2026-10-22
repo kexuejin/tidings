@@ -12,10 +12,6 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.shape.RoundedCornerShape
-import androidx.compose.foundation.layout.PaddingValues
-import androidx.compose.foundation.layout.Spacer
-import androidx.compose.foundation.layout.width
-import androidx.compose.material3.Button
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.CircularProgressIndicator
@@ -60,6 +56,8 @@ import app.relay.generated.resources.workspace_board_starting
 import app.relay.generated.resources.workspace_board_starting_hint
 import app.relay.generated.resources.workspace_board_subtitle
 import app.relay.generated.resources.workspace_create_group_title
+import app.relay.ui.components.AppButton
+import app.relay.ui.components.AppButtonSize
 import app.relay.ui.theme.LocalAppSpacing
 import app.relay.ui.theme.LocalCardShape
 import org.jetbrains.compose.resources.painterResource
@@ -208,15 +206,15 @@ internal fun WorkspaceBoardView(
                 horizontalArrangement = Arrangement.spacedBy(LocalAppSpacing.current.xs),
             ) {
                 onCreateWorkspaceGroup?.let { createWs ->
-                    Button(
+                    // 原型顶栏这颗是 `.btn sm pri`（`prototype/relay.html:6314`）：顶栏密排位置。
+                    // 原来那套 8×4 内边距 / 8dp 圆角 / 13dp 图标是就地手写的覆盖，
+                    // 迁到按钮族后由小档统一（10×6 / 12dp 圆角 / 16dp 图标）。
+                    AppButton(
+                        text = stringResource(Res.string.workspace_create_group_title),
                         onClick = createWs,
-                        contentPadding = PaddingValues(horizontal = 8.dp, vertical = 4.dp),
-                        shape = RoundedCornerShape(8.dp),
-                    ) {
-                        Icon(painterResource(Res.drawable.ic_plus), contentDescription = null, modifier = Modifier.size(13.dp))
-                        Spacer(Modifier.width(4.dp))
-                        Text(stringResource(Res.string.workspace_create_group_title), style = MaterialTheme.typography.labelSmall)
-                    }
+                        size = AppButtonSize.Small,
+                        leadingIcon = Res.drawable.ic_plus,
+                    )
                 }
                 if (onRefresh != null) {
                     TopBarIconAction(
@@ -233,9 +231,14 @@ internal fun WorkspaceBoardView(
     // 而「有 agent 但一条会话、一个工作区都没宣告过」时派生仍会给出一行降级行
     // （inboxWorkspaceUnits() 的「未上报类型」），那条路不该被空态挡掉。
     //
+    // **但判据不能是 `!units.isEmpty`**：派生层在「什么都没宣告、一条帧都没收到」时
+    // 造的那行是**空壳**（wsTitle=null / sessionCount=0 / active=null），它在界面上就是一张
+    // 没有主体的卡 —— 空态因此被挡掉，用户看到的是「工作区页面空白，没有空屏效果」。
+    // 用 [InboxWorkspaceUnitsUi.hasVisibleContent]：只有真有内容时才不画空态。
+    //
     // 注：agents / selectedAgent 两个形参留给**桌面壳**（它仍走二级下钻），手机侧这条
     // 路径不用它们 —— 见 AgentConsoleScreen 的 isViewingDetail 分支。
-    if (units.isEmpty) {
+    if (!units.hasVisibleContent) {
         // task-10：切过来的头几秒先别下「还没有任何 Agent 上报」这个结论 —— 节点还没起来、
         // 或一个对端都还没发现时，那不是**空**，是**还没到**。分档规则抽成纯函数
         // [boardEmptyStage]，单测才钉得住"加载态与真·空态有区分"。

@@ -15,8 +15,6 @@ import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
-import androidx.compose.material3.Icon
-import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
@@ -49,8 +47,8 @@ import app.relay.ui.ContentWidths
 import app.relay.ui.centerCapped
 import app.relay.ui.theme.LocalAppSpacing
 import org.jetbrains.compose.resources.StringResource
-import org.jetbrains.compose.resources.painterResource
 import org.jetbrains.compose.resources.stringResource
+import app.relay.ui.components.AppIconButton
 
 /**
  * 手机端移动能力治理与 MCP 动态 ACL 开关面板。
@@ -121,12 +119,11 @@ fun CapabilitySettingsScreen(
                 .padding(horizontal = LocalAppSpacing.current.md, vertical = LocalAppSpacing.current.sm),
             verticalAlignment = Alignment.CenterVertically,
         ) {
-            IconButton(onClick = onBack) {
-                Icon(
-                    painter = painterResource(Res.drawable.ic_arrow_back),
-                    contentDescription = stringResource(Res.string.action_back),
-                )
-            }
+            AppIconButton(
+                icon = Res.drawable.ic_arrow_back,
+                contentDescription = stringResource(Res.string.action_back),
+                onClick = onBack,
+            )
             Column(modifier = Modifier.padding(start = LocalAppSpacing.current.xs)) {
                 Text(
                     text = stringResource(Res.string.capability_settings_title),

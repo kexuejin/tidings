@@ -11,12 +11,10 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.shape.RoundedCornerShape
-import androidx.compose.material3.Button
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
@@ -36,12 +34,15 @@ import app.relay.generated.resources.agent_approval_status_denied
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
-import androidx.compose.material3.TextButton
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.text.font.FontFamily
+import app.relay.ui.components.AppButton
+import app.relay.ui.components.AppButtonSize
+import app.relay.ui.components.AppOutlinedButton
+import app.relay.ui.components.AppTextButton
 import app.relay.ui.components.RelayDialog
 import app.relay.ui.components.RelayDialogButton
 import app.relay.generated.resources.agent_approval_allow_session
@@ -250,24 +251,32 @@ private fun ApprovalRow(
                         )
                     }
                 } else if (approval.status == "pending" && !isExpired && (onRespond != null || onRespondChoice != null)) {
-                    OutlinedButton(onClick = {
-                        if (onRespondChoice != null) onRespondChoice(approval.approvalId, false, false)
-                        else onRespond?.invoke(approval.approvalId, false)
-                    }) {
-                        Text(stringResource(Res.string.agent_approval_deny))
-                    }
-                    Button(onClick = {
-                        if (onRespondChoice != null) onRespondChoice(approval.approvalId, true, false)
-                        else onRespond?.invoke(approval.approvalId, true)
-                    }) {
-                        Text(stringResource(Res.string.agent_approval_allow))
-                    }
+                    // 原型这一行是 `.btn sm out` + `.btn sm pri`（`prototype/relay.html:2223`）：
+                    // 审批行是列表行，三颗都走小档。拒绝用中性描边（原型是 `.out`，不是 `.danger-o`）。
+                    AppOutlinedButton(
+                        text = stringResource(Res.string.agent_approval_deny),
+                        onClick = {
+                            if (onRespondChoice != null) onRespondChoice(approval.approvalId, false, false)
+                            else onRespond?.invoke(approval.approvalId, false)
+                        },
+                        size = AppButtonSize.Small,
+                    )
+                    AppButton(
+                        text = stringResource(Res.string.agent_approval_allow),
+                        onClick = {
+                            if (onRespondChoice != null) onRespondChoice(approval.approvalId, true, false)
+                            else onRespond?.invoke(approval.approvalId, true)
+                        },
+                        size = AppButtonSize.Small,
+                    )
                     if (onRespondChoice != null) {
-                        TextButton(onClick = {
-                            onRespondChoice(approval.approvalId, true, true)
-                        }) {
-                            Text(stringResource(Res.string.agent_approval_allow_session), style = MaterialTheme.typography.labelSmall)
-                        }
+                        // 同一行里语义最低的一颗（只在本次会话内免审）：走同一小档，
+                        // 不再单独压字阶 —— 层级靠 tone 与位置表达，不靠第五个字号。
+                        AppTextButton(
+                            text = stringResource(Res.string.agent_approval_allow_session),
+                            onClick = { onRespondChoice(approval.approvalId, true, true) },
+                            size = AppButtonSize.Small,
+                        )
                     }
                 } else if (statusText != null) {
                     val badgeColor = when (approval.status) {
@@ -413,9 +422,13 @@ private fun QueueRow(task: AgentQueueTaskUi, onCancelTask: ((taskId: String) -> 
             }
         }
         if (onCancelTask != null) {
-            OutlinedButton(onClick = { onCancelTask(task.taskId) }) {
-                Text(stringResource(Res.string.agent_queue_cancel))
-            }
+            // 队列卡的行末动作：原型队列行没有按钮，这里按「列表行内动作」走小档，
+            // 与同屏审批行的 `.btn sm` 保持同一级。
+            AppOutlinedButton(
+                text = stringResource(Res.string.agent_queue_cancel),
+                onClick = { onCancelTask(task.taskId) },
+                size = AppButtonSize.Small,
+            )
         }
     }
 }

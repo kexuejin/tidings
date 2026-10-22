@@ -127,6 +127,22 @@ class AgentGrantStore(private val file: File) {
         wsId: String? = null,
         requireRw: Boolean = false,
         requireApproval: Boolean = false,
+        /**
+         * **执行面判定**：true 时 `scope=ALL` 不再自动覆盖具体 agent。
+         *
+         * ## 为什么两个判定必须分开
+         *
+         * 「能看」与「能执行」是两件事。批准一台设备为可信，意味着它**能看**本机的
+         * agent 列表、会话流、产物 —— 那是对的，可见性不该逼用户逐个配置。
+         *
+         * 但「能让我的机器跑命令」风险完全不同：批准一台设备的初心可能是「让他用 dsh
+         * 做项目协作」，而三个月后装了 codex 并给了它更宽的权限 —— 如果 `scope=ALL`
+         * 继续自动覆盖，**同事在无人察觉的情况下获得了新 agent 的执行权**。
+         *
+         * 所以执行面要求**逐 agent 显式授权**（`scope=AGENT` + 对应 agentKey）。
+         * 唯一的例外是本机用户自己（`isMyDevice`）：他本来就在自己机器上。
+         */
+        forExecution: Boolean = false,
     ): Boolean = rwLock.read {
         if (policy == AgentGrantPolicies.AUTO) return@read true
         grants.any { g ->
@@ -141,7 +157,11 @@ class AgentGrantStore(private val file: File) {
                 if (!canApprove) return@any false
             }
             when (g.scope) {
-                AgentGrantScopes.ALL -> true
+                AgentGrantScopes.ALL ->
+                    // **执行面不接受「整台设备」这一档**（本机用户除外）：
+                    // 它会让新装的 agent 自动继承执行权，用户毫无感知。
+                    // 详见 `forExecution` 的 KDoc。
+                    !forExecution || g.isMyDevice
                 AgentGrantScopes.AGENT -> agentKey != null && g.agentKey == agentKey
                 AgentGrantScopes.WORKSPACE -> {
                     (agentKey == null || g.agentKey == null || g.agentKey == agentKey) &&
