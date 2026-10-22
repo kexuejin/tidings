@@ -48,6 +48,15 @@ sealed interface BannerMessage {
     /** 运行时还没起来就点了发送。 */
     data object NodeNotStarted : BannerMessage
 
+    /**
+     * 一次要传的文件太多（拖进来的文件夹展开后超过上限）。
+     *
+     * 为什么必须**先判、再给具体数**：传输层超限时只是 `return null`，界面看到的是
+     * 「这张传不出去」，说不出原因。用户拖了一个几千文件的目录时，最需要知道的是
+     * 「有多少、上限多少」——否则只会反复重试。
+     */
+    data class TooManyFiles(val count: Int, val limit: Int) : BannerMessage
+
     /** 单条文本超过上限。 */
     data class MessageTooLong(val bytes: Int, val limit: Int) : BannerMessage
 

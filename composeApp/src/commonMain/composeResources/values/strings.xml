@@ -181,6 +181,16 @@
     <string name="banner_group_unknown">这个群的成员表还没同步过来，稍等一下，或者让对方在群里发一条消息。</string>
     <string name="banner_group_left">你已经被移出这个群，发不出去了。</string>
     <string name="banner_group_members_added">已邀请 %1$d 位新成员，正在通知全群。</string>
+    <!-- 一次传输的文件数超过上限。参数：%1$d = 实际个数，%2$d = 上限。 -->
+    <!-- 拖进来的文件夹展开后超过单次上限（参数：上限）。 -->
+    <!-- 桌面端拖放：没选会话时拖进来。 -->
+    <string name="desktop_drop_pick_conversation">先选一个会话，再把文件拖进来</string>
+    <!-- 桌面端通知的标题（原来写死在 desktopApp 里，属历史欠账；新增文案统一走这里）。 -->
+    <string name="desktop_notification_title">捎话</string>
+    <string name="file_folder_too_many">这个文件夹里的文件超过 %1$d 个，一次传不了。先挑一部分再发。</string>
+    <!-- 空文件夹暂时传不了（发送侧不设置 isDir），跳过后如实告知。 -->
+    <string name="file_folder_empty_skipped">已跳过空文件夹——暂不支持传空文件夹。</string>
+    <string name="banner_too_many_files">一次最多传 %2$d 个文件，这个有 %1$d 个。先挑一部分再发。</string>
     <string name="banner_group_member_removed">已将该成员移出群聊，正在通知全群。</string>
     <string name="banner_group_no_permission">只有群主或管理员有权移出成员。</string>
     <string name="chat_group_members_changed">群成员有变化</string>

@@ -7,6 +7,13 @@ import androidx.compose.foundation.isSystemInDarkTheme
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.material3.MaterialTheme
 import app.relay.ui.theme.ThemeMode
+import app.relay.core.protocol.FileTransfer
+import app.relay.generated.resources.Res
+import app.relay.generated.resources.desktop_drop_pick_conversation
+import app.relay.generated.resources.desktop_notification_title
+import app.relay.generated.resources.file_folder_empty_skipped
+import app.relay.generated.resources.file_folder_too_many
+import org.jetbrains.compose.resources.stringResource
 import androidx.compose.material3.Surface
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.CompositionLocalProvider
@@ -32,7 +39,6 @@ import androidx.compose.ui.input.key.KeyEventType
 import androidx.compose.ui.input.key.key
 import androidx.compose.ui.input.key.type
 import app.relay.app.RelayController
-import app.relay.core.transport.LocalFile
 import app.relay.ui.theme.AppTheme
 import kotlinx.coroutines.CoroutineScope
 import java.io.File
@@ -351,6 +357,17 @@ internal fun DesktopHostWindow(
             onFocusRequestConsumed = controller::consumeFocusRequest,
         )
 
+        // 拖放相关的文案**必须在 Composable 里先解析好**：`onFiles` 是 AWT 回调，
+        // 不是 Composable，里面调不了 `stringResource`；而 `desktopApp` 里新写硬编码中文
+        // 会被 `cjkLiteralGate` 判红。
+        val dropAppTitle = stringResource(Res.string.desktop_notification_title)
+        val dropPickConversation = stringResource(Res.string.desktop_drop_pick_conversation)
+        val dropTooMany = stringResource(
+            Res.string.file_folder_too_many,
+            FileTransfer.MAX_FILES_PER_TRANSFER,
+        )
+        val dropEmptyDirs = stringResource(Res.string.file_folder_empty_skipped)
+
         // 拖放：把文件丢进窗口直接发给当前会话。
         DesktopDropTarget(
             enabled = true,
@@ -358,15 +375,19 @@ internal fun DesktopHostWindow(
             // 从这里传下去；否则用户选深色、系统外观却是浅色时，遮罩会变成一张白卡片。
             darkTheme = effectiveDark,
             onFiles = { files ->
-                val peerId = host.selectedPeerId
-                if (peerId == null) {
-                    DesktopNotifications.show("捎话", "先选一个会话，再把文件拖进来")
-                } else {
-                    controller.sendFiles(
-                        peerId,
-                        files.map { LocalFile(it.absolutePath, it.name, it.length()) },
-                    )
-                }
+                // 展开目录 → 传文件夹 / 传文件，与独立会话窗共用一份实现。
+                // 文案在这里解析：`handleDroppedFiles` 不是 Composable，拿不到 stringResource。
+                handleDroppedFiles(
+                    controller = controller,
+                    peerId = host.selectedPeerId,
+                    dropped = files,
+                    notify = { body -> DesktopNotifications.show(dropAppTitle, body) },
+                    texts = DropTexts(
+                        pickConversation = dropPickConversation,
+                        tooMany = dropTooMany,
+                        emptyDirsSkipped = dropEmptyDirs,
+                    ),
+                )
             },
         )
 

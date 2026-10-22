@@ -54,6 +54,7 @@ import app.relay.generated.resources.banner_group_created
 import app.relay.generated.resources.banner_group_left
 import app.relay.generated.resources.banner_group_members_added
 import app.relay.generated.resources.banner_group_member_removed
+import app.relay.generated.resources.banner_too_many_files
 import app.relay.generated.resources.banner_group_no_permission
 import app.relay.generated.resources.banner_group_name_required
 import app.relay.generated.resources.banner_group_name_too_long
@@ -292,6 +293,8 @@ fun bannerText(message: BannerMessage): String = when (message) {
     BannerMessage.DuplicatePeer -> stringResource(Res.string.disc_duplicate)
     is BannerMessage.Handshaking -> stringResource(Res.string.disc_added, message.target)
     BannerMessage.NodeNotStarted -> stringResource(Res.string.node_not_started)
+    is BannerMessage.TooManyFiles ->
+        stringResource(Res.string.banner_too_many_files, message.count, message.limit)
     is BannerMessage.MessageTooLong ->
         stringResource(Res.string.chat_send_too_long, message.bytes, message.limit)
     is BannerMessage.SendFailed -> stringResource(Res.string.chat_send_failed, message.detail)

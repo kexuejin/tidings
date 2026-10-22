@@ -3,6 +3,13 @@
 package app.relay.desktop
 
 import app.relay.ui.desktop.*
+import app.relay.core.protocol.FileTransfer
+import app.relay.generated.resources.Res
+import app.relay.generated.resources.desktop_drop_pick_conversation
+import app.relay.generated.resources.desktop_notification_title
+import app.relay.generated.resources.file_folder_empty_skipped
+import app.relay.generated.resources.file_folder_too_many
+import org.jetbrains.compose.resources.stringResource
 import androidx.compose.foundation.isSystemInDarkTheme
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.material3.MaterialTheme
@@ -21,7 +28,6 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.window.FrameWindowScope
 import androidx.compose.ui.window.Window
 import androidx.compose.ui.window.rememberWindowState
-import app.relay.core.transport.LocalFile
 import app.relay.ui.theme.ThemeMode
 import app.relay.ui.theme.AppTheme
 
@@ -126,6 +132,15 @@ private fun DesktopPeerWindow(
     ) {
         DesktopPeerWindowChrome()
 
+        // 文案在 Composable 里先解析：`onFiles` 是 AWT 回调，里面调不了 stringResource。
+        val dropAppTitle = stringResource(Res.string.desktop_notification_title)
+        val dropTooMany = stringResource(
+            Res.string.file_folder_too_many,
+            FileTransfer.MAX_FILES_PER_TRANSFER,
+        )
+        val dropEmptyDirs = stringResource(Res.string.file_folder_empty_skipped)
+        val dropPickConversation = stringResource(Res.string.desktop_drop_pick_conversation)
+
         // 拖进这扇窗口就发给**这扇窗口的**会话，而不是主窗当前选中的那个 ——
         // 用户把文件丢在哪扇窗口上，意图已经写在动作里了。
         DesktopDropTarget(
@@ -135,9 +150,17 @@ private fun DesktopPeerWindow(
             // 同主窗：覆盖层自己重铺主题，只能由调用点把真实偏好传下去。
             darkTheme = effectiveDark,
             onFiles = { files ->
-                controller.sendFiles(
-                    peerId,
-                    files.map { LocalFile(it.absolutePath, it.name, it.length()) },
+                // 与主窗共用一份展开/降级逻辑：拖放行为不该因为窗口不同而不同。
+                handleDroppedFiles(
+                    controller = controller,
+                    peerId = peerId,
+                    dropped = files,
+                    notify = { body -> DesktopNotifications.show(dropAppTitle, body) },
+                    texts = DropTexts(
+                        pickConversation = dropPickConversation,
+                        tooMany = dropTooMany,
+                        emptyDirsSkipped = dropEmptyDirs,
+                    ),
                 )
             },
         )

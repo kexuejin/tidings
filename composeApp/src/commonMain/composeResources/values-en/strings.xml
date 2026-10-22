@@ -162,6 +162,11 @@
     <string name="banner_group_unknown">Group metadata not yet synchronized. Please wait or ask a member to send a message.</string>
     <string name="banner_group_left">You have been removed from this group.</string>
     <string name="banner_group_members_added">Added %1$d members. Notifying group.</string>
+    <string name="desktop_drop_pick_conversation">Pick a conversation first, then drop files here</string>
+    <string name="desktop_notification_title">Tidings</string>
+    <string name="file_folder_too_many">This folder holds more than %1$d files, which is more than one transfer can carry. Pick a subset and send again.</string>
+    <string name="file_folder_empty_skipped">Empty folders were skipped — sending empty folders is not supported yet.</string>
+    <string name="banner_too_many_files">At most %2$d files per transfer; this is %1$d. Pick a subset and try again.</string>
     <string name="banner_group_member_removed">Member removed. Notifying group.</string>
     <string name="banner_group_no_permission">Only the group owner or admins can remove members.</string>
     <string name="chat_group_members_changed">Group members updated</string>

@@ -7,6 +7,7 @@ import app.relay.app.model.MessageUi
 import app.relay.app.model.TransferRecordUi
 import app.relay.app.model.TransferState
 import app.relay.core.nowMillis
+import app.relay.core.protocol.FileTransfer
 import app.relay.core.protocol.ConvId
 import app.relay.core.protocol.FilePurpose
 import app.relay.core.protocol.newId
@@ -67,8 +68,19 @@ fun handlePickAndSendFiles(peerId: String) {
 }
 
 
-fun handleSendFiles(peerId: String, files: List<LocalFile>) {
+fun handleSendFiles(
+    peerId: String,
+    files: List<LocalFile>,
+    isFolder: Boolean = false,
+    folderRootName: String? = null,
+) {
     if (files.isEmpty()) return
+    // **先判数量、给出具体数。** 传输层超限时只 `return null`，界面只会看到「这张传不出去」，
+    // 说不出原因 —— 拖进一个几千文件的目录时，用户最需要知道的正是「有多少、上限多少」。
+    if (files.size > FileTransfer.MAX_FILES_PER_TRANSFER) {
+        host.warn(BannerMessage.TooManyFiles(files.size, FileTransfer.MAX_FILES_PER_TRANSFER))
+        return
+    }
     val groupId = ConvId.groupIdOf(peerId)
     if (groupId != null) {
         val meta = host._state.value.settings.groups.firstOrNull { it.groupId == groupId }
@@ -82,17 +94,26 @@ fun handleSendFiles(peerId: String, files: List<LocalFile>) {
         }
     }
     val rt = host.runtime ?: run { host.warn(BannerMessage.NodeNotStarted); return }
-    host.scope.launch { handleOfferFiles(rt, peerId, files) }
+    host.scope.launch { handleOfferFiles(rt, peerId, files, isFolder, folderRootName) }
 }
 
 
-suspend fun handleOfferFiles(rt: NodeRuntime, peerId: String, files: List<LocalFile>) =
+suspend fun handleOfferFiles(
+    rt: NodeRuntime,
+    peerId: String,
+    files: List<LocalFile>,
+    isFolder: Boolean = false,
+    folderRootName: String? = null,
+) =
     handleOfferFilesWith(peerId, files) { member, msgId, groupId, groupRev ->
         runCatching {
             rt.offerFiles(
                 peerId = member,
                 files = files,
                 msgId = msgId,
+                // 文件夹传输：对端按 `name` 里的相对路径还原目录树，界面显示文件夹角标。
+                isFolder = isFolder,
+                folderRootName = folderRootName,
                 groupId = groupId,
                 groupRev = groupRev,
             )
