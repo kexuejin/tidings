@@ -46,6 +46,8 @@
 - **长连接下行通道（K1 / K2）**：手机主动拨主机并维持一条 TCP 长连接，承载下行推送与低延迟控制。局域网走明文（K1），公网走 TLS + 双向 pin（K2）；**公网必须 TLS，验不过就拒**，不存在降级成明文出网这条路。没有需要用户配置的开关：手机在哪张网上就用哪条路，换网（Wi-Fi ↔ 蜂窝 ↔ 飞行模式）自动切换，不需要手动重拨。
 - **后台保活与省电**：Android 前台服务（`remoteMessaging`）保证后台可达；Doze 期间降频；**有数据往来时免心跳**，并保留保底 Ping（2×心跳 < 45s 判死），既不误杀也不白耗电。
 - **离线排队与可靠投递**：对端离线期间消息严格保序入队，对端上线握手后自动发起可靠补发。
+  排队有**边界**（见下文「已知限制」）：只为「认识过的设备」长期保留，从未握过手的对象只留
+  24 小时，超过 3 天仍送不出去的条目会被淘汰。
 - **本地系统通知**：支持跨平台系统级通知（Android Notification / iOS UserNotifications / 桌面通知），支持静音时段与专注模式，无需公网推送服务器。
 
 ---
@@ -122,23 +124,26 @@ open Tidings.xcodeproj
 
 ## 质量门禁与验证 (Quality Gates)
 
-本项目实施严格的代码质量工程标准，包含 12 项自动化静态与动态检查。在发起 PR 前，需确保本地全量门禁流水线全部通过：
+本项目实施严格的代码质量工程标准。发起 PR 前需确保以下**全量**流水线通过 —— 这份清单与
+[AGENTS.md](AGENTS.md) §1 同一口径（那边是改代码时的权威说明）：
 
 ```bash
-./gradlew \
-  :core:allTests \
-  :composeApp:allTests \
-  :desktopApp:test \
-  :agentNode:test \
-  :desktopApp:compileKotlin \
-  :cjkLiteralGate \
-  :staleCommentRefGate \
-  :constructionTraceGate \
-  :designSpecDrift \
-  :designTokenUsageGate \
-  :designStateSlotGate \
-  && python3 tools/unused-imports.py --check
+# 测试（五个模块）
+./gradlew :core:jvmTest :composeApp:jvmTest :composeApp:testAndroidHostTest \
+          :agentNode:test :desktopApp:test --continue
+
+# 门禁（缺一不可）
+./gradlew :cjkLiteralGate :constructionTraceGate :staleCommentRefGate \
+          :designSpecDrift :designTokenUsageGate :designStateSlotGate \
+          :designLocaleParityGate :jlinkModulesGate --continue
+python3 tools/unused-imports.py --check
 ```
+
+> **加 `--continue`**：不加的话第一个红就停，你看到的「绿」可能只是没跑到。
+
+动了 UI / 设计 token / 截图夹具，还要跑 `designScreenDiffGate`、`designIconGate`、
+`designConvergeGate`、`designFormPairingGate`、`designPreviewPairingGate`、
+`designDupFrameGate`、`designDpDebtGate`（都在 `tools/design-contract-gate.gradle.kts` 里注册）。
 
 ### 关键门禁说明
 
@@ -177,7 +182,7 @@ open Tidings.xcodeproj
 
 ### 能力声明（caps）：声明了什么、没声明什么
 
-手机端广播的能力位由 `RelaySettings.caps()` **显式拼出**（`composeApp/.../RelaySettings.kt:300-340`），完整清单见 [`PROTOCOL-COVERAGE.md`](PROTOCOL-COVERAGE.md) 第四节。要点：
+手机端广播的能力位由 `RelaySettings.caps()` **显式拼出**（就在那个函数里，不散落在各处），完整清单见 [`PROTOCOL-COVERAGE.md`](PROTOCOL-COVERAGE.md) 第四节。要点：
 
 - **固定声明**：`agn1`（agent 会话帧）、`agq1`（队列与审批）、`aws1`（工作区身份）、`agr1`（授权回路）、`agp1`（会话分页）、`tbl1`（表格图片文字视图）、`att1`（agent 事件附件卡片）。`tw1` / `mrec1` 各有一个设置开关，关掉即移除。
 - **按条件声明**：`rv1` / `rvs1`（投屏，平台支持时）、`shr1`（配置了共享目录时）、`av1`（「自定义头像」打开时）。`ag1` 与 `lnk1` **只有承载 agent 的主机声明**（手机是拨号侧，不声明）。
@@ -226,6 +231,12 @@ open Tidings.xcodeproj
 - **跨网发大文件还没在真机上端到端跑过一次**：代码链路与单测都在，缺的是真机验收。
 - **DSH 排队期间的消息不会立刻出现**：排在宿主队列里的消息，要等下一轮开始才到手机上。
   不过手机现在**会**说「指令已排队，等这一轮结束就轮到它」，不再让人以为消息丢了。
+- **离线排队不是永久的**：队列只为「这台设备还可能回来」的对象长期保留。判据分两档 ——
+  认识过的设备（握过手、在已知名录里）一直留着；**只在群成员表里、从没握过手**的对象只留
+  24 小时。另外任何条目超过 3 天仍未送达都会被淘汰，每台设备最多保留 200 条。
+  这么定是因为真机上出现过相反的问题：一台早就不用了的设备还留在群成员表里，每轮群广播
+  都给它添一条，队列无限增长且永远送不出去。**代价是**：一台设备离线超过 3 天后回来，
+  那段时间发给它的消息不会再补发 —— 它对收件人来说已经过期了。
 
 ### 做不到（平台限制）
 

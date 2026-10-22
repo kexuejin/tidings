@@ -46,6 +46,7 @@
 - **Long-connection downlink (K1 / K2)**: the phone dials the host and keeps one TCP long connection for downlink push and low-latency control. LAN traffic uses plaintext (K1); public traffic uses TLS with a pinned peer key (K2) — **public routes must use TLS, and a failed pin check is refused**, never downgraded to plaintext. There is nothing for you to configure: whichever network the phone is on picks the route, and switching networks (Wi-Fi ↔ cellular ↔ airplane mode) happens automatically with no manual redial.
 - **Background keep-alive and battery**: an Android foreground service (`remoteMessaging`) keeps the app reachable in the background; Doze lowers the frequency; **heartbeats are skipped while data is flowing**, with a fallback ping (dead after 45s, more than 2× the heartbeat) so a live connection is neither killed by mistake nor drained by idle chatter.
 - **Strictly Ordered Offline Queue & Reliable Delivery**: Messages sent while a peer is offline are preserved in transactional local queues and automatically flushed upon handshake re-establishment.
+  Queueing is **bounded** (see Known Limitations below): entries are kept long-term only for devices this node has actually met; an object that never completed a handshake gets 24 hours, and anything still undeliverable after 3 days is dropped.
 
 ---
 
@@ -121,22 +122,23 @@ open Tidings.xcodeproj
 
 ## Quality Gates & Verification
 
-Tidings enforces strict engineering standards with automated verification gates. Before opening a Pull Request, verify that the complete gate pipeline passes locally:
+Tidings enforces strict engineering standards with automated verification gates. Before opening a Pull Request, verify that the **complete** pipeline passes locally — this list matches [AGENTS.md](AGENTS.md) §1, which is the authoritative note for anyone changing code here:
 
 ```bash
-./gradlew \
-  :core:jvmTest \
-  :composeApp:jvmTest \
-  :desktopApp:test \
-  :agentNode:test \
-  :cjkLiteralGate \
-  :staleCommentRefGate \
-  :constructionTraceGate \
-  :designTokenUsageGate \
-  :designIconGate \
-  :designLocaleParityGate \
-  && python3 tools/unused-imports.py --check
+# Tests (five modules)
+./gradlew :core:jvmTest :composeApp:jvmTest :composeApp:testAndroidHostTest \
+          :agentNode:test :desktopApp:test --continue
+
+# Gates (all required)
+./gradlew :cjkLiteralGate :constructionTraceGate :staleCommentRefGate \
+          :designSpecDrift :designTokenUsageGate :designStateSlotGate \
+          :designLocaleParityGate :jlinkModulesGate --continue
+python3 tools/unused-imports.py --check
 ```
+
+> **Always pass `--continue`**: without it the first failure stops the run, so what looks green may simply never have executed.
+
+If you touched UI, design tokens or screenshot fixtures, also run `designScreenDiffGate`, `designIconGate`, `designConvergeGate`, `designFormPairingGate`, `designPreviewPairingGate`, `designDupFrameGate`, `designDpDebtGate` (all registered in `tools/design-contract-gate.gradle.kts`).
 
 ### Gate Highlights
 
@@ -175,7 +177,7 @@ For the complete protocol specification, see [PROTOCOL-COVERAGE.md](PROTOCOL-COV
 
 ### Capability declarations (caps): what we announce and what we do not
 
-The capability bits the phone broadcasts are assembled **explicitly** by `RelaySettings.caps()` (`composeApp/.../RelaySettings.kt:300-340`); the full table lives in [PROTOCOL-COVERAGE.md](PROTOCOL-COVERAGE.md) section 4. The essentials:
+The capability bits the phone broadcasts are assembled **explicitly** by `RelaySettings.caps()` — all in that one function, not scattered; the full table lives in [PROTOCOL-COVERAGE.md](PROTOCOL-COVERAGE.md) section 4. The essentials:
 
 - **Always announced**: `agn1` (agent session frames), `agq1` (queue and approvals), `aws1` (workspace identity), `agr1` (grant loop), `agp1` (session paging), `tbl1` (table-image text view), `att1` (agent-event attachment cards). `tw1` / `mrec1` each have a settings switch and are dropped when it is off.
 - **Conditionally announced**: `rv1` / `rvs1` (screen sharing, where the platform supports it), `shr1` (a shared directory is configured), `av1` (custom avatar is enabled). `ag1` and `lnk1` are announced **only by a host that carries agents** (the phone is the dialing side and does not announce them).
@@ -224,6 +226,8 @@ deliberately-not items state the cost.**
 - **Attachments from an agent can be viewed but not saved**: the card renders the file name, dimensions and size, but it cannot be opened and cannot be written to local storage. The reason is that an attachment is identified by `attachmentId`, while the file-transfer layer identifies files by `fileId` / `transferId` — the two are not the same identifier and there is no mapping between them, so saving needs a new message that fetches bytes by attachment id. (This entry used to claim that the file channel and `fileId` were already in place and only a save button was missing; that was not true.)
 - **A large cross-network file transfer has never been run end to end on a real device**: the code path and its unit tests exist; real-device acceptance is what is missing.
 - **Messages do not appear while DSH is queued**: a message sitting in the host's queue reaches the phone when the next round begins. The phone now does say that the instruction is queued and will start when the current round ends, so it no longer looks like the message was lost.
+- **Offline queueing is not permanent**: the queue keeps entries long-term only for objects that may still come back. Two tiers — devices this node has met (handshake completed, present in the known-peers roster) are kept indefinitely; objects that exist **only in a group's member list and never completed a handshake** get 24 hours. Independently, any entry still undelivered after 3 days is dropped, and each device keeps at most 200 entries.
+  The reason is a real defect in the opposite direction: a device long retired stayed in a group's member list, so every group broadcast appended another entry for it — the queue grew without bound and nothing was ever deliverable. **The cost is**: if a device comes back after more than 3 days offline, messages sent during that window are not resent — to the recipient they are already stale.
 
 ### Not possible (platform constraints)
 
