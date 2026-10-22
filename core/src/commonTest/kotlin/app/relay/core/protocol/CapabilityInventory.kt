@@ -40,6 +40,7 @@ internal object CapabilityInventory {
         "CAP_AGENT_SESSION_PAGE" to MsgTypes.CAP_AGENT_SESSION_PAGE,
         "CAP_LINK" to MsgTypes.CAP_LINK,
         "CAP_ATTACHMENT" to MsgTypes.CAP_ATTACHMENT,
+        "CAP_GROUP_TEXT_ATTRIBUTED" to MsgTypes.CAP_GROUP_TEXT_ATTRIBUTED,
     )
 
     /** core 的两份 profile 清单合并（去重）：被它们声明的 cap 是"活的"。 */

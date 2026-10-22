@@ -69,6 +69,19 @@ object CodecProfile {
             strAllowEmptyOrNull(c, Limits.CAP_ITEM) ?: return false
         }
 
+        // 可选键：本机全部可路由地址（含 Tailscale / ZeroTier 段）。老端没有这个键 ⇒ 跳过。
+        //
+        // 与 `caps` 同款逐项校验：元素是 IP 字面量（IPv6 最长 45），数量封顶
+        // [Limits.CAPS]。**不校验它是否真的可达** —— 那会变成「拿外部网络当门禁」，
+        // 而本仓对那类判据的纪律是「没验到 ≠ 验坏了」，不为它编造结论。
+        if (o.containsKey("addresses")) {
+            val addrs = o["addresses"] as? JsonArray ?: return false
+            if (addrs.size > Limits.CAPS) return false
+            for (a in addrs) {
+                if (!isStr(a, Limits.IP)) return false
+            }
+        }
+
         return true
     }
 

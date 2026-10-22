@@ -22,6 +22,53 @@ class CodecTest {
      * 默认 `null` 若被序列化成 `"senderId":null`，所有老端的 golden 断言都会红，
      * 而且线上帧会白白胖 18 字节。
      */
+    /**
+     * 不传会话归属时，载荷形状**必须与改动前逐字一致**（老端视角不会看到新键）。
+     */
+    @Test
+    fun groupTextWithoutSessionKeepsTheOldShape() {
+        val legacy = Codec.groupTextPayload("hi", "grp-1", 1).toString()
+        assertFalse(legacy.contains("agentSessionId"), legacy)
+        assertFalse(legacy.contains("agentCursor"), legacy)
+    }
+
+    /**
+     * 带会话归属的群文本必须**过得了入站校验**（走解码这条路，不是只看 JSON 有没有键）。
+     *
+     * 守的是 AGENTS.md §2.2 那条死规矩：加可选键必须同时加进 GROUP_TEXT_KEYS。
+     * 漏加的话症状是：桌面发得出去、本地落库成功、SendOutcome.SENT —— 手机端一条都收不到。
+     */
+    @Test
+    fun groupTextWithSessionSurvivesInboundValidation() {
+        val payload = Codec.groupTextPayload(
+            text = "agent 说的话",
+            groupId = "grp-1",
+            groupRev = 1,
+            agentSessionId = "s-abc",
+            agentCursor = 7L,
+        ).toString()
+        val decoded = Codec.decodeTcp(env("msg", payload)) as? DecodeResult.Ok
+            ?: fail("带会话归属的群文本被入站校验拒了（白名单漏加？）：$payload")
+        val obj = decoded.env.payload as JsonObject
+        assertEquals("s-abc", (obj["agentSessionId"] as JsonPrimitive).content)
+        assertEquals(7L, (obj["agentCursor"] as JsonPrimitive).content.toLong())
+    }
+
+    /**
+     * **两者必须成对出现**：只有 sessionId 没有 cursor 的帧整帧拒收。
+     *
+     * 理由与 recall 的 groupId/groupRev 同一条：接收端要么猜、要么忽略；
+     * 两种都不如直接拒 —— 拒收可诊断，猜错不可诊断。
+     */
+    @Test
+    fun aSessionWithoutCursorIsRejected() {
+        val payload = "{\"kind\":\"group-text\",\"text\":\"hi\",\"groupId\":\"grp-1\",\"groupRev\":1,\"agentSessionId\":\"s-abc\"}"
+        assertTrue(
+            Codec.decodeTcp(env("msg", payload)) !is DecodeResult.Ok,
+            "只给 sessionId 不给 cursor 的帧必须被拒",
+        )
+    }
+
     @Test
     fun groupTextWithoutSenderIdKeepsTheOldShape() {
         val legacy = Codec.groupTextPayload("hi", "grp-1", 1).toString()

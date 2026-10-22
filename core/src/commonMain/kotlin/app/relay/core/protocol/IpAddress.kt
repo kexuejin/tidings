@@ -142,6 +142,29 @@ object IpAddressUtils {
     }
 
     /**
+     * 这个地址是不是**代理软件 TUN 的虚拟地址**（`198.18.0.0/15`）。
+     *
+     * ## 为什么必须单独识别
+     *
+     * 代理软件开 TUN 增强模式时会在本机建一个 `utun` 接口、配一个 `198.18.x.x`
+     * 的虚拟地址，并装上 `0.0.0.0/1` + `128.0.0.0/1` 两条路由 —— 那等于**接管了全部 IPv4**。
+     *
+     * 真机现场：把它当成一个可用地址宣告出去之后，对端会去拨它，而它**永远不通**
+     * （它只是代理自己的虚拟口，不对应任何可达的网络）。更糟的是它把 Tailscale /
+     * ZeroTier 的包也截走了 —— 双方都收到对方的地址、都拨不通。
+     *
+     * `198.18.0.0/15` 是 RFC 2544 保留给网络设备基准测试的段，家用/办公网络不会用它，
+     * 所以拿它当「这是代理的虚拟口」的判据是安全的。
+     */
+    fun isProxyTunAddress(host: String): Boolean {
+        val clean = unbracket(host).trim()
+        if (!isIpv4(clean)) return false
+        val parts = clean.split('.').mapNotNull { it.toIntOrNull() }
+        if (parts.size != 4) return false
+        return parts[0] == 198 && parts[1] in 18..19
+    }
+
+    /**
      * 这个对端地址**是不是局域网**（task-40 真机）。
      *
      * 为什么不能只看 [isPrivateOrLocal]：家庭 LAN 的 IPv6 常常是**全局单播 GUA**

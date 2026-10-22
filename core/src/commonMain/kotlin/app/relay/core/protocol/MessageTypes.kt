@@ -140,6 +140,9 @@ object MsgTypes {
             // task-45：手机能把 agent 事件的附件元数据渲染成卡片 ⇒ 如实声明。
             // 发送方（桥/宿主）据此决定 agent-event 里带不带 attachment；不声明就只发文本占位。
             CAP_ATTACHMENT,
+            // 手机端收发群文本都可能带 senderId / reasoning（agent 转发、思考态）⇒ 如实声明。
+            // 不声明的话「对端按能力门控」会连**我们自己的宿主**一起退化成不带归属的那一份。
+            CAP_GROUP_TEXT_ATTRIBUTED,
         )
 
     /**
@@ -289,14 +292,42 @@ object MsgTypes {
     const val CAP_ATTACHMENT = "att1"
 
     /**
+     * `gta1` = **带发送者归属的群文本**（group-text attributed）。
+     *
+     * 声明它的意思是「我看得懂 `group-text` 载荷里的 `senderId` / `reasoning` 两个扩展键」。
+     * 发送侧**只给声明了它的成员**附带这两个键；没声明的成员收到的是**同一封信封 id**、
+     * 但只含上游白名单内字段的另一份载荷。
+     *
+     * ## 为什么必须是独立能力位，而不是"复用 agn1 / 猜版本号"
+     *
+     * 上游茶话间（0.61.2）对 `group-text` 做的是**严格字段白名单**
+     * （`kind/text/groupId/groupRev/mentions/resend/replyTo`）：多一个键 ⇒ `validatePayload`
+     * 返回 false ⇒ **整帧丢弃**。而本仓的 `senderId` / `reasoning` 恰好在那份白名单之外，
+     * 所以「agent 转发进群的消息」在茶话间侧是**静默消失**的：发送侧 SENT、本地落库成功、
+     * 对端什么都没有。
+     *
+     * 用版本号判也不行：`ver` 是自由字符串（`relay-0.1.0` / `0.33.2` 都在线上出现过），
+     * 拿它做能力判定等于让每个发送方各写一遍版本表。而 caps 是**由对端自己声明**的：
+     * 不声明 = 不认识 = 不许发新键，这是唯一能把「谁认识什么」说清楚的机制。
+     *
+     * **老版 Tidings 节点即使有 `agn1` 也不能当作支持**：`agn1` 说的是 agent 会话帧，
+     * 与群文本的字段白名单无关；把它当代理标志会让老构建继续整帧拒收。
+     */
+    const val CAP_GROUP_TEXT_ATTRIBUTED = "gta1"
+
+    /**
      * agent 节点的 caps：`ag1`（身份）+ 一个人类节点也会有的文本能力 + `agn1`（会话帧）
      * + `aws1`（工作区键与宣告帧，D1/D2/D3 已实现）+ `agr1`（授权回路，D7 已实现）
-     * + `lnk1`（长连接下行，K1 已实现）。
+     * + `lnk1`（长连接下行，K1 已实现）+ `gta1`（带发送者归属的群文本）。
+     *
+     * `gta1` 两边都声明（这里与 [MOBILE_CAPS]）：宿主侧的转发路径同样会往群里写
+     * `senderId = agent:<kind>`，不声明的话手机对**自家宿主**也会退化成不带归属的那一份。
      */
     val AGENT_CAPS: List<String> =
         listOf(
             CAP_AGENT, CAP_MOBILE_TEXT, CAP_AGENT_SESSION, CAP_AGENT_QUEUE,
             CAP_AGENT_WORKSPACE, CAP_AGENT_GRANT, CAP_AGENT_SESSION_PAGE, CAP_LINK,
+            CAP_GROUP_TEXT_ATTRIBUTED,
         )
 
     /**

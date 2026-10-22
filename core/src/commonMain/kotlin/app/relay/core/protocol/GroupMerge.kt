@@ -111,7 +111,35 @@ object GroupMerge {
         if (!sameManagementIdentity(current, next)) return GroupMergeDecision.Reject("management-identity")
 
         // rev 严格递增。相等也拒 —— 同一 rev 的两份不同快照没法排序，先到的那份说了算。
-        if (next.rev <= current.rev) return GroupMergeDecision.Reject("stale-rev")
+        //
+        // **唯一的例外：本地那份缺 `virtualAgents`、而收到的有。**
+        //
+        // `virtualAgents` 是后加的字段（PPE-2），所以**在这个字段存在之前落库的元数据**
+        // 里它必然是空的；而对端那份是同一个 rev、内容却完整。真机现场：手机本地是
+        // `rev=7` 且 `virtualAgents` 为空，桌面端发的也是 `rev=7` 但带 1 条声明 ——
+        // 持续被这一行判成 `stale-rev` 丢弃，于是手机上群详情没有 agent、输入 `@`
+        // 找不到、气泡署名永远是 `dsh`，而且**无论怎么补发都不会好**。
+        //
+        // 为什么这个例外不会造成「两份快照来回翻转」：条件只在**本地为空**时成立，
+        // 一旦接受，本地就不再是空 —— 同一个例外对同一份数据只能生效一次。
+        // 而「谁后到谁赢」那种危险语义并没有被放开：本地非空时仍然按先到的算。
+        if (next.rev <= current.rev) {
+            val localLacksAgents = current.virtualAgents.isNullOrEmpty()
+            val incomingHasAgents = !next.virtualAgents.isNullOrEmpty()
+            if (next.rev == current.rev && localLacksAgents && incomingHasAgents) {
+                // **只补这一个字段，其余一律用本地那份。**
+                //
+                // 写成 `Apply(next)` 就是**权限绕过**：本分支直接 return，后面那些
+                // `actor-not-a-member` / `removal-not-authorised` / 角色矩阵校验**全被跳过**
+                // —— 任何人只要发一个「同 rev + 带 virtualAgents」的帧，就能重写整份群
+                // 元数据，包括成员表与踢人；而 `virtualAgents` 是任何人都能填的字段。
+                //
+                // 那是 fail-open，与本仓「验不过就拒」相反。补字段的正确形态是：
+                // 拿本地那份当底，只把缺的那一个键换成对方的值。
+                return GroupMergeDecision.Apply(current.copy(virtualAgents = next.virtualAgents))
+            }
+            return GroupMergeDecision.Reject("stale-rev")
+        }
 
         val actor = next.updatedBy
         if (actor !in current.members) return GroupMergeDecision.Reject("actor-not-a-member")
@@ -178,6 +206,23 @@ object GroupMerge {
  * 只活在内存里 —— 重启后重新问一次是**正确**的（那时我们确实不知道），代价是一次往返。
  */
 class GroupNeedTracker {
+    /**
+     * 「**问过**哪个 rev」，用来抑制往返风暴（[beginRequest] 与 [noteKnown] 都推进它）。
+     *
+     * ## 两件容易被混淆的事
+     *
+     * **① 本地握有完整元数据**（[noteKnown] 的六个调用点：建群 / 加人 / 移人 / 退群 /
+     * 改资料 / 收到 info 并合并）。手上有完整元数据时，同 rev 再来问一次只是白跑，
+     * 所以推进这里是**对的**。
+     *
+     * **② 仅从群消息里见过某个 rev**（`handleSyncGroupMetaIfNeeded`）。它**只调
+     * [beginRequest]，从不碰 [noteKnown]** —— 收到带 rev 7 的群消息不代表有 rev 7 的
+     * 成员表与 `virtualAgents`，所以那种情况下仍该去要。
+     *
+     * 曾经误以为「收到消息也会推进 noteKnown ⇒ 错过一次广播就永久缺失」，据此把这个
+     * map 拆成两份 —— 那会让建群之后每一条同 rev 的群消息都再问一次，正是本类要防的
+     * 往返风暴。查证调用点后已还原。
+     */
     private val requested = mutableMapOf<String, Int>()
 
     /** 该不该为 ([groupId], [wantRev]) 发一次 need。 */
@@ -206,7 +251,15 @@ class GroupNeedTracker {
         return true
     }
 
-    /** 本地已经有这个群的某个 rev 时，把游标推到它 —— 别人的消息不该让我们去问已知的事。 */
+    /**
+     * 记下「本地**握有**这个群的 rev 的完整元数据」—— 六条写元数据的路径都调它
+     * （建群 / 加人 / 移人 / 退群 / 改资料 / 收到 info 并合并）。
+     *
+     * 因此它推进 [requested] 是正确的：手上有完整元数据时，同 rev 再来问一次只是白跑一趟。
+     *
+     * **注意它与「从群消息里见过某个 rev」不是一回事**：后者走 [beginRequest]，
+     * 从不调用这里 —— 收到带 rev 7 的群消息不代表有 rev 7 的成员表。
+     */
     fun noteKnown(groupId: String, rev: Int) {
         val highest = requested[groupId]
         if (highest == null || rev > highest) requested[groupId] = rev

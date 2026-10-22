@@ -509,12 +509,22 @@ class GroupProtocolTest {
         assertTrue(tracker.shouldRequest(GROUP, 4), "真的更新了还是要问")
     }
 
+    /**
+     * **`noteKnown` 只由「本地确实握有完整元数据」的路径调用，所以它抑制再问是对的。**
+     *
+     * 六个调用点：建群 / 加人 / 移人 / 退群 / 改资料 / 收到 `info` 并合并。
+     * 手上有完整元数据时同 rev 再问一次只是白跑一趟 —— 这正是本类要防的往返风暴。
+     *
+     * **反例（不属于这条）**：仅从群消息里见到某个 `groupRev` 的路径
+     * （`handleSyncGroupMetaIfNeeded`）只调 `beginRequest`，**从不碰 `noteKnown`** ——
+     * 收到带 rev 7 的消息不代表有 rev 7 的成员表。
+     */
     @Test
     fun knowingALocalRevisionStopsUsAskingAboutIt() {
         val tracker = GroupNeedTracker()
         tracker.noteKnown(GROUP, 5)
-        assertFalse(tracker.shouldRequest(GROUP, 5))
-        assertTrue(tracker.shouldRequest(GROUP, 6))
+        assertFalse(tracker.shouldRequest(GROUP, 5), "手上已有 rev 5 的完整元数据，不必再问")
+        assertTrue(tracker.shouldRequest(GROUP, 6), "真的更新了还是要问")
     }
 
     @Test
@@ -627,5 +637,119 @@ class GroupProtocolTest {
         val payload = infoPayload { putJsonObject("memberNicks") { } }
         assertTrue(Codec.validateGroup(payload))
         assertNull(Codec.decodeGroupInfo(payload)?.memberNicks)
+    }
+
+    // ---------------------------------------------------------------- 同 rev 的字段补全
+
+    private fun metaWithAgents(rev: Int, agents: List<VirtualAgentMember>?) = GroupMeta(
+        groupId = GROUP,
+        name = "项目组",
+        members = listOf(OWNER, ADMIN, BOB, SELF),
+        rev = rev,
+        updatedBy = OWNER,
+        updatedTs = TS,
+        ownerId = OWNER,
+        adminIds = listOf(ADMIN),
+        creatorId = OWNER,
+        virtualAgents = agents,
+    )
+
+    private fun oneAgent() = VirtualAgentMember(
+        agentId = "DSH",
+        hostNodeId = OWNER,
+        name = "dsh-teahouse-mobile",
+        wsId = "ws-1",
+    )
+
+    /**
+     * **本地那份缺 `virtualAgents`、而收到的同一个 rev 里有 ⇒ 必须接受。**
+     *
+     * 真机现场（Pixel）：它本地是 `rev=7` 且 `virtualAgents` 为空（那个字段还不存在时
+     * 落库的），桌面端发的也是 `rev=7` 但带 1 条声明。原先 `next.rev <= current.rev`
+     * 一律判 `stale-rev` 丢弃 ⇒ 手机上群详情没有 agent、输入 `@` 找不到、气泡署名永远
+     * 是 `dsh`，而且**无论怎么补发都不会好**。
+     */
+    @Test
+    fun aSameRevisionFillsMissingVirtualAgents() {
+        val local = metaWithAgents(rev = 7, agents = null)
+        val incoming = metaWithAgents(rev = 7, agents = listOf(oneAgent()))
+        val decision = GroupMerge.decide(local, incoming, SELF)
+        assertTrue(
+            decision is GroupMergeDecision.Apply,
+            "本地缺 virtualAgents、同 rev 的对方有 ⇒ 该接受；实得 " + decision,
+        )
+    }
+
+    /**
+     * **但「本地已有」时同 rev 仍然拒** —— 不能放开成「谁后到谁赢」。
+     *
+     * 同一 rev 的两份不同快照没法排序；如果放成后到者胜，两台设备会各持一份、
+     * 来回覆盖成永不收敛的抖动。
+     */
+    @Test
+    fun aSameRevisionDoesNotOverwriteExistingVirtualAgents() {
+        val local = metaWithAgents(rev = 7, agents = listOf(oneAgent()))
+        val other = VirtualAgentMember(agentId = "CODEX", hostNodeId = BOB, name = "codex-b", wsId = "ws-2")
+        val incoming = metaWithAgents(rev = 7, agents = listOf(other))
+        val decision = GroupMerge.decide(local, incoming, SELF)
+        assertTrue(
+            decision is GroupMergeDecision.Reject,
+            "本地已有 agent 声明时，同 rev 不能覆盖（先到的那份说了算）；实得 " + decision,
+        )
+    }
+
+    /** 更旧的 rev 仍然一律拒（那个例外只针对「同 rev + 本地缺字段」）。 */
+    @Test
+    fun anOlderRevisionStaysRejected() {
+        val local = metaWithAgents(rev = 7, agents = null)
+        val incoming = metaWithAgents(rev = 6, agents = listOf(oneAgent()))
+        assertTrue(
+            GroupMerge.decide(local, incoming, SELF) is GroupMergeDecision.Reject,
+            "更旧的 rev 不能因为「带着 agent 声明」就被接受",
+        )
+    }
+
+    /**
+     * **同 rev 补 `virtualAgents` 时，其余一切必须用本地那份。**
+     *
+     * 这条钉的是一条**权限绕过**：那个例外写成 `Apply(next)` 时会直接 return，
+     * 后面 `actor-not-a-member` / `removal-not-authorised` / 角色矩阵校验**全被跳过**。
+     * 任何人发一个「同 rev + 带 virtualAgents」的帧，就能重写整份群元数据 ——
+     * 包括改成员表、把人踢出去 —— 而 `virtualAgents` 是谁都能填的字段。
+     *
+     * 正确形态：拿本地当底，只换缺的那一个键。这条测试断言成员表与管理员名单
+     * **一个字节都没变**，即使对方那份里写着不一样的成员。
+     */
+    @Test
+    fun aSameRevisionAgentTopUpCannotRewriteMembersOrRoles() {
+        val local = metaWithAgents(rev = 7, agents = null)
+        // 对方那份：同 rev、带 agent 声明，但成员表被改过（少了 BOB、updatedBy 也不是管理员）
+        val tampered = GroupMeta(
+            groupId = GROUP,
+            name = "项目组",
+            members = listOf(OWNER, SELF),
+            rev = 7,
+            updatedBy = BOB,
+            updatedTs = TS,
+            ownerId = OWNER,
+            adminIds = emptyList(),
+            creatorId = OWNER,
+            virtualAgents = listOf(oneAgent()),
+        )
+        val decision = GroupMerge.decide(local, tampered, SELF)
+        assertTrue(decision is GroupMergeDecision.Apply, "本地缺 agent 声明时该接受补全；实得 " + decision)
+        val applied = decision as GroupMergeDecision.Apply
+        assertEquals(
+            local.members,
+            applied.meta.members,
+            "补字段不能顺带改成员表 —— 那等于任何人发一帧就能踢人",
+        )
+        assertEquals(local.adminIds, applied.meta.adminIds, "管理员名单不能被这一路改掉")
+        assertEquals(local.updatedBy, applied.meta.updatedBy, "updatedBy 用本地那份")
+        assertEquals(
+            listOf(oneAgent()),
+            applied.meta.virtualAgents,
+            "唯一该变的就是这个字段",
+        )
     }
 }

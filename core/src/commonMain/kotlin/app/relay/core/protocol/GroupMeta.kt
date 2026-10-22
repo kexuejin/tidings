@@ -171,11 +171,147 @@ object GroupOps {
     const val NEED = "need"
 }
 
-/** 虚拟 Agent 群成员元数据（PPE-2 / Goal 5）。 */
+/**
+ * 群里一个可被 @ 的智能体（PPE-2 / Goal 5）。
+ *
+ * ## 身份是三元组
+ *
+ * `(hostNodeId, agentId, wsId)` —— 见 [app.relay.core.protocol.AgentMemberName] 的 KDoc：
+ * 一台设备可以装多个 agent，不同 agent 也可能操作同一个 workspace，所以单项都不足以定位。
+ *
+ * ## `name` 是**暴露名**，不是显示名
+ *
+ * 它是 `@` 后面要打的那个 token（`codex-teahouse`），由 [AgentMemberName.base] 生成、
+ * 由 [AgentMemberName.unique] 保证群内不冲突。**默认生成、不可手改**（加成员时不许冲突）。
+ *
+ * 与显示名的分工：气泡上显示什么由 `SenderIdentity.displayName` 决定（可以更漂亮、可以跟随
+ * wsTitle），而 `@` 要打什么必须是稳定且 ASCII 的 —— 两者不必是同一个字符串。
+ *
+ * ## `wsId` 为 null 表示"没有绑定工作区"
+ *
+ * 这种 agent 仍然可以被 @（做问答、跑命令），只是没有"在哪个目录里干活"这回事。
+ * 合法的一等状态，不是缺失。
+ */
+/**
+ * 从群元数据里找出发送方 @ 到的那个 agent（用于「把手机的一句话交给它」）。
+ *
+ * ## 为什么这个判据要在 core 里
+ *
+ * 群元数据（`GroupMeta.virtualAgents`）是**协议事实**，四端共享；而「注入时投给哪个会话」
+ * 必须先知道「@ 的是哪个 agent」。把这条放在 core，宿主侧（agentNode）与界面侧
+ * （composeApp）用的是**同一份**判定 —— 各写一遍必然漂。
+ *
+ * ## 两种形态，按用户的话定
+ *
+ * 「添加 agent 进群的时候，要么这个 agent 就绑定了某个 workspace，要么就是没绑定。」
+ *
+ * - **绑了 workspace**（`wsId != null`）：那这个 agent 在群里的活儿都属于那个工作区。
+ *   注入时按 `wsId` 找该工作区的会话。
+ * - **没绑**（`wsId == null`）：它不属于任何工作区，注入只能投给**它自己的会话**
+ *   （不带 wsId 的会话）。
+ *
+ * 两者都不猜「最近一个」：猜错的后果是 agent 在无关目录里执行命令。
+ *
+ * @param text 群消息正文（用来匹配 `@name`）。
+ * @param agentNames 候选 token：群元数据里的 `VirtualAgentMember.name`。
+ */
+fun GroupMeta.mentionedVirtualAgent(text: String, tokens: List<String>): VirtualAgentMember? {
+    val agents = virtualAgents.orEmpty()
+    if (agents.isEmpty()) return null
+    // 从长到短匹配：`@dsh-teahouse` 不该被 `@dsh` 抢先命中。
+    val hit = tokens.sortedByDescending { it.length }.firstOrNull { token ->
+        token.isNotBlank() && mentionsToken(text, token)
+    } ?: return null
+    return agents.firstOrNull { it.name.equals(hit, ignoreCase = true) }
+}
+
+/**
+ * 正文里有没有出现 `@token`。
+ *
+ * 判据与 Tidings 侧 `isMentioningAgent` 同一条：`@` 之后按 **case-insensitive** 比，
+ * 且要求 token 后面不是标识符字符（避免 `@dsh` 命中 `@dsh2`）。
+ *
+ * 为什么不在 core 里 import 界面层的实现：那一层在 composeApp，core 不能反向依赖。
+ * 所以这里给一份**最小等价实现**，并用测试钉住它与界面层的行为一致（见
+ * `GroupMentionTokenTest`）。这是本仓少见的「两份实现」，代价换 core 不依赖上层。
+ */
+/**
+ * 这个字符算不算「标识符的延续」（用来区分 `@dsh` 与 `@dsh2`）。
+ *
+ * **只认 ASCII 字母、数字、下划线**。中文/日文/韩文等表意文字不算 ——
+ * 中文用户写 `@dsh你好` 时，`@dsh` 是一个完整的 mention，不是 `dsh你` 这个 token。
+ */
+internal fun isAsciiIdentChar(c: Char): Boolean =
+    c == '_' || (c in 'a'..'z') || (c in 'A'..'Z') || (c in '0'..'9')
+
+internal fun mentionsToken(text: String, token: String): Boolean {
+    if (token.isBlank()) return false
+    val needle = "@" + token
+    var from = 0
+    while (true) {
+        val at = text.indexOf(needle, from, ignoreCase = true)
+        if (at < 0) return false
+        val after = text.getOrNull(at + needle.length)
+        // 后面是空/空白/标点 ⇒ 命中；是**标识符字符** ⇒ 那是另一个 token（如 `@dsh2`）。
+        //
+        // **「标识符字符」只算 ASCII**：中文是表意文字，不是 token 的延续。
+        // 真机上踩过：中文群里用户必然写 `@dsh你好` 而不是 `@dsh 你好` ——
+        // 而 `isLetterOrDigit` 对汉字返回 true，于是整条 @ 被判成「另一个 token」，
+        // agentHint 恒为 null，用户看到的是「@ 了但没反应」。
+        if (after == null || isAsciiIdentChar(after).not()) return true
+        from = at + 1
+    }
+}
+
 @Serializable
 data class VirtualAgentMember(
     val agentId: String,
     val hostNodeId: String,
+    /** `@` 后面要打的 token；群内唯一。见上面的 KDoc。 */
     val name: String,
     val role: String? = null,
+    /**
+     * 绑定的工作区 id；null = 不绑。
+     *
+     * **加可选键 ⇒ 旧节点整帧拒收**（`hasOnlyKeys` 判 extra-field）。本仓的取舍是
+     * 两端必须同版本，不能悄悄加 —— 见 AGENTS.md §2.2。
+     */
+    val wsId: String? = null,
 )
+
+/**
+ * 广播 `group.info` 前补齐**本机能提供的**那部分：成员昵称 + 本机声明。
+ *
+ * ## 为什么是纯函数
+ *
+ * 它原本长在 `RelayController.groupMetaWithNicks` 里、直接读全局状态，于是
+ * 「null 时该保留还是该覆盖」这个判据**没法单独测**，只能靠在真机上撞见。
+ * 撞见了两次：一次是昵称为空、一次是 [localAgents] 为 null。
+ * 抽成纯函数后，两条都能用一个 `assertEquals` 钉住。
+ *
+ * ## 两条不可动摇的判据
+ *
+ * ① **[localAgents] 为 null 表示「本机没有要声明的」，必须保持原样。**
+ *
+ * 这不是可选的宽松处理：`virtualAgents` 里装的是**别人**声明进来的 agent。
+ * 本机没有 agent 时把它覆盖成 null ⇒ 那台设备广播出去的元数据里 agent 就没了 ⇒
+ * 所有收到它的成员都以为这个群没有 agent（真机现场：手机端群里 0 个 agent、
+ * `@` 候选空、气泡署名退回 `dsh`）。而发送者自己本地还好好留着那一条 ——
+ * 于是**两端对同一份元数据有两种说法**，正是本仓要消掉的分叉。
+ *
+ * ② **昵称为空时不覆盖已有的 `memberNicks`。**
+ *
+ * 同一个形状：拿不到不等于该抹掉。
+ *
+ * @param nicks 本机能提供昵称的那些成员；空表示「一个都不知道」
+ * @param localAgents 本机声明；null 表示本机没有 agent（不是「清空」）
+ */
+fun GroupMeta.withLocalExtras(
+    nicks: Map<String, String>,
+    localAgents: List<VirtualAgentMember>?,
+): GroupMeta {
+    val nicksPart = if (nicks.isEmpty()) memberNicks else nicks
+    val agentsPart = localAgents ?: virtualAgents
+    if (nicksPart == memberNicks && agentsPart == virtualAgents) return this
+    return copy(memberNicks = nicksPart, virtualAgents = agentsPart)
+}

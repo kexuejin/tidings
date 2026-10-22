@@ -148,6 +148,30 @@ object CodecGroup {
                 }
                 ?.takeIf { it.isNotEmpty() }
                 ?.toMap(),
+            // **`virtualAgents` 必须在这里解出来。**
+            //
+            // 本函数是**手写逐字段解析**，而编码走 `@Serializable`（`Codec.groupInfoPayload`）——
+            // 加字段时只加进了 data class、忘了这里，于是：
+            //
+            //   发送端编码出 `virtualAgents: [...]`（完整）
+            //   接收端解码成 `virtualAgents = null`（被漏掉）
+            //
+            // 后果是整条链路的判据全部失效：`GroupMerge` 里「本地缺、对方有」那个例外永远
+            // 看到 `incomingHasAgents = false`，同 rev 的补全被当成 `stale-rev` 丢弃 ——
+            // 手机上群里永远 0 个 agent、输入 `@` 找不到、气泡署名停在 `dsh`。
+            //
+            // 真机排查了很久：帧确实到了、数据确实完整（`messages.log` 里那个数组清清楚楚），
+            // 但落库的结果一直是空。**编码与解码各写一遍，就是会漏在这一边。**
+            virtualAgents = (meta["virtualAgents"] as? JsonArray)?.mapNotNull { item ->
+                val a = item as? JsonObject ?: return@mapNotNull null
+                VirtualAgentMember(
+                    agentId = strOrNull(a["agentId"], Limits.ID) ?: return@mapNotNull null,
+                    hostNodeId = strOrNull(a["hostNodeId"], Limits.FROM) ?: return@mapNotNull null,
+                    name = strOrNull(a["name"], Limits.NICK) ?: return@mapNotNull null,
+                    role = strOrNull(a["role"], Limits.ID),
+                    wsId = strOrNull(a["wsId"], Limits.ID),
+                )
+            }?.takeIf { it.isNotEmpty() },
         )
     }
 

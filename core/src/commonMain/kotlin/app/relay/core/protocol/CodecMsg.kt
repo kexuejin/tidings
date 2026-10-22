@@ -35,6 +35,9 @@ object CodecMsg {
     private val GROUP_TEXT_KEYS = setOf(
         "kind", "text", "groupId", "groupRev", "mentions", "resend", "replyTo",
         "senderId", "reasoning",
+        // 会话归属（agent 事件的群转发用）：让接收端能画出「任务分段线」，
+        // 而不是靠猜消息 id 前缀。**没加进这里的可选键 = 对端整帧拒收**。
+        "agentSessionId", "agentCursor",
     )
 
     /**
@@ -110,6 +113,18 @@ object CodecMsg {
             if (utf8ByteLength(reasoning.content) > Limits.GROUP_REASONING_BYTES) return false
         }
 
+        // 会话归属（可选）：让接收端画出「任务分段线」。
+        // 两者**必须成对**（与 recall 的 groupId/groupRev 同一条纪律）：
+        // 只给 sessionId 而没有 cursor 的帧，接收端要么猜要么忽略，两种都不如直接拒。
+        val hasSession = o.containsKey("agentSessionId")
+        val hasCursor = o.containsKey("agentCursor")
+        if (hasSession != hasCursor) return false
+        if (hasSession) {
+            if (!isStr(o["agentSessionId"], Limits.ID)) return false
+            val cursor = intOf(o["agentCursor"]) ?: return false
+            if (cursor < 0) return false
+        }
+
         // 严格字段白名单：多一个字段整帧丢弃（neg-group-text-extra-field 就是这条）。
         return hasOnlyKeys(o, GROUP_TEXT_KEYS)
     }
@@ -147,6 +162,13 @@ object CodecMsg {
          * 这里不截，超限的帧接收侧会整帧拒收。
          */
         reasoning: String? = null,
+        /**
+         * 这条消息属于哪个 agent 会话（可选）。带上它，接收端才能画出「任务分段线」。
+         * 旧接收端不认识 ⇒ 整帧丢弃，两端需同版本。
+         */
+        agentSessionId: String? = null,
+        /** 会话内游标（可选，与 [agentSessionId] 配对）。 */
+        agentCursor: Long? = null,
     ): JsonElement = wireJson.encodeToJsonElement(
         GroupTextMsgPayload.serializer(),
         GroupTextMsgPayload(
@@ -159,6 +181,8 @@ object CodecMsg {
             replyTo = replyTo,
             senderId = senderId,
             reasoning = reasoning,
+            agentSessionId = agentSessionId,
+            agentCursor = agentCursor,
         ),
     )
 

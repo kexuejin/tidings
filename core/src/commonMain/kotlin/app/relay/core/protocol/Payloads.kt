@@ -96,6 +96,30 @@ data class GroupTextMsgPayload(
      * 旧接收端不认识这个键 ⇒ 整帧丢弃；两端需同版本（与 `senderId` 同一取舍）。
      */
     val reasoning: String? = null,
+    /**
+     * 这条群消息属于**哪个 agent 会话**（可选）。与 [agentCursor] 一起构成会话分段标识。
+     *
+     * ## 为什么需要它（用户可见缺陷）
+     *
+     * 手机端聊天流里那条「任务：xxx / 新会话」分段线**从来不出现**，而桌面端有。
+     * 根因是分段判据绑在消息 id 前缀 `agent-ev-` 上 —— 那是**桌面端本地构造**消息时
+     * 写进 id 的，转发到群里时并没有把这个事实带过去；手机端落库用的是信封 UUID，
+     * 于是 `extractSessionId` 恒 null，一条线都画不出来。
+     *
+     * 会话归属是**事实**，应该由协议携带，而不是靠 id 字符串猜。
+     *
+     * **安全边界**：纯展示分段，不参与鉴权、不参与成员判定。
+     * 旧接收端不认识这个键 ⇒ 整帧丢弃；两端需同版本（与 [senderId] 同一取舍）。
+     */
+    val agentSessionId: String? = null,
+    /**
+     * 该会话内的事件游标（可选，与 [agentSessionId] 配对）。
+     *
+     * 用来区分「同一会话的两条消息」与「换了一条会话」—— 只有 sessionId 时，
+     * 同一会话连续多条会被正确地视为一段（那已经够了）；带上 cursor 是为了将来
+     * 按游标排序/去重时不必再加字段。
+     */
+    val agentCursor: Long? = null,
 )
 
 /**
@@ -243,9 +267,16 @@ data class AgentEventPayload(
      * 附件元数据（task-45，cap `att1`）—— **追加在最后**，旧字段的线上键序一字不变。
      *
      * 为什么需要它：在此之前图片只能以**文本占位**（"🖼 图片: image.png (920×412, 30 KB)"）
-     * 出现在手机上。占位比丢帧好，但用户要的是看到附件本身。这里只带**元数据**
-     * （id/类型/尺寸/大小/文件名），字节仍走既有的文件传输路径（file-msg / file-ctl）——
-     * 与 DSH 侧 `user/message` 的 content 块同口径。
+     * 出现在手机上。占位比丢帧好，但用户至少要知道「它是什么」。这里只带**元数据**
+     * （id/类型/尺寸/大小/文件名），与 DSH 侧 `user/message` 的 content 块同口径。
+     *
+     * **字节通道没有接通 —— 这条以前写成「字节仍走既有的文件传输路径（file-msg / file-ctl）」，
+     * 那是一句没有兑现的意图，读起来像已经接好了。事实是：
+     * - `file-msg` / `file-ctl` 要的是 `transferId` / `fileId`（见 `FileCardUi.transferId`），
+     * - 而这里只有 `attachmentId`，两者不是同一个标识，也没有映射关系。
+     * 所以界面只能画一张信息卡（文件名 + 尺寸 + 大小），**点不开**。
+     * 要做「保存 / 预览」需先定义一条取件消息（按 `attachmentId` 请求字节），
+     * 那是产品级新增，不是补一行 UI（见 `agent-board.md` 的 F-AGENT 系列与此处同源）。
      *
      * 缺这个键 ⇒ 退回文本占位（旧端兼容）；带了这个键但形状不对 ⇒ 整帧拒（见
      * [app.relay.core.protocol.CodecAgent.validateAgentEvent]）。
