@@ -1,7 +1,8 @@
 # overlayd 契约（嵌入式 overlay 的插件控制协议）
 
 > 状态：**契约草案 v1，待评审**。这是**跨产品契约**：任何产品接这个插件只依赖本文件，不依赖实现语言。
-> 形态与取舍见 [overlay-transport-design.md](overlay-transport-design.md) §3.5；产品侧怎么用见 [overlay-product-plan.md](overlay-product-plan.md) §8。
+> 形态与取舍见 [overlay-transport-design.md](overlay-transport-design.md) §3.5；产品侧怎么用见 [overlay-product-plan.md](overlay-product-plan.md) §8；
+> 三端的安装/发现/鉴权/升级见 [overlay-plugin-system.md](overlay-plugin-system.md)。
 
 ## 0. 一页纸
 
@@ -98,6 +99,43 @@
 {"id":6,"cmd":"ping"}
 {"id":6,"ok":true,"t":1761100000}
 ```
+
+### 4.7 settings（配置：读 schema + 读写值）
+
+配置的**所有权在插件**，宿主只负责**渲染与提交**。所以插件要先告诉宿主「有哪些项、什么类型」，
+宿主再按类型映射到原生控件 —— **不允许宿主自己硬编码表单**（否则两端会漂移）。
+
+```json
+{"id":7,"cmd":"settings.get"}
+{"id":7,"ok":true,
+ "schema":[
+  {"key":"controlUrl","type":"url","title":"控制面地址","help":"留空使用默认","default":""},
+  {"key":"hostname","type":"string","title":"本机在网络里的名字","maxLen":63,"default":""},
+  {"key":"allowThirdParty","type":"bool","title":"允许其他应用使用","default":false,"editable":false},
+  {"key":"proxyLimit","type":"int","title":"同时代理连接上限","min":1,"max":64,"default":16},
+  {"key":"logLevel","type":"enum","title":"日志级别","options":["off","error","info","debug"],"default":"info"}
+ ],
+ "values":{"controlUrl":"","hostname":"mac-mini","allowThirdParty":false,"proxyLimit":16,"logLevel":"info"}}
+```
+
+```json
+{"id":8,"cmd":"settings.set","values":{"proxyLimit":32}}
+{"id":8,"ok":true,"applied":"immediate"}
+```
+
+| 字段 | 含义 |
+|---|---|
+| `type` | `string` / `bool` / `int` / `enum` / `url` / `secret` —— **宿主只认这六种** |
+| `editable` | 缺省 true；**false 表示宿主只能展示、不能修改**（授权类配置属于插件界面） |
+| `secret` | 类型为 `secret` 时，`get` **不回传值**，只回 `{set:true/false}` |
+| `help` | 一句人话解释，宿主直接显示，不自行编文案 |
+| `applied` | `immediate` 或 `restart` —— 宿主据此提示「重启后生效」 |
+
+**三条纪律**：
+
+1. **单一来源**：schema 由插件给，宿主不写死字段 —— 否则宿主与插件界面会出现两份配置；
+2. **secret 只写不读**：宿主能设置，但永远拿不到原值（回传即泄漏）；
+3. **授权类不可由宿主改**：`allowThirdParty` 这类必须是 `editable:false`，只能在插件界面改（安全边界）。
 
 ## 5. 状态模型
 
