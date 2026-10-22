@@ -147,6 +147,38 @@ LIMIT :limit;
 selectDistinctConvIds:
 SELECT DISTINCT conv_id FROM MessageEntity;
 
+-- ---- 会话摘要（ConversationSummary）----
+--
+-- 存在的理由见 15.sqm 的注释：让会话列表不必依赖「内存里有全部消息」。
+-- 会话数只有几十，全量读它比读消息便宜三个数量级。
+CREATE TABLE IF NOT EXISTS ConversationSummary (
+    conv_id TEXT NOT NULL PRIMARY KEY,
+    last_message_id TEXT,
+    last_text_preview TEXT,
+    last_message_at INTEGER NOT NULL,
+    last_message_is_mine INTEGER NOT NULL
+);
+
+selectAllConversationSummaries:
+SELECT * FROM ConversationSummary;
+
+selectLatestMessageOfConv:
+SELECT id, text, timestamp, mine FROM MessageEntity
+WHERE conv_id = :convId
+ORDER BY seq DESC
+LIMIT 1;
+
+upsertConversationSummary:
+INSERT OR REPLACE INTO ConversationSummary (
+    conv_id, last_message_id, last_text_preview, last_message_at, last_message_is_mine
+) VALUES (?, ?, ?, ?, ?);
+
+deleteConversationSummary:
+DELETE FROM ConversationSummary WHERE conv_id = :convId;
+
+selectConvIdOfMessage:
+SELECT conv_id FROM MessageEntity WHERE id = :id;
+
 -- 向上翻（更早）。游标是**当前窗口最小的 seq**，不含端点。
 selectMessagesBefore:
 SELECT * FROM MessageEntity

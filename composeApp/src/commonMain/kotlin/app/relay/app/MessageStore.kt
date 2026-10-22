@@ -18,6 +18,21 @@ import app.relay.app.model.SCREEN_RECORD_VERSION
 // ------------------------------------------------------------------ 消息落盘
 
 /**
+ * 一个会话摘要：会话列表需要的那几样东西，全部与「消息本体在不在内存里」无关。
+ *
+ * 存在的理由见 ConversationSummary 表（`15.sqm`）的注释：把「会话列表」与
+ * 「消息窗口」解耦，列表才不必为了拿一行预览而把每条会话的尾巴都读进内存。
+ */
+data class ConversationSummaryRow(
+    val convId: String,
+    val lastMessageId: String?,
+    /** 列表预览。null = 最后一条正文为空且没有文件名（与 ConversationUi.preview 同义）。 */
+    val lastTextPreview: String?,
+    val lastMessageAt: Long,
+    val lastMessageIsMine: Boolean,
+)
+
+/**
  * 聊天记录的落盘契约。
  *
  * 为什么需要它：控制器里的消息流是纯内存 `mutableMapOf`，所以聊天页顶部那条
@@ -72,6 +87,12 @@ interface MessageStore {
      */
     fun loadOlder(convId: String, beforeSeq: Long, limit: Int): List<MessageUi> = emptyList()
 
+
+    /**
+     * 读回全部会话摘要。默认空实现 —— 整份覆盖型存储（内存/iOS JSON）没有这张表，
+     * 它们的 conversations 直接从 messages 现算即可。
+     */
+    fun loadSummaries(): List<ConversationSummaryRow> = emptyList()
 
     /**
      * 清空全部历史。

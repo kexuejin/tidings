@@ -76,6 +76,42 @@ class SqlDelightMessageStore(
             .map { it.toUi() }
             .sortedBy { it.at }
 
+    override fun loadSummaries(): List<ConversationSummaryRow> =
+        queries.selectAllConversationSummaries().executeAsList().map { row ->
+            ConversationSummaryRow(
+                convId = row.conv_id,
+                lastMessageId = row.last_message_id,
+                lastTextPreview = row.last_text_preview,
+                lastMessageAt = row.last_message_at,
+                lastMessageIsMine = row.last_message_is_mine == 1L,
+            )
+        }
+
+    /**
+     * 按库里的真实状态重算一个会话的摘要。
+     *
+     * 为什么是「重算」而不是「增量维护 last_message_id」：增量维护要在每条写入路径上
+     * 都记得更新（包括删除、清会话、剪枝），漏一处就是「预览停在旧消息」——
+     * 而那类缺陷只在真机上、只在某个特定操作后才出现。重算走 (conv_id, seq) 索引，
+     * 一个会话一次查询，代价可以忽略，换来「永远不会不同步」。
+     */
+    private fun refreshSummary(convId: String) {
+        val latest = queries.selectLatestMessageOfConv(convId).executeAsList().firstOrNull()
+        if (latest == null) {
+            // 这个会话已经没有消息了：摘要也得跟着消失，否则列表里会留下一个空行。
+            queries.deleteConversationSummary(convId)
+            return
+        }
+        queries.upsertConversationSummary(
+            conv_id = convId,
+            last_message_id = latest.id,
+            // 与 ConversationUi.preview 的 text.ifBlank { file?.name } 同义：空正文落成 null。
+            last_text_preview = latest.text.takeIf { it.isNotBlank() },
+            last_message_at = latest.timestamp,
+            last_message_is_mine = if (latest.mine == 1L) 1L else 0L,
+        )
+    }
+
     /**
      * [limitPerConversation] 为 null 时读全部（[load]），否则每个会话只读最近 N 条。
      *
@@ -126,6 +162,9 @@ class SqlDelightMessageStore(
 
     override fun save(threads: Map<String, List<MessageUi>>) {
         var changed = false
+        // 这一趟动过哪些会话 —— 只重算这些的摘要（会话数几十，全量重算也不贵，
+        // 但按 touched 来更诚实：没动的会话没有任何理由被重写）。
+        val touched = HashSet<String>()
         queries.transaction {
             // **这里不再按"快照里没有"反推删除。**
             //
@@ -192,8 +231,12 @@ class SqlDelightMessageStore(
                         seq = seq,
                     )
                     changed = true
+                    touched += values.convId
                 }
             }
+            // 摘要按库里的真实状态重算（不是增量维护 last_message_id）：
+            // 增量维护要在每条写入/删除路径上都记得更新，漏一处就是「预览停在旧消息」。
+            for (convId in touched) refreshSummary(convId)
         }
         // 只在"真的动过库"时重写镜像：内容一字未变就把同样的 4 MB 再落一遍盘，
         // 是纯浪费（真机 6656 条 / 4 MB）。删除也会把 mirrorDirty 置脏，
@@ -205,16 +248,25 @@ class SqlDelightMessageStore(
     }
 
     override fun deleteMessage(id: String) {
-        // 一条真正的 DELETE：会激活 message_after_delete，由它按 FTS5 的 delete 命令
-        // 把索引条目一并移除。**不要**再手写一次索引清理 —— 那是第二条真相来源，
-        // 两次删除会让虚拟表与实际内容不一致（实测抛 SQLITE_CORRUPT_VTAB）。
-        queries.deleteMessage(id)
+        queries.transaction {
+            // 先拿到它属于哪个会话：删掉之后就查不到了，而摘要必须跟着重算。
+            val convId = queries.selectConvIdOfMessage(id).executeAsList().firstOrNull()
+            // 一条真正的 DELETE：会激活 message_after_delete，由它按 FTS5 的 delete 命令
+            // 把索引条目一并移除。**不要**再手写一次索引清理 —— 那是第二条真相来源，
+            // 两次删除会让虚拟表与实际内容不一致（实测抛 SQLITE_CORRUPT_VTAB）。
+            queries.deleteMessage(id)
+            // 删掉的可能正是最后一条 ⇒ 预览要退回上一条；删空了 ⇒ 摘要行自己消失。
+            if (convId != null) refreshSummary(convId)
+        }
         mirrorDirty = true
     }
 
     override fun deleteConversation(convId: String) {
-        // clearConv 同样是逐行 DELETE，每行都由触发器清掉自己的索引条目。
-        queries.clearConv(convId)
+        queries.transaction {
+            queries.clearConv(convId)
+            // 会话已经空了，refreshSummary 会把摘要行删掉（否则列表里留一个空行）。
+            refreshSummary(convId)
+        }
         mirrorDirty = true
     }
 

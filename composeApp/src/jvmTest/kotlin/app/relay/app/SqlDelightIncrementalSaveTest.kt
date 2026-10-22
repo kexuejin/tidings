@@ -202,6 +202,47 @@ class SqlDelightIncrementalSaveTest {
     }
 
     @Test
+    fun 摘要表始终等于从消息推导的结果() {
+        // 不变量：ConversationSummary 与「拿 load() 全量消息自己算一遍」必须一致。
+        // 这是摘要表唯一需要的正确性判据 —— 它错的表现是「会话预览停在旧消息」，
+        // 而那类缺陷只在真机上、只在某个特定操作后才出现（漏写一条同步路径）。
+        fun expected(): Map<String, Pair<String?, Long>> =
+            store.load().mapValues { (_, list) ->
+                val last = list.last()
+                last.text.takeIf { it.isNotBlank() } to last.at
+            }
+
+        fun actual(): Map<String, Pair<String?, Long>> =
+            store.loadSummaries().associate { it.convId to (it.lastTextPreview to it.lastMessageAt) }
+
+        fun assertConsistent(step: String) {
+            assertEquals(expected(), actual(), "摘要表与消息不一致（$step）")
+        }
+
+        // ① 新写入
+        store.save(
+            mapOf(
+                "peer-1" to listOf(msg("m1", text = "第一条", at = 1000), msg("m2", text = "最后一条", at = 2000)),
+                "peer-2" to listOf(msg("n1", text = "另一个会话", at = 1500, peer = "peer-2")),
+            ),
+        )
+        assertConsistent("首次写入")
+
+        // ② 改写最后一条（预览要跟着变）
+        store.save(mapOf("peer-1" to listOf(msg("m1", text = "第一条", at = 1000), msg("m2", text = "改过的最后一条", at = 2000))))
+        assertConsistent("改写最后一条")
+
+        // ③ 删掉最后一条（预览必须退回上一条，而不是停在被删的那条）
+        store.deleteMessage("m2")
+        assertConsistent("删除最后一条")
+
+        // ④ 删空整个会话（摘要行必须消失，否则列表里留一个空行）
+        store.deleteConversation("peer-1")
+        assertConsistent("删空会话")
+        assertEquals(listOf("peer-2"), store.loadSummaries().map { it.convId }, "空会话不该留摘要行")
+    }
+
+    @Test
     fun save_不再按快照反推删除() {
         // 这条钉的是**契约变更**，不是实现细节：
         // 旧 save() 扫全表、把「内存里没有的 id」DELETE 掉。内存是全部历史时那是对的；
