@@ -740,37 +740,6 @@ fun ChatScreen(
                     // 屏幕上就变成「最新在上、最旧在下」—— 真机截图正是这个样子。
                     // 两者必须同时翻：数据倒序 + reverseLayout，才等价于原来的「最旧在上」。
                     items(messages.asReversed(), key = { it.id }) { message ->
-                        if (message.id in dayDividers) {
-                            DayDivider(at = message.at, now = now)
-                        }
-                        if (message.id in sessionTransitions) {
-                            // **必须与 `sessionTransitionIds` 用同一个判据取 sid。**
-                            //
-                            // 这里原来写的是 `extractSessionId(message.id)` —— 只认 id 前缀。
-                            // 而判定那边用的是 `sessionIdOf`（优先协议字段 `agentSessionId`，
-                            // 再退回前缀）。两者对**手机端**给出的答案不同：
-                            //
-                            //   桌面：id = `agent-ev-session-xxx-12` ⇒ 前缀能取到 ⇒ 有分割线
-                            //   手机：id = 信封 UUID（转发时换掉了）⇒ 前缀取不到 ⇒ **整条不画**
-                            //
-                            // 于是「判定说这里是切换点、渲染说自己取不到 sid 就跳过」—— 手机端
-                            // 永远画不出那条线，而数据是对的。这正是用户报的「桌面有、移动端没有」。
-                            val sid = sessionIdOf(message)
-                            if (sid != null) {
-                                // **标题优先用消息自带的那一份。**
-                                //
-                                // `state.agentSessions` 是**本机私有**数据：它只由本机 agent 宿主
-                                // 写入（`saveSession`），从来没有同步到对端 —— 真机读数：手机侧那张
-                                // 表是**空的**（count=0），所以它那边每条线都只能显示「新会话」。
-                                //
-                                // 转发时把标题一并带上之后，对端也拿得到真标题。查本地表那一步
-                                // 保留着：桌面上 agent 会话就是本机的，表里有更权威（会随标题更新
-                                // 而刷新）。两者都没有才退回「新会话」那句中性说明。
-                                val s = state.agentSessions.values.firstOrNull { it.sessionId == sid && it.title?.isNotBlank() == true }
-                                    ?: state.agentSessions.values.firstOrNull { it.sessionId == sid }
-                                SessionDivider(sessionTitle = message.agentSessionTitle ?: s?.title)
-                            }
-                        }
                         val notice = message.notice
                         if (notice != null) {
                             // 系统提示行不是消息：撤回与戳一碰都只留一行居中的灰字（协议 §8）。
@@ -889,6 +858,46 @@ fun ChatScreen(
                                     senderId = message.senderId,
                                 ),
                             )
+                        }
+                        // **两条分隔线必须画在气泡之后，不能画在之前。**
+                        //
+                        // 这个列表是 `reverseLayout = true` + 数据倒序（见上面那段 KDoc）。
+                        // 正序下「画在消息之前」= 视觉上方，是对的；一旦翻了向，同一个写法
+                        // 就变成**视觉下方** —— 真机现场：`任务：…` 那条线落在它所标记的消息
+                        // 的下面，读起来像「这条消息结束后换了新会话」。
+                        //
+                        // 判据：在 reverseLayout 里，**后画的元素在视觉上方**。所以日期线与
+                        // 会话线都要写在 MessageBubble 之后。改顺序时请连这条注释一起想。
+                        if (message.id in dayDividers) {
+                            DayDivider(at = message.at, now = now)
+                        }
+                        if (message.id in sessionTransitions) {
+                            // **必须与 `sessionTransitionIds` 用同一个判据取 sid。**
+                            //
+                            // 这里原来写的是 `extractSessionId(message.id)` —— 只认 id 前缀。
+                            // 而判定那边用的是 `sessionIdOf`（优先协议字段 `agentSessionId`，
+                            // 再退回前缀）。两者对**手机端**给出的答案不同：
+                            //
+                            //   桌面：id = `agent-ev-session-xxx-12` ⇒ 前缀能取到 ⇒ 有分割线
+                            //   手机：id = 信封 UUID（转发时换掉了）⇒ 前缀取不到 ⇒ **整条不画**
+                            //
+                            // 于是「判定说这里是切换点、渲染说自己取不到 sid 就跳过」—— 手机端
+                            // 永远画不出那条线，而数据是对的。这正是用户报的「桌面有、移动端没有」。
+                            val sid = sessionIdOf(message)
+                            if (sid != null) {
+                                // **标题优先用消息自带的那一份。**
+                                //
+                                // `state.agentSessions` 是**本机私有**数据：它只由本机 agent 宿主
+                                // 写入（`saveSession`），从来没有同步到对端 —— 真机读数：手机侧那张
+                                // 表是**空的**（count=0），所以它那边每条线都只能显示「新会话」。
+                                //
+                                // 转发时把标题一并带上之后，对端也拿得到真标题。查本地表那一步
+                                // 保留着：桌面上 agent 会话就是本机的，表里有更权威（会随标题更新
+                                // 而刷新）。两者都没有才退回「新会话」那句中性说明。
+                                val s = state.agentSessions.values.firstOrNull { it.sessionId == sid && it.title?.isNotBlank() == true }
+                                    ?: state.agentSessions.values.firstOrNull { it.sessionId == sid }
+                                SessionDivider(sessionTitle = message.agentSessionTitle ?: s?.title)
+                            }
                         }
                     }
                 }
