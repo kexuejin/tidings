@@ -151,6 +151,39 @@ class SqlDelightIncrementalSaveTest {
     }
 
     @Test
+    fun loadRecent_只取每个会话最近的N条且保留全部会话() {
+        // 这条钉两件事，它们直接决定会话列表会不会失真：
+        // ① 每个有消息的会话都必须出现（ConversationUi 的 id 集合来自 messages.keys，
+        //    漏一个就是列表少一行）；
+        // ② 窗口必须是**尾部**，即最后一条等于真实最后一条（预览、排序、时间全靠它）。
+        val a = (1..250).map { msg("a" + it, at = 1000L * it, peer = "a") }
+        val b = (1..3).map { msg("b" + it, at = 1000L * it, peer = "b") }
+        store.save(mapOf("a" to a, "b" to b))
+
+        val loaded = store.loadRecent(10)
+        assertEquals(setOf("a", "b"), loaded.keys, "有消息的会话一个都不能少")
+        assertEquals(10, loaded.getValue("a").size, "超过窗口的会话只给最近 N 条")
+        assertEquals(3, loaded.getValue("b").size, "不足 N 条时应当全给")
+        assertEquals("a250", loaded.getValue("a").last().id, "窗口必须是尾部，否则会话预览与排序全歪")
+        assertEquals("b3", loaded.getValue("b").last().id)
+        assertEquals(
+            loaded.getValue("a").map { it.at }.sorted(),
+            loaded.getValue("a").map { it.at },
+            "组内仍按时间升序 —— UI 直接按这个顺序画",
+        )
+    }
+
+    @Test
+    fun load_仍然是全量() {
+        // 分页是**新增**能力，不是把 load() 改小：
+        // 导出 / 迁移 / 测试夹具仍要能拿到全部历史。
+        val all = (1..40).map { msg("m" + it, at = 1000L * it) }
+        store.save(mapOf("peer-1" to all))
+        assertEquals(40, store.load().getValue("peer-1").size)
+        assertEquals(5, store.loadRecent(5).getValue("peer-1").size)
+    }
+
+    @Test
     fun save_不再按快照反推删除() {
         // 这条钉的是**契约变更**，不是实现细节：
         // 旧 save() 扫全表、把「内存里没有的 id」DELETE 掉。内存是全部历史时那是对的；

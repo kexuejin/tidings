@@ -714,8 +714,13 @@ fun handleRestoreMessages(): Job {
     host.messagesRestored = true
     if (!host.persistMessages) return host.completedJob()
     return host.scope.launch {
+        // 分页读：每个会话只取最近 MessageStore.MESSAGE_PAGE_SIZE 条。
+        //
+        // 为什么不是"只读当前打开的会话"：会话列表的预览、最后消息时间与排序，
+        // 全部依赖「每个会话的最后一条」。只加载一个会话，其余的会从列表里消失、
+        // 或预览变成空白 —— 那是功能回退，不是优化。
         val loaded = withContext(ioDispatcher) {
-            runCatching { host.messageStore.load() }.getOrNull()
+            runCatching { host.messageStore.loadRecent(MessageStore.MESSAGE_PAGE_SIZE) }.getOrNull()
         } ?: return@launch
         if (!host.persistMessages || loaded.isEmpty()) return@launch
         var changed = false

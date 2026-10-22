@@ -139,6 +139,14 @@ WHERE conv_id = :convId
 ORDER BY seq DESC
 LIMIT :limit;
 
+-- 有消息的会话清单。分页读要靠它逐个会话取窗口，而不是把全表捞出来再截断。
+--
+-- 不用「窗口函数一次查完」：Android 的框架 SQLite 在旧版本上没有 row_number()，
+-- 而分页一旦在那类机器上抛异常，用户看到的是「历史全没了」。
+-- 会话数是几十的量级，逐个查的代价可以忽略。
+selectDistinctConvIds:
+SELECT DISTINCT conv_id FROM MessageEntity;
+
 -- 向上翻（更早）。游标是**当前窗口最小的 seq**，不含端点。
 selectMessagesBefore:
 SELECT * FROM MessageEntity

@@ -65,12 +65,34 @@ class SqlDelightMessageStore(
         }.isSuccess
     }
 
-    override fun load(): Map<String, List<MessageUi>> {
-        val existing = queries.selectAllMessages().executeAsList()
-        if (existing.isNotEmpty()) {
-            return existing.map { it.toUi() }
-                .groupBy { it.peerId }
-                .mapValues { (_, list) -> list.sortedBy { it.at } }
+    override fun load(): Map<String, List<MessageUi>> = loadInternal(null)
+
+    override fun loadRecent(limitPerConversation: Int): Map<String, List<MessageUi>> =
+        loadInternal(limitPerConversation)
+
+    /**
+     * [limitPerConversation] 为 null 时读全部（[load]），否则每个会话只读最近 N 条。
+     *
+     * 为什么按会话逐个查、而不是一条窗口函数查全表：Android 的框架 SQLite 在旧版本
+     * 上没有 `row_number()`，而分页路径一旦抛异常，用户看到的是「历史全没了」。
+     * 会话是几十的量级，逐个查（各走 `message_conv_seq` 索引）代价可以忽略。
+     */
+    private fun loadInternal(limitPerConversation: Int?): Map<String, List<MessageUi>> {
+        val convIds = queries.selectDistinctConvIds().executeAsList()
+        if (convIds.isNotEmpty()) {
+            val result = LinkedHashMap<String, List<MessageUi>>(convIds.size)
+            for (convId in convIds) {
+                val rows = if (limitPerConversation == null) {
+                    queries.selectMessagesByConv(convId).executeAsList()
+                } else {
+                    // ORDER BY seq DESC LIMIT N —— 取的是**最近**的 N 条（新消息永远进窗口）。
+                    queries.selectRecentMessages(convId, limitPerConversation.toLong()).executeAsList()
+                }
+                if (rows.isEmpty()) continue
+                // 与 load() 的老行为一致：组内按时间升序（UI 直接按这个顺序画）。
+                result[convId] = rows.map { it.toUi() }.sortedBy { it.at }
+            }
+            return result
         }
 
         // SQLite 为空：尝试从旧版快照平滑迁移

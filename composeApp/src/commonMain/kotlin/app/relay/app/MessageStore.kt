@@ -43,6 +43,26 @@ interface MessageStore {
     fun save(threads: Map<String, List<MessageUi>>)
 
     /**
+     * 读回**每个会话最近** [limitPerConversation] 条。
+     *
+     * 为什么需要它：`load()` 是全量（真机 6656 条 / 约 15 MB 常驻），而界面一次
+     * 只看得到最近几十条。分页读把常驻压到「会话数 × N」。
+     *
+     * **窗口必须包含每个会话的最新消息**：会话列表的预览、最后消息时间、排序全部
+     * 依赖「该会话最后一条」。只加载当前打开的会话、把其它会话整个丢掉，会让
+     * 会话列表的预览与排序集体失真。所以这里按会话各取一个尾部窗口，
+     * 而不是只加载某一个会话。
+     *
+     * 默认实现对「整份读进内存」的存储（iOS 的 JSON 快照）是**事后截断**：
+     * 峰值内存省不掉，但常驻量能降下来，行为与 SQLite 那份一致。
+     */
+    fun loadRecent(limitPerConversation: Int): Map<String, List<MessageUi>> =
+        load()
+            .mapValues { (_, list) -> list.takeLast(limitPerConversation.coerceAtLeast(0)) }
+            .filterValues { it.isNotEmpty() }
+
+
+    /**
      * 清空全部历史。
      *
      * 与 `save(emptyMap())` 分开，是因为"删干净"对存储实现往往有额外含义
@@ -112,6 +132,15 @@ interface MessageStore {
     fun searchFiles(query: String, limit: Long = 20): List<MessageSearchResult> = emptyList()
 
     companion object {
+        /**
+         * 启动时每个会话读进内存的窗口大小。
+         *
+         * 200 的依据：真机最大会话 6161 条、其余会话都在 300 条以内。200 条足够覆盖
+         * 「打开就被看到的最近几屏」，同时把常驻消息对象从 6656 条压到约 700 条。
+         * 更早的历史由游标（`selectMessagesBefore`）按需翻，不参与启动。
+         */
+        const val MESSAGE_PAGE_SIZE: Int = 200
+
         /**
          * 落盘用的 JSON 配置。
          *
