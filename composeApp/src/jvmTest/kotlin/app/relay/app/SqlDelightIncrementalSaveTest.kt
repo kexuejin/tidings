@@ -60,9 +60,13 @@ class SqlDelightIncrementalSaveTest {
         text: String = "正文",
         at: Long = 1000,
         delivery: DeliveryState? = null,
+        // 默认与被测会话一致。注意 save() 里 conv_id 取自**消息自身**的 peerId、
+        // 而 peer_id 取自 map 的键 —— 两者不一致时那一行会自相矛盾，
+        // 所以夹具必须让它们对上（真实调用点也是这么用的）。
+        peer: String = "peer-1",
     ) = MessageUi(
         id = id,
-        peerId = "peer-1",
+        peerId = peer,
         mine = true,
         text = text,
         at = at,
@@ -147,12 +151,40 @@ class SqlDelightIncrementalSaveTest {
     }
 
     @Test
-    fun 删除的消息真的从库里消失() {
-        // 跳过逻辑不能顺手把「删除」也吞掉：那会让用户「删了还在」（本仓真机上出现过）。
+    fun save_不再按快照反推删除() {
+        // 这条钉的是**契约变更**，不是实现细节：
+        // 旧 save() 扫全表、把「内存里没有的 id」DELETE 掉。内存是全部历史时那是对的；
+        // 一旦内存只保留一个窗口，它就会把窗口外的历史整批删掉 —— 数据丢失。
+        // 所以删除改成显式 API，save() 只做 upsert。
+        // 若有人把反推删除加回来，这条会红 —— 那时分页一上线就会丢历史。
         store.save(mapOf("peer-1" to listOf(msg("m1"), msg("m2", at = 2000))))
         assertEquals(2, rows().size)
 
         store.save(mapOf("peer-1" to listOf(msg("m1"))))
-        assertEquals(listOf("m1"), rows().map { it.id }, "快照里没有的那条必须被删掉")
+        assertEquals(
+            listOf("m1", "m2"),
+            rows().map { it.id },
+            "save 不该从「快照里没有」反推删除 —— 分页之后那等于删掉窗口之外的全部历史",
+        )
+    }
+
+    @Test
+    fun 显式_deleteMessage_才真的删掉() {
+        store.save(mapOf("peer-1" to listOf(msg("m1"), msg("m2", at = 2000))))
+        store.deleteMessage("m2")
+        assertEquals(listOf("m1"), rows().map { it.id }, "显式删除必须真的落到库里")
+    }
+
+    @Test
+    fun 显式_deleteConversation_删干净整个会话() {
+        store.save(
+            mapOf(
+                "peer-1" to listOf(msg("m1")),
+                "peer-2" to listOf(msg("n1", at = 500, peer = "peer-2")),
+            ),
+        )
+        store.deleteConversation("peer-1")
+        assertEquals(0, rows().size, "整个会话的消息必须一次删干净")
+        assertEquals(1, database.relayDatabaseQueries.selectAllMessages().executeAsList().size, "别的会话不能被连坐")
     }
 }

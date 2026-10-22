@@ -374,9 +374,24 @@ fun handleDeleteMessage(convId: String, messageId: String) {
         val unread = host.core.unread[convId] ?: 0
         if (unread > 0) host.core.unread[convId] = (unread - 1).coerceAtLeast(0)
     }
-    if (!removed) return
-    host.publish()
-    host.handlePersistThreads()
+    if (removed) {
+        host.publish()
+        host.handlePersistThreads()
+    }
+    // **删除必须显式打到存储层。** 内存里删掉只是让界面立刻消失；
+    // 落盘那一步不再由 save() 反推（见 MessageStore.deleteMessage 的 KDoc）。
+    //
+    // 这条也顺带修掉一个分页之后才会暴露的形态：要删的那条可能**不在内存窗口里**
+    // （更早的历史），此时上面 removeAll 返回 false、removed 为 false，
+    // 但库里那条仍然必须删掉 —— 否则用户看到的是「删了还在」。
+    if (host.persistMessages) {
+        val target = host.messageStore
+        host.scope.launch {
+            host.persistMutex.withLock {
+                withContext(ioDispatcher) { runCatching { target.deleteMessage(messageId) } }
+            }
+        }
+    }
 }
 
 
@@ -386,6 +401,15 @@ fun handleClearMessages(peerId: String) {
         host.core.unread.remove(peerId)
     }
     host.publish()
+    // 同 handleDeleteMessage：清会话也要显式打到存储层，不能指望 save() 反推。
+    if (host.persistMessages) {
+        val target = host.messageStore
+        host.scope.launch {
+            host.persistMutex.withLock {
+                withContext(ioDispatcher) { runCatching { target.deleteConversation(peerId) } }
+            }
+        }
+    }
     host.handlePersistThreads()
 }
 

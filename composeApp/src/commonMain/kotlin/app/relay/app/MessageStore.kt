@@ -51,6 +51,24 @@ interface MessageStore {
     fun clear()
 
     /**
+     * 删一条消息。
+     *
+     * 为什么需要它：[save] 只做 upsert，**不再**从"内存里没有"反推"库里该删"。
+     * 那条反推一旦遇到分页（内存只保留一个窗口）就会把窗口之外的历史整批删掉 ——
+     * 那不是性能问题，是数据丢失。所以删除必须由调用方显式说出来。
+     *
+     * 默认空实现是**正当**的：整份覆盖型的存储（内存实现、iOS 的 JSON 快照）
+     * 在下一次 [save] 时自然就不含这条了，删除语义由覆盖写本身完成。
+     * SQLite 那种逐行 upsert 的存储必须覆盖它，否则删除不会真的发生。
+     */
+    fun deleteMessage(id: String) = Unit
+
+    /**
+     * 删一个会话的全部消息。语义与 [deleteMessage] 同源（都不靠 [save] 反推）。
+     */
+    fun deleteConversation(convId: String) = Unit
+
+    /**
      * 基于 FTS 倒排索引全文搜索历史消息。默认空实现以兼容内存存储。
      */
     fun search(query: String, limit: Long = 50): List<MessageSearchResult> = emptyList()
@@ -158,6 +176,19 @@ class InMemoryMessageStore : MessageStore {
 
     override fun clear() {
         current = emptyMap()
+    }
+
+    override fun deleteMessage(id: String) {
+        // 这个实现本来就是整份覆盖：删掉之后再 save 一次，内容自然就不含它了。
+        // 仍然实现它，是为了让"删除"在**只调 deleteMessage、没接着 save** 的路径上
+        // 语义与 SQLite 那份一致 —— 测试里恰恰最容易走这种路径。
+        current = current
+            .mapValues { (_, list) -> list.filter { it.id != id } }
+            .filterValues { it.isNotEmpty() }
+    }
+
+    override fun deleteConversation(convId: String) {
+        current = current.filterKeys { it != convId }
     }
 
     override fun search(query: String, limit: Long): List<MessageSearchResult> {

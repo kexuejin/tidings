@@ -123,6 +123,25 @@ class FileMessageStoreTest {
     }
 
     @Test
+    fun 删除之后镜像不再包含那条消息() {
+        // messages.json 是"库的导出"，不是只写一次的备份：删除必须也反映到它上面。
+        // 否则 SQLite 一旦为空（重装/库损坏），load() 会拿这份陈旧镜像做一次性迁移，
+        // 把用户删过的消息复活。
+        val store = createMessageStore(platform)
+        val keep = MessageUi(id = "k1", peerId = "peer-g", mine = false, text = "这条要留下来", at = 2)
+        val gone = MessageUi(id = "g1", peerId = "peer-g", mine = false, text = "这条要被删掉", at = 1)
+        store.save(mapOf("peer-g" to listOf(gone, keep)))
+        val file = File(directory, "messages.json")
+        assertTrue(file.readText().contains("这条要被删掉"), "先确认镜像里确实有它")
+
+        // 真实顺序与 handleDeleteMessage 一致：先显式删库，再落一次快照。
+        store.deleteMessage("g1")
+        store.save(mapOf("peer-g" to listOf(keep)))
+        assertFalse(file.readText().contains("这条要被删掉"), "删掉的消息不能继续留在导出里")
+        assertTrue(file.readText().contains("这条要留下来"), "没删的那条仍要在导出里")
+    }
+
+    @Test
     fun clearRemovesTheFileInsteadOfLeavingAnEmptyGhost() {
         createMessageStore(platform).save(
             mapOf("peer-c" to listOf(MessageUi(id = "m1", peerId = "peer-c", mine = false, text = "留个纪念", at = 1))),

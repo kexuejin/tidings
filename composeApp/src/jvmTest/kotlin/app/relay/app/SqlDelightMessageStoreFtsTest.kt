@@ -253,8 +253,9 @@ class SqlDelightMessageStoreFtsTest {
      *
      * 这是「单条本地删除」（`RelayControllerMessagesComponent.handleDeleteMessage`）的
      * 存储侧不变量。AGENTS.md §2.3 记着真机事故：索引与实体行数不一致把库撑到 21 GB。
-     * 删除走的是整份快照 `save()`，那条路径靠 `message_after_delete` 触发器清索引 ——
-     * 这里钉住"它真的清了"，而不是"我们相信它会清"。
+     * 删除入口是**显式的** `deleteMessage`（`save()` 已不再按快照反推删除 ——
+     * 那在分页之后等于把窗口之外的历史整批删掉）。它靠 `message_after_delete`
+     * 触发器清索引，这里钉住"它真的清了"，而不是"我们相信它会清"。
      */
     @Test
     fun deletingAMessageShrinksTheFtsIndex() {
@@ -268,14 +269,8 @@ class SqlDelightMessageStoreFtsTest {
         )
         assertEquals(1, store.search("会议纪要").size, "删除前应当搜得到")
 
-        // 只保留 d2 —— 等价于"删掉一条后再落盘"。
-        store.save(
-            mapOf(
-                "peer-1" to listOf(
-                    MessageUi(id = "d2", peerId = "peer-1", mine = false, text = "这条要留下来", at = 2000),
-                ),
-            ),
-        )
+        // 显式删除 d1 —— 这就是 handleDeleteMessage 现在走的路径。
+        store.deleteMessage("d1")
 
         assertEquals(0, store.search("会议纪要").size, "删掉的那条不能再被搜到（索引里有残留就是孤儿）")
         assertEquals(1, store.search("留下来").size, "没删的那条仍要搜得到")

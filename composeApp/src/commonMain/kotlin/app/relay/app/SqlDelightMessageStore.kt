@@ -84,45 +84,33 @@ class SqlDelightMessageStore(
         return emptyMap()
     }
 
+    /**
+     * 旧版 JSON 镜像（messages.json）需要重写。
+     *
+     * 为什么用一个脏标记而不是"每次 save 都写"：那份镜像有 4 MB（真机 6656 条），
+     * 每次 save 都整份重编码 + 落盘，比 SQLite 那几行贵一个数量级。
+     *
+     * 为什么删除也要把它标脏：删除走的是显式 deleteMessage，**不经过** save ——
+     * 只按"有没有 upsert"判断的话，镜像会永远留着已删消息，变成一份撒谎的导出
+     * （而 SQLite 为空时 load() 会拿它做一次性迁移，等于把删掉的消息复活）。
+     */
+    private var mirrorDirty = false
+
     override fun save(threads: Map<String, List<MessageUi>>) {
-        // 这一趟到底动没动库。它决定**旧版 JSON 镜像要不要重写** ——
-        // 那份镜像有 4 MB（真机消息 6656 条），每次 save 都整份重编码 + 落盘，
-        // 比 SQLite 那几行贵得多；而它只在"库真的变了"时才会有新内容。
         var changed = false
         queries.transaction {
-            // **先处理"快照里已经没有了"的行** —— 否则删除只发生在调用方的内存里，
-            // 库里那行连同它的 FTS 索引会一直留着。
+            // **这里不再按"快照里没有"反推删除。**
             //
-            // 真身：单条本地删除（`handleDeleteMessage`）走的就是"改内存 → 整份快照 save"，
-            // 而 save 原来只做 upsert，**从不删任何东西**。于是被删的那条仍留在
-            // MessageEntity 里、也仍被搜得到 —— 用户"删了还在"。
+            // 旧实现在这里扫全表、把"内存里没有的 id"整条 DELETE 掉。它当时是对的
+            // （内存就是全部历史），但一旦内存只保留一个**窗口**，这条反推就会把
+            // 窗口之外的历史整批删掉 —— 那不是性能问题，是数据丢失。
             //
-            // FTS 必须显式清：这里用的是**逐 id 的 DELETE**（不是 REPLACE），
-            // 它会激活 `message_after_delete` 触发器把索引按 'delete' 命令移除。
-            // 若改用"REPLACE 掉整表"的方案，隐式删除不触发触发器 ⇒ 孤儿索引
-            // （AGENTS.md §2.3 那 21 GB 就是这么来的）。
-            val wanted = threads.values.flatten().mapTo(HashSet()) { it.id }
-            // 一次查询同时服务两件事：① 找出快照里已经没有了该删的行；
-            // ② 找出一个字段都没变、该跳过的行（见下面循环里的比对）。
+            // 所以删除改成**调用方显式说出来**（deleteMessage / deleteConversation /
+            // clear），save() 只做 upsert。这也顺带把「删了还在」那类缺陷的
+            // 责任放回唯一的删除入口，而不是靠一次全表比对去猜。
             //
-            // 为什么必须比对而不是无条件重写：handlePersistThreads 在**每次消息变化**
-            // （含 Sending→Sent 这种只改交付状态的）之后都会整份 save。真机库 6656 条，
-            // 无条件重写就是 6656 次「删旧索引 + INSERT + 触发器」，而其中 6655 次是白写。
+            // 这次查询仍然要留：它给出"库里现在长什么样"，用来判断每条消息有没有变。
             val existing = queries.selectAllMessages().executeAsList().associateBy { it.id }
-            existing.forEach { (id, _) ->
-                if (id !in wanted) {
-                    // **只删实体行**：deleteMessage 是一条真正的 DELETE，
-                    // 会激活 message_after_delete 触发器，由它按 FTS5 的 delete 命令移除索引条目。
-                    //
-                    // 这里**不要**再先调 insertMessageDropStaleIndex：那句等于手工再删一遍索引，
-                    // 两次删除会让 FTS 虚拟表与实际内容不一致 —— 实测直接抛
-                    // SQLITE_CORRUPT_VTAB: Content in the virtual table is corrupt。
-                    // （upsert 路径反过来：INSERT OR REPLACE 的隐式删除**不**触发触发器，
-                    // 所以那里必须先显式删索引，见下面循环里那句。）
-                    queries.deleteMessage(id)
-                    changed = true
-                }
-            }
             for ((peerId, list) in threads) {
                 for (message in list) {
                     // 这一条相对库里那一行有没有变化。没变就整条跳过：
@@ -179,9 +167,27 @@ class SqlDelightMessageStore(
                 }
             }
         }
-        // 没动库就不重写旧版镜像：内容一字未变，重写只是把同样的 4 MB 再落一遍盘。
-        // （镜像本身仍是有意保留的：SQLite 意外为空时 load() 会拿它做一次性迁移。）
-        if (changed) runCatching { legacyStore?.save(threads) }
+        // 只在"真的动过库"时重写镜像：内容一字未变就把同样的 4 MB 再落一遍盘，
+        // 是纯浪费（真机 6656 条 / 4 MB）。删除也会把 mirrorDirty 置脏，
+        // 否则镜像会与库不一致。
+        if (changed || mirrorDirty) {
+            mirrorDirty = false
+            runCatching { legacyStore?.save(threads) }
+        }
+    }
+
+    override fun deleteMessage(id: String) {
+        // 一条真正的 DELETE：会激活 message_after_delete，由它按 FTS5 的 delete 命令
+        // 把索引条目一并移除。**不要**再手写一次索引清理 —— 那是第二条真相来源，
+        // 两次删除会让虚拟表与实际内容不一致（实测抛 SQLITE_CORRUPT_VTAB）。
+        queries.deleteMessage(id)
+        mirrorDirty = true
+    }
+
+    override fun deleteConversation(convId: String) {
+        // clearConv 同样是逐行 DELETE，每行都由触发器清掉自己的索引条目。
+        queries.clearConv(convId)
+        mirrorDirty = true
     }
 
     override fun clear() {
