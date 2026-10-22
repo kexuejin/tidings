@@ -262,6 +262,9 @@ deliberately-not items state the cost.**
 
 - **No forward secrecy at the identity layer**: a pin covers the SPKI of a long-lived self-signed identity. **The transport itself is TLS 1.3 / 1.2** (ECDHE key exchange, which does provide forward secrecy); the **identity layer** does not — if the private key leaked, past traffic could be decrypted.
 - **No key-rotation entry point**: the private key stays stable and the certificate is re-issued automatically (7 days before expiry), so the pin never changes. Manual rotation is not offered because rotating would require every paired device to pair again — a cost that outweighs the benefit.
+- **"Plaintext or TLS" is decided by address, so one overlay can land in different tiers.** The rule is `isLanAddress` (private ∨ same /64 ∨ link-local/ULA), and it has no idea *which interface* an address came from. Consequently ZeroTier's `10.x` / `172.26.x` and Tailscale's `fd7a:…` (ULA) count as private ⇒ **plaintext**, while Tailscale's `100.64/10` is not RFC1918 ⇒ **TLS**. **The same pair of devices is encrypted over v4 and plaintext over v6.**
+
+  This is not plaintext leaking onto the internet: Tailscale is WireGuard and ZeroTier encrypts its own link, so the tunnel already protects that layer. It is still an **inconsistency**, and no clean address rule removes it (`fc00::/7` is also used by real LANs). Making it fully consistent means turning the security tier into a property of *which interface the connection used* rather than of the address family — a protocol-layer change that is known to be outstanding.
 
 ### Honesty statements (commitments, not limitations)
 
