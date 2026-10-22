@@ -412,6 +412,19 @@ Wi-Fi 省电模式下能否收到、TCP 直连、托盘/深链/多窗口、通�
 而不是看界面。真机上这条差点被读反：一条群探针我以为是 1:1，其实落进了群（帧是 `group-text`）——
 所以先断言**帧的 kind 与 peerId**，再看有没有回复。
 
+### A20 `gta1` 门控与「按原 id 重发」（2026-10-20 新增，待装包真机跑）
+
+这两条守的是同一类缺陷：**发送侧一切正常、接收侧什么都没有 / 多了一条**。
+
+| 步骤 | 期望（判据） |
+|---|---|
+| 群里发一条带 `senderId` 的 agent 转发消息，群内有**上游茶话间 0.61.2**（或老 Tidings，caps 无 `gta1`） | 它**能显示这条**，且收到的帧只含 `kind/text/groupId/groupRev/mentions/resend/replyTo`；`id` 与声明了 `gta1` 的成员收到的**完全相同**（`ts` 也相同） |
+| 同一条失败消息连点「重发」5 次 | 对端 `MessageEntity` 只多**一条**，且 `id` 等于本地 `MessageUi.id`；不是每次一个新 id |
+| 关 WiFi、只留蜂窝后点重发 | 15 秒内该对端在 `files/relay/stores/queue.log` 的行数**开始下降**；不降则 `adb logcat` 过滤 `ENETUNREACH` —— 出现即内核没路由（需要 UDP/TCP 绑网，见 `ARCHITECTURE.md`） |
+| 全程 | `files/relay/diag/link.json` 的 `closeCount` 保持 **0**（换网/断网/冷启动） |
+
+> 判读「对方离线」时先看 `lastSeen`：`online=false` 但距上次入站 **< 90 秒** ⇒ 是 `markOffline`（某次发送失败）标的，不是心跳超时（`Timings.offlineAfter=90s`），别等 10 秒就判缺陷。
+
 ## 3. iOS 真机
 
 **本轮（2026-10-07）在 iPhone 17 Pro 模拟器（iOS 26.2，`00000000-FEF7-409D-AE33-803A77C62376`）

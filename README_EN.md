@@ -215,14 +215,33 @@ plugin alone has no node to connect to. See that repository's README for install
 
 ## Known Limitations (stated honestly)
 
-- **Cross-network screen assistance is unavailable**: screen mirroring / assistance still requires both ends to be on the **same LAN**. Cross-network support covers **files** only.
+This section is split three ways, because "cannot", "not yet" and "deliberately not" mean very different
+things to a user: **the not-yet items say what is missing, the cannot items name the platform, and the
+deliberately-not items state the cost.**
+
+### Not built yet, but buildable
+
+- **Attachments from an agent can be viewed but not saved**: the card renders the file name, dimensions and size, but it cannot be opened and cannot be written to local storage. The reason is that an attachment is identified by `attachmentId`, while the file-transfer layer identifies files by `fileId` / `transferId` — the two are not the same identifier and there is no mapping between them, so saving needs a new message that fetches bytes by attachment id. (This entry used to claim that the file channel and `fileId` were already in place and only a save button was missing; that was not true.)
 - **A large cross-network file transfer has never been run end to end on a real device**: the code path and its unit tests exist; real-device acceptance is what is missing.
-- **Attachments from an agent can be viewed but not saved**: the card renders, but tapping it cannot write the file to disk yet.
-- **No cloud push**: background wakeups rely on the Android foreground service plus offline incremental sync, with no third-party push service involved. The trade-off is that an app the system has fully frozen receives no timely alert.
-- **iOS needs a signed build for cross-network long connections**: an unsigned build has no keychain container and therefore no TLS transport, so public long connections are refused (fail-closed, never downgraded to plaintext).
-- **Messages do not appear while DSH is queued**: a message sitting in the host's queue reaches the phone when the next round begins.
+- **Messages do not appear while DSH is queued**: a message sitting in the host's queue reaches the phone when the next round begins. The phone now does say that the instruction is queued and will start when the current round ends, so it no longer looks like the message was lost.
+
+### Not possible (platform constraints)
+
+- **iOS needs a signed build for cross-network long connections**: an unsigned build has no keychain container and therefore no TLS transport, so public long connections are refused (fail-closed, never downgraded to plaintext). This is an iOS sandbox constraint, not a choice made by this app.
+
+### Deliberately not done (trade-offs already weighed)
+
+- **No cloud push**: background wakeups rely on the Android foreground service plus offline incremental sync, with no third-party push service involved. The cost is that an app the system has fully frozen receives no timely alert — that is the necessary consequence of not integrating a third-party push service, not a defect.
+- **Cross-network screen assistance is unavailable**: screen mirroring / assistance still requires both ends to be on the **same LAN**; cross-network support covers **files** only. The reason is volume: a screen stream runs about 5 MB/s (roughly 300 MB per minute), which does not hold up on cellular data plans or relay bandwidth. It is not technically impossible — it is not worth it.
+
+### Security boundaries
+
+- **No forward secrecy at the identity layer**: a pin covers the SPKI of a long-lived self-signed identity. **The transport itself is TLS 1.3 / 1.2** (ECDHE key exchange, which does provide forward secrecy); the **identity layer** does not — if the private key leaked, past traffic could be decrypted.
+- **No key-rotation entry point**: the private key stays stable and the certificate is re-issued automatically (7 days before expiry), so the pin never changes. Manual rotation is not offered because rotating would require every paired device to pair again — a cost that outweighs the benefit.
+
+### Honesty statements (commitments, not limitations)
+
 - **The demo driver does not pretend**: it is off by default, and when selected it states plainly that no real task was executed and counts no tokens.
-- **No forward secrecy and no key-rotation entry point**: a pin covers the SPKI of a long-lived self-signed identity — the private key stays stable and the certificate is re-issued automatically, while rotation and expiry prompts are not offered yet.
 
 ---
 

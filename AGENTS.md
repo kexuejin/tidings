@@ -142,6 +142,77 @@ python3 tools/unused-imports.py --check
 - 诊断字段要么如实、要么不存在：`dialLastError` 这类「只在失败时写、成功时不清」的字段
   会给出 `connected=true` + `lastError=connect-timeout` 这种自相矛盾的读数。
 
+### 2.6 组件复用能力：一个 UI 元素只许有一处定义
+
+**规则**：同一个界面元素，手机与桌面必须**共用同一份实现**。有独占结构就把它做成参数/接缝，
+**不要把内容重抄一遍**。
+
+> 真身（2026-10-20 实测）：`ConversationRow` 曾有两份平行实现 —— 手机是 16dp 圆角白卡 + 投影，
+> 桌面是整幅宽平铺行 + `outlineVariant.copy(alpha = 0.4f)` 的 40% 分割线。
+> 于是**同一个列表在同一应用里长两个样**，用户连问两次「桌面端有分割线、客户端为什么没有，
+> 这俩不是共享的吗」。而那条分割线正是「没做圆角行」的**补偿**，不是设计。
+> 合并后 `ConversationRow` 只剩一份，桌面那个文件 905 行变 686。
+> 同类还清了 6 个组件 + 2 个枚举 + 2 个容器（全部收敛到 `feature/nodes/NodeDetail.kt`）。
+
+#### 第一步 · 判"该不该共享"：问这是**内容**还是**外壳**
+
+| | 例子 | 处置 |
+|---|---|---|
+| **内容** | 列表行、详情卡、气泡、按钮、空态、工具栏图标 | **共享** |
+| **外壳** | 两栏布局、选中态、快捷键、菜单栏、状态栏、窗口 chrome | **参数化** |
+
+一句话判据：**把外壳换掉之后，这块像素还应不应该一样？** 应该 ⇒ 共享；不应该 ⇒ 它是外壳。
+
+#### 第二步 · 选接缝（本仓已有四种，按代价从低到高）
+
+| 模式 | 什么时候用 | 本仓现成例子 |
+|---|---|---|
+| **参数化** | 差异只是"值不同" | `bubbleFraction` / `showHeader` |
+| **插槽** | 差异是"整块不同" | `composerSlot` —— 桌面塞 `DesktopComposer`，手机塞 `MessageComposer` |
+| **适配器** | 两侧**模型类型不同** | `NodeDetailHeader(displayName, isAgent, presence)` —— 接原语，不接 `NodeEntry` / `NodeListItem` |
+| **状态提升** | 一侧多一个状态（选中、hover） | `selected: Boolean = false` + `hoverable` |
+
+**优先用参数化**。插槽是"整块换"，它会让两侧的分叉继续存在；适配器只在模型真的不同时用。
+
+#### 第三步 · 放哪（别把领域组件塞进通用层）
+
+| 共享范围 | 位置 | 例子 |
+|---|---|---|
+| 全应用、无领域含义 | `ui/components/` | `AppButtons.kt` / `PressableSurface.kt` / `Common.kt` |
+| **某个领域内**跨壳 | 哪个 `feature/<x>/` 就是它的家，**提为 `internal`** | `feature/nodes/NodeDetail.kt`（节点专属，**不进** components） |
+| 只服务一屏 | 就留在那个屏的文件里，`private` | — |
+
+反过来也成立：**为了"看起来更共享"把领域组件搬进 `ui/components/` 是错的** ——
+通用层会长出一堆只服务一个屏的东西，下一个读代码的人会以为它通用。
+
+#### 第四步 · 写的时候守三条
+
+1. **参数接原语**（`String` / `Boolean` / 已有枚举），不接壳自己的模型类型 ——
+   模型类型不一致是共享的**第一道障**（`NodeDetailHeader` 就是卡在这）。
+2. **不暴露样式自由度**（`contentPadding` / `style` / `shape` 之类）。留了口子，
+   调用点会把差异原样长回来 —— `AppButtons` 的 KDoc 里写着这条。
+3. **默认值要让信息最少的那一侧能直接调**：`selected = false` 让手机端不传就是对的。
+
+#### 第五步 · 怎么验（三件，缺一不算共享）
+
+1. **两端都有帧**：同一个组件至少一条手机帧 + 一条桌面帧，并且写进 `componentSpecs` 的
+   `previews`（不写进规格 = 没有证据，只有一张图）。
+2. **改一处，两端都变**：故意让桌面壳多传一个参数，看手机端的帧会不会跟着变。
+   **会 ⇒ 真共享；不会 ⇒ 是两份。**
+3. `python3 tools/ux-scoreboard.py` 看 `ci.duplicate_composables`（同名 Composable 同时出现在
+   `ui/desktop/` 与非 desktop 的处数），**只许降不许升**。
+
+#### 两个坑（都踩过）
+
+1. **量具会因此红，那是量具的问题**：`:designScreenDiffGate` 按"屏"切切片，而共享组件被多屏
+   共用 ⇒ 每次迁移都会双报一次（宿主屏"只代码"、别的屏"只原型"）。
+   **该门已修**（`tools/design-screen-diff.py` 的 `SHARED_COMPONENT_FILES` / `shared_components`）：
+   它按"这一屏的切片里真的调了这个组件"来并取值，且**只许关闭"只原型"、不许制造"只代码"**。
+   若仍红：① 先逐字确认新值确实在原型里（贴行号）；② 再用 `--baseline --reason` 记账并写明
+   是量具缺口；③ **不许**因为"反正要记账"就跳过第 ① 步。
+2. **"只共享一半"是最常见的失败形态**：合并了行却留着两个列表容器、合并了叶子组件却留着两个
+   模型类型 —— 分叉会从没合的地方重新长回来。合并时**先统一模型，再统一组件，最后才拆外壳**。
+
 ---
 
 ## 3. 「静默丢失」清单 —— 本仓最贵的一类缺陷
@@ -199,7 +270,16 @@ python3 tools/unused-imports.py --check
 - 装机与验证流程：
   - 产物统一放 `~/Downloads/relay-build-<date>/`；**报告前核对 sha256**。
   - APK：`adb -s <serial> install -r -d <apk>`；
-    桌面端：`osascript -e 'quit app "Tidings"'` → 替换 `/Applications/Tidings.app` → `open -a`。
+    桌面端：`osascript -e 'quit app "Tidings"'` → 替换 `/Applications/Tidings.app` → **重注册** → `open -a`。
+     ```bash
+     /System/Library/Frameworks/CoreServices.framework/Frameworks/LaunchServices.framework/Support/lsregister \\
+       -f -R -trusted /Applications/Tidings.app && killall Finder
+     ```
+     **为什么必须重注册**：LaunchServices 按 `CFBundleIdentifier` 索引图标缓存，直接替换 bundle
+     **不会**让缓存失效。不补这一步，新版装上去仍显示旧图标（常常是空白/通用图标），
+     看起来像「打包把图标弄丢了」—— 而实际 `Tidings.icns`、`Info.plist` 的 `CFBundleIconFile`、
+     以及两处 sha256 全是对的。**分辨方法**：把 .app 拷到 `~/Applications/` 再打开，
+     新路径不命中旧缓存；那里图标正常 ⇒ 是缓存问题，不是打包缺陷。
   - **不要只看「装上了」**：在新产物里 grep 一个只有新代码才有的符号名，证明装的是新的。
   - 手机状态探针（`run-as` 可读）：
     - `files/relay/diag/link.json` —— 链路（`closeCount` / `carrier` / `lastError`）
@@ -259,6 +339,8 @@ python3 tools/unused-imports.py --check
 | 修完一个缺陷 | 反向验证：把旧行为放回去，看测试变红 |
 | 新增文件 | 确认它是源码 / 测试 / 正式文档，不是临时产物 |
 | 报告真机结果 | 先 grep 新产物里的新符号，证明装的是新代码 |
+| 写桌面壳里的屏 | 先问"这是**内容**还是**外壳**"：内容（列表行/详情卡/气泡/按钮）与手机共用一份，外壳（两栏、快捷键、chrome）参数化 —— 照抄 `ChatScreen + ChatScreenChrome` 的形状，别照抄"复制一份再改"（见 §2.6） |
+| 合并共享组件之后 `:designScreenDiffGate` 红了 | 那是**量具缺口**不是代码偏离：先逐字确认新值确实在原型里（贴行号）再 `--baseline --reason` 记账，别直接刷。根治方案见主计划 §0.7（工具已实现"按调用点并共享取值、且只许关闭'只原型'"） |
 
 ---
 

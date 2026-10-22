@@ -63,6 +63,7 @@
 | `agr1` | 授权回路（D7） | 三张 grant 帧；**宿主在投递 agent 帧前按策略过滤** —— 没授权 = 没数据，沉默 ≠ 拒绝 |
 | `agp1` | 会话分页（D8） | `agent-session-page`：设备向宿主要一页历史会话（与 `agn1` 是两个方向的能力） |
 | `att1` | agent 事件附件卡片（task-45） | 发送方据此决定要不要在 `agent-event` 里带 `attachment`；**不声明就只发文本占位** |
+| `gta1` | 带发送者归属的群文本 | 发送方据此决定群文本带不带 `senderId` / `reasoning` / `agentSessionId`+`agentCursor`；**不声明就发同 id 的裁剪版**（只含上游白名单字段，见 §6.10 / §6.11） |
 | `lnk1` | 长连接下行（K1/K2） | 由**主机**声明；手机据此决定要不要拨号（见 `ARCHITECTURE.md` §5.4） |
 
 > 兼容规则不变，但补一条**主动**保障：新字段只在「对端声明了对应 cap」时才发。`att1` 就是这么用的 —— 不靠"指望旧端恰好宽容"，而是先看 caps 再决定带不带。
@@ -251,6 +252,21 @@
 于是 agent 转发进群的每一条都被对端判成 extra-field 丢掉 ——
 发送侧编码成功、本地落库成功、`SendOutcome.SENT`，接收侧一条都没有。
 
+**能力门控（`gta1`）：白名单只解决「本仓两端都升级」。** 对**不是本仓**的接收端，多一个键就是
+整帧丢弃：上游茶话间 0.61.2 的 `group-text` 白名单逐字只有
+`kind / text / groupId / groupRev / mentions / resend / replyTo`（`validatePayload`，多键返回 `false`）。
+所以从 `gta1` 起，这两个键按**逐成员的能力**发：
+
+- 声明了 `gta1` 的成员收**带键**的那一份；没声明的收**同一信封 `id`、同一 `ts`** 的裁剪版；
+- 同一 id 是硬约束 —— 两个变体若换 id，同一条话会在群里出现两次，撤回也只能撤其中一份；
+- 队列按 `(peerId, msgId)` 分行，各存**各自那份** JSON；扇出预算到点的重放也用各自那份（不能
+  给 legacy 成员塞回带键版本）；
+- 判据**只看 caps**，不看版本号、不拿 `agn1` 当代理：老版 Tidings 节点可能声明了 `agn1` 却不认识这两个键。
+
+不做门控的现场后果不是「显示少一点」，而是**桌面端一条都收不到**（发送侧编码成功、本地落库成功、
+`SendOutcome.SENT`）。测试：`GroupTextCapabilityGatingTest`（6 条：模拟上游 7 键白名单、两变体同
+id/ts、legacy 成员无键、真实扇出逐成员、队列两行各存各的、群重发仍保持门控与原 id）。
+
 **为什么 `reasoning` 是独立字段，而不是把 ` thinking…</think>` 塞回 `text`**：正文与思考各有各的
 上限。混在 `text` 里时，正文 + 思考一起顶到通道上限（UDP 800 / TCP 4096 字节）会被整帧拒收 ——
 那正是「带思考的原文发出去、对端反而收不到」的形态。分开之后思考有 24 KiB 预算，
@@ -259,6 +275,31 @@
 **安全边界**：两个键都只影响显示。任何群成员本来就能在群里说任何话，把 `senderId` 写成别人的
 nodeId 只会让那条气泡挂在别人名下（本协议不防冒名，群内成员互信）；`reasoning` 同理，
 伪造一个思考块没有任何特权收益。所以只校验长度形态，不做归属校验。
+
+### 6.11 群文本的 `agentSessionId` / `agentCursor`（可选键，**纯展示分段**）
+
+| 键 | 类型 | 上线条件 |
+|---|---|---|
+| `agentSessionId` | string（≤ `Limits.ID`） | 与 `agentCursor` **成对**出现 |
+| `agentCursor` | 非负整数 | 同上 |
+
+**解决什么**：聊天流里那条「任务：xxx / 新会话」会话分段线，此前只有桌面端画得出来。
+判据绑在消息 id 前缀 `agent-ev-` 上 —— 那是桌面端**本地构造**消息时写进 id 的，转发进群时
+并没有把这个事实带过去；手机端落库用的是信封 UUID，于是 `extractSessionId` 恒 null。
+会话归属是**事实**，应该由协议携带，而不是靠 id 字符串猜。
+
+**成对强制**：只给 `agentSessionId` 而不给 `agentCursor` 的帧**整帧拒收** ——
+与 `recall` 的 `groupId`/`groupRev` 同一条纪律。接收端要么猜、要么忽略，两种都不如直接拒：
+拒收可诊断，猜错不可诊断。
+
+**与 `gta1` 的关系**：两个键都属于扩展键，走同一个能力位门控 —— 对端没声明 `gta1` 就发
+同 id 的裁剪版（只含上游白名单字段）。**旧节点不认识新键 ⇒ 整帧丢弃**，两端需同版本。
+
+**安全边界**：纯展示分段，不参与鉴权、不参与成员判定。
+
+测试：`CodecTest.kt` 的 `groupTextWithSessionSurvivesInboundValidation`
+（**回归：走解码而不是只断言 JSON 里有键**）、`groupTextWithoutSessionKeepsTheOldShape`、
+`aSessionWithoutCursorIsRejected`。
 
 测试：`core/src/commonTest/.../CodecTest.kt` 的
 `groupTextWithSenderIdSurvivesInboundValidation`（**回归：走解码而不是只断言 JSON 里有键**）、
