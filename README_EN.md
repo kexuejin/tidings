@@ -31,6 +31,26 @@
 4. **Desktop App (`:desktopApp`)**: Standalone Compose Desktop client sharing core business state and UI components, optimized for widescreen split-pane workflows, window management, and background tray execution.
 5. **Headless Agent Node & Pluggable Drivers (`:agentNode`)**: Decouples network communication from LLM inference engines. Supports `NativeRelayDriver`, `DsBotDriver`, `OpenAiDriver`, and MCP (Model Context Protocol) tool extensions via a local loopback HTTP control plane (`127.0.0.1:8788`) and WebSocket gateway.
 
+### Supported connection paths
+
+Four paths — they differ only in **how the two sides find each other**; once found, the encryption rules and message semantics are identical:
+
+| Path | Auto-discovery | QR scan needed first | Requirement |
+|---|---|---|---|
+| **Same LAN (IPv4)** | ✅ UDP broadcast + subnet broadcast | No | Same broadcast domain |
+| **Same LAN (IPv6)** | ✅ mDNS / same `/64` | No | Same as above |
+| **Public IPv6** | ❌ broadcast cannot cross subnets | **Yes** (QR carries the GUA) | Peer's router allows inbound |
+| **Tailscale** | ❌ point-to-point tunnel, no broadcast domain | **Yes** (QR carries the tunnel address) | Both on the same tailnet |
+| **ZeroTier** | ✅ subnet broadcast (phones included) | No | Same subnet, same ZT network |
+
+**Why ZeroTier discovers itself like a LAN**: the desktop treats it as an ordinary NIC (macOS exposes it as `feth`, with a broadcast address) and broadcasts on it as usual; the phone receives it through a **socket bound to the wildcard address** — verified on device: a wildcard socket on Android does receive packets sent to the ZeroTier subnet broadcast address.
+
+**After pairing, discovery matters much less**: both sides tell each other **every address they have** (including Tailscale / ZeroTier tunnel ranges) and send a unicast heartbeat to all known addresses every 30 seconds. Moving between networks (LAN ↔ cellular) therefore recovers automatically — no re-scan and no manual address entry.
+
+**Stated honestly — the recovery window**: how fast a switch recovers depends on how fast the overlay itself reconnects (ZeroTier on mobile can take minutes after a network change, especially when the screen is off or the app is background-restricted). The peer shows as offline meanwhile, and messages queue until it returns.
+
+**Reinstalling means scanning again**: node identity lives with the installation, so a reinstall is a brand-new device — the previous pairings and group memberships no longer point at it. What saves you there is exactly what is described above: subnet-broadcast discovery on the same network, or one QR scan.
+
 ---
 
 ## Key Features

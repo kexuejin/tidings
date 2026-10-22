@@ -387,7 +387,13 @@
     <string name="disc_peers_online">在线节点</string>
     <string name="disc_retry_start">重新监听</string>
     <string name="disc_connect">连接</string>
-    <string name="disc_vpn_warning">检测到 VPN。局域网广播到不了对端，请在「添加节点」里填对方地址直连。</string>
+    <!--
+         原来写的是「请在「添加节点」里填对方地址直连」—— 那时隧道地址既不进配对码、
+         也不进候选池，手动填是唯一出路。现在两条都通了：配对码带隧道地址，配对后
+         双方互告全部地址并每 30 秒单播心跳。所以现在这句该说的是「怎么用」，
+         而不是让用户去抄 IP。
+    -->
+    <string name="disc_vpn_warning">检测到 VPN / 覆盖网。同一张网里的设备扫码即可直连；配对之后换网会自动恢复，不用重新扫码。</string>
     <string name="disc_invalid_host">这不是一个有效的 IP 或主机名。</string>
     <string name="disc_duplicate">这个节点已经在列表里了。</string>
     <string name="disc_added">已向 %1$s 打招呼，等它回应。</string>

@@ -344,7 +344,7 @@
     <string name="disc_peers_online">Online Nodes</string>
     <string name="disc_retry_start">Listen Again</string>
     <string name="disc_connect">Connect</string>
-    <string name="disc_vpn_warning">VPN detected. LAN broadcasts may fail; enter address manually to connect.</string>
+    <string name="disc_vpn_warning">VPN / overlay network detected. Devices on the same network can connect by scanning the QR; after pairing, switching networks recovers automatically — no re-scan needed.</string>
     <string name="disc_invalid_host">Invalid IP or hostname.</string>
     <string name="disc_duplicate">Node already exists in list.</string>
     <string name="disc_added">Greeting sent to %1$s, awaiting response.</string>
