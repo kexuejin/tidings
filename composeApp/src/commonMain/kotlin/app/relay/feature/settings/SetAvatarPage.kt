@@ -8,7 +8,6 @@ import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
-import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
@@ -23,14 +22,11 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
-import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
-import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -74,6 +70,9 @@ import app.relay.generated.resources.set_avatar_steps_hint
 import app.relay.ui.ContentWidths
 import app.relay.ui.SectionCard
 import app.relay.ui.centerCapped
+import app.relay.ui.components.AppButtonSize
+import app.relay.ui.components.AppOutlinedButton
+import app.relay.ui.components.AppTextButton
 import app.relay.ui.components.LargeTitleBar
 import app.relay.ui.components.TitleBarDivider
 import app.relay.ui.theme.LocalAppSpacing
@@ -256,24 +255,15 @@ private fun PickImageCard(
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                     )
                 }
-                // 原型 `.avup-acts .btn`：白底 + 1px outline 描边的 12px 圆角胶囊，
-                // `padding:6px 9px`、`font-size:11px`、`font-weight:500`。
-                // 高度仍由 M3 的 40dp 最小触控高度决定（与桌面设置窗「重试」同一先例），原型画的是 27px。
-                OutlinedButton(
+                // 原型 `.avup-acts .btn` 即小档（`.btn sm`）：白底 + 1px outline 描边的圆角胶囊。
+                // 内边距 / 字号 / 圆角现在由按钮族的小档统一给（原型那颗是 6×9 / 11px；
+                // 小档是 6×10 / labelMedium，1px 档位差已在按钮族里记为一处刻意偏离）。
+                // 高度仍由 M3 的最小触控高度决定（与桌面设置窗「重试」同一先例），原型画的是 27px。
+                AppOutlinedButton(
+                    text = stringResource(Res.string.set_avatar_reselect),
                     onClick = onRemove,
-                    shape = MaterialTheme.shapes.medium,
-                    contentPadding = PaddingValues(horizontal = sp.md10, vertical = sp.sm6),
-                    colors = ButtonDefaults.outlinedButtonColors(
-                        containerColor = MaterialTheme.colorScheme.surface,
-                        contentColor = MaterialTheme.colorScheme.onSurface,
-                    ),
-                ) {
-                    Text(
-                        text = stringResource(Res.string.set_avatar_reselect),
-                        style = MaterialTheme.typography.labelSmall,
-                        fontWeight = FontWeight.Medium,
-                    )
-                }
+                    size = AppButtonSize.Small,
+                )
             }
         }
         Spacer(Modifier.height(sp.sm))
@@ -610,17 +600,11 @@ private fun SaveProfileBar(onSave: () -> Unit, enabled: Boolean) {
                 horizontalArrangement = Arrangement.End,
                 verticalAlignment = Alignment.CenterVertically,
             ) {
-                TextButton(onClick = onSave, enabled = enabled) {
-                    Text(
-                        text = stringResource(Res.string.set_avatar_save),
-                        style = MaterialTheme.typography.labelLarge,
-                        color = if (enabled) {
-                            MaterialTheme.colorScheme.primary
-                        } else {
-                            MaterialTheme.colorScheme.onSurfaceVariant
-                        },
-                    )
-                }
+                AppTextButton(
+                    text = stringResource(Res.string.set_avatar_save),
+                    onClick = onSave,
+                    enabled = enabled,
+                )
             }
         }
     }

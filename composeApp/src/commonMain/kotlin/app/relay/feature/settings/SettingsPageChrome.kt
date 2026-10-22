@@ -17,7 +17,6 @@ import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
-import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Switch
@@ -43,6 +42,7 @@ import app.relay.ui.components.TitleBarDivider
 import app.relay.ui.theme.LocalAppSpacing
 import app.relay.ui.theme.RelayElevations
 import org.jetbrains.compose.resources.stringResource
+import app.relay.ui.theme.SurfaceTiers
 
 /**
  * 设置各子页共用的「标题栏 + 滚动列」外壳，以及共用的行组件。
@@ -267,7 +267,8 @@ internal fun TagPill(text: String, tone: TagTone = TagTone.Plain) {
     // 第二轮修：原来**三档都画绿底**（写死 primaryContainer），于是 `fd1` 与「7 天」
     // 这两处原型 `.tag`（灰底）被画成了 `.tag.ok` 的绿底。
     val color = when (tone) {
-        TagTone.Plain -> MaterialTheme.colorScheme.surfaceVariant
+        // 标签的「默认」档 → --surface-2（原型 .tag 用的就是这一档，见 SurfaceTiers）。
+        TagTone.Plain -> SurfaceTiers.Raised
         TagTone.Ok -> MaterialTheme.colorScheme.primaryContainer
         TagTone.Queued -> MaterialTheme.colorScheme.secondaryContainer
     }
@@ -311,13 +312,6 @@ internal fun CardHeaderNote(text: String) {
         modifier = Modifier.fillMaxWidth().padding(bottom = LocalAppSpacing.current.xs),
     )
 }
-
-/** 危险动作按钮的配色，与第一屏一致。 */
-@Composable
-internal fun dangerOutlinedColors() = ButtonDefaults.outlinedButtonColors(
-    containerColor = MaterialTheme.colorScheme.errorContainer,
-    contentColor = MaterialTheme.colorScheme.onErrorContainer,
-)
 
 /**
  * 与 `ui/components/Common.kt` 的 [app.relay.ui.components.InfoRow] 同形状、但值可以带颜色 /
@@ -386,6 +380,16 @@ const val SETTINGS_PAGE_CAPS = "caps"
 const val SETTINGS_PAGE_DATA = "data"
 const val SETTINGS_PAGE_DIAG = "diag"
 const val SETTINGS_PAGE_UPDATE = "update"
+
+/**
+ * 「输入法自检」独立页。
+ *
+ * 它此前是一个**孤儿页**：`ImeSmokePane` 与桌面那套 `DesktopSettingsNav.ImeSmoke` 都写好了，
+ * 但 `ImeSmokePane` 在全仓**零处调用**，`DesktopSettingsChrome` 也没有任何宿主（桌面实际渲染的是
+ * 与手机共用的 `SettingsScreen`）。用户按文档「设置 → 诊断 → 输入法自检」找过去，根本到不了。
+ * 现在它有了真实路由，不是一个只能读代码想象的面板。
+ */
+const val SETTINGS_PAGE_IME = "ime"
 
 /**
  * 「上传头像」独立页（台账 `m-set-avatar`）。

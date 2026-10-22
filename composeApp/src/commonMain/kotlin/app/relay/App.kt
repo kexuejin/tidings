@@ -8,6 +8,7 @@ import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.WindowInsets
+import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.safeDrawing
 import androidx.compose.foundation.layout.windowInsetsPadding
@@ -31,7 +32,9 @@ import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import app.relay.app.RelayController
+import app.relay.app.exportDiagnosticsPackage
 import app.relay.core.fs.directoryUsageBytes
+import app.relay.core.nowMillis
 import app.relay.core.transport.PartFile
 import app.relay.app.navBadges
 import app.relay.feature.agents.AgentConsoleScreen
@@ -40,6 +43,8 @@ import app.relay.feature.chat.ChatScreen
 import app.relay.feature.chat.ChatScreenActions
 import app.relay.feature.chat.ChatScreenChrome
 import app.relay.feature.chat.ChatScreenGroupActions
+import app.relay.feature.chat.draftOf
+import app.relay.feature.chat.updateDraft
 import app.relay.feature.chat.ChatScreenState
 import app.relay.feature.conversations.ConversationsScreen
 import app.relay.feature.nodes.NodesScreen
@@ -51,11 +56,13 @@ import app.relay.feature.settings.SETTINGS_PAGE_CAPS
 import app.relay.feature.settings.SETTINGS_PAGE_DATA
 import app.relay.feature.settings.SETTINGS_PAGE_DIAG
 import app.relay.feature.settings.SETTINGS_PAGE_NOTIFY
+import app.relay.feature.settings.SETTINGS_PAGE_IME
 import app.relay.feature.settings.SETTINGS_PAGE_UPDATE
 import app.relay.feature.settings.SettingsAppearSubpage
 import app.relay.feature.settings.SettingsCapsSubpage
 import app.relay.feature.settings.SettingsDataSubpage
 import app.relay.feature.settings.SettingsDiagSubpage
+import app.relay.ui.desktop.ImeSmokePane
 import app.relay.feature.settings.SettingsNotifySubpage
 import app.relay.feature.settings.SetAvatarPage
 import app.relay.feature.settings.SettingsUpdateSubpage
@@ -164,6 +171,14 @@ fun RelayApp(
 
                 var nav by remember { mutableStateOf(AppNavState()) }
 
+                // 会话列表的滚动状态**提到这里**，而不是留在 ConversationsScreen 内部。
+                //
+                // 为什么：`ConversationsScreen` 挂在 `when` 分支里，进会话那一屏切走时它就被
+                // 销毁了，内部的 rememberLazyListState 跟着没 ⇒ 返回时列表回到顶部（116 个
+                // 会话的列表上，用户翻到「11 天前」那批点进去看一眼再回来，位置全丢）。
+                // 放在 nav 旁边，它与导航状态同寿，进出会话都还在。
+                val convListState = rememberLazyListState()
+
                 // 折叠屏展开 / 平板旋转会让外壳从手机换成两栏，而两栏那条路没有扫码页：
                 // 不在这里收掉的话，页面会无声消失（scanning 还挂着、相机也一直开着），
                 // 折回去又自己冒出来。`selectTab` 与关闭按钮之外的第三条清路。
@@ -174,6 +189,12 @@ fun RelayApp(
                 // 「在看哪个 Agent 的日志」和「聊天里开着哪几个会话」是两件事，
                 // 以前它们共用 selectedPeerId，于是打开一个 Agent 日志会顺手改掉聊天的当前会话。
                 var selectedAgentId by remember { mutableStateOf<String?>(null) }
+
+                // 每个会话各自的草稿。**必须住在壳里**：ChatScreen 自己的 `draft` 是
+                // `remember(peerId)` 的，切会话就重建 —— 用户写到一半去别处确认件事，
+                // 回来字数全没。壳按会话键记着，切回来时作为 `initialDraft` 喂进 ChatScreen。
+                // 只活在进程内（不落盘）：手机该有的语义是"切页面不丢"，不是"重启还留着"。
+                var draftsByConv by remember { mutableStateOf(mapOf<String, String>()) }
 
                 // 戳一碰要求"定位到该会话"（协议 §8）：控制器只放一个一次性请求，
                 // 外壳消费一次就清掉 —— 留着它，用户手动切走之后又会被拽回来。
@@ -312,6 +333,9 @@ fun RelayApp(
                         ),
                         actions = ChatScreenActions(
                             onSend = controller::sendToConversation,
+                            // 「重发」按原消息 id 重放（core 的 replayOutgoing）：换 id 重发会让
+                            // 对端多落一条（真机现场同一句话两个 id）。
+                            onRetryMessage = controller::retryMessage,
                             onOpenAgentConsole = { nav = nav.selectTab(AppRoutes.AGENTS) },
                             // 打开与 agent 的会话时，向宿主要该工作区**第一页**历史会话
                             // （PPE-1 增补 D8）。用户裁决：
@@ -349,6 +373,8 @@ fun RelayApp(
                             onResumeTransfer = controller::resumeTransfer,
                             // 长按自己的消息撤回；头部的戳一碰（仅单聊，Agent 会话不画）。
                             onRecallMessage = controller::recall,
+                            // 只删本机这一条（与撤回不同：不动协议、不通知对方）。
+                            onDeleteMessage = controller::deleteMessage,
                             onForwardMessage = controller::forwardMessage,
                             onNudge = controller::nudge,
                             onRequestScreenView = controller::requestScreenView,
@@ -390,6 +416,11 @@ fun RelayApp(
                             // 只喂移动端那套壳，所以恒 82% —— 判据不是窗口多宽，推导见
                             // feature/chat/BubbleWidth.kt。
                             bubbleFraction = ContentWidths.BUBBLE_FRACTION_PHONE,
+                            // 草稿按会话记：切走再回来不丢字（见 draftsByConv 的说明）。
+                            initialDraft = draftOf(draftsByConv, nav.activeSessionId),
+                            onDraftChange = { convId, text ->
+                                draftsByConv = updateDraft(draftsByConv, convId, text)
+                            },
                         ),
                     )
                 }
@@ -487,6 +518,18 @@ fun RelayApp(
                             state = state,
                             modifier = settingsModifier,
                             onBack = { settingsPage = null },
+                            // 诊断包导出：打包/分享都在这条 suspend 里，页面自己起协程并显示结果
+                            // （成功报文件名与大小，失败报原因 —— 不给一颗点下去没反应的按钮）。
+                            onExportDiagnostics = controller::exportDiagnosticsPackage,
+                            // 输入法自检的入口（此前是孤儿页，见 SETTINGS_PAGE_IME 的 KDoc）。
+                            onOpenImeSmoke = { settingsPage = SETTINGS_PAGE_IME },
+                        )
+
+                        // 输入法自检：此前是孤儿页（见 SETTINGS_PAGE_IME 的 KDoc）。
+                        // 它在 commonMain 里，手机与桌面同一份实现。
+                        SETTINGS_PAGE_IME -> ImeSmokePane(
+                            modifier = settingsModifier,
+                            onBack = { settingsPage = null },
                         )
 
                         SETTINGS_PAGE_UPDATE -> SettingsUpdateSubpage(
@@ -551,7 +594,9 @@ fun RelayApp(
                         // 放在 `chatDetailOnTop` **之前**：搜索页是从列表进的，两者不该同时成立；
                         // 顺序写反的后果是"从命中点进会话、再返回"会落回搜索页而不是列表。
                         globalSearchOpen -> GlobalSearchScreen(
-                            onSearch = controller::searchGlobal,
+                            // 用 lambda 而不是方法引用：`searchGlobal` 有两个重载（无 scope / 带 scope），
+                            // 方法引用在重载下推断不出参数类型。
+                            onSearch = { q, scope -> controller.searchGlobal(q, scope) },
                             onBack = { globalSearchOpen = false },
                             onOpenChat = { convId ->
                                 globalSearchOpen = false
@@ -584,6 +629,12 @@ fun RelayApp(
                                     onDownloadEntries = controller::downloadCabinetEntries,
                                     onPickShareRoot = controller::pickShareRoot,
                                     onUploadToCabinet = controller::uploadToCabinet,
+                                    // 「最近上传」的时间列必须有一个真实基准：以前这一行不传
+                                    // now，CabinetScreen 的默认值是 0，relativeTime(ts, 0) 的
+                                    // delta 恒为负、恒落进"刚刚"那一档 —— 界面在说假话。
+                                    // 不传也能拿到默认的 nowMillis()，这里显式写出来是为了让
+                                    // 组合根这一层能一眼看出它读的是墙上时钟。
+                                    now = nowMillis(),
                                     modifier = Modifier.weight(1f),
                                 )
 
@@ -627,7 +678,12 @@ fun RelayApp(
 
                                 AppRoutes.AGENTS -> AgentConsoleScreen(
                                     state = state,
-                                    selectedAgentId = nav.detailPeerId ?: selectedAgentId,
+                                    // **不能用** `nav.detailPeerId`：那是**节点页**的详情（普通节点
+                                    // 也有值）。用户先在节点页点开一台普通设备、再切到 Agents 页签时，
+                                    // 这个 id 会流进来；它不在 `agentPeers` 里时，`AgentConsoleScreen` 的
+                                    // 回落会换成「第一个 agent」⇒ **用户点 A 却看到 B 的工作区**
+                                    // （AGENTS.md §2.4：一个事实只有一个来源，两个页签的「详情」是两件事）。
+                                    selectedAgentId = selectedAgentId,
                                     onSelectAgent = { selectedAgentId = it },
                                     selectedAgentSessionId = nav.activeAgentSessionId,
                                     onSelectAgentSession = { nav = nav.selectAgentSession(it) },
@@ -694,6 +750,7 @@ fun RelayApp(
 
                                 else -> ConversationsScreen(
                                     state = state,
+                                    listState = convListState,
                                     onOpenChat = openChat,
                                     onGoToPairing = { nav = nav.selectTab(AppRoutes.NODES) },
                                     onDismissBanner = controller::dismissBanner,
@@ -715,6 +772,11 @@ fun RelayApp(
                                     // （字段名是 `convId` 不是 `peerId`，理由见 `ConversationUi.convId`
                                     // 的 KDoc；`App.kt` 是组合根，一处调用补一行都要 Lead 点名授权。）
                                     onMarkAllRead = controller::markAllRead,
+                                    // 长按会话行的三个动作。都是纯本机行为：置顶/静音只改设置，
+                                    // 删除只清本机消息与标记（不动协议、不通知对方）。
+                                    onTogglePin = controller::togglePinnedConv,
+                                    onToggleMute = controller::toggleMutedConv,
+                                    onDeleteConversation = controller::deleteConversation,
                                     // ## 手机端**不画**「工作区」段（用户裁决：对齐桌面）
                                     //
                                     // 这两颗 lambda 一起决定那一段画不画（见 `ConversationsScreen`

@@ -303,6 +303,12 @@ internal fun MessageUi.toStorable(): MessageUi = copy(file = null)
  * 只动**出站**（[MessageUi.mine]）：入站消息本来就没有投递态，也不会带信封；
  * 而 `mine == true && delivery == Queued` 在内存里是唯一的排队形态，不会认错人。
  *
+ * 乐观插入（[DeliveryState.Sending]）现在有**三条**入口，全部落在同一个 [MessageUi] 上，
+ * 所以上面这条折算对它们一视同仁：私聊文本（`RelayControllerMessagesComponent.handleSend`）、
+ * 群聊文本（`RelayControllerGroupsComponent.sendGroupTextOptimistic`）、以及文件卡插入前那段
+ * 窗口。文件卡本身另有一层保障：卡片状态（[TransferState.Offered]）**不落盘** ——
+ * [toStorable] 会把 [MessageUi.file] 整张剥掉，所以重启后不会复活一张传输管理器不认的卡片。
+ *
  * 已知代价（写在这里是因为一定会有人来问）：重注入失败而显示出的「发送失败」是**终态** ——
  * 用户想重发只能自己再发一条。
  */

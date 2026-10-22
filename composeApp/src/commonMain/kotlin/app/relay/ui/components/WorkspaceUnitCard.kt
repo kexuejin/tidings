@@ -5,13 +5,10 @@ package app.relay.ui.components
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
-import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
-import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
-import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.Card
@@ -19,7 +16,6 @@ import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
@@ -52,6 +48,7 @@ import app.relay.app.model.PeerUi
 import org.jetbrains.compose.resources.painterResource
 import org.jetbrains.compose.resources.stringResource
 import app.relay.ui.theme.relayCardShadow
+import app.relay.ui.theme.SurfaceTiers
 
 /**
  * 工作区卡片的全部文案与计数。
@@ -188,7 +185,7 @@ internal fun WorkspaceUnitCard(
                         } else if (ui.access != null) {
                             Surface(
                                 shape = RoundedCornerShape(4.dp),
-                                color = MaterialTheme.colorScheme.surfaceVariant,
+                                color = SurfaceTiers.Raised,
                             ) {
                                 Text(
                                     text = stringResource(
@@ -224,21 +221,12 @@ internal fun WorkspaceUnitCard(
                         )
                     }
                 }
-                OutlinedButton(
+                AppOutlinedButton(
+                    text = ui.chatLabel,
                     onClick = onOpenChat,
-                    contentPadding = PaddingValues(horizontal = sp.md10, vertical = sp.xxs),
-                ) {
-                    Icon(
-                        painter = painterResource(Res.drawable.ic_chat_bubble),
-                        contentDescription = null,
-                        modifier = Modifier.size(IconSizes.Label),
-                    )
-                    Spacer(Modifier.width(sp.sm6))
-                    Text(
-                        text = ui.chatLabel,
-                        style = MaterialTheme.typography.labelMedium,
-                    )
-                }
+                    size = AppButtonSize.Small,
+                    leadingIcon = Res.drawable.ic_chat_bubble,
+                )
             }
 
             HorizontalDivider()

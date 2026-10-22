@@ -49,15 +49,15 @@ class CapabilityAndNotificationSettingsTest {
     fun theTwoSwitchesNarrowTheDeclaredCapabilities() {
         assertEquals(MsgTypes.MOBILE_CAPS, settings().caps(), "两个都开 = 原来那套 MOBILE_CAPS，顺序都不能变")
         assertEquals(
-            listOf(MsgTypes.CAP_MOBILE_TEXT, MsgTypes.CAP_AGENT_SESSION, MsgTypes.CAP_AGENT_QUEUE, MsgTypes.CAP_AGENT_WORKSPACE, MsgTypes.CAP_AGENT_GRANT, MsgTypes.CAP_AGENT_SESSION_PAGE, MsgTypes.CAP_TABLE_TEXT, MsgTypes.CAP_ATTACHMENT),
+            listOf(MsgTypes.CAP_MOBILE_TEXT, MsgTypes.CAP_AGENT_SESSION, MsgTypes.CAP_AGENT_QUEUE, MsgTypes.CAP_AGENT_WORKSPACE, MsgTypes.CAP_AGENT_GRANT, MsgTypes.CAP_AGENT_SESSION_PAGE, MsgTypes.CAP_TABLE_TEXT, MsgTypes.CAP_ATTACHMENT, MsgTypes.CAP_GROUP_TEXT_ATTRIBUTED),
             settings(record = false).caps(),
         )
         assertEquals(
-            listOf(MsgTypes.CAP_MOBILE_RECORD, MsgTypes.CAP_AGENT_SESSION, MsgTypes.CAP_AGENT_QUEUE, MsgTypes.CAP_AGENT_WORKSPACE, MsgTypes.CAP_AGENT_GRANT, MsgTypes.CAP_AGENT_SESSION_PAGE, MsgTypes.CAP_TABLE_TEXT, MsgTypes.CAP_ATTACHMENT),
+            listOf(MsgTypes.CAP_MOBILE_RECORD, MsgTypes.CAP_AGENT_SESSION, MsgTypes.CAP_AGENT_QUEUE, MsgTypes.CAP_AGENT_WORKSPACE, MsgTypes.CAP_AGENT_GRANT, MsgTypes.CAP_AGENT_SESSION_PAGE, MsgTypes.CAP_TABLE_TEXT, MsgTypes.CAP_ATTACHMENT, MsgTypes.CAP_GROUP_TEXT_ATTRIBUTED),
             settings(text = false).caps(),
         )
         assertEquals(
-            listOf(MsgTypes.CAP_AGENT_SESSION, MsgTypes.CAP_AGENT_QUEUE, MsgTypes.CAP_AGENT_WORKSPACE, MsgTypes.CAP_AGENT_GRANT, MsgTypes.CAP_AGENT_SESSION_PAGE, MsgTypes.CAP_TABLE_TEXT, MsgTypes.CAP_ATTACHMENT),
+            listOf(MsgTypes.CAP_AGENT_SESSION, MsgTypes.CAP_AGENT_QUEUE, MsgTypes.CAP_AGENT_WORKSPACE, MsgTypes.CAP_AGENT_GRANT, MsgTypes.CAP_AGENT_SESSION_PAGE, MsgTypes.CAP_TABLE_TEXT, MsgTypes.CAP_ATTACHMENT, MsgTypes.CAP_GROUP_TEXT_ATTRIBUTED),
             settings(text = false, record = false).caps(),
             "两个开关都关掉也不影响 agn1 / agq1 / aws1 / tbl1：它们是事实声明，不是用户偏好",
         )
@@ -81,7 +81,7 @@ class CapabilityAndNotificationSettingsTest {
     fun theDeclaredCapabilitiesReachTheProfileThatGetsBroadcast() {
         val profile = settings(text = false).toProfile(host = "192.168.1.44", ver = "relay-0.1.0")
         assertEquals(
-            listOf(MsgTypes.CAP_MOBILE_RECORD, MsgTypes.CAP_AGENT_SESSION, MsgTypes.CAP_AGENT_QUEUE, MsgTypes.CAP_AGENT_WORKSPACE, MsgTypes.CAP_AGENT_GRANT, MsgTypes.CAP_AGENT_SESSION_PAGE, MsgTypes.CAP_TABLE_TEXT, MsgTypes.CAP_ATTACHMENT),
+            listOf(MsgTypes.CAP_MOBILE_RECORD, MsgTypes.CAP_AGENT_SESSION, MsgTypes.CAP_AGENT_QUEUE, MsgTypes.CAP_AGENT_WORKSPACE, MsgTypes.CAP_AGENT_GRANT, MsgTypes.CAP_AGENT_SESSION_PAGE, MsgTypes.CAP_TABLE_TEXT, MsgTypes.CAP_ATTACHMENT, MsgTypes.CAP_GROUP_TEXT_ATTRIBUTED),
             profile.caps,
         )
         assertEquals("self", profile.nodeId, "收窄 caps 不该顺手改动档案的其它字段")
@@ -222,7 +222,7 @@ class CapabilityAndNotificationSettingsTest {
 
         assertEquals(false, controller.state.value.settings.waitFrameCapability)
         assertEquals(
-            listOf(MsgTypes.CAP_MOBILE_RECORD, MsgTypes.CAP_AGENT_SESSION, MsgTypes.CAP_AGENT_QUEUE, MsgTypes.CAP_AGENT_WORKSPACE, MsgTypes.CAP_AGENT_GRANT, MsgTypes.CAP_AGENT_SESSION_PAGE, MsgTypes.CAP_TABLE_TEXT, MsgTypes.CAP_ATTACHMENT),
+            listOf(MsgTypes.CAP_MOBILE_RECORD, MsgTypes.CAP_AGENT_SESSION, MsgTypes.CAP_AGENT_QUEUE, MsgTypes.CAP_AGENT_WORKSPACE, MsgTypes.CAP_AGENT_GRANT, MsgTypes.CAP_AGENT_SESSION_PAGE, MsgTypes.CAP_TABLE_TEXT, MsgTypes.CAP_ATTACHMENT, MsgTypes.CAP_GROUP_TEXT_ATTRIBUTED),
             controller.state.value.settings.caps(),
             "重启后广播出去的能力必须还是用户关掉之后的那个（agn1 / agq1 / aws1 / tbl1 恒在，与开关无关）",
         )

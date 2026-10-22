@@ -26,6 +26,7 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import app.relay.app.RelayUiState
+import app.relay.app.resolveNodeIdentity
 import app.relay.core.protocol.GroupMeta
 import app.relay.generated.resources.Res
 import androidx.compose.material.icons.Icons
@@ -141,6 +142,19 @@ internal fun ChatHeader(
     visibleSessionCount: Int? = null,
 ) {
     val sp = LocalAppSpacing.current
+    // 头部标题与头像也走**同一个身份解析器**：1:1 的 agent 会话标题应是 agent 名（DSH），
+    // 不是那台宿主机器的昵称 —— 否则列表里是 DSH、点进去头部又叫 mac mini。
+    // 群头部保持群名（`peer` 是占位，解析器对群键没有意义）。
+    val identityState = state
+    val resolvedPeer = if (group == null && identityState != null) {
+        remember(peer, identityState) {
+            resolveNodeIdentity(peer.nodeId, identityState.senderContext(peer.nodeId))
+        }
+    } else {
+        null
+    }
+    val peerTitle = resolvedPeer?.displayName?.takeIf { it.isNotBlank() } ?: peer.displayName
+    val peerIsAgent = resolvedPeer?.isAgent ?: peer.isAgent
     // 「请求查看屏幕」的确认表单：以前点那颗图标按钮**直接发请求**，原型 d30-reqscreen
     // 在中间有一张确认卡（说明 + 取消 / 发送请求）。改成先开表单、确认后才发。
     var screenRequestConfirmOpen by remember { mutableStateOf(initialConfirmOpen) }
@@ -169,8 +183,8 @@ internal fun ChatHeader(
         // 原型 `.topbar.chat .hav{width:36px;height:36px;border-radius:12px;font-size:14px}`
         // —— 聊天顶栏头像是 **36dp 圆角方块**，不是 40dp 正圆。
         PeerAvatar(
-            name = peer.displayName,
-            isAgent = group == null && peer.isAgent,
+            name = peerTitle,
+            isAgent = group == null && peerIsAgent,
             size = 36.dp,
             isGroup = group != null,
             shape = RoundedCornerShape(12.dp),
@@ -181,7 +195,7 @@ internal fun ChatHeader(
                 horizontalArrangement = Arrangement.spacedBy(sp.sm),
             ) {
                 Text(
-                    text = peer.displayName,
+                    text = peerTitle,
                     style = MaterialTheme.typography.titleSmall,
                     fontWeight = FontWeight.SemiBold,
                     maxLines = 1,
@@ -194,7 +208,7 @@ internal fun ChatHeader(
                     modifier = Modifier.weight(1f, fill = false),
                 )
                 if (group == null) {
-                    KindBadge(peer.isAgent)
+                    KindBadge(peerIsAgent)
                     StatusDot(peer.online)
                     Text(
                         text = stringResource(
@@ -220,7 +234,7 @@ internal fun ChatHeader(
             Text(
                 text = if (group != null) {
                     stringResource(Res.string.chat_group_members, group.members.size)
-                } else if (peer.isAgent && state != null) {
+                } else if (peerIsAgent && state != null) {
                     // 会话名与状态都取调用方给的那个（已按工作区收窄），不再自己按 peerId 猜 ——
                     // 见 activeSession 形参的 KDoc。
                     // 判空的是**会话**不是名字：有会话但没名字时要写「未命名」，
@@ -283,7 +297,7 @@ internal fun ChatHeader(
         // 顺序照原型聊天页的槽位：第一颗是「会话 / 群」这个语境动作，第二颗是戳一碰。
         // 方块取**聊天页档** 30dp / 16dp 图标（`.topbar.chat .ibtn`，`:570-571`）。
         val actions = mutableListOf<ChatHeaderAction>()
-        if (group == null && peer.isAgent && onOpenSessionPicker != null) {
+        if (group == null && peerIsAgent && onOpenSessionPicker != null) {
             // 数的是**这一屏可见**的会话：① 子代理/空壳会话不算（否则一个只有 1 条
             // 真实会话的节点也会长出这颗按钮，点开却全是该藏的行）；② 必须是**本工作区**
             // 的那几条（否则按钮画得出来、点开只有 1 行）。两者都由调用方在同一集合上
@@ -295,7 +309,7 @@ internal fun ChatHeader(
                 ) { size ->
                     Icon(
                         imageVector = Icons.Outlined.SwapHoriz,
-                        contentDescription = null,
+                        contentDescription = stringResource(Res.string.agent_session_switch_title),
                         tint = MaterialTheme.colorScheme.onSurface,
                         modifier = Modifier.size(size),
                     )
@@ -309,7 +323,7 @@ internal fun ChatHeader(
             ) { size ->
                 Icon(
                     painter = painterResource(Res.drawable.ic_groups),
-                    contentDescription = null,
+                    contentDescription = stringResource(Res.string.chat_group_info_title),
                     tint = MaterialTheme.colorScheme.onSurface,
                     modifier = Modifier.size(size),
                 )
@@ -322,7 +336,7 @@ internal fun ChatHeader(
             ) { size ->
                 Icon(
                     painter = painterResource(Res.drawable.ic_nudge),
-                    contentDescription = null,
+                    contentDescription = stringResource(Res.string.chat_nudge),
                     tint = MaterialTheme.colorScheme.onSurface,
                     modifier = Modifier.size(size),
                 )
@@ -336,7 +350,7 @@ internal fun ChatHeader(
             ) { size ->
                 Icon(
                     painter = painterResource(Res.drawable.ic_screen_share),
-                    contentDescription = null,
+                    contentDescription = stringResource(Res.string.screen_remote_view_action),
                     tint = MaterialTheme.colorScheme.onSurface,
                     modifier = Modifier.size(size),
                 )
@@ -349,7 +363,7 @@ internal fun ChatHeader(
             ) { size ->
                 Icon(
                     painter = painterResource(Res.drawable.ic_search),
-                    contentDescription = null,
+                    contentDescription = stringResource(Res.string.hist_search_title),
                     tint = MaterialTheme.colorScheme.onSurface,
                     modifier = Modifier.size(size),
                 )
@@ -364,7 +378,7 @@ internal fun ChatHeader(
             ) { size ->
                 Icon(
                     painter = painterResource(Res.drawable.ic_trash),
-                    contentDescription = null,
+                    contentDescription = stringResource(Res.string.chat_clear_local_action),
                     tint = MaterialTheme.colorScheme.onSurface,
                     modifier = Modifier.size(size),
                 )

@@ -10,7 +10,6 @@ import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.ExperimentalLayoutApi
-import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
@@ -25,7 +24,6 @@ import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.VerticalDivider
@@ -88,8 +86,9 @@ import org.jetbrains.compose.resources.StringResource
 import org.jetbrains.compose.resources.DrawableResource
 import org.jetbrains.compose.resources.painterResource
 import org.jetbrains.compose.resources.stringResource
-import app.relay.ui.theme.ShapeRoles
 import app.relay.ui.theme.IconSizes
+import app.relay.ui.components.AppOutlinedButton
+import app.relay.ui.components.AppButtonSize
 
 /**
  * 桌面设置窗里「桌面」档（[DesktopPrefsPanel]）需要的宿主能力。
@@ -467,17 +466,12 @@ public fun DesktopPrefsPanel(
                         color = MaterialTheme.colorScheme.onErrorContainer,
                         modifier = Modifier.padding(top = sp.xs),
                     )
-                    OutlinedButton(
+                    AppOutlinedButton(
+                        text = stringResource(Res.string.desk_retry),
                         onClick = { host.applyLaunchAtLogin(true) },
-                        shape = ShapeRoles.Avatar,
-                        contentPadding = PaddingValues(horizontal = LocalAppSpacing.current.osm9, vertical = LocalAppSpacing.current.oxs5),
+                        size = AppButtonSize.Compact,
                         modifier = Modifier.padding(top = sp.sm),
-                    ) {
-                        Text(
-                            stringResource(Res.string.desk_retry),
-                            style = MaterialTheme.typography.labelSmall,
-                        )
-                    }
+                    )
                 }
             }
         }

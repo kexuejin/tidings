@@ -100,6 +100,55 @@ fun handleUpdateKeepConnectionAlive(enabled: Boolean) {
     host.scope.launch { host.platform.backgroundConnection?.setEnabled(enabled) }
 }
 
+/** 置顶 / 取消置顶一个会话。纯本机偏好，不进 wire。 */
+fun handleTogglePinnedConv(convId: String) {
+    updateNotificationPreference { current ->
+        current.copy(
+            pinnedConvIds = if (convId in current.pinnedConvIds) {
+                current.pinnedConvIds - convId
+            } else {
+                // 插到最前：新置顶的排在已有置顶之前，用户刚点的那个一眼可见。
+                listOf(convId) + current.pinnedConvIds
+            },
+        )
+    }
+}
+
+/** 静音 / 取消静音一个会话。静音 = 不再产生通知，消息照收、红点照挂。 */
+fun handleToggleMutedConv(convId: String) {
+    updateNotificationPreference { current ->
+        current.copy(
+            mutedConvIds = if (convId in current.mutedConvIds) {
+                current.mutedConvIds - convId
+            } else {
+                current.mutedConvIds + convId
+            },
+        )
+    }
+}
+
+/**
+ * **删掉一个会话**（只删本机）：消息、未读、以及它身上的置顶/静音标记。
+ *
+ * 与「清空聊天记录」不是一回事：那个保留会话行（你还能继续聊），
+ * 这个把行也从列表里去掉。与「退出群聊」也不同：那个动协议、会告诉成员；
+ * 这里**不动协议、不通知对方** —— 对方库里那条会话照旧，只是我这边不再显示。
+ *
+ * 群会话被删后，只要再收到一条群消息就会重新出现（消息会重建会话行）——
+ * 这是对的：删除表示「不想再看到这段历史」，不是「退群」或「屏蔽」。
+ */
+fun handleDeleteConversation(convId: String) {
+    host.messagesCtl.handleClearMessages(convId)
+    // 清掉这个会话身上的本机偏好：留着会让「下次收到消息重建的会话」
+    // 莫名继承一个用户已经不想要了的置顶/静音。
+    updateNotificationPreference { current ->
+        current.copy(
+            pinnedConvIds = current.pinnedConvIds - convId,
+            mutedConvIds = current.mutedConvIds - convId,
+        )
+    }
+}
+
 private fun updateNotificationPreference(transform: (RelaySettings) -> RelaySettings) {
     val current = host._state.value.settings
     val next = transform(current)

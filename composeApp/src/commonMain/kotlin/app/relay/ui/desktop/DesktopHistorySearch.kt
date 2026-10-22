@@ -85,6 +85,7 @@ import org.jetbrains.compose.resources.stringResource
 import app.relay.ui.theme.IconSizes
 import app.relay.ui.theme.LocalAppSpacing
 import app.relay.app.model.PeerUi
+import app.relay.ui.theme.SurfaceTiers
 
 /**
  * 桌面端会话内历史搜索弹窗（原型 d-histsearch）。
@@ -199,7 +200,8 @@ public fun DesktopHistorySearchDialog(
                             modifier = Modifier
                                 .size(34.dp)
                                 .background(
-                                    color = MaterialTheme.colorScheme.surfaceVariant,
+                                    // 图标座（34dp 方砖 + 单颗图标）→ --surface-3。
+                                    color = SurfaceTiers.Inset,
                                     shape = MaterialTheme.shapes.medium,
                                 ),
                         ) {

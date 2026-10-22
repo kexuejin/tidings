@@ -66,4 +66,47 @@ class MarkdownMessageTest {
         assertFalse(shouldRenderMarkdown(mine = false, senderIsAgent = false))
         assertFalse(shouldRenderMarkdown(mine = true, senderIsAgent = true))
     }
+
+    /**
+     * 群里的 agent 消息必须渲染 —— 这正是「富文本没生效」的反向验证点。
+     *
+     * 现场：群 agent 的 senderId 是 `agent:<kind>`，界面按 nodeId 查对端表必然查不到，
+     * 于是旧判据（只看 senderIsAgent）恒为 false。这里把 senderIsAgent 显式传成 false
+     * —— 模拟"解析失败"—— 仍然要求渲染。删掉 shouldRenderMarkdown 里的 prefix 分支，
+     * 这条会红。
+     */
+    @Test
+    fun rendersGroupAgentMessageEvenWhenPeerLookupFailed() {
+        assertTrue(
+            shouldRenderMarkdown(
+                mine = false,
+                senderIsAgent = false,
+                senderId = "agent:dsh",
+            ),
+            "群里 agent 的 senderId 是 agent:<kind>，peer() 查不到时也必须按 Markdown 渲染",
+        )
+        assertTrue(isAgentSenderId("agent:dsh"))
+        assertTrue(isAgentSenderId("agent:DSH"))
+    }
+
+    /** 人发的（senderId = nodeId）在群里必须保持纯文本：用户打的星号不是强调。 */
+    @Test
+    fun keepsHumanGroupMessagesPlain() {
+        assertFalse(
+            shouldRenderMarkdown(
+                mine = false,
+                senderIsAgent = false,
+                senderId = "7f3a9c21-1d4e-4c8b-9a55-2e6d0b7c1f00",
+            ),
+        )
+        assertFalse(shouldRenderMarkdown(mine = false, senderIsAgent = false, senderId = null))
+        assertFalse(shouldRenderMarkdown(mine = false, senderIsAgent = false, senderId = ""))
+    }
+
+    /** 自己发的消息无论 id 长什么样都不渲染（自己打的原文就是自己看到的）。 */
+    @Test
+    fun neverRendersOwnMessages() {
+        assertFalse(shouldRenderMarkdown(mine = true, senderIsAgent = false, senderId = "agent:dsh"))
+        assertFalse(shouldRenderMarkdown(mine = true, senderIsAgent = true, senderId = null))
+    }
 }

@@ -21,11 +21,9 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
-import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
-import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
@@ -62,12 +60,14 @@ import app.relay.generated.resources.ic_chat_bubble
 import app.relay.generated.resources.ic_file
 import app.relay.generated.resources.ic_image
 import app.relay.generated.resources.ic_search
+import app.relay.ui.components.AppTextButton
 import app.relay.ui.components.PeerAvatar
 import app.relay.ui.components.formatClock
 import org.jetbrains.compose.resources.stringResource
 
 import app.relay.ui.theme.IconSizes
 import app.relay.ui.theme.LocalAppSpacing
+import app.relay.ui.components.AppIconButton
 
 private enum class GlobalSearchState {
     Loading,
@@ -167,9 +167,10 @@ public fun DesktopGlobalSearchPanel(
                             color = MaterialTheme.colorScheme.error,
                         )
                         Spacer(Modifier.height(LocalAppSpacing.current.sm))
-                        TextButton(onClick = onClearQuery) {
-                            Text(stringResource(Res.string.action_clear_search))
-                        }
+                        AppTextButton(
+                            text = stringResource(Res.string.action_clear_search),
+                            onClick = onClearQuery,
+                        )
                     }
                 }
             }
@@ -330,14 +331,11 @@ public fun DesktopGlobalSearchPage(
                 )
             }
             onCreateGroup?.let { create ->
-                IconButton(onClick = create) {
-                    Icon(
-                        painter = painterResource(Res.drawable.ic_add_node),
-                        contentDescription = stringResource(Res.string.conv_new_group),
-                        tint = MaterialTheme.colorScheme.onSurfaceVariant,
-                        modifier = Modifier.size(IconSizes.Label),
-                    )
-                }
+                AppIconButton(
+                    icon = Res.drawable.ic_add_node,
+                    contentDescription = stringResource(Res.string.conv_new_group),
+                    onClick = create,
+                )
             }
         }
         HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)

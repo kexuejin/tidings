@@ -102,6 +102,74 @@ class ChatInteractionsTest {
         assertFalse(canRecall(message(at = NOW + 1_000), NOW))
     }
 
+    // ---------- 撤回菜单的倒计时（界面用） ----------
+
+    @Test
+    fun theRecallCountdownIsTheWindowMinusElapsed() {
+        assertEquals(RECALL_WINDOW_MS, recallRemainingMs(message(at = NOW), NOW))
+        assertEquals(RECALL_WINDOW_MS - 30_000, recallRemainingMs(message(at = NOW - 30_000), NOW))
+    }
+
+    @Test
+    fun theRecallCountdownClampsToZeroInsteadOfGoingNegative() {
+        // 超时之后**不许**给负数：界面要拿它判"置灰"，负数会让"> 0"这类判断照样成立。
+        assertEquals(0, recallRemainingMs(message(at = NOW - RECALL_WINDOW_MS - 60_000), NOW))
+        // 时钟倒退（未来的时间戳）同样算 0 —— 与 canRecall 的下界同一条规矩。
+        assertEquals(0, recallRemainingMs(message(at = NOW + 1_000), NOW))
+    }
+
+    @Test
+    fun theRecallCountdownRendersAsMinutesAndSeconds() {
+        assertEquals("04:32", formatRecallRemaining(4 * 60_000 + 32_000))
+        assertEquals("05:00", formatRecallRemaining(RECALL_WINDOW_MS))
+        assertEquals("01:00", formatRecallRemaining(60_000))
+    }
+
+    @Test
+    fun theRecallCountdownRoundsUpSoItNeverShowsZeroWhileStillClickable() {
+        // 剩 0.4 秒时显示 00:01 而不是 00:00：显示 00:00 而按钮还亮着，用户会以为界面坏了。
+        assertEquals("00:01", formatRecallRemaining(400))
+        assertEquals("00:01", formatRecallRemaining(1))
+    }
+
+    @Test
+    fun anExpiredRecallHasNoCountdownText() {
+        // 超时返回 null，由调用方换成已本地化的「超时」—— 纯函数不碰资源。
+        assertNull(formatRecallRemaining(0))
+        assertNull(formatRecallRemaining(-1))
+    }
+
+    @Test
+    fun onlyTheLastTenSecondsAreUrgent() {
+        assertTrue(isRecallUrgent(10_000))
+        assertTrue(isRecallUrgent(1))
+        assertFalse(isRecallUrgent(10_001), "11 秒还不该转危险色")
+        assertFalse(isRecallUrgent(0), "已经超时了就不是「快没了」")
+    }
+
+    @Test
+    fun theMenuShowsForOwnMessagesEvenAfterTheWindowClosed() {
+        // 关键在于**区分两件事**：超时后入口关闭（可以点不动），但这一项仍然要显示。
+        // 以前两者不分，"撤回"超过 5 分钟就凭空消失，用户不知道原因。
+        val expired = message(at = NOW - RECALL_WINDOW_MS - 1)
+        assertNull(recallBlockedReason(expired), "超时不是「不该显示」的理由")
+        assertFalse(canRecall(expired, NOW), "但确实点不动了")
+    }
+
+    @Test
+    fun theMenuIsAbsentForReasonsThatAreNotAboutTime() {
+        assertEquals(RecallBlock.NotMine, recallBlockedReason(message(mine = false)))
+        assertEquals(
+            RecallBlock.Notice,
+            recallBlockedReason(message(text = "", notice = NoticeKind.RecalledByPeer)),
+        )
+        assertEquals(
+            RecallBlock.NoTargetId,
+            recallBlockedReason(message(text = "", file = fileCard())),
+        )
+        assertEquals(RecallBlock.EmptyBody, recallBlockedReason(message(text = "   ")))
+    }
+
     // ---------- 媒体撤回（接收侧） ----------
 
     @Test

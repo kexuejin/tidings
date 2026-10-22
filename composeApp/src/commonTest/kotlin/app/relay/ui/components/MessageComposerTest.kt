@@ -81,6 +81,31 @@ class MessageComposerTest {
         assertEquals("好😀" to 3, insertEmoji("好", start = 1, end = 99, emoji = "😀"))
     }
 
+    /**
+     * @ 插入与候选列表**同一个函数**：候选里给的是 `@DSH`，插完就是「@DSH 」。
+     *
+     * 这条钉的是「@ 了却叫不醒」的那条缝：token 由身份解析器给（agent = `@KIND`），
+     * 输入栏只负责插入；任何在这里另拼名字的写法都会让插入的 token 与触发判据分叉。
+     */
+    @Test
+    fun mentionIsInsertedAtTheCaretWithASingleSpace() {
+        assertEquals("@DSH " to 5, insertMention("", start = 0, end = 0, token = "@DSH"))
+        // 光标停在插入内容之后（0 基下标 7 = 紧挨着「看」之前），不是文本长度。
+        assertEquals("请 @DSH 看一下" to 7, insertMention("请 看一下", start = 2, end = 2, token = "@DSH"))
+    }
+
+    /** 用户刚敲出一个 `@` 时不再补第二个，否则会变成 `@@DSH`。 */
+    @Test
+    fun anAlreadyTypedAtIsNotDoubled() {
+        assertEquals("@DSH " to 5, insertMention("@", start = 1, end = 1, token = "@DSH"))
+    }
+
+    /** 有选区时替换选区（与表情同一套光标语义）。 */
+    @Test
+    fun mentionReplacesTheSelection() {
+        assertEquals("你好 @DSH " to 8, insertMention("你好 旧名字", start = 3, end = 6, token = "@DSH"))
+    }
+
     /** 连着点两个表情是依次追加：第二次接第一次返回的光标，不是都挤在开头。 */
     @Test
     fun pickingTwiceAppendsInOrder() {

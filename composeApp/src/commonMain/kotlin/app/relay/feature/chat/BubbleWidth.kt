@@ -5,6 +5,7 @@ package app.relay.feature.chat
 import androidx.compose.foundation.layout.widthIn
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.Dp
+import androidx.compose.ui.unit.dp
 
 /**
  * 气泡宽度上限：消息区**可用宽度**的一个比例，不是一个写死的像素值。
@@ -14,8 +15,9 @@ import androidx.compose.ui.unit.Dp
  * 百分比的包含块是 `.msgs` 的内容盒：`:920 .msgs{padding:12px 14px 6px}` 与
  * `:921 .win .msgs{padding:14px 18px 6px}` 说明这个内容盒已经把消息区自己的横向内边距
  * 扣掉了。所以 [availableWidth] 要传**消息区内容宽**，不是整幅窗口宽 —— 在 `ChatScreen`
- * 里它就是列表项宽 = LazyColumn 宽 − 2×16dp 的 `contentPadding`（`ChatScreen.kt:414`），
- * 由气泡外面那层 `BoxWithConstraints` 实测得到（`ChatScreen.kt` 里气泡外那层 `BoxWithConstraints`）。
+ * 里它就是列表项宽 = LazyColumn 宽 − 2×16dp 的 `contentPadding`，
+ * 由气泡外面那层 `BoxWithConstraints` 实测得到（见 `ChatScreen` 里气泡外那层
+ * `BoxWithConstraints` —— 具体函数名是 `MessageBubble` 之外那一层的调用点）。
  *
  * ## [fraction] 为什么是形参，而不是在这里按宽度算
  *
@@ -40,10 +42,44 @@ import androidx.compose.ui.unit.Dp
  * 原型没有下限兜底，所以这里也不写 `minOf(300.dp, …)` 之类的取小：那只是把两个错误
  * 叠在一起，宽屏上仍然是 300。
  *
- * 与原型的一处已知偏差：原型的 `max-width` 挂在 `.msg`（整行）上，而那一行还含
- * `:929 .msg .mav` 的 26px 头像和 8px 的 `gap`；本仓 `MessageBubble` 目前不画头像，
- * 所以比例直接作用在气泡本体上，会比原型的气泡宽出大约一个头像。等消息行加上头像时，
- * 把头像宽从 [availableWidth] 里扣掉即可对齐。
+ * ## 量纲：这里的 [availableWidth] 是**气泡那一侧的可用宽**，不是整行
+ *
+ * 调用点是 `ChatBubbles` 里 `Row` 内部的 `BoxWithConstraints`（气泡与头像并排，头像在
+ * `Row` 里、`BoxWithConstraints` 只包气泡那一侧），所以 `maxWidth` **已经不含头像与间距**。
+ *
+ * 这一点踩过一次：我曾按「原型 `.msg` 的 82% 含头像」在这里再扣一次 26+8dp，结果
+ * 393dp 手机上气泡只有约 262dp（占屏 67%），agent 的长回复被挤成一条窄柱 ——
+ * 用户原话「看的消息有点窄」。**同一个扣除做两次**，比不扣更糟。
  */
 internal fun Modifier.bubbleMaxWidth(availableWidth: Dp, fraction: Float): Modifier =
     widthIn(max = availableWidth * fraction)
+
+/**
+ * **长文本**的气泡上限：按比例算出来的宽度放不下这段字时，放开到接近满宽。
+ *
+ * ## 为什么不是直接把 82% 调大
+ *
+ * 算过一遍：原型 `.msg{max-width:82%}` 是**整行**口径，扣掉 26px 头像 + 8px gap 之后，
+ * 气泡本体在 393dp 屏上约 265dp = **67.5% 屏宽**；本仓同一口径算出来是 271dp = 69.1%。
+ * 也就是说**代码一直与原型一致** —— 用户觉得"窄"，是这条比例在长文本上本身就窄。
+ *
+ * 所以不调那个数字（调了就是偏离原型，且短消息也会跟着变胖、失去右对齐的层次），
+ * 而是按**内容**分档：短消息维持原型比例，长消息才放开。判据用字数 —— 一段 80 字以上的
+ * 中文在 271dp 里要折 6~7 行，读起来确实费劲；此时多给宽度不会破坏"谁在说话"的层次。
+ *
+ * @param text 这条消息的正文（已含 reasoning 时用 answer 部分）。
+ */
+internal fun Modifier.bubbleMaxWidthForText(
+    availableWidth: Dp,
+    fraction: Float,
+    text: String,
+): Modifier {
+    val base = availableWidth * fraction
+    if (text.length < LONG_TEXT_CHARS) return widthIn(max = base)
+    // 长文本：最多放到「气泡侧可用宽」的 96%（留一点，不然会贴住列表右边缘、
+    // 和滚动条/内边距挤在一起）。
+    return widthIn(max = maxOf(base, availableWidth * 0.96f))
+}
+
+/** 超过这个字数就按「长文本」处理（中文 80 字 ≈ 在 271dp 里折 6~7 行）。 */
+private const val LONG_TEXT_CHARS: Int = 80

@@ -25,7 +25,6 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.ChevronRight
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.outlined.Image
-import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.FilterChip
 import androidx.compose.material3.FilterChipDefaults
@@ -33,7 +32,6 @@ import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
@@ -100,6 +98,8 @@ import app.relay.ui.theme.LocalAppSpacing
 import app.relay.ui.theme.accents
 import org.jetbrains.compose.resources.stringResource
 import app.relay.ui.theme.ShapeRoles
+import app.relay.ui.components.AppButton
+import app.relay.ui.components.AppOutlinedButton
 
 /**
  * 移动端会话内历史搜索浮层（原型 m-histsearch 与 m-histdate）。
@@ -800,19 +800,17 @@ internal fun HistoryDateSheet(
                         modifier = Modifier.fillMaxWidth().padding(top = sp.md, bottom = sp.xs),
                         horizontalArrangement = Arrangement.spacedBy(sp.md10),
                     ) {
-                        OutlinedButton(
+                        AppOutlinedButton(
+                            text = stringResource(Res.string.common_cancel),
                             onClick = onDismiss,
                             modifier = Modifier.weight(1f),
-                        ) {
-                            Text(stringResource(Res.string.common_cancel))
-                        }
-                        Button(
+                        )
+                        // 原来的 colors 就是 ButtonDefaults 的主色（= AppButton 的 Primary 默认），省掉。
+                        AppButton(
+                            text = stringResource(Res.string.hist_date_confirm),
                             onClick = { onConfirm(tempStart, tempEnd) },
                             modifier = Modifier.weight(1f),
-                            colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.primary),
-                        ) {
-                            Text(stringResource(Res.string.hist_date_confirm))
-                        }
+                        )
                     }
                 }
             }

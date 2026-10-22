@@ -22,6 +22,11 @@
     <string name="common_agent">Agent</string>
     <string name="common_human">同事</string>
     <string name="common_unknown">未知</string>
+    <!-- 群成员/发送者缺名时的兜底：说「未知成员」而不是吐 nodeId 前 8 位那串十六进制。 -->
+    <string name="common_unknown_member">未知成员</string>
+    <!-- 只知道 id、资料（昵称/备注/群昵称）都还没到时，成员行与 @ 候选的副行。
+         名字本身仍显示 8 位短 id（用户至少能对上"是那台设备"），但不能让裸 id 冒充真名。 -->
+    <string name="common_profile_unavailable">未获取到资料</string>
     <string name="common_never">从未</string>
 
     <!-- 会话列表 -->
@@ -85,6 +90,9 @@
          "本地隐藏原消息并插入系统提示行"），所以这里的两条是"谁撤回的"而不是"已撤回"。
          `chat_recall` 同时是长按菜单的项名和入口的无障碍文本。 -->
     <string name="chat_recall">撤回</string>
+    <string name="chat_delete_local">删除（仅本机）</string>
+    <!-- 撤回窗口已过时的菜单副标题。写「超时」而不是把整项藏掉：藏掉用户不知道为什么没了。 -->
+    <string name="chat_recall_expired">超时</string>
     <string name="chat_copy">复制</string>
     <string name="chat_forward">转发</string>
     <string name="chat_recall_peer">对方撤回了一条消息</string>
@@ -117,6 +125,17 @@
     <string name="conv_subtitle_unread">%1$d 个会话有未读 · 共 %2$d 条</string>
     <string name="conv_menu_new_session">新建会话（去配对节点）</string>
     <string name="conv_menu_only_unread">只看有未读的</string>
+    <!-- 全局搜索的筛选条 -->
+    <string name="global_search_scope_all">全部</string>
+    <string name="global_search_scope_contacts">联系人</string>
+    <string name="global_search_scope_chats">聊天记录</string>
+    <string name="global_search_scope_files">文件</string>
+    <!-- 长按会话行的动作菜单 -->
+    <string name="conv_action_pin">置顶</string>
+    <string name="conv_action_unpin">取消置顶</string>
+    <string name="conv_action_mute">静音</string>
+    <string name="conv_action_unmute">取消静音</string>
+    <string name="conv_action_delete">删除会话（仅本机）</string>
     <string name="conv_menu_mark_all_read">全部标为已读</string>
     <string name="conv_menu_sort_recent">排序：最近优先</string>
     <!-- 消息页签的「工作区」分区（m-home-recent 的第二段）。与会话区是两把尺子：
@@ -196,8 +215,6 @@
     <string name="chat_image_preview_close">关闭预览</string>
     <string name="chat_mention_all">所有人</string>
     <string name="chat_mention_title">选择要 @ 的成员</string>
-    <!-- 群里有成员不在线时的输入栏提示。与 chat_peer_offline 分开：群消息走离线补发队列，离线成员上线后会收到，不是"发不出去"。 -->
-    <string name="chat_group_some_offline">有成员不在线，他们上线后会收到</string>
     <string name="chat_peer_offline">对方离线，消息会排队</string>
     <string name="chat_restored_offline">离线 · 下面是本机存下来的历史</string>
     <string name="chat_caps_label">能力：%1$s</string>
@@ -392,6 +409,11 @@
     <string name="workspace_global_pending_banner">有 %1$d 项操作等待审批</string>
     <string name="workspace_active_session_label">活跃会话</string>
     <string name="workspace_no_sessions">暂无会话</string>
+    <!-- 工作区详情的整屏空态：工作区对象不存在且一条会话都没有时。
+         此前这一屏只剩一张写着「暂无会话」的小卡，大半屏是空的 —— 空态没有"出路"。 -->
+    <string name="workspace_detail_empty_title">这个工作区还没有任何会话</string>
+    <string name="workspace_detail_empty_body">agent 宿主还没有为它上报会话。等它跑起来、或者先回工作区列表看看别的。</string>
+    <string name="workspace_detail_empty_back">回到工作区列表</string>
     <!--
       声明了 N 条会话、但这一屏本地还没拉到任何一条时用的话。
 
@@ -461,6 +483,8 @@
     <string name="agent_session_state_archived">已归档</string>
     <!-- 输入区正上方的 agent 状态（真机反馈 #3）。四个状态各自只在真实信号下出现，
          没有证据时整行不画 —— 见 feature/chat/AgentComposerStatus.kt。 -->
+    <!-- 排队中：指令在这个会话的队列里，要等当前这一轮结束才轮到它。 -->
+    <string name="chat_composer_status_queued">指令已排队，等这一轮结束就轮到它</string>
     <string name="chat_composer_status_thinking">Agent 正在思考 / 执行中…</string>
     <string name="chat_composer_status_awaiting_approval">等待你审批工具调用…</string>
     <string name="chat_composer_status_unresponsive">Agent 已停止响应（最近没有新动作）</string>
@@ -489,6 +513,9 @@
     <string name="chat_task_divider_label">任务：%1$s</string>
     <!-- 新会话还没有标题时的分段标记（task-42 ④）。不用 sessionId 兜底：身份键不是标题；
          但也不能整条不画 —— 那会让「新建会话」看起来没有任何分段。 -->
+    <!-- 聊天流的日期分隔：今天 / 昨天 / 具体日期（yyyy-MM-dd 由 UI 拼，不写死在这里）。 -->
+    <string name="chat_day_divider_today">今天</string>
+    <string name="chat_day_divider_yesterday">昨天</string>
     <string name="chat_task_divider_new">新会话</string>
 
     <!-- 「加入网络」整屏随 feature/pairing/ 一起删掉了，文案并进上面的 nodes_* -->
@@ -646,6 +673,15 @@
     <string name="set_caps_card_title">声明</string>
     <string name="set_caps_peer_visible">对端可见</string>
     <string name="set_caps_saved">能力声明已更新，节点正在重新广播。</string>
+    <!-- 设置首页（settings-phone）各行的「值」与兜底文案。这一屏原来是硬编码中文，
+         全部收进资源；能力声明那一行读真实开关（tw1 / mrec1），全关时说「未声明」
+         而不是继续宣称开着。 -->
+    <string name="set_home_notify_mention_only">仅被 @</string>
+    <string name="set_home_notify_quiet">静默中</string>
+    <string name="set_home_notify_all">全部</string>
+    <string name="set_home_online_nodes">%1$d 节点</string>
+    <string name="set_caps_none">未声明</string>
+    <string name="set_profile_org_empty">未填写组织信息</string>
     <string name="set_cap_text_title">排队保活</string>
     <string name="set_cap_text_sub">对端排队时保持连接，取消后还能续传</string>
     <!-- mrec1 的真身是**媒体撤回**，不是录音（上游协议 §3 决议 #188：offer 带 msgId、
@@ -703,6 +739,7 @@
     <string name="set_clear_history_title">清空聊天记录</string>
     <string name="set_clear_history_sub">不可撤销</string>
     <string name="set_clear_history_action">清空</string>
+    <string name="set_clear_history_confirm_body">这会清空全部会话的聊天记录，只删本机、对方那里不受影响，删除后不可恢复。</string>
     <string name="set_diag_title">诊断</string>
     <string name="set_diag_subtitle">实时状态，非配置</string>
     <!-- 原型这张卡的标题（prototype/relay.html:3952），与页面标题「诊断」不是同一个词 -->
@@ -717,14 +754,17 @@
     <string name="set_diag_group_text">group-text</string>
     <string name="set_diag_enabled">已启用</string>
     <string name="set_diag_disabled">未启用</string>
+    <string name="set_diag_ime_smoke">输入法自检</string>
     <string name="set_diag_inset">状态栏 inset</string>
     <string name="set_diag_inset_value">24 dp · 应用自绘，无系统底色</string>
     <!-- 传输是否加密。协议层没有加密实现（明文 JSON），输入栏的「局域网直连」也不再暗示加密；
          这一行是把"没加密"摆在用户能查到的地方，而不是靠没人注意就不说。 -->
     <string name="set_diag_crypto">传输加密</string>
+    <!-- 诊断页：本机身份证书的到期日（会在此前自动续签，配对关系不受影响） -->
+    <string name="set_diag_cert_expiry">证书到期</string>
     <string name="set_diag_crypto_value">无 · 局域网内明文</string>
     <string name="set_diag_rerun">重新自检</string>
-    <string name="set_diag_selfcheck_unavailable">自检尚未接线：这屏显示的都是实时状态，还没有可重跑的诊断动作。</string>
+    <string name="set_diag_selfcheck_unavailable">除「导出诊断包」外，这一屏只显示实时状态；其它自检动作尚未接线。</string>
     <!-- 第二轮：诊断页卡外那条 `.navrow` 的文案（原型 prototype/relay.html:3966-3971 逐字）。 -->
     <string name="r2_set_diag_insets_title">适配对照</string>
     <string name="r2_set_diag_insets_sub">顶部空白 / 导航栏 / 状态栏：真机症状与现状对照</string>
@@ -815,6 +855,9 @@
 
     <!-- 会话 -->
     <string name="conv_no_messages">还没聊过，打个招呼</string>
+    <!-- 会话行预览里区分「这条是我说的」。多数 IM 都这么做 ——
+         否则用户看到一句熟悉的话，分不清是自己说的还是对方说的。 -->
+    <string name="conv_preview_mine">你：%1$s</string>
 
     <!-- 通知渠道：这两个名字显示在「系统设置 → 应用 → 通知」里，由系统按渠道 id 缓存。
          改文案必须同时改 AndroidPushNotificationHandler 的 CHANNEL_ID，否则老用户看到的还是旧名。 -->
@@ -1495,6 +1538,7 @@
     <string name="workspace_member_agent_dsh">DSH · 本地终端与执行引擎</string>
     <string name="workspace_member_agent_gemini">Gemini · 架构设计与代码审阅</string>
     <string name="workspace_member_add_agent">+ 邀请新智能体入驻…</string>
+    <string name="workspace_member_no_workspace">本机还没有可暴露的项目</string>
     <string name="workspace_no_title_banner">这个工作区没有名字。对端只上报了它的标识 %1$s，没有上报名字 —— 我们不用那串标识冒充名字，等它补上。</string>
     <string name="workspace_sessions_section">会话 (%1$d)</string>
     <string name="workspace_events_section">事件流 (%1$d 条 · %2$s)</string>
@@ -1553,6 +1597,46 @@
     <string name="workspace_board_starting_hint">启动完成后，设备和它们的工作区会出现在这里。</string>
     <string name="workspace_board_discovering">正在查找设备…</string>
     <string name="workspace_board_discovering_hint">还没有发现任何对端。确认对方在线；也可以去「节点」页手动填地址。</string>
+
+    <!-- ===== task-3：诊断包导出（手机端「设置 · 诊断」页） ===== -->
+    <!-- 入口按钮。只有宿主给出真实导出动作时才画（null = 整颗不画，同「运行自检」）。 -->
+    <string name="diag_export_package">导出诊断包</string>
+    <string name="diag_export_running">正在打包…</string>
+    <!-- 包里有什么、没有什么：用户把它发给别人之前应当知道边界。 -->
+    <string name="diag_export_hint">只含环境、链路读数与脱敏后的队列/信封结构，不含聊天正文与文件内容。</string>
+    <string name="diag_export_done_shared">已生成 %1$s（%2$s），已交给系统分享。</string>
+    <string name="diag_export_done_saved">已生成 %1$s（%2$s），保存在应用的文件目录里。</string>
+    <string name="diag_export_failed_write">诊断包没写出来：存储空间或权限不足。没有生成文件。</string>
+    <string name="diag_export_failed_unexpected">导出失败：打包过程中出错了，请稍后重试。</string>
+    <!-- 每个 agent 的执行范围（谁能让它干活）。四档从严到宽，每档都写清后果。 -->
+    <string name="agent_exec_policy_title">谁能让它干活</string>
+    <string name="agent_exec_policy_host_only">只有我</string>
+    <string name="agent_exec_policy_host_only_note">只接受这台机器上的操作。最安全。</string>
+    <string name="agent_exec_policy_trusted">我和我批准过的设备</string>
+    <string name="agent_exec_policy_trusted_note">可信设备面板里批准过的设备可以下指令。</string>
+    <string name="agent_exec_policy_owner_admin">再加上群主和管理员</string>
+    <string name="agent_exec_policy_owner_admin_note">群主与管理员无需另外批准即可下指令。</string>
+    <string name="agent_exec_policy_any_member">群内任何人</string>
+    <string name="agent_exec_policy_any_member_note">进这个群的所有人都能在这台机器上执行命令。</string>
+
+    <!-- 每个 agent 的执行权限：逐设备勾选 -->
+    <string name="agent_exec_who_title">谁能让它干活</string>
+    <string name="agent_exec_who_note">只有勾上的设备能在这个 agent 上执行命令。新装的 agent 默认只允许你自己。</string>
+    <string name="agent_exec_who_empty">还没有可授权的设备。加一台设备后就能在这里勾选。</string>
+    <string name="agent_exec_who_trusted_badge">可信</string>
+    <string name="agent_exec_who_add">+ 添加设备</string>
+
+    <string name="agent_exec_add_title">添加设备</string>
+    <string name="agent_exec_add_empty">所有设备都已经在名单里了。</string>
+
+    <!-- 群内加减 agent：暴露本机 agent / 已暴露的移除 -->
+    <string name="group_expose_agent_title">本机可入驻的 Agent</string>
+    <string name="group_expose_agent_note">选了哪些，群里就能 @ 到它们。只能暴露这台机器上的 agent。</string>
+    <string name="group_expose_agent_empty">这台机器上还没有可入驻的工作区。先在「工作台」里建一个。</string>
+    <string name="group_expose_agent_confirm">入驻</string>
+    <string name="group_expose_agent_done">已入驻 %1$s。群里现在可以 @ 它了。</string>
+
 </resources>
+
 
 

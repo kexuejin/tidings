@@ -1,19 +1,13 @@
 package app.relay.ui.components
 
-import androidx.compose.foundation.BorderStroke
-import androidx.compose.foundation.layout.PaddingValues
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.AlertDialog
-import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.ProvideTextStyle
-import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
-import androidx.compose.foundation.shape.RoundedCornerShape
 
 /**
  * 对话框的**共享骨架**（原型 `.dlg`，`prototype/relay.html:1446-1449` + `:1465`）。
@@ -72,19 +66,22 @@ internal fun RelayDialog(
 }
 
 /**
- * 对话框里的按钮（原型 `.btn` / `.btn.pri` / `.btn.out`，`prototype/relay.html:372-386`）。
+ * 对话框里的按钮（原型 `.btn` / `.btn.pri` / `.btn.danger-o`）。
  *
- * ```css
- * .btn{border-radius:var(--r-ctl);border:1px solid var(--outline);background:var(--surface);
- *      color:var(--on);font-weight:500;padding:var(--pad-btn)}   /* --r-ctl:12px --pad-btn:9px 14px */
- * .btn.pri{background:var(--primary);color:var(--on-primary);border-color:transparent;font-weight:600}
- * ```
- * 对应 M3 `OutlinedButton`：底色/内容色/描边/圆角/内边距四样都要显式给（M3 默认圆角是
- * `shapes.extraLarge`-ish 的全圆角、内边距 24dp、高度 40dp）。
+ * 这里**只剩映射**：主行动走 [AppButton]，其余走 [AppOutlinedButton]。字号、内边距、
+ * 圆角、配色全部由按钮族决定 —— 本文件不再持有任何一份数字。此前它手抄了一遍
+ * `--pad-btn: 9px 14px` / `--r-ctl: 12px` / `labelLarge`：与按钮族同一组值写了两遍，
+ * 而写两遍的东西迟早只改一边（这正是按钮族存在的理由）。
+ *
+ * 为什么保留这个名字、而不是让调用点直接写组件族：**「对话框动作条」是一个语义位置**，
+ * 它已经在各处散开；给语义位置留一个名字，比在几十个调用点各写一次 tone 更不容易走样。
  *
  * @param primary true = 实心主按钮（`.btn.pri`，创建/批准那一颗）；false = 描边按钮（取消/关闭）。
- * @param danger 危险动作的描边按钮（`.btn.danger-o{color:var(--on-error-c);border-color:var(--error);
- *   background:transparent}`，原型 :379）—— 退群那一颗。
+ * @param danger 危险动作的描边按钮（`.btn.danger-o`）—— 退群那一颗。
+ *
+ * 两处与旧实现的差异，都是**组件族既有的决定**，不是这一轮顺手改的：
+ * 1. 主按钮字重 600 → 500：族里每个字号只有一档 weight，不为一颗按钮新增一档。
+ * 2. 中性档底色 `surface` → 透明：在 [RelayDialog] 的 surface 底上同色，肉眼不可分。
  */
 @Composable
 internal fun RelayDialogButton(
@@ -94,36 +91,14 @@ internal fun RelayDialogButton(
     danger: Boolean = false,
     enabled: Boolean = true,
 ) {
-    OutlinedButton(
+    if (primary) {
+        AppButton(text = text, onClick = onClick, enabled = enabled)
+        return
+    }
+    AppOutlinedButton(
+        text = text,
         onClick = onClick,
         enabled = enabled,
-        shape = RoundedCornerShape(12.dp),
-        border = BorderStroke(
-            width = 1.dp,
-            color = when {
-                primary -> Color.Transparent
-                danger -> MaterialTheme.colorScheme.error
-                else -> MaterialTheme.colorScheme.outline
-            },
-        ),
-        colors = ButtonDefaults.outlinedButtonColors(
-            containerColor = when {
-                primary -> MaterialTheme.colorScheme.primary
-                danger -> Color.Transparent
-                else -> MaterialTheme.colorScheme.surface
-            },
-            contentColor = when {
-                primary -> MaterialTheme.colorScheme.onPrimary
-                danger -> MaterialTheme.colorScheme.onErrorContainer
-                else -> MaterialTheme.colorScheme.onSurface
-            },
-        ),
-        contentPadding = PaddingValues(horizontal = 14.dp, vertical = 9.dp),
-    ) {
-        Text(
-            text = text,
-            style = MaterialTheme.typography.labelLarge,
-            fontWeight = if (primary) FontWeight.SemiBold else FontWeight.Medium,
-        )
-    }
+        tone = if (danger) AppButtonTone.Danger else AppButtonTone.Neutral,
+    )
 }

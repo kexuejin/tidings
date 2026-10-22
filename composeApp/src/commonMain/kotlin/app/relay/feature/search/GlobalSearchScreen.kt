@@ -5,25 +5,30 @@ package app.relay.feature.search
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.ui.graphics.Color
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.text.BasicTextField
 import androidx.compose.foundation.verticalScroll
+import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
-import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -39,19 +44,27 @@ import app.relay.app.GlobalSearchChatHit
 import app.relay.app.GlobalSearchContactHit
 import app.relay.app.GlobalSearchFileHit
 import app.relay.app.GlobalSearchResult
+import app.relay.app.GlobalSearchScope
 import app.relay.core.nowMillis
 import app.relay.core.protocol.ConvId
 import app.relay.generated.resources.Res
 import app.relay.generated.resources.action_back
+import app.relay.generated.resources.action_clear_search
 import app.relay.generated.resources.common_offline
 import app.relay.generated.resources.global_search_more_messages
 import app.relay.generated.resources.global_search_section_messages
 import app.relay.generated.resources.global_search_section_contacts
 import app.relay.generated.resources.global_search_empty_hint
+import app.relay.generated.resources.global_search_scope_all
+import app.relay.generated.resources.global_search_scope_chats
+import app.relay.generated.resources.global_search_scope_contacts
+import app.relay.generated.resources.global_search_scope_files
 import app.relay.generated.resources.global_search_empty
 import app.relay.generated.resources.global_search_from_chat
 import app.relay.generated.resources.global_search_section_files
 import app.relay.generated.resources.global_search_contact_time
+import app.relay.generated.resources.global_search_failed
+import app.relay.generated.resources.global_search_loading
 import app.relay.generated.resources.conv_search_hint_global
 import app.relay.generated.resources.ic_chat_bubble
 import app.relay.generated.resources.ic_file
@@ -59,11 +72,15 @@ import app.relay.generated.resources.ic_image
 import app.relay.generated.resources.ic_arrow_back
 import app.relay.generated.resources.ic_close
 import app.relay.generated.resources.ic_search
+import app.relay.ui.components.AppButtonTone
+import app.relay.ui.components.AppIconButton
+import app.relay.ui.components.AppTextButton
 import app.relay.ui.components.PeerAvatar
 import app.relay.ui.components.formatClock
 import app.relay.ui.theme.IconSizes
 import app.relay.ui.theme.LocalAppSpacing
 import app.relay.ui.theme.accents
+import kotlinx.coroutines.delay
 import org.jetbrains.compose.resources.painterResource
 import org.jetbrains.compose.resources.stringResource
 
@@ -89,7 +106,13 @@ import org.jetbrains.compose.resources.stringResource
  */
 @Composable
 fun GlobalSearchScreen(
-    onSearch: (String) -> GlobalSearchResult,
+    /**
+     * 检索入口。第二参数是**只要哪一段**（见 `GlobalSearchScope`）。
+     *
+     * 为什么把 scope 交给调用方而不是在这里过滤结果：不要的段应当**直接不查** ——
+     * 这个搜索同步跑在 UI 路径上，先查再丢等于白付一次全库扫描。
+     */
+    onSearch: (String, GlobalSearchScope) -> GlobalSearchResult,
     onBack: () -> Unit,
     onOpenChat: (String) -> Unit,
     onOpenFile: (String) -> Unit,
@@ -109,12 +132,39 @@ fun GlobalSearchScreen(
     initialQuery: String = "",
 ) {
     var query by remember(initialQuery) { mutableStateOf(initialQuery) }
+    // 只看哪一段。默认全部 —— 与原型「没有筛选器」的默认口径一致；
+    // 这里多出来的是一层可选收窄，不改变默认行为。
+    var scope by remember { mutableStateOf(GlobalSearchScope.All) }
 
-    // `onSearch` 是**同步读**（`RelayController.searchGlobal` 读的是内存里那份 peer / 消息表），
-    // 所以直接算而不是走 `LaunchedEffect`：后者会多一次重组，而截图帧要的是
-    // "给一个初值、当帧就有结果"。空关键词不查 —— 那是初始态，不是空结果。
-    val result: GlobalSearchResult? = remember(query) {
-        if (query.isBlank()) null else onSearch(query)
+    // 静态帧接缝：初值非空时当帧直接出结果（截图门禁要的第一帧就是最终画面）。
+    // 生产路径的初值为空，走下面的 debounce。
+    val initialOutcome: GlobalSearchOutcome = remember(initialQuery) {
+        if (initialQuery.isBlank()) {
+            GlobalSearchOutcome.Idle
+        } else {
+            runCatching { onSearch(initialQuery, GlobalSearchScope.All) }
+                .fold({ GlobalSearchOutcome.Done(it) }, { GlobalSearchOutcome.Failed })
+        }
+    }
+    var outcome by remember(initialQuery) { mutableStateOf(initialOutcome) }
+
+    // 击键不再逐字打一次全库：静默 [SEARCH_DEBOUNCE_MILLIS] 之后才查一次。
+    // `LaunchedEffect(query)` 在 query 变化时取消上一次协程，于是只有最后一次真的落地。
+    LaunchedEffect(query, scope) {
+        if (query.isBlank()) {
+            outcome = GlobalSearchOutcome.Idle
+            return@LaunchedEffect
+        }
+        // 初值那一帧已经算好，不要再走一遍 debounce 把画面翻成「正在搜索」。
+        // 换筛选档时必须重查 —— 同一句话换「只看文件」结果不同。
+        if (query == initialQuery && scope == GlobalSearchScope.All) return@LaunchedEffect
+        outcome = GlobalSearchOutcome.Loading
+        when (val next = debouncedGlobalSearch(query, SEARCH_DEBOUNCE_MILLIS, onSearch, scope)) {
+            GlobalSearchOutcome.Idle -> outcome = GlobalSearchOutcome.Idle
+            GlobalSearchOutcome.Loading -> Unit
+            GlobalSearchOutcome.Failed -> outcome = GlobalSearchOutcome.Failed
+            is GlobalSearchOutcome.Done -> outcome = next
+        }
     }
 
     val sp = LocalAppSpacing.current
@@ -130,52 +180,72 @@ fun GlobalSearchScreen(
             )
             HorizontalDivider()
 
-            when {
+            // 筛选条：**只在真的搜过之后才画**。初始态（还没输字）画一排 chip
+            // 等于给一个「还没开始」的屏加配置，而用户此刻要的是输入框。
+            if (outcome !is GlobalSearchOutcome.Idle) {
+                SearchScopeRow(
+                    selected = scope,
+                    onSelect = { scope = it },
+                )
+            }
+
+            when (val current = outcome) {
                 // 初始态：还没输字，三段一块都不画（不是"没有结果"）。
-                result == null -> Unit
+                GlobalSearchOutcome.Idle -> Unit
 
-                result.isEmpty -> EmptyHits(query)
+                // 静默期与检索执行期间：给一个明确的「正在搜索」，而不是让界面像没反应。
+                GlobalSearchOutcome.Loading -> SearchLoading()
 
-                else -> Column(
-                    modifier = Modifier
-                        .fillMaxSize()
-                        .verticalScroll(rememberScrollState())
-                        .padding(bottom = sp.md),
-                ) {
-                    if (result.contacts.isNotEmpty()) {
-                        SectionLabel(stringResource(Res.string.global_search_section_contacts))
-                        result.contacts.forEach { hit ->
-                            ContactHitRow(
-                                hit = hit,
-                                // 联系人的命中键是 **nodeId**，而这里要的是**会话键** ——
-                                // 两者在私聊上恰好相等，但那是 `ConvId.single` 的约定、
-                                // 不是可以靠"它们一样"来省掉的一步（`ConvId` 的 KDoc
-                                // 明写「存在的意义是让调用方不必记'私聊不加前缀'这条约定」）。
-                                onClick = { onOpenChat(ConvId.single(hit.nodeId)) },
-                            )
-                        }
-                    }
-                    if (result.chats.isNotEmpty()) {
-                        SectionLabel(stringResource(Res.string.global_search_section_messages))
-                        result.chats.forEach { hit ->
-                            ChatHitRow(
-                                hit = hit,
-                                now = now,
-                                onClick = { onOpenChat(hit.convId) },
-                            )
-                        }
-                    }
-                    if (result.files.isNotEmpty()) {
-                        SectionLabel(stringResource(Res.string.global_search_section_files))
-                        result.files.forEach { hit ->
-                            FileHitRow(
-                                hit = hit,
-                                now = now,
-                                // 文件在协议里属文件柜那一套：点它该看到"这个文件在哪"，
-                                // 不只是"谁发过"（`prototype/relay.html:4437-4438`）。
-                                // 落点由调用方决定，这里只报会话键。
-                                onClick = { onOpenFile(hit.convId) },
-                            )
+                // 检索抛错：给一句失败说明与回到可搜状态的出口，不画一片空白。
+                GlobalSearchOutcome.Failed -> SearchFailed(onClear = { query = "" })
+
+                is GlobalSearchOutcome.Done -> {
+                    val result = current.result
+                    if (result.isEmpty) {
+                        EmptyHits(query)
+                    } else {
+                        Column(
+                            modifier = Modifier
+                                .fillMaxSize()
+                                .verticalScroll(rememberScrollState())
+                                .padding(bottom = sp.md),
+                        ) {
+                            if (result.contacts.isNotEmpty()) {
+                                SectionLabel(stringResource(Res.string.global_search_section_contacts))
+                                result.contacts.forEach { hit ->
+                                    ContactHitRow(
+                                        hit = hit,
+                                        // 联系人的命中键是 **nodeId**，而这里要的是**会话键** ——
+                                        // 两者在私聊上恰好相等，但那是 `ConvId.single` 的约定、
+                                        // 不是可以靠"它们一样"来省掉的一步（`ConvId` 的 KDoc
+                                        // 明写「存在的意义是让调用方不必记'私聊不加前缀'这条约定」）。
+                                        onClick = { onOpenChat(ConvId.single(hit.nodeId)) },
+                                    )
+                                }
+                            }
+                            if (result.chats.isNotEmpty()) {
+                                SectionLabel(stringResource(Res.string.global_search_section_messages))
+                                result.chats.forEach { hit ->
+                                    ChatHitRow(
+                                        hit = hit,
+                                        now = now,
+                                        onClick = { onOpenChat(hit.convId) },
+                                    )
+                                }
+                            }
+                            if (result.files.isNotEmpty()) {
+                                SectionLabel(stringResource(Res.string.global_search_section_files))
+                                result.files.forEach { hit ->
+                                    FileHitRow(
+                                        hit = hit,
+                                        now = now,
+                                        // 文件在协议里属文件柜那一套：点它该看到"这个文件在哪"，
+                                        // 不只是"谁发过"（`prototype/relay.html:4437-4438`）。
+                                        // 落点由调用方决定，这里只报会话键。
+                                        onClick = { onOpenFile(hit.convId) },
+                                    )
+                                }
+                            }
                         }
                     }
                 }
@@ -191,6 +261,66 @@ fun GlobalSearchScreen(
  * （`.tbinner{align-items:center}` + `.ibtn.plain{align-self:center;margin-top:0}`），
  * 而 `.search.fill{max-width:none;min-width:0}` 把输入框放开吃满整行。
  */
+
+/**
+ * 全局搜索的筛选条：全部 / 联系人 / 聊天记录 / 文件。
+ *
+ * 抽成独立组件而不是内联，理由与 `ConversationsOverflowItems` 同一条：
+ * 截图门禁要能单独渲染这一条。
+ *
+ * 「全部」是**默认档**，且与原型的「没有筛选器」那一版等价 —— 这一条不改默认口径，
+ * 只是把「只看某一段」这条常被用来碰运气的操作变成一次点击。
+ */
+@Composable
+private fun SearchScopeRow(
+    selected: GlobalSearchScope,
+    onSelect: (GlobalSearchScope) -> Unit,
+) {
+    val sp = LocalAppSpacing.current
+    val options = listOf(
+        GlobalSearchScope.All to Res.string.global_search_scope_all,
+        GlobalSearchScope.Contacts to Res.string.global_search_scope_contacts,
+        GlobalSearchScope.Chats to Res.string.global_search_scope_chats,
+        GlobalSearchScope.Files to Res.string.global_search_scope_files,
+    )
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(horizontal = sp.lg, vertical = sp.sm)
+            .background(MaterialTheme.colorScheme.surfaceVariant, RoundedCornerShape(10.dp))
+            .padding(3.dp),
+        horizontalArrangement = Arrangement.spacedBy(3.dp),
+    ) {
+        options.forEach { (option, label) ->
+            val active = option == selected
+            Surface(
+                color = if (active) MaterialTheme.colorScheme.surface else Color.Transparent,
+                shape = RoundedCornerShape(8.dp),
+                modifier = Modifier.weight(1f),
+            ) {
+                Box(
+                    modifier = Modifier
+                        .clickable { onSelect(option) }
+                        .padding(vertical = sp.sm6),
+                    contentAlignment = Alignment.Center,
+                ) {
+                    Text(
+                        text = stringResource(label),
+                        style = MaterialTheme.typography.labelMedium,
+                        fontWeight = if (active) FontWeight.SemiBold else null,
+                        color = if (active) {
+                            MaterialTheme.colorScheme.onSurface
+                        } else {
+                            MaterialTheme.colorScheme.onSurfaceVariant
+                        },
+                        maxLines = 1,
+                    )
+                }
+            }
+        }
+    }
+}
+
 @Composable
 private fun SearchTopBar(
     query: String,
@@ -205,13 +335,12 @@ private fun SearchTopBar(
         verticalAlignment = Alignment.CenterVertically,
         horizontalArrangement = Arrangement.spacedBy(sp.sm),
     ) {
-        IconButton(onClick = onBack) {
-            Icon(
-                painter = painterResource(Res.drawable.ic_arrow_back),
-                contentDescription = stringResource(Res.string.action_back),
-                tint = MaterialTheme.colorScheme.onSurface,
-            )
-        }
+        AppIconButton(
+            icon = Res.drawable.ic_arrow_back,
+            contentDescription = stringResource(Res.string.action_back),
+            onClick = onBack,
+            tone = AppButtonTone.Primary,
+        )
         Row(
             // 原型 `.search input{border:1px solid var(--outline);background:var(--bg);
             // border-radius:9px}`（relay.html:625-627）。底色是 `--bg`（#FAFAF8）不是
@@ -484,4 +613,107 @@ private fun FileHitRow(hit: GlobalSearchFileHit, now: Long, onClick: () -> Unit)
         time = formatClock(hit.at),
         onClick = onClick,
     )
+}
+
+/** 全局搜索的输入静默期：击键停下来这么久才真的查一次全库。 */
+internal const val SEARCH_DEBOUNCE_MILLIS: Long = 200
+
+/**
+ * 全局搜索的状态。
+ *
+ * `Loading` 只由界面在等待静默期 / 检索时置上；[debouncedGlobalSearch] 永远不返回它 ——
+ * 检索本身的结局只有「空关键词没搜」「搜到了」「搜失败了」三种。
+ */
+internal sealed interface GlobalSearchOutcome {
+    /** 空关键词：还没开始搜，画初始态（与「搜了但没命中」不是同一件事）。 */
+    data object Idle : GlobalSearchOutcome
+
+    /** 正在等静默期或正在检索。 */
+    data object Loading : GlobalSearchOutcome
+
+    /** 检索完成；结果可能为空（空结果 = 无命中态）。 */
+    data class Done(val result: GlobalSearchResult) : GlobalSearchOutcome
+
+    /** 检索抛错。 */
+    data object Failed : GlobalSearchOutcome
+}
+
+/**
+ * 静默 [debounceMillis] 之后执行一次检索。
+ *
+ * 调用方每次 query 变化都取消上一个协程（`LaunchedEffect(query)` 天然如此），
+ * 于是**只有最后一次**真的落到 [search] —— 这就是 debounce 的全部含义。
+ * 空关键词直接返回 [GlobalSearchOutcome.Idle]，一次检索都不发。
+ */
+internal suspend fun debouncedGlobalSearch(
+    rawQuery: String,
+    debounceMillis: Long = SEARCH_DEBOUNCE_MILLIS,
+    search: (String, GlobalSearchScope) -> GlobalSearchResult,
+    scope: GlobalSearchScope = GlobalSearchScope.All,
+): GlobalSearchOutcome {
+    val q = rawQuery.trim()
+    if (q.isEmpty()) return GlobalSearchOutcome.Idle
+    delay(debounceMillis)
+    return try {
+        GlobalSearchOutcome.Done(search(q, scope))
+    } catch (_: Throwable) {
+        GlobalSearchOutcome.Failed
+    }
+}
+
+/**
+ * 兼容重载：只关心关键词、不要筛选的调用点（老调用点与既有单测）。
+ *
+ * 有它就不必让每个老调用点都写 `{ q, _ -> ... }` —— 那种为了凑签名而写的
+ * 丢弃参数，正是下一次改动时最容易漏的地方。
+ */
+internal suspend fun debouncedGlobalSearch(
+    rawQuery: String,
+    debounceMillis: Long = SEARCH_DEBOUNCE_MILLIS,
+    search: (String) -> GlobalSearchResult,
+): GlobalSearchOutcome = debouncedGlobalSearch(rawQuery, debounceMillis, { q, _ -> search(q) })
+
+/** 搜索中：静默期与检索执行期间画它，替掉「敲了字却像没反应」。 */
+@Composable
+private fun SearchLoading() {
+    val sp = LocalAppSpacing.current
+    Box(
+        modifier = Modifier.fillMaxSize().padding(top = sp.xl),
+        contentAlignment = Alignment.TopCenter,
+    ) {
+        Column(horizontalAlignment = Alignment.CenterHorizontally) {
+            CircularProgressIndicator(modifier = Modifier.size(sp.xl))
+            Spacer(Modifier.height(sp.md))
+            Text(
+                text = stringResource(Res.string.global_search_loading),
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+        }
+    }
+}
+
+/** 搜索失败：给一句失败说明与回到可搜状态的出口，不画一片空白。 */
+@Composable
+private fun SearchFailed(onClear: () -> Unit) {
+    val sp = LocalAppSpacing.current
+    Box(
+        modifier = Modifier.fillMaxSize().padding(top = sp.xl),
+        contentAlignment = Alignment.TopCenter,
+    ) {
+        Column(
+            horizontalAlignment = Alignment.CenterHorizontally,
+            verticalArrangement = Arrangement.spacedBy(sp.sm),
+        ) {
+            Text(
+                text = stringResource(Res.string.global_search_failed),
+                style = MaterialTheme.typography.bodyMedium,
+                color = MaterialTheme.colorScheme.error,
+            )
+            AppTextButton(
+                text = stringResource(Res.string.action_clear_search),
+                onClick = onClear,
+            )
+        }
+    }
 }

@@ -86,10 +86,48 @@ fun handleSendFiles(peerId: String, files: List<LocalFile>) {
 }
 
 
-suspend fun handleOfferFiles(rt: NodeRuntime, peerId: String, files: List<LocalFile>) {
+suspend fun handleOfferFiles(rt: NodeRuntime, peerId: String, files: List<LocalFile>) =
+    handleOfferFilesWith(peerId, files) { member, msgId, groupId, groupRev ->
+        runCatching {
+            rt.offerFiles(
+                peerId = member,
+                files = files,
+                msgId = msgId,
+                groupId = groupId,
+                groupRev = groupRev,
+            )
+        }.getOrNull()
+    }
+
+/**
+ * 文件报价的乐观插入：**先把卡片放进消息流**，再等 [offer] 返回真实 transferId。
+ *
+ * 与私聊/群聊文本那条路同一条理由：报价要对每个成员跑一遍 ACK + TCP 兜底，
+ * 那段时间界面原本什么都不显示（见 DeliveryState.Sending 的 KDoc）。这里先插一张
+ * [TransferState.Offered] 的卡片，报价回来后把卡片就地换成带真实 transferId 的那张；
+ * 报价失败时卡片转 [TransferState.Failed]，**不消失** —— 一张凭空消失的卡片读起来像
+ * 「我根本没发过」。
+ *
+ * ## 临时键与登记的一致性
+ *
+ * 报价返回前不知道真实 transferId，所以卡片先挂在 [pendingTransferKey] 这个临时键上。
+ * 报价返回后 [commitOptimisticTransferCard] 会把临时键换成真实 transferId，并同步
+ * `transferConvs` / `transferMessages` 两张表 —— 三处必须指向同一条 [MessageUi]，
+ * 否则后续 Progress / Completed 事件按真实 transferId 找不到卡片，会**另插一张**。
+ *
+ * @param offer 真正的报价动作（生产路径传 [NodeRuntime.offerFiles] 的调用）。抽成形参
+ *   是为了让「先插卡片后等报价」这个**时序**能被闸门式测试钉住。
+ */
+internal suspend fun handleOfferFilesWith(
+    peerId: String,
+    files: List<LocalFile>,
+    offer: suspend (member: String, msgId: String, groupId: String?, groupRev: Int?) -> String?,
+) {
+    if (files.isEmpty()) return
     val groupId = ConvId.groupIdOf(peerId)
     val name = files.first().name
     val msgId = newId()
+    val pendingKey = pendingTransferKey(msgId)
 
     if (groupId != null) {
         val meta = host._state.value.settings.groups.firstOrNull { it.groupId == groupId }
@@ -106,75 +144,135 @@ suspend fun handleOfferFiles(rt: NodeRuntime, peerId: String, files: List<LocalF
             host.warn(BannerMessage.GroupNeedsMember)
             return
         }
+        val cardMessageId = insertOptimisticTransferCard(peerId, pendingKey, files, msgId)
         val spawnedTransfers = mutableListOf<String>()
         for (member in others) {
-            val tId = runCatching {
-                rt.offerFiles(
-                    peerId = member,
-                    files = files,
-                    msgId = msgId,
-                    groupId = meta.groupId,
-                    groupRev = meta.rev,
-                )
-            }.getOrNull()
-            if (tId != null) {
-                spawnedTransfers += tId
-                host.stateLock.withLock { host.core.transferConvs[tId] = peerId }
-            }
+            val tId = offer(member, msgId, meta.groupId, meta.rev)
+            if (tId != null) spawnedTransfers += tId
         }
         if (spawnedTransfers.isEmpty()) {
-            host.warn(BannerMessage.TransferFailed("offer-failed"))
+            failOptimisticTransferCard(peerId, pendingKey, cardMessageId)
             return
         }
-        val cardMessageId = host.localMessageId()
-        host.stateLock.withLock {
-            host.core.groupTransferIds[msgId] = spawnedTransfers
-            for (tId in spawnedTransfers) {
-                host.core.transferMessages[tId] = cardMessageId
-            }
-        }
-        val primaryTransferId = spawnedTransfers.first()
-        handleUpsertTransferCard(
-            peerId,
-            FileCardUi(
-                transferId = primaryTransferId,
-                name = name,
-                size = files.sumOf { it.size },
-                fileCount = files.size,
-                mine = true,
-                state = TransferState.Offered,
-                msgId = msgId,
-                localPaths = files.map { it.path },
-            ),
-        )
+        host.stateLock.withLock { host.core.groupTransferIds[msgId] = spawnedTransfers }
+        commitOptimisticTransferCard(peerId, pendingKey, cardMessageId, spawnedTransfers, files, msgId)
         host._state.update {
             it.copy(banner = BannerUi(BannerMessage.FilesOffered(files.size, name), BannerTone.Info))
         }
         return
     }
 
-    val transferId = runCatching { rt.offerFiles(peerId, files, msgId = msgId) }.getOrNull()
+    val cardMessageId = insertOptimisticTransferCard(peerId, pendingKey, files, msgId)
+    val transferId = offer(peerId, msgId, null, null)
     if (transferId == null) {
-        host.warn(BannerMessage.TransferFailed("offer-failed"))
+        failOptimisticTransferCard(peerId, pendingKey, cardMessageId)
         return
     }
-    host.stateLock.withLock { host.core.transferConvs[transferId] = peerId }
-    handleUpsertTransferCard(
-        peerId,
-        FileCardUi(
-            transferId = transferId,
-            name = name,
-            size = files.sumOf { it.size },
-            fileCount = files.size,
-            mine = true,
-            state = TransferState.Offered,
-            msgId = msgId,
-            localPaths = files.map { it.path },
-        ),
-    )
+    commitOptimisticTransferCard(peerId, pendingKey, cardMessageId, listOf(transferId), files, msgId)
     host._state.update {
         it.copy(banner = BannerUi(BannerMessage.FilesOffered(files.size, name), BannerTone.Info))
     }
+}
+
+/**
+ * 乐观卡片的临时 transferId 键。
+ *
+ * 以 `pending-` 开头：真实 transferId 是传输层生成的，不会以这个前缀开头，
+ * 所以临时键不会和真实键撞上（撞上会让进度事件认到错误的卡片）。
+ */
+private fun pendingTransferKey(msgId: String): String = "pending-" + msgId
+
+/**
+ * 先把一张 [TransferState.Offered] 卡片插进 [convId]，返回它所在 [MessageUi] 的 id。
+ *
+ * 卡片先挂在 [pendingTransferKey] 上，报价返回后由 [commitOptimisticTransferCard] 换键。
+ */
+private fun insertOptimisticTransferCard(
+    convId: String,
+    pendingKey: String,
+    files: List<LocalFile>,
+    msgId: String,
+): String {
+    val messageId = host.localMessageId()
+    val card = FileCardUi(
+        transferId = pendingKey,
+        name = files.first().name,
+        size = files.sumOf { it.size },
+        fileCount = files.size,
+        mine = true,
+        state = TransferState.Offered,
+        msgId = msgId,
+        localPaths = files.map { it.path },
+    )
+    host.stateLock.withLock {
+        host.core.transferConvs[pendingKey] = convId
+        host.core.transferMessages[pendingKey] = messageId
+        host.handleAppendMessage(
+            MessageUi(
+                id = messageId,
+                peerId = convId,
+                mine = true,
+                text = "",
+                at = nowMillis(),
+                file = card,
+                senderId = host._state.value.selfNodeId,
+            ),
+        )
+    }
+    return messageId
+}
+
+/**
+ * 报价返回后：临时键换成真实 transferId，并把那张卡片**就地改写**。
+ *
+ * 登记与卡片必须一致：`transferConvs[tId]` 给 Progress / Completed 事件定位会话，
+ * `transferMessages[tId]` 给它们定位消息行，而卡片里的 transferId 是下一轮
+ * [handleCurrentTransferCard] 的入口。三者指向同一条消息，才不会长出第二张卡片。
+ */
+private fun commitOptimisticTransferCard(
+    convId: String,
+    pendingKey: String,
+    messageId: String,
+    transferIds: List<String>,
+    files: List<LocalFile>,
+    msgId: String,
+) {
+    val card = FileCardUi(
+        transferId = transferIds.first(),
+        name = files.first().name,
+        size = files.sumOf { it.size },
+        fileCount = files.size,
+        mine = true,
+        state = TransferState.Offered,
+        msgId = msgId,
+        localPaths = files.map { it.path },
+    )
+    host.stateLock.withLock {
+        host.core.transferConvs.remove(pendingKey)
+        host.core.transferMessages.remove(pendingKey)
+        for (tId in transferIds) {
+            host.core.transferConvs[tId] = convId
+            host.core.transferMessages[tId] = messageId
+        }
+        val existing = host.core.threads[convId]?.firstOrNull { it.id == messageId } ?: return@withLock
+        host.handleReplaceMessage(convId, existing.copy(file = card))
+    }
+}
+
+/**
+ * 报价一个都没成功：把那张乐观卡片转成 [TransferState.Failed]，**不删掉它**。
+ *
+ * 旧行为是只弹一条横幅、卡片根本不出现 —— 用户看到的是「点了发送，什么都没有」。
+ */
+private fun failOptimisticTransferCard(convId: String, pendingKey: String, messageId: String) {
+    host.stateLock.withLock {
+        host.core.transferConvs.remove(pendingKey)
+        host.core.transferMessages.remove(pendingKey)
+        val existing = host.core.threads[convId]?.firstOrNull { it.id == messageId } ?: return@withLock
+        val card = existing.file?.copy(state = TransferState.Failed, reason = "offer-failed") ?: return@withLock
+        host.handleReplaceMessage(convId, existing.copy(file = card))
+    }
+    host.warn(BannerMessage.TransferFailed("offer-failed"))
 }
 
 

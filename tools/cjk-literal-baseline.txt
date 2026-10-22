@@ -9,7 +9,6 @@
 5	composeApp/src/androidMain/kotlin/app/relay/platform/AndroidMdnsBrowser.kt
 2	composeApp/src/androidMain/kotlin/app/relay/platform/AndroidPushNotificationHandler.kt
 7	composeApp/src/androidMain/kotlin/app/relay/platform/AndroidReceivedFileActions.kt
-20	composeApp/src/commonMain/kotlin/app/relay/feature/settings/SettingsHomeScreen.kt
 5	composeApp/src/commonMain/kotlin/app/relay/feature/settings/SettingsProfileSubpage.kt
 4	composeApp/src/commonMain/kotlin/app/relay/platform/PlatformContracts.kt
 12	composeApp/src/commonMain/kotlin/app/relay/ui/components/AvatarPalette.kt

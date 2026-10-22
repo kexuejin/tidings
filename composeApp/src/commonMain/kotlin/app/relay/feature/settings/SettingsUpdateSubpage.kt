@@ -6,9 +6,7 @@ import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
-import androidx.compose.material3.Button
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Modifier
@@ -26,6 +24,8 @@ import app.relay.generated.resources.set_update_open_action
 import app.relay.generated.resources.set_update_subtitle
 import app.relay.generated.resources.set_update_title
 import app.relay.ui.SectionCard
+import app.relay.ui.components.AppButton
+import app.relay.ui.components.AppOutlinedButton
 import app.relay.ui.components.InfoRow
 import app.relay.ui.theme.LocalAppSpacing
 import org.jetbrains.compose.resources.stringResource
@@ -115,20 +115,18 @@ fun SettingsUpdateSubpage(
                 modifier = Modifier.fillMaxWidth().padding(top = LocalAppSpacing.current.sm),
                 horizontalArrangement = Arrangement.spacedBy(LocalAppSpacing.current.sm),
             ) {
-                OutlinedButton(
+                AppOutlinedButton(
+                    text = stringResource(Res.string.set_update_check_action),
                     onClick = { onCheckForUpdates?.invoke() },
                     enabled = onCheckForUpdates != null && updateState.status != UpdateCheckStatus.Checking,
                     modifier = Modifier.weight(1f),
-                ) {
-                    Text(stringResource(Res.string.set_update_check_action))
-                }
+                )
                 if (updateState.status == UpdateCheckStatus.UpdateAvailable && onOpenUpdate != null) {
-                    Button(
+                    AppButton(
+                        text = stringResource(Res.string.set_update_open_action),
                         onClick = { onOpenUpdate.invoke() },
                         modifier = Modifier.weight(1f),
-                    ) {
-                        Text(stringResource(Res.string.set_update_open_action))
-                    }
+                    )
                 }
             }
         }

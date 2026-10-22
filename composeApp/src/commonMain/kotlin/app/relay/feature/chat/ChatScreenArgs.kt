@@ -11,6 +11,7 @@ import app.relay.platform.ReceivedFileActions
 import app.relay.ui.ContentWidths
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Modifier
+import app.relay.ui.components.MentionTarget
 
 /**
  * [ChatScreen] 的四个参数组。
@@ -82,6 +83,14 @@ data class ChatScreenState(
  */
 data class ChatScreenActions(
     val onSend: (targetId: String, text: String, replyTo: String?) -> Unit,
+    /**
+     * 失败气泡上的「重发」。
+     *
+     * 与 [onSend] 分开是必须的：`onSend(targetId, 原文本, null)` 会生成**新信封 id**，
+     * 而对端按 id 去重 —— 换 id 重发就是「群里多了一条」（真机现场）。null = 这个壳
+     * 没有按原 id 重放的能力，那就退回旧行为（红字仍可点，但会新发一条）。
+     */
+    val onRetryMessage: ((MessageUi) -> Unit)? = null,
     val onOpenAgentConsole: ((String) -> Unit)? = null,
     val onDismissBanner: (() -> Unit)? = null,
     /** null = 输入栏不画附件图标。 */
@@ -94,6 +103,13 @@ data class ChatScreenActions(
     val onResumeTransfer: ((String) -> Unit)? = null,
     /** null = 文件卡片不画「打开 / 分享」。 */
     val onRecallMessage: ((MessageUi) -> Unit)? = null,
+    /**
+     * **只删本机**这一条：(会话键, 消息 id) → 删除。
+     *
+     * 与 [onRecallMessage] 是两件事：撤回有时限、**会告诉对方**；
+     * 删除是纯本机行为 ——「我自己不想再看到它」。null = 这个壳不提供删除入口。
+     */
+    val onDeleteMessage: ((convId: String, messageId: String) -> Unit)? = null,
     /** null = 长按菜单不画「转发」。 */
     val onForwardMessage: ((message: MessageUi, targetConvId: String) -> Unit)? = null,
     /** null = 头部与输入栏都不画戳一碰。 */
@@ -162,6 +178,13 @@ data class ChatScreenActions(
 data class ChatScreenGroupActions(
     val onAddGroupMembers: ((groupId: String, memberIds: List<String>) -> Unit)? = null,
     val onRemoveGroupMember: ((groupId: String, memberId: String) -> Unit)? = null,
+    /**
+     * 把**本机的一个 workspace** 暴露/收起进群（`virtualAgents` 的成员入口）。
+     *
+     * `wsId` 为 null 时表示收起。与 `onAddGroupMembers` 是两件事：那个加**人**，
+     * 这个暴露**本机项目**（暴露单位是 `(agentId, wsId)`）。
+     */
+    val onExposeWorkspaces: ((groupId: String, wsId: String?, agentId: String?) -> Unit)? = null,
     val onUpdateGroupMeta: ((groupId: String, description: String?, announce: String?) -> Unit)? = null,
     val onLeaveGroup: ((groupId: String) -> Unit)? = null,
 )
@@ -172,6 +195,29 @@ data class ChatScreenGroupActions(
  * `initial*` 四个参数是**截图接缝**：让那些「只在用户点了什么之后才出现」的分支
  * 在首帧就开着，否则截图门禁对它们完全变瞎。默认值全部等于生产行为（关的）。
  */
+/**
+ * 按会话存草稿的那张表 —— 手机壳与桌面壳**共用这一份**（AGENTS.md §2.6：
+ * 同一个事实只许有一处实现，两端各写一份必然漂）。
+ *
+ * ## 为什么需要它
+ *
+ * `ChatScreen` 自己的 `draft` 是 `remember(peerId)` 的：**切会话就重建**。
+ * 用户写到一半去另一个会话确认一件事，回来字数全没了 —— 那是丢用户的输入，
+ * 性质与丢消息接近，只是没那么显眼。
+ *
+ * ## 语义
+ *
+ * - **空串 = 删除这一条**：发送后 `onDraftChange(convId, "")`，表里不该留一个空草稿
+ *   （留着会让"切回来是空白"与"没草稿"无法区分，且表会越攒越大）。
+ * - **只活在进程内，不落盘**：产品语义是"切页面不丢"，不是"重启还留着"。
+ */
+internal fun updateDraft(drafts: Map<String, String>, convId: String, text: String): Map<String, String> =
+    if (text.isEmpty()) drafts - convId else drafts + (convId to text)
+
+/** 取某个会话的草稿；没有就是空串（绝不返回 null —— 调用点直接喂给输入框）。 */
+internal fun draftOf(drafts: Map<String, String>, convId: String?): String =
+    convId?.let { drafts[it] }.orEmpty()
+
 data class ChatScreenChrome(
     val receivedFileActions: ReceivedFileActions? = null,
     val onBack: (() -> Unit)? = null,
@@ -179,7 +225,28 @@ data class ChatScreenChrome(
     val modifier: Modifier = Modifier,
     val showHeader: Boolean = true,
     val bubbleFraction: Float = ContentWidths.BUBBLE_FRACTION_PHONE,
-    val composerSlot: (@Composable (String, (String) -> Unit) -> Unit)? = null,
+    /**
+     * 外壳自带的输入卡片（桌面壳用它）。
+     *
+     * 第三个参数是 `@` 候选：**必须由这一层传下去**，否则桌面输入框没有候选列表 ——
+     * 真机反馈「桌面端还是无法输入 @」就是这条：`DesktopComposer` 从来没接过候选。
+     */
+    val composerSlot: (@Composable (String, (String) -> Unit, List<MentionTarget>) -> Unit)? = null,
+    /**
+     * 草稿的**外部存放处**：壳可以接住，把草稿按会话记下来，切换会话时再喂回 [initialDraft]。
+     *
+     * 为什么需要：草稿原来是 `remember(peerId)` —— **切走就重建**，回到原会话草稿已空。
+     * 用户写到一半去另一个会话确认一件事，回来字数全没了。那是**丢用户的输入**，
+     * 性质和丢消息接近，只是没那么显眼。
+     *
+     * 为什么做成可空槽而不是让 ChatScreen 自己持久化：草稿的寿命该跟着**壳**走
+     * （桌面窗口常驻 / 手机进程内），而且不同壳的存放位置不同（见桌面 `DesktopChatPane`）。
+     * 传 null = 这个壳不关心草稿保留，行为与改动前一致。
+     *
+     * @param convId 会话键（私聊 = 对端 nodeId、群 = `group:<id>`）。
+     * @param text 当前草稿全文；空串表示草稿被清掉（发送后）。
+     */
+    val onDraftChange: ((convId: String, text: String) -> Unit)? = null,
     val initialDraft: String = "",
     val initialEmojiOpen: Boolean = false,
     val initialHistorySearch: Boolean = false,

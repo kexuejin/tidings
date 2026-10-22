@@ -26,6 +26,7 @@ class ConversationsFeedOrderTest {
         lastMessageAt: Long = 0L,
         presenceAt: Long = 0L,
         online: Boolean = true,
+        isPinned: Boolean = false,
     ) = ConversationUi(
         convId = id,
         title = id,
@@ -38,6 +39,7 @@ class ConversationsFeedOrderTest {
         pendingCount = 0,
         lastMessageAt = lastMessageAt,
         presenceAt = presenceAt,
+        isPinned = isPinned,
     )
 
     private fun workspace(
@@ -135,5 +137,35 @@ class ConversationsFeedOrderTest {
 
         assertEquals(listOf("conv_a"), out.map { it.key })
         assertEquals(1L, (out.single() as InboxFeedItem.Conversation).conv.lastMessageAt)
+    }
+
+    // ------------------------------------------------------ 置顶（task-18）
+
+    /**
+     * **置顶的行必须排在最前，哪怕它很旧、而且别的行有未处理。**
+     *
+     * 用户钉它上去的意思就是「不管多旧、多安静，都留在最上面」，
+     * 所以置顶优先于「有未处理」那一档 —— 否则一条待审批就能把置顶会话挤下去。
+     */
+    @Test
+    fun pinnedConversationsSortAboveEverythingElse() {
+        val oldPinned = InboxFeedItem.Conversation(conv("pinned", lastMessageAt = 1L, isPinned = true))
+        val newer = InboxFeedItem.Conversation(conv("newer", lastMessageAt = 9_999L))
+        val pendingWs = workspace("ws-1", lastActivityAt = 0L, pendingCount = 3)
+
+        val out = orderInboxFeed(listOf(newer, pendingWs, oldPinned))
+
+        assertEquals("conv_pinned", out.first().key, "置顶必须第一 —— 比新鲜度与待处理都优先")
+    }
+
+    /** 没有置顶时行为**完全不变**（回归保护：老用户升级后列表顺序不该动）。 */
+    @Test
+    fun withoutPinsTheOldOrderIsUntouched() {
+        val newer = InboxFeedItem.Conversation(conv("newer", lastMessageAt = 9_999L))
+        val older = InboxFeedItem.Conversation(conv("older", lastMessageAt = 1L))
+
+        val out = orderInboxFeed(listOf(older, newer))
+
+        assertEquals(listOf("conv_newer", "conv_older"), out.map { it.key })
     }
 }

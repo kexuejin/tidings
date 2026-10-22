@@ -46,6 +46,9 @@ import org.jetbrains.compose.resources.stringResource
 
 import app.relay.ui.theme.LocalAppSpacing
 import app.relay.app.model.PeerUi
+import app.relay.app.model.WorkspaceUi
+import app.relay.generated.resources.workspace_member_add_agent
+import app.relay.generated.resources.workspace_member_no_workspace
 
 @Composable
 internal fun AddGroupMembersDialog(
@@ -230,6 +233,92 @@ internal fun EditGroupMetaDialog(
         },
         dismissButton = {
             RelayDialogButton(text = stringResource(Res.string.common_cancel), onClick = onDismiss)
+        },
+    )
+}
+
+/**
+ * 「添加智能体」对话框：列出**本机可以暴露给这个群**的 workspace。
+ *
+ * 暴露单位是 `(agentId, wsId)` —— 一台设备可以装多个 agent，不同 agent 也可能操作同一个
+ * workspace（见 `VirtualAgentMember` 的 KDoc）。这里每一行就是一个可 @ 的成员。
+ *
+ * 默认名由 `AgentMemberName.base` 生成（`dsh-teahouse-mobile`），冲突时自动加序号。
+ * **不给手改入口**（产品决定：默认生成唯一名字，后面再加的不允许冲突）。
+ */
+@Composable
+internal fun AddGroupWorkspaceDialog(
+    candidates: List<WorkspaceUi>,
+    exposed: Set<String>,
+    onDismiss: () -> Unit,
+    onConfirm: (List<String>) -> Unit,
+) {
+    // 已在群里暴露的默认勾上，用户取消勾选 = 收起。
+    val chosen = remember(candidates, exposed) {
+        mutableStateListOf<String>().apply { addAll(candidates.map { it.wsId }.filter { it in exposed }) }
+    }
+
+    RelayDialog(
+        onDismissRequest = onDismiss,
+        title = { Text(stringResource(Res.string.workspace_member_add_agent)) },
+        content = {
+            Column {
+                if (candidates.isEmpty()) {
+                    Text(
+                        text = stringResource(Res.string.workspace_member_no_workspace),
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                } else {
+                    LazyColumn(Modifier.heightIn(max = 240.dp)) {
+                        items(candidates, key = { it.wsId }) { ws ->
+                            val checked = ws.wsId in chosen
+                            Row(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .clickable {
+                                        if (!chosen.remove(ws.wsId)) chosen.add(ws.wsId)
+                                    }
+                                    .padding(vertical = LocalAppSpacing.current.xs),
+                                verticalAlignment = Alignment.CenterVertically,
+                            ) {
+                                Checkbox(checked = checked, onCheckedChange = null)
+                                Column(Modifier.weight(1f).padding(start = LocalAppSpacing.current.sm)) {
+                                    Text(
+                                        // 名字只显示工作区（用户认得出的是项目名，不是 agent 驱动名）；
+                                        // 驱动名放进副行，回答"用什么在跑"。
+                                        text = ws.wsTitle?.takeIf { it.isNotBlank() } ?: ws.wsId,
+                                        style = MaterialTheme.typography.bodyMedium,
+                                        maxLines = 1,
+                                        overflow = TextOverflow.Ellipsis,
+                                    )
+                                    Text(
+                                        text = ws.agentKind?.takeIf { it.isNotBlank() } ?: ws.wsId,
+                                        style = MaterialTheme.typography.labelSmall,
+                                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                        maxLines = 1,
+                                        overflow = TextOverflow.Ellipsis,
+                                    )
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        },
+        confirmButton = {
+            RelayDialogButton(
+                text = stringResource(Res.string.common_confirm),
+                onClick = { onConfirm(chosen.toList()) },
+                primary = true,
+            )
+        },
+        dismissButton = {
+            RelayDialogButton(
+                text = stringResource(Res.string.common_cancel),
+                onClick = onDismiss,
+                primary = false,
+            )
         },
     )
 }

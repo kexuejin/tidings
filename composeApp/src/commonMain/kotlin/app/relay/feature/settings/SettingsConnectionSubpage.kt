@@ -14,13 +14,10 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
-import androidx.compose.material3.Button
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
-import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -71,11 +68,16 @@ import app.relay.generated.resources.set_conn_subtitle
 import app.relay.ui.ContentWidths
 import app.relay.ui.SectionCard
 import app.relay.ui.centerCapped
+import app.relay.ui.components.AppButton
+import app.relay.ui.components.AppButtonSize
+import app.relay.ui.components.AppOutlinedButton
+import app.relay.ui.components.AppTextButton
 import app.relay.ui.components.LargeTitleBar
 import app.relay.ui.components.QrCodeView
 import app.relay.ui.components.TitleBarDivider
 import org.jetbrains.compose.resources.stringResource
 import app.relay.ui.theme.LocalAppSpacing
+import app.relay.ui.theme.SurfaceTiers
 
 /** 二级子页：连接设置。 */
 @Composable
@@ -167,22 +169,23 @@ fun SettingsConnectionSubpage(
                     modifier = Modifier.fillMaxWidth().padding(top = LocalAppSpacing.current.sm),
                     horizontalArrangement = Arrangement.spacedBy(LocalAppSpacing.current.sm, Alignment.End),
                 ) {
-                    OutlinedButton(enabled = !state.restarting, onClick = onRestart) {
-                        Text(
-                            stringResource(
-                                if (state.restarting) Res.string.set_conn_reconnecting
-                                else Res.string.set_conn_reconnect,
-                            ),
-                        )
-                    }
-                    Button(
+                    // 原型这两颗是 `.cardfoot` 里的标准档 `.btn`（不是 `.btn sm`），
+                    // 所以走默认的 Medium 档。
+                    AppOutlinedButton(
+                        text = stringResource(
+                            if (state.restarting) Res.string.set_conn_reconnecting
+                            else Res.string.set_conn_reconnect,
+                        ),
+                        onClick = onRestart,
+                        enabled = !state.restarting,
+                    )
+                    AppButton(
+                        text = stringResource(Res.string.set_conn_save),
                         onClick = {
                             val port = portText.trim().ifEmpty { settings.udpPort.toString() }
                             onSavePorts(port, settings.tcpPort.toString())
                         },
-                    ) {
-                        Text(stringResource(Res.string.set_conn_save))
-                    }
+                    )
                 }
             }
 
@@ -292,7 +295,9 @@ fun SettingsConnectionSubpage(
                         modifier = Modifier.weight(1f),
                         singleLine = true,
                     )
-                    Button(
+                    // 原型这颗是 `.btn sm pri`（`prototype/relay.html:5097`）：输入框右侧的密排位置。
+                    AppButton(
+                        text = stringResource(Res.string.cidr_add_action),
                         onClick = {
                             val target = newCidr.trim()
                             if (target.isNotEmpty()) {
@@ -300,9 +305,8 @@ fun SettingsConnectionSubpage(
                                 newCidr = ""
                             }
                         },
-                    ) {
-                        Text(stringResource(Res.string.cidr_add_action))
-                    }
+                        size = AppButtonSize.Small,
+                    )
                 }
 
                 if (settings.scanRanges.isEmpty()) {
@@ -319,7 +323,7 @@ fun SettingsConnectionSubpage(
                     ) {
                         settings.scanRanges.forEach { entry ->
                             Surface(
-                                color = MaterialTheme.colorScheme.surfaceVariant,
+                                color = SurfaceTiers.Raised,
                                 shape = RoundedCornerShape(8.dp),
                                 modifier = Modifier.fillMaxWidth(),
                             ) {
@@ -345,24 +349,32 @@ fun SettingsConnectionSubpage(
                                             color = MaterialTheme.colorScheme.onSurfaceVariant,
                                         )
                                     }
-                                    TextButton(onClick = { onTriggerCidrScan(entry.cidr) }) {
-                                        Text(stringResource(Res.string.cidr_scan_now))
-                                    }
-                                    TextButton(onClick = { onRemoveScanRange(entry.cidr) }) {
-                                        Text(stringResource(Res.string.cidr_delete))
-                                    }
+                                    // 原型这条行尾是两颗 `.btn sm`（`prototype/relay.html:5091-5092`）：
+                                    // 列表行内的动作，走小档。
+                                    AppTextButton(
+                                        text = stringResource(Res.string.cidr_scan_now),
+                                        onClick = { onTriggerCidrScan(entry.cidr) },
+                                        size = AppButtonSize.Small,
+                                    )
+                                    AppTextButton(
+                                        text = stringResource(Res.string.cidr_delete),
+                                        onClick = { onRemoveScanRange(entry.cidr) },
+                                        size = AppButtonSize.Small,
+                                    )
                                 }
                             }
                         }
                     }
 
-                    Button(
+                    // 原型「全部立即探测」是 `.btn sm`（`prototype/relay.html:5098`），
+                    // 与上一颗同一张 `.cardfoot`；本仓把它画成整宽（宽度不改档，字号仍按原型走小档）。
+                    AppButton(
+                        text = stringResource(if (state.scanProgress != null) Res.string.cidr_scanning else Res.string.cidr_scan_now),
                         onClick = { onTriggerCidrScan(null) },
                         modifier = Modifier.fillMaxWidth().padding(top = LocalAppSpacing.current.sm),
                         enabled = state.scanProgress == null,
-                    ) {
-                        Text(stringResource(if (state.scanProgress != null) Res.string.cidr_scanning else Res.string.cidr_scan_now))
-                    }
+                        size = AppButtonSize.Small,
+                    )
                 }
             }
 

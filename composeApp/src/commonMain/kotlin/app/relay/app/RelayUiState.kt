@@ -178,6 +178,95 @@ data class RelayUiState(
 
     val humanPeers: List<PeerUi> get() = peers.filterNot { it.isAgent }
 
+    /**
+     * 宿主 nodeId → 该宿主上 agent 的 kind（`dsh` / `opencode` …）。
+     *
+     * 这是**唯一**的「这个节点上有哪种 agent」台账：成员列表把 agent 显示成 `DSH`
+     * 而不是宿主机器名、@ 候选给出 `@DSH`、触发判据认哪些 kind，都从这里取。
+     * 来源只有两个（都是宿主自己宣告的帧）：工作区宣告与会话宣告；先到先得，不合成。
+     */
+    /**
+     * 宿主 nodeId → 该宿主上**所有** agent 的 kind（小写去重）。
+     *
+     * 一台设备可以装多个 agent（codex / opencode / dsh…），所以这里收集合。
+     * 旧实现是 `if (!out.containsKey(host)) out[host] = k` —— **每个宿主只留第一个 kind**，
+     * 于是装了第二个 agent 之后 `@opencode` 永远匹配不上：触发判据会静默漏掉它，
+     * 表现为「@ 了却没反应」。
+     */
+    fun agentKindsByHost(): Map<String, Set<String>> {
+        val out = LinkedHashMap<String, MutableSet<String>>()
+        fun note(host: String, kind: String?) {
+            val k = kind?.trim()?.lowercase()?.takeIf { it.isNotBlank() } ?: return
+            out.getOrPut(host) { LinkedHashSet() }.add(k)
+        }
+        agentWorkspaces.values.forEach { note(it.peerId, it.agentKind) }
+        agentSessions.values.forEach { note(it.peerId, it.agentKind) }
+        return out
+    }
+
+    /**
+     * 宿主 nodeId → agent 的 alias（PPE-1 会话帧 `alias`）。
+     *
+     * 只用于显示名：宿主自己报的 `DSH` 比 kind 的机械大写更像人名。**不参与判定** ——
+     * 身份键始终是 kind / nodeId，alias 换了不该让同一个人在群里换一栏。
+     */
+    fun agentAliasesByHost(): Map<String, String> {
+        val out = LinkedHashMap<String, String>()
+        agentSessions.values.forEach { s ->
+            val alias = s.alias?.trim()?.takeIf { it.isNotBlank() } ?: return@forEach
+            if (!out.containsKey(s.peerId)) out[s.peerId] = alias
+        }
+        return out
+    }
+
+    /**
+     * 一个会话的身份解析上下文（气泡、成员面板、@ 候选、会话行标题共用）。
+     *
+     * [SenderIdentityContext.agentSenderIds] 从**这个会话的消息**里收集：群里 agent
+     * 说过话就说明它在场，哪怕宿主节点还没进 `peers`（跨网冷启动时常见）。
+     */
+    fun senderContext(convId: String?): SenderIdentityContext {
+        val group = groupOfConv(convId)
+        val agentSenders = messages[convId].orEmpty()
+            .mapNotNull { it.senderId }
+            .filter { isAgentSenderId(it) }
+            .toSet()
+        return SenderIdentityContext(
+            selfNodeId = selfNodeId,
+            // 自己不在 peers 里 —— 昵称来自 settings.nick，不传就显示成 nodeId 前 8 位。
+            selfNick = settings.nick,
+            peers = peers,
+            group = group,
+            agentKindsByHost = agentKindsByHost(),
+            agentAliasesByHost = agentAliasesByHost(),
+            agentSenderIds = agentSenders,
+            // 工作区 id → 名字：@ token 要的是名字（`@dsh-teahouse-mobile`），
+            // 而 `virtualAgents` 只存 wsId。同一份状态里已有 `agentWorkspaces`，
+            // 不需要额外请求。
+            workspaceTitles = agentWorkspaces.values
+                .mapNotNull { ws -> ws.wsTitle?.takeIf { it.isNotBlank() }?.let { ws.wsId to it } }
+                .toMap(),
+            // **宿主的 agent 各自活跃在哪个工作区** —— 单聊里算名字要用它。
+            //
+            // 群聊从 `virtualAgents` 拿到名字（入驻时生成的）；单聊没有群元数据，
+            // 但 agent 的会话自己带 `wsId` —— 有了这张表，单聊能用**同一条规则**
+            // 算出同一个名字，而不是退回 `dsh`。
+            //
+            // 取该 (host, kind) 下**最近活跃**的那条会话的 wsId：用户在单聊里面对的
+            // 就是那个工作区的 agent，名字与群聊里看到的一致。
+            agentWorkspaceByHostAndKind = agentSessions.values
+                .filter { it.wsId != null && !it.agentKind.isNullOrBlank() }
+                .groupBy { session -> session.peerId }
+                .mapValues { (_, sessionsOfHost) ->
+                    sessionsOfHost
+                        .groupBy { session -> session.agentKind!!.lowercase() }
+                        .mapValues { (_, sameKind) ->
+                            sameKind.maxByOrNull { it.sortActivityAt }!!.wsId!!
+                        }
+                },
+        )
+    }
+
     fun peer(nodeId: String?): PeerUi? = nodeId?.let { id ->
         if (id == selfNodeId) {
             PeerUi(
@@ -259,17 +348,17 @@ data class RelayUiState(
     /**
      * 群消息气泡该署谁的名。
      *
-     * 发送者可能是**从没被发现过的**群成员（别人拉进来的人、还没广播的机器），
-     * 这时只能退回 nodeId 前 8 位 —— 和会话列表、[chatPeer] 的兜底保持同一种叫法，
-     * 不让同一个人在两处显示成两个样子。
+     * **只是 [resolveSenderIdentity] 的薄封装**，不保留第二套判定：agent 的
+     * `agent:<kind>` 在旧实现里单独走一条 "DSH Agent" 分支，于是「署名认 agent、
+     * 头像和 Markdown 不认」—— 同一条消息三个身份。现在一律走解析器。
+     *
+     * 拿不到会话上下文（群昵称那一档）时退化成「对端档案 + agent kind」，聊天气泡
+     * 该用 [senderContext] 构造的上下文再调 [resolveSenderIdentity]。
      */
-    fun senderName(senderId: String?): String? = senderId?.let { id ->
-        if (id == selfNodeId) null
-        else if (id.startsWith("agent:")) {
-            val name = id.substringAfter("agent:")
-            if (name.equals("dsh", ignoreCase = true)) "DSH Agent" else "Agent ($name)"
-        }
-        else peer(id)?.displayName ?: id.take(8)
+    fun senderName(senderId: String?): String? {
+        val id = senderId?.trim()?.takeIf { it.isNotBlank() } ?: return null
+        if (id == selfNodeId) return null
+        return resolveSenderIdentity(id, SenderIdentityContext(selfNodeId = selfNodeId, peers = peers))?.displayName
     }
 
     /**
@@ -515,6 +604,10 @@ data class RelayUiState(
                         title = convTitle(id),
                         // 文件消息没有正文，列表预览要退回文件名，否则会话行是空白。
                         preview = last?.let { it.text.ifBlank { it.file?.name } },
+                        // 预览要能区分「他说的」与「我说的」：后者加「你：」前缀。
+                        lastMessageIsMine = last?.mine == true,
+                        isPinned = id in settings.pinnedConvIds,
+                        isMuted = id in settings.mutedConvIds,
                         // 兼容兜底：桌面会话面板直接 relativeTime(at)，没有 0 守卫，
                         // 所以这里保持"有消息用消息时间、没有用在线时间"，语义见 at 的 KDoc。
                         at = if (lastMessageAt > 0) lastMessageAt else presenceAt,
@@ -561,10 +654,16 @@ data class RelayUiState(
      * 公开出来是因为**不止会话列表要它**：文件页把一条带附件的消息折算成一行时，
      * 也得用同一种叫法。两处各写一遍的结果是同一个群在两个页面上有两个名字。
      */
-    fun convTitle(convId: String): String =
-        groupOfConv(convId)?.name
-            ?: peer(convId)?.displayName
-            ?: fallbackTitle(convId)
+    fun convTitle(convId: String): String {
+        groupOfConv(convId)?.name?.let { return it }
+        if (!ConvId.isGroup(convId)) {
+            // 1:1 会话标题也走**同一个解析器**：agent 节点的会话就是「跟那个 agent 说话」
+            // （1:1 的每条消息都触发它），标题因此必须是 agent 名（`DSH`），
+            // 而不是那台宿主机器的昵称（用户看到的是「mac mini」，找不到 DSH）。
+            resolveSenderIdentity(convId, senderContext(convId))?.displayName?.let { return it }
+        }
+        return fallbackTitle(convId)
+    }
 }
 
 /**

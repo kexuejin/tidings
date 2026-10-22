@@ -115,8 +115,10 @@ public fun ConversationsPane(
     onSelect: (String) -> Unit,
     onGoToPairing: () -> Unit,
     now: Long,
-    /** 输入框预置草稿，只给截图门禁用（见 [ChatScreen.initialDraft]）。 */
+    /** 输入框预置草稿；生产路径由壳按会话喂（见 [onDraftChange]）。 */
     initialDraft: String = "",
+    /** 草稿的外部存放处 —— 与手机壳同一个槽（见 `ChatScreenChrome.onDraftChange`）。 */
+    onDraftChange: ((convId: String, text: String) -> Unit)? = null,
     /**
      * 建群入口。null = 不画这个按钮（预览、或宿主没有这条能力）。
      *
@@ -232,6 +234,7 @@ public fun ConversationsPane(
             sizeClass = sizeClass,
             now = now,
             initialDraft = initialDraft,
+            onDraftChange = onDraftChange,
             onSelect = onSelect,
             onGoToPairing = onGoToPairing,
             onCopyPeerId = onCopyPeerId,
@@ -311,6 +314,9 @@ public fun ConversationsPane(
                 onCreateGroup = onCreateGroup?.let { { creatingGroup = true } },
                 onCreateWorkspaceGroup = onCreateGroup?.let { { creatingWorkspaceGroup = true } },
                 onSearchMessages = controller::searchHistoricalMessages,
+                onTogglePin = controller::togglePinnedConv,
+                onToggleMute = controller::toggleMutedConv,
+                onDeleteConversation = controller::deleteConversation,
                 onSearchGlobal = if (globalSearchEnabled) controller::searchGlobal else null,
                 initialGlobalSearch = initialGlobalSearch,
             )
@@ -336,6 +342,9 @@ public fun ConversationsPane(
                 onCreateGroup = onCreateGroup?.let { { creatingGroup = true } },
                 onCreateWorkspaceGroup = onCreateGroup?.let { { creatingWorkspaceGroup = true } },
                 onSearchMessages = controller::searchHistoricalMessages,
+                onTogglePin = controller::togglePinnedConv,
+                onToggleMute = controller::toggleMutedConv,
+                onDeleteConversation = controller::deleteConversation,
                 onSearchGlobal = if (globalSearchEnabled) controller::searchGlobal else null,
                 initialGlobalSearch = initialGlobalSearch,
             )
@@ -367,6 +376,9 @@ public fun ConversationsPane(
                         onCreateGroup = onCreateGroup?.let { { creatingGroup = true } },
                         onCreateWorkspaceGroup = onCreateGroup?.let { { creatingWorkspaceGroup = true } },
                         onSearchMessages = controller::searchHistoricalMessages,
+                onTogglePin = controller::togglePinnedConv,
+                onToggleMute = controller::toggleMutedConv,
+                onDeleteConversation = controller::deleteConversation,
                         onSearchGlobal = if (globalSearchEnabled) controller::searchGlobal else null,
                 initialGlobalSearch = initialGlobalSearch,
                     )

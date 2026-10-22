@@ -43,14 +43,58 @@ internal const val RECALL_WINDOW_MS: Long = 5 * 60_000L
  *
  * [MessageUi.notice] 非空的是系统提示行，不是消息，也不能撤回。
  */
-internal fun canRecall(message: MessageUi, now: Long): Boolean {
-    if (!message.mine) return false
-    if (message.notice != null) return false
-    if (recallTargetIdOf(message) == null) return false
+internal fun canRecall(message: MessageUi, now: Long): Boolean =
+    recallBlockedReason(message) == null &&
+        now - message.at in 0..RECALL_WINDOW_MS
+
+/**
+ * 撤回被挡的**非时间**原因；`null` = 只剩 5 分钟窗口这一道。
+ *
+ * 拆出这一层是为了让菜单能区分两件事：
+ * - **压根不该出现**（不是自己的、系统提示、媒体没有可报的 id）→ 菜单外面就不画
+ * - **出现过、但现在超时了** → 仍然画出来，置灰 + 写「超时」
+ *
+ * 以前两者不分：超过 5 分钟后「撤回」整项**凭空消失**，用户不知道是自己撤过了、
+ * 还是本来就不能撤 —— 这跟"等了很久才显示消息"是同一类问题：界面不说清楚。
+ */
+internal enum class RecallBlock { NotMine, Notice, NoTargetId, EmptyBody }
+
+internal fun recallBlockedReason(message: MessageUi): RecallBlock? {
+    if (!message.mine) return RecallBlock.NotMine
+    if (message.notice != null) return RecallBlock.Notice
+    if (recallTargetIdOf(message) == null) return RecallBlock.NoTargetId
     // 文本消息要有正文；文件消息的正文本来就是空的（内容在卡片上，见 upsertTransferCard）。
-    if (message.file == null && message.text.isBlank()) return false
-    return now - message.at in 0..RECALL_WINDOW_MS
+    if (message.file == null && message.text.isBlank()) return RecallBlock.EmptyBody
+    return null
 }
+
+/** 最后这么多毫秒算「快没了」，菜单上转成危险色。 */
+internal const val RECALL_URGENT_MS: Long = 10_000L
+
+/**
+ * 撤回窗口还剩多少毫秒。`0` = 已经超时（或者时钟倒退 —— 未来的时间戳不算可撤回，
+ * 这条与旧 `now - at in 0..WINDOW` 的下界一致，别放宽）。
+ */
+internal fun recallRemainingMs(message: MessageUi, now: Long): Long =
+    if (now < message.at) 0L else (RECALL_WINDOW_MS - (now - message.at)).coerceAtLeast(0L)
+
+/**
+ * 剩余时间的菜单文案：`mm:ss`；**超时返回 `null`**，由调用方换成已本地化的「超时」。
+ *
+ * 向上取整：剩 0.4 秒时显示 `00:01` 而不是 `00:00` —— 显示 `00:00` 而按钮还亮着，
+ * 用户会以为界面坏了。
+ */
+internal fun formatRecallRemaining(remainingMs: Long): String? {
+    if (remainingMs <= 0L) return null
+    val totalSec = (remainingMs + 999L) / 1000L
+    val mm = (totalSec / 60L).toString().padStart(2, '0')
+    val ss = (totalSec % 60L).toString().padStart(2, '0')
+    return "$mm:$ss"
+}
+
+/** 最后 10 秒（且还没超时）转危险色。 */
+internal fun isRecallUrgent(remainingMs: Long): Boolean =
+    remainingMs in 1..RECALL_URGENT_MS
 
 /**
  * 撤回这条消息时该报哪个 id。

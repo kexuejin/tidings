@@ -6,7 +6,6 @@ import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
-import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
@@ -18,11 +17,9 @@ import androidx.compose.foundation.text.BasicTextField
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
-import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
@@ -67,7 +64,9 @@ import app.relay.ui.theme.RelayElevations
 import app.relay.ui.theme.LocalAppSpacing
 import kotlinx.coroutines.delay
 import org.jetbrains.compose.resources.stringResource
-import app.relay.ui.theme.ShapeRoles
+import app.relay.ui.components.AppOutlinedButton
+import app.relay.ui.components.AppTextButton
+import app.relay.ui.components.AppButtonSize
 
 /**
  * 输入法自检（桌面诊断页）。
@@ -97,7 +96,9 @@ import app.relay.ui.theme.ShapeRoles
  */
 @Composable
 public fun ImeSmokePane(
-    onBack: (() -> Unit)? = null) {
+    modifier: Modifier = Modifier,
+    onBack: (() -> Unit)? = null,
+) {
     val sp = LocalAppSpacing.current
     // 三个探针各自记账，观测台只显示"当前焦点所在的"那一个：一次看一个才读得清，
     // 而三个框共用一份记账会把 A 框的上屏次数算到 B 框头上。
@@ -116,7 +117,7 @@ public fun ImeSmokePane(
     }
 
     Column(
-        modifier = Modifier
+        modifier = modifier
             .fillMaxSize()
             .verticalScroll(rememberScrollState())
             .padding(sp.lg),
@@ -180,32 +181,21 @@ public fun ImeSmokePane(
             modifier = Modifier.fillMaxWidth().padding(top = sp.md),
             horizontalArrangement = Arrangement.spacedBy(sp.sm, Alignment.End),
         ) {
-            OutlinedButton(
+            AppOutlinedButton(
+                text = stringResource(Res.string.desktop_ime_blur_action),
                 onClick = {
                     // 先记账再移焦点：clearFocus() 之后 onValueChange 可能同步就来了，
                     // 那时候 blurBefore 必须已经写好，否则读到的"失焦前"是失焦后的值。
                     active.armBlur()
                     focusManager.clearFocus()
                 },
-                // `.win .btn.sm{padding:5px 9px;font-size:11px;border-radius:9px}`
-                shape = ShapeRoles.Avatar,
-                contentPadding = PaddingValues(horizontal = LocalAppSpacing.current.osm9, vertical = LocalAppSpacing.current.oxs5),
-            ) {
-                Text(
-                    stringResource(Res.string.desktop_ime_blur_action),
-                    style = MaterialTheme.typography.labelSmall,
-                )
-            }
-            TextButton(
+                size = AppButtonSize.Compact,
+            )
+            AppTextButton(
+                text = stringResource(Res.string.desktop_ime_reset_action),
                 onClick = { active.reset() },
-                shape = ShapeRoles.Avatar,
-                contentPadding = PaddingValues(horizontal = LocalAppSpacing.current.osm9, vertical = LocalAppSpacing.current.oxs5),
-            ) {
-                Text(
-                    stringResource(Res.string.desktop_ime_reset_action),
-                    style = MaterialTheme.typography.labelSmall,
-                )
-            }
+                size = AppButtonSize.Compact,
+            )
         }
     }
 }

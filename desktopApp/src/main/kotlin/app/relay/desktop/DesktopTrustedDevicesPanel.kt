@@ -702,3 +702,4 @@ private fun GrantReplyStatusLine(outcome: GrantReplyOutcome, peerLabel: String) 
         color = if (delivered) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.error,
     )
 }
+

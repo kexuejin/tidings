@@ -4,10 +4,8 @@ package app.relay.ui.desktop
 
 import org.jetbrains.compose.resources.painterResource
 import androidx.compose.foundation.background
-import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
-import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
@@ -21,20 +19,11 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
-import androidx.compose.foundation.lazy.grid.GridCells
-import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
 import androidx.compose.foundation.lazy.grid.items
-import androidx.compose.foundation.shape.RoundedCornerShape
-import androidx.compose.material3.Button
-import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
-import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
-import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.OutlinedButton
-import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
@@ -48,76 +37,23 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import app.relay.app.RelayUiState
+import app.relay.feature.cabinet.MineCabinetView
+import app.relay.feature.cabinet.PeerCabinetView
+import app.relay.core.nowMillis
 import app.relay.ui.ContentWidths
-import app.relay.ui.components.formatBytes
-import app.relay.ui.components.formatCount
-import app.relay.ui.components.TopBarIconAction
 import app.relay.generated.resources.Res
-import app.relay.generated.resources.action_back
-import app.relay.generated.resources.cabinet_col_mtime
-import app.relay.generated.resources.cabinet_col_name
-import app.relay.generated.resources.cabinet_col_size
-import app.relay.generated.resources.cabinet_crumbs_root
-import app.relay.generated.resources.cabinet_crumbs_up
-import app.relay.generated.resources.cabinet_dir_hint
-import app.relay.generated.resources.cabinet_download_count
-import app.relay.generated.resources.cabinet_footer_selected
-import app.relay.generated.resources.cabinet_footer_unselected_hint
-import app.relay.generated.resources.cabinet_grants_count
-import app.relay.generated.resources.cabinet_grants_default_note
-import app.relay.generated.resources.cabinet_grants_remove
-import app.relay.generated.resources.cabinet_grants_title
-import app.relay.generated.resources.cabinet_hint_off
-import app.relay.generated.resources.cabinet_hint_read
-import app.relay.generated.resources.cabinet_hint_write
-import app.relay.generated.resources.cabinet_mine_subtitle_active
-import app.relay.generated.resources.cabinet_mine_subtitle_inactive
 import app.relay.generated.resources.cabinet_mine_title
 import app.relay.generated.resources.cabinet_mode_off
 import app.relay.generated.resources.cabinet_mode_read
-import app.relay.generated.resources.cabinet_mode_write
-import app.relay.generated.resources.cabinet_not_configured_desc
-import app.relay.generated.resources.cabinet_not_configured_title
-import app.relay.generated.resources.cabinet_open
-import app.relay.generated.resources.cabinet_change
-import app.relay.generated.resources.cabinet_peer_item_count
 import app.relay.generated.resources.cabinet_peer_title
 import app.relay.generated.resources.cabinet_peers_title
-import app.relay.generated.resources.cabinet_perm_badge_readonly
 import app.relay.generated.resources.cabinet_perm_badge_upload
-import app.relay.generated.resources.cabinet_perm_default_title
-import app.relay.generated.resources.cabinet_pick_dir
-import app.relay.generated.resources.cabinet_recent_empty
-import app.relay.generated.resources.cabinet_recent_hint
-import app.relay.generated.resources.cabinet_recent_row_desc
-import app.relay.generated.resources.cabinet_recent_title
-import app.relay.generated.resources.cabinet_save_as
-import app.relay.generated.resources.cabinet_share_dir_title
 import app.relay.generated.resources.cabinet_side_title
-import app.relay.generated.resources.cabinet_stop_share
-import app.relay.generated.resources.cabinet_upload
-import app.relay.generated.resources.cabinet_view_grid
-import app.relay.generated.resources.cabinet_view_list
-import app.relay.generated.resources.desktop_action_list
-import app.relay.generated.resources.ic_arrow_back
-import app.relay.generated.resources.ic_check_double
-import app.relay.generated.resources.ic_close
-import app.relay.generated.resources.ic_down
-import app.relay.generated.resources.ic_file
-import app.relay.generated.resources.ic_folder
-import app.relay.generated.resources.ic_grid
 import app.relay.generated.resources.ic_hdd
-import app.relay.generated.resources.ic_list
-import app.relay.generated.resources.ic_refresh
-import app.relay.generated.resources.ic_up
-import app.relay.ui.components.TitleBarDivider
 import app.relay.ui.components.PeerAvatar
-import app.relay.ui.components.relativeTime
-import app.relay.ui.theme.IconSizes
 import org.jetbrains.compose.resources.stringResource
 
 import app.relay.ui.theme.LocalAppSpacing
-import app.relay.ui.theme.relayCardShadow
 import app.relay.ui.theme.RelayShapes
 
 /**
@@ -166,8 +102,14 @@ public fun CabinetPane(
     state: RelayUiState,
     controller: DesktopPaneActions,
     modifier: Modifier = Modifier,
-    now: Long = 0L,
+    now: Long = nowMillis(),
     sizeClass: DesktopWindowSizeClass? = null,
+    /**
+     * 「在文件管理器里打开共享目录」的真实动作；null = 宿主给不出这条出口，
+     * 那颗按钮**整颗不画**（与移动端 `CabinetScreen` 同一个判据：能力缺失 = 不画，
+     * 不是"点了没反应"）。
+     */
+    onOpenShareRoot: (() -> Unit)? = null,
 ) {
     val cabinet = state.cabinet
 
@@ -192,16 +134,33 @@ public fun CabinetPane(
             BoxWithConstraints(detailModifier.background(MaterialTheme.colorScheme.background)) {
                 val paneTier = desktopWindowSizeClass(maxWidth.value.toInt(), maxHeight.value.toInt())
                 if (cabinet.activePeerId == null) {
-                    // 我的文件柜设置面板
-                    MineCabinetPanel(state = state, controller = controller, now = now, onBack = onBack)
-                } else {
-                    // 同事文件柜浏览面板
-                    PeerCabinetBrowser(
+                    // 我的文件柜设置面板 —— **手机与桌面共用同一个实现**
+                    // （`MineCabinetView`）。桌面这两栏里它只多一个"回列表"入口，
+                    // 由 `onBack` 参数化；其余四张卡、共享目录、权限三档、单独授权、
+                    // 最近有人放进来，全部是同一份代码。
+                    MineCabinetView(
                         state = state,
-                        controller = controller,
-                        now = now,
-                        paneTier = paneTier,
+                        onSetShareRoot = { controller.setShareRoot(it) },
+                        onPickShareRoot = { controller.pickShareRoot() },
+                        onSetShareMode = { controller.setShareMode(it) },
+                        onRemoveShareGrant = { controller.removeShareGrant(it) },
+                        onSelectPeer = { controller.selectCabinetPeer(it) },
+                        onOpenShareRoot = onOpenShareRoot,
                         onBack = onBack,
+                        now = now,
+                    )
+                } else {
+                    // 同事文件柜浏览面板 —— **手机与桌面共用同一个实现**（`PeerCabinetView`）。
+                    // 桌面这两栏里它只多一个"回列表"入口（`onBack`）；面包屑、选中框、
+                    // 上传/下载/权限、空态全部是同一份代码。
+                    PeerCabinetView(
+                        state = state,
+                        onBack = onBack,
+                        onLoadPath = { controller.loadCabinetPath(it) },
+                        onToggleSelection = { controller.toggleCabinetSelection(it) },
+                        onDownloadEntries = { names, saveAs -> controller.downloadCabinetEntries(names, saveAs) },
+                        onUploadToCabinet = { controller.uploadToCabinet(it) },
+                        now = now,
                     )
                 }
             }
@@ -338,462 +297,6 @@ private fun CabinetSidebar(
                     }
                 }
             }
-        }
-    }
-}
-
-/**
- * 我的文件柜设置面板（右栏）。
- *
- * **右栏内容不另加宽度上限**（与 [PeerCabinetBrowser] 一致）：本包的宽度口径只改
- * 「左栏多宽」（见 [CabinetPane] 的档位表），右栏继续吃 `weight(1f)` 的全部剩余宽度。
- * 审计 §6 的宽屏收列（[ContentWidths.Pane]）落在移动/共享的 `CabinetScreen` 上，
- * 不在这里 —— 桌面双栏本身已经把内容切到半幅，再叠一层收列是另一件事，没被要求。
- *
- * @param onBack 非 `null` 表示当前是 Compact 单栏档：在头部画一个回列表的按钮。
- *   宽档传 `null`，按钮不画 —— 左栏一直在旁边，画它只会占宽度。
- */
-@Composable
-private fun MineCabinetPanel(
-    state: RelayUiState,
-    controller: DesktopPaneActions,
-    now: Long,
-    onBack: (() -> Unit)? = null,
-) {
-    val settings = state.settings
-    val hasRoot = !settings.shareRoot.isNullOrBlank()
-
-    LazyColumn(Modifier.fillMaxSize().padding(LocalAppSpacing.current.xl), verticalArrangement = Arrangement.spacedBy(LocalAppSpacing.current.lg)) {
-        // 头部
-        item {
-            Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
-                if (onBack != null) {
-                    ToolbarButton(stringResource(Res.string.desktop_action_list), painterResource(Res.drawable.ic_list), onBack)
-                    Spacer(Modifier.width(LocalAppSpacing.current.md))
-                }
-                Icon(painterResource(Res.drawable.ic_hdd), contentDescription = null, Modifier.size(32.dp))
-                Spacer(Modifier.width(LocalAppSpacing.current.md))
-                Column(Modifier.weight(1f)) {
-                    Text(
-                        stringResource(Res.string.cabinet_mine_title),
-                        style = MaterialTheme.typography.headlineSmall,
-                        fontWeight = FontWeight.Bold,
-                    )
-                    Text(
-                        if (hasRoot) stringResource(Res.string.cabinet_mine_subtitle_active) else stringResource(Res.string.cabinet_mine_subtitle_inactive),
-                        style = MaterialTheme.typography.bodySmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    )
-                }
-                if (hasRoot) {
-                    OutlinedButton(onClick = { controller.setShareRoot(null) }) {
-                        Text(stringResource(Res.string.cabinet_stop_share))
-                    }
-                }
-            }
-        }
-
-        if (!hasRoot) {
-            item {
-                Card(
-                    Modifier
-                        .fillMaxWidth()
-                        .padding(top = LocalAppSpacing.current.lg)
-                        .relayCardShadow(shape = MaterialTheme.shapes.medium),
-                    colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
-                    elevation = CardDefaults.cardElevation(defaultElevation = 0.dp),
-                ) {
-                    Column(Modifier.padding(LocalAppSpacing.current.xl), horizontalAlignment = Alignment.CenterHorizontally) {
-                        Icon(painterResource(Res.drawable.ic_folder), contentDescription = null, Modifier.size(48.dp))
-                        Spacer(Modifier.height(LocalAppSpacing.current.md))
-                        Text(
-                            stringResource(Res.string.cabinet_not_configured_title),
-                            style = MaterialTheme.typography.titleMedium,
-                            fontWeight = FontWeight.Bold,
-                        )
-                        Spacer(Modifier.height(LocalAppSpacing.current.sm6))
-                        Text(
-                            stringResource(Res.string.cabinet_not_configured_desc),
-                            style = MaterialTheme.typography.bodyMedium,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant,
-                        )
-                        Spacer(Modifier.height(LocalAppSpacing.current.lg))
-                        Button(onClick = { controller.pickShareRoot() }) {
-                            Text(stringResource(Res.string.cabinet_pick_dir))
-                        }
-                    }
-                }
-            }
-        } else {
-            // 卡片 1: 共享目录
-            item {
-                Card(Modifier.fillMaxWidth(), colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface)) {
-                    Column(Modifier.padding(LocalAppSpacing.current.lg)) {
-                        Text(stringResource(Res.string.cabinet_share_dir_title), style = MaterialTheme.typography.titleSmall, fontWeight = FontWeight.Bold)
-                        Spacer(Modifier.height(LocalAppSpacing.current.sm))
-                        Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
-                            Icon(painterResource(Res.drawable.ic_folder), contentDescription = null, Modifier.size(IconSizes.Title))
-                            Spacer(Modifier.width(LocalAppSpacing.current.sm))
-                            Text(settings.shareRoot.orEmpty(), style = MaterialTheme.typography.bodyMedium, modifier = Modifier.weight(1f))
-                            OutlinedButton(onClick = { }, modifier = Modifier.padding(end = LocalAppSpacing.current.sm)) {
-                                Text(stringResource(Res.string.cabinet_open))
-                            }
-                            Button(onClick = { controller.pickShareRoot() }) {
-                                Text(stringResource(Res.string.cabinet_change))
-                            }
-                        }
-                        Spacer(Modifier.height(LocalAppSpacing.current.sm6))
-                        Text(stringResource(Res.string.cabinet_dir_hint), style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
-                    }
-                }
-            }
-
-            // 卡片 2: 默认权限
-            item {
-                Card(Modifier.fillMaxWidth(), colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface)) {
-                    Column(Modifier.padding(LocalAppSpacing.current.lg)) {
-                        Text(stringResource(Res.string.cabinet_perm_default_title), style = MaterialTheme.typography.titleSmall, fontWeight = FontWeight.Bold)
-                        Spacer(Modifier.height(LocalAppSpacing.current.md))
-                        Row(horizontalArrangement = Arrangement.spacedBy(LocalAppSpacing.current.sm)) {
-                            val modes = listOf("off" to Res.string.cabinet_mode_off, "read" to Res.string.cabinet_mode_read, "write" to Res.string.cabinet_mode_write)
-                            modes.forEach { (m, labelRes) ->
-                                val selected = settings.shareMode == m
-                                Button(
-                                    onClick = { controller.setShareMode(m) },
-                                    colors = ButtonDefaults.buttonColors(
-                                        containerColor = if (selected) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.surfaceVariant,
-                                        contentColor = if (selected) MaterialTheme.colorScheme.onPrimary else MaterialTheme.colorScheme.onSurfaceVariant,
-                                    ),
-                                ) {
-                                    Text(stringResource(labelRes))
-                                }
-                            }
-                        }
-                        Spacer(Modifier.height(LocalAppSpacing.current.sm))
-                        val hintRes = when (settings.shareMode) {
-                            "off" -> Res.string.cabinet_hint_off
-                            "write" -> Res.string.cabinet_hint_write
-                            else -> Res.string.cabinet_hint_read
-                        }
-                        Text(stringResource(hintRes), style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
-                    }
-                }
-            }
-
-            // 卡片 3: 单独设过的同事
-            item {
-                Card(Modifier.fillMaxWidth(), colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface)) {
-                    Column(Modifier.padding(LocalAppSpacing.current.lg)) {
-                        Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
-                            Text(stringResource(Res.string.cabinet_grants_title), style = MaterialTheme.typography.titleSmall, fontWeight = FontWeight.Bold)
-                            Text(stringResource(Res.string.cabinet_grants_count, settings.shareGrants.size), style = MaterialTheme.typography.labelSmall)
-                        }
-                        Spacer(Modifier.height(LocalAppSpacing.current.md10))
-                        if (settings.shareGrants.isEmpty()) {
-                            Text(stringResource(Res.string.cabinet_grants_default_note), style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
-                        } else {
-                            settings.shareGrants.forEach { grant ->
-                                Row(Modifier.fillMaxWidth().padding(vertical = LocalAppSpacing.current.xs), verticalAlignment = Alignment.CenterVertically) {
-                                    Text(grant.nodeId.take(8), style = MaterialTheme.typography.bodyMedium, modifier = Modifier.weight(1f))
-                                    Text(grant.mode, style = MaterialTheme.typography.bodySmall, modifier = Modifier.padding(end = LocalAppSpacing.current.sm))
-                                    IconButton(onClick = { controller.removeShareGrant(grant.nodeId) }) {
-                                        Icon(painterResource(Res.drawable.ic_close), contentDescription = stringResource(Res.string.cabinet_grants_remove))
-                                    }
-                                }
-                            }
-                        }
-                    }
-                }
-            }
-
-            // 卡片 4: 最近有人放进来
-            item {
-                Card(Modifier.fillMaxWidth(), colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface)) {
-                    Column(Modifier.padding(LocalAppSpacing.current.lg)) {
-                        Text(stringResource(Res.string.cabinet_recent_title), style = MaterialTheme.typography.titleSmall, fontWeight = FontWeight.Bold)
-                        Spacer(Modifier.height(LocalAppSpacing.current.md10))
-                        if (settings.cabinetRecentUploads.isEmpty()) {
-                            Text(stringResource(Res.string.cabinet_recent_empty), style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
-                        } else {
-                            settings.cabinetRecentUploads.forEach { item ->
-                                Row(Modifier.fillMaxWidth().padding(vertical = LocalAppSpacing.current.xs), verticalAlignment = Alignment.CenterVertically) {
-                                    Text(
-                                        stringResource(Res.string.cabinet_recent_row_desc, item.uploaderNick, item.fileCount, formatBytes(item.totalSize)),
-                                        style = MaterialTheme.typography.bodyMedium,
-                                        modifier = Modifier.weight(1f),
-                                    )
-                                    Text(relativeTime(item.ts, now), style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
-                                }
-                            }
-                        }
-                        Spacer(Modifier.height(LocalAppSpacing.current.sm6))
-                        Text(stringResource(Res.string.cabinet_recent_hint), style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
-                    }
-                }
-            }
-        }
-    }
-}
-
-/**
- * 同事文件柜浏览面板（右栏）。
- *
- * @param paneTier 由 [CabinetPane] 在右栏位置上量出来的分档（见那里的 `detail` 槽）。
- *   与 [CabinetPane] 自己用的那个 `tier` **不是同一个值**：外层判的是整个窗
- *   （含左栏与竖导），这里判的是右栏实际剩下多少 —— Expanded 窗（≥1000）减去
- *   竖导 64 与左栏 300 之后右栏约 636–1076，正好横跨 Medium 与 Expanded 两档。
- *   换句话说「窗口是 Expanded」不代表「这块浏览区够宽」，所以两处必须分开判。
- *
- * @param onBack 非 `null` 表示当前是 Compact 单栏档：在头部最左画一个回列表的按钮。
- *   宽档传 `null`，按钮不画 —— 左栏一直在旁边，画它只会占宽度。
- */
-@Composable
-private fun PeerCabinetBrowser(
-    state: RelayUiState,
-    controller: DesktopPaneActions,
-    now: Long,
-    paneTier: DesktopWindowSizeClass,
-    onBack: (() -> Unit)? = null,
-) {
-    val cabinet = state.cabinet
-    val peer = state.peer(cabinet.activePeerId)
-    val peerName = peer?.nick ?: cabinet.activePeerId.orEmpty().take(8)
-
-    Column(Modifier.fillMaxSize()) {
-        // 头部工具栏
-        Row(
-            Modifier.fillMaxWidth().height(56.dp).background(MaterialTheme.colorScheme.surface).padding(horizontal = LocalAppSpacing.current.lg),
-            verticalAlignment = Alignment.CenterVertically,
-        ) {
-            if (onBack != null) {
-                IconButton(onClick = onBack) {
-                    Icon(painterResource(Res.drawable.ic_arrow_back), contentDescription = stringResource(Res.string.action_back))
-                }
-                Spacer(Modifier.width(LocalAppSpacing.current.xs))
-            }
-            Icon(painterResource(Res.drawable.ic_hdd), contentDescription = null, Modifier.size(24.dp))
-            Spacer(Modifier.width(LocalAppSpacing.current.md10))
-            Column(Modifier.weight(1f)) {
-                Text(stringResource(Res.string.cabinet_peer_title, peerName), style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold)
-                Text(stringResource(Res.string.cabinet_peer_item_count, formatCount(cabinet.totalEntries)), style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
-            }
-            // 权限徽标在窄面板里是第一个该让位的：它只是一句状态说明，
-            // 而右侧三个动作按钮是这一屏唯一的操作入口，挤掉了就没别的路。
-            if (paneTier != DesktopWindowSizeClass.Compact) {
-                Text(
-                    if (cabinet.currentPerm == "write") stringResource(Res.string.cabinet_perm_badge_upload) else stringResource(Res.string.cabinet_perm_badge_readonly),
-                    style = MaterialTheme.typography.labelMedium,
-                    color = MaterialTheme.colorScheme.primary,
-                    modifier = Modifier.padding(end = LocalAppSpacing.current.lg),
-                )
-            }
-            // 头部动作是原型的 `.ibtn` 方块：`.cbhead` 里 grid / refresh 就是
-            // `<button class="ibtn">`（prototype/relay.html:5178-5179），不是裸图标；
-            // 它们之间的 10dp 来自 `.cbhead{gap:10px}`（prototype/relay.html:285）。
-            Row(
-                verticalAlignment = Alignment.CenterVertically,
-                horizontalArrangement = Arrangement.spacedBy(LocalAppSpacing.current.md10),
-            ) {
-                if (cabinet.currentPerm == "write" && cabinet.activePeerId != null) {
-                    TopBarIconAction(Res.drawable.ic_up, stringResource(Res.string.cabinet_upload), onClick = { controller.uploadToCabinet(cabinet.activePeerId) })
-                }
-                TopBarIconAction(Res.drawable.ic_list, stringResource(Res.string.cabinet_view_list), onClick = { controller.setCabinetViewMode("list") })
-                TopBarIconAction(Res.drawable.ic_grid, stringResource(Res.string.cabinet_view_grid), onClick = { controller.setCabinetViewMode("grid") })
-                TopBarIconAction(Res.drawable.ic_refresh, null, onClick = { controller.loadCabinetPath(cabinet.currentPath) })
-            }
-        }
-        HorizontalDivider()
-
-        // 面包屑
-        Row(
-            Modifier.fillMaxWidth().padding(horizontal = LocalAppSpacing.current.lg, vertical = LocalAppSpacing.current.sm),
-            verticalAlignment = Alignment.CenterVertically,
-        ) {
-            IconButton(
-                onClick = {
-                    val segments = cabinet.currentPath.split("/").filter { it.isNotEmpty() }
-                    val parent = if (segments.size <= 1) "" else segments.dropLast(1).joinToString("/")
-                    controller.loadCabinetPath(parent)
-                },
-                enabled = cabinet.currentPath.isNotEmpty(),
-            ) {
-                Icon(painterResource(Res.drawable.ic_arrow_back), contentDescription = stringResource(Res.string.cabinet_crumbs_up))
-            }
-            Text(
-                stringResource(Res.string.cabinet_crumbs_root),
-                style = MaterialTheme.typography.bodyMedium,
-                fontWeight = if (cabinet.currentPath.isEmpty()) FontWeight.Bold else FontWeight.Normal,
-                modifier = Modifier.clickable { controller.loadCabinetPath("") },
-            )
-            if (cabinet.currentPath.isNotEmpty()) {
-                val segments = cabinet.currentPath.split("/").filter { it.isNotEmpty() }
-                segments.forEachIndexed { i, seg ->
-                    Text(" / ", style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
-                    val isLast = i == segments.lastIndex
-                    Text(
-                        seg,
-                        style = MaterialTheme.typography.bodyMedium,
-                        fontWeight = if (isLast) FontWeight.Bold else FontWeight.Normal,
-                        modifier = Modifier.clickable {
-                            val subPath = segments.take(i + 1).joinToString("/")
-                            controller.loadCabinetPath(subPath)
-                        },
-                    )
-                }
-            }
-        }
-        HorizontalDivider()
-
-        // 内容区
-        Box(Modifier.weight(1f).fillMaxWidth()) {
-            if (cabinet.viewMode == "grid") {
-                LazyVerticalGrid(
-                    columns = GridCells.Adaptive(120.dp),
-                    modifier = Modifier.fillMaxSize().padding(LocalAppSpacing.current.md),
-                    horizontalArrangement = Arrangement.spacedBy(LocalAppSpacing.current.sm),
-                    verticalArrangement = Arrangement.spacedBy(LocalAppSpacing.current.sm),
-                ) {
-                    items(cabinet.entries) { entry ->
-                        val isSelected = entry.name in cabinet.selectedNames
-                        Column(
-                            Modifier.clip(RelayShapes.small)
-                                .background(if (isSelected) MaterialTheme.colorScheme.primaryContainer else MaterialTheme.colorScheme.surface)
-                                .clickable {
-                                    if (entry.isDir) {
-                                        val next = if (cabinet.currentPath.isEmpty()) entry.name else "${cabinet.currentPath}/${entry.name}"
-                                        controller.loadCabinetPath(next)
-                                    } else {
-                                        controller.toggleCabinetSelection(entry.name)
-                                    }
-                                }
-                                .padding(LocalAppSpacing.current.md),
-                            horizontalAlignment = Alignment.CenterHorizontally,
-                        ) {
-                            Icon(
-                                if (entry.isDir) painterResource(Res.drawable.ic_folder) else painterResource(Res.drawable.ic_file),
-                                contentDescription = null,
-                                modifier = Modifier.size(40.dp),
-                            )
-                            Spacer(Modifier.height(LocalAppSpacing.current.sm6))
-                            Text(entry.name, style = MaterialTheme.typography.bodySmall, maxLines = 1, overflow = TextOverflow.Ellipsis)
-                        }
-                    }
-                }
-            } else {
-                // 表格列表
-                LazyColumn(Modifier.fillMaxSize()) {
-                    item {
-                        Row(
-                            Modifier.fillMaxWidth().background(MaterialTheme.colorScheme.surfaceVariant).padding(horizontal = LocalAppSpacing.current.lg, vertical = LocalAppSpacing.current.sm),
-                            verticalAlignment = Alignment.CenterVertically,
-                        ) {
-                            Text(stringResource(Res.string.cabinet_col_name), style = MaterialTheme.typography.labelMedium, modifier = Modifier.weight(1f))
-                            Text(stringResource(Res.string.cabinet_col_size), style = MaterialTheme.typography.labelMedium, modifier = Modifier.width(90.dp))
-                            Text(stringResource(Res.string.cabinet_col_mtime), style = MaterialTheme.typography.labelMedium, modifier = Modifier.width(110.dp))
-                        }
-                    }
-                    items(cabinet.entries) { entry ->
-                        val isSelected = entry.name in cabinet.selectedNames
-                        Row(
-                            Modifier.fillMaxWidth()
-                                .background(if (isSelected) MaterialTheme.colorScheme.primaryContainer else MaterialTheme.colorScheme.surface)
-                                .clickable {
-                                    if (entry.isDir) {
-                                        val next = if (cabinet.currentPath.isEmpty()) entry.name else "${cabinet.currentPath}/${entry.name}"
-                                        controller.loadCabinetPath(next)
-                                    } else {
-                                        controller.toggleCabinetSelection(entry.name)
-                                    }
-                                }
-                                .padding(horizontal = LocalAppSpacing.current.lg, vertical = LocalAppSpacing.current.md10),
-                            verticalAlignment = Alignment.CenterVertically,
-                        ) {
-                            CabinetSelectionBox(selected = isSelected)
-                            Spacer(Modifier.width(LocalAppSpacing.current.sm))
-                            Icon(if (entry.isDir) painterResource(Res.drawable.ic_folder) else painterResource(Res.drawable.ic_file), contentDescription = null, Modifier.size(IconSizes.Body))
-                            Spacer(Modifier.width(LocalAppSpacing.current.sm))
-                            Text(entry.name, style = MaterialTheme.typography.bodyMedium, modifier = Modifier.weight(1f), maxLines = 1, overflow = TextOverflow.Ellipsis)
-                            Text(if (entry.isDir) "—" else formatBytes(entry.size), style = MaterialTheme.typography.bodySmall, modifier = Modifier.width(90.dp))
-                            Text(relativeTime(entry.mtime, now), style = MaterialTheme.typography.bodySmall, modifier = Modifier.width(110.dp))
-                        }
-                        HorizontalDivider()
-                    }
-                }
-            }
-        }
-
-        // 底部操作栏
-        Column(Modifier.fillMaxWidth()) {
-            TitleBarDivider()
-            Surface(color = MaterialTheme.colorScheme.surface) {
-                Row(
-                    Modifier.fillMaxWidth().height(52.dp).padding(horizontal = LocalAppSpacing.current.lg),
-                    verticalAlignment = Alignment.CenterVertically,
-                ) {
-                    if (cabinet.selectedNames.isNotEmpty()) {
-                        val selCount = cabinet.selectedNames.size
-                        val totalSize = cabinet.entries.filter { it.name in cabinet.selectedNames }.sumOf { it.size }
-                        Text(
-                            stringResource(Res.string.cabinet_footer_selected, formatCount(selCount), formatBytes(totalSize)),
-                            style = MaterialTheme.typography.bodyMedium,
-                            fontWeight = FontWeight.SemiBold,
-                            modifier = Modifier.weight(1f),
-                        )
-                        OutlinedButton(onClick = { controller.downloadCabinetEntries(cabinet.selectedNames.toList(), saveAs = true) }) {
-                            Text(stringResource(Res.string.cabinet_save_as))
-                        }
-                        Spacer(Modifier.width(LocalAppSpacing.current.sm))
-                        Button(onClick = { controller.downloadCabinetEntries(cabinet.selectedNames.toList(), saveAs = false) }) {
-                            Icon(painterResource(Res.drawable.ic_down), contentDescription = null, Modifier.size(IconSizes.Body))
-                            Spacer(Modifier.width(LocalAppSpacing.current.sm6))
-                            Text(stringResource(Res.string.cabinet_download_count, formatCount(selCount)))
-                        }
-                    } else {
-                        Text(
-                            stringResource(Res.string.cabinet_footer_unselected_hint),
-                            style = MaterialTheme.typography.bodySmall,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant,
-                        )
-                    }
-                }
-            }
-        }
-    }
-}
-
-/**
- * 表格行首那个方框：原型 `prototype/relay.html:4068` 的 `cabRow` 第一列 `.cbx`
- * （选中时里面画一个 `check`），尺寸/圆角/描边逐字照 CSS —— `.cbx{width:16px;
- * height:16px;border-radius:5px;border:1.5px solid var(--outline)}`、
- * `.cbx.on{background:var(--primary);border-color:var(--primary)}`。
- *
- * 为什么要有它：整行选中高亮此前已经在（`primaryContainer` 底色），但**没有看得见的
- * 方框** —— 底色变化很容易被当成 hover，方框才是「这一行可以多选」的信号；原型
- * `d23-cabinet` 里那两行未选中项带着空方框，也是靠它才看出表格是可多选的。
- */
-@Composable
-private fun CabinetSelectionBox(selected: Boolean) {
-    val shape = RoundedCornerShape(5.dp)
-    val primary = MaterialTheme.colorScheme.primary
-    Box(
-        modifier = Modifier
-            .size(LocalAppSpacing.current.lg)
-            .clip(shape)
-            .then(if (selected) Modifier.background(primary) else Modifier)
-            .border(
-                width = 1.5.dp,
-                color = if (selected) primary else MaterialTheme.colorScheme.outline,
-                shape = shape,
-            ),
-        contentAlignment = Alignment.Center,
-    ) {
-        if (selected) {
-            Icon(
-                painterResource(Res.drawable.ic_check_double),
-                contentDescription = null,
-                tint = MaterialTheme.colorScheme.onPrimary,
-                modifier = Modifier.size(IconSizes.Badge),
-            )
         }
     }
 }

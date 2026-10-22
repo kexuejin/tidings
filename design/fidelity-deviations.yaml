@@ -57,3 +57,19 @@
   reason: "用户 2026-10-18 裁决「改成系统菜单栏」。16 条里没有一条是独占能力（设置×3、视图与左侧竖导重复、主题在设置里、刷新各页都有、诊断包在状态栏、退出有标题栏✕/托盘/⌘Q、截图在输入栏、复制本机 ID 在节点页、导入文件与新建会话在工具栏），它唯一的价值是当快捷键的说明书，而快捷键由 DesktopShell 的键盘处理独立驱动。原型自己就把这 26px 标成「macOS 系统菜单栏（mac 上由系统提供；Win/Linux 上同一份 Compose 菜单落在 .titlebar）」（prototype/relay.html:651），代码此前把这段示意当成了窗口内的一行。"
   approved_by: "kexuejin（用户 2026-10-18 裁决：改成系统菜单栏，经 Lead 转述）"
   date: 2026-10-18
+- kind: deviation
+  dimension: 间距/gap
+  where: "会话行之间（feature/conversations/ConversationRow.kt 的 ConversationListDivider）"
+  design: "原型 .sidelist{gap:1px} + .li{border-radius:12px}，**行与行之间没有分割线**（prototype/relay.html:730/734），靠 .li:hover 与 .li[aria-selected] 分层"
+  actual: "新增一条**内缩**分割线：HorizontalDivider，内缩 xxxl(48dp) 到文字左沿，颜色 outlineVariant，两侧壳（手机 ConversationsScreen / 桌面 DesktopConversationWidgets）共用同一个组件与同一个内缩量"
+  reason: "用户 2026-10-20 复看「分割线应该是需要的吧」。先删除后加回，判断依据变了：原型那段是 Web 列表写法（滚动区短、鼠标随手可见、靠 hover 分层），而桌面这一列窄、行多、要长时间扫读，一条极淡的内缩线能把行的基线立住。**内缩而非通栏**是因为行本身是 12dp 圆角，通栏线会顶到圆角上、像把行切成两半；内缩到文字左沿与文字对齐，是 macOS/iOS 列表分隔的常规做法。这条值(48)在原型里不存在，属**有意偏离**，不是量具误报。"
+  approved_by: "kexuejin（用户 2026-10-20 复看：分割线应该是需要的）"
+  date: 2026-10-20
+- kind: deviation
+  dimension: 材质/阴影
+  where: "ui/theme/CardShadow.kt 的 relayCardShadow"
+  design: "原型 `.card{box-shadow:var(--shadow)}`，而 `--shadow` 是**两层**：`0 1px 2px rgba(16,24,20,.05), 0 8px 24px rgba(16,24,20,.06)`（prototype/relay.html:52）"
+  actual: "Compose 的 `Modifier.shadow(elevation = 8.dp, ambientColor/spotColor = accents.cardShadow)` —— **单层 elevation + 原型色**，不是两层 box-shadow"
+  reason: "Compose 的 `shadow()` 只产出单层 Material 阴影，要复刻两层得自绘（`drawBehind` + 两次模糊），代价与收益不匹配；用原型色把"色调"对齐，层次差一层。所以口径是**近似对齐**，不是"已对齐原型" —— 之前计划里写成"已对齐"是措辞过宽，已改。"
+  approved_by: "kexuejin（本仓立场：原型是设计权威，但平台绘制能力允许近似时如实记账）"
+  date: 2026-10-20

@@ -25,6 +25,8 @@ import app.relay.core.protocol.MsgKinds
 import app.relay.core.protocol.MsgTypes
 import app.relay.core.protocol.Protocol
 import app.relay.core.session.NodeRuntime
+import app.relay.core.session.OutgoingReplay
+import app.relay.core.session.OutgoingText
 import app.relay.core.transport.PrunedMessage
 import app.relay.core.transport.SendOutcome
 import app.relay.generated.resources.Res
@@ -107,57 +109,160 @@ fun handleSend(peerId: String, text: String) {
         return
     }
     host.scope.launch {
-        val (optimisticReasoning, optimisticText) = parseThinkingContent(body)
-        // 乐观插入（P0，见 DeliveryState.Sending 的 KDoc）：发送路径最坏要等 40 秒量级
-        // （多端点 UDP 退避 + 每端点 TCP 7s），那段时间界面原本**什么都不显示** ——
-        // 用户会以为没点上而重复发送。先插一个 Sending 气泡，结果回来后就地改写它。
-        //
-        // 临时 id 用 `local-` 前缀（`localMessageId()`）：真实 id 要等发送路径返回才有
-        // （`outcome.envelopeId`）。成功后按临时 id 找到这一条、换成真实 id 与终态 ——
-        // 仍然只有一条气泡，且 id 从此与协议一致（回执 / 撤回都靠它）。
-        val optimistic = MessageUi(
-            id = host.localMessageId(),
-            peerId = peerId,
-            mine = true,
-            text = optimisticText,
-            at = nowMillis(),
-            delivery = DeliveryState.Sending,
-            reasoning = optimisticReasoning,
+        // 乐观插入：**先让气泡出现**，再等发送路径返回（见 [sendTextOptimistic]）。
+        val sent = sendTextOptimistic(peerId, body) { rt.sendTextWithEnvelope(peerId, body) }
+            ?: return@launch
+        // 这条路按构造只服务 1:1（`sendToConversation` 把群会话键路由给 `sendToGroup`）。
+        // 仍然过一遍共用判据：万一有人拿群键调进来，规则不该在第二个地方重写一遍。
+        val groupId = ConvId.groupIdOf(peerId)
+        // 目标是**别的宿主上的 agent** ⇒ 远端在场，本机不执行：那条消息已经按 1:1 协议
+        // 送达它，本机再跑一遍就是「@ 了 agent 却收到本地 mock」。
+        val targetPeer = host._state.value.peer(peerId)
+        val remoteAgentPresent = targetPeer?.isAgent == true
+        val localAgentPresent = host.onAgentPrompt != null && !remoteAgentPresent
+        // 该宿主上**所有** kind（一台设备可以装多个 agent）。取不到才退回默认集。
+        val agentKinds = host._state.value.agentKindsByHost()[peerId]
+            ?.takeIf { it.isNotEmpty() }
+            ?: RelayController.DEFAULT_AGENT_KINDS
+        val route = RelayController.agentPromptRoute(
+            text = body,
+            groupId = groupId,
+            isWorkspaceGroup = groupId != null && host.isWorkspaceGroup(groupId),
+            repliedToIsAgent = false,
+            localAgentPresent = localAgentPresent,
+            remoteAgentPresent = remoteAgentPresent,
+            agentKinds = agentKinds,
         )
-        host.handleAppendMessage(optimistic)
-        val outcome = runCatching { rt.sendTextWithEnvelope(peerId, body) }
-            .onFailure {
-                host.warn(
-                    it.messageOrNull()?.let(BannerMessage::SendFailed) ?: BannerMessage.UnknownError,
-                )
-            }
-            .getOrNull()
-        if (outcome == null) {
-            // 发送路径自己抛了：**必须**把那个"发送中"收尾成失败，否则它会永远转下去
-            // （那是比"不显示气泡"更糟的谎）。
-            host.replaceMessage(peerId, optimistic.id, optimistic.copy(delivery = DeliveryState.Failed))
-            return@launch
-        }
-        val (parsedReasoning, cleanedText) = parseThinkingContent(body)
-        // 按**临时 id** 定位再换 id：只按新 id 找会落空，气泡就永远停在「发送中」。
-        host.replaceMessage(
-            peerId,
-            optimistic.id,
-            optimistic.copy(
-                id = outcome.envelopeId,
-                text = cleanedText,
-                delivery = if (outcome.outcome == SendOutcome.SENT) DeliveryState.Sent else DeliveryState.Queued,
-                reasoning = parsedReasoning,
-            ),
-        )
-        if (RelayController.isMentioningDsh(body)) {
-            val prompt = RelayController.extractDshPrompt(body)
+        if (route == AgentPromptRoute.Local) {
+            val prompt = RelayController.extractAgentPrompt(body, agentKinds)
             val self = host._state.value.selfNodeId
             host.scope.launch {
-                host.onAgentPrompt?.invoke(peerId, self, prompt, outcome.envelopeId)
+                host.onAgentPrompt?.invoke(peerId, self, prompt, sent.envelopeId)
             }
         }
     }
+}
+
+/**
+ * 用户点「重发」：按**原消息 id** 重放那条消息，而不是以原文本再发一条。
+ *
+ * ## 为什么不能「再发一条」
+ *
+ * 收端按 `(id, from)` 去重：新 id 就是**另一条消息**。真机现场：同一条 231 字的消息在
+ * 桌面 `MessageEntity` 里是 `f93a27cf…` 与 `0137bff5…` 两条 —— 用户说的是「点重发，
+ * 又多出一条」。本仓 `MessageStore` 的 KDoc
+ * 早就把「原样重放、让对端去重挡掉第二条」写成不变量，这里是它在 UI 侧的落点。
+ *
+ * ## 两条路（在 core 里）
+ *
+ * 队列里还有这条的原信封 ⇒ 原样重放（连入队时刻都不变）；没有了（已 ACK / 被剪枝 /
+ * 换过进程）⇒ 用原 id 重建并打 `resend = true`。两条路都不写 messageStore —— 历史行
+ * 已经在库里，再 append 就是本地的第二条。
+ *
+ * 群聊要额外给 `groupId / groupRev / members`：群消息在队列里是**逐成员**一行，没有
+ * 「一条群消息」的行可查，core 一律按成员重建并继续做 `gta1` 门控。
+ *
+ * 界面全程只有一条气泡：点下去立刻回到「发送中」，结果回来再改成终态。
+ */
+fun handleRetryMessage(message: MessageUi) {
+    if (!message.mine || message.text.isBlank()) return
+    val rt = host.runtime ?: run { host.warn(BannerMessage.NodeNotStarted); return }
+    host.handleReplaceMessage(message.peerId, message.copy(delivery = DeliveryState.Sending))
+    host.scope.launch {
+        val convId = message.peerId
+        val group = ConvId.groupIdOf(convId)?.let { groupId ->
+            host._state.value.settings.groups.firstOrNull { it.groupId == groupId }
+        }
+        val outcome = runCatching {
+            rt.replayOutgoing(
+                OutgoingReplay(
+                    peerId = convId,
+                    msgId = message.id,
+                    text = message.text,
+                    groupId = group?.groupId,
+                    groupRev = group?.rev,
+                    members = group?.members,
+                    replyTo = message.replyTo,
+                    senderId = message.senderId,
+                    reasoning = message.reasoning,
+                ),
+            )
+        }.onFailure {
+            host.warn(
+                it.messageOrNull()?.let(BannerMessage::SendFailed) ?: BannerMessage.UnknownError,
+            )
+        }.getOrNull()
+        host.handleReplaceMessage(
+            message.peerId,
+            message.copy(
+                delivery = when (outcome) {
+                    SendOutcome.SENT -> DeliveryState.Sent
+                    SendOutcome.QUEUED -> DeliveryState.Queued
+                    null -> DeliveryState.Failed
+                },
+            ),
+        )
+    }
+}
+
+/**
+ * 私聊文本的乐观插入：**先让气泡出现**，再等发送路径返回，然后按临时 id 就地改写。
+ *
+ * 发送路径最坏要等 40 秒量级（多端点 UDP 退避 + 每端点 TCP 7s），那段时间界面原本
+ * **什么都不显示** —— 用户会以为没点上而重复发送。先插一个 [DeliveryState.Sending] 气泡，
+ * 结果回来后就地改写它：用户看到的是同一个气泡从「发送中」变成终态，而不是先消失再出现
+ * （也绝不会出现两条）。
+ *
+ * 临时 id 用 `local-` 前缀（[RelayController.localMessageId]）：真实 id 要等发送路径返回
+ * 才有（[OutgoingText.envelopeId]）。成功后按临时 id 找到这一条、换成真实 id 与终态 ——
+ * 仍然只有一条气泡，且 id 从此与协议一致（回执 / 撤回都靠它）。
+ *
+ * @param send 真正的发送动作（生产路径传 `rt.sendTextWithEnvelope` 的调用）。抽成形参是
+ *   为了让「先插后等」这个**时序**能被闸门式测试钉住，而不是只能断言终态。
+ * @return 发送路径的结论；抛异常时为 null（那条气泡已收尾成 [DeliveryState.Failed]）。
+ */
+internal suspend fun sendTextOptimistic(
+    peerId: String,
+    body: String,
+    send: suspend () -> OutgoingText,
+): OutgoingText? {
+    val (optimisticReasoning, optimisticText) = parseThinkingContent(body)
+    val optimistic = MessageUi(
+        id = host.localMessageId(),
+        peerId = peerId,
+        mine = true,
+        text = optimisticText,
+        at = nowMillis(),
+        delivery = DeliveryState.Sending,
+        reasoning = optimisticReasoning,
+    )
+    host.handleAppendMessage(optimistic)
+    val outcome = runCatching { send() }
+        .onFailure {
+            host.warn(
+                it.messageOrNull()?.let(BannerMessage::SendFailed) ?: BannerMessage.UnknownError,
+            )
+        }
+        .getOrNull()
+    if (outcome == null) {
+        // 发送路径自己抛了：**必须**把那个「发送中」收尾成失败，否则它会永远转下去
+        // （那是比「不显示气泡」更糟的谎）。
+        host.replaceMessage(peerId, optimistic.id, optimistic.copy(delivery = DeliveryState.Failed))
+        return null
+    }
+    val (parsedReasoning, cleanedText) = parseThinkingContent(body)
+    // 按**临时 id** 定位再换 id：只按新 id 找会落空，气泡就永远停在「发送中」。
+    host.replaceMessage(
+        peerId,
+        optimistic.id,
+        optimistic.copy(
+            id = outcome.envelopeId,
+            text = cleanedText,
+            delivery = if (outcome.outcome == SendOutcome.SENT) DeliveryState.Sent else DeliveryState.Queued,
+            reasoning = parsedReasoning,
+        ),
+    )
+    return outcome
 }
 
 
@@ -236,6 +341,42 @@ fun handleNudge(peerId: String) {
             ),
         )
     }
+}
+
+
+/**
+ * **只删本机的这一条**（不动协议、不通知对方）。
+ *
+ * 与「撤回」是两件事，用户经常要的是后者做不到的那个：
+ * - 撤回有时限（自己的、5 分钟内）、**会告诉对方**、且协议里有它的位置；
+ * - 删除是纯本机行为：对方库里那条照旧，只是「我自己不想再看到它」。
+ *
+ * 为什么必须有这条路：现在用户想清掉一条只有两个选择 —— 撤回（超时就没了）
+ * 或清空整个会话（那是核弹）。中间那一档是缺的。
+ *
+ * **FTS 不变量靠库层的触发器兜住**：`ALWAYS` 走 `deleteMessage` 的
+ * `DELETE FROM MessageEntity` 会激活 `message_after_delete`，它把该行从
+ * `MessageFts` 里按 'delete' 命令删掉（见 RelayDatabase.sq 的触发器）。
+ * 所以这里**不要**再手写一次索引清理 —— 那是第二条真相来源，漂了就是一具孤儿索引。
+ */
+fun handleDeleteMessage(convId: String, messageId: String) {
+    var removed = false
+    host.stateLock.withLock {
+        val thread = host.core.threads[convId] ?: return@withLock
+        // 原地删（threads 的值是 MutableList，且它已被 publish 引用过）；
+        // 删空了就把整个会话键摘掉，与 `handleClearMessages` 的收尾保持一致。
+        val removedAny = thread.removeAll { it.id == messageId }
+        if (!removedAny) return@withLock
+        removed = true
+        if (thread.isEmpty()) host.core.threads.remove(convId)
+        // 删掉的是最后一条未读时，会话的未读数也要跟着降 —— 否则红点挂着一个
+        // 永远点不掉的数字（消息已经不在列表里了）。
+        val unread = host.core.unread[convId] ?: 0
+        if (unread > 0) host.core.unread[convId] = (unread - 1).coerceAtLeast(0)
+    }
+    if (!removed) return
+    host.publish()
+    host.handlePersistThreads()
 }
 
 
@@ -387,6 +528,9 @@ fun handleOnInbound(envelope: Envelope) {
             // payload 里的 `senderId` 才是真正说话的那一方（旧端不发 ⇒ 退回 `from`，
             // 与以前完全一致）。形态与桌面端本地落库同一套：真人 = nodeId，agent = `agent:<kind>`。
             senderId = if (groupId != null) (groupSenderIdOf(envelope) ?: envelope.from) else null,
+            // 会话归属：协议字段（旧端不发 ⇒ null ⇒ 分段线按 id 前缀回退，与以前一致）。
+            // 有它之后，手机端才画得出桌面端一直有的那条「任务分段线」。
+            agentSessionId = payload?.let { stringField(it, "agentSessionId") },
             replyTo = if (groupId != null) replyToOf(envelope) else null,
             reasoning = finalReasoning,
             reasoningElapsedMs = reasoningElapsedMs,
@@ -394,9 +538,35 @@ fun handleOnInbound(envelope: Envelope) {
         incoming = true,
     )
     if (groupId != null) host.runtime?.let { host.groupsCtl.handleSyncGroupMetaIfNeeded(it, envelope) }
-    val isWs = groupId != null && host.isWorkspaceGroup(groupId)
-    if (RelayController.isMentioningDsh(cleanedText) || isWs) {
-        val prompt = RelayController.extractDshPrompt(cleanedText)
+    // 接话判据：这条是不是在回复 agent 自己发的那条（只有群文本才有 `replyTo`）。
+    val replyToId = if (groupId != null) replyToOf(envelope) else null
+    val repliedToIsAgent = replyToId != null && RelayController.isAgentAuthored(
+        host._state.value.messages[convId].orEmpty().firstOrNull { it.id == replyToId },
+    )
+    // 触发判据（要不要叫 agent）只有一个；这里再问「谁执行」：
+    // 远端 agent 在场时本机让路 —— 这条消息已经送达那台设备，本机不替它回话。
+    val routeFacts = if (groupId != null) {
+        host.agentRouteFactsOf(groupId)
+    } else {
+        val senderPeer = host._state.value.peer(envelope.from)
+        val remote = senderPeer?.isAgent == true
+        GroupAgentRouteFacts(
+            agentKinds = RelayController.DEFAULT_AGENT_KINDS,
+            localAgentPresent = host.onAgentPrompt != null && !remote,
+            remoteAgentPresent = remote,
+        )
+    }
+    val route = RelayController.agentPromptRoute(
+        text = cleanedText,
+        groupId = groupId,
+        isWorkspaceGroup = groupId != null && host.isWorkspaceGroup(groupId),
+        repliedToIsAgent = repliedToIsAgent,
+        localAgentPresent = routeFacts.localAgentPresent,
+        remoteAgentPresent = routeFacts.remoteAgentPresent,
+        agentKinds = routeFacts.agentKinds,
+    )
+    if (route == AgentPromptRoute.Local) {
+        val prompt = RelayController.extractAgentPrompt(cleanedText, routeFacts.agentKinds)
         host.scope.launch {
             host.onAgentPrompt?.invoke(convId, envelope.from, prompt, envelope.id)
         }
@@ -408,6 +578,9 @@ fun handleOnInbound(envelope: Envelope) {
             isGroup = groupId != null,
             mentioned = mentionsSelf(envelope, host._state.value.selfNodeId),
             localHour = localHourOfDay(),
+            // 会话级静音：用户说过「这个会话别吵我」，就不弹。convId 在上面已算好
+            // （私聊 = 对端 nodeId、群 = group:<id>），与置顶/删除用的是同一个键。
+            convId = convId,
         )
     ) {
         val group = host._state.value.groupOf(groupId)
@@ -681,7 +854,16 @@ fun handleOnPruned(pruned: List<PrunedMessage>) {
  * 各叫各的，用它检索会让同一个人在两台设备上搜出不同结果。IP 反而是双方共见的。
  * 计划明写了这条。
  */
-fun handleSearchGlobalInternal(query: String): GlobalSearchResult {
+fun handleSearchGlobalInternal(
+    query: String,
+    /**
+     * 只查哪一段。默认 [GlobalSearchScope.All] —— 老调用点（与桌面全局搜索）行为不变。
+     *
+     * 不要的段**直接不查**：先查出来再丢掉等于白付一次全库扫描的钱，
+     * 而这个搜索是同步跑在 UI 路径上的。
+     */
+    scope: GlobalSearchScope = GlobalSearchScope.All,
+): GlobalSearchResult {
     val q = query.trim()
     if (q.isEmpty()) return GlobalSearchResult(query = query)
 
@@ -689,31 +871,43 @@ fun handleSearchGlobalInternal(query: String): GlobalSearchResult {
 
     // 联系人段：规则在 [matchContacts] 里，单独抽出去是为了能直接测"不含 host"那一条
     // （见那个函数的 KDoc）。
-    val contacts = matchContacts(state.peers, q)
+    val contacts = if (scope.includes(GlobalSearchScope.Contacts)) {
+        matchContacts(state.peers, q)
+    } else {
+        emptyList()
+    }
 
     // 聊天记录段：存储层按会话聚合好了，这里只把会话名与摘要拼上。
-    val chats = host.messageStore.searchGrouped(q, GlobalSearchResult.CHAT_LIMIT.toLong()).map { group ->
-        GlobalSearchChatHit(
-            convId = group.convId,
-            title = state.convTitle(group.convId),
-            matchCount = group.matchCount,
-            latestAt = group.latestAt,
-            // 文件消息的 text 是空串，而它不可能在按 text 聚合的那条 SQL 里命中 ——
-            // 所以这里空串只可能是"会话里最后一条命中恰好没有正文"的边角，退回空串即可。
-            snippet = group.latestText,
-        )
+    val chats = if (scope.includes(GlobalSearchScope.Chats)) {
+        host.messageStore.searchGrouped(q, GlobalSearchResult.CHAT_LIMIT.toLong()).map { group ->
+            GlobalSearchChatHit(
+                convId = group.convId,
+                title = state.convTitle(group.convId),
+                matchCount = group.matchCount,
+                latestAt = group.latestAt,
+                // 文件消息的 text 是空串，而它不可能在按 text 聚合的那条 SQL 里命中 ——
+                // 所以这里空串只可能是「会话里最后一条命中恰好没有正文」的边角，退回空串即可。
+                snippet = group.latestText,
+            )
+        }
+    } else {
+        emptyList()
     }
 
     // 文件段：存储层按展示名匹配，这里补上会话名与图片判据。
-    val files = host.messageStore.searchFiles(q, GlobalSearchResult.FILE_LIMIT.toLong()).map { hit ->
-        GlobalSearchFileHit(
-            messageId = hit.id,
-            convId = hit.convId,
-            convTitle = state.convTitle(hit.convId),
-            name = hit.fileName.orEmpty(),
-            at = hit.timestamp,
-            isImage = hit.isImage,
-        )
+    val files = if (scope.includes(GlobalSearchScope.Files)) {
+        host.messageStore.searchFiles(q, GlobalSearchResult.FILE_LIMIT.toLong()).map { hit ->
+            GlobalSearchFileHit(
+                messageId = hit.id,
+                convId = hit.convId,
+                convTitle = state.convTitle(hit.convId),
+                name = hit.fileName.orEmpty(),
+                at = hit.timestamp,
+                isImage = hit.isImage,
+            )
+        }
+    } else {
+        emptyList()
     }
 
     return GlobalSearchResult(query = query, contacts = contacts, chats = chats, files = files)

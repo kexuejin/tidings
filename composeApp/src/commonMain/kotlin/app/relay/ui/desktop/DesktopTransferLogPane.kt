@@ -7,7 +7,6 @@ import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
-import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
@@ -17,7 +16,6 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
@@ -46,9 +44,10 @@ import app.relay.ui.theme.RelayElevations
 import app.relay.ui.theme.LocalAppSpacing
 import app.relay.app.model.TransferRecordUi
 import org.jetbrains.compose.resources.stringResource
-import app.relay.ui.theme.ShapeRoles
 import app.relay.ui.theme.IconSizes
 import app.relay.ui.theme.RelayShapes
+import app.relay.ui.components.AppOutlinedButton
+import app.relay.ui.components.AppButtonSize
 
 /**
  * 桌面端传输记录面板 (d-transferlog)。
@@ -241,19 +240,12 @@ private fun TransferRecordRow(
         }
         if (onOpenFile != null) {
             // `.win .btn.sm`：`padding:5px 9px` / 11px / `border-radius:9px`（描边，非实心）
-            OutlinedButton(
+            AppOutlinedButton(
+                text = stringResource(Res.string.file_open),
                 onClick = { record.path?.let { onOpenFile(it) } },
                 enabled = record.path != null,
-                shape = ShapeRoles.Avatar,
-                contentPadding = PaddingValues(horizontal = LocalAppSpacing.current.osm9, vertical = LocalAppSpacing.current.oxs5),
-            ) {
-                Text(
-                    text = stringResource(Res.string.file_open),
-                    style = MaterialTheme.typography.labelSmall,
-                    // `.btn{font-weight:500}` —— 原型小按钮也走 `.btn` 的字重
-                    fontWeight = FontWeight.Medium,
-                )
-            }
+                size = AppButtonSize.Compact,
+            )
         }
     }
 }

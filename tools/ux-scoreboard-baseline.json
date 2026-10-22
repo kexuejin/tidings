@@ -1,0 +1,105 @@
+{
+  "note": "UX 记分板基线：用当前量具量改动前内容（git archive HEAD）。指标集变了必须重记。",
+  "values": {
+    "chat.separator": {
+      "direction": "up",
+      "name": "消息时间/日期分隔实现处数",
+      "value": 0
+    },
+    "ci.component_specs": {
+      "direction": "up",
+      "name": "组件级规格条数（只增不减：删规格=绕过契约）",
+      "value": 7
+    },
+    "ci.duplicate_composables": {
+      "direction": "down",
+      "name": "跨壳重复的 Composable 处数（只许降）",
+      "value": 7
+    },
+    "cjk.ratchet_settings_home": {
+      "direction": "down",
+      "name": "设置首页 CJK 棘轮值（0=已资源化且基线已下调）",
+      "value": 20
+    },
+    "conv.state_fields": {
+      "direction": "up",
+      "name": "会话置顶/免打扰/草稿字段数（目标 3）",
+      "value": 0
+    },
+    "fb.clickable_files": {
+      "direction": "info",
+      "name": "含 clickable 的生产文件数（按压覆盖的分母）",
+      "value": 46
+    },
+    "fb.haptic": {
+      "direction": "up",
+      "name": "触感反馈的真实调用点数（排除组件层）",
+      "value": 0
+    },
+    "leak.take8": {
+      "direction": "down",
+      "name": "take(8) 命中处数（人语境应改人话）",
+      "value": 40
+    },
+    "leak.term": {
+      "direction": "down",
+      "name": "UI 字符串里的技术术语条数",
+      "value": 57
+    },
+    "leak.uuid": {
+      "direction": "down",
+      "name": "渲染完整 UUID 的处数",
+      "value": 2
+    },
+    "test.fanout_concurrency": {
+      "direction": "up",
+      "name": "并发峰值测试：群扇出（不赌耗时）",
+      "value": 0
+    },
+    "test.gate_file": {
+      "direction": "up",
+      "name": "闸门测试：文件卡乐观插入",
+      "value": 0
+    },
+    "test.gate_group": {
+      "direction": "up",
+      "name": "闸门测试：群聊乐观插入",
+      "value": 0
+    },
+    "test.gate_private": {
+      "direction": "up",
+      "name": "闸门测试：私聊乐观插入",
+      "value": 0
+    },
+    "tz.hardcoded": {
+      "direction": "down",
+      "name": "时区硬编码处数",
+      "value": 1
+    },
+    "ui.button_call_sites": {
+      "direction": "down",
+      "name": "裸 Material3 按钮族调用点数（迁移分母，排除组件层）",
+      "value": 165
+    },
+    "ui.dead_button": {
+      "direction": "down",
+      "name": "空实现按钮处数（白名单外）",
+      "value": 3
+    },
+    "ui.inline_typography": {
+      "direction": "info",
+      "name": "[代理] 生产源码内联 typography 覆盖数（含正文，非按钮专属）",
+      "value": 673
+    },
+    "ui.migrated_button_calls": {
+      "direction": "up",
+      "name": "已迁到按钮族的调用点数",
+      "value": 0
+    },
+    "ui.press_feedback_adopted": {
+      "direction": "up",
+      "name": "按压反馈的采用点数（排除原语自身）",
+      "value": 0
+    }
+  }
+}

@@ -1,7 +1,7 @@
 {
   "generatedAt": "d96d85c3d4e0",
   "note": "逐屏差集棘轮：每个键的差集只许变小。--check 报「新增的值」。",
-  "reason": "台账 d-agents 行的落点由 ui/desktop/DesktopAgentPane.kt（**该文件已不存在**）改为 feature/agents/AgentConsoleScreen.kt（agents 重构后的真实实现）。落点换了文件 ⇒ 该行 4 个键的差集按新落点重算（d-agents|spacing|proto / radius|proto / radius|code / font-size|code），不是代码漂移。",
+  "reason": "④ 收尾按验证者意见补迁了 3 处（HistorySearchOverlay 取消/确定、DesktopFilesPane 条件图标按钮）。m-histsearch|font-weight|proto 新增 500 是**量具口径变化**，不是视觉变化：原实现是 M3 OutlinedButton/Button + 内层 Text，字重由 ButtonDefaults 注入的 LocalTextStyle 带出；换成 AppOutlinedButton/AppButton 后，同一字重由 AppButtonSize.textStyle() 提供 —— 两者都是 MaterialTheme.typography.labelLarge，而 AppTheme.kt 的 labelLarge{fontWeight} 就是 FontWeight.Medium(500)。即这一屏的 500 一直都在（只换了声明位置），量具的「逐屏取值集合」看的是声明位置而不是渲染结果。已核对 AppTheme.kt 的 labelLarge；原型的 .hsdatebtn b 是 600，属另一处、未动。",
   "rowCount": 70,
   "signature": {
     "d-agentdetail|__error__": [
@@ -15,7 +15,6 @@
       "8"
     ],
     "d-agents|radius|proto": [
-      "9",
       "20",
       "999"
     ],
@@ -23,33 +22,23 @@
       "1",
       "1.5",
       "3",
-      "5",
       "7",
-      "9",
       "11",
       "13",
       "30"
     ],
     "d-cabinet|font-size|code": [
-      "16",
-      "24"
+      "16"
     ],
     "d-cabinet|font-weight|code": [
-      "400",
       "700"
     ],
-    "d-cabinet|spacing|code": [
-      "24"
+    "d-cabinet|radius|proto": [
+      "9"
     ],
     "d-cabinet|spacing|proto": [
       "1",
-      "2",
-      "3",
-      "5",
-      "9",
-      "11",
-      "13",
-      "14"
+      "13"
     ],
     "d-capture-tools|font-size|proto": [
       "11"
@@ -106,9 +95,6 @@
       "6",
       "11"
     ],
-    "d-chat-group|radius|proto": [
-      "9"
-    ],
     "d-chat-group|spacing|code": [
       "2",
       "4",
@@ -120,10 +106,6 @@
     ],
     "d-chat-group|spacing|proto": [
       "1",
-      "3",
-      "5",
-      "7",
-      "9",
       "11",
       "13"
     ],
@@ -151,7 +133,6 @@
     ],
     "d-chat|spacing|proto": [
       "1",
-      "5",
       "7",
       "13",
       "30"
@@ -213,7 +194,6 @@
     ],
     "d-emoji|spacing|proto": [
       "1",
-      "5",
       "7",
       "13"
     ],
@@ -236,7 +216,6 @@
       "32"
     ],
     "d-empty|spacing|proto": [
-      "9",
       "34",
       "40"
     ],
@@ -248,8 +227,6 @@
       "24"
     ],
     "d-filesempty|spacing|proto": [
-      "5",
-      "9",
       "11",
       "34",
       "40"
@@ -269,8 +246,6 @@
     ],
     "d-files|spacing|proto": [
       "1",
-      "5",
-      "9",
       "11",
       "13"
     ],
@@ -286,8 +261,6 @@
     ],
     "d-folder|spacing|proto": [
       "1",
-      "5",
-      "9",
       "11",
       "13"
     ],
@@ -313,7 +286,6 @@
       "20"
     ],
     "d-groupcreate|spacing|proto": [
-      "5",
       "7",
       "13",
       "30"
@@ -344,7 +316,6 @@
     ],
     "d-histsearch|spacing|proto": [
       "1",
-      "5",
       "7",
       "13",
       "15"
@@ -368,7 +339,6 @@
     "d-home-more|spacing|proto": [
       "1",
       "3",
-      "9",
       "11",
       "13"
     ],
@@ -402,9 +372,6 @@
       "11",
       "12"
     ],
-    "d-nomatch|radius|proto": [
-      "9"
-    ],
     "d-nomatch|spacing|code": [
       "2",
       "4",
@@ -417,9 +384,6 @@
       "32"
     ],
     "d-nomatch|spacing|proto": [
-      "5",
-      "7",
-      "9",
       "11",
       "13",
       "34",
@@ -444,10 +408,6 @@
     ],
     "d-nosel|spacing|proto": [
       "1",
-      "3",
-      "5",
-      "7",
-      "9",
       "11",
       "13",
       "34",
@@ -476,10 +436,7 @@
       "24"
     ],
     "d-reqscreen|spacing|proto": [
-      "6",
       "7",
-      "9",
-      "10",
       "11"
     ],
     "d-resume|font-size|code": [
@@ -497,8 +454,6 @@
     "d-resume|spacing|proto": [
       "1",
       "3",
-      "5",
-      "9",
       "11",
       "13"
     ],
@@ -524,10 +479,6 @@
       "24",
       "32"
     ],
-    "d-search-empty|spacing|proto": [
-      "5",
-      "9"
-    ],
     "d-search|font-size|code": [
       "16",
       "18",
@@ -550,10 +501,6 @@
       "24",
       "32"
     ],
-    "d-search|spacing|proto": [
-      "5",
-      "9"
-    ],
     "d-settings-data|font-size|code": [
       "14",
       "24"
@@ -562,9 +509,7 @@
       "700"
     ],
     "d-settings-data|radius|proto": [
-      "8",
-      "9",
-      "12"
+      "8"
     ],
     "d-settings-data|spacing|code": [
       "2"
@@ -573,7 +518,6 @@
       "1",
       "1.5",
       "7",
-      "9",
       "13"
     ],
     "d-settings-desk|font-weight|proto": [
@@ -599,8 +543,7 @@
     ],
     "d-settings-ime|spacing|proto": [
       "1",
-      "4",
-      "6"
+      "4"
     ],
     "d-settings|font-size|proto": [
       "16"
@@ -629,12 +572,8 @@
       "24"
     ],
     "d-sharescreen|spacing|proto": [
-      "6",
       "7",
       "11"
-    ],
-    "d-transferlog|spacing|proto": [
-      "4"
     ],
     "d-tray|font-size|proto": [
       "11",
@@ -683,17 +622,12 @@
       "24"
     ],
     "d-viewscreen|spacing|proto": [
-      "6",
       "7",
-      "10",
       "11",
       "13"
     ],
     "d-workspacedetail|__error__": [
       "落点不存在：**待建**（2026-10-13 原型新增提案；代码侧本轮未适配）"
-    ],
-    "m-addnode-fill|font-size|proto": [
-      "16"
     ],
     "m-addnode-fill|font-weight|code": [
       "400"
@@ -715,12 +649,7 @@
     ],
     "m-addnode-fill|spacing|proto": [
       "1.5",
-      "5",
-      "9",
       "11"
-    ],
-    "m-addnode|font-size|proto": [
-      "16"
     ],
     "m-addnode|font-weight|code": [
       "400"
@@ -742,8 +671,6 @@
     ],
     "m-addnode|spacing|proto": [
       "1.5",
-      "5",
-      "9",
       "11"
     ],
     "m-agentdetail|__error__": [
@@ -769,7 +696,6 @@
     "m-agents|spacing|proto": [
       "1",
       "1.5",
-      "5",
       "11",
       "13"
     ],
@@ -803,7 +729,6 @@
     ],
     "m-chat-group|spacing|proto": [
       "1",
-      "5",
       "13",
       "30"
     ],
@@ -831,7 +756,6 @@
     ],
     "m-chat-solo|spacing|proto": [
       "1",
-      "5",
       "13",
       "30"
     ],
@@ -859,7 +783,6 @@
     ],
     "m-chat|spacing|proto": [
       "1",
-      "5",
       "13",
       "30"
     ],
@@ -885,8 +808,7 @@
       "20"
     ],
     "m-folderin|spacing|proto": [
-      "1.5",
-      "5"
+      "1.5"
     ],
     "m-groupcreate|radius|code": [
       "9"
@@ -895,10 +817,12 @@
       "16"
     ],
     "m-groupcreate|spacing|code": [
-      "1"
+      "1",
+      "3",
+      "7",
+      "48"
     ],
     "m-groupcreate|spacing|proto": [
-      "5",
       "11",
       "13",
       "24"
@@ -919,7 +843,6 @@
     ],
     "m-groupinfo|spacing|proto": [
       "1.5",
-      "5",
       "16"
     ],
     "m-gsearch-empty|font-size|proto": [
@@ -931,15 +854,11 @@
     "m-gsearch-empty|radius|code": [
       "8"
     ],
-    "m-gsearch-empty|radius|proto": [
-      "9"
-    ],
     "m-gsearch-empty|spacing|code": [
       "4",
       "24"
     ],
     "m-gsearch-empty|spacing|proto": [
-      "14",
       "29",
       "32"
     ],
@@ -952,15 +871,11 @@
     "m-gsearch|radius|code": [
       "8"
     ],
-    "m-gsearch|radius|proto": [
-      "9"
-    ],
     "m-gsearch|spacing|code": [
       "4",
       "24"
     ],
     "m-gsearch|spacing|proto": [
-      "14",
       "29",
       "32"
     ],
@@ -1003,6 +918,9 @@
     "m-histsearch|font-weight|code": [
       "400"
     ],
+    "m-histsearch|font-weight|proto": [
+      "500"
+    ],
     "m-histsearch|radius|code": [
       "2",
       "6"
@@ -1021,11 +939,12 @@
       "16"
     ],
     "m-home-more|spacing|code": [
-      "1"
+      "1",
+      "3",
+      "7",
+      "48"
     ],
     "m-home-more|spacing|proto": [
-      "5",
-      "9",
       "11"
     ],
     "m-home-recent|radius|code": [
@@ -1035,11 +954,12 @@
       "16"
     ],
     "m-home-recent|spacing|code": [
-      "1"
+      "1",
+      "3",
+      "7",
+      "48"
     ],
     "m-home-recent|spacing|proto": [
-      "5",
-      "9",
       "11"
     ],
     "m-home-unread|radius|code": [
@@ -1049,18 +969,24 @@
       "16"
     ],
     "m-home-unread|spacing|code": [
-      "1"
+      "1",
+      "3",
+      "7",
+      "9",
+      "48"
     ],
     "m-home-unread|spacing|proto": [
-      "5",
       "11"
     ],
     "m-insets|font-size|code": [
       "16"
     ],
     "m-insets|font-size|proto": [
-      "11",
       "24"
+    ],
+    "m-insets|font-weight|proto": [
+      "500",
+      "600"
     ],
     "m-insets|radius|code": [
       "20"
@@ -1069,8 +995,7 @@
       "16"
     ],
     "m-insets|spacing|proto": [
-      "2",
-      "5"
+      "2"
     ],
     "m-msgmenu|font-size|code": [
       "22",
@@ -1097,13 +1022,9 @@
     "m-msgmenu|spacing|proto": [
       "1",
       "1.5",
-      "5",
       "13",
       "24",
       "30"
-    ],
-    "m-myqr|font-size|proto": [
-      "16"
     ],
     "m-myqr|font-weight|code": [
       "400"
@@ -1125,12 +1046,7 @@
     ],
     "m-myqr|spacing|proto": [
       "1.5",
-      "5",
-      "9",
       "11"
-    ],
-    "m-nodedetail|font-size|proto": [
-      "16"
     ],
     "m-nodedetail|font-weight|code": [
       "400"
@@ -1149,8 +1065,6 @@
     ],
     "m-nodedetail|spacing|proto": [
       "1.5",
-      "5",
-      "9",
       "11"
     ],
     "m-nodes-empty|font-weight|code": [
@@ -1165,12 +1079,12 @@
     ],
     "m-nodes-empty|spacing|code": [
       "1",
+      "1.5",
       "3",
       "7",
       "32"
     ],
     "m-nodes-empty|spacing|proto": [
-      "5",
       "11",
       "48"
     ],
@@ -1193,8 +1107,6 @@
       "32"
     ],
     "m-nodes|spacing|proto": [
-      "1.5",
-      "5",
       "11"
     ],
     "m-screencard|font-size|code": [
@@ -1217,8 +1129,7 @@
     ],
     "m-screencard|spacing|proto": [
       "1",
-      "1.5",
-      "5"
+      "1.5"
     ],
     "m-sendfolder|font-size|code": [
       "16",
@@ -1242,8 +1153,7 @@
       "20"
     ],
     "m-sendfolder|spacing|proto": [
-      "1.5",
-      "5"
+      "1.5"
     ],
     "m-set-appear|font-size|code": [
       "14"
@@ -1258,9 +1168,6 @@
     "m-set-avatar|font-size|code": [
       "16"
     ],
-    "m-set-avatar|font-size|proto": [
-      "12"
-    ],
     "m-set-avatar|radius|proto": [
       "16"
     ],
@@ -1268,8 +1175,6 @@
       "4"
     ],
     "m-set-avatar|spacing|proto": [
-      "5",
-      "9",
       "11"
     ],
     "m-set-caps|font-size|code": [
@@ -1303,15 +1208,10 @@
     "m-set-conn|spacing|code": [
       "4"
     ],
-    "m-set-conn|spacing|proto": [
-      "5",
-      "9"
-    ],
     "m-set-data|font-size|code": [
       "14"
     ],
     "m-set-data|radius|proto": [
-      "12",
       "13",
       "16"
     ],
@@ -1321,7 +1221,6 @@
     ],
     "m-set-data|spacing|proto": [
       "1.5",
-      "9",
       "11"
     ],
     "m-set-diag|spacing|code": [
@@ -1330,7 +1229,6 @@
     ],
     "m-set-diag|spacing|proto": [
       "2",
-      "9",
       "13"
     ],
     "m-set-notify|font-size|code": [
@@ -1354,7 +1252,6 @@
     ],
     "m-set-profile|spacing|proto": [
       "1.5",
-      "9",
       "11"
     ],
     "m-settings|radius|proto": [

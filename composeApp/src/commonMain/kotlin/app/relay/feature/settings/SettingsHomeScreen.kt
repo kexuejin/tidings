@@ -36,16 +36,37 @@ import app.relay.app.BannerTone
 import app.relay.app.BannerUi
 import app.relay.app.RelayUiState
 import app.relay.generated.resources.Res
+import app.relay.generated.resources.desk_nav_group_appear
+import app.relay.generated.resources.desk_nav_group_conn
+import app.relay.generated.resources.desk_nav_group_data
+import app.relay.generated.resources.ic_chev
 import app.relay.generated.resources.r2_set_profile_rev_chip
-import app.relay.generated.resources.set_conn_title
-import app.relay.generated.resources.set_home_subtitle
-import app.relay.generated.resources.set_title
+import app.relay.generated.resources.set_appear_subtitle
+import app.relay.generated.resources.set_caps_none
+import app.relay.generated.resources.set_caps_peer_visible
+import app.relay.generated.resources.set_caps_title
 import app.relay.generated.resources.set_conn_subtitle
+import app.relay.generated.resources.set_conn_title
+import app.relay.generated.resources.set_data_dir
+import app.relay.generated.resources.set_data_subtitle
+import app.relay.generated.resources.set_diag_subtitle
+import app.relay.generated.resources.set_diag_title
 import app.relay.generated.resources.set_home_broadcast_hint
+import app.relay.generated.resources.set_home_notify_all
+import app.relay.generated.resources.set_home_notify_mention_only
+import app.relay.generated.resources.set_home_notify_quiet
+import app.relay.generated.resources.set_home_online_nodes
+import app.relay.generated.resources.set_home_subtitle
+import app.relay.generated.resources.set_more_appearance_title
+import app.relay.generated.resources.set_more_data_title
+import app.relay.generated.resources.set_more_notif_title
+import app.relay.generated.resources.set_notify_subtitle
+import app.relay.generated.resources.set_profile_org_empty
+import app.relay.generated.resources.set_profile_title
 import app.relay.generated.resources.set_theme_dark
 import app.relay.generated.resources.set_theme_light
 import app.relay.generated.resources.set_theme_system
-import app.relay.generated.resources.ic_chev
+import app.relay.generated.resources.set_title
 import app.relay.ui.ContentWidths
 import app.relay.ui.centerCapped
 import app.relay.ui.components.AppBanner
@@ -67,6 +88,18 @@ internal fun SettingsHomeScreen(
     modifier: Modifier = Modifier,
 ) {
     val settings = state.settings
+    // 「能力声明」这一行读**真实开关**：以前写死 tw1 · mrec1，用户在子页关掉后
+    // 首页仍宣称开着 —— 界面在说假话。全关时说「未声明」，不假报。
+    val declaredCaps = declaredCapabilityCodes(
+        waitFrameCapability = settings.waitFrameCapability,
+        recordMessageCapability = settings.recordMessageCapability,
+    )
+    val capsText = if (declaredCaps.isEmpty()) {
+        stringResource(Res.string.set_caps_none)
+    } else {
+        declaredCaps.joinToString(" · ")
+    }
+    val onlinePeerCount = state.peers.count { it.online }
 
     Column(modifier = modifier.fillMaxSize()) {
         LargeTitleBar(
@@ -123,7 +156,7 @@ internal fun SettingsHomeScreen(
                         // （`prototype/relay.html:1319`，14px/600）—— 不是 16sp 的 titleMedium，
                         // 那正是差集里最后一条 `font-size 只代码{16}`。
                         Text(
-                            text = settings.nick.ifBlank { "我的资料" },
+                            text = settings.nick.ifBlank { stringResource(Res.string.set_profile_title) },
                             style = MaterialTheme.typography.titleSmall,
                             fontWeight = FontWeight.SemiBold,
                             maxLines = 1,
@@ -134,7 +167,7 @@ internal fun SettingsHomeScreen(
                             .filter { it.isNotEmpty() }
                             .joinToString(" · ")
                         Text(
-                            text = orgInfo.ifEmpty { "未填写组织信息" },
+                            text = orgInfo.ifEmpty { stringResource(Res.string.set_profile_org_empty) },
                             style = MaterialTheme.typography.bodySmall,
                             color = MaterialTheme.colorScheme.onSurfaceVariant,
                             maxLines = 1,
@@ -160,7 +193,7 @@ internal fun SettingsHomeScreen(
             }
 
             // 分组 1：连接与通知
-            SettingsGroupBlock(title = "连接与通知") {
+            SettingsGroupBlock(title = stringResource(Res.string.desk_nav_group_conn)) {
                 Column {
                     SettingsNavRow(
                         icon = Icons.Outlined.Link,
@@ -172,12 +205,12 @@ internal fun SettingsHomeScreen(
                     HorizontalDivider(modifier = Modifier.padding(horizontal = LocalAppSpacing.current.lg))
                     SettingsNavRow(
                         icon = Icons.Outlined.Notifications,
-                        title = "通知",
-                        sub = "提醒规则与静默时段",
+                        title = stringResource(Res.string.set_more_notif_title),
+                        sub = stringResource(Res.string.set_notify_subtitle),
                         valText = when {
-                            settings.notifyMentionOnly -> "仅被 @"
-                            settings.notifyQuietHours -> "静默中"
-                            else -> "全部"
+                            settings.notifyMentionOnly -> stringResource(Res.string.set_home_notify_mention_only)
+                            settings.notifyQuietHours -> stringResource(Res.string.set_home_notify_quiet)
+                            else -> stringResource(Res.string.set_home_notify_all)
                         },
                         onClick = { onOpenPage?.invoke(SETTINGS_PAGE_NOTIFY) },
                     )
@@ -185,12 +218,12 @@ internal fun SettingsHomeScreen(
             }
 
             // 分组 2：外观与能力
-            SettingsGroupBlock(title = "外观与能力") {
+            SettingsGroupBlock(title = stringResource(Res.string.desk_nav_group_appear)) {
                 Column {
                     SettingsNavRow(
                         icon = Icons.Outlined.DarkMode,
-                        title = "外观",
-                        sub = "主题",
+                        title = stringResource(Res.string.set_more_appearance_title),
+                        sub = stringResource(Res.string.set_appear_subtitle),
                         valText = when (settings.themeMode) {
                             THEME_MODE_DARK -> stringResource(Res.string.set_theme_dark)
                             THEME_MODE_LIGHT -> stringResource(Res.string.set_theme_light)
@@ -201,30 +234,30 @@ internal fun SettingsHomeScreen(
                     HorizontalDivider(modifier = Modifier.padding(horizontal = LocalAppSpacing.current.lg))
                     SettingsNavRow(
                         icon = Icons.Outlined.Security,
-                        title = "能力声明",
-                        sub = "对端可见",
-                        valText = "tw1 · mrec1",
+                        title = stringResource(Res.string.set_caps_title),
+                        sub = stringResource(Res.string.set_caps_peer_visible),
+                        valText = capsText,
                         onClick = { onOpenPage?.invoke(SETTINGS_PAGE_CAPS) },
                     )
                 }
             }
 
             // 分组 3：数据与诊断
-            SettingsGroupBlock(title = "数据与诊断") {
+            SettingsGroupBlock(title = stringResource(Res.string.desk_nav_group_data)) {
                 Column {
                     SettingsNavRow(
                         icon = Icons.Outlined.Folder,
-                        title = "数据与存储",
-                        sub = "占用、残片与保留策略",
-                        valText = "数据目录",
+                        title = stringResource(Res.string.set_more_data_title),
+                        sub = stringResource(Res.string.set_data_subtitle),
+                        valText = stringResource(Res.string.set_data_dir),
                         onClick = { onOpenPage?.invoke(SETTINGS_PAGE_DATA) },
                     )
                     HorizontalDivider(modifier = Modifier.padding(horizontal = LocalAppSpacing.current.lg))
                     SettingsNavRow(
                         icon = Icons.Outlined.Info,
-                        title = "诊断",
-                        sub = "实时状态，非配置",
-                        valText = "${state.peers.count { it.online }} 节点",
+                        title = stringResource(Res.string.set_diag_title),
+                        sub = stringResource(Res.string.set_diag_subtitle),
+                        valText = stringResource(Res.string.set_home_online_nodes, onlinePeerCount),
                         onClick = { onOpenPage?.invoke(SETTINGS_PAGE_DIAG) },
                     )
                 }
@@ -239,4 +272,19 @@ internal fun SettingsHomeScreen(
 
         }
     }
+}
+
+/**
+ * 首页「能力声明」这一行要显示的能力码，按开关**如实**给出。
+ *
+ * 以前这里写死 tw1 · mrec1：用户在能力声明子页把两个开关都关掉后，首页仍然宣称开着 ——
+ * 界面在说假话。空列表表示一个都没声明，调用点据此显示「未声明」而不是画一个空串。
+ * 顺序与 [app.relay.app.RelaySettings.caps] 的追加顺序一致（tw1 在前、mrec1 在后）。
+ */
+internal fun declaredCapabilityCodes(
+    waitFrameCapability: Boolean,
+    recordMessageCapability: Boolean,
+): List<String> = buildList {
+    if (waitFrameCapability) add("tw1")
+    if (recordMessageCapability) add("mrec1")
 }

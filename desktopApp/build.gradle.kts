@@ -74,6 +74,8 @@ val RELAY_MIME = "application/x-relay-message"
  * `CFBundleTypeRole=Viewer`：捎话只是这个链接的消费者，不是编辑器。
  */
 val RELAY_URL_TYPES_XML = """
+    <key>CFBundleDisplayName</key>
+    <string>捎话 Tidings</string>
     <key>CFBundleURLTypes</key>
     <array>
         <dict>
@@ -167,6 +169,12 @@ compose.desktop {
 
             macOS {
                 bundleID = "app.relay.desktop"
+                // `dockName` **只管运行时的 Dock 名称**，它不会写进 Info.plist ——
+                // 实测打包产物里 `CFBundleName` 仍是 packageName（`Tidings`），
+                // 而 `CFBundleDisplayName` **一个都没有**（0 处）。后果：程序坞 / 菜单栏 /
+                // 活动监视器显示的是 `Tidings`，不是产品名「捎话 Tidings」。
+                // 所以真正的 bundle 元数据在下面 `infoPlist` 的 `RELAY_URL_TYPES_XML` 里
+                // 显式补了 `CFBundleDisplayName`。两处都留着：一个管运行时、一个管元数据。
                 dockName = "捎话 Tidings"
                 packageBuildVersion = "1"
                 signing { sign.set(false) }

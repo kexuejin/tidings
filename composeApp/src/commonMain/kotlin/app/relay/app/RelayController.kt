@@ -60,6 +60,7 @@ import app.relay.feature.update.AppUpdateChecker
 import app.relay.feature.update.DefaultAppUpdateChecker
 import app.relay.feature.update.UpdateCheckState
 import app.relay.feature.update.UpdateCheckStatus
+import app.relay.feature.agents.ExecDeviceRow
 import app.relay.app.model.DeliveryState
 import app.relay.app.model.MdnsServiceUi
 import app.relay.app.model.MessageUi
@@ -125,6 +126,14 @@ public fun parseExternalPairingPreview(
 
     null -> null
 }
+
+/**
+ * 一条「在跟 agent 说」的消息该由谁执行（见 `RelayController.agentPromptRoute`）。
+ *
+ * 顶层类型而不是 companion 里的嵌套类：它就是三个调用点与 UI 共同判定的结论，
+ * 不该只能写成 `RelayController.xxx`；而且嵌套在 companion 里时外部引用不到。
+ */
+enum class AgentPromptRoute { None, Local, Remote }
 
 /**
  * 把 [NodeRuntime] 接到 Compose 上的唯一状态持有者与门面协调器（Facade Coordinator）。
@@ -209,6 +218,18 @@ class RelayController(
     internal var jobs = mutableListOf<Job>()
     var onLocalSessionPageRequest: ((peerId: String, wsId: String, offset: Long, limit: Long?) -> Boolean)? = null
     var onAgentPrompt: (suspend (convId: String, senderPeerId: String, prompt: String, replyToId: String?) -> Unit)? = null
+    /**
+     * **执行名单的宿主侧桥**：读写「谁能用这个 agent 干活」。
+     *
+     * 为什么需要桥：台账（`AgentGrantStore`）在 desktopApp，控制器在 composeApp ——
+     * 后者拿不到前者。手机壳不接这个桥（`null`），因为它连的是别人的机器，
+     * 那里的台账是对方的主权，我配不了。
+     *
+     * 三个回调都是**同步**的：台账读写是内存操作 + 一次文件落盘，不需要协程，
+     * 而界面要在点击的这一帧就看到结果（异步会让勾选框闪一下再回来）。
+     */
+    var onExecDevices: ((agentKey: String?) -> List<ExecDeviceRow>?)? = null
+    var onSetExecDeviceAllowed: ((agentKey: String, nodeId: String, allowed: Boolean) -> Unit)? = null
 
     /**
      * 控制器持有的可变会话表。搬出本类是为了让「这张表归谁」写在类型上，
@@ -279,6 +300,15 @@ class RelayController(
     fun updateNotifyQuietHours(enabled: Boolean) = settingsCtl.handleUpdateNotifyQuietHours(enabled)
     fun updateKeepConnectionAlive(enabled: Boolean) = settingsCtl.handleUpdateKeepConnectionAlive(enabled)
 
+    /** 置顶 / 取消置顶一个会话（纯本机偏好）。 */
+    override fun togglePinnedConv(convId: String) = settingsCtl.handleTogglePinnedConv(convId)
+
+    /** 静音 / 取消静音一个会话（消息照收，只是不再通知）。 */
+    override fun toggleMutedConv(convId: String) = settingsCtl.handleToggleMutedConv(convId)
+
+    /** 删掉一个会话（只删本机：消息、未读、置顶/静音标记）。不动协议、不通知对方。 */
+    override fun deleteConversation(convId: String) = settingsCtl.handleDeleteConversation(convId)
+
     /**
      * 本平台有没有「后台保持连接」这条能力（设置页据此决定画不画那个开关）。
      *
@@ -337,12 +367,26 @@ class RelayController(
         info(BannerMessage.ForwardSuccess)
     }
     override fun recall(message: MessageUi) = messagesCtl.handleRecall(message)
+
+    /**
+     * 失败气泡上的「重发」：按**原消息 id** 重放（core 的 `replayOutgoing`），不是再发一条。
+     * 换 id 重发在收端就是另一条消息 —— 真机现场同一句话在桌面库里两个 id。
+     */
+    override fun retryMessage(message: MessageUi) = messagesCtl.handleRetryMessage(message)
     override fun nudge(peerId: String) = messagesCtl.handleNudge(peerId)
     override fun clearMessages(convId: String) = messagesCtl.handleClearMessages(convId)
+
+    /** 只删本机这一条（不动协议、不通知对方）；见 `handleDeleteMessage` 的 KDoc。 */
+    override fun deleteMessage(convId: String, messageId: String) =
+        messagesCtl.handleDeleteMessage(convId, messageId)
     fun clearAllMessages() = messagesCtl.handleClearAllMessages()
     override fun searchHistoricalMessages(query: String, limit: Long): List<MessageSearchResult> =
         messageStore.search(query, limit)
     override fun searchGlobal(query: String): GlobalSearchResult = messagesCtl.handleSearchGlobalInternal(query)
+
+    /** 带筛选范围的全局检索（见 `GlobalSearchScope`）：不要的段直接不查。 */
+    fun searchGlobal(query: String, scope: GlobalSearchScope): GlobalSearchResult =
+        messagesCtl.handleSearchGlobalInternal(query, scope)
     override fun searchInConversation(
         convId: String,
         query: String,
@@ -358,6 +402,15 @@ class RelayController(
     override fun leaveGroup(groupId: String) = groupsCtl.handleLeaveGroup(groupId)
     override fun updateGroupMeta(groupId: String, description: String?, announce: String?) =
         groupsCtl.handleUpdateGroupMeta(groupId, description, announce)
+    /** 执行名单：**转给宿主侧桥**；没接（手机壳）就返回 null，界面不画配置区。 */
+    override fun execDevicesOf(agentKey: String?): List<ExecDeviceRow>? = onExecDevices?.invoke(agentKey)
+
+    override fun setExecDeviceAllowed(agentKey: String, nodeId: String, allowed: Boolean) {
+        onSetExecDeviceAllowed?.invoke(agentKey, nodeId, allowed)
+    }
+
+    override fun exposeWorkspace(groupId: String, wsId: String?, agentId: String?) =
+        handleExposeWorkspace(groupId, wsId, agentId)
     /**
      * 打开某条会话时把它标为已读。
      *
@@ -628,6 +681,12 @@ class RelayController(
             // K2：自签身份的落盘目录 + 本机当前地址（进证书 SAN）。
             linkIdentityDir = { pathJoin(dataDirectory, "link-identity") },
             localAddresses = { _state.value.network.localAddresses },
+            // 宣告地址与上面那份**不是同一个列表**（见 NodeRuntime 的 KDoc）：
+            // 上面那份刻意过滤隧道网卡（广播/同网段判断用），这份含它们（单播告知用）。
+            advertisedAddresses = { _state.value.network.advertisedAddresses },
+            // 子网广播：受限广播在 TUN 环境下会被代理的 `/1` 路由接走，子网广播抢不走。
+            // 平台没提供（Android/iOS 尚未接）时为空 —— 行为与改动前一字不差。
+            subnetBroadcasts = { platform.subnetBroadcastAddresses() },
             // 三个存储契约都用落盘实现：离线待发队列与会话历史跨重启，
             // 去重表本来就落盘（见 dedupStore）。内存版只留给测试与预览。
             queueStore = persist.queue,
@@ -675,10 +734,15 @@ class RelayController(
                         phase = NodePhase.Running,
                         transport = snapshot.transport,
                         localAddresses = snapshot.localAddresses,
+                        // 宣告地址与上面那份不是同一个列表（见 NetworkSnapshot 的 KDoc）：
+                        // 上面刻意过滤隧道网卡（广播/同网段判断用），这份含它们（单播告知用）。
+                        advertisedAddresses = snapshot.advertisedAddresses,
                         vpnActive = snapshot.vpnActive,
                         boundUdpPort = rt.boundPort,
                         // 印码要用（task-86）：主机必须把本机 pin 交给手机，否则公网目标建不出来。
                         selfTlsPin = rt.localTlsPin(),
+                        // 诊断页要看的读数（与 pin 同一档：本机身份的只读事实）。
+                        selfCertNotAfterMillis = rt.localCertNotAfterMillis(),
                         failure = null,
                     ),
                     restarting = false,
@@ -811,6 +875,7 @@ class RelayController(
                 network = it.network.copy(
                     transport = snapshot.transport,
                     localAddresses = snapshot.localAddresses,
+                    advertisedAddresses = snapshot.advertisedAddresses,
                     vpnActive = snapshot.vpnActive,
                 ),
             )
@@ -1296,10 +1361,61 @@ class RelayController(
         }
 
         internal const val MENTION_ALL: String = "@all"
-        private val DSH_MENTION_REGEX = Regex("(?i)@DSH\\b")
 
+        /**
+         * 默认要认的 agent kind（兼容老调用点与历史测试）。
+         *
+         * 真正的口径是**这个会话里有哪些 agent**（解析器的 `GroupParticipantRows.agentKinds`），
+         * 由调用方传进来；默认值只是让「只有一个 dsh agent」的旧场景保持原样。
+         */
+        val DEFAULT_AGENT_KINDS: Set<String> = setOf("dsh")
+
+        /**
+         * 点名正则：`@<kind>`，case-insensitive，词边界。
+         *
+         * kind 来自**解析器**（`SenderIdentity.mentionToken` 与它同源），所以「@ 候选里
+         * 插的名字」与「触发判据认的名字」不可能分叉 —— 这里每多写一个别名，就等于多一种
+         * 「@ 了却叫不醒」的形态。
+         */
+        private fun agentMentionRegex(agentKinds: Set<String>): Regex? {
+            // 每个 kind 都要**同时**认两种写法：
+            //
+            // 1. 裸 kind（`@dsh`）—— 老形态、以及 agent 没有绑定 workspace 的情况；
+            // 2. `kind-workspace`（`@dsh-teahouse`）—— `SenderIdentity.mentionToken` 现在
+            //    产出的形态（它走 `AgentMemberName.token(agentKind, workspaceName)`）。
+            //
+            // 只认第 1 种会让「@ 插入的名字」与「正则认的名字」分叉 —— 那就是本仓反复
+            // 出现过的「@ 了却叫不醒」。
+            val kinds = agentKinds
+                .mapNotNull { it.trim().lowercase().takeIf { k -> k.isNotEmpty() } }
+                .distinct()
+            if (kinds.isEmpty()) return null
+            val alternatives = kinds.flatMap { k ->
+                val escaped = Regex.escape(k)
+                // `-` 必须紧跟：`@dsh-teahouse` 算，`@dshx` **不算**。
+                // 用 `(?:-[a-z0-9-]+)?` 而不是 `[a-z0-9-]*` —— 后者会把 `@dshx`
+                // 的 `x` 也吃进去，词边界就破了（既有测试钉着这条）。
+                listOf(escaped + "(?:-[a-z0-9-]+)?", escaped)
+            }.distinct()
+            // 尾部不用 `\b`：`-` 是非单词字符，`\b` 在它后面不成立，会让
+            // `@dsh-teahouse` 被 `@dsh` 那一支提前匹配。用否定前瞻锁定 token 边界。
+            // 尾部否定前瞻要同时排掉 `_`：它虽是单词字符，但不在我们的 token 字符集里，
+            // 漏掉它会让 `@dsh_extra` 被当成 `@dsh`（旧行为是**不**匹配，有测试钉着）。
+            return Regex("(?i)@(?:" + alternatives.joinToString("|") + ")(?![a-z0-9_-])")
+        }
+
+        /** 这条文本有没有点名这个会话里的某个 agent（默认只认 `@dsh`）。 */
+        fun isMentioningAgent(
+            text: String,
+            agentKinds: Set<String> = DEFAULT_AGENT_KINDS,
+        ): Boolean {
+            val regex = agentMentionRegex(agentKinds) ?: return false
+            return text.contains(regex)
+        }
+
+        /** 兼容旧调用点的名字（只认 dsh）。 */
         fun isMentioningDsh(text: String): Boolean =
-            text.contains(DSH_MENTION_REGEX)
+            isMentioningAgent(text, DEFAULT_AGENT_KINDS)
 
         /** 这条消息是不是 agent 说的（`senderId` 形如 `agent:<kind>`）。 */
         fun isAgentAuthored(message: MessageUi?): Boolean =
@@ -1330,10 +1446,49 @@ class RelayController(
             groupId: String?,
             isWorkspaceGroup: Boolean,
             repliedToIsAgent: Boolean,
+            agentKinds: Set<String> = DEFAULT_AGENT_KINDS,
         ): Boolean {
             if (groupId == null) return true
-            if (isMentioningDsh(text)) return true
+            if (isMentioningAgent(text, agentKinds)) return true
             return isWorkspaceGroup && repliedToIsAgent
+        }
+
+        /**
+         * 这条在跟 agent 说的消息，**该由谁执行**。
+         *
+         * - [AgentPromptRoute.Local]：这个会话里的 agent 就在本机，调用本机的执行器；
+         * - [AgentPromptRoute.Remote]：agent 在**别的宿主**上。群消息已经按协议送达那台
+         *   设备，本机**不做任何执行、也不代替它回话**。注意这里**不**承诺「远端已经
+         *   开始执行」：真正唤醒宿主上的 DSH 需要宿主侧的 prompt 注入桥，那不在本协议里
+         *   （本轮已单列为产品级缺口），所以 UI 文案只能说「消息已送达」，不能说「已交给
+         *   agent 执行」；
+         * - [AgentPromptRoute.None]：没有该执行的对象（本机没执行器、会话里也没有 agent）。
+         *
+         * 为什么不引入「两边都跑」这一档：同一个群里两个同名 agent 同时回话，用户分不清
+         * 哪条算数；而本机驱动是**降级执行能力**（bash / 文件读写），让它和真 agent 抢答
+         * 恰恰就是「@dsh 却收到本地 mock」的那次事故。所以远端 agent 在场时本机让路。
+         *
+         * **判据本身仍只有一份**（[shouldTriggerAgent]）；这里多回答的是「谁执行」，
+         * 不是「要不要叫醒」。
+         */
+        fun agentPromptRoute(
+            text: String,
+            groupId: String?,
+            isWorkspaceGroup: Boolean,
+            repliedToIsAgent: Boolean,
+            localAgentPresent: Boolean,
+            remoteAgentPresent: Boolean,
+            agentKinds: Set<String> = DEFAULT_AGENT_KINDS,
+        ): AgentPromptRoute {
+            if (!shouldTriggerAgent(text, groupId, isWorkspaceGroup, repliedToIsAgent, agentKinds)) {
+                return AgentPromptRoute.None
+            }
+            return when {
+                // 远端 agent 在场 ⇒ 本机让路（哪怕本机也有 agent）。
+                remoteAgentPresent -> AgentPromptRoute.Remote
+                localAgentPresent -> AgentPromptRoute.Local
+                else -> AgentPromptRoute.None
+            }
         }
 
         /**
@@ -1343,11 +1498,21 @@ class RelayController(
          * （"Hey @dsh what…" 变成 "Hey  what…"），那是这个函数该收拾的，不该由调用方或测试替它擦。
          * 也**不**剥 mention 之外的前缀 —— "Hey" 可能是用户有意写的。
          */
-        fun extractDshPrompt(text: String): String =
-            text.replace(DSH_MENTION_REGEX, "")
+        fun extractAgentPrompt(
+            text: String,
+            agentKinds: Set<String> = DEFAULT_AGENT_KINDS,
+        ): String {
+            val regex = agentMentionRegex(agentKinds)
+                ?: return text.trim().ifBlank { text }
+            return text.replace(regex, "")
                 .replace(Regex("[ \t]+"), " ")
                 .trim()
                 .ifBlank { text }
+        }
+
+        /** 兼容旧调用点的名字（只剥 `@dsh`）。 */
+        fun extractDshPrompt(text: String): String =
+            extractAgentPrompt(text, DEFAULT_AGENT_KINDS)
 
         internal fun isGroupText(envelope: Envelope): Boolean =
             envelope.type == MsgTypes.MSG && msgKindOf(envelope) == MsgKinds.GROUP_TEXT

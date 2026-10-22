@@ -47,7 +47,14 @@ class AgentChatMessageConvergenceTest {
             },
         )
         assertEquals("工作区 A", seenTitle, "标题必须一路传到格式化器（补发此前传的是 null）")
-        assertEquals("agent:codex", message?.senderId, "agent 正文的发送者是 agent:<agentKind>，不是写死的 agent:dsh")
+        // agent 的身份是 **(设备, agent)**：`agent:<hostNodeId>:<agentId>`。
+        // 只写 `agent:<kind>` 时，两台设备上同名的 agent 在 senderId 里完全一样，
+        // 会被合并成同一个人（AgentSenderId 的 KDoc 记了这条来历）。
+        assertEquals(
+            "agent:self-node:codex",
+            message?.senderId,
+            "agent 正文的发送者必须是完整身份（设备 + agent），不是裸 kind",
+        )
         assertEquals("hello", message?.text)
     }
 

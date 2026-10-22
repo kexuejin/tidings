@@ -36,6 +36,9 @@ import androidx.compose.foundation.clickable
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.layout.heightIn
+import app.relay.feature.chat.localDayKey
+import app.relay.generated.resources.chat_day_divider_today
+import app.relay.generated.resources.chat_day_divider_yesterday
 import app.relay.generated.resources.chat_forward_title
 import app.relay.generated.resources.common_cancel
 import androidx.compose.ui.unit.sp
@@ -122,6 +125,7 @@ import app.relay.ui.theme.LocalAppSpacing
 import app.relay.app.model.ConversationUi
 import org.jetbrains.compose.resources.painterResource
 import org.jetbrains.compose.resources.stringResource
+import app.relay.ui.theme.SurfaceTiers
 
 /**
  * Agent 节点在界面上的强调色。与 `design/design-spec.json` 的 `agentAccent` 一致。
@@ -230,7 +234,9 @@ fun PeerAvatar(
 @Composable
 fun KindBadge(isAgent: Boolean) {
     val sp = LocalAppSpacing.current
-    val background = if (isAgent) MaterialTheme.accents.agentAccentContainer else MaterialTheme.colorScheme.surfaceVariant
+    // 标签类 → `--surface-2`（原型 `.tag` / `.pill` 都用这一档，见 [SurfaceTiers] 的 KDoc）。
+    // 以前写 `surfaceVariant`（= `--surface-3` 那档），于是标签与内嵌小控件同色，两层纵深化成一层。
+    val background = if (isAgent) MaterialTheme.accents.agentAccentContainer else SurfaceTiers.Raised
     val foreground = if (isAgent) MaterialTheme.accents.agentAccentText else MaterialTheme.colorScheme.onSurfaceVariant
     Surface(color = background, shape = CircleShape) {
         Text(
@@ -398,7 +404,8 @@ fun screenReasonText(reason: String): String = when (reason) {
 fun AppBanner(banner: BannerUi, onDismiss: () -> Unit, modifier: Modifier = Modifier) {
     val sp = LocalAppSpacing.current
     val container = when (banner.tone) {
-        BannerTone.Info -> MaterialTheme.colorScheme.surfaceVariant
+        // Info 横幅是"一块次级表面"，不是小控件 → `--surface-2`。
+        BannerTone.Info -> SurfaceTiers.Raised
         BannerTone.Warn -> MaterialTheme.colorScheme.secondaryContainer
         BannerTone.Error -> MaterialTheme.colorScheme.errorContainer
     }
@@ -528,9 +535,82 @@ fun relativeTime(atMillis: Long, nowMillis: Long): String {
     }
 }
 
+
+/**
+ * 本仓显示时间用的固定 UTC 偏移（+8）。
+ *
+ * ## 为什么是一个常量而不是到处写 `8`
+ *
+ * 时间/日期显示有三处（气泡时钟、日期分隔、相对日期的天界）：它们必须**同一套口径**，
+ * 否则会出现「气泡说今天 08:30、分隔线说昨天」这种自相矛盾的读数。
+ * 各写一遍 `+ 8 * …` 就是三处可以各自漂的真相来源 —— 量具已经把这件事记成
+ * 「时区硬编码处数」，这条就是把它收敛到一处。
+ *
+ * 注：协议里的时间一律是毫秒时间戳（UTC），偏移只用于**显示**，不参与任何判定。
+ */
+internal const val DISPLAY_UTC_OFFSET_MILLIS: Long = 8L * 3_600_000L
+
+/** 把一个瞬时换算成「本机显示用的」毫秒数（已加显示偏移）。 */
+internal fun displayMillis(atMillis: Long): Long = atMillis + DISPLAY_UTC_OFFSET_MILLIS
+/** 「年-月-日」形态的日期，与 [formatClock] 同一套显示偏移（纯算术，不引日期库）。 */
+internal fun formatDay(atMillis: Long): String {
+    val days = displayMillis(atMillis) / 86_400_000L
+    // 从「自纪元第几天」反解年月日（Howard Hinnant 的 civil_from_days 算法）。
+    // 不引 kotlinx-datetime 的理由见 localDayKey 的 KDoc：同一屏不能有两套时间口径。
+    val z = days + 719_468
+    val era = (if (z >= 0) z else z - 146_096) / 146_097
+    val doe = z - era * 146_097
+    val yoe = (doe - doe / 1_460 + doe / 36_524 - doe / 146_096) / 365
+    val y = yoe + era * 400
+    val doy = doe - (365 * yoe + yoe / 4 - yoe / 100)
+    val mp = (5 * doy + 2) / 153
+    val d = doy - (153 * mp + 2) / 5 + 1
+    val m = if (mp < 10) mp + 3 else mp - 9
+    val year = if (m <= 2) y + 1 else y
+    return "${year}-${m.toString().padStart(2, '0')}-${d.toString().padStart(2, '0')}"
+}
+/**
+ * 聊天流的日期分隔条：「今天 / 昨天 / 年-月-日」。
+ *
+ * 与 `SessionDivider`（会话分段）是同族组件、不同维度 —— 那个回答「换了一段任务」，
+ * 这个回答「换了一天」。翻历史时后者才是用户真正在找的锚点。
+ *
+ * 日期口径与 [formatClock] **同一套**（+8 粗算，见 `localDayKey`），
+ * 所以不会出现「气泡时间说今天、分隔线说昨天」这种自相矛盾。
+ */
+@Composable
+internal fun DayDivider(at: Long, now: Long, modifier: Modifier = Modifier) {
+    val todayKey = localDayKey(now)
+    val dayKey = localDayKey(at)
+    val label = when {
+        dayKey == todayKey -> stringResource(Res.string.chat_day_divider_today)
+        // 「昨天」= 日历上的前一天。用 key 的差而不是 86_400_000 的窗口：
+        // 后者在跨月/跨年边界上会说错，而 key 是「自纪元第几天」，差 1 就是昨天。
+        dayKey.toLongOrNull() == todayKey.toLongOrNull()?.minus(1) ->
+            stringResource(Res.string.chat_day_divider_yesterday)
+        else -> formatDay(at)
+    }
+    Row(
+        modifier = modifier.fillMaxWidth().padding(vertical = LocalAppSpacing.current.sm),
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.Center,
+    ) {
+        Surface(
+            shape = RoundedCornerShape(percent = 50),
+            color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f),
+        ) {
+            Text(
+                text = label,
+                style = MaterialTheme.typography.labelSmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                modifier = Modifier.padding(horizontal = LocalAppSpacing.current.sm, vertical = 3.dp),
+            )
+        }
+    }
+}
 /** 消息气泡上的时间：HH:mm（本地时区，按 UTC 偏移粗算即可，不需要秒级精度）。 */
 fun formatClock(atMillis: Long): String {
-    val minutesOfDay = ((atMillis / 60_000L) + 8 * 60) % (24 * 60)
+    val minutesOfDay = (displayMillis(atMillis) / 60_000L) % (24 * 60)
     val hour = (minutesOfDay / 60).toInt()
     val minute = (minutesOfDay % 60).toInt()
     return "${hour.toString().padStart(2, '0')}:${minute.toString().padStart(2, '0')}"

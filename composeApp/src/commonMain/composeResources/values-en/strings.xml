@@ -22,6 +22,11 @@
     <string name="common_agent">Agent</string>
     <string name="common_human">Colleague</string>
     <string name="common_unknown">Unknown</string>
+    <!-- Fallback when a group member / sender has no name: say "Unknown member" instead of hex. -->
+    <string name="common_unknown_member">Unknown member</string>
+    <!-- Only the id is known (no profile nick / remark / group nick yet). The row still shows
+         the short id, with this as the honest sub-line. -->
+    <string name="common_profile_unavailable">No profile yet</string>
     <string name="common_never">Never</string>
 
     <!-- 会话列表 -->
@@ -85,6 +90,8 @@
          "本地隐藏原消息并插入系统提示行"），所以这里的两条是"谁撤回的"而不是"已撤回"。
          `chat_recall` 同时是长按菜单的项名和入口的无障碍文本。 -->
     <string name="chat_recall">Recall</string>
+    <string name="chat_delete_local">Delete (this device only)</string>
+    <string name="chat_recall_expired">Timed out</string>
     <string name="chat_copy">Copy</string>
     <string name="chat_forward">Forward</string>
     <string name="chat_recall_peer">The other party recalled a message</string>
@@ -106,6 +113,15 @@
     <string name="conv_subtitle_unread">%1$d conversations unread · %2$d messages</string>
     <string name="conv_menu_new_session">New conversation (go to pairing)</string>
     <string name="conv_menu_only_unread">Unread only</string>
+    <string name="global_search_scope_all">All</string>
+    <string name="global_search_scope_contacts">Contacts</string>
+    <string name="global_search_scope_chats">Messages</string>
+    <string name="global_search_scope_files">Files</string>
+    <string name="conv_action_pin">Pin</string>
+    <string name="conv_action_unpin">Unpin</string>
+    <string name="conv_action_mute">Mute</string>
+    <string name="conv_action_unmute">Unmute</string>
+    <string name="conv_action_delete">Delete conversation (this device only)</string>
     <string name="conv_menu_mark_all_read">Mark all as read</string>
     <string name="conv_menu_sort_recent">Sort: most recent first</string>
     <!-- Workspace section on the conversations tab (the second block of m-home-recent).
@@ -175,8 +191,6 @@
     <string name="chat_image_preview_close">Close Preview</string>
     <string name="chat_mention_all">All</string>
     <string name="chat_mention_title">Select member to @mention</string>
-    <!-- 群里有成员不在线时的输入栏提示。与 chat_peer_offline 分开：群消息走离线补发队列，离线成员上线后会收到，不是"发不出去"。 -->
-    <string name="chat_group_some_offline">Some members offline; they will receive messages upon reconnecting</string>
     <string name="chat_peer_offline">Peer is offline; messages will be queued</string>
     <string name="chat_restored_offline">Offline · Local conversation history</string>
     <string name="chat_caps_label">Capabilities: %1$s</string>
@@ -199,6 +213,8 @@
     <!-- Divider label for a new session whose title has not arrived yet (task-42 ④).
          We do not fall back to the sessionId (an identity key is not a title), but we also
          do not omit the divider — that would make a new session look like it never started. -->
+    <string name="chat_day_divider_today">Today</string>
+    <string name="chat_day_divider_yesterday">Yesterday</string>
     <string name="chat_task_divider_new">New session</string>
 
     <!-- 节点页（合并了原来的「发现」和「加入网络」两屏） -->
@@ -355,6 +371,9 @@
     <string name="workspace_global_pending_banner">%1$d operations pending approval</string>
     <string name="workspace_active_session_label">Active Session</string>
     <string name="workspace_no_sessions">No sessions</string>
+    <string name="workspace_detail_empty_title">This workspace has no sessions yet</string>
+    <string name="workspace_detail_empty_body">The agent host has not reported any sessions for it yet. Wait for it to run, or go back to the workspace list.</string>
+    <string name="workspace_detail_empty_back">Back to workspaces</string>
     <string name="workspace_sessions_not_synced">Sessions are not synced here yet (the host reports %1$d); opening this workspace pulls them.</string>
     <string name="workspace_total_sessions_format">%1$d sessions · Latest activity %2$s</string>
     <string name="workspace_board_queue_format">%1$d queued</string>
@@ -407,6 +426,7 @@
     <!-- Agent status line right above the composer (user report #3). Each state appears only
          on a real signal; the whole line is absent when there is no evidence — see
          feature/chat/AgentComposerStatus.kt. -->
+    <string name="chat_composer_status_queued">Your message is queued — it starts after the current round</string>
     <string name="chat_composer_status_thinking">Agent is thinking / working…</string>
     <string name="chat_composer_status_awaiting_approval">Waiting for your approval…</string>
     <string name="chat_composer_status_unresponsive">Agent stopped responding (no recent activity)</string>
@@ -587,6 +607,13 @@
     <string name="set_caps_title">Capability Declarations</string>
     <string name="set_caps_peer_visible">Visible to peers</string>
     <string name="set_caps_saved">Capabilities updated; node is rebroadcasting.</string>
+    <!-- Settings home row values / fallbacks (see values/strings.xml). -->
+    <string name="set_home_notify_mention_only">Mentions only</string>
+    <string name="set_home_notify_quiet">Quiet</string>
+    <string name="set_home_notify_all">All</string>
+    <string name="set_home_online_nodes">%1$d nodes</string>
+    <string name="set_caps_none">Not declared</string>
+    <string name="set_profile_org_empty">No organization info</string>
     <string name="set_cap_text_title">Queue Keep-Alive</string>
     <string name="set_cap_text_sub">Keep connection alive during queueing; resume transfer if cancelled</string>
     <!-- mrec1 的真身是**媒体撤回**，不是录音（上游协议 §3 决议 #188：offer 带 msgId、
@@ -636,6 +663,7 @@
     <string name="set_clear_history_title">Clear Chat History</string>
     <string name="set_clear_history_sub">Irreversible</string>
     <string name="set_clear_history_action">Clear</string>
+    <string name="set_clear_history_confirm_body">This clears the chat history of every conversation. It only deletes from this device — the other side is unaffected — and cannot be undone.</string>
     <string name="set_diag_title">Diagnostics</string>
     <string name="set_node_id">Node ID</string>
     <string name="set_peer_count">Known Nodes</string>
@@ -647,14 +675,16 @@
     <string name="set_diag_group_text">group-text</string>
     <string name="set_diag_enabled">Enabled</string>
     <string name="set_diag_disabled">Disabled</string>
+    <string name="set_diag_ime_smoke">Input self-check</string>
     <string name="set_diag_inset">Status Bar Inset</string>
     <string name="set_diag_inset_value">24 dp · App rendered without system background</string>
     <!-- 传输是否加密。协议层没有加密实现（明文 JSON），输入栏的「局域网直连」也不再暗示加密；
          这一行是把"没加密"摆在用户能查到的地方，而不是靠没人注意就不说。 -->
     <string name="set_diag_crypto">Transport Encryption</string>
+    <string name="set_diag_cert_expiry">Certificate expires</string>
     <string name="set_diag_crypto_value">None · Plaintext on LAN</string>
     <string name="set_diag_rerun">Rerun Diagnostics</string>
-    <string name="set_diag_selfcheck_unavailable">Diagnostics currently show live state; no rerun actions available.</string>
+    <string name="set_diag_selfcheck_unavailable">Apart from exporting a diagnostics package, this screen only shows live state; other self-checks are not wired yet.</string>
     <!-- Round 2: the `.navrow` outside the diagnostics card (prototype relay.html:3966-3971). -->
     <string name="r2_set_diag_insets_title">Adaptive check</string>
     <string name="r2_set_diag_insets_sub">Top gap / navigation bar / status bar: real-device symptoms vs. current state</string>
@@ -741,6 +771,7 @@
 
     <!-- 会话 -->
     <string name="conv_no_messages">No messages yet, say hi</string>
+    <string name="conv_preview_mine">You: %1$s</string>
 
     <!-- 通知渠道：这两个名字显示在「系统设置 → 应用 → 通知」里，由系统按渠道 id 缓存。
          改文案必须同时改 AndroidPushNotificationHandler 的 CHANNEL_ID，否则老用户看到的还是旧名。 -->
@@ -1415,6 +1446,7 @@
     <string name="workspace_member_agent_dsh">DSH · Terminal &amp; Execution</string>
     <string name="workspace_member_agent_gemini">Gemini · Review &amp; Architecture</string>
     <string name="workspace_member_add_agent">+ Add Agent Bot…</string>
+    <string name="workspace_member_no_workspace">No local project to expose yet</string>
     <string name="workspace_qr_dialog_desc">Scan this direct QR with Tidings on mobile to pair node and authorize workspace access. One-time credential, valid for 15 minutes.</string>
     <string name="workspace_qr_no_address">Cannot obtain candidate addresses. Please make sure the network is connected and port is open.</string>
     <string name="pairing_public_ipv6_hint">A public IPv6 candidate is included: whether it works depends on your router/host firewall allowing inbound connections. This app does not punch through NAT or change your network settings. LAN is preferred; the public address is the cross-network fallback.</string>
@@ -1462,6 +1494,41 @@
     <string name="workspace_board_starting_hint">Devices and their workspaces will appear here once startup finishes.</string>
     <string name="workspace_board_discovering">Looking for devices…</string>
     <string name="workspace_board_discovering_hint">No peer discovered yet. Make sure the other device is online, or add its address on the Nodes page.</string>
+
+    <!-- ===== task-3: diagnostics package export (phone Settings > Diagnostics) ===== -->
+    <string name="diag_export_package">Export diagnostics</string>
+    <string name="diag_export_running">Packaging…</string>
+    <string name="diag_export_hint">Contains environment, link readings and a redacted view of the queue/envelopes. No chat text or file content.</string>
+    <string name="diag_export_done_shared">Created %1$s (%2$s) and handed it to the system share sheet.</string>
+    <string name="diag_export_done_saved">Created %1$s (%2$s) in the app's file directory.</string>
+    <string name="diag_export_failed_write">The diagnostics package could not be written: not enough space or no permission. No file was created.</string>
+    <string name="diag_export_failed_unexpected">Export failed: packaging hit an unexpected error. Try again.</string>
+    <string name="agent_exec_policy_title">Who can run it</string>
+    <string name="agent_exec_policy_host_only">Only me</string>
+    <string name="agent_exec_policy_host_only_note">Accepts input from this machine only. Safest.</string>
+    <string name="agent_exec_policy_trusted">Me and my approved devices</string>
+    <string name="agent_exec_policy_trusted_note">Devices approved in Trusted devices can send tasks.</string>
+    <string name="agent_exec_policy_owner_admin">Also the owner and admins</string>
+    <string name="agent_exec_policy_owner_admin_note">The group owner and admins need no separate approval.</string>
+    <string name="agent_exec_policy_any_member">Anyone in the group</string>
+    <string name="agent_exec_policy_any_member_note">Every member can run commands on this machine.</string>
+
+    <string name="agent_exec_who_title">Who can run it</string>
+    <string name="agent_exec_who_note">Only checked devices can run commands through this agent. A new agent starts with just you.</string>
+    <string name="agent_exec_who_empty">No devices to authorize yet. Add one and it will show up here.</string>
+    <string name="agent_exec_who_trusted_badge">Trusted</string>
+    <string name="agent_exec_who_add">+ Add a device</string>
+
+    <string name="agent_exec_add_title">Add a device</string>
+    <string name="agent_exec_add_empty">Every device is already on the list.</string>
+
+    <string name="group_expose_agent_title">Agents from this machine</string>
+    <string name="group_expose_agent_note">Checked agents can be @-mentioned in this group. Only agents on this machine can be exposed.</string>
+    <string name="group_expose_agent_empty">No workspace on this machine to expose yet. Create one in the board first.</string>
+    <string name="group_expose_agent_confirm">Expose</string>
+    <string name="group_expose_agent_done">Exposed %1$s. The group can @ it now.</string>
+
 </resources>
+
 
 

@@ -23,8 +23,8 @@ class ChatScrollLogicTest {
             isNearBottomAfterLayout(
                 itemCount = 0,
                 totalItemCount = 0,
-                lastVisibleIndex = null,
-                canScrollForward = false,
+                firstVisibleIndex = null,
+                canScrollBackward = false,
             ),
         )
     }
@@ -37,8 +37,8 @@ class ChatScrollLogicTest {
             isNearBottomAfterLayout(
                 itemCount = 30,
                 totalItemCount = 0,
-                lastVisibleIndex = null,
-                canScrollForward = true,
+                firstVisibleIndex = null,
+                canScrollBackward = true,
             ),
         )
         // 量到了条目、但可见列表这一刻是空的（测量间隙）：同样取安全的一侧。
@@ -46,22 +46,26 @@ class ChatScrollLogicTest {
             isNearBottomAfterLayout(
                 itemCount = 30,
                 totalItemCount = 30,
-                lastVisibleIndex = null,
-                canScrollForward = true,
+                firstVisibleIndex = null,
+                canScrollBackward = true,
             ),
         )
     }
 
     @Test
-    fun measuredTopOfLongListIsNotNearBottom() {
-        // 回归护栏：这就是旧实现 `?: 0` 兜底等价出来的那一格 —— 布局量好了、确实停在
-        // 第 0 条、下面还有 29 条，这时才是真的「用户在往上读」。
+    fun readingHistoryUpALongListIsNotNearBottom() {
+        // 倒序下索引 0 是最新一条。用户往上翻历史时，**最靠底的可见项**已经远离 0
+        // （这里是 20，看着的是更早的消息），且还能往回滚 ⇒ 真的在阅读历史。
+        //
+        // 注意这个断言的方向已经跟正序版本相反了：正序时「停在索引 0」= 在顶部 = 不贴底，
+        // 倒序时「停在索引 0」= 在底部 = 贴底。把旧断言照搬过来会**看起来还绿**，
+        // 但测的是相反的事。
         assertFalse(
             isNearBottomAfterLayout(
                 itemCount = 30,
                 totalItemCount = 30,
-                lastVisibleIndex = 0,
-                canScrollForward = true,
+                firstVisibleIndex = 20,
+                canScrollBackward = true,
             ),
         )
     }
@@ -73,32 +77,35 @@ class ChatScrollLogicTest {
             isNearBottomAfterLayout(
                 itemCount = 2,
                 totalItemCount = 2,
-                lastVisibleIndex = 0,
-                canScrollForward = false,
+                firstVisibleIndex = 0,
+                canScrollBackward = false,
             ),
         )
         assertTrue(
             isNearBottomAfterLayout(
                 itemCount = 100,
                 totalItemCount = 100,
-                lastVisibleIndex = 30,
-                canScrollForward = false,
+                firstVisibleIndex = 30,
+                canScrollBackward = false,
             ),
         )
     }
 
+    /**
+     * 容忍度：倒序下「最靠底的索引」0 = 最新一条。所以离 0 越远 = 越往上翻。
+     */
     @Test
     fun toleranceIsTwoItems() {
-        fun near(lastVisible: Int) = isNearBottomAfterLayout(
+        fun near(firstVisible: Int) = isNearBottomAfterLayout(
             itemCount = 30,
             totalItemCount = 30,
-            lastVisibleIndex = lastVisible,
-            canScrollForward = true,
+            firstVisibleIndex = firstVisible,
+            canScrollBackward = true,
         )
-        assertTrue(near(29), "最后一条可见 = 贴底")
-        assertTrue(near(28), "离底一条 = 贴底")
-        assertTrue(near(27), "离底两条 = 贴底（容忍度边界）")
-        assertFalse(near(26), "离底三条 = 已经算翻上去了")
+        assertTrue(near(0), "最新一条可见 = 贴底")
+        assertTrue(near(1), "离底一条 = 贴底")
+        assertTrue(near(2), "离底两条 = 贴底（容忍度边界）")
+        assertFalse(near(3), "离底三条 = 已经算翻上去了")
     }
 
     @Test

@@ -9,7 +9,6 @@ import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
-import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
@@ -17,16 +16,13 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.RoundedCornerShape
-import androidx.compose.material3.Button
 import androidx.compose.material3.Checkbox
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
-import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -50,7 +46,6 @@ import app.relay.generated.resources.ic_plus
 import app.relay.generated.resources.ic_qr_code_scanner
 import app.relay.generated.resources.workspace_agent_section_sessions
 import app.relay.generated.resources.workspace_create_group_agent_label
-import app.relay.generated.resources.workspace_create_group_browse
 import app.relay.generated.resources.workspace_create_group_confirm
 import app.relay.generated.resources.workspace_create_group_dedup_hint
 import app.relay.generated.resources.workspace_create_group_enter_chat
@@ -212,6 +207,12 @@ public fun WorkspaceGroupCreateDialog(
                             horizontalArrangement = Arrangement.spacedBy(sp.xs),
                             verticalAlignment = Alignment.CenterVertically,
                         ) {
+                            // 这里原先还有一颗「浏览」按钮，点下去什么都不发生（空实现）。
+                            // 本仓的纪律是"有真实动作就接上，没有就整颗不画"：这台设备上的
+                            // 目录选择能力（`SaveDirectoryPicker`）拿不到这条对话框的调用链上
+                            // （三个活调用点里，会话侧栏那一个的 controller 是窄接口
+                            // `DesktopPaneActions`，取不到平台 picker），所以**整颗删掉**，
+                            // 而不是留一颗按下去没反应的按钮。路径仍可手动输入。
                             OutlinedTextField(
                                 value = newPath,
                                 onValueChange = { newPath = it },
@@ -219,15 +220,6 @@ public fun WorkspaceGroupCreateDialog(
                                 singleLine = true,
                                 textStyle = MaterialTheme.typography.bodySmall.copy(fontFamily = FontFamily.Monospace),
                             )
-                            OutlinedButton(
-                                onClick = { /* File browser handle */ },
-                                shape = RelayShapes.small,
-                            ) {
-                                Text(
-                                    text = stringResource(Res.string.workspace_create_group_browse),
-                                    style = MaterialTheme.typography.labelSmall,
-                                )
-                            }
                         }
 
                         Row(
@@ -389,56 +381,26 @@ private fun WorkspaceItemCard(
 
             if (boundGroup != null) {
                 Row(horizontalArrangement = Arrangement.spacedBy(LocalAppSpacing.current.xs)) {
-                    Button(
+                    AppButton(
+                        text = stringResource(Res.string.workspace_create_group_enter_chat),
                         onClick = onOpenChat,
-                        contentPadding = androidx.compose.foundation.layout.PaddingValues(horizontal = LocalAppSpacing.current.sm, vertical = LocalAppSpacing.current.xs),
-                        shape = RoundedCornerShape(6.dp),
-                    ) {
-                        Icon(
-                            painter = painterResource(Res.drawable.ic_chat_bubble),
-                            contentDescription = null,
-                            modifier = Modifier.size(13.dp),
-                        )
-                        Spacer(Modifier.size(LocalAppSpacing.current.xs))
-                        Text(
-                            text = stringResource(Res.string.workspace_create_group_enter_chat),
-                            style = MaterialTheme.typography.labelSmall,
-                        )
-                    }
-                    OutlinedButton(
+                        size = AppButtonSize.Small,
+                        leadingIcon = Res.drawable.ic_chat_bubble,
+                    )
+                    AppOutlinedButton(
+                        text = stringResource(Res.string.workspace_create_group_share_qr),
                         onClick = onShowQr,
-                        contentPadding = androidx.compose.foundation.layout.PaddingValues(horizontal = LocalAppSpacing.current.sm, vertical = LocalAppSpacing.current.xs),
-                        shape = RoundedCornerShape(6.dp),
-                    ) {
-                        Icon(
-                            painter = painterResource(Res.drawable.ic_qr_code_scanner),
-                            contentDescription = null,
-                            modifier = Modifier.size(13.dp),
-                        )
-                        Spacer(Modifier.size(LocalAppSpacing.current.xs))
-                        Text(
-                            text = stringResource(Res.string.workspace_create_group_share_qr),
-                            style = MaterialTheme.typography.labelSmall,
-                        )
-                    }
+                        size = AppButtonSize.Small,
+                        leadingIcon = Res.drawable.ic_qr_code_scanner,
+                    )
                 }
             } else {
-                Button(
+                AppButton(
+                    text = stringResource(Res.string.workspace_create_group_quick_btn),
                     onClick = onQuickCreate,
-                    contentPadding = androidx.compose.foundation.layout.PaddingValues(horizontal = LocalAppSpacing.current.md10, vertical = LocalAppSpacing.current.xs),
-                    shape = RoundedCornerShape(6.dp),
-                ) {
-                    Icon(
-                        painter = painterResource(Res.drawable.ic_plus),
-                        contentDescription = null,
-                        modifier = Modifier.size(13.dp),
-                    )
-                    Spacer(Modifier.size(LocalAppSpacing.current.xs))
-                    Text(
-                        text = stringResource(Res.string.workspace_create_group_quick_btn),
-                        style = MaterialTheme.typography.labelSmall,
-                    )
-                }
+                    size = AppButtonSize.Small,
+                    leadingIcon = Res.drawable.ic_plus,
+                )
             }
         }
     }
@@ -493,12 +455,11 @@ public fun WorkspaceGroupPromptDialog(
                     )
                 }
                 if (onOpenWithoutGroup != null) {
-                    TextButton(onClick = onOpenWithoutGroup) {
-                        Text(
-                            text = stringResource(Res.string.workspace_group_prompt_skip),
-                            style = MaterialTheme.typography.labelMedium,
-                        )
-                    }
+                    AppTextButton(
+                        text = stringResource(Res.string.workspace_group_prompt_skip),
+                        onClick = onOpenWithoutGroup,
+                        size = AppButtonSize.Small,
+                    )
                 }
             }
         },

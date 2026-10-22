@@ -99,7 +99,11 @@ private fun smallButtonHeight() = LocalAppSpacing.current.xxl
 @Composable
 internal fun PeerCabinetView(
     state: RelayUiState,
-    onBack: () -> Unit,
+    /**
+     * 头部那颗返回。`null` = 不画 —— 桌面宽档左栏一直在旁边，画它只会占宽度
+     * （与 `MineCabinetView.onBack` 同一条规矩）。
+     */
+    onBack: (() -> Unit)? = null,
     onLoadPath: (String) -> Unit,
     onToggleSelection: (String) -> Unit,
     onDownloadEntries: (List<String>, Boolean) -> Unit,
@@ -124,7 +128,7 @@ internal fun PeerCabinetView(
             verticalAlignment = Alignment.CenterVertically,
             horizontalArrangement = Arrangement.spacedBy(LocalAppSpacing.current.md10),
         ) {
-            IconButton(onClick = onBack) {
+            if (onBack != null) IconButton(onClick = onBack) {
                 // 原型顶栏的返回键是 `topbar(..., back='m-cabinet', ...)` 画出来的
                 // `ic('back')`，即 `i-back`（`prototype/relay.html:1558`，一条 stroke 细
                 // chevron）。上一版用 M3 `Icons.AutoMirrored.Outlined.ArrowBack` —— 那是

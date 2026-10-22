@@ -22,7 +22,6 @@ import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
-import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -205,12 +204,11 @@ public fun PkPickerDialog(
                 }
 
                 Spacer(Modifier.height(LocalAppSpacing.current.md))
-                TextButton(
+                AppTextButton(
+                    text = stringResource(Res.string.common_cancel),
                     onClick = onDismiss,
                     modifier = Modifier.align(Alignment.End),
-                ) {
-                    Text(stringResource(Res.string.common_cancel))
-                }
+                )
             }
         }
     }

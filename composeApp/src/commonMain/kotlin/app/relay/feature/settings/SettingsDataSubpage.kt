@@ -2,13 +2,11 @@
 
 package app.relay.feature.settings
 
-import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
@@ -17,13 +15,16 @@ import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.unit.dp
 import app.relay.generated.resources.Res
+import app.relay.ui.components.AppButtonTone
+import app.relay.ui.components.AppOutlinedButton
+import app.relay.generated.resources.common_cancel
 import app.relay.generated.resources.ic_folder
 import app.relay.generated.resources.settings_data_desktop_hint
 import app.relay.generated.resources.settings_data_phone_hint
 import app.relay.generated.resources.set_change_dir
 import app.relay.generated.resources.set_clear_history_action
+import app.relay.generated.resources.set_clear_history_confirm_body
 import app.relay.generated.resources.set_clear_history_sub
 import app.relay.generated.resources.set_clear_history_title
 import app.relay.generated.resources.set_data_card_title
@@ -47,6 +48,8 @@ import app.relay.generated.resources.set_storage_usage_counting
 import app.relay.generated.resources.set_storage_usage_value
 import app.relay.ui.SectionCard
 import app.relay.ui.components.InfoRow
+import app.relay.ui.components.RelayDialog
+import app.relay.ui.components.RelayDialogButton
 import app.relay.ui.components.formatBytes
 import app.relay.ui.theme.LocalAppSpacing
 import org.jetbrains.compose.resources.stringResource
@@ -67,6 +70,10 @@ import org.jetbrains.compose.resources.stringResource
  * 两个目录入口都没有消费者时整行不画：一排永远点不动的按钮就是"留在屏上骗人"。
  * 移动端两个都没接（SAF / security-scoped bookmark 给回来的东西不能直接当数据目录用），
  * 桌面只接「打开所在目录」。
+ *
+ * 「清空聊天记录」与它们相反：它**不是**按下去没反应的入口，而是**按下去太有效**——
+ * 一键清空全部会话的全部本地历史。所以它前面必须有一道二次确认（[ClearAllHistoryConfirmDialog]），
+ * 与「清空本会话」的 `ClearConversationDialog` 同一档次：更危险的动作不能保护更少。
  */
 @Composable
 fun SettingsDataSubpage(
@@ -83,17 +90,24 @@ fun SettingsDataSubpage(
     onOpenDataDirectory: (() -> Unit)? = null,
     persistMessagesEnabled: Boolean = false,
     onPersistMessagesEnabledChange: ((Boolean) -> Unit)? = null,
-    /**
-     * K1 长连接（跨网下行通道）开关。**默认关**，且只对**局域网**对端生效：
-     * 公网要等 K2 的 TLS + 双向 pin（明文长连接只允许局域网，与今天的 LAN 明文路径风险相同）。
-     */
-    onLinkDownlinkEnabledChange: ((Boolean) -> Unit)? = null,
     retentionDays: Int = DEFAULT_RETENTION_DAYS,
-    onRetentionDaysChange: ((Int) -> Unit)? = null,
     onClearHistory: (() -> Unit)? = null,
 ) {
     var persistMessages by rememberSaveable(persistMessagesEnabled) {
         mutableStateOf(persistMessagesEnabled)
+    }
+    // 「清空聊天记录」**先确认再删**：它清的是全部会话的全部本地历史、不可恢复，
+    // 却比「清空本会话」（有 ClearConversationDialog）保护更少。这个开关就是那道前置闸。
+    var showClearHistoryConfirm by rememberSaveable { mutableStateOf(false) }
+
+    if (showClearHistoryConfirm) {
+        ClearAllHistoryConfirmDialog(
+            onDismiss = { showClearHistoryConfirm = false },
+            onConfirm = {
+                showClearHistoryConfirm = false
+                onClearHistory?.invoke()
+            },
+        )
     }
 
     SettingsPageScaffold(
@@ -162,12 +176,11 @@ fun SettingsDataSubpage(
                 ) {
                     // 原型这一格是 `.tag q`（琥珀底，`prototype/relay.html:3936`），不是 `.tag.ok` 的绿底。
                     TagPill(leftover, TagTone.Queued)
-                    OutlinedButton(
+                    AppOutlinedButton(
+                        text = stringResource(Res.string.set_leftover_action),
                         onClick = { onClearLeftoverParts?.invoke() },
                         enabled = onClearLeftoverParts != null && (leftoverPartCount ?: 0) > 0,
-                    ) {
-                        Text(stringResource(Res.string.set_leftover_action))
-                    }
+                    )
                 }
             }
 
@@ -180,15 +193,19 @@ fun SettingsDataSubpage(
                 ) {
                     val changeDir = onChangeDataDirectory
                     if (changeDir != null) {
-                        OutlinedButton(onClick = changeDir, modifier = Modifier.weight(1f)) {
-                            Text(stringResource(Res.string.set_change_dir))
-                        }
+                        AppOutlinedButton(
+                            text = stringResource(Res.string.set_change_dir),
+                            onClick = changeDir,
+                            modifier = Modifier.weight(1f),
+                        )
                     }
                     val openDir = onOpenDataDirectory
                     if (openDir != null) {
-                        OutlinedButton(onClick = openDir, modifier = Modifier.weight(1f)) {
-                            Text(stringResource(Res.string.set_open_dir))
-                        }
+                        AppOutlinedButton(
+                            text = stringResource(Res.string.set_open_dir),
+                            onClick = openDir,
+                            modifier = Modifier.weight(1f),
+                        )
                     }
                 }
             }
@@ -219,15 +236,58 @@ fun SettingsDataSubpage(
                 title = stringResource(Res.string.set_clear_history_title),
                 subtitle = stringResource(Res.string.set_clear_history_sub),
             ) {
-                OutlinedButton(
-                    onClick = { onClearHistory?.invoke() },
+                AppOutlinedButton(
+                    text = stringResource(Res.string.set_clear_history_action),
+                    // 只负责把确认框叫出来；真正删的动作在确认框的 danger 按钮上。
+                    onClick = { showClearHistoryConfirm = true },
                     enabled = onClearHistory != null,
-                    colors = dangerOutlinedColors(),
-                    border = BorderStroke(1.dp, MaterialTheme.colorScheme.error.copy(alpha = 0.4f)),
-                ) {
-                    Text(stringResource(Res.string.set_clear_history_action))
-                }
+                    tone = AppButtonTone.Danger,
+                )
             }
         }
     }
+}
+
+/**
+ * 「清空**全部**聊天记录」的二次确认。
+ *
+ * 与 `ClearConversationDialog`（清空本会话）是同一档次的前置闸，区别只在范围。
+ * 正文逐条说清三件事，一条都不能省：
+ * 1. **全部会话**——不是当前这一个，否则用户会以为只清眼前这段；
+ * 2. **只删本机、对方不受影响**——不说清的话，用户要么以为在替对方删（不敢用），
+ *    要么以为删了就没人看得见（误解了隐私边界）；
+ * 3. **不可恢复**——它删的是本地历史，没有回收站。
+ *
+ * 确认按钮复用 `RelayDialogButton(danger = true)`（描边红字）：破坏性动作与「取消」
+ * 在形状上就分开，不靠位置区分，宽窄两档下都不会顺手点错。
+ */
+@Composable
+private fun ClearAllHistoryConfirmDialog(
+    onDismiss: () -> Unit,
+    onConfirm: () -> Unit,
+) {
+    RelayDialog(
+        onDismissRequest = onDismiss,
+        title = { Text(stringResource(Res.string.set_clear_history_title)) },
+        content = {
+            Text(
+                text = stringResource(Res.string.set_clear_history_confirm_body),
+                style = MaterialTheme.typography.bodyMedium,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+        },
+        confirmButton = {
+            RelayDialogButton(
+                text = stringResource(Res.string.set_clear_history_action),
+                danger = true,
+                onClick = onConfirm,
+            )
+        },
+        dismissButton = {
+            RelayDialogButton(
+                text = stringResource(Res.string.common_cancel),
+                onClick = onDismiss,
+            )
+        },
+    )
 }

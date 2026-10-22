@@ -23,9 +23,7 @@ import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
-import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
@@ -37,13 +35,21 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
+import app.relay.core.nowMillis
 import app.relay.ui.theme.IconSizes
 import app.relay.ui.theme.LocalAppSpacing
 import app.relay.app.RelayUiState
 import app.relay.ui.ContentWidths
 import app.relay.ui.centerCapped
+import app.relay.ui.components.AppButton
+import app.relay.ui.components.AppButtonSize
+import app.relay.ui.components.AppButtonTone
+import app.relay.ui.components.AppIconButton
+import app.relay.ui.components.AppOutlinedButton
 import app.relay.ui.components.formatBytes
 import app.relay.generated.resources.Res
+import app.relay.generated.resources.desktop_action_list
+import app.relay.generated.resources.ic_list
 import app.relay.generated.resources.cabinet_change
 import app.relay.generated.resources.cabinet_dir_hint
 import app.relay.generated.resources.cabinet_grants_count
@@ -118,6 +124,17 @@ import app.relay.ui.theme.relayCardShadow
  * 审计 §7.2 的「列表列数自适应」（工作包 V7）在本屏**未做**：下面两处 `LazyColumn`
  * 保持单列。对「表头 + 行」的表格与卡片流而言单列本身也是对的取舍（表格列宽固定，
  * 卡片流在窄档下再分列会碎），所以本包不动它 —— 但 §7.2 那条欠账仍然记在案。
+ *
+ * ## 「打开共享目录」是一颗**可空**按钮
+ *
+ * 共享目录卡里那颗「打开」曾经挂着一个空实现：按下去什么都不发生，而它画得跟旁边
+ * 「更改」一模一样 —— 这正是本仓「一个按下去没反应的入口比没有更糟」的典型。
+ *
+ * 现在它由 [onOpenShareRoot] 决定画不画：宿主给得出真实动作（把共享目录交给系统文件
+ * 管理器）就传进来，给不出就传 null，按钮**整颗不画** —— 与 [AppPlatform.receivedFileActions]
+ * / `MessageComposer` 同一条规矩（能力缺失 = 不画，不是"点了失败"）。
+ * 移动端两个系统（SAF / security-scoped bookmark）都还没有这条出口，所以那边不画；
+ * 将来某台宿主接上了，只改它的调用点，本文件不动。
  */
 @Composable
 public fun CabinetScreen(
@@ -131,8 +148,10 @@ public fun CabinetScreen(
     onDownloadEntries: (List<String>, Boolean) -> Unit,
     onPickShareRoot: () -> Unit = {},
     onUploadToCabinet: ((String) -> Unit)? = null,
+    /** 打开共享目录的真实动作；null = 本平台没有这条出口，那颗按钮不画。 */
+    onOpenShareRoot: (() -> Unit)? = null,
     modifier: Modifier = Modifier,
-    now: Long = 0L,
+    now: Long = nowMillis(),
 ) {
     val cabinet = state.cabinet
 
@@ -157,6 +176,7 @@ public fun CabinetScreen(
             onSetShareMode = onSetShareMode,
             onRemoveShareGrant = onRemoveShareGrant,
             onSelectPeer = onSelectPeer,
+            onOpenShareRoot = onOpenShareRoot,
             modifier = modifier,
             now = now,
         )
@@ -228,15 +248,23 @@ private fun CabinetCardCount(text: String) {
 }
 
 @Composable
-private fun MineCabinetView(
+internal fun MineCabinetView(
     state: RelayUiState,
     onSetShareRoot: (String?) -> Unit,
     onPickShareRoot: () -> Unit,
     onSetShareMode: (String) -> Unit,
     onRemoveShareGrant: (String) -> Unit,
     onSelectPeer: (String?) -> Unit,
+    onOpenShareRoot: (() -> Unit)? = null,
+    /**
+     * 头部最左那颗"回列表"。`null` = 不画（手机屏独占一屏，没有列表可回）。
+     *
+     * 这是**外壳**差异，所以要参数化：桌面 Compact 档两栏互斥，详情页要能退回左栏；
+     * 宽档左栏一直在旁边，传 `null`。
+     */
+    onBack: (() -> Unit)? = null,
     modifier: Modifier = Modifier,
-    now: Long = 0L,
+    now: Long = nowMillis(),
 ) {
     val settings = state.settings
     val hasRoot = !settings.shareRoot.isNullOrBlank()
@@ -259,6 +287,14 @@ private fun MineCabinetView(
         // 原实现多画了一个 28dp 的 hdd 图标，标题压成 22sp、副标题 12sp —— 三处都对不上。
         item {
             Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+                if (onBack != null) {
+                    AppIconButton(
+                        icon = Res.drawable.ic_list,
+                        contentDescription = stringResource(Res.string.desktop_action_list),
+                        onClick = onBack,
+                    )
+                    Spacer(Modifier.width(LocalAppSpacing.current.md))
+                }
                 Column(Modifier.weight(1f)) {
                     Text(
                         stringResource(Res.string.cabinet_mine_title),
@@ -272,9 +308,10 @@ private fun MineCabinetView(
                     )
                 }
                 if (hasRoot) {
-                    OutlinedButton(onClick = { onSetShareRoot(null) }) {
-                        Text(stringResource(Res.string.cabinet_stop_share))
-                    }
+                    AppOutlinedButton(
+                        text = stringResource(Res.string.cabinet_stop_share),
+                        onClick = { onSetShareRoot(null) },
+                    )
                 }
             }
         }
@@ -335,9 +372,10 @@ private fun MineCabinetView(
                             color = MaterialTheme.colorScheme.onSurfaceVariant,
                         )
                         Spacer(Modifier.height(LocalAppSpacing.current.lg14))
-                        Button(onClick = { onPickShareRoot() }) {
-                            Text(stringResource(Res.string.cabinet_pick_dir))
-                        }
+                        AppButton(
+                            text = stringResource(Res.string.cabinet_pick_dir),
+                            onClick = { onPickShareRoot() },
+                        )
                     }
                 }
             }
@@ -366,22 +404,24 @@ private fun MineCabinetView(
                             // （`prototype/relay.html:338-340`，只有 `.pri` 才是实心绿）。
                             // 上一版用 M3 `Button`（实心 primary 底 + 白字）—— 形态不符，
                             // 并排图里一眼就是两团绿块 vs 两个白描边小钮。
-                            OutlinedButton(
-                                onClick = { },
-                                contentPadding = PaddingValues(horizontal = LocalAppSpacing.current.md10, vertical = LocalAppSpacing.current.sm6),
-                            ) {
-                                Icon(painterResource(Res.drawable.ic_external), contentDescription = null, Modifier.size(IconSizes.Inline))
-                                Spacer(Modifier.width(5.dp))
-                                Text(stringResource(Res.string.cabinet_open))
+                            // 没有真实动作就整颗不画（见本文件顶部 KDoc）：一颗按下去什么都不发生的
+                            // 「打开」比没有这个入口更糟 —— 用户会以为目录打不开，而不是这台设备
+                            // 没有这条出口。
+                            val openShareRoot = onOpenShareRoot
+                            if (openShareRoot != null) {
+                                AppOutlinedButton(
+                                    text = stringResource(Res.string.cabinet_open),
+                                    onClick = openShareRoot,
+                                    size = AppButtonSize.Small,
+                                    leadingIcon = Res.drawable.ic_external,
+                                )
                             }
-                            OutlinedButton(
+                            AppOutlinedButton(
+                                text = stringResource(Res.string.cabinet_change),
                                 onClick = { onPickShareRoot() },
-                                contentPadding = PaddingValues(horizontal = LocalAppSpacing.current.md10, vertical = LocalAppSpacing.current.sm6),
-                            ) {
-                                Icon(painterResource(Res.drawable.ic_refresh), contentDescription = null, Modifier.size(IconSizes.Inline))
-                                Spacer(Modifier.width(5.dp))
-                                Text(stringResource(Res.string.cabinet_change))
-                            }
+                                size = AppButtonSize.Small,
+                                leadingIcon = Res.drawable.ic_refresh,
+                            )
                         }
                         Spacer(Modifier.height(LocalAppSpacing.current.sm6))
                         Text(stringResource(Res.string.cabinet_dir_hint), style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
@@ -502,9 +542,12 @@ private fun MineCabinetView(
                                 style = MaterialTheme.typography.bodySmall,
                                 color = MaterialTheme.colorScheme.onSurfaceVariant,
                             )
-                            IconButton(onClick = { onRemoveShareGrant(grant.nodeId) }) {
-                                Icon(painterResource(Res.drawable.ic_close), contentDescription = stringResource(Res.string.cabinet_grants_remove))
-                            }
+                            AppIconButton(
+                                icon = Res.drawable.ic_close,
+                                contentDescription = stringResource(Res.string.cabinet_grants_remove),
+                                onClick = { onRemoveShareGrant(grant.nodeId) },
+                                tone = AppButtonTone.Danger,
+                            )
                         }
                         HorizontalDivider()
                     }

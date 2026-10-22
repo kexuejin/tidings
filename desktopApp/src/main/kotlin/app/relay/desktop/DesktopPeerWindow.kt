@@ -143,12 +143,16 @@ private fun DesktopPeerWindow(
         )
 
         AppTheme(darkTheme = effectiveDark) {
-            val actions = remember(host, scope, peerId, systemDark) {
+            // 与主窗同一条：没设共享目录就不给这条出口（null ⇒ 文件柜那颗「打开」不画），
+            // 并且它必须是 remember 的键，否则设 / 停共享目录后 actions 还是旧的那一份。
+            val shareRoot = state.settings.shareRoot?.takeIf { it.isNotBlank() }
+            val actions = remember(host, scope, peerId, systemDark, shareRoot) {
                 DesktopShellActions(
                     onOpenSettings = { host.settingsOpen = true },
                     onToggleTheme = { host.toggleTheme(systemDark) },
                     onExportDiagnostics = { exportDiagnostics(host) },
                     onOpenDownloadsFolder = { openDownloadsFolder(controller.dataDirectory) },
+                    onOpenShareRoot = shareRoot?.let { root -> { openShareRoot(root) } },
                     onRefresh = { controller.handshake() },
                     // 顶层视图路由归 shell 自己，窗口层不再写第二次（同主窗的理由）。
                     onNewConversation = {},

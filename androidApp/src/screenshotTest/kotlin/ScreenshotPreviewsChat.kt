@@ -709,11 +709,12 @@ private fun ChatDeskPanePreview() {
             ),
             chrome = ChatScreenChrome(
                 showHeader = false,
-                composerSlot = { draft, onDraftChange ->
+                composerSlot = { draft, onDraftChange, mentions ->
                 DesktopComposer(
                 peer = peer,
                 draft = draft,
                 onDraftChange = onDraftChange,
+                mentionTargets = mentions,
                 controller = DesktopPreviewActions,
             )
                 },
@@ -740,7 +741,7 @@ private fun ChatDeskHistSearchPreview() {
             ),
             chrome = ChatScreenChrome(
                 showHeader = false,
-                composerSlot = { draft, onDraftChange ->
+                composerSlot = { draft, onDraftChange, mentions ->
                 DesktopComposer(peer, draft, onDraftChange, DesktopPreviewActions)
                 },
                 modifier = inner,
@@ -773,7 +774,7 @@ private fun ChatDeskGroupCreatePreview() {
             ),
             chrome = ChatScreenChrome(
                 showHeader = false,
-                composerSlot = { draft, onDraftChange ->
+                composerSlot = { draft, onDraftChange, mentions ->
                 DesktopComposer(linPeer(), draft, onDraftChange, DesktopPreviewActions)
                 },
                 modifier = inner,

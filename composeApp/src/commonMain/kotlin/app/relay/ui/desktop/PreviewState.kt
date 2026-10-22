@@ -757,7 +757,7 @@ public fun desktopPreviewFolderState(): RelayUiState {
  * （`DesktopGlobalSearch.kt` 的 `GlobalSearchState.{Loading, Failed, Empty, Success}`），
  * 其中 `Success` 那一支（三段分组：联系人 / 聊天记录 / 文件）此前**一张图都没有** ——
  * 因为 [DesktopPreviewActions] 没 override `searchGlobal`，落到接口默认实现
- * （`DesktopPaneActions.kt:143`）返回 `GlobalSearchResult(query = query)`，
+ * （`DesktopPaneActions.searchGlobal` 的默认实现）返回 `GlobalSearchResult(query = query)`，
  * 三个 list 全空 ⇒ `isEmpty` 为真 ⇒ 面板永远走 `Empty`。
  *
  * 换句话说：用旧的 actions 拍搜索，拍出来的"空结果"不是数据决定的，是**实现决定的** ——

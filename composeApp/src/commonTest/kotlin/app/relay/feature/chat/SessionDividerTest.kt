@@ -54,4 +54,39 @@ class SessionDividerTest {
         assertNull(sessionDividerTitle("   "), "空白串与没有标题是同一档")
         assertEquals("refactor runner", sessionDividerTitle("refactor runner"))
     }
+
+    // ------------------------------------------- 协议字段优先于 id 前缀（task-16）
+
+    /**
+     * **协议字段优先**：消息带 `agentSessionId` 时，分段判据只看字段，不看 id 形状。
+     *
+     * 真身：手机端收到的群消息 id 是**信封 UUID**（不是 `agent-ev-…`），
+     * 所以 `extractSessionId` 恒 null —— 桌面端有会话分段线、手机端一条都没有。
+     * 修法是让协议携带会话归属，判据读字段。
+     */
+    @Test
+    fun theProtocolFieldWinsOverTheIdPrefix() {
+        val messages = listOf(
+            MessageUi(id = "3f2a-uuid", peerId = "group:g", mine = false, text = "a", at = 1, agentSessionId = "s-1"),
+            MessageUi(id = "9b31-uuid", peerId = "group:g", mine = false, text = "b", at = 2, agentSessionId = "s-1"),
+            MessageUi(id = "c7e0-uuid", peerId = "group:g", mine = false, text = "c", at = 3, agentSessionId = "s-2"),
+        )
+        assertEquals(
+            setOf("3f2a-uuid", "c7e0-uuid"),
+            sessionTransitionIds(messages),
+            "同一会话只出一条分隔；换会话再出一条 —— 全程不需要 id 前缀",
+        )
+    }
+
+    /**
+     * **旧数据回退**：字段为 null 时仍认 id 前缀。
+     *
+     * 升级前收到的 agent 消息 id 里仍带 `agent-ev-`；没有这条回退，
+     * 老会话的分段线会在升级后凭空消失（用户会觉得历史被改坏了）。
+     */
+    @Test
+    fun theIdPrefixStillWorksAsAFallbackForOldRows() {
+        val messages = listOf(msg("agent-ev-s1-1", 1), msg("agent-ev-s2-1", 2))
+        assertEquals(setOf("agent-ev-s1-1", "agent-ev-s2-1"), sessionTransitionIds(messages))
+    }
 }

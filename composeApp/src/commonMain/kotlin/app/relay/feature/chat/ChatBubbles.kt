@@ -5,6 +5,7 @@ package app.relay.feature.chat
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.combinedClickable
+import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -34,6 +35,7 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.StrokeCap
 import androidx.compose.ui.platform.LocalClipboardManager
@@ -76,6 +78,7 @@ import app.relay.generated.resources.chat_group_removed
 import app.relay.generated.resources.chat_group_renamed
 import app.relay.generated.resources.chat_nudge_peer
 import app.relay.generated.resources.chat_nudge_self
+import app.relay.generated.resources.chat_delete_local
 import app.relay.generated.resources.chat_recall
 import app.relay.generated.resources.chat_recall_peer
 import app.relay.generated.resources.chat_recall_self
@@ -125,6 +128,9 @@ import app.relay.generated.resources.transfer_resume_hint
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.setValue
 import app.relay.ui.theme.ShapeRoles
+import app.relay.ui.components.AppButton
+import app.relay.ui.components.AppTextButton
+import app.relay.ui.components.AppButtonSize
 
 /**
  * 一条消息气泡。
@@ -153,10 +159,23 @@ internal fun MessageBubble(
     onResumeTransfer: ((String) -> Unit)? = null,
     receivedFileActions: ReceivedFileActions? = null,
     onRetry: ((String) -> Unit)? = null,
-    /** 撤回这条消息。null = 现在撤不了（不是自己的、是文件、或过了 5 分钟窗口）。 */
+    /** 撤回这条消息。null = 现在撤不了（过了 5 分钟窗口时也传 null，但下面三项仍然给值）。 */
     onRecall: (() -> Unit)? = null,
+    /**
+     * 撤回菜单项要不要**画出来**。
+     *
+     * 与 [onRecall] 分开：超过 5 分钟后点击入口没了，但这一项**仍然要显示**并置灰 ——
+     * 直接消失会让用户以为是自己撤过了，或者以为这里本来就没有这个功能。
+     */
+    recallVisible: Boolean = false,
+    /** 撤回菜单项的副标题：`mm:ss`，或已本地化的「超时」。 */
+    recallMeta: String = "",
+    /** 最后 10 秒转危险色。 */
+    recallUrgent: Boolean = false,
     onReply: (() -> Unit)? = null,
     onForward: (() -> Unit)? = null,
+    /** 只删本机这一条；null = 这个壳不提供删除。行为与「撤回」无关，见 `MessagePressActions`。 */
+    onDelete: (() -> Unit)? = null,
     /** 群消息气泡上方署的发件人名。null = 不署（私聊，或这条是自己发的）。 */
     senderName: String? = null,
     /**
@@ -166,6 +185,13 @@ internal fun MessageBubble(
      * —— 自己发的一条都没有。所以这里也只在非 [MessageUi.mine] 时给值。
      */
     senderAvatar: ChatAvatar? = null,
+    /**
+     * 长按发送者头像**直接 @ 这个人/这个 agent**。null = 不提供入口（私聊、自己发的）。
+     *
+     * 只有群里有意义：群里"对着头像说"是最自然的指人方式，比先敲 `@` 再从候选里找快。
+     * token 由调用方从身份解析器取（[ChatAvatar] 同一次解析的产物），气泡不自己拼名字。
+     */
+    onMentionSender: (() -> Unit)? = null,
     quotedMessage: MessageUi? = null,
     onScrollToQuoted: (() -> Unit)? = null,
     onImageClick: ((String) -> Unit)? = null,
@@ -215,13 +241,32 @@ internal fun MessageBubble(
         verticalAlignment = Alignment.Bottom,
     ) {
         senderAvatar?.let { av ->
-            PeerAvatar(
-                name = av.name,
-                isAgent = av.isAgent,
-                size = 26.dp,
-                avatar = av.avatar,
-                shape = ShapeRoles.Avatar,
-            )
+            // 长按头像 = 直接 @：入口挂在**头像**上而不是气泡上 —— 气泡的长按已经是
+            // 「回复 / 撤回 / 复制 / 转发」那个菜单，两个手势落在同一个目标上会打架。
+            // 包一层 Box 而不是给 PeerAvatar 加 modifier：头像组件是全仓共用的，为一个
+            // 手势往它身上开口子，下一个使用点就会照着这个口子长出别的自由度。
+            val avatarContent: @Composable () -> Unit = {
+                PeerAvatar(
+                    name = av.name,
+                    isAgent = av.isAgent,
+                    size = 26.dp,
+                    avatar = av.avatar,
+                    shape = ShapeRoles.Avatar,
+                )
+            }
+            if (onMentionSender != null) {
+                // 只用长按手势，**不挂 onClick**：combinedClickable 必须给一个 onClick，
+                // 而"点了没反应"的空实现正是 DeadButtonGuard 盯的那种死按钮（同一个文件
+                // 已有气泡自己那一处，再多一处就会被判红）。detectTapGestures 只注册
+                // onLongPress，单击在这个头像上本来就是"没有动作"。
+                Box(
+                    modifier = Modifier.pointerInput(av.name, onMentionSender) {
+                        detectTapGestures(onLongPress = { onMentionSender() })
+                    },
+                ) { avatarContent() }
+            } else {
+                avatarContent()
+            }
             Spacer(Modifier.width(sp.sm))
         }
         // 菜单要锚在气泡上，所以外面套一层 BoxWithConstraints；气泡上限见 bubbleMaxWidth。
@@ -244,7 +289,13 @@ internal fun MessageBubble(
                 modifier = Modifier
                     // `maxWidth` 要显式取外层 BoxWithConstraints 的接收者：`Column` 与
                     // `BoxWithConstraints` 都带 `@LayoutScopeMarker`，嵌套后外层被遮蔽。
-                    .bubbleMaxWidth(this@BoxWithConstraints.maxWidth, bubbleFraction)
+                    // 长文本按内容放开（见 bubbleMaxWidthForText 的 KDoc：比例本身与原型一致，
+                    // 但 80 字以上的中文在 271dp 里要折 6~7 行，读起来太费劲）。
+                    .bubbleMaxWidthForText(
+                        availableWidth = this@BoxWithConstraints.maxWidth,
+                        fraction = bubbleFraction,
+                        text = message.text,
+                    )
                     .combinedClickable(
                         onClick = {}, onLongClick = { menuOpen = true },
                     ),
@@ -386,7 +437,11 @@ internal fun MessageBubble(
                     copyText = message.text.ifBlank { message.file?.name.orEmpty() },
                     onReply = onReply?.let { { menuOpen = false; it() } },
                     onRecall = onRecall?.let { { menuOpen = false; it() } },
+                    recallVisible = recallVisible,
+                    recallMeta = recallMeta,
+                    recallUrgent = recallUrgent,
                     onForward = onForward?.let { { menuOpen = false; it() } },
+        onDelete = onDelete?.let { { menuOpen = false; it() } },
                 )
             }
         }
@@ -423,9 +478,23 @@ internal fun MessageBubble(
 @Composable
 public fun MessagePressActions(
     copyText: String,
+    /**
+     * 只删本机这一条（不动协议、不通知对方）。
+     *
+     * 与「撤回」是两件事：撤回有时限、会告诉对方；删除是纯本机行为 ——
+     * 「我自己不想再看到它」。没有这一项时，用户想清掉一条只有两条路：
+     * 撤回（超时就没了）或清空整个会话（那是核弹）。
+     */
+    onDelete: (() -> Unit)? = null,
     onReply: (() -> Unit)? = null,
     onRecall: (() -> Unit)? = null,
     onForward: (() -> Unit)? = null,
+    /** 见 [MessageBubble.recallVisible]：超时后仍要显示并置灰。 */
+    recallVisible: Boolean = false,
+    /** 撤回项副标题：`mm:ss` 或「超时」。 */
+    recallMeta: String = "",
+    /** 最后 10 秒转危险色。 */
+    recallUrgent: Boolean = false,
 ) {
     val clipboardManager = LocalClipboardManager.current
     if (onReply != null) {
@@ -434,10 +503,32 @@ public fun MessagePressActions(
             onClick = onReply,
         )
     }
-    if (onRecall != null) {
+    if (recallVisible) {
+        // 剩余时间写在项名右边（原型菜单也是这个位置）。超时后**不隐藏**、只置灰 ——
+        // 隐藏等于"不解释为什么不能撤"，而用户最需要知道的正是这一点。
+        val metaColor = if (recallUrgent) {
+            MaterialTheme.colorScheme.error
+        } else {
+            MaterialTheme.colorScheme.onSurfaceVariant
+        }
         DropdownMenuItem(
-            text = { Text(stringResource(Res.string.chat_recall)) },
-            onClick = onRecall,
+            text = {
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(LocalAppSpacing.current.sm),
+                ) {
+                    Text(stringResource(Res.string.chat_recall))
+                    if (recallMeta.isNotEmpty()) {
+                        Text(
+                            text = recallMeta,
+                            style = MaterialTheme.typography.labelSmall,
+                            color = metaColor,
+                        )
+                    }
+                }
+            },
+            enabled = onRecall != null,
+            onClick = { onRecall?.invoke() },
         )
     }
     DropdownMenuItem(
@@ -452,6 +543,17 @@ public fun MessagePressActions(
         DropdownMenuItem(
             text = { Text(stringResource(Res.string.chat_forward)) },
             onClick = onForward,
+        )
+    }
+    if (onDelete != null) {
+        DropdownMenuItem(
+            text = {
+                Text(
+                    text = stringResource(Res.string.chat_delete_local),
+                    color = MaterialTheme.colorScheme.error,
+                )
+            },
+            onClick = onDelete,
         )
     }
 }
@@ -815,18 +917,20 @@ internal fun FileCardView(
                         // 给实心 [Button]；「分享」是次要出口，降级成 [TextButton]。
                         // 两个都是纯文字按钮时看不出该点哪个 —— 这与 Offered 分支的
                         // 「接收（实心）/ 拒绝（文字）」是同一条规矩。
-                        Button(
+                        // 用按钮族的 **Compact 档**（9×5 / labelSmall），不用裸 M3 `Button`：
+                        // M3 的 `Button` 自带 `minHeight = 40dp`，`contentPadding` 只压得动横向，
+                        // 于是这张卡里那行按钮的**背景比文字高一大截**（真机反馈 #5）。
+                        // 同一处「打开/分享」的主次关系不变：主操作实心、次操作文字。
+                        AppButton(
+                            text = stringResource(Res.string.file_open),
                             onClick = { receivedFileActions.open(savedPath) },
-                            contentPadding = PaddingValues(horizontal = sp.md10, vertical = sp.xs),
-                        ) {
-                            Text(stringResource(Res.string.file_open), style = MaterialTheme.typography.labelSmall)
-                        }
-                        TextButton(
+                            size = AppButtonSize.Compact,
+                        )
+                        AppTextButton(
+                            text = stringResource(Res.string.file_share),
                             onClick = { receivedFileActions.share(savedPath) },
-                            contentPadding = PaddingValues(horizontal = sp.sm, vertical = sp.xs),
-                        ) {
-                            Text(stringResource(Res.string.file_share), style = MaterialTheme.typography.labelSmall)
-                        }
+                            size = AppButtonSize.Compact,
+                        )
                     }
                 }
             }

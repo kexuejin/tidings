@@ -39,7 +39,18 @@ internal fun shouldNotify(
     isGroup: Boolean,
     mentioned: Boolean,
     localHour: Int,
+    /**
+     * 这条消息所属的**会话键**（私聊 = 对端 nodeId、群 = group:<id>）。
+     *
+     * 用来查「这个会话被用户静音了吗」。null = 调用方不知道会话键（预览 / 老调用点），
+     * 那就当没静音 —— 宁可多提醒一次，也不要因为查不到键就把通知吞掉。
+     */
+    convId: String? = null,
 ): Boolean {
+    // 会话级静音**优先于一切**：用户明确说过「这个会话别吵我」，
+    // 那么不论它是不是 agent、有没有 @ 我、当前是不是静默时段，都不该弹。
+    // 与全局开关的语义分开：全局开关是「我什么都不想收」，静音是「这一个别吵」。
+    if (convId != null && convId in settings.mutedConvIds) return false
     if (settings.notifyQuietHours && isQuietHour(localHour)) return false
     if (fromAgent) return settings.notifyAgentMessages
     if (isGroup && settings.notifyMentionOnly && !mentioned) return false

@@ -159,6 +159,19 @@ data class MessageUi(
      */
     val senderId: String? = null,
     /**
+     * 这条消息属于**哪个 agent 会话**（协议 `agentSessionId`，群转发的 agent 事件才带）。
+     *
+     * ## 为什么现在是字段而不是从 id 里猜
+     *
+     * 聊天流里那条「任务：xxx / 新会话」分段线原来靠 `id.startsWith("agent-ev-")` 判，
+     * 而那个前缀只有**桌面端本地构造消息**时才有；转发进群时没带过去，手机端落库用信封 UUID，
+     * 于是 `extractSessionId` 恒 null —— 桌面有分段线、手机一条都没有。
+     *
+     * 会话归属是**事实**，由协议携带（`agentSessionId` + `agentCursor`），
+     * 不再靠 id 字符串猜。null = 这条消息不属于任何 agent 会话（普通聊天）。
+     */
+    val agentSessionId: String? = null,
+    /**
      * 出站排队时为 [DeliveryState.Queued]，其余为 null —— 一个徽标，别的什么都不存。
      *
      * 这里**曾经**有一个 `outgoingEnvelope: String?`，存的是整条已编码信封，

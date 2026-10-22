@@ -71,7 +71,6 @@ import org.jetbrains.compose.resources.stringResource
 
 import app.relay.ui.theme.LocalAppSpacing
 import app.relay.app.model.MessageUi
-import app.relay.app.model.PeerUi
 
 /**
  * 输入栏能发起的一项能力（发文件、拍照、语音、位置…）。
@@ -125,6 +124,54 @@ internal fun insertEmoji(text: String, start: Int, end: Int, emoji: String): Pai
 }
 
 /**
+ * 一个 @ 候选。
+ *
+ * [token] 由**身份解析器**给（agent = `@KIND`，真人 = `@显示名`），输入栏**不自己拼**：
+ * 触发判据认的就是 kind，任何在这里另拼一次的写法都会造出「@ 了却叫不醒」。
+ * [note] 是候选行的副文案（目前只有「未获取到资料」），null = 不画。
+ */
+public data class MentionTarget(
+    val token: String,
+    val label: String,
+    val note: String? = null,
+    val isAgent: Boolean = false,
+)
+
+/**
+ * 在光标处（有选区则在选区处）插入一个 @ mention，返回新文本与插入后的光标位置。
+ *
+ * 抽成纯函数是为了两个**必须一致**的入口共用：输入栏里敲 `@` 弹出的候选列表，以及
+ * 群成员/气泡头像长按「直接 @」。两处各写一遍 token 拼装，迟早一处多一个空格、
+ * 一处少一个词边界，症状就是「@ 了没反应」。
+ *
+ * 已经刚敲出一个 `@` 时不再补第二个（与旧的内联实现同一行为）。
+ */
+internal fun insertMention(text: String, start: Int, end: Int, token: String): Pair<String, Int> {
+    val from = start.coerceIn(0, text.length)
+    val to = end.coerceIn(from, text.length)
+    val name = token.trim().removePrefix("@")
+    val alreadyTypedAt = from > 0 && text[from - 1] == '@'
+    val insertion = (if (alreadyTypedAt) "" else "@") + name + " "
+    val cursor = from + insertion.length
+
+    // **已经打完整个 token 时不再插一次。**
+    //
+    // 真身：在 `@panda` 后面再选一次 `@panda`，旧实现会得到 `@panda@panda ` ——
+    // 用户按了候选、结果 token 变成两截，`@` 也重复了。判据是"光标左侧已经恰好
+    // 是这个 token"（含其后的空格），那就只移动光标。
+    val typedToken = (if (alreadyTypedAt) "" else "@") + name
+    val leftOfCursor = text.substring(0, from)
+    if (leftOfCursor.endsWith(typedToken)) {
+        // 后面还没空格就补一个，已经有的不重复补。
+        val needsSpace = !text.substring(from).startsWith(" ")
+        val tail = if (needsSpace) text.substring(0, from) + " " + text.substring(from) else text
+        return tail to (if (needsSpace) from + 1 else from)
+    }
+
+    return text.substring(0, from) + insertion + text.substring(to) to cursor
+}
+
+/**
  * 移动端输入栏：一条药丸装输入框，右侧一颗圆形发送键，能力入口排在药丸里。
  *
  * 形态参考的是市场上 IM 的输入区，而不是桌面那张浮起卡片（桌面要拖拽改高、要键盘快捷键、
@@ -166,9 +213,12 @@ public fun MessageComposer(
     modifier: Modifier = Modifier,
     focusRequester: FocusRequester? = null,
     /**
-     * 可供 @ 提及的群成员列表（为空表示非群聊或无可选成员，不触发 @ 选单）。
+     * 可供 @ 提及的候选（为空表示非群聊或没有可提及的人，不触发 @ 选单）。
+     *
+     * 候选由**身份解析器**产出（[MentionTarget.token] 已经带 `@`），输入栏只负责插入，
+     * 不判断谁是 agent、更不自己把 agent kind 拼成名字。
      */
-    groupMembers: List<PeerUi> = emptyList(),
+    mentionTargets: List<MentionTarget> = emptyList(),
     /**
      * 当前正在引用的消息，为 null 时不显示引用预览条。
      */
@@ -304,7 +354,7 @@ public fun MessageComposer(
                         modifier = Modifier.padding(start = LocalAppSpacing.current.sm, end = LocalAppSpacing.current.xxs),
                     ) {
                         var mentionMenuOpen by remember { mutableStateOf(false) }
-                        val canMention = groupMembers.isNotEmpty()
+                        val canMention = mentionTargets.isNotEmpty()
 
                         val field = Modifier
                             .weight(1f)
@@ -354,38 +404,50 @@ public fun MessageComposer(
                             )
 
                             if (canMention) {
+                                // @所有人 的 token 也参与同一个插入函数（同一份拼装规则）。
+                                val mentionAllToken = "@" + stringResource(Res.string.chat_mention_all)
                                 DropdownMenu(
                                     expanded = mentionMenuOpen,
                                     onDismissRequest = { mentionMenuOpen = false },
                                     modifier = Modifier.heightIn(max = 240.dp),
                                 ) {
                                     DropdownMenuItem(
-                                        text = { Text("@${stringResource(Res.string.chat_mention_all)}") },
+                                        text = { Text(mentionAllToken) },
                                         onClick = {
                                             mentionMenuOpen = false
-                                            val currentText = fieldValue.text
-                                            val cursor = fieldValue.selection.end
-                                            val before = if (cursor > 0 && currentText.getOrNull(cursor - 1) == '@') currentText.substring(0, cursor) else "$currentText@"
-                                            val after = if (cursor < currentText.length) currentText.substring(cursor) else ""
-                                            val insertion = "all "
-                                            val nextText = before + insertion + after
-                                            val nextCursor = before.length + insertion.length
+                                            val (nextText, nextCursor) = insertMention(
+                                                text = fieldValue.text,
+                                                start = fieldValue.selection.min,
+                                                end = fieldValue.selection.max,
+                                                token = mentionAllToken,
+                                            )
                                             fieldValue = TextFieldValue(nextText, TextRange(nextCursor))
                                             onDraftChange(nextText)
                                         },
                                     )
-                                    groupMembers.forEach { m ->
+                                    mentionTargets.forEach { target ->
                                         DropdownMenuItem(
-                                            text = { Text("@${m.displayName}") },
+                                            text = {
+                                                Column {
+                                                    Text(target.token)
+                                                    // 资料没到时如实说一句；有名字的人不画副行（不制造噪声）。
+                                                    target.note?.let { note ->
+                                                        Text(
+                                                            text = note,
+                                                            style = MaterialTheme.typography.labelSmall,
+                                                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                                        )
+                                                    }
+                                                }
+                                            },
                                             onClick = {
                                                 mentionMenuOpen = false
-                                                val currentText = fieldValue.text
-                                                val cursor = fieldValue.selection.end
-                                                val before = if (cursor > 0 && currentText.getOrNull(cursor - 1) == '@') currentText.substring(0, cursor) else "$currentText@"
-                                                val after = if (cursor < currentText.length) currentText.substring(cursor) else ""
-                                                val insertion = "${m.displayName} "
-                                                val nextText = before + insertion + after
-                                                val nextCursor = before.length + insertion.length
+                                                val (nextText, nextCursor) = insertMention(
+                                                    text = fieldValue.text,
+                                                    start = fieldValue.selection.min,
+                                                    end = fieldValue.selection.max,
+                                                    token = target.token,
+                                                )
                                                 fieldValue = TextFieldValue(nextText, TextRange(nextCursor))
                                                 onDraftChange(nextText)
                                             },

@@ -230,6 +230,28 @@ public data class InboxWorkspaceUnitsUi(
     val isEmpty: Boolean get() = groups.isEmpty()
 
     /**
+     * 这些行里有没有**能给人看的内容** —— 空态判据必须用它，不能用 [isEmpty] 的反面。
+     *
+     * ## 为什么需要一个独立判据
+     *
+     * 派生层在「这台设备什么都没宣告、也一条会话帧都没收到」时**仍会造一行**
+     * 占位行（见构造处那条 `if (unitKeys.isEmpty()) unitKeys += WorkspaceRowKey(null, null)`，
+     * 意图是对的：设备不该整台消失）。但那一行 `wsTitle = null`、`sessionCount = 0`、
+     * `active = null` —— 它在界面上渲染成一张写着「未上报类型 / 对端还没宣告过工作区」的空卡。
+     *
+     * 于是 `isEmpty == false` ⇒ 空态被挡掉 ⇒ 屏幕上只剩一张**没有主体的卡**，
+     * 用户看到的就是「工作区页面空白，没有空屏效果」。
+     *
+     * 判据换成「有没有可视内容」之后，任何新增的占位行都不会再把空态挡掉。
+     */
+    val hasVisibleContent: Boolean
+        get() = groups.any { group ->
+            group.units.any { unit ->
+                unit.isWorkspace || unit.sessionCount > 0 || unit.active != null
+            }
+        }
+
+    /**
      * 段头右端那个数该用的单位词。
      *
      * 阶段二有工作区行，就写「N 个工作区」；阶段一只有 Agent 行，写「N 个 Agent」。

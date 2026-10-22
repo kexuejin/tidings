@@ -64,6 +64,7 @@ import org.jetbrains.compose.resources.stringResource
 
 import app.relay.ui.theme.LocalAppSpacing
 import app.relay.app.model.PeerUi
+import app.relay.core.protocol.ConvId
 
 
 @Composable
@@ -81,6 +82,13 @@ public fun ChatPane(
     onBack: (() -> Unit)? = null,
     /** 输入框预置草稿，只给截图门禁用（见 [ChatScreen.initialDraft]）。 */
     initialDraft: String = "",
+    /**
+     * 草稿的外部存放处 —— 与手机壳同一个槽（见 `ChatScreenChrome.onDraftChange`）。
+     *
+     * 桌面窗口常驻，没有这张表时"切走会话再回来"草稿就没了。
+     * null = 不接管（截图门禁那条路不需要保留草稿）。
+     */
+    onDraftChange: ((convId: String, text: String) -> Unit)? = null,
     selectedWsId: String? = null,
     activeSessionId: String? = null,
     onSelectAgentSession: ((String) -> Unit)? = null,
@@ -118,6 +126,8 @@ public fun ChatPane(
                 onAttachFile = controller::pickAndSendFiles,
                 onAcceptTransfer = controller::acceptTransfer,
                 onDeclineTransfer = controller::declineTransfer,
+                // 与手机端同一个入口：按原 id 重放，不新发一条。
+                onRetryMessage = controller::retryMessage,
                 // 撤回自己发出的、还在传的文件。以前这条没接：桌面上文件卡片根本没有取消按钮，
                 // 点了「发送」就只能等它自己失败（审计 P1-13）。移动端那条路一直有。
                 onCancelTransfer = controller::cancelTransfer,
@@ -128,6 +138,8 @@ public fun ChatPane(
                 onSendPk = controller::sendPk,
                 // 撤回与戳一碰：两条都是协议动作，手机与桌面共用同一个聊天页，所以一起接上。
                 onRecallMessage = controller::recall,
+                // 与手机壳同一个入口：只删本机，不动协议。
+                onDeleteMessage = controller::deleteMessage,
                 onForwardMessage = controller::forwardMessage,
                 // 群与 Agent 的判据在 ChatScreen 里面，这里不必再判一次。
                 onNudge = controller::nudge,
@@ -166,11 +178,19 @@ public fun ChatPane(
                 bubbleFraction = ContentWidths.BUBBLE_FRACTION_WIDE,
                 modifier = chatModifier,
                 initialDraft = initialDraft,
+                onDraftChange = onDraftChange,
                 composerSlot = if (peer == null) {
                     null
                 } else {
-                    { draft, onDraftChange ->
-                        DesktopComposer(peer, draft, onDraftChange, controller, isGroup = group != null)
+                    { draft, onDraftChange, mentions ->
+                        DesktopComposer(
+                            peer = peer,
+                            draft = draft,
+                            onDraftChange = onDraftChange,
+                            controller = controller,
+                            isGroup = group != null,
+                            mentionTargets = mentions,
+                        )
                     }
                 },
             ),
@@ -235,6 +255,7 @@ public fun ChatPane(
             GroupInfoDialog(
                 group = group,
                 selfNodeId = state.selfNodeId,
+                selfNick = state.settings.nick,
                 peers = state.peers,
                 memberOnlineCount = state.memberOnlineCount(group),
                 onDismiss = { showGroupInfo = false },
@@ -242,6 +263,20 @@ public fun ChatPane(
                 onRemoveMember = { member -> controller.removeGroupMember(group.groupId, member) },
                 onUpdateMeta = controller::updateGroupMeta,
                 onLeaveGroup = { controller.leaveGroup(group.groupId); onBack?.invoke() },
+                // **必须传身份上下文**：不传的话 `GroupInfoDialog` 会现建一份
+                // `(selfNodeId, peers, group)` —— 里面没有 `agentKindsByHost`，于是
+                // `groupParticipantRows` 找不到任何 agent，整个「入驻智能体」段落消失。
+                // 真机反馈：同一个群，手机端能看到 agent、桌面端一个都看不到。
+                identityContext = state.senderContext(ConvId.group(group.groupId)),
+                // 「添加智能体」= 暴露**本机项目**（与手机端同一份语义）。
+                localWorkspaces = state.agentWorkspaces.values.filter { it.peerId == state.selfNodeId },
+                onExposeWorkspaces = { chosen ->
+                    val before = group.virtualAgents.orEmpty()
+                        .filter { it.hostNodeId == state.selfNodeId }
+                        .mapNotNull { it.wsId }
+                    (before - chosen.toSet()).forEach { wsId -> controller.exposeWorkspace(group.groupId, wsId, null) }
+                    chosen.forEach { wsId -> controller.exposeWorkspace(group.groupId, wsId, null) }
+                },
             )
         }
         if (showClearConfirm) {

@@ -2,7 +2,6 @@
 
 package app.relay.ui.desktop
 
-import org.jetbrains.compose.resources.painterResource
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
@@ -15,34 +14,30 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
-import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.widthIn
-import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.CircleShape
-import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.HorizontalDivider
-import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
-import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.input.key.key
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
-import androidx.compose.ui.unit.dp
 
+import app.relay.feature.conversations.ConversationListDivider
+import app.relay.feature.conversations.ConversationListPanel
+import app.relay.feature.conversations.ConversationRow
 import app.relay.ui.EmptyState
 import app.relay.ui.LoadingState
-import app.relay.ui.components.PeerAvatar
-import app.relay.ui.components.StatusDot
+import app.relay.ui.components.AppButtonSize
+import app.relay.ui.components.AppOutlinedButton
+import app.relay.ui.components.AppTextButton
 import app.relay.ui.components.relativeTime
 import app.relay.generated.resources.Res
 import app.relay.generated.resources.action_clear_search
@@ -55,9 +50,6 @@ import app.relay.generated.resources.desktop_conv_empty_hint
 import app.relay.generated.resources.desktop_conv_go_pairing
 import app.relay.generated.resources.desktop_no_match
 import app.relay.generated.resources.desktop_conv_no_match_hint
-import app.relay.generated.resources.desktop_conv_no_preview
-import app.relay.generated.resources.chat_group_online
-import app.relay.generated.resources.desktop_conv_pending
 import app.relay.generated.resources.ic_folder
 import app.relay.generated.resources.desktop_peer_connected
 import app.relay.generated.resources.desktop_peer_last_seen
@@ -65,7 +57,6 @@ import app.relay.generated.resources.desktop_view_conversations
 import app.relay.generated.resources.workspace_group_label
 import app.relay.generated.resources.ic_close
 import app.relay.generated.resources.ic_groups
-import app.relay.ui.theme.IconSizes
 import org.jetbrains.compose.resources.stringResource
 
 import app.relay.ui.theme.LocalAppSpacing
@@ -153,6 +144,10 @@ public fun ConversationSidebar(
      * 历史消息全文搜索接口。null = 预览或不启用。
      */
     onSearchMessages: ((String) -> List<app.relay.app.MessageSearchResult>)? = null,
+    /** 长按会话行的三个动作（与手机壳同一份实现，见 ConversationRow）。 */
+    onTogglePin: ((String) -> Unit)? = null,
+    onToggleMute: ((String) -> Unit)? = null,
+    onDeleteConversation: ((String) -> Unit)? = null,
     onSearchGlobal: ((String) -> app.relay.app.GlobalSearchResult)? = null,
     /**
      * 冷启动时预置的全局搜索结果，只给截图门禁用。
@@ -194,20 +189,22 @@ public fun ConversationSidebar(
             Text(stringResource(Res.string.desktop_view_conversations), style = MaterialTheme.typography.labelLarge)
             Spacer(Modifier.weight(1f))
             onCreateWorkspaceGroup?.let { createWs ->
-                TextButton(onClick = createWs) {
-                    Icon(painterResource(Res.drawable.ic_folder), contentDescription = null, modifier = Modifier.size(IconSizes.Label))
-                    Spacer(Modifier.width(LocalAppSpacing.current.xs))
-                    Text(stringResource(Res.string.workspace_group_label), style = MaterialTheme.typography.labelMedium)
-                }
+                AppTextButton(
+                    text = stringResource(Res.string.workspace_group_label),
+                    onClick = createWs,
+                    size = AppButtonSize.Small,
+                    leadingIcon = Res.drawable.ic_folder,
+                )
             }
             onCreateGroup?.let { create ->
                 // 图标 + 文字都要：这一列里没有任何别的按钮，光一个「+」说不清是加会话
                 // 还是加节点。窄侧栏（240dp）也放得下两个字。
-                TextButton(onClick = create) {
-                    Icon(painterResource(Res.drawable.ic_groups), contentDescription = null, modifier = Modifier.size(IconSizes.Label))
-                    Spacer(Modifier.width(LocalAppSpacing.current.xs))
-                    Text(stringResource(Res.string.conv_new_group), style = MaterialTheme.typography.labelMedium)
-                }
+                AppTextButton(
+                    text = stringResource(Res.string.conv_new_group),
+                    onClick = create,
+                    size = AppButtonSize.Small,
+                    leadingIcon = Res.drawable.ic_groups,
+                )
             }
             Text("${sessions.size}", style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
         }
@@ -253,11 +250,11 @@ public fun ConversationSidebar(
                             modifier = Modifier.widthIn(max = EmptyLedeMaxWidth),
                         )
                         Spacer(Modifier.height(LocalAppSpacing.current.lg14))
-                        OutlinedButton(onClick = onClearQuery) {
-                            Icon(painterResource(Res.drawable.ic_close), contentDescription = null, modifier = Modifier.size(IconSizes.Label))
-                            Spacer(Modifier.width(LocalAppSpacing.current.sm6))
-                            Text(stringResource(Res.string.action_clear_search))
-                        }
+                        AppOutlinedButton(
+                            text = stringResource(Res.string.action_clear_search),
+                            onClick = onClearQuery,
+                            leadingIcon = Res.drawable.ic_close,
+                        )
                     }
                 }
             } else if (phase == NodePhase.Starting) {
@@ -276,134 +273,52 @@ public fun ConversationSidebar(
                 )
             }
         } else {
-            // 每条会话后面那根 `outlineVariant.copy(alpha = 0.4f)` 是**代码侧**的分组线：
-            // 原型左栏是 `.li{padding:7px 9px;border-radius:12px}` 的圆角行、`.sidelist` 只给
-            // `gap:1px`、**没有分隔线**（`prototype/relay.html:709/713`），而这里渲染的是整幅宽的
-            // ConversationRow，所以留一条 40% 的极淡线代替。它是 `--hair` 再压 40%，
-            // 不是 `--hair` 的另一种写法。
-            LazyColumn(Modifier.fillMaxSize()) {
-                items(sessions, key = { it.convId }) { conv ->
-                    ConversationRow(conv, conv.convId == selectedPeerId, now, onSelect)
-                    HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.4f))
-                }
-
-                if (searchResults.isNotEmpty()) {
-                    item(key = "desktop_section_search_messages") {
-                        Text(
-                            text = stringResource(Res.string.conv_search_messages_section),
-                            style = MaterialTheme.typography.labelSmall,
-                            color = MaterialTheme.colorScheme.primary,
-                            modifier = Modifier.padding(horizontal = LocalAppSpacing.current.lg14, vertical = LocalAppSpacing.current.sm),
-                        )
-                        HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.4f))
-                    }
-                    items(searchResults, key = { "desktop_msg_${it.id}" }) { result ->
-                        val conv = sessions.firstOrNull { it.convId == result.convId }
-                        val title = conv?.title ?: result.peerId
-                        DesktopMessageSearchRow(result, title, now, onSelect)
-                        HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.4f))
-                    }
-                }
-            }
-        }
-    }
-}
-
-@Composable
-public fun ConversationRow(conv: ConversationUi, selected: Boolean, now: Long, onSelect: (String) -> Unit) {
-    // 选中态用 primaryContainer：secondaryContainer 的暖色在本 App 里是
-    // 排队/告警的语义色，复用到普通选中会与「排队 1」这类 badge 撞色
-    // （深色主题下更明显，选中行会变成一整块褐色）。
-    val bg = if (selected) MaterialTheme.colorScheme.primaryContainer else Color.Transparent
-    val fg = if (selected) MaterialTheme.colorScheme.onPrimaryContainer else MaterialTheme.colorScheme.onSurface
-    val fgMuted = if (selected) {
-        MaterialTheme.colorScheme.onPrimaryContainer.copy(alpha = 0.75f)
-    } else {
-        MaterialTheme.colorScheme.onSurfaceVariant
-    }
-    Row(
-        Modifier
-            .fillMaxWidth()
-            .background(bg)
-            .clickable { onSelect(conv.convId) }
-            .padding(horizontal = LocalAppSpacing.current.lg14, vertical = LocalAppSpacing.current.md10),
-        verticalAlignment = Alignment.CenterVertically,
-        horizontalArrangement = Arrangement.spacedBy(LocalAppSpacing.current.md10),
-    ) {
-        Box {
-            PeerAvatar(conv.title, conv.isAgent, 38.dp, isGroup = conv.isGroup)
-            // 群不画在线点：那个点说的是"这一个对端在不在"，群是一群人，
-            // `ConversationUi.online` 对群恒 false —— 画出来就是每个群都显示离线。
-            if (!conv.isGroup) Box(Modifier.align(Alignment.BottomEnd)) { StatusDot(conv.online, 8.dp) }
-        }
-        Column(Modifier.weight(1f)) {
-            Text(
-                conv.title,
-                style = MaterialTheme.typography.bodyMedium,
-                color = fg,
-                fontWeight = FontWeight.Medium,
-                maxLines = 1,
-                overflow = TextOverflow.Ellipsis,
-            )
-            Text(
-                // 群把成员数接在预览后面（预览不删：它回答的是"这个群最近在说什么"）。
-                // 群行上真正影响决策的是"现在发出去有没有人立刻看到"，那是一个数字，
-                // 而 StatusDot 能表达的只有一个布尔。
-                text = buildString {
-                    append(conv.preview ?: stringResource(Res.string.desktop_conv_no_preview))
-                    if (conv.isGroup) {
-                        append(" · ")
-                        append(
-                            stringResource(
-                                Res.string.chat_group_online,
-                                conv.memberOnlineCount,
-                                conv.memberCount,
-                            ),
-                        )
+            // **这里不许再画分割线。**
+            //
+            // 以前有一条 `outlineVariant.copy(alpha = 0.4f)` 的 40% 淡线，理由是"原型左栏是
+            // `.li{border-radius:12px}` 的圆角行 + `.sidelist{gap:1px}`、没有分隔线，
+            // 而这里渲染的是整幅宽平铺行，所以留一条线代替"。**那是对症错了**：
+            // 缺的不是线，是圆角行本身。现在 `ConversationRow` 只有一份实现、并且按原型做了
+            // 行间分隔用**内缩**的极淡线（[ConversationListDivider]），不用通栏线：
+            // 行是 12dp 圆角，通栏会顶到圆角上；内缩到文字左沿才与文字对齐。
+            // 手机壳用同一条线、同一个内缩量（见 ConversationsScreen），两侧必须一致。
+            // 行的容器是**共享组件**（`ConversationListPanel`）—— 手机屏用的是同一个。
+            // 这里只提供外壳：选中态、以及尾部那一段"搜到的消息"（插槽）。
+            ConversationListPanel(
+                feed = sessions.map { app.relay.feature.conversations.InboxFeedItem.Conversation(it) },
+                now = now,
+                onOpenChat = onSelect,
+                onTogglePin = onTogglePin,
+                onToggleMute = onToggleMute,
+                onDeleteConversation = onDeleteConversation,
+                modifier = Modifier.fillMaxSize(),
+                selectedConvId = selectedPeerId,
+                trailingContent = if (searchResults.isEmpty()) {
+                    null
+                } else {
+                    {
+                        item(key = "desktop_section_search_messages") {
+                            Text(
+                                text = stringResource(Res.string.conv_search_messages_section),
+                                style = MaterialTheme.typography.labelSmall,
+                                color = MaterialTheme.colorScheme.primary,
+                                modifier = Modifier.padding(
+                                    horizontal = LocalAppSpacing.current.lg14,
+                                    vertical = LocalAppSpacing.current.sm,
+                                ),
+                            )
+                            ConversationListDivider()
+                        }
+                        items(searchResults, key = { "desktop_msg_${it.id}" }) { result ->
+                            val conv = sessions.firstOrNull { it.convId == result.convId }
+                            val title = conv?.title ?: result.peerId
+                            DesktopMessageSearchRow(result, title, now, onSelect)
+                            // 同一个内缩量：搜索结果与上方的会话行属于同一条列表。
+                            ConversationListDivider()
+                        }
                     }
                 },
-                style = MaterialTheme.typography.bodySmall,
-                color = fgMuted,
-                maxLines = 1,
-                overflow = TextOverflow.Ellipsis,
             )
-        }
-        Column(horizontalAlignment = Alignment.End) {
-            Text(
-                // 与手机侧 `ConversationRow` 同一口径：只用**最近一条消息**的时间。
-                // `conv.at` 只是兼容兜底值（没消息时会退回对端 lastSeenAt / 群 updatedTs），
-                // 局域网发现一刷新就变成「刚刚」—— 那正是"没聊过的会话一直顶在最上面"的一半。
-                // 没聊过（lastMessageAt == 0）就整格留空，不拿 presenceAt 去冒充活跃。
-                text = if (conv.lastMessageAt > 0) relativeTime(conv.lastMessageAt, now) else "",
-                style = MaterialTheme.typography.labelSmall,
-                color = fgMuted,
-            )
-            Row(horizontalArrangement = Arrangement.spacedBy(LocalAppSpacing.current.xs), verticalAlignment = Alignment.CenterVertically) {
-                if (conv.pendingCount > 0) {
-                    // 排队徽标取 secondaryContainer，不取 tertiaryContainer。
-                    // 原型里 --queued-c/--on-queued-c 就是这两个角色（Accents.kt 的 KDoc 与
-                    // design-spec.json 的 colorNotes 都这么写），而 tertiaryContainer 本 App
-                    // 从没赋过值 —— 取它等于取 Material 基线的粉 #FFD8E4/#633B48。
-                    Text(
-                        stringResource(Res.string.desktop_conv_pending, conv.pendingCount),
-                        style = MaterialTheme.typography.labelSmall,
-                        color = MaterialTheme.colorScheme.onSecondaryContainer,
-                        modifier = Modifier
-                            .background(MaterialTheme.colorScheme.secondaryContainer, RoundedCornerShape(4.dp))
-                            .padding(horizontal = LocalAppSpacing.current.xs),
-                    )
-                }
-                if (conv.unread > 0) {
-                    Text(
-                        "${conv.unread}",
-                        style = MaterialTheme.typography.labelSmall,
-                        color = MaterialTheme.colorScheme.onPrimary,
-                        modifier = Modifier
-                            .background(MaterialTheme.colorScheme.primary, RoundedCornerShape(8.dp))
-                            .padding(horizontal = 5.dp),
-                    )
-                }
-            }
         }
     }
 }

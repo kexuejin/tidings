@@ -394,22 +394,22 @@
           "agentAccent": {
             "sites": 1,
             "status": "enforced",
-            "first": "composeApp/src/commonMain/kotlin/app/relay/ui/components/Common.kt:182"
+            "first": "composeApp/src/commonMain/kotlin/app/relay/ui/components/Common.kt:186"
           },
           "agentAccentContainer": {
             "sites": 2,
             "status": "enforced",
-            "first": "composeApp/src/commonMain/kotlin/app/relay/ui/components/Common.kt:176"
+            "first": "composeApp/src/commonMain/kotlin/app/relay/ui/components/Common.kt:180"
           },
           "agentAccentText": {
             "sites": 1,
             "status": "enforced",
-            "first": "composeApp/src/commonMain/kotlin/app/relay/ui/components/Common.kt:234"
+            "first": "composeApp/src/commonMain/kotlin/app/relay/ui/components/Common.kt:240"
           },
           "background": {
-            "sites": 9,
+            "sites": 11,
             "status": "enforced",
-            "first": "composeApp/src/commonMain/kotlin/app/relay/ui/desktop/CabinetPane.kt:192"
+            "first": "composeApp/src/commonMain/kotlin/app/relay/ui/desktop/CabinetPane.kt:134"
           },
           "badge": {
             "sites": 3,
@@ -421,14 +421,14 @@
             "status": "pending"
           },
           "error": {
-            "sites": 44,
+            "sites": 47,
             "status": "enforced",
-            "first": "composeApp/src/commonMain/kotlin/app/relay/ui/desktop/DesktopChrome.kt:346"
+            "first": "composeApp/src/commonMain/kotlin/app/relay/ui/desktop/DesktopChrome.kt:347"
           },
           "errorContainer": {
-            "sites": 12,
+            "sites": 11,
             "status": "enforced",
-            "first": "composeApp/src/commonMain/kotlin/app/relay/ui/components/Common.kt:403"
+            "first": "composeApp/src/commonMain/kotlin/app/relay/ui/components/Common.kt:410"
           },
           "inverseOnSurface": {
             "sites": 0,
@@ -452,24 +452,24 @@
             "first": "composeApp/src/commonMain/kotlin/app/relay/ui/desktop/DesktopNavigation.kt:192"
           },
           "onError": {
-            "sites": 2,
+            "sites": 3,
             "status": "enforced",
-            "first": "composeApp/src/commonMain/kotlin/app/relay/ui/components/VoiceRecordDialog.kt:160"
+            "first": "composeApp/src/commonMain/kotlin/app/relay/ui/components/AppButtons.kt:212"
           },
           "onErrorContainer": {
-            "sites": 17,
+            "sites": 16,
             "status": "enforced",
-            "first": "composeApp/src/commonMain/kotlin/app/relay/ui/desktop/DesktopSettingsChrome.kt:462"
+            "first": "composeApp/src/commonMain/kotlin/app/relay/ui/desktop/DesktopSettingsChrome.kt:461"
           },
           "onPrimary": {
-            "sites": 14,
+            "sites": 11,
             "status": "enforced",
-            "first": "composeApp/src/commonMain/kotlin/app/relay/ui/desktop/CabinetPane.kt:465"
+            "first": "composeApp/src/commonMain/kotlin/app/relay/ui/desktop/DesktopChrome.kt:496"
           },
           "onPrimaryContainer": {
-            "sites": 33,
+            "sites": 31,
             "status": "enforced",
-            "first": "composeApp/src/commonMain/kotlin/app/relay/ui/desktop/DesktopChrome.kt:494"
+            "first": "composeApp/src/commonMain/kotlin/app/relay/ui/desktop/DesktopChrome.kt:497"
           },
           "onSecondary": {
             "sites": 0,
@@ -478,15 +478,15 @@
           "onSecondaryContainer": {
             "sites": 14,
             "status": "enforced",
-            "first": "composeApp/src/commonMain/kotlin/app/relay/ui/desktop/DesktopConversationWidgets.kt:389"
+            "first": "composeApp/src/commonMain/kotlin/app/relay/ui/desktop/DesktopConversationsPane.kt:452"
           },
           "onSurface": {
-            "sites": 74,
+            "sites": 70,
             "status": "enforced",
-            "first": "composeApp/src/commonMain/kotlin/app/relay/ui/desktop/DesktopChrome.kt:495"
+            "first": "composeApp/src/commonMain/kotlin/app/relay/ui/desktop/DesktopChrome.kt:498"
           },
           "onSurfaceVariant": {
-            "sites": 395,
+            "sites": 392,
             "status": "enforced",
             "first": "composeApp/src/commonMain/kotlin/app/relay/ui/AppStates.kt:104"
           },
@@ -495,53 +495,53 @@
             "status": "pending"
           },
           "online": {
-            "sites": 10,
+            "sites": 8,
             "status": "enforced",
-            "first": "composeApp/src/commonMain/kotlin/app/relay/ui/desktop/DesktopNodesPane.kt:345"
+            "first": "composeApp/src/commonMain/kotlin/app/relay/ui/desktop/DesktopNodesPane.kt:351"
           },
           "outline": {
-            "sites": 22,
+            "sites": 21,
             "status": "enforced",
-            "first": "composeApp/src/commonMain/kotlin/app/relay/ui/desktop/CabinetPane.kt:785"
+            "first": "composeApp/src/commonMain/kotlin/app/relay/ui/desktop/DesktopComposer.kt:251"
           },
           "outlineVariant": {
-            "sites": 50,
+            "sites": 48,
             "status": "enforced",
-            "first": "composeApp/src/commonMain/kotlin/app/relay/ui/desktop/DesktopChatPane.kt:232"
+            "first": "composeApp/src/commonMain/kotlin/app/relay/ui/desktop/DesktopChatPane.kt:252"
           },
           "primary": {
-            "sites": 97,
+            "sites": 93,
             "status": "enforced",
             "first": "composeApp/src/commonMain/kotlin/app/relay/ui/SectionCard.kt:72"
           },
           "primaryContainer": {
-            "sites": 40,
+            "sites": 37,
             "status": "enforced",
-            "first": "composeApp/src/commonMain/kotlin/app/relay/ui/desktop/CabinetPane.kt:278"
+            "first": "composeApp/src/commonMain/kotlin/app/relay/ui/desktop/CabinetPane.kt:237"
           },
           "scrim": {
             "sites": 1,
             "status": "enforced",
-            "first": "desktopApp/src/main/kotlin/app/relay/desktop/DesktopHosting.kt:555"
+            "first": "desktopApp/src/main/kotlin/app/relay/desktop/DesktopHosting.kt:648"
           },
           "secondary": {
             "sites": 0,
             "status": "pending"
           },
           "secondaryContainer": {
-            "sites": 9,
+            "sites": 8,
             "status": "enforced",
-            "first": "composeApp/src/commonMain/kotlin/app/relay/ui/desktop/CabinetPane.kt:319"
+            "first": "composeApp/src/commonMain/kotlin/app/relay/ui/desktop/CabinetPane.kt:278"
           },
           "surface": {
-            "sites": 113,
+            "sites": 102,
             "status": "enforced",
-            "first": "composeApp/src/commonMain/kotlin/app/relay/App.kt:148"
+            "first": "composeApp/src/commonMain/kotlin/app/relay/App.kt:155"
           },
           "surface3": {
-            "sites": 7,
+            "sites": 6,
             "status": "enforced",
-            "first": "composeApp/src/commonMain/kotlin/app/relay/ui/desktop/DesktopSettingsChrome.kt:272"
+            "first": "composeApp/src/commonMain/kotlin/app/relay/ui/desktop/DesktopSettingsChrome.kt:271"
           },
           "surfaceBright": {
             "sites": 0,
@@ -550,7 +550,7 @@
           "surfaceContainer": {
             "sites": 8,
             "status": "enforced",
-            "first": "composeApp/src/commonMain/kotlin/app/relay/ui/desktop/DesktopNodesPane.kt:862"
+            "first": "composeApp/src/commonMain/kotlin/app/relay/ui/desktop/DesktopNodesPane.kt:610"
           },
           "surfaceContainerHigh": {
             "sites": 0,
@@ -559,12 +559,12 @@
           "surfaceContainerHighest": {
             "sites": 5,
             "status": "enforced",
-            "first": "composeApp/src/commonMain/kotlin/app/relay/ui/desktop/DesktopChrome.kt:486"
+            "first": "composeApp/src/commonMain/kotlin/app/relay/ui/desktop/DesktopChrome.kt:489"
           },
           "surfaceContainerLow": {
             "sites": 2,
             "status": "enforced",
-            "first": "composeApp/src/commonMain/kotlin/app/relay/ui/desktop/DesktopChrome.kt:256"
+            "first": "composeApp/src/commonMain/kotlin/app/relay/ui/desktop/DesktopChrome.kt:257"
           },
           "surfaceContainerLowest": {
             "sites": 0,
@@ -579,9 +579,9 @@
             "status": "pending"
           },
           "surfaceVariant": {
-            "sites": 79,
+            "sites": 67,
             "status": "enforced",
-            "first": "composeApp/src/commonMain/kotlin/app/relay/ui/desktop/CabinetPane.kt:278"
+            "first": "composeApp/src/commonMain/kotlin/app/relay/ui/desktop/CabinetPane.kt:237"
           },
           "tertiary": {
             "sites": 2,
@@ -593,17 +593,17 @@
           "bodyLarge": {
             "sites": 6,
             "status": "enforced",
-            "first": "composeApp/src/commonMain/kotlin/app/relay/ui/components/MessageComposer.kt:334"
+            "first": "composeApp/src/commonMain/kotlin/app/relay/ui/components/MessageComposer.kt:384"
           },
           "bodyMedium": {
-            "sites": 98,
+            "sites": 97,
             "status": "enforced",
             "first": "composeApp/src/commonMain/kotlin/app/relay/ui/AppStates.kt:73"
           },
           "bodySmall": {
-            "sites": 150,
+            "sites": 141,
             "status": "enforced",
-            "first": "composeApp/src/commonMain/kotlin/app/relay/ui/desktop/CabinetPane.kt:329"
+            "first": "composeApp/src/commonMain/kotlin/app/relay/ui/desktop/CabinetPane.kt:288"
           },
           "displayLarge": {
             "sites": 0,
@@ -624,114 +624,114 @@
           "headlineMedium": {
             "sites": 2,
             "status": "enforced",
-            "first": "composeApp/src/commonMain/kotlin/app/relay/ui/components/PkPalette.kt:239"
+            "first": "composeApp/src/commonMain/kotlin/app/relay/ui/components/PkPalette.kt:237"
           },
           "headlineSmall": {
-            "sites": 6,
+            "sites": 5,
             "status": "enforced",
-            "first": "composeApp/src/commonMain/kotlin/app/relay/ui/desktop/CabinetPane.kt:379"
+            "first": "composeApp/src/commonMain/kotlin/app/relay/ui/components/PkPalette.kt:190"
           },
           "labelLarge": {
             "sites": 15,
             "status": "enforced",
-            "first": "composeApp/src/commonMain/kotlin/app/relay/ui/desktop/DesktopChrome.kt:510"
+            "first": "composeApp/src/commonMain/kotlin/app/relay/ui/desktop/DesktopChrome.kt:513"
           },
           "labelMedium": {
-            "sites": 47,
+            "sites": 40,
             "status": "enforced",
-            "first": "composeApp/src/commonMain/kotlin/app/relay/ui/desktop/CabinetPane.kt:306"
+            "first": "composeApp/src/commonMain/kotlin/app/relay/ui/desktop/CabinetPane.kt:265"
           },
           "labelSmall": {
-            "sites": 294,
+            "sites": 267,
             "status": "enforced",
-            "first": "composeApp/src/commonMain/kotlin/app/relay/ui/desktop/CabinetPane.kt:293"
+            "first": "composeApp/src/commonMain/kotlin/app/relay/ui/desktop/CabinetPane.kt:252"
           },
           "titleLarge": {
             "sites": 6,
             "status": "enforced",
-            "first": "composeApp/src/commonMain/kotlin/app/relay/ui/components/PkPalette.kt:127"
+            "first": "composeApp/src/commonMain/kotlin/app/relay/ui/components/PkPalette.kt:126"
           },
           "titleMedium": {
-            "sites": 31,
+            "sites": 29,
             "status": "enforced",
             "first": "composeApp/src/commonMain/kotlin/app/relay/ui/AppStates.kt:96"
           },
           "titleSmall": {
-            "sites": 32,
+            "sites": 28,
             "status": "enforced",
             "first": "composeApp/src/commonMain/kotlin/app/relay/ui/SectionCard.kt:79"
           }
         },
         "spacing": {
           "lg": {
-            "sites": 96,
+            "sites": 80,
             "status": "enforced",
             "first": "composeApp/src/commonMain/kotlin/app/relay/ui/AppStates.kt:63"
           },
           "lg14": {
-            "sites": 44,
+            "sites": 46,
             "status": "enforced",
-            "first": "composeApp/src/commonMain/kotlin/app/relay/ui/desktop/DesktopConversationWidgets.kt:190"
+            "first": "composeApp/src/commonMain/kotlin/app/relay/ui/desktop/DesktopConversationWidgets.kt:186"
           },
           "md": {
-            "sites": 95,
+            "sites": 87,
             "status": "enforced",
             "first": "composeApp/src/commonMain/kotlin/app/relay/ui/AppStates.kt:64"
           },
           "md10": {
-            "sites": 52,
+            "sites": 43,
             "status": "enforced",
-            "first": "composeApp/src/commonMain/kotlin/app/relay/ui/desktop/CabinetPane.kt:284"
+            "first": "composeApp/src/commonMain/kotlin/app/relay/ui/desktop/CabinetPane.kt:243"
           },
           "olg11": {
             "sites": 3,
             "status": "enforced",
-            "first": "composeApp/src/commonMain/kotlin/app/relay/ui/desktop/DesktopTransferLogPane.kt:196"
+            "first": "composeApp/src/commonMain/kotlin/app/relay/ui/desktop/DesktopTransferLogPane.kt:195"
           },
           "olg13": {
             "sites": 8,
             "status": "enforced",
-            "first": "composeApp/src/commonMain/kotlin/app/relay/ui/desktop/DesktopSettingsChrome.kt:195"
+            "first": "composeApp/src/commonMain/kotlin/app/relay/ui/desktop/DesktopSettingsChrome.kt:194"
           },
           "osm7": {
             "sites": 2,
             "status": "enforced",
-            "first": "composeApp/src/commonMain/kotlin/app/relay/ui/desktop/DesktopComposer.kt:469"
+            "first": "composeApp/src/commonMain/kotlin/app/relay/ui/desktop/DesktopComposer.kt:567"
           },
           "osm9": {
-            "sites": 7,
+            "sites": 5,
             "status": "enforced",
-            "first": "composeApp/src/commonMain/kotlin/app/relay/ui/desktop/DesktopSettingsChrome.kt:240"
+            "first": "composeApp/src/commonMain/kotlin/app/relay/ui/desktop/DesktopSettingsChrome.kt:239"
           },
           "oxs3": {
             "sites": 3,
             "status": "enforced",
-            "first": "composeApp/src/commonMain/kotlin/app/relay/ui/desktop/DesktopSettingsChrome.kt:557"
+            "first": "composeApp/src/commonMain/kotlin/app/relay/ui/desktop/DesktopSettingsChrome.kt:551"
           },
           "oxs5": {
-            "sites": 8,
+            "sites": 5,
             "status": "enforced",
-            "first": "composeApp/src/commonMain/kotlin/app/relay/ui/desktop/DesktopSettingsChrome.kt:473"
+            "first": "composeApp/src/commonMain/kotlin/app/relay/ui/desktop/DesktopTransferLogPane.kt:101"
           },
           "sm": {
-            "sites": 132,
+            "sites": 117,
             "status": "enforced",
-            "first": "composeApp/src/commonMain/kotlin/app/relay/ui/desktop/CabinetPane.kt:310"
+            "first": "composeApp/src/commonMain/kotlin/app/relay/ui/desktop/CabinetPane.kt:269"
           },
           "sm6": {
-            "sites": 60,
+            "sites": 52,
             "status": "enforced",
             "first": "composeApp/src/commonMain/kotlin/app/relay/ui/SectionCard.kt:75"
           },
           "xl": {
-            "sites": 16,
+            "sites": 14,
             "status": "enforced",
             "first": "composeApp/src/commonMain/kotlin/app/relay/ui/AppStates.kt:91"
           },
           "xs": {
-            "sites": 114,
+            "sites": 96,
             "status": "enforced",
-            "first": "composeApp/src/commonMain/kotlin/app/relay/ui/desktop/CabinetPane.kt:314"
+            "first": "composeApp/src/commonMain/kotlin/app/relay/ui/desktop/CabinetPane.kt:273"
           },
           "xxl": {
             "sites": 3,
@@ -739,20 +739,21 @@
             "first": "composeApp/src/commonMain/kotlin/app/relay/ui/desktop/DesktopGlobalSearch.kt:143"
           },
           "xxs": {
-            "sites": 36,
+            "sites": 33,
             "status": "enforced",
             "first": "composeApp/src/commonMain/kotlin/app/relay/ui/AppStates.kt:68"
           },
           "xxxl": {
-            "sites": 0,
-            "status": "pending"
+            "sites": 2,
+            "status": "enforced",
+            "first": "composeApp/src/commonMain/kotlin/app/relay/ui/components/AppButtons.kt:343"
           }
         },
         "shape": {
           "extraLarge": {
-            "sites": 2,
+            "sites": 1,
             "status": "enforced",
-            "first": "composeApp/src/commonMain/kotlin/app/relay/ui/components/MessageComposer.kt:550"
+            "first": "composeApp/src/commonMain/kotlin/app/relay/ui/components/MessageComposer.kt:612"
           },
           "extraSmall": {
             "sites": 0,
@@ -761,29 +762,29 @@
           "large": {
             "sites": 11,
             "status": "enforced",
-            "first": "composeApp/src/commonMain/kotlin/app/relay/ui/components/MessageComposer.kt:605"
+            "first": "composeApp/src/commonMain/kotlin/app/relay/ui/components/MessageComposer.kt:667"
           },
           "medium": {
-            "sites": 69,
+            "sites": 65,
             "status": "enforced",
-            "first": "composeApp/src/commonMain/kotlin/app/relay/ui/desktop/CabinetPane.kt:402"
+            "first": "composeApp/src/commonMain/kotlin/app/relay/ui/desktop/DesktopChrome.kt:440"
           },
           "small": {
             "sites": 14,
             "status": "enforced",
-            "first": "composeApp/src/commonMain/kotlin/app/relay/ui/desktop/DesktopHistorySearch.kt:356"
+            "first": "composeApp/src/commonMain/kotlin/app/relay/ui/desktop/DesktopHistorySearch.kt:358"
           }
         },
         "elevation": {
           "card": {
             "sites": 23,
             "status": "enforced",
-            "first": "composeApp/src/commonMain/kotlin/app/relay/ui/desktop/DesktopNodesPane.kt:761"
+            "first": "composeApp/src/commonMain/kotlin/app/relay/ui/desktop/DesktopNodesPane.kt:611"
           },
           "floating": {
             "sites": 7,
             "status": "enforced",
-            "first": "composeApp/src/commonMain/kotlin/app/relay/ui/desktop/DesktopChrome.kt:402"
+            "first": "composeApp/src/commonMain/kotlin/app/relay/ui/desktop/DesktopChrome.kt:405"
           },
           "sheet": {
             "sites": 1,
@@ -793,41 +794,41 @@
         },
         "iconSizes": {
           "badge": {
-            "sites": 2,
+            "sites": 3,
             "status": "enforced",
-            "first": "composeApp/src/commonMain/kotlin/app/relay/ui/desktop/CabinetPane.kt:795"
+            "first": "composeApp/src/commonMain/kotlin/app/relay/ui/desktop/DesktopNodesPane.kt:513"
           },
           "body": {
-            "sites": 23,
+            "sites": 20,
             "status": "enforced",
-            "first": "composeApp/src/commonMain/kotlin/app/relay/ui/desktop/CabinetPane.kt:713"
+            "first": "composeApp/src/commonMain/kotlin/app/relay/ui/desktop/DesktopChrome.kt:246"
           },
           "hero": {
             "sites": 2,
             "status": "enforced",
-            "first": "composeApp/src/commonMain/kotlin/app/relay/ui/desktop/DesktopComposer.kt:527"
+            "first": "composeApp/src/commonMain/kotlin/app/relay/ui/desktop/DesktopComposer.kt:625"
           },
           "inline": {
-            "sites": 13,
+            "sites": 11,
             "status": "enforced",
             "first": "composeApp/src/commonMain/kotlin/app/relay/ui/SectionCard.kt:73"
           },
           "label": {
-            "sites": 31,
+            "sites": 24,
             "status": "enforced",
-            "first": "composeApp/src/commonMain/kotlin/app/relay/ui/desktop/DesktopChrome.kt:233"
+            "first": "composeApp/src/commonMain/kotlin/app/relay/ui/desktop/DesktopChrome.kt:234"
           },
           "title": {
-            "sites": 9,
+            "sites": 8,
             "status": "enforced",
-            "first": "composeApp/src/commonMain/kotlin/app/relay/ui/desktop/CabinetPane.kt:435"
+            "first": "composeApp/src/commonMain/kotlin/app/relay/ui/components/GroupCreateDialog.kt:215"
           }
         },
         "shapeRoles": {
           "avatar": {
-            "sites": 12,
+            "sites": 9,
             "status": "enforced",
-            "first": "composeApp/src/commonMain/kotlin/app/relay/ui/desktop/DesktopChrome.kt:254"
+            "first": "composeApp/src/commonMain/kotlin/app/relay/ui/desktop/DesktopChrome.kt:255"
           },
           "dayCell": {
             "sites": 0,
@@ -836,37 +837,38 @@
           "listCard": {
             "sites": 1,
             "status": "enforced",
-            "first": "composeApp/src/commonMain/kotlin/app/relay/ui/desktop/DesktopConversationsPane.kt:560"
+            "first": "composeApp/src/commonMain/kotlin/app/relay/ui/desktop/DesktopConversationsPane.kt:587"
           }
         },
         "weights": {
           "emphasis": {
-            "sites": 0,
-            "status": "pending"
+            "sites": 6,
+            "status": "enforced",
+            "first": "composeApp/src/commonMain/kotlin/app/relay/feature/chat/MarkdownMessage.kt:56"
           }
         }
       },
       "adoption": {
         "colors": "29/42",
         "typography": "11/15",
-        "spacing": "16/17",
+        "spacing": "17/17",
         "shape": "4/5",
         "elevation": "3/3",
         "iconSizes": "6/6",
         "shapeRoles": "2/3",
-        "weights": "0/1"
+        "weights": "1/1"
       },
       "shapeInventory": {
         "rawRoundedCornerShape": {
-          "5": 4,
           "14": 2,
-          "6": 15,
-          "4": 12,
-          "8": 17,
-          "12": 23,
+          "6": 12,
+          "12": 21,
+          "8": 16,
+          "4": 11,
           "22": 2,
+          "5": 3,
           "20": 1,
-          "10": 3,
+          "10": 4,
           "9": 1,
           "16": 2,
           "2": 2,
@@ -879,9 +881,9 @@
         },
         "circleShapeSites": 73,
         "offScale": {
-          "6": 15,
-          "5": 4,
-          "10": 3,
+          "6": 12,
+          "10": 4,
+          "5": 3,
           "14": 2,
           "22": 2,
           "2": 2,
@@ -892,21 +894,21 @@
         "note": "offScale = 没有任何 M3 槽位能表达的半径，这些点只能靠字面量写出来，是「看着不精致」最直接的一类证据。"
       },
       "debt": {
-        "shape": 84,
+        "shape": 77,
         "typography": 6,
         "color": 13,
         "elevation": 6,
-        "iconSizes": 53,
-        "dimension": 144,
-        "spacing": 120
+        "iconSizes": 42,
+        "dimension": 131,
+        "spacing": 111
       },
       "shapeSemantics": {
         "bubble": {
           "radiusDp": 12,
           "scaleSlot": "medium",
           "mode": "slot",
-          "rawSites": 23,
-          "slotSites": 69,
+          "rawSites": 21,
+          "slotSites": 65,
           "circleShapeSites": 0
         },
         "card": {
@@ -921,8 +923,8 @@
           "radiusDp": 12,
           "scaleSlot": "medium",
           "mode": "slot",
-          "rawSites": 23,
-          "slotSites": 69,
+          "rawSites": 21,
+          "slotSites": 65,
           "circleShapeSites": 0
         },
         "chip": {
@@ -938,7 +940,7 @@
           "scaleSlot": "extraLarge",
           "mode": "m3-internal",
           "rawSites": 0,
-          "slotSites": 2,
+          "slotSites": 1,
           "circleShapeSites": 0
         }
       }
@@ -1146,6 +1148,93 @@
         "stress": [
           "多分类滚动",
           "深色主题"
+        ]
+      },
+      {
+        "id": "AppButtons",
+        "file": "composeApp/src/commonMain/kotlin/app/relay/ui/components/AppButtons.kt",
+        "screens": [
+          "conversations",
+          "chat",
+          "nodes",
+          "agents",
+          "settings",
+          "settings-more",
+          "cabinet",
+          "files",
+          "remote-view"
+        ],
+        "states": [
+          "normal",
+          "dark",
+          "long_text",
+          "font2x"
+        ],
+        "previews": [
+          "ComponentsButtonsPhonePreview"
+        ],
+        "expectGroups": [
+          "colors",
+          "shape",
+          "typography",
+          "spacing",
+          "iconSizes"
+        ],
+        "requiredTokens": [
+          "typography.labelLarge",
+          "typography.labelMedium",
+          "spacing.lg14",
+          "spacing.osm9",
+          "spacing.md10",
+          "spacing.sm6",
+          "spacing.xxxl",
+          "shape.medium",
+          "colors.primary",
+          "colors.onPrimary",
+          "colors.error",
+          "colors.onError",
+          "colors.onErrorContainer",
+          "colors.onSurface",
+          "colors.outline",
+          "colors.onSurfaceVariant"
+        ],
+        "stress": [
+          "超长文案",
+          "深色主题",
+          "大字号",
+          "禁用态"
+        ],
+        "note": "iconSizes 刻意不进 requiredTokens：:designSpecDrift 的 token 证据扫描（_COMPONENT_PROBES）**没有 iconSizes 探针**，声明了必然判无证据行。这是量具的缺口，不是本组件的问题 —— 组件里确实用了 IconSizes.Label。"
+      },
+      {
+        "id": "PressableSurface",
+        "file": "composeApp/src/commonMain/kotlin/app/relay/ui/components/PressableSurface.kt",
+        "screens": [
+          "conversations",
+          "chat",
+          "nodes",
+          "agents",
+          "settings",
+          "settings-more",
+          "cabinet",
+          "files"
+        ],
+        "states": [
+          "normal",
+          "dark",
+          "long_text",
+          "font2x"
+        ],
+        "previews": [],
+        "expectGroups": [
+          "shape"
+        ],
+        "requiredTokens": [
+          "shape.medium"
+        ],
+        "stress": [
+          "深色主题",
+          "大字号"
         ]
       }
     ]
@@ -2047,7 +2136,8 @@
       "Window",
       "Dialog",
       "Sheet",
-      "Adaptive"
+      "Adaptive",
+      "Components"
     ],
     "renderTargets": {
       "note": "归属的第一层判据：预览函数**实际渲染了哪个屏**，由函数体里调用了哪个屏级 Composable 机械判定（design_contract.scan_render_targets）。名字前缀是第二层，只在渲染目标判不出时使用。加这一层的原因：预览函数名会撒谎——实测 139 个预览里 58 个能判定唯一渲染目标，其中 4 个名字认领的屏 ≠ 实际渲染的屏（ChatFilesPhonePreview / ChatFolderPhonePreview / ChatTransferFailedPhonePreview / ChatTransferResumePhonePreview，体内都是 ChatScreen，却因 files 声明了 ChatFiles/ChatFolder/ChatTransfer 前缀而被判给 files）。名字前缀分不出「作者故意写的别名」与「意外嵌套」（settings ← SettingsMore* 就是意外嵌套），渲染目标可以。含 DesktopShell( 的帧一律跳过：桌面壳一壳多视图，Desk(filesView = true) 与 Desk() 是同一个 Composable，渲染目标不是屏的信号。**2026-10-10 收口**：那 4 个撒谎的名字不再借给 files —— 已从 `screenPrefixes.files` 删掉 ChatFiles/ChatFolder/ChatTransfer。当初保留它们是为了「别让 files 的覆盖掉」，而那两条覆盖本来就不是 files 的证据：真正钉 files 的 DeskFiles* 帧一直都在（DeskFilesExpanded/Folder/Resume/Banner），只是词表 `normal` 的锚定正则看不见 Desk/Tablet 前缀、`error` 正则看不见帧名里的 Banner。删掉错挂前缀后 files 六槽全部由 DeskFiles* 自己撑住，见第二十九个洞。",
@@ -2202,7 +2292,8 @@
           "why": "ScreenshotPreviewsDesktop.kt:456 `Desk(1100, 720, state = desktopPreviewFilesBannerState(), filesView = true)`，而 `desktopPreviewFilesBannerState`（composeApp/.../ui/desktop/PreviewState.kt:388）= `desktopPreviewFilesState().copy(banner = BannerUi(message = BannerMessage.TransferFailed(\"hash-mismatch\"), tone = BannerTone.Error))` ⇒ 它钉的就是文件屏那条 Error 横幅。帧名里只有 Banner，词表 `(?i)error|failed` 看不见它。这一槽此前靠 `ChatTransferFailedPhonePreview` 撑着，而那一帧渲染的是 ChatScreen —— 是邻屏的证据借了名字（第二十九个洞），去掉错挂的前缀后本槽诚实暴露为缺口，这条别名把它补回真证据。"
         }
       ]
-    }
+    },
+    "note_unattributable": "额外说明：Components 前缀是**组件族展示帧**（如 ScreenshotPreviewsComponents），它不渲染任何屏，硬按屏归属只会造出一条假缺口。与 Desk/Dialog/Sheet 同一条理由：归属失败是原理性的，不是懒得做。"
   },
   "gates": {
     "note": "门禁登记表：每条写清命令、基线文件、证明什么。CI 与本机都按这张表跑，新增门禁必须在这里登记，否则 --check 报错。",

@@ -18,7 +18,6 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
-import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.DropdownMenu
@@ -146,13 +145,15 @@ fun RemoteViewSessionDialog(
                         modifier = Modifier.fillMaxWidth(),
                         horizontalArrangement = Arrangement.End,
                     ) {
-                        OutlinedButton(onClick = onReject) {
-                            Text(stringResource(Res.string.screen_remote_view_consent_reject))
-                        }
+                        AppOutlinedButton(
+                            text = stringResource(Res.string.screen_remote_view_consent_reject),
+                            onClick = onReject,
+                        )
                         Spacer(Modifier.width(LocalAppSpacing.current.md))
-                        Button(onClick = onAccept) {
-                            Text(stringResource(Res.string.screen_remote_view_consent_accept))
-                        }
+                        AppButton(
+                            text = stringResource(Res.string.screen_remote_view_consent_accept),
+                            onClick = onAccept,
+                        )
                     }
                 }
             }
@@ -187,12 +188,11 @@ fun RemoteViewSessionDialog(
                         color = MaterialTheme.colorScheme.onPrimaryContainer,
                         modifier = Modifier.weight(1f),
                     )
-                    Button(
+                    AppButton(
+                        text = stringResource(Res.string.screen_remote_view_stop),
                         onClick = onStop,
-                        colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.error),
-                    ) {
-                        Text(stringResource(Res.string.screen_remote_view_stop))
-                    }
+                        tone = AppButtonTone.Danger,
+                    )
                 }
             }
         }
@@ -380,12 +380,11 @@ fun RemoteViewSessionDialog(
 
                         Spacer(Modifier.weight(1f))
 
-                        Button(
+                        AppButton(
+                            text = stringResource(Res.string.screen_remote_view_stop_viewing),
                             onClick = onStop,
-                            colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.error),
-                        ) {
-                            Text(stringResource(Res.string.screen_remote_view_stop_viewing))
-                        }
+                            tone = AppButtonTone.Danger,
+                        )
                     }
                 }
 
@@ -478,12 +477,16 @@ fun ScreenRequestConfirmDialog(
                         )
                     }
                 }
-                OutlinedButton(onClick = onCancel, modifier = Modifier.fillMaxWidth()) {
-                    Text(stringResource(Res.string.screen_remote_view_request_cancel))
-                }
-                Button(onClick = onSend, modifier = Modifier.fillMaxWidth()) {
-                    Text(stringResource(Res.string.screen_remote_view_request_send))
-                }
+                AppOutlinedButton(
+                    text = stringResource(Res.string.screen_remote_view_request_cancel),
+                    onClick = onCancel,
+                    modifier = Modifier.fillMaxWidth(),
+                )
+                AppButton(
+                    text = stringResource(Res.string.screen_remote_view_request_send),
+                    onClick = onSend,
+                    modifier = Modifier.fillMaxWidth(),
+                )
             }
         }
     }
@@ -526,7 +529,10 @@ private fun RemoteViewErrorDialog(session: ScreenSessionState, onDismiss: () -> 
         onDismissRequest = onDismiss,
         properties = DialogProperties(
             usePlatformDefaultWidth = !viewer,
-            dismissOnBackPress = false,
+            // 终态错误卡（对方拒绝 / 断链 / 超时）必须能按返回键关掉：
+            // 一张按返回键没反应的卡会被读成"卡死了"。等待同意与共享中置顶条
+            // 那两处仍拦返回键（它们不是终态，误关会丢掉进行中的会话）。
+            dismissOnBackPress = true,
             dismissOnClickOutside = false,
         ),
     ) {
@@ -564,9 +570,10 @@ private fun RemoteViewErrorDialog(session: ScreenSessionState, onDismiss: () -> 
                         modifier = Modifier.fillMaxWidth(),
                         horizontalArrangement = Arrangement.End,
                     ) {
-                        Button(onClick = onDismiss) {
-                            Text(stringResource(Res.string.common_close))
-                        }
+                        AppButton(
+                            text = stringResource(Res.string.common_close),
+                            onClick = onDismiss,
+                        )
                     }
                 }
             }

@@ -247,6 +247,23 @@ data class RelaySettings(
      * 不存在的会话里。所以它必须落盘，而且默认值只能是空列表（老用户升级后行为不变）。
      */
     val groups: List<GroupMeta> = emptyList(),
+    /**
+     * 被**置顶**的会话键（私聊 = 对端 nodeId、群 = `group:<id>`）。
+     *
+     * **纯本机偏好，不进 wire**：对端并不知道我们把它置顶了，也不需要知道
+     * （与 [manualPeers] 的备注同一条纪律 —— 那是给人看的，不是协议状态）。
+     *
+     * 用 `List` 而不是 `Set`：这里是 @Serializable 的设置模型，List 的兼容性更稳
+     * （加字段时老 JSON 缺这个键就是空列表，行为不变）。
+     */
+    val pinnedConvIds: List<String> = emptyList(),
+    /**
+     * 被**静音**（免打扰）的会话键。静音 = 该会话不再产生通知，但消息照收、红点照挂。
+     *
+     * 为什么不复用「取消未读」来表达静音：那等于**假装没收到**，
+     * 用户下次打开仍会看到未读；静音是「收到了，但别吵我」——两件事。
+     */
+    val mutedConvIds: List<String> = emptyList(),
     val remoteRelay: RemoteRelayConfig? = null,
     /**
      * 共享文件柜：本机发布的本地文件夹绝对路径。null 或空串表示未开启。
@@ -363,6 +380,10 @@ data class RelaySettings(
         // task-45：手机能把 agent 事件的附件元数据渲染成卡片 ⇒ 如实声明（顺序跟 MOBILE_CAPS 一致）。
         // 漏了这一行就是 task-31 那类静默：桥永远只发文本占位，而代码里"明明支持附件"。
         add(MsgTypes.CAP_ATTACHMENT)
+        // gta1：本端能**收**带 senderId / reasoning 的群文本，也**发**得出去。
+        // 与 tbl1/att1 同一类事实声明：它决定对端发不发归属键，不是用户偏好；
+        // 漏了就是 lnk1/att1 那次静默 —— 手机自己收得到，对端永远不带。
+        add(MsgTypes.CAP_GROUP_TEXT_ATTRIBUTED)
         if (remoteView) add(MsgTypes.CAP_REMOTE_VIEW)
         if (remoteShare) add(MsgTypes.CAP_REMOTE_SHARE)
         if (isShareEnabled()) add(MsgTypes.CAP_SHARE)

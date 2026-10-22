@@ -34,7 +34,6 @@ import androidx.compose.foundation.layout.width
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
-import app.relay.core.protocol.GroupMeta
 import app.relay.core.fs.readFileBytes
 import app.relay.core.ioDispatcher
 import app.relay.generated.resources.Res
@@ -46,7 +45,6 @@ import kotlinx.coroutines.withContext
 import org.jetbrains.compose.resources.DrawableResource
 import org.jetbrains.compose.resources.stringResource
 import app.relay.app.model.AgentApprovalUi
-import app.relay.app.model.ConversationUi
 import app.relay.app.model.DeliveryState
 import app.relay.generated.resources.agent_approval_allow
 import app.relay.generated.resources.agent_approval_deny
@@ -162,17 +160,6 @@ internal fun DeliveryState.stateIcon(): DrawableResource? = when (this) {
     DeliveryState.Queued -> Res.drawable.ic_clock_pending
     else -> null
 }
-
-/**
- * 群里**除自己以外**的人数，用来和 `memberOnlineCount` 比。
- *
- * 两个数都来自同一份成员表，但一个含自己一个不含（见 `ConversationUi.memberOnlineCount`
- * 的 KDoc）。写成 `members.size` 就是拿"含自己"去比"不含自己"，永远少算一个 ——
- * 表现是所有人都在线时仍显示"有成员不在线"。自己理论上恒在成员表里（`GroupMerge`
- * 不接受自己不在的群），但这里仍做 `coerceAtLeast(0)`：一个空成员表不该让
- * 比较变成负数而永远显示提示。
- */
-internal fun othersInGroup(group: GroupMeta): Int = (group.members.size - 1).coerceAtLeast(0)
 
 @Composable
 internal fun ChatApprovalBanner(

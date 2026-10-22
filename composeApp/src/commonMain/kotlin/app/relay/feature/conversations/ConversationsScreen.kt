@@ -3,6 +3,8 @@
 package app.relay.feature.conversations
 
 import androidx.compose.foundation.horizontalScroll
+import androidx.compose.foundation.lazy.LazyListState
+import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -12,12 +14,8 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
-import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.material3.DropdownMenu
-import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.Surface
-import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -39,7 +37,6 @@ import app.relay.generated.resources.conv_empty_title
 import app.relay.generated.resources.conv_filter_empty_action
 import app.relay.generated.resources.conv_filter_empty_title
 import app.relay.generated.resources.conv_loading
-import app.relay.generated.resources.conv_offline_banner
 import app.relay.generated.resources.conv_title
 import app.relay.generated.resources.conv_more_action
 import app.relay.generated.resources.conv_filter_all
@@ -93,6 +90,11 @@ fun ConversationsScreen(
     onDismissBanner: () -> Unit,
     modifier: Modifier = Modifier,
     /**
+     * 会话列表的滚动状态；由上层持有，才能在「进会话 → 返回」后保住位置。
+     * 默认在内部创建（行为与改动前一致），要保住位置的壳自己传。
+     */
+    listState: LazyListState = rememberLazyListState(),
+    /**
      * 渲染"几分钟前"所用的当前时刻。
      *
      * 为什么是参数而不是在函数里直接读挂钟：相对时间只要在渲染时取真实时间，
@@ -133,6 +135,10 @@ fun ConversationsScreen(
      * 画灰则是"这个壳支持、但此刻没接上"。同一份菜单在预览里也能看出差别。
      */
     onMarkAllRead: (() -> Unit)? = null,
+    /** 长按会话行的三个动作；null = 这个壳不提供菜单（预览/门禁用默认值）。 */
+    onTogglePin: ((String) -> Unit)? = null,
+    onToggleMute: ((String) -> Unit)? = null,
+    onDeleteConversation: ((String) -> Unit)? = null,
     /**
      * 打开**全局搜索**（原型 `m-gsearch`）。null = 这个壳没有这条出口，那颗放大镜整颗不画。
      *
@@ -295,22 +301,15 @@ fun ConversationsScreen(
         // 未读轴上**整条不画**待发横幅：原型 `m01c-home-unread` 里没有它。
         // 不是"画了但被折叠"—— 那一屏要钉的就是"只看未读时，屏幕纵向空间全给列表"，
         // 所以横幅（以及上面那条 `state.banner`）在这条轴上都让位。
-        if (filter != "unread" && state.totalPending > 0) {
-            Surface(
-                color = MaterialTheme.colorScheme.surfaceVariant,
-                shape = MaterialTheme.shapes.medium,
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .padding(horizontal = LocalAppSpacing.current.lg, vertical = LocalAppSpacing.current.sm),
-            ) {
-                Text(
-                    text = stringResource(Res.string.conv_offline_banner, state.totalPending),
-                    style = MaterialTheme.typography.bodySmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    modifier = Modifier.padding(horizontal = LocalAppSpacing.current.lg, vertical = LocalAppSpacing.current.md),
-                )
-            }
-        }
+        // **不再画「有成员不在线，他们上线后会收到」这条横幅。**
+        //
+        // 它说明的是一件用户既不能验证、也不能处理的事：消息本来就进了队列（会自动补发），
+        // 而"谁不在线"在这条列表上既没有主体、也没有下一步 —— 用户原话「这个提示没有任何用」。
+        // 真正需要告知「这条还没发出去」的地方是**那条消息自己**（气泡上的发送态），
+        // 那里有主体、有时机，也能重试。
+        //
+        // `state.totalPending` 仍然保留在状态里：气泡的发送态与补发逻辑都还在用它，
+        // 这里只是不再把它抬成一条列表级横幅。
 
         // 筛选标签条：全部 / 未读 / 群聊 / Agent / 同事。
         //
@@ -394,25 +393,25 @@ fun ConversationsScreen(
                 modifier = Modifier.fillMaxWidth(),
             )
 
-            else -> LazyColumn(
+            // 行的容器是**共享组件**（`ConversationListPanel`）—— 行间距、分割线、
+            // 最后一行不画线都在它里面。这里只提供外壳：边距与已排好序/筛过的 feed。
+            else -> ConversationListPanel(
+                feed = filteredFeed,
+                now = now,
+                onOpenChat = onOpenChat,
+                onTogglePin = onTogglePin,
+                onToggleMute = onToggleMute,
+                onDeleteConversation = onDeleteConversation,
                 modifier = Modifier.fillMaxSize(),
+                state = listState,
                 contentPadding = androidx.compose.foundation.layout.PaddingValues(
-                    start = LocalAppSpacing.current.lg, end = LocalAppSpacing.current.lg, top = LocalAppSpacing.current.sm, bottom = LocalAppSpacing.current.lg,
+                    start = LocalAppSpacing.current.lg,
+                    end = LocalAppSpacing.current.lg,
+                    top = LocalAppSpacing.current.sm,
+                    bottom = LocalAppSpacing.current.lg,
                 ),
-                verticalArrangement = Arrangement.spacedBy(LocalAppSpacing.current.sm),
-            ) {
-                items(filteredFeed, key = { it.key }) { item ->
-                    when (item) {
-                        is InboxFeedItem.Conversation -> ConversationRow(item.conv, now, onOpenChat)
-                        is InboxFeedItem.Workspace -> WorkspaceFeedRow(
-                            unit = item.unit,
-                            group = item.group,
-                            now = now,
-                            onOpenWorkspaceUnit = { onOpenWorkspaceUnit?.invoke(it) },
-                        )
-                    }
-                }
-            }
+                onOpenWorkspaceUnit = onOpenWorkspaceUnit,
+            )
         }
     }
 }
@@ -436,6 +435,15 @@ internal sealed interface InboxFeedItem {
     /** 混排用的"待处理置顶"键。工作区 = 待审批条数；会话恒 0（理由见下）。 */
     val pendingCount: Int
 
+    /**
+     * 用户手动**置顶**了这一行。
+     *
+     * 它是排序的**第一把尺子**（比"有未处理"更优先）：用户钉它上去的意思就是
+     * "不管多旧、多安静，都留在最上面"。工作区行恒 false —— 置顶是会话列表的概念，
+     * 工作区段由它自己的待审批规则排序。
+     */
+    val isPinned: Boolean
+
     data class Conversation(val conv: ConversationUi) : InboxFeedItem {
         override val key: String get() = "conv_${conv.convId}"
 
@@ -447,6 +455,8 @@ internal sealed interface InboxFeedItem {
         // 会话的 ConversationUi.pendingCount 是"没发出去的消息"（ConversationRow 画徽标），
         // 两者不是一个概念。它若参与置顶，用户自己发的一条离线消息就会把会话顶到最上面。
         override val pendingCount: Int get() = 0
+
+        override val isPinned: Boolean get() = conv.isPinned
     }
 
     data class Workspace(
@@ -456,6 +466,9 @@ internal sealed interface InboxFeedItem {
         override val key: String get() = "ws_${unit.peerId}_${unit.agentKind.orEmpty()}_${unit.wsId.orEmpty()}"
         override val timestamp: Long get() = unit.lastActivityAt
         override val pendingCount: Int get() = unit.pendingCount
+
+        // 置顶是**会话列表**的概念；工作区段用它自己的待审批规则排序。
+        override val isPinned: Boolean get() = false
     }
 }
 
@@ -474,7 +487,10 @@ internal sealed interface InboxFeedItem {
 internal fun orderInboxFeed(items: List<InboxFeedItem>): List<InboxFeedItem> =
     items.distinctBy { it.key }
         .sortedWith(
-            compareByDescending<InboxFeedItem> { it.pendingCount > 0 }
+            // 第一把尺子 = 用户手动置顶：钉上去的意思就是"不管多旧、多安静，都在最上面"，
+            // 所以它必须排在「有未处理」之前 —— 否则一条待审批就能把置顶会话挤下去。
+            compareByDescending<InboxFeedItem> { it.isPinned }
+                .thenByDescending { it.pendingCount > 0 }
                 .thenByDescending { it.timestamp },
         )
 

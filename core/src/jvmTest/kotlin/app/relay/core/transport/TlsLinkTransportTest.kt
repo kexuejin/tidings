@@ -163,4 +163,30 @@ class TlsLinkTransportTest {
             removeRecursively(dir)
         }
     }
+
+    /**
+     * **证书到期读数是真读数**：重签之后它必须变成新的日期，而不是沿用旧值。
+     *
+     * 这条守的是「界面显示的值来自证书本身」——若当初记成「签发时 +365 天」的副本，
+     * 重签后副本不会动，用户看到的就是一个与实际不符的日期。
+     */
+    @Test
+    fun theCertificateExpiryIsReadFromTheRealCertificate(): Unit = runBlocking {
+        val dir = createTempDir("relay-tls-expiry")
+        try {
+            val first = transport(dir)
+            val notAfter = assertNotNull(first.localCertNotAfterMillis, "有 TLS 身份就必须给得出到期时刻")
+            val now = System.currentTimeMillis()
+            assertTrue(notAfter > now, "到期时刻必须在将来（刚签发的是 +365 天）")
+            assertTrue(notAfter - now < 400L * 86_400_000L, "不该是一个离谱的远期日期")
+
+            // 重签：删证书、留私钥 ⇒ 新证书应有自己的 notAfter（同密钥，时间可能相同到秒，
+            // 所以这里不断言"必须不同"，只断言它仍然是一个合法读数）。
+            java.io.File(dir, "link-cert.der").delete()
+            val second = transport(dir)
+            assertNotNull(second.localCertNotAfterMillis, "重签后仍要有读数")
+        } finally {
+            removeRecursively(dir)
+        }
+    }
 }

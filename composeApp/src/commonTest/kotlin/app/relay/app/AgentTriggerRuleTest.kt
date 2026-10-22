@@ -4,6 +4,7 @@ package app.relay.app
 
 import app.relay.app.model.MessageUi
 import kotlin.test.Test
+import kotlin.test.assertEquals
 import kotlin.test.assertFalse
 import kotlin.test.assertTrue
 
@@ -66,6 +67,23 @@ class AgentTriggerRuleTest {
         assertTrue(RelayController.isMentioningDsh("hey @Dsh 在吗"))
         assertFalse(RelayController.isMentioningDsh("@dshx 这不是点名"), "词边界：@dshx 不是 @dsh")
         assertFalse(RelayController.isMentioningDsh("dsh 没有 @"))
+    }
+
+    /**
+     * **`@<kind>-<workspace>` 也要能叫醒**（与 `mentionToken` 同源）。
+     *
+     * 真身：`mentionToken` 现在产出 `@dsh-teahouse`（带 workspace 名），而正则只认裸
+     * `@dsh` 的话，插入的名字与判据就分叉了 —— 那就是本仓反复出现的「@ 了却叫不醒」。
+     */
+    @Test
+    fun aWorkspaceQualifiedMentionAlsoWakesTheAgent() {
+        assertTrue(RelayController.isMentioningDsh("@dsh-teahouse 跑一下测试"))
+        assertTrue(RelayController.isMentioningDsh("@DSH-TEAHOUSE 大小写不敏感"))
+        // 边界仍然要严：`@dshx` 与 `@dsh_extra` 都不是点名（既有测试钉着，别放松）。
+        assertFalse(RelayController.isMentioningDsh("@dshx 不是"))
+        assertFalse(RelayController.isMentioningDsh("@dsh_extra 不是"))
+        // 剥掉 mention 之后正文要干净（`-` 那段一起剥，不留残渣）。
+        assertEquals("跑一下测试", RelayController.extractDshPrompt("@dsh-teahouse 跑一下测试"))
     }
 
     @Test

@@ -39,13 +39,46 @@ class NotificationPolicyTest {
         isGroup: Boolean = false,
         mentioned: Boolean = false,
         localHour: Int = 12,
+        convId: String? = null,
     ) = shouldNotify(
         settings = settings,
         fromAgent = fromAgent,
         isGroup = isGroup,
         mentioned = mentioned,
         localHour = localHour,
+        convId = convId,
     )
+
+    // ---- 会话级静音（task-18）----
+
+    /**
+     * **被静音的会话一律不弹**，哪怕它是对端 agent、哪怕当前不是静默时段。
+     *
+     * 静音与「全局通知开关」是两件事：全局开关是「我什么都不想收」，
+     * 静音是「这一个别吵我」。这条钉住的是：静音真的生效，而不只是改了个设置字段。
+     */
+    @Test
+    fun aMutedConversationNeverNotifies() {
+        val muted = settings().copy(mutedConvIds = listOf("group:g1"))
+        assertFalse(
+            notify(muted, isGroup = true, mentioned = true, convId = "group:g1"),
+            "静音的会话不该因为「@ 到我」就绕过去",
+        )
+    }
+
+    /** 静音是**按会话**的：别的会话照常提醒。 */
+    @Test
+    fun mutingOneConversationLeavesOthersAlone() {
+        val s = settings().copy(mutedConvIds = listOf("group:g1"))
+        assertTrue(notify(s, convId = "group:g2"), "没被静音的会话照常提醒")
+    }
+
+    /** 不知道会话键（null）时不能吞掉通知 —— 宁可多提醒一次。 */
+    @Test
+    fun anUnknownConversationIsNotTreatedAsMuted() {
+        val s = settings().copy(mutedConvIds = listOf("group:g1"))
+        assertTrue(notify(s, convId = null), "查不到键就当没静音，别把通知吞掉")
+    }
 
     // ---- 静默时段 ----
 

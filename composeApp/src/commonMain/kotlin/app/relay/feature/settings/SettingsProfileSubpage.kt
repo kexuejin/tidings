@@ -12,7 +12,6 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
-import androidx.compose.material3.Button
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.MaterialTheme
@@ -46,6 +45,7 @@ import app.relay.generated.resources.set_team
 import app.relay.ui.ContentWidths
 import app.relay.ui.SectionCard
 import app.relay.ui.centerCapped
+import app.relay.ui.components.AppButton
 import app.relay.ui.components.AvatarPicker
 import app.relay.ui.components.LargeTitleBar
 import app.relay.ui.components.PeerAvatar
@@ -252,13 +252,13 @@ fun SettingsProfileSubpage(
                     maxLength = RelaySettings.LIMIT_TEAM,
                 )
 
-                Button(
+                // 原型 `.cardfoot.wide .btn`（标准档）：`.cardfoot.wide` 里按钮 `flex:1`，即整宽。
+                AppButton(
+                    text = stringResource(Res.string.set_save_profile),
                     onClick = { onSaveProfile(nick, company, dept, team, avatar) },
                     enabled = !nickInvalid,
                     modifier = Modifier.fillMaxWidth().padding(top = LocalAppSpacing.current.sm),
-                ) {
-                    Text(stringResource(Res.string.set_save_profile))
-                }
+                )
             }
 
         }

@@ -45,12 +45,25 @@ class AgentEventForwardingTest {
     }
 
     /**
-     * 三条转发路径（实时 / 本地驱动 / 补发）必须**都**把思考过程带上。
+     * 所有转发路径（实时 / 补发）必须**都**把思考过程带上。
      *
      * 只发正文的后果是用户可见的：同一个群里桌面端的气泡有「思考」折叠块、手机端没有，
-     * 看起来就是「过程只在桌面，手机只剩最后一句」。三处各写一遍参数，漏一处就少一截，
+     * 看起来就是「过程只在桌面，手机只剩最后一句」。每处各写一遍参数，漏一处就少一截，
      * 而单测各自只覆盖自己那条 —— 所以这里做**源码级守卫**：把每个 `sendGroupText(`
      * 的参数表切出来，逐个要求里面有 `reasoning`。
+     *
+     * ## 为什么门槛从三条降到两条
+     *
+     * 原先第三条是 **native 驱动的回复**。那个驱动自己 KDoc 写着「没有挂载执行运行时：
+     * 这次不会执行命令、不读写文件、不产出结果」—— 它发进群的是那句
+     * 「本机 native 驱动没有挂载执行运行时」的兜底话术，不是 agent 的回答。
+     *
+     * 真机上这条表现为群里冒出一个 `NATIVE` 发送者、内容全是「我没有运行时」。
+     * 已删除：一个**永远成功但什么都不做**的执行器比没有执行器更糟 ——
+     * 它让用户以为 agent 收到了、只是干不了活。真正的执行路径是 dsh-tidings 的 inbox 注入。
+     *
+     * 门槛因此是 **2**。但不要因为「反正只剩两条」就把它当摆设：
+     * 谁再加一条 `sendGroupText(` 而不带 `reasoning`，这里照样会红。
      */
     @Test
     fun everyGroupForwardPathCarriesTheReasoning() {
@@ -59,7 +72,7 @@ class AgentEventForwardingTest {
             ?: File("desktopApp/src/main/kotlin/app/relay/desktop/DesktopExtension.kt")
         assertTrue(source.isFile, "找不到 DesktopExtension.kt（工作目录 " + File("").absolutePath + "）")
         val argLists = groupTextArgumentLists(source.readText())
-        assertTrue(argLists.size >= 3, "转发路径应当至少三条（实时 / 本地驱动 / 补发），实测 " + argLists.size)
+        assertTrue(argLists.size >= 2, "转发路径应当至少两条（实时 / 补发），实测 " + argLists.size)
         argLists.forEachIndexed { index, args ->
             assertTrue(
                 args.contains("reasoning"),
@@ -80,7 +93,9 @@ class AgentEventForwardingTest {
             .takeIf { it.isFile }
             ?: File("desktopApp/src/main/kotlin/app/relay/desktop/DesktopExtension.kt")
         val argLists = groupTextArgumentLists(source.readText())
-        assertTrue(argLists.size >= 3, "转发路径应当至少三条，实测 " + argLists.size)
+        // 门槛 2：第三条（native 驱动的回复）已删 —— 那个驱动没有执行运行时，
+        // 它发进群的是「本机没有运行时」的兜底话术。见上一条守卫的 KDoc。
+        assertTrue(argLists.size >= 2, "转发路径应当至少两条（实时 / 补发），实测 " + argLists.size)
         argLists.forEachIndexed { index, args ->
             // 只看**活代码**：解释这条纪律的注释里正当地提到了那个函数名，
             // 不剥掉的话守卫会被自己的说明文字绊倒。

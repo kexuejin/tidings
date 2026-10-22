@@ -223,11 +223,7 @@ fun NodesScreen(
                     // 「没有回应」只可能出现在手动地址上：对端只要能进节点表，
                     // 就说明它至少接过一次手 —— 那是「离线」，不是「没有回应」。
                     never = false,
-                    lastSeenText = if (peer.online || peer.lastSeenAt <= 0L) {
-                        null
-                    } else {
-                        relativeTime(peer.lastSeenAt, now)
-                    },
+                    lastSeenAt = peer.lastSeenAt,
                     host = peer.ip.ifBlank { peer.host },
                     port = peer.udpPort.ifZero(state.settings.udpPort),
                     hostName = peer.host,
@@ -254,7 +250,7 @@ fun NodesScreen(
                     isAgent = false,
                     online = false,
                     never = true,
-                    lastSeenText = null,
+                    lastSeenAt = 0L,
                     host = status.entry.host,
                     port = status.entry.port,
                     // 这条地址从未接通过：对端没跟它握过手，就没有主机名、平台与备注
@@ -289,6 +285,8 @@ fun NodesScreen(
                 item = detailItem,
                 onSetPeerRemark = onSetPeerRemark,
                 onOpenChat = onOpenChat,
+                // 详情页的「最近」要跟着时钟走 —— 时间戳进模型、文案在渲染层算。
+                now = now,
                 modifier = Modifier.weight(1f),
             )
         } else {
@@ -559,8 +557,14 @@ internal data class NodeListItem(
     val isAgent: Boolean,
     val online: Boolean,
     val never: Boolean,
-    /** 只有「离线」才印：最后一次见到它是什么时候。`null` = 不印。 */
-    val lastSeenText: String?,
+    /**
+     * 最后一次见到它是什么时候（原始时间戳）；`0` = 没有记录。
+     *
+     * 这里**存时间戳而不是印好的文案**（旧版是 `lastSeenText: String?`）：文案要本地化、
+     * 还要跟着时钟走，属于**渲染**；模型里存渲染结果会让"同一个事实两个来源"，
+     * 而且桌面壳没法复用它（桌面要在自己的 `now` 上算 `relativeTime`）。
+     */
+    val lastSeenAt: Long,
     /** 列表第二行印的那个地址：对端优先用 `ip`，没拿到就回落主机名。 */
     val host: String,
     val port: Int,
@@ -589,6 +593,21 @@ internal data class NodeListItem(
 ) {
     /** 排序键：在线 → 离线 → 没有回应。出处：原型 `nodeRank`。 */
     val rank: Int get() = if (never) 2 else if (online) 0 else 1
+
+    /**
+     * 在场三档。
+     *
+     * **派生，不另存一份**：`online` + `never` 已经把这个事实说完了，
+     * 再存一个 `presence` 就是"一个事实两个来源"（AGENTS.md §2.4）——
+     * 两者一不一致只能靠人记着同步。桌面壳原来有自己的 `NodeEntry.presence`，
+     * 合并后统一走这里。
+     */
+    val presence: NodePresence
+        get() = when {
+            never -> NodePresence.Never
+            online -> NodePresence.Online
+            else -> NodePresence.Offline
+        }
 }
 
 

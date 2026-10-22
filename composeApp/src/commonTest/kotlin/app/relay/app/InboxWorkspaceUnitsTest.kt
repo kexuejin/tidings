@@ -658,4 +658,79 @@ class InboxWorkspaceUnitsTest {
         )
         assertEquals(listOf("ws-alpha", "ws-zeta"), s2.workspacesOf(peerA).map { it.wsId })
     }
+
+    // ------------------------------------------------- 空态判据（工作区页面空白）
+
+    /**
+     * **只有空壳行时，必须算「没有可视内容」。**
+     *
+     * 真身：派生层在「这台设备什么都没宣告、也一条会话帧都没收到」时仍造一行
+     * 占位行（`unitKeys.isEmpty()` 时补 `WorkspaceRowKey(null, null)`），
+     * 那一行 wsTitle=null / sessionCount=0 / active=null，界面上是**一张没有主体的卡**。
+     *
+     * 看板原来用 `!units.isEmpty` 判空态 ⇒ 这一行把空态挡掉 ⇒ 用户看到的正是
+     * 「工作区页面空白，没有空屏效果」。判据改成 `hasVisibleContent` 后，
+     * 空壳行不再挡空态。
+     */
+    @Test
+    fun aShellOnlyRowDoesNotCountAsVisibleContent() {
+        val shell = WorkspaceUnitUi(
+            peerId = peerA,
+            agentKind = null,
+            wsId = null,
+            wsTitle = null,
+            sessionCount = 0,
+            active = null,
+        )
+        val units = InboxWorkspaceUnitsUi(
+            groups = listOf(
+                WorkspaceUnitGroupUi(
+                    peerId = peerA,
+                    nodeName = "mac-mini",
+                    platform = "macos",
+                    online = true,
+                    lastSeenAt = 0L,
+                    agentCount = 1,
+                    workspaceCount = 0,
+                    units = listOf(shell),
+                ),
+            ),
+            totalUnits = 1,
+        )
+        assertFalse(units.isEmpty, "派生层确实给了行 —— 这正是旧判据被它挡住的原因")
+        assertFalse(units.hasVisibleContent, "空壳行没有可看的内容，不该挡掉空态")
+    }
+
+    /**
+     * 有名的工作区行（哪怕 0 会话）**算**可视内容 —— 它是用户真的能看到的一个工作区。
+     *
+     * 这条防止修过头：不能为了让空态显示出来，把「刚宣告、还没会话」的工作区也判成空。
+     */
+    @Test
+    fun aNamedWorkspaceRowCountsAsVisibleContent() {
+        val ws = WorkspaceUnitUi(
+            peerId = peerA,
+            agentKind = "dsh",
+            wsId = "ws-alpha",
+            wsTitle = "Alpha",
+            sessionCount = 0,
+            active = null,
+        )
+        val units = InboxWorkspaceUnitsUi(
+            groups = listOf(
+                WorkspaceUnitGroupUi(
+                    peerId = peerA,
+                    nodeName = "mac-mini",
+                    platform = "macos",
+                    online = true,
+                    lastSeenAt = 0L,
+                    agentCount = 0,
+                    workspaceCount = 1,
+                    units = listOf(ws),
+                ),
+            ),
+            totalUnits = 1,
+        )
+        assertTrue(units.hasVisibleContent, "有名字的工作区行是可视内容")
+    }
 }

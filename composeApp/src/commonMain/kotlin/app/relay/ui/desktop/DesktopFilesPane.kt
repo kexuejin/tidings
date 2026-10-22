@@ -26,15 +26,12 @@ import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
-import androidx.compose.material3.Button
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
-import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -51,6 +48,8 @@ import androidx.compose.ui.unit.dp
 
 import app.relay.app.RelayUiState
 import app.relay.ui.SectionCard
+import app.relay.ui.components.AppButton
+import app.relay.ui.components.AppTextButton
 import app.relay.ui.components.AppBanner
 import app.relay.ui.components.SectionHeader
 import app.relay.ui.components.formatBytes
@@ -105,6 +104,7 @@ import org.jetbrains.compose.resources.StringResource
 import org.jetbrains.compose.resources.painterResource
 import org.jetbrains.compose.resources.stringResource
 import app.relay.ui.theme.ShapeRoles
+import app.relay.ui.components.AppOutlinedButton
 
 // ------------------------------------------------------------------ 文件视图
 
@@ -242,17 +242,16 @@ public fun FilesPane(
                     val action: (() -> Unit)? = if (filtering) onClearQuery else onOpenFolder
                     if (action != null) {
                         Spacer(Modifier.height(LocalAppSpacing.current.lg14))
-                        OutlinedButton(onClick = action) {
-                            if (!filtering) {
-                                Icon(
-                                    painterResource(Res.drawable.ic_folder),
-                                    contentDescription = null,
-                                    modifier = Modifier.size(IconSizes.Label),
-                                )
-                                Spacer(Modifier.width(LocalAppSpacing.current.sm6))
-                            }
-                            Text(if (filtering) stringResource(Res.string.action_clear_search) else stringResource(Res.string.desktop_files_open_dir))
-                        }
+                        AppOutlinedButton(
+                            text = if (filtering) {
+                                stringResource(Res.string.action_clear_search)
+                            } else {
+                                stringResource(Res.string.desktop_files_open_dir)
+                            },
+                            onClick = action,
+                            // 过滤态没有图标（原型那颗是"清除"），非过滤态是"打开目录"
+                            leadingIcon = if (filtering) null else Res.drawable.ic_folder,
+                        )
                     }
                 }
             }
@@ -625,7 +624,10 @@ public fun FileDetailPane(
         SectionCard(stringResource(Res.string.desktop_files_info_card)) {
             FileDetailRow(stringResource(Res.string.desktop_files_row_source), peerId.take(8), monospace = true)
             FileDetailRow(stringResource(Res.string.desktop_files_row_direction), if (file.mine) stringResource(Res.string.desktop_files_dir_out) else stringResource(Res.string.desktop_files_dir_in))
-            FileDetailRow(stringResource(Res.string.desktop_files_row_transfer_id), file.transferId.take(12), monospace = true)
+            // 内部临时键（乐观插入的 pending-…）不上屏：它不是用户认得出的传输编号。
+            transferIdDetailLabel(file.transferId)?.let { shown ->
+                FileDetailRow(stringResource(Res.string.desktop_files_row_transfer_id), shown, monospace = true)
+            }
             FileDetailRow(stringResource(Res.string.desktop_files_row_progress), stringResource(Res.string.desktop_files_progress, "${(file.fraction * 100).toInt()}%", formatBytes(file.done), formatBytes(file.size)))
             // FileCardUi 来自 composeApp 模块，reason 是跨模块的公开属性，
             // 这里不能靠 if (reason != null) 让编译器 smart cast，直接取一次可空值。
@@ -650,13 +652,15 @@ public fun FileDetailPane(
                     verticalAlignment = Alignment.CenterVertically,
                     modifier = Modifier.fillMaxWidth(),
                 ) {
-                    Button(onClick = { onResumeTransfer(file.transferId) }) {
-                        Text(stringResource(Res.string.transfer_action_resume))
-                    }
+                    AppButton(
+                        text = stringResource(Res.string.transfer_action_resume),
+                        onClick = { onResumeTransfer(file.transferId) },
+                    )
                     if (onCancelTransfer != null) {
-                        TextButton(onClick = { onCancelTransfer(file.transferId) }) {
-                            Text(stringResource(Res.string.common_cancel))
-                        }
+                        AppTextButton(
+                            text = stringResource(Res.string.common_cancel),
+                            onClick = { onCancelTransfer(file.transferId) },
+                        )
                     }
                 }
             }
@@ -697,3 +701,21 @@ public fun FileCardUi.stateLabel(): StringResource = when (state) {
     TransferState.Failed -> Res.string.desktop_files_state_failed
     TransferState.Declined -> Res.string.file_state_declined
 }
+
+/**
+ * 详情行要显示的传输编号；内部临时键返回 null（整行不画）。
+ *
+ * 乐观插入会在报价返回前把卡片挂在一个**内部临时键**上（见 `RelayControllerTransfersComponent`
+ * 的 pendingTransferKey）。那是本端的实现细节，不是用户认得出的传输编号 —— 画进详情行只会
+ * 让人以为出了什么怪编号。这里只放行真实 transferId 的前 12 位。
+ *
+ * 前缀必须与 pendingTransferKey 一致：两处对不上时，临时键就会漏到界面上，改前缀要一起改。
+ */
+internal fun transferIdDetailLabel(transferId: String?): String? {
+    val id = transferId?.takeIf { it.isNotBlank() } ?: return null
+    if (id.startsWith(INTERNAL_TRANSFER_KEY_PREFIX)) return null
+    return id.take(12)
+}
+
+/** 乐观插入用的内部临时传输键前缀（见 [transferIdDetailLabel]）。 */
+internal const val INTERNAL_TRANSFER_KEY_PREFIX: String = "pending-"

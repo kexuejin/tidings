@@ -9,18 +9,13 @@ import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.ColumnScope
 import androidx.compose.foundation.layout.Row
-import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
-import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.verticalScroll
-import androidx.compose.material3.Button
-import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
@@ -43,11 +38,14 @@ import app.relay.ui.theme.LocalCardShape
 import app.relay.ui.theme.RelayElevations
 import app.relay.generated.resources.Res
 import app.relay.generated.resources.disc_manual_unreachable
+import app.relay.ui.components.AppButton
+import app.relay.ui.components.AppButtonSize
+import app.relay.ui.components.AppOutlinedButton
 import app.relay.ui.components.KindBadge
+import app.relay.ui.components.relativeTime
 import app.relay.ui.components.PeerAvatar
 import app.relay.ui.components.StatusDot
 import app.relay.ui.theme.accents
-import org.jetbrains.compose.resources.painterResource
 import org.jetbrains.compose.resources.stringResource
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.ui.text.style.TextOverflow
@@ -84,7 +82,7 @@ import app.relay.generated.resources.nodes_menu_message
  * 详情页的三种在场状态。原型 `nodeDetailBody()` 里状态点与状态词是同一套三档
  * （`prototype/relay.html:3298-3300`）：在线 / 离线 / 没有回应。
  */
-private enum class NodePresence { Online, Offline, Never }
+internal enum class NodePresence { Online, Offline, Never }
 
 /**
  * 备注长度上界，与 `RelaySettings.LIMIT_REMARK`（32）同值
@@ -134,14 +132,17 @@ internal fun NodeDetailBody(
     item: NodeListItem,
     onSetPeerRemark: ((String, String) -> Unit)?,
     onOpenChat: ((String) -> Unit)?,
+    /**
+     * 渲染「最近」那一行用的当前时刻。
+     *
+     * 必须是参数：`relativeTime` 是 @Composable，而模型里只存时间戳（`lastSeenAt`）。
+     * 存印好的文案会让"同一事实两个来源"，也没法让两个壳各自用自己的时钟。
+     */
+    now: Long,
     modifier: Modifier = Modifier,
 ) {
     val sp = LocalAppSpacing.current
-    val presence = when {
-        item.never -> NodePresence.Never
-        item.online -> NodePresence.Online
-        else -> NodePresence.Offline
-    }
+    val presence = item.presence
     val nodeId = item.nodeId
     Column(
         modifier = modifier
@@ -149,7 +150,7 @@ internal fun NodeDetailBody(
             .verticalScroll(rememberScrollState())
             .padding(start = sp.lg, end = sp.lg, top = sp.lg14, bottom = sp.lg),
     ) {
-        NodeDetailHeader(item = item, presence = presence)
+        NodeDetailHeader(displayName = item.displayName, isAgent = item.isAgent, presence = presence)
 
         if (nodeId != null) {
             RemarkCard(nodeId = nodeId, initial = item.remark, onSave = onSetPeerRemark)
@@ -159,7 +160,13 @@ internal fun NodeDetailBody(
             CardGroupHeader(stringResource(Res.string.node_detail_info_section))
             DetailRow(
                 label = stringResource(Res.string.node_detail_info_recent),
-                value = item.lastSeenText ?: stringResource(Res.string.node_detail_recent_just_now),
+                // 在线、或没有记录（手动地址从没接通过）都印「刚刚」：
+                // 那两档下"上次见到"不是一个有意义的数。
+                value = if (item.online || item.lastSeenAt <= 0L) {
+                    stringResource(Res.string.node_detail_recent_just_now)
+                } else {
+                    relativeTime(item.lastSeenAt, now)
+                },
             )
             DetailRow(
                 label = stringResource(Res.string.node_detail_info_ip),
@@ -193,7 +200,7 @@ internal fun NodeDetailBody(
  * 本端还没有分组概念，所以恒印「未分组」—— 规范中对应公司/部门/团队未分组）。
  */
 @Composable
-private fun NodeDetailHeader(item: NodeListItem, presence: NodePresence) {
+internal fun NodeDetailHeader(displayName: String, isAgent: Boolean, presence: NodePresence) {
     val sp = LocalAppSpacing.current
     Row(
         modifier = Modifier
@@ -203,7 +210,7 @@ private fun NodeDetailHeader(item: NodeListItem, presence: NodePresence) {
         horizontalArrangement = Arrangement.spacedBy(sp.lg14),
     ) {
         Box {
-            PeerAvatar(name = item.displayName, isAgent = item.isAgent, size = 72.dp)
+            PeerAvatar(name = displayName, isAgent = isAgent, size = 72.dp)
             // `.av .p{border:2px solid var(--surface)}`：描边靠给状态点垫一层
             // surface 底色的圆形内边距做出来（14 + 2×2 = 18px，正是 `.av.xl .p` 的 18px）。
             Box(
@@ -227,14 +234,14 @@ private fun NodeDetailHeader(item: NodeListItem, presence: NodePresence) {
                 horizontalArrangement = Arrangement.spacedBy(sp.sm),
             ) {
                 Text(
-                    text = item.displayName,
+                    text = displayName,
                     style = MaterialTheme.typography.titleMedium,
                     fontWeight = FontWeight.SemiBold,
                     maxLines = 1,
                     overflow = TextOverflow.Ellipsis,
                     modifier = Modifier.weight(1f, fill = false),
                 )
-                if (item.isAgent) {
+                if (isAgent) {
                     KindBadge(isAgent = true)
                 }
             }
@@ -258,7 +265,7 @@ private fun NodeDetailHeader(item: NodeListItem, presence: NodePresence) {
  * `color-mix(… 18%, transparent)` 在 Compose 里就是同一个颜色的 18% 透明度。
  */
 @Composable
-private fun NodeStatePill(presence: NodePresence) {
+internal fun NodeStatePill(presence: NodePresence) {
     val sp = LocalAppSpacing.current
     val colorScheme = MaterialTheme.colorScheme
     val container: Color
@@ -312,7 +319,7 @@ private fun MutedTag(text: String) {
  * 正是移动档的 `--r-card:16px`）。
  */
 @Composable
-private fun DetailCard(content: @Composable ColumnScope.() -> Unit) {
+internal fun DetailCard(content: @Composable ColumnScope.() -> Unit) {
     val sp = LocalAppSpacing.current
     Surface(
         color = MaterialTheme.colorScheme.surface,
@@ -339,7 +346,7 @@ private fun DetailCard(content: @Composable ColumnScope.() -> Unit) {
  * 原型 `.sm` 这一档特意从 11px 提到 12px。
  */
 @Composable
-private fun CardGroupHeader(text: String) {
+internal fun CardGroupHeader(text: String) {
     val sp = LocalAppSpacing.current
     Text(
         text = text,
@@ -358,7 +365,7 @@ private fun CardGroupHeader(text: String) {
  * （`m08a-nodedetail.png` 实测四行值列都在 x350）。
  */
 @Composable
-private fun DetailRow(
+internal fun DetailRow(
     label: String,
     value: String,
     monospace: Boolean = false,
@@ -408,7 +415,7 @@ private val DetailKeyWidth = 118.dp
  * 不是漏画。
  */
 @Composable
-private fun RemarkCard(nodeId: String, initial: String, onSave: ((String, String) -> Unit)?) {
+internal fun RemarkCard(nodeId: String, initial: String, onSave: ((String, String) -> Unit)?) {
     val sp = LocalAppSpacing.current
     var text by remember(nodeId, initial) { mutableStateOf(initial) }
     DetailCard {
@@ -429,13 +436,13 @@ private fun RemarkCard(nodeId: String, initial: String, onSave: ((String, String
             modifier = Modifier.fillMaxWidth(),
         )
         if (onSave != null) {
-            OutlinedButton(
+            // 原型这颗是 `.btn sm`（`prototype/relay.html:4021`）：备注卡内的行末动作。
+            AppOutlinedButton(
+                text = stringResource(Res.string.node_detail_remark_save),
                 onClick = { onSave(nodeId, text.trim()) },
-                shape = MaterialTheme.shapes.medium,
                 modifier = Modifier.padding(top = sp.sm),
-            ) {
-                Text(stringResource(Res.string.node_detail_remark_save))
-            }
+                size = AppButtonSize.Small,
+            )
         }
     }
 }
@@ -450,25 +457,18 @@ private fun RemarkCard(nodeId: String, initial: String, onSave: ((String, String
  * —— 原型这条闸（`p.never`）与它是同一件事的两种写法。
  */
 @Composable
-private fun SendMessageButton(target: String?, onOpenChat: ((String) -> Unit)?) {
+internal fun SendMessageButton(target: String?, onOpenChat: ((String) -> Unit)?) {
     val sp = LocalAppSpacing.current
     val enabled = target != null && onOpenChat != null
-    Button(
+    AppButton(
+        text = stringResource(Res.string.nodes_menu_message),
         onClick = { if (target != null) onOpenChat?.invoke(target) },
         enabled = enabled,
-        shape = MaterialTheme.shapes.medium,
         modifier = Modifier
             .fillMaxWidth()
             .padding(top = sp.lg14),
-    ) {
-        Icon(
-            painter = painterResource(Res.drawable.ic_chat_bubble),
-            contentDescription = null,
-            modifier = Modifier.size(IconSizes.Label),
-        )
-        Spacer(Modifier.width(sp.sm6))
-        Text(stringResource(Res.string.nodes_menu_message))
-    }
+        leadingIcon = Res.drawable.ic_chat_bubble,
+    )
     if (!enabled) {
         Text(
             text = stringResource(Res.string.node_detail_never_hint),

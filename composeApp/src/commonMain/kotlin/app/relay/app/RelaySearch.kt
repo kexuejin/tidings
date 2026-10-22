@@ -113,6 +113,34 @@ data class ConversationSearchGroup(
  * 上限写在这里而不是让调用方传：三个 20/10/20 是原型的数字，
  * 做成参数只会多三个没人会传别的值的形参。
  */
+/**
+ * 全局检索要搜**哪几段**。
+ *
+ * 全局搜索原来只能做一件事：输关键词、三块一起搜。想找「上周某人发的那个文件」时，
+ * 用户只能靠关键词碰运气 —— 而会话内检索早就有类型筛选（`HistorySearchKFilter`），
+ * 这里是把同一份能力补齐到全局。
+ *
+ * **按段筛而不是按文件类型筛**：全局结果本来就是「联系人 / 聊天记录 / 文件」三段纵向拼的，
+ * 用户想「只看文件」时指的是**那一段**，不是「所有段里 mediaType 是文件的行」。
+ * 按段筛也更省：不要的段直接不查，不用先查出来再丢掉。
+ */
+enum class GlobalSearchScope {
+    All,
+    Contacts,
+    Chats,
+    Files,
+}
+
+/**
+ * 这一次检索要不要包含 [section] 那一段。
+ *
+ * 抽成纯函数：三个段（联系人 / 聊天 / 文件）必须用**同一条**判据。
+ * 各写一个 `scope == All || scope == X` 就是三处可以各自漂的真相来源 ——
+ * 漏改一处，用户点「只看文件」却仍看到联系人，而且没有任何报错。
+ */
+internal fun GlobalSearchScope.includes(section: GlobalSearchScope): Boolean =
+    this == GlobalSearchScope.All || this == section
+
 data class GlobalSearchResult(
     val query: String,
     val contacts: List<GlobalSearchContactHit> = emptyList(),

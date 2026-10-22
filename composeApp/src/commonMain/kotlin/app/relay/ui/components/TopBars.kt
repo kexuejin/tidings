@@ -33,6 +33,8 @@ import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.em
 import app.relay.generated.resources.Res
+import app.relay.generated.resources.action_back
+import app.relay.generated.resources.nodes_group_add
 import app.relay.generated.resources.ic_add_node
 import app.relay.generated.resources.ic_arrow_back
 import app.relay.generated.resources.ic_more
@@ -40,6 +42,8 @@ import app.relay.ui.centerCapped
 import app.relay.ui.theme.LocalAppSpacing
 import org.jetbrains.compose.resources.DrawableResource
 import org.jetbrains.compose.resources.painterResource
+import org.jetbrains.compose.resources.stringResource
+import app.relay.ui.theme.SurfaceTiers
 
 /**
  * 大标题顶栏 —— 上一轮「界面偏 demo 感」的直接解法。
@@ -96,10 +100,12 @@ fun LargeTitleBar(
             verticalAlignment = Alignment.CenterVertically,
         ) {
             if (onBack != null) {
+                // 可点目标必须读得出来：给 null 的后果是读屏软件只会念"按钮"，
+                // 用户不知道它做什么（装饰性图标才该用 null，见同文件下游那几颗）。
                 IconButton(onClick = onBack) {
                     Icon(
                         painter = painterResource(Res.drawable.ic_arrow_back),
-                        contentDescription = null,
+                        contentDescription = stringResource(Res.string.action_back),
                         tint = MaterialTheme.colorScheme.onSurface,
                     )
                 }
@@ -241,7 +247,8 @@ private fun IbtnBox(
         modifier = modifier
             .size(size)
             .clip(MaterialTheme.shapes.medium)
-            .background(MaterialTheme.colorScheme.surfaceVariant)
+            // 图标砖（固定尺寸方砖 + 单颗图标）→ --surface-3。
+            .background(SurfaceTiers.Inset)
             .clickable(enabled = enabled, onClick = onClick),
         contentAlignment = Alignment.Center,
     ) {
@@ -254,7 +261,8 @@ private fun IbtnBox(
 fun AddNodeAction(onClick: () -> Unit, modifier: Modifier = Modifier) {
     TopBarIconAction(
         icon = Res.drawable.ic_add_node,
-        contentDescription = null,
+        // 纯图标按钮：没有可见文字兜底，描述必须真的说出来它做什么。
+        contentDescription = stringResource(Res.string.nodes_group_add),
         onClick = onClick,
         modifier = modifier,
     )
@@ -364,7 +372,8 @@ fun SyncBar(
     Row(
         modifier = modifier
             .fillMaxWidth()
-            .background(MaterialTheme.colorScheme.surfaceVariant)
+            // 通栏的次级表面条（不是图标砖）→ --surface-2。
+            .background(SurfaceTiers.Raised)
             .padding(horizontal = sp.lg, vertical = sp.sm6),
         verticalAlignment = Alignment.CenterVertically,
         horizontalArrangement = Arrangement.spacedBy(sp.sm),

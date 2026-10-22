@@ -3,7 +3,6 @@
 
 package app.relay.feature.scan
 
-import org.jetbrains.compose.resources.painterResource
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.layout.Arrangement
@@ -15,12 +14,8 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.shape.RoundedCornerShape
-import androidx.compose.material3.Icon
-import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Text
-import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
@@ -46,6 +41,9 @@ import app.relay.generated.resources.scan_no_preview
 import app.relay.generated.resources.scan_retry
 import app.relay.generated.resources.scan_starting
 import app.relay.generated.resources.ic_close
+import app.relay.ui.components.AppIconButton
+import app.relay.ui.components.AppOutlinedButton
+import app.relay.ui.components.AppTextButton
 import app.relay.ui.components.AppBanner
 import app.relay.ui.theme.LocalAppSpacing
 import kotlinx.coroutines.launch
@@ -126,12 +124,11 @@ fun ScanScreen(
             modifier = Modifier.fillMaxWidth().padding(horizontal = sp.xs, vertical = sp.xs),
             verticalAlignment = Alignment.CenterVertically,
         ) {
-            IconButton(onClick = onCancel) {
-                Icon(
-                    painter = painterResource(Res.drawable.ic_close),
-                    contentDescription = stringResource(Res.string.common_close),
-                )
-            }
+            AppIconButton(
+                icon = Res.drawable.ic_close,
+                contentDescription = stringResource(Res.string.common_close),
+                onClick = onCancel,
+            )
             Text(
                 text = stringResource(Res.string.nodes_scan_title),
                 style = MaterialTheme.typography.titleLarge,
@@ -191,16 +188,16 @@ fun ScanScreen(
             // 「再试一次」**扫描期间也在**：相机静默起不来时（CameraX 走 CameraState 而不抛
             // 异常，我们收不到任何失败信号）`scan()` 会一直等下去，上一版这时页面上既没有
             // 提示也没有按钮，只能关掉整页。重试会取消这次等待、重建预览、重绑一次相机。
-            OutlinedButton(
+            AppOutlinedButton(
+                text = stringResource(Res.string.scan_retry),
                 onClick = { attempt += 1 },
                 modifier = Modifier.fillMaxWidth(),
-            ) {
-                Text(stringResource(Res.string.scan_retry))
-            }
+            )
             // 第二条路：不从相机读，从一张已有的图里读。它**不需要相机权限**，所以相机被拒、
             // 或者"码在另一块屏幕上但镜头就是对不准"的时候，这是真的出路。
             if (importFromImage != null) {
-                OutlinedButton(
+                AppOutlinedButton(
+                    text = stringResource(Res.string.scan_import_image),
                     onClick = {
                         importScope.launch {
                             importing = true
@@ -212,13 +209,13 @@ fun ScanScreen(
                     // 只在导入期间禁用自己：取景框那条 `scan()` 照常跑着，不该被这里挡住。
                     enabled = !importing,
                     modifier = Modifier.fillMaxWidth(),
-                ) {
-                    Text(stringResource(Res.string.scan_import_image))
-                }
+                )
             }
-            TextButton(onClick = onCancel, modifier = Modifier.fillMaxWidth()) {
-                Text(stringResource(Res.string.scan_manual_hint))
-            }
+            AppTextButton(
+                text = stringResource(Res.string.scan_manual_hint),
+                onClick = onCancel,
+                modifier = Modifier.fillMaxWidth(),
+            )
         }
     }
 }

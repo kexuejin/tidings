@@ -25,6 +25,7 @@ import app.relay.core.nowMillis
 import app.relay.generated.resources.Res
 import app.relay.generated.resources.chat_composer_status_awaiting_approval
 import app.relay.generated.resources.chat_composer_status_stopped
+import app.relay.generated.resources.chat_composer_status_queued
 import app.relay.generated.resources.chat_composer_status_thinking
 import app.relay.generated.resources.chat_composer_status_unresponsive
 import app.relay.generated.resources.ic_terminal
@@ -69,6 +70,18 @@ internal enum class AgentComposerStatus {
 
     /** 宿主把会话报成了 error：执行已经停了。 */
     Stopped,
+
+    /**
+     * 有指令**排在这个会话的队列里**，还没开始执行（PPE-1 §6.3 的 `agent-queue`）。
+     *
+     * 与 [Thinking] 的区别是用户能推进的方式完全不同：
+     * - Thinking = 它正在干；
+     * - Queued = 它还没拿到这条，要等当前这轮结束 —— 所以「怎么没反应」有了答案。
+     *
+     * 这条**不是新发明的事实**：`agentTasks` 里本来就有该会话的排队任务，
+     * 只是此前没有任何界面把它翻译成一句人话（工作区看板有计数，聊天屏没有）。
+     */
+    Queued,
 }
 
 /** 输入区状态条的渲染资源；`null` = 沉默（没有证据，不画）。 */
@@ -79,11 +92,21 @@ internal fun agentComposerStatusOf(
     hasPendingApproval: Boolean,
     hasActiveRun: Boolean,
     now: Long,
+    /**
+     * 这个会话里有几条指令**排在队列里还没执行**（`AgentQueueTaskUi` 里该会话的条数）。
+     *
+     * 默认 0 让老调用点与既有单测行为不变。
+     */
+    queuedCount: Int = 0,
 ): AgentComposerStatus? {
     // 这个会话根本没有 agent（普通同事私聊、纯人类群）：这条线整条不出现。
     if (!agentInvolved) return null
     // 待审批优先：它比「busy」更具体，也是用户此刻唯一能推进的事。
     if (hasPendingApproval) return AgentComposerStatus.AwaitingApproval
+    // **排队中排在「在干活」之前**：这是用户最容易误解的一档 ——
+    // 「我发了指令，它没反应」在排队时是**正常**的，而 Thinking 那句话会说成「它在想」，
+    // 于是用户以为它已经在处理这条了。先告诉用户「还没轮到」，比说「正在想」更诚实。
+    if (queuedCount > 0) return AgentComposerStatus.Queued
     val working = sessionState == AGENT_STATE_BUSY || hasActiveRun
     if (working) {
         // 已经在干活、但太久没有任何新动作：说「无响应」而不是继续演「正在思考中」。
@@ -123,6 +146,7 @@ private const val ComposerStatusTickMs: Long = 15_000L
  * @param lastActivityAt 会话最后一次动过的时刻（会话活动时刻与事件流最近时刻取大）。
  * @param hasPendingApproval 当前会话有没有 pending 审批。
  * @param hasActiveRun 当前会话有没有未终止的 run。
+ * @param queuedCount 当前会话里排在队列里还没执行的指令条数（默认 0 = 不显示排队态）。
  * @param now 本帧的（可能是夹具固定的）当前时刻；内部会用真实时钟继续推进。
  */
 @Composable
@@ -134,6 +158,7 @@ internal fun ComposerStatusLine(
     hasActiveRun: Boolean,
     now: Long,
     modifier: Modifier = Modifier,
+    queuedCount: Int = 0,
 ) {
     // 不是 agent 会话：这条线整条不出现，连下面的滴答协程都不必建。
     if (!agentInvolved) return
@@ -152,6 +177,7 @@ internal fun ComposerStatusLine(
         lastActivityAt = lastActivityAt,
         hasPendingApproval = hasPendingApproval,
         hasActiveRun = hasActiveRun,
+        queuedCount = queuedCount,
         now = liveNow,
     ) ?: return
     val textRes: StringResource = when (status) {
@@ -159,6 +185,8 @@ internal fun ComposerStatusLine(
         AgentComposerStatus.AwaitingApproval -> Res.string.chat_composer_status_awaiting_approval
         AgentComposerStatus.Unresponsive -> Res.string.chat_composer_status_unresponsive
         AgentComposerStatus.Stopped -> Res.string.chat_composer_status_stopped
+        // 排队：告诉用户「它还没拿到这条」，而不是说成「正在想」。
+        AgentComposerStatus.Queued -> Res.string.chat_composer_status_queued
     }
     // 「无响应 / 已停止」用错误色：它是在告诉用户「别干等」；正常干活与等待审批用次级色。
     val alarming = status == AgentComposerStatus.Unresponsive || status == AgentComposerStatus.Stopped

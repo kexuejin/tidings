@@ -17,9 +17,7 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.shape.CircleShape
-import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
@@ -170,12 +168,11 @@ fun AvatarPicker(
                         )
                     }
                     if (onOpenAvatarPage != null) {
-                        OutlinedButton(
+                        AppOutlinedButton(
+                            text = stringResource(Res.string.set_avatar_change),
                             onClick = onOpenAvatarPage,
-                            contentPadding = PaddingValues(horizontal = sp.md10, vertical = sp.xs),
-                        ) {
-                            Text(stringResource(Res.string.set_avatar_change), style = MaterialTheme.typography.labelSmall)
-                        }
+                            size = AppButtonSize.Small,
+                        )
                     }
                 }
             }

@@ -112,6 +112,14 @@ fun main(args: Array<String>) {
     // 第二实例转发）。注册失败不影响主功能，见函数内注释。
     installDesktopOpenHandlers()
 
+    // 按键诊断（默认关闭，`RELAY_KEY_TRACE=1` 才装）。装在 application 之前：
+    // 它要看到的是"系统发给本进程的第一个按键"，晚于窗口创建就会漏掉开头几下。
+    DesktopKeyTrace.install(dataDirectory)
+    // 补上 macOS + JDK 让空格丢掉的那一次 KEY_TYPED。常驻、默认生效 ——
+    // 它是缺陷绕修而不是诊断开关，用户不该为了能打空格去开某个选项。
+    DesktopSpaceKeyFix.install()
+    SpaceLab.install(dataDirectory)
+
     // exitProcessOnExit=false：application 返回后我们自己做收尾（摘控制面 → 停运行时 → 停 scope）。
     application(exitProcessOnExit = false) {
         DesktopHostWindow(
@@ -124,6 +132,12 @@ fun main(args: Array<String>) {
             host = host,
             onExitApplication = ::shutdown,
         )
+        // 空格诊断的最小对照窗口（默认关闭，标记文件 `space-lab.on` 才出现）。
+        // 它同进程、同 Compose 栈、同 AWT 桥，只把"产品壳"这一层拿掉 —— 用来二分
+        // "空格缺陷在壳层还是在 CMP 桥接"。见 [SpaceLab] 的 KDoc。
+        if (SpaceLab.isEnabled()) {
+            SpaceLabWindow()
+        }
     }
 
     // application 返回（所有窗口关闭 / 显式退出循环）后收尾。

@@ -24,6 +24,7 @@ class AgentComposerStatusTest {
         lastActivityAt: Long = now - 1_000L,
         hasPendingApproval: Boolean = false,
         hasActiveRun: Boolean = false,
+        queuedCount: Int = 0,
     ) = agentComposerStatusOf(
         agentInvolved = agentInvolved,
         sessionState = sessionState,
@@ -31,6 +32,7 @@ class AgentComposerStatusTest {
         hasPendingApproval = hasPendingApproval,
         hasActiveRun = hasActiveRun,
         now = now,
+        queuedCount = queuedCount,
     )
 
     @Test
@@ -101,4 +103,43 @@ class AgentComposerStatusTest {
         assertNull(status(sessionState = "some-future-state"))
         assertNull(status(sessionState = null))
     }
-}
+
+    // ------------------------------------------------------ 排队（task-15）
+
+    /**
+     * **排队中要压过「正在想」**。
+     *
+     * 这是用户最容易误解的一档：他发了指令、界面说「agent 正在思考」⇒ 他以为它已经在处理
+     * 这条了，于是干等。真相是它还排在队列里，要等当前这一轮结束才轮到它。
+     */
+    @Test
+    fun queuedWinsOverThinking() {
+        assertEquals(
+            AgentComposerStatus.Queued,
+            status(sessionState = "busy", queuedCount = 1),
+        )
+    }
+
+    /** 排队只在**有 agent** 的会话里出现；纯人类会话整条线不画（与其它档一致）。 */
+    @Test
+    fun queuedStaysSilentInAPlainHumanConversation() {
+        assertNull(status(agentInvolved = false, queuedCount = 3))
+    }
+
+    /**
+     * **待审批仍然压过排队**：审批是用户此刻唯一能推进的事，比「排着队」更该先说。
+     */
+    @Test
+    fun pendingApprovalStillWinsOverQueued() {
+        assertEquals(
+            AgentComposerStatus.AwaitingApproval,
+            status(sessionState = "busy", hasPendingApproval = true, queuedCount = 2),
+        )
+    }
+
+    /** 0 条排队 = 不显示排队态（默认值不该改变既有行为）。 */
+    @Test
+    fun anEmptyQueueDoesNotShowTheQueuedStatus() {
+        assertEquals(AgentComposerStatus.Thinking, status(sessionState = "busy", queuedCount = 0))
+    }
+  }

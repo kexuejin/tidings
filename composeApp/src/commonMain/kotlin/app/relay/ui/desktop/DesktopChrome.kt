@@ -74,6 +74,7 @@ import app.relay.generated.resources.ic_more
 import app.relay.generated.resources.ic_search
 import org.jetbrains.compose.resources.stringResource
 import app.relay.ui.theme.ShapeRoles
+import app.relay.ui.components.AppIconButton
 
 // ------------------------------------------------------------------ 标题栏
 
@@ -390,9 +391,11 @@ private fun ToolbarOverflowItemDivider() {
 private fun ToolbarOverflowMenu(items: List<DesktopToolbarOverflowItem>) {
     var expanded by remember { mutableStateOf(false) }
     Box {
-        IconButton(onClick = { expanded = true }) {
-            Icon(painterResource(Res.drawable.ic_more), contentDescription = stringResource(Res.string.desktop_toolbar_more))
-        }
+        AppIconButton(
+            icon = Res.drawable.ic_more,
+            contentDescription = stringResource(Res.string.desktop_toolbar_more),
+            onClick = { expanded = true },
+        )
         DropdownMenu(
             expanded = expanded,
             onDismissRequest = { expanded = false },

@@ -17,7 +17,6 @@ import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
-import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -32,6 +31,8 @@ import app.relay.ui.theme.RelayElevations
 import app.relay.generated.resources.Res
 import app.relay.generated.resources.disc_connect
 import app.relay.generated.resources.disc_manual_unreachable
+import app.relay.ui.components.AppButtonSize
+import app.relay.ui.components.AppTextButton
 import app.relay.ui.components.PeerAvatar
 import app.relay.ui.components.StatusDot
 import app.relay.ui.theme.accents
@@ -238,9 +239,12 @@ internal fun MdnsServiceRow(service: MdnsServiceUi, onConnect: () -> Unit) {
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
             }
-            TextButton(onClick = onConnect) {
-                Text(stringResource(Res.string.disc_connect))
-            }
+            // 行尾动作（原型节点行的行尾一律 `.btn sm`）：列表行内，走小档。
+            AppTextButton(
+                text = stringResource(Res.string.disc_connect),
+                onClick = onConnect,
+                size = AppButtonSize.Small,
+            )
         }
     }
 }

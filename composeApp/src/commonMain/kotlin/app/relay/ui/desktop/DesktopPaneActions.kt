@@ -5,6 +5,7 @@ package app.relay.ui.desktop
 
 import app.relay.app.ManualPeerEntry
 import app.relay.platform.ReceivedFileActions
+import app.relay.feature.agents.ExecDeviceRow
 import app.relay.app.model.MessageUi
 import app.relay.app.model.PeerUi
 
@@ -60,6 +61,14 @@ public interface DesktopPaneActions {
     fun sendToConversation(convId: String, text: String, replyTo: String? = null)
 
     /**
+     * 「重发」：按**原消息 id** 重放（core 的 `replayOutgoing`），不新发一条。
+     *
+     * 换 id 重发会让对端多落一条 —— 真机现场同一句话出现两个 id。
+     * 与手机端同一个入口（`RelayController.retryMessage`）。
+     */
+    fun retryMessage(message: MessageUi)
+
+    /**
      * 发起 PK 小游戏（猜拳 / 骰子）。
      */
     fun sendPk(convId: String, game: String, value: String)
@@ -73,6 +82,33 @@ public interface DesktopPaneActions {
      * 更新群简介与公告（仅群主/管理员）。
      */
     fun updateGroupMeta(groupId: String, description: String?, announce: String?)
+    /**
+     * 把**本机的一个 workspace** 暴露/收起进这个群（`virtualAgents` 的成员入口）。
+     *
+     * [wsId] 传 null = 收起。暴露单位是 `(agentId, wsId)`：一台设备可以装多个 agent，
+     * 不同 agent 也可能操作同一个 workspace。
+     */
+    fun exposeWorkspace(groupId: String, wsId: String?, agentId: String?)
+
+    /**
+     * 算「谁能用这个 agent 干活」的逐设备勾选状态。
+     *
+     * null = 这个壳没有台账（手机连别人的机器：那是对方的主权，我配不了）。
+     * 只有桌面端实现得出 —— 它持有 `AgentGrantStore`（宿主自己的授权账面）。
+     */
+    fun execDevicesOf(agentKey: String?): List<ExecDeviceRow>? = null
+
+    /**
+     * 勾选 / 取消某台设备对这个 agent 的执行权。
+     *
+     * **只动 `scope=AGENT` 这一档**：取消时不该碰「这台设备是可信任的」那条记录 ——
+     * 「不许它执行这个 agent」与「不再信任这台设备」是两件事，
+     * 混在一起会让用户取消一个勾、结果把人整台设备都踢了。
+     */
+    fun setExecDeviceAllowed(agentKey: String, nodeId: String, allowed: Boolean): Unit = Unit
+
+    /** 「添加设备」：从候选里挑一个加到名单。默认不提供（手机壳没有台账）。 */
+    fun addExecDevice(agentKey: String): Unit = Unit
 
     /**
      * 建一个群：一个名字 + 一份成员表。
@@ -122,6 +158,22 @@ public interface DesktopPaneActions {
      * 界面只在 `canRecall` 为真时长按才给这一项，控制器里还会再挡一道。
      */
     fun recall(message: MessageUi)
+
+    /**
+     * **只删本机**这一条：(会话键, 消息 id)。不动协议、不通知对方。
+     *
+     * 与 [recall] 是两件事：撤回有时限、会告诉对方；删除是「我自己不想再看到它」。
+     */
+    fun deleteMessage(convId: String, messageId: String)
+
+    /** 置顶 / 取消置顶一个会话（纯本机偏好，与手机壳同一份语义）。 */
+    fun togglePinnedConv(convId: String)
+
+    /** 静音 / 取消静音一个会话（消息照收，只是不再通知）。 */
+    fun toggleMutedConv(convId: String)
+
+    /** 删掉一个会话（只删本机：消息、未读、置顶/静音标记）。不动协议、不通知对方。 */
+    fun deleteConversation(convId: String)
 
     /**
      * 戳一碰（协议里**仅单聊**、不入离线队列、按对端限流）。
@@ -251,11 +303,14 @@ public object DesktopPreviewActions : DesktopPaneActions {
 
     override fun sendToConversation(convId: String, text: String, replyTo: String?): Unit = Unit
 
+    override fun retryMessage(message: MessageUi): Unit = Unit
+
     override fun sendPk(convId: String, game: String, value: String): Unit = Unit
 
     override fun forwardMessage(message: MessageUi, targetConvId: String): Unit = Unit
 
     override fun updateGroupMeta(groupId: String, description: String?, announce: String?): Unit = Unit
+    override fun exposeWorkspace(groupId: String, wsId: String?, agentId: String?): Unit = Unit
 
     /**
      * 预览里建群不做事，但**必须回一个 id**：`DesktopShell` 的会话侧栏拿到 null
@@ -281,6 +336,14 @@ public object DesktopPreviewActions : DesktopPaneActions {
     override fun clearTransferLogs(): Unit = Unit
 
     override fun recall(message: MessageUi): Unit = Unit
+
+    override fun deleteMessage(convId: String, messageId: String): Unit = Unit
+
+    override fun togglePinnedConv(convId: String): Unit = Unit
+
+    override fun toggleMutedConv(convId: String): Unit = Unit
+
+    override fun deleteConversation(convId: String): Unit = Unit
 
     override fun nudge(peerId: String): Unit = Unit
 

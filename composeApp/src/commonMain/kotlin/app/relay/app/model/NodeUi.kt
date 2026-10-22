@@ -20,6 +20,13 @@ data class NetworkUi(
     val transport: Transport = Transport.None,
     val localAddresses: List<String> = emptyList(),
     val vpnActive: Boolean = false,
+    /**
+     * 对外宣告的地址（含 Tailscale / ZeroTier 隧道段），默认与 [localAddresses] 相同。
+     *
+     * 分工见 `NetworkSnapshot.advertisedAddresses`：那个给广播/同网段判断用（刻意窄），
+     * 这个给 `Profile.addresses` 单播告知用（要宽）。
+     */
+    val advertisedAddresses: List<String> = localAddresses,
     val boundUdpPort: Int = 0,
     /**
      * 本机 TLS pin（SPKI 指纹），印进配对二维码用（task-86）。
@@ -29,6 +36,13 @@ data class NetworkUi(
      * 在蜂窝上一直 connect-timeout。null = 还没有身份/明文实现（降级，不假装）。
      */
     val selfTlsPin: String? = null,
+    /**
+     * 本机身份证书的到期时刻（毫秒）；null = 没有 TLS 身份（明文实现 / 还没生成）。
+     *
+     * 只在设置-诊断页显示。**不做倒计时**：证书会在到期前自动续签且保留密钥，
+     * 所以它不会真的失效 —— 用户需要的是「值是多少」，不是一个会制造焦虑的计数器。
+     */
+    val selfCertNotAfterMillis: Long? = null,
     val failure: BannerMessage? = null,
     /**
      * mDNS 注册这一步本身的原始结果：`true` 注册成功、`false` 注册失败、`null` 未启动。

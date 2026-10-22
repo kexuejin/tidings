@@ -7,6 +7,7 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.remember
 import androidx.compose.ui.Modifier
+import app.relay.core.protocol.AGENT_SENDER_PREFIX
 import app.relay.ui.theme.TextWeights
 import com.mikepenz.markdown.m3.Markdown
 import com.mikepenz.markdown.m3.markdownColor
@@ -74,8 +75,33 @@ internal fun MarkdownMessage(
  * 判据只有一条：**agent 说的算 Markdown，人说的不算**。
  * - 自己的消息恒为 false：自己打出去的原文就是自己看到的，来回对照才不会以为发错了。
  * - 群聊里 agent 只是成员之一，所以要按**发送者**判，而不是按会话。
+ *
+ * ## 为什么还需要 [senderId]
+ *
+ * 只看「解析出来的发送者是不是 agent」在群里**判不出来**：群消息的 agent 发送者形如
+ * `agent:<kind>`（[AGENT_SENDER_PREFIX]，见 [app.relay.core.protocol.agentSenderIdFor]），
+ * 而界面的对端表是按 nodeId 建索引的 —— 拿 `agent:dsh` 去查必然查不到，于是
+ * `senderIsAgent` 恒为 false，agent 的回复在群里永远按纯文本显示（用户看到
+ * `**加粗**` 的字面量，这就是「富文本没生效」的真正原因）。私聊里对端本身就是那个
+ * agent，所以那条路一直是好的。
+ *
+ * 所以判据是**两个来源取或**：解析结果（对端表认得它时最准）**或**发送者 id 的协议前缀
+ * （对端表认不出时仍然成立）。调用点要同时把 [senderId] 递进来 —— 只传解析结果，
+ * 群里的 agent 消息就又会退回纯文本。
+ *
+ * 前缀不是安全边界：它只决定「这段文字按 Markdown 排版还是原样显示」，不影响是谁发的、
+ * 有没有权限。对端伪造这个前缀最多让自己的消息被渲染成排版文本，与它直接发 Markdown
+ * 源码没有区别。
  */
-internal fun shouldRenderMarkdown(mine: Boolean, senderIsAgent: Boolean): Boolean = !mine && senderIsAgent
+internal fun shouldRenderMarkdown(
+    mine: Boolean,
+    senderIsAgent: Boolean,
+    senderId: String? = null,
+): Boolean = !mine && (senderIsAgent || isAgentSenderId(senderId))
+
+/** [senderId] 是不是协议里的 agent 发送者（`agent:<kind>`）。null/空串一律 false。 */
+internal fun isAgentSenderId(senderId: String?): Boolean =
+    senderId != null && senderId.startsWith(AGENT_SENDER_PREFIX)
 
 /**
  * 把这些换行变成**硬换行**（行尾两个空格），只动「普通段落里的续行」。

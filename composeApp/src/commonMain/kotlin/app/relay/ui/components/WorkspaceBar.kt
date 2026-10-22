@@ -15,7 +15,6 @@ import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
-import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -105,16 +104,11 @@ fun WorkspaceBar(
 
             Row(verticalAlignment = Alignment.CenterVertically) {
                 if (onNewSegment != null) {
-                    TextButton(
+                    AppTextButton(
+                        text = stringResource(Res.string.workspace_new_segment),
                         onClick = onNewSegment,
-                        contentPadding = androidx.compose.foundation.layout.PaddingValues(horizontal = 6.dp, vertical = 2.dp),
-                    ) {
-                        Text(
-                            text = stringResource(Res.string.workspace_new_segment),
-                            style = MaterialTheme.typography.labelSmall,
-                            color = MaterialTheme.colorScheme.primary,
-                        )
-                    }
+                        size = AppButtonSize.Small,
+                    )
                 }
 
                 Icon(

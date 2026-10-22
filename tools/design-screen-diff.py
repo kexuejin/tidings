@@ -896,6 +896,85 @@ def _is_parts_file(path):
     return not any(n.endswith(SCREEN_LEVEL_SUFFIX) for n in _fun_bodies(src))
 
 
+# ── 共享组件归属（主计划 0.7）────────────────────────────────────────────
+#
+# ## 这个名单解决什么问题
+#
+# 本量具的判据是「**某屏的**原型取值集合 vs **某屏的**代码取值集合」，按"屏"切切片。
+# 而细节层迁移的本质是**把值从屏层搬进共享组件**：ConversationRow / NodeDetail 这类文件
+# 被多个屏共用，它们的取值在"每个屏"的切片里都看不到 —— 于是同一件事被报两次：
+# 对共享组件的宿主屏报"只代码"，对使用它的别的屏报"只原型"。
+#
+# ## 为什么不自动检测
+#
+# "被 >= 2 个屏引用"这个判据会把 Common.kt / SectionCard.kt 这类**几乎所有屏都碰**的文件
+# 也吸进来 —— 那等于给每个屏套上同一份取值，差集被人为缩小、这道门就废了。
+# 所以这里**人工维护**：只放"确定被多个屏共用、且取值就是该屏渲染结果"的 UI 组件文件。
+# 加一条要在 PR 里写清"哪几个屏共用它"。
+SHARED_COMPONENT_FILES = (
+    "composeApp/src/commonMain/kotlin/app/relay/feature/conversations/ConversationRow.kt",
+    "composeApp/src/commonMain/kotlin/app/relay/feature/nodes/NodeDetail.kt",
+    # 文件柜：`MineCabinetView` 起两个壳共用（手机 CabinetScreen / 桌面 CabinetPane 右栏），
+    # 取值本来就在这个文件里，而工具只把它归给手机屏 m-cabinet —— 于是 d-cabinet 报"缺 7/9/12"。
+    "composeApp/src/commonMain/kotlin/app/relay/feature/cabinet/CabinetScreen.kt",
+    "composeApp/src/commonMain/kotlin/app/relay/feature/cabinet/PeerCabinetView.kt",
+    # 按钮族：`AppButton` / `AppOutlinedButton` / `AppTextButton` / `AppIconButton` 被全应用共用。
+    # 迁进来之后，原来写在屏上的 `shape = ShapeRoles.Avatar`(9) / `shapes.medium`(12) /
+    # `contentPadding = 9×5` 全都**搬进了这个文件**，逐屏切片里自然就"没有"了。
+    "composeApp/src/commonMain/kotlin/app/relay/ui/components/AppButtons.kt",
+)
+
+_SHARED_CACHE = {}
+
+
+def merge_shared_values(cv, sv, pv=None):
+    """把共享组件文件的取值并进本屏的代码取值集合。**原地改**并返回。
+
+    纯函数，所以自检能直接打它 —— 不需要造临时仓库。
+
+    ## [pv] 的约束：只许关闭"只原型"，不许制造"只代码"
+
+    给定原型取值集合 [pv] 时，**只并那些原型里也有的值**。
+
+    为什么必须这样：共享归属存在的意义是解释"这一屏确实用到了某个值，只是它写在
+    共享组件里"。它**没有**资格宣称"代码里有原型没有的值" —— 那是真偏离，必须留着。
+    不加这条约束实测过：9 个空态屏（d-empty / d-nosel / d-nomatch…）因为落点文件里
+    含有 ConversationRow 的调用行，凭空多出 3/5/7/48 四个"只代码"值。
+    """
+    for dim in DIM_ORDER:
+        if pv is None:
+            cv[dim] |= sv[dim]
+        else:
+            cv[dim] |= (sv[dim] & pv[dim])
+    return cv
+
+
+def shared_components(repo, tokens):
+    """共享组件清单：[{path, names, values}]，按 repo+tokens 缓存。
+
+    [names] 是该文件导出的 Composable 名，调用方据此判断"这一屏到底用没用它"。
+
+    **只并到真正调用它的屏。** 无条件并到所有屏会比不修还糟 —— 实测 89 个并不渲染
+    ConversationRow / NodeDetail 的屏（m-gsearch / m-histsearch / m-folderin…）
+    凭空冒出 7 / 9 / 48 / 16 / 500 这些"只代码"值。
+    """
+    key = (os.path.abspath(repo), id(tokens))
+    if key in _SHARED_CACHE:
+        return _SHARED_CACHE[key]
+    out = []
+    fn_re = re.compile(r"^\s*(?:public |internal |private )?fun ([A-Z]\w*)\(", re.M)
+    for rel in SHARED_COMPONENT_FILES:
+        path = os.path.join(repo, rel)
+        if not os.path.exists(path):
+            raise DiffError("共享组件文件不存在：" + rel + "（名单过期了？改 SHARED_COMPONENT_FILES）")
+        src = open(path, encoding="utf-8").read()
+        names = sorted(set(fn_re.findall(src)))
+        values, _ = code_values([(rel, "", src)], tokens)
+        out.append({"path": rel, "names": names, "values": values})
+    _SHARED_CACHE[key] = out
+    return out
+
+
 def landing_slices(repo, landing, render_fn, exclude=None):
     """台账落点 → **真正画这一屏的那个 Composable** 的源码切片。
 
@@ -1369,6 +1448,14 @@ def compare_one(repo, row, html, css, scopes, bodies, fns, forms, tokens, exclud
     if not slices:
         return {"screen": sid, "label": row["label"], "error": f"落点不存在：{row['landing']}"}
     cv, cu = code_values(slices, tokens)
+    # 共享组件（ConversationRow / NodeDetail 等）的取值属于**用到它的每一个屏**。
+    # 判据是"这一屏的切片里真的调了这个组件"，不是"名单里有就并" —— 后者会把取值灌进
+    # 所有屏，差集被人为缩小、这道门就失去分辨力。
+    _all_src = chr(10).join(src for _p, _f, src in slices)
+    for _comp in shared_components(repo, tokens):
+        if any(re.search(r"(?<![\w.])" + re.escape(_n) + r"\s*\(", _all_src) for _n in _comp["names"]):
+            # 传 pv：只许关闭"只原型"，不许制造"只代码"（见 merge_shared_values 的 KDoc）。
+            merge_shared_values(cv, _comp["values"], pv)
     # **第十九个洞**：药丸圆角没有数字对应物 —— 原型写 `border-radius:999px`（`--r-chip`），
     # Compose 的惯用写法是 `CircleShape`，量具只认数字圆角，于是**恒挂一条「只原型 999」**
     # （实测 33 屏：m-chat / m-msgmenu / m-agents / d-cabinet / d-nodes …，全是同一个单位缺口）。
@@ -1876,6 +1963,33 @@ def self_test():
     regress, improved = ratchet({"m-x|spacing|proto": ["9"]}, base)
     expect(not regress and improved == [("m-x|spacing|proto", ["13"])],
            "自检：差集变小必须算改进且不报红")
+
+    # 9) 共享组件归属（主计划 0.7）。这条守的是"合并共享组件之后不再双报"，
+    #    以及它的反面：不许借这个机制把本屏自己的取值洗掉、也不许凭空补维度。
+    _cv = {d: set() for d in DIM_ORDER}
+    _cv["spacing"] = {14.0}
+    _cv["font-size"] = {11.0}
+    _sv = {d: set() for d in DIM_ORDER}
+    _sv["spacing"] = {7.0}
+    merge_shared_values(_cv, _sv)
+    expect(_cv["spacing"] == {14.0, 7.0},
+           "自检：共享组件的取值必须并进本屏 —— 否则每迁一个共享件都会双报一次（0.7）")
+    expect(_cv["font-size"] == {11.0},
+           "自检：本屏自己的取值不许被共享件覆盖（并集不是替换）")
+    expect(_cv["radius"] == set(),
+           "自检：共享件没有的维度不许凭空补值（否则差集被人为缩小）")
+    # 带 pv 的约束：共享归属只许关闭"只原型"，不许制造"只代码"。
+    # 不加这条约束实测过：9 个空态屏因为落点文件里含共享组件调用行，凭空多出 3/5/7/48。
+    _cv2 = {d: set() for d in DIM_ORDER}
+    _sv2 = {d: set() for d in DIM_ORDER}
+    _sv2["spacing"] = {7.0, 48.0}
+    _pv2 = {d: set() for d in DIM_ORDER}
+    _pv2["spacing"] = {7.0}
+    merge_shared_values(_cv2, _sv2, _pv2)
+    expect(_cv2["spacing"] == {7.0},
+           "自检：带 pv 时只并原型也有的值（48 不许进来，否则凭空造出「只代码」）")
+    expect(48.0 not in _cv2["spacing"],
+           "自检：共享归属没有资格声称「代码里有原型没有的值」—— 那是真偏离，必须留着")
 
     if fails:
         for f in fails:

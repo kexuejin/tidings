@@ -69,6 +69,14 @@ class TlsLinkTransport(
     /** 本机的 pin（SPKI）。它本来就要进配对二维码，所以公开无妨 —— 测试与诊断也用它。 */
     override val localPin: TlsPin get() = identity.pin
 
+    /**
+     * 本机证书的到期时刻。给设置-诊断页显示用。
+     *
+     * 直接读证书自己的 `notAfter`，不是记一个「签发时 +365 天」的副本 ——
+     * 副本会与真实证书漂，漂了以后用户看到的就是一个与实际不符的日期。
+     */
+    override val localCertNotAfterMillis: Long get() = identity.certificate.notAfter.time
+
     /** TLS 监听**实际绑上**的端口（传 0 时由系统分配；未监听为 null）。 */
     @Volatile
     var boundServerPort: Int? = null

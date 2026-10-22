@@ -34,7 +34,9 @@ import androidx.compose.material3.TextFieldDefaults
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.withFrameNanos
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -98,6 +100,11 @@ import app.relay.app.model.PeerUi
 import org.jetbrains.compose.resources.painterResource
 import org.jetbrains.compose.resources.StringResource
 import org.jetbrains.compose.resources.stringResource
+import app.relay.ui.components.AppIconButton
+import androidx.compose.material3.DropdownMenu
+import androidx.compose.material3.DropdownMenuItem
+import app.relay.ui.components.MentionTarget
+import app.relay.ui.components.insertMention
 
 // ------------------------------------------------------------------ 浮起输入卡片
 
@@ -122,6 +129,15 @@ import org.jetbrains.compose.resources.stringResource
  * 更窄的窗口不该出现这个组件：分栏下限由 `DesktopMetrics.MIN_CHAT_PANE_PX` 保证。
  */
 private val ComposerRoomyWidth = 420.dp
+
+/**
+ * 进入会话时最多重试几次 `requestFocus()`。
+ *
+ * 目标在焦点树里落定需要一两帧（输入框在子组合里，首帧 `requestFocus()` 返回 false），
+ * 所以第一枪必然是空的。给到 30 帧（半秒左右）足够覆盖慢机器，又不会在真正拿不到焦点时
+ * 无限空转 —— 循环只在 `requestFocus()` 返回 true 时提前退出。
+ */
+private const val FOCUS_ATTEMPTS = 30
 
 /**
  * 工具行每一颗图标的**方框**边长，等于原型 `.tools .ibtn` 的 28px
@@ -151,6 +167,17 @@ public fun DesktopComposer(
      * 显式传进来，将来占位对端的 id 怎么变都不会影响这里。
      */
     isGroup: Boolean = false,
+    /**
+     * `@` 候选（群成员 + 群里可叫醒的 agent）。空 = 这个会话没有可 @ 的对象。
+     *
+     * **桌面端以前完全没有这个能力**：`DesktopComposer` 自己画输入框，只在那排按钮里
+     * 塞了一个硬编码的「@dsh」快捷插入 —— 于是「输入 @ 弹出成员列表」在手机上能用、
+     * 桌面上根本没有（真机反馈：「桌面端还是无法输入 @」）。
+     *
+     * 与移动端用**同一个** [MentionTarget] 与同一个 [insertMention]：插入的 token 与
+     * 触发判据同源，不存在"@ 了却叫不醒"的分叉。
+     */
+    mentionTargets: List<MentionTarget> = emptyList(),
 ) {
     val density = LocalDensity.current
     var split by remember { mutableStateOf(ComposerSplit(ComposerSplit.DEFAULT_RATIO)) }
@@ -158,9 +185,33 @@ public fun DesktopComposer(
         mutableStateOf(TextFieldValue(draft, TextRange(draft.length)))
     }
     var emojiOpen by remember { mutableStateOf(false) }
+    var mentionMenuOpen by remember { mutableStateOf(false) }
     var historySearchOpen by remember(peer.nodeId) { mutableStateOf(false) }
     var pkPickerOpen by remember(peer.nodeId) { mutableStateOf(false) }
     val focusRequester = remember { FocusRequester() }
+
+    // **进入会话就把焦点给输入框。**
+    //
+    // 没有这一步时，窗口/会话打开后焦点在根容器上：用户先按空格或直接打字，
+    // 按键进不了输入框 —— 表现是「输入框不支持空格」，而**根容器会出现点击高亮**
+    // （`.focusable()` 的默认指示），于是更像「点中了什么」。
+    //
+    // **必须按返回值重试，不能只调一次。** `FocusRequester.requestFocus()` 在目标还没
+    // 进入焦点树的头几帧里**返回 false 且不抛异常** —— 而输入框在两层
+    // `BoxWithConstraints`（子组合）里，首帧必然是这个状态。旧写法
+    // `runCatching { requestFocus() }` 把返回值丢了，于是"聚焦"这个动作每次都
+    // 静默失败：用户不点一下输入框，空格与字母都进不去（真机反复报"打不进空格"，
+    // 而点击之后一切正常 —— 这条差异就是判据）。用 `withFrameNanos` 等下一帧再试，
+    // 拿到 true 立刻停，不无限抢焦点。
+    //
+    // 只在**换会话**时请求（键是 peer.nodeId）：每条 draft 变化都抢焦点
+    // 会让用户点别处（表情面板、候选列表）后又被拽回来。
+    LaunchedEffect(peer.nodeId) {
+        repeat(FOCUS_ATTEMPTS) {
+            if (focusRequester.requestFocus()) return@LaunchedEffect
+            withFrameNanos { }
+        }
+    }
 
     val bytes = draftByteCount(value.text)
     val mode = composeByteMode(bytes)
@@ -226,9 +277,12 @@ public fun DesktopComposer(
                             // 表情在原型工具行的第一位（`relay.html:3109` 的 `i-smile`），
                             // 也是整排里唯一带浮层的：它那一格连着 `EmojiPopup`。
                             Box {
-                                IconButton(onClick = { emojiOpen = true }, modifier = Modifier.size(ComposerToolIconSize)) {
-                                    Icon(painterResource(Res.drawable.ic_smile), contentDescription = stringResource(Res.string.chat_emoji), modifier = Modifier.size(IconSizes.Label))
-                                }
+                                AppIconButton(
+                                    icon = Res.drawable.ic_smile,
+                                    contentDescription = stringResource(Res.string.chat_emoji),
+                                    onClick = { emojiOpen = true },
+                                    modifier = Modifier.size(ComposerToolIconSize),
+                                )
                                 if (emojiOpen) {
                                     EmojiPopup(
                                         onPick = { emoji ->
@@ -339,9 +393,17 @@ public fun DesktopComposer(
                     }
                     OutlinedTextField(
                         value = value,
-                        onValueChange = {
-                            value = it
-                            onDraftChange(it.text)
+                        onValueChange = { next ->
+                            val previousText = value.text
+                            value = next
+                            onDraftChange(next.text)
+                            // 刚敲入 `@` 就开候选（与手机端 MessageComposer 同一条判据）。
+                            if (mentionTargets.isNotEmpty() && next.text.length > previousText.length) {
+                                val cursor = next.selection.end
+                                if (cursor > 0 && next.text.getOrNull(cursor - 1) == '@') {
+                                    mentionMenuOpen = true
+                                }
+                            }
                         },
                         placeholder = { Text(stringResource(Res.string.desktop_composer_placeholder), style = MaterialTheme.typography.bodyMedium) },
                         textStyle = MaterialTheme.typography.bodyMedium,
@@ -372,6 +434,42 @@ public fun DesktopComposer(
                             unfocusedIndicatorColor = Color.Transparent,
                         ),
                     )
+                    // `@` 候选：输入 `@` 后弹出（与手机端 MessageComposer 同一套 UI 与同一条
+                    // 插入函数）。桌面端此前完全没有这个能力，只有一个硬编码的「@dsh」快捷插入。
+                    DropdownMenu(
+                        expanded = mentionMenuOpen,
+                        onDismissRequest = { mentionMenuOpen = false },
+                    ) {
+                        mentionTargets.forEach { target ->
+                            DropdownMenuItem(
+                                text = {
+                                    Column {
+                                        Text(target.token)
+                                        // 资料没到时如实说一句；有名字的人不画副行（不制造噪声）。
+                                        target.note?.let { note ->
+                                            Text(
+                                                text = note,
+                                                style = MaterialTheme.typography.labelSmall,
+                                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                            )
+                                        }
+                                    }
+                                },
+                                onClick = {
+                                    mentionMenuOpen = false
+                                    val (nextText, nextCursor) = insertMention(
+                                        text = value.text,
+                                        start = value.selection.min,
+                                        end = value.selection.max,
+                                        token = target.token,
+                                    )
+                                    value = TextFieldValue(nextText, TextRange(nextCursor))
+                                    onDraftChange(nextText)
+                                    focusRequester.requestFocus()
+                                },
+                            )
+                        }
+                    }
                     BoxWithConstraints(Modifier.fillMaxWidth()) {
                         // 窄聊天栏里按顺序丢东西：先丢键盘提示，再让草稿行省略号截断。
                         // 顺序不能反 —— 反了就成「看得见怎么发，看不见发的是什么」。

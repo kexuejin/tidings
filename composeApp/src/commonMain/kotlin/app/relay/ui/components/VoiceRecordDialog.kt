@@ -2,7 +2,6 @@
 
 package app.relay.ui.components
 
-import org.jetbrains.compose.resources.painterResource
 import androidx.compose.animation.core.RepeatMode
 import androidx.compose.animation.core.animateFloat
 import androidx.compose.animation.core.infiniteRepeatable
@@ -211,15 +210,14 @@ fun VoiceRecordDialog(
                                 Icon(Icons.Outlined.PlayArrow, contentDescription = null, modifier = Modifier.size(IconSizes.Body))
                                 Text(stringResource(Res.string.file_play_audio), modifier = Modifier.padding(start = LocalAppSpacing.current.xs))
                             }
-                            OutlinedButton(
+                            AppOutlinedButton(
+                                text = stringResource(Res.string.chat_voice_rerecord),
                                 onClick = {
                                     RelayAudioPlayback.stop()
                                     stage = RecordStage.Idle
                                 },
-                            ) {
-                                Icon(painterResource(Res.drawable.ic_refresh), contentDescription = null, modifier = Modifier.size(IconSizes.Body))
-                                Text(stringResource(Res.string.chat_voice_rerecord), modifier = Modifier.padding(start = LocalAppSpacing.current.xs))
-                            }
+                                leadingIcon = Res.drawable.ic_refresh,
+                            )
                         }
                     }
                 }
