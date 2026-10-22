@@ -832,7 +832,8 @@ fun WorkspaceDetailView(
             wsPath = workspace?.wsPath,
             host = host,
             port = port,
-            addresses = if (qrIsSelf) state.network.localAddresses else emptyList(),
+            // 直接码用「宣告」那份（含隧道地址）；不是自己时仍给空表，让弹层走对端地址。
+            addresses = if (qrIsSelf) state.network.advertisedAddresses else emptyList(),
             nodeId = if (qrIsSelf) state.selfNodeId else "",
             // task-86：本机直通码必须带 pin（对端工作区的码不带 —— 那时手机连的是别人）。
             tlsPin = if (qrIsSelf) state.network.selfTlsPin else null,

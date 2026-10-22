@@ -977,7 +977,9 @@ fun RelayApp(
                             ?: state.peers.firstOrNull { it.online }?.let { it.host.ifBlank { it.ip } },
                         port = state.network.boundUdpPort.takeIf { it > 0 } ?: state.settings.udpPort,
                         // 全部候选：跨网络的手机才能靠这张码找到本机（公网 v6 在二维码预算内）。
-                        addresses = state.network.localAddresses,
+                        // 用「宣告」那份（含 Tailscale/ZeroTier 隧道地址）：本地那份给广播
+                        // 与同网段判断用，刻意窄。出码用它会让走隧道的手机永远连不上。
+                        addresses = state.network.advertisedAddresses,
                         nodeId = state.selfNodeId,
                         // task-86：直通码也必须带 pin，否则手机建不出公网 TLS 目标。
                         tlsPin = state.network.selfTlsPin,

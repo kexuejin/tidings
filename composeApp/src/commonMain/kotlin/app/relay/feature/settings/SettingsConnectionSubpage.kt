@@ -201,7 +201,8 @@ fun SettingsConnectionSubpage(
                 // （真机症状：dialLastTarget 一直是局域网明文口 ⇒ connect-timeout）。
                 val qrPayload = pairingQrPayloadFor(
                     host = state.network.localAddresses.firstOrNull(),
-                    addresses = state.network.localAddresses,
+                    // 同其他出码点：用「宣告」那份，含隧道地址。
+                    addresses = state.network.advertisedAddresses,
                     port = settings.udpPort,
                     nodeId = state.selfNodeId,
                     // task-86：**必须**带 pin（公网目标要求 pin != null，fail-closed）。

@@ -16,6 +16,16 @@ import kotlin.test.assertTrue
  *
  * 为什么放在 jvmTest 而不是 commonTest：断言的是源码文本，只有 JVM 侧能读文件
  * （与 SystemBarsInsetGuardTest 同一取舍）。
+ *
+ * ## 这条守卫**曾经把缺陷钉死**（真机现场）
+ *
+ * 它原来断言的标记是 `addresses = ...localAddresses` —— 也就是「每处入口都必须用**窄**的那份
+ * 地址表」。于是手机卸载重装后（nodeId 变了、`known-peers` 空了），三条发现路径全断：
+ * 受限广播出不了本机子网、`utun` 是 `/32` 点对点没有广播语义、mDNS 同样限于局域网。
+ * 唯一剩下的引导通道是扫这张码 —— 而码里恰好没有隧道地址，走 Tailscale 的那台 Mac
+ * 永远连不上。**守卫绿色的那段时间，缺陷一直是活的。**
+ *
+ * 教训写在断言里：守卫要钉「性质」，不要钉「当时那一行怎么写」。
  */
 class PairingEntryPointsGuardTest {
 
@@ -24,15 +34,15 @@ class PairingEntryPointsGuardTest {
         "composeApp/src/commonMain/kotlin/app/relay/feature/nodes/NodeSheets.kt" to
             "pairingQrPayloadFor(",
         "composeApp/src/commonMain/kotlin/app/relay/feature/nodes/NodesScreen.kt" to
-            "addresses = network.localAddresses",
+            "addresses = network.advertisedAddresses",
         "composeApp/src/commonMain/kotlin/app/relay/feature/settings/SettingsConnectionSubpage.kt" to
             "pairingQrPayloadFor(",
         "composeApp/src/commonMain/kotlin/app/relay/App.kt" to
-            "addresses = state.network.localAddresses",
+            "addresses = state.network.advertisedAddresses",
         "composeApp/src/commonMain/kotlin/app/relay/ui/desktop/DesktopShell.kt" to
-            "addresses = state.network.localAddresses",
+            "addresses = state.network.advertisedAddresses",
         "composeApp/src/commonMain/kotlin/app/relay/feature/agents/WorkspaceDetailView.kt" to
-            "addresses = if (qrIsSelf) state.network.localAddresses else emptyList()",
+            "addresses = if (qrIsSelf) state.network.advertisedAddresses else emptyList()",
     )
 
     @Test

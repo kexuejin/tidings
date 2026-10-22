@@ -217,7 +217,11 @@ public fun ConversationsPane(
                 ?: state.peers.firstOrNull { it.online }?.let { it.host.ifBlank { it.ip } },
             port = state.network.boundUdpPort.takeIf { it > 0 } ?: state.settings.udpPort,
             // 给多候选能力：有本机地址时直通码也带上全部候选（公网 v6 在跨网时才可能连通）。
-            addresses = state.network.localAddresses,
+            // **用「宣告」那份，不是「本地」那份**：后者刻意过滤掉 utun / feth / tailscale
+            // （广播与同网段判断要窄），于是 Tailscale 的 100.x 永远进不了码 —— 真机现场：
+            // 手机卸载重装后 nodeId 变了、known-peers 空了，广播又出不了本机子网，
+            // 三条发现路径全断，只剩这张码可依赖，而码里没有隧道地址。
+            addresses = state.network.advertisedAddresses,
             nodeId = state.selfNodeId,
             // task-86：直通码也必须带 pin，否则手机建不出公网 TLS 目标。
             tlsPin = state.network.selfTlsPin,
@@ -291,7 +295,11 @@ public fun ConversationsPane(
             selfTlsPin = state.network.selfTlsPin,
             nodeId = state.selfNodeId,
             nick = state.settings.nick,
-            addresses = state.network.localAddresses,
+            // **用「宣告」那份，不是「本地」那份**：后者刻意过滤掉 utun / feth / tailscale
+            // （广播与同网段判断要窄），于是 Tailscale 的 100.x 永远进不了码 —— 真机现场：
+            // 手机卸载重装后 nodeId 变了、known-peers 空了，广播又出不了本机子网，
+            // 三条发现路径全断，只剩这张码可依赖，而码里没有隧道地址。
+            addresses = state.network.advertisedAddresses,
             port = state.network.boundUdpPort,
             onPair = onGoToPairing,
             onOpenAgentConsole = onOpenAgentConsole,

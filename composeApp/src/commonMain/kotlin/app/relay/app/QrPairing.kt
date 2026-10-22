@@ -43,6 +43,23 @@ public object PeerCandidateTypes {
     public const val LAN_V6: String = "lan_v6"
     /** 公网 IPv6（GUA `2000::/3`）：跨网络时唯一可能直连的类型（前提是主机侧允许入站）。 */
     public const val PUBLIC_V6: String = "public_v6"
+    /**
+     * **覆盖网隧道 IPv4**（Tailscale / ZeroTier 的 `100.64.0.0/10`）。
+     *
+     * ## 为什么单独一档、而不是并入 `lan_v4`
+     *
+     * 它的可达性**依赖两端都在同一张覆盖网里** —— 不像局域网那样「同网段就连得上」。
+     * 所以它在优先级阶梯里排最后（见 [choosePeerCandidate](同一文件)）：同网段的设备仍走
+     * `lan_v4`，只有别的路都不可用时才落到它。
+     *
+     * ## 为什么必须有这一档（真机现场）
+     *
+     * 手机卸载重装 ⇒ nodeId 变了 ⇒ 那台机器上 `known-peers` 是空的。三条发现路径同时断：
+     * 受限广播出不了本机子网、`utun` 是 `/32` 点对点没有广播语义、mDNS 同样限于局域网。
+     * 唯一剩下的引导通道是**扫桌面端的码** —— 而 `100.64/10` 原先被 `isFakeCandidateRange`
+     * 整段挡掉，于是「走 Tailscale 的那台 Mac」永远进不了码，手机永远连不上它。
+     */
+    public const val TUNNEL_V4: String = "tunnel_v4"
     /** 主机名（`desktop-node.local` 这种）。 */
     public const val DOMAIN: String = "domain"
     /** 认不出类型但仍是合法主机串。 */
@@ -72,7 +89,11 @@ public fun peerCandidateTypeOf(host: String): String? {
         if (octets.size != 4) return null
         if (octets[0] == 127) return null                 // 回环：只有本机能连
         if (octets[0] == 169 && octets[1] == 254) return null // 链路本地：不可路由
-        if (isFakeCandidateRange(octets)) return null     // 代理 fake-IP / 隧道 CGNAT
+        // 代理 fake-IP：对端照它连只会连到不存在的隧道网关，**任何情况都不进码**。
+        if (isFakeCandidateRange(octets)) return null
+        // 覆盖网隧道（Tailscale / ZeroTier）：能连，但**只限同在那一张网里的设备**，
+        // 所以单独一档、优先级最低，而不是丢掉 —— 见 TUNNEL_V4 的 KDoc。
+        if (isTunnelRange(octets)) return PeerCandidateTypes.TUNNEL_V4
         return PeerCandidateTypes.LAN_V4
     }
     if (IpAddressUtils.isIpv6(clean)) {
@@ -107,8 +128,18 @@ public fun isFakeCandidateRange(octets: List<Int>): Boolean {
     val a = octets[0]
     val b = octets[1]
     if (a == 198 && (b == 18 || b == 19)) return true   // 198.18.0.0/15
-    if (a == 100 && b in 64..127) return true           // 100.64.0.0/10
     return false
+}
+
+/**
+ * RFC 6598 运营商级 NAT 段 `100.64.0.0/10` —— 本机上是 **Tailscale / ZeroTier** 的隧道地址。
+ *
+ * 与 [isFakeCandidateRange] 分开的理由：fake-IP 是**任何情况都连不通**（照它拨只会打到代理
+ * 自己的网关），隧道地址是**同网可达**。前者要从候选里彻底消失，后者只是优先级低。
+ */
+public fun isTunnelRange(octets: List<Int>): Boolean {
+    if (octets.size != 4) return false
+    return octets[0] == 100 && octets[1] in 64..127
 }
 
 /**
@@ -240,6 +271,8 @@ internal fun choosePeerCandidate(
     return pick(PeerCandidateTypes.LAN_V4)
         ?: pick(PeerCandidateTypes.LAN_V6)
         ?: pick(PeerCandidateTypes.PUBLIC_V6)
+        // 覆盖网隧道（Tailscale / ZeroTier）：同网才可达，所以排在所有直连类型之后。
+        ?: pick(PeerCandidateTypes.TUNNEL_V4)
         ?: pick(PeerCandidateTypes.DOMAIN)
         ?: pick(PeerCandidateTypes.OTHER)
         ?: candidates.first()
@@ -393,6 +426,8 @@ internal fun roundRobinByType(candidates: List<PeerCandidate>): List<PeerCandida
         PeerCandidateTypes.PUBLIC_V6,
         PeerCandidateTypes.LAN_V4,
         PeerCandidateTypes.LAN_V6,
+        // 隧道排在预算的最末：装不下时它是第一个被裁掉的（同 LAN 的设备本来也不需要它）。
+        PeerCandidateTypes.TUNNEL_V4,
         PeerCandidateTypes.DOMAIN,
         PeerCandidateTypes.OTHER,
     )

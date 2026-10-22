@@ -189,9 +189,10 @@ class PeerCandidatePairingTest {
         // 公网那条不可替代）。所以这里钉的是"第一档 = 公网 v6、内网 v4 紧随其后"。
         assertEquals(PeerCandidateTypes.PUBLIC_V6, qr.first().type, "轮转第一档是公网 v6（跨网唯一不可替代的那条）")
         assertTrue(qr.getOrNull(1)?.type == PeerCandidateTypes.LAN_V4, "第二档是内网 v4：" + qr)
-        // 版本 8 的 153 字节上限；二进制候选约 12–22 字节/条 ⇒ 最多 5 条。
-        // 上限钉在 5：再多就说明预算（QR_PAYLOAD_MAX_BYTES）没生效。
-        assertTrue(qr.size <= 5, "二维码容量只装得下少数几条，别把 12 条全塞进去：" + qr)
+        // **断言性质，不钉条数。** 原来写的是 `qr.size <= 5` —— 那是按二进制候选 12–22 字节
+        // 估出来的经验值，加一档 `tunnel_v4` 就假红了。真正的性质是「预算裁掉了东西」，
+        // 而「生成的载荷一定能编码」由 `qrPayloadAlwaysFitsTheEncoder` 独立守着。
+        assertTrue(qr.size < addresses.size, "预算必须真的裁过，别把 12 条全塞进去：" + qr)
     }
 
     @Test
@@ -316,12 +317,18 @@ class PeerCandidatePairingTest {
     // ------------------------------------------------------------ 假候选过滤（task-17）
 
     @Test
-    fun proxyFakeIpAndTunnelCgnatRangesAreNotCandidates() {
-        // 真机实测：Mac 上 5 个 v4 候选里 2 个来自这两段（Clash fake-IP 与 Tailscale CGNAT）。
+    fun proxyFakeIpIsNeverACandidateButTunnelIsTheLowestTier() {
+        // **这两段现在处置不同**（曾经都是 null）：
+        //  · 198.18/15 是代理 fake-IP，照它拨只会打到代理自己的网关 ⇒ 任何情况都不进候选；
+        //  · 100.64/10 是 Tailscale / ZeroTier 的隧道地址，**同网可达** ⇒ 单独一档、优先级最低。
+        //
+        // 为什么改：手机卸载重装后 nodeId 变了、known-peers 空了，广播与 mDNS 都出不了本机
+        // 子网，`utun` 又是 /32 点对点没有广播语义 —— 唯一剩下的引导通道只有扫二维码，
+        // 而隧道地址被整段挡掉意味着「走 Tailscale 的那台 Mac」永远进不了码。
         assertNull(peerCandidateTypeOf("198.18.0.1"), "198.18/15 是代理 fake-IP 网关")
         assertNull(peerCandidateTypeOf("198.19.255.254"), "198.18.0.0/15 的上边界")
-        assertNull(peerCandidateTypeOf("100.64.0.1"), "100.64/10 是隧道 CGNAT")
-        assertNull(peerCandidateTypeOf("100.127.255.254"), "100.64.0.0/10 的上边界")
+        assertEquals(PeerCandidateTypes.TUNNEL_V4, peerCandidateTypeOf("100.64.0.1"), "隧道段单独一档")
+        assertEquals(PeerCandidateTypes.TUNNEL_V4, peerCandidateTypeOf("100.127.255.254"), "100.64/10 的上边界")
         // 边界外必须放行：过滤过宽会把用户真实的私网/公网地址也挡掉。
         assertEquals(PeerCandidateTypes.LAN_V4, peerCandidateTypeOf("198.17.0.1"))
         assertEquals(PeerCandidateTypes.LAN_V4, peerCandidateTypeOf("198.20.0.1"))
@@ -350,11 +357,11 @@ class PeerCandidatePairingTest {
             17878,
         )
         assertEquals(
-            listOf(PeerCandidateTypes.LAN_V4, PeerCandidateTypes.PUBLIC_V6),
+            listOf(PeerCandidateTypes.TUNNEL_V4, PeerCandidateTypes.LAN_V4, PeerCandidateTypes.PUBLIC_V6),
             pool.map { it.type },
-            "fake-IP / 隧道 CGNAT / 链路本地都进不了候选池，真 v4 与公网 v6 保留",
+            "fake-IP 与链路本地进不了候选池；隧道地址保留但自成最低一档，真 v4 与公网 v6 照旧",
         )
-        assertEquals(listOf("192.168.2.82", guaV6), pool.map { it.host })
+        assertEquals(listOf("100.66.238.121", "192.168.2.82", guaV6), pool.map { it.host })
     }
 
     // ------------------------------------------------------------ 入口共用选择（task-17）
@@ -398,7 +405,8 @@ class PeerCandidatePairingTest {
         assertNotNull(payload)
         val parsed = parseQr(payload) as ParsedQr.LanPeer
         val hosts = parsed.candidates.map { it.host }
-        assertTrue(hosts.none { it.startsWith("198.18") || it.startsWith("100.66") }, "假候选不许进码：" + hosts)
+        assertTrue(hosts.none { it.startsWith("198.18") }, "fake-IP 不许进码：" + hosts)
+        assertTrue(hosts.any { it.startsWith("100.66") }, "隧道地址要进码（重装后唯一能引导的那条）" + hosts)
         assertTrue(hosts.contains("192.168.2.82") && hosts.contains(guaV6), "真候选必须在：" + hosts)
     }
 

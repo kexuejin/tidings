@@ -83,7 +83,9 @@ public fun DesktopStatusBar(
     val pairingLink = pairingPayloadForAddresses(
         nodeId = state.selfNodeId,
         nick = state.settings.nick,
-        addresses = state.network.localAddresses,
+        // 用「宣告」那份：含隧道地址。本地那份刻意过滤 utun/feth/tailscale，
+        // 拿它生成链接会让「换到别的网络（或走 Tailscale）的手机」只能手动填地址。
+        addresses = state.network.advertisedAddresses,
         port = selfPort,
         // task-86：复制链接这条路也要带 pin —— 公网目标要求 pin != null（fail-closed）。
         tlsPin = state.network.selfTlsPin,

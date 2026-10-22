@@ -520,7 +520,8 @@ fun NodesScreen(
             port = udpPort,
             onDismiss = { myQrOpen = false },
             // 带全部候选：手机「我的二维码」也要能跨网络被找到（见 pairingQrPayloadFor）。
-            addresses = network.localAddresses,
+            // 用「宣告」那份：含隧道地址（本地那份给广播与同网段判断）。
+            addresses = network.advertisedAddresses,
             nodeId = state.selfNodeId,
             // task-86：还要带 pin，否则跨网手机建不出公网 TLS 目标（真机就死在这一格）。
             tlsPin = network.selfTlsPin,
