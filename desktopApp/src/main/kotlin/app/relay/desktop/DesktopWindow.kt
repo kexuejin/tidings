@@ -172,6 +172,18 @@ internal class DesktopHost(
 
     /** 同上：外部入口要求把界面切到「节点」视图（深链 = 添加节点流程）。 */
     var nodesViewTicks by mutableStateOf(0)
+
+    /**
+     * 「把添加节点面板打开」的一次性请求计数。
+     *
+     * **为什么需要它**：`DesktopShell` 的「新建会话」原本只做 `view = Nodes` 再调
+     * `actions.onNewConversation()`，而宿主注入的那个动作是空实现 —— 于是这个命令的
+     * 全部效果就是切一次视图。用户已经在节点页时点它，**什么都不发生**。
+     *
+     * 与 `nodesViewTicks` 同一个形状（递增的意图计数，消费方用 `LaunchedEffect` 收），
+     * 因为视图路由归 shell 独占，窗口层只能表达意图、不能直接改 `view`。
+     */
+    var addNodeTicks by mutableStateOf(0)
         private set
 
     /** 同上：托盘菜单「收到的文件」要求把界面切到「文件」视图。 */
@@ -188,6 +200,12 @@ internal class DesktopHost(
 
     fun requestNodesView() {
         nodesViewTicks++
+    }
+
+    /** 「新建会话」的落点：切到节点视图**并直接打开添加节点面板**。 */
+    fun requestNewConversation() {
+        nodesViewTicks++
+        addNodeTicks++
     }
 
     fun requestFilesView() {
@@ -353,12 +371,17 @@ internal fun DesktopHostWindow(
         )
 
         AppTheme(darkTheme = effectiveDark) {
-            val actions = remember(host, scope, systemDark) {
+            // 「打开共享目录」只在真的设了共享目录时给出去：null ⇒ 文件柜那颗「打开」不画。
+            // 它必须是 remember 的键：用户中途设 / 停共享目录时 actions 得跟着重算，
+            // 否则那颗按钮要么永远不出现、要么永远不消失。
+            val shareRoot = state.settings.shareRoot?.takeIf { it.isNotBlank() }
+            val actions = remember(host, scope, systemDark, shareRoot) {
                 DesktopShellActions(
                     onOpenSettings = { host.settingsOpen = true },
                     onToggleTheme = { host.toggleTheme(systemDark) },
                     onExportDiagnostics = { exportDiagnostics(host) },
                     onOpenDownloadsFolder = { openDownloadsFolder(controller.dataDirectory) },
+                    onOpenShareRoot = shareRoot?.let { root -> { openShareRoot(root) } },
                     onRefresh = {
                         controller.refreshPeers()
                         controller.handshake()
@@ -388,11 +411,15 @@ internal fun DesktopHostWindow(
             // 系统菜单栏：主窗给全 6 条（新建会话 / 导入文件 / 设置 / 截图 / 诊断包 / 退出）。
             DesktopSystemMenuBar(
                 onNewConversation = {
-                    // 与 DesktopShell 的 ⌘N 逐字同一条路：切到节点视图 + 宿主动作。
-                    // view 归 shell 独占，窗口层用既有的一次性请求通道表达「切到节点」
-                    // （shell 的 LaunchedEffect(externalNodesRequest) 收到后自己切）。
-                    host.requestNodesView()
-                    actions.onNewConversation()
+                    // **窗口层这条入口要真的把面板打开**，不能只切视图。
+                    //
+                    // 原来这里写的是 `requestNodesView()` + `actions.onNewConversation()`，
+                    // 而注入的那个动作是空实现 —— 效果只有一次视图切换；用户已经在节点页
+                    // 时点「新建会话」什么都不发生（真机反馈）。
+                    //
+                    // `requestNewConversation()` 同时递增「切到节点」与「打开添加面板」两个
+                    // 意图计数：view 归 shell 独占，窗口层只表达意图，消费方各自 `LaunchedEffect`。
+                    host.requestNewConversation()
                 },
                 onImportFiles = { host.selectedPeerId?.let(actions.onImportFiles) },
                 canImportFiles = canImportFiles(host.selectedPeerId),
@@ -419,6 +446,7 @@ internal fun DesktopHostWindow(
                             controlPlanePort = host.extension.controlPlanePort,
                             actions = actions,
                             externalNodesRequest = host.nodesViewTicks,
+                            externalAddNodeRequest = host.addNodeTicks,
                             externalFilesRequest = host.filesViewTicks,
                             focusPeerId = state.focusRequest,
                         )
@@ -632,6 +660,22 @@ internal fun openDownloadsFolder(dataDirectory: String) {
     val dir = File(desktopReceivedFilesDirectory(dataDirectory))
     // 一个文件都没收过时目录还不存在：Finder/资源管理器打开不存在的路径是静默失败，
     // 用户看到的仍然只是「点了没反应」。先建出来，让空目录也真的被打开。
+    if (!dir.isDirectory) dir.mkdirs()
+    openDirectory(dir)
+}
+
+/**
+ * 打开**共享目录**（文件柜那张卡上的「打开」）。
+ *
+ * 与 [openDownloadsFolder] 是**两个目录**：那条开的是数据 / 接收目录，这条开的是
+ * 用户在文件柜里设的共享目录。打开错的目录和点了没反应一样是在骗人，所以这里
+ * 只认传进来的那一个路径。
+ *
+ * 同 [openDownloadsFolder] 的处理：目录不存在时先建出来 —— 系统文件管理器打开一个
+ * 不存在的路径是**静默失败**，用户看到的仍然只是「点了没反应」。
+ */
+internal fun openShareRoot(path: String) {
+    val dir = File(path)
     if (!dir.isDirectory) dir.mkdirs()
     openDirectory(dir)
 }

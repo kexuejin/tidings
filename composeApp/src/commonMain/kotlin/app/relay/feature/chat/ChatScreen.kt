@@ -28,44 +28,57 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.unit.dp
 import app.relay.app.MessageSearchResult
+import app.relay.app.SenderIdentity
+import app.relay.app.agentHostsInGroup
 import app.relay.app.canRecall
+import app.relay.app.directChatMentionTargets
+import app.relay.app.groupParticipantRows
+import app.relay.app.resolveNodeIdentity
+import app.relay.app.resolveSenderIdentity
+import app.relay.app.formatRecallRemaining
+import app.relay.app.isRecallUrgent
+import app.relay.app.recallBlockedReason
+import app.relay.app.recallRemainingMs
 import app.relay.app.sessionPageKeyOf
 import app.relay.app.RelayUiState
 import app.relay.generated.resources.Res
 import app.relay.feature.agents.AgentSessionBar
 import app.relay.feature.agents.AgentSessionPickerDialog
 import app.relay.ui.components.AppBanner
+import app.relay.ui.components.DayDivider
 import app.relay.ui.components.ComposerCapability
 import app.relay.ui.components.PkPickerDialog
 import app.relay.ui.components.VoiceRecordDialog
 import app.relay.ui.components.ForwardTargetDialog
 import app.relay.ui.components.GroupInfoDialog
 import app.relay.ui.components.ImageViewerDialog
+import app.relay.ui.components.MentionTarget
 import app.relay.ui.components.MessageComposer
 import app.relay.ui.components.ScreenHistoryCard
+import app.relay.ui.components.insertMention
 import app.relay.ui.theme.LocalAppSpacing
 import app.relay.ui.EmptyState
 import kotlinx.coroutines.launch
 import org.jetbrains.compose.resources.stringResource
 import app.relay.app.model.AgentSessionKey
 import app.relay.app.model.MessageUi
-import app.relay.app.model.PeerUi
 import app.relay.app.model.TransferState
 import app.relay.core.protocol.AgentGrantAccess
 import app.relay.generated.resources.action_find_nodes
 import app.relay.generated.resources.chat_attach
+import app.relay.generated.resources.chat_recall_expired
 import app.relay.generated.resources.chat_empty_message
 import app.relay.generated.resources.chat_empty_title
 import app.relay.generated.resources.chat_first_message
 import app.relay.generated.resources.chat_folder_limit_hint
 import app.relay.generated.resources.chat_group_media_hint
-import app.relay.generated.resources.chat_group_some_offline
 import app.relay.generated.resources.chat_image
 import app.relay.generated.resources.chat_no_selection_message
 import app.relay.generated.resources.chat_no_selection_title
 import app.relay.generated.resources.chat_nudge
 import app.relay.generated.resources.chat_peer_offline
 import app.relay.generated.resources.chat_pk
+import app.relay.generated.resources.common_profile_unavailable
 import app.relay.generated.resources.chat_voice_record
 import app.relay.generated.resources.hist_search_title
 import app.relay.generated.resources.ic_attachment
@@ -132,6 +145,8 @@ fun ChatScreen(
     val onCancelTransfer = actions.onCancelTransfer
     val onResumeTransfer = actions.onResumeTransfer
     val onRecallMessage = actions.onRecallMessage
+    val onDeleteMessage = actions.onDeleteMessage
+    val onRetryMessage = actions.onRetryMessage
     val onForwardMessage = actions.onForwardMessage
     val onNudge = actions.onNudge
     val onRequestScreenView = actions.onRequestScreenView
@@ -151,11 +166,14 @@ fun ChatScreen(
     val showHeader = chrome.showHeader
     val bubbleFraction = chrome.bubbleFraction
     val initialDraft = chrome.initialDraft
+    // 草稿的外部存放处（可空槽）。壳接住它，切会话时再作为 initialDraft 喂回来，
+    // 于是"写到一半切走再回来"不会丢字。传 null = 这个壳不关心，行为不变。
+    val onDraftChangeExternal = chrome.onDraftChange
     val initialEmojiOpen = chrome.initialEmojiOpen
     val initialHistorySearch = chrome.initialHistorySearch
     val initialScreenRequestConfirmOpen = chrome.initialScreenRequestConfirmOpen
     /** null = 用内置输入栏；非 null = 桌面壳自己提供的输入卡片。 */
-    val composerSlot: (@Composable (String, (String) -> Unit) -> Unit)? = chrome.composerSlot
+    val composerSlot: (@Composable (String, (String) -> Unit, List<MentionTarget>) -> Unit)? = chrome.composerSlot
     val sp = LocalAppSpacing.current
     val realPeer = state.peer(peerId)
     // 群会话：会话键是 `group:<groupId>`，所以 `peer()` 必然查不到人 —— 它的"对端"
@@ -189,6 +207,44 @@ fun ChatScreen(
     }
 
     val messages = state.messagesWith(peerId)
+
+    // 身份解析上下文（冒泡署名 / 头像 / Markdown / 群成员面板 / @ 候选 / agentInvolved
+    // 共用这一份事实）。判据只在 `SenderIdentity` 里写一次，这里不再各自 `peer()` 一遍。
+    val identityCtx = remember(state, peerId) { state.senderContext(peerId) }
+    // **消息署名单独一份 ctx：裸 nodeId 是「人」，不是「那台机器上的 agent」。**
+    //
+    // 与 `identityCtx` 分开而不是直接改它：那一份还服务群成员列表（`groupParticipantRows`），
+    // 而成员列表里一个 agent 宿主的裸 nodeId **应该**显示 agent 名（那一行代表的就是
+    // 那台机器上的 agent）。两个场景的正确答案相反，详见 `bareNodeIdIsHuman` 的 KDoc。
+    //
+    // 真身：用户在自己的 DSH 里打字，桌面端把 prompt 转发进群时 `senderId` 就是**用户
+    // 的 nodeId**；手机上它的 agentKindsByHost 里那个 nodeId 有 `dsh`（它确实能跑 agent），
+    // 于是被渲染成 `dsh` —— 用户看到自己说的话署名成了 agent。
+    val bubbleCtx = remember(identityCtx) { identityCtx.copy(bareNodeIdIsHuman = true) }
+    val groupRows = remember(identityCtx) { groupParticipantRows(identityCtx) }
+    // `@` 候选：**外壳与内置输入栏共用这一份**。桌面壳的输入卡片也要它 —— 否则
+    // 桌面上输 `@` 什么都不弹（真机反馈）。
+    // 群与单聊**共用同一条**「谁能被 @」的派生规则，只是来源不同：
+    // 群来自成员表（`groupParticipantRows`），单聊来自对端那台机器上的 agent
+    // （`directChatMentionTargets`）。此前这里是 `else -> emptyList()`，
+    // 于是**单聊里输 @ 什么都不弹** —— 而单聊正是跟 agent 说话的主场景。
+    val mentionIdentities = if (group != null) {
+        (groupRows.agents + groupRows.humans).filter { it.canMention }
+    } else {
+        peerId?.let { directChatMentionTargets(it, identityCtx) }.orEmpty()
+            .filter { it.canMention }
+    }
+    val profileNote = stringResource(Res.string.common_profile_unavailable)
+    val mentionTargets = mentionIdentities.map { identity ->
+        MentionTarget(
+            token = identity.mentionToken,
+            label = identity.displayName,
+            note = if (identity.needsProfileNote) profileNote else null,
+            isAgent = identity.isAgent,
+        )
+    }
+    // 群里有没有 agent 成员 —— 问题 1 的口径是**成员级事实**，不是"这是不是工作区群"。
+    val groupAgentInvolved = groupRows.hasAgent
 
     // 正在收发**文件夹**时，计数行右端那句要换掉（原型 `m-sendfolder`）：
     // 那一刻真正要提醒的上限不是"走 UDP 还是 TCP"，而是"一次能塞多少个文件"。
@@ -269,19 +325,36 @@ fun ChatScreen(
     // 真机实测：111 行落库会话里 68 行是 DSH 自己一定不显示的（子代理 19 + 空壳 49），
     // 它们成批出现在这个浮层里，而用户的原话是「怎么都是 Route this bounded MEMORY…」。
     val isWorkspaceGroup = group != null && effectiveWsId != null
-    val agentSessions = remember(state.agentSessions, peer.nodeId, effectiveWsId) {
+    // 群里 agent 宿主是谁（本机或远端都算）。这是群上下文里"该看谁的会话"的唯一来源：
+    // 群会话键是 `group:<id>`，拿它去 `agentSessionsOf` 一条都查不到 —— 于是「正在思考」
+    // 永远不显示，只剩输入区那句「有成员不在线」。
+    val groupAgentHosts = remember(identityCtx) {
+        if (group != null) agentHostsInGroup(identityCtx) else emptySet()
+    }
+    val agentSessions = remember(state.agentSessions, peer.nodeId, effectiveWsId, groupAgentHosts) {
         if (effectiveWsId != null) {
             state.agentSessions.values
                 .filter { it.wsId == effectiveWsId && !it.isSubagent && !it.isArchived && it.title?.isNotBlank() == true }
+                .distinctBy { it.sessionId }
+        } else if (group != null) {
+            state.agentSessions.values
+                .filter {
+                    it.peerId in groupAgentHosts && !it.isSubagent && !it.isArchived &&
+                        it.title?.isNotBlank() == true
+                }
                 .distinctBy { it.sessionId }
         } else {
             state.visibleAgentSessionsOf(peer.nodeId)
         }
     }
-    val archivedSessions = remember(state.agentSessions, peer.nodeId, effectiveWsId) {
+    val archivedSessions = remember(state.agentSessions, peer.nodeId, effectiveWsId, groupAgentHosts) {
         if (effectiveWsId != null) {
             state.agentSessions.values
                 .filter { it.wsId == effectiveWsId && !it.isSubagent && it.isArchived }
+                .distinctBy { it.sessionId }
+        } else if (group != null) {
+            state.agentSessions.values
+                .filter { it.peerId in groupAgentHosts && !it.isSubagent && it.isArchived }
                 .distinctBy { it.sessionId }
         } else {
             state.agentSessionsOf(peer.nodeId).filter {
@@ -289,6 +362,9 @@ fun ChatScreen(
             }
         }
     }
+    // 这个会话算不算"有 agent 参与"：群里按**成员表**判（远端 agent 也是成员），
+    // 不是按"是不是工作区群" —— 普通群里入住了一个 agent，状态线同样该出现。
+    val agentInvolved = if (group != null) groupAgentInvolved else peer.isAgent
     // 当前会话：**用户选的那条优先**，只在没选或它不属于这一屏的集合时才退回第一条。
     //
     // 三处（头部副标题、切换条、选择器高亮）从此共用这一个值 —— 它们都在画「当前会话」，
@@ -313,6 +389,21 @@ fun ChatScreen(
             }
         }
     }
+    // 这个会话里有几条指令**排在队列里还没执行**（PPE-1 §6.3 的 agent-queue）。
+    //
+    // 为什么统计到**会话**而不是设备：用户关心的是「我刚发的那条排上了没」，
+    // 而一台设备上可能并行好几个会话。工作区看板上那个 queueCount 是按设备的,
+    // 两者口径不同、用途也不同，不要合并。
+    val sessionQueuedCount = remember(state.agentTasks, activeSession, peer.nodeId) {
+        state.agentTasks.values.count { task ->
+            when {
+                activeSession != null ->
+                    task.peerId == activeSession.peerId && task.sessionId == activeSession.sessionId
+                // 没有选中会话时退回按设备数 —— 与 pendingApproval 同一条降级口径。
+                else -> task.peerId == peer.nodeId
+            }
+        }
+    }
     val sessionActiveRun = remember(state.agentRuns, activeSession, peer.nodeId) {
         state.agentRuns.values.firstOrNull { run ->
             !run.isTerminal && when {
@@ -331,6 +422,32 @@ fun ChatScreen(
             sessionActiveRun?.at ?: 0L,
             sessionActiveRun?.updatedAt ?: 0L,
         )
+    }
+
+    // 状态线的**快照**：与 [ComposerStatusLine] 内部调用的是同一个纯函数（只是 now 不同），
+    // 用来回答"状态线已经说明了情况，输入区那句「有成员不在线」还要不要说"。
+    // 不在这里另写一套 busy/run 判定 —— 两处判据一旦分叉，就会出现"上面说正在思考、
+    // 下面说有人在离线"的自相矛盾。
+    val agentStatusSnapshot = agentComposerStatusOf(
+        agentInvolved = agentInvolved,
+        sessionState = activeSession?.state,
+        lastActivityAt = sessionLastActivityAt,
+        hasPendingApproval = sessionHasPendingApproval,
+        hasActiveRun = sessionActiveRun != null,
+        now = data.now,
+    )
+
+    // 长按头像 / 成员行「直接 @」：token 来自身份解析器，插入函数与输入栏的候选列表
+    // 是**同一个** —— 两处各拼一次 token，迟早有一处 @ 了却叫不醒。
+    val mentionSender: (SenderIdentity) -> Unit = { identity ->
+        val (next, _) = insertMention(
+            text = draft,
+            start = draft.length,
+            end = draft.length,
+            token = identity.mentionToken,
+        )
+        draft = next
+        composerFocus.requestFocus()
     }
 
     // 打开这个 agent 会话时，向宿主要该工作区第一页历史会话（PPE-1 增补 D8）。
@@ -364,16 +481,21 @@ fun ChatScreen(
     // 用 derivedStateOf 而不是在 effect 里现读：effect 只在 messages.size 变化时重启，
     // 而"是否贴底"是随滚动持续变化的，必须在滚动时就更新，否则拿到的是上一次的快照。
     // 最后可见索引**不要用 `?: 0` 兜底**：那会把"还没量过"说成"可见的是第 0 条"。
-    val lastVisibleIndex by remember(listState) {
-        derivedStateOf { listState.layoutInfo.visibleItemsInfo.lastOrNull()?.index }
+    // **reverseLayout = true**：索引 0 是最新一条（画在最下面）。所以「最靠底的那条」
+    // 是 visibleItemsInfo.firstOrNull()，不是 lastOrNull() —— 后者在倒序下是最早的一条。
+    val bottomVisibleIndex by remember(listState) {
+        derivedStateOf { listState.layoutInfo.visibleItemsInfo.firstOrNull()?.index }
     }
-    val isNearBottom by remember(messages.size) {
+    // key 必须带 peerId：只按条数记时，两个**条数相同**的会话互切不会重建，
+    // `derivedStateOf` 里捕获的还是上一个会话的 itemCount ⇒ 贴底判据算错。
+    val isNearBottom by remember(peerId, messages.size) {
         derivedStateOf {
             isNearBottomAfterLayout(
                 itemCount = messages.size,
                 totalItemCount = listState.layoutInfo.totalItemsCount,
-                lastVisibleIndex = lastVisibleIndex,
-                canScrollForward = listState.canScrollForward,
+                firstVisibleIndex = bottomVisibleIndex,
+                // 倒序下「继续往最新方向滚」是 canScrollBackward。
+                canScrollBackward = listState.canScrollBackward,
             )
         }
     }
@@ -384,26 +506,27 @@ fun ChatScreen(
     // 进入之后、用户不在底部时新到的条数。
     var unseenWhileAway by remember(peerId) { mutableStateOf(0) }
     var previousMessageCount by remember(peerId) { mutableStateOf(messages.size) }
-    var hasInitialScrolled by remember(peerId) { mutableStateOf(false) }
-
-    // 进入会话：**第一次拿到消息就滚到最新**。不能只在"首帧就非空"时滚 ——
-    // 冷启动 MessageStore 是异步恢复的（RelayControllerMessagesComponent.handleRestoreMessages
-    // 里 scope.launch + withContext(io) 之后才 publish），消息常常在第一帧之后才落进
-    // core.threads；旧实现把闩锁设在第一个非空帧上，之后的增长只剩"贴底才滚"这一条路。
-    LaunchedEffect(peerId, messages.isEmpty()) {
+    // 「为**哪个会话**做过首次锚定」。用 peerId 而不是布尔量，是因为布尔量的复位时机
+    // 依赖 `remember(peerId)` 的重建与 `LaunchedEffect` 重启谁先发生 —— 两个都有消息的
+    // 会话互切时，`messages.isEmpty()` 不变（false→false），复位分支不触发，而布尔量
+    // 还没随 remember 刷新 ⇒ 读到的仍是上一个会话的 true ⇒ **一次都不滚**。
+    // 判据换成「这个 peerId 滚过没有」后，就不再依赖那两次重建的顺序。
+    //
+    // 进入会话：**倒序渲染后不需要锚定**。
+    //
+    // 正序版本要在这里反复 `scrollToItem(lastIndex)`，而 LazyColumn 在容器高度未稳定时
+    // 会提前把 `canScrollForward` 报成 false —— 真机实测落点 firstVisibleItemIndex=74
+    // （应为 83），于是「进会话停在中间」。三轮修补（布尔量 / peerId 记账 / 进入令牌）
+    // 都是在修「何时该滚」，没解决「滚的时候还没量完」，所以一直没修好。
+    //
+    // `reverseLayout = true` 把问题从根上取消：索引 0 就是最新一条，进入即在底部，
+    // 没有「要滚到哪」这件事。这里只保留「空会话时复位未读计数」那一支。
+    LaunchedEffect(peerId, messages.size) {
         if (messages.isEmpty()) {
-            // 会话被清空（或本来就空）：把锚定状态复位，下一条消息到达时重新落到底。
-            // 没有这一支的话，「清空本会话记录」之后 hasInitialScrolled 仍是 true，
-            // 之后的新消息只会画出来、不滚 —— 用户会以为清空把会话弄坏了。
-            hasInitialScrolled = false
+            // 会话被清空（或本来就空）：复位未读计数。
             previousMessageCount = 0
             unseenWhileAway = 0
-            return@LaunchedEffect
         }
-        if (hasInitialScrolled) return@LaunchedEffect
-        hasInitialScrolled = true
-        previousMessageCount = messages.size
-        listState.scrollToItem(messages.lastIndex)
     }
 
     LaunchedEffect(messages.size) {
@@ -413,15 +536,18 @@ fun ChatScreen(
         val lastMsgIsMine = messages.lastOrNull()?.mine == true
         unseenWhileAway = unseenAfterGrowth(unseenWhileAway, newAdded, isNearBottom, lastMsgIsMine)
         if (shouldFollowLatest(isNearBottom, lastMsgIsMine)) {
-            listState.animateScrollToItem(messages.lastIndex)
+            // reverseLayout：最新一条在索引 0，不是 lastIndex。
+            listState.animateScrollToItem(0)
         }
     }
 
-    LaunchedEffect(isNearBottom, hasInitialScrolled) {
-        if (!hasInitialScrolled || !isNearBottom) return@LaunchedEffect
-        // 锚定真的落到底 = 最新那条已经在眼前，进入时采下的 N 条未读**不再在屏幕外**，
+    LaunchedEffect(isNearBottom) {
+        if (!isNearBottom) return@LaunchedEffect
+        // 贴底 = 最新那条已经在眼前，进入时采下的 N 条未读**不再在屏幕外**，
         // 计数到此为止。放掉它而不是留着：否则用户之后往上翻旧消息时，胶囊会拿一个
         // 早就看过的旧数字来骗他。
+        //
+        // 倒序渲染后「进入会话」本身就在底部，所以这条不再需要「是否锚定过」那个前置。
         unseenWhileAway = 0
         unreadOnEntry = 0
     }
@@ -585,17 +711,51 @@ fun ChatScreen(
                 )
             } else {
                 val sessionTransitions = remember(messages) { sessionTransitionIds(messages) }
+                // 日期分隔：每换一天的第一条。判据只看 `message.at`（不碰 id 前缀），
+                // 所以两端永远一致 —— 这一点与 SessionDivider 不同，见 dayDividerIds 的 KDoc。
+                val dayDividers = remember(messages) { dayDividerIds(messages, ::localDayKey) }
                 LazyColumn(
                     state = listState,
                     modifier = Modifier.fillMaxSize(),
                     // 原型 `.msgs{...padding:12px 14px 6px;...gap:10px}`（桌面 `.win .msgs` 为
                     // `14px 16px 6px`/`gap:9px`，手机取 `:root` 那一条）。
                     contentPadding = PaddingValues(start = sp.lg14, top = sp.md, end = sp.lg14, bottom = sp.sm6),
-                    verticalArrangement = Arrangement.spacedBy(sp.md10),
+                    // **内容不足一屏时要贴底**（气泡贴着输入区，不是贴着顶）。
+                    //
+                    // reverseLayout 只决定「从哪头开始排」，不决定「排不满时贴哪边」：
+                    // 少了 `Alignment.Bottom` 这一档，短会话（只有两三条）的气泡会停在顶部、
+                    // 下方留出一大片空白，而输入框贴在屏幕底部 —— 真机现场就是这样。
+                    // 正序时这个现象不明显（内容和输入区都在上方），倒序把它放大了。
+                    verticalArrangement = Arrangement.spacedBy(sp.md10, Alignment.Bottom),
+                    // **倒序渲染**（聊天流的标准结构，WeChat/Slack/Telegram 都是这条）。
+                    //
+                    // 为什么：正序时「最新在末尾」，进入会话必须先量完整个列表才滚得准，
+                    // 而 LazyColumn 在容器高度未稳定时 `canScrollForward` 会提前变 false ——
+                    // 真机实测停在 firstVisibleItemIndex=74（应为 83）。
+                    // 倒序后索引 0 就是最新一条，**进入即在底部**，根本不需要锚定；
+                    // 新消息到达时它天然出现在可见区顶部（视觉上是最下方）。
+                    reverseLayout = true,
                 ) {
-                    items(messages, key = { it.id }) { message ->
+                    // **数据也要倒过来**：`reverseLayout` 只翻视觉，若数据仍是最旧在前，
+                    // 屏幕上就变成「最新在上、最旧在下」—— 真机截图正是这个样子。
+                    // 两者必须同时翻：数据倒序 + reverseLayout，才等价于原来的「最旧在上」。
+                    items(messages.asReversed(), key = { it.id }) { message ->
+                        if (message.id in dayDividers) {
+                            DayDivider(at = message.at, now = now)
+                        }
                         if (message.id in sessionTransitions) {
-                            val sid = extractSessionId(message.id)
+                            // **必须与 `sessionTransitionIds` 用同一个判据取 sid。**
+                            //
+                            // 这里原来写的是 `extractSessionId(message.id)` —— 只认 id 前缀。
+                            // 而判定那边用的是 `sessionIdOf`（优先协议字段 `agentSessionId`，
+                            // 再退回前缀）。两者对**手机端**给出的答案不同：
+                            //
+                            //   桌面：id = `agent-ev-session-xxx-12` ⇒ 前缀能取到 ⇒ 有分割线
+                            //   手机：id = 信封 UUID（转发时换掉了）⇒ 前缀取不到 ⇒ **整条不画**
+                            //
+                            // 于是「判定说这里是切换点、渲染说自己取不到 sid 就跳过」—— 手机端
+                            // 永远画不出那条线，而数据是对的。这正是用户报的「桌面有、移动端没有」。
+                            val sid = sessionIdOf(message)
                             if (sid != null) {
                                 val s = state.agentSessions.values.firstOrNull { it.sessionId == sid && it.title?.isNotBlank() == true }
                                     ?: state.agentSessions.values.firstOrNull { it.sessionId == sid }
@@ -624,6 +784,14 @@ fun ChatScreen(
                             val quotedMsg = message.replyTo?.let { replyId ->
                                 messages.firstOrNull { it.id == replyId }
                             }
+                            // 这条消息的发送者身份：署名 / 头像 / Markdown / 长按 @ **共用一份**。
+                            // 群里按 senderId 解析（`agent:<kind>` 才认得出 agent）；
+                            // 私聊的发送者就是会话对端，仍走同一个 `resolveNodeIdentity`。
+                            val senderIdentity = when {
+                                message.mine -> null
+                                group != null -> resolveSenderIdentity(message.senderId, bubbleCtx)
+                                else -> resolveNodeIdentity(peer.nodeId, bubbleCtx)
+                            }
                             MessageBubble(
                                 message = message,
                                 bubbleFraction = bubbleFraction,
@@ -632,43 +800,66 @@ fun ChatScreen(
                                 onCancelTransfer = onCancelTransfer,
                                 onResumeTransfer = onResumeTransfer,
                                 receivedFileActions = receivedFileActions,
+                                // 「重发」必须按**原消息 id** 重放：换新 id 重发在收端就是
+                                // 另一条消息（真机现场：同一句话在桌面库里两个 id）。
+                                // 没有这条能力的壳（预览）退回旧行为，红字仍然可点。
                                 onRetry = if (message.file == null && message.text.isNotBlank()) {
-                                    { text: String -> onSend(peer.nodeId, text, null) }
+                                    onRetryMessage?.let { retry -> { _: String -> retry(message) } }
+                                        ?: { text: String -> onSend(peer.nodeId, text, null) }
                                 } else {
                                     null
                                 },
                                 // 撤回入口的判据在 canRecall 里（自己的、5 分钟内、媒体要有 msgId）。
+                                // 超时后**入口置 null（点不动）但这一项仍然显示** ——
+                                // 只剩"不能撤回"这一个事实时，把它藏起来等于不解释（见 recallBlockedReason）。
                                 onRecall = onRecallMessage
                                     ?.takeIf { canRecall(message, now) }
                                     ?.let { recall -> { recall(message) } },
+                                recallVisible = onRecallMessage != null &&
+                                    recallBlockedReason(message) == null,
+                                recallMeta = formatRecallRemaining(recallRemainingMs(message, now))
+                                    ?: stringResource(Res.string.chat_recall_expired),
+                                recallUrgent = isRecallUrgent(recallRemainingMs(message, now)),
                                 onReply = {
                                     replyingToMessage = message
                                     composerFocus.requestFocus()
                                 },
                                 onForward = onForwardMessage?.let { { forwardingMessage = message } },
+                                // 只删本机这一条：不动协议、不通知对方。没有这一项时，
+                                // 用户想清掉一条只有「撤回」（有时限）或「清空整个会话」两条路。
+                                onDelete = onDeleteMessage?.let { del ->
+                                    { peerId?.let { pid -> del(pid, message.id) } }
+                                },
                                 // 群里必须署名：会话键是 `group:<groupId>`，气泡左右只分得出
                                 // "是不是我发的"，分不出"是哪个人发的"。私聊恒 null（会话键
                                 // 就是发送者，再署一次名是同一件事的第二个说法）。
                                 senderName = if (group != null && !message.mine) {
-                                    state.senderName(message.senderId)
+                                    senderIdentity?.displayName
                                 } else {
                                     null
                                 },
                                 // 原型 `.msg .mav` 只在**别人发的**消息上出现（演示数据里
-                                // 自己发的几条一条 `ini` 都没有）。私聊那颗就是会话对端；
-                                // 群里按发送者取 —— 取不到就退回署名用的那串（`nodeId` 前 8 位），
-                                // 与 `senderName` 的兜底保持同一种叫法。
-                                senderAvatar = if (message.mine) {
-                                    null
-                                } else {
-                                    val senderPeer = if (group != null) state.peer(message.senderId) else peer
+                                // 自己发的几条一条 `ini` 都没有）。头像与署名**同源**：
+                                // agent 的 `agent:<kind>` 走解析器后 isAgent 为真，于是它画的是
+                                // agent 头像（以前 peer() 查不到人就退化成会话对端的样子）。
+                                senderAvatar = senderIdentity?.let { identity ->
                                     ChatAvatar(
-                                        name = senderPeer?.nick
-                                            ?: state.senderName(message.senderId)
-                                            ?: peer.nick,
-                                        avatar = senderPeer?.avatar?.takeIf { it >= 0 },
-                                        isAgent = senderPeer?.isAgent ?: false,
+                                        name = identity.displayName,
+                                        avatar = identity.avatar,
+                                        isAgent = identity.isAgent,
                                     )
+                                },
+                                // 长按发送者头像 = 直接 @ 这个人 / 这个 agent（自己除外）。
+                                // **不再限定群**：单聊里对方若是 agent，长按它的头像同样该能 @ ——
+                                // 此前这里是 `group != null && ...`，单聊恒为 null，于是
+                                // `ChatBubbles` 连手势都没注册（它的 `if (onMentionSender != null)`）。
+                                // 判据只留「这条消息不是自己发的」+ `canMention`（它已排除自己）。
+                                onMentionSender = if (!message.mine) {
+                                    senderIdentity
+                                        ?.takeIf { it.canMention }
+                                        ?.let { identity -> { mentionSender(identity) } }
+                                } else {
+                                    null
                                 },
                                 quotedMessage = quotedMsg,
                                 onScrollToQuoted = quotedMsg?.let { target ->
@@ -685,11 +876,8 @@ fun ChatScreen(
                                 // 否则用户打的星号会被当成强调。
                                 renderMarkdown = shouldRenderMarkdown(
                                     mine = message.mine,
-                                    senderIsAgent = if (group != null) {
-                                        state.peer(message.senderId)?.isAgent == true
-                                    } else {
-                                        peer.isAgent
-                                    },
+                                    senderIsAgent = senderIdentity?.isAgent == true,
+                                    senderId = message.senderId,
                                 ),
                             )
                         }
@@ -711,7 +899,8 @@ fun ChatScreen(
                         unreadOnEntry = 0
                         unseenWhileAway = 0
                         coroutineScope.launch {
-                            if (messages.isNotEmpty()) listState.animateScrollToItem(messages.lastIndex)
+                            // reverseLayout：最新一条在索引 0。
+                            if (messages.isNotEmpty()) listState.animateScrollToItem(0)
                         }
                     },
                     shape = CircleShape,
@@ -749,21 +938,33 @@ fun ChatScreen(
         // agent 会话的输入提示：放在输入区正上方。两条壳（手机内置输入栏 / 桌面 composerSlot）
         // 共用这一个调用点 —— 以后要挪位置只动这一行（见 ComposerStatusLine 的 KDoc）。
         ComposerStatusLine(
-            agentInvolved = peer.isAgent || isWorkspaceGroup,
+            // 成员级事实：群里入住了一个 agent 就算 agentInvolved（不再要求"工作区群"）。
+            agentInvolved = agentInvolved,
             sessionState = activeSession?.state,
             lastActivityAt = sessionLastActivityAt,
             hasPendingApproval = sessionHasPendingApproval,
             hasActiveRun = sessionActiveRun != null,
+            queuedCount = sessionQueuedCount,
             now = data.now,
         )
 
         if (composerSlot != null) {
             // 草稿仍由 ChatScreen 持有（remember(peerId)），所以切换会话时桌面输入卡片也不会串内容。
-            composerSlot(draft) { draft = it }
+            composerSlot(
+                draft,
+                { next ->
+                    draft = next
+                    peerId?.let { onDraftChangeExternal?.invoke(it, next) }
+                },
+                mentionTargets,
+            )
         } else {
             MessageComposer(
                 draft = draft,
-                onDraftChange = { draft = it },
+                onDraftChange = { next ->
+                    draft = next
+                    peerId?.let { onDraftChangeExternal?.invoke(it, next) }
+                },
                 // 发文件夹时计数行右端换掉：见上面 `sendingFolder` 的注释。
                 hintTrailing = if (sendingFolder) {
                     stringResource(Res.string.chat_folder_limit_hint)
@@ -774,14 +975,23 @@ fun ChatScreen(
                 // 群里有人不在线是常态，说的不是"对方离线"而是"有人不在线"，
                 // 而且群消息确实会为离线成员入队（逐成员 sendUserMessage）。
                 //
-                // 比的是**除自己以外**的人数：`memberOnlineCount` 的 KDoc 写明它不含自己，
-                // 而 `group.members` 含自己（建群时自己恒在成员表里）。曾经两边都直接用
-                // `group.members.size`，于是所有人都在线时也会说"有成员不在线" ——
-                // 正好差自己那一个（2 人群、两人都在线，输入栏仍挂着这句）。
+                // **群里不再显示「有成员不在线，他们上线后会收到」。**
+                //
+                // 用户两次说过这条没用（第一次我把它降级成"状态线出现时让位"，那只是
+                // 让它少出现，没解决它本身没有信息量这件事）。理由是：
+                // - 群消息**本来就**为离线成员入队并补发，这是协议保证的行为，不是异常；
+                // - 把它当提示说，等于每次有人不在线都提醒一遍「你的消息会送达」——
+                //   用户不需要为一件必然会发生的事被通知；
+                // - 头部已经有「1/4 人在线」这个更精确、可随时看的读数，重复表达同一件事；
+                // - 占着输入区上方那一行，挤掉真正有用的东西（agent 正在思考 / 等审批）。
+                //
+                // **单聊的「对方离线」保留**：那一条说的是"这条现在发不出去，会排队"，
+                // 是用户需要知道的状态差异（群是补发、单聊是排队等对方上线），
+                // 不能因为群那条被删就一起删掉。
                 offlineHint = when {
+                    // 状态线已经在说明情况时，离线提示让位（判据用同一个快照，不另写一套）。
+                    agentStatusSnapshot != null -> null
                     group == null && !peer.online -> stringResource(Res.string.chat_peer_offline)
-                    group != null && memberOnlineCount < othersInGroup(group) ->
-                        stringResource(Res.string.chat_group_some_offline)
                     else -> null
                 },
                 // 能力由「壳真的能不能做」决定，而不是由一个空 lambda 决定：
@@ -848,9 +1058,15 @@ fun ChatScreen(
                             label = Res.string.chat_new_task_action,
                             icon = Res.drawable.ic_plus,
                             onPick = {
-                                val prefix = "@dsh "
-                                if (!draft.startsWith(prefix)) {
-                                    draft = "$prefix$draft"
+                                // 用**这个群里的 agent kind** 点名（默认 @dsh），而且与 @ 候选
+                                // 走同一个插入函数：写死 "@dsh" 在别的 agent 群里叫不醒。
+                                val token = groupRows.agents
+                                    .firstOrNull { !it.agentKind.isNullOrBlank() }
+                                    ?.mentionToken
+                                    ?: "@dsh"
+                                if (!draft.startsWith(token, ignoreCase = true)) {
+                                    val (next, _) = insertMention(draft, 0, 0, token)
+                                    draft = next
                                 }
                                 composerFocus.requestFocus()
                             },
@@ -873,14 +1089,10 @@ fun ChatScreen(
                 ),
                 // 群里那排比单聊少一项（没有窗口震动），腾出的位置给这句话。
                 toolsHint = group?.let { stringResource(Res.string.chat_group_media_hint) },
-                groupMembers = if (group != null) {
-                    val peerMap = state.peers.associateBy { it.nodeId }
-                    group.members.filter { it != state.selfNodeId }.map { id ->
-                        peerMap[id] ?: PeerUi(nodeId = id, nick = id.take(8), online = false)
-                    }
-                } else {
-                    emptyList()
-                },
+                // @ 候选与成员面板、agentInvolved **同一份**解析结果：agent 以 `@DSH`
+                // 出现（不再是宿主昵称），只有 id 的成员如实标「未获取到资料」，
+                // 不再把 nodeId 裸串直接当候选名。
+                mentionTargets = mentionTargets,
                 replyingTo = replyingToMessage,
                 onCancelReply = { replyingToMessage = null },
                 focusRequester = composerFocus,
@@ -900,13 +1112,34 @@ fun ChatScreen(
         GroupInfoDialog(
             group = group,
             selfNodeId = state.selfNodeId,
+            selfNick = state.settings.nick,
             peers = state.peers,
             memberOnlineCount = memberOnlineCount,
             onDismiss = { showGroupInfo = false },
-            onAddMembers = onAddGroupMembers?.let { add -> { members -> add(group.groupId, members) } },
-            onRemoveMember = onRemoveGroupMember?.let { remove -> { member -> remove(group.groupId, member) } },
-            onUpdateMeta = onUpdateGroupMeta,
-            onLeaveGroup = onLeaveGroup?.let { leave -> { leave(group.groupId) } },
+            onAddMembers = groupActions.onAddGroupMembers?.let { add -> { members -> add(group.groupId, members) } },
+            onRemoveMember = groupActions.onRemoveGroupMember?.let { remove -> { member -> remove(group.groupId, member) } },
+            onUpdateMeta = groupActions.onUpdateGroupMeta,
+            onLeaveGroup = groupActions.onLeaveGroup?.let { leave -> { leave(group.groupId) } },
+            // 成员面板用**和气泡 / @ 候选同一份**上下文：agent 显示 DSH、@ 候选给出 @DSH。
+            identityContext = identityCtx,
+            // 长按成员头像 = 直接 @：插入到编辑器后关掉面板（用户下一步是打字）。
+            onMentionMember = { identity ->
+                showGroupInfo = false
+                mentionSender(identity)
+            },
+            // 「添加智能体」= 暴露**本机项目**（不是加人）。候选取本机 workspace 表。
+            localWorkspaces = state.agentWorkspaces.values.filter { it.peerId == state.selfNodeId },
+            onExposeWorkspaces = groupActions.onExposeWorkspaces?.let { expose ->
+                { chosen ->
+                    // 先收起已取消的，再暴露新勾的 —— 两个方向都要处理，
+                    // 否则"取消勾选"在界面上看起来生效、实际没移除。
+                    val before = group.virtualAgents.orEmpty()
+                        .filter { it.hostNodeId == state.selfNodeId }
+                        .mapNotNull { it.wsId }
+                    (before - chosen.toSet()).forEach { expose(group.groupId, it, null) }
+                    chosen.forEach { wsId -> expose(group.groupId, wsId, null) }
+                }
+            },
         )
     }
 
@@ -1043,11 +1276,26 @@ private fun hasMoreSessionsLocal(state: RelayUiState, peerId: String, wsId: Stri
  * 判据是「这条消息的会话 id 与上一条不同」：会话 id 相同的一段算同一段，换段就是新一段。
  * 抽成纯函数是为了能被单测钉住：新会话是否真的会产生一条分隔线，不该只能靠真机肉眼确认。
  */
+/**
+ * 一条消息属于哪个 agent 会话：**优先读协议字段**，id 前缀只作为旧数据的回退。
+ *
+ * ## 为什么要这个顺序
+ *
+ * 字段（`agentSessionId`）是**事实**，由协议携带，两端一致；
+ * id 前缀（`agent-ev-`）是桌面端本地构造消息时的副产物，转发进群时并不会带过去 ——
+ * 手机端落库用的是信封 UUID，前缀判据在那里恒为 null，于是桌面有分段线、手机一条都没有。
+ *
+ * 保留回退是为了**已经落库的旧数据**（升级前收到的 agent 消息 id 里仍带前缀）：
+ * 不然老会话的分段线会在升级后消失。新消息一律走字段那条路。
+ */
+internal fun sessionIdOf(message: MessageUi): String? =
+    message.agentSessionId ?: extractSessionId(message.id)
+
 internal fun sessionTransitionIds(messages: List<MessageUi>): Set<String> {
     val transitions = mutableSetOf<String>()
     var lastSessionId: String? = null
     for (m in messages) {
-        val sid = extractSessionId(m.id)
+        val sid = sessionIdOf(m)
         if (sid != null && sid != lastSessionId) {
             transitions.add(m.id)
             lastSessionId = sid

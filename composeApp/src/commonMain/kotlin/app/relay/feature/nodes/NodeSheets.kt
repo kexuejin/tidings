@@ -10,28 +10,23 @@ import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
-import androidx.compose.foundation.layout.aspectRatio
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
-import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
-import androidx.compose.material3.Button
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.ModalBottomSheet
 import androidx.compose.material3.SheetState
-import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
-import androidx.compose.material3.TextButton
 import androidx.compose.material3.rememberModalBottomSheetState
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
@@ -43,22 +38,20 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
-import androidx.compose.ui.draw.drawBehind
-import androidx.compose.ui.geometry.CornerRadius
-import androidx.compose.ui.geometry.Offset
-import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.graphics.PathEffect
-import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
+import app.relay.ui.components.AppIconButton
+import app.relay.ui.components.AppButton
+import app.relay.ui.components.AppButtonSize
+import app.relay.ui.components.AppOutlinedButton
+import app.relay.ui.components.AppTextButton
 import app.relay.ui.components.QrCodeView
 import app.relay.ui.theme.IconSizes
 import app.relay.ui.theme.LocalAppSpacing
 import app.relay.ui.theme.RelayElevations
-import app.relay.ui.theme.accents
 import app.relay.app.ManualPeerEntry
 import app.relay.app.RelayController
 import app.relay.app.RelayUiState
@@ -71,7 +64,6 @@ import app.relay.generated.resources.nodes_my_qr_hint
 import app.relay.generated.resources.nodes_my_qr_no_address
 import app.relay.generated.resources.nodes_my_qr_title
 import app.relay.generated.resources.nodes_my_qr_too_long
-import app.relay.generated.resources.ic_qr_code_scanner
 import app.relay.generated.resources.nodes_error_host
 import app.relay.generated.resources.nodes_error_two_ports
 import app.relay.generated.resources.nodes_group_add
@@ -85,7 +77,6 @@ import app.relay.generated.resources.nodes_scan_field_host
 import app.relay.generated.resources.nodes_scan_field_host_hint
 import app.relay.generated.resources.nodes_manual_name
 import app.relay.generated.resources.nodes_manual_name_hint
-import app.relay.generated.resources.nodes_scan_frame_hint
 import app.relay.generated.resources.nodes_scan_unavailable
 import app.relay.generated.resources.nodes_seg_manual
 import app.relay.generated.resources.nodes_seg_scan
@@ -101,7 +92,6 @@ import org.jetbrains.compose.resources.DrawableResource
 import org.jetbrains.compose.resources.painterResource
 import org.jetbrains.compose.resources.stringResource
 import androidx.compose.material3.HorizontalDivider
-import androidx.compose.material3.IconButton
 import androidx.compose.ui.text.style.TextOverflow
 import app.relay.generated.resources.common_close
 import app.relay.generated.resources.ic_chev
@@ -157,13 +147,11 @@ private fun SheetHead(title: String, onClose: () -> Unit) {
             overflow = TextOverflow.Ellipsis,
             modifier = Modifier.weight(1f),
         )
-        IconButton(onClick = onClose) {
-            Icon(
-                painter = painterResource(Res.drawable.ic_close),
-                contentDescription = stringResource(Res.string.common_close),
-                tint = MaterialTheme.colorScheme.onSurfaceVariant,
-            )
-        }
+        AppIconButton(
+            icon = Res.drawable.ic_close,
+            contentDescription = stringResource(Res.string.common_close),
+            onClick = onClose,
+        )
     }
 }
 
@@ -412,21 +400,28 @@ fun AddNodeSheet(
                 // 打开取景框的按钮；不在（桌面 / 平板，没有相机栈），按钮不画，
                 // 由下面那条 `.banner.info` 把"为什么扫不了、该走哪条路"写清楚。
                 //
-                // 取景框里那句**永远是** `nodes_scan_frame_hint`（原型 `.scanhint` 就是
-                // "把对方的节点码放进框里"，不随平台变）。上一版在 onScanQr == null 时
-                // 把 `nodes_scan_unavailable` 顶到框里，等于同一句话在两个位置之间搬家，
-                // 而原型里它俩是**同时存在**的两处（`prototype/relay.html:3364-3370`）。
-                ScanFrame(
-                    modifier = Modifier.fillMaxWidth().padding(vertical = LocalAppSpacing.current.md),
-                    hint = stringResource(Res.string.nodes_scan_frame_hint),
-                )
+                // 原型那一屏另有一块方形虚线框 + 棋盘格（`.scanwrap` / `.qr`），本实现
+                // **不画它** —— 理由见下面那一段。
+                // **这里不放任何取景框。**
+                //
+                // 原型这一屏画了一块方形虚线框 + 20dp 棋盘格（`.scanwrap` / `.qr`），看起来
+                // 像取景预览。但它**不是**相机预览，是一块画出来的装饰图：真相机在点「打开
+                // 相机扫码」之后另开的那一屏（`ScanScreen`）。于是这块东西在**所有**平台上
+                // 都只表达「这里本该有个相机」，不表达任何能力 —— 桌面端更没有相机栈，
+                // 它连「本该有」都不成立。
+                //
+                // 真机反馈的原话是「扫描的二维码假图还在」。旁边那句「把对方的节点码放进框
+                // 里」把误导坐实了：没有任何东西会进那个框。**两端都删**，不是按平台闸门。
+                //
+                // 现在这一段的表达是诚实的：有相机 ⇒ 一颗真的能打开取景框的按钮；没有 ⇒
+                // 下面的 `banner.info` 说明扫不了、并把路指向「填地址」。
                 if (onScanQr != null) {
-                    Button(
+                    // 原型这颗是绿实心 `.btn`（标准档）的通栏主行动，不是小档。
+                    AppButton(
+                        text = stringResource(Res.string.nodes_scan_action),
                         onClick = { onScanQr() },
                         modifier = Modifier.fillMaxWidth().padding(bottom = LocalAppSpacing.current.md10),
-                    ) {
-                        Text(stringResource(Res.string.nodes_scan_action))
-                    }
+                    )
                 }
                 // 第二条路：不从相机读，从一张已有的图里读。原型把这三样排成
                 // 「绿实心打开相机扫码」→「通栏描边从图片导入二维码」→ `.banner.info`
@@ -439,7 +434,8 @@ fun AddNodeSheet(
                 // `onScanQr != null` —— 这两颗本来就是两个独立入口，各自按自己的
                 // 回调在不在决定画不画（与上面那颗 `Button` 同一个写法）。
                 if (onImportQrFromImage != null) {
-                    OutlinedButton(
+                    AppOutlinedButton(
+                        text = stringResource(Res.string.scan_import_image),
                         onClick = {
                             importScope.launch {
                                 importing = true
@@ -452,9 +448,7 @@ fun AddNodeSheet(
                         },
                         enabled = !importing,
                         modifier = Modifier.fillMaxWidth().padding(bottom = LocalAppSpacing.current.md10),
-                    ) {
-                        Text(stringResource(Res.string.scan_import_image))
-                    }
+                    )
                 }
                 // `.banner.info`：原型扫码段里紧跟在按钮下面那条提示条
                 // （`--surface-2` 底 + `--on-2` 字 + 16px 信息图标 + 圆角 `--r-ctl`）。
@@ -473,13 +467,16 @@ fun AddNodeSheet(
                 // 复用现成 key `scan_manual_hint`（`composeResources/values/strings.xml:220`，
                 // en `:231`），不新增 key；另一处消费点 `feature/scan/ScanScreen.kt`
                 // 是失败态专用，同一句话在两个位置都成立。
-                TextButton(onClick = onDismiss, modifier = Modifier.fillMaxWidth()) {
-                    Text(stringResource(Res.string.scan_manual_hint))
-                }
+                // 原型这颗就是 `.cardfoot` 里的 `.btn sm`（`prototype/relay.html:4110`）：密排动作条。
+                AppTextButton(
+                    text = stringResource(Res.string.scan_manual_hint),
+                    onClick = onDismiss,
+                    modifier = Modifier.fillMaxWidth(),
+                    size = AppButtonSize.Small,
+                )
                 // 这里**不要**再摆 `nodes_scan_field_host_hint`：那句话是给「填地址」
                 // 那一段讲端口默认值的（"不填端口时用 17878"），放在扫码段里既答非所问，
-                // 又让人以为扫码还得先填个地址。取景框下面那句 `nodes_scan_frame_hint`
-                // 已经把该做的事说完了。真机上就是这么露馅的。
+                // 又让人以为扫码还得先填个地址。
             } else {
                 OutlinedTextField(
                     value = host,
@@ -606,7 +603,9 @@ fun AddNodeSheet(
             // 又会因为地址是空的而**常亮一句"地址看起来不对"** —— 用户明明在扫码，
             // 却被红字说地址错了。所以整段（按钮 + 两条校验说明）只在手动段画。
             if (!scanMode) {
-                Button(
+                // 原型这颗是 `.cardfoot` 里的绿实心 `.btn`（标准档）通栏行动。
+                AppButton(
+                    text = stringResource(Res.string.nodes_scan_connect),
                     onClick = {
                         // 记的是**解析后**的主机名：超时判据要拿它去比对节点表里的 ip/host，
                         // 原串 `1.2.3.4:17899` 永远比不中。
@@ -625,9 +624,7 @@ fun AddNodeSheet(
                     modifier = Modifier
                         .fillMaxWidth()
                         .padding(top = LocalAppSpacing.current.lg, bottom = LocalAppSpacing.current.xl),
-                ) {
-                    Text(stringResource(Res.string.nodes_scan_connect))
-                }
+                )
 
                 // 校验失败时把原因说清楚，而不是只让按钮变灰：
                 // 灰按钮在移动端是最典型的"无出路"状态。
@@ -693,109 +690,12 @@ private fun SegTab(
  * 这个框**自己不点** —— 空框做成可点的形状只会让人反复点一个没有反馈的地方，
  * 真正的入口是它下面那颗按钮。
  */
-@Composable
-private fun ScanFrame(
-    modifier: Modifier = Modifier,
-    hint: String,
-) {
-    // 原型 `.scanwrap` 是**正方形**（`aspect-ratio:1/1`、`max-width:200px`、`2px dashed`
-    // 描边、`--surface-2` 底、圆角 16），框里摆一块 132×132 的棋盘 `.qr`，
-    // 右下角叠一颗 30×30 的 `.lamp` 圆钮；说明那句 `.scanhint` 在**框外下方**，
-    // 不是框里的文字（`prototype/relay.html:790-800`）。
-    //
-    // 上一版是 `height(180.dp)` + 1dp 实线 + 把说明塞在框正中：三点都不对 ——
-    // 框不是方的、描边不是虚线、说明本该在框下面。并排图里最扎眼的就是这一处。
-    val sp = LocalAppSpacing.current
-    val surfaceVariant = MaterialTheme.colorScheme.surfaceVariant
-    val outline = MaterialTheme.colorScheme.outline
-    val onSurface = MaterialTheme.colorScheme.onSurface
-    val onSurfaceVariant = MaterialTheme.colorScheme.onSurfaceVariant
-    Column(modifier = modifier.fillMaxWidth(), horizontalAlignment = Alignment.CenterHorizontally) {
-        Box(
-            modifier = Modifier
-                .widthIn(max = 200.dp)
-                .fillMaxWidth()
-                .aspectRatio(1f)
-                .drawBehind {
-                    val radius = 16.dp.toPx()
-                    drawRoundRect(color = surfaceVariant, cornerRadius = CornerRadius(radius, radius))
-                    drawRoundRect(
-                        color = outline,
-                        cornerRadius = CornerRadius(radius, radius),
-                        style = Stroke(
-                            width = 2.dp.toPx(),
-                            pathEffect = PathEffect.dashPathEffect(
-                                floatArrayOf(6.dp.toPx(), 4.dp.toPx()),
-                            ),
-                        ),
-                    )
-                },
-        ) {
-            // `.qr`：`repeating-conic-gradient(var(--on) 0 25%, transparent 0 50%) 0 0/20px 20px`
-            // —— 20px 一格的棋盘，整体 88% 不透明。这里按格子逐块画，等价于那条渐变。
-            Box(
-                modifier = Modifier
-                    .align(Alignment.Center)
-                    .size(132.dp)
-                    .clip(RoundedCornerShape(12.dp))
-                    .drawBehind {
-                        val cell = 20.dp.toPx()
-                        val ink = onSurface.copy(alpha = 0.88f)
-                        var row = 0
-                        var y = 0f
-                        while (y < size.height) {
-                            var col = 0
-                            var x = 0f
-                            while (x < size.width) {
-                                if ((row + col) % 2 == 0) {
-                                    drawRect(color = ink, topLeft = Offset(x, y), size = Size(cell, cell))
-                                }
-                                x += cell
-                                col++
-                            }
-                            y += cell
-                            row++
-                        }
-                    },
-            )
-            // `.lamp`：右下角那颗 30×30 圆钮，底 `--surface-3`（**填充** token ⇒
-            // `MaterialTheme.accents.surface3`，不是做描边的 `outlineVariant`）、
-            // 图标 16px。原型里它是 `aria-pressed` 的按钮，但这一层在代码里只是
-            // **取景框的占位**（真扫码是整屏 `ScanScreen`），所以画成静态形状、
-            // 不挂一个按下去没反应的点击 —— 与这个框"自己不点"的理由一致。
-            Box(
-                modifier = Modifier
-                    .align(Alignment.BottomEnd)
-                    .padding(9.dp)
-                    .size(30.dp)
-                    .clip(CircleShape)
-                    .background(MaterialTheme.accents.surface3),
-                contentAlignment = Alignment.Center,
-            ) {
-                Icon(
-                    painter = painterResource(Res.drawable.ic_qr_code_scanner),
-                    contentDescription = null,
-                    tint = onSurfaceVariant,
-                    modifier = Modifier.size(16.dp),
-                )
-            }
-        }
-        Text(
-            text = hint,
-            style = MaterialTheme.typography.labelSmall,
-            color = onSurfaceVariant,
-            textAlign = TextAlign.Center,
-            modifier = Modifier.fillMaxWidth().padding(top = sp.md10),
-        )
-    }
-}
-
 /**
  * 原型 `.banner.info`（`prototype/relay.html:354-362`）：`--surface-2` 底、`--on-2` 字、
  * 16px 信息图标、圆角 `--r-ctl`(12)、`padding:10px 12px`、`gap:9px`、`line-height:1.45`。
  *
  * **为什么不复用 `AppBanner`**：那个组件的 `BannerTone.Info` 也映射到
- * `surfaceVariant`/`onSurfaceVariant`（`ui/components/Common.kt:393-430`），但它是
+ * 次级表面色与 `onSurfaceVariant`（见 `ui/components/Common.kt` 的 `AppBanner`），但它是
  * "可关闭的页级横幅" —— 带一颗 `common_close` 文字按钮、`tonalElevation`、`maxLines=3`。
  * 扫码段这条是**不可关闭的说明条**（原型里 `.banner.info` 没有 `.x`），
  * 硬套那个组件会凭空多出一颗关闭钮。而 `AppBanner` 住在 Lead 独占的

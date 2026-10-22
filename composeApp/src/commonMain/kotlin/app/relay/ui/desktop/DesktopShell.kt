@@ -39,6 +39,8 @@ import app.relay.app.RelayUiState
 import app.relay.app.model.WorkspaceUi
 import app.relay.core.nowMillis
 import app.relay.feature.agents.AgentConsoleScreen
+import app.relay.feature.chat.draftOf
+import app.relay.feature.chat.updateDraft
 import app.relay.feature.chat.ChatScreen
 import app.relay.ui.components.AppBanner
 import app.relay.generated.resources.workspace_group_default_name
@@ -105,6 +107,16 @@ public class DesktopShellActions(
     val onToggleTheme: () -> Unit = {},
     val onExportDiagnostics: (() -> Unit)? = null,
     val onOpenDownloadsFolder: (() -> Unit)? = null,
+    /**
+     * 「在文件管理器里打开**共享目录**」。null = 宿主给不出这条出口（或本机还没设
+     * 共享目录），文件柜那张卡上的「打开」按钮**整颗不画**（与 [onOpenDownloadsFolder]
+     * 同一判据：能力不存在就不给一个按下去没反应的入口）。
+     *
+     * 与 [onOpenDownloadsFolder] 的区别是**打开哪个目录**：那条开的是数据/接收目录，
+     * 这条开的是用户设的共享目录（`settings.shareRoot`）。两者不能互相冒充 ——
+     * 打开错的目录和点了没反应一样是在骗人。
+     */
+    val onOpenShareRoot: (() -> Unit)? = null,
     val onRefresh: () -> Unit = {},
     val onNewConversation: () -> Unit = {},
     val onImportFiles: (String) -> Unit = {},
@@ -179,6 +191,14 @@ public fun DesktopShell(
      * 所以窗口层只报「被请求了几次」，由 shell 自己决定怎么切。
      */
     externalNodesRequest: Int = 0,
+    /**
+     * 「把添加节点面板打开」的外来请求计数（同一套意图计数约定）。
+     *
+     * 与 [externalNodesRequest] 配套：窗口层系统菜单的「新建会话」同时递增两者 ——
+     * 前者切视图、后者开面板。**只切视图不够**：用户已经在节点页时那一按没有任何反馈
+     * （真机上就是「点新建会话没反应」）。
+     */
+    externalAddNodeRequest: Int = 0,
     /**
      * 外部入口（托盘菜单「收到的文件」）要求切到「文件」视图的次数。
      *
@@ -286,6 +306,11 @@ public fun DesktopShell(
         if (externalFilesRequest > 0) view = DesktopView.Files
     }
     var selectedPeerId by remember { mutableStateOf(initialPeerId) }
+
+    // 每个会话各自的草稿 —— 与手机壳同一条理由（见 App.kt 的 draftsByConv）：
+    // ChatScreen 的 draft 是 `remember(peerId)` 的，切会话就重建，写到一半切走回来字没了。
+    // 桌面窗口常驻，这张表活得比手机更久，但同样只活在进程内（不落盘）。
+    var draftsByConv by remember { mutableStateOf(mapOf<String, String>()) }
     var selectedWsId by remember { mutableStateOf<String?>(null) }
     var selectedAgentSessionId by remember(selectedPeerId) { mutableStateOf<String?>(null) }
     var showWsQrFor by remember { mutableStateOf<WorkspaceUi?>(null) }
@@ -348,14 +373,20 @@ public fun DesktopShell(
     // 输入框的启动自动聚焦顶掉，窗口一打开就打不了字。
     // 「新建会话」的**唯一**实现（缺陷②）：切到节点视图 + 宿主动作。
     //
-    // 为什么必须只有这一处：此前菜单写的是「view = Nodes + actions.onNewConversation()」，
-    // 而宿主注入的 `onNewConversation` 是空实现 —— 于是"新建会话"看起来有用全靠那次
-    // 顺带切视图；同一个命令的第二条入口（⌘N）如果只调动作、不切视图，用户按下去
-    // 就什么都不发生。同一个命令两条入口两种行为，正是要消掉的那类分叉。
-    // 现在快捷键、工具栏、系统菜单栏都从这一份语义出发（菜单栏在窗口层，用
-    // `host.requestNodesView()` + 同一个 `actions.onNewConversation()` 表达同一件事）。
+    // **这一个 lambda 就是「新建会话」的全部语义**：切到节点视图 + 打开添加节点面板。
+    //
+    // 修过两次，记下来免得再退化：
+    //  · 第一版是 `view = Nodes` + `actions.onNewConversation()`，而宿主动作是空实现
+    //    ⇒ 全部效果只有一次视图切换，用户已经在节点页时**按下去什么都不发生**。
+    //  · 第二版只把窗口层的系统菜单改成 `host.requestNewConversation()`，**漏了这一条**
+    //    —— 工具栏那颗按钮与 ⌘N 走的还是旧路，于是「系统菜单能用、按钮没反应」。
+    //
+    // 现在三条入口（工具栏 / ⌘N / 系统菜单）表达的是同一件事：面板真的打开。
+    // 面板的开合归 `NodesPane` 自己，这里只递增一个意图计数。
+    var addNodeRequest by remember { mutableStateOf(0) }
     val newConversation: () -> Unit = {
         view = DesktopView.Nodes
+        addNodeRequest++
         actions.onNewConversation()
     }
 
@@ -555,7 +586,12 @@ public fun DesktopShell(
                             },
                             onGoToPairing = { view = DesktopView.Nodes },
                             now = now,
-                            initialDraft = initialDraft,
+                            // 有真草稿用它；否则退回 initialDraft（截图门禁的预置值）。
+                            initialDraft = draftOf(draftsByConv, selectedPeerId)
+                                .ifEmpty { initialDraft },
+                            onDraftChange = { convId, text ->
+                                draftsByConv = updateDraft(draftsByConv, convId, text)
+                            },
                             initialGlobalSearch = initialGlobalSearch,
                             onCreateGroup = { name, members, description ->
                                 val gid = controller.createGroup(name, members, description)
@@ -664,6 +700,16 @@ public fun DesktopShell(
                             state.banner?.let { AppBanner(it, onDismiss = controller::dismissBanner) }
                             AgentConsoleScreen(
                                 state = state,
+                                // 谁能用这个 agent 干活 —— 走 controller 的宿主侧桥。
+                                // 手机壳不接这个桥（null），所以那一侧不画配置区。
+                                // 可空 → 非空：null（壳没有台账）时给空列表，界面据此不画配置区。
+                                execDevicesOf = { agentKey -> controller.execDevicesOf(agentKey).orEmpty() },
+                                onToggleExecDevice = { agentKey, nodeId, checked ->
+                                    controller.setExecDeviceAllowed(agentKey, nodeId, checked)
+                                },
+                                // 「添加设备」只要有台账就给出口；候选为空时弹层自己说「都已经在名单里了」，
+                                // 那比把入口藏起来好 —— 藏起来用户会以为这个功能没有。
+                                onAddExecDevice = {},
                                 selectedAgentId = selectedPeerId,
                                 onSelectAgent = { selectedPeerId = it },
                                 onOpenChat = { id, wsId ->
@@ -718,11 +764,18 @@ public fun DesktopShell(
                             state = state,
                             controller = controller,
                             now = now,
+                            // 宿主给不出（或还没设共享目录）时是 null ⇒ 那颗「打开」不画。
+                            onOpenShareRoot = actions.onOpenShareRoot,
                         )
 
                         DesktopView.Nodes -> NodesPane(
                             state = state,
                             controller = controller,
+                            // 「新建会话」的落点：把面板直接打开，而不是只切过来。
+                            // 两个来源相加：系统菜单（窗口层意图计数）+ 工具栏/⌘N（本文件的）。
+                            // 两者都是单调递增的计数器，相加后仍然单调 —— `LaunchedEffect`
+                            // 只关心「变了」，所以合并不会漏触发。
+                            externalAddNodeRequest = externalAddNodeRequest + addNodeRequest,
                             // 新稿不再画「本机节点 ID」条，这个实参只为兼容第一轮帧文件保留。
                             onCopyNodeId = { actions.onCopyNodeId(state.selfNodeId) },
                             onSetPeerRemark = controller::setPeerRemark,

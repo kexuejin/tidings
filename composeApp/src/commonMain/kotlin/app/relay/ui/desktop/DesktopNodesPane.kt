@@ -22,17 +22,11 @@ import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
-import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
-import androidx.compose.foundation.verticalScroll
-import androidx.compose.material3.Button
-import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.OutlinedButton
-import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
@@ -40,13 +34,13 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.Shape
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
-import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
@@ -55,39 +49,28 @@ import app.relay.app.RelayUiState
 import app.relay.app.manualPeerStatuses
 import app.relay.core.nowMillis
 import app.relay.feature.nodes.NodesScreen
+import app.relay.feature.nodes.NodeDetailBody
+import app.relay.feature.nodes.NodeListItem
+import app.relay.feature.nodes.NodePresence
+import app.relay.feature.nodes.AddNodeSheet
+import app.relay.ui.components.AddNodeAction
 import app.relay.ui.components.AppBanner
 import app.relay.ui.components.KindBadge
 import app.relay.ui.components.PeerAvatar
 import app.relay.ui.components.StatusDot
-import app.relay.ui.components.relativeTime
 import app.relay.ui.theme.IconSizes
 import app.relay.ui.theme.LocalAppSpacing
-import app.relay.ui.theme.LocalCardShape
 import app.relay.ui.theme.RelayElevations
 import app.relay.ui.theme.accents
 import app.relay.generated.resources.Res
-import app.relay.generated.resources.common_never
 import app.relay.generated.resources.desktop_nodes_copy_id
 import app.relay.generated.resources.desktop_nodes_local_id
 import app.relay.generated.resources.disc_manual_offline
 import app.relay.generated.resources.disc_manual_online
 import app.relay.generated.resources.disc_manual_unreachable
-import app.relay.generated.resources.node_detail_info_host
-import app.relay.generated.resources.node_detail_info_ip
-import app.relay.generated.resources.node_detail_info_platform
-import app.relay.generated.resources.node_detail_info_recent
-import app.relay.generated.resources.node_detail_info_section
 import app.relay.generated.resources.node_detail_never_hint
-import app.relay.generated.resources.node_detail_recent_just_now
-import app.relay.generated.resources.node_detail_remark_hint
-import app.relay.generated.resources.node_detail_remark_placeholder
-import app.relay.generated.resources.node_detail_remark_save
-import app.relay.generated.resources.node_detail_remark_section
-import app.relay.generated.resources.node_detail_ungrouped
 import app.relay.generated.resources.nodes_lan_empty
-import app.relay.generated.resources.nodes_menu_message
 import app.relay.generated.resources.nodes_subtitle_short
-import app.relay.generated.resources.ic_chat_bubble
 import app.relay.generated.resources.ic_copy
 import app.relay.generated.resources.ic_lan_search
 import org.jetbrains.compose.resources.stringResource
@@ -147,6 +130,7 @@ import org.jetbrains.compose.resources.stringResource
  *    按「保真档」保留并登记。
  */
 @Composable
+@OptIn(androidx.compose.material3.ExperimentalMaterial3Api::class)
 public fun NodesPane(
     state: RelayUiState,
     controller: DesktopPaneActions,
@@ -186,6 +170,13 @@ public fun NodesPane(
      * 默认取真实时钟；预览帧传固定值，否则同一张参考图每天都不一样。
      */
     now: Long = nowMillis(),
+    /**
+     * 外部（系统菜单「新建会话」）要求**打开添加节点面板**的请求计数。
+     *
+     * 用计数器而不是 Bool：同一个命令按两次要能触发两次。与 `externalNodesRequest`
+     * 同一套约定（见 `DesktopShell` 里那条的 KDoc）。
+     */
+    externalAddNodeRequest: Int = 0,
 ) {
     BoxWithConstraints(modifier.fillMaxSize()) {
         val tier = sizeClass
@@ -203,6 +194,14 @@ public fun NodesPane(
             )
         }
         val selected = entries.firstOrNull { it.key == selectedKey } ?: entries.firstOrNull()
+        // 宽档的「添加节点」弹层。Compact 那支由 `NodesScreen` 自己管这个状态，
+        // 这里必须自己有一份 —— 否则宽窗上那个入口点下去什么都不发生。
+        var addNodeOpen by remember { mutableStateOf(false) }
+        // 外部请求（系统菜单「新建会话」）：计数器变了就打开面板。
+        // 用 `LaunchedEffect(key)` 而不是在组合里直接改状态 —— 组合期写状态会触发重组循环。
+        LaunchedEffect(externalAddNodeRequest) {
+            if (externalAddNodeRequest > 0) addNodeOpen = true
+        }
 
         if (tier == DesktopWindowSizeClass.Compact) {
             Column(Modifier.fillMaxSize()) {
@@ -243,6 +242,7 @@ public fun NodesPane(
                         onlineCount = onlineCount,
                         showCount = showNodeCountInPane,
                         onSelect = { entry -> selectedKey = entry.key },
+                        onAddNode = { addNodeOpen = true },
                         modifier = Modifier
                             .width(DesktopMetrics.SIDEBAR_PX.dp)
                             .fillMaxHeight(),
@@ -250,7 +250,6 @@ public fun NodesPane(
                     VerticalDividerLine()
                     NodeDetailPane(
                         entry = selected,
-                        remark = selected?.nodeId?.let { id -> state.settings.peerRemarks[id].orEmpty() }.orEmpty(),
                         now = now,
                         onSetPeerRemark = onSetPeerRemark,
                         onOpenChat = onOpenChat,
@@ -261,13 +260,24 @@ public fun NodesPane(
                 }
             }
         }
+        // **宽档的添加节点弹层。** 与 `NodesScreen` 里那份是同一个组件（`AddNodeSheet`），
+        // 不重写：扫码两个回调传 null —— 桌面端没有相机栈，传了只会多出一个点下去报错的
+        // 按钮；组件在 null 时如实写「这台设备扫不了」并把路引到填地址。
+        if (addNodeOpen) {
+            AddNodeSheet(
+                state = state,
+                onConnect = { host, port ->
+                    controller.addManualPeer(host, port)
+                    addNodeOpen = false
+                },
+                onDismiss = { addNodeOpen = false },
+            )
+        }
     }
 }
 
 // ------------------------------------------------------------------ 数据
 
-/** 一行节点在列表与详情里的三种状态（原型 `nodeRow` 的 `online` / `never` 分支）。 */
-private enum class NodePresence { Online, Offline, Never }
 
 /**
  * 左栏与详情共用的**一行**。
@@ -275,21 +285,6 @@ private enum class NodePresence { Online, Offline, Never }
  * [nodeId] 为 null 只有一种来源：「保存了但从来没接通过」的手动地址
  * （`manualPeerStatuses` 里 `unreachable` 的那些，它们在节点表 `state.peers` 里没有对应行）。
  */
-private data class NodeEntry(
-    val key: String,
-    val nodeId: String?,
-    val name: String,
-    val isAgent: Boolean,
-    val presence: NodePresence,
-    /** 列表第二行与详情「IP 地址」显示的值：`ip` 优先，空则回落 `host`。 */
-    val address: String,
-    val port: Int,
-    /** 详情「主机」行（原型是 `hostName`，与列表用的地址不是一回事）。 */
-    val hostName: String,
-    val platform: String,
-    val lastSeenAt: Long,
-)
-
 /**
  * 节点表 + 「只有地址、从没接通」的手动条目，合成一份列表。
  *
@@ -297,35 +292,46 @@ private data class NodeEntry(
  * （它在别处已经按「在线优先 / 最近活跃」排过），死地址追加在末尾 —— 原型的 `allNodes()`
  * 也是这个顺序。
  */
-private fun nodeEntries(state: RelayUiState): List<NodeEntry> {
+private fun nodeEntries(state: RelayUiState): List<NodeListItem> {
     val known = state.peers.map { peer ->
-        NodeEntry(
+        NodeListItem(
             key = "peer:${peer.nodeId}",
             nodeId = peer.nodeId,
-            name = peer.displayName,
+            displayName = peer.displayName,
             isAgent = peer.isAgent,
-            presence = if (peer.online) NodePresence.Online else NodePresence.Offline,
-            address = peer.ip.ifBlank { peer.host },
+            online = peer.online,
+            // 「没有回应」只可能出现在手动地址上：对端只要能进节点表，就说明它至少
+            // 接过一次手 —— 那是「离线」，不是「没有回应」。
+            never = false,
+            host = peer.ip.ifBlank { peer.host },
             port = peer.udpPort,
             hostName = peer.host,
             platform = peer.platform,
+            remark = peer.remark,
+            manual = false,
+            manualEntry = null,
             lastSeenAt = peer.lastSeenAt,
         )
     }
     val never = manualPeerStatuses(state.settings.manualPeers, state.peers)
         .filter { it.nodeId == null }
         .map { status ->
-            NodeEntry(
+            NodeListItem(
                 key = "manual:${status.entry.host}:${status.entry.port}",
                 nodeId = null,
-                name = status.entry.name?.takeIf { it.isNotBlank() }
+                displayName = status.entry.name?.takeIf { it.isNotBlank() }
                     ?: "${status.entry.host}:${status.entry.port}",
                 isAgent = false,
-                presence = NodePresence.Never,
-                address = status.entry.host,
+                online = false,
+                never = true,
+                host = status.entry.host,
                 port = status.entry.port,
                 hostName = status.entry.host,
                 platform = "",
+                // 从没接通过：没有备注可问，三个空值而不是编一个占位符。
+                remark = "",
+                manual = true,
+                manualEntry = status.entry,
                 lastSeenAt = 0L,
             )
         }
@@ -357,16 +363,35 @@ private fun presenceDotColor(presence: NodePresence): Color = when (presence) {
  */
 @Composable
 private fun NodeList(
-    entries: List<NodeEntry>,
+    entries: List<NodeListItem>,
     selectedKey: String?,
     onlineCount: Int,
     showCount: Boolean,
-    onSelect: (NodeEntry) -> Unit,
+    onSelect: (NodeListItem) -> Unit,
+    /**
+     * 「添加节点」。
+     *
+     * **宽档必须自己提供这一条**：`Compact` 那支调的是 `NodesScreen`，它标题栏里有
+     * `AddNodeAction`、列表底部还有一行「添加节点」；而宽档走的是本文件自建的双栏，
+     * 这两处都不在里面 —— 真机上宽窗因此**完全没有添加入口**，用户只能看见已有节点。
+     */
+    onAddNode: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
     val sp = LocalAppSpacing.current
     Column(modifier) {
-        if (showCount) NodeCountLine(entries.size, onlineCount)
+        // 计数行与添加入口同一行：入口在最常用的位置，又不额外占一条纵向空间。
+        Row(
+            verticalAlignment = Alignment.CenterVertically,
+            modifier = Modifier.fillMaxWidth(),
+        ) {
+            if (showCount) {
+                Box(Modifier.weight(1f)) { NodeCountLine(entries.size, onlineCount) }
+            } else {
+                Spacer(Modifier.weight(1f))
+            }
+            AddNodeAction(onClick = onAddNode, modifier = Modifier.padding(end = sp.xs))
+        }
         LazyColumn(
             modifier = Modifier.fillMaxSize(),
             contentPadding = PaddingValues(horizontal = sp.sm, vertical = sp.xs),
@@ -406,7 +431,7 @@ private fun NodeCountLine(count: Int, onlineCount: Int) {
  * `box-shadow:0 0 0 1px var(--hair)`（`:690`）。这里用同色的 `border` 表达那圈 hairline。
  */
 @Composable
-private fun NodeListRow(entry: NodeEntry, selected: Boolean, onClick: () -> Unit) {
+private fun NodeListRow(entry: NodeListItem, selected: Boolean, onClick: () -> Unit) {
     val sp = LocalAppSpacing.current
     val scheme = MaterialTheme.colorScheme
     Surface(
@@ -426,7 +451,7 @@ private fun NodeListRow(entry: NodeEntry, selected: Boolean, onClick: () -> Unit
             horizontalArrangement = Arrangement.spacedBy(sp.md10),
         ) {
             NodeAvatar(
-                name = entry.name,
+                name = entry.displayName,
                 isAgent = entry.isAgent,
                 presence = entry.presence,
                 size = NodeListAvatarSize,
@@ -439,7 +464,7 @@ private fun NodeListRow(entry: NodeEntry, selected: Boolean, onClick: () -> Unit
                     horizontalArrangement = Arrangement.spacedBy(sp.xs),
                 ) {
                     Text(
-                        text = entry.name,
+                        text = entry.displayName,
                         style = MaterialTheme.typography.bodyMedium,
                         fontWeight = FontWeight.SemiBold,
                         maxLines = 1,
@@ -449,7 +474,7 @@ private fun NodeListRow(entry: NodeEntry, selected: Boolean, onClick: () -> Unit
                     if (entry.isAgent) KindBadge(isAgent = true)
                 }
                 Text(
-                    text = "${presenceLabel(entry.presence)} · ${entry.address}:${entry.port}",
+                    text = "${presenceLabel(entry.presence)} · ${entry.host}:${entry.port}",
                     style = MaterialTheme.typography.bodySmall,
                     color = scheme.onSurfaceVariant,
                     maxLines = 1,
@@ -517,8 +542,7 @@ private fun NodeAvatar(
  */
 @Composable
 private fun NodeDetailPane(
-    entry: NodeEntry?,
-    remark: String,
+    entry: NodeListItem?,
     now: Long,
     onSetPeerRemark: (String, String) -> Unit,
     onOpenChat: (String) -> Unit,
@@ -534,291 +558,15 @@ private fun NodeDetailPane(
         }
         return
     }
-    val sp = LocalAppSpacing.current
-    Column(
-        modifier = modifier
-            .verticalScroll(rememberScrollState())
-            .padding(horizontal = sp.lg, vertical = sp.lg14),
-        verticalArrangement = Arrangement.spacedBy(sp.lg14),
-    ) {
-        NodeDetailHeader(entry)
-        // 备注卡只在**有 nodeId** 时出现：备注是按 nodeId 存的
-        // （`RelaySettings.peerRemarks`），「从来没有回应」的手动地址没有 nodeId 可挂。
-        entry.nodeId?.let { nodeId ->
-            RemarkCard(
-                nodeId = nodeId,
-                initial = remark,
-                onSave = onSetPeerRemark,
-            )
-        }
-        InfoCard(entry = entry, now = now)
-        SendMessageButton(entry = entry, onOpenChat = onOpenChat)
-    }
-}
-
-/** `.ndhead{gap:14px;padding:6px 2px 14px}` + `.ndmeta .t1{17px/600}` + `.ndtags{gap:6px;margin-top:6px}`。 */
-@Composable
-private fun NodeDetailHeader(entry: NodeEntry) {
-    val sp = LocalAppSpacing.current
-    Row(
-        modifier = Modifier.fillMaxWidth(),
-        verticalAlignment = Alignment.CenterVertically,
-        horizontalArrangement = Arrangement.spacedBy(sp.lg14),
-    ) {
-        NodeAvatar(
-            name = entry.name,
-            isAgent = entry.isAgent,
-            presence = entry.presence,
-            size = NodeDetailAvatarSize,
-            shape = CircleShape,
-            ringed = true,
-        )
-        Column(Modifier.weight(1f)) {
-            Row(
-                verticalAlignment = Alignment.CenterVertically,
-                horizontalArrangement = Arrangement.spacedBy(sp.xs),
-            ) {
-                Text(
-                    text = entry.name,
-                    style = MaterialTheme.typography.titleMedium,
-                    fontWeight = FontWeight.SemiBold,
-                    maxLines = 1,
-                    overflow = TextOverflow.Ellipsis,
-                    modifier = Modifier.weight(1f, fill = false),
-                )
-                if (entry.isAgent) KindBadge(isAgent = true)
-            }
-            Row(
-                modifier = Modifier.padding(top = sp.sm6),
-                verticalAlignment = Alignment.CenterVertically,
-                horizontalArrangement = Arrangement.spacedBy(sp.sm6),
-            ) {
-                NodeStatePill(entry.presence)
-                Surface(
-                    color = MaterialTheme.colorScheme.surfaceVariant,
-                    contentColor = MaterialTheme.colorScheme.onSurfaceVariant,
-                    shape = CircleShape,
-                ) {
-                    Text(
-                        text = stringResource(Res.string.node_detail_ungrouped),
-                        style = MaterialTheme.typography.labelSmall,
-                        fontWeight = FontWeight.SemiBold,
-                        modifier = Modifier.padding(horizontal = sp.sm6, vertical = sp.xxs),
-                    )
-                }
-            }
-        }
-    }
-}
-
-/**
- * 状态药丸（`.pill`，`:306-309`）。
- *
- * 「在线」的配色在原型里是 `color-mix(in srgb, var(--online) 18%, transparent)`，
- * 在 Compose 里就是同一个颜色的 18% 透明度；「没有回应」用 M3 的 `errorContainer`
- * （原型 `--error-c` / `--on-error-c` 与 M3 语义槽同值）。
- */
-@Composable
-private fun NodeStatePill(presence: NodePresence) {
-    val sp = LocalAppSpacing.current
-    val scheme = MaterialTheme.colorScheme
-    val container = when (presence) {
-        NodePresence.Online -> MaterialTheme.accents.online.copy(alpha = 0.18f)
-        NodePresence.Offline -> scheme.surfaceVariant
-        NodePresence.Never -> scheme.errorContainer
-    }
-    val content = when (presence) {
-        NodePresence.Online -> MaterialTheme.accents.online
-        NodePresence.Offline -> scheme.onSurfaceVariant
-        NodePresence.Never -> scheme.onErrorContainer
-    }
-    Surface(color = container, contentColor = content, shape = CircleShape) {
-        Text(
-            text = presenceLabel(presence),
-            style = MaterialTheme.typography.labelSmall,
-            fontWeight = FontWeight.SemiBold,
-            modifier = Modifier.padding(horizontal = sp.sm, vertical = sp.xxs),
-        )
-    }
-}
-
-/** 备注卡：`.card > .padc{padding:8px 13px 13px}`（`.win` 的 `--padc`，`:600`）+ `.grphead.sm`（`:311`）。 */
-@Composable
-private fun RemarkCard(nodeId: String, initial: String, onSave: (String, String) -> Unit) {
-    val sp = LocalAppSpacing.current
-    var text by remember(nodeId, initial) { mutableStateOf(initial) }
-    DesktopDetailCard {
-        CardGroupHeader(stringResource(Res.string.node_detail_remark_section))
-        Text(
-            text = stringResource(Res.string.node_detail_remark_hint),
-            style = MaterialTheme.typography.labelSmall,
-            color = MaterialTheme.colorScheme.onSurfaceVariant,
-            modifier = Modifier.padding(bottom = sp.sm),
-        )
-        OutlinedTextField(
-            value = text,
-            // 原型 `maxlength` 是 32（`RelaySettings.LIMIT_REMARK`）；输入框自己拦一道，
-            // 免得把超出长度的内容送到控制层再被悄悄截断 —— 那样用户看不到自己被截了。
-            onValueChange = { next -> if (next.length <= RemarkLimit) text = next },
-            placeholder = { Text(stringResource(Res.string.node_detail_remark_placeholder)) },
-            singleLine = false,
-            minLines = 2,
-            shape = MaterialTheme.shapes.medium,
-            modifier = Modifier.fillMaxWidth(),
-        )
-        OutlinedButton(
-            onClick = { onSave(nodeId, text.trim()) },
-            shape = MaterialTheme.shapes.medium,
-            modifier = Modifier.padding(top = sp.sm),
-        ) {
-            Text(stringResource(Res.string.node_detail_remark_save))
-        }
-    }
-}
-
-/** 详细信息卡：四行 kv（`.kv{padding:9px 14px;border-bottom:1px solid var(--hair)}`，`:277`）。 */
-@Composable
-private fun InfoCard(entry: NodeEntry, now: Long) {
-    val sp = LocalAppSpacing.current
-    DesktopDetailCard {
-        CardGroupHeader(stringResource(Res.string.node_detail_info_section))
-        DetailRow(
-            label = stringResource(Res.string.node_detail_info_recent),
-            // 原型 `const ls = p.lastSeen === 0 ? '刚刚' : p.lastSeen;`（`prototype/relay.html:3300`），
-            // 它模型里的 `0` 是「现在还在线」；本端 `lastSeenAt` 是时间戳，`0` 是**从来没有过**，
-            // 两者语义相反，所以分开判：
-            //   · 从没连通过（死地址）→ `common_never`（房内同款回落：`feature/nodes/NodeDetail.kt`
-            //     与 `feature/agents/AgentSessionWidgets.kt` 都这么写）—— 写「刚刚」会假装它出现过；
-            //   · 在线 → 「刚刚」（原型对 online 的那种 0 语义）；
-            //   · 其余有时间的 → 相对时间；时间戳也是 0 的 → `common_never`。
-            value = when {
-                entry.presence == NodePresence.Never -> stringResource(Res.string.common_never)
-                entry.presence == NodePresence.Online -> stringResource(Res.string.node_detail_recent_just_now)
-                entry.lastSeenAt > 0L -> relativeTime(entry.lastSeenAt, now)
-                else -> stringResource(Res.string.common_never)
-            },
-        )
-        DetailRow(
-            label = stringResource(Res.string.node_detail_info_ip),
-            value = "${entry.address}:${entry.port}",
-            monospace = true,
-        )
-        DetailRow(
-            label = stringResource(Res.string.node_detail_info_host),
-            // 空值占位符跟手机那份同款（`feature/nodes/NodeDetail.kt` 的 `"—"`）。
-            value = entry.hostName.ifBlank { "—" },
-            monospace = true,
-        )
-        DetailRow(
-            label = stringResource(Res.string.node_detail_info_platform),
-            value = entry.platform.ifBlank { "—" },
-        )
-    }
-}
-
-/** 整宽「发消息」；「从来没有回应」的地址按原型置灰，并在下面补一行解释。 */
-@Composable
-private fun SendMessageButton(entry: NodeEntry, onOpenChat: (String) -> Unit) {
-    val sp = LocalAppSpacing.current
-    val nodeId = entry.nodeId
-    Column(Modifier.fillMaxWidth()) {
-        Button(
-            onClick = { nodeId?.let(onOpenChat) },
-            enabled = nodeId != null,
-            shape = MaterialTheme.shapes.medium,
-            modifier = Modifier.fillMaxWidth(),
-        ) {
-            Icon(
-                painter = painterResource(Res.drawable.ic_chat_bubble),
-                contentDescription = null,
-                modifier = Modifier.size(IconSizes.Label),
-            )
-            Spacer(Modifier.width(sp.sm6))
-            Text(stringResource(Res.string.nodes_menu_message))
-        }
-        if (nodeId == null) {
-            Text(
-                text = stringResource(Res.string.node_detail_never_hint),
-                style = MaterialTheme.typography.labelSmall,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-                textAlign = TextAlign.Center,
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .padding(top = sp.sm),
-            )
-        }
-    }
-}
-
-/** 详情里的卡：`LocalCardShape`（桌面壳覆盖成 12dp，= `.win{--r-card:12px}`）+ 原型 `.card` 的内边距。 */
-@Composable
-private fun DesktopDetailCard(content: @Composable () -> Unit) {
-    val sp = LocalAppSpacing.current
-    Surface(
-        color = MaterialTheme.colorScheme.surface,
-        contentColor = MaterialTheme.colorScheme.onSurface,
-        shape = LocalCardShape.current,
-        shadowElevation = RelayElevations.Card,
-        modifier = Modifier.fillMaxWidth(),
-    ) {
-        Column(
-            modifier = Modifier.padding(
-                start = sp.lg14,
-                end = sp.lg14,
-                top = sp.sm,
-                bottom = sp.lg14,
-            ),
-        ) {
-            content()
-        }
-    }
-}
-
-/** 卡内小标题（`.grphead.sm`，`:311`：`padding:10px 0 4px;font-size:12px;opacity:.92`）。 */
-@Composable
-private fun CardGroupHeader(text: String) {
-    val sp = LocalAppSpacing.current
-    Text(
-        text = text,
-        style = MaterialTheme.typography.bodySmall,
-        fontWeight = FontWeight.SemiBold,
-        modifier = Modifier.padding(top = sp.md10, bottom = sp.xs),
+    // **手机与桌面共用同一个详情面板**（`NodeDetailBody`）：头部 + 备注卡 + 详细信息卡
+    // + 发消息，四处都只有一份实现。桌面这里只多一层"没有选中项"的空态。
+    NodeDetailBody(
+        item = entry,
+        onSetPeerRemark = onSetPeerRemark,
+        onOpenChat = onOpenChat,
+        now = now,
+        modifier = modifier,
     )
-}
-
-/**
- * `详细信息` 的一行。
- *
- * 标签的**列宽**在原型里是 `--kv-k`（桌面窗 `104px`，`:600`）；它落在任何 M3 尺寸槽之外，
- * 所以按「保真档」用一个具名常量表达（值来自原型，不是随手挑的）。
- * 行底那根 hairline 用 `outlineVariant`（= 原型 `--hair`，见 `Accents.kt` 的说明）。
- */
-@Composable
-private fun DetailRow(label: String, value: String, monospace: Boolean = false) {
-    val sp = LocalAppSpacing.current
-    Column(Modifier.fillMaxWidth()) {
-        Row(
-            modifier = Modifier
-                .fillMaxWidth()
-                .padding(vertical = sp.sm),
-            verticalAlignment = Alignment.Top,
-        ) {
-            Text(
-                text = label,
-                style = MaterialTheme.typography.bodySmall,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-                maxLines = 1,
-                modifier = Modifier.width(DetailKeyWidth),
-            )
-            Text(
-                text = value,
-                style = if (monospace) MaterialTheme.typography.bodySmall else MaterialTheme.typography.bodyMedium,
-                fontFamily = if (monospace) FontFamily.Monospace else null,
-                modifier = Modifier.weight(1f),
-            )
-        }
-        HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
-    }
 }
 
 /**
