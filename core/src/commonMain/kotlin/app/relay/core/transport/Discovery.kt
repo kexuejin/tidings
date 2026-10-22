@@ -72,6 +72,13 @@ class Discovery(
     private val broadcastHost: String = "255.255.255.255",
     private val broadcastPort: Int = Protocol.DEFAULT_UDP_PORT,
     /**
+     * 各网卡自己的子网广播地址，由平台层提供；空 = 只发受限广播。
+     *
+     * 受限广播在 TUN 环境下会被代理的更具体路由（`0.0.0.0/1`）接走，而子网广播有
+     * 直连路由、抢不走 —— 详见 [broadcastTargets] 的 `subnetBroadcasts` 参数说明。
+     */
+    private val subnetBroadcasts: () -> List<String> = { emptyList() },
+    /**
      * 发现层认得、但要交给**应用层**处理的 gossip 帧（目前只有 `scan-ranges`）。
      *
      * 必须在这里投递：`scan-ranges` 不在 [MsgTypes.RELIABLE] 里，所以
@@ -145,6 +152,7 @@ class Discovery(
             // 候选端点也要发：手机只留移动网时，它给桌面发 presence 必须能到达桌面的**公网**
             // 地址，否则桌面永远学不到手机的运营商地址（task-20 那条死锁）。
             candidateEndpoints = candidateTargets(),
+            subnetBroadcasts = subnetBroadcasts(),
         )) {
             sendRaw(bytes, host, port)
         }
@@ -182,6 +190,7 @@ class Discovery(
             // 候选端点也要发：手机只留移动网时，它给桌面发 presence 必须能到达桌面的**公网**
             // 地址，否则桌面永远学不到手机的运营商地址（task-20 那条死锁）。
             candidateEndpoints = candidateTargets(),
+            subnetBroadcasts = subnetBroadcasts(),
         )) {
             sendRaw(bytes, host, port)
         }
@@ -298,9 +307,40 @@ class Discovery(
         onPeerPin(profile.nodeId, raw)
     }
 
+    /**
+     * **把对端档案里声明的全部地址学进候选池。**
+     *
+     * 候选地址原先只有两个来源：配对码给的那一池、以及「刚从这个地址收到过报文」
+     * （`PeerRegistry.rememberSource`）。两者都要求**先有一条能通的路径**。
+     * 而对端换成 VPN（Tailscale / ZeroTier）之后，广播不跨网段，那条路径就不存在了：
+     *
+     * 1. 局域网里互通，双方各自记下对方的局域网地址；
+     * 2. 一方切到 VPN，旧地址不可达；
+     * 3. 广播到不了 VPN 段，双方都收不到对方的包；
+     * 4. `rememberSource` 也触发不了（它要收到包才记）。
+     *
+     * 死锁。真机现场：红米半小时零收包，而本机 ping 它的 Tailscale 地址几秒就通 ——
+     * 网络通，是协议不知道怎么走。
+     *
+     * 档案里带上全部地址后，**任意一条通路收到过一次 profile** 就能把对端的所有地址
+     * 灌进候选池；出站重试按序尝试，VPN 那条自然能命中。不依赖广播跨网。
+     *
+     * 端口用报文自己的 `datagram.port` —— 与 `rememberSource` 同一口径。
+     */
+    private fun learnAddresses(profile: Profile, datagram: ReceivedDatagram) {
+        val declared = profile.addresses.orEmpty()
+        if (declared.isEmpty()) return
+        for (host in declared) {
+            val trimmed = host.trim()
+            if (trimmed.isEmpty()) continue
+            registry.rememberSource(profile.nodeId, trimmed, datagram.port)
+        }
+    }
+
     private suspend fun handleEntry(envelope: Envelope, datagram: ReceivedDatagram) {
         val profile = profileOf(envelope) ?: return
         learnPin(profile)
+        learnAddresses(profile, datagram)
         registry.touch(
             envelope.from,
             datagram.host,
@@ -315,6 +355,7 @@ class Discovery(
     private suspend fun handleAlive(envelope: Envelope, datagram: ReceivedDatagram) {
         val profile = profileOf(envelope) ?: return
         learnPin(profile)
+        learnAddresses(profile, datagram)
         registry.touch(envelope.from, datagram.host, datagram.port, profile, envelope.ts, confirmed = true)
     }
 
@@ -329,6 +370,7 @@ class Discovery(
     private suspend fun handleProfile(envelope: Envelope, datagram: ReceivedDatagram) {
         val profile = profileOf(envelope) ?: return
         learnPin(profile)
+        learnAddresses(profile, datagram)
         registry.touch(envelope.from, datagram.host, datagram.port, profile, envelope.ts)
     }
 
@@ -488,8 +530,27 @@ internal fun broadcastTargets(
      * 手机就永远送不出 presence、桌面也就永远学不到手机的运营商地址 —— 两边互相显示离线。
      */
     candidateEndpoints: List<Pair<String, Int>> = emptyList(),
+    /**
+     * 各网卡自己的**子网广播地址**（家用网段那类 `x.x.x.255`）。
+     *
+     * 受限广播 `255.255.255.255` **没有具体路由条目**，只能落到默认路由；而代理软件
+     * 开 TUN 增强模式时会装 `0.0.0.0/1` + `128.0.0.0/1`（比 `/0` 更具体），受限广播
+     * 因此被整条接进代理的虚拟口，局域网里一个对端都收不到。
+     *
+     * 表现极具迷惑性：Tailscale / ZeroTier 照常能用（走 `100.64/10` 这类更具体的
+     * 路由），**只有 Tidings 失联**。用户的疑问是「没关之前能正常通过
+     * Tailscale/ZeroTier 访问，为什么会对 Tidings 有影响」—— 因为两者走的不是同一条路。
+     *
+     * 子网广播有直连路由（该网段的 /24，前缀更长），抢不走，所以它是 TUN 环境下
+     * 唯一还能出网的广播形态。顺带覆盖多网卡：LAN + ZeroTier + Tailscale 同时有时，
+     * 原先只在一个网段广播。
+     */
+    subnetBroadcasts: List<String> = emptyList(),
 ): List<Pair<String, Int>> {
     val targets = mutableListOf(broadcastHost to broadcastPort)
+    for (host in subnetBroadcasts) {
+        if (host.isNotBlank() && host != broadcastHost) targets += host to broadcastPort
+    }
     for (peer in manualPeers) targets += peer.host to peer.udpPort
     for (record in knownPeers) {
         if (record.online) targets += record.ip to record.udpPort

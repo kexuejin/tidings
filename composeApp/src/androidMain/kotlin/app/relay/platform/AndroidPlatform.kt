@@ -165,6 +165,19 @@ class AndroidAppPlatform(
                 transport = transport,
                 localAddresses = localAddresses,
                 vpnActive = vpnActive,
+                // **宣告地址必须含隧道口**（`tun*` 就是 Android 的 VPN 口）。
+                //
+                // 上面那份 [localAddresses] 服务「广播 / 配对码 / 同网段判断」，刻意窄；
+                // 而 `Profile.addresses` 是**单播**告诉已配对的对端「该往哪儿拨」——
+                // 手机只留 VPN 时，那条隧道地址是它**唯一**还能被拨到的路径。
+                //
+                // 不覆盖会走接口默认值（= localAddresses，窄）。真机上曾经看起来「能用」，
+                // 只是因为当时 `tun*` 的接口名没被 `isVirtualInterfaceName` 匹配上 ——
+                // 那是巧合，不是设计：换成 ZeroTier 的 `feth` 或改个接口名就静默失效。
+                advertisedAddresses = (
+                    localIpv4Addresses(includeVirtualInterfaces = true) +
+                        localIpv6CandidateAddresses(includeVirtualInterfaces = true)
+                    ).ifEmpty { localAddresses },
             )
         }
 

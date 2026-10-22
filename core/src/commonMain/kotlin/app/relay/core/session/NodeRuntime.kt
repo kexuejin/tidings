@@ -156,6 +156,37 @@ class NodeRuntime(
      *  · task-40 的地址复查判"对端是不是同一段局域网"（家庭 LAN 的 IPv6 常是 GUA）。
      */
     private val localAddresses: () -> List<String> = { emptyList() },
+    /**
+     * **对外宣告的地址**（进 `Profile.addresses`），默认与 [localAddresses] 相同。
+     *
+     * ## 为什么必须是两个列表而不是一个
+     *
+     * [localAddresses] 还承担「判断对端是不是同一段局域网」的职责（`Link.linkTargets`）。
+     * 平台层刻意**过滤掉隧道网卡**（`utun` / `feth` / `tailscale`）—— 因为那些地址发不出
+     * UDP 广播，留在列表里会让同网段判断选错路。
+     *
+     * 但 [Profile.addresses] 的用途**不是广播**，而是**单播告诉已配对的对端「该往哪儿拨」**。
+     * Tailscale 的 `100.x` 恰恰只能靠单播到达 —— 沿用那份过滤后的列表，等于宣告的地址里
+     * 永远没有隧道地址，跨网死锁照旧（真机：红米只拿到 `192.168.2.82`，而它走 VPN，拨不通）。
+     *
+     * 所以拆成两个：同网段判断用窄的，宣告用宽的。
+     */
+    private val advertisedAddresses: () -> List<String> = localAddresses,
+    /**
+     * 各网卡自己的**子网广播地址**（`192.168.2.255` 这类），默认空 = 只发受限广播。
+     *
+     * ## 为什么要单独一份
+     *
+     * 受限广播（`255.255.255.255`）没有具体路由条目，落到默认路由。而代理软件开 TUN 时
+     * 会装 `0.0.0.0/1` + `128.0.0.0/1`（比 `/0` 更具体）⇒ **受限广播被整条接进代理的
+     * 虚拟口**，局域网里一个对端都收不到。
+     *
+     * 真机现场：FClash 开 TUN 时 Tailscale / ZeroTier 照常能用（它们走 `100.64/10` 这类
+     * 更具体的路由），**只有 Tidings 失联** —— 红米 8 次拨号全失败、队列堆到 594 条。
+     *
+     * 子网广播有直连路由（`192.168.2.0/24`，前缀更长），抢不走。
+     */
+    private val subnetBroadcasts: () -> List<String> = { emptyList() },
     /** 连接层（K2 的接缝）。默认取平台实现：JVM/Android = TLS，iOS = 明文（公网被策略拒绝）。 */
     private val linkTransport: LinkTransport = createPlatformLinkTransport(linkIdentityDir, localAddresses),
     /**
@@ -217,7 +248,17 @@ class NodeRuntime(
      * 并且**如实记为降级路径**。
      */
     private val selfProfile: Profile
-        get() = profile.copy(tlsPin = linkTransport.localPin?.wire ?: profile.tlsPin)
+        get() = profile.copy(
+            tlsPin = linkTransport.localPin?.wire ?: profile.tlsPin,
+            // **把本机全部可路由地址带出去**（含 Tailscale / ZeroTier 段）。
+            //
+            // 对端原先只能从「发现包的源地址」学地址，而广播不跨 VPN 网段 ⇒
+            // 一方换网后双方都记着对方不可达的旧地址、且都收不到对方的包 ⇒
+            // 永远互相学习不到新地址（真机：红米 30 分钟零收包，而 ping 它 2.2s 通）。
+            //
+            // 带上全部地址后，任意一条通路收到过一次 profile 就能打破死锁。
+            addresses = advertisedAddresses().takeIf { it.isNotEmpty() } ?: profile.addresses,
+        )
 
     private val discovery = Discovery(
         transport,
@@ -233,6 +274,7 @@ class NodeRuntime(
         // task-38：对端资料里带 tlsPin ⇒ **配对时**就把它的 pin 固定下来（来源标 pairing），
         // 不再依赖 TOFU 的首次固定 —— 那个有"攻击者抢先声明 nodeId"的首次使用竞态。
         onPeerPin = { nodeId, pin -> setPeerPin(nodeId, pin, PeerRegistry.PIN_SOURCE_PAIRING) },
+        subnetBroadcasts = subnetBroadcasts,
     )
     internal val messenger = Messenger(
         transport = transport,
@@ -247,8 +289,9 @@ class NodeRuntime(
         messenger = messenger,
         messageStore = messageStore,
         selfId = { profile.nodeId },
-        selfProfile = { profile },
-        resolvePeer = this,
+        selfProfile = { selfProfile },
+        // 能力门控收成一条问句：NodeOutbound 不认识 NodeRuntime，逐成员门控才能被单测覆盖。
+        peerDeclares = { peerId, cap -> peerDeclares(peerId, cap) },
     )
 
 
@@ -421,6 +464,15 @@ class NodeRuntime(
     fun peerEndpointsOf(nodeId: String): List<PeerEndpoint> = registry.candidatesOf(nodeId)
 
     /**
+     * 全部对端的候选地址 —— 诊断用（`GET /v1/candidates`）。
+     *
+     * 与 `/v1/peers` 的分工：那里只有「正在用的那一个」地址，看不出「还有哪些路可以试」。
+     * 排查「换了网就连不上」时，**先看这里有没有对方的 VPN 地址** —— 没有就说明死锁未破，
+     * 需要一次显式握手（`POST /v1/announce`）。
+     */
+    fun candidateEndpoints(): Map<String, List<PeerEndpoint>> = registry.allCandidates()
+
+    /**
      * 记下对端的 TLS pin（配对码里那一枚）并落盘。
      *
      * K2 的信任根：手机侧的公网长连接**有 pin 才建**（fail-closed）。校验一律走
@@ -450,6 +502,14 @@ class NodeRuntime(
      * 手机退回 TOFU/局域网路径（**如实记为降级**，不假装有 pin）。
      */
     fun localTlsPin(): String? = linkTransport.localPin?.wire
+
+    /**
+     * 本机身份证书的到期时刻（毫秒）；没有身份 / 明文实现返回 null。
+     *
+     * 与 [localTlsPin] 同一档：都是「本机身份」的只读读数 —— 区别只是这个给诊断页看，
+     * 那个进配对二维码。
+     */
+    fun localCertNotAfterMillis(): Long? = linkTransport.localCertNotAfterMillis
 
     /**
      * 记住一个**扫码配对**来的对端，并给它一条可拨的最小档案。
@@ -595,6 +655,10 @@ class NodeRuntime(
             // task-63：换网**立刻**重试排队中的报价 —— 退避上限 60s 对不上 K3「换网 ≤10s 恢复」
             // 的口径，而这里只是把到点的重试提前触发一轮（幂等键保证不会投出两份）。
             runScope.launch { transfer?.retryQueuedOffersNow() }
+            // **消息积压同样要重试**。上一次 `markOffline` 是在上一张网下作出的；而离线 +
+            // 没有候选池的对端在稳态重试（`retryPendingQueues`）里一次都不会被尝试 ——
+            // 症状是换网后队列只涨不降、界面一直显示对方离线（见 Messenger 那条的 KDoc）。
+            runScope.launch { runCatching { messenger.retryQueuedAfterNetworkChange() } }
         }
         // K2：平台能作为 TLS 服务端时，在 profile 声明的 tlsPort 上监听。
         // 独立端口，**不复用 17879** —— 老对端的 4 字节长度前缀与 TLS 的 0x16 混在一起是事故。
@@ -962,8 +1026,20 @@ class NodeRuntime(
          * 带它进群是「过程 + 最终回复都有」的前提：不带的话，同一个群里桌面端的气泡
          * 有思考折叠块、手机端没有。超长由 [NodeOutbound.sendGroupText] 截断。
          */
-        reasoning: String? = null,) =
-        outbound.sendGroupText(text, groupId, groupRev, members, mentions, replyTo, senderId, reasoning)
+        reasoning: String? = null,
+        /** 这次发送用的信封 id（见 `NodeOutbound.sendGroupText`）；不传就生成一个。 */
+        envelopeId: String? = null,
+        /**
+         * 这条消息属于哪个 agent 会话（可选，与 [agentCursor] 成对）。带上它，
+         * 接收端才能画出「任务分段线」—— 在此之前那条线只存在于桌面端本地。
+         */
+        agentSessionId: String? = null,
+        /** 会话内游标（可选，与 [agentSessionId] 配对）。 */
+        agentCursor: Long? = null,) =
+        outbound.sendGroupText(
+            text, groupId, groupRev, members, mentions, replyTo, senderId, reasoning,
+            agentSessionId, agentCursor, envelopeId,
+        )
 
     suspend fun sendPk(peerId: String,
         game: String,
@@ -1163,6 +1239,17 @@ class NodeRuntime(
 
     fun peerDeclares(peerId: String, cap: String): Boolean =
         getPeer(peerId)?.profile?.caps?.contains(cap) == true
+
+    /**
+     * 「重发」：按**原信封 id** 重放一条已发过的消息（用户点了失败气泡上的重发）。
+     *
+     * 这里只是转发到 [outbound]；两条路（队列里还有原信封 ⇒ 原样重放 / 否则用原 id 重建
+     * 并打 `resend=true`）与"为什么不许换新 id"都写在那边的 KDoc 里。
+     *
+     * 调用方要点：**传原来那条消息的 `id` 与 `peerId`**（`MessageUi.id` / `MessageUi.peerId`），
+     * 群聊还要把 `groupId` / `groupRev` / `members` 一起给。新 id 发一条 = 对方收到两条。
+     */
+    suspend fun replayOutgoing(request: OutgoingReplay): SendOutcome = outbound.replayOutgoing(request)
 
     /**
      * 把一条原信封重新入队（**手工补发 / 迁移老数据**时调用）。

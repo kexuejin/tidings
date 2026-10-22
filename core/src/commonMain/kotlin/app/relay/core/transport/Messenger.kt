@@ -97,7 +97,16 @@ class Messenger(
 
     private val pendingLock = createCoreLock()
     private val pending = LinkedHashMap<String, CompletableDeferred<Boolean>>()
-    private val flushing = HashSet<String>()
+
+    /**
+     * 每个对端**正在进行的**一次排空：nodeId → 完成信号。
+     *
+     * 为什么不是一个 `HashSet` 去重：调用方（在线事件、15s 定时重试、「重发」）都要知道
+     * "这一轮排空**结束了没有**"。旧写法「已经在排空就立刻 return」会让「重发」把一条
+     * **正在被送出去**的消息报成 [SendOutcome.QUEUED] —— 用户看到"重发没反应"，
+     * 而对端其实毫秒后收到了；队列与界面状态从此各说一套。
+     */
+    private val flushing = HashMap<String, CompletableDeferred<Unit>>()
     private var scope: CoroutineScope? = null
     private var job: Job? = null
     private var queueRetryJob: Job? = null
@@ -520,10 +529,18 @@ class Messenger(
          * 不可达，回退它只是白等；选路交给「重拨链路」。默认 true ⇒ 其它调用方逐字不变。
          */
         allowTcpFallback: Boolean = true,
+        /**
+         * 即使"对端离线且没有候选地址"也**试着打当前端点一次**。
+         *
+         * 只给「网络路径变了」那一条用（见 [retryQueuedAfterNetworkChange]）：那个 offline
+         * 判定是**上一张网**下作出的，换网之后它已经不是事实了。不放开的话，一个没有候选池
+         * 的对端会永远停在这句 `return false` 上 —— 队列只涨不降，而用户看到的是"一直排队"。
+         */
+        tryCurrentEndpointEvenIfOffline: Boolean = false,
     ): Boolean {
         val record = registry.get(peerId) ?: return false
         val candidates = registry.candidatesOf(peerId)
-        if (!record.online && candidates.isEmpty()) {
+        if (!record.online && candidates.isEmpty() && !tryCurrentEndpointEvenIfOffline) {
             // 旧行为：对端离线、又没有别的地址可试 —— 一个包都不发，直接入队。
             return false
         }
@@ -622,9 +639,23 @@ class Messenger(
     /**
      * 补发一个 peer 的队列。**保序**：第一个未 ACK 就停下，剩下的等下次上线再发。
      */
-    suspend fun flushQueue(peerId: String) {
-        val added = pendingLock.withLock { flushing.add(peerId) }
-        if (!added) return
+    suspend fun flushQueue(
+        peerId: String,
+        /**
+         * 网络路径刚变过 ⇒ 上一张网下"对端离线、没有候选"的结论作废，允许打当前端点一次。
+         * 见 [retryQueuedAfterNetworkChange]。
+         */
+        tryCurrentEndpointEvenIfOffline: Boolean = false,
+    ): Boolean {
+        // 已经有人在排空这个对端 ⇒ **等它结束**再回答，而不是立刻回一个假的"还在排队"
+        // （「重发」按这个返回值决定界面状态，见 [flushing] 的 KDoc）。
+        val inFlight = pendingLock.withLock { flushing[peerId] }
+        if (inFlight != null) {
+            inFlight.await()
+            return queueStore.listByPeer(peerId).isEmpty()
+        }
+        val done = CompletableDeferred<Unit>()
+        pendingLock.withLock { flushing[peerId] = done }
         try {
             for (item in queueStore.listByPeer(peerId)) {
                 // **必须用 TCP 的上限解码，不能用 `Codec.decode`（UDP 那套）**。
@@ -646,7 +677,10 @@ class Messenger(
                 } else if (bytes.size > Protocol.UDP_MAX_PAYLOAD) {
                     sendViaTcp(peerId, envelope)
                 } else {
-                    sendAwaitAck(peerId, envelope, bytes, ArrayList())
+                    sendAwaitAck(
+                        peerId, envelope, bytes, ArrayList(),
+                        tryCurrentEndpointEvenIfOffline = tryCurrentEndpointEvenIfOffline,
+                    )
                 }
                 if (!ok) {
                     // 补发失败 = 这条数据路径现在不通。必须把对端标离线（与
@@ -657,13 +691,17 @@ class Messenger(
                     // 不标的话，flush 失败后 online 永远留在 true，再也不会有转变，
                     // 队列就卡到天荒地老（真机 28 条十几分钟的现场）。
                     registry.markOffline(peerId)
-                    return
+                    return false
                 }
                 queueStore.remove(item.msgId, peerId)
                 _status.tryEmit(MessageStatus(peerId, envelope.id, "sent"))
             }
+            // 判据是**队列真的空了**，不是"这一轮我发了几个"：中途有人 requeue 也算如实。
+            return queueStore.listByPeer(peerId).isEmpty()
         } finally {
             pendingLock.withLock { flushing.remove(peerId) }
+            // 叫醒所有在等这一轮结束的调用方（包括「重发」那条）。
+            done.complete(Unit)
         }
     }
 
@@ -683,6 +721,28 @@ class Messenger(
         for (peerId in queueStore.countByPeer().keys) {
             val online = registry.get(peerId)?.online == true
             if (online || registry.candidatesOf(peerId).isNotEmpty()) flushQueue(peerId)
+        }
+    }
+
+    /**
+     * **网络路径变了**：所有带积压的对端各重试一次，**包括被判离线的那些**。
+     *
+     * ## 为什么这条不能靠 15s 的定时重试
+     *
+     * [retryPendingQueues] 只碰 `online || 有候选地址` 的对端。而一次失败的发送会
+     * `markOffline`，离线 + 没有候选池（配对码只给了一个地址的常见情形）之后，
+     * [sendAwaitAck] 里那句 `!online && candidates.isEmpty() ⇒ return false` 就让它
+     * **一个包都不发**。那个 offline 判定是**上一张网**下作出的：换网之后，同一个地址可能
+     * 又通了，而我们已经不再尝试 —— 真机上就是「消息一直排队、界面上对方一直离线」。
+     *
+     * 所以换网是一个**独立的触发点**：它不改变任何「在线」结论（那不是我们能宣布的），
+     * 只是把「这张网下没试过」这件事重新试一次。失败照旧 `markOffline`，队列里一条不丢。
+     *
+     * 与 [retryPendingQueues] 的分工：那条是稳态下的定期重试，这条只在**网络变化**时跑。
+     */
+    suspend fun retryQueuedAfterNetworkChange() {
+        for (peerId in queueStore.countByPeer().keys) {
+            flushQueue(peerId, tryCurrentEndpointEvenIfOffline = true)
         }
     }
 
@@ -739,6 +799,16 @@ class Messenger(
      * 存一份信封，而是问队列要。
      */
     fun pendingAll(): List<QueuedMessage> = queueStore.pendingAll()
+
+    /**
+     * 队列里某条消息的整行（信封 JSON + 原始入队时刻）；不在队列里返回 null。
+     *
+     * 「重发」要先问它：队列里那一帧是当初真的发过的，比任何重建都忠实 ——
+     * 重建只能靠调用方交回来的字段，而队列里有整条信封。**入队时刻也要一起拿**：
+     * 重放是对同一条的补发，不该把它排到队尾、也不该把 TTL 从今天重新算。
+     */
+    fun queuedMessage(peerId: String, msgId: String): QueuedMessage? =
+        queueStore.listByPeer(peerId).firstOrNull { it.msgId == msgId }
 
     private fun withResendFlag(payload: JsonElement): JsonElement {
         if (payload !is JsonObject) return payload

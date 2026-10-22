@@ -127,6 +127,18 @@ interface LinkTransport {
     val localPin: TlsPin? get() = null
 
     /**
+     * 本机身份证书的**到期时刻**（毫秒）。没有身份 / 明文实现返回 null。
+     *
+     * 为什么要暴露它：证书会自动续签、密钥保留，所以**配对关系不会因为到期而断** ——
+     * 但「快到期 / 已续签」这件事从来不告诉用户。真出问题时只表现为「突然连不上」，
+     * 而那时用户没有任何可看的读数。这个字段就是那个读数。
+     *
+     * 只读：续签是自动的，界面上不提供手动重新签发的入口（轮换意味着所有已配对设备
+     * 要重新配对，代价大于收益）。
+     */
+    val localCertNotAfterMillis: Long? get() = null
+
+    /**
      * 在 [port] 上接受 TLS 长连接；每条**已完成握手**的连接交给 [onConnection]。
      *
      * @return true = 监听已开始；false = 这个平台/端口起不来（调用方按"没有 TLS"处理）。
@@ -513,6 +525,8 @@ class LinkServer(
                 when (val decoded = TcpFrames.decodeBody(body.decodeToString())) {
                     is TcpFrameDecode.Link -> if (decoded.frame == LinkFrame.Ping) {
                         runCatching { connection.send(LinkFrames.encode(LinkFrame.Pong)) }
+                        // 同上（服务端那段 KDoc 写了完整死锁）：心跳到了就让节点回到在线。
+                        registry.setLinkedAddress(nodeId, connection.remoteHost)
                     }
 
                     is TcpFrameDecode.MsgAck -> settleAck(nodeId, decoded.ackFor)
@@ -998,6 +1012,16 @@ class LinkClient(
                 when (val decoded = TcpFrames.decodeBody(body.decodeToString())) {
                     is TcpFrameDecode.Link -> if (decoded.frame == LinkFrame.Ping) {
                         runCatching { connection.send(LinkFrames.encode(LinkFrame.Pong)) }
+                        // **心跳也是可达性证据，而且比 UDP 数据报更强**：它证明的是一条已经
+                        // 握手过、现在还活着的 TCP。这里必须顺手刷新 presence —— 否则「UDP 到
+                        // 不了（WiFi 客户端隔离 / 入站被挡）+ 没有 Msg 流经链路（两端都在排队）」
+                        // 会死锁：sweep 判离线 → 双方都排队 → 没有 Msg → 永远不刷新 → 一直离线。
+                        //
+                        // 真机现场（relay-diag-20261020-075417）：transport=Wifi，同一台对端
+                        // linkConnected=true / dialFailures=0 / closeCount=0，而 online=false；
+                        // 用户体感是「移动网能收、连上 WiFi 收不到、断开又能收」（断 WiFi 会走
+                        // NetworkWatch 的换网分支重拨 + 排空队列，于是积压一次全到）。
+                        registry.setLinkedAddress(peerId, connection.remoteHost)
                     }
 
                     is TcpFrameDecode.Msg -> {

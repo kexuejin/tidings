@@ -58,6 +58,24 @@ data class NetworkSnapshot(
     val transport: Transport,
     val localAddresses: List<String>,
     val vpnActive: Boolean,
+    /**
+     * **对外宣告的地址**（进 `Profile.addresses`），默认与 [localAddresses] 相同。
+     *
+     * ## 为什么需要第二个列表
+     *
+     * [localAddresses] 服务「广播 / 配对码 / 同网段判断」，所以各平台实现刻意**过滤掉隧道
+     * 网卡**（`utun` / `feth` / `tailscale`）：那些地址发不出 UDP 广播，留在里面会让同网段
+     * 判断选错路。
+     *
+     * 但宣告地址是**单播**给已配对的对端，告诉它「该往哪儿拨」—— Tailscale 的 `100.x`、
+     * ZeroTier 的 `10.147.x` 恰恰只能靠单播到达。沿用过滤后的列表，宣告里就永远没有隧道
+     * 地址，跨网死锁照旧（真机：红米只拿到 `192.168.2.82`，它走 VPN，拨不通；
+     * 而本机 `ping` 它的 Tailscale 地址 2.2 秒就通）。
+     *
+     * 默认等于 [localAddresses]：不改平台实现时行为一字不变，只有确实能枚举隧道地址的
+     * 平台（桌面端）才覆盖它。
+     */
+    val advertisedAddresses: List<String> = localAddresses,
 )
 
 /**
@@ -305,6 +323,25 @@ interface AppPlatform {
 
     /** 判定某个昵称是否为平台未定制的默认昵称，若是且平台有更精准的设备名则可升级。 */
     fun isDefaultNick(nick: String): Boolean = nick.isBlank()
+
+    /**
+     * 本机各网卡的**子网广播地址**（`192.168.2.255` 这类）；空 = 只发受限广播。
+     *
+     * ## 为什么需要它（真机现场 2026-10-22）
+     *
+     * 用户开着代理的 TUN 增强模式时，它在本机装 `0.0.0.0/1` + `128.0.0.0/1` 两条路由
+     * （比默认 `/0` 更具体）。而**受限广播 `255.255.255.255` 没有具体路由条目**，只能
+     * 落到默认路由 —— 于是被整条接进代理的虚拟口，局域网里一个对端都收不到。
+     *
+     * 表现极具迷惑性：Tailscale / ZeroTier 照常能用（走 `100.64/10` 这类更具体的路由），
+     * **只有 Tidings 失联**。用户的疑问是「没关之前能正常通过 Tailscale/ZeroTier 访问，
+     * 为什么会对 Tidings 有影响」—— 因为两者走的不是同一条路。
+     *
+     * 子网广播有直连路由（`192.168.2.0/24`，前缀更长），抢不走。
+     *
+     * 默认返回空：未接入的平台行为与改动前**一字不差**（只发受限广播）。
+     */
+    fun subnetBroadcastAddresses(): List<String> = emptyList()
 
     val localNetworkGate: LocalNetworkGate
     val filePicker: FilePicker

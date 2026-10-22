@@ -51,7 +51,14 @@ class DesktopAppPlatform(
     override val urlOpener: app.relay.platform.UrlOpener = DesktopUrlOpener(),
     override val screenCapture: app.relay.platform.ScreenCaptureService? = null,
     override val screenSharing: app.relay.platform.ScreenSharingService = app.relay.desktop.capture.DesktopScreenSharingService(),
-) : app.relay.platform.AppPlatform
+) : app.relay.platform.AppPlatform {
+    /**
+     * 桌面端能算子网广播（`NetworkInterface.interfaceAddresses`），所以覆盖掉默认的空。
+     *
+     * 这是 TUN 环境下唯一还能出网的广播形态 —— 见接口里那段 KDoc 的真机现场。
+     */
+    override fun subnetBroadcastAddresses(): List<String> = subnetBroadcastAddresses()
+}
 
 class DesktopUrlOpener : app.relay.platform.UrlOpener {
     override fun openUrl(url: String): Boolean {
@@ -138,6 +145,13 @@ class DesktopNetworkMonitor : app.relay.platform.NetworkMonitor {
             // 的隧道段），而 ULA `fd00::/8` 同时也是**家用路由器常见的局域网段** —— 拿它当 VPN
             // 会把"家里有 ULA"误报成"VPN 已启用"。原来的语义（只看 v4 表）在这里保持不变。
             vpnActive = localIpv4Addresses().any { isVpnLike(it) },
+            // **宣告地址要宽**：含隧道网卡（Tailscale `100.x` / ZeroTier）。
+            //
+            // 上面那份 [addresses] 是给广播 / 配对码 / 同网段判断用的，刻意窄；
+            // 而 `Profile.addresses` 是**单播**告诉已配对的对端「该往哪儿拨」，
+            // 隧道地址恰恰只能靠单播到达。两个用途不同，不能共用一个列表 ——
+            // 共用就是真机那句：红米只拿到 `192.168.2.82`，它走 VPN，拨不通。
+            advertisedAddresses = advertisedAddresses().ifEmpty { addresses },
         )
     }
 
@@ -236,6 +250,81 @@ internal fun localIpv6CandidateAddresses(includeVirtualInterfaces: Boolean = fal
         }
         .distinct()
 }.getOrElse { emptyList() }
+/**
+ * 本机各网卡的**子网广播地址**（`192.168.2.255` 这类）。
+ *
+ * ## 为什么需要它（真机现场 2026-10-22）
+ *
+ * 用户开着 FClash 的 TUN 增强模式时，它在本机装 `0.0.0.0/1` + `128.0.0.0/1` 两条路由
+ * （比默认的 `/0` 更具体）。而**受限广播 `255.255.255.255` 没有具体路由条目**，
+ * 只能落到默认路由 —— 于是被整条接进代理的虚拟口，局域网里一个对端都收不到。
+ *
+ * 结果极具迷惑性：Tailscale / ZeroTier 照常能用（它们走 `100.64/10` 这类更具体的路由），
+ * **只有 Tidings 失联** —— 红米 8 次拨号全失败、队列堆到 594 条；关掉 TUN 后 `ping`
+ * 立刻恢复 416ms。用户的原话是「没关之前可以正常通过 tailscale/zerotier 访问，
+ * 为什么会对 relay 有影响」—— 因为两者走的根本不是同一条路。
+ *
+ * ## 为什么子网广播能解决
+ *
+ * `192.168.2.0/24` 是**直连路由**（前缀 24 位，远比 `/1` 具体），所以 `192.168.2.255`
+ * 一定从 `en1` 出去，抢不走。
+ *
+ * 顺带解决多网卡问题：同时有 LAN + ZeroTier + Tailscale 时，原先只在一个网段广播。
+ *
+ * 只算 IPv4：IPv6 没有广播语义（用组播，本仓未实现）。
+ */
+internal fun subnetBroadcastAddresses(): List<String> = runCatching {
+    NetworkInterface.getNetworkInterfaces().toList()
+        .filter { it.isUp && !it.isLoopback }
+        // **含虚拟网卡**：ZeroTier 的 `feth` 也是真实可达网段，它的对端同样需要被发现。
+        .flatMap { nic -> nic.interfaceAddresses }
+        .mapNotNull { ia ->
+            val addr = ia.address as? java.net.Inet4Address ?: return@mapNotNull null
+            val broadcast = ia.broadcast ?: return@mapNotNull null
+            // /31 与 /32 没有广播地址（点对点），`broadcast` 会等于地址本身 —— 发了也没意义。
+            val host = broadcast.hostAddress.orEmpty().trim()
+            if (host.isBlank() || host == addr.hostAddress) return@mapNotNull null
+            host
+        }
+        .distinct()
+}.getOrElse { emptyList() }
+
+/**
+ * **对外宣告的全部地址**（进 `Profile.addresses`）—— 与 [localCandidateAddresses] 的区别是
+ * **不过滤隧道网卡**。
+ *
+ * ## 为什么必须有两个列表
+ *
+ * [localCandidateAddresses] 服务的是「广播 / 配对码 / 同网段判断」：隧道地址发不出 UDP
+ * 广播，留在里面会让同网段判断选错路，所以它刻意把 `utun` / `feth` / `tailscale` 挡掉。
+ *
+ * 但宣告地址的用途是**单播告诉已配对的对端「该往哪儿拨」**。Tailscale 的 `100.x`、
+ * ZeroTier 的 `10.147.x` 恰恰**只能靠单播**到达 —— 沿用过滤后的列表，宣告里就永远没有
+ * 隧道地址，跨网死锁照旧（真机：红米只拿到 `192.168.2.82`，而它走 VPN，拨不通；
+ * 同时本机 `ping` 它的 Tailscale 地址 2.2 秒就通）。
+ *
+ * 排除项只剩「拨了也不可能通的」：回环、未指定、链路本地、带 scope 后缀的。
+ */
+internal fun advertisedAddresses(): List<String> = runCatching {
+    NetworkInterface.getNetworkInterfaces().toList()
+        .filter { it.isUp && !it.isLoopback }
+        .flatMap { nic -> nic.inetAddresses.toList() }
+        .mapNotNull { addr ->
+            // macOS 的 JDK 给每个 IPv6 都带 `%en1` 这类 scope 后缀，先剥掉再判。
+            val host = addr.hostAddress.orEmpty().substringBefore('%').trim()
+            if (host.isBlank()) return@mapNotNull null
+            if (addr.isLoopbackAddress || addr.isAnyLocalAddress || addr.isLinkLocalAddress) return@mapNotNull null
+            // **代理 TUN 的虚拟地址不能宣告**：它不对应任何可达网络，对端拨它永远失败。
+            //
+            // 真机现场：`198.18.0.1`（代理开 TUN 增强模式时的虚拟口，路由接管全部 IPv4）
+            // 进了宣告列表之后，对端拿它当候选、白白重试；而它本身还把 Tailscale /
+            // ZeroTier 的包截走 —— 双方都拿到对方的地址、都拨不通。
+            if (app.relay.core.protocol.IpAddressUtils.isProxyTunAddress(host)) return@mapNotNull null
+            host
+        }
+        .distinct()
+}.getOrElse { emptyList() }
+
 
 /** utun / tun-tap / ppp 这类隧道地址不能用来算「局域网可达」，否则会误报在线。 */
 internal fun isVpnLike(address: String): Boolean {
