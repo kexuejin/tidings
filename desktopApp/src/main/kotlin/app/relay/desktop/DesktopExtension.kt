@@ -2,17 +2,23 @@
 
 package app.relay.desktop
 
+import app.relay.agent.AgentExecPolicyStore
+import app.relay.core.protocol.AgentGrantScopes
+import app.relay.app.execDeviceRows
+import app.relay.app.rebroadcastGroupMeta
+import app.relay.app.ExecGrantView
+import app.relay.core.protocol.GroupMeta
 import app.relay.agent.AgentGrantStore
 import app.relay.agent.AgentSessionRegistry
 import app.relay.agent.AgentWorkspaceRegistry
+import app.relay.agent.AgentInboxEnricher
 import app.relay.agent.ControlPlane
+import app.relay.agent.JsonObjectLike
 import app.relay.agent.GrantReplyOutcome
 import app.relay.app.RelayController
 import app.relay.app.model.hasVisibleText
-import app.relay.core.protocol.AGENT_SENDER_PREFIX
 import app.relay.core.session.NodeRuntime
 import app.relay.generated.resources.Res
-import app.relay.generated.resources.agent_demo_driver_notice
 import app.relay.generated.resources.agent_event_error_fallback
 import app.relay.generated.resources.agent_event_finished_fallback
 import org.jetbrains.compose.resources.getString
@@ -24,6 +30,7 @@ import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.runBlocking
+import app.relay.core.protocol.AgentSenderId
 
 /**
  * 桌面版的「扩展装配」：让 agent 与 UI 活在同一个进程里。
@@ -120,6 +127,12 @@ internal class DesktopExtension(
         get() = plane?.boundPort ?: 0
 
     var grantStore: AgentGrantStore? = null
+
+    /**
+     * 每个 agent 的执行范围（谁能让它干活）。与 [grantStore] 同一档暴露给 UI ——
+     * 两者都是**宿主自己的**台账，面板读写它们就是本机用户在配自己的机器。
+     */
+    var execPolicyStore: AgentExecPolicyStore? = null
         private set
 
     /**
@@ -306,12 +319,14 @@ internal class DesktopExtension(
                         if (!hasVisibleText(finalAnswer)) return@onRecord
                         for (group in targetGroups) {
                             val convId = app.relay.core.protocol.ConvId.group(group.groupId)
-                            val alreadyInChat = isUserPrompt && controller.state.value.messages[convId]
-                                .orEmpty()
-                                .any { existing ->
-                                    existing.text.trim() == finalAnswer.trim() &&
-                                        kotlin.math.abs(existing.at - rec.at) < 120_000L
-                                }
+                            // **去重要按剥离后的正文比**（见 [alreadyForwardedToGroup]）：
+                            // relay 注入时剥掉了 mention，回传的正文比群里原文少一个 `@token`。
+                            val alreadyInChat = alreadyForwardedToGroup(
+                                isUserAuthoredPrompt = isUserPrompt,
+                                existingMessages = controller.state.value.messages[convId].orEmpty(),
+                                finalAnswer = finalAnswer,
+                                eventAt = rec.at,
+                            )
                             if (!shouldForwardAgentEventToGroup(isUserAuthoredPrompt = isUserPrompt, alreadyInChat = alreadyInChat)) {
                                 logEventRoute(rec.eventType, rec.sessionId, rec.cursor, finalAnswer.length, "duplicate-in-chat")
                                 continue
@@ -325,6 +340,17 @@ internal class DesktopExtension(
                                 reasoning = parsedReasoning,
                                 at = rec.at,
                                 senderId = agentSenderId,
+                                // **会话归属必须落在这里。**
+                                //
+                                // 漏掉的后果是真机上的「桌面有分段线、手机没有」：手机只从群里
+                                // 收消息，它拿不到 id 前缀那条回退（转发时 id 会换成信封 UUID），
+                                // 只能靠协议字段；而这条实时路径自己手写 `MessageUi`、没填这两个
+                                // 字段 —— 于是 `agent_session_id` 一直是 NULL。
+                                //
+                                // 探针实测：`SAVE agent=5212 withSid=0` —— 进 save() 时就已经是空，
+                                // 不是落库丢的。而补发那条路（走 `agentChatMessageFor`）一直是对的，
+                                // 于是同一件事在两条路上表现不同 —— 正是本仓反复出现的那类分叉。
+                                agentSessionId = rec.sessionId,
                             )
                             controller.appendMessage(msg, incoming = !isUserPrompt)
 
@@ -367,6 +393,11 @@ internal class DesktopExtension(
                                             // 桌面端的气泡有「思考」折叠块、手机端没有 —— 用户看到
                                             // 的就是「过程只在桌面、手机只剩最后一句」。
                                             reasoning = parsedReasoning,
+                                            // **会话归属**：把「这条属于哪个 agent 会话」一起送出去。
+                                            // 此前只写进本地消息 id 前缀、转发时没带 —— 于是桌面有
+                                            // 「任务分段线」、手机一条都没有（同一件事两端两个样）。
+                                            agentSessionId = message.agentSessionId,
+                                            agentCursor = message.agentCursor,
                                         )
                                         // 交给运行时之后才记水位：rt == null（或发送抛错）时**不记**，
                                         // 于是补发那一趟会把它补上；记早了就永远补不回来。
@@ -391,9 +422,26 @@ internal class DesktopExtension(
         )
         val grants = AgentGrantStore(java.io.File(controller.dataDirectory, "agent-grants.json"))
         grantStore = grants
+        val execPolicies = AgentExecPolicyStore(
+            java.io.File(controller.dataDirectory, "agent-exec-policies.json"),
+        )
+        execPolicyStore = execPolicies
         val created = ControlPlane(
             runtime, httpPort, token,
-            sessions = registry, workspaces = workspaces, grants = grants,
+            sessions = registry, workspaces = workspaces, grants = grants, execPolicies = execPolicies,
+            // **注入判定**：判据只有一份（core 的 mentionedVirtualAgent），这里只提供
+            // 「这个群的元数据长什么样」这个事实 —— desktopApp 能读到 composeApp 的
+            // settings.groups，agentNode 读不到，所以由这里注入。
+            // **桌面端只提供事实**：这个群的元数据。
+            // 「@ 到谁」「谁有权执行」「投给哪个会话」三个判据都在 Tidings 侧
+            // （core 的判据 + ControlPlane 的台账），桥接侧只消费结论。
+            inboxEnricher = object : AgentInboxEnricher {
+                override fun groupMetaOf(payload: JsonObjectLike): GroupMeta? {
+                    val groupId = payload.groupId ?: return null
+                    return controller.state.value.settings.groups
+                        .firstOrNull { it.groupId == groupId }
+                }
+            },
         )
         try {
             created.start()
@@ -407,137 +455,115 @@ internal class DesktopExtension(
             scope.launch {
                 delay(3000L)
                 backfillMissedGroupForwards()
+                // **群元数据补发只做一次，且不挂在状态流上。**
+                //
+                // 第一版把它放进下面那个 `collect`，结果**自我触发了循环**：广播会改变
+                // 在线对端集合 → 状态流又发一个值 → 又广播。真机上是每 15 秒一轮、
+                // 队列瞬间涨到 286 条 group-info 帧，全是同一个 rev。
+                //
+                // 补发要解决的是「对端错过了那一次快照」，而这件事只需要在**本机启动后**
+                // 做一次 —— 对端在线时它会自己来问（`op:need`），离线时队列会替它留着。
+                controller.rebroadcastGroupMeta()
                 controller.state
                     .map { st -> st.network.phase to st.peers.filter { it.online }.map { it.nodeId }.sorted() }
                     .distinctUntilChanged()
-                    .collect { backfillMissedGroupForwards() }
+                    .collect {
+                        backfillMissedGroupForwards()
+                        // **群元数据也要补**：它是快照，而广播只在「变更时」发一次。
+                        // 对端在那一刻离线就永远缺 `virtualAgents` —— 接收端还会因为「我已知
+                        // 这个 rev」而不再发 need，自己走不出来（真机：手机上三处全是 `dsh`）。
+                        //
+                        // `rebroadcastGroupMeta` 自带 `(对端, 群) → 已发 rev` 台账，
+                        // 所以挂在这个会抖动的状态流上是安全的：同 rev 只发一次。
+                        // 第一版没有台账，真机上每 15 秒一轮、队列涨到 286 帧 —— 别去掉它。
+                        controller.rebroadcastGroupMeta()
+                    }
             }
             controller.onLocalSessionPageRequest = { peerId, wsId, offset, limit ->
                 created.recordSessionPage(peerId, wsId, offset, limit)
                 true
             }
             val driverRegistry = app.relay.agent.drivers.DriverRegistry()
-            controller.onAgentPrompt = { convId, senderPeerId, prompt, replyToId ->
-                // 真用户 prompt **默认走真实驱动**（native）；演示驱动（ds-bot，本地模拟器、
-                // 不联网不执行工具）只能由显式开发开关进入 —— 在用户不知情时把它当默认，
-                // 就是「为没发生过的活报完成」（驱动诚信整改，见 selectDriverIdForUserPrompt）。
-                val demoRequested = System.getProperty("relay.driver.demo") == "1"
-                val driver = driverRegistry.getDriver(
-                    app.relay.agent.drivers.selectDriverIdForUserPrompt(demoRequested = demoRequested),
-                )
-                if (driver != null) {
-                    val sessionId = "s-dsh-${System.currentTimeMillis().toString(16)}"
-                    val thoughts = StringBuilder()
-                    val answer = StringBuilder()
-                    var toolCallInfo: String? = null
 
-                    driver.executeTask(sessionId, prompt) { event ->
-                        when (event) {
-                            is app.relay.agent.drivers.DriverEvent.ThoughtDelta -> {
-                                thoughts.append(event.delta).append("\n")
-                                registry.recordEvent(
-                                    nodeId = runtime.nodeId,
-                                    sessionId = sessionId,
-                                    cursor = eventCursors.next(sessionId),
-                                    eventType = "thought",
-                                    summary = event.delta,
-                                    body = event.delta,
-                                )
-                            }
-                            is app.relay.agent.drivers.DriverEvent.ToolCall -> {
-                                toolCallInfo = "tool: ${event.tool} (${event.riskLevel})"
-                                registry.recordEvent(
-                                    nodeId = runtime.nodeId,
-                                    sessionId = sessionId,
-                                    cursor = eventCursors.next(sessionId),
-                                    eventType = "tool.started",
-                                    summary = toolCallInfo,
-                                    body = event.inputJson,
-                                )
-                            }
-                            is app.relay.agent.drivers.DriverEvent.TokenDelta -> {
-                                answer.append(event.delta)
-                            }
-                            is app.relay.agent.drivers.DriverEvent.Finished -> {
-                                registry.recordEvent(
-                                    nodeId = runtime.nodeId,
-                                    sessionId = sessionId,
-                                    cursor = eventCursors.next(sessionId),
-                                    eventType = "finished",
-                                    summary = "Execution completed",
-                                    // 演示驱动报 0 tokens（它没调用模型）；这里把「演示」写进消息里，
-                                    // 让 UI 上（消息内）有一句显眼的如实标注（task-58 ④）。
-                                    body = if (driver.driverId == "ds-bot") {
-                                        // 资源在中英两份 strings.xml 里都有；取不到就给空串 —— 宁可少一句提示，
-                                        // 也不在源码里写死中文（cjk 棘轮挡的就是这个）。
-                                        runCatching { getString(Res.string.agent_demo_driver_notice) }.getOrNull().orEmpty()
-                                    } else {
-                                        "tokens: " + event.totalTokens
-                                    },
-                                )
-                            }
-                            is app.relay.agent.drivers.DriverEvent.Error -> {
-                                answer.append("\n[Error: ${event.message}]")
-                            }
+            // **执行名单的宿主侧实现**：台账在桌面端（`AgentGrantStore`），控制器拿不到。
+            //
+            // 名单 = `scope=AGENT` 且 agentKey 匹配的授权记录；可信 = `scope=ALL`。
+            // 两者都从**同一份快照**读，所以界面上看到的「可信」与「已勾」永远属于同一时刻 ——
+            // 分两次读会在并发改动时给出自相矛盾的一屏。
+            controller.onExecDevices = { agentKey ->
+                val key = agentKey?.trim()?.takeIf { it.isNotEmpty() }
+                if (key == null) {
+                    null
+                } else {
+                    val snapshot = grants.snapshot()
+                    val rows = snapshot.grants.map {
+                        ExecGrantView(
+                            nodeId = it.nodeId,
+                            scope = it.scope,
+                            agentKey = it.agentKey,
+                            isMyDevice = it.isMyDevice,
+                        )
+                    }
+                    // 已知设备：群成员 ∪ 对端。标签取 peers 的昵称，拿不到就留给派生层兜底（id 前 8 位）。
+                    val st = controller.state.value
+                    // **本机自己一定用 `settings.nick`**：它不在对端表里（那是「别人」），
+                    // 也不是每个群都在 `memberNicks` 里记了自己。漏了它就会退化成
+                    // nodeId 前 8 位 —— 界面上显示一串字母，而用户明明给这台机器起过名字。
+                    //
+                    // 合并顺序 = 优先级：本机名 > 对端昵称 > 群成员昵称；
+                    // `distinctBy` 保留**第一条**，所以有名字的来源要排在前面，
+                    // 且空串不算名字（否则一条空 nick 会把真名挤掉）。
+                    val known = buildList {
+                        if (st.selfNodeId.isNotBlank()) add(st.selfNodeId to st.settings.nick)
+                        addAll(st.peers.map { it.nodeId to it.nick })
+                        st.settings.groups.forEach { g ->
+                            g.members.forEach { m -> add(m to (g.memberNicks?.get(m).orEmpty())) }
                         }
                     }
-
-                    val replyText = if (thoughts.isNotBlank()) {
-                        val toolPart = if (toolCallInfo != null) "\n> $toolCallInfo\n" else ""
-                        "<think>\n${thoughts.toString().trim()}\n$toolPart</think>\n\n${answer.toString().trim()}"
-                    } else {
-                        answer.toString().trim()
-                    }
-
-                    if (app.relay.core.protocol.ConvId.isGroup(convId)) {
-                        val groupId = app.relay.core.protocol.ConvId.groupIdOf(convId) ?: convId
-                        val targetGroup = controller.state.value.settings.groups.firstOrNull { it.groupId == groupId }
-                        val (parsedReasoning, cleanAnswer) = app.relay.app.model.parseThinkingContent(replyText)
-                        val finalAnswer = cleanAnswer.ifBlank { replyText }
-                        // 只有看不见的字符时**什么都不发**（纯 <think> 的一条就是这种）：
-                        // 落库会在群里留下一个只有时间戳的空气泡。
-                        if (hasVisibleText(finalAnswer)) {
-                            // 发送者 = **哪个驱动答的**（不是写死的 agent:dsh）：演示驱动答的就是
-                            // agent:ds-bot —— 与「驱动诚信」同一条口径，也让实时/补发/本地驱动
-                            // 三条路对同一个发送者语义只有一个答案。
-                            val agentSenderId = "agent:" + driver.driverId
-                            val msg = app.relay.app.model.MessageUi(
-                                id = "agent-reply-${System.currentTimeMillis()}",
-                                peerId = convId,
-                                mine = false,
-                                text = finalAnswer,
-                                reasoning = parsedReasoning,
-                                at = System.currentTimeMillis(),
-                                senderId = agentSenderId,
-                                replyTo = replyToId,
-                            )
-                            controller.appendMessage(msg, incoming = true)
-
-                            if (targetGroup != null) {
-                                val rt = attachedRuntime ?: runtime
-                                scope.launch {
-                                    runCatching {
-                                        rt.sendGroupText(
-                                            // 发解析后的正文：原文里的 <think>…</think> 不该进群。
-                                            text = finalAnswer,
-                                            groupId = groupId,
-                                            groupRev = targetGroup.rev,
-                                            members = targetGroup.members,
-                                            mentions = listOf(senderPeerId),
-                                            replyTo = replyToId,
-                                            // 这条同样是 agent 答的：不传 senderId 会被接收端
-                                            // 按信封 `from` 显示成「桌面端发的」，与实时那条不一致。
-                                            senderId = agentSenderId,
-                                            reasoning = parsedReasoning,
-                                        )
-                                    }
-                                }
-                            }
-                        }
-                    } else {
-                        controller.send(senderPeerId, replyText)
-                    }
+                        // 空串标签等于「没有名字」，不能占位 —— 它会把后面的真名挤掉。
+                        .filter { it.second.isNotBlank() }
+                        .distinctBy { it.first }
+                    execDeviceRows(
+                        selfNodeId = st.selfNodeId,
+                        agentKey = key,
+                        knownDevices = known,
+                        grants = rows,
+                    )
                 }
+            }
+            controller.onSetExecDeviceAllowed = { agentKey, nodeId, allowed ->
+                // **只动 `scope=AGENT`**：取消时不该碰「这台设备可信任」那条记录 ——
+                // 「不许它执行这个 agent」与「不再信任这台设备」是两件事。
+                if (allowed) {
+                    grants.grant(
+                        nodeId = nodeId,
+                        scope = AgentGrantScopes.AGENT,
+                        agentKey = agentKey,
+                        grantedBy = "panel",
+                        at = System.currentTimeMillis(),
+                    )
+                } else {
+                    grants.revoke(nodeId = nodeId, scope = AgentGrantScopes.AGENT, agentKey = agentKey)
+                }
+            }
+            // **执行由 DSH 注入桥承担，这里不再跑本地驱动。**
+            //
+            // 原先这里接的是 `driverRegistry` 里的 `native` 驱动 —— 它自己 KDoc 写着
+            // 「没有挂载执行运行时：这次不会执行命令、不读写文件、不产出结果」，
+            // 于是用户 @agent 后收到的是那句「本机 native 驱动的兜底」，而活一件没干。
+            // 那正是本仓反复出现的「界面在说假话」形态：一个**永远成功但什么都不做**的执行器。
+            //
+            // 真正的执行路径是 `dsh-tidings`：它轮询本机 agentNode 的 `/v1/inbox`，
+            // 按随行给出的 `agentHint`（addressd / 授权 / targetSessionId）把 prompt
+            // 注入宿主上的 DSH 会话。那条路径**与本回调无关** —— 它只看 inbox。
+            //
+            // 所以这里保持**非 null**（群消息路由要靠 `onAgentPrompt != null` 判「本机有 agent」），
+            // 但什么都不做：让既有的 `NativeRelayDriver` 不再产出假回复。
+            //
+            // 代价（如实记在这里）：**没装 dsh-tidings 的宿主，@agent 将得不到任何回复**。
+            // 那比回一句「我没有运行时」诚实 —— 后者让用户以为 agent 收到了却干不了活。
+            controller.onAgentPrompt = { _, _, _, _ ->
+                // 有意为空。执行由 dsh-tidings 从 inbox 取走并注入宿主会话。
             }
         } catch (t: Throwable) {
             // 控制面是「加装」能力，绑不上（例如 8788 被别的进程占了）不能拖垮整个桌面壳：
@@ -547,6 +573,8 @@ internal class DesktopExtension(
             sessions = null
             controller.onLocalSessionPageRequest = null
             controller.onAgentPrompt = null
+            controller.onExecDevices = null
+            controller.onSetExecDeviceAllowed = null
             inboundJob?.cancel()
             inboundJob = null
         }
@@ -560,6 +588,7 @@ internal class DesktopExtension(
         attachedRuntime = null
         sessions = null
         grantStore = null
+        execPolicyStore = null
         // 先停控制面再撤订阅：collector 里会调 runtime 发送（grant 回包），
         // 运行时可能紧随其后被 stop —— 留着它跑就是往死运行时里发帧。
         inboundJob?.cancel()
@@ -839,13 +868,17 @@ internal class DesktopExtension(
 
                     for (group in targetGroups) {
                         val convId = app.relay.core.protocol.ConvId.group(group.groupId)
-                        if (isUserPrompt) {
-                            val thread = controller.state.value.messages[convId].orEmpty()
-                            val alreadyInChat = thread.any { existing ->
-                                existing.text.trim() == finalAnswer.trim() &&
-                                    kotlin.math.abs(existing.at - rec.at) < 120_000L
-                            }
-                            if (alreadyInChat) continue
+                        // 与上面那条转发路径**同一个判据**（原先这里是手写的同样逻辑，
+                        // 两处一旦分叉就会出现「补发那趟多发、实时那趟不多发」这种诡异现象）。
+                        if (
+                            alreadyForwardedToGroup(
+                                isUserAuthoredPrompt = isUserPrompt,
+                                existingMessages = controller.state.value.messages[convId].orEmpty(),
+                                finalAnswer = finalAnswer,
+                                eventAt = rec.at,
+                            )
+                        ) {
+                            continue
                         }
                         val msg = app.relay.app.model.MessageUi(
                             id = msgId,
@@ -855,6 +888,7 @@ internal class DesktopExtension(
                             reasoning = parsedReasoning,
                             at = rec.at,
                             senderId = agentSenderId,
+                            agentSessionId = message.agentSessionId,
                         )
                         controller.appendMessage(msg, incoming = !isUserPrompt)
                     }
@@ -895,6 +929,40 @@ internal fun shouldForwardAgentEventToGroup(
     @Suppress("UNUSED_PARAMETER") isUserAuthoredPrompt: Boolean,
     alreadyInChat: Boolean,
 ): Boolean = !alreadyInChat
+
+/**
+ * **这条 agent 事件，是不是群里已经有一条同样的了？**
+ *
+ * ## 为什么不能直接比字符串
+ *
+ * 用户 @ 了 agent 的那条群消息，经过 relay 注入时**被剥掉了 mention**
+ * （`stripMention`：agent 应该看到指令，不该看到 `@token`）。回传到群里的
+ * `finalAnswer` 因此是剥离后的正文。
+ *
+ * 真机现场：群里发 `@dsh-teahouse-mobile test2` ⇒ 注入 ⇒ 事件回传 `test2` ⇒
+ * 去重拿 `"@dsh-teahouse-mobile test2"` 和 `"test2"` 比，**不相等** ⇒ 又发一条。
+ * 用户只发了一次，群里出现两条 —— 而第二条看起来就是他发的（`mine = isUserPrompt`）。
+ *
+ * ## 判据
+ *
+ * 两边都剥掉 mention 再比，用的是 `extractAgentPrompt`（与 relay 的 `stripMention`
+ * 同一口径：剥 `@token` + 归一化空格）。规则一处改，两边一起变。
+ *
+ * 时间窗保留：同一条指令隔几分钟重新执行是合理的，不该被当重复吞掉。
+ */
+internal fun alreadyForwardedToGroup(
+    isUserAuthoredPrompt: Boolean,
+    existingMessages: List<app.relay.app.model.MessageUi>,
+    finalAnswer: String,
+    eventAt: Long,
+): Boolean {
+    if (!isUserAuthoredPrompt) return false
+    val answer = app.relay.app.RelayController.extractAgentPrompt(finalAnswer)
+    return existingMessages.any { existing ->
+        app.relay.app.RelayController.extractAgentPrompt(existing.text) == answer &&
+            kotlin.math.abs(existing.at - eventAt) < 120_000L
+    }
+}
 
 internal fun recordLocalWorkspaceFrom(
     controller: RelayController,
@@ -1017,6 +1085,15 @@ internal data class AgentChatMessage(
     val reasoning: String?,
     val isUserPrompt: Boolean,
     val senderId: String,
+    /**
+     * 这条消息属于哪个 agent 会话（schema 见 `rec`）。
+     *
+     * 加在**共用构造**里而不是两个调用点各传一次：实时与补发两条路各写一份的话，
+     * 迟早有一处漏掉 —— 而漏掉的表现是「实时有分段线、补发没有」，只在断网重连后才看得见。
+     */
+    val agentSessionId: String? = null,
+    /** 会话内游标（与 [agentSessionId] 配对）。 */
+    val agentCursor: Long? = null,
 )
 
 /**
@@ -1046,7 +1123,11 @@ internal fun agentChatMessageFor(
         // 这里原来写的是 `"agent:" + agentKind`，而线上那条路用的是 `agentSenderIdFor` ——
         // 同一个说话者在桌面端落库成 `agent:DSH`、在手机端落库成 `agent:dsh`，
         // 一个 agent 在群里显示成两个人（真机库里两种拼写各 801 / 113 条）。
-        senderId = if (isUserPrompt) selfNodeId else agentSenderIdFor(agentKind),
+        senderId = if (isUserPrompt) selfNodeId else agentSenderIdFor(selfNodeId, agentKind),
+        // 会话归属：`rec` 就是这条路唯一的事实来源，两条路（实时/补发）都从这里取，
+        // 所以不会出现「实时有分段线、补发没有」。
+        agentSessionId = rec.sessionId,
+        agentCursor = rec.cursor,
     )
 }
 
@@ -1065,8 +1146,11 @@ internal fun agentChatMessageFor(
  *
  * kind 为空时退回 `agent:dsh`：宁可显示一个通用 agent 名，也不要退回成"桌面端"这个**错的人**。
  */
-internal fun agentSenderIdFor(agentKind: String?): String =
-    AGENT_SENDER_PREFIX + (agentKind?.trim()?.takeIf { it.isNotBlank() } ?: "dsh").lowercase()
+internal fun agentSenderIdFor(selfNodeId: String, agentKind: String?, agentId: String? = null): String =
+    // 交给 core 的**唯一来源**：它产出 `agent:<hostNodeId>:<agentId>`，并处理长度预算
+    // （Limits.ID = 64，留给 agentId 只有 21 个字符）。各写一份已经漂过一次 ——
+    // 真机库里 `agent:DSH` 与 `agent:dsh` 并存。
+    AgentSenderId.of(selfNodeId, agentId, agentKind)
 
 internal fun eventDiagnosticLine(
     type: String,
