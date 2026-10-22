@@ -357,7 +357,16 @@ fun handleOnTransfer(event: TransferEvent) {
                 convId,
                 card.copy(
                     done = event.done,
-                    size = maxOf(card.size, event.total),
+                    // **分母只在 Offered 里定，这里不改。**
+                    //
+                    // 原来写 `size = maxOf(card.size, event.total)`：`card.size` 是
+                    // `offer.totalSize`（**整次传输**总额），而 `event.total` 是**当前文件**
+                    // 的大小。多文件传输时两者交替当分母，`fraction = done / size` 于是
+                    // 一会儿按单文件算、一会儿按总额算 —— 真机现场：同一张图上的百分比
+                    // 在 20% 与 60% 之间来回跳，看起来像两个下载同时在跑。
+                    //
+                    // 单文件时两者相等，看不出问题；所以这条只有在多文件传输上才会暴露。
+                    size = card.size,
                     state = TransferState.Active,
                 ),
             )
@@ -365,7 +374,24 @@ fun handleOnTransfer(event: TransferEvent) {
 
         is TransferEvent.Completed -> {
             val convId = host.stateLock.withLock { host.core.transferConvs[event.transferId] } ?: event.peerId
-            val card = handleCurrentTransferCard(convId, event.transferId) ?: return
+            // **找不到卡片也要把「传完了」这条事实落下来，不能 `?: return`。**
+            //
+            // 原来这里写 `?: return`，而上一段 `Progress` 用的是 `?: FileCardUi(...)`
+            // 自建卡片 —— 同一个 helper、两种处置。后果：卡片一旦查不到（会话键与
+            // `transferConvs` 不一致、或 `transferMessages` 里还没有这一条），`Completed`
+            // 被整条丢掉，那张卡永远停在 `Active` ⇒ 进度条卡在 100% 不动。
+            //
+            // `Progress` 能容忍「卡片还没建出来」，`Completed` 更不能丢：它带的是
+            // `savedPaths`（文件真的落盘了），丢了等于用户不知道文件在哪。
+            val card = handleCurrentTransferCard(convId, event.transferId) ?: FileCardUi(
+                transferId = event.transferId,
+                // 兜底时拿不到真名与总额（`Completed` 事件只带 savedPaths 与方向）——
+                // 用路径末段当名字，比空字符串有用；大小未知就 0，卡片会显示「已完成」而不是百分比。
+                name = event.savedPaths.firstOrNull()?.substringAfterLast('/') ?: event.transferId,
+                size = 0L,
+                mine = !event.incoming,
+                state = TransferState.Completed,
+            )
             handleUpsertTransferCard(
                 convId,
                 card.copy(
