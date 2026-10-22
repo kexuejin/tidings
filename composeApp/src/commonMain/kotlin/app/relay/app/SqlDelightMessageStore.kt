@@ -85,6 +85,10 @@ class SqlDelightMessageStore(
     }
 
     override fun save(threads: Map<String, List<MessageUi>>) {
+        // 这一趟到底动没动库。它决定**旧版 JSON 镜像要不要重写** ——
+        // 那份镜像有 4 MB（真机消息 6656 条），每次 save 都整份重编码 + 落盘，
+        // 比 SQLite 那几行贵得多；而它只在"库真的变了"时才会有新内容。
+        var changed = false
         queries.transaction {
             // **先处理"快照里已经没有了"的行** —— 否则删除只发生在调用方的内存里，
             // 库里那行连同它的 FTS 索引会一直留着。
@@ -98,8 +102,15 @@ class SqlDelightMessageStore(
             // 若改用"REPLACE 掉整表"的方案，隐式删除不触发触发器 ⇒ 孤儿索引
             // （AGENTS.md §2.3 那 21 GB 就是这么来的）。
             val wanted = threads.values.flatten().mapTo(HashSet()) { it.id }
-            queries.selectAllMessages().executeAsList().forEach { row ->
-                if (row.id !in wanted) {
+            // 一次查询同时服务两件事：① 找出快照里已经没有了该删的行；
+            // ② 找出一个字段都没变、该跳过的行（见下面循环里的比对）。
+            //
+            // 为什么必须比对而不是无条件重写：handlePersistThreads 在**每次消息变化**
+            // （含 Sending→Sent 这种只改交付状态的）之后都会整份 save。真机库 6656 条，
+            // 无条件重写就是 6656 次「删旧索引 + INSERT + 触发器」，而其中 6655 次是白写。
+            val existing = queries.selectAllMessages().executeAsList().associateBy { it.id }
+            existing.forEach { (id, _) ->
+                if (id !in wanted) {
                     // **只删实体行**：deleteMessage 是一条真正的 DELETE，
                     // 会激活 message_after_delete 触发器，由它按 FTS5 的 delete 命令移除索引条目。
                     //
@@ -108,11 +119,23 @@ class SqlDelightMessageStore(
                     // SQLITE_CORRUPT_VTAB: Content in the virtual table is corrupt。
                     // （upsert 路径反过来：INSERT OR REPLACE 的隐式删除**不**触发触发器，
                     // 所以那里必须先显式删索引，见下面循环里那句。）
-                    queries.deleteMessage(row.id)
+                    queries.deleteMessage(id)
+                    changed = true
                 }
             }
             for ((peerId, list) in threads) {
                 for (message in list) {
+                    // 这一条相对库里那一行有没有变化。没变就整条跳过：
+                    // 不删索引、不重写行、不改 FTS、不取号。
+                    //
+                    // 判据与写入**共用同一份 values**（见 toRowValues），所以两者
+                    // 不可能各说各话 —— 若比对用的是另一套表达式，改了一个字段而
+                    // 漏改另一个，症状会是"某些改动永远存不进去"，而且只在真机上。
+                    val values = message.toRowValues(peerId)
+                    val row = existing[message.id]
+                    // seq 也要求非空：迁移后理论上都有值，但万一有遗留的 NULL，
+                    // 跳过它就等于让它永远从分页里消失，所以这里宁可重写一次。
+                    if (row != null && row.seq != null && row.matches(values)) continue
                     val storable = message.toStorable()
                     // 同 id 重写时，`INSERT OR REPLACE` 的**隐式删除不触发 DELETE 触发器**，
                     // 旧 FTS 条目会留下来 —— 真机上这条把索引写到 4,554,999 行、库长到 21 GB
@@ -130,55 +153,35 @@ class SqlDelightMessageStore(
                     // 取号规则「该会话当前 MAX(seq)+1」对**新消息**是对的；对**重写同一 id**
                     // 却会把它挪到队尾 —— 一条 10:00 的消息改了交付状态就跳到 23:00 的位置，
                     // 聊天记录会自己乱序。所以已存在的 id 必须**沿用原 seq**。
-                    // SQLDelight 对可空单列也会生成 data class（SelectSeqById），
-                    // 所以展开取它里面那个 long。firstOrNull 而不是 executeAsOneOrNull：
-                    // 后者要求「恰好 0 或 1 行」，而这里用不到那条严格性。
-                    val existingSeq: Long? = queries
-                        .selectSeqById(storable.id)
-                        .executeAsList()
-                        .firstOrNull()
-                        ?.seq
-                    val seq: Long = existingSeq ?: queries.nextSeqForConv(storable.peerId).executeAsOne()
+                    //
+                    // 原 seq 直接从上面那次 selectAllMessages 的索引里取（row?.seq），
+                    // 不再每行单发一条 selectSeqById：6656 行就是 6656 次查询，
+                    // 而那份数据整份已经在内存里了。
+                    val seq: Long = row?.seq ?: queries.nextSeqForConv(storable.peerId).executeAsOne()
                     queries.insertMessage(
                         id = storable.id,
-                        conv_id = storable.peerId,
-                        peer_id = peerId,
-                        sender_id = storable.senderId,
-                        mine = if (storable.mine) 1L else 0L,
-                        text = if (!storable.reasoning.isNullOrBlank()) "<think>\n${storable.reasoning}\n</think>\n${storable.text}" else storable.text,
-                        timestamp = storable.at,
-                        delivery = storable.delivery?.name,
-                        notice = storable.notice?.name,
-                        // 通知细节：JSON 一列。null 与 `"null"` 都要落成 null —— 老数据没有它。
-                        notice_detail = storable.noticeDetail
-                            ?.takeIf { !it.isEmpty }
-                            ?.let { runCatching { MessageStore.json.encodeToString(NoticeDetail.serializer(), it) }.getOrNull() },
-                        file_json = message.file?.let {
-                            runCatching { MessageStore.json.encodeToString(it) }.getOrNull()
-                        },
-                        // 注意取的是 `message` 而不是 `storable`：`toStorable()` 会把 `file` 抹掉
-                        // （文件卡不落盘），但它**刻意保留** `screen`（屏幕协助记录是"这件事发生过"
-                        // 的唯一凭据，重启必须还在）。所以两者在这里写法不同不是笔误。
-                        screen_json = message.screen?.let {
-                            runCatching { MessageStore.json.encodeToString(it) }.getOrNull()
-                        },
-                        // **会话归属必须落库**：聊天流里那条「任务：xxx / 新会话」分段线
-                        // 靠它判（`sessionIdOf` 优先读这个字段）。
-                        //
-                        // 以前它只活在内存的 MessageUi 里：实时看得到分段线，重新打开聊天
-                        // 就没了。而手机端连 id 前缀那条回退也用不上（`agent-ev-` 是桌面端
-                        // 本地构造消息的副产物，转发进群时不带过去）。
-                        agent_session_id = message.agentSessionId,
-                        // 标题必须一起落库：分段线重启后要还显示得出「任务：xxx」，
-                        // 而不是退回「新会话」。它与 agent_session_id 同一条纪律 ——
-                        // 只活在内存的字段，重新打开聊天就没了。
-                        agent_session_title = message.agentSessionTitle,
+                        conv_id = values.convId,
+                        peer_id = values.peerId,
+                        sender_id = values.senderId,
+                        mine = values.mine,
+                        text = values.text,
+                        timestamp = values.timestamp,
+                        delivery = values.delivery,
+                        notice = values.notice,
+                        notice_detail = values.noticeDetail,
+                        file_json = values.fileJson,
+                        screen_json = values.screenJson,
+                        agent_session_id = values.agentSessionId,
+                        agent_session_title = values.agentSessionTitle,
                         seq = seq,
                     )
+                    changed = true
                 }
             }
         }
-        runCatching { legacyStore?.save(threads) }
+        // 没动库就不重写旧版镜像：内容一字未变，重写只是把同样的 4 MB 再落一遍盘。
+        // （镜像本身仍是有意保留的：SQLite 意外为空时 load() 会拿它做一次性迁移。）
+        if (changed) runCatching { legacyStore?.save(threads) }
     }
 
     override fun clear() {
@@ -777,3 +780,84 @@ private fun app.relay.db.SearchMessagesGroupedLike.toGroup(): ConversationSearch
         latestAt = latestAt ?: 0L,
         latestText = latestText.orEmpty(),
     )
+
+/**
+ * 一条消息**将要**写进 MessageEntity 的那一组列值（不含 seq —— 它是身份，不是内容）。
+ *
+ * 存在的唯一理由：**比对与写入必须是同一份逻辑**。
+ * save() 要靠「这一行有没有变」决定跳不跳过；若比对另写一套表达式，两套判据迟早漂移 ——
+ * 那时要么永远不跳过（白干），要么把一条**真的变了**的消息判成没变（丢更新，
+ * 而且只在真机上、只在改动某个特定字段时才会出现）。所以两边共用 [toRowValues]。
+ */
+private data class MessageRowValues(
+    val convId: String,
+    val peerId: String,
+    val senderId: String?,
+    val mine: Long,
+    val text: String,
+    val timestamp: Long,
+    val delivery: String?,
+    val notice: String?,
+    val noticeDetail: String?,
+    val fileJson: String?,
+    val screenJson: String?,
+    val agentSessionId: String?,
+    val agentSessionTitle: String?,
+)
+
+/**
+ * 把消息落成列值。[peerId] 是**会话键**（`threads` 的键），不是消息自带的那个。
+ *
+ * 两个来源刻意不合并：`conv_id` 取消息自报的 `peerId`，`peer_id` 取调用方传进来的
+ * 会话键 —— 这是 save() 一直以来的写法，改掉会让群聊/私聊的归属在某些边界上错位。
+ *
+ * `text` 里那条 `<think>` 包装也是既有行为：reasoning 与正文同列落库，
+ * 读回来时由 `parseThinkingContent` 拆开。
+ */
+private fun MessageUi.toRowValues(peerId: String): MessageRowValues {
+    val storable = toStorable()
+    return MessageRowValues(
+        convId = storable.peerId,
+        peerId = peerId,
+        senderId = storable.senderId,
+        mine = if (storable.mine) 1L else 0L,
+        text = if (!storable.reasoning.isNullOrBlank()) {
+            "<think>\n" + storable.reasoning + "\n</think>\n" + storable.text
+        } else {
+            storable.text
+        },
+        timestamp = storable.at,
+        delivery = storable.delivery?.name,
+        notice = storable.notice?.name,
+        noticeDetail = storable.noticeDetail
+            ?.takeIf { !it.isEmpty }
+            ?.let { runCatching { MessageStore.json.encodeToString(NoticeDetail.serializer(), it) }.getOrNull() },
+        fileJson = file?.let { runCatching { MessageStore.json.encodeToString(it) }.getOrNull() },
+        screenJson = screen?.let { runCatching { MessageStore.json.encodeToString(it) }.getOrNull() },
+        agentSessionId = agentSessionId,
+        agentSessionTitle = agentSessionTitle,
+    )
+}
+
+/**
+ * 库里那一行与 [values] 是否一个字段都不差。
+ *
+ * 不比 `id`（它是索引键，两边必然相同）与 `seq`（排序身份，不参与内容判定）。
+ * 少比任何**会被写入**的列，都会让那条列的更新永远存不进去 —— 这正是
+ * 本函数必须与 [toRowValues] 的字段表逐一对应的原因。
+ */
+private fun app.relay.db.MessageEntity.matches(values: MessageRowValues): Boolean =
+    conv_id == values.convId &&
+        peer_id == values.peerId &&
+        sender_id == values.senderId &&
+        mine == values.mine &&
+        text == values.text &&
+        timestamp == values.timestamp &&
+        delivery == values.delivery &&
+        notice == values.notice &&
+        notice_detail == values.noticeDetail &&
+        file_json == values.fileJson &&
+        screen_json == values.screenJson &&
+        agent_session_id == values.agentSessionId &&
+        agent_session_title == values.agentSessionTitle
+

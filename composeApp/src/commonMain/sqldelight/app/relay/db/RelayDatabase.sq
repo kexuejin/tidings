@@ -112,11 +112,6 @@ nextSeqForConv:
 SELECT COALESCE(MAX(seq), 0) + 1 AS next FROM MessageEntity
 WHERE conv_id = :convId;
 
--- 已存在那行的 seq。重写同一 id 时必须沿用，否则消息会被挪到队尾（聊天记录乱序）。
-selectSeqById:
-SELECT seq FROM MessageEntity
-WHERE id = :id;
-
 insertMessage:
 INSERT OR REPLACE INTO MessageEntity (
     id, conv_id, peer_id, sender_id, mine, text, timestamp, delivery, notice, notice_detail, file_json, screen_json,
