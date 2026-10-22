@@ -85,6 +85,31 @@ class SqlDelightMessageStore(
 
     override fun save(threads: Map<String, List<MessageUi>>) {
         queries.transaction {
+            // **先处理"快照里已经没有了"的行** —— 否则删除只发生在调用方的内存里，
+            // 库里那行连同它的 FTS 索引会一直留着。
+            //
+            // 真身：单条本地删除（`handleDeleteMessage`）走的就是"改内存 → 整份快照 save"，
+            // 而 save 原来只做 upsert，**从不删任何东西**。于是被删的那条仍留在
+            // MessageEntity 里、也仍被搜得到 —— 用户"删了还在"。
+            //
+            // FTS 必须显式清：这里用的是**逐 id 的 DELETE**（不是 REPLACE），
+            // 它会激活 `message_after_delete` 触发器把索引按 'delete' 命令移除。
+            // 若改用"REPLACE 掉整表"的方案，隐式删除不触发触发器 ⇒ 孤儿索引
+            // （AGENTS.md §2.3 那 21 GB 就是这么来的）。
+            val wanted = threads.values.flatten().mapTo(HashSet()) { it.id }
+            queries.selectAllMessages().executeAsList().forEach { row ->
+                if (row.id !in wanted) {
+                    // **只删实体行**：deleteMessage 是一条真正的 DELETE，
+                    // 会激活 message_after_delete 触发器，由它按 FTS5 的 delete 命令移除索引条目。
+                    //
+                    // 这里**不要**再先调 insertMessageDropStaleIndex：那句等于手工再删一遍索引，
+                    // 两次删除会让 FTS 虚拟表与实际内容不一致 —— 实测直接抛
+                    // SQLITE_CORRUPT_VTAB: Content in the virtual table is corrupt。
+                    // （upsert 路径反过来：INSERT OR REPLACE 的隐式删除**不**触发触发器，
+                    // 所以那里必须先显式删索引，见下面循环里那句。）
+                    queries.deleteMessage(row.id)
+                }
+            }
             for ((peerId, list) in threads) {
                 for (message in list) {
                     val storable = message.toStorable()
@@ -116,6 +141,13 @@ class SqlDelightMessageStore(
                         screen_json = message.screen?.let {
                             runCatching { MessageStore.json.encodeToString(it) }.getOrNull()
                         },
+                        // **会话归属必须落库**：聊天流里那条「任务：xxx / 新会话」分段线
+                        // 靠它判（`sessionIdOf` 优先读这个字段）。
+                        //
+                        // 以前它只活在内存的 MessageUi 里：实时看得到分段线，重新打开聊天
+                        // 就没了。而手机端连 id 前缀那条回退也用不上（`agent-ev-` 是桌面端
+                        // 本地构造消息的副产物，转发进群时不带过去）。
+                        agent_session_id = message.agentSessionId,
                     )
                 }
             }
@@ -628,6 +660,13 @@ private fun app.relay.db.MessageEntity.toUi(): MessageUi {
         // 整条消息因此读不出来比少一张卡糟得多。
         screen = screen_json?.let { parseScreenRecordUi(it) },
         reasoning = parsedReasoning,
+        // **会话归属读回来**：聊天流的分段线靠它判（`sessionIdOf`）。
+        //
+        // 缺这一行，重启后所有分段线都会消失 —— 桌面端还能靠 id 前缀 `agent-ev-` 回退，
+        // 手机端连那条回退都没有（转发进群的消息 id 是信封 UUID）。
+        // 老库这一列是 NULL（迁移补列、不回填）：那确实不知道，与「这条不属于任何会话」
+        // 是同一档，`sessionIdOf` 会继续退回 id 前缀那条旧判据。
+        agentSessionId = agent_session_id,
     )
 }
 

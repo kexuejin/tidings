@@ -13,7 +13,14 @@ CREATE TABLE MessageEntity (
     -- 屏幕协助历史卡（ScreenRecord 会话历史记录）。
     -- 单独一列而不是搭 file_json 的车：搭车会让 searchFileMessages 把屏幕记录当成文件命中，
     -- 也会让 decodeFileCard 去解析一个不是文件卡的结构。见 MessageUi.screen 的 KDoc。
-    screen_json TEXT
+    screen_json TEXT,
+    -- 这条消息属于哪个 agent 会话（协议 `agentSessionId`）。
+    --
+    -- 必须落库：聊天流里那条「任务：xxx / 新会话」分段线靠它判（`sessionIdOf`）。
+    -- 以前它只活在内存的 MessageUi 里，**一落库就丢**：实时看得到分段线，
+    -- 重新打开聊天就没有了。而手机端连 id 前缀那条回退也用不上
+    -- （`agent-ev-` 是桌面端本地构造消息的副产物，转发进群时不带过去）。
+    agent_session_id TEXT
 );
 
 CREATE INDEX idx_message_conv_time ON MessageEntity(conv_id, timestamp);
@@ -79,9 +86,10 @@ SELECT 'delete', m.rowid, m.text FROM MessageEntity m WHERE m.id = ?;
 
 insertMessage:
 INSERT OR REPLACE INTO MessageEntity (
-    id, conv_id, peer_id, sender_id, mine, text, timestamp, delivery, notice, file_json, screen_json
+    id, conv_id, peer_id, sender_id, mine, text, timestamp, delivery, notice, file_json, screen_json,
+    agent_session_id
 ) VALUES (
-    ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?
+    ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?
 );
 
 selectMessagesByConv:

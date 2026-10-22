@@ -147,6 +147,13 @@ class SqlDelightMessageStoreFtsTest {
 
         // ① 把库伪装成「还带着 3.sqm 那条无条件触发器」的旧库。
         driver.execute(null, "DROP TRIGGER IF EXISTS message_after_update", 0)
+        // **还要把后续迁移加的列删掉**：`Schema.create` 用的是**最新** .sq，
+        // 里面已经有 `agent_session_id`（11.sqm 补的）。而下面只跑最后一条迁移，
+        // 那条是 `ALTER TABLE ADD COLUMN` —— 列已存在就撞 duplicate column。
+        //
+        // 这是夹具的假设问题，不是迁移的缺陷：生产路径按 `user_version` 只跑一次，
+        // 老库上那一列确实不存在。夹具要模拟的是**老库**，所以得先退回旧形状。
+        runCatching { driver.execute(null, "ALTER TABLE MessageEntity DROP COLUMN agent_session_id", 0) }
         driver.execute(
             null,
             """
@@ -174,12 +181,17 @@ class SqlDelightMessageStoreFtsTest {
             "旧触发器必须真的堆出孤儿，否则这条测试什么也没证明（消息 " + messages + " / 索引 " + orphans + "）",
         )
 
-        // ③ 跑**最新那一条**迁移。
-        //    用 `version - 1 → version` 而不是写死数字：SQLDelight 的版本号是
-        //    「迁移文件数 + 1」（9 个迁移 ⇒ 版本 10），所以 10.sqm 搬的是 10 → 11。
-        //    写死数字会在下一条迁移加进来时悄悄测到别的东西。
-        val latest = RelayDatabase.Schema.version
-        RelayDatabase.Schema.migrate(driver, latest - 1, latest)
+        // ③ 从**修触发器的那条迁移之前**跑到最新。
+        //
+        // 这里原本写的是 `migrate(latest - 1, latest)` —— 假设「最后一条迁移就是修触发器
+        // 的那条（10.sqm）」。那条注释还特意提醒过写死数字会测到别的东西，但没防住
+        // 「最后一条换了职责」：11.sqm（给 MessageEntity 补 agent_session_id）加进来之后，
+        // 这段就只跑 11.sqm，触发器根本没被重建，索引停在 20 条 —— 测试红得莫名其妙。
+        //
+        // 改成从 10 起：**覆盖 10.sqm 与它之后的每一条**，无论后面再加多少条。
+        // 10 是「修触发器」那条迁移的源版本（9 个迁移 ⇒ 版本 10），写死它是有意的：
+        // 这一条测试关心的就是那一次修复，往前的历史迁移与它无关。
+        RelayDatabase.Schema.migrate(driver, 10, RelayDatabase.Schema.version)
 
         assertEquals(
             messages,
@@ -226,5 +238,62 @@ class SqlDelightMessageStoreFtsTest {
         val searchResults = migratingStore.search("历史消息")
         assertEquals(1, searchResults.size)
         assertEquals("old-1", searchResults.first().id)
+    }
+
+    /**
+     * **删掉一条消息后，FTS 索引必须同步缩小。**
+     *
+     * 这是「单条本地删除」（`RelayControllerMessagesComponent.handleDeleteMessage`）的
+     * 存储侧不变量。AGENTS.md §2.3 记着真机事故：索引与实体行数不一致把库撑到 21 GB。
+     * 删除走的是整份快照 `save()`，那条路径靠 `message_after_delete` 触发器清索引 ——
+     * 这里钉住"它真的清了"，而不是"我们相信它会清"。
+     */
+    @Test
+    fun deletingAMessageShrinksTheFtsIndex() {
+        store.save(
+            mapOf(
+                "peer-1" to listOf(
+                    MessageUi(id = "d1", peerId = "peer-1", mine = false, text = "这条要被删掉的会议纪要", at = 1000),
+                    MessageUi(id = "d2", peerId = "peer-1", mine = false, text = "这条要留下来", at = 2000),
+                ),
+            ),
+        )
+        assertEquals(1, store.search("会议纪要").size, "删除前应当搜得到")
+
+        // 只保留 d2 —— 等价于"删掉一条后再落盘"。
+        store.save(
+            mapOf(
+                "peer-1" to listOf(
+                    MessageUi(id = "d2", peerId = "peer-1", mine = false, text = "这条要留下来", at = 2000),
+                ),
+            ),
+        )
+
+        assertEquals(0, store.search("会议纪要").size, "删掉的那条不能再被搜到（索引里有残留就是孤儿）")
+        assertEquals(1, store.search("留下来").size, "没删的那条仍要搜得到")
+
+        // **行数不变量**：实体行数 ≡ 索引 docsize 行数。
+        // 这条断言能区分"真删了索引"与"只是搜不到"（后者可能仍留着 docsize 行）。
+        val entityRows = entityRowIds()
+        assertEquals(1, entityRows.size, "实体表应当只剩一条")
+        assertEquals(entityRows, ftsRowIds(), "FTS 里必须只剩同一条 —— 行数不等就是 AGENTS.md §2.3 那类孤儿索引")
+    }
+
+    /** 实体表的 rowid 集合。 */
+    private fun entityRowIds(): Set<Long> =
+        driver.executeQuery(null, "SELECT rowid FROM MessageEntity", { cursor ->
+            app.cash.sqldelight.db.QueryResult.Value(buildSet(cursor))
+        }, 0).value
+
+    /** FTS 索引的 rowid 集合（`MessageFts` 是外部内容表，行数就是索引行数）。 */
+    private fun ftsRowIds(): Set<Long> =
+        driver.executeQuery(null, "SELECT rowid FROM MessageFts", { cursor ->
+            app.cash.sqldelight.db.QueryResult.Value(buildSet(cursor))
+        }, 0).value
+
+    private fun buildSet(cursor: app.cash.sqldelight.db.SqlCursor): Set<Long> {
+        val out = mutableSetOf<Long>()
+        while (cursor.next().value) out += cursor.getLong(0)!!
+        return out
     }
 }
