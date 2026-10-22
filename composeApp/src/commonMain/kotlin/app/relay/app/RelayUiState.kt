@@ -37,6 +37,19 @@ data class RelayUiState(
     val network: NetworkUi = NetworkUi(),
     val peers: List<PeerUi> = emptyList(),
     val messages: Map<String, List<MessageUi>> = emptyMap(),
+    /**
+     * 会话摘要（会话列表需要的最后一句话 / 时间 / 归属）。
+     *
+     * 为什么与 [messages] 分开：会话列表要一行预览、最后消息时间、是否「我说的」，
+     * 这些曾经全从 [messages] 现算 —— 于是「列表」被绑死在「消息窗口」上，
+     * 想只加载当前打开的会话就不可能。摘要把这两件事拆开（见 ConversationSummary 表）。
+     *
+     * 生产路径每帧都有它（RelayStateWriter 在每次 commit 时合成：内存里有的会话用
+     * 最新一条覆盖，内存里没有的沿用启动时从库里读到的那份）。
+     * 空表示「这个壳没有摘要」（测试 / 预览 / 未接存储），此时 conversations 退回从
+     * [messages] 推导，行为与改造前逐字一致。
+     */
+    val conversationSummaries: List<ConversationSummaryRow> = emptyList(),
     val unreadByPeer: Map<String, Int> = emptyMap(),
     val pendingByPeer: Map<String, Int> = emptyMap(),
     val banner: BannerUi? = null,
@@ -570,6 +583,26 @@ data class RelayUiState(
         get() {
             val real = peers.associateBy { it.nodeId }
             val groupsByConv = settings.groups.associateBy { ConvId.group(it.groupId) }
+            // 会话摘要：会话列表的 id 集合、预览、最后消息时间全部来自它。
+            //
+            // 空 ⇒ 这个壳没接摘要（测试/预览/未接存储）：退回从已加载消息推导同一份形状，
+            // 行为与改造前逐字一致。生产路径永远走 conversationSummaries。
+            val summariesByConv: Map<String, ConversationSummaryRow> =
+                if (conversationSummaries.isEmpty()) {
+                    messages.mapNotNull { (convId, list) ->
+                        val last = list.lastOrNull() ?: return@mapNotNull null
+                        convId to ConversationSummaryRow(
+                            convId = convId,
+                            lastMessageId = last.id,
+                            // 与旧实现的 text.ifBlank { file?.name } 同义。
+                            lastTextPreview = last.text.takeIf { it.isNotBlank() } ?: last.file?.name,
+                            lastMessageAt = last.at,
+                            lastMessageIsMine = last.mine,
+                        )
+                    }.toMap()
+                } else {
+                    conversationSummaries.associateBy { it.convId }
+                }
             // 先认识到的对端在前，消息独有的会话排后面；去重靠 map，天然只留一条。
             val ids = LinkedHashSet<String>().apply {
                 // 对端（task-42 ③）：**agent 节点**只有在「有可见会话」或「有消息」时才算
@@ -581,10 +614,10 @@ data class RelayUiState(
                 addAll(real.keys.filter { id ->
                     val p = real[id]
                     p?.isAgent != true ||
-                        messages[id].orEmpty().isNotEmpty() ||
+                        summariesByConv.containsKey(id) ||
                         visibleAgentSessionsOf(id).isNotEmpty()
                 })
-                addAll(messages.keys.filter { key ->
+                addAll(summariesByConv.keys.filter { key ->
                     groupsByConv.containsKey(key) || real.containsKey(key) || (!app.relay.core.protocol.IpAddressUtils.isIpv4(key) && !app.relay.core.protocol.IpAddressUtils.isIpv6(key) && !key.contains(':'))
                 })
                 addAll(groupsByConv.keys)
@@ -593,9 +626,9 @@ data class RelayUiState(
                 .map { id ->
                     val group = groupsByConv[id]
                     val peer = real[id]
-                    val thread = messages[id].orEmpty()
-                    val last = thread.lastOrNull()
-                    val lastMessageAt = last?.at ?: 0L
+                    // 只读摘要：不再回头翻 messages —— 那正是「列表绑死消息窗口」的根源。
+                    val summary = summariesByConv[id]
+                    val lastMessageAt = summary?.lastMessageAt ?: 0L
                     // 对端最后在线（群没有"在线"这个概念，退回建群/更新时间 updatedTs）。
                     // 只有"还没聊过"那一档才拿它当尺子，见 ConversationUi.presenceAt 的 KDoc。
                     val presenceAt = group?.updatedTs ?: peer?.lastSeenAt ?: 0L
@@ -603,9 +636,9 @@ data class RelayUiState(
                         convId = id,
                         title = convTitle(id),
                         // 文件消息没有正文，列表预览要退回文件名，否则会话行是空白。
-                        preview = last?.let { it.text.ifBlank { it.file?.name } },
+                        preview = summary?.lastTextPreview,
                         // 预览要能区分「他说的」与「我说的」：后者加「你：」前缀。
-                        lastMessageIsMine = last?.mine == true,
+                        lastMessageIsMine = summary?.lastMessageIsMine == true,
                         isPinned = id in settings.pinnedConvIds,
                         isMuted = id in settings.mutedConvIds,
                         // 兼容兜底：桌面会话面板直接 relativeTime(at)，没有 0 守卫，

@@ -722,9 +722,16 @@ fun handleRestoreMessages(): Job {
         val loaded = withContext(ioDispatcher) {
             runCatching { host.messageStore.loadRecent(MessageStore.MESSAGE_PAGE_SIZE) }.getOrNull()
         } ?: return@launch
-        if (!host.persistMessages || loaded.isEmpty()) return@launch
+        if (!host.persistMessages) return@launch
+        // 会话摘要基线：内存里没有消息的会话，靠它才在列表里出现。
+        // 读的是 ConversationSummary 表（几十行），与消息的分页窗口无关。
+        val summaries = withContext(ioDispatcher) {
+            runCatching { host.messageStore.loadSummaries() }.getOrNull().orEmpty()
+        }
         var changed = false
         host.stateLock.withLock {
+            host.core.summaries.clear()
+            for (summary in summaries) host.core.summaries[summary.convId] = summary
             for ((peerId, list) in loaded) {
                 if (list.isEmpty()) continue
                 val thread = host.core.threads.getOrPut(peerId) { mutableListOf() }
@@ -738,7 +745,9 @@ fun handleRestoreMessages(): Job {
                 if (added) thread.sortBy { it.at }
             }
         }
-        if (changed) host.publish()
+        // 摘要非空也要 publish：消息窗口可能一条都没有（老库刚迁移），
+        // 但会话列表仍要按摘要把行画出来。
+        if (changed || summaries.isNotEmpty()) host.publish()
     }
 }
 

@@ -47,6 +47,15 @@ internal class RelayCoreState {
     /** 会话 id → 该会话的消息列表。这是最大的一张表，也是崩溃事故的主角。 */
     val threads = mutableMapOf<String, MutableList<MessageUi>>()
 
+    /**
+     * 会话 id → 摘要。启动时从库里读一份（MessageStore.loadSummaries）。
+     *
+     * 它是「内存里没有消息的那个会话」在列表里仍然有预览的唯一来源。
+     * 内存里**有**消息的会话由 RelayStateWriter.commit 用最新一条覆盖它 ——
+     * 那条覆盖是必须的：新消息刚到、异步落盘还没完成时，列表预览不能等。
+     */
+    val summaries = mutableMapOf<String, ConversationSummaryRow>()
+
     /** 会话 id → 未读数。 */
     val unread = mutableMapOf<String, Int>()
 
@@ -110,19 +119,49 @@ internal class RelayStateWriter(
      *
      * @param transform 基于当前 UI 状态算新状态；它看到的是刚刚被改完的那批表的快照。
      */
+    private data class Snapshot(
+        val messages: Map<String, List<MessageUi>>,
+        val unread: Map<String, Int>,
+        val pending: Map<String, Int>,
+        val summaries: List<ConversationSummaryRow>,
+    )
+
     fun commit(transform: (RelayUiState) -> RelayUiState) {
         val snapshot = state.lock.withLock {
-            Triple(
-                state.threads.mapValues { (_, list) -> list.toList() },
-                state.unread.toMap(),
-                state.pending.toMap(),
+            // 摘要 = 启动时从库里读到的那份（内存里没有消息的会话）
+            //      + 内存里最新一条（内存里有消息的会话）。
+            //
+            // 后者是刻意的覆盖：新消息刚到、异步落盘还没完成时，会话列表的预览
+            // 必须立刻反映它，不能让用户看到「消息进来了、列表还停在上一句」。
+            val merged = LinkedHashMap<String, ConversationSummaryRow>(state.summaries)
+            for ((convId, list) in state.threads) {
+                val last = list.lastOrNull()
+                if (last == null) {
+                    // 空列表 = 这个会话已经没有消息了：摘要不能留着，否则列表多一个空行。
+                    merged.remove(convId)
+                    continue
+                }
+                merged[convId] = ConversationSummaryRow(
+                    convId = convId,
+                    lastMessageId = last.id,
+                    lastTextPreview = last.text.takeIf { it.isNotBlank() } ?: last.file?.name,
+                    lastMessageAt = last.at,
+                    lastMessageIsMine = last.mine,
+                )
+            }
+            Snapshot(
+                messages = state.threads.mapValues { (_, list) -> list.toList() },
+                unread = state.unread.toMap(),
+                pending = state.pending.toMap(),
+                summaries = merged.values.toList(),
             )
         }
         flow.update {
             transform(it).copy(
-                messages = snapshot.first,
-                unreadByPeer = snapshot.second,
-                pendingByPeer = snapshot.third,
+                messages = snapshot.messages,
+                unreadByPeer = snapshot.unread,
+                pendingByPeer = snapshot.pending,
+                conversationSummaries = snapshot.summaries,
             )
         }
     }

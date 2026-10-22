@@ -41,6 +41,70 @@ class RelayUiStateTest {
     private fun message(id: String, peerId: String, text: String, at: Long, mine: Boolean = false) =
         MessageUi(id = id, peerId = peerId, mine = mine, text = text, at = at)
 
+
+    /**
+     * **摘要表必须是「从消息推导」的无损替代。**
+     *
+     * 这条是切换读取方的唯一安全阀：`conversations` 的输出在两种输入下必须逐字段相同，
+     * 否则那 53 个读取点会以难以觉察的方式漂移（排序、预览、时间各错一点）。
+     */
+    @Test
+    fun conversationsAreIdenticalWithOrWithoutSummaries() {
+        val messages = mapOf(
+            "a" to listOf(message("m1", "a", "第一句", 1_000L), message("m2", "a", "最后一句", 3_000L)),
+            "b" to listOf(message("n1", "b", "另一个会话", 2_000L, mine = true)),
+        )
+        // 从消息推导出一份摘要（与 RelayStateWriter.commit 的合成规则一致）。
+        val summaries = messages.map { (convId, list) ->
+            val last = list.last()
+            ConversationSummaryRow(
+                convId = convId,
+                lastMessageId = last.id,
+                lastTextPreview = last.text.takeIf { it.isNotBlank() } ?: last.file?.name,
+                lastMessageAt = last.at,
+                lastMessageIsMine = last.mine,
+            )
+        }
+        val base = RelayUiState(
+            peers = listOf(peer("a", "甲", lastSeenAt = 5_000L), peer("b", "乙", lastSeenAt = 6_000L)),
+            messages = messages,
+            unreadByPeer = mapOf("a" to 2),
+            pendingByPeer = mapOf("b" to 1),
+        )
+
+        // 无摘要 ⇒ 退回从消息推导（改造前的行为）。有摘要 ⇒ 走新路径。
+        val derived = base.conversations
+        val fromSummary = base.copy(conversationSummaries = summaries).conversations
+
+        assertEquals(derived, fromSummary, "有摘要与无摘要两种输入下，会话列表必须逐字段相同")
+    }
+
+    /**
+     * **只有摘要、没有消息的会话也必须在列表里。**
+     *
+     * 这正是把两件事拆开之后新获得的能力：会话列表不再要求「内存里握着这条会话的消息」。
+     * 将来只加载当前打开的会话时，靠的就是这条。
+     */
+    @Test
+    fun conversationVisibleFromSummaryAlone() {
+        val state = RelayUiState(
+            // 没有任何 messages —— 窗口里一条消息都没加载。
+            messages = emptyMap(),
+            conversationSummaries = listOf(
+                ConversationSummaryRow(
+                    convId = "ghost",
+                    lastMessageId = "g1",
+                    lastTextPreview = "只存在于摘要里的一句话",
+                    lastMessageAt = 7_000L,
+                    lastMessageIsMine = false,
+                ),
+            ),
+        )
+        val row = state.conversations.single { it.convId == "ghost" }
+        assertEquals("只存在于摘要里的一句话", row.preview)
+        assertEquals(7_000L, row.lastMessageAt)
+        assertEquals(7_000L, row.at)
+    }
     @Test
     fun newerActivitySortsBeforeOlderActivity() {
         val state = RelayUiState(
