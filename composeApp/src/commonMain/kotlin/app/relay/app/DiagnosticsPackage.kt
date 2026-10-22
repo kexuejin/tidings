@@ -61,6 +61,26 @@ internal data class DiagPeer(
     val online: Boolean,
     val isAgent: Boolean,
     val tcpPort: Int,
+    /**
+     * 这个对端**声明过的全部地址**（LAN / IPv6 / Tailscale / ZeroTier），来自它的档案。
+     *
+     * ## 为什么诊断包里必须有它
+     *
+     * 排查「连不上」时最先要回答的是**「对端到底有哪些地址、本机在试哪一个」**。没有这
+     * 两个字段时只能去 `stores/known-peers.json` 手工反推 —— 那正是一次 VPN 失联排查里
+     * 做过的事：反复读那个文件、比对 peers 列表、再猜本机在拨谁。
+     *
+     * **空列表是有信息量的**：说明对端版本还不会宣告地址（`Profile.addresses` 是后加的
+     * 可选键），那种情况下只能靠「发现包的源地址」那一条，换网就会失联。
+     */
+    val addresses: List<String> = emptyList(),
+    /**
+     * 本机最近一次**尝试拨号**的目标（`host:port`）；null = 还没拨过或对端在线。
+     *
+     * 它与 [addresses] 是两件事：那个说「有哪些可选」，这个说「选了哪个、为什么失败」。
+     * 只有前者时看不出「明明有 IPv6 候选却没试」这类问题。
+     */
+    val dialTarget: String? = null,
 )
 
 /** `environment.json` 的输入。都是原语，便于从 UI 状态直接投影而不把 UI 模型拖进导出逻辑。 */
@@ -320,6 +340,14 @@ internal fun environmentJson(environment: DiagnosticsEnvironment, generatedAtMil
                                     put("online", peer.online)
                                     put("isAgent", peer.isAgent)
                                     put("tcpPort", peer.tcpPort)
+                                    // **对端有哪些地址**：排查「连不上」时第一个要看的东西。
+                                    // 空数组本身是信息 —— 对端版本还不宣告地址。
+                                    put(
+                                        "addresses",
+                                        buildJsonArray { peer.addresses.forEach { add(JsonPrimitive(it)) } },
+                                    )
+                                    // **本机在拨哪一个**：与上面配合才能看出「有候选却没试」。
+                                    put("dialTarget", peer.dialTarget)
                                 },
                             )
                         }

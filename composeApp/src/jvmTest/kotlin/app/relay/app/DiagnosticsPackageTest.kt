@@ -228,4 +228,82 @@ class DiagnosticsPackageTest {
             "窄列表也要留着：它才是同网段判断的依据",
         )
     }
+
+    /**
+     * **诊断包必须给每个对端带上「它有哪些地址」与「本机在拨哪一个」。**
+     *
+     * ## 为什么（一次真实排查）
+     *
+     * 排查「VPN 连不上」时，最先要回答的是**对端到底有哪些地址、本机在试哪个**。
+     * 当时诊断包里没有这两项，只能反复读 `stores/known-peers.json`、比对 peers 列表、
+     * 再猜本机在拨谁 —— 那段推理花了大半个会话。
+     *
+     * `addresses` 与 `dialTarget` 是两件事：
+     *  · 前者说「有哪些可选」（空 = 对端版本还不会宣告地址，那本身是信息）；
+     *  · 后者说「选了哪个、为什么失败」。只有前者时看不出「有 IPv6 候选却没试」。
+     */
+    @Test
+    fun peersCarryTheirDeclaredAddressesAndDialTarget() {
+        val env = environment().copy(
+            peers = listOf(
+                DiagPeer(
+                    nodeId = "node-b",
+                    nick = "手机",
+                    platform = "android",
+                    online = false,
+                    isAgent = false,
+                    tcpPort = 17879,
+                    addresses = listOf("192.168.2.22", "2001:db8::1", "fd7a:115c:a1e0::1"),
+                    dialTarget = "2001:db8::1:17880",
+                ),
+            ),
+        )
+        val json = unzip(
+            buildDiagnosticsZip(
+                buildDiagnosticsBundle(
+                    environment = env,
+                    linkJson = """{"self":"node-self"}""",
+                    queueLog = "",
+                    messagesLog = "",
+                    generatedAtMillis = 1_760_928_000_123L,
+                ).entries,
+                1_760_928_000_123L,
+            ),
+        ).getValue("environment.json").decodeToString()
+
+        assertTrue(json.contains("2001:db8::1"), "对端的 IPv6 候选必须原样出现")
+        assertTrue(json.contains("fd7a:115c:a1e0::1"), "Tailscale IPv6 也要在")
+        assertTrue(
+            json.contains("2001:db8::1:17880"),
+            "必须能看出本机在拨哪一个地址 —— 只有候选列表看不出「选了哪个」",
+        )
+    }
+
+    /**
+     * **没有地址的对端也要如实导出空数组，而不是省略这个键。**
+     *
+     * 省掉键会让「对端不会宣告地址」与「这个字段没实现」看起来一样 —— 那正是本仓
+     * 反复强调的「如实：要么说清楚、要么不存在」。
+     */
+    @Test
+    fun aPeerWithoutAddressesExportsAnEmptyArray() {
+        val env = environment().copy(
+            peers = listOf(
+                DiagPeer("node-c", "老设备", "linux", online = false, isAgent = false, tcpPort = 17879),
+            ),
+        )
+        val json = unzip(
+            buildDiagnosticsZip(
+                buildDiagnosticsBundle(
+                    environment = env,
+                    linkJson = """{}""",
+                    queueLog = "",
+                    messagesLog = "",
+                    generatedAtMillis = 1L,
+                ).entries,
+                1L,
+            ),
+        ).getValue("environment.json").decodeToString()
+        assertTrue(json.contains("\"addresses\""), "空也要有键：缺键会被误读成「没实现」")
+    }
 }

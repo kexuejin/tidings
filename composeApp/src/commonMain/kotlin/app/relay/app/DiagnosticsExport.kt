@@ -104,6 +104,20 @@ private fun RelayController.exportDiagnosticsPackageOrThrow(): DiagnosticsExport
                 online = peer.online,
                 isAgent = peer.isAgent,
                 tcpPort = peer.tcpPort,
+                // **对端声明过的全部地址**（LAN / IPv6 / Tailscale / ZeroTier）。
+                //
+                // 来源是候选池（`NodeRuntime.candidateEndpoints`），不是 `peer.ip` ——
+                // 后者只是**当前被采纳的那一个**。排查「连不上」要看「还有哪些没试」，
+                // 只有候选池能回答。一次 VPN 失联排查里就是靠手工读 known-peers.json
+                // 反推这个信息的，那本该是诊断包直接给的东西。
+                addresses = runCatching {
+                    runtime?.candidateEndpoints()?.get(peer.nodeId)?.map { it.host }
+                }.getOrNull().orEmpty(),
+                // **本机在拨哪个地址**（`host:port`）。与上面配合才能看出「有 IPv6 候选
+                // 却一直在试旧 LAN 地址」这类问题；null = 还没拨过或对端在线。
+                dialTarget = runCatching {
+                    runtime?.linkSnapshot()?.dial?.get(peer.nodeId)?.lastTarget
+                }.getOrNull(),
             )
         },
     )
