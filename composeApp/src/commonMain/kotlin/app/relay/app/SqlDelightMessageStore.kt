@@ -123,6 +123,22 @@ class SqlDelightMessageStore(
                     // SQLite，见 FtsTolerantSchema），那时这一句会抛 no such table。吞掉它是
                     // 正确的 —— 那种机器本来就没有索引要维护，而写消息本身不能被它带崩。
                     runCatching { queries.insertMessageDropStaleIndex(storable.id) }
+                    // seq：会话内游标。**不能省成 NULL**（NULL 会让这条消息在所有
+                    // `seq < ?` / `seq > ?` 的分页查询里都消失），也不能靠 INSERT 自己算：
+                    // INSERT OR REPLACE 是 DELETE + INSERT，旧行的 seq 会被一起删掉。
+                    //
+                    // 取号规则「该会话当前 MAX(seq)+1」对**新消息**是对的；对**重写同一 id**
+                    // 却会把它挪到队尾 —— 一条 10:00 的消息改了交付状态就跳到 23:00 的位置，
+                    // 聊天记录会自己乱序。所以已存在的 id 必须**沿用原 seq**。
+                    // SQLDelight 对可空单列也会生成 data class（SelectSeqById），
+                    // 所以展开取它里面那个 long。firstOrNull 而不是 executeAsOneOrNull：
+                    // 后者要求「恰好 0 或 1 行」，而这里用不到那条严格性。
+                    val existingSeq: Long? = queries
+                        .selectSeqById(storable.id)
+                        .executeAsList()
+                        .firstOrNull()
+                        ?.seq
+                    val seq: Long = existingSeq ?: queries.nextSeqForConv(storable.peerId).executeAsOne()
                     queries.insertMessage(
                         id = storable.id,
                         conv_id = storable.peerId,
@@ -157,6 +173,7 @@ class SqlDelightMessageStore(
                         // 而不是退回「新会话」。它与 agent_session_id 同一条纪律 ——
                         // 只活在内存的字段，重新打开聊天就没了。
                         agent_session_title = message.agentSessionTitle,
+                        seq = seq,
                     )
                 }
             }

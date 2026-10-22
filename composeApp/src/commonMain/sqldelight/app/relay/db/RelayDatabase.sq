@@ -27,11 +27,19 @@ CREATE TABLE MessageEntity (
     -- 会话标题：分段线显示「任务：xxx」用它。**标题是跟着消息走的**协议事实
     -- （`agentSessionTitle`），不是本机会话表里的那一份 —— 后者从不跨设备同步，
     -- 真机上手机侧那张表是空的，只靠它的话对端每条线都只能显示「新会话」。
-    agent_session_title TEXT
+    agent_session_title TEXT,
+    -- 会话内单调递增的消息序号。**分页与增量写的唯一排序依据**，不能拿 timestamp 代替：
+    -- 同一毫秒可能有多条（agent 流式回复尤甚），用时间做游标要么重复要么漏。
+    -- 老库由 14.sqm 按 (timestamp, id) 回填，新建库由 insertMessage 的 MAX(seq)+1 取号，
+    -- 两条路给出同一种语义（会话内从 1 起、连续、无重复）。
+    seq INTEGER
 );
 
 CREATE INDEX idx_message_conv_time ON MessageEntity(conv_id, timestamp);
 CREATE INDEX idx_message_peer ON MessageEntity(peer_id);
+-- 游标查询的专用索引（同时是 seq 的会话内唯一约束）。
+-- 分页的三条 SQL（最近 N 条 / 向上翻 / 向下翻）全部走 (conv_id, seq)。
+CREATE UNIQUE INDEX IF NOT EXISTS message_conv_seq ON MessageEntity(conv_id, seq);
 
 -- FTS5 virtual table for full-text search with trigram tokenizer
 CREATE VIRTUAL TABLE MessageFts USING fts5(
@@ -91,12 +99,30 @@ insertMessageDropStaleIndex:
 INSERT INTO MessageFts(MessageFts, rowid, text)
 SELECT 'delete', m.rowid, m.text FROM MessageEntity m WHERE m.id = ?;
 
+-- 取号：会话内下一个 seq。
+--
+-- 为什么不用 AUTOINCREMENT 之类的全局自增：分页的游标是**会话内**的，
+-- 全局序号会让「向上翻到 seq < X」跨会话命中，语义就错了。
+--
+-- 为什么调用方必须自己取号而不是写进 INSERT 的子查询：INSERT OR REPLACE 是
+-- 「DELETE + INSERT」，新行拿不到旧行的 seq（隐式删除把它一起删了）。
+-- 所以顺序是：先 nextSeqForConv 取号 → 再 insertMessage 带上它。
+-- 两句在同一个事务里（save() 已经是 queries.transaction）。
+nextSeqForConv:
+SELECT COALESCE(MAX(seq), 0) + 1 AS next FROM MessageEntity
+WHERE conv_id = :convId;
+
+-- 已存在那行的 seq。重写同一 id 时必须沿用，否则消息会被挪到队尾（聊天记录乱序）。
+selectSeqById:
+SELECT seq FROM MessageEntity
+WHERE id = :id;
+
 insertMessage:
 INSERT OR REPLACE INTO MessageEntity (
     id, conv_id, peer_id, sender_id, mine, text, timestamp, delivery, notice, notice_detail, file_json, screen_json,
-    agent_session_id, agent_session_title
+    agent_session_id, agent_session_title, seq
 ) VALUES (
-    ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?
+    ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?
 );
 
 selectMessagesByConv:
@@ -107,6 +133,30 @@ ORDER BY timestamp ASC;
 selectAllMessages:
 SELECT * FROM MessageEntity
 ORDER BY timestamp ASC;
+
+-- ---- 分页游标（三条，与茶话间的形态一致）----
+-- 为什么都是 (conv_id, seq) 而不是 timestamp：见 message_conv_seq 索引上的注释。
+
+-- 最近 N 条（首次打开会话）。
+selectRecentMessages:
+SELECT * FROM MessageEntity
+WHERE conv_id = :convId
+ORDER BY seq DESC
+LIMIT :limit;
+
+-- 向上翻（更早）。游标是**当前窗口最小的 seq**，不含端点。
+selectMessagesBefore:
+SELECT * FROM MessageEntity
+WHERE conv_id = :convId AND seq < :beforeSeq
+ORDER BY seq DESC
+LIMIT :limit;
+
+-- 向下翻（更新）。游标是**当前窗口最大的 seq**，不含端点。
+selectMessagesAfter:
+SELECT * FROM MessageEntity
+WHERE conv_id = :convId AND seq > :afterSeq
+ORDER BY seq ASC
+LIMIT :limit;
 
 updateDelivery:
 UPDATE MessageEntity

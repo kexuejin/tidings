@@ -207,12 +207,18 @@ class ScreenHistoryRecordTest {
         RelayDatabase.Schema.migrate(driver, 1, RelayDatabase.Schema.version)
         // 这条**故意**写死数字：它是一个提醒 —— 每加一个 `.sqm` 都要回来把它 +1，
         // 顺便逼人想一遍"老库上这一级迁移会不会丢东西"。（`2.sqm` 加的就是那四张 agent 表。）
-        assertEquals(14L, RelayDatabase.Schema.version, "迁移文件数 + 1 —— 加一个 .sqm 就得同步改这条")
+        // 15 = 14.sqm 之后。14.sqm 加的是 MessageEntity.seq（分页游标）：
+        // 它**回填**老行（不回填的话分页上线后老历史直接看不见），并建 (conv_id, seq) 唯一索引。
+        // 这条测试本身就是"老库升级"的现场，所以下面还要断言回填出来的 seq 是有值的。
+        assertEquals(15L, RelayDatabase.Schema.version, "迁移文件数 + 1 —— 加一个 .sqm 就得同步改这条")
 
         val database = RelayDatabase(driver)
         val old = database.relayDatabaseQueries.selectMessagesByConv("peer-1").executeAsList().single()
         assertEquals("加列之前的消息", old.text)
         assertNull(old.screen_json, "老行的新列是 NULL ⇒ 读回来 screen == null，不需要回填")
+        // 14.sqm 的**回填**必须真的生效。留 NULL 的话，分页的 `seq < ?` / `seq > ?`
+        // 会把这条老消息整条排除 —— 分页上线后老历史直接看不见（不是变慢，是消失）。
+        assertEquals(1L, old.seq, "老库里的第一条消息应被回填成 seq=1（会话内从 1 起）")
 
         // 新列真的可写可读（不是"迁移没报错"就算过）。
         database.relayDatabaseQueries.insertMessage(
@@ -230,6 +236,8 @@ class ScreenHistoryRecordTest {
             screen_json = MessageStore.json.encodeToString(activeRecord()),
             agent_session_id = null,
             agent_session_title = null,
+            // 新建库这条路的取号：会话内 MAX(seq)+1。老行已是 1，所以这条是 2。
+            seq = 2L,
         )
         val fresh = database.relayDatabaseQueries.selectMessagesByConv("peer-1").executeAsList()
             .single { it.id == "new-1" }
