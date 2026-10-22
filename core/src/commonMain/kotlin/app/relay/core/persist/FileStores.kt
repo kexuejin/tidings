@@ -345,11 +345,12 @@ class FileQueueStore(
 
     init {
         load()
-        // 启动时清一次：队列原先**没有任何上限也没有淘汰**，真机上攒到 478 条，
-        // 其中 201 条的目标节点早已消失（不在 peers / known-peers 里）—— 它们永远
-        // 发不出去、也不会被删，只是每次启动都被重扫一遍。详见 [QueueRetention]。
-        // knownPeer 此刻还不可用（上层要在构造之后才能回答「哪些 peer 还可能回来」），
-        // 所以这里只做一次「不认识的 peer + 超时」的保守清理，真正的淘汰由 RelayController 触发。
+        // **这里不清理。** 判断「这台设备还可能回来吗」需要上层掌握的信息（peers 与
+        // known-peers 名录），而 store 构造时那些还没加载好。所以淘汰由
+        // `RelayController.pruneVanishedQueuedMessages()` 在启动后与周期里各跑一次。
+        //
+        // 上下文：队列原先既没有「目标已消失」的判据也没有上限 —— 真机上攒到 478 条，
+        // 其中 201 条的目标节点早就不存在了，永远发不出去、也永远新鲜到碰不到 TTL。
     }
 
     override fun enqueue(msgId: String, peerId: String, envelopeJson: String, created: Long) {
@@ -433,9 +434,18 @@ class FileQueueStore(
      * @return 删掉的条数
      */
     override fun pruneVanishedPeers(now: Long, ttl: Long, knownPeer: (String) -> Boolean): Int {
-        val cutoff = now - ttl
         val before = items.size
+        // ① 目标设备已消失 + 超时。
+        val cutoff = now - ttl
         items.entries.removeAll { (_, m) -> m.created < cutoff && !knownPeer(m.peerId) }
+        // ② **总量硬上限**：`queueMaxPerPeer` 只管每台设备，管不住「设备数 × 每台上限」，
+        //    而真机上出现过「一堆早已消失的设备各占 200 条」的形态。这条兜底不依赖
+        //    任何人喂进来的信息，所以它总能生效。按入队先后砍最旧的。
+        if (items.size > retention.maxItems) {
+            val overflow = items.size - retention.maxItems
+            val oldest = items.values.sortedBy { it.created }.take(overflow)
+            for (m in oldest) items.remove(logKey(m.peerId, m.msgId))
+        }
         val removed = before - items.size
         if (removed > 0) rewrite()
         return removed

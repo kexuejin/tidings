@@ -89,4 +89,40 @@ class QueueVanishedPeerPruneTest {
         assertEquals(0, s.pruneVanishedPeers(now, threeDays, { false }))
         assertEquals(1, s.countByPeer()["gone"])
     }
+
+    /**
+     * **总量硬上限**：`queueMaxPerPeer` 只管每台设备，管不住「设备数 × 每台上限」。
+     *
+     * 真机形态就是「一堆早已消失的设备各占 200 条」—— 每台都没超，总量却失控。
+     * 这条兜底不依赖任何人喂进来的「已知对端」信息，所以它总能生效。
+     */
+    @Test
+    fun theTotalCapEvictsOldestWhenExceeded() {
+        val s = FileQueueStore(
+            "build/tmp/queue-cap-" + kotlin.random.Random.nextLong() + ".log",
+            retention = QueueRetention(ttlMillis = threeDays, maxItems = 3),
+        )
+        // 5 条、分属 5 个不同 peer —— 每台都没超 perPeer 上限，只有总量超。
+        for (i in 1..5) s.enqueue("m-$i", "peer-$i", "{}", now - (10 - i) * 1000L)
+        assertEquals(5, s.pendingAll().size)
+
+        // knownPeer 全放行（模拟「都认识」）：① 一条都不该删；② 上限仍然生效。
+        val removed = s.pruneVanishedPeers(now, threeDays, knownPeer = { true })
+
+        assertEquals(2, removed, "超过 3 条就砍最旧的 2 条")
+        val left = s.pendingAll().map { it.msgId }.toSet()
+        assertEquals(setOf("m-3", "m-4", "m-5"), left, "留下的是最新三条，砍的是最旧两条")
+    }
+
+    /** 没超上限时这条不该动任何东西。 */
+    @Test
+    fun theTotalCapDoesNothingWhenUnderLimit() {
+        val s = FileQueueStore(
+            "build/tmp/queue-cap2-" + kotlin.random.Random.nextLong() + ".log",
+            retention = QueueRetention(ttlMillis = threeDays, maxItems = 10),
+        )
+        for (i in 1..3) s.enqueue("m-$i", "peer-$i", "{}", now - 1000L)
+        assertEquals(0, s.pruneVanishedPeers(now, threeDays, knownPeer = { true }))
+        assertEquals(3, s.pendingAll().size)
+    }
 }
