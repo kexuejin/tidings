@@ -17,7 +17,7 @@ dependencies {
     implementation(project(":composeApp"))
     // 必须显式声明 :core —— composeApp 用的是 implementation(project(":core"))，
     // implementation 不进消费者的**编译** classpath，于是 desktopApp 里每个
-    // `import app.relay.core.…` 都报 Unresolved reference 'core'。
+    // `import com.kapp.tidings.core.…` 都报 Unresolved reference 'core'。
     // 症状看着像"缺依赖"，根因是上游把协议层当成了实现细节。
     implementation(project(":core"))
     // 控制面（ControlPlane）来自 agentNode：桌面版同进程复用它，不复制一份 HTTP 路由。
@@ -80,7 +80,7 @@ val RELAY_URL_TYPES_XML = """
     <array>
         <dict>
             <key>CFBundleURLName</key>
-            <string>app.relay.desktop</string>
+            <string>com.kapp.tidings.desktop</string>
             <key>CFBundleTypeRole</key>
             <string>Viewer</string>
             <key>CFBundleURLSchemes</key>
@@ -93,7 +93,7 @@ val RELAY_URL_TYPES_XML = """
 
 compose.desktop {
     application {
-        mainClass = "app.relay.desktop.MainKt"
+        mainClass = "com.kapp.tidings.desktop.MainKt"
 
         // 堆上限。**不设这一项时 JVM 用的是自己的默认规则**：最大堆 = 物理内存 / 4。
         // 这台机器 24 GB ⇒ 默认上限 6 GB，于是 GC 几乎不感到压力、堆一路长到 1 GB+
@@ -106,11 +106,20 @@ compose.desktop {
         // **改代码省不掉**，也不随堆上限变化；剩下的 VM_ALLOCATE 486 MB +
         // MALLOC_SMALL 252 MB 才是这几条参数能压的部分。
         //
-        // 所以别指望压到两三百 MB：Compose Desktop 常驻 600~700 MB 是正常水位。
+        // ## 真正的杠杆是 `-Xms`，不是 `-Xmx`
         //
-        // 768m 是「够用且逼 GC 干活」的起点：512m 对 Compose + Skia 偏紧（会频繁 GC
-        // 卡顿），1g 又贴回默认值附近、起不到约束作用。这个数字必须靠真机读数复核，
-        // 不能当成定论：装上去连续 footprint，稳定在 600~700 MB 且界面不卡才算成立。
+        // 上面那组读数全是**没设 `-Xms` 时**的。JVM 的默认初始堆 = 物理内存 / 64
+        // （这台 24 GB ⇒ 384 MB），**启动时就提交**，而活对象只有 50 MB 上下 ——
+        // 于是三百多 MB 是「预留但没用上」。实测（单实例、`jcmd GC.run` 之后）：
+        //
+        //   -Xmx768m（原样）                  footprint 453~462 MB  堆 committed 393 MB
+        //   -Xmx512m                          footprint 468 MB      ← 等于没改
+        //   -Xmx384m                          footprint 458 MB      ← 等于没改
+        //   -Xms96m  -Xmx768m                 footprint 380 MB
+        //   -Xms32m  -Xmx384m -MaxNewSize=32m footprint 364~373 MB
+        //   -Xms32m  -Xmx256m -MaxNewSize=32m footprint 369 MB      ← 再压无收益
+        //
+        // 所以**只调 `-Xmx` 一分不省**。下面这组是实测过的那一档。
         //
         // `+UseSerialGC`：桌面端是 GUI 应用，堆压在几百 MB 时 SerialGC 的停顿与
         // 并行 GC 差别不大，但它没有额外的 GC 线程栈与元数据开销 —— 那部分在
@@ -123,19 +132,26 @@ compose.desktop {
         // **注意别按「线程数 × 栈上限」估收益**：栈是按需换入的，不是每线程实占常驻。
         // 实测 footprint 里的 stack 项只有 6528 KB（88 个线程的合计 ≈ 6.4 MB），
         // 所以这一条的真实收益是 5~10 MB 量级。早期曾按 91 × 1 MB 估算成 45 MB，
-        // 那是错的；真正的大头是 -Xmx768m 与 UseSerialGC。
+        // 那是错的；真正的大头是初始堆提交（见上）。
         //
         // 安全性有实测依据：用产物同款参数跑探针，512k 栈仍可递归 3607 层；
         // Compose 的 UI 递归深度远达不到，真溢出会是一次明确的 StackOverflowError。
         //
         // `-XX:MaxMetaspaceSize`：元数据区无上限时，长时间运行的 GUI 应用会持续加载
-        // 类（协程、序列化、Ktor 反射）把它们留在元空间里。192m 对桌面端够用，
-        // 而且超限会是可诊断的 OutOfMemoryError: Metaspace，而不是慢慢吃满整个内存。
+        // 类（协程、序列化、Ktor 反射）把它们留在元空间里。**128m** —— 实测 used
+        // 47~55 MB，192m 是多余预留；超限仍是可诊断的 OutOfMemoryError: Metaspace。
+        //
+        // 这组参数（`-Xms96m -Xmx384m -XX:MaxNewSize=32m -XX:MaxMetaspaceSize=128m`）
+        // 必须靠真机读数复核：装上去连续 footprint 稳定在 **≈375 MB**、`/healthz`
+        // 正常、`jstat -gcutil` 的 YGC 增长率不异常才算成立。实测过的那一次是
+        // footprint 373.4 MB / old gen committed 92,864K / YGC 稳态不涨。
         jvmArgs += listOf(
-            "-Xmx768m",
+            "-Xms96m",
+            "-Xmx384m",
+            "-XX:MaxNewSize=32m",
             "-XX:+UseSerialGC",
             "-Xss512k",
-            "-XX:MaxMetaspaceSize=192m",
+            "-XX:MaxMetaspaceSize=128m",
         )
 
         nativeDistributions {
@@ -152,8 +168,8 @@ compose.desktop {
             // java.logging / jdk.crypto.ec —— 打出来的 .app **一启动就崩**：
             //   NoClassDefFoundError: java/sql/DriverManager
             //     at app.cash.sqldelight.driver.jdbc.sqlite.ThreadedConnectionManager.getConnection
-            //     at app.relay.app.MessageStore_jvmKt.createMessageStore(MessageStore.jvm.kt:47)
-            //     at app.relay.desktop.MainKt.main(Main.kt:64)
+            //     at com.kapp.tidings.app.MessageStore_jvmKt.createMessageStore(MessageStore.jvm.kt:47)
+            //     at com.kapp.tidings.desktop.MainKt.main(Main.kt:64)
             // 这条只在**打包产物**里出现，`./gradlew :desktopApp:run` 走宿主 JDK 全量模块，
             // 因此本地怎么跑都是绿的 —— 必须用 createDistributable 后的 .app 验收。
             //
@@ -168,7 +184,7 @@ compose.desktop {
             modules("java.sql", "jdk.httpserver")
 
             macOS {
-                bundleID = "app.relay.desktop"
+                bundleID = "com.kapp.tidings.desktop"
                 // `dockName` **只管运行时的 Dock 名称**，它不会写进 Info.plist ——
                 // 实测打包产物里 `CFBundleName` 仍是 packageName（`Tidings`），
                 // 而 `CFBundleDisplayName` **一个都没有**（0 处）。后果：程序坞 / 菜单栏 /

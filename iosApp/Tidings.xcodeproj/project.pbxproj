@@ -381,7 +381,7 @@
 					RelayShared,
 					"-lsqlite3",
 				);
-				PRODUCT_BUNDLE_IDENTIFIER = app.relay;
+				PRODUCT_BUNDLE_IDENTIFIER = com.kapp.tidings;
 				PRODUCT_NAME = Tidings;
 				SDKROOT = iphoneos;
 				SWIFT_VERSION = 5.0;
@@ -404,7 +404,7 @@
 					"@executable_path/Frameworks",
 					"@executable_path/../../Frameworks",
 				);
-				PRODUCT_BUNDLE_IDENTIFIER = app.relay.RelayBroadcastUpload;
+				PRODUCT_BUNDLE_IDENTIFIER = com.kapp.tidings.RelayBroadcastUpload;
 				PRODUCT_NAME = RelayBroadcastUpload;
 				SDKROOT = iphoneos;
 				SWIFT_VERSION = 5.0;
@@ -427,7 +427,7 @@
 					"@executable_path/Frameworks",
 					"@executable_path/../../Frameworks",
 				);
-				PRODUCT_BUNDLE_IDENTIFIER = app.relay.RelayBroadcastUpload;
+				PRODUCT_BUNDLE_IDENTIFIER = com.kapp.tidings.RelayBroadcastUpload;
 				PRODUCT_NAME = RelayBroadcastUpload;
 				SDKROOT = iphoneos;
 				SWIFT_VERSION = 5.0;
@@ -461,7 +461,7 @@
 					RelayShared,
 					"-lsqlite3",
 				);
-				PRODUCT_BUNDLE_IDENTIFIER = app.relay;
+				PRODUCT_BUNDLE_IDENTIFIER = com.kapp.tidings;
 				PRODUCT_NAME = Tidings;
 				SDKROOT = iphoneos;
 				SWIFT_VERSION = 5.0;

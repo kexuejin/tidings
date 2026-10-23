@@ -15,7 +15,7 @@
     <key>CFBundleExecutable</key>
     <string>$(EXECUTABLE_NAME)</string>
     <key>CFBundleIdentifier</key>
-    <string>app.relay</string>
+    <string>com.kapp.tidings</string>
     <key>CFBundleInfoDictionaryVersion</key>
     <string>6.0</string>
     <key>CFBundleName</key>
@@ -56,7 +56,7 @@
     -->
     <key>LSApplicationQueriesSchemes</key>
     <array>
-        <string>app-app.relay.RelayBroadcastUpload</string>
+        <string>app-com.kapp.tidings.RelayBroadcastUpload</string>
     </array>
     <!--
         canOpenURL 的查询白名单。iOS 9 起，没在这里声明的 scheme **一律返回 false**
@@ -66,7 +66,7 @@
     -->
     <key>LSApplicationQueriesSchemes</key>
     <array>
-        <string>app-app.relay.RelayBroadcastUpload</string>
+        <string>app-com.kapp.tidings.RelayBroadcastUpload</string>
     </array>
     <key>UIApplicationSceneManifest</key>
     <dict>

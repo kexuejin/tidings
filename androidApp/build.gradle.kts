@@ -14,12 +14,24 @@ android {
     // are committed, and a human looks at them before they are re-recorded.
     experimentalProperties["android.experimental.enableScreenshotTest"] = true
 
-    namespace = "app.relay.app"
+    // **namespace 必须与 applicationId 一致**（都是 `com.kapp.tidings`）。
+    //
+    // 原来写的是 `com.kapp.tidings.app`，那是错的，而且错得有连锁反应：
+    //
+    // 1. 应用身份是 `com.kapp.tidings`（applicationId），但 R 类/Manifest 归属写成 `com.kapp.tidings.app`
+    //    —— 它是 applicationId 的**子串**，于是 `am start` 只能写成
+    //    `com.kapp.tidings/.app.MainActivity`，既反直觉又不必要；
+    // 2. `com.kapp.tidings.app` 同时又是 `:app`（领域层）124 个文件的 Kotlin 包名，
+    //    两个毫无关系的东西撞成了同一个字符串；
+    // 3. 追根是 `:composeApp` 先占了 `com.kapp.tidings` 这个 namespace（见它的 build 文件）。
+    //
+    // 那一处也一并改了：库模块占走应用身份的 namespace 才是最初的错。
+    namespace = "com.kapp.tidings"
     compileSdk = libs.versions.android.compileSdk.get().toInt()
     buildToolsVersion = libs.versions.android.buildToolsVersion.get()
 
     defaultConfig {
-        applicationId = "app.relay"
+        applicationId = "com.kapp.tidings"
         minSdk = libs.versions.android.minSdk.get().toInt()
         targetSdk = libs.versions.android.compileSdk.get().toInt()
         versionCode = 1

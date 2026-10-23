@@ -4,12 +4,12 @@
 
   它必须单独存在：`composeApp/src/commonMain/composeResources/values/strings.xml`
   里的 `app_name` 是 Compose Multiplatform 的资源，由 Compose 资源插件编译进
-  `app.relay.generated.resources`，**AAPT2 看不见它**。清单里写
+  `com.kapp.tidings.generated.resources`，**AAPT2 看不见它**。清单里写
   `@string/app_name` 时找的是 Android 自己的 `R.string`，所以这里必须再声明一份。
 
   两处名字要一起改：这一份决定桌面图标下的名字，Compose 那份决定界面里的自称。
   实测过的症状是构建期直接失败，不是静默降级：
-  `AAPT: error: resource string/app_name (aka app.relay:string/app_name) not found.`
+  `AAPT: error: resource string/app_name (aka com.kapp.tidings:string/app_name) not found.`
 -->
 <resources>
     <string name="app_name">捎话</string>

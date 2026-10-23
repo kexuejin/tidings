@@ -50,7 +50,7 @@ targets:
       base:
         PRODUCT_NAME: Tidings
         ASSETCATALOG_COMPILER_APPICON_NAME: AppIcon
-        PRODUCT_BUNDLE_IDENTIFIER: app.relay
+        PRODUCT_BUNDLE_IDENTIFIER: com.kapp.tidings
         INFOPLIST_FILE: Info.plist
         GENERATE_INFOPLIST_FILE: NO
         SWIFT_VERSION: "5.0"
@@ -120,7 +120,7 @@ targets:
     settings:
       base:
         PRODUCT_NAME: RelayBroadcastUpload
-        PRODUCT_BUNDLE_IDENTIFIER: app.relay.RelayBroadcastUpload
+        PRODUCT_BUNDLE_IDENTIFIER: com.kapp.tidings.RelayBroadcastUpload
         INFOPLIST_FILE: RelayBroadcastUpload/Info.plist
         GENERATE_INFOPLIST_FILE: NO
         SWIFT_VERSION: "5.0"

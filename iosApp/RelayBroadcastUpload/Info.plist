@@ -11,7 +11,7 @@
   RPBroadcastProcessMode = SampleBuffer：直接给 CMSampleBuffer，是我们用的模式
   （Interactive 是 ReplayKit 2 的 API，本仓不需要回写能力）。
 
-  CFBundleURLTypes 里的 `app-app.relay.RelayBroadcastUpload://` 不是给链接用的，
+  CFBundleURLTypes 里的 `app-com.kapp.tidings.RelayBroadcastUpload://` 不是给链接用的，
   是广播扩展的**存在性探针**：主 App 的 canOpenURL 靠它如实回答"这台设备装了本 App 的
   扩展"（见 IosScreenShare.EXTENSION_URL）。主 App 的 Info.plist 必须同步把它列进
   LSApplicationQueriesSchemes，否则 canOpenURL 恒为 false，症状是"投屏入口整个消失"。
@@ -59,10 +59,10 @@
         <dict>
             <key>CFBundleURLSchemes</key>
             <array>
-                <string>app-app.relay.RelayBroadcastUpload</string>
+                <string>app-com.kapp.tidings.RelayBroadcastUpload</string>
             </array>
             <key>CFBundleURLName</key>
-            <string>app.relay.RelayBroadcastUpload</string>
+            <string>com.kapp.tidings.RelayBroadcastUpload</string>
         </dict>
     </array>
 </dict>

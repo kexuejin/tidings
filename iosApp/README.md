@@ -7,7 +7,7 @@ product-owned.
 
 Create an Xcode project or Swift Package app target that:
 
-- Uses bundle id `app.relay`.
+- Uses bundle id `com.kapp.tidings`.
 - Uses `Info.plist` as the target plist.
 - Links the generated framework from the shared `composeApp` KMP module.
 - Uses `iOSApp.swift` as the app entry point.

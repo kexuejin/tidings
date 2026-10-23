@@ -27,7 +27,7 @@ class SampleHandler: RPBroadcastSampleHandler {
     private var writerQueue: DispatchQueue?
 
     override func broadcastStarted(withSetupInfo setupInfo: [String: NSObject]?) {
-        writerQueue = DispatchQueue(label: "app.relay.broadcast-writer", qos: .userInitiated)
+        writerQueue = DispatchQueue(label: "com.kapp.tidings.broadcast-writer", qos: .userInitiated)
         ensureFrameDir()
     }
 
@@ -107,7 +107,7 @@ class SampleHandler: RPBroadcastSampleHandler {
 
     private func frameDirURL() -> URL? {
         FileManager.default
-            .containerURL(forSecurityApplicationGroupIdentifier: "group.app.relay")?
+            .containerURL(forSecurityApplicationGroupIdentifier: "group.com.kapp.tidings")?
             .appendingPathComponent(frameDirName, isDirectory: true)
     }
 
