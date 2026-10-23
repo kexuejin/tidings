@@ -512,8 +512,17 @@ internal fun FrameWindowScope.DesktopDropTarget(
     // AWT 给的是像素，覆盖层要的是 dp；桌面 Popup 内容按内容测量，fillMaxSize() 在里面
     // 会拿到无界约束塌成 0×0，所以这里必须换算出窗口实际 dp 尺寸传进去。
     val overlayDensity = LocalDensity.current
-    val overlaySize = with(overlayDensity) {
-        DpSize(awtWindow.width.toDp(), awtWindow.height.toDp())
+    // ## 尺寸必须在**拖动那一刻**读，不能在组合时读（真机轨迹定的）
+    //
+    // 原来这里是 `val overlaySize = with(density) { DpSize(window.width.toDp(), ...) }`,
+    // 只在首次组合时求值一次。轨迹里那一次读到的是 `40.0.dp x 16.0.dp` —— 窗口还没
+    // 完成布局，而 `installed on ComposeWindow size=560x620` 是之后才成立的。
+    // 于是遮罩按 40×16 dp 画出来：**等于没有遮罩**，用户看到的就是「拖进去毫无反应」。
+    //
+    // 现在改成 dragEnter 时刷新：拖动期间窗口尺寸基本不变，但**首次**拖动这一读
+    // 必须发生在窗口已经有真实尺寸之后。
+    var overlaySize by remember {
+        mutableStateOf(with(overlayDensity) { DpSize(awtWindow.width.toDp(), awtWindow.height.toDp()) })
     }
     var dragging by remember { mutableStateOf(false) }
     DisposableEffect(awtWindow, enabled) {
@@ -532,6 +541,16 @@ internal fun FrameWindowScope.DesktopDropTarget(
              * 先亮出「可以松手」的提示再拒，等于骗人一次。
              */
             override fun dragEnter(dte: DropTargetDragEvent) {
+                // 覆盖层尺寸在这里刷新（见 overlaySize 的 KDoc）：组合期读到的是布局前的值。
+                overlaySize = with(overlayDensity) {
+                    DpSize(awtWindow.width.toDp(), awtWindow.height.toDp())
+                }
+                // 这一行不出现，说明事件根本没进这扇窗口 —— 后面所有应用内推断都无从谈起。
+                DesktopDndTrace.track(
+                    "dragEnter files=" + dte.isDataFlavorSupported(DataFlavor.javaFileListFlavor) +
+                        " action=" + dte.dropAction +
+                        " loc=" + dte.location.x + "," + dte.location.y,
+                )
                 if (!dte.isDataFlavorSupported(DataFlavor.javaFileListFlavor)) return
                 acceptDragAction(dte)
                 dragging = true
@@ -545,6 +564,8 @@ internal fun FrameWindowScope.DesktopDropTarget(
              * 禁止号，事件链断掉，drop() 不再回调。
              */
             override fun dragOver(dte: DropTargetDragEvent) {
+                // 每秒几十次，去重后再记：这里一旦停掉，就是事件链断在半路的证据。
+                DesktopDndTrace.track("dragOver action=" + dte.dropAction, throttled = true)
                 acceptDragAction(dte)
             }
 
@@ -555,6 +576,7 @@ internal fun FrameWindowScope.DesktopDropTarget(
              * 而此时根本没有 drop() 来收拾它。
              */
             override fun dragExit(dte: DropTargetEvent) {
+                DesktopDndTrace.track("dragExit")
                 dragging = false
             }
 
@@ -564,6 +586,11 @@ internal fun FrameWindowScope.DesktopDropTarget(
                 dragging = false
                 dtde.acceptDrop(DnDConstants.ACTION_COPY)
                 val files = collectDroppedFiles(dtde)
+                DesktopDndTrace.track(
+                    "drop accepted=" + dtde.dropAction +
+                        " files=" + files.size +
+                        " first=" + (files.firstOrNull()?.name ?: "-"),
+                )
                 // 必须配 dropComplete，否则部分平台认为这次 drop 没处理完。
                 if (files.isEmpty()) {
                     dtde.dropComplete(false)
@@ -573,9 +600,111 @@ internal fun FrameWindowScope.DesktopDropTarget(
                 dtde.dropComplete(true)
             }
         }
-        val target = DropTarget(awtWindow, DnDConstants.ACTION_COPY, listener, true)
+        // ## 必须装到**最深的那一层**：Compose 在自己的内容面板上也装了 DropTarget
+        //
+        // 真机自检打出来的：`childDropTargets=[ComposeWindowPanel]`。
+        // AWT 的规则是**选离指针最近的那个** DropTarget，所以只装在
+        // `ComposeWindow`（JFrame）上时，事件永远被 Compose 的 `ComposeWindowPanel` 接走，
+        // 我们的监听器一次都不会被调用 —— 屏幕上就是「拖进去毫无反应」。
+        //
+        // 独立 AWT 窗口（同样的代码，没有 Compose 面板）是正常的，这条对照排除了
+        // JDK/系统层，把原因钉在「谁离指针更近」上。
+        val installed = ArrayList<DropTarget>()
+        fun claim(component: java.awt.Component) {
+            installed.add(DropTarget(component, DnDConstants.ACTION_COPY, listener, true))
+        }
+        claim(awtWindow)
+        // 面板是 Compose 之后才挂上 DropTarget 的，所以要在若干时刻再抢一次；
+        // 抢完就停，不留常驻轮询。
+        var claims = 0
+        val claimTimer = javax.swing.Timer(700) { t ->
+            claims += 1
+            val claimed = ArrayList<String>()
+            fun walk(c: java.awt.Container) {
+                for (child in c.components) {
+                    val existing = child.dropTarget
+                    if (existing != null && installed.none { it.component === child }) {
+                        claim(child)
+                        claimed.add(child.javaClass.simpleName)
+                    }
+                    if (child is java.awt.Container) walk(child)
+                }
+            }
+            runCatching { walk(awtWindow) }
+            if (claimed.isNotEmpty()) {
+                DesktopDndTrace.track("claimed deeper targets=" + claimed)
+            }
+            if (claims >= 12) (t.source as javax.swing.Timer).stop()
+        }.apply { isRepeats = true; start() }
+        val target = installed.first()
+        // ## 谁真正持有这扇窗的 DropTarget（真机实测）
+        //
+        // `Component.dropTarget` 是**单值**属性。Compose Desktop 1.11 自己也用 AWT
+        // DropTarget 实现 DnD（`ui-desktop` 的 jar 里有 22 处 `java/awt/dnd/DropTarget`），
+        // 谁后装谁赢。这条自检在装好 3 秒后再看一次归属：
+        //   · 仍是我们 ⇒ 没人覆盖，问题在别处；
+        //   · 变了     ⇒ 被 Compose 换掉了，AWT 这条路根本不可用。
+        // 一次性窗口清单快照：**拖的时候到底有没有一扇可见的窗**，只能这样确认。
+        // 只在诊断开启时跑（6 次 × 4 秒后自停）；生产环境不留空转的定时器。
+        var ticks = 0
+        val diagnostics = ArrayList<javax.swing.Timer>()
+        if (DesktopDndTrace.enabled) javax.swing.Timer(4_000) { t ->
+            ticks += 1
+            val windows = java.awt.Window.getWindows()
+                .filter { it.isDisplayable }
+                .joinToString(" | ") { w ->
+                    w.javaClass.simpleName +
+                        " showing=" + w.isShowing +
+                        " visible=" + w.isVisible +
+                        " size=" + w.width + "x" + w.height
+                }
+            DesktopDndTrace.track("windows tick=" + ticks + " :: " + windows)
+            // 两个都能让「装上却收不到事件」成立：
+            //   · 归属被别人抢走（`dropTarget` 是单值属性）；
+            //   · 内容里有 heavyweight 子组件 —— AWT 的 NSView 命中会停在它上面。
+            val heavy = ArrayList<String>()
+            // 谁自己装了 DropTarget：AWT 选中**离指针最近的那个**，
+            // 若 Compose 在自己的组件上装了一个，窗口上这个就永远不会被叫到。
+            val withTarget = ArrayList<String>()
+            fun walk(c: java.awt.Container) {
+                for (child in c.components) {
+                    if (!child.isLightweight) heavy.add(child.javaClass.simpleName)
+                    child.dropTarget?.let { withTarget.add(child.javaClass.simpleName) }
+                    if (child is java.awt.Container) walk(child)
+                }
+            }
+            runCatching { walk(awtWindow) }
+            DesktopDndTrace.track(
+                "dnd tick=" + ticks +
+                    " owner=" + (awtWindow.dropTarget?.javaClass?.simpleName ?: "null") +
+                    " ours=" + (awtWindow.dropTarget === target) +
+                    " heavyweight=" + heavy +
+                    " childDropTargets=" + withTarget,
+            )
+            if (ticks >= 6) (t.source as javax.swing.Timer).stop()
+        }.apply { isRepeats = true; start(); diagnostics.add(this) }
+        if (DesktopDndTrace.enabled) javax.swing.Timer(3_000) {
+            DesktopDndTrace.track(
+                "owner-after-3s ours=" + (awtWindow.dropTarget === target) +
+                    " actual=" + (awtWindow.dropTarget?.javaClass?.name ?: "null"),
+            )
+        }.apply { isRepeats = false; start(); diagnostics.add(this) }
+        // 装上 ≠ 会收到：把组件身份、尺寸、是否真的挂上一起记下来，
+        // 才能区分「装错组件」与「事件没来」。
+        DesktopDndTrace.track(
+            "installed on " + awtWindow.javaClass.simpleName +
+                " size=" + awtWindow.width + "x" + awtWindow.height +
+                " active=" + target.isActive +
+                " bound=" + (awtWindow.dropTarget === target) +
+                " showing=" + awtWindow.isShowing +
+                " visible=" + awtWindow.isVisible,
+        )
         onDispose {
-            awtWindow.dropTarget = null
+            // 关窗即销毁是本仓的设计（托盘常驻）。所以「拖了没反应」有一类成因是
+            // **此刻根本没有窗口** —— 这条日志让那段时间线可核对。
+            DesktopDndTrace.track("dispose (window destroyed)")
+            claimTimer.stop()
+            installed.forEach { it.component.dropTarget = null }
             // 拖动中途关窗/切主题时 target 会被拆掉，此时不会再有 dragExit/drop 来收尾，
             // 不手动归零就会把覆盖层连同 Popup 一起留在屏幕上。
             dragging = false
@@ -586,6 +715,12 @@ internal fun FrameWindowScope.DesktopDropTarget(
     // 发射在 `AppTheme` 之前，Compose 桌面窗口的根节点按发射顺序叠放，直接画会被
     // 后发射的 AppTheme 子树整片盖住。走 Popup —— 它是独立的一层原生窗口，永远在最上，
     // 且不依赖调用点把本函数摆在哪。
+    // 0×0 的遮罩等于没有遮罩：尺寸读得太早就会这样。
+    DesktopDndTrace.track(
+        "overlay dragging=" + dragging +
+            " size=" + overlaySize.width + "x" + overlaySize.height,
+        throttled = true,
+    )
     if (dragging) {
         DesktopDropOverlay(
             windowSize = overlaySize,

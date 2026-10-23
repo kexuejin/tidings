@@ -161,6 +161,9 @@ fun main(args: Array<String>) {
     // 按键诊断（默认关闭，`RELAY_KEY_TRACE=1` 才装）。装在 application 之前：
     // 它要看到的是"系统发给本进程的第一个按键"，晚于窗口创建就会漏掉开头几下。
     DesktopKeyTrace.install(dataDirectory)
+    // 拖放诊断（默认关闭，`RELAY_DND_TRACE=1` 或数据目录里的 `dnd-trace.on` 才装）。
+    // 与按键诊断同一立场：三种「拖了没反应」的成因截然不同，而屏幕上的表现一模一样。
+    DesktopDndTrace.install(dataDirectory)
     // 补上 macOS + JDK 让空格丢掉的那一次 KEY_TYPED。常驻、默认生效 ——
     // 它是缺陷绕修而不是诊断开关，用户不该为了能打空格去开某个选项。
     DesktopSpaceKeyFix.install()
