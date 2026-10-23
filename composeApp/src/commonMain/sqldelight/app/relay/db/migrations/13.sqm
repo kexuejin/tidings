@@ -1,1 +1,0 @@
-ALTER TABLE MessageEntity ADD COLUMN notice_detail TEXT;

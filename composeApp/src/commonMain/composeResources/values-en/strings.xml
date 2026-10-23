@@ -169,6 +169,10 @@
     <string name="banner_too_many_files">At most %2$d files per transfer; this is %1$d. Pick a subset and try again.</string>
     <string name="banner_group_member_removed">Member removed. Notifying group.</string>
     <string name="banner_group_no_permission">Only the group owner or admins can remove members.</string>
+    <string name="chat_agent_not_authorized">%1$s did not run: you are not on its authorization list</string>
+    <string name="chat_agent_request_grant">Request access</string>
+    <string name="chat_agent_grant_requested">Access requested — waiting for the device owner to approve</string>
+    <string name="chat_agent_grant_failed">Could not send the request; try again later</string>
     <string name="chat_group_members_changed">Group members updated</string>
     <string name="common_name_list_separator">, </string>
     <string name="chat_group_member_added">%1$s invited %2$s to the group</string>
@@ -962,6 +966,8 @@
     <!-- 系统托盘。模型只持「资源 + 参数」（AWT 侧要的是字符串，解析发生在 composable 里），
          所以这里的插值一律走 %1$d / %1$s，不在 Kotlin 侧拼句子。 -->
     <string name="desktop_tray_headline_unread">%1$d new messages</string>
+    <string name="desktop_tray_headline_grants">%1$d access request(s) awaiting approval</string>
+    <string name="desktop_tray_open_grants">Review pending access requests</string>
     <string name="desktop_tray_headline_files">Received %1$d files (%2$s)</string>
     <string name="desktop_tray_open_main">Open Main Window</string>
     <string name="desktop_tray_received_files">Received Files</string>

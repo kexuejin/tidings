@@ -8,13 +8,12 @@ plugins {
     // RelaySettings 是 @Serializable —— 没有这个插件，注解能编译通过但
     // 不会生成 serializer()，报错会落在"存设置"那几行上，离病根很远。
     alias(libs.plugins.kotlinSerialization)
-    alias(libs.plugins.sqldelight)
 }
 
 compose.resources {
     // Pin the generated Res class instead of relying on the group/module-name default, so
     // the import in App.kt is the same no matter what the product names its modules.
-    packageOfResClass = "app.relay.generated.resources"
+    packageOfResClass = "com.kapp.tidings.generated.resources"
     publicResClass = true
     // The module also builds for jvm and iOS, where the auto rule can skip generation and
     // leave stringResource() unresolvable. A scaffold must compile on the first try.
@@ -25,7 +24,16 @@ kotlin {
     jvm()
 
     androidLibrary {
-        namespace = "app.relay"
+        // **库模块不许占用应用身份的 namespace。**
+        //
+        // 这里原来是 `com.kapp.tidings` —— 与 `:androidApp` 的 applicationId 完全相同，
+        // 于是应用壳只能退到 `com.kapp.tidings.app`，那又撞上 `:app` 领域层的包名，
+        // 最终让 `am start` 变成 `com.kapp.tidings/.app.MainActivity`。
+        //
+        // 用 `com.kapp.tidings.platform`：本模块 androidMain 的 18 个文件全在这个包下，
+        // namespace 与实际代码归属一致。Compose 的资源类另由
+        // `packageOfResClass = "com.kapp.tidings.generated.resources"` 固定，不受这里影响。
+        namespace = "com.kapp.tidings.platform"
         compileSdk = libs.versions.android.compileSdk.get().toInt()
         buildToolsVersion = libs.versions.android.buildToolsVersion.get()
         minSdk = libs.versions.android.minSdk.get().toInt()
@@ -50,6 +58,8 @@ kotlin {
         commonMain.dependencies {
             // The UI is driven by the real protocol/transport runtime. Without this the
             // screens can only render literals, which is exactly what the scaffold did.
+            // 领域层（控制器/状态/存储/数据库/平台契约）。它零 Compose，换 UI 方案时原样复用。
+            api(project(":app"))
             implementation(project(":core"))
             implementation(libs.kotlinx.coroutines.core)
             implementation(libs.kotlinx.serialization.json)
@@ -123,6 +133,12 @@ kotlin {
                 implementation(kotlin("test-junit"))
             }
         }
+        // 源码级守卫共用的读盘工具（独立模块，只被测试引用）。
+        val jvmTest by getting {
+            dependencies {
+                implementation(project(":testsupport"))
+            }
+        }
         commonTest.dependencies {
             implementation(libs.kotlin.test)
             // 落盘走的是真 IO 调度器（ioDispatcher），断言"写盘有没有发生、发生了几次"
@@ -132,11 +148,9 @@ kotlin {
     }
 }
 
-sqldelight {
-    databases {
-        create("RelayDatabase") {
-            packageName.set("app.relay.db")
-            dialect("app.cash.sqldelight:sqlite-3-38-dialect:2.0.2")
-        }
-    }
-}
+// SQLDelight 的定义（`.sq` / `.sqm`）与生成代码已搬进 :app —— 表结构服务的是
+// `SqlDelightMessageStore` 的查询，两者不该隔着一条模块边界。本模块只**消费**
+// `:app` 生成的 `RelayDatabase`（经 `api(project(":app"))` 传递可见）。
+//
+// 依赖坐标本身保留：`SqlDelightMessageStore` 持有 driver 与 queries 类型，
+// 而 iOS/JVM/Android 的 driver 工厂在 :app 里 —— 这里只是不需要再生成代码。
