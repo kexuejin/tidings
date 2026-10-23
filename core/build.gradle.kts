@@ -16,7 +16,7 @@ kotlin {
     jvm()
 
     androidLibrary {
-        namespace = "app.relay.core"
+        namespace = "com.kapp.tidings.core"
         compileSdk = libs.versions.android.compileSdk.get().toInt()
         buildToolsVersion = libs.versions.android.buildToolsVersion.get()
         minSdk = libs.versions.android.minSdk.get().toInt()
