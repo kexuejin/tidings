@@ -60,11 +60,14 @@ Tidings 是一款基于 Kotlin Multiplatform (KMP) 与 Compose Multiplatform 构
 ### 2.1 模块职责划分
 
 - **`:core`**：核心基础库。包含协议定义、编解码器、网络通道抽象、传输队列、离线暂存、会话编排及数据持久化。
-- **`:composeApp`**：UI 表现层。包含会话列表、聊天视窗、节点发现、Agent 看板、设置面板及多端自适应布局。
+- **`:app`**：领域层。包含控制器（`RelayController` 及其分片）、UI 状态模型、设置/消息/Agent 存储、SQLDelight 库定义与平台契约。**零 Compose 依赖**：应用事实（「要不要落一条投屏记录」「这台设备有没有相机」「投屏该写成哪句话」）都在这里判定，措辞与像素留在 `:composeApp`。换一套 UI 方案时这一层原样复用。
+  - 三条边界由两条可执行判据守着：`DomainHasNoComposeTest`（源码级：领域包不许 `import androidx.compose.*`）与 `:cli`（运行时：只链接 `:app` 的程序 classpath 上 0 个 Compose jar）。
+- **`:composeApp`**：UI 表现层。包含会话列表、聊天视窗、节点发现、Agent 看板、设置面板及多端自适应布局。它**依赖** `:app`，不再包含领域逻辑。
+- **`:cli`**：无 UI 的 Tidings 客户端。不是产品功能，而是「领域层真的能脱离 UI 运行」的**可执行验收物**：它起控制器、发消息、读收件箱，且只链接 `:app`。
 - **`:agentNode`**：Agent 控制面组件。提供本地回环 HTTP API（Ktor Server），供 AI 代理或本地脚本调度与交互。在桌面形态下作为库被 `desktopApp` 同进程引用。
 - **`:androidApp`**：Android 原生壳工程。配置 `MainActivity`、CameraX 扫码、前台服务（后台消息接收）及 SAF 文件契约。
 - **`:iosApp`**：iOS 原生工程（XcodeGen 管理）。配置 `MainViewController`、AVFoundation 扫码及 security-scoped 文件契约。
-- **`:desktopApp`**：桌面端原生入口。提供窗口管理、系统托盘常驻，并常驻承载 `:agentNode` 控制面。
+- **`:desktopApp`**：桌面端原生入口。提供系统托盘常驻、**按需创建窗口**（主窗关闭即销毁，托盘唤回时重建），并常驻承载 `:agentNode` 控制面。另有 `--headless` 形态：只跑运行时与控制面、不组合任何 Compose，用于量守护形态的内存与证明领域层不依赖 UI。
 
 ---
 
@@ -74,7 +77,9 @@ Tidings 是一款基于 Kotlin Multiplatform (KMP) 与 Compose Multiplatform 构
 
 1. **`:core` 不得依赖任何 UI 框架**：严禁引入 Compose、Android SDK 或 UIKit。确保其可在无图形界面的 Headless JVM、测试夹具及命令行环境中独立运行。
 2. **`protocol` 包零 IO 约束**：`core.protocol` 内严禁出现任何网络套接字（`Socket`）、文件读写、协程分发器（`Dispatchers.IO`）。该层必须是纯确定性函数（Pure Functions），保障与线上多端向量完全对拍。
-3. **平台抽象单一出口**：`:composeApp` 仅能通过 `PlatformContracts` 抽象向平台宿主索取原生能力，禁止在公共代码中穿透平台实现。
+3. **平台抽象单一出口**：`:app` 与 `:composeApp` 仅能通过 `PlatformContracts` 抽象向平台宿主索取原生能力，禁止在公共代码中穿透平台实现。
+   - 反过来也成立：**契约里不许出现 UI 类型**。需要 `@Composable` 的能力（相机取景框、状态栏图标亮度、图片解码后的 `ImageBitmap`）拆成独立窄接口（`QrPreviewProvider`），由平台实现类额外实现；需要 `Context` 开库的能力同理（`AndroidDatabaseHost`）。把这类类型塞进 `PlatformContracts` 会让整个领域层被迫依赖 Compose。
+   - 领域层要「一句用户可读的话」时走 `RelayUiTexts` 接口：措辞在 `strings.xml`（`ResourceUiTexts`），判定在领域侧。这是唯一允许领域层产出用户可见文案的通道。
 4. **宿主层纯装配原则**：`androidApp`、`iosApp`、`desktopApp` 仅提供平台配置与契约实现，严禁在宿主壳内编写任何业务流程或协议路由逻辑。
 5. **`:agentNode` 无 UI 污染**：`:agentNode` 严禁应用 Compose Multiplatform 插件，保持轻量高效。
 
@@ -90,9 +95,20 @@ Tidings 是一款基于 Kotlin Multiplatform (KMP) 与 Compose Multiplatform 构
 ├── iosMain        iOS NSFileManager、NWPathMonitor、SecurityScoped 资源释放
 └── commonTest     黄金测试向量、报文编解码对拍、重传与节点发现测试
 
+:app
+├── commonMain     控制器与状态机、设置/消息/Agent 存储、SQLDelight 库定义、平台契约
+├── jvmMain        JVM 存储实现、SQLite 驱动、文件锁（另含 testsupport/ 的守卫读盘工具）
+├── androidMain    Android 存储实现、框架 SQLite 驱动（走 AndroidDatabaseHost 窄契约）
+├── iosMain        iOS 存储实现与 native SQLite 驱动
+└── commonTest     控制器编排、状态转移、协议耦合与源码级守卫（647 条）
+                   （零 Compose：本模块不应用 Compose 插件、不声明 Compose 依赖）
+
 :composeApp
-├── commonMain     多平台 Compose UI、自适应导航骨架、状态管理、设计系统
-└── commonTest     自适应布局断点、Reducer 状态转移与徽标状态派生测试
+├── commonMain     多平台 Compose UI、自适应导航骨架、设计系统、文案（strings.xml）
+└── commonTest     自适应布局断点、UI 状态派生与跨层守卫测试
+
+:cli
+└── main           无 UI 的 Tidings 客户端（起控制器 / 发消息 / 读收件箱），零 Compose
 
 :agentNode
 ├── jvmMain        ControlPlane 本地 HTTP 路由定义与 Token 鉴权
@@ -103,7 +119,8 @@ Tidings 是一款基于 Kotlin Multiplatform (KMP) 与 Compose Multiplatform 构
 └── screenshotTest Compose 预览图逐像素截图回归测试集
 
 :desktopApp
-└── jvmMain        窗口管理、托盘图标、后台驻留与内嵌 AgentNode 服务
+└── jvmMain        应用级组合（托盘/通知/深链）、按需窗口、单实例锁、内嵌 AgentNode 服务
+                   --headless 形态不组合 Compose（无窗口、无 Skia）
 ```
 
 ---
@@ -321,7 +338,7 @@ flowchart TD
 1. **协议黄金向量对拍**：`core/commonTest` 包含上游标准实现的全量向量序列化测试用例，确保双向编解码逐字节对称。
 2. **多平台单元测试**：
    ```sh
-   ./gradlew :core:allTests :composeApp:allTests :agentNode:test
+   ./gradlew :core:allTests :app:allTests :cli:test :composeApp:allTests :agentNode:test
    ```
    覆盖核心协议、节点状态机、离线队列退避、自适应断点与控制面端点。
 3. **Compose Preview 截图比对**：

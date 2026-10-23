@@ -15,28 +15,40 @@
 | 模块 | 是什么 |
 |---|---|
 | `:core` | 协议定义、编解码、传输通道、离线队列、会话编排、持久化。**跨平台共享内核** |
-| `:composeApp` | UI 表现层（会话/聊天/节点/Agent 看板/设置/自适应布局） |
+| **`:app`** | **领域层**：控制器、UI 状态、存储、数据库（含 SQLDelight 定义）、平台契约。**零 Compose 依赖** —— 换一套 UI 方案时这一层原样复用。`:domainComposeFreeGate` 与 `:cli` 共同守着这条边界 |
+| `:composeApp` | UI 表现层（会话/聊天/节点/Agent 看板/设置/自适应布局）。依赖 `:app`，不再包含领域逻辑 |
+| `:cli` | **没有 UI** 的 Tidings 客户端。不是产品功能，是「领域层真的能脱离 UI」的**可执行验收物**：只链接 `:app`，classpath 上 0 个 Compose jar，`-verbose:class` 实测 AWT/Swing/Skiko 加载数为 0 |
+| `:testsupport` | 源码级守卫测试共用的读盘工具（`GuardSourceScan`）。**只被 `testImplementation` 引用**，所以永远不进 APK / Tidings.app —— 它曾经住在 `:app` 的 main 源集，实测被打进了 `app-jvm.jar` |
 | `:agentNode` | Agent 控制面：本地回环 HTTP API（Ktor），桌面形态下被 `desktopApp` 同进程引用 |
 | `:androidApp` / `:iosApp` | 原生壳：扫码、前台服务、SAF / security-scoped 文件契约 |
-| `:desktopApp` | 桌面入口：窗口、托盘，常驻承载 `:agentNode` |
+| `:desktopApp` | 桌面入口：托盘常驻 + **按需创建窗口**（关窗即销毁），常驻承载 `:agentNode`。`--headless` 形态不组合 Compose |
 
 源集：`commonMain` / **`jvmSharedMain`**（JVM 与 Android 共享）/ `jvmMain` / `androidMain` /
 `iosMain`，各配一个 `*Test`。**`jvmSharedMain` 是 K2 的接缝** —— 新的传输实现写这里，
 不要复制成两份；只有真的平台相关（Keychain、JSSE 初始化）才下沉到 `jvmMain` / `iosMain`。
+
+> 注意：`jvmSharedMain` 目前只有 **`:core` 与 `:app`** 配了它（不是每个模块都有）。
+> `:app` 里曾有两对逐字重复的 actual（`SettingsStore`、`StateLock`）—— 拆模块时从
+> `:composeApp` 一起搬过来，jvm 与 android 两版一字不差。现在它们只在 `jvmSharedMain` 里各一份。
+>
+> **别用 `create("jvmShared")` + `dependsOn`**：KGP 靠名字里的平台前缀推断源集归属，
+> 手工造新源集会让默认层级模板失效（`iosMain`/`appleMain`/`nativeMain` 从图上消失，
+> 症状是 iOS 报一屏 "has no actual declaration in module commonMain"—— 报错指向
+> commonMain，看起来像 expect 写错了）。用 `applyHierarchyTemplate`，写法见 `:core` 的 build 文件。
 
 ---
 
 ## 1. 动手前先跑这些
 
 ```bash
-# 五个模块的测试
-./gradlew :core:jvmTest :composeApp:jvmTest :composeApp:testAndroidHostTest \
-          :agentNode:test :desktopApp:test --continue
+# 六个模块的测试
+./gradlew :core:jvmTest :app:jvmTest :cli:test :composeApp:jvmTest \
+          :composeApp:testAndroidHostTest :agentNode:test :desktopApp:test --continue
 
 # 门禁（缺一不可）
 ./gradlew :cjkLiteralGate :constructionTraceGate :staleCommentRefGate \
-          :designSpecDrift :designTokenUsageGate :designStateSlotGate \
-          :designLocaleParityGate :jlinkModulesGate --continue
+          :domainComposeFreeGate :designSpecDrift :designTokenUsageGate \
+          :designStateSlotGate :designLocaleParityGate :jlinkModulesGate --continue
 python3 tools/unused-imports.py --check
 ```
 
@@ -57,6 +69,7 @@ python3 tools/unused-imports.py --check
 | `cjkLiteralGate` | 生产源码里不许新增**硬编码中文文案**（注释不算，词法器区分状态） | 文案进 `composeResources/values*/strings.xml` |
 | `constructionTraceGate` | 注释里不许留**日期 / 内网 IP / 私人绝对路径 / 模型名** | 删掉或改成通用说法 |
 | `staleCommentRefGate` | 注释里不许写 `X.kt:NN`（重构必腐坏） | 换成**符号名** |
+| `domainComposeFreeGate` | 领域层 `:app` 不许 `import compose.*`；**扫描根不存在 / 文件数不足也算失败** | 做成可注入的桥（`RelayUiTexts` 的形状），或列进 `tools/domain-compose-free.py` 的 `INDIVIDUAL_ALLOWED` 并写理由 |
 | `designSpecDrift` / `designTokenUsageGate` / `designStateSlotGate` / `designLocaleParityGate` | 设计契约：规格漂移、token 采用率、状态槽覆盖、多语言对账 | 见 `design/` 与 `tools/design-*.py` |
 | `jlinkModulesGate` | 桌面 jlink 的模块清单与依赖一致 | 更新 `build.gradle.kts` 的模块列表 |
 | `tools/unused-imports.py --check` | 没有未使用的 import | 删掉 |
@@ -335,6 +348,7 @@ python3 tools/unused-imports.py --check
 | 想加设置开关 | 先问这是不是产品缺陷（本仓删掉过「跨网通道」开关） |
 | 写用户可见文案 | 进 `composeResources/values*/strings.xml`，别硬编码中文 |
 | 在注释里写行号 / 日期 / 内网 IP | 都不允许；用符号名 |
+| **在 Kotlin 注释里写路径通配** | `/v1/*` 里的 `/*` 会**开启嵌套块注释**，把文件后半段整个吞掉 —— 症状是几百个 `Unresolved reference`，根因却是一句注释。写 `/v1/` 下的所有路由 |
 | 写「多处必须一致」的纪律 | 加一条**能区分对错**的源码级守卫测试 |
 | 修完一个缺陷 | 反向验证：把旧行为放回去，看测试变红 |
 | 新增文件 | 确认它是源码 / 测试 / 正式文档，不是临时产物 |

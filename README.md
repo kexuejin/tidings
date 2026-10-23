@@ -92,7 +92,7 @@
 ├── core/                          # 核心协议层：传输、加解密、状态机、会话管理（纯 KMP，无 UI）
 ├── composeApp/                    # 跨平台共享 UI（Compose Multiplatform，支持 Android / iOS / Desktop）
 ├── androidApp/                    # Android 原生宿主壳工程与截图比对门禁测试
-├── desktopApp/                    # Compose Multiplatform 桌面端独立启动入口
+├── desktopApp/                    # Compose Multiplatform 桌面端入口（托盘常驻、按需建窗）
 ├── agentNode/                     # 库：HTTP 控制面与 WebSocket 网关（由桌面端同进程承载）
 ├── iosApp/                        # iOS Xcode 壳工程（由 XcodeGen 根据 project.yml 生成）
 ├── design/                        # 设计规范、Token 规范与视觉基准
