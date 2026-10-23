@@ -482,7 +482,7 @@ def offladder_markdown(shots, code, path, excl, census=None):
 
 
 # ---------------------------------------------------------------- 锚点自动对账（C1 第一步）
-DESKTOP_LAYOUT = "composeApp/src/commonMain/kotlin/app/relay/ui/desktop/DesktopLayout.kt"
+DESKTOP_LAYOUT = "composeApp/src/commonMain/kotlin/com/kapp/tidings/ui/desktop/DesktopLayout.kt"
 
 
 def code_layout_constants():
@@ -514,7 +514,7 @@ def node_by_suffix(data, suffix):
     return best
 
 
-DESKTOP_UI_GLOB = os.path.join(REPO, "composeApp/src/commonMain/kotlin/app/relay/ui/desktop", "*.kt")
+DESKTOP_UI_GLOB = os.path.join(REPO, "composeApp/src/commonMain/kotlin/com/kapp/tidings/ui/desktop", "*.kt")
 
 
 def code_width_landing_points():

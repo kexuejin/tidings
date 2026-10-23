@@ -542,7 +542,7 @@ class _PeerHeartbeat(object):
     """周期性给对端发 `alive`，把手机侧的 `lastSeen` 续上。
 
     为什么**必须**要有它：手机给**离线**成员发群消息时一个字节都不发 ——
-    `Messenger.sendAwaitAck`（`core/src/commonMain/kotlin/app/relay/core/transport/Messenger.kt:219`）
+    `Messenger.sendAwaitAck`（`core/src/commonMain/kotlin/com/kapp/tidings/core/transport/Messenger.kt:219`）
     的循环第一句是 `if (!record.online) break` ⇒ `attempted=false` ⇒ `sendUserMessage` 直接
     `queueStore.enqueue(...)` 并把状态标成 `queued`（`:183-186`），等对端上线由
     `flushQueue(peerId)`（`:243`）补发。而 `Discovery` 每 `presenceInterval`（30s）扫一次、
@@ -599,7 +599,7 @@ def _handshake(args, st):
         phase("设备与环境")
         R.require_device()
         pid = R.app_pid()
-        R.log("app.relay pid=%s" % pid)
+        R.log("com.kapp.tidings pid=%s" % pid)
         if not pid:
             R.log("应用没在跑，拉起 %s" % R.LAUNCH_ACTIVITY)
             R.ensure_app_foreground()
@@ -1378,7 +1378,7 @@ def _removed_self_phase(args, st):
     # `ownerId` 必须落在 `members` 里，否则这一帧**在校验阶段就被丢掉**：`Codec.validateGroup`
     # 的 `if (ownerId !in members) return false`（Codec.kt:273）⇒ 手机连 ACK 都不回。
     # run5 就是这么红的：mirror 只换了 members=[B]、`ownerId` 还留着手机自己 ⇒ 帧被丢，
-    # 手机落盘仍是 rev 7（`adb exec-out run-as app.relay cat files/relay/settings.json`
+    # 手机落盘仍是 rev 7（`adb exec-out run-as com.kapp.tidings cat files/relay/settings.json`
     # 里 `69a6cbfd… rev 7 members=[手机, fixB9449b917c6]`），`group-removed-notice-shown`
     # 与 `group-removed-ratio` 两条一起红。
     # 权限仍按 `updatedBy` 判（GroupMerge.kt:112 `val actor = next.updatedBy`）⇒ 发起者写手机

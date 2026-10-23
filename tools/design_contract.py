@@ -60,7 +60,7 @@ WEIGHTS = {
     "FontWeight.Light": "light",
 }
 
-REL_THEME = "composeApp/src/commonMain/kotlin/app/relay/ui/theme"
+REL_THEME = "composeApp/src/commonMain/kotlin/com/kapp/tidings/ui/theme"
 F_COLOR = f"{REL_THEME}/Color.kt"
 F_ACCENTS = f"{REL_THEME}/Accents.kt"
 F_THEME = f"{REL_THEME}/AppTheme.kt"
@@ -894,14 +894,22 @@ def scan_preview_functions(root: str) -> List[str]:
         base = scan_base(root, rel)
         if not os.path.isdir(base):
             continue
-        for fn in sorted(os.listdir(base)):
-            if not fn.endswith(".kt"):
-                continue
-            with open(os.path.join(base, fn), encoding="utf-8") as fh:
-                for line in fh:
-                    m = re.search(r"fun\s+(\w+)\s*\(\s*\)", line)
-                    if m and m.group(1) not in names:
-                        names.append(m.group(1))
+        # **递归**：截图夹具按 Kotlin 包分层放（`.../app/relay/app/screenshot/`），
+        # 原来的 `os.listdir(base)` 只扫一层，于是文件一进子目录就"一条都扫不到"。
+        # 那条路径不是假设 —— 它真的发生过：把 21 个截图文件移进包目录后，
+        # 这个门禁立刻报「一条 @Preview 函数名都没扫到」。
+        #
+        # 排序保持稳定，避免输出顺序随文件系统变化。
+        for dirpath, dirnames, filenames in os.walk(base):
+            dirnames[:] = [d for d in dirnames if d != "build"]
+            for fn in sorted(filenames):
+                if not fn.endswith(".kt"):
+                    continue
+                with open(os.path.join(dirpath, fn), encoding="utf-8") as fh:
+                    for line in fh:
+                        m = re.search(r"fun\s+(\w+)\s*\(\s*\)", line)
+                        if m and m.group(1) not in names:
+                            names.append(m.group(1))
     if not names:
         raise ContractError("一条 @Preview 函数名都没扫到 —— 状态槽报告会变成空表，宁可报错")
     return names

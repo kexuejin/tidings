@@ -50,6 +50,14 @@ SKIP_LINE_RE = re.compile(r"stale-comment-ref|X\.kt:NN|行号引用")
 # 截图夹具（androidApp/src/screenshotTest）大量引用"上一次截图时某个文件的某一行"，
 # 那些引用随夹具重录而变，属于工具链历史而不是人读的注释。
 DEFAULT_ROOTS = (
+    # 领域层现在住在 :app。漏掉这几行不会报错：`kotlin_files` 对不存在的根是
+    # `continue`，于是"整层没被扫过"显示成"无新增"。
+    "app/src/commonMain",
+    "app/src/androidMain",
+    "app/src/iosMain",
+    "app/src/jvmMain",
+    "app/src/commonTest",
+    "app/src/jvmTest",
     "composeApp/src/commonMain",
     "composeApp/src/androidMain",
     "composeApp/src/iosMain",
@@ -60,6 +68,8 @@ DEFAULT_ROOTS = (
     "core/src/commonTest",
     "agentNode/src/main",
     "desktopApp/src/main",
+    "cli/src/main",
+    "cli/src/test",
 )
 
 

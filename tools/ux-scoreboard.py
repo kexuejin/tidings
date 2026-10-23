@@ -295,7 +295,7 @@ def dead_button_count() -> int:
         matched = len(rx.findall(text))
         if matched == 0:
             continue
-        key = rel(path).replace("composeApp/src/commonMain/kotlin/app/relay/", "")
+        key = rel(path).replace("composeApp/src/commonMain/kotlin/com/kapp/tidings/", "")
         if key in DEAD_BUTTON_WHITELIST:
             continue
         hits += matched
@@ -312,7 +312,7 @@ def dead_button_hits() -> list:
             continue
         for number, line in enumerate(text.splitlines(), start=1):
             if rx.search(line):
-                key = rel(path).replace("composeApp/src/commonMain/kotlin/app/relay/", "")
+                key = rel(path).replace("composeApp/src/commonMain/kotlin/com/kapp/tidings/", "")
                 rows.append((key, number, key in DEAD_BUTTON_WHITELIST))
     return rows
 
@@ -494,16 +494,16 @@ def metrics():
     # 真正该量的是"有没有一条能判红的闸门测试"：闸门 = 假 send 挂起，
     # 放行前断言气泡已存在。没有闸门就只能断言终态，而终态区分不出乐观插入。
     yield ("test.gate_private", "闸门测试：私聊乐观插入", "up", lambda: test_has(
-        "composeApp/src/jvmTest/kotlin/app/relay/app/RelayControllerSendOptimisticTest.kt",
+        "composeApp/src/jvmTest/kotlin/com/kapp/tidings/app/RelayControllerSendOptimisticTest.kt",
         r"CompletableDeferred"))
     yield ("test.gate_group", "闸门测试：群聊乐观插入", "up", lambda: test_has(
-        "composeApp/src/jvmTest/kotlin/app/relay/app/RelayControllerGroupSendOptimisticTest.kt",
+        "composeApp/src/jvmTest/kotlin/com/kapp/tidings/app/RelayControllerGroupSendOptimisticTest.kt",
         r"CompletableDeferred"))
     yield ("test.gate_file", "闸门测试：文件卡乐观插入", "up", lambda: test_has(
-        "composeApp/src/jvmTest/kotlin/app/relay/app/RelayControllerFileCardOptimisticTest.kt",
+        "composeApp/src/jvmTest/kotlin/com/kapp/tidings/app/RelayControllerFileCardOptimisticTest.kt",
         r"CompletableDeferred"))
     yield ("test.fanout_concurrency", "并发峰值测试：群扇出（不赌耗时）", "up", lambda: test_has(
-        "core/src/commonTest/kotlin/app/relay/core/transport/GroupFanOutConcurrencyTest.kt",
+        "core/src/commonTest/kotlin/com/kapp/tidings/core/transport/GroupFanOutConcurrencyTest.kt",
         r"peak|live"))
 
 

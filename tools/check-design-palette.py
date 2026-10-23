@@ -116,8 +116,8 @@ HEX_RE = re.compile(r"0x([0-9a-fA-F]{8})\b|0x([0-9a-fA-F]{6})\b")
 HIST_RE = re.compile(r"^\s*(\d+):\s*\([^)]*\)\s*#([0-9A-Fa-f]{6,8})")
 
 THEME_FILES = [
-    "composeApp/src/commonMain/kotlin/app/relay/ui/theme/Color.kt",
-    "composeApp/src/commonMain/kotlin/app/relay/ui/theme/Accents.kt",
+    "composeApp/src/commonMain/kotlin/com/kapp/tidings/ui/theme/Color.kt",
+    "composeApp/src/commonMain/kotlin/com/kapp/tidings/ui/theme/Accents.kt",
 ]
 
 
@@ -250,7 +250,7 @@ def assigned_roles(root: Path) -> set[str]:
     用括号配平扫出两个块的正文，而不是全文正则 —— 全文正则会把文件里任何
     四空格缩进的赋值都当角色（这个文件里恰好只有角色，但那是巧合，不是保证）。
     """
-    path = root / "composeApp/src/commonMain/kotlin/app/relay/ui/theme/Color.kt"
+    path = root / "composeApp/src/commonMain/kotlin/com/kapp/tidings/ui/theme/Color.kt"
     if not path.exists():
         return set()
     text = path.read_text("utf-8")

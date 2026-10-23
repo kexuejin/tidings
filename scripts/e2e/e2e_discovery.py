@@ -910,9 +910,9 @@ def phase_env(args):
         raise R.EnvError("找不到 %s（macOS 自带 Bonjour CLI）；要么装上、要么 --skip-ui"
                          % MDNS_TOOL)
     pid = R.app_pid()
-    R.log("app.relay pid=%s" % (pid or "(not running)"))
+    R.log("com.kapp.tidings pid=%s" % (pid or "(not running)"))
     if not pid:
-        R.log("app.relay 没在跑，先拉起来")
+        R.log("com.kapp.tidings 没在跑，先拉起来")
         R.adb("shell", "am", "start", "-n", R.LAUNCH_ACTIVITY)
         time.sleep(3.0)
     if not args.skip_ui:
@@ -1457,7 +1457,7 @@ def run(args):
                 R.log("收尾：没删掉 %r（下次跑会在已保存组里留一行「没有回应」）" % row)
         phase_phone_no_exit(args, peer, prof or {})
         if not args.skip_ui:
-            R.log("收尾：把手机上的 app.relay 重新拉起来（刚才 force-stop 过）")
+            R.log("收尾：把手机上的 com.kapp.tidings 重新拉起来（刚才 force-stop 过）")
             R.adb("shell", "am", "start", "-n", R.LAUNCH_ACTIVITY)
     finally:
         responder.stop()

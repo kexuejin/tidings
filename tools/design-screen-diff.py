@@ -59,7 +59,7 @@ LEDGER_REL = "docs/plans/2026-10-10-relay-screen-pairing-ledger.md"
 BASELINE_REL = "tools/design-screen-diff-baseline.json"
 
 # 落点相对这个目录
-LANDING_PREFIX = "composeApp/src/commonMain/kotlin/app/relay/"
+LANDING_PREFIX = "composeApp/src/commonMain/kotlin/com/kapp/tidings/"
 
 # 维度 → (CSS 属性, 容差)。与 design-converge.py 同一套维度名，便于并排读。
 DIMENSIONS = {
@@ -679,9 +679,9 @@ def _num(raw):
 # 可能带括号注解（`desktopApp DesktopWindow（AWT 托盘）`）。工具必须容忍这些写法，
 # 否则台账里会有一整批行直接 FAIL —— 那些行不是"没有落点"，是"落点写得不像路径"。
 LANDING_ROOTS = (
-    "composeApp/src/commonMain/kotlin/app/relay",
-    "composeApp/src/androidMain/kotlin/app/relay",
-    "desktopApp/src/main/kotlin/app/relay",
+    "composeApp/src/commonMain/kotlin/com/kapp/tidings",
+    "composeApp/src/androidMain/kotlin/com/kapp/tidings",
+    "desktopApp/src/main/kotlin/com/kapp/tidings",
 )
 
 
@@ -732,7 +732,7 @@ def _fun_index(repo, extra_dirs=()):
     # 的 `LargeTitleBar`、`ui/components/Common.kt` 的 `AppBanner`）。
     # 无差别跟进整个 `feature/` 会把**兄弟屏**的组件并进来 —— 那是拿另一种错换这一种错，
     # 所以 feature 侧只开"本行落点文件所在的那一层"（见上面第四十三个洞）。
-    roots = [os.path.join(repo, "composeApp/src/commonMain/kotlin/app/relay/ui")]
+    roots = [os.path.join(repo, "composeApp/src/commonMain/kotlin/com/kapp/tidings/ui")]
     roots += [os.path.abspath(d) for d in extra_dirs if d]
     for base in roots:
         if not os.path.isdir(base):
@@ -912,16 +912,16 @@ def _is_parts_file(path):
 # 所以这里**人工维护**：只放"确定被多个屏共用、且取值就是该屏渲染结果"的 UI 组件文件。
 # 加一条要在 PR 里写清"哪几个屏共用它"。
 SHARED_COMPONENT_FILES = (
-    "composeApp/src/commonMain/kotlin/app/relay/feature/conversations/ConversationRow.kt",
-    "composeApp/src/commonMain/kotlin/app/relay/feature/nodes/NodeDetail.kt",
+    "composeApp/src/commonMain/kotlin/com/kapp/tidings/feature/conversations/ConversationRow.kt",
+    "composeApp/src/commonMain/kotlin/com/kapp/tidings/feature/nodes/NodeDetail.kt",
     # 文件柜：`MineCabinetView` 起两个壳共用（手机 CabinetScreen / 桌面 CabinetPane 右栏），
     # 取值本来就在这个文件里，而工具只把它归给手机屏 m-cabinet —— 于是 d-cabinet 报"缺 7/9/12"。
-    "composeApp/src/commonMain/kotlin/app/relay/feature/cabinet/CabinetScreen.kt",
-    "composeApp/src/commonMain/kotlin/app/relay/feature/cabinet/PeerCabinetView.kt",
+    "composeApp/src/commonMain/kotlin/com/kapp/tidings/feature/cabinet/CabinetScreen.kt",
+    "composeApp/src/commonMain/kotlin/com/kapp/tidings/feature/cabinet/PeerCabinetView.kt",
     # 按钮族：`AppButton` / `AppOutlinedButton` / `AppTextButton` / `AppIconButton` 被全应用共用。
     # 迁进来之后，原来写在屏上的 `shape = ShapeRoles.Avatar`(9) / `shapes.medium`(12) /
     # `contentPadding = 9×5` 全都**搬进了这个文件**，逐屏切片里自然就"没有"了。
-    "composeApp/src/commonMain/kotlin/app/relay/ui/components/AppButtons.kt",
+    "composeApp/src/commonMain/kotlin/com/kapp/tidings/ui/components/AppButtons.kt",
 )
 
 _SHARED_CACHE = {}
@@ -1240,10 +1240,10 @@ def landing_files(repo, landing):
 def code_tokens(repo):
     """代码的 token 权威源：AppSpacing / RelayTypography / RelayShapes。"""
     spacing, typo, shapes = {}, {}, {}
-    p = os.path.join(repo, "composeApp/src/commonMain/kotlin/app/relay/ui/theme/Spacing.kt")
+    p = os.path.join(repo, "composeApp/src/commonMain/kotlin/com/kapp/tidings/ui/theme/Spacing.kt")
     if os.path.exists(p):
         spacing = {k: float(v) for k, v in KT_PROP.findall(open(p, encoding="utf-8").read())}
-    p = os.path.join(repo, "composeApp/src/commonMain/kotlin/app/relay/ui/theme/AppTheme.kt")
+    p = os.path.join(repo, "composeApp/src/commonMain/kotlin/com/kapp/tidings/ui/theme/AppTheme.kt")
     if os.path.exists(p):
         src = open(p, encoding="utf-8").read()
         for role, body in KT_ROLE.findall(src):
@@ -1258,7 +1258,7 @@ def code_tokens(repo):
     # ShapeRoles（Avatar 9 / ListCard 11 / DayCell 7）是 M3 五槽之外的圆角角色，定义在
     # ShapeRoles.kt。不并进来，用角色 token 写的圆角在代码侧会凭空消失 —— 与第二十六个洞同族：
     # 量具只看得见自己看得见的形态。
-    p = os.path.join(repo, 'composeApp/src/commonMain/kotlin/app/relay/ui/theme/ShapeRoles.kt')
+    p = os.path.join(repo, 'composeApp/src/commonMain/kotlin/com/kapp/tidings/ui/theme/ShapeRoles.kt')
     if os.path.exists(p):
         for role, v in SHAPE_ROLE_PROP.findall(open(p, encoding='utf-8').read()):
             shapes.setdefault(role[:1].lower() + role[1:], float(v))
@@ -1832,7 +1832,7 @@ def self_test():
     # 原型侧 `collect_classes` 早就递归跟进自己的 helper；代码侧跟进自己的调用链是对称的。
     import tempfile
     with tempfile.TemporaryDirectory() as _td:
-        _rel = "composeApp/src/commonMain/kotlin/app/relay"
+        _rel = "composeApp/src/commonMain/kotlin/com/kapp/tidings"
         _d = os.path.join(_td, _rel, "ui/components")
         os.makedirs(_d)
         with open(os.path.join(_d, "Bars.kt"), "w", encoding="utf-8") as _f:

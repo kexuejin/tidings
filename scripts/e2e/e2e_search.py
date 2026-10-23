@@ -590,7 +590,7 @@ def run(args):
     R.require_device()
     pid = R.app_pid()
     if not pid:
-        R.log("app.relay 没在跑，先拉起来")
+        R.log("com.kapp.tidings 没在跑，先拉起来")
         R.ensure_app_foreground()
     R.log("device=%s pid=%s" % (R.resolve_serial(), pid or "-"))
 

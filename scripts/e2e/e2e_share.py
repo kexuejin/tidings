@@ -16,7 +16,7 @@ R88/R89 是**诚实的负向 / 回归夹具**
 ------------------------------------
 共享文件柜（`share`，cap `shr1`）在 relay 侧**没有实现**。这不是推断，是本夹具逐条核过的：
 
-1. `composeApp/src/commonMain/kotlin/app/relay/app/RelayController.kt:739`
+1. `composeApp/src/commonMain/kotlin/com/kapp/tidings/app/RelayController.kt:739`
    `internal val CHAT_INBOUND_TYPES: Set<String> = setOf(MsgTypes.MSG)` —— 只有 `msg`；
    `app/RelayControllerMessages.kt:229` `if (envelope.type !in CHAT_INBOUND_TYPES) return`
    ⇒ 入站 `share` 帧在传输层被 ACK 之后，在控制器层被静默丢掉。
@@ -1166,7 +1166,7 @@ def cidr_phase(args, peer, sink, prof):
     payload = scan_ranges_payload([foreign])
     env_sr = peer.env(T_SCAN_RANGES, payload)
     # **不要等 ACK**：`scan-ranges` 是 gossip 帧，**不在** RELIABLE_TYPES 里
-    # （`core/src/commonMain/kotlin/app/relay/core/protocol/MessageTypes.kt:58-63`
+    # （`core/src/commonMain/kotlin/com/kapp/tidings/core/protocol/MessageTypes.kt:58-63`
     # = MSG/FILE_CTL/GROUP/AVATAR/UPDATE/SHARE/SCREEN/AGENT_*，夹具自己的镜像
     # `scripts/e2e/relay_e2e.py:78-82` 同样不含它）⇒ 手机**有意**不回 ACK，和 `peers`
     # 一样。2026-10-09 run2 的 `r91-inbound-scan-ranges-acked` 是**照着一个错前提写的**
@@ -1196,7 +1196,7 @@ def cidr_phase(args, peer, sink, prof):
     # （`scheduleShareTo`）、以及 `scanRangeShareInterval` = **60 分钟**周期兜底。
     # 入站 handle 只 `acceptRanges`（index.js:8034），**不** scheduleShareSoon ⇒
     # "吸收后 15s 内回发"在参考实现里同样不会发生。
-    # 真正可复现的触发点是**对端上线**：`composeApp/src/commonMain/kotlin/app/relay/app/RelayController.kt:438`
+    # 真正可复现的触发点是**对端上线**：`composeApp/src/commonMain/kotlin/com/kapp/tidings/app/RelayController.kt:438`
     # 在 `PeerEvent.Updated` 里 `shareScanRangesToPeer(nodeId)`（无抖动），
     # 把本机全部网段 —— **含刚吸收的那条** —— 单播给该对端。
     # 所以先 `exit`（手机立刻 `registry.markOffline`）再 `entry(alive=True)` 造出这次上线事件。

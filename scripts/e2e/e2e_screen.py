@@ -495,7 +495,7 @@ def run(args):
     phase("设备与环境")
     R.require_device()
     pid = R.app_pid()
-    R.log("app.relay pid=%s" % (pid or "(not running)"))
+    R.log("com.kapp.tidings pid=%s" % (pid or "(not running)"))
     # 无论进程在不在都拉到前台：① 后台 app 会被 Android 冻结（App Standby/Doze）⇒ UDP 收不到，
     # 握手必失败（2026-10-10 现场：pid 在、人停在启动器上，15s 一条 alive 都没有）；
     # ② viewer 的「同意共享」弹窗也要 app 在前台才会出现。

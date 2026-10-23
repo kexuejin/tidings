@@ -83,30 +83,30 @@ EXEMPT_LINE = re.compile(
 FILE_EXEMPT = {
     # TransferServer 里那几处内网地址是"裸地址 vs SocketAddress.toString()"的对照例，
     # 换成别的网段反而看不出说的是 IPv4 映射地址。
-    os.path.normpath("core/src/commonMain/kotlin/app/relay/core/transport/TransferServer.kt"),
+    os.path.normpath("core/src/commonMain/kotlin/com/kapp/tidings/core/transport/TransferServer.kt"),
     # NodeRuntime 那处是在举 `{"to":"192.168.1.5"}` 这个 JSON 的形状。
-    os.path.normpath("core/src/commonMain/kotlin/app/relay/core/session/NodeRuntime.kt"),
+    os.path.normpath("core/src/commonMain/kotlin/com/kapp/tidings/core/session/NodeRuntime.kt"),
     # 桌面端搜索历史的参考串逐字是原型那行，录参考图要用同一串。
-    os.path.normpath("composeApp/src/commonMain/kotlin/app/relay/ui/desktop/DesktopHistorySearch.kt"),
+    os.path.normpath("composeApp/src/commonMain/kotlin/com/kapp/tidings/ui/desktop/DesktopHistorySearch.kt"),
     # 「192.168.1.77:17878 这种串没人记得住是哪台」—— 用的是 RFC1918 里的示例段。
-    os.path.normpath("composeApp/src/commonMain/kotlin/app/relay/app/RelayController.kt"),
+    os.path.normpath("app/src/commonMain/kotlin/com/kapp/tidings/domain/RelayController.kt"),
     # 契约样例里的假地址（KDoc 里的 sample 实现），不是生产取值。
-    os.path.normpath("composeApp/src/commonMain/kotlin/app/relay/platform/PlatformContracts.kt"),
+    os.path.normpath("app/src/commonMain/kotlin/com/kapp/tidings/platform/PlatformContracts.kt"),
     # 「m09b-addnode-fill 框里已经写着 192.168.1.31」—— 逐字引用原型那一屏。
-    os.path.normpath("composeApp/src/commonMain/kotlin/app/relay/feature/nodes/NodeSheets.kt"),
+    os.path.normpath("composeApp/src/commonMain/kotlin/com/kapp/tidings/feature/nodes/NodeSheets.kt"),
     # `/Users/a&b/…` 是在举"路径里有 & 会破 plist"，必须保留原样才看得出问题。
-    os.path.normpath("desktopApp/src/main/kotlin/app/relay/desktop/DesktopLoginItem.kt"),
+    os.path.normpath("desktopApp/src/main/kotlin/com/kapp/tidings/desktop/DesktopLoginItem.kt"),
     # CIDR 规范化实现，示例网段就是它的输入格式
-    os.path.normpath("core/src/commonMain/kotlin/app/relay/core/protocol/CidrUtils.kt"),
+    os.path.normpath("core/src/commonMain/kotlin/com/kapp/tidings/core/protocol/CidrUtils.kt"),
     # 二维码载荷格式说明
-    os.path.normpath("core/src/commonMain/kotlin/app/relay/core/qr/QrEncoder.kt"),
+    os.path.normpath("core/src/commonMain/kotlin/com/kapp/tidings/core/qr/QrEncoder.kt"),
     # 截图夹具的假数据（虽然不在根里，防御性保留）
-    os.path.normpath("composeApp/src/commonMain/kotlin/app/relay/ui/desktop/PreviewState.kt"),
+    os.path.normpath("composeApp/src/commonMain/kotlin/com/kapp/tidings/ui/desktop/PreviewState.kt"),
     # agentNode 控制面的 curl 示例
-    os.path.normpath("agentNode/src/main/kotlin/app/relay/agent/ControlPlane.kt"),
+    os.path.normpath("agentNode/src/main/kotlin/com/kapp/tidings/agent/ControlPlane.kt"),
     # 桌面端深链格式与私网判据
-    os.path.normpath("desktopApp/src/main/kotlin/app/relay/desktop/DesktopDeepLink.kt"),
-    os.path.normpath("desktopApp/src/main/kotlin/app/relay/desktop/DesktopPlatform.kt"),
+    os.path.normpath("desktopApp/src/main/kotlin/com/kapp/tidings/desktop/DesktopDeepLink.kt"),
+    os.path.normpath("desktopApp/src/main/kotlin/com/kapp/tidings/desktop/DesktopPlatform.kt"),
 }
 
 
@@ -266,10 +266,15 @@ def main():
 
     base = os.path.abspath(args.root)
     roots = args.root_dir or [
-        "core/src/commonMain", "composeApp/src/commonMain",
-        "composeApp/src/androidMain", "composeApp/src/iosMain",
-        "composeApp/src/jvmMain", "agentNode/src/main",
-        "desktopApp/src/main", "androidApp/src/main",
+        "core/src/commonMain",
+        # 领域层现在住在 :app。漏掉这几行不会报错 —— scan() 对不存在的根是跳过，
+        # 于是"整层没被扫过"会显示成"无新增"。
+        "app/src/commonMain", "app/src/androidMain",
+        "app/src/iosMain", "app/src/jvmMain",
+        "composeApp/src/commonMain", "composeApp/src/androidMain",
+        "composeApp/src/iosMain", "composeApp/src/jvmMain",
+        "agentNode/src/main", "desktopApp/src/main", "androidApp/src/main",
+        "cli/src/main",
     ]
     hits = scan(base, roots)
     if args.rule:

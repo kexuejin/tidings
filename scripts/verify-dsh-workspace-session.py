@@ -440,7 +440,7 @@ def main(argv=None):
         checks.skip("手机 relay.db 回读", "本机没有 sqlite3")
     else:
         print("  adb 设备: " + serial)
-        pull = run(["adb", "-s", serial, "exec-out", "run-as", "app.relay", "cat", "databases/relay.db"],
+        pull = run(["adb", "-s", serial, "exec-out", "run-as", "com.kapp.tidings", "cat", "databases/relay.db"],
                    binary=True)
         Path(DB_FILE).write_bytes(pull.stdout)
         checks.expect(len(pull.stdout) > 0, "把手机数据库拉到了本机", "%d bytes" % len(pull.stdout))
@@ -563,7 +563,7 @@ def main(argv=None):
         checks.expect(hit.get("online") is True, "台账行的 online 是布尔 true 而不是字符串", repr(hit.get("online")))
     # 手机侧落库（AgentWorkspaceEntity 由手机端写；run-as 能读就跑，读不到就 skip）。
     if serial and shutil.which("sqlite3"):
-        pull = run(["adb", "-s", serial, "exec-out", "run-as", "app.relay", "cat", "databases/relay.db"],
+        pull = run(["adb", "-s", serial, "exec-out", "run-as", "com.kapp.tidings", "cat", "databases/relay.db"],
                    binary=True)
         if pull.stdout:
             Path(DB_FILE).write_bytes(pull.stdout)
@@ -625,7 +625,7 @@ def main(argv=None):
         if alias not in xml:
             # 可能只是没停在控制台那一屏：拉起 App 再 dump 一次，仍没有才算 skip（不是 FAIL）。
             brief = run(["adb", "-s", serial, "shell", "cmd", "package", "resolve-activity",
-                         "--brief", "app.relay"]).stdout.strip().splitlines()
+                         "--brief", "com.kapp.tidings"]).stdout.strip().splitlines()
             if brief:
                 run(["adb", "-s", serial, "shell", "am", "start", "-n", brief[-1]])
                 time.sleep(1.5)

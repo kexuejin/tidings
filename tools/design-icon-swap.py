@@ -17,7 +17,7 @@
 * **只替换能一一对应的映射**（`design-icon-map.py` 的语义桥同源）；`Icons.AutoMirrored.*`
   只在目标是方向性图标（arrow/back/forward）时替换，其余保留（镜像语义不能丢）。
 * **替换后要处理 import**：加 `Res.drawable.*` 需要
-  `import app.relay.generated.resources.Res` 与对应资源名；删掉不再用的 `Icons` import 交给
+  `import com.kapp.tidings.generated.resources.Res` 与对应资源名；删掉不再用的 `Icons` import 交给
   仓里既有的 `unused-imports.py`（有门禁，别手工猜）。
 * 每处替换都计数，`--expect N` 不符即拒绝写盘（防止正则比预期多/少匹配）。
 
@@ -433,7 +433,7 @@ def _pos_ok(s: str, i: int) -> tuple:
 
 def ensure_imports(text: str, ics):
     """补 Res / drawable 资源 import。资源名 import 形如
-    `import app.relay.generated.resources.<name>`（Compose Resources 生成物）。"""
+    `import com.kapp.tidings.generated.resources.<name>`（Compose Resources 生成物）。"""
     if not ics:
         return text, False
     changed = False
@@ -445,21 +445,21 @@ def ensure_imports(text: str, ics):
                 + "import org.jetbrains.compose.resources.painterResource\n"
                 + text[anchor.start():])
         changed = True
-    if "import app.relay.generated.resources.Res" not in text:
+    if "import com.kapp.tidings.generated.resources.Res" not in text:
         anchor = re.search(r"^import .*$", text, re.M)
         if anchor:
-            text = text[:anchor.start()] + "import app.relay.generated.resources.Res\n" + text[anchor.start():]
+            text = text[:anchor.start()] + "import com.kapp.tidings.generated.resources.Res\n" + text[anchor.start():]
             changed = True
     for ic in sorted(set(ics)):
-        line = f"import app.relay.generated.resources.{ic}"
+        line = f"import com.kapp.tidings.generated.resources.{ic}"
         if line not in text:
             # 插到 Res import 之后，保持分组
             m = re.search(r"^import app\.relay\.generated\.resources\.Res\n(?:import app\.relay\.generated\.resources\.\w+\n)*", text, re.M)
             if m:
                 text = text[:m.end()] + line + "\n" + text[m.end():]
             else:
-                text = text.replace("import app.relay.generated.resources.Res\n",
-                                    f"import app.relay.generated.resources.Res\n{line}\n", 1)
+                text = text.replace("import com.kapp.tidings.generated.resources.Res\n",
+                                    f"import com.kapp.tidings.generated.resources.Res\n{line}\n", 1)
             changed = True
     return text, changed
 
@@ -581,11 +581,11 @@ def self_test():
     t5 = "package a\n\nimport androidx.compose.material.icons.Icons\n"
     n5, _ = ensure_imports(t5 + n4, ["ic_folder"])
     for want in ("import org.jetbrains.compose.resources.painterResource",
-                 "import app.relay.generated.resources.Res",
-                 "import app.relay.generated.resources.ic_folder"):
+                 "import com.kapp.tidings.generated.resources.Res",
+                 "import com.kapp.tidings.generated.resources.ic_folder"):
         check(f"import {want.rsplit('.', 1)[-1]}", want in n5, True)
     n5b, _ = ensure_imports(n5, ["ic_folder"])
-    check("import 幂等", n5b.count("import app.relay.generated.resources.ic_folder"), 1)
+    check("import 幂等", n5b.count("import com.kapp.tidings.generated.resources.ic_folder"), 1)
 
     if fails:
         print(f"self-test: FAILED（{len(fails)} 处）")

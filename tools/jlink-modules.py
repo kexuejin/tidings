@@ -345,8 +345,11 @@ def main(argv):
         if image is None:
             print("\n".join(errors))
             return 1
+    # `app` 是本仓自己的领域层模块（它已经被绑进桌面镜像）。**漏掉它不会报错** ——
+    # jdeps 只是少扫一个 jar，于是"领域层用到的 JDK 模块"从不参与校验，
+    # 而那正是最容易新增 JDK 依赖的一层（序列化、加密、文件系统）。
     ok, lines = check(image, jdk_bin,
-                      args.own_prefix or ["agentNode", "composeApp", "core", "desktopApp"])
+                      args.own_prefix or ["agentNode", "app", "composeApp", "core", "desktopApp"])
     print("\n".join(lines))
     return 0 if ok else 1
 

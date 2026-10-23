@@ -21,14 +21,14 @@
   R42  取消 / 失败原因 / 对方拒绝：收端「取消」按钮、坏哈希 → `hash-mismatch`、
        发端撤回 `file-ctl cancel` → 收端「对方已拒绝」。
   R43  传输落盘根 = 数据目录 downloads/（`downloadDir()`；Android 是
-       `/data/user/0/app.relay/files/relay/downloads`）。
+       `/data/user/0/com.kapp.tidings/files/relay/downloads`）。
   R44  落盘副本与原文件 sha256 一致（`adb shell run-as ... sha256sum`）。
   R45  同名的「一层同名目录」存档：`downloads/<rootName>/<relPath>`；同名再来一次
        走 `dedupeTargetPath` → `name(1).ext`（不覆盖）。
 
 夹具自己装成"那台电脑"：UDP 握手/收 ACK 用共享库的 `UdpPeer`；TCP 侧另起一个
 **拉取服务端**（共享库的 `TcpFrameServer` 只认 `{"type":"msg"}`，没有 pull/pull-ok/done
-与裸流能力），逐帧对齐 `core/src/commonMain/kotlin/app/relay/core/transport/TransferServer.kt`。
+与裸流能力），逐帧对齐 `core/src/commonMain/kotlin/com/kapp/tidings/core/transport/TransferServer.kt`。
 
     # 不插手机也能确认自己没写崩（纯本地断言，不碰网络、不碰设备）：
     python3 scripts/e2e/e2e_files.py --dry-run
@@ -70,7 +70,7 @@ import relay_e2e as R  # noqa: E402
 
 
 # ---------------------------------------------------------------------------
-# 协议常量：逐条对齐 core/src/commonMain/kotlin/app/relay/core/protocol/FileTransfer.kt
+# 协议常量：逐条对齐 core/src/commonMain/kotlin/com/kapp/tidings/core/protocol/FileTransfer.kt
 # ---------------------------------------------------------------------------
 
 FILE_CTL = "file-ctl"
@@ -113,7 +113,7 @@ TRANSFER_FAIL_REASONS = (
 
 # 落盘根（Android）：AndroidPlatform.dataDirectory() = filesDir/relay，
 # RelayController.downloadDir = pathJoin(dataDirectory, "downloads")。
-DEV = "/data/user/0/app.relay/files/relay/downloads"
+DEV = "/data/user/0/com.kapp.tidings/files/relay/downloads"
 
 # UI 文案（composeResources/values/strings.xml），全部走 dump 出来的 bounds。
 UI_ATTACH = "发文件"          # chat_attach
@@ -701,7 +701,7 @@ def register(server, *files):
 # ---------------------------------------------------------------------------
 
 class FsProbe(object):
-    """用 `adb shell run-as app.relay` 读被应用私有目录。
+    """用 `adb shell run-as com.kapp.tidings` 读被应用私有目录。
 
     只有 debuggable 包能用 `run-as`；release 包上它会拒。这时夹具**不报 FAIL**，
     只是把磁盘断言标成跳过 —— 落盘本身已经有 pull+done+finish 这条边证明，
@@ -722,7 +722,7 @@ class FsProbe(object):
 
         `adb shell` 的参数是**设备上的 sh 再解析一遍**的：去重落盘的名字是
         `e2e-dup(6).txt` / `e2e-auto(3).png`，括号是 shell 元字符 ——
-        真机实测 `run-as app.relay sha256sum …/e2e-auto(3).png` 直接
+        真机实测 `run-as com.kapp.tidings sha256sum …/e2e-auto(3).png` 直接
         `/system/bin/sh: syntax error: unexpected '('`（于是 sha256 返回 None、
         断言看着像"摘要不一致"，其实是取证命令没跑起来）。
         """

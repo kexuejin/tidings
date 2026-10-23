@@ -5,20 +5,20 @@
 # 生成时机: HEAD=2f3c4d7 (dirty), scope=composeApp/src/commonMain,composeApp/src/androidMain,composeApp/src/iosMain,composeApp/src/jvmMain,desktopApp/src/main
 # 命中总数: 138（文件数 18）
 #
-9	composeApp/src/androidMain/kotlin/app/relay/platform/AndroidMdnsAdvertiser.kt
-5	composeApp/src/androidMain/kotlin/app/relay/platform/AndroidMdnsBrowser.kt
-2	composeApp/src/androidMain/kotlin/app/relay/platform/AndroidPushNotificationHandler.kt
-7	composeApp/src/androidMain/kotlin/app/relay/platform/AndroidReceivedFileActions.kt
-5	composeApp/src/commonMain/kotlin/app/relay/feature/settings/SettingsProfileSubpage.kt
-4	composeApp/src/commonMain/kotlin/app/relay/platform/PlatformContracts.kt
-12	composeApp/src/commonMain/kotlin/app/relay/ui/components/AvatarPalette.kt
-1	composeApp/src/commonMain/kotlin/app/relay/ui/components/Common.kt
-1	composeApp/src/commonMain/kotlin/app/relay/ui/desktop/DesktopLayout.kt
-3	desktopApp/src/main/kotlin/app/relay/desktop/DesktopDragOut.kt
-3	desktopApp/src/main/kotlin/app/relay/desktop/DesktopHosting.kt
-9	desktopApp/src/main/kotlin/app/relay/desktop/DesktopLoginItem.kt
-6	desktopApp/src/main/kotlin/app/relay/desktop/DesktopPeerWindow.kt
-3	desktopApp/src/main/kotlin/app/relay/desktop/DesktopPlatform.kt
-9	desktopApp/src/main/kotlin/app/relay/desktop/DesktopServices.kt
-33	desktopApp/src/main/kotlin/app/relay/desktop/DesktopWindow.kt
-6	desktopApp/src/main/kotlin/app/relay/desktop/Main.kt
+9	composeApp/src/androidMain/kotlin/com/kapp/tidings/platform/AndroidMdnsAdvertiser.kt
+5	composeApp/src/androidMain/kotlin/com/kapp/tidings/platform/AndroidMdnsBrowser.kt
+2	composeApp/src/androidMain/kotlin/com/kapp/tidings/platform/AndroidPushNotificationHandler.kt
+7	composeApp/src/androidMain/kotlin/com/kapp/tidings/platform/AndroidReceivedFileActions.kt
+5	composeApp/src/commonMain/kotlin/com/kapp/tidings/feature/settings/SettingsProfileSubpage.kt
+4	app/src/commonMain/kotlin/com/kapp/tidings/platform/PlatformContracts.kt
+12	composeApp/src/commonMain/kotlin/com/kapp/tidings/ui/components/AvatarPalette.kt
+1	composeApp/src/commonMain/kotlin/com/kapp/tidings/ui/components/Common.kt
+1	composeApp/src/commonMain/kotlin/com/kapp/tidings/ui/desktop/DesktopLayout.kt
+3	desktopApp/src/main/kotlin/com/kapp/tidings/desktop/DesktopDragOut.kt
+3	desktopApp/src/main/kotlin/com/kapp/tidings/desktop/DesktopHosting.kt
+9	desktopApp/src/main/kotlin/com/kapp/tidings/desktop/DesktopLoginItem.kt
+6	desktopApp/src/main/kotlin/com/kapp/tidings/desktop/DesktopPeerWindow.kt
+3	desktopApp/src/main/kotlin/com/kapp/tidings/desktop/DesktopPlatform.kt
+9	desktopApp/src/main/kotlin/com/kapp/tidings/desktop/DesktopServices.kt
+33	desktopApp/src/main/kotlin/com/kapp/tidings/desktop/DesktopWindow.kt
+6	desktopApp/src/main/kotlin/com/kapp/tidings/desktop/Main.kt

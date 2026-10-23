@@ -109,8 +109,8 @@ DEFAULT_PHONE = "192.168.2.22"     # Pixel 6 @ LAN
 DEFAULT_HOST_IP = "192.168.2.82"   # 本机 Mac 的 LAN IP
 DEFAULT_SERIAL = "SERIAL-TEST-01"  # Pixel 6 adb 序列号
 DEFAULT_NICK = "E2E夹具"
-PKG = "app.relay"
-LAUNCH_ACTIVITY = "app.relay/.app.MainActivity"
+PKG = "com.kapp.tidings"
+LAUNCH_ACTIVITY = "com.kapp.tidings/.app.MainActivity"
 # 2026-10-10：原来写 `/sdcard/relay-e2e-ui.xml`，而 Pixel 6 的模拟存储走 FUSE，
 # 跑久/负载高时会整片打嗝 —— `cat: /sdcard/relay-e2e-ui.xml: Transport endpoint is
 # not connected`，随后每一次 dump 都失败（读数会退化成"什么都找不到"）。改用
@@ -914,7 +914,7 @@ def ensure_messages_persisted(timeout=12.0):
     这不是缺陷，是隐私优先的默认值；夹具要做的是把前置摆好并**断言**它。
     """
     if not ensure_app_foreground(timeout=timeout):
-        return False, "app.relay 没到前台"
+        return False, "com.kapp.tidings 没到前台"
     # 先把界面退回会话列表：聊天页里没有底栏，「设置」tab 根本不在 dump 里
     # （2026-10-09 run4 的前置就是这么红的）。
     if not goto_messages_list():
@@ -1355,13 +1355,13 @@ _ACT_RE = re.compile(r"(?:topResumedActivity=|ResumedActivity: )ActivityRecord\{
 
 
 def foreground_activity():
-    """当前前台 Activity，形如 `app.relay/.app.MainActivity`；拿不到返回 None。"""
+    """当前前台 Activity，形如 `com.kapp.tidings/.app.MainActivity`；拿不到返回 None。"""
     m = _ACT_RE.search(adb("shell", "dumpsys", "activity", "activities"))
     return "%s/%s" % (m.group(1), m.group(2)) if m else None
 
 
 def ensure_app_foreground(timeout=10.0):
-    """确保 app.relay 在前台（可能刚被 force-stop 过）。返回前台 Activity 或 None。"""
+    """确保 com.kapp.tidings 在前台（可能刚被 force-stop 过）。返回前台 Activity 或 None。"""
     deadline = time.monotonic() + timeout
     while True:
         act = foreground_activity()

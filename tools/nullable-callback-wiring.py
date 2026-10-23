@@ -52,15 +52,15 @@ SKIP_FUNS = {"remember", "derivedStateOf", "LaunchedEffect", "key"}
 EXEMPT = {
     # 手机壳不接「执行名单」这套宿主台账桥：手机连的是别人的机器，
     # 那里的台账是对方主权，配不了（见 AgentExecDeviceWiringGuardTest 的同名纪律）。
-    ("composeApp/src/commonMain/kotlin/app/relay/App.kt", "AgentConsoleScreen", "onToggleExecDevice"),
+    ("composeApp/src/commonMain/kotlin/com/kapp/tidings/App.kt", "AgentConsoleScreen", "onToggleExecDevice"),
     # 桌面壳用 `localDetailWsId` / `localDetailSessionId` 内部状态进详情与返回，
     # 不经过这三个导航回调（导航回调是给手机壳的路由用的）。
-    ("composeApp/src/commonMain/kotlin/app/relay/ui/desktop/DesktopShell.kt", "AgentConsoleScreen", "onLeaveSessionDetail"),
-    ("composeApp/src/commonMain/kotlin/app/relay/ui/desktop/DesktopShell.kt", "AgentConsoleScreen", "onLeaveWorkspaceDetail"),
-    ("composeApp/src/commonMain/kotlin/app/relay/ui/desktop/DesktopShell.kt", "AgentConsoleScreen", "onOpenSessionDetail"),
+    ("composeApp/src/commonMain/kotlin/com/kapp/tidings/ui/desktop/DesktopShell.kt", "AgentConsoleScreen", "onLeaveSessionDetail"),
+    ("composeApp/src/commonMain/kotlin/com/kapp/tidings/ui/desktop/DesktopShell.kt", "AgentConsoleScreen", "onLeaveWorkspaceDetail"),
+    ("composeApp/src/commonMain/kotlin/com/kapp/tidings/ui/desktop/DesktopShell.kt", "AgentConsoleScreen", "onOpenSessionDetail"),
     # 桌面设置页的「输入法自检」入口在 `DesktopSettingsSidebar` 里（遍历全部 nav 项），
     # 不走子页的 `onOpenImeSmoke` 回调 —— 那条是手机端从设置首页跳子页用的。
-    ("desktopApp/src/main/kotlin/app/relay/desktop/DesktopHosting.kt", "SettingsDiagSubpage", "onOpenImeSmoke"),
+    ("desktopApp/src/main/kotlin/com/kapp/tidings/desktop/DesktopHosting.kt", "SettingsDiagSubpage", "onOpenImeSmoke"),
 }
 
 

@@ -137,7 +137,7 @@ def run_checks(args):
         return True
 
     phase("2. 二维码测试注入与 Deep Link 自动化测试")
-    out_bc = R.adb("shell", "am", "broadcast", "-a", "app.relay.TEST_INJECT_QR", "--es", "qr", f"relay://{args.host_ip}:{args.tcp_port}")
+    out_bc = R.adb("shell", "am", "broadcast", "-a", "com.kapp.tidings.TEST_INJECT_QR", "--es", "qr", f"relay://{args.host_ip}:{args.tcp_port}")
     R.check("qr-broadcast-injected", "result=0" in out_bc or "completed" in out_bc, "测试二维码广播成功注入真机")
 
     out_dl = R.adb("shell", "am", "start", "-a", "android.intent.action.VIEW", "-d", f"relay://{args.host_ip}:{args.tcp_port}")

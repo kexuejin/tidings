@@ -16,7 +16,7 @@
     python3 tools/render-preview.py --list                 # 已知 @PreviewTest → reference 路径
     python3 tools/render-preview.py --preview CabinetPeerPhonePreview
     python3 tools/render-preview.py --preview A --preview B
-    python3 tools/render-preview.py --filter 'app.relay.app.screenshot.ScreenshotPreviewsKt.Cabinet*'
+    python3 tools/render-preview.py --filter 'com.kapp.tidings.app.screenshot.ScreenshotPreviewsKt.Cabinet*'
     python3 tools/render-preview.py --preview X --sha     # 渲染前后打 sha，证明幂等
 
 `--preview` 接受**不带 @PreviewTest 前缀的真实函数名**（脚本自己去源码里找它属于哪个类）。
@@ -179,7 +179,7 @@ def report_precheck() -> int:
     for rel, line, name, kind, miss_import, miss_decl in rows:
         why = []
         if miss_import:
-            why.append(f"缺 import（在文件顶部加一行 `import app.relay.generated.resources.{name}`）")
+            why.append(f"缺 import（在文件顶部加一行 `import com.kapp.tidings.generated.resources.{name}`）")
         if miss_decl:
             why.append(f"缺声明（composeResources 里没有 {kind} `{name}`，要新建而不是补 import）")
         print(f"  {rel}:{line}  Res.{kind}.{name}  →  " + "；".join(why), file=sys.stderr)

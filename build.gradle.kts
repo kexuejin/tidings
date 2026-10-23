@@ -39,6 +39,10 @@ apply(from = "tools/stale-comment-ref-gate.gradle.kts")
 // 内部工作笔记指针。这些形态读起来都像正常技术说明，只有变成会报红的门禁，
 // `docs/relay-comment-audit.md` §4 那六条政策才真的生效。
 apply(from = "tools/construction-trace-gate.gradle.kts")
+// 领域层零 Compose 依赖：换掉 UI 方案时 :app 原样复用。
+// 它是根任务而非单元测试 —— 单元测试要先编译 :app，那时编译器会先于守卫失败，
+// 「守卫红了」是错觉。见 tools/domain-compose-free-gate.gradle.kts 的说明。
+apply(from = "tools/domain-compose-free-gate.gradle.kts")
 
 // 打包镜像的 JDK 模块门禁：jpackage 的默认模块集不含代码用到的每个 JDK 包，
 // 缺了只在**打包产物**里抛 NoClassDefFoundError，而且会被桌面端刻意的容错吞掉

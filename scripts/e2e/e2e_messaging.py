@@ -73,9 +73,9 @@ def run(args):
     phase("设备与环境")
     R.require_device()
     pid = R.app_pid()
-    R.log("app.relay pid=%s" % (pid or "(not running)"))
+    R.log("com.kapp.tidings pid=%s" % (pid or "(not running)"))
     if not pid:
-        R.log("app.relay 没在跑，先拉起来")
+        R.log("com.kapp.tidings 没在跑，先拉起来")
         R.ensure_app_foreground()
 
     # ---------------------------------------------------------------- 起服务

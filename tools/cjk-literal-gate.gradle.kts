@@ -198,6 +198,9 @@ object CjkGate {
             "/screenshotTest/", "/screenshotTestDebug/", "/screenshotTestRelease/",
             "/commonTest/", "/jvmTest/", "/androidUnitTest/", "/androidInstrumentedTest/",
             "/androidTest/", "/test/",
+            // 注意：GuardSourceScan 那类测试工具现在已经搬进独立的 :testsupport
+            // 模块（不在任何扫描根里），所以这里**不再需要**按目录豁免它。
+            // 留着旧豁免会让下一个人以为 :app 里还有个 testsupport/ 目录要照顾。
         )
         if (excludedDirs.any { p.contains(it) }) return false
         val name = relativePath.substringAfterLast('/')
@@ -275,11 +278,19 @@ val cjkBaselineFile = File(project.projectDir, "tools/cjk-literal-baseline.txt")
 val cjkConfig = CjkGateConfig(
     sourceRoot = project.projectDir,
     scanRoots = listOf(
+        // 领域层（控制器/状态/存储/数据库/平台契约）—— 它现在住在 :app。
+        // 漏掉这几行不会报错：门禁对不存在的扫描根是跳过，于是"整层没被扫过"
+        // 会显示成全绿。那正是这次拆模块最危险的一步。
+        "app/src/commonMain",
+        "app/src/androidMain",
+        "app/src/iosMain",
+        "app/src/jvmMain",
         "composeApp/src/commonMain",
         "composeApp/src/androidMain",
         "composeApp/src/iosMain",
         "composeApp/src/jvmMain",
         "desktopApp/src/main",
+        "cli/src/main",
     ),
     baselineFile = cjkBaselineFile,
 )
@@ -437,12 +448,12 @@ tasks.register("cjkLiteralGateSelfTest") {
 
         // 排除规则断言
         val exclusionCases = listOf(
-            "composeApp/src/commonMain/kotlin/app/relay/ui/A.kt" to true,
-            "composeApp/src/commonMain/kotlin/app/relay/ui/AFeatureTest.kt" to false,
+            "composeApp/src/commonMain/kotlin/com/kapp/tidings/ui/A.kt" to true,
+            "composeApp/src/commonMain/kotlin/com/kapp/tidings/ui/AFeatureTest.kt" to false,
             "composeApp/src/commonTest/kotlin/B.kt" to false,
             "composeApp/src/jvmTest/kotlin/B.kt" to false,
             "androidApp/src/screenshotTest/kotlin/Preview.kt" to false,
-            "composeApp/src/commonMain/kotlin/app/relay/ui/desktop/PreviewState.kt" to false,
+            "composeApp/src/commonMain/kotlin/com/kapp/tidings/ui/desktop/PreviewState.kt" to false,
             "desktopApp/src/test/kotlin/C.kt" to false,
         )
         exclusionCases.forEach { (path, expected) ->

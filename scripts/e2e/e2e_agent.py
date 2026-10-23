@@ -6,7 +6,7 @@
 做什么
 ------
 夹具扮成一个**声明了 ag1 + agn1 的 agent 宿主节点**（caps 与
-`core/src/commonMain/kotlin/app/relay/core/protocol/MessageTypes.kt:150` 的
+`core/src/commonMain/kotlin/com/kapp/tidings/core/protocol/MessageTypes.kt:150` 的
 `AGENT_CAPS` 逐项一致），在 LAN 上与手机握手，然后直接把 `agent-session` /
 `agent-event` 信封发到手机的 UDP 17878，最后用 uiautomator dump 断言手机
 「Agent」页显示成什么样。
@@ -22,7 +22,7 @@
 为什么不走 agentNode 的 HTTP 控制面
 -----------------------------------
 `POST /v1/agent/session`、`POST /v1/agent/event`、`GET /v1/inbox` 都属于
-JVM agentNode（`agentNode/src/main/kotlin/app/relay/agent/ControlPlane.kt`），
+JVM agentNode（`agentNode/src/main/kotlin/com/kapp/tidings/agent/ControlPlane.kt`），
 要跑它们得先编 Kotlin、再起一个承载它的进程（历史上是 `agentNode` 的独立 CLI
 入口，2026-10-14 起改由桌面端同进程承载）。夹具契约
 （`docs/plans/2026-10-09-relay-e2e-fixture-program.md:61`）要的是
@@ -539,13 +539,13 @@ def run(args):
     if not args.skip_ui:
         phase("设备")
         r.require_device()
-        # 先把 App 提到前台再问 pid：`app_pid()` 就是 `pidof app.relay`，而安装/上一次
+        # 先把 App 提到前台再问 pid：`app_pid()` 就是 `pidof com.kapp.tidings`，而安装/上一次
         # force-stop 之后它本来就该是空的。原顺序（先问 pid 再 ensure）会把「夹具自己
         # 刚装完 APK」记成一条 FAIL —— 2026-10-09 真机首跑就是这么假红了一条。
         r.ensure_app_foreground()
         pid = r.app_pid()
         r.check("phone-app-running", bool(pid),
-                "把 App 提到前台后 pidof app.relay = %r" % (pid,))
+                "把 App 提到前台后 pidof com.kapp.tidings = %r" % (pid,))
 
     peer = r.UdpPeer(args.phone_ip, args.phone_udp, nick=nick, caps=FIXTURE_CAPS,
                      tcp_port=args.tcp_port, host=args.host_ip)

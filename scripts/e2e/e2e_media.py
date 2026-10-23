@@ -59,7 +59,7 @@
 
 夹具自己装成"那台电脑"：UDP 握手 / 收 ACK 用共享库的 `UdpPeer`；TCP 侧另起一个
 **拉取服务端**（共享库的 `TcpFrameServer` 只认 `{"type":"msg"}`，没有 pull/pull-ok/done
-与裸流能力），逐帧对齐 `core/src/commonMain/kotlin/app/relay/core/transport/TransferServer.kt`。
+与裸流能力），逐帧对齐 `core/src/commonMain/kotlin/com/kapp/tidings/core/transport/TransferServer.kt`。
 `e2e_files.py` 是同一个形状的兄弟夹具；两个文件不互相 import（README §约定）。
 
     # 不插手机也能确认自己没写崩（纯本地断言，不碰网络、不碰设备）：
@@ -101,9 +101,9 @@ import relay_e2e as R  # noqa: E402
 
 # ---------------------------------------------------------------------------
 # 协议常量：逐条对齐
-#   core/src/commonMain/kotlin/app/relay/core/protocol/FileTransfer.kt
-#   core/src/commonMain/kotlin/app/relay/core/protocol/Codec.kt
-#   core/src/commonMain/kotlin/app/relay/core/protocol/MessageTypes.kt
+#   core/src/commonMain/kotlin/com/kapp/tidings/core/protocol/FileTransfer.kt
+#   core/src/commonMain/kotlin/com/kapp/tidings/core/protocol/Codec.kt
+#   core/src/commonMain/kotlin/com/kapp/tidings/core/protocol/MessageTypes.kt
 # ---------------------------------------------------------------------------
 
 FILE_CTL = "file-ctl"
@@ -980,7 +980,7 @@ def _text_present(substr, timeout=6.0, exact=False, interval=0.5, desc=False):
 
     `desc=True` 比的是 **contentDescription**（`n.desc`）。有些「标题」只在描述上：
     查看图片弹层的标题就是 `contentDescription = chat_image_preview_title`
-    （`composeApp/src/commonMain/kotlin/app/relay/ui/components/ImageViewerDialog.kt:84`），
+    （`composeApp/src/commonMain/kotlin/com/kapp/tidings/ui/components/ImageViewerDialog.kt:84`），
     用 text 找永远是 None（2026-10-09 真机：r52 因此恒红）。
     """
     deadline = time.monotonic() + max(0.0, timeout)
@@ -1089,7 +1089,7 @@ def _scroll_chat_bottom(times=2, pixels=900):
     """把消息列表拉到底，露出最新的卡片。
 
     会话页是 LazyColumn，只在**消息集合变化**时 `animateScrollToItem(lastIndex)`
-    （`composeApp/src/commonMain/kotlin/app/relay/feature/chat/ChatScreen.kt:356`）——
+    （`composeApp/src/commonMain/kotlin/com/kapp/tidings/feature/chat/ChatScreen.kt:356`）——
     一张已经收到的卡自己长高（出现「接收」按钮、进度、完成态）**不会**触发滚动，
     于是新卡片经常落在视口下方；而 uiautomator 只报**可见**节点，看不见的卡等于不存在。
     2026-10-09 真机实证：音频相位找 `e2e-broken.m4a` 的「接收」12 秒找不到，那一刻
@@ -1716,7 +1716,7 @@ def _phase_nudge(args, peer, server, material_dir):
 
     # ---- R63：限流。NudgeThrottle(maxPerWindow=2, windowMs=60s, minGapMs=15s)
     #
-    # 关键读源事实（`composeApp/src/commonMain/kotlin/app/relay/app/ChatInteractions.kt:81-90`）：
+    # 关键读源事实（`composeApp/src/commonMain/kotlin/com/kapp/tidings/app/ChatInteractions.kt:81-90`）：
     #   `allow()` 被 minGapMs 挡下时 **不记账**（`if (last != null && now - last < minGapMs) return false`
     #   在 `times += now` 之前）⇒ 挨着发的第二条**不占**配额。
     # 所以「间隔够了但窗口已满」这一条必须先把配额**用满**：要让 60s 窗口里真的攒下 2 条**放行**的，

@@ -34,8 +34,15 @@ import java.io.File
 val traceTool = File(project.projectDir, "tools/construction-trace.py")
 val traceBaseline = File(project.projectDir, "tools/construction-trace-baseline.txt")
 
+// **这份列表必须与 tools/construction-trace.py 的 `roots` 一致** ——
+// 门禁把它显式传进去（`--root-dir`），所以只改 python 那份不会生效。
+// 这是本仓"两份清单"的老毛病：它不会报错，只会让某一层静默不被扫描。
 val traceRoots = listOf(
     "core/src/commonMain",
+    "app/src/commonMain",
+    "app/src/androidMain",
+    "app/src/iosMain",
+    "app/src/jvmMain",
     "composeApp/src/commonMain",
     "composeApp/src/androidMain",
     "composeApp/src/iosMain",
@@ -43,6 +50,7 @@ val traceRoots = listOf(
     "agentNode/src/main",
     "desktopApp/src/main",
     "androidApp/src/main",
+    "cli/src/main",
 )
 
 fun traceNote(): String {

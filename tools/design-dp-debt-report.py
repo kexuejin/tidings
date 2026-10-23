@@ -36,33 +36,33 @@ SCOPE_DEFAULT = "/tmp/relay-own-scope.txt"
 # 第 19 轮 2 个 → 第 22 轮 28 个：全仓 389 处档上站点一次性迁完，档上计数归零。
 # **这条清单是"迁移进度"的唯一断言**：账上的「档上」列只报现状，不报做过什么。
 MIGRATED_FILES = (
-    "composeApp/src/commonMain/kotlin/app/relay/feature/cabinet/PeerCabinetView.kt",
-    "desktopApp/src/main/kotlin/app/relay/desktop/capture/CaptureOverlayView.kt",
-    "composeApp/src/commonMain/kotlin/app/relay/ui/desktop/CabinetPane.kt",
-    "composeApp/src/commonMain/kotlin/app/relay/ui/desktop/DesktopGlobalSearch.kt",
-    "composeApp/src/commonMain/kotlin/app/relay/ui/desktop/DesktopConversationsPane.kt",
-    "composeApp/src/commonMain/kotlin/app/relay/ui/desktop/DesktopFilesPane.kt",
-    "composeApp/src/commonMain/kotlin/app/relay/ui/desktop/DesktopHistorySearch.kt",
-    "composeApp/src/commonMain/kotlin/app/relay/ui/desktop/DesktopComposer.kt",
-    "composeApp/src/commonMain/kotlin/app/relay/ui/desktop/DesktopChrome.kt",
-    "composeApp/src/commonMain/kotlin/app/relay/ui/desktop/DesktopNodesPane.kt",
-    "composeApp/src/commonMain/kotlin/app/relay/ui/desktop/DesktopNavigation.kt",
-    "composeApp/src/commonMain/kotlin/app/relay/feature/agents/AgentConsoleScreen.kt",
-    "composeApp/src/commonMain/kotlin/app/relay/feature/agents/AgentApprovalCards.kt",
-    "composeApp/src/commonMain/kotlin/app/relay/feature/conversations/ConversationsScreen.kt",
-    "composeApp/src/commonMain/kotlin/app/relay/feature/settings/SettingsScreen.kt",
-    "composeApp/src/commonMain/kotlin/app/relay/feature/settings/SettingsMoreScreen.kt",
-    "composeApp/src/commonMain/kotlin/app/relay/feature/nodes/NodesScreen.kt",
-    "composeApp/src/commonMain/kotlin/app/relay/ui/components/GroupInfoDialog.kt",
-    "composeApp/src/commonMain/kotlin/app/relay/ui/components/GroupInfoSubDialogs.kt",
-    "composeApp/src/commonMain/kotlin/app/relay/ui/components/MessageComposer.kt",
-    "composeApp/src/commonMain/kotlin/app/relay/ui/components/PkPalette.kt",
-    "composeApp/src/commonMain/kotlin/app/relay/ui/components/EmojiPalette.kt",
-    "composeApp/src/commonMain/kotlin/app/relay/ui/components/RemoteViewSessionDialog.kt",
-    "composeApp/src/commonMain/kotlin/app/relay/ui/components/VoiceRecordDialog.kt",
-    "composeApp/src/commonMain/kotlin/app/relay/ui/components/ImageViewerDialog.kt",
-    "composeApp/src/commonMain/kotlin/app/relay/ui/components/AdaptiveDiagDialog.kt",
-    "desktopApp/src/main/kotlin/app/relay/desktop/DesktopHosting.kt",
+    "composeApp/src/commonMain/kotlin/com/kapp/tidings/feature/cabinet/PeerCabinetView.kt",
+    "desktopApp/src/main/kotlin/com/kapp/tidings/desktop/capture/CaptureOverlayView.kt",
+    "composeApp/src/commonMain/kotlin/com/kapp/tidings/ui/desktop/CabinetPane.kt",
+    "composeApp/src/commonMain/kotlin/com/kapp/tidings/ui/desktop/DesktopGlobalSearch.kt",
+    "composeApp/src/commonMain/kotlin/com/kapp/tidings/ui/desktop/DesktopConversationsPane.kt",
+    "composeApp/src/commonMain/kotlin/com/kapp/tidings/ui/desktop/DesktopFilesPane.kt",
+    "composeApp/src/commonMain/kotlin/com/kapp/tidings/ui/desktop/DesktopHistorySearch.kt",
+    "composeApp/src/commonMain/kotlin/com/kapp/tidings/ui/desktop/DesktopComposer.kt",
+    "composeApp/src/commonMain/kotlin/com/kapp/tidings/ui/desktop/DesktopChrome.kt",
+    "composeApp/src/commonMain/kotlin/com/kapp/tidings/ui/desktop/DesktopNodesPane.kt",
+    "composeApp/src/commonMain/kotlin/com/kapp/tidings/ui/desktop/DesktopNavigation.kt",
+    "composeApp/src/commonMain/kotlin/com/kapp/tidings/feature/agents/AgentConsoleScreen.kt",
+    "composeApp/src/commonMain/kotlin/com/kapp/tidings/feature/agents/AgentApprovalCards.kt",
+    "composeApp/src/commonMain/kotlin/com/kapp/tidings/feature/conversations/ConversationsScreen.kt",
+    "composeApp/src/commonMain/kotlin/com/kapp/tidings/feature/settings/SettingsScreen.kt",
+    "composeApp/src/commonMain/kotlin/com/kapp/tidings/feature/settings/SettingsMoreScreen.kt",
+    "composeApp/src/commonMain/kotlin/com/kapp/tidings/feature/nodes/NodesScreen.kt",
+    "composeApp/src/commonMain/kotlin/com/kapp/tidings/ui/components/GroupInfoDialog.kt",
+    "composeApp/src/commonMain/kotlin/com/kapp/tidings/ui/components/GroupInfoSubDialogs.kt",
+    "composeApp/src/commonMain/kotlin/com/kapp/tidings/ui/components/MessageComposer.kt",
+    "composeApp/src/commonMain/kotlin/com/kapp/tidings/ui/components/PkPalette.kt",
+    "composeApp/src/commonMain/kotlin/com/kapp/tidings/ui/components/EmojiPalette.kt",
+    "composeApp/src/commonMain/kotlin/com/kapp/tidings/ui/components/RemoteViewSessionDialog.kt",
+    "composeApp/src/commonMain/kotlin/com/kapp/tidings/ui/components/VoiceRecordDialog.kt",
+    "composeApp/src/commonMain/kotlin/com/kapp/tidings/ui/components/ImageViewerDialog.kt",
+    "composeApp/src/commonMain/kotlin/com/kapp/tidings/ui/components/AdaptiveDiagDialog.kt",
+    "desktopApp/src/main/kotlin/com/kapp/tidings/desktop/DesktopHosting.kt",
 )
 
 GROUP_LABEL = {
@@ -227,7 +227,7 @@ def render(root, rows, scope=None):
     L.append("3. 档外的字面量按「保真优先于复用」保留并登记偏差 —— 它们是原型写死的精确值"
              "（如 `.dlg{border-radius:20px}`），不在 `AppSpacing` 的档上，硬套档位就是改保真度。")
     L.append("")
-    L.append(f"`AppSpacing` 档位：{'/'.join(tiers)}（`scaffold/composeApp/src/commonMain/kotlin/app/relay/ui/theme/Spacing.kt`）")
+    L.append(f"`AppSpacing` 档位：{'/'.join(tiers)}（`scaffold/composeApp/src/commonMain/kotlin/com/kapp/tidings/ui/theme/Spacing.kt`）")
     L.append("")
     L.append("## 2 按组汇总")
     L.append("")
