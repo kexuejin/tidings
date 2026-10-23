@@ -1,0 +1,79 @@
+-- 删掉 MessageEntity.outgoing_envelope：那条影子凭据退休了。
+--
+-- 为什么能删：这一列的**唯一**用途是"core 的待发队列只是进程内的，重启即空"，
+-- 所以 UI 必须自己留一份已编码信封，重启时原样喂回 `Messenger.requeue`。
+-- 现在待发队列自己落盘了（core/persist/PersistStores 的 FileQueueStore），
+-- 凭据只剩一份。启动时反过来问 core 要还在等的 msgId
+-- （`NodeRuntime.pendingOutgoingMessages()`），由
+-- `RelayControllerMessagesComponent.handleRestoreQueuedFrom` 贴回 UI 那一行。
+--
+-- 为什么留着两份更难维护：UI 那份必然可能过期 —— 队列出队了 UI 还留着信封，
+-- 下次启动就会把一条**已经送达**的消息重新塞回队列，对端于是收到两条。
+--
+-- 为什么是重建表而不是 `ALTER TABLE … DROP COLUMN`：SQLDelight 生成的目标版本
+-- 必须是"从零建库"也能得到的形状，而 `DROP COLUMN` 要求 SQLite ≥ 3.35
+-- （桌面那条 sqlite-jdbc 与 iOS 的系统 libsqlite3 都够，但 Android 框架 SQLite
+-- 各版本的编译选项不保证）。重建表是所有 SQLite 版本都支持的写法。
+--
+-- 顺带把三个 FTS 触发器重建成 BEFORE INSERT/UPDATE/DELETE + AFTER 三件套的等价形状：
+-- 原来的写法是 insert 后写 FTS、delete/update 前写 FTS，这里保持**同样的时机**，
+-- 不顺手"修"成别的形状 —— 迁移文件只做"让老库变成新库"，不顺带改语义。
+--
+-- 数据：一个可空 TEXT 列，值只被上面的代码读写，没有任何查询按它过滤。
+-- 丢弃它不丢信息：还在排队的消息由 queue.log 里的信封决定，已送达的消息
+-- 的 delivery 列已经是 'sent'。
+DROP INDEX IF EXISTS idx_message_conv_time;
+DROP INDEX IF EXISTS idx_message_peer;
+
+CREATE TABLE MessageEntity_new (
+    id TEXT NOT NULL PRIMARY KEY,
+    conv_id TEXT NOT NULL,
+    peer_id TEXT NOT NULL,
+    sender_id TEXT,
+    mine INTEGER NOT NULL,
+    text TEXT NOT NULL,
+    timestamp INTEGER NOT NULL,
+    delivery TEXT,
+    notice TEXT,
+    file_json TEXT,
+    screen_json TEXT
+);
+
+INSERT INTO MessageEntity_new (
+    id, conv_id, peer_id, sender_id, mine, text, timestamp, delivery, notice, file_json, screen_json
+)
+SELECT id, conv_id, peer_id, sender_id, mine, text, timestamp, delivery, notice, file_json, screen_json
+FROM MessageEntity;
+
+-- FTS5 的 content 指向表名与 rowid，必须在换表**之后**重建。
+DROP TRIGGER IF EXISTS message_after_insert;
+DROP TRIGGER IF EXISTS message_after_delete;
+DROP TRIGGER IF EXISTS message_after_update;
+DROP TABLE IF EXISTS MessageFts;
+
+DROP TABLE MessageEntity;
+
+ALTER TABLE MessageEntity_new RENAME TO MessageEntity;
+
+CREATE INDEX IF NOT EXISTS idx_message_conv_time ON MessageEntity(conv_id, timestamp);
+CREATE INDEX IF NOT EXISTS idx_message_peer ON MessageEntity(peer_id);
+
+CREATE VIRTUAL TABLE IF NOT EXISTS MessageFts USING fts5(
+    text,
+    content='MessageEntity',
+    content_rowid='rowid',
+    tokenize='trigram'
+);
+
+CREATE TRIGGER IF NOT EXISTS message_after_insert AFTER INSERT ON MessageEntity BEGIN
+    INSERT INTO MessageFts(rowid, text) VALUES (new.rowid, new.text);
+END;
+
+CREATE TRIGGER IF NOT EXISTS message_after_delete AFTER DELETE ON MessageEntity BEGIN
+    INSERT INTO MessageFts(MessageFts, rowid, text) VALUES ('delete', old.rowid, old.text);
+END;
+
+CREATE TRIGGER IF NOT EXISTS message_after_update AFTER UPDATE ON MessageEntity BEGIN
+    INSERT INTO MessageFts(MessageFts, rowid, text) VALUES ('delete', old.rowid, old.text);
+    INSERT INTO MessageFts(rowid, text) VALUES (new.rowid, new.text);
+END;

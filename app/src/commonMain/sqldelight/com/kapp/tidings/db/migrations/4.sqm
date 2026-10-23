@@ -1,0 +1,81 @@
+-- PPE-1 增补 D1/D6：AgentSessionEntity 获得四个可空新列（agent-session 的新可选键
+-- agentId / wsId / wsTitle / wsPath 的落库面），并补上 v1→v4 链从未建出的两张 agent 表。
+--
+-- 为什么是「补建 + 重建」而不是 `ALTER TABLE … ADD COLUMN`（第一版就是后者，被两条
+-- 真实路径的测试当场判红）：
+--  1. **v1 老库上没有这张表**：`2.sqm` 只建了审批那四张，`AgentSessionEntity` /
+--     `AgentEventEntity` 从第 2 版起只由 `Schema.create` 建 —— 于是 v1 → v5 的迁移链
+--     从来没有建出过它们，`ALTER TABLE AgentSessionEntity` 直接 `no such table`。
+--     这里先 `CREATE TABLE IF NOT EXISTS`（旧形状）把表补出来，链就闭合了。
+--  2. **「表已是最新但 user_version=0」的库**（桌面那条手写路径专门处理的状态）重跑
+--     本文件时，`ALTER` 会撞 `duplicate column name`，用户开不了 App —— 与 `1.sqm` 的
+--     `screen_json`、`2.sqm` 的 `IF NOT EXISTS` 是同一条纪律。重建表天然幂等：
+--     新列在旧形状上不存在 → 补 NULL；已经存在 → 原样搬。
+--  3. 重建（`create new + INSERT…SELECT 点名列 + drop + rename`）是所有 SQLite 版本都
+--     支持的写法，`DROP COLUMN` 不是（要求 ≥ 3.35，Android 框架 SQLite 不保证）—— 3.sqm 同此。
+--
+-- 搬移只点名**九个历史列**，四个新列一律置 NULL：这样无论源表是 9 列还是 13 列，
+-- `INSERT…SELECT` 都不会因列数不匹配而失败（幂等的代价：极端情形「13 列 + 未盖章」的库
+-- 重跑会把四个新列洗成 NULL —— 可自愈，下一次 `agent-session` 宣告就原样填回，
+-- 而九列的真实数据一行不丢；另一侧的备选是 ALTER 直接崩、开不了 App，两害取其轻）。
+--
+-- 谁真的会跑它：Android（AndroidSqliteDriver）与 iOS（NativeSqliteDriver）由驱动做版本
+-- 检查并逐级 migrate；桌面（DatabaseDriverFactory.jvm.kt）2026-10-11 起也走建表/迁移/盖三步。
+-- 没有这个文件时老库少四列，而生成的查询显式点名列 —— 症状是打开库那一刻
+-- `no such column: agent_id`，不是"少显示一个字段"。
+
+-- (1) v1 链的补建：两张表按**第 2 版的形状**（不含四个新列）建出来；已经有的库是 no-op。
+CREATE TABLE IF NOT EXISTS AgentSessionEntity (
+    node_id TEXT NOT NULL,
+    session_id TEXT NOT NULL,
+    alias TEXT,
+    agent_kind TEXT,
+    state TEXT,
+    title TEXT,
+    started_at INTEGER,
+    updated_at INTEGER NOT NULL,
+    announced INTEGER NOT NULL,
+    PRIMARY KEY (node_id, session_id)
+);
+
+CREATE TABLE IF NOT EXISTS AgentEventEntity (
+    node_id TEXT NOT NULL,
+    session_id TEXT NOT NULL,
+    cursor INTEGER NOT NULL,
+    event_type TEXT NOT NULL,
+    summary TEXT,
+    body TEXT,
+    ref TEXT,
+    at INTEGER NOT NULL,
+    PRIMARY KEY (node_id, session_id, cursor)
+);
+
+-- (2) 幂等重建：新形状 = 九个历史列 + 四个可空新列（与 RelayDatabase.sq 的 CREATE 逐列一致）。
+CREATE TABLE AgentSessionEntity_new (
+    node_id TEXT NOT NULL,
+    session_id TEXT NOT NULL,
+    alias TEXT,
+    agent_kind TEXT,
+    state TEXT,
+    title TEXT,
+    started_at INTEGER,
+    updated_at INTEGER NOT NULL,
+    announced INTEGER NOT NULL,
+    agent_id TEXT,
+    ws_id TEXT,
+    ws_title TEXT,
+    ws_path TEXT,
+    PRIMARY KEY (node_id, session_id)
+);
+
+INSERT INTO AgentSessionEntity_new (
+    node_id, session_id, alias, agent_kind, state, title, started_at, updated_at, announced
+)
+SELECT node_id, session_id, alias, agent_kind, state, title, started_at, updated_at, announced
+FROM AgentSessionEntity;
+
+DROP INDEX IF EXISTS idx_agent_session_node;
+DROP TABLE AgentSessionEntity;
+ALTER TABLE AgentSessionEntity_new RENAME TO AgentSessionEntity;
+
+CREATE INDEX IF NOT EXISTS idx_agent_session_node ON AgentSessionEntity(node_id);
