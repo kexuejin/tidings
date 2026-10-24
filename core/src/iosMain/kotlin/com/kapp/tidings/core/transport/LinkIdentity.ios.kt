@@ -1,5 +1,7 @@
 // SPDX-License-Identifier: GPL-3.0-only
 
+@file:OptIn(ExperimentalForeignApi::class)
+
 package com.kapp.tidings.core.transport
 
 import com.kapp.tidings.core.crypto.TlsPin
@@ -35,6 +37,7 @@ import platform.CoreFoundation.CFTypeRef
 import platform.CoreFoundation.kCFNumberSInt32Type
 import platform.CoreFoundation.kCFTypeDictionaryKeyCallBacks
 import platform.CoreFoundation.kCFTypeDictionaryValueCallBacks
+import platform.Security.SecCertificateCopyData
 import platform.Security.SecCertificateCreateWithData
 import platform.Security.SecIdentityRef
 import platform.Security.SecItemAdd
@@ -77,10 +80,160 @@ import platform.Security.kSecRandomDefault
  *    [LinkCertificateDer.ecP256SpkiFromRawPoint] 拼出；
  *  · 私钥不变时**重签不换 pin**（自动续签）；私钥/公钥/证书分别落盘。
  *
+ * **恢复语义（P1）**：`ensure` 的读取顺序是 **容器 → 钥匙串 → 才生成**。
+ * 容器文件随沙箱删（卸载即丢），钥匙串项在卸载后幸存 —— 所以重装后必须从钥匙串
+ * 收养旧私钥，绝不允许"容器一空就生成新钥"。旧实现正是在这里把幸存旧钥删掉换成新钥，
+ * 加上 nodeId 已随 NSUserDefaults 死亡，对端只看到一个陌生设备，全程无报错。
+ *
  * 本文件只做"密钥 + 证书 + pin"这一层；把它变成 `sec_identity_t` 的 keychain 那一步
- * （`SecItemAdd` + `SecItemCopyMatching(kSecClassIdentity)`）在下一步，
- * 因为那一步要往 keychain 写东西、需要单独的验证。
+ * （`SecItemAdd` + `SecItemCopyMatching(kSecClassIdentity)`）走 [LinkKeychainStore]，
+ * 生产实现是 [SecItemKeychainStore]，测试注入假实现（Kotlin/Native 的测试二进制不是 app，
+ * 没有 keychain 可用）。
  */
+
+/** 身份是从哪来的。诊断字段，如实带出 —— 恢复是否生效就看它。 */
+internal enum class IosIdentitySource {
+    /** 容器文件（日常稳态、重签）。 */
+    CONTAINER,
+    /** 容器丢失/损坏后从钥匙串收养（重装场景的回退）。 */
+    KEYCHAIN_FALLBACK,
+    /** 全新生成（真首启：容器与钥匙串都没有）。 */
+    GENERATED,
+}
+
+/** 钥匙串里幸存的身份快照。`certDer` 可为 null（只剩钥匙没有证书）。 */
+internal class KeychainIdentitySnapshot(
+    val keyExternal: ByteArray,
+    val certDer: ByteArray?,
+)
+
+internal enum class KeychainWriteMode {
+    /**
+     * key + cert 都重写：key 项先删后加。**只有"保留身份的钥匙与钥匙串现存的不同"才允许** ——
+     * 显式轮换语义（容器/导入是权威）。绝不是每次启动都走它。
+     */
+    ADD_KEY_AND_CERT,
+    /** 只刷新 cert/identity，key 项一个字节都不动（日常稳态、重签、收养后的证书对齐）。 */
+    UPDATE_CERT_ONLY,
+}
+
+/** keychain 那一步的结果：identity（成功时非空）与状态码（成功时 null）。 */
+internal class KeychainWriteResult(val identity: SecIdentityRef?, val status: Int?)
+
+/**
+ * 钥匙串操作的可注入接缝：生产实现 [SecItemKeychainStore]；测试用假实现。
+ *
+ * 为什么必须是接口：Kotlin/Native 的测试二进制不是 app（没有 app 容器 / keychain-access-group
+ * 权限），`SecItemAdd` 返回 errSecNotAvailable —— 真实 keychain 行为只能靠真机验收，
+ * 恢复决策逻辑则靠假实现测。
+ */
+internal interface LinkKeychainStore {
+    /** 钥匙串里现存的身份；null = 没有 key 项（或读不回来）。 */
+    fun load(): KeychainIdentitySnapshot?
+
+    /**
+     * 把身份写进钥匙串并取回 SecIdentity。写入口径见 [KeychainWriteMode] ——
+     * cert/identity **每次写都换新**（重签之后旧证书若还留在钥匙串里，`SecItemCopyMatching`
+     * 可能配到旧的那份，症状和"pin 变了"一样难查）；key 项是否重写由 mode 决定。
+     */
+    fun write(key: SecKeyRef, certificate: SecCertificateRef, mode: KeychainWriteMode): KeychainWriteResult
+}
+
+@OptIn(ExperimentalForeignApi::class)
+internal class SecItemKeychainStore : LinkKeychainStore {
+
+    override fun load(): KeychainIdentitySnapshot? {
+        val keyExternal = copyKeyExternal() ?: return null
+        return KeychainIdentitySnapshot(keyExternal, copyCertDer())
+    }
+
+    /** 查 key 项并导出外部表示（收养比对的口径）；查不到或 keychain 不可用都按"没有"处理（null）。 */
+    private fun copyKeyExternal(): ByteArray? = memScoped {
+        val result = alloc<CFTypeRefVar>()
+        val status = SecItemCopyMatching(
+            cfDictionary(
+                kSecClass to kSecClassKey,
+                kSecAttrApplicationTag to TAG.encodeToByteArray().toCFData(),
+                kSecReturnRef to kCFBooleanTrue,
+                kSecMatchLimit to kSecMatchLimitOne,
+            ),
+            result.ptr,
+        )
+        if (status != 0) return@memScoped null
+        val key = result.value as? SecKeyRef ?: return@memScoped null
+        runCatching { exportData(SecKeyCopyExternalRepresentation(key, null)) }.getOrNull()
+    }
+
+    /** 查 cert 项并导出 DER；没有证书（只剩钥匙）返回 null。 */
+    private fun copyCertDer(): ByteArray? = memScoped {
+        val result = alloc<CFTypeRefVar>()
+        val status = SecItemCopyMatching(
+            cfDictionary(
+                kSecClass to kSecClassCertificate,
+                kSecAttrApplicationTag to TAG.encodeToByteArray().toCFData(),
+                kSecReturnRef to kCFBooleanTrue,
+                kSecMatchLimit to kSecMatchLimitOne,
+            ),
+            result.ptr,
+        )
+        if (status != 0) return@memScoped null
+        val cert = result.value as? SecCertificateRef ?: return@memScoped null
+        runCatching { exportData(SecCertificateCopyData(cert)) }.getOrNull()
+    }
+
+    override fun write(
+        key: SecKeyRef,
+        certificate: SecCertificateRef,
+        mode: KeychainWriteMode,
+    ): KeychainWriteResult = memScoped {
+        val tag = TAG.encodeToByteArray().toCFData()
+        for (cls in listOf(kSecClassCertificate, kSecClassIdentity)) {
+            SecItemDelete(cfDictionary(kSecClass to cls, kSecAttrApplicationTag to tag))
+        }
+        if (mode == KeychainWriteMode.ADD_KEY_AND_CERT) {
+            SecItemDelete(cfDictionary(kSecClass to kSecClassKey, kSecAttrApplicationTag to tag))
+            val keyStatus = SecItemAdd(
+                cfDictionary(
+                    kSecClass to kSecClassKey,
+                    kSecValueRef to key,
+                    kSecAttrApplicationTag to tag,
+                    kSecAttrIsPermanent to kCFBooleanTrue,
+                ),
+                null,
+            )
+            // 拿不到 keychain（测试进程没有 app 容器）时**不抛**：把状态带出去，让上层 fail-closed。
+            if (keyStatus != 0) return@memScoped KeychainWriteResult(null, keyStatus.toInt())
+        }
+        val certStatus = SecItemAdd(
+            cfDictionary(
+                kSecClass to kSecClassCertificate,
+                kSecValueRef to certificate,
+                kSecAttrApplicationTag to tag,
+            ),
+            null,
+        )
+        if (certStatus != 0) return@memScoped KeychainWriteResult(null, certStatus.toInt())
+
+        val result = alloc<CFTypeRefVar>()
+        val status = SecItemCopyMatching(
+            cfDictionary(
+                kSecClass to kSecClassIdentity,
+                kSecAttrApplicationTag to tag,
+                kSecReturnRef to kCFBooleanTrue,
+                kSecMatchLimit to kSecMatchLimitOne,
+            ),
+            result.ptr,
+        )
+        if (status != 0) return@memScoped KeychainWriteResult(null, status.toInt())
+        KeychainWriteResult(result.value as? SecIdentityRef, null)
+    }
+
+    companion object {
+        /** keychain 里的 application tag：key 与 cert **必须共用它**，identity 才查得到。 */
+        private const val TAG = "com.kapp.tidings.link.identity"
+    }
+}
+
 @OptIn(ExperimentalForeignApi::class)
 internal class IosLinkIdentity(
     val privateKey: SecKeyRef,
@@ -88,8 +241,10 @@ internal class IosLinkIdentity(
     val spki: ByteArray,
     val certDer: ByteArray,
     val pin: TlsPin,
+    /** 本次身份的来源（诊断：恢复是否生效看它）。 */
+    val source: IosIdentitySource,
     /**
-     * keychain 里查回来的 SecIdentity（第 2 步）。
+     * keychain 里查回来的 SecIdentity。
      *
      * 为什么非要走 keychain：`sec_protocol_options_set_local_identity` 要的是 `sec_identity_t`，
      * 而 **SecIdentity 没有公开的"用 key+cert 现造一个"构造函数** —— 只能把 key 与 cert 以
@@ -118,26 +273,44 @@ internal class IosLinkIdentity(
         /** 证书超过这个年龄就重签（同一把私钥 ⇒ pin 不变）。 */
         private const val RENEW_AFTER_MS = 300L * 24 * 3600 * 1000
 
-        fun ensure(dir: String, addresses: List<String>): IosLinkIdentity {
+        fun ensure(
+            dir: String,
+            addresses: List<String>,
+            keychain: LinkKeychainStore = SecItemKeychainStore(),
+        ): IosLinkIdentity {
             makeDirectories(dir)
             val keyPath = pathJoin(dir, KEY_FILE)
             val publicPath = pathJoin(dir, PUBLIC_FILE)
             val certPath = pathJoin(dir, CERT_FILE)
             val sanIps = addresses.mapNotNull { LinkCertificateDer.ipBytes(it) }
 
-            val keyData = readFileBytes(keyPath)
+            val containerKey = readFileBytes(keyPath)
             val storedSpki = readFileBytes(publicPath)
             val storedCert = readFileBytes(certPath)
             val certAge = fileAttributes(certPath)?.mtime?.let { now() - it } ?: Long.MAX_VALUE
+            val chain = keychain.load()
 
-            val fresh = keyData != null && storedSpki != null && storedCert != null && certAge < RENEW_AFTER_MS
-            val privateKey = if (fresh) {
-                createKeyFromData(keyData)
-            } else {
-                keyData?.let { runCatching { createKeyFromData(it) }.getOrNull() } ?: generateKey()
+            // 容器里的私钥解析失败（损坏）与"没有"同罪；钥匙串里幸存的旧钥不受影响。
+            val containerPrivateKey = containerKey?.let { runCatching { createKeyFromData(it) }.getOrNull() }
+            val containerFresh = containerPrivateKey != null && storedSpki != null &&
+                storedCert != null && certAge < RENEW_AFTER_MS
+
+            // 读顺序（P1 修复）：容器 → 钥匙串 → 才生成。
+            //  · 容器可用 → 用容器（权威：显式轮换与导入的用户意志都在容器这边）；
+            //  · 容器不可用、钥匙串有幸存身份 → 收养（重装场景的回退，pin 不变）；
+            //  · 都没有 → 真首启，生成。
+            var source = IosIdentitySource.CONTAINER
+            val privateKey = when {
+                containerPrivateKey != null -> containerPrivateKey
+                chain != null -> runCatching { createKeyFromData(chain.keyExternal) }.getOrNull()
+                    ?.also { source = IosIdentitySource.KEYCHAIN_FALLBACK }
+                    ?: generateKey().also { source = IosIdentitySource.GENERATED }
+                else -> generateKey().also { source = IosIdentitySource.GENERATED }
             }
-            val spki = if (fresh) storedSpki else publicSpki(privateKey)
-            val certDer = if (fresh) {
+
+            val fresh = containerFresh && source == IosIdentitySource.CONTAINER
+            val spki = if (fresh && storedSpki != null) storedSpki else publicSpki(privateKey)
+            val certDer = if (fresh && storedCert != null) {
                 storedCert
             } else {
                 LinkCertificateDer.selfSigned(
@@ -156,70 +329,31 @@ internal class IosLinkIdentity(
             }
             val certificate = SecCertificateCreateWithData(null, certDer.toCFData())
                 ?: error("SecCertificateCreateWithData 失败（证书 DER 形状不对）")
-            val keychain = keychainIdentity(privateKey, certificate)
+
+            // 钥匙串对账（取代旧的无条件三连删）：
+            //  · 钥匙串没有 key 项，或钥匙与保留身份不同 → 全量写入（后者 = 显式轮换语义，
+            //    这是**唯一**允许删 key 项的分支）；
+            //  · 钥匙与保留身份一致 → 只刷证书 —— 收养路径走这里，幸存的旧钥绝不被动。
+            //    （旧实现无条件先删后加：重装后收养无从谈起，幸存旧钥直接被换成新钥。）
+            val keyExternal = exportData(SecKeyCopyExternalRepresentation(privateKey, null))
+            val mode = if (chain != null && chain.keyExternal.contentEquals(keyExternal)) {
+                KeychainWriteMode.UPDATE_CERT_ONLY
+            } else {
+                KeychainWriteMode.ADD_KEY_AND_CERT
+            }
+            val keychainResult = keychain.write(privateKey, certificate, mode)
+
             return IosLinkIdentity(
                 privateKey = privateKey,
                 certificate = certificate,
                 spki = spki,
                 certDer = certDer,
                 pin = TlsPin.ofSpki(spki),
-                identity = keychain.identity,
-                secIdentity = keychain.identity?.let { sec_identity_create(it) },
-                keychainStatus = keychain.status,
+                source = source,
+                identity = keychainResult.identity,
+                secIdentity = keychainResult.identity?.let { sec_identity_create(it) },
+                keychainStatus = keychainResult.status,
             )
-        }
-
-        /** keychain 里的 application tag：key 与 cert **必须共用它**，identity 才查得到。 */
-        private val TAG = "com.kapp.tidings.link.identity".encodeToByteArray()
-
-        /**
-         * 第 2 步：把 key + cert 以同一个 tag 放进 keychain，再取回 SecIdentity。
-         *
-         * 先删同 tag 的旧项是**必需**的：证书重签之后旧的 cert 还在 keychain 里，
-         * `SecItemCopyMatching(kSecClassIdentity)` 可能配到旧的那一份（本地身份"看起来换了"
-         * 但 TLS 层还是旧证书）—— 症状和"pin 变了"一样难查。
-         */
-        /** keychain 那一步的结果：identity（成功时非空）与状态码（成功时 null）。 */
-        private class KeychainResult(val identity: SecIdentityRef?, val status: Int?)
-
-        private fun keychainIdentity(key: SecKeyRef, certificate: SecCertificateRef): KeychainResult = memScoped {
-            val tag = TAG.toCFData()
-            for (cls in listOf(kSecClassKey, kSecClassCertificate, kSecClassIdentity)) {
-                SecItemDelete(cfDictionary(kSecClass to cls, kSecAttrApplicationTag to tag))
-            }
-            val keyStatus = SecItemAdd(
-                cfDictionary(
-                    kSecClass to kSecClassKey,
-                    kSecValueRef to key,
-                    kSecAttrApplicationTag to tag,
-                    kSecAttrIsPermanent to kCFBooleanTrue,
-                ),
-                null,
-            )
-            // 拿不到 keychain（测试进程没有 app 容器）时**不抛**：把状态带出去，让上层 fail-closed。
-            if (keyStatus != 0) return@memScoped KeychainResult(null, keyStatus.toInt())
-            val certStatus = SecItemAdd(
-                cfDictionary(
-                    kSecClass to kSecClassCertificate,
-                    kSecValueRef to certificate,
-                    kSecAttrApplicationTag to tag,
-                ),
-                null,
-            )
-            if (certStatus != 0) return@memScoped KeychainResult(null, certStatus.toInt())
-
-            val result = alloc<CFTypeRefVar>()
-            val status = SecItemCopyMatching(
-                cfDictionary(
-                    kSecClass to kSecClassIdentity,
-                    kSecAttrApplicationTag to tag,
-                    kSecReturnRef to kCFBooleanTrue,
-                    kSecMatchLimit to kSecMatchLimitOne,
-                ),
-                result.ptr,
-            )
-            if (status != 0) return@memScoped KeychainResult(null, status.toInt())
-            KeychainResult(result.value as? SecIdentityRef, null)
         }
 
         // ---- 平台原语 ----
@@ -266,28 +400,6 @@ internal class IosLinkIdentity(
             return exportData(signature)
         }
 
-        private fun cfDictionary(vararg pairs: Pair<CFTypeRef?, CFTypeRef?>): CFMutableDictionaryRef? {
-            val dict = CFDictionaryCreateMutable(
-                null,
-                pairs.size.toLong(),
-                kCFTypeDictionaryKeyCallBacks.ptr,
-                kCFTypeDictionaryValueCallBacks.ptr,
-            )
-            for ((key, value) in pairs) CFDictionaryAddValue(dict, key, value)
-            return dict
-        }
-
-        private fun ByteArray.toCFData(): CFDataRef? = usePinned { pinned ->
-            CFDataCreate(null, pinned.addressOf(0).reinterpret(), size.toLong())
-        }
-
-        private fun exportData(data: CFDataRef?): ByteArray {
-            val cfData = data ?: error("期望 CFData，拿到 null")
-            val length = CFDataGetLength(cfData).toInt()
-            val pointer = CFDataGetBytePtr(cfData) ?: error("CFData 没有字节")
-            return pointer.readBytes(length)
-        }
-
         private fun randomBytes(size: Int): ByteArray {
             val out = ByteArray(size)
             out.usePinned { pinned ->
@@ -303,4 +415,28 @@ internal class IosLinkIdentity(
 
         private fun now(): Long = com.kapp.tidings.core.nowMillis()
     }
+}
+
+// ---- 共享的 cinterop 小工具（ensure 与 SecItemKeychainStore 都要用，放文件级） ----
+
+private fun ByteArray.toCFData(): CFDataRef? = usePinned { pinned ->
+    CFDataCreate(null, pinned.addressOf(0).reinterpret(), size.toLong())
+}
+
+internal fun exportData(data: CFDataRef?): ByteArray {
+    val cfData = data ?: error("期望 CFData，拿到 null")
+    val length = CFDataGetLength(cfData).toInt()
+    val pointer = CFDataGetBytePtr(cfData) ?: error("CFData 没有字节")
+    return pointer.readBytes(length)
+}
+
+private fun cfDictionary(vararg pairs: Pair<CFTypeRef?, CFTypeRef?>): CFMutableDictionaryRef? {
+    val dict = CFDictionaryCreateMutable(
+        null,
+        pairs.size.toLong(),
+        kCFTypeDictionaryKeyCallBacks.ptr,
+        kCFTypeDictionaryValueCallBacks.ptr,
+    )
+    for ((key, value) in pairs) CFDictionaryAddValue(dict, key, value)
+    return dict
 }
