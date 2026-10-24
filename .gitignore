@@ -21,6 +21,11 @@ build/
 captures/
 .cxx/
 
+# 发布签名指针文件:指向仓库外的密钥库,含口令,绝不入库。
+# 真身在哪、怎么备份,记录在密钥库所属的私有仓,不随本仓公开;
+# CI 侧由 repo secrets 注入同一把。
+/keystore.properties
+
 # ---- iOS / Xcode -----------------------------------------------------
 iosApp/build/
 iosApp/.build/

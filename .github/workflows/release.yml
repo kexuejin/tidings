@@ -3,7 +3,8 @@
 # 多平台安装包自动构建与 GitHub Release 发布工作流。
 #
 # 覆盖平台：
-#   - Android:  APK (signed with debug keystore for instant install)
+#   - Android:  APK (signed with the shared release keystore injected from repo
+#               secrets; the build fails rather than falling back to a debug key)
 #   - macOS:    DMG (Compose Desktop standalone runtime, URL Schemes, custom ICNS)
 #   - Windows:  MSI (Compose Desktop native Windows installer)
 #   - Linux:    DEB (Compose Desktop Debian/Ubuntu package)
@@ -50,6 +51,31 @@ jobs:
           packages: "platforms;android-36 build-tools;36.1.0"
 
       - uses: gradle/actions/setup-gradle@v4
+
+      # 正式签名从 repo secrets 注入 —— 与本地 keystore.properties 指向的是
+      # 同一把密钥库。密钥库放哪、怎么备份是仓库之外的部署事实,不写进本仓。
+      # 缺任何一项都直接红,绝不回退 debug 签名:"release 产物带着某个 runner
+      # 现生成的 debug key 静默发布出去"正是这套流程要消灭的缺陷形态。
+      - name: Materialize release signing config
+        env:
+          RELAY_KEYSTORE_BASE64: ${{ secrets.ANDROID_KEYSTORE_BASE64 }}
+          RELAY_STORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
+          RELAY_KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
+          RELAY_KEY_PASSWORD: ${{ secrets.ANDROID_KEY_PASSWORD }}
+        run: |
+          for var in RELAY_KEYSTORE_BASE64 RELAY_STORE_PASSWORD RELAY_KEY_ALIAS RELAY_KEY_PASSWORD; do
+            if [ -z "${!var}" ]; then
+              echo "::error::Release signing secret missing: $var. Configure ANDROID_KEYSTORE_BASE64 / ANDROID_KEYSTORE_PASSWORD / ANDROID_KEY_ALIAS / ANDROID_KEY_PASSWORD."
+              exit 1
+            fi
+          done
+          printf '%s' "$RELAY_KEYSTORE_BASE64" | base64 --decode > "$RUNNER_TEMP/relay-release.jks"
+          {
+            echo "storeFile=$RUNNER_TEMP/relay-release.jks"
+            echo "storePassword=$RELAY_STORE_PASSWORD"
+            echo "keyAlias=$RELAY_KEY_ALIAS"
+            echo "keyPassword=$RELAY_KEY_PASSWORD"
+          } > keystore.properties
 
       - name: Build Android Release APK
         run: |

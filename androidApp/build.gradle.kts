@@ -1,5 +1,7 @@
 // SPDX-License-Identifier: GPL-3.0-only
 
+import java.util.Properties
+
 plugins {
     alias(libs.plugins.androidApplication)
     alias(libs.plugins.composeCompiler)
@@ -7,6 +9,46 @@ plugins {
     // because the plugin is Android-only, even though the screens it renders
     // live in the shared module.
     alias(libs.plugins.screenshot)
+}
+
+// 发布签名:密钥库文件与口令永远不进版本库。
+//
+// 曾经的形态是 release 直接挂 debug 签名 —— 而 debug keystore 是**每台机器各一份**
+// (CI runner 每次冷启动现生成一份,本地是 ~/.android 那份),于是同一个应用
+// 在本地产物与 Release 产物上带着互不兼容的签名,设备上想换装必须卸载重装。
+//
+// 解析顺序(环境变量优先,便于 CI 注入;其次是仓库根的 keystore.properties,
+// 该文件已被 .gitignore 忽略,只存在于本机):
+//   1. RELAY_STORE_FILE / RELAY_STORE_PASSWORD / RELAY_KEY_ALIAS / RELAY_KEY_PASSWORD
+//   2. keystore.properties 的 storeFile / storePassword / keyAlias / keyPassword
+// 四项齐 → 用正式签名;一项都没有 → 回退 debug 签名并打一行警告(新克隆不配
+// 也能出包);**缺一部分 → 构建直接失败** —— "配了一半"会把配置错误藏进一次
+// 看起来成功的构建里,比"没配"更糟。
+// 密钥库放哪、怎么备份,是仓库之外的部署事实,不写进本仓(随仓公开等于
+// 把签名材料的部署状态交给所有人)。
+val releaseSigningProperties = Properties().apply {
+    val propertiesFile = rootProject.file("keystore.properties")
+    if (propertiesFile.isFile) propertiesFile.inputStream().use { load(it) }
+}
+
+fun releaseSigningValue(propertyName: String, envName: String): String? =
+    System.getenv(envName)?.takeIf { it.isNotBlank() }
+        ?: releaseSigningProperties.getProperty(propertyName)?.takeIf { it.isNotBlank() }
+
+val releaseSigningValues = mapOf(
+    "storeFile" to releaseSigningValue("storeFile", "RELAY_STORE_FILE"),
+    "storePassword" to releaseSigningValue("storePassword", "RELAY_STORE_PASSWORD"),
+    "keyAlias" to releaseSigningValue("keyAlias", "RELAY_KEY_ALIAS"),
+    "keyPassword" to releaseSigningValue("keyPassword", "RELAY_KEY_PASSWORD"),
+)
+val releaseSigningConfigured = releaseSigningValues.values.all { it != null }
+if (!releaseSigningConfigured && releaseSigningValues.values.any { it != null }) {
+    val present = releaseSigningValues.filterValues { it != null }.keys.joinToString(",")
+    val absent = releaseSigningValues.filterValues { it == null }.keys.joinToString(",")
+    throw GradleException(
+        "发布签名只配了一半(已有 $present,缺少 $absent)。要么四项配齐" +
+            "(keystore.properties 或 RELAY_* 环境变量),要么全部拿掉回退 debug。"
+    )
 }
 
 android {
@@ -38,10 +80,31 @@ android {
         versionName = "0.1.0"
     }
 
+    if (releaseSigningConfigured) {
+        signingConfigs {
+            create("release") {
+                // 相对路径按仓库根解析;绝对路径(密钥库放在仓库外)原样使用。
+                storeFile = rootProject.file(releaseSigningValues.getValue("storeFile")!!)
+                storePassword = releaseSigningValues.getValue("storePassword")
+                keyAlias = releaseSigningValues.getValue("keyAlias")
+                keyPassword = releaseSigningValues.getValue("keyPassword")
+            }
+        }
+    }
+
     buildTypes {
         release {
             isMinifyEnabled = false
-            signingConfig = signingConfigs.getByName("debug")
+            signingConfig = if (releaseSigningConfigured) {
+                signingConfigs.getByName("release")
+            } else {
+                logger.lifecycle(
+                    "androidApp: 未配置正式发布签名(keystore.properties / RELAY_* 环境变量)," +
+                        "release 回退 debug 签名 —— 该产物只能覆盖安装同为 debug 签名的构建。" +
+                        "正式签名的配置材料在仓库之外,不随仓分发。"
+                )
+                signingConfigs.getByName("debug")
+            }
         }
     }
 }
