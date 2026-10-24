@@ -11,15 +11,37 @@ import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import com.kapp.tidings.domain.recovery.RecoveryActionFailure
+import com.kapp.tidings.domain.recovery.RecoveryExportResult
+import com.kapp.tidings.domain.recovery.RecoveryImportResult
 import com.kapp.tidings.generated.resources.Res
 import com.kapp.tidings.ui.components.AppButtonTone
 import com.kapp.tidings.ui.components.AppOutlinedButton
 import com.kapp.tidings.generated.resources.common_cancel
+import com.kapp.tidings.generated.resources.common_confirm
 import com.kapp.tidings.generated.resources.ic_folder
+import com.kapp.tidings.generated.resources.ic_shield
+import com.kapp.tidings.generated.resources.recovery_failed_format
+import com.kapp.tidings.generated.resources.recovery_failed_password
+import com.kapp.tidings.generated.resources.recovery_failed_title
+import com.kapp.tidings.generated.resources.recovery_failed_unexpected
+import com.kapp.tidings.generated.resources.recovery_failed_version
+import com.kapp.tidings.generated.resources.recovery_failed_write
+import com.kapp.tidings.generated.resources.recovery_export_success_body
+import com.kapp.tidings.generated.resources.recovery_export_success_title
+import com.kapp.tidings.generated.resources.recovery_import_success_body
+import com.kapp.tidings.generated.resources.recovery_import_success_title
+import com.kapp.tidings.generated.resources.recovery_password_empty
+import com.kapp.tidings.generated.resources.recovery_password_label
+import com.kapp.tidings.generated.resources.recovery_password_title
+import com.kapp.tidings.generated.resources.recovery_shared_opened
+import com.kapp.tidings.generated.resources.recovery_shared_written
 import com.kapp.tidings.generated.resources.settings_data_desktop_hint
 import com.kapp.tidings.generated.resources.settings_data_phone_hint
 import com.kapp.tidings.generated.resources.set_change_dir
@@ -42,16 +64,26 @@ import com.kapp.tidings.generated.resources.set_more_data_title
 import com.kapp.tidings.generated.resources.set_open_dir
 import com.kapp.tidings.generated.resources.set_persist_sub
 import com.kapp.tidings.generated.resources.set_persist_title
+import com.kapp.tidings.generated.resources.set_recovery_card_title
+import com.kapp.tidings.generated.resources.set_recovery_export_action
+import com.kapp.tidings.generated.resources.set_recovery_export_sub
+import com.kapp.tidings.generated.resources.set_recovery_export_title
+import com.kapp.tidings.generated.resources.set_recovery_hint
+import com.kapp.tidings.generated.resources.set_recovery_import_action
+import com.kapp.tidings.generated.resources.set_recovery_import_sub
+import com.kapp.tidings.generated.resources.set_recovery_import_title
 import com.kapp.tidings.generated.resources.set_retention_summary
 import com.kapp.tidings.generated.resources.set_storage_usage
 import com.kapp.tidings.generated.resources.set_storage_usage_counting
 import com.kapp.tidings.generated.resources.set_storage_usage_value
 import com.kapp.tidings.ui.SectionCard
 import com.kapp.tidings.ui.components.InfoRow
+import com.kapp.tidings.ui.components.LabeledField
 import com.kapp.tidings.ui.components.RelayDialog
 import com.kapp.tidings.ui.components.RelayDialogButton
 import com.kapp.tidings.ui.components.formatBytes
 import com.kapp.tidings.ui.theme.LocalAppSpacing
+import kotlinx.coroutines.launch
 import org.jetbrains.compose.resources.stringResource
 
 /**
@@ -92,6 +124,12 @@ fun SettingsDataSubpage(
     onPersistMessagesEnabledChange: ((Boolean) -> Unit)? = null,
     retentionDays: Int = DEFAULT_RETENTION_DAYS,
     onClearHistory: (() -> Unit)? = null,
+    /** L1 导出（口令加密身份包）。null = 本宿主没有接（整张卡不画，与目录出口同一纪律）。 */
+    onExportIdentityBundle: (suspend (String) -> RecoveryExportResult)? = null,
+    /** 选备份文件并读回字节；null（取消/读不到）时导入流程静默终止。 */
+    onPickBackupFile: (suspend () -> ByteArray?)? = null,
+    /** L1 导入。 */
+    onImportIdentityBundle: (suspend (ByteArray, String) -> RecoveryImportResult)? = null,
 ) {
     var persistMessages by rememberSaveable(persistMessagesEnabled) {
         mutableStateOf(persistMessagesEnabled)
@@ -269,6 +307,18 @@ fun SettingsDataSubpage(
                 )
             }
         }
+
+        // 备份与恢复（L1）：三个回调都有人才画 —— 没有消费者的整张卡是"留在屏上骗人"。
+        val exportBundle = onExportIdentityBundle
+        val pickBackup = onPickBackupFile
+        val importBundle = onImportIdentityBundle
+        if (exportBundle != null && pickBackup != null && importBundle != null) {
+            RecoverySection(
+                onExport = exportBundle,
+                onPickBackupFile = pickBackup,
+                onImport = importBundle,
+            )
+        }
     }
 }
 
@@ -279,6 +329,238 @@ fun SettingsDataSubpage(
  */
 internal fun isAppPrivateStoragePath(path: String): Boolean =
     path.startsWith("/data/user/0/") || path.startsWith("/data/data/")
+
+/**
+ * 备份与恢复卡（L1，原型 screenSetData() 的「备份与恢复」卡）。
+ *
+ * 流程与「清空聊天记录」同一档次的前置闸纪律：导出/导入都要先过口令对话框，
+ * 确认按钮才真正动手。导入多一步选文件 —— 取消选文件**不是错误**，静默终止。
+ *
+ * 结果一律落对话框（成功报文件名/大小/去向，失败报程序化原因的文案），不给
+ * 「点了一下什么都没发生」的入口。
+ */
+@Composable
+private fun RecoverySection(
+    onExport: suspend (String) -> RecoveryExportResult,
+    onPickBackupFile: suspend () -> ByteArray?,
+    onImport: suspend (ByteArray, String) -> RecoveryImportResult,
+) {
+    val scope = rememberCoroutineScope()
+    var password by rememberSaveable { mutableStateOf("") }
+    var passwordError by rememberSaveable { mutableStateOf(false) }
+    var showExportPassword by rememberSaveable { mutableStateOf(false) }
+    var showImportPassword by rememberSaveable { mutableStateOf(false) }
+    var pendingImport by remember { mutableStateOf<ByteArray?>(null) }
+    var exportResult by remember { mutableStateOf<RecoveryExportResult?>(null) }
+    var importResult by remember { mutableStateOf<RecoveryImportResult?>(null) }
+
+    fun closePasswordDialog() {
+        showExportPassword = false
+        showImportPassword = false
+        passwordError = false
+        password = ""
+        pendingImport = null
+    }
+
+    fun confirmPassword() {
+        if (password.isEmpty()) {
+            passwordError = true
+            return
+        }
+        val bytes = pendingImport
+        if (showImportPassword && bytes != null) {
+            val request = bytes
+            scope.launch {
+                importResult = onImport(request, password)
+                closePasswordDialog()
+            }
+        } else {
+            scope.launch {
+                exportResult = onExport(password)
+                closePasswordDialog()
+            }
+        }
+    }
+
+    SectionCard(
+        title = stringResource(Res.string.set_recovery_card_title),
+        icon = Res.drawable.ic_shield,
+    ) {
+        Text(
+            text = stringResource(Res.string.set_recovery_hint),
+            style = MaterialTheme.typography.bodySmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+            modifier = Modifier.padding(top = LocalAppSpacing.current.sm6),
+        )
+        SettingRow(
+            title = stringResource(Res.string.set_recovery_export_title),
+            subtitle = stringResource(Res.string.set_recovery_export_sub),
+        ) {
+            AppOutlinedButton(
+                text = stringResource(Res.string.set_recovery_export_action),
+                onClick = {
+                    password = ""
+                    passwordError = false
+                    showExportPassword = true
+                },
+            )
+        }
+        SettingRow(
+            title = stringResource(Res.string.set_recovery_import_title),
+            subtitle = stringResource(Res.string.set_recovery_import_sub),
+        ) {
+            AppOutlinedButton(
+                text = stringResource(Res.string.set_recovery_import_action),
+                onClick = {
+                    scope.launch {
+                        val bytes = onPickBackupFile()
+                        // 用户取消选文件不是错误，什么都不发生。
+                        if (bytes != null) {
+                            password = ""
+                            passwordError = false
+                            pendingImport = bytes
+                            showImportPassword = true
+                        }
+                    }
+                },
+            )
+        }
+    }
+
+    if (showExportPassword || showImportPassword) {
+        RecoveryPasswordDialog(
+            password = password,
+            onPasswordChange = {
+                password = it
+                if (it.isNotEmpty()) passwordError = false
+            },
+            showError = passwordError,
+            onDismiss = { closePasswordDialog() },
+            onConfirm = { confirmPassword() },
+        )
+    }
+
+    exportResult?.let { result ->
+        when (result) {
+            is RecoveryExportResult.Exported -> RecoveryResultDialog(
+                title = stringResource(Res.string.recovery_export_success_title),
+                body = stringResource(
+                    Res.string.recovery_export_success_body,
+                    result.fileName,
+                    formatBytes(result.byteCount.toLong()),
+                    if (result.shared) {
+                        stringResource(Res.string.recovery_shared_opened)
+                    } else {
+                        stringResource(Res.string.recovery_shared_written)
+                    },
+                ),
+                onDismiss = { exportResult = null },
+            )
+            is RecoveryExportResult.Failed -> RecoveryResultDialog(
+                title = stringResource(Res.string.recovery_failed_title),
+                body = recoveryFailureText(result.reason),
+                onDismiss = { exportResult = null },
+            )
+        }
+    }
+
+    importResult?.let { result ->
+        when (result) {
+            is RecoveryImportResult.Imported -> RecoveryResultDialog(
+                title = stringResource(Res.string.recovery_import_success_title),
+                body = stringResource(
+                    Res.string.recovery_import_success_body,
+                    result.nodeId,
+                    result.peerPinCount,
+                ),
+                onDismiss = { importResult = null },
+            )
+            is RecoveryImportResult.Failed -> RecoveryResultDialog(
+                title = stringResource(Res.string.recovery_failed_title),
+                body = recoveryFailureText(result.reason),
+                onDismiss = { importResult = null },
+            )
+        }
+    }
+}
+
+@Composable
+private fun RecoveryPasswordDialog(
+    password: String,
+    onPasswordChange: (String) -> Unit,
+    showError: Boolean,
+    onDismiss: () -> Unit,
+    onConfirm: () -> Unit,
+) {
+    RelayDialog(
+        onDismissRequest = onDismiss,
+        title = { Text(stringResource(Res.string.recovery_password_title)) },
+        content = {
+            LabeledField(
+                label = stringResource(Res.string.recovery_password_label),
+                value = password,
+                onValueChange = onPasswordChange,
+                isError = showError,
+                supporting = if (showError) stringResource(Res.string.recovery_password_empty) else null,
+            )
+        },
+        confirmButton = {
+            RelayDialogButton(
+                text = stringResource(Res.string.common_confirm),
+                onClick = onConfirm,
+            )
+        },
+        dismissButton = {
+            RelayDialogButton(
+                text = stringResource(Res.string.common_cancel),
+                onClick = onDismiss,
+            )
+        },
+    )
+}
+
+@Composable
+private fun RecoveryResultDialog(
+    title: String,
+    body: String,
+    onDismiss: () -> Unit,
+) {
+    RelayDialog(
+        onDismissRequest = onDismiss,
+        title = { Text(title) },
+        content = {
+            Text(
+                text = body,
+                style = MaterialTheme.typography.bodyMedium,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+        },
+        confirmButton = {
+            RelayDialogButton(
+                text = stringResource(Res.string.common_confirm),
+                onClick = onDismiss,
+            )
+        },
+    )
+}
+
+@Composable
+private fun recoveryFailureText(reason: RecoveryActionFailure): String = when (reason) {
+    RecoveryActionFailure.PasswordRequired,
+    RecoveryActionFailure.AuthFailed,
+    -> stringResource(Res.string.recovery_failed_password)
+
+    RecoveryActionFailure.BadFormat,
+    RecoveryActionFailure.ManifestMismatch,
+    RecoveryActionFailure.InvalidPayload,
+    -> stringResource(Res.string.recovery_failed_format)
+
+    RecoveryActionFailure.UnsupportedVersion -> stringResource(Res.string.recovery_failed_version)
+    RecoveryActionFailure.WriteFailed -> stringResource(Res.string.recovery_failed_write)
+    RecoveryActionFailure.IdentityMissing,
+    RecoveryActionFailure.Unexpected,
+    -> stringResource(Res.string.recovery_failed_unexpected)
+}
 
 /**
  * 「清理续传残片」的二次确认，与 [ClearAllHistoryConfirmDialog] 同一档次：

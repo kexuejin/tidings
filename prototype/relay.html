@@ -5173,6 +5173,22 @@ function screenSetData(){
       ${srow('保留天数','离线排队消息保留 7 天', '<span class="tag">7 天</span>')}
       ${srow('清空聊天记录','不可撤销', '<button class="btn sm danger-o">清空</button>')}
     </div>
+    <div class="card">
+      <h3>${ic('shield')} 备份与恢复</h3>
+      <div class="padc" style="padding-bottom:2px">
+        <div class="hint">卸载重装后，凭备份文件与口令找回身份；口令丢了就无法找回。</div>
+      </div>
+      <div class="krow blk">
+        <div class="bd"><div class="t1">备份身份</div>
+          <div class="t2">口令加密导出到文件，换机或恢复出厂后凭口令导回</div>
+          <div class="ract"><button class="btn sm">导出…</button></div></div>
+      </div>
+      <div class="krow blk">
+        <div class="bd"><div class="t1">从备份恢复</div>
+          <div class="t2">选择备份文件并输入口令，恢复后节点自动重启</div>
+          <div class="ract"><button class="btn sm">恢复…</button></div></div>
+      </div>
+    </div>
     <div class="hint" style="padding:0 4px">目录占用与残片都是<b>现数</b>的（后台线程，
       没数完显示「正在统计…」）—— 盘上是什么就显示什么，不编一个数字。</div>
   </div></div>`;

@@ -41,6 +41,9 @@ import com.kapp.tidings.domain.RelayController
 import com.kapp.tidings.core.protocol.ConvId
 import com.kapp.tidings.domain.exportDiagnosticsPackage
 import com.kapp.tidings.core.fs.directoryUsageBytes
+import com.kapp.tidings.core.fs.readFileBytes
+import com.kapp.tidings.domain.recovery.exportIdentityBundle
+import com.kapp.tidings.domain.recovery.importIdentityBundle
 import com.kapp.tidings.core.nowMillis
 import com.kapp.tidings.core.transport.PartFile
 import com.kapp.tidings.domain.navBadges
@@ -612,6 +615,14 @@ fun RelayApp(
                             // 「跨网通道」开关已移除（长连接恒开）。用户的心智是"哪张网都能
                             // 无感连上"，不是"我要不要开一条长连接"；而关掉它反而是不拨号。
                             onClearHistory = controller::clearAllMessages,
+                            // 备份与恢复（L1）：选文件走三平台共用的 filePicker 契约
+                            // （Android SAF 桥 / iOS 文稿选择器 / 桌面对话框），读回字节
+                            // 交给领域层；取消选文件返回 null，页面据此静默终止。
+                            onExportIdentityBundle = controller::exportIdentityBundle,
+                            onPickBackupFile = {
+                                controller.platform.filePicker.pick()?.let { readFileBytes(it.path) }
+                            },
+                            onImportIdentityBundle = controller::importIdentityBundle,
                         )
 
                         SETTINGS_PAGE_DIAG -> SettingsDiagSubpage(

@@ -10,6 +10,9 @@ import com.kapp.tidings.core.fs.use
 import com.kapp.tidings.core.ioDispatcher
 import com.kapp.tidings.core.nowMillis
 import com.kapp.tidings.core.protocol.ConvId
+import com.kapp.tidings.domain.recovery.NoPlatformRecovery
+import com.kapp.tidings.domain.recovery.PlatformRecoveryStore
+import com.kapp.tidings.domain.recovery.RecoveryService
 import com.kapp.tidings.core.protocol.DEFAULT_TIMINGS
 import com.kapp.tidings.core.protocol.Envelope
 import com.kapp.tidings.core.protocol.MsgKinds
@@ -179,13 +182,45 @@ class RelayController(
      * 默认 false ⇒ 既有行为一字不变；桌面端在 `Main` 里显式传 true。
      */
     private val advertiseAgent: Boolean = false,
+    /**
+     * L0 平台存活存储（iOS 钥匙串 / Android 公共 Downloads）。桌面与所有测试宿主
+     * 不传（= [NoPlatformRecovery]），行为与从前逐字节一致。
+     *
+     * 收养**决策**在 [_state] 初始化里（settings 不存在才收养，Q10 裁决）；
+     * 这个参数只提供存取。备份的定时刷新在 [start] 里做（身份稳定后写一次）。
+     */
+    val platformRecovery: PlatformRecoveryStore = NoPlatformRecovery,
 ) : DesktopPaneActions {
+
+    // dataDirectory 与 persist 提到 _state **之前**：L0 收养（若有）要在 settings
+    // 首次加载前摸到 pins 与钥匙目录 —— 恢复先于 firstRun（身份恢复方案 §9.2）。
+    // persist 用 lazy 只是给「声明顺序早于 dataDirectory」留一条安全缝，实际访问仍是单次。
+    val dataDirectory: String = platform.dataDirectory.dataDirectory()
+
+    private val persist: PersistStores by lazy { PersistStores.under(dataDirectory) }
+
+    /** 身份恢复服务：组装载荷 / 落钥匙 / 写信任根。L1 与 L0 收养共用这一层。 */
+    internal val recovery = RecoveryService(
+        linkIdentityDir = pathJoin(dataDirectory, "link-identity"),
+        pins = persist.peerPins,
+    )
+
 
     internal val _state: MutableStateFlow<RelayUiState> = MutableStateFlow(
         // 首次运行的默认设备名按**宿主**给（2026-10-14 修真机撞名）：桌面端与手机是同一份
         // 模型的两个宿主，默认名不同。`advertiseAgent` 就是区分它们的那个标志（见它的 KDoc）。
         RelayUiState(
-            settings = (store.load() ?: RelaySettings.firstRun()).let { raw ->
+            settings = run {
+                // L0 收养（Q10 收养规则）：settings 文件不在（重装 / 新机首启）且平台
+                // 存活存储（钥匙串 / 公共 Downloads）里有身份包 ⇒ 先收养再正常加载。
+                // **已有 settings 就绝不收养**：同步层里的身份包可能属于账号下另一台
+                // 设备，覆盖本机身份 = 静默克隆。收养写 settings + 钥匙 + pins，
+                // 所以这个钩子就是"恢复先于 firstRun"的落点。
+                val existing = store.load()
+                if (existing == null) {
+                    platformRecovery.load()?.let { recovery.adoptForFreshInstall(it, store, platform) }
+                }
+                (existing ?: store.load() ?: RelaySettings.firstRun()).let { raw ->
                 // 一次性迁移（真机反馈 #2）：老库没有 persistMessagesDecided 这一位，
                 // 而旧文件里"从没设过"与"显式关掉"是同一串字节 —— 按"从没设过"补成开启。
                 // 只认这一位，所以跑过一次就再也不会重来（详见 migrateRelaySettings 的 KDoc）。
@@ -207,12 +242,11 @@ class RelayController(
                 // "一次性"就变成每次启动都重来一遍。
                 if (next != raw) store.save(next)
                 next
+                }
             },
         ),
     )
     val state: StateFlow<RelayUiState> = _state.asStateFlow()
-
-    val dataDirectory: String = platform.dataDirectory.dataDirectory()
 
     /**
      * 手机侧长连接诊断文件的路径（task-34）：`<dataDir>/diag/link.json`。
@@ -300,8 +334,9 @@ class RelayController(
      *
      * 单独一个字段而不是就地 new 两个 store：这两个对象在构造时就会把日志读进内存，
      * 构造两次等于白读一遍文件，而「读两遍」在文件正在被写时读到的是两个不同的快照。
+     * （声明移到了 _state 之前并改为 lazy —— 身份恢复的 L0 收养要在 settings 首次
+     * 加载前用到 pins，见类头部那段说明。）
      */
-    private val persist: PersistStores = PersistStores.under(dataDirectory)
 
         /**
      * **这个对端是否已经等了超过 [graceMs]。**
@@ -918,6 +953,16 @@ class RelayController(
                 return@launch
             }
             runtime = rt
+            // L0 保活：身份稳定后把「当前身份 + 信任根摘要」刷进平台存活存储（幂等）。
+            // 只在有实现时做（桌面/测试是 NoPlatformRecovery，no-op）；失败不致命 ——
+            // 备份是尽力而为，L1 永远是兜底，不能让备份写失败把节点启动掀翻。
+            if (platformRecovery !== NoPlatformRecovery) {
+                scope.launch {
+                    runCatching {
+                        recovery.currentPayload(settings.nodeId)?.let { platformRecovery.save(it) }
+                    }
+                }
+            }
             val snapshot = platform.networkMonitor.snapshot()
             _state.update {
                 it.copy(

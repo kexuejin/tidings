@@ -1,7 +1,7 @@
 {
-  "generatedAt": "d96d85c3d4e0",
+  "generatedAt": "d39b1eb60939",
   "note": "逐屏差集棘轮：每个键的差集只许变小。--check 报「新增的值」。",
-  "reason": "3 处 m-home-* font-weight 新增 400 = 可访问性修复，不是视觉漂移：静音会话预览此前用 alpha 弱化，实测对比度 2.66:1（亮）/3.21:1（暗），低于 4.5:1；改为「字重 Normal + onSurfaceVariant」后 6.47/6.43:1。原型用透明度表达静音，代码改为字重表达 —— 400 是这条判据的产物，只在 m-home-recent/more/unread 三屏出现，其余值未变。",
+  "reason": "screenSetData 新增「备份与恢复」卡（L1 身份恢复 P2）：全部复用本屏既有 class（card/h3/padc/hint/krow blk/btn sm），未引入新取值档；代码侧 SettingsDataSubpage.RecoverySection 同步落成",
   "rowCount": 70,
   "signature": {
     "d-agentdetail|__error__": [
@@ -867,7 +867,6 @@
     ],
     "m-gsearch-empty|spacing|code": [
       "3",
-      "4",
       "24"
     ],
     "m-gsearch-empty|spacing|proto": [
@@ -886,7 +885,6 @@
     ],
     "m-gsearch|spacing|code": [
       "3",
-      "4",
       "24"
     ],
     "m-gsearch|spacing|proto": [
@@ -1009,8 +1007,7 @@
       "24"
     ],
     "m-insets|font-weight|proto": [
-      "500",
-      "600"
+      "500"
     ],
     "m-insets|radius|code": [
       "20"
@@ -1186,9 +1183,6 @@
     "m-sendfolder|spacing|proto": [
       "1.5"
     ],
-    "m-set-appear|font-size|code": [
-      "14"
-    ],
     "m-set-appear|radius|proto": [
       "16"
     ],
@@ -1219,7 +1213,6 @@
       "500"
     ],
     "m-set-caps|radius|proto": [
-      "12",
       "13",
       "16"
     ],
@@ -1274,7 +1267,6 @@
       "14"
     ],
     "m-set-notify|radius|proto": [
-      "12",
       "13",
       "16"
     ],
