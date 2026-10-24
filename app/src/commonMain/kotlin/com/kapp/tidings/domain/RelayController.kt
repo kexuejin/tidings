@@ -205,6 +205,11 @@ class RelayController(
         pins = persist.peerPins,
     )
 
+    /**
+     * L2 待拉取历史的对端（方案 §6.3 / Q11）。初始化期（L0 收养，单线程）直接写；
+     * 运行期一律经 [stateLock]。空集 = 没有恢复在途，启动路径零开销。
+     */
+    internal val pendingRecoveryPeers = mutableSetOf<String>()
 
     internal val _state: MutableStateFlow<RelayUiState> = MutableStateFlow(
         // 首次运行的默认设备名按**宿主**给（2026-10-14 修真机撞名）：桌面端与手机是同一份
@@ -218,7 +223,11 @@ class RelayController(
                 // 所以这个钩子就是"恢复先于 firstRun"的落点。
                 val existing = store.load()
                 if (existing == null) {
-                    platformRecovery.load()?.let { recovery.adoptForFreshInstall(it, store, platform) }
+                    platformRecovery.load()?.let { payload ->
+                        recovery.adoptForFreshInstall(payload, store, platform)
+                        // L2：收养完成 ⇒ 信任根里的对端都是待拉历史的一方（Q11：全量重发+去重）。
+                        pendingRecoveryPeers += payload.peerPins.map { it.nodeId }
+                    }
                 }
                 (existing ?: store.load() ?: RelaySettings.firstRun()).let { raw ->
                 // 一次性迁移（真机反馈 #2）：老库没有 persistMessagesDecided 这一位，
@@ -962,6 +971,10 @@ class RelayController(
                         recovery.currentPayload(settings.nodeId)?.let { platformRecovery.save(it) }
                     }
                 }
+            }
+            // L2 触发：恢复在途时逐对端要历史（ACK 不到就保留，下次启动再试）。
+            if (stateLock.withLock { pendingRecoveryPeers.isNotEmpty() }) {
+                scope.launch { drainRecoveryPull() }
             }
             val snapshot = platform.networkMonitor.snapshot()
             _state.update {

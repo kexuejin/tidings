@@ -327,3 +327,12 @@ if __name__ == "__main__":
    **不要**写成夹具，照 `docs/physical-acceptance-sop.md` 走人工；
    签完字把 `design/host-surface-checklist.md` 第 6 节的空表填上
    （它现在是空的，而 sop §4 已经打了勾 —— 详见矩阵 §8.2）。
+
+
+---
+
+## 身份恢复（2026-10-25）
+
+L2 两张帧（`recovery-req`/`recovery-data`）对旧节点是未知类型 ⇒ 静默丢弃（Q5 设计）。
+`e2e` 脚本如需覆盖：恢复方发 req 后 5 秒窗口内应收到分批 `recovery-data`
+（批间 100 ms），旧端场景断言「无响应且离线队列为空」。

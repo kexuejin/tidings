@@ -26,7 +26,7 @@
 
 ---
 
-## 一、会处理的（26 种）
+## 一、会处理的（28 种）
 
 > 数量口径 = `MsgTypes.HANDLED` 的元素个数（下面的表按**帧族合并**成行，所以行数少于类型数）。
 > `HANDLED` 与 `UNHANDLED` 必须构成 `KNOWN` 的一个**划分**，由
@@ -173,3 +173,13 @@
 - `TransferOfferFieldsTest`：`groupId`/`groupRev`/`tableText`/`tableTextTruncated` 四个可选字段穿过组装过程不丢。
 - `NudgeNotificationTest`：戳一戳帧生成带有发送者上下文的通知（`focusPeerId` = 发件人），点击直接定位至目标会话。
 - 媒体撤回（`mrec1`）：手机长按自己发出的图片触发撤回，对端收到 `file-ctl {"op":"cancel"}` 与 `msg {"kind":"recall","targetId":…}`，收发双向均有完整单测与端到端链路覆盖。
+
+
+---
+
+## 六、身份恢复 L2（2026-10-25 新增）
+
+`recovery-req` / `recovery-data` 已进 `HANDLED`（方案 §6.3）：请求方恢复身份后向持有
+双边副本的对端要历史，对端分页回消息实体。投递纪律与安全边界见
+`PROTOCOL-EXTENSION.md` §14。老节点把两张帧当未知类型静默丢弃——这是设计（Q5），
+不是缺陷；`MsgTypeDispositionTest` 钉住划分。

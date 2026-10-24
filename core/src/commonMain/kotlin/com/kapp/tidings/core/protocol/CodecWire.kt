@@ -171,6 +171,8 @@ object CodecWire {
             MsgTypes.AGENT_GRANT -> validateAgentGrant(o)
             MsgTypes.AGENT_GRANT_LIST -> validateAgentGrantList(o)
             MsgTypes.AGENT_SESSION_PAGE -> validateAgentSessionPage(o)
+            MsgTypes.RECOVERY_REQ -> CodecRecovery.validateRecoveryReq(o)
+            MsgTypes.RECOVERY_DATA -> CodecRecovery.validateRecoveryData(o)
             MsgTypes.GROUP -> validateGroup(o)
             MsgTypes.SHARE -> validateShare(o)
             MsgTypes.SCAN_RANGES -> validateScanRanges(o)

@@ -8,6 +8,8 @@ import com.kapp.tidings.core.protocol.AgentEventAttachment
 import com.kapp.tidings.core.protocol.Codec
 import com.kapp.tidings.core.protocol.DEFAULT_TIMINGS
 import com.kapp.tidings.core.protocol.Envelope
+import kotlinx.serialization.json.JsonArray
+import kotlinx.serialization.json.JsonElement
 import com.kapp.tidings.core.protocol.IpAddressUtils
 import com.kapp.tidings.core.protocol.GroupMeta
 import com.kapp.tidings.core.protocol.MsgTypes
@@ -843,7 +845,11 @@ class NodeRuntime(
                 // 没人认领的噪声帧；投屏与 agent 会话机各由专门的存储维护，这里只读 _inbound。
                 if (envelope.type != MsgTypes.SCREEN &&
                     envelope.type != MsgTypes.SHARE &&
-                    !envelope.type.startsWith("agent-")
+                    !envelope.type.startsWith("agent-") &&
+                    // 身份恢复 L2 是控制帧：合并入库走应用层的消息实体路径，
+                    // 写进 envelope 日志只会给 /v1/inbox 添噪声。
+                    envelope.type != MsgTypes.RECOVERY_REQ &&
+                    envelope.type != MsgTypes.RECOVERY_DATA
                 ) {
                     messageStore.append(
                         peerId = envelope.from,
@@ -1083,6 +1089,13 @@ class NodeRuntime(
     suspend fun announceExit() = discovery.announceExit()
 
     suspend fun sendText(peerId: String, text: String) = outbound.sendText(peerId, text)
+
+    /** 身份恢复 L2：向对端要历史（ACK 不到 = 旧版或离线，Q5）。 */
+    suspend fun sendRecoveryReq(peerId: String): Boolean = outbound.sendRecoveryReq(peerId)
+
+    /** 身份恢复 L2：给恢复方发一批历史（fire-and-forget，不入队）。 */
+    suspend fun sendRecoveryData(peerId: String, batch: Int, more: Boolean, messages: List<JsonElement>): Boolean =
+        outbound.sendRecoveryData(peerId, batch, more, JsonArray(messages))
 
     suspend fun sendTextWithEnvelope(peerId: String, text: String) = outbound.sendTextWithEnvelope(peerId, text)
 

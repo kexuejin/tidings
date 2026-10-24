@@ -12,6 +12,11 @@ import com.kapp.tidings.core.protocol.makeEnvelope
 import com.kapp.tidings.core.protocol.newId
 import com.kapp.tidings.core.transport.DIRECTION_OUT
 import com.kapp.tidings.core.transport.SendOutcome
+import kotlinx.serialization.json.JsonArray
+import kotlinx.serialization.json.JsonObject
+import kotlinx.serialization.json.JsonPrimitive
+import kotlinx.serialization.json.buildJsonObject
+import kotlinx.serialization.json.put
 import com.kapp.tidings.core.protocol.Envelope
 import com.kapp.tidings.core.protocol.GroupMeta
 import com.kapp.tidings.core.transport.Messenger
@@ -655,6 +660,38 @@ internal class NodeOutbound(
      */
     suspend fun sendReliableNoQueue(peerId: String, envelope: Envelope): Boolean =
         messenger.sendReliableNoQueue(peerId, envelope)
+
+    /**
+     * 身份恢复 L2：向对端要历史（`recovery-req`，方案 §6.3）。
+     *
+     * 用 `sendReliableNoQueue`：对端**会** ACK（recovery-req 在 RELIABLE 集里），
+     * 所以返回值就是 Q5 的「5 秒窗口」语义 —— ACK 不到 = 对端是旧版（把未知类型
+     * 静默丢掉）或已离线，放弃，**绝不入队**。
+     */
+    suspend fun sendRecoveryReq(peerId: String): Boolean =
+        messenger.sendReliableNoQueue(
+            peerId,
+            makeEnvelope(MsgTypes.RECOVERY_REQ, selfId(), JsonObject(emptyMap())),
+        )
+
+    /**
+     * 身份恢复 L2：把一批历史发给恢复方（`recovery-data`）。
+     *
+     * fire-and-forget：不可靠 TCP、不入队。重复帧由接收侧去重表挡住。
+     */
+    suspend fun sendRecoveryData(peerId: String, batch: Int, more: Boolean, messages: JsonArray): Boolean =
+        messenger.sendUnreliableTcp(
+            peerId,
+            makeEnvelope(
+                MsgTypes.RECOVERY_DATA,
+                selfId(),
+                buildJsonObject {
+                    put("batch", JsonPrimitive(batch))
+                    put("more", JsonPrimitive(more))
+                    put("messages", messages)
+                },
+            ),
+        )
 
     /**
      * 戳一碰（私聊窗口震动）：发 `msg(kind:"nudge")`。

@@ -50,7 +50,7 @@ import kotlinx.coroutines.withContext
  *   给它加前缀会直接产出语法垃圾。
  */
 internal class RelayControllerMessagesComponent(
-    private val host: RelayController,
+    internal val host: RelayController,
 ) {
 
 /**

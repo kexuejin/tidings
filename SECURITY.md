@@ -129,3 +129,20 @@ Instead, please report the vulnerability privately:
 - Potential impact on local network nodes (e.g. DoS, path traversal, sandbox breakout, unauthorized approvals).
 
 We will acknowledge receipt within 48 hours and work with you on validation and coordinated disclosure.
+
+
+---
+
+## 身份恢复的安全边界（2026-10-25）
+
+- **恢复包永远口令加密**（L1 强制口令；Android L0 的 `KDF(ANDROID_ID)` 定性为防误触
+  混淆——ANDROID_ID 任何应用可读，不构成安全边界，强安全由 L1 承担）。
+- **身份与库不进云备份、不进 OEM 迁移通道**：`dataExtractionRules` 显式排除
+  （Q12）。恢复包私钥等价物只存在于：本机沙箱、平台存活存储（钥匙串/公共 Downloads）、
+  用户自己保存的口令加密文件。
+- **L2 拉回的信任根**：恢复方持有旧 link 私钥，对端用 `peer-pins[旧 nodeId]` 验
+  TLS 证书通过 ⇒ 密码学证明「这就是原来那台」，无需人工确认框（§5.5）。
+  局域网明文档与聊天同等级（能发起拉取的攻击者本来就能嗅探同样的明文流）；
+  公网档 fail-closed 不变。
+- 恢复包导出/导入的失败一律 fail-closed：成套校验（manifest 与载荷咬合）、
+  半截包（缺钥匙）在解码层拒收。

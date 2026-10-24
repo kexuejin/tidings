@@ -641,6 +641,17 @@ class Messenger(
         return false
     }
 
+    /**
+     * 发一条**不可靠、不入队**的 TCP 帧：不发也不重试，失败就是失败。
+     *
+     * 为身份恢复 L2 的 `recovery-data` 而加（Q5：fire-and-forget + 不进可靠队列）。
+     * 与 [sendViaTcp] 共用一条路（长连接优先，失败退 TCP 回退）；TCP 帧的
+     * 传输层 `msg-ack` 对方永远会回（Link 泵的纪律），所以这里的返回值只说明
+     * "这一帧送到了对方传输层"，不说明对方应用层认不认这个类型 —— 旧端会把
+     * 未知类型静默丢掉，发送方无从得知，这正是 fire-and-forget 的边界。
+     */
+    suspend fun sendUnreliableTcp(peerId: String, envelope: Envelope): Boolean = sendViaTcp(peerId, envelope)
+
     private suspend fun sendViaTcp(peerId: String, envelope: Envelope): Boolean {
         val fallback = tcpFallback ?: return false
         val record = registry.get(peerId) ?: return false

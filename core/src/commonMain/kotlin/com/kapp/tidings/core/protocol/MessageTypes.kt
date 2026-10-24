@@ -101,6 +101,26 @@ object MsgTypes {
      */
     const val AGENT_SESSION_PAGE = "agent-session-page"
 
+    /**
+     * 身份恢复 L2：恢复后的设备向**持有双边副本的对端**要历史（方案 §6.3）。
+     *
+     * 载荷为空对象 `{}`（严格白名单，多一个键整帧拒收）—— 要什么是隐含的：
+     * 「你我这段会话的全部」。这个帧对**旧端是未知类型**（解码通过、known=false、
+     * 静默忽略），所以恢复请求发进旧版本对端等于发进黑洞 —— 发送方按 Q5 的
+     * 5 秒窗口放弃，不进离线队列。
+     */
+    const val RECOVERY_REQ = "recovery-req"
+
+    /**
+     * 身份恢复 L2：对端把双边副本里的历史**分页**回给恢复方（设备 → 恢复方）。
+     *
+     * fire-and-forget（Q5）：**严禁进可靠离线队列** —— 恢复方版本落后时静默阻塞
+     * 的队列重试会把请求变成第 7 种「没收到」。分页在 64 KiB 整帧硬上限内，
+     * 发送侧按字节预算切批（`CodecRecovery.RECOVERY_DATA_BATCH_BYTES`）。
+     * 重复帧由接收侧去重表挡住；合并按消息 id 幂等。
+     */
+    const val RECOVERY_DATA = "recovery-data"
+
     /** 本实现认识的类型；未知类型解码通过但 known=false。 */
     val KNOWN: Set<String> = setOf(
         ENTRY, ALIVE, EXIT, PRESENCE, PROFILE, PEERS, SCAN_RANGES, MSG, ACK,
@@ -109,6 +129,7 @@ object MsgTypes {
         AGENT_QUEUE, AGENT_RUN, AGENT_APPROVAL, AGENT_CANCEL, AGENT_ACK,
         AGENT_ARTIFACT,
         AGENT_WORKSPACE, AGENT_GRANT_REQUEST, AGENT_GRANT, AGENT_GRANT_LIST, AGENT_SESSION_PAGE,
+        RECOVERY_REQ, RECOVERY_DATA,
     )
 
     /**
@@ -125,6 +146,7 @@ object MsgTypes {
         AGENT_ARTIFACT,
         AGENT_WORKSPACE,
         AGENT_GRANT_REQUEST, AGENT_GRANT, AGENT_GRANT_LIST,
+        RECOVERY_REQ, RECOVERY_DATA,
         // 请求帧同样必须在 RELIABLE 里：不在的话它到不了对端 inbound（见上文那条），
         // 表现是「手机点了加载更多，宿主根本没收到」。
         AGENT_SESSION_PAGE,
@@ -346,6 +368,7 @@ object MsgTypes {
         AGENT_ARTIFACT,
         AGENT_WORKSPACE, AGENT_GRANT_REQUEST, AGENT_GRANT, AGENT_GRANT_LIST, AGENT_SESSION_PAGE,
         GROUP, SHARE, SCAN_RANGES, SCREEN, AVATAR,
+        RECOVERY_REQ, RECOVERY_DATA,
     )
 
     /**

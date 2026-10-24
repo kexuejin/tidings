@@ -11,6 +11,7 @@ import com.kapp.tidings.core.nowMillis
 import com.kapp.tidings.core.persist.RecoveryBundle
 import com.kapp.tidings.core.persist.RecoveryBundleException
 import com.kapp.tidings.domain.RelayController
+import com.kapp.tidings.domain.markRecoveryPullPending
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.withContext
@@ -150,6 +151,9 @@ private suspend fun RelayController.importIdentityBundleOrThrow(bytes: ByteArray
     val next = base.copy(nodeId = payload.nodeId)
     store.save(next)
     _state.update { it.copy(settings = next) }
+    // L2 触发（Q11）：信任根里的对端就是待拉历史的一方；restart() 里的 start()
+    // 会看到非空的 pending 集合并逐个发起（ACK 不到就保留，下次启动再试）。
+    markRecoveryPullPending(payload.peerPins.map { it.nodeId })
     restart()
     return RecoveryImportResult.Imported(payload.nodeId, payload.peerPins.size)
 }

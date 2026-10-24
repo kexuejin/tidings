@@ -348,3 +348,20 @@ flowchart TD
    对 6 屏主要交互界面在深浅色、不同字号及四种自适应形态下进行全量回归渲染比对。
 4. **代码整洁与门禁扫描**：
    运行静态检查工具，确保生产代码中无内部调试痕迹、无未授权的绝对路径依赖，所有公共依赖均来自标准公共 Maven 仓库。
+
+
+---
+
+## 身份与数据恢复（2026-10-25）
+
+恢复按「身份 / 数据」两个维度分三层（方案 §6）：
+
+- **L0 平台存活存储**：iOS 钥匙串身份包（本地 + iCloud 同步层，收养规则 Q10）；
+  Android 公共 Downloads 里的 `KDF(ANDROID_ID)` 混淆包（读取失败走 SAF 导入，A6/Q6）。
+- **L1 口令加密导出/导入**：设置页「备份与恢复」卡；格式与成套校验见 `core/.../persist/RecoveryBundle`。
+- **L2 对端拉回**：`recovery-req` / `recovery-data` 两张帧，fire-and-forget + 全量重发 +
+  消息 id 幂等合并（`PROTOCOL-EXTENSION.md` §14）。数据只走应用层消息实体，
+  不存在裸库替换——SQLDelight 不降级、FTS 索引必须走触发器维护（§2.3 不变量）。
+
+领域层入口：`RelayController.recovery`（`RecoveryService`）、
+`recovery/RecoveryActions.kt`（L1 动作）、`RelayControllerRecoveryComponent.kt`（L2 分派）。
