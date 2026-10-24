@@ -2,6 +2,7 @@
 
 package com.kapp.tidings.core.transport
 
+import com.kapp.tidings.core.protocol.FileTransfer
 import com.kapp.tidings.core.protocol.Limits
 import com.kapp.tidings.core.protocol.ScreenImageMetadata
 import com.kapp.tidings.core.protocol.ScreenMode
@@ -9,7 +10,6 @@ import com.kapp.tidings.core.protocol.ScreenTcpFrame
 import com.kapp.tidings.core.protocol.TcpFrames
 import io.ktor.network.selector.SelectorManager
 import io.ktor.network.sockets.InetSocketAddress
-import io.ktor.network.sockets.Socket
 import io.ktor.network.sockets.aSocket
 import io.ktor.network.sockets.openReadChannel
 import io.ktor.network.sockets.openWriteChannel
@@ -30,6 +30,73 @@ import kotlin.math.max
 import kotlin.math.min
 
 /**
+ * 屏幕通道的传输抽象：两条字节流 + 关闭句柄。
+ *
+ * 明文 socket（局域网原路径）与跨网 TLS 的 [RawPullConnection]（`docs/cross-network-file-screen-design.md`
+ * 选项 B：独立 TCP 连接、原样复用 screen-* 协议、TLS/双向 pin 由拨号层提供）都适配它 ——
+ * screen-* 协议只在这两条流上跑,不关心底下有没有加密。
+ */
+class ScreenWire(
+    val read: ByteReadChannel,
+    val write: ByteWriteChannel,
+    val close: () -> Unit,
+)
+
+/** 一次连接尝试：`open()` 返回 null = 这条路不通（调用方按序试下一条）。 */
+fun interface ScreenWireOpener {
+    suspend fun open(): ScreenWire?
+}
+
+/**
+ * 明文直连尝试（局域网原路径,今天的行为逐字保留）。
+ *
+ * selector 的生命周期跟着 wire：连上后由 [ScreenWire.close] 收,连不上当场收。
+ */
+fun plainScreenWireOpener(host: String, port: Int): ScreenWireOpener = ScreenWireOpener {
+    val sm = SelectorManager(ioDispatcher)
+    val sock = withTimeoutOrNull(Limits.SCREEN_CONNECT_TIMEOUT_MS) {
+        aSocket(sm).tcp().connect(InetSocketAddress(host, port))
+    }
+    if (sock == null) {
+        runCatching { sm.close() }
+        return@ScreenWireOpener null
+    }
+    ScreenWire(
+        read = sock.openReadChannel(),
+        write = sock.openWriteChannel(autoFlush = true),
+        close = {
+            runCatching { sock.close() }
+            runCatching { sm.close() }
+        },
+    )
+}
+
+/**
+ * 读一条长度前缀帧并解出 screen-open —— 跨网 TLS 监听的首帧识别。
+ *
+ * 与 [TransferServer] 的首帧分发同一套解码；识别不了（非 screen 帧 / 坏长度）返回 null,
+ * 调用方按「这条连接不是投屏」关闭。
+ */
+internal suspend fun readFirstScreenOpen(read: ByteReadChannel): ScreenTcpFrame.Open? {
+    // 半截帧（对端连上就断）会让 readFully 抛 EOF 而不是返回 0 —— 那与本函数
+    // "识别不了返回 null" 的契约不一致。这里自己收住，不把关连接的责任推给调用方。
+    return try {
+        val head = ByteArray(TcpFrame.LENGTH_PREFIX_BYTES)
+        read.readFully(head, 0, head.size)
+        val len = TcpFrame.decodeLength(head)
+        if (len <= 0 || len > FileTransfer.MAX_FRAME) return null
+        val body = ByteArray(len)
+        read.readFully(body, 0, len)
+        val decoded = TcpFrames.decodeBody(body.decodeToString())
+        (decoded as? com.kapp.tidings.core.protocol.TcpFrameDecode.Screen)?.screenFrame as? ScreenTcpFrame.Open
+    } catch (e: kotlinx.coroutines.CancellationException) {
+        throw e
+    } catch (t: Throwable) {
+        null
+    }
+}
+
+/**
  * 自适应帧率调节器，对齐茶话间 ScreenRate。
  */
 class ScreenRate {
@@ -41,7 +108,12 @@ class ScreenRate {
 
     private var slow = 0
     private var stableSince: Long? = null
-    private var lastDown: Long = Long.MIN_VALUE
+    /**
+     * 上次降档时刻。**必须可空**：用 Long.MIN_VALUE 当哨兵时，nowMs - lastDown
+     * 会溢出成负数，10 秒判据恒为 false —— 今天不可达（Auto 起步就是 10fps），
+     * 但一旦允许低档起步，升档会永远不发生。null = 还没降过档，按不满足处理。
+     */
+    private var lastDown: Long? = null
 
     fun setMode(newMode: ScreenMode) {
         mode = newMode
@@ -52,7 +124,7 @@ class ScreenRate {
         }
         slow = 0
         stableSince = null
-        lastDown = Long.MIN_VALUE
+        lastDown = null
     }
 
     fun observe(durationMs: Long, nowMs: Long) {
@@ -63,7 +135,8 @@ class ScreenRate {
         } else {
             slow = 0
         }
-        if (slow >= 3 && fps > 3) {
+        // 地板由下面的阶梯（10→5→3）自身守住；多余的 fps > 3 已删，免得读代码的人以为地板靠它。
+        if (slow >= 3) {
             fps = if (fps == 10) 5 else 3
             slow = 0
             stableSince = null
@@ -80,7 +153,8 @@ class ScreenRate {
             stableSince = nowMs
         }
         val stable = stableSince ?: nowMs
-        if (nowMs - lastDown >= 10_000L && nowMs - stable >= 10_000L) {
+        val sinceDown = lastDown?.let { nowMs - it }
+        if (sinceDown != null && sinceDown >= 10_000L && nowMs - stable >= 10_000L) {
             fps = faster
             stableSince = null
             slow = 0
@@ -101,7 +175,8 @@ class ScreenRate {
  * 首帧就抛这个异常、socket 随即被关，Viewer 侧表现为 `reason:"disconnected"`。
  */
 class ScreenSender(
-    private val socket: Socket,
+    /** 传输通道（明文 socket 或跨网 TLS 都是它）；本类只在 stop 时负责关。 */
+    val wire: ScreenWire,
     private val sessionId: String,
     private val sample: suspend (seq: Long) -> ByteArray?,
     private val onEnd: (reason: String) -> Unit,
@@ -122,8 +197,8 @@ class ScreenSender(
     fun start() {
         creditedAt = com.kapp.tidings.core.nowMillis()
         // 只在调用方没给通道时才自己开 —— 已绑定的 socket 上再开必抛。
-        if (read == null) read = socket.openReadChannel()
-        if (write == null) write = socket.openWriteChannel(autoFlush = true)
+        if (read == null) read = wire.read
+        if (write == null) write = wire.write
 
         pumpJob = scope.launch(ioDispatcher) {
             try {
@@ -154,7 +229,7 @@ class ScreenSender(
         val head = ByteArray(TcpFrame.LENGTH_PREFIX_BYTES)
         rc.readFully(head, 0, head.size)
         val len = TcpFrame.decodeLength(head)
-        if (len <= 0 || len > 64 * 1024) return null
+        if (len <= 0 || len > FileTransfer.MAX_FRAME) return null
         val body = ByteArray(len)
         rc.readFully(body, 0, len)
         val decoded = TcpFrames.decodeBody(body.decodeToString())
@@ -229,7 +304,7 @@ class ScreenSender(
         stopped = true
         pumpJob?.cancel()
         pumpJob = null
-        runCatching { socket.close() }
+        runCatching { wire.close() }
     }
 
     private fun end(reason: String) {
@@ -241,11 +316,16 @@ class ScreenSender(
 
 /**
  * 屏幕接收器（Viewer 侧）：
- * 建立 TCP 连接，发出 screen-open 帧，循环发出 screen-next 并接收解码 JPEG 帧。
+ * 依序尝试连接（局域网明文第一、跨网 TLS 候选其后，顺序由调用方按
+ * [CrossNetworkTransferPolicy.planScreen] 排好），发出 screen-open 帧并等 screen-ready，
+ * 循环发出 screen-next 并接收解码 JPEG 帧。
+ *
+ * 「这条尝试可用」的判据是**握手完成**（收到 screen-ready）而不是 TCP 连上 ——
+ * TLS 候选的 pin 校验失败、旧端不认识这条端口，都表现为连不上或握手超时，
+ * 此时试下一条而不是整场报 timeout。
  */
 class ScreenReceiver(
-    private val host: String,
-    private val port: Int,
+    private val attempts: List<ScreenWireOpener>,
     private val selfId: String,
     private val sessionId: String,
     private val token: String,
@@ -262,8 +342,7 @@ class ScreenReceiver(
     private var sequence = 0L
     private var sentAt = 0L
     private var minimized = false
-    private var socket: Socket? = null
-    private var selector: SelectorManager? = null
+    private var wire: ScreenWire? = null
     private var receiverJob: Job? = null
 
     val targetFps: Int get() = if (minimized) 3 else rate.fps
@@ -271,30 +350,31 @@ class ScreenReceiver(
     fun start() {
         receiverJob = scope.launch(ioDispatcher) {
             try {
-                val sm = SelectorManager(ioDispatcher).also { selector = it }
-                val sock = withTimeoutOrNull(Limits.SCREEN_CONNECT_TIMEOUT_MS) {
-                    aSocket(sm).tcp().connect(InetSocketAddress(host, port))
+                var connected: ScreenWire? = null
+                for (attempt in attempts) {
+                    if (stopped) return@launch
+                    val candidate = attempt.open() ?: continue
+                    // 发 screen-open 并等 ready —— 只有握手过的这条才算数。
+                    val ok = runCatching {
+                        candidate.write.writeFully(TcpFrames.encode(ScreenTcpFrame.Open(from = selfId, sessionId = sessionId, token = token)))
+                        withTimeoutOrNull(Limits.SCREEN_CONNECT_TIMEOUT_MS) {
+                            readNextControlFrame(candidate.read)
+                        } is ScreenTcpFrame.Ready
+                    }.getOrDefault(false)
+                    if (ok) {
+                        connected = candidate
+                        break
+                    }
+                    runCatching { candidate.close() }
                 }
-                if (sock == null) {
+                if (connected == null) {
+                    // 一条都没握上手：对端没监听（旧端/跨网未启用）或不在同一张网。
                     end("timeout")
                     return@launch
                 }
-                socket = sock
-                val read = sock.openReadChannel()
-                val write = sock.openWriteChannel(autoFlush = true)
-
-                // 连上后发送 screen-open 握手
-                val openFrame = ScreenTcpFrame.Open(from = selfId, sessionId = sessionId, token = token)
-                write.writeFully(TcpFrames.encode(openFrame))
-
-                // 等待 screen-ready 帧
-                val readyFrame = withTimeoutOrNull(Limits.SCREEN_CONNECT_TIMEOUT_MS) {
-                    readNextControlFrame(read)
-                }
-                if (readyFrame !is ScreenTcpFrame.Ready || readyFrame.sessionId != sessionId) {
-                    end("protocol-error")
-                    return@launch
-                }
+                wire = connected
+                val read = connected.read
+                val write = connected.write
                 ready = true
                 onReady()
 
@@ -360,7 +440,7 @@ class ScreenReceiver(
         val head = ByteArray(TcpFrame.LENGTH_PREFIX_BYTES)
         read.readFully(head, 0, head.size)
         val len = TcpFrame.decodeLength(head)
-        if (len <= 0 || len > 64 * 1024) return null
+        if (len <= 0 || len > FileTransfer.MAX_FRAME) return null
         val body = ByteArray(len)
         read.readFully(body, 0, len)
         val decoded = TcpFrames.decodeBody(body.decodeToString())
@@ -385,10 +465,8 @@ class ScreenReceiver(
         stopped = true
         receiverJob?.cancel()
         receiverJob = null
-        runCatching { socket?.close() }
-        socket = null
-        runCatching { selector?.close() }
-        selector = null
+        runCatching { wire?.close() }
+        wire = null
     }
 
     private fun end(reason: String) {

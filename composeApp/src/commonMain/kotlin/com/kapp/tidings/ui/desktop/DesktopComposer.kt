@@ -25,6 +25,7 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.outlined.DragHandle
 import androidx.compose.material.icons.automirrored.outlined.Send
+import androidx.compose.material.icons.filled.Close
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.Icon
@@ -74,10 +75,14 @@ import com.kapp.tidings.generated.resources.chat_byte_over
 import com.kapp.tidings.generated.resources.chat_emoji
 import com.kapp.tidings.generated.resources.chat_group_media_hint
 import com.kapp.tidings.generated.resources.chat_image
+import com.kapp.tidings.generated.resources.chat_mention_all
 import com.kapp.tidings.generated.resources.chat_nudge
 import com.kapp.tidings.generated.resources.chat_pk
+import com.kapp.tidings.generated.resources.chat_reply_cancel
+import com.kapp.tidings.generated.resources.chat_reply_preview_prefix
 import com.kapp.tidings.generated.resources.chat_send
 import com.kapp.tidings.generated.resources.chat_toolbar_capture
+import com.kapp.tidings.generated.resources.common_unknown_member
 import com.kapp.tidings.generated.resources.desktop_composer_draft
 import com.kapp.tidings.generated.resources.desktop_composer_emoji_note
 import com.kapp.tidings.generated.resources.desktop_composer_placeholder
@@ -105,8 +110,12 @@ import org.jetbrains.compose.resources.stringResource
 import com.kapp.tidings.ui.components.AppIconButton
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
+import com.kapp.tidings.feature.chat.COMPOSER_FOCUS_REQUEST_IDLE
 import com.kapp.tidings.ui.components.MentionTarget
+import com.kapp.tidings.ui.components.filterMentionTargets
 import com.kapp.tidings.ui.components.insertMention
+import com.kapp.tidings.ui.components.mentionQueryBeforeCursor
+import com.kapp.tidings.domain.model.MessageUi
 
 // ------------------------------------------------------------------ 浮起输入卡片
 
@@ -154,6 +163,19 @@ private const val FOCUS_ATTEMPTS = 30
  */
 private val ComposerToolIconSize = 28.dp
 
+/**
+ * 这份草稿**现在能不能发** —— 发送按钮与 Enter 键**共用**的同一条判据。
+ *
+ * ## 为什么必须是同一个函数
+ *
+ * 发送按钮一直有这条门（超限置灰），但 Enter 直发那条路从前**不查**：超限的草稿按
+ * Enter，输入框被清空、字没了，消息实际**没有发出去**（对端按字节预算整帧拒收，
+ * 发送侧收不到任何错误 —— AGENTS §3 的「静默丢失」形态）。两处各写一遍判据，
+ * 就必然有一处漏；抽成纯函数让「Enter 与按钮同一条门」可被单测钉住。
+ */
+internal fun desktopComposerCanSend(text: String, mode: ComposeByteMode): Boolean =
+    text.isNotBlank() && !mode.overLimit
+
 @Composable
 public fun DesktopComposer(
     peer: PeerUi,
@@ -180,14 +202,96 @@ public fun DesktopComposer(
      * 触发判据同源，不存在"@ 了却叫不醒"的分叉。
      */
     mentionTargets: List<MentionTarget> = emptyList(),
+    /**
+     * 正在引用的消息；null = 不画引用条。
+     *
+     * **桌面此前不收它**：气泡菜单点「回复」只改了 ChatScreen 的状态，这里的输入卡片
+     * 看都不看 —— 用户点了没反应。引用条样式与手机 [com.kapp.tidings.ui.components.MessageComposer]
+     * 的回复预览同款、同一组 strings key。
+     */
+    replyingTo: MessageUi? = null,
+    /** [replyingTo] 的发送者显示名（ChatScreen 用身份解析器算好）；null = 资料未到。 */
+    replySenderName: String? = null,
+    /** 取消引用。 */
+    onCancelReply: () -> Unit = {},
+    /**
+     * 「新任务」chip 要点名的 agent token（ChatScreen 按**这个群里的 agent kind** 解析，
+     * 与手机内置输入栏同一个值）。null = 不是工作区群，chip 不画。
+     *
+     * **桌面 chip 从前在这里写死 `@dsh `**：换个 agent 群（`@codex` 之类）它插的就是
+     * 一个叫不醒的 token。
+     */
+    newTaskToken: String? = null,
+    /**
+     * 按消息 id 跳到消息流里那条（历史搜索命中的落点）；null = 不跳。
+     *
+     * **桌面此前把命中整个丢掉**（`onSelectHit = { _ -> 关窗 }`）：窗口关了，
+     * 用户却不知道要找的那条在哪。
+     */
+    onJumpToMessage: ((String) -> Unit)? = null,
+    /**
+     * 发送出口：`(正文, 被回复的消息 id)`。
+     *
+     * 生产调用方（`ChatPane` 的 composerSlot）传的是 [com.kapp.tidings.feature.chat.ChatScreen]
+     * 里那个**与手机内置输入栏共用的**出口：它复位草稿、清外部草稿表、清引用态，
+     * 并把 replyId 交给发送侧。
+     *
+     * **桌面从前没有这个参数**：这里直接调 `controller.sendToConversation(peer.nodeId, text)`，
+     * 于是「回复」的 replyId 在这一行就丢了（发出去是一条普通消息），发完引用条也挂在
+     * 输入框上方不走 —— 用户看到的是"点了回复等于没点"。
+     *
+     * 默认实现只服务预览 / 截图夹具（它们拿不到 ChatScreen 的状态，也没有会话可言）：
+     * 仍然把 replyId 带到发送侧，语义与生产路径一致。
+     */
+    onSend: (body: String, replyToId: String?) -> Unit = { body, replyToId ->
+        controller.sendToConversation(peer.nodeId, body, replyToId)
+    },
+    /**
+     * 「把焦点落到输入框」的意图计数（[COMPOSER_FOCUS_REQUEST_IDLE] = 没有请求）。
+     * 由 [com.kapp.tidings.feature.chat.ChatScreen] 的回复 / 长按头像直接 @ / 新任务 chip 递增。
+     *
+     * 为什么需要这条接缝：那几条动作在手机上调的是 `ChatScreen` 自己那份
+     * `composerFocus`，而桌面走的是本卡片 —— 那个 requester 在桌面**没有挂载点**，
+     * `requestFocus()` 打印一行警告并返回 false。症状是"点了回复、@ 了人，光标却还在
+     * 消息列表上，得自己再点一下输入框"。
+     *
+     * 键是计数不是布尔（见 [com.kapp.tidings.feature.chat.nextComposerFocusRequest]）：
+     * 同一会话里连续两次「回复」也得各触发一次。
+     */
+    focusRequest: Int = COMPOSER_FOCUS_REQUEST_IDLE,
+    /**
+     * 只读原因；null = 可以正常输入。被移出群时非空（与手机内置输入栏同一句话）。
+     *
+     * 只读时**整块收起输入卡片**（留一句说明），与手机侧同一条语义：
+     * 让用户打完字再吃一条「发送失败」是最糟的形状。
+     */
+    readOnlyReason: String? = null,
 ) {
     val density = LocalDensity.current
     var split by remember { mutableStateOf(ComposerSplit(ComposerSplit.DEFAULT_RATIO)) }
     var value by remember(peer.nodeId) {
         mutableStateOf(TextFieldValue(draft, TextRange(draft.length)))
     }
+    // **外部对草稿的改动要把字送进输入框**（与手机端 MessageComposer 的
+    // LaunchedEffect(draft) 同一条纪律）。真身：长按头像「直接 @」改的是 ChatScreen
+    // 持有的 draft，这里只记自己的 TextFieldValue —— 没有这一步，@ 插进去了、
+    // 桌面输入框却纹丝不动，动作静默丢失。
+    //
+    // 键是 (peer.nodeId, draft) 而不是裸 draft：DesktopComposerFocusGuardTest 盯着
+    // 「聚焦效果不许按 draft 键」（每打一个字抢一次焦点会让表情/候选面板点不动）。
+    // 本效果**只同步文本、绝不 requestFocus**；正常打字的回路
+    // （onValueChange → onDraftChange → draft 流回来）文本恒等，body 是空操作，
+    // 光标不会被拽走。外部改动（@ 插入、发送清空）才真的写回。
+    LaunchedEffect(peer.nodeId, draft) {
+        if (value.text != draft) {
+            value = value.copy(text = draft, selection = TextRange(draft.length))
+        }
+    }
     var emojiOpen by remember { mutableStateOf(false) }
     var mentionMenuOpen by remember { mutableStateOf(false) }
+    // 光标前正在进行的那段 `@` 输入（`mentionQueryBeforeCursor` 的产物）：
+    // 候选开着时决定**过滤**，变 null（@ 被删 / 跨过空白）就收起候选。
+    var mentionQuery by remember { mutableStateOf<String?>(null) }
     var historySearchOpen by remember(peer.nodeId) { mutableStateOf(false) }
     var pkPickerOpen by remember(peer.nodeId) { mutableStateOf(false) }
     val focusRequester = remember { FocusRequester() }
@@ -215,13 +319,36 @@ public fun DesktopComposer(
         }
     }
 
+    // **外部要求的焦点**（回复 / 长按头像直接 @ / 新任务）：与上面那条"进会话就聚焦"分开。
+    //
+    // 上面那条的键是 peer.nodeId，只在换会话时跑；这条的键是**递增计数**，只有
+    // `ChatScreen` 真的点名要焦点时才变。两条都留着是必要的：合进上面那条的键
+    // 会让"每打一个字"或"每次回复"都重跑一遍带重试的聚焦循环，反而把候选面板拽走。
+    //
+    // 这里**不用重试、不赌时序**：能点「回复」/「@」时本卡片早已在树上（用户点了消息列表
+    // 里的东西），首个组合帧之后 `requestFocus()` 是确定的。用重试反而会在卡片已经
+    // 可见之后继续抢焦点。
+    LaunchedEffect(focusRequest) {
+        if (focusRequest != COMPOSER_FOCUS_REQUEST_IDLE) {
+            focusRequester.requestFocus()
+        }
+    }
+
     val bytes = draftByteCount(value.text)
     val mode = composeByteMode(bytes)
 
     fun send() {
+        // **与发送按钮同一条判据**（[desktopComposerCanSend]）：超限的草稿发出去会被
+        // 对端按字节预算整帧拒收，发送侧收不到任何错误 —— 按 Enter 后输入框被清空、
+        // 字没了、消息实际没发出去，正是「静默丢失」的形态。这里不拦，
+        // Enter 那条路就是唯一绕过按钮置灰的门。
+        if (!desktopComposerCanSend(value.text, mode)) return
         val text = value.text.trim()
         if (text.isEmpty()) return
-        controller.sendToConversation(peer.nodeId, text)
+        // **带 replyId 走 ChatScreen 的出口**（[onSend]）：从前这一行是
+        // `controller.sendToConversation(peer.nodeId, text)` —— 「回复」的 replyId 与
+        // 发送后的引用态清理都在这条路上丢了。现在发送、清草稿、清引用是同一个动作。
+        onSend(text, replyingTo?.id)
         value = TextFieldValue("")
         onDraftChange("")
     }
@@ -261,6 +388,61 @@ public fun DesktopComposer(
                 modifier = Modifier.fillMaxWidth().height(with(density) { composerPx.toDp() }),
             ) {
                 Column(Modifier.fillMaxSize().padding(LocalAppSpacing.current.md10)) {
+                    // 只读：留一句说明、收起输入区（与手机 MessageComposer 的 readOnlyReason 同义）。
+                    // 让用户打完字再吃一条「发送失败」是最糟的形状。
+                    if (readOnlyReason != null) {
+                        Text(
+                            text = readOnlyReason,
+                            style = MaterialTheme.typography.bodyMedium,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            modifier = Modifier.fillMaxWidth().padding(vertical = LocalAppSpacing.current.sm6),
+                        )
+                        return@Column
+                    }
+                    // 引用条：与手机 MessageComposer 的回复预览同款（同一组 strings key）。
+                    // 桌面从前不收 replyingTo —— 气泡菜单点「回复」什么都不会发生。
+                    replyingTo?.let { reply ->
+                        Surface(
+                            color = MaterialTheme.colorScheme.surfaceVariant,
+                            shape = RoundedCornerShape(8.dp),
+                            modifier = Modifier.fillMaxWidth().padding(bottom = LocalAppSpacing.current.sm6),
+                        ) {
+                            Row(
+                                modifier = Modifier.padding(
+                                    horizontal = LocalAppSpacing.current.md10,
+                                    vertical = LocalAppSpacing.current.sm6,
+                                ),
+                                verticalAlignment = Alignment.CenterVertically,
+                                horizontalArrangement = Arrangement.SpaceBetween,
+                            ) {
+                                val replyText = reply.text.ifBlank { reply.file?.name.orEmpty() }
+                                // 发送者名由 ChatScreen 用身份解析器算好；资料没到就说
+                                // 「未知成员」，不把 8 位 hex 的裸 id 当人名印。
+                                val senderLabel = replySenderName ?: stringResource(Res.string.common_unknown_member)
+                                Text(
+                                    text = stringResource(
+                                        Res.string.chat_reply_preview_prefix,
+                                        senderLabel,
+                                        // 不做 UTF-16 预截断（会劈开 emoji），交给 maxLines+Ellipsis。
+                                        replyText,
+                                    ),
+                                    style = MaterialTheme.typography.labelSmall,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                    maxLines = 1,
+                                    overflow = TextOverflow.Ellipsis,
+                                    modifier = Modifier.weight(1f),
+                                )
+                                IconButton(onClick = onCancelReply, modifier = Modifier.size(24.dp)) {
+                                    Icon(
+                                        imageVector = Icons.Default.Close,
+                                        contentDescription = stringResource(Res.string.chat_reply_cancel),
+                                        tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                                        modifier = Modifier.size(16.dp),
+                                    )
+                                }
+                            }
+                        }
+                    }
                     BoxWithConstraints(Modifier.fillMaxWidth()) {
                         // 工具行照原型 `toolsRow(group=false)` 逐颗对齐
                         // （`prototype/relay.html:3103-3118`）：表情 · PK · 窗口震动 · 截图 ·
@@ -351,17 +533,23 @@ public fun DesktopComposer(
                                     overflow = TextOverflow.Ellipsis,
                                     modifier = Modifier.padding(start = LocalAppSpacing.current.sm6),
                                 )
+                            }
+                            // 「新任务」chip：点名的 token 由 ChatScreen 按**这个群里的
+                            // agent kind** 解析（与手机内置输入栏同一个值、同一条
+                            // insertMention 插入路径）—— 从前在这里写死 "@dsh "，
+                            // 换个 agent 群就插出一个叫不醒的 token。
+                            // 判据与手机一致：只在工作区群画（newTaskToken != null）。
+                            if (newTaskToken != null) {
                                 Surface(
                                     shape = RoundedCornerShape(6.dp),
                                     color = MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.5f),
                                     modifier = Modifier
                                         .padding(start = LocalAppSpacing.current.sm)
                                         .clickable {
-                                            val prefix = "@dsh "
                                             val currentText = value.text
-                                            if (!currentText.startsWith(prefix)) {
-                                                val newText = "$prefix$currentText"
-                                                value = value.copy(text = newText, selection = TextRange(newText.length))
+                                            if (!currentText.startsWith(newTaskToken, ignoreCase = true)) {
+                                                val (newText, cursor) = insertMention(currentText, 0, 0, newTaskToken)
+                                                value = TextFieldValue(newText, TextRange(cursor))
                                                 onDraftChange(newText)
                                             }
                                             focusRequester.requestFocus()
@@ -399,12 +587,22 @@ public fun DesktopComposer(
                             val previousText = value.text
                             value = next
                             onDraftChange(next.text)
-                            // 刚敲入 `@` 就开候选（与手机端 MessageComposer 同一条判据）。
-                            if (mentionTargets.isNotEmpty() && next.text.length > previousText.length) {
-                                val cursor = next.selection.end
-                                if (cursor > 0 && next.text.getOrNull(cursor - 1) == '@') {
-                                    mentionMenuOpen = true
+                            // 与手机端 MessageComposer **同一份判据**（不是抄一份实现）：
+                            // 敲入 `@` 开候选，之后每次输入都重读"光标前那段 @ 输入"——
+                            // 它变 null（@ 被删 / 跨过空白）就收起，非空就按它过滤候选。
+                            // 桌面从前只开不收、也不过滤：候选挂在那儿盖住正文，删了 @ 还赖着。
+                            if (mentionTargets.isNotEmpty()) {
+                                if (next.text.length > previousText.length) {
+                                    val cursor = next.selection.end
+                                    if (cursor > 0 && next.text.getOrNull(cursor - 1) == '@') {
+                                        mentionMenuOpen = true
+                                    }
                                 }
+                                val query = mentionQueryBeforeCursor(next.text, next.selection.end)
+                                if (mentionMenuOpen && query == null) {
+                                    mentionMenuOpen = false
+                                }
+                                mentionQuery = if (mentionMenuOpen) query else null
                             }
                         },
                         placeholder = { Text(stringResource(Res.string.desktop_composer_placeholder), style = MaterialTheme.typography.bodyMedium) },
@@ -440,9 +638,39 @@ public fun DesktopComposer(
                     // 插入函数）。桌面端此前完全没有这个能力，只有一个硬编码的「@dsh」快捷插入。
                     DropdownMenu(
                         expanded = mentionMenuOpen,
-                        onDismissRequest = { mentionMenuOpen = false },
+                        onDismissRequest = {
+                            mentionMenuOpen = false
+                            mentionQuery = null
+                        },
                     ) {
-                        mentionTargets.forEach { target ->
+                        // 「@所有人」与手机端 MessageComposer 对齐（同一个 strings key、
+                        // 同一条 insertMention 插入路径、同一条前缀过滤）。
+                        val mentionAllToken = "@" + stringResource(Res.string.chat_mention_all)
+                        // 按**光标前的前缀**过滤，而不是不管打到哪儿都把全体成员摊出来
+                        // （[filterMentionTargets] 与手机端同一份实现，不复制第二份）。
+                        val query = mentionQuery.orEmpty()
+                        val showMentionAll = mentionAllToken.removePrefix("@")
+                            .startsWith(query, ignoreCase = true)
+                        val visibleTargets = filterMentionTargets(mentionTargets, query)
+                        if (showMentionAll) {
+                            DropdownMenuItem(
+                                text = { Text(mentionAllToken) },
+                                onClick = {
+                                    mentionMenuOpen = false
+                                    mentionQuery = null
+                                    val (nextText, nextCursor) = insertMention(
+                                        text = value.text,
+                                        start = value.selection.min,
+                                        end = value.selection.max,
+                                        token = mentionAllToken,
+                                    )
+                                    value = TextFieldValue(nextText, TextRange(nextCursor))
+                                    onDraftChange(nextText)
+                                    focusRequester.requestFocus()
+                                },
+                            )
+                        }
+                        visibleTargets.forEach { target ->
                             DropdownMenuItem(
                                 text = {
                                     Column {
@@ -459,6 +687,7 @@ public fun DesktopComposer(
                                 },
                                 onClick = {
                                     mentionMenuOpen = false
+                                    mentionQuery = null
                                     val (nextText, nextCursor) = insertMention(
                                         text = value.text,
                                         start = value.selection.min,
@@ -501,7 +730,7 @@ public fun DesktopComposer(
                                 Text(" " + stringResource(Res.string.desktop_composer_send_hint), style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
                             }
                             Spacer(Modifier.width(LocalAppSpacing.current.md))
-                            Button2(stringResource(Res.string.chat_send), Icons.AutoMirrored.Outlined.Send, enabled = value.text.isNotBlank() && !mode.overLimit, onClick = { send() })
+                            Button2(stringResource(Res.string.chat_send), Icons.AutoMirrored.Outlined.Send, enabled = desktopComposerCanSend(value.text, mode), onClick = { send() })
                         }
                     }
                 }
@@ -514,8 +743,11 @@ public fun DesktopComposer(
             peer = peer,
             onDismiss = { historySearchOpen = false },
             onSearch = { q, f -> controller.searchInConversation(peer.nodeId, q, f) },
-            onSelectHit = { _ ->
+            onSelectHit = { hit ->
                 historySearchOpen = false
+                // **命中要跳过去，不是只把窗口关掉。** 从前这里把命中整个丢掉：
+                // 用户搜到了那条，点一下窗口合上，要找的消息在哪只靠自己翻。
+                onJumpToMessage?.invoke(hit.id)
             },
         )
     }

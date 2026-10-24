@@ -805,8 +805,6 @@ private fun SettingsMoreStoragePhonePreview() {
     AppTheme(darkTheme = false) {
         ExtraScreen(AppRoutes.SETTINGS, badges = navBadges(humanOnlyState)) { inner ->
             SettingsDataSubpage(
-                // 武装这一支：可空出口不传则依赖它的界面根本不渲染（截图证据里没有它）。
-                onLinkDownlinkEnabledChange = {},
                 modifier = inner,
                 dataDirectory = "/data/user/0/com.kapp.tidings/files/relay",
                 cacheDirectory = "/data/user/0/com.kapp.tidings/cache/relay",
@@ -855,8 +853,6 @@ private fun SettingsMoreLoadingPhonePreview() {
     AppTheme(darkTheme = false) {
         ExtraScreen(AppRoutes.SETTINGS, badges = navBadges(humanOnlyState)) { inner ->
             SettingsDataSubpage(
-                // 武装这一支：可空出口不传则依赖它的界面根本不渲染（截图证据里没有它）。
-                onLinkDownlinkEnabledChange = {},
                 modifier = inner,
                 dataDirectory = "/data/user/0/com.kapp.tidings/files/relay",
                 cacheDirectory = "/data/user/0/com.kapp.tidings/cache/relay",
@@ -1737,6 +1733,8 @@ private fun ConversationsBannerPhonePreview() {
             ConversationsScreen(
                 state = errorBannerState,
                 onOpenChat = {},
+                onToggleMute = {},
+                onDeleteConversation = {},
                 onGoToPairing = {},
                 onDismissBanner = {},
                 modifier = inner,
@@ -1755,6 +1753,8 @@ private fun ConversationsLongTextPhonePreview() {
             ConversationsScreen(
                 state = longTextState,
                 onOpenChat = {},
+                onToggleMute = {},
+                onDeleteConversation = {},
                 onGoToPairing = {},
                 onDismissBanner = {},
                 modifier = inner,
@@ -2072,11 +2072,12 @@ private fun SettingsMoreLongTextPhonePreview() {
     AppTheme(darkTheme = false) {
         ExtraScreen(AppRoutes.SETTINGS, badges = navBadges(longProfileState)) { inner ->
             SettingsDataSubpage(
-                // 武装这一支：可空出口不传则依赖它的界面根本不渲染（截图证据里没有它）。
-                onLinkDownlinkEnabledChange = {},
                 modifier = inner,
-                dataDirectory = "/data/user/0/com.kapp.tidings/files/relay/downloads/2026-10-07-quarterly-review",
-                cacheDirectory = "/data/user/0/com.kapp.tidings/cache/relay/thumbs",
+                // 必须用**外置**路径：应用私有路径会被 `isAppPrivateStoragePath` 换成人话，
+                // 于是这一帧与 settings-more-storage 渲染成同一张图（门禁抓到的「重复参考图」）。
+                // 这一帧的职责就是「长路径会不会把这一行撑破」，所以要让它真的把路径显示出来。
+                dataDirectory = "/storage/emulated/0/Download/2026-10-07-quarterly-review-final-v3",
+                cacheDirectory = "/storage/emulated/0/Android/data/com.kapp.tidings/cache/relay/thumbs",
                 onBack = {},
                 dataUsageBytes = 268_435_456L,
                 cacheUsageBytes = 33_554_432L,
@@ -2209,6 +2210,8 @@ private fun ConversationsGroupPhonePreview() {
             ConversationsScreen(
                 state = groupListState,
                 onOpenChat = {},
+                onToggleMute = {},
+                onDeleteConversation = {},
                 onGoToPairing = {},
                 onDismissBanner = {},
                 modifier = inner,
@@ -2235,6 +2238,8 @@ private fun ConversationsGroupCreatePhonePreview() {
             ConversationsScreen(
                 state = humanOnlyState,
                 onOpenChat = {},
+                onToggleMute = {},
+                onDeleteConversation = {},
                 onGoToPairing = {},
                 onDismissBanner = {},
                 modifier = inner,

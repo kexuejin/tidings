@@ -189,6 +189,8 @@ private fun ChatHomeRecentPhonePreview() {
         ConversationsScreen(
             state = chatBase,
             onOpenChat = {},
+            onToggleMute = {},
+            onDeleteConversation = {},
             onGoToPairing = {},
             onDismissBanner = {},
             onCreateGroup = { _, _ -> },
@@ -218,6 +220,8 @@ private fun ChatHomeRecentWorkspacesPhonePreview() {
         ConversationsScreen(
             state = state,
             onOpenChat = {},
+            onToggleMute = {},
+            onDeleteConversation = {},
             onGoToPairing = {},
             onDismissBanner = {},
             onCreateGroup = { _, _ -> },
@@ -245,6 +249,8 @@ private fun ChatHomeUnreadPhonePreview() {
         ConversationsScreen(
             state = chatBase,
             onOpenChat = {},
+            onToggleMute = {},
+            onDeleteConversation = {},
             onGoToPairing = {},
             onDismissBanner = {},
             onCreateGroup = { _, _ -> },
@@ -279,6 +285,8 @@ private fun ChatFilterEmptyPhonePreview() {
         ConversationsScreen(
             state = chatBase,
             onOpenChat = {},
+            onToggleMute = {},
+            onDeleteConversation = {},
             onGoToPairing = {},
             onDismissBanner = {},
             onCreateGroup = { _, _ -> },
@@ -580,6 +588,8 @@ private fun ChatGroupCreatePhonePreview() {
                 ConversationsScreen(
                     state = chatBase,
                     onOpenChat = {},
+                    onToggleMute = {},
+                    onDeleteConversation = {},
                     onGoToPairing = {},
                     onDismissBanner = {},
                     onCreateGroup = { _, _ -> },
@@ -674,6 +684,8 @@ private fun ChatInsetsPhonePreview() {
                 ConversationsScreen(
                     state = chatBase,
                     onOpenChat = {},
+                    onToggleMute = {},
+                    onDeleteConversation = {},
                     onGoToPairing = {},
                     onDismissBanner = {},
                     modifier = inner,
@@ -709,12 +721,12 @@ private fun ChatDeskPanePreview() {
             ),
             chrome = ChatScreenChrome(
                 showHeader = false,
-                composerSlot = { draft, onDraftChange, mentions ->
+                composerSlot = { args ->
                 DesktopComposer(
                 peer = peer,
-                draft = draft,
-                onDraftChange = onDraftChange,
-                mentionTargets = mentions,
+                draft = args.draft,
+                onDraftChange = args.onDraftChange,
+                mentionTargets = args.mentionTargets,
                 controller = DesktopPreviewActions,
             )
                 },
@@ -741,8 +753,8 @@ private fun ChatDeskHistSearchPreview() {
             ),
             chrome = ChatScreenChrome(
                 showHeader = false,
-                composerSlot = { draft, onDraftChange, mentions ->
-                DesktopComposer(peer, draft, onDraftChange, DesktopPreviewActions)
+                composerSlot = { args ->
+                DesktopComposer(peer, args.draft, args.onDraftChange, DesktopPreviewActions)
                 },
                 modifier = inner,
             )
@@ -774,8 +786,8 @@ private fun ChatDeskGroupCreatePreview() {
             ),
             chrome = ChatScreenChrome(
                 showHeader = false,
-                composerSlot = { draft, onDraftChange, mentions ->
-                DesktopComposer(linPeer(), draft, onDraftChange, DesktopPreviewActions)
+                composerSlot = { args ->
+                DesktopComposer(linPeer(), args.draft, args.onDraftChange, DesktopPreviewActions)
                 },
                 modifier = inner,
             )
@@ -915,7 +927,7 @@ private val gsHits: GlobalSearchResult = GlobalSearchResult(
 private fun ChatGlobalSearchPhonePreview() {
     ChatShell("conversations", chatBase) { inner ->
         GlobalSearchScreen(
-            onSearch = { gsHits },
+            onSearch = { _, _ -> gsHits },
             onBack = {},
             onOpenChat = {},
             onOpenFile = {},
@@ -942,7 +954,7 @@ private fun ChatGlobalSearchPhonePreview() {
 private fun ChatGlobalSearchEmptyPhonePreview() {
     ChatShell("conversations", chatBase) { inner ->
         GlobalSearchScreen(
-            onSearch = { GlobalSearchResult(query = "捎话") },
+            onSearch = { _, _ -> GlobalSearchResult(query = "捎话") },
             onBack = {},
             onOpenChat = {},
             onOpenFile = {},

@@ -2,6 +2,7 @@
 
 package com.kapp.tidings.domain
 
+import com.kapp.tidings.domain.model.AgentApprovalUi
 import com.kapp.tidings.domain.model.AgentSessionKey
 import com.kapp.tidings.domain.model.AgentSessionUi
 import com.kapp.tidings.domain.model.ConversationUi
@@ -446,7 +447,9 @@ public fun RelayUiState.inboxWorkspaceUnits(
         else -> nowMillis()
     }
 
-    val pendingApprovals = agentApprovals.values.filter { it.status == APPROVAL_PENDING }
+    // 过期的不算待批（[isPendingApproval] 是唯一判据）：页头、段头、角标、尾巴那行
+    // 「还有 N 项待审批」都必须数同一批，否则用户会看到两个不同的数。
+    val pendingApprovals = agentApprovals.values.filter { isPendingApproval(it, referenceNow) }
 
     val full = mutableListOf<WorkspaceUnitGroupUi>()
     for (node in agentNodes) {
@@ -649,7 +652,7 @@ public fun RelayUiState.inboxWorkspaceUnits(
         hiddenPending = if (hidden == 0) 0 else shownHiddenPending(ordered, shown),
         workspaceCount = ordered.sumOf { group -> group.units.count { it.isWorkspace } },
         agentCount = ordered.sumOf { group -> group.units.count { !it.isWorkspace } },
-        pendingTotal = agentApprovals.values.count { it.status == APPROVAL_PENDING },
+        pendingTotal = pendingApprovals.size,
     )
 }
 
@@ -750,6 +753,42 @@ private data class WorkspaceRowKey(val agentKey: String?, val wsId: String?)
 
 /** 审批的"待处理"取值。协议里就这一个字面量，`status` 其余取值表示已决。 */
 private const val APPROVAL_PENDING: String = "pending"
+
+/**
+ * 这条审批是否已过有效期 —— **全仓唯一判据**。
+ *
+ * 有效期是审批的属性，不是某一屏的：看板页头、工作区分段头、会话切换条、会话选择器
+ * 与工作区详情必须用同一个判据。此前各处手写 `status == "pending"`，页头说
+ * 「2 项待审批」、段头与角标却说「3 项」—— 同一个屏两把尺子，就是这么来的。
+ *
+ * `expiresAt == 0` 的含义是「对端没声明有效期」，**不是**「已经过期」。
+ */
+public fun isApprovalExpired(approval: AgentApprovalUi, now: Long): Boolean =
+    approval.expiresAt > 0L && now > approval.expiresAt
+
+/** 这条审批是否**还要人处置**：pending 且未过期（见 [isApprovalExpired]）。 */
+public fun isPendingApproval(approval: AgentApprovalUi, now: Long): Boolean =
+    approval.status == APPROVAL_PENDING && !isApprovalExpired(approval, now)
+
+/**
+ * 待批的审批条数 —— 全仓唯一入口（页头 / 分段头 / 工作区详情 / 会话切换条 / 会话选择器）。
+ *
+ * [peerId] / [sessionId] / [sessionIds] 是本屏的收窄条件，全部可选（不传 = 不限）。
+ * 收窄条件必须和「什么叫待批」长在同一个函数里：拆成两处之后，过期这条规则
+ * 就只在其中一处落地，其余几处立刻退回「另一把尺子」。
+ */
+public fun pendingApprovalCount(
+    approvals: Collection<AgentApprovalUi>,
+    now: Long,
+    peerId: String? = null,
+    sessionId: String? = null,
+    sessionIds: Set<String>? = null,
+): Int = approvals.count { approval ->
+    isPendingApproval(approval, now) &&
+        (peerId == null || approval.peerId == peerId) &&
+        (sessionId == null || approval.sessionId == sessionId) &&
+        (sessionIds == null || approval.sessionId in sessionIds)
+}
 
 /** 会话状态里表示「正在干活」的取值（PPE-1 §6.5）。看板挑活跃会话时用的就是它。 */
 private const val AGENT_STATE_BUSY: String = "busy"

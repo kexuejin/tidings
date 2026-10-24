@@ -15,6 +15,7 @@ import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.minimumInteractiveComponentSize
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
@@ -203,7 +204,11 @@ fun AppButton(
 ) {
     Button(
         onClick = onClick,
-        modifier = modifier,
+        // 触控下限（视觉不变）：小档/紧凑档的视觉高度只有 ~26–28dp，而这一层在
+        // M3 Surface 的背景**之外** —— 命中区扩到 48dp，色块本身仍是原型那个高度。
+        // 显式写而不是只依赖 M3 的默认值：那个默认可以被 LocalMinimumInteractiveComponentSize
+        // 覆盖，钉在组件里才算纪律。
+        modifier = modifier.minimumInteractiveComponentSize(),
         enabled = enabled,
         shape = size.buttonShape(),
         colors = when (tone) {
@@ -240,7 +245,7 @@ fun AppOutlinedButton(
     }
     OutlinedButton(
         onClick = onClick,
-        modifier = modifier,
+        modifier = modifier.minimumInteractiveComponentSize(),
         enabled = enabled,
         shape = size.buttonShape(),
         colors = ButtonDefaults.outlinedButtonColors(
@@ -284,7 +289,7 @@ fun AppTextButton(
     }
     TextButton(
         onClick = onClick,
-        modifier = modifier,
+        modifier = modifier.minimumInteractiveComponentSize(),
         enabled = enabled,
         shape = size.buttonShape(),
         colors = ButtonDefaults.textButtonColors(contentColor = contentColor),

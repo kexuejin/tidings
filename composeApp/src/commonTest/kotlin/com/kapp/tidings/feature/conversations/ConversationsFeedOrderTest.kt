@@ -168,4 +168,53 @@ class ConversationsFeedOrderTest {
 
         assertEquals(listOf("conv_newer", "conv_older"), out.map { it.key })
     }
+
+    // ------------------------------------------------------ 桌面侧栏同一把尺子（[P1]）
+
+    /**
+     * 桌面壳过去对 `state.conversations` 只做查询词过滤、原样 map 进行的容器 ——
+     * 置顶的第一排序键只在 [orderInboxFeed] 里，于是同一个置顶动作在手机上生效、
+     * 在桌面上点了没反应。现在桌面走 [orderConversationList]，两条用例钉住：
+     * 置顶必须最前；无置顶时顺序与派生顺序逐条一致（稳定排序回归保护）。
+     */
+    @Test
+    fun desktopListSortsPinnedFirstEvenWhenItIsTheOldest() {
+        val oldPinned = conv("pinned", lastMessageAt = 1L, isPinned = true)
+        val newer = conv("newer", lastMessageAt = 9_999L)
+        val quiet = conv("quiet", lastMessageAt = 0L, presenceAt = 5_000L)
+
+        val out = orderConversationList(listOf(newer, quiet, oldPinned))
+
+        assertEquals(
+            listOf("pinned", "newer", "quiet"),
+            out.map { it.convId },
+            "桌面列表的第一排序键也必须是置顶，其次才轮到最近消息与在线时间",
+        )
+    }
+
+    @Test
+    fun desktopListWithoutPinsKeepsTheDerivedOrder() {
+        val newer = conv("newer", lastMessageAt = 9_999L)
+        val older = conv("older", lastMessageAt = 1L)
+        val fresh = conv("fresh", lastMessageAt = 0L, presenceAt = 99_000L)
+
+        val out = orderConversationList(listOf(older, newer, fresh))
+
+        assertEquals(
+            listOf("newer", "older", "fresh"),
+            out.map { it.convId },
+            "无置顶时桌面顺序必须与 RelayUiState.conversations 的派生顺序一致",
+        )
+    }
+
+    @Test
+    fun desktopListStillFiltersByQuery() {
+        // 桌面壳原来的查询词过滤（标题或预览命中）必须原样保留 —— 排序的修复不许动它。
+        val hit = conv("老周", lastMessageAt = 1L).copy(preview = "周五聚餐")
+        val miss = conv("老王", lastMessageAt = 2L).copy(preview = "下周再说")
+
+        val out = orderConversationList(listOf(hit, miss), query = "聚餐")
+
+        assertEquals(listOf("老周"), out.map { it.convId })
+    }
 }

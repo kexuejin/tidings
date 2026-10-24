@@ -17,6 +17,8 @@
     <string name="common_confirm">Confirm</string>
     <string name="common_remove">Delete</string>
     <string name="common_close">Close</string>
+    <!-- Inline "copied" feedback (e.g. the payload row in the My-QR sheet). -->
+    <string name="common_copied">Copied</string>
     <string name="common_online">Online</string>
     <string name="common_offline">Offline</string>
     <string name="common_agent">Agent</string>
@@ -32,10 +34,7 @@
     <!-- 会话列表 -->
     <string name="conv_title">Messages</string>
     <string name="action_clear_search">Clear search</string>
-    <string name="conv_section_agents">Agent nodes</string>
-    <string name="conv_section_people">Colleagues</string>
-    <!-- 群单列一节：它不是人也不是 agent，塞进任一节都会让那一节的控件失效。 -->
-    <string name="conv_section_groups">Groups</string>
+    <string name="action_retry">Retry</string>
     <string name="conv_new_group">New group</string>
     <string name="conv_more_action">More</string>
     <string name="conv_filter_all">All</string>
@@ -48,7 +47,6 @@
     <string name="conv_filter_empty_action">Show all</string>
     <string name="conv_subtitle_summary">%1$d conversations · %2$d unread</string>
     <string name="conv_subtitle_summary_ws">%1$d conversations · %2$d workspaces · %3$d unread</string>
-    <string name="conv_no_groups">No groups yet. Tap "New group" in the top right to invite colleagues.</string>
     <string name="conv_group_name">Group name</string>
     <string name="conv_group_members_hint">Select members (you are included automatically)</string>
     <string name="conv_group_no_peers">No other nodes found. Add nodes on the Nodes page before creating a group.</string>
@@ -57,7 +55,8 @@
     <string name="conv_loading">Restoring conversations…</string>
     <string name="conv_empty_message">Add an IP on the Nodes page, or wait for incoming messages.</string>
     <string name="conv_empty_action">Go to Nodes</string>
-    <string name="conv_offline_banner">%1$d messages queued waiting for peer to come online; will retry automatically.</string>
+    <string name="conv_empty_failed_title">The node did not start</string>
+    <string name="conv_empty_failed_message">The local node is not running, so messages cannot arrive right now. Check the Nodes page for what went wrong.</string>
     <string name="conv_pending_count">%1$d pending</string>
 
     <!-- 聊天 -->
@@ -76,7 +75,7 @@
     <string name="chat_byte_over">Exceeds message limit (%1$d bytes). Please split into multiple messages.</string>
     <!-- 输入栏状态行的右半边：这条草稿实际会走哪条路。手机上没法像桌面那样把两条路摆成两个模式，
          所以要说清楚"现在这样发出去是什么后果"，而不是只给一个字节数。 -->
-    <string name="chat_route_udp">Direct LAN · UDP unicast</string>
+    <string name="chat_route_udp">Direct on this network</string>
     <string name="chat_route_tcp">Exceeds unicast limit, falling back to TCP</string>
     <string name="chat_delivery_sending">Sending</string>
     <string name="chat_delivery_sent">Delivered</string>
@@ -122,6 +121,10 @@
     <string name="conv_action_mute">Mute</string>
     <string name="conv_action_unmute">Unmute</string>
     <string name="conv_action_delete">Delete conversation (this device only)</string>
+    <string name="conv_delete_confirm_title">Delete this conversation?</string>
+    <string name="conv_delete_confirm_body">Only this device's chat history is deleted; the other side is not affected. This cannot be undone.</string>
+    <string name="conv_row_pinned">Pinned</string>
+    <string name="conv_row_more_actions">More actions</string>
     <string name="conv_menu_mark_all_read">Mark all as read</string>
     <string name="conv_menu_sort_recent">Sort: most recent first</string>
     <!-- Workspace section on the conversations tab (the second block of m-home-recent).
@@ -192,6 +195,9 @@
     <string name="chat_group_desc_label">Description</string>
     <string name="chat_group_announce_label">Announcement</string>
     <string name="chat_group_id_label">groupId</string>
+    <string name="chat_group_copy_id">Copy group ID</string>
+    <string name="chat_group_id_copied">Copied</string>
+    <string name="group_member_agent_badge">Agent</string>
     <string name="chat_group_members_header">Members (%1$d)</string>
     <string name="chat_group_info_hint">Group metadata synchronizes across members only; invitations and removals adhere to group policies.</string>
     <string name="chat_group_add_member">Add members</string>
@@ -279,9 +285,12 @@
     <string name="external_pairing_body_unknown">This device cannot tell which node this content refers to; allowing it runs the normal pairing flow.</string>
     <string name="external_pairing_allow">Allow pairing</string>
     <string name="nodes_my_qr_desc">Pairing QR code for others to scan via "Nodes → Scan to Pair"</string>
-    <string name="nodes_my_qr_hint">Have others scan this code in "Nodes → Scan to Pair" to add you to their nodes list. Both devices must be on the same local network.</string>
-    <string name="nodes_my_qr_no_address">Local address not yet acquired; QR code cannot be generated yet.</string>
-    <string name="nodes_my_qr_too_long">Local address too long for QR code. Please enter the address manually.</string>
+    <!-- Mirror of the zh comment: the code carries ALL candidates (LAN + public tunnel), so
+         "must be on the same network" understates what already works; the old "the card above"
+         pointed at a card the sheet no longer has. -->
+    <string name="nodes_my_qr_hint">Have the other side scan this code in "Nodes → Scan to Pair" to add you: same Wi-Fi connects directly; the code also carries public-network candidates, so it works across networks.</string>
+    <string name="nodes_my_qr_no_address">The node has no local address yet, so the QR code cannot be generated. Try again once the network is ready.</string>
+    <string name="nodes_my_qr_too_long">The address is too long to encode as a QR code. Ask the other side to enter it in "Add Node → Enter Address".</string>
     <string name="nodes_group_lan">LAN Discovery</string>
     <string name="nodes_lan_empty">No other nodes discovered on LAN. Others must also run Tidings to be discovered.</string>
     <string name="nodes_group_saved">Saved Nodes (Managed)</string>
@@ -292,7 +301,6 @@
     <string name="nodes_saved_empty">No manually saved nodes. Desktop nodes will not appear automatically; add their address manually.</string>
     <string name="nodes_group_add">Add Node</string>
     <string name="nodes_scan_title">Scan to Pair</string>
-    <string name="nodes_scan_sub">Scan the QR code in the other party's "My QR Code"</string>
     <string name="nodes_add_manual_title">Enter Peer Address</string>
     <string name="nodes_footer">Up to %1$d manual nodes can be saved. Messages are queued when nodes are offline.</string>
 
@@ -302,19 +310,22 @@
         而所有截图帧写死 `locale = "zh-rCN"`，门禁与参考图都照不到 ⇒ 必须成对落。
     -->
     <string name="nodes_group_nodes_count">Nodes (%1$d)</string>
-    <string name="nodes_nodes_empty">No nodes found yet. Others on the same LAN must also have Tidings running to be discovered; if the peer device does not have automatic discovery enabled, add it with "Enter Peer Address" below.</string>
-    <string name="nodes_row_src_lan">LAN</string>
-    <string name="nodes_row_src_manual">Added manually</string>
-    <string name="nodes_row_offline_at">Offline %1$s</string>
-    <string name="nodes_row_menu">Node actions</string>
+    <string name="nodes_nodes_empty">No nodes found yet. Others on the same LAN must also have Tidings running to be discovered; if the peer device does not have automatic discovery enabled, add it with "Add Node" below.</string>
+    <!-- Mirror of the zh comment: the row-end ⋯ menu is gone; these actions now live at the
+         bottom of the node detail (management actions stay out of the main list). -->
     <string name="nodes_menu_message">Send Message</string>
-    <string name="nodes_menu_reconnect">Reconnect</string>
     <string name="nodes_menu_copy">Copy Address</string>
     <string name="nodes_menu_remove">Remove "%1$s"</string>
+    <string name="nodes_removed_notice">Removed "%1$s" (chat history on this device is kept)</string>
     <string name="nodes_menu_copied">Address copied</string>
+    <!-- Remove-node confirmation. Say what it actually does: local only, the peer is unaffected. -->
+    <string name="nodes_remove_confirm_title">Remove this node?</string>
+    <string name="nodes_remove_confirm_body">Removes it from this device's node list only; the peer is unaffected and saved chat history is kept.</string>
     <string name="nodes_my_qr_entry_title">My QR Code</string>
     <string name="nodes_my_qr_entry_sub">Have the other side scan it to add you to their node list</string>
     <string name="nodes_my_qr_payload">Payload</string>
+    <!-- Copy action for the payload line: nobody can hand-copy that string. -->
+    <string name="nodes_my_qr_copy">Copy payload</string>
     <string name="nodes_my_qr_payload_hint">If the camera is broken or the code is too far to scan, copy the line above to the other side — that works just as well.</string>
     <string name="nodes_manual_name">Name (optional)</string>
     <string name="nodes_manual_name_hint">Shown on this device only. After the handshake, the list shows the other side's own nickname.</string>
@@ -369,7 +380,6 @@
     <string name="disc_manual_online">Online</string>
     <string name="disc_manual_offline">Offline</string>
     <string name="disc_manual_unreachable">Unreachable</string>
-    <string name="disc_manual_unreachable_hint">This address has never responded. It may be obsolete after network changes.</string>
     <string name="disc_cleanup_unreachable">Clean up unreachable (%1$d)</string>
     <string name="disc_cleanup_none">No nodes need cleanup.</string>
     <string name="disc_cleanup_done">Cleaned up %1$d unreachable nodes.</string>
@@ -403,7 +413,7 @@
          protocol, so this line carries the two parts it can, from real values. -->
     <string name="agent_summary_line">%1$s · TCP %2$d</string>
     <!-- Board header summary; prototype relay.html:4208-4211. -->
-    <string name="workspace_board_subtitle">%1$d devices · %2$d Agents · %3$d workspaces · %4$d sessions</string>
+    <string name="workspace_board_subtitle">%1$d devices · %2$d agents · %3$d spaces · %4$d chats</string>
     <string name="workspace_bar_title">Active Workspace</string>
     <string name="workspace_bar_switch">Switch Workspace</string>
     <string name="workspace_new_segment">New Segment</string>
@@ -425,8 +435,8 @@
     <string name="agent_status_last_seen">Last Seen</string>
     <string name="agent_timeline_title">Event Stream</string>
     <string name="agent_messages_title">Chat Messages</string>
-    <string name="agent_sessions_empty">No session announcements received. Peer must declare agn1 and send agent-session / agent-event frames.</string>
-    <string name="agent_sessions_memory_note">Events and sessions are stored persistently in isolated tables (PPE-1 §9).</string>
+    <string name="agent_sessions_empty">No sessions yet. Once an Agent starts working on the other device, its sessions will appear here.</string>
+    <string name="agent_sessions_memory_note">Sessions and their activity are kept on this device and survive a restart.</string>
     <string name="agent_session_load_more">Load more</string>
     <string name="agent_session_load_more_busy">Loading…</string>
     <string name="agent_session_load_more_hint">The host fetches conversation history only when you open a workspace</string>
@@ -450,15 +460,15 @@
     <string name="agent_session_meta">%1$s · %2$s</string>
     <string name="agent_session_started">Started at %1$s</string>
     <string name="agent_session_events_count">%1$d events</string>
-    <string name="agent_session_events_shown">Showing latest %1$d events (of %2$d)</string>
+    <string name="agent_session_events_shown">%1$d more earlier events</string>
+    <string name="agent_session_show_older">Show earlier</string>
     <string name="agent_session_bar_label">Session</string>
     <string name="agent_session_pending_count">%1$d pending</string>
     <string name="agent_session_no_events">No events in this session.</string>
     <!-- Shown when a session has neither an alias nor a title. We do not fall back to the
          session id: that is an identity key, not a name (DSH itself shows "Untitled"). -->
     <string name="agent_session_untitled">Untitled</string>
-    <string name="agent_event_cursor">Cursor %1$d</string>
-    <string name="agent_events_note">Chat history with this Agent (bubble stream), not structured events.</string>
+    <string name="agent_events_note">Chat history with this Agent (one card per message), not structured events.</string>
     <string name="agent_timeline_empty">No conversation with this Agent yet.</string>
     <string name="agent_open_chat">Open Chat</string>
     <string name="agent_event_count">%1$d messages</string>
@@ -475,6 +485,10 @@
     <string name="set_title_sub">Identity &amp; Connection</string>
     <string name="set_home_subtitle">Connection, notifications, appearance, capabilities, data &amp; diagnostics</string>
     <string name="set_profile_title">My Profile</string>
+    <!-- 资料子页顶栏副标题与表单卡里的占位兜底（原来硬编码在 Kotlin 里，进了 CJK 基线）。
+         公司/部门/团队三个兜底词复用 set_company / set_dept / set_team —— 同一个词只有一处来源。 -->
+    <string name="set_profile_page_subtitle">Nickname, avatar, company, department, team</string>
+    <string name="set_profile_nick_placeholder">My nickname</string>
     <string name="set_nick">Nickname</string>
     <string name="set_company">Company</string>
     <string name="set_dept">Department</string>
@@ -484,24 +498,36 @@
     <!-- 设置 · 上传头像（m-set-avatar / m15e-set-avatar-dark）。原型 relay.html:3735-3809；
          三张卡 + 一段「协议没通」的说明，全部是页面正文，没有 CHROME 元素。 -->
     <string name="set_avatar_page_title">Upload Avatar</string>
-    <string name="set_avatar_page_subtitle">Pick an image → crop square → hash → announce</string>
+    <!-- 如实描述现状（不承诺裁剪/转码——那是未实现的目标态）：选图 → 本机算哈希 → 保存档案。 -->
+    <string name="set_avatar_page_subtitle">Pick an image → hash it → save the profile</string>
     <string name="set_avatar_card_pick">Choose Image</string>
     <string name="set_avatar_change">Change</string>
-    <string name="set_avatar_file_meta">Source 1920×1280 · 1.8 MB · JPEG</string>
+    <!-- 资料页头像卡（AvatarPicker）的副行：%1$s 是系统选择器给的真实文件名
+         （拿不到时由 set_avatar_picked_label 兜底），%2$s 是真实字节数的可读形态。 -->
+    <string name="set_avatar_file_meta">%1$s · Size %2$s</string>
+    <string name="set_avatar_picked_label">Local image</string>
+    <string name="set_avatar_none_picked">No image selected yet</string>
+    <!-- %1$s 是 pickedAvatarBytes.size 换算出的可读大小（如 128 KiB）。宽高/格式拿不到，就不显示。 -->
+    <string name="set_avatar_file_size">Size %1$s</string>
     <string name="set_avatar_reselect">Reselect</string>
-    <string name="set_avatar_pick_hint">Choose a local image via the system file picker. Image limits: dimension ≤ 8192, file size ≤ 20 MiB.</string>
+    <!-- 实际上限是 MAX_AVATAR_BYTES = 32 KiB（落盘那张的闸）；20 MiB/8192 是「源图编码」那一步的闸，
+         那一步尚未实现，不写。 -->
+    <string name="set_avatar_pick_hint">Pick a local image via the system file picker. Current limit: file size ≤ 32 KiB — shrink larger images in your gallery app first.</string>
     <string name="set_avatar_step1_title">Pick a local image</string>
     <string name="set_avatar_step1_desc">One entry point: “Upload Image” → the system file picker.</string>
-    <string name="set_avatar_step2_title">Crop to a square</string>
-    <string name="set_avatar_step2_desc">Any source ratio, center crop; fixed output 192×192 — not “up to 192”.</string>
-    <string name="set_avatar_step3_title">Encode + write to disk</string>
-    <string name="set_avatar_step3_desc">webp, non-animated, ≤ 32 KiB; the file name is sha256(bytes) and the path accepts only that hash.</string>
-    <string name="set_avatar_step4_title">Write to the profile</string>
-    <string name="set_avatar_step4_desc">profile.avatarHash = hash, profileRev +1, announceProfile is broadcast.</string>
-    <string name="set_avatar_steps_hint">These four are four segments of one line, not four parallel features: only after picking an image can you crop, only after cropping can you encode, and only after encoding is there a hash to write into the profile. The line between step 3 and step 4 is the real boundary — cross it and the other side sees nothing.</string>
+    <string name="set_avatar_step2_title">Hash it</string>
+    <string name="set_avatar_step2_desc">The sha256 is computed on this device the moment the image is picked; the profile carries only that hash — the image body never goes online.</string>
+    <string name="set_avatar_step3_title">Stays on this device</string>
+    <string name="set_avatar_step3_desc">The image body never goes online; there is no cropping and no re-encoding today.</string>
+    <string name="set_avatar_step4_title">Save the profile</string>
+    <string name="set_avatar_step4_desc">“Save profile” writes the profile fields; the picked image does not sync with the profile yet (see below).</string>
+    <string name="set_avatar_steps_hint">This is what the page actually does today: pick an image, hash it, save the profile fields — all on this device. Cross-device sync of the image itself (cropping, re-encoding, on-demand fetch) is not implemented yet; that is the goal, not the current state.</string>
+    <string name="set_avatar_hash_empty">No image picked yet</string>
+    <!-- %1$d 是保存后的资料版本（profileRev）。 -->
+    <string name="set_avatar_saved_inline">Saved; the profile rev is now v%1$d. The picked image is not saved with the profile yet.</string>
     <string name="set_avatar_hash_title">Only these 64 hex digits go over the wire</string>
     <string name="set_avatar_hash_hint">The image body &lt;b&gt;never goes online&lt;/b&gt;; only this one hash travels with the profile. The peer sends avatar{op:"get"} on demand to fetch it — the images nobody could keep up with on a LAN never enter anyone’s bandwidth. The 32 KiB limit serves the same purpose: keeping the base64 envelope safely below one TCP control frame (64 KiB).</string>
-    <string name="set_avatar_protocol_title">Saving in this mode does nothing yet</string>
+    <string name="set_avatar_protocol_title">Saving works, but this image doesn't sync yet</string>
     <string name="set_avatar_protocol_lead">Custom avatar network sync is not yet enabled.</string>
     <string name="set_avatar_protocol_body">Custom avatar exchange (the av1 capability) requires on-demand fetch, caching, and framed chunk transfer. The current version prioritizes instant synchronization via preset avatars and initials; custom avatar network roaming will be enabled in a future release.</string>
     <string name="set_avatar_save">Save Profile</string>
@@ -525,7 +551,7 @@
     <string name="set_notify_subtitle">Alert rules and quiet hours</string>
     <string name="set_appear_card_title">Theme</string>
     <string name="set_appear_subtitle">Theme</string>
-    <string name="set_caps_card_title">Claims</string>
+    <string name="set_caps_card_title">Declarations</string>
     <string name="set_data_card_title">Directories</string>
     <string name="set_data_subtitle">Usage, partial transfers and retention</string>
     <string name="set_diag_card_title">Live status</string>
@@ -588,12 +614,17 @@
     <string name="set_saved">Saved. Profile rev updated to %1$d; peers will see changes.</string>
     <string name="set_invalid_nick">Nickname cannot be empty (max 32 characters).</string>
     <string name="set_data_dir">Data Directory</string>
+    <!-- 手机侧不显示私有绝对路径（/data/user/0/... 对用户没有信息量），换成这句。桌面保留真实路径。 -->
+    <string name="set_data_dir_private">App-internal storage</string>
     <string name="set_conn_title">Connection</string>
     <string name="set_conn_reset">Restore Defaults</string>
+    <!-- 卡头那枚小字的真实行为：只把默认端口填进输入框，不落盘 —— 名字必须与行为一致
+         （「恢复默认」读起来像已保存）。 -->
+    <string name="set_conn_fill_default_port">Fill in Default Port</string>
     <string name="set_conn_default_port">Default UDP Port</string>
     <!-- 如实说明改端口的后果：Discovery 的广播端口是协议默认的 17878（见 core 的 Discovery.broadcastPort），
          与本机监听端口无关，所以改完之后广播仍在 17878 发出、而本机只听新端口 —— 单向。 -->
-    <string name="set_conn_default_port_note">Broadcasting remains on 17878 while listening on the new port.</string>
+    <string name="set_conn_default_port_note">After the change, broadcasting still goes out on 17878 while the node listens only on the new port: others can still discover you, but you can no longer hear their broadcasts.</string>
     <string name="set_conn_save">Save Connection Settings</string>
     <string name="set_conn_reconnect">Reconnect</string>
     <string name="set_conn_reconnecting">Restarting…</string>
@@ -622,7 +653,7 @@
     <string name="set_theme_dark">Dark</string>
     <string name="set_caps_title">Capability Declarations</string>
     <string name="set_caps_peer_visible">Visible to peers</string>
-    <string name="set_caps_saved">Capabilities updated; node is rebroadcasting.</string>
+    <string name="set_caps_saved">Changes are rebroadcast immediately; peers see them on their next presence.</string>
     <!-- Settings home row values / fallbacks (see values/strings.xml). -->
     <string name="set_home_notify_mention_only">Mentions only</string>
     <string name="set_home_notify_quiet">Quiet</string>
@@ -655,11 +686,13 @@
          不会失败，null 只表示还在数。 -->
     <string name="set_leftover_counting">Calculating…</string>
     <string name="set_leftover_action">Clean up</string>
+    <!-- 清残片与「清空聊天记录」同一档次的前置确认：%1$d 是残片个数，%2$s 是总大小。 -->
+    <string name="set_leftover_confirm_body">This deletes %1$d partial transfer file(s) (%2$s in total) and abandons resuming them. This cannot be undone.</string>
     <string name="set_change_dir">Change Directory</string>
     <string name="set_open_dir">Open</string>
     <!-- 桌面数据页的卡内说明，原型 prototype/relay.html:5290-5292 逐字（英文按同义译）。
          原型那句的括号里是内部键名 set_change_dir / set_open_dir，正式产品不印内部标识符，故删掉。 -->
-    <string name="settings_data_desktop_hint">"Change Directory" / "Open Directory" is a desktop-only exit — on mobile you get to files from the file card in a conversation, so those two buttons are not there.</string>
+    <string name="settings_data_desktop_hint">Open Directory is a desktop-only exit — on mobile you reach files from the file card in a conversation, so it isn't here.</string>
     <!-- 手机数据页的卡内说明，原型 prototype/relay.html:3930-3931 逐字（英文按同义译）。与上面那句互斥。 -->
     <string name="settings_data_phone_hint">On mobile you get to files from the file card in a conversation (open / share), so "Change Directory" and "Open" are not here.</string>
 
@@ -673,9 +706,8 @@
     <string name="r2_set_profile_node_chip">Node %1$s</string>
     <string name="set_persist_title">Message Persistence</string>
     <string name="set_persist_sub">When disabled, messages stay in memory and are lost on restart</string>
-    <string name="set_retention_title">Retention Days</string>
-    <string name="set_retention_sub">Retain offline queued messages for %1$d days</string>
-    <string name="set_retention_value">%1$d days</string>
+    <!-- 保留天数在此页是一行纯说明（没有可改的开关），不再伪装成设置行。 -->
+    <string name="set_retention_summary">Offline queued messages are kept for %1$d days by default</string>
     <string name="set_clear_history_title">Clear Chat History</string>
     <string name="set_clear_history_sub">Irreversible</string>
     <string name="set_clear_history_action">Clear</string>
@@ -685,14 +717,15 @@
     <string name="set_peer_count">Known Nodes</string>
     <string name="set_diag_selfcheck">Run Self-Check</string>
     <string name="set_diag_protocol">Protocol</string>
-    <string name="set_diag_protocol_value">v1 · Compatible with desktop 0.61.1</string>
+    <!-- %1$d 来自 core 的 Protocol.VERSION —— 不再写死版本号与兼容对端（那两处会随实现漂移）。 -->
+    <string name="set_diag_protocol_value">v%1$d</string>
     <string name="set_diag_peers_value">%1$d · %2$d online / %3$d offline</string>
     <string name="set_diag_queued">Queued Messages</string>
-    <string name="set_diag_group_text">group-text</string>
+    <string name="set_diag_group_text">Group text</string>
     <string name="set_diag_enabled">Enabled</string>
     <string name="set_diag_disabled">Disabled</string>
-    <string name="set_diag_ime_smoke">Input self-check</string>
-    <string name="set_diag_inset">Status Bar Inset</string>
+    <string name="set_diag_ime_smoke">IME self-check</string>
+    <string name="set_diag_inset">Status bar padding</string>
     <string name="set_diag_inset_value">24 dp · App rendered without system background</string>
     <!-- 传输是否加密。协议层没有加密实现（明文 JSON），输入栏的「局域网直连」也不再暗示加密；
          这一行是把"没加密"摆在用户能查到的地方，而不是靠没人注意就不说。 -->
@@ -701,6 +734,10 @@
     <string name="set_diag_crypto_value">None · Plaintext on LAN</string>
     <string name="set_diag_rerun">Rerun Diagnostics</string>
     <string name="set_diag_selfcheck_unavailable">Apart from exporting a diagnostics package, this screen only shows live state; other self-checks are not wired yet.</string>
+    <!-- 与上一条互斥：宿主连「导出诊断包」都没接时用这条 —— 不能引用一颗不存在的按钮。 -->
+    <string name="set_diag_selfcheck_unavailable_no_export">This screen shows live state only; self-check actions are not wired up yet.</string>
+    <!-- 行内复制反馈（诊断页节点 ID / 连接页载荷）。 -->
+    <string name="settings_copy_done">Copied</string>
     <!-- Round 2: the `.navrow` outside the diagnostics card (prototype relay.html:3966-3971). -->
     <string name="r2_set_diag_insets_title">Adaptive check</string>
     <string name="r2_set_diag_insets_sub">Top gap / navigation bar / status bar: real-device symptoms vs. current state</string>
@@ -752,6 +789,7 @@
     <string name="file_state_completed_in">Received</string>
     <string name="file_state_completed_out">Delivered</string>
     <string name="file_state_failed">Transfer failed: %1$s</string>
+    <string name="chat_file_send_failed_hint">Send failed. Please pick the file again to send it</string>
     <string name="file_state_declined">Peer declined transfer</string>
     <!-- Folder transfers split the meta row from the state row, as in the prototype's
          folderCard (relay.html:4251-4275): progress in the meta row, a bare state word
@@ -779,15 +817,15 @@
     <string name="chat_attach">Attach File</string>
     <string name="chat_image">Image</string>
 
-    <!-- 相对时间 -->
+    <!-- Relative time (up to "N hours ago"; older falls back to a calendar date from formatDay) -->
     <string name="time_just_now">just now</string>
     <string name="time_minutes_ago">%1$d min ago</string>
     <string name="time_hours_ago">%1$d hours ago</string>
-    <string name="time_days_ago">%1$d days ago</string>
 
     <!-- 会话 -->
     <string name="conv_no_messages">No messages yet, say hi</string>
     <string name="conv_preview_mine">You: %1$s</string>
+    <string name="conv_preview_sender">%1$s: %2$s</string>
 
     <!-- 通知渠道：这两个名字显示在「系统设置 → 应用 → 通知」里，由系统按渠道 id 缓存。
          改文案必须同时改 AndroidPushNotificationHandler 的 CHANNEL_ID，否则老用户看到的还是旧名。 -->
@@ -876,7 +914,7 @@
     <string name="desktop_composer_draft">Draft %1$d / %2$d B · %3$s</string>
     <string name="desktop_composer_send_hint">Send · Shift+Enter for newline</string>
     <string name="desktop_composer_emoji_note">Emoji measured in UTF-8 · mostly 4 bytes</string>
-    <string name="desktop_composer_route_udp">UDP unicast</string>
+    <string name="desktop_composer_route_udp">Direct on this network</string>
     <string name="desktop_composer_route_tcp">Auto TCP fallback</string>
 
     <!-- 会话列表 -->
@@ -888,8 +926,7 @@
     <string name="desktop_conv_no_match_hint">Try other keywords or clear search to view all conversations.</string>
     <string name="desktop_conv_empty_hint">Nodes appear here when online; or add address in Nodes view to pair.</string>
     <string name="desktop_conv_go_pairing">Pair Nodes</string>
-    <string name="desktop_conv_no_preview">No chat history</string>
-    <string name="desktop_conv_pending">Queued %1$d</string>
+    <string name="desktop_conv_count">%1$d conversations</string>
 
     <!-- First-run empty state (prototype screenDEmpty, prototype/relay.html:5124-5140).
          The prototype's lede and footline each break across two lines inside one
@@ -1012,8 +1049,6 @@
 
     <!-- 历史消息全文搜索 -->
     <string name="conv_search_messages_section">Chat History</string>
-    <string name="conv_search_messages_count">%1$d relevant messages</string>
-    <string name="conv_search_messages_empty">No relevant chat messages found</string>
 
     <!-- 消息协作进阶：转发与群元数据编辑 -->
     <string name="chat_forward_title">Forward message to</string>
@@ -1055,7 +1090,7 @@
     <string name="cabinet_recent_title">Recent Incoming Files</string>
     <string name="cabinet_recent_empty">No one has put files into your cabinet yet</string>
     <string name="cabinet_recent_row_desc">%1$s put in %2$d files · %3$s</string>
-    <string name="cabinet_recent_hint">Click any entry to open local folder. Browsing or downloading will not appear here.</string>
+    <string name="cabinet_recent_hint">New files put into your cabinet by others appear here. Browsing or downloading by others is not recorded.</string>
     <string name="cabinet_peer_title">%1$s\'s Cabinet</string>
     <string name="cabinet_peers_title">Colleagues\' Cabinets</string>
     <string name="cabinet_peer_item_count">%1$s items</string>
@@ -1063,17 +1098,12 @@
     <string name="cabinet_perm_badge_readonly">Read-only</string>
     <string name="cabinet_col_name">Name</string>
     <string name="cabinet_col_size">Size</string>
-    <string name="cabinet_col_mtime">Modified</string>
-    <string name="cabinet_view_list">List</string>
-    <string name="cabinet_view_grid">Grid</string>
     <string name="cabinet_crumbs_root">Cabinet</string>
     <string name="cabinet_crumbs_up">Up</string>
     <string name="cabinet_footer_selected">%1$s selected · %2$s</string>
-    <string name="cabinet_footer_unselected_hint">Click to select, double click to open folder</string>
-    <string name="cabinet_save_as">Save As…</string>
+    <string name="cabinet_footer_unselected_hint">Tap a file to select it; tap a folder to open it</string>
     <string name="cabinet_download_count">Download %1$s</string>
     <string name="cabinet_side_title">Cabinet</string>
-    <string name="cabinet_side_search_hint">Search colleagues</string>
     <string name="cabinet_banner_dir_updated">Shared folder updated</string>
     <string name="cabinet_banner_share_stopped">Sharing stopped</string>
     <string name="cabinet_upload">Upload file</string>
@@ -1086,6 +1116,22 @@
     <string name="cabinet_empty_dir">This folder is empty</string>
     <string name="cabinet_empty_dir_hint">The other side hasn\'t put any files in this folder yet.</string>
     <string name="cabinet_retry">Reload</string>
+    <string name="cabinet_loading">Loading peer\'s cabinet…</string>
+    <string name="cabinet_download_dir_disabled">Downloading a whole folder isn\'t supported yet — open the folder and pick files</string>
+    <string name="cabinet_list_truncated">Showing the first %1$d items only</string>
+    <string name="cabinet_reason_off">The peer\'s cabinet is not shared</string>
+    <string name="cabinet_reason_no_perm">You don\'t have access to this cabinet</string>
+    <string name="cabinet_reason_not_found">The peer can\'t find the requested files</string>
+    <string name="cabinet_reason_too_deep">The path is too deep; the peer rejected the request</string>
+    <string name="cabinet_reason_busy">The peer is busy; try again later</string>
+    <string name="cabinet_reason_timeout">The peer didn\'t respond; try again later</string>
+    <string name="cabinet_reason_gone">The peer no longer provides these files</string>
+    <string name="cabinet_reason_unknown">The peer rejected the request</string>
+    <string name="cabinet_download_denied">The peer refused the download</string>
+    <string name="cabinet_confirm_stop_share_title">Stop sharing your cabinet?</string>
+    <string name="cabinet_confirm_stop_share_desc">Once stopped, colleagues can no longer browse or download your shared files.</string>
+    <string name="cabinet_confirm_remove_grant_title">Remove this colleague\'s access?</string>
+    <string name="cabinet_confirm_remove_grant_desc">After removal, this colleague follows the default permissions for your cabinet.</string>
 
     <!-- Network Range Scan & Sync -->
     <string name="cidr_section_title">Network Discovery &amp; Sync</string>
@@ -1126,6 +1172,7 @@
     <string name="screen_remote_view_waiting_consent">Waiting for peer consent…</string>
     <string name="screen_remote_view_consent_title">%1$s wants to view your screen</string>
     <string name="screen_remote_view_consent_desc">%1$s requested to view your screen. Frames are transmitted strictly in local network.</string>
+    <string name="screen_remote_view_consent_privacy">Everything on the screen — including any notifications that pop up — will be visible to the other side.</string>
     <string name="screen_remote_view_consent_accept">Start sharing</string>
     <string name="screen_remote_view_consent_reject">Decline</string>
     <string name="screen_remote_view_stop">Stop</string>
@@ -1144,6 +1191,7 @@
     <string name="screen_remote_view_sharing_notification">Screen sharing active (Tidings)</string>
     <string name="screen_remote_view_sharing_notification_desc">A peer is viewing your screen live; tap to stop sharing.</string>
     <string name="screen_remote_view_connecting">Connecting to screen…</string>
+    <string name="screen_remote_view_waiting_frames">Waiting for video…</string>
     <string name="screen_remote_view_fps">Target %1$d fps</string>
     <string name="screen_remote_view_viewer_footer">View only — guide the peer over chat</string>
     <string name="screen_remote_view_error_title">Screen sharing with %1$s was interrupted</string>
@@ -1152,6 +1200,8 @@
     <string name="screen_remote_view_error_unknown">Screen sharing ended unexpectedly</string>
     <string name="banner_screen_view_unavailable">Remote screen viewing is currently unavailable on peer or local device</string>
     <string name="banner_screen_view_ended">Screen session ended (%1$s)</string>
+    <string name="banner_agent_ack_send_failed">The decision wasn't delivered, so the request stays pending. Try again shortly.</string>
+    <string name="banner_agent_ack_not_confirmed">The peer doesn't send approval receipts (feature off, or it's offline). Your choice is recorded; what actually runs is up to the peer's Agent.</string>
     <string name="screen_reason_declined">Peer declined</string>
     <string name="screen_reason_busy">Peer is busy</string>
     <string name="screen_reason_unsupported">Screen sharing unsupported</string>
@@ -1235,6 +1285,7 @@
     <string name="hist_filter_date_all">All Dates</string>
     <string name="hist_filter_date_range">%1$s to %2$s</string>
     <string name="hist_search_empty">No matching messages found</string>
+    <string name="hist_search_guide">Type keywords to search this conversation</string>
     <string name="hist_search_empty_hint">Try searching with different keywords</string>
     <string name="hist_date_select_title">Search by Date</string>
     <string name="hist_date_clear">Reset</string>
@@ -1282,10 +1333,10 @@
          `GlobalSearchFileHit.convTitle` 的 KDoc。 -->
     <string name="global_search_more_messages">Chat with %1$s · %2$d hits</string>
     <string name="global_search_from_chat">From chat with %1$s</string>
-    <!-- The prototype hardcodes this cell as 「今天 11:20」; the contact row has no
-         "last message" to derive a real time from, so we copy the same literal — but it is
-         user-visible text, so it must live in resources (see the zh comment for detail). -->
-    <string name="global_search_contact_time">Today 11:20</string>
+    <!-- The contact hit row draws no time cell at all: contacts have no "latest message"
+         to derive a time from, and the prototype\'s hardcoded 「今天 11:20」 was a fabricated
+         timestamp — removed on both shells. Restore only if GlobalSearchContactHit ever
+         carries a real last-interaction time. -->
 
     <!-- Folder Transfer & Resume -->
     <string name="transfer_folder_badge">Folder</string>
@@ -1368,10 +1419,13 @@
     <string name="agent_approval_status_denied">Denied</string>
     <string name="agent_approval_tool_label">Tool</string>
     <string name="agent_approval_expires_label">Expires</string>
-    <string name="agent_approval_allow_session">Allow Session</string>
+    <string name="agent_approval_allow_session">Allow for this session</string>
     <string name="agent_approval_status_allowed_session">Session Allowed</string>
     <string name="agent_approval_view_diff">View Details</string>
     <string name="agent_approval_diff_title">Parameters &amp; Diff Details</string>
+    <string name="agent_approval_confirm_l3_title">Approve this high-risk action?</string>
+    <string name="agent_approval_confirm_l3_body">This request runs a high-risk operation. Once approved, it goes through immediately.</string>
+    <string name="agent_approval_risk_unrated">Unrated</string>
     <string name="agent_approval_risk_l1">L1 Read-Only</string>
     <string name="agent_approval_risk_l2">L2 Modify</string>
     <string name="agent_approval_risk_l3">L3 Danger</string>
@@ -1412,22 +1466,6 @@
     <string name="chat_voice_too_short">Recording too short</string>
     <string name="chat_voice_failed">Recording failed</string>
     <string name="chat_voice_permission_denied">Microphone permission required</string>
-    <string name="capability_settings_title">Capability Governance</string>
-    <string name="capability_settings_subtitle">Manage host MCP and tool execution permissions</string>
-    <string name="capability_category_system">System Tools</string>
-    <string name="capability_category_mcp">MCP Extensions</string>
-    <string name="capability_category_model">Inference Drivers</string>
-    <string name="capability_bash">Terminal Execution (Bash)</string>
-    <string name="capability_bash_desc">Allow Agent to execute shell scripts and commands</string>
-    <string name="capability_filesystem">Workspace File Read &amp; Write</string>
-    <string name="capability_filesystem_desc">Allow Agent to inspect and modify workspace files</string>
-    <string name="capability_codesearch">Code Graph Search (Codegraph)</string>
-    <string name="capability_codesearch_desc">Allow Agent to lookup symbols and jump to definitions</string>
-    <string name="capability_websearch">Web Search</string>
-    <string name="capability_websearch_desc">Allow Agent to query public documentation</string>
-    <string name="capability_status_enabled">Enabled</string>
-    <string name="capability_status_disabled">Disabled</string>
-    <string name="capability_save_toast">ACL updated immediately</string>
 
     <!-- Workspace Group & Permission Governance -->
     <string name="workspace_create_group_title">Link Workspace to Group</string>
@@ -1505,8 +1543,8 @@
     <string name="workspace_grant_request_sent">Request sent; waiting for the peer to confirm.</string>
     <string name="workspace_grant_request_pending">Requested; waiting for the peer…</string>
     <string name="workspace_grant_request_no_runtime">This device's node isn't running, so the request wasn't sent. Try again shortly.</string>
-    <string name="workspace_grant_request_peer_not_agent">The peer doesn't declare ag1 (it isn't an agent node), so it can't receive access requests.</string>
-    <string name="workspace_grant_request_peer_no_loop">The peer doesn't declare agr1, so the request was blocked — sending it would wrongly mark the device offline.</string>
+    <string name="workspace_grant_request_peer_not_agent">The other device isn't an Agent host, so it can't receive access requests.</string>
+    <string name="workspace_grant_request_peer_no_loop">The other device doesn't support access requests (older version or unsupported), so the request wasn't sent.</string>
     <string name="workspace_grant_remote_hint">This list shows the grants known on this device; permissions on the peer are decided by the peer.</string>
     <string name="workspace_board_starting">Starting the node…</string>
     <string name="workspace_board_starting_hint">Devices and their workspaces will appear here once startup finishes.</string>
@@ -1546,7 +1584,35 @@
     <string name="group_expose_agent_confirm">Expose</string>
     <string name="group_expose_agent_done">Exposed %1$s. The group can @ it now.</string>
 
+    <string name="chat_history_loading">Loading earlier messages…</string>
+    <string name="chat_history_begin">This is the beginning of the conversation</string>
+    <string name="hist_date_month_year">%1$d/%2$d</string>
+    <string name="hist_date_day_year">%1$d/%2$d/%3$d</string>
+    <string name="chat_delete_confirm_title">Delete this message?</string>
+    <string name="chat_delete_confirm_body">This removes it from this device only. It's permanent.</string>
+    <string name="chat_group_readonly_left">You're no longer in this group. History is read-only.</string>
+    <string name="set_diag_crypto_value_lan_cross">Plaintext on LAN · TLS across networks</string>
+    <string name="set_diag_cert_expiry_hint">Renews automatically before expiry; paired devices don't need to re-pair.</string>
+    <string name="set_diag_copy_node_id">Copy node ID</string>
+    <string name="set_update_failed_generic">Couldn't check for updates. Check your network and try again.</string>
+    <string name="conv_preview_draft">Draft: %1$s</string>
+    <string name="nodes_mdns_row_desc">Discovered device, not paired yet</string>
+    <!-- T21 approval authority/records/revoke, grant list wording, agent-empty buckets, stale frame -->
+    <string name="agent_approval_status_revoked">Revoked</string>
+    <string name="agent_approval_allow_session_hint">"Allow for this session" stops asking for similar requests in this session. Undo it with "Ask again for each request" below.</string>
+    <string name="agent_approval_revoke_session">Ask again for each request</string>
+    <string name="agent_approval_history_title">Approval history</string>
+    <string name="agent_empty_agents_only_title">Agent reported</string>
+    <string name="agent_empty_agents_only_message">The Agent on this device has not reported any workspace or session yet.</string>
+    <string name="agent_empty_section_n">Agent (%1$d)</string>
+    <string name="workspace_grant_unknown_peer">Unknown member</string>
+    <string name="workspace_grant_state_approved">Approved</string>
+    <string name="workspace_grant_state_denied">Denied</string>
+    <string name="workspace_grant_state_revoked">Revoked</string>
+    <string name="workspace_grant_state_unknown">Unknown state</string>
+    <string name="screen_remote_view_stale">Screen not updating (%1$d s ago)</string>
+    <string name="nodes_mdns_row_desc_fmt">%1$s, %2$s, %3$s</string>
+    <string name="cidr_scan_never">Never scanned</string>
+    <string name="cidr_scan_last">Last scan %1$s · %2$d found</string>
+    <string name="scan_open_settings">Open Settings</string>
 </resources>
-
-
-

@@ -10,6 +10,7 @@ import com.kapp.tidings.core.protocol.Profile
 import com.kapp.tidings.core.nowMillis
 import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.CoroutineStart
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.cancel
@@ -92,7 +93,7 @@ class DiscoveryExitTest {
         // 在 B 的入站流上再挂一个收集器：用 Mutex 保护跨协程列表访问。
         val seen = mutableListOf<Envelope>()
         val seenLock = kotlinx.coroutines.sync.Mutex()
-        val watcher = scope.launch {
+        val watcher = scope.launch(start = CoroutineStart.UNDISPATCHED) {
             transportB.incoming.collect { datagram ->
                 val decoded = Codec.decode(datagram.bytes)
                 if (decoded is DecodeResult.Ok) {

@@ -171,7 +171,7 @@ private fun CabinetPeerSelectedPhonePreview() {
                 onSelectPeer = {},
                 onLoadPath = {},
                 onToggleSelection = {},
-                onDownloadEntries = { _, _ -> },
+                onDownloadEntries = { _ -> },
                 // 必须传：生产 `App.kt:417 CabinetScreen(` 恒传
                 // `onUploadToCabinet = controller::uploadToCabinet`（`App.kt:427`），而
                 // `PeerCabinetView.kt:107` 的闸门是 `canUpload = currentPerm == "write" &&

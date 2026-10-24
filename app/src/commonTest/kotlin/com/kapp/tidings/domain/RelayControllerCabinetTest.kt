@@ -57,13 +57,16 @@ class RelayControllerCabinetTest {
     }
 
     @Test
-    fun testSelectCabinetPeerAndMockLoad() {
+    fun testSelectCabinetPeerWithoutRuntimeShowsErrorNotMockData() {
         val controller = controller()
         controller.selectCabinetPeer("peer-42")
         assertEquals("peer-42", controller.state.value.cabinet.activePeerId)
         assertEquals("", controller.state.value.cabinet.currentPath)
-        // With no active runtime, fallback mock entries are loaded
-        assertTrue(controller.state.value.cabinet.entries.isNotEmpty())
+        // 节点未启动 = error 态 + 零条目。这一分支过去填的是编造的演示数据
+        // （docs/、contract-v2.pdf…、totalEntries=1280）—— 界面上是一个根本不存在的目录。
+        assertTrue(controller.state.value.cabinet.entries.isEmpty())
+        assertEquals(0, controller.state.value.cabinet.totalEntries)
+        assertEquals(CABINET_ERR_NODE_OFFLINE, controller.state.value.cabinet.errorMessage)
         assertEquals(false, controller.state.value.cabinet.loading)
 
         controller.toggleCabinetSelection("contract-v2.pdf")

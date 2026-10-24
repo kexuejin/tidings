@@ -40,6 +40,7 @@ import com.kapp.tidings.ui.components.ScreenRequestConfirmDialog
 import com.kapp.tidings.ui.components.TopBarIconAction
 import com.kapp.tidings.ui.components.TopBarOverflowAction
 import com.kapp.tidings.ui.components.TopBarOverflowItem
+import com.kapp.tidings.ui.components.topBarActionRowGap
 import com.kapp.tidings.ui.theme.LocalAppSpacing
 import org.jetbrains.compose.resources.painterResource
 import org.jetbrains.compose.resources.stringResource
@@ -52,7 +53,6 @@ import com.kapp.tidings.generated.resources.agent_session_state_error
 import com.kapp.tidings.generated.resources.agent_session_state_idle
 import com.kapp.tidings.generated.resources.agent_session_switch_title
 import com.kapp.tidings.generated.resources.agent_session_untitled
-import com.kapp.tidings.generated.resources.chat_caps_label
 import com.kapp.tidings.generated.resources.chat_group_info_title
 import com.kapp.tidings.generated.resources.chat_group_members
 import com.kapp.tidings.generated.resources.chat_group_online
@@ -60,7 +60,6 @@ import com.kapp.tidings.generated.resources.chat_clear_local_action
 import com.kapp.tidings.generated.resources.chat_more_actions
 import com.kapp.tidings.generated.resources.chat_nudge
 import com.kapp.tidings.generated.resources.chat_restored_offline
-import com.kapp.tidings.generated.resources.chat_tcp_port
 import com.kapp.tidings.generated.resources.common_offline
 import com.kapp.tidings.generated.resources.common_online
 import com.kapp.tidings.generated.resources.hist_search_title
@@ -262,10 +261,8 @@ internal fun ChatHeader(
                             append(" · ")
                         }
                         append(if (peer.online) stringResource(Res.string.common_online) else stringResource(Res.string.common_offline))
-                        if (peer.tcpPort > 0) {
-                            append(" · TCP ")
-                            append(peer.tcpPort)
-                        }
+                        // 端口是排障信息，留在节点详情；聊天顶栏印一行「TCP 17879」既挤占标题，
+                        // 也让这一行被截断（实测「产品 · 客户端 · 移动端 · TCP 17879 · …」）。
                     }
                 } else {
                     buildString {
@@ -276,14 +273,8 @@ internal fun ChatHeader(
                         } else {
                             append(peer.subtitle)
                         }
-                        if (peer.tcpPort > 0) {
-                            append(" · ")
-                            append(stringResource(Res.string.chat_tcp_port, peer.tcpPort))
-                        }
-                        if (peer.caps.isNotEmpty()) {
-                            append(" · ")
-                            append(stringResource(Res.string.chat_caps_label, peer.caps.joinToString(" ")))
-                        }
+                        // 端口与能力 token（`tw1 mrec1`）都不进聊天顶栏：前者是排障信息、
+                        // 后者是协议词汇，两样都会把这一行挤成省略号。要看它们去节点详情/诊断页。
                     }
                 },
                 style = MaterialTheme.typography.labelSmall,
@@ -391,9 +382,13 @@ internal fun ChatHeader(
         val overflowActions = inlineActions.drop(ChatHeaderInlineActions) + actions.filter { it.overflowOnly }
         Row(
             verticalAlignment = Alignment.CenterVertically,
-            // 原型 `.topbar .acts{gap:6px}`（`:580`）—— 动作方块之间 6px，
-            // 与最外层那颗 Row 的 12dp（`.tbinner` 的元素间距）不是同一件事。
-            horizontalArrangement = Arrangement.spacedBy(6.dp),
+            // 原型 `.topbar .acts{gap:6px}`（`:580`）—— 动作方块之间 6px。
+            // 砖块只有 30dp（[ChatIbtnSize]），而命中区被撑到 48dp（xxxl），
+            // 所以视觉缝必须扣掉这 18dp：与设置页顶栏走**同一个**补偿函数，
+            // 否则同一套 48dp 触达会在两屏给出不同的缝隙（24dp vs 14dp）。
+            horizontalArrangement = Arrangement.spacedBy(
+                topBarActionRowGap(LocalAppSpacing.current.xxxl, ChatIbtnSize, 6.dp),
+            ),
         ) {
             inlineActions.take(ChatHeaderInlineActions).forEach { action ->
                 TopBarIconAction(

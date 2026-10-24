@@ -61,6 +61,33 @@ EXEMPT = {
     # 桌面设置页的「输入法自检」入口在 `DesktopSettingsSidebar` 里（遍历全部 nav 项），
     # 不走子页的 `onOpenImeSmoke` 回调 —— 那条是手机端从设置首页跳子页用的。
     ("desktopApp/src/main/kotlin/com/kapp/tidings/desktop/DesktopHosting.kt", "SettingsDiagSubpage", "onOpenImeSmoke"),
+    # 「后台接收」卡被 `keepAliveSupported` 独立闸住：不传回调的宿主（桌面 / 守卫测试）
+    # 也没传 supported（默认 false），开关永不出现，空默认值永远不会被调用。
+    # 手机壳（App.kt）supported 与回调一起传，那条路才是真的。
+    ("desktopApp/src/main/kotlin/com/kapp/tidings/desktop/DesktopHosting.kt", "SettingsConnectionSubpage", "onKeepAliveChange"),
+    ("composeApp/src/jvmTest/kotlin/com/kapp/tidings/guards/SettingsConnectionSlotsGuardTest.kt", "SettingsConnectionSubpage", "onKeepAliveChange"),
+    # 桌面壳的会话选择走 AgentConsoleScreen 内部的 `localDetailSessionId` 状态
+    # （与上面三条 DesktopShell 导航豁免同族）——壳级 `onSelectAgentSession` 是给
+    # 手机壳 nav 状态同步用的钩子，桌面没有对应的壳级状态要写。
+    ("composeApp/src/commonMain/kotlin/com/kapp/tidings/ui/desktop/DesktopShell.kt", "AgentConsoleScreen", "onSelectAgentSession"),
+    # 「更改目录 / 打开目录」是**桌面独有**的出口：手机存储在应用私有目录，用户
+    # 无权换/看，数据页另有 `set_data_dir_private`（"应用内部存储"）说明。手机壳
+    # 两样都不接；桌面接「打开」不接「更改」（该按钮 changeDir==null 不画，设计）。
+    ("composeApp/src/commonMain/kotlin/com/kapp/tidings/App.kt", "SettingsDataSubpage", "onChangeDataDirectory"),
+    ("composeApp/src/commonMain/kotlin/com/kapp/tidings/App.kt", "SettingsDataSubpage", "onOpenDataDirectory"),
+    ("desktopApp/src/main/kotlin/com/kapp/tidings/desktop/DesktopHosting.kt", "SettingsDataSubpage", "onChangeDataDirectory"),
+    # 「运行自检」在所有宿主上都还是 null（能力未接线，按钮不画）——诊断页的
+    # 兜底文案 `set_diag_selfcheck_unavailable` 已如实说明，这是已知未接线项。
+    ("composeApp/src/commonMain/kotlin/com/kapp/tidings/App.kt", "SettingsDiagSubpage", "onRunSelfCheck"),
+    ("desktopApp/src/main/kotlin/com/kapp/tidings/desktop/DesktopHosting.kt", "SettingsDiagSubpage", "onRunSelfCheck"),
+    # 会话列表的「工作区段」：手机端不画（用户裁决：对齐桌面），App.kt 有意不接
+    # 这两个回调 —— KDoc「一起为 null 时整段不画」正是这个形态（App.kt 的
+    # 不画工作区段注释同源）。桌面侧栏经 DesktopShell 传，那条才是真的。
+    ("composeApp/src/commonMain/kotlin/com/kapp/tidings/App.kt", "ConversationsScreen", "onOpenWorkspaceUnit"),
+    ("composeApp/src/commonMain/kotlin/com/kapp/tidings/App.kt", "ConversationsScreen", "onOpenWorkspaceBoard"),
+    # 桌面壳的工作区详情走内部 `localDetailWsId` 状态（与上面三条 DesktopShell
+    # 导航豁免同族），不用手机壳的导航回调。
+    ("composeApp/src/commonMain/kotlin/com/kapp/tidings/ui/desktop/DesktopShell.kt", "AgentConsoleScreen", "onOpenWorkspaceDetail"),
 }
 
 
@@ -104,17 +131,66 @@ def nullable_callbacks(sig: str) -> set:
     return set(re.findall(r"(\w+)\s*:\s*\(\([^)]*\)\s*->[^)]*\)\?\s*=\s*null", sig))
 
 
+# ── 判据二：空 lambda 默认值（2026-10 的 CIDR 实锤提炼） ──────────────────
+#
+# `onAddScanRange: (String) -> Unit = {}` 这种**非空**回调配空默认值，形态上
+# 比 null 槽更危险：组件以为能力一定在（按钮照画、照点），漏传的宿主上点了
+# 什么也不发生 —— CIDR 那次还把输入框清空了，看起来像成功。null 槽会静默
+# 不画；空 lambda 是「画了但假的」。
+#
+# 判据（三件事同时成立才报）：
+#   1. 参数是 lambda 类型且默认值为空 `{}`，名字以 on 开头（动作回调）；
+#   2. 函数体内真的调用它（空默认值 + 从不调用 = 死参数，另有 unused 类门禁管）；
+#   3. 存在生产调用点调用该函数时**没传**它（既非 `p = …` 也算不上显式空实现）。
+# 显式传 `{}`（夹具/有意降级）不算漏传。
+EMPTY_LAMBDA_DEFAULT = re.compile(r"(\w+)\s*:\s*\([^)]*\)\s*->\s*\w+\s*=\s*\{\s*\}")
+
+
+def empty_lambda_action_params(sig: str) -> set:
+    return {m for m in EMPTY_LAMBDA_DEFAULT.findall(sig) if m.startswith("on")}
+
+
+def calls_param(body: str, name: str) -> bool:
+    n = re.escape(name)
+    return bool(re.search(r"\b" + n + r"\s*\(|\b" + n + r"\.invoke\s*\(", body))
+
+
+def find_call_sites(files, fn):
+    """调用点：[(文件, 调用括号段)]。跳过声明本身（签名尾部不在 `fn(` 直接调用形态里）。"""
+    pat = re.compile(r"\b" + re.escape(fn) + r"\s*\(")
+    for f in files:
+        txt = strip_comments(read(f))
+        for m in pat.finditer(txt):
+            start = m.end()
+            depth, i = 1, start
+            while i < len(txt) and depth > 0:
+                if txt[i] == "(": depth += 1
+                elif txt[i] == ")": depth -= 1
+                i += 1
+            yield str(f), txt[start:i]
+
+
 def render_gates(cbs: set, body: str) -> set:
-    """其中被用作「整块渲染开关」的那些。"""
+    """其中被用作「整块渲染开关」的那些。
+
+    参数可能先被起过局部别名（`val addRange = onAddScanRange`，然后
+    `if (addRange != null)`）——只认参数名直判会把这种组件判成「不是渲染开关」，
+    CIDR 卡的反向验证实锤过这个洞。别名与参数名同权参与三种开关形态的匹配。
+    """
     out = set()
     for name in cbs:
         n = re.escape(name)
-        if re.search(r"if\s*\(\s*" + n + r"\s*!=\s*null", body):
-            out.add(name)
-        elif re.search(r"if\s*\(\s*" + n + r"\s*==\s*null\s*\)", body):
-            out.add(name)
-        elif re.search(n + r"\?\.let", body):
-            out.add(name)
+        names = [name] + re.findall(r"val\s+(\w+)\s*=\s*" + n + r"\b", body)
+        for candidate in names:
+            c = re.escape(candidate)
+            # 开关形态：对 null 性做分支就是渲染开关——包括多参联合条件
+            # `if (a != null && b != null && …)`：第二个之后的参数前面是 `&&`
+            # 不是 `if (`，只锚 `if (` 开头会漏掉它们（CIDR 卡实锤）。
+            if (re.search(c + r"\s*!=\s*null", body)
+                    or re.search(r"if\s*\(\s*" + c + r"\s*==\s*null\s*\)", body)
+                    or re.search(c + r"\?\.let", body)):
+                out.add(name)
+                break
     return out
 
 
@@ -135,6 +211,29 @@ def collect(files, owner):
                 continue
             prev, gates = table.get(fn, (set(), set()))
             table[fn] = (prev | cbs, gates | render_gates(cbs, body))
+            owner.setdefault(fn, str(f))
+    return table
+
+
+def collect_empty_lambda(files, owner):
+    """判据二的收集：fn -> {会被函数体调用的空默认值动作回调}。"""
+    table = {}
+    for f in files:
+        txt = strip_comments(read(f))
+        for m in re.finditer(r"fun\s+(\w+)\s*\(", txt):
+            fn = m.group(1)
+            if fn in SKIP_FUNS:
+                continue
+            sig, body = function_signature(txt, fn)
+            if sig is None:
+                continue
+            params = empty_lambda_action_params(sig)
+            if not params:
+                continue
+            live = {p for p in params if calls_param(body, p)}
+            if not live:
+                continue
+            table.setdefault(fn, set()).update(live)
             owner.setdefault(fn, str(f))
     return table
 
@@ -179,6 +278,21 @@ def main() -> int:
                 }
                 if missing:
                     problems.append((str(target), fn, sorted(missing)))
+
+    # ── 判据二：空 lambda 默认值 + 生产调用点没传（「画了但假的」按钮） ──
+    empty_owner = {}
+    empty_table = collect_empty_lambda(files, empty_owner)
+    for fn, params in empty_table.items():
+        for call_file, args in find_call_sites(files, fn):
+            if call_file == empty_owner.get(fn):
+                continue  # 组件内部复用自己，同判据一
+            named = set(re.findall(r"(\w+)\s*=", args))
+            missing = {
+                p for p in (params - named)
+                if (call_file, fn, p) not in EXEMPT
+            }
+            if missing:
+                problems.append((call_file, fn + "（空默认值回调）", sorted(missing)))
 
     unique = []
     seen = set()

@@ -43,6 +43,8 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.focus.FocusRequester
+import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.SolidColor
 import androidx.compose.ui.text.font.FontWeight
@@ -60,8 +62,8 @@ import com.kapp.tidings.generated.resources.common_close
 import com.kapp.tidings.generated.resources.hist_date_clear
 import com.kapp.tidings.generated.resources.hist_date_confirm
 import com.kapp.tidings.generated.resources.hist_date_end
-import com.kapp.tidings.generated.resources.hist_date_month_day
-import com.kapp.tidings.generated.resources.hist_date_month_title
+import com.kapp.tidings.generated.resources.hist_date_day_year
+import com.kapp.tidings.generated.resources.hist_date_month_year
 import com.kapp.tidings.generated.resources.hist_date_range_title
 import com.kapp.tidings.generated.resources.hist_date_start
 import com.kapp.tidings.generated.resources.hist_filter_all
@@ -73,6 +75,7 @@ import com.kapp.tidings.generated.resources.hist_quick_30days
 import com.kapp.tidings.generated.resources.hist_quick_7days
 import com.kapp.tidings.generated.resources.hist_quick_today
 import com.kapp.tidings.generated.resources.hist_search_empty
+import com.kapp.tidings.generated.resources.hist_search_guide
 import com.kapp.tidings.generated.resources.hist_search_filter_date
 import com.kapp.tidings.generated.resources.hist_search_filter_type
 import com.kapp.tidings.generated.resources.hist_search_footer_hint
@@ -100,6 +103,7 @@ import org.jetbrains.compose.resources.stringResource
 import com.kapp.tidings.ui.theme.ShapeRoles
 import com.kapp.tidings.ui.components.AppButton
 import com.kapp.tidings.ui.components.AppOutlinedButton
+import kotlinx.coroutines.delay
 
 /**
  * 移动端会话内历史搜索浮层（原型 m-histsearch 与 m-histdate）。
@@ -146,10 +150,18 @@ fun HistorySearchOverlay(
 
     var results by remember { mutableStateOf(initialResults) }
 
+    // 击键不再逐字打一次检索：静默 [HISTORY_SEARCH_DEBOUNCE_MILLIS] 后才查一次。
+    // `LaunchedEffect(query, …)` 在条件变化时取消上一个协程，于是只有最后一次真的落地
+    // —— 与全局搜索（GlobalSearchScreen 的 debouncedGlobalSearch）同一条纪律。
+    // 日期/类型筛选同样吃这个静默期；空关键词也照走（日期筛选在空关键词下仍有效）。
     LaunchedEffect(query, selectedKind, fromAt, toAt) {
         val filter = HistorySearchFilter(kind = selectedKind, fromAt = fromAt, toAt = toAt)
-        results = onSearch(query, filter)
+        results = debouncedHistorySearch(query, filter, search = onSearch)
     }
+
+    // 打开浮层就把光标送进搜索框：点「搜索」就是要打字，不该再点一次输入框。
+    val searchFocus = remember { FocusRequester() }
+    LaunchedEffect(Unit) { searchFocus.requestFocus() }
 
     // 原型 `.hsbd{position:absolute;inset:0;z-index:24;background:var(--surface)}` —— 整屏浮层。
     Surface(
@@ -186,6 +198,7 @@ fun HistorySearchOverlay(
                     onValueChange = { query = it },
                     modifier = Modifier
                         .weight(1f)
+                        .focusRequester(searchFocus)
                         .clip(MaterialTheme.shapes.medium)
                         .background(MaterialTheme.colorScheme.surface)
                         .border(1.dp, MaterialTheme.colorScheme.outline, MaterialTheme.shapes.medium)
@@ -396,13 +409,21 @@ fun HistorySearchOverlay(
                 // `.hsres{flex:none;display:flex;flex-direction:column;gap:2px}` —— 结果列表是
                 // `.hsbody` 这个滚动容器里的一段，原型没有第二层滚动区（所以不再开 LazyColumn）。
                 if (results.isEmpty()) {
-                    // 原型 `.annot` 的第四态文案：「没有找到相关记录」。这一层没有出错态
-                    // （`runHistorySearch` 没写 catch），所以只有空态一种兜底。
+                    // **引导态与空结果态是两回事**：还没输入关键词时不该说
+                    // 「没有找到相关记录」—— 那是对一次还没发生的检索下结论。
+                    // 原型 `.annot` 的第四态文案是「没有找到相关记录」，它说的
+                    // 是"搜了但没命中"；未输入时改画引导（新键 hist_search_guide）。
                     //
                     // 原型没有画空态帧，所以这里**不给任何自创的间距值** —— 一给，差集里就会
                     // 多出一个「代码有、原型没有」的数字，而那个数字是我编的。
                     Text(
-                        text = stringResource(Res.string.hist_search_empty),
+                        text = stringResource(
+                            if (query.isBlank()) {
+                                Res.string.hist_search_guide
+                            } else {
+                                Res.string.hist_search_empty
+                            },
+                        ),
                         style = MaterialTheme.typography.bodyMedium,
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                         textAlign = TextAlign.Center,
@@ -835,7 +856,11 @@ internal fun CalendarGrid(
     now: Long = nowMillis(),
 ) {
     val todayEpochDay = (now + 28800000L) / 86400000L
-    val (curYear, curMonth) = epochDayToYearMonth(todayEpochDay + monthOffset * 30L)
+    // **年月算术，不是「+30 天」**：旧写法 `epochDayToYearMonth(todayEpochDay + monthOffset * 30L)`
+    // 拿 30 天冒充一个月 —— 1 月 31 日点「>」，+30 天直接跳到 3 月（2 月只有 28/29 天）。
+    // 先解出今天的 (年, 月)，再做整月偏移（[shiftYearMonth]）。
+    val (baseYear, baseMonth) = epochDayToYearMonth(todayEpochDay)
+    val (curYear, curMonth) = shiftYearMonth(baseYear, baseMonth, monthOffset)
     val sp = LocalAppSpacing.current
 
     Column(
@@ -853,7 +878,8 @@ internal fun CalendarGrid(
                 Text("<", fontWeight = FontWeight.Bold)
             }
             Text(
-                text = stringResource(Res.string.hist_date_month_title, curMonth),
+                // 带年份：月份可以无限前后翻，"10月"无法区分是哪一年（跨年查找时无解）。
+                text = stringResource(Res.string.hist_date_month_year, curYear, curMonth),
                 style = MaterialTheme.typography.titleSmall,
                 fontWeight = FontWeight.Bold,
             )
@@ -882,13 +908,11 @@ internal fun CalendarGrid(
 
         Spacer(Modifier.height(sp.xs))
 
-        // 日历网格 (按 35 格渲染)
-        val firstDayEpoch = yearMonthToEpochDay(curYear, curMonth, 1)
-        // 1970-01-01 是周四 (dayOfWeek = 4, 1=Mon, 7=Sun)
-        val firstDayOfWeek = (((firstDayEpoch + 3) % 7) + 1).toInt() // 1=Mon...7=Sun
-        val startEpochDay = firstDayEpoch - (firstDayOfWeek - 1)
+        // 日历网格：按这个月**需要几行**渲染，不写死 5 行 35 格 ——
+        // 「周六开月 + 31 天」的月份（如 2026-08）要 6 行，写死 5 行会把 29/30/31 整行裁掉。
+        val startEpochDay = monthGridStartEpochDay(curYear, curMonth)
 
-        for (row in 0 until 5) {
+        for (row in 0 until calendarRowCount(curYear, curMonth)) {
             Row(modifier = Modifier.fillMaxWidth().padding(vertical = sp.xxs)) {
                 for (col in 0 until 7) {
                     val epochDay = startEpochDay + row * 7 + col
@@ -919,8 +943,15 @@ internal fun CalendarGrid(
                         inRange -> MaterialTheme.colorScheme.primaryContainer
                         else -> Color.Transparent
                     }
-                    // 原型 `.hsdays button.out{color:var(--on-2);opacity:.4}` —— 非本月那几天是
-                    // **深灰降到四成**，不是换成浅灰（`--outline` 是边框色，比 `--on-2` 浅得多）。
+                    // 非本月那几天：**真的禁用**，不是"看起来禁用、其实能点"。
+                    //
+                    // 原型 `.hsdays button.out{color:var(--on-2);opacity:.4}` 只给了视觉（那是静态稿），
+                    // 代码照抄视觉却保留了点击：灰得像不可选的日子，点下去却真的选中了 ——
+                    // 而且选中后标题还停在当前月，用户不知道自己刚选的是哪一天。
+                    // 现在禁用：视觉维持弱化（禁用态本就不受文本对比度约束），语义与观感一致。
+                    //
+                    // 注意别把"禁用"做成"整格消失"：格子仍在网格里占位（它给本月日期定位）。
+                    val selectable = dayCellSelectable(isCurrentMonth)
                     val textColor = when {
                         isEdge -> MaterialTheme.colorScheme.onPrimary
                         inRange -> MaterialTheme.colorScheme.onPrimaryContainer
@@ -934,7 +965,13 @@ internal fun CalendarGrid(
                             .height(32.dp)
                             .clip(RoundedCornerShape(6.dp))
                             .background(bg)
-                            .clickable { onDayClick(dayMillis) },
+                            .then(
+                                if (selectable) {
+                                    Modifier.clickable { onDayClick(dayMillis) }
+                                } else {
+                                    Modifier
+                                },
+                            ),
                         contentAlignment = Alignment.Center,
                     ) {
                         Text(
@@ -950,11 +987,26 @@ internal fun CalendarGrid(
     }
 }
 
+/**
+ * 选中/区间端点日期的显示文案 —— **带年份**。
+ *
+ * 真身：原来只有「10月8日」。会话历史可以横跨好几年，而日期选择器能无限前后翻，
+ * 于是"10月8日"到底是哪一年，用户与界面都答不出来（跨年区间更无从核对）。
+ * 年份是同一个事实的一部分，不是可省的修饰。
+ */
+/**
+ * 月历里这一格**能不能选**：只有本月的日子可点。
+ *
+ * 抽成纯函数是为了让"非本月格不可点"这条判据能被单测钉住 —— 它是纯视觉/交互判据，
+ * 没有编译期信号，错了只有用户点一下才发现（而且现象是"选了个日期，标题却没变"）。
+ */
+internal fun dayCellSelectable(isCurrentMonth: Boolean): Boolean = isCurrentMonth
+
 @Composable
 internal fun formatDateLabel(millis: Long): String {
     val epochDay = (millis + 28800000L) / 86400000L
-    val (_, m, d) = epochDayToYearMonthDay(epochDay)
-    return stringResource(Res.string.hist_date_month_day, m, d)
+    val (y, m, d) = epochDayToYearMonthDay(epochDay)
+    return stringResource(Res.string.hist_date_day_year, y, m, d)
 }
 
 /**
@@ -997,6 +1049,30 @@ internal fun epochDayToYearMonth(epochDay: Long): Pair<Int, Int> {
     return Pair(y, m)
 }
 
+/** 会话内搜索的静默期：与全局搜索同档（GlobalSearchScreen 的 `SEARCH_DEBOUNCE_MILLIS`）。 */
+internal const val HISTORY_SEARCH_DEBOUNCE_MILLIS = 200L
+
+/**
+ * 静默 [debounceMillis] 之后执行一次会话内检索。
+ *
+ * 调用方每次条件变化都取消上一个协程（`LaunchedEffect(query, …)` 天然如此），
+ * 于是**只有最后一次**真的落到 [search] —— 这就是 debounce 的全部含义。
+ * 与全局搜索的 `debouncedGlobalSearch` 是同一条纪律的会话内版本：此前这里逐字直查，
+ * 每敲一个字符都把当次检索跑一遍。
+ *
+ * 空关键词**不**在这里拦：会话内搜索的日期/类型筛选在空关键词下仍然有效
+ * （「只看某几天」），这与全局搜索「空关键词 = 初始态」的口径不同，是刻意保留的差异。
+ */
+internal suspend fun debouncedHistorySearch(
+    query: String,
+    filter: HistorySearchFilter,
+    debounceMillis: Long = HISTORY_SEARCH_DEBOUNCE_MILLIS,
+    search: (String, HistorySearchFilter) -> List<MessageSearchResult>,
+): List<MessageSearchResult> {
+    delay(debounceMillis)
+    return search(query, filter)
+}
+
 internal fun yearMonthToEpochDay(y: Int, m: Int, d: Int): Long {
     val adjY = if (m <= 2) y - 1 else y
     val era = if (adjY >= 0) adjY / 400 else (adjY - 399) / 400
@@ -1004,4 +1080,54 @@ internal fun yearMonthToEpochDay(y: Int, m: Int, d: Int): Long {
     val doy = (153 * (if (m > 2) m - 3 else m + 9) + 2) / 5 + d - 1
     val doe = yoe * 365 + yoe / 4 - yoe / 100 + doy
     return era * 146097L + doe - 719468L
+}
+
+/**
+ * 年月算术：从 `(year, month)` 偏移 [offset] 个月。
+ *
+ * ## 为什么必须是这一层算术
+ *
+ * 旧实现拿「+30 天」冒充「+1 个月」：`epochDayToYearMonth(todayEpochDay + offset * 30L)`。
+ * 1 月 31 日点「>」，+30 天落在 3 月 2 日 —— 2 月被整月跳过；8 月、10 月这样 31 天的
+ * 月份连点几次还会漂出额外的几天。抽成纯函数是为了让「1 月 31 日 → 2 月」「12 月 →
+ * 次年 1 月」「反向翻月」这几条都能被 jvmTest 钉住。
+ *
+ * @return 偏移后的 `(year, month)`，month 恒在 1..12。
+ */
+internal fun shiftYearMonth(year: Int, month: Int, offset: Int): Pair<Int, Int> {
+    require(month in 1..12) { "month out of range: $month" }
+    val zeroBased = year * 12 + (month - 1) + offset
+    // floorDiv / mod（而不是 % 与 /）：负的 zeroBased（1970 年前的极端输入）也要
+    // 得到非负的月号，否则 1 月再往前翻一月会算出「第 0 年的 12 月」这种残片。
+    return zeroBased.floorDiv(12) to (zeroBased.mod(12) + 1)
+}
+
+/** 这个月有几天（闰年 2 月 29 天；大小月由公历规则给）。 */
+internal fun daysInMonth(year: Int, month: Int): Int {
+    require(month in 1..12) { "month out of range: $month" }
+    val nextY = if (month == 12) year + 1 else year
+    val nextM = if (month == 12) 1 else month + 1
+    return (yearMonthToEpochDay(nextY, nextM, 1) - yearMonthToEpochDay(year, month, 1)).toInt()
+}
+
+/** 这个月的 1 号落位的网格起点（周一首格的 epochDay；可能落在上个月）。 */
+internal fun monthGridStartEpochDay(year: Int, month: Int): Long {
+    val firstDayEpoch = yearMonthToEpochDay(year, month, 1)
+    // 1970-01-01 是周四 (dayOfWeek = 4, 1=Mon, 7=Sun)
+    val firstDayOfWeek = (((firstDayEpoch + 3) % 7) + 1).toInt() // 1=Mon...7=Sun
+    return firstDayEpoch - (firstDayOfWeek - 1)
+}
+
+/**
+ * 这个月的月历需要几行（每行 7 格）。
+ *
+ * 旧实现写死 5 行 35 格：2026 年 8 月（周六开月 + 31 天 = 37 格）的第 6 行 ——
+ * 29/30/31 三天 —— 整行被裁掉，用户选不到那几天。行数由「网格起点到本月最后一天」
+ * 的格数向上取整推出，任何月份都自洽。
+ */
+internal fun calendarRowCount(year: Int, month: Int): Int {
+    val start = monthGridStartEpochDay(year, month)
+    val end = yearMonthToEpochDay(year, month, daysInMonth(year, month))
+    val cells = (end - start).toInt() + 1
+    return (cells + 6) / 7
 }

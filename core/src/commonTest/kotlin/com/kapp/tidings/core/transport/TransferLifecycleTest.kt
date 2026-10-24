@@ -19,6 +19,7 @@ import io.ktor.network.selector.SelectorManager
 import io.ktor.network.sockets.InetSocketAddress
 import io.ktor.network.sockets.Socket
 import io.ktor.network.sockets.aSocket
+import com.kapp.tidings.core.testutil.awaitTrue as sharedAwaitTrue
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.CoroutineStart
 import kotlinx.coroutines.Dispatchers
@@ -26,7 +27,6 @@ import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.cancel
 import kotlinx.coroutines.channels.Channel
-import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.runBlocking
 import kotlinx.coroutines.test.advanceUntilIdle
@@ -96,13 +96,9 @@ class TransferLifecycleTest {
     }
 
     /** 轮询等待一个异步条件（真 socket 的测试用；`runTest` 那几个用 `advanceUntilIdle`）。 */
-    private suspend fun awaitUntil(what: String, timeoutMs: Long = 5_000, condition: suspend () -> Boolean) {
-        val ok = withTimeoutOrNull(timeoutMs) {
-            while (!condition()) delay(10)
-            true
-        } ?: false
-        assertTrue(ok, "等待超时：$what")
-    }
+    /** 转发到唯一实现（本文件曾有第二份 while-deadline 轮询副本）。 */
+    private suspend fun awaitUntil(what: String, timeoutMs: Long = 5_000, condition: suspend () -> Boolean) =
+        sharedAwaitTrue(what = what, timeoutMs = timeoutMs, condition = condition)
 
     /** 从事件通道里等到第一条满足 [predicate] 的事件；超时返回 null。 */
     private suspend fun awaitEvent(

@@ -2,6 +2,9 @@
 
 package com.kapp.tidings.domain
 
+import com.kapp.tidings.ExternalPairingGate
+import com.kapp.tidings.MainActivity
+import com.kapp.tidings.externalPairingPayloadOf
 import java.io.File
 import kotlin.test.Test
 import kotlin.test.assertEquals
@@ -160,14 +163,24 @@ class ExternalPairingGateTest {
         assertFalse(body.contains("app.platform."), "接收器不许直接碰平台层/扫码器（旁路形状二）")
     }
 
+    /**
+     * 读 `androidApp/src/main/kotlin/MainActivity.kt`，**从测试类自己的代码源往上找**。
+     *
+     * 这里原先第一候选是**进程的工作目录** —— 也就是"谁在哪里跑测试"。
+     * Gradle 把测试 JVM 的工作目录设成模块目录、IDE 常常设成模块或仓库根，于是同一条
+     * 结构守卫在某个入口下会读不到文件、在另一个入口下正常：症状是"偶发红"，根因是环境。
+     * 类文件位置跟着构建产物走，任何入口都一致。
+     *
+     * 读不到时**必须红**（而不是返回空串让下面的断言假绿）：这条守卫的判据是
+     * "接收器里没有旁路"，一个读不到源码的守卫会让它永远通过。
+     */
     private fun readMainActivitySource(): String {
-        val relative = "src/main/kotlin/MainActivity.kt"
-        val starts = listOfNotNull(
-            System.getProperty("user.dir")?.let(::File),
-            runCatching {
-                File(ExternalPairingGateTest::class.java.protectionDomain.codeSource.location.toURI())
-            }.getOrNull(),
-        )
+        // 包名统一（com.kapp.tidings）后 MainActivity 已搬进子包目录，旧路径会让守卫"读不到"。
+        val relative = "src/main/kotlin/com/kapp/tidings/MainActivity.kt"
+        val codeSource = runCatching {
+            File(ExternalPairingGateTest::class.java.protectionDomain.codeSource.location.toURI())
+        }.getOrNull()
+        val starts = listOfNotNull(codeSource)
         for (start in starts) {
             var dir: File? = start.absoluteFile
             while (dir != null) {

@@ -859,6 +859,49 @@ class RelayControllerGroupTest {
         assertEquals(BannerMessage.GroupMetaUpdated, controller.state.value.banner?.message)
     }
 
+    /**
+     * **空串 = 清空，null = 不改**，两种语义必须都能表达。
+     *
+     * 现场：编辑框里删光文字点「保存」，界面曾把空串折成 null，控制器对 null 的解释是
+     * 「保持原值」—— 于是简介/公告永远无法清空。协议面支持空串（`GroupMeta.description`
+     * 的 KDoc「空串表示未设置」，`validateGroup` 用 `isStrAllowEmpty` 放行），
+     * 所以控制器对 `""` 直接落库、随 `group.info` 全量快照同步给全群。
+     *
+     * 反向验证：把 UI 侧（`EditGroupMetaDialog`）的 `editDesc.trim()` 改回
+     * `editDesc.trim().ifEmpty { null }`，[clearingTheDescriptionWithAnEmptyString] 不会红
+     * （它测的是域层语义）—— 真正被这个语义钉住的是 UI 侧的接线，由调用点形状保证；
+     * 域层这里钉住的是「null 绝不能被解释成清空」与「空串绝不能被解释成不改」。
+     */
+    @Test
+    fun clearingTheDescriptionWithAnEmptyString() = runBlocking {
+        val controller = controller()
+        val groupId = controller.createGroup("核心项目组", listOf(lin))!!
+        controller.updateGroupMeta(groupId, description = "项目简介文本", announce = "重要公告内容")
+
+        controller.updateGroupMeta(groupId, description = "", announce = "")
+
+        val group = controller.state.value.groupOfConv(ConvId.group(groupId))
+        assertNotNull(group)
+        assertEquals("", group.description, "空串必须把简介清空（协议：空串表示未设置）")
+        assertEquals("", group.announce, "空串必须把公告清空")
+        assertEquals(BannerMessage.GroupMetaUpdated, controller.state.value.banner?.message)
+    }
+
+    @Test
+    fun nullFieldsMeanLeaveUnchangedNotClear() = runBlocking {
+        val controller = controller()
+        val groupId = controller.createGroup("核心项目组", listOf(lin))!!
+        controller.updateGroupMeta(groupId, description = "项目简介文本", announce = "重要公告内容")
+
+        // 只改公告、不动简介：传 null 的那一栏必须原样保留（旧语义，不许被"清空"语义吃掉）。
+        controller.updateGroupMeta(groupId, description = null, announce = "新公告")
+
+        val group = controller.state.value.groupOfConv(ConvId.group(groupId))
+        assertNotNull(group)
+        assertEquals("项目简介文本", group.description, "null = 不改；把 null 清成空串会把别人的简介抹掉")
+        assertEquals("新公告", group.announce)
+    }
+
     /** 一帧入站撤回：`groupId`/`groupRev` 按协议成对出现。 */
     private fun recall(from: String, targetId: String, groupId: String, groupRev: Int): Envelope =
         envelope(

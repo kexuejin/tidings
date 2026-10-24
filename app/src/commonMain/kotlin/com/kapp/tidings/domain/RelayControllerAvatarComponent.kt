@@ -123,16 +123,15 @@ fun handlePickAvatar() {
             return@launch
         }
         val hash = sha256Hex(bytes)
-        host._state.update { it.copy(pickedAvatarBytes = bytes, pickedAvatarHash = hash) }
+        host._state.update {
+            it.copy(pickedAvatarBytes = bytes, pickedAvatarHash = hash, pickedAvatarName = picked.name)
+        }
     }
 }
 
 /** 移除刚选中的那张图（还原到「还没选图」态）。只清本机，不碰任何已宣告的东西。 */
-
-
-/** 移除刚选中的那张图（还原到「还没选图」态）。只清本机，不碰任何已宣告的东西。 */
 fun handleRemovePickedAvatar() {
-    host._state.update { it.copy(pickedAvatarBytes = null, pickedAvatarHash = null) }
+    host._state.update { it.copy(pickedAvatarBytes = null, pickedAvatarHash = null, pickedAvatarName = null) }
 }
 
 /**

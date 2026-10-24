@@ -7,13 +7,12 @@ import com.kapp.tidings.platform.InMemoryAppPlatform
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.cancel
-import kotlinx.coroutines.delay
 import kotlinx.coroutines.runBlocking
-import kotlinx.coroutines.withTimeout
 import kotlin.test.AfterTest
 import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertTrue
+import com.kapp.tidings.testutil.awaitUntil
 
 /**
  * **两个真实节点之间投递一条消息** —— 全程零 UI。
@@ -116,12 +115,4 @@ class TwoNodeDeliveryTest {
     /** 端口 0 由系统分配；这里取一个当前空闲的固定号，够两个实例分开用。 */
     private fun freePort(): Int = java.net.ServerSocket(0).use { it.localPort }
 
-    private suspend fun awaitUntil(what: String, condition: () -> Boolean) {
-        withTimeout(20_000) {
-            while (!condition()) delay(50)
-        }
-        // 超时是 IOException/TimeoutCancellationException；把「等什么」带进消息，
-        // 否则失败输出只有一句超时，看不出卡在哪一步。
-        if (!condition()) throw AssertionError("等不到：" + what)
-    }
 }

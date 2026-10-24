@@ -46,12 +46,13 @@ import com.kapp.tidings.ui.ContentWidths
 import com.kapp.tidings.generated.resources.Res
 import com.kapp.tidings.generated.resources.cabinet_mine_title
 import com.kapp.tidings.generated.resources.cabinet_mode_off
-import com.kapp.tidings.generated.resources.cabinet_mode_read
 import com.kapp.tidings.generated.resources.cabinet_peer_title
 import com.kapp.tidings.generated.resources.cabinet_peers_title
-import com.kapp.tidings.generated.resources.cabinet_perm_badge_upload
 import com.kapp.tidings.generated.resources.cabinet_side_title
+import com.kapp.tidings.generated.resources.common_offline
+import com.kapp.tidings.generated.resources.common_online
 import com.kapp.tidings.generated.resources.ic_hdd
+import com.kapp.tidings.ui.components.AppBanner
 import com.kapp.tidings.ui.components.PeerAvatar
 import org.jetbrains.compose.resources.stringResource
 
@@ -115,89 +116,107 @@ public fun CabinetPane(
 ) {
     val cabinet = state.cabinet
 
-    BoxWithConstraints(modifier.fillMaxSize()) {
-        val tier = sizeClass
-            ?: desktopWindowSizeClass(maxWidth.value.toInt(), maxHeight.value.toInt())
-
-        // Compact 档「左栏还是右栏」是**本屏**的导航状态，不是 cabinet 数据的一部分：
-        // `activePeerId == null` 在双栏下表示「我的文件柜」这一项被选中，它不能同时
-        // 兼职「详情是否打开」——否则窄档下「我的文件柜」一进去就退不回列表。
-        // 初值取数据里是否已有选中项，这样将来若有冷启动预置的调用点也不会开在错的一栏。
-        var compactDetailOpen by remember { mutableStateOf(cabinet.activePeerId != null) }
-
-        val sidebar: @Composable (Modifier, (String?) -> Unit) -> Unit = { sidebarModifier, onSelect ->
-            CabinetSidebar(state = state, onSelect = onSelect, modifier = sidebarModifier)
+    Column(modifier.fillMaxSize()) {
+        // **桌面这一屏过去没有横幅宿主。** 上传/下载开始、最近有人放进来、停止共享
+        // 四类反馈都走 `state.banner`，手机端 `CabinetScreen` 有自己的那一条，桌面这里
+        // 一条都没有 —— 用户点了「上传」，界面上一个字都不出现。
+        // 位置与 `DesktopFilesPane` 一致（同一窗口级提示、同一条 padding 口径）。
+        state.banner?.let { banner ->
+            AppBanner(
+                banner = banner,
+                onDismiss = { controller.dismissBanner() },
+                modifier = Modifier.padding(
+                    horizontal = LocalAppSpacing.current.lg,
+                    vertical = LocalAppSpacing.current.sm,
+                ),
+            )
         }
+        BoxWithConstraints(Modifier.weight(1f).fillMaxWidth()) {
+            val tier = sizeClass
+                ?: desktopWindowSizeClass(maxWidth.value.toInt(), maxHeight.value.toInt())
 
-        val detail: @Composable (Modifier, (() -> Unit)?) -> Unit = { detailModifier, onBack ->
-            // 右栏里量一次**自己的**宽度：这是 [PeerCabinetBrowser] 头部要不要让位、
-            // 网格排几列的依据。放在这一层而不是 [CabinetPane] 顶层，是因为顶层量到的
-            // 是整窗宽度（含左栏与竖导），右栏实际剩多少要等 `weight(1f)` 分完才知道。
-            BoxWithConstraints(detailModifier.background(MaterialTheme.colorScheme.background)) {
-                val paneTier = desktopWindowSizeClass(maxWidth.value.toInt(), maxHeight.value.toInt())
-                if (cabinet.activePeerId == null) {
-                    // 我的文件柜设置面板 —— **手机与桌面共用同一个实现**
-                    // （`MineCabinetView`）。桌面这两栏里它只多一个"回列表"入口，
-                    // 由 `onBack` 参数化；其余四张卡、共享目录、权限三档、单独授权、
-                    // 最近有人放进来，全部是同一份代码。
-                    MineCabinetView(
-                        state = state,
-                        onSetShareRoot = { controller.setShareRoot(it) },
-                        onPickShareRoot = { controller.pickShareRoot() },
-                        onSetShareMode = { controller.setShareMode(it) },
-                        onRemoveShareGrant = { controller.removeShareGrant(it) },
-                        onSelectPeer = { controller.selectCabinetPeer(it) },
-                        onOpenShareRoot = onOpenShareRoot,
-                        onBack = onBack,
-                        now = now,
-                    )
-                } else {
-                    // 同事文件柜浏览面板 —— **手机与桌面共用同一个实现**（`PeerCabinetView`）。
-                    // 桌面这两栏里它只多一个"回列表"入口（`onBack`）；面包屑、选中框、
-                    // 上传/下载/权限、空态全部是同一份代码。
-                    PeerCabinetView(
-                        state = state,
-                        onBack = onBack,
-                        onLoadPath = { controller.loadCabinetPath(it) },
-                        onToggleSelection = { controller.toggleCabinetSelection(it) },
-                        onDownloadEntries = { names, saveAs -> controller.downloadCabinetEntries(names, saveAs) },
-                        onUploadToCabinet = { controller.uploadToCabinet(it) },
-                        now = now,
-                    )
+            // Compact 档「左栏还是右栏」是**本屏**的导航状态，不是 cabinet 数据的一部分：
+            // `activePeerId == null` 在双栏下表示「我的文件柜」这一项被选中，它不能同时
+            // 兼职「详情是否打开」——否则窄档下「我的文件柜」一进去就退不回列表。
+            // 初值取数据里是否已有选中项，这样将来若有冷启动预置的调用点也不会开在错的一栏。
+            var compactDetailOpen by remember { mutableStateOf(cabinet.activePeerId != null) }
+
+            val sidebar: @Composable (Modifier, (String?) -> Unit) -> Unit = { sidebarModifier, onSelect ->
+                CabinetSidebar(state = state, onSelect = onSelect, modifier = sidebarModifier)
+            }
+
+            val detail: @Composable (Modifier, (() -> Unit)?) -> Unit = { detailModifier, onBack ->
+                // 右栏里量一次**自己的**宽度：这是 [PeerCabinetBrowser] 头部要不要让位、
+                // 网格排几列的依据。放在这一层而不是 [CabinetPane] 顶层，是因为顶层量到的
+                // 是整窗宽度（含左栏与竖导），右栏实际剩多少要等 `weight(1f)` 分完才知道。
+                BoxWithConstraints(detailModifier.background(MaterialTheme.colorScheme.background)) {
+                    val paneTier = desktopWindowSizeClass(maxWidth.value.toInt(), maxHeight.value.toInt())
+                    if (cabinet.activePeerId == null) {
+                        // 我的文件柜设置面板 —— **手机与桌面共用同一个实现**
+                        // （`MineCabinetView`）。桌面这两栏里它只多一个"回列表"入口，
+                        // 由 `onBack` 参数化；其余四张卡、共享目录、权限三档、单独授权、
+                        // 最近有人放进来，全部是同一份代码。
+                        MineCabinetView(
+                            state = state,
+                            onSetShareRoot = { controller.setShareRoot(it) },
+                            onPickShareRoot = { controller.pickShareRoot() },
+                            onSetShareMode = { controller.setShareMode(it) },
+                            onRemoveShareGrant = { controller.removeShareGrant(it) },
+                            onSelectPeer = { controller.selectCabinetPeer(it) },
+                            onOpenShareRoot = onOpenShareRoot,
+                            onBack = onBack,
+                            now = now,
+                        )
+                    } else {
+                        // 同事文件柜浏览面板 —— **手机与桌面共用同一个实现**（`PeerCabinetView`）。
+                        // 桌面这两栏里它只多一个"回列表"入口（`onBack`）；面包屑、选中框、
+                        // 上传/下载/权限、空态全部是同一份代码。
+                        PeerCabinetView(
+                            state = state,
+                            onBack = onBack,
+                            onLoadPath = { controller.loadCabinetPath(it) },
+                            onToggleSelection = { controller.toggleCabinetSelection(it) },
+                            onDownloadEntries = { names -> controller.downloadCabinetEntries(names) },
+                            onUploadToCabinet = { controller.uploadToCabinet(it) },
+                            // 加载更多：`DesktopPaneActions.loadMoreCabinetEntries` 默认空实现，
+                            // 生产控制器覆写它（追加下一页，见 `cabinetEntriesAfterPage`）。
+                            onLoadMore = { controller.loadMoreCabinetEntries() },
+                        )
+                    }
                 }
             }
-        }
 
-        when (tier) {
-            // Expanded：原型 d-cabinet 画的就是这一档，左栏 300 + 右栏吃掉剩余宽度。
-            DesktopWindowSizeClass.Expanded -> Row(Modifier.fillMaxSize()) {
-                sidebar(Modifier.width(ContentWidths.Sidebar).fillMaxHeight(), controller::selectCabinetPeer)
-                VerticalDividerLine()
-                detail(Modifier.weight(1f).fillMaxHeight(), null)
-            }
+            when (tier) {
+                // Expanded：原型 d-cabinet 画的就是这一档，左栏 300 + 右栏吃掉剩余宽度。
+                DesktopWindowSizeClass.Expanded -> Row(Modifier.fillMaxSize()) {
+                    sidebar(Modifier.width(ContentWidths.Sidebar).fillMaxHeight(), controller::selectCabinetPeer)
+                    VerticalDividerLine()
+                    detail(Modifier.weight(1f).fillMaxHeight(), null)
+                }
 
-            // Medium：窗口只有 664–999，竖导已经在壳里占掉 64dp。左栏让出 60dp 给右栏，
-            // 与 DesktopConversationsPane 的 Medium 分支同一个数字（ContentWidths.SidebarNarrow）。
-            DesktopWindowSizeClass.Medium -> Row(Modifier.fillMaxSize()) {
-                sidebar(Modifier.width(ContentWidths.SidebarNarrow).fillMaxHeight(), controller::selectCabinetPeer)
-                VerticalDividerLine()
-                detail(Modifier.weight(1f).fillMaxHeight(), null)
-            }
+                // Medium：窗口只有 664–999，竖导已经在壳里占掉 64dp。左栏让出 60dp 给右栏，
+                // 与 DesktopConversationsPane 的 Medium 分支同一个数字（ContentWidths.SidebarNarrow）。
+                DesktopWindowSizeClass.Medium -> Row(Modifier.fillMaxSize()) {
+                    sidebar(Modifier.width(ContentWidths.SidebarNarrow).fillMaxHeight(), controller::selectCabinetPeer)
+                    VerticalDividerLine()
+                    detail(Modifier.weight(1f).fillMaxHeight(), null)
+                }
 
-            // Compact：560–663。左栏 240 加上右栏也只剩两条缝，所以两栏**互斥**：
-            // 一屏只画一个，回列表的入口在详情头部（同 DesktopConversationsPane /
-            // DesktopFilesPane 的做法）。壳在底部给了三段导航，视图切换不靠这一屏。
-            DesktopWindowSizeClass.Compact -> {
-                if (compactDetailOpen) {
-                    detail(Modifier.fillMaxSize(), { compactDetailOpen = false })
-                } else {
-                    sidebar(Modifier.fillMaxSize(), { peerId ->
-                        controller.selectCabinetPeer(peerId)
-                        compactDetailOpen = true
-                    })
+                // Compact：560–663。左栏 240 加上右栏也只剩两条缝，所以两栏**互斥**：
+                // 一屏只画一个，回列表的入口在详情头部（同 DesktopConversationsPane /
+                // DesktopFilesPane 的做法）。壳在底部给了三段导航，视图切换不靠这一屏。
+                DesktopWindowSizeClass.Compact -> {
+                    if (compactDetailOpen) {
+                        detail(Modifier.fillMaxSize(), { compactDetailOpen = false })
+                    } else {
+                        sidebar(Modifier.fillMaxSize(), { peerId ->
+                            controller.selectCabinetPeer(peerId)
+                            compactDetailOpen = true
+                        })
+                    }
                 }
             }
-        }
+    }
     }
 }
 
@@ -290,9 +309,15 @@ private fun CabinetSidebar(
                             style = MaterialTheme.typography.bodySmall,
                             fontWeight = FontWeight.Medium,
                             maxLines = 1,
+                            // 同事昵称可能很长：不写 ellipsis 会把左栏行顶破（硬截断）
+                            overflow = TextOverflow.Ellipsis,
                         )
                         Text(
-                            if (peer.online) stringResource(Res.string.cabinet_perm_badge_upload) else stringResource(Res.string.cabinet_mode_read),
+                            // 左栏这一行回答的是「这位同事在不在线」，不是权限 ——
+                            // 过去把「在线」印成「可上传」、把「离线」印成「只读」，
+                            // 是拿在线状态冒充授权（本机对这位同事到底开了什么权限，
+                            // 这一行根本不知道）。显示真实在线状态本身。
+                            stringResource(if (peer.online) Res.string.common_online else Res.string.common_offline),
                             style = MaterialTheme.typography.labelSmall,
                             color = MaterialTheme.colorScheme.onSurfaceVariant,
                         )

@@ -293,6 +293,8 @@ private fun R2HomeMoreMenuPhonePreview() {
             ConversationsScreen(
                 state = chatBase,
                 onOpenChat = {},
+                onToggleMute = {},
+                onDeleteConversation = {},
                 onGoToPairing = {},
                 onDismissBanner = {},
                 now = PREVIEW_NOW,

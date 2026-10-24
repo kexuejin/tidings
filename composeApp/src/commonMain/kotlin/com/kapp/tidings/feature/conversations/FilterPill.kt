@@ -6,7 +6,9 @@ import androidx.compose.material3.FilterChip
 import androidx.compose.material3.FilterChipDefaults
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
+import androidx.compose.material3.minimumInteractiveComponentSize
 import androidx.compose.runtime.Composable
+import androidx.compose.ui.Modifier
 import androidx.compose.ui.text.font.FontWeight
 
 /**
@@ -36,6 +38,11 @@ internal fun FilterPill(selected: Boolean, label: String, onClick: () -> Unit) {
     FilterChip(
         selected = selected,
         onClick = onClick,
+        // 裸 FilterChip 只有 32dp 高，低于 48dp 的最小可点尺寸 —— 五颗 chip 挤在一条
+        // 横向滚动条上，误触邻近 chip 的概率不低。`minimumInteractiveComponentSize`
+        // 只放大**命中区**到 48dp、视觉的药丸本体不动（M3 的标准做法，尺寸由
+        // `LocalMinimumInteractiveComponentSize` 的系统默认值给，这里不写字面量）。
+        modifier = Modifier.minimumInteractiveComponentSize(),
         label = {
             Text(
                 text = label,

@@ -11,8 +11,8 @@ import com.kapp.tidings.core.protocol.makeEnvelope
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
+import com.kapp.tidings.core.testutil.awaitAfterSend
 import kotlinx.coroutines.cancel
-import kotlinx.coroutines.delay
 import kotlinx.coroutines.runBlocking
 import kotlinx.serialization.json.JsonObject
 import kotlin.test.Test
@@ -80,18 +80,16 @@ class DiscoveryGossipDeliveryTest {
             // **重发**而不是只发一次：SharedFlow 没有 replay，订阅之前 emit 的帧会被直接丢掉
             // （不是缓冲），而 Discovery.start 是 scope.launch 异步订阅的 —— 单跑时调度来得及，
             // 全量跑（负载高、launch 晚一步）时会偶发超时（2026-10-18 全量跑红过两次、单跑绿）。
-            // 每 20ms 重发一次直到收到，这条断言就变成确定性的，不靠 sleep 猜。
-            var delivered = false
-            repeat(150) {
-                if (delivered) return@repeat
-                send(
-                    MsgTypes.SCAN_RANGES,
-                    Codec.scanRangesPayload(listOf(ScanRangeSummary(cidr = "10.99.195.0/24", addedAt = 1L))),
-                )
-                delay(20)
-                delivered = got.any { it.type == MsgTypes.SCAN_RANGES }
-            }
-            assertTrue(delivered, "发现层没把入站 scan-ranges 递上来（应用层那段处理代码就是死的）")
+            // 重发节奏与硬超时统一交给 testutil 的 awaitAfterSend（不再自己数次数）。
+            awaitAfterSend(
+                what = "发现层没把入站 scan-ranges 递上来（应用层那段处理代码就是死的）",
+                send = {
+                    send(
+                        MsgTypes.SCAN_RANGES,
+                        Codec.scanRangesPayload(listOf(ScanRangeSummary(cidr = "10.99.195.0/24", addedAt = 1L))),
+                    )
+                },
+            ) { got.any { it.type == MsgTypes.SCAN_RANGES } }
 
             // 递上来的那一帧必须是应用层**能用**的：载荷能解回同一条网段。
             val envelope = got.first { it.type == MsgTypes.SCAN_RANGES }
@@ -103,8 +101,20 @@ class DiscoveryGossipDeliveryTest {
             )
 
             // 负控：`peers` 仍然是有意不处理的（我们不做节点表散播）。
+            // **不用 sleep 400ms 赌它已经处理完**：在 PEERS 之后再发一帧我们确定会被递上来的
+            // scan-ranges，等它到达 —— 同一条 UDP 流是有序的，那一帧到了就说明 PEERS 早已被
+            // 处理过（被丢掉也该被丢掉了）。这样"没有 peers"才是确定的结论，而不是"还没到"。
+            val scanRangesBefore = got.count { it.type == MsgTypes.SCAN_RANGES }
             send(MsgTypes.PEERS, JsonObject(emptyMap()))
-            delay(400)
+            awaitAfterSend(
+                what = "后续 scan-ranges 没被递上来，无法证明 peers 那一帧已被处理",
+                send = {
+                    send(
+                        MsgTypes.SCAN_RANGES,
+                        Codec.scanRangesPayload(listOf(ScanRangeSummary(cidr = "10.99.195.0/24", addedAt = 1L))),
+                    )
+                },
+            ) { got.count { it.type == MsgTypes.SCAN_RANGES } > scanRangesBefore }
             assertTrue(
                 got.none { it.type == MsgTypes.PEERS },
                 "peers 被递到应用层了 —— 它属于「认得、有意不处理」，不该出现在入站流里",
@@ -115,14 +125,5 @@ class DiscoveryGossipDeliveryTest {
             transportB.stop()
             scope.cancel()
         }
-    }
-
-    /** 轮询到条件成立为止；超时就带着 [what] 断言失败（比挂死或裸超时好读）。 */
-    private suspend fun awaitTrue(timeoutMs: Long = 3_000, what: String, condition: () -> Boolean) {
-        repeat((timeoutMs / 20).toInt()) {
-            if (condition()) return
-            delay(20)
-        }
-        assertTrue(condition(), what)
     }
 }

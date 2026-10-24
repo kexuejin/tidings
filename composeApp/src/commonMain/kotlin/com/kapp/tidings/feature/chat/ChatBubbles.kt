@@ -32,11 +32,14 @@ import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.ui.hapticfeedback.HapticFeedbackType
+import androidx.compose.ui.platform.LocalHapticFeedback
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.StrokeCap
 import androidx.compose.ui.platform.LocalClipboardManager
@@ -47,6 +50,8 @@ import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.ui.text.AnnotatedString
+import androidx.compose.ui.text.LinkAnnotation
+import androidx.compose.ui.text.buildAnnotatedString
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
@@ -90,7 +95,10 @@ import com.kapp.tidings.generated.resources.chat_recall_peer
 import com.kapp.tidings.generated.resources.chat_recall_self
 import com.kapp.tidings.generated.resources.chat_reply_action
 import com.kapp.tidings.generated.resources.common_cancel
+import com.kapp.tidings.generated.resources.common_copied
 import com.kapp.tidings.generated.resources.common_unknown
+import com.kapp.tidings.generated.resources.common_unknown_member
+import com.kapp.tidings.generated.resources.chat_file_send_failed_hint
 import com.kapp.tidings.generated.resources.file_accept
 import com.kapp.tidings.generated.resources.file_bubble_count
 import com.kapp.tidings.generated.resources.file_decline
@@ -194,11 +202,19 @@ internal fun MessageBubble(
     /**
      * 长按发送者头像**直接 @ 这个人/这个 agent**。null = 不提供入口（私聊、自己发的）。
      *
-     * 只有群里有意义：群里"对着头像说"是最自然的指人方式，比先敲 `@` 再从候选里找快。
+     * 只有群里有意义：群里「对着头像说」是最自然的指人方式，比先敲 `@` 再从候选里找快。
      * token 由调用方从身份解析器取（[ChatAvatar] 同一次解析的产物），气泡不自己拼名字。
      */
     onMentionSender: (() -> Unit)? = null,
     quotedMessage: MessageUi? = null,
+    /**
+     * [quotedMessage] 的发送者显示名（调用方用身份解析器算好）。
+     *
+     * 为什么由调用方给：身份规则全在 `SenderIdentityContext` 那一层，气泡不该知道。
+     * null = 资料没到 —— 引用卡如实说「未知成员」，**不把 senderId 前 8 位的裸 hex
+     * 当人名印**。
+     */
+    quotedSenderName: String? = null,
     onScrollToQuoted: (() -> Unit)? = null,
     onImageClick: ((String) -> Unit)? = null,
     /**
@@ -226,6 +242,11 @@ internal fun MessageBubble(
         MaterialTheme.colorScheme.surfaceVariant
     }
     var menuOpen by remember { mutableStateOf(false) }
+    // 「删除本机这条」是破坏性动作：先立确认框（与列表删除同一规矩）。
+    var confirmDelete by remember { mutableStateOf(false) }
+    // 长按菜单的触感确认（HapticFeedbackType.LongPress）：气泡的长按是唯一入口，
+    // 没有触感时用户分不清「按住了」与「按了个寂寞」—— 尤其菜单弹出有延迟的时候。
+    val haptics = LocalHapticFeedback.current
     // 原型 `.bub{border:1px solid var(--hair)}`，`.msg.me .bub{border-color:transparent}`。
     // `--hair` 在 `:root` 里是 rgba(0,0,0,.07)；`outlineVariant` 即它的
     // 真值（半透明黑），不再是「借一个同灰族的近似」。`--surface-3` 是另一个**填充** token，
@@ -303,7 +324,11 @@ internal fun MessageBubble(
                         text = message.text,
                     )
                     .combinedClickable(
-                        onClick = {}, onLongClick = { menuOpen = true },
+                        onClick = {},
+                        onLongClick = {
+                            haptics.performHapticFeedback(HapticFeedbackType.LongPress)
+                            menuOpen = true
+                        },
                     ),
             ) {
                 // 原型 `.bub{padding:8px 12px}`；纯文件气泡 `.bub.bf{padding:5px}`
@@ -317,7 +342,10 @@ internal fun MessageBubble(
                 // 被引用的源消息卡片：点击可跳至原消息
                 if (quotedMessage != null) {
                     val quotedBody = quotedMessage.text.ifBlank { quotedMessage.file?.name.orEmpty() }
-                    val quotedSender = quotedMessage.senderId?.take(8) ?: quotedMessage.peerId.take(8)
+                    // 发送者名走身份解析（调用方算好传进来）；资料没到就如实说
+                    // 「未知成员」，不再印 8 位 hex。
+                    val quotedSender = quotedSenderName
+                        ?: stringResource(Res.string.common_unknown_member)
                     Surface(
                         color = MaterialTheme.colorScheme.surface.copy(alpha = 0.65f),
                         shape = RoundedCornerShape(6.dp),
@@ -367,7 +395,10 @@ internal fun MessageBubble(
                         if (renderMarkdown) {
                             MarkdownMessage(message.text)
                         } else {
-                            Text(text = message.text, style = MaterialTheme.typography.bodyMedium)
+                            // 人发的消息**不渲染 Markdown**（用户打的星号就该原样显示），
+                            // 但 URL 仍然要能点 —— 这两件事不是一回事。局域网场景里贴地址很常见，
+                            // 之前整条纯文本连识别都没有，对端只能看着。
+                            Text(text = linkifyPlainText(message.text), style = MaterialTheme.typography.bodyMedium)
                         }
                     }
                 }
@@ -440,6 +471,15 @@ internal fun MessageBubble(
             }
             }
             }
+            if (confirmDelete) {
+                DeleteChatMessageConfirmDialog(
+                    onDismiss = { confirmDelete = false },
+                    onConfirm = {
+                        confirmDelete = false
+                        onDelete?.invoke()
+                    },
+                )
+            }
             DropdownMenu(expanded = menuOpen, onDismissRequest = { menuOpen = false }) {
                 MessagePressActions(
                     copyText = message.text.ifBlank { message.file?.name.orEmpty() },
@@ -449,7 +489,7 @@ internal fun MessageBubble(
                     recallMeta = recallMeta,
                     recallUrgent = recallUrgent,
                     onForward = onForward?.let { { menuOpen = false; it() } },
-        onDelete = onDelete?.let { { menuOpen = false; it() } },
+        onDelete = onDelete?.let { { menuOpen = false; confirmDelete = true } },
                 )
             }
         }
@@ -503,8 +543,23 @@ public fun MessagePressActions(
     recallMeta: String = "",
     /** 最后 10 秒转危险色。 */
     recallUrgent: Boolean = false,
+    /**
+     * 复制成功后收菜单。null = 由调用方自己管（菜单会留着，但项名已经翻成「已复制」）。
+     *
+     * 为什么要收：复制是**瞬态动作**，「点了有没有成」必须当场给反馈。
+     * 此前点了没有任何变化 —— 用户不知道成没成，常重复点。
+     */
+    onDismiss: (() -> Unit)? = null,
 ) {
     val clipboardManager = LocalClipboardManager.current
+    // 复制反馈：点完把这一项的字翻成「已复制」，短暂停留后收起菜单。
+    var copied by remember { mutableStateOf(false) }
+    LaunchedEffect(copied) {
+        if (copied) {
+            kotlinx.coroutines.delay(COPY_FEEDBACK_MS)
+            onDismiss?.invoke()
+        }
+    }
     if (onReply != null) {
         DropdownMenuItem(
             text = { Text(stringResource(Res.string.chat_reply_action)) },
@@ -539,14 +594,22 @@ public fun MessagePressActions(
             onClick = { onRecall?.invoke() },
         )
     }
-    DropdownMenuItem(
-        text = { Text(stringResource(Res.string.chat_copy)) },
-        onClick = {
-            if (copyText.isNotEmpty()) {
+    // 没有可复制的文本就**不画这一项**（此前它一直在，点了什么都不发生 —— 死项）。
+    if (copyText.isNotEmpty()) {
+        DropdownMenuItem(
+            text = {
+                Text(
+                    stringResource(
+                        if (copied) Res.string.common_copied else Res.string.chat_copy,
+                    ),
+                )
+            },
+            onClick = {
                 clipboardManager.setText(AnnotatedString(copyText))
-            }
-        },
-    )
+                copied = true
+            },
+        )
+    }
     if (onForward != null) {
         DropdownMenuItem(
             text = { Text(stringResource(Res.string.chat_forward)) },
@@ -569,7 +632,7 @@ public fun MessagePressActions(
 /**
  * 时间线上的一行系统提示（撤回、戳一碰）。
  *
- * 居中的小灰字，不画气泡、不带时间戳：它不是谁说的话，是"这里发生过一件事"。
+ * 居中的小灰字，不画气泡、不带时间戳：它不是谁说的话，是「这里发生过一件事」。
  * 文案全部来自资源，控制器只给出 [NoticeKind]（见 `RelayUiState.NoticeKind`）。
  *
  * 原型 `.notice{align-self:center;font-size:11px;color:var(--on-2);background:var(--surface-2);
@@ -697,7 +760,7 @@ private fun noticeText(
  * 文件气泡。
  *
  * 与文字气泡共用同一条消息流：一次 transfer 只产生一条消息，进度事件原地更新它，
- * 于是"发文件"和"发消息"在会话里是同一种东西，不需要第二套列表，也不会两处对不上。
+ * 于是「发文件」和「发消息」在会话里是同一种东西，不需要第二套列表，也不会两处对不上。
  */
 @Composable
 internal fun FileCardView(
@@ -1039,6 +1102,16 @@ internal fun FileCardView(
                     style = MaterialTheme.typography.labelSmall,
                     color = MaterialTheme.colorScheme.error,
                 )
+                if (card.mine) {
+                    // 出站失败**没有续传入口**（core 只有入站 resume；重发的正路是重新挑文件），
+                    // 所以要把下一步说清楚，而不是只留一句失败原因 —— 那读起来像死路。
+                    Text(
+                        text = stringResource(Res.string.chat_file_send_failed_hint),
+                        style = MaterialTheme.typography.labelSmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        modifier = Modifier.padding(top = sp.xs),
+                    )
+                }
                 if (!card.mine && onResumeTransfer != null) {
                     Row(
                         modifier = Modifier.padding(top = sp.sm6),
@@ -1100,6 +1173,35 @@ internal fun elidePathTail(path: String, maxChars: Int = 34): String {
 }
 
 /**
+ * 把纯文本里的 http(s) 链接标成可点（LinkAnnotation.Url）。
+ *
+ * 为什么单独一条：人发的消息**故意**不渲染 Markdown（用户打的 `*星号*` 该原样显示），
+ * 但「不渲染 Markdown」不等于「不识别链接」。此前整条纯文本连 URL 都不认：
+ * 对端看到一串地址却点不动 —— 而局域网/隧道地址正是这个应用最常见的粘贴内容。
+ *
+ * 抽成纯函数：判据（认哪些、切在哪）可被单测钉住，不依赖任何平台能力。
+ */
+internal fun linkifyPlainText(text: String): AnnotatedString = buildAnnotatedString {
+    append(text)
+    plainTextUrls(text).forEach { (start, end) ->
+        addLink(LinkAnnotation.Url(text.substring(start, end)), start, end)
+    }
+}
+
+/**
+ * 纯文本里认得的链接区间（`[start, end)`）。**只认 http/https** —— 其它 scheme
+ * （`file:` / `intent:` 之类）交给 Markdown 那一侧的策略，纯文本不给人一条能点开本地的路。
+ */
+/** 复制反馈在菜单里停留多久（够看清「已复制」，又不至于让人等）。 */
+private const val COPY_FEEDBACK_MS = 900L
+
+internal fun plainTextUrls(text: String): List<Pair<Int, Int>> =
+    PLAIN_TEXT_URL_REGEX.findAll(text).map { it.range.first to it.range.last + 1 }.toList()
+
+// URL 的终止符里包含中文标点，但源码里不能出现 CJK 字符（CJK 门禁按字面量计），
+// 所以用 Unicode 转义表达：\u3001 、 \u3002 。 \uFF0C ， \uFF1B ； \uFF09 ）
+private val PLAIN_TEXT_URL_REGEX = Regex("https?://[^\\s<>\"'\\u3001\\u3002\\uFF0C\\uFF1B\\uFF09]+")
+/**
  * 这张文件卡要不要给「接收」按钮。
  *
  * 两条规矩，缺一不可：
@@ -1107,26 +1209,26 @@ internal fun elidePathTail(path: String, maxChars: Int = 34): String {
  *  · 而且必须是**还没开始传**的 `Offered`。
  *
  * 第二条是需求里点名的那条：`Active`（正在接收 62%）时再出现一个「接收」按钮，用户会以为
- * 点了能重来。抽成纯函数是为了让它**能被测到** —— 布局里"少画一个按钮"用肉眼迟早会漏。
+ * 点了能重来。抽成纯函数是为了让它**能被测到** —— 布局里「少画一个按钮」用肉眼迟早会漏。
  */
 internal fun fileCardShowsAccept(card: FileCardUi): Boolean =
     card.state == TransferState.Offered && !card.mine
 
 /**
- * 把 core 的传输失败**机器码**翻译成人话；认不出时返回 null（调用方退回原文或"未知"）。
+ * 把 core 的传输失败**机器码**翻译成人话；认不出时返回 null（调用方退回原文或「未知」）。
  *
  * ## 为什么必须有这一层
  *
  * `TransferState.Failed` 的 `reason` 是传输层造的诊断码（`socket-error`、`hash-mismatch`、
  * `offer-expired`、`timeout-waiting-pull-ok`…）。它们对排障有价值、对用户毫无意义 ——
- * 真机上用户看到的是「文件传输失败：socket-error」，第一反应是"这软件坏了还是我网坏了"，
+ * 真机上用户看到的是「文件传输失败：socket-error」，第一反应是「这软件坏了还是我网坏了」，
  * 而这恰恰是产品最该替他回答的问题。
  *
  * ## 两道纪律
  *
  * 1. **认不出的码原样显示**（返回 null ⇒ 调用方画 `common_unknown`）。绝不把不认识的码
  *    硬塞进某个笼统说法里 —— 那是在替事实编故事。
- * 2. **每条都要同时说"发生了什么"和"我该怎么办"**。只说"失败了"等于把问题原样退回给用户。
+ * 2. **每条都要同时说「发生了什么」和「我该怎么办」**。只说「失败了」等于把问题原样退回给用户。
  *
  * 前缀匹配是刻意的：错误码族里有 `timeout` / `timeout-data` / `timeout-waiting-pull-ok`
  * 这样的派生形态，逐个枚举迟早漏。

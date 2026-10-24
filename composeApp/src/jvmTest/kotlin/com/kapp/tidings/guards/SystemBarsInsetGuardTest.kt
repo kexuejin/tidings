@@ -176,11 +176,23 @@ class SystemBarsInsetGuardTest {
 
     // ---- helpers -------------------------------------------------------------------------
 
-    private fun commonSources(): List<File> =
-        File(composeAppRoot(), "src/commonMain/kotlin")
+    /**
+     * commonMain 下的全部 Kotlin/Swift 源。
+     *
+     * 扫描面必须非空：空清单会让「没有 offender」恒真、让「只许一个 safeDrawing 消费点」
+     * 以另一种方式假红 —— 两种都读不出"目录搬走了"这个真相（[GuardSourceScan] 同一个坑）。
+     */
+    private fun commonSources(): List<File> {
+        val files = File(composeAppRoot(), "src/commonMain/kotlin")
             .walkTopDown()
             .filter { it.isFile && (it.extension == "kt" || it.extension == "swift") }
             .toList()
+        assertTrue(
+            files.size > 100,
+            "只扫到 ${files.size} 个 commonMain 源文件 —— 扫描根写错了？（空清单会让两条 inset 守卫失去意义）",
+        )
+        return files
+    }
 
     /** 去掉注释，避免 KDoc 里提到的 `imePadding()` 被当成真的调用点。 */
     private fun code(file: File): String {

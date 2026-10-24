@@ -197,7 +197,10 @@ class AgentInboundTest {
 
     @Test
     fun recordInboundApprovalAndAck() {
-        val registry = AgentSessionRegistry()
+        // 这一条测的是**解析与记账**，不测授权：所以显式装一条「允许一切」的门禁。
+        // 授权本身（谁能批、过期算不算）在 AgentApprovalAckAuthorityTest 里钉 —— 不装门禁
+        // 时台账是 fail-closed（默认拒绝），那是安全默认值，不是这里的被测对象。
+        val registry = AgentSessionRegistry().apply { approvalAuthority = { true } }
         val env = makeEnvelope(
             from = nodeId,
             type = MsgTypes.AGENT_APPROVAL,
@@ -206,7 +209,9 @@ class AgentInboundTest {
                 sessionId = sessionId,
                 tool = "bash",
                 summary = "run rm -rf",
-                expiresAt = 9999L,
+                // 不过期：宿主会用墙钟判 `expiresAt`，写死一个绝对小值会让这条测试
+                // 随系统时间变红（真正的过期语义见授权测试）。
+                expiresAt = Long.MAX_VALUE,
                 choices = "yes,no",
             ),
         )

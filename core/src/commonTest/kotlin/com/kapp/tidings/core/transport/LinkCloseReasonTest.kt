@@ -11,6 +11,7 @@ import com.kapp.tidings.core.protocol.Profile
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
+import com.kapp.tidings.core.testutil.awaitTrue
 import kotlinx.coroutines.cancel
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.runBlocking
@@ -109,11 +110,12 @@ class LinkCloseReasonTest {
         try {
             // 第一条：对端一直不说话（挂住），好让"被替换"成为它结束的唯一原因。
             server.handle(FakeConnection { delay(5_000); null })
-            delay(100)
             // 第二条：同一个 nodeId 再连一次 ⇒ 保留最新、关掉旧的。
             server.handle(FakeConnection { delay(5_000); null })
-            delay(150)
-            assertEquals(CLOSE_REPLACED, server.closeReasons()["peer"], "被替换必须记成 replaced（不能被旧泵覆盖成 peer-closed）")
+            awaitTrue(what = "被替换必须记成 replaced（不能被旧泵覆盖成 peer-closed）") {
+            server.closeReasons()["peer"] == CLOSE_REPLACED
+        }
+        assertEquals(CLOSE_REPLACED, server.closeReasons()["peer"], "被替换必须记成 replaced（不能被旧泵覆盖成 peer-closed）")
             assertTrue((server.closeCounts()["peer"] ?: 0) >= 1, "本端主动关闭必须计数")
         } finally {
             server.close()

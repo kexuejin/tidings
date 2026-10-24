@@ -20,6 +20,7 @@ import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.setValue
@@ -27,6 +28,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
+import kotlinx.coroutines.launch
 
 import com.kapp.tidings.domain.RelayUiState
 import com.kapp.tidings.ui.components.GroupInfoDialog
@@ -103,6 +105,9 @@ public fun ChatPane(
      */
     unreadOnEntry: Int = 0,
 ) {
+    // 「中断 agent run」走控制面（§6.6 agent-cancel），需要协程作用域；
+    // 与手机壳（App.kt 里 chatScope.launch）同一条纪律。
+    val cancelScope = rememberCoroutineScope()
     // 群没有 PeerUi（协议里群不是节点），所以群会话要用占位对端。
     // 与手机端 `ChatScreen` 同一条路径：`chatPeer` 靠历史兜底，`groupPeer` 靠成员表。
     val group = state.groupOfConv(selectedPeerId)
@@ -157,6 +162,12 @@ public fun ChatPane(
                 onNudge = controller::nudge,
                 onRequestScreenView = controller::requestScreenView,
                 onRespondApproval = controller::respondApproval,
+                // 群里那条「中断」：控制面动作，不发聊天文本（与手机端同一个控制器方法）。
+                onCancelAgentRun = { peerId, sessionId, runId ->
+                    cancelScope.launch {
+                        controller.cancelAgentRun(peerId, sessionId, runId, reason = "user")
+                    }
+                },
                 onOpenAgentHistory = { peerId, wsId ->
                     controller.requestAgentSessionPage(peerId, wsId, offset = 0)
                 },
@@ -194,14 +205,30 @@ public fun ChatPane(
                 composerSlot = if (peer == null) {
                     null
                 } else {
-                    { draft, onDraftChange, mentions ->
+                    { args ->
+                        // slot 的参数是一整包（ComposerSlotArgs）：回复条、@ 候选、
+                        // 新任务 token、命中跳转与手机内置输入栏同源 —— 以前散参版本
+                        // 漏接了 replyingTo，桌面点「回复」就没反应。
                         DesktopComposer(
                             peer = peer,
-                            draft = draft,
-                            onDraftChange = onDraftChange,
+                            draft = args.draft,
+                            onDraftChange = args.onDraftChange,
                             controller = controller,
                             isGroup = group != null,
-                            mentionTargets = mentions,
+                            mentionTargets = args.mentionTargets,
+                            replyingTo = args.replyingTo,
+                            replySenderName = args.replySenderName,
+                            onCancelReply = args.onCancelReply,
+                            newTaskToken = args.newTaskToken,
+                            onJumpToMessage = args.onJumpToMessage,
+                            // 发送走 ChatScreen 的出口（与手机内置输入栏同一个）：
+                            // 「回复」的 replyId 才带得到发送侧，发完引用条才会消失。
+                            onSend = args.onSend,
+                            // 焦点意图：ChatScreen 那份 composerFocus 在桌面没有挂载点，
+                            // 由本卡片自己的 requester 消费（回复 / @ 之后光标才回到输入框）。
+                            focusRequest = args.focusRequest,
+                            // 被移出群时与手机同一句话（历史只读）。
+                            readOnlyReason = args.readOnlyReason,
                         )
                     }
                 },

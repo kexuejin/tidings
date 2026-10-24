@@ -40,6 +40,7 @@ import com.kapp.tidings.feature.chat.ChatScreenState
 import com.kapp.tidings.feature.conversations.ConversationsScreen
 import com.kapp.tidings.feature.nodes.AddNodeSheet
 import com.kapp.tidings.feature.nodes.NodesScreen
+import com.kapp.tidings.feature.settings.SettingsConnectionSubpage
 import com.kapp.tidings.feature.settings.SettingsScreen
 import com.kapp.tidings.feature.settings.SetAvatarPage
 import com.kapp.tidings.navigation.AppNavItems
@@ -630,6 +631,8 @@ private fun ConversationsPhonePreview() {
             ConversationsScreen(
                 state = normalState,
                 onOpenChat = {},
+                onToggleMute = {},
+                onDeleteConversation = {},
                 onGoToPairing = {},
                 onDismissBanner = {},
                 modifier = inner,
@@ -693,6 +696,8 @@ private fun Window620PhoneShellPreview() {
             ConversationsScreen(
                 state = normalState,
                 onOpenChat = {},
+                onToggleMute = {},
+                onDeleteConversation = {},
                 onGoToPairing = {},
                 onDismissBanner = {},
                 modifier = inner,
@@ -977,6 +982,10 @@ private fun SetAvatarPageDarkPreview() {
  * 设置屏的 loading：连接卡的「重连」正在跑（`state.restarting`），按钮换成
  * 「正在重启…」且不可再点。852 高看不到这张卡的下半部分（重启按钮在端口输入框
  * 下面），所以这一帧刻意高 1400 —— 与 `nodes-long-text` 同理：图高不够就等于没证明。
+ *
+ * 直接拍连接子页：`initialSubpage` 的 `if (state.restarting)` 劫持已删（用户不该
+ * 因为节点在重启就被换页），SettingsScreen 首页不再自动跳到连接页 —— 但「重连按钮
+ * 变『正在重启…』」这条 loading 证据就在连接子页里，这一帧仍钉它。
  */
 @PreviewTest
 @Preview(name = "settings-restarting", widthDp = 393, heightDp = 1400, showBackground = true, locale = "zh-rCN")
@@ -984,17 +993,15 @@ private fun SetAvatarPageDarkPreview() {
 private fun SettingsRestartingPreview() {
     AppTheme(darkTheme = false) {
         Screen("settings", badges = navBadges(restartingState)) { inner ->
-            SettingsScreen(
+            SettingsConnectionSubpage(
                 state = restartingState,
-                dataDirectory = "/data/user/0/com.kapp.tidings/files/relay",
-                cacheDirectory = "/data/user/0/com.kapp.tidings/cache/relay",
-                onSaveProfile = { _, _, _, _, _ -> },
+                defaultPort = null,
                 onSavePorts = { _, _ -> },
                 onRestart = {},
-                onDismissBanner = {},
-                onClearNote = {},
-                // 武装这一支：可空出口不传则依赖它的界面根本不渲染（截图证据里没有它）。
-                onRemovePickedAvatar = {},
+                onAddScanRange = {},
+                onRemoveScanRange = {},
+                onTriggerCidrScan = {},
+                onBack = {},
                 modifier = inner,
             )
         }
@@ -1010,6 +1017,8 @@ private fun ConversationsDarkPreview() {
             ConversationsScreen(
                 state = normalState,
                 onOpenChat = {},
+                onToggleMute = {},
+                onDeleteConversation = {},
                 onGoToPairing = {},
                 onDismissBanner = {},
                 modifier = inner,
@@ -1064,6 +1073,8 @@ private fun ConversationsEmptyPreview() {
             ConversationsScreen(
                 state = emptyState,
                 onOpenChat = {},
+                onToggleMute = {},
+                onDeleteConversation = {},
                 onGoToPairing = {},
                 onDismissBanner = {},
                 modifier = inner,
@@ -1099,6 +1110,8 @@ private fun ConversationsLoadingPreview() {
             ConversationsScreen(
                 state = startingState,
                 onOpenChat = {},
+                onToggleMute = {},
+                onDeleteConversation = {},
                 onGoToPairing = {},
                 onDismissBanner = {},
                 modifier = inner,
@@ -1221,6 +1234,8 @@ private fun ConversationsLandscapePreview() {
             ConversationsScreen(
                 state = normalState,
                 onOpenChat = {},
+                onToggleMute = {},
+                onDeleteConversation = {},
                 onGoToPairing = {},
                 onDismissBanner = {},
                 modifier = inner,
@@ -1277,7 +1292,7 @@ private fun CabinetMinePhonePreview() {
                 onSelectPeer = {},
                 onLoadPath = {},
                 onToggleSelection = {},
-                onDownloadEntries = { _, _ -> },
+                onDownloadEntries = { _ -> },
                 modifier = inner,
                 now = PREVIEW_NOW,
             )
@@ -1305,7 +1320,7 @@ private fun CabinetPeerPhonePreview() {
                 onSelectPeer = {},
                 onLoadPath = {},
                 onToggleSelection = {},
-                onDownloadEntries = { _, _ -> },
+                onDownloadEntries = { _ -> },
                 modifier = inner,
                 now = PREVIEW_NOW,
             )
@@ -1332,7 +1347,7 @@ private fun CabinetUnsetPhonePreview() {
                 onSelectPeer = {},
                 onLoadPath = {},
                 onToggleSelection = {},
-                onDownloadEntries = { _, _ -> },
+                onDownloadEntries = { _ -> },
                 modifier = inner,
                 now = PREVIEW_NOW,
             )
@@ -1391,6 +1406,8 @@ private fun ConversationsFont2xPreview() {
             ConversationsScreen(
                 state = normalState,
                 onOpenChat = {},
+                onToggleMute = {},
+                onDeleteConversation = {},
                 onGoToPairing = {},
                 onDismissBanner = {},
                 modifier = inner,
@@ -1544,7 +1561,7 @@ private fun CabinetPeerFont2xPreview() {
                 onSelectPeer = {},
                 onLoadPath = {},
                 onToggleSelection = {},
-                onDownloadEntries = { _, _ -> },
+                onDownloadEntries = { _ -> },
                 modifier = inner,
                 now = PREVIEW_NOW,
             )
@@ -1619,7 +1636,7 @@ private fun CabinetPeerMaxSizeFont2xPreview() {
                 onSelectPeer = {},
                 onLoadPath = {},
                 onToggleSelection = {},
-                onDownloadEntries = { _, _ -> },
+                onDownloadEntries = { _ -> },
                 modifier = inner,
                 now = PREVIEW_NOW,
             )

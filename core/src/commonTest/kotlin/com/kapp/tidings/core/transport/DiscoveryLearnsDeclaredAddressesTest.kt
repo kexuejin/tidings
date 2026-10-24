@@ -9,8 +9,8 @@ import com.kapp.tidings.core.protocol.makeEnvelope
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
+import com.kapp.tidings.core.testutil.awaitAfterSend
 import kotlinx.coroutines.cancel
-import kotlinx.coroutines.delay
 import kotlinx.coroutines.runBlocking
 import kotlin.test.Test
 import kotlin.test.assertTrue
@@ -73,23 +73,22 @@ class DiscoveryLearnsDeclaredAddressesTest {
         try {
             val declared = listOf("100.66.238.121", "192.168.2.82")
             val profileA = profile("node-a", declared)
-            var learned: List<String> = emptyList()
-            repeat(40) {
-                transportA.send(
-                    Codec.encodeToBytes(
-                        makeEnvelope(MsgTypes.ENTRY, "node-a", Codec.profilePayload(profileA)),
-                    ),
-                    "127.0.0.1",
-                    transportB.boundPort,
-                )
-                delay(60)
-                learned = registryB.candidatesOf("node-a").map { it.host }
-                if (learned.containsAll(declared)) return@repeat
-            }
-            assertTrue(
-                learned.containsAll(declared),
-                "档案声明的地址必须进候选池（否则换网后永远连不上）；实得=" + learned,
-            )
+            // 重发（entry 在真机上本来就是周期性的）+ 硬超时，统一走 testutil（不再自己数次数）。
+            awaitAfterSend(
+                timeoutMs = 8_000,
+                resendMs = 60,
+                what = "档案声明的地址必须进候选池（否则换网后永远连不上）；实得=" +
+                    registryB.candidatesOf("node-a").map { it.host },
+                send = {
+                    transportA.send(
+                        Codec.encodeToBytes(
+                            makeEnvelope(MsgTypes.ENTRY, "node-a", Codec.profilePayload(profileA)),
+                        ),
+                        "127.0.0.1",
+                        transportB.boundPort,
+                    )
+                },
+            ) { registryB.candidatesOf("node-a").map { it.host }.containsAll(declared) }
         } finally {
             discoveryB.stop()
             transportA.stop()
@@ -117,17 +116,22 @@ class DiscoveryLearnsDeclaredAddressesTest {
         discoveryB.start(scope)
         try {
             val profileA = profile("node-a", null)
-            repeat(30) {
-                transportA.send(
-                    Codec.encodeToBytes(
-                        makeEnvelope(MsgTypes.ENTRY, "node-a", Codec.profilePayload(profileA)),
-                    ),
-                    "127.0.0.1",
-                    transportB.boundPort,
-                )
-                delay(50)
-            }
-            assertTrue(registryB.get("node-a") != null, "资料本身要被采纳")
+            // 先等到"资料被采纳"这个**确定事件**，再断言"没有凭空造候选" ——
+            // 原来发 30 次再 sleep，最后那句断言只可能在"还没处理"的情况下假绿。
+            awaitAfterSend(
+                timeoutMs = 8_000,
+                resendMs = 50,
+                what = "资料本身要被采纳",
+                send = {
+                    transportA.send(
+                        Codec.encodeToBytes(
+                            makeEnvelope(MsgTypes.ENTRY, "node-a", Codec.profilePayload(profileA)),
+                        ),
+                        "127.0.0.1",
+                        transportB.boundPort,
+                    )
+                },
+            ) { registryB.get("node-a") != null }
             // rememberSource 仍会记下真实源地址，但**不得**多出档案里没有的地址。
             assertTrue(
                 registryB.candidatesOf("node-a").none { it.host.startsWith("100.") },

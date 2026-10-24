@@ -14,6 +14,7 @@ import io.ktor.utils.io.ByteWriteChannel
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
+import com.kapp.tidings.core.testutil.awaitTrue
 import kotlinx.coroutines.cancel
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.runBlocking
@@ -80,7 +81,11 @@ class LinkDialDiagnosticsTest {
             connectTimeoutMs = 50,
         )
         client.start()
-        delay(200)
+        // 「没拨」也要有确定的证据：等**诊断里出现 skipReason**（说明这一轮真的评估过它），
+        // 而不是 sleep 200ms 之后假设评估已经发生。
+        awaitTrue(what = "等不到 peer 的 skipReason：调度循环没评估过它，这条负控无法成立") {
+            client.dialStats()["peer"]?.skipReason != null
+        }
         client.stop()
         scope.cancel()
 
@@ -117,7 +122,10 @@ class LinkDialDiagnosticsTest {
             connectTimeoutMs = 50,
         )
         client.start()
-        delay(200)
+        awaitTrue(what = "同 /64 的 GUA 没被拨，且真公网也没有 skipReason —— 这一轮没评估完") {
+            (client.dialStats()["peer"]?.attempts ?: 0) >= 1 &&
+                client.dialStats()["other"]?.skipReason != null
+        }
         client.stop()
         scope.cancel()
 
@@ -153,7 +161,9 @@ class LinkDialDiagnosticsTest {
             connectTimeoutMs = 50,
         )
         client.start()
-        delay(300)
+        awaitTrue(what = "等不到一次失败拨号：有 pin 就该真的拨一次") {
+            (client.dialStats()["peer"]?.failures ?: 0) > 0
+        }
         client.stop()
         scope.cancel()
 
@@ -182,7 +192,9 @@ class LinkDialDiagnosticsTest {
             connectTimeoutMs = 50,
         )
         client.start()
-        delay(200)
+        awaitTrue(what = "等不到 peer-has-no-lnk1 这条跳过原因：诊断没把它记下来") {
+            client.dialStats()["peer"]?.skipReason == "peer-has-no-lnk1"
+        }
         client.stop()
         scope.cancel()
 

@@ -4,15 +4,13 @@ package com.kapp.tidings.feature.chat
 
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.clickable
-import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
-import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
-import androidx.compose.material3.Button
+import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
@@ -21,7 +19,6 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.produceState
 import androidx.compose.runtime.remember
-import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.ImageBitmap
@@ -31,13 +28,10 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.border
 import androidx.compose.foundation.layout.width
-import androidx.compose.ui.text.font.FontWeight
-import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import com.kapp.tidings.core.fs.readFileBytes
 import com.kapp.tidings.core.ioDispatcher
 import com.kapp.tidings.generated.resources.Res
-import androidx.compose.material3.OutlinedButton
 import com.kapp.tidings.platform.RelayAudioPlayback
 import com.kapp.tidings.platform.decodeImageBytes
 import com.kapp.tidings.ui.theme.LocalAppSpacing
@@ -46,9 +40,7 @@ import org.jetbrains.compose.resources.DrawableResource
 import org.jetbrains.compose.resources.stringResource
 import com.kapp.tidings.domain.model.AgentApprovalUi
 import com.kapp.tidings.domain.model.DeliveryState
-import com.kapp.tidings.generated.resources.agent_approval_allow
-import com.kapp.tidings.generated.resources.agent_approval_deny
-import com.kapp.tidings.generated.resources.agent_approval_readonly
+import com.kapp.tidings.feature.agents.AgentApprovalRow
 import com.kapp.tidings.generated.resources.chat_delivery_failed
 import com.kapp.tidings.generated.resources.chat_delivery_queued
 import com.kapp.tidings.generated.resources.chat_delivery_recalled
@@ -152,83 +144,59 @@ internal fun DeliveryState.label(): String = when (this) {
 }
 
 /**
- * 投递状态图标，对应 design-spec 里的 `delivered`（ic_check_double）与 `queued`（ic_clock_pending）。
+ * 投递状态图标，对应 design-spec 里的 `delivered`（ic_check_double）与
+ * `queued` / `sending`（ic_clock_pending —— 两者都是「还没到对方手里」的在途态，
+ * 共用同一枚时钟图标；区分靠旁边的文案）。
  * 失败和撤回没有对应素材，返回 null 走纯文案，不拿别的图标凑数。
  */
 internal fun DeliveryState.stateIcon(): DrawableResource? = when (this) {
     DeliveryState.Sent -> Res.drawable.ic_check_double
     DeliveryState.Queued -> Res.drawable.ic_clock_pending
+    // 「发送中」同样是挂在发送侧的在途态：只有文字没有图标时，这一档读起来
+    // 像「状态行少画了东西」。与 Queued 共用 ic_clock_pending（同一族语义）。
+    DeliveryState.Sending -> Res.drawable.ic_clock_pending
     else -> null
 }
 
+/**
+ * 会话内待审批条 —— **复用看板那一行**（[AgentApprovalRow]），不另画一份。
+ *
+ * ## 为什么必须同一行
+ *
+ * 修复前这里是"另一套审批 UI"：只显示工具名 + **原始 sessionId**、没有 summary、没有
+ * L3 确认卡、没有「本会话免审」。于是同一条高危请求，在 Agent 看板里需要二次确认并说清
+ * 要执行什么，在聊天里却是一颗按钮盲批 —— 安全档位随入口变化，用户根本不知道自己在批什么。
+ *
+ * ## 为什么不再是红底警告条
+ *
+ * 审批条出现时用户已经在会话里，红底横幅会把"待你处置"读成"出错了"。改为普通卡面 +
+ * 发丝线：风险由行内的 L1/L2/L3 徽标表达（那才是分级该待的地方），而不是整块底色的情绪。
+ */
 @Composable
 internal fun ChatApprovalBanner(
     approvals: List<AgentApprovalUi>,
-    onRespond: (approvalId: String, allow: Boolean) -> Unit,
+    now: Long,
+    onRespond: ((approvalId: String, allow: Boolean) -> Unit)?,
+    onRespondChoice: ((approvalId: String, allow: Boolean, allowSession: Boolean) -> Unit)? = null,
     modifier: Modifier = Modifier,
     isReadOnly: ((AgentApprovalUi) -> Boolean)? = null,
 ) {
     Surface(
-        color = MaterialTheme.colorScheme.errorContainer.copy(alpha = 0.35f),
+        color = MaterialTheme.colorScheme.surface,
         shape = RoundedCornerShape(10.dp),
-        border = BorderStroke(1.dp, MaterialTheme.colorScheme.error.copy(alpha = 0.3f)),
+        border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant),
         modifier = modifier.fillMaxWidth(),
     ) {
-        Column(
-            modifier = Modifier.padding(horizontal = LocalAppSpacing.current.md, vertical = LocalAppSpacing.current.sm),
-            verticalArrangement = Arrangement.spacedBy(LocalAppSpacing.current.xs),
-        ) {
-            approvals.forEach { approval ->
-                val risk = com.kapp.tidings.feature.agents.resolveRiskLevel(approval.riskLevel, approval.tool)
-                val readOnly = isReadOnly?.invoke(approval) == true
-                Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.SpaceBetween,
-                ) {
-                    Row(
-                        modifier = Modifier.weight(1f),
-                        verticalAlignment = Alignment.CenterVertically,
-                        horizontalArrangement = Arrangement.spacedBy(LocalAppSpacing.current.xs),
-                    ) {
-                        com.kapp.tidings.feature.agents.RiskLevelBadge(risk)
-                        Text(
-                            text = "${approval.tool ?: "action"} · ${approval.sessionId}",
-                            style = MaterialTheme.typography.bodyMedium,
-                            fontWeight = FontWeight.SemiBold,
-                            maxLines = 1,
-                            overflow = TextOverflow.Ellipsis,
-                        )
-                    }
-                    if (readOnly) {
-                        Surface(
-                            shape = RoundedCornerShape(6.dp),
-                            color = MaterialTheme.colorScheme.surfaceVariant,
-                        ) {
-                            Text(
-                                text = stringResource(Res.string.agent_approval_readonly),
-                                style = MaterialTheme.typography.labelSmall,
-                                color = MaterialTheme.colorScheme.onSurfaceVariant,
-                                modifier = Modifier.padding(horizontal = 8.dp, vertical = 2.dp),
-                            )
-                        }
-                    } else {
-                        Row(horizontalArrangement = Arrangement.spacedBy(LocalAppSpacing.current.xs)) {
-                            OutlinedButton(
-                                onClick = { onRespond(approval.approvalId, false) },
-                                contentPadding = PaddingValues(horizontal = 8.dp, vertical = 2.dp),
-                            ) {
-                                Text(stringResource(Res.string.agent_approval_deny), style = MaterialTheme.typography.labelSmall)
-                            }
-                            Button(
-                                onClick = { onRespond(approval.approvalId, true) },
-                                contentPadding = PaddingValues(horizontal = 8.dp, vertical = 2.dp),
-                            ) {
-                                Text(stringResource(Res.string.agent_approval_allow), style = MaterialTheme.typography.labelSmall)
-                            }
-                        }
-                    }
-                }
+        Column(modifier = Modifier.fillMaxWidth()) {
+            approvals.forEachIndexed { index, approval ->
+                if (index > 0) HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
+                AgentApprovalRow(
+                    approval = approval,
+                    now = now,
+                    onRespond = onRespond,
+                    onRespondChoice = onRespondChoice,
+                    isReadOnly = isReadOnly?.invoke(approval) == true,
+                )
             }
         }
     }

@@ -65,6 +65,21 @@ internal fun ConversationListPanel(
     selectedConvId: String? = null,
     onOpenWorkspaceUnit: ((WorkspaceUnitUi) -> Unit)? = null,
     /**
+     * 群会话预览的发送者显示名解析（convId → 名字；null/解析不出 = 不署名）。
+     *
+     * 名字的权威在域层（`RelayUiState.previewSenderNameOf`，与 convTitle 同一个解析器）；
+     * 这里只把它从壳运到行 —— 拼装用的文案归 UI 层（`conv_preview_sender`），域层不写死。
+     * null = 这个壳不署名（预览 / 未接域层的宿主），行的形状不变。
+     */
+    previewSenderNameOf: ((String) -> String?)? = null,
+    /**
+     * 会话草稿预览（convId → 已拼好、带「草稿」标记的文案；null = 该会话没有草稿）。
+     *
+     * 草稿表活在壳里（手机 App.kt / 桌面 DesktopShell），列表拿不到 —— 所以由壳注入。
+     * null = 这个壳没接草稿（预览/截图夹具），行形状与行为保持不变。
+     */
+    draftPreviewOf: ((String) -> String?)? = null,
+    /**
      * 列表尾部追加的东西（桌面左栏的"搜到的消息"那一段）。
      *
      * 用**插槽**而不是参数化：它整块不同（导出不同、行类型不同、还带小节标题），
@@ -90,6 +105,8 @@ internal fun ConversationListPanel(
                     onTogglePin = onTogglePin?.let { act -> { act(item.conv.convId) } },
                     onToggleMute = onToggleMute?.let { act -> { act(item.conv.convId) } },
                     onDeleteConversation = onDeleteConversation?.let { act -> { act(item.conv.convId) } },
+                    previewSenderName = previewSenderNameOf?.invoke(item.conv.convId),
+                    draftPreview = draftPreviewOf?.invoke(item.conv.convId),
                     selected = selectedConvId != null && item.conv.convId == selectedConvId,
                 )
 

@@ -18,8 +18,10 @@ import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Surface
+import androidx.compose.material3.minimumInteractiveComponentSize
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.remember
@@ -28,6 +30,8 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.platform.LocalClipboardManager
+import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
@@ -37,15 +41,28 @@ import com.kapp.tidings.ui.theme.LocalAppSpacing
 import com.kapp.tidings.ui.theme.LocalCardShape
 import com.kapp.tidings.ui.theme.RelayElevations
 import com.kapp.tidings.generated.resources.Res
+import com.kapp.tidings.generated.resources.common_cancel
+import com.kapp.tidings.generated.resources.disc_connect
 import com.kapp.tidings.generated.resources.disc_manual_unreachable
+import com.kapp.tidings.generated.resources.nodes_menu_copied
+import com.kapp.tidings.generated.resources.nodes_menu_copy
+import com.kapp.tidings.generated.resources.nodes_menu_remove
+import com.kapp.tidings.generated.resources.nodes_remove_confirm_body
+import com.kapp.tidings.generated.resources.nodes_remove_confirm_title
 import com.kapp.tidings.ui.components.AppButton
 import com.kapp.tidings.ui.components.AppButtonSize
+import com.kapp.tidings.ui.components.AppButtonTone
 import com.kapp.tidings.ui.components.AppOutlinedButton
+import com.kapp.tidings.ui.components.AppTextButton
 import com.kapp.tidings.ui.components.KindBadge
+import com.kapp.tidings.ui.components.RelayDialog
+import com.kapp.tidings.ui.components.RelayDialogButton
 import com.kapp.tidings.ui.components.relativeTime
 import com.kapp.tidings.ui.components.PeerAvatar
 import com.kapp.tidings.ui.components.StatusDot
 import com.kapp.tidings.ui.theme.accents
+import com.kapp.tidings.domain.ManualPeerEntry
+import kotlinx.coroutines.delay
 import org.jetbrains.compose.resources.stringResource
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.ui.text.style.TextOverflow
@@ -93,6 +110,24 @@ internal enum class NodePresence { Online, Offline, Never }
  */
 private const val DetailRemarkLimit = 32
 
+/**
+ * 详情页「最近」一行的取值档位 —— 抽成纯函数供单测钉住三档的边界。
+ *
+ * **「没有记录」与「刚刚」必须分开**：上一版把 `lastSeenAt <= 0` 兜底成「刚刚」，
+ * 于是「没有回应」的详情页头部挂着红药丸、下面「最近」却写着「刚刚」——
+ * 同一屏自相矛盾（"从来没回应过"和"刚刚还见过"不可能同时成立）。
+ * 「刚刚」只属于在线档：在线节点的 lastSeenAt 本来就在秒级滚动，写"刚刚"是如实的；
+ * 没有记录的（手动地址从没接通过）如实写没有（「—」），与同卡「主机 / 平台」空值
+ * 的占位符同一笔。
+ */
+internal enum class RecentSeenBucket { JustNow, NoRecord, Relative }
+
+internal fun recentSeenBucket(online: Boolean, lastSeenAt: Long): RecentSeenBucket = when {
+    online -> RecentSeenBucket.JustNow
+    lastSeenAt <= 0L -> RecentSeenBucket.NoRecord
+    else -> RecentSeenBucket.Relative
+}
+
 @Composable
 private fun presenceLabel(presence: NodePresence): String = stringResource(
     when (presence) {
@@ -133,6 +168,23 @@ internal fun NodeDetailBody(
     onSetPeerRemark: ((String, String) -> Unit)?,
     onOpenChat: ((String) -> Unit)?,
     /**
+     * 「移除节点」按下并确认后调用（参数是这条行的手动记录）。
+     *
+     * `null` = 这个壳没有移除这条路，详情页不画那颗动作 —— 而不是给一个按了
+     * 什么都不发生的按钮。**只有 `item.manualEntry != null` 的行画**：
+     * 移除的语义是"删掉本机存的这条手动地址"（`RelayController.removeManualPeer`），
+     * 局域网扫到、没有手动记录的对端没有可删的东西。
+     */
+    onRemovePeer: ((ManualPeerEntry) -> Unit)? = null,
+    /**
+     * 「连接」一条**已保存但当前不通**的手动地址（见 `RelayController.reconnectManualPeer`）。
+     *
+     * 只在 `manualEntry != null && !online` 时画：在线的不需要重连；局域网扫到的对端
+     * 没有手动记录，重连的目标地址就是它自己的广播——那条 mDNS 行还在列表里。
+     * `null` = 这个壳没接这条路，不画（按了没反应的按钮比没有更糟）。
+     */
+    onReconnectPeer: ((ManualPeerEntry) -> Unit)? = null,
+    /**
      * 渲染「最近」那一行用的当前时刻。
      *
      * 必须是参数：`relativeTime` 是 @Composable，而模型里只存时间戳（`lastSeenAt`）。
@@ -160,12 +212,12 @@ internal fun NodeDetailBody(
             CardGroupHeader(stringResource(Res.string.node_detail_info_section))
             DetailRow(
                 label = stringResource(Res.string.node_detail_info_recent),
-                // 在线、或没有记录（手动地址从没接通过）都印「刚刚」：
-                // 那两档下"上次见到"不是一个有意义的数。
-                value = if (item.online || item.lastSeenAt <= 0L) {
-                    stringResource(Res.string.node_detail_recent_just_now)
-                } else {
-                    relativeTime(item.lastSeenAt, now)
+                // 三档见 [recentSeenBucket]：「刚刚」只留给在线档；没有记录印「—」，
+                // 不再与头部红药丸「没有回应」同屏互斥。
+                value = when (recentSeenBucket(item.online, item.lastSeenAt)) {
+                    RecentSeenBucket.JustNow -> stringResource(Res.string.node_detail_recent_just_now)
+                    RecentSeenBucket.NoRecord -> "—"
+                    RecentSeenBucket.Relative -> relativeTime(item.lastSeenAt, now)
                 },
             )
             DetailRow(
@@ -189,6 +241,131 @@ internal fun NodeDetailBody(
         }
 
         SendMessageButton(target = nodeId, onOpenChat = onOpenChat)
+
+        // 管理动作收在详情页底部（原型把行尾 ⋯ 菜单从列表撤掉时留下的判据：
+        // 「管理动作不进主列表」）。复制对任何行都有；移除只对手动地址有。
+        // `manualEntry` 先落进局部 val：编译器穿不过 lambda 里的智能转换，
+        // 直接写 `item.manualEntry` 会拿到可空类型。
+        val manualEntry = item.manualEntry
+        val removeAction = onRemovePeer?.takeIf { manualEntry != null }
+        // 只在「手动保存过、现在不在线」时给「连接」：这是 mDNS 行被判重滤掉之后，
+        // 用户唯一能把那台设备连回来的动作（重新添加会被控制器判重复）。
+        val reconnectAction = onReconnectPeer?.takeIf { manualEntry != null && !item.online }
+        DetailManageActions(
+            address = "${item.host}:${item.port}",
+            displayName = item.displayName,
+            onReconnect = if (reconnectAction != null && manualEntry != null) {
+                { reconnectAction(manualEntry) }
+            } else {
+                null
+            },
+            onRemoveConfirmed = if (removeAction != null && manualEntry != null) {
+                { removeAction(manualEntry) }
+            } else {
+                null
+            },
+        )
+    }
+}
+
+/**
+ * 详情页底部的一排管理动作：「复制地址」+「移除」。
+ *
+ * - **复制**：地址是"对方怎么找到我/我怎么填它"的唯一凭据，抄给对面或贴进
+ *   「添加节点」都要它。成功后行内短暂显示「地址已复制」（`nodes_menu_copied`），
+ *   2 秒自清 —— 不发页面级横幅，一个详情页里的动作不值得把整屏顶一下。
+ * - **移除**：两段式。第一段只是开确认框；真正调 [onRemovePeer] 的是确认框里
+ *   那颗危险按钮。后果必须在按下去之前说清（`nodes_remove_confirm_body`）：
+ *   只影响本机，对方不受影响。
+ */
+@Composable
+private fun DetailManageActions(
+    address: String,
+    displayName: String,
+    onRemoveConfirmed: (() -> Unit)?,
+    onReconnect: (() -> Unit)? = null,
+) {
+    val sp = LocalAppSpacing.current
+    val clipboard = LocalClipboardManager.current
+    var copied by remember { mutableStateOf(false) }
+    // 复制反馈自清：2 秒足够看清，也不会一直挂着两份文案。
+    LaunchedEffect(copied) {
+        if (copied) {
+            delay(2_000)
+            copied = false
+        }
+    }
+    var confirmRemove by remember { mutableStateOf(false) }
+
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(top = sp.sm6),
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(sp.sm6),
+    ) {
+        AppTextButton(
+            text = stringResource(
+                if (copied) Res.string.nodes_menu_copied else Res.string.nodes_menu_copy,
+            ),
+            onClick = {
+                clipboard.setText(AnnotatedString(address))
+                copied = true
+            },
+            size = AppButtonSize.Small,
+            // 命中区抬到 48dp（视觉尺寸不变）：小档按钮自身的 padding 只撑到 ~32dp，
+            // 拇指在列表/详情底部常点空 —— 与「分段控件抬到 48」同一条无障碍下限。
+            modifier = Modifier.minimumInteractiveComponentSize().weight(1f, fill = false),
+        )
+        if (onReconnect != null) {
+            AppTextButton(
+                text = stringResource(Res.string.disc_connect),
+                onClick = onReconnect,
+                size = AppButtonSize.Small,
+                modifier = Modifier.minimumInteractiveComponentSize().weight(1f, fill = false),
+            )
+        }
+        if (onRemoveConfirmed != null) {
+            AppTextButton(
+                text = stringResource(Res.string.nodes_menu_remove, displayName),
+                onClick = { confirmRemove = true },
+                size = AppButtonSize.Small,
+                tone = AppButtonTone.Danger,
+                modifier = Modifier.minimumInteractiveComponentSize().weight(1f, fill = false),
+            )
+        }
+    }
+
+    if (confirmRemove && onRemoveConfirmed != null) {
+        RelayDialog(
+            onDismissRequest = { confirmRemove = false },
+            title = { Text(stringResource(Res.string.nodes_remove_confirm_title)) },
+            content = {
+                Text(
+                    text = stringResource(Res.string.nodes_remove_confirm_body),
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+            },
+            confirmButton = {
+                // 危险动作走描边红（`RelayDialogButton` 的 `.btn.danger-o` 档），
+                // 与退群/清空那一类同一颗形状。
+                RelayDialogButton(
+                    text = stringResource(Res.string.nodes_menu_remove, displayName),
+                    onClick = {
+                        confirmRemove = false
+                        onRemoveConfirmed()
+                    },
+                    danger = true,
+                )
+            },
+            dismissButton = {
+                RelayDialogButton(
+                    text = stringResource(Res.string.common_cancel),
+                    onClick = { confirmRemove = false },
+                )
+            },
+        )
     }
 }
 
@@ -272,8 +449,11 @@ internal fun NodeStatePill(presence: NodePresence) {
     val content: Color
     when (presence) {
         NodePresence.Online -> {
+            // 底仍是 18% 绿（原型 `color-mix(… 18%)`），但**字不再用同一个绿**：
+            // 绿字压 18% 绿底实测 ≈2.8:1，远低于 AA 4.5:1。状态点/底色继续承担"是绿色那一档"，
+            // 文字回到 onSurface（≈13:1）—— 读屏本来也只读文字，不读颜色。
             container = MaterialTheme.accents.online.copy(alpha = 0.18f)
-            content = MaterialTheme.accents.online
+            content = colorScheme.onSurface
         }
         NodePresence.Offline -> {
             container = colorScheme.surfaceVariant

@@ -163,7 +163,9 @@ selectAllConversationSummaries:
 SELECT * FROM ConversationSummary;
 
 selectLatestMessageOfConv:
-SELECT id, text, timestamp, mine FROM MessageEntity
+-- file_json 也要取：会话列表预览在正文为空时退回文件名（conversationPreviewOf）。
+-- 只补 SELECT 列、不动表结构 ⇒ 不需要迁移（.sqm 只跟 DDL 走）。
+SELECT id, text, timestamp, mine, file_json FROM MessageEntity
 WHERE conv_id = :convId
 ORDER BY seq DESC
 LIMIT 1;

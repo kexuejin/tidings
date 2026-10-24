@@ -2,6 +2,7 @@
 
 package com.kapp.tidings.feature.conversations
 
+import androidx.compose.foundation.background
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.lazy.LazyListState
 import androidx.compose.foundation.lazy.rememberLazyListState
@@ -11,10 +12,10 @@ import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.padding
-import androidx.compose.foundation.layout.size
-import androidx.compose.foundation.lazy.items
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
@@ -23,7 +24,11 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.Brush
+import androidx.compose.ui.graphics.Color
+import androidx.compose.material3.MaterialTheme
 import com.kapp.tidings.ui.theme.LocalAppSpacing
+import com.kapp.tidings.domain.BannerMessage
 import com.kapp.tidings.domain.RelayUiState
 import com.kapp.tidings.domain.model.ConversationUi
 import com.kapp.tidings.domain.WorkspaceUnitGroupUi
@@ -32,6 +37,8 @@ import com.kapp.tidings.domain.inboxWorkspaceUnits
 import com.kapp.tidings.core.nowMillis
 import com.kapp.tidings.generated.resources.Res
 import com.kapp.tidings.generated.resources.conv_empty_action
+import com.kapp.tidings.generated.resources.conv_empty_failed_message
+import com.kapp.tidings.generated.resources.conv_empty_failed_title
 import com.kapp.tidings.generated.resources.conv_empty_message
 import com.kapp.tidings.generated.resources.conv_empty_title
 import com.kapp.tidings.generated.resources.conv_filter_empty_action
@@ -58,6 +65,7 @@ import com.kapp.tidings.ui.components.GroupCreateDialog
 import com.kapp.tidings.ui.components.LargeTitleBar
 import com.kapp.tidings.ui.components.TitleBarDivider
 import com.kapp.tidings.ui.components.TopBarIconAction
+import com.kapp.tidings.ui.components.bannerText
 import com.kapp.tidings.ui.EmptyState
 import com.kapp.tidings.ui.LoadingState
 import org.jetbrains.compose.resources.stringResource
@@ -109,6 +117,13 @@ fun ConversationsScreen(
      * 有机会造出两个同 id 的群，那是控制器的职责。
      */
     onCreateGroup: ((String, List<String>) -> Unit)? = null,
+    /**
+     * 会话草稿（convId → 草稿正文；null = 该会话没有草稿）。
+     *
+     * 草稿表活在壳里（手机 App.kt 的 draftsByConv、桌面 DesktopShell），这一屏拿不到，
+     * 所以由壳注入、一路运到 ConversationRow。null = 这个壳不显示草稿（预览/截图夹具）。
+     */
+    draftPreviewOf: ((String) -> String?)? = null,
     /**
      * 建群对话框是否**一开始就打开**，默认关。
      *
@@ -326,10 +341,14 @@ fun ConversationsScreen(
         val peopleCount = conversations.count { !it.isGroup && !it.isAgent }
         val workspaceCount = if (showWorkspaces) workspaceUnits.totalUnits else 0
         val pendingTotal = if (showWorkspaces) workspaceUnits.pendingTotal else 0
+        // 五个 pill 在 393dp 上放不下，最右那颗会被屏幕边缘**切成半个**，看不出还能滚。
+        // 加一层右侧渐隐：只在还能往右滚时出现，滚到底自动消失（滚动能力自己会说话）。
+        val filterScroll = rememberScrollState()
+        Box(Modifier.fillMaxWidth()) {
         Row(
             modifier = Modifier
                 .fillMaxWidth()
-                .horizontalScroll(rememberScrollState())
+                .horizontalScroll(filterScroll)
                 .padding(horizontal = LocalAppSpacing.current.lg, vertical = LocalAppSpacing.current.xs),
             horizontalArrangement = Arrangement.spacedBy(LocalAppSpacing.current.sm),
             verticalAlignment = Alignment.CenterVertically,
@@ -367,6 +386,25 @@ fun ConversationsScreen(
                 label = "${stringResource(Res.string.conv_filter_people)} $peopleCount",
             )
         }
+            if (filterScroll.canScrollForward) {
+                // 用 matchParentSize：渐隐层只覆盖 pill 行的高度，**不参与**父 Box 的尺寸计算。
+                // 之前这里写 fillMaxHeight，把外层 Box 撑到整屏高，下面的会话列表被挤成 0 高
+                // （渲染帧实测：只剩 pill、列表整片空白）。
+                Box(Modifier.matchParentSize()) {
+                    Box(
+                        Modifier
+                            .align(Alignment.CenterEnd)
+                            .fillMaxHeight()
+                            .width(LocalAppSpacing.current.lg)
+                            .background(
+                                Brush.horizontalGradient(
+                                    listOf(Color.Transparent, MaterialTheme.colorScheme.surface),
+                                ),
+                            ),
+                    )
+                }
+            }
+        }
 
         when {
             // 「正在恢复会话…」只在**真的会去恢复**时画：关掉落盘（`persistMessages = false`）
@@ -375,6 +413,17 @@ fun ConversationsScreen(
             allFeedItems.isEmpty() && state.network.phase == NodePhase.Starting && state.settings.persistMessages ->
                 LoadingState(
                     label = stringResource(Res.string.conv_loading),
+                    modifier = Modifier.fillMaxWidth(),
+                )
+
+            // 「节点失败」单列一档：它不是"还没有会话"，是"本地节点没跑起来" ——
+            // 混进通用空态会把**过程/故障**说成**结论**，用户会以为数据丢了。
+            // 文案与"原因怎么拼"都在 [ConversationFailedEmptyState] 里，两侧只给各自的出路。
+            allFeedItems.isEmpty() && state.network.phase == NodePhase.Failed ->
+                ConversationFailedEmptyState(
+                    failure = state.network.failure,
+                    actionLabel = stringResource(Res.string.conv_empty_action),
+                    onAction = onGoToPairing,
                     modifier = Modifier.fillMaxWidth(),
                 )
 
@@ -402,6 +451,9 @@ fun ConversationsScreen(
                 onTogglePin = onTogglePin,
                 onToggleMute = onToggleMute,
                 onDeleteConversation = onDeleteConversation,
+                // 群预览的发送者署名：名字的解析权威在域层（与 convTitle 同一个解析器）。
+                previewSenderNameOf = state::previewSenderNameOf,
+                draftPreviewOf = draftPreviewOf,
                 modifier = Modifier.fillMaxSize(),
                 state = listState,
                 contentPadding = androidx.compose.foundation.layout.PaddingValues(
@@ -493,4 +545,68 @@ internal fun orderInboxFeed(items: List<InboxFeedItem>): List<InboxFeedItem> =
                 .thenByDescending { it.pendingCount > 0 }
                 .thenByDescending { it.timestamp },
         )
+
+/**
+ * 「本地节点没跑起来」这一档空态 —— 手机屏与桌面侧栏的**同一份**实现。
+ *
+ * 为什么必须合成一处：它说的是同一句话（标题 + 正文 + 失败原因），只有「出路」的按钮
+ * 文案不同（手机「去节点页」/ 桌面「去配对节点」）。两边各写一遍 `buildString`
+ * 拼原因的后果，是有人改了其中一句之后**另一侧继续撒谎** —— 而这类空态只在故障时
+ * 出现，没人会同时盯着两个壳比对。
+ *
+ * [failure] 为 null 时只画通用那句（`NetworkUi.failure` 没有结构化原因的情况）。
+ * 原因文案走 [bannerText]：同一份 `BannerMessage` 在横幅与空态里必须是同一句人话。
+ */
+@Composable
+public fun ConversationFailedEmptyState(
+    failure: BannerMessage?,
+    actionLabel: String,
+    onAction: () -> Unit,
+    modifier: Modifier = Modifier,
+) {
+    EmptyState(
+        title = stringResource(Res.string.conv_empty_failed_title),
+        message = buildString {
+            append(stringResource(Res.string.conv_empty_failed_message))
+            failure?.let {
+                append('\n')
+                append(bannerText(it))
+            }
+        },
+        actionLabel = actionLabel,
+        onAction = onAction,
+        modifier = modifier,
+    )
+}
+
+/**
+ * 会话列表数据流的**最后一米**：按查询词筛选 + 过 [orderInboxFeed] 混排。
+ *
+ * 为什么它存在：置顶的第一排序键只在 [orderInboxFeed] 里。手机端在
+ * [ConversationsScreen] 的 feed 构建处过它；桌面壳（DesktopShell）过去只做查询词
+ * 过滤、把 `state.conversations` 原样 map 进行的容器 —— 于是同一个置顶动作在手机上
+ * 生效、在桌面上点了没反应（同一份数据、两套数据流，正是 §2.6 要消的那类分叉）。
+ * 现在桌面壳对这一份**纯会话**的列表也走这里，置顶口径两端一致。
+ *
+ * 桌面 feed 里只有会话行（工作区段是手机端 InboxFeedItem.Workspace 那条路），
+ * 所以这里接的模型直接是 [ConversationUi]；包裹与拆包都在函数内部，调用方不碰
+ * [InboxFeedItem]。`orderInboxFeed` 的稳定排序保证：无置顶时输出顺序与
+ * `RelayUiState.conversations` 的派生顺序完全一致（回归保护）。
+ */
+internal fun orderConversationList(
+    conversations: List<ConversationUi>,
+    query: String = "",
+): List<ConversationUi> {
+    val filtered = if (query.isBlank()) {
+        conversations
+    } else {
+        conversations.filter {
+            it.title.contains(query, ignoreCase = true) ||
+                it.preview?.contains(query, ignoreCase = true) == true
+        }
+    }
+    return orderInboxFeed(filtered.map { InboxFeedItem.Conversation(it) })
+        .mapNotNull { it as? InboxFeedItem.Conversation }
+        .map { it.conv }
+}
 

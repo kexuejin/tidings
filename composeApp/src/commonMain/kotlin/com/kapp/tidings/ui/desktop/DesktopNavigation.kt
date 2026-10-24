@@ -15,6 +15,7 @@ import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.selection.selectableGroup
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.outlined.Chat
 import androidx.compose.material.icons.outlined.Devices
@@ -31,6 +32,9 @@ import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.semantics.Role
+import androidx.compose.ui.semantics.selected
+import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.unit.dp
 
 import com.kapp.tidings.domain.RelayUiState
@@ -94,7 +98,12 @@ public fun NavigationRail(
     onOpenSettings: (() -> Unit)? = null,
 ) {
     Column(
-        Modifier.width(DesktopMetrics.MEDIUM_RAIL_PX.dp).fillMaxHeight().background(MaterialTheme.colorScheme.surface),
+        Modifier
+            .width(DesktopMetrics.MEDIUM_RAIL_PX.dp)
+            .fillMaxHeight()
+            .background(MaterialTheme.colorScheme.surface)
+            // 竖导是一组互斥页签：缺 selectableGroup 时读屏不报「第 2 个，共 5 个」。
+            .selectableGroup(),
         horizontalAlignment = Alignment.CenterHorizontally,
     ) {
         Spacer(Modifier.height(LocalAppSpacing.current.md10))
@@ -120,6 +129,18 @@ public fun NavigationRail(
     }
 }
 
+/**
+ * 竖导按钮：图标在上、标签在下，选中时图标染 `primary`。
+ *
+ * **读屏语义**：这颗按钮与移动端横屏竖导
+ * （[com.kapp.tidings.ui.components.CompactScaffold] 里的 `NavRailButton`）是同一物种，
+ * 语义必须一项不差 —— 角色 [Role.Tab]、选中态 `semantics { selected }`，
+ * 并且 `mergeDescendants = true`：标签 `Text` 与图标在同一个可点节点里，
+ * 否则 TalkBack 会先念「标签页/已选中」再单独把标签念一遍，分两次播报。
+ * 缺了这一套，读屏在平板上只会念「按钮」、不念「哪个被选中」，
+ * 手机竖屏底导（M3 `NavigationBarItem`）却什么都告诉用户。
+ * 图标的 `contentDescription` 是 null（见 [NavIconWithBadge]）：标签文字就在下面可见着。
+ */
 @Composable
 public fun RailButton(
     label: String,
@@ -130,7 +151,11 @@ public fun RailButton(
 ) {
     val tint = if (selected) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant
     Column(
-        Modifier.clickable(onClick = onClick).padding(vertical = LocalAppSpacing.current.md10).width(DesktopMetrics.MEDIUM_RAIL_PX.dp),
+        Modifier
+            .clickable(onClick = onClick, role = Role.Tab)
+            .semantics(mergeDescendants = true) { this.selected = selected }
+            .padding(vertical = LocalAppSpacing.current.md10)
+            .width(DesktopMetrics.MEDIUM_RAIL_PX.dp),
         horizontalAlignment = Alignment.CenterHorizontally,
     ) {
         NavIconWithBadge(icon = icon, label = label, tint = tint, badge = badge)
@@ -150,7 +175,11 @@ public fun CompactNavigationBar(
         TitleBarDivider()
         Surface(color = MaterialTheme.colorScheme.surface) {
             Row(
-                Modifier.fillMaxWidth().height(DesktopMetrics.COMPACT_NAV_PX.dp),
+                Modifier
+                    .fillMaxWidth()
+                    .height(DesktopMetrics.COMPACT_NAV_PX.dp)
+                    // 一组互斥页签：读屏靠它报「第 2 个，共 5 个」。
+                    .selectableGroup(),
                 horizontalArrangement = Arrangement.SpaceEvenly,
                 verticalAlignment = Alignment.CenterVertically,
             ) {
@@ -159,7 +188,11 @@ public fun CompactNavigationBar(
                     val tint = if (selected) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant
                     val label = stringResource(desktopViewLabel(item))
                     Column(
-                        Modifier.clickable { onViewChange(item) }.padding(horizontal = LocalAppSpacing.current.lg, vertical = LocalAppSpacing.current.xs),
+                        Modifier
+                            // 与 [RailButton] 同一套语义：角色 Tab + 选中态 + 合并后代。
+                            .clickable(onClick = { onViewChange(item) }, role = Role.Tab)
+                            .semantics(mergeDescendants = true) { this.selected = selected }
+                            .padding(horizontal = LocalAppSpacing.current.lg, vertical = LocalAppSpacing.current.xs),
                         horizontalAlignment = Alignment.CenterHorizontally,
                     ) {
                         NavIconWithBadge(icon = desktopViewIcon(item), label = label, tint = tint, badge = badges[item] ?: 0)
@@ -176,6 +209,11 @@ public fun CompactNavigationBar(
  * 的 `NavIcon` 同一形状：`badge <= 0` 时连 `Badge` 都不进组合，不会画出一个空圈。
  *
  * 徽标底色显式取 `accents.badge` / `onBadge`：M3 `Badge` 默认的 `error` 配白字只有 4.17:1。
+ *
+ * **`contentDescription` 是 null**：两个调用点（[RailButton] / [CompactNavigationBar]）
+ * 都把标签文字画在图标旁边可见着，图标再描述一遍会让 TalkBack 把同一个词播两次 ——
+ * 与移动端 `NavRailButton` / `NavIcon` 同一条纪律。`label` 形参仍保留：调用点按
+ * 「图标 + 可见标签」成对传参，删掉它反而让两个调用点各拼一次文案。
  */
 @Composable
 private fun NavIconWithBadge(
@@ -194,7 +232,7 @@ private fun NavIconWithBadge(
             }
         },
     ) {
-        Icon(icon, contentDescription = label, modifier = Modifier.size(IconSizes.Body), tint = tint)
+        Icon(icon, contentDescription = null, modifier = Modifier.size(IconSizes.Body), tint = tint)
     }
 }
 

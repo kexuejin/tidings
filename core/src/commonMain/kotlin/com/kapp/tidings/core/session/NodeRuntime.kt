@@ -53,6 +53,12 @@ import com.kapp.tidings.core.transport.CrossNetworkFileListener
 import com.kapp.tidings.core.transport.CrossNetworkRawDialer
 import com.kapp.tidings.core.transport.CrossNetworkTransferPlanner
 import com.kapp.tidings.core.transport.CrossNetworkTransferPolicy
+import com.kapp.tidings.core.transport.PullAttemptTransport
+import com.kapp.tidings.core.transport.ScreenWire
+import com.kapp.tidings.core.transport.ScreenWireOpener
+import com.kapp.tidings.core.transport.crossNetworkScreenPort
+import com.kapp.tidings.core.transport.plainScreenWireOpener
+import com.kapp.tidings.core.transport.readFirstScreenOpen
 import com.kapp.tidings.core.transport.createCrossNetworkFileListener
 import com.kapp.tidings.core.transport.createCrossNetworkRawDialer
 import com.kapp.tidings.core.transport.ReliableSendDiagnostics
@@ -210,8 +216,18 @@ class NodeRuntime(
         createCrossNetworkRawDialer(linkIdentityDir, localAddresses),
     private val crossNetworkFileListener: CrossNetworkFileListener =
         createCrossNetworkFileListener(linkIdentityDir, localAddresses),
+    /**
+     * 跨网屏幕监听（`tlsPort + 2`,与文件的 `tlsPort + 1` 同族）：独立实例、独立端口,
+     * 首帧 `screen-open` 交给 [onOpenScreenWire]。起不来只是没有这条跨网入口,
+     * 局域网原路径（[onOpenScreen]）不受影响。
+     */
+    private val crossNetworkScreenListener: CrossNetworkFileListener =
+        createCrossNetworkFileListener(linkIdentityDir, localAddresses),
     private val onOpenScreen: suspend (Socket, ScreenTcpFrame.Open, String, ByteReadChannel, ByteWriteChannel) -> Boolean =
         { _, _, _, _, _ -> false },
+    /** 跨网 TLS 监听的首帧投屏交接（通道是 TLS 解密后的裸流,协议与明文路完全一致）。 */
+    private val onOpenScreenWire: suspend (ScreenTcpFrame.Open, ScreenWire) -> Boolean =
+        { _, _ -> false },
 ) {
 
     private val transport = UdpTransport(udpPort, bindHost)
@@ -506,6 +522,40 @@ class NodeRuntime(
     fun pinOfPeer(nodeId: String): String? = registry.pinOf(nodeId)
 
     /**
+     * 屏幕通道的连接计划（Viewer 侧）：局域网明文直连第一、跨网 TLS+pin 候选其后 ——
+     * 与 F1 文件拉取（TransferManager 的 planner）同一条纪律、同一个 [CrossNetworkTransferPolicy]。
+     *
+     * 空表 = 一条都排不出来（对端不在 registry）：调用方按「对端不在线」处理。
+     * `canDialTls=false`（iOS 的 raw TLS 未落地）⇒ 只剩明文直连,公网场景连不上并如实
+     * 报 timeout —— **不降级明文出公网**（fail-closed）。
+     */
+    fun screenWireAttempts(peerId: String): List<ScreenWireOpener> {
+        val record = registry.get(peerId) ?: return emptyList()
+        val pin = pinOfPeer(peerId)?.let { TlsPin.parse(it) }
+        val plan = CrossNetworkTransferPolicy(
+            enabled = linkEnabled,
+            canDialTls = crossNetworkRawDialer.canDialTls,
+        ).planScreen(
+            direct = PeerEndpoint(record.ip, record.profile.tcpPort),
+            candidates = registry.candidatesOf(peerId),
+            tlsPort = record.profile.tlsPort,
+            hasPin = pin != null,
+        )
+        return plan.map { attempt ->
+            when (attempt.transport) {
+                PullAttemptTransport.Plaintext -> plainScreenWireOpener(attempt.host, attempt.port)
+                // 5s 拨号超时：公网握手失败要快速试下一条候选,不能挂住整场连接。
+                PullAttemptTransport.Tls -> ScreenWireOpener {
+                    crossNetworkRawDialer.connect(attempt.host, attempt.port, pin, 5_000L)
+                        ?.let { conn ->
+                            ScreenWire(conn.read, conn.write) { runCatching { conn.close() } }
+                        }
+                }
+            }
+        }
+    }
+
+    /**
      * 本机的 TLS pin（SPKI 指纹）。
      *
      * 为什么要有这一条（task-86 真机）：二维码是**主机→手机单向**的信任传递通道，
@@ -768,6 +818,23 @@ class NodeRuntime(
             runScope.launch { m.events.collect { _transfers.tryEmit(it) } }
         }
 
+        // 跨网屏幕监听（Sharer 侧,`tlsPort + 2`）：进来的 TLS 裸流先读首帧,
+        // 是 `screen-open` 且宿主认领（会话/token 校验在 onOpenScreenWire 里）才交接,
+        // 否则关掉 —— 与明文监听（TransferServer 首帧分发）同一套纪律。
+        // 起不来（平台不支持 / 端口被占）只是**没有跨网入口**,局域网原路径不受影响。
+        val screenPort = crossNetworkScreenPort(profile.tlsPort)
+        if (screenPort != null && crossNetworkScreenListener.canServe) {
+            runCatching {
+                crossNetworkScreenListener.start(screenPort) { conn ->
+                    val wire = ScreenWire(conn.read, conn.write) { runCatching { conn.close() } }
+                    val open = readFirstScreenOpen(conn.read)
+                    if (open == null || !onOpenScreenWire(open, wire)) {
+                        wire.close()
+                    }
+                }
+            }
+        }
+
         pump = runScope.launch {
             messenger.incoming.collect { envelope ->
                 // **不写 messageStore**：投屏信令（screen 的 request/accept/reject/end）、
@@ -833,6 +900,7 @@ class NodeRuntime(
         transferPump = null
         transfer?.stop()
         transfer = null
+        runCatching { crossNetworkScreenListener.stop() }
         tcpBound = false
         discovery.stop()
         messenger.stop()

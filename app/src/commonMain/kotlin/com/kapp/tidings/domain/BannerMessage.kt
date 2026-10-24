@@ -223,6 +223,9 @@ sealed interface BannerMessage {
     /** 共享文件柜下载任务已开始。 */
     data class CabinetDownloadStarted(val count: Int) : BannerMessage
 
+    /** 已开始向同事的文件柜上传文件（`cabinet_upload_started`，此前 0 消费）。 */
+    data object CabinetUploadStarted : BannerMessage
+
     /** 网段格式不正确或超出范围。 */
     data object ScanRangeInvalid : BannerMessage
 
@@ -253,4 +256,39 @@ sealed interface BannerMessage {
 
     /** 屏幕协助已结束。 */
     data class ScreenSessionEnded(val reason: String) : BannerMessage
+
+    /**
+     * 审批决定没能送出：要么本机节点没在跑（连离线队列都不存在），要么发送抛了错。
+     *
+     * 与「QUEUED」的区别必须说清：QUEUED 是帧进了离线补发队列、**终会送达**，本地
+     * 的「已批准」是合法的乐观记账；这一条是**连队列都没进**，本地状态已经回滚成
+     * 待审批 —— 界面上「已批准」若还挂着，就是对端永远不知道的假账。
+     */
+    data object AgentAckSendFailed : BannerMessage
+
+    /**
+     * 对端不声明审批回执（`agq1`）或当前不在线到无法判定：ack 无处可发。
+     *
+     * 本地的决定仍然记着（授权决定是本端产生的事实），但**必须**如实说明
+     * 「最终以对方 Agent 宿主实际执行为准」—— 界面上的「已批准」在这里不能暗示
+     * 对方已经知道。这条横幅就是本仓「静默丢失」清单第 7 条的守门员。
+     */
+    data object AgentAckUnconfirmed : BannerMessage
+
+    /**
+     * 已把一台节点从本机移除（含清理它的手动地址）。
+     *
+     * 为什么要有回执：移除是**不可撤销**的本地破坏性动作，且桌面上原本连入口都没有 ——
+     * 用户点完「移除」若界面只是少一行，很难分清「移除了」和「列表重绘了」。
+     * 名字放在文案里，是因为同一屏可能连着移两台，只说「已移除」会认不出是哪台。
+     */
+    data class PeerRemoved(val name: String) : BannerMessage
+
+    /**
+     * 对方拒绝了这个文件柜的下载请求。
+     *
+     * 与共用 [com.kapp.tidings.domain.RelayControllerCabinetComponent] 的 `errorMessage` 分开：
+     * 那个槽位属于**整张目录列表**（浏览失败），一次下载被拒不该把列表顶成错误态。
+     */
+    data object CabinetDownloadDenied : BannerMessage
 }

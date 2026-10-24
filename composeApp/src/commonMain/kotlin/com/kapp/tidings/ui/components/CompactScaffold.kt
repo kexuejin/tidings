@@ -3,6 +3,8 @@
 package com.kapp.tidings.ui.components
 
 import androidx.compose.foundation.background
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -16,6 +18,7 @@ import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.selection.selectableGroup
 import androidx.compose.material3.Badge
 import androidx.compose.material3.BadgedBox
 import androidx.compose.material3.Icon
@@ -28,6 +31,9 @@ import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.semantics.Role
+import androidx.compose.ui.semantics.selected
+import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import com.kapp.tidings.ui.theme.LocalAppSpacing
@@ -191,7 +197,12 @@ private fun CompactNavigationRail(
             modifier = Modifier
                 .width(COMPACT_RAIL_WIDTH_DP.dp)
                 .fillMaxHeight()
-                .background(MaterialTheme.colorScheme.surface),
+                .background(MaterialTheme.colorScheme.surface)
+                // 一组互斥页签：读屏靠它报「第 2 个，共 5 个」。
+                .selectableGroup()
+                // 横屏 + 系统大字号时 5 个页签会高过可用高度（单格 47 + 16×fontScale），
+                // 最底下的「设置」会被挤出屏幕且无处可滚。给它滚动，别让字号把入口吃掉。
+                .verticalScroll(rememberScrollState()),
             horizontalAlignment = Alignment.CenterHorizontally,
         ) {
             Spacer(Modifier.height(LocalAppSpacing.current.md10))
@@ -215,6 +226,17 @@ private fun CompactNavigationRail(
  * 标签不设 [TextOverflow.Ellipsis] 之外的宽度处理：64 dp 的栏宽放得下
  * 「会话 / 文件柜 / 发现 / 终端 / 设置」这几个两三个字的标签，超长语言
  * （德语等）会省略号截断，这是可接受的降级 —— 图标本身仍可辨认。
+ *
+ * **读屏语义**：这颗按钮与底导的 [NavigationBarItem] 是同一物种，语义必须对齐 ——
+ * 角色是 [Role.Tab]、选中态用 `semantics { selected }` 汇报，并且
+ * `mergeDescendants = true` 把图标与下方标签并进同一个可点节点（不合并的话 TalkBack
+ * 会先念「标签页/已选中」、再单独把标签念一遍）。缺了它们，读屏软件在横屏竖导上
+ * 只会念「按钮」、不念「哪个被选中」，竖屏底导却什么都告诉用户 ——
+ * 同一个导航件在两种朝向下讲两种话。图标的 `contentDescription` 是 null：
+ * 标签文字就在下面可见着，图标再描述一遍「会话」会让 TalkBack 把同一个词播两次。
+ *
+ * 桌面/平板那份竖导（`ui.desktop.DesktopNavigation` 的 `RailButton`）是同一套语义的
+ * 第二份实现，两份必须逐项一致 —— 由 `CompactScaffoldSemanticsGuardTest` 同时盯着。
  */
 @Composable
 private fun NavRailButton(
@@ -230,7 +252,8 @@ private fun NavRailButton(
     }
     Column(
         modifier = Modifier
-            .clickable(onClick = onClick)
+            .clickable(onClick = onClick, role = Role.Tab)
+            .semantics(mergeDescendants = true) { this.selected = selected }
             .padding(vertical = LocalAppSpacing.current.md10)
             .width(COMPACT_RAIL_WIDTH_DP.dp),
         horizontalAlignment = Alignment.CenterHorizontally,
@@ -248,7 +271,8 @@ private fun NavRailButton(
         ) {
             Icon(
                 painter = painterResource(item.icon),
-                contentDescription = stringResource(item.label),
+                // 标签文字可见（下方 Text），图标描述是重复播报 → null。
+                contentDescription = null,
                 tint = tint,
                 modifier = Modifier.size(24.dp),
             )
@@ -269,6 +293,10 @@ private fun NavRailButton(
  *
  * 徽标画在图标右上角而不是标签旁：窄屏上 5 个页签的标签宽度本来就只有几毫米，
  * 再挤一个数字进来必然触发 [TextOverflow.Ellipsis]，那正是这个应用最早暴露的缺陷。
+ *
+ * 图标的 `contentDescription` 是 null：[NavigationBarItem] 的标签文字（下方可见的
+ * 「会话」等）就是这颗页签的读屏名字，图标再描述一遍等于同一个词播报两次 ——
+ * 与横屏竖导的 [NavRailButton] 同一条纪律。
  */
 @Composable
 private fun NavIcon(item: AppNavItem, badgeCount: Int) {
@@ -284,7 +312,7 @@ private fun NavIcon(item: AppNavItem, badgeCount: Int) {
     ) {
         Icon(
             painter = painterResource(item.icon),
-            contentDescription = stringResource(item.label),
+            contentDescription = null,
             modifier = Modifier.size(24.dp),
         )
     }

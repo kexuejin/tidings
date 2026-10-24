@@ -11,17 +11,13 @@ import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
-import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
-import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.text.BasicTextField
-import androidx.compose.foundation.verticalScroll
-import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
@@ -40,9 +36,6 @@ import androidx.compose.ui.graphics.SolidColor
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
-import com.kapp.tidings.domain.GlobalSearchChatHit
-import com.kapp.tidings.domain.GlobalSearchContactHit
-import com.kapp.tidings.domain.GlobalSearchFileHit
 import com.kapp.tidings.domain.GlobalSearchResult
 import com.kapp.tidings.domain.GlobalSearchScope
 import com.kapp.tidings.core.nowMillis
@@ -50,33 +43,16 @@ import com.kapp.tidings.core.protocol.ConvId
 import com.kapp.tidings.generated.resources.Res
 import com.kapp.tidings.generated.resources.action_back
 import com.kapp.tidings.generated.resources.action_clear_search
-import com.kapp.tidings.generated.resources.common_offline
-import com.kapp.tidings.generated.resources.global_search_more_messages
-import com.kapp.tidings.generated.resources.global_search_section_messages
-import com.kapp.tidings.generated.resources.global_search_section_contacts
-import com.kapp.tidings.generated.resources.global_search_empty_hint
 import com.kapp.tidings.generated.resources.global_search_scope_all
 import com.kapp.tidings.generated.resources.global_search_scope_chats
 import com.kapp.tidings.generated.resources.global_search_scope_contacts
 import com.kapp.tidings.generated.resources.global_search_scope_files
-import com.kapp.tidings.generated.resources.global_search_empty
-import com.kapp.tidings.generated.resources.global_search_from_chat
-import com.kapp.tidings.generated.resources.global_search_section_files
-import com.kapp.tidings.generated.resources.global_search_contact_time
-import com.kapp.tidings.generated.resources.global_search_failed
-import com.kapp.tidings.generated.resources.global_search_loading
 import com.kapp.tidings.generated.resources.conv_search_hint_global
-import com.kapp.tidings.generated.resources.ic_chat_bubble
-import com.kapp.tidings.generated.resources.ic_file
-import com.kapp.tidings.generated.resources.ic_image
 import com.kapp.tidings.generated.resources.ic_arrow_back
 import com.kapp.tidings.generated.resources.ic_close
 import com.kapp.tidings.generated.resources.ic_search
 import com.kapp.tidings.ui.components.AppButtonTone
 import com.kapp.tidings.ui.components.AppIconButton
-import com.kapp.tidings.ui.components.AppTextButton
-import com.kapp.tidings.ui.components.PeerAvatar
-import com.kapp.tidings.ui.components.formatClock
 import com.kapp.tidings.ui.theme.IconSizes
 import com.kapp.tidings.ui.theme.LocalAppSpacing
 import com.kapp.tidings.ui.theme.accents
@@ -135,6 +111,9 @@ fun GlobalSearchScreen(
     // 只看哪一段。默认全部 —— 与原型「没有筛选器」的默认口径一致；
     // 这里多出来的是一层可选收窄，不改变默认行为。
     var scope by remember { mutableStateOf(GlobalSearchScope.All) }
+    // 「重试」的计数器：失败后重跑**同一个 query**（不清输入）。把计数加进
+    // LaunchedEffect 的 key，自增一次就重放一次检索 —— query 本身没变，靠它触发。
+    var retryTick by remember { mutableStateOf(0) }
 
     // 静态帧接缝：初值非空时当帧直接出结果（截图门禁要的第一帧就是最终画面）。
     // 生产路径的初值为空，走下面的 debounce。
@@ -150,14 +129,15 @@ fun GlobalSearchScreen(
 
     // 击键不再逐字打一次全库：静默 [SEARCH_DEBOUNCE_MILLIS] 之后才查一次。
     // `LaunchedEffect(query)` 在 query 变化时取消上一次协程，于是只有最后一次真的落地。
-    LaunchedEffect(query, scope) {
+    LaunchedEffect(query, scope, retryTick) {
         if (query.isBlank()) {
             outcome = GlobalSearchOutcome.Idle
             return@LaunchedEffect
         }
         // 初值那一帧已经算好，不要再走一遍 debounce 把画面翻成「正在搜索」。
         // 换筛选档时必须重查 —— 同一句话换「只看文件」结果不同。
-        if (query == initialQuery && scope == GlobalSearchScope.All) return@LaunchedEffect
+        // 「重试」(retryTick > 0) 必须绕过这条：哪怕 query 与初值相同也要真重跑。
+        if (retryTick == 0 && query == initialQuery && scope == GlobalSearchScope.All) return@LaunchedEffect
         outcome = GlobalSearchOutcome.Loading
         when (val next = debouncedGlobalSearch(query, SEARCH_DEBOUNCE_MILLIS, onSearch, scope)) {
             GlobalSearchOutcome.Idle -> outcome = GlobalSearchOutcome.Idle
@@ -189,67 +169,22 @@ fun GlobalSearchScreen(
                 )
             }
 
-            when (val current = outcome) {
-                // 初始态：还没输字，三段一块都不画（不是"没有结果"）。
-                GlobalSearchOutcome.Idle -> Unit
-
-                // 静默期与检索执行期间：给一个明确的「正在搜索」，而不是让界面像没反应。
-                GlobalSearchOutcome.Loading -> SearchLoading()
-
-                // 检索抛错：给一句失败说明与回到可搜状态的出口，不画一片空白。
-                GlobalSearchOutcome.Failed -> SearchFailed(onClear = { query = "" })
-
-                is GlobalSearchOutcome.Done -> {
-                    val result = current.result
-                    if (result.isEmpty) {
-                        EmptyHits(query)
-                    } else {
-                        Column(
-                            modifier = Modifier
-                                .fillMaxSize()
-                                .verticalScroll(rememberScrollState())
-                                .padding(bottom = sp.md),
-                        ) {
-                            if (result.contacts.isNotEmpty()) {
-                                SectionLabel(stringResource(Res.string.global_search_section_contacts))
-                                result.contacts.forEach { hit ->
-                                    ContactHitRow(
-                                        hit = hit,
-                                        // 联系人的命中键是 **nodeId**，而这里要的是**会话键** ——
-                                        // 两者在私聊上恰好相等，但那是 `ConvId.single` 的约定、
-                                        // 不是可以靠"它们一样"来省掉的一步（`ConvId` 的 KDoc
-                                        // 明写「存在的意义是让调用方不必记'私聊不加前缀'这条约定」）。
-                                        onClick = { onOpenChat(ConvId.single(hit.nodeId)) },
-                                    )
-                                }
-                            }
-                            if (result.chats.isNotEmpty()) {
-                                SectionLabel(stringResource(Res.string.global_search_section_messages))
-                                result.chats.forEach { hit ->
-                                    ChatHitRow(
-                                        hit = hit,
-                                        now = now,
-                                        onClick = { onOpenChat(hit.convId) },
-                                    )
-                                }
-                            }
-                            if (result.files.isNotEmpty()) {
-                                SectionLabel(stringResource(Res.string.global_search_section_files))
-                                result.files.forEach { hit ->
-                                    FileHitRow(
-                                        hit = hit,
-                                        now = now,
-                                        // 文件在协议里属文件柜那一套：点它该看到"这个文件在哪"，
-                                        // 不只是"谁发过"（`prototype/relay.html:4437-4438`）。
-                                        // 落点由调用方决定，这里只报会话键。
-                                        onClick = { onOpenFile(hit.convId) },
-                                    )
-                                }
-                            }
-                        }
-                    }
-                }
-            }
+            // **结果区与桌面共用同一份实现**（loading / failed / 空结果 / 三段命中）。
+            //
+            // 这一屏只保留外壳：顶部输入框、筛选条、宽度、以及"空关键词时画不画筛选条"。
+            // 过去这里自己写了一套，与桌面各走各的，于是同一个状态两端给出不同答案
+            // （桌面失败态没有「重试」、空态字号字重不同、结果行信息更少）。
+            GlobalSearchResults(
+                outcome = outcome,
+                query = query,
+                // 联系人的命中键是 nodeId，而这一屏要的是**会话键** —— 两者的映射是壳的事。
+                onOpenContact = { nodeId -> onOpenChat(ConvId.single(nodeId)) },
+                onOpenConversation = onOpenChat,
+                onOpenFile = onOpenFile,
+                onRetry = { retryTick++ },
+                onClear = { query = "" },
+                modifier = Modifier.weight(1f),
+            )
         }
     }
 }
@@ -314,6 +249,8 @@ private fun SearchScopeRow(
                             MaterialTheme.colorScheme.onSurfaceVariant
                         },
                         maxLines = 1,
+                        // 筛选档名超出等分宽度时收尾省略，而不是互相顶挤（硬截断）
+                        overflow = TextOverflow.Ellipsis,
                     )
                 }
             }
@@ -385,234 +322,41 @@ private fun SearchTopBar(
                 },
             )
             if (query.isNotEmpty()) {
+                // 命中区是**外层 48dp 触控目标**（无障碍下限，与 `AppIconButton` /
+                // `TopBars` 的 IbtnBox 同一个两层结构：外层吃命中区，视觉砖居中在内）。
+                // 过去是一颗 18dp 的裸图标块，既没有 contentDescription（读屏用户
+                // 听到的是一个无名可点块），真机上拇指也点不中。
                 Box(
-                    // 原型 `.search .clr{width:18px;height:18px;border-radius:50%;
-                    // background:var(--surface-3)}` + `.clr svg{width:11px;height:11px}`
-                    // （relay.html:632-635）。代码原来是一颗没有底色、也没有圆形的裸图标，
-                    // 在浅色输入框里看不出"这是一颗可以点的清除钮"。
-                    // `--surface-3` 是**填充** token（`MaterialTheme.accents.surface3`）；
-                    // 别退回 `outlineVariant` —— 那个现在专做描边用的 `--hair`。
                     modifier = Modifier
-                        .size(18.dp)
+                        .size(48.dp)
                         .clip(CircleShape)
-                        .background(MaterialTheme.accents.surface3)
-                        .clickable { onQueryChange("") },
+                        .clickable(onClick = { onQueryChange("") }),
                     contentAlignment = Alignment.Center,
                 ) {
-                    Icon(
-                        painter = painterResource(Res.drawable.ic_close),
-                        contentDescription = null,
-                        modifier = Modifier.size(11.dp),
-                        tint = MaterialTheme.colorScheme.onSurfaceVariant,
-                    )
+                    Box(
+                        // 原型 `.search .clr{width:18px;height:18px;border-radius:50%;
+                        // background:var(--surface-3)}` + `.clr svg{width:11px;height:11px}`
+                        // （relay.html:632-635）。代码原来是一颗没有底色、也没有圆形的裸图标，
+                        // 在浅色输入框里看不出"这是一颗可以点的清除钮"。
+                        // `--surface-3` 是**填充** token（`MaterialTheme.accents.surface3`）；
+                        // 别退回 `outlineVariant` —— 那个现在专做描边用的 `--hair`。
+                        modifier = Modifier
+                            .size(18.dp)
+                            .clip(CircleShape)
+                            .background(MaterialTheme.accents.surface3),
+                        contentAlignment = Alignment.Center,
+                    ) {
+                        Icon(
+                            painter = painterResource(Res.drawable.ic_close),
+                            contentDescription = stringResource(Res.string.action_clear_search),
+                            modifier = Modifier.size(11.dp),
+                            tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                        )
+                    }
                 }
             }
         }
     }
-}
-
-/** 分组标题。原型 `.spsec{font-size:11px;color:var(--on-2);font-weight:600;letter-spacing:.06em;padding:9px 12px 5px}`。 */
-@Composable
-private fun SectionLabel(text: String) {
-    // 原型 `.spsec{padding:9px 12px 5px}` 里的 9 与 5 不在 AppSpacing 档上，保持字面量；
-    // 12 是档上的 `md`，按本轮纪律必须消费 token（值不变 ⇒ 渲染逐字节不变）。
-    val sp = LocalAppSpacing.current
-    Text(
-        text = text,
-        style = MaterialTheme.typography.labelSmall,
-        fontWeight = FontWeight.SemiBold,
-        color = MaterialTheme.colorScheme.onSurfaceVariant,
-        modifier = Modifier.padding(start = sp.md, top = 9.dp, end = sp.md, bottom = 5.dp),
-    )
-}
-
-/** 空态：两行字，标题加粗。原型 `.spph{font-size:12px;color:var(--on-2);text-align:center;margin-top:24px}`。 */
-@Composable
-private fun EmptyHits(query: String) {
-    val sp = LocalAppSpacing.current
-    Column(
-        modifier = Modifier
-            .fillMaxWidth()
-            .padding(top = sp.xl, start = sp.lg, end = sp.lg),
-        horizontalAlignment = Alignment.CenterHorizontally,
-        verticalArrangement = Arrangement.spacedBy(sp.xs),
-    ) {
-        Text(
-            text = stringResource(Res.string.global_search_empty, query),
-            style = MaterialTheme.typography.bodySmall,
-            fontWeight = FontWeight.Bold,
-            color = MaterialTheme.colorScheme.onSurface,
-        )
-        Text(
-            text = stringResource(Res.string.global_search_empty_hint),
-            style = MaterialTheme.typography.bodySmall,
-            color = MaterialTheme.colorScheme.onSurfaceVariant,
-        )
-    }
-}
-
-/**
- * 命中行的公共外壳。原型 `.spitem{display:flex;gap:10px;align-items:center;padding:8px 12px}`
- * + `.sptime{font-size:11px;color:var(--on-2);flex:none}`。
- *
- * 抽出来是因为三段的行**只有左侧那一块不同**（联系人放头像、聊天放会话图标、
- * 文件放文件/图片图标），右侧的时间与整体的骨架三行完全一样 —— 三份拷贝迟早会漂。
- */
-@Composable
-private fun HitRow(
-    leading: @Composable () -> Unit,
-    title: @Composable () -> Unit,
-    subtitle: String,
-    time: String,
-    onClick: () -> Unit,
-) {
-    val sp = LocalAppSpacing.current
-    Row(
-        modifier = Modifier
-            .fillMaxWidth()
-            .clickable(onClick = onClick)
-            .padding(horizontal = sp.md, vertical = sp.sm),
-        verticalAlignment = Alignment.CenterVertically,
-        horizontalArrangement = Arrangement.spacedBy(sp.md10),
-    ) {
-        leading()
-        Column(Modifier.weight(1f)) {
-            title()
-            Text(
-                text = subtitle,
-                style = MaterialTheme.typography.labelSmall,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-                maxLines = 1,
-                overflow = TextOverflow.Ellipsis,
-                modifier = Modifier.padding(top = sp.xxs),
-            )
-        }
-        Text(
-            text = time,
-            style = MaterialTheme.typography.labelSmall,
-            color = MaterialTheme.colorScheme.onSurfaceVariant,
-        )
-    }
-}
-
-/** 「联系人」段一行：34dp 圆角方头像（radius 12）+ 昵称 +「研发 · §后端」+ 右侧时间。 */
-@Composable
-private fun ContactHitRow(hit: GlobalSearchContactHit, onClick: () -> Unit) {
-    HitRow(
-        leading = {
-            // 原型 `.spitem .spav{width:34px;height:34px;border-radius:12px}`，名字取首字。
-            PeerAvatar(
-                name = hit.title,
-                isAgent = hit.isAgent,
-                size = 34.dp,
-                shape = MaterialTheme.shapes.medium,
-            )
-        },
-        title = {
-            Row(
-                verticalAlignment = Alignment.CenterVertically,
-                horizontalArrangement = Arrangement.spacedBy(5.dp),
-            ) {
-                Text(
-                    text = hit.title,
-                    style = MaterialTheme.typography.bodyMedium,
-                    fontWeight = FontWeight.SemiBold,
-                    color = MaterialTheme.colorScheme.onSurface,
-                    maxLines = 1,
-                    overflow = TextOverflow.Ellipsis,
-                )
-                // 原型 `searchHit` 只在离线时挂这半句（`.t1 .off`），在线不写 —— 在线是常态。
-                if (!hit.online) {
-                    Text(
-                        text = "· " + stringResource(Res.string.common_offline),
-                        style = MaterialTheme.typography.labelSmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    )
-                }
-            }
-        },
-        subtitle = hit.subtitle,
-        // 原型把联系人那行的时间**写死**成「今天 11:20」（`searchHit` 里是字面量，
-        // 没有取真实时刻）—— 联系人没有"最近一条消息"可算。这里照原型写成同一句，
-        // 不编一个假时间戳。**但它是用户可见文案** ⇒ 走资源（`:cjkLiteralGate` 判红的就是
-        // 这里；写死在代码里还会让英文界面印中文）。
-        time = stringResource(Res.string.global_search_contact_time),
-        onClick = onClick,
-    )
-}
-
-/** 「聊天记录」段一行：**一个会话**，标题「与 X 的聊天 · N 条相关」，副行是最新那条命中的摘要。 */
-@Composable
-private fun ChatHitRow(hit: GlobalSearchChatHit, now: Long, onClick: () -> Unit) {
-    HitRow(
-        leading = {
-            Box(
-                modifier = Modifier
-                    .size(34.dp)
-                    .clip(MaterialTheme.shapes.medium)
-                    .background(MaterialTheme.colorScheme.primary),
-                contentAlignment = Alignment.Center,
-            ) {
-                Icon(
-                    painter = painterResource(Res.drawable.ic_chat_bubble),
-                    contentDescription = null,
-                    modifier = Modifier.size(IconSizes.Label),
-                    tint = MaterialTheme.colorScheme.onPrimary,
-                )
-            }
-        },
-        title = {
-            Text(
-                text = stringResource(Res.string.global_search_more_messages, hit.title, hit.matchCount),
-                style = MaterialTheme.typography.bodyMedium,
-                fontWeight = FontWeight.SemiBold,
-                color = MaterialTheme.colorScheme.onSurface,
-                maxLines = 1,
-                overflow = TextOverflow.Ellipsis,
-            )
-        },
-        subtitle = hit.snippet,
-        time = formatClock(hit.latestAt),
-        onClick = onClick,
-    )
-}
-
-/** 「文件」段一行：副行写「来自与 X 的聊天」—— 文件本身没有标题可写，出处才是它的身份。 */
-@Composable
-private fun FileHitRow(hit: GlobalSearchFileHit, now: Long, onClick: () -> Unit) {
-    HitRow(
-        leading = {
-            Box(
-                modifier = Modifier
-                    .size(34.dp)
-                    .clip(MaterialTheme.shapes.medium)
-                    .background(MaterialTheme.colorScheme.surfaceVariant),
-                contentAlignment = Alignment.Center,
-            ) {
-                Icon(
-                    painter = painterResource(
-                        if (hit.isImage) Res.drawable.ic_image else Res.drawable.ic_file,
-                    ),
-                    contentDescription = null,
-                    modifier = Modifier.size(IconSizes.Label),
-                    tint = MaterialTheme.colorScheme.onSurfaceVariant,
-                )
-            }
-        },
-        title = {
-            Text(
-                text = hit.name,
-                style = MaterialTheme.typography.bodyMedium,
-                fontWeight = FontWeight.SemiBold,
-                color = MaterialTheme.colorScheme.onSurface,
-                maxLines = 1,
-                overflow = TextOverflow.Ellipsis,
-            )
-        },
-        subtitle = stringResource(Res.string.global_search_from_chat, hit.convTitle),
-        time = formatClock(hit.at),
-        onClick = onClick,
-    )
 }
 
 /** 全局搜索的输入静默期：击键停下来这么久才真的查一次全库。 */
@@ -672,48 +416,3 @@ internal suspend fun debouncedGlobalSearch(
     debounceMillis: Long = SEARCH_DEBOUNCE_MILLIS,
     search: (String) -> GlobalSearchResult,
 ): GlobalSearchOutcome = debouncedGlobalSearch(rawQuery, debounceMillis, { q, _ -> search(q) })
-
-/** 搜索中：静默期与检索执行期间画它，替掉「敲了字却像没反应」。 */
-@Composable
-private fun SearchLoading() {
-    val sp = LocalAppSpacing.current
-    Box(
-        modifier = Modifier.fillMaxSize().padding(top = sp.xl),
-        contentAlignment = Alignment.TopCenter,
-    ) {
-        Column(horizontalAlignment = Alignment.CenterHorizontally) {
-            CircularProgressIndicator(modifier = Modifier.size(sp.xl))
-            Spacer(Modifier.height(sp.md))
-            Text(
-                text = stringResource(Res.string.global_search_loading),
-                style = MaterialTheme.typography.bodySmall,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-            )
-        }
-    }
-}
-
-/** 搜索失败：给一句失败说明与回到可搜状态的出口，不画一片空白。 */
-@Composable
-private fun SearchFailed(onClear: () -> Unit) {
-    val sp = LocalAppSpacing.current
-    Box(
-        modifier = Modifier.fillMaxSize().padding(top = sp.xl),
-        contentAlignment = Alignment.TopCenter,
-    ) {
-        Column(
-            horizontalAlignment = Alignment.CenterHorizontally,
-            verticalArrangement = Arrangement.spacedBy(sp.sm),
-        ) {
-            Text(
-                text = stringResource(Res.string.global_search_failed),
-                style = MaterialTheme.typography.bodyMedium,
-                color = MaterialTheme.colorScheme.error,
-            )
-            AppTextButton(
-                text = stringResource(Res.string.action_clear_search),
-                onClick = onClear,
-            )
-        }
-    }
-}

@@ -157,7 +157,7 @@ VIEW_CALL = re.compile(r"\b([A-Z]\w*(?:View|Pane|Screen|Dialog|Shell|Overlay|Win
 SCREEN_LEVEL_SUFFIX = ("Screen", "Pane", "View", "Shell", "Host", "Window", "Overlay")
 # 第四十四个洞的判据：`feature/<x>/` 是"一屏一个目录"，`ui/` 是"一个目录装一堆屏"。
 # 第 2 跳只允许从前者出发（见 `landing_slices` 里 `_hop` 的注释）。
-_FEATURE_MARK = os.path.join("commonMain", "kotlin", "app", "relay", "feature") + os.sep
+_FEATURE_MARK = os.path.join("commonMain", "kotlin", "com", "kapp", "relay", "feature") + os.sep
 # **不能加行首锚定**（`^\s*` + re.M）：原型把多条声明压在一行
 # （`:root` 里 `--fs-body:14px; --fs-bub:14px; --r-card:16px; --r-bubble:12px; --r-ctl:12px;`），
 # 锚定后**只有每行第一条**被抓到，`--r-card`/`--r-ctl`/`--padc`/`--fs-ctitle`/`--fs-btn`/

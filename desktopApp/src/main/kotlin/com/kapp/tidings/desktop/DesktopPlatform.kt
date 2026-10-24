@@ -309,21 +309,36 @@ internal fun advertisedAddresses(): List<String> = runCatching {
     NetworkInterface.getNetworkInterfaces().toList()
         .filter { it.isUp && !it.isLoopback }
         .flatMap { nic -> nic.inetAddresses.toList() }
-        .mapNotNull { addr ->
-            // macOS 的 JDK 给每个 IPv6 都带 `%en1` 这类 scope 后缀，先剥掉再判。
-            val host = addr.hostAddress.orEmpty().substringBefore('%').trim()
-            if (host.isBlank()) return@mapNotNull null
-            if (addr.isLoopbackAddress || addr.isAnyLocalAddress || addr.isLinkLocalAddress) return@mapNotNull null
-            // **代理 TUN 的虚拟地址不能宣告**：它不对应任何可达网络，对端拨它永远失败。
-            //
-            // 真机现场：`198.18.0.1`（代理开 TUN 增强模式时的虚拟口，路由接管全部 IPv4）
-            // 进了宣告列表之后，对端拿它当候选、白白重试；而它本身还把 Tailscale /
-            // ZeroTier 的包截走 —— 双方都拿到对方的地址、都拨不通。
-            if (com.kapp.tidings.core.protocol.IpAddressUtils.isProxyTunAddress(host)) return@mapNotNull null
-            host
-        }
+        .filter { shouldAdvertiseAddress(it) }
+        // macOS 的 JDK 给每个 IPv6 都带 `%en1` 这类 scope 后缀，先剥掉再判。
+        .map { it.hostAddress.orEmpty().substringBefore('%').trim() }
+        .filter { it.isNotBlank() }
         .distinct()
 }.getOrElse { emptyList() }
+
+/**
+ * 一条网卡地址该不该进「宣告列表」。
+ *
+ * 抽成纯判据的理由是**可验证**：用户开不开代理 TUN 是环境变量，测试无从得知 ——
+ * 依赖真实网卡的断言在没有 TUN 的机器上会退化成空断言（假绿），在有 TUN 的机器上
+ * 又会因为把 fake-IP 当成"该宣告的地址"而报假红。抽出这一层之后，两种情况都用
+ * **合成地址**钉住（见 `AdvertisedAddressFilterTest`），与网卡枚举彻底解耦。
+ *
+ * 排除三类：
+ *  - 回环 / 未指定 / 链路本地：拨了也不可能通；
+ *  - 空地址；
+ *  - **代理 TUN 的虚拟地址**（`198.18.0.0/15`）：Clash/mihomo 之类开 TUN 增强模式时
+ *    挂在 utun 上当 fake-IP 网关、接管全部 IPv4 路由。它不对应任何可达网络。
+ *    真机现场：`198.18.0.1` 进了宣告列表后，对端拿它当候选、白白重试；而它本身还把
+ *    Tailscale / ZeroTier 的包截走 —— 双方都拿到对方地址、都拨不通。
+ */
+internal fun shouldAdvertiseAddress(addr: java.net.InetAddress): Boolean {
+    if (addr.isLoopbackAddress || addr.isAnyLocalAddress || addr.isLinkLocalAddress) return false
+    val host = addr.hostAddress.orEmpty().substringBefore('%').trim()
+    if (host.isBlank()) return false
+    if (com.kapp.tidings.core.protocol.IpAddressUtils.isProxyTunAddress(host)) return false
+    return true
+}
 
 
 /** utun / tun-tap / ppp 这类隧道地址不能用来算「局域网可达」，否则会误报在线。 */

@@ -3,16 +3,9 @@
 package com.kapp.tidings.feature.conversations
 
 import androidx.compose.foundation.background
-import androidx.compose.foundation.clickable
-import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
-import androidx.compose.foundation.layout.Column
-import androidx.compose.foundation.layout.Row
-import androidx.compose.foundation.layout.Spacer
-import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
-import androidx.compose.foundation.lazy.LazyListScope
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
@@ -23,260 +16,55 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.text.font.FontWeight
-import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import com.kapp.tidings.feature.nodes.AddNodeEntryRow
-import com.kapp.tidings.domain.InboxWorkspaceUnitsUi
-import com.kapp.tidings.domain.WorkspaceUnitGroupUi
 import com.kapp.tidings.domain.WorkspaceUnitUi
 import com.kapp.tidings.generated.resources.agent_session_untitled
 import com.kapp.tidings.generated.resources.conv_inbox_ws_row_unassigned
 import com.kapp.tidings.generated.resources.conv_inbox_ws_row_unassigned_body
 import com.kapp.tidings.generated.resources.ic_list
-import com.kapp.tidings.ui.theme.LocalCardShape
 import com.kapp.tidings.generated.resources.Res
 import com.kapp.tidings.generated.resources.conv_inbox_ws_badge_no_workspace
 import com.kapp.tidings.generated.resources.conv_inbox_ws_badge_unknown_kind
-import com.kapp.tidings.generated.resources.conv_inbox_ws_count_short
-import com.kapp.tidings.generated.resources.conv_inbox_ws_count_short_agents
-import com.kapp.tidings.generated.resources.conv_inbox_ws_group_offline
 import com.kapp.tidings.generated.resources.conv_inbox_ws_open_chat
-import com.kapp.tidings.generated.resources.conv_inbox_ws_pending
 import com.kapp.tidings.generated.resources.conv_inbox_ws_pending_pill
 import com.kapp.tidings.generated.resources.conv_inbox_ws_row_agent_none
 import com.kapp.tidings.generated.resources.conv_inbox_ws_row_unnamed
 import com.kapp.tidings.generated.resources.conv_inbox_ws_row_unnamed_hint
-import com.kapp.tidings.generated.resources.conv_inbox_ws_tail_body
-import com.kapp.tidings.generated.resources.conv_inbox_ws_tail_body_pending
-import com.kapp.tidings.generated.resources.conv_inbox_ws_tail_title
-import com.kapp.tidings.generated.resources.conv_inbox_ws_title
 import com.kapp.tidings.generated.resources.ic_bot
-import com.kapp.tidings.generated.resources.ic_chev
-import com.kapp.tidings.generated.resources.ic_grid
 import com.kapp.tidings.generated.resources.ic_terminal
-import com.kapp.tidings.ui.components.StatusDot
 import com.kapp.tidings.ui.components.WorkspaceUnitCard
 import com.kapp.tidings.ui.components.WorkspaceUnitCardUi
 import com.kapp.tidings.ui.components.WorkspaceUnitSessionUi
-import com.kapp.tidings.ui.components.relativeTime
 import com.kapp.tidings.ui.theme.IconSizes
 import com.kapp.tidings.ui.theme.LocalAppSpacing
-import com.kapp.tidings.ui.theme.RelayElevations
-import com.kapp.tidings.ui.theme.accents
 import org.jetbrains.compose.resources.DrawableResource
 import org.jetbrains.compose.resources.painterResource
 import org.jetbrains.compose.resources.stringResource
 
-/**
- * 消息页签的「工作区」段（原型 `m01-home-recent` 下半屏）。
+/*
+ * 消息页签里「工作区」行与「未归属会话」行的家 —— 只剩**被引用**的两件：
+ * [InboxUnitRow]（工作区看板 `AgentWorkspaceBoard` 复用）与 [UnassignedSessionsRow]（同）。
  *
- * ## 为什么是列表里的**一个** item
+ * ## 为什么这个文件瘦了一大圈
  *
- * 段头 + 若干组头 + 若干张卡在原型里是一整块：它们之间的间距全是 0（只有圆角与阴影分隔），
- * 而外层 `LazyColumn` 的 `spacedBy(sp.sm)` 会插在**每个** item 之间。要保住"段内不散开、
- * 段与会话区之间有 8px"这个形状，最省事也最不容易漂的就写法是把整段提交成一颗 item ——
- * 拆成多颗就再也管不住它们之间的间距了。
+ * 这里曾经住着整段「工作区」节的渲染（`LazyListScope.inboxWorkspaceSection` 扩展 +
+ * 私有 `InboxWorkspaceSection` + 段头/组头/组卡/尾巴行）。会话列表改为混排 feed 后
+ * （`InboxFeedItem` / `WorkspaceFeedRow`，见 `ConversationRow.kt` 与
+ * `ConversationListPanel.kt`），那条扩展**一个调用点都不剩**（逐符号 grep 证实：
+ * `inboxWorkspaceSection` 全仓 0 引用，段头/组头/组卡/尾巴只被那条死链自己引用），
+ * 于是整条死链被删除 —— 唯一没有写代码的代码，是永远不需要改的代码。
  *
- * ## 取数全在 [com.kapp.tidings.domain.inboxWorkspaceUnits] 里
+ * ## 取数仍在 `com.kapp.tidings.domain.inboxWorkspaceUnits` 里
  *
- * 这个文件只负责画：排序、上限、待审批的二次 join、`未上报` 的降级都在派生里做完
- * （那里有逐条注释）。界面哪怕想改顺序也改不动，这是故意的 —— 一屏的规则只留一处。
+ * 排序、上限、待审批的二次 join、`未上报` 的降级都在派生里做完（那里有逐条注释）。
+ * 界面哪怕想改顺序也改不动，这是故意的 —— 一屏的规则只留一处。
  *
  * ## 两个红点是两种红
  *
- * 会话区的红点是**未读条数**，这一段的红点是**待审批条数**（`pending`）。它们不共用一个
- * 数字也不混排：一段只有一把尺子（段内按"待审批降序 → 最近活动降序"），跨段不 join。
- *
- * ## 阶段一画出来的是什么
- *
- * 协议还没有 `wsId`（父稿 D1/D2），所以今天每一行都是 **Agent 行**：标题是 Agent 身份键
- * （`agentId ?? agentKind`，都没有时写「未上报类型」），副行如实写"对端还没宣告过工作区"。
- * 工作区行、未命名工作区、未归属会话那几支代码已经写好，数据一到就自己亮。
+ * 会话区的红点是**未读条数**，工作区段的红点是**待审批条数**（`pending`）。它们不共用
+ * 一个数字也不混排：一段只有一把尺子，跨段不 join。
  */
-public fun LazyListScope.inboxWorkspaceSection(
-    units: InboxWorkspaceUnitsUi,
-    now: Long,
-    onOpenUnit: (WorkspaceUnitUi) -> Unit,
-    onOpenBoard: () -> Unit,
-    onOpenChat: (String) -> Unit,
-) {
-    if (units.isEmpty) return
-    item(key = "inbox-workspace-section") {
-        InboxWorkspaceSection(units, now, onOpenUnit, onOpenBoard, onOpenChat)
-    }
-}
-
-@Composable
-private fun InboxWorkspaceSection(
-    units: InboxWorkspaceUnitsUi,
-    now: Long,
-    onOpenUnit: (WorkspaceUnitUi) -> Unit,
-    onOpenBoard: () -> Unit,
-    onOpenChat: (String) -> Unit,
-) {
-    val sp = LocalAppSpacing.current
-    Column(modifier = Modifier.fillMaxWidth()) {
-        InboxSectionHead(units)
-        units.groups.forEach { group ->
-            InboxGroupHead(group, now)
-            // 一行 = 一张卡（看板同款）。卡间留 `sp.md` —— 与看板列表的
-            // `verticalArrangement = Arrangement.spacedBy(sp.md)` 同一个间距；
-            // 这一整段在消息页里是一颗 lazy item，间距必须自己给，外层管不着。
-            Column(verticalArrangement = Arrangement.spacedBy(sp.md)) {
-                group.units.forEach { unit ->
-                    InboxUnitRow(
-                        unit = unit,
-                        online = group.online,
-                        now = now,
-                        onOpenUnit = onOpenUnit,
-                        onOpenChat = onOpenChat,
-                    )
-                }
-            }
-        }
-        if (units.hiddenUnits > 0) {
-            Spacer(Modifier.size(sp.md))
-            InboxUnitCard { InboxTailRow(units, onOpenBoard) }
-        }
-    }
-}
-
-/**
- * 段头：左边「工作区」、右边「N 个 · 待审批 M」。
- *
- * 上边距为什么是 `sp.md10` 而不是原型的 18px：外层列表有 `spacedBy(sp.sm = 8)`，8 + 10 = 18。
- * 写成 18 会变成 26 —— 这不是随手取的数，是两处相加才对得上。
- *
- * 右边那半句只在 `M > 0` 时画（原型是无条件画的，但它的夹具里 M 恒为 3，那一档从没被渲染过；
- * 而同一段里"行内药丸 pending = 0 就不画"本来就是原型自己的规矩）。这一处偏离已登记。
- */
-@Composable
-internal fun InboxSectionHead(units: InboxWorkspaceUnitsUi) {
-    val sp = LocalAppSpacing.current
-    val count = if (units.countsWorkspaces) {
-        stringResource(Res.string.conv_inbox_ws_count_short, units.totalUnits)
-    } else {
-        // 只有 Agent 行时单位词换成「N 个 Agent」：照原样写「N 个」会让人以为在数工作区，
-        // 而下面明明一条工作区行都没有。
-        stringResource(Res.string.conv_inbox_ws_count_short_agents, units.totalUnits)
-    }
-    val headCount = if (units.pendingTotal > 0) {
-        count + " · " + stringResource(Res.string.conv_inbox_ws_pending, units.pendingTotal)
-    } else {
-        count
-    }
-    Row(
-        modifier = Modifier
-            .fillMaxWidth()
-            .padding(top = sp.md10),
-        verticalAlignment = Alignment.CenterVertically,
-        horizontalArrangement = Arrangement.spacedBy(sp.sm6),
-    ) {
-        Text(
-            text = stringResource(Res.string.conv_inbox_ws_title),
-            style = MaterialTheme.typography.labelSmall,
-            fontWeight = FontWeight.SemiBold,
-            color = MaterialTheme.colorScheme.onSurfaceVariant,
-        )
-        Spacer(Modifier.weight(1f))
-        Text(
-            text = headCount,
-            style = MaterialTheme.typography.labelSmall,
-            fontWeight = FontWeight.Medium,
-            color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.85f),
-            maxLines = 1,
-        )
-    }
-}
-
-/**
- * 组头 = 一台设备：圆点 + 「节点名 · 平台」 + 「N 个 Agent · M 个工作区」。
- *
- * 组头**不挂点击**：它不是一个对象，只是这些行的归属说明。原型的看板里那个组头可以点
- * （点了收窄到该节点），消息页签这段没有这个动作 —— 收窄是看板的活儿。
- *
- * 离线才在末尾补「 · N 分钟前在线」；**从来没有回应过的设备不补**（`lastSeenAt == 0`），
- * 它的圆点已经是 `error` 色了，再写一句"很久以前在线"是编的。
- */
-@Composable
-internal fun InboxGroupHead(group: WorkspaceUnitGroupUi, now: Long) {
-    val sp = LocalAppSpacing.current
-    val onSurfaceVariant = MaterialTheme.colorScheme.onSurfaceVariant
-    // 与节点页同一条规矩：在线绿、从没回应过红、离线走中性灰。
-    val dot = when {
-        group.online -> MaterialTheme.accents.online
-        group.lastSeenAt == 0L -> MaterialTheme.colorScheme.error
-        else -> onSurfaceVariant
-    }
-    // 计数已按 issue 6 的裁决整体移除（组头不再印「N 个 Agent · M 个工作区」）：
-    // 组头要回答的是"这些是谁的"，数量是段/页层面的事，不该在每一台设备的抬头再数一遍。
-    // 离线时间与"归不到 Agent 的待审批"保留 —— 它们不是数量噪音，而是组头必须替
-    // 那些行说出来的状态（join 不到 Agent 的审批只能写在节点级，父稿 §4.2）。
-    val counts = buildString {
-        if (!group.online && group.lastSeenAt > 0L) {
-            append(stringResource(Res.string.conv_inbox_ws_group_offline, relativeTime(group.lastSeenAt, now)))
-        }
-        if (group.unattributedApprovals > 0) {
-            if (isNotEmpty()) append(" · ")
-            append(stringResource(Res.string.conv_inbox_ws_pending, group.unattributedApprovals))
-        }
-    }
-    Row(
-        modifier = Modifier
-            .fillMaxWidth()
-            .padding(start = sp.xs, end = sp.xs, top = sp.lg14, bottom = sp.sm6),
-        verticalAlignment = Alignment.CenterVertically,
-        horizontalArrangement = Arrangement.spacedBy(sp.sm),
-    ) {
-        StatusDot(online = group.online, size = sp.lg14, color = dot)
-        Text(
-            text = "${group.nodeName} · ${group.platform}",
-            style = MaterialTheme.typography.labelSmall,
-            fontWeight = FontWeight.SemiBold,
-            color = onSurfaceVariant,
-            maxLines = 1,
-            overflow = TextOverflow.Ellipsis,
-        )
-        Spacer(Modifier.weight(1f))
-        Text(
-            text = counts,
-            style = MaterialTheme.typography.labelSmall,
-            fontWeight = FontWeight.Medium,
-            color = onSurfaceVariant,
-            maxLines = 1,
-            overflow = TextOverflow.Ellipsis,
-        )
-    }
-}
-
-/**
- * 一组行外面那张卡。
- *
- * 圆角用 `MaterialTheme.shapes.medium`(12) 而不是 `LocalCardShape`(16)：与会话行同一张卡、
- * 同一条已登记的跨模块偏差（`design/fidelity-deviations.yaml`）。
- */
-@Composable
-private fun InboxUnitCard(content: @Composable () -> Unit) {
-    val sp = LocalAppSpacing.current
-    Surface(
-        modifier = Modifier.fillMaxWidth(),
-        color = MaterialTheme.colorScheme.surface,
-        shape = MaterialTheme.shapes.medium,
-        shadowElevation = RelayElevations.Card,
-    ) {
-        Column(
-            modifier = Modifier.padding(
-                start = sp.lg14,
-                end = sp.lg14,
-                top = sp.md10,
-                bottom = sp.lg14,
-            ),
-        ) {
-            content()
-        }
-    }
-}
-
 /**
  * 一行 = 看板同款的**一张卡**。
  *
@@ -291,12 +79,12 @@ private fun InboxUnitCard(content: @Composable () -> Unit) {
  *
  * 1. **标题阶梯**：本段是 `wsTitle → Agent 身份键 → 「未上报类型」`。阶梯里**没有**
  *    路径末段 / host / 端口 —— 拿它们冒充工作区名是明令禁止的（看板直接用节点名）。
- * 2. **副行**：本段如实写"这台 Agent 有几个会话"，看板写"在线 · TCP 11800"。
+ * 2. **副行**：本段如实写"这一行是谁的"，看板写"在线 · TCP 11800"。
  * 3. **头像**：本段按行分 Agent（机器人）与工作区（终端），看板用节点头像。
  *
  * 行尾那颗聊天按钮才是"打开聊天"，整卡点击是**下钻**（Agent 行 → 该 Agent 的会话详情、
- * 工作区行 → 工作区详情）—— 这正是本轮要修的那个缺口：换之前整卡点击与"去会话"都落在
- * 打开聊天上，于是看板上根本下钻不去（父稿 §5）。
+ * 工作区行 → 工作区详情）—— 换之前整卡点击与"去会话"都落在打开聊天上，看板上根本
+ * 下钻不去（父稿 §5）。
  */
 @Composable
 internal fun InboxUnitRow(
@@ -394,53 +182,6 @@ private fun UnitAvatar(icon: DrawableResource, tint: androidx.compose.ui.graphic
             contentDescription = null,
             modifier = Modifier.size(IconSizes.Label),
             tint = tint,
-        )
-    }
-}
-
-/**
- * 上限挡住的行收成一行尾巴：「还有 N 行」→ 点进工作区看板（`m-agents`）。
- *
- * 尾巴必须把被挡住的待审批数报出来：只写"还有 4 行"会把最要紧的那条藏在后面。
- */
-@Composable
-private fun InboxTailRow(units: InboxWorkspaceUnitsUi, onOpenBoard: () -> Unit) {
-    val sp = LocalAppSpacing.current
-    Row(
-        modifier = Modifier
-            .fillMaxWidth()
-            .clickable { onOpenBoard() }
-            .padding(horizontal = sp.lg14, vertical = sp.md),
-        verticalAlignment = Alignment.CenterVertically,
-        horizontalArrangement = Arrangement.spacedBy(sp.md),
-    ) {
-        UnitAvatar(icon = Res.drawable.ic_grid, tint = MaterialTheme.colorScheme.onSurfaceVariant)
-        Column(modifier = Modifier.weight(1f)) {
-            Text(
-                text = stringResource(Res.string.conv_inbox_ws_tail_title, units.hiddenUnits),
-                style = MaterialTheme.typography.bodyMedium,
-                color = MaterialTheme.colorScheme.onSurface,
-                maxLines = 1,
-                overflow = TextOverflow.Ellipsis,
-            )
-            Text(
-                text = if (units.hiddenPending > 0) {
-                    stringResource(Res.string.conv_inbox_ws_tail_body_pending, units.hiddenPending)
-                } else {
-                    stringResource(Res.string.conv_inbox_ws_tail_body)
-                },
-                style = MaterialTheme.typography.bodySmall,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-                maxLines = 1,
-                overflow = TextOverflow.Ellipsis,
-                modifier = Modifier.padding(top = sp.xs),
-            )
-        }
-        Icon(
-            painter = painterResource(Res.drawable.ic_chev),
-            contentDescription = null,
-            modifier = Modifier.size(IconSizes.Inline),
-            tint = MaterialTheme.colorScheme.onSurfaceVariant,
         )
     }
 }

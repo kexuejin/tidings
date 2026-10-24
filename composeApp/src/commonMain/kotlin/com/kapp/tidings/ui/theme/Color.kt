@@ -57,6 +57,11 @@ val RelayLightColors = lightColorScheme(
     onSecondaryContainer = Color(0xFF5C3D1E),
     tertiary = RelayInfo,
     onTertiary = Color.White,
+    // tertiary 的容器对（审批卡的 L2「中风险」徽标等 3 处在用）：此前从未赋值，
+    // 回退 Material 基线紫 —— 与本仓茶绿/暖木的色板完全脱节。补一对与 RelayInfo
+    // 同色相（蓝）的浅容器/深字，亮暗两套沿用 secondary/primary 的「同值互换」模式。
+    tertiaryContainer = Color(0xFFCDE2EF),
+    onTertiaryContainer = Color(0xFF173B4E),
     background = RelayLightBackground,
     onBackground = RelayLightOnSurface,
     surface = RelayLightSurface,
@@ -129,6 +134,9 @@ val RelayDarkColors = darkColorScheme(
     onSecondaryContainer = Color(0xFFF5E6D3),
     tertiary = Color(0xFF89B4C8),
     onTertiary = Color(0xFF003542),
+    // 与亮色同一对值互换（同 secondary/primary 的模式）：深色里容器是深蓝、字是浅蓝。
+    tertiaryContainer = Color(0xFF173B4E),
+    onTertiaryContainer = Color(0xFFCDE2EF),
     background = RelayDarkBackground,
     onBackground = RelayDarkOnSurface,
     surface = RelayDarkSurface,

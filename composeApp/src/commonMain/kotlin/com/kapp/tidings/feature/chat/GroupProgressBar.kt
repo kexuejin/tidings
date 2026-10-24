@@ -68,19 +68,28 @@ fun GroupProgressBar(
                 overflow = TextOverflow.Ellipsis,
                 modifier = Modifier.weight(1f),
             )
-            if (onInterrupt != null) {
-                OutlinedButton(
-                    onClick = onInterrupt,
-                    contentPadding = PaddingValues(horizontal = 8.dp, vertical = 2.dp),
-                    shape = RoundedCornerShape(4.dp),
-                ) {
-                    Text(
-                        text = stringResource(Res.string.agent_interrupt_btn),
-                        style = MaterialTheme.typography.labelSmall,
-                        color = MaterialTheme.colorScheme.error,
-                        fontWeight = FontWeight.SemiBold,
-                    )
-                }
+            // 按钮**始终画**、没接线时置灰：
+            //
+            // 从前它接的是 `onSend(peer.nodeId, "/cancel")` —— 一个把控制意图当群文本发的假动作。
+            // 改成控制面（agent-cancel）之后，宿主没接线时宁可让人看见"这个动作现在不可用"，
+            // 也不要让按钮凭空消失（消失会让人以为"这个群没有在跑的任务"）。
+            // 更不要退回"发一条假消息"：那会广播给所有成员，而且根本没中断。
+            OutlinedButton(
+                onClick = { onInterrupt?.invoke() },
+                enabled = onInterrupt != null,
+                contentPadding = PaddingValues(horizontal = 8.dp, vertical = 2.dp),
+                shape = RoundedCornerShape(4.dp),
+            ) {
+                Text(
+                    text = stringResource(Res.string.agent_interrupt_btn),
+                    style = MaterialTheme.typography.labelSmall,
+                    color = if (onInterrupt != null) {
+                        MaterialTheme.colorScheme.error
+                    } else {
+                        MaterialTheme.colorScheme.onSurfaceVariant
+                    },
+                    fontWeight = FontWeight.SemiBold,
+                )
             }
         }
     }

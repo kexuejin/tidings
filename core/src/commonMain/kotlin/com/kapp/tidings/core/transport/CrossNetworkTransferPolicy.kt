@@ -34,8 +34,23 @@ const val CROSS_NETWORK_FILE_PORT_OFFSET: Int = 1
 
 /** `tlsPort` → 跨网文件端口；越界/缺失返回 null（调用方按「这条路不可用」处理）。 */
 fun crossNetworkFilePort(tlsPort: Int?): Int? =
-    tlsPort?.takeIf { it in 1..(65535 - CROSS_NETWORK_FILE_PORT_OFFSET) }
-        ?.let { it + CROSS_NETWORK_FILE_PORT_OFFSET }
+    crossNetworkDerivedPort(tlsPort, CROSS_NETWORK_FILE_PORT_OFFSET)
+
+/**
+ * 跨网屏幕端口 = 对端的 `tlsPort + 2`。
+ *
+ * 与文件端口（+1）同一条裁决：零协议改动、确定性派生、旧端不受影响。屏幕是
+ * `docs/cross-network-file-screen-design.md` 选项 B 里 F1 之外的第二个使用者 ——
+ * 同一套「独立 TCP 连接 + 原样复用现有 screen-* 协议 + TLS/双向 pin 由拨号层提供」。
+ */
+const val CROSS_NETWORK_SCREEN_PORT_OFFSET: Int = 2
+
+/** `tlsPort` → 跨网屏幕端口；越界/缺失返回 null。 */
+fun crossNetworkScreenPort(tlsPort: Int?): Int? =
+    crossNetworkDerivedPort(tlsPort, CROSS_NETWORK_SCREEN_PORT_OFFSET)
+
+private fun crossNetworkDerivedPort(tlsPort: Int?, offset: Int): Int? =
+    tlsPort?.takeIf { it in 1..(65535 - offset) }?.let { it + offset }
 
 /**
  * F1 跨网文件拉取的**纯策略**：把「直连 / 跨网 / 退回」从 IO 里剥出来，好单测。
@@ -112,13 +127,33 @@ class CrossNetworkTransferPolicy(
         candidates: List<PeerEndpoint>,
         tlsPort: Int?,
         hasPin: Boolean,
+    ): List<PullAttempt> = planDerived(direct, candidates, tlsPort, hasPin, CROSS_NETWORK_FILE_PORT_OFFSET)
+
+    /**
+     * 屏幕通道的同一套计划（端口偏移 [CROSS_NETWORK_SCREEN_PORT_OFFSET]）：
+     * 局域网明文直连第一，公网 TLS 候选其后，`enabled/canDialTls/hasPin/tlsPort`
+     * 缺一即无 TLS 候选（fail-closed，与 [plan] 同三条硬规矩）。
+     */
+    fun planScreen(
+        direct: PeerEndpoint?,
+        candidates: List<PeerEndpoint>,
+        tlsPort: Int?,
+        hasPin: Boolean,
+    ): List<PullAttempt> = planDerived(direct, candidates, tlsPort, hasPin, CROSS_NETWORK_SCREEN_PORT_OFFSET)
+
+    private fun planDerived(
+        direct: PeerEndpoint?,
+        candidates: List<PeerEndpoint>,
+        tlsPort: Int?,
+        hasPin: Boolean,
+        portOffset: Int,
     ): List<PullAttempt> {
         val out = ArrayList<PullAttempt>(2)
         if (direct != null && direct.host.isNotBlank() && direct.port in 1..65535) {
             out += PullAttempt(direct.host, direct.port, PullAttemptTransport.Plaintext)
         }
         if (!enabled || !canDialTls || !hasPin) return out
-        val filePort = crossNetworkFilePort(tlsPort) ?: return out
+        val derivedPort = crossNetworkDerivedPort(tlsPort, portOffset) ?: return out
         val seen = HashSet<String>(out.size + candidates.size)
         out.forEach { seen += it.host }
         for (candidate in candidates) {
@@ -126,7 +161,7 @@ class CrossNetworkTransferPolicy(
             if (host.isEmpty() || host in seen) continue
             if (isPrivateOrLocal(host)) continue
             seen += host
-            out += PullAttempt(host, filePort, PullAttemptTransport.Tls)
+            out += PullAttempt(host, derivedPort, PullAttemptTransport.Tls)
         }
         return out
     }

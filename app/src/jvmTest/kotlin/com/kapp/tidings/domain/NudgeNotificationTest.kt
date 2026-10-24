@@ -21,10 +21,10 @@ import java.util.Collections
 import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlinx.coroutines.CoroutineScope
-import kotlinx.coroutines.delay
 import kotlinx.coroutines.runBlocking
 import kotlinx.serialization.json.buildJsonObject
 import kotlinx.serialization.json.put
+import com.kapp.tidings.testutil.awaitUntil
 
 /**
  * 通知必须知道**自己说的是谁**。
@@ -180,14 +180,6 @@ class NudgeNotificationTest {
     private fun send(peer: DatagramSocket, port: Int, envelope: com.kapp.tidings.core.protocol.Envelope) {
         val bytes = Codec.encodeToBytes(envelope)
         peer.send(DatagramPacket(bytes, bytes.size, InetAddress.getByName("127.0.0.1"), port))
-    }
-
-    private suspend fun awaitUntil(what: String, condition: () -> Boolean) {
-        val deadline = kotlin.time.TimeSource.Monotonic.markNow()
-        while (!condition()) {
-            if (deadline.elapsedNow().inWholeMilliseconds > TIMEOUT_MS) error("等了 ${TIMEOUT_MS}ms 仍未发生：$what")
-            delay(10)
-        }
     }
 
     /** 记下每一次通知**原样**收到的三个参数。 */

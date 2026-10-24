@@ -117,8 +117,20 @@ class GlobalSearchDebounceTest {
             live.contains("onSearch(initialQuery, GlobalSearchScope.All)"),
             "唯一允许的那次同步检索必须是静态帧接缝，且用 initialQuery 而不是实时 query",
         )
-        assertTrue(live.contains("global_search_loading"), "搜索中那一句必须画出来")
-        assertTrue(live.contains("global_search_failed"), "搜索失败那一句必须画出来")
+        // 三个状态已经**收进共享结果区**（见 SearchUiConvergenceTest）：这里改为断言
+        // "屏真的把 outcome 交给了共享实现"，而状态文案由那份实现拥有。
+        // 这样这条守卫仍然回答"界面会不会画出来"，但不再要求每个壳各自复制一遍文案。
+        assertTrue(
+            live.contains("GlobalSearchResults("),
+            "搜索屏没有把状态交给共享结果区 —— 那意味着它又自己画 loading/failed",
+        )
+        val shared = GuardSourceScan.stripComments(
+            GuardSourceScan.read(
+                "composeApp/src/commonMain/kotlin/com/kapp/tidings/feature/search/GlobalSearchResults.kt",
+            ),
+        )
+        assertTrue(shared.contains("global_search_loading"), "搜索中那一句必须画出来（共享结果区）")
+        assertTrue(shared.contains("global_search_failed"), "搜索失败那一句必须画出来（共享结果区）")
     }
 
     private companion object {

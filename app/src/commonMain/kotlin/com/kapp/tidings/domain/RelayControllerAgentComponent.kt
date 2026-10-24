@@ -76,6 +76,25 @@ suspend fun handleSendAgentSession(
 }
 
 
+/**
+ * 「中断这次 agent 运行」——走 PPE-1 §6.6 的 agent-cancel 帧，**不是**往群里发一条
+ * `/cancel` 文本。此前 UI 用后者当替身：所有人都会看到你的 /cancel 气泡，而对端
+ * 不认这条命令时根本没中断（群里多出一条消息，行为却是零）。
+ *
+ * 返回 null 表示这个对端没声明 agent 能力 / 本机节点没在跑 —— 调用方据此禁用按钮，
+ * 而不是假装发成功。
+ */
+suspend fun handleCancelAgentRun(
+    peerId: String,
+    sessionId: String,
+    runId: String? = null,
+    reason: String? = null,
+): SendOutcome? {
+    val rt = host.runtime ?: return null
+    if (!rt.peerDeclares(peerId, MsgTypes.CAP_AGENT)) return null
+    return rt.sendAgentCancel(peerId, sessionId, runId, reason)
+}
+
 suspend fun handleSendAgentEvent(
     peerId: String,
     sessionId: String,
@@ -717,6 +736,12 @@ fun handleOnAgentAck(envelope: Envelope) {
             val nextStatus = when (kind) {
                 "approved" -> "approved"
                 "denied" -> "denied"
+                // 「本会话免审」是别的设备（或对端）做出的决定，本端要显示它 ——
+                // 修复前这两种 kind 都被当成"推进不了"，于是同一会话在两台设备上
+                // 一台显示「会话免审」、另一台还显示「已批准」。
+                "allow_session" -> "allow_session"
+                // 撤销同理：宿主/别的设备把免审收回，本端必须跟着回到 revoked。
+                "revoke_session", "revoked" -> "revoked"
                 else -> current.status
             }
             val next = current.copy(status = nextStatus)
@@ -890,11 +915,48 @@ fun handleOnAgentArtifact(envelope: Envelope) {
 }
 
 
+/**
+ * 测试接缝：替换「发 agent-ack」的底层调用，null = 生产路径。
+ *
+ * 为什么要有它：`Messenger.sendUserMessage` 把**所有可预期的失败**都折进返回值
+ * （SENT / QUEUED —— 连对端不在线都会入离线补发队列），用真实传输造不出「发送抛异常」
+ * 这条路；而「抛异常 ⇒ 本地状态必须回滚」这条不变量不能没有会变红的测试
+ * （AGENTS.md §4：变不红的测试等于没测）。
+ */
+internal var ackSenderForTest: (suspend (peerId: String, ackOf: String, kind: String) -> Unit)? = null
+
+/**
+ * 处置一条审批：翻本地状态、落盘、把决定以 `agent-ack` 送达对端。
+ *
+ * ## 「发送成功」不等于「对方知道」（本仓最贵的一类缺陷，这里是它的审批入口）
+ *
+ * 旧实现先把本地状态翻成「已批准」、再用 `runCatching` 吞掉发送异常 —— 三种处境
+ * 全部长着同一张「已批准」的脸：
+ *
+ * 1. **本机节点没在跑**（`runtime == null`）：ack 连离线队列都进不去。这不是「已批准」，
+ *    是「决定没有送出」—— 本地状态必须**回滚成待审批**并如实提示，否则用户批准了
+ *    一个永远不会被执行、也永远不会被告知失败的请求。
+ * 2. **发送抛了异常**：同上回滚（QUEUED 不算失败 —— 帧在补发队列里，终会送达，
+ *    与 [handleSendGrantRequest] 对 QUEUED 的口径一致）。
+ * 3. **对端不声明审批回执（`agq1`）**：ack 无处可发是**已知且不可修复**的事实，
+ *    不是故障 —— 本地仍按用户的选择记账（决定本身是本端产生的），但横幅必须说明
+ *    「最终以对方 Agent 宿主实际执行为准」，不能让「已批准」暗示对方已经知道。
+ */
 fun handleRespondApproval(approvalId: String, allow: Boolean, allowSession: Boolean = false) {
     val approval = host._state.value.agentApprovals[approvalId] ?: return
+    // **先问唯一判据**：过期或无权 ⇒ 这一下根本不该发生（UI 也不该画出按钮）。
+    // 不发 ack、也不翻本地状态。修复前这里既不查权限也不查有效期：翻完就发，
+    // 用户看到的「已批准」是对端永远不会知道的假账（宿主侧现在也会拒——但前端的假账更害人，
+    // 因为它让用户以为自己已经批准了一件其实没人执行的事）。
+    if (!host._state.value.mayDecideApproval(approval, nowMillis())) return
     val rt = host.runtime
     val kind = if (allowSession) "allow_session" else if (allow) "approved" else "denied"
     val nextStatus = if (allowSession) "allow_session" else if (allow) "approved" else "denied"
+    if (rt == null) {
+        // 处境 1：连离线队列都不存在，这个决定送不出去 —— 不翻状态，直接如实说。
+        host.warn(BannerMessage.AgentAckSendFailed)
+        return
+    }
     val decided = approval.copy(status = nextStatus)
     host._state.update { s ->
         s.copy(agentApprovals = s.agentApprovals + (approvalId to decided))
@@ -902,9 +964,17 @@ fun handleRespondApproval(approvalId: String, allow: Boolean, allowSession: Bool
     // **本条是 F2 的核心场景**：用户点的这一下是本端产生的唯一凭据，对端只会看到那条 ack。
     // 不落盘的话，重启之后面板又显示「待审批」，而用户已经点过了。
     host.scope.launch { runCatching { host.agentStore.saveApproval(decided) } }
-    if (rt != null && rt.peerDeclares(approval.peerId, MsgTypes.CAP_AGENT_QUEUE)) {
-        host.scope.launch {
-            runCatching {
+    if (!rt.peerDeclares(approval.peerId, MsgTypes.CAP_AGENT_QUEUE)) {
+        // 处境 3：对端不回执（或不在线到无从判定）。本地记账照旧，横幅说清后果。
+        host.warn(BannerMessage.AgentAckUnconfirmed)
+        return
+    }
+    host.scope.launch {
+        runCatching {
+            val sender = ackSenderForTest
+            if (sender != null) {
+                sender(approval.peerId, approvalId, kind)
+            } else {
                 rt.sendAgentAck(
                     peerId = approval.peerId,
                     ackOf = approvalId,
@@ -912,10 +982,95 @@ fun handleRespondApproval(approvalId: String, allow: Boolean, allowSession: Bool
                     at = nowMillis(),
                 )
             }
+        }.onFailure { _ ->
+            // 处境 2：发送抛错 ⇒ 本地的「已批准/已拒绝」是对端永远不知道的假账。
+            // 回滚到 pending（回执可能已经先到：只有还停在本次决定的状态上才回滚），
+            // 落盘与横幅跟上 —— 否则重启后假账复活。
+            var rolled: AgentApprovalUi? = null
+            host._state.update { s ->
+                val current = s.agentApprovals[approvalId]
+                if (current != null && current.status == nextStatus) {
+                    val back = current.copy(status = "pending")
+                    rolled = back
+                    s.copy(agentApprovals = s.agentApprovals + (approvalId to back))
+                } else {
+                    s
+                }
+            }
+            rolled?.let { host.scope.launch { runCatching { host.agentStore.saveApproval(it) } } }
+            host.warn(BannerMessage.AgentAckSendFailed)
         }
     }
 }
 
+
+
+/**
+ * 撤销「本会话免审」：把该会话里所有 `allow_session` 的处置还原成逐条审批。
+ *
+ * ## 为什么需要它
+ *
+ * 「本会话免审」是一次点击授出的**会话级空白放行**（此后同类请求不再询问）。之前它
+ * 没有任何撤销入口 —— 用户点错一次就再也收不回来，界面上也看不出还剩几条免审在生效。
+ *
+ * ## 它不是新帧
+ *
+ * 复用 `agent-ack` 现有的 `kind` 字段（值 = `revoke_session`）：旧宿主不认识这个值，
+ * 只会停在那条审批的 `allow_session` 上 —— 与它今天的行为一致，不会更糟。宿主
+ * （`:agentNode` 的 `applyAckToApproval`）认识它，就把那条审批改成 `revoked`。
+ *
+ * 发送失败时**不回滚本地状态**、也不谎报成功：本端只有在 ack 真发出去之后才把
+ * 那几条改成 `revoked`（与 [handleRespondApproval] 的乐观记账不同 —— 那里"决定"是本端
+ * 产生的，这里"撤销"要被宿主知道才成立）。
+ */
+fun handleRevokeSessionApproval(sessionId: String) {
+    val targets = host._state.value.agentApprovals.values.filter {
+        it.sessionId == sessionId && it.status == "allow_session"
+    }
+    if (targets.isEmpty()) return
+    val rt = host.runtime
+    if (rt == null) {
+        host.warn(BannerMessage.AgentAckSendFailed)
+        return
+    }
+    host.scope.launch {
+        var failed = false
+        targets.forEach { approval ->
+            if (!rt.peerDeclares(approval.peerId, MsgTypes.CAP_AGENT_QUEUE)) {
+                // 对端不收审批回执：撤销无从送达，如实失败（不假装撤销成功）。
+                failed = true
+                return@forEach
+            }
+            runCatching {
+                val sender = ackSenderForTest
+                if (sender != null) {
+                    sender(approval.peerId, approval.approvalId, "revoke_session")
+                } else {
+                    rt.sendAgentAck(
+                        peerId = approval.peerId,
+                        ackOf = approval.approvalId,
+                        kind = "revoke_session",
+                        at = nowMillis(),
+                    )
+                }
+            }.onSuccess {
+                var revoked: AgentApprovalUi? = null
+                host._state.update { s ->
+                    val current = s.agentApprovals[approval.approvalId]
+                    if (current != null && current.status == "allow_session") {
+                        val next = current.copy(status = "revoked")
+                        revoked = next
+                        s.copy(agentApprovals = s.agentApprovals + (approval.approvalId to next))
+                    } else {
+                        s
+                    }
+                }
+                revoked?.let { host.scope.launch { runCatching { host.agentStore.saveApproval(it) } } }
+            }.onFailure { failed = true }
+        }
+        if (failed) host.warn(BannerMessage.AgentAckSendFailed)
+    }
+}
 
 fun handleCancelAgentTask(taskId: String) {
     val task = host._state.value.agentTasks[taskId] ?: return

@@ -43,6 +43,8 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.drawBehind
+import androidx.compose.ui.focus.FocusRequester
+import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.geometry.CornerRadius
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.PathEffect
@@ -57,6 +59,7 @@ import com.kapp.tidings.domain.HistorySearchKind
 import com.kapp.tidings.domain.MessageSearchResult
 import com.kapp.tidings.core.nowMillis
 import com.kapp.tidings.feature.chat.CalendarGrid
+import com.kapp.tidings.feature.chat.debouncedHistorySearch
 import com.kapp.tidings.feature.chat.HistoryHitItem
 import com.kapp.tidings.feature.chat.formatDateLabel
 import com.kapp.tidings.generated.resources.Res
@@ -127,10 +130,20 @@ public fun DesktopHistorySearchDialog(
 
     var results by remember { mutableStateOf<List<MessageSearchResult>>(emptyList()) }
 
+    // 击键不再逐字打一次检索：静默后才查一次，与手机浮层
+    // （`HistorySearchOverlay` 的 `debouncedHistorySearch`）**同一个 helper、同一条静默期**。
+    // 桌面从前是逐字直查（这里一行同步 `onSearch`），同一句话打三个字就是三次全库扫。
     LaunchedEffect(query, selectedKind, fromAt, toAt) {
         val filter = HistorySearchFilter(kind = selectedKind, fromAt = fromAt, toAt = toAt)
-        results = onSearch(query, filter)
+        results = debouncedHistorySearch(query, filter, search = onSearch)
     }
+
+    // 打开即聚焦：点「历史搜索」就是要打字，不该再点一次输入框。
+    // 与手机浮层（`HistorySearchOverlay` 的 `searchFocus`）**同一条纪律、同一个 key（Unit）**：
+    // 这个弹窗的生命周期就是"打开"，所以「组合一次、请求一次」正是想要的语义。
+    // 桌面从前没有这一步 —— 弹窗打开后按键进不去（焦点还在聊天页的输入卡片上）。
+    val searchFocus = remember { FocusRequester() }
+    LaunchedEffect(Unit) { searchFocus.requestFocus() }
 
     Dialog(
         onDismissRequest = onDismiss,
@@ -273,7 +286,7 @@ public fun DesktopHistorySearchDialog(
                                                 color = MaterialTheme.colorScheme.onSurface,
                                             ),
                                             cursorBrush = SolidColor(MaterialTheme.colorScheme.primary),
-                                            modifier = Modifier.fillMaxWidth(),
+                                            modifier = Modifier.fillMaxWidth().focusRequester(searchFocus),
                                         )
                                     }
                                 }

@@ -211,7 +211,7 @@ public fun FilesPane(
             // 不沿用共用 `EmptyState`（`app/relay/ui/AppStates.kt:23` → `MessageState:87`）：
             // 它按 `fillMaxWidth()` 顶对齐排、没有 textAlign 口子，传 `fillMaxSize()` 只占高度、
             // 内容仍贴左上；而它是全 app 共用的，动它会把手机端多屏空态一起挪走。
-            // 写法与 d-search-empty 那支（`DesktopGlobalSearch.kt:171-194`）一致。
+            // 写法与 d-search-empty 那支（`DesktopGlobalSearchPanel 的结果区`）一致。
             Box(
                 modifier = Modifier.fillMaxSize().padding(LocalAppSpacing.current.xl),
                 contentAlignment = Alignment.Center,

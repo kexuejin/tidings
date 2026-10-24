@@ -40,6 +40,8 @@ import com.kapp.tidings.generated.resources.set_company
 import com.kapp.tidings.generated.resources.set_dept
 import com.kapp.tidings.generated.resources.set_invalid_nick
 import com.kapp.tidings.generated.resources.set_nick
+import com.kapp.tidings.generated.resources.set_profile_nick_placeholder
+import com.kapp.tidings.generated.resources.set_profile_page_subtitle
 import com.kapp.tidings.generated.resources.set_profile_title
 import com.kapp.tidings.generated.resources.set_team
 import com.kapp.tidings.ui.ContentWidths
@@ -110,7 +112,7 @@ fun SettingsProfileSubpage(
         //  桌面窗变体 prototype/relay.html:136 `.win .grphead{padding:12px 3px 5px;font-size:11px;letter-spacing:.06em}`，
         //  行内 padding-top:0 覆盖后实际是 `0 3px 5px`）。
         // 判别式用 onBack == null：两条生产路径里只有桌面宿主传 null
-        // （desktopApp/.../DesktopHosting.kt:531 传 null；本文件手机子页传 { subpage = null }）。
+        // （desktopApp/.../DesktopHosting 的设置覆盖层 传 null；本文件手机子页传 { subpage = null }）。
         if (onBack == null) {
             Text(
                 text = stringResource(Res.string.set_profile_title),
@@ -123,7 +125,7 @@ fun SettingsProfileSubpage(
         } else {
             LargeTitleBar(
                 title = stringResource(Res.string.set_profile_title),
-                subtitle = "昵称、头像、公司、部门、团队",
+                subtitle = stringResource(Res.string.set_profile_page_subtitle),
                 onBack = onBack,
                 contentMaxWidth = ContentWidths.Settings,
             )
@@ -162,13 +164,18 @@ fun SettingsProfileSubpage(
                     PeerAvatar(name = nick, size = 54.dp, avatar = avatar, avatarBytes = state.pickedAvatarBytes)
                     Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(LocalAppSpacing.current.xs)) {
                         Text(
-                            text = nick.ifBlank { "我的昵称" },
+                            text = nick.ifBlank { stringResource(Res.string.set_profile_nick_placeholder) },
                             // 原型 `.pn{font-size:16px;font-weight:700}`（:1220）。
                             style = MaterialTheme.typography.titleMedium,
                             fontWeight = FontWeight.Bold,
                         )
+                        // 组织行：空字段用兜底词顶位（与字段标签同一个词，复用 set_* 资源）。
                         Text(
-                            text = "${company.ifBlank { "公司" }} · ${dept.ifBlank { "部门" }} · ${team.ifBlank { "团队" }}",
+                            text = listOf(
+                                company.ifBlank { stringResource(Res.string.set_company) },
+                                dept.ifBlank { stringResource(Res.string.set_dept) },
+                                team.ifBlank { stringResource(Res.string.set_team) },
+                            ).joinToString(" · "),
                             style = MaterialTheme.typography.bodySmall,
                             color = MaterialTheme.colorScheme.onSurfaceVariant,
                         )
@@ -214,6 +221,7 @@ fun SettingsProfileSubpage(
                     pickedAvatarBytes = state.pickedAvatarBytes,
                     onAvatarChange = { avatar = it },
                     onRemovePickedAvatar = onRemovePickedAvatar,
+                    pickedAvatarName = state.pickedAvatarName,
                     onOpenAvatarPage = onOpenAvatarPage,
                 )
 

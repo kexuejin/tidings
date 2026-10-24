@@ -39,6 +39,10 @@ import com.kapp.tidings.domain.model.AgentSessionUi
 import com.kapp.tidings.domain.model.GrantRequestStatus
 import com.kapp.tidings.domain.model.PeerUi
 import com.kapp.tidings.domain.model.WorkspaceUi
+import com.kapp.tidings.domain.canApproveAgentWork
+import com.kapp.tidings.domain.isPendingApproval
+import com.kapp.tidings.domain.mayDecideApproval
+import com.kapp.tidings.domain.pendingApprovalCount
 import com.kapp.tidings.domain.pickActiveSession
 import com.kapp.tidings.core.protocol.AgentGrantAccess
 import com.kapp.tidings.core.transport.SendOutcome
@@ -67,7 +71,13 @@ import com.kapp.tidings.generated.resources.workspace_grant_request_peer_no_loop
 import com.kapp.tidings.generated.resources.workspace_grant_request_peer_not_agent
 import com.kapp.tidings.generated.resources.workspace_grant_request_pending
 import com.kapp.tidings.generated.resources.workspace_grant_request_sent
+import com.kapp.tidings.generated.resources.conv_inbox_ws_row_unnamed
 import com.kapp.tidings.generated.resources.workspace_grant_none
+import com.kapp.tidings.generated.resources.workspace_grant_state_approved
+import com.kapp.tidings.generated.resources.workspace_grant_state_denied
+import com.kapp.tidings.generated.resources.workspace_grant_state_revoked
+import com.kapp.tidings.generated.resources.workspace_grant_state_unknown
+import com.kapp.tidings.generated.resources.workspace_grant_unknown_peer
 import com.kapp.tidings.generated.resources.workspace_grant_section_title
 import com.kapp.tidings.generated.resources.workspace_host_badge
 import com.kapp.tidings.generated.resources.workspace_detail_empty_back
@@ -154,6 +164,8 @@ fun WorkspaceDetailView(
     onOpenChat: () -> Unit,
     onOpenSessionChat: ((sessionId: String) -> Unit)? = null,
     onRespondApproval: ((approvalId: String, allow: Boolean) -> Unit)? = null,
+    /** 三参处置（「本会话免审」）：null 时退回 [onRespondApproval]，不画免审按钮。 */
+    onRespondChoice: ((approvalId: String, allow: Boolean, allowSession: Boolean) -> Unit)? = null,
     onRefresh: (() -> Unit)? = null,
     /**
      * **谁能用这个 agent 干活** —— 逐设备的勾选状态；null = 这个宿主不提供该配置
@@ -177,7 +189,10 @@ fun WorkspaceDetailView(
     onRequestGrant: (suspend () -> SendOutcome?)? = null,
     modifier: Modifier = Modifier,
 ) {
-    val wsTitle = workspace?.wsTitle ?: workspace?.wsId ?: stringResource(Res.string.agent_session_untitled)
+    // 不拿 wsId 顶标题：身份键不是名字（与列表行的「未命名工作区」兜底、以及
+    // AgentSessionUi.displayTitle 同一条纪律）。id 只留给诊断，不进标题位。
+    val wsTitle = workspace?.wsTitle?.takeIf { it.isNotBlank() }
+        ?: stringResource(Res.string.conv_inbox_ws_row_unnamed)
     val peerNick = peer?.displayName ?: ""
     val kind = workspace?.agentKind ?: sessions.firstOrNull()?.agentKind ?: ""
 
@@ -189,12 +204,9 @@ fun WorkspaceDetailView(
         peer.nodeId == state.selfNodeId ||
             peer.ip == "127.0.0.1" || peer.host == "localhost" || peer.host == "127.0.0.1"
         )
-    val sessionGrant = peer?.let { state.grantFor(it.nodeId, workspace?.agentKey, wsId) }
-    val canApprove = isHost ||
-        sessionGrant?.isMyDevice == true ||
-        sessionGrant?.access == AgentGrantAccess.OWNER ||
-        (sessionGrant?.access == AgentGrantAccess.ADMIN && sessionGrant.delegatedApproval)
-    val isReadOnly = !canApprove
+    // 工作区级「我是什么角色」与逐条审批共用同一个 :core 判据（经 RelayUiState 的两个入口）：
+    // 修复前这里是手抄的第四份，与看板那份（只挡 RO）对不上。
+    val isReadOnly = peer == null || !state.canApproveAgentWork(peer.nodeId, workspace?.agentKey, wsId)
 
     // 「最近会话」= 唯一一处挑选规则（优先待批 → 其次未超时 busy → 其次最新活动）。
     // 与本屏原来那段 `pending → busy → first` 的差别不只是收敛：旧代码的 "first" 排在
@@ -207,8 +219,9 @@ fun WorkspaceDetailView(
         pickActiveSession(
             sessions = sessions,
             lastEventAtOf = lastEventAtOf,
+            // 同一判据（含过期）：别把"已经超时的审批"当成"这条会话最要紧"的理由。
             pendingSessionIds = state.agentApprovals.values
-                .filter { it.peerId == peer?.nodeId && it.status == "pending" }
+                .filter { it.peerId == peer?.nodeId && isPendingApproval(it, now) }
                 .map { it.sessionId }
                 .toSet(),
             now = now,
@@ -632,15 +645,24 @@ fun WorkspaceDetailView(
 
             // 工作区专属待处理审批区段（跨会话；处置就在卡里，所以它留在操作中心）
             val sessionIds = remember(sessions) { sessions.map { it.sessionId }.toSet() }
-            val wsApprovals = remember(peer, sessionIds, state.agentApprovals) {
-                state.agentApprovals.values.filter {
-                    it.peerId == (peer?.nodeId ?: "") && it.sessionId in sessionIds && it.status == "pending"
-                }
-            }
+            // 与看板同一条口径（[rememberLingeringApprovalRows]）：待批 + 本屏刚处置的。
+            // 只喂 pending 会让交付的那段「留痕 2 秒」在三级详情里同样变成死代码。
+            val wsApprovals = rememberLingeringApprovalRows(
+                approvals = state.agentApprovals.values,
+                now = now,
+                peerId = peer?.nodeId ?: "",
+                sessionIds = sessionIds,
+            )
             if (wsApprovals.isNotEmpty()) {
                 AgentApprovalsSection(
                     approvals = wsApprovals,
                     onRespond = onRespondApproval,
+                    onRespondChoice = onRespondChoice,
+                    // 只读用户（无处置权）也要能看审批段，但按钮位换成「只读」胶囊
+                    // ——此前这里漏传 isReadOnly，看板传了、这一屏没传：只读用户在工作区
+                    // 详情看到的是可点的批准/拒绝按钮（issue「只读用户看到可点批准按钮」）。
+                    // 逐条判据（含过期）：与看板/会话详情/聊天横幅同一入口。
+                    isReadOnly = { appr -> !state.mayDecideApproval(appr, now) },
                     modifier = Modifier.fillMaxWidth(),
                 )
             }
@@ -670,9 +692,13 @@ fun WorkspaceDetailView(
             } else {
                 val events = state.agentEventsOf(recent)
                 val lastEvent = events.lastOrNull()
-                val pendingCount = state.agentApprovals.values.count {
-                    it.peerId == recent.peerId && it.sessionId == recent.sessionId && it.status == "pending"
-                }
+                // 与看板页头/段头同一把尺子：过期的审批不算「待批」（领域层唯一入口）。
+                val pendingCount = pendingApprovalCount(
+                    approvals = state.agentApprovals.values,
+                    now = now,
+                    peerId = recent.peerId,
+                    sessionId = recent.sessionId,
+                )
                 Card(
                     modifier = Modifier
                         .fillMaxWidth()
@@ -963,12 +989,22 @@ private fun WorkspaceGrantDialog(
                                 verticalAlignment = Alignment.CenterVertically,
                             ) {
                                 Text(
-                                    text = state.peer(grant.peerId)?.displayName ?: grant.peerId.take(8),
+                                    // 不印 nodeId 前 8 位：身份键不是名字（与 AgentSessionUi.displayTitle
+                                    // 同一条纪律；文件柜那侧的授权清单已经这么改过）。
+                                    text = state.peer(grant.peerId)?.displayName
+                                        ?: stringResource(Res.string.workspace_grant_unknown_peer),
                                     style = MaterialTheme.typography.bodyMedium,
                                     fontWeight = FontWeight.SemiBold,
                                 )
                                 Text(
-                                    text = grant.state,
+                                    // state 是协议取值（approved/denied/revoked）：界面要说人话，
+                                    // 不认识的取值如实写「状态未知」而不是把英文枚举丢给用户。
+                                    text = when (grant.state) {
+                                        "approved" -> stringResource(Res.string.workspace_grant_state_approved)
+                                        "denied" -> stringResource(Res.string.workspace_grant_state_denied)
+                                        "revoked" -> stringResource(Res.string.workspace_grant_state_revoked)
+                                        else -> stringResource(Res.string.workspace_grant_state_unknown)
+                                    },
                                     style = MaterialTheme.typography.labelSmall,
                                     color = MaterialTheme.colorScheme.primary,
                                 )

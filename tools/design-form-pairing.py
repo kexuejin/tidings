@@ -176,20 +176,26 @@ def parse_preview_source(text, fname="<mem>"):
 
 
 def collect_previews(root):
-    """读截图源集下所有 `*.kt`，返回 (name → 记录, 尺寸未知的名单)。"""
+    """读截图源集下所有 `*.kt`，返回 (name → 记录, 尺寸未知的名单)。
+
+    **递归**遍历：包名统一（com.kapp.tidings.*）后预览文件挪进了子目录，
+    顶层 listdir 一个都扫不到（与 design-preview-pairing.py 同一个坑，那边先修的）。
+    """
     d = os.path.join(root, SHOTS)
     by_name = {}
     unknown = []
     dup = []
     if not os.path.isdir(d):
         return by_name, unknown, dup
-    for fn in sorted(os.listdir(d)):
-        if not fn.endswith(".kt"):
-            continue
-        path = os.path.join(d, fn)
+    paths = []
+    for cur, _dirs, files in os.walk(d):
+        for fn in sorted(files):
+            if fn.endswith(".kt"):
+                paths.append(os.path.join(cur, fn))
+    for path in sorted(paths):
         with open(path, encoding="utf-8") as fh:
             text = fh.read()
-        for rec in parse_preview_source(text, fn):
+        for rec in parse_preview_source(text, os.path.basename(path)):
             if rec["name"] in by_name:
                 dup.append(rec["name"])
                 continue

@@ -25,6 +25,9 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.Shape
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
+import androidx.compose.ui.semantics.LiveRegionMode
+import androidx.compose.ui.semantics.liveRegion
+import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
@@ -67,6 +70,8 @@ import com.kapp.tidings.generated.resources.banner_group_meta_updated
 import com.kapp.tidings.generated.resources.chat_forward_success
 import com.kapp.tidings.generated.resources.banner_remote_relay_cleared
 import com.kapp.tidings.generated.resources.banner_remote_relay_configured
+import com.kapp.tidings.generated.resources.banner_agent_ack_not_confirmed
+import com.kapp.tidings.generated.resources.banner_agent_ack_send_failed
 import com.kapp.tidings.generated.resources.banner_scan_failed
 import com.kapp.tidings.generated.resources.banner_scan_range_added
 import com.kapp.tidings.generated.resources.banner_scan_range_invalid
@@ -91,6 +96,8 @@ import com.kapp.tidings.generated.resources.screen_reason_user
 import com.kapp.tidings.generated.resources.cabinet_banner_dir_updated
 import com.kapp.tidings.generated.resources.cabinet_banner_share_stopped
 import com.kapp.tidings.generated.resources.cabinet_download_count
+import com.kapp.tidings.generated.resources.cabinet_download_denied
+import com.kapp.tidings.generated.resources.cabinet_upload_started
 import com.kapp.tidings.generated.resources.common_agent
 import com.kapp.tidings.generated.resources.common_close
 import com.kapp.tidings.generated.resources.common_human
@@ -111,11 +118,11 @@ import com.kapp.tidings.generated.resources.nav_badge_overflow
 import com.kapp.tidings.generated.resources.node_bind_failed_reason
 import com.kapp.tidings.generated.resources.node_not_started
 import com.kapp.tidings.generated.resources.nodes_port_bad
+import com.kapp.tidings.generated.resources.nodes_removed_notice
 import com.kapp.tidings.generated.resources.set_caps_saved
 import com.kapp.tidings.generated.resources.set_invalid_nick
 import com.kapp.tidings.generated.resources.set_ports_saved
 import com.kapp.tidings.generated.resources.set_saved
-import com.kapp.tidings.generated.resources.time_days_ago
 import com.kapp.tidings.generated.resources.time_hours_ago
 import com.kapp.tidings.generated.resources.time_just_now
 import com.kapp.tidings.generated.resources.time_minutes_ago
@@ -186,7 +193,9 @@ fun PeerAvatar(
     val foreground = when {
         isAgent -> MaterialTheme.accents.agentAccent
         isGroup -> MaterialTheme.colorScheme.onSecondaryContainer
-        avatar != null -> Color.White
+        // 首字前景按底色亮度二选一：原先固定白色，10 个底色里 5 个不到 4.5:1
+        // （杏黄只有 2.95:1），而首字模式是默认形态。见 AvatarPalette.foregroundOn。
+        avatar != null -> AvatarPalette.foregroundOn(AvatarPalette.resolveBg(avatar, name))
         else -> MaterialTheme.colorScheme.primary
     }
     Box(
@@ -321,6 +330,9 @@ fun bannerText(message: BannerMessage): String = when (message) {
     BannerMessage.InvalidQrCode -> stringResource(Res.string.banner_invalid_qr)
     BannerMessage.NoQrInImage -> stringResource(Res.string.banner_no_qr_in_image)
     BannerMessage.UnknownError -> stringResource(Res.string.error_unknown)
+    is BannerMessage.PeerRemoved ->
+        stringResource(Res.string.nodes_removed_notice, message.name)
+    BannerMessage.CabinetDownloadDenied -> stringResource(Res.string.cabinet_download_denied)
     BannerMessage.NoUnreachablePeers -> stringResource(Res.string.disc_cleanup_none)
     is BannerMessage.UnreachablePeersRemoved ->
         stringResource(Res.string.disc_cleanup_done, message.count)
@@ -350,6 +362,8 @@ fun bannerText(message: BannerMessage): String = when (message) {
         stringResource(Res.string.cabinet_banner_share_stopped)
     is BannerMessage.CabinetDownloadStarted ->
         stringResource(Res.string.cabinet_download_count, formatCount(message.count.toLong()))
+    BannerMessage.CabinetUploadStarted ->
+        stringResource(Res.string.cabinet_upload_started)
     BannerMessage.ScanRangeInvalid ->
         stringResource(Res.string.banner_scan_range_invalid)
     is BannerMessage.ScanRangeAdded ->
@@ -366,6 +380,10 @@ fun bannerText(message: BannerMessage): String = when (message) {
         stringResource(Res.string.banner_screen_view_unavailable)
     is BannerMessage.ScreenSessionEnded ->
         stringResource(Res.string.banner_screen_view_ended, screenReasonText(message.reason))
+    BannerMessage.AgentAckSendFailed ->
+        stringResource(Res.string.banner_agent_ack_send_failed)
+    BannerMessage.AgentAckUnconfirmed ->
+        stringResource(Res.string.banner_agent_ack_not_confirmed)
 }
 
 /**
@@ -420,7 +438,18 @@ fun AppBanner(banner: BannerUi, onDismiss: () -> Unit, modifier: Modifier = Modi
     Surface(
         color = container,
         shape = RoundedCornerShape(12.dp),
-        modifier = modifier.fillMaxWidth(),
+        modifier = modifier
+            .fillMaxWidth()
+            // 横幅是本应用**唯一**的失败反馈通道（建群失败、连接失败、导出失败都走它）。
+            // 读屏用户看不见"屏幕上方突然多了一行"，所以要主动播报：错误档用 Assertive
+            // （立刻打断），其余用 Polite（等当前朗读结束）。
+            .semantics {
+                liveRegion = if (banner.tone == BannerTone.Error) {
+                    LiveRegionMode.Assertive
+                } else {
+                    LiveRegionMode.Polite
+                }
+            },
         tonalElevation = RelayElevations.Card,
     ) {
         Row(
@@ -526,7 +555,16 @@ fun InfoRow(label: String, value: String, modifier: Modifier = Modifier) {
     }
 }
 
-/** 相对时间：刚刚 / N 分钟前 / N 小时前 / N 天前。不引入日期库，纯算术。 */
+/**
+ * 相对时间：刚刚 / N 分钟前 / N 小时前；**超过一天落「年-月-日」**（与聊天页日期分隔条的
+ * [formatDay] 同一口径）。不引入日期库，纯算术。
+ *
+ * 为什么没有「N 天前」这一档：相对天数会**过期** —— 列表里的老会话今天显示「11 天前」，
+ * 明天还是「11 天前」（delta 整数除法一天才挪一格），而且用户对它还得再做一次减法。
+ * 一个日历日期永远如实、永远可核对，与聊天流翻历史时看到的锚点是同一套口径。
+ * 原型夹具里最老的时间也只有「N 小时前」（`lastSeen:'3 小时前'`），从没画过「N 天前」，
+ * 所以这一档不是保真信息，落日期不算偏离。
+ */
 @Composable
 fun relativeTime(atMillis: Long, nowMillis: Long): String {
     val delta = nowMillis - atMillis
@@ -534,7 +572,7 @@ fun relativeTime(atMillis: Long, nowMillis: Long): String {
         delta < 60_000 -> stringResource(Res.string.time_just_now)
         delta < 3_600_000 -> stringResource(Res.string.time_minutes_ago, (delta / 60_000).toInt())
         delta < 86_400_000 -> stringResource(Res.string.time_hours_ago, (delta / 3_600_000).toInt())
-        else -> stringResource(Res.string.time_days_ago, (delta / 86_400_000).toInt())
+        else -> formatDay(atMillis)
     }
 }
 

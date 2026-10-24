@@ -2,7 +2,7 @@
 
 package com.kapp.tidings.core.transport
 
-import com.kapp.tidings.core.nowMillis
+import com.kapp.tidings.core.testutil.awaitTrue
 import com.kapp.tidings.core.testing.createTempDir
 import com.kapp.tidings.core.testing.removeRecursively
 import kotlinx.coroutines.CompletableDeferred
@@ -95,7 +95,35 @@ class OfferDeliveryAsyncTest {
      * 这条钉：第一次投递失败 ⇒ 状态如实是 `queued-awaiting-reconnect`；重试成功 ⇒ `offered`。
      */
     @Test
-    fun aFailedOfferIsQueuedAndRetriedUntilItSucceeds() = runBlocking {
+    fun aFailedOfferIsQueuedForReconnect() = runBlocking {
+        // 只测「第一次失败后如实入队」：把退避设得远大于本用例寿命，重试就不会插进来。
+        // 原先这条与前一条（重试成功）合在一起，用 20ms 退避 —— 慢机器上观测到的已经是
+        // 重试成功后的 offered，断言过程态必红（RUN4 实测 expected queued but was offered）。
+        // 观测一个会被下一次调度抹掉的过程态，本质上是竞态，不是判据。
+        var attempts = 0
+        val manager = TransferManager(
+            selfId = "self",
+            scope = scope,
+            tcpPort = 0,
+            downloadDir = { dir() },
+            sendReliable = { _, _ -> error("报价必须走 quick 那条路") },
+            sendReliableQuick = { _, _ ->
+                attempts++
+                false
+            },
+            offerRetryBackoffMs = 60_000L,
+            offerDeliveryBudgetMs = 5_000L,
+            peerAddress = { null },
+        )
+        val id = manager.offerFilesAsync("peer-1", listOf(LocalFile("/tmp/a.bin", "a.bin", 16L)))!!
+        val queued = awaitState(manager, id) { it != "offering" }
+        assertEquals("queued-awaiting-reconnect", queued.state, "失败的报价必须入队等恢复，而不是丢掉")
+        assertEquals(1, queued.attempts, "只尝试过一次就入队")
+    }
+
+    @Test
+    fun aQueuedOfferIsRetriedUntilItSucceeds() = runBlocking {
+        // 只测终态：第二次发送成功 ⇒ offered，且 attempts 如实增长。
         var attempts = 0
         val manager = TransferManager(
             selfId = "self",
@@ -112,10 +140,6 @@ class OfferDeliveryAsyncTest {
             peerAddress = { null },
         )
         val id = manager.offerFilesAsync("peer-1", listOf(LocalFile("/tmp/a.bin", "a.bin", 16L)))!!
-        // 第一次失败之后必须**如实入队**（不是 ack-timeout 就完事）。
-        val queued = awaitState(manager, id) { it != "offering" }
-        assertEquals("queued-awaiting-reconnect", queued.state, "失败的报价必须入队等恢复，而不是丢掉")
-        // 重试成功之后转 offered，且 attempts 如实增长。
         val done = awaitState(manager, id) { it == "offered" }
         assertEquals("offered", done.state)
         assertTrue(done.attempts >= 2, "应当记下尝试次数：" + done.attempts)
@@ -201,9 +225,10 @@ class OfferDeliveryAsyncTest {
             peerAddress = { null },
         )
         val id = manager.offerFilesAsync("peer-1", listOf(LocalFile("/tmp/a.bin", "a.bin", 16L)))!!
-        // 上限 120ms ⇒ 等 500ms 再读一次就足够；不用轮询（轮询会与投递协程抢 stateLock）。
-        delay(500L)
-        val row = manager.offerDeliveries().single { it.transferId == id }
+        // 上限 120ms ⇒ 状态必然迁移到 queued-awaiting-reconnect。**等这个状态**而不是
+        // sleep 500ms 再读一次：后者在慢机器上仍可能读到 offering（假红），在快机器上白等。
+        // 读出口 offerDeliveries() 本身是快照（不在 stateLock 上做 IO），轮询它不会与投递协程抢锁。
+        val row = awaitState(manager, id, timeoutMs = 5_000L) { it == "queued-awaiting-reconnect" }
         assertEquals("queued-awaiting-reconnect", row.state, "一次尝试到点就必须给结论，不许停在 offering")
     }
 
@@ -281,20 +306,22 @@ class OfferDeliveryAsyncTest {
         )
     }
 
-    /** 轮询等某个状态出现（超时即失败）。 */
+    /**
+     * 等某个投递状态出现（超时即失败）。实现转发到 testutil 的唯一轮询（本文件曾有第四种
+     * 轮询写法：自己算 deadline）。返回值形态保持不变，便于调用点按 row 取 detail。
+     */
     private suspend fun awaitState(
         manager: TransferManager,
         transferId: String,
         timeoutMs: Long = 5_000L,
         predicate: (String) -> Boolean,
     ): TransferManager.OfferDelivery {
-        val deadline = nowMillis() + timeoutMs
-        while (nowMillis() < deadline) {
+        awaitTrue(timeoutMs = timeoutMs, what = "超时等不到状态：" + manager.offerDeliveries().firstOrNull { it.transferId == transferId }) {
             val row = manager.offerDeliveries().firstOrNull { it.transferId == transferId }
-            if (row != null && predicate(row.state)) return row
-            delay(10)
+            row != null && predicate(row.state)
         }
-        error("超时等不到状态：" + manager.offerDeliveries().firstOrNull { it.transferId == transferId })
+        return manager.offerDeliveries().firstOrNull { it.transferId == transferId }
+            ?: error("状态行消失了：" + manager.offerDeliveries())
     }
 
     /**

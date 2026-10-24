@@ -13,6 +13,8 @@ import kotlin.test.assertTrue
 import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.awaitCancellation
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.sync.Mutex
+import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.runBlocking
 import kotlinx.coroutines.withTimeout
@@ -40,6 +42,10 @@ class GroupFanOutConcurrencyTest {
     @Test
     fun everyMemberStartsBeforeAnyOfThemReturns() = runBlocking {
         val gate = CompletableDeferred<Unit>()
+        // `live` / `peak` 被三个协程在 Dispatchers.Default 上并发读写 —— 裸 `var` 会丢更新，
+        // 也会让测试线程读到旧值（`live` 可能永远到不了 3，看起来像并发缺陷）。
+        // 用 Mutex 保护：读、写、断言都在锁内。
+        val lock = Mutex()
         var live = 0
         var peak = 0
         val job = launch {
@@ -50,19 +56,30 @@ class GroupFanOutConcurrencyTest {
                 envelopeFor = { envelopeOf(it) },
                 requeue = { _, _, _ -> true },
                 send = { _, _ ->
-                    live++
-                    if (live > peak) peak = live
+                    lock.withLock {
+                        live++
+                        if (live > peak) peak = live
+                    }
                     gate.await()
-                    live--
+                    lock.withLock { live-- }
                     SendOutcome.SENT
                 },
             )
         }
         // 等到三个成员都进过 send：串行实现下 live 永远到不了 3，这里会超时。
-        withTimeout(5_000) {
-            while (live < 3) delay(5)
+        //
+        // 上界只用来防挂死，**不表达时序语义**（要断言的是「都启动后才有人返回」，与快慢无关）。
+        // 原先 5s 在全量并行（org.gradle.workers.max=6，六个模块的测试 JVM 抢 CPU）时会被
+        // 饿到超时，看起来像并发缺陷 —— 实测单跑恒绿、并行偶红。30s 仍是有界等待。
+        withTimeout(30_000) {
+            while (true) {
+                val started = lock.withLock { live }
+                if (started >= 3) break
+                delay(5)
+            }
         }
-        assertEquals(3, peak, "三个成员必须在任何一个返回之前就已全部启动（串行实现下 peak 恒为 1）")
+        val peakSeen = lock.withLock { peak }
+        assertEquals(3, peakSeen, "三个成员必须在任何一个返回之前就已全部启动（串行实现下 peak 恒为 1）")
         gate.complete(Unit)
         job.join()
     }
@@ -71,7 +88,7 @@ class GroupFanOutConcurrencyTest {
     fun membersPastTheBudgetAreRequeuedInsteadOfLost() = runBlocking {
         val gate = CompletableDeferred<Unit>()
         val requeued = mutableListOf<String>()
-        val outcome = withTimeout(5_000) {
+        val outcome = withTimeout(30_000) {
             sendGroupTextFanOut(
                 members = listOf("fast", "slow"),
                 selfId = "self",
@@ -120,7 +137,7 @@ class GroupFanOutConcurrencyTest {
             Codec.groupTextPayload("hi", "g1", 1),
             id = "same-id",
         )
-        val outcome = withTimeout(5_000) {
+        val outcome = withTimeout(30_000) {
             sendGroupTextFanOut(
                 members = listOf("modern", "legacy"),
                 selfId = "self",
@@ -207,7 +224,7 @@ class GroupFanOutConcurrencyTest {
     @Test
     fun aHangingMemberDoesNotPreventTheFanOutFromReturning() = runBlocking {
         val requeued = mutableListOf<String>()
-        val outcome = withTimeout(2_000) {
+        val outcome = withTimeout(30_000) {
             sendGroupTextFanOut(
                 members = listOf("self", "hang"),
                 selfId = "self",

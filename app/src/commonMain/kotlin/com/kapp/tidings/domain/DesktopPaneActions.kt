@@ -3,6 +3,7 @@
 
 package com.kapp.tidings.domain
 
+import com.kapp.tidings.core.transport.SendOutcome
 import com.kapp.tidings.domain.ManualPeerEntry
 import com.kapp.tidings.platform.ReceivedFileActions
 // ExecDeviceRow 现在住在同一个包（领域侧）：它由 execDeviceRows() 算出来。
@@ -30,8 +31,29 @@ public interface DesktopPaneActions {
      */
     val receivedFileActions: ReceivedFileActions?
 
-    fun requestRestart()
+    /**
+     * 中断对端上的一次 agent 运行（PPE-1 §6.6）。
+     *
+     * 默认返回 null = 这个壳没有实现（UI 据此禁用「中断」）；**不要**在默认实现里假装成功 ——
+     * 群里曾经用「发一条 /cancel 文本」当替身，结果是所有人看到一条消息、对端没中断。
+     */
+    suspend fun cancelAgentRun(
+        peerId: String,
+        sessionId: String,
+        runId: String? = null,
+        reason: String? = null,
+    ): SendOutcome? = null
 
+    /** 文件柜「加载更多」（协议已支持 offset/truncated）。默认空实现 = 这个壳不画该按钮。 */
+    fun loadMoreCabinetEntries() {}
+
+    /** 撤销本会话的「免审」授权。默认空实现 = 这个壳没有该入口（不画按钮）。 */
+    fun revokeSessionApproval(sessionId: String) {}
+
+    /** 「重连」一条已保存但当前不通的手动地址。默认空实现 = 这个壳没有该入口。 */
+    fun reconnectManualPeer(entry: ManualPeerEntry) {}
+
+    fun requestRestart()
     fun addManualPeer(rawHost: String, rawPort: String)
 
     fun removeManualPeer(entry: ManualPeerEntry)
@@ -244,7 +266,7 @@ public interface DesktopPaneActions {
     fun loadCabinetPath(path: String)
     fun toggleCabinetSelection(name: String)
     fun clearCabinetSelection()
-    fun downloadCabinetEntries(names: List<String>, saveAs: Boolean = false)
+    fun downloadCabinetEntries(names: List<String>)
     fun uploadToCabinet(peerId: String)
     fun setCabinetViewMode(mode: String)
 

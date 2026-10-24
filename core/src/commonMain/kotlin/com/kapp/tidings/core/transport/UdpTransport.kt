@@ -123,9 +123,19 @@ class UdpTransport(
         return runCatching {
             val buf = Buffer().apply { write(bytes) }
             s.send(Datagram(buf, InetSocketAddress(host, port)))
+            lastSendError = null
             true
-        }.getOrDefault(false)
+        }.getOrElse { e ->
+            // 如实记下失败原因：调用方（与回归测试）要能区分「没开 SO_BROADCAST 被内核拒绝」
+            // 和「本机根本没有广播路由」——前者是缺陷，后者是环境。只返回 false 时两者不可分。
+            lastSendError = e::class.simpleName + ": " + (e.message ?: "")
+            false
+        }
     }
+
+    /** 最近一次 [send] 失败的原因（成功时为 null）。**不要**在失败后忘记清空 —— 见 send 的实现。 */
+    var lastSendError: String? = null
+        private set
 
     fun stop() {
         pump?.cancel()

@@ -4,7 +4,9 @@ package com.kapp.tidings.feature.agents
 
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
@@ -16,6 +18,7 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.backhandler.BackHandler
 import com.kapp.tidings.domain.RelayUiState
+import com.kapp.tidings.domain.isPendingApproval
 import com.kapp.tidings.domain.pickActiveSession
 import com.kapp.tidings.core.nowMillis
 import com.kapp.tidings.navigation.resolveAgentSessionId
@@ -56,6 +59,15 @@ fun AgentConsoleScreen(
     now: Long = nowMillis(),
     showHeader: Boolean = true,
     onRespondApproval: ((approvalId: String, allow: Boolean) -> Unit)? = null,
+    /**
+     * 三参处置（issue「本次免审全链路不可达」）：比 [onRespondApproval] 多一个
+     * `allowSession` —— 批准的同时声明「本会话内后续同类请求免审」。组合根应优先接
+     * controller 的三参 `respondApproval`；两参版本保留给只认批准/拒绝的旧调用点。
+     * null 时审批段退回 [onRespondApproval]（不画「本会话免审」按钮）。
+     */
+    onRespondChoice: ((approvalId: String, allow: Boolean, allowSession: Boolean) -> Unit)? = null,
+    /** 撤销「本会话免审」（见 SessionDetailView 的同名形参）。 */
+    onRevokeSessionApproval: ((sessionId: String) -> Unit)? = null,
     onCancelTask: ((taskId: String) -> Unit)? = null,
     onRefresh: (() -> Unit)? = null,
     /**
@@ -153,6 +165,8 @@ fun AgentConsoleScreen(
                 onOpenChat(sessionPeerId, effectiveWsId)
             },
             onRespondApproval = onRespondApproval,
+            onRespondChoice = onRespondChoice,
+            onRevokeSessionApproval = onRevokeSessionApproval,
             onCancelTask = onCancelTask,
             modifier = modifier,
             initialPicking = initialSessionPickerOpen,
@@ -197,8 +211,10 @@ fun AgentConsoleScreen(
                 pickActiveSession(
                     sessions = sessions,
                     lastEventAtOf = { s -> state.agentEventsOf(s).maxOfOrNull { it.at } ?: 0L },
+                    // 与看板/角标同一判据（含过期）：否则"打开聊天时停在哪条会话"会优先停在
+                    // 一条其实已经没事可做的会话上（它的审批早过期了）。
                     pendingSessionIds = state.agentApprovals.values
-                        .filter { it.peerId == selected.nodeId && it.status == "pending" }
+                        .filter { it.peerId == selected.nodeId && isPendingApproval(it, now) }
                         .map { it.sessionId }
                         .toSet(),
                     now = now,
@@ -210,6 +226,7 @@ fun AgentConsoleScreen(
                 onOpenChat(selected.nodeId, effectiveWsId)
             },
             onRespondApproval = onRespondApproval,
+            onRespondChoice = onRespondChoice,
             onRefresh = onRefresh,
             // 谁能用这个 agent 干活：逐设备勾选。
             // 数据由调用方算好（`execDeviceRows`），这里只透传 —— 派生逻辑不该散在壳里。
@@ -275,10 +292,13 @@ fun AgentConsoleScreen(
                 onFindNodes = onFindNodes,
                 onRefresh = onRefresh,
                 onRespondApproval = onRespondApproval,
+                onRespondChoice = onRespondChoice,
                 onCreateWorkspaceGroup = onCreateWorkspaceGroup,
             )
 
-            Column(Modifier.padding(bottom = LocalAppSpacing.current.xl)) {}
+            // 底部留白：原先是空 `Column(padding(bottom)) {}` —— 空组合件当间距用，
+            // 读代码的人会以为那里少了内容。Spacer 表达的就是间距本身。
+            Spacer(Modifier.height(LocalAppSpacing.current.xl))
         }
     }
 }

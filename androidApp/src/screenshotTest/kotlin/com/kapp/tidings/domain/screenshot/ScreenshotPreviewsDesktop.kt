@@ -889,8 +889,6 @@ private fun DeskSettingsDataPreview() {
                 persistMessagesEnabled = true,
                 onPersistMessagesEnabledChange = {},
                 onClearHistory = {},
-            // 武装这一支：可空出口不传则依赖它的界面根本不渲染（截图证据里没有它）。
-            onLinkDownlinkEnabledChange = {},
             )
         }
     }

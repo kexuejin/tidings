@@ -21,6 +21,9 @@ import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.saveable.Saver
+import androidx.compose.runtime.saveable.rememberSaveable
+import androidx.compose.ui.backhandler.BackHandler
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -43,6 +46,7 @@ import com.kapp.tidings.core.nowMillis
 import com.kapp.tidings.feature.agents.AgentConsoleScreen
 import com.kapp.tidings.feature.chat.draftOf
 import com.kapp.tidings.feature.chat.updateDraft
+import com.kapp.tidings.feature.chat.DraftsByConvSaver
 import com.kapp.tidings.feature.chat.ChatScreen
 import com.kapp.tidings.ui.components.AppBanner
 import com.kapp.tidings.generated.resources.workspace_group_default_name
@@ -159,6 +163,9 @@ public class DesktopShellActions(
  * `DesktopWindow.kt`）—— 原型自己就写着那 26px 是 macOS 系统菜单栏的示意
  * （`prototype/relay.html` 的 `.menubar` 注释）。
  */
+// BackHandler（系统返回键）在 Compose Multiplatform 里仍是实验 API：opt-in 收在这一个函数上，
+// 与其他壳层入口（App.kt 的 BackKeyHandler）同一处理方式。
+@OptIn(androidx.compose.ui.ExperimentalComposeUiApi::class)
 @Composable
 public fun DesktopShell(
     state: RelayUiState,
@@ -296,7 +303,12 @@ public fun DesktopShell(
     modifier: Modifier = Modifier,
 ) {
     val sizeClass = desktopWindowSizeClass(windowWidthDp, windowHeightDp, chromeMode)
-    var view by remember { mutableStateOf(initialView) }
+    // ⚠ 下面这六格（view / selectedPeerId / selectedWsId / selectedAgentSessionId / query /
+    // searching）**必须活过配置变更**：平板形态走的就是这条壳，而 Manifest 没有
+    // configChanges —— 转一次屏整个 Activity 重建，裸 remember 会把它们全扔回初值，
+    // 用户正在看的会话直接消失、视图跳回列表。手机壳由 App.kt 的 AppNavStateSaver 负责，
+    // 这条壳此前只有草稿表是 Saveable。改动它们之前先看 AppShellSaveableStateGuardTest。
+    var view by rememberSaveable(stateSaver = DesktopViewSaver) { mutableStateOf(initialView) }
 
     // 深链进来时把用户送到「节点」视图：新加的节点就在那里，留在会话列表会让人
     // 以为链接没生效。
@@ -307,20 +319,60 @@ public fun DesktopShell(
     LaunchedEffect(externalFilesRequest) {
         if (externalFilesRequest > 0) view = DesktopView.Files
     }
-    var selectedPeerId by remember { mutableStateOf(initialPeerId) }
+    var selectedPeerId by rememberSaveable { mutableStateOf(initialPeerId) }
 
     // 每个会话各自的草稿 —— 与手机壳同一条理由（见 App.kt 的 draftsByConv）：
     // ChatScreen 的 draft 是 `remember(peerId)` 的，切会话就重建，写到一半切走回来字没了。
     // 桌面窗口常驻，这张表活得比手机更久，但同样只活在进程内（不落盘）。
-    var draftsByConv by remember { mutableStateOf(mapOf<String, String>()) }
-    var selectedWsId by remember { mutableStateOf<String?>(null) }
-    var selectedAgentSessionId by remember(selectedPeerId) { mutableStateOf<String?>(null) }
+    //
+    // **必须是 rememberSaveable**：平板形态（Android 平板/折叠屏展开）走的就是这条壳，
+    // 而 Manifest 没有 configChanges —— 转一次屏整个 Activity 重建，裸 remember 会把草稿
+    // 全清掉。手机壳（App.kt）早就换成了 Saveable，桌面壳这边漏了，症状是"同一个应用，
+    // 手机上转屏不丢、平板上转屏全丢"。存档格式由 [DraftsByConvSaver] **唯一**决定 ——
+    // 它就是手机壳用的那一个实例（声明在 `feature/chat`，两壳谁都不许再包一层）。
+    var draftsByConv by rememberSaveable(stateSaver = DraftsByConvSaver) {
+        mutableStateOf(mapOf<String, String>())
+    }
+    var selectedWsId by rememberSaveable { mutableStateOf<String?>(null) }
+    var selectedAgentSessionId by rememberSaveable(selectedPeerId) { mutableStateOf<String?>(null) }
     var showWsQrFor by remember { mutableStateOf<WorkspaceUi?>(null) }
-    var query by remember { mutableStateOf(initialQuery) }
+    var query by rememberSaveable { mutableStateOf(initialQuery) }
     // 窄档搜索面板的展开态由壳持有，工具栏只负责呈现这个开关。
     // 面板收起后 query 仍保留：否则用户点一下「关闭」就把正在用的筛选无声清空了。
-    var searching by remember { mutableStateOf(false) }
-    var showCreateWsDialog by remember { mutableStateOf(false) }
+    var searching by rememberSaveable { mutableStateOf(false) }
+    var showCreateWsDialog by rememberSaveable { mutableStateOf(false) }
+
+    // 系统返回键（平板 two-pane）。
+    //
+    // ## 选中态在谁手里（与 App.kt 的边界）
+    //
+    // 宽屏形态下**「当前看的是哪个会话」只住在这一层**（selectedPeerId / selectedWsId /
+    // selectedAgentSessionId），`App.kt` 的 `nav.activeSessionId` 是**手机壳**的状态：
+    // 两栏分支既不读它、也不被它渲染。所以平板的返回键该由这里消费 —— App.kt 那几条
+    // 导航返回键在平板应当保持关闭（`&& !twoPane`），否则 `nav` 里可能残留一个
+    // **界面上看不见**的 activeSessionId（通知点进来那条路会写它），同一次返回被两层
+    // 各自消费一次，用户就会遇到"按两次才退出"。
+    //
+    // ## 只处理自己的状态，并且让**更深的层先消费**
+    //
+    // 这里只写上面三个本地变量，绝不碰 `nav` / controller；`state.cabinet.activePeerId`
+    // 例外：同事文件柜由 App.kt 那条 `peerCabinetOnTop` 负责（它是 controller 状态、两壳共享），
+    // 所以文件柜打开时这一条必须**让位**，保证同一次返回只有一个消费方、且顺序是
+    // 文件柜（更深）→ 会话详情 → 选中会话 → 交还系统。
+    //
+    // 桌面（JVM）上 BackHandler 是 no-op，不改变桌面行为。
+    BackHandler(
+        enabled = (selectedAgentSessionId != null || selectedPeerId != null) &&
+            state.cabinet.activePeerId == null,
+    ) {
+        when {
+            selectedAgentSessionId != null -> selectedAgentSessionId = null
+            else -> {
+                selectedPeerId = null
+                selectedWsId = null
+            }
+        }
+    }
     // task-2 接线：进入会话**那一刻**的未读条数。必须在 controller.selectConversation
     // （它会清零未读）之前采下，否则永远是 0 —— 屏外未读指示就只能退化成一个没有数字的
     // 「回到最新」。采集只能发生在壳里：只有壳知道"用户点了哪一行"，控制器在清完未读之后
@@ -362,11 +414,11 @@ public fun DesktopShell(
         selectedWsId = null
     }
 
+    // 列表数据流走与手机端同一个入口（orderConversationList = 查询词筛选 + orderInboxFeed）：
+    // 置顶的第一排序键只在 orderInboxFeed 里，桌面过去只做筛选、原样 map ⇒ 置顶点了没效果。
+    // 会话顺序的唯一真源仍是 RelayUiState.conversations；无置顶时顺序与它逐条一致（稳定排序）。
     val sessions = remember(state.conversations, query) {
-        val list = state.conversations
-        if (query.isBlank()) list else list.filter {
-            it.title.contains(query, ignoreCase = true) || it.preview?.contains(query, ignoreCase = true) == true
-        }
+        com.kapp.tidings.feature.conversations.orderConversationList(state.conversations, query)
     }
 
     // 快捷键挂在根 Column 上。Compose 的键事件沿焦点路径分发：preview 阶段从根往下走，
@@ -509,6 +561,25 @@ public fun DesktopShell(
             .focusable()
             .onPreviewKeyEvent { event ->
                 if (event.type != KeyEventType.KeyDown) return@onPreviewKeyEvent false
+                // Alt+↑/↓ 在会话列表里移动选中项（a-chat 已把会话行做成可聚焦，这里补列表级移动）。
+                // **不用裸方向键**：壳的 onPreviewKeyEvent 先于输入框收到事件，裸 ↑/↓ 会让
+                // 「在消息里挪光标」变成「切换会话」。视图不在会话页时不消费，交还给系统。
+                if (event.isAltPressed && !event.isCtrlPressed && !event.isMetaPressed) {
+                    val delta = when (event.key) {
+                        androidx.compose.ui.input.key.Key.DirectionDown -> 1
+                        androidx.compose.ui.input.key.Key.DirectionUp -> -1
+                        else -> 0
+                    }
+                    if (delta != 0 && view == DesktopView.Conversations) {
+                        nextConversationId(selectedPeerId, sessions.map { it.convId }, delta)?.let { next ->
+                            selectedPeerId = next
+                            selectedWsId = state.workspaceOfConv(next)?.wsId
+                            selectedAgentSessionId = null
+                            openConversation(next)
+                        }
+                        return@onPreviewKeyEvent true
+                    }
+                }
                 val spec = desktopShortcutKeySpec(event.key) ?: return@onPreviewKeyEvent false
                 val shortcut = desktopShortcutFor(
                     key = spec,
@@ -575,6 +646,9 @@ public fun DesktopShell(
                             activeSessionId = selectedAgentSessionId,
                             onSelectAgentSession = { selectedAgentSessionId = it },
                             unreadOnEntry = desktopChatUnreadOnEntry,
+                            // 草稿预览：与手机壳同一份表（App.kt 传同形 lambda）。空白草稿按
+                            // 「没有」处理，否则列表上会出现一个只剩空格的「草稿：」。
+                            draftPreviewOf = { convId -> draftsByConv[convId]?.takeIf { it.isNotBlank() } },
                             query = query,
                             onClearQuery = { query = "" },
                             onCopyPeerId = { actions.onCopyNodeId(it) },
@@ -702,6 +776,7 @@ public fun DesktopShell(
                             state.banner?.let { AppBanner(it, onDismiss = controller::dismissBanner) }
                             AgentConsoleScreen(
                                 state = state,
+                                onRevokeSessionApproval = controller::revokeSessionApproval,
                                 // 谁能用这个 agent 干活 —— 走 controller 的宿主侧桥。
                                 // 手机壳不接这个桥（null），所以那一侧不画配置区。
                                 // 可空 → 非空：null（壳没有台账）时给空列表，界面据此不画配置区。
@@ -754,6 +829,9 @@ public fun DesktopShell(
                                 },
                                 onFindNodes = { view = DesktopView.Nodes },
                                 onRespondApproval = controller::respondApproval,
+                                // 三参处置（「本会话免审」）：与手机壳同一条，接 controller 的
+                                // 三参重载 —— 此前只接两参，免审按钮永远不出现。
+                                onRespondChoice = controller::respondApproval,
                                 onCancelTask = controller::cancelAgentTask,
                                 onCreateWorkspaceGroup = { showCreateWsDialog = true },
                                 onRefresh = {
@@ -825,6 +903,12 @@ public fun DesktopShell(
                 // Compact：底导常驻。再点一次当前页的「会话」从详情退回列表 ——
                 // 底导是窄窗里唯一的返回入口，只切视图会让用户卡在详情里。
                 DesktopWindowSizeClass.Compact -> Column(Modifier.fillMaxSize()) {
+                    // 窄窗补搜索入口：这一档整条工具栏都不渲染，而 query 仍是壳层状态 ——
+                    // 从宽窗收窄过来时列表会一直被旧词过滤，却没有任何输入框（review #8）。
+                    // 只在「会话」视图显示：其它视图不按 query 过滤，摆一个输入框是在骗人。
+                    if (view == DesktopView.Conversations) {
+                        CompactSearchRow(query = query, onQueryChange = { query = it })
+                    }
                     Box(Modifier.weight(1f).fillMaxWidth()) { viewContent() }
                     CompactNavigationBar(
                         view = view,
@@ -927,3 +1011,39 @@ public fun DesktopShell(
     }
     }
 }
+
+/**
+ * [DesktopView] 的 Saveable 映射。
+ *
+ * 枚举在 Android Bundle 里可以靠 Serializable 过关，但各平台对「Bundle 里允许放什么」的
+ * 口径并不一致（与草稿表的 Saver 同一条理由）；显式只存 name，让存档里只有一个字符串，
+ * 读到不认识的视图名就退回会话列表 —— 不猜、也不崩在启动路径上。
+ */
+/**
+ * Alt+↑/↓ 的**纯判据**：在给定的会话顺序里从 [current] 移动 [delta] 格。
+ *
+ * ## 为什么要一个纯函数
+ *
+ * 列表级键盘移动的边界（第一次按 ↓ 从哪开始、到头之后怎么办、当前选中已被删掉怎么办）
+ * 是这条交互的全部内容；放在可执行的判断里，测试才能把"到头就停"和"跳过不存在的 id"
+ * 分开钉住，而不是靠一段 UI 代码的注释声明。
+ *
+ * 规则：
+ * - 列表为空 ⇒ null（没有可去的地方，调用方不要消费按键）；
+ * - [current] 为 null 或已不在列表里 ⇒ 从就近的一端进入（↓ 取第一条，↑ 也取第一条 ——
+ *   用户按 ↑ 时通常想要"最后一条"，但那条更常见于底部列表；侧栏是自上而下的时间序，
+ *   进第一条与手机/桌面其它列表的键盘行为一致，且不会让人以为选中跑到了屏幕外）；
+ * - 越界**夹住**而不是循环：循环会让"一直按 ↓"在两端来回跳，用户以为选中丢了。
+ */
+internal fun nextConversationId(current: String?, orderedIds: List<String>, delta: Int): String? {
+    if (orderedIds.isEmpty()) return null
+    val index = current?.let { orderedIds.indexOf(it) }?.takeIf { it >= 0 }
+    if (index == null) return orderedIds.first()
+    val target = (index + delta).coerceIn(0, orderedIds.lastIndex)
+    return orderedIds[target]
+}
+
+private val DesktopViewSaver: Saver<DesktopView, String> = Saver(
+    save = { it.name },
+    restore = { name -> DesktopView.entries.firstOrNull { it.name == name } },
+)

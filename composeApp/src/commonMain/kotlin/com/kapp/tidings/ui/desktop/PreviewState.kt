@@ -756,8 +756,9 @@ public fun desktopPreviewFolderState(): RelayUiState {
  * 两条返回真数据，其余方法与 [DesktopPreviewActions] 一样什么都不做。
  *
  * 为什么必须另起一个对象：全局搜索面板有四支状态
- * （`DesktopGlobalSearch.kt` 的 `GlobalSearchState.{Loading, Failed, Empty, Success}`），
- * 其中 `Success` 那一支（三段分组：联系人 / 聊天记录 / 文件）此前**一张图都没有** ——
+ * （共享结果区 `feature/search/GlobalSearchResults.kt` 的
+ * `GlobalSearchOutcome.{Loading, Failed, Idle, Done}`），
+ * 其中 `Done` 那一支（三段分组：联系人 / 聊天记录 / 文件）此前**一张图都没有** ——
  * 因为 [DesktopPreviewActions] 没 override `searchGlobal`，落到接口默认实现
  * （`DesktopPaneActions.searchGlobal` 的默认实现）返回 `GlobalSearchResult(query = query)`，
  * 三个 list 全空 ⇒ `isEmpty` 为真 ⇒ 面板永远走 `Empty`。

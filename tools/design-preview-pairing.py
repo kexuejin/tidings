@@ -88,22 +88,37 @@ NO_FRAME_MARKERS = (NO_PREVIEW, HOST_TRACK, "全稿无帧", "无帧")
 _PAREN_RE = re.compile(r"[（(][^（()）]*[)）]")
 
 
-def scan_previews(root):
-    """{函数名: (文件, {它渲染的屏级 Composable})}"""
-    out = {}
+def _preview_files(root):
+    """两个预览目录下所有 ScreenshotPreviews*.kt（**递归**）。
+
+    顶层 os.listdir 是个已踩过的坑：包名统一（com.kapp.tidings.*）把预览文件挪进了
+    `com/kapp/tidings/domain/screenshot/` 子目录，不递归的工具就一个 @Preview 都扫不到，
+    57 条「找不到预览」全是这个瞎。文件在哪一层不该影响扫描，按文件名找。
+    """
+    seen = set()
     for rel in PREVIEW_GLOBS:
         d = os.path.join(root, rel)
         if not os.path.isdir(d):
             continue
-        for name in sorted(os.listdir(d)):
-            if not PREVIEW_FILE_RE.match(name):
-                continue
-            src = open(os.path.join(d, name), encoding="utf-8").read()
-            hits = list(FUNC_RE.finditer(src))
-            for i, m in enumerate(hits):
-                end = hits[i + 1].start() if i + 1 < len(hits) else len(src)
-                body = _strip_comments(src[m.end():end])
-                out[m.group(1)] = (name, set(COMPOSABLE_RE.findall(body)))
+        for cur, _dirs, files in os.walk(d):
+            for name in sorted(files):
+                if PREVIEW_FILE_RE.match(name):
+                    path = os.path.join(cur, name)
+                    if path not in seen:  # 两个 GLOB 重叠时同一文件只读一次
+                        seen.add(path)
+                        yield name, path
+
+
+def scan_previews(root):
+    """{函数名: (文件, {它渲染的屏级 Composable})}"""
+    out = {}
+    for name, path in _preview_files(root):
+        src = open(path, encoding="utf-8").read()
+        hits = list(FUNC_RE.finditer(src))
+        for i, m in enumerate(hits):
+            end = hits[i + 1].start() if i + 1 < len(hits) else len(src)
+            body = _strip_comments(src[m.end():end])
+            out[m.group(1)] = (name, set(COMPOSABLE_RE.findall(body)))
     return out
 
 
@@ -311,35 +326,29 @@ def reachable_tested(comp, table, depth=3):
 def preview_armed(root, composables):
     """{preview: {Composable: 没传的闸门参数集合}}"""
     out = {}
-    for rel in PREVIEW_GLOBS:
-        d = os.path.join(root, rel)
-        if not os.path.isdir(d):
-            continue
-        for name in sorted(os.listdir(d)):
-            if not PREVIEW_FILE_RE.match(name):
-                continue
-            src = open(os.path.join(d, name), encoding="utf-8").read()
-            hits = list(FUNC_RE.finditer(src))
-            for i, m in enumerate(hits):
-                end = hits[i + 1].start() if i + 1 < len(hits) else len(src)
-                body = _strip_comments(src[m.end():end])
-                missing = {}
-                for cm in COMPOSABLE_RE.finditer(body):
-                    comp = cm.group(1)
-                    if comp not in composables:
-                        continue
-                    pend = _match(body, cm.end() - 1, "(", ")")
-                    passed = {a.group(1) for a in
-                              (re.match(r"\s*(\w+)\s*=", x) for x in _split_top(body[cm.end():pend - 1]))
-                              if a}
-                    # 闸门可能挂在子组件上，而参数是**根组件**声明并转发下去的：
-                    # 只有根也声明了这个参数，预览才有可能传给它，才算欠武装。
-                    gates = reachable_tested(comp, composables) & composables[comp]["optional"]
-                    miss = gates - passed
-                    if miss:
-                        missing[comp] = miss
-                if missing:
-                    out[m.group(1)] = missing
+    for name, path in _preview_files(root):
+        src = open(path, encoding="utf-8").read()
+        hits = list(FUNC_RE.finditer(src))
+        for i, m in enumerate(hits):
+            end = hits[i + 1].start() if i + 1 < len(hits) else len(src)
+            body = _strip_comments(src[m.end():end])
+            missing = {}
+            for cm in COMPOSABLE_RE.finditer(body):
+                comp = cm.group(1)
+                if comp not in composables:
+                    continue
+                pend = _match(body, cm.end() - 1, "(", ")")
+                passed = {a.group(1) for a in
+                          (re.match(r"\s*(\w+)\s*=", x) for x in _split_top(body[cm.end():pend - 1]))
+                          if a}
+                # 闸门可能挂在子组件上，而参数是**根组件**声明并转发下去的：
+                # 只有根也声明了这个参数，预览才有可能传给它，才算欠武装。
+                gates = reachable_tested(comp, composables) & composables[comp]["optional"]
+                miss = gates - passed
+                if miss:
+                    missing[comp] = miss
+            if missing:
+                out[m.group(1)] = missing
     return out
 
 

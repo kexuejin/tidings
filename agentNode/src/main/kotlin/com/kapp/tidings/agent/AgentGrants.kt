@@ -5,6 +5,7 @@ package com.kapp.tidings.agent
 import com.kapp.tidings.core.protocol.AgentGrantAccess
 import com.kapp.tidings.core.protocol.AgentGrantPolicies
 import com.kapp.tidings.core.protocol.AgentGrantScopes
+import com.kapp.tidings.core.protocol.canApproveAgentRequest
 import java.io.File
 import java.util.concurrent.locks.ReentrantReadWriteLock
 import kotlin.concurrent.read
@@ -179,24 +180,71 @@ class AgentGrantStore(private val file: File) {
                 if (!hasRw) return@any false
             }
             if (requireApproval) {
-                val canApprove = g.isMyDevice || g.access == AgentGrantAccess.OWNER ||
-                    (g.access == AgentGrantAccess.ADMIN && g.delegatedApproval)
+                // **唯一判据在 :core**：客户端画按钮与宿主认回执调的是同一个函数。
+                // 这里再写一遍 `isMyDevice || OWNER || (ADMIN && delegated)` 就是本仓
+                // 反复抓过的「两把尺子」—— 而这条尺子是安全边界，分叉一次就是越权一次。
+                val canApprove = canApproveAgentRequest(
+                    isLocalHost = false,
+                    isMyDevice = g.isMyDevice,
+                    access = g.access,
+                    delegatedApproval = g.delegatedApproval,
+                )
                 if (!canApprove) return@any false
             }
-            when (g.scope) {
-                AgentGrantScopes.ALL ->
-                    // **执行面不接受「整台设备」这一档**（本机用户除外）：
-                    // 它会让新装的 agent 自动继承执行权，用户毫无感知。
-                    // 详见 `forExecution` 的 KDoc。
-                    !forExecution || g.isMyDevice
-                AgentGrantScopes.AGENT -> agentKey != null && g.agentKey == agentKey
-                AgentGrantScopes.WORKSPACE -> {
-                    (agentKey == null || g.agentKey == null || g.agentKey == agentKey) &&
-                        (wsId != null && g.wsId == wsId)
-                }
-                else -> false
-            }
+            if (!scopeMatches(g, agentKey, wsId, forExecution)) return@any false
+            true
         }
+    }
+
+    /**
+     * **审批回执**的授权判据 —— 宿主侧唯一入口（`AgentSessionRegistry.approvalAuthority`）。
+     *
+     * ## 与 [allows] 的区别：不看策略档
+     *
+     * `allows` 的第一行是 `policy == AUTO ⇒ 恒真`。那个短路对「能看」是对的（开放档就是
+     * 开放），对「能批准高危操作」是灾难：`auto` 档下任何被添加的节点都会自动获得批准权，
+     * 而用户在客户端看到的却是「只读」（判据里 `AUTO` 不存在）。所以审批这里**只认显式授权**，
+     * 且那条授权必须满足 `:core` 的 `canApproveAgentRequest`（isMyDevice / OWNER /
+     * ADMIN+委托审批）。
+     *
+     * 说清代价：`auto` 档 + 一条授权都没有时，远端**不能**代为批准 —— 这正是"沉默 = 未授权"
+     * （父稿 §3.3）在审批这条路上的样子；要让人代为批准，就显式授一条 OWNER/ADMIN+委托，
+     * 而不是靠策略档顺带获得。
+     */
+    fun allowsApproval(nodeId: String, agentKey: String?, wsId: String?): Boolean = rwLock.read {
+        grants.any { g ->
+            if (g.nodeId != nodeId) return@any false
+            if (!canApproveAgentRequest(
+                    isLocalHost = false,
+                    isMyDevice = g.isMyDevice,
+                    access = g.access,
+                    delegatedApproval = g.delegatedApproval,
+                )
+            ) {
+                return@any false
+            }
+            scopeMatches(g, agentKey, wsId, forExecution = false)
+        }
+    }
+
+    /** 授权作用域是否覆盖这一帧（[allows] 与 [allowsApproval] 共用，一处定义）。 */
+    private fun scopeMatches(
+        g: Grant,
+        agentKey: String?,
+        wsId: String?,
+        forExecution: Boolean,
+    ): Boolean = when (g.scope) {
+        AgentGrantScopes.ALL ->
+            // **执行面不接受「整台设备」这一档**（本机用户除外）：
+            // 它会让新装的 agent 自动继承执行权，用户毫无感知。
+            // 详见 `forExecution` 的 KDoc。
+            !forExecution || g.isMyDevice
+        AgentGrantScopes.AGENT -> agentKey != null && g.agentKey == agentKey
+        AgentGrantScopes.WORKSPACE -> {
+            (agentKey == null || g.agentKey == null || g.agentKey == agentKey) &&
+                (wsId != null && g.wsId == wsId)
+        }
+        else -> false
     }
 
     fun setPolicy(next: String): Boolean {

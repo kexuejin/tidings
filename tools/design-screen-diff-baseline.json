@@ -1,7 +1,7 @@
 {
   "generatedAt": "d96d85c3d4e0",
   "note": "逐屏差集棘轮：每个键的差集只许变小。--check 报「新增的值」。",
-  "reason": "④ 收尾按验证者意见补迁了 3 处（HistorySearchOverlay 取消/确定、DesktopFilesPane 条件图标按钮）。m-histsearch|font-weight|proto 新增 500 是**量具口径变化**，不是视觉变化：原实现是 M3 OutlinedButton/Button + 内层 Text，字重由 ButtonDefaults 注入的 LocalTextStyle 带出；换成 AppOutlinedButton/AppButton 后，同一字重由 AppButtonSize.textStyle() 提供 —— 两者都是 MaterialTheme.typography.labelLarge，而 AppTheme.kt 的 labelLarge{fontWeight} 就是 FontWeight.Medium(500)。即这一屏的 500 一直都在（只换了声明位置），量具的「逐屏取值集合」看的是声明位置而不是渲染结果。已核对 AppTheme.kt 的 labelLarge；原型的 .hsdatebtn b 是 600，属另一处、未动。",
+  "reason": "3 处 m-home-* font-weight 新增 400 = 可访问性修复，不是视觉漂移：静音会话预览此前用 alpha 弱化，实测对比度 2.66:1（亮）/3.21:1（暗），低于 4.5:1；改为「字重 Normal + onSurfaceVariant」后 6.47/6.43:1。原型用透明度表达静音，代码改为字重表达 —— 400 是这条判据的产物，只在 m-home-recent/more/unread 三屏出现，其余值未变。",
   "rowCount": 70,
   "signature": {
     "d-agentdetail|__error__": [
@@ -129,7 +129,8 @@
     ],
     "d-chat|spacing|code": [
       "2",
-      "20"
+      "20",
+      "48"
     ],
     "d-chat|spacing|proto": [
       "1",
@@ -190,7 +191,8 @@
       "12",
       "14",
       "16",
-      "20"
+      "20",
+      "48"
     ],
     "d-emoji|spacing|proto": [
       "1",
@@ -283,7 +285,8 @@
     "d-groupcreate|spacing|code": [
       "2",
       "3",
-      "20"
+      "20",
+      "48"
     ],
     "d-groupcreate|spacing|proto": [
       "7",
@@ -312,7 +315,8 @@
     "d-histsearch|spacing|code": [
       "1.5",
       "20",
-      "24"
+      "24",
+      "48"
     ],
     "d-histsearch|spacing|proto": [
       "1",
@@ -345,9 +349,6 @@
     "d-nodes|font-size|proto": [
       "24"
     ],
-    "d-nodes|radius|proto": [
-      "9"
-    ],
     "d-nodes|spacing|code": [
       "4"
     ],
@@ -355,9 +356,7 @@
       "1",
       "1.5",
       "3",
-      "5",
       "7",
-      "9",
       "11",
       "13"
     ],
@@ -465,9 +464,6 @@
     "d-search-empty|font-size|proto": [
       "24"
     ],
-    "d-search-empty|font-weight|proto": [
-      "400"
-    ],
     "d-search-empty|radius|code": [
       "6",
       "8",
@@ -486,9 +482,6 @@
     ],
     "d-search|font-size|proto": [
       "24"
-    ],
-    "d-search|font-weight|proto": [
-      "400"
     ],
     "d-search|radius|code": [
       "6",
@@ -512,7 +505,8 @@
       "8"
     ],
     "d-settings-data|spacing|code": [
-      "2"
+      "2",
+      "48"
     ],
     "d-settings-data|spacing|proto": [
       "1",
@@ -547,6 +541,9 @@
     ],
     "d-settings|font-size|proto": [
       "16"
+    ],
+    "d-settings|spacing|code": [
+      "48"
     ],
     "d-settings|spacing|proto": [
       "1.5",
@@ -592,6 +589,10 @@
       "8",
       "11",
       "15"
+    ],
+    "d-tray|spacing|code": [
+      "8",
+      "16"
     ],
     "d-tray|spacing|proto": [
       "1",
@@ -645,7 +646,8 @@
     "m-addnode-fill|spacing|code": [
       "1",
       "24",
-      "32"
+      "32",
+      "48"
     ],
     "m-addnode-fill|spacing|proto": [
       "1.5",
@@ -667,7 +669,8 @@
     "m-addnode|spacing|code": [
       "1",
       "24",
-      "32"
+      "32",
+      "48"
     ],
     "m-addnode|spacing|proto": [
       "1.5",
@@ -702,6 +705,9 @@
     "m-cabinet|font-size|code": [
       "16"
     ],
+    "m-cabinet|radius|code": [
+      "20"
+    ],
     "m-cabinet|spacing|code": [
       "4"
     ],
@@ -725,7 +731,8 @@
     "m-chat-group|spacing|code": [
       "9",
       "11",
-      "20"
+      "20",
+      "48"
     ],
     "m-chat-group|spacing|proto": [
       "1",
@@ -752,7 +759,8 @@
     "m-chat-solo|spacing|code": [
       "9",
       "11",
-      "20"
+      "20",
+      "48"
     ],
     "m-chat-solo|spacing|proto": [
       "1",
@@ -779,7 +787,8 @@
     "m-chat|spacing|code": [
       "9",
       "11",
-      "20"
+      "20",
+      "48"
     ],
     "m-chat|spacing|proto": [
       "1",
@@ -805,7 +814,8 @@
     "m-folderin|spacing|code": [
       "4",
       "11",
-      "20"
+      "20",
+      "48"
     ],
     "m-folderin|spacing|proto": [
       "1.5"
@@ -852,9 +862,11 @@
       "400"
     ],
     "m-gsearch-empty|radius|code": [
-      "8"
+      "8",
+      "10"
     ],
     "m-gsearch-empty|spacing|code": [
+      "3",
       "4",
       "24"
     ],
@@ -869,9 +881,11 @@
       "400"
     ],
     "m-gsearch|radius|code": [
-      "8"
+      "8",
+      "10"
     ],
     "m-gsearch|spacing|code": [
+      "3",
       "4",
       "24"
     ],
@@ -904,7 +918,8 @@
       "1.5",
       "4",
       "20",
-      "24"
+      "24",
+      "48"
     ],
     "m-histdate|spacing|proto": [
       "7"
@@ -931,6 +946,9 @@
     "m-histsearch|spacing|code": [
       "4"
     ],
+    "m-home-more|font-weight|code": [
+      "400"
+    ],
     "m-home-more|radius|code": [
       "4"
     ],
@@ -947,6 +965,9 @@
     "m-home-more|spacing|proto": [
       "11"
     ],
+    "m-home-recent|font-weight|code": [
+      "400"
+    ],
     "m-home-recent|radius|code": [
       "4"
     ],
@@ -961,6 +982,9 @@
     ],
     "m-home-recent|spacing|proto": [
       "11"
+    ],
+    "m-home-unread|font-weight|code": [
+      "400"
     ],
     "m-home-unread|radius|code": [
       "4"
@@ -1017,7 +1041,8 @@
     ],
     "m-msgmenu|spacing|code": [
       "3",
-      "20"
+      "20",
+      "48"
     ],
     "m-msgmenu|spacing|proto": [
       "1",
@@ -1042,7 +1067,8 @@
       "1",
       "3",
       "24",
-      "32"
+      "32",
+      "48"
     ],
     "m-myqr|spacing|proto": [
       "1.5",
@@ -1061,7 +1087,8 @@
       "1",
       "3",
       "24",
-      "32"
+      "32",
+      "48"
     ],
     "m-nodedetail|spacing|proto": [
       "1.5",
@@ -1072,7 +1099,8 @@
     ],
     "m-nodes-empty|radius|code": [
       "8",
-      "10"
+      "10",
+      "20"
     ],
     "m-nodes-empty|radius|proto": [
       "16"
@@ -1085,15 +1113,15 @@
       "32"
     ],
     "m-nodes-empty|spacing|proto": [
-      "11",
-      "48"
+      "11"
     ],
     "m-nodes|font-weight|code": [
       "400"
     ],
     "m-nodes|radius|code": [
       "8",
-      "10"
+      "10",
+      "20"
     ],
     "m-nodes|radius|proto": [
       "16"
@@ -1104,7 +1132,8 @@
       "7",
       "9",
       "24",
-      "32"
+      "32",
+      "48"
     ],
     "m-nodes|spacing|proto": [
       "11"
@@ -1125,7 +1154,8 @@
       "13"
     ],
     "m-screencard|spacing|code": [
-      "20"
+      "20",
+      "48"
     ],
     "m-screencard|spacing|proto": [
       "1",
@@ -1150,7 +1180,8 @@
     "m-sendfolder|spacing|code": [
       "4",
       "11",
-      "20"
+      "20",
+      "48"
     ],
     "m-sendfolder|spacing|proto": [
       "1.5"
@@ -1160,6 +1191,9 @@
     ],
     "m-set-appear|radius|proto": [
       "16"
+    ],
+    "m-set-appear|spacing|code": [
+      "48"
     ],
     "m-set-appear|spacing|proto": [
       "2",
@@ -1172,7 +1206,8 @@
       "16"
     ],
     "m-set-avatar|spacing|code": [
-      "4"
+      "4",
+      "48"
     ],
     "m-set-avatar|spacing|proto": [
       "11"
@@ -1190,7 +1225,8 @@
     ],
     "m-set-caps|spacing|code": [
       "3",
-      "4"
+      "4",
+      "48"
     ],
     "m-set-caps|spacing|proto": [
       "1.5",
@@ -1206,7 +1242,8 @@
       "16"
     ],
     "m-set-conn|spacing|code": [
-      "4"
+      "4",
+      "48"
     ],
     "m-set-data|font-size|code": [
       "14"
@@ -1217,7 +1254,8 @@
     ],
     "m-set-data|spacing|code": [
       "3",
-      "4"
+      "4",
+      "48"
     ],
     "m-set-data|spacing|proto": [
       "1.5",
@@ -1225,7 +1263,8 @@
     ],
     "m-set-diag|spacing|code": [
       "3",
-      "4"
+      "4",
+      "48"
     ],
     "m-set-diag|spacing|proto": [
       "2",
@@ -1241,7 +1280,8 @@
     ],
     "m-set-notify|spacing|code": [
       "3",
-      "4"
+      "4",
+      "48"
     ],
     "m-set-notify|spacing|proto": [
       "11"
@@ -1250,6 +1290,9 @@
       "8",
       "16"
     ],
+    "m-set-profile|spacing|code": [
+      "48"
+    ],
     "m-set-profile|spacing|proto": [
       "1.5",
       "11"
@@ -1257,6 +1300,9 @@
     "m-settings|radius|proto": [
       "0",
       "16"
+    ],
+    "m-settings|spacing|code": [
+      "48"
     ],
     "m-settings|spacing|proto": [
       "2",

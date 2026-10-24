@@ -3,6 +3,7 @@
 package com.kapp.tidings.domain
 
 import android.content.pm.ApplicationInfo
+import com.kapp.tidings.shouldRegisterTestQrReceiver
 import kotlin.test.Test
 import kotlin.test.assertFalse
 import kotlin.test.assertTrue

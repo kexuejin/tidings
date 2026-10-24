@@ -2,7 +2,7 @@
 
 package com.kapp.tidings.desktop
 
-import java.io.File
+import com.kapp.tidings.desktop.testutil.RepoSource
 import kotlin.test.Test
 import kotlin.test.assertTrue
 
@@ -28,17 +28,8 @@ import kotlin.test.assertTrue
  */
 class DesktopDropTargetWiringTest {
 
-    private val root: File by lazy {
-        var dir = File("").absoluteFile
-        repeat(6) {
-            val candidate = File(dir, "desktopApp/src/main/kotlin/com/kapp/tidings/desktop")
-            if (candidate.isDirectory) return@lazy candidate
-            dir = dir.parentFile ?: dir
-        }
-        error("找不到 desktopApp 源码目录")
-    }
-
-    private fun read(name: String): String = File(root, name).readText()
+    private fun read(name: String): String =
+        RepoSource.read("desktopApp/src/main/kotlin/com/kapp/tidings/desktop/" + name)
 
     @Test
     fun 主窗接了拖放且真的会发送() {

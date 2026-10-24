@@ -9,7 +9,7 @@ import com.kapp.tidings.core.protocol.MsgTypes
 import com.kapp.tidings.core.protocol.Profile
 import com.kapp.tidings.core.protocol.newId
 import com.kapp.tidings.core.session.NodeRuntime
-import com.kapp.tidings.core.transport.IncomingOffer
+import com.kapp.tidings.agent.testutil.Await
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
@@ -169,7 +169,11 @@ class ControlPlaneTest {
         // 反向：桌面端主动发一封给 agentNode。
         runBlocking { desktop.sendText(agent.nodeId, "回来的信") }
 
-        val inbound = awaitInbound()
+        val inbound = Await.value("agentNode 收件箱里出现入站帧") {
+            array(get("/v1/inbox?since=0").second)
+                .filter { it["direction"]?.jsonPrimitive?.contentOrNull == "in" }
+                .takeIf { it.isNotEmpty() }
+        }
         assertEquals(1, inbound.size, "入站应恰好一封")
         assertEquals("in", inbound[0]["direction"]?.jsonPrimitive?.contentOrNull)
         assertEquals(desktop.nodeId, inbound[0]["peerId"]?.jsonPrimitive?.contentOrNull)
@@ -268,7 +272,14 @@ class ControlPlaneTest {
         assertEquals("agent-event", obj(event.second)["type"]?.jsonPrimitive?.contentOrNull)
 
         // 两帧都必须真的落到对端：status=sent 的含义是对方回了 ACK，不是"我们发出去了"。
-        val frames = awaitPeerFrames(setOf("agent-session", "agent-event"))
+        val expectedTypes = setOf("agent-session", "agent-event")
+        val frames = Await.value("对端收到 $expectedTypes") {
+            desktopFrames
+                .filter { it["type"]?.jsonPrimitive?.contentOrNull in expectedTypes }
+                .takeIf { seen ->
+                    seen.mapNotNull { it["type"]?.jsonPrimitive?.contentOrNull }.containsAll(expectedTypes)
+                }
+        }
         val sessionPayload = frames
             .first { it["type"]?.jsonPrimitive?.contentOrNull == "agent-session" }
             .let { it["payload"]!!.jsonObject }
@@ -497,12 +508,18 @@ class ControlPlaneTest {
         // 关键断言①：**投递真的完成**（offering → offered），从只读出口读 ——
         // 没有这条，「登记即返回」就可能把「发不出去」变成「看起来发出去了」。
         val transferId = json["transferId"]!!.jsonPrimitive.content
-        val delivery = awaitDelivery(transferId)
+        val delivery = Await.value("$transferId 的投递不再停在 offering") {
+            obj(get("/v1/transfers").second)["transfers"]?.jsonArray?.map { it.jsonObject }
+                ?.firstOrNull { it["transferId"]?.jsonPrimitive?.contentOrNull == transferId }
+                ?.takeIf { it["state"]?.jsonPrimitive?.contentOrNull != "offering" }
+        }
         assertEquals("offered", delivery["state"]?.jsonPrimitive?.contentOrNull, "投递应到达 offered：" + delivery)
 
         // 关键断言②：对端真的挂上了一个待处理报价，字段与协议一致。
-        val offer = runBlocking { awaitOffer() }
-        assertTrue(offer != null, "对端应收到一条待处理报价")
+        // 探测在轮询里重跑，所以 `runBlocking` 放在 probe 内（不是包住整个轮询）。
+        val offer = Await.value("对端挂上一条待处理报价") {
+            runBlocking { desktop.pendingTransferOffers().firstOrNull() }
+        }
         assertEquals(file.name, offer.rootName)
         assertEquals(file.length(), offer.totalSize)
         assertEquals(agent.nodeId, offer.peerId)
@@ -525,8 +542,10 @@ class ControlPlaneTest {
         // image —— 小图带 purpose:image 会被对面直接收下，报价随即从待处理里消失，反而看不见。
         // 阈值行为（群图 10MB vs 私聊 20MB）由 core 的 TransferAutoAcceptTest 钉，
         // 发端把群引用写上帧由 TransferOfferGroupRefTest 钉，这里只钉 HTTP 这一层不吞字段。
-        val offer = runBlocking { awaitOffer() }
-        assertTrue(offer != null, "对端应收到一条待处理报价")
+        // 探测在轮询里重跑，所以 `runBlocking` 放在 probe 内（不是包住整个轮询）。
+        val offer = Await.value("对端挂上一条待处理报价") {
+            runBlocking { desktop.pendingTransferOffers().firstOrNull() }
+        }
         assertEquals("g-1", offer.groupId, "群 id 没走到对面，收端只会当成私聊媒体")
         assertEquals(7, offer.groupRev)
     }
@@ -551,8 +570,10 @@ class ControlPlaneTest {
         // 故意不带 purpose:image —— 1KB 的图带 purpose:image 会被对面自动收下，
         // 报价随即从待处理里消失，反而看不见。这里钉的是 HTTP 这一层不吞字段，
         // 不是自动接收那条规则（阈值行为见 core 的 TransferAutoAcceptTest）。
-        val offer = runBlocking { awaitOffer() }
-        assertTrue(offer != null, "对端应收到一条待处理报价")
+        // 探测在轮询里重跑，所以 `runBlocking` 放在 probe 内（不是包住整个轮询）。
+        val offer = Await.value("对端挂上一条待处理报价") {
+            runBlocking { desktop.pendingTransferOffers().firstOrNull() }
+        }
         assertEquals(tsv, offer.tableText, "表格文字没走到对面，界面上那个开关就永远不出现")
         // 没超上限，就不该带 truncated 标记。
         assertNotEquals(true, offer.tableTextTruncated)
@@ -656,16 +677,26 @@ class ControlPlaneTest {
             writeText("x")
             deleteOnExit()
         }
+        // 「不存在的路径」与「目录」都**现造**，不借口机器上的 `/tmp`：
+        // 前者若那台机器恰好有这个文件，就会变成"存在的路径"（校验仍 400，但走的是另一支）；
+        // 后者在没有 `/tmp` 的机器上会以"路径不存在"过掉同一条断言 —— 两种都是假绿。
+        val dir = File.createTempFile("relay-controlplane-dir-", "").apply {
+            delete()
+            mkdirs()
+            deleteOnExit()
+        }
+        val missing = File(dir, "relay-does-not-exist-" + dir.name.hashCode() + ".bin")
+        assertTrue(!missing.exists(), "临时目录下不该已有这个文件：" + missing)
         val base = """"to":"$LOOPBACK","port":${desktop.boundPort}"""
         assertEquals(400, post("/v1/send-file", "{$base}").first, "缺 path")
         assertEquals(
             400,
-            post("/v1/send-file", "{$base,\"path\":\"/tmp/relay-does-not-exist-8f3a2b\"}").first,
+            post("/v1/send-file", "{$base,\"path\":\"${missing.absolutePath}\"}").first,
             "不存在的路径",
         )
         assertEquals(
             400,
-            post("/v1/send-file", "{$base,\"path\":\"/tmp\"}").first,
+            post("/v1/send-file", "{$base,\"path\":\"${dir.absolutePath}\"}").first,
             "目录不是普通文件",
         )
         assertEquals(
@@ -702,50 +733,20 @@ class ControlPlaneTest {
 
     // ------------------------------------------------------------------ 辅助
 
+    /** 量一次 `GET /v1/peers` 的耗时（毫秒），并顺带断言它必须是 200。 */
+    private fun measurePeersMs(): Long {
+        val startedAt = Await.nowMillis()
+        val res = get("/v1/peers")
+        assertEquals(200, res.first, "阻塞发送占满处理器时 /v1/peers 也必须回 200")
+        return Await.nowMillis() - startedAt
+    }
+
     /**
      * 等**对端**（[desktop]）的库里出现这些类型的帧。
      *
      * 注意不能查 agentNode 自己的 `/v1/inbox`：那里记的是它**发出**的行（direction=out），
      * 而这几个用例要验证的是"帧真的到了对面"。
      */
-    private fun awaitPeerFrames(expectedTypes: Set<String>, timeoutMs: Long = 5_000L): List<JsonObject> {
-        val deadline = System.currentTimeMillis() + timeoutMs
-        var frames = emptyList<JsonObject>()
-        while (System.currentTimeMillis() < deadline) {
-            frames = desktopFrames.filter { it["type"]?.jsonPrimitive?.contentOrNull in expectedTypes }
-            val seen = frames.mapNotNull { it["type"]?.jsonPrimitive?.contentOrNull }.toSet()
-            if (seen.containsAll(expectedTypes)) return frames
-            Thread.sleep(50)
-        }
-        return frames
-    }
-
-    /** 等对端挂上一条待处理报价（文件报价走的是另一条通道，比文本帧慢半拍）。 */
-    /** 轮询只读出口，等某次报价的投递状态不再是 offering（task-62）。 */
-    private fun awaitDelivery(transferId: String, timeoutMs: Long = 5_000L): JsonObject {
-        val deadline = System.currentTimeMillis() + timeoutMs
-        var last: JsonObject? = null
-        while (System.currentTimeMillis() < deadline) {
-            val body = obj(get("/v1/transfers").second)
-            val row = body["transfers"]?.jsonArray?.map { it.jsonObject }
-                ?.firstOrNull { it["transferId"]?.jsonPrimitive?.contentOrNull == transferId }
-            if (row != null) {
-                last = row
-                if (row["state"]?.jsonPrimitive?.contentOrNull != "offering") return row
-            }
-            Thread.sleep(50)
-        }
-        return last ?: error("只读出口里没有这次报价：" + transferId)
-    }
-
-    private suspend fun awaitOffer(timeoutMs: Long = 5_000L): IncomingOffer? {
-        val deadline = System.currentTimeMillis() + timeoutMs
-        while (System.currentTimeMillis() < deadline) {
-            desktop.pendingTransferOffers().firstOrNull()?.let { return it }
-            Thread.sleep(50)
-        }
-        return null
-    }
 
     // ------------------------------------------------- PPE-1 增补 D3 / D7（2026-10-14）
 
@@ -761,7 +762,7 @@ class ControlPlaneTest {
         assertEquals("sent", json["status"]?.jsonPrimitive?.contentOrNull)
         assertEquals(MsgTypes.AGENT_WORKSPACE, json["type"]?.jsonPrimitive?.contentOrNull)
 
-        val frames = awaitDesktop(MsgTypes.AGENT_WORKSPACE)
+        val frames = Await.value("桌面收到 " + MsgTypes.AGENT_WORKSPACE) { desktopFrames.filter { it["type"]?.jsonPrimitive?.contentOrNull == MsgTypes.AGENT_WORKSPACE }.takeIf { it.isNotEmpty() } }
         assertEquals(1, frames.size, "桌面侧应收到恰好一条 agent-workspace 帧")
         val payload = frames[0]["payload"]!!.jsonObject
         assertEquals("ws-abc123", payload["wsId"]?.jsonPrimitive?.contentOrNull)
@@ -835,7 +836,7 @@ class ControlPlaneTest {
         assertTrue(notes.any { it.contains("只拦未来投递") }, "撤销的诚实边界必须写进回执：$notes")
 
         // 方向：agent-grant 是宿主 → 设备的帧，判据在桌面侧收下的帧里，不在 agent 自己的 inbox。
-        val frames = awaitDesktop(MsgTypes.AGENT_GRANT)
+        val frames = Await.value("桌面收到 " + MsgTypes.AGENT_GRANT) { desktopFrames.filter { it["type"]?.jsonPrimitive?.contentOrNull == MsgTypes.AGENT_GRANT }.takeIf { it.isNotEmpty() } }
         assertEquals(1, frames.size)
         assertEquals("revoked", frames[0]["payload"]!!.jsonObject["state"]?.jsonPrimitive?.contentOrNull)
     }
@@ -909,7 +910,7 @@ class ControlPlaneTest {
             "{\"to\":\"127.0.0.1\",\"port\":${desktop.boundPort},\"sessionId\":\"s-blocked\",\"agentKind\":\"DSH\"}",
         )
         assertEquals(200, ok.first, ok.second)
-        val arrived = awaitDesktop(MsgTypes.AGENT_SESSION)
+        val arrived = Await.value("桌面收到 " + MsgTypes.AGENT_SESSION) { desktopFrames.filter { it["type"]?.jsonPrimitive?.contentOrNull == MsgTypes.AGENT_SESSION }.takeIf { it.isNotEmpty() } }
         assertEquals("s-blocked", arrived.last()["payload"]!!.jsonObject["sessionId"]?.jsonPrimitive?.contentOrNull)
     }
 
@@ -920,7 +921,7 @@ class ControlPlaneTest {
         // 只会入队（QUEUED），申请帧永远到不了 —— 握手是这条链路的前提，不是被测行为。
         post("/v1/send", "{\"to\":\"127.0.0.1\",\"port\":${desktop.boundPort},\"text\":\"握手\"}")
         runBlocking { desktop.sendAgentGrantRequest(agent.nodeId, "dsh-main", "想在手机上看 DSH 会话") }
-        val snap = awaitUntil {
+        val snap = Await.value("待办里出现设备发来的授权申请") {
             val s = obj(get("/v1/agent/grants").second)
             if (s["requests"]!!.jsonArray.isNotEmpty()) s else null
         }
@@ -931,34 +932,15 @@ class ControlPlaneTest {
         // 先批一条再让设备申请一次：宿主必须回 agent-grant-list（沉默 ≠ 拒绝，四档可区分）。
         assertEquals(200, putJson("/v1/agent/grants", "{\"grant\":{\"nodeId\":\"" + desktop.nodeId + "\",\"scope\":\"all\"}}").first)
         runBlocking { desktop.sendAgentGrantRequest(agent.nodeId, "dsh-main", "再问一次") }
-        val lists = awaitDesktop(MsgTypes.AGENT_GRANT_LIST)
+        val lists = Await.value("桌面收到 " + MsgTypes.AGENT_GRANT_LIST) { desktopFrames.filter { it["type"]?.jsonPrimitive?.contentOrNull == MsgTypes.AGENT_GRANT_LIST }.takeIf { it.isNotEmpty() } }
         assertTrue(lists.isNotEmpty(), "申请后设备应收到当前授权清单（agent-grant-list）")
         assertEquals("all", lists.last()["payload"]!!.jsonObject["scope"]?.jsonPrimitive?.contentOrNull)
     }
 
     /**
      * 轮询桌面侧收下的帧直到出现 [type]（agent → desktop 方向的帧判据在这里 ——
-     * `awaitInbound` 读的是 agent 自己的收件箱，方向反了测的就是空气）。
+     * 读 agent 自己收件箱的那个方向反了，测的就是空气）。
      */
-    private fun awaitDesktop(type: String, timeoutMs: Long = 5_000L): List<JsonObject> {
-        val deadline = System.currentTimeMillis() + timeoutMs
-        while (System.currentTimeMillis() < deadline) {
-            val rows = desktopFrames.filter { it["type"]?.jsonPrimitive?.contentOrNull == type }
-            if (rows.isNotEmpty()) return rows
-            Thread.sleep(50)
-        }
-        return emptyList()
-    }
-
-    /** 轮询到断言出非空为止（异步入站 + 回包链路，与 awaitInbound 同一动机）。 */
-    private fun awaitUntil(probe: () -> JsonObject?): JsonObject {
-        val deadline = System.currentTimeMillis() + 5_000
-        while (System.currentTimeMillis() < deadline) {
-            probe()?.let { return it }
-            Thread.sleep(50)
-        }
-        throw AssertionError("5s 内没有等到期望的读数")
-    }
 
     private fun putJson(path: String, body: String): Pair<Int, String> {
         val res = client.send(
@@ -969,18 +951,6 @@ class ControlPlaneTest {
             HttpResponse.BodyHandlers.ofString(),
         )
         return res.statusCode() to res.body()
-    }
-
-    private fun awaitInbound(timeoutMs: Long = 5_000L): List<JsonObject> {
-        val deadline = System.currentTimeMillis() + timeoutMs
-        var rows = emptyList<JsonObject>()
-        while (System.currentTimeMillis() < deadline) {
-            rows = array(get("/v1/inbox?since=0").second)
-                .filter { it["direction"]?.jsonPrimitive?.contentOrNull == "in" }
-            if (rows.isNotEmpty()) return rows
-            Thread.sleep(50)
-        }
-        return rows
     }
 
     private fun get(path: String, port: Int = plane.boundPort, token: String? = null): Pair<Int, String> {
@@ -1023,29 +993,44 @@ class ControlPlaneTest {
      */
     @Test
     fun peersStaysFastEvenWhenBlockingSendsFillTheHandlerPool() {
-        // 6 条并发 POST 全发往黑洞地址（TEST-NET-1，不会有 ACK）：每条按住一个线程约 8 秒。
-        val sender = java.util.concurrent.Executors.newFixedThreadPool(6)
+        // 预算相对**本机基线**：绝对阈值（原来写死 1s）在慢机器/并发 CI 上是假红 ——
+        // 那台机器空载读一次也要 300ms 时，"< 1s" 测的就不是池子饿死而是机器快慢。
+        // 上限仍钉在 [MAX_PEERS_MS]（1s），远小于黑洞退避（约 8s），所以「真被饿死」照样红。
+        val baselineMs = (1..3).minOf { measurePeersMs() }
+        val budgetMs = minOf(MAX_PEERS_MS, maxOf(baselineMs * 20, 1_000L))
+
+        val entered = java.util.concurrent.atomic.AtomicInteger(0)
         val gate = java.util.concurrent.CountDownLatch(1)
-        val futures = (1..6).map {
+        val sender = java.util.concurrent.Executors.newFixedThreadPool(STORM_SENDERS)
+        val futures = (1..STORM_SENDERS).map {
             sender.submit {
                 gate.await()
-                runCatching { post("/v1/send", """{"to":"192.0.2.1","port":17878,"text":"黑洞"}""") }
+                // 计数放在 submit 之后、post 之前：post 会一直卡到黑洞退避结束（约 8s），
+                // 所以「计到 6」= 六条都真的在等回包，线程池已经被占住。
+                entered.incrementAndGet()
+                runCatching { post("/v1/send", STORM_SEND_BODY) }
             }
         }
         gate.countDown()
         try {
-            // 让阻塞请求真的进到处理器里（runBlocking 已经开始按住线程）。
-            Thread.sleep(800)
-            val worst = (1..5).maxOf {
-                val startedAt = System.currentTimeMillis()
-                val res = get("/v1/peers")
-                val elapsed = System.currentTimeMillis() - startedAt
-                assertEquals(200, res.first, "阻塞发送占满处理器时 /v1/peers 也必须回 200")
-                elapsed
-            }
+            // **不睡固定时长。** 过去是 Thread.sleep(800) 赌「800ms 足够让它们进到处理器」：
+            // 慢机器上赌输就读到"池子还没满"的假绿，快机器上白等。现在等到可观测信号。
+            Await.condition(
+                "${STORM_SENDERS} 条阻塞 POST 都已进入",
+                timeoutMs = STORM_ENTER_TIMEOUT_MS,
+            ) { entered.get() >= STORM_SENDERS }
+
+            val worst = (1..5).maxOf { measurePeersMs() }
+
+            // 采样时这六条必须**仍然在途**：否则测的是"风暴过去之后读很快"，与缺陷无关。
+            assertEquals(
+                STORM_SENDERS,
+                futures.count { !it.isDone },
+                "采样时阻塞发送必须仍在途 —— 都结束了这条测试就证明不了「池子被占满时读还快」",
+            )
             assertTrue(
-                worst < MAX_PEERS_MS,
-                "阻塞发送占满处理器时 /v1/peers 最慢 ${worst}ms（应 < ${MAX_PEERS_MS}ms）",
+                worst < budgetMs,
+                "阻塞发送占满处理器时 /v1/peers 最慢 ${worst}ms（基线 ${baselineMs}ms，预算 ${budgetMs}ms）",
             )
         } finally {
             futures.forEach { it.cancel(true) }
@@ -1056,8 +1041,20 @@ class ControlPlaneTest {
     private companion object {
         const val LOOPBACK = "127.0.0.1"
 
-        /** 读路由的单次上限（真机验收是 < 200ms；这里给 CI 留余量）。 */
+        /** 读路由的单次上限（真机验收是 < 200ms；这里给 CI 留余量）。也是相对预算的封顶。 */
         const val MAX_PEERS_MS = 1_000L
+
+        /** 黑洞风暴的并发数：控制面处理器池只有 4 条线程，6 条足以压满并溢出。 */
+        const val STORM_SENDERS = 6
+
+        /** 等六条阻塞请求都进到 `send` 的上限（只是"线程起来"，不是等退避结束）。 */
+        const val STORM_ENTER_TIMEOUT_MS = 10_000L
+
+        /** TEST-NET-1（RFC 5737）保证不可达：不会有 ACK，请求会一直卡到退避结束。 */
+        const val STORM_SEND_BODY = """{"to":"192.0.2.1","port":17878,"text":"黑洞"}"""
+
+        /** 三次「加载更多」逐步落队列的上限。 */
+        const val SESSION_PAGE_TIMEOUT_MS = 5_000L
     }
 
 
@@ -1079,7 +1076,7 @@ class ControlPlaneTest {
         runBlocking {
             desktop.sendAgentSessionPage(agent.nodeId, wsId = "ws-page-1", offset = 0, limit = 10)
         }
-        val listed = awaitUntil {
+        val listed = Await.value("宿主队列里出现会话分页请求") {
             val body = obj(get("/v1/agent/session-pages").second)
             body.takeIf { (it["total"]?.jsonPrimitive?.int ?: 0) > 0 }
         }
@@ -1105,21 +1102,32 @@ class ControlPlaneTest {
     @Test
     fun agentSessionPageKeepsOnlyTheNewestPerWorkspace() {
         post("/v1/send", "{\"to\":\"127.0.0.1\",\"port\":${desktop.boundPort},\"text\":\"握手\"}")
-        repeat(3) { n ->
+        // **每一发都先看到它进了队列，再发下一发。**
+        //
+        // 过去是 `send; Thread.sleep(120)` 连发三次，再 `awaitUntil { total > 0 }` 收尾：
+        // 慢机器上第三发可能还没到，而 total>0 早被第一发满足了 —— 断言拿到的是 offset=0，
+        // 于是这条用例以"队列只留最新"的名字红在一个与时序无关的地方。
+        for (offset in listOf(0L, 10L, 20L)) {
             runBlocking {
-                desktop.sendAgentSessionPage(agent.nodeId, wsId = "ws-page-2", offset = n * 10L, limit = 10)
+                desktop.sendAgentSessionPage(agent.nodeId, wsId = "ws-page-2", offset = offset, limit = 10)
             }
-            Thread.sleep(120)
+            Await.condition("ws-page-2 的请求落在 offset=$offset", SESSION_PAGE_TIMEOUT_MS) {
+                sessionPageOffsetOrNull("ws-page-2") == offset
+            }
         }
-        val listed = awaitUntil {
-            val body = obj(get("/v1/agent/session-pages").second)
-            body.takeIf { (it["total"]?.jsonPrimitive?.int ?: 0) > 0 }
-        }
-        val rows = listed["requests"]!!.jsonArray.map { it.jsonObject }
+
+        val rows = obj(get("/v1/agent/session-pages").second)["requests"]!!.jsonArray.map { it.jsonObject }
         val mine = rows.filter { it["wsId"]?.jsonPrimitive?.contentOrNull == "ws-page-2" }
         assertEquals(1, mine.size, "同一工作区只该留最新一条：$mine")
         assertEquals(20, mine[0]["offset"]?.jsonPrimitive?.int, "留下的该是最后那条（offset=20）")
     }
+
+    /** 队列里该 ws 那条请求的 offset；还没有就返回 null（给 [Await.condition] 轮询）。 */
+    private fun sessionPageOffsetOrNull(wsId: String): Long? =
+        obj(get("/v1/agent/session-pages").second)["requests"]!!.jsonArray
+            .map { it.jsonObject }
+            .firstOrNull { it["wsId"]?.jsonPrimitive?.contentOrNull == wsId }
+            ?.get("offset")?.jsonPrimitive?.long
 
     /** 控制面读数在空队列时也要是合法形状（否则手机/宿主读到 null 会当成"端点坏了"）。 */
     @Test

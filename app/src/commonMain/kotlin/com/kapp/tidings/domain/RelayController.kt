@@ -161,7 +161,8 @@ class RelayController(
      * 生命周期与控制器一致（不是与某一屏一致）—— 这正是它住在这里的理由。
      */
     val scope: CoroutineScope,
-    val version: String = APP_VERSION,
+    // 真实构建版本优先；壳拿不到（null）才回退常量 —— 绝不让常量冒充版本号（见 AppPlatform.appVersion 的 KDoc）。
+    val version: String = platform.appVersion ?: APP_VERSION,
     internal val messageStore: MessageStore = InMemoryMessageStore(),
     internal val agentStore: AgentStore = InMemoryAgentStore(),
     private val timings: Timings = DEFAULT_TIMINGS,
@@ -560,10 +561,18 @@ class RelayController(
     override fun removeShareGrant(nodeId: String) = cabinetCtl.handleRemoveShareGrant(nodeId)
     override fun selectCabinetPeer(nodeId: String?) = cabinetCtl.handleSelectCabinetPeer(nodeId)
     override fun loadCabinetPath(path: String) = cabinetCtl.handleLoadCabinetPath(path)
+
+    /**
+     * 「加载更多」：按当前行数当 offset 再拉一页并**追加**（服务端已按 offset 分页）。
+     *
+     * 已经进了 `DesktopPaneActions`：两栏模式的文件柜在桌面壳里也要这颗按钮，
+     * 而那个壳只认 `DesktopPaneActions`。接口默认空实现 = 没有该入口的壳不画按钮。
+     */
+    override fun loadMoreCabinetEntries() = cabinetCtl.handleLoadMoreCabinetEntries()
     override fun toggleCabinetSelection(name: String) = cabinetCtl.handleToggleCabinetSelection(name)
     override fun clearCabinetSelection() = cabinetCtl.handleClearCabinetSelection()
-    override fun downloadCabinetEntries(names: List<String>, saveAs: Boolean) =
-        cabinetCtl.handleDownloadCabinetEntries(names, saveAs)
+    override fun downloadCabinetEntries(names: List<String>) =
+        cabinetCtl.handleDownloadCabinetEntries(names)
     override fun uploadToCabinet(peerId: String) = cabinetCtl.handleUploadToCabinet(peerId)
     override fun setCabinetViewMode(mode: String) = cabinetCtl.handleSetCabinetViewMode(mode)
 
@@ -571,6 +580,9 @@ class RelayController(
     override fun addScanRange(cidr: String) = cidrCtl.handleAddScanRange(cidr)
     override fun removeScanRange(cidr: String) = cidrCtl.handleRemoveScanRange(cidr)
     override fun triggerCidrScan(cidr: String?) = cidrCtl.handleTriggerCidrScan(cidr)
+
+    /** 取消正在进行的网段探测（设置页扫描中那颗「取消」）。 */
+    fun cancelCidrScan() = cidrCtl.handleCancelCidrScan()
 
     // ------------------------------------------------------------------ 委托动作：屏幕截取
     override fun triggerScreenCapture(targetConvId: String?) {
@@ -635,6 +647,19 @@ class RelayController(
         peerId, sessionId, alias, agentKind, state, title, startedAt,
         agentId, wsId, wsTitle, wsPath,
     )
+
+    /**
+     * 中断对端上的一次 agent 运行（PPE-1 §6.6）。null = 对端没有 agent 能力或本机节点未运行。
+     */
+    /** 撤销本会话的「免审」授权（由会话详情入口触发）。 */
+    override fun revokeSessionApproval(sessionId: String) = agentCtl.handleRevokeSessionApproval(sessionId)
+
+    override suspend fun cancelAgentRun(
+        peerId: String,
+        sessionId: String,
+        runId: String?,
+        reason: String?,
+    ): SendOutcome? = agentCtl.handleCancelAgentRun(peerId, sessionId, runId, reason)
 
     suspend fun sendAgentEvent(
         peerId: String,
@@ -863,6 +888,11 @@ class RelayController(
             timings = timings,
             onOpenScreen = { socket, open, remoteAddress, read, write ->
                 screenCtl.handleOnIncomingScreenSocket(socket, open, remoteAddress, read, write)
+            },
+            // 跨网 TLS 监听（tlsPort + 2）的首帧投屏交接 —— 与明文路同一套协议与校验,
+            // 区别只在底下那条流是 TLS 解密过的（设计文档 cross-network-file-screen 选项 B）。
+            onOpenScreenWire = { open, wire ->
+                screenCtl.handleOnIncomingScreenWire(open, wire, remoteAddress = "tls")
             },
         )
         // K1：长连接**恒开**（不再是用户设置）。见 RelaySettings.linkDownlink 的 KDoc：
@@ -1386,11 +1416,57 @@ class RelayController(
         handlePersist(next)
         runtime?.let { rt -> scope.launch { runCatching { rt.announceTo(host, port) } } }
         _state.update { it.copy(banner = BannerUi(BannerMessage.Handshaking("$host:$port"), BannerTone.Info)) }
+        expireHandshakingBanner("$host:$port")
+    }
+
+    /**
+     * 握手提示的**时限**：过了 [CONNECT_ATTEMPT_TIMEOUT_MS] 还挂在页面上，就会与弹层里
+     * 那句「对方 3 秒内没回应」同屏互斥 —— 一半说"正在等回应"、一半说"没回应"。
+     *
+     * 只清**同一条**提示（[handshakingBannerStillPending]）：用户这 3 秒里点了别的东西、
+     * 页面已经换了新横幅，那条是别人的，不能顺手抹掉。
+     */
+    private fun expireHandshakingBanner(target: String) {
+        scope.launch {
+            delay(CONNECT_ATTEMPT_TIMEOUT_MS)
+            _state.update { st ->
+                if (handshakingBannerStillPending(st.banner, target)) st.copy(banner = null) else st
+            }
+        }
     }
 
     override fun removeManualPeer(entry: ManualPeerEntry) {
         val settings = _state.value.settings
-        handlePersist(settings.copy(manualPeers = settings.manualPeers.filterNot { it == entry }))
+        // 回执里的名字与详情页菜单项同一个来源（[manualPeerDisplayName]）：横幅说
+        // 「已移除 X」、按钮写「移除「X」」，两处指的不是同一个名字时用户没法确认删对了。
+        // 删完立刻置横幅：这一行确实从列表上消失了，但「消失」本身不解释任何事。
+        val name = manualPeerDisplayName(entry, _state.value.peers)
+        handlePersist(settings.copy(manualPeers = manualPeersWithout(settings.manualPeers, entry)))
+        info(BannerMessage.PeerRemoved(name))
+    }
+
+    /**
+     * 「重连」一条**已保存但当前不通**的手动地址。
+     *
+     * 为什么需要它：mDNS 发现行会被「双表判重」滤掉（同一个地址不该出现两次），
+     * 于是"手动存过、当时没接通、之后对端开机并在广播"的用户只剩一行红色的
+     * 「没有回应」—— 而那一行**没有**任何能点回连接的动作用（`addManualPeer` 会判重复）。
+     * 这条入口就是那唯一的一步：对目标地址重发一次 entry，并把"在等它回应"如实挂出来。
+     *
+     * 与 `handshake()` 的区别：那个只在启动时对**全部**手动地址广播一轮；这个只针对
+     * 用户刚点的那一条，并且带可见反馈（否则点完像什么都没发生）。
+     */
+    override fun reconnectManualPeer(entry: ManualPeerEntry) {
+        val rt = runtime
+        if (rt == null) {
+            warn(BannerMessage.NodeNotStarted)
+            return
+        }
+        scope.launch { runCatching { rt.announceTo(entry.host, entry.port) } }
+        val target = "${entry.host}:${entry.port}"
+        _state.update { it.copy(banner = BannerUi(BannerMessage.Handshaking(target), BannerTone.Info)) }
+        // 与首次添加同一条时限：过了窗口还挂着"在等它回应"，就会和界面上的失败说明打架。
+        expireHandshakingBanner(target)
     }
 
     override fun removeUnreachableManualPeers() {
@@ -1900,3 +1976,46 @@ internal fun shouldReplacePeerLabel(stored: String?, real: String): Boolean {
  * 24 小时是取舍：一天内没出现的对端，那条消息对用户来说已经过期了。
  */
 private const val FIRST_DELIVERY_GRACE_MS: Long = 24L * 3_600_000
+
+/**
+ * 一次「连接」尝试的等回执窗口（毫秒）。
+ *
+ * **一份常量、两个消费点**：弹层的超时红字与握手提示的自动过期。两边各写一个 3_200 时，
+ * 「红字已经出现、提示还挂着」就只是概率问题；共用一个数，两句话在同一拍退场。
+ */
+public const val CONNECT_ATTEMPT_TIMEOUT_MS: Long = 3_200L
+
+/**
+ * 窗口结束时，这条握手提示还该不该留在页面上（纯函数，单测钉住）。
+ *
+ * 判据只认**同一个目标**：这 3 秒里冒出来的别的提示（保存失败、清理结果…）是别人的事，
+ * 过期任务顺手抹掉它就成了「谁的提示都可能被上一拍的动作删掉」。
+ */
+public fun handshakingBannerStillPending(banner: BannerUi?, target: String): Boolean =
+    banner?.message == BannerMessage.Handshaking(target)
+
+/**
+ * 从手动地址表里摘掉一条。
+ *
+ * 判据是**整条 entry**（host + port + name），不是 host：同一台机器的两个端口是两条记录，
+ * 只按 host 过滤会一次删两条；按整条相等只摘掉用户真正点的那一条。
+ */
+public fun manualPeersWithout(
+    entries: List<ManualPeerEntry>,
+    removed: ManualPeerEntry,
+): List<ManualPeerEntry> = entries.filterNot { it == removed }
+
+/**
+ * 一条手动地址在界面上的显示名 —— 与 `nodes_menu_remove` 的参数**同一个来源**。
+ *
+ * 规则只有这一条：握过手的（节点表里有它）用对端的显示名；没有的用用户起的名字，
+ * 再没有就回落 `host:port`。移除回执必须拿它，否则横幅说的名字和按钮上说的不是同一个，
+ * 用户分不清删掉的是哪一条（列表里可能同时挂着同一台机器的两个地址）。
+ */
+public fun manualPeerDisplayName(entry: ManualPeerEntry, peers: List<PeerUi>): String {
+    val matched = manualPeerStatuses(listOf(entry), peers).firstOrNull()?.nodeId
+        ?.let { id -> peers.firstOrNull { it.nodeId == id } }
+    return matched?.displayName
+        ?: entry.name?.takeIf { it.isNotBlank() }
+        ?: "${entry.host}:${entry.port}"
+}

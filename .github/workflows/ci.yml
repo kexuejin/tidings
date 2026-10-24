@@ -8,7 +8,11 @@
 #
 # 跑的就是 README:164-166 那七条，一个字都不多：
 #   :core:allTests :composeApp:allTests :desktopApp:test :agentNode:test
-#   :desktopApp:compileKotlin :androidApp:validateDebugScreenshotTest :cjkLiteralGate
+#   :desktopApp:compileKotlin :cjkLiteralGate
+#
+# 截图门禁（:androidApp:validateDebugScreenshotTest）**不在 CI 里跑**：参考图按 .gitignore:44
+# 由本机生成、不入库，全新检出上没有参考图，跑了只会报「234 张都是新增」。它是本地门禁，
+# 命令与判据见 AGENTS.md §1。
 # 外加三条注释门禁，都来自 `docs/relay-comment-audit.md` §4 的政策 ——
 # 它们挡的不是代码错，是"注释会悄悄腐坏"这一类：
 #   :cjkLiteralGate            硬编码中文字面量（与 :constructionTraceGate 同构）
@@ -88,6 +92,9 @@ jobs:
           # --no-build-cache：判"干净"就不能吃缓存（README:168-169）。
           # 这里不写 --rerun-tasks：CI 每次都是全新检出，本来就没有增量状态，
           # 加它只是让同样的活重跑一遍。
+          # --max-workers=1：六个模块的测试 JVM 并行时，异步用例会互相饿死 —— 实测每轮都有
+          # 1-2 条「单跑恒绿、全量必红」的红（旋转在 UdpTransportBroadcast / GroupText /
+          # TransferPeerCancel / FileMessageStore 之间），串行跑一次 3m45s 全绿。
           ./gradlew \
             :core:allTests \
             :composeApp:allTests \
@@ -101,6 +108,7 @@ jobs:
             :designTokenUsageGate \
             :designStateSlotGate \
             --no-build-cache \
+            --max-workers=1 \
             --console=plain \
             --stacktrace
 

@@ -35,7 +35,6 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import com.kapp.tidings.domain.RelayUiState
 import com.kapp.tidings.generated.resources.Res
-import com.kapp.tidings.generated.resources.agent_event_cursor
 import com.kapp.tidings.generated.resources.agent_session_announced_missing
 import com.kapp.tidings.generated.resources.agent_session_archived_section
 import com.kapp.tidings.generated.resources.agent_session_events_count
@@ -44,6 +43,7 @@ import com.kapp.tidings.generated.resources.agent_session_load_more
 import com.kapp.tidings.generated.resources.agent_session_load_more_busy
 import com.kapp.tidings.generated.resources.agent_session_meta
 import com.kapp.tidings.generated.resources.agent_session_no_events
+import com.kapp.tidings.generated.resources.agent_session_show_older
 import com.kapp.tidings.generated.resources.agent_session_started
 import com.kapp.tidings.generated.resources.agent_session_switch_title
 import com.kapp.tidings.generated.resources.agent_session_untitled
@@ -66,6 +66,7 @@ import com.kapp.tidings.ui.theme.LocalAppSpacing
 import com.kapp.tidings.ui.theme.RelayElevations
 import org.jetbrains.compose.resources.painterResource
 import org.jetbrains.compose.resources.stringResource
+import com.kapp.tidings.domain.pendingApprovalCount
 import com.kapp.tidings.domain.model.AgentAttachmentUi
 import com.kapp.tidings.domain.model.AgentEventUi
 import com.kapp.tidings.domain.model.AgentSessionUi
@@ -161,13 +162,23 @@ internal fun AgentSessionCard(
                 return@Column
             }
 
-            val shown = events.takeLast(MAX_SHOWN_EVENTS)
-            if (events.size > shown.size) {
+            // 「显示更早」的本地展开（issue「事件流截断 20 条无展开」）：
+            // 默认只画最近 MAX_SHOWN_EVENTS 条；有更早的就给一颗按钮，每点一次多 50 条。
+            // revealed 是纯 UI 记账（本卡展开到哪了），不进领域状态 —— 会话事件本身没变。
+            var revealed by remember { mutableStateOf(0) }
+            val visibleCount = visibleEventCount(events.size, revealed)
+            val shown = events.takeLast(visibleCount)
+            if (visibleCount < events.size) {
                 Text(
-                    text = stringResource(Res.string.agent_session_events_shown, shown.size, events.size),
+                    text = stringResource(Res.string.agent_session_events_shown, events.size - visibleCount),
                     style = MaterialTheme.typography.labelSmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    modifier = Modifier.padding(top = LocalAppSpacing.current.xs),
+                    modifier = Modifier.padding(top = LocalAppSpacing.current.xxs),
+                )
+                AppTextButton(
+                    text = stringResource(Res.string.agent_session_show_older),
+                    onClick = { revealed += EVENTS_REVEAL_STEP },
+                    size = AppButtonSize.Small,
                 )
             }
             shown.forEach { event -> AgentEventRow(event) }
@@ -194,11 +205,6 @@ private fun AgentEventRow(event: AgentEventUi) {
                 maxLines = 1,
                 overflow = TextOverflow.Ellipsis,
                 modifier = Modifier.weight(1f),
-            )
-            Text(
-                text = stringResource(Res.string.agent_event_cursor, event.cursor),
-                style = MaterialTheme.typography.labelSmall,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
         }
         val isThought = event.eventType.contains("thought", ignoreCase = true) ||
@@ -269,7 +275,27 @@ private fun AgentAttachmentCard(attachment: AgentAttachmentUi) {
     }
 }
 
+/**
+ * 事件流这一轮要画的条数：基础窗口 [baseWindow] 条（最近的事件优先），用户每点一次
+ * 「显示更早」就把 [revealed] 加 [EVENTS_REVEAL_STEP]，直到装下 [total]。
+ *
+ * 抽成纯函数是为了可测：「截断 20 条无展开」的原缺陷里，截断逻辑内联在组合体内，
+ * 只有截图能看见。旧行为等价于 `revealed 恒为 0`。
+ */
+internal fun visibleEventCount(
+    total: Int,
+    revealed: Int,
+    baseWindow: Int = MAX_SHOWN_EVENTS,
+): Int {
+    if (revealed < 0) return baseWindow.coerceAtMost(total)
+    return (baseWindow + revealed).coerceAtMost(total)
+}
+
+/** 事件流的基础窗口：默认只画最近这么多条，其余靠「显示更早」展开。 */
 private const val MAX_SHOWN_EVENTS = 20
+
+/** 每点一次「显示更早」多展开的条数。 */
+internal const val EVENTS_REVEAL_STEP = 50
 
 @Composable
 internal fun AgentSessionPickerDialog(
@@ -304,9 +330,12 @@ internal fun AgentSessionPickerDialog(
             ) {
                 sessions.forEach { session ->
                     val isActive = session.sessionId == activeSessionId
-                    val pendingCount = state.agentApprovals.values.count {
-                        it.sessionId == session.sessionId && it.status == "pending"
-                    }
+                    // 与看板页头同一把尺子：过期的审批不算「待批」（领域层唯一入口）。
+                    val pendingCount = pendingApprovalCount(
+                        approvals = state.agentApprovals.values,
+                        now = now,
+                        sessionId = session.sessionId,
+                    )
                     AgentSessionPickRow(
                         session = session,
                         isActive = isActive,

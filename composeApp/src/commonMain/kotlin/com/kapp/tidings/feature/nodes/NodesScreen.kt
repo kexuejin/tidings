@@ -20,6 +20,7 @@ import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Surface
+import androidx.compose.material3.minimumInteractiveComponentSize
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
@@ -32,10 +33,12 @@ import androidx.compose.ui.unit.dp
 import com.kapp.tidings.ui.theme.IconSizes
 import com.kapp.tidings.ui.theme.LocalAppSpacing
 import com.kapp.tidings.domain.ManualPeerEntry
+import com.kapp.tidings.domain.ManualPeerStatus
 import com.kapp.tidings.domain.RelayController
 import com.kapp.tidings.domain.RelayUiState
 import com.kapp.tidings.domain.manualPeerStatuses
 import com.kapp.tidings.core.nowMillis
+import com.kapp.tidings.core.protocol.IpAddressUtils
 import com.kapp.tidings.core.qr.QrEncoder
 import com.kapp.tidings.generated.resources.Res
 import com.kapp.tidings.generated.resources.disc_cleanup_unreachable
@@ -50,6 +53,8 @@ import com.kapp.tidings.ui.AppError
 import com.kapp.tidings.ui.ErrorState
 import com.kapp.tidings.ui.components.AddNodeAction
 import com.kapp.tidings.ui.components.AppBanner
+import com.kapp.tidings.ui.components.AppButtonSize
+import com.kapp.tidings.ui.components.AppTextButton
 import com.kapp.tidings.ui.components.bannerText
 import com.kapp.tidings.ui.components.LargeTitleBar
 import com.kapp.tidings.ui.components.SectionHeader
@@ -64,7 +69,9 @@ import com.kapp.tidings.generated.resources.nodes_group_nodes_count
 import com.kapp.tidings.generated.resources.nodes_my_qr_entry_sub
 import com.kapp.tidings.generated.resources.nodes_my_qr_entry_title
 import com.kapp.tidings.generated.resources.nodes_nodes_empty
+import com.kapp.tidings.domain.model.MdnsServiceUi
 import com.kapp.tidings.domain.model.NodePhase
+import com.kapp.tidings.domain.model.PeerUi
 
 
 /**
@@ -94,6 +101,16 @@ fun NodesScreen(
     onAddPeer: (String, String) -> Unit,
     onRemovePeer: (ManualPeerEntry) -> Unit,
     onCleanupUnreachable: () -> Unit,
+    /**
+     * 「重连」一条已保存但当前不通的手动地址（见 `RelayController.reconnectManualPeer`）。
+     *
+     * `null` = 这个壳没接这条路，详情页不画那颗按钮。桌面宽档已直接接上；手机壳在
+     * `App.kt` 里补一行 `onReconnectPeer = controller::reconnectManualPeer` 即生效。
+     *
+     * 为什么必须先有它：mDNS 发现行被双表判重滤掉之后，用户手上只剩一行红色的
+     * 「没有回应」，而**没有任何一步能把那台设备连回来**（重新添加会判重复）。
+     */
+    onReconnectPeer: ((ManualPeerEntry) -> Unit)? = null,
     onRetryStart: () -> Unit,
     /**
      * 打开扫码页（真的去调相机扫一次码）。
@@ -183,8 +200,6 @@ fun NodesScreen(
     onSetPeerRemark: ((String, String) -> Unit)? = null,
 ) {
     var sheetOpen by remember { mutableStateOf(false) }
-    // 弹层从哪一段开：点了「扫码配对」那一行就该落在扫码段，而不是让人自己再点一次。
-    var sheetStartsOnScan by remember { mutableStateOf(false) }
     // 「我的二维码」弹层。原型 Gen2 把它从页面正文搬到这条入口后面（见 MyQrSheet 的 KDoc）。
     var myQrOpen by remember { mutableStateOf(false) }
     val network = state.network
@@ -207,12 +222,13 @@ fun NodesScreen(
     // 来源因此降级成副标题里的一小段（「局域网」/「手动添加」）。
     // 排序键：在线 → 离线 → 没有回应，同一档内按昵称（稳定、可预期）。
     // 出处：prototype/relay.html:3242-3299 的 `nodeRow` / `nodeRank` / `allNodes`。
-    val manualByNodeId = manualStatuses
-        .mapNotNull { status -> status.nodeId?.let { it to status } }
-        .toMap()
+    // 手动地址 → 它的原始记录。手机与桌面宽档共用同一份装配（[manualEntriesByNodeId]）：
+    // 桌面曾经把所有对端硬置 manualEntry = null，于是「已握过手的手动地址」在桌面详情
+    // 没有移除入口、手机上却有 —— 同一行两副面孔。
+    val manualByNodeId = manualEntriesByNodeId(manualStatuses)
     val nodes = buildList {
         state.peers.forEach { peer ->
-            val status = manualByNodeId[peer.nodeId]
+            val entry = manualByNodeId[peer.nodeId]
             add(
                 NodeListItem(
                     key = peer.nodeId,
@@ -229,8 +245,8 @@ fun NodesScreen(
                     hostName = peer.host,
                     platform = peer.platform,
                     remark = peer.remark,
-                    manual = status != null,
-                    manualEntry = status?.entry,
+                    manual = entry != null,
+                    manualEntry = entry,
                 ),
             )
         }
@@ -266,6 +282,11 @@ fun NodesScreen(
     }.sortedWith(compareBy<NodeListItem> { it.rank }.thenBy(nodeNameOrder) { it.displayName })
 
     Column(modifier = modifier.fillMaxSize()) {
+        // 横幅在**两个分支之上**：手机壳与桌面窄档都只经过这一处（宽档由 `NodesPane` 自己画）。
+        // 上一版把它画在列表分支里，于是用户停在节点详情时看不到任何失败/回执 ——
+        // 绑定失败、握手提示、移除回执全都要退回列表才出现。
+        state.banner?.let { AppBanner(it, onDismissBanner) }
+
         // 详情层与列表层是同一条屏的两个分支。原型 `m-nodedetail` 是**节点页签内部的一个分支**
         // （底栏照画、只多一个顶栏返回键，见 `AppNavState` 里 `detailPeerId` 的 KDoc），
         // 所以这里换掉的是页签内容，不是整屏。
@@ -285,6 +306,11 @@ fun NodesScreen(
                 item = detailItem,
                 onSetPeerRemark = onSetPeerRemark,
                 onOpenChat = onOpenChat,
+                // 「移除节点」从列表撤进了详情（原型把行尾 ⋯ 菜单撤掉时留下的判据：
+                // 管理动作不进主列表）。回调直通：壳已经接好 `controller::removeManualPeer`。
+                onRemovePeer = onRemovePeer,
+                // 同上直通：手动地址的「连接」就在详情页里（判重滤掉了列表里的 mDNS 行）。
+                onReconnectPeer = onReconnectPeer,
                 // 详情页的「最近」要跟着时钟走 —— 时间戳进模型、文案在渲染层算。
                 now = now,
                 modifier = Modifier.weight(1f),
@@ -298,7 +324,7 @@ fun NodesScreen(
                     // 旧稿是三个数（「N 个已知 · X 在线 · Y 离线」），第三个是前两个的差 ——
                     // 说两遍同一件事的那一类。`nodes_subtitle` 因此不再被任何界面消费。
                     subtitle = stringResource(Res.string.nodes_subtitle_short, known, online),
-                    actions = { AddNodeAction(onClick = { sheetStartsOnScan = false; sheetOpen = true }) },
+                    actions = { AddNodeAction(onClick = { sheetOpen = true }) },
                 )
                 TitleBarDivider()
             }
@@ -314,7 +340,6 @@ fun NodesScreen(
                 // 六个节点 + 本机卡 + 添加节点就多滚出小半屏。
                 verticalArrangement = Arrangement.spacedBy(LocalAppSpacing.current.md10),
             ) {
-                state.banner?.let { AppBanner(it, onDismissBanner) }
 
                 if (network.vpnActive) {
                     // 原型这一条是 `.banner.warn`（`prototype/relay.html:359`）：
@@ -429,16 +454,30 @@ fun NodesScreen(
                             // 这一段是代码**独有**的：原型的静态数据里没有"扫到了但还没握手"这个中间态，
                             // 而真机上它恰恰是"局域网发现为空"最常见的原因。它不进 `nodes` —— 还没进
                             // 节点表的东西不该算进「N 个已知」。
-                            state.mdnsServices.forEach { service ->
+                            //
+                            // **渲染前先把已在节点表里的滤掉**（[filterKnownMdnsServices]）：
+                            // 服务被握手入表之后 mDNS 还会继续广播它，不过滤就是同一台设备两行 ——
+                            // 用户点下面那行的「连接」，控制器回一句「这个节点已经在列表里了」。
+                            filterKnownMdnsServices(state.mdnsServices, state.peers, state.settings.manualPeers).forEach { service ->
                                 MdnsServiceRow(service) { onAddPeer(service.host, service.port.toString()) }
                             }
-                            // 「清理没有回应的」一行在这里被原型撤掉了。新稿
-                            // `prototype/relay.html` 里 `disc_cleanup_unreachable` 已无任何调用点，
-                            // 只剩 `:1675` 一条注释讲"换网段之后会一直挂在这里"的来由；
-                            // `nodeRow` 的 KDoc 逐字写着「不区分"握过手又掉"和"从来没通"——
-                            // 那是清理时才关心的工程细节，界面只用灰点表达」。
-                            // 判据：管理动作不进主列表（同一次改稿撤掉的还有行尾那颗 ⋯ 菜单）。
-                            // `onCleanupUnreachable` 形参保留 —— 设置页将来要接的正是这条出路。
+                            // 「清理没有回应的」回来了，但**不在主列表里** —— 换网段后死地址会
+                            // 一直挂着（`prototype/relay.html:1675` 的注释讲的正是这件事），它们
+                            // 需要一条出路。原型撤掉的是"常驻行"，这里收成**按需出现**：
+                            // 只在真有「没有回应」的地址时才画，平时一行都不占。
+                            // 控制器侧空清单时会自己发横幅（`BannerMessage.NoUnreachablePeers`），
+                            // 这里不必再判一次。
+                            if (unreachableCount > 0) {
+                                AppTextButton(
+                                    text = stringResource(Res.string.disc_cleanup_unreachable, unreachableCount),
+                                    onClick = onCleanupUnreachable,
+                                    size = AppButtonSize.Small,
+                                    // 命中区 48dp：小档按钮自身只撑到 ~32dp，拇指常点空。
+                                    modifier = Modifier
+                                        .minimumInteractiveComponentSize()
+                                        .padding(top = LocalAppSpacing.current.xs),
+                                )
+                            }
                         }
                     }
 
@@ -466,7 +505,7 @@ fun NodesScreen(
                                 title = stringResource(Res.string.nodes_group_add),
                                 subtitle = stringResource(Res.string.nodes_add_entry_sub),
                                 icon = Res.drawable.ic_link,
-                                onClick = { sheetStartsOnScan = false; sheetOpen = true },
+                                onClick = { sheetOpen = true },
                                 showDivider = true,
                             )
                         }
@@ -490,16 +529,18 @@ fun NodesScreen(
     if (sheetOpen) {
         AddNodeSheet(
             state = state,
+            // **不在这里关弹层**：连接是异步握手，「发出」不等于「连上」。上一版同拍
+            // `sheetOpen = false`，于是弹层里那套"3.2 秒超时红字 + 原地重试"在生产上
+            // 一次都走不到 —— 用户点完「连接」弹层直接消失，连没连上全靠去列表里找。
+            // 成功关层由弹层自己负责（节点表里出现目标即 `onDismiss`），失败留在原地。
             onConnect = { host, port ->
                 onAddPeer(host, port)
-                sheetOpen = false
             },
             // 带名字那条（可选）：手机壳传 `controller::addNamedManualPeer`，于是弹层里
             // 多一个「名字（可选）」框；不传的壳连那个框都不画。
             onConnectNamed = onAddPeerNamed?.let { add ->
                 { host, port, name ->
                     add(host, port, name)
-                    sheetOpen = false
                 }
             },
             onDismiss = { sheetOpen = false },
@@ -507,7 +548,6 @@ fun NodesScreen(
             // 手机端传的是真入口（点下去盖一整屏取景框）；画不出相机预览的平台（桌面/平板壳）
             // 传 null，弹层就整段不画，而不是给一个"打开相机"却开不出相机的按钮。
             // 扫完节点是直接加进列表的，所以那天空出来时也不关弹层。
-            initialScanMode = sheetStartsOnScan,
             onScanQr = onScanQr,
             // 「从图片导入二维码」与取景框同一道闸：桌面壳传下来的也是 null，两颗一起消失。
             onImportQrFromImage = onImportQrFromImage,
@@ -530,6 +570,73 @@ fun NodesScreen(
         )
     }
 }
+
+/**
+ * 渲染前把「其实已经认识这台设备」的 mDNS 服务滤掉 —— 抽成纯函数是为了让"谁该被滤"
+ * 能被单测钉住（本文件之外没有任何状态可依赖）。
+ *
+ * 为什么会有这一步：对端握上手进了 `state.peers` 之后，它的 mDNS 广播还在继续，于是同一
+ * 台设备在列表里出现两行；用户点下面那行的「连接」，控制器按**手动地址表**判重，回一句
+ * 「这个节点已经在列表里了」。列表自己说它陌生、控制器说它认识，两个口径打架。
+ *
+ * 所以判重必须认**两张表**：
+ *  - 节点表 `peers`：握过手的对端（地址用自报 host 或 ip，端口未知时按"地址对上就算"，
+ *    与 `manualPeerStatuses` 的 `udpPortMatches` 同一口径）；
+ *  - 手动地址表 `manualPeers`：用户存过、但**还没接通**的地址。只认节点表时，
+ *    "手动存了同一个地址 + 它还在广播"仍然两行并存，点「连接」照样被判重复 ——
+ *    那正是这条修复要消掉的现场。
+ *
+ * 地址比较用 [sameEndpointAddress] 而不是裸 `==`：方括号、大小写、IPv6 压缩写法都表示
+ * 同一个地址。**不用 `IpAddressUtils.isSameHost`** 也在这里：它对 IPv6 走 /64 前缀匹配，
+ * 而一个局域网通常就是一整段 /64 —— 用它判重会把同网段的**另一台**设备也滤掉，
+ * 那等于把一条用户要点的「连接」按钮藏起来（比多一行更难发现）。
+ */
+internal fun filterKnownMdnsServices(
+    services: List<MdnsServiceUi>,
+    peers: List<PeerUi>,
+    manualPeers: List<ManualPeerEntry> = emptyList(),
+): List<MdnsServiceUi> {
+    if (services.isEmpty()) return services
+    if (peers.isEmpty() && manualPeers.isEmpty()) return services
+    return services.filterNot { service ->
+        peers.any { peer ->
+            (sameEndpointAddress(peer.ip, service.host) || sameEndpointAddress(peer.host, service.host)) &&
+                (peer.udpPort == service.port || peer.udpPort == 0)
+        } || manualPeers.any { entry ->
+            sameEndpointAddress(entry.host, service.host) && entry.port == service.port
+        }
+    }
+}
+
+/**
+ * 两个地址是否指向**同一个端点**（不是同一个网段）。
+ *
+ * 空串一律不相等 —— 没拿到地址（替身/预览/启动中）说"不知道"，不说"是它"。
+ * IPv6 的压缩式与展开式由 [IpAddressUtils.parseIpv6Bytes] 按字节对上，
+ * 不用前缀比较（理由见 [filterKnownMdnsServices] 的 KDoc）。
+ */
+internal fun sameEndpointAddress(a: String, b: String): Boolean {
+    val cleanA = IpAddressUtils.unbracket(a).trim()
+    val cleanB = IpAddressUtils.unbracket(b).trim()
+    if (cleanA.isEmpty() || cleanB.isEmpty()) return false
+    if (cleanA.equals(cleanB, ignoreCase = true)) return true
+    val bytesA = IpAddressUtils.parseIpv6Bytes(cleanA)
+    val bytesB = IpAddressUtils.parseIpv6Bytes(cleanB)
+    return bytesA != null && bytesB != null && bytesA.contentEquals(bytesB)
+}
+
+/**
+ * 手动地址表 → 节点表里的 nodeId 到原始记录的映射（`nodeId == null` 的不进来）。
+ *
+ * 手机列表与桌面宽档**共用这一份装配**：桌面曾经把所有对端硬置 `manualEntry = null`，
+ * 于是"已经握过手的手动地址"在桌面详情没有移除入口、手机上却有 —— 同一行两副面孔。
+ * 抽成纯函数就能被单测钉住（见 `NodeEntriesManualEntryTest`）。
+ */
+internal fun manualEntriesByNodeId(
+    statuses: List<ManualPeerStatus>,
+): Map<String, ManualPeerEntry> = statuses
+    .mapNotNull { status -> status.nodeId?.let { it to status.entry } }
+    .toMap()
 
 /**
  * 节点列表里的一行，**在进列表之前就消化掉两个分组的差异**。

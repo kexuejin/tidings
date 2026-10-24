@@ -44,6 +44,13 @@ apply(from = "tools/construction-trace-gate.gradle.kts")
 // 「守卫红了」是错觉。见 tools/domain-compose-free-gate.gradle.kts 的说明。
 apply(from = "tools/domain-compose-free-gate.gradle.kts")
 
+// 测试结论不许依赖机器状态（网卡/时钟/固定 sleep 同步）。实现见
+// tools/env-dependent-test-gate.gradle.kts 与同目录的 env-test-scan.py。
+apply(from = "tools/env-dependent-test-gate.gradle.kts")
+
+// 并发/存储改动后的验收：同一套测试连跑 N 轮（见 tools/repeat-tests.sh 的说明）。
+apply(from = "tools/stability-gate.gradle.kts")
+
 // 打包镜像的 JDK 模块门禁：jpackage 的默认模块集不含代码用到的每个 JDK 包，
 // 缺了只在**打包产物**里抛 NoClassDefFoundError，而且会被桌面端刻意的容错吞掉
 // （已实测：装机版缺 jdk.httpserver ⇒ 界面全正常、8788 永不监听）。

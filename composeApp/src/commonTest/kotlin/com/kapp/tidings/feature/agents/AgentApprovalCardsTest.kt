@@ -2,6 +2,7 @@
 package com.kapp.tidings.feature.agents
 
 import com.kapp.tidings.domain.model.AgentApprovalUi
+import com.kapp.tidings.domain.pendingApprovalCount
 import com.kapp.tidings.core.protocol.AgentApprovalPayload
 import com.kapp.tidings.core.protocol.Codec
 import kotlinx.serialization.json.Json
@@ -20,13 +21,87 @@ class AgentApprovalCardsTest {
         assertEquals("L2", resolveRiskLevel(null, "write_file"))
         assertEquals("L2", resolveRiskLevel(null, "replace_file_content"))
         assertEquals("L2", resolveRiskLevel(null, "delete_item"))
-        assertEquals("L1", resolveRiskLevel(null, "view_file"))
-        assertEquals("L1", resolveRiskLevel(null, "search_web"))
-        assertEquals("L1", resolveRiskLevel(null, "unknown_tool"))
+        // 看不出高低的工具**不猜**：显示「未分级」，而不是替对端宣布它安全（旧实现猜 L1）。
+        assertEquals(RISK_UNRATED, resolveRiskLevel(null, "view_file"))
+        assertEquals(RISK_UNRATED, resolveRiskLevel(null, "search_web"))
+        assertEquals(RISK_UNRATED, resolveRiskLevel(null, "unknown_tool"))
+        assertEquals(RISK_UNRATED, resolveRiskLevel(null, null))
 
         // Explicit risk override always wins
         assertEquals("L3", resolveRiskLevel("l3", "view_file"))
         assertEquals("L1", resolveRiskLevel("L1", "bash"))
+    }
+
+    /**
+     * 反向验证过：把 `shouldConfirmApproval` 改回「恒 false」（旧的一键放行行为），
+     * 本测试变红；恢复后变绿 —— 它钉住的是「L3 必须先确认」这条纪律本身。
+     */
+    @Test
+    fun testL3ApprovalRequiresConfirm() {
+        // 高危：先确认再放行（一键批准无撤销是原缺陷）。
+        assertEquals(true, shouldConfirmApproval("L3"))
+        // L1/L2 保持一键 —— 确认卡只该花在真正危险的请求上。
+        assertEquals(false, shouldConfirmApproval("L2"))
+        assertEquals(false, shouldConfirmApproval("L1"))
+        // 未分级不拦：它不是高危声明，只是不知情；拦它等于把「不知道」当成「危险」。
+        assertEquals(false, shouldConfirmApproval(RISK_UNRATED))
+    }
+
+    @Test
+    fun testApprovalExpiry() {
+        fun approval(expiresAt: Long) = AgentApprovalUi(
+            approvalId = "appr-1",
+            sessionId = "sess-1",
+            peerId = "node-1",
+            expiresAt = expiresAt,
+        )
+
+        val now = 10_000L
+        // 没填有效期 = 永不过期（0 的含义是「对端没说」，不是「已过期」）。
+        assertEquals(false, isApprovalExpired(approval(0L), now))
+        assertEquals(false, isApprovalExpired(approval(now), now))
+        assertEquals(false, isApprovalExpired(approval(now + 1), now))
+        assertEquals(true, isApprovalExpired(approval(now - 1), now))
+    }
+
+    /**
+     * 看板的待批计数与审批段共用 [visibleApprovalRows] / [isApprovalExpired]：
+     * 过期的 pending 不画、不算「待审批」。反向验证过：把过滤改回
+     * `status == "pending"`（旧行为，过期也计入），本测试变红。
+     */
+    @Test
+    fun testExpiredPendingIsNotCountedOrShown() {
+        val now = 10_000L
+        val pending = AgentApprovalUi(
+            approvalId = "p1", sessionId = "s", peerId = "n", status = "pending", expiresAt = now + 60_000,
+        )
+        val expired = AgentApprovalUi(
+            approvalId = "p2", sessionId = "s", peerId = "n", status = "pending", expiresAt = now - 1,
+        )
+        val decided = AgentApprovalUi(
+            approvalId = "p3", sessionId = "s", peerId = "n", status = "approved",
+        )
+        val decidedDismissed = AgentApprovalUi(
+            approvalId = "p4", sessionId = "s", peerId = "n", status = "denied",
+        )
+
+        val visible = visibleApprovalRows(
+            approvals = listOf(pending, expired, decided, decidedDismissed),
+            now = now,
+            lingerDismissed = setOf("p4"),
+        )
+
+        // 过期的 pending 掉出；留痕窗口内的已决（p3）还在；窗口外（p4）退场。
+        assertEquals(listOf("p1", "p3"), visible.map { it.approvalId })
+
+        // 看板页头的「N 项待审批」与这里是同一把尺子 —— 断言必须调**生产函数**。
+        // 上一版把生产表达式在这里抄了一遍：生产侧改回「过期也计入」时这条断言照旧绿
+        // （假绿）。现在它数的是 pendingApprovalCount 本身，生产改坏就红。
+        assertEquals(
+            1,
+            pendingApprovalCount(listOf(pending, expired, decided), now),
+            "过期的 pending 不能计进「N 项待审批」",
+        )
     }
 
     @Test

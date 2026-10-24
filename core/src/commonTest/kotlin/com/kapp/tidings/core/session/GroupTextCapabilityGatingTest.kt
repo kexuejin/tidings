@@ -22,6 +22,8 @@ import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.cancel
+import com.kapp.tidings.core.testutil.awaitTrue
+import com.kapp.tidings.core.transport.QueuedMessage
 import kotlinx.coroutines.runBlocking
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.JsonPrimitive
@@ -289,7 +291,16 @@ class GroupTextCapabilityGatingTest {
             )
             assertEquals(SendOutcome.QUEUED, outcome, "两个成员都不在线 ⇒ QUEUED（入队等补发）")
 
-            val rows = rig.queueStore.pendingAll()
+            // 入队是**每成员各写一行**，慢机器上可能还没写完就读 —— 直接断言 size==2 会在
+            // 全量并发时偶发 expected 2 but was 1（实测只在 7 模块并行时出现，单跑恒绿）。
+            // 等「两行都到」再断言；超时仍按失败处理，不做静默跳过。
+            // 断言必须落在**同一份快照**上：后台重试会成功、随后把行取走，
+            // 若等完再读一次，慢机器上就可能读到 1 行（实测全量偶发 expected 2 but was 1）。
+            var rows = emptyList<QueuedMessage>()
+            awaitTrue(what = "两个成员的队列行没在超时内落齐") {
+                rows = rig.queueStore.pendingAll()
+                rows.size == 2
+            }
             assertEquals(2, rows.size, "队列按 (peerId, msgId) 分行：两个成员两行")
             assertEquals(1, rows.map { it.msgId }.distinct().size, "同一条群消息只能有一个 msgId")
             val byPeer = rows.associateBy { it.peerId }

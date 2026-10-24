@@ -17,6 +17,7 @@ import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.text.font.FontWeight
 import com.kapp.tidings.ui.theme.IconSizes
 import com.kapp.tidings.ui.theme.LocalAppSpacing
 import androidx.compose.ui.unit.dp
@@ -76,7 +77,15 @@ public fun SectionCard(
                 }
                 Text(
                     text = title,
-                    style = MaterialTheme.typography.titleSmall,
+                    // 原型 `.card>h3{font-size:var(--fs-ctitle)=12px;font-weight:600;color:var(--primary)}`
+                    // （`prototype/relay.html:143`）。原来用 `titleSmall`（14sp / Medium 500）：
+                    // 字号大一档、字重轻一档 —— 于是"卡头"和"行标题"（也是 14/600）看起来一样重，
+                    // 一张卡里的层次被抹平。
+                    //
+                    // 用 `labelMedium`（12sp）+ 显式 `SemiBold` 落在同一个 token 上，
+                    // **不写裸 TextStyle**（设计 token 门禁按 role 计采用率，裸字号会记成欠债）。
+                    style = MaterialTheme.typography.labelMedium,
+                    fontWeight = FontWeight.SemiBold,
                     color = MaterialTheme.colorScheme.primary,
                 )
                 if (trailing != null) {

@@ -2,7 +2,6 @@
 
 package com.kapp.tidings.core.transport
 
-import com.kapp.tidings.core.nowMillis
 import com.kapp.tidings.core.protocol.Codec
 import com.kapp.tidings.core.protocol.DecodeResult
 import com.kapp.tidings.core.protocol.Envelope
@@ -10,11 +9,13 @@ import com.kapp.tidings.core.protocol.MsgTypes
 import com.kapp.tidings.core.protocol.Profile
 import com.kapp.tidings.core.protocol.Timings
 import com.kapp.tidings.core.protocol.makeEnvelope
+import com.kapp.tidings.core.testutil.awaitAfterSend as sharedAwaitAfterSend
+import com.kapp.tidings.core.testutil.awaitTrue as sharedAwaitTrue
 import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.CoroutineStart
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.cancel
-import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.runBlocking
 import kotlin.test.Test
@@ -163,7 +164,7 @@ class DiscoveryProfileRefreshTest {
         discoveryB.start(scope)
 
         val sentByB = mutableListOf<Envelope>()
-        val watcher = scope.launch {
+        val watcher = scope.launch(start = CoroutineStart.UNDISPATCHED) {
             transportA.incoming.collect { datagram ->
                 val decoded = Codec.decode(datagram.bytes)
                 if (decoded is DecodeResult.Ok) sentByB += decoded.env
@@ -237,7 +238,7 @@ class DiscoveryProfileRefreshTest {
         // 看 B 到底发了什么：这条路径的**证据是那个出站的 entry**，
         // 只看"最后资料对了"会分不清是刷新生效了还是碰巧别的帧带过来的。
         val sentByB = mutableListOf<Envelope>()
-        val watcher = scope.launch {
+        val watcher = scope.launch(start = CoroutineStart.UNDISPATCHED) {
             transportA.incoming.collect { datagram ->
                 val decoded = Codec.decode(datagram.bytes)
                 if (decoded is DecodeResult.Ok) sentByB += decoded.env
@@ -332,7 +333,7 @@ class DiscoveryProfileRefreshTest {
         discoveryB.start(scope)
 
         val askedAddresses = mutableListOf<String>()
-        val watcher = scope.launch {
+        val watcher = scope.launch(start = CoroutineStart.UNDISPATCHED) {
             transportA.incoming.collect { datagram ->
                 val decoded = Codec.decode(datagram.bytes)
                 if (decoded is DecodeResult.Ok &&
@@ -410,7 +411,7 @@ class DiscoveryProfileRefreshTest {
         discovery.start(scope)
 
         val seen = mutableListOf<Envelope>()
-        val watcher = scope.launch {
+        val watcher = scope.launch(start = CoroutineStart.UNDISPATCHED) {
             peerSide.incoming.collect { datagram ->
                 val decoded = Codec.decode(datagram.bytes)
                 if (decoded is DecodeResult.Ok) seen += decoded.env
@@ -443,27 +444,23 @@ class DiscoveryProfileRefreshTest {
      * （几百个测试并行）的负载下会因丢包/调度而间歇红 —— 那是**测试没按真实节奏来**，不是产品问题。
      * 间歇红必须改成确定性的，不能用「单独跑绿」当结论。
      */
+    /**
+     * 「按真实节奏重发直到条件成立」的**转发**（实现只有 `testutil` 里那一份）。
+     *
+     * 保留这个名字和签名只为让六处调用点不必改写；逻辑、超时口径、失败文案
+     * 全部来自 [sharedAwaitAfterSend]，本文件不再自带轮询实现。
+     */
     private suspend fun sendUntil(
         send: suspend () -> Unit,
         timeoutMs: Long = 8_000,
         what: String,
-        condition: () -> Boolean,
-    ) {
-        val deadline = nowMillis() + timeoutMs
-        while (nowMillis() < deadline) {
-            if (condition()) return
-            send()
-            delay(100)
-        }
-        assertTrue(condition(), what)
-    }
+        condition: suspend () -> Boolean,
+    ) = sharedAwaitAfterSend(what = what, timeoutMs = timeoutMs, resendMs = 100, send = send, condition = condition)
 
-    /** 轮询到条件成立为止；超时就带着 [what] 断言失败（比挂死或裸超时好读）。 */
-    private suspend fun awaitTrue(timeoutMs: Long = 3_000, what: String, condition: () -> Boolean) {
-        repeat((timeoutMs / 20).toInt()) {
-            if (condition()) return
-            delay(20)
-        }
-        assertTrue(condition(), what)
-    }
+    /** 转发到唯一实现（本文件曾有第二份 `repeat(timeoutMs/20)` 的轮询副本）。 */
+    private suspend fun awaitTrue(
+        timeoutMs: Long = 3_000,
+        what: String,
+        condition: suspend () -> Boolean,
+    ) = sharedAwaitTrue(what = what, timeoutMs = timeoutMs, condition = condition)
 }

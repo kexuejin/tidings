@@ -21,13 +21,12 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.selection.toggleable
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.automirrored.outlined.ArrowBack
 import androidx.compose.material.icons.outlined.FileDownload
 import androidx.compose.material.icons.outlined.FileUpload
-import androidx.compose.material.icons.outlined.Folder
 import androidx.compose.material.icons.automirrored.outlined.InsertDriveFile
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
@@ -37,6 +36,7 @@ import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Surface
+import androidx.compose.material3.minimumInteractiveComponentSize
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
@@ -44,40 +44,61 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
+import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.em
 import androidx.compose.ui.unit.sp
+import com.kapp.tidings.core.protocol.ShareDenyReasons
+import com.kapp.tidings.domain.CABINET_ERR_NODE_OFFLINE
+import com.kapp.tidings.domain.CABINET_ERR_TIMEOUT
 import com.kapp.tidings.domain.RelayUiState
+import com.kapp.tidings.domain.model.CabinetEntryUi
 import com.kapp.tidings.generated.resources.Res
 import com.kapp.tidings.generated.resources.cabinet_col_name
 import com.kapp.tidings.generated.resources.cabinet_col_size
 import com.kapp.tidings.generated.resources.cabinet_crumbs_root
 import com.kapp.tidings.generated.resources.cabinet_crumbs_up
 import com.kapp.tidings.generated.resources.cabinet_download_count
+import com.kapp.tidings.generated.resources.cabinet_download_dir_disabled
 import com.kapp.tidings.generated.resources.cabinet_empty_dir
 import com.kapp.tidings.generated.resources.cabinet_empty_dir_hint
 import com.kapp.tidings.generated.resources.cabinet_footer_selected
 import com.kapp.tidings.generated.resources.cabinet_footer_unselected_hint
+import com.kapp.tidings.generated.resources.agent_session_load_more
+import com.kapp.tidings.generated.resources.agent_session_load_more_busy
+import com.kapp.tidings.generated.resources.cabinet_list_truncated
+import com.kapp.tidings.generated.resources.cabinet_loading
 import com.kapp.tidings.generated.resources.cabinet_peer_item_count
 import com.kapp.tidings.generated.resources.cabinet_peer_title
 import com.kapp.tidings.generated.resources.cabinet_perm_badge_readonly
 import com.kapp.tidings.generated.resources.cabinet_perm_badge_upload
+import com.kapp.tidings.generated.resources.cabinet_reason_busy
+import com.kapp.tidings.generated.resources.cabinet_reason_gone
+import com.kapp.tidings.generated.resources.cabinet_reason_no_perm
+import com.kapp.tidings.generated.resources.cabinet_reason_not_found
+import com.kapp.tidings.generated.resources.cabinet_reason_off
+import com.kapp.tidings.generated.resources.cabinet_reason_timeout
+import com.kapp.tidings.generated.resources.cabinet_reason_too_deep
+import com.kapp.tidings.generated.resources.cabinet_reason_unknown
 import com.kapp.tidings.generated.resources.cabinet_retry
-import com.kapp.tidings.generated.resources.cabinet_save_as
 import com.kapp.tidings.generated.resources.cabinet_upload_pick
 import com.kapp.tidings.generated.resources.ic_arrow_back
 import com.kapp.tidings.generated.resources.ic_file
 import com.kapp.tidings.generated.resources.ic_folder
 import com.kapp.tidings.generated.resources.ic_hdd
 import com.kapp.tidings.generated.resources.ic_check_double
+import com.kapp.tidings.generated.resources.node_not_started
 import com.kapp.tidings.ui.AppError
 import com.kapp.tidings.ui.ContentWidths
 import com.kapp.tidings.ui.EmptyState
 import com.kapp.tidings.ui.ErrorState
+import com.kapp.tidings.ui.LoadingState
 import com.kapp.tidings.ui.centerCapped
+import com.kapp.tidings.ui.components.AppButtonSize
+import com.kapp.tidings.ui.components.AppTextButton
 import com.kapp.tidings.ui.components.AvatarPalette
 import com.kapp.tidings.ui.components.StatusDot
 import com.kapp.tidings.ui.components.formatBytes
@@ -87,8 +108,26 @@ import com.kapp.tidings.ui.theme.LocalAppSpacing
 import org.jetbrains.compose.resources.DrawableResource
 import org.jetbrains.compose.resources.painterResource
 import org.jetbrains.compose.resources.stringResource
-import com.kapp.tidings.domain.model.CabinetUiState
 import com.kapp.tidings.domain.model.PeerUi
+
+/**
+ * 选中集里是否混进了**目录**。
+ *
+ * 纯函数（可单测钉住）。目录在共享协议里不可下载（接收侧只对文件回 offer），
+ * 把目录混进「下载 N 项」的结果是那一项**永远等不到下文** —— 发送侧必须在自己这里
+ * 把这类注定被拒的请求挡下来（AGENTS.md §3：不产出注定被拒的帧）。
+ */
+internal fun selectionContainsDir(selectedNames: Set<String>, entries: List<CabinetEntryUi>): Boolean =
+    selectedNames.any { name -> entries.any { it.name == name && it.isDir } }
+
+/**
+ * 「下载 N 项」按钮此刻可不可用：有选中，且选中集里没有目录。
+ *
+ * 纯函数。含目录时按钮禁用、底栏给行内提示（[Res.string.cabinet_download_dir_disabled]），
+ * 而不是点了以后静默无事发生。
+ */
+internal fun canDownloadSelected(selectedNames: Set<String>, entries: List<CabinetEntryUi>): Boolean =
+    selectedNames.isNotEmpty() && !selectionContainsDir(selectedNames, entries)
 
 /** 原型 `.btn.sm`：padding 6px 10px + 12px 行高 ⇒ 约 32px 高。 */
 // 原型 `.btn` 的最小高度 32px = 间距档 `xxl`。顶层 val 读不到 CompositionLocal，
@@ -106,10 +145,15 @@ internal fun PeerCabinetView(
     onBack: (() -> Unit)? = null,
     onLoadPath: (String) -> Unit,
     onToggleSelection: (String) -> Unit,
-    onDownloadEntries: (List<String>, Boolean) -> Unit,
+    onDownloadEntries: (List<String>) -> Unit,
     onUploadToCabinet: ((String) -> Unit)? = null,
+    /**
+     * 「加载更多」：真去拉下一页（`entries.size` 当 offset，追加）。
+     *
+     * `null` = 这个壳还没接这条路 —— 那一行就整颗不画，而不是给一颗按了没反应的按钮。
+     */
+    onLoadMore: (() -> Unit)? = null,
     modifier: Modifier = Modifier,
-    now: Long = 0L,
 ) {
     val cabinet = state.cabinet
     val peer = state.peer(cabinet.activePeerId)
@@ -258,34 +302,40 @@ internal fun PeerCabinetView(
 
         // ── 4) `.cbfhead` + `.cbfrow`
         //
-        // 三种情形互斥：错误态 / 空态 / 有内容的列表。
+        // 四种情形互斥：错误态 / 加载态 / 空态 / 有内容的列表。
         //
-        // 前两种**不画表头** —— 「名称 / 大小」两列在没有任何行时是纯噪声，
+        // 前三种**不画表头** —— 「名称 / 大小」两列在没有任何行时是纯噪声，
         // 而且会让人以为"列表只加载了一部分"。位置与样式跟仓里其余空态/错误态一致：
         // `fillMaxWidth()` 靠左、由 `MessageState` 自己带 24dp 内边距，**不居中** ——
-        // 全仓空态都是这个位置（`ConversationsScreen.kt:308`、`DesktopFilesPane.kt:191`），
+        // 全仓空态都是这个位置（`ConversationsScreen 的会话列表`、`DesktopFilesPane.kt:191`），
         // 这里另造一个居中版本就是新视觉语言。
         //
-        // 原型 `screenCabinetPeer`（`prototype/relay.html`）**没有画过这两支** ——
-        // GALLERY 里这一屏只有正常目录一格。所以这一段不是在"对齐原型取值"，而是补一条
-        // **数据层有、UI 层零**的分支：`CabinetUiState.errorMessage` 由控制器写入
-        // （`deny.reason`），此前唯一读它的是单测 —— 用户看到的只是"点进同事的文件柜，
-        // 什么都没发生"。`entries` 为空同理：空目录画出来只有一个表头，像卡住了。
+        // 加载态是补出来的第四支：控制器换目录/换对端时**先把列表清空**再置
+        // `loading=true`（见 `RelayControllerCabinetComponent.cabinetPathLoadingState`），
+        // 所以 `loading && entries.isEmpty()` 这一瞬画 [LoadingState]；不这样做，过去画的是
+        // 「这个文件夹是空的」或**上一级目录的行** —— 两种都是谎话。
         //
-        // 取值不新造视觉语言，走 App 既有的 [ErrorState] / [EmptyState] 原语；
-        // 这两支没有原型基准，所以**不要**拿它们当"原型要求这样做"的依据。
+        // 取值不新造视觉语言，走 App 既有的 [ErrorState] / [EmptyState] / [LoadingState] 原语。
         val loadError = cabinet.errorMessage
-        val isEmptyDir = loadError == null && cabinet.entries.isEmpty()
+        val showLoading = loadError == null && cabinet.loading && cabinet.entries.isEmpty()
+        val isEmptyDir = loadError == null && !cabinet.loading && cabinet.entries.isEmpty()
         LazyColumn(
             Modifier.weight(1f).centerCapped(ContentWidths.Pane),
         ) {
-            if (loadError != null || isEmptyDir) {
+            if (loadError != null || showLoading || isEmptyDir) {
                 item {
                     if (loadError != null) {
+                        // deny 原因是协议 token（"off"/"no-perm"…）或本地哨兵（节点未启动），
+                        // **不许直屏** —— 照 `Common.kt` 的 screenReasonText 模式映射成人话。
                         ErrorState(
-                            error = AppError(code = "", message = loadError),
+                            error = AppError(code = "", message = cabinetReasonText(loadError)),
                             actionLabel = stringResource(Res.string.cabinet_retry),
                             onAction = { onLoadPath(cabinet.currentPath) },
+                            modifier = Modifier.fillMaxWidth(),
+                        )
+                    } else if (showLoading) {
+                        LoadingState(
+                            label = stringResource(Res.string.cabinet_loading),
                             modifier = Modifier.fillMaxWidth(),
                         )
                     } else {
@@ -391,6 +441,41 @@ internal fun PeerCabinetView(
                     }
                     HorizontalDivider()
                 }
+                // 目录超过一页（100 项）时服务端按 offset 截断下发。过去截断是**静默**的：
+                // 用户看到 100 行就以为是全部。现在如实说一句，并且**给出出路**：
+                // 有 `onLoadMore` 就画「加载更多」（追加下一页，见 `cabinetEntriesAfterPage`）；
+                // 没接这条路的壳只保留说明句 —— 一颗按了没反应的按钮比没有更糟。
+                if (cabinet.totalEntries > cabinet.entries.size) {
+                    item(key = "cabinet_list_truncated") {
+                        Column(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .padding(horizontal = LocalAppSpacing.current.lg14, vertical = LocalAppSpacing.current.sm6),
+                        ) {
+                            Text(
+                                stringResource(Res.string.cabinet_list_truncated, cabinet.entries.size),
+                                style = MaterialTheme.typography.labelSmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            )
+                            if (onLoadMore != null) {
+                                AppTextButton(
+                                    // 复用会话分页那句「加载更多」：同一句话，两处同一含义。
+                                    text = if (cabinet.loading) {
+                                        stringResource(Res.string.agent_session_load_more_busy)
+                                    } else {
+                                        stringResource(Res.string.agent_session_load_more)
+                                    },
+                                    onClick = onLoadMore,
+                                    enabled = !cabinet.loading,
+                                    size = AppButtonSize.Small,
+                                    modifier = Modifier
+                                        .padding(top = LocalAppSpacing.current.xs)
+                                        .minimumInteractiveComponentSize(),
+                                )
+                            }
+                        }
+                    }
+                }
             }
         }
 
@@ -404,12 +489,19 @@ internal fun PeerCabinetView(
                 horizontalArrangement = Arrangement.spacedBy(LocalAppSpacing.current.md10),
             ) {
                 if (cabinet.selectedNames.isNotEmpty()) {
+                    // 选中集里混了目录时，「下载」整批禁用（目录不可下载，见 canDownloadSelected），
+                    // 底栏那句换成行内提示 —— 过去点了就是静默无事发生。
+                    val dirSelected = selectionContainsDir(cabinet.selectedNames, cabinet.entries)
                     val selCount = cabinet.selectedNames.size
                     val totalSize = cabinet.entries
                         .filter { it.name in cabinet.selectedNames }
                         .sumOf { it.size }
                     Text(
-                        stringResource(Res.string.cabinet_footer_selected, formatCount(selCount), formatBytes(totalSize)),
+                        if (dirSelected) {
+                            stringResource(Res.string.cabinet_download_dir_disabled)
+                        } else {
+                            stringResource(Res.string.cabinet_footer_selected, formatCount(selCount), formatBytes(totalSize))
+                        },
                         style = MaterialTheme.typography.labelSmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                         maxLines = 1,
@@ -417,15 +509,11 @@ internal fun PeerCabinetView(
                         modifier = Modifier.weight(1f),
                     )
                     SmallButton(
-                        text = stringResource(Res.string.cabinet_save_as),
-                        primary = false,
-                        onClick = { onDownloadEntries(cabinet.selectedNames.toList(), true) },
-                    )
-                    SmallButton(
                         text = stringResource(Res.string.cabinet_download_count, formatCount(selCount)),
                         primary = true,
                         icon = Icons.Outlined.FileDownload,
-                        onClick = { onDownloadEntries(cabinet.selectedNames.toList(), false) },
+                        enabled = !dirSelected,
+                        onClick = { onDownloadEntries(cabinet.selectedNames.toList()) },
                     )
                 } else {
                     Text(
@@ -453,7 +541,14 @@ internal fun PeerCabinetView(
     }
 }
 
-/** 原型 `.cbx`：16×16 radius 5、1.5px 描边；`.on` 主色填充 + 白勾。 */
+/**
+ * 原型 `.cbx`：16×16 radius 5、1.5px 描边；`.on` 主色填充 + 白勾。
+ *
+ * 视觉砖之外套一层 **48dp 触控目标**（`spacing.xxxl`，无障碍下限）：
+ * 命中区挂外层、视觉砖居中在内 —— 与 `TopBars.kt` 的 `IbtnBox` 同一个两层结构。
+ * 语义用 [Modifier.toggleable] + [Role.Checkbox]：读屏用户听到的是「复选框，已勾选/未勾选」，
+ * 而不是一个无名可点块。
+ */
 @Composable
 private fun CabinetCheckbox(
     checked: Boolean,
@@ -463,38 +558,46 @@ private fun CabinetCheckbox(
      */
     onCheckedChange: (() -> Unit)? = null,
 ) {
-    val borderColor = if (checked) {
-        MaterialTheme.colorScheme.primary
-    } else {
-        MaterialTheme.colorScheme.outline
-    }
     Box(
-        Modifier.size(16.dp)
-            // 原型 `.cbx`：radius 5（就地内联 —— 顶层 val 不在任何函数切片里，量具看不见它）
-            // 原型 `.cbx{border-radius:5px}`：M3 槽位（4/8/12/16/28）里没有 5。
-            // 不收进 extraSmall(4) —— 收进去 design-screen-diff 会多出「原型有 5、代码没有」，
-            // 那是拿保真换复用。5px 是原型精确值，欠债按 shape 记一笔。
-            .clip(RoundedCornerShape(5.dp))
-            .background(if (checked) MaterialTheme.colorScheme.primary else Color.Transparent)
-            .border(1.5.dp, borderColor, RoundedCornerShape(5.dp))
+        Modifier
+            .size(LocalAppSpacing.current.xxxl)
             .then(
                 if (onCheckedChange != null) {
-                    // 命中区就是这 16dp：行体（整行 clickable）已经吃掉行内的空白，
-                    // 再往外扩会把「进目录」的命中区切碎。原型 `.cbx` 也是 16px。
-                    Modifier.clickable(onClick = onCheckedChange)
+                    Modifier.toggleable(
+                        value = checked,
+                        role = Role.Checkbox,
+                        onValueChange = { onCheckedChange() },
+                    )
                 } else {
                     Modifier
                 },
             ),
         contentAlignment = Alignment.Center,
     ) {
-        if (checked) {
-            Icon(
-                painterResource(Res.drawable.ic_check_double),
-                contentDescription = null,
-                modifier = Modifier.size(12.dp),
-                tint = Color.White,
-            )
+        val borderColor = if (checked) {
+            MaterialTheme.colorScheme.primary
+        } else {
+            MaterialTheme.colorScheme.outline
+        }
+        Box(
+            Modifier.size(16.dp)
+                // 原型 `.cbx`：radius 5（就地内联 —— 顶层 val 不在任何函数切片里，量具看不见它）
+                // 原型 `.cbx{border-radius:5px}`：M3 槽位（4/8/12/16/28）里没有 5。
+                // 不收进 extraSmall(4) —— 收进去 design-screen-diff 会多出「原型有 5、代码没有」，
+                // 那是拿保真换复用。5px 是原型精确值，欠债按 shape 记一笔。
+                .clip(RoundedCornerShape(5.dp))
+                .background(if (checked) MaterialTheme.colorScheme.primary else Color.Transparent)
+                .border(1.5.dp, borderColor, RoundedCornerShape(5.dp)),
+            contentAlignment = Alignment.Center,
+        ) {
+            if (checked) {
+                Icon(
+                    painterResource(Res.drawable.ic_check_double),
+                    contentDescription = null,
+                    modifier = Modifier.size(12.dp),
+                    tint = Color.White,
+                )
+            }
         }
     }
 }
@@ -594,9 +697,32 @@ private fun CrumbSeg(
                 fontWeight = if (current) FontWeight.SemiBold else null,
                 color = tint,
                 maxLines = 1,
+                // 深层级目录名可能很长：不写 ellipsis 会把面包屑行顶破（硬截断）
+                overflow = TextOverflow.Ellipsis,
             )
         }
     }
+}
+
+/**
+ * deny 原因 token / 本地哨兵 → 用户看得懂的一句话。
+ *
+ * 照 `Common.kt` 的 `screenReasonText` 模式：**这里必须覆盖 [ShareDenyReasons] 全部 6 个
+ * 取值**外加 [CABINET_ERR_NODE_OFFLINE] 哨兵 —— 这个函数是用户看到失败原因的唯一出口，
+ * 漏一个就会把协议 token 直接印在界面上。兜底分支不原样返回 reason：未知码宁可说
+ * 「被拒绝」，也不把 `foo-bar` 印给用户。
+ */
+@Composable
+internal fun cabinetReasonText(reason: String): String = when (reason) {
+    CABINET_ERR_NODE_OFFLINE -> stringResource(Res.string.node_not_started)
+    CABINET_ERR_TIMEOUT -> stringResource(Res.string.cabinet_reason_timeout)
+    ShareDenyReasons.OFF -> stringResource(Res.string.cabinet_reason_off)
+    ShareDenyReasons.NO_PERM -> stringResource(Res.string.cabinet_reason_no_perm)
+    ShareDenyReasons.NOT_FOUND -> stringResource(Res.string.cabinet_reason_not_found)
+    ShareDenyReasons.TOO_DEEP -> stringResource(Res.string.cabinet_reason_too_deep)
+    ShareDenyReasons.BUSY -> stringResource(Res.string.cabinet_reason_busy)
+    ShareDenyReasons.GONE -> stringResource(Res.string.cabinet_reason_gone)
+    else -> stringResource(Res.string.cabinet_reason_unknown)
 }
 
 /** 原型 `.btn.sm`：padding 6px 10px、12px 字、gap 5px、radius 12；`.pri` 加粗。 */
@@ -606,6 +732,7 @@ private fun SmallButton(
     primary: Boolean,
     icon: ImageVector? = null,
     onClick: () -> Unit,
+    enabled: Boolean = true,
 ) {
     val contentPadding = PaddingValues(horizontal = LocalAppSpacing.current.md10, vertical = LocalAppSpacing.current.sm6)
     val label: @Composable () -> Unit = {
@@ -618,21 +745,26 @@ private fun SmallButton(
             style = MaterialTheme.typography.bodySmall,
             fontWeight = if (primary) FontWeight.SemiBold else FontWeight.Medium,
             maxLines = 1,
+            // 按钮文字超出宽度时收尾省略，而不是把底栏撑破（硬截断）
+            overflow = TextOverflow.Ellipsis,
         )
     }
+    // 命中区 48dp（视觉高度不动）：底栏这几颗是触屏上唯一的动作入口。
     if (primary) {
         Button(
             onClick = onClick,
-            modifier = Modifier.height(smallButtonHeight()),
+            modifier = Modifier.height(smallButtonHeight()).minimumInteractiveComponentSize(),
             shape = MaterialTheme.shapes.medium,
             contentPadding = contentPadding,
+            enabled = enabled,
         ) { label() }
     } else {
         OutlinedButton(
             onClick = onClick,
-            modifier = Modifier.height(smallButtonHeight()),
+            modifier = Modifier.height(smallButtonHeight()).minimumInteractiveComponentSize(),
             shape = MaterialTheme.shapes.medium,
             contentPadding = contentPadding,
+            enabled = enabled,
             colors = ButtonDefaults.outlinedButtonColors(
                 contentColor = MaterialTheme.colorScheme.onSurface,
             ),

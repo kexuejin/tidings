@@ -60,7 +60,9 @@ class RelayUiStateTest {
             ConversationSummaryRow(
                 convId = convId,
                 lastMessageId = last.id,
-                lastTextPreview = last.text.takeIf { it.isNotBlank() } ?: last.file?.name,
+                // 必须用生产那条派生（剥 think / 文件名兜底），否则夹具比生产更宽松，
+                // 两边都绿但线上仍会把推理过程漏进会话列表。
+                lastTextPreview = conversationPreviewOf(last.text, last.file?.name),
                 lastMessageAt = last.at,
                 lastMessageIsMine = last.mine,
             )
@@ -664,5 +666,81 @@ class RelayUiStateTest {
             mixed.agentSessionsOf("dev").map { it.sessionId },
             "没报宿主时刻的会话不该被当成最旧的一条",
         )
+    }
+
+    // ---- 群预览署名（previewSenderNameOf）：谁是「最后一条」的发送者 ----
+
+    private fun signedGroupState(
+        senderId: String = "you",
+        withMessage: Boolean = true,
+    ): Pair<RelayUiState, String> {
+        val groupId = "g-preview"
+        // 会话键不是 groupId：群会话键是 ConvId.group(groupId) = "group:<id>"。
+        val conv = ConvId.group(groupId)
+        val state = RelayUiState(
+            settings = RelaySettings.firstRun().copy(
+                nodeId = "me",
+                groups = listOf(
+                    GroupMeta(
+                        groupId = groupId,
+                        name = "喝茶群",
+                        members = listOf("me", "you"),
+                        rev = 1,
+                        updatedBy = "me",
+                        updatedTs = 1L,
+                    ),
+                ),
+            ),
+            peers = listOf(peer("you", "老周")),
+            messages = if (withMessage) {
+                mapOf(
+                    conv to listOf(
+                        MessageUi(
+                            id = "m1",
+                            peerId = "you",
+                            senderId = senderId,
+                            mine = senderId == "me",
+                            text = "最后一条",
+                            at = 1_000L,
+                        ),
+                    ),
+                )
+            } else {
+                emptyMap()
+            },
+        )
+        return state to conv
+    }
+
+    @Test
+    fun groupPreviewSignsWhoSentTheLastMessage() {
+        // 群聊预览要能看出「最后一条是谁说的」；名字必须经域层解析（与 convTitle 同一个解析器），
+        // 不能由 UI 自己拼 senderId —— 那会让同一个 agent 在两端显示成两个人。
+        val (state, conv) = signedGroupState()
+        assertEquals(
+            state.peers.single().displayName,
+            state.previewSenderNameOf(conv),
+            "群预览署名要等于节点表里的显示名",
+        )
+    }
+
+    @Test
+    fun aMessageOfMyOwnIsNotSigned() {
+        val (state, conv) = signedGroupState(senderId = "me")
+        assertNull(state.previewSenderNameOf(conv), "自己说的话不需要署名")
+    }
+
+    @Test
+    fun aBlankSenderIdIsNotGuessed() {
+        val (state, conv) = signedGroupState(senderId = " ")
+        assertNull(state.previewSenderNameOf(conv), "不知道是谁就别猜一个名字出来")
+    }
+
+    @Test
+    fun aGroupWhoseLastMessageIsNotLoadedIsNotSigned() {
+        // 只加载当前会话的消息之后，「最后一条」常常不在内存窗口里 —— 这时宁可不署名，
+        // 也不能拿别的消息冒充（那会把 A 说的话挂到 B 头上）。
+        val (state, conv) = signedGroupState(withMessage = false)
+        assertNull(state.previewSenderNameOf(conv), "最后一条不在内存窗口时不应署名")
     }
 }

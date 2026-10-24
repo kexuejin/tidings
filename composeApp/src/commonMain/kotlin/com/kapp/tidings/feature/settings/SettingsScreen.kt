@@ -73,9 +73,12 @@ fun SettingsScreen(
     onSaveProfile: (String, String, String, String, Int) -> Unit,
     onSavePorts: (String, String) -> Unit,
     onRestart: () -> Unit,
-    onAddScanRange: (String) -> Unit = {},
-    onRemoveScanRange: (String) -> Unit = {},
-    onTriggerCidrScan: (String?) -> Unit = {},
+    /** 与 [SettingsConnectionSubpage] 同一条可空槽纪律：null = 连接页不画 CIDR 卡。 */
+    onAddScanRange: ((String) -> Unit)? = null,
+    onRemoveScanRange: ((String) -> Unit)? = null,
+    onTriggerCidrScan: ((String?) -> Unit)? = null,
+    /** 「取消正在跑的网段探测」；null = 宿主给不出取消能力（连接页只把「探测」置灰）。 */
+    onCancelCidrScan: (() -> Unit)? = null,
     /** 「后台保持连接」：本平台有没有这条能力（Android 有）、当前开关值、以及改动出口。 */
     keepAliveSupported: Boolean = false,
     keepAliveEnabled: Boolean = true,
@@ -91,7 +94,12 @@ fun SettingsScreen(
     /** 资料页头像分段控件第三档「上传图片」的出口。null = 该档置灰。 */
     onOpenAvatarPage: (() -> Unit)? = null,
     onRemovePickedAvatar: (() -> Unit)? = null,
-    initialSubpage: String? = if (state.restarting) SUBPAGE_CONN else null,
+    /**
+     * 初始子页。**不再是** `if (state.restarting) SUBPAGE_CONN`：
+     * 那会把「正在重启」的用户劫持到连接子页（返回键行为也跟着变）——
+     * 重启状态在连接页与首页都如实显示（重连按钮的「正在重启…」），不需要劫持。
+     */
+    initialSubpage: String? = null,
 ) {
     var subpage by rememberSaveable(initialSubpage) { mutableStateOf(initialSubpage) }
 
@@ -122,6 +130,7 @@ fun SettingsScreen(
                 onAddScanRange = onAddScanRange,
                 onRemoveScanRange = onRemoveScanRange,
                 onTriggerCidrScan = onTriggerCidrScan,
+                onCancelCidrScan = onCancelCidrScan,
                 keepAliveSupported = keepAliveSupported,
                 keepAliveEnabled = keepAliveEnabled,
                 onKeepAliveChange = onKeepAliveChange,

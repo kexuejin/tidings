@@ -12,7 +12,6 @@ import kotlinx.coroutines.Job
 import kotlinx.coroutines.cancel
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.runBlocking
-import kotlinx.coroutines.withTimeout
 import java.io.File
 import java.nio.file.Files
 import kotlin.test.AfterTest
@@ -26,6 +25,7 @@ import com.kapp.tidings.domain.model.DeliveryState
 import com.kapp.tidings.domain.model.FileCardUi
 import com.kapp.tidings.domain.model.MessageUi
 import com.kapp.tidings.domain.model.TransferState
+import com.kapp.tidings.testutil.awaitUntil
 
 /**
  * 落盘的**真实实现**：文件版 `MessageStore` 与跨重启恢复。
@@ -187,7 +187,11 @@ class FileMessageStoreTest {
         val controller = controller(persistMessages = false)
         try {
             controller.start()
-            delay(200) // 读盘是后台异步的：这里等一会儿，才能证明它真的没去读
+            // 「关着就不读盘」是**同步分支**：`handleRestoreMessages` 在开关关闭时直接返回
+            // 一个已完成的 Job，连读盘协程都不会起（见 `RelayControllerMessagesComponent`）。
+            // 所以 join 一次就够 —— 过去用 `delay(200)` 是拿时间赌"它已经读完（或根本没读）"：
+            // 慢机器上会抢跑，快机器上则白等 200ms。
+            controller.messagesCtl.handleRestoreMessages().join()
             assertEquals(
                 emptyList(),
                 controller.state.value.messages["peer-f"].orEmpty(),
@@ -244,13 +248,6 @@ class FileMessageStoreTest {
         version = "relay-test",
         messageStore = createMessageStore(platform),
     )
-
-    private suspend fun awaitUntil(what: String, condition: () -> Boolean) =
-        withTimeout(5_000) {
-            while (!condition()) {
-                delay(10)
-            }
-        }
 
     private class FixedSettingsStore(private val persistMessages: Boolean) : SettingsStore {
         override fun load(): RelaySettings? = RelaySettings(

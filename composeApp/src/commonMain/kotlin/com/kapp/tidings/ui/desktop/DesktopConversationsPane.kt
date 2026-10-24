@@ -112,6 +112,8 @@ public fun ConversationsPane(
     /** 当前搜索词与清除入口：只透给侧栏空态，见 [ConversationSidebar]。 */
     query: String,
     onClearQuery: () -> Unit,
+    /** 会话行的草稿预览（透给侧栏 ConversationSidebar 的同名参数）；null = 不显示。 */
+    draftPreviewOf: ((String) -> String?)? = null,
     onCopyPeerId: (String) -> Unit,
     onOpenInNewWindow: ((String) -> Unit)?,
     onSelect: (String) -> Unit,
@@ -291,8 +293,14 @@ public fun ConversationsPane(
     //
     // 判据用 `state.peers`（远端节点表，本机不在其中）而不是 `sessions` 单条：
     // 会话可以为空而节点表非空（刚配对、还没聊过），那时该画的是普通空列表。
-    // `NodePhase.Starting` 让位给侧栏那句「正在启动」（见 `ConversationSidebar`）。
-    if (sessions.isEmpty() && state.peers.isEmpty() && state.network.phase != NodePhase.Starting) {
+    // `NodePhase.Starting` 让位给侧栏那句「正在启动」（见 `ConversationSidebar`）；
+    // `NodePhase.Failed` 同理让位给侧栏那档「节点没有启动起来」—— 引导画的是"下一步
+    // 该做什么"，而失败是"这一步没走成"，两个都画只会让用户以为二维码坏了。
+    if (sessions.isEmpty() &&
+        state.peers.isEmpty() &&
+        state.network.phase != NodePhase.Starting &&
+        state.network.phase != NodePhase.Failed
+    ) {
         DesktopEmptyOnboarding(
             selfTlsPin = state.network.selfTlsPin,
             nodeId = state.selfNodeId,
@@ -314,7 +322,9 @@ public fun ConversationsPane(
             ConversationSidebar(
                 sessions = sessions,
                 phase = state.network.phase,
+                failure = state.network.failure,
                 selectedPeerId = selectedPeerId,
+                draftPreviewOf = draftPreviewOf,
                 query = query,
                 onClearQuery = onClearQuery,
                 onSelect = onSelect,
@@ -327,6 +337,7 @@ public fun ConversationsPane(
                 onTogglePin = controller::togglePinnedConv,
                 onToggleMute = controller::toggleMutedConv,
                 onDeleteConversation = controller::deleteConversation,
+                previewSenderNameOf = state::previewSenderNameOf,
                 onSearchGlobal = if (globalSearchEnabled) controller::searchGlobal else null,
                 initialGlobalSearch = initialGlobalSearch,
             )
@@ -342,7 +353,9 @@ public fun ConversationsPane(
             ConversationSidebar(
                 sessions = sessions,
                 phase = state.network.phase,
+                failure = state.network.failure,
                 selectedPeerId = selectedPeerId,
+                draftPreviewOf = draftPreviewOf,
                 query = query,
                 onClearQuery = onClearQuery,
                 onSelect = onSelect,
@@ -355,6 +368,7 @@ public fun ConversationsPane(
                 onTogglePin = controller::togglePinnedConv,
                 onToggleMute = controller::toggleMutedConv,
                 onDeleteConversation = controller::deleteConversation,
+                previewSenderNameOf = state::previewSenderNameOf,
                 onSearchGlobal = if (globalSearchEnabled) controller::searchGlobal else null,
                 initialGlobalSearch = initialGlobalSearch,
             )
@@ -376,7 +390,9 @@ public fun ConversationsPane(
                     ConversationSidebar(
                         sessions = sessions,
                         phase = state.network.phase,
+                        failure = state.network.failure,
                         selectedPeerId = selectedPeerId,
+                        draftPreviewOf = draftPreviewOf,
                         query = query,
                         onClearQuery = onClearQuery,
                         onSelect = onSelect,
@@ -389,6 +405,7 @@ public fun ConversationsPane(
                 onTogglePin = controller::togglePinnedConv,
                 onToggleMute = controller::toggleMutedConv,
                 onDeleteConversation = controller::deleteConversation,
+                        previewSenderNameOf = state::previewSenderNameOf,
                         onSearchGlobal = if (globalSearchEnabled) controller::searchGlobal else null,
                 initialGlobalSearch = initialGlobalSearch,
                     )

@@ -31,6 +31,7 @@ import com.kapp.tidings.domain.model.AgentEventUi
 import com.kapp.tidings.domain.model.AgentSessionKey
 import com.kapp.tidings.domain.model.AgentSessionUi
 import com.kapp.tidings.domain.model.DeliveryState
+import com.kapp.tidings.testutil.awaitUntil
 
 /**
  * 验证 Agent Session 协议（PPE-1 P0）在客户端控制器与 Agent 节点之间的端到端双向闭环。
@@ -114,7 +115,11 @@ class RelayControllerAgentSessionTest {
         // ==========================================
         // 步骤 1：Agent 发起会话宣告（agent-session）
         // ==========================================
-        val sessionId = "s-test-${System.currentTimeMillis()}"
+        // 固定 sessionId：过去是 `${System.currentTimeMillis()}` 拼出来的"唯一" id ——
+        // 那个时间戳从不进任何期望值，只会让"读时钟"混进断言上下文（环境依赖扫描
+        // 的 A 类信号），并且让同一测试两次运行的输入不同。唯一的必要性在进程内，
+        // 每个用例各自建 controller/store，固定值就够。
+        val sessionId = "s-test-main"
         val sessionOutcome = agentRuntime.sendAgentSession(
             peerId = clientNodeId,
             sessionId = sessionId,
@@ -192,10 +197,19 @@ class RelayControllerAgentSessionTest {
         val sortedEvents = controller.state.value.agentEventsOf(agentNodeId, sessionId)
         assertEquals(listOf(10L, 20L, 30L, 40L, 50L), sortedEvents.map { it.cursor }, "事件流必须按 cursor 升序排列")
 
-        // 重复发送已存在的 cursor 20
+        // 重复发送已存在的 cursor 20。**不靠 sleep 证明"它没被收下"**：紧接着再发一条 60
+        // 并等它落地 —— 同一来源、同一条通道是 FIFO，60 到了就意味着 20 那帧已经处理过；
+        // 此刻去数，重复帧若进了表就一定看得见（AGENTS §4：别用固定 delay 赌时间）。
         agentRuntime.sendAgentEvent(clientNodeId, sessionId, cursor = 20L, eventType = "tool.started", summary = "重复帧")
-        delay(100)
-        assertEquals(5, controller.state.value.agentEventsOf(agentNodeId, sessionId).size, "相同 cursor 重复帧必须被去重")
+        agentRuntime.sendAgentEvent(clientNodeId, sessionId, cursor = 60L, eventType = "tool.finished", summary = "后续帧")
+        awaitUntil("后续帧 60 落地（证明重复帧 20 已被处理）") {
+            controller.state.value.agentEventsOf(agentNodeId, sessionId).size == 6
+        }
+        assertEquals(
+            listOf(10L, 20L, 30L, 40L, 50L, 60L),
+            controller.state.value.agentEventsOf(agentNodeId, sessionId).map { it.cursor },
+            "相同 cursor 重复帧必须被去重",
+        )
 
         // ==========================================
         // 步骤 4：客户端向 Agent 回复双向消息
@@ -632,14 +646,6 @@ class RelayControllerAgentSessionTest {
         assertEquals(1, healedList.size)
         assertEquals("stale-busy", healedList.single().sessionId)
         assertEquals("idle", healedList.single().state)
-    }
-
-    private suspend fun awaitUntil(what: String, condition: () -> Boolean) {
-        val deadline = kotlin.time.TimeSource.Monotonic.markNow()
-        while (!condition()) {
-            if (deadline.elapsedNow().inWholeMilliseconds > TIMEOUT_MS) error("等了 ${TIMEOUT_MS}ms 仍未发生：$what")
-            delay(10)
-        }
     }
 
     private class AgentTestSettingsStore(

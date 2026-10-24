@@ -2,7 +2,7 @@
 
 package com.kapp.tidings.desktop
 
-import java.io.File
+import com.kapp.tidings.desktop.testutil.RepoSource
 import kotlin.test.Test
 import kotlin.test.assertTrue
 
@@ -26,16 +26,8 @@ import kotlin.test.assertTrue
  */
 class ReopenRaisesMainWindowTest {
 
-    private val source: String by lazy { mainSource().readText() }
-
-    private fun mainSource(): File {
-        var dir: File? = File("").absoluteFile.normalize()
-        while (dir != null) {
-            val candidate = File(dir, "desktopApp/src/main/kotlin/com/kapp/tidings/desktop/Main.kt")
-            if (candidate.isFile) return candidate
-            dir = dir.parentFile
-        }
-        throw AssertionError("找不到 Main.kt（工作目录 " + File("").absolutePath + "）")
+    private val source: String by lazy {
+        RepoSource.read("desktopApp/src/main/kotlin/com/kapp/tidings/desktop/Main.kt")
     }
 
     @Test

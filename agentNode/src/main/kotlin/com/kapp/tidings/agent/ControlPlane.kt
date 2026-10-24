@@ -179,6 +179,13 @@ class ControlPlane(
 
     private var server: HttpServer? = null
 
+    init {
+        // 审批回执的**授权门禁**（fail-closed）：宿主在这里自己装判据，而不是相信客户端。
+        // 台账由外部建好传进来（桌面端内嵌控制面与独立进程共用同一个实例），门禁装在这一层，
+        // 两种进程模型才不可能各判一套。
+        sessions.approvalAuthority = approvalAuthorityFor(grants, sessions)
+    }
+
     /** 实际监听端口。`httpPort` 传 0 时在 [start] 之后才有效。 */
     var boundPort: Int = httpPort
         private set
@@ -2719,6 +2726,26 @@ internal fun parseAgentEventAttachment(value: kotlinx.serialization.json.JsonEle
         height = o["height"]?.jsonPrimitive?.intOrNull,
         bytes = o["bytes"]?.jsonPrimitive?.longOrNull,
         name = (o["name"] as? kotlinx.serialization.json.JsonPrimitive)?.takeIf { it.isString }?.content,
+    )
+}
+
+/**
+ * 宿主侧的审批回执授权判据 —— `AgentSessionRegistry.approvalAuthority` 的唯一实现。
+ *
+ * 取 `(approval.nodeId, approval.sessionId)` 对应的会话，从中拿 `agentKey`/`wsId`
+ * 去查授权台账：授权是按 agent / 工作区授的，只按 nodeId 判会把「只批了这个 agent」
+ * 当成「整台设备都能批」。会话还没宣告（拿不到 agentKey）时传 null ⇒ 只有 scope=all
+ * 或 `isMyDevice` 的授权能命中 —— 缺信息就往严里判，不猜。
+ */
+internal fun approvalAuthorityFor(
+    grants: AgentGrantStore,
+    sessions: AgentSessionRegistry,
+): (AgentSessionRegistry.ApprovalRecord) -> Boolean = { approval ->
+    val session = sessions.sessionOrNull(approval.nodeId, approval.sessionId)
+    grants.allowsApproval(
+        nodeId = approval.nodeId,
+        agentKey = session?.agentId ?: session?.agentKind,
+        wsId = session?.wsId,
     )
 }
 

@@ -27,6 +27,8 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -42,15 +44,22 @@ import com.kapp.tidings.domain.RelayUiState
 import com.kapp.tidings.ui.ContentWidths
 import com.kapp.tidings.ui.centerCapped
 import com.kapp.tidings.ui.components.AppButton
+import com.kapp.tidings.ui.components.AppBanner
 import com.kapp.tidings.ui.components.AppButtonSize
 import com.kapp.tidings.ui.components.AppButtonTone
 import com.kapp.tidings.ui.components.AppIconButton
 import com.kapp.tidings.ui.components.AppOutlinedButton
+import com.kapp.tidings.ui.components.RelayDialog
+import com.kapp.tidings.ui.components.RelayDialogButton
 import com.kapp.tidings.ui.components.formatBytes
 import com.kapp.tidings.generated.resources.Res
 import com.kapp.tidings.generated.resources.desktop_action_list
 import com.kapp.tidings.generated.resources.ic_list
 import com.kapp.tidings.generated.resources.cabinet_change
+import com.kapp.tidings.generated.resources.cabinet_confirm_remove_grant_desc
+import com.kapp.tidings.generated.resources.cabinet_confirm_remove_grant_title
+import com.kapp.tidings.generated.resources.cabinet_confirm_stop_share_desc
+import com.kapp.tidings.generated.resources.cabinet_confirm_stop_share_title
 import com.kapp.tidings.generated.resources.cabinet_dir_hint
 import com.kapp.tidings.generated.resources.cabinet_grants_count
 import com.kapp.tidings.generated.resources.cabinet_grants_default_note
@@ -78,6 +87,7 @@ import com.kapp.tidings.generated.resources.cabinet_recent_row_desc
 import com.kapp.tidings.generated.resources.cabinet_recent_title
 import com.kapp.tidings.generated.resources.cabinet_share_dir_title
 import com.kapp.tidings.generated.resources.cabinet_stop_share
+import com.kapp.tidings.generated.resources.common_cancel
 import com.kapp.tidings.generated.resources.ic_close
 import com.kapp.tidings.generated.resources.ic_external
 import com.kapp.tidings.generated.resources.ic_folder
@@ -145,41 +155,63 @@ public fun CabinetScreen(
     onSelectPeer: (String?) -> Unit,
     onLoadPath: (String) -> Unit,
     onToggleSelection: (String) -> Unit,
-    onDownloadEntries: (List<String>, Boolean) -> Unit,
+    onDownloadEntries: (List<String>) -> Unit,
     onPickShareRoot: () -> Unit = {},
     onUploadToCabinet: ((String) -> Unit)? = null,
+    /** 「加载更多」：拉下一页并追加；null = 这个壳没接，按钮不画。 */
+    onLoadMore: (() -> Unit)? = null,
     /** 打开共享目录的真实动作；null = 本平台没有这条出口，那颗按钮不画。 */
     onOpenShareRoot: (() -> Unit)? = null,
+    /**
+     * 关掉全局横幅。控制器发的「已更新共享目录 / 已停止共享 / 下载已开始」等
+     * 都走 `state.banner` 这一个字段 —— 本屏过去没有宿主渲染它，用户点了按钮
+     * 什么反馈都看不到。默认 `{}` 只服务截图夹具（banner 恒为 null，画不出来）。
+     */
+    onDismissBanner: () -> Unit = {},
     modifier: Modifier = Modifier,
     now: Long = nowMillis(),
 ) {
     val cabinet = state.cabinet
 
-    if (cabinet.activePeerId != null) {
-        // 浏览同事的文件柜
-        PeerCabinetView(
-            state = state,
-            onBack = { onSelectPeer(null) },
-            onLoadPath = onLoadPath,
-            onToggleSelection = onToggleSelection,
-            onDownloadEntries = onDownloadEntries,
-            onUploadToCabinet = onUploadToCabinet,
-            modifier = modifier,
-            now = now,
-        )
-    } else {
-        // 我的文件柜设置与动态面板
-        MineCabinetView(
-            state = state,
-            onSetShareRoot = onSetShareRoot,
-            onPickShareRoot = onPickShareRoot,
-            onSetShareMode = onSetShareMode,
-            onRemoveShareGrant = onRemoveShareGrant,
-            onSelectPeer = onSelectPeer,
-            onOpenShareRoot = onOpenShareRoot,
-            modifier = modifier,
-            now = now,
-        )
+    Column(modifier.fillMaxSize()) {
+        // 「最近有人放进来」「下载已开始」这类反馈的唯一出口（照 ConversationsScreen 的
+        // 模式）：banner 数据一直在发，过去只是没有宿主画它。
+        state.banner?.let {
+            AppBanner(
+                banner = it,
+                onDismiss = onDismissBanner,
+                modifier = Modifier.padding(
+                    horizontal = LocalAppSpacing.current.lg,
+                    vertical = LocalAppSpacing.current.sm,
+                ),
+            )
+        }
+        if (cabinet.activePeerId != null) {
+            // 浏览同事的文件柜
+            PeerCabinetView(
+                state = state,
+                onBack = { onSelectPeer(null) },
+                onLoadPath = onLoadPath,
+                onToggleSelection = onToggleSelection,
+                onDownloadEntries = onDownloadEntries,
+                onUploadToCabinet = onUploadToCabinet,
+                onLoadMore = onLoadMore,
+                modifier = Modifier.weight(1f),
+            )
+        } else {
+            // 我的文件柜设置与动态面板
+            MineCabinetView(
+                state = state,
+                onSetShareRoot = onSetShareRoot,
+                onPickShareRoot = onPickShareRoot,
+                onSetShareMode = onSetShareMode,
+                onRemoveShareGrant = onRemoveShareGrant,
+                onSelectPeer = onSelectPeer,
+                onOpenShareRoot = onOpenShareRoot,
+                modifier = Modifier.weight(1f),
+                now = now,
+            )
+        }
     }
 }
 
@@ -270,6 +302,63 @@ internal fun MineCabinetView(
     val hasRoot = !settings.shareRoot.isNullOrBlank()
     val peers = state.humanPeers.filter { it.online }
 
+    // 两个不可逆动作各自挂一道确认：停止共享（同事立刻看不到任何东西）与
+    // 移除某位同事的单独授权。过去都是一按就生效 —— 与「退出群聊」「移出成员」
+    // 同一条纪律：破坏性动作必须有回头路。
+    var confirmStopShare by remember { mutableStateOf(false) }
+    var grantToRemove by remember { mutableStateOf<String?>(null) }
+    if (confirmStopShare) {
+        RelayDialog(
+            onDismissRequest = { confirmStopShare = false },
+            title = { Text(stringResource(Res.string.cabinet_confirm_stop_share_title)) },
+            content = {
+                Text(
+                    stringResource(Res.string.cabinet_confirm_stop_share_desc),
+                    style = MaterialTheme.typography.bodyMedium,
+                )
+            },
+            confirmButton = {
+                RelayDialogButton(
+                    text = stringResource(Res.string.cabinet_stop_share),
+                    onClick = {
+                        confirmStopShare = false
+                        onSetShareRoot(null)
+                    },
+                    danger = true,
+                )
+            },
+            dismissButton = {
+                RelayDialogButton(text = stringResource(Res.string.common_cancel), onClick = { confirmStopShare = false })
+            },
+        )
+    }
+    val removingGrant = grantToRemove
+    if (removingGrant != null) {
+        RelayDialog(
+            onDismissRequest = { grantToRemove = null },
+            title = { Text(stringResource(Res.string.cabinet_confirm_remove_grant_title)) },
+            content = {
+                Text(
+                    stringResource(Res.string.cabinet_confirm_remove_grant_desc),
+                    style = MaterialTheme.typography.bodyMedium,
+                )
+            },
+            confirmButton = {
+                RelayDialogButton(
+                    text = stringResource(Res.string.cabinet_grants_remove),
+                    onClick = {
+                        grantToRemove = null
+                        onRemoveShareGrant(removingGrant)
+                    },
+                    danger = true,
+                )
+            },
+            dismissButton = {
+                RelayDialogButton(text = stringResource(Res.string.common_cancel), onClick = { grantToRemove = null })
+            },
+        )
+    }
+
     LazyColumn(
         modifier.fillMaxSize()
             // 宽屏收列（审计 §5.2）：1440 下这一列会拉满整幅，一行文字超过舒适阅读宽度。
@@ -310,7 +399,7 @@ internal fun MineCabinetView(
                 if (hasRoot) {
                     AppOutlinedButton(
                         text = stringResource(Res.string.cabinet_stop_share),
-                        onClick = { onSetShareRoot(null) },
+                        onClick = { confirmStopShare = true },
                     )
                 }
             }
@@ -545,7 +634,7 @@ internal fun MineCabinetView(
                             AppIconButton(
                                 icon = Res.drawable.ic_close,
                                 contentDescription = stringResource(Res.string.cabinet_grants_remove),
-                                onClick = { onRemoveShareGrant(grant.nodeId) },
+                                onClick = { grantToRemove = grant.nodeId },
                                 tone = AppButtonTone.Danger,
                             )
                         }

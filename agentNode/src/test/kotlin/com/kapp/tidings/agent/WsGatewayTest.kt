@@ -18,6 +18,18 @@ import kotlin.test.assertTrue
 
 /**
  * [WsGateway] 的回环升级、路径路由、Token鉴权与回收测试。
+ *
+ * ## 为什么必须真环境
+ *
+ * 这里钉的是**握手本身**：HTTP Upgrade 请求行的形状、响应头里的 `Upgrade: websocket`、
+ * 缺路径/错方法/错 token 时的状态码，以及 101 之后字节流的双向搬运。把 socket mock 掉，
+ * 测到的只会是"我们自己解析自己拼的字符串" —— 而这一层的价值恰恰是"对面真的那样说话时
+ * 我们能不能接住"（真机上翻过车的是 upgrade 与转发，不是解析函数）。
+ *
+ * ## 超时
+ *
+ * 每条连接都设 [SOCKET_TIMEOUT_MS] 读超时：网关卡住时 `input.read()` 会**永久**阻塞，
+ * 症状是 gradle 任务挂死而不是失败 —— 那比红更难诊断。
  */
 class WsGatewayTest {
 
@@ -39,6 +51,17 @@ class WsGatewayTest {
         runCatching { dummyTcpServer?.close() }
         scope.cancel()
     }
+
+    /**
+     * 连一条回环 socket 并设**读超时**。
+     *
+     * 不设的话：网关没回包时 `readResponse` 里的 `input.read()` 永远不返回，
+     * 测试既不绿也不红，只是把任务挂住。
+     */
+    private fun openSocket(port: Int): Socket =
+        Socket("127.0.0.1", port).apply {
+            soTimeout = SOCKET_TIMEOUT_MS
+        }
 
     private fun readResponse(input: InputStream): Pair<Int, String> {
         val lines = mutableListOf<String>()
@@ -73,7 +96,7 @@ class WsGatewayTest {
         )
         gateway.start()
         try {
-            Socket("127.0.0.1", gateway.boundPort).use { sock ->
+            openSocket(gateway.boundPort).use { sock ->
                 val out = sock.getOutputStream()
                 val req = "GET /unknown-path HTTP/1.1\r\nHost: 127.0.0.1\r\n\r\n"
                 out.write(req.toByteArray())
@@ -97,7 +120,7 @@ class WsGatewayTest {
         )
         gateway.start()
         try {
-            Socket("127.0.0.1", gateway.boundPort).use { sock ->
+            openSocket(gateway.boundPort).use { sock ->
                 val out = sock.getOutputStream()
                 val req = "POST /v1/pipe HTTP/1.1\r\nHost: 127.0.0.1\r\n\r\n"
                 out.write(req.toByteArray())
@@ -123,7 +146,7 @@ class WsGatewayTest {
         gateway.start()
         try {
             // 1. 无 token 升级 -> 401
-            Socket("127.0.0.1", gateway.boundPort).use { sock ->
+            openSocket(gateway.boundPort).use { sock ->
                 val out = sock.getOutputStream()
                 val req = "GET /v1/pipe HTTP/1.1\r\n" +
                     "Host: 127.0.0.1\r\n" +
@@ -139,7 +162,7 @@ class WsGatewayTest {
             }
 
             // 2. 带 Authorization Bearer -> 101 Switching Protocols
-            Socket("127.0.0.1", gateway.boundPort).use { sock ->
+            openSocket(gateway.boundPort).use { sock ->
                 val out = sock.getOutputStream()
                 val req = "GET /v1/pipe HTTP/1.1\r\n" +
                     "Host: 127.0.0.1\r\n" +
@@ -157,7 +180,7 @@ class WsGatewayTest {
             }
 
             // 3. 带 ?token= 查询参数 -> 101 Switching Protocols
-            Socket("127.0.0.1", gateway.boundPort).use { sock ->
+            openSocket(gateway.boundPort).use { sock ->
                 val out = sock.getOutputStream()
                 val req = "GET /v1/pipe?token=$secret HTTP/1.1\r\n" +
                     "Host: 127.0.0.1\r\n" +
@@ -190,5 +213,10 @@ class WsGatewayTest {
             thrown = true
         }
         assertTrue(thrown, "重复路由路径启动时必须抛出异常")
+    }
+
+    private companion object {
+        /** 读超时：网关不回包时让测试**失败**，而不是把 gradle 任务挂死。 */
+        const val SOCKET_TIMEOUT_MS = 5_000
     }
 }

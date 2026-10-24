@@ -142,4 +142,45 @@ class ChatScrollLogicTest {
             unseenAfterGrowth(previousUnseen = 4, added = -3, nearBottom = false, lastMessageIsMine = false),
         )
     }
+
+    /**
+     * 时间正序下标 → 倒序渲染视觉下标的镜像换算。
+     *
+     * 真身：点引用卡 / 搜索命中跳转，旧代码把正序下标直接喂给 `scrollToItem`，
+     * 而列表是「数据倒序 + reverseLayout」双翻结构 —— 跳到的是**镜像位置**
+     * （消息总数对称的另一头）。反向验证：把 [visualIndexOf] 改成原样返回
+     * `chronologicalIndex`（不做换算），本组测试立刻变红。
+     */
+    @Test
+    fun singleItemListMapsToItself() {
+        // 单条消息的会话：正序第 0 条（也是最新一条）= 视觉第 0 条。
+        // 空表永远不会走到换算（两处调用点都先判 idx >= 0），这里只钉「一条」的下限情形。
+        assertEquals(0, visualIndexOf(0, 1))
+    }
+
+    @Test
+    fun newestMessageInChronologicalOrderIsVisualIndexZero() {
+        // 正序的最后一条 = 最新一条 = 倒序渲染的第 0 条（画在最下面、离输入区最近）。
+        assertEquals(0, visualIndexOf(chronologicalIndex = 9, size = 10))
+    }
+
+    @Test
+    fun oldestMessageInChronologicalOrderIsTheLastVisualIndex() {
+        // 正序的第 0 条 = 最旧一条 = 倒序渲染的最后一条（历史顶端）。
+        assertEquals(9, visualIndexOf(chronologicalIndex = 0, size = 10))
+    }
+
+    @Test
+    fun middleMessageMirrorsAroundTheCenter() {
+        // 镜像换算满足 idx + visual == size - 1：中条对称、首尾互换。
+        assertEquals(4, visualIndexOf(5, 10))
+        assertEquals(5, visualIndexOf(4, 10))
+        assertEquals(1, visualIndexOf(1, 3))
+        // 换算再走一遍要回到原点（自反性）。
+        for (size in listOf(1, 2, 7, 50)) {
+            for (idx in 0 until size) {
+                assertEquals(idx, visualIndexOf(visualIndexOf(idx, size), size))
+            }
+        }
+    }
 }

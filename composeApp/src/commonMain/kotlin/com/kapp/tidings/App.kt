@@ -6,10 +6,13 @@ import androidx.compose.foundation.background
 import androidx.compose.foundation.isSystemInDarkTheme
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.BoxWithConstraints
+import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.WindowInsets
 import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.safeDrawing
 import androidx.compose.foundation.layout.windowInsetsPadding
 import androidx.compose.material3.MaterialTheme
@@ -24,6 +27,8 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.produceState
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.runtime.saveable.rememberSaveable
+import androidx.compose.runtime.saveable.rememberSaveableStateHolder
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.ExperimentalComposeUiApi
 import androidx.compose.ui.Modifier
@@ -48,6 +53,7 @@ import com.kapp.tidings.feature.chat.ChatScreenGroupActions
 import com.kapp.tidings.feature.chat.draftOf
 import com.kapp.tidings.feature.chat.updateDraft
 import com.kapp.tidings.feature.chat.ChatScreenState
+import com.kapp.tidings.feature.chat.DraftsByConvSaver
 import com.kapp.tidings.feature.conversations.ConversationsScreen
 import com.kapp.tidings.feature.nodes.NodesScreen
 import com.kapp.tidings.feature.scan.ScanScreen
@@ -74,9 +80,11 @@ import com.kapp.tidings.generated.resources.workspace_group_default_name
 import com.kapp.tidings.navigation.AppLayoutMode
 import com.kapp.tidings.navigation.AppNavItems
 import com.kapp.tidings.navigation.AppNavState
+import com.kapp.tidings.navigation.AppNavStateSaver
 import com.kapp.tidings.navigation.AppRoutes
 import com.kapp.tidings.platform.CareSystemBars
 import com.kapp.tidings.ui.ContentWidths
+import com.kapp.tidings.ui.components.AppBanner
 import com.kapp.tidings.ui.components.CompactScaffold
 import com.kapp.tidings.ui.qrScannerPreviewUi
 import com.kapp.tidings.ui.desktop.DesktopChromeMode
@@ -84,12 +92,14 @@ import com.kapp.tidings.ui.desktop.DesktopMetrics
 import com.kapp.tidings.ui.desktop.DesktopShell
 import com.kapp.tidings.ui.desktop.DesktopShellActions
 import com.kapp.tidings.ui.theme.AppTheme
+import com.kapp.tidings.ui.theme.LocalAppSpacing
 import com.kapp.tidings.ui.theme.ThemeMode
 import com.kapp.tidings.domain.model.ConversationUi
 import com.kapp.tidings.domain.model.PeerUi
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
+import org.jetbrains.compose.resources.stringResource
 
 /**
  * 应用根。
@@ -187,7 +197,14 @@ fun RelayApp(
                 val windowWidthDp = maxWidth.value.toInt()
                 val windowHeightDp = maxHeight.value.toInt()
 
-                var nav by remember { mutableStateOf(AppNavState()) }
+                // 导航状态**必须能活过转屏与进程重建**：本应用的 Manifest 没有
+                // configChanges，转一次屏整个 Activity 重建，裸 `remember` 会被扔回初值
+                // —— 用户正停在聊天里，转个屏就落回会话列表，聊天里的草稿也一起没了。
+                // `rememberSaveable(stateSaver = AppNavStateSaver)` 把这件事变成不变量；
+                // 存档格式（逐字段、null 的表示法）见 [AppNavStateSaver] 的 KDoc。
+                var nav by rememberSaveable(stateSaver = AppNavStateSaver) {
+                    mutableStateOf(AppNavState())
+                }
 
                 // 会话列表的滚动状态**提到这里**，而不是留在 ConversationsScreen 内部。
                 //
@@ -195,7 +212,17 @@ fun RelayApp(
                 // 销毁了，内部的 rememberLazyListState 跟着没 ⇒ 返回时列表回到顶部（116 个
                 // 会话的列表上，用户翻到「11 天前」那批点进去看一眼再回来，位置全丢）。
                 // 放在 nav 旁边，它与导航状态同寿，进出会话都还在。
+                //
+                // **它自身不用另存**：`rememberLazyListState` 内部就是 `rememberSaveable`，
+                // 转屏 / 进程重建自己能活；这里提上来解决的是「分支切走即销毁」，
+                // 不是「转屏归零」。
                 val convListState = rememberLazyListState()
+
+                // 页签内容的 Saveable 存档按页签 id 分格：切页签（以及进聊天 / 扫码 /
+                // 搜索盖上来）时旧页签离开组合，它的 rememberSaveable（各屏内部的
+                // 滚动位置等）会被销毁 —— 有了这层 provider，存档留在 holder 里，
+                // 切回来原样恢复。与 NavHost 保存各目的地状态是同一个机制。
+                val tabStateHolder = rememberSaveableStateHolder()
 
                 // 折叠屏展开 / 平板旋转会让外壳从手机换成两栏，而两栏那条路没有扫码页：
                 // 不在这里收掉的话，页面会无声消失（scanning 还挂着、相机也一直开着），
@@ -211,8 +238,13 @@ fun RelayApp(
                 // 每个会话各自的草稿。**必须住在壳里**：ChatScreen 自己的 `draft` 是
                 // `remember(peerId)` 的，切会话就重建 —— 用户写到一半去别处确认件事，
                 // 回来字数全没。壳按会话键记着，切回来时作为 `initialDraft` 喂进 ChatScreen。
-                // 只活在进程内（不落盘）：手机该有的语义是"切页面不丢"，不是"重启还留着"。
-                var draftsByConv by remember { mutableStateOf(mapOf<String, String>()) }
+                // `rememberSaveable` 而不是裸 `remember`：转屏 / 进程重建时草稿跟着壳一起
+                // 存活（存档格式见 [DraftsByConvSaver]）。它仍然**不落盘**：存档活的是
+                // 系统给的 SavedState（转屏与系统回收进程），用户主动划掉应用就该丢 ——
+                // "切页面不丢"依旧成立，只是不再连转屏一起丢。
+                var draftsByConv by rememberSaveable(stateSaver = DraftsByConvSaver) {
+                    mutableStateOf(mapOf<String, String>())
+                }
 
                 // 戳一碰要求"定位到该会话"（协议 §8）：控制器只放一个一次性请求，
                 // 外壳消费一次就清掉 —— 留着它，用户手动切走之后又会被拽回来。
@@ -251,12 +283,14 @@ fun RelayApp(
                 // 并且必须同时接管返回键 —— 否则用户在第二屏按返回会直接退出应用。
                 // 第二屏现在是**六选一**：拆分前是一个布尔 showSettingsMore，
                 // 而「进第二屏」实际是六件事之一（五张原型设置页 + 代码自有的更新页）。
-                var settingsPage by remember { mutableStateOf<String?>(null) }
+                var settingsPage by rememberSaveable { mutableStateOf<String?>(null) }
                 BackHandler(enabled = settingsPage != null) { settingsPage = null }
 
                 // 平板外壳（DesktopShell）没有桌面菜单栏，设置只能在工具栏溢出里进入，
                 // 因此在这里挂一个全屏覆盖层；同样必须接管返回键。
-                var tabletSettingsOpen by remember { mutableStateOf(false) }
+                // 必须是 rememberSaveable：平板/折叠屏转屏时覆盖层若凭空消失，用户半改的设置
+                // 就没了（手机侧的 settingsPage 早已是可保存的，这里此前漏了）。
+                var tabletSettingsOpen by rememberSaveable { mutableStateOf(false) }
                 BackKeyHandler(enabled = tabletSettingsOpen) { tabletSettingsOpen = false }
 
                 // 手机端全局搜索（原型 `m-gsearch`）。它是**整屏**而不是弹层：原型
@@ -264,7 +298,7 @@ fun RelayApp(
                 // 也就是它替换的是会话列表那**一整屏**，不是盖一层对话框。
                 // 与上面两条同一个理由：盖住了整屏就必须接管返回键，否则用户在搜索页
                 // 按返回会直接退出应用（这条规矩在本文件里已经写过三遍）。
-                var globalSearchOpen by remember { mutableStateOf(false) }
+                var globalSearchOpen by rememberSaveable { mutableStateOf(false) }
                 BackKeyHandler(enabled = globalSearchOpen) { globalSearchOpen = false }
 
                 // 平板同样要能复制节点 ID / 配对链接：composeApp 里没有剪贴板实现，
@@ -281,8 +315,14 @@ fun RelayApp(
                     controller.selectConversation(convId)
                 }
 
-                // 返回键只在紧凑布局的聊天详情里被接管：两栏模式下列表本来就看得见，
-                // 再吃掉返回键，用户会找不到退出应用的办法。
+                // 返回键的分工（平板与手机不同源，必须说清，否则会「按两次才退出」）：
+                // - 手机：详情/选中都住在 App 的 nav 里，这里接管；
+                // - 平板两栏：**选中住在 DesktopShell 的本地状态**（它自己渲染右栏），App 的
+                //   nav.activeSessionId 在平板只是一条残留写点（通知点击路径会写、没人清），
+                //   若这里也 enabled，会先被这条看不见的状态吃掉一次返回。所以三条 nav 判据
+                //   继续 `!twoPane`，平板交给壳里的 BackHandler。
+                // - 例外：同事文件柜是 controller 状态、两壳共享（壳的 handler 已让位），
+                //   所以下面那条**不加** `!twoPane`。
                 val chatDetailOnTop = nav.inChatDetail && !twoPane
                 BackKeyHandler(enabled = chatDetailOnTop) { nav = nav.leaveChatDetail() }
 
@@ -300,7 +340,7 @@ fun RelayApp(
                 BackKeyHandler(enabled = peerDetailOnTop) { nav = nav.leavePeerDetail() }
 
                 // 浏览同事文件柜时也要接管返回键：从同事文件列表回到我的文件柜，避免直接退出应用
-                val peerCabinetOnTop = state.cabinet.activePeerId != null && !twoPane
+                val peerCabinetOnTop = state.cabinet.activePeerId != null
                 BackKeyHandler(enabled = peerCabinetOnTop) { controller.selectCabinetPeer(null) }
 
                 // 工作区详情与会话详情也要接管返回键：从会话详情回到工作区详情，从工作区详情回到看板
@@ -334,6 +374,11 @@ fun RelayApp(
                 // 两个不同的动作：一个是"挑一个工作区建群"，另一个是"就这个工作区建群"。
                 var groupPromptFor by remember { mutableStateOf<com.kapp.tidings.domain.model.WorkspaceUi?>(null) }
 
+                // 「中断 agent 运行」要发帧（suspend），而 ChatScreen 的 actions 是同步回调：
+                // 在这里起一个壳级 scope，把 suspend 调用丢进去。选 rememberCoroutineScope 而
+                // 不是 controller.scope：这条请求的寿命跟随这一屏，离开就取消。
+                val chatScope = rememberCoroutineScope()
+
                 val chatPanel: @Composable (Modifier, Boolean) -> Unit = { panelModifier, showHeader ->
                     ChatScreen(
                         data = ChatScreenState(
@@ -354,6 +399,16 @@ fun RelayApp(
                             // 「重发」按原消息 id 重放（core 的 replayOutgoing）：换 id 重发会让
                             // 对端多落一条（真机现场同一句话两个 id）。
                             onRetryMessage = controller::retryMessage,
+                            // 审批三参（含「本会话免审」）：聊天里复用看板那一行，
+                            // 判据与看板同源（:core AgentApprovalAuthority），这里只转发意图。
+                            onRespondChoice = controller::respondApproval,
+                            // 群里那颗「中断」此前是往群里发一条 /cancel 文本（所有人可见、
+                            // 对端不认就完全没中断）。现在走 PPE-1 §6.6 的 agent-cancel 帧。
+                            onCancelAgentRun = { peerId, sessionId, runId ->
+                                chatScope.launch {
+                                    controller.cancelAgentRun(peerId, sessionId, runId, reason = "user")
+                                }
+                            },
                             // **从「@ 了但没有执行权」那一行提示直接申请**：
                             // 用户读到「没有执行」的那一刻就是想授权的时刻，不该让他去别处找入口。
                             onRequestAgentGrant = { agentName ->
@@ -490,13 +545,25 @@ fun RelayApp(
                         if (!dataPageOpen) return@produceState
                         value = withContext(Dispatchers.Default) { controller.leftoverParts() }
                     }
+                    // 子页（settingsPage != null）此前**没有横幅宿主**：失败与回执都走
+                    // state.banner，而宿主只在首页 SettingsHomeScreen 里 —— 于是在「连接」
+                    // 页点保存，端口非法/网段非法/选图超限全都静默（CIDR「假成功」从这条
+                    // 路复活）。这里给所有子页统一挂一个宿主；首页仍用它自己那一份，
+                    // 两处互斥（同一时刻只画一棵子树），不会双画。
+                    Column(settingsModifier) {
+                        if (settingsPage != null) {
+                            state.banner?.let { banner ->
+                                AppBanner(banner = banner, onDismiss = controller::dismissBanner)
+                            }
+                        }
+                        Box(Modifier.fillMaxWidth().weight(1f)) {
                     when (settingsPage) {
                         // 通知与能力声明这五个开关以前只改屏上的本地状态，没有后端 ——
                         // 也就是"拨了不改变行为"（审计 P1-7）。现在都落到 RelaySettings：
                         // 通知三条只写盘（策略在收到消息那一刻现读），能力两条会
                         // 递增 profileRev 并重启节点（对端据此重新认识我们的能力）。
                         SETTINGS_PAGE_NOTIFY -> SettingsNotifySubpage(
-                            modifier = settingsModifier,
+                            modifier = Modifier.fillMaxSize(),
                             onBack = { settingsPage = null },
                             notificationsEnabled = state.settings.notifyAgentMessages,
                             onNotificationsEnabledChange = controller::updateNotifyAgentMessages,
@@ -507,7 +574,7 @@ fun RelayApp(
                         )
 
                         SETTINGS_PAGE_APPEAR -> SettingsAppearSubpage(
-                            modifier = settingsModifier,
+                            modifier = Modifier.fillMaxSize(),
                             onBack = { settingsPage = null },
                             themeMode = themeMode.wire,
                             onThemeModeChange = { wire ->
@@ -516,7 +583,7 @@ fun RelayApp(
                         )
 
                         SETTINGS_PAGE_CAPS -> SettingsCapsSubpage(
-                            modifier = settingsModifier,
+                            modifier = Modifier.fillMaxSize(),
                             onBack = { settingsPage = null },
                             textCapabilityEnabled = state.settings.waitFrameCapability,
                             onTextCapabilityEnabledChange = controller::updateWaitFrameCapability,
@@ -525,7 +592,7 @@ fun RelayApp(
                         )
 
                         SETTINGS_PAGE_DATA -> SettingsDataSubpage(
-                            modifier = settingsModifier,
+                            modifier = Modifier.fillMaxSize(),
                             dataDirectory = controller.dataDirectory,
                             cacheDirectory = controller.cacheDirectory,
                             dataUsageBytes = storageUsage?.first,
@@ -549,7 +616,7 @@ fun RelayApp(
 
                         SETTINGS_PAGE_DIAG -> SettingsDiagSubpage(
                             state = state,
-                            modifier = settingsModifier,
+                            modifier = Modifier.fillMaxSize(),
                             onBack = { settingsPage = null },
                             // 诊断包导出：打包/分享都在这条 suspend 里，页面自己起协程并显示结果
                             // （成功报文件名与大小，失败报原因 —— 不给一颗点下去没反应的按钮）。
@@ -561,24 +628,26 @@ fun RelayApp(
                         // 输入法自检：此前是孤儿页（见 SETTINGS_PAGE_IME 的 KDoc）。
                         // 它在 commonMain 里，手机与桌面同一份实现。
                         SETTINGS_PAGE_IME -> ImeSmokePane(
-                            modifier = settingsModifier,
+                            modifier = Modifier.fillMaxSize(),
                             onBack = { settingsPage = null },
                         )
 
                         SETTINGS_PAGE_UPDATE -> SettingsUpdateSubpage(
                             state = state,
-                            modifier = settingsModifier,
+                            modifier = Modifier.fillMaxSize(),
                             onBack = { settingsPage = null },
                             appVersion = controller.version,
                             onCheckForUpdates = controller::checkForUpdates,
                             onOpenUpdate = controller::openUpdateUrl,
                         )
 
-                        // 「上传头像」独立页（台账 `m-set-avatar`）。它是**资料页头像
-                        // 分段控件第三档的出口** —— 原型 `avSeg()` 的第三档
+                        // 「上传头像」独立页（台账 `m-set-avatar`）。两个入口都落到这一支：
+                        // ① 设置首页「外观与能力」组的「头像」行（`SettingsHomeScreen`）；
+                        // ② 资料页头像分段控件的第三档 —— 原型 `avSeg()` 的第三档
                         // `avOpenUpload(){ go('m-set-avatar'); }`（`prototype/relay.html:2122`）。
-                        // 在加这一支之前，`SetAvatarPage` 全仓没有生产调用点，是张孤儿页：
-                        // 分段控件第三档就算画出来也无处可去。
+                        // 在接上之前，这一支有 when 分支、却**全仓没有一个写入点**：
+                        // 第三档被接成 `controller::pickAvatar`（选图，不换页），
+                        // 于是 `SetAvatarPage` 在生产里不可达，成了孤儿页。
                         SETTINGS_PAGE_AVATAR -> SetAvatarPage(
                             state = state,
                             pickedAvatarBytes = state.pickedAvatarBytes,
@@ -586,7 +655,7 @@ fun RelayApp(
                             onRemovePicked = controller::removePickedAvatar,
                             onSaveProfile = controller::saveProfile,
                             onBack = { settingsPage = null },
-                            modifier = settingsModifier,
+                            modifier = Modifier.fillMaxSize(),
                         )
 
                         else -> SettingsScreen(
@@ -599,6 +668,7 @@ fun RelayApp(
                             onAddScanRange = controller::addScanRange,
                             onRemoveScanRange = controller::removeScanRange,
                             onTriggerCidrScan = controller::triggerCidrScan,
+                            onCancelCidrScan = controller::cancelCidrScan,
                             // 「后台保持连接」（task-15）：能力在 Android 上为 true，桌面/iOS
                             // 为 false ⇒ 设置页不画那个开关（能力不存在就不画入口）。
                             keepAliveSupported = controller.backgroundConnectionSupported,
@@ -607,10 +677,14 @@ fun RelayApp(
                             onDismissBanner = controller::dismissBanner,
                             onClearNote = controller::clearSettingsNote,
                             onOpenPage = { settingsPage = it },
-                            onOpenAvatarPage = controller::pickAvatar,
+                            // 第三档的出口是**换页**，不是选图：接成 `controller::pickAvatar`
+                            // 会让这一档点了只弹文件框、永远到不了 SETTINGS_PAGE_AVATAR。
+                            onOpenAvatarPage = { settingsPage = SETTINGS_PAGE_AVATAR },
                             onRemovePickedAvatar = controller::removePickedAvatar,
-                            modifier = settingsModifier,
+                            modifier = Modifier.fillMaxSize(),
                         )
+                    }
+                        }
                     }
                 }
 
@@ -636,12 +710,14 @@ fun RelayApp(
                                 openChat(convId)
                             },
                             // 文件在协议里属文件柜那一套（原型 `gscFile` 的落点是手机 `m-cabinet`）：
-                            // 点它该看到"这个文件在哪"，不只是"谁发过"。这里先切到文件柜页签 ——
-                            // 直接定位到那一项要文件柜支持"按消息 id 定位"，那是它那一组的能力，
-                            // 不在这块屏里编一个注定到不了位的落点。
-                            onOpenFile = {
+                            // 但命中行带的是**会话键**（`GlobalSearchFileHit.convId`），文件柜那一屏
+                            // 根本没有「按消息定位」的入口 —— 过去只切到文件柜页签、把会话键扔掉，
+                            // 用户点了一条文件命中，看到的却是文件柜列表，什么都没定位到。
+                            // 现在打开对应会话（会话内定位到具体消息要 ChatScreen 的跳转接缝
+                            // 暴露到组合根，那一步不在本轮范围 —— 先做到「打开对应会话」）。
+                            onOpenFile = { convId ->
                                 globalSearchOpen = false
-                                nav = nav.selectTab(AppRoutes.CABINET)
+                                openChat(convId)
                             },
                             modifier = contentModifier,
                         )
@@ -649,195 +725,239 @@ fun RelayApp(
                         // 紧凑布局下的聊天详情：整屏，顶栏带返回。
                         chatDetailOnTop -> chatPanel(contentModifier, true)
 
-                        else -> Row(contentModifier.fillMaxSize()) {
-                            when (nav.selectedTabId) {
-                                AppRoutes.CABINET -> CabinetScreen(
-                                    state = state,
-                                    onSetShareRoot = controller::setShareRoot,
-                                    onSetShareMode = controller::setShareMode,
-                                    onRemoveShareGrant = controller::removeShareGrant,
-                                    onSelectPeer = controller::selectCabinetPeer,
-                                    onLoadPath = controller::loadCabinetPath,
-                                    onToggleSelection = controller::toggleCabinetSelection,
-                                    onDownloadEntries = controller::downloadCabinetEntries,
-                                    onPickShareRoot = controller::pickShareRoot,
-                                    onUploadToCabinet = controller::uploadToCabinet,
-                                    // 「最近上传」的时间列必须有一个真实基准：以前这一行不传
-                                    // now，CabinetScreen 的默认值是 0，relativeTime(ts, 0) 的
-                                    // delta 恒为负、恒落进"刚刚"那一档 —— 界面在说假话。
-                                    // 不传也能拿到默认的 nowMillis()，这里显式写出来是为了让
-                                    // 组合根这一层能一眼看出它读的是墙上时钟。
-                                    now = nowMillis(),
-                                    modifier = Modifier.weight(1f),
-                                )
+                        // 页签内容包在 SaveableStateProvider 里（见上面 tabStateHolder 的
+                        // 注释）：切页签 / 被聊天详情、扫码、搜索盖走再回来，各屏自己的
+                        // rememberSaveable（滚动位置等）从 holder 原样恢复，而不是归零。
+                        else -> tabStateHolder.SaveableStateProvider(key = nav.selectedTabId) {
+                            Row(contentModifier.fillMaxSize()) {
+                                when (nav.selectedTabId) {
+                                    AppRoutes.CABINET -> CabinetScreen(
+                                        state = state,
+                                        onSetShareRoot = controller::setShareRoot,
+                                        onSetShareMode = controller::setShareMode,
+                                        onRemoveShareGrant = controller::removeShareGrant,
+                                        onSelectPeer = controller::selectCabinetPeer,
+                                        onLoadPath = controller::loadCabinetPath,
+                                        // 协议已支持 offset/truncated：有更多才画「加载更多」（见 PeerCabinetView）。
+                                        onLoadMore = controller::loadMoreCabinetEntries,
+                                        onToggleSelection = controller::toggleCabinetSelection,
+                                        onDownloadEntries = controller::downloadCabinetEntries,
+                                        onPickShareRoot = controller::pickShareRoot,
+                                        onUploadToCabinet = controller::uploadToCabinet,
+                                        // 文件柜屏自己挂了 AppBanner（与 ConversationsScreen 同一模式），
+                                        // banner 的关闭动作从组合根接进去。
+                                        onDismissBanner = controller::dismissBanner,
+                                        // 「最近上传」的时间列必须有一个真实基准：以前这一行不传
+                                        // now，CabinetScreen 的默认值是 0，relativeTime(ts, 0) 的
+                                        // delta 恒为负、恒落进"刚刚"那一档 —— 界面在说假话。
+                                        // 不传也能拿到默认的 nowMillis()，这里显式写出来是为了让
+                                        // 组合根这一层能一眼看出它读的是墙上时钟。
+                                        now = nowMillis(),
+                                        modifier = Modifier.weight(1f),
+                                    )
 
-                                AppRoutes.NODES -> NodesScreen(
-                                    state = state,
-                                    onAddPeer = controller::addManualPeer,
-                                    // 带名字那条：手机壳能收下"给手动节点起个本机显示名"，
-                                    // 于是弹层里多一个「名字（可选）」框；名字只存本机、不进 wire。
-                                    onAddPeerNamed = controller::addNamedManualPeer,
-                                    onRemovePeer = controller::removeManualPeer,
-                                    onCleanupUnreachable = controller::removeUnreachableManualPeers,
-                                    onRetryStart = controller::requestRestart,
-                                    // 手机端接上了：点「打开相机扫码」会盖一整屏取景框
-                                    // （见 ScanScreen）。`onScanQr` 为 null = 这个平台画不出
-                                    // 取景框（桌面/平板没有相机栈），按钮不画，弹层里如实写
-                                    // "请切到填地址"。
-                                    onScanQr = onScanQr,
-                                    // 「从图片导入二维码」与取景框同一道闸（同一个
-                                    // `qrScannerPreview != null` 判据）：手机端有，
-                                    // 桌面/平板两个一起是 null，弹层里两颗按钮一起不画。
-                                    // 授权：Lead 批准 W2 在本文件加这一行（task-16）。
-                                    onImportQrFromImage = importQrFromImage,
-                                    onDismissBanner = controller::dismissBanner,
-                                    // 行尾 ⋯ 菜单的「发消息」：节点是"对端"，会话是"跟它的对话"，
-                                    // 点一行就该进会话 —— 走的是与 Agent 控制台同一条 `openChat`。
-                                    onOpenChat = openChat,
-                                    // 原型把「点一行」的含义改掉了：不再直冲会话，
-                                    // 而是进这个节点的详情（`nodeRow` 的
-                                    // `onclick="selNode='…';go('m-nodedetail')"`，`prototype/relay.html:3287`）。
-                                    // 详情是节点页签内部的一个分支，所以"正在看谁"记在 `nav` 上、
-                                    // 由 `NodesScreen` 自己决定画列表还是画详情 —— 组合根只负责
-                                    // 把导航状态与三个回调接进去。
-                                    detailPeerId = nav.detailPeerId,
-                                    onOpenPeerDetail = { peerId -> nav = nav.openPeerDetail(peerId) },
-                                    onLeavePeerDetail = { nav = nav.leavePeerDetail() },
-                                    // 备注是本机给人起的名，不进协议（见 `PeerUi.remark` 的 KDoc）：
-                                    // 落盘在设置里，所以走 `controller` 而不是导航。
-                                    onSetPeerRemark = controller::setPeerRemark,
-                                    modifier = Modifier.weight(1f),
-                                )
+                                    AppRoutes.NODES -> NodesScreen(
+                                        state = state,
+                                        onAddPeer = controller::addManualPeer,
+                                        // 带名字那条：手机壳能收下"给手动节点起个本机显示名"，
+                                        // 于是弹层里多一个「名字（可选）」框；名字只存本机、不进 wire。
+                                        onAddPeerNamed = controller::addNamedManualPeer,
+                                        onRemovePeer = controller::removeManualPeer,
+                                        // 「重连」一条已保存但当前不通的手动地址：mDNS 判重会把
+                                        // 同址的广播行滤掉，只剩红色「没有回应」那行 —— 没有这个
+                                        // 入口，用户只能删了重加或重启应用（review R2-#1）。
+                                        onReconnectPeer = controller::reconnectManualPeer,
+                                        onCleanupUnreachable = controller::removeUnreachableManualPeers,
+                                        onRetryStart = controller::requestRestart,
+                                        // 手机端接上了：点「打开相机扫码」会盖一整屏取景框
+                                        // （见 ScanScreen）。`onScanQr` 为 null = 这个平台画不出
+                                        // 取景框（桌面/平板没有相机栈），按钮不画，弹层里如实写
+                                        // "请切到填地址"。
+                                        onScanQr = onScanQr,
+                                        // 「从图片导入二维码」与取景框同一道闸（同一个
+                                        // `qrScannerPreview != null` 判据）：手机端有，
+                                        // 桌面/平板两个一起是 null，弹层里两颗按钮一起不画。
+                                        // 授权：Lead 批准 W2 在本文件加这一行（task-16）。
+                                        onImportQrFromImage = importQrFromImage,
+                                        onDismissBanner = controller::dismissBanner,
+                                        // 行尾 ⋯ 菜单的「发消息」：节点是"对端"，会话是"跟它的对话"，
+                                        // 点一行就该进会话 —— 走的是与 Agent 控制台同一条 `openChat`。
+                                        onOpenChat = openChat,
+                                        // 原型把「点一行」的含义改掉了：不再直冲会话，
+                                        // 而是进这个节点的详情（`nodeRow` 的
+                                        // `onclick="selNode='…';go('m-nodedetail')"`，`prototype/relay.html:3287`）。
+                                        // 详情是节点页签内部的一个分支，所以"正在看谁"记在 `nav` 上、
+                                        // 由 `NodesScreen` 自己决定画列表还是画详情 —— 组合根只负责
+                                        // 把导航状态与三个回调接进去。
+                                        detailPeerId = nav.detailPeerId,
+                                        onOpenPeerDetail = { peerId -> nav = nav.openPeerDetail(peerId) },
+                                        onLeavePeerDetail = { nav = nav.leavePeerDetail() },
+                                        // 备注是本机给人起的名，不进协议（见 `PeerUi.remark` 的 KDoc）：
+                                        // 落盘在设置里，所以走 `controller` 而不是导航。
+                                        onSetPeerRemark = controller::setPeerRemark,
+                                        modifier = Modifier.weight(1f),
+                                    )
 
-                                AppRoutes.AGENTS -> AgentConsoleScreen(
-                                    state = state,
-                                    // **不能用** `nav.detailPeerId`：那是**节点页**的详情（普通节点
-                                    // 也有值）。用户先在节点页点开一台普通设备、再切到 Agents 页签时，
-                                    // 这个 id 会流进来；它不在 `agentPeers` 里时，`AgentConsoleScreen` 的
-                                    // 回落会换成「第一个 agent」⇒ **用户点 A 却看到 B 的工作区**
-                                    // （AGENTS.md §2.4：一个事实只有一个来源，两个页签的「详情」是两件事）。
-                                    selectedAgentId = selectedAgentId,
-                                    onSelectAgent = { selectedAgentId = it },
-                                    selectedAgentSessionId = nav.activeAgentSessionId,
-                                    onSelectAgentSession = { nav = nav.selectAgentSession(it) },
-                                    inDetail = nav.inAgentSubpage,
-                                    detailWsId = nav.detailWorkspaceId,
-                                    detailSessionId = nav.detailAgentSessionId,
-                                    onOpenWorkspaceDetail = { peerId, wsId ->
-                                        selectedAgentId = peerId
-                                        nav = nav.openAgentWorkspaceDetail(peerId, wsId)
-                                    },
-                                    onLeaveWorkspaceDetail = {
-                                        nav = nav.leaveAgentWorkspaceDetail()
-                                    },
-                                    onOpenSessionDetail = { peerId, sessionId ->
-                                        selectedAgentId = peerId
-                                        nav = nav.openAgentSessionDetail(sessionId)
-                                    },
-                                    onLeaveSessionDetail = {
-                                        nav = nav.leaveAgentSessionDetail()
-                                    },
-                                    onBackToBoard = {
-                                        nav = nav.leaveAgentWorkspaceDetail()
-                                    },
-                                    onOpenChat = { peerId, wsId ->
-                                        selectedAgentId = peerId
-                                        val ws = state.agentWorkspaces.values.firstOrNull { it.wsId == wsId }
-                                        val boundGroup = state.settings.groups.firstOrNull { g ->
-                                            // 跨模块读 public 属性要先落成局部量：smart cast 只在同模块内成立。
-                                            val wsPath = ws?.wsPath
-                                            val wsTitle = ws?.wsTitle
-                                            val matchPath = !wsPath.isNullOrBlank() && g.description?.contains(wsPath) == true
-                                            val matchTitle = !wsTitle.isNullOrBlank() && g.name.contains(wsTitle)
-                                            matchPath || matchTitle
+                                    // ## Agent 页签也要有一条 AppBanner
+                                    //
+                                    // 建群失败（群名为空 / 超长 / 没有其他成员）时 controller 发的就是
+                                    // `state.banner` —— 本分支不挂它，用户点「创建」就只是**没反应**：
+                                    // 弹窗关了、群没建出来、屏幕上一个字都没有。ConversationsScreen 的
+                                    // 顶栏下有现成的同款接法，这里照同一模式补上（横幅画在 Agent 屏幕
+                                    // 自己的顶栏之上 —— banner 槽在屏内，本文件够不到，组合根能给的
+                                    // 位置就是这里）。
+                                    AppRoutes.AGENTS -> Column(Modifier.weight(1f)) {
+                                        state.banner?.let {
+                                            AppBanner(
+                                                banner = it,
+                                                onDismiss = controller::dismissBanner,
+                                                modifier = Modifier.padding(
+                                                    horizontal = LocalAppSpacing.current.lg,
+                                                    vertical = LocalAppSpacing.current.sm,
+                                                ),
+                                            )
                                         }
-                                        if (boundGroup != null) {
-                                            openChat(com.kapp.tidings.core.protocol.ConvId.group(boundGroup.groupId))
-                                        } else if (ws != null) {
-                                            // issue 7：没有绑定群时**针对这一个工作区**提示建群并进入。
-                                            // 桌面端此前弹的是「所有工作区」列表（用户要处理的是当前这一行，
-                                            // 那张列表跟他点的那一行无关）；手机端此前直接进聊天，等于
-                                            // 根本没给建群这条路。两条壳现在走同一个对话框。
-                                            groupPromptFor = ws
-                                        } else {
-                                            // 没有 wsId 的 Agent 行：这台设备上没有"某个工作区"这回事，
-                                            // 直接进这个节点的会话（与桌面壳同一条）。
-                                            nav = wsId?.let { w -> nav.openWorkspaceChat(peerId, w) }
-                                                ?: nav.openSession(peerId)
-                                            chatUnreadOnEntry = state.unreadByPeer[peerId] ?: 0
-                                            controller.selectConversation(peerId)
-                                        }
-                                    },
-                                    onLoadWorkspaceSessions = { peerId, wsId ->
-                                        controller.requestAgentSessionPage(peerId, wsId, offset = 0)
-                                    },
-                                    onFindNodes = { nav = nav.selectTab(AppRoutes.NODES) },
-                                    onRespondApproval = controller::respondApproval,
-                                    onCancelTask = controller::cancelAgentTask,
-                                    // task-10：手机是「客户端」，申请授权只能由组合根接线 ——
-                                    // 接口留在 feature/agents，能力从哪儿来在这里给。
-                                    onRequestGrant = controller::sendAgentGrantRequest,
-                                    onRefresh = { controller.refreshPeers() },
-                                    onCreateWorkspaceGroup = if (twoPane) { { showCreateWsDialog = true } } else null,
-                                    modifier = Modifier.weight(1f),
-                                )
+                                        AgentConsoleScreen(
+                                            state = state,
+                                            // 撤销本会话免审（撤销是一次显式动作，与逐条审批入口分开）。
+                                            onRevokeSessionApproval = controller::revokeSessionApproval,
+                                            // **不能用** `nav.detailPeerId`：那是**节点页**的详情（普通节点
+                                            // 也有值）。用户先在节点页点开一台普通设备、再切到 Agents 页签时，
+                                            // 这个 id 会流进来；它不在 `agentPeers` 里时，`AgentConsoleScreen` 的
+                                            // 回落会换成「第一个 agent」⇒ **用户点 A 却看到 B 的工作区**
+                                            // （AGENTS.md §2.4：一个事实只有一个来源，两个页签的「详情」是两件事）。
+                                            selectedAgentId = selectedAgentId,
+                                            onSelectAgent = { selectedAgentId = it },
+                                            selectedAgentSessionId = nav.activeAgentSessionId,
+                                            onSelectAgentSession = { nav = nav.selectAgentSession(it) },
+                                            inDetail = nav.inAgentSubpage,
+                                            detailWsId = nav.detailWorkspaceId,
+                                            detailSessionId = nav.detailAgentSessionId,
+                                            onOpenWorkspaceDetail = { peerId, wsId ->
+                                                selectedAgentId = peerId
+                                                nav = nav.openAgentWorkspaceDetail(peerId, wsId)
+                                            },
+                                            onLeaveWorkspaceDetail = {
+                                                nav = nav.leaveAgentWorkspaceDetail()
+                                            },
+                                            onOpenSessionDetail = { peerId, sessionId ->
+                                                selectedAgentId = peerId
+                                                nav = nav.openAgentSessionDetail(sessionId)
+                                            },
+                                            onLeaveSessionDetail = {
+                                                nav = nav.leaveAgentSessionDetail()
+                                            },
+                                            onBackToBoard = {
+                                                nav = nav.leaveAgentWorkspaceDetail()
+                                            },
+                                            onOpenChat = { peerId, wsId ->
+                                                selectedAgentId = peerId
+                                                val ws = state.agentWorkspaces.values.firstOrNull { it.wsId == wsId }
+                                                val boundGroup = state.settings.groups.firstOrNull { g ->
+                                                    // 跨模块读 public 属性要先落成局部量：smart cast 只在同模块内成立。
+                                                    val wsPath = ws?.wsPath
+                                                    val wsTitle = ws?.wsTitle
+                                                    val matchPath = !wsPath.isNullOrBlank() && g.description?.contains(wsPath) == true
+                                                    val matchTitle = !wsTitle.isNullOrBlank() && g.name.contains(wsTitle)
+                                                    matchPath || matchTitle
+                                                }
+                                                if (boundGroup != null) {
+                                                    openChat(com.kapp.tidings.core.protocol.ConvId.group(boundGroup.groupId))
+                                                } else if (ws != null) {
+                                                    // issue 7：没有绑定群时**针对这一个工作区**提示建群并进入。
+                                                    // 桌面端此前弹的是「所有工作区」列表（用户要处理的是当前这一行，
+                                                    // 那张列表跟他点的那一行无关）；手机端此前直接进聊天，等于
+                                                    // 根本没给建群这条路。两条壳现在走同一个对话框。
+                                                    groupPromptFor = ws
+                                                } else {
+                                                    // 没有 wsId 的 Agent 行：这台设备上没有"某个工作区"这回事，
+                                                    // 直接进这个节点的会话（与桌面壳同一条）。
+                                                    nav = wsId?.let { w -> nav.openWorkspaceChat(peerId, w) }
+                                                        ?: nav.openSession(peerId)
+                                                    chatUnreadOnEntry = state.unreadByPeer[peerId] ?: 0
+                                                    controller.selectConversation(peerId)
+                                                }
+                                            },
+                                            onLoadWorkspaceSessions = { peerId, wsId ->
+                                                controller.requestAgentSessionPage(peerId, wsId, offset = 0)
+                                            },
+                                            onFindNodes = { nav = nav.selectTab(AppRoutes.NODES) },
+                                            onRespondApproval = controller::respondApproval,
+                                            // 三参处置（「本会话免审」）：controller 有现成三参重载，
+                                            // 此前只接了两参 —— 免审按钮与徽标在组件里备好了却永远
+                                            // 不出现（issue「本次免审全链路不可达」）。
+                                            onRespondChoice = controller::respondApproval,
+                                            onCancelTask = controller::cancelAgentTask,
+                                            // task-10：手机是「客户端」，申请授权只能由组合根接线 ——
+                                            // 接口留在 feature/agents，能力从哪儿来在这里给。
+                                            onRequestGrant = controller::sendAgentGrantRequest,
+                                            onRefresh = { controller.refreshPeers() },
+                                            onCreateWorkspaceGroup = if (twoPane) { { showCreateWsDialog = true } } else null,
+                                            modifier = Modifier.weight(1f).fillMaxWidth(),
+                                        )
+                                    }
 
-                                AppRoutes.SETTINGS -> settingsContent(Modifier.weight(1f))
+                                    AppRoutes.SETTINGS -> settingsContent(Modifier.weight(1f))
 
-                                else -> ConversationsScreen(
-                                    state = state,
-                                    listState = convListState,
-                                    onOpenChat = openChat,
-                                    onGoToPairing = { nav = nav.selectTab(AppRoutes.NODES) },
-                                    onDismissBanner = controller::dismissBanner,
-                                    onCreateGroup = controller::createGroup,
-                                    // 顶栏那颗放大镜。原型 `prototype/relay.html:2803`/`:2888`
-                                    // 的 `<button class="ibtn" aria-label="全局搜索"
-                                    // onclick="go('m-gsearch')">` 就在 ⋮ 左边，且是移动端
-                                    // **唯一**的搜索入口（`screenGSearch` 的注释：
-                                    // 列表上方那条只管标题与预览的框已经删掉）。
-                                    onSearchGlobal = { globalSearchOpen = true },
-                                    // 「全部标为已读」：原型 `screenHomeMore` 的第 5 项
-                                    // （`prototype/relay.html:2861`，菜单共 6 项 + 2 条分隔线）。
-                                    // 走 `controller.markAllRead()` 而不是
-                                    // `conversations.forEach { selectConversation(it.convId) }`：
-                                    // 后者效果对（`selectConversation` 顺手清零 unread），
-                                    // 但那是**借了别人的副作用** ——
-                                    // 一个叫 `selectConversation` 的方法被当"批量标已读"用。
-                                    // 裁决：给它一个说得出名字的入口。
-                                    // （字段名是 `convId` 不是 `peerId`，理由见 `ConversationUi.convId`
-                                    // 的 KDoc；`App.kt` 是组合根，一处调用补一行都要 Lead 点名授权。）
-                                    onMarkAllRead = controller::markAllRead,
-                                    // 长按会话行的三个动作。都是纯本机行为：置顶/静音只改设置，
-                                    // 删除只清本机消息与标记（不动协议、不通知对方）。
-                                    onTogglePin = controller::togglePinnedConv,
-                                    onToggleMute = controller::toggleMutedConv,
-                                    onDeleteConversation = controller::deleteConversation,
-                                    // ## 手机端**不画**「工作区」段（用户裁决：对齐桌面）
-                                    //
-                                    // 这两颗 lambda 一起决定那一段画不画（见 `ConversationsScreen`
-                                    // 的 `showWorkspaces`）。这里**都不传**，于是：
-                                    //   · 会话列表只剩「会话」——群、同事、agent 节点的对话；
-                                    //   · agent 的工作区行不再混进来（真机上它们是
-                                    //     `care-in-china · Agent · dsh-… · 27 个会话` 这种行，
-                                    //     而**桌面端的会话列表从来没有这一段** —— 两端不一致本身就是缺陷）。
-                                    //
-                                    // ## 工作区内容去哪了：一个字都没少
-                                    //
-                                    // 底部 **Agents 页签**就是「全部工作区」的清单页，而且用的是
-                                    // **同一个** `state.inboxWorkspaceUnits()` 派生（`limit = Int.MAX_VALUE`
-                                    // ⇒ 比这一段的裁剪版更全）。从那里点进去仍然是完整的工作区详情 /
-                                    // 聊天 / 直通码 / 权限管理。
-                                    //
-                                    // 为什么不留一段「只读摘要」：那正是用户看腻的那几行。列表的职责是
-                                    // 「谁刚跟我说过话」，工作区的职责是「我在哪几个仓库里干活」——
-                                    // 两件事各自有一屏，混在一屏只会让两边都不清楚。
-                                    //
-                                    // 传给 ConversationsScreen 的那两个参数保持 `null`（默认值即 null），
-                                    // 段、段头、以及副标里的「N 个工作区」会**一起**消失（它们同源，见
-                                    // `showWorkspaces` 的 KDoc：判据只有这一处）。
-                                    modifier = Modifier.weight(1f),
-                                )
+                                    else -> ConversationsScreen(
+                                        state = state,
+                                        listState = convListState,
+                                        onOpenChat = openChat,
+                                        // 写到一半切回列表时，那一行要能看出「草稿：…」——
+                                        // 草稿表住在壳里（draftsByConv），域层不掺和；
+                                        // 桌面壳同名注入见 DesktopShell。
+                                        draftPreviewOf = { convId -> draftsByConv[convId]?.takeIf { it.isNotBlank() } },
+                                        onGoToPairing = { nav = nav.selectTab(AppRoutes.NODES) },
+                                        onDismissBanner = controller::dismissBanner,
+                                        onCreateGroup = controller::createGroup,
+                                        // 顶栏那颗放大镜。原型 `prototype/relay.html:2803`/`:2888`
+                                        // 的 `<button class="ibtn" aria-label="全局搜索"
+                                        // onclick="go('m-gsearch')">` 就在 ⋮ 左边，且是移动端
+                                        // **唯一**的搜索入口（`screenGSearch` 的注释：
+                                        // 列表上方那条只管标题与预览的框已经删掉）。
+                                        onSearchGlobal = { globalSearchOpen = true },
+                                        // 「全部标为已读」：原型 `screenHomeMore` 的第 5 项
+                                        // （`prototype/relay.html:2861`，菜单共 6 项 + 2 条分隔线）。
+                                        // 走 `controller.markAllRead()` 而不是
+                                        // `conversations.forEach { selectConversation(it.convId) }`：
+                                        // 后者效果对（`selectConversation` 顺手清零 unread），
+                                        // 但那是**借了别人的副作用** ——
+                                        // 一个叫 `selectConversation` 的方法被当"批量标已读"用。
+                                        // 裁决：给它一个说得出名字的入口。
+                                        // （字段名是 `convId` 不是 `peerId`，理由见 `ConversationUi.convId`
+                                        // 的 KDoc；`App.kt` 是组合根，一处调用补一行都要 Lead 点名授权。）
+                                        onMarkAllRead = controller::markAllRead,
+                                        // 长按会话行的三个动作。都是纯本机行为：置顶/静音只改设置，
+                                        // 删除只清本机消息与标记（不动协议、不通知对方）。
+                                        onTogglePin = controller::togglePinnedConv,
+                                        onToggleMute = controller::toggleMutedConv,
+                                        onDeleteConversation = controller::deleteConversation,
+                                        // ## 手机端**不画**「工作区」段（用户裁决：对齐桌面）
+                                        //
+                                        // 这两颗 lambda 一起决定那一段画不画（见 `ConversationsScreen`
+                                        // 的 `showWorkspaces`）。这里**都不传**，于是：
+                                        //   · 会话列表只剩「会话」——群、同事、agent 节点的对话；
+                                        //   · agent 的工作区行不再混进来（真机上它们是
+                                        //     `care-in-china · Agent · dsh-… · 27 个会话` 这种行，
+                                        //     而**桌面端的会话列表从来没有这一段** —— 两端不一致本身就是缺陷）。
+                                        //
+                                        // ## 工作区内容去哪了：一个字都没少
+                                        //
+                                        // 底部 **Agents 页签**就是「全部工作区」的清单页，而且用的是
+                                        // **同一个** `state.inboxWorkspaceUnits()` 派生（`limit = Int.MAX_VALUE`
+                                        // ⇒ 比这一段的裁剪版更全）。从那里点进去仍然是完整的工作区详情 /
+                                        // 聊天 / 直通码 / 权限管理。
+                                        //
+                                        // 为什么不留一段「只读摘要」：那正是用户看腻的那几行。列表的职责是
+                                        // 「谁刚跟我说过话」，工作区的职责是「我在哪几个仓库里干活」——
+                                        // 两件事各自有一屏，混在一屏只会让两边都不清楚。
+                                        //
+                                        // 传给 ConversationsScreen 的那两个参数保持 `null`（默认值即 null），
+                                        // 段、段头、以及副标里的「N 个工作区」会**一起**消失（它们同源，见
+                                        // `showWorkspaces` 的 KDoc：判据只有这一处）。
+                                        modifier = Modifier.weight(1f),
+                                    )
+                                }
                             }
                         }
                     }
@@ -912,6 +1032,12 @@ fun RelayApp(
                         onDismissBanner = controller::dismissBanner,
                         modifier = Modifier.fillMaxSize(),
                         importFromImage = importQrFromImage,
+                        // 相机被拒后的第二颗按钮：只有真的存在系统设置页的平台才画（桌面没有）。
+                        onOpenAppSettings = if (controller.platform.canOpenAppSettings) {
+                            { controller.platform.openAppSettings() }
+                        } else {
+                            null
+                        },
                     )
                 } else if (chatDetailOnTop || agentSubpageOnTop) {
                     // 紧凑布局下的聊天详情与 Agent 子页（工作区详情、会话详情）均是**整屏全屏**（原型 m-chat、m-workspacedetail 与 m-session-detail 均标记 full:true）。
@@ -940,10 +1066,19 @@ fun RelayApp(
                 )
 
                 if (showCreateWsDialog) {
-                    val defaultGroupNameFormat = org.jetbrains.compose.resources.stringResource(
-                        com.kapp.tidings.generated.resources.Res.string.workspace_group_default_name,
-                        "%s",
-                    )
+                    // 默认群名**按真实标题直接格式化**：`stringResource` 只能在组合里调，
+                    // 而点「创建」发生在回调里（ws 那时才确定）—— 所以把每个可能被点的
+                    // 工作区的默认群名都在组合期算好，回调里只查表。曾经这里是
+                    // `stringResource(res, "%s")` 拿回裸模式再 `.replace("%s", …)`：
+                    // 用占位符当参数、再手写一遍替换 —— 与 `stringResource(res, title)`
+                    // 等价却多出两段约定（`%s` 字面量 + replace），纯黑科技。
+                    val defaultGroupNames: Map<String, String> = state.agentWorkspaces.values
+                        .associate { ws ->
+                            ws.wsId to stringResource(
+                                Res.string.workspace_group_default_name,
+                                ws.wsTitle ?: ws.wsId,
+                            )
+                        }
                     com.kapp.tidings.ui.components.WorkspaceGroupCreateDialog(
                         workspaces = state.agentWorkspaces.values.toList(),
                         groups = state.settings.groups,
@@ -957,8 +1092,7 @@ fun RelayApp(
                         },
                         onQuickCreate = { ws, _ ->
                             showCreateWsDialog = false
-                            val title = ws.wsTitle ?: ws.wsId
-                            val name = defaultGroupNameFormat.replace("%s", title)
+                            val name = defaultGroupNames[ws.wsId] ?: (ws.wsTitle ?: ws.wsId)
                             val members = state.peers.filter { it.online }.map { it.nodeId }
                             val gid = controller.createGroup(name, members, ws.wsPath ?: ws.wsId)
                             if (gid != null) {
@@ -978,17 +1112,19 @@ fun RelayApp(
 
                 // issue 7：某个工作区没有绑定协同群时的建群提示。
                 // 群名/成员与上面「快速建群」同一口径（默认名 + 当前在线设备）。
+                // 默认群名在这里**按真实标题直接格式化**（ws 在组合期就是已知的，
+                // 不必再用占位符当参数的那套黑科技，理由见上面 showCreateWsDialog 处）。
                 groupPromptFor?.let { ws ->
-                    val defaultGroupNameFormat = org.jetbrains.compose.resources.stringResource(
-                        com.kapp.tidings.generated.resources.Res.string.workspace_group_default_name,
-                        "%s",
+                    val defaultGroupName = stringResource(
+                        Res.string.workspace_group_default_name,
+                        ws.wsTitle ?: ws.wsId,
                     )
                     com.kapp.tidings.ui.components.WorkspaceGroupPromptDialog(
                         workspace = ws,
                         onDismiss = { groupPromptFor = null },
                         onCreate = {
                             groupPromptFor = null
-                            val name = defaultGroupNameFormat.replace("%s", ws.wsTitle ?: ws.wsId)
+                            val name = defaultGroupName
                             val members = state.peers.filter { it.online }.map { it.nodeId }
                             val gid = controller.createGroup(name, members, ws.wsPath ?: ws.wsId)
                             if (gid != null) {
@@ -1057,14 +1193,14 @@ private fun BackKeyHandler(enabled: Boolean, onBack: () -> Unit) {
  * 分两栏会把内容挤成一条缝。所以「够宽」和「够高」必须同时成立才给两栏，
  * 否则宁可退回紧凑横屏 —— 这正是矩阵里 852×393 → `CompactLandscape` 的意思。
  *
- * 高度的口径见 [TWO_PANE_MIN_HEIGHT_PX]：它曾经是一个独立的 `600`，
+ * 高度的口径见 [TWO_PANE_MIN_HEIGHT_DP]：它曾经是一个独立的 `600`，
  * 与外壳自己的预算不同源，把 `664..999` 宽、`466..599` 高的窗口误判成手机壳。
  *
  * @return 只回答「挂哪个壳」；档位由壳内部的 `desktopWindowSizeClass` 决定。
  */
 internal fun resolveAppLayoutMode(width: Dp, height: Dp): AppLayoutMode = when {
     width >= DesktopMetrics.EXPANDED_MIN_PX.dp -> AppLayoutMode.ExpandedListDetail
-    width >= DesktopMetrics.MEDIUM_MIN_PX.dp && height >= TWO_PANE_MIN_HEIGHT_PX.dp ->
+    width >= DesktopMetrics.MEDIUM_MIN_PX.dp && height >= TWO_PANE_MIN_HEIGHT_DP.dp ->
         AppLayoutMode.MediumTwoPane
     width > height -> AppLayoutMode.CompactLandscape
     else -> AppLayoutMode.CompactSinglePane
@@ -1073,11 +1209,16 @@ internal fun resolveAppLayoutMode(width: Dp, height: Dp): AppLayoutMode = when {
 /**
  * 两栏的高度下限（**整窗**高度，不是可用高度）。
  *
+ * **单位是 dp，名字里就写着**：调用点是 `resolveAppLayoutMode`，它收的两个参数都是
+ * `Dp`。这个常量曾叫 `TWO_PANE_MIN_HEIGHT_PX` —— 名字说 px、用法是 dp，下一个
+ * 改断点的人一换算就把阈值改错。外壳侧的 `DesktopMetrics.*_PX` 是**真像素**口径
+ * （桌面窗口没有密度缩放那层语义），两侧单位不同，名字必须能拦住混用。
+ *
  * 与桌面外壳的 [DesktopMetrics.MIN_CHAT_HEIGHT_PX] **同源**，不再各写一个数字。
- * 这条曾经是独立的 `600`，而外壳要的是 `420 + 46 = 466` —— A 比 B 严 134px，
+ * 这条曾经是独立的 `600`，而外壳要的是 `420 + 46 = 466` —— A 比 B 严 134，
  * 于是 `664..999` 宽、`466..599` 高的窗口（平板分屏的常见形状，如 `800×580`）
  * 被判成 `CompactLandscape`、落回**手机壳的底部页签**；同一个窗口只要再高
- * 20px 就切成桌面壳双栏，中间是硬跳变。
+ * 20 就切成桌面壳双栏，中间是硬跳变。
  *
  * **为什么减 `TABLET_CHROME_PX` 而不是 `CHROME_PX`**：`twoPane` 分支里挂的是
  * `chromeMode = DesktopChromeMode.Tablet`（菜单栏/标题栏/状态栏都不画），
@@ -1087,8 +1228,7 @@ internal fun resolveAppLayoutMode(width: Dp, height: Dp): AppLayoutMode = when {
  * **两套断点的分工**：本值守着「挂手机壳还是桌面壳」；档位由
  * `desktopWindowSizeClass` 在壳内部决定。这层守卫是**必需的** ——
  * B 的 `Medium` 分支没有高度条件，没有它，`800×400` 这种窗口也会被送进双栏。
- *
- *
  */
-internal const val TWO_PANE_MIN_HEIGHT_PX: Int =
+internal const val TWO_PANE_MIN_HEIGHT_DP: Int =
     DesktopMetrics.MIN_CHAT_HEIGHT_PX + DesktopMetrics.TABLET_CHROME_PX
+

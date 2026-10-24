@@ -24,8 +24,8 @@ import kotlin.test.assertEquals
 import kotlin.test.assertTrue
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.delay
 import kotlinx.coroutines.runBlocking
+import com.kapp.tidings.testutil.awaitUntil
 
 /**
  * 换 Wi-Fi / 换网段之后，节点**必须自己知道**，而且要**马上重新广播**。
@@ -289,14 +289,6 @@ class RelayControllerNetworkTest {
         scope = scope,
         version = "relay-test",
     )
-
-    private suspend fun awaitUntil(what: String, condition: () -> Boolean) {
-        val deadline = kotlin.time.TimeSource.Monotonic.markNow()
-        while (!condition()) {
-            if (deadline.elapsedNow().inWholeMilliseconds > TIMEOUT_MS) error("等了 ${TIMEOUT_MS}ms 仍未发生：$what")
-            delay(10)
-        }
-    }
 
     /** 假订阅源：把回调留住，让测试自己决定"网络刚刚发生了什么"。 */
     private class RecordingNetworkMonitor : NetworkMonitor {

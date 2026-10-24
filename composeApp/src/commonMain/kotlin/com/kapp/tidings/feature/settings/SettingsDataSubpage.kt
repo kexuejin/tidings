@@ -29,8 +29,10 @@ import com.kapp.tidings.generated.resources.set_clear_history_sub
 import com.kapp.tidings.generated.resources.set_clear_history_title
 import com.kapp.tidings.generated.resources.set_data_card_title
 import com.kapp.tidings.generated.resources.set_data_dir
+import com.kapp.tidings.generated.resources.set_data_dir_private
 import com.kapp.tidings.generated.resources.set_data_subtitle
 import com.kapp.tidings.generated.resources.set_leftover_action
+import com.kapp.tidings.generated.resources.set_leftover_confirm_body
 import com.kapp.tidings.generated.resources.set_leftover_counting
 import com.kapp.tidings.generated.resources.set_leftover_none
 import com.kapp.tidings.generated.resources.set_leftover_sub
@@ -40,9 +42,7 @@ import com.kapp.tidings.generated.resources.set_more_data_title
 import com.kapp.tidings.generated.resources.set_open_dir
 import com.kapp.tidings.generated.resources.set_persist_sub
 import com.kapp.tidings.generated.resources.set_persist_title
-import com.kapp.tidings.generated.resources.set_retention_sub
-import com.kapp.tidings.generated.resources.set_retention_title
-import com.kapp.tidings.generated.resources.set_retention_value
+import com.kapp.tidings.generated.resources.set_retention_summary
 import com.kapp.tidings.generated.resources.set_storage_usage
 import com.kapp.tidings.generated.resources.set_storage_usage_counting
 import com.kapp.tidings.generated.resources.set_storage_usage_value
@@ -110,6 +110,20 @@ fun SettingsDataSubpage(
         )
     }
 
+    // 「清残片」同一档次：删掉 = 放弃续传、不可恢复，也要先确认。
+    var showClearLeftoverConfirm by rememberSaveable { mutableStateOf(false) }
+    if (showClearLeftoverConfirm) {
+        ClearLeftoverConfirmDialog(
+            count = leftoverPartCount ?: 0,
+            totalBytes = leftoverPartBytes ?: 0L,
+            onDismiss = { showClearLeftoverConfirm = false },
+            onConfirm = {
+                showClearLeftoverConfirm = false
+                onClearLeftoverParts?.invoke()
+            },
+        )
+    }
+
     SettingsPageScaffold(
         title = stringResource(Res.string.set_more_data_title),
         subtitle = stringResource(Res.string.set_data_subtitle),
@@ -120,7 +134,16 @@ fun SettingsDataSubpage(
             title = stringResource(Res.string.set_data_card_title),
             icon = Res.drawable.ic_folder,
         ) {
-            InfoRow(label = stringResource(Res.string.set_data_dir), value = dataDirectory)
+            // 手机侧的私有绝对路径（/data/user/0/...）对用户没有信息量，显示「应用内部存储」；
+            // 桌面路径用户真的会去访达里找，保留真实值。
+            InfoRow(
+                label = stringResource(Res.string.set_data_dir),
+                value = if (isAppPrivateStoragePath(dataDirectory)) {
+                    stringResource(Res.string.set_data_dir_private)
+                } else {
+                    dataDirectory
+                },
+            )
 
             val usage = if (dataUsageBytes == null) {
                 // null 只可能是"还在数"：directoryUsageBytes 三平台都不会失败（目录不存在返回 0）。
@@ -178,7 +201,10 @@ fun SettingsDataSubpage(
                     TagPill(leftover, TagTone.Queued)
                     AppOutlinedButton(
                         text = stringResource(Res.string.set_leftover_action),
-                        onClick = { onClearLeftoverParts?.invoke() },
+                        // 只负责把确认框叫出来；真正删的动作在确认框的 danger 按钮上。
+                        // （与「清空聊天记录」同一条纪律：删掉 = 放弃续传、不可恢复的动作
+                        //  不能比更不危险的动作保护更少。）
+                        onClick = { showClearLeftoverConfirm = true },
                         enabled = onClearLeftoverParts != null && (leftoverPartCount ?: 0) > 0,
                     )
                 }
@@ -225,12 +251,10 @@ fun SettingsDataSubpage(
             // 只剩等对端连入，在移动网 / NAT 下就是"怎么都连不上"（真机缺陷）。
             // 安全边界（公网必须 TLS + 双向 pin）在传输层，与这个开关无关。
 
-            SettingRow(
-                title = stringResource(Res.string.set_retention_title),
-                subtitle = stringResource(Res.string.set_retention_sub, retentionDays),
-            ) {
-                TagPill(stringResource(Res.string.set_retention_value, retentionDays))
-            }
+            // 「保留天数」**不是可改的设置**：本仓没有任何修改保留期的入口（天数跟着构建走）。
+            // 原来画成 SettingRow + 「7 天」胶囊，长得像能点 —— 降级成一行纯说明，
+            // 不占设置行的视觉，也不给"能改"的错觉。
+            Hint(stringResource(Res.string.set_retention_summary, retentionDays))
 
             SettingRow(
                 title = stringResource(Res.string.set_clear_history_title),
@@ -246,6 +270,56 @@ fun SettingsDataSubpage(
             }
         }
     }
+}
+
+/**
+ * 手机侧私有数据目录的识别：Android 应用的内部存储路径（`/data/user/0/<pkg>` 与
+ * `/data/data/<pkg>` 两个历史形态）。命中就显示「应用内部存储」而不是那串对用户
+ * 没有信息量的绝对路径；桌面路径不命中，保留真实值。抽成纯函数是为了可单测。
+ */
+internal fun isAppPrivateStoragePath(path: String): Boolean =
+    path.startsWith("/data/user/0/") || path.startsWith("/data/data/")
+
+/**
+ * 「清理续传残片」的二次确认，与 [ClearAllHistoryConfirmDialog] 同一档次：
+ * 删掉 = 放弃这些文件的续传、不可恢复。正文报**个数与总大小** —— 用户得知道
+ * 放弃的是多少东西才能做决定。
+ */
+@Composable
+private fun ClearLeftoverConfirmDialog(
+    count: Int,
+    totalBytes: Long,
+    onDismiss: () -> Unit,
+    onConfirm: () -> Unit,
+) {
+    RelayDialog(
+        onDismissRequest = onDismiss,
+        title = { Text(stringResource(Res.string.set_leftover_title)) },
+        content = {
+            Text(
+                text = stringResource(
+                    Res.string.set_leftover_confirm_body,
+                    count,
+                    formatBytes(totalBytes),
+                ),
+                style = MaterialTheme.typography.bodyMedium,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+        },
+        confirmButton = {
+            RelayDialogButton(
+                text = stringResource(Res.string.set_leftover_action),
+                danger = true,
+                onClick = onConfirm,
+            )
+        },
+        dismissButton = {
+            RelayDialogButton(
+                text = stringResource(Res.string.common_cancel),
+                onClick = onDismiss,
+            )
+        },
+    )
 }
 
 /**

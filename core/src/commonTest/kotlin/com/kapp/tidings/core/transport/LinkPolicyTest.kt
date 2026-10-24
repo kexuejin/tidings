@@ -11,8 +11,8 @@ import io.ktor.utils.io.ByteWriteChannel
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
+import com.kapp.tidings.core.testutil.awaitTrue
 import kotlinx.coroutines.cancel
-import kotlinx.coroutines.delay
 import kotlinx.coroutines.runBlocking
 import kotlin.test.Test
 import kotlin.test.assertEquals
@@ -29,11 +29,14 @@ class LinkPolicyTest {
 
     private class CountingTransport(override val isSecure: Boolean) : LinkTransport {
         var connects = 0
+        /** 每次拨号的目标地址：负控要断言"这个地址一次都没出现过"，而不只是计数为 0。 */
+        val hosts = mutableListOf<String>()
         var lastHost: String? = null
         var lastPort: Int = 0
         var lastPin: TlsPin? = null
         override suspend fun connect(host: String, port: Int, expectedPin: TlsPin?, timeoutMs: Long): LinkConnection? {
             connects++
+            hosts += host
             lastHost = host
             lastPort = port
             lastPin = expectedPin
@@ -89,14 +92,21 @@ class LinkPolicyTest {
         registry.touch("peer", "2001:db8:2020:8494::9", 17878, profile("peer", tlsPort = 17880), 1L, confirmed = true)
         val secure = CountingTransport(isSecure = true)
         val plaintext = CountingTransport(isSecure = false)
+        // 探针：再注册一台**私网**对端（它一定会走明文路径）。等到它被拨，就证明调度
+        // 循环至少完整跑过一轮 —— 公网那台在同一轮里也被评估过。负控因此不再需要
+        // "sleep 300ms 赌客户端已经跑过"，结论由顺序决定。
+        val publicHost = "2001:db8:2020:8494::9"
+        registry.touch("probe", "192.168.9.9", 17878, profile("probe"), 1L, confirmed = true)
         val link = client(registry, secure, plaintext, scope)
         link.start()
-        delay(300)
+        awaitTrue(what = "私网探针对端始终没被拨：调度循环根本没跑，这条负控无法成立") {
+            plaintext.connects > 0
+        }
         link.stop()
         scope.cancel()
 
         assertEquals(0, secure.connects, "公网 + 没 pin：一个 TLS 连接都不许拨")
-        assertEquals(0, plaintext.connects, "公网更不能退回明文")
+        assertTrue(publicHost !in plaintext.hosts, "公网更不能退回明文：明文层从没碰过这个地址")
     }
 
     @Test
@@ -109,7 +119,7 @@ class LinkPolicyTest {
         val plaintext = CountingTransport(isSecure = false)
         val link = client(registry, secure, plaintext, scope)
         link.start()
-        delay(300)
+        awaitTrue(what = "有 pin 就该拨 TLS（等不到任何 TLS 拨号）") { secure.connects > 0 }
         link.stop()
         scope.cancel()
 
@@ -131,7 +141,9 @@ class LinkPolicyTest {
         val plaintext = CountingTransport(isSecure = false)
         val link = client(registry, secure, plaintext, scope)
         link.start()
-        delay(300)
+        awaitTrue(what = "局域网明文与公网 TLS 两条路都没走全（等不到两者都拨过）") {
+            plaintext.connects > 0 && secure.connects > 0
+        }
         link.stop()
         scope.cancel()
 
@@ -151,7 +163,7 @@ class LinkPolicyTest {
         val plaintext = CountingTransport(isSecure = false)
         val link = client(registry, secure, plaintext, scope)
         link.start()
-        delay(300)
+        awaitTrue(what = "局域网明文路径（K1）没被拨：这条路径不得失效") { plaintext.connects > 0 }
         link.stop()
         scope.cancel()
 

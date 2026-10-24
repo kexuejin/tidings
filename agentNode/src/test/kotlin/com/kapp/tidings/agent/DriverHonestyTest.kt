@@ -16,7 +16,7 @@ import kotlin.test.assertTrue
  * 驱动诚信（task-58）：模拟器驱动不得对真用户断言「已完成」，也不得被默认选中。
  *
  * 事实（workspace-ia 的 task-50 第四轮审查）：DsBotDriver.executeTask **从不碰网络**
- * （只有 delay(15) + 固定文案），却会发工具卡片、报 128 tokens、正文逐字断言
+ * （只有一次 15ms 的固定等待 + 固定文案），却会发工具卡片、报 128 tokens、正文逐字断言
  * 「已在当前工作区完成分析与协同处理，任务管道正常执行完毕」；而 DesktopExtension
  * 对真用户 prompt **优先选它**。用户看到的是「为没发生过的活报完成的智能体」。
  *

@@ -14,6 +14,8 @@ import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.heightIn
+import androidx.compose.ui.draw.clip
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
@@ -205,7 +207,9 @@ public fun DesktopToolbar(
     Column(Modifier.fillMaxWidth()) {
         Surface(color = MaterialTheme.colorScheme.surface) {
             Row(
-                Modifier.fillMaxWidth().height(DesktopMetrics.TOOLBAR_PX.dp).padding(horizontal = LocalAppSpacing.current.md),
+                // 下限而不是固定高度：系统字号放大时按钮文字要能把这一行撑高 ——
+                // 固定 46dp 会在 fontScale 约 1.7 起把文字下半截裁掉（平板走的就是这条壳）。
+                Modifier.fillMaxWidth().heightIn(min = DesktopMetrics.TOOLBAR_PX.dp).padding(horizontal = LocalAppSpacing.current.md),
                 verticalAlignment = Alignment.CenterVertically,
                 horizontalArrangement = Arrangement.spacedBy(LocalAppSpacing.current.md10),
             ) {
@@ -377,6 +381,61 @@ private fun ToolbarOverflowItemDivider() {
     )
 }
 
+
+/**
+ * 窄窗（Compact，< 664dp）的搜索入口。
+ *
+ * 这一档此前**整条工具栏都不渲染**（它的四个动作按钮在 560dp 宽度下会换行），于是
+ * 会话搜索在这一档完全没有入口：从宽窗把窗口拖窄，`query` 仍是壳层状态、列表继续被它
+ * 过滤，而屏幕上没有任何输入框 —— 用户只能把窗口再拖宽才能改词。
+ *
+ * 这里只放一颗搜索框（真机上窄窗最常缺的就是它），动作按钮仍不进来。
+ */
+@Composable
+internal fun CompactSearchRow(
+    query: String,
+    onQueryChange: (String) -> Unit,
+    modifier: Modifier = Modifier,
+) {
+    Surface(color = MaterialTheme.colorScheme.surface) {
+        OutlinedTextField(
+            value = query,
+            onValueChange = onQueryChange,
+            singleLine = true,
+            textStyle = MaterialTheme.typography.bodySmall,
+            leadingIcon = {
+                Icon(
+                    painterResource(Res.drawable.ic_search),
+                    contentDescription = null,
+                    modifier = Modifier.size(IconSizes.Label),
+                )
+            },
+            trailingIcon = if (query.isNotEmpty()) {
+                {
+                    IconButton(onClick = { onQueryChange("") }) {
+                        Icon(
+                            painterResource(Res.drawable.ic_close),
+                            contentDescription = stringResource(Res.string.action_clear_search),
+                            modifier = Modifier.size(IconSizes.Body),
+                        )
+                    }
+                }
+            } else {
+                null
+            },
+            placeholder = { Text(stringResource(Res.string.desktop_toolbar_search_placeholder), style = MaterialTheme.typography.bodySmall) },
+            shape = ShapeRoles.Avatar,
+            colors = TextFieldDefaults.colors(
+                focusedContainerColor = MaterialTheme.colorScheme.surfaceContainerLow,
+                unfocusedContainerColor = MaterialTheme.colorScheme.surfaceContainerLow,
+                focusedIndicatorColor = Color.Transparent,
+                unfocusedIndicatorColor = Color.Transparent,
+            ),
+            modifier = modifier.fillMaxWidth().padding(horizontal = LocalAppSpacing.current.md, vertical = LocalAppSpacing.current.xs),
+        )
+    }
+}
+
 /**
  * 工具栏末尾的溢出菜单按钮，仅在 [items] 非空时由 [DesktopToolbar] 渲染。
  *
@@ -497,19 +556,29 @@ public fun ToolbarButton(
         selected -> MaterialTheme.colorScheme.onPrimaryContainer
         else -> MaterialTheme.colorScheme.onSurface
     }
-    Row(
-        Modifier
-            // 圆角 9dp：这三颗工具条按钮的 class 是 `btn sm`，而 `.win` 外壳里有档位覆盖
-            // `.win .btn.sm{padding:5px 9px;font-size:11px;border-radius:9px}`
-            // （`prototype/relay.html:382`；`win()` 的产物一定套在 `.win` 里，见 `:2718-2720`），
-            // 它盖掉全局 `.btn{border-radius:var(--r-ctl)=12px}`（`:372-375`）。
-            .background(bg, ShapeRoles.Avatar)
-            .clickable(enabled = enabled, onClick = onClick)
-            .padding(horizontal = LocalAppSpacing.current.md, vertical = 7.dp),
-        verticalAlignment = Alignment.CenterVertically,
-        horizontalArrangement = Arrangement.spacedBy(LocalAppSpacing.current.sm6),
+    // **两层**（与顶栏 IbtnBox 同一条裁决）：外层是 48dp 无障碍触控下限的命中区，
+    // 内层才是原型的视觉砖（11px 字 / 9dp 圆角 / 7dp 竖内边距）。此前能点的就是那块
+    // ~34dp 的砖 —— 平板（Medium/Expanded 走的就是这条壳）上手指点不中，而「导入文件」
+    // 与「新窗口」还挨在一起，误触就是新建会话。
+    Box(
+        modifier = Modifier
+            .heightIn(min = LocalAppSpacing.current.xxxl)
+            .clip(ShapeRoles.Avatar)
+            .clickable(enabled = enabled, onClick = onClick),
+        contentAlignment = Alignment.Center,
     ) {
-        Icon(painter, contentDescription = null, tint = fg, modifier = Modifier.size(15.dp))
-        Text(label, style = MaterialTheme.typography.labelLarge, color = fg)
+        Row(
+            Modifier
+                // 圆角 9dp：这三颗工具条按钮的 class 是 btn sm，而 .win 外壳里有档位覆盖
+                // （原型 .win .btn.sm：padding 5px 9px / font-size 11px / border-radius 9px），
+                // 它盖掉全局 .btn 的 12px。
+                .background(bg, ShapeRoles.Avatar)
+                .padding(horizontal = LocalAppSpacing.current.md, vertical = 7.dp),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(LocalAppSpacing.current.sm6),
+        ) {
+            Icon(painter, contentDescription = null, tint = fg, modifier = Modifier.size(15.dp))
+            Text(label, style = MaterialTheme.typography.labelLarge, color = fg)
+        }
     }
 }

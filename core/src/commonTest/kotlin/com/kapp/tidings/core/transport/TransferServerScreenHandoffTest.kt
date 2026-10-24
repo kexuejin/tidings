@@ -10,6 +10,7 @@ import com.kapp.tidings.core.protocol.TcpFrame
 import com.kapp.tidings.core.protocol.TcpFrameTypes
 import com.kapp.tidings.core.protocol.TcpFrames
 import com.kapp.tidings.core.protocol.makeEnvelope
+import com.kapp.tidings.core.testutil.awaitTrue
 import io.ktor.network.selector.SelectorManager
 import io.ktor.network.sockets.InetSocketAddress
 import io.ktor.network.sockets.Socket
@@ -24,7 +25,6 @@ import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.cancel
-import kotlinx.coroutines.delay
 import kotlinx.coroutines.runBlocking
 import kotlinx.coroutines.withTimeoutOrNull
 import kotlin.test.Test
@@ -210,6 +210,34 @@ class TransferServerScreenHandoffTest {
         }
     }
 
+    /**
+     * 一次"第二条连接"探针：连进去发一个普通 msg 帧，能读到帧就返回它（未接通返回 null）。
+     *
+     * **每次都关掉探针连接** —— maxConnections=1 时留着它，下一次探针自己就把名额占了，
+     * 于是"等名额释放"会永远等不到（那是最难查的一种假红）。
+     */
+    private suspend fun probeMsgAck(selector: SelectorManager, port: Int): String? {
+        val socket = runCatching {
+            aSocket(selector).tcp().connect(InetSocketAddress("127.0.0.1", port))
+        }.getOrNull() ?: return null
+        return try {
+            val write = socket.openWriteChannel(autoFlush = true)
+            val read = socket.openReadChannel()
+            val envelope = makeEnvelope(
+                type = MsgTypes.MSG,
+                from = PEER_ID,
+                payload = Codec.textPayload("y".repeat(2_000)),
+                id = "msg-after-handoff",
+            )
+            write.writeFully(TcpFrame.encode(TcpFrames.encodeMsgFrame(envelope).encodeToByteArray()))
+            readFrameOrNull(read)
+        } catch (_: Exception) {
+            null
+        } finally {
+            runCatching { socket.close() }
+        }
+    }
+
     @Test
     fun handedOffSocketLeavesTheConnectionTableWhenItCloses() = runBlocking {
         val scope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
@@ -246,30 +274,16 @@ class TransferServerScreenHandoffTest {
             assertNotNull(readFrameOrNull(firstRead), "第一条连接没能完成投屏交接")
             first.close()
 
-            // 给清理协程一点时间（它在 socketContext 结束后才把 socket 摘出集合）。
-            delay(500)
-
-            // 第二条：连接表已经腾空，必须能正常服务。
-            val second = aSocket(selector).tcp().connect(InetSocketAddress("127.0.0.1", port))
-            try {
-                val write = second.openWriteChannel(autoFlush = true)
-                val read = second.openReadChannel()
-                val envelope = makeEnvelope(
-                    type = MsgTypes.MSG,
-                    from = PEER_ID,
-                    payload = Codec.textPayload("y".repeat(2_000)),
-                    id = "msg-after-handoff",
-                )
-                write.writeFully(TcpFrame.encode(TcpFrames.encodeMsgFrame(envelope).encodeToByteArray()))
-                val ack = readFrameOrNull(read)
-                assertNotNull(
-                    ack,
-                    "交接过的连接关闭后仍占着连接表：maxConnections=1 时第二条连接被直接丢弃",
-                )
-                assertTrue(ack.contains(TcpFrameTypes.MSG_ACK), "第二条连接没被正常服务：$ack")
-            } finally {
-                second.close()
+            // 连接表什么时候腾空由**清理协程**决定 —— 等这个事件，不再用固定等待赌调度。
+            // 探针 = "第二条连接能不能被服务"：连进去发一个普通 msg 帧，读到 ack 就说明名额
+            // 已释放；被丢弃时读不到帧，重试下一次（每次探针自己会关掉，不占名额）。
+            var ack: String? = null
+            awaitTrue(what = "交接过的连接关闭后仍占着连接表：maxConnections=1 时第二条连接被直接丢弃") {
+                if (ack == null) ack = probeMsgAck(selector, port)
+                ack != null
             }
+            val served = assertNotNull(ack, "等到了 ack 却读不到帧")
+            assertTrue(served.contains(TcpFrameTypes.MSG_ACK), "第二条连接没被正常服务：$served")
         } finally {
             server.stop()
             selector.close()

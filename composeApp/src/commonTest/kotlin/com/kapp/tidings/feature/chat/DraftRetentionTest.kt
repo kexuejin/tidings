@@ -58,4 +58,39 @@ class DraftRetentionTest {
     fun noConversationYieldsAnEmptyDraft() {
         assertEquals("", draftOf(emptyMap(), null))
     }
+
+    /**
+     * **发送之后，外部草稿表里的这一条也要清掉**（[notifyDraftCleared] 的契约）。
+     *
+     * 真身：发送侧只复位了 ChatScreen 自己的 `draft`，外部表（两个壳共用的
+     * `updateDraft` 表）里留着一份**已经发出去的正文**；下次回到这个会话，
+     * `initialDraft` 把它喂回输入框 —— 已发内容「复活」。旧行为就是这条测试的反面。
+     *
+     * 这条只钉 helper 的契约；**接线**（onSend 真的调了它）由
+     * `DraftClearOnSendWiringTest`（jvmTest 的源码级守卫）钉 —— 删掉调用点时
+     * helper 还在、本条仍绿，守卫那条才会红。
+     */
+    @Test
+    fun sendingClearsTheExternalDraftEntry() {
+        // 走 updateDraft 的真实语义建表：发送前外部表里确实有一条草稿。
+        var drafts = mapOf("peer-1" to "已经发出去的话")
+        val notified = mutableListOf<Pair<String, String>>()
+        // 通知必须以「空串」落到**这一个会话键**上 —— updateDraft 的语义是
+        // 「空串 = 删除」，表里不该残留已发送的正文。
+        notifyDraftCleared("peer-1") { convId, text ->
+            notified += convId to text
+            drafts = updateDraft(drafts, convId, text)
+        }
+        assertEquals(listOf("peer-1" to ""), notified, "发送后必须通知外部表清掉这一条草稿")
+        assertTrue(drafts.isEmpty(), "外部表不该残留已发送的正文（否则切回来会「复活」）")
+    }
+
+    /** 没有会话键、或壳没接外部表时，复位动作必须安静地什么都不做（不炸、不误投）。 */
+    @Test
+    fun clearingWithoutAConvOrSinkIsANoop() {
+        var called = false
+        notifyDraftCleared(null) { _, _ -> called = true }
+        notifyDraftCleared("peer-1", null)
+        assertTrue(!called, "没有会话键时不该通知任何回调")
+    }
 }

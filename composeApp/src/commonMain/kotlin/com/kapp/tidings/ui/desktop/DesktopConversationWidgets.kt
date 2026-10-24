@@ -38,6 +38,7 @@ import com.kapp.tidings.ui.LoadingState
 import com.kapp.tidings.ui.components.AppButtonSize
 import com.kapp.tidings.ui.components.AppOutlinedButton
 import com.kapp.tidings.ui.components.AppTextButton
+import com.kapp.tidings.feature.conversations.ConversationFailedEmptyState
 import com.kapp.tidings.ui.components.relativeTime
 import com.kapp.tidings.generated.resources.Res
 import com.kapp.tidings.generated.resources.action_clear_search
@@ -45,6 +46,7 @@ import com.kapp.tidings.generated.resources.common_offline
 import com.kapp.tidings.generated.resources.conv_loading
 import com.kapp.tidings.generated.resources.conv_new_group
 import com.kapp.tidings.generated.resources.conv_search_messages_section
+import com.kapp.tidings.generated.resources.desktop_conv_count
 import com.kapp.tidings.generated.resources.desktop_conv_empty
 import com.kapp.tidings.generated.resources.desktop_conv_empty_hint
 import com.kapp.tidings.generated.resources.desktop_conv_go_pairing
@@ -110,7 +112,20 @@ public fun ConversationSidebar(
      * `NodePhase.Starting` 画「正在恢复会话…」），桌面端一直缺这一支。
      */
     phase: NodePhase,
+    /**
+     * 节点最后一次失败的原因（`NetworkUi.failure`）。只在 [phase] == Failed 的空态里
+     * 如实呈现；null = 没有结构化的失败原因，空态只说通用的那句。
+     */
+    failure: com.kapp.tidings.domain.BannerMessage? = null,
     selectedPeerId: String?,
+    /**
+     * 会话行的**草稿预览**（会话键 → 草稿正文；空/空白草稿应返回 null）。
+     *
+     * 与手机壳 `ConversationsScreen` 的同名参数同一个形状：桌面侧由壳把 `draftsByConv`
+     * 传进来。不传的后果是同一应用两种行为 —— 手机列表能看出「这行有草稿」，桌面看不出。
+     * 默认 null = 不显示（截图预览、或宿主没有草稿表）。
+     */
+    draftPreviewOf: ((String) -> String?)? = null,
     /**
      * 当前搜索词。
      *
@@ -148,6 +163,8 @@ public fun ConversationSidebar(
     onTogglePin: ((String) -> Unit)? = null,
     onToggleMute: ((String) -> Unit)? = null,
     onDeleteConversation: ((String) -> Unit)? = null,
+    /** 群会话预览的发送者署名解析（权威在域层，与 convTitle 同一个解析器）。 */
+    previewSenderNameOf: ((String) -> String?)? = null,
     onSearchGlobal: ((String) -> com.kapp.tidings.domain.GlobalSearchResult)? = null,
     /**
      * 冷启动时预置的全局搜索结果，只给截图门禁用。
@@ -206,7 +223,13 @@ public fun ConversationSidebar(
                     leadingIcon = Res.drawable.ic_groups,
                 )
             }
-            Text("${sessions.size}", style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
+            // 计数带语义（「3 个会话」）：裸数字对读屏与扫读都不说人话 ——
+            // 侧栏头部那一行里它紧跟两颗按钮，一个悬空的 3 分不清是数什么的。
+            Text(
+                stringResource(Res.string.desktop_conv_count, sessions.size),
+                style = MaterialTheme.typography.labelMedium,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
         }
         HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
         if (sessions.isEmpty() && searchResults.isEmpty()) {
@@ -223,7 +246,7 @@ public fun ConversationSidebar(
                 // 它按 `fillMaxWidth()` 顶对齐排、按钮也没有图标口子，而它是全 app 共用的
                 // （动它会把手机端多屏空态一起挪走）。写法与 d-filesempty 那支
                 // （`DesktopFilesPane.kt:205-245`）、d-search-empty 那支
-                // （`DesktopGlobalSearch.kt:171-194`）保持一致。
+                // （`DesktopGlobalSearchPanel 的结果区`）保持一致。
                 Box(
                     modifier = Modifier
                         .fillMaxSize()
@@ -263,6 +286,15 @@ public fun ConversationSidebar(
                     label = stringResource(Res.string.conv_loading),
                     modifier = Modifier.fillMaxWidth(),
                 )
+            } else if (phase == NodePhase.Failed) {
+                // 「节点失败」与移动端**共用同一份空态**（含"原因如实带上"的拼装）：
+                // 两壳各写一遍 buildString 的话，改文案时必然只改一边。
+                ConversationFailedEmptyState(
+                    failure = failure,
+                    actionLabel = stringResource(Res.string.desktop_conv_go_pairing),
+                    onAction = onGoToPairing,
+                    modifier = Modifier.fillMaxSize(),
+                )
             } else {
                 EmptyState(
                     title = stringResource(Res.string.desktop_conv_empty),
@@ -291,6 +323,8 @@ public fun ConversationSidebar(
                 onTogglePin = onTogglePin,
                 onToggleMute = onToggleMute,
                 onDeleteConversation = onDeleteConversation,
+                previewSenderNameOf = previewSenderNameOf,
+                draftPreviewOf = draftPreviewOf,
                 modifier = Modifier.fillMaxSize(),
                 selectedConvId = selectedPeerId,
                 trailingContent = if (searchResults.isEmpty()) {

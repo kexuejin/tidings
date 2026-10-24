@@ -21,6 +21,36 @@ import com.kapp.tidings.ui.components.displayMillis
 internal const val NEAR_BOTTOM_TOLERANCE: Int = 2
 
 /**
+ * 时间正序下标 → 倒序渲染下的**视觉下标**。
+ *
+ * ## 为什么必须有这一层换算
+ *
+ * 消息流的列表是「数据倒序（`messages.asReversed()`）+ `reverseLayout = true`」双翻结构
+ * （见 `ChatScreen` 里 LazyColumn 的 KDoc）：LazyColumn 的条目下标 0 是**最新一条**，
+ * 而 `messages` 这个 List 本身仍是最旧在前。于是任何「按消息在 `messages` 里找下标、
+ * 再拿去 `scrollToItem`」的调用 —— 点引用卡跳源消息、搜索命中跳原文 —— 都必须先做
+ * `size - 1 - idx` 的镜像换算；直接把正序下标喂给 LazyColumn 会滚到**镜像位置**
+ * （消息总数对称的另一头），看起来像「跳错了地方」。
+ *
+ * 抽成纯函数并单测：换算错了没有任何编译期信号，两端各自「看起来能跳」，
+ * 只有对准某一条看落点才看得出来。
+ *
+ * @param chronologicalIndex 消息在**时间正序**列表（`messages`）里的下标。
+ * @param size 列表条目总数。
+ * @return 同一条消息在 LazyColumn（倒序渲染）里的下标。
+ */
+internal fun visualIndexOf(chronologicalIndex: Int, size: Int): Int = size - 1 - chronologicalIndex
+
+/**
+ * 这条消息是不是**会话里最早的一条**（`seq` 是会话内自增游标，第一条恒为 1）。
+ *
+ * 用来决定消息流顶端要不要写「已经到最早一条了」。判据必须是**事实**（seq），不能靠
+ * "这一页没返回新消息" —— 域层的 loadOlder 在尽头时什么信号都不发，那会得到"永远转圈"
+ * 或"永远不说到头"。`null`（本地刚构造、还没落库）不宣称到头。
+ */
+internal fun isHistoryBeginning(oldestSeq: Long?): Boolean = oldestSeq != null && oldestSeq <= 1L
+
+/**
  * 列表当前是否算「贴底」（贴底 = 值得自动滚到最新、不值得弹新消息胶囊）。
  *
  * [totalItemCount] 与 [lastVisibleIndex] 都来自 `LazyListState.layoutInfo`：

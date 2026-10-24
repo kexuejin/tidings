@@ -2,9 +2,8 @@
 
 package com.kapp.tidings.desktop
 
-import java.io.File
-
 import com.kapp.tidings.agent.AgentSessionRegistry
+import com.kapp.tidings.desktop.testutil.RepoSource
 import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertNull
@@ -92,12 +91,10 @@ class AgentChatMessageConvergenceTest {
      */
     @Test
     fun theAgentLabelHasASingleSourceOfTruth() {
-        val source = File("src/main/kotlin/com/kapp/tidings/desktop/DesktopExtension.kt")
-            .takeIf { it.isFile }
-            ?: File("desktopApp/src/main/kotlin/com/kapp/tidings/desktop/DesktopExtension.kt")
+        val source = RepoSource.read("desktopApp/src/main/kotlin/com/kapp/tidings/desktop/DesktopExtension.kt")
         // 只看 `agentSenderIdFor` **定义之前**的代码：那个函数自己的实现里当然有 `"agent:" +`，
         // 它是唯一合法的现拼处；别的任何地方现拼都是同一个 bug 的复发。
-        val beforeDefinition = source.readText().substringBefore("internal fun agentSenderIdFor")
+        val beforeDefinition = source.substringBefore("internal fun agentSenderIdFor")
         val codeLines = beforeDefinition.lines().map { it.substringBefore("//") }
         // 唯一允许的第二处现拼是**本地驱动**那条：它答的就是它自己（`agent:<driverId>`，
         // 与事件转发那条不是同一个说话者），这是有意的、也写明了理由。
@@ -111,11 +108,7 @@ class AgentChatMessageConvergenceTest {
 
     @Test
     fun bothPathsGoThroughTheSharedConstructor() {
-        val source = File("src/main/kotlin/com/kapp/tidings/desktop/DesktopExtension.kt")
-            .takeIf { it.isFile }
-            ?: File("desktopApp/src/main/kotlin/com/kapp/tidings/desktop/DesktopExtension.kt")
-        assertTrue(source.isFile, "找不到 DesktopExtension.kt（工作目录 " + File("").absolutePath + "）")
-        val text = source.readText()
+        val text = RepoSource.read("desktopApp/src/main/kotlin/com/kapp/tidings/desktop/DesktopExtension.kt")
         // 定义 1 处 + 实时 1 处 + 补发 2 处（本地会话补发 / 群补发）
         val calls = text.split("chatMessageFor(").size - 1
         assertTrue(calls >= 4, "实时与两条补发都必须走共用构造，实测 " + calls + " 处")

@@ -17,12 +17,13 @@ import io.ktor.network.sockets.InetSocketAddress
 import io.ktor.network.sockets.ServerSocket
 import io.ktor.network.sockets.Socket
 import io.ktor.network.sockets.aSocket
+import com.kapp.tidings.core.testutil.awaitTrue as sharedAwaitTrue
 import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.CoroutineStart
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.cancel
 import kotlinx.coroutines.channels.Channel
-import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.runBlocking
 import kotlinx.coroutines.withTimeoutOrNull
@@ -116,17 +117,21 @@ class TransferPeerCancelTest {
         ),
     )
 
-    private suspend fun awaitUntil(what: String, timeoutMs: Long = 5_000, condition: suspend () -> Boolean) {
-        val ok = withTimeoutOrNull(timeoutMs) {
-            while (!condition()) delay(10)
-            true
-        } ?: false
-        assertTrue(ok, "等待超时：$what")
-    }
+    /** 转发到唯一实现（本文件曾有第二份 while-deadline 轮询副本）。 */
+    private suspend fun awaitUntil(what: String, timeoutMs: Long = 5_000, condition: suspend () -> Boolean) =
+        sharedAwaitTrue(what = what, timeoutMs = timeoutMs, condition = condition)
 
+    /**
+     * 等一个事件（超时返回 null）。
+     *
+     * 超时取 10s 而不是 5s：本文件在**全量跑**（574 条并发）时出现过
+     * "对方拒收我们的报价，必须报 Declined" 偶发超时，单独跑同一条是绿的 ——
+     * 那是 `Dispatchers.Default` 被别的用例占满时这条事件链的延迟，不是产品问题。
+     * 仍是**有界**等待：超时就是失败，不是"多睡一会儿"。
+     */
     private suspend fun awaitEvent(
         channel: Channel<TransferEvent>,
-        timeoutMs: Long = 5_000,
+        timeoutMs: Long = 10_000,
         predicate: (TransferEvent) -> Boolean,
     ): TransferEvent? {
         var hit: TransferEvent? = null
@@ -151,7 +156,7 @@ class TransferPeerCancelTest {
         val transferId = "t-inflight"
 
         val events = Channel<TransferEvent>(Channel.UNLIMITED)
-        val pump = scope.launch { manager.events.collect { events.send(it) } }
+        val pump = scope.launch(start = CoroutineStart.UNDISPATCHED) { manager.events.collect { events.send(it) } }
         try {
             manager.onEnvelope(offerEnvelope(transferId, size = 4096))
             awaitUntil("offer 进入待接收") { manager.pendingOffers().any { it.transferId == transferId } }
@@ -191,7 +196,7 @@ class TransferPeerCancelTest {
         val transferId = "t-pending"
 
         val events = Channel<TransferEvent>(Channel.UNLIMITED)
-        val pump = scope.launch { manager.events.collect { events.send(it) } }
+        val pump = scope.launch(start = CoroutineStart.UNDISPATCHED) { manager.events.collect { events.send(it) } }
         try {
             manager.onEnvelope(offerEnvelope(transferId, size = 12))
             awaitUntil("offer 进入待接收") { manager.pendingOffers().any { it.transferId == transferId } }
@@ -222,7 +227,7 @@ class TransferPeerCancelTest {
         val file = "/tmp/relay-peer-cancel.bin"
 
         val events = Channel<TransferEvent>(Channel.UNLIMITED)
-        val pump = scope.launch { manager.events.collect { events.send(it) } }
+        val pump = scope.launch(start = CoroutineStart.UNDISPATCHED) { manager.events.collect { events.send(it) } }
         try {
             val transferId = assertNotNull(
                 manager.offerFiles("peer-node", listOf(LocalFile(path = file, name = "a.bin", size = 3L))),

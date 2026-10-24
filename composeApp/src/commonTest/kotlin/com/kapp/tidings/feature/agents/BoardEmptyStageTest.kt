@@ -23,6 +23,29 @@ class BoardEmptyStageTest {
         assertEquals(BoardEmptyStage.NodeStarting, boardEmptyStage(nodeRunning = false, scanning = false, peerCount = 0))
     }
 
+    /**
+     * **启动失败 ≠ 还在启动**。
+     *
+     * 修复前这两档共用「节点还没启动 + 无限转圈」：端口被占/权限失败之后，用户永远等不到
+     * 一句人话，也拿不到下一步。失败档必须有原因与出路（对应 NodeFailed）。
+     *
+     * 反向验证：把 boardEmptyStage 里 `!nodeRunning && hasFailure -> NodeFailed` 那一行删掉，
+     * 本测试变红（会退回 NodeStarting）。
+     */
+    @Test
+    fun aNodeWithARecordedFailureIsItsOwnStage() {
+        assertEquals(
+            BoardEmptyStage.NodeFailed,
+            boardEmptyStage(nodeRunning = false, scanning = false, peerCount = 0, hasFailure = true),
+            "有失败原因时不许再画「正在启动」的转圈",
+        )
+        assertEquals(
+            BoardEmptyStage.NodeStarting,
+            boardEmptyStage(nodeRunning = false, scanning = false, peerCount = 0, hasFailure = false),
+            "没有失败原因才是真的还在启动",
+        )
+    }
+
     @Test
     fun aRunningNodeThatHasSeenNobodyIsStillLooking() {
         assertEquals(BoardEmptyStage.Discovering, boardEmptyStage(nodeRunning = true, scanning = false, peerCount = 0))

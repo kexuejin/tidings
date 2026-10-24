@@ -95,7 +95,7 @@ public object DesktopPreviewActions : DesktopPaneActions {
     override fun loadCabinetPath(path: String): Unit = Unit
     override fun toggleCabinetSelection(name: String): Unit = Unit
     override fun clearCabinetSelection(): Unit = Unit
-    override fun downloadCabinetEntries(names: List<String>, saveAs: Boolean): Unit = Unit
+    override fun downloadCabinetEntries(names: List<String>): Unit = Unit
     override fun uploadToCabinet(peerId: String): Unit = Unit
     override fun setCabinetViewMode(mode: String): Unit = Unit
 

@@ -2,7 +2,6 @@
 
 package com.kapp.tidings.feature.settings
 
-import org.jetbrains.compose.resources.painterResource
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -25,7 +24,9 @@ import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.painter.Painter
 import androidx.compose.ui.graphics.vector.ImageVector
+import androidx.compose.ui.graphics.vector.rememberVectorPainter
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.VisualTransformation
@@ -34,6 +35,8 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.em
 import com.kapp.tidings.generated.resources.Res
 import com.kapp.tidings.generated.resources.ic_chev
+import org.jetbrains.compose.resources.DrawableResource
+import org.jetbrains.compose.resources.painterResource
 import com.kapp.tidings.ui.SectionCard
 import com.kapp.tidings.ui.components.LargeTitleBar
 import com.kapp.tidings.ui.components.LabeledField
@@ -87,8 +90,10 @@ internal fun SettingsGroupBlock(
 @Composable
 // 第二轮把它从 private 提到 internal：诊断页那条「适配对照」也是原型里同一种 `.navrow`
 // （`prototype/relay.html:3966-3971`），复用它才不会让两处各画一版。
+// 图标走 [Painter]（两个薄壳各管各的来源：ImageVector / DrawableResource），
+// 行体只有这一份 —— 「一个 UI 元素只许有一处定义」。
 internal fun SettingsNavRow(
-    icon: ImageVector,
+    icon: Painter,
     title: String,
     sub: String?,
     valText: String?,
@@ -111,7 +116,7 @@ internal fun SettingsNavRow(
         ) {
             Box(contentAlignment = Alignment.Center, modifier = Modifier.fillMaxSize()) {
                 Icon(
-                    imageVector = icon,
+                    painter = icon,
                     contentDescription = null,
                     tint = MaterialTheme.colorScheme.onPrimaryContainer,
                     modifier = Modifier.size(18.dp),
@@ -151,6 +156,42 @@ internal fun SettingsNavRow(
     }
 }
 
+/** [SettingsNavRow] 的 ImageVector 薄壳：图标来源不同、行是同一行。 */
+@Composable
+internal fun SettingsNavRow(
+    icon: ImageVector,
+    title: String,
+    sub: String?,
+    valText: String?,
+    onClick: () -> Unit,
+) {
+    SettingsNavRow(
+        icon = rememberVectorPainter(icon),
+        title = title,
+        sub = sub,
+        valText = valText,
+        onClick = onClick,
+    )
+}
+
+/** [SettingsNavRow] 的 drawable 薄壳：设置页自己的 ic_* 资源从这里进（如「输入法自检」的 ic_eye）。 */
+@Composable
+internal fun SettingsNavRow(
+    icon: DrawableResource,
+    title: String,
+    sub: String?,
+    valText: String?,
+    onClick: () -> Unit,
+) {
+    SettingsNavRow(
+        icon = painterResource(icon),
+        title = title,
+        sub = sub,
+        valText = valText,
+        onClick = onClick,
+    )
+}
+
 /**
  * 顶栏：大标题 + 副标题 + 底部细分隔线。
  *
@@ -175,6 +216,14 @@ internal fun LabeledFieldWithKey(
     maxLength: Int? = null,
     hint: String? = null,
     supporting: String? = null,
+    /**
+     * 这一格当前的值**不合法**（例如端口不在 1..65535、网段格式不对）。
+     *
+     * 为什么要有它：以前非法值只能等控制器 `warn` 出一条横幅，而横幅宿主不在子页上
+     * —— 用户点完「保存/添加」看不到任何变化。字段级报错是**就地、可行动**的反馈，
+     * 不能依赖横幅是否有人渲染。
+     */
+    isError: Boolean = false,
     enabled: Boolean = true,
     singleLine: Boolean = true,
     visualTransformation: VisualTransformation = VisualTransformation.None,
@@ -211,6 +260,7 @@ internal fun LabeledFieldWithKey(
             modifier = Modifier.fillMaxWidth().padding(top = LocalAppSpacing.current.xs),
             singleLine = singleLine,
             enabled = enabled,
+            isError = isError,
             placeholder = hint?.let { { Text(it) } },
             visualTransformation = visualTransformation,
         )
@@ -219,7 +269,12 @@ internal fun LabeledFieldWithKey(
                 text = supporting,
                 style = MaterialTheme.typography.bodySmall,
                 // 禁用态提示用 RelayWarning #E9C46A 作前景只有约 1.6:1，改用 secondaryContainer 的 on 色。
-                color = if (enabled) MaterialTheme.colorScheme.onSurfaceVariant else MaterialTheme.colorScheme.onSecondaryContainer,
+                // 报错优先于禁用态：值不合法时用户最需要看清的就是那句话。
+                color = when {
+                    isError -> MaterialTheme.colorScheme.error
+                    !enabled -> MaterialTheme.colorScheme.onSecondaryContainer
+                    else -> MaterialTheme.colorScheme.onSurfaceVariant
+                },
                 modifier = Modifier.padding(top = LocalAppSpacing.current.xxs),
             )
         }

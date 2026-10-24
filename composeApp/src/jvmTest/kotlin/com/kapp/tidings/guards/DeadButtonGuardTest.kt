@@ -74,7 +74,7 @@ class DeadButtonGuardTest {
     @Test
     fun noNewDeadButtonHandlersInProductionSources() {
         val offenders = mutableListOf<String>()
-        GuardSourceScan.kotlinFiles(
+        val scanned = GuardSourceScan.kotlinFiles(
             "composeApp/src/commonMain",
             "composeApp/src/androidMain",
             "composeApp/src/iosMain",
@@ -83,7 +83,14 @@ class DeadButtonGuardTest {
             "androidApp/src/main",
             "desktopApp/src/main",
             "core/src/commonMain",
-        ).forEach { path ->
+        )
+        // 扫描面必须非空：[GuardSourceScan.kotlinFiles] 对**不存在的目录**返回空列表，
+        // 于是「没有 offender」恒真 —— 本仓源码门禁最常见的假绿形态。
+        assertTrue(
+            scanned.size > 200,
+            "只扫到 ${scanned.size} 个生产源文件 —— 扫描根写错了？（空清单会让这条守卫永远绿）",
+        )
+        scanned.forEach { path ->
             val text = GuardSourceScan.stripComments(GuardSourceScan.read(path))
             val hits = emptyOnClick.findAll(text).count()
             if (hits == 0) return@forEach

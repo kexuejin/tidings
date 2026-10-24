@@ -32,6 +32,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
+import com.kapp.tidings.domain.APP_VERSION
 import com.kapp.tidings.domain.BannerTone
 import com.kapp.tidings.domain.BannerUi
 import com.kapp.tidings.domain.RelayUiState
@@ -40,8 +41,12 @@ import com.kapp.tidings.generated.resources.desk_nav_group_appear
 import com.kapp.tidings.generated.resources.desk_nav_group_conn
 import com.kapp.tidings.generated.resources.desk_nav_group_data
 import com.kapp.tidings.generated.resources.ic_chev
+import com.kapp.tidings.generated.resources.ic_image
+import com.kapp.tidings.generated.resources.ic_refresh
+import com.kapp.tidings.generated.resources.r2_set_profile_avatar_label
 import com.kapp.tidings.generated.resources.r2_set_profile_rev_chip
 import com.kapp.tidings.generated.resources.set_appear_subtitle
+import com.kapp.tidings.generated.resources.set_avatar_page_subtitle
 import com.kapp.tidings.generated.resources.set_caps_none
 import com.kapp.tidings.generated.resources.set_caps_peer_visible
 import com.kapp.tidings.generated.resources.set_caps_title
@@ -67,6 +72,8 @@ import com.kapp.tidings.generated.resources.set_theme_dark
 import com.kapp.tidings.generated.resources.set_theme_light
 import com.kapp.tidings.generated.resources.set_theme_system
 import com.kapp.tidings.generated.resources.set_title
+import com.kapp.tidings.generated.resources.set_update_subtitle
+import com.kapp.tidings.generated.resources.set_update_title
 import com.kapp.tidings.ui.ContentWidths
 import com.kapp.tidings.ui.centerCapped
 import com.kapp.tidings.ui.components.AppBanner
@@ -86,6 +93,11 @@ internal fun SettingsHomeScreen(
     onClearNote: () -> Unit,
     onBack: (() -> Unit)?,
     modifier: Modifier = Modifier,
+    /**
+     * 「版本与更新」行值列显示的当前版本。默认取领域侧的 [APP_VERSION] 常量 ——
+     * 与 `RelayController.version` 的默认值同源，手机组合根没传时也是真值。
+     */
+    appVersion: String? = APP_VERSION,
 ) {
     val settings = state.settings
     // 「能力声明」这一行读**真实开关**：以前写死 tw1 · mrec1，用户在子页关掉后
@@ -207,11 +219,17 @@ internal fun SettingsHomeScreen(
                         icon = Icons.Outlined.Notifications,
                         title = stringResource(Res.string.set_more_notif_title),
                         sub = stringResource(Res.string.set_notify_subtitle),
-                        valText = when {
-                            settings.notifyMentionOnly -> stringResource(Res.string.set_home_notify_mention_only)
-                            settings.notifyQuietHours -> stringResource(Res.string.set_home_notify_quiet)
-                            else -> stringResource(Res.string.set_home_notify_all)
-                        },
+                        // 三个开关可能同时开着；只报其中一个（以前「仅@」优先）会让另一个
+                        // 看起来"没生效"。两个都开时并列，一个都没开时报「全部提醒」。
+                        // 文案先取出来再拼：`stringResource` 只能在可组合作用域里调，
+                        // 别把它塞进非内联 lambda（编译期会拦，但那种改法也没法读）。
+                        valText = listOfNotNull(
+                            stringResource(Res.string.set_home_notify_mention_only)
+                                .takeIf { settings.notifyMentionOnly },
+                            stringResource(Res.string.set_home_notify_quiet)
+                                .takeIf { settings.notifyQuietHours },
+                        ).ifEmpty { listOf(stringResource(Res.string.set_home_notify_all)) }
+                            .joinToString(" · "),
                         onClick = { onOpenPage?.invoke(SETTINGS_PAGE_NOTIFY) },
                     )
                 }
@@ -220,6 +238,18 @@ internal fun SettingsHomeScreen(
             // 分组 2：外观与能力
             SettingsGroupBlock(title = stringResource(Res.string.desk_nav_group_appear)) {
                 Column {
+                    // 「头像」这一行是上传头像页在**设置首页**的门。此前 `SETTINGS_PAGE_AVATAR`
+                    // 这条路由分支有、却全仓没有一个写入点：资料页分段控件第三档被接成
+                    // `controller::pickAvatar`（选图，不换页），于是那一页 259 行的诚实化
+                    // 只在截图帧里存在。标题/副标题复用资料页与头像页自己的键，不另造说法。
+                    SettingsNavRow(
+                        icon = Res.drawable.ic_image,
+                        title = stringResource(Res.string.r2_set_profile_avatar_label),
+                        sub = stringResource(Res.string.set_avatar_page_subtitle),
+                        valText = null,
+                        onClick = { onOpenPage?.invoke(SETTINGS_PAGE_AVATAR) },
+                    )
+                    HorizontalDivider(modifier = Modifier.padding(horizontal = LocalAppSpacing.current.lg))
                     SettingsNavRow(
                         icon = Icons.Outlined.DarkMode,
                         title = stringResource(Res.string.set_more_appearance_title),
@@ -259,6 +289,16 @@ internal fun SettingsHomeScreen(
                         sub = stringResource(Res.string.set_diag_subtitle),
                         valText = stringResource(Res.string.set_home_online_nodes, onlinePeerCount),
                         onClick = { onOpenPage?.invoke(SETTINGS_PAGE_DIAG) },
+                    )
+                    HorizontalDivider(modifier = Modifier.padding(horizontal = LocalAppSpacing.current.lg))
+                    SettingsNavRow(
+                        // 「版本与更新」此前只有 when 分支、没有任何入口（死路由）：
+                        // 这一行是它唯一的门。值列显示当前应用版本。
+                        icon = Res.drawable.ic_refresh,
+                        title = stringResource(Res.string.set_update_title),
+                        sub = stringResource(Res.string.set_update_subtitle),
+                        valText = appVersion,
+                        onClick = { onOpenPage?.invoke(SETTINGS_PAGE_UPDATE) },
                     )
                 }
             }

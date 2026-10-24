@@ -2,7 +2,6 @@
 
 package com.kapp.tidings.core.transport
 
-import com.kapp.tidings.core.nowMillis
 import com.kapp.tidings.core.crypto.TlsPin
 import com.kapp.tidings.core.protocol.LinkFrame
 import com.kapp.tidings.core.protocol.LinkFrames
@@ -11,8 +10,8 @@ import com.kapp.tidings.core.protocol.Profile
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
+import com.kapp.tidings.core.testutil.awaitTrue
 import kotlinx.coroutines.cancel
-import kotlinx.coroutines.delay
 import kotlinx.coroutines.runBlocking
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
@@ -92,11 +91,8 @@ class LinkHeartbeatFloorTest {
         try {
             server.handle(connection)
             // 入站一直有数据；修复前这里永远等不到 Ping（心跳被无限跳过）。
-            val deadline = nowMillis() + 3_000
-            while (nowMillis() < deadline &&
-                connection.sentSnapshot().none { it.decodeToString().contains("link-ping") }
-            ) {
-                delay(20)
+            awaitTrue(what = "入站不停也必须保底发 Ping（3s 内没等到）：心跳被无限跳过") {
+                connection.sentSnapshot().any { it.decodeToString().contains("link-ping") }
             }
             val sent = connection.sentSnapshot()
             assertTrue(

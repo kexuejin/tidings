@@ -2,7 +2,7 @@
 
 package com.kapp.tidings.desktop
 
-import java.io.File
+import com.kapp.tidings.desktop.testutil.RepoSource
 import kotlin.test.Test
 import kotlin.test.assertFalse
 import kotlin.test.assertTrue
@@ -67,11 +67,9 @@ class AgentEventForwardingTest {
      */
     @Test
     fun everyGroupForwardPathCarriesTheReasoning() {
-        val source = File("src/main/kotlin/com/kapp/tidings/desktop/DesktopExtension.kt")
-            .takeIf { it.isFile }
-            ?: File("desktopApp/src/main/kotlin/com/kapp/tidings/desktop/DesktopExtension.kt")
-        assertTrue(source.isFile, "找不到 DesktopExtension.kt（工作目录 " + File("").absolutePath + "）")
-        val argLists = groupTextArgumentLists(source.readText())
+        val argLists = groupTextArgumentLists(
+            RepoSource.read("desktopApp/src/main/kotlin/com/kapp/tidings/desktop/DesktopExtension.kt"),
+        )
         assertTrue(argLists.size >= 2, "转发路径应当至少两条（实时 / 补发），实测 " + argLists.size)
         argLists.forEachIndexed { index, args ->
             assertTrue(
@@ -89,10 +87,7 @@ class AgentEventForwardingTest {
      */
     @Test
     fun everyGroupForwardPathUsesTheSameSenderAsTheLocalRecord() {
-        val source = File("src/main/kotlin/com/kapp/tidings/desktop/DesktopExtension.kt")
-            .takeIf { it.isFile }
-            ?: File("desktopApp/src/main/kotlin/com/kapp/tidings/desktop/DesktopExtension.kt")
-        val argLists = groupTextArgumentLists(source.readText())
+        val argLists = groupTextArgumentLists(RepoSource.read("desktopApp/src/main/kotlin/com/kapp/tidings/desktop/DesktopExtension.kt"))
         // 门槛 2：第三条（native 驱动的回复）已删 —— 那个驱动没有执行运行时，
         // 它发进群的是「本机没有运行时」的兜底话术。见上一条守卫的 KDoc。
         assertTrue(argLists.size >= 2, "转发路径应当至少两条（实时 / 补发），实测 " + argLists.size)

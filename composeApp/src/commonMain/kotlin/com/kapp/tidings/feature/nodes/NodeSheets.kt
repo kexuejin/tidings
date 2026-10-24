@@ -12,6 +12,7 @@ import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
@@ -39,6 +40,8 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.platform.LocalClipboardManager
+import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
@@ -52,9 +55,11 @@ import com.kapp.tidings.ui.components.QrCodeView
 import com.kapp.tidings.ui.theme.IconSizes
 import com.kapp.tidings.ui.theme.LocalAppSpacing
 import com.kapp.tidings.ui.theme.RelayElevations
+import com.kapp.tidings.domain.CONNECT_ATTEMPT_TIMEOUT_MS
 import com.kapp.tidings.domain.ManualPeerEntry
 import com.kapp.tidings.domain.RelayController
 import com.kapp.tidings.domain.RelayUiState
+import com.kapp.tidings.domain.model.PeerUi
 import com.kapp.tidings.domain.pairingQrPayloadFor
 import com.kapp.tidings.core.protocol.Protocol
 import com.kapp.tidings.core.qr.QrEncoder
@@ -94,11 +99,45 @@ import org.jetbrains.compose.resources.stringResource
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.ui.text.style.TextOverflow
 import com.kapp.tidings.generated.resources.common_close
+import com.kapp.tidings.generated.resources.common_copied
 import com.kapp.tidings.generated.resources.ic_chev
 import com.kapp.tidings.generated.resources.ic_close
+import com.kapp.tidings.generated.resources.ic_copy
 import com.kapp.tidings.generated.resources.ic_info
+import com.kapp.tidings.generated.resources.nodes_my_qr_copy
 import com.kapp.tidings.generated.resources.nodes_my_qr_payload
 import com.kapp.tidings.generated.resources.nodes_my_qr_payload_hint
+
+/**
+ * 「这串像不像一个地址」的判据 —— **逐字对齐** `RelayController.isPlausibleHost`
+ * （`:app` 侧，`internal`，跨模块看不见，所以在这里有一份镜像）：
+ * 非空、不超过 253 字符（DNS 域名上限）、不含空白、至少有一个字母或数字。
+ *
+ * 为什么界面要在按下**之前**用与控制器同一条判据：控制器收下地址后先判这条，
+ * 判不过只发一条横幅（`BannerMessage.InvalidHost`）。表单要是用另一套宽一点的判据，
+ * 就会出现「按钮亮着、按下去被控制器打回」的自相矛盾 —— 判据只能有一份，
+ * 这份镜像必须跟着 `:app` 那份走：`NodeSheetsHostCheckTest` 既钉三条规则的行为，
+ * 也逐字比对两侧源码（只改一侧就红）。
+ */
+internal fun isPlausibleHost(host: String): Boolean {
+    if (host.isEmpty() || host.length > 253) return false
+    if (host.any { it.isWhitespace() }) return false
+    return host.any { it.isLetterOrDigit() }
+}
+
+/**
+ * 超时红字的显示判据：**真的等过**那 3.2 秒（[timedOut]），且这次尝试的目标
+ * 至今没有出现在节点表里（`ip` 或自报的 `host` 都比对）。
+ *
+ * 抽成纯函数是为了让"点连接 → 立刻红字"与"等都没等就原谅"两类假象都能被单测钉住：
+ * 前者是 `timedOut=false` 就不该显示，后者是目标已经进表就不该再骂。
+ */
+internal fun connectAttemptTimedOut(
+    timedOut: Boolean,
+    attemptedHost: String,
+    peers: List<PeerUi>,
+): Boolean = timedOut && attemptedHost.isNotEmpty() &&
+    peers.none { it.ip == attemptedHost || it.host == attemptedHost }
 
 /**
  * 「添加节点」区里的入口行，逐档对齐原型的 `.krow`（`prototype/relay.html`）：
@@ -282,8 +321,9 @@ fun AddNodeSheet(
      * 弹层打开时停在「扫码」段还是「填地址」段。
      *
      * 默认停在填地址：那是**一定能走通**的那条路（没有相机、没给权限的设备也得能加节点）。
-     * 节点页那行「扫码配对」会把它置 true —— 用户点的就是扫码，再让他自己点一次分段控件
-     * 是白白多一步。截图门禁也靠它录"扫码段"那一帧（分段是弹层内部状态，外部点不进去）。
+     * **生产路径不再传它** —— 节点页已没有「点了就该落在扫码段」的入口（那一行随旧版
+     * 撤掉，`sheetStartsOnScan` 的死状态链一并删除）；现在只有 `androidApp` 的截图门禁
+     * 还在传，用来录「扫码段」那一帧（分段是弹层内部状态，外部点不进去）。
      */
     initialScanMode: Boolean = false,
     /**
@@ -335,14 +375,31 @@ fun AddNodeSheet(
     // 才置位 —— 上一版把红字挂在 `attempted` 上，一点「连接」就立刻报"连接超时"，
     // 而那时连 3 秒都还没过去。
     var timedOut by remember { mutableStateOf(false) }
-    LaunchedEffect(attempted, state.peers) {
+    // 每按一次「连接」+1：同一目标重试时 `attempted` 不变，计时器要靠它重新起跑。
+    var attemptGen by remember { mutableStateOf(0) }
+
+    // **超时钟只挂在「这一次尝试」上**（`attempted` / `attemptGen` 变化才重走）。
+    // 上一版把它和成功判定合在一条 `LaunchedEffect(attempted, state.peers)` 里 ——
+    // 节点表**每次**变化（心跳、在线档切换都会重建列表）都把 effect 重启：
+    // `timedOut` 被抹回 false、3.2 秒从头再数。网络越是活跃，红字越永远出不来，
+    // 而调用方又在这条路上不再替它关弹层（见 `NodesScreen` / `NodesPane` 的「连接」），
+    // 用户点完「连接」就只剩一个永不回应的弹层。计时与判定因此拆成两条 effect：
+    // 这条只管"等够 [CONNECT_ATTEMPT_TIMEOUT_MS] 还没有结果就认输"，与 peers 的抖动完全解耦。
+    LaunchedEffect(attempted, attemptGen) {
         timedOut = false
+        if (attempted.isEmpty()) return@LaunchedEffect
+        // 与控制器里握手提示的过期共用同一个窗口（[CONNECT_ATTEMPT_TIMEOUT_MS]）：
+        // 红字出现的那一拍，页面横幅「已向 x 打招呼，等它回应」也该退场。
+        delay(CONNECT_ATTEMPT_TIMEOUT_MS)
+        timedOut = true
+    }
+
+    // **成功即关**：节点表里出现了这次尝试的目标（`ip` 或自报的 `host` 撞上）就收弹层。
+    // 它不碰 `timedOut` —— 超时之后才握手成功同样该关（迟到的成功也是成功）。
+    LaunchedEffect(attempted, state.peers) {
         if (attempted.isEmpty()) return@LaunchedEffect
         if (state.peers.any { it.ip == attempted || it.host == attempted }) {
             onDismiss()
-        } else {
-            delay(3_200)
-            timedOut = true
         }
     }
 
@@ -454,7 +511,14 @@ fun AddNodeSheet(
                 // （`--surface-2` 底 + `--on-2` 字 + 16px 信息图标 + 圆角 `--r-ctl`）。
                 // 文案与 `m-nodes-empty` 的 VPN 条不同：那条是 `.banner.warn`（橙黄），
                 // 这条是 `.banner.info`（灰），所以**不能**复用 `AppBanner` 的 Warn 档。
-                ScanInfoBanner(text = stringResource(Res.string.nodes_scan_unavailable))
+                //
+                // **只在两个扫码入口都画不出来时才出现**：这条横幅的本职是替消失的按钮
+                // 解释原因（本文件顶部 `onScanQr` 的 KDoc：「按钮不画时才由 banner 说明」）。
+                // 手机端两个入口都在，横幅还照画的话，扫码段就成了一句自相矛盾的
+                // 「请切到填地址」—— 按钮明明就在上面。那是真机抓到的 P0。
+                if (onScanQr == null && onImportQrFromImage == null) {
+                    ScanInfoBanner(text = stringResource(Res.string.nodes_scan_unavailable))
+                }
                 // 扫码段的「出路」：原型 `.cardfoot` 两颗小按钮的第一颗
                 // （`prototype/relay.html:3381`：`<button class="btn sm">扫不到？回节点页填地址</button>`）。
                 // **第二颗「连接」不补**（曾加过一颗，撤回）：扫码段里 `host` 是空的，
@@ -493,7 +557,7 @@ fun AddNodeSheet(
                             ),
                         )
                     },
-                    isError = host.isNotEmpty() && !host.trim().any { it.isLetterOrDigit() },
+                    isError = host.isNotEmpty() && !isPlausibleHost(host.trim()),
                     singleLine = true,
                     modifier = Modifier.fillMaxWidth().padding(top = LocalAppSpacing.current.md),
                 )
@@ -582,21 +646,25 @@ fun AddNodeSheet(
                 }
             }
 
-            val hostOk = resolved != null && trimmedHost.isNotEmpty() &&
-                trimmedHost.any { it.isLetterOrDigit() }
+            // hostOk 前移控制器的判据（[isPlausibleHost]）：表单说合法、控制器也说合法，
+            // 不会出现"按钮亮着、按下去被打回"的自相矛盾。
+            val hostOk = resolved != null && isPlausibleHost(trimmedHost)
             // 留空表示"用默认端口"，所以空值不是错误 —— 原型的提示也是这么说的。
             val portOk = trimmedPort.isEmpty() ||
                 (trimmedPort.toIntOrNull()?.let { it in 1..65535 } == true)
 
-            // 只有**真的等过**那 3 秒才报超时（见上面那个 LaunchedEffect）：
+            // 只有**真的等过**那 3 秒才报超时（见上面那条计时 effect）：
             // 上一版把这句红字挂在 `attempted` 上，点一下「连接」就立刻说"连接超时"。
-            if (timedOut && state.peers.none { it.ip == attempted || it.host == attempted }) {
+            if (connectAttemptTimedOut(timedOut, attempted, state.peers)) {
                 Text(
                     text = timeoutError,
                     style = MaterialTheme.typography.labelSmall,
                     color = MaterialTheme.colorScheme.error,
                     modifier = Modifier.padding(top = LocalAppSpacing.current.sm),
                 )
+                // 超时后的出路就是原地的「连接」：地址还在框里，再按一次就是重试
+                // （`attemptGen` +1 让超时钟重新起跑）。这条按钮本来就画在下面，
+                // 这里只把话说破，免得用户以为红字之后只能关弹层重来。
             }
 
             // 「连接」这颗按钮只属于「填地址」那一段：扫码段里它既没有输入框可提交，
@@ -610,6 +678,8 @@ fun AddNodeSheet(
                         // 记的是**解析后**的主机名：超时判据要拿它去比对节点表里的 ip/host，
                         // 原串 `1.2.3.4:17899` 永远比不中。
                         attempted = resolved?.first ?: trimmedHost
+                        // 重试同一目标时 `attempted` 不变，靠这一拍让超时钟重新起跑。
+                        attemptGen += 1
                         // 端口原样传下去（空串 = 用默认 17878），不再用**本机**端口兜底：
                         // 本机改过 UDP 端口后，那样会连到 `host:<本机端口>`。
                         // 名字同理：只在壳收得下它时走带名字那条（空串 = 不起名）。
@@ -653,7 +723,14 @@ fun AddNodeSheet(
         }
     }
 }
-/** 分段控件里的一格。 */
+/**
+ * 分段控件里的一格。
+ *
+ * 命中区 ≥ 48dp（`sp.xxxl`）：上一版文字上下各 7dp，整格只有 ~30dp 高 ——
+ * 低于 Material 无障碍的 48dp 命中下限，真机上两根手指轮流点「扫码配对 / 填地址」
+ * 经常点空。做法是把**可点的 Surface** 抬到 48dp 高、文字在 Box 里居中，
+ * 字号与内边距不动：视觉只是这一条分段控件整体高了一档，不是重画。
+ */
 @Composable
 private fun SegTab(
     text: String,
@@ -666,17 +743,24 @@ private fun SegTab(
         shape = RoundedCornerShape(8.dp),
         modifier = modifier.clickable(onClick = onClick),
     ) {
-        Text(
-            text = text,
-            style = MaterialTheme.typography.labelSmall,
-            color = if (selected) {
-                MaterialTheme.colorScheme.onSurface
-            } else {
-                MaterialTheme.colorScheme.onSurfaceVariant
-            },
-            textAlign = TextAlign.Center,
-            modifier = Modifier.fillMaxWidth().padding(vertical = 7.dp),
-        )
+        Box(
+            modifier = Modifier
+                .fillMaxWidth()
+                .heightIn(min = LocalAppSpacing.current.xxxl),
+            contentAlignment = Alignment.Center,
+        ) {
+            Text(
+                text = text,
+                style = MaterialTheme.typography.labelSmall,
+                color = if (selected) {
+                    MaterialTheme.colorScheme.onSurface
+                } else {
+                    MaterialTheme.colorScheme.onSurfaceVariant
+                },
+                textAlign = TextAlign.Center,
+                modifier = Modifier.padding(vertical = 7.dp),
+            )
+        }
     }
 }
 
@@ -830,7 +914,18 @@ fun MyQrSheet(
                         modifier = Modifier.fillMaxWidth(),
                     )
                     // 「载荷」一行：左边标签、右边等宽原文，中间一条分隔线（原型是一条 kv）。
+                    // 行尾一颗复制动作：那串字长得没法手抄（URL + pin + nodeId），
+                    // 只展示不给复制，"相机坏了就抄这串字"就是一句空话。
                     HorizontalDivider(Modifier.padding(top = sp.lg))
+                    val clipboard = LocalClipboardManager.current
+                    var payloadCopied by remember { mutableStateOf(false) }
+                    // 行内反馈自清：2 秒足够看清「已复制」，又不至于一直挂着两份文案。
+                    LaunchedEffect(payloadCopied) {
+                        if (payloadCopied) {
+                            delay(2_000)
+                            payloadCopied = false
+                        }
+                    }
                     Row(
                         modifier = Modifier.fillMaxWidth().padding(vertical = sp.md),
                         verticalAlignment = Alignment.CenterVertically,
@@ -839,12 +934,32 @@ fun MyQrSheet(
                             text = stringResource(Res.string.nodes_my_qr_payload),
                             style = MaterialTheme.typography.labelSmall,
                             color = MaterialTheme.colorScheme.onSurfaceVariant,
-                            modifier = Modifier.weight(1f),
                         )
                         Text(
                             text = payload,
                             style = MaterialTheme.typography.bodySmall,
                             fontFamily = FontFamily.Monospace,
+                            maxLines = 3,
+                            overflow = TextOverflow.Ellipsis,
+                            modifier = Modifier.weight(1f).padding(horizontal = sp.sm),
+                        )
+                        AppIconButton(
+                            icon = Res.drawable.ic_copy,
+                            contentDescription = stringResource(Res.string.nodes_my_qr_copy),
+                            onClick = {
+                                clipboard.setText(AnnotatedString(payload))
+                                payloadCopied = true
+                            },
+                        )
+                    }
+                    // 成功反馈写在行内（替换提示行的位置感），短暂显示后自己退场；
+                    // 不发横幅 —— 弹层里的事件不值得把页面级横幅顶出来。
+                    if (payloadCopied) {
+                        Text(
+                            text = stringResource(Res.string.common_copied),
+                            style = MaterialTheme.typography.labelSmall,
+                            color = MaterialTheme.colorScheme.primary,
+                            modifier = Modifier.padding(bottom = sp.sm),
                         )
                     }
                     Text(

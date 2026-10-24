@@ -23,6 +23,7 @@ import com.kapp.tidings.core.protocol.screenTerminalPhaseFor
 import com.kapp.tidings.core.transport.ScreenFrameSource
 import com.kapp.tidings.core.transport.ScreenReceiver
 import com.kapp.tidings.core.transport.ScreenSender
+import com.kapp.tidings.core.transport.ScreenWire
 import io.ktor.network.sockets.Socket
 import io.ktor.utils.io.ByteReadChannel
 import io.ktor.utils.io.ByteWriteChannel
@@ -354,16 +355,17 @@ fun handleOnScreenEnvelope(envelope: Envelope) {
                 )
             }
 
-            // 作为 Viewer，主动建立 TCP 连接至对方绑定的 TCP 端口
-            val tcpPort = peer.tcpPort
-            if (tcpPort <= 0) {
+            // 作为 Viewer，按 runtime 排好的顺序尝试连接：局域网明文直连第一、
+            // 跨网 TLS+pin 候选其后（policy 与跨网文件同一条纪律）。空表 = 对端不在
+            // registry，按「这条能力当前不可用」如实结束，不编地址硬连。
+            val attempts = host.runtime?.screenWireAttempts(current.peerId).orEmpty()
+            if (attempts.isEmpty()) {
                 handleStopScreenView(reason = ScreenEndReasons.DISCONNECTED)
                 return
             }
 
             val receiver = ScreenReceiver(
-                host = peer.host,
-                port = tcpPort,
+                attempts = attempts,
                 selfId = host._state.value.selfNodeId,
                 sessionId = msg.sessionId,
                 token = msg.token,
@@ -454,6 +456,22 @@ fun handleOnIncomingScreenSocket(
     remoteAddress: String,
     read: ByteReadChannel,
     write: ByteWriteChannel,
+): Boolean = handleOnIncomingScreenWire(
+    open = open,
+    wire = ScreenWire(read = read, write = write) { runCatching { socket.close() } },
+    remoteAddress = remoteAddress,
+)
+
+/**
+ * Sharer 侧接入点的核心：明文（TransferServer 交接）与跨网 TLS（NodeRuntime 的
+ * `tlsPort + 2` 监听）两条路最后都到这 —— screen-* 协议在 [ScreenWire] 之上原样跑,
+ * 这里不区分底下有没有加密（加密/双向 pin 由拨号层负责，设计文档选项 B）。
+ */
+fun handleOnIncomingScreenWire(
+    open: ScreenTcpFrame.Open,
+    wire: ScreenWire,
+    /** 诊断用途；跨网 TLS 路没有对端地址可取，传 `"tls"` 占位。 */
+    remoteAddress: String,
 ): Boolean {
     val current = host._state.value.screenSession.session ?: return false
     val token = activeScreenToken ?: return false
@@ -470,16 +488,14 @@ fun handleOnIncomingScreenSocket(
     val frameSource = ScreenFrameSource { seq -> sharing?.captureFrame(seq) }
     activeScreenFrameSource = frameSource
     val sender = ScreenSender(
-        socket = socket,
+        wire = wire,
         sessionId = open.sessionId,
         sample = { seq -> frameSource.sample(seq) },
         onEnd = { reason ->
             handleStopScreenView(reason = reason)
         },
         scope = host.scope,
-        // 监听器已绑定的通道，直接复用（socket 上不能再开第二条）。
-        readChannel = read,
-        writeChannel = write,
+        // 通道由 wire 携带（监听器已绑定的一次性通道，原样转交）。
     )
     activeScreenSender = sender
     sender.start()

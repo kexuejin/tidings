@@ -9,7 +9,7 @@
 5	composeApp/src/androidMain/kotlin/com/kapp/tidings/platform/AndroidMdnsBrowser.kt
 2	composeApp/src/androidMain/kotlin/com/kapp/tidings/platform/AndroidPushNotificationHandler.kt
 7	composeApp/src/androidMain/kotlin/com/kapp/tidings/platform/AndroidReceivedFileActions.kt
-5	composeApp/src/commonMain/kotlin/com/kapp/tidings/feature/settings/SettingsProfileSubpage.kt
+0	composeApp/src/commonMain/kotlin/com/kapp/tidings/feature/settings/SettingsProfileSubpage.kt
 4	app/src/commonMain/kotlin/com/kapp/tidings/platform/PlatformContracts.kt
 12	composeApp/src/commonMain/kotlin/com/kapp/tidings/ui/components/AvatarPalette.kt
 1	composeApp/src/commonMain/kotlin/com/kapp/tidings/ui/components/Common.kt

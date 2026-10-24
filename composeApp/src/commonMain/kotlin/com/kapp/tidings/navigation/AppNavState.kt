@@ -2,6 +2,8 @@
 
 package com.kapp.tidings.navigation
 
+import androidx.compose.runtime.saveable.Saver
+
 /**
  * 导航状态。
  *
@@ -16,7 +18,8 @@ package com.kapp.tidings.navigation
  *
  * 纯数据 + 纯函数，不依赖 Compose，也不依赖 `RelayUiState`：未知页签 id 该不该被接受
  * 这类规则必须能被测试盯住 —— 理由同 `resolveAppLayoutMode`，规则本身就是这块功能的
- * 全部内容。
+ * 全部内容。（本文件末尾的 `AppNavStateSaver` 是唯一的例外：它只是把同样纯的
+ * `toSaverValue` / `appNavStateFromSaverValue` 包成 Saver，规则本体仍是纯函数。）
  */
 data class AppNavState(
     val selectedTabId: String = AppNavItems.first().id,
@@ -131,16 +134,33 @@ data class AppNavState(
      *
      * 连点同一个会话无害，也因此是幂等的：状态里本来就只有「当前是哪一个」，
      * 没有会被堆出一排的标签要防。
+     *
+     * **进入聊天会同时退出所有详情层**（[detailPeerId] / [detailWorkspaceId] /
+     * [detailAgentSessionId]）：聊天详情与节点详情、Agent 子页都盖在页签之上，而
+     * 「发消息 / 进聊天」恰恰是从那些详情里出发的 —— 不清的话旧详情还挂在状态里，
+     * 返回键先弹**看不见的**那层（画面一动不动），第二次才退聊天。同时注册顺序上
+     * Agent 子页的返回键处理在聊天详情之后，两层同时活着时返回键永远先吃掉
+     * 看不见的那层 —— 现场正是「从节点详情进聊天，第一次返回画面不动、第二次才
+     * 回列表」。这个互斥由这里的 open 函数保证，不由调用方自觉。
      */
-    fun openSession(peerId: String): AppNavState =
+    fun openSession(peerId: String): AppNavState {
         // 普通进入会话要**清掉工作区收窄**：`chatWorkspaceId` 的语义是「我是从工作区 A
         // 点进来的」，而 `openSession` 是「直接跟这个节点聊」—— 留着上一轮的 wsId 会让
         // 这一屏继续按旧工作区过滤，用户看到的会话列表莫名其妙地少。
-        if (activeSessionId == peerId && chatWorkspaceId == null) {
+        val detailLayersClear =
+            detailPeerId == null && detailWorkspaceId == null && detailAgentSessionId == null
+        return if (activeSessionId == peerId && chatWorkspaceId == null && detailLayersClear) {
             this
         } else {
-            copy(activeSessionId = peerId, chatWorkspaceId = null)
+            copy(
+                activeSessionId = peerId,
+                chatWorkspaceId = null,
+                detailPeerId = null,
+                detailWorkspaceId = null,
+                detailAgentSessionId = null,
+            )
         }
+    }
 
     /**
      * 进入某个节点时**收窄到某个工作区**（工作区列表点一行时走这条路）。
@@ -153,13 +173,26 @@ data class AppNavState(
      * Compose 的状态，新实例会让下游每一个 remember/LaunchedEffect 的 key
      * 看起来都变了；工作区看板点一行会走这条路两次（选中 + 进聊天），
      * 第二次必须是个 no-op。
+     *
+     * 与 [openSession] 同一条纪律：进入聊天会**清掉所有详情层** —— 「没有绑定协同群
+     * → 提示建群 → 直接进会话」这条路正是从工作区详情里出发的，不清的话返回键先
+     * 弹看不见的详情层（理由详见 [openSession] 的 KDoc）。
      */
-    fun openWorkspaceChat(peerId: String, wsId: String): AppNavState =
-        if (activeSessionId == peerId && chatWorkspaceId == wsId) {
+    fun openWorkspaceChat(peerId: String, wsId: String): AppNavState {
+        val detailLayersClear =
+            detailPeerId == null && detailWorkspaceId == null && detailAgentSessionId == null
+        return if (activeSessionId == peerId && chatWorkspaceId == wsId && detailLayersClear) {
             this
         } else {
-            copy(activeSessionId = peerId, chatWorkspaceId = wsId)
+            copy(
+                activeSessionId = peerId,
+                chatWorkspaceId = wsId,
+                detailPeerId = null,
+                detailWorkspaceId = null,
+                detailAgentSessionId = null,
+            )
         }
+    }
 
     /**
      * 退出聊天详情，回到当前页签。
@@ -212,7 +245,88 @@ data class AppNavState(
             activeAgentSessionId = sessionId,
             detailAgentSessionId = if (detailAgentSessionId != null) sessionId else null,
         )
+
+    /**
+     * 逐字段存档：转屏 / 进程重建时 `rememberSaveable` 靠它把导航状态原样带回来。
+     *
+     * 纯函数、零 Compose 依赖，配合 [appNavStateFromSaverValue] 组成可被
+     * `commonTest` roundtrip 盯住的映射（规则的主体在纯函数里，[AppNavStateSaver]
+     * 只是把它包成 Saver）。顺序即格式：`selectedTabId, activeSessionId,
+     * activeAgentSessionId, scanning, detailPeerId, detailWorkspaceId,
+     * detailAgentSessionId, chatWorkspaceId`。
+     */
+    fun toSaverValue(): List<Any> = listOf(
+        selectedTabId,
+        activeSessionId.orSaverNull(),
+        activeAgentSessionId.orSaverNull(),
+        scanning,
+        detailPeerId.orSaverNull(),
+        detailWorkspaceId.orSaverNull(),
+        detailAgentSessionId.orSaverNull(),
+        chatWorkspaceId.orSaverNull(),
+    )
 }
+
+/** [AppNavState.toSaverValue] 的项数；恢复时项数对不上就放弃（见 [appNavStateFromSaverValue]）。 */
+internal const val APP_NAV_STATE_SAVER_FIELDS = 8
+
+/**
+ * 可空 String 在存档里的 null 哨兵。
+ *
+ * 本仓的页签 id 是固定常量、节点 / 群 / 会话 id 都是生成器产出的非空串，
+ * 空串从来不是合法值 —— 拿它当哨兵，存档里就只有 String 与 Boolean 两种类型。
+ * 不往集合里塞 null：各平台对「Bundle 集合项为 null」的校验口径不一，
+ * 而纯 String + Boolean 的定长表在 Android / JVM / iOS 三边都没有疑问。
+ */
+private const val SAVER_NULL_STRING = ""
+
+private fun String?.orSaverNull(): String = this ?: SAVER_NULL_STRING
+
+private fun String.saverNullToReal(): String? = ifEmpty { null }
+
+/**
+ * [AppNavState.toSaverValue] 的逆运算；格式对不上（项数错、类型错）返回 null，
+ * 即「放弃恢复、回到初值」—— 不猜、不抛：存档是跨配置变更 / 进程重建的边界，
+ * 读到一份不合身的旧格式时，宁可让用户回到会话列表，也不要崩在启动路径上。
+ */
+internal fun appNavStateFromSaverValue(saved: List<*>): AppNavState? {
+    if (saved.size != APP_NAV_STATE_SAVER_FIELDS) return null
+    val selectedTabId = saved[0] as? String ?: return null
+    val activeSessionId = saved[1] as? String ?: return null
+    val activeAgentSessionId = saved[2] as? String ?: return null
+    val scanning = saved[3] as? Boolean ?: return null
+    val detailPeerId = saved[4] as? String ?: return null
+    val detailWorkspaceId = saved[5] as? String ?: return null
+    val detailAgentSessionId = saved[6] as? String ?: return null
+    val chatWorkspaceId = saved[7] as? String ?: return null
+    return AppNavState(
+        selectedTabId = selectedTabId,
+        activeSessionId = activeSessionId.saverNullToReal(),
+        activeAgentSessionId = activeAgentSessionId.saverNullToReal(),
+        scanning = scanning,
+        detailPeerId = detailPeerId.saverNullToReal(),
+        detailWorkspaceId = detailWorkspaceId.saverNullToReal(),
+        detailAgentSessionId = detailAgentSessionId.saverNullToReal(),
+        chatWorkspaceId = chatWorkspaceId.saverNullToReal(),
+    )
+}
+
+/**
+ * [AppNavState] 的 [Saver] —— `App.kt` 用 `rememberSaveable(stateSaver = AppNavStateSaver)`
+ * 挂在导航状态上。
+ *
+ * ## 为什么不用 autoSaver
+ *
+ * `autoSaver` 把整个对象原样塞进 Bundle，要求类型本身是 Parcelable / Serializable ——
+ * `AppNavState` 两者都不是；给它补 `Serializable` 等于把**存档格式**交给 JVM 序列化
+ * （字段一改旧存档就反序列化失败，而且失败点在启动路径上）。显式逐字段映射让
+ * 「存了什么、按什么顺序、null 怎么表示」成为一眼可见的契约，改字段时必须同时
+ * 改映射，roundtrip 测试会盯着这件事。
+ */
+val AppNavStateSaver: Saver<AppNavState, List<Any>> = Saver(
+    save = { it.toSaverValue() },
+    restore = { appNavStateFromSaverValue(it) },
+)
 
 /**
  * 定出 Agent 档当前该显示哪个 session。

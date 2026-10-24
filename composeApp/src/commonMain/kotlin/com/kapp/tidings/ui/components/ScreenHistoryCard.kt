@@ -121,7 +121,9 @@ fun ScreenHistoryCard(
     // 所以 viewer（我看别人的屏幕）⇒ `--bubble-mine`，对端 ⇒ `--bubble-peer`。
     val mine = record.role == ScreenRole.Viewer
     val active = record.phase == ScreenPhase.Active
-    val details = screenCardDetails(record)
+    // 细节说明与副行**同用注入的 [now]**：这里曾经自己读 nowMillis()，于是同一张卡
+    // 的副行（走参数）与无障碍说明（走挂钟）跨日瞬间会各说各话，截图帧也不可复现。
+    val details = screenCardDetails(record, now)
     Surface(
         color = if (mine) {
             // `--bubble-mine:#B7E4C7` = 本仓 `primaryContainer`（与己方气泡同一个 token）。
@@ -303,8 +305,8 @@ private fun screenCardSecondLine(record: ScreenRecordUi, now: Long): String {
  * 只能从这里出来。
  */
 @Composable
-private fun screenCardDetails(record: ScreenRecordUi): String {
-    val withSeconds: (Long) -> String = { at -> "${screenCardClock(at, nowMillis())}:${secondsOf(at)}" }
+private fun screenCardDetails(record: ScreenRecordUi, now: Long): String {
+    val withSeconds: (Long) -> String = { at -> "${screenCardClock(at, now)}:${secondsOf(at)}" }
     val lines = mutableListOf(
         "${stringResource(Res.string.screen_card_title)} · ${stringResource(Res.string.screen_card_view_only)}",
         stringResource(

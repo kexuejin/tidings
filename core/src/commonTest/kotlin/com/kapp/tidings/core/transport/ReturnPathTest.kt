@@ -9,6 +9,7 @@ import com.kapp.tidings.core.protocol.Profile
 import com.kapp.tidings.core.protocol.Timings
 import com.kapp.tidings.core.protocol.makeEnvelope
 import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.CoroutineStart
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.cancel
@@ -114,7 +115,7 @@ class ReturnPathTest {
         registry.rememberSource("phone-node", "127.0.0.1", phoneTransport.boundPort)
 
         // 手机侧：收到 msg 就回 ACK（"对方活着"的信号）。
-        val phone = scope.launch {
+        val phone = scope.launch(start = CoroutineStart.UNDISPATCHED) {
             phoneTransport.incoming.collect { datagram ->
                 val decoded = Codec.decode(datagram.bytes)
                 if (decoded is DecodeResult.Ok && decoded.env.type == MsgTypes.MSG) {

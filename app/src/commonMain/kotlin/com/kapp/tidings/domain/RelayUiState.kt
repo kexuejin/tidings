@@ -171,6 +171,12 @@ data class RelayUiState(
     val pickedAvatarBytes: ByteArray? = null,
     /** 上面那张图的 sha256，选中的那一刻就算好（原型第 3 步「编码 + 落盘」的文件名就是它）。 */
     val pickedAvatarHash: String? = null,
+    /**
+     * 那张图在系统选择器里的原始文件名。资料页选图卡与「上传头像」页都靠它显示
+     * **真实的**文件名 —— 之前选完图界面只能写「本机图片」，用户分不清选的是哪一张。
+     * 移除选择时与 bytes、hash 一起清空。
+     */
+    val pickedAvatarName: String? = null,
 ) {
     val selfNodeId: String get() = settings.nodeId
 
@@ -594,8 +600,9 @@ data class RelayUiState(
                         convId to ConversationSummaryRow(
                             convId = convId,
                             lastMessageId = last.id,
-                            // 与旧实现的 text.ifBlank { file?.name } 同义。
-                            lastTextPreview = last.text.takeIf { it.isNotBlank() } ?: last.file?.name,
+                            // 与落库那份（refreshSummary）共用同一份派生（conversationPreviewOf）：
+                            // `<think>` 清洗 + 文件名兜底 —— 兜底路径也不许有第二份写法。
+                            lastTextPreview = conversationPreviewOf(last.text, last.file?.name),
                             lastMessageAt = last.at,
                             lastMessageIsMine = last.mine,
                         )
@@ -667,6 +674,27 @@ data class RelayUiState(
                         .thenByDescending { it.presenceAt },
                 )
         }
+
+    /**
+     * 群会话预览该署的**发送者显示名**；非群会话恒 null。
+     *
+     * 为什么会有它：群行预览过去只有「你：」一种前缀 —— 群里多人说话，列表里一句
+     * 「周五聚餐」分不清是谁说的。名字的解析走 [resolveSenderIdentity] + [senderContext]，
+     * 与会话标题（[convTitle]）、气泡署名是**同一个解析器**；这里绝不自拼 senderId
+     * （`agent:<host>:<id>` 一类身份键拼出来的是内部形态，不是人名）。
+     *
+     * 返回 null 的每一档都是「如实」而不是丢失：
+     * - 最后一条不在内存窗口里（摘要还在、消息没加载）—— 不知道是谁，就不署；
+     * - 发送者没署名（旧端帧、系统提示行）；
+     * - 最后一条是自己说的 —— 界面另有「你：」前缀管这一档。
+     */
+    fun previewSenderNameOf(convId: String): String? {
+        if (groupOfConv(convId) == null) return null
+        val last = messages[convId]?.lastOrNull() ?: return null
+        val sender = last.senderId?.trim()?.takeIf { it.isNotBlank() } ?: return null
+        if (sender == selfNodeId) return null
+        return resolveSenderIdentity(sender, senderContext(convId))?.displayName
+    }
 
     /** 会话还没有名字时的兜底：群退回 groupId 前缀，私聊退回 nodeId 前缀。 */
     private fun fallbackTitle(convId: String): String =

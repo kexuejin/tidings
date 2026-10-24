@@ -48,12 +48,12 @@ class AppLayoutModeTest {
         // 边界取常量，不写数字：断点表和它渲染的外壳必须是同一件事。
         assertEquals(
             AppLayoutMode.MediumTwoPane,
-            resolveAppLayoutMode(800.dp, TWO_PANE_MIN_HEIGHT_PX.dp),
+            resolveAppLayoutMode(800.dp, TWO_PANE_MIN_HEIGHT_DP.dp),
         )
         // 高度差 1dp 就退回紧凑横屏。
         assertEquals(
             AppLayoutMode.CompactLandscape,
-            resolveAppLayoutMode(800.dp, (TWO_PANE_MIN_HEIGHT_PX - 1).dp),
+            resolveAppLayoutMode(800.dp, (TWO_PANE_MIN_HEIGHT_DP - 1).dp),
         )
         // 够高但不够宽也不是两栏。
         assertEquals(AppLayoutMode.CompactSinglePane, resolveAppLayoutMode(599.dp, 900.dp))
@@ -68,14 +68,14 @@ class AppLayoutModeTest {
      * 被判成 `CompactLandscape` → 落回**手机壳的底部页签**；同一个窗口只要再高
      * 20px 就切成桌面壳双栏，中间是硬跳变。
      *
-     * 这条断言盯的是**同源**这件事本身：把 `TWO_PANE_MIN_HEIGHT_PX` 的定义式
+     * 这条断言盯的是**同源**这件事本身：把 `TWO_PANE_MIN_HEIGHT_DP` 的定义式
      * 抄一遍，而不是钉死 466 —— 将来任何一边调预算，这里会立刻红。
      */
     @Test
     fun 两栏高度下限与外壳预算同源() {
         assertEquals(
             DesktopMetrics.MIN_CHAT_HEIGHT_PX + DesktopMetrics.TABLET_CHROME_PX,
-            TWO_PANE_MIN_HEIGHT_PX,
+            TWO_PANE_MIN_HEIGHT_DP,
             "本层的高度下限必须由外壳预算推导（可用高度 + 平板 chrome），" +
                 "写死一个独立数字就会重演 800×580 落手机壳那条缺陷。",
         )

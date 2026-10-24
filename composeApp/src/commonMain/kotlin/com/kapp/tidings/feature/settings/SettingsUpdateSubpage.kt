@@ -11,6 +11,7 @@ import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.text.font.FontWeight
+import com.kapp.tidings.domain.APP_VERSION
 import com.kapp.tidings.domain.RelayUiState
 import com.kapp.tidings.domain.UpdateCheckStatus
 import com.kapp.tidings.generated.resources.Res
@@ -18,7 +19,7 @@ import com.kapp.tidings.generated.resources.set_update_app_version
 import com.kapp.tidings.generated.resources.set_update_available
 import com.kapp.tidings.generated.resources.set_update_check_action
 import com.kapp.tidings.generated.resources.set_update_checking
-import com.kapp.tidings.generated.resources.set_update_failed
+import com.kapp.tidings.generated.resources.set_update_failed_generic
 import com.kapp.tidings.generated.resources.set_update_latest
 import com.kapp.tidings.generated.resources.set_update_open_action
 import com.kapp.tidings.generated.resources.set_update_subtitle
@@ -58,7 +59,8 @@ fun SettingsUpdateSubpage(
         modifier = modifier,
     ) {
         SectionCard(title = stringResource(Res.string.set_update_title)) {
-            val currentVer = appVersion ?: "relay-0.1.0"
+            // 兜底值与 RelayController.version 的默认值同一个常量，不再抄一份字面量。
+            val currentVer = appVersion ?: APP_VERSION
             InfoRow(
                 label = stringResource(Res.string.set_update_app_version),
                 value = currentVer,
@@ -101,8 +103,11 @@ fun SettingsUpdateSubpage(
                     }
                 }
                 UpdateCheckStatus.Error -> {
+                    // 不把原始异常串（控制器的 t.message，常是英文系统错误或字面量 "error"）
+                    // 直接上屏：中文界面里那一行既不可读也不可行动。失败给一句人话，
+                    // 技术细节属于诊断包（那里有 errorMessage 的原始值）。
                     Text(
-                        text = stringResource(Res.string.set_update_failed, updateState.errorMessage.orEmpty()),
+                        text = stringResource(Res.string.set_update_failed_generic),
                         style = MaterialTheme.typography.bodySmall,
                         color = MaterialTheme.colorScheme.error,
                         modifier = Modifier.padding(vertical = LocalAppSpacing.current.xs),

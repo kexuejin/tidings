@@ -46,9 +46,6 @@ import org.jetbrains.compose.resources.stringResource
 
 import com.kapp.tidings.ui.theme.LocalAppSpacing
 import com.kapp.tidings.domain.model.PeerUi
-import com.kapp.tidings.domain.model.WorkspaceUi
-import com.kapp.tidings.generated.resources.workspace_member_add_agent
-import com.kapp.tidings.generated.resources.workspace_member_no_workspace
 
 @Composable
 internal fun AddGroupMembersDialog(
@@ -224,9 +221,20 @@ internal fun EditGroupMetaDialog(
                 text = stringResource(Res.string.chat_group_edit_save),
                 primary = true,
                 onClick = {
+                    // **空串 = 清空，不是"不改"。**
+                    //
+                    // 过去 `ifEmpty { null }` 把空串折成 null，而控制器（handleUpdateGroupMeta）
+                    // 对 null 的解释是「保持原值」—— 于是简介/公告**永远无法清空**：
+                    // 用户删光文字点保存，界面毫无反应，旧文案还挂在群里。
+                    //
+                    // 协议面支持清空：`GroupMeta.description/announce` 的 KDoc 明写
+                    // 「空串表示未设置」，`validateGroup` 对这两个字段用 `isStrAllowEmpty`
+                    // （空串合法、照发），解码侧 `strAllowEmptyOrNull` 把空串解成 ""
+                    // —— 全量快照按 rev 覆盖，对端跟着清空。
+                    // null 仍然是「这个字段这次不动」（只改公告时简介不被误清）。
                     onConfirm(
-                        editDesc.trim().ifEmpty { null },
-                        editAnnounce.trim().ifEmpty { null },
+                        editDesc.trim(),
+                        editAnnounce.trim(),
                     )
                 },
             )
@@ -241,84 +249,13 @@ internal fun EditGroupMetaDialog(
  * 「添加智能体」对话框：列出**本机可以暴露给这个群**的 workspace。
  *
  * 暴露单位是 `(agentId, wsId)` —— 一台设备可以装多个 agent，不同 agent 也可能操作同一个
- * workspace（见 `VirtualAgentMember` 的 KDoc）。这里每一行就是一个可 @ 的成员。
+ * workspace（见 `VirtualAgentMember` 的 KDoc）。这里每一行就是一个可被 @ 的成员。
  *
  * 默认名由 `AgentMemberName.base` 生成（`dsh-teahouse-mobile`），冲突时自动加序号。
  * **不给手改入口**（产品决定：默认生成唯一名字，后面再加的不允许冲突）。
+ *
+ * 上一版这里还有一个 `AddGroupWorkspaceDialog`（同形状、按勾选提交 wsId 列表）——
+ * 全仓 0 调用点（真实的暴露入口是 `ExposeAgentDialog`，挂在 [GroupInfoDialog] 里），
+ * 已删除：一份没人走的第二实现只会让人在改「加 agent」交互时改错那一份。
  */
-@Composable
-internal fun AddGroupWorkspaceDialog(
-    candidates: List<WorkspaceUi>,
-    exposed: Set<String>,
-    onDismiss: () -> Unit,
-    onConfirm: (List<String>) -> Unit,
-) {
-    // 已在群里暴露的默认勾上，用户取消勾选 = 收起。
-    val chosen = remember(candidates, exposed) {
-        mutableStateListOf<String>().apply { addAll(candidates.map { it.wsId }.filter { it in exposed }) }
-    }
 
-    RelayDialog(
-        onDismissRequest = onDismiss,
-        title = { Text(stringResource(Res.string.workspace_member_add_agent)) },
-        content = {
-            Column {
-                if (candidates.isEmpty()) {
-                    Text(
-                        text = stringResource(Res.string.workspace_member_no_workspace),
-                        style = MaterialTheme.typography.bodySmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    )
-                } else {
-                    LazyColumn(Modifier.heightIn(max = 240.dp)) {
-                        items(candidates, key = { it.wsId }) { ws ->
-                            val checked = ws.wsId in chosen
-                            Row(
-                                modifier = Modifier
-                                    .fillMaxWidth()
-                                    .clickable {
-                                        if (!chosen.remove(ws.wsId)) chosen.add(ws.wsId)
-                                    }
-                                    .padding(vertical = LocalAppSpacing.current.xs),
-                                verticalAlignment = Alignment.CenterVertically,
-                            ) {
-                                Checkbox(checked = checked, onCheckedChange = null)
-                                Column(Modifier.weight(1f).padding(start = LocalAppSpacing.current.sm)) {
-                                    Text(
-                                        // 名字只显示工作区（用户认得出的是项目名，不是 agent 驱动名）；
-                                        // 驱动名放进副行，回答"用什么在跑"。
-                                        text = ws.wsTitle?.takeIf { it.isNotBlank() } ?: ws.wsId,
-                                        style = MaterialTheme.typography.bodyMedium,
-                                        maxLines = 1,
-                                        overflow = TextOverflow.Ellipsis,
-                                    )
-                                    Text(
-                                        text = ws.agentKind?.takeIf { it.isNotBlank() } ?: ws.wsId,
-                                        style = MaterialTheme.typography.labelSmall,
-                                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                                        maxLines = 1,
-                                        overflow = TextOverflow.Ellipsis,
-                                    )
-                                }
-                            }
-                        }
-                    }
-                }
-            }
-        },
-        confirmButton = {
-            RelayDialogButton(
-                text = stringResource(Res.string.common_confirm),
-                onClick = { onConfirm(chosen.toList()) },
-                primary = true,
-            )
-        },
-        dismissButton = {
-            RelayDialogButton(
-                text = stringResource(Res.string.common_cancel),
-                onClick = onDismiss,
-                primary = false,
-            )
-        },
-    )
-}

@@ -16,6 +16,7 @@ import io.ktor.network.sockets.aSocket
 import io.ktor.network.sockets.openReadChannel
 import io.ktor.network.sockets.openWriteChannel
 import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.CoroutineStart
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.cancel
@@ -118,7 +119,7 @@ class TransferRoundTripTest {
             // 症状是随机一条 `测试发送端绑定 127.0.0.1:xxxxx 失败`（iOS 模拟器上真的撞到过）。
             check(server.start(0)) { "测试发送端绑定 127.0.0.1:0 失败" }
             val port = server.boundPort ?: error("TransferServer 已启动却没有 boundPort")
-            scope.launch { server.events.collect { channel.send(it) } }
+            scope.launch(start = CoroutineStart.UNDISPATCHED) { server.events.collect { channel.send(it) } }
             delay(50)
             return port
         }

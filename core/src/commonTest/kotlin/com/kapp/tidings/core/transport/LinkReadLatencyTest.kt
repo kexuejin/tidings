@@ -12,6 +12,7 @@ import io.ktor.utils.io.ByteWriteChannel
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
+import com.kapp.tidings.core.testutil.awaitTrue
 import kotlinx.coroutines.cancel
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.runBlocking
@@ -85,12 +86,10 @@ class LinkReadLatencyTest {
         client.start()
         try {
             // 前置：拨号必须真的已经开始（attempts 在 connect 之前计数），否则这条测试会假绿。
-            var waited = 0
-            while ((client.dialStats()["peer"]?.attempts ?: 0) == 0 && waited < 5_000) {
-                delay(20)
-                waited += 20
+            // 等待策略统一走 testutil（硬超时，不再自己数 20ms 的拍子）。
+            awaitTrue(what = "前置：拨号必须已经开始") {
+                (client.dialStats()["peer"]?.attempts ?: 0) > 0
             }
-            assertTrue((client.dialStats()["peer"]?.attempts ?: 0) > 0, "前置：拨号必须已经开始")
 
             // 拨号挂着的时候，读侧反复读：最慢一次也不能超过 MAX_READ_MS。
             var worst = 0L

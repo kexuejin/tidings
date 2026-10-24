@@ -138,9 +138,28 @@ data class ChatScreenActions(
     val onSendVoice: ((peerId: String, filePath: String, durationMs: Long) -> Unit)? = null,
     /** null = 会话不画待审批条。 */
     val onRespondApproval: ((approvalId: String, allow: Boolean) -> Unit)? = null,
-    /** 会话内历史搜索；null = 输入栏右端不画那颗搜索。 */
+    /**
+     * 三参处置（「本会话免审」）：与看板/三屏同一个回调。
+     *
+     * 为什么两参版本还留着：聊天横幅在**旧调用点**（其它壳、预览）只认批准/拒绝。
+     * 只接了 [onRespondApproval] 时，L3 确认与摘要照常工作，只是不画「本会话免审」。
+     */
+    val onRespondChoice: ((approvalId: String, allow: Boolean, allowSession: Boolean) -> Unit)? = null,
     /** 会话内历史搜索；null = 输入栏右端不画那颗搜索。 */
     val onSearchInConversation: ((query: String, filter: HistorySearchFilter) -> List<MessageSearchResult>)? = null,
+    /**
+     * 「中断正在跑的 agent」——**控制面动作**，不是聊天消息。
+     *
+     * 为什么必须有这个槽：群里那条「中断」按钮从前实现成
+     * `onSend(peer.nodeId, "/cancel", null)` —— 点一下就把四个字母当**普通群文本**
+     * 发给所有成员（每人都会看到一条 "/cancel" 气泡），而对端若不把斜杠命令当命令，
+     * agent 根本没停。协议本来就有 §6.6 的 agent-cancel 帧（sessionId / runId / reason），
+     * 那才是它的家。
+     *
+     * 参数：`(peerId, sessionId, runId)`。null = 这个壳没接控制面 ⇒ 按钮**置灰**
+     * （宁可不能点，也不要发一条假消息）。
+     */
+    val onCancelAgentRun: ((peerId: String, sessionId: String, runId: String) -> Unit)? = null,
     /**
      * 打开与某个 agent 的会话时，向宿主要该工作区**第一页**历史会话
      * （PPE-1 增补 D8）。null = 不发（预览、非 agent 对端）。
@@ -234,6 +253,128 @@ internal fun updateDraft(drafts: Map<String, String>, convId: String, text: Stri
 internal fun draftOf(drafts: Map<String, String>, convId: String?): String =
     convId?.let { drafts[it] }.orEmpty()
 
+/**
+ * 发送之后把**外部草稿表**里这一条也清掉。
+ *
+ * ## 为什么发送侧必须显式清
+ *
+ * `ChatScreen` 的 onSend 只复位自己那份 `remember(peerId)` 的 `draft`；而两个壳都把
+ * 草稿**同时**落在外部表（[ChatScreenChrome.onDraftChange]，`updateDraft` 的语义是
+ * 「空串 = 删除」）。输入过程中的每一次 `onDraftChange` 都会同步外部表，唯独发送这条
+ * 路径绕过了它 —— 于是外部表里留着一份**已经发出去的正文**，下次回到这个会话时
+ * [ChatScreenChrome.initialDraft] 把它喂回输入框：用户看到自己刚发的话「复活」在输入框里。
+ *
+ * 抽成函数是为了让「发送 ⇒ 外部表同步清空」这条 [ChatScreenChrome.onDraftChange] KDoc
+ * 承诺的契约能被 jvmTest 钉住，而不只是在 Composable 里一行带过。
+ */
+internal fun notifyDraftCleared(
+    convId: String?,
+    onDraftChange: ((convId: String, text: String) -> Unit)?,
+) {
+    if (convId != null) onDraftChange?.invoke(convId, "")
+}
+
+/**
+ * 「输入焦点意图」的**空闲值**：没有任何一次请求（也是计数器复位后的值）。
+ *
+ * 为什么焦点要表达成一个计数：手机内置输入栏的 [androidx.compose.ui.focus.FocusRequester]
+ * 挂在 `ChatScreen` 自己这一层，直接请求即可；桌面走 `composerSlot`，那一层**没有**
+ * 挂载点 —— 对未挂载的 requester 调 `requestFocus()` 只会打印
+ * `FocusRequester is not initialized` 并返回 false（静默失败，不崩）。
+ * 于是桌面那条路改成"递增一个计数，由输入卡片自己的 requester 消费"：
+ * `LaunchedEffect(focusRequest)` 的键变了才会重跑，所以每次请求都必须**换一个值**。
+ */
+internal const val COMPOSER_FOCUS_REQUEST_IDLE: Int = 0
+
+/**
+ * 下一条焦点意图的值：永远不等于 `current`，也永远不回到 [COMPOSER_FOCUS_REQUEST_IDLE]。
+ *
+ * 三条性质都是接线正确性的前提，单测钉在 `ComposerFocusRequestTest`：
+ * 1. **每次调用都变** —— 值不变，`LaunchedEffect(focusRequest)` 不会重跑，
+ *    同一会话里第二次点「回复」就又不聚焦了；
+ * 2. **不回到空闲值** —— 空闲值表示"从来没有请求过"，交叠上去等于把意图吞掉；
+ * 3. **越界回绕到 1** —— 计数器不该因为溢出变成负数或撞回 0。
+ */
+internal fun nextComposerFocusRequest(current: Int): Int =
+    if (current >= Int.MAX_VALUE) 1 else current + 1
+
+/**
+ * [ChatScreenChrome.composerSlot] 收到的**一包上下文**。
+ *
+ * 为什么是 data class 而不是继续散参：slot 是「桌面壳自带输入卡片」的唯一接缝，
+ * 手机内置输入栏（[com.kapp.tidings.ui.components.MessageComposer]）能拿到的每一份事实，
+ * 桌面输入卡片都该拿到 —— 散参版本在「桌面回复点了没反应」「桌面长按头像 @ 静默丢失」
+ * 「桌面新任务 chip 写死 @dsh」「桌面搜索命中只关窗」四件事上各漏了一次，全都是
+ * 「手机侧有、桌面 slot 没接到」的同一种分叉。打包之后，加能力 = 加字段 +
+ * 桌面壳自己决定接不接，不再靠改函数签名的位置记忆。
+ */
+data class ComposerSlotArgs(
+    /** 当前草稿全文（ChatScreen 持有的唯一事实来源，切会话重建）。 */
+    val draft: String,
+    /** 草稿变化；空串 = 草稿被清掉（发送后）。 */
+    val onDraftChange: (String) -> Unit,
+    /**
+     * 发送出口：`(正文, 被回复的消息 id)`。
+     *
+     * 为什么 slot 必须自己有发送出口：桌面输入卡片从前直接调
+     * `controller.sendToConversation(peer.nodeId, text)`，于是它绕过了
+     * [ChatScreen] 的 onSend —— 「回复」那条消息的 replyId 到不了发送侧（发出去是
+     * 一条普通消息），发完 `replyingToMessage` 也没人清（引用条赖在输入框上方，
+     * 下一条又变成"回复"）。手机内置输入栏能做的这两件事，桌面都做不到，根因就是
+     * 这一层只有"读"没有"写"。
+     *
+     * 传进来的实现必须是 [ChatScreen] 里那个**与手机内置输入栏共用的**出口：
+     * 复位草稿、清外部草稿表、清引用态、带 replyId 调发送 —— 四件事一起发生；
+     * 分成两份实现就必然有一份漏掉（这正是本接缝存在的理由）。
+     */
+    val onSend: (body: String, replyToId: String?) -> Unit,
+    /** `@` 候选（群成员 + 可叫醒的 agent），与手机输入栏同一份解析结果。 */
+    val mentionTargets: List<MentionTarget>,
+    /**
+     * 正在引用的消息；null = 不画引用条。
+     *
+     * 桌面此前不收它：气泡菜单点「回复」只改了 ChatScreen 的状态，桌面输入卡片
+     * 看都不看 —— 用户点了没反应。
+     */
+    val replyingTo: MessageUi? = null,
+    /** [replyingTo] 的发送者显示名（ChatScreen 用身份解析器算好）；null = 资料未到。 */
+    val replySenderName: String? = null,
+    /** 取消引用；空实现 = 引用条不画取消按钮。 */
+    val onCancelReply: () -> Unit = {},
+    /**
+     * 「把焦点落到输入框」的意图计数（[COMPOSER_FOCUS_REQUEST_IDLE] = 没有请求）。
+     *
+     * 桌面此前没有这条通路：`ChatScreen` 在「回复」「长按头像直接 @」这些动作里
+     * 只调自己那份 `composerFocus`，而桌面走的是本卡片、那个 requester 没有挂载点
+     * —— `requestFocus()` 返回 false、打印一行警告，用户看到的是"点了回复，光标还在
+     * 消息列表上，得自己再点一下输入框"。
+     *
+     * 键必须是**递增计数**而不是布尔：连续两次「回复」也得各触发一次
+     * （布尔从 true 到 true 不产生新键，第二次就丢了）。
+     */
+    val focusRequest: Int = COMPOSER_FOCUS_REQUEST_IDLE,
+    /**
+     * 「新任务」chip 要点名的 agent token（如 `@DSH`），由 ChatScreen 按**这个群里的
+     * agent kind** 解析（与手机内置输入栏同一个值）。null = 不是工作区群，chip 不画。
+     * 桌面 chip 从前写死 `@dsh`，在别的 agent 群里叫不醒。
+     */
+    val newTaskToken: String? = null,
+    /**
+     * 按消息 id 跳到消息流里的那条（历史搜索命中的落点）。null = 这个会话不支持跳转。
+     *
+     * 桌面此前把命中整个丢掉（`onSelectHit = { _ -> 关窗 }`）：窗口关了，
+     * 用户却不知道要找的那条在哪。
+     */
+    val onJumpToMessage: ((messageId: String) -> Unit)? = null,
+    /**
+     * 只读原因；null = 可以正常输入。
+     *
+     * 被移出群时非空（见 ChatScreen 的 leftGroup）：桌面输入卡片刻画这句话、收起输入框，
+     * 与手机内置输入栏同一语义。
+     */
+    val readOnlyReason: String? = null,
+)
+
 data class ChatScreenChrome(
     val receivedFileActions: ReceivedFileActions? = null,
     val onBack: (() -> Unit)? = null,
@@ -242,12 +383,12 @@ data class ChatScreenChrome(
     val showHeader: Boolean = true,
     val bubbleFraction: Float = ContentWidths.BUBBLE_FRACTION_PHONE,
     /**
-     * 外壳自带的输入卡片（桌面壳用它）。
-     *
-     * 第三个参数是 `@` 候选：**必须由这一层传下去**，否则桌面输入框没有候选列表 ——
-     * 真机反馈「桌面端还是无法输入 @」就是这条：`DesktopComposer` 从来没接过候选。
+     * 外壳自带的输入卡片（桌面壳用它）。参数打包成 [ComposerSlotArgs]：
+     * 桌面输入卡片与手机内置输入栏要接的是**同一份上下文**（草稿、@ 候选、引用条、
+     * 「新任务」token、搜索命中跳转）—— 逐个散参每加一个能力就要改一遍签名，
+     * 而且很容易漏接（桌面「回复点了没反应」的根因就是 slot 不收 replyingTo）。
      */
-    val composerSlot: (@Composable (String, (String) -> Unit, List<MentionTarget>) -> Unit)? = null,
+    val composerSlot: (@Composable (ComposerSlotArgs) -> Unit)? = null,
     /**
      * 草稿的**外部存放处**：壳可以接住，把草稿按会话记下来，切换会话时再喂回 [initialDraft]。
      *

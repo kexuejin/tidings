@@ -2,18 +2,20 @@
 
 package com.kapp.tidings.feature.settings
 
-import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.ColumnScope
 import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.RowScope
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.selection.selectable
+import androidx.compose.foundation.selection.toggleable
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
@@ -25,6 +27,7 @@ import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
@@ -37,6 +40,7 @@ import com.kapp.tidings.generated.resources.set_theme_light
 import com.kapp.tidings.generated.resources.set_theme_system
 import com.kapp.tidings.ui.ContentWidths
 import com.kapp.tidings.ui.centerCapped
+import com.kapp.tidings.ui.components.AppSwitch
 import com.kapp.tidings.ui.components.LargeTitleBar
 import com.kapp.tidings.ui.components.TitleBarDivider
 import com.kapp.tidings.ui.theme.LocalAppSpacing
@@ -73,6 +77,17 @@ internal fun SettingsPageScaffold(
     subtitle: String,
     onBack: (() -> Unit)?,
     modifier: Modifier = Modifier,
+    /**
+     * 横幅槽：失败原因与保存回执（`state.banner` / `settingsNote`）。
+     *
+     * 为什么收在外壳上：这些回执的**数据源**在 `RelayUiState` 里，而五个子页里只有
+     * 连接/数据/诊断拿着 state（通知/外观/能力连 state 都没有）。宿主传一次即可；
+     * 不传 = 这一屏没有横幅位（预览/截图）。
+     *
+     * 位置：标题栏之下、滚动内容之上 —— 横幅不该跟着内容滚走，否则用户点完保存
+     * 还要往上找半天。
+     */
+    banner: (@Composable () -> Unit)? = null,
     content: @Composable ColumnScope.() -> Unit,
 ) {
     Column(modifier = modifier.fillMaxSize()) {
@@ -103,6 +118,12 @@ internal fun SettingsPageScaffold(
                 contentMaxWidth = ContentWidths.Settings,
             )
             TitleBarDivider()
+        }
+
+        if (banner != null) {
+            Box(Modifier.padding(horizontal = LocalAppSpacing.current.lg)) {
+                banner()
+            }
         }
 
         Column(
@@ -169,6 +190,10 @@ internal fun SettingRow(
  *
  * [enabled] = false 的那一行是 fd1：它必须呈现成「关着且点不动」，
  * 不能是一个能点但没用的开关。
+ *
+ * **整行可点**：`toggleable` 挂在整行上（role = [Role.Switch]），开关本体只画状态
+ * （`onCheckedChange = null`）—— 触达目标从那颗 52×32 的轨道扩大到整行，读屏软件
+ * 也把它当"一个开关"报，而不是"一行字 + 一颗开关"。
  */
 @Composable
 internal fun SettingSwitchRow(
@@ -180,8 +205,21 @@ internal fun SettingSwitchRow(
     onCheckedChange: (Boolean) -> Unit,
     enabled: Boolean = true,
 ) {
-    SettingRow(title = title, subtitle = subtitle, badge = badge, badgeTone = badgeTone) {
-        Switch(checked = checked, onCheckedChange = onCheckedChange, enabled = enabled)
+    SettingRow(
+        title = title,
+        subtitle = subtitle,
+        badge = badge,
+        badgeTone = badgeTone,
+        modifier = Modifier.toggleable(
+            value = checked,
+            enabled = enabled,
+            role = Role.Switch,
+            onValueChange = onCheckedChange,
+        ),
+    ) {
+        // 与桌面共用同一个开关实现（§2.6）：轨道/圆点/配色/命中区只有一份定义。
+        // 这里传 null：交互由外层 `SettingRow` 的 toggleable 承担（整行可点，命中区更大）。
+        AppSwitch(checked = checked, onCheckedChange = null, enabled = enabled)
     }
 }
 
@@ -219,7 +257,13 @@ internal fun ThemeSegments(selected: String, onSelect: (String) -> Unit) {
                 ) {
                     Box(
                         modifier = Modifier
-                            .clickable { onSelect(mode) }
+                            // 单选语义：读屏软件按「单选按钮，已选中/未选中」报这一档，
+                            // 而不是一颗无名按钮。
+                            .selectable(
+                                selected = active,
+                                role = Role.RadioButton,
+                                onClick = { onSelect(mode) },
+                            )
                             .padding(vertical = LocalAppSpacing.current.sm6),
                         contentAlignment = Alignment.Center,
                     ) {
@@ -331,10 +375,18 @@ internal fun KvRow(
     valueColor: Color = MaterialTheme.colorScheme.onSurface,
     mono: Boolean = false,
     emphasize: Boolean = false,
+    /**
+     * 值列的行数上限。默认 1（单行省略，与原型 `.kv` 一致）；像「我的二维码」的载荷串
+     * 这种读得懂整串才有用的值，调用方传 [Int.MAX_VALUE] 让它完整展开。
+     */
+    valueMaxLines: Int = 1,
+    /** 行尾动作槽（如「复制」的图标按钮）。null = 没有动作，与原型 `.kv` 同形。 */
+    trailing: (@Composable RowScope.() -> Unit)? = null,
 ) {
     Row(
         modifier = modifier.fillMaxWidth().padding(vertical = LocalAppSpacing.current.sm),
         horizontalArrangement = Arrangement.spacedBy(LocalAppSpacing.current.md),
+        verticalAlignment = Alignment.CenterVertically,
     ) {
         Text(
             text = label,
@@ -348,11 +400,14 @@ internal fun KvRow(
             color = valueColor,
             fontFamily = if (mono) FontFamily.Monospace else null,
             fontWeight = if (emphasize) FontWeight.SemiBold else null,
-            maxLines = 1,
+            maxLines = valueMaxLines,
             overflow = TextOverflow.Ellipsis,
             textAlign = TextAlign.End,
             modifier = Modifier.weight(2.5f),
         )
+        if (trailing != null) {
+            trailing()
+        }
     }
 }
 

@@ -143,7 +143,7 @@ public fun DesktopStatusBar(
             if (sizeClass == DesktopWindowSizeClass.Expanded) {
                 Text(
                     // TCP 端口同样不能从 `state.peers` 里找自己（见上面配对链接那段）：
-                    // 那会恒读成 0。设置里那个才是配着要用的端口（`RelaySettings.kt:98`）。
+                    // 那会恒读成 0。设置里那个才是配着要用的端口（`ScanRangeEntry`）。
                     "UDP $selfPort · TCP ${state.settings.tcpPort}",
                     style = MaterialTheme.typography.labelSmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,

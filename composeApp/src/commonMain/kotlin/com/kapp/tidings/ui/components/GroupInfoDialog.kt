@@ -26,6 +26,8 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.ui.platform.LocalClipboardManager
+import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
@@ -35,8 +37,10 @@ import com.kapp.tidings.generated.resources.Res
 import com.kapp.tidings.generated.resources.chat_group_add_member
 import com.kapp.tidings.generated.resources.chat_group_admin_label
 import com.kapp.tidings.generated.resources.chat_group_announce_label
+import com.kapp.tidings.generated.resources.chat_group_copy_id
 import com.kapp.tidings.generated.resources.chat_group_desc_label
 import com.kapp.tidings.generated.resources.chat_group_edit_meta
+import com.kapp.tidings.generated.resources.chat_group_id_copied
 import com.kapp.tidings.generated.resources.chat_group_id_label
 import com.kapp.tidings.generated.resources.chat_group_info_hint
 import com.kapp.tidings.generated.resources.chat_group_info_sub
@@ -49,6 +53,7 @@ import com.kapp.tidings.generated.resources.chat_group_owner_label
 import com.kapp.tidings.generated.resources.chat_group_remove_member
 import com.kapp.tidings.generated.resources.common_close
 import com.kapp.tidings.generated.resources.common_profile_unavailable
+import com.kapp.tidings.generated.resources.group_member_agent_badge
 import com.kapp.tidings.generated.resources.workspace_member_add_agent
 import com.kapp.tidings.generated.resources.workspace_member_section_agents
 import com.kapp.tidings.generated.resources.workspace_member_section_humans
@@ -146,6 +151,9 @@ fun GroupInfoDialog(
     var showEditMetaDialog by remember { mutableStateOf(false) }
     var showLeaveConfirm by remember { mutableStateOf(false) }
     var memberToRemove by remember { mutableStateOf<String?>(null) }
+    // 撤回**本机** agent 暴露前也要过一道确认：它对全群生效（群里的人立刻 @ 不到它），
+    // 与移出人类成员同一档破坏性 —— 过去一按就生效、没有回头路。
+    var agentWsToRevoke by remember { mutableStateOf<String?>(null) }
     val isSelfOwner = group.ownerId == selfNodeId || (group.ownerId == null && group.creatorId == selfNodeId)
     val isSelfAdmin = group.adminIds?.contains(selfNodeId) == true
     val canManageMembers = isSelfOwner || isSelfAdmin
@@ -199,14 +207,9 @@ fun GroupInfoDialog(
                                         horizontalArrangement = Arrangement.spacedBy(LocalAppSpacing.current.sm6),
                                         modifier = Modifier.padding(top = LocalAppSpacing.current.xxs),
                                     ) {
-                                        Surface(color = MaterialTheme.colorScheme.primaryContainer, shape = RelayShapes.extraSmall) {
-                                            Text(
-                                                text = "rev ${group.rev}",
-                                                style = MaterialTheme.typography.labelSmall,
-                                                color = MaterialTheme.colorScheme.primary,
-                                                modifier = Modifier.padding(horizontal = LocalAppSpacing.current.xs, vertical = LocalAppSpacing.current.xxs),
-                                            )
-                                        }
+                                        // 「rev N」曾经也挤在这一排 —— 它是协议内部版本号，
+                                        // 与同文件 KDoc 自己说的 groupId/UUID 一样是一级技术泄漏，
+                                        // 用户没有任何事要拿它做，删掉（本文件 KDoc 的同一条理由）。
                                         Surface(color = MaterialTheme.colorScheme.surface, shape = RelayShapes.extraSmall) {
                                             Text(
                                                 text = "${stringResource(Res.string.chat_group_owner_label)} $ownerNick",
@@ -245,18 +248,27 @@ fun GroupInfoDialog(
                                 horizontalArrangement = Arrangement.SpaceBetween,
                                 verticalAlignment = Alignment.CenterVertically,
                             ) {
-                                Row(verticalAlignment = Alignment.CenterVertically) {
-                                    Text(
-                                        text = "${stringResource(Res.string.chat_group_id_label)}: ",
-                                        style = MaterialTheme.typography.labelSmall,
-                                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                                    )
-                                    Text(
-                                        text = group.groupId,
-                                        style = MaterialTheme.typography.labelSmall,
-                                        fontFamily = androidx.compose.ui.text.font.FontFamily.Monospace,
-                                    )
-                                }
+                                Text(
+                                    text = stringResource(Res.string.chat_group_id_label),
+                                    style = MaterialTheme.typography.labelSmall,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                )
+                                // 36 字符的 groupId 曾经**原样上屏**：真机宽度的对话框里
+                                // 它占掉整行，是纯技术泄漏（本文件 KDoc 自己写过这条）。
+                                // 收进「复制群 ID」次级动作 —— 需要对 ID 的人（报障、对账）
+                                // 仍然一键可取，不关心的人不再被迫看一串十六进制。
+                                var copied by remember { mutableStateOf(false) }
+                                val clipboard = LocalClipboardManager.current
+                                AppTextButton(
+                                    text = stringResource(
+                                        if (copied) Res.string.chat_group_id_copied else Res.string.chat_group_copy_id,
+                                    ),
+                                    onClick = {
+                                        clipboard.setText(AnnotatedString(group.groupId))
+                                        copied = true
+                                    },
+                                    size = AppButtonSize.Small,
+                                )
                             }
                             // 入口**另起一行**，不跟 groupId 挤同一行：groupId 是 36 字符定宽
                             // （等宽字体约 464px），手机宽度下同一行只剩 ~95px，按钮的文字会被
@@ -397,8 +409,10 @@ fun GroupInfoDialog(
                                 ?.takeIf { identity.canMention }
                                 ?.let { mention -> { mention(identity) } },
                             badges = {
+                                // 过去硬编码 "🤖 Agent Bot"：英文界面印英文是碰巧、中文界面
+                                // 也印英文，且 emoji 是私货。用户可见文案只住 strings.xml。
                                 MemberBadge(
-                                    "🤖 Agent Bot",
+                                    stringResource(Res.string.group_member_agent_badge),
                                     MaterialTheme.colorScheme.tertiaryContainer,
                                     MaterialTheme.colorScheme.tertiary,
                                 )
@@ -429,14 +443,7 @@ fun GroupInfoDialog(
                                 if (ownWsId != null && onExposeWorkspaces != null) {
                                     AppTextButton(
                                         text = stringResource(Res.string.chat_group_remove_member),
-                                        onClick = {
-                                            // 撤回 = 传一份**不含它**的列表给同一个回调。
-                                            val keep = group.virtualAgents.orEmpty()
-                                                .filter { it.hostNodeId == selfNodeId }
-                                                .mapNotNull { it.wsId }
-                                                .filterNot { it == ownWsId }
-                                            onExposeWorkspaces(keep)
-                                        },
+                                        onClick = { agentWsToRevoke = ownWsId },
                                         tone = AppButtonTone.Danger,
                                         size = AppButtonSize.Small,
                                     )
@@ -519,6 +526,33 @@ fun GroupInfoDialog(
             onConfirm = {
                 memberToRemove = null
                 removeMember(targetId)
+            },
+        )
+    }
+
+    // 确认撤回本机 agent 的暴露（与移出成员同款确认框；撤回动作本身与上面那颗
+    // 行内按钮相同：传一份不含它的列表给 onExposeWorkspaces）。
+    val exposeWorkspaces = onExposeWorkspaces
+    val wsToRevoke = agentWsToRevoke
+    if (wsToRevoke != null && exposeWorkspaces != null) {
+        val revoked = rows.agents.firstOrNull { identity ->
+            declaredWorkspaceOfSender(
+                senderId = identity.id,
+                declaredAgents = group.virtualAgents,
+                hostNodeId = selfNodeId,
+            ) == wsToRevoke
+        }
+        ConfirmRemoveMemberDialog(
+            targetNick = revoked?.displayName ?: wsToRevoke,
+            onDismiss = { agentWsToRevoke = null },
+            onConfirm = {
+                agentWsToRevoke = null
+                // 撤回 = 传一份**不含它**的列表给同一个回调。
+                val keep = group.virtualAgents.orEmpty()
+                    .filter { it.hostNodeId == selfNodeId }
+                    .mapNotNull { it.wsId }
+                    .filterNot { it == wsToRevoke }
+                exposeWorkspaces(keep)
             },
         )
     }

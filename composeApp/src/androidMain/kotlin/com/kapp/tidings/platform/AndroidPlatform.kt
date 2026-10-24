@@ -304,6 +304,26 @@ class AndroidAppPlatform(
      */
     override val receivedFileActions: ReceivedFileActions = AndroidReceivedFileActions(context)
 
+    /**
+     * 「去系统设置」：打开**本应用**的权限/通知详情页。
+     *
+     * 为什么它必须是一个"能不能"而不是"直接打开"：Android 上设置页也可能打不开
+     * （被托管的设备、极简 ROM），而界面据此决定**画不画那颗按钮** —— 点了没反应的
+     * 按钮比没有按钮更糟。所以失败如实返回 false。
+     */
+    override val canOpenAppSettings: Boolean = true
+
+    override fun openAppSettings(): Boolean = try {
+        val intent = Intent(
+            android.provider.Settings.ACTION_APPLICATION_DETAILS_SETTINGS,
+            Uri.parse("package:" + context.packageName),
+        ).apply { addFlags(Intent.FLAG_ACTIVITY_NEW_TASK) }
+        context.startActivity(intent)
+        true
+    } catch (_: Throwable) {
+        false
+    }
+
     override val urlOpener: UrlOpener = object : UrlOpener {
         override fun openUrl(url: String): Boolean {
             return try {

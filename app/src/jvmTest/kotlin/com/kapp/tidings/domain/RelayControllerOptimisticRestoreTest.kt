@@ -11,9 +11,8 @@ import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertNull
 import kotlinx.coroutines.CoroutineScope
-import kotlinx.coroutines.delay
 import kotlinx.coroutines.runBlocking
-import kotlinx.coroutines.withTimeout
+import com.kapp.tidings.testutil.awaitUntil
 
 /**
  * 乐观插入的状态**跨重启**必须收尾（回归护栏，任务 D-4）。
@@ -46,7 +45,7 @@ class RelayControllerOptimisticRestoreTest {
                 senderId = self,
             ),
         )
-        awaitUntil { store.load()["group:g1"]?.any { it.id == "local-1" } == true }
+        awaitUntil("恢复或发送后的状态落地") { store.load()["group:g1"]?.any { it.id == "local-1" } == true }
 
         val second = controller(this, store)
         second.messagesCtl.handleRestoreMessages().join()
@@ -80,7 +79,7 @@ class RelayControllerOptimisticRestoreTest {
                 ),
             ),
         )
-        awaitUntil { store.load()[lin]?.any { it.id == "card-1" } == true }
+        awaitUntil("文件卡落盘之后又被读回来") { store.load()[lin]?.any { it.id == "card-1" } == true }
 
         // 落盘那一刻卡片就该被剥掉：磁盘上不该留下一个传输管理器不认的 transferId。
         val persisted = store.load()[lin].orEmpty().single { it.id == "card-1" }
@@ -92,12 +91,6 @@ class RelayControllerOptimisticRestoreTest {
         val restored = second.state.value.messagesWith(lin).single { it.id == "card-1" }
         assertNull(restored.file, "重启后不该复活一张 Offered 卡片")
         assertNull(restored.delivery, "文件卡没有投递态，不该凭空长出转圈或红字")
-    }
-
-    private suspend fun awaitUntil(condition: () -> Boolean) {
-        withTimeout(5_000) {
-            while (!condition()) delay(5)
-        }
     }
 
     private fun controller(scope: CoroutineScope, store: MessageStore): RelayController = RelayController(

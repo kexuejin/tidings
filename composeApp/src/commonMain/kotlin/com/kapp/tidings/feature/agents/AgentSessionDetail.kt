@@ -18,10 +18,13 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
+import androidx.compose.runtime.snapshotFlow
+import androidx.compose.runtime.withFrameNanos
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.text.font.FontWeight
@@ -38,19 +41,22 @@ import com.kapp.tidings.generated.resources.agent_offline_message
 import com.kapp.tidings.generated.resources.agent_offline_title
 import com.kapp.tidings.generated.resources.agent_open_chat
 import com.kapp.tidings.generated.resources.cidr_scan_progress
+import com.kapp.tidings.generated.resources.agent_approval_history_title
+import com.kapp.tidings.generated.resources.agent_approval_revoke_session
 import com.kapp.tidings.generated.resources.agent_sessions_empty
 import com.kapp.tidings.generated.resources.agent_sessions_memory_note
 import com.kapp.tidings.generated.resources.agent_session_untitled
 import com.kapp.tidings.generated.resources.agent_timeline_empty
-import com.kapp.tidings.core.protocol.AgentGrantAccess
 import com.kapp.tidings.generated.resources.common_never
 import com.kapp.tidings.generated.resources.ic_arrow_back
 import com.kapp.tidings.generated.resources.ic_chat_bubble
 import com.kapp.tidings.ui.ContentWidths
 import com.kapp.tidings.ui.EmptyState
 import com.kapp.tidings.ui.centerCapped
+import com.kapp.tidings.ui.components.AppButtonSize
 import com.kapp.tidings.ui.components.AppIconButton
 import com.kapp.tidings.ui.components.AppButton
+import com.kapp.tidings.ui.components.AppTextButton
 import com.kapp.tidings.ui.components.SectionHeader
 import com.kapp.tidings.ui.components.ThinkingBlock
 import com.kapp.tidings.ui.components.formatClock
@@ -60,9 +66,41 @@ import com.kapp.tidings.ui.theme.RelayElevations
 import org.jetbrains.compose.resources.stringResource
 import com.kapp.tidings.domain.model.AgentSessionUi
 import com.kapp.tidings.domain.model.PeerUi
+import com.kapp.tidings.domain.mayDecideApproval
+import com.kapp.tidings.domain.pendingApprovalCount
 import com.kapp.tidings.domain.model.ScanProgressUi
 import com.kapp.tidings.ui.components.AppButtonTone
 
+
+/**
+ * 跟随滚动的判定：视口停在**离底不超过 [threshold]** 的位置时才算「用户在底部」，
+ * 新事件到达才自动滚到底；用户往上翻了就不打扰（等他回到底部附近才恢复跟随）。
+ *
+ * 抽成纯函数是因为「±阈值」这条纪律必须能被单测钉住（旧行为是根本不滚：新事件
+ * 追加在屏外，用户以为没动静）。`max <= 0`（内容不足一屏，无滚动条）按跟随处理。
+ */
+internal fun shouldAutoFollow(lastVisible: Int, max: Int, threshold: Int): Boolean =
+    max <= 0 || max - lastVisible <= threshold
+
+/** 「近底」的容差（像素）：比一屏小、又容得下最后一两张卡的高度。 */
+internal const val AUTO_FOLLOW_THRESHOLD_PX = 480
+
+/**
+ * 会话详情「有新内容」的信号：**任一路**条数变化都算。
+ *
+ * 为什么不是只数聊天消息：这一屏是「审批 + 队列 + 事件流 + 消息流」四种内容的组合，
+ * 旧实现拿 `state.messagesWith(...).size` 单独当 key —— 事件流或审批在屏外追加时
+ * 什么都不滚，用户看到的是「已经到底了」，而新内容就挂在他视线下面。
+ *
+ * 用四个分量而不是求和：求和的碰撞是真实的（来一条消息 + 走一条队列任务 = 和不变 ⇒
+ * 该滚不滚）。`LaunchedEffect(List)` 按结构比较，四个分量各占一格。
+ */
+internal fun followScrollSignature(
+    messageCount: Int,
+    eventCount: Int,
+    approvalCount: Int,
+    taskCount: Int,
+): List<Int> = listOf(messageCount, eventCount, approvalCount, taskCount)
 
 /**
  * 会话详情工作台视图（**第三级**，下钻详情）。
@@ -84,6 +122,15 @@ internal fun SessionDetailView(
     onSelectSession: (String) -> Unit,
     onOpenChat: (String) -> Unit,
     onRespondApproval: ((approvalId: String, allow: Boolean) -> Unit)?,
+    /** 三参处置（「本会话免审」）：null 时退回 [onRespondApproval]，不画免审按钮。 */
+    onRespondChoice: ((approvalId: String, allow: Boolean, allowSession: Boolean) -> Unit)? = null,
+    /**
+     * 撤销「本会话免审」：null = 不提供入口。
+     *
+     * 免审是一次点击授出的**会话级空白放行**；没有撤销入口，它就是一个不可逆决定。
+     * 组合根接 controller 的实现：按 approvalId 逐条发一条 agent-ack（kind = revoke_session）。
+     */
+    onRevokeSessionApproval: ((sessionId: String) -> Unit)? = null,
     onCancelTask: ((taskId: String) -> Unit)?,
     modifier: Modifier = Modifier,
     // 只给截图门禁用：把「切换会话」浮层默认打开。生产侧一律走默认值（点击 `AgentSessionBar`
@@ -146,9 +193,10 @@ internal fun SessionDetailView(
 
         // 会话切换条（原型 `.swbar`）：仅在多会话时呈现，单会话时不画冗余条目
         if (sessions.size > 1) {
-            val sessionPendingCount = remember(state.agentApprovals, activeSession?.sessionId) {
+            // 与看板页头同一把尺子：过期的审批不算「待批」（领域层唯一入口）。
+            val sessionPendingCount = remember(state.agentApprovals, activeSession?.sessionId, now) {
                 activeSession?.sessionId?.let { sid ->
-                    state.agentApprovals.values.count { it.sessionId == sid && it.status == "pending" }
+                    pendingApprovalCount(state.agentApprovals.values, now, sessionId = sid)
                 } ?: 0
             }
             AgentSessionBar(
@@ -160,10 +208,43 @@ internal fun SessionDetailView(
             HorizontalDivider()
         }
 
+        // ===== 跟随滚动（issue「会话详情无跟随滚动」）=====
+        // 整屏是 verticalScroll，新事件追加在屏外时用户毫无感知。规则：视口在底部附近
+        // （shouldAutoFollow）才跟随；用户往上翻了就不打扰，回到底部附近自动恢复跟随。
+        val scrollState = rememberScrollState()
+        var autoFollow by remember { mutableStateOf(true) }
+        LaunchedEffect(scrollState) {
+            snapshotFlow { scrollState.value to scrollState.maxValue }
+                .collect { (v, m) -> autoFollow = shouldAutoFollow(v, m, AUTO_FOLLOW_THRESHOLD_PX) }
+        }
+        // 新内容到达 = 这一屏**任一路**条数变化（消息 / 事件 / 审批 / 队列），
+        // 见 followScrollSignature。等一帧让新内容先完成布局（maxValue 才是新的），
+        // 仍在跟随态才滚到底 —— 离底状态下这个 effect 什么都不做。
+        val feedSignature = if (activeSession != null) {
+            followScrollSignature(
+                messageCount = state.messagesWith(peer.nodeId).size,
+                eventCount = state.agentEventsOf(activeSession).size,
+                approvalCount = state.agentApprovals.values.count {
+                    it.peerId == peer.nodeId && it.sessionId == activeSession.sessionId
+                },
+                taskCount = state.agentTasks.values.count {
+                    it.peerId == peer.nodeId && it.sessionId == activeSession.sessionId
+                },
+            )
+        } else {
+            emptyList()
+        }
+        LaunchedEffect(feedSignature) {
+            if (feedSignature.isNotEmpty() && autoFollow) {
+                withFrameNanos { }
+                scrollState.animateScrollTo(scrollState.maxValue)
+            }
+        }
+
         Column(
             modifier = Modifier
                 .fillMaxSize()
-                .verticalScroll(rememberScrollState())
+                .verticalScroll(scrollState)
                 .padding(horizontal = LocalAppSpacing.current.lg),
             verticalArrangement = Arrangement.spacedBy(LocalAppSpacing.current.md),
         ) {
@@ -174,14 +255,6 @@ internal fun SessionDetailView(
                     modifier = Modifier.fillMaxWidth(),
                 )
             } else {
-                val isHost = peer.nodeId == state.selfNodeId || peer.ip == "127.0.0.1" || peer.host == "localhost" || peer.host == "127.0.0.1"
-                val sessionGrant = state.grantFor(peer.nodeId, activeSession.agentId ?: activeSession.agentKind, activeSession.wsId)
-                val canApprove = isHost ||
-                    (sessionGrant?.isMyDevice == true) ||
-                    (sessionGrant?.access == AgentGrantAccess.OWNER) ||
-                    (sessionGrant?.access == AgentGrantAccess.ADMIN && sessionGrant.delegatedApproval)
-                val isReadOnly = !canApprove
-
                 // 权限与宿主控制条已按 task-4 D 整体搬到**工作区详情**（WorkspaceDetailView）：
                 // 授权是按工作区给的，不是按某一轮会话给的 —— 挂在会话详情上意味着
                 // "换一条会话就换一套权限显示"，而且没有会话时那一栏整块消失。
@@ -194,15 +267,70 @@ internal fun SessionDetailView(
                     now = now,
                 )
 
-                // 专属待审批卡片
+                // 离线必须紧跟身份卡：它是"这个会话现在能不能指望"的第一条事实，
+                // 排在审批/队列/产物之后的写法会让用户先读"能点什么"、翻到底才知道它已经离线。
+                if (!peer.online) {
+                    Surface(
+                        color = MaterialTheme.colorScheme.secondaryContainer,
+                        shape = MaterialTheme.shapes.medium,
+                        modifier = Modifier.fillMaxWidth(),
+                    ) {
+                        Column(Modifier.padding(LocalAppSpacing.current.lg)) {
+                            Text(
+                                text = stringResource(Res.string.agent_offline_title),
+                                style = MaterialTheme.typography.titleSmall,
+                                color = MaterialTheme.colorScheme.onSecondaryContainer,
+                            )
+                            Text(
+                                text = stringResource(
+                                    Res.string.agent_offline_message,
+                                    if (peer.lastSeenAt > 0) relativeTime(peer.lastSeenAt, now) else stringResource(Res.string.common_never),
+                                ),
+                                style = MaterialTheme.typography.bodySmall,
+                                color = MaterialTheme.colorScheme.onSecondaryContainer,
+                            )
+                        }
+                    }
+                }
+
+                // ===== 待办与历史分开 =====
+                // 修复前这段把「已批准/已拒绝」也画在「待处理审批 N 项」下面，计数还数它们 ——
+                // 用户看到 7 项、能点的只有 1 条。现在：pending（未过期）进待处理，
+                // 已决 + 已过期的 pending 进「审批记录」（过期项以「已过期」徽标常驻，不带按钮）。
                 val sessionApprovals = state.agentApprovals.values.filter {
                     it.peerId == peer.nodeId && it.sessionId == activeSession.sessionId
                 }
+                val pendingApprovals = sessionApprovals.filter {
+                    it.status == "pending" && !isApprovalExpired(it, now)
+                }
+                val historyApprovals = sessionApprovals.filter {
+                    it.status != "pending" || isApprovalExpired(it, now)
+                }
                 AgentApprovalsSection(
-                    approvals = sessionApprovals,
+                    approvals = pendingApprovals,
                     onRespond = onRespondApproval,
-                    isReadOnly = { isReadOnly },
+                    onRespondChoice = onRespondChoice,
+                    // 与看板/工作区详情/聊天横幅同一个判据（含过期）。修复前这里是第三份手抄。
+                    isReadOnly = { appr -> !state.mayDecideApproval(appr, now) },
                 )
+                // 「本会话免审」的撤销入口：免审是一次点击授出的会话级空白放行，
+                // 没有撤销入口就等于把「以后同类都不问」变成不可逆决定。
+                if (onRevokeSessionApproval != null && sessionApprovals.any { it.status == "allow_session" }) {
+                    AppTextButton(
+                        text = stringResource(Res.string.agent_approval_revoke_session),
+                        onClick = { onRevokeSessionApproval(activeSession.sessionId) },
+                        size = AppButtonSize.Small,
+                        modifier = Modifier.fillMaxWidth(),
+                    )
+                }
+                if (historyApprovals.isNotEmpty()) {
+                    AgentApprovalsSection(
+                        approvals = historyApprovals,
+                        title = Res.string.agent_approval_history_title,
+                        includeExpiredPending = true,
+                        isReadOnly = { true },
+                    )
+                }
 
                 // 专属队列卡片
                 val sessionTasks = state.agentTasks.values.filter {
@@ -217,30 +345,6 @@ internal fun SessionDetailView(
                 AgentArtifactsSection(
                     artifacts = state.agentArtifactsOf(peer.nodeId, activeSession.sessionId),
                 )
-
-                if (!peer.online) {
-                    Surface(
-                        color = MaterialTheme.colorScheme.errorContainer,
-                        shape = MaterialTheme.shapes.medium,
-                        modifier = Modifier.fillMaxWidth(),
-                    ) {
-                        Column(Modifier.padding(LocalAppSpacing.current.lg)) {
-                            Text(
-                                text = stringResource(Res.string.agent_offline_title),
-                                style = MaterialTheme.typography.titleSmall,
-                                color = MaterialTheme.colorScheme.onErrorContainer,
-                            )
-                            Text(
-                                text = stringResource(
-                                    Res.string.agent_offline_message,
-                                    if (peer.lastSeenAt > 0) relativeTime(peer.lastSeenAt, now) else stringResource(Res.string.common_never),
-                                ),
-                                style = MaterialTheme.typography.bodySmall,
-                                color = MaterialTheme.colorScheme.onErrorContainer,
-                            )
-                        }
-                    }
-                }
 
                 // 真实聊天气泡流
                 SectionHeader(stringResource(Res.string.agent_messages_title))

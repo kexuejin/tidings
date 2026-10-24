@@ -134,9 +134,22 @@ fun LargeTitleBar(
             // 动作之间是原型的 `.topbar .acts{gap:6px}`（prototype/relay.html:580）：
             // 裸 IconButton 时代靠 40dp 按钮自带的内边距留缝，换成 34dp 的 `.ibtn`
             // 方块之后必须显式给间距，否则两颗方块会贴在一起（已实测到贴死）。
+            //
+            // **行 gap 不等于眼睛看到的砖间缝**：`.ibtn` 现在包在 48dp 触控框里
+            // （见 [IbtnBox]），每颗砖左右各让出 (48 − 34) / 2 = 7dp 内缩。照抄 6dp 的
+            // 话，砖与砖之间实际是 6 + 7 + 7 = 20dp —— 这正是「照抄原型数值、结果对不上」
+            // 的现场。这里用 [topBarActionRowGap] 按同一份算术补偿（夹到 0 为止：
+            // 负 gap 会让相邻 48dp 命中区互相重叠、把无障碍目标压回 48dp 以下），
+            // 补偿后视觉缝 14dp；剩下的差值就是 48dp 触控目标的代价，不再用加大间距掩盖。
             Row(
                 verticalAlignment = Alignment.CenterVertically,
-                horizontalArrangement = Arrangement.spacedBy(6.dp),
+                horizontalArrangement = Arrangement.spacedBy(
+                    topBarActionRowGap(
+                        touchTarget = sp.xxxl,
+                        brick = IbtnSize,
+                        prototypeGap = 6.dp,
+                    ),
+                ),
             ) {
                 actions()
             }
@@ -147,6 +160,29 @@ fun LargeTitleBar(
 /** `.ibtn` 的几何（原型 `prototype/relay.html:589-591`）：34×34 的方块、内部图标 18×18。 */
 private val IbtnSize = 34.dp
 private val IbtnIconSize = 18.dp
+
+/**
+ * 顶栏动作行的行 gap：把原型 `gap:6px` 按 48dp 触控框的内缩补偿一次。
+ *
+ * ## 为什么需要补偿
+ *
+ * [IbtnBox] 的命中框是 `spacing.xxxl`（48dp 无障碍触控下限），视觉砖只有 34dp
+ * （聊天页 30dp）。于是每颗砖左右各多出 (48 − 34) / 2 = 7dp 内缩 —— 行 gap 若照抄
+ * 原型的 6dp，**眼睛看到的**砖间缝会变成 6 + 7 + 7 = 20dp（聊天页 24dp），而不是 6dp。
+ * 把行 gap 减去这层内缩，视觉缝才回到「补偿后能到的最小值」。
+ *
+ * ## 为什么夹到 0，而不是返回负值
+ *
+ * 要让视觉缝正好 6dp，行 gap 得是 6 − 14 = −8dp：两颗 48dp 命中框会重叠 8dp，而 `Row`
+ * 的命中测试按绘制顺序倒序命中，后一颗会吃掉前一颗右缘 8dp —— 等于把刚立起来的无障碍
+ * 目标又压回 48dp 以下。所以补偿到 0 为止：视觉缝 14dp（聊天页 18dp），差值如实留着。
+ *
+ * @param touchTarget 命中框边长（调用点传 `LocalAppSpacing.current.xxxl` = 48dp）。
+ * @param brick 视觉砖边长（[IbtnSize] / [ChatIbtnSize]）。
+ * @param prototypeGap 原型 `gap` 的直译值（6dp）。
+ */
+internal fun topBarActionRowGap(touchTarget: Dp, brick: Dp, prototypeGap: Dp): Dp =
+    (prototypeGap - (touchTarget - brick)).coerceAtLeast(0.dp)
 
 /**
  * 聊天页顶栏的 `.ibtn` 小一号：原型 `.topbar.chat .ibtn{width:30px;height:30px}` +
@@ -166,6 +202,9 @@ val ChatIbtnIconSize = 16.dp
  * 所以在原型截图里它们是**浅色圆角方块**（`--surface-2` = `#F0EFE9`，深色 `#2A2C2B`）。
  * 裸 `IconButton`（无底色、且常把 tint 写成 primary）是**形状 + 颜色双重偏离**：
  * 实测原型 `m01-home.png` 顶栏右侧有 7373px 的 `#F0EFE9` 方块，而代码侧同一区域 0px。
+ *
+ * [size] / [iconSize] 只管**视觉**（34/30dp 的砖）；可点命中区恒为 48dp 无障碍
+ * 触控下限，见 [IbtnBox] 的 KDoc。
  *
  * **两处例外，别用本件**：
  *  - 返回键是 `.ibtn.plain{background:none}`（`:592`）—— 就是普通 `IconButton`；
@@ -234,7 +273,19 @@ fun TopBarIconAction(
     }
 }
 
-/** `.ibtn` 的外壳：方块 + 圆角 + `--surface-2` 底 + 点击，图标由调用方给。 */
+/**
+ * `.ibtn` 的外壳：**两层** —— 外层 48dp 的可点命中区，内层居中的 34/30dp 视觉砖。
+ *
+ * ## 为什么是两层，而不是直接 `.size(34).clickable`
+ *
+ * 视觉砖的 34dp / 30dp 是设计契约（原型 `.ibtn` / `.topbar.chat .ibtn`，见上面两个
+ * 常量的 KDoc），一个像素不能动；但 34dp 低于 48dp 的无障碍触控下限，`AppButtons.kt`
+ * 的 KDoc 有明文裁决（「宁可偏离原型也不做不可点的按钮」），直接在视觉砖上挂
+ * clickable 的后果是真机上拇指点不中。所以**外层吃满 `spacing.xxxl`（48dp 触控
+ * 口径的 token）并挂 clickable，内层只管画**：点得中，看起来还是那块 34dp 砖。
+ * 48dp 取 token 而不写裸数字 —— designTokenUsageGate 不收裸 dp，且触控目标口径
+ * 只许有 spacing token 一处事实来源。
+ */
 @Composable
 private fun IbtnBox(
     size: Dp,
@@ -245,14 +296,21 @@ private fun IbtnBox(
 ) {
     Box(
         modifier = modifier
-            .size(size)
+            .size(LocalAppSpacing.current.xxxl)
             .clip(MaterialTheme.shapes.medium)
-            // 图标砖（固定尺寸方砖 + 单颗图标）→ --surface-3。
-            .background(SurfaceTiers.Inset)
             .clickable(enabled = enabled, onClick = onClick),
         contentAlignment = Alignment.Center,
     ) {
-        content()
+        Box(
+            modifier = Modifier
+                .size(size)
+                .clip(MaterialTheme.shapes.medium)
+                // 图标砖（固定尺寸方砖 + 单颗图标）→ --surface-3。
+                .background(SurfaceTiers.Inset),
+            contentAlignment = Alignment.Center,
+        ) {
+            content()
+        }
     }
 }
 

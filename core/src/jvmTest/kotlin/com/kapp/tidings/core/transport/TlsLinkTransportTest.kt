@@ -41,7 +41,9 @@ class TlsLinkTransportTest {
             assertTrue(server.startServer(0) { connection -> accepted.complete(connection) }, "TLS 监听必须起来")
             val port = server.boundServerPort ?: error("没绑到端口")
 
-            val connection = client.connect("127.0.0.1", port, server.localPin, 5_000)
+            // 上界只防挂死，不表达「handshake 应该多快」：全量并行（六个模块的测试 JVM
+            // 抢 CPU）时 5s 会被握手开销吃掉，看起来像 pin 不对。20s 仍是有界等待。
+            val connection = client.connect("127.0.0.1", port, server.localPin, 20_000)
             assertNotNull(connection, "正确 pin 必须建连")
             assertTrue(connection.isSecure, "这条连接必须是 TLS")
             assertEquals(server.localPin, connection.peerPin, "客户端必须记下服务端的 SPKI pin")
@@ -176,9 +178,12 @@ class TlsLinkTransportTest {
         try {
             val first = transport(dir)
             val notAfter = assertNotNull(first.localCertNotAfterMillis, "有 TLS 身份就必须给得出到期时刻")
-            val now = System.currentTimeMillis()
-            assertTrue(notAfter > now, "到期时刻必须在将来（刚签发的是 +365 天）")
-            assertTrue(notAfter - now < 400L * 86_400_000L, "不该是一个离谱的远期日期")
+            // **不拿墙上时钟作基准**：到期读数必须逐毫秒等于证书文件自己的 notAfter。
+            // 原先写的是 notAfter > System.currentTimeMillis() —— 时钟被拨快一年、
+            // 或测试机时区/时间不对时，这条会以"产品缺陷"的形态变红，而证书其实没问题。
+            val cert = readCertificate(dir)
+            assertEquals(cert.notAfter.time, notAfter, "到期读数必须来自证书本身，而不是另记的副本")
+            assertTrue(notAfter > cert.notBefore.time, "notAfter 必须晚于 notBefore")
 
             // 重签：删证书、留私钥 ⇒ 新证书应有自己的 notAfter（同密钥，时间可能相同到秒，
             // 所以这里不断言"必须不同"，只断言它仍然是一个合法读数）。
@@ -189,4 +194,87 @@ class TlsLinkTransportTest {
             removeRecursively(dir)
         }
     }
+
+    /**
+     * **重签判据的两个方向**：证书剩余寿命在 7 天窗口内 ⇒ 重签（pin 不变）；
+     * 窗口外 ⇒ 原样保留。
+     *
+     * ## 为什么要有这条合成用例
+     *
+     * 上面那条只证明"读数是真读数"，证不了"判据本身对不对"。而判据
+     * （`notAfter - now > 7 天`）是**唯一会因时间推进而改变产品行为**的地方：
+     * 写错方向就会变成"证书还很久才到期却被反复重签"（pin 虽不变，但每次都要写盘，
+     * 且 SAN 检查被绕过）或"快过期了却不重签"（真机到期那天所有公网连接同时失效）。
+     *
+     * 做法：同一把私钥、只改证书的 notBefore/notAfter 写回身份目录 ——
+     * 判据的输入被精确控制，不需要等 365 天。两个方向都用"离窗口很远"的偏移
+     * （1 天 vs 300 天），所以本机时钟有几小时甚至几天的偏差也不改变结论。
+     */
+    @Test
+    fun theRenewWindowFlipsInBothDirections() {
+        val dir = createTempDir("relay-tls-renew-window")
+        try {
+            val first = transport(dir)
+            val pinBefore = first.localPin
+            val keyDer = java.io.File(dir, "link-key.pk8").readBytes()
+            val publicDer = java.io.File(dir, "link-pub.spki").readBytes()
+            val privateKey = java.security.KeyFactory.getInstance("EC")
+                .generatePrivate(java.security.spec.PKCS8EncodedKeySpec(keyDer))
+            val publicKey = java.security.KeyFactory.getInstance("EC")
+                .generatePublic(java.security.spec.X509EncodedKeySpec(publicDer))
+
+            fun writeCert(notBeforeMillis: Long, notAfterMillis: Long) {
+                val der = LinkCertificateDer.selfSigned(
+                    spki = publicDer,
+                    serial = ByteArray(16) { (it + 1).toByte() },
+                    sanIps = listOfNotNull(LinkCertificateDer.ipBytes("127.0.0.1")),
+                    notBeforeMillis = notBeforeMillis,
+                    notAfterMillis = notAfterMillis,
+                    sign = { tbs ->
+                        java.security.Signature.getInstance("SHA256withECDSA").run {
+                            initSign(privateKey)
+                            update(tbs)
+                            sign()
+                        }
+                    },
+                )
+                java.io.File(dir, "link-cert.der").writeBytes(der)
+            }
+
+            // 时间基准取**身份自己**的 notBefore（首次签发时它已经是"现在 − 5 分钟"），
+            // 于是这条用例里不再出现 System.currentTimeMillis() —— 墙上时钟被拨动也不影响判据。
+            val now = readCertificate(dir).notBefore.time + 300_000L
+            val oneDay = 86_400_000L
+
+            // ① 只剩 1 天（< 7 天窗口）⇒ 必须重签：读数应当跃迁到新签的 +365 天。
+            writeCert(now - 300_000L, now + oneDay)
+            val renewed = transport(dir)
+            val renewedAfter = assertNotNull(renewed.localCertNotAfterMillis, "重签后必须有读数")
+            assertTrue(
+                renewedAfter - (now + oneDay) > 300L * oneDay,
+                "剩余寿命 1 天（在 7 天续签窗口内）却没有重签 —— 证书到期那一刻公网连接会集体失效",
+            )
+            assertEquals(pinBefore, renewed.localPin, "用同一把私钥重签，pin 必须不变（否则要重新配对）")
+
+            // ② 还剩 300 天（远在窗口外）⇒ 不许重签：读数必须**原样**是那张合成证书的值。
+            // 注意 X.509 的时间是**秒级**（我写进去的是毫秒），所以基准取"写回文件后读回来的
+            // 那张证书"，而不是内存里那个毫秒数 —— 否则断言会在最后三位上假红。
+            writeCert(now - 300_000L, now + 300L * oneDay)
+            val craftedInFile = readCertificate(dir).notAfter.time
+            val kept = transport(dir)
+            assertEquals(
+                craftedInFile,
+                kept.localCertNotAfterMillis,
+                "证书还有 300 天却被重签 —— 判据方向反了",
+            )
+        } finally {
+            removeRecursively(dir)
+        }
+    }
+
+    /** 读出身份目录里那张证书（测试用：不经过产品代码，避免"自己验自己"）。 */
+    private fun readCertificate(dir: String): java.security.cert.X509Certificate =
+        java.security.cert.CertificateFactory.getInstance("X.509")
+            .generateCertificate(java.io.File(dir, "link-cert.der").inputStream())
+            as java.security.cert.X509Certificate
 }

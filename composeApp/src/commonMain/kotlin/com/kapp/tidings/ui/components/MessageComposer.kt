@@ -64,6 +64,7 @@ import com.kapp.tidings.generated.resources.chat_route_udp
 import com.kapp.tidings.generated.resources.chat_send
 import com.kapp.tidings.generated.resources.ic_send
 import com.kapp.tidings.generated.resources.chat_mention_all
+import com.kapp.tidings.generated.resources.common_unknown_member
 import org.jetbrains.compose.resources.DrawableResource
 import org.jetbrains.compose.resources.StringResource
 import org.jetbrains.compose.resources.painterResource
@@ -172,6 +173,50 @@ internal fun insertMention(text: String, start: Int, end: Int, token: String): P
 }
 
 /**
+ * 光标前正在进行的那段「@ 输入」：离光标最近的一个 `@` 到光标之间的文字。
+ *
+ * ## 它回答两个问题
+ *
+ * 1. **候选该不该开**：返回 null = 光标前没有进行中的 @ 输入（还没打 @、@ 与光标之间
+ *    隔了空白/换行、或 @ 已被删掉）—— 候选列表该收起。此前候选只在「敲入 @」那一刻打开，
+ *    之后**不过滤也不收起**：候选挂在那儿盖住正文，删除 @ 后还赖着不走。
+ * 2. **过滤词是什么**：返回非 null = 用户正在 @ 后面打的字 —— 候选按它的前缀过滤，
+ *    而不是不管打到哪儿都把全体成员摊出来。
+ *
+ * 抽成纯函数是为了让「删除 @ 收起」「按前缀过滤」这两条判据能被 jvmTest 钉住 ——
+ * 候选开合错了没有任何编译期信号，只有边打字边看才知道。
+ *
+ * @param cursor 光标的 UTF-16 偏移（`TextFieldValue.selection.end`）。
+ * @return @ 后面到光标为止的片段（可能为空串 = 刚敲完 @）；null = 没有进行中的 @ 输入。
+ */
+internal fun mentionQueryBeforeCursor(text: String, cursor: Int): String? {
+    val c = cursor.coerceIn(0, text.length)
+    var i = c - 1
+    while (i >= 0) {
+        val ch = text[i]
+        // 空白/换行 = 这一段输入已经结束：@ 到光标之间不再连贯。
+        if (ch.isWhitespace()) return null
+        if (ch == '@') return text.substring(i + 1, c)
+        i--
+    }
+    return null
+}
+
+/**
+ * 按光标前的 token 前缀过滤 @ 候选。
+ *
+ * [query] 是 [mentionQueryBeforeCursor] 的产物：空串 = 刚敲完 @，全体候选都给；
+ * 非空 = 只留 token（去掉前导 @）以它开头的候选（大小写不敏感 —— 用户打 `@dsh`
+ * 也该叫得出 `@DSH`，与身份解析器「名字只有一份」的纪律一致）。
+ */
+internal fun filterMentionTargets(targets: List<MentionTarget>, query: String): List<MentionTarget> =
+    if (query.isEmpty()) {
+        targets
+    } else {
+        targets.filter { it.token.removePrefix("@").startsWith(query, ignoreCase = true) }
+    }
+
+/**
  * 移动端输入栏：一条药丸装输入框，右侧一颗圆形发送键，能力入口排在药丸里。
  *
  * 形态参考的是市场上 IM 的输入区，而不是桌面那张浮起卡片（桌面要拖拽改高、要键盘快捷键、
@@ -224,9 +269,25 @@ public fun MessageComposer(
      */
     replyingTo: MessageUi? = null,
     /**
+     * [replyingTo] 的发送者显示名（调用方用身份解析器算好）。
+     *
+     * 为什么由调用方给而不是在这里解析：身份规则全在 `SenderIdentityContext` 那一层，
+     * 输入栏不该知道。null = 资料没到 —— 预览条如实说「未知成员」，
+     * **不把 senderId 前 8 位的裸 hex 当人名印**（那是一个事实的两个说法里最糟的那个）。
+     */
+    replySenderName: String? = null,
+    /**
      * 取消引用回调。
      */
     onCancelReply: (() -> Unit)? = null,
+    /**
+     * 只读态：这个会话现在**发不出去**（最典型：你已被移出这个群）。
+     *
+     * 真身：被移出群后输入栏仍然完全可用，用户打完字点发送、只得到一条红色的
+     * 「发送失败」—— 反复试，因为界面从没告诉过他原因。
+     * 非 null = 用这句话**替换整个输入区**（不画输入框、不画发送键）。
+     */
+    readOnlyReason: String? = null,
     /**
      * 只给截图预览用的接缝：面板开合是屏内状态，单帧截图抓不到"打开着"的样子。
      * 生产调用方一律用默认值（关着）。与 `DesktopShell` 的 `initialView` 同一路数。
@@ -290,6 +351,19 @@ public fun MessageComposer(
                 .fillMaxWidth()
                 .padding(horizontal = LocalAppSpacing.current.md, vertical = LocalAppSpacing.current.sm),
         ) {
+            // 只读态**整块替换**输入区：不画输入框、不画发送键、不显示引用条。
+            // 留着输入框等于让用户白打一遍字再吃一条「发送失败」。
+            if (readOnlyReason != null) {
+                Text(
+                    text = readOnlyReason,
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(horizontal = LocalAppSpacing.current.sm, vertical = LocalAppSpacing.current.md10),
+                )
+                return@Column
+            }
             if (replyingTo != null) {
                 Surface(
                     color = MaterialTheme.colorScheme.surfaceVariant,
@@ -301,13 +375,18 @@ public fun MessageComposer(
                         verticalAlignment = Alignment.CenterVertically,
                         horizontalArrangement = Arrangement.SpaceBetween,
                     ) {
+                        // 不做 take(40) 预截断：那按 UTF-16 码元切，emoji/组合字符会被劈开
+                        // （预览末尾出现半个字符）。交给 maxLines=1 + Ellipsis 按字素收尾。
                         val replyText = replyingTo.text.ifBlank { replyingTo.file?.name.orEmpty() }
-                        val senderLabel = replyingTo.senderId?.take(8) ?: replyingTo.peerId.take(8)
+                        // 发送者名走身份解析（调用方算好传进来）；资料没到就如实说
+                        // 「未知成员」，不再印 8 位 hex。
+                        val senderLabel = replySenderName
+                            ?: stringResource(Res.string.common_unknown_member)
                         Text(
                             text = stringResource(
                                 Res.string.chat_reply_preview_prefix,
                                 senderLabel,
-                                replyText.take(40),
+                                replyText,
                             ),
                             style = MaterialTheme.typography.labelSmall,
                             color = MaterialTheme.colorScheme.onSurfaceVariant,
@@ -316,7 +395,9 @@ public fun MessageComposer(
                             modifier = Modifier.weight(1f),
                         )
                         if (onCancelReply != null) {
-                            IconButton(onClick = onCancelReply, modifier = Modifier.size(24.dp)) {
+                            // 触达 48dp（视觉仍是那颗 16dp 的小叉）：24dp 的按钮拇指按不中，
+                            // 反而容易点到下面的输入框。
+                            IconButton(onClick = onCancelReply, modifier = Modifier.size(48.dp)) {
                                 Icon(
                                     imageVector = Icons.Default.Close,
                                     contentDescription = stringResource(Res.string.chat_reply_cancel),
@@ -354,6 +435,9 @@ public fun MessageComposer(
                         modifier = Modifier.padding(start = LocalAppSpacing.current.sm, end = LocalAppSpacing.current.xxs),
                     ) {
                         var mentionMenuOpen by remember { mutableStateOf(false) }
+                        // 光标前正在打的那段 @ 输入（mentionQueryBeforeCursor 的产物）：
+                        // 候选开着时它决定**过滤**；变成 null（@ 被删掉 / 跨过空白）就收起。
+                        var mentionQuery by remember { mutableStateOf<String?>(null) }
                         val canMention = mentionTargets.isNotEmpty()
 
                         val field = Modifier
@@ -373,12 +457,22 @@ public fun MessageComposer(
                                     val previousText = fieldValue.text
                                     fieldValue = next
                                     onDraftChange(next.text)
-                                    // 检查是否刚敲入 '@'
-                                    if (canMention && next.text.length > previousText.length) {
-                                        val cursor = next.selection.end
-                                        if (cursor > 0 && next.text.getOrNull(cursor - 1) == '@') {
-                                            mentionMenuOpen = true
+                                    if (canMention) {
+                                        // 刚敲入 '@'：开候选（与桌面端同一条判据）。
+                                        if (next.text.length > previousText.length) {
+                                            val cursor = next.selection.end
+                                            if (cursor > 0 && next.text.getOrNull(cursor - 1) == '@') {
+                                                mentionMenuOpen = true
+                                            }
                                         }
+                                        // 每次输入都重读光标前的 @ 片段：删掉 '@'（或跨过空白）
+                                        // 后它变 null，候选**收起** —— 从前候选只开不收，
+                                        // 删了 @ 也一直挂着盖住正文。
+                                        val query = mentionQueryBeforeCursor(next.text, next.selection.end)
+                                        if (mentionMenuOpen && query == null) {
+                                            mentionMenuOpen = false
+                                        }
+                                        mentionQuery = if (mentionMenuOpen) query else null
                                     }
                                 },
                                 textStyle = MaterialTheme.typography.bodyLarge.copy(
@@ -406,26 +500,39 @@ public fun MessageComposer(
                             if (canMention) {
                                 // @所有人 的 token 也参与同一个插入函数（同一份拼装规则）。
                                 val mentionAllToken = "@" + stringResource(Res.string.chat_mention_all)
+                                // 按**光标前的前缀**过滤候选（[filterMentionTargets]）：
+                                // 刚敲完 @ 给全体；@ 后打了字就只留匹配的 —— 不再不管打到
+                                // 哪儿都把全部成员摊出来。
+                                val query = mentionQuery.orEmpty()
+                                val showMentionAll = mentionAllToken.removePrefix("@")
+                                    .startsWith(query, ignoreCase = true)
+                                val visibleTargets = filterMentionTargets(mentionTargets, query)
                                 DropdownMenu(
                                     expanded = mentionMenuOpen,
-                                    onDismissRequest = { mentionMenuOpen = false },
+                                    onDismissRequest = {
+                                        mentionMenuOpen = false
+                                        mentionQuery = null
+                                    },
                                     modifier = Modifier.heightIn(max = 240.dp),
                                 ) {
-                                    DropdownMenuItem(
-                                        text = { Text(mentionAllToken) },
-                                        onClick = {
-                                            mentionMenuOpen = false
-                                            val (nextText, nextCursor) = insertMention(
-                                                text = fieldValue.text,
-                                                start = fieldValue.selection.min,
-                                                end = fieldValue.selection.max,
-                                                token = mentionAllToken,
-                                            )
-                                            fieldValue = TextFieldValue(nextText, TextRange(nextCursor))
-                                            onDraftChange(nextText)
-                                        },
-                                    )
-                                    mentionTargets.forEach { target ->
+                                    if (showMentionAll) {
+                                        DropdownMenuItem(
+                                            text = { Text(mentionAllToken) },
+                                            onClick = {
+                                                mentionMenuOpen = false
+                                                mentionQuery = null
+                                                val (nextText, nextCursor) = insertMention(
+                                                    text = fieldValue.text,
+                                                    start = fieldValue.selection.min,
+                                                    end = fieldValue.selection.max,
+                                                    token = mentionAllToken,
+                                                )
+                                                fieldValue = TextFieldValue(nextText, TextRange(nextCursor))
+                                                onDraftChange(nextText)
+                                            },
+                                        )
+                                    }
+                                    visibleTargets.forEach { target ->
                                         DropdownMenuItem(
                                             text = {
                                                 Column {
@@ -442,6 +549,7 @@ public fun MessageComposer(
                                             },
                                             onClick = {
                                                 mentionMenuOpen = false
+                                                mentionQuery = null
                                                 val (nextText, nextCursor) = insertMention(
                                                     text = fieldValue.text,
                                                     start = fieldValue.selection.min,

@@ -2,7 +2,6 @@
 
 package com.kapp.tidings.ui.desktop
 
-import androidx.compose.animation.core.animateDpAsState
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
@@ -19,7 +18,6 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.rememberScrollState
-import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
@@ -33,7 +31,6 @@ import androidx.compose.runtime.getValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.alpha
-import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
@@ -50,7 +47,6 @@ import com.kapp.tidings.generated.resources.ic_link
 import com.kapp.tidings.generated.resources.ic_moon
 import com.kapp.tidings.generated.resources.ic_shield
 import com.kapp.tidings.generated.resources.ic_window
-import com.kapp.tidings.generated.resources.ic_eye
 import com.kapp.tidings.generated.resources.desk_autostart_error_title
 import com.kapp.tidings.generated.resources.desk_nav_appearance
 import com.kapp.tidings.generated.resources.desk_nav_capabilities
@@ -64,8 +60,6 @@ import com.kapp.tidings.generated.resources.desk_nav_group_appear
 import com.kapp.tidings.generated.resources.desk_nav_group_conn
 import com.kapp.tidings.generated.resources.desk_nav_group_data
 import com.kapp.tidings.generated.resources.desk_nav_group_desk
-import com.kapp.tidings.generated.resources.desk_nav_identity
-import com.kapp.tidings.generated.resources.desk_nav_ime
 import com.kapp.tidings.generated.resources.desk_nav_notifications
 import com.kapp.tidings.generated.resources.desk_nav_transfers
 import com.kapp.tidings.generated.resources.desk_prefs_autostart_subtitle
@@ -77,16 +71,19 @@ import com.kapp.tidings.generated.resources.desk_prefs_power_title
 import com.kapp.tidings.generated.resources.desk_retry
 import com.kapp.tidings.generated.resources.desk_settings_title
 import com.kapp.tidings.generated.resources.desk_switch_unavailable
+import com.kapp.tidings.generated.resources.ic_refresh
+import com.kapp.tidings.generated.resources.set_profile_title
+import com.kapp.tidings.generated.resources.set_update_title
 import com.kapp.tidings.ui.theme.LocalAppSpacing
 import com.kapp.tidings.ui.theme.LocalCardShape
 import com.kapp.tidings.ui.theme.RelayElevations
 import com.kapp.tidings.ui.theme.RelayShapes
+import com.kapp.tidings.ui.components.AppSwitch
 import com.kapp.tidings.ui.theme.accents
 import org.jetbrains.compose.resources.StringResource
 import org.jetbrains.compose.resources.DrawableResource
 import org.jetbrains.compose.resources.painterResource
 import org.jetbrains.compose.resources.stringResource
-import com.kapp.tidings.ui.theme.IconSizes
 import com.kapp.tidings.ui.components.AppOutlinedButton
 import com.kapp.tidings.ui.components.AppButtonSize
 
@@ -134,7 +131,7 @@ public enum class DesktopSettingsNav(
     val icon: DrawableResource,
     val note: StringResource? = null,
 ) {
-    Identity("id", Res.string.desk_nav_identity, GROUP_ROOT, null, Res.drawable.ic_key),
+    Identity("id", Res.string.set_profile_title, GROUP_ROOT, null, Res.drawable.ic_key),
     TrustedDevices(
         "trusted", Res.string.desk_nav_trusted_devices, GROUP_CONN,
         Res.string.desk_nav_group_conn, Res.drawable.ic_shield,
@@ -167,16 +164,21 @@ public enum class DesktopSettingsNav(
         "diag", Res.string.desk_nav_diagnostics, GROUP_DATA,
         Res.string.desk_nav_group_data, Res.drawable.ic_info,
     ),
+    // 「版本与更新」：手机在设置首页「数据与诊断」组里有这一行，桌面此前**完全没有入口**
+    // （桌面用户拿不到自己装的版本号，也没有手动检查更新这条路）。原型桌面侧栏没有这一项，
+    // 这是**有意偏离**：它属于"代码自有页"（手机那页也没有原型），版本信息是排障刚需。
+    Update(
+        "update", Res.string.set_update_title, GROUP_DATA,
+        Res.string.desk_nav_group_data, Res.drawable.ic_refresh,
+    ),
     Desktop(
         "desk", Res.string.desk_nav_desktop, GROUP_DESK,
         Res.string.desk_nav_group_desk, Res.drawable.ic_window,
         note = Res.string.desk_nav_desktop_only,
     ),
-    ImeSmoke(
-        "ime", Res.string.desk_nav_ime, GROUP_DESK,
-        Res.string.desk_nav_group_desk, Res.drawable.ic_eye,
-        note = Res.string.desk_nav_desktop_only,
-    ),
+    // 「输入法自检」不在侧栏：它是**诊断页里的一条二级入口**（`SettingsDiagSubpage`
+    // 的 onOpenImeSmoke 行），与手机端同一条路径 —— 侧栏一级项让它看起来像个独立功能，
+    // 实际上是诊断仪器。
 }
 
 /**
@@ -411,7 +413,7 @@ public fun DesktopPrefsPanel(
                     ),
                     last = false,
                 ) {
-                    RelaySwitch(
+                    AppSwitch(
                         checked = host.powerSaver,
                         onCheckedChange = host::applyPowerSaver,
                     )
@@ -427,7 +429,7 @@ public fun DesktopPrefsPanel(
                     last = true,
                 ) {
                     if (supported) {
-                        RelaySwitch(
+                        AppSwitch(
                             checked = host.launchAtLogin,
                             onCheckedChange = host::applyLaunchAtLogin,
                         )
@@ -518,39 +520,3 @@ private fun PrefRow(
 
 /** 毫秒 → 秒，只用于文案；不引入新依赖。 */
 private fun seconds(millis: Long): Long = millis / 1000
-
-/**
- * 自绘开关，对应原型 `.setrow .sw`：42×24 圆角轨道 + 18dp 白色圆钮，开启态用 `primary`、
- * 关闭态用 `--surface-3`（`MaterialTheme.accents.surface3`，**填充** token —— 原型的
- * `.sw{background:var(--surface-3)}`；不是做描边的 `--hair`），禁用 `alpha .45`。
- * Material3 的 `Switch` 是 52×32 的轨道式，
- * 形状与尺寸都对不上原型，所以这里按原型自绘。原本在 `:desktopApp` 的
- * `DesktopPreferences.kt`，搬进 composeApp 让截图门禁（只渲染 androidApp）也能复用。
- */
-@Composable
-private fun RelaySwitch(
-    checked: Boolean,
-    onCheckedChange: (Boolean) -> Unit,
-    enabled: Boolean = true,
-) {
-    val sp = LocalAppSpacing.current
-    val knobOffset by animateDpAsState(if (checked) 21.dp else 3.dp, label = "swKnob")
-    Box(
-        modifier = Modifier
-            .size(width = 42.dp, height = sp.xl)
-            .clip(MaterialTheme.shapes.medium)
-            .background(
-                if (checked) MaterialTheme.colorScheme.primary
-                else MaterialTheme.accents.surface3,
-            )
-            .alpha(if (enabled) 1f else 0.45f)
-            .clickable(enabled = enabled) { onCheckedChange(!checked) },
-    ) {
-        Box(
-            modifier = Modifier
-                .padding(start = knobOffset, top = LocalAppSpacing.current.oxs3)
-                .size(IconSizes.Body)
-                .background(Color.White, CircleShape),
-        )
-    }
-}

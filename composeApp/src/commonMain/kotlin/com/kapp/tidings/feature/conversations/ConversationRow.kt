@@ -4,6 +4,7 @@ package com.kapp.tidings.feature.conversations
 
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.focusable
 import androidx.compose.foundation.hoverable
 import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.interaction.collectIsHoveredAsState
@@ -30,12 +31,16 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.focus.onFocusChanged
+import androidx.compose.ui.hapticfeedback.HapticFeedbackType
+import androidx.compose.ui.platform.LocalHapticFeedback
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import com.kapp.tidings.ui.components.KindBadge
 import com.kapp.tidings.ui.components.PeerAvatar
 import com.kapp.tidings.ui.components.StatusDot
+import com.kapp.tidings.ui.components.badgeCountText
 import com.kapp.tidings.ui.components.relativeTime
 import com.kapp.tidings.ui.theme.LocalAppSpacing
 import com.kapp.tidings.ui.theme.LocalCardShape
@@ -49,8 +54,12 @@ import com.kapp.tidings.generated.resources.conv_action_pin
 import com.kapp.tidings.generated.resources.conv_action_unmute
 import com.kapp.tidings.generated.resources.conv_action_unpin
 import com.kapp.tidings.generated.resources.conv_no_messages
+import com.kapp.tidings.generated.resources.conv_preview_draft
 import com.kapp.tidings.generated.resources.conv_preview_mine
+import com.kapp.tidings.generated.resources.conv_preview_sender
 import com.kapp.tidings.generated.resources.conv_pending_count
+import com.kapp.tidings.generated.resources.conv_row_more_actions
+import com.kapp.tidings.generated.resources.conv_row_pinned
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.drawBehind
 import androidx.compose.ui.graphics.Color
@@ -108,11 +117,69 @@ internal fun ConversationListDivider() {
 
 
 /**
- * 长按会话行弹出的动作菜单：置顶 / 静音 / 删除。
+ * 长按会话行弹出的动作菜单体：置顶 / 静音 / 删除 —— **不含 Popup**。
  *
- * 独立成一个组件（而不是塞在 `ConversationRow` 里）的理由与 `ConversationsOverflowItems`
- * 同一条：`DropdownMenu` 内部是 `Popup`，Layoutlib 只合成 Popup 的容器、不合成内容。
- * 抽出来之后截图门禁能直接渲染菜单体。
+ * public 只有一个理由：截图门禁在 `:androidApp` 的 `screenshotTest` 源集里，是**另一个
+ * 模块**，Kotlin 的 `internal` 对它不可见；而 Layoutlib 只合成 `Popup` 的容器、不合成
+ * 内容（`Dialog` 族能完整组合，见 `ScreenshotPreviewsDialogs.kt` 文件头）。菜单体因此
+ * 必须是一个能被门禁**直接调用**的独立 Composable，否则「长按菜单」永远没有参考图 ——
+ * 它此前零帧正是这个原因（旧的 KDoc 说"抽出来就能渲染"，但它是 private，门禁够不到）。
+ *
+ * 参数接**原语**（`isPinned` / `isMuted`）而不是 `ConversationUi`：门禁帧不该为了拍一张
+ * 菜单体去构造整个会话模型（AGENTS §2.6「适配器：接原语，不接壳的模型类型」）。
+ *
+ * 不是对外 API：仓库外调用点为零，除 [ConversationRowMenu] 与截图门禁外不要新增调用。
+ */
+@Composable
+public fun ConversationActionsMenuContent(
+    isPinned: Boolean,
+    isMuted: Boolean,
+    onTogglePin: (() -> Unit)?,
+    onToggleMute: (() -> Unit)?,
+    onDelete: (() -> Unit)?,
+) {
+    if (onTogglePin != null) {
+        DropdownMenuItem(
+            text = {
+                Text(
+                    stringResource(
+                        if (isPinned) Res.string.conv_action_unpin else Res.string.conv_action_pin,
+                    ),
+                )
+            },
+            onClick = onTogglePin,
+        )
+    }
+    if (onToggleMute != null) {
+        DropdownMenuItem(
+            text = {
+                Text(
+                    stringResource(
+                        if (isMuted) Res.string.conv_action_unmute else Res.string.conv_action_mute,
+                    ),
+                )
+            },
+            onClick = onToggleMute,
+        )
+    }
+    if (onDelete != null) {
+        DropdownMenuItem(
+            text = {
+                Text(
+                    text = stringResource(Res.string.conv_action_delete),
+                    color = MaterialTheme.colorScheme.error,
+                )
+            },
+            onClick = onDelete,
+        )
+    }
+}
+
+/**
+ * 长按会话行弹出的菜单：Popup 外壳 + [ConversationActionsMenuContent] 菜单体。
+ *
+ * 这里只剩"把菜单体放进 Popup"和收起菜单两件事，**不含任何文案** —— 文案与项序都在
+ * 菜单体里，两种渲染路径（真实 Popup / 门禁帧）因此不可能各说各话。
  */
 @Composable
 private fun ConversationRowMenu(
@@ -123,43 +190,54 @@ private fun ConversationRowMenu(
     onDelete: (() -> Unit)?,
 ) {
     DropdownMenu(expanded = true, onDismissRequest = onDismiss) {
-        if (onTogglePin != null) {
-            DropdownMenuItem(
-                text = {
-                    Text(
-                        stringResource(
-                            if (row.isPinned) Res.string.conv_action_unpin else Res.string.conv_action_pin,
-                        ),
-                    )
-                },
-                onClick = onTogglePin,
-            )
-        }
-        if (onToggleMute != null) {
-            DropdownMenuItem(
-                text = {
-                    Text(
-                        stringResource(
-                            if (row.isMuted) Res.string.conv_action_unmute else Res.string.conv_action_mute,
-                        ),
-                    )
-                },
-                onClick = onToggleMute,
-            )
-        }
-        if (onDelete != null) {
-            DropdownMenuItem(
-                text = {
-                    Text(
-                        text = stringResource(Res.string.conv_action_delete),
-                        color = MaterialTheme.colorScheme.error,
-                    )
-                },
-                onClick = onDelete,
-            )
-        }
+        ConversationActionsMenuContent(
+            isPinned = row.isPinned,
+            isMuted = row.isMuted,
+            onTogglePin = onTogglePin,
+            onToggleMute = onToggleMute,
+            onDelete = onDelete,
+        )
     }
 }
+
+/**
+ * 静音行预览的"弱一档"**不用透明度表达**。
+ *
+ * 真身：先前是 onSurfaceVariant.copy(alpha = 0.6f)，压在本行底色上实算只有
+ * **2.66:1（亮）/ 3.21:1（暗）** —— 12sp 小字低于 4.5:1，低视力与强光下读不出
+ * "这个静音会话说了什么"。而"静音"只是弱化优先级，不该牺牲可读性。
+ *
+ * 现在改用**字重**这个非颜色通道：非静音 Medium、静音 Normal，两档颜色都是
+ * onSurfaceVariant（亮 6.47:1 / 暗 6.43:1，达标）。弱化仍看得出来，但文字始终可读；
+ * 也不再依赖"透明色叠在会变化的行底色上"这种不可预算的写法。
+ */
+private val MutedPreviewWeight = FontWeight.Normal
+private val ActivePreviewWeight = FontWeight.Medium
+
+/**
+ * 行内的「置顶」小标识。
+ *
+ * `design/icon` 与 drawable 资源里都**没有**已映射的图钉图标（查过
+ * `composeResources/drawable/` 与 design-icon-baseline：无 pin 一族），而
+ * AGENTS.md 的 icon 消费率棘轮禁止为此新引一枚库图标 —— 所以按行内文字 tag 落地，
+ * 形状与 `KindBadge` 的弱化态同一族（`--surface-2` 底 + `--on-2` 字，原型 `.tag.muted`）。
+ */
+@Composable
+private fun PinnedTag() {
+    val sp = LocalAppSpacing.current
+    Surface(color = SurfaceTiers.Raised, shape = CircleShape) {
+        Text(
+            text = stringResource(Res.string.conv_row_pinned),
+            style = MaterialTheme.typography.labelSmall,
+            fontWeight = FontWeight.SemiBold,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+            // 纵向 1.5px snap 到 `sp.xxs`（2dp）—— 与 `UnassignedCountTag` 同一个口径，
+            // 不为半像素在行组件里新开一处 `.dp` 字面量（欠债棘轮只许降）。
+            modifier = Modifier.padding(horizontal = sp.sm6, vertical = sp.xxs),
+        )
+    }
+}
+
 @Composable
 internal fun ConversationRow(
     row: ConversationUi,
@@ -182,10 +260,29 @@ internal fun ConversationRow(
     onTogglePin: (() -> Unit)? = null,
     onToggleMute: (() -> Unit)? = null,
     onDeleteConversation: (() -> Unit)? = null,
+    /**
+     * 群会话预览该署的**发送者显示名**；null = 不署名（私聊、最后一条是自己说的、
+     * 或解析不出 —— 名字由域层解析，见 `RelayUiState.previewSenderNameOf`，UI 不自拼）。
+     */
+    previewSenderName: String? = null,
+    /**
+     * 这个会话的草稿预览（**已经拼好、带「草稿」标记**的最终文案）；null = 没有草稿。
+     *
+     * 为什么由调用方给而不是在这里查：草稿表活在**壳**里（手机 App.kt、桌面 DesktopShell），
+     * 列表组件拿不到；而"草稿长什么样"属于这一屏的呈现规则，所以壳只给值、这里只画。
+     *
+     * 真身：草稿保留（切走再回来不丢）早就做了，但列表上没有任何痕迹 ——
+     * 用户写到一半切出去，那行仍显示上一条消息，会话一多就只能逐个点进去找。
+     */
+    draftPreview: String? = null,
 ) {
     val sp = LocalAppSpacing.current
     var menuOpen by remember { mutableStateOf(false) }
+    // 菜单里的「删除」只把确认框立起来；真正的删除回调必须过用户确认 ——
+    // 一次点击直接删、没有回头路，是「长按菜单」这种易误触入口上最坏的形状。
+    var confirmDelete by remember { mutableStateOf(false) }
     val hasMenu = onTogglePin != null || onToggleMute != null || onDeleteConversation != null
+    val haptics = LocalHapticFeedback.current
 
     // 桌面有鼠标，所以要有 hover；手机的指针永远不在"悬停"状态，`hoverable` 无害。
     val interaction = remember { MutableInteractionSource() }
@@ -217,10 +314,19 @@ internal fun ConversationRow(
         hovered -> SurfaceTiers.Raised
         else -> Color.Transparent
     }
+    // 键盘焦点：桌面用户按 Tab 必须能**走进列表**、并看见焦点在哪。
+    //
+    // 此前行上只有 hover 与 combinedClickable：鼠标一切正常，键盘用户按 Tab 直接跳过整个
+    // 列表（全仓唯一的 .focusable() 是桌面壳根 Column，用来收字母快捷键），于是"打开一个会话"
+    // 在桌面上只能靠鼠标。这里补两件：可聚焦 + 一圈明确的焦点环（primary 2dp，
+    // 与"选中"的 1dp outline 环刻意不同 —— 两个状态可能同时成立，颜色/粗细都要分得开）。
+    var focused by remember { mutableStateOf(false) }
     val modifier = Modifier
         .fillMaxWidth()
         .clip(MaterialTheme.shapes.medium)
         .background(background)
+        .onFocusChanged { focused = it.isFocused }
+        .focusable()
         .then(
             // 选中态的 1px 内描边（原型那圈 `0 0 0 1px var(--hair)`）。
             // 用 drawBehind 而不是 border：border 会被外层的 clip 裁掉一半。
@@ -234,14 +340,19 @@ internal fun ConversationRow(
             // `cornerRadius` **必须显式传**：`DrawScope.drawRoundRect` 的默认是
             // `CornerRadius.Zero`，不传就画成方角，再被外层的 `clip(shapes.medium)` 裁掉四角 ——
             // 结果是"看起来没有描边"（这一条是独立验证者发现的代码级缺陷，不是取舍）。
-            if (selected) {
-                val ring = MaterialTheme.colorScheme.outline
+            if (selected || focused) {
+                val ring = if (focused) {
+                    MaterialTheme.colorScheme.primary
+                } else {
+                    MaterialTheme.colorScheme.outline
+                }
+                val width = if (focused) 2.dp else 1.dp
                 val radius = with(LocalDensity.current) { 12.dp.toPx() }
                 Modifier.drawBehind {
                     drawRoundRect(
                         color = ring,
                         cornerRadius = CornerRadius(radius, radius),
-                        style = Stroke(width = 1.dp.toPx()),
+                        style = Stroke(width = width.toPx()),
                     )
                 }
             } else {
@@ -250,9 +361,21 @@ internal fun ConversationRow(
         )
         // 长按开菜单；单击仍是打开会话。combinedClickable 必须给 onClick ——
         // 这里的 onClick 本来就有真动作（打开），不是死按钮。
+        //
+        // onLongClickLabel：长按是唯一入口但屏幕上**没有任何可见的 affordance**，
+        // 读屏用户拿不到「这里还有个菜单」的任何线索（无障碍死路）。给长按一个
+        // 语义标签（「更多操作」），TalkBack / VoiceOver 会把它读成行的自定义动作。
+        // 触感反馈：长按弹出的是**瞬态菜单**，没有触感确认时用户不知道按没按上
+        //（松手才弹出、无按下态延续），LongPress 震动就是那一下"收到"。
         .combinedClickable(
             onClick = { onOpenChat(row.convId) },
-            onLongClick = if (hasMenu) { { menuOpen = true } } else null,
+            onLongClickLabel = if (hasMenu) stringResource(Res.string.conv_row_more_actions) else null,
+            onLongClick = if (hasMenu) {
+                {
+                    haptics.performHapticFeedback(HapticFeedbackType.LongPress)
+                    menuOpen = true
+                }
+            } else null,
         )
 
     if (menuOpen) {
@@ -261,7 +384,18 @@ internal fun ConversationRow(
             onDismiss = { menuOpen = false },
             onTogglePin = onTogglePin?.let { act -> { menuOpen = false; act() } },
             onToggleMute = onToggleMute?.let { act -> { menuOpen = false; act() } },
-            onDelete = onDeleteConversation?.let { act -> { menuOpen = false; act() } },
+            // 删除项不再直接执行：先把确认框立起来（见 confirmDelete 的注释）。
+            onDelete = onDeleteConversation?.let { act -> { menuOpen = false; confirmDelete = true } },
+        )
+    }
+
+    if (confirmDelete) {
+        DeleteConversationConfirmDialog(
+            onDismiss = { confirmDelete = false },
+            onConfirm = {
+                confirmDelete = false
+                onDeleteConversation?.invoke()
+            },
         )
     }
 
@@ -323,20 +457,42 @@ internal fun ConversationRow(
                     modifier = Modifier.weight(1f, fill = false),
                 )
                 KindBadge(row.isAgent)
+                // 置顶/静音过去只在长按菜单里可见，行上没有任何痕迹 —— 用户钉完一条，
+                // 过两天忘了它为什么一直排在最上面。置顶给一枚行内 tag（位置在标题之后，
+                // 不占右列的"时间/未读"格）；静音不挂 tag，它改的是下面预览那一行的分量。
+                if (row.isPinned) {
+                    PinnedTag()
+                }
             }
             // 「我说的」加前缀：否则用户在列表里看到一句熟悉的话，分不清是哪边说的。
             // 前缀只加在**真有消息**那一档；「还没聊过」那句不是消息，加前缀会说反。
-            val previewText = row.preview?.let { text ->
-                if (row.lastMessageIsMine) {
-                    stringResource(Res.string.conv_preview_mine, text)
-                } else {
-                    text
+            // 群会话里别人说的署发送者（名字由域层用与 convTitle 同一个解析器给出，
+            // UI 只拼装）—— 群里多人说话，一句正文分不清是谁说的。名字解析不出
+            //（最后一条不在内存窗口 / 旧端帧没署名）就退回不带署名的正文，不编名字。
+            // 草稿优先：它比"上一条消息"更接近用户此刻的状态，而且必须**说清这是一条草稿** ——
+            // 只把正文换掉会让它看起来像"我发过这句话"（用户会以为消息已经发出去了）。
+            val previewText = draftPreview?.let { stringResource(Res.string.conv_preview_draft, it) }
+                ?: row.preview?.let { text ->
+                when {
+                    row.isGroup && !row.lastMessageIsMine && previewSenderName != null ->
+                        stringResource(Res.string.conv_preview_sender, previewSenderName, text)
+                    row.lastMessageIsMine -> stringResource(Res.string.conv_preview_mine, text)
+                    else -> text
                 }
             } ?: stringResource(Res.string.conv_no_messages)
             Text(
                 text = previewText,
                 style = MaterialTheme.typography.bodySmall,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                // 静音的视觉语义 = **弱一档**，但只用字重（见 MutedPreviewWeight 的 KDoc）：
+                // 颜色两档相同，保证小字始终 ≥4.5:1。
+                // 草稿用主色（一眼看出"这行是我的未完成输入"，而不是一条已发消息）；
+                // 其余仍用次级色 + 字重区分静音。
+                color = if (draftPreview != null) {
+                    MaterialTheme.colorScheme.primary
+                } else {
+                    MaterialTheme.colorScheme.onSurfaceVariant
+                },
+                fontWeight = if (row.isMuted) MutedPreviewWeight else ActivePreviewWeight,
                 maxLines = 1,
                 overflow = TextOverflow.Ellipsis,
                 modifier = Modifier.padding(top = sp.xxs),
@@ -370,7 +526,10 @@ internal fun ConversationRow(
             if (row.unread > 0) {
                 Surface(color = MaterialTheme.colorScheme.primary, shape = CircleShape) {
                     Text(
-                        text = row.unread.toString(),
+                        // ≥100 折成「99+」：徽标回答的是"有没有没看的"，不是精确计数器，
+                        // 三位数会把药丸撑变形。规则与页签徽标共用一份（badgeCountText），
+                        // 否则同一个未读数在两处显示成两个样子。
+                        text = badgeCountText(row.unread),
                         color = MaterialTheme.colorScheme.onPrimary,
                         style = MaterialTheme.typography.labelSmall,
                         modifier = Modifier.padding(horizontal = sp.sm, vertical = sp.xxs),

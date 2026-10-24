@@ -2,6 +2,9 @@
 
 package com.kapp.tidings.core.transport
 
+import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.update
+
 /**
  * 存储契约。
  *
@@ -133,86 +136,118 @@ const val DIRECTION_OUT: String = "out"
 // 内存实现
 // ---------------------------------------------------------------------------
 
+/**
+ * 内存队列（测试/preview 用）。
+ *
+ * **必须线程安全**：群发是并发的 —— `sendGroupTextFanOut` 同时向每个成员各写一行，
+ * 而那几行可能来自不同协程。此前这里是裸 `LinkedHashMap`，并发入队会丢更新：
+ * 实测「两个成员的队列行」这条用例在全量跑里永远只看到 1 行（隔离跑恒绿），
+ * 一度被误判成测试在赌时序。
+ *
+ * 用 `MutableStateFlow` 的 `update`（原子 CAS 循环）而不是锁：这是 commonMain，
+ * 没有 `synchronized`；StateFlow 在 JVM/Native 上都是线程安全的。
+ */
 class InMemoryQueueStore : QueueStore {
-    private val rows = LinkedHashMap<String, QueuedMessage>()
+    private val rows = MutableStateFlow<Map<String, QueuedMessage>>(emptyMap())
 
     private fun key(msgId: String, peerId: String) = "$peerId|$msgId"
 
     override fun enqueue(msgId: String, peerId: String, envelopeJson: String, created: Long) {
-        rows[key(msgId, peerId)] = QueuedMessage(msgId, peerId, envelopeJson, created)
+        rows.update { it + (key(msgId, peerId) to QueuedMessage(msgId, peerId, envelopeJson, created)) }
     }
 
     override fun listByPeer(peerId: String): List<QueuedMessage> =
-        rows.values.filter { it.peerId == peerId }.sortedBy { it.created }
+        rows.value.values.filter { it.peerId == peerId }.sortedBy { it.created }
 
     override fun remove(msgId: String, peerId: String) {
-        rows.remove(key(msgId, peerId))
+        rows.update { it - key(msgId, peerId) }
     }
 
     override fun countByPeer(): Map<String, Int> =
-        rows.values.groupingBy { it.peerId }.eachCount()
+        rows.value.values.groupingBy { it.peerId }.eachCount()
 
     override fun pendingAll(): List<QueuedMessage> =
-        rows.values.sortedBy { it.created }
+        rows.value.values.sortedBy { it.created }
 
     override fun prune(now: Long, ttl: Long, maxPerPeer: Int): List<PrunedMessage> {
-        val pruned = mutableListOf<PrunedMessage>()
-        val expired = rows.values.filter { it.created < now - ttl }
-        for (row in expired) {
-            rows.remove(key(row.msgId, row.peerId))
-            pruned += PrunedMessage(row.msgId, row.peerId, PRUNE_REASON_TTL)
-        }
-        val byPeer = rows.values.groupBy { it.peerId }
-        for ((peerId, list) in byPeer) {
-            if (list.size <= maxPerPeer) continue
-            val overflow = list.sortedBy { it.created }.take(list.size - maxPerPeer)
-            for (row in overflow) {
-                rows.remove(key(row.msgId, row.peerId))
-                pruned += PrunedMessage(row.msgId, row.peerId, PRUNE_REASON_OVERFLOW)
+        // 整段在 `update` 里算：并发 enqueue 与 prune 交错时，先取快照再逐条 remove 会删到
+        // 不存在的行（也漏删）。`update` 的 CAS 会在冲突时重跑 lambda，所以结果也要
+        // 在 lambda 里重算，不能在外面累加。
+        var pruned: List<PrunedMessage> = emptyList()
+        rows.update { current ->
+            val removed = mutableListOf<PrunedMessage>()
+            var next = current
+            for (row in current.values.filter { it.created < now - ttl }) {
+                next = next - key(row.msgId, row.peerId)
+                removed += PrunedMessage(row.msgId, row.peerId, PRUNE_REASON_TTL)
             }
+            for ((_, list) in next.values.groupBy { it.peerId }) {
+                if (list.size <= maxPerPeer) continue
+                for (row in list.sortedBy { it.created }.take(list.size - maxPerPeer)) {
+                    next = next - key(row.msgId, row.peerId)
+                    removed += PrunedMessage(row.msgId, row.peerId, PRUNE_REASON_OVERFLOW)
+                }
+            }
+            pruned = removed
+            next
         }
         return pruned
     }
 }
 
+/** 内存去重表。同样**必须线程安全**：并发入站会同时 add（见 InMemoryQueueStore 的说明）。 */
 class InMemoryDedupStore : DedupStore {
-    private val seen = LinkedHashMap<String, Long>()
+    private val seen = MutableStateFlow<Map<String, Long>>(emptyMap())
 
     private fun key(msgId: String, peerId: String) = "$peerId|$msgId"
 
-    override fun has(msgId: String, peerId: String): Boolean = seen.containsKey(key(msgId, peerId))
+    override fun has(msgId: String, peerId: String): Boolean = seen.value.containsKey(key(msgId, peerId))
 
     override fun add(msgId: String, peerId: String, at: Long) {
-        seen[key(msgId, peerId)] = at
+        seen.update { it + (key(msgId, peerId) to at) }
     }
 
     override fun prune(now: Long, ttl: Long): Int {
-        val expired = seen.filterValues { it < now - ttl }.keys
-        for (k in expired) seen.remove(k)
-        return expired.size
+        var removed = 0
+        seen.update { current ->
+            val expired = current.filterValues { it < now - ttl }.keys
+            removed = expired.size
+            current - expired
+        }
+        return removed
     }
 }
 
+/** 内存消息存储。与 Queue/Dedup 同一条纪律：**必须线程安全**（收帧协程写、测试线程读）。 */
 class InMemoryMessageStore : MessageStore {
-    private val rows = mutableListOf<StoredMessage>()
-    private val seqByPeer = HashMap<String, Long>()
+    private data class State(
+        val rows: List<StoredMessage> = emptyList(),
+        val seqByPeer: Map<String, Long> = emptyMap(),
+    )
+
+    private val state = MutableStateFlow(State())
 
     override fun append(peerId: String, direction: String, envelopeJson: String, at: Long): Long {
-        val seq = (seqByPeer[peerId] ?: 0L) + 1L
-        seqByPeer[peerId] = seq
-        rows += StoredMessage(seq, peerId, direction, envelopeJson, at)
+        var seq = 0L
+        state.update { current ->
+            seq = (current.seqByPeer[peerId] ?: 0L) + 1L
+            State(
+                rows = current.rows + StoredMessage(seq, peerId, direction, envelopeJson, at),
+                seqByPeer = current.seqByPeer + (peerId to seq),
+            )
+        }
         return seq
     }
 
     override fun since(peerId: String, sinceSeq: Long, limit: Int): List<StoredMessage> =
-        rows.filter { it.peerId == peerId && it.seq > sinceSeq }
+        state.value.rows.filter { it.peerId == peerId && it.seq > sinceSeq }
             .sortedBy { it.seq }
             .take(limit)
 
-    override fun latestSeq(peerId: String): Long = seqByPeer[peerId] ?: 0L
+    override fun latestSeq(peerId: String): Long = state.value.seqByPeer[peerId] ?: 0L
 
     override fun sinceAll(sinceAt: Long, limit: Int): List<StoredMessage> =
-        rows.filter { it.at > sinceAt }
+        state.value.rows.filter { it.at > sinceAt }
             .sortedBy { it.at }
             .take(limit)
 }

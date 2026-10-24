@@ -37,7 +37,9 @@ import com.kapp.tidings.generated.resources.nodes_scan_frame_hint
 import com.kapp.tidings.generated.resources.nodes_scan_title
 import com.kapp.tidings.generated.resources.scan_import_image
 import com.kapp.tidings.generated.resources.scan_manual_hint
+import com.kapp.tidings.domain.BannerMessage
 import com.kapp.tidings.generated.resources.scan_no_preview
+import com.kapp.tidings.generated.resources.scan_open_settings
 import com.kapp.tidings.generated.resources.scan_retry
 import com.kapp.tidings.generated.resources.scan_starting
 import com.kapp.tidings.generated.resources.ic_close
@@ -88,6 +90,16 @@ fun ScanScreen(
      * 它**不需要相机权限**，所以在相机被拒、取景框起不来的设备上，这是真的出路而不是安慰。
      */
     importFromImage: (suspend () -> Boolean)? = null,
+    /**
+     * 「去设置」：把用户送到本应用的系统设置页（相机权限在那里开关）。
+     *
+     * `null` = 本平台没有这个概念（桌面），这一颗**整颗不画**；手机端由壳按
+     * `AppPlatform` 的能力位决定传不传（能力缺失 = 不画，不是画一颗点了没反应的）。
+     *
+     * 为什么需要它：权限被拒后横幅只说「请到系统设置里开启」，而应用内没有一级入口；
+     * 用户要么自己翻系统设置，要么回节点页填地址 —— 相机这条路等于废了。
+     */
+    onOpenAppSettings: (() -> Unit)? = null,
     /**
      * 这一页是否**从「上一次尝试已经失败」的样子**开始画。
      *
@@ -168,6 +180,16 @@ fun ScanScreen(
         ) {
             // 真实原因：权限被拒、相机被占用、码不是我们的格式，各有各的横幅。
             state.banner?.let { AppBanner(it, onDismissBanner) }
+            // 横幅把原因说清了，但「去系统设置」这一步过去没有出口：给一颗直达按钮。
+            // 只在**相机权限被拒**这一档出现 —— 其它横幅（码不对、相机被占）没有可去的地方，
+            // 多一颗按钮只会让人以为设置里能修。
+            if (onOpenAppSettings != null && state.banner?.message == BannerMessage.CameraPermissionDenied) {
+                AppOutlinedButton(
+                    text = stringResource(Res.string.scan_open_settings),
+                    onClick = onOpenAppSettings,
+                    modifier = Modifier.fillMaxWidth(),
+                )
+            }
             // 「把对方的节点码放进框里」**常显**：这句话在扫描期间才最有用，而上一版用
             // waiting 把它换成了"正在启动相机…"，于是真正在扫的时候用户反而看不到该做什么。
             Text(

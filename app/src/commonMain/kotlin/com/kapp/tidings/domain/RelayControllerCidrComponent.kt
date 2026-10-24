@@ -185,6 +185,11 @@ private var activeScanJob: Job? = null
 
 /**
  * 触发网段探测：对指定 CIDR（或已配置的所有 CIDR）展开主机列表并逐个发送探活包。
+ *
+ * **按段循环、按段写回**：以前把所有网段展开成一个大 plan，进度里只能报
+ * "N ranges"，扫完也不留任何痕迹。现在每一段扫完就把 [ScanRangeEntry.lastScanAt] /
+ * [ScanRangeEntry.lastFoundCount] 写回 —— 这样中途取消时，**已经扫完的那几段**
+ * 的读数仍然留得住，界面上的「上次探测 / 扫到 N 个」也才有数据来源。
  */
 fun handleTriggerCidrScan(targetCidr: String?) {
     val rt = host.runtime ?: run {
@@ -192,61 +197,132 @@ fun handleTriggerCidrScan(targetCidr: String?) {
         return
     }
 
-    val cidrList = if (targetCidr != null) {
+    val requested = if (targetCidr != null) {
         listOf(targetCidr)
     } else {
         host._state.value.settings.scanRanges.map { it.cidr }
     }
 
-    if (cidrList.isEmpty()) return
-
-    val plan = CidrUtils.buildCidrHostPlan(cidrList)
-    if (plan.isEmpty()) return
+    // 每个网段单独展开 + 规范化：进度要报"正在扫哪一段"，写回也要按这一段的 cidr 对齐。
+    val plans = requested.mapNotNull { raw ->
+        val cidr = CidrUtils.normalizeCidr(raw) ?: return@mapNotNull null
+        val hosts = CidrUtils.parseCidrHosts(cidr) ?: return@mapNotNull null
+        cidr to hosts
+    }
+    val total = plans.sumOf { it.second.size }
+    if (total == 0) return
 
     activeScanJob?.cancel()
-    host.info(BannerMessage.ScanRangeTriggered(plan.size))
+    host.info(BannerMessage.ScanRangeTriggered(total))
 
     activeScanJob = host.scope.launch {
         var scanned = 0
-        val total = plan.size
-        val currentCidrDisplay = targetCidr ?: (if (cidrList.size == 1) cidrList.first() else "${cidrList.size} ranges")
-
-        host._state.update {
-            it.copy(
-                scanProgress = ScanProgressUi(
-                    currentCidr = currentCidrDisplay,
-                    scannedHosts = 0,
-                    totalHosts = total,
-                    discoveredCount = it.peers.count { p -> p.online },
-                )
-            )
-        }
-
         val targetPort = host._state.value.settings.udpPort
         // 循环变量不能叫 host：那会遮蔽构造参数 host，让本函数后半段的
         // host._state 全变成对一个 String 的成员访问。
-        for (target in plan) {
-            runCatching {
-                rt.announceTo(target, targetPort)
-            }
-            scanned++
-            if (scanned % 4 == 0 || scanned == total) {
-                host._state.update {
-                    it.copy(
-                        scanProgress = it.scanProgress?.copy(
-                            scannedHosts = scanned,
-                            discoveredCount = it.peers.count { p -> p.online },
-                        )
+        for ((cidr, hosts) in plans) {
+            host._state.update {
+                it.copy(
+                    scanProgress = ScanProgressUi(
+                        currentCidr = cidr,
+                        scannedHosts = scanned,
+                        totalHosts = total,
+                        discoveredCount = it.peers.count { p -> p.online },
                     )
-                }
+                )
             }
-            // 每台主机间隔 15ms，避免路由器丢包与网络拥塞
-            delay(15)
+            for (target in hosts) {
+                runCatching {
+                    rt.announceTo(target, targetPort)
+                }
+                scanned++
+                if (scanned % 4 == 0 || scanned == total) {
+                    host._state.update {
+                        it.copy(
+                            scanProgress = it.scanProgress?.copy(
+                                scannedHosts = scanned,
+                                discoveredCount = it.peers.count { p -> p.online },
+                            )
+                        )
+                    }
+                }
+                // 每台主机间隔 15ms，避免路由器丢包与网络拥塞
+                delay(15)
+            }
+            // 这一段扫完：立刻写回它的读数（而不是等全部扫完）。
+            recordScanResult(cidr)
         }
 
         // 扫描完成稍等 2 秒后清理进度条
         delay(2000)
         host._state.update { it.copy(scanProgress = null) }
     }
+}
+
+/**
+ * 把「刚扫完的这一段」的读数写回设置：时刻 + 该网段内**在线**的节点数。
+ *
+ * 网段在扫描途中被用户删掉时直接跳过 —— 不往一个已经不存在的条目上写。
+ */
+internal fun recordScanResult(cidr: String) {
+    val current = host._state.value.settings
+    if (current.scanRanges.none { it.cidr == cidr }) return
+    val found = countPeersInRange(
+        peerIps = host._state.value.peers.filter { it.online }.map { it.ip },
+        cidr = cidr,
+    )
+    val next = current.copy(
+        scanRanges = applyScanResultToRanges(current.scanRanges, cidr, nowMillis(), found),
+    )
+    if (next != current) {
+        host.handlePersist(next)
+        host.publish()
+    }
+}
+
+/**
+ * 取消正在跑的网段探测。
+ *
+ * 进度条是"正在跑"的唯一读数：取消后必须**立刻**消失，否则界面还在宣称在扫、
+ * 用户只能等它自己跑完。已经扫完的网段的历史已经写回（按段写回），取消不会吞掉真读数。
+ *
+ * 没有额外横幅：进度条消失 + 行内按钮从「取消」变回「探测」就是这次操作的反馈，
+ * 再加一条横幅反而与"刚刚发生了什么"重复。
+ */
+fun handleCancelCidrScan() {
+    val job = activeScanJob
+    activeScanJob = null
+    job?.cancel()
+    host._state.update { it.copy(scanProgress = null) }
+}
+
+/**
+ * 一段扫描结束后的网段表（纯函数，可单测）：只改 [cidr] 那一条，其余原样、顺序不变。
+ *
+ * 刻意不做"没扫到的段保留旧值"的魔法：调用方按段调用，没扫的段压根不该被碰。
+ */
+internal fun applyScanResultToRanges(
+    ranges: List<ScanRangeEntry>,
+    cidr: String,
+    atMillis: Long,
+    foundCount: Int,
+): List<ScanRangeEntry> = ranges.map { entry ->
+    if (entry.cidr == cidr) {
+        entry.copy(lastScanAt = atMillis, lastFoundCount = foundCount)
+    } else {
+        entry
+    }
+}
+
+/**
+ * 某一网段内的对端数（纯函数，可单测）。
+ *
+ * 判据是**对端 IP 落在该网段的可探测主机里**（与 [CidrUtils.parseCidrHosts] 同一份展开，
+ * 所以 /22 上限、网络号/广播号排除都与真正发探活包时一致）。空 IP（还没学到地址的节点）
+ * 无法归属，不计入 —— 宁可少一个，也不把它算到别的网段头上。
+ */
+internal fun countPeersInRange(peerIps: List<String>, cidr: String): Int {
+    val hosts = CidrUtils.parseCidrHosts(cidr)?.toHashSet() ?: return 0
+    return peerIps.count { ip -> ip.isNotBlank() && ip in hosts }
 }
 }

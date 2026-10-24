@@ -16,11 +16,14 @@ import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
+import androidx.compose.material3.minimumInteractiveComponentSize
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
@@ -30,6 +33,8 @@ import com.kapp.tidings.ui.theme.LocalCardShape
 import com.kapp.tidings.ui.theme.RelayElevations
 import com.kapp.tidings.generated.resources.Res
 import com.kapp.tidings.generated.resources.disc_connect
+import com.kapp.tidings.generated.resources.nodes_mdns_row_desc
+import com.kapp.tidings.generated.resources.nodes_mdns_row_desc_fmt
 import com.kapp.tidings.generated.resources.disc_manual_unreachable
 import com.kapp.tidings.ui.components.AppButtonSize
 import com.kapp.tidings.ui.components.AppTextButton
@@ -49,7 +54,7 @@ import com.kapp.tidings.domain.model.MdnsServiceUi
  * **为什么不直接用 `String.compareTo`**：原型排的是 `a.nick.localeCompare(b.nick)`
  * （`prototype/relay.html:3298-3299`），它把 `老周` 排在了 `Huang` 前面 —— 而 Kotlin 的
  * 码位比较（拉丁字母 U+0048… 都小于汉字 U+8001）会把它排到最后。两边并排看时，
- * 顺序不同会让"逐行对照"变成"逐行找"，而顺序本身并不是原型想表达的东西。
+ * 顺序不同会让「逐行对照」变成「逐行找」，而顺序本身并不是原型想表达的东西。
  *
  * `commonMain` 里没有 `Collator`（那是 JVM 的东西），所以这里用一条**显式、确定**的规则
  * 复现原型渲染出来的那个可观察顺序：汉字名在前、其余按大小写无关的名称序。
@@ -83,11 +88,20 @@ internal fun NodeRow(
 ) {
     val sp = LocalAppSpacing.current
     val address = "${item.host}:${item.port}"
-    val stateColor = if (item.never) {
-        MaterialTheme.colorScheme.error
-    } else {
-        MaterialTheme.colorScheme.onSurfaceVariant
-    }
+    // 还没被认出来的手动地址，displayName 就是 `host:port`。此时：
+    // ① 头像首字会退化成「1」「2」这类数字（没有信息量）；
+    // ② 副行再印一遍同一串地址（标题=副行，视觉上像重复渲染）。
+    val nameIsAddress = item.displayName == address
+    val avatarName = if (nameIsAddress) "?" else item.displayName
+    // 三档三色，与详情页药丸/状态点同一套：在线 `accents.online`（绿）、
+    // 「没有回应」`error`（红）、离线 `onSurfaceVariant`（灰）。
+    // 上一版在线与离线同用灰字 —— 状态点已经是绿的了，文字却不认，
+    // 两处口径不同；对齐后列表行与详情页说的是同一种颜色语言。
+    // 文字**不用**彩色承载状态：`accents.online` 压白底实测 3.41:1、`error` 4.17:1，
+    // 都低于 AA 的 4.5:1（11sp Normal 属正常文本），强光/低视力用户读不清这一行最要紧的字。
+    // 状态由「头像右下角的三色点 + 文字本身（在线/离线/没有回应）」共同表达：颜色是辅助，
+    // 文字才是判据（读屏也只读文字）。上一版"三档三色"把颜色压在了文字上。
+    val stateColor = MaterialTheme.colorScheme.onSurfaceVariant
     Surface(
         color = MaterialTheme.colorScheme.surface,
         // 节点行圆角 = 卡片圆角：原型 `.row{...border-radius:var(--r-card)}`
@@ -121,7 +135,7 @@ internal fun NodeRow(
             // `AppSpacing` 里没有档位，写死一个裸 `40.dp` 只会给
             // `:designTokenUsageGate` 的 dimension 棘轮多记一笔欠债。
             Box {
-                PeerAvatar(name = item.displayName, isAgent = item.isAgent)
+                PeerAvatar(name = avatarName, isAgent = item.isAgent)
                 Box(
                     modifier = Modifier
                         .align(Alignment.BottomEnd)
@@ -187,7 +201,8 @@ internal fun NodeRow(
                         modifier = Modifier.padding(start = sp.sm),
                     )
                 }
-                Text(
+                // 标题已经是地址时不再重复同一串（原来这两行一字不差）。
+                if (!nameIsAddress) Text(
                     text = address,
                     // 原型 `.row .t2.mono`（`prototype/relay.html:3279`）：`${p.host}:${p.port}`
                     // 加等宽字体。那版把「· 局域网 / 手动添加」那半砍了 ——
@@ -209,20 +224,37 @@ internal fun NodeRow(
 /**
  * 广播到但还没握手的 mDNS 服务。
  *
- * mDNS 只知道地址，真正入表要等一次 entry/ACK 往返，所以这一行不能画成"已知节点"，
+ * mDNS 只知道地址，真正入表要等一次 entry/ACK 往返，所以这一行不能画成「已知节点」，
  * 只能给一颗「连接」——它点下去就是一次握手，握上了下一帧就会以真节点的样子出现在上面。
  */
 @Composable
 internal fun MdnsServiceRow(service: MdnsServiceUi, onConnect: () -> Unit) {
     val sp = LocalAppSpacing.current
+    // 读屏描述："叫什么 + 它是什么"（文案在 strings.xml，中英各一份）。
+    val mdnsRowDescription = stringResource(
+        Res.string.nodes_mdns_row_desc_fmt,
+        service.serviceName,
+        "${service.host}:${service.port}",
+        stringResource(Res.string.nodes_mdns_row_desc),
+    )
     Surface(
         color = MaterialTheme.colorScheme.surface,
-        shape = MaterialTheme.shapes.medium,
+        // 与 NodeRow 同一档：原型节点行的圆角 = 卡片圆角（`--r-card`，手机 16 / 桌面窗 12）。
+        // 上一版写死 `shapes.medium`(12dp)，同一条列表里 mDNS 行与节点行圆角不同档。
+        shape = LocalCardShape.current,
         modifier = Modifier.fillMaxWidth(),
         shadowElevation = RelayElevations.Card,
     ) {
         Row(
-            modifier = Modifier.fillMaxWidth().padding(horizontal = sp.lg, vertical = sp.md),
+            // 读屏把"服务名 / 地址 / 连接"读成**一整个**可点单元，而不是三个独立停顿：
+            // 这一行的语义是"发现到一台还没配对的设备，点连接去握手"（完整描述文案待新字符串）。
+            modifier = Modifier
+                .fillMaxWidth()
+                .semantics(mergeDescendants = true) {
+                    // 读屏要说出「这是什么」：只报服务名+地址时，用户不知道点下去是配对握手。
+                    contentDescription = mdnsRowDescription
+                }
+                .padding(horizontal = sp.lg, vertical = sp.md),
             verticalAlignment = Alignment.CenterVertically,
         ) {
             PeerAvatar(name = service.serviceName, isAgent = false)
@@ -244,6 +276,8 @@ internal fun MdnsServiceRow(service: MdnsServiceUi, onConnect: () -> Unit) {
                 text = stringResource(Res.string.disc_connect),
                 onClick = onConnect,
                 size = AppButtonSize.Small,
+                // 小档自身只有 ~32dp；命中区抬到 48dp，视觉不变（同 NodeDetail 的复制/移除）。
+                modifier = Modifier.minimumInteractiveComponentSize(),
             )
         }
     }
@@ -254,7 +288,7 @@ internal fun MdnsServiceRow(service: MdnsServiceUi, onConnect: () -> Unit) {
  * 与 [EmptyHint] 的区别不是好看与否，而是**它是不是一个元素**：原型这一块是一张
  * 与其它卡同款的 `Surface`，里面一段居中正文；`EmptyHint` 是一行靠左的 12sp 小字。
  * 两者在屏上占据的高度、对齐方式、字号都不同，而 `design-screen-diff.py` 只比
- * 「取值集合」，看不见"这里本该有一张卡"。
+ * 「取值集合」，看不见「这里本该有一张卡」。
  *
  * 尺寸逐条来自原型（`prototype/relay.html:126,366-369`）：
  * `.card .padc{padding:var(--padc)}`（`--padc:10px 14px 14px`）+ `.empty{padding:22px 12px}`

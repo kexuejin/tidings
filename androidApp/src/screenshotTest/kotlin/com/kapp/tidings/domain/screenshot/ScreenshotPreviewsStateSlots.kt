@@ -508,6 +508,8 @@ private fun ConversationsOfflineQueuePhonePreview() {
             ConversationsScreen(
                 state = state,
                 onOpenChat = {},
+                onToggleMute = {},
+                onDeleteConversation = {},
                 onGoToPairing = {},
                 onDismissBanner = {},
                 modifier = inner,
@@ -571,7 +573,7 @@ private fun CabinetEmptyPhonePreview() {
                 onSelectPeer = {},
                 onLoadPath = {},
                 onToggleSelection = {},
-                onDownloadEntries = { _, _ -> },
+                onDownloadEntries = { _ -> },
                 // 显式传空实现而不是留 null：本帧 `currentPerm = "read"`，上传入口本来
                 // 就该被权限挡掉 —— 传了它，「图里没有上传按钮」才只有一个原因（只读）。
                 // 注意注释要写在参数**同行或上方**、不能夹在参数之间：静态解析器按顶层逗号
@@ -640,7 +642,7 @@ private fun CabinetErrorPhonePreview() {
                 onSelectPeer = {},
                 onLoadPath = {},
                 onToggleSelection = {},
-                onDownloadEntries = { _, _ -> },
+                onDownloadEntries = { _ -> },
                 // 显式传空实现而不是留 null：本帧 `currentPerm = "read"`，上传入口本来
                 // 就该被权限挡掉 —— 传了它，「图里没有上传按钮」才只有一个原因（只读）。
                 // 注意注释要写在参数**同行或上方**、不能夹在参数之间：静态解析器按顶层逗号
@@ -748,9 +750,12 @@ private fun SettingsProfilePhonePreview() {
  * - `defaultPort` 传 `null`：走 `portSeed = defaultPort ?: settings.udpPort.toString()`
  *   的**兜底那一半**，也就是生产上真正会走的那一半（`App.kt` 不传 `defaultPort`）。
  *   传一个字符串会拍到另一条路径，图上分辨不出来，但它已经不是同一支了。
- * - `onAddScanRange` / `onRemoveScanRange` / `onTriggerCidrScan` 用默认空实现，
- *   与生产一致（移动端这三项没接）；`onRestart` 传空实现，
- *   因为这一帧要钉的是**版面**，不是"点重连会不会转圈"（那一支看 `settings-restarting`）。
+ * - `onAddScanRange` / `onRemoveScanRange` / `onTriggerCidrScan` 传空实现（**不是**
+ *   留 null）：这三个回调现在是可空槽，null 时「网段探测与同步」整卡不画 —— 而手机
+ *   生产接线（App.kt 的 `controller::addScanRange` …）是传的，这帧要与生产同版面，
+ *   CIDR 卡必须在。空实现只表示"点了不做事"，与这帧钉版面的目的相容。
+ *   `onRestart` 传空实现同理：这一帧钉的是版面，不是"点重连会不会转圈"（那一支看
+ *   `settings-restarting`）。
  *
  * ## 「后台接收」那张卡**不在这帧里**（task-24）
  *
@@ -775,6 +780,10 @@ private fun SettingsConnPhonePreview() {
                 defaultPort = null,
                 onSavePorts = { _, _ -> },
                 onRestart = {},
+                // 与 settings-conn-phone 同理：可空槽传空实现而非留 null，CIDR 卡保持可见。
+                onAddScanRange = {},
+                onRemoveScanRange = {},
+                onTriggerCidrScan = {},
                 onBack = {},
                 modifier = inner,
             )
@@ -819,6 +828,10 @@ private fun SettingsConnKeepAlivePhonePreview() {
                 defaultPort = null,
                 onSavePorts = { _, _ -> },
                 onRestart = {},
+                // 与 settings-conn-phone 同理：可空槽传空实现而非留 null，CIDR 卡保持可见。
+                onAddScanRange = {},
+                onRemoveScanRange = {},
+                onTriggerCidrScan = {},
                 // Android 才有「后台接收」：按真机取值拍，开关默认开着。
                 keepAliveSupported = true,
                 keepAliveEnabled = true,

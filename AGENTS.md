@@ -41,14 +41,27 @@
 ## 1. 动手前先跑这些
 
 ```bash
-# 六个模块的测试
+# 六个模块的测试（验收时加 --max-workers=1）
 ./gradlew :core:jvmTest :app:jvmTest :cli:test :composeApp:jvmTest \
-          :composeApp:testAndroidHostTest :agentNode:test :desktopApp:test --continue
+          :composeApp:testAndroidHostTest :agentNode:test :desktopApp:test --continue \
+          --max-workers=1
+
+# 为什么验收时要串行：六个模块的测试 JVM 并行（org.gradle.workers.max=6）时，异步用例会
+# 互相饿死 —— 表现为「每轮换一条红、单跑恒绿」（实测在 UdpTransportBroadcast / GroupText /
+# TransferPeerCancel / FileMessageStore 之间旋转），串行跑一次 3m45s 全绿。
+# 这不是测试在说谎：同一条断言在串行下是稳定的；并行下失败的是等待窗口，不是被测行为。
+# 日常迭代可以不开串行；**判「这批能不能交」时必须开**。
+
+# 改了并发 / 存储 / 测试替身之后，额外跑一遍「同一套测试连跑 3 轮」（约 3.5 分钟）：
+#   ./gradlew :testStabilityGate
+# 为什么：并发的失败是低频且轮换的 —— 单轮全绿区分不了「没缺陷」与「这轮没撞上」。
+# 真实读数：修 InMemoryQueueStore 之前每 3 轮必红、且每次红的是不同的一条。
 
 # 门禁（缺一不可）
 ./gradlew :cjkLiteralGate :constructionTraceGate :staleCommentRefGate \
-          :domainComposeFreeGate :designSpecDrift :designTokenUsageGate \
-          :designStateSlotGate :designLocaleParityGate :jlinkModulesGate --continue
+          :domainComposeFreeGate :envDependentTestGate :designSpecDrift \
+          :designTokenUsageGate :designStateSlotGate :designLocaleParityGate \
+          :jlinkModulesGate --continue
 python3 tools/unused-imports.py --check
 ```
 
@@ -71,6 +84,8 @@ python3 tools/unused-imports.py --check
 | `staleCommentRefGate` | 注释里不许写 `X.kt:NN`（重构必腐坏） | 换成**符号名** |
 | `domainComposeFreeGate` | 领域层 `:app` 不许 `import compose.*`；**扫描根不存在 / 文件数不足也算失败** | 做成可注入的桥（`RelayUiTexts` 的形状），或列进 `tools/domain-compose-free.py` 的 `INDIVIDUAL_ALLOWED` 并写理由 |
 | `designSpecDrift` / `designTokenUsageGate` / `designStateSlotGate` / `designLocaleParityGate` | 设计契约：规格漂移、token 采用率、状态槽覆盖、多语言对账 | 见 `design/` 与 `tools/design-*.py` |
+| `envDependentTestGate` | 测试的结论不许依赖**这台机器**：断言读网卡/时钟、用固定 `delay` 赌同步都算。例外必须写进 `tools/env-test-allowlist.txt` 并给出理由（`A/B/C/D` 四类口径见 `tools/env-test-scan.py --help`） | 抽纯函数+合成输入 / 改用「确定会发生的事件」做探针 / 真环境测试写清理由后入账 |
+| `testStabilityGate` | 同一套测试连跑 N 轮（默认 3），任何一轮红即失败。它抓的是「每 3 轮红 1 次」那类竞态；不进默认链（约 3.5 分钟），改并发/存储/替身时手动跑 | 先看红在哪几条 → 修测试替身的线程安全（`InMemoryQueueStore` / `InMemoryDedupStore` / `InMemoryMessageStore` 都已改 `MutableStateFlow`），**不要放宽断言** |
 | `jlinkModulesGate` | 桌面 jlink 的模块清单与依赖一致 | 更新 `build.gradle.kts` 的模块列表 |
 | `tools/unused-imports.py --check` | 没有未使用的 import | 删掉 |
 

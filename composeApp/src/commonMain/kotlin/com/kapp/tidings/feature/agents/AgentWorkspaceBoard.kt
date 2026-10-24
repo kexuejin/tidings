@@ -21,6 +21,7 @@ import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -31,15 +32,21 @@ import com.kapp.tidings.domain.RelayUiState
 import com.kapp.tidings.domain.WorkspaceAgentSectionUi
 import com.kapp.tidings.domain.agentSections
 import com.kapp.tidings.domain.inboxWorkspaceUnits
+import com.kapp.tidings.domain.pendingApprovalCount
+import com.kapp.tidings.domain.mayDecideApproval
+import com.kapp.tidings.domain.model.AgentApprovalUi
 import com.kapp.tidings.domain.model.AgentSessionKey
-import com.kapp.tidings.core.protocol.AgentGrantAccess
+import com.kapp.tidings.feature.conversations.ConversationFailedEmptyState
 import com.kapp.tidings.feature.conversations.InboxUnitRow
 import com.kapp.tidings.generated.resources.Res
+import com.kapp.tidings.generated.resources.agent_empty_agents_only_message
+import com.kapp.tidings.generated.resources.agent_empty_agents_only_title
 import com.kapp.tidings.generated.resources.agent_empty_card
 import com.kapp.tidings.generated.resources.agent_empty_exit_body
 import com.kapp.tidings.generated.resources.agent_empty_exit_title
 import com.kapp.tidings.generated.resources.agent_empty_message
 import com.kapp.tidings.generated.resources.agent_empty_section
+import com.kapp.tidings.generated.resources.agent_empty_section_n
 import com.kapp.tidings.generated.resources.agent_empty_subtitle
 import com.kapp.tidings.generated.resources.agent_empty_title
 import com.kapp.tidings.generated.resources.agent_subtitle_pending
@@ -72,7 +79,6 @@ import com.kapp.tidings.generated.resources.conv_inbox_ws_pending
 import com.kapp.tidings.ui.components.StatusDot
 import com.kapp.tidings.ui.components.TopBarIconAction
 import com.kapp.tidings.ui.components.relativeTime
-import com.kapp.tidings.ui.theme.accents
 import com.kapp.tidings.domain.model.PeerUi
 import com.kapp.tidings.ui.theme.relayCardShadow
 
@@ -127,6 +133,8 @@ internal fun WorkspaceBoardView(
     onFindNodes: (() -> Unit)?,
     onRefresh: (() -> Unit)?,
     onRespondApproval: ((approvalId: String, allow: Boolean) -> Unit)?,
+    /** 三参处置（「本会话免审」）：null 时退回 [onRespondApproval]，不画免审按钮。 */
+    onRespondChoice: ((approvalId: String, allow: Boolean, allowSession: Boolean) -> Unit)? = null,
     onCreateWorkspaceGroup: (() -> Unit)? = null,
 ) {
     // 与消息页同一份派生（排序 / 上限 / 待审批 join / 降级都在里面做完）。
@@ -141,7 +149,9 @@ internal fun WorkspaceBoardView(
     val refresh = rememberUpdatedState(onRefresh)
     LaunchedEffect(Unit) { refresh.value?.invoke() }
     val units = state.inboxWorkspaceUnits(limit = Int.MAX_VALUE)
-    val totalPending = state.agentApprovals.values.count { it.status == "pending" }
+    // 页头的「N 项待审批」与审批段同一把尺子：领域层的 pendingApprovalCount
+    // （pending 且未过期）。分段的 pill、会话切换条、选择器也走它 —— 一个数只有一个来源。
+    val totalPending = pendingApprovalCount(state.agentApprovals.values, now)
 
     if (showHeader) {
         Row(
@@ -249,10 +259,23 @@ internal fun WorkspaceBoardView(
             nodeRunning = state.network.isRunning,
             scanning = state.scanProgress != null,
             peerCount = state.peers.size,
+            hasFailure = state.network.failure != null,
         )
         val scanning = state.scanProgress
         if (stage == BoardEmptyStage.Scanning && scanning != null) {
             AgentLoadingState(progress = scanning, modifier = Modifier.fillMaxWidth())
+        } else if (stage == BoardEmptyStage.NodeFailed) {
+            // 启动**失败**与"还在启动"是两件事：失败时继续转圈，用户只会以为 App 卡了。
+            // 原因文案复用会话页那份（bannerText 的同一句话），并给一条出路。
+            ConversationFailedEmptyState(
+                failure = state.network.failure,
+                actionLabel = stringResource(Res.string.agent_empty_exit_title),
+                onAction = {
+                    onFindNodes?.invoke()
+                    onRefresh?.invoke()
+                },
+                modifier = Modifier.fillMaxWidth(),
+            )
         } else if (stage == BoardEmptyStage.NodeStarting || stage == BoardEmptyStage.Discovering) {
             val starting = stage == BoardEmptyStage.NodeStarting
             AgentBoardWaitingState(
@@ -273,6 +296,10 @@ internal fun WorkspaceBoardView(
             // 为什么不走 EmptyState：那是「标题 + 一句说明 + 一颗按钮」的通用形状，
             // 而这一屏原型是四段；而且文案里不许出现 wire 键（原型 relay.html:4562
             // 写死「不印 `ag1` 这种 wire 键」，此前代码恰好印了）。
+            // 「一个 agent 都没上报」与「上报了 agent、但还没有可显示的工作区/会话」是两句
+            // 不同的话。修复前两者共用后者文案 + 写死的「Agent（0）」：设备明明报了 agent，
+            // 屏上却说"还没有任何 Agent 上报" —— 那是把"我这边没收到内容"说成"对方没装"。
+            val anyAgentReported = agents.isNotEmpty()
             Column(
                 modifier = Modifier.fillMaxWidth(),
                 verticalArrangement = Arrangement.spacedBy(LocalAppSpacing.current.lg14),
@@ -297,13 +324,19 @@ internal fun WorkspaceBoardView(
                         )
                         Column {
                             Text(
-                                text = stringResource(Res.string.agent_empty_title),
+                                text = stringResource(
+                                    if (anyAgentReported) Res.string.agent_empty_agents_only_title
+                                    else Res.string.agent_empty_title
+                                ),
                                 style = MaterialTheme.typography.bodyMedium,
                                 fontWeight = FontWeight.SemiBold,
                                 color = MaterialTheme.colorScheme.onSecondaryContainer,
                             )
                             Text(
-                                text = stringResource(Res.string.agent_empty_message),
+                                text = stringResource(
+                                    if (anyAgentReported) Res.string.agent_empty_agents_only_message
+                                    else Res.string.agent_empty_message
+                                ),
                                 style = MaterialTheme.typography.bodySmall,
                                 color = MaterialTheme.colorScheme.onSecondaryContainer,
                             )
@@ -311,7 +344,13 @@ internal fun WorkspaceBoardView(
                     }
                 }
                 Text(
-                    text = stringResource(Res.string.agent_empty_section),
+                    // 段头的数字取真实值：写死「Agent（0）」会在"报了 2 个 agent 但没有
+                    // 可见工作区"时与上方那句同时撒谎。
+                    text = if (anyAgentReported) {
+                        stringResource(Res.string.agent_empty_section_n, agents.size)
+                    } else {
+                        stringResource(Res.string.agent_empty_section)
+                    },
                     style = MaterialTheme.typography.labelLarge,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
@@ -380,15 +419,34 @@ internal fun WorkspaceBoardView(
     }
 
     // 待处理审批（原型 relay.html 的 `.grphead`「待处理审批 N 项」+ 逐条卡）。
-    val pendingApprovals = state.agentApprovals.values.filter { it.status == "pending" }
-    if (pendingApprovals.isNotEmpty()) {
+    //
+    // **喂给审批段的是「待批 + 本屏刚处置的」**，不是只喂 pending：审批段自己的
+    // 「处置后保留 2 秒」（`AgentApprovalsSection` 里的 `seenPending` 记账）要先拿到
+    // 已决行才生效 —— 在调用方先把非 pending 滤掉，那段留痕就是死代码，用户点完
+    // 批准卡立刻消失，与「它被谁删了」无法区分（issue「处置留痕 2 秒」）。
+    // 过期的不画、也不计数（`pendingApprovalCount` 同一判据）。
+    val approvalRows = rememberLingeringApprovalRows(state.agentApprovals.values, now)
+    if (approvalRows.isNotEmpty()) {
         AgentApprovalsSection(
-            approvals = pendingApprovals,
+            approvals = approvalRows,
             onRespond = onRespondApproval,
-            isReadOnly = { appr ->
+            onRespondChoice = onRespondChoice,
+            // 审批权只有一处判据（:core 的 canApproveAgentRequest，经 RelayUiState.mayDecideApproval）：
+            // 修复前只挡 RO，于是 ADMIN 未开委托审批、乃至没有授权记录的人也能点「批准」，
+            // 而同一个用户在会话详情里看到的却是「只读」。
+            isReadOnly = { appr -> !state.mayDecideApproval(appr, now) },
+            // 跨设备/跨工作区的平铺清单必须有归属：否则两台设备同时报审批时只能靠 summary 猜。
+            attribution = { appr ->
                 val session = state.agentSessions[AgentSessionKey(appr.peerId, appr.sessionId)]
-                val grant = state.grantFor(appr.peerId, session?.let { it.agentId ?: it.agentKind }, session?.wsId)
-                grant?.access == AgentGrantAccess.RO
+                val agentKey = session?.let { it.agentId ?: it.agentKind }
+                val wsTitle = session?.wsId?.let { ws ->
+                    state.agentWorkspaces.values.firstOrNull { it.wsId == ws }?.wsTitle
+                }
+                val device = state.peer(appr.peerId)?.displayName
+                listOfNotNull(device, wsTitle ?: agentKey)
+                    .filter { it.isNotBlank() }
+                    .joinToString(" · ")
+                    .takeIf { it.isNotBlank() }
             },
         )
     }
@@ -456,9 +514,12 @@ internal fun WorkspaceBoardView(
 private fun AgentSectionHead(section: WorkspaceAgentSectionUi) {
     val sp = LocalAppSpacing.current
     Row(
+        // Agent 这一层是**排版层级**，不是容器层级：它夹在设备卡与工作区卡之间，
+        // 再套一张卡会让"设备 > Agent > 工作区"读成三层并列的盒子。
+        // 缩进对齐卡内边距（sp.lg），让这行字看起来属于上面那张设备卡。
         modifier = Modifier
             .fillMaxWidth()
-            .padding(start = sp.xs, end = sp.xs, top = sp.sm),
+            .padding(start = sp.lg, end = sp.lg, top = sp.lg14, bottom = sp.xxs),
         verticalAlignment = Alignment.CenterVertically,
         horizontalArrangement = Arrangement.spacedBy(sp.sm6),
     ) {
@@ -492,46 +553,55 @@ private fun AgentSectionHead(section: WorkspaceAgentSectionUi) {
 private fun BoardGroupHead(group: com.kapp.tidings.domain.WorkspaceUnitGroupUi, now: Long) {
     val sp = LocalAppSpacing.current
     val onSurfaceVariant = MaterialTheme.colorScheme.onSurfaceVariant
-    val dot = when {
-        group.online -> MaterialTheme.accents.online
-        group.lastSeenAt == 0L -> MaterialTheme.colorScheme.error
-        else -> onSurfaceVariant
-    }
     // 计数已按 issue 6 的裁决整体移除（组头不再印「N 个 Agent · M 个工作区」）：
     // 组头要回答的是"这些是谁的"，数量是段/页层面的事，不该在每一台设备的抬头再数一遍。
-    Row(
+    val meta = buildString {
+        // 离线时间与"归不到 Agent 的待审批"都保留：它们不是数量噪音，而是
+        // 组头必须替那些行说出来的状态（join 不到 Agent 的审批只能写在节点级）。
+        if (!group.online && group.lastSeenAt > 0L) {
+            append(stringResource(Res.string.conv_inbox_ws_group_offline, relativeTime(group.lastSeenAt, now)))
+        }
+        if (group.unattributedApprovals > 0) {
+            if (isNotEmpty()) append(" · ")
+            append(stringResource(Res.string.conv_inbox_ws_pending, group.unattributedApprovals))
+        }
+    }
+    // **同一套容器语言**：与会话行 / 工作区行 / 节点行一样，是"白卡 + LocalCardShape + 自绘投影"。
+    // 之前这里是一条裸文本行 —— 夹在一排卡片中间，看起来像外壳没画完。
+    // 层次感由**排版**承担（设备名 titleSmall/SemiBold，状态行 labelSmall），不靠另起一种盒子。
+    Surface(
+        color = MaterialTheme.colorScheme.surface,
+        shape = LocalCardShape.current,
         modifier = Modifier
             .fillMaxWidth()
-            .padding(start = sp.xs, end = sp.xs, top = sp.lg14, bottom = sp.sm6),
-        verticalAlignment = Alignment.CenterVertically,
-        horizontalArrangement = Arrangement.spacedBy(sp.sm),
+            .relayCardShadow(),
     ) {
-        StatusDot(group.online)
-        Text(
-            // 与消息页组头同形：节点名 + 平台（同名设备靠平台消歧）。
-            text = if (group.platform.isNullOrBlank()) group.nodeName else group.nodeName + " · " + group.platform,
-            style = MaterialTheme.typography.labelMedium,
-            fontWeight = FontWeight.SemiBold,
-            maxLines = 1,
-            overflow = TextOverflow.Ellipsis,
-        )
-        Text(
-            text = buildString {
-                // 离线时间与"归不到 Agent 的待审批"都保留：它们不是数量噪音，而是
-                // 组头必须替那些行说出来的状态（join 不到 Agent 的审批只能写在节点级）。
-                if (!group.online && group.lastSeenAt > 0L) {
-                    append(stringResource(Res.string.conv_inbox_ws_group_offline, relativeTime(group.lastSeenAt, now)))
+        Row(
+            modifier = Modifier.padding(horizontal = sp.lg, vertical = sp.md),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(sp.md),
+        ) {
+            StatusDot(group.online)
+            Column(modifier = Modifier.weight(1f)) {
+                Text(
+                    // 只印设备名：平台（linux/macOS）是排障信息，不是设备对用户的名字。
+                    text = group.nodeName,
+                    style = MaterialTheme.typography.titleSmall,
+                    fontWeight = FontWeight.SemiBold,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                )
+                if (meta.isNotEmpty()) {
+                    Text(
+                        text = meta,
+                        style = MaterialTheme.typography.labelSmall,
+                        color = onSurfaceVariant,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis,
+                    )
                 }
-                if (group.unattributedApprovals > 0) {
-                    if (isNotEmpty()) append(" · ")
-                    append(stringResource(Res.string.conv_inbox_ws_pending, group.unattributedApprovals))
-                }
-            },
-            style = MaterialTheme.typography.labelSmall,
-            color = onSurfaceVariant,
-            maxLines = 1,
-            overflow = TextOverflow.Ellipsis,
-        )
+            }
+        }
     }
 }
 
@@ -589,6 +659,9 @@ internal enum class BoardEmptyStage {
     /** 正在扫描网段（有进度可报）。 */
     Scanning,
 
+    /** 本机节点**起不来**（有失败原因）—— 不是"再等等"，要如实报原因并给出路。 */
+    NodeFailed,
+
     /** 本机节点还没起来 —— 数据不可能到，等它。 */
     NodeStarting,
 
@@ -599,9 +672,76 @@ internal enum class BoardEmptyStage {
     TrulyEmpty,
 }
 
-internal fun boardEmptyStage(nodeRunning: Boolean, scanning: Boolean, peerCount: Int): BoardEmptyStage = when {
+internal fun boardEmptyStage(
+    nodeRunning: Boolean,
+    scanning: Boolean,
+    peerCount: Int,
+    /**
+     * 本机节点有没有一条**已记录**的启动失败原因（`NetworkUi.failure`）。
+     *
+     * 修复前只有三档：失败与"还在启动"共用「节点还没启动」+ 无限转圈那一档，
+     * 用户永远等不到下结论。有原因就必须分开 —— 那一档要报原因 + 给出路。
+     */
+    hasFailure: Boolean = false,
+): BoardEmptyStage = when {
     scanning -> BoardEmptyStage.Scanning
+    !nodeRunning && hasFailure -> BoardEmptyStage.NodeFailed
     !nodeRunning -> BoardEmptyStage.NodeStarting
     peerCount == 0 -> BoardEmptyStage.Discovering
     else -> BoardEmptyStage.TrulyEmpty
+}
+
+/**
+ * 审批段这一轮要画的行（**主屏口径**）：待处置的 + 本屏刚处置、还在留痕窗口里的。
+ *
+ * ## 为什么主屏不能只喂 pending
+ *
+ * `AgentApprovalsSection` 的「处置后保留 2 秒」靠它自己的 `seenPending` 记账：
+ * 一条审批得先以 pending 进来过，变成已决之后才会被它计时、到点收起。调用方若在
+ * 外面先按 `status == "pending"` 过滤，已决行永远进不去，那段留痕就是**死代码** ——
+ * 用户点完批准卡立刻消失，是「点上了吗」还是「被谁删了」无法区分。
+ *
+ * ## 为什么不是把整张表都喂进去
+ *
+ * `seenPending` 只替**本屏见过它 pending** 的条目计时；磁盘里恢复回来的历史已决项
+ * 喂进看板会**永远**留在清单上（常驻历史是会话详情的行为，不是清单页的）。所以
+ * [lingerIds] 就是「本屏见过 pending 的 id 集合」，已决行只有在里面才留；2 秒后由
+ * `AgentApprovalsSection` 自己收起（它仍是驻留时长的唯一主人）。
+ *
+ * [lingerIds] 是可变集合，结果每次组合现算（审批条数个位数，开销可忽略）。
+ */
+internal fun approvalRowsFor(
+    approvals: Collection<AgentApprovalUi>,
+    now: Long,
+    lingerIds: Set<String>,
+    peerId: String? = null,
+    sessionIds: Set<String>? = null,
+): List<AgentApprovalUi> = approvals.filter { approval ->
+    val scoped = (peerId == null || approval.peerId == peerId) &&
+        (sessionIds == null || approval.sessionId in sessionIds)
+    scoped && when {
+        approval.status == "pending" -> !isApprovalExpired(approval, now)
+        else -> approval.approvalId in lingerIds
+    }
+}
+
+/**
+ * [approvalRowsFor] 的组合期包装：顺手把「本屏见过它 pending」记进 `lingerIds`。
+ *
+ * 记账用普通 `MutableSet`（不是 snapshot 状态）：它只在组合期写读，写入**不改变
+ * 本轮结果**（本轮读到的"已决"一定来自上一轮的记账），真正的重组由
+ * `state.agentApprovals` 变化驱动。
+ */
+@Composable
+internal fun rememberLingeringApprovalRows(
+    approvals: Collection<AgentApprovalUi>,
+    now: Long,
+    peerId: String? = null,
+    sessionIds: Set<String>? = null,
+): List<AgentApprovalUi> {
+    val lingerIds = remember { mutableSetOf<String>() }
+    approvals.forEach { approval ->
+        if (approval.status == "pending") lingerIds.add(approval.approvalId)
+    }
+    return approvalRowsFor(approvals, now, lingerIds, peerId, sessionIds)
 }

@@ -38,6 +38,7 @@
       "onSurface": "#1A1C1A",
       "onSurfaceVariant": "#5C5F5C",
       "onTertiary": "#FFFFFF",
+      "onTertiaryContainer": "#173B4E",
       "online": "#2E9E5B",
       "outline": "#D4D4D0",
       "outlineVariant": "#12000000",
@@ -57,7 +58,8 @@
       "surfaceDim": "#EFEEE8",
       "surfaceTint": "#FFFFFF",
       "surfaceVariant": "#F0EFE9",
-      "tertiary": "#457B9D"
+      "tertiary": "#457B9D",
+      "tertiaryContainer": "#CDE2EF"
     },
     "colorsDark": {
       "agentAccent": "#B9A6FF",
@@ -82,6 +84,7 @@
       "onSurface": "#E8E8E6",
       "onSurfaceVariant": "#A0A3A0",
       "onTertiary": "#003542",
+      "onTertiaryContainer": "#CDE2EF",
       "online": "#6FD69A",
       "outline": "#3A3C3B",
       "outlineVariant": "#17FFFFFF",
@@ -101,14 +104,15 @@
       "surfaceDim": "#121413",
       "surfaceTint": "#1E201F",
       "surfaceVariant": "#2A2C2B",
-      "tertiary": "#89B4C8"
+      "tertiary": "#89B4C8",
+      "tertiaryContainer": "#173B4E"
     },
     "colorNotes": {
       "source": "浅色取 ui/theme/Color.kt 的 RelayLightColors，深色取 RelayDarkColors；agentAccent / agentAccentContainer / online 两态在 ui/theme/Accents.kt（M3 的 ColorScheme 没有对应槽，用 CompositionLocal 挂），queued 深色值 #E3B75A 来自原型、代码里还没有对应槽。",
       "hairline": "outlineVariant 两态必须显式钉死（浅 #E4E9E7 / 深 #2B3331）：M3 默认值是紫调的 #CAC4D0 / #49454F，落在这套暖中性色板上会显脏。发丝线的低对比（深 1.47:1、浅 1.23:1）是设计意图，不计入无障碍缺陷。",
       "textContrast": "文字与状态点必须 ≥4.5:1（大字 ≥3:1）。原型的深色值正是按这条选的：#B9A6FF on #312A52 = 6.29:1、#6FD69A on #121413 = 10.36:1、#E3B75A on #121413 = 9.85:1。排队色当文字时用 secondaryContainer/onSecondaryContainer 那对（浅 8.01:1），不要用 queued 本身（浅色下只有 1.60:1）。",
       "palette": {
-        "note": "设计侧批准过的核心调色板角色。tokens.colors 现在是代码全量投影（42 键/主题），这个列表保留「哪些是设计明确批准过的」这一信息，不参与漂移比对。",
+        "note": "设计侧批准过的核心调色板角色。tokens.colors 现在是代码全量投影（44 键/主题），这个列表保留「哪些是设计明确批准过的」这一信息，不参与漂移比对。",
         "roles": [
           "primary",
           "onPrimary",
@@ -394,41 +398,41 @@
           "agentAccent": {
             "sites": 1,
             "status": "enforced",
-            "first": "composeApp/src/commonMain/kotlin/com/kapp/tidings/ui/components/Common.kt:187"
+            "first": "composeApp/src/commonMain/kotlin/com/kapp/tidings/ui/components/Common.kt:194"
           },
           "agentAccentContainer": {
             "sites": 2,
             "status": "enforced",
-            "first": "composeApp/src/commonMain/kotlin/com/kapp/tidings/ui/components/Common.kt:181"
+            "first": "composeApp/src/commonMain/kotlin/com/kapp/tidings/ui/components/Common.kt:188"
           },
           "agentAccentText": {
             "sites": 1,
             "status": "enforced",
-            "first": "composeApp/src/commonMain/kotlin/com/kapp/tidings/ui/components/Common.kt:241"
+            "first": "composeApp/src/commonMain/kotlin/com/kapp/tidings/ui/components/Common.kt:250"
           },
           "background": {
-            "sites": 11,
+            "sites": 10,
             "status": "enforced",
-            "first": "composeApp/src/commonMain/kotlin/com/kapp/tidings/ui/desktop/CabinetPane.kt:134"
+            "first": "composeApp/src/commonMain/kotlin/com/kapp/tidings/ui/desktop/CabinetPane.kt:152"
           },
           "badge": {
             "sites": 3,
             "status": "enforced",
-            "first": "composeApp/src/commonMain/kotlin/com/kapp/tidings/ui/desktop/DesktopNavigation.kt:191"
+            "first": "composeApp/src/commonMain/kotlin/com/kapp/tidings/ui/desktop/DesktopNavigation.kt:229"
           },
           "cardShadow": {
             "sites": 0,
             "status": "pending"
           },
           "error": {
-            "sites": 47,
+            "sites": 45,
             "status": "enforced",
-            "first": "composeApp/src/commonMain/kotlin/com/kapp/tidings/ui/desktop/DesktopChrome.kt:347"
+            "first": "composeApp/src/commonMain/kotlin/com/kapp/tidings/ui/desktop/DesktopChrome.kt:351"
           },
           "errorContainer": {
-            "sites": 11,
+            "sites": 9,
             "status": "enforced",
-            "first": "composeApp/src/commonMain/kotlin/com/kapp/tidings/ui/components/Common.kt:413"
+            "first": "composeApp/src/commonMain/kotlin/com/kapp/tidings/ui/components/Common.kt:431"
           },
           "inverseOnSurface": {
             "sites": 0,
@@ -449,44 +453,44 @@
           "onBadge": {
             "sites": 3,
             "status": "enforced",
-            "first": "composeApp/src/commonMain/kotlin/com/kapp/tidings/ui/desktop/DesktopNavigation.kt:192"
+            "first": "composeApp/src/commonMain/kotlin/com/kapp/tidings/ui/desktop/DesktopNavigation.kt:230"
           },
           "onError": {
             "sites": 3,
             "status": "enforced",
-            "first": "composeApp/src/commonMain/kotlin/com/kapp/tidings/ui/components/AppButtons.kt:212"
+            "first": "composeApp/src/commonMain/kotlin/com/kapp/tidings/ui/components/AppButtons.kt:217"
           },
           "onErrorContainer": {
-            "sites": 16,
+            "sites": 14,
             "status": "enforced",
-            "first": "composeApp/src/commonMain/kotlin/com/kapp/tidings/ui/desktop/DesktopSettingsChrome.kt:461"
+            "first": "composeApp/src/commonMain/kotlin/com/kapp/tidings/ui/desktop/DesktopSettingsChrome.kt:463"
           },
           "onPrimary": {
-            "sites": 11,
+            "sites": 10,
             "status": "enforced",
-            "first": "composeApp/src/commonMain/kotlin/com/kapp/tidings/ui/desktop/DesktopChrome.kt:496"
+            "first": "composeApp/src/commonMain/kotlin/com/kapp/tidings/ui/desktop/DesktopChrome.kt:555"
           },
           "onPrimaryContainer": {
             "sites": 31,
             "status": "enforced",
-            "first": "composeApp/src/commonMain/kotlin/com/kapp/tidings/ui/desktop/DesktopChrome.kt:497"
+            "first": "composeApp/src/commonMain/kotlin/com/kapp/tidings/ui/desktop/DesktopChrome.kt:556"
           },
           "onSecondary": {
             "sites": 0,
             "status": "pending"
           },
           "onSecondaryContainer": {
-            "sites": 14,
+            "sites": 16,
             "status": "enforced",
-            "first": "composeApp/src/commonMain/kotlin/com/kapp/tidings/ui/desktop/DesktopConversationsPane.kt:460"
+            "first": "composeApp/src/commonMain/kotlin/com/kapp/tidings/ui/desktop/DesktopConversationsPane.kt:479"
           },
           "onSurface": {
-            "sites": 70,
+            "sites": 69,
             "status": "enforced",
-            "first": "composeApp/src/commonMain/kotlin/com/kapp/tidings/ui/desktop/DesktopChrome.kt:498"
+            "first": "composeApp/src/commonMain/kotlin/com/kapp/tidings/ui/desktop/DesktopChrome.kt:557"
           },
           "onSurfaceVariant": {
-            "sites": 392,
+            "sites": 393,
             "status": "enforced",
             "first": "composeApp/src/commonMain/kotlin/com/kapp/tidings/ui/AppStates.kt:104"
           },
@@ -494,54 +498,59 @@
             "sites": 0,
             "status": "pending"
           },
-          "online": {
-            "sites": 8,
+          "onTertiaryContainer": {
+            "sites": 3,
             "status": "enforced",
-            "first": "composeApp/src/commonMain/kotlin/com/kapp/tidings/ui/desktop/DesktopNodesPane.kt:351"
+            "first": "composeApp/src/commonMain/kotlin/com/kapp/tidings/feature/agents/AgentApprovalCards.kt:174"
+          },
+          "online": {
+            "sites": 5,
+            "status": "enforced",
+            "first": "composeApp/src/commonMain/kotlin/com/kapp/tidings/ui/desktop/DesktopNodesPane.kt:391"
           },
           "outline": {
-            "sites": 21,
+            "sites": 20,
             "status": "enforced",
-            "first": "composeApp/src/commonMain/kotlin/com/kapp/tidings/ui/desktop/DesktopComposer.kt:251"
+            "first": "composeApp/src/commonMain/kotlin/com/kapp/tidings/ui/desktop/DesktopComposer.kt:380"
           },
           "outlineVariant": {
             "sites": 48,
             "status": "enforced",
-            "first": "composeApp/src/commonMain/kotlin/com/kapp/tidings/ui/desktop/DesktopChatPane.kt:262"
+            "first": "composeApp/src/commonMain/kotlin/com/kapp/tidings/ui/desktop/DesktopChatPane.kt:291"
           },
           "primary": {
-            "sites": 93,
+            "sites": 96,
             "status": "enforced",
-            "first": "composeApp/src/commonMain/kotlin/com/kapp/tidings/ui/SectionCard.kt:72"
+            "first": "composeApp/src/commonMain/kotlin/com/kapp/tidings/ui/SectionCard.kt:73"
           },
           "primaryContainer": {
-            "sites": 37,
+            "sites": 36,
             "status": "enforced",
-            "first": "composeApp/src/commonMain/kotlin/com/kapp/tidings/ui/desktop/CabinetPane.kt:237"
+            "first": "composeApp/src/commonMain/kotlin/com/kapp/tidings/ui/desktop/CabinetPane.kt:258"
           },
           "scrim": {
             "sites": 1,
             "status": "enforced",
-            "first": "desktopApp/src/main/kotlin/com/kapp/tidings/desktop/DesktopHosting.kt:648"
+            "first": "desktopApp/src/main/kotlin/com/kapp/tidings/desktop/DesktopHosting.kt:788"
           },
           "secondary": {
             "sites": 0,
             "status": "pending"
           },
           "secondaryContainer": {
-            "sites": 8,
+            "sites": 9,
             "status": "enforced",
-            "first": "composeApp/src/commonMain/kotlin/com/kapp/tidings/ui/desktop/CabinetPane.kt:278"
+            "first": "composeApp/src/commonMain/kotlin/com/kapp/tidings/ui/desktop/CabinetPane.kt:299"
           },
           "surface": {
-            "sites": 102,
+            "sites": 105,
             "status": "enforced",
-            "first": "composeApp/src/commonMain/kotlin/com/kapp/tidings/App.kt:156"
+            "first": "composeApp/src/commonMain/kotlin/com/kapp/tidings/App.kt:183"
           },
           "surface3": {
             "sites": 6,
             "status": "enforced",
-            "first": "composeApp/src/commonMain/kotlin/com/kapp/tidings/ui/desktop/DesktopSettingsChrome.kt:271"
+            "first": "composeApp/src/commonMain/kotlin/com/kapp/tidings/ui/desktop/DesktopSettingsChrome.kt:273"
           },
           "surfaceBright": {
             "sites": 0,
@@ -550,7 +559,7 @@
           "surfaceContainer": {
             "sites": 8,
             "status": "enforced",
-            "first": "composeApp/src/commonMain/kotlin/com/kapp/tidings/ui/desktop/DesktopNodesPane.kt:610"
+            "first": "composeApp/src/commonMain/kotlin/com/kapp/tidings/ui/desktop/DesktopNodesPane.kt:675"
           },
           "surfaceContainerHigh": {
             "sites": 0,
@@ -559,12 +568,12 @@
           "surfaceContainerHighest": {
             "sites": 5,
             "status": "enforced",
-            "first": "composeApp/src/commonMain/kotlin/com/kapp/tidings/ui/desktop/DesktopChrome.kt:489"
+            "first": "composeApp/src/commonMain/kotlin/com/kapp/tidings/ui/desktop/DesktopChrome.kt:548"
           },
           "surfaceContainerLow": {
-            "sites": 2,
+            "sites": 4,
             "status": "enforced",
-            "first": "composeApp/src/commonMain/kotlin/com/kapp/tidings/ui/desktop/DesktopChrome.kt:257"
+            "first": "composeApp/src/commonMain/kotlin/com/kapp/tidings/ui/desktop/DesktopChrome.kt:261"
           },
           "surfaceContainerLowest": {
             "sites": 0,
@@ -581,29 +590,34 @@
           "surfaceVariant": {
             "sites": 67,
             "status": "enforced",
-            "first": "composeApp/src/commonMain/kotlin/com/kapp/tidings/ui/desktop/CabinetPane.kt:237"
+            "first": "composeApp/src/commonMain/kotlin/com/kapp/tidings/ui/desktop/CabinetPane.kt:258"
           },
           "tertiary": {
             "sites": 2,
             "status": "enforced",
             "first": "composeApp/src/commonMain/kotlin/com/kapp/tidings/ui/desktop/DesktopStatusBar.kt:64"
+          },
+          "tertiaryContainer": {
+            "sites": 3,
+            "status": "enforced",
+            "first": "composeApp/src/commonMain/kotlin/com/kapp/tidings/ui/components/GroupInfoDialog.kt:416"
           }
         },
         "typography": {
           "bodyLarge": {
-            "sites": 6,
+            "sites": 7,
             "status": "enforced",
-            "first": "composeApp/src/commonMain/kotlin/com/kapp/tidings/ui/components/MessageComposer.kt:384"
+            "first": "composeApp/src/commonMain/kotlin/com/kapp/tidings/ui/components/MessageComposer.kt:478"
           },
           "bodyMedium": {
-            "sites": 97,
+            "sites": 100,
             "status": "enforced",
             "first": "composeApp/src/commonMain/kotlin/com/kapp/tidings/ui/AppStates.kt:73"
           },
           "bodySmall": {
             "sites": 141,
             "status": "enforced",
-            "first": "composeApp/src/commonMain/kotlin/com/kapp/tidings/ui/desktop/CabinetPane.kt:288"
+            "first": "composeApp/src/commonMain/kotlin/com/kapp/tidings/ui/desktop/CabinetPane.kt:309"
           },
           "displayLarge": {
             "sites": 0,
@@ -634,54 +648,54 @@
           "labelLarge": {
             "sites": 15,
             "status": "enforced",
-            "first": "composeApp/src/commonMain/kotlin/com/kapp/tidings/ui/desktop/DesktopChrome.kt:513"
+            "first": "composeApp/src/commonMain/kotlin/com/kapp/tidings/ui/desktop/DesktopChrome.kt:581"
           },
           "labelMedium": {
             "sites": 40,
             "status": "enforced",
-            "first": "composeApp/src/commonMain/kotlin/com/kapp/tidings/ui/desktop/CabinetPane.kt:265"
+            "first": "composeApp/src/commonMain/kotlin/com/kapp/tidings/ui/SectionCard.kt:87"
           },
           "labelSmall": {
-            "sites": 267,
+            "sites": 261,
             "status": "enforced",
-            "first": "composeApp/src/commonMain/kotlin/com/kapp/tidings/ui/desktop/CabinetPane.kt:252"
+            "first": "composeApp/src/commonMain/kotlin/com/kapp/tidings/ui/desktop/CabinetPane.kt:273"
           },
           "titleLarge": {
-            "sites": 6,
+            "sites": 5,
             "status": "enforced",
             "first": "composeApp/src/commonMain/kotlin/com/kapp/tidings/ui/components/PkPalette.kt:126"
           },
           "titleMedium": {
-            "sites": 29,
+            "sites": 28,
             "status": "enforced",
             "first": "composeApp/src/commonMain/kotlin/com/kapp/tidings/ui/AppStates.kt:96"
           },
           "titleSmall": {
             "sites": 28,
             "status": "enforced",
-            "first": "composeApp/src/commonMain/kotlin/com/kapp/tidings/ui/SectionCard.kt:79"
+            "first": "composeApp/src/commonMain/kotlin/com/kapp/tidings/ui/desktop/DesktopHistorySearch.kt:493"
           }
         },
         "spacing": {
           "lg": {
-            "sites": 80,
+            "sites": 91,
             "status": "enforced",
-            "first": "composeApp/src/commonMain/kotlin/com/kapp/tidings/ui/AppStates.kt:63"
+            "first": "composeApp/src/commonMain/kotlin/com/kapp/tidings/App.kt:815"
           },
           "lg14": {
-            "sites": 46,
+            "sites": 42,
             "status": "enforced",
-            "first": "composeApp/src/commonMain/kotlin/com/kapp/tidings/ui/desktop/DesktopConversationWidgets.kt:186"
+            "first": "composeApp/src/commonMain/kotlin/com/kapp/tidings/ui/desktop/DesktopConversationWidgets.kt:203"
           },
           "md": {
-            "sites": 87,
+            "sites": 83,
             "status": "enforced",
             "first": "composeApp/src/commonMain/kotlin/com/kapp/tidings/ui/AppStates.kt:64"
           },
           "md10": {
-            "sites": 43,
+            "sites": 42,
             "status": "enforced",
-            "first": "composeApp/src/commonMain/kotlin/com/kapp/tidings/ui/desktop/CabinetPane.kt:243"
+            "first": "composeApp/src/commonMain/kotlin/com/kapp/tidings/ui/desktop/CabinetPane.kt:264"
           },
           "olg11": {
             "sites": 3,
@@ -691,22 +705,22 @@
           "olg13": {
             "sites": 8,
             "status": "enforced",
-            "first": "composeApp/src/commonMain/kotlin/com/kapp/tidings/ui/desktop/DesktopSettingsChrome.kt:194"
+            "first": "composeApp/src/commonMain/kotlin/com/kapp/tidings/ui/desktop/DesktopSettingsChrome.kt:196"
           },
           "osm7": {
             "sites": 2,
             "status": "enforced",
-            "first": "composeApp/src/commonMain/kotlin/com/kapp/tidings/ui/desktop/DesktopComposer.kt:567"
+            "first": "composeApp/src/commonMain/kotlin/com/kapp/tidings/ui/desktop/DesktopComposer.kt:801"
           },
           "osm9": {
             "sites": 5,
             "status": "enforced",
-            "first": "composeApp/src/commonMain/kotlin/com/kapp/tidings/ui/desktop/DesktopSettingsChrome.kt:239"
+            "first": "composeApp/src/commonMain/kotlin/com/kapp/tidings/ui/desktop/DesktopSettingsChrome.kt:241"
           },
           "oxs3": {
             "sites": 3,
             "status": "enforced",
-            "first": "composeApp/src/commonMain/kotlin/com/kapp/tidings/ui/desktop/DesktopSettingsChrome.kt:551"
+            "first": "composeApp/src/commonMain/kotlin/com/kapp/tidings/ui/desktop/DesktopTransferLogPane.kt:101"
           },
           "oxs5": {
             "sites": 5,
@@ -714,14 +728,14 @@
             "first": "composeApp/src/commonMain/kotlin/com/kapp/tidings/ui/desktop/DesktopTransferLogPane.kt:101"
           },
           "sm": {
-            "sites": 117,
+            "sites": 112,
             "status": "enforced",
-            "first": "composeApp/src/commonMain/kotlin/com/kapp/tidings/ui/desktop/CabinetPane.kt:269"
+            "first": "composeApp/src/commonMain/kotlin/com/kapp/tidings/App.kt:816"
           },
           "sm6": {
-            "sites": 52,
+            "sites": 55,
             "status": "enforced",
-            "first": "composeApp/src/commonMain/kotlin/com/kapp/tidings/ui/SectionCard.kt:75"
+            "first": "composeApp/src/commonMain/kotlin/com/kapp/tidings/ui/SectionCard.kt:76"
           },
           "xl": {
             "sites": 14,
@@ -729,31 +743,31 @@
             "first": "composeApp/src/commonMain/kotlin/com/kapp/tidings/ui/AppStates.kt:91"
           },
           "xs": {
-            "sites": 96,
+            "sites": 91,
             "status": "enforced",
-            "first": "composeApp/src/commonMain/kotlin/com/kapp/tidings/ui/desktop/CabinetPane.kt:273"
+            "first": "composeApp/src/commonMain/kotlin/com/kapp/tidings/ui/desktop/CabinetPane.kt:294"
           },
           "xxl": {
-            "sites": 3,
+            "sites": 1,
             "status": "enforced",
-            "first": "composeApp/src/commonMain/kotlin/com/kapp/tidings/ui/desktop/DesktopGlobalSearch.kt:143"
+            "first": "composeApp/src/commonMain/kotlin/com/kapp/tidings/feature/cabinet/PeerCabinetView.kt:136"
           },
           "xxs": {
-            "sites": 33,
+            "sites": 35,
             "status": "enforced",
             "first": "composeApp/src/commonMain/kotlin/com/kapp/tidings/ui/AppStates.kt:68"
           },
           "xxxl": {
-            "sites": 2,
+            "sites": 7,
             "status": "enforced",
-            "first": "composeApp/src/commonMain/kotlin/com/kapp/tidings/ui/components/AppButtons.kt:343"
+            "first": "composeApp/src/commonMain/kotlin/com/kapp/tidings/ui/desktop/DesktopChrome.kt:565"
           }
         },
         "shape": {
           "extraLarge": {
             "sites": 1,
             "status": "enforced",
-            "first": "composeApp/src/commonMain/kotlin/com/kapp/tidings/ui/components/MessageComposer.kt:612"
+            "first": "composeApp/src/commonMain/kotlin/com/kapp/tidings/ui/components/MessageComposer.kt:720"
           },
           "extraSmall": {
             "sites": 0,
@@ -762,61 +776,61 @@
           "large": {
             "sites": 11,
             "status": "enforced",
-            "first": "composeApp/src/commonMain/kotlin/com/kapp/tidings/ui/components/MessageComposer.kt:667"
+            "first": "composeApp/src/commonMain/kotlin/com/kapp/tidings/ui/components/MessageComposer.kt:775"
           },
           "medium": {
-            "sites": 65,
+            "sites": 61,
             "status": "enforced",
-            "first": "composeApp/src/commonMain/kotlin/com/kapp/tidings/ui/desktop/DesktopChrome.kt:440"
+            "first": "composeApp/src/commonMain/kotlin/com/kapp/tidings/ui/desktop/DesktopChrome.kt:499"
           },
           "small": {
             "sites": 14,
             "status": "enforced",
-            "first": "composeApp/src/commonMain/kotlin/com/kapp/tidings/ui/desktop/DesktopHistorySearch.kt:358"
+            "first": "composeApp/src/commonMain/kotlin/com/kapp/tidings/ui/desktop/DesktopHistorySearch.kt:371"
           }
         },
         "elevation": {
           "card": {
             "sites": 23,
             "status": "enforced",
-            "first": "composeApp/src/commonMain/kotlin/com/kapp/tidings/ui/desktop/DesktopNodesPane.kt:611"
+            "first": "composeApp/src/commonMain/kotlin/com/kapp/tidings/ui/desktop/DesktopNodesPane.kt:676"
           },
           "floating": {
             "sites": 7,
             "status": "enforced",
-            "first": "composeApp/src/commonMain/kotlin/com/kapp/tidings/ui/desktop/DesktopChrome.kt:405"
+            "first": "composeApp/src/commonMain/kotlin/com/kapp/tidings/ui/desktop/DesktopChrome.kt:464"
           },
           "sheet": {
             "sites": 1,
             "status": "enforced",
-            "first": "composeApp/src/commonMain/kotlin/com/kapp/tidings/ui/components/CompactScaffold.kt:113"
+            "first": "composeApp/src/commonMain/kotlin/com/kapp/tidings/ui/components/CompactScaffold.kt:119"
           }
         },
         "iconSizes": {
           "badge": {
             "sites": 3,
             "status": "enforced",
-            "first": "composeApp/src/commonMain/kotlin/com/kapp/tidings/ui/desktop/DesktopNodesPane.kt:513"
+            "first": "composeApp/src/commonMain/kotlin/com/kapp/tidings/ui/desktop/DesktopNodesPane.kt:571"
           },
           "body": {
-            "sites": 20,
+            "sites": 21,
             "status": "enforced",
-            "first": "composeApp/src/commonMain/kotlin/com/kapp/tidings/ui/desktop/DesktopChrome.kt:246"
+            "first": "composeApp/src/commonMain/kotlin/com/kapp/tidings/ui/desktop/DesktopChrome.kt:250"
           },
           "hero": {
             "sites": 2,
             "status": "enforced",
-            "first": "composeApp/src/commonMain/kotlin/com/kapp/tidings/ui/desktop/DesktopComposer.kt:625"
+            "first": "composeApp/src/commonMain/kotlin/com/kapp/tidings/ui/desktop/DesktopComposer.kt:859"
           },
           "inline": {
-            "sites": 11,
+            "sites": 10,
             "status": "enforced",
-            "first": "composeApp/src/commonMain/kotlin/com/kapp/tidings/ui/SectionCard.kt:73"
+            "first": "composeApp/src/commonMain/kotlin/com/kapp/tidings/ui/SectionCard.kt:74"
           },
           "label": {
-            "sites": 24,
+            "sites": 23,
             "status": "enforced",
-            "first": "composeApp/src/commonMain/kotlin/com/kapp/tidings/ui/desktop/DesktopChrome.kt:234"
+            "first": "composeApp/src/commonMain/kotlin/com/kapp/tidings/ui/desktop/DesktopChrome.kt:238"
           },
           "title": {
             "sites": 8,
@@ -826,9 +840,9 @@
         },
         "shapeRoles": {
           "avatar": {
-            "sites": 9,
+            "sites": 11,
             "status": "enforced",
-            "first": "composeApp/src/commonMain/kotlin/com/kapp/tidings/ui/desktop/DesktopChrome.kt:255"
+            "first": "composeApp/src/commonMain/kotlin/com/kapp/tidings/ui/desktop/DesktopChrome.kt:259"
           },
           "dayCell": {
             "sites": 0,
@@ -837,7 +851,7 @@
           "listCard": {
             "sites": 1,
             "status": "enforced",
-            "first": "composeApp/src/commonMain/kotlin/com/kapp/tidings/ui/desktop/DesktopConversationsPane.kt:595"
+            "first": "composeApp/src/commonMain/kotlin/com/kapp/tidings/ui/desktop/DesktopConversationsPane.kt:614"
           }
         },
         "weights": {
@@ -849,7 +863,7 @@
         }
       },
       "adoption": {
-        "colors": "29/42",
+        "colors": "31/44",
         "typography": "11/15",
         "spacing": "17/17",
         "shape": "4/5",
@@ -861,16 +875,16 @@
       "shapeInventory": {
         "rawRoundedCornerShape": {
           "14": 2,
+          "8": 16,
           "6": 12,
           "12": 21,
-          "8": 16,
           "4": 11,
           "22": 2,
           "5": 3,
-          "20": 1,
+          "20": 2,
           "10": 4,
           "9": 1,
-          "16": 2,
+          "16": 3,
           "2": 2,
           "13": 1
         },
@@ -879,28 +893,28 @@
           "6": 2,
           "28": 2
         },
-        "circleShapeSites": 73,
+        "circleShapeSites": 75,
         "offScale": {
           "6": 12,
           "10": 4,
           "5": 3,
           "14": 2,
           "22": 2,
+          "20": 2,
           "2": 2,
-          "20": 1,
           "9": 1,
           "13": 1
         },
         "note": "offScale = 没有任何 M3 槽位能表达的半径，这些点只能靠字面量写出来，是「看着不精致」最直接的一类证据。"
       },
       "debt": {
-        "shape": 77,
+        "shape": 78,
         "typography": 6,
         "color": 13,
         "elevation": 6,
-        "iconSizes": 42,
-        "dimension": 131,
-        "spacing": 112
+        "iconSizes": 43,
+        "dimension": 132,
+        "spacing": 104
       },
       "shapeSemantics": {
         "bubble": {
@@ -908,14 +922,14 @@
           "scaleSlot": "medium",
           "mode": "slot",
           "rawSites": 21,
-          "slotSites": 65,
+          "slotSites": 61,
           "circleShapeSites": 0
         },
         "card": {
           "radiusDp": 16,
           "scaleSlot": "large",
           "mode": "raw",
-          "rawSites": 2,
+          "rawSites": 3,
           "slotSites": 11,
           "circleShapeSites": 0
         },
@@ -924,7 +938,7 @@
           "scaleSlot": "medium",
           "mode": "slot",
           "rawSites": 21,
-          "slotSites": 65,
+          "slotSites": 61,
           "circleShapeSites": 0
         },
         "chip": {
@@ -933,7 +947,7 @@
           "mode": "circle",
           "rawSites": 0,
           "slotSites": 0,
-          "circleShapeSites": 73
+          "circleShapeSites": 75
         },
         "sheet": {
           "radiusDp": 28,
@@ -949,6 +963,45 @@
   "componentSpecs": {
     "note": "组件级规格：书写的是**意图**（属于哪些屏、涉及哪些状态、最少该绑定哪些 token），工具校验的是**证据**（requiredTokens 必须在 file 里真的有引用行，previews 必须是真实存在的预览函数）。对不上就是「该用 token 却写了字面量」的欠债，要么改代码要么改这份声明。expectGroups 是粗粒度意图检查：某组一个都没出现时，报告里会记为该组零绑定。",
     "components": [
+      {
+        "id": "ConversationRowStates",
+        "file": "composeApp/src/commonMain/kotlin/com/kapp/tidings/feature/conversations/ConversationRow.kt",
+        "screens": [
+          "conversations"
+        ],
+        "states": [
+          "normal",
+          "error"
+        ],
+        "previews": [
+          "ConversationsRowStatesPhonePreview",
+          "ConversationsRowStatesDeskPreview",
+          "ConversationsFailedEmptyPhonePreview",
+          "ConversationsFailedEmptyDeskPreview",
+          "ConversationsRowMenuPhonePreview",
+          "ConversationsRowMenuDeskPreview",
+          "ConversationsDeleteConfirmDialogPhonePreview",
+          "ConversationsDeleteConfirmDialogDeskPreview"
+        ],
+        "expectGroups": [
+          "colors",
+          "shape",
+          "typography",
+          "spacing"
+        ],
+        "requiredTokens": [
+          "colors.primary",
+          "colors.onSurfaceVariant",
+          "typography.bodySmall",
+          "shape.medium"
+        ],
+        "stress": [
+          "置顶 tag 与未读药丸同一行",
+          "静音弱化后仍可读",
+          "群署名与在线人数两行并存",
+          "三位数未读折成 99+"
+        ]
+      },
       {
         "id": "SectionCard",
         "file": "composeApp/src/commonMain/kotlin/com/kapp/tidings/ui/SectionCard.kt",
@@ -970,7 +1023,7 @@
         "requiredTokens": [
           "colors.surface",
           "shape.large",
-          "typography.titleSmall"
+          "typography.labelMedium"
         ],
         "stress": [
           "超长标题",
@@ -2268,14 +2321,6 @@
           "why": "ScreenshotPreviews.kt:889-911 的夹具 KDoc 原文写着「设置屏的 loading：连接卡的「重连」正在跑（state.restarting），按钮换成「正在重启…」且不可再点」，夹具 `restartingState = normalState.copy(restarting = true)`（:472）的 KDoc 写着「这是设置屏**唯一**的 loading 渲染分支」。它不算覆盖，只因帧名里的 Restarting 对不上词表正则 `(?i)loading`。"
         },
         {
-          "screen": "conversations",
-          "slot": "error",
-          "previews": [
-            "ConversationsBannerPhonePreview"
-          ],
-          "why": "ScreenshotPreviewsExtra.kt:1467 这一帧渲染 `errorBannerState`（:1447 `banner = BannerUi(message = BannerMessage.BindFailed(17_878, \"Address already in use\"), tone = BannerTone.Error)`，夹具 KDoc 原文「会话页 / 设置页上真挂着一条错误横幅。语气是 Error（红），不是 Info。」）⇒ 它钉的是 ConversationsScreen.kt:221 的错误横幅。帧名里只有 Banner，旧词表把它认领给了 conversations/offline_queue_banner（另一条分支）。"
-        },
-        {
           "screen": "settings",
           "slot": "error",
           "previews": [
@@ -2499,11 +2544,14 @@
         {
           "type": "ConversationRow",
           "id": "conv_row",
-          "contract": "avatar + name + preview + ts + unread_badge + delivery_state",
+          "contract": "avatar + name + pinned_tag + preview + ts + unread_badge(99+) + delivery_state + muted_preview",
           "stress": [
             "long_name",
             "long_preview",
-            "large_font"
+            "large_font",
+            "long_name_with_pinned_tag",
+            "unread_overflow_three_digits",
+            "group_sender_and_online_count_together"
           ]
         },
         {

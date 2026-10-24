@@ -2,7 +2,7 @@
 
 package com.kapp.tidings.desktop
 
-import java.io.File
+import com.kapp.tidings.desktop.testutil.RepoSource
 import kotlin.test.Test
 import kotlin.test.assertFalse
 import kotlin.test.assertTrue
@@ -36,19 +36,9 @@ import kotlin.test.assertTrue
  */
 class LazyMainWindowGuardTest {
 
-    private val source: String by lazy { sourcePath().readText() }
-
-    private fun sourcePath(): File {
-        var dir: File? = File("").absoluteFile.normalize()
-        while (dir != null) {
-            val candidate = File(
-                dir,
-                "desktopApp/src/main/kotlin/com/kapp/tidings/desktop/DesktopWindow.kt",
-            )
-            if (candidate.isFile) return candidate
-            dir = dir.parentFile
-        }
-        throw AssertionError("找不到 DesktopWindow.kt（工作目录 " + File("").absolutePath + "）")
+    // 路径解析统一走 testutil/RepoSource（起点是类代码源，不看进程工作目录）。
+    private val source: String by lazy {
+        RepoSource.read("desktopApp/src/main/kotlin/com/kapp/tidings/desktop/DesktopWindow.kt")
     }
 
     /** 剥掉 `//` 行注释与 `/* */` 块注释，保留换行与字符串字面量。 */

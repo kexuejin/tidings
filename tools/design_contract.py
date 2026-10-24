@@ -547,7 +547,7 @@ def _detect_root() -> str:
     `python3 tools/design_contract.py --self-test` 报「缺少权威源文件」，
     而文件明明在：真相是仓库从 scaffold/ 挪到了根，默认路径没人跟着改。"""
     here = os.path.dirname(os.path.abspath(__file__))
-    probe = os.path.join("composeApp", "src", "commonMain", "kotlin", "app", "relay", "ui", "theme", "Color.kt")
+    probe = os.path.join("composeApp", "src", "commonMain", "kotlin", "com", "kapp", "relay", "ui", "theme", "Color.kt")
     d = here
     for _ in range(4):
         if os.path.exists(os.path.join(d, probe)):

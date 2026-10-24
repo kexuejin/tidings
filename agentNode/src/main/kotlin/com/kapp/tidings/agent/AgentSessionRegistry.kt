@@ -2,6 +2,7 @@
 
 package com.kapp.tidings.agent
 
+import com.kapp.tidings.core.protocol.isAgentApprovalExpired
 import java.util.concurrent.ConcurrentHashMap
 import java.util.concurrent.ConcurrentLinkedQueue
 
@@ -157,7 +158,13 @@ class AgentSessionRegistry(
         val outbound: Boolean,
     )
 
-    /** 一条 `agent-ack`（§6.8）。 */
+    /**
+     * 一条 `agent-ack`（§6.8）。
+     *
+     * [outcome] 是这条回执对审批台账的**实际效果**（见 [AckOutcome]）：一条回执被收下了，
+     * 不等于它被采纳了。以前这两件事在台账里长得一模一样 —— 一条过期/无权的回执和一条
+     * 生效的回执都只是"收到过"，于是"点了没反应"在日志里无从区分。
+     */
     data class AckRecord(
         val nodeId: String,
         val ackOf: String,
@@ -165,7 +172,33 @@ class AgentSessionRegistry(
         val at: Long?,
         val recordedAt: Long,
         val outbound: Boolean,
+        /** 见 [AckOutcome]；空 = 这条记录早于该字段加入（读旧快照时可能出现）。 */
+        val outcome: String? = null,
     )
+
+    /**
+     * 一条回执对审批的处置结果 —— **审计用**，也是"为什么没生效"的唯一答案。
+     *
+     * 生效与不生效必须分得开：过期、无权、找不到那条审批、kind 不认识，这四种都表现为
+     * 「界面点了没反应」，但原因完全不同。把它落进 [AckRecord] 之后，面板/诊断至少能读出
+     * `rejected-expired` 而不是一句"收到了"。
+     */
+    enum class AckOutcome(val wire: String) {
+        /** 审批状态已按回执推进。 */
+        APPLIED("applied"),
+
+        /** 审批已过有效期 —— 拒绝应用，只留审计。 */
+        REJECTED_EXPIRED("rejected-expired"),
+
+        /** 回执方无权处置这条审批（委托审批未开 / 无授权记录）—— 拒绝应用。 */
+        REJECTED_UNAUTHORIZED("rejected-unauthorized"),
+
+        /** 台账里找不到这条审批（已淘汰 / 从未收到）。 */
+        NO_SUCH_APPROVAL("no-such-approval"),
+
+        /** 回执 kind 不在 §6.8 的取值里。 */
+        UNKNOWN_KIND("unknown-kind"),
+    }
 
     /**
      * 一条 `agent-artifact` 产物元数据（§6.7）。
@@ -194,6 +227,22 @@ class AgentSessionRegistry(
     private val approvals = ConcurrentHashMap<Key, MutableList<ApprovalRecord>>()
     private val cancels = ConcurrentHashMap<Key, MutableList<CancelRecord>>()
     private val artifacts = ConcurrentHashMap<Key, MutableList<ArtifactRecord>>()
+    /**
+     * 审批回执的**授权门禁**：宿主侧唯一一处决定"这条 ack 算不算数"的地方。
+     *
+     * ## fail-closed
+     *
+     * `null`（没装判据）**等于拒绝**，不是等于放行：安全边界不能靠"记得接"。控制面在
+     * `init` 里把它装成 [AgentGrantStore.allows] 的 `requireApproval` 分支（同一个
+     * `:core` 判据），没装上的进程（例如只读诊断工具）就只能收到"拒绝"这一种处理。
+     *
+     * ## 为什么放在台账而不是接收侧
+     *
+     * 两个进程模型（独立 agentNode、桌面端内嵌控制面）都由**同一个** [AgentSessionRegistry]
+     * 实例同时承担收发记账；门禁装在这里，"两边各判一次"的分叉才不可能发生。
+     */
+    var approvalAuthority: ((ApprovalRecord) -> Boolean)? = null
+
     /** `agent-ack` 的键是 `(nodeId, ackOf)` —— `ackOf` 是被确认的 msgId，不是 sessionId。 */
     private val acks = ConcurrentHashMap<Key, AckRecord>()
     private val ackOrder = ConcurrentLinkedQueue<Key>()
@@ -389,25 +438,67 @@ class AgentSessionRegistry(
     }
 
     /**
-     * 用 §6.8 的回执推进审批状态。
+     * 用 §6.8 的回执推进审批状态，并返回**它到底生效了没有**。
      *
      * `ackOf` 是 `approvalId` 时才有意义；找不到对应审批（例如它已经被淘汰）就什么都不做，
      * 而不是凭空造一条 —— 回执描述的是**已经存在**的那件事。
+     *
+     * ## 两道门（顺序固定）
+     *
+     * 1. **过期**：`expiresAt` 已过 ⇒ 不应用。过期是审批自身的属性，"客户端画不画按钮"
+     *    是另一件事 —— 老客户端/手写帧照样会发来一条迟到的批准，宿主不能替它把时间倒流。
+     * 2. **授权**：[approvalAuthority] 说不行就不行（fail-closed：没装判据也算不行）。
+     *    客户端也有同一份判据（`:core` 的 `canApproveAgentRequest`），但那是**体验**；
+     *    这里是**边界** —— 只要有一版客户端把按钮画错，没有这一门就是越权执行。
+     *
+     * 被拒绝的回执**仍然记账**（`recordAck` 已经写入），只是不推进状态 —— 审计里能读出
+     * `rejected-expired` / `rejected-unauthorized`，而不是"收到了一条什么都没发生的回执"。
      */
-    fun applyAckToApproval(nodeId: String, ackOf: String, kind: String, at: Long = System.currentTimeMillis()) {
+    fun applyAckToApproval(
+        nodeId: String,
+        ackOf: String,
+        kind: String,
+        at: Long = System.currentTimeMillis(),
+    ): AckOutcome {
         val status = when (kind) {
             "approved" -> "approved"
             "allow_session" -> "allow_session"
             "denied" -> "denied"
             "cancelled" -> "cancelled"
-            else -> return
+            // 撤销「本会话免审」：把那条审批从 allow_session 改成 revoked。
+            // 复用 agent-ack 现有的 kind 字段（不新增帧/键），旧宿主不认识这个值时
+            // 只会停在 allow_session —— 与它今天的行为一致，不会更糟。
+            "revoke_session" -> "revoked"
+            else -> return AckOutcome.UNKNOWN_KIND
         }
+        var found = false
+        var applied = false
+        var expired = false
+        var unauthorized = false
         approvals.forEach { (key, list) ->
             if (key.nodeId != nodeId) return@forEach
             synchronized(lockFor(key)) {
                 val i = list.indexOfFirst { it.approvalId == ackOf }
-                if (i >= 0) list[i] = list[i].copy(status = status, updatedAt = at)
+                if (i < 0) return@synchronized
+                found = true
+                val record = list[i]
+                when {
+                    isAgentApprovalExpired(record.expiresAt, at) -> expired = true
+                    approvalAuthority?.invoke(record) != true -> unauthorized = true
+                    else -> {
+                        list[i] = record.copy(status = status, updatedAt = at)
+                        applied = true
+                    }
+                }
             }
+        }
+        return when {
+            applied -> AckOutcome.APPLIED
+            expired -> AckOutcome.REJECTED_EXPIRED
+            unauthorized -> AckOutcome.REJECTED_UNAUTHORIZED
+            // 找到了却既没生效也没被上面两条拦下：只可能是并发淘汰，按"找不到"如实报。
+            found -> AckOutcome.NO_SUCH_APPROVAL
+            else -> AckOutcome.NO_SUCH_APPROVAL
         }
     }
 
@@ -461,21 +552,32 @@ class AgentSessionRegistry(
         recordedAt: Long = System.currentTimeMillis(),
     ) {
         val key = Key(nodeId, ackOf)
+        // 先算效果再落账：审计记录必须带上"生效/为什么没生效"，否则一条被拒绝的回执
+        // 与一条生效的回执在表里长得一模一样（"点了没反应"就是这么无从查起的）。
+        val outcome = applyAckToApproval(nodeId, ackOf, kind, recordedAt)
         synchronized(lockFor(key)) {
             if (!acks.containsKey(key)) ackOrder += key
-            acks[key] = AckRecord(nodeId, ackOf, kind, at, recordedAt, outbound)
+            acks[key] = AckRecord(nodeId, ackOf, kind, at, recordedAt, outbound, outcome.wire)
             while (ackOrder.size > maxAcks) {
                 val doomed = ackOrder.poll() ?: break
                 acks.remove(doomed)
             }
         }
-        applyAckToApproval(nodeId, ackOf, kind, recordedAt)
         evictIfNeeded()
     }
 
     /** 会话快照，`updatedAt` 降序（最近有动静的排前面），供面板列表直接用。 */
     fun sessions(): List<SessionRecord> =
         sessions.values.sortedByDescending { it.updatedAt }
+
+    /**
+     * 单条会话（找不到就是 null）。
+     *
+     * 审批回执的授权门禁要拿它的 `agentKey`/`wsId` 去查授权台账 —— 授权是按 agent/工作区
+     * 授的，只按 nodeId 判会把"只批了这个 agent"当成"整台设备都能批"（父稿 §3.3 的反面）。
+     */
+    fun sessionOrNull(nodeId: String, sessionId: String): SessionRecord? =
+        sessions[Key(nodeId, sessionId)]
 
     /** 某个会话的事件，按 `cursor` 升序。 */
     fun events(nodeId: String, sessionId: String): List<EventRecord> =

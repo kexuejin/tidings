@@ -12,9 +12,9 @@ import kotlin.test.assertNotNull
 import kotlin.test.assertNull
 import kotlin.test.assertTrue
 import kotlinx.coroutines.CoroutineScope
-import kotlinx.coroutines.delay
 import kotlinx.coroutines.runBlocking
 import com.kapp.tidings.domain.model.NodePhase
+import com.kapp.tidings.testutil.awaitUntil
 
 /**
  * 启动节点**必须真的去广播**，而发现回来的服务**必须真的进状态**。
@@ -121,14 +121,6 @@ class RelayControllerMdnsTest {
         scope = scope,
         version = "relay-test",
     )
-
-    private suspend fun awaitUntil(what: String, condition: () -> Boolean) {
-        val deadline = kotlin.time.TimeSource.Monotonic.markNow()
-        while (!condition()) {
-            if (deadline.elapsedNow().inWholeMilliseconds > TIMEOUT_MS) error("等了 ${TIMEOUT_MS}ms 仍未发生：$what")
-            delay(10)
-        }
-    }
 
     private class RecordingAdvertiser(private val result: Boolean = true) : MdnsAdvertiser {
         var startedWith: Pair<String, Int>? = null

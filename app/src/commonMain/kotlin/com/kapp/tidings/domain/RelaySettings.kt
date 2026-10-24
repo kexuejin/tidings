@@ -77,6 +77,26 @@ data class ScanRangeEntry(
     val source: String = "self", // "self" | "peer"
     val sourceNodeId: String? = null,
     val sourceNick: String? = null,
+    /**
+     * 上一次扫描**结束**的时刻（毫秒）；null = 从来没探过。
+     *
+     * 为什么与 [addedAt] 分开：添加时间回答"我什么时候配的它"，探测时间回答
+     * "它现在还算不算数"。用户配了五个网段之后，唯一想知道的是哪几个探过、探到几个。
+     *
+     * 持久化：它属于 [RelaySettings]，走 `SettingsStore` 的 JSON（不是消息库），
+     * 两个字段都是**有默认值的可选字段** —— 老 settings.json 读进来取 null，
+     * 新 settings.json 被旧构建读到会被 `ignoreUnknownKeys` 忽略，两个方向都兼容，
+     * 既不需要 schema 版本，也不需要 .sqm。
+     */
+    val lastScanAt: Long? = null,
+    /**
+     * 上一次扫描结束时，**该网段内在线**的节点数；null = 从来没探过。
+     *
+     * **0 与 null 是两件事**：0 = 探过了、里面一个都没有；null = 还没探过。
+     * 界面上前者说「扫到 0 个」，后者说「还没探测过」—— 混起来就是把"没做"
+     * 说成"做了但没有"。
+     */
+    val lastFoundCount: Int? = null,
 )
 
 /**

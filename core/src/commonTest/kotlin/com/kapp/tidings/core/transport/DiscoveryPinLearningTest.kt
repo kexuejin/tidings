@@ -9,12 +9,11 @@ import com.kapp.tidings.core.protocol.makeEnvelope
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
+import com.kapp.tidings.core.testutil.awaitAfterSend
 import kotlinx.coroutines.cancel
-import kotlinx.coroutines.delay
 import kotlinx.coroutines.runBlocking
 import kotlin.test.Test
 import kotlin.test.assertEquals
-import kotlin.test.assertTrue
 
 /**
  * task-38：对端资料里带了 `tlsPin` ⇒ 发现层必须把它交给上层固定（**配对带来的 pin**）。
@@ -73,20 +72,27 @@ class DiscoveryPinLearningTest {
         try {
             // 重发而不是只发一次：SharedFlow 没有 replay，订阅之前的帧会被直接丢掉
             // （与 DiscoveryGossipDeliveryTest 同一条纪律，避免全量跑时偶发红）。
-            repeat(150) {
-                if (learned.isNotEmpty()) return@repeat
-                sendEntry(profile("node-b", goodPin))
-                delay(20)
-            }
+            awaitAfterSend(
+                what = "资料里的 pin 必须交给上层固定",
+                send = { sendEntry(profile("node-b", goodPin)) },
+            ) { learned.isNotEmpty() }
             assertEquals(listOf("node-b" to goodPin), learned, "资料里的 pin 必须交给上层固定")
 
             // 负控：形状不对的 pin（TlsPin.parse 不认）**不许**交上去。
+            // 不能"发 50 次坏 pin 再 sleep 一会儿然后断言没学到"——那只是还没到。
+            // 在坏 pin 之后发一条**好** pin，等好 pin 被学到：同一个 UDP 流有序，
+            // 好 pin 到了就证明坏 pin 那一帧早已被处理过（该丢的已经丢了）。
             learned.clear()
-            repeat(50) {
-                sendEntry(profile("node-c", "not-a-pin"))
-                delay(20)
-            }
-            assertTrue(learned.isEmpty(), "坏形状的 pin 绝不许变成\"信任的 pin\"：$learned")
+            sendEntry(profile("node-c-bad", "not-a-pin"))
+            awaitAfterSend(
+                what = "坏形状的 pin 之后连好 pin 都没被学到，无法证明坏 pin 已被处理",
+                send = { sendEntry(profile("node-good", goodPin)) },
+            ) { learned.isNotEmpty() }
+            assertEquals(
+                listOf("node-good" to goodPin),
+                learned,
+                "坏形状的 pin 绝不许变成「信任的 pin」：$learned",
+            )
         } finally {
             discoveryA.stop()
             transportA.stop()

@@ -4,7 +4,9 @@ package com.kapp.tidings.ui.components
 
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
-import androidx.compose.foundation.clickable
+import androidx.compose.foundation.gestures.detectDragGestures
+import androidx.compose.foundation.layout.offset
+import androidx.compose.foundation.selection.selectable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -29,18 +31,32 @@ import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.produceState
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.ImageBitmap
+import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.ui.semantics.Role
+import androidx.compose.ui.unit.IntOffset
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.window.Dialog
+import androidx.compose.ui.window.Popup
+import androidx.compose.ui.window.PopupProperties
 import androidx.compose.ui.window.DialogProperties
+import com.kapp.tidings.core.nowMillis
+import kotlinx.coroutines.CoroutineDispatcher
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.withContext
 import com.kapp.tidings.core.protocol.ScreenEndReasons
 import com.kapp.tidings.core.protocol.ScreenMode
 import com.kapp.tidings.core.protocol.ScreenPhase
@@ -54,6 +70,7 @@ import com.kapp.tidings.generated.resources.screen_remote_view_actual_size
 import com.kapp.tidings.generated.resources.screen_remote_view_connecting
 import com.kapp.tidings.generated.resources.screen_remote_view_consent_accept
 import com.kapp.tidings.generated.resources.screen_remote_view_consent_desc
+import com.kapp.tidings.generated.resources.screen_remote_view_consent_privacy
 import com.kapp.tidings.generated.resources.screen_remote_view_consent_reject
 import com.kapp.tidings.generated.resources.screen_remote_view_consent_title
 import com.kapp.tidings.generated.resources.screen_remote_view_error_capture_ended
@@ -72,10 +89,12 @@ import com.kapp.tidings.generated.resources.screen_remote_view_request_send
 import com.kapp.tidings.generated.resources.screen_remote_view_request_title
 import com.kapp.tidings.generated.resources.screen_remote_view_sharing_hint
 import com.kapp.tidings.generated.resources.screen_remote_view_stop
+import com.kapp.tidings.generated.resources.screen_remote_view_stale
 import com.kapp.tidings.generated.resources.screen_remote_view_stop_viewing
 import com.kapp.tidings.generated.resources.screen_remote_view_title
 import com.kapp.tidings.generated.resources.screen_remote_view_viewer_footer
 import com.kapp.tidings.generated.resources.screen_remote_view_waiting_consent
+import com.kapp.tidings.generated.resources.screen_remote_view_waiting_frames
 import com.kapp.tidings.platform.decodeImageBytes
 import org.jetbrains.compose.resources.painterResource
 import org.jetbrains.compose.resources.stringResource
@@ -91,6 +110,42 @@ import com.kapp.tidings.domain.model.ScreenSessionUiState
  * - Viewer: 全屏实时画面渲染、帧率模式切换、主动结束；
  * - Sharer: 邀请同意/拒绝弹窗、置顶共享中状态条与停止共享。
  */
+
+/**
+ * Viewer 进入 Active 相之后，画面区这一轮该画什么（纯函数，可测）。
+ *
+ * 旧实现 Active 但还没解出第一帧时**什么都不画** —— 整屏纯黑（issue「已连接无帧
+ * 纯黑屏」），用户分不清「正在连」与「已经断了」。新实现：没有帧就画占位
+ * （[RemoteViewBody.WaitingFrames]，「等待画面…」），有帧才画 [RemoteViewBody.Frame]。
+ * 非 Active 相（等同意/连接中）不归它管 —— 那两档由既有相位文案处理。
+ */
+internal enum class RemoteViewBody { WaitingFrames, Frame }
+
+/** 超过这个间隔没有新帧就算「画面暂未更新」（3 秒 ≈ 最慢档 3fps 连续丢三帧）。 */
+internal const val STALE_FRAME_AFTER_MS: Long = 3_000L
+
+internal fun activeFrameBody(hasFrame: Boolean): RemoteViewBody =
+    if (hasFrame) RemoteViewBody.Frame else RemoteViewBody.WaitingFrames
+
+/**
+ * 在后台 dispatcher 上解一帧屏幕画面（issue 9①：帧解码挪出组合期）。
+ *
+ * 旧实现 `remember(frameBytes) { decodeImageBytes(it) }` 在**组合期的 UI 线程**上同步
+ * 解码整张位图 —— 3-10fps 的流每帧一次组合期解码，直接吃掉 UI 帧率。这里把解码放到
+ * [dispatcher]（生产是 [Dispatchers.Default]），坏帧折成 null（占位会接管）而不是
+ * 抛异常炸掉 produceState 的协程。
+ *
+ * [decoder] 参数只是测试接缝（默认真实现），让「解码真的不在调用方线程上」
+ * 这条不变量可以被钉住。
+ */
+internal suspend fun decodeFrameBackground(
+    bytes: ByteArray?,
+    dispatcher: CoroutineDispatcher = Dispatchers.Default,
+    decoder: suspend (ByteArray) -> ImageBitmap? = { decodeImageBytes(it) },
+): ImageBitmap? = bytes?.let {
+    withContext(dispatcher) { runCatching { decoder(it) }.getOrNull() }
+}
+
 @Composable
 fun RemoteViewSessionDialog(
     state: ScreenSessionUiState,
@@ -141,6 +196,14 @@ fun RemoteViewSessionDialog(
                         style = MaterialTheme.typography.bodyMedium,
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                     )
+                    // 同意前必须说清的第二件事（issue 9③）：共享的是「整块屏幕」，
+                    // 弹出来的通知、消息预览都会被看到 —— 只说「查看你的屏幕」
+                    // 不足以让用户在点「开始共享」前想到这一层。
+                    Text(
+                        text = stringResource(Res.string.screen_remote_view_consent_privacy),
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
                     Row(
                         modifier = Modifier.fillMaxWidth(),
                         horizontalArrangement = Arrangement.End,
@@ -161,11 +224,13 @@ fun RemoteViewSessionDialog(
         return
     }
 
-    // 2. Sharer 共享中置顶条
+    // 2. Sharer 共享中置顶条 —— **非模态**：共享期间用户还要继续用 App（回聊天给对方指路、
+    //    切页面展示内容）。这里是 Dialog 的时候，一块模态窗把整个界面挡死，"共享屏幕"实际
+    //    变成了"只能盯着一块共享条"。Popup(focusable = false) 不抢焦点、不拦输入，位置仍在顶部。
     if (session.role == ScreenRole.Sharer && (session.phase == ScreenPhase.Preparing || session.phase == ScreenPhase.Connecting || session.phase == ScreenPhase.Active)) {
-        Dialog(
-            onDismissRequest = {},
-            properties = DialogProperties(dismissOnBackPress = false, dismissOnClickOutside = false),
+        Popup(
+            alignment = Alignment.TopCenter,
+            properties = PopupProperties(focusable = false),
         ) {
             Surface(
                 shape = RelayShapes.medium,
@@ -241,17 +306,97 @@ fun RemoteViewSessionDialog(
                         )
                     }
                 } else {
+                    // 帧解码挪出组合期（issue 9①）：produceState 在后台 dispatcher 解码，
+                    // 解出的 ImageBitmap 缓存在 state 里 —— 下一帧解码期间上一帧继续显示
+                    // （produceState 换 key 重启 producer 时 value 不清空），不会黑一下。
                     val frameBytes = state.latestFrameBytes
-                    val bitmap = remember(frameBytes) {
-                        frameBytes?.let { decodeImageBytes(it) }
+                    val bitmap by produceState<ImageBitmap?>(initialValue = null, frameBytes) {
+                        value = decodeFrameBackground(frameBytes)
                     }
-                    if (bitmap != null) {
-                        Image(
-                            bitmap = bitmap,
-                            contentDescription = stringResource(Res.string.screen_remote_view_title, session.peerName),
-                            contentScale = if (zoomActualSize) ContentScale.None else ContentScale.Fit,
-                            modifier = Modifier.fillMaxSize(),
-                        )
+                    // 判定走纯函数 activeFrameBody（可测）：有帧画帧，没帧画占位。
+                    val frame = if (activeFrameBody(hasFrame = bitmap != null) == RemoteViewBody.Frame) {
+                        bitmap
+                    } else {
+                        null
+                    }
+
+                    // 画面新鲜度（issue「冻结帧与实时不可分」）：帧停了之后画面会一直停在最后
+                    // 一帧上，与"对方没动"完全一样。原型把「画面暂未更新」明确列为与「正在连接」
+                    // 不同的一态。这里只在观看窗本地记账（不新开领域状态）：最近一次拿到帧的时刻
+                    // 与"现在"的差超过 [STALE_FRAME_AFTER_MS] 就盖一条提示。
+                    var lastFrameAt by remember { mutableStateOf(nowMillis()) }
+                    LaunchedEffect(frameBytes) {
+                        if (frameBytes != null) lastFrameAt = nowMillis()
+                    }
+                    var staleSeconds by remember { mutableStateOf(0) }
+                    LaunchedEffect(frame != null) {
+                        while (true) {
+                            delay(1_000)
+                            staleSeconds = ((nowMillis() - lastFrameAt) / 1_000L).toInt()
+                        }
+                    }
+
+                    // 「100%」档的平移（issue「1:1 看不到别处」）：ContentScale.None 之后画面
+                    // 只显示中心一块，没有手势就永远停在那儿 —— 比「适应窗口」更没用。
+                    var pan by remember { mutableStateOf(Offset.Zero) }
+
+                    if (frame != null) {
+                        Box(
+                            modifier = Modifier
+                                .fillMaxSize()
+                                .then(
+                                    if (zoomActualSize) {
+                                        Modifier.pointerInput(Unit) {
+                                            detectDragGestures { _, dragAmount -> pan += dragAmount }
+                                        }
+                                    } else {
+                                        Modifier
+                                    }
+                                ),
+                        ) {
+                            Image(
+                                bitmap = frame,
+                                contentDescription = stringResource(Res.string.screen_remote_view_title, session.peerName),
+                                contentScale = if (zoomActualSize) ContentScale.None else ContentScale.Fit,
+                                modifier = Modifier
+                                    .fillMaxSize()
+                                    .offset { IntOffset(pan.x.toInt(), pan.y.toInt()) },
+                            )
+                            if (staleSeconds * 1_000L >= STALE_FRAME_AFTER_MS) {
+                                Surface(
+                                    color = Color.Black.copy(alpha = 0.72f),
+                                    shape = RelayShapes.medium,
+                                    modifier = Modifier
+                                        .align(Alignment.Center)
+                                        .padding(LocalAppSpacing.current.lg),
+                                ) {
+                                    Text(
+                                        text = stringResource(Res.string.screen_remote_view_stale, staleSeconds),
+                                        color = Color.White,
+                                        style = MaterialTheme.typography.bodyMedium,
+                                        modifier = Modifier.padding(
+                                            horizontal = LocalAppSpacing.current.lg,
+                                            vertical = LocalAppSpacing.current.md,
+                                        ),
+                                    )
+                                }
+                            }
+                        }
+                    } else {
+                        // 已连接但第一帧还没到/没解出来：画占位（issue 9②），
+                        // 不能什么都不画 —— 整屏纯黑与「断了」无法区分。
+                        Column(
+                            modifier = Modifier.align(Alignment.Center),
+                            horizontalAlignment = Alignment.CenterHorizontally,
+                            verticalArrangement = Arrangement.spacedBy(LocalAppSpacing.current.lg),
+                        ) {
+                            CircularProgressIndicator(color = Color.White)
+                            Text(
+                                text = stringResource(Res.string.screen_remote_view_waiting_frames),
+                                color = Color.White,
+                                style = MaterialTheme.typography.bodyLarge,
+                            )
+                        }
                     }
                 }
 
@@ -341,7 +486,9 @@ fun RemoteViewSessionDialog(
                         IconButton(
                             onClick = onStop,
                             modifier = Modifier
-                                .size(36.dp)
+                                // 48dp 触达（视觉圆仍由 background 画在 IconButton 的默认盒子里）：
+                                // 远程查看是全屏覆盖层，关闭是唯一出口，36dp 在手持时点不到。
+                                .size(48.dp)
                                 .background(Color.White.copy(alpha = 0.2f), CircleShape),
                         ) {
                             Icon(
@@ -391,11 +538,15 @@ fun RemoteViewSessionDialog(
                 // 底部说明行：原型 d32-viewscreen 底部那一句（"只看画面、不能操作"）。
                 Text(
                     text = stringResource(Res.string.screen_remote_view_viewer_footer),
-                    color = Color.White.copy(alpha = 0.7f),
+                    color = Color.White.copy(alpha = 0.85f),
                     style = MaterialTheme.typography.labelSmall,
+                    // 这行压在**任意**画面内容上：白字落在亮色画面（浅色主题的文档、
+                    // 白色终端）上会消失。加一层深色底是唯一不依赖内容颜色的做法。
                     modifier = Modifier
                         .align(Alignment.BottomCenter)
-                        .padding(bottom = LocalAppSpacing.current.xl),
+                        .padding(bottom = LocalAppSpacing.current.xl)
+                        .background(Color.Black.copy(alpha = 0.55f), RoundedCornerShape(6.dp))
+                        .padding(horizontal = LocalAppSpacing.current.sm, vertical = LocalAppSpacing.current.xxs),
                 )
             }
         }
@@ -501,7 +652,9 @@ private fun RemoteViewZoomOption(label: String, selected: Boolean, onClick: () -
                 color = if (selected) MaterialTheme.colorScheme.primary else Color.Transparent,
                 shape = RoundedCornerShape(6.dp),
             )
-            .clickable(onClick = onClick)
+            // 分段控件的选中态要进语义树：只靠底色的话，读屏用户听到两个可点文字，
+            // 不知道当前选的是「适应窗口」还是「100%」。
+            .selectable(selected = selected, role = Role.Tab, onClick = onClick)
             .padding(horizontal = LocalAppSpacing.current.md, vertical = LocalAppSpacing.current.xs),
     ) {
         Text(

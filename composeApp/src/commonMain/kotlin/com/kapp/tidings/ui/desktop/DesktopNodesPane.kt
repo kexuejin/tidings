@@ -48,6 +48,7 @@ import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 
 import com.kapp.tidings.domain.RelayUiState
+import com.kapp.tidings.domain.ManualPeerEntry
 import com.kapp.tidings.domain.manualPeerStatuses
 import com.kapp.tidings.core.nowMillis
 import com.kapp.tidings.feature.nodes.NodesScreen
@@ -55,18 +56,24 @@ import com.kapp.tidings.feature.nodes.NodeDetailBody
 import com.kapp.tidings.feature.nodes.NodeListItem
 import com.kapp.tidings.feature.nodes.NodePresence
 import com.kapp.tidings.feature.nodes.AddNodeSheet
+import com.kapp.tidings.feature.nodes.manualEntriesByNodeId
+import com.kapp.tidings.feature.nodes.nodeNameOrder
 import com.kapp.tidings.ui.components.AddNodeAction
 import com.kapp.tidings.ui.components.AppBanner
+import com.kapp.tidings.ui.components.AppButtonSize
+import com.kapp.tidings.ui.components.AppTextButton
 import com.kapp.tidings.ui.components.KindBadge
 import com.kapp.tidings.ui.components.PeerAvatar
 import com.kapp.tidings.ui.components.StatusDot
 import com.kapp.tidings.ui.theme.IconSizes
 import com.kapp.tidings.ui.theme.LocalAppSpacing
+import androidx.compose.material3.minimumInteractiveComponentSize
 import com.kapp.tidings.ui.theme.RelayElevations
 import com.kapp.tidings.ui.theme.accents
 import com.kapp.tidings.generated.resources.Res
 import com.kapp.tidings.generated.resources.desktop_nodes_copy_id
 import com.kapp.tidings.generated.resources.desktop_nodes_local_id
+import com.kapp.tidings.generated.resources.disc_cleanup_unreachable
 import com.kapp.tidings.generated.resources.disc_manual_offline
 import com.kapp.tidings.generated.resources.disc_manual_online
 import com.kapp.tidings.generated.resources.disc_manual_unreachable
@@ -205,6 +212,13 @@ public fun NodesPane(
             if (externalAddNodeRequest > 0) addNodeOpen = true
         }
 
+        // 横幅宿主只有**一个**：整个节点页要么走窄档、要么走宽档，两条分支互斥
+        // （同一个 if/else 决定哪棵子树存在）。
+        //  - 窄档：把整页委托给 `NodesScreen`，横幅由它画（它自己的 `state.banner?.let`）；
+        //  - 宽档：本文件自建双栏、不调 `NodesScreen`，所以横幅只能由下面那行画。
+        // 因此 `state.banner?.let { AppBanner(...) }` **必须**留在 else 分支里：
+        // 抬到 if 之上就成了「窄档时本文件一条 + NodesScreen 一条」的双横幅，
+        // 且两条都带自己的关闭按钮（同一条提示两个 ✕）。
         if (tier == DesktopWindowSizeClass.Compact) {
             Column(Modifier.fillMaxSize()) {
                 // 这里**不要**再画一次 `state.banner`：下面的 `NodesScreen` 自己就会画
@@ -216,6 +230,8 @@ public fun NodesPane(
                     state = state,
                     onAddPeer = controller::addManualPeer,
                     onRemovePeer = controller::removeManualPeer,
+                    // 「连接」已保存但不通的地址：mDNS 行被判重滤掉后，这是唯一能把设备连回来的动作。
+                    onReconnectPeer = controller::reconnectManualPeer,
                     onCleanupUnreachable = controller::removeUnreachableManualPeers,
                     onRetryStart = controller::requestRestart,
                     // 桌面端本来就没有相机（`DesktopPlatform.cameraGate` 直接抛 Unsupported），
@@ -245,6 +261,9 @@ public fun NodesPane(
                         showCount = showNodeCountInPane,
                         onSelect = { entry -> selectedKey = entry.key },
                         onAddNode = { addNodeOpen = true },
+                        // 「清理没有回应的」与手机列表同一条出路：只在真有死地址时出现。
+                        onCleanupUnreachable = controller::removeUnreachableManualPeers,
+                        unreachableCount = entries.count { it.never },
                         modifier = Modifier
                             .width(DesktopMetrics.SIDEBAR_PX.dp)
                             .fillMaxHeight(),
@@ -255,6 +274,11 @@ public fun NodesPane(
                         now = now,
                         onSetPeerRemark = onSetPeerRemark,
                         onOpenChat = onOpenChat,
+                        // 「移除节点」与手机详情同一颗（`NodeDetailBody` 内带确认框，
+                        // 只对有手动记录的行出现）。
+                        onRemovePeer = controller::removeManualPeer,
+                        // 「连接」：手动保存过、当前不通的地址（mDNS 行被判重滤掉后的唯一出路）。
+                        onReconnectPeer = controller::reconnectManualPeer,
                         modifier = Modifier
                             .weight(1f)
                             .fillMaxHeight(),
@@ -265,12 +289,13 @@ public fun NodesPane(
         // **宽档的添加节点弹层。** 与 `NodesScreen` 里那份是同一个组件（`AddNodeSheet`），
         // 不重写：扫码两个回调传 null —— 桌面端没有相机栈，传了只会多出一个点下去报错的
         // 按钮；组件在 null 时如实写「这台设备扫不了」并把路引到填地址。
+        // **这里不关弹层**：连接是异步握手，关早了弹层里那套"超时红字 + 原地重试"
+        // 就永远走不到；成功关层由弹层自己判（节点表里出现目标即收）。
         if (addNodeOpen) {
             AddNodeSheet(
                 state = state,
                 onConnect = { host, port ->
                     controller.addManualPeer(host, port)
-                    addNodeOpen = false
                 },
                 onDismiss = { addNodeOpen = false },
             )
@@ -290,11 +315,15 @@ public fun NodesPane(
 /**
  * 节点表 + 「只有地址、从没接通」的手动条目，合成一份列表。
  *
- * 顺服原型 `sideNodes` 的口径：**一条列表**，不分组。已知节点保持 `state.peers` 的顺序
- * （它在别处已经按「在线优先 / 最近活跃」排过），死地址追加在末尾 —— 原型的 `allNodes()`
- * 也是这个顺序。
+ * 一条列表，不分组。排序与手机端**同一把**（`NodesScreen` 的口径：
+ * 在线 → 离线 → 没有回应，档内按昵称）—— 同一批数据两个壳必须同一副面孔。
  */
-private fun nodeEntries(state: RelayUiState): List<NodeListItem> {
+internal fun nodeEntries(state: RelayUiState): List<NodeListItem> {
+    val statuses = manualPeerStatuses(state.settings.manualPeers, state.peers)
+    // 手动地址 ↔ 节点表的对应关系与手机端**同一份**（[manualEntriesByNodeId]）。
+    // 上一版这里把每个对端的 `manualEntry` 硬置 `null`，于是「已经握过手的手动地址」
+    // 在桌面右栏详情没有「移除」、在手机上却有 —— 同一行两个壳两副面孔。
+    val manualByNodeId = manualEntriesByNodeId(statuses)
     val known = state.peers.map { peer ->
         NodeListItem(
             key = "peer:${peer.nodeId}",
@@ -310,12 +339,12 @@ private fun nodeEntries(state: RelayUiState): List<NodeListItem> {
             hostName = peer.host,
             platform = peer.platform,
             remark = peer.remark,
-            manual = false,
-            manualEntry = null,
+            manual = manualByNodeId.containsKey(peer.nodeId),
+            manualEntry = manualByNodeId[peer.nodeId],
             lastSeenAt = peer.lastSeenAt,
         )
     }
-    val never = manualPeerStatuses(state.settings.manualPeers, state.peers)
+    val never = statuses
         .filter { it.nodeId == null }
         .map { status ->
             NodeListItem(
@@ -328,7 +357,11 @@ private fun nodeEntries(state: RelayUiState): List<NodeListItem> {
                 never = true,
                 host = status.entry.host,
                 port = status.entry.port,
-                hostName = status.entry.host,
+                // 「主机」是对端**自己声明**的名字；这条地址从没通过，就没有声明可读。
+                // 上一版把用户填的 entry.host 塞进来 —— 那是"怎么连它"，不是"它自称什么"，
+                // 详情页会印出一个像真名其实是输入残片的值。空串让详情页印「—」，
+                // 与手机端同一口径。
+                hostName = "",
                 platform = "",
                 // 从没接通过：没有备注可问，三个空值而不是编一个占位符。
                 remark = "",
@@ -337,7 +370,12 @@ private fun nodeEntries(state: RelayUiState): List<NodeListItem> {
                 lastSeenAt = 0L,
             )
         }
-    return known + never
+    // 与手机同一把排序（`NodesScreen` 的口径：在线 → 离线 → 没有回应，档内按昵称）。
+    // 上一版「节点表顺序 + 死地址垫底」，同一批数据两个壳两副面孔 ——
+    // 手机把刚离线的排中间，桌面把它压到末尾，并排看就像两份不同的列表。
+    return (known + never).sortedWith(
+        compareBy<NodeListItem> { it.rank }.thenBy(nodeNameOrder) { it.displayName },
+    )
 }
 
 @Composable
@@ -378,6 +416,13 @@ private fun NodeList(
      * 这两处都不在里面 —— 真机上宽窗因此**完全没有添加入口**，用户只能看见已有节点。
      */
     onAddNode: () -> Unit,
+    /**
+     * 「清理没有回应的」（手机列表同一条出路，`NodesScreen` 里那份的桌面孪生）。
+     * `unreachableCount > 0` 时才画 —— 没有死地址时一条管理行都不该占地方。
+     */
+    onCleanupUnreachable: () -> Unit,
+    /** 「没有回应」的条数，画进按钮文案（`disc_cleanup_unreachable` 带 %1$d）。 */
+    unreachableCount: Int,
     modifier: Modifier = Modifier,
 ) {
     val sp = LocalAppSpacing.current
@@ -395,7 +440,7 @@ private fun NodeList(
             AddNodeAction(onClick = onAddNode, modifier = Modifier.padding(end = sp.xs))
         }
         LazyColumn(
-            modifier = Modifier.fillMaxSize(),
+            modifier = Modifier.weight(1f),
             contentPadding = PaddingValues(horizontal = sp.sm, vertical = sp.xs),
             verticalArrangement = Arrangement.spacedBy(sp.xxs),
         ) {
@@ -406,6 +451,17 @@ private fun NodeList(
                     onClick = { onSelect(entry) },
                 )
             }
+        }
+        if (unreachableCount > 0) {
+            AppTextButton(
+                text = stringResource(Res.string.disc_cleanup_unreachable, unreachableCount),
+                onClick = onCleanupUnreachable,
+                // 命中区 48dp：与手机端同一条无障碍下限。
+                modifier = Modifier
+                    .minimumInteractiveComponentSize()
+                    .padding(horizontal = sp.sm, vertical = sp.xs),
+                size = AppButtonSize.Small,
+            )
         }
     }
 }
@@ -495,7 +551,7 @@ private val NodeDetailAvatarSize = 72.dp
 /**
  * 头像 + 右下角状态点。
  *
- * `PeerAvatar` 与 `StatusDot` 都没有 `modifier` 形参（`ui/components/Common.kt:140/162`），
+ * `PeerAvatar` 与 `StatusDot` 都没有 `modifier` 形参（见 `ui/components/Common.kt` 里各自的声明），
  * 只能用一个 `Box` 把点叠在头像右下角。`.av.xl .p`（`:302`）是 18px 实心圆 + 2px 的
  * `--surface` 描边 —— 那圈描边让点在大头像上不与头像底色糊在一起，所以只有大头像
  * （[ringed]）才补它；列表里的 10px 小点按原型本来就没有描边。
@@ -548,6 +604,10 @@ private fun NodeDetailPane(
     now: Long,
     onSetPeerRemark: (String, String) -> Unit,
     onOpenChat: (String) -> Unit,
+    /** 「移除节点」确认后直通 `controller::removeManualPeer`（见 [NodeDetailBody]）。 */
+    onRemovePeer: (ManualPeerEntry) -> Unit,
+    /** 「连接」一条已保存但不通的手动地址（见 `RelayController.reconnectManualPeer`）。 */
+    onReconnectPeer: ((ManualPeerEntry) -> Unit)? = null,
     modifier: Modifier = Modifier,
 ) {
     if (entry == null) {
@@ -561,11 +621,14 @@ private fun NodeDetailPane(
         return
     }
     // **手机与桌面共用同一个详情面板**（`NodeDetailBody`）：头部 + 备注卡 + 详细信息卡
-    // + 发消息，四处都只有一份实现。桌面这里只多一层"没有选中项"的空态。
+    // + 发消息 + 管理动作（复制 / 移除），四处都只有一份实现。桌面这里只多一层
+    // "没有选中项"的空态。
     NodeDetailBody(
         item = entry,
         onSetPeerRemark = onSetPeerRemark,
         onOpenChat = onOpenChat,
+        onRemovePeer = onRemovePeer,
+        onReconnectPeer = onReconnectPeer,
         now = now,
         modifier = modifier,
     )

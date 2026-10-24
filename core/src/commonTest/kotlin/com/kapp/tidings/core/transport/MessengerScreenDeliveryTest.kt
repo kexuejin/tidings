@@ -9,11 +9,12 @@ import com.kapp.tidings.core.protocol.Envelope
 import com.kapp.tidings.core.protocol.MsgTypes
 import com.kapp.tidings.core.protocol.Profile
 import com.kapp.tidings.core.protocol.makeEnvelope
+import com.kapp.tidings.core.testutil.awaitAfterSend as sharedAwaitAfterSend
+import com.kapp.tidings.core.testutil.awaitTrue as sharedAwaitTrue
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.cancel
-import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.runBlocking
 import kotlinx.serialization.json.JsonObject
@@ -58,13 +59,31 @@ private fun relayProfile(nodeId: String) = Profile(
  */
 class MessengerScreenDeliveryTest {
 
-    private suspend fun awaitTrue(ms: Long = 2_000, what: String, cond: () -> Boolean) {
-        val deadline = com.kapp.tidings.core.nowMillis() + ms
-        while (com.kapp.tidings.core.nowMillis() < deadline) {
-            if (cond()) return
-            delay(20)
-        }
-        assertTrue(false, what)
+    /**
+     * 等条件成立（超时即失败）。转发到 testutil 的唯一轮询实现 —— 本文件原来自带
+     * 「自己算 deadline + 末尾 assertTrue(false)」的第二份写法。
+     */
+    private suspend fun awaitTrue(ms: Long = 2_000, what: String, cond: suspend () -> Boolean) =
+        sharedAwaitTrue(what = what, timeoutMs = ms, condition = cond)
+
+    /**
+     * **订阅/泵探针**：重发一个普通 msg 帧直到它被 messenger 投递上来。
+     *
+     * 为什么需要它：夹具的 collect 与 messenger.start 都是异步挂订阅，而 UDP + 无 replay
+     * 的 SharedFlow 会**丢掉订阅之前**的帧。原实现用固定等待赌"已经挂好了"；这里改成
+     * 重发到收到 —— 反正真机上普通消息本来就是可靠重发的。
+     */
+    private suspend fun probePump(fx: Fixture, from: String, id: String) {
+        val probe = makeEnvelope(
+            type = MsgTypes.MSG,
+            from = from,
+            payload = Codec.textPayload("pump-probe"),
+            id = id,
+        )
+        sharedAwaitAfterSend(
+            what = "消息泵没起来：探针 msg 一直没被投递，后面的投屏断言无法成立",
+            send = { fx.peerTransport.send(Codec.encodeToBytes(probe), "127.0.0.1", fx.selfTransport.boundPort) },
+        ) { fx.delivered.any { it.id == id } }
     }
 
     private class Fixture(scope: CoroutineScope) {
@@ -116,7 +135,8 @@ class MessengerScreenDeliveryTest {
         val fx = Fixture(scope)
         fx.start(peerIp = "127.0.0.1")
         fx.messenger.start(scope)
-        delay(150)
+        // 等"泵真的把一帧普通消息投上来"，再谈投屏帧 —— 不再用固定等待赌订阅挂好了。
+        probePump(fx, from = "node-a", id = "pump-probe-1")
 
         try {
             val env = makeEnvelope(
@@ -146,7 +166,18 @@ class MessengerScreenDeliveryTest {
         // 注册表里存的是别的地址：回环报文的真实源 127.0.0.1 与之不符 ⇒ 漂移。
         fx.start(peerIp = "10.9.9.9")
         fx.messenger.start(scope)
-        delay(150)
+        // 探针必须来自一个**地址正确**的节点（node-c 指向 127.0.0.1）：它会被投递，
+        // 从而证明"泵在处理帧"。node-a 仍是漂移来源（注册地址 10.9.9.9），
+        // 于是"scr-2 没被投递"是确定的结论，而不是"600ms 内还没到"。
+        fx.registry.touch(
+            "node-c",
+            "127.0.0.1",
+            fx.peerTransport.boundPort,
+            relayProfile("node-c"),
+            profileTs = 1_000,
+            confirmed = true,
+        )
+        probePump(fx, from = "node-c", id = "pump-probe-2")
 
         try {
             val env = makeEnvelope(
@@ -157,16 +188,17 @@ class MessengerScreenDeliveryTest {
             )
             fx.peerTransport.send(Codec.encodeToBytes(env), "127.0.0.1", fx.selfTransport.boundPort)
 
-            // 「不作答」没法断言"永远没有"，只能断言一个短窗口里没有；
-            // 窗口与上面用例的等待同量级，够真路径跑三趟。
-            delay(600)
+            // 「不作答」的确定性来自**顺序**：探针 node-c 之后，node-a 那一帧也早已被处理过
+            // （同一条 UDP 流进同一个泵），所以"没投递 / 没 ACK"是结论而非"窗口里还没到"。
             assertTrue(
                 fx.delivered.none { it.id == "scr-2" },
                 "漂移来源的 screen 帧被投递了：等于把未验证来源当已握手节点",
             )
+            // 只断言**这一帧**没被 ACK：泵里还有上面那帧探针（它本来就该被 ACK），
+            // 整表为空会变成"探针不许被 ACK"的假断言。
             assertTrue(
-                fx.acks.isEmpty(),
-                "漂移来源的 screen 帧回了 ACK：告诉冒名者这个节点活着，违反 screen 的授权纪律",
+                fx.acks.none { it == "scr-2" },
+                "漂移来源的 screen 帧回了 ACK：告诉冒名者这个节点活着，违反 screen 的授权纪律（acks=${fx.acks}）",
             )
         } finally {
             fx.stop()
@@ -180,7 +212,7 @@ class MessengerScreenDeliveryTest {
         val fx = Fixture(scope)
         fx.start(peerIp = "127.0.0.1")
         fx.messenger.start(scope)
-        delay(150)
+        probePump(fx, from = "node-a", id = "pump-probe-3")
 
         try {
             val env = makeEnvelope(
@@ -194,7 +226,8 @@ class MessengerScreenDeliveryTest {
             awaitTrue(what = "第一帧没有被投递") { fx.delivered.any { it.id == "scr-3" } }
             fx.peerTransport.send(bytes, "127.0.0.1", fx.selfTransport.boundPort)
             awaitTrue(what = "重复帧也要回第二个 ACK（对端只认 ACK 停止重传）") { fx.acks.size >= 2 }
-            delay(300)
+            // ACK 由同一条处理路径产生（先 ACK → 去重 → 投递），第二个 ACK 已到 ⇒ 第二帧的
+            // 投递判定也早已做完 ⇒ 此刻数投递次数是确定的，不需要再等一个静默窗口。
             assertEquals(
                 1, fx.delivered.count { it.id == "scr-3" },
                 "重复帧被投递了两次：同意弹窗会被重放帧弹第二次",

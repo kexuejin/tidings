@@ -14,6 +14,10 @@ import kotlinx.cinterop.reinterpret
 import kotlinx.cinterop.toKString
 import kotlinx.cinterop.value
 import platform.Foundation.NSApplicationSupportDirectory
+import platform.Foundation.NSBundle
+import platform.Foundation.NSURL
+import platform.UIKit.UIApplication
+import platform.UIKit.UIApplicationOpenSettingsURLString
 import platform.Foundation.NSCachesDirectory
 import platform.Foundation.NSFileManager
 import platform.Foundation.NSHomeDirectory
@@ -48,6 +52,33 @@ import platform.posix.sockaddr_in
  *   真正的后台到达需要 APNs（P5），这是平台限制而不是实现偷懒。
  */
 class IosAppPlatform : AppPlatform, QrPreviewProvider {
+
+    /**
+     * 从 **Info.plist** 读构建版本（CFBundleShortVersionString）。
+     *
+     * 拿不到就返回 null（而不是编一个）：更新页拿当前版本跟远端比大小，编一个会让用户
+     * 永远看到同一个旧版本号 —— 那正是这个字段存在的理由。
+     */
+    override val appVersion: String? = runCatching {
+        (NSBundle.mainBundle.infoDictionary?.get("CFBundleShortVersionString") as? String)
+            ?.takeIf { it.isNotBlank() }
+    }.getOrNull()
+
+    /**
+     * 「去系统设置」：打开本应用的设置页（iOS 只给这一条系统级入口）。
+     *
+     * 返回 false 的情形：模拟器/极简系统上 URL 打不开、或系统不给本应用建设置页 ——
+     * 界面据此不画那颗按钮，而不是画一颗点了没反应的。
+     *
+     * **未编译验证**：本机没有 iOS 工具链。
+     */
+    override val canOpenAppSettings: Boolean = true
+
+    override fun openAppSettings(): Boolean = runCatching {
+        val url = NSURL(string = UIApplicationOpenSettingsURLString)
+        UIApplication.sharedApplication.openURL(url, options = emptyMap<Any?, Any>(), completionHandler = null)
+        true
+    }.getOrDefault(false)
 
     override val dataDirectory: DataDirectoryProvider = object : DataDirectoryProvider {
         // 容器内两条**真实**目录，路径每次现算、顺便建出来 —— 与 Android 的

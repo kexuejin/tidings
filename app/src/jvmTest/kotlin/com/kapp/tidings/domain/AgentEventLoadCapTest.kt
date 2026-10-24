@@ -8,10 +8,10 @@ import com.kapp.tidings.domain.model.AgentSessionKey
 import com.kapp.tidings.domain.model.AgentSessionUi
 import com.kapp.tidings.db.RelayDatabase
 import com.kapp.tidings.platform.InMemoryAppPlatform
+import com.kapp.tidings.testutil.awaitUntil
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.cancel
-import kotlinx.coroutines.delay
 import kotlinx.coroutines.runBlocking
 import kotlin.test.AfterTest
 import kotlin.test.BeforeTest
@@ -233,7 +233,15 @@ class AgentEventLoadCapTest {
                 agentStore = recording,
             )
             controller.agentCtl.handleRestoreAgentData()
-            runBlocking { delay(100) }
+            // 恢复走 `scope.launch`：轮询等到**状态里真的出现这个会话**，不用固定 sleep 赌
+            // "差不多读完了"（AGENTS §4）。轮询助手是模块共享的那一份（testutil/Await.kt）。
+            // 注意不能等 lastLimit：它是在调用 store 之前记下的，比状态落地早 —— 等它就会
+            // 在慢机器上抢跑（实测全量并发时这里抛 KeyMissing）。
+            runBlocking {
+                awaitUntil("恢复完成（状态里出现该会话，且条数已收敛）") {
+                    controller.state.value.agentEvents[AgentSessionKey(peerA, "s-1")]?.size == 200
+                }
+            }
 
             // 第一断：调用点传的就是收帧路径那个常量。传 Int.MAX_VALUE 时这里红，
             // 而上面三条（测 store）全绿 —— 这正是「缺陷修在 store、接线没修」的形态。

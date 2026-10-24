@@ -36,9 +36,11 @@ import com.kapp.tidings.generated.resources.r2_set_avatar_mode_initial
 import com.kapp.tidings.generated.resources.r2_set_avatar_mode_upload
 import com.kapp.tidings.generated.resources.set_avatar_change
 import com.kapp.tidings.generated.resources.set_avatar_file_meta
+import com.kapp.tidings.generated.resources.set_avatar_picked_label
 import com.kapp.tidings.ui.theme.LocalAppSpacing
 import com.kapp.tidings.ui.theme.RelayElevations
 import com.kapp.tidings.ui.theme.RelayShapes
+import kotlin.math.pow
 import org.jetbrains.compose.resources.stringResource
 
 /**
@@ -99,6 +101,46 @@ object AvatarPalette {
 
     fun resolveAnimal(avatar: Int): String? =
         if (avatar in 0..AVATAR_ANIMAL_MAX_VALUE) ANIMALS[animalIndex(avatar)] else null
+
+    // ---------------------------------------------------------------------
+    // 首字前景：按底色亮度二选一
+    // ---------------------------------------------------------------------
+
+    /**
+     * 「昵称首字」前景色随底色亮度切换的**阈值**（WCAG 相对亮度）。
+     *
+     * 为什么是 0.1791：纯黑与纯白两条对比度曲线在那里相交 ——
+     * 黑字为 `20 × (L + 0.05)`、白字为 `1.05 / (L + 0.05)`，两者相等时
+     * `(L + 0.05)² = 0.0525` ⇒ `L = 0.1791`，交点对比度 ≈ **4.58:1**。
+     * 于是"亮度高于它用黑字、低于它用白字"对**任意**底色都保证 ≥ 4.58:1
+     * （小字门槛 4.5:1），不必逐个调色板去凑。
+     */
+    const val INK_SWITCH_LUMINANCE: Float = 0.1791f
+
+    /**
+     * 头像上**首字**的前景色。
+     *
+     * 原先固定写 `Color.White`：10 个底色里 5 个不到 4.5:1，其中「杏黄」只有
+     * **2.95:1**；而 `avatar = -1`（首字模式）是**默认形态**，底色又按昵称哈希自动
+     * 分配 —— 没挑过头像的用户就会撞上"首字几乎看不见"。这里按底色亮度二选一，
+     * 推导见 [INK_SWITCH_LUMINANCE]。
+     */
+    fun foregroundOn(bg: Color): Color =
+        if (relativeLuminance(bg) > INK_SWITCH_LUMINANCE) Color.Black else Color.White
+
+    /** WCAG 相对亮度（sRGB → 线性 → 0.2126R + 0.7152G + 0.0722B）。 */
+    fun relativeLuminance(color: Color): Float =
+        0.2126f * linear(color.red) + 0.7152f * linear(color.green) + 0.0722f * linear(color.blue)
+
+    private fun linear(c: Float): Float =
+        if (c <= 0.04045f) c / 12.92f else ((c + 0.055f) / 1.055f).pow(2.4f)
+
+    /** WCAG 对比度（1..21）。测试用它把"够不够看清"变成可算的数。 */
+    fun contrastRatio(a: Color, b: Color): Float {
+        val la = relativeLuminance(a)
+        val lb = relativeLuminance(b)
+        return (maxOf(la, lb) + 0.05f) / (minOf(la, lb) + 0.05f)
+    }
 }
 
 /**
@@ -115,6 +157,8 @@ fun AvatarPicker(
     onAvatarChange: (Int) -> Unit,
     pickedAvatarBytes: ByteArray? = null,
     onRemovePickedAvatar: (() -> Unit)? = null,
+    /** 刚选那张图在系统选择器里的原始文件名（[com.kapp.tidings.domain.RelayUiState.pickedAvatarName]）。选图卡靠它显示真名，不再编「本机图片」。 */
+    pickedAvatarName: String? = null,
     /** 第三档「上传图片」的出口；null = 没接线，该档置灰。 */
     onOpenAvatarPage: (() -> Unit)? = null,
     modifier: Modifier = Modifier,
@@ -161,8 +205,15 @@ fun AvatarPicker(
                             style = MaterialTheme.typography.bodyMedium,
                             fontWeight = FontWeight.SemiBold,
                         )
+                        // 副行只说真话：真实的文件名 + 真实的字节数。之前这里是一句
+                        // 写死的「已选用本机图片」——选了哪一张、多大，用户一概不知。
+                        // 文件名拿不到（旧状态恢复 / 选择器没给名）才退 set_avatar_picked_label。
                         Text(
-                            text = stringResource(Res.string.set_avatar_file_meta),
+                            text = stringResource(
+                                Res.string.set_avatar_file_meta,
+                                pickedAvatarName ?: stringResource(Res.string.set_avatar_picked_label),
+                                formatAvatarByteCount(pickedAvatarBytes.size),
+                            ),
                             style = MaterialTheme.typography.labelSmall,
                             color = MaterialTheme.colorScheme.onSurfaceVariant,
                         )
@@ -355,4 +406,23 @@ private fun AvatarModeSegments(
             }
         }
     }
+}
+
+/**
+ * 头像字节数的可读形态（`512 B` / `128 KiB` / `1.5 MiB`）。
+ *
+ * 「上传头像」页与资料页头像卡（[AvatarPicker]）都显示**同一个真实大小**，所以
+ * 格式化只此一份。整数 KiB 不带假精度的小数（32 KiB 不写成 32.0 KiB）。
+ */
+fun formatAvatarByteCount(bytes: Int): String {
+    if (bytes < 1024) return "$bytes B"
+    val kib = bytes / 1024.0
+    if (kib < 1024.0) return decimalAtMostOne(kib) + " KiB"
+    return decimalAtMostOne(kib / 1024.0) + " MiB"
+}
+
+private fun decimalAtMostOne(value: Double): String {
+    val whole = value.toInt()
+    val tenths = ((value - whole) * 10).toInt()
+    return if (tenths == 0) "$whole" else "$whole.$tenths"
 }

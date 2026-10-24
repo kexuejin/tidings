@@ -59,12 +59,17 @@ import androidx.compose.ui.window.Popup
 import androidx.compose.ui.window.PopupProperties
 import com.kapp.tidings.domain.RelayController
 import com.kapp.tidings.domain.RelayUiState
+import com.kapp.tidings.domain.BannerTone
+import com.kapp.tidings.domain.BannerUi
+import com.kapp.tidings.domain.exportDiagnosticsPackage
 import com.kapp.tidings.core.fs.directoryUsageBytes
 import com.kapp.tidings.core.transport.PartFile
+import com.kapp.tidings.ui.components.AppBanner
 import com.kapp.tidings.feature.settings.SettingsAppearSubpage
 import com.kapp.tidings.feature.settings.SettingsCapsSubpage
 import com.kapp.tidings.feature.settings.SettingsDataSubpage
 import com.kapp.tidings.feature.settings.SettingsDiagSubpage
+import com.kapp.tidings.feature.settings.SettingsUpdateSubpage
 import com.kapp.tidings.feature.settings.SettingsNotifySubpage
 import com.kapp.tidings.feature.settings.SetAvatarPage
 import com.kapp.tidings.feature.settings.SettingsProfileSubpage
@@ -869,9 +874,14 @@ internal fun DesktopSettingsPane(
             host.settingsInitialNav = null
         }
     }
-    // 「上传头像」独立页（台账 `m-set-avatar`）。它挂在身份页的第三档后面，不是左栏的
-    // 第八行 —— 原型左栏也只有四行可点（身份与连接 / 数据与存储 / 桌面 / 输入法自检）。
+    // 「上传头像」独立页（台账 `m-set-avatar`）。它挂在身份页头像分段控件的第三档后面，
+    // 不是左栏的第八行 —— 原型左栏也只有四行可点（身份与连接 / 数据与存储 / 桌面 /
+    // 输入法自检）。**这个开关必须有 true 的写入点**：此前只有 false，
+    // 于是头像页在桌面上永远打不开（与手机侧同一条缺陷）。
     var showAvatarPage by remember { mutableStateOf(false) }
+    // 「输入法自检」从侧栏一级项改为诊断页的二级入口（`SettingsDiagSubpage.onOpenImeSmoke`），
+    // 与手机端同一条路径。这里只留一页级的开关。
+    var showImeSmoke by remember { mutableStateOf(false) }
 
     // 占用数字与移动端同一条路：只在用户真的进这一屏时数一次，且在后台线程。
     val usage by produceState<Pair<Long, Long>?>(null) {
@@ -905,119 +915,165 @@ internal fun DesktopSettingsPane(
                 )
                 VerticalDivider()
                 Box(Modifier.weight(1f).fillMaxHeight()) {
-                    if (showAvatarPage) {
-                        SetAvatarPage(
-                            state = state,
-                            pickedAvatarBytes = state.pickedAvatarBytes,
-                            onPickFromAlbum = controller::pickAvatar,
-                            onRemovePicked = controller::removePickedAvatar,
-                            onSaveProfile = { n, c, d, t, a ->
-                                controller.saveProfile(n, c, d, t, a)
-                            },
-                            onBack = { showAvatarPage = false },
-                        )
-                        return@Box
-                    }
-                    when (selectedNav) {
-                        DesktopSettingsNav.Identity -> {
-                            SettingsProfileSubpage(
-                                state = state,
-                                onSaveProfile = { n, c, d, t, a ->
-                                    controller.saveProfile(n, c, d, t, a)
-                                },
-                                onBack = null,
-                                onOpenAvatarPage = controller::pickAvatar,
-                                onRemovePickedAvatar = controller::removePickedAvatar,
+                    // 反馈位：桌面设置窗此前**没有任何横幅渲染** —— 保存端口/能力/资料
+                    // 的回执（PortsSaved / CapabilitiesSaved / settingsNote）在桌面上
+                    // 什么都没有，用户点完保存看不到一丝变化。与手机首页同一对横幅 +
+                    // 同一条清除路径（controller::dismissBanner / clearSettingsNote）。
+                    Column(Modifier.fillMaxSize()) {
+                        state.banner?.let {
+                            AppBanner(
+                                banner = it,
+                                onDismiss = controller::dismissBanner,
+                                modifier = Modifier.padding(horizontal = LocalAppSpacing.current.lg, vertical = LocalAppSpacing.current.sm),
                             )
                         }
-                        DesktopSettingsNav.TrustedDevices -> {
-                            DesktopTrustedDevicesPanel(
-                                state = state,
-                                controller = controller,
-                                grantStore = host.extension.grantStore,
-                                // 面板的每个决定都经这里回给设备（agent-grant 帧）。此前面板够不到
-                                // 发帧能力，只能写本机台账 ⇒ 用户点完手机看不到。
-                                grantReplySender = host.extension::sendGrantReply,
+                        state.settingsNote?.let { note ->
+                            AppBanner(
+                                banner = BannerUi(note, BannerTone.Info),
+                                onDismiss = controller::clearSettingsNote,
+                                modifier = Modifier.padding(horizontal = LocalAppSpacing.current.lg, vertical = LocalAppSpacing.current.sm),
                             )
                         }
-                        DesktopSettingsNav.Connection -> {
-                            SettingsConnectionSubpage(
-                                state = state,
-                                defaultPort = null,
-                                onSavePorts = { udp, tcp -> controller.savePorts(udp, tcp) },
-                                onRestart = { controller.requestRestart() },
-                                onBack = null,
-                            )
-                        }
-                        DesktopSettingsNav.Desktop -> {
-                            DesktopPrefsPanel(host = host)
-                        }
-                        DesktopSettingsNav.ImeSmoke -> {
-                            ImeSmokePane(onBack = null)
-                        }
-                        DesktopSettingsNav.Transfers -> {
-                            com.kapp.tidings.ui.desktop.DesktopTransferLogPane(
-                                records = state.transferLogs,
-                                onClear = { controller.clearTransferLogs() },
-                                onOpenFile = { path ->
-                                    DesktopReceivedFileActions().open(path)
-                                },
-                            )
-                        }
-                        DesktopSettingsNav.Notifications -> {
-                            SettingsNotifySubpage(
-                                onBack = null,
-                                notificationsEnabled = state.settings.notifyAgentMessages,
-                                onNotificationsEnabledChange = { controller.updateNotifyAgentMessages(it) },
-                                mentionOnlyEnabled = state.settings.notifyMentionOnly,
-                                onMentionOnlyEnabledChange = { controller.updateNotifyMentionOnly(it) },
-                                quietHoursEnabled = state.settings.notifyQuietHours,
-                                onQuietHoursEnabledChange = { controller.updateNotifyQuietHours(it) },
-                            )
-                        }
-                        DesktopSettingsNav.Appearance -> {
-                            SettingsAppearSubpage(
-                                onBack = null,
-                                // 空串 = 取不到 = 跟随系统（见 RelaySettings.themeMode 的注释）。
-                                themeMode = state.settings.themeMode.ifEmpty { THEME_MODE_SYSTEM },
-                                onThemeModeChange = { controller.updateThemeMode(it) },
-                            )
-                        }
-                        DesktopSettingsNav.Capabilities -> {
-                            SettingsCapsSubpage(
-                                onBack = null,
-                                textCapabilityEnabled = state.settings.waitFrameCapability,
-                                onTextCapabilityEnabledChange = { controller.updateWaitFrameCapability(it) },
-                                recordCapabilityEnabled = state.settings.recordMessageCapability,
-                                onRecordCapabilityEnabledChange = { controller.updateRecordMessageCapability(it) },
-                            )
-                        }
-                        DesktopSettingsNav.DataStorage -> {
-                            SettingsDataSubpage(
-                                dataDirectory = controller.dataDirectory,
-                                cacheDirectory = controller.cacheDirectory,
-                                dataUsageBytes = usage?.first,
-                                cacheUsageBytes = usage?.second,
-                                leftoverPartCount = leftoverParts?.size,
-                                leftoverPartBytes = leftoverParts?.sumOf { it.size },
-                                onClearLeftoverParts = {
-                                    leftoverScope.launch {
-                                        withContext(Dispatchers.Default) { controller.clearLeftoverParts() }
-                                        leftoverEpoch.intValue++
+                        Box(Modifier.weight(1f)) {
+                            if (showAvatarPage) {
+                                SetAvatarPage(
+                                    state = state,
+                                    pickedAvatarBytes = state.pickedAvatarBytes,
+                                    onPickFromAlbum = controller::pickAvatar,
+                                    onRemovePicked = controller::removePickedAvatar,
+                                    onSaveProfile = { n, c, d, t, a ->
+                                        controller.saveProfile(n, c, d, t, a)
+                                    },
+                                    onBack = { showAvatarPage = false },
+                                )
+                            } else if (showImeSmoke) {
+                                // 「输入法自检」从侧栏一级项改为诊断页的二级入口（与手机同路径）。
+                                ImeSmokePane(onBack = { showImeSmoke = false })
+                            } else {
+                                when (selectedNav) {
+                                    DesktopSettingsNav.Identity -> {
+                                        SettingsProfileSubpage(
+                                            state = state,
+                                            onSaveProfile = { n, c, d, t, a ->
+                                                controller.saveProfile(n, c, d, t, a)
+                                            },
+                                            onBack = null,
+                                            // 第三档的出口是**换页**：接成 pickAvatar 只会弹
+                                            // 文件框，showAvatarPage 永远没有 true 的写入点。
+                                            onOpenAvatarPage = { showAvatarPage = true },
+                                            onRemovePickedAvatar = controller::removePickedAvatar,
+                                        )
                                     }
-                                },
-                                onBack = null,
-                                onOpenDataDirectory = { openInFileManager(controller.dataDirectory) },
-                                persistMessagesEnabled = state.settings.persistMessages,
-                                onPersistMessagesEnabledChange = { controller.updatePersistMessages(it) },
-                                onClearHistory = { controller.clearAllMessages() },
-                            )
-                        }
-                        DesktopSettingsNav.Diagnostics -> {
-                            SettingsDiagSubpage(
-                                state = state,
-                                onBack = null,
-                            )
+                                    DesktopSettingsNav.TrustedDevices -> {
+                                        DesktopTrustedDevicesPanel(
+                                            state = state,
+                                            controller = controller,
+                                            grantStore = host.extension.grantStore,
+                                            // 面板的每个决定都经这里回给设备（agent-grant 帧）。此前面板够不到
+                                            // 发帧能力，只能写本机台账 ⇒ 用户点完手机看不到。
+                                            grantReplySender = host.extension::sendGrantReply,
+                                        )
+                                    }
+                                    DesktopSettingsNav.Connection -> {
+                                        SettingsConnectionSubpage(
+                                            state = state,
+                                            defaultPort = null,
+                                            onAddScanRange = controller::addScanRange,
+                                            onRemoveScanRange = controller::removeScanRange,
+                                            onTriggerCidrScan = controller::triggerCidrScan,
+                                            onSavePorts = { udp, tcp -> controller.savePorts(udp, tcp) },
+                                            onRestart = { controller.requestRestart() },
+                                            // 网段探测桌面也真的能做（控制器实现现成）：
+                                            // 以前不传，页面上那排按钮按下去什么都不发生。
+                                            onBack = null,
+                                        )
+                                    }
+                                    DesktopSettingsNav.Desktop -> {
+                                        DesktopPrefsPanel(host = host)
+                                    }
+                                    DesktopSettingsNav.Transfers -> {
+                                        com.kapp.tidings.ui.desktop.DesktopTransferLogPane(
+                                            records = state.transferLogs,
+                                            onClear = { controller.clearTransferLogs() },
+                                            onOpenFile = { path ->
+                                                DesktopReceivedFileActions().open(path)
+                                            },
+                                        )
+                                    }
+                                    DesktopSettingsNav.Notifications -> {
+                                        SettingsNotifySubpage(
+                                            onBack = null,
+                                            notificationsEnabled = state.settings.notifyAgentMessages,
+                                            onNotificationsEnabledChange = { controller.updateNotifyAgentMessages(it) },
+                                            mentionOnlyEnabled = state.settings.notifyMentionOnly,
+                                            onMentionOnlyEnabledChange = { controller.updateNotifyMentionOnly(it) },
+                                            quietHoursEnabled = state.settings.notifyQuietHours,
+                                            onQuietHoursEnabledChange = { controller.updateNotifyQuietHours(it) },
+                                        )
+                                    }
+                                    DesktopSettingsNav.Appearance -> {
+                                        SettingsAppearSubpage(
+                                            onBack = null,
+                                            // 空串 = 取不到 = 跟随系统（见 RelaySettings.themeMode 的注释）。
+                                            themeMode = state.settings.themeMode.ifEmpty { THEME_MODE_SYSTEM },
+                                            onThemeModeChange = { controller.updateThemeMode(it) },
+                                        )
+                                    }
+                                    DesktopSettingsNav.Capabilities -> {
+                                        SettingsCapsSubpage(
+                                            onBack = null,
+                                            textCapabilityEnabled = state.settings.waitFrameCapability,
+                                            onTextCapabilityEnabledChange = { controller.updateWaitFrameCapability(it) },
+                                            recordCapabilityEnabled = state.settings.recordMessageCapability,
+                                            onRecordCapabilityEnabledChange = { controller.updateRecordMessageCapability(it) },
+                                        )
+                                    }
+                                    DesktopSettingsNav.DataStorage -> {
+                                        SettingsDataSubpage(
+                                            dataDirectory = controller.dataDirectory,
+                                            cacheDirectory = controller.cacheDirectory,
+                                            dataUsageBytes = usage?.first,
+                                            cacheUsageBytes = usage?.second,
+                                            leftoverPartCount = leftoverParts?.size,
+                                            leftoverPartBytes = leftoverParts?.sumOf { it.size },
+                                            onClearLeftoverParts = {
+                                                leftoverScope.launch {
+                                                    withContext(Dispatchers.Default) { controller.clearLeftoverParts() }
+                                                    leftoverEpoch.intValue++
+                                                }
+                                            },
+                                            onBack = null,
+                                            onOpenDataDirectory = { openInFileManager(controller.dataDirectory) },
+                                            persistMessagesEnabled = state.settings.persistMessages,
+                                            onPersistMessagesEnabledChange = { controller.updatePersistMessages(it) },
+                                            onClearHistory = { controller.clearAllMessages() },
+                                        )
+                                    }
+                                    DesktopSettingsNav.Diagnostics -> {
+                                        SettingsDiagSubpage(
+                                            state = state,
+                                            onBack = null,
+                                            // 桌面没有系统状态栏，inset 那一行是编造读数 —— 不画。
+                                            statusBarInsetShown = false,
+                                            // 与手机同款：打包/分享在这条 suspend 里，页面自己起协程
+                                            // 并把结果（文件名与大小 / 失败原因）落在那一屏上。
+                                            onExportDiagnostics = { controller.exportDiagnosticsPackage() },
+                                            // 「输入法自检」的二级入口（侧栏一级项已删，两端统一走这条）。
+                                            onOpenImeSmoke = { showImeSmoke = true },
+                                        )
+                                    }
+                                    DesktopSettingsNav.Update -> {
+                                        // 与手机同一页、同一个 checker（DefaultAppUpdateChecker 不依赖平台壳）。
+                                        SettingsUpdateSubpage(
+                                            state = state,
+                                            onBack = null,
+                                            appVersion = controller.version,
+                                            onCheckForUpdates = controller::checkForUpdates,
+                                            onOpenUpdate = controller::openUpdateUrl,
+                                        )
+                                    }
+                                }
+                            }
                         }
                     }
                 }

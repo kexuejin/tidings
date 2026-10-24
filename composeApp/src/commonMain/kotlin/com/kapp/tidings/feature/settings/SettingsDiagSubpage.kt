@@ -13,6 +13,7 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -20,7 +21,10 @@ import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.LocalClipboardManager
+import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.unit.dp
+import com.kapp.tidings.core.protocol.Protocol
 import com.kapp.tidings.domain.DiagnosticsExportFailure
 import com.kapp.tidings.domain.DiagnosticsExportResult
 import com.kapp.tidings.domain.RelayUiState
@@ -32,11 +36,16 @@ import com.kapp.tidings.generated.resources.diag_export_failed_write
 import com.kapp.tidings.generated.resources.diag_export_hint
 import com.kapp.tidings.generated.resources.diag_export_package
 import com.kapp.tidings.generated.resources.diag_export_running
+import com.kapp.tidings.generated.resources.ic_copy
+import com.kapp.tidings.generated.resources.ic_eye
 import com.kapp.tidings.generated.resources.ic_info
 import com.kapp.tidings.generated.resources.set_diag_card_title
 import com.kapp.tidings.generated.resources.set_diag_cert_expiry
+import com.kapp.tidings.generated.resources.set_diag_cert_expiry_hint
+import com.kapp.tidings.generated.resources.set_diag_copy_node_id
 import com.kapp.tidings.generated.resources.set_diag_crypto
 import com.kapp.tidings.generated.resources.set_diag_crypto_value
+import com.kapp.tidings.generated.resources.set_diag_crypto_value_lan_cross
 import com.kapp.tidings.generated.resources.set_diag_disabled
 import com.kapp.tidings.generated.resources.set_diag_enabled
 import com.kapp.tidings.generated.resources.set_diag_group_text
@@ -49,12 +58,15 @@ import com.kapp.tidings.generated.resources.set_diag_protocol_value
 import com.kapp.tidings.generated.resources.set_diag_queued
 import com.kapp.tidings.generated.resources.set_diag_selfcheck
 import com.kapp.tidings.generated.resources.set_diag_selfcheck_unavailable
+import com.kapp.tidings.generated.resources.set_diag_selfcheck_unavailable_no_export
 import com.kapp.tidings.generated.resources.set_diag_subtitle
 import com.kapp.tidings.generated.resources.set_diag_title
 import com.kapp.tidings.generated.resources.set_node_id
 import com.kapp.tidings.generated.resources.set_peer_count
+import com.kapp.tidings.generated.resources.settings_copy_done
 import com.kapp.tidings.ui.SectionCard
 import com.kapp.tidings.ui.components.AdaptiveDiagDialog
+import com.kapp.tidings.ui.components.AppIconButton
 import com.kapp.tidings.ui.components.AppOutlinedButton
 import com.kapp.tidings.ui.components.InfoRow
 import com.kapp.tidings.ui.components.formatDay
@@ -62,6 +74,7 @@ import com.kapp.tidings.generated.resources.r2_set_diag_insets_sub
 import com.kapp.tidings.generated.resources.r2_set_diag_insets_title
 import com.kapp.tidings.ui.theme.LocalAppSpacing
 import com.kapp.tidings.ui.theme.RelayElevations
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import org.jetbrains.compose.resources.stringResource
 
@@ -107,8 +120,16 @@ fun SettingsDiagSubpage(
      * 为什么需要它：那个自检页此前是**孤儿页**（`ImeSmokePane` 零处调用），
      * 用户在文档里看到「设置 → 诊断 → 输入法自检」，却没有任何一条路能走到。
      * 桌面端打不进空格这条缺陷，正是**没有它就做不了二分**。
+     *
+     * 它是**独立一行**（NavRow），不嵌在「运行自检」那颗按钮的分支里 ——
+     * 以前嵌在里面，而 `onRunSelfCheck` 全宿主为 null，于是这行入口在任何宿主上都出不来。
      */
     onOpenImeSmoke: (() -> Unit)? = null,
+    /**
+     * 「状态栏 inset」这一行要不要画。这行的语义只存在于**有系统 insets 的平台**（Android）；
+     * 桌面没有状态栏，画一行「24 dp」是编造读数 —— 桌面宿主传 false 整行不画。
+     */
+    statusBarInsetShown: Boolean = true,
 ) {
     var showAdaptiveDiag by rememberSaveable { mutableStateOf(false) }
 
@@ -130,12 +151,44 @@ fun SettingsDiagSubpage(
             title = stringResource(Res.string.set_diag_card_title),
             icon = Res.drawable.ic_info,
         ) {
-            InfoRow(label = stringResource(Res.string.set_node_id), value = state.settings.nodeId)
+            // 节点 ID 那串字没法手抄，行尾给一颗「复制」（行内回执自清，与连接页载荷同一套范式）。
+            val clipboard = LocalClipboardManager.current
+            var nodeIdCopied by remember { mutableStateOf(false) }
+            LaunchedEffect(nodeIdCopied) {
+                if (nodeIdCopied) {
+                    delay(2_000)
+                    nodeIdCopied = false
+                }
+            }
+            KvRow(
+                label = stringResource(Res.string.set_node_id),
+                value = state.settings.nodeId,
+            ) {
+                AppIconButton(
+                    icon = Res.drawable.ic_copy,
+                    // 「复制」两个字在这一屏有两个对象（节点 ID 在这张卡、二维码载荷在连接页），
+                    // 读屏用户听到同一句无法分辨；这里说清复制的是什么。
+                    contentDescription = stringResource(Res.string.set_diag_copy_node_id),
+                    onClick = {
+                        clipboard.setText(AnnotatedString(state.settings.nodeId))
+                        nodeIdCopied = true
+                    },
+                )
+            }
+            if (nodeIdCopied) {
+                Text(
+                    text = stringResource(Res.string.settings_copy_done),
+                    style = MaterialTheme.typography.labelSmall,
+                    color = MaterialTheme.colorScheme.primary,
+                )
+            }
             InfoRow(
                 label = stringResource(Res.string.set_diag_protocol),
                 // 兼容串是 UI 文案而不是数据：留在 Kotlin 里等于把它钉死成不可翻译的
                 // 中文常量，而这里本来就是「没传就用当前协议说明」的默认值。
-                value = protocolSummary ?: stringResource(Res.string.set_diag_protocol_value),
+                // 兜底值从 core 的 Protocol.VERSION 拼出来 —— 以前写死的「v1 · 与 desktop
+                // 0.61.1 兼容」是两处会随实现漂移的死数。
+                value = protocolSummary ?: stringResource(Res.string.set_diag_protocol_value, Protocol.VERSION),
             )
             InfoRow(
                 label = stringResource(Res.string.set_peer_count),
@@ -149,8 +202,21 @@ fun SettingsDiagSubpage(
                 mono = true,
                 emphasize = true,
             )
-            // 原型顺序是「传输加密」在「状态栏 inset」之前（`prototype/relay.html:3959-3960`）。
-            InfoRow(label = stringResource(Res.string.set_diag_crypto), value = stringResource(Res.string.set_diag_crypto_value))
+            // 原型顺序是「传输加密」在「状态栏留白」之前（`prototype/relay.html:3959-3960`）。
+            //
+            // **这一行的值必须与下面那行证书读数同源判档**：本机有 TLS 身份（证书/引脚存在）
+            // 时，跨网那条路走的就是 TLS + 双向 pin，局域网仍是明文 —— 旧代码恒定写
+            // 「无 · 局域网内明文」，配上同屏可见的「证书到期」，等于一张卡自己打自己。
+            val hasTlsIdentity = state.network.selfCertNotAfterMillis != null || state.network.selfTlsPin != null
+            InfoRow(
+                label = stringResource(Res.string.set_diag_crypto),
+                value = stringResource(
+                    when (cryptoSummary(hasTlsIdentity)) {
+                        CryptoSummary.LanOnlyPlaintext -> Res.string.set_diag_crypto_value
+                        CryptoSummary.LanPlaintextCrossTls -> Res.string.set_diag_crypto_value_lan_cross
+                    },
+                ),
+            )
             // 证书到期读数。**只在真有 TLS 身份时画这一行** —— 明文实现 / 身份还没生成时
             // 显示「无」是对的，但画一行「到期：无」不如不画（那会让人以为证书没了）。
             state.network.selfCertNotAfterMillis?.let { notAfter ->
@@ -158,8 +224,17 @@ fun SettingsDiagSubpage(
                     label = stringResource(Res.string.set_diag_cert_expiry),
                     value = formatDay(notAfter),
                 )
+                // 只有日期、没有后果，用户会以为到期那天要做什么；答案是什么都不用做。
+                Text(
+                    text = stringResource(Res.string.set_diag_cert_expiry_hint),
+                    style = MaterialTheme.typography.labelSmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    modifier = Modifier.padding(bottom = LocalAppSpacing.current.xs),
+                )
             }
-            InfoRow(label = stringResource(Res.string.set_diag_inset), value = stringResource(Res.string.set_diag_inset_value))
+            if (statusBarInsetShown) {
+                InfoRow(label = stringResource(Res.string.set_diag_inset), value = stringResource(Res.string.set_diag_inset_value))
+            }
 
             // 原型 `.cardfoot{display:flex;justify-content:flex-end;gap:8px;padding:10px 14px}`
             // （`prototype/relay.html:128`）：一枚**内容宽**的按钮右对齐。
@@ -176,18 +251,18 @@ fun SettingsDiagSubpage(
                         text = stringResource(Res.string.set_diag_selfcheck),
                         onClick = runSelfCheck,
                     )
-                    onOpenImeSmoke?.let { open ->
-                        AppOutlinedButton(
-                            text = stringResource(Res.string.set_diag_ime_smoke),
-                            onClick = open,
-                            modifier = Modifier.padding(start = LocalAppSpacing.current.sm),
-                        )
-                    }
                 }
             } else {
                 // 没有真实动作：不画按钮，只在原位说明这一屏的诚实状态。
+                // 文案按「导出诊断包」接没接分两版 —— 引用一颗不存在的按钮也是说谎。
                 Text(
-                    text = stringResource(Res.string.set_diag_selfcheck_unavailable),
+                    text = stringResource(
+                        if (onExportDiagnostics != null) {
+                            Res.string.set_diag_selfcheck_unavailable
+                        } else {
+                            Res.string.set_diag_selfcheck_unavailable_no_export
+                        },
+                    ),
                     style = MaterialTheme.typography.labelSmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                     modifier = Modifier.padding(top = LocalAppSpacing.current.xs),
@@ -264,6 +339,28 @@ fun SettingsDiagSubpage(
             }
         }
 
+        // 「输入法自检」是**独立一行**（与下面那条「适配对照」同一种 `.navrow`）：
+        // 以前它嵌在「运行自检」按钮的分支里，而 onRunSelfCheck 全宿主为 null，
+        // 于是这行入口在任何宿主上都出不来 —— 文档里写的那条路走不通。
+        val openIme = onOpenImeSmoke
+        if (openIme != null) {
+            Surface(
+                color = MaterialTheme.colorScheme.surface,
+                shape = RoundedCornerShape(16.dp),
+                shadowElevation = RelayElevations.Card,
+                modifier = Modifier.fillMaxWidth(),
+            ) {
+                SettingsNavRow(
+                    // 与桌面侧栏原「输入法自检」项同一枚 ic_eye —— 那一项已并入这条入口。
+                    icon = Res.drawable.ic_eye,
+                    title = stringResource(Res.string.set_diag_ime_smoke),
+                    sub = null,
+                    valText = null,
+                    onClick = openIme,
+                )
+            }
+        }
+
         // 原型的「适配对照」是**卡外**的一条 `.navrow`（`prototype/relay.html:3966-3971`）：
         // `.ni2` 图标块 + `.bv .t1`「适配对照」+ `.t2`「顶部空白 / 导航栏 / 状态栏：真机症状与现状对照」
         // + `.chev`。复用了设置首页那条 `SettingsNavRow`，只把它包进 `.navrow` 自己的
@@ -306,3 +403,24 @@ private fun oneDecimal(value: Double): String {
     val tenths = (value * 10.0).toInt()
     return (tenths / 10).toString() + "." + (tenths % 10).toString()
 }
+
+/**
+ * 「传输加密」这一行当前该说哪一句话。
+ *
+ * 为什么要有这一档：本机**有 TLS 身份**（证书到期 / pin 存在）时，跨网那条路是
+ * TLS + 双向 pin，局域网那条仍是明文 —— 旧代码恒定写「无 · 局域网内明文」，
+ * 与同屏可见的「证书到期」直接矛盾，排障的人会据此得出「跨网在裸奔」的错误结论。
+ *
+ * 抽成纯函数是为了可单测：把入参翻过来，文案必须跟着翻。
+ */
+internal enum class CryptoSummary {
+    /** 没有 TLS 身份：只有局域网明文一条路。 */
+    LanOnlyPlaintext,
+
+    /** 有 TLS 身份：局域网明文 + 跨网 TLS（双向 pin）。 */
+    LanPlaintextCrossTls,
+}
+
+internal fun cryptoSummary(hasTlsIdentity: Boolean): CryptoSummary =
+    if (hasTlsIdentity) CryptoSummary.LanPlaintextCrossTls else CryptoSummary.LanOnlyPlaintext
+

@@ -1,0 +1,29 @@
+# 环境依赖测试的已评审例外。每条必须写清为什么保留，否则下一个人只能猜。
+# 格式： 路径 | A 或 B | 理由（一行）
+# 判据：只有「这条测试的结论本来就必须来自真环境」才允许进这里；
+#       懒得改不是理由，先试 A/B/C 三类处置（见 tools/env-test-scan.py --help）。
+# 扫描器已剥注释：KDoc 里引用的旧代码不会进来。
+
+# ---- core：广播地址是被测纯函数的输入/期望值（不读机器状态）----
+core/src/commonTest/kotlin/com/kapp/tidings/core/protocol/IpAddressTest.kt | A | 255.255.255.255 是纯函数的期望值，不读网卡
+core/src/commonTest/kotlin/com/kapp/tidings/core/transport/DiscoveryTargetsTest.kt | A | 广播地址是构造输入与期望，纯函数
+core/src/commonTest/kotlin/com/kapp/tidings/core/transport/SubnetBroadcastTargetsTest.kt | A | 同上：子网广播地址由 CIDR 算出
+core/src/commonTest/kotlin/com/kapp/tidings/core/transport/UdpTransportBroadcastTest.kt | A | 广播地址正是被测对象（真发送）；时序已改轮询
+core/src/jvmTest/kotlin/com/kapp/tidings/core/transport/LinkCertificateDerTest.kt | A | getByName 只解析字面量 IP（证书 SAN），不查 DNS、不读网卡
+core/src/jvmTest/kotlin/com/kapp/tidings/core/spike/TlsServerSpikeTest.kt | A | 同上：解析证书里的字面量地址
+core/src/commonTest/kotlin/com/kapp/tidings/core/transport/LinkPresenceFromHeartbeatTest.kt | B | delay 在 while(now<deadline) 轮询体内，退出由条件决定，不是盲等
+
+# ---- desktopApp ----
+desktopApp/src/test/kotlin/com/kapp/tidings/desktop/AdvertisedAddressFilterTest.kt | A | getByName 解析 IP 字面量做合成输入，纯判据
+desktopApp/src/test/kotlin/com/kapp/tidings/desktop/AdvertisedAddressesAreWiderThanBroadcastTest.kt | A | 有意读网卡作为独立事实（D 类集成测试），无事实时 fail-soft 并打印跳过原因
+# ---- app ----
+app/src/jvmTest/kotlin/com/kapp/tidings/domain/RelayControllerNetworkTest.kt | A | 命中是回环常量 127.0.0.1 与广播语义 KDoc；断言不读机器状态，该文件属 D 类真 socket 集成
+app/src/commonTest/kotlin/com/kapp/tidings/domain/RelayControllerHelpersTest.kt | A | 255.255.255.255 只在真机取证 KDoc 里；断言是 splitHostPort 的纯函数期望值
+core/src/commonTest/kotlin/com/kapp/tidings/core/transport/LinkDialDiagnosticsTest.kt | B | delay 在 withTimeout { while(...) delay(10) } 轮询体内，退出由条件决定，不是盲等
+core/src/commonTest/kotlin/com/kapp/tidings/core/transport/LinkCloseReasonTest.kt | B | delay 在 while(now<deadline) 轮询体内，退出由条件决定，不是盲等
+core/src/commonTest/kotlin/com/kapp/tidings/core/transport/OfferDeliveryAsyncTest.kt | B | delay 在 withTimeout{while(!条件) delay(20)} 轮询体内，退出条件由条件决定；另一处 delay(60_000) 是 fake 发送器的被测输入（由被测的 offerAttemptTimeoutMs=120 切断），不参与断言同步
+core/src/commonTest/kotlin/com/kapp/tidings/core/transport/MessengerReliabilityTest.kt | B | delay 在 withTimeout{while(!条件) delay(10)} 轮询体内，退出条件由条件决定，不是盲等
+core/src/commonTest/kotlin/com/kapp/tidings/core/transport/LinkAcceptPolicyTest.kt | B | delay(30_000) 在 fake accept 里模拟「空闲但不断」的入站连接，不参与断言同步；可执行替代：awaitCancellation()
+core/src/commonTest/kotlin/com/kapp/tidings/core/session/OutgoingReplayTest.kt | B | 「重放后收端只该有 1 条」判据的固有形态（证明没有第二条必须有静默窗口）；替代方案需协议层序号确认、属生产行为变更，已评估不采纳
+core/src/commonTest/kotlin/com/kapp/tidings/core/transport/NetworkChangeQueueRetryTest.kt | B | 订阅探针的 delay(50) 是**重发间隔**（SharedFlow 无 replay，单发会丢），退出由 seenIds 是否收到决定，不是盲等
+
