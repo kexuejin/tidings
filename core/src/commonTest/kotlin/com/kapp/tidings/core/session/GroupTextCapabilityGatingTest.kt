@@ -22,6 +22,8 @@ import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.cancel
+import kotlinx.coroutines.sync.Mutex
+import kotlinx.coroutines.sync.withLock
 import com.kapp.tidings.core.testutil.awaitTrue
 import com.kapp.tidings.core.transport.QueuedMessage
 import kotlinx.coroutines.runBlocking
@@ -149,18 +151,22 @@ class GroupTextCapabilityGatingTest {
 
     /** 记录每个成员的帧：UDP 没人听 ⇒ 一定走到这条兜底，于是能确定"这个端口的成员收到了什么"。 */
     private class RecordingTcpFallback : TcpFallback {
-        /**
-         * **必须线程安全**：`sendGroupText` 是并发发给每个成员的（fan-out），
-         * 而 `mutableListOf` 的 `+=` 在并发下会丢元素 ——
-         * 真实现象：同一个用例连跑两次，一次丢 `legacy` 的帧、一次丢 `modern` 的，
-         * 失败信息还写着「那一帧没发出去」，看起来像产品缺陷，其实只是夹具丢了。
-         */
-        val frames = java.util.concurrent.CopyOnWriteArrayList<Pair<Int, Envelope>>()
+    /**
+     * **必须线程安全**：`sendGroupText` 是并发发给每个成员的（fan-out），
+     * 而 `mutableListOf` 的 `+=` 在并发下会丢元素 ——
+     * 真实现象：同一个用例连跑两次，一次丢 `legacy` 的帧、一次丢 `modern` 的，
+     * 失败信息还写着「那一帧没发出去」，看起来像产品缺陷，其实只是夹具丢了。
+     *
+     * commonTest 不能碰 java.*（iOS 目标也要编译），用协程 Mutex 守住并发追加；
+     * 读取都发生在协程 join 之后，happens-before 由 Mutex 与 Job 完成语义保证。
+     */
+    private val frameMutex = Mutex()
+    val frames = mutableListOf<Pair<Int, Envelope>>()
 
-        override suspend fun sendAndAwaitAck(host: String, port: Int, envelope: Envelope): Boolean {
-            frames += port to envelope
-            return true
-        }
+    override suspend fun sendAndAwaitAck(host: String, port: Int, envelope: Envelope): Boolean {
+        frameMutex.withLock { frames += port to envelope }
+        return true
+    }
     }
 
     private class Rig(

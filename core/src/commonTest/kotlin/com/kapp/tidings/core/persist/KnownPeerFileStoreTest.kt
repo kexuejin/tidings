@@ -2,6 +2,8 @@
 
 package com.kapp.tidings.core.persist
 
+import com.kapp.tidings.core.fs.openRandomAccess
+import com.kapp.tidings.core.fs.use
 import com.kapp.tidings.core.protocol.Profile
 import com.kapp.tidings.core.testing.createTempDir
 import com.kapp.tidings.core.testing.removeRecursively
@@ -20,6 +22,12 @@ import kotlin.test.assertTrue
  * 不假装在线、不过期太早。
  */
 class KnownPeerFileStoreTest {
+
+    /** commonTest 不能碰 java.*（iOS 目标也要编译），用共享 fs 原语写坏文件。 */
+    private fun writeTextFile(path: String, text: String) {
+        val bytes = text.encodeToByteArray()
+        openRandomAccess(path, forWrite = true).use { it.append(bytes, bytes.size) }
+    }
 
     private fun profile(nodeId: String, nick: String) = Profile(
         nodeId = nodeId,
@@ -90,7 +98,7 @@ class KnownPeerFileStoreTest {
         val dir = createTempDir("relay-known-peers-bad")
         try {
             val path = dir + "/known-peers.json"
-            java.io.File(path).writeText("{not json")
+            writeTextFile(path, "{not json")
             // 读不出来就该当空表 —— 丢的是"记得它是谁"，不是应用能不能启动。
             assertTrue(FileKnownPeerStore(path).load().isEmpty())
         } finally {
