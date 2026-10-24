@@ -7,6 +7,7 @@ import com.kapp.tidings.domain.RelayController
 import com.kapp.tidings.domain.createAgentStore
 import com.kapp.tidings.domain.createMessageStore
 import com.kapp.tidings.domain.createSettingsStore
+import com.kapp.tidings.domain.recovery.IosKeychainRecoveryStore
 import com.kapp.tidings.platform.IosAppPlatform
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -28,6 +29,9 @@ private val controller: RelayController by lazy {
         // 「消息落盘」开关背后必须是真的文件存储，否则它活不过一次重启。
         messageStore = createMessageStore(platform),
         agentStore = createAgentStore(platform),
+        // L0：身份包进钥匙串（本地层 + iCloud 同步层）。收养决策在控制器里
+        //（settings 不存在才收养，Q10），这里只递存取实现。
+        platformRecovery = IosKeychainRecoveryStore(),
     )
     // 通知被点开时，把 showNotification 收到的 focusPeerId 变成一次「定位到这个会话」
     // 的请求（协议 §8）。接在这里，是因为只有这里同时拿得到 platform 与 controller；

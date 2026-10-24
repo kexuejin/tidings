@@ -83,7 +83,8 @@
         android:icon="@mipmap/ic_launcher"
         android:roundIcon="@mipmap/ic_launcher_round"
         android:label="@string/app_name"
-        android:theme="@android:style/Theme.DeviceDefault.Light.NoActionBar">
+        android:theme="@android:style/Theme.DeviceDefault.Light.NoActionBar"
+        android:dataExtractionRules="@xml/data_extraction_rules">
         <!--
             windowSoftInputMode 必须显式声明，否则系统按 SOFT_INPUT_ADJUST_UNSPECIFIED
             处理：真机 dumpsys window shows sim={adjust=pan}，键盘弹起时窗口整体上移而

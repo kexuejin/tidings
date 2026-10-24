@@ -1,0 +1,28 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  备份与迁移规则（身份恢复方案 Q12 裁决）：**显式排除**，把今天 allowBackup=false 的
+  隐式封闭变成显式声明。
+
+  为什么身份与库都不进任何迁移通道：
+  · 云备份（Android 12+ 由本文件控制，与 allowBackup 并列）：恢复身份包里是明文私钥
+    等价物，密钥管理在 Google 侧，违背本仓「无云参与」的边界；
+  · 设备迁移（device-transfer，OEM 换机克隆走这里）：迁移工具是闭源传输面（部分经
+    云中转），私钥进去 = 信任面扩到 OEM；且库与身份分离迁移会造成「有历史但验不了
+    身份」的半残状态。换机一律走设置页的口令加密导出/导入（L1）。
+-->
+<data-extraction-rules>
+    <cloud-backup>
+        <exclude domain="root" path="." />
+        <exclude domain="file" path="." />
+        <exclude domain="database" path="." />
+        <exclude domain="sharedpref" path="." />
+        <exclude domain="external" path="." />
+    </cloud-backup>
+    <device-transfer>
+        <exclude domain="root" path="." />
+        <exclude domain="file" path="." />
+        <exclude domain="database" path="." />
+        <exclude domain="sharedpref" path="." />
+        <exclude domain="external" path="." />
+    </device-transfer>
+</data-extraction-rules>

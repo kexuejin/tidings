@@ -9,6 +9,7 @@ import android.app.Application
 // 带来的便利，也是它掩盖依赖的地方。
 import com.kapp.tidings.R
 import com.kapp.tidings.domain.RelayController
+import com.kapp.tidings.domain.recovery.AndroidMediaRecoveryStore
 import com.kapp.tidings.domain.createAgentStore
 import com.kapp.tidings.domain.createMessageStore
 import com.kapp.tidings.domain.createSettingsStore
@@ -56,6 +57,9 @@ class RelayApplication : Application() {
             // 否则打开开关也只能活到进程结束 —— 界面在骗人。
             messageStore = createMessageStore(platform),
             agentStore = createAgentStore(platform),
+            // L0：身份包写公共 Downloads（KDF(ANDROID_ID) 混淆）。读取失败（A6 属主断裂）
+            // 的兜底是设置页的 L1 导入；收养决策在控制器（settings 不存在才收养，Q10）。
+            platformRecovery = AndroidMediaRecoveryStore(this),
         )
     }
 }
