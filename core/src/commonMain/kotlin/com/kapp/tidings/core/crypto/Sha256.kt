@@ -147,6 +147,23 @@ class Sha256 {
         finalized = false
     }
 
+    /**
+     * 深拷贝当前状态：新实例从**这一刻**的哈希状态继续，原实例不受影响。
+     *
+     * 为什么要有它：HMAC 的 ipad/opad 中间态只需压一次（64 字节 key-pad），
+     * 之后每次 MAC 调用从中间态 [copy] 出发，省掉一半压缩 —— PBKDF2 六十万轮
+     * 就是省出六十万次不必要的块压缩。
+     */
+    fun copy(): Sha256 {
+        check(!finalized) { "已终结的实例没有可拷贝的状态" }
+        val c = Sha256()
+        h.copyInto(c.h)
+        block.copyInto(c.block)
+        c.blockLen = blockLen
+        c.totalBytes = totalBytes
+        return c
+    }
+
     /** 压缩一个 64 字节块到状态字 [h]。 */
     private fun compress(h: IntArray, data: ByteArray, offset: Int) {
         val w = this.w
