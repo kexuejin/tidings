@@ -47,7 +47,7 @@ dependencyResolutionManagement {
     }
 }
 
-rootProject.name = "relay"
+rootProject.name = "tidings"
 
 include(":composeApp")
 include(":androidApp")

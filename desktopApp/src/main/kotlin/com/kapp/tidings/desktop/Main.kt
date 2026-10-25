@@ -39,6 +39,11 @@ import kotlinx.coroutines.runBlocking
 fun main(args: Array<String>) {
     val scope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
     var hostRefLocal: DesktopHost? = null
+
+    // 改名迁移必须先于一切：单实例锁、库、身份全在数据目录里，锁在旧目录上
+    // 等于新旧版本互相看不见（见 migrateLegacyDesktopDirs 的说明）。
+    migrateLegacyDesktopDirs()
+    DesktopLoginItem.migrateLegacyRegistration()
     val defaultDataDir = defaultDataDirectory()
     val defaultCacheDir = defaultCacheDirectory()
 

@@ -7,6 +7,7 @@ import com.kapp.tidings.core.protocol.IpAddressUtils
 import com.kapp.tidings.core.protocol.Ipv6Scope
 import java.awt.FileDialog
 import java.awt.Frame
+import java.io.File
 import java.net.Inet4Address
 import java.net.Inet6Address
 import java.net.NetworkInterface
@@ -113,6 +114,36 @@ internal fun defaultCacheDirectory(): String {
 }
 
 const val DESKTOP_APP_DIR: String = "捎话 Tidings"
+
+/** 应用改名前的目录名；老用户的库与身份都还挂在它下面，见 [migrateLegacyDesktopDirs]。 */
+internal const val LEGACY_DESKTOP_APP_DIR: String = "捎话 Relay"
+
+/**
+ * 一次性目录迁移：目录名来自 [DESKTOP_APP_DIR]，改名后若不搬，老用户升级会当自己是
+ * **全新安装** —— 空库、新 nodeId，旧会话一条不剩。这是改名最贵的静默丢失形态，
+ * 所以迁移是启动序的第一步（必须早于单实例锁：锁文件也在数据目录里，锁在旧目录上
+ * 等于新旧版本互相看不见，两个进程会同写一个库）。
+ *
+ * 只在**新目录不存在**时整目录 rename；两边都有（半迁移）宁可留给用户处置，
+ * 程序不自作主张合并两个库。返回搬成功的 base 目录，供诊断与测试断言。
+ */
+internal fun migrateLegacyDesktopDirs(
+    osName: String = System.getProperty("os.name").orEmpty(),
+    home: String = System.getProperty("user.home") ?: ".",
+    dataHome: String? = System.getenv("XDG_DATA_HOME"),
+    cacheHome: String? = System.getenv("XDG_CACHE_HOME"),
+): List<String> {
+    val bases = if (osName.contains("Mac")) {
+        listOf("$home/Library/Application Support", "$home/Library/Caches")
+    } else {
+        listOf(dataHome ?: "$home/.local/share", cacheHome ?: "$home/.cache")
+    }
+    return bases.mapNotNull { base ->
+        val legacy = File(base, LEGACY_DESKTOP_APP_DIR)
+        val target = File(base, DESKTOP_APP_DIR)
+        if (legacy.isDirectory && !target.exists() && legacy.renameTo(target)) base else null
+    }
+}
 
 /**
  * 真实网卡枚举。

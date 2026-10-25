@@ -235,15 +235,15 @@ X-GNOME-Autostart-enabled=true
 
     private fun currentOs(): DesktopOs = desktopOs(System.getProperty("os.name").orEmpty())
 
-    private fun windowsValueExists(): Boolean = runCatching {
+    private fun windowsValueExists(name: String = WINDOWS_VALUE_NAME): Boolean = runCatching {
         val p = ProcessBuilder(
-            "reg", "query", WINDOWS_RUN_KEY, "/v", WINDOWS_VALUE_NAME,
+            "reg", "query", WINDOWS_RUN_KEY, "/v", name,
         ).redirectErrorStream(true).start()
         p.inputStream.readBytes()
         p.waitFor() == 0
     }.getOrDefault(false)
 
-    private fun windowsSet(enabled: Boolean, command: List<String>): Result<Unit> = runCatching {
+    private fun windowsSet(enabled: Boolean, command: List<String>): Result<Unit> {
         val args = if (enabled) {
             listOf(
                 "reg", "add", WINDOWS_RUN_KEY, "/v", WINDOWS_VALUE_NAME,
@@ -252,9 +252,59 @@ X-GNOME-Autostart-enabled=true
         } else {
             listOf("reg", "delete", WINDOWS_RUN_KEY, "/v", WINDOWS_VALUE_NAME, "/f")
         }
+        return runReg(args)
+    }
+
+    private fun windowsDeleteLegacy(): Result<Unit> = runReg(
+        listOf("reg", "delete", WINDOWS_RUN_KEY, "/v", LEGACY_WINDOWS_VALUE_NAME, "/f"),
+    )
+
+    private fun runReg(args: List<String>): Result<Unit> = runCatching {
         val p = ProcessBuilder(args).redirectErrorStream(true).start()
         val output = p.inputStream.readBytes().decodeToString()
         if (p.waitFor() != 0) error("reg 命令失败：${output.trim()}")
+    }
+
+    // -------------------------------------------------------- 改名迁移（一次性）
+
+    /** 改名前的 LaunchAgent label（与旧 bundleID 同名）。见 [migrateLegacyRegistration]。 */
+    const val LEGACY_MACOS_LABEL = "com.kapp.relay.desktop"
+
+    /** 改名前的 Windows 自启值名。 */
+    const val LEGACY_WINDOWS_VALUE_NAME = "捎话 Relay"
+
+    fun legacyMacosEntryPath(homeDir: String): String =
+        "$homeDir/Library/LaunchAgents/$LEGACY_MACOS_LABEL.plist"
+
+    /**
+     * 一次性自启项迁移。label 改名后老 plist 不搬的后果：每次登录按老 label 启动
+     * **注册时点**的旧命令行（指向旧应用路径），与新 label 各起一个进程 —— 被单实例锁
+     * 拦下来就是「登录时闪一下」，拦不住就是两个写者。所以老 plist 存在时必须处理：
+     * 新项还没注册（说明用户此前开着自启）就按**当前**命令行重注册一份，老的删掉；
+     * 新项已在（用户已自行重开）只删老的。Linux 的文件名不含品牌词，无需迁移。
+     */
+    fun migrateLegacyRegistration(os: DesktopOs = currentOs()) {
+        when (os) {
+            DesktopOs.Macos -> migrateLegacyMacosEntry()
+            DesktopOs.Windows -> {
+                if (!windowsValueExists(LEGACY_WINDOWS_VALUE_NAME)) return
+                if (!windowsValueExists()) setEnabled(true, DesktopOs.Windows)
+                windowsDeleteLegacy()
+            }
+            else -> Unit
+        }
+    }
+
+    /** 见 [migrateLegacyRegistration]；reRegister 抽成参数是为了可测。 */
+    fun migrateLegacyMacosEntry(
+        homeDir: String = System.getProperty("user.home") ?: ".",
+        reRegister: () -> Result<Unit> = { setEnabled(true, DesktopOs.Macos, homeDir, currentCommand()) },
+    ) {
+        val legacy = File(legacyMacosEntryPath(homeDir))
+        if (!legacy.isFile) return
+        val current = entryPath(DesktopOs.Macos, homeDir)?.let(::File) ?: return
+        if (!current.isFile) reRegister()
+        legacy.delete()
     }
 
     const val WINDOWS_RUN_KEY = "HKCU\\Software\\Microsoft\\Windows\\CurrentVersion\\Run"
