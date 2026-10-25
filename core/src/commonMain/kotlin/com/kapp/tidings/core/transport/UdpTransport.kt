@@ -124,7 +124,10 @@ class UdpTransport(
         // 通道上——本次 send 仍返回 true，错误在下一次 send 才炸出来。多端点序列
         // （队列自愈「先试当前地址、再试候选」）于是被第一个坏端点毒化：第二个端点的
         // 报文根本没进内核，症状是 loopback 发送报 NoRouteToHost。这里先短路，不碰通道。
-        if (host.contains(':') != bindHost.contains(':')) {
+        // 例外：`::` 是双栈绑定（默认配置下 v4 映射可达），两种族都放行 —— 将来默认
+        // 绑定翻成 `::` 时不需要改这里。真正的双栈默认值切换要过真机广播验证，未做。
+        val bindIsDualStack = bindHost == "::"
+        if (!bindIsDualStack && host.contains(':') != bindHost.contains(':')) {
             lastSendError = "address-family-mismatch: bound=$bindHost target=$host"
             return false
         }
