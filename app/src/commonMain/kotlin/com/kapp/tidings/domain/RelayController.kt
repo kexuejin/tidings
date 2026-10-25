@@ -13,6 +13,7 @@ import com.kapp.tidings.core.protocol.ConvId
 import com.kapp.tidings.domain.recovery.NoPlatformRecovery
 import com.kapp.tidings.domain.recovery.PlatformRecoveryStore
 import com.kapp.tidings.domain.recovery.RecoveryService
+import com.kapp.tidings.domain.recovery.RecoveryPendingPeers
 import com.kapp.tidings.core.protocol.DEFAULT_TIMINGS
 import com.kapp.tidings.core.protocol.Envelope
 import com.kapp.tidings.core.protocol.MsgKinds
@@ -206,10 +207,12 @@ class RelayController(
     )
 
     /**
-     * L2 待拉取历史的对端（方案 §6.3 / Q11）。初始化期（L0 收养，单线程）直接写；
-     * 运行期一律经 [stateLock]。空集 = 没有恢复在途，启动路径零开销。
+     * L2 待拉取历史的对端（方案 §6.3 / Q11）。**落盘**（`stores/recovery-pending.json`）：
+     * 只在内存里的话，「收养完成 → 进程在 drain 前被杀」之后，下次启动 settings 已存在、
+     * 不再收养、集合为空 —— 这次恢复的历史拉取静默丢失。变更经 [markRecoveryPullPending]
+     * 与 drain 的移除写回盘上。空集 = 没有恢复在途，启动路径零开销。
      */
-    internal val pendingRecoveryPeers = mutableSetOf<String>()
+    internal val pendingRecoveryPeers = RecoveryPendingPeers.load(dataDirectory).toMutableSet()
 
     internal val _state: MutableStateFlow<RelayUiState> = MutableStateFlow(
         // 首次运行的默认设备名按**宿主**给（2026-10-14 修真机撞名）：桌面端与手机是同一份
@@ -227,6 +230,7 @@ class RelayController(
                         recovery.adoptForFreshInstall(payload, store, platform)
                         // L2：收养完成 ⇒ 信任根里的对端都是待拉历史的一方（Q11：全量重发+去重）。
                         pendingRecoveryPeers += payload.peerPins.map { it.nodeId }
+                        RecoveryPendingPeers.save(dataDirectory, pendingRecoveryPeers)
                     }
                 }
                 (existing ?: store.load() ?: RelaySettings.firstRun()).let { raw ->

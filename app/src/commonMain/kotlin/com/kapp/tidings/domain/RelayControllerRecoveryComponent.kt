@@ -3,6 +3,7 @@
 package com.kapp.tidings.domain
 
 import com.kapp.tidings.core.protocol.Codec
+import com.kapp.tidings.domain.recovery.RecoveryPendingPeers
 import com.kapp.tidings.core.protocol.Envelope
 import com.kapp.tidings.domain.model.MessageUi
 import kotlinx.coroutines.delay
@@ -95,7 +96,10 @@ internal suspend fun RelayController.drainRecoveryPull() {
     for (peer in peers) {
         val acked = activeRuntime()?.sendRecoveryReq(peer) == true
         if (acked) {
+            // ACK 只说明请求送达（Q5）；数据是 fire-and-forget，丢了不追（Q11）——
+            // 所以 ACK 即完成，从待拉集合移除并落盘。
             stateLock.withLock { pendingRecoveryPeers.remove(peer) }
+            RecoveryPendingPeers.save(dataDirectory, pendingRecoveryPeers.toSet())
         }
     }
 }
@@ -103,8 +107,16 @@ internal suspend fun RelayController.drainRecoveryPull() {
 internal fun RelayController.markRecoveryPullPending(peerIds: Collection<String>) {
     if (peerIds.isEmpty()) return
     stateLock.withLock { pendingRecoveryPeers += peerIds }
+    RecoveryPendingPeers.save(dataDirectory, pendingRecoveryPeers.toSet())
 }
 
+/**
+ * L1 全量恢复的**批量合入**：按会话逐条以消息 id 幂等插入（已有 id 跳过），按 `at`
+ * 插到该在的位置 —— 插序逻辑与 [RelayController.handleAppendMessage] 同一条（一条消息
+ * 的位置不该取决于它经历过几次重启）。与逐条 append 的差别：锁一次、`refreshPeers` 与
+ * `handlePersistThreads` 只各一次 —— 恢复几千条时逐条 publish/persist 是平方级。
+ * `mine` 不翻转：这是本机自己的备份（L2 的对端副本才需要翻转）。
+ */
 /** 单批字节预算：`recovery-data` 各批序列化后的实体总量上限（整帧 64 KiB 内的保守值）。 */
 internal const val RECOVERY_DATA_BATCH_BYTES = 24 * 1024
 
