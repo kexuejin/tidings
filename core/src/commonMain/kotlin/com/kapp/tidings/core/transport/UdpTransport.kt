@@ -120,15 +120,37 @@ class UdpTransport(
      */
     suspend fun send(bytes: ByteArray, host: String, port: Int): Boolean {
         val s = socket ?: return false
-        return runCatching {
+        // 地址族守卫：v4 绑定的 socket 发 v6 目标（或反过来），Ktor 的错误**异步**落在
+        // 通道上——本次 send 仍返回 true，错误在下一次 send 才炸出来。多端点序列
+        // （队列自愈「先试当前地址、再试候选」）于是被第一个坏端点毒化：第二个端点的
+        // 报文根本没进内核，症状是 loopback 发送报 NoRouteToHost。这里先短路，不碰通道。
+        if (host.contains(':') != bindHost.contains(':')) {
+            lastSendError = "address-family-mismatch: bound=$bindHost target=$host"
+            return false
+        }
+        val attempt = runCatching {
             val buf = Buffer().apply { write(bytes) }
             s.send(Datagram(buf, InetSocketAddress(host, port)))
             lastSendError = null
             true
-        }.getOrElse { e ->
+        }
+        if (attempt.isSuccess) return true
+        // 单次重发解「毒」：上一次 send 留在通道里的异步错误会在本次调用上先行炸出
+        // （同一族目标也会遇到，例如无路由的 v4 目标），报文本体还没交出去。
+        // 重发一次；再失败就是本次真实的失败，如实返回。
+        val retry = runCatching {
+            val buf = Buffer().apply { write(bytes) }
+            s.send(Datagram(buf, InetSocketAddress(host, port)))
+            true
+        }
+        return if (retry.isSuccess) {
+            lastSendError = null
+            true
+        } else {
             // 如实记下失败原因：调用方（与回归测试）要能区分「没开 SO_BROADCAST 被内核拒绝」
             // 和「本机根本没有广播路由」——前者是缺陷，后者是环境。只返回 false 时两者不可分。
-            lastSendError = e::class.simpleName + ": " + (e.message ?: "")
+            val e2 = retry.exceptionOrNull()!!
+            lastSendError = e2::class.simpleName + ": " + (e2.message ?: "")
             false
         }
     }
