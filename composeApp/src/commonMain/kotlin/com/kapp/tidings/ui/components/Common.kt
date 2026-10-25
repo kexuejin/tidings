@@ -491,6 +491,8 @@ fun LabeledField(
     singleLine: Boolean = true,
     enabled: Boolean = true,
     maxLength: Int? = null,
+    /** 口令类输入：视觉遮蔽 + 密码键盘。默认 false，既有调用点一字不改。 */
+    password: Boolean = false,
 ) {
     val sp = LocalAppSpacing.current
     Column(modifier.fillMaxWidth().padding(vertical = sp.xs)) {
@@ -505,6 +507,18 @@ fun LabeledField(
             singleLine = singleLine,
             isError = isError,
             enabled = enabled,
+            visualTransformation = if (password) {
+                androidx.compose.ui.text.input.PasswordVisualTransformation()
+            } else {
+                androidx.compose.ui.text.input.VisualTransformation.None
+            },
+            keyboardOptions = if (password) {
+                androidx.compose.foundation.text.KeyboardOptions(
+                    keyboardType = androidx.compose.ui.text.input.KeyboardType.Password,
+                )
+            } else {
+                androidx.compose.foundation.text.KeyboardOptions.Default
+            },
         )
         if (supporting != null) {
             Text(

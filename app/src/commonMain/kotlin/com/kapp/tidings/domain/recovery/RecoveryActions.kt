@@ -31,6 +31,11 @@ sealed interface RecoveryExportResult {
         val byteCount: Int,
         /** 是否真的交给了系统分享面板；false = 本平台没有这条出口，文件仍写出来了。 */
         val shared: Boolean,
+        /**
+         * 已复制进**用户可达**的公共下载目录时的显示名；null = 平台没这条出口或失败
+         * —— 界面据此决定文案，不得把 null 说成"已保存"。
+         */
+        val publicName: String? = null,
     ) : RecoveryExportResult
 
     data class Failed(val reason: RecoveryActionFailure) : RecoveryExportResult
@@ -134,8 +139,11 @@ private fun RelayController.exportRecoveryBundleOrThrow(password: String): Recov
     if (!written) throw RecoveryWriteFailure()
 
     val actions = receivedFileActions
+    // 先公共后分享：公共目录那份不依赖用户在分享面板里做对选择；分享面板被取消时
+    // 备份至少还在系统「下载」里找得到。
+    val publicName = actions?.let { runCatching { it.saveToPublicDownloads(target) }.getOrNull() }
     val shared = actions != null && runCatching { actions.share(target) }.isSuccess
-    return RecoveryExportResult.Exported(fileName, bytes.size, shared)
+    return RecoveryExportResult.Exported(fileName, bytes.size, shared, publicName)
 }
 
 /**

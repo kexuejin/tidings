@@ -63,6 +63,38 @@ public class AndroidReceivedFileActions(private val context: Context) : Received
         start(Intent.createChooser(send, file.name).addFlags(START_FLAGS))
     }
 
+    override fun saveToPublicDownloads(path: String): String? {
+        val file = File(path)
+        if (!file.isFile) {
+            Log.w(TAG, "公共保存没做成，文件不在了：$path")
+            return null
+        }
+        return try {
+            val values = android.content.ContentValues().apply {
+                put(android.provider.MediaStore.Downloads.DISPLAY_NAME, file.name)
+                put(android.provider.MediaStore.Downloads.MIME_TYPE, "application/octet-stream")
+                put(android.provider.MediaStore.Downloads.RELATIVE_PATH, android.os.Environment.DIRECTORY_DOWNLOADS)
+            }
+            val uri = context.contentResolver.insert(
+                android.provider.MediaStore.Downloads.EXTERNAL_CONTENT_URI,
+                values,
+            )
+            if (uri == null) {
+                Log.w(TAG, "MediaStore 插不进去，公共保存失败：${file.name}")
+                return null
+            }
+            context.contentResolver.openOutputStream(uri)?.use { out ->
+                file.inputStream().use { it.copyTo(out) }
+            } ?: return null
+            file.name
+        } catch (e: Exception) {
+            // 契约：不许抛。公共目录写不进去只影响"能不能从文件应用里找到"，不影响
+            // 沙箱里那份已生成的备份；如实留痕并返回 null，让界面换一句实话。
+            Log.w(TAG, "公共保存失败：${e.message}")
+            null
+        }
+    }
+
     /** 真的启动一次；返回 false 表示"这次没起来"（已经写过日志，调用方决定要不要换条路）。 */
     private fun start(intent: Intent): Boolean = try {
         context.startActivity(intent)

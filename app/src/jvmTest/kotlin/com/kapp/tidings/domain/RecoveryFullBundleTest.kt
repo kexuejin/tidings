@@ -18,6 +18,7 @@ import com.kapp.tidings.domain.recovery.exportRecoveryBundle
 import com.kapp.tidings.domain.recovery.importRecoveryBundle
 import com.kapp.tidings.domain.recovery.writeIdentityKeyMaterial
 import com.kapp.tidings.platform.InMemoryAppPlatform
+import java.io.File
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.cancel
@@ -197,7 +198,72 @@ class RecoveryFullBundleTest {
         )
     }
 
+    @Test
+    fun exportAnnouncesPublicSaveAndStillShares() = runBlocking {
+        val scalar = secureRandomBytes(32)
+        val spki = ByteArray(91) { (it * 9 + 5).toByte() }
+        writeIdentityKeyMaterial(pathJoin(dataDir, "link-identity"), scalar, spki)
+
+        val actions = RecordingFileActions(publicSaveName = { File(it).name })
+        val platform = object : com.kapp.tidings.platform.AppPlatform by InMemoryAppPlatform() {
+            override val receivedFileActions = actions
+        }
+        val a = RelayController(platform = platform, store = InMemorySettingsStore(), scope = scopeA)
+        var fileName: String? = null
+        try {
+            val export = a.exportRecoveryBundle(password)
+            check(export is RecoveryExportResult.Exported) { "导出必须成功：$export" }
+            fileName = export.fileName
+
+            // 公共保存与分享的判据分开：前者决定「已保存到下载目录」能不能说出口，
+            // 后者只说明分享面板开过。两者混在一起时，分享被取消会被说成已保存。
+            assertEquals(export.fileName, export.publicName, "公共保存成功时必须把显示名带回 UI")
+            assertEquals(listOf(pathJoin(dataDir, "downloads", export.fileName)), actions.savedToPublic, "公共保存收到的必须是那份导出文件")
+            assertEquals(1, actions.sharedCount, "分享面板照旧打开一次")
+            assertTrue(actions.savedToPublic.size <= 1, "公共保存失败也不许重试刷屏")
+        } finally {
+            scopeA.cancel()
+            for (path in cleanupPaths(fileName)) deleteFile(path)
+        }
+    }
+
+    @Test
+    fun exportWithoutPublicSupportReportsNeither() = runBlocking {
+        val scalar = secureRandomBytes(32)
+        val spki = ByteArray(91) { (it * 11 + 2).toByte() }
+        writeIdentityKeyMaterial(pathJoin(dataDir, "link-identity"), scalar, spki)
+
+        // 平台不给公共保存出口（iOS/桌面默认路径）：publicName 必须是 null，
+        // 界面据此只能说「文件在应用下载目录」，不得谎称已保存。
+        val a = RelayController(platform = InMemoryAppPlatform(), store = InMemorySettingsStore(), scope = scopeA)
+        var fileName: String? = null
+        try {
+            val export = a.exportRecoveryBundle(password)
+            check(export is RecoveryExportResult.Exported) { "导出必须成功：$export" }
+            fileName = export.fileName
+            assertEquals(null, export.publicName)
+            assertEquals(false, export.shared, "InMemoryAppPlatform 没有 receivedFileActions，分享出口也不存在")
+        } finally {
+            scopeA.cancel()
+            for (path in cleanupPaths(fileName)) deleteFile(path)
+        }
+    }
+
     // ---- 夹具 ----
+
+    /** 记录调用、不抛错的 [com.kapp.tidings.platform.ReceivedFileActions] 替身。 */
+    private class RecordingFileActions(
+        private val publicSaveName: (String) -> String?,
+    ) : com.kapp.tidings.platform.ReceivedFileActions {
+        val savedToPublic = mutableListOf<String>()
+        var sharedCount = 0
+        override fun open(path: String) = Unit
+        override fun share(path: String) { sharedCount++ }
+        override fun saveToPublicDownloads(path: String): String? {
+            savedToPublic += path
+            return publicSaveName(path)
+        }
+    }
 
     private fun sampleSnapshot(): RecoveryDataCodec.FullSnapshot {
         val identity = com.kapp.tidings.core.persist.RecoveryIdentityPayload(

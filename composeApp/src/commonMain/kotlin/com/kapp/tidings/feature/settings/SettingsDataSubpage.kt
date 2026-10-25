@@ -40,8 +40,10 @@ import com.kapp.tidings.generated.resources.recovery_import_success_title
 import com.kapp.tidings.generated.resources.recovery_password_empty
 import com.kapp.tidings.generated.resources.recovery_password_label
 import com.kapp.tidings.generated.resources.recovery_password_title
-import com.kapp.tidings.generated.resources.recovery_shared_opened
-import com.kapp.tidings.generated.resources.recovery_shared_written
+import com.kapp.tidings.generated.resources.recovery_export_tail_app_dir
+import com.kapp.tidings.generated.resources.recovery_export_tail_public
+import com.kapp.tidings.generated.resources.recovery_export_tail_public_shared
+import com.kapp.tidings.generated.resources.recovery_export_tail_shared_only
 import com.kapp.tidings.generated.resources.settings_data_desktop_hint
 import com.kapp.tidings.generated.resources.settings_data_phone_hint
 import com.kapp.tidings.generated.resources.set_change_dir
@@ -448,11 +450,7 @@ private fun RecoverySection(
                     Res.string.recovery_export_success_body,
                     result.fileName,
                     formatBytes(result.byteCount.toLong()),
-                    if (result.shared) {
-                        stringResource(Res.string.recovery_shared_opened)
-                    } else {
-                        stringResource(Res.string.recovery_shared_written)
-                    },
+                    exportTailText(result),
                 ),
                 onDismiss = { exportResult = null },
             )
@@ -503,6 +501,7 @@ private fun RecoveryPasswordDialog(
                 onValueChange = onPasswordChange,
                 isError = showError,
                 supporting = if (showError) stringResource(Res.string.recovery_password_empty) else null,
+                password = true,
             )
         },
         confirmButton = {
@@ -543,6 +542,23 @@ private fun RecoveryResultDialog(
             )
         },
     )
+}
+
+/**
+ * 导出结果对话框的收尾一句，按「公共目录存没存上 × 分享面板开没开」四个组合说实话：
+ * 文件在哪、用户还要做什么。`publicName == null` 时**不许**说"已保存到下载目录"——
+ * 那份只在应用沙箱里，用户在系统文件应用里找不到。
+ */
+@Composable
+private fun exportTailText(result: RecoveryExportResult.Exported): String = when {
+    result.publicName != null && result.shared ->
+        stringResource(Res.string.recovery_export_tail_public_shared)
+    result.publicName != null ->
+        stringResource(Res.string.recovery_export_tail_public)
+    result.shared ->
+        stringResource(Res.string.recovery_export_tail_shared_only)
+    else ->
+        stringResource(Res.string.recovery_export_tail_app_dir)
 }
 
 @Composable
