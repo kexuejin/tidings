@@ -166,7 +166,7 @@ def _parse_color_kt(root: str) -> Tuple[Dict[str, Tuple[str, int]], Dict[str, Tu
     current: Optional[str] = None
     depth = 0
     for line in lines:
-        m = re.search(r"val\s+Tidings(\w+?)Colors\s*=\s*(light|dark)ColorScheme\($", line)
+        m = re.search(r"val\s+Relay(\w+?)Colors\s*=\s*(light|dark)ColorScheme\($", line)
         if m:
             current = "light" if m.group(2) == "light" else "dark"
             depth = 1
@@ -206,7 +206,7 @@ def _parse_accents(root: str, color_named: Dict[str, Tuple[str, int]]) -> Dict[s
     out: Dict[str, Dict[str, str]] = {"light": {}, "dark": {}}
     current: Optional[str] = None
     for line in lines:
-        m = re.search(r"val\s+Tidings(Light|Dark)Accents\s*=\s*RelayAccents\($", line)
+        m = re.search(r"val\s+Relay(Light|Dark)Accents\s*=\s*RelayAccents\($", line)
         if m:
             current = "light" if m.group(1) == "Light" else "dark"
             continue
@@ -547,7 +547,7 @@ def _detect_root() -> str:
     `python3 tools/design_contract.py --self-test` 报「缺少权威源文件」，
     而文件明明在：真相是仓库从 scaffold/ 挪到了根，默认路径没人跟着改。"""
     here = os.path.dirname(os.path.abspath(__file__))
-    probe = os.path.join("composeApp", "src", "commonMain", "kotlin", "com", "kapp", "relay", "ui", "theme", "Color.kt")
+    probe = os.path.join("composeApp", "src", "commonMain", "kotlin", "com", "kapp", "tidings", "ui", "theme", "Color.kt")
     d = here
     for _ in range(4):
         if os.path.exists(os.path.join(d, probe)):

@@ -1,7 +1,7 @@
 {
-  "generatedAt": "ccd083f0ad90",
+  "generatedAt": "8e7efbb982dc",
   "note": "逐屏差集棘轮：每个键的差集只许变小。--check 报「新增的值」。",
-  "reason": "备份与恢复卡文案升级为全量口径（备份身份与数据；副标题列出设置与聊天记录）——纯文本对齐，复用既有 class，取值集合零位移",
+  "reason": "品牌英文名 Relay→Tidings 全仓改名：原型 sha 位移只由品牌串重写引起（捎话 Relay→捎话 Tidings、Relay→Tidings），已逐字核实新值在原型第 6/9/1602/6097 行；设计取值本身无变化",
   "rowCount": 70,
   "signature": {
     "d-agentdetail|__error__": [
