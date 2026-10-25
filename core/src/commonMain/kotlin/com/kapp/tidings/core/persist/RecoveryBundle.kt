@@ -38,6 +38,11 @@ data class RecoveryManifest(
     val nodeId: String,
     val createdAtEpochMs: Long,
     val peerPinCount: Int,
+    /**
+     * 全量快照（kind=[RecoveryBundle.KIND_FULL]）里的消息条数 —— 成套校验用
+     * （manifest 与载荷咬合）。identity 包不写这个键（encodeDefaults=false）。
+     */
+    val messageCount: Long? = null,
 )
 
 /**
@@ -106,6 +111,9 @@ object RecoveryBundle {
     const val KDF_ITERATIONS: Int = 600_000
 
     const val KIND_IDENTITY: String = "identity"
+
+    /** 全量快照：身份 + 设置 + 会话历史（载荷编码归应用层，见 `RecoveryDataCodec`）。 */
+    const val KIND_FULL: String = "full"
 
     /** 对端 pin 摘要硬上限（Q4）。 */
     const val MAX_PEER_PINS: Int = 50
@@ -178,7 +186,47 @@ object RecoveryBundle {
      * （kind 一致、nodeId 一致、pin 计数一致）—— 只对上 nodeId 的半截包在这里就死，
      * 不会带着"看起来能用的身份"流到恢复流程里。
      */
-    fun importIdentity(bytes: ByteArray, password: String): RecoveryIdentityPayload {
+    fun importIdentity(bytes: ByteArray, password: String): RecoveryIdentityPayload =
+        identityPayloadOf(openBundle(bytes, password))
+
+    /**
+     * 对**已开封**的 bundle 做身份包的载荷解码与成套校验。应用层先 [openBundle]
+     * 按 kind 分派时走这里，避免同一文件付两次 KDF（600k 迭代在低端机上以秒计）。
+     */
+    fun identityPayloadOf(opened: OpenedBundle): RecoveryIdentityPayload {
+        val payload = try {
+            decodeIdentityPayload(opened.payload)
+        } catch (e: IllegalArgumentException) {
+            // 载荷缺字段/超上限/带尾巴 = 半截包，一律 BAD_FORMAT，不许流出导入层。
+            throw RecoveryBundleException(RecoveryBundleFailure.BAD_FORMAT, "payload rejected: ${e.message}", e)
+        }
+        if (opened.manifest.kind != KIND_IDENTITY) {
+            throw RecoveryBundleException(RecoveryBundleFailure.MANIFEST_MISMATCH, "kind ${opened.manifest.kind}")
+        }
+        if (opened.manifest.nodeId != payload.nodeId) {
+            throw RecoveryBundleException(
+                RecoveryBundleFailure.MANIFEST_MISMATCH,
+                "nodeId mismatch: manifest=${opened.manifest.nodeId} payload=${payload.nodeId}",
+            )
+        }
+        if (opened.manifest.peerPinCount != payload.peerPins.size) {
+            throw RecoveryBundleException(
+                RecoveryBundleFailure.MANIFEST_MISMATCH,
+                "peerPinCount mismatch: manifest=${opened.manifest.peerPinCount} payload=${payload.peerPins.size}",
+            )
+        }
+        return payload
+    }
+
+    /** [openBundle] 的结果：已认证开封的 manifest 与载荷字节（载荷编码随 kind 而异）。 */
+    class OpenedBundle(val manifest: RecoveryManifest, val payload: ByteArray)
+
+    /**
+     * 通用开封：头部校验 → KDF → AEAD 认证 → manifest 解析，**不做**任何 kind 特定
+     * 的载荷解码与成套校验（那是 [importIdentity] 与应用层全量快照各自的职责）。
+     * 口令错误与文件被改在这里统一死掉（AUTH_FAILED）。
+     */
+    fun openBundle(bytes: ByteArray, password: String): OpenedBundle {
         if (password.isEmpty()) {
             throw RecoveryBundleException(RecoveryBundleFailure.PASSWORD_REQUIRED, "password is required")
         }
@@ -226,29 +274,7 @@ object RecoveryBundle {
         } catch (e: Exception) {
             throw RecoveryBundleException(RecoveryBundleFailure.BAD_FORMAT, "manifest is not valid JSON", e)
         }
-        val payload = try {
-            decodeIdentityPayload(reader.bytes(reader.remaining()))
-        } catch (e: IllegalArgumentException) {
-            // 载荷缺字段/超上限/带尾巴 = 半截包，一律 BAD_FORMAT，不许流出导入层。
-            throw RecoveryBundleException(RecoveryBundleFailure.BAD_FORMAT, "payload rejected: ${e.message}", e)
-        }
-
-        if (manifest.kind != KIND_IDENTITY) {
-            throw RecoveryBundleException(RecoveryBundleFailure.MANIFEST_MISMATCH, "kind ${manifest.kind}")
-        }
-        if (manifest.nodeId != payload.nodeId) {
-            throw RecoveryBundleException(
-                RecoveryBundleFailure.MANIFEST_MISMATCH,
-                "nodeId mismatch: manifest=${manifest.nodeId} payload=${payload.nodeId}",
-            )
-        }
-        if (manifest.peerPinCount != payload.peerPins.size) {
-            throw RecoveryBundleException(
-                RecoveryBundleFailure.MANIFEST_MISMATCH,
-                "peerPinCount mismatch: manifest=${manifest.peerPinCount} payload=${payload.peerPins.size}",
-            )
-        }
-        return payload
+        return OpenedBundle(manifest, reader.bytes(reader.remaining()))
     }
 
     private fun validatePayloadForExport(payload: RecoveryIdentityPayload) {

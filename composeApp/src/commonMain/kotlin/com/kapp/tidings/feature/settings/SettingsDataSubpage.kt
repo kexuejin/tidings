@@ -125,11 +125,11 @@ fun SettingsDataSubpage(
     retentionDays: Int = DEFAULT_RETENTION_DAYS,
     onClearHistory: (() -> Unit)? = null,
     /** L1 导出（口令加密身份包）。null = 本宿主没有接（整张卡不画，与目录出口同一纪律）。 */
-    onExportIdentityBundle: (suspend (String) -> RecoveryExportResult)? = null,
+    onExportRecoveryBundle: (suspend (String) -> RecoveryExportResult)? = null,
     /** 选备份文件并读回字节；null（取消/读不到）时导入流程静默终止。 */
     onPickBackupFile: (suspend () -> ByteArray?)? = null,
     /** L1 导入。 */
-    onImportIdentityBundle: (suspend (ByteArray, String) -> RecoveryImportResult)? = null,
+    onImportRecoveryBundle: (suspend (ByteArray, String) -> RecoveryImportResult)? = null,
 ) {
     var persistMessages by rememberSaveable(persistMessagesEnabled) {
         mutableStateOf(persistMessagesEnabled)
@@ -309,9 +309,9 @@ fun SettingsDataSubpage(
         }
 
         // 备份与恢复（L1）：三个回调都有人才画 —— 没有消费者的整张卡是"留在屏上骗人"。
-        val exportBundle = onExportIdentityBundle
+        val exportBundle = onExportRecoveryBundle
         val pickBackup = onPickBackupFile
-        val importBundle = onImportIdentityBundle
+        val importBundle = onImportRecoveryBundle
         if (exportBundle != null && pickBackup != null && importBundle != null) {
             RecoverySection(
                 onExport = exportBundle,
@@ -472,6 +472,7 @@ private fun RecoverySection(
                     Res.string.recovery_import_success_body,
                     result.nodeId,
                     result.peerPinCount,
+                    result.messageCount,
                 ),
                 onDismiss = { importResult = null },
             )

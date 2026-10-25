@@ -835,11 +835,11 @@
          原型在 prototype/relay.html 的 screenSetData() 里（新增卡，复用 .krow blk 行件）。 -->
     <string name="set_recovery_card_title">备份与恢复</string>
     <string name="set_recovery_hint">卸载重装后，凭备份文件与口令找回身份；口令丢了就无法找回。</string>
-    <string name="set_recovery_export_title">备份身份</string>
-    <string name="set_recovery_export_sub">口令加密导出到文件，换机或恢复出厂后凭口令导回</string>
+    <string name="set_recovery_export_title">备份身份与数据</string>
+    <string name="set_recovery_export_sub">口令加密导出身份、设置与聊天记录，换机或恢复出厂后凭口令导回</string>
     <string name="set_recovery_export_action">导出…</string>
     <string name="set_recovery_import_title">从备份恢复</string>
-    <string name="set_recovery_import_sub">选择备份文件并输入口令，恢复后节点自动重启</string>
+    <string name="set_recovery_import_sub">选择备份文件并输入口令，身份、设置与聊天记录一起回来</string>
     <string name="set_recovery_import_action">恢复…</string>
     <string name="recovery_password_title">输入口令</string>
     <string name="recovery_password_label">口令</string>
@@ -849,7 +849,7 @@
     <string name="recovery_shared_opened">系统分享面板已打开。</string>
     <string name="recovery_shared_written">文件在应用的下载目录里。</string>
     <string name="recovery_import_success_title">身份已恢复</string>
-    <string name="recovery_import_success_body">已恢复为节点 %1$s（信任根 %2$d 条），连接已重启。</string>
+    <string name="recovery_import_success_body">已恢复为节点 %1$s（信任根 %2$d 条 · %3$d 条消息），连接已重启。</string>
     <string name="recovery_failed_title">操作未完成</string>
     <string name="recovery_failed_password">口令不对，或文件被改过。</string>
     <string name="recovery_failed_format">不是有效的备份文件。</string>

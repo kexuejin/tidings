@@ -117,6 +117,23 @@ internal fun RelayController.markRecoveryPullPending(peerIds: Collection<String>
  * `handlePersistThreads` 只各一次 —— 恢复几千条时逐条 publish/persist 是平方级。
  * `mine` 不翻转：这是本机自己的备份（L2 的对端副本才需要翻转）。
  */
+internal fun RelayController.mergeRecoveredThreads(threads: Map<String, List<com.kapp.tidings.domain.model.MessageUi>>) {
+    stateLock.withLock {
+        for ((convId, incoming) in threads) {
+            val thread = core.threads.getOrPut(convId) { mutableListOf() }
+            val existingIds = thread.mapTo(mutableSetOf()) { it.id }
+            for (message in incoming) {
+                if (!existingIds.add(message.id)) continue
+                var index = thread.size
+                while (index > 0 && thread[index - 1].at > message.at) index--
+                thread.add(index, message)
+            }
+        }
+    }
+    refreshPeers()
+    handlePersistThreads()
+}
+
 /** 单批字节预算：`recovery-data` 各批序列化后的实体总量上限（整帧 64 KiB 内的保守值）。 */
 internal const val RECOVERY_DATA_BATCH_BYTES = 24 * 1024
 

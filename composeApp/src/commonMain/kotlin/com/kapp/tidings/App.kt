@@ -42,8 +42,8 @@ import com.kapp.tidings.core.protocol.ConvId
 import com.kapp.tidings.domain.exportDiagnosticsPackage
 import com.kapp.tidings.core.fs.directoryUsageBytes
 import com.kapp.tidings.core.fs.readFileBytes
-import com.kapp.tidings.domain.recovery.exportIdentityBundle
-import com.kapp.tidings.domain.recovery.importIdentityBundle
+import com.kapp.tidings.domain.recovery.exportRecoveryBundle
+import com.kapp.tidings.domain.recovery.importRecoveryBundle
 import com.kapp.tidings.core.nowMillis
 import com.kapp.tidings.core.transport.PartFile
 import com.kapp.tidings.domain.navBadges
@@ -618,11 +618,11 @@ fun RelayApp(
                             // 备份与恢复（L1）：选文件走三平台共用的 filePicker 契约
                             // （Android SAF 桥 / iOS 文稿选择器 / 桌面对话框），读回字节
                             // 交给领域层；取消选文件返回 null，页面据此静默终止。
-                            onExportIdentityBundle = controller::exportIdentityBundle,
+                            onExportRecoveryBundle = controller::exportRecoveryBundle,
                             onPickBackupFile = {
                                 controller.platform.filePicker.pick()?.let { readFileBytes(it.path) }
                             },
-                            onImportIdentityBundle = controller::importIdentityBundle,
+                            onImportRecoveryBundle = controller::importRecoveryBundle,
                         )
 
                         SETTINGS_PAGE_DIAG -> SettingsDiagSubpage(

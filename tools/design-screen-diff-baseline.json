@@ -1,7 +1,7 @@
 {
-  "generatedAt": "d39b1eb60939",
+  "generatedAt": "ccd083f0ad90",
   "note": "逐屏差集棘轮：每个键的差集只许变小。--check 报「新增的值」。",
-  "reason": "screenSetData 新增「备份与恢复」卡（L1 身份恢复 P2）：全部复用本屏既有 class（card/h3/padc/hint/krow blk/btn sm），未引入新取值档；代码侧 SettingsDataSubpage.RecoverySection 同步落成",
+  "reason": "备份与恢复卡文案升级为全量口径（备份身份与数据；副标题列出设置与聊天记录）——纯文本对齐，复用既有 class，取值集合零位移",
   "rowCount": 70,
   "signature": {
     "d-agentdetail|__error__": [

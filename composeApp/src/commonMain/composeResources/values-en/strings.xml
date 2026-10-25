@@ -714,11 +714,11 @@
     <string name="set_clear_history_confirm_body">This clears the chat history of every conversation. It only deletes from this device — the other side is unaffected — and cannot be undone.</string>
     <string name="set_recovery_card_title">Backup &amp; restore</string>
     <string name="set_recovery_hint">After an uninstall, your identity comes back from a backup file and its passphrase. Lose the passphrase and it cannot be recovered.</string>
-    <string name="set_recovery_export_title">Back up identity</string>
-    <string name="set_recovery_export_sub">Export a passphrase-encrypted file; use it after switching devices or a factory reset</string>
+    <string name="set_recovery_export_title">Back up identity &amp; data</string>
+    <string name="set_recovery_export_sub">Export a passphrase-encrypted file with identity, settings and chat history; use it after switching devices or a factory reset</string>
     <string name="set_recovery_export_action">Export…</string>
     <string name="set_recovery_import_title">Restore from backup</string>
-    <string name="set_recovery_import_sub">Pick a backup file and enter its passphrase; the connection restarts afterwards</string>
+    <string name="set_recovery_import_sub">Pick a backup file and enter its passphrase; identity, settings and chat history come back together</string>
     <string name="set_recovery_import_action">Restore…</string>
     <string name="recovery_password_title">Enter passphrase</string>
     <string name="recovery_password_label">Passphrase</string>
@@ -728,7 +728,7 @@
     <string name="recovery_shared_opened">The system share sheet was opened.</string>
     <string name="recovery_shared_written">The file is in the app's downloads folder.</string>
     <string name="recovery_import_success_title">Identity restored</string>
-    <string name="recovery_import_success_body">Restored as node %1$s (%2$d pinned peers); the connection was restarted.</string>
+    <string name="recovery_import_success_body">Restored as node %1$s (%2$d pinned peers · %3$d messages); the connection was restarted.</string>
     <string name="recovery_failed_title">Not completed</string>
     <string name="recovery_failed_password">Wrong passphrase, or the file was modified.</string>
     <string name="recovery_failed_format">Not a valid backup file.</string>

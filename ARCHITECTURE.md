@@ -358,7 +358,10 @@ flowchart TD
 
 - **L0 平台存活存储**：iOS 钥匙串身份包（本地 + iCloud 同步层，收养规则 Q10）；
   Android 公共 Downloads 里的 `KDF(ANDROID_ID)` 混淆包（读取失败走 SAF 导入，A6/Q6）。
-- **L1 口令加密导出/导入**：设置页「备份与恢复」卡；格式与成套校验见 `core/.../persist/RecoveryBundle`。
+- **L1 口令加密导出/导入**：设置页「备份与恢复」卡；**全量快照**（身份 + 设置 + 会话历史，
+  `kind="full"`；老的身份包 `kind="identity"` 仍可导入）。容器格式与成套校验见
+  `core/.../persist/RecoveryBundle`，载荷编解码见 `:app` 的 `RecoveryDataCodec`，
+  批量合入见 `mergeRecoveredThreads`（按消息 id 幂等、`mine` 不翻转）。
 - **L2 对端拉回**：`recovery-req` / `recovery-data` 两张帧，fire-and-forget + 全量重发 +
   消息 id 幂等合并（`PROTOCOL-EXTENSION.md` §14）。数据只走应用层消息实体，
   不存在裸库替换——SQLDelight 不降级、FTS 索引必须走触发器维护（§2.3 不变量）。
