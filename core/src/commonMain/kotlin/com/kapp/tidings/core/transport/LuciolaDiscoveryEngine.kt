@@ -2,6 +2,7 @@
 package com.kapp.tidings.core.transport
 
 import com.kapp.tidings.core.protocol.Profile
+import com.kapp.tidings.core.withLock
 import io.github.kexuejin.luciola.DiscoveryEventUi
 import io.github.kexuejin.luciola.PeerUiModel
 import io.github.kexuejin.luciola.UniffiEngineAdapter
@@ -11,7 +12,7 @@ import kotlinx.coroutines.delay
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
 import kotlinx.serialization.json.Json
-import java.util.concurrent.ConcurrentHashMap
+import kotlin.concurrent.Volatile
 
 /**
  * 阶段二:luciola 发现引擎(JVM 桌面宿主;Android 在阶段三接入)。
@@ -46,13 +47,16 @@ class LuciolaDiscoveryEngine(
 
     // luciola nodeId -> Tidings nodeId(lost 事件只带 luciola 侧 id)
     private val idMap = HashMap<String, String>()
-    private val idMapLock = Any()
+    private val idMapLock = com.kapp.tidings.core.createCoreLock()
 
     private var started = false
     private var heartbeatJob: Job? = null
 
     /** luciola nodeId -> 最近一次 found/updated 的原始 peer(心跳按它重放 touch)。 */
-    private val knownPeers = ConcurrentHashMap<String, PeerUiModel>()
+    // 跨平台：ConcurrentHashMap 只在 JVM 有。这里用 CoreLock + HashMap ——
+    // 访问都是短操作（读多写少），粗粒度锁的代价远小于把整类锁死在 jvmSharedMain。
+    private val peersLock = com.kapp.tidings.core.createCoreLock()
+    private val knownPeers = HashMap<String, PeerUiModel>()
 
     @Volatile
     var lastError: String? = null
@@ -84,7 +88,7 @@ class LuciolaDiscoveryEngine(
         heartbeatJob = scope.launch {
             while (isActive) {
                 delay(heartbeatMs)
-                knownPeers.values.forEach { applyPeer(it) }
+                peersLock.withLock { knownPeers.values.toList() }.forEach { applyPeer(it) }
             }
         }
     }
@@ -110,13 +114,13 @@ class LuciolaDiscoveryEngine(
         adapter?.stop()
     }
 
-    private val loggedPeers = java.util.concurrent.ConcurrentHashMap.newKeySet<String>()
+    private val loggedPeers = HashSet<String>()
 
     private fun applyPeer(peer: PeerUiModel) {
-        knownPeers[peer.nodeId] = peer
+        peersLock.withLock { knownPeers[peer.nodeId] = peer }
         val raw = peer.extra ?: return
         val profile = runCatching { json.decodeFromString(Profile.serializer(), raw) }.getOrNull() ?: return
-        synchronized(idMapLock) { idMap[peer.nodeId] = profile.nodeId }
+        idMapLock.withLock { idMap[peer.nodeId] = profile.nodeId }
         if (loggedPeers.add(profile.nodeId)) {
             println("[luciola] discovered " + profile.nodeId + " at " + peer.ip + ":" + peer.udpPort)
         }
@@ -127,8 +131,8 @@ class LuciolaDiscoveryEngine(
     }
 
     private fun onLuciolaLost(luciolaNodeId: String) {
-        knownPeers.remove(luciolaNodeId)
-        val tidingsId = synchronized(idMapLock) { idMap.remove(luciolaNodeId) } ?: return
+        peersLock.withLock { knownPeers.remove(luciolaNodeId) }
+        val tidingsId = idMapLock.withLock { idMap.remove(luciolaNodeId) } ?: return
         registry.markOffline(tidingsId)
     }
 }
