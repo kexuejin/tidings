@@ -261,8 +261,16 @@ compose.desktop {
 }
 
 tasks.withType<Test>().configureEach {
-    // luciola(JNA/uniffi)在测试里加载本地库;与 :core 同一份临时路径(阶段接线期)。
-    systemProperty("jna.library.path", System.getProperty("jna.library.path") ?: "/workspace/RustBuild/cargo-target/debug")
+    // luciola(JNA/uniffi)在测试里加载本地库。**必须指 release**：
+    // 2026-10-27 换成 uniffi 0.29.4 的绑定后，这里若仍指 debug，会因 uniffi 的
+    // 运行时校验和比对失败抛 ExceptionInInitializerError
+    // （"Could not initialize class uniffi.luciola_uniffi"）—— 不是 DllNotFound，
+    // 是"加载到了，但版本对不上"，比找不到更难认。
+    // 与 :core 同一个教训：debug/release 两份 dylib 混用曾让 50MB 验收差了 538 倍。
+    systemProperty(
+        "jna.library.path",
+        System.getProperty("jna.library.path") ?: "/workspace/RustBuild/cargo-target/release",
+    )
 }
 
 // 开发验收用:真实进程(./gradlew :desktopApp:run)也能加载 luciola 原生库。
@@ -281,7 +289,7 @@ tasks.withType<JavaExec>().configureEach {
  * 正式发版应改为从 luciola 的发布构件取并校验 sha256(待 Android 发布形态一起做)。
  */
 val luciolaNativeDir: Provider<String> =
-    providers.environmentVariable("TIDINGS_LUCIOLA_NATIVE").orElse("/workspace/RustBuild/cargo-target/debug")
+    providers.environmentVariable("TIDINGS_LUCIOLA_NATIVE").orElse("/workspace/RustBuild/cargo-target/release")
 
 val copyLuciolaNative by tasks.registering(Copy::class) {
     from(luciolaNativeDir) {
