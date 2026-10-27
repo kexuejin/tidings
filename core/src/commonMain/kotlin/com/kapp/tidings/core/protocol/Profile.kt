@@ -82,6 +82,17 @@ data class Profile(
      * null = 这个节点不提供 luciola 信道（legacy 节点），行为一字不变。
      */
     val luciolaPort: Int? = null,
+    /**
+     * 投屏画面**独立加密会话**的监听端口（可选键，与 [luciolaPort] 同一族）。
+     *
+     * 为什么另开一格而不是复用 [luciolaPort]：信道层的 `listen` 一次只接受一条连接，
+     * 消息/文件那条已经把 luciolaPort 占住了；画面要**另开一条会话**才谈得上
+     * 「投屏不挤占消息与文件」（goal 第 4 步）。
+     *
+     * 兼容性：可选键，老端忽略；null = 这个节点没有画面信道，对端继续走
+     * 17879/17882 —— 行为一字不变。
+     */
+    val screenPort: Int? = null,
 ) {
     companion object {
         /**

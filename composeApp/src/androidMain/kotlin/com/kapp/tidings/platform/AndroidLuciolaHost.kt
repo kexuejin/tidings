@@ -7,8 +7,10 @@ import com.kapp.tidings.core.transport.DatagramTransport
 import com.kapp.tidings.core.transport.DiscoveryEngine
 import com.kapp.tidings.core.transport.LuciolaTransportFactory
 import com.kapp.tidings.core.transport.PeerRegistry
+import com.kapp.tidings.core.transport.ScreenChannelHost
 import com.kapp.tidings.core.transport.SecureStateStore
 import com.kapp.tidings.domain.LuciolaQrInfo
+import kotlinx.coroutines.CoroutineScope
 import java.io.File
 import java.security.SecureRandom
 import java.util.Base64
@@ -66,6 +68,14 @@ class AndroidLuciolaHost(
 
     override fun discoveryFactory(): ((PeerRegistry, () -> Profile) -> DiscoveryEngine)? =
         factory?.let { f -> ({ registry: PeerRegistry, profile: () -> Profile -> f.createDiscovery(registry, profile) }) }
+
+    override fun screenChannelHostFactory(
+        scope: CoroutineScope,
+        listenPort: Int?,
+    ): ((PeerRegistry) -> ScreenChannelHost)? =
+        factory?.let { f ->
+            ({ registry: PeerRegistry -> f.createScreenChannelHost(registry, scope, listenPort ?: -1) })
+        }
 
     private fun installNativeLibraryPath() {
         val nativeDir = context.applicationInfo?.nativeLibraryDir ?: return

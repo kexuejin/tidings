@@ -1,0 +1,204 @@
+// SPDX-License-Identifier: GPL-3.0-only
+package com.kapp.tidings.core.transport
+
+import io.ktor.utils.io.ByteChannel
+import io.ktor.utils.io.readAvailable
+import io.ktor.utils.io.writeFully
+import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Job
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.isActive
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.withTimeoutOrNull
+
+/**
+ * 投屏的**独立加密会话**（与消息、文件三条数据面互不挤占）。
+ *
+ * ## 为什么要独立一条
+ *
+ * 投屏是**连续、低延迟、允许丢一步但不能堵**的流量：10fps × 上百 KiB 的流会把
+ * 消息信道与文件窗口的队列占满（文件发送端等 ACK 时照样在刷整窗），表现为
+ * 「投屏一开、消息延迟跳起来、文件传输停住」。所以画面走自己的一条 [SecureSession]，
+ * 队列、重连、心跳都与别的数据面无关。
+ *
+ * ## 形态
+ *
+ * 对外只有一个东西：[ScreenWire]（两条字节流）。screen-* 协议完全不知道底下是
+ * 加密信道还是明文 socket —— 与跨网 TLS 那条走的是同一个抽象。
+ *
+ * - **写**：上层 `writeFully` 写进 [ByteChannel]，泵按 [chunkSize] 切片、封成
+ *   [ScreenChannelFrame]，逐帧送进信道。队列满（send 返回 false）**退避重试而不是丢帧**：
+ *   字节流丢一段就是协议错乱，而投屏的令牌桶本来就把速率压在信道能力之下。
+ * - **读**：入站帧解开封套后按序写进另一个 [ByteChannel]，上层 `readFully`
+ *   读到的就是连续字节流。
+ *
+ * ## 归属与信任
+ *
+ * 复用 [SecureChannelTransport]：拨号要求对端公钥已配对（deny-by-default），
+ * 入站按握手指纹验信任、按指纹反查对端地址 —— 这里不建第二份节点表。
+ */
+class SecureScreenChannel(
+    identitySeed: ByteArray,
+    /** 拨号用的对端公钥（未配对返回 null ⇒ 不拨）。与消息信道同一个 pin 表。 */
+    peerKey: (String, Int) -> ByteArray?,
+    /** 监听端口；<= 0 = 只拨不听（手机/测试）。 */
+    listenPort: Int = -1,
+    /** 入站信任判据（默认全信：只有测试这么用）。 */
+    isTrustedFingerprint: (String) -> Boolean = { true },
+    /** 帧 → 对端地址（入站二进制帧没有 Envelope，只能靠握手指纹反查）。 */
+    peerOfFingerprint: (String) -> PeerEndpoint? = { null },
+    /** 切片大小。64KiB 与文件数据面同一个数量级：一次拷贝，不拆乱 screen 协议自己的帧。 */
+    private val chunkSize: Int = 64 * 1024,
+) {
+    private val transport = SecureChannelTransport(
+        identitySeed = identitySeed,
+        peerKey = peerKey,
+        listenPort = listenPort,
+        isTrustedFingerprint = isTrustedFingerprint,
+        peerOfFingerprint = peerOfFingerprint,
+        // 这条信道上只跑画面：魔数一变，文件块与 Envelope 都不会被当成本面的帧。
+        isBinaryFrame = { ScreenChannelFrame.isScreenFrame(it) },
+    )
+
+    /** 本端监听端口；未监听为 -1。 */
+    val boundPort: Int get() = transport.boundPort
+
+    /** 诊断：会话状态迁移 + Rust 侧计数（与消息信道同一个读数口径）。 */
+    fun diagnostics(): String = transport.stateHistory() + " | " + transport.diagnostics()
+
+    suspend fun start() = transport.start()
+
+    fun stop() = transport.stop()
+
+    /**
+     * 拨号并返回一条字节流。**不等握手**：screen-* 自己的 `screen-open`/`screen-ready`
+     * 就是"这条通不通"的判据（[ScreenReceiver] 已按这个纪律写），这里再等一次
+     * 只会多一层超时与竞态。
+     */
+    fun dial(host: String, port: Int, scope: CoroutineScope): ScreenWire {
+        val incoming = ByteChannel(autoFlush = true)
+        val outgoing = ByteChannel(autoFlush = true)
+        val writeJob = pumpOutbound(scope, outgoing, host, port)
+        // 回程（Sharer 的 screen-ready 与画面帧）也走这条会话，所以拨号侧同样要
+        // 把入站帧解出来写进读通道 —— 少了这一段，观众永远等不到第一帧。
+        val readJob = pumpInbound(scope, transport, incoming)
+        return ScreenWire(
+            read = incoming,
+            write = outgoing,
+            close = {
+                readJob.cancel()
+                writeJob.cancel()
+                runCatching { transport.stop() }
+                runCatching { incoming.close() }
+                runCatching { outgoing.close() }
+            },
+        )
+    }
+
+    /**
+     * 把入站画面帧搬进读通道。
+     *
+     * 读端慢（解码/渲染卡住）时**背压到 [DELIVER_TIMEOUT_MS] 为止**：超时说明这场
+     * 投屏已经不可能实时，于是如实收掉（上层按"投屏断开"处理），而不是继续把
+     * 越来越旧的画面堆进内存。
+     */
+    private fun pumpInbound(
+        scope: CoroutineScope,
+        transport: SecureChannelTransport,
+        channel: ByteChannel,
+    ): Job = scope.launch {
+        try {
+            transport.incoming.collect { datagram ->
+                val payload = ScreenChannelFrame.unwrap(datagram.bytes) ?: return@collect
+                val written = withTimeoutOrNull(DELIVER_TIMEOUT_MS) { channel.writeFully(payload) }
+                if (written == null) {
+                    runCatching { channel.close() }
+                }
+            }
+        } catch (_: CancellationException) {
+            // 正常收摊
+        }
+    }
+
+    /**
+     * 开始接受入站画面会话；第一条可信连接到达时回调 [onAccept]，之后该连接的字节
+     * 就写进这条 wire。
+     *
+     * 一次只服务一条画面会话（换连接即先关旧的）：`openScreen` 的交接纪律要求
+     * 所有权一次只在一处。
+     */
+    fun accept(scope: CoroutineScope, onAccept: (ScreenWire) -> Unit) {
+        acceptJob?.cancel()
+        acceptJob = scope.launch {
+            var incoming: ByteChannel? = null
+            var writeJob: Job? = null
+            var wire: ScreenWire? = null
+            try {
+                transport.incoming.collect { datagram ->
+                    val payload = ScreenChannelFrame.unwrap(datagram.bytes) ?: return@collect
+                    var target = incoming
+                    if (target == null) {
+                        val channel = ByteChannel(autoFlush = true)
+                        val outgoing = ByteChannel(autoFlush = true)
+                        writeJob = pumpOutbound(scope, outgoing, datagram.host, datagram.port)
+                        val created = ScreenWire(channel, outgoing) {
+                            writeJob?.cancel()
+                            runCatching { channel.close() }
+                            runCatching { outgoing.close() }
+                        }
+                        incoming = channel
+                        wire = created
+                        onAccept(created)
+                        target = channel
+                    }
+                    // 上层读得慢也要背压，但**不许阻塞信道回调**；超时就判定这场投屏
+                    // 已经不能实时（观众那边早已看不出画面），如实收掉这条 wire。
+                    val written = withTimeoutOrNull(DELIVER_TIMEOUT_MS) { target!!.writeFully(payload) }
+                    if (written == null) {
+                        wire?.close?.invoke()
+                        incoming = null
+                        wire = null
+                    }
+                }
+            } catch (_: CancellationException) {
+                // 正常收摊
+            } finally {
+                wire?.close?.invoke()
+            }
+        }
+    }
+
+    private var acceptJob: Job? = null
+
+    private fun pumpOutbound(scope: CoroutineScope, channel: ByteChannel, host: String, port: Int): Job =
+        scope.launch {
+            val buffer = ByteArray(chunkSize)
+            try {
+                while (isActive) {
+                    val n = channel.readAvailable(buffer, 0, buffer.size)
+                    if (n == -1) break
+                    if (n <= 0) continue
+                    val frame = ScreenChannelFrame.wrap(buffer, n)
+                    // 队列满就退避重试：丢一段字节 = 字节流错乱，比慢一点糟得多。
+                    var waited = 0L
+                    while (isActive && !transport.send(frame, host, port)) {
+                        delay(SEND_BACKOFF_MS)
+                        waited += SEND_BACKOFF_MS
+                        // 一条画面约 33-100ms 就该出去；5s 还送不出去 = 这条路已经死了，
+                        // 收掉它让上层按"投屏断开"处理，而不是假装还在传。
+                        if (waited > SEND_STALL_MS) return@launch
+                    }
+                }
+            } catch (_: CancellationException) {
+                // 正常收摊
+            }
+        }
+
+    private companion object {
+        /** 上层读得慢时的背压上限：超过它这场投屏已经不实时了。 */
+        const val DELIVER_TIMEOUT_MS = 2_000L
+        const val SEND_BACKOFF_MS = 2L
+        const val SEND_STALL_MS = 5_000L
+    }
+}

@@ -4,8 +4,10 @@ package com.kapp.tidings.platform
 import com.kapp.tidings.core.transport.DatagramTransport
 import com.kapp.tidings.core.transport.DiscoveryEngine
 import com.kapp.tidings.core.transport.PeerRegistry
+import com.kapp.tidings.core.transport.ScreenChannelHost
 import com.kapp.tidings.core.protocol.Profile
 import com.kapp.tidings.domain.LuciolaQrInfo
+import kotlinx.coroutines.CoroutineScope
 
 /**
  * 实验:luciola 传输宿主（JVM 桌面）。Android/iOS 暂不实现 —— 契约默认 null 即 legacy。
@@ -39,4 +41,15 @@ interface LuciolaHost {
 
     /** 发现面装配（NodeRuntime 注入用）。profile 由运行时给（含运行时才知道的 luciolaPort）。 */
     fun discoveryFactory(): ((PeerRegistry, () -> Profile) -> DiscoveryEngine)?
+
+    /**
+     * 画面信道装配（NodeRuntime 注入用）。
+     *
+     * @param listenPort 画面会话的监听端口；null = 本机只拨不听（手机按平台能力决定）。
+     * 返回 null = 本机不提供画面信道 ⇒ 运行时继续走 legacy 的 17879/17882。
+     */
+    fun screenChannelHostFactory(
+        scope: CoroutineScope,
+        listenPort: Int?,
+    ): ((PeerRegistry) -> ScreenChannelHost)?
 }

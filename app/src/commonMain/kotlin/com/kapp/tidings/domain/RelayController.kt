@@ -899,6 +899,11 @@ class RelayController(
         // 发现引擎的 extra 必须用运行时 selfProfile(含 luciolaPort):工厂构造时的静态
         // profile 没有那个字段,对端会拿发现临时端口来拨号(真机实测拨错)。
         val luciolaMode = luciolaTransport != null && luciolaDiscovery != null
+        // 画面信道：独立一条 luciola 会话，端口取「发现端口 + 10」——
+        // 刻意避开 legacy 的三兄弟（+1 tcp、+2 tls、+3/+2 跨网文件与投屏），
+        // 也避开 17879/17881/17882（luciola 模式下这三个不许再出现在 lsof 里）。
+        val screenChannelPort = if (luciolaMode) (settings.udpPort + 10).takeIf { it in 1..65535 } else null
+        val screenChannelHostFactory = luciolaHost?.screenChannelHostFactory(scope, screenChannelPort)
         if (luciolaMode) {
             // 只有**确认**数据面可用之后才声明 `fch1`：声明了却收不了字节，对端会推、
             // 本端永远等文件（"对方说发了、我一直卡在接收中"）。
@@ -909,6 +914,8 @@ class RelayController(
                 remoteShare = isShareSupported,
                 advertiseAgent = advertiseAgent,
                 fileOverChannel = true,
+                // 只有画面信道真的会起监听才声明 scr1（声明了没人听，对端会一直等握手）。
+                screenOverChannel = screenChannelPort != null && screenChannelHostFactory != null,
             )
             luciolaHost?.configure(profile, settings.udpPort)
         }
@@ -968,6 +975,8 @@ class RelayController(
             // 文件字节走加密信道（fch1）：**只有**实验信道启用时才建路由器。
             // 关着 = null ⇒ TransferManager 照旧拨号拉取，行为一字不变。
             fileChannelEnabled = luciolaMode,
+            screenChannelHostFactory = screenChannelHostFactory,
+            screenChannelPort = screenChannelPort?.takeIf { screenChannelHostFactory != null },
             // 配对码里那一池候选地址（按 nodeId 存）：换网之后发送/心跳的兜底。
             peerEndpointStore = persist.peerEndpoints,
             // 配对码里那枚 tlsPin：K2 公网长连接的信任根（没它就不建公网连接）。

@@ -6,9 +6,11 @@ import com.kapp.tidings.core.transport.DatagramTransport
 import com.kapp.tidings.core.transport.DiscoveryEngine
 import com.kapp.tidings.core.transport.LuciolaTransportFactory
 import com.kapp.tidings.core.transport.PeerRegistry
+import com.kapp.tidings.core.transport.ScreenChannelHost
 import com.kapp.tidings.core.transport.SecureStateStore
 import com.kapp.tidings.domain.LuciolaQrInfo
 import com.kapp.tidings.platform.LuciolaHost
+import kotlinx.coroutines.CoroutineScope
 import java.io.File
 import java.security.SecureRandom
 import java.util.Base64
@@ -68,6 +70,14 @@ class DesktopLuciolaHost(
 
     override fun discoveryFactory(): ((PeerRegistry, () -> Profile) -> DiscoveryEngine)? =
         factory?.let { f -> ({ registry: PeerRegistry, profile: () -> Profile -> f.createDiscovery(registry, profile) }) }
+
+    override fun screenChannelHostFactory(
+        scope: CoroutineScope,
+        listenPort: Int?,
+    ): ((PeerRegistry) -> ScreenChannelHost)? =
+        factory?.let { f ->
+            ({ registry: PeerRegistry -> f.createScreenChannelHost(registry, scope, listenPort ?: -1) })
+        }
 
     /** 造一个「扫过码的手机」用的发起侧:配对信息 + 发起配对。 */
     suspend fun requestPairing(transport: DatagramTransport, host: String, port: Int, nodeId: String): Boolean {

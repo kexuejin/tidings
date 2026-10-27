@@ -79,10 +79,21 @@ kotlin {
     }
 }
 
+// luciola(JNA) 在测试里加载本地库；分支阶段指向本机构建产物。
+//
+// **优先 release**：debug 引擎的 AES-GCM/握手是未优化的，同一条数据面实测慢 6-8 倍
+// （投屏 10fps×100KiB 的单帧 p95：release 6ms / debug 29ms；50MB 文件 3s vs 46s）。
+// 拿 debug 的数去验收会得到「加密信道就是慢」的错误结论 —— 而真机装的是 release。
+val luciolaNativeDir: String = runCatching {
+    val base = file("/workspace/RustBuild/cargo-target")
+    listOf(base.resolve("release"), base.resolve("debug"))
+        .firstOrNull { it.resolve("libluciola_uniffi.dylib").exists() }
+        ?.absolutePath
+        ?: base.resolve("debug").absolutePath
+}.getOrDefault("/workspace/RustBuild/cargo-target/debug")
+
 tasks.withType<Test>().configureEach {
-    // luciola(JNA)在测试里加载本地库;分支阶段:指向本机构建产物。
-    // 正式接入时应改为随构件分发或 CI 固定路径。
-    systemProperty("jna.library.path", System.getProperty("jna.library.path") ?: "/workspace/RustBuild/cargo-target/debug")
+    systemProperty("jna.library.path", System.getProperty("jna.library.path") ?: luciolaNativeDir)
 }
 
 // ## 为什么验收用例要单独一个 JVM

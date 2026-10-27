@@ -68,6 +68,14 @@ class SecureChannelTransport(
      * 不能靠帧里的 from 归属;只能靠握手出来的指纹反查(TrustStore → nodeId → registry)。
      */
     private val peerOfFingerprint: (String) -> PeerEndpoint? = { null },
+    /**
+     * 「这帧是二进制数据面帧、不是 Envelope」的判据。
+     *
+     * 默认只认文件块（[FileChunkFrame]）—— 行为与加这个参数之前逐字一致。投屏会
+     * 建**自己的一条**信道实例并传入 [ScreenChannelFrame.isScreenFrame]：两条数据面
+     * 各有各的魔数，于是一条信道上的帧不会被另一条误认。
+     */
+    private val isBinaryFrame: (ByteArray) -> Boolean = { FileChunkFrame.isChunkFrame(it) },
 ) : DatagramTransport {
     private val outbound = ConcurrentHashMap<String, SecureSession>()
 
@@ -340,7 +348,7 @@ class SecureChannelTransport(
             // 未通过信任手续的对端,一帧业务数据都不许进入应用层。
             if (!trusted) return
             // 二进制数据帧(文件/投屏)没有 Envelope:按会话指纹反查对端地址后原样投递。
-            if (FileChunkFrame.isChunkFrame(message)) {
+            if (isBinaryFrame(message)) {
                 val fp = sessionFingerprint ?: return
                 val endpoint = inboundPeer ?: peerOfFingerprint(fp) ?: return
                 inboundPeer = endpoint

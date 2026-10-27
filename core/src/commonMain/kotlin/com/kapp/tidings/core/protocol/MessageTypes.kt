@@ -234,6 +234,16 @@ object MsgTypes {
     const val CAP_FILE_CHANNEL = "fch1"
 
     /**
+     * `scr1` = **投屏画面走独立加密会话**（与 `fch1` 同一族的第二块数据面）。
+     *
+     * 说的是「画面字节能不能经一条**专门**的加密会话推给我」，不是「能不能投屏」
+     * （那是 `rv1`/`rvs1`）。两者必须分开：`rv1` 描述会话能不能建立，`scr1` 描述
+     * 画面走哪条路。只有双方都声明 `scr1` 且对端档案里有 screenPort 才走新数据面，
+     * 否则继续用 17879 明文 / 17882 跨网 TLS —— 这同样是不对称能力位作灰度开关。
+     */
+    const val CAP_SCREEN_CHANNEL = "scr1"
+
+    /**
      * `shr1` = **共享文件柜能力**（协议 §8.2）。
      */
     const val CAP_SHARE = "shr1"

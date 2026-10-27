@@ -206,6 +206,15 @@ class TransferManager(
      * null = 不起这条入口。
      */
     private val crossNetworkFilePort: Int? = null,
+    /**
+     * 是否创建 **legacy 监听**（明文 tcpPort 与跨网 tlsPort + 1）。
+     *
+     * luciola 信道模式（fch1）下置 false：文件字节走加密信道，这两条入口没有存在
+     * 意义，留着只是多两个可被扫到、可被老协议误连的端口。关掉之后 [start] 依然
+     * 返回 true —— 「管理器可用」不等于「我绑了 17879」，真实端口看 [boundPort]
+     * （此处为 null）。
+     */
+    private val legacyTcpListener: Boolean = true,
     /** 对端是否声明了 `tw1`。只有声明者才允许收 `wait` 帧。 */
     private val peerSupportsWait: (peerId: String) -> Boolean = { false },
     /**
@@ -374,20 +383,27 @@ class TransferManager(
         // 半截文件 —— 它们既不会被续传，也不会被转正，只会一直占着磁盘。审计里说的
         // "`.part` 残留零出口"就是这件事。放在绑端口之前，顺序上也不可能删到在途文件。
         stalePartSweep = sweepStaleParts()
-        if (!server.start(tcpPort) && (tcpPort == 0 || !server.start(0))) {
-            started = false
-            return false
-        }
-        // F1：跨网文件的独立 TLS 监听（与明文监听并存、互不影响）。
-        // 起不来（平台不支持 / 端口被占）就只是**没有这条入口** —— 局域网原路径不受影响。
-        val listener = crossNetworkListener
-        val filePort = crossNetworkFilePort
-        if (listener != null && filePort != null) {
-            crossNetworkBoundPort = listener.start(filePort) { connection ->
-                // 协议逐字复用：这里只负责「连接从哪来」，服务端逻辑全在 servePullFrame。
-                runCatching { server.servePullFrame(connection.read, connection.write) }
-                runCatching { connection.close() }
+        if (legacyTcpListener) {
+            if (!server.start(tcpPort) && (tcpPort == 0 || !server.start(0))) {
+                started = false
+                return false
             }
+            // F1：跨网文件的独立 TLS 监听（与明文监听并存、互不影响）。
+            // 起不来（平台不支持 / 端口被占）就只是**没有这条入口** —— 局域网原路径不受影响。
+            val listener = crossNetworkListener
+            val filePort = crossNetworkFilePort
+            if (listener != null && filePort != null) {
+                crossNetworkBoundPort = listener.start(filePort) { connection ->
+                    // 协议逐字复用：这里只负责「连接从哪来」，服务端逻辑全在 servePullFrame。
+                    runCatching { server.servePullFrame(connection.read, connection.write) }
+                    runCatching { connection.close() }
+                }
+            }
+        } else {
+            // luciola 信道模式：**一帧都不从这两个端口进出**。
+            // boundPort 保持 null，上层据此如实呈现「没有 legacy 入口」，
+            // 而不是绑上了却装作没有。
+            crossNetworkBoundPort = null
         }
         eventJob = scope.launch {
             server.events.collect { event ->
@@ -436,7 +452,9 @@ class TransferManager(
                 }
             }
         }
-        return server.start(tcpPort)
+        // 这里原来无条件再 server.start(tcpPort) 一次（幂等：已绑上就直接返回 true）。
+        // 信道模式下不能走这一句 —— 它会把刚才刻意不建的明文监听又建起来。
+        return if (legacyTcpListener) server.start(tcpPort) else true
     }
 
     suspend fun stop() {

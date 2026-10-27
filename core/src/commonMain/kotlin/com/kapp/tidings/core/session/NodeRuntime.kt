@@ -61,6 +61,8 @@ import com.kapp.tidings.core.transport.CrossNetworkRawDialer
 import com.kapp.tidings.core.transport.CrossNetworkTransferPlanner
 import com.kapp.tidings.core.transport.CrossNetworkTransferPolicy
 import com.kapp.tidings.core.transport.PullAttemptTransport
+import com.kapp.tidings.core.transport.ScreenChannelHost
+import com.kapp.tidings.core.transport.ScreenChannelNegotiation
 import com.kapp.tidings.core.transport.ScreenWire
 import com.kapp.tidings.core.transport.ScreenWireOpener
 import com.kapp.tidings.core.transport.crossNetworkScreenPort
@@ -175,6 +177,21 @@ class NodeRuntime(
      */
     private val fileChannelEnabled: Boolean = false,
     /**
+     * 画面信道（luciola）宿主；null = 没有画面信道，投屏继续走 legacy（17879/17882）。
+     *
+     * 只有 `fileChannelEnabled`（luciola 模式）+ 档案里有 `screenPort` + 本参数非空
+     * 三件齐了才会真的起监听**并**把新通路排进 Viewer 的计划 —— 缺一件就整体退回
+     * legacy，绝不出现"声明了 scr1 却没人听画面端口"。
+     */
+    private val screenChannelHostFactory: ((PeerRegistry) -> ScreenChannelHost)? = null,
+    /**
+     * 画面信道的监听端口（宿主定，必须与 [screenChannelHost] 起的那条会话一致）。
+     *
+     * 由宿主传入而不是运行时自己猜：端口是**绑定结果**，猜错就是"我广播了一个没人听的
+     * 端口"。null = 本机不提供画面信道（手机端按平台能力决定）。
+     */
+    private val screenChannelPort: Int? = null,
+    /**
      * 额外发现引擎(阶段二 B-3:luciola 桥接)。与主 Discovery 并存:
      * registry 按 nodeId 去重;luciola 补 IPv6 多播/防 TUN 的发现覆盖,
      * legacy 继续承载 msg 帧(阶段三切 SecureChannel 后移除)。
@@ -282,6 +299,14 @@ class NodeRuntime(
     private val tcp: TcpFramedChannel? = if (enableTcp) TcpFramedChannel() else null
 
     /**
+     * 画面信道宿主（`start` 里按 [screenChannelHostFactory] + 本运行时的 registry 建）。
+     *
+     * 为什么是工厂而不是实例：宿主对象需要 `PeerRegistry`（指纹 → 端点归属），而
+     * registry 是本运行时自己建的 —— 与 `messengerTransportFactory` 同一个理由。
+     */
+    private var screenChannelHost: ScreenChannelHost? = null
+
+    /**
      * 信道文件数据路由器（仅 `fileChannelEnabled` 时存在）。
      *
      * 发送面绑到「registry 查端点 → transport.send」：加密信道是 TCP，端口用对端的
@@ -361,6 +386,9 @@ class NodeRuntime(
             //
             // 带上全部地址后，任意一条通路收到过一次 profile 就能打破死锁。
             addresses = advertisedAddresses().takeIf { it.isNotEmpty() } ?: profile.addresses,
+            // 画面信道的端口：只在真的会起监听时才广播（否则就是对端一直等握手）。
+            screenPort = screenChannelPort
+                ?.takeIf { screenChannelHost != null && it in 1..65535 && fileChannelEnabled },
         )
 
     private val legacyDiscoveryEnabled = messengerTransportFactory == null
@@ -666,7 +694,7 @@ class NodeRuntime(
             tlsPort = record.profile.tlsPort,
             hasPin = pin != null,
         )
-        return plan.map { attempt ->
+        val legacy = plan.map { attempt ->
             when (attempt.transport) {
                 PullAttemptTransport.Plaintext -> plainScreenWireOpener(attempt.host, attempt.port)
                 // 5s 拨号超时：公网握手失败要快速试下一条候选,不能挂住整场连接。
@@ -678,6 +706,17 @@ class NodeRuntime(
                 }
             }
         }
+        // 新数据面排在**最前**：协商通过就优先走加密画面会话，失败自然落到 legacy
+        // 的那几条（ScreenReceiver 按序试，"握上手"才算这条通）。
+        val host = screenChannelHost
+        val peer = record.profile
+        val screenPort = peer.screenPort
+        if (host != null && screenPort != null &&
+            ScreenChannelNegotiation.canUseChannel(selfProfile, peer)
+        ) {
+            return listOf(host.opener(record.ip, screenPort)) + legacy
+        }
+        return legacy
     }
 
     /**
@@ -783,6 +822,13 @@ class NodeRuntime(
                     runCatching { router.onBinaryFrame(datagram.bytes) }
                 }
             }
+        }
+        // 画面信道宿主先建起来：`selfProfile` 要按"它到底建没建"决定广播不广播 screenPort
+        // （广播一个没人听的端口，对端会一直等 screen-ready）。
+        screenChannelHost = screenChannelHostFactory?.let { factory ->
+            runCatching { factory(registry) }
+                .onFailure { t -> println("[luciola] screen channel host failed: " + t) }
+                .getOrNull()
         }
 
         discovery.start(runScope)
@@ -988,6 +1034,10 @@ class NodeRuntime(
                 // 主机侧入口：独立 TLS 监听（对端按 tlsPort + 1 来连）。起不来就只是没这条入口。
                 crossNetworkListener = crossNetworkFileListener,
                 crossNetworkFilePort = crossNetworkFilePort(profile.tlsPort),
+                // luciola 信道模式：**不创建** 17879 明文监听与 17881 跨网 TLS 监听
+                // （它们只是两个可被扫到的端口）。旧协议的入站在这个模式下不存在 ——
+                // 发现也已经是 luciola 的，老对端找不到我们，谈不上「回退到 legacy 端口收」。
+                legacyTcpListener = !fileChannelEnabled,
             )
         } else {
             null
@@ -1001,6 +1051,23 @@ class NodeRuntime(
         // 是 `screen-open` 且宿主认领（会话/token 校验在 onOpenScreenWire 里）才交接,
         // 否则关掉 —— 与明文监听（TransferServer 首帧分发）同一套纪律。
         // 起不来（平台不支持 / 端口被占）只是**没有跨网入口**,局域网原路径不受影响。
+        // 画面信道（luciola）：独立会话，一帧都不走 17879/17882。
+        // 与 legacy 监听**互不替代地并存**：开关/协商任一不满足时 legacy 那条仍然是投屏的路。
+        val screenHost = screenChannelHost
+        val secureScreenPort = screenChannelPort?.takeIf { it in 1..65535 }
+        if (fileChannelEnabled && screenHost != null && secureScreenPort != null) {
+            runCatching {
+                screenHost.startListening { wire ->
+                    // 首帧是 screen-open（与两条 legacy 通路同一套解码与 token 校验）。
+                    runScope.launch {
+                        val open = readFirstScreenOpen(wire.read)
+                        if (open == null || !onOpenScreenWire(open, wire)) {
+                            runCatching { wire.close() }
+                        }
+                    }
+                }
+            }.onFailure { t -> println("[luciola] screen channel listen failed: " + t) }
+        }
         val screenPort = crossNetworkScreenPort(profile.tlsPort)
         if (screenPort != null && crossNetworkScreenListener.canServe) {
             runCatching {
@@ -1042,7 +1109,11 @@ class NodeRuntime(
         // 绑 TCP 端口要放在订阅之后：端口一开，桌面端就可能连进来拉文件。
         // 返回值**必须**留下：见 [tcpBound]。丢掉它等于让"端口没拿到"永远没人知道，
         // 而资料里那个 tcpPort 照样会广播出去。
-        tcpBound = manager?.start() ?: false
+        // 注意：这里判的是**真的绑上了端口**，不是「管理器起来了」。
+        // 信道模式（legacyTcpListener = false）下 manager.start() 仍返回 true（数据传输
+        // 走 fch1），但 `boundPort` 是 null —— 那种情况不许宣称自己绑着 TCP。
+        val started = manager?.start() == true
+        tcpBound = started && manager?.boundPort != null
         if (tcpBound) {
             // 声明一个自己没拿到的端口，后果不是"收不到"而是**投递错人**：对端照着我们
             // 广播出去的 tcpPort 去连，连上的是占着那个端口的另一个程序。
@@ -1084,6 +1155,8 @@ class NodeRuntime(
         transfer?.stop()
         transfer = null
         runCatching { crossNetworkScreenListener.stop() }
+        runCatching { screenChannelHost?.stopListening() }
+        screenChannelHost = null
         tcpBound = false
         discovery.stop()
         resolvedExtraDiscovery?.stop()

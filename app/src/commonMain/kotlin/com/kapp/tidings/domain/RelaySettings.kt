@@ -375,8 +375,16 @@ data class RelaySettings(
          * 既有调用点（测试、预览、未开实验开关的宿主）行为不变。
          */
         fileOverChannel: Boolean = false,
+        /**
+         * 本机是否能**收**独立加密会话送来的投屏画面（`scr1`）。
+         *
+         * 与 [fileOverChannel] 同一条纪律：只有画面信道真的起来（luciola 模式 +
+         * 已绑上 screenPort）才声明 —— 声明了却没人听，对端会一直等 `screen-ready`。
+         */
+        screenOverChannel: Boolean = false,
     ): List<String> = buildList {
         if (fileOverChannel) add(MsgTypes.CAP_FILE_CHANNEL)
+        if (screenOverChannel) add(MsgTypes.CAP_SCREEN_CHANNEL)
         // `ag1` 在最前：它是「这个节点能承载 agent 会话」的身份声明，与后面的帧能力不同层。
         // 桌面端（托盘常驻）与 agentNode 都声明它；手机端不声明。
         if (advertiseAgent) add(MsgTypes.CAP_AGENT)
@@ -449,6 +457,8 @@ data class RelaySettings(
         advertiseAgent: Boolean = false,
         /** 实验 luciola 数据面可用时传 true ⇒ 声明 `fch1`（见 [caps]）。 */
         fileOverChannel: Boolean = false,
+        /** 画面信道可用时传 true ⇒ 声明 `scr1`（见 [caps]）。 */
+        screenOverChannel: Boolean = false,
     ): Profile = Profile.mobile(
         nodeId = nodeId,
         nick = nick.take(LIMIT_NICK),
@@ -469,6 +479,7 @@ data class RelaySettings(
             customAvatar = customAvatar,
             advertiseAgent = advertiseAgent,
             fileOverChannel = fileOverChannel,
+            screenOverChannel = screenOverChannel,
         ),
     )
 

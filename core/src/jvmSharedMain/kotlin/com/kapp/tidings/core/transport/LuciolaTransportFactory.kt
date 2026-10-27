@@ -271,25 +271,51 @@ class LuciolaTransportFactory(
             pairing = pairingAdmission(),
             pairingSecretOf = { host, port -> pairingSecrets[endpointKey(host, port)] },
             selfPublicKey = identity.publicKey,
-            peerOfFingerprint = { fingerprint ->
-                // TrustStore 的指纹账本 → deviceId → registry 地址。
-                //
-                // **deviceId 有两种形态**（实测踩过，回环 5MB 验收时收端一个字节都没收到）：
-                //  - 被对方扫我们的码配对时，deviceId = 对方的 nodeId（正常）；
-                //  - 我们扫对方的码配对时，deviceId = "host:port" 端点键（pairPeer 的写法）。
-                // 只按 nodeId 查的话，第二种形态在 registry 里查不到 ⇒ 入站二进制帧全被丢。
-                // 所以端点键形态要反查：按 ip/port 找 registry 里的对端。
-                val deviceId = rustTrustStore.entries()
-                    .firstOrNull { it.fingerprint == fingerprint }
-                    ?.deviceId
-                    ?: return@SecureChannelTransport null
-                registry.get(deviceId)?.let { return@SecureChannelTransport PeerEndpoint(it.ip, it.udpPort) }
-                val host = deviceId.substringBeforeLast(':', "")
-                val port = deviceId.substringAfterLast(':', "").toIntOrNull() ?: 0
-                if (host.isEmpty() || port == 0) return@SecureChannelTransport null
-                registry.findByEndpoint(host, port)?.let { PeerEndpoint(it.ip, it.udpPort) }
-            },
+            peerOfFingerprint = { fingerprint -> endpointOfFingerprint(fingerprint, registry) },
         )
+
+    /**
+     * 画面信道的宿主（Sharer 监听 + Viewer 拨号）。
+     *
+     * 与消息/文件同一个身份、同一份信任库、同一套指纹 → 端点归属：画面是**另一条会话**，
+     * 不是另一套安全模型。
+     */
+    fun createScreenChannelHost(
+        registry: PeerRegistry,
+        scope: kotlinx.coroutines.CoroutineScope,
+        /** 画面监听端口；<= 0 = 只拨不听（手机端按平台能力决定）。 */
+        listenPort: Int = -1,
+    ): SecureScreenChannelHost = SecureScreenChannelHost(
+        channel = SecureScreenChannel(
+            identitySeed = identity.seed,
+            peerKey = { host, port -> pinFor(host, port, registry) },
+            listenPort = listenPort,
+            isTrustedFingerprint = { fingerprint -> isTrustedFingerprint(fingerprint) },
+            peerOfFingerprint = { fingerprint -> endpointOfFingerprint(fingerprint, registry) },
+        ),
+        scope = scope,
+    )
+
+    /**
+     * 握手指纹 → 对端在 registry 里的地址。
+     *
+     * **deviceId 有两种形态**（实测踩过，回环 5MB 验收时收端一个字节都没收到）：
+     *  - 被对方扫我们的码配对时，deviceId = 对方的 nodeId（正常）；
+     *  - 我们扫对方的码配对时，deviceId = "host:port" 端点键（pairPeer 的写法）。
+     * 只按 nodeId 查的话，第二种形态在 registry 里查不到 ⇒ 入站二进制帧全被丢。
+     * 所以端点键形态要反查：按 ip/port 找 registry 里的对端。
+     */
+    private fun endpointOfFingerprint(fingerprint: String, registry: PeerRegistry): PeerEndpoint? {
+        val deviceId = rustTrustStore.entries()
+            .firstOrNull { it.fingerprint == fingerprint }
+            ?.deviceId
+            ?: return null
+        registry.get(deviceId)?.let { return PeerEndpoint(it.ip, it.udpPort) }
+        val host = deviceId.substringBeforeLast(':', "")
+        val port = deviceId.substringAfterLast(':', "").toIntOrNull() ?: 0
+        if (host.isEmpty() || port == 0) return null
+        return registry.findByEndpoint(host, port)?.let { PeerEndpoint(it.ip, it.udpPort) }
+    }
 
     /**
      * 拨号用的对端公钥：先查配对表；查不到再走「registry 端点 → nodeId → TrustStore」——

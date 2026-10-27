@@ -30,6 +30,7 @@ internal object CapabilityInventory {
         "CAP_TABLE_TEXT" to MsgTypes.CAP_TABLE_TEXT,
         "CAP_FILE_DIRECT" to MsgTypes.CAP_FILE_DIRECT,
         "CAP_FILE_CHANNEL" to MsgTypes.CAP_FILE_CHANNEL,
+        "CAP_SCREEN_CHANNEL" to MsgTypes.CAP_SCREEN_CHANNEL,
         "CAP_SHARE" to MsgTypes.CAP_SHARE,
         "CAP_REMOTE_VIEW" to MsgTypes.CAP_REMOTE_VIEW,
         "CAP_REMOTE_SHARE" to MsgTypes.CAP_REMOTE_SHARE,
@@ -59,6 +60,9 @@ internal object CapabilityInventory {
         MsgTypes.CAP_FILE_CHANNEL to
             "由壳按实验开关条件声明（RelaySettings.caps 的 fileOverChannel）："
                 + "只有 luciola 数据面确认可用才声明，否则对端推字节而本端永远等文件",
+        MsgTypes.CAP_SCREEN_CHANNEL to
+            "由壳按同一条开关条件声明（RelaySettings.caps 的 screenOverChannel）："
+                + "与 fch1 同一族的第二块数据面；声明了却不起画面监听，对端会一直等握手",
         MsgTypes.CAP_MSG_AGENT_SESSION to
             "预埋：阶段 C1 未实现，本端既不声明也不解析（见 docs/plans/2026-10-12-relay-agent-session-scheme.md）",
         MsgTypes.CAP_SHARE to
