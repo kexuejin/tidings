@@ -4,10 +4,8 @@ package com.kapp.tidings.core.transport
 import com.kapp.tidings.core.crypto.Sha256
 import com.kapp.tidings.core.fs.fileSize
 import com.kapp.tidings.core.testing.createTempDir
-import kotlinx.coroutines.channels.Channel
 import kotlinx.coroutines.test.runTest
 import kotlin.test.Test
-import kotlin.test.assertContentEquals
 import kotlin.test.assertEquals
 import kotlin.test.assertTrue
 

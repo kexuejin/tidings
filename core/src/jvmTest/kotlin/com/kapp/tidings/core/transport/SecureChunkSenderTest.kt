@@ -2,7 +2,6 @@
 package com.kapp.tidings.core.transport
 
 import com.kapp.tidings.core.protocol.Profile
-import kotlinx.coroutines.async
 import kotlinx.coroutines.channels.Channel
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.first

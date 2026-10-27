@@ -5,6 +5,11 @@
 # 扫描器已剥注释：KDoc 里引用的旧代码不会进来。
 
 # ---- core：广播地址是被测纯函数的输入/期望值（不读机器状态）----
+core/src/jvmTest/kotlin/com/kapp/tidings/core/transport/LuciolaSecureChannelTest.kt | B | delay 在真 socket 信道建连/断开探测中等待状态收敛
+core/src/jvmTest/kotlin/com/kapp/tidings/core/transport/ChannelFileTransferE2ETest.kt | A | currentTimeMillis 测量传输耗时与吞吐
+core/src/jvmTest/kotlin/com/kapp/tidings/core/transport/ChannelFileTransferE2ETest.kt | B | D 类本地真 socket 传输 E2E，delay 模拟在途传输
+core/src/jvmTest/kotlin/com/kapp/tidings/core/transport/LuciolaChannelThroughputSpikeTest.kt | B | 吞吐压力 Spike 测试，delay 用于排空出站队列
+core/src/jvmTest/kotlin/com/kapp/tidings/core/transport/LuciolaDiscoveryEngineTest.kt | B | 测试真实心跳间隔（300ms 心跳 + 400ms 扫除窗口），delay 推进时钟验证在线保活
 core/src/commonTest/kotlin/com/kapp/tidings/core/protocol/IpAddressTest.kt | A | 255.255.255.255 是纯函数的期望值，不读网卡
 core/src/commonTest/kotlin/com/kapp/tidings/core/transport/DiscoveryTargetsTest.kt | A | 广播地址是构造输入与期望，纯函数
 core/src/commonTest/kotlin/com/kapp/tidings/core/transport/SubnetBroadcastTargetsTest.kt | A | 同上：子网广播地址由 CIDR 算出

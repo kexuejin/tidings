@@ -984,7 +984,7 @@ class NodeRuntime(
                 // 信道文件数据面：**只有** 启用 + 对端声明 fch1 才接管。
                 // 接管 = 登记到路由器且**不发 pull**；否则返回 false，走 legacy 拨号拉取。
                 registerChannelInbound = fileChannel?.let { router ->
-                    register@ { offer, saveDir ->
+                    register@ { offer, saveDir, onProgress, onCompleted, onFailed ->
                         val peerCaps = registry.get(offer.peerId)?.profile?.caps
                         val allows = FileChannelNegotiation.canUseChannel(
                             selfCaps = selfProfile.caps,
@@ -1011,6 +1011,9 @@ class NodeRuntime(
                                 // 信道模式先只校验长度；sha 由 done 帧给（后续步骤）。
                                 target = ChunkFileTarget(file.relPath, file.size, null),
                                 root = saveDir,
+                                onProgress = { done, total -> onProgress(file.fileId, done, total) },
+                                onCompleted = { path -> onCompleted(file.fileId, path) },
+                                onFailure = { reason -> onFailed(file.fileId, reason) },
                             )
                             if (ok) registered++
                         }
@@ -1025,7 +1028,7 @@ class NodeRuntime(
                 },
                 // 出站：对端 accept 之后我们**推**。sha 由对端按长度校验（与 legacy 同一纪律）。
                 pushFileOnChannel = fileChannel?.let { router ->
-                    push@ { transferId, peerId, files ->
+                    push@ { transferId, peerId, files, onProgress ->
                         println(
                             "[luciola] channel push start transfer=" + transferId.take(8) +
                                 " peer=" + peerId.take(8) + " files=" + files.size,
@@ -1036,6 +1039,7 @@ class NodeRuntime(
                                 transferId = transferId,
                                 fileId = file.fileId,
                                 source = com.kapp.tidings.core.transport.DiskFileChunkSource(file.absPath),
+                                onProgress = { done -> onProgress(file.fileId, done, file.size) },
                             )
                             println(
                                 "[luciola] channel push file=" + file.fileId.take(8) +

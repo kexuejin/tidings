@@ -49,6 +49,8 @@ class ChunkFileReceiver(
     private val finalPath: String? = target.resolveUnder(root)
     private val partPath: String? = finalPath?.let { it + PART_SUFFIX }
 
+    val expectedSize: Long get() = target.expectedSize
+
     /** 解析阶段就失败（路径越界）：调用方据此报 path-escape。 */
     val valid: Boolean get() = finalPath != null
 

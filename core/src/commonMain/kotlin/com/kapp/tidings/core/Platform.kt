@@ -13,7 +13,7 @@ import kotlinx.coroutines.CoroutineDispatcher
 expect fun nowMillis(): Long
 
 /**
- * ## commonMain 里禁止使用 JVM 专属 API（2026-10-27 实测）
+ * ## commonMain 里禁止使用 JVM 专属 API
  *
  * 判据只有一条：`./gradlew :core:compileKotlinIosSimulatorArm64`
  * （或 `:composeApp:compileKotlinIosSimulatorArm64`）必须过。

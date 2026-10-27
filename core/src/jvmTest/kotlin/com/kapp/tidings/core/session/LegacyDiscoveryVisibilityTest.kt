@@ -3,7 +3,6 @@ package com.kapp.tidings.core.session
 
 import com.kapp.tidings.core.protocol.MsgTypes
 import com.kapp.tidings.core.protocol.Profile
-import com.kapp.tidings.core.protocol.newId
 import com.kapp.tidings.core.transport.UdpTransport
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers

@@ -31,10 +31,11 @@ class FileChannelRouterTest {
         val a = ByteArray(70_000) { (it % 251).toByte() }
         val b = ByteArray(40_000) { (it % 97).toByte() }
         val sent = mutableListOf<ByteArray>()
+        val completedFiles = mutableListOf<String>()
         val router = FileChannelRouter(sendToPeer = { _, bytes -> sent.add(bytes); true })
 
-        assertTrue(router.registerInbound("peer", "t1", "a", ChunkFileTarget("a.bin", a.size.toLong(), shaOf(a)), dir))
-        assertTrue(router.registerInbound("peer", "t1", "b", ChunkFileTarget("b.bin", b.size.toLong(), shaOf(b)), dir))
+        assertTrue(router.registerInbound("peer", "t1", "a", ChunkFileTarget("a.bin", a.size.toLong(), shaOf(a)), dir, onCompleted = { completedFiles.add("a") }))
+        assertTrue(router.registerInbound("peer", "t1", "b", ChunkFileTarget("b.bin", b.size.toLong(), shaOf(b)), dir, onCompleted = { completedFiles.add("b") }))
 
         // 交错送入两个文件的块，模拟真实交错到达。
         val chunk = SecureChunkReceiver.CHUNK
@@ -52,6 +53,7 @@ class FileChannelRouterTest {
         }
         assertTrue(fileExists(dir + "/a.bin"), "文件 a 必须转正")
         assertTrue(fileExists(dir + "/b.bin"), "文件 b 必须转正")
+        assertEquals(listOf("a", "b"), completedFiles.sorted(), "两个文件收齐时都必须触发 onCompleted")
         assertEquals(a.size.toLong(), fileSize(dir + "/a.bin"))
         assertEquals(b.size.toLong(), fileSize(dir + "/b.bin"))
         // 每个文件都必须收到过 ACK（帧里的键含 fileId，说明路由没串）。

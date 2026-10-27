@@ -31,6 +31,9 @@ class FileChannelRouter(
         val fileId: String,
         val receiver: ChunkFileReceiver,
         val chunks: SecureChunkReceiver,
+        val onProgress: ((done: Long, total: Long) -> Unit)? = null,
+        val onCompleted: ((path: String) -> Unit)? = null,
+        val onFailure: ((reason: String) -> Unit)? = null,
     ) {
         /**
          * 转正是否已经做过（只做一次）。
@@ -54,6 +57,9 @@ class FileChannelRouter(
         fileId: String,
         target: ChunkFileTarget,
         root: String,
+        onProgress: ((done: Long, total: Long) -> Unit)? = null,
+        onCompleted: ((path: String) -> Unit)? = null,
+        onFailure: ((reason: String) -> Unit)? = null,
     ): Boolean {
         val receiver = ChunkFileReceiver(target, root)
         if (!receiver.valid) return false
@@ -63,7 +69,7 @@ class FileChannelRouter(
             sendToPeer(peerId, FileChunkAck.encode(transferIdKey(transferId, fileId), upTo))
         }
         lock.withLock {
-            inbound[key] = Inbound(peerId, transferId, fileId, receiver, chunks)
+            inbound[key] = Inbound(peerId, transferId, fileId, receiver, chunks, onProgress, onCompleted, onFailure)
         }
         return true
     }
@@ -79,6 +85,7 @@ class FileChannelRouter(
             val entry = lock.withLock { inbound[keyOf(transferId, fileId)] } ?: return true
             if (entry.chunks.onChunk(FileChunkFrame.Decoded(transferIdKey(transferId, fileId), frame.offset, frame.payload))) {
                 entry.receiver.append(frame.offset, frame.payload)
+                entry.onProgress?.invoke(entry.chunks.ackedUpTo, entry.receiver.expectedSize)
             }
             if (entry.chunks.isComplete) completeOnce(entry)
             return true
@@ -102,12 +109,17 @@ class FileChannelRouter(
             if (entry.finished) return
             entry.finished = true
         }
-        runCatching { entry.receiver.finish() }
+        val finalPath = runCatching { entry.receiver.finish() }
             .onFailure { t ->
                 println("[luciola] channel file verify failed: " + t)
                 lock.withLock { inbound.remove(keyOf(entry.transferId, entry.fileId)) }
                 entry.receiver.discard()
+                entry.onFailure?.invoke(t.message ?: "verify-failed")
             }
+            .getOrNull()
+        if (finalPath != null) {
+            entry.onCompleted?.invoke(finalPath)
+        }
     }
 
     /** 查询某次出站传输的最新确认（发送端窗口用）。 */
@@ -120,6 +132,7 @@ class FileChannelRouter(
         transferId: String,
         fileId: String,
         source: FileChunkSource,
+        onProgress: ((done: Long) -> Unit)? = null,
     ): Long {
         val frameKey = transferIdKey(transferId, fileId)
         return SecureChunkSender(chunkSize).send(
@@ -129,6 +142,7 @@ class FileChannelRouter(
             port = 0,
             send = { bytes, _, _ -> sendToPeer(peerId, bytes) },
             acks = { ackedUpTo(transferId, fileId) },
+            onProgress = onProgress,
         )
     }
 

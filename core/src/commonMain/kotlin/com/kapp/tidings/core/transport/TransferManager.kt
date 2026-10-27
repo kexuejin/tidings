@@ -180,20 +180,31 @@ class TransferManager(
     /**
      * 信道数据面的**接管缝**（`fch1` 协商通过时由宿主注入）。
      *
-     * 为什么是函数而不是路由器类型：`FileChannelRouter` 在 jvmShared（平台侧），
-     * 而本类是 commonMain —— 类型引不进来。宿主把"登记一次入站 transfer"绑上来即可。
+     * 为什么是函数而不是路由器类型：`FileChannelRouter` 在平台侧，
+     * 而本类是 commonMain。宿主把"登记一次入站 transfer"绑上来即可。
      *
      * 返回 true = **已接管**（调用方必须**不发 pull**：字节会由信道推进来）；
      * 返回 false = 没接管（未启用 / 路径越界），调用方走 legacy 拨号拉取。
      */
-    private val registerChannelInbound: ((IncomingOffer, saveDir: String) -> Boolean)? = null,
+    private val registerChannelInbound: ((
+        offer: IncomingOffer,
+        saveDir: String,
+        onProgress: (fileId: String, done: Long, total: Long) -> Unit,
+        onCompleted: (fileId: String, savedPath: String) -> Unit,
+        onFailed: (fileId: String, reason: String) -> Unit,
+    ) -> Boolean)? = null,
     /**
      * 信道数据面的**出站缝**（与 [registerChannelInbound] 成对由宿主注入）。
      *
      * 对端 `accept` 之后调用：把本机的每个文件按窗口推到对端，返回已推字节数。
      * null = 今天的行为（对端自己拨号来拉）。
      */
-    private val pushFileOnChannel: (suspend (transferId: String, peerId: String, files: List<OutgoingFile>) -> Unit)? = null,
+    private val pushFileOnChannel: (suspend (
+        transferId: String,
+        peerId: String,
+        files: List<OutgoingFile>,
+        onProgress: (fileId: String, done: Long, total: Long) -> Unit,
+    ) -> Unit)? = null,
     /**
      * F1（task-39）：跨网文件的**主机侧原始 TLS 监听**（方案 B 的入口）。
      *
@@ -639,9 +650,64 @@ class TransferManager(
      */
     private fun registerOnChannel(offer: IncomingOffer): Boolean {
         val register = registerChannelInbound ?: return false
-        // 目录由本类算（与 legacy 拉取同一个公式），宿主只负责登记 —— 这样
-        // "信道模式的文件落到别处"这类问题在结构上就不可能发生。
-        return register(offer, saveDirFor(offer))
+        val saveDir = saveDirFor(offer)
+        val nonDirFiles = offer.files.filter { !it.isDir }
+        val completedPaths = mutableMapOf<String, String>()
+
+        return register(
+            offer,
+            saveDir,
+            { fileId, done, total ->
+                _events.tryEmit(
+                    TransferEvent.Progress(
+                        transferId = offer.transferId,
+                        peerId = offer.peerId,
+                        fileId = fileId,
+                        done = done,
+                        total = total,
+                        incoming = true,
+                    ),
+                )
+            },
+            { fileId, savedPath ->
+                scope.launch {
+                    val allCompleted = stateLock.withLock {
+                        completedPaths[fileId] = savedPath
+                        val finished = nonDirFiles.isEmpty() || nonDirFiles.all { completedPaths.containsKey(it.fileId) }
+                        if (finished) {
+                            acceptedOffers.remove(offer.transferId)
+                        }
+                        finished
+                    }
+                    if (allCompleted) {
+                        val saved = nonDirFiles.mapNotNull { completedPaths[it.fileId] }
+                        _events.tryEmit(
+                            TransferEvent.Completed(
+                                transferId = offer.transferId,
+                                peerId = offer.peerId,
+                                incoming = true,
+                                savedPaths = saved,
+                            ),
+                        )
+                    }
+                }
+            },
+            { fileId, reason ->
+                scope.launch {
+                    stateLock.withLock {
+                        acceptedOffers.remove(offer.transferId)
+                    }
+                    _events.tryEmit(
+                        TransferEvent.Failed(
+                            transferId = offer.transferId,
+                            peerId = offer.peerId,
+                            incoming = true,
+                            reason = reason,
+                        ),
+                    )
+                }
+            },
+        )
     }
 
     /**
@@ -714,7 +780,7 @@ class TransferManager(
      *
      * 判据的唯一权威源：本类判定、随 [TransferEvent.Offered] 带给 UI；界面不自己算
      * （它拿不到群 id，只能算出「私聊上限」那一半，迟早与这里分叉 —— 症状就是
-     * 「已经收下来了，卡片还显示等你接收」，2026-10-27 模拟器实测）。
+     * 「已经收下来了，卡片还显示等你接收」）。
      */
     fun isAutoAccepted(purpose: String?, totalSize: Long, isGroup: Boolean): Boolean =
         autoAcceptsFile(purpose, totalSize, isGroup)
@@ -804,8 +870,43 @@ class TransferManager(
                     " files=" + (transfer?.files?.size ?: -1),
             )
             if (transfer != null && push != null) {
-                runCatching { push(transfer.transferId, transfer.peerId, transfer.files) }
-                    .onFailure { println("[luciola] push failed " + simple.transferId + ": " + it) }
+                runCatching {
+                    push(transfer.transferId, transfer.peerId, transfer.files) { fileId, done, total ->
+                        _events.tryEmit(
+                            TransferEvent.Progress(
+                                transferId = transfer.transferId,
+                                peerId = transfer.peerId,
+                                fileId = fileId,
+                                done = done,
+                                total = total,
+                                incoming = false,
+                            ),
+                        )
+                    }
+                }
+                    .onSuccess {
+                        stateLock.withLock { outgoing.remove(transfer.transferId) }
+                        _events.tryEmit(
+                            TransferEvent.Completed(
+                                transferId = transfer.transferId,
+                                peerId = transfer.peerId,
+                                incoming = false,
+                                savedPaths = emptyList(),
+                            ),
+                        )
+                    }
+                    .onFailure { t ->
+                        println("[luciola] push failed " + simple.transferId + ": " + t)
+                        stateLock.withLock { outgoing.remove(transfer.transferId) }
+                        _events.tryEmit(
+                            TransferEvent.Failed(
+                                transferId = transfer.transferId,
+                                peerId = transfer.peerId,
+                                incoming = false,
+                                reason = t.message ?: "push-failed",
+                            ),
+                        )
+                    }
             }
         }
     }

@@ -85,7 +85,7 @@ class LuciolaTransportFactory(
      *
      * 为什么允许分开：同一台机器上跑两个实例时（典型：桌面 App + iOS 模拟器，
      * 或两台桌面实例），它们的"自己的 IP"是同一个，若信道端口也相同，对端拨
-     * `<ip>:<port>` 会连到**它自己**而不是你 —— 2026-10-27 在模拟器上实测到：
+     * `<ip>:<port>` 会连到**它自己**而不是你 —— 模拟器同机验证时实测到：
      * 互发现成功、拨号却打到本机。分开之后，本机把不同的 luciolaPort 广播出去，
      * 对端就能拨到正确的那一个。
      */
@@ -373,7 +373,7 @@ class LuciolaTransportFactory(
         // **同一台设备的其他端口**：身份是那把公钥，不是端口。
         // 配对写进表里的是**一条**端口的键（消息/文件那条），而画面信道在 udpPort+10、
         // 跨网文件在 tlsPort+1 —— 只按 (host, port) 精确查会得到「未配对」⇒ 新数据面
-        // 在这台设备上永远拨不通（真机踩过：`pin lookup 192.168.2.22:17888 pinned=false`）。
+        // 在这台设备上永远拨不通（现场踩过：`pin lookup <ip>:<port> pinned=false`）。
         // 只在**该 host 下所有条目公钥一致**时才采用：同一地址出现两个不同身份时
         // 宁可拒绝（deny-by-default），也不猜。
         val sameHost = endpoints.entries().filter { (key, _) -> key.substringBeforeLast(':', "") == host }

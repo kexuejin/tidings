@@ -507,8 +507,8 @@ object TcpFrames {
  * 把结论带给界面；**界面不自己算** —— 界面那张卡片拿不到 `groupId`，只能算出
  * 「私聊上限」这一半，两边各自算迟早分叉。
  *
- * 2026-10-27 的现场：iOS 模拟器上小图已被自动接收（字节落地、sha256 一致），
- * 卡片却还显示「对方发来的文件，等你接收」并给着按钮 —— 就是分叉的后果。
+ * 历史教训：入站小图已被自动接收（字节落地、sha256 一致），
+ * 卡片却还显示「对方发来的文件，等你接收」并给着按钮 —— 就是两端分叉的后果。
  */
 fun autoAcceptsFile(purpose: String?, totalSize: Long, isGroup: Boolean): Boolean {
     if (purpose != "image") return false

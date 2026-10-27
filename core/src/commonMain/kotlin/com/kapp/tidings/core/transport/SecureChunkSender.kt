@@ -73,7 +73,7 @@ class DiskFileChunkSource(private val path: String) : FileChunkSource {
  *
  * ## 为什么窗口是 64 而不是更大
  *
- * 真机实测（Pixel 6 ↔ macOS，50MB）：窗口 32（2MiB in-flight）时 `windows=25`，
+ * 真机实测（手机 ↔ 桌面，50MB）：窗口 32（2MiB in-flight）时 `windows=25`，
  * 每个窗口等一个 WiFi RTT（≈110ms），`waitMs=2761` —— 吞吐被"窗口/RTT"卡在 17 MiB/s。
  *
  * 但窗口不能无限加大：Rust 侧出站队列只有 **64 槽**（`mpsc::channel::<Vec<u8>>(64)`），
@@ -114,6 +114,7 @@ class SecureChunkSender(
         port: Int,
         send: suspend (ByteArray, String, Int) -> Boolean,
         acks: suspend () -> Long?,
+        onProgress: ((acked: Long) -> Unit)? = null,
     ): Long {
         val total = source.size
         var acked = 0L
@@ -188,6 +189,7 @@ class SecureChunkSender(
             }
             ackAdvances += best - acked
             acked = minOf(best, total)
+            if (progressed) onProgress?.invoke(acked)
             waitMs += com.kapp.tidings.core.nowMillis() - wt0
             if (!progressed) {
                 timeouts++
