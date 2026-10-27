@@ -67,6 +67,25 @@
 
 `:core:jvmTest :app:jvmTest :composeApp:jvmTest :desktopApp:test` 全绿。
 
+## 4.1 发现替换的归因实验（2026-10-26 晚，真机 + 主机控制面）
+
+在本机把「发现」与「传输」分开测，结论如下：
+
+- **发现（luciola）可用**：主机 `/v1/peers` 能看到手机；心跳修复后 `online=true`。
+- **心跳是真问题**：luciola 只推 found/updated/lost，而 registry 的在线判定是
+  "lastSeen 超时即离线" ⇒ 一个在线对端会在一个 sweep 窗口后显示离线（实测
+  `online=false`，消息直接进队列）。已加 5s 心跳（`heartbeatMs`）+ 回归测试
+  `heartbeatKeepsOnlinePeerFromSweepingOffline`。
+- **端口身份不一致**：发现上报的手机端口是 `52213`（logcat 无 bind_failed），而它的
+  加密信道监听在 `17878`（从 Mac `nc` 验证）。按 registry 里的地址拨号会拨错端口；
+  需要一个显式的「信道端口」（例如加进 Profile 可选字段），不能继续拿发现端口兼用。
+- **数据面仍在走 legacy 长连接**（关键结论）：主机通过控制面 `POST /v1/send` 发消息，
+  返回 `outcome=sent-via-link`、`link=true`，日志 `[send] peer=d1e2136f channel=LINK`；
+  手机端确实收到（UI 可见）。也就是说当前是「**发现换成了 luciola，传输仍优先走
+  legacy K1 长连接**」，传输替换没有完成。
+- 引擎错误面已接上（`bind_failed` 等不再静默），发送通道归因日志
+  `[send] channel=LINK|TCP|TRANSPORT` 已加。
+
 ## 5. 已知边界 / 后续
 
 1. `luciola-android 0.4.4` 只在 mavenLocal，**Maven Central 未发布**（0.4.3 为 404）；

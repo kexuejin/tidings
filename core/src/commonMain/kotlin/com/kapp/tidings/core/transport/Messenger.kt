@@ -371,11 +371,28 @@ class Messenger(
     }
 
     /** 发一条可靠消息：ACK 成功 → SENT；否则入队并标记对端离线 → QUEUED。 */
+    /**
+     * 发送通道归因(真机排障用):同一条消息可能走 长连接(LINK) / legacy TCP / 传输面
+     * (luciola 模式下就是加密信道)。每个对端只在**通道发生变化**时打一行,
+     * 避免刷屏;诊断页/日志据此能回答"消息到底走了哪条路"。
+     */
+    enum class SendChannel { LINK, TCP, TRANSPORT }
+
+    private val lastSendChannel = HashMap<String, SendChannel>()
+
+    private fun noteSendChannel(peerId: String, channel: SendChannel) {
+        val changed = synchronized(lastSendChannel) {
+            lastSendChannel.put(peerId, channel) != channel
+        }
+        if (changed) println("[send] peer=" + peerId.take(8) + " channel=" + channel)
+    }
+
     suspend fun sendUserMessage(peerId: String, envelope: Envelope): SendOutcome {
         val started = nowMillis()
         // 链路优先 + 半死时重拨（见 tryLinkFirst）：消息与报价走**同一条**判定。
         val linkTry = tryLinkFirst(peerId, envelope, started)
         linkTry.sent?.let { sent ->
+            noteSendChannel(peerId, SendChannel.LINK)
             lastSendDiagnostics = sent
             _status.tryEmit(MessageStatus(peerId, envelope.id, "sent"))
             return SendOutcome.SENT
@@ -440,6 +457,7 @@ class Messenger(
             peerOnline = registry.get(peerId)?.online == true,
         )
         if (ok) {
+            noteSendChannel(peerId, if (tcpOk) SendChannel.TCP else SendChannel.TRANSPORT)
             _status.tryEmit(MessageStatus(peerId, envelope.id, "sent"))
             return SendOutcome.SENT
         }

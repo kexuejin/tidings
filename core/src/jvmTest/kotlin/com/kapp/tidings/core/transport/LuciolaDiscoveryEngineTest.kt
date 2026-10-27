@@ -3,6 +3,7 @@ package com.kapp.tidings.core.transport
 
 import com.kapp.tidings.core.protocol.Profile
 import io.github.kexuejin.luciola.UniffiEngineAdapter
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.runBlocking
 import kotlinx.coroutines.withTimeout
@@ -59,6 +60,45 @@ class LuciolaDiscoveryEngineTest {
      * 阶段二验收补充:对端 stop(exit)后 registry 必须判离线——
      * 对应 legacy 的 exit 语义(luciola stop 广播 exit)。
      */
+    /**
+     * luciola 只在 found/updated/lost 推事件,而 registry 的在线判定是"lastSeen 超时"；
+     * 没有心跳时,一个在线的对端会在一个 sweep 窗口后变离线(真机实测主机看到手机 offline)。
+     * 本用例把心跳调快,反复 sweep 后仍必须在线。
+     */
+    @Test
+    fun heartbeatKeepsOnlinePeerFromSweepingOffline() = runBlocking {
+        val json = Json { encodeDefaults = false; ignoreUnknownKeys = true }
+        val selfP = profile("hb_self", "Self")
+        val peerP = profile("hb_peer", "Alive")
+        val registry = PeerRegistry(selfP.nodeId)
+        val engine = LuciolaDiscoveryEngine(registry, { selfP }, udpPort = 18931, heartbeatMs = 300)
+        val peerAdapter = UniffiEngineAdapter(
+            sessionName = peerP.nick,
+            discoveryPort = 18932u,
+            product = "tidings",
+            extra = json.encodeToString(Profile.serializer(), peerP),
+        )
+        peerAdapter.start { }
+        engine.start(this)
+        try {
+            val online = launch {
+                withTimeout(10_000) { registry.events.first { it is PeerEvent.Online } }
+            }
+            engine.announceTo("127.0.0.1", 18932)
+            online.join()
+
+            // 心跳 300ms、扫除窗口 400ms:没有心跳时第二次就会判离线。
+            repeat(6) {
+                delay(350)
+                registry.sweep(400)
+            }
+            assertTrue(registry.get(peerP.nodeId)?.online == true, "有心跳的在网对端不许被 sweep 判离线")
+        } finally {
+            engine.stop()
+            peerAdapter.stop()
+        }
+    }
+
     @Test
     fun peerGoesOfflineAfterPeerStops() = runBlocking {
         val json = Json { encodeDefaults = false; ignoreUnknownKeys = true }

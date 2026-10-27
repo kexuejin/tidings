@@ -6,7 +6,12 @@ import io.github.kexuejin.luciola.DiscoveryEventUi
 import io.github.kexuejin.luciola.PeerUiModel
 import io.github.kexuejin.luciola.UniffiEngineAdapter
 import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Job
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.isActive
+import kotlinx.coroutines.launch
 import kotlinx.serialization.json.Json
+import java.util.concurrent.ConcurrentHashMap
 
 /**
  * 阶段二:luciola 发现引擎(JVM 桌面宿主;Android 在阶段三接入)。
@@ -26,6 +31,12 @@ class LuciolaDiscoveryEngine(
     private val registry: PeerRegistry,
     private val selfProfile: () -> Profile,
     private val udpPort: Int,
+    /**
+     * 心跳间隔:luciola 只在 found/updated/lost 时推事件,而 registry 的在线判定是
+     * "lastSeen 超时即离线"(legacy 心跳语义)。不补心跳时,一个**明明在线**的对端会在
+     * 一个 sweep 窗口后显示离线,发送直接进队列(真机实测:主机看到手机 online=false)。
+     */
+    private val heartbeatMs: Long = 5_000,
 ) : DiscoveryEngine {
 
     private val json = Json { encodeDefaults = false; ignoreUnknownKeys = true }
@@ -38,6 +49,14 @@ class LuciolaDiscoveryEngine(
     private val idMapLock = Any()
 
     private var started = false
+    private var heartbeatJob: Job? = null
+
+    /** luciola nodeId -> 最近一次 found/updated 的原始 peer(心跳按它重放 touch)。 */
+    private val knownPeers = ConcurrentHashMap<String, PeerUiModel>()
+
+    @Volatile
+    var lastError: String? = null
+        private set
 
     override fun start(scope: CoroutineScope) {
         if (started) return
@@ -54,13 +73,27 @@ class LuciolaDiscoveryEngine(
                 is DiscoveryEventUi.Found -> applyPeer(event.peer)
                 is DiscoveryEventUi.Updated -> applyPeer(event.peer)
                 is DiscoveryEventUi.Lost -> onLuciolaLost(event.nodeId)
-                is DiscoveryEventUi.Error -> Unit // 阶段三:接 NodeRuntime 的错误面
+                is DiscoveryEventUi.Error -> {
+                    // bind_failed 之类必须可见:静默吞掉时表现为"扫不到/端口悄悄换了",
+                    // 而加密信道仍按配置端口在听,两边端口从此对不上。
+                    lastError = event.code + ": " + event.message
+                    println("[luciola] engine error " + lastError)
+                }
+            }
+        }
+        heartbeatJob = scope.launch {
+            while (isActive) {
+                delay(heartbeatMs)
+                knownPeers.values.forEach { applyPeer(it) }
             }
         }
     }
 
     override fun stop() {
         started = false
+        heartbeatJob?.cancel()
+        heartbeatJob = null
+        knownPeers.clear()
         adapter?.stop() // Rust 侧广播 exit 后收尾。
         adapter = null
     }
@@ -80,6 +113,7 @@ class LuciolaDiscoveryEngine(
     private val loggedPeers = java.util.concurrent.ConcurrentHashMap.newKeySet<String>()
 
     private fun applyPeer(peer: PeerUiModel) {
+        knownPeers[peer.nodeId] = peer
         val raw = peer.extra ?: return
         val profile = runCatching { json.decodeFromString(Profile.serializer(), raw) }.getOrNull() ?: return
         synchronized(idMapLock) { idMap[peer.nodeId] = profile.nodeId }
@@ -91,6 +125,7 @@ class LuciolaDiscoveryEngine(
     }
 
     private fun onLuciolaLost(luciolaNodeId: String) {
+        knownPeers.remove(luciolaNodeId)
         val tidingsId = synchronized(idMapLock) { idMap.remove(luciolaNodeId) } ?: return
         registry.markOffline(tidingsId)
     }

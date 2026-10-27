@@ -1714,6 +1714,7 @@
     <string name="agent_event_finished_fallback">任务已完成</string>
     <string name="agent_demo_driver_notice">演示驱动：未执行真实任务，未连接任何模型或工具。</string>
     <string name="agent_event_error_fallback">Agent 异常</string>
+    <string name="agent_event_thinking_only_fallback">这一轮只有思考过程，没有正文</string>
 
     <!-- ===== issue 6：工作区三层 IA 重构（workspace-ia, task-4）===== -->
     <!-- 卡片底栏那半句。此前是「共 N 个会话 · 最新活动 X」，按用户裁决去掉会话数：

@@ -1552,6 +1552,7 @@
     <string name="agent_event_finished_fallback">Task completed</string>
     <string name="agent_demo_driver_notice">Demo driver: no real task was executed and no model or tool was contacted.</string>
     <string name="agent_event_error_fallback">Agent error</string>
+    <string name="agent_event_thinking_only_fallback">This turn produced only thinking, no answer text</string>
 
     <!-- ===== issue 6: workspace 3-level IA rework (workspace-ia, task-4) ===== -->
     <string name="workspace_latest_activity_format">Latest activity %1$s</string>
