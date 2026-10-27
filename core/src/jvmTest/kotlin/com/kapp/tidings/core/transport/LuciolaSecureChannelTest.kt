@@ -477,8 +477,14 @@ class LuciolaSecureChannelTest {
             withTimeout(10_000) { phoneTransport.pairingResults.first() }
 
             val chunk = FileChunkFrame.encode("tf-1", 0, ByteArray(256) { it.toByte() })
-            val atHost = async { withTimeout(15_000) { hostTransport.incoming.first() } }
-            withTimeout(15_000) { while (!phoneTransport.send(chunk, "127.0.0.1", portHost)) delay(50) }
+            // 全量并发跑时握手会慢一些:收端等待给足 30s,发送端"重发到真收到"而不是只看一次返回值。
+            val atHost = async { withTimeout(30_000) { hostTransport.incoming.first() } }
+            withTimeout(30_000) {
+                while (!atHost.isCompleted) {
+                    phoneTransport.send(chunk, "127.0.0.1", portHost)
+                    delay(50)
+                }
+            }
             val received = atHost.await()
             assertContentEquals(chunk, received.bytes)
             assertEquals("127.0.0.1", received.host)

@@ -137,12 +137,24 @@ TransferManager（现有，权威）
 
 ## 8. 下一步（待做）
 
-1. `TransferManager` 的字节搬运抽成 `DataPlane` 接口（legacy 实现行为不变，纯重构）；
-2. `SecureChannelDataPlane`：把 `SecureChunkSender` 接进 `DataPlane`，补接收端 helper
-   （连续前缀 ACK 的接收侧封装，测试里已有一份逻辑可提炼）；
+1. ~~`TransferManager` 的字节搬运抽成 `DataPlane` 接口~~ ✅ 第 1 步已完成（见 10）；
+2. `SecureChannelDataPlane`：把 `SecureChunkSender` 接进 `FileDataPlane`，补接收端 helper
+   （连续前缀 ACK 的接收侧封装，测试里已有一份逻辑可提炼）+ 发送端要把 offer 的文件
+   按 offset 读出来（现在 sender 吃整块 ByteArray）；
 3. `fd1` 能力协商 + 真机 ≥50 MB 验收；
 4. 投屏独立会话 + 5 分钟验收；
 5. luciola 模式关 legacy 监听；开关转正。
+
+## 10. 步骤 1 完成（2026-10-26 晚）
+
+- 新增 `FileDataPlane` 接缝 + `LegacyTcpDataPlane`（逐字等于原 `pullTransfer`）；
+- `TransferManager` 增可选参数 `dataPlane`：**null = 今天的明文实现**，四套测试证明行为未变；
+- 抽缝时刻意**不抽**续传/校验/去重/取消语义（那些在 `PullSession` 里，与"字节从哪条连接来"
+  无关），否则就变成一次行为重写；
+- 回归 `TransferDataPlaneSeamTest` 两例：默认路径照旧把报价处理掉；注入的数据面
+  **真的被调用**且拿到 transferId/files/saveDir（这是下一步接加密信道的前提）。
+  写用例时踩到两个前置条件（`peerAddress` 必须非 null、`pull` 只认 `acceptedOffers`），
+  两条都写进了用例注释——否则测的会变成"对端离线"而不是接缝。
 
 ## 9. 追加落地（2026-10-26 晚，步骤 2/3 核心件）
 

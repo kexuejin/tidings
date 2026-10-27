@@ -169,6 +169,14 @@ class TransferManager(
      */
     private val crossNetwork: CrossNetworkTransferPlanner? = null,
     /**
+     * **字节搬运**的数据面（第 1 步只抽缝，默认就是今天的明文实现）。
+     *
+     * 传 null = `LegacyTcpDataPlane`，行为逐字不变；加密信道的数据面（下一步）
+     * 只要实现 [FileDataPlane] 就能换进来，本类不关心字节从哪条连接来
+     * （续传/校验/去重/取消仍由数据面实现负责，见 [FileDataPlane] 的 KDoc）。
+     */
+    private val dataPlane: FileDataPlane? = null,
+    /**
      * F1（task-39）：跨网文件的**主机侧原始 TLS 监听**（方案 B 的入口）。
      *
      * null = 不起这条入口 ⇒ 行为与今天一字不差（局域网原路径）。平台不支持 TLS 服务端
@@ -799,7 +807,7 @@ class TransferManager(
         val plan = crossNetwork?.plan(offer.peerId, endpoint)
         val attempts = plan?.attempts?.takeIf { it.isNotEmpty() }
         try {
-            pullTransfer(
+            (dataPlane ?: LegacyTcpDataPlane()).pull(
                 PullOptions(
                     host = endpoint.host,
                     port = endpoint.port,

@@ -60,10 +60,12 @@ class SecureChunkSenderTest {
         val dropOnce = AtomicBoolean(false)
 
         try {
-            withTimeout(10_000) {
-                while (!phoneTransport.requestPairing("127.0.0.1", hostPort, "phone")) delay(100)
+            // 握手+配对是异步的:全量并发跑时 10s 会偶发不够(实测过一次)。
+            // 这里用"一直重发到主机信任"的判据,而不是单次调用 + 固定等待。
+            withTimeout(25_000) {
+                while (!phoneTransport.requestPairing("127.0.0.1", hostPort, "phone")) delay(50)
             }
-            withTimeout(10_000) { phoneTransport.pairingResults.first() }
+            withTimeout(25_000) { phoneTransport.pairingResults.first() }
 
             // 接收端:按 offset 落盘 + 连续前缀 ACK;故意丢一块(offset = chunkSize)的第一次。
             val receiver = launch {
