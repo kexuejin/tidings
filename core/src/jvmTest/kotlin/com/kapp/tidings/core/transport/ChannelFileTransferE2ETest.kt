@@ -168,10 +168,10 @@ class ChannelFileTransferE2ETest {
                                 " hostIn=" + hostIn.get() +
                                 " | phoneIn=" + phoneIn.get() +
                                 " phoneOut=" + phoneOut.get() + " phoneRej=" + phoneRejected.get() +
-                                " | rBlocked=" + hostTransport.blockedEmits.get() + "/" +
-                                phoneTransport.blockedEmits.get() +
-                                " rFail=" + hostTransport.emitFailures.get() + "/" +
-                                phoneTransport.emitFailures.get(),
+                                " | rBlocked=" + hostTransport.blockedEmits.value + "/" +
+                                phoneTransport.blockedEmits.value +
+                                " rFail=" + hostTransport.emitFailures.value + "/" +
+                                phoneTransport.emitFailures.value,
                         )
                         last = cur
                         lastChangeAt = System.currentTimeMillis()

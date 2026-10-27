@@ -1,13 +1,24 @@
 // SPDX-License-Identifier: GPL-3.0-only
 package com.kapp.tidings.core.transport
 
+import com.kapp.tidings.core.ioDispatcher
+import com.kapp.tidings.core.withLock
+import kotlinx.atomicfu.atomic
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Job
+import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.cancel
+import kotlinx.coroutines.channels.Channel
+import kotlinx.coroutines.delay
+import kotlin.concurrent.Volatile
+import kotlinx.coroutines.launch
+
 import com.kapp.tidings.core.protocol.Codec
 import com.kapp.tidings.core.protocol.DecodeResult
 import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.SharedFlow
 import uniffi.luciola_uniffi.SecureSession
 import uniffi.luciola_uniffi.SecureSessionListener
-import java.util.concurrent.ConcurrentHashMap
 
 /**
  * 阶段三:UdpTransport 的加密信道替换(接口同形,Messenger 零改动)。
@@ -77,15 +88,15 @@ class SecureChannelTransport(
      */
     private val isBinaryFrame: (ByteArray) -> Boolean = { FileChunkFrame.isChunkFrame(it) },
 ) : DatagramTransport {
-    private val outbound = ConcurrentHashMap<String, SecureSession>()
+    private val outbound = SharedMap<String, SecureSession>()
 
     /**
      * 握手完成前发出的配对帧(扫码后立刻触发时几乎必然遇到):
      * send 在未连接时返回 false,帧会丢 —— 这里先存下来,等 "connected" 再补发。
      * 真机实测:不补发时主机永远收不到 TLPAIR1,表现为"扫码后一直不配对"。
      */
-    private val pendingPairing = ConcurrentHashMap<String, ByteArray>()
-    private val inboundByEndpoint = ConcurrentHashMap<String, SecureSession>()
+    private val pendingPairing = SharedMap<String, ByteArray>()
+    private val inboundByEndpoint = SharedMap<String, SecureSession>()
 
     /**
      * 入站帧流。
@@ -128,12 +139,12 @@ class SecureChannelTransport(
         if (_incoming.tryEmit(datagram)) return
         blockedEmits.incrementAndGet()
         // 慢路径：交给后台线程。这里**只做一次无锁 offer**，绝不阻塞 FFI 线程。
-        if (pendingInbound.size >= MAX_PENDING_INBOUND) {
+        // Channel.trySend 是**非阻塞**的：容量满时返回失败，绝不阻塞 FFI 线程
+        // （原实现用 LinkedBlockingQueue + size 判断，语义相同但只在 JVM 有）。
+        if (pendingInbound.trySend(datagram).isFailure) {
             // 已经积压这么多说明下游真的卡死了；如实丢弃并记账，而不是拖死链路线程。
             droppedInbound.incrementAndGet()
-            return
         }
-        pendingInbound.offer(datagram)
     }
 
     /**
@@ -142,34 +153,29 @@ class SecureChannelTransport(
      * **背压落在这条线程上**（`emit` 会在缓冲满时挂起），而这正是它该在的地方。
      */
     private fun startInboundDrainer() {
-        if (drainer != null) return
-        drainer = Thread {
-            while (!Thread.currentThread().isInterrupted) {
-                val datagram = try {
-                    pendingInbound.take()
-                } catch (_: InterruptedException) {
-                    break
-                }
+        if (drainerJob != null) return
+        // 用协程而不是 OS 线程：Channel.receive 是**挂起**，等帧时不吃一条线程；
+        // 顺带把原来每帧一次的 runBlocking（会新建一个事件循环）也去掉了。
+        drainerJob = drainerScope.launch {
+            for (datagram in pendingInbound) {
                 try {
-                    kotlinx.coroutines.runBlocking { _incoming.emit(datagram) }
+                    _incoming.emit(datagram)
                 } catch (t: Throwable) {
                     emitFailures.incrementAndGet()
                     println("[luciola] inbound emit failed: " + t)
                 }
             }
-        }.apply {
-            isDaemon = true
-            name = "luciola-inbound-drain"
-        }.also { it.start() }
+        }
     }
 
     /** FFI 回调塞进来的入站帧（无锁；只有回调线程 offer、投递线程 take）。 */
-    private val pendingInbound = java.util.concurrent.LinkedBlockingQueue<ReceivedDatagram>()
+    private var pendingInbound = Channel<ReceivedDatagram>(capacity = MAX_PENDING_INBOUND)
 
     /** 因为积压过多而如实丢弃的帧数（诊断用）。 */
-    val droppedInbound = java.util.concurrent.atomic.AtomicLong()
+    val droppedInbound = atomic(0L)
 
-    private var drainer: Thread? = null
+    private var drainerJob: Job? = null
+    private val drainerScope = CoroutineScope(SupervisorJob() + ioDispatcher)
 
     private companion object {
         /** 状态迁移只留最后这么多条：再多就不是诊断而是日志洪泛了。 */
@@ -180,10 +186,10 @@ class SecureChannelTransport(
     }
 
     /** 入站缓冲满而阻塞在回调线程上的次数（诊断用；正常稳态应当很小）。 */
-    val blockedEmits = java.util.concurrent.atomic.AtomicLong()
+    val blockedEmits = atomic(0L)
 
     /** 入站投递失败次数（回调线程上不容许抛异常）。 */
-    val emitFailures = java.util.concurrent.atomic.AtomicLong()
+    val emitFailures = atomic(0L)
 
     /**
      * 最近若干次会话状态迁移（有界，只留最后 [STATE_LOG_LIMIT] 条）。
@@ -192,17 +198,18 @@ class SecureChannelTransport(
      * 或帧少了几个。把 closed/error 的 detail 留下来，就能把"谁先关的、为什么关"
      * 变成一行可复核的证据，而不是猜。
      */
-    private val stateLog = java.util.ArrayDeque<String>()
+    private val stateLog = kotlin.collections.ArrayDeque<String>()
+    private val stateLogLock = com.kapp.tidings.core.createCoreLock()
 
     private fun recordState(tag: String, key: String, state: String, detail: String?) {
-        synchronized(stateLog) {
+        stateLogLock.withLock {
             stateLog.addLast(tag + "[" + key + "]=" + state + (detail?.let { "(" + it + ")" } ?: ""))
             while (stateLog.size > STATE_LOG_LIMIT) stateLog.removeFirst()
         }
     }
 
     /** 会话状态迁移记录（新→旧顺序返回，逗号分隔）。 */
-    fun stateHistory(): String = synchronized(stateLog) { stateLog.joinToString(",") }
+    fun stateHistory(): String = stateLogLock.withLock { stateLog.joinToString(",") }
 
     /**
      * 一条可诊断的快照：每条会话的 Rust 侧计数（连接/重连/帧数）。
@@ -235,8 +242,8 @@ class SecureChannelTransport(
                 .append(';')
         }
         inboundSession?.let { one("listen", "", it) }
-        outbound.forEach { (k, s) -> one("out", k, s) }
-        inboundByEndpoint.forEach { (k, s) -> one("in", k, s) }
+        outbound.forEach { k, s -> one("out", k, s) }
+        inboundByEndpoint.forEach { k, s -> one("in", k, s) }
         if (sb.isEmpty()) {
             // **空快照也要说明为什么空**：否则「diag=」这种输出无法区分
             // 「没有会话」与「有会话但 stats() 抛了异常」（后者被 runCatching 吞掉）。
@@ -262,7 +269,7 @@ class SecureChannelTransport(
     /** 发起侧:主机对配对请求的应答(控制帧**不进** Messenger)。 */
     val pairingResults: SharedFlow<PairingResult> = _pairingResults
 
-    private val listenLock = Any()
+    private val listenLock = com.kapp.tidings.core.createCoreLock()
 
     @Volatile
     private var inboundSession: SecureSession? = null
@@ -277,14 +284,14 @@ class SecureChannelTransport(
     var rejectedInbound: Int = 0
         private set
 
-    private val unattributedDrops = java.util.concurrent.atomic.AtomicInteger()
+    private val unattributedDrops = atomic(0)
 
     override val boundPort: Int get() = if (listenPort > 0) listenPort else -1
 
     override suspend fun start() {
         startInboundDrainer()
         if (listenPort <= 0) return
-        synchronized(listenLock) {
+        listenLock.withLock {
             if (inboundSession != null) return
             val session = SecureSession(identitySeed)
             inboundSession = session
@@ -300,24 +307,23 @@ class SecureChannelTransport(
     }
 
     override fun stop() {
-        val current = synchronized(listenLock) {
+        val current = listenLock.withLock {
             val s = inboundSession
             inboundSession = null
             s
         }
         current?.let { runCatching { it.disconnect() } }
         inboundByEndpoint.clear()
-        outbound.values.forEach { runCatching { it.disconnect() } }
+        outbound.values().forEach { runCatching { it.disconnect() } }
         outbound.clear()
         // **必须停掉投递线程**：它可能正阻塞在 emit 上等一个已经不会再来的订阅者。
         // 不回收会导致：线程泄漏 + 下一次 start() 复用一条已经卡死的线程，
         // 表现为「单独跑绿、整套跑超时」（实测过）。
-        drainer?.let { t ->
-            t.interrupt()
-            runCatching { t.join(500) }
-        }
-        drainer = null
-        pendingInbound.clear()
+        drainerJob?.cancel()
+        drainerJob = null
+        pendingInbound.close()
+        pendingInbound = Channel(capacity = MAX_PENDING_INBOUND)
+        runCatching { drainerScope.cancel() }
     }
 
     /**
@@ -359,20 +365,23 @@ class SecureChannelTransport(
     override suspend fun send(bytes: ByteArray, host: String, port: Int): Boolean {
         val key = endpointKey(host, port)
         // 对端主动连进来的信道优先:移动端不监听,拨回去必然失败。
-        val c0 = System.nanoTime()
+        // 计时用 kotlin.time.TimeSource.Monotonic 而不是 System.nanoTime()：
+        // 后者在 Kotlin/Native 不存在，而这里要的是"两个点之间的微秒差"，
+        // 单调时钟的 mark/elapsedNow 正好是跨平台且不会因墙钟跳变出错的写法。
+        val mark0 = kotlin.time.TimeSource.Monotonic.markNow()
         val inbound = inboundByEndpoint[key]
         val conn = inbound?.isConnected() ?: false
-        val connUs = (System.nanoTime() - c0) / 1_000
+        val connUs = mark0.elapsedNow().inWholeMicroseconds
         if (conn) {
-            val s0 = System.nanoTime()
+            val s0 = kotlin.time.TimeSource.Monotonic.markNow()
             val r = runCatching { inbound!!.send(bytes) }.getOrDefault(false)
-            probeRecord(connUs, (System.nanoTime() - s0) / 1_000)
+            probeRecord(connUs, s0.elapsedNow().inWholeMicroseconds)
             return r
         }
         val session = runCatching { channelFor(host, port, key) }.getOrNull() ?: return false
-        val s1 = System.nanoTime()
+        val s1 = kotlin.time.TimeSource.Monotonic.markNow()
         val r = runCatching { session.send(bytes) }.getOrDefault(false)
-        probeRecord(connUs, (System.nanoTime() - s1) / 1_000)
+        probeRecord(connUs, s1.elapsedNow().inWholeMicroseconds)
         return r
     }
 
@@ -454,7 +463,7 @@ class SecureChannelTransport(
                     trusted = false
                     sessionFingerprint = null
                     if (state == "error" && detail != null) listenError = detail
-                    inboundByEndpoint.values.removeAll { it === session }
+                    inboundByEndpoint.removeValuesWhere { it === session }
                 }
                 else -> Unit
             }
@@ -515,35 +524,21 @@ class SecureChannelTransport(
             runCatching { pairing?.onPairingRejected(nodeId, reason) }
             runCatching { session.send(PairingFrame.encodeReply(false, reason)) }
             // 先让应答出队再断:立刻 disconnect 会把排队中的 deny 帧丢掉,对端只能看到"超时"。
-            Thread({
-                try {
-                    Thread.sleep(200)
-                } catch (_: InterruptedException) {
-                    return@Thread
-                }
+            drainerScope.launch {
+                delay(200)
                 runCatching { session.disconnect() }
-            }, "tl-pairing-deny").apply {
-                isDaemon = true
-                start()
             }
         }
 
         /** 没有超时保护时,一个陌生连接就能把 accept 循环占死(一次只接一条)。 */
         private fun armPendingDeadline() {
-            Thread({
-                try {
-                    Thread.sleep(pendingPairingTimeoutMs)
-                } catch (_: InterruptedException) {
-                    return@Thread
-                }
+            drainerScope.launch {
+                delay(pendingPairingTimeoutMs)
                 if (!trusted) {
                     rejectedInbound += 1
                     runCatching { pairing?.onPairingRejected(null, "pairing_timeout") }
                     runCatching { session.disconnect() }
                 }
-            }, "tl-pairing-deadline").apply {
-                isDaemon = true
-                start()
             }
         }
     }

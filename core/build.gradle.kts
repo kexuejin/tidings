@@ -75,6 +75,10 @@ kotlin {
             implementation(libs.kotlinx.coroutines.core)
             implementation(libs.kotlinx.serialization.json)
             implementation(libs.ktor.network)
+            // 计数据（入站丢帧/阻塞/投放失败）要用无锁原子量。JVM 的 AtomicLong 在
+            // Kotlin/Native 不存在，atomicfu 是两端都有且不需要编译器插件的写法
+            // （它是普通库，不用上 atomicfu 的 Gradle 插件）。
+            implementation("org.jetbrains.kotlinx:atomicfu:0.26.1")
         }
         commonTest.dependencies {
             implementation(libs.kotlin.test)
