@@ -100,6 +100,8 @@ class IosLuciolaHost(
                 },
             )
             configuredProfile = profile
+            // 启动证据（与桌面端同款）：日志里能看到这行，就能判断信道到底有没有装配。
+            println("[luciola] ios host configured port=" + udpPort + " fp=" + (factory?.fingerprint?.take(12) ?: "?"))
         }
     }
 
@@ -135,7 +137,10 @@ class IosLuciolaHost(
     private fun readOrCreateSeedHex(): String {
         keychainRead(ACCOUNT_SEED)?.trim()?.takeIf { it.length == SEED_HEX_CHARS }?.let { return it }
         val hex = secureRandomBytes(SEED_BYTES).toHex()
-        keychainWrite(ACCOUNT_SEED, hex)
+        if (!keychainWrite(ACCOUNT_SEED, hex)) {
+            // 存不住就明说：否则每启动一次就是一台"新设备"，对端会看到无穷多个自己。
+            println("[luciola] seed NOT persisted — identity will change on next launch")
+        }
         return hex
     }
 
@@ -151,7 +156,10 @@ class IosLuciolaHost(
 
     // ------------------------------------------------------------------ 钥匙串
 
-    private fun keychainRead(account: String): String? = memScoped {
+    private fun keychainRead(account: String): String? =
+        keychainReadRaw(account) ?: fallbackRead(account)
+
+    private fun keychainReadRaw(account: String): String? = memScoped {
         val result = alloc<CFTypeRefVar>()
         val status = SecItemCopyMatching(
             cfDictionary(
@@ -163,6 +171,7 @@ class IosLuciolaHost(
             ),
             result.ptr,
         )
+        // 读失败（模拟器上常见 errSecMissingEntitlement=-34018）→ 走回退存储。
         if (status != 0) return@memScoped null
         val data = result.value as? CFDataRef ?: return@memScoped null
         val length = CFDataGetLength(data).toInt()
@@ -170,8 +179,16 @@ class IosLuciolaHost(
         runCatching { pointer.readBytes(length).decodeToString() }.getOrNull()
     }
 
-    private fun keychainWrite(account: String, value: String) {
+    /**
+     * 写钥匙串，**检查并上报 OSStatus**。
+     *
+     * 为什么必须查：第一版这里忽略了返回值，结果 SecItemAdd 失败时毫无痕迹 ——
+     * 表现是"每次启动 nodeId 都不一样"（模拟器上实测到 09f33d47… → 1d8314c5…）。
+     * 身份不持久化不会报错，只会让所有对端把你当成新设备，是最难归因的一类故障。
+     */
+    private fun keychainWrite(account: String, value: String): Boolean {
         val bytes = value.encodeToByteArray()
+        var ok = false
         memScoped {
             // 删后加：整值条目，不值得做差异 update。
             SecItemDelete(
@@ -181,7 +198,7 @@ class IosLuciolaHost(
                     kSecAttrAccount to cfString(account),
                 ),
             )
-            SecItemAdd(
+            val status = SecItemAdd(
                 cfDictionary(
                     kSecClass to kSecClassGenericPassword,
                     kSecAttrService to cfString(SERVICE),
@@ -193,7 +210,37 @@ class IosLuciolaHost(
                 ),
                 null,
             )
+            ok = status == 0
+            if (!ok) {
+                println("[luciola] keychain unavailable account=" + account + " status=" + status + " -> fallback")
+            }
         }
+        if (!ok) {
+            fallbackWrite(account, value)
+            // 回退写成功也算"存住了"：否则日志会说"没持久化"，而身份其实稳定，
+            // 排障时会朝完全错误的方向走（模拟器上实测到过这条误导）。
+            return fallbackRead(account) == value
+        }
+        return true
+    }
+
+    /**
+     * 回退存储：**仅**在钥匙串不可用时使用（典型场景：模拟器上 App 未签名，
+     * SecItemAdd 返回 errSecMissingEntitlement=-34018）。
+     *
+     * 为什么一定要有回退：没有它，每次启动都会生成新 seed ⇒ nodeId 每次变 ⇒
+     * 对端看到无穷多个"自己"，配对与信任全部失效（模拟器上实测到
+     * 09f33d47… → 1d8314c5… 两分钟内变两次）。身份不持久化不报错，只让所有
+     * 对端把你当新设备，是最难归因的一类故障。
+     *
+     * 强度取舍：NSUserDefaults 没有钥匙串的加密与卸载幸存性，**真机上不要走这条路**
+     * （真机有签名、钥匙串可用 ⇒ 正常路径就是钥匙串）。这里只是让模拟器可测。
+     */
+    private fun fallbackRead(account: String): String? =
+        platform.Foundation.NSUserDefaults.standardUserDefaults.stringForKey(FALLBACK_PREFIX + account)
+
+    private fun fallbackWrite(account: String, value: String) {
+        platform.Foundation.NSUserDefaults.standardUserDefaults.setObject(value, FALLBACK_PREFIX + account)
     }
 
     private fun ByteArray.toCFData(): CFDataRef? = usePinned { pinned ->
@@ -221,6 +268,7 @@ class IosLuciolaHost(
         const val ACCOUNT_STATE = "trust-state-json"
         const val SEED_BYTES = 32
         const val SEED_HEX_CHARS = 64
+        const val FALLBACK_PREFIX = "luciola.fallback."
     }
 }
 

@@ -533,6 +533,11 @@ fun handleOnInbound(envelope: Envelope) {
     val convId = groupId?.let(ConvId::group) ?: envelope.from
     val peer = host._state.value.peers.firstOrNull { it.nodeId == envelope.from }
     val peerName = peer?.nick ?: envelope.from
+    // 入站消息的可观测点（三端共用这一处）。一行日志就能把
+    // 「对方说发了、我这边没收到」与「收到了但没渲染」区分开 ——
+    // 2026-10-27 在 iOS 模拟器上验 luciola 通路时，就是靠它把"互发现成功"推进到
+    // "消息真的到了"的；没有它，模拟器没法像 adb 那样从界面取证。
+    println("[msg] inbound from=" + envelope.from + " conv=" + convId + " len=" + cleanedText.length)
     host.handleAppendMessage(
         MessageUi(
             id = envelope.id,
