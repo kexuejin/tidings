@@ -2477,6 +2477,11 @@ class ControlPlane(
                     put(
                         "reachability",
                         when {
+                            // **陈旧档案不许当成老端。** 真机实测过这个误报：
+                            // 一条从磁盘恢复的旧 peer 记录（profileRev=0、caps 全空）
+                            // 被这条判据打成 legacy-peer-invisible —— 而那个对端当时
+                            // 正走加密信道传 50MB。caps 为空 = **不知道**，不是"没有"。
+                            peer.profile.caps.isEmpty() -> "unknown"
                             !runtime.legacyDiscoveryActive && !posesLuciolaCaps(peer.profile) ->
                                 "legacy-peer-invisible"
                             else -> "ok"

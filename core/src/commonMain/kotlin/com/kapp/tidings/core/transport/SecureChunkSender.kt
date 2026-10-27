@@ -69,7 +69,16 @@ class DiskFileChunkSource(private val path: String) : FileChunkSource {
  * 在加密信道上按窗口发送文件字节。
  *
  * 语义：
- *  - 每块 [chunkSize]，窗口 [windowChunks] 块未确认上限（64KiB × 32 = 2MiB in-flight）；
+ *  - 每块 [chunkSize]，窗口 [windowChunks] 块未确认上限（64KiB × 64 = 4MiB in-flight）；
+ *
+ * ## 为什么窗口是 64 而不是更大
+ *
+ * 真机实测（Pixel 6 ↔ macOS，50MB）：窗口 32（2MiB in-flight）时 `windows=25`，
+ * 每个窗口等一个 WiFi RTT（≈110ms），`waitMs=2761` —— 吞吐被"窗口/RTT"卡在 17 MiB/s。
+ *
+ * 但窗口不能无限加大：Rust 侧出站队列只有 **64 槽**（`mpsc::channel::<Vec<u8>>(64)`），
+ * 窗口超过 64 就会在填窗时撞上 `try_send` 失败、退避 2ms/次，反而变成新的固定开销。
+ * 所以 64 是"在没有改上游队列的前提下"能用的最大值。要再快得先让上游把队列加大。
  *  - 只认**连续前缀**确认（[FileChunkAck.ackedUpTo]）；超时从已确认位置重传；
  *  - 发送面返回 false（信道队列满）时退避，不自旋；
  *  - 数据从 [FileChunkSource] 按 offset 读，峰值内存 = 一个窗口。

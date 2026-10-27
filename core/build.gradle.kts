@@ -116,7 +116,19 @@ val jvmAcceptanceTest = tasks.register<Test>("jvmAcceptanceTest") {
     filter {
         includeTestsMatching("com.kapp.tidings.core.transport.ChannelFileTransferE2ETest")
     }
-    systemProperty("jna.library.path", System.getProperty("jna.library.path") ?: "/workspace/RustBuild/cargo-target/debug")
+    // **必须与上面 tasks.withType<Test> 同一份 release 路径**。
+    //
+    // 这里原来硬编码成 `cargo-target/debug`，而本文件上面对 release 的注释已经写明：
+    // debug 引擎的 AES-GCM/握手未优化，同一条数据面慢 6-8 倍（50MB：3s vs 46s），
+    // 「拿 debug 的数去验收会得到『加密信道就是慢』的错误结论。」
+    //
+    // 实际后果（2026-10-27 查明）：这条验收长期跑在 debug 引擎上 ——
+    //   ① 吞吐只有 0.15-0.16 MiB/s，被误判成协议/加密的问题，查了十几轮；
+    //   ② 上游 Rust 的修复（取消安全 recv、写失败不丢帧、LinkStats 新字段）
+    //      **一次都没被这条验收执行过**，因为它加载的是另一个 .so/.dylib；
+    //   ③ 装上 0.4.6 的 6 字段 LinkStats 后，debug 那份旧引擎只有 4 字段，
+    //      读 stats() 直接 BufferUnderflowException —— 这才把真相暴露出来。
+    systemProperty("jna.library.path", System.getProperty("jna.library.path") ?: luciolaNativeDir)
     // 一次只跑一条：这条用例独占端口与磁盘，并行只会互相干扰。
     maxParallelForks = 1
 }

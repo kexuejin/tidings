@@ -159,17 +159,38 @@ class SecureChannelTransport(
     fun diagnostics(): String {
         val sb = StringBuilder()
         fun one(tag: String, key: String, session: SecureSession) {
-            val s = runCatching { session.stats() }.getOrNull() ?: return
+            // **不许把 stats() 的异常吞成"没有会话"**：那会让「读不到计数」和
+            // 「真的没有会话」长得一模一样（本轮实测就是踩了这个坑：diag 是空串，
+            // 一度被当成「会话不存在」，而实际上 inboundSession=true、out=1）。
+            val s = runCatching { session.stats() }.getOrElse { t ->
+                sb.append(tag).append('[').append(key).append("] statsErr=")
+                    .append(t::class.simpleName).append(':').append(t.message).append(';')
+                return
+            }
             sb.append(tag).append('[').append(key).append("] sent=").append(s.framesSent.toLong())
                 .append(" recv=").append(s.framesReceived.toLong())
                 .append(" conns=").append(s.connectionsEstablished.toLong())
                 .append(" retries=").append(s.reconnectAttempts.toLong())
+                // 入队 / 取走 / 真发出 三个数：应用层一直把「send() 返回 true」当成
+                // 「已发送」，而 send 内部只是 try_send 入队。三者放在一起才能区分
+                // 「帧堆在队列里」与「帧在链路循环里被丢」。
+                .append(" enq=").append(s.framesEnqueued.toLong())
+                .append(" deq=").append(s.framesDequeued.toLong())
                 .append(" connected=").append(session.isConnected())
                 .append(';')
         }
         inboundSession?.let { one("listen", "", it) }
         outbound.forEach { (k, s) -> one("out", k, s) }
         inboundByEndpoint.forEach { (k, s) -> one("in", k, s) }
+        if (sb.isEmpty()) {
+            // **空快照也要说明为什么空**：否则「diag=」这种输出无法区分
+            // 「没有会话」与「有会话但 stats() 抛了异常」（后者被 runCatching 吞掉）。
+            sb.append("none(inboundSession=").append(inboundSession != null)
+                .append(",out=").append(outbound.size)
+                .append(",inByEp=").append(inboundByEndpoint.size)
+                .append(",listenErr=").append(listenError)
+                .append(')')
+        }
         return sb.toString()
     }
 
