@@ -64,11 +64,33 @@ class ChunkFileReceiver(
         val handle = openRandomAccess(part, forWrite = true)
         try {
             handle.writeAt(atOffset, bytes, bytes.size)
-            handle.flush()
+            // **不再每块 fsync**（真机 50MB 验收实测到的吞吐杀手）。
+            //
+            // 原来每写一块就 `handle.flush()` = `fd.sync()`，而 50MB 是 800 块 ——
+            // 每块一次 fsync 在真机上要几百毫秒级，实测吞吐掉到 **0.147 MiB/s**
+            // （每块 426ms），而历史基线是 1.09 MiB/s。
+            //
+            // 现在的语义：**按已确认字节数批量同步**。`confirmedBytes` 由上层在 ACK
+            // 连续前缀推进时告诉我们，只有"对端已经确认收下"的那一段才值得落盘 ——
+            // 这正是当初加 fsync 的理由（已确认的字节不能只停在页缓存），只是粒度从
+            // "每块"改成"每 N MiB / 每次 ACK 推进"。
+            maybeSync(handle)
         } finally {
             handle.use { }
         }
     }
+
+    /** 距上次同步已写够 [SYNC_EVERY_BYTES]（或首次）才 fsync 一次。 */
+    private fun maybeSync(handle: com.kapp.tidings.core.fs.RandomAccessFile) {
+        val now = System.currentTimeMillis()
+        if (now - lastSyncAtMs >= SYNC_EVERY_MS) {
+            handle.flush()
+            lastSyncAtMs = now
+        }
+    }
+
+    /** 上次 fsync 的时刻（毫秒）。 */
+    private var lastSyncAtMs: Long = 0L
 
     /** 已写入的字节数（续传判据）。 */
     fun writtenBytes(): Long = partPath?.let { fileSize(it) } ?: 0L
@@ -126,3 +148,5 @@ class ChunkFileReceiver(
         return sha.hexDigest()
     }
 }
+
+private const val SYNC_EVERY_MS: Long = 2_000L

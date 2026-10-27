@@ -256,6 +256,9 @@ class ScreenSender(
     /** 发送侧读数（10s 一行，见 [ScreenStats]）。 */
     private val stats = ScreenStats("tx")
 
+    /** 发送侧**第一段三拆**：节流等待 vs 采样编码（10s 一行）。 */
+    private val sendSplitStats = SegmentStats("txsplit")
+
     fun start() {
         creditedAt = com.kapp.tidings.core.nowMillis()
         // 只在调用方没给通道时才自己开 —— 已绑定的 socket 上再开必抛。
@@ -310,15 +313,25 @@ class ScreenSender(
         busy = true
         sequence = frame.seq
 
-        val now = com.kapp.tidings.core.nowMillis()
+        // **第一段的三拆**（goal 第 4 步定案用）：观众侧看到的那 38ms 里，究竟是
+        //   ①节流等待（SCREEN_MIN_FRAME_INTERVAL_MS=100ms 的门槛）+ ②采样编码 + ③传输
+        // 各自占多少。三者现在混在一起，而优化手段完全不同：
+        //   ① 是我们的排程策略、② 是手机采集/编码、③ 才是传输。
+        // 只做测量，不改行为。
+        val arrivedAt = com.kapp.tidings.core.nowMillis()
+        val now = arrivedAt
         val intervalElapsed = now - lastSampleAt
         if (intervalElapsed < Limits.SCREEN_MIN_FRAME_INTERVAL_MS) {
             delay(Limits.SCREEN_MIN_FRAME_INTERVAL_MS - intervalElapsed)
         }
         if (stopped) return
 
+        val throttleMs = com.kapp.tidings.core.nowMillis() - arrivedAt
         lastSampleAt = com.kapp.tidings.core.nowMillis()
+        val sampleStart = System.nanoTime()
         val bytes = sample(sequence)
+        val sampleMs = (System.nanoTime() - sampleStart) / 1_000_000
+        sendSplitStats.onSplit(throttleMs, sampleMs)
         if (bytes == null) {
             end("capture-ended")
             return

@@ -149,13 +149,30 @@ class ChannelFileTransferE2ETest {
             val started = System.nanoTime()
             // 进度探针：每 500ms 打一次已确认字节数 —— 卡在哪一侧一眼就能看出来
             // （确认不动 = 收端没落盘/没回 ACK；确认在涨而文件没出现 = 转正失败）。
+            var diagTicks = 0
             val probe = async {
                 var last = -1L
                 var lastChangeAt = System.currentTimeMillis()
                 repeat(600) {
                     val cur = hostRouter.ackedUpTo("t-50mb", "f1")
                     if (cur != last) {
-                        println("PROGRESS acked=" + cur + " / " + total)
+                        // 每 100 行进度打一次会话统计：要看的是 **Rust 侧 framesSent**
+                        // 与我方 hostOut 的比值随时间怎么变（只打早期快照会得出错误结论）。
+                        if (++diagTicks % 100 == 1) {
+                            println("DIAG@" + (cur / 65536) + "ck host=" + hostTransport.diagnostics())
+                            println("DIAG@" + (cur / 65536) + "ck phone=" + phoneTransport.diagnostics())
+                        }
+                        println(
+                            "PROGRESS acked=" + cur + " / " + total +
+                                " | hostOut=" + hostOut.get() + " hostRej=" + hostRejected.get() +
+                                " hostIn=" + hostIn.get() +
+                                " | phoneIn=" + phoneIn.get() +
+                                " phoneOut=" + phoneOut.get() + " phoneRej=" + phoneRejected.get() +
+                                " | rBlocked=" + hostTransport.blockedEmits.get() + "/" +
+                                phoneTransport.blockedEmits.get() +
+                                " rFail=" + hostTransport.emitFailures.get() + "/" +
+                                phoneTransport.emitFailures.get(),
+                        )
                         last = cur
                         lastChangeAt = System.currentTimeMillis()
                     }

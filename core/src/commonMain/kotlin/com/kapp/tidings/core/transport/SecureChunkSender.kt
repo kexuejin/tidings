@@ -88,6 +88,9 @@ class SecureChunkSender(
     private companion object {
         /** 等确认时的轮询间隔：既要让出线程，也别把 CPU 空转掉。 */
         const val LAST_MILE_POLL_MS: Long = 5
+
+        /** 有过推进、但 ACK 停这么久就等于「这一窗到这儿为止」（大概率有洞）。 */
+        const val ACK_QUIET_MS: Long = 120L
     }
 
     /**
@@ -106,18 +109,32 @@ class SecureChunkSender(
         val total = source.size
         var acked = 0L
         val windowBytes = chunkSize.toLong() * windowChunks
+        // **诊断计数器**（临时；定位「每块 500ms」用）。不改行为。
+        var windows = 0
+        var timeouts = 0
+        var chunksSent = 0L
+        var ackAdvances = 0L
+        var readNs = 0L
+        var sendNs = 0L
+        var waitNs = 0L
         while (acked < total) {
+            windows++
             // 1) 从已确认位置起填满一个窗口
             val windowEnd = minOf(total, acked + windowBytes)
             var offset = acked
             while (offset < windowEnd) {
                 val len = minOf(chunkSize.toLong(), total - offset).toInt()
+                val rt0 = System.nanoTime()
                 val chunk = source.read(offset, len)
+                readNs += System.nanoTime() - rt0
                 if (chunk.isEmpty()) break
                 val frame = FileChunkFrame.encode(transferId, offset, chunk)
+                val st0 = System.nanoTime()
                 while (!send(frame, host, port)) {
                     kotlinx.coroutines.delay(backoffMs)
                 }
+                sendNs += System.nanoTime() - st0
+                chunksSent++
                 offset += chunk.size
             }
             // 2) 等确认前进；没前进就从 acked 整窗重发（接收端按 offset 写，幂等）
@@ -126,19 +143,54 @@ class SecureChunkSender(
             // 放在 withTimeoutOrNull {} 里会立刻返回 —— 循环不休眠就成了热自旋,
             // 单线程调度器上会把收帧的协程饿死,ACK 永远进不来。
             // 真机/回环 50MB 验收撞过:180s 超时,一个字节都没确认。
+            // 2) **把这一窗的确认收干净，而不是「看见第一块就走」**。
+            //
+            // 原来这里一看到 upTo > acked 就 break，于是每轮只前进**一块**、
+            // 却把整窗（32 块）重发一遍 —— 实测 50MB 传输里
+            // chunksSent=12768 而真正需要的只有 **399** 块（32 倍放大），
+            // waitMs 占掉 180s 里的 163s，吞吐掉到 0.16 MiB/s。
+            //
+            // 正确语义：ACK 是**逐块**到的，所以要一直轮询到
+            //   · 整窗都被确认（最好情况，立刻开下一窗），或
+            //   · 进度停止前进超过 ACK_QUIET_MS（说明有洞，交给下一轮重传），或
+            //   · 到了 ackTimeoutMs 硬上限。
             val deadlineAt = System.currentTimeMillis() + ackTimeoutMs
             var progressed = false
+            var best = acked
+            var lastAdvanceAt = System.currentTimeMillis()
+            val wt0 = System.nanoTime()
             while (System.currentTimeMillis() < deadlineAt) {
-                val upTo = acks() ?: acked
-                if (upTo > acked) {
-                    acked = minOf(upTo, total)
+                val upTo = acks() ?: best
+                if (upTo > best) {
+                    best = upTo
                     progressed = true
+                    lastAdvanceAt = System.currentTimeMillis()
+                    if (best >= windowEnd) break // 整窗确认，立刻下一窗
+                } else if (
+                    progressed && System.currentTimeMillis() - lastAdvanceAt >= ACK_QUIET_MS
+                ) {
+                    // 有推进但停了：大概率有洞（对端某些帧根本没收到），别把 3s 干等完。
+                    //
+                    // 实测对照：**保留这个提前退出**时 180s 能传 23-27MB；
+                    // 去掉它（干等满 3s）只剩 3.7MB —— 因为 ACK 经常不再前进。
                     break
                 }
                 kotlinx.coroutines.delay(LAST_MILE_POLL_MS)
             }
-            if (!progressed) kotlinx.coroutines.delay(backoffMs)
+            ackAdvances += best - acked
+            acked = minOf(best, total)
+            waitNs += System.nanoTime() - wt0
+            if (!progressed) {
+                timeouts++
+                kotlinx.coroutines.delay(backoffMs)
+            }
         }
+        println(
+            "[chunk] total=" + total + " windows=" + windows + " timeouts=" + timeouts +
+                " chunksSent=" + chunksSent + " ackAdvanceSum=" + ackAdvances +
+                " readMs=" + (readNs / 1_000_000) + " sendMs=" + (sendNs / 1_000_000) +
+                " waitMs=" + (waitNs / 1_000_000),
+        )
         return acked
     }
 

@@ -20,11 +20,25 @@ class SegmentStats(private val tag: String) {
     private var firstUs = 0L
     private var secondUs = 0L
     private var split = false
+    private var split3 = false
+    private var wrapTotalUs = 0L
+    private var sendTotalUs = 0L
     private var windowStart = com.kapp.tidings.core.nowMillis()
 
     fun onSegment(byteCount: Long, us: Long, sendUs: Long) {
         split = false
         record(byteCount, us + sendUs)
+    }
+
+    /** 三段：封套拷贝（us）/ 投递（us）/ 字节数。用于区分 "拷贝贵" 还是 "JNA 贵"。 */
+    fun onSplit3(wrapUs: Long, sendUs: Long, byteCount: Long) {
+        split3 = true
+        wrapTotalUs += wrapUs
+        sendTotalUs += sendUs
+        bytes += byteCount
+        count += 1
+        if (wrapUs + sendUs > maxUs) maxUs = wrapUs + sendUs
+        flushIfDue()
     }
 
     /** 一次等待拆成两段（毫秒进，微秒出）。 */
@@ -52,7 +66,12 @@ class SegmentStats(private val tag: String) {
         if (elapsed < WINDOW_MS || count == 0) return
         val head = "[screen] " + tag + " n=" + count
         println(
-            if (split) {
+            if (split3) {
+                head + " wrapAvgUs=" + (wrapTotalUs / count) +
+                    " sendAvgUs=" + (sendTotalUs / count) +
+                    " maxUs=" + maxUs +
+                    " bytes=" + bytes
+            } else if (split) {
                 head +
                     " firstAvgMs=" + (firstUs / count / 1_000) +
                     " secondAvgMs=" + (secondUs / count / 1_000) +
@@ -71,6 +90,9 @@ class SegmentStats(private val tag: String) {
         bytes = 0
         firstUs = 0
         secondUs = 0
+        split3 = false
+        wrapTotalUs = 0
+        sendTotalUs = 0
         windowStart = now
     }
 

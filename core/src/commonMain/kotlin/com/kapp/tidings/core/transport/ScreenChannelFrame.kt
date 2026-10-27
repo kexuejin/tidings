@@ -29,7 +29,9 @@ object ScreenChannelFrame {
     /** 单帧上限：一次投屏帧最大 8MiB（协议 `FileTransfer.MAX_FRAME` 同量级）。 */
     const val MAX_PAYLOAD: Int = 8 * 1024 * 1024
 
-    private const val HEADER = 8
+    /** 封套头长度（magic 4 + 长度 4）。对外公开：调用方要预留这 8 字节就地写头。 */
+    const val HEADER_BYTES: Int = 8
+    private const val HEADER = HEADER_BYTES
 
     /** 这一段字节是不是投屏帧（只看魔数，不看长度）。 */
     fun isScreenFrame(bytes: ByteArray): Boolean {
@@ -39,6 +41,29 @@ object ScreenChannelFrame {
     }
 
     /** 封一帧。payload 超过 [MAX_PAYLOAD] 直接抛错（调用方该更小的切）。 */
+    /**
+     * 把封套**写进调用方自己的缓冲**（`buf[0 until payloadLen]` 已在 [headerAt] 之后），
+     * 不分配新数组、不多拷一份 —— 一帧 49KiB 时这一份拷贝就是 49KiB。
+     *
+     * 调用方契约：`buf` 从 [headerAt] 起至少留出 `HEADER + payloadLen` 字节，
+     * 且 `buf[headerAt + HEADER until headerAt + HEADER + payloadLen]` 已经是要发的正文。
+     * 做法是先把正文**后移 HEADER**（`copyInto` 支持重叠区间，方向按从尾到头），
+     * 再把头写进去。
+     */
+    fun wrapInPlace(buf: ByteArray, headerAt: Int, payloadLen: Int) {
+        require(payloadLen in 0..MAX_PAYLOAD)
+        require(headerAt >= 0 && headerAt + HEADER + payloadLen <= buf.size) {
+            "buffer too small: headerAt=$headerAt payload=$payloadLen size=${buf.size}"
+        }
+        // 正文后移 HEADER（从尾部往前拷，避免重叠覆盖）。
+        buf.copyInto(buf, headerAt + HEADER, headerAt, headerAt + payloadLen)
+        MAGIC.copyInto(buf, headerAt)
+        buf[headerAt + 4] = (payloadLen ushr 24).toByte()
+        buf[headerAt + 5] = (payloadLen ushr 16).toByte()
+        buf[headerAt + 6] = (payloadLen ushr 8).toByte()
+        buf[headerAt + 7] = payloadLen.toByte()
+    }
+
     fun wrap(payload: ByteArray, length: Int = payload.size): ByteArray {
         require(length in 0..payload.size) { "length=$length 不在 0..${payload.size}" }
         require(length <= MAX_PAYLOAD) { "投屏帧上限 ${MAX_PAYLOAD} 字节，收到 $length" }

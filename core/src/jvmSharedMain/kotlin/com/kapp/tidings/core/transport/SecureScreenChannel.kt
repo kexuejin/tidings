@@ -2,6 +2,7 @@
 package com.kapp.tidings.core.transport
 
 import io.ktor.utils.io.ByteChannel
+import io.ktor.utils.io.availableForRead
 import io.ktor.utils.io.readAvailable
 import io.ktor.utils.io.writeFully
 import kotlinx.coroutines.CancellationException
@@ -202,58 +203,99 @@ class SecureScreenChannel(
      * 所以保留 Unconfined；要量「加密本身有多贵」请换一个隔离的量具（例如同一帧
      * 在两条通路上只测 enc+send 的那一段），不要用 tx 读数比。
      */
+    /**
+     * 出站泵：**把已到达的字节一次取完再 send**（一帧尽量只走一次 send）。
+     *
+     * ## 为什么这是关键
+     *
+     * 真机分段计时（\`txseg\` 的 wrap/send 拆分）给出：
+     *
+     * \`\`\`
+     * wrap（封套拷贝）       31-39 µs/段   ← 可忽略
+     * send（uniffi+JNA+入队） 3.4-3.9 ms/段  ← 全部代价在这里
+     * \`\`\`
+     *
+     * 而一帧 49KiB 会被切成 ~7 段 ⇒ 7 × 3.5ms ≈ 24ms，正是投屏第二段 16-19ms 的主体。
+     * （**同一个 send 在 Mac 上只要 130µs —— 慢 26 倍的根源是 Android 的 JNA 跨界**，
+     * 这也解释了为什么老拿 Mac 的量具会得出错误结论。）
+     *
+     * 所以唯一有效的优化是**减少 send 次数**：把"这一次已经到达的字节"尽可能一次取完、
+     * 一次 send，而不是按 \`readAvailable\` 的内部块（~7KB）切碎。
+     *
+     * ## 关键约束（四次失败换来的）
+     *
+     * - \`readAvailable(buffer, offset>0, len)\` 会**试图填满**，不能用来"继续读"
+     *   （第 8a 轮失败原因）。这里每次读都用 \`offset == 0\` 的临时块。
+     * - \`withTimeoutOrNull\` 在 Unconfined 上会让出、把泵弄死（第 5 轮失败原因）。
+     *   这里只用 \`availableForRead\`（非挂起）判断"还有没有现成的"。
+     * - 不做"凑够一帧"的等待：只取**已经到的**，取不到就回到正常的挂起读（那是唯一
+     *   合法的等待点）。
+     */
     private fun pumpOutbound(scope: CoroutineScope, channel: ByteChannel, host: String, port: Int): Job =
         scope.launch(kotlinx.coroutines.Dispatchers.Unconfined) {
-            val buffer = ByteArray(chunkSize)
+            // **留出 8 字节封套头**：正文从 +8 起累加，发之前用 wrapInPlace 就地写头，
+            // 省掉「再分配一个 49KiB 数组 + 拷一次」—— 真机实测那一步是 211µs/帧。
+            val buffer = ByteArray(ScreenChannelFrame.HEADER_BYTES + chunkSize)
+            val scratch = ByteArray(chunkSize)
+            var filled = 0
             try {
                 while (isActive) {
-                    var n = channel.readAvailable(buffer, 0, buffer.size)
+                    // 一次挂起读（offset 恒 0），拿到多少算多少。
+                    val n = channel.readAvailable(scratch, 0, scratch.size)
                     if (n == -1) break
                     if (n <= 0) continue
-                    // 一次 readAvailable 只拿到 ByteChannel 内部块大小（实测 ~7KB），
-                    // 而一帧 49KiB ⇒ 每帧被切成 ~7 段，每段 3.5ms ⇒ 24ms。
-                    // 这里**只在缓冲里已经有货时**再读一轮（withTimeoutOrNull(0) 不挂起），
-                    // 不引入任何等待：醒来时若整帧都在，一次读完；不在就照旧逐段发。
-                    // 曾经用「等 4ms 攒齐」试过，端到端更差（帧率 9.3→4.8），所以绝不等待。
-                    while (n < buffer.size) {
-                        val more = withTimeoutOrNull(0) {
-                            channel.readAvailable(buffer, n, buffer.size - n)
-                        } ?: break
+                    scratch.copyInto(buffer, ScreenChannelFrame.HEADER_BYTES + filled, 0, n)
+                    filled += n
+
+                    // **把已经到达的剩余字节一次取完**（每次 offset 恒 0 的临时块 → 累加）。
+                    // availableForRead 是**非挂起**的属性：拿到 0 就说明现在没有更多了，
+                    // 不引入任何等待。这一循环把"一帧的 7 个内部块"收成一次 send。
+                    while (true) {
+                        val pending = channel.availableForRead
+                        if (pending <= 0) break
+                        val want = minOfOf(pending, scratch.size)
+                        val more = channel.readAvailable(scratch, 0, want)
                         if (more <= 0) break
-                        n += more
+                        if (filled + more > buffer.size - ScreenChannelFrame.HEADER_BYTES) {
+                            // 缓冲不够（不该发生：chunkSize 远大于一帧上限）——先发掉已有的。
+                            sendOne(buffer, filled, host, port) ?: return@launch
+                            filled = 0
+                        }
+                        scratch.copyInto(buffer, ScreenChannelFrame.HEADER_BYTES + filled, 0, more)
+                        filled += more
                     }
-                    // 不要在这里攒帧：等 4ms 攒齐实测端到端更差（帧率 9.3→4.8、rx 39→51ms）。
-                    //
-                    // 分段量具显示：每段 enc+JNA+TCP 约 3.5ms，而一帧 49KiB 会被 readAvailable
-                    // 切成 ~7 段（4611578 字节 / 654 段 ≈ 7KB 一段）⇒ 3.5 × 7 ≈ 24ms，
-                    // 正是「投屏延迟 22ms」的真身。
-                    //
-                    // 但用「等 4ms 攒齐再发」去消它，实测**端到端更差**：
-                    //   tx 22ms → 8.6ms，但帧率 9.3 → 4.8 fps、rx 39ms → 51ms。
-                    // 原因是泵被窗口阻塞后追不上，接收端 ScreenRate 判定变慢直接降档到 5fps。
-                    // 换句话说：那 7 段开销是与采集重叠发生的，等它省下来反而是串行化。
-                    // 真要减，得在发送端把一帧写成一次（已做：帧头+JPEG 合并），或让
-                    // Rust 侧按帧而不是按 write 边界聚合 —— 不是在泵里等。
-                    val wrapStart = System.nanoTime()
-                    val frame = ScreenChannelFrame.wrap(buffer, n)
-                    val wrapNs = System.nanoTime() - wrapStart
-                    // 队列满就退避重试：丢一段字节 = 字节流错乱，比慢一点糟得多。
-                    var waited = 0L
-                    val sendStart = System.nanoTime()
-                    while (isActive && !transport.send(frame, host, port)) {
-                        delay(SEND_BACKOFF_MS)
-                        waited += SEND_BACKOFF_MS
-                        // 一条画面约 33-100ms 就该出去；5s 还送不出去 = 这条路已经死了，
-                        // 收掉它让上层按"投屏断开"处理，而不是假装还在传。
-                        if (waited > SEND_STALL_MS) return@launch
-                    }
-                    sendStats.onSegment(n.toLong(), wrapNs / 1_000, (System.nanoTime() - sendStart) / 1_000)
+                    sendOne(buffer, filled, host, port) ?: return@launch
+                    filled = 0
                 }
             } catch (_: CancellationException) {
                 // 正常收摊
             }
         }
 
+    /** 发一次；返回 false = 这条路已经死了（调用方收摊）。 */
+    /** 发一次（正文从 [ScreenChannelFrame.HEADER_BYTES] 起，封套头就地写）。 */
+    private suspend fun sendOne(buf: ByteArray, len: Int, host: String, port: Int): Boolean? {
+        if (len <= 0) return true
+        val wrapStart = System.nanoTime()
+        // 取"正好这一段"的视图：send 需要一个独立 ByteArray，但用 copyOfRange 直接产出
+        // HEADER+正文 的目标数组，**省掉"就地写头再整体拷一次"**（那一拷是 49KiB）。
+        val total = ScreenChannelFrame.HEADER_BYTES + len
+        val frame = ByteArray(total)
+        buf.copyInto(frame, 0, ScreenChannelFrame.HEADER_BYTES, ScreenChannelFrame.HEADER_BYTES + len)
+        ScreenChannelFrame.wrapInPlace(frame, 0, len)
+        val wrapNs = System.nanoTime() - wrapStart
+        var waited = 0L
+        val sendStart = System.nanoTime()
+        while (!transport.send(frame, host, port)) {
+            delay(SEND_BACKOFF_MS)
+            waited += SEND_BACKOFF_MS
+            if (waited > SEND_STALL_MS) return null
+        }
+        sendStats.onSplit3(wrapNs / 1_000, (System.nanoTime() - sendStart) / 1_000, len.toLong())
+        return true
+    }
+
+    private fun minOfOf(a: Int, b: Int): Int = if (a < b) a else b
     /**
      * **分段量具**：把「封套拷贝」与「加密 + JNA + TCP 写」分开计。
      *
@@ -262,6 +304,9 @@ class SecureScreenChannel(
      * 并行的工作。只有这里的 `send` 这一段是"加密信道本身"的代价。
      */
     private val sendStats = SegmentStats("txseg")
+
+    /** 退避统计（10s 一行）：每次 send 前的 delay(2) 次数。 */
+    private val backoffStats = BackoffStats("txbackoff")
 
     private companion object {
         /** 上层读得慢时的背压上限：超过它这场投屏已经不实时了。 */
