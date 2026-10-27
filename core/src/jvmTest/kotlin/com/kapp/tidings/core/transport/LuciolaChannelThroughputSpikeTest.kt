@@ -44,7 +44,7 @@ class LuciolaChannelThroughputSpikeTest {
         val server = SecureSession(seedServer)
         server.listen(port.toUShort(), null, object : SecureSessionListener {
             override fun onState(state: String, detail: String?) {}
-            override fun onMessage(message: ByteArray) {
+            override fun onMessage(message: ByteArray, peerFingerprint: String, remoteAddr: String?) {
                 val now = received.addAndGet(message.size.toLong())
                 if (now >= totalBytes && !done.isCompleted) done.complete(Unit)
             }
@@ -55,7 +55,7 @@ class LuciolaChannelThroughputSpikeTest {
             listOf("127.0.0.1"), port.toUShort(), serverIdentity.publicKey, false,
             object : SecureSessionListener {
                 override fun onState(state: String, detail: String?) {}
-                override fun onMessage(message: ByteArray) {}
+                override fun onMessage(message: ByteArray, peerFingerprint: String, remoteAddr: String?) {}
             },
         )
         withTimeout(15_000) {

@@ -265,11 +265,21 @@ class LuciolaTransportFactory(
     /**
      * 发现引擎。`selfProfile` 用函数而不是快照:tlsPin / 本机地址是运行时才定下的
      * （见 [LuciolaDiscoveryEngine.start]）。
+     *
+     * 信标身份与零信任体系完全对齐(luciola 0.6.0):nodeId 取 Tidings 自己的
+     * nodeId（引擎内默认映射）、tcpPort 是加密信道的真实监听端口、publicKey
+     * 是本机 Ed25519 公钥 —— 对端从发现层直接拿到「可拨端口 + 可信公钥」。
      */
     fun createDiscovery(
         registry: PeerRegistry,
         selfProfile: () -> Profile = { profile },
-    ): LuciolaDiscoveryEngine = LuciolaDiscoveryEngine(registry, selfProfile, udpPort)
+    ): LuciolaDiscoveryEngine = LuciolaDiscoveryEngine(
+        registry,
+        selfProfile,
+        udpPort,
+        channelTcpPort = channelListenPort,
+        publicKey = identity.publicKey,
+    )
 
     /**
      * 加密信道。**必须传 registry**:入站帧只有查到对端地址才递得进

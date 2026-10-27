@@ -183,6 +183,29 @@ class SecureChannelTransport(
 
         /** 入站异步队列的上限帧数：超过它说明下游真的卡死了，如实丢弃并记账。 */
         const val MAX_PENDING_INBOUND = 4096
+
+        /**
+         * 解析 Rust 引擎在 onMessage 里给出的 socket 来源（"ip:port"）。
+         * IPv6 是方括号形式（"[fe80::1]:8080"），去掉括号；解析失败返回 null
+         * （调用方退回指纹反查路径）。
+         */
+        fun parsePeerEndpoint(remoteAddr: String): PeerEndpoint? {
+            val host: String
+            val port: Int
+            if (remoteAddr.startsWith("[")) {
+                val close = remoteAddr.indexOf(']')
+                if (close <= 1 || close + 2 > remoteAddr.length || remoteAddr[close + 1] != ':') return null
+                host = remoteAddr.substring(1, close)
+                port = remoteAddr.substring(close + 2).toIntOrNull() ?: return null
+            } else {
+                val idx = remoteAddr.lastIndexOf(':')
+                if (idx <= 0) return null
+                host = remoteAddr.substring(0, idx)
+                port = remoteAddr.substring(idx + 1).toIntOrNull() ?: return null
+            }
+            if (host.isEmpty() || port !in 1..65535) return null
+            return PeerEndpoint(host, port)
+        }
     }
 
     /** 入站缓冲满而阻塞在回调线程上的次数（诊断用；正常稳态应当很小）。 */
@@ -411,7 +434,11 @@ class SecureChannelTransport(
                             // 上层按退避重试 —— 这与网关队列满时的语义完全一致。
                         }
 
-                        override fun onMessage(message: ByteArray) {
+                        override fun onMessage(
+                            message: ByteArray,
+                            peerFingerprint: String,
+                            remoteAddr: String?,
+                        ) {
                             // 配对应答是传输层控制帧:交给 [pairingResults],不许进 Messenger
                             // (它的 Envelope 解码会把控制帧整条判成坏帧)。
                             if (PairingFrame.looksLikePairingFrame(message)) {
@@ -469,17 +496,25 @@ class SecureChannelTransport(
             }
         }
 
-        override fun onMessage(message: ByteArray) {
+        override fun onMessage(
+            message: ByteArray,
+            peerFingerprint: String,
+            remoteAddr: String?,
+        ) {
             if (PairingFrame.looksLikePairingFrame(message)) {
                 handlePairingFrame(message)
                 return
             }
             // 未通过信任手续的对端,一帧业务数据都不许进入应用层。
             if (!trusted) return
-            // 二进制数据帧(文件/投屏)没有 Envelope:按会话指纹反查对端地址后原样投递。
+            // 二进制数据帧(文件/投屏)没有 Envelope:优先用 Rust 引擎在握手里
+            // 确权过的 peerFingerprint(luciola 0.6.0 起逐帧携带)反查端点,再退
+            // 会话级缓存与 socket 真实来源 —— 不再依赖会话状态机时序的启发式。
             if (isBinaryFrame(message)) {
-                val fp = sessionFingerprint ?: return
-                val endpoint = inboundPeer ?: peerOfFingerprint(fp) ?: return
+                val endpoint = inboundPeer
+                    ?: peerOfFingerprint(peerFingerprint)
+                    ?: remoteAddr?.let { parsePeerEndpoint(it) }
+                    ?: return
                 inboundPeer = endpoint
                 inboundByEndpoint[endpointKey(endpoint.host, endpoint.port)] = session
                 emitOrBlock(ReceivedDatagram(message, endpoint.host, endpoint.port))

@@ -38,6 +38,18 @@ class LuciolaDiscoveryEngine(
      * 一个 sweep 窗口后显示离线,发送直接进队列(真机实测:主机看到手机 online=false)。
      */
     private val heartbeatMs: Long = 5_000,
+    /**
+     * 把信标身份钉到宿主自己的零信任体系上(luciola 0.6.0):
+     * - [engineNodeId]:信标携带宿主自己的 nodeId,信标身份 = 信道身份,不再由
+     *   引擎随机生成第二套;
+     * - [channelTcpPort]:加密信道的真实监听端口,对端从发现层直接拿到可拨端口,
+     *   不再猜 udp+1;
+     * - [publicKey]:本机 Ed25519 公钥,与外拨/入站握手出示的身份一致。
+     * 三者都可空 = 维持旧行为(引擎自动生成)。
+     */
+    private val engineNodeId: String? = null,
+    private val channelTcpPort: Int? = null,
+    private val publicKey: ByteArray? = null,
 ) : DiscoveryEngine {
 
     private val json = Json { encodeDefaults = false; ignoreUnknownKeys = true }
@@ -71,6 +83,9 @@ class LuciolaDiscoveryEngine(
             discoveryPort = udpPort.toUShort(),
             product = "tidings",
             extra = json.encodeToString(Profile.serializer(), self),
+            nodeId = engineNodeId ?: self.nodeId,
+            tcpPort = channelTcpPort?.toUShort(),
+            publicKey = publicKey,
         ).also { this.adapter = it }
         adapter.start { event ->
             when (event) {
