@@ -418,6 +418,9 @@ class ScreenReceiver(
     /** 接收侧读数（10s 一行，见 [ScreenStats]）。 */
     private val stats = ScreenStats("rx")
 
+    /** 分段读数（10s 一行）：等帧头 vs 等 JPEG。 */
+    private val segmentStats = SegmentStats("rxseg")
+
     val targetFps: Int get() = if (minimized) 3 else rate.fps
 
     fun start() {
@@ -454,11 +457,16 @@ class ScreenReceiver(
                 // 主流循环：调度 request -> 读 frame 头 -> 读 raw JPEG -> 回调 display
                 while (isActive && !stopped) {
                     scheduleNext(write)
+                    // **分段计时**（goal 第 4 步定位延迟用）：从发 next 到收到帧头是第一段，
+                    // 帧头到 JPEG 收齐是第二段。合起来才是 rx 那个读数 —— 只有拆开才能
+                    // 判断 20ms 究竟是"等对端采样+节流"还是"传字节"。
+                    val tNext = com.kapp.tidings.core.nowMillis()
 
                     // 读 screen-frame 头
                     val frameHeader = withTimeoutOrNull(Limits.SCREEN_FRAME_TIMEOUT_MS) {
                         readNextControlFrame(read)
                     }
+                    val headerWaitMs = com.kapp.tidings.core.nowMillis() - tNext
                     if (frameHeader !is ScreenTcpFrame.Frame || frameHeader.sessionId != sessionId || frameHeader.seq != sequence) {
                         end("protocol-error")
                         return@launch
@@ -481,6 +489,7 @@ class ScreenReceiver(
 
                     waiting = false
                     val now = com.kapp.tidings.core.nowMillis()
+                    segmentStats.onSplit(headerWaitMs, now - tNext - headerWaitMs)
                     val frameRttMs = now - sentAt
                     if (!minimized) {
                         rate.observe(frameRttMs, now)

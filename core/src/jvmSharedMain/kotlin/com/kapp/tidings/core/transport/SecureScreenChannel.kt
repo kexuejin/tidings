@@ -8,6 +8,7 @@ import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.withTimeoutOrNull
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withTimeoutOrNull
@@ -131,8 +132,8 @@ class SecureScreenChannel(
      */
     fun accept(scope: CoroutineScope, onAccept: (ScreenWire) -> Unit) {
         acceptJob?.cancel()
-        // 入站这条同样 Unconfined：它由 Rust 的回调线程驱动，喂进 ByteChannel 是纯内存
-        // 拷贝，没有阻塞点，不该再排一次调度队列。
+        // 入站也 Unconfined：它由 Rust 的回调线程驱动，喂进 ByteChannel 是纯内存拷贝，
+        // 没有阻塞点，不该再排一次调度队列（IO 版本实测 rx 52ms / 4.8fps，明显更差）。
         acceptJob = scope.launch(kotlinx.coroutines.Dispatchers.Unconfined) {
             var incoming: ByteChannel? = null
             var writeJob: Job? = null
@@ -185,24 +186,60 @@ class SecureScreenChannel(
     private var acceptJob: Job? = null
 
     /**
-     * 出站泵。
+     * 出站泵。**必须跑在 Dispatchers.Unconfined 上**（试过 IO，更差）。
      *
-     * **必须跑在 Dispatchers.Unconfined 上**：writeFully 唤醒它时应当**在写端的线程**
-     * 上直接继续，而不是先排队回到 Dispatchers.IO 的调度队列。投屏是一问一答的小帧
-     * （~530 字节），每帧多两次调度切换就是几十毫秒 —— 真机实测 luciola 组 51ms vs
-     * 明文组 16ms，而两边帧率、帧大小完全一样。字节量不是瓶颈，切换次数是。
+     * Unconfined 会让泵在 `writeFully` resume 它的那条线程上内联跑完 —— 也就是采集
+     * 线程。代价是「采样→写完」(tx) 这个读数把加密 + JNA + TCP 写的耗时也算进去了，
+     * 真机上因此显示 22ms（明文通路 2ms），**看起来像「加密慢 20ms」**。
+     *
+     * **但那是真实的并行收益，不是浪费**。同一台机器实测（同一条链路、同一段共享）：
+     *
+     *   泵线程     rx 延迟   帧率
+     *   Unconfined  39ms     9.3 fps
+     *   IO          52ms     4.8 fps   ← 掉档：接收端自适应降到 5fps
+     *
+     * 放回 IO 后泵与采集变成串行，端到端反而更差、还触发 ScreenRate 降档。
+     * 所以保留 Unconfined；要量「加密本身有多贵」请换一个隔离的量具（例如同一帧
+     * 在两条通路上只测 enc+send 的那一段），不要用 tx 读数比。
      */
     private fun pumpOutbound(scope: CoroutineScope, channel: ByteChannel, host: String, port: Int): Job =
         scope.launch(kotlinx.coroutines.Dispatchers.Unconfined) {
             val buffer = ByteArray(chunkSize)
             try {
                 while (isActive) {
-                    val n = channel.readAvailable(buffer, 0, buffer.size)
+                    var n = channel.readAvailable(buffer, 0, buffer.size)
                     if (n == -1) break
                     if (n <= 0) continue
+                    // 一次 readAvailable 只拿到 ByteChannel 内部块大小（实测 ~7KB），
+                    // 而一帧 49KiB ⇒ 每帧被切成 ~7 段，每段 3.5ms ⇒ 24ms。
+                    // 这里**只在缓冲里已经有货时**再读一轮（withTimeoutOrNull(0) 不挂起），
+                    // 不引入任何等待：醒来时若整帧都在，一次读完；不在就照旧逐段发。
+                    // 曾经用「等 4ms 攒齐」试过，端到端更差（帧率 9.3→4.8），所以绝不等待。
+                    while (n < buffer.size) {
+                        val more = withTimeoutOrNull(0) {
+                            channel.readAvailable(buffer, n, buffer.size - n)
+                        } ?: break
+                        if (more <= 0) break
+                        n += more
+                    }
+                    // 不要在这里攒帧：等 4ms 攒齐实测端到端更差（帧率 9.3→4.8、rx 39→51ms）。
+                    //
+                    // 分段量具显示：每段 enc+JNA+TCP 约 3.5ms，而一帧 49KiB 会被 readAvailable
+                    // 切成 ~7 段（4611578 字节 / 654 段 ≈ 7KB 一段）⇒ 3.5 × 7 ≈ 24ms，
+                    // 正是「投屏延迟 22ms」的真身。
+                    //
+                    // 但用「等 4ms 攒齐再发」去消它，实测**端到端更差**：
+                    //   tx 22ms → 8.6ms，但帧率 9.3 → 4.8 fps、rx 39ms → 51ms。
+                    // 原因是泵被窗口阻塞后追不上，接收端 ScreenRate 判定变慢直接降档到 5fps。
+                    // 换句话说：那 7 段开销是与采集重叠发生的，等它省下来反而是串行化。
+                    // 真要减，得在发送端把一帧写成一次（已做：帧头+JPEG 合并），或让
+                    // Rust 侧按帧而不是按 write 边界聚合 —— 不是在泵里等。
+                    val wrapStart = System.nanoTime()
                     val frame = ScreenChannelFrame.wrap(buffer, n)
+                    val wrapNs = System.nanoTime() - wrapStart
                     // 队列满就退避重试：丢一段字节 = 字节流错乱，比慢一点糟得多。
                     var waited = 0L
+                    val sendStart = System.nanoTime()
                     while (isActive && !transport.send(frame, host, port)) {
                         delay(SEND_BACKOFF_MS)
                         waited += SEND_BACKOFF_MS
@@ -210,16 +247,28 @@ class SecureScreenChannel(
                         // 收掉它让上层按"投屏断开"处理，而不是假装还在传。
                         if (waited > SEND_STALL_MS) return@launch
                     }
+                    sendStats.onSegment(n.toLong(), wrapNs / 1_000, (System.nanoTime() - sendStart) / 1_000)
                 }
             } catch (_: CancellationException) {
                 // 正常收摊
             }
         }
 
+    /**
+     * **分段量具**：把「封套拷贝」与「加密 + JNA + TCP 写」分开计。
+     *
+     * 为什么要单独一个：上一轮拿「采样→写完」(tx) 去比较两条通路，结论连着错了两次
+     * （先怪 ByteChannel 背压、再怪 Unconfined 内联）—— 因为那个读数里混着采集与
+     * 并行的工作。只有这里的 `send` 这一段是"加密信道本身"的代价。
+     */
+    private val sendStats = SegmentStats("txseg")
+
     private companion object {
         /** 上层读得慢时的背压上限：超过它这场投屏已经不实时了。 */
         const val DELIVER_TIMEOUT_MS = 2_000L
         const val SEND_BACKOFF_MS = 2L
         const val SEND_STALL_MS = 5_000L
+
+
     }
 }
