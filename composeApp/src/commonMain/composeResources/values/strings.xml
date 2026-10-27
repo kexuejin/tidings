@@ -835,7 +835,7 @@
     <string name="r2_set_profile_rev_chip">资料 v%1$d</string>
     <string name="r2_set_profile_node_chip">节点 %1$s</string>
     <string name="set_luciola_title">luciola 加密信道</string>
-    <string name="set_luciola_sub">消息、文件与投屏都走加密信道。开启后与未升级设备的自动发现会关闭，只认二维码与手动地址；关掉即回退到原传输，重启节点生效</string>
+    <string name="set_luciola_sub">消息、文件与投屏都走加密信道（默认开启）。与未升级到同一版本的设备会失去自动发现，只认二维码与手动地址；关掉并重启节点即回退到原传输</string>
     <string name="set_persist_title">消息落盘</string>
     <string name="set_persist_sub">关着时历史只在内存，重启即丢</string>
     <!-- 保留天数在此页是一行纯说明（没有可改的开关），不再伪装成设置行。 -->
