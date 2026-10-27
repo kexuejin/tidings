@@ -25,6 +25,7 @@ import io.ktor.utils.io.ByteWriteChannel
 import com.kapp.tidings.core.transport.DIRECTION_IN
 import com.kapp.tidings.core.transport.DedupStore
 import com.kapp.tidings.core.transport.Discovery
+import com.kapp.tidings.core.transport.DiscoveryEngine
 import com.kapp.tidings.core.transport.SYNTHETIC_NICK_PREFIX
 import com.kapp.tidings.core.transport.InMemoryDedupStore
 import com.kapp.tidings.core.transport.InMemoryMessageStore
@@ -152,6 +153,13 @@ class NodeRuntime(
      * `node-a1b2c3d4` 这个合成名（真机缺陷）。
      */
     private val knownPeerStore: KnownPeerStore? = null,
+    /**
+     * 额外发现引擎(阶段二 B-3:luciola 桥接)。与主 Discovery 并存:
+     * registry 按 nodeId 去重;luciola 补 IPv6 多播/防 TUN 的发现覆盖,
+     * legacy 继续承载 msg 帧(阶段三切 SecureChannel 后移除)。
+     * 仅 JVM/Android 宿主传入 LuciolaDiscoveryEngine;iOS 传 null(legacy)。
+     */
+    private val extraDiscovery: DiscoveryEngine? = null,
     /**
      * 长连接的连接层（K2 的接缝）。K1 默认明文 [PlaintextLinkTransport]；K2 换成
      * TLS + 双向 pin 的实现即可，本类一行不用改。
@@ -288,7 +296,7 @@ class NodeRuntime(
             addresses = advertisedAddresses().takeIf { it.isNotEmpty() } ?: profile.addresses,
         )
 
-    private val discovery = Discovery(
+    private val discovery: DiscoveryEngine = Discovery(
         transport,
         registry,
         // task-38：把自己的 TLS pin 随资料带出去（旧端忽略未知键 ⇒ 兼容）。
@@ -652,6 +660,7 @@ class NodeRuntime(
             registry.setPin(nodeId, pin, pinSources[nodeId] ?: PeerRegistry.PIN_SOURCE_UNKNOWN)
         }
         discovery.start(runScope)
+        extraDiscovery?.start(runScope)
         messenger.start(runScope)
 
         // 长连接（K1）：主机侧接受、发起侧按开关连出去；同一个运行时两个角色都在。
@@ -909,6 +918,7 @@ class NodeRuntime(
         runCatching { crossNetworkScreenListener.stop() }
         tcpBound = false
         discovery.stop()
+        extraDiscovery?.stop()
         messenger.stop()
         transport.stop()
         tcp?.close()
@@ -1049,7 +1059,10 @@ class NodeRuntime(
     fun leftoverParts(): List<PartFile> = transfer?.leftoverParts().orEmpty()
 
     /** 主动握手：向广播地址或所有手动节点单播 `entry`。 */
-    suspend fun announce() = discovery.announce()
+    suspend fun announce() {
+        discovery.announce()
+        extraDiscovery?.announce()
+    }
 
     /**
      * 网络路径变了：**立刻**重拨长连接（不等退避），并排空一次离线队列（K3 ①）。
@@ -1086,7 +1099,10 @@ class NodeRuntime(
      * 只在**真的要离开**时调（退出进程 / 主动停节点），不要在 [stop] 里无条件发：
      * `restart()` 会先停后起，发了就是一次"离线→在线"的假抖动。
      */
-    suspend fun announceExit() = discovery.announceExit()
+    suspend fun announceExit() {
+        discovery.announceExit()
+        extraDiscovery?.announceExit()
+    }
 
     suspend fun sendText(peerId: String, text: String) = outbound.sendText(peerId, text)
 

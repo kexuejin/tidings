@@ -94,7 +94,7 @@ class Discovery(
      * 不再依赖 TOFU 的首次固定（那个有首次使用竞态）。
      */
     private val onPeerPin: (String, String) -> Unit = { _, _ -> },
-) {
+) : DiscoveryEngine {
 
     private var scope: CoroutineScope? = null
     private val jobs = mutableListOf<Job>()
@@ -109,7 +109,7 @@ class Discovery(
      */
     private val lastProfileRefreshAt = HashMap<String, Long>()
 
-    fun start(scope: CoroutineScope) {
+    override fun start(scope: CoroutineScope) {
         if (this.scope != null) return
         this.scope = scope
         // 每条报文单独兜底：一条坏帧（或应用层的 gossip 处理器抛异常）绝不能把整个发现层
@@ -120,7 +120,7 @@ class Discovery(
         jobs += scope.launch { sweepLoop() }
     }
 
-    fun stop() {
+    override fun stop() {
         for (job in jobs) job.cancel()
         jobs.clear()
         scope = null
@@ -137,7 +137,7 @@ class Discovery(
      * presence（最多 `presenceInterval` = 30 秒）才知道我的新地址 —— 和
      * "心跳漏掉被动握手的节点"是同一条规则。
      */
-    suspend fun announce() {
+    override suspend fun announce() {
         val envelope = makeEnvelope(
             MsgTypes.ENTRY,
             selfProfile().nodeId,
@@ -159,7 +159,7 @@ class Discovery(
     }
 
     /** 只向一个节点握手（手机端的主路径：知道电脑 IP 即可建立双向在线）。 */
-    suspend fun announceTo(host: String, port: Int = Protocol.DEFAULT_UDP_PORT) {
+    override suspend fun announceTo(host: String, port: Int) {
         val envelope = makeEnvelope(
             MsgTypes.ENTRY,
             selfProfile().nodeId,
@@ -179,7 +179,7 @@ class Discovery(
      * 与 [announce] 用同一组目标：广播 + 手动节点 + 学到过的在线节点。少任何一类，
      * 那一类对端就要等满 presence 超时才知道我们走了。
      */
-    suspend fun announceExit() {
+    override suspend fun announceExit() {
         val envelope = makeEnvelope(MsgTypes.EXIT, selfProfile().nodeId, JsonObject(emptyMap()))
         val bytes = Codec.encodeToBytes(envelope)
         for ((host, port) in broadcastTargets(

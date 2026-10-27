@@ -76,3 +76,9 @@ kotlin {
         }
     }
 }
+
+tasks.withType<Test>().configureEach {
+    // luciola(JNA)在测试里加载本地库;分支阶段:指向本机构建产物。
+    // 正式接入时应改为随构件分发或 CI 固定路径。
+    systemProperty("jna.library.path", System.getProperty("jna.library.path") ?: "/workspace/RustBuild/cargo-target/debug")
+}
