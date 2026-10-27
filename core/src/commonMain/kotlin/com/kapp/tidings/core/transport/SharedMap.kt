@@ -29,6 +29,9 @@ internal class SharedMap<K, V> {
         lock.withLock { map[key] = value }
     }
 
+    /** 与 Map.put 同名，便于把 ConcurrentHashMap 的初始化块直接搬过来。 */
+    fun put(key: K, value: V): V? = lock.withLock { map.put(key, value) }
+
     fun remove(key: K): V? = lock.withLock { map.remove(key) }
 
     fun containsKey(key: K): Boolean = lock.withLock { map.containsKey(key) }
@@ -45,6 +48,12 @@ internal class SharedMap<K, V> {
     }
 
     fun values(): List<V> = lock.withLock { map.values.toList() }
+
+    /** 键值对快照（可解构为 (key, value)）。 */
+    fun entries(): List<Pair<K, V>> = lock.withLock { map.entries.map { it.key to it.value } }
+
+    /** 整表快照：持久化（把表序列化成 JSON）时用，避免持锁做序列化。 */
+    fun snapshot(): Map<K, V> = lock.withLock { HashMap(map) }
 
     /** 按谓词移除（快照匹配、锁内删除两步，避免边遍历边改）。 */
     fun removeValuesWhere(predicate: (V) -> Boolean) {
@@ -70,7 +79,8 @@ internal class SharedSet<V> {
 
     fun remove(value: V): Boolean = lock.withLock { set.remove(value) }
 
-    fun contains(value: V): Boolean = lock.withLock { value in set }
+    /** 支持 `x in set` 语法（与 HashSet 一致，迁移时调用点不用改）。 */
+    operator fun contains(value: V): Boolean = lock.withLock { value in set }
 
     fun toList(): List<V> = lock.withLock { set.toList() }
 

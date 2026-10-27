@@ -4,15 +4,18 @@ package com.kapp.tidings.core.transport
 import com.kapp.tidings.core.protocol.Profile
 import kotlinx.serialization.Serializable
 import kotlinx.serialization.json.Json
+import com.kapp.tidings.core.crypto.secureRandomBytes
+import com.kapp.tidings.core.createCoreLock
+import com.kapp.tidings.core.nowMillis
+import com.kapp.tidings.core.withLock
+import kotlin.concurrent.Volatile
 import uniffi.luciola_uniffi.TrustStore as RustTrustStore
 import uniffi.luciola_uniffi.TrustedDeviceInfo
 import uniffi.luciola_uniffi.TrustLevel
 import uniffi.luciola_uniffi.identityFingerprint
 import uniffi.luciola_uniffi.identityFromSeed
-import java.security.SecureRandom
 import kotlin.io.encoding.Base64
 import kotlin.io.encoding.ExperimentalEncodingApi
-import java.util.concurrent.ConcurrentHashMap
 
 /**
  * 工厂状态的落盘位置(宿主提供:桌面受限文件 / Android Keystore 包装的
@@ -87,6 +90,13 @@ class LuciolaTransportFactory(
 ) {
     private val json = Json { ignoreUnknownKeys = true; encodeDefaults = false }
 
+    /**
+     * 保护信任账本的四张表。原来是 JVM 的 `@Synchronized` 方法修饰 + `ConcurrentHashMap`，
+     * 两者在 Kotlin/Native 都不存在。CoreLock 两端都可重入（ReentrantLock / NSRecursiveLock），
+     * 所以"加了锁的方法里再调另一个加锁方法"（如 pairPeer → trustDevice）不会死锁。
+     */
+    private val stateLock = createCoreLock()
+
     val identity = identityFromSeed(seedHexToBytes(seedPersist(null)))
 
     val publicKey: ByteArray get() = identity.publicKey
@@ -99,14 +109,14 @@ class LuciolaTransportFactory(
     private val rustTrustStore = RustTrustStore(state.trust)
 
     /** "host:port" → public key;配对后立即生效,重启从 stateStore 恢复。 */
-    private val endpoints = ConcurrentHashMap<String, ByteArray>().apply {
+    private val endpoints = SharedMap<String, ByteArray>().apply {
         state.endpoints.forEach { (key, b64) ->
             runCatching { put(key, Base64.UrlSafe.decode(b64)) }
         }
     }
 
     /** "host:port" → 扫到的对端配对密钥(发起侧用);缺 = 这个对端没扫过码。 */
-    private val pairingSecrets = ConcurrentHashMap<String, ByteArray>().apply {
+    private val pairingSecrets = SharedMap<String, ByteArray>().apply {
         state.pairingSecrets.forEach { (key, b64) ->
             runCatching { put(key, Base64.UrlSafe.decode(b64)) }
         }
@@ -114,7 +124,7 @@ class LuciolaTransportFactory(
 
     /** 仅指纹的信任(监听侧 TOFU);与 [endpoints] 一起决定入站放行。 */
     private val trustedFingerprints =
-        ConcurrentHashMap.newKeySet<String>().apply { addAll(state.trustedFingerprints) }
+        SharedSet<String>().apply { state.trustedFingerprints.forEach { add(it) } }
 
     /**
      * 配对密钥:128 位随机数,随二维码出去(不进发现广播)。首次生成后落盘,
@@ -123,7 +133,7 @@ class LuciolaTransportFactory(
     private val pairSecret: ByteArray = state.pairSecret
         ?.let { runCatching { Base64.UrlSafe.decode(it) }.getOrNull() }
         ?.takeIf { it.size >= MIN_PAIR_SECRET_BYTES }
-        ?: ByteArray(DEFAULT_PAIR_SECRET_BYTES).also { SecureRandom().nextBytes(it) }
+        ?: secureRandomBytes(DEFAULT_PAIR_SECRET_BYTES)
 
     init {
         if (state.pairSecret == null) persist()
@@ -161,7 +171,6 @@ class LuciolaTransportFactory(
      * @param alsoReachableAt 配对码里同一台设备的其他地址(IPv4 + IPv6 多候选);
      *        它们共用同一个端口与公钥,任一条可达就能拨通。
      */
-    @Synchronized
     fun pairPeer(
         host: String,
         port: Int,
@@ -171,7 +180,7 @@ class LuciolaTransportFactory(
         alsoReachableAt: List<String> = emptyList(),
         /** 对端二维码里的配对密钥(发起侧);给了才能用 [SecureChannelTransport.requestPairing]。 */
         secret: ByteArray? = null,
-    ) {
+    ) = stateLock.withLock {
         require(publicKey.size == ED25519_PUBLIC_KEY_SIZE) {
             "Ed25519 public key must be $ED25519_PUBLIC_KEY_SIZE bytes, got ${publicKey.size}"
         }
@@ -183,14 +192,13 @@ class LuciolaTransportFactory(
     }
 
     /** 只写 TrustStore(分级/账本),不绑定地址;一般用 [pairPeer]。 */
-    @Synchronized
-    fun trustDevice(nodeId: String, name: String, publicKey: ByteArray, full: Boolean) {
+    fun trustDevice(nodeId: String, name: String, publicKey: ByteArray, full: Boolean) = stateLock.withLock {
         rustTrustStore.trustDevice(
             TrustedDeviceInfo(
                 deviceId = nodeId, name = name, publicKey = publicKey,
                 fingerprint = identityFingerprint(publicKey),
                 level = if (full) TrustLevel.FULL else TrustLevel.PARTIAL,
-                pinnedAtMs = System.currentTimeMillis().toULong(),
+                pinnedAtMs = nowMillis().toULong(),
             )
         )
         persist()
@@ -203,34 +211,32 @@ class LuciolaTransportFactory(
      * 进来这条路径只能先按指纹信任;真正要与 TrustStore 的指纹账本对齐,得等
      * 应用层配对帧把公钥带上来(见迁移手册阶段三备注)。
      */
-    @Synchronized
-    fun trustInboundFingerprint(fingerprint: String) {
-        trustedFingerprints += fingerprint
+    fun trustInboundFingerprint(fingerprint: String) = stateLock.withLock {
+        trustedFingerprints.add(fingerprint)
         persist()
     }
 
-    @Synchronized
-    fun untrustInboundFingerprint(fingerprint: String) {
-        trustedFingerprints -= fingerprint
+    fun untrustInboundFingerprint(fingerprint: String) = stateLock.withLock {
+        trustedFingerprints.remove(fingerprint)
         persist()
     }
 
     /** 撤销一个地址的配对(公钥账本按公钥去重,别处的同一设备条目不受影响)。 */
-    @Synchronized
-    fun unpair(host: String, port: Int) {
+    fun unpair(host: String, port: Int) = stateLock.withLock {
         val key = endpointKey(host, port)
         val removed = endpoints.remove(key) ?: return
         pairingSecrets.remove(key)
         val fingerprint = identityFingerprint(removed)
-        if (endpoints.values.none { identityFingerprint(it) == fingerprint }) {
+        if (endpoints.values().none { identityFingerprint(it) == fingerprint }) {
             rustTrustStore.remove(fingerprint)
             // 撤销必须两侧一起撤:只删 pin 表、留着入站指纹信任,等于没撤。
-            trustedFingerprints -= fingerprint
+            trustedFingerprints.remove(fingerprint)
         }
         persist()
     }
 
-    fun isPaired(host: String, port: Int): Boolean = endpoints.containsKey(endpointKey(host, port))
+    fun isPaired(host: String, port: Int): Boolean =
+        stateLock.withLock { endpoints.containsKey(endpointKey(host, port)) }
 
     /** 当前信任账本(按公钥去重)。 */
     fun entries(): List<TrustedDeviceInfo> = rustTrustStore.entries()
@@ -242,7 +248,7 @@ class LuciolaTransportFactory(
     fun isTrustedFingerprint(fingerprint: String): Boolean =
         fingerprint in trustedFingerprints ||
             rustTrustStore.entries().any { it.fingerprint == fingerprint } ||
-            endpoints.values.any { identityFingerprint(it) == fingerprint }
+            endpoints.values().any { identityFingerprint(it) == fingerprint }
 
     // ------------------------------------------------------------------ 装配
 
@@ -269,7 +275,7 @@ class LuciolaTransportFactory(
                 registry.get(nodeId)?.let { PeerEndpoint(it.ip, it.udpPort) }
             },
             pairing = pairingAdmission(),
-            pairingSecretOf = { host, port -> pairingSecrets[endpointKey(host, port)] },
+            pairingSecretOf = { host, port -> stateLock.withLock { pairingSecrets[endpointKey(host, port)] } },
             selfPublicKey = identity.publicKey,
             peerOfFingerprint = { fingerprint -> endpointOfFingerprint(fingerprint, registry) },
         )
@@ -324,7 +330,7 @@ class LuciolaTransportFactory(
         // 桌面二维码）—— 那时会话能连上（信任判据查 endpoints），二进制帧却归属不到
         // 对端（原先只查 TrustStore）⇒ 文件/画面字节被整条静默丢弃，
         // 用户看到的是"对方说发了、我这边一直卡在接收中"。真机 50MB 验收踩过这一条。
-        endpoints.entries.forEach { (key, publicKey) ->
+        endpoints.entries().forEach { (key, publicKey) ->
             if (identityFingerprint(publicKey) != fingerprint) return@forEach
             val host = key.substringBeforeLast(':', "")
             val port = key.substringAfterLast(':', "").toIntOrNull() ?: 0
@@ -343,7 +349,7 @@ class LuciolaTransportFactory(
      * 入站配对 (对方扫了我的码) 只把信任写进 TrustStore，没有端点映射，不补这条
      * 主机就永远拨不回去（真机实测：发送 no-ack，最后退回 legacy TCP）。
      */
-    private val reportedPins = ConcurrentHashMap.newKeySet<String>()
+    private val reportedPins = SharedSet<String>()
 
     /**
      * 测试入口：验证「同一台设备其他端口也能取到 pin」这条判据。
@@ -360,10 +366,10 @@ class LuciolaTransportFactory(
         // 在这台设备上永远拨不通（真机踩过：`pin lookup 192.168.2.22:17888 pinned=false`）。
         // 只在**该 host 下所有条目公钥一致**时才采用：同一地址出现两个不同身份时
         // 宁可拒绝（deny-by-default），也不猜。
-        val sameHost = endpoints.entries.filter { (key, _) -> key.substringBeforeLast(':', "") == host }
+        val sameHost = endpoints.entries().filter { (key, _) -> key.substringBeforeLast(':', "") == host }
         if (sameHost.isNotEmpty()) {
-            val first = sameHost.first().value
-            val unique = sameHost.all { it.value.contentEquals(first) }
+            val first = sameHost.first().second
+            val unique = sameHost.all { it.second.contentEquals(first) }
             if (unique) return first
         }
         val record = registry.findByEndpoint(host, port)
@@ -389,13 +395,13 @@ class LuciolaTransportFactory(
             .getOrElse { FactoryStateJson() }
     }
 
-    private fun persist() {
+    private fun persist() = stateLock.withLock<Unit> {
         val next = FactoryStateJson(
             trust = runCatching { rustTrustStore.toJson() }.getOrNull(),
-            endpoints = endpoints.mapValues { Base64.UrlSafe.encode(it.value) },
+            endpoints = endpoints.snapshot().mapValues { Base64.UrlSafe.encode(it.value) },
             trustedFingerprints = trustedFingerprints.toList(),
             pairSecret = Base64.UrlSafe.encode(pairSecret),
-            pairingSecrets = pairingSecrets.mapValues { Base64.UrlSafe.encode(it.value) },
+            pairingSecrets = pairingSecrets.snapshot().mapValues { Base64.UrlSafe.encode(it.value) },
         )
         state = next
         runCatching { stateStore.save(json.encodeToString(FactoryStateJson.serializer(), next)) }

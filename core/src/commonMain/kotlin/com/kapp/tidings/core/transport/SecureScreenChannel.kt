@@ -276,17 +276,17 @@ class SecureScreenChannel(
     /** 发一次（正文从 [ScreenChannelFrame.HEADER_BYTES] 起，封套头就地写）。 */
     private suspend fun sendOne(buf: ByteArray, len: Int, host: String, port: Int): Boolean? {
         if (len <= 0) return true
-        val wrapStart = System.nanoTime()
+        val wrapStart = kotlin.time.TimeSource.Monotonic.markNow()
         // 取"正好这一段"的视图：send 需要一个独立 ByteArray，但用 copyOfRange 直接产出
         // HEADER+正文 的目标数组，**省掉"就地写头再整体拷一次"**（那一拷是 49KiB）。
         val total = ScreenChannelFrame.HEADER_BYTES + len
         val frame = ByteArray(total)
         buf.copyInto(frame, 0, ScreenChannelFrame.HEADER_BYTES, ScreenChannelFrame.HEADER_BYTES + len)
         ScreenChannelFrame.wrapInPlace(frame, 0, len)
-        val wrapNs = System.nanoTime() - wrapStart
+        val wrapNs = wrapStart.elapsedNow().inWholeNanoseconds
         var waited = 0L
         var backoffs = 0
-        val sendStart = System.nanoTime()
+        val sendStart = kotlin.time.TimeSource.Monotonic.markNow()
         while (!transport.send(frame, host, port)) {
             backoffs += 1
             delay(SEND_BACKOFF_MS)
@@ -294,7 +294,7 @@ class SecureScreenChannel(
             if (waited > SEND_STALL_MS) return null
         }
         backoffStats.onCount(backoffs)
-        sendStats.onSplit3(wrapNs / 1_000, (System.nanoTime() - sendStart) / 1_000, len.toLong())
+        sendStats.onSplit3(wrapNs / 1_000, sendStart.elapsedNow().inWholeMicroseconds, len.toLong())
         return true
     }
 
