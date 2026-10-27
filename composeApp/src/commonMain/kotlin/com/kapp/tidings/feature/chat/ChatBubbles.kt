@@ -1212,7 +1212,7 @@ private val PLAIN_TEXT_URL_REGEX = Regex("https?://[^\\s<>\"'\\u3001\\u3002\\uFF
  * 点了能重来。抽成纯函数是为了让它**能被测到** —— 布局里「少画一个按钮」用肉眼迟早会漏。
  */
 internal fun fileCardShowsAccept(card: FileCardUi): Boolean =
-    card.state == TransferState.Offered && !card.mine
+    card.state == TransferState.Offered && !card.mine && !card.autoAccepted
 
 /**
  * 把 core 的传输失败**机器码**翻译成人话；认不出时返回 null（调用方退回原文或「未知」）。

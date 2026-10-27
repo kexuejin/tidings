@@ -52,6 +52,25 @@ class FileCardStyleTest {
     }
 
     @Test
+    fun anAutoAcceptedImageShowsNoAcceptButton() {
+        // 2026-10-27 模拟器实测：小图在协议层已被自动接收（字节落地、sha256 一致），
+        // 界面却还画着「接收 / 拒绝」—— 因为判据没看 autoAccepted。
+        // 这条钉住的是「结论由 core 给、界面只管照做」：卡片带着 autoAccepted 时不出按钮。
+        val card = FileCardUi(
+            transferId = "t-auto",
+            name = "ios1m.png",
+            size = 1_048_576L,
+            mine = false,
+            state = TransferState.Offered,
+            autoAccepted = true,
+        )
+        assertFalse(
+            fileCardShowsAccept(card),
+            "已自动接收的图片不该再让用户点「接收」",
+        )
+    }
+
+    @Test
     fun acceptIsOnlyOfferedForAnInboundOffer() {
         assertTrue(fileCardShowsAccept(card(TransferState.Offered, mine = false)))
         assertFalse(

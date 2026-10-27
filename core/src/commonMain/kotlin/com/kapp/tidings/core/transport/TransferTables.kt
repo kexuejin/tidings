@@ -124,6 +124,18 @@ data class IncomingOffer(
     val groupId: String? = null,
     val groupRev: Int? = null,
     /**
+     * 本端是否**已经自动接收**了这份 offer（小图片等免确认场景）。
+     *
+     * 由 [com.kapp.tidings.core.transport.TransferManager] 在收到 offer 时判定，
+     * 随事件一路带到 UI —— 界面据此**不画**「接收/拒绝」按钮。
+     *
+     * 为什么是这里给结论而不是让 UI 自己算：判定要用到 `groupId`（群图上限只有私聊的一半），
+     * 而界面那张卡片里没有群 id。各自算一遍迟早会分叉，症状是"明明已经收下来了，
+     * 卡片还显示等你接收"（2026-10-27 模拟器实测）。
+     */
+    val autoAccepted: Boolean = false,
+
+    /**
      * 表格图片消息的**文字视图**（≤4096B UTF-8）。
      *
      * 只有 `purpose:"image"` 的单图 offer 会带它；[tableTextTruncated] 为真表示发送端已按上限

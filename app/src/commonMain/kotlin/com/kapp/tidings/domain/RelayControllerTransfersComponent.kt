@@ -354,6 +354,7 @@ fun handleOnTransfer(event: TransferEvent) {
                     state = TransferState.Offered,
                     msgId = offer.msgId,
                     purpose = offer.purpose,
+                    autoAccepted = offer.autoAccepted,
                     tableText = offer.tableText,
                     tableTextTruncated = offer.tableTextTruncated == true,
                     isFolder = offer.isFolder,

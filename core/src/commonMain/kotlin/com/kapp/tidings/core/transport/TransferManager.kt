@@ -13,6 +13,7 @@ import com.kapp.tidings.core.protocol.FileCtlSimple
 import com.kapp.tidings.core.protocol.FileMeta
 import com.kapp.tidings.core.protocol.FilePurpose
 import com.kapp.tidings.core.protocol.FileTransfer
+import com.kapp.tidings.core.protocol.autoAcceptsFile
 import com.kapp.tidings.core.protocol.LinkFrame
 import com.kapp.tidings.core.protocol.MsgTypes
 import com.kapp.tidings.core.protocol.ScreenTcpFrame
@@ -708,6 +709,16 @@ class TransferManager(
         decodeSimple(payload)
     }
 
+    /**
+     * 这份入站 offer 是否**免确认接收**（不需要用户点「接收」）。
+     *
+     * 判据的唯一权威源：本类判定、随 [TransferEvent.Offered] 带给 UI；界面不自己算
+     * （它拿不到群 id，只能算出「私聊上限」那一半，迟早与这里分叉 —— 症状就是
+     * 「已经收下来了，卡片还显示等你接收」，2026-10-27 模拟器实测）。
+     */
+    fun isAutoAccepted(purpose: String?, totalSize: Long, isGroup: Boolean): Boolean =
+        autoAcceptsFile(purpose, totalSize, isGroup)
+
     private fun onOffer(peerId: String, payload: JsonObject) {
         val offer = runCatching {
             Codec.wireJson.decodeFromJsonElement(FileCtlOffer.serializer(), payload)
@@ -751,13 +762,13 @@ class TransferManager(
             // 这里选择退化成手动领取而不是拒收：这条上限的意图是"超限群图按普通文件手动接收"，
             // 拒收会让一条本来能收的图彻底收不到。差别只在"合规但更宽松"，且只对不合规的
             // 发送端可见。
-            val autoAcceptLimit = if (assembled.groupId != null) {
-                FileTransfer.GROUP_IMG_AUTO_ACCEPT
-            } else {
-                FileTransfer.IMG_AUTO_ACCEPT
-            }
-            val autoAccept = assembled.purpose == FilePurpose.IMAGE &&
-                assembled.totalSize <= autoAcceptLimit
+            val autoAccept = isAutoAccepted(
+                purpose = assembled.purpose,
+                totalSize = assembled.totalSize,
+                isGroup = assembled.groupId != null,
+            )
+            // 结论随事件带给 UI：卡片据此不画「接收/拒绝」。
+            val offered = assembled.copy(autoAccepted = autoAccept)
             if (!autoAccept) {
                 stateLock.withLock { offers[assembled.transferId] = assembled }
             } else {
@@ -769,7 +780,7 @@ class TransferManager(
             // 自动接收也要先报一次 Offered：UI 要靠 rootName/totalSize 才能画出文件卡片，
             // 否则收到的图片在聊天流里第一次露面时是个没有名字的进度条。
             // 先登记再发事件，避免 UI 收到事件立刻 accept 时查不到这份 offer。
-            _events.tryEmit(TransferEvent.Offered(assembled))
+            _events.tryEmit(TransferEvent.Offered(offered))
             if (autoAccept) {
                 sendSimple(assembled.peerId, FileCtlOps.ACCEPT, assembled.transferId)
                 // 信道模式：登记后由路由器收字节（不发 pull）；否则走 legacy 拨号拉取。

@@ -63,6 +63,14 @@ data class FileCardUi(
      *
      * 不落盘：文件卡本身就不落盘（见 `MessageUi.toStorable`）。
      */
+    /**
+     * 本端是否**免确认接收**了这份文件（小图片等）。
+     *
+     * 由 core 的 TransferManager 判定、经 [TransferEvent.Offered] 带上来；界面据此
+     * **不画**「接收/拒绝」按钮 —— 它是"要不要用户点头"的单一权威，不是界面自己算的。
+     */
+    val autoAccepted: Boolean = false,
+
     val localPaths: List<String> = emptyList(),
     /**
      * 这条文件消息的**协议消息 id**（`file-ctl offer` 的 `msgId`），媒体撤回就是靠它匹配的。
