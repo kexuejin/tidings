@@ -57,6 +57,9 @@ kotlin {
     }
 
     sourceSets {
+        // luciola 发现引擎(JVM/Android;iOS 保留自研)。luciola 仓库 docs/MIGRATION-tidings.md 阶段一。
+        val jvmMain by getting { dependencies { implementation(libs.luciola) } }
+        val androidMain by getting { dependencies { implementation(libs.luciola) } }
         getByName("jvmSharedMain").dependencies {
             implementation(libs.kotlinx.coroutines.core)
             implementation(libs.ktor.network)
