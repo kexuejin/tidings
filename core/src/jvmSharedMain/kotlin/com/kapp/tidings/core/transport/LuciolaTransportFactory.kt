@@ -305,16 +305,37 @@ class LuciolaTransportFactory(
      * 只按 nodeId 查的话，第二种形态在 registry 里查不到 ⇒ 入站二进制帧全被丢。
      * 所以端点键形态要反查：按 ip/port 找 registry 里的对端。
      */
-    private fun endpointOfFingerprint(fingerprint: String, registry: PeerRegistry): PeerEndpoint? {
+    internal fun endpointOfFingerprint(fingerprint: String, registry: PeerRegistry): PeerEndpoint? {
         val deviceId = rustTrustStore.entries()
             .firstOrNull { it.fingerprint == fingerprint }
             ?.deviceId
-            ?: return null
-        registry.get(deviceId)?.let { return PeerEndpoint(it.ip, it.udpPort) }
-        val host = deviceId.substringBeforeLast(':', "")
-        val port = deviceId.substringAfterLast(':', "").toIntOrNull() ?: 0
-        if (host.isEmpty() || port == 0) return null
-        return registry.findByEndpoint(host, port)?.let { PeerEndpoint(it.ip, it.udpPort) }
+        if (deviceId != null) {
+            registry.get(deviceId)?.let { return PeerEndpoint(it.ip, it.udpPort) }
+            val host = deviceId.substringBeforeLast(':', "")
+            val port = deviceId.substringAfterLast(':', "").toIntOrNull() ?: 0
+            if (host.isNotEmpty() && port != 0) {
+                registry.findByEndpoint(host, port)?.let { return PeerEndpoint(it.ip, it.udpPort) }
+            }
+        }
+        // **兜底：本机的「地址 ↔ 公钥」配对表本身就是一份归属证据。**
+        //
+        // 扫码配对（[pairPeer]）把对端写进 [endpoints]，但 Rust 的 TrustStore 里那条
+        // 只有在**对端反向来配对**时才会出现。而 app 端只扫过码的场景很常见（手机只扫
+        // 桌面二维码）—— 那时会话能连上（信任判据查 endpoints），二进制帧却归属不到
+        // 对端（原先只查 TrustStore）⇒ 文件/画面字节被整条静默丢弃，
+        // 用户看到的是"对方说发了、我这边一直卡在接收中"。真机 50MB 验收踩过这一条。
+        endpoints.entries.forEach { (key, publicKey) ->
+            if (identityFingerprint(publicKey) != fingerprint) return@forEach
+            val host = key.substringBeforeLast(':', "")
+            val port = key.substringAfterLast(':', "").toIntOrNull() ?: 0
+            if (host.isEmpty() || port == 0) return@forEach
+            registry.findByEndpoint(host, port)?.let { return PeerEndpoint(it.ip, it.udpPort) }
+            // 端口可能对不上（扫码时印在码里的端口 vs 发现上报的端口）。指纹已经**唯一**
+            // 认定了这台设备，所以按地址兜底不会串台；精确端口仍然优先。
+            registry.values().firstOrNull { it.ip == host }
+                ?.let { return PeerEndpoint(it.ip, it.udpPort) }
+        }
+        return null
     }
 
     /**
@@ -324,8 +345,27 @@ class LuciolaTransportFactory(
      */
     private val reportedPins = ConcurrentHashMap.newKeySet<String>()
 
+    /**
+     * 测试入口：验证「同一台设备其他端口也能取到 pin」这条判据。
+     * 生产路径只经由 [createTransport] / [createScreenChannelHost] 进入。
+     */
+    internal fun pinForTest(host: String, port: Int): ByteArray? =
+        pinFor(host, port, PeerRegistry("pin-test"))
+
     private fun pinFor(host: String, port: Int, registry: PeerRegistry): ByteArray? {
         endpoints[endpointKey(host, port)]?.let { return it }
+        // **同一台设备的其他端口**：身份是那把公钥，不是端口。
+        // 配对写进表里的是**一条**端口的键（消息/文件那条），而画面信道在 udpPort+10、
+        // 跨网文件在 tlsPort+1 —— 只按 (host, port) 精确查会得到「未配对」⇒ 新数据面
+        // 在这台设备上永远拨不通（真机踩过：`pin lookup 192.168.2.22:17888 pinned=false`）。
+        // 只在**该 host 下所有条目公钥一致**时才采用：同一地址出现两个不同身份时
+        // 宁可拒绝（deny-by-default），也不猜。
+        val sameHost = endpoints.entries.filter { (key, _) -> key.substringBeforeLast(':', "") == host }
+        if (sameHost.isNotEmpty()) {
+            val first = sameHost.first().value
+            val unique = sameHost.all { it.value.contentEquals(first) }
+            if (unique) return first
+        }
         val record = registry.findByEndpoint(host, port)
         val pin = record?.let { rec ->
             rustTrustStore.entries().firstOrNull { it.deviceId == rec.profile.nodeId }?.publicKey

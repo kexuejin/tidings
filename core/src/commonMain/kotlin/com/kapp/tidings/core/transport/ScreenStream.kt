@@ -42,6 +42,57 @@ class ScreenWire(
     val close: () -> Unit,
 )
 
+
+/**
+ * 一段投屏会话的**可复核读数**（帧数 / 帧率 / 延迟 / 字节数），每 [WINDOW_MS] 打一行。
+ *
+ * 为什么要在生产代码里留这行日志：goal 第 (4) 步的判据是「真机连续 5 分钟帧率/延迟
+ * 不低于 legacy 的 90%」，而这两条通路上**没有任何别的可观测口径** —— 不打印，
+ * 判据就只能靠肉眼看画面流畅度。rx 侧的 latency 是「发 screen-next → 收齐这一帧」，
+ * 正是用户能感觉到的那个量；tx 侧是「采样 → 写完」。
+ */
+class ScreenStats(private val tag: String) {
+    private var frames = 0
+    private var bytes = 0L
+    private var windowStart = com.kapp.tidings.core.nowMillis()
+    private var windowFrames = 0
+    private var latSumMs = 0L
+    private var latMaxMs = 0L
+
+    fun onFrame(bytes: Long, latencyMs: Long) {
+        frames += 1
+        windowFrames += 1
+        this.bytes += bytes
+        latSumMs += latencyMs
+        if (latencyMs > latMaxMs) latMaxMs = latencyMs
+        val now = com.kapp.tidings.core.nowMillis()
+        val elapsed = now - windowStart
+        if (elapsed < WINDOW_MS) return
+        val secs = elapsed / 1000.0
+        println(
+            "[screen] " + tag + " frames=" + frames +
+                " fps=" + fmt(windowFrames / secs) +
+                " latAvg=" + fmt(latSumMs.toDouble() / windowFrames) + "ms" +
+                " latMax=" + latMaxMs + "ms" +
+                " bytes=" + bytes,
+        )
+        windowStart = now
+        windowFrames = 0
+        latSumMs = 0
+        latMaxMs = 0
+    }
+
+    private fun fmt(value: Double): String {
+        val scaled = (value * 100).toLong()
+        return (scaled / 100).toString() + "." + ((scaled % 100) + 100).toString().substring(1)
+    }
+
+    private companion object {
+        /** 真机 5 分钟验收：10s 一行既够密集，也不会把日志刷爆。 */
+        const val WINDOW_MS = 10_000L
+    }
+}
+
 /** 一次连接尝试：`open()` 返回 null = 这条路不通（调用方按序试下一条）。 */
 fun interface ScreenWireOpener {
     suspend fun open(): ScreenWire?
@@ -54,9 +105,17 @@ fun interface ScreenWireOpener {
  */
 fun plainScreenWireOpener(host: String, port: Int): ScreenWireOpener = ScreenWireOpener {
     val sm = SelectorManager(ioDispatcher)
-    val sock = withTimeoutOrNull(Limits.SCREEN_CONNECT_TIMEOUT_MS) {
-        aSocket(sm).tcp().connect(InetSocketAddress(host, port))
-    }
+    // **连不上必须返回 null，不能让异常穿出去。**
+    // 契约写在 [ScreenWireOpener]：null = 这条路不通、调用方按序试下一条。
+    // 而「这条不通」最常见的形态就是 ConnectException（对端没监听）——
+    // luciola 模式退掉 17879 之后，局域网对端的明文尝试**必然**是这一条；
+    // 让它抛出去，[ScreenReceiver] 的整个循环就断了，后续那条加密画面会话
+    // 根本没机会被尝试（用户看到的是「投屏连接失败」，而其实新通路是好的）。
+    val sock = runCatching {
+        withTimeoutOrNull(Limits.SCREEN_CONNECT_TIMEOUT_MS) {
+            aSocket(sm).tcp().connect(InetSocketAddress(host, port))
+        }
+    }.getOrNull()
     if (sock == null) {
         runCatching { sm.close() }
         return@ScreenWireOpener null
@@ -194,6 +253,9 @@ class ScreenSender(
     private var write: ByteWriteChannel? = writeChannel
     private var pumpJob: Job? = null
 
+    /** 发送侧读数（10s 一行，见 [ScreenStats]）。 */
+    private val stats = ScreenStats("tx")
+
     fun start() {
         creditedAt = com.kapp.tidings.core.nowMillis()
         // 只在调用方没给通道时才自己开 —— 已绑定的 socket 上再开必抛。
@@ -293,9 +355,17 @@ class ScreenSender(
         val encodedHeader = TcpFrames.encode(header)
         val wc = write
         if (wc != null) {
-            wc.writeFully(encodedHeader)
-            wc.writeFully(bytes)
+            // **一次写完，不拆两次 writeFully。**
+            // 明文 socket 上这是两次 write(2)（同一个报文段，几乎无代价）；但加密信道上
+            // 每次 writeFully 都是一个**独立的加密帧 + 一次 flush**，拆两次就是每帧多一次
+            // 往返的排队机会 —— 真机实测投屏 p50 因此多出 ~15-20ms。
+            // 拼一拼只是多一次 ≤ 数十字节的拷贝，换来的是每帧少一个信道帧。
+            val combined = ByteArray(encodedHeader.size + bytes.size)
+            encodedHeader.copyInto(combined, 0)
+            bytes.copyInto(combined, encodedHeader.size)
+            wc.writeFully(combined)
         }
+        stats.onFrame(bytes.size.toLong(), com.kapp.tidings.core.nowMillis() - lastSampleAt)
         busy = false
     }
 
@@ -344,6 +414,9 @@ class ScreenReceiver(
     private var minimized = false
     private var wire: ScreenWire? = null
     private var receiverJob: Job? = null
+
+    /** 接收侧读数（10s 一行，见 [ScreenStats]）。 */
+    private val stats = ScreenStats("rx")
 
     val targetFps: Int get() = if (minimized) 3 else rate.fps
 
@@ -408,10 +481,12 @@ class ScreenReceiver(
 
                     waiting = false
                     val now = com.kapp.tidings.core.nowMillis()
+                    val frameRttMs = now - sentAt
                     if (!minimized) {
-                        rate.observe(now - sentAt, now)
+                        rate.observe(frameRttMs, now)
                     }
                     onTarget(targetFps)
+                    stats.onFrame(frameHeader.len.toLong(), frameRttMs)
 
                     display(frameHeader.seq, rawJpeg, verifiedSize.width, verifiedSize.height)
                 }

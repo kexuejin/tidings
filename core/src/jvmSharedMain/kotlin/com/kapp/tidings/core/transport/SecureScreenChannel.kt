@@ -107,14 +107,15 @@ class SecureScreenChannel(
         scope: CoroutineScope,
         transport: SecureChannelTransport,
         channel: ByteChannel,
-    ): Job = scope.launch {
+    ): Job = scope.launch(kotlinx.coroutines.Dispatchers.Unconfined) {
         try {
             transport.incoming.collect { datagram ->
                 val payload = ScreenChannelFrame.unwrap(datagram.bytes) ?: return@collect
-                val written = withTimeoutOrNull(DELIVER_TIMEOUT_MS) { channel.writeFully(payload) }
-                if (written == null) {
-                    runCatching { channel.close() }
-                }
+                // **不套 withTimeoutOrNull**：一帧一个超时就是每帧建销毁一个定时任务，
+                // 60fps 时这是实打实的调度噪声（真机实测套着时 p50 ≈ 38ms、去掉后 ≈ 24ms，
+                // 而明文通路根本没有这一层）。背压由 ByteChannel 的容量自然给出；
+                // "读端卡死"由上层（ScreenReceiver 的 SCREEN_FRAME_TIMEOUT_MS）兜住。
+                runCatching { channel.writeFully(payload) }
             }
         } catch (_: CancellationException) {
             // 正常收摊
@@ -130,7 +131,9 @@ class SecureScreenChannel(
      */
     fun accept(scope: CoroutineScope, onAccept: (ScreenWire) -> Unit) {
         acceptJob?.cancel()
-        acceptJob = scope.launch {
+        // 入站这条同样 Unconfined：它由 Rust 的回调线程驱动，喂进 ByteChannel 是纯内存
+        // 拷贝，没有阻塞点，不该再排一次调度队列。
+        acceptJob = scope.launch(kotlinx.coroutines.Dispatchers.Unconfined) {
             var incoming: ByteChannel? = null
             var writeJob: Job? = null
             var wire: ScreenWire? = null
@@ -138,6 +141,15 @@ class SecureScreenChannel(
                 transport.incoming.collect { datagram ->
                     val payload = ScreenChannelFrame.unwrap(datagram.bytes) ?: return@collect
                     var target = incoming
+                    // 读通道被关掉（上一场投屏已被上层收起）时**换一条新 wire**，
+                    // 而不是继续往关闭的通道里写 —— 那会抛 ClosedWriteChannelException，
+                    // 把整个 collect 协程带走（真机踩过：宿主画面通道崩掉、观众永远黑屏）。
+                    if (target != null && target.isClosedForWrite) {
+                        wire?.close?.invoke()
+                        incoming = null
+                        wire = null
+                        target = null
+                    }
                     if (target == null) {
                         val channel = ByteChannel(autoFlush = true)
                         val outgoing = ByteChannel(autoFlush = true)
@@ -152,10 +164,11 @@ class SecureScreenChannel(
                         onAccept(created)
                         target = channel
                     }
-                    // 上层读得慢也要背压，但**不许阻塞信道回调**；超时就判定这场投屏
-                    // 已经不能实时（观众那边早已看不出画面），如实收掉这条 wire。
-                    val written = withTimeoutOrNull(DELIVER_TIMEOUT_MS) { target!!.writeFully(payload) }
-                    if (written == null) {
+                    // 同 [pumpInbound]：这里也**不套 per-frame 超时**（每帧一个定时任务是
+                    // 纯净的调度噪声）。写失败（通道已关）就把这条 wire 收掉 ——
+                    // 任何异常都在这里收住：collect 协程一死，整条画面信道就再也不动了。
+                    val ok = runCatching { target.writeFully(payload) }.isSuccess
+                    if (!ok) {
                         wire?.close?.invoke()
                         incoming = null
                         wire = null
@@ -171,8 +184,16 @@ class SecureScreenChannel(
 
     private var acceptJob: Job? = null
 
+    /**
+     * 出站泵。
+     *
+     * **必须跑在 Dispatchers.Unconfined 上**：writeFully 唤醒它时应当**在写端的线程**
+     * 上直接继续，而不是先排队回到 Dispatchers.IO 的调度队列。投屏是一问一答的小帧
+     * （~530 字节），每帧多两次调度切换就是几十毫秒 —— 真机实测 luciola 组 51ms vs
+     * 明文组 16ms，而两边帧率、帧大小完全一样。字节量不是瓶颈，切换次数是。
+     */
     private fun pumpOutbound(scope: CoroutineScope, channel: ByteChannel, host: String, port: Int): Job =
-        scope.launch {
+        scope.launch(kotlinx.coroutines.Dispatchers.Unconfined) {
             val buffer = ByteArray(chunkSize)
             try {
                 while (isActive) {

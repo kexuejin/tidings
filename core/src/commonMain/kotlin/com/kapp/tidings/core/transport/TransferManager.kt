@@ -617,7 +617,14 @@ class TransferManager(
             }
             sendSimple(offer.peerId, FileCtlOps.ACCEPT, transferId)
             // 信道模式：登记后由路由器收字节（不发 pull）；否则走 legacy 拨号拉取。
-            if (registerOnChannel(offer)) return@launch
+            val channelTook = registerOnChannel(offer)
+            // 一行可检索的归属日志：信道没接管时，用户看到的是"一直卡在接收中"，
+            // 而原因可能是"对端没声明 fch1"（回退 legacy）或"登记失败"（回退 legacy）。
+            println(
+                "[luciola] accept " + transferId.take(8) + " channel=" + channelTook +
+                    " files=" + offer.files.size + " peer=" + offer.peerId.take(8),
+            )
+            if (channelTook) return@launch
             pull(offer)
         }
     }
@@ -780,6 +787,11 @@ class TransferManager(
             // 信道模式：对方接下之后**我们推**字节（它不会再拨 17879/17881 来拉）。
             // 失败只记一条诊断，不把已经 accept 的传输判死 —— 用户重试 / 对端也会回 cancel。
             val push = pushFileOnChannel
+            println(
+                "[luciola] accept-in transfer=" + simple.transferId.take(8) +
+                    " known=" + (transfer != null) + " push=" + (push != null) +
+                    " files=" + (transfer?.files?.size ?: -1),
+            )
             if (transfer != null && push != null) {
                 runCatching { push(transfer.transferId, transfer.peerId, transfer.files) }
                     .onFailure { println("[luciola] push failed " + simple.transferId + ": " + it) }

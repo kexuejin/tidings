@@ -963,11 +963,21 @@ class NodeRuntime(
                 // 接管 = 登记到路由器且**不发 pull**；否则返回 false，走 legacy 拨号拉取。
                 registerChannelInbound = fileChannel?.let { router ->
                     register@ { offer, saveDir ->
+                        val peerCaps = registry.get(offer.peerId)?.profile?.caps
                         val allows = FileChannelNegotiation.canUseChannel(
                             selfCaps = selfProfile.caps,
-                            peerCaps = registry.get(offer.peerId)?.profile?.caps,
+                            peerCaps = peerCaps,
                         )
-                        if (!allows) return@register false
+                        if (!allows) {
+                            // 不接管 ⇒ 上层回退 legacy 拨号。这条必须留下原因：
+                            // "对端没声明 fch1" 与 "我自己没声明" 是两种完全不同的故障。
+                            println(
+                                "[luciola] channel inbound declined: selfFch1=" +
+                                    selfProfile.caps.contains(MsgTypes.CAP_FILE_CHANNEL) +
+                                    " peerCaps=" + peerCaps,
+                            )
+                            return@register false
+                        }
 
                         var registered = 0
                         for (file in offer.files) {
@@ -982,20 +992,34 @@ class NodeRuntime(
                             )
                             if (ok) registered++
                         }
+                        if (registered == 0) {
+                            println(
+                                "[luciola] channel inbound registered 0 files: transfer=" +
+                                    offer.transferId.take(8) + " files=" + offer.files.size,
+                            )
+                        }
                         registered > 0
                     }
                 },
                 // 出站：对端 accept 之后我们**推**。sha 由对端按长度校验（与 legacy 同一纪律）。
                 pushFileOnChannel = fileChannel?.let { router ->
                     push@ { transferId, peerId, files ->
+                        println(
+                            "[luciola] channel push start transfer=" + transferId.take(8) +
+                                " peer=" + peerId.take(8) + " files=" + files.size,
+                        )
                         for (file in files) {
-                            if (!router.sendFile(
-                                    peerId = peerId,
-                                    transferId = transferId,
-                                    fileId = file.fileId,
-                                    source = com.kapp.tidings.core.transport.DiskFileChunkSource(file.absPath),
-                                ).let { it >= file.size }
-                            ) {
+                            val pushed = router.sendFile(
+                                peerId = peerId,
+                                transferId = transferId,
+                                fileId = file.fileId,
+                                source = com.kapp.tidings.core.transport.DiskFileChunkSource(file.absPath),
+                            )
+                            println(
+                                "[luciola] channel push file=" + file.fileId.take(8) +
+                                    " sent=" + pushed + "/" + file.size,
+                            )
+                            if (pushed < file.size) {
                                 throw IllegalStateException("channel push incomplete for " + file.fileId)
                             }
                         }
