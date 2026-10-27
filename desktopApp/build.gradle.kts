@@ -254,6 +254,11 @@ compose.desktop {
     }
 }
 
+tasks.withType<Test>().configureEach {
+    // luciola(JNA/uniffi)在测试里加载本地库;与 :core 同一份临时路径(阶段接线期)。
+    systemProperty("jna.library.path", System.getProperty("jna.library.path") ?: "/workspace/RustBuild/cargo-target/debug")
+}
+
 // 不切 JUnit Platform：libs.kotlin.test 默认走 JUnit4，和 :composeApp / :agentNode 保持一致。
 // 写成 useJUnitPlatform() 而 classpath 上没有 kotlin-test-junit5，Gradle 会报「找不到引擎」。
 // 临时：打印运行时 classpath，便于脱离 Gradle 直接 java -cp 启动取证据

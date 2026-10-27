@@ -567,6 +567,8 @@ fun NodesScreen(
             tlsPin = network.selfTlsPin,
             // 带昵称：对方扫完立刻看见真名，而不是 node-a1b2c3d4。
             nick = state.settings.nick,
+            // 实验 luciola：开了才带这一段（与 pin 互斥，见 QrPairing）。
+            luciola = network.luciolaQr,
         )
     }
 }

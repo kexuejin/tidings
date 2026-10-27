@@ -24,29 +24,31 @@ import kotlinx.serialization.json.Json
  */
 class LuciolaDiscoveryEngine(
     private val registry: PeerRegistry,
-    selfProfile: () -> Profile,
-    udpPort: Int,
+    private val selfProfile: () -> Profile,
+    private val udpPort: Int,
 ) : DiscoveryEngine {
 
     private val json = Json { encodeDefaults = false; ignoreUnknownKeys = true }
-    private val self = selfProfile()
+
+    // 档案在 **start() 那一刻**取：tlsPin / 地址是运行时才知道的，构造时快照会把它们冻住。
+    private var adapter: UniffiEngineAdapter? = null
 
     // luciola nodeId -> Tidings nodeId(lost 事件只带 luciola 侧 id)
     private val idMap = HashMap<String, String>()
     private val idMapLock = Any()
-
-    private val adapter = UniffiEngineAdapter(
-        sessionName = self.nick,
-        discoveryPort = udpPort.toUShort(),
-        product = "tidings",
-        extra = json.encodeToString(Profile.serializer(), self),
-    )
 
     private var started = false
 
     override fun start(scope: CoroutineScope) {
         if (started) return
         started = true
+        val self = selfProfile()
+        val adapter = UniffiEngineAdapter(
+            sessionName = self.nick,
+            discoveryPort = udpPort.toUShort(),
+            product = "tidings",
+            extra = json.encodeToString(Profile.serializer(), self),
+        ).also { this.adapter = it }
         adapter.start { event ->
             when (event) {
                 is DiscoveryEventUi.Found -> applyPeer(event.peer)
@@ -59,7 +61,8 @@ class LuciolaDiscoveryEngine(
 
     override fun stop() {
         started = false
-        adapter.stop() // Rust 侧广播 exit 后收尾。
+        adapter?.stop() // Rust 侧广播 exit 后收尾。
+        adapter = null
     }
 
     override suspend fun announce() {
@@ -67,11 +70,11 @@ class LuciolaDiscoveryEngine(
     }
 
     override suspend fun announceTo(host: String, port: Int) {
-        adapter.dial(host, port.toUShort())
+        adapter?.dial(host, port.toUShort())
     }
 
     override suspend fun announceExit() {
-        adapter.stop()
+        adapter?.stop()
     }
 
     private fun applyPeer(peer: PeerUiModel) {

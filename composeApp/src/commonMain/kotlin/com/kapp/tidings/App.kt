@@ -612,6 +612,8 @@ fun RelayApp(
                             onBack = { settingsPage = null },
                             persistMessagesEnabled = controller.persistMessages,
                             onPersistMessagesEnabledChange = controller::updatePersistMessages,
+                            experimentalLuciolaEnabled = state.settings.experimentalLuciola,
+                            onExperimentalLuciolaChange = controller::updateExperimentalLuciola,
                             // 「跨网通道」开关已移除（长连接恒开）。用户的心智是"哪张网都能
                             // 无感连上"，不是"我要不要开一条长连接"；而关掉它反而是不拨号。
                             onClearHistory = controller::clearAllMessages,
@@ -1166,6 +1168,8 @@ fun RelayApp(
                         nodeId = state.selfNodeId,
                         // task-86：直通码也必须带 pin，否则手机建不出公网 TLS 目标。
                         tlsPin = state.network.selfTlsPin,
+                        // 实验 luciola：直通码也带同一段（与 pin 互斥）。
+                        luciola = state.network.luciolaQr,
                         // 带昵称：扫完立刻是真名，不是 node-a1b2c3d4。
                         nick = state.settings.nick,
                         onDismiss = { showWsQrFor = null },

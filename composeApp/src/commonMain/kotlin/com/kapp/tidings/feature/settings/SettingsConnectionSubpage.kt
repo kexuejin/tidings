@@ -284,6 +284,8 @@ fun SettingsConnectionSubpage(
                     tlsPin = state.network.selfTlsPin,
                     // 带昵称：对方扫完立刻看见真名，而不是 node-a1b2c3d4。
                     nick = state.settings.nick,
+                    // 实验 luciola：开了才带这一段（与 pin 互斥，见 QrPairing）。
+                    luciola = state.network.luciolaQr,
                 )
                 // 编码器对超长内容抛异常（它拒绝截断）；这里既不能让它把整屏打崩，
                 // 也绝不画一张「能扫、但内容是错的」码 —— 三种情况各自说清。

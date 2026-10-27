@@ -56,7 +56,7 @@ data class ReceivedDatagram(
 class UdpTransport(
     private val port: Int,
     private val bindHost: String = "0.0.0.0",
-) {
+) : DatagramTransport {
     /**
      * selector / scope 都在 [start] 里创建、在 [stop] 里销毁 —— **不再是一次性的**。
      *
@@ -73,15 +73,15 @@ class UdpTransport(
     private val _incoming = MutableSharedFlow<ReceivedDatagram>(extraBufferCapacity = 256)
 
     /** 入站报文流。必须在 [start] 之前订阅，否则早期报文会被丢进 extraBufferCapacity。 */
-    val incoming: SharedFlow<ReceivedDatagram> = _incoming
+    override val incoming: SharedFlow<ReceivedDatagram> = _incoming
 
     /** 实际绑定的端口（传 0 时由系统分配，测试用）。 */
-    var boundPort: Int = port
+    override var boundPort: Int = port
         private set
 
     val isRunning: Boolean get() = socket != null
 
-    suspend fun start() {
+    override suspend fun start() {
         if (socket != null) return
         // broadcast = true 不是优化，是**必需**的：受限广播（255.255.255.255）在
         // SO_BROADCAST 没打开时会被内核直接拒收，JVM 的 DatagramChannel 抛
@@ -118,7 +118,7 @@ class UdpTransport(
      *   调用方据此自愈 —— 从前这里是 `error(...)`/抛异常，被发送侧的 `runCatching`
      *   吞掉之后，一台设备的发现泵可以静默地彻底停摆（task-29 真机现场）。
      */
-    suspend fun send(bytes: ByteArray, host: String, port: Int): Boolean {
+    override suspend fun send(bytes: ByteArray, host: String, port: Int): Boolean {
         val s = socket ?: return false
         // 地址族守卫：v4 绑定的 socket 发 v6 目标（或反过来），Ktor 的错误**异步**落在
         // 通道上——本次 send 仍返回 true，错误在下一次 send 才炸出来。多端点序列
@@ -162,7 +162,7 @@ class UdpTransport(
     var lastSendError: String? = null
         private set
 
-    fun stop() {
+    override fun stop() {
         pump?.cancel()
         pump = null
         runCatching { socket?.close() }
@@ -180,7 +180,7 @@ class UdpTransport(
      * 所以它不会打断一条健康的连接（入站报文流 [incoming] 是外部持有的 SharedFlow，
      * 重建期间照旧收）。
      */
-    suspend fun restart() {
+    override suspend fun restart() {
         stop()
         start()
     }

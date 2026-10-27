@@ -24,6 +24,7 @@ import io.ktor.utils.io.ByteReadChannel
 import io.ktor.utils.io.ByteWriteChannel
 import com.kapp.tidings.core.transport.DIRECTION_IN
 import com.kapp.tidings.core.transport.DedupStore
+import com.kapp.tidings.core.transport.DatagramTransport
 import com.kapp.tidings.core.transport.Discovery
 import com.kapp.tidings.core.transport.DiscoveryEngine
 import com.kapp.tidings.core.transport.SYNTHETIC_NICK_PREFIX
@@ -154,12 +155,29 @@ class NodeRuntime(
      */
     private val knownPeerStore: KnownPeerStore? = null,
     /**
+     * 阶段三(合并切):提供时 Messenger 的传输面换成它(认证加密信道)且
+     * legacy Discovery 不启动——发现由 extraDiscovery(luciola)承担。
+     * 不提供 = 完全 legacy(iOS / 未迁移宿主)。
+     *
+     * 是**工厂而不是实例**:luciola 的入站帧要按 `from` 查到对端地址才递得进
+     * Messenger,而 registry 由本类自己创建(见 [registry])。宿主传
+     * `{ registry -> factory.createTransport(registry) }`。
+     */
+    private val messengerTransportFactory: ((PeerRegistry) -> DatagramTransport)? = null,
+    /**
      * 额外发现引擎(阶段二 B-3:luciola 桥接)。与主 Discovery 并存:
      * registry 按 nodeId 去重;luciola 补 IPv6 多播/防 TUN 的发现覆盖,
      * legacy 继续承载 msg 帧(阶段三切 SecureChannel 后移除)。
      * 仅 JVM/Android 宿主传入 LuciolaDiscoveryEngine;iOS 传 null(legacy)。
      */
     private val extraDiscovery: DiscoveryEngine? = null,
+    /**
+     * 额外发现引擎的**工厂**版本（与 [extraDiscovery] 二选一,工厂优先）。
+     *
+     * 为什么需要:luciola 的发现把 found/updated/lost 直接写进 [registry],而 registry
+     * 是本类自己创建的 —— 宿主拿不到实例,只能拿工厂（同 [messengerTransportFactory]）。
+     */
+    private val extraDiscoveryFactory: ((PeerRegistry) -> DiscoveryEngine)? = null,
     /**
      * 长连接的连接层（K2 的接缝）。K1 默认明文 [PlaintextLinkTransport]；K2 换成
      * TLS + 双向 pin 的实现即可，本类一行不用改。
@@ -240,8 +258,17 @@ class NodeRuntime(
         { _, _ -> false },
 ) {
 
-    private val transport = UdpTransport(udpPort, bindHost)
+    // registry 必须先于 transport:luciola 工厂需要它来解析入站帧的对端地址。
     private val registry = PeerRegistry(profile.nodeId)
+
+    // legacy UDP 传输。luciola 模式(messengerTransportFactory != null)下
+    // legacy Discovery 不启动,所以 UdpTransport 只在 factory 为空时创建。
+    private val transport: DatagramTransport =
+        messengerTransportFactory?.invoke(registry) ?: UdpTransport(udpPort, bindHost)
+
+    // 额外发现:实例优先,其次工厂(两者都空 = 纯 legacy)。
+    private val resolvedExtraDiscovery: DiscoveryEngine? =
+        extraDiscovery ?: extraDiscoveryFactory?.invoke(registry)
     private val tcp: TcpFramedChannel? = if (enableTcp) TcpFramedChannel() else null
 
     /**
@@ -296,7 +323,8 @@ class NodeRuntime(
             addresses = advertisedAddresses().takeIf { it.isNotEmpty() } ?: profile.addresses,
         )
 
-    private val discovery: DiscoveryEngine = Discovery(
+    private val legacyDiscoveryEnabled = messengerTransportFactory == null
+    private val discovery: DiscoveryEngine = if (legacyDiscoveryEnabled) Discovery(
         transport,
         registry,
         // task-38：把自己的 TLS pin 随资料带出去（旧端忽略未知键 ⇒ 兼容）。
@@ -311,7 +339,15 @@ class NodeRuntime(
         // 不再依赖 TOFU 的首次固定 —— 那个有"攻击者抢先声明 nodeId"的首次使用竞态。
         onPeerPin = { nodeId, pin -> setPeerPin(nodeId, pin, PeerRegistry.PIN_SOURCE_PAIRING) },
         subnetBroadcasts = subnetBroadcasts,
-    )
+    ) else object : DiscoveryEngine {
+        // luciola 模式:发现由 extraDiscovery(luciola)承担,这里给一个哑实现
+        // 兜底——所有动作都是 no-op(NodeRuntime 的其余代码仍会调它们)。
+        override fun start(scope: CoroutineScope) {}
+        override fun stop() {}
+        override suspend fun announce() {}
+        override suspend fun announceTo(host: String, port: Int) {}
+        override suspend fun announceExit() {}
+    }
     internal val messenger = Messenger(
         transport = transport,
         registry = registry,
@@ -371,6 +407,12 @@ class NodeRuntime(
 
     /** 实际绑定的 UDP 端口。`udpPort` 传 0 时在 [start] 之后才有效。 */
     val boundPort: Int get() = transport.boundPort
+
+    /**
+     * 扫码后向对端发配对自证(luciola)。false = 本节点没跑加密信道/该对端码里没有密钥。
+     */
+    suspend fun requestLuciolaPairing(host: String, port: Int, peerNodeId: String): Boolean =
+        transport.requestPairing(host, port, peerNodeId)
 
     /**
      * 实际绑定的 **TCP** 端口（文件传输与可靠投递），[start] 之前为 null。
@@ -660,7 +702,7 @@ class NodeRuntime(
             registry.setPin(nodeId, pin, pinSources[nodeId] ?: PeerRegistry.PIN_SOURCE_UNKNOWN)
         }
         discovery.start(runScope)
-        extraDiscovery?.start(runScope)
+        resolvedExtraDiscovery?.start(runScope)
         messenger.start(runScope)
 
         // 长连接（K1）：主机侧接受、发起侧按开关连出去；同一个运行时两个角色都在。
@@ -918,7 +960,7 @@ class NodeRuntime(
         runCatching { crossNetworkScreenListener.stop() }
         tcpBound = false
         discovery.stop()
-        extraDiscovery?.stop()
+        resolvedExtraDiscovery?.stop()
         messenger.stop()
         transport.stop()
         tcp?.close()
@@ -1061,7 +1103,7 @@ class NodeRuntime(
     /** 主动握手：向广播地址或所有手动节点单播 `entry`。 */
     suspend fun announce() {
         discovery.announce()
-        extraDiscovery?.announce()
+        resolvedExtraDiscovery?.announce()
     }
 
     /**
@@ -1101,7 +1143,7 @@ class NodeRuntime(
      */
     suspend fun announceExit() {
         discovery.announceExit()
-        extraDiscovery?.announceExit()
+        resolvedExtraDiscovery?.announceExit()
     }
 
     suspend fun sendText(peerId: String, text: String) = outbound.sendText(peerId, text)

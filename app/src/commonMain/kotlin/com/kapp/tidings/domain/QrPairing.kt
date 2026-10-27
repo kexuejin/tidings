@@ -30,6 +30,52 @@ data class PeerCandidate(
 )
 
 /**
+ * 二维码里的 luciola 段（`l` 键）:对端 Ed25519 公钥 + 配对证明。
+ *
+ * 端口不单列:luciola 的加密信道 TCP 监听端口**复用发现 UDP 端口**(同号不同协议),
+ * 就是二维码里那条候选自带的 port。主机想在别的端口监听,就得先回来改这个格式。
+ *
+ * `secret` = 主机生成的随机配对密钥(128 位)。它只在二维码里出现,证明扫码方**真的
+ * 看过这张码**;配对帧里带上它,主机才放行(见 core 的 `PairingAdmission`)。
+ */
+public data class LuciolaQrInfo(
+    val publicKey: String,
+    val secret: String,
+) {
+    public companion object {
+        /** 公钥 32 字节、secret 16 字节;长度不对返回 null（宁可不写,不写坏码）。 */
+        public fun of(publicKey: ByteArray, secret: ByteArray): LuciolaQrInfo? {
+            if (publicKey.size != ED25519_PUBLIC_KEY_SIZE) return null
+            if (secret.size != PAIR_SECRET_BYTES) return null
+            return LuciolaQrInfo(base64UrlEncode(publicKey), base64UrlEncode(secret))
+        }
+
+        internal const val ED25519_PUBLIC_KEY_SIZE = 32
+        internal const val PAIR_SECRET_BYTES = 16
+    }
+}
+
+/** 编成线上的 `"<公钥 b64url>:<配对密钥 b64url>"`;非法长度返回 null（宁可不写）。 */
+internal fun encodeLuciolaQrInfo(info: LuciolaQrInfo): String? {
+    val publicKey = base64UrlDecode(info.publicKey) ?: return null
+    val secret = base64UrlDecode(info.secret) ?: return null
+    if (publicKey.size != LuciolaQrInfo.ED25519_PUBLIC_KEY_SIZE) return null
+    if (secret.size != LuciolaQrInfo.PAIR_SECRET_BYTES) return null
+    return info.publicKey + ":" + info.secret
+}
+
+/** [encodeLuciolaQrInfo] 的逆;任何一段解不出来就返回 null（只丢这一段,不废整张码）。 */
+internal fun decodeLuciolaQrInfo(raw: String): LuciolaQrInfo? {
+    val parts = raw.split(':')
+    if (parts.size != 2) return null
+    val publicKey = base64UrlDecode(parts[0]) ?: return null
+    val secret = base64UrlDecode(parts[1]) ?: return null
+    if (publicKey.size != LuciolaQrInfo.ED25519_PUBLIC_KEY_SIZE) return null
+    if (secret.size != LuciolaQrInfo.PAIR_SECRET_BYTES) return null
+    return LuciolaQrInfo(base64UrlEncode(publicKey), base64UrlEncode(secret))
+}
+
+/**
  * 候选地址的类型标签 —— **两端共用这一份**。
  *
  * 曾经桌面端写 "lan"/"ipv6"、手机端找 "lan_v4"/"public_v6"，两边对不上 ⇒ 手机永远落到
@@ -188,10 +234,13 @@ public fun pairingQrPayloadFor(
      * 预算同样要算（[qrCandidatesFor] 会把它算进去）。
      */
     nick: String? = null,
+    /** luciola 段（可选）:开了实验信道的主机把它放进同一个码,老端忽略。 */
+    luciola: LuciolaQrInfo? = null,
 ): String? {
     if (nodeId.isNotBlank() && addresses.isNotEmpty()) {
-        qrPairingPayloadForAddresses(nodeId, addresses, port, tlsPin = tlsPin, nick = nick)
-            ?.let { return it }
+        qrPairingPayloadForAddresses(
+            nodeId, addresses, port, tlsPin = tlsPin, nick = nick, luciola = luciola,
+        )?.let { return it }
     }
     return host?.takeIf { it.isNotBlank() }?.let { pairingPayload(it, port) }
 }
@@ -290,10 +339,12 @@ public fun pairingPayloadForAddresses(
     addresses: List<String>,
     port: Int,
     tlsPin: String? = null,
+    /** luciola 段（可选）:同一个码双栈,老端忽略。 */
+    luciola: LuciolaQrInfo? = null,
 ): String? {
     val candidates = peerCandidatesFrom(addresses, port)
     if (candidates.isEmpty()) return null
-    return multiCandidatePairingPayload(nodeId, nick, tlsPin, candidates)
+    return multiCandidatePairingPayload(nodeId, nick, tlsPin, candidates, luciola = luciola)
 }
 
 
@@ -348,12 +399,16 @@ public fun qrCandidatesFor(
      * **唯一**能主动交代"我是谁"的通道，昵称 15–25 字节就能省掉这段困惑。
      */
     nick: String? = null,
+    /** 将要写进载荷的 luciola 段;预算必须把它算进去(同 [tlsPin] / [nick] 的纪律)。 */
+    luciola: LuciolaQrInfo? = null,
 ): List<PeerCandidate> {
     val ranked = roundRobinByType(collapseSamePrefix(peerCandidatesFrom(addresses, port)))
     val out = mutableListOf<PeerCandidate>()
     for (c in ranked) {
         val trial = out + c
-        val trialLen = multiCandidatePairingPayload(nodeId, nick = nick, tlsPin = tlsPin, candidates = trial).length
+        val trialLen = multiCandidatePairingPayload(
+            nodeId, nick = nick, tlsPin = tlsPin, candidates = trial, luciola = luciola,
+        ).length
         if (trialLen > budgetBytes) continue
         out += c
     }
@@ -378,13 +433,18 @@ public fun qrPairingPayloadForAddresses(
     budgetBytes: Int = QR_PAYLOAD_MAX_BYTES,
     tlsPin: String? = null,
     nick: String? = null,
+    luciola: LuciolaQrInfo? = null,
 ): String? {
-    val candidates = qrCandidatesFor(addresses, port, nodeId, budgetBytes, tlsPin = tlsPin, nick = nick)
+    val candidates = qrCandidatesFor(
+        addresses, port, nodeId, budgetBytes, tlsPin = tlsPin, nick = nick, luciola = luciola,
+    )
     if (candidates.isEmpty()) return null
     // tlsPin **必须带**（task-86 真机）：公网长连接的拨号目标要求 `pin != null`（fail-closed），
     // 二维码是主机→手机单向的 ⇒ 不在这里交出主机 pin，手机就永远建不出公网目标，
     // 只剩局域网明文那条 ⇒ 手机在蜂窝上一直 connect-timeout（真机 9 次全砸在 192.168.x）。
-    return multiCandidatePairingPayload(nodeId, nick = nick, tlsPin = tlsPin, candidates = candidates)
+    return multiCandidatePairingPayload(
+        nodeId, nick = nick, tlsPin = tlsPin, candidates = candidates, luciola = luciola,
+    )
 }
 
 /**
@@ -472,6 +532,8 @@ sealed interface ParsedQr {
         val candidates: List<PeerCandidate> = emptyList(),
         val nodeId: String? = null,
         val nick: String? = null,
+        /** 同一个码里的 luciola 配对信息;老端/未开启时是 null。 */
+        val luciola: LuciolaQrInfo? = null,
     ) : ParsedQr
 
     data class RemoteRelay(
@@ -552,6 +614,9 @@ internal fun parseQr(content: String, myAddresses: List<String> = emptyList()): 
                         ?.jsonPrimitive?.contentOrNull?.trim()?.ifEmpty { null }
                     val nodeId = nodeIdRaw?.let { if (isCompact) decodeNodeId(it) else it }
                     val nick = (json["k"] ?: json["nick"])?.jsonPrimitive?.contentOrNull?.trim()?.ifEmpty { null }
+                    // luciola 段是**可选**的:解析失败只丢这一段,整张码照旧可用
+                    // （老主机不会发它;发坏了也不该让用户看到"二维码内容不认识"）。
+                    val luciola = json["l"]?.jsonPrimitive?.contentOrNull?.let { decodeLuciolaQrInfo(it) }
                     val best = choosePeerCandidate(candidates, myAddresses) ?: candidates.first()
                     return ParsedQr.LanPeer(
                         host = best.host,
@@ -560,6 +625,7 @@ internal fun parseQr(content: String, myAddresses: List<String> = emptyList()): 
                         candidates = candidates,
                         nodeId = nodeId,
                         nick = nick,
+                        luciola = luciola,
                     )
                 }
             }
@@ -704,6 +770,11 @@ public fun multiCandidatePairingPayload(
     nick: String? = null,
     tlsPin: String? = null,
     candidates: List<PeerCandidate>,
+    /**
+     * luciola 配对段（可选）。**同一个码走双栈**：老端忽略这个未知键，
+     * 新端读到它就能在同一个二维码里拿到 Ed25519 公钥与配对密钥。
+     */
+    luciola: LuciolaQrInfo? = null,
 ): String {
     val usable = candidates.mapNotNull { c ->
         val host = IpAddressUtils.unbracket(c.host).trim()
@@ -725,8 +796,20 @@ public fun multiCandidatePairingPayload(
         // 宁可多 14 字节也不能把一个合法身份压坏。
         put("n", encodeNodeId(nodeId))
         if (!nick.isNullOrBlank()) put("k", nick)
-        // pin：64 位 hex -> 32 字节 base64url（43 字符），去掉 sha256: 前缀与 hex 两重开销。
-        tlsPin?.let { encodePin(it) }?.let { put("p", it) }
+        // pin 与 luciola 段**互斥**（预算 153 字节，装不下两者）：
+        //  - 没开 luciola ⇒ 照旧写 pin（legacy K2 公网长连接的信任根）；
+        //  - 开了 luciola ⇒ 写 l、不写 p：这个节点不跑 K2 明文/TLS 通道，pin 在这条
+        //    链路上没有任何用途；而手机拿到的 pk + secret 才是新信道的信任根。
+        // 老端扫到没有 p 的码仍能按地址连（局域网），只是建不出公网 K2 目标 —— 这在
+        // 「开了实验 luciola 信道」的节点上本来就是预期（它已不跑 legacy 发现）。
+        if (luciola == null) {
+            // pin：64 位 hex -> 32 字节 base64url（43 字符），去掉 sha256: 前缀与 hex 两重开销。
+            tlsPin?.let { encodePin(it) }?.let { put("p", it) }
+        } else {
+            // luciola 段："<公钥 b64url>:<配对密钥 b64url>"。端口不写（= 候选自带的端口，
+            // 同号不同协议）；写坏就不写 —— 一张能扫的旧码好过一张新端也读不出的坏码。
+            encodeLuciolaQrInfo(luciola)?.let { put("l", it) }
+        }
         if (implicitPort != null) put("o", implicitPort)
         put("a", buildJsonArray {
             for (c in usable) {

@@ -68,7 +68,7 @@ interface TcpFallback {
  *   以"延迟失败"的形式暴露。
  */
 class Messenger(
-    private val transport: UdpTransport,
+    private val transport: DatagramTransport,
     private val registry: PeerRegistry,
     private val selfNodeId: String,
     private val queueStore: QueueStore,

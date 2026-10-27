@@ -59,7 +59,7 @@ data class ManualPeer(val host: String, val udpPort: Int)
  * 接收广播在省电模式下会被过滤 —— 这条留待 mDNS 自动发现 P4 落地时一并验证）。
  */
 class Discovery(
-    private val transport: UdpTransport,
+    private val transport: DatagramTransport,
     private val registry: PeerRegistry,
     /**
      * 本节点身份。是函数不是值：`NodeRuntime.start()` 会在绑定失败后**改写**自己对外

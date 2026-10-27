@@ -89,6 +89,8 @@ public fun DesktopStatusBar(
         port = selfPort,
         // task-86：复制链接这条路也要带 pin —— 公网目标要求 pin != null（fail-closed）。
         tlsPin = state.network.selfTlsPin,
+        // 实验 luciola：同一个载荷里带公钥/配对密钥（与 pin 互斥，见 QrPairing）。
+        luciola = state.network.luciolaQr,
     )
     Surface(color = MaterialTheme.colorScheme.surfaceContainer, tonalElevation = RelayElevations.Card) {
         Row(

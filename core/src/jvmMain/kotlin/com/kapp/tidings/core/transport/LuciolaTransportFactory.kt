@@ -2,70 +2,301 @@
 package com.kapp.tidings.core.transport
 
 import com.kapp.tidings.core.protocol.Profile
+import kotlinx.serialization.Serializable
+import kotlinx.serialization.json.Json
 import uniffi.luciola_uniffi.TrustStore as RustTrustStore
 import uniffi.luciola_uniffi.TrustedDeviceInfo
 import uniffi.luciola_uniffi.TrustLevel
-import uniffi.luciola_uniffi.generateDeviceIdentity
+import uniffi.luciola_uniffi.identityFingerprint
 import uniffi.luciola_uniffi.identityFromSeed
+import java.security.SecureRandom
+import java.util.Base64
+import java.util.concurrent.ConcurrentHashMap
 
 /**
- * 阶段三收尾:luciola 全栈装配工厂(发现 + 信道 + 信任)。
+ * 工厂状态的落盘位置(宿主提供:桌面受限文件 / Android Keystore 包装的
+ * SharedPreferences / 测试内存)。**只存一个字符串** —— 内部是本文件的 JSON 封套。
+ */
+interface SecureStateStore {
+    fun load(): String?
+    fun save(value: String)
+}
+
+/** 默认内存实现(进程重启即丢,只用于测试/预览)。 */
+class InMemorySecureStateStore(initial: String? = null) : SecureStateStore {
+    @Volatile
+    private var value: String? = initial
+    override fun load(): String? = value
+    override fun save(value: String) {
+        this.value = value
+    }
+}
+
+@Serializable
+private data class FactoryStateJson(
+    /** luciola TrustStore 自己的 JSON(含 deviceId/name/pk/fingerprint/level/pinnedAt)。 */
+    val trust: String? = null,
+    /** "host:port" → base64 Ed25519 public key:外拨 pin 的查找表。 */
+    val endpoints: Map<String, String> = emptyMap(),
+    /** 只有指纹、没有公钥的信任项(监听侧 TOFU 配对用)。 */
+    val trustedFingerprints: List<String> = emptyList(),
+    /** 二维码里带出去的配对密钥(128 位随机数,base64);见 [PairingAdmission]。 */
+    val pairSecret: String? = null,
+    /** 发起侧:扫描到的对端 "host:port" → 它二维码里的 secret(base64)。 */
+    val pairingSecrets: Map<String, String> = emptyMap(),
+)
+
+/**
+ * 阶段三:luciola 全栈装配工厂(发现 + 信道 + 信任)。
  *
  * 用法(JVM 宿主):
  * ```kotlin
- * val factory = LuciolaTransportFactory(profile, udpPort, pinStore, seedFile)
- * NodeRuntime(
+ * val factory = LuciolaTransportFactory(profile, udpPort, stateStore = fileStore)
+ * val runtime = NodeRuntime(
  *     profile = profile,
- *     extraDiscovery = factory.createDiscovery(registry),
- *     // 阶段四切传呼时:transport = factory.createTransport()
+ *     extraDiscovery = factory.createDiscovery(...),
+ *     messengerTransportFactory = { registry -> factory.createTransport(registry) },
  * )
+ * // 扫码(luciola://pair v2)拿到 host / port / host 公钥之后:
+ * factory.pairPeer(host, port, hostPublicKey)
  * ```
  *
- * 信任迁移策略:存量 PeerPins 是 P-256 SPKI;luciola 身份是 Ed25519——
- * **无自动转换**。新配对走 luciola QR(重扫码);过渡期两套并存。
+ * ## 信任模型(为什么两个表)
+ *
+ * - **endpoints**:配对时拿到的是「地址 + Ed25519 公钥」,没有 nodeId。外拨必须按
+ *   (host, port) 找到 pin —— 这张表就是查找键,**落盘**,重启后照旧生效。
+ * - **TrustStore**:luciola 的分级信任(Full/Partial)与指纹账本;入站信道按指纹
+ *   验信任。它按公钥去重,所以同一个对端换地址不会多出一条。
+ *
+ * 存量 PeerPins 是 P-256 SPKI;luciola 身份是 Ed25519 —— **无自动转换**。
+ * 新配对走 luciola QR(重扫码);过渡期两套并存。
  */
 class LuciolaTransportFactory(
     private val profile: Profile,
-    private val udpPort: Int = 17878,
+    /** 发现 UDP 端口;同时也是加密信道的 TCP 监听端口(同号不同协议)。 */
+    private val udpPort: Int = DEFAULT_DISCOVERY_PORT,
     private val legacyPinStore: PeerPinStore? = null,
     /**
      * Ed25519 seed 的持久化回调(32 字节 hex)——存 Keychain / Keystore /
      * 受限文件。首次调用返回 null 会生成新身份并存回。
      */
     private val seedPersist: (String?) -> String,
+    private val stateStore: SecureStateStore = InMemorySecureStateStore(),
 ) {
-    private val identity: uniffi.luciola_uniffi.DeviceIdentityInfo =
-        identityFromSeed(seedPersist(null).chunked(2).map { it.toInt(16).toByte() }.toByteArray())
+    private val json = Json { ignoreUnknownKeys = true; encodeDefaults = false }
 
+    val identity = identityFromSeed(seedHexToBytes(seedPersist(null)))
+
+    val publicKey: ByteArray get() = identity.publicKey
     val fingerprint: String get() = identity.fingerprint
     val shortPin: String get() = identity.shortPin
 
-    private val rustTrustStore = RustTrustStore(null) // JSON 恢复见阶段四落盘
+    @Volatile
+    private var state: FactoryStateJson = loadState()
 
-    /** 信任一个设备(配对确认后调用)。 */
+    private val rustTrustStore = RustTrustStore(state.trust)
+
+    /** "host:port" → public key;配对后立即生效,重启从 stateStore 恢复。 */
+    private val endpoints = ConcurrentHashMap<String, ByteArray>().apply {
+        state.endpoints.forEach { (key, b64) ->
+            runCatching { put(key, Base64.getDecoder().decode(b64)) }
+        }
+    }
+
+    /** "host:port" → 扫到的对端配对密钥(发起侧用);缺 = 这个对端没扫过码。 */
+    private val pairingSecrets = ConcurrentHashMap<String, ByteArray>().apply {
+        state.pairingSecrets.forEach { (key, b64) ->
+            runCatching { put(key, Base64.getDecoder().decode(b64)) }
+        }
+    }
+
+    /** 仅指纹的信任(监听侧 TOFU);与 [endpoints] 一起决定入站放行。 */
+    private val trustedFingerprints =
+        ConcurrentHashMap.newKeySet<String>().apply { addAll(state.trustedFingerprints) }
+
+    /**
+     * 配对密钥:128 位随机数,随二维码出去(不进发现广播)。首次生成后落盘,
+     * 使二维码在重启后仍然有效;想强制所有已扫码设备重新配对 = 换一个 secret。
+     */
+    private val pairSecret: ByteArray = state.pairSecret
+        ?.let { runCatching { Base64.getDecoder().decode(it) }.getOrNull() }
+        ?.takeIf { it.size >= MIN_PAIR_SECRET_BYTES }
+        ?: ByteArray(DEFAULT_PAIR_SECRET_BYTES).also { SecureRandom().nextBytes(it) }
+
+    init {
+        if (state.pairSecret == null) persist()
+    }
+
+    /** 二维码/luciola 配对页要展示的 secret(base64)。 */
+    fun pairSecretBase64(): String = Base64.getEncoder().encodeToString(pairSecret)
+
+    /** 原始 secret(16 字节) —— 二维码构造器要字节形态。返回副本,调用方改不到内部状态。 */
+    fun pairSecretBytes(): ByteArray = pairSecret.copyOf()
+
+    /**
+     * 主机的配对准入实现:三关(公钥指纹绑定会话、secret、落信任)由
+     * [SecureChannelTransport] 校验,这里只提供期望的 secret 与落盘动作。
+     */
+    fun pairingAdmission(): PairingAdmission = object : PairingAdmission {
+        override fun expectedPairSecret(): ByteArray = pairSecret
+
+        override fun onPaired(nodeId: String, publicKey: ByteArray, name: String?) {
+            trustDevice(nodeId = nodeId, name = name ?: nodeId, publicKey = publicKey, full = true)
+        }
+    }
+
+    // ------------------------------------------------------------------ 配对
+
+    /**
+     * 扫码/外部配对成功后的唯一入口:绑定「对端地址 ↔ 已核对的公钥」。
+     *
+     * @param alsoReachableAt 配对码里同一台设备的其他地址(IPv4 + IPv6 多候选);
+     *        它们共用同一个端口与公钥,任一条可达就能拨通。
+     */
+    @Synchronized
+    fun pairPeer(
+        host: String,
+        port: Int,
+        publicKey: ByteArray,
+        name: String = host,
+        full: Boolean = true,
+        alsoReachableAt: List<String> = emptyList(),
+        /** 对端二维码里的配对密钥(发起侧);给了才能用 [SecureChannelTransport.requestPairing]。 */
+        secret: ByteArray? = null,
+    ) {
+        require(publicKey.size == ED25519_PUBLIC_KEY_SIZE) {
+            "Ed25519 public key must be $ED25519_PUBLIC_KEY_SIZE bytes, got ${publicKey.size}"
+        }
+        (listOf(host) + alsoReachableAt).forEach { key ->
+            endpoints[endpointKey(key, port)] = publicKey
+            if (secret != null) pairingSecrets[endpointKey(key, port)] = secret.copyOf()
+        }
+        trustDevice(nodeId = endpointKey(host, port), name = name, publicKey = publicKey, full = full)
+    }
+
+    /** 只写 TrustStore(分级/账本),不绑定地址;一般用 [pairPeer]。 */
+    @Synchronized
     fun trustDevice(nodeId: String, name: String, publicKey: ByteArray, full: Boolean) {
         rustTrustStore.trustDevice(
             TrustedDeviceInfo(
                 deviceId = nodeId, name = name, publicKey = publicKey,
-                fingerprint = uniffi.luciola_uniffi.identityFingerprint(publicKey),
+                fingerprint = identityFingerprint(publicKey),
                 level = if (full) TrustLevel.FULL else TrustLevel.PARTIAL,
                 pinnedAtMs = System.currentTimeMillis().toULong(),
             )
         )
+        persist()
     }
 
-    fun createDiscovery(registry: PeerRegistry): LuciolaDiscoveryEngine =
-        LuciolaDiscoveryEngine(registry, { profile }, udpPort)
+    /**
+     * 监听侧 TOFU 配对:只知道指纹、拿不到公钥时登记信任。
+     *
+     * luciola 的入站回调只报对端指纹(不暴露 socket 地址/公钥),所以手机主动连
+     * 进来这条路径只能先按指纹信任;真正要与 TrustStore 的指纹账本对齐,得等
+     * 应用层配对帧把公钥带上来(见迁移手册阶段三备注)。
+     */
+    @Synchronized
+    fun trustInboundFingerprint(fingerprint: String) {
+        trustedFingerprints += fingerprint
+        persist()
+    }
 
-    fun createTransport(): SecureChannelTransport =
+    @Synchronized
+    fun untrustInboundFingerprint(fingerprint: String) {
+        trustedFingerprints -= fingerprint
+        persist()
+    }
+
+    /** 撤销一个地址的配对(公钥账本按公钥去重,别处的同一设备条目不受影响)。 */
+    @Synchronized
+    fun unpair(host: String, port: Int) {
+        val key = endpointKey(host, port)
+        val removed = endpoints.remove(key) ?: return
+        pairingSecrets.remove(key)
+        val fingerprint = identityFingerprint(removed)
+        if (endpoints.values.none { identityFingerprint(it) == fingerprint }) {
+            rustTrustStore.remove(fingerprint)
+            // 撤销必须两侧一起撤:只删 pin 表、留着入站指纹信任,等于没撤。
+            trustedFingerprints -= fingerprint
+        }
+        persist()
+    }
+
+    fun isPaired(host: String, port: Int): Boolean = endpoints.containsKey(endpointKey(host, port))
+
+    /** 当前信任账本(按公钥去重)。 */
+    fun entries(): List<TrustedDeviceInfo> = rustTrustStore.entries()
+
+    /**
+     * 入站放行判据:配对过的公钥指纹 ∪ TrustStore 账本 ∪ 仅指纹的 TOFU 信任。
+     * **deny-by-default** —— 三者都没有就是陌生人。
+     */
+    fun isTrustedFingerprint(fingerprint: String): Boolean =
+        fingerprint in trustedFingerprints ||
+            rustTrustStore.entries().any { it.fingerprint == fingerprint } ||
+            endpoints.values.any { identityFingerprint(it) == fingerprint }
+
+    // ------------------------------------------------------------------ 装配
+
+    /**
+     * 发现引擎。`selfProfile` 用函数而不是快照:tlsPin / 本机地址是运行时才定下的
+     * （见 [LuciolaDiscoveryEngine.start]）。
+     */
+    fun createDiscovery(
+        registry: PeerRegistry,
+        selfProfile: () -> Profile = { profile },
+    ): LuciolaDiscoveryEngine = LuciolaDiscoveryEngine(registry, selfProfile, udpPort)
+
+    /**
+     * 加密信道。**必须传 registry**:入站帧只有查到对端地址才递得进
+     * Messenger(见 [SecureChannelTransport] 的 KDoc)。
+     */
+    fun createTransport(registry: PeerRegistry): SecureChannelTransport =
         SecureChannelTransport(
             identitySeed = identity.seed,
-            peerKey = { host, port ->
-                // deny-by-default:只有 TrustStore 里有的对端才能建连
-                val entry = rustTrustStore.entries().firstOrNull {
-                    it.deviceId == "$host:$port" // 简化映射;阶段四按 registry 查
-                }
-                entry?.publicKey
+            peerKey = { host, port -> endpoints[endpointKey(host, port)] },
+            listenPort = udpPort,
+            isTrustedFingerprint = { fingerprint -> isTrustedFingerprint(fingerprint) },
+            endpointOf = { nodeId ->
+                registry.get(nodeId)?.let { PeerEndpoint(it.ip, it.udpPort) }
             },
+            pairing = pairingAdmission(),
+            pairingSecretOf = { host, port -> pairingSecrets[endpointKey(host, port)] },
+            selfPublicKey = identity.publicKey,
         )
+
+    // ------------------------------------------------------------------ 内部
+
+    private fun loadState(): FactoryStateJson {
+        val raw = runCatching { stateStore.load() }.getOrNull() ?: return FactoryStateJson()
+        return runCatching { json.decodeFromString(FactoryStateJson.serializer(), raw) }
+            .getOrElse { FactoryStateJson() }
+    }
+
+    private fun persist() {
+        val next = FactoryStateJson(
+            trust = runCatching { rustTrustStore.toJson() }.getOrNull(),
+            endpoints = endpoints.mapValues { Base64.getEncoder().encodeToString(it.value) },
+            trustedFingerprints = trustedFingerprints.toList(),
+            pairSecret = Base64.getEncoder().encodeToString(pairSecret),
+            pairingSecrets = pairingSecrets.mapValues { Base64.getEncoder().encodeToString(it.value) },
+        )
+        state = next
+        runCatching { stateStore.save(json.encodeToString(FactoryStateJson.serializer(), next)) }
+    }
+
+    private fun endpointKey(host: String, port: Int): String = "$host:$port"
+
+    private fun seedHexToBytes(hex: String): ByteArray {
+        val clean = hex.trim()
+        require(clean.length == 64) { "seed must be 32 bytes of hex (64 chars), got ${clean.length}" }
+        return ByteArray(32) { i -> clean.substring(i * 2, i * 2 + 2).toInt(16).toByte() }
+    }
+
+    companion object {
+        const val DEFAULT_DISCOVERY_PORT: Int = 17878
+        private const val ED25519_PUBLIC_KEY_SIZE = 32
+        private const val DEFAULT_PAIR_SECRET_BYTES = 16
+        private const val MIN_PAIR_SECRET_BYTES = 16
+    }
 }

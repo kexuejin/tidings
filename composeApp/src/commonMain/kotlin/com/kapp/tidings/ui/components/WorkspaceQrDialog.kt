@@ -69,6 +69,8 @@ public fun WorkspaceQrDialog(
      * 预算同样要算 —— 与 [tlsPin] 同一条纪律，否则裁剪与生成会用两套参数。
      */
     nick: String? = null,
+    /** 实验 luciola 段（与 [tlsPin] 互斥，二维码预算装不下两者）。 */
+    luciola: com.kapp.tidings.domain.LuciolaQrInfo? = null,
 ) {
     val sp = LocalAppSpacing.current
     // 多候选载荷装不下 `?wsId=` 这个查询后缀（JSON 后面挂 query 会直接解析失败），而那个后缀
@@ -79,7 +81,7 @@ public fun WorkspaceQrDialog(
     // （那样 hasPublicV6 会宣称码里有公网 v6，而码里其实已经被裁掉了 —— 界面对用户说了假话）。
     val candidates =
         if (nodeId.isNotBlank()) {
-            qrCandidatesFor(addresses, port, nodeId, tlsPin = tlsPin, nick = nick)
+            qrCandidatesFor(addresses, port, nodeId, tlsPin = tlsPin, nick = nick, luciola = luciola)
         } else {
             emptyList()
         }
@@ -90,6 +92,7 @@ public fun WorkspaceQrDialog(
             port = port,
             tlsPin = tlsPin,
             nick = nick,
+            luciola = luciola,
         )
     } else {
         host?.takeIf { it.isNotBlank() }?.let { h ->

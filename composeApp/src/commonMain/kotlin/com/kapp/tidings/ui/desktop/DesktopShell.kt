@@ -953,6 +953,8 @@ public fun DesktopShell(
                 nodeId = state.selfNodeId,
                 // task-86：直通码也必须带 pin，否则手机建不出公网 TLS 目标。
                 tlsPin = state.network.selfTlsPin,
+                // 实验 luciola：直通码也带同一段（与 pin 互斥）。
+                luciola = state.network.luciolaQr,
                 // 带昵称：扫完立刻是真名，不是 node-a1b2c3d4。
                 nick = state.settings.nick,
                 onDismiss = { showWsQrFor = null },

@@ -854,6 +854,8 @@ fun MyQrSheet(
      * 而不是 `node-a1b2c3d4` 这种合成名（见 `qrPairingPayloadForAddresses` 的 KDoc）。
      */
     nick: String? = null,
+    /** 实验 luciola 段；null = 出 legacy 码（与 tlsPin 互斥）。 */
+    luciola: com.kapp.tidings.domain.LuciolaQrInfo? = null,
 ) {
     val sp = LocalAppSpacing.current
     val ownSheetState = rememberModalBottomSheetState()
@@ -865,6 +867,7 @@ fun MyQrSheet(
         nodeId = nodeId,
         tlsPin = tlsPin,
         nick = nick,
+        luciola = luciola,
     )
     // 编码器对超长内容会抛异常（它拒绝截断）；这里不能让它把整屏打崩，
     // 但也绝不"画一张能扫、内容却是错的码"。

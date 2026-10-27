@@ -42,6 +42,11 @@ fun handleUpdatePersistMessages(enabled: Boolean) {
 }
 
 
+fun handleUpdateExperimentalLuciola(enabled: Boolean) {
+    if (host._state.value.settings.experimentalLuciola == enabled) return
+    host.handlePersist(host._state.value.settings.copy(experimentalLuciola = enabled))
+}
+
 fun handleUpdateThemeMode(wire: String) {
     if (host.themeMode == wire) return
     host.handlePersist(host._state.value.settings.copy(themeMode = wire))

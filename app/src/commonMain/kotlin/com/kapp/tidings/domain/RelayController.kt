@@ -416,6 +416,7 @@ class RelayController(
 
     // ------------------------------------------------------------------ 委托动作：设置
     fun updatePersistMessages(enabled: Boolean) = settingsCtl.handleUpdatePersistMessages(enabled)
+    fun updateExperimentalLuciola(enabled: Boolean) = settingsCtl.handleUpdateExperimentalLuciola(enabled)
     fun updateThemeMode(wire: String) = settingsCtl.handleUpdateThemeMode(wire)
     fun updateWaitFrameCapability(enabled: Boolean) = settingsCtl.handleUpdateWaitFrameCapability(enabled)
     fun updateRecordMessageCapability(enabled: Boolean) = settingsCtl.handleUpdateRecordMessageCapability(enabled)
@@ -876,6 +877,15 @@ class RelayController(
             // 承载 agent 节点的宿主（桌面端）在此广播 `ag1`；手机端恒 false。
             advertiseAgent = advertiseAgent,
         )
+        // 实验:luciola 传输。**两件齐了才切** —— 只给加密信道不给发现,或有发现没
+        // 加密信道,都比 legacy 更糟;缺一件就整体退回 legacy。
+        // 设置项是**唯一**的用户开关（实验信道默认关）；关着时连工厂都不建,
+        // 出码点拿不到 luciola 段 ⇒ 二维码一字不变。
+        val luciolaHost = platform.luciolaHost.takeIf { settings.experimentalLuciola }
+        luciolaHost?.configure(profile, settings.udpPort)
+        val luciolaTransport = luciolaHost?.transportFactory()
+        val luciolaDiscovery = luciolaHost?.discoveryFactory()
+        val luciolaMode = luciolaTransport != null && luciolaDiscovery != null
         val rt = NodeRuntime(
             profile = profile,
             udpPort = settings.udpPort,
@@ -926,6 +936,9 @@ class RelayController(
             queueStore = persist.queue,
             dedupStore = dedupStore,
             messageStore = persist.messages,
+            // 实验:luciola 传输与发现（两件都非空才生效,见上面 luciolaMode）。
+            messengerTransportFactory = luciolaTransport.takeIf { luciolaMode },
+            extraDiscoveryFactory = luciolaDiscovery.takeIf { luciolaMode },
             // 配对码里那一池候选地址（按 nodeId 存）：换网之后发送/心跳的兜底。
             peerEndpointStore = persist.peerEndpoints,
             // 配对码里那枚 tlsPin：K2 公网长连接的信任根（没它就不建公网连接）。
@@ -994,6 +1007,8 @@ class RelayController(
                         boundUdpPort = rt.boundPort,
                         // 印码要用（task-86）：主机必须把本机 pin 交给手机，否则公网目标建不出来。
                         selfTlsPin = rt.localTlsPin(),
+                        // 实验 luciola:二维码里的公钥/配对密钥(没开就是 null ⇒ legacy 码)。
+                        luciolaQr = luciolaHost?.pairingInfo(),
                         // 诊断页要看的读数（与 pin 同一档：本机身份的只读事实）。
                         selfCertNotAfterMillis = rt.localCertNotAfterMillis(),
                         failure = null,
@@ -1372,6 +1387,24 @@ class RelayController(
                         udpPort = parsed.port,
                         tlsPin = parsedPin,
                     )
+                }
+                // luciola 段：把扫码得到的 Ed25519 公钥 + 配对密钥钉进宿主信任库。
+                // 传输面读工厂实时状态，不需要重启节点；失败必须让用户看见（不能静默）。
+                parsed.luciola?.let { info ->
+                    val host = platform.luciolaHost
+                    val ok = host != null && host.pairPeer(parsed.host, parsed.port, info)
+                    if (!ok) {
+                        warn(BannerMessage.ScanFailed("luciola-pair-rejected"))
+                    } else {
+                        // 记住 pin/secret 只是"愿意信它";还要把自证发过去,主机才放行本机。
+                        val peerId = parsed.nodeId
+                        val rt = runtime
+                        if (peerId != null && rt != null) {
+                            scope.launch {
+                                runCatching { rt.requestLuciolaPairing(parsed.host, parsed.port, peerId) }
+                            }
+                        }
+                    }
                 }
                 for (candidate in parsed.candidates) {
                     if (candidate.host != parsed.host || candidate.port != parsed.port) {

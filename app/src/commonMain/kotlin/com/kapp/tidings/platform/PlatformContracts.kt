@@ -307,6 +307,13 @@ interface AppPlatform {
     val deviceInfo: DeviceInfo
 
     /**
+     * 实验:luciola 传输宿主。**默认 null = 本壳没接,一切走 legacy**
+     * （测试替身、Android、iOS 都是这条）。
+     */
+    val luciolaHost: LuciolaHost?
+        get() = null
+
+    /**
      * 本机构建里**真实的**版本名（Android 的 versionName、iOS 的
      * CFBundleShortVersionString、桌面安装包的 packageVersion）。
      *

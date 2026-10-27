@@ -185,6 +185,14 @@ data class RelaySettings(
      */
     val persistMessagesDecided: Boolean = false,
     /**
+     * 实验:luciola 加密信道（发现 + 传输整体切换）。**默认关**,开启后需重启节点。
+     *
+     * 关着 = 今天的行为（legacy 发现 + UDP/TCP）。开着之后 legacy 发现不再启动,
+     * 未迁移设备只能靠二维码/手动地址找到本机 —— 所以它出现在设置页时文案必须
+     * 说明这一点,不能伪装成"更安全的开关"。
+     */
+    val experimentalLuciola: Boolean = false,
+    /**
      * 外观档位的 wire 形态（`system` / `light` / `dark`，认不出的值一律当跟随系统）。
      *
      * 与 [persistMessages] 同一条理由：一个**用户偏好**如果重启就自己弹回「跟随系统」，

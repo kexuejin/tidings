@@ -52,6 +52,12 @@ class DesktopAppPlatform(
     override val urlOpener: com.kapp.tidings.platform.UrlOpener = DesktopUrlOpener(),
     override val screenCapture: com.kapp.tidings.platform.ScreenCaptureService? = null,
     override val screenSharing: com.kapp.tidings.platform.ScreenSharingService = com.kapp.tidings.desktop.capture.DesktopScreenSharingService(),
+    /**
+     * 实验 luciola 传输:默认关,TIDINGS_LUCIOLA=1 才启用。
+     * 数据目录在 dataDirectory 里(身份 seed + 信任库)。
+     */
+    override val luciolaHost: com.kapp.tidings.platform.LuciolaHost =
+        DesktopLuciolaHost({ dataDirectory.dataDirectory() }, enabled = true),
 ) : com.kapp.tidings.platform.AppPlatform {
     /**
      * 桌面端能算子网广播（`NetworkInterface.interfaceAddresses`），所以覆盖掉默认的空。
