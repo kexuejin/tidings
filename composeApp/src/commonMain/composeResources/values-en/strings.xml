@@ -123,6 +123,8 @@
     <string name="conv_action_delete">Delete conversation (this device only)</string>
     <string name="conv_delete_confirm_title">Delete this conversation?</string>
     <string name="conv_delete_confirm_body">Only this device's chat history is deleted; the other side is not affected. This cannot be undone.</string>
+    <string name="conv_delete_confirm_body_group">Only this device's chat history for the group is cleared; the group and its members stay as they are, and the next group message will recreate this conversation. This cannot be undone.</string>
+    <string name="conv_delete_and_leave">Delete and leave group</string>
     <string name="conv_row_pinned">Pinned</string>
     <string name="conv_row_more_actions">More actions</string>
     <string name="conv_menu_mark_all_read">Mark all as read</string>
@@ -162,8 +164,10 @@
     <string name="banner_group_name_too_long">Group name is too long (max %1$d characters).</string>
     <string name="banner_group_needs_member">Select at least one other member.</string>
     <string name="banner_group_created">"%1$s" created. Notifying %2$d members.</string>
+    <string name="banner_group_created_no_members">"%1$s" is ready. No other device is in it yet — add members from group info once they are online.</string>
     <string name="banner_group_unknown">Group metadata not yet synchronized. Please wait or ask a member to send a message.</string>
     <string name="banner_group_left">You have been removed from this group.</string>
+    <string name="banner_group_disbanded">"%1$s" has been disbanded. The chat history stays on this device.</string>
     <string name="banner_group_members_added">Added %1$d members. Notifying group.</string>
     <string name="desktop_drop_pick_conversation">Pick a conversation first, then drop files here</string>
     <string name="desktop_notification_title">Tidings</string>
@@ -317,10 +321,12 @@
     <string name="nodes_menu_copy">Copy Address</string>
     <string name="nodes_menu_remove">Remove "%1$s"</string>
     <string name="nodes_removed_notice">Removed "%1$s" (chat history on this device is kept)</string>
+    <string name="banner_peer_forgotten">Removed "%1$s". It will show up again the next time it is discovered online.</string>
     <string name="nodes_menu_copied">Address copied</string>
     <!-- Remove-node confirmation. Say what it actually does: local only, the peer is unaffected. -->
     <string name="nodes_remove_confirm_title">Remove this node?</string>
     <string name="nodes_remove_confirm_body">Removes it from this device's node list only; the peer is unaffected and saved chat history is kept.</string>
+    <string name="nodes_forget_confirm_body">Removes it from this device's node list. It will reappear the next time it is discovered online; saved chat history is kept.</string>
     <string name="nodes_my_qr_entry_title">My QR Code</string>
     <string name="nodes_my_qr_entry_sub">Have the other side scan it to add you to their node list</string>
     <string name="nodes_my_qr_payload">Payload</string>
@@ -704,6 +710,8 @@
     <string name="r2_set_profile_org">Organization</string>
     <string name="r2_set_profile_rev_chip">Profile v%1$d</string>
     <string name="r2_set_profile_node_chip">Node %1$s</string>
+    <string name="set_luciola_title">luciola encrypted channel</string>
+    <string name="set_luciola_sub">Messages, files and screen sharing all travel over the encrypted channel (on by default). Devices not upgraded to the same version lose automatic discovery; only QR codes and manual addresses remain. Turn it off and restart the node to fall back to the original transport.</string>
     <string name="set_persist_title">Message Persistence</string>
     <string name="set_persist_sub">When disabled, messages stay in memory and are lost on restart</string>
     <!-- 保留天数在此页是一行纯说明（没有可改的开关），不再伪装成设置行。 -->
@@ -1481,7 +1489,10 @@
     <string name="chat_group_me">Me</string>
     <string name="chat_group_none">None</string>
     <string name="chat_group_leave">Leave group</string>
+    <string name="chat_group_forget_local">Delete this group (you were removed)</string>
     <string name="chat_group_confirm_leave">Are you sure you want to leave this group?</string>
+    <string name="chat_group_dissolve">Disband group</string>
+    <string name="chat_group_confirm_dissolve">Once disbanded, this group no longer exists for anyone and cannot be restored; chat history on this device is kept.</string>
     <string name="chat_group_progress_working">%1$s is running: %2$s</string>
     <string name="chat_voice_record">Voice message</string>
     <string name="chat_voice_start">Tap to record</string>
@@ -1541,6 +1552,7 @@
     <string name="agent_event_finished_fallback">Task completed</string>
     <string name="agent_demo_driver_notice">Demo driver: no real task was executed and no model or tool was contacted.</string>
     <string name="agent_event_error_fallback">Agent error</string>
+    <string name="agent_event_thinking_only_fallback">This turn produced only thinking, no answer text</string>
 
     <!-- ===== issue 6: workspace 3-level IA rework (workspace-ia, task-4) ===== -->
     <string name="workspace_latest_activity_format">Latest activity %1$s</string>

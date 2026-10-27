@@ -734,6 +734,85 @@ class ControlPlaneTest {
     // ------------------------------------------------------------------ 辅助
 
     /** 量一次 `GET /v1/peers` 的耗时（毫秒），并顺带断言它必须是 200。 */
+    /**
+     * **读路由不许被「解析不到的对端」饿死**（真机现场：16 条处理器线程全卡在
+     * `resolveAgentTarget` 的 `runBlocking` 上，连 `/healthz` 都打不出去）。
+     *
+     * 手机离线时它每隔几秒重试一次 `agent/event`，而一次解析不到要等**满 3 秒**。
+     * 处理器池就那么大 —— 几条这样的请求就能把控制面按死。修法两条：
+     *  1. 处理器改用虚拟线程（JDK 21+）：阻塞只花一个虚拟线程；
+     *  2. 解析失败记 5 秒：同一个死对端的连续重试只付一次 3 秒。
+     *
+     * 这条测试同时压这两条：**不同**的 TEST-NET 主机（绕开失败记忆）+ 足够多条
+     * 并发（绕开虚拟线程之前的固定池上限）。两个修复都失效时它会红。
+     */
+    @Test
+    fun healthzStaysFastEvenWhenUnreachableTargetsFillTheHandlers() {
+        val baselineMs = (1..3).minOf { measureHealthzMs() }
+        val budgetMs = minOf(MAX_PEERS_MS, maxOf(baselineMs * 20, 1_000L))
+
+        val entered = java.util.concurrent.atomic.AtomicInteger(0)
+        val gate = java.util.concurrent.CountDownLatch(1)
+        val storm = java.util.concurrent.Executors.newFixedThreadPool(STORM_SENDERS)
+        val results = java.util.concurrent.CopyOnWriteArrayList<Pair<Int, String>>()
+        val futures = (1..STORM_SENDERS).map { index ->
+            storm.submit {
+                gate.await()
+                entered.incrementAndGet()
+                // 每一条用**不同**的黑洞地址：失败记忆是按键的，同一条地址只会有一个真等。
+                runCatching {
+                    post(
+                        "/v1/agent/event",
+                        "{\"to\":\"192.0.2.${index + 1}\",\"port\":17878,\"sessionId\":\"s-1\",\"eventType\":\"tool.started\",\"cursor\":1}",
+                    )
+                }.onSuccess { results += it }
+            }
+        }
+        gate.countDown()
+        try {
+            Await.condition(
+                "$STORM_SENDERS 条解析请求都已进入",
+                timeoutMs = STORM_ENTER_TIMEOUT_MS,
+            ) { entered.get() >= STORM_SENDERS }
+
+            val worst = (1..5).maxOf { measureHealthzMs() }
+            assertEquals(
+                STORM_SENDERS,
+                futures.count { !it.isDone },
+                "采样时必须仍在解析 —— 都结束了这条测试就证明不了「解析占满时读还快」",
+            )
+            assertTrue(
+                worst < budgetMs,
+                "不可达对端占用处理器时 /healthz 最慢 ${worst}ms（基线 ${baselineMs}ms，预算 ${budgetMs}ms）",
+            )
+
+            // **反空转**：这六条必须真的走到「解析不到」并如实回 404 —— 否则
+            // 上面那次「读很快」只是因为它们还没进处理器，测试就成了摆设。
+            // 一条不可达的解析要 3 秒，所以这里等满 20 秒。
+            Await.condition(
+                "$STORM_SENDERS 条解析请求都已拿到应答",
+                timeoutMs = 20_000L,
+            ) { results.size >= STORM_SENDERS }
+            results.forEach { (status, body) ->
+                assertEquals(404, status, "解析不到的对端必须如实回 404，而不是挂住：$body")
+                assertTrue(
+                    body.contains("peer-unreachable"),
+                    "404 的原因必须是 peer-unreachable（说明真的走过握手），实际：$body",
+                )
+            }
+        } finally {
+            futures.forEach { it.cancel(true) }
+            storm.shutdownNow()
+        }
+    }
+
+    private fun measureHealthzMs(): Long {
+        val startedAt = Await.nowMillis()
+        val res = get("/healthz")
+        assertEquals(200, res.first, "解析风暴进行中 /healthz 也必须回 200")
+        return Await.nowMillis() - startedAt
+    }
+
     private fun measurePeersMs(): Long {
         val startedAt = Await.nowMillis()
         val res = get("/v1/peers")

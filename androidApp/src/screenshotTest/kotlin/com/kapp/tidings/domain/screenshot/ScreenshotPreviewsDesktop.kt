@@ -889,6 +889,7 @@ private fun DeskSettingsDataPreview() {
                 persistMessagesEnabled = true,
                 onPersistMessagesEnabledChange = {},
                 onClearHistory = {},
+                onExperimentalLuciolaChange = {},
             )
         }
     }

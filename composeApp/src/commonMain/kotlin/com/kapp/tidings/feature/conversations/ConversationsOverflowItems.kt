@@ -15,7 +15,9 @@ import com.kapp.tidings.generated.resources.conv_menu_new_session
 import com.kapp.tidings.generated.resources.conv_menu_only_unread
 import com.kapp.tidings.generated.resources.conv_menu_sort_recent
 import com.kapp.tidings.generated.resources.conv_new_group
+import com.kapp.tidings.generated.resources.ic_folder
 import com.kapp.tidings.generated.resources.ic_groups
+import com.kapp.tidings.generated.resources.workspace_create_group_title
 import com.kapp.tidings.generated.resources.ic_list
 import com.kapp.tidings.generated.resources.ic_refresh
 import com.kapp.tidings.generated.resources.ic_sort
@@ -53,6 +55,18 @@ public fun ConversationsOverflowItems(
     onGoToPairing: () -> Unit,
     onOnlyUnread: () -> Unit,
     onMarkAllRead: (() -> Unit)?,
+    /**
+     * 「关联工作区建群」。
+     *
+     * 为什么它要出现在**手机**的 ⋮ 菜单里：这条路径此前只接在两栏布局的会话侧栏与桌面
+     * 工作区看板上，compact 布局既没有侧栏、工作区看板的按钮又只由两栏那个回调点亮 ——
+     * 于是手机上**根本没有**建工作区群的入口（真机：工作区页只有「刷新」）。手机与桌面
+     * 共用同一个对话框（[com.kapp.tidings.ui.components.WorkspaceGroupCreateDialog]），
+     * 补的只是「从哪儿点开」。
+     *
+     * null = 这个壳不提供该入口（预览 / 没有工作区能力的宿主）。
+     */
+    onCreateWorkspaceGroup: (() -> Unit)? = null,
 ) {
     // 项序与分隔线照原型 `m01b-home-more`（`screenHomeMore`）逐条对齐。
     if (onCreateGroup != null) {
@@ -62,6 +76,17 @@ public fun ConversationsOverflowItems(
                 Icon(painterResource(Res.drawable.ic_groups), contentDescription = null)
             },
             onClick = onCreateGroup,
+        )
+    }
+    // 紧跟普通建群：两者是同一个动作的两档（拉人 / 绑工作区），分开放会让用户以为
+    // 后者是别处的功能。图标用文件夹 —— 与工作区卡片一致，不另造一枚。
+    if (onCreateWorkspaceGroup != null) {
+        DropdownMenuItem(
+            text = { Text(stringResource(Res.string.workspace_create_group_title)) },
+            leadingIcon = {
+                Icon(painterResource(Res.drawable.ic_folder), contentDescription = null)
+            },
+            onClick = onCreateWorkspaceGroup,
         )
     }
     DropdownMenuItem(

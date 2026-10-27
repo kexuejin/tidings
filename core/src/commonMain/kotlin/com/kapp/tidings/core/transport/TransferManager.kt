@@ -169,6 +169,31 @@ class TransferManager(
      */
     private val crossNetwork: CrossNetworkTransferPlanner? = null,
     /**
+     * **字节搬运**的数据面（第 1 步只抽缝，默认就是今天的明文实现）。
+     *
+     * 传 null = `LegacyTcpDataPlane`，行为逐字不变；加密信道的数据面（下一步）
+     * 只要实现 [FileDataPlane] 就能换进来，本类不关心字节从哪条连接来
+     * （续传/校验/去重/取消仍由数据面实现负责，见 [FileDataPlane] 的 KDoc）。
+     */
+    private val dataPlane: FileDataPlane? = null,
+    /**
+     * 信道数据面的**接管缝**（`fch1` 协商通过时由宿主注入）。
+     *
+     * 为什么是函数而不是路由器类型：`FileChannelRouter` 在 jvmShared（平台侧），
+     * 而本类是 commonMain —— 类型引不进来。宿主把"登记一次入站 transfer"绑上来即可。
+     *
+     * 返回 true = **已接管**（调用方必须**不发 pull**：字节会由信道推进来）；
+     * 返回 false = 没接管（未启用 / 路径越界），调用方走 legacy 拨号拉取。
+     */
+    private val registerChannelInbound: ((IncomingOffer, saveDir: String) -> Boolean)? = null,
+    /**
+     * 信道数据面的**出站缝**（与 [registerChannelInbound] 成对由宿主注入）。
+     *
+     * 对端 `accept` 之后调用：把本机的每个文件按窗口推到对端，返回已推字节数。
+     * null = 今天的行为（对端自己拨号来拉）。
+     */
+    private val pushFileOnChannel: (suspend (transferId: String, peerId: String, files: List<OutgoingFile>) -> Unit)? = null,
+    /**
      * F1（task-39）：跨网文件的**主机侧原始 TLS 监听**（方案 B 的入口）。
      *
      * null = 不起这条入口 ⇒ 行为与今天一字不差（局域网原路径）。平台不支持 TLS 服务端
@@ -181,6 +206,15 @@ class TransferManager(
      * null = 不起这条入口。
      */
     private val crossNetworkFilePort: Int? = null,
+    /**
+     * 是否创建 **legacy 监听**（明文 tcpPort 与跨网 tlsPort + 1）。
+     *
+     * luciola 信道模式（fch1）下置 false：文件字节走加密信道，这两条入口没有存在
+     * 意义，留着只是多两个可被扫到、可被老协议误连的端口。关掉之后 [start] 依然
+     * 返回 true —— 「管理器可用」不等于「我绑了 17879」，真实端口看 [boundPort]
+     * （此处为 null）。
+     */
+    private val legacyTcpListener: Boolean = true,
     /** 对端是否声明了 `tw1`。只有声明者才允许收 `wait` 帧。 */
     private val peerSupportsWait: (peerId: String) -> Boolean = { false },
     /**
@@ -349,20 +383,27 @@ class TransferManager(
         // 半截文件 —— 它们既不会被续传，也不会被转正，只会一直占着磁盘。审计里说的
         // "`.part` 残留零出口"就是这件事。放在绑端口之前，顺序上也不可能删到在途文件。
         stalePartSweep = sweepStaleParts()
-        if (!server.start(tcpPort) && (tcpPort == 0 || !server.start(0))) {
-            started = false
-            return false
-        }
-        // F1：跨网文件的独立 TLS 监听（与明文监听并存、互不影响）。
-        // 起不来（平台不支持 / 端口被占）就只是**没有这条入口** —— 局域网原路径不受影响。
-        val listener = crossNetworkListener
-        val filePort = crossNetworkFilePort
-        if (listener != null && filePort != null) {
-            crossNetworkBoundPort = listener.start(filePort) { connection ->
-                // 协议逐字复用：这里只负责「连接从哪来」，服务端逻辑全在 servePullFrame。
-                runCatching { server.servePullFrame(connection.read, connection.write) }
-                runCatching { connection.close() }
+        if (legacyTcpListener) {
+            if (!server.start(tcpPort) && (tcpPort == 0 || !server.start(0))) {
+                started = false
+                return false
             }
+            // F1：跨网文件的独立 TLS 监听（与明文监听并存、互不影响）。
+            // 起不来（平台不支持 / 端口被占）就只是**没有这条入口** —— 局域网原路径不受影响。
+            val listener = crossNetworkListener
+            val filePort = crossNetworkFilePort
+            if (listener != null && filePort != null) {
+                crossNetworkBoundPort = listener.start(filePort) { connection ->
+                    // 协议逐字复用：这里只负责「连接从哪来」，服务端逻辑全在 servePullFrame。
+                    runCatching { server.servePullFrame(connection.read, connection.write) }
+                    runCatching { connection.close() }
+                }
+            }
+        } else {
+            // luciola 信道模式：**一帧都不从这两个端口进出**。
+            // boundPort 保持 null，上层据此如实呈现「没有 legacy 入口」，
+            // 而不是绑上了却装作没有。
+            crossNetworkBoundPort = null
         }
         eventJob = scope.launch {
             server.events.collect { event ->
@@ -411,7 +452,9 @@ class TransferManager(
                 }
             }
         }
-        return server.start(tcpPort)
+        // 这里原来无条件再 server.start(tcpPort) 一次（幂等：已绑上就直接返回 true）。
+        // 信道模式下不能走这一句 —— 它会把刚才刻意不建的明文监听又建起来。
+        return if (legacyTcpListener) server.start(tcpPort) else true
     }
 
     suspend fun stop() {
@@ -573,8 +616,46 @@ class TransferManager(
                 return@launch
             }
             sendSimple(offer.peerId, FileCtlOps.ACCEPT, transferId)
+            // 信道模式：登记后由路由器收字节（不发 pull）；否则走 legacy 拨号拉取。
+            val channelTook = registerOnChannel(offer)
+            // 一行可检索的归属日志：信道没接管时，用户看到的是"一直卡在接收中"，
+            // 而原因可能是"对端没声明 fch1"（回退 legacy）或"登记失败"（回退 legacy）。
+            println(
+                "[luciola] accept " + transferId.take(8) + " channel=" + channelTook +
+                    " files=" + offer.files.size + " peer=" + offer.peerId.take(8),
+            )
+            if (channelTook) return@launch
             pull(offer)
         }
+    }
+
+    /**
+     * 把一次入站 transfer 登记到信道路由器。返回 true = 已接管（调用方**不要**再 pull）。
+     *
+     * 两种不接管的情形，都必须 **fallback 到 legacy**而不是静默失败：
+     *  - 没传路由器（未开 fch1 / 未开实验信道）；
+     *  - 某个文件的相对路径越界（`path-escape`）—— 那是拒绝，不是改走 legacy。
+     */
+    private fun registerOnChannel(offer: IncomingOffer): Boolean {
+        val register = registerChannelInbound ?: return false
+        // 目录由本类算（与 legacy 拉取同一个公式），宿主只负责登记 —— 这样
+        // "信道模式的文件落到别处"这类问题在结构上就不可能发生。
+        return register(offer, saveDirFor(offer))
+    }
+
+    /**
+     * 一次入站 transfer 的落盘目录（`<downloadDir>/<rootName>`，rootName 先过路径净化）。
+     *
+     * 抽出来给信道接管缝用：host 侧登记时要与 legacy 拨号拉取**写同一个目录**，
+     * 否则同一个 transfer 在两条路径下会落到两个地方（用户看到"文件传完了但找不到"）。
+     */
+    internal fun saveDirFor(offer: IncomingOffer): String {
+        val root = downloadDir()
+        makeDirectories(root)
+        val safeRoot = sanitizeRelativePath(offer.rootName) ?: offer.transferId
+        val saveDir = pathJoin(root, safeRoot)
+        makeDirectories(saveDir)
+        return saveDir
     }
 
     /** 续传失败的入站传输。对齐 files.ts，仅用于入站 Failed 续拉。 */
@@ -691,7 +772,8 @@ class TransferManager(
             _events.tryEmit(TransferEvent.Offered(assembled))
             if (autoAccept) {
                 sendSimple(assembled.peerId, FileCtlOps.ACCEPT, assembled.transferId)
-                pull(assembled)
+                // 信道模式：登记后由路由器收字节（不发 pull）；否则走 legacy 拨号拉取。
+                if (!registerOnChannel(assembled)) pull(assembled)
             }
         }
     }
@@ -699,8 +781,20 @@ class TransferManager(
     private fun onAccept(payload: JsonObject) {
         val simple = decodeSimple(payload) ?: return
         scope.launch {
-            stateLock.withLock {
-                outgoing[simple.transferId]?.accepted = true
+            val transfer = stateLock.withLock {
+                outgoing[simple.transferId]?.also { it.accepted = true }
+            }
+            // 信道模式：对方接下之后**我们推**字节（它不会再拨 17879/17881 来拉）。
+            // 失败只记一条诊断，不把已经 accept 的传输判死 —— 用户重试 / 对端也会回 cancel。
+            val push = pushFileOnChannel
+            println(
+                "[luciola] accept-in transfer=" + simple.transferId.take(8) +
+                    " known=" + (transfer != null) + " push=" + (push != null) +
+                    " files=" + (transfer?.files?.size ?: -1),
+            )
+            if (transfer != null && push != null) {
+                runCatching { push(transfer.transferId, transfer.peerId, transfer.files) }
+                    .onFailure { println("[luciola] push failed " + simple.transferId + ": " + it) }
             }
         }
     }
@@ -799,7 +893,7 @@ class TransferManager(
         val plan = crossNetwork?.plan(offer.peerId, endpoint)
         val attempts = plan?.attempts?.takeIf { it.isNotEmpty() }
         try {
-            pullTransfer(
+            (dataPlane ?: LegacyTcpDataPlane()).pull(
                 PullOptions(
                     host = endpoint.host,
                     port = endpoint.port,

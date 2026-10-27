@@ -4,6 +4,8 @@ package com.kapp.tidings.core.session
 
 import com.kapp.tidings.core.protocol.Profile
 import com.kapp.tidings.core.protocol.newId
+import com.kapp.tidings.core.transport.CrossNetworkFileListener
+import com.kapp.tidings.core.transport.RawPullConnection
 import java.net.ServerSocket
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -117,4 +119,100 @@ class NodeRuntimeTcpBindTest {
         udpPort = 0,
         tcpPort = tcpPort,
     )
+    /**
+     * luciola 信道模式（fch1）下**不创建** legacy 监听。
+     *
+     * 这条不变量是 goal 第 (5) 步的判据：真机上 lsof 不该看到 17879/17881。
+     * 这里在 JVM 上把它做成可复核的两面：
+     *  1. 明文端口上**连不上**（不是「绑了但不用」）；
+     *  2. 跨网 TLS 监听器**一次都没被 start**（用记账实现证明，避免只是端口恰好空着）。
+     *
+     * 同一份夹具跑 legacy 模式作为对照：那时端口必须绑上、监听器必须被调用 ——
+     * 否则这个测试是空转的（永远绿）。
+     */
+    @Test
+    fun luciolaChannelModeCreatesNoLegacyListeners() = runBlocking {
+        val scope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
+        val tcpPort = ServerSocket(0).use { it.localPort }
+        val tlsPort = ServerSocket(0).use { it.localPort }
+        val listener = RecordingCrossNetworkListener()
+        val runtime = NodeRuntime(
+            profile = Profile.mobile(
+                nodeId = newId(),
+                nick = "legacy-listener-gate",
+                host = "localhost",
+                tcpPort = tcpPort,
+                tlsPort = tlsPort,
+                ver = "test",
+            ),
+            udpPort = 0,
+            tcpPort = tcpPort,
+            fileChannelEnabled = true,
+            crossNetworkFileListener = listener,
+            crossNetworkScreenListener = RecordingCrossNetworkListener(),
+        )
+        try {
+            runtime.start(scope)
+            assertFalse(runtime.tcpBound, "信道模式下不该宣称绑上了明文 TCP 端口")
+            assertEquals(null, runtime.tcpBoundPort, "信道模式下没有 legacy 明文入口")
+            assertFalse(canConnect(tcpPort), "明文端口 " + tcpPort + " 必须连不上（真的没在听）")
+            assertTrue(listener.startCalls.isEmpty(), "跨网 TLS 监听不该被创建，实际: " + listener.startCalls)
+        } finally {
+            runtime.stop()
+            scope.cancel()
+        }
+    }
+
+    /** 对照组：同一条路径在 legacy 模式（默认）下必须真的开监听，证明上面不是空转。 */
+    @Test
+    fun legacyModeStillOpensBothListeners() = runBlocking {
+        val scope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
+        val tcpPort = ServerSocket(0).use { it.localPort }
+        val tlsPort = ServerSocket(0).use { it.localPort }
+        val listener = RecordingCrossNetworkListener()
+        val runtime = NodeRuntime(
+            profile = Profile.mobile(
+                nodeId = newId(),
+                nick = "legacy-listener-control",
+                host = "localhost",
+                tcpPort = tcpPort,
+                tlsPort = tlsPort,
+                ver = "test",
+            ),
+            udpPort = 0,
+            tcpPort = tcpPort,
+            crossNetworkFileListener = listener,
+            crossNetworkScreenListener = RecordingCrossNetworkListener(),
+        )
+        try {
+            runtime.start(scope)
+            assertTrue(runtime.tcpBound, "legacy 模式必须绑上明文端口")
+            assertTrue(canConnect(tcpPort), "legacy 模式下明文端口必须可连")
+            assertEquals(listOf(tlsPort + 1), listener.startCalls, "跨网入口是 tlsPort + 1")
+        } finally {
+            runtime.stop()
+            scope.cancel()
+        }
+    }
+
+    /** 记账用的跨网监听器：只记 start 的端口，不真绑（避免端口冲突干扰断言）。 */
+    private class RecordingCrossNetworkListener : CrossNetworkFileListener {
+        val startCalls = mutableListOf<Int>()
+        override val canServe: Boolean get() = true
+        override suspend fun start(port: Int, onConnection: suspend (RawPullConnection) -> Unit): Int? {
+            startCalls += port
+            return port
+        }
+        override suspend fun stop() = Unit
+    }
+
+    /** 端口上有没有人在听：连得上 = 有人在听。 */
+    private fun canConnect(port: Int): Boolean = try {
+        java.net.Socket().use { s ->
+            s.connect(java.net.InetSocketAddress("127.0.0.1", port), 300)
+        }
+        true
+    } catch (_: java.io.IOException) {
+        false
+    }
 }

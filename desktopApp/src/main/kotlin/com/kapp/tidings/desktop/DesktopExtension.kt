@@ -21,6 +21,7 @@ import com.kapp.tidings.core.session.NodeRuntime
 import com.kapp.tidings.generated.resources.Res
 import com.kapp.tidings.generated.resources.agent_event_error_fallback
 import com.kapp.tidings.generated.resources.agent_event_finished_fallback
+import com.kapp.tidings.generated.resources.agent_event_thinking_only_fallback
 import org.jetbrains.compose.resources.getString
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Job
@@ -111,6 +112,26 @@ internal class DesktopExtension(
 
     private val errorFallback: String by lazy {
         runCatching { runBlocking { getString(Res.string.agent_event_error_fallback) } }.getOrDefault("")
+    }
+
+    /**
+     * 「这一轮只有思考、没有正文」时的**替代正文**。
+     *
+     * ## 为什么不为空（来自真机读数）
+     *
+     * 插件在回合结束、整轮没有任何正文时，发来的是一条 body 只有 `<think>…</think>` 的
+     * `assistant.text`（summary `思考完成`）。桌面端剥掉思考块后正文为空，此前直接
+     * `return@onRecord` —— 用户看到的是「回合明明结束了，群里一个字都没有」。
+     * 真机上连测到三轮这种形态（剥完只剩思考），轨迹里全是「没有下文」。
+     *
+     * 判据：**空正文不等于「没有发生」**。宁可给一句如实的话（思考块照样折叠显示），
+     * 也不要让一段历史凭空消失 —— 静默丢弃正是本仓最贵的那类缺陷。
+     *
+     * 取不到资源时退回空串：那时它等价于旧行为（少一条气泡），不会编一句中文。
+     */
+    private val thinkingOnlyFallback: String by lazy {
+        runCatching { runBlocking { getString(Res.string.agent_event_thinking_only_fallback) } }
+            .getOrDefault("")
     }
 
     private val processedEventCursors = java.util.Collections.newSetFromMap(
@@ -626,6 +647,9 @@ internal class DesktopExtension(
         selfNodeId = selfNodeId,
         agentKind = agentKind,
         format = ::formatAgentEventForChat,
+        // 只有思考、没有正文时用这句替代正文（见 thinkingOnlyFallback 的 KDoc）：
+        // 空串 = 资源取不到 ⇒ 等价于旧行为，不会凭空编内容。
+        thinkingOnlyFallback = thinkingOnlyFallback,
     )
 
 
@@ -1121,13 +1145,28 @@ internal fun agentChatMessageFor(
     selfNodeId: String,
     agentKind: String,
     format: (AgentSessionRegistry.EventRecord, String?) -> String?,
+    /**
+     * 只有思考、没有正文时的替代正文（空串 = 维持旧行为，直接丢弃这条）。
+     *
+     * 为什么放在**共用构造**里而不是两个调用点各传一次：实时与补发各写一份的话，
+     * 迟早有一处漏掉 —— 而漏掉的表现正是「只是那一路没有下文」，只在断网重连后才看得见
+     * （与 task-59 b 同一条纪律）。
+     */
+    thinkingOnlyFallback: String = "",
 ): AgentChatMessage? {
     val eventText = format(rec, sessionTitle) ?: return null
     if (!hasVisibleText(eventText)) return null
     val isUserPrompt = rec.eventType.lowercase() == "user.message"
     val (parsedReasoning, cleanAnswer) = com.kapp.tidings.domain.model.parseThinkingContent(eventText)
-    val finalAnswer = if (parsedReasoning != null) cleanAnswer else eventText
-    if (!hasVisibleText(finalAnswer)) return null
+    // 只有思考、没有正文：**不许静默丢弃**（真机上这类回合整轮消失过，用户只说「没有下文」）。
+    // 思考块留在 reasoning 里（界面上是折叠的「思考」），正文用一句如实的话顶上；
+    // 顶替文本取不到（空串）时才退回旧行为。
+    val thinkOnly = !hasVisibleText(cleanAnswer)
+    val finalAnswer = when {
+        !thinkOnly -> cleanAnswer
+        parsedReasoning != null && hasVisibleText(thinkingOnlyFallback) -> thinkingOnlyFallback
+        else -> return null
+    }
     return AgentChatMessage(
         text = finalAnswer,
         reasoning = parsedReasoning,

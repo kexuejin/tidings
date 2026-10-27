@@ -24,7 +24,12 @@ import io.ktor.utils.io.ByteReadChannel
 import io.ktor.utils.io.ByteWriteChannel
 import com.kapp.tidings.core.transport.DIRECTION_IN
 import com.kapp.tidings.core.transport.DedupStore
+import com.kapp.tidings.core.transport.DatagramTransport
+import com.kapp.tidings.core.transport.FileChannelRouter
+import com.kapp.tidings.core.transport.FileChannelNegotiation
+import com.kapp.tidings.core.transport.ChunkFileTarget
 import com.kapp.tidings.core.transport.Discovery
+import com.kapp.tidings.core.transport.DiscoveryEngine
 import com.kapp.tidings.core.transport.SYNTHETIC_NICK_PREFIX
 import com.kapp.tidings.core.transport.InMemoryDedupStore
 import com.kapp.tidings.core.transport.InMemoryMessageStore
@@ -56,6 +61,8 @@ import com.kapp.tidings.core.transport.CrossNetworkRawDialer
 import com.kapp.tidings.core.transport.CrossNetworkTransferPlanner
 import com.kapp.tidings.core.transport.CrossNetworkTransferPolicy
 import com.kapp.tidings.core.transport.PullAttemptTransport
+import com.kapp.tidings.core.transport.ScreenChannelHost
+import com.kapp.tidings.core.transport.ScreenChannelNegotiation
 import com.kapp.tidings.core.transport.ScreenWire
 import com.kapp.tidings.core.transport.ScreenWireOpener
 import com.kapp.tidings.core.transport.crossNetworkScreenPort
@@ -153,6 +160,52 @@ class NodeRuntime(
      */
     private val knownPeerStore: KnownPeerStore? = null,
     /**
+     * 阶段三(合并切):提供时 Messenger 的传输面换成它(认证加密信道)且
+     * legacy Discovery 不启动——发现由 extraDiscovery(luciola)承担。
+     * 不提供 = 完全 legacy(iOS / 未迁移宿主)。
+     *
+     * 是**工厂而不是实例**:luciola 的入站帧要按 `from` 查到对端地址才递得进
+     * Messenger,而 registry 由本类自己创建(见 [registry])。宿主传
+     * `{ registry -> factory.createTransport(registry) }`。
+     */
+    private val messengerTransportFactory: ((PeerRegistry) -> DatagramTransport)? = null,
+    /**
+     * 是否启用**信道文件数据面**（`fch1` 协商通过时由宿主传 true）。
+     *
+     * 为什么在运行时这一层判断：路由器要同时知道「传输面怎么发帧」与「registry 里
+     * 对端是谁」，那两样只有本类有。false = 不启用（逐字回到 legacy）。
+     */
+    private val fileChannelEnabled: Boolean = false,
+    /**
+     * 画面信道（luciola）宿主；null = 没有画面信道，投屏继续走 legacy（17879/17882）。
+     *
+     * 只有 `fileChannelEnabled`（luciola 模式）+ 档案里有 `screenPort` + 本参数非空
+     * 三件齐了才会真的起监听**并**把新通路排进 Viewer 的计划 —— 缺一件就整体退回
+     * legacy，绝不出现"声明了 scr1 却没人听画面端口"。
+     */
+    private val screenChannelHostFactory: ((PeerRegistry) -> ScreenChannelHost)? = null,
+    /**
+     * 画面信道的监听端口（宿主定，必须与 [screenChannelHost] 起的那条会话一致）。
+     *
+     * 由宿主传入而不是运行时自己猜：端口是**绑定结果**，猜错就是"我广播了一个没人听的
+     * 端口"。null = 本机不提供画面信道（手机端按平台能力决定）。
+     */
+    private val screenChannelPort: Int? = null,
+    /**
+     * 额外发现引擎(阶段二 B-3:luciola 桥接)。与主 Discovery 并存:
+     * registry 按 nodeId 去重;luciola 补 IPv6 多播/防 TUN 的发现覆盖,
+     * legacy 继续承载 msg 帧(阶段三切 SecureChannel 后移除)。
+     * 仅 JVM/Android 宿主传入 LuciolaDiscoveryEngine;iOS 传 null(legacy)。
+     */
+    private val extraDiscovery: DiscoveryEngine? = null,
+    /**
+     * 额外发现引擎的**工厂**版本（与 [extraDiscovery] 二选一,工厂优先）。
+     *
+     * 为什么需要:luciola 的发现把 found/updated/lost 直接写进 [registry],而 registry
+     * 是本类自己创建的 —— 宿主拿不到实例,只能拿工厂（同 [messengerTransportFactory]）。
+     */
+    private val extraDiscoveryFactory: ((PeerRegistry, () -> Profile) -> DiscoveryEngine)? = null,
+    /**
      * 长连接的连接层（K2 的接缝）。K1 默认明文 [PlaintextLinkTransport]；K2 换成
      * TLS + 双向 pin 的实现即可，本类一行不用改。
      */
@@ -232,9 +285,49 @@ class NodeRuntime(
         { _, _ -> false },
 ) {
 
-    private val transport = UdpTransport(udpPort, bindHost)
+    // registry 必须先于 transport:luciola 工厂需要它来解析入站帧的对端地址。
     private val registry = PeerRegistry(profile.nodeId)
+
+    // legacy UDP 传输。luciola 模式(messengerTransportFactory != null)下
+    // legacy Discovery 不启动,所以 UdpTransport 只在 factory 为空时创建。
+    private val transport: DatagramTransport =
+        messengerTransportFactory?.invoke(registry) ?: UdpTransport(udpPort, bindHost)
+
+    // 额外发现:实例优先,其次工厂(两者都空 = 纯 legacy)。
+    private val resolvedExtraDiscovery: DiscoveryEngine? =
+        extraDiscovery ?: extraDiscoveryFactory?.invoke(registry, { selfProfile })
     private val tcp: TcpFramedChannel? = if (enableTcp) TcpFramedChannel() else null
+
+    /**
+     * 画面信道宿主（`start` 里按 [screenChannelHostFactory] + 本运行时的 registry 建）。
+     *
+     * 为什么是工厂而不是实例：宿主对象需要 `PeerRegistry`（指纹 → 端点归属），而
+     * registry 是本运行时自己建的 —— 与 `messengerTransportFactory` 同一个理由。
+     */
+    private var screenChannelHost: ScreenChannelHost? = null
+
+    /**
+     * 信道文件数据路由器（仅 `fileChannelEnabled` 时存在）。
+     *
+     * 发送面绑到「registry 查端点 → transport.send」：加密信道是 TCP，端口用对端的
+     * `luciolaPort`（发现登记时已归一到 registry 的 udpPort，见 LuciolaDiscoveryEngine）。
+     */
+    val fileChannel: FileChannelRouter? =
+        if (fileChannelEnabled) {
+            FileChannelRouter(
+                sendToPeer = { peerId, bytes ->
+                    val record = registry.get(peerId)
+                    if (record == null || !record.online) {
+                        false
+                    } else {
+                        transport.send(bytes, record.ip, record.udpPort)
+                    }
+                },
+            )
+        } else {
+            null
+        }
+
 
     /**
      * 长连接开关。
@@ -278,6 +371,13 @@ class NodeRuntime(
     private val selfProfile: Profile
         get() = profile.copy(
             tlsPin = linkTransport.localPin?.wire ?: profile.tlsPin,
+            // luciola 模式下把**信道的监听端口**告诉对端:发现引擎上报的端口可能是
+            // 临时端口,不能拿来拨号(真机实测 17878 vs 52213)。
+            luciolaPort = if (messengerTransportFactory != null) {
+                transport.boundPort.takeIf { it > 0 }
+            } else {
+                null
+            },
             // **把本机全部可路由地址带出去**（含 Tailscale / ZeroTier 段）。
             //
             // 对端原先只能从「发现包的源地址」学地址，而广播不跨 VPN 网段 ⇒
@@ -286,9 +386,23 @@ class NodeRuntime(
             //
             // 带上全部地址后，任意一条通路收到过一次 profile 就能打破死锁。
             addresses = advertisedAddresses().takeIf { it.isNotEmpty() } ?: profile.addresses,
+            // 画面信道的端口：只在真的会起监听时才广播（否则就是对端一直等握手）。
+            screenPort = screenChannelPort
+                ?.takeIf { screenChannelHost != null && it in 1..65535 && fileChannelEnabled },
         )
 
-    private val discovery = Discovery(
+    /**
+     * **本机是否还在跑 legacy 发现**（只读，诊断/共存解释用）。
+     *
+     * 为什么要把这个暴露出去：开启 luciola 模式后 `legacyDiscoveryEnabled` 变 false，
+     * legacy 发现整体关闭 —— 于是**没升级的老设备既发现不到我们、我们也发现不到它**，
+     * 它只是静静地显示成"离线"。控制面的 peer 诊断靠这个标志区分
+     * "设备关机" 与 "它还在老传输上"。
+     */
+    val legacyDiscoveryActive: Boolean get() = legacyDiscoveryEnabled
+
+    private val legacyDiscoveryEnabled = messengerTransportFactory == null
+    private val discovery: DiscoveryEngine = if (legacyDiscoveryEnabled) Discovery(
         transport,
         registry,
         // task-38：把自己的 TLS pin 随资料带出去（旧端忽略未知键 ⇒ 兼容）。
@@ -303,7 +417,15 @@ class NodeRuntime(
         // 不再依赖 TOFU 的首次固定 —— 那个有"攻击者抢先声明 nodeId"的首次使用竞态。
         onPeerPin = { nodeId, pin -> setPeerPin(nodeId, pin, PeerRegistry.PIN_SOURCE_PAIRING) },
         subnetBroadcasts = subnetBroadcasts,
-    )
+    ) else object : DiscoveryEngine {
+        // luciola 模式:发现由 extraDiscovery(luciola)承担,这里给一个哑实现
+        // 兜底——所有动作都是 no-op(NodeRuntime 的其余代码仍会调它们)。
+        override fun start(scope: CoroutineScope) {}
+        override fun stop() {}
+        override suspend fun announce() {}
+        override suspend fun announceTo(host: String, port: Int) {}
+        override suspend fun announceExit() {}
+    }
     internal val messenger = Messenger(
         transport = transport,
         registry = registry,
@@ -313,6 +435,7 @@ class NodeRuntime(
         timings = timings,
         tcpFallback = tcp,
         acceptQueueFor = acceptQueueFor,
+        preferTransport = messengerTransportFactory != null,
     )
     private val outbound = NodeOutbound(
         messenger = messenger,
@@ -363,6 +486,12 @@ class NodeRuntime(
 
     /** 实际绑定的 UDP 端口。`udpPort` 传 0 时在 [start] 之后才有效。 */
     val boundPort: Int get() = transport.boundPort
+
+    /**
+     * 扫码后向对端发配对自证(luciola)。false = 本节点没跑加密信道/该对端码里没有密钥。
+     */
+    suspend fun requestLuciolaPairing(host: String, port: Int): Boolean =
+        transport.requestPairing(host, port, profile.nodeId)
 
     /**
      * 实际绑定的 **TCP** 端口（文件传输与可靠投递），[start] 之前为 null。
@@ -448,26 +577,58 @@ class NodeRuntime(
         registry.addListener { event ->
             // Online 也要记：它意味着"这台设备确实存在且可达过"，比任何静态资料都硬。
             // 跨平台 AtomicBoolean 的写是 `store`（JVM 版叫 `set`）。
-            if (event is PeerEvent.Updated || event is PeerEvent.Online) dirty.store(true)
+            // Removed 也要标脏：用户删掉一个节点后，文件里那条必须跟着消失，
+            // 否则重启时 restoreOffline 会把它原样放回来（「删了没用」的现场）。
+            if (event is PeerEvent.Updated || event is PeerEvent.Online || event is PeerEvent.Removed) {
+                dirty.store(true)
+            }
         }
         runScope.launch {
             while (isActive) {
                 delay(KNOWN_PEER_FLUSH_MS)
                 if (!dirty.compareAndSet(true, false)) continue
-                runCatching {
-                    store.save(
-                        registry.values().map { record ->
-                            com.kapp.tidings.core.persist.KnownPeer(
-                                profile = record.profile,
-                                ip = record.ip,
-                                udpPort = record.udpPort,
-                                lastSeen = record.lastSeen,
-                            )
-                        },
-                    )
-                }
+                runCatching { store.save(knownPeersSnapshot()) }
             }
         }
+    }
+
+    /**
+     * 当前 registry 的「已知对端」快照（落盘用）。
+     *
+     * 抽成函数是为了让「删除节点」那条路与后台定时落盘**写的是同一份形状** ——
+     * 两处各拼一遍字段，迟早一处漏字段（known-peers 里少一列，重启后那台设备就只剩 nodeId）。
+     */
+    private fun knownPeersSnapshot(): List<com.kapp.tidings.core.persist.KnownPeer> =
+        registry.values().map { record ->
+            com.kapp.tidings.core.persist.KnownPeer(
+                profile = record.profile,
+                ip = record.ip,
+                udpPort = record.udpPort,
+                lastSeen = record.lastSeen,
+            )
+        }
+
+    /**
+     * 把一条节点从**本机**节点表里删掉（用户显式动作）。
+     *
+     * 与 [PeerRegistry.forget] 的分工：那边只动内存；这里把四份落盘一起缩掉，而且
+     * **立刻**写，不等 1.5 秒的合并窗口 —— 用户在按下确认后马上杀进程，也应该得到
+     * 「删掉了」的结果，而不是重启后它又回来了。
+     *
+     * 注意：删完不等于「拉黑」。它下次在局域网里出现时，发现流程会重新学到它；
+     * 要拒绝一台设备是另一件事（信任库），不在本函数的语义里。
+     *
+     * @return 这条节点此前是否存在过。
+     */
+    fun forgetPeer(nodeId: String): Boolean {
+        if (!registry.forget(nodeId)) return false
+        runCatching { knownPeerStore?.save(knownPeersSnapshot()) }
+        runCatching { peerEndpointStore.save(registry.allCandidates()) }
+        runCatching {
+            peerPinStore.save(registry.allPins())
+            peerPinStore.saveSources(registry.allPinSources())
+        }
+        return true
     }
 
     private companion object {
@@ -543,7 +704,7 @@ class NodeRuntime(
             tlsPort = record.profile.tlsPort,
             hasPin = pin != null,
         )
-        return plan.map { attempt ->
+        val legacy = plan.map { attempt ->
             when (attempt.transport) {
                 PullAttemptTransport.Plaintext -> plainScreenWireOpener(attempt.host, attempt.port)
                 // 5s 拨号超时：公网握手失败要快速试下一条候选,不能挂住整场连接。
@@ -555,6 +716,29 @@ class NodeRuntime(
                 }
             }
         }
+        // 新数据面排在**最前**：协商通过就优先走加密画面会话，失败自然落到 legacy
+        // 的那几条（ScreenReceiver 按序试，"握上手"才算这条通）。
+        //
+        // **按对端候选地址逐条尝试**（不只局域网那一个）：画面信道要替代 17882 那条
+        // 跨网 TLS 入口，就必须能走公网地址 —— 只拨 `record.ip` 的话，一旦退役 17882，
+        // 蜂窝/跨网场景就彻底没有投屏了（真机先把这条补上，再谈退役）。
+        // 候选顺序沿用 registry 的池子（同一条纪律见 CrossNetworkTransferPolicy），
+        // 局域网地址天然排在前面。
+        val host = screenChannelHost
+        val peer = record.profile
+        val screenPort = peer.screenPort
+        if (host != null && screenPort != null &&
+            ScreenChannelNegotiation.canUseChannel(selfProfile, peer)
+        ) {
+            val addresses = buildList {
+                add(record.ip)
+                registry.candidatesOf(peerId).forEach { c ->
+                    if (c.host.isNotBlank() && c.host != record.ip) add(c.host)
+                }
+            }
+            return addresses.map { addr -> host.opener(addr, screenPort) } + legacy
+        }
+        return legacy
     }
 
     /**
@@ -651,7 +835,26 @@ class NodeRuntime(
         for ((nodeId, pin) in peerPinStore.load()) {
             registry.setPin(nodeId, pin, pinSources[nodeId] ?: PeerRegistry.PIN_SOURCE_UNKNOWN)
         }
+        // 信道数据帧（文件/投屏字节）在 **Messenger 之前**分流：它们是二进制帧，
+        // 交给 Messenger 的 Envelope 解码只会被判成坏帧丢掉；而一条已经被认领的
+        // TDCH/TDCA 帧不应该再进可靠消息管线（它本来就不需要 ACK/去重）。
+        fileChannel?.let { router ->
+            runScope.launch {
+                transport.incoming.collect { datagram ->
+                    runCatching { router.onBinaryFrame(datagram.bytes) }
+                }
+            }
+        }
+        // 画面信道宿主先建起来：`selfProfile` 要按"它到底建没建"决定广播不广播 screenPort
+        // （广播一个没人听的端口，对端会一直等 screen-ready）。
+        screenChannelHost = screenChannelHostFactory?.let { factory ->
+            runCatching { factory(registry) }
+                .onFailure { t -> println("[luciola] screen channel host failed: " + t) }
+                .getOrNull()
+        }
+
         discovery.start(runScope)
+        resolvedExtraDiscovery?.start(runScope)
         messenger.start(runScope)
 
         // 长连接（K1）：主机侧接受、发起侧按开关连出去；同一个运行时两个角色都在。
@@ -778,6 +981,72 @@ class NodeRuntime(
                 peerSupportsDirect = { peerId ->
                     registry.get(peerId)?.profile?.caps?.contains(MsgTypes.CAP_FILE_DIRECT) == true
                 },
+                // 信道文件数据面：**只有** 启用 + 对端声明 fch1 才接管。
+                // 接管 = 登记到路由器且**不发 pull**；否则返回 false，走 legacy 拨号拉取。
+                registerChannelInbound = fileChannel?.let { router ->
+                    register@ { offer, saveDir ->
+                        val peerCaps = registry.get(offer.peerId)?.profile?.caps
+                        val allows = FileChannelNegotiation.canUseChannel(
+                            selfCaps = selfProfile.caps,
+                            peerCaps = peerCaps,
+                        )
+                        if (!allows) {
+                            // 不接管 ⇒ 上层回退 legacy 拨号。这条必须留下原因：
+                            // "对端没声明 fch1" 与 "我自己没声明" 是两种完全不同的故障。
+                            println(
+                                "[luciola] channel inbound declined: selfFch1=" +
+                                    selfProfile.caps.contains(MsgTypes.CAP_FILE_CHANNEL) +
+                                    " peerCaps=" + peerCaps,
+                            )
+                            return@register false
+                        }
+
+                        var registered = 0
+                        for (file in offer.files) {
+                            if (file.isDir) continue
+                            val ok = router.registerInbound(
+                                peerId = offer.peerId,
+                                transferId = offer.transferId,
+                                fileId = file.fileId,
+                                // 信道模式先只校验长度；sha 由 done 帧给（后续步骤）。
+                                target = ChunkFileTarget(file.relPath, file.size, null),
+                                root = saveDir,
+                            )
+                            if (ok) registered++
+                        }
+                        if (registered == 0) {
+                            println(
+                                "[luciola] channel inbound registered 0 files: transfer=" +
+                                    offer.transferId.take(8) + " files=" + offer.files.size,
+                            )
+                        }
+                        registered > 0
+                    }
+                },
+                // 出站：对端 accept 之后我们**推**。sha 由对端按长度校验（与 legacy 同一纪律）。
+                pushFileOnChannel = fileChannel?.let { router ->
+                    push@ { transferId, peerId, files ->
+                        println(
+                            "[luciola] channel push start transfer=" + transferId.take(8) +
+                                " peer=" + peerId.take(8) + " files=" + files.size,
+                        )
+                        for (file in files) {
+                            val pushed = router.sendFile(
+                                peerId = peerId,
+                                transferId = transferId,
+                                fileId = file.fileId,
+                                source = com.kapp.tidings.core.transport.DiskFileChunkSource(file.absPath),
+                            )
+                            println(
+                                "[luciola] channel push file=" + file.fileId.take(8) +
+                                    " sent=" + pushed + "/" + file.size,
+                            )
+                            if (pushed < file.size) {
+                                throw IllegalStateException("channel push incomplete for " + file.fileId)
+                            }
+                        }
+                    }
+                },
                 // TCP 回退的长文本（>800 字节）也走这条监听器，收下后与 UDP 路径共用投递纪律。
                 receiveMessage = { envelope, remoteAddress ->
                     messenger.acceptTcpMessage(envelope, remoteAddress)
@@ -811,6 +1080,10 @@ class NodeRuntime(
                 // 主机侧入口：独立 TLS 监听（对端按 tlsPort + 1 来连）。起不来就只是没这条入口。
                 crossNetworkListener = crossNetworkFileListener,
                 crossNetworkFilePort = crossNetworkFilePort(profile.tlsPort),
+                // luciola 信道模式：**不创建** 17879 明文监听与 17881 跨网 TLS 监听
+                // （它们只是两个可被扫到的端口）。旧协议的入站在这个模式下不存在 ——
+                // 发现也已经是 luciola 的，老对端找不到我们，谈不上「回退到 legacy 端口收」。
+                legacyTcpListener = !fileChannelEnabled,
             )
         } else {
             null
@@ -824,8 +1097,30 @@ class NodeRuntime(
         // 是 `screen-open` 且宿主认领（会话/token 校验在 onOpenScreenWire 里）才交接,
         // 否则关掉 —— 与明文监听（TransferServer 首帧分发）同一套纪律。
         // 起不来（平台不支持 / 端口被占）只是**没有跨网入口**,局域网原路径不受影响。
+        // 画面信道（luciola）：独立会话，一帧都不走 17879/17882。
+        // 与 legacy 监听**互不替代地并存**：开关/协商任一不满足时 legacy 那条仍然是投屏的路。
+        val screenHost = screenChannelHost
+        val secureScreenPort = screenChannelPort?.takeIf { it in 1..65535 }
+        if (fileChannelEnabled && screenHost != null && secureScreenPort != null) {
+            runCatching {
+                screenHost.startListening { wire ->
+                    // 首帧是 screen-open（与两条 legacy 通路同一套解码与 token 校验）。
+                    runScope.launch {
+                        val open = readFirstScreenOpen(wire.read)
+                        if (open == null || !onOpenScreenWire(open, wire)) {
+                            runCatching { wire.close() }
+                        }
+                    }
+                }
+            }.onFailure { t -> println("[luciola] screen channel listen failed: " + t) }
+        }
+        // luciola 信道模式下**不创建** 17882（跨网投屏 TLS）。
+        //
+        // 与 17879/17881 同一条纪律：那三个端口在信道模式下没有存在意义，留着只是多一个
+        // 可被扫到的入口。画面走 [screenChannelHost] 的独立加密会话，且它的 opener
+        // 已按对端候选地址逐条尝试（见 screenWireAttempts），所以跨网投屏不再依赖 17882。
         val screenPort = crossNetworkScreenPort(profile.tlsPort)
-        if (screenPort != null && crossNetworkScreenListener.canServe) {
+        if (!fileChannelEnabled && screenPort != null && crossNetworkScreenListener.canServe) {
             runCatching {
                 crossNetworkScreenListener.start(screenPort) { conn ->
                     val wire = ScreenWire(conn.read, conn.write) { runCatching { conn.close() } }
@@ -865,7 +1160,11 @@ class NodeRuntime(
         // 绑 TCP 端口要放在订阅之后：端口一开，桌面端就可能连进来拉文件。
         // 返回值**必须**留下：见 [tcpBound]。丢掉它等于让"端口没拿到"永远没人知道，
         // 而资料里那个 tcpPort 照样会广播出去。
-        tcpBound = manager?.start() ?: false
+        // 注意：这里判的是**真的绑上了端口**，不是「管理器起来了」。
+        // 信道模式（legacyTcpListener = false）下 manager.start() 仍返回 true（数据传输
+        // 走 fch1），但 `boundPort` 是 null —— 那种情况不许宣称自己绑着 TCP。
+        val started = manager?.start() == true
+        tcpBound = started && manager?.boundPort != null
         if (tcpBound) {
             // 声明一个自己没拿到的端口，后果不是"收不到"而是**投递错人**：对端照着我们
             // 广播出去的 tcpPort 去连，连上的是占着那个端口的另一个程序。
@@ -907,8 +1206,11 @@ class NodeRuntime(
         transfer?.stop()
         transfer = null
         runCatching { crossNetworkScreenListener.stop() }
+        runCatching { screenChannelHost?.stopListening() }
+        screenChannelHost = null
         tcpBound = false
         discovery.stop()
+        resolvedExtraDiscovery?.stop()
         messenger.stop()
         transport.stop()
         tcp?.close()
@@ -1049,7 +1351,10 @@ class NodeRuntime(
     fun leftoverParts(): List<PartFile> = transfer?.leftoverParts().orEmpty()
 
     /** 主动握手：向广播地址或所有手动节点单播 `entry`。 */
-    suspend fun announce() = discovery.announce()
+    suspend fun announce() {
+        discovery.announce()
+        resolvedExtraDiscovery?.announce()
+    }
 
     /**
      * 网络路径变了：**立刻**重拨长连接（不等退避），并排空一次离线队列（K3 ①）。
@@ -1086,7 +1391,10 @@ class NodeRuntime(
      * 只在**真的要离开**时调（退出进程 / 主动停节点），不要在 [stop] 里无条件发：
      * `restart()` 会先停后起，发了就是一次"离线→在线"的假抖动。
      */
-    suspend fun announceExit() = discovery.announceExit()
+    suspend fun announceExit() {
+        discovery.announceExit()
+        resolvedExtraDiscovery?.announceExit()
+    }
 
     suspend fun sendText(peerId: String, text: String) = outbound.sendText(peerId, text)
 

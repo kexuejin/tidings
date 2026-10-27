@@ -40,6 +40,8 @@ import com.kapp.tidings.generated.resources.recovery_import_success_title
 import com.kapp.tidings.generated.resources.recovery_password_empty
 import com.kapp.tidings.generated.resources.recovery_password_label
 import com.kapp.tidings.generated.resources.recovery_password_title
+import com.kapp.tidings.generated.resources.set_luciola_sub
+import com.kapp.tidings.generated.resources.set_luciola_title
 import com.kapp.tidings.generated.resources.recovery_export_tail_app_dir
 import com.kapp.tidings.generated.resources.recovery_export_tail_public
 import com.kapp.tidings.generated.resources.recovery_export_tail_public_shared
@@ -124,6 +126,8 @@ fun SettingsDataSubpage(
     onOpenDataDirectory: (() -> Unit)? = null,
     persistMessagesEnabled: Boolean = false,
     onPersistMessagesEnabledChange: ((Boolean) -> Unit)? = null,
+    experimentalLuciolaEnabled: Boolean = false,
+    onExperimentalLuciolaChange: ((Boolean) -> Unit)? = null,
     retentionDays: Int = DEFAULT_RETENTION_DAYS,
     onClearHistory: (() -> Unit)? = null,
     /** L1 导出（口令加密身份包）。null = 本宿主没有接（整张卡不画，与目录出口同一纪律）。 */
@@ -283,6 +287,22 @@ fun SettingsDataSubpage(
                 onCheckedChange = { next ->
                     persistMessages = next
                     onPersistMessagesEnabledChange?.invoke(next)
+                },
+            )
+
+            // luciola 加密信道。**默认关**:延迟判据还没达标，且开启后老版本设备
+            // 会失去自动发现（只认二维码/手动地址）—— 取舍写在文案里，由用户决定。
+            // 开启或关闭都需重启节点生效。
+            var experimentalLuciola by rememberSaveable(experimentalLuciolaEnabled) {
+                mutableStateOf(experimentalLuciolaEnabled)
+            }
+            SettingSwitchRow(
+                title = stringResource(Res.string.set_luciola_title),
+                subtitle = stringResource(Res.string.set_luciola_sub),
+                checked = experimentalLuciola,
+                onCheckedChange = { next ->
+                    experimentalLuciola = next
+                    onExperimentalLuciolaChange?.invoke(next)
                 },
             )
 

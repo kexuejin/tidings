@@ -37,6 +37,11 @@ private class JdkRandomAccessFileHandle(private val file: JdkRandomAccessFile) :
         file.write(buffer, 0, count)
     }
 
+    override fun writeAt(atOffset: Long, buffer: ByteArray, count: Int) {
+        file.seek(atOffset)
+        file.write(buffer, 0, count)
+    }
+
     /**
      * `RandomAccessFile` 没有用户态缓冲，写就是 write(2)。这里做 `fd.sync()` 是为了
      * 崩溃后 `.part` 的长度可信 —— 对端已经确认收到的字节不能只停在页缓存里。

@@ -58,6 +58,16 @@ public interface DesktopPaneActions {
 
     fun removeManualPeer(entry: ManualPeerEntry)
 
+    /**
+     * 「移除节点」：手动地址与发现来的节点都走这一条。
+     *
+     * 默认实现只处理手动地址（预览/没有节点运行时的壳），把「删身份记忆」留给真正的
+     * 控制器 —— 那一侧要动 registry 与四份落盘，不是一个空实现能糊过去的。
+     */
+    fun removeNode(removal: NodeRemoval) {
+        if (removal is NodeRemoval.ManualAddress) removeManualPeer(removal.entry)
+    }
+
     fun removeUnreachableManualPeers()
 
     /**
@@ -154,6 +164,23 @@ public interface DesktopPaneActions {
     fun createGroup(name: String, memberIds: List<String>, description: String = ""): String?
 
     /**
+     * 给一个**工作区**建协同群（[wsId] 为 null = 「关联本地全新目录」，还没有工作区行）。
+     *
+     * 与 [createGroup] 的差别只有一条，但正是用户踩到的那个坑：**允许此刻没有任何
+     * 其它设备**，并把工作区上的 agent 声明进群。工作区群是「先建出来、再分享码拉设备」，
+     * 而 [createGroup] 要求「至少再选一个人」——建群对话框在这一支里根本没有可勾的人，
+     * 于是单机用户永远建不出群（真机反馈：「无法快速建群，一直提示要至少一个人」）。
+     *
+     * @return 新群的 groupId；名字不合法（空 / 超长）时为 null。
+     */
+    fun createWorkspaceGroup(
+        name: String,
+        wsId: String?,
+        memberIds: List<String>,
+        description: String = "",
+    ): String? = createGroup(name, memberIds, description)
+
+    /**
      * 邀请新成员加入群聊。
      */
     fun addGroupMembers(groupId: String, newMemberIds: List<String>)
@@ -162,6 +189,14 @@ public interface DesktopPaneActions {
      * 移出群成员（仅群主或管理员有权）。
      */
     fun removeGroupMember(groupId: String, memberId: String)
+
+    /**
+     * 群主**解散**群：对所有成员生效（不是「我退出去」）。
+     *
+     * 默认空实现 = 这个壳没有解散能力（预览/截图夹具），群信息里不画那颗按钮 ——
+     * 而不是给一个按了什么都不发生的动作。
+     */
+    fun dissolveGroup(groupId: String): Unit = Unit
 
     fun pickAndSendFiles(peerId: String)
 

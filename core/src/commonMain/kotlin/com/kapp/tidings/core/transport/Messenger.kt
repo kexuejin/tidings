@@ -68,7 +68,7 @@ interface TcpFallback {
  *   以"延迟失败"的形式暴露。
  */
 class Messenger(
-    private val transport: UdpTransport,
+    private val transport: DatagramTransport,
     private val registry: PeerRegistry,
     private val selfNodeId: String,
     private val queueStore: QueueStore,
@@ -102,6 +102,14 @@ class Messenger(
      * null = 不做判断（测试与老调用点行为一字不变）。
      */
     private val acceptQueueFor: ((String) -> Boolean)? = null,
+    /**
+     * luciola 模式:消息**优先走传输面**(加密信道),而不是先试 legacy K1 长连接。
+     *
+     * 真机归因实验(2026-10-26):发现换成 luciola 后,消息仍先走 K1
+     * (`outcome=sent-via-link`),加密信道只是配对握手用了 —— 传输没真正替换。
+     * 打开本开关后,链路不再是第一选择(仍保留为失败回退),数据面才真正落在信道上。
+     */
+    private val preferTransport: Boolean = false,
 ) {
 
     private val _incoming = MutableSharedFlow<Envelope>(extraBufferCapacity = 128)
@@ -371,11 +379,34 @@ class Messenger(
     }
 
     /** 发一条可靠消息：ACK 成功 → SENT；否则入队并标记对端离线 → QUEUED。 */
+    /**
+     * 发送通道归因(真机排障用):同一条消息可能走 长连接(LINK) / legacy TCP / 传输面
+     * (luciola 模式下就是加密信道)。每个对端只在**通道发生变化**时打一行,
+     * 避免刷屏;诊断页/日志据此能回答"消息到底走了哪条路"。
+     */
+    enum class SendChannel { LINK, TCP, TRANSPORT }
+
+    private val lastSendChannel = HashMap<String, SendChannel>()
+
+    private fun noteSendChannel(peerId: String, channel: SendChannel) {
+        val changed = synchronized(lastSendChannel) {
+            lastSendChannel.put(peerId, channel) != channel
+        }
+        if (changed) println("[send] peer=" + peerId.take(8) + " channel=" + channel)
+    }
+
     suspend fun sendUserMessage(peerId: String, envelope: Envelope): SendOutcome {
         val started = nowMillis()
         // 链路优先 + 半死时重拨（见 tryLinkFirst）：消息与报价走**同一条**判定。
-        val linkTry = tryLinkFirst(peerId, envelope, started)
+        // luciola 模式（preferTransport）下跳过这一步，直接走传输面（加密信道）；
+        // 传输失败仍会在下面回退 TCP/队列，链路不再抢在加密信道前面。
+        val linkTry = if (preferTransport) {
+            LinkFirstOutcome(sent = null, tcpSkipped = null)
+        } else {
+            tryLinkFirst(peerId, envelope, started)
+        }
         linkTry.sent?.let { sent ->
+            noteSendChannel(peerId, SendChannel.LINK)
             lastSendDiagnostics = sent
             _status.tryEmit(MessageStatus(peerId, envelope.id, "sent"))
             return SendOutcome.SENT
@@ -440,6 +471,7 @@ class Messenger(
             peerOnline = registry.get(peerId)?.online == true,
         )
         if (ok) {
+            noteSendChannel(peerId, if (tcpOk) SendChannel.TCP else SendChannel.TRANSPORT)
             _status.tryEmit(MessageStatus(peerId, envelope.id, "sent"))
             return SendOutcome.SENT
         }

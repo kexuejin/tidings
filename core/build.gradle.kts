@@ -57,6 +57,11 @@ kotlin {
     }
 
     sourceSets {
+        // luciola 发现引擎(JVM/Android;iOS 保留自研)。luciola 仓库 docs/MIGRATION-tidings.md 阶段一。
+        val jvmMain by getting { dependencies { implementation(libs.luciola) } }
+        // Android 必须用 AAR 变体:luciola-jvm 只有桌面 dylib,JNA 在 Android 上加载不到;
+        // AAR 里带 jniLibs/*.so(见 luciola 仓 verifyNativeLib 的守卫)。
+        val androidMain by getting { dependencies { implementation(libs.luciola.android) } }
         getByName("jvmSharedMain").dependencies {
             implementation(libs.kotlinx.coroutines.core)
             implementation(libs.ktor.network)
@@ -72,4 +77,63 @@ kotlin {
             implementation(libs.kotlinx.coroutines.test)
         }
     }
+}
+
+// luciola(JNA) 在测试里加载本地库；分支阶段指向本机构建产物。
+//
+// **优先 release**：debug 引擎的 AES-GCM/握手是未优化的，同一条数据面实测慢 6-8 倍
+// （投屏 10fps×100KiB 的单帧 p95：release 6ms / debug 29ms；50MB 文件 3s vs 46s）。
+// 拿 debug 的数去验收会得到「加密信道就是慢」的错误结论 —— 而真机装的是 release。
+val luciolaNativeDir: String = runCatching {
+    val base = file("/workspace/RustBuild/cargo-target")
+    listOf(base.resolve("release"), base.resolve("debug"))
+        .firstOrNull { it.resolve("libluciola_uniffi.dylib").exists() }
+        ?.absolutePath
+        ?: base.resolve("debug").absolutePath
+}.getOrDefault("/workspace/RustBuild/cargo-target/debug")
+
+tasks.withType<Test>().configureEach {
+    systemProperty("jna.library.path", System.getProperty("jna.library.path") ?: luciolaNativeDir)
+}
+
+// ## 为什么验收用例要单独一个 JVM
+//
+// `ChannelFileTransferE2ETest` 是**真验收**：两条真实 luciola 加密信道、真实分块窗口、
+// 真落盘 50MB 再校验 sha256，跑一次 ~40s 并持续做文件 IO。把它放进 `:core:jvmTest`
+// 会把同一 JVM 里后续的 luciola 握手用例挤到超时 —— 实测连跑时
+// `binaryChunkFrameFromTrustedPeerCarriesPeerEndpoint` 这类用例会在 10s 上超时，
+// 单个类跑却是绿的（683/683）。所以判据拆成两条，都跑才算过：
+//
+//   ./gradlew :core:jvmTest              # 单元/协议（四套 JVM 套件的一项）
+//   ./gradlew :core:jvmAcceptanceTest    # ≥50MB 信道验收（goal 第 3 步证据）
+val jvmAcceptanceTest = tasks.register<Test>("jvmAcceptanceTest") {
+    group = "verification"
+    description = "luciola 信道 ≥50MB 验收（真实信道 + 真实落盘 + sha256 一致）"
+    val base = tasks.named<Test>("jvmTest")
+    dependsOn("jvmTestClasses")
+    testClassesDirs = base.get().testClassesDirs
+    classpath = base.get().classpath
+    filter {
+        includeTestsMatching("com.kapp.tidings.core.transport.ChannelFileTransferE2ETest")
+    }
+    // **必须与上面 tasks.withType<Test> 同一份 release 路径**。
+    //
+    // 这里原来硬编码成 `cargo-target/debug`，而本文件上面对 release 的注释已经写明：
+    // debug 引擎的 AES-GCM/握手未优化，同一条数据面慢 6-8 倍（50MB：3s vs 46s），
+    // 「拿 debug 的数去验收会得到『加密信道就是慢』的错误结论。」
+    //
+    // 实际后果（2026-10-27 查明）：这条验收长期跑在 debug 引擎上 ——
+    //   ① 吞吐只有 0.15-0.16 MiB/s，被误判成协议/加密的问题，查了十几轮；
+    //   ② 上游 Rust 的修复（取消安全 recv、写失败不丢帧、LinkStats 新字段）
+    //      **一次都没被这条验收执行过**，因为它加载的是另一个 .so/.dylib；
+    //   ③ 装上 0.4.6 的 6 字段 LinkStats 后，debug 那份旧引擎只有 4 字段，
+    //      读 stats() 直接 BufferUnderflowException —— 这才把真相暴露出来。
+    systemProperty("jna.library.path", System.getProperty("jna.library.path") ?: luciolaNativeDir)
+    // 一次只跑一条：这条用例独占端口与磁盘，并行只会互相干扰。
+    maxParallelForks = 1
+}
+
+// 单元套件里排除这条验收：它由 jvmAcceptanceTest 负责。
+tasks.named<Test>("jvmTest") {
+    exclude("**/ChannelFileTransferE2ETest*")
 }

@@ -3,6 +3,7 @@
 package com.kapp.tidings.domain
 
 import com.kapp.tidings.domain.model.DeliveryState
+import com.kapp.tidings.domain.model.WorkspaceUi
 import com.kapp.tidings.domain.model.MessageUi
 import com.kapp.tidings.domain.model.NoticeKind
 import com.kapp.tidings.domain.model.NoticeDetail
@@ -97,7 +98,65 @@ fun handleSyncWorkspaceGroups() {
  * 覆盖建群、邀请/移出成员、群文本发送、GroupNeed/GroupInfo 协议协商与同步。
  */
 
-fun handleCreateGroup(name: String, memberIds: List<String>, description: String = ""): String? {
+fun handleCreateGroup(name: String, memberIds: List<String>, description: String = ""): String? =
+    handleCreateGroupInternal(
+        name = name,
+        memberIds = memberIds,
+        description = description,
+        workspace = null,
+        // 普通建群（会话列表那颗按钮）保持原判据：一个都选不出来，那确实不是群聊。
+        allowEmptyMembers = false,
+    )
+
+/**
+ * 给一个**工作区**建协同群：允许此刻还没有任何其它设备，并把工作区上的 agent 声明进群。
+ *
+ * ## 为什么这条入口不吃 [handleCreateGroup] 那道「至少再来一个人」
+ *
+ * 真机反馈：「新建工作区的群无法快速建群，一直提示要至少一个人」。现场就是这一形态 ——
+ * 用户点「一键建群 / 共享」，而建群对话框里**根本没有可勾的人**（成员来源只有"当前在线
+ * 设备"，对话框本身也不是成员选择器），于是控制器拒收、对话框已经关掉、屏幕上只剩一句
+ * 「至少再选一个人」。用户被指着一个他此刻做不到的动作。
+ *
+ * 两种群不是一回事：
+ * - 普通群 = 「拉几个人聊天」，成员得先存在；
+ * - 工作区群 = 「给这个项目开一条协同通道」，**先把群建出来，再用分享码/群信息把设备
+ *   拉进来**（对话框里「已在协同群中」那张卡片给的正是「进入群聊 + 分享码」）。
+ *   反过来要求"必须先有在线设备"，等于要求用户先完成他本来要靠这个群才能做的事。
+ *
+ * 所以这里允许 0 个人类成员，但会尽量把工作区上的 agent 声明进 `virtualAgents`
+ * （见 [virtualAgentMemberFor]）：群里因此至少还有第二方，且 @ 它能真的驱动执行。
+ * 连 agent 身份都拿不到（工作区没上报 agentId/agentKind，或它属于远端设备）时，
+ * 群仍可建出来 —— 它此刻的意义是那条协同通道，成员按 [handleAddGroupMembers] 补。
+ *
+ * @param wsId 已宣告的工作区 id；null = 「关联本地全新目录」分支（还没有工作区行）。
+ */
+fun handleCreateWorkspaceGroup(
+    name: String,
+    wsId: String?,
+    memberIds: List<String>,
+    description: String = "",
+): String? {
+    val self = host._state.value.selfNodeId
+    val workspace = wsId
+        ?.takeIf { it.isNotBlank() }
+        ?.let { id -> host._state.value.agentWorkspaces.values.firstOrNull { it.peerId == self && it.wsId == id } }
+    return handleCreateGroupInternal(
+        name = name,
+        memberIds = memberIds,
+        description = description,
+        workspace = workspace,
+        allowEmptyMembers = true,
+    )
+}
+
+private fun handleCreateGroupInternal(
+    name: String,
+    memberIds: List<String>,
+    description: String,
+    workspace: WorkspaceUi?,
+    allowEmptyMembers: Boolean,
+): String? {
     val trimmed = name.trim()
     if (trimmed.isEmpty()) {
         host.warn(BannerMessage.GroupNameRequired)
@@ -109,7 +168,8 @@ fun handleCreateGroup(name: String, memberIds: List<String>, description: String
     }
     val self = host._state.value.selfNodeId
     val others = memberIds.map { it.trim() }.filter { it.isNotEmpty() && it != self }.distinct()
-    if (others.isEmpty()) {
+    val seat = workspace?.let { virtualAgentMemberFor(it) }
+    if (others.isEmpty() && !allowEmptyMembers) {
         host.warn(BannerMessage.GroupNeedsMember)
         return null
     }
@@ -120,7 +180,7 @@ fun handleCreateGroup(name: String, memberIds: List<String>, description: String
         // 同上：简介用**展示名**，不用路径 / wsId（那是内部标识，不是给人读的）。
         foundWs?.wsTitle.orEmpty()
     }
-    val meta = GroupMeta.create(
+    val created = GroupMeta.create(
         groupId = newId(),
         name = trimmed,
         members = others,
@@ -128,6 +188,10 @@ fun handleCreateGroup(name: String, memberIds: List<String>, description: String
         updatedTs = nowMillis(),
         description = autoDesc,
     )
+    // agent 声明与群一起落库（rev = 1）：别人收到的第一份 `group.info` 里就带着它，
+    // 不必再等一次额外的「入驻」往返 —— 那条路要成员在线才发得出去，而这里恰恰
+    // 可能一个成员都没有。
+    val meta = if (seat == null) created else created.copy(virtualAgents = listOf(seat))
     host.handlePersist(host._state.value.settings.copy(groups = host._state.value.settings.groups + meta))
     // 建群这条路径也要把 rev 登记进 need 游标：我们**刚刚**有这个群的元数据了。
     // 漏了它会怎样？建完群收到的第一条同 rev 群消息会回一发 `op:need` —— 去问一份
@@ -136,7 +200,8 @@ fun handleCreateGroup(name: String, memberIds: List<String>, description: String
     // 另外三条写元数据的路径（加人/移人/收到 host.info）都登记了，只有这里是漏的。
     host.core.groupNeeds.noteKnown(meta.groupId, meta.rev)
 
-    val targetWs = if (autoDesc.isNotBlank()) {
+    // 显式传进来的那个工作区优先：调用方已经知道是哪一行，不必再靠简介/群名反猜。
+    val targetWs = workspace ?: if (autoDesc.isNotBlank()) {
         host._state.value.agentWorkspaces.values.firstOrNull { ws ->
             autoDesc == ws.wsPath || autoDesc == ws.wsId || (ws.wsPath?.isNotBlank() == true && autoDesc.contains(ws.wsPath))
         }
@@ -153,7 +218,10 @@ fun handleCreateGroup(name: String, memberIds: List<String>, description: String
         val agentKind = targetWs.agentKind ?: "DSH"
         // agent 的身份是 **(设备, agent)**，不是裸 kind —— 否则两台设备上同名 agent
         // 在 senderId 里完全一样，会被合并成同一个人（见 AgentSenderId 的 KDoc）。
-        val agentSenderId = AgentSenderId.of(self, targetWs.agentId, agentKind)
+        // 开场白的署名必须与群里那条声明**同一个人**：声明用的是兜底后的身份键
+        // （agentId 空时退到 agentKind），这里若还传裸 `agentId`，同一个 agent 会在成员
+        // 列表里叫一个名字、在气泡上叫另一个。
+        val agentSenderId = AgentSenderId.of(self, seat?.agentId ?: targetWs.agentId, agentKind)
         host.scope.launch {
             // 开场白与状态播报都经桥取（见 [RelayUiTexts]）：措辞在 strings.xml，
             // 「什么时候说」由这里判 —— 两者不该互相依赖。
@@ -197,9 +265,16 @@ fun handleCreateGroup(name: String, memberIds: List<String>, description: String
         }
     }
 
+    // 「正在通知 0 位成员」读起来像失败。工作区群允许先建后拉，所以 0 人时换一句
+    // 能指路的：群已经建好，设备等会儿再加。
+    val createdBanner = if (others.isEmpty()) {
+        BannerMessage.GroupCreatedWithoutMembers(meta.name)
+    } else {
+        BannerMessage.GroupCreated(meta.name, others.size)
+    }
     val rt = host.runtime
     if (rt == null) {
-        host.info(BannerMessage.GroupCreated(meta.name, others.size))
+        host.info(createdBanner)
         host.publish()
         return meta.groupId
     }
@@ -209,9 +284,29 @@ fun handleCreateGroup(name: String, memberIds: List<String>, description: String
         }
         host.refreshPeers()
     }
-    host.info(BannerMessage.GroupCreated(meta.name, others.size))
+    host.info(createdBanner)
     host.publish()
     return meta.groupId
+}
+
+/**
+ * 工作区上的 agent 在群里的那一条声明（`virtualAgents`）。
+ *
+ * 身份键的兜底顺序与「邀请新智能体入驻」（[RelayController.handleExposeWorkspace]）**同一套**
+ * —— 真机数据里工作区的 `agentId` 常为空，只认它会让「建群时把 agent 拉进来」在多数
+ * 工作区上静默不生效。名字走 `AgentMemberName.base`，与入驻同源：两处各算一遍，
+ * 同一个 agent 在群里就会有两个名字。
+ *
+ * @return null = 这个工作区拿不到任何 agent 身份（agentId / agentKind 都没上报）。
+ */
+private fun virtualAgentMemberFor(ws: WorkspaceUi): VirtualAgentMember? {
+    val agentId = resolveVirtualAgentKey(null, ws.agentId, ws.agentKind) ?: return null
+    return VirtualAgentMember(
+        agentId = agentId,
+        hostNodeId = host._state.value.selfNodeId,
+        name = AgentMemberName.base(ws.agentKind, agentId, ws.wsTitle, ws.wsId),
+        wsId = ws.wsId,
+    )
 }
 
 
@@ -318,6 +413,21 @@ fun handleLeaveGroup(groupId: String) {
     }
     val self = host._state.value.selfNodeId
     if (!meta.hasMember(self)) {
+        // **我已经不在这个群里了**（被移出 / 被解散）—— 此时仍然要能把这个群删掉。
+        //
+        // 这是一条真实的死角，不是漏网之鱼：`GroupMerge.Removed` 的既有设计是**保留**
+        // 元数据（成员表里没有自己 = 对端回答「我为什么发不出话」的唯一依据），于是被移出
+        // 的人手里长期留着一份「我在里面」的群元数据；而这里原来直接 `return`，
+        // 那颗「退出群聊」按下去什么都不发生、连提示都没有 —— 用户被卡在一个
+        // 删不掉、也发不出话的群上。
+        //
+        // 没有别人可通知（我不在成员表里，发出去的帧对端只会当垃圾），所以这一支
+        // 只清本机、回一句如实的话。用 `GroupLeft` 那条既有措辞（「你已经被移出这个群」）
+        // 而不是「已退出」—— 后者会撒谎说我主动退了。
+        val settings = host._state.value.settings
+        host.handlePersist(settings.copy(groups = settings.groups.filter { it.groupId != groupId }))
+        host.info(BannerMessage.GroupLeft)
+        host.publish()
         return
     }
     val oldMembers = meta.members
@@ -343,6 +453,72 @@ fun handleLeaveGroup(groupId: String) {
     host.scope.launch {
         for (m in notifyList) {
             runCatching { rt.sendGroupInfo(m, host.groupMetaWithNicks(updatedMeta)) }
+        }
+        host.refreshPeers()
+    }
+}
+
+
+/**
+ * 群主**解散**这个群：对所有成员生效，不是「我退出去」。
+ *
+ * ## 协议上怎么做（不新增帧）
+ *
+ * 把成员表裁到 `[自己]`、rev+1，然后给**原来的每个成员**发一份 `group.info`。
+ * 对端收到后按既有判据处理：自己不在 `members` 里 ⇒ [GroupMerge] 判 Removed，
+ * 本机删除该群并提示「你已被移出群」。也就是说「解散」= 一次性的全员移出，
+ * 一个字节的新协议都不需要 —— 而新增一个 `dissolved` 标志会让旧端整帧拒收
+ * （AGENTS §2.2：加可选键等于要求两端同版本），代价远大于收益。
+ *
+ * ## 与「退出群聊」的差别
+ *
+ * [handleLeaveGroup] 只动自己这一份，群对别人继续存在（群主退出时还会转交群主）。
+ * 这里则**先广播、再删本机**：顺序反了的话，本机已经没有这个群，广播就发不出去，
+ * 别人会永远留着一个「群主跑路」的群。
+ *
+ * ## 聊天记录不动
+ *
+ * 与「退出群聊」同一条口径：历史消息留在本机（用户想清可以再删会话）。
+ */
+fun handleDissolveGroup(groupId: String) {
+    val meta = host._state.value.settings.groups.firstOrNull { it.groupId == groupId } ?: run {
+        host.warn(BannerMessage.GroupUnknown)
+        return
+    }
+    val self = host._state.value.selfNodeId
+    if (!meta.hasMember(self)) {
+        host.warn(BannerMessage.GroupLeft)
+        return
+    }
+    val isOwner = meta.ownerId == self || (meta.ownerId == null && meta.creatorId == self)
+    if (!isOwner) {
+        host.warn(BannerMessage.GroupNoPermission)
+        return
+    }
+    val oldMembers = meta.members
+    // 只剩自己：对端据此判 Removed；ownerId 必须仍属于 members（否则整帧拒收）。
+    val dissolved = meta.copy(
+        members = listOf(self),
+        adminIds = emptyList(),
+        ownerId = self,
+        rev = meta.rev + 1,
+        updatedBy = self,
+        updatedTs = nowMillis(),
+    )
+    val settings = host._state.value.settings
+    host.handlePersist(settings.copy(groups = settings.groups.filter { it.groupId != groupId }))
+    host.core.groupNeeds.noteKnown(dissolved.groupId, dissolved.rev)
+    handleNotice(ConvId.group(groupId), NoticeKind.GroupMembersChanged)
+    host.info(BannerMessage.GroupDisbanded(meta.name))
+    host.publish()
+
+    val rt = host.runtime ?: return
+    // 广播要在删除本机元数据**之后**发仍然有效：收件人列表与载荷都取自上面那份快照。
+    val notifyList = oldMembers.filter { it != self }
+    host.scope.launch {
+        val payload = host.groupMetaWithNicks(dissolved)
+        for (m in notifyList) {
+            runCatching { rt.sendGroupInfo(m, payload) }
         }
         host.refreshPeers()
     }

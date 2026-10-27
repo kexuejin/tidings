@@ -416,6 +416,7 @@ class RelayController(
 
     // ------------------------------------------------------------------ 委托动作：设置
     fun updatePersistMessages(enabled: Boolean) = settingsCtl.handleUpdatePersistMessages(enabled)
+    fun updateExperimentalLuciola(enabled: Boolean) = settingsCtl.handleUpdateExperimentalLuciola(enabled)
     fun updateThemeMode(wire: String) = settingsCtl.handleUpdateThemeMode(wire)
     fun updateWaitFrameCapability(enabled: Boolean) = settingsCtl.handleUpdateWaitFrameCapability(enabled)
     fun updateRecordMessageCapability(enabled: Boolean) = settingsCtl.handleUpdateRecordMessageCapability(enabled)
@@ -529,9 +530,20 @@ class RelayController(
 
     // ------------------------------------------------------------------ 委托动作：群组
     override fun createGroup(name: String, memberIds: List<String>, description: String): String? = groupsCtl.handleCreateGroup(name, memberIds, description)
+
+    /** 工作区群：允许 0 个其它设备 + 把该工作区的 agent 声明进群（见 [handleCreateWorkspaceGroup]）。 */
+    override fun createWorkspaceGroup(
+        name: String,
+        wsId: String?,
+        memberIds: List<String>,
+        description: String,
+    ): String? = groupsCtl.handleCreateWorkspaceGroup(name, wsId, memberIds, description)
     override fun addGroupMembers(groupId: String, newMemberIds: List<String>) = groupsCtl.handleAddGroupMembers(groupId, newMemberIds)
     override fun removeGroupMember(groupId: String, memberId: String) = groupsCtl.handleRemoveGroupMember(groupId, memberId)
     override fun leaveGroup(groupId: String) = groupsCtl.handleLeaveGroup(groupId)
+
+    /** 群主解散群：广播全员移出后删本机元数据（见 [handleDissolveGroup]）。 */
+    override fun dissolveGroup(groupId: String) = groupsCtl.handleDissolveGroup(groupId)
     override fun updateGroupMeta(groupId: String, description: String?, announce: String?) =
         groupsCtl.handleUpdateGroupMeta(groupId, description, announce)
     /** 执行名单：**转给宿主侧桥**；没接（手机壳）就返回 null，界面不画配置区。 */
@@ -868,7 +880,7 @@ class RelayController(
         scope.launch { platform.backgroundConnection?.setEnabled(settings.keepConnectionAlive) }
 
         val isShareSupported = platform.screenSharing?.isShareSupported() == true
-        val profile = settings.toProfile(
+        var profile = settings.toProfile(
             host = platform.deviceInfo.hostName(),
             ver = version,
             remoteView = true,
@@ -876,6 +888,37 @@ class RelayController(
             // 承载 agent 节点的宿主（桌面端）在此广播 `ag1`；手机端恒 false。
             advertiseAgent = advertiseAgent,
         )
+        // 实验:luciola 传输。**两件齐了才切** —— 只给加密信道不给发现,或有发现没
+        // 加密信道,都比 legacy 更糟;缺一件就整体退回 legacy。
+        // 设置项是**唯一**的用户开关（实验信道默认关）；关着时连工厂都不建,
+        // 出码点拿不到 luciola 段 ⇒ 二维码一字不变。
+        val luciolaHost = platform.luciolaHost.takeIf { settings.experimentalLuciola }
+        luciolaHost?.configure(profile, settings.udpPort)
+        val luciolaTransport = luciolaHost?.transportFactory()
+        val luciolaDiscovery = luciolaHost?.discoveryFactory()
+        // 发现引擎的 extra 必须用运行时 selfProfile(含 luciolaPort):工厂构造时的静态
+        // profile 没有那个字段,对端会拿发现临时端口来拨号(真机实测拨错)。
+        val luciolaMode = luciolaTransport != null && luciolaDiscovery != null
+        // 画面信道：独立一条 luciola 会话，端口取「发现端口 + 10」——
+        // 刻意避开 legacy 的三兄弟（+1 tcp、+2 tls、+3/+2 跨网文件与投屏），
+        // 也避开 17879/17881/17882（luciola 模式下这三个不许再出现在 lsof 里）。
+        val screenChannelPort = if (luciolaMode) (settings.udpPort + 10).takeIf { it in 1..65535 } else null
+        val screenChannelHostFactory = luciolaHost?.screenChannelHostFactory(scope, screenChannelPort)
+        if (luciolaMode) {
+            // 只有**确认**数据面可用之后才声明 `fch1`：声明了却收不了字节，对端会推、
+            // 本端永远等文件（"对方说发了、我一直卡在接收中"）。
+            profile = settings.toProfile(
+                host = platform.deviceInfo.hostName(),
+                ver = version,
+                remoteView = true,
+                remoteShare = isShareSupported,
+                advertiseAgent = advertiseAgent,
+                fileOverChannel = true,
+                // 只有画面信道真的会起监听才声明 scr1（声明了没人听，对端会一直等握手）。
+                screenOverChannel = screenChannelPort != null && screenChannelHostFactory != null,
+            )
+            luciolaHost?.configure(profile, settings.udpPort)
+        }
         val rt = NodeRuntime(
             profile = profile,
             udpPort = settings.udpPort,
@@ -926,6 +969,14 @@ class RelayController(
             queueStore = persist.queue,
             dedupStore = dedupStore,
             messageStore = persist.messages,
+            // 实验:luciola 传输与发现（两件都非空才生效,见上面 luciolaMode）。
+            messengerTransportFactory = luciolaTransport.takeIf { luciolaMode },
+            extraDiscoveryFactory = luciolaDiscovery.takeIf { luciolaMode },
+            // 文件字节走加密信道（fch1）：**只有**实验信道启用时才建路由器。
+            // 关着 = null ⇒ TransferManager 照旧拨号拉取，行为一字不变。
+            fileChannelEnabled = luciolaMode,
+            screenChannelHostFactory = screenChannelHostFactory,
+            screenChannelPort = screenChannelPort?.takeIf { screenChannelHostFactory != null },
             // 配对码里那一池候选地址（按 nodeId 存）：换网之后发送/心跳的兜底。
             peerEndpointStore = persist.peerEndpoints,
             // 配对码里那枚 tlsPin：K2 公网长连接的信任根（没它就不建公网连接）。
@@ -994,6 +1045,8 @@ class RelayController(
                         boundUdpPort = rt.boundPort,
                         // 印码要用（task-86）：主机必须把本机 pin 交给手机，否则公网目标建不出来。
                         selfTlsPin = rt.localTlsPin(),
+                        // 实验 luciola:二维码里的公钥/配对密钥(没开就是 null ⇒ legacy 码)。
+                        luciolaQr = luciolaHost?.pairingInfo(),
                         // 诊断页要看的读数（与 pin 同一档：本机身份的只读事实）。
                         selfCertNotAfterMillis = rt.localCertNotAfterMillis(),
                         failure = null,
@@ -1373,6 +1426,24 @@ class RelayController(
                         tlsPin = parsedPin,
                     )
                 }
+                // luciola 段：把扫码得到的 Ed25519 公钥 + 配对密钥钉进宿主信任库。
+                // 传输面读工厂实时状态，不需要重启节点；失败必须让用户看见（不能静默）。
+                parsed.luciola?.let { info ->
+                    val host = platform.luciolaHost
+                    val ok = host != null && host.pairPeer(parsed.host, parsed.port, info)
+                    if (!ok) {
+                        warn(BannerMessage.ScanFailed("luciola-pair-rejected"))
+                    } else {
+                        // 记住 pin/secret 只是"愿意信它";还要把自证发过去,主机才放行本机。
+                        // 配对帧里的 nodeId 必须是**本机**(发送方)的;拿扫码结果里的对端 id
+                        // 会把主机的信任库记成本机 id(真机实测过一次,entry 全是自己的 id)。
+                        runtime?.let { rt ->
+                            scope.launch {
+                                runCatching { rt.requestLuciolaPairing(parsed.host, parsed.port) }
+                            }
+                        }
+                    }
+                }
                 for (candidate in parsed.candidates) {
                     if (candidate.host != parsed.host || candidate.port != parsed.port) {
                         runtime?.let { rt -> scope.launch { runCatching { rt.announceTo(candidate.host, candidate.port) } } }
@@ -1505,6 +1576,32 @@ class RelayController(
         val name = manualPeerDisplayName(entry, _state.value.peers)
         handlePersist(settings.copy(manualPeers = manualPeersWithout(settings.manualPeers, entry)))
         info(BannerMessage.PeerRemoved(name))
+    }
+
+    /**
+     * 「移除节点」的统一入口：手动地址删记录，发现的节点删身份记忆。
+     *
+     * 为什么要一个统一入口：界面只有一颗按钮（详情页的「移除「名字」」），但它面前
+     * 混着两种行。让界面去判断「这行是什么」，等于把领域规则抄一份到 UI；这里按
+     * [NodeRemoval] 分派，界面只负责把「这一行是什么」如实说出来。
+     */
+    override fun removeNode(removal: NodeRemoval) {
+        when (removal) {
+            is NodeRemoval.ManualAddress -> removeManualPeer(removal.entry)
+            is NodeRemoval.DiscoveredNode -> {
+                val rt = runtime
+                if (rt == null) {
+                    warn(BannerMessage.NodeNotStarted)
+                    return
+                }
+                val name = _state.value.peer(removal.nodeId)?.displayName ?: removal.nodeId
+                if (rt.forgetPeer(removal.nodeId)) {
+                    info(BannerMessage.PeerForgotten(name))
+                }
+                refreshPeers()
+                publish()
+            }
+        }
     }
 
     /**

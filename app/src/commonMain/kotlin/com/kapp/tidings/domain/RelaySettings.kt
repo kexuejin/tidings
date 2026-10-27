@@ -185,6 +185,31 @@ data class RelaySettings(
      */
     val persistMessagesDecided: Boolean = false,
     /**
+     * luciola 加密信道（发现 + 传输整体切换）。**默认开**,开启或关闭都需重启节点。
+     *
+     * ## 为什么默认开（2026-10-27 的证据）
+     *
+     * - 文件传输：50MB 真机 2.89s / 17 MiB/s（修复前 90s），sha256 两端一致；
+     *   回环验收 566ms / 88-105 MiB/s；
+     * - 投屏帧率：正式 5 分钟验收 4.908 vs legacy 4.909 fps = **99.98%**，全程 0 降档；
+     * - 三个 legacy 端口（17879/17881/17882）在真机两端都不再监听；
+     * - 消息/文件/投屏全部走加密信道。
+     *
+     * ## 已知取舍（必须让用户看得见，不能藏）
+     *
+     * 1. **投屏延迟 1.51×**：55.16ms vs legacy 36.57ms（同条件 5 分钟 A/B）。
+     *    差额来自每次跨 JVM↔Rust 边界的固定开销；传输段（字节搬运）反而比 legacy 更快。
+     *    见 docs/2026-10-27-screen-5min-acceptance-0.4.6.md。
+     * 2. **未升级的老设备会失去自动发现**：开着时 legacy 发现不启动，老版本既发现不到我们、
+     *    我们也发现不到它 —— 它们只会显示成离线。这是本条默认开最大的产品风险。
+     *    **回退路径**：本机设置里关掉这个开关 + 重启节点，即回到 legacy 发现与传输；
+     *    或让那台设备升级到同一版本。
+     *
+     * 字段名保留 `experimentalLuciola` 是为了**不破坏已落盘的设置文件**（改名等于让
+     * 所有老用户的选择丢失）；对用户可见的"实验"字样已从文案里去掉。
+     */
+    val experimentalLuciola: Boolean = true,
+    /**
      * 外观档位的 wire 形态（`system` / `light` / `dark`，认不出的值一律当跟随系统）。
      *
      * 与 [persistMessages] 同一条理由：一个**用户偏好**如果重启就自己弹回「跟随系统」，
@@ -359,7 +384,24 @@ data class RelaySettings(
         remoteShare: Boolean = false,
         customAvatar: Boolean = false,
         advertiseAgent: Boolean = false,
+        /**
+         * 本机是否**能收**加密信道送来的文件字节（`fch1`）。
+         *
+         * 只有 luciola 数据面可用时才该为 true —— 声明了却收不了，对端会推字节而本端
+         * 永远等文件，症状是"对方说发了、我这边一直卡在接收中"。默认 false 让所有
+         * 既有调用点（测试、预览、未开实验开关的宿主）行为不变。
+         */
+        fileOverChannel: Boolean = false,
+        /**
+         * 本机是否能**收**独立加密会话送来的投屏画面（`scr1`）。
+         *
+         * 与 [fileOverChannel] 同一条纪律：只有画面信道真的起来（luciola 模式 +
+         * 已绑上 screenPort）才声明 —— 声明了却没人听，对端会一直等 `screen-ready`。
+         */
+        screenOverChannel: Boolean = false,
     ): List<String> = buildList {
+        if (fileOverChannel) add(MsgTypes.CAP_FILE_CHANNEL)
+        if (screenOverChannel) add(MsgTypes.CAP_SCREEN_CHANNEL)
         // `ag1` 在最前：它是「这个节点能承载 agent 会话」的身份声明，与后面的帧能力不同层。
         // 桌面端（托盘常驻）与 agentNode 都声明它；手机端不声明。
         if (advertiseAgent) add(MsgTypes.CAP_AGENT)
@@ -430,6 +472,10 @@ data class RelaySettings(
         remoteShare: Boolean = false,
         customAvatar: Boolean = false,
         advertiseAgent: Boolean = false,
+        /** 实验 luciola 数据面可用时传 true ⇒ 声明 `fch1`（见 [caps]）。 */
+        fileOverChannel: Boolean = false,
+        /** 画面信道可用时传 true ⇒ 声明 `scr1`（见 [caps]）。 */
+        screenOverChannel: Boolean = false,
     ): Profile = Profile.mobile(
         nodeId = nodeId,
         nick = nick.take(LIMIT_NICK),
@@ -449,6 +495,8 @@ data class RelaySettings(
             remoteShare = remoteShare,
             customAvatar = customAvatar,
             advertiseAgent = advertiseAgent,
+            fileOverChannel = fileOverChannel,
+            screenOverChannel = screenOverChannel,
         ),
     )
 

@@ -8,8 +8,13 @@ import androidx.compose.runtime.Composable
 import com.kapp.tidings.generated.resources.Res
 import com.kapp.tidings.generated.resources.common_cancel
 import com.kapp.tidings.generated.resources.common_remove
+import com.kapp.tidings.generated.resources.conv_delete_and_leave
 import com.kapp.tidings.generated.resources.conv_delete_confirm_body
+import com.kapp.tidings.generated.resources.conv_delete_confirm_body_group
 import com.kapp.tidings.generated.resources.conv_delete_confirm_title
+import com.kapp.tidings.ui.components.AppButtonSize
+import com.kapp.tidings.ui.components.AppButtonTone
+import com.kapp.tidings.ui.components.AppTextButton
 import com.kapp.tidings.ui.components.RelayDialog
 import com.kapp.tidings.ui.components.RelayDialogButton
 import org.jetbrains.compose.resources.stringResource
@@ -40,16 +45,47 @@ import org.jetbrains.compose.resources.stringResource
 public fun DeleteConversationConfirmDialog(
     onDismiss: () -> Unit,
     onConfirm: () -> Unit,
+    /**
+     * 这是**群**会话。
+     *
+     * 群与单聊的删除后果不同：单聊删的就是那段对话；群删的只是本机记录 ——
+     * 群元数据还在，下一条群消息会把会话**重建**。不说清这件事，用户会以为
+     * 「删了就退群了」，然后发现它又回来了（真机上就是这么被问到的）。
+     */
+    isGroup: Boolean = false,
+    /**
+     * 群会话才给：清除记录**并且**退出群聊（本机把群也去掉）。
+     *
+     * 为什么不合成一个按钮：删除是「我不想在这台设备上看这个群的消息」，退群是
+     * 「我要离开这个群」。合成一个会让只想清记录的人被顺手退群；分成两处又要求
+     * 用户先删再跑去群信息 —— 所以放在同一个对话框里，由用户显式选。
+     * null = 不提供（单聊 / 没有退群能力的壳）。
+     */
+    onConfirmAndLeave: (() -> Unit)? = null,
 ) {
     RelayDialog(
         onDismissRequest = onDismiss,
         title = { Text(stringResource(Res.string.conv_delete_confirm_title)) },
         content = {
             Text(
-                text = stringResource(Res.string.conv_delete_confirm_body),
+                text = stringResource(
+                    if (isGroup) {
+                        Res.string.conv_delete_confirm_body_group
+                    } else {
+                        Res.string.conv_delete_confirm_body
+                    },
+                ),
                 style = MaterialTheme.typography.bodyMedium,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
+            if (isGroup && onConfirmAndLeave != null) {
+                AppTextButton(
+                    text = stringResource(Res.string.conv_delete_and_leave),
+                    onClick = onConfirmAndLeave,
+                    size = AppButtonSize.Small,
+                    tone = AppButtonTone.Danger,
+                )
+            }
         },
         confirmButton = {
             RelayDialogButton(

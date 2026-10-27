@@ -869,6 +869,8 @@ fun WorkspaceDetailView(
             tlsPin = if (qrIsSelf) state.network.selfTlsPin else null,
             // 同理：昵称也只在"这张码指向本机"时才带（对端的码印我们的名字会张冠李戴）。
             nick = if (qrIsSelf) state.settings.nick else null,
+            // 实验 luciola：同理只在"码指向本机"时带。
+            luciola = if (qrIsSelf) state.network.luciolaQr else null,
             onDismiss = { showQrDialog = false },
         )
     }

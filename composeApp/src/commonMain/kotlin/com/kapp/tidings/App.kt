@@ -493,6 +493,11 @@ fun RelayApp(
                                 controller.leaveGroup(groupId)
                                 nav = nav.leaveChatDetail()
                             },
+                            // 解散同样要退出这一屏：群没了，留在群聊里就是一条死会话。
+                            onDissolveGroup = { groupId ->
+                                controller.dissolveGroup(groupId)
+                                nav = nav.leaveChatDetail()
+                            },
                         ),
                         chrome = ChatScreenChrome(
                             receivedFileActions = controller.receivedFileActions,
@@ -612,6 +617,8 @@ fun RelayApp(
                             onBack = { settingsPage = null },
                             persistMessagesEnabled = controller.persistMessages,
                             onPersistMessagesEnabledChange = controller::updatePersistMessages,
+                            experimentalLuciolaEnabled = state.settings.experimentalLuciola,
+                            onExperimentalLuciolaChange = controller::updateExperimentalLuciola,
                             // 「跨网通道」开关已移除（长连接恒开）。用户的心智是"哪张网都能
                             // 无感连上"，不是"我要不要开一条长连接"；而关掉它反而是不拨号。
                             onClearHistory = controller::clearAllMessages,
@@ -773,7 +780,7 @@ fun RelayApp(
                                         // 带名字那条：手机壳能收下"给手动节点起个本机显示名"，
                                         // 于是弹层里多一个「名字（可选）」框；名字只存本机、不进 wire。
                                         onAddPeerNamed = controller::addNamedManualPeer,
-                                        onRemovePeer = controller::removeManualPeer,
+                                        onRemovePeer = controller::removeNode,
                                         // 「重连」一条已保存但当前不通的手动地址：mDNS 判重会把
                                         // 同址的广播行滤掉，只剩红色「没有回应」那行 —— 没有这个
                                         // 入口，用户只能删了重加或重启应用（review R2-#1）。
@@ -903,7 +910,11 @@ fun RelayApp(
                                             // 接口留在 feature/agents，能力从哪儿来在这里给。
                                             onRequestGrant = controller::sendAgentGrantRequest,
                                             onRefresh = { controller.refreshPeers() },
-                                            onCreateWorkspaceGroup = if (twoPane) { { showCreateWsDialog = true } } else null,
+                                            // **不再按布局分支**：此前只在两栏布局给回调，于是 compact
+                                            // （手机竖屏）的工作区看板连「关联工作区建群」这颗按钮都不画
+                                            // —— 用户报的「手机上没法建工作区群」就是这个。对话框本体
+                                            // 在两种布局下是同一个，窄屏上它自己会收成整幅宽弹层。
+                                            onCreateWorkspaceGroup = { showCreateWsDialog = true },
                                             modifier = Modifier.weight(1f).fillMaxWidth(),
                                         )
                                     }
@@ -921,6 +932,8 @@ fun RelayApp(
                                         onGoToPairing = { nav = nav.selectTab(AppRoutes.NODES) },
                                         onDismissBanner = controller::dismissBanner,
                                         onCreateGroup = controller::createGroup,
+                                        // 工作区建群：compact 布局的唯一入口（两栏布局另有侧栏那颗）。
+                                        onCreateWorkspaceGroup = { showCreateWsDialog = true },
                                         // 顶栏那颗放大镜。原型 `prototype/relay.html:2803`/`:2888`
                                         // 的 `<button class="ibtn" aria-label="全局搜索"
                                         // onclick="go('m-gsearch')">` 就在 ⋮ 左边，且是移动端
@@ -943,6 +956,8 @@ fun RelayApp(
                                         onTogglePin = controller::togglePinnedConv,
                                         onToggleMute = controller::toggleMutedConv,
                                         onDeleteConversation = controller::deleteConversation,
+                                        // 群会话的「删除并退出群聊」需要它（见 DeleteConversationConfirmDialog）。
+                                        onLeaveGroup = controller::leaveGroup,
                                         // ## 手机端**不画**「工作区」段（用户裁决：对齐桌面）
                                         //
                                         // 这两颗 lambda 一起决定那一段画不画（见 `ConversationsScreen`
@@ -1105,7 +1120,10 @@ fun RelayApp(
                             showCreateWsDialog = false
                             val name = defaultGroupNames[ws.wsId] ?: (ws.wsTitle ?: ws.wsId)
                             val members = state.peers.filter { it.online }.map { it.nodeId }
-                            val gid = controller.createGroup(name, members, ws.wsPath ?: ws.wsId)
+                            // 工作区群走专用入口：允许此刻一个其它设备都不在线，并把该工作区的
+                            // agent 声明进群（普通 createGroup 会判「至少再选一个人」而拒收 ——
+                            // 那张对话框里根本没有可勾的人）。
+                            val gid = controller.createWorkspaceGroup(name, ws.wsId, members, ws.wsPath ?: ws.wsId)
                             if (gid != null) {
                                 openChat(com.kapp.tidings.core.protocol.ConvId.group(gid))
                             }
@@ -1113,7 +1131,9 @@ fun RelayApp(
                         onCreateNew = { path, _, groupName, _ ->
                             showCreateWsDialog = false
                             val members = state.peers.filter { it.online }.map { it.nodeId }
-                            val gid = controller.createGroup(groupName, members, path)
+                            // 「关联本地全新目录」分支：还没有工作区行（wsId = null），
+                            // 群先建出来，设备随后用分享码 / 群信息加进来。
+                            val gid = controller.createWorkspaceGroup(groupName, null, members, path)
                             if (gid != null) {
                                 openChat(com.kapp.tidings.core.protocol.ConvId.group(gid))
                             }
@@ -1137,7 +1157,7 @@ fun RelayApp(
                             groupPromptFor = null
                             val name = defaultGroupName
                             val members = state.peers.filter { it.online }.map { it.nodeId }
-                            val gid = controller.createGroup(name, members, ws.wsPath ?: ws.wsId)
+                            val gid = controller.createWorkspaceGroup(name, ws.wsId, members, ws.wsPath ?: ws.wsId)
                             if (gid != null) {
                                 openChat(com.kapp.tidings.core.protocol.ConvId.group(gid))
                             }
@@ -1166,6 +1186,8 @@ fun RelayApp(
                         nodeId = state.selfNodeId,
                         // task-86：直通码也必须带 pin，否则手机建不出公网 TLS 目标。
                         tlsPin = state.network.selfTlsPin,
+                        // 实验 luciola：直通码也带同一段（与 pin 互斥）。
+                        luciola = state.network.luciolaQr,
                         // 带昵称：扫完立刻是真名，不是 node-a1b2c3d4。
                         nick = state.settings.nick,
                         onDismiss = { showWsQrFor = null },

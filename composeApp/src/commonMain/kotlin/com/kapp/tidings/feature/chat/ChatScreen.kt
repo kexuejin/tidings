@@ -1352,6 +1352,7 @@ fun ChatScreen(
             onRemoveMember = groupActions.onRemoveGroupMember?.let { remove -> { member -> remove(group.groupId, member) } },
             onUpdateMeta = groupActions.onUpdateGroupMeta,
             onLeaveGroup = groupActions.onLeaveGroup?.let { leave -> { leave(group.groupId) } },
+            onDissolveGroup = groupActions.onDissolveGroup?.let { dissolve -> { dissolve(group.groupId) } },
             // 成员面板用**和气泡 / @ 候选同一份**上下文：agent 显示 DSH、@ 候选给出 @DSH。
             identityContext = identityCtx,
             // 长按成员头像 = 直接 @：插入到编辑器后关掉面板（用户下一步是打字）。

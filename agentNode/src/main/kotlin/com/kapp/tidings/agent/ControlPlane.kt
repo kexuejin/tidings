@@ -203,12 +203,30 @@ class ControlPlane(
         //
         // 这里给 16 条：并发阻塞写最多几条，读路由仍然拿得到线程。回归测试见
         // ControlPlaneTest.peersStaysFastEvenWhenBlockingSendsFillTheHandlerPool。
-        s.executor = Executors.newFixedThreadPool(HANDLER_THREADS)
+        // **虚拟线程（JDK 21+）优先**：处理器里有几处 `runBlocking`（发消息的退避、
+        // 按主机名解析对端要等 3 秒握手）。固定池再大也是有限资源 —— 真机现场
+        // `jcmd Thread.print` 里 16 条 `pool-1-thread` 全卡在 `resolveAgentTarget` 的
+        // `runBlocking` 上，于是连 `/healthz` 与 `/v1/peers` 都打不开，"控制面整个挂了"。
+        // 虚拟线程让"阻塞"只花一个虚拟线程，读路由永远还有空。
+        // 没有虚拟线程（JDK < 21）就退回固定池 —— 行为与加这段之前一致。
+        s.executor = virtualThreadExecutor() ?: Executors.newFixedThreadPool(HANDLER_THREADS)
         s.createContext("/") { exchange -> handle(exchange) }
         s.start()
         server = s
         boundPort = s.address.port
     }
+
+    /**
+     * JDK 21+ 的「每个任务一条虚拟线程」执行器；没有就返回 null（调用方退回固定池）。
+     *
+     * 反射取：这个模块要兼顾没有该 API 的 JDK，编译期直接引用会让老 JDK 连加载都
+     * 失败 —— 而控制面是 agent 宿主的心脏，不许因为"想用新 API"整个起不来。
+     */
+    private fun virtualThreadExecutor(): java.util.concurrent.Executor? = runCatching {
+        java.util.concurrent.Executors::class.java
+            .getMethod("newVirtualThreadPerTaskExecutor")
+            .invoke(null) as java.util.concurrent.Executor
+    }.getOrNull()
 
     fun stop() {
         server?.stop(0)
@@ -744,12 +762,43 @@ class ControlPlane(
      * 抽出来是因为 `/v1/send` 与 `/v1/send-file` 的解析规则必须逐字相同 —— 包括那句
      * "给了端口就必须匹配上"的注释所说的语义：复制一份迟早会漂。
      */
+    /**
+     * 解析「to[:port]」到底是谁 —— **带失败记忆**。
+     *
+     * 为什么不是直接 `runBlocking { resolvePeerByHost(...) }`：那条路对一个不可达的
+     * 主机要等满 3 秒。手机离线时它每隔几秒重试一次 agent 帧，控制面的处理器池就被
+     * 这 3 秒一个个吃掉 —— 真机现场 16 条 `pool-1-thread` 全卡在这里，连 `/healthz`
+     * 与 `/v1/peers` 都打不开，"控制面整个挂了"。这里给"解析失败"记 5 秒：
+     * 同一个死对端的连续重试只付一次代价，其余立刻如实返回"解析不到"
+     * （调用方本来就按 404 peer-unreachable 回）。
+     *
+     * 只记失败、不记成功：成功之后对端已经进了 registry，`runtime.getPeer` 直接命中。
+     */
+    private fun resolveTargetNodeId(to: String, port: Int?): String? {
+        runtime.getPeer(to)?.profile?.nodeId?.let { return it }
+        val key = if (port != null) to + ":" + port else to
+        val now = System.currentTimeMillis()
+        resolveFailures[key]?.let { until -> if (until > now) return null }
+        val resolved = runBlocking { runtime.resolvePeerByHost(to, port) }?.profile?.nodeId
+        if (resolved == null) {
+            resolveFailures[key] = now + RESOLVE_FAILURE_TTL_MS
+            if (resolveFailures.size > RESOLVE_FAILURE_MAX) {
+                resolveFailures.entries.removeIf { it.value <= now }
+            }
+        } else {
+            resolveFailures.remove(key)
+        }
+        return resolved
+    }
+
+    /** 解析失败（3 秒握手没等到）的短期记忆：key = "to[:port]"，value = 到期时刻。 */
+    private val resolveFailures = java.util.concurrent.ConcurrentHashMap<String, Long>()
+
     private fun resolveNodeIdOrRespond(exchange: HttpExchange, to: String, port: Int?): String? {
         // 先当 nodeId 查，查不到再当 IP 去握手 —— 调用方两种都该能用。
         val target =
             if (port != null) "$to:$port" else "$to（未指定端口，按默认 ${Protocol.DEFAULT_UDP_PORT}）"
-        val nodeId = runtime.getPeer(to)?.profile?.nodeId
-            ?: runBlocking { runtime.resolvePeerByHost(to, port) }?.profile?.nodeId
+        val nodeId = resolveTargetNodeId(to, port)
         if (nodeId == null) {
             respond(
                 exchange,
@@ -1998,8 +2047,7 @@ class ControlPlane(
             return null
         }
         val target = if (port != null) "$to:$port" else to
-        val nodeId = runtime.getPeer(to)?.profile?.nodeId
-            ?: runBlocking { runtime.resolvePeerByHost(to, port) }?.profile?.nodeId
+        val nodeId = resolveTargetNodeId(to, port)
         if (nodeId == null) {
             respond(
                 exchange,
@@ -2421,6 +2469,27 @@ class ControlPlane(
                     put("linkDialLastTarget", dial?.lastTarget)
                     put("linkLastError", dial?.lastError)
                     put("linkSkipReason", dial?.skipReason)
+                    // **可达性判据（goal 第 5 步的共存可见性）**：
+                    // luciola 模式下 legacy 发现整体关闭，于是"没升级的老设备"既发现不到
+                    // 我们、我们也发现不到它 —— 它只是静静地显示成"离线"，界面上没有任何
+                    // 解释。这一格把原因说出来，让运维/用户能一眼分清"设备关机"与
+                    // "它还在老传输上、需要我们帮它升级"。
+                    put(
+                        "reachability",
+                        when {
+                            // **陈旧档案不许当成老端。** 真机实测过这个误报：
+                            // 一条从磁盘恢复的旧 peer 记录（profileRev=0、caps 全空）
+                            // 被这条判据打成 legacy-peer-invisible —— 而那个对端当时
+                            // 正走加密信道传 50MB。caps 为空 = **不知道**，不是"没有"。
+                            peer.profile.caps.isEmpty() -> "unknown"
+                            !runtime.legacyDiscoveryActive && !posesLuciolaCaps(peer.profile) ->
+                                "legacy-peer-invisible"
+                            else -> "ok"
+                        },
+                    )
+                    if (!runtime.legacyDiscoveryActive) {
+                        put("legacyDiscovery", "off")
+                    }
                 }
             }
         }
@@ -2655,7 +2724,23 @@ class ControlPlane(
      * 退避（约 8 秒）。池子太小时，几条并发写就能把读路由（/v1/peers）饿死 —— 真机上表现为
      * 回环控制面连续 8 秒超时、诊断手段被自己挡住。
      */
+    /**
+     * 这个对端**是否已经迁到 luciola**（有它自己的发现/信道能力位）。
+     *
+     * 判据只看能力位而不是版本号：能力位是被对端**主动声明**的，而版本号字符串
+     * 各家写法不一（relay-0.1.0 / 0.61.1 …）。没有这个位 = 老端。
+     */
+    private fun posesLuciolaCaps(profile: com.kapp.tidings.core.protocol.Profile): Boolean =
+        profile.caps.contains(MsgTypes.CAP_LINK) &&
+            profile.caps.contains(MsgTypes.CAP_FILE_CHANNEL)
+
     private const val HANDLER_THREADS: Int = 16
+
+    /** 「解析不到这个对端」的记忆时长：短到对端一上线就能重新解析，长到不会每次重试都付 3 秒。 */
+    private const val RESOLVE_FAILURE_TTL_MS: Long = 5_000L
+
+    /** 失败记忆的容量上限（超过就顺手清一次过期项）。 */
+    private const val RESOLVE_FAILURE_MAX: Int = 256
 
         /**
          * 授权台账的默认落点（只在调用方没显式传 [AgentGrantStore] 时用到）。

@@ -222,6 +222,13 @@ data class ChatScreenGroupActions(
     val onExposeWorkspaces: ((groupId: String, wsId: String?, agentId: String?) -> Unit)? = null,
     val onUpdateGroupMeta: ((groupId: String, description: String?, announce: String?) -> Unit)? = null,
     val onLeaveGroup: ((groupId: String) -> Unit)? = null,
+    /**
+     * 群主**解散**群：对所有成员生效。null = 这个壳没有解散能力，群信息里不画那颗按钮。
+     *
+     * 与 [onLeaveGroup] 并列而不是复用：退出只动自己（群对别人继续存在），解散是
+     * 一次性的全员移出 —— 两个动作后果不同，入口也不同。
+     */
+    val onDissolveGroup: ((groupId: String) -> Unit)? = null,
 )
 
 /**

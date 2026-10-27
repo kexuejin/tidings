@@ -136,15 +136,57 @@ class ChatReviewGuardTest {
         )
     }
 
-    /** 被移出群后必须只读（否则用户打完字只得到一条「发送失败」）。 */
+    /**
+     * 被移出群后必须只读（否则用户打完字只得到一条「发送失败」）。
+     *
+     * ## 为什么要守**整条链**，而不是只守两端
+     *
+     * 只读是由四段接力完成的，断任何一段症状都一样（输入框照常可用、点发送才失败）：
+     * `ChatScreen` 算出 `leftGroup` → 塞进 `ComposerSlotArgs.readOnlyReason`
+     * → 桥梁 `DesktopChatPane` 原样透传 → 两个输入区各自把输入区整块换掉。
+     * 这条守卫此前只断言了「`ChatScreen` 有这个事实」与「手机输入栏有这个参数」，
+     * **桌面那一半是碰巧接上的**（没人守 `DesktopComposer` 与那段透传）。
+     *
+     * 回退方式（任一条都会让这条用例变红）：删掉 `leftGroup` 的派生 / 不把
+     * `readOnlyReason` 交给 slot / 桥梁不再透传 / 任一输入区删掉只读分支。
+     */
     @Test
     fun removedFromGroupMakesTheComposerReadOnly() {
         val chat = live(CHAT_SCREEN)
         assertTrue(chat.contains("val leftGroup ="), "聊天页没有「我不在群里了」这个事实")
         assertTrue(chat.contains("chat_group_readonly_left"), "只读原因没有交给输入栏")
+
+        // ① 手机内置输入栏：声明了参数**并且**真的用它换掉输入区。
+        val mobile = live(MESSAGE_COMPOSER)
         assertTrue(
-            live(MESSAGE_COMPOSER).contains("readOnlyReason: String? = null"),
+            mobile.contains("readOnlyReason: String? = null"),
             "内置输入栏没有只读态 —— 只读原因传进去也没人用",
+        )
+        assertTrue(
+            mobile.contains("if (readOnlyReason != null)"),
+            "内置输入栏收到了只读原因却不判它 —— 输入框照旧可用",
+        )
+
+        // ② 桌面输入卡片：同样的两条。此前这一段没有任何守卫。
+        val desktop = live(DESKTOP_COMPOSER)
+        assertTrue(
+            desktop.contains("readOnlyReason: String? = null"),
+            "桌面输入卡片没有只读态 —— 被移出后桌面仍能打字、点发送才失败",
+        )
+        assertTrue(
+            desktop.contains("if (readOnlyReason != null)"),
+            "桌面输入卡片收到了只读原因却不判它",
+        )
+
+        // ③ 桥梁：`ComposerSlotArgs` 带着它、桌面聊天面板原样透传。
+        //    少了这一跳，ChatScreen 传的东西到不了桌面输入卡片（空接线）。
+        assertTrue(
+            live(CHAT_ARGS).contains("readOnlyReason"),
+            "ComposerSlotArgs 没有 readOnlyReason —— 只读原因过不了壳的边界",
+        )
+        assertTrue(
+            live(DESKTOP_CHAT_PANE).contains("readOnlyReason = args.readOnlyReason"),
+            "桌面聊天面板没有把 readOnlyReason 交给输入卡片（接了不用 = 空接线）",
         )
     }
 
@@ -165,5 +207,9 @@ class ChatReviewGuardTest {
             "composeApp/src/commonMain/kotlin/com/kapp/tidings/ui/components/MessageComposer.kt"
         const val DESKTOP_COMPOSER =
             "composeApp/src/commonMain/kotlin/com/kapp/tidings/ui/desktop/DesktopComposer.kt"
+        const val DESKTOP_CHAT_PANE =
+            "composeApp/src/commonMain/kotlin/com/kapp/tidings/ui/desktop/DesktopChatPane.kt"
+        const val CHAT_ARGS =
+            "composeApp/src/commonMain/kotlin/com/kapp/tidings/feature/chat/ChatScreenArgs.kt"
     }
 }

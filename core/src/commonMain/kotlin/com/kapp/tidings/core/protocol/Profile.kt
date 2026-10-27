@@ -71,6 +71,28 @@ data class Profile(
     val addresses: List<String>? = null,
     val ver: String,
     val caps: List<String>,
+    /**
+     * luciola 加密信道的 TCP 监听端口（可选键）。
+     *
+     * 为什么必须单独一格：发现引擎上报的端口不一定是信道端口 —— 真机实测
+     * luciola 发现的 udpPort 可能是引擎的**临时端口**（52213），而加密信道在
+     * 17878 上监听；拿发现端口去拨号会拨错目标。写进档案后，对端按这个端口发送。
+     *
+     * 兼容性：可选键、老端忽略（同 tlsPort/tlsPin/addresses 的先例）；
+     * null = 这个节点不提供 luciola 信道（legacy 节点），行为一字不变。
+     */
+    val luciolaPort: Int? = null,
+    /**
+     * 投屏画面**独立加密会话**的监听端口（可选键，与 [luciolaPort] 同一族）。
+     *
+     * 为什么另开一格而不是复用 [luciolaPort]：信道层的 `listen` 一次只接受一条连接，
+     * 消息/文件那条已经把 luciolaPort 占住了；画面要**另开一条会话**才谈得上
+     * 「投屏不挤占消息与文件」（goal 第 4 步）。
+     *
+     * 兼容性：可选键，老端忽略；null = 这个节点没有画面信道，对端继续走
+     * 17879/17882 —— 行为一字不变。
+     */
+    val screenPort: Int? = null,
 ) {
     companion object {
         /**

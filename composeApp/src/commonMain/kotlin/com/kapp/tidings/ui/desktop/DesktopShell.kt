@@ -747,7 +747,9 @@ public fun DesktopShell(
                                         // 必须同源 —— 否则同一次建群在两端叫两个名字。
                                         val name = groupNameFormat.replace("%s", ws.wsTitle ?: ws.wsId)
                                         val members = state.peers.filter { it.online }.map { it.nodeId }
-                                        val gid = controller.createGroup(name, members, ws.wsPath ?: ws.wsId)
+                                        // 工作区群走专用入口：0 个在线设备也能建，并把该工作区的 agent
+                                        // 声明进群（普通 createGroup 会判「至少再选一个人」）。
+                                        val gid = controller.createWorkspaceGroup(name, ws.wsId, members, ws.wsPath ?: ws.wsId)
                                         if (gid != null) {
                                             val convId = com.kapp.tidings.core.protocol.ConvId.group(gid)
                                             selectedPeerId = convId
@@ -760,7 +762,8 @@ public fun DesktopShell(
                                     onCreateNew = { path, _, groupName, _ ->
                                         showCreateWsDialog = false
                                         val members = state.peers.filter { it.online }.map { it.nodeId }
-                                        val gid = controller.createGroup(groupName, members, path)
+                                        // 「关联本地全新目录」：还没有工作区行（wsId = null）。
+                                        val gid = controller.createWorkspaceGroup(groupName, null, members, path)
                                         if (gid != null) {
                                             val convId = com.kapp.tidings.core.protocol.ConvId.group(gid)
                                             val ws = state.workspaceOfGroup(gid)
@@ -953,6 +956,8 @@ public fun DesktopShell(
                 nodeId = state.selfNodeId,
                 // task-86：直通码也必须带 pin，否则手机建不出公网 TLS 目标。
                 tlsPin = state.network.selfTlsPin,
+                // 实验 luciola：直通码也带同一段（与 pin 互斥）。
+                luciola = state.network.luciolaQr,
                 // 带昵称：扫完立刻是真名，不是 node-a1b2c3d4。
                 nick = state.settings.nick,
                 onDismiss = { showWsQrFor = null },
@@ -973,7 +978,7 @@ public fun DesktopShell(
                     groupCreatePromptFor = null
                     val name = groupNameFormat.replace("%s", ws.wsTitle ?: ws.wsId)
                     val members = state.peers.filter { it.online }.map { it.nodeId }
-                    val gid = controller.createGroup(name, members, ws.wsPath ?: ws.wsId)
+                    val gid = controller.createWorkspaceGroup(name, ws.wsId, members, ws.wsPath ?: ws.wsId)
                     if (gid != null) {
                         val convId = com.kapp.tidings.core.protocol.ConvId.group(gid)
                         selectedPeerId = convId

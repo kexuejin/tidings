@@ -84,6 +84,9 @@ class AndroidAppPlatform(
     override val databaseContext: Context
         get() = context.applicationContext
 
+    /** 实验 luciola 传输(默认关,由设置项门控;AAR 的 jniLibs 提供原生库)。 */
+    override val luciolaHost: LuciolaHost = AndroidLuciolaHost(context)
+
     override val dataDirectory: DataDirectoryProvider = object : DataDirectoryProvider {
         override fun dataDirectory(): String =
             File(context.filesDir, "relay").apply { mkdirs() }.absolutePath

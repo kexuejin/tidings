@@ -52,6 +52,12 @@ class DesktopAppPlatform(
     override val urlOpener: com.kapp.tidings.platform.UrlOpener = DesktopUrlOpener(),
     override val screenCapture: com.kapp.tidings.platform.ScreenCaptureService? = null,
     override val screenSharing: com.kapp.tidings.platform.ScreenSharingService = com.kapp.tidings.desktop.capture.DesktopScreenSharingService(),
+    /**
+     * 实验 luciola 传输:默认关,TIDINGS_LUCIOLA=1 才启用。
+     * 数据目录在 dataDirectory 里(身份 seed + 信任库)。
+     */
+    override val luciolaHost: com.kapp.tidings.platform.LuciolaHost =
+        DesktopLuciolaHost({ dataDirectory.dataDirectory() }, enabled = true),
 ) : com.kapp.tidings.platform.AppPlatform {
     /**
      * 桌面端能算子网广播（`NetworkInterface.interfaceAddresses`），所以覆盖掉默认的空。
@@ -92,6 +98,8 @@ class DesktopDataDirectory(
 }
 
 internal fun defaultDataDirectory(): String {
+    // 开发/验收用:允许显式指定数据目录(独立实例、CI、冒烟脚本),不影响正常启动。
+    System.getenv("TIDINGS_DATA_DIR")?.takeIf { it.isNotBlank() }?.let { return it }
     val home = System.getProperty("user.home") ?: "."
     val os = System.getProperty("os.name").orEmpty()
     val base = if (os.contains("Mac")) {

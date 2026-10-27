@@ -3,6 +3,7 @@
 package com.kapp.tidings.domain.model
 
 import com.kapp.tidings.domain.BannerMessage
+import com.kapp.tidings.domain.LuciolaQrInfo
 import com.kapp.tidings.core.protocol.MsgTypes
 import com.kapp.tidings.platform.Transport
 enum class NodePhase { Stopped, Starting, Running, Failed }
@@ -52,6 +53,12 @@ data class NetworkUi(
      * 后者会随换网来回变；如果这里直接写结论，换网时改小一次就再也回不到"广播中"了。
      */
     val mdnsAdvertised: Boolean? = null,
+    /**
+     * 二维码里的 luciola 段（实验）。null = 本机没开 luciola 传输 ⇒ 出 legacy 码，
+     * 一字不变。它与 [selfTlsPin] **互斥**（二维码 153 字节预算装不下两者，见
+     * `QrPairing.multiCandidatePairingPayload` 的注释）。
+     */
+    val luciolaQr: LuciolaQrInfo? = null,
 ) {
     val isRunning: Boolean get() = phase == NodePhase.Running
 

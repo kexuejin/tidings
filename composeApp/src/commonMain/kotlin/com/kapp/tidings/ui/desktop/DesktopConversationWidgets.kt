@@ -163,6 +163,8 @@ public fun ConversationSidebar(
     onTogglePin: ((String) -> Unit)? = null,
     onToggleMute: ((String) -> Unit)? = null,
     onDeleteConversation: ((String) -> Unit)? = null,
+    /** 群会话「删除并退出群聊」用；null = 这个壳没有退群能力（见 ConversationRow 同名参数）。 */
+    onLeaveGroup: ((String) -> Unit)? = null,
     /** 群会话预览的发送者署名解析（权威在域层，与 convTitle 同一个解析器）。 */
     previewSenderNameOf: ((String) -> String?)? = null,
     onSearchGlobal: ((String) -> com.kapp.tidings.domain.GlobalSearchResult)? = null,
@@ -323,6 +325,7 @@ public fun ConversationSidebar(
                 onTogglePin = onTogglePin,
                 onToggleMute = onToggleMute,
                 onDeleteConversation = onDeleteConversation,
+                onLeaveGroup = onLeaveGroup,
                 previewSenderNameOf = previewSenderNameOf,
                 draftPreviewOf = draftPreviewOf,
                 modifier = Modifier.fillMaxSize(),
