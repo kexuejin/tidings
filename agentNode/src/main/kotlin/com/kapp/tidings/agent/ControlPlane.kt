@@ -312,6 +312,10 @@ class ControlPlane(
                 path == "/v1/send-file" && method == "POST" -> sendFile(exchange)
                 path == "/v1/transfers" && method == "GET" -> transfers(exchange)
                 path == "/v1/nudge" && method == "POST" -> nudge(exchange)
+                // 仅开发可用（TIDINGS_DEV_ROUTES=1）：在没有相机/触控的环境（iOS 模拟器、
+                // 集成测试）里完成「扫码后向对端发配对自证」这一步。前提是 pin 与
+                // pairingSecrets 已由扫码流程写进宿主状态 —— 它只负责发帧，不建立信任。
+                path == "/v1/dev/pair" && method == "POST" && devRoutesEnabled -> devPair(exchange)
                 path == "/v1/announce" && method == "POST" -> announce(exchange)
                 path == "/v1/candidates" && method == "GET" -> candidates(exchange)
                 path == "/v1/agent/session" && method == "POST" -> agentSession(exchange)
@@ -511,6 +515,42 @@ class ControlPlane(
             },
         )
     }
+    /** 是否注册仅开发可用的路由（默认关：生产路径不该有它）。 */
+    private val devRoutesEnabled: Boolean =
+        System.getenv("TIDINGS_DEV_ROUTES")?.let { it == "1" || it.equals("true", ignoreCase = true) } == true
+
+    /**
+     * POST /v1/dev/pair {host, port} —— 仅开发可用。
+     *
+     * 只做「发配对自证帧」，等价于界面上扫码之后的动作；它**不写入信任** ——
+     * 信任来自二维码（公钥 + 配对密钥已进宿主状态）。没有码里那份密钥，
+     * 对端的 PairingAdmission 会拒，所以它不能被用来绕过配对。
+     */
+    private fun devPair(exchange: HttpExchange) {
+        val obj = readJsonObject(exchange) ?: return
+        val host = obj["host"]?.jsonPrimitive?.contentOrNull?.trim().orEmpty()
+        val port = obj["port"]?.jsonPrimitive?.intOrNull
+        if (host.isEmpty() || port == null || port !in 1..65535) {
+            respond(exchange, 400, errorJson("bad-request", "需要 host 与 1..65535 的 port"))
+            return
+        }
+        val ok = try {
+            runBlocking { runtime.requestLuciolaPairing(host, port) }
+        } catch (t: Throwable) {
+            respond(exchange, 502, errorJson("pair-failed", t.message ?: "配对自证失败"))
+            return
+        }
+        respond(
+            exchange,
+            200,
+            buildJsonObject {
+                put("ok", ok)
+                put("host", host)
+                put("port", port)
+            },
+        )
+    }
+
     private fun nudge(exchange: HttpExchange) {
         val obj = readJsonObject(exchange) ?: return
         val to = obj["to"]?.jsonPrimitive?.contentOrNull?.trim().orEmpty()
@@ -2556,6 +2596,9 @@ class ControlPlane(
                 ),
             )
             add(JsonPrimitive("GET  /v1/pairing-qr   公网中继配对二维码（响应含令牌，只走回环）"))
+            if (devRoutesEnabled) {
+                add(JsonPrimitive("POST /v1/dev/pair      仅开发：向已扫码的对端发起配对自证"))
+            }
             add(JsonPrimitive("GET  /v1/messages  （/v1/inbox 的同义路由）"))
         }
         putJsonArray("examples") {
