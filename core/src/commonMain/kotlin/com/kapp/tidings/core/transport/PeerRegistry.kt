@@ -215,6 +215,23 @@ class PeerRegistry(private val selfNodeId: String) {
 
     fun get(nodeId: String): PeerRecord? = lock.withLock { peers[nodeId] }
 
+    /**
+     * 按 (ip, port) 反查对端 —— luciola 模式下，主机通过入站配对 (TLPAIR1) 拿到的是
+     * "nodeId + 公钥"，没有端点映射；要反向拨号时只能靠 registry 把 nodeId 找回来，
+     * 再从 TrustStore 取它的 pin。
+     */
+    fun findByEndpoint(ip: String, port: Int): PeerRecord? = lock.withLock {
+        // 同一端点可能对应多条历史记录(重装过的手机会留下旧 nodeId) ——
+        // 必须挑**在线且最近见过**的那条,否则会把 pin 钉到旧身份上,握手对不上,
+        // 症状是"永远 no-ack、最后退回 legacy TCP"(真机实测)。
+        peers.values
+            .filter {
+                (it.ip == ip || com.kapp.tidings.core.protocol.IpAddressUtils.isSameHost(it.ip, ip)) &&
+                    it.udpPort == port
+            }
+            .maxWithOrNull(compareBy<PeerRecord>({ it.online }, { it.lastSeen }))
+    }
+
     companion object {
         /** pin 来源：配对流程带来（可信路径）。 */
         const val PIN_SOURCE_PAIRING = "pairing"

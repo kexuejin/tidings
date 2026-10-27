@@ -66,8 +66,8 @@ class DesktopLuciolaHost(
     override fun transportFactory(): ((PeerRegistry) -> DatagramTransport)? =
         factory?.let { f -> ({ registry: PeerRegistry -> f.createTransport(registry) }) }
 
-    override fun discoveryFactory(): ((PeerRegistry) -> DiscoveryEngine)? =
-        factory?.let { f -> ({ registry: PeerRegistry -> f.createDiscovery(registry) }) }
+    override fun discoveryFactory(): ((PeerRegistry, () -> Profile) -> DiscoveryEngine)? =
+        factory?.let { f -> ({ registry: PeerRegistry, profile: () -> Profile -> f.createDiscovery(registry, profile) }) }
 
     /** 造一个「扫过码的手机」用的发起侧:配对信息 + 发起配对。 */
     suspend fun requestPairing(transport: DatagramTransport, host: String, port: Int, nodeId: String): Boolean {

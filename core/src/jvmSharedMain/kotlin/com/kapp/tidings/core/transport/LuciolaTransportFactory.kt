@@ -262,7 +262,7 @@ class LuciolaTransportFactory(
     fun createTransport(registry: PeerRegistry): SecureChannelTransport =
         SecureChannelTransport(
             identitySeed = identity.seed,
-            peerKey = { host, port -> endpoints[endpointKey(host, port)] },
+            peerKey = { host, port -> pinFor(host, port, registry) },
             listenPort = udpPort,
             isTrustedFingerprint = { fingerprint -> isTrustedFingerprint(fingerprint) },
             endpointOf = { nodeId ->
@@ -271,7 +271,39 @@ class LuciolaTransportFactory(
             pairing = pairingAdmission(),
             pairingSecretOf = { host, port -> pairingSecrets[endpointKey(host, port)] },
             selfPublicKey = identity.publicKey,
+            peerOfFingerprint = { fingerprint ->
+                // TrustStore 的指纹账本 → deviceId(nodeId) → registry 地址。
+                rustTrustStore.entries()
+                    .firstOrNull { it.fingerprint == fingerprint }
+                    ?.deviceId
+                    ?.let { registry.get(it) }
+                    ?.let { PeerEndpoint(it.ip, it.udpPort) }
+            },
         )
+
+    /**
+     * 拨号用的对端公钥：先查配对表；查不到再走「registry 端点 → nodeId → TrustStore」——
+     * 入站配对 (对方扫了我的码) 只把信任写进 TrustStore，没有端点映射，不补这条
+     * 主机就永远拨不回去（真机实测：发送 no-ack，最后退回 legacy TCP）。
+     */
+    private val reportedPins = ConcurrentHashMap.newKeySet<String>()
+
+    private fun pinFor(host: String, port: Int, registry: PeerRegistry): ByteArray? {
+        endpoints[endpointKey(host, port)]?.let { return it }
+        val record = registry.findByEndpoint(host, port)
+        val pin = record?.let { rec ->
+            rustTrustStore.entries().firstOrNull { it.deviceId == rec.profile.nodeId }?.publicKey
+        }
+        // 拨号排障:第一次需要反查时打一行(含 registry 是否认识该端点)。
+        val key = endpointKey(host, port)
+        if (reportedPins.add(key)) {
+            println(
+                "[luciola] pin lookup " + key + " registry=" + (record?.profile?.nodeId ?: "none") +
+                    " pinned=" + (pin != null),
+            )
+        }
+        return pin
+    }
 
     // ------------------------------------------------------------------ 内部
 

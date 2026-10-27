@@ -64,8 +64,8 @@ class AndroidLuciolaHost(
     override fun transportFactory(): ((PeerRegistry) -> DatagramTransport)? =
         factory?.let { f -> ({ registry: PeerRegistry -> f.createTransport(registry) }) }
 
-    override fun discoveryFactory(): ((PeerRegistry) -> DiscoveryEngine)? =
-        factory?.let { f -> ({ registry: PeerRegistry -> f.createDiscovery(registry) }) }
+    override fun discoveryFactory(): ((PeerRegistry, () -> Profile) -> DiscoveryEngine)? =
+        factory?.let { f -> ({ registry: PeerRegistry, profile: () -> Profile -> f.createDiscovery(registry, profile) }) }
 
     private fun installNativeLibraryPath() {
         val nativeDir = context.applicationInfo?.nativeLibraryDir ?: return

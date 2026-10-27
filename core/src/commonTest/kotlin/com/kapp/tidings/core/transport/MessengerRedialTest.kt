@@ -57,6 +57,7 @@ class MessengerRedialTest {
         tcp: FakeTcp,
         public: Boolean,
         registry: PeerRegistry,
+        preferTransport: Boolean = false,
     ): Pair<Messenger, CoroutineScope> {
         val scope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
         val transport = UdpTransport(port = 0, bindHost = "127.0.0.1")
@@ -68,12 +69,54 @@ class MessengerRedialTest {
             dedupStore = InMemoryDedupStore(),
             timings = Timings(ackRetrySchedule = listOf(30L), tcpAckTimeout = 30L),
             tcpFallback = tcp,
+            preferTransport = preferTransport,
         )
         transport.start()
         messenger.start(scope)
         messenger.linkDownlink = link
         messenger.peerIsPublic = { public }
         return messenger to scope
+    }
+
+    /**
+     * luciola 模式（preferTransport）必须**不先走 legacy K1**：
+     * 真机归因发现过"发现换成 luciola、消息仍走 LINK"。这里用一个"如果被调用就成功"的
+     * 假链路钉住：开启后链路调用次数必须为 0（传输面失败则入队）。
+     */
+    @Test
+    fun preferTransportSkipsLegacyLink() = runBlocking {
+        val link = FakeLink(failFirst = 0)
+        val registry = PeerRegistry("self-node")
+        val (messenger, scope) = newMessenger(
+            link = link, tcp = FakeTcp(false), public = true, registry = registry, preferTransport = true,
+        )
+        try {
+            messenger.peerIsPublic = { true }
+            val envelope = makeEnvelope(MsgTypes.MSG, "self-node", Codec.textPayload("hi"))
+            val outcome = messenger.sendUserMessage("unknown-peer", envelope)
+            assertEquals(com.kapp.tidings.core.transport.SendOutcome.QUEUED, outcome, "未知对端无法 ACK,应入队")
+            assertEquals(0, link.sends, "luciola 模式下不许先走 legacy 链路")
+        } finally {
+            scope.cancel()
+        }
+    }
+
+    @Test
+    fun legacyModeStillUsesLinkFirst() = runBlocking {
+        val link = FakeLink(failFirst = 0)
+        val registry = PeerRegistry("self-node")
+        val (messenger, scope) = newMessenger(
+            link = link, tcp = FakeTcp(false), public = true, registry = registry, preferTransport = false,
+        )
+        try {
+            messenger.peerIsPublic = { true }
+            val envelope = makeEnvelope(MsgTypes.MSG, "self-node", Codec.textPayload("hi"))
+            val outcome = messenger.sendUserMessage("unknown-peer", envelope)
+            assertEquals(com.kapp.tidings.core.transport.SendOutcome.SENT, outcome)
+            assertEquals(1, link.sends, "legacy 模式仍是链路优先(对照组)")
+        } finally {
+            scope.cancel()
+        }
     }
 
     @Test

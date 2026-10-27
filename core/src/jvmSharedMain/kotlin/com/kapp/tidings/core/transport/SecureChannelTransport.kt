@@ -63,6 +63,11 @@ class SecureChannelTransport(
     private val pairingSecretOf: (String, Int) -> ByteArray? = { _, _ -> null },
     /** 本端 Ed25519 公钥(配对帧自证用;由工厂传入)。 */
     private val selfPublicKey: ByteArray = ByteArray(0),
+    /**
+     * 会话指纹 → 对端在 registry 里的地址。二进制数据帧(FileChunkFrame)没有 Envelope,
+     * 不能靠帧里的 from 归属;只能靠握手出来的指纹反查(TrustStore → nodeId → registry)。
+     */
+    private val peerOfFingerprint: (String) -> PeerEndpoint? = { null },
 ) : DatagramTransport {
     private val outbound = ConcurrentHashMap<String, SecureSession>()
 
@@ -200,6 +205,10 @@ class SecureChannelTransport(
         @Volatile
         private var sessionFingerprint: String? = null
 
+        /** 该会话已解析出的对端地址(二进制帧与 Envelope 帧共用,解析一次缓存)。 */
+        @Volatile
+        private var inboundPeer: PeerEndpoint? = null
+
         override fun onState(state: String, detail: String?) {
             when (state) {
                 "connected" -> {
@@ -232,6 +241,15 @@ class SecureChannelTransport(
             }
             // 未通过信任手续的对端,一帧业务数据都不许进入应用层。
             if (!trusted) return
+            // 二进制数据帧(文件/投屏)没有 Envelope:按会话指纹反查对端地址后原样投递。
+            if (FileChunkFrame.isChunkFrame(message)) {
+                val fp = sessionFingerprint ?: return
+                val endpoint = inboundPeer ?: peerOfFingerprint(fp) ?: return
+                inboundPeer = endpoint
+                inboundByEndpoint[endpointKey(endpoint.host, endpoint.port)] = session
+                _incoming.tryEmit(ReceivedDatagram(message, endpoint.host, endpoint.port))
+                return
+            }
             val from = senderOf(message) ?: return
             val endpoint = endpointOf(from)
             if (endpoint == null) {

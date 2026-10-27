@@ -120,8 +120,10 @@ class LuciolaDiscoveryEngine(
         if (loggedPeers.add(profile.nodeId)) {
             println("[luciola] discovered " + profile.nodeId + " at " + peer.ip + ":" + peer.udpPort)
         }
-        // 源地址用 luciola 观察到的可达地址;地址表随 Tidings 资料走。
-        registry.touch(profile.nodeId, peer.ip, peer.udpPort, profile, confirmed = true)
+        // 端口优先用档案里的 luciolaPort:发现引擎上报的 udpPort 可能是临时端口,
+        // 而加密信道监听在固定端口(真机实测 52213 vs 17878)。老档案没这个键才回退。
+        val sendPort = profile.luciolaPort ?: peer.udpPort
+        registry.touch(profile.nodeId, peer.ip, sendPort, profile, confirmed = true)
     }
 
     private fun onLuciolaLost(luciolaNodeId: String) {

@@ -99,6 +99,36 @@ class LuciolaDiscoveryEngineTest {
         }
     }
 
+    /**
+     * 发现上报的端口可能是引擎的临时端口(真机:52213),而加密信道在固定端口监听。
+     * 档案里的 luciolaPort 必须覆盖它,否则发送会拨到错误端口。
+     */
+    @Test
+    fun registryUsesProfileLuciolaPortInsteadOfEngineReportedPort() = runBlocking {
+        val json = Json { encodeDefaults = false; ignoreUnknownKeys = true }
+        val selfP = profile("lp_self", "Self")
+        val peerP = profile("lp_peer", "FixedPort").copy(luciolaPort = 19999)
+        val registry = PeerRegistry(selfP.nodeId)
+        val engine = LuciolaDiscoveryEngine(registry, { selfP }, udpPort = 18941)
+        val peerAdapter = UniffiEngineAdapter(
+            sessionName = peerP.nick,
+            discoveryPort = 18942u,
+            product = "tidings",
+            extra = json.encodeToString(Profile.serializer(), peerP),
+        )
+        peerAdapter.start { }
+        engine.start(this)
+        try {
+            val online = launch { withTimeout(10_000) { registry.events.first { it is PeerEvent.Online } } }
+            engine.announceTo("127.0.0.1", 18942)
+            online.join()
+            assertEquals(19999, registry.get(peerP.nodeId)?.udpPort, "registry 的发送端口必须用档案里的 luciolaPort")
+        } finally {
+            engine.stop()
+            peerAdapter.stop()
+        }
+    }
+
     @Test
     fun peerGoesOfflineAfterPeerStops() = runBlocking {
         val json = Json { encodeDefaults = false; ignoreUnknownKeys = true }

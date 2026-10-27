@@ -177,7 +177,7 @@ class NodeRuntime(
      * 为什么需要:luciola 的发现把 found/updated/lost 直接写进 [registry],而 registry
      * 是本类自己创建的 —— 宿主拿不到实例,只能拿工厂（同 [messengerTransportFactory]）。
      */
-    private val extraDiscoveryFactory: ((PeerRegistry) -> DiscoveryEngine)? = null,
+    private val extraDiscoveryFactory: ((PeerRegistry, () -> Profile) -> DiscoveryEngine)? = null,
     /**
      * 长连接的连接层（K2 的接缝）。K1 默认明文 [PlaintextLinkTransport]；K2 换成
      * TLS + 双向 pin 的实现即可，本类一行不用改。
@@ -268,7 +268,7 @@ class NodeRuntime(
 
     // 额外发现:实例优先,其次工厂(两者都空 = 纯 legacy)。
     private val resolvedExtraDiscovery: DiscoveryEngine? =
-        extraDiscovery ?: extraDiscoveryFactory?.invoke(registry)
+        extraDiscovery ?: extraDiscoveryFactory?.invoke(registry, { selfProfile })
     private val tcp: TcpFramedChannel? = if (enableTcp) TcpFramedChannel() else null
 
     /**
@@ -313,6 +313,13 @@ class NodeRuntime(
     private val selfProfile: Profile
         get() = profile.copy(
             tlsPin = linkTransport.localPin?.wire ?: profile.tlsPin,
+            // luciola 模式下把**信道的监听端口**告诉对端:发现引擎上报的端口可能是
+            // 临时端口,不能拿来拨号(真机实测 17878 vs 52213)。
+            luciolaPort = if (messengerTransportFactory != null) {
+                transport.boundPort.takeIf { it > 0 }
+            } else {
+                null
+            },
             // **把本机全部可路由地址带出去**（含 Tailscale / ZeroTier 段）。
             //
             // 对端原先只能从「发现包的源地址」学地址，而广播不跨 VPN 网段 ⇒
@@ -357,6 +364,7 @@ class NodeRuntime(
         timings = timings,
         tcpFallback = tcp,
         acceptQueueFor = acceptQueueFor,
+        preferTransport = messengerTransportFactory != null,
     )
     private val outbound = NodeOutbound(
         messenger = messenger,

@@ -46,7 +46,7 @@ class NodeRuntimeExtraDiscoveryFactoryTest {
             udpPort = 0,
             tcpPort = 0,
             messengerTransportFactory = null,
-            extraDiscoveryFactory = { registry ->
+            extraDiscoveryFactory = { registry, _ ->
                 FakeDiscovery(registry).also { fake = it }
             },
         )

@@ -896,6 +896,8 @@ class RelayController(
         luciolaHost?.configure(profile, settings.udpPort)
         val luciolaTransport = luciolaHost?.transportFactory()
         val luciolaDiscovery = luciolaHost?.discoveryFactory()
+        // 发现引擎的 extra 必须用运行时 selfProfile(含 luciolaPort):工厂构造时的静态
+        // profile 没有那个字段,对端会拿发现临时端口来拨号(真机实测拨错)。
         val luciolaMode = luciolaTransport != null && luciolaDiscovery != null
         val rt = NodeRuntime(
             profile = profile,

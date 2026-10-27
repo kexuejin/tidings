@@ -6,6 +6,7 @@ import com.kapp.tidings.core.protocol.MsgTypes
 import com.kapp.tidings.core.protocol.Profile
 import com.kapp.tidings.core.protocol.makeEnvelope
 import kotlinx.coroutines.async
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.runBlocking
 import kotlinx.coroutines.withTimeout
@@ -411,6 +412,115 @@ class LuciolaSecureChannelTest {
             )
         } finally {
             transport.stop()
+        }
+    }
+
+    /**
+     * 反向拨号:主机通过入站配对 (TLPAIR1) 只拿到 nodeId+公钥,没有端点映射。
+     * 主机要回消息时必须能靠「registry 端点 → nodeId → TrustStore」找回 pin,
+     * 否则真实症状是"手机发得进来、主机发不出去"(真机实测 no-ack → 退回 legacy TCP)。
+     */
+    @Test
+    fun hostCanDialBackPeerThatPairedInbound() = runBlocking {
+        val portHost = freeTcpPort()
+        val portPhone = freeTcpPort()
+        val host = factory(portHost, 40)
+        val phone = factory(portPhone, 41)
+        phone.pairPeer(
+            "127.0.0.1", portHost, host.publicKey,
+            secret = Base64.UrlSafe.decode(host.pairSecretBase64()),
+        )
+        val hostTransport = host.createTransport(registryWith("host-node", "phone-node", "127.0.0.1", portPhone))
+        val phoneTransport = phone.createTransport(registryWith("phone-node", "host-node", "127.0.0.1", portHost))
+        hostTransport.start()
+        phoneTransport.start()
+        try {
+            withTimeout(10_000) {
+                while (!phoneTransport.requestPairing("127.0.0.1", portHost, "phone-node")) delay(100)
+            }
+            withTimeout(10_000) { phoneTransport.pairingResults.first() }
+
+            val payload = frame("host-node", "dial-back-after-pairing")
+            val atPhone = async { withTimeout(15_000) { phoneTransport.incoming.first() } }
+            withTimeout(15_000) {
+                while (!hostTransport.send(payload, "127.0.0.1", portPhone)) delay(100)
+            }
+            assertContentEquals(payload, atPhone.await().bytes)
+        } finally {
+            hostTransport.stop()
+            phoneTransport.stop()
+        }
+    }
+
+    /**
+     * 文件/投屏的二进制数据帧没有 Envelope,不能靠帧里的 from 归属 ——
+     * 必须靠会话指纹反查 (TrustStore → nodeId → registry 端点) 后才能进业务层。
+     */
+    @Test
+    fun binaryChunkFrameFromTrustedPeerCarriesPeerEndpoint() = runBlocking {
+        val portHost = freeTcpPort()
+        val portPhone = freeTcpPort()
+        val host = factory(portHost, 50)
+        val phone = factory(portPhone, 51)
+        phone.pairPeer(
+            "127.0.0.1", portHost, host.publicKey,
+            secret = Base64.UrlSafe.decode(host.pairSecretBase64()),
+        )
+        val hostTransport = host.createTransport(registryWith("host-node", "phone-node", "127.0.0.1", portPhone))
+        val phoneTransport = phone.createTransport(registryWith("phone-node", "host-node", "127.0.0.1", portHost))
+        hostTransport.start()
+        phoneTransport.start()
+        try {
+            withTimeout(10_000) {
+                while (!phoneTransport.requestPairing("127.0.0.1", portHost, "phone-node")) delay(100)
+            }
+            withTimeout(10_000) { phoneTransport.pairingResults.first() }
+
+            val chunk = FileChunkFrame.encode("tf-1", 0, ByteArray(256) { it.toByte() })
+            val atHost = async { withTimeout(15_000) { hostTransport.incoming.first() } }
+            withTimeout(15_000) { while (!phoneTransport.send(chunk, "127.0.0.1", portHost)) delay(50) }
+            val received = atHost.await()
+            assertContentEquals(chunk, received.bytes)
+            assertEquals("127.0.0.1", received.host)
+            assertEquals(portPhone, received.port, "二进制帧必须带对端 registry 地址")
+            assertEquals("tf-1", FileChunkFrame.decode(received.bytes)?.transferId)
+        } finally {
+            hostTransport.stop()
+            phoneTransport.stop()
+        }
+    }
+
+    @Test
+    fun binaryChunkFrameFromTrustedPeerWithoutRegistryEndpointIsDropped() = runBlocking {
+        val portHost = freeTcpPort()
+        val portPhone = freeTcpPort()
+        val host = factory(portHost, 52)
+        val phone = factory(portPhone, 53)
+        phone.pairPeer(
+            "127.0.0.1", portHost, host.publicKey,
+            secret = Base64.UrlSafe.decode(host.pairSecretBase64()),
+        )
+        // 主机 registry **故意不认识**手机(发现还没到)。
+        val hostTransport = host.createTransport(PeerRegistry("host-node"))
+        val phoneTransport = phone.createTransport(PeerRegistry("phone-node"))
+        hostTransport.start()
+        phoneTransport.start()
+        try {
+            withTimeout(10_000) {
+                while (!phoneTransport.requestPairing("127.0.0.1", portHost, "phone-node")) delay(100)
+            }
+            withTimeout(10_000) { phoneTransport.pairingResults.first() }
+
+            val chunk = FileChunkFrame.encode("tf-2", 0, ByteArray(64))
+            repeat(10) {
+                phoneTransport.send(chunk, "127.0.0.1", portHost)
+                delay(50)
+            }
+            val leak = withTimeoutOrNull(1_500) { hostTransport.incoming.first() }
+            assertTrue(leak == null, "查不到对端地址时不许把二进制帧交上去")
+        } finally {
+            hostTransport.stop()
+            phoneTransport.stop()
         }
     }
 

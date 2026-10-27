@@ -37,6 +37,6 @@ interface LuciolaHost {
     /** 传输面装配（NodeRuntime 注入用）。 */
     fun transportFactory(): ((PeerRegistry) -> DatagramTransport)?
 
-    /** 发现面装配（NodeRuntime 注入用）。 */
-    fun discoveryFactory(): ((PeerRegistry) -> DiscoveryEngine)?
+    /** 发现面装配（NodeRuntime 注入用）。profile 由运行时给（含运行时才知道的 luciolaPort）。 */
+    fun discoveryFactory(): ((PeerRegistry, () -> Profile) -> DiscoveryEngine)?
 }

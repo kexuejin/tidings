@@ -86,6 +86,32 @@
 - 引擎错误面已接上（`bind_failed` 等不再静默），发送通道归因日志
   `[send] channel=LINK|TCP|TRANSPORT` 已加。
 
+## 4.2 数据面切到加密信道（2026-10-26 晚，真机验证通过）
+
+在 4.1 之后补了三处，真机重跑同一归因命令：
+
+1. **档案里加 `luciolaPort`（可选键）**：发现引擎上报的 `udpPort` 可能是临时端口
+   （实测 40332/52213），对端拿它拨号必错。运行时 `selfProfile` 把加密信道的实际
+   监听端口写进档案；发现引擎用 `profile.luciolaPort ?: peer.udpPort` 登记 registry。
+   实测：registry 从 `40332` 变为 `17878`。
+2. **反向拨号的 pin 查找**：主机通过入站配对只拿到 nodeId+公钥，没有端点映射。
+   新增 `PeerRegistry.findByEndpoint`（同一端点有多条历史记录时挑**在线且最近见过**
+   的那条 —— 实测踩过：先挑到旧 nodeId，握手对不上，症状是 no-ack 后退回 TCP）。
+   工厂 `pinFor` 走「配对表 → registry 端点 → TrustStore」。
+3. **Messenger.preferTransport**：luciola 模式下消息不再先走 legacy K1（仍保留失败回退）。
+
+真机最终结果（主机控制面 POST /v1/send）：
+
+```
+{"lastSend":"outcome=sent-via-udp elapsed=100ms endpoints=[192.168.2.22:17878 acked 100ms] link=true"}
+[host log] [luciola] paired node=0f39bd5f-... fp=sha256:3754378087d
+[host log] [send] peer=0f39bd5f channel=TRANSPORT
+```
+
+即：**发现走 luciola、消息走加密信道、100ms 内 ACK**。legacy TCP/TLS 仅作为回退保留
+（文件传输/投屏尚未迁移，仍依赖它们）。回归测试覆盖：`luciolaPort` 编解码、
+registry 用档案端口、dial-back 反查、`preferTransport` 跳过链路。
+
 ## 5. 已知边界 / 后续
 
 1. `luciola-android 0.4.4` 只在 mavenLocal，**Maven Central 未发布**（0.4.3 为 404）；
