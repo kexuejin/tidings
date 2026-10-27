@@ -4,7 +4,6 @@ package com.kapp.tidings.core.transport
 import kotlinx.serialization.Serializable
 import kotlinx.serialization.json.Json
 import uniffi.luciola_uniffi.identityFingerprint
-import java.security.MessageDigest
 import kotlin.io.encoding.Base64
 import kotlin.io.encoding.ExperimentalEncodingApi
 
@@ -56,7 +55,7 @@ data class PairingResult(
 
 /** 传输层配对控制帧的线格式(magic + JSON)。 */
 object PairingFrame {
-    private val MAGIC = "TLPAIR1".toByteArray(Charsets.US_ASCII)
+    private val MAGIC = "TLPAIR1".encodeToByteArray()
     private const val MAX_FRAME_BYTES = 1024
 
     private val json = Json { ignoreUnknownKeys = true; encodeDefaults = false }
@@ -89,12 +88,12 @@ object PairingFrame {
             Request.serializer(),
             Request(nodeId, b64(publicKey), b64(secret), name),
         )
-        return MAGIC + payload.toByteArray(Charsets.UTF_8)
+        return MAGIC + payload.encodeToByteArray()
     }
 
     fun decodeRequest(bytes: ByteArray): DecodedRequest? {
         if (!looksLikePairingFrame(bytes)) return null
-        val body = bytes.copyOfRange(MAGIC.size, bytes.size).toString(Charsets.UTF_8)
+        val body = bytes.decodeToString(MAGIC.size, bytes.size)
         val parsed = runCatching { json.decodeFromString(Request.serializer(), body) }.getOrNull() ?: return null
         val pk = unb64(parsed.pk) ?: return null
         val secret = unb64(parsed.secret) ?: return null
@@ -103,11 +102,11 @@ object PairingFrame {
     }
 
     fun encodeReply(ok: Boolean, reason: String? = null): ByteArray =
-        MAGIC + json.encodeToString(Reply.serializer(), Reply(ok, reason)).toByteArray(Charsets.UTF_8)
+        MAGIC + json.encodeToString(Reply.serializer(), Reply(ok, reason)).encodeToByteArray()
 
     fun decodeReply(bytes: ByteArray): Pair<Boolean, String?>? {
         if (!looksLikePairingFrame(bytes)) return null
-        val body = bytes.copyOfRange(MAGIC.size, bytes.size).toString(Charsets.UTF_8)
+        val body = bytes.decodeToString(MAGIC.size, bytes.size)
         val parsed = runCatching { json.decodeFromString(Reply.serializer(), body) }.getOrNull() ?: return null
         return parsed.ok to parsed.reason
     }
@@ -124,7 +123,7 @@ object PairingFrame {
         val actual = runCatching { identityFingerprint(request.publicKey) }.getOrNull()
             ?: return "bad_public_key"
         if (actual != sessionFingerprint) return "fingerprint_mismatch"
-        if (!MessageDigest.isEqual(request.secret, expectedSecret)) return "bad_secret"
+        if (!constantTimeEquals(request.secret, expectedSecret)) return "bad_secret"
         return null
     }
 
@@ -135,4 +134,19 @@ object PairingFrame {
         runCatching { Base64.UrlSafe.decode(text) }.getOrNull()
 
     internal const val ED25519_PUBLIC_KEY_SIZE = 32
+}
+
+/**
+ * 常量时间字节比较。
+ *
+ * 原来用的是 java.security.MessageDigest.isEqual —— 它是**防时序攻击**的：
+ * 比较耗时与"第几个字节不同"无关。换成 contentEquals 会在第一个不同字节就返回，
+ * 让攻击者能按响应时间逐字节猜出配对密钥。Kotlin/Native 没有 MessageDigest，
+ * 所以这里自带一份，语义保持一致（尺寸不同直接 false，尺寸相同则全程异或）。
+ */
+internal fun constantTimeEquals(a: ByteArray, b: ByteArray): Boolean {
+    if (a.size != b.size) return false
+    var diff = 0
+    for (i in a.indices) diff = diff or (a[i].toInt() xor b[i].toInt())
+    return diff == 0
 }
