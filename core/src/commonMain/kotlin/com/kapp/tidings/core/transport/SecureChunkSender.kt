@@ -85,6 +85,11 @@ class SecureChunkSender(
         require(windowChunks >= 1)
     }
 
+    private companion object {
+        /** 等确认时的轮询间隔：既要让出线程，也别把 CPU 空转掉。 */
+        const val LAST_MILE_POLL_MS: Long = 5
+    }
+
     /**
      * @param send 发一帧到 (host, port)；false = 队列满/未连接，调用方退避重试。
      * @param acks 取"当前最新确认"(ackedUpTo, 单调不减)；超时返回 null 视为没有前进。
@@ -116,14 +121,21 @@ class SecureChunkSender(
                 offset += chunk.size
             }
             // 2) 等确认前进；没前进就从 acked 整窗重发（接收端按 offset 写，幂等）
+            //
+            // **必须真的让出线程**:acks 一般是"读一下当前确认值"这种非挂起调用,
+            // 放在 withTimeoutOrNull {} 里会立刻返回 —— 循环不休眠就成了热自旋,
+            // 单线程调度器上会把收帧的协程饿死,ACK 永远进不来。
+            // 真机/回环 50MB 验收撞过:180s 超时,一个字节都没确认。
+            val deadlineAt = System.currentTimeMillis() + ackTimeoutMs
             var progressed = false
-            while (true) {
-                val upTo = withTimeoutOrNull(ackTimeoutMs) { acks() } ?: break
+            while (System.currentTimeMillis() < deadlineAt) {
+                val upTo = acks() ?: acked
                 if (upTo > acked) {
                     acked = minOf(upTo, total)
                     progressed = true
                     break
                 }
+                kotlinx.coroutines.delay(LAST_MILE_POLL_MS)
             }
             if (!progressed) kotlinx.coroutines.delay(backoffMs)
         }

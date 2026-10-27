@@ -9,6 +9,17 @@ interface RandomAccessFile {
     fun read(buffer: ByteArray, atOffset: Long, count: Int): Int
     /** 追加写入（永远写在当前末尾）。 */
     fun append(buffer: ByteArray, count: Int)
+
+    /**
+     * 在 [atOffset] 处写入（随机写；越过末尾会在中间留空洞，与 POSIX pwrite 同语义）。
+     *
+     * 为什么需要它：加密信道的分块数据面按**窗口 + 整窗重传**跑，帧到达顺序由
+     * "哪条 TCP 先排空"决定，乱序与重复都是常态。只按到达顺序 append，乱序块会
+     * 被写到错误的位置 —— 端到端表现为"字节数对得上、sha256 却对不上"
+     * （回环 50MB 验收实测过：finish() 报 hash-mismatch）。按帧里的 offset 落盘
+     * 才能让"重传补洞"这件事成立。
+     */
+    fun writeAt(atOffset: Long, buffer: ByteArray, count: Int)
     /** 把缓冲区刷到磁盘。 */
     fun flush()
     fun close()

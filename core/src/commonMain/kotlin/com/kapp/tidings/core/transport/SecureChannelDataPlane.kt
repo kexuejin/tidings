@@ -43,7 +43,7 @@ class SecureChannelDataPlane(
             sendAck(upTo)
         }
         receive { frame ->
-            if (chunkReceiver.onChunk(frame)) receiver.append(frame.payload)
+            if (chunkReceiver.onChunk(frame)) receiver.append(frame.offset, frame.payload)
         }
         if (!chunkReceiver.isComplete) {
             receiver.discard()

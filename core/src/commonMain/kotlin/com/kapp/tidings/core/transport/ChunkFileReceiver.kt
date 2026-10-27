@@ -52,13 +52,18 @@ class ChunkFileReceiver(
     /** 解析阶段就失败（路径越界）：调用方据此报 path-escape。 */
     val valid: Boolean get() = finalPath != null
 
-    /** 写入一段到 part 文件末尾（顺序追加；乱序由上层 `SecureChunkReceiver` 保证）。 */
-    suspend fun append(bytes: ByteArray) = withContext(ioDispatcher) {
+    /**
+     * 按帧里的 [atOffset] 写入 part 文件（随机写，**不是**顺序追加）。
+     *
+     * 数据面按窗口重传，帧可能乱序、也可能重复投递；只有按 offset 写才能让
+     * "重传补洞"正确落盘。重复块由上层 `SecureChunkReceiver` 挡住，这里不做去重。
+     */
+    suspend fun append(atOffset: Long, bytes: ByteArray) = withContext(ioDispatcher) {
         val part = partPath ?: throw PullException("path-escape", PullStage.Write)
         makeDirectories(root)
         val handle = openRandomAccess(part, forWrite = true)
         try {
-            handle.append(bytes, bytes.size)
+            handle.writeAt(atOffset, bytes, bytes.size)
             handle.flush()
         } finally {
             handle.use { }

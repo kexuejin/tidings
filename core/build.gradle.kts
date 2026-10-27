@@ -84,3 +84,33 @@ tasks.withType<Test>().configureEach {
     // 正式接入时应改为随构件分发或 CI 固定路径。
     systemProperty("jna.library.path", System.getProperty("jna.library.path") ?: "/workspace/RustBuild/cargo-target/debug")
 }
+
+// ## 为什么验收用例要单独一个 JVM
+//
+// `ChannelFileTransferE2ETest` 是**真验收**：两条真实 luciola 加密信道、真实分块窗口、
+// 真落盘 50MB 再校验 sha256，跑一次 ~40s 并持续做文件 IO。把它放进 `:core:jvmTest`
+// 会把同一 JVM 里后续的 luciola 握手用例挤到超时 —— 实测连跑时
+// `binaryChunkFrameFromTrustedPeerCarriesPeerEndpoint` 这类用例会在 10s 上超时，
+// 单个类跑却是绿的（683/683）。所以判据拆成两条，都跑才算过：
+//
+//   ./gradlew :core:jvmTest              # 单元/协议（四套 JVM 套件的一项）
+//   ./gradlew :core:jvmAcceptanceTest    # ≥50MB 信道验收（goal 第 3 步证据）
+val jvmAcceptanceTest = tasks.register<Test>("jvmAcceptanceTest") {
+    group = "verification"
+    description = "luciola 信道 ≥50MB 验收（真实信道 + 真实落盘 + sha256 一致）"
+    val base = tasks.named<Test>("jvmTest")
+    dependsOn("jvmTestClasses")
+    testClassesDirs = base.get().testClassesDirs
+    classpath = base.get().classpath
+    filter {
+        includeTestsMatching("com.kapp.tidings.core.transport.ChannelFileTransferE2ETest")
+    }
+    systemProperty("jna.library.path", System.getProperty("jna.library.path") ?: "/workspace/RustBuild/cargo-target/debug")
+    // 一次只跑一条：这条用例独占端口与磁盘，并行只会互相干扰。
+    maxParallelForks = 1
+}
+
+// 单元套件里排除这条验收：它由 jvmAcceptanceTest 负责。
+tasks.named<Test>("jvmTest") {
+    exclude("**/ChannelFileTransferE2ETest*")
+}

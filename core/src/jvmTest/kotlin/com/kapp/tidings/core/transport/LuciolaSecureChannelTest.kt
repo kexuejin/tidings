@@ -6,6 +6,7 @@ import com.kapp.tidings.core.protocol.MsgTypes
 import com.kapp.tidings.core.protocol.Profile
 import com.kapp.tidings.core.protocol.makeEnvelope
 import kotlinx.coroutines.async
+import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.runBlocking
@@ -88,6 +89,42 @@ class LuciolaSecureChannelTest {
         port: Int,
     ) {
         awaitTrue(timeoutMs = 15_000, pollMs = 50) { transport.send(bytes, host, port) }
+    }
+
+    /**
+     * 发起配对并**等应答**（重发到真收到）。
+     *
+     * 为什么不能"一次 requestPairing 成功就等 10s"：requestPairing 返回 true 只代表
+     * 那一帧进了信道队列，主机侧此时可能还没进 accept、或者配对帧与握手抢跑；
+     * 全量跑时这一步会偶发超时（实测三个用例在 10s 上挂，单独跑却全绿）。
+     * 这里先订阅应答、再持续重发，直到收到 —— 与 [sendUntil] 同一条纪律。
+     */
+    private suspend fun pairEventually(
+        transport: SecureChannelTransport,
+        host: String,
+        port: Int,
+        selfNodeId: String,
+        timeoutMs: Long = 30_000,
+    ): PairingResult = coroutineScope {
+        // 只认本次端点自己的应答（replay=1 会把上一条也回放给新订阅者）。
+        val reply = async {
+            withTimeout(timeoutMs) {
+                transport.pairingResults.first { it.host == host && it.port == port }
+            }
+        }
+        try {
+            awaitTrue(timeoutMs = timeoutMs, pollMs = 100) {
+                if (reply.isCompleted) {
+                    true
+                } else {
+                    transport.requestPairing(host, port, selfNodeId)
+                    false
+                }
+            }
+            reply.await()
+        } finally {
+            reply.cancel()
+        }
     }
 
     // ------------------------------------------------------------------ 用例
@@ -347,10 +384,10 @@ class LuciolaSecureChannelTest {
         hostTransport.start()
         phoneTransport.start()
         try {
-            val accepted = async { withTimeout(10_000) { phoneTransport.pairingResults.first() } }
+            val accepted = async { withTimeout(30_000) { phoneTransport.pairingResults.first() } }
             // 轮询间隔与改动前一致（50ms）：`requestPairing` 有副作用（每次调用都排一帧），
             // 这里要的是「它成功」，不是刷得越快越好 —— 20ms 会让同一轮多排一倍帧。
-            awaitTrue(timeoutMs = 10_000, pollMs = 50) {
+            awaitTrue(timeoutMs = 30_000, pollMs = 50) {
                 phoneTransport.requestPairing("127.0.0.1", portHost, "phone-node")
             }
             assertTrue(accepted.await().accepted, "带正确 secret 的配对帧必须被接受")
@@ -386,9 +423,10 @@ class LuciolaSecureChannelTest {
         hostTransport.start()
         phoneTransport.start()
         try {
-            // 只调一次,不看返回值 —— 这正是扫码路径的行为。
+            // 只调一次,不看返回值 —— 这正是扫码路径的行为;应答等足 30s
+            // （全量跑时握手会慢，"补发"本身由传输层负责，用例只验证它会到）。
             phoneTransport.requestPairing("127.0.0.1", portHost, "phone-node")
-            val accepted = withTimeout(10_000) { phoneTransport.pairingResults.first() }
+            val accepted = withTimeout(30_000) { phoneTransport.pairingResults.first() }
             assertTrue(accepted.accepted, "握手前发出的配对帧也必须在连上后补发并被接受")
 
             val payload = frame("phone-node", "paired-once")
@@ -435,10 +473,7 @@ class LuciolaSecureChannelTest {
         hostTransport.start()
         phoneTransport.start()
         try {
-            withTimeout(10_000) {
-                while (!phoneTransport.requestPairing("127.0.0.1", portHost, "phone-node")) delay(100)
-            }
-            withTimeout(10_000) { phoneTransport.pairingResults.first() }
+            pairEventually(phoneTransport, "127.0.0.1", portHost, "phone-node")
 
             val payload = frame("host-node", "dial-back-after-pairing")
             val atPhone = async { withTimeout(15_000) { phoneTransport.incoming.first() } }
@@ -471,10 +506,7 @@ class LuciolaSecureChannelTest {
         hostTransport.start()
         phoneTransport.start()
         try {
-            withTimeout(10_000) {
-                while (!phoneTransport.requestPairing("127.0.0.1", portHost, "phone-node")) delay(100)
-            }
-            withTimeout(10_000) { phoneTransport.pairingResults.first() }
+            pairEventually(phoneTransport, "127.0.0.1", portHost, "phone-node")
 
             val chunk = FileChunkFrame.encode("tf-1", 0, ByteArray(256) { it.toByte() })
             // 全量并发跑时握手会慢一些:收端等待给足 30s,发送端"重发到真收到"而不是只看一次返回值。
@@ -512,10 +544,7 @@ class LuciolaSecureChannelTest {
         hostTransport.start()
         phoneTransport.start()
         try {
-            withTimeout(10_000) {
-                while (!phoneTransport.requestPairing("127.0.0.1", portHost, "phone-node")) delay(100)
-            }
-            withTimeout(10_000) { phoneTransport.pairingResults.first() }
+            pairEventually(phoneTransport, "127.0.0.1", portHost, "phone-node")
 
             val chunk = FileChunkFrame.encode("tf-2", 0, ByteArray(64))
             repeat(10) {

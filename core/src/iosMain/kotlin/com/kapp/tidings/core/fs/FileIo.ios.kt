@@ -80,6 +80,15 @@ private class IosRandomAccessFile(
         handle.writeData(data)
     }
 
+    override fun writeAt(atOffset: Long, buffer: ByteArray, count: Int) {
+        if (count <= 0) return
+        handle.seekToFileOffset(atOffset.toULong())
+        val data = buffer.usePinned { pinned ->
+            NSData.create(bytes = pinned.addressOf(0), length = count.toULong())
+        }
+        handle.writeData(data)
+    }
+
     /** `synchronizeFile()` 就是 fsync(2)，与 JVM 侧的 `fd.sync()` 同一个语义。 */
     override fun flush() = handle.synchronizeFile()
 

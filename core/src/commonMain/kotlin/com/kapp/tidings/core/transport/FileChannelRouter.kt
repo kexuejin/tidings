@@ -30,7 +30,17 @@ class FileChannelRouter(
         val fileId: String,
         val receiver: ChunkFileReceiver,
         val chunks: SecureChunkReceiver,
-    )
+    ) {
+        /**
+         * 转正是否已经做过（只做一次）。
+         *
+         * 收齐之后**故意不从表里摘掉**：末帧的 ACK 一旦丢在信道上，发送端会重传整窗，
+         * 而它只认"连续前缀到 totalSize"。摘掉之后重传帧无人认领、不再回 ACK，
+         * 发送端就永远停在最后一窗（回环 50MB 验收实测：acked 50593792/52428800，
+         * 文件其实早已转正、part 已改名，两边却都以为没传完）。
+         */
+        var finished: Boolean = false
+    }
 
     private val lock = Any()
     private val inbound = HashMap<String, Inbound>()
@@ -67,12 +77,9 @@ class FileChannelRouter(
             val (transferId, fileId) = splitKey(frame.transferId) ?: return true
             val entry = synchronized(lock) { inbound[keyOf(transferId, fileId)] } ?: return true
             if (entry.chunks.onChunk(FileChunkFrame.Decoded(transferIdKey(transferId, fileId), frame.offset, frame.payload))) {
-                entry.receiver.append(frame.payload)
+                entry.receiver.append(frame.offset, frame.payload)
             }
-            if (entry.chunks.isComplete) {
-                synchronized(lock) { inbound.remove(keyOf(transferId, fileId)) }
-                entry.receiver.finish()
-            }
+            if (entry.chunks.isComplete) completeOnce(entry)
             return true
         }
         FileChunkAck.decode(bytes)?.let { ack ->
@@ -81,6 +88,25 @@ class FileChannelRouter(
         }
         // 既不是数据帧也不是 ACK:交给上层(它会按 Envelope 处理或丢弃)。
         return false
+    }
+
+    /**
+     * 收齐后转正，**只做一次**；失败就把条目摘掉（不再回 ACK，让发送端如实失败）。
+     *
+     * 校验失败不回 ACK 是刻意的：ACK 的语义是"字节收齐"，一旦校验不过，就不能再
+     * 给出"收齐了"的信号 —— 那会让发送端报成功、而盘上没有这个文件。
+     */
+    private suspend fun completeOnce(entry: Inbound) {
+        synchronized(lock) {
+            if (entry.finished) return
+            entry.finished = true
+        }
+        runCatching { entry.receiver.finish() }
+            .onFailure { t ->
+                println("[luciola] channel file verify failed: " + t)
+                synchronized(lock) { inbound.remove(keyOf(entry.transferId, entry.fileId)) }
+                entry.receiver.discard()
+            }
     }
 
     /** 查询某次出站传输的最新确认（发送端窗口用）。 */
