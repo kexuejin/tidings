@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: GPL-3.0-only
 package com.kapp.tidings.core.transport
+import com.kapp.tidings.core.withLock
 
 /**
  * 加密信道上**文件数据帧的路由器**：把入站的 `TDCH`/`TDCA` 帧分派到对应的
@@ -42,7 +43,7 @@ class FileChannelRouter(
         var finished: Boolean = false
     }
 
-    private val lock = Any()
+    private val lock = com.kapp.tidings.core.createCoreLock()
     private val inbound = HashMap<String, Inbound>()
     private val outboundAcks = HashMap<String, Long>()
 
@@ -61,7 +62,7 @@ class FileChannelRouter(
             // ACK 只回**连续前缀**；帧里的键用组合键，对端能路由回这个文件。
             sendToPeer(peerId, FileChunkAck.encode(transferIdKey(transferId, fileId), upTo))
         }
-        synchronized(lock) {
+        lock.withLock {
             inbound[key] = Inbound(peerId, transferId, fileId, receiver, chunks)
         }
         return true
@@ -75,7 +76,7 @@ class FileChannelRouter(
     suspend fun onBinaryFrame(bytes: ByteArray): Boolean {
         FileChunkFrame.decode(bytes)?.let { frame ->
             val (transferId, fileId) = splitKey(frame.transferId) ?: return true
-            val entry = synchronized(lock) { inbound[keyOf(transferId, fileId)] } ?: return true
+            val entry = lock.withLock { inbound[keyOf(transferId, fileId)] } ?: return true
             if (entry.chunks.onChunk(FileChunkFrame.Decoded(transferIdKey(transferId, fileId), frame.offset, frame.payload))) {
                 entry.receiver.append(frame.offset, frame.payload)
             }
@@ -83,7 +84,7 @@ class FileChannelRouter(
             return true
         }
         FileChunkAck.decode(bytes)?.let { ack ->
-            synchronized(lock) { outboundAcks[ack.transferId] = ack.ackedUpTo }
+            lock.withLock { outboundAcks[ack.transferId] = ack.ackedUpTo }
             return true
         }
         // 既不是数据帧也不是 ACK:交给上层(它会按 Envelope 处理或丢弃)。
@@ -97,21 +98,21 @@ class FileChannelRouter(
      * 给出"收齐了"的信号 —— 那会让发送端报成功、而盘上没有这个文件。
      */
     private suspend fun completeOnce(entry: Inbound) {
-        synchronized(lock) {
+        lock.withLock {
             if (entry.finished) return
             entry.finished = true
         }
         runCatching { entry.receiver.finish() }
             .onFailure { t ->
                 println("[luciola] channel file verify failed: " + t)
-                synchronized(lock) { inbound.remove(keyOf(entry.transferId, entry.fileId)) }
+                lock.withLock { inbound.remove(keyOf(entry.transferId, entry.fileId)) }
                 entry.receiver.discard()
             }
     }
 
     /** 查询某次出站传输的最新确认（发送端窗口用）。 */
     fun ackedUpTo(transferId: String, fileId: String): Long =
-        synchronized(lock) { outboundAcks[transferIdKey(transferId, fileId)] ?: 0L }
+        lock.withLock { outboundAcks[transferIdKey(transferId, fileId)] ?: 0L }
 
     /** 推一个文件到对端；返回已确认字节数。 */
     suspend fun sendFile(
@@ -133,7 +134,7 @@ class FileChannelRouter(
 
     /** 清理一次传输的全部在途状态（取消/完成后调用）。 */
     fun forget(transferId: String) {
-        synchronized(lock) {
+        lock.withLock {
             inbound.keys.filter { it.startsWith(transferId + "#") }.forEach { inbound.remove(it) }
             outboundAcks.keys.filter { it.startsWith(transferId + "#") }.forEach { outboundAcks.remove(it) }
         }
@@ -147,9 +148,9 @@ class FileChannelRouter(
      */
     private fun transferIdKey(transferId: String, fileId: String): String {
         val raw = keyOf(transferId, fileId)
-        if (raw.toByteArray(Charsets.UTF_8).size <= FileChunkFrame.MAX_TID_BYTES) return raw
+        if (raw.encodeToByteArray().size <= FileChunkFrame.MAX_TID_BYTES) return raw
         val digest = com.kapp.tidings.core.crypto.Sha256()
-        digest.update(raw.toByteArray(Charsets.UTF_8))
+        digest.update(raw.encodeToByteArray())
         return "#" + digest.hexDigest().take(48)
     }
 

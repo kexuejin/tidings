@@ -157,6 +157,11 @@ class IosAppPlatform : AppPlatform, QrPreviewProvider {
         { modifier -> iosQrScanner.QrScannerPreview(modifier) }
     override val cameraGate: CameraGate = IosCameraGate()
     override val mdnsAdvertiser: MdnsAdvertiser = IosMdnsAdvertiser()
+
+    // luciola 宿主：**当前是空壳**（所有工厂返回 null ⇒ luciolaMode=false ⇒ 仍走 legacy）。
+    // 它的存在只证明「iosMain 能用 KMP 根模块 + 这个接口能在 iOS 侧实现 + iOS 仍能编译」。
+    // 接线顺序见 IosLuciolaHost 的 KDoc。
+    override val luciolaHost: LuciolaHost = IosLuciolaHost()
     override val mdnsBrowser: MdnsBrowser = IosMdnsBrowser()
     override val pushNotificationHandler: PushNotificationHandler = IosPushNotificationHandler()
 

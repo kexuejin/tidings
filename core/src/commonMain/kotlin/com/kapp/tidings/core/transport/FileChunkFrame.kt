@@ -28,7 +28,7 @@ object FileChunkFrame {
     fun encode(transferId: String, offset: Long, payload: ByteArray): ByteArray {
         require(offset >= 0) { "offset must be >= 0" }
         require(payload.size <= MAX_PAYLOAD_BYTES) { "payload too large: " + payload.size }
-        val tid = transferId.toByteArray(Charsets.UTF_8)
+        val tid = transferId.encodeToByteArray()
         require(tid.isNotEmpty() && tid.size <= MAX_TID_BYTES) { "bad transferId length: " + tid.size }
         val out = ByteArray(HEADER_FIXED + tid.size + payload.size)
         var i = 0
@@ -51,7 +51,7 @@ object FileChunkFrame {
         val tidLen = ((bytes[i++].toInt() and 0xFF) shl 8) or (bytes[i++].toInt() and 0xFF)
         if (tidLen !in 1..MAX_TID_BYTES) return null
         if (bytes.size < HEADER_FIXED + tidLen) return null
-        val transferId = String(bytes, i, tidLen, Charsets.UTF_8)
+        val transferId = bytes.decodeToString(i, i + tidLen)
         i += tidLen
         var offset = 0L
         repeat(8) { offset = (offset shl 8) or (bytes[i++].toLong() and 0xFF) }

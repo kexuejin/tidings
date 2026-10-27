@@ -328,9 +328,9 @@ class ScreenSender(
 
         val throttleMs = com.kapp.tidings.core.nowMillis() - arrivedAt
         lastSampleAt = com.kapp.tidings.core.nowMillis()
-        val sampleStart = System.nanoTime()
+        val sampleStart = com.kapp.tidings.core.nowMillis()
         val bytes = sample(sequence)
-        val sampleMs = (System.nanoTime() - sampleStart) / 1_000_000
+        val sampleMs = com.kapp.tidings.core.nowMillis() - sampleStart
         sendSplitStats.onSplit(throttleMs, sampleMs)
         if (bytes == null) {
             end("capture-ended")

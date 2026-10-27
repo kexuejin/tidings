@@ -13,6 +13,23 @@ import kotlinx.coroutines.CoroutineDispatcher
 expect fun nowMillis(): Long
 
 /**
+ * ## commonMain 里禁止使用 JVM 专属 API（2026-10-27 实测）
+ *
+ * 判据只有一条：`./gradlew :core:compileKotlinIosSimulatorArm64`
+ * （或 `:composeApp:compileKotlinIosSimulatorArm64`）必须过。
+ *
+ * 这一条为什么必须写下来：luciola 数据面迁移往 commonMain 里塞了 `synchronized(...)`、
+ * `Charsets.UTF_8`、`System.nanoTime()/currentTimeMillis()` —— 它们在 JVM 上当然能编，
+ * **四套 JVM 测试也全绿**，但 `:core:compileKotlinIosSimulatorArm64` 报 50 个错。
+ * 也就是说 iOS 目标在那段时间里**一直是坏的，而没有任何门禁会发现**。
+ *
+ * 正确写法：
+ *  - 加锁 → [createCoreLock] + [withLock]（iOS actual 用 NSRecursiveLock）；
+ *  - 时间 → [nowMillis]（毫秒够用就别引纳米；确实要纳米再加 expect/actual）；
+ *  - 编码 → `String.encodeToByteArray()` / `ByteArray.decodeToString()`。
+ */
+
+/**
  * 跑阻塞式 socket IO 的调度器。
  *
  * 为什么需要这个 expect：`Dispatchers.IO` **只在 JVM 上存在**。它在 Kotlin/Native 上是

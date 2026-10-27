@@ -386,10 +386,11 @@ class Messenger(
      */
     enum class SendChannel { LINK, TCP, TRANSPORT }
 
+    private val lastSendLock = com.kapp.tidings.core.createCoreLock()
     private val lastSendChannel = HashMap<String, SendChannel>()
 
     private fun noteSendChannel(peerId: String, channel: SendChannel) {
-        val changed = synchronized(lastSendChannel) {
+        val changed = lastSendLock.withLock {
             lastSendChannel.put(peerId, channel) != channel
         }
         if (changed) println("[send] peer=" + peerId.take(8) + " channel=" + channel)

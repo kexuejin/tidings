@@ -5,8 +5,7 @@ package com.kapp.tidings.platform
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.SideEffect
 import platform.UIKit.UIApplication
-import platform.UIKit.UIUserInterfaceStyleDark
-import platform.UIKit.UIUserInterfaceStyleLight
+import platform.UIKit.UIUserInterfaceStyle
 
 /**
  * iOS 实现：把**窗口**的外观跟随**应用内**主题（而不是系统设置）。
@@ -29,7 +28,7 @@ import platform.UIKit.UIUserInterfaceStyleLight
  * Swift 侧拿不到那个值；让 Swift 再推导一遍就是两个真相来源。所以驱动点放在这里：
  * `SideEffect` 每次提交后按当前 `darkTheme` 刷一次窗口外观（主题切换的那一帧就生效）。
  *
- * **未编译验证**：本机没有 iOS 工具链，这段 UIKit 调用没有跑过 `compileKotlinIos*`。
+ * **已编译验证（2026-10-27）**：有 iOS 工具链后实测——原来直接 import `UIUserInterfaceStyleDark`
  * 若 `UIUserInterfaceStyleDark` / `UIUserInterfaceStyleLight` 在 Kotlin/Native 的导入形态
  * 与预期不同，编译会在这里失败 —— 那是唯一的风险点，逻辑本身只有"按布尔二选一"。
  */
@@ -40,6 +39,10 @@ actual fun CareSystemBars(darkTheme: Boolean) {
         // 下一次重组/主题切换会再来一次。不要为此在启动路径上抛异常。
         val window = UIApplication.sharedApplication.keyWindow ?: return@SideEffect
         window.overrideUserInterfaceStyle =
-            if (darkTheme) UIUserInterfaceStyleDark else UIUserInterfaceStyleLight
+            if (darkTheme) {
+                UIUserInterfaceStyle.UIUserInterfaceStyleDark
+            } else {
+                UIUserInterfaceStyle.UIUserInterfaceStyleLight
+            }
     }
 }

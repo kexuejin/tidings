@@ -62,6 +62,10 @@ kotlin {
         // Android 必须用 AAR 变体:luciola-jvm 只有桌面 dylib,JNA 在 Android 上加载不到;
         // AAR 里带 jniLibs/*.so(见 luciola 仓 verifyNativeLib 的守卫)。
         val androidMain by getting { dependencies { implementation(libs.luciola.android) } }
+        // iOS 必须用 **KMP 根模块**（luciola-multiplatform）：只有它发布了 iosArm64 /
+        // iosSimulatorArm64 变体（klib + 内嵌 xcframework）。luciola-jvm 只有桌面 dylib、
+        // luciola-android 只有 AAR —— 用错坐标 JVM 侧完全看不出问题，只有 iOS 编译才炸。
+        val iosMain by getting { dependencies { implementation(libs.luciola.multiplatform) } }
         getByName("jvmSharedMain").dependencies {
             implementation(libs.kotlinx.coroutines.core)
             implementation(libs.ktor.network)

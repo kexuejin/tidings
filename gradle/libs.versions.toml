@@ -40,6 +40,10 @@ markdown-renderer = "0.41.0"
 [libraries]
 luciola = { module = "io.github.kexuejin:luciola-jvm", version.ref = "luciola" }
 luciola-android = { module = "io.github.kexuejin:luciola-android", version.ref = "luciola" }
+# KMP 根模块：Android 要用 AAR 变体、桌面用 -jvm、**iOS 只能用根模块**（它带
+# iosArm64 / iosSimulatorArm64 变体，klib + xcframework）。三端坐标不同是因为
+# 各自的产物形态不同，不是历史遗留。
+luciola-multiplatform = { module = "io.github.kexuejin:luciola", version.ref = "luciola" }
 kotlin-test = { module = "org.jetbrains.kotlin:kotlin-test", version.ref = "kotlin" }
 
 androidx-core-ktx = { module = "androidx.core:core-ktx", version.ref = "androidx-core" }

@@ -123,9 +123,9 @@ class SecureChunkSender(
         var timeouts = 0
         var chunksSent = 0L
         var ackAdvances = 0L
-        var readNs = 0L
-        var sendNs = 0L
-        var waitNs = 0L
+        var readMs = 0L
+        var sendMs = 0L
+        var waitMs = 0L
         while (acked < total) {
             windows++
             // 1) 从已确认位置起填满一个窗口
@@ -133,16 +133,16 @@ class SecureChunkSender(
             var offset = acked
             while (offset < windowEnd) {
                 val len = minOf(chunkSize.toLong(), total - offset).toInt()
-                val rt0 = System.nanoTime()
+                val rt0 = com.kapp.tidings.core.nowMillis()
                 val chunk = source.read(offset, len)
-                readNs += System.nanoTime() - rt0
+                readMs += com.kapp.tidings.core.nowMillis() - rt0
                 if (chunk.isEmpty()) break
                 val frame = FileChunkFrame.encode(transferId, offset, chunk)
-                val st0 = System.nanoTime()
+                val st0 = com.kapp.tidings.core.nowMillis()
                 while (!send(frame, host, port)) {
                     kotlinx.coroutines.delay(backoffMs)
                 }
-                sendNs += System.nanoTime() - st0
+                sendMs += com.kapp.tidings.core.nowMillis() - st0
                 chunksSent++
                 offset += chunk.size
             }
@@ -163,20 +163,20 @@ class SecureChunkSender(
             //   · 整窗都被确认（最好情况，立刻开下一窗），或
             //   · 进度停止前进超过 ACK_QUIET_MS（说明有洞，交给下一轮重传），或
             //   · 到了 ackTimeoutMs 硬上限。
-            val deadlineAt = System.currentTimeMillis() + ackTimeoutMs
+            val deadlineAt = com.kapp.tidings.core.nowMillis() + ackTimeoutMs
             var progressed = false
             var best = acked
-            var lastAdvanceAt = System.currentTimeMillis()
-            val wt0 = System.nanoTime()
-            while (System.currentTimeMillis() < deadlineAt) {
+            var lastAdvanceAt = com.kapp.tidings.core.nowMillis()
+            val wt0 = com.kapp.tidings.core.nowMillis()
+            while (com.kapp.tidings.core.nowMillis() < deadlineAt) {
                 val upTo = acks() ?: best
                 if (upTo > best) {
                     best = upTo
                     progressed = true
-                    lastAdvanceAt = System.currentTimeMillis()
+                    lastAdvanceAt = com.kapp.tidings.core.nowMillis()
                     if (best >= windowEnd) break // 整窗确认，立刻下一窗
                 } else if (
-                    progressed && System.currentTimeMillis() - lastAdvanceAt >= ACK_QUIET_MS
+                    progressed && com.kapp.tidings.core.nowMillis() - lastAdvanceAt >= ACK_QUIET_MS
                 ) {
                     // 有推进但停了：大概率有洞（对端某些帧根本没收到），别把 3s 干等完。
                     //
@@ -188,7 +188,7 @@ class SecureChunkSender(
             }
             ackAdvances += best - acked
             acked = minOf(best, total)
-            waitNs += System.nanoTime() - wt0
+            waitMs += com.kapp.tidings.core.nowMillis() - wt0
             if (!progressed) {
                 timeouts++
                 kotlinx.coroutines.delay(backoffMs)
@@ -197,8 +197,7 @@ class SecureChunkSender(
         println(
             "[chunk] total=" + total + " windows=" + windows + " timeouts=" + timeouts +
                 " chunksSent=" + chunksSent + " ackAdvanceSum=" + ackAdvances +
-                " readMs=" + (readNs / 1_000_000) + " sendMs=" + (sendNs / 1_000_000) +
-                " waitMs=" + (waitNs / 1_000_000),
+                " readMs=" + readMs + " sendMs=" + sendMs + " waitMs=" + waitMs,
         )
         return acked
     }

@@ -82,7 +82,7 @@ class ChunkFileReceiver(
 
     /** 距上次同步已写够 [SYNC_EVERY_BYTES]（或首次）才 fsync 一次。 */
     private fun maybeSync(handle: com.kapp.tidings.core.fs.RandomAccessFile) {
-        val now = System.currentTimeMillis()
+        val now = com.kapp.tidings.core.nowMillis()
         if (now - lastSyncAtMs >= SYNC_EVERY_MS) {
             handle.flush()
             lastSyncAtMs = now

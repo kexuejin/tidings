@@ -22,7 +22,7 @@ object FileChunkAck {
 
     fun encode(transferId: String, ackedUpTo: Long): ByteArray {
         require(ackedUpTo >= 0)
-        val tid = transferId.toByteArray(Charsets.UTF_8)
+        val tid = transferId.encodeToByteArray()
         require(tid.isNotEmpty() && tid.size <= MAX_TID_BYTES)
         val out = ByteArray(HEADER_FIXED + tid.size)
         var i = 0
@@ -43,7 +43,7 @@ object FileChunkAck {
         val tidLen = ((bytes[i++].toInt() and 0xFF) shl 8) or (bytes[i++].toInt() and 0xFF)
         if (tidLen !in 1..MAX_TID_BYTES) return null
         if (bytes.size != HEADER_FIXED + tidLen) return null
-        val transferId = String(bytes, i, tidLen, Charsets.UTF_8)
+        val transferId = bytes.decodeToString(i, i + tidLen)
         i += tidLen
         var upTo = 0L
         repeat(8) { upTo = (upTo shl 8) or (bytes[i++].toLong() and 0xFF) }
