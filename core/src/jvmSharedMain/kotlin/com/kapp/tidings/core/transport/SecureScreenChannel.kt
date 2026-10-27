@@ -285,12 +285,15 @@ class SecureScreenChannel(
         ScreenChannelFrame.wrapInPlace(frame, 0, len)
         val wrapNs = System.nanoTime() - wrapStart
         var waited = 0L
+        var backoffs = 0
         val sendStart = System.nanoTime()
         while (!transport.send(frame, host, port)) {
+            backoffs += 1
             delay(SEND_BACKOFF_MS)
             waited += SEND_BACKOFF_MS
             if (waited > SEND_STALL_MS) return null
         }
+        backoffStats.onCount(backoffs)
         sendStats.onSplit3(wrapNs / 1_000, (System.nanoTime() - sendStart) / 1_000, len.toLong())
         return true
     }

@@ -101,27 +101,82 @@ class SecureChannelTransport(
     )
     override val incoming: SharedFlow<ReceivedDatagram> = _incoming
 
-    /** 从非挂起线程投递：满了就**阻塞提供背压**，绝不丢帧。 */
+    /**
+     * 从**非挂起**的 FFI 回调线程投递。**绝不在这条线程上阻塞。**
+     *
+     * ## 为什么不能阻塞（2026-10-27 真机实测）
+     *
+     * 这条线程是 Rust 的链路循环线程。原来是「SharedFlow 缓冲满了就
+     * `runBlocking { emit(...) }` 阻塞提供背压」，看起来安全，实测却是**性能杀手**：
+     *
+     * ```
+     * [screen] txprobe n=1   connAvgUs=7      sendAvgUs=1462    ← 链路空闲
+     * [screen] txprobe n=10  connAvgUs=3738   sendAvgUs=4521
+     * [screen] txprobe n=6   connAvgUs=5187   sendAvgUs=5616    ← 投屏中
+     * ```
+     *
+     * 一个**零字节**的 `isConnected()` JNA 调用，空闲时 7µs、投屏中 4-5ms（慢 500 倍）。
+     * 数据量不影响它 ⇒ 不是拷贝、不是加密，而是**回调线程被占住**：
+     * 接收端慢 → ByteChannel 写阻塞 → 这里 runBlocking → Rust 线程卡住
+     * → JNA 的 upcall/downcall 互斥 → 我们自己的 `send` 要排队 4ms。
+     *
+     * 修法：回调只**塞进无锁队列就返回**，真正的 `emit`（以及它带来的背压）交给
+     * 独立的后台线程 [startInboundDrainer]。反压还在，只是不再落在 FFI 线程上。
+     */
     private fun emitOrBlock(datagram: ReceivedDatagram) {
+        // 快路径：缓冲还有空位，直接进（不碰队列）。
         if (_incoming.tryEmit(datagram)) return
         blockedEmits.incrementAndGet()
-        try {
-            synchronized(emitLock) {
-                kotlinx.coroutines.runBlocking { _incoming.emit(datagram) }
-            }
-        } catch (t: Throwable) {
-            // 回调线程上抛异常会让 uniffi 把整个 Rust 链接线程结束掉（静默断链）——
-            // 这里必须收住，并且**如实记账**，不许装成投递成功。
-            emitFailures.incrementAndGet()
-            println("[luciola] inbound emit failed: " + t)
+        // 慢路径：交给后台线程。这里**只做一次无锁 offer**，绝不阻塞 FFI 线程。
+        if (pendingInbound.size >= MAX_PENDING_INBOUND) {
+            // 已经积压这么多说明下游真的卡死了；如实丢弃并记账，而不是拖死链路线程。
+            droppedInbound.incrementAndGet()
+            return
         }
+        pendingInbound.offer(datagram)
     }
 
-    private val emitLock = Any()
+    /**
+     * 后台投递线程：把 [pendingInbound] 里的帧按序 `emit` 进 [incoming]。
+     *
+     * **背压落在这条线程上**（`emit` 会在缓冲满时挂起），而这正是它该在的地方。
+     */
+    private fun startInboundDrainer() {
+        if (drainer != null) return
+        drainer = Thread {
+            while (!Thread.currentThread().isInterrupted) {
+                val datagram = try {
+                    pendingInbound.take()
+                } catch (_: InterruptedException) {
+                    break
+                }
+                try {
+                    kotlinx.coroutines.runBlocking { _incoming.emit(datagram) }
+                } catch (t: Throwable) {
+                    emitFailures.incrementAndGet()
+                    println("[luciola] inbound emit failed: " + t)
+                }
+            }
+        }.apply {
+            isDaemon = true
+            name = "luciola-inbound-drain"
+        }.also { it.start() }
+    }
+
+    /** FFI 回调塞进来的入站帧（无锁；只有回调线程 offer、投递线程 take）。 */
+    private val pendingInbound = java.util.concurrent.LinkedBlockingQueue<ReceivedDatagram>()
+
+    /** 因为积压过多而如实丢弃的帧数（诊断用）。 */
+    val droppedInbound = java.util.concurrent.atomic.AtomicLong()
+
+    private var drainer: Thread? = null
 
     private companion object {
         /** 状态迁移只留最后这么多条：再多就不是诊断而是日志洪泛了。 */
         const val STATE_LOG_LIMIT = 40
+
+        /** 入站异步队列的上限帧数：超过它说明下游真的卡死了，如实丢弃并记账。 */
+        const val MAX_PENDING_INBOUND = 4096
     }
 
     /** 入站缓冲满而阻塞在回调线程上的次数（诊断用；正常稳态应当很小）。 */
@@ -227,6 +282,7 @@ class SecureChannelTransport(
     override val boundPort: Int get() = if (listenPort > 0) listenPort else -1
 
     override suspend fun start() {
+        startInboundDrainer()
         if (listenPort <= 0) return
         synchronized(listenLock) {
             if (inboundSession != null) return
@@ -253,6 +309,15 @@ class SecureChannelTransport(
         inboundByEndpoint.clear()
         outbound.values.forEach { runCatching { it.disconnect() } }
         outbound.clear()
+        // **必须停掉投递线程**：它可能正阻塞在 emit 上等一个已经不会再来的订阅者。
+        // 不回收会导致：线程泄漏 + 下一次 start() 复用一条已经卡死的线程，
+        // 表现为「单独跑绿、整套跑超时」（实测过）。
+        drainer?.let { t ->
+            t.interrupt()
+            runCatching { t.join(500) }
+        }
+        drainer = null
+        pendingInbound.clear()
     }
 
     /**
@@ -267,14 +332,48 @@ class SecureChannelTransport(
         return send(frame, host, port)
     }
 
+    /** 诊断：send 内那两次 JNA 调用各自的耗时（us），每 10s 一行。 */
+    private var probeCalls = 0
+    private var probeConnUs = 0L
+    private var probeSendUs = 0L
+    private var probeWindowAt = com.kapp.tidings.core.nowMillis()
+
+    private fun probeRecord(connUs: Long, sendUs: Long) {
+        probeCalls += 1
+        probeConnUs += connUs
+        probeSendUs += sendUs
+        val now = com.kapp.tidings.core.nowMillis()
+        val elapsed = now - probeWindowAt
+        if (elapsed < 10_000 || probeCalls == 0) return
+        println(
+            "[screen] txprobe n=" + probeCalls +
+                " connAvgUs=" + (probeConnUs / probeCalls) +
+                " sendAvgUs=" + (probeSendUs / probeCalls),
+        )
+        probeCalls = 0
+        probeConnUs = 0
+        probeSendUs = 0
+        probeWindowAt = now
+    }
+
     override suspend fun send(bytes: ByteArray, host: String, port: Int): Boolean {
         val key = endpointKey(host, port)
         // 对端主动连进来的信道优先:移动端不监听,拨回去必然失败。
-        inboundByEndpoint[key]?.takeIf { it.isConnected() }?.let { session ->
-            return runCatching { session.send(bytes) }.getOrDefault(false)
+        val c0 = System.nanoTime()
+        val inbound = inboundByEndpoint[key]
+        val conn = inbound?.isConnected() ?: false
+        val connUs = (System.nanoTime() - c0) / 1_000
+        if (conn) {
+            val s0 = System.nanoTime()
+            val r = runCatching { inbound!!.send(bytes) }.getOrDefault(false)
+            probeRecord(connUs, (System.nanoTime() - s0) / 1_000)
+            return r
         }
         val session = runCatching { channelFor(host, port, key) }.getOrNull() ?: return false
-        return runCatching { session.send(bytes) }.getOrDefault(false)
+        val s1 = System.nanoTime()
+        val r = runCatching { session.send(bytes) }.getOrDefault(false)
+        probeRecord(connUs, (System.nanoTime() - s1) / 1_000)
+        return r
     }
 
     private fun channelFor(host: String, port: Int, key: String): SecureSession =
