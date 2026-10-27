@@ -710,8 +710,8 @@
     <string name="r2_set_profile_org">Organization</string>
     <string name="r2_set_profile_rev_chip">Profile v%1$d</string>
     <string name="r2_set_profile_node_chip">Node %1$s</string>
-    <string name="set_luciola_title">Experimental: luciola encrypted channel</string>
-    <string name="set_luciola_sub">Turning this on disables automatic discovery of devices still on the legacy transport; only QR codes and manual addresses remain. Restart the node to apply.</string>
+    <string name="set_luciola_title">luciola encrypted channel</string>
+    <string name="set_luciola_sub">Messages, files and screen sharing all travel over the encrypted channel. Turning this on disables automatic discovery of devices that have not been upgraded; only QR codes and manual addresses remain. Turning it off falls back to the original transport. Restart the node to apply.</string>
     <string name="set_persist_title">Message Persistence</string>
     <string name="set_persist_sub">When disabled, messages stay in memory and are lost on restart</string>
     <!-- 保留天数在此页是一行纯说明（没有可改的开关），不再伪装成设置行。 -->

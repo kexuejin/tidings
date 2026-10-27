@@ -6,6 +6,8 @@ import com.kapp.tidings.core.protocol.Profile
 import com.kapp.tidings.core.protocol.newId
 import com.kapp.tidings.core.persist.KnownPeer
 import com.kapp.tidings.core.transport.KnownPeerStore
+import com.kapp.tidings.core.transport.PeerEndpoint
+import com.kapp.tidings.core.transport.PeerEndpointStore
 import com.kapp.tidings.core.transport.PeerRegistry
 import com.kapp.tidings.core.transport.ScreenChannelHost
 import com.kapp.tidings.core.transport.ScreenWire
@@ -45,10 +47,12 @@ class ScreenChannelWiringTest {
         var stopped = false
         var openedHost: String? = null
         var openedPort: Int = -1
+        val openedHosts = mutableListOf<String>()
 
         override fun opener(host: String, port: Int): ScreenWireOpener = ScreenWireOpener {
             openedHost = host
             openedPort = port
+            openedHosts += host
             null // 测试只关心"有没有试这条"，不真建会话
         }
 
@@ -62,6 +66,14 @@ class ScreenChannelWiringTest {
     }
 
     private fun freePort(): Int = ServerSocket(0).use { it.localPort }
+
+    /** 只读的候选端点表（测试用；真机上是 PeerEndpointFileStore）。 */
+    private class FixedEndpointStore(
+        private val entries: Map<String, List<PeerEndpoint>>,
+    ) : PeerEndpointStore {
+        override fun load(): Map<String, List<PeerEndpoint>> = entries
+        override fun save(endpoints: Map<String, List<PeerEndpoint>>) = Unit
+    }
 
     /** 只读的已知对端名录（测试用；core 里只有落盘实现与空实现）。 */
     private class FixedKnownPeers(private val peers: List<KnownPeer>) : KnownPeerStore {
@@ -137,6 +149,60 @@ class ScreenChannelWiringTest {
             // 对端没声明 scr1（老端）：一条都不许插进去，全走 legacy。
             runtime.screenWireAttempts(peerId).forEach { it.open() }
             assertFalse(fake.openedPort != -1, "对端没声明 scr1 时不许拨画面信道")
+        } finally {
+            runtime.stop()
+            scope.cancel()
+        }
+    }
+    /**
+     * **画面信道必须覆盖对端的公网候选地址**（退役 17882 的前提）。
+     *
+     * 17882 是跨网投屏 TLS 的入口。luciola 模式要退役它，前提是画面信道自己能走
+     * 公网地址 —— 只拨 `record.ip`（局域网那个）的话，蜂窝场景就彻底没有投屏了。
+     * 这条测试就是那个前提的证据。
+     */
+    @Test
+    fun secureScreenCoversPublicCandidateAddresses() = runBlocking {
+        val scope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
+        val fake = FakeHost()
+        val peerId = newId()
+        val screenPort = freePort()
+        val runtime = NodeRuntime(
+            profile = profile("self", MsgTypes.MOBILE_CAPS + MsgTypes.CAP_SCREEN_CHANNEL),
+            udpPort = 0,
+            tcpPort = 0,
+            fileChannelEnabled = true,
+            screenChannelPort = freePort(),
+            screenChannelHostFactory = { _: PeerRegistry -> fake },
+            knownPeerStore = FixedKnownPeers(
+                listOf(
+                    KnownPeer(
+                        profile = profile(peerId, listOf(MsgTypes.CAP_SCREEN_CHANNEL), screenPort = screenPort),
+                        ip = "192.168.2.22",
+                        udpPort = freePort(),
+                        lastSeen = 1_000L,
+                    ),
+                ),
+            ),
+            // 公网候选地址从候选池注入（与真机上"上一次配对/发现学到的地址"同一条路）。
+            peerEndpointStore = FixedEndpointStore(
+                mapOf(peerId to listOf(PeerEndpoint("203.0.113.9", freePort()))),
+            ),
+        )
+        try {
+            runtime.start(scope)
+            val attempts = runtime.screenWireAttempts(peerId)
+            // 局域网那条 + 公网候选 + legacy 的若干条
+            assertTrue(
+                attempts.size >= 3,
+                "画面信道必须把公网候选也排进去（实际只有 " + attempts.size + " 条）——" +
+                    "否则退役 17882 后蜂窝场景没有投屏",
+            )
+            // 逐条拨一下，看它试过哪些地址。
+            attempts.forEach { it.open() }
+            val tried = fake.openedHosts.toSet()
+            assertTrue(tried.contains("192.168.2.22"), "局域网地址必须试过，实际 $tried")
+            assertTrue(tried.contains("203.0.113.9"), "公网候选地址也必须试过，实际 $tried")
         } finally {
             runtime.stop()
             scope.cancel()

@@ -391,6 +391,16 @@ class NodeRuntime(
                 ?.takeIf { screenChannelHost != null && it in 1..65535 && fileChannelEnabled },
         )
 
+    /**
+     * **本机是否还在跑 legacy 发现**（只读，诊断/共存解释用）。
+     *
+     * 为什么要把这个暴露出去：开启 luciola 模式后 `legacyDiscoveryEnabled` 变 false，
+     * legacy 发现整体关闭 —— 于是**没升级的老设备既发现不到我们、我们也发现不到它**，
+     * 它只是静静地显示成"离线"。控制面的 peer 诊断靠这个标志区分
+     * "设备关机" 与 "它还在老传输上"。
+     */
+    val legacyDiscoveryActive: Boolean get() = legacyDiscoveryEnabled
+
     private val legacyDiscoveryEnabled = messengerTransportFactory == null
     private val discovery: DiscoveryEngine = if (legacyDiscoveryEnabled) Discovery(
         transport,
@@ -708,13 +718,25 @@ class NodeRuntime(
         }
         // 新数据面排在**最前**：协商通过就优先走加密画面会话，失败自然落到 legacy
         // 的那几条（ScreenReceiver 按序试，"握上手"才算这条通）。
+        //
+        // **按对端候选地址逐条尝试**（不只局域网那一个）：画面信道要替代 17882 那条
+        // 跨网 TLS 入口，就必须能走公网地址 —— 只拨 `record.ip` 的话，一旦退役 17882，
+        // 蜂窝/跨网场景就彻底没有投屏了（真机先把这条补上，再谈退役）。
+        // 候选顺序沿用 registry 的池子（同一条纪律见 CrossNetworkTransferPolicy），
+        // 局域网地址天然排在前面。
         val host = screenChannelHost
         val peer = record.profile
         val screenPort = peer.screenPort
         if (host != null && screenPort != null &&
             ScreenChannelNegotiation.canUseChannel(selfProfile, peer)
         ) {
-            return listOf(host.opener(record.ip, screenPort)) + legacy
+            val addresses = buildList {
+                add(record.ip)
+                registry.candidatesOf(peerId).forEach { c ->
+                    if (c.host.isNotBlank() && c.host != record.ip) add(c.host)
+                }
+            }
+            return addresses.map { addr -> host.opener(addr, screenPort) } + legacy
         }
         return legacy
     }
@@ -1092,8 +1114,13 @@ class NodeRuntime(
                 }
             }.onFailure { t -> println("[luciola] screen channel listen failed: " + t) }
         }
+        // luciola 信道模式下**不创建** 17882（跨网投屏 TLS）。
+        //
+        // 与 17879/17881 同一条纪律：那三个端口在信道模式下没有存在意义，留着只是多一个
+        // 可被扫到的入口。画面走 [screenChannelHost] 的独立加密会话，且它的 opener
+        // 已按对端候选地址逐条尝试（见 screenWireAttempts），所以跨网投屏不再依赖 17882。
         val screenPort = crossNetworkScreenPort(profile.tlsPort)
-        if (screenPort != null && crossNetworkScreenListener.canServe) {
+        if (!fileChannelEnabled && screenPort != null && crossNetworkScreenListener.canServe) {
             runCatching {
                 crossNetworkScreenListener.start(screenPort) { conn ->
                     val wire = ScreenWire(conn.read, conn.write) { runCatching { conn.close() } }

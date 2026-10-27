@@ -2469,6 +2469,22 @@ class ControlPlane(
                     put("linkDialLastTarget", dial?.lastTarget)
                     put("linkLastError", dial?.lastError)
                     put("linkSkipReason", dial?.skipReason)
+                    // **可达性判据（goal 第 5 步的共存可见性）**：
+                    // luciola 模式下 legacy 发现整体关闭，于是"没升级的老设备"既发现不到
+                    // 我们、我们也发现不到它 —— 它只是静静地显示成"离线"，界面上没有任何
+                    // 解释。这一格把原因说出来，让运维/用户能一眼分清"设备关机"与
+                    // "它还在老传输上、需要我们帮它升级"。
+                    put(
+                        "reachability",
+                        when {
+                            !runtime.legacyDiscoveryActive && !posesLuciolaCaps(peer.profile) ->
+                                "legacy-peer-invisible"
+                            else -> "ok"
+                        },
+                    )
+                    if (!runtime.legacyDiscoveryActive) {
+                        put("legacyDiscovery", "off")
+                    }
                 }
             }
         }
@@ -2703,6 +2719,16 @@ class ControlPlane(
      * 退避（约 8 秒）。池子太小时，几条并发写就能把读路由（/v1/peers）饿死 —— 真机上表现为
      * 回环控制面连续 8 秒超时、诊断手段被自己挡住。
      */
+    /**
+     * 这个对端**是否已经迁到 luciola**（有它自己的发现/信道能力位）。
+     *
+     * 判据只看能力位而不是版本号：能力位是被对端**主动声明**的，而版本号字符串
+     * 各家写法不一（relay-0.1.0 / 0.61.1 …）。没有这个位 = 老端。
+     */
+    private fun posesLuciolaCaps(profile: com.kapp.tidings.core.protocol.Profile): Boolean =
+        profile.caps.contains(MsgTypes.CAP_LINK) &&
+            profile.caps.contains(MsgTypes.CAP_FILE_CHANNEL)
+
     private const val HANDLER_THREADS: Int = 16
 
     /** 「解析不到这个对端」的记忆时长：短到对端一上线就能重新解析，长到不会每次重试都付 3 秒。 */

@@ -290,7 +290,9 @@ fun SettingsDataSubpage(
                 },
             )
 
-            // 实验:luciola 加密信道。默认关;开启后需重启节点生效。
+            // luciola 加密信道。**默认关**:延迟判据还没达标，且开启后老版本设备
+            // 会失去自动发现（只认二维码/手动地址）—— 取舍写在文案里，由用户决定。
+            // 开启或关闭都需重启节点生效。
             var experimentalLuciola by rememberSaveable(experimentalLuciolaEnabled) {
                 mutableStateOf(experimentalLuciolaEnabled)
             }
