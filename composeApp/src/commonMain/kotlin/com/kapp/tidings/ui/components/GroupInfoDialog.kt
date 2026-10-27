@@ -34,6 +34,7 @@ import androidx.compose.ui.unit.dp
 import com.kapp.tidings.core.protocol.declaredWorkspaceOfSender
 import com.kapp.tidings.core.protocol.GroupMeta
 import com.kapp.tidings.generated.resources.Res
+import com.kapp.tidings.generated.resources.chat_group_dissolve
 import com.kapp.tidings.generated.resources.chat_group_add_member
 import com.kapp.tidings.generated.resources.chat_group_admin_label
 import com.kapp.tidings.generated.resources.chat_group_announce_label
@@ -44,6 +45,7 @@ import com.kapp.tidings.generated.resources.chat_group_id_copied
 import com.kapp.tidings.generated.resources.chat_group_id_label
 import com.kapp.tidings.generated.resources.chat_group_info_hint
 import com.kapp.tidings.generated.resources.chat_group_info_sub
+import com.kapp.tidings.generated.resources.chat_group_forget_local
 import com.kapp.tidings.generated.resources.chat_group_leave
 import com.kapp.tidings.generated.resources.chat_group_me
 import com.kapp.tidings.generated.resources.chat_group_members_header
@@ -86,6 +88,13 @@ fun GroupInfoDialog(
     onRemoveMember: ((String) -> Unit)? = null,
     onUpdateMeta: ((String, String?, String?) -> Unit)? = null,
     onLeaveGroup: (() -> Unit)? = null,
+    /**
+     * 群主**解散**这个群（对所有成员生效）。null = 这个壳没有解散能力。
+     *
+     * 只有群主才画那颗按钮：非群主调它会被控制器拒（`GroupNoPermission`），
+     * 画出来只会骗用户点一次。
+     */
+    onDissolveGroup: (() -> Unit)? = null,
     /**
      * 身份解析上下文。传 null 时按 `peers + group` 现建一份（桌面壳与截图夹具用）。
      *
@@ -150,11 +159,14 @@ fun GroupInfoDialog(
     var showExposeDialog by remember { mutableStateOf(false) }
     var showEditMetaDialog by remember { mutableStateOf(false) }
     var showLeaveConfirm by remember { mutableStateOf(false) }
+    var showDissolveConfirm by remember { mutableStateOf(false) }
     var memberToRemove by remember { mutableStateOf<String?>(null) }
     // 撤回**本机** agent 暴露前也要过一道确认：它对全群生效（群里的人立刻 @ 不到它），
     // 与移出人类成员同一档破坏性 —— 过去一按就生效、没有回头路。
     var agentWsToRevoke by remember { mutableStateOf<String?>(null) }
     val isSelfOwner = group.ownerId == selfNodeId || (group.ownerId == null && group.creatorId == selfNodeId)
+    /** 本机是否还在这份成员表里。被移出/被解散后为 false —— 见下面那颗按钮的文案分支。 */
+    val isSelfMember = group.hasMember(selfNodeId)
     val isSelfAdmin = group.adminIds?.contains(selfNodeId) == true
     val canManageMembers = isSelfOwner || isSelfAdmin
 
@@ -474,10 +486,25 @@ fun GroupInfoDialog(
         },
         confirmButton = {
             Row(horizontalArrangement = Arrangement.spacedBy(LocalAppSpacing.current.sm)) {
+                // 解散只对群主画：非群主点它只会得到「没有权限」，那是注定失败的按钮。
+                if (onDissolveGroup != null && isSelfOwner) {
+                    RelayDialogButton(
+                        text = stringResource(Res.string.chat_group_dissolve),
+                        onClick = { showDissolveConfirm = true },
+                        danger = true,
+                    )
+                }
                 if (onLeaveGroup != null) {
                     // 原型 `.btn.danger-o`（描边 + `--on-error-c` 文字）。
+                    //
+                    // **已经不在成员表里时，这颗按钮的动作是「删掉本地这条」，不是「退出」。**
+                    // 措辞必须跟着变：对着一份「我不在里面的群」说「退出群聊」，用户会以为
+                    // 自己还在群里、只是要离开 —— 而这个群他其实早就进不去了。同一个回调
+                    // （`handleLeaveGroup` 现在也覆盖这一档），两种文案。
                     RelayDialogButton(
-                        text = stringResource(Res.string.chat_group_leave),
+                        text = stringResource(
+                            if (isSelfMember) Res.string.chat_group_leave else Res.string.chat_group_forget_local,
+                        ),
                         onClick = { showLeaveConfirm = true },
                         danger = true,
                     )
@@ -553,6 +580,19 @@ fun GroupInfoDialog(
                     .mapNotNull { it.wsId }
                     .filterNot { it == wsToRevoke }
                 exposeWorkspaces(keep)
+            },
+        )
+    }
+
+    // 确认解散群聊对话框（仅群主；与退出分成两个框，因为后果不同）。
+    val dissolveGroup = onDissolveGroup
+    if (showDissolveConfirm && dissolveGroup != null) {
+        ConfirmDissolveGroupDialog(
+            onDismiss = { showDissolveConfirm = false },
+            onConfirm = {
+                showDissolveConfirm = false
+                onDismiss()
+                dissolveGroup()
             },
         )
     }

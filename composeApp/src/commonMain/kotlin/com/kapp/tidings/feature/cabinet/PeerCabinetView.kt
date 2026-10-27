@@ -623,7 +623,9 @@ private fun PeerHeadAvatar(name: String, avatar: Int, online: Boolean) {
                 // （`peerName` 来自 `PeerUi.displayName`，链路末端已经回落到 host/ip/nodeId，
                 // `RelayUiState.kt:89`），所以这里放一个**非 CJK** 的占位，而不是为一条
                 // 不可达分支新增中文资源；`cjkLiteralGate` 的基线里 `Common.kt` 只留了 1 条
-                // `"茶"`（`Common.kt:214`），本文件不在基线里，多一条就是新增违规。
+                // （那条 CJK 字面量 `"茶"`），本文件不在基线里，多一条就是新增违规。
+                // 这里原本写的是 `Common.kt` 的行号，而 `Common` 一加 import 行号就整体后移、
+                // 引用立刻指向一个孤立括号 —— 门禁 `:staleCommentRefGate` 正是为这种腐坏设的。
                 name.take(1).uppercase().ifBlank { "?" },
                 // 原型 `.hav{font-size:14px;font-weight:700}`：14sp 用排版角色取，
                 // 字重覆写成 700 —— 不写裸 `14.sp`，否则字号就绕过了唯一权威源。

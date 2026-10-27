@@ -37,6 +37,15 @@ sealed interface PeerEvent {
 
     /** 由离线变在线 —— 补发队列的触发点。 */
     data class Online(val nodeId: String) : PeerEvent
+
+    /**
+     * 用户把这条节点**从本机节点表里删掉了**（[PeerRegistry.forget]）。
+     *
+     * 为什么单独一个事件而不是复用 [Updated]：落盘那边只在 Updated/Online 上标脏并整份
+     * 重写 known-peers；删除如果不触发它，文件里那条会在**下次重启时原样回来** ——
+     * 用户会认为「删除没生效」，而内存里其实早就没了（最典型的两端不一致）。
+     */
+    data class Removed(val nodeId: String) : PeerEvent
 }
 
 class PeerRegistry(private val selfNodeId: String) {
@@ -349,6 +358,37 @@ class PeerRegistry(private val selfNodeId: String) {
             r
         }
         emit(PeerEvent.Updated(record))
+    }
+
+    /**
+     * 把一条节点**从本机节点表里删掉**（用户显式动作，不可撤销）。
+     *
+     * ## 删的是「本机对它的记忆」，不是那条设备
+     *
+     * 一起清掉的四类东西，少一样就会表现为「删不干净」：
+     * - `peers`：节点行本身；
+     * - `peerPins` / `pinSources`：pin 留在表里时，重启后 [pinOf] 还能把它当作「我认识
+     *   这台设备」，而节点表里已经没有那一行 —— 一个没有主体的信任；
+     * - `candidateEndpoints`：配对码带下来的地址池，不清就会继续往旧地址发心跳；
+     * - `profileTimes` / `profileConfirmationOnly`：旧档案的新鲜度判据，留着会让它下次
+     *   被重新发现时被判成「旧档案」而拒收。
+     *
+     * **它下次被发现在网上时会重新出现** —— 这是设计，不是缺陷：局域网里出现一台设备，
+     * 本机就会重新学到它。界面必须把这一点说清（见确认框文案）。
+     *
+     * @return 这条节点此前是否存在过。
+     */
+    fun forget(nodeId: String): Boolean {
+        val existed = lock.withLock { peers.remove(nodeId) != null }
+        lock.withLock {
+            profileTimes.remove(nodeId)
+            profileConfirmationOnly.remove(nodeId)
+            candidateEndpoints.remove(nodeId)
+            peerPins.remove(nodeId)
+            pinSources.remove(nodeId)
+        }
+        if (existed) emit(PeerEvent.Removed(nodeId))
+        return existed
     }
 
     /** 心跳超时（protocol §6.2）。返回本次被判定离线的节点。 */

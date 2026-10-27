@@ -189,6 +189,15 @@ sealed interface BannerMessage {
     data class GroupCreated(val name: String, val memberCount: Int) : BannerMessage
 
     /**
+     * 工作区群建好了，但群里此刻还没有其它设备。
+     *
+     * 与 [GroupCreated] 分开：那条说的是「正在通知 N 位成员」，N = 0 时读起来像失败。
+     * 而工作区群本来就允许**先建群、再把设备拉进来**（分享码 / 群信息里的添加成员）——
+     * 文案要顺着这条顺序指路，而不是陈述一个看起来失败的数字。
+     */
+    data class GroupCreatedWithoutMembers(val name: String) : BannerMessage
+
+    /**
      * 要发的这个群本机没有成员表。
      *
      * 只可能是"元数据还没同步到"（刚被拉进来、`group.info` 还在路上），所以文案要指向
@@ -198,6 +207,9 @@ sealed interface BannerMessage {
 
     /** 我们已被移出这个群，发送被拒。 */
     data object GroupLeft : BannerMessage
+
+    /** 群主解散了这个群（对所有成员生效；本机历史记录仍保留）。 */
+    data class GroupDisbanded(val name: String) : BannerMessage
 
     /** 成功邀请新成员入群。 */
     data class GroupMembersAdded(val count: Int) : BannerMessage
@@ -283,6 +295,14 @@ sealed interface BannerMessage {
      * 名字放在文案里，是因为同一屏可能连着移两台，只说「已移除」会认不出是哪台。
      */
     data class PeerRemoved(val name: String) : BannerMessage
+
+    /**
+     * 把一条**被发现来的**节点从本机节点表里删掉了。
+     *
+     * 与 [PeerRemoved] 分开：那条说的是「删掉一条手动地址」，这条要顺带说清「它下次被
+     * 发现在网上会重新出现」—— 不说这句，用户会以为这是拉黑，然后发现它又回来了。
+     */
+    data class PeerForgotten(val name: String) : BannerMessage
 
     /**
      * 对方拒绝了这个文件柜的下载请求。

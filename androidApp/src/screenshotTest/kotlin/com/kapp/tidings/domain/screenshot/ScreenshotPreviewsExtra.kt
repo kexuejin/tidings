@@ -826,6 +826,7 @@ private fun SettingsMoreStoragePhonePreview() {
                 // ⇒ 手机这一屏**不该有**「打开」按钮。生产侧手机确实不传（`App.kt:352`
                 // 那处调用没有这个实参），只有桌面传（`DesktopHosting.kt:606`）。
                 // 夹具传了就是**过武装**：画出生产永远到不了的按钮，截图门禁从此对它变瞎。
+                onExperimentalLuciolaChange = {},
             )
         }
     }
@@ -865,6 +866,7 @@ private fun SettingsMoreLoadingPhonePreview() {
                 persistMessagesEnabled = true,
                 onPersistMessagesEnabledChange = {},
                 onClearHistory = {},
+                onExperimentalLuciolaChange = {},
             )
         }
     }
@@ -2090,6 +2092,7 @@ private fun SettingsMoreLongTextPhonePreview() {
                 persistMessagesEnabled = true,
                 onPersistMessagesEnabledChange = {},
                 onClearHistory = {},
+                onExperimentalLuciolaChange = {},
             )
         }
     }

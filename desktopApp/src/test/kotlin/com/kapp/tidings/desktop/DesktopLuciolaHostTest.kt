@@ -7,7 +7,6 @@ import com.kapp.tidings.core.protocol.Profile
 import com.kapp.tidings.core.protocol.makeEnvelope
 import com.kapp.tidings.core.transport.PeerRegistry
 import kotlinx.coroutines.async
-import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.runBlocking
 import kotlinx.coroutines.withTimeout
@@ -87,8 +86,8 @@ class DesktopLuciolaHostTest {
         hostTransport.start()
         phoneTransport.start()
         try {
-            withTimeout(15_000) {
-                while (!phoneTransport.requestPairing("127.0.0.1", hostPort, "node-phone")) delay(100)
+            awaitTrue(timeoutMs = 15_000, pollMs = 100) {
+                phoneTransport.requestPairing("127.0.0.1", hostPort, "node-phone")
             }
             // 帧必须由 Codec 产生:手写 JSON 过不了协议的字段校验(传输层解码不到 from
             // 就会把整帧丢掉 —— 这一步正好也被这次调试证实了)。
@@ -96,11 +95,8 @@ class DesktopLuciolaHostTest {
                 makeEnvelope(MsgTypes.MSG, "node-phone", Codec.textPayload("paired-by-scan")),
             )
             val atHost = async { withTimeout(15_000) { hostTransport.incoming.first() } }
-            withTimeout(15_000) {
-                while (!atHost.isCompleted) {
-                    phoneTransport.send(frame, "127.0.0.1", hostPort)
-                    delay(100)
-                }
+            awaitTrue(timeoutMs = 15_000, pollMs = 100) {
+                if (atHost.isCompleted) true else { phoneTransport.send(frame, "127.0.0.1", hostPort); false }
             }
             assertContentEquals(frame, atHost.await().bytes, "配对后业务帧必须走加密信道到达主机")
         } finally {

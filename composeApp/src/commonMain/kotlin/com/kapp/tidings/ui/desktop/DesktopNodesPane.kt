@@ -49,6 +49,7 @@ import androidx.compose.ui.unit.dp
 
 import com.kapp.tidings.domain.RelayUiState
 import com.kapp.tidings.domain.ManualPeerEntry
+import com.kapp.tidings.domain.NodeRemoval
 import com.kapp.tidings.domain.manualPeerStatuses
 import com.kapp.tidings.core.nowMillis
 import com.kapp.tidings.feature.nodes.NodesScreen
@@ -229,7 +230,7 @@ public fun NodesPane(
                 NodesScreen(
                     state = state,
                     onAddPeer = controller::addManualPeer,
-                    onRemovePeer = controller::removeManualPeer,
+                    onRemovePeer = controller::removeNode,
                     // 「连接」已保存但不通的地址：mDNS 行被判重滤掉后，这是唯一能把设备连回来的动作。
                     onReconnectPeer = controller::reconnectManualPeer,
                     onCleanupUnreachable = controller::removeUnreachableManualPeers,
@@ -276,7 +277,7 @@ public fun NodesPane(
                         onOpenChat = onOpenChat,
                         // 「移除节点」与手机详情同一颗（`NodeDetailBody` 内带确认框，
                         // 只对有手动记录的行出现）。
-                        onRemovePeer = controller::removeManualPeer,
+                        onRemovePeer = controller::removeNode,
                         // 「连接」：手动保存过、当前不通的地址（mDNS 行被判重滤掉后的唯一出路）。
                         onReconnectPeer = controller::reconnectManualPeer,
                         modifier = Modifier
@@ -605,7 +606,7 @@ private fun NodeDetailPane(
     onSetPeerRemark: (String, String) -> Unit,
     onOpenChat: (String) -> Unit,
     /** 「移除节点」确认后直通 `controller::removeManualPeer`（见 [NodeDetailBody]）。 */
-    onRemovePeer: (ManualPeerEntry) -> Unit,
+    onRemovePeer: (NodeRemoval) -> Unit,
     /** 「连接」一条已保存但不通的手动地址（见 `RelayController.reconnectManualPeer`）。 */
     onReconnectPeer: ((ManualPeerEntry) -> Unit)? = null,
     modifier: Modifier = Modifier,

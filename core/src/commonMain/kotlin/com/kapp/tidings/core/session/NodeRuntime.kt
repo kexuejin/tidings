@@ -411,8 +411,8 @@ class NodeRuntime(
     /**
      * 扫码后向对端发配对自证(luciola)。false = 本节点没跑加密信道/该对端码里没有密钥。
      */
-    suspend fun requestLuciolaPairing(host: String, port: Int, peerNodeId: String): Boolean =
-        transport.requestPairing(host, port, peerNodeId)
+    suspend fun requestLuciolaPairing(host: String, port: Int): Boolean =
+        transport.requestPairing(host, port, profile.nodeId)
 
     /**
      * 实际绑定的 **TCP** 端口（文件传输与可靠投递），[start] 之前为 null。
@@ -498,26 +498,58 @@ class NodeRuntime(
         registry.addListener { event ->
             // Online 也要记：它意味着"这台设备确实存在且可达过"，比任何静态资料都硬。
             // 跨平台 AtomicBoolean 的写是 `store`（JVM 版叫 `set`）。
-            if (event is PeerEvent.Updated || event is PeerEvent.Online) dirty.store(true)
+            // Removed 也要标脏：用户删掉一个节点后，文件里那条必须跟着消失，
+            // 否则重启时 restoreOffline 会把它原样放回来（「删了没用」的现场）。
+            if (event is PeerEvent.Updated || event is PeerEvent.Online || event is PeerEvent.Removed) {
+                dirty.store(true)
+            }
         }
         runScope.launch {
             while (isActive) {
                 delay(KNOWN_PEER_FLUSH_MS)
                 if (!dirty.compareAndSet(true, false)) continue
-                runCatching {
-                    store.save(
-                        registry.values().map { record ->
-                            com.kapp.tidings.core.persist.KnownPeer(
-                                profile = record.profile,
-                                ip = record.ip,
-                                udpPort = record.udpPort,
-                                lastSeen = record.lastSeen,
-                            )
-                        },
-                    )
-                }
+                runCatching { store.save(knownPeersSnapshot()) }
             }
         }
+    }
+
+    /**
+     * 当前 registry 的「已知对端」快照（落盘用）。
+     *
+     * 抽成函数是为了让「删除节点」那条路与后台定时落盘**写的是同一份形状** ——
+     * 两处各拼一遍字段，迟早一处漏字段（known-peers 里少一列，重启后那台设备就只剩 nodeId）。
+     */
+    private fun knownPeersSnapshot(): List<com.kapp.tidings.core.persist.KnownPeer> =
+        registry.values().map { record ->
+            com.kapp.tidings.core.persist.KnownPeer(
+                profile = record.profile,
+                ip = record.ip,
+                udpPort = record.udpPort,
+                lastSeen = record.lastSeen,
+            )
+        }
+
+    /**
+     * 把一条节点从**本机**节点表里删掉（用户显式动作）。
+     *
+     * 与 [PeerRegistry.forget] 的分工：那边只动内存；这里把四份落盘一起缩掉，而且
+     * **立刻**写，不等 1.5 秒的合并窗口 —— 用户在按下确认后马上杀进程，也应该得到
+     * 「删掉了」的结果，而不是重启后它又回来了。
+     *
+     * 注意：删完不等于「拉黑」。它下次在局域网里出现时，发现流程会重新学到它；
+     * 要拒绝一台设备是另一件事（信任库），不在本函数的语义里。
+     *
+     * @return 这条节点此前是否存在过。
+     */
+    fun forgetPeer(nodeId: String): Boolean {
+        if (!registry.forget(nodeId)) return false
+        runCatching { knownPeerStore?.save(knownPeersSnapshot()) }
+        runCatching { peerEndpointStore.save(registry.allCandidates()) }
+        runCatching {
+            peerPinStore.save(registry.allPins())
+            peerPinStore.saveSources(registry.allPinSources())
+        }
+        return true
     }
 
     private companion object {

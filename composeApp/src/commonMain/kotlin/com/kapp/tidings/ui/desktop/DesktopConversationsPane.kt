@@ -197,7 +197,8 @@ public fun ConversationsPane(
                 creatingWorkspaceGroup = false
                 val name = defaultGroupNameFormat.replace("%s", ws.wsTitle ?: ws.wsId)
                 val members = state.peers.filter { it.online }.map { it.nodeId }
-                val gid = onCreateGroup(name, members, ws.wsPath ?: ws.wsId)
+                // 工作区群：允许 0 个在线设备（先建群、再拉设备），并把该工作区的 agent 声明进群。
+                val gid = controller.createWorkspaceGroup(name, ws.wsId, members, ws.wsPath ?: ws.wsId)
                 if (gid != null) {
                     onSelect(com.kapp.tidings.core.protocol.ConvId.group(gid))
                 }
@@ -205,7 +206,8 @@ public fun ConversationsPane(
             onCreateNew = { path, _, groupName, _ ->
                 creatingWorkspaceGroup = false
                 val members = state.peers.filter { it.online }.map { it.nodeId }
-                val gid = onCreateGroup(groupName, members, path)
+                // 「关联本地全新目录」：还没有工作区行（wsId = null）。
+                val gid = controller.createWorkspaceGroup(groupName, null, members, path)
                 if (gid != null) {
                     onSelect(com.kapp.tidings.core.protocol.ConvId.group(gid))
                 }
@@ -340,6 +342,7 @@ public fun ConversationsPane(
                 onTogglePin = controller::togglePinnedConv,
                 onToggleMute = controller::toggleMutedConv,
                 onDeleteConversation = controller::deleteConversation,
+                onLeaveGroup = controller::leaveGroup,
                 previewSenderNameOf = state::previewSenderNameOf,
                 onSearchGlobal = if (globalSearchEnabled) controller::searchGlobal else null,
                 initialGlobalSearch = initialGlobalSearch,
@@ -371,6 +374,7 @@ public fun ConversationsPane(
                 onTogglePin = controller::togglePinnedConv,
                 onToggleMute = controller::toggleMutedConv,
                 onDeleteConversation = controller::deleteConversation,
+                onLeaveGroup = controller::leaveGroup,
                 previewSenderNameOf = state::previewSenderNameOf,
                 onSearchGlobal = if (globalSearchEnabled) controller::searchGlobal else null,
                 initialGlobalSearch = initialGlobalSearch,
@@ -408,6 +412,7 @@ public fun ConversationsPane(
                 onTogglePin = controller::togglePinnedConv,
                 onToggleMute = controller::toggleMutedConv,
                 onDeleteConversation = controller::deleteConversation,
+                onLeaveGroup = controller::leaveGroup,
                         previewSenderNameOf = state::previewSenderNameOf,
                         onSearchGlobal = if (globalSearchEnabled) controller::searchGlobal else null,
                 initialGlobalSearch = initialGlobalSearch,

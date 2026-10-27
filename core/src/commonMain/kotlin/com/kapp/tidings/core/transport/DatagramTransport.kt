@@ -29,5 +29,5 @@ interface DatagramTransport {
      * 向对端发「配对自证」(luciola 的 TLPAIR1)。默认 false = 这条传输没有这个概念
      * (legacy UDP);宿主据此不宣称"已配对"。
      */
-    suspend fun requestPairing(host: String, port: Int, peerNodeId: String): Boolean = false
+    suspend fun requestPairing(host: String, port: Int, selfNodeId: String): Boolean = false
 }

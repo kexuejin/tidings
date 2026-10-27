@@ -37,8 +37,22 @@
     Android 上 Rust 的 `TcpListener::bind` 正常）；
   - luciola 发现在真机网络上工作：节点页显示 `1 个节点 · 1 在线`（`demo-mac-97`
     192.168.2.82:17878）。
-- **仍未验证**：两台设备之间的实际配对（出码→扫码→TLPAIR1→双向消息）。真机 A/B
-  需要第二台设备与相机；本机只能做到上面这些运行时证据。
+- **两台设备之间的完整配对：2026-10-26 已用「二维码图片导入」验证通过**（无需相机）：
+  1. 桌面 headless 宿主（`TIDINGS_DATA_DIR=/tmp/luciola-e2e-host`，实验开关开）；
+  2. 用它的 settings + seed（→Ed25519 公钥）+ pairSecret 生成**真实二维码 PNG**，
+     经 `adb push` 到手机、在 App 里「从图片导入二维码」；
+  3. 手机解析 → `pairPeer`（pin+secret 落盘，可在手机 state.json 里看到）→
+     `requestPairing` 发 TLPAIR1 → 主机三关校验通过：
+     `[luciola] paired node=4e76052f-... fp=sha256:87a5ecd...`，
+     主机 TrustStore 出现该 nodeId/full；
+  4. 手机在聊天里发 "QR-import-pairing-works" → 手机气泡显示 **✓ 已送达**，
+     主机 `relay.db` 的 `MessageEntity` 落库：
+     `conv/peer/sender=4e76052f-... | text=QR-import-pairing-works | ts=1792981154471`。
+- 这次真机验证抓到并修掉两个真实缺陷：
+  a) 扫码后**只发一次**配对帧，握手未完成时帧被丢弃 ⇒ 主机永远不信任；
+     修法：信道把帧存到 "connected" 再补发（附回归测试）；
+  b) 配对帧里的 nodeId 传成了**对端 id**，主机把自己的 id 记进信任库；
+     修法：帧内固定用本机 nodeId（`profile.nodeId`）。
 
 ## 3. 配对链路（协议层与宿主包装层）
 

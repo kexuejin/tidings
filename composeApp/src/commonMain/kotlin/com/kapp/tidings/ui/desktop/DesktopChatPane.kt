@@ -302,6 +302,7 @@ public fun ChatPane(
                 onRemoveMember = { member -> controller.removeGroupMember(group.groupId, member) },
                 onUpdateMeta = controller::updateGroupMeta,
                 onLeaveGroup = { controller.leaveGroup(group.groupId); onBack?.invoke() },
+                onDissolveGroup = { controller.dissolveGroup(group.groupId); onBack?.invoke() },
                 // **必须传身份上下文**：不传的话 `GroupInfoDialog` 会现建一份
                 // `(selfNodeId, peers, group)` —— 里面没有 `agentKindsByHost`，于是
                 // `groupParticipantRows` 找不到任何 agent，整个「入驻智能体」段落消失。

@@ -54,6 +54,9 @@ import com.kapp.tidings.generated.resources.banner_camera_unavailable
 import com.kapp.tidings.generated.resources.banner_capture_canceled
 import com.kapp.tidings.generated.resources.banner_capture_unavailable
 import com.kapp.tidings.generated.resources.banner_group_created
+import com.kapp.tidings.generated.resources.banner_group_created_no_members
+import com.kapp.tidings.generated.resources.banner_peer_forgotten
+import com.kapp.tidings.generated.resources.banner_group_disbanded
 import com.kapp.tidings.generated.resources.banner_group_left
 import com.kapp.tidings.generated.resources.banner_group_members_added
 import com.kapp.tidings.generated.resources.banner_group_member_removed
@@ -65,6 +68,7 @@ import com.kapp.tidings.generated.resources.banner_group_needs_member
 import com.kapp.tidings.generated.resources.banner_group_unknown
 import com.kapp.tidings.generated.resources.banner_invalid_qr
 import com.kapp.tidings.generated.resources.banner_no_qr_in_image
+import com.kapp.tidings.generated.resources.banner_peer_forgotten
 import com.kapp.tidings.generated.resources.banner_notification_denied
 import com.kapp.tidings.generated.resources.banner_group_meta_updated
 import com.kapp.tidings.generated.resources.chat_forward_success
@@ -336,6 +340,8 @@ fun bannerText(message: BannerMessage): String = when (message) {
     BannerMessage.NoUnreachablePeers -> stringResource(Res.string.disc_cleanup_none)
     is BannerMessage.UnreachablePeersRemoved ->
         stringResource(Res.string.disc_cleanup_done, message.count)
+    is BannerMessage.PeerForgotten ->
+        stringResource(Res.string.banner_peer_forgotten, message.name)
     BannerMessage.NudgeFailed -> stringResource(Res.string.chat_nudge_failed)
     BannerMessage.NudgeThrottled -> stringResource(Res.string.chat_nudge_throttled)
     BannerMessage.GroupNameRequired -> stringResource(Res.string.banner_group_name_required)
@@ -344,8 +350,11 @@ fun bannerText(message: BannerMessage): String = when (message) {
     BannerMessage.GroupNeedsMember -> stringResource(Res.string.banner_group_needs_member)
     is BannerMessage.GroupCreated ->
         stringResource(Res.string.banner_group_created, message.name, message.memberCount)
+    is BannerMessage.GroupCreatedWithoutMembers ->
+        stringResource(Res.string.banner_group_created_no_members, message.name)
     BannerMessage.GroupUnknown -> stringResource(Res.string.banner_group_unknown)
     BannerMessage.GroupLeft -> stringResource(Res.string.banner_group_left)
+    is BannerMessage.GroupDisbanded -> stringResource(Res.string.banner_group_disbanded, message.name)
     is BannerMessage.GroupMembersAdded ->
         stringResource(Res.string.banner_group_members_added, message.count)
     BannerMessage.GroupMemberRemoved -> stringResource(Res.string.banner_group_member_removed)

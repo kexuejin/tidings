@@ -310,6 +310,9 @@ private fun R2HomeMoreMenuPhonePreview() {
                 MenuPanel {
                     ConversationsOverflowItems(
                         onCreateGroup = {},
+                        // 生产两个壳都接了它（手机 compact 的那颗就靠这条入口）：
+                        // 留 null 会录出一张「没有关联工作区建群」的假图。
+                        onCreateWorkspaceGroup = {},
                         onGoToPairing = {},
                         onOnlyUnread = {},
                         onMarkAllRead = {},

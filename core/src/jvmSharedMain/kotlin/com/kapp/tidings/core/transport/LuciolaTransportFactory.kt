@@ -144,6 +144,12 @@ class LuciolaTransportFactory(
 
         override fun onPaired(nodeId: String, publicKey: ByteArray, name: String?) {
             trustDevice(nodeId = nodeId, name = name ?: nodeId, publicKey = publicKey, full = true)
+            // 真机/桌面排障:配对是"看不见结果"的一步,必须有可检索的一行日志。
+            println("[luciola] paired node=" + nodeId + " fp=" + identityFingerprint(publicKey).take(18))
+        }
+
+        override fun onPairingRejected(nodeId: String?, reason: String) {
+            println("[luciola] pairing rejected node=" + nodeId + " reason=" + reason)
         }
     }
 

@@ -6,7 +6,6 @@ import com.kapp.tidings.core.protocol.MsgTypes
 import com.kapp.tidings.core.protocol.Profile
 import com.kapp.tidings.core.protocol.makeEnvelope
 import kotlinx.coroutines.async
-import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.runBlocking
 import kotlinx.coroutines.withTimeout
@@ -74,11 +73,9 @@ class LuciolaSecureChannelTest {
         port: Int,
         at: kotlinx.coroutines.Deferred<*>,
     ) {
-        withTimeout(20_000) {
-            while (!at.isCompleted) {
-                transport.send(bytes, host, port)
-                delay(100)
-            }
+        // 轮询间隔与改动前一致（100ms）：每轮都会真投一帧，密集轮询只会无谓地刷帧。
+        awaitTrue(timeoutMs = 20_000, pollMs = 100) {
+            if (at.isCompleted) true else { transport.send(bytes, host, port); false }
         }
     }
 
@@ -89,9 +86,7 @@ class LuciolaSecureChannelTest {
         host: String,
         port: Int,
     ) {
-        withTimeout(15_000) {
-            while (!transport.send(bytes, host, port)) delay(50)
-        }
+        awaitTrue(timeoutMs = 15_000, pollMs = 50) { transport.send(bytes, host, port) }
     }
 
     // ------------------------------------------------------------------ 用例
@@ -140,9 +135,8 @@ class LuciolaSecureChannelTest {
         transport.start()
         try {
             var everSent = false
-            repeat(20) {
+            deliverRepeatedly(times = 20) {
                 if (transport.send(frame("node-x", "nope"), "127.0.0.1", port)) everSent = true
-                delay(50)
             }
             assertFalse(everSent, "peerKey 查不到 ⇒ 必须拒绝建连(deny-by-default)")
         } finally {
@@ -165,10 +159,7 @@ class LuciolaSecureChannelTest {
         transportC.start()
         try {
             val payload = frame("node-stranger", "untrusted")
-            repeat(30) {
-                transportC.send(payload, "127.0.0.1", portB)
-                delay(50)
-            }
+            deliverRepeatedly(times = 30) { transportC.send(payload, "127.0.0.1", portB) }
             val leak = withTimeoutOrNull(2_000) { transportB.incoming.first() }
             assertTrue(leak == null, "未通过信任手续的入站帧一条都不许进应用层")
             assertFalse(host.isTrustedFingerprint(stranger.fingerprint), "陌生对端不许进信任库")
@@ -233,9 +224,7 @@ class LuciolaSecureChannelTest {
             sendEventually(phoneTransport, request, "127.0.0.1", portHost)
             assertTrue(accepted.await().accepted, "主机必须接受带正确 secret 且指纹自证的配对")
 
-            withTimeout(5_000) {
-                while (!host.isTrustedFingerprint(phone.fingerprint)) delay(50)
-            }
+            awaitTrue(timeoutMs = 5_000) { host.isTrustedFingerprint(phone.fingerprint) }
 
             val payload = frame("phone-node", "paired-and-talking")
             val atHost = async { withTimeout(20_000) { hostTransport.incoming.first() } }
@@ -265,10 +254,7 @@ class LuciolaSecureChannelTest {
             val wrong = ByteArray(16) { 0x42 }
             val request = PairingFrame.encodeRequest("phone-node-2", phone.publicKey, wrong)
             val result = async { timeoutOrNull(10_000) { phoneTransport.pairingResults.first() } }
-            repeat(40) {
-                phoneTransport.send(request, "127.0.0.1", portHost)
-                delay(50)
-            }
+            deliverRepeatedly(times = 40) { phoneTransport.send(request, "127.0.0.1", portHost) }
             val reply = result.await()
             assertTrue(reply != null && !reply.accepted, "secret 不对必须被拒绝,且要有明说的应答")
             assertFalse(host.isTrustedFingerprint(phone.fingerprint), "被拒绝的对端不许进信任库")
@@ -296,11 +282,10 @@ class LuciolaSecureChannelTest {
             val secret = Base64.UrlSafe.decode(host.pairSecretBase64())
             // 会话证明的是 phone 的私钥,却声称另一把公钥 ⇒ 指纹绑定必须拦下。
             val forged = PairingFrame.encodeRequest("phone-node-3", other.publicKey, secret)
-            repeat(40) {
-                phoneTransport.send(forged, "127.0.0.1", portHost)
-                delay(50)
-            }
-            delay(500)
+            deliverRepeatedly(times = 40) { phoneTransport.send(forged, "127.0.0.1", portHost) }
+            // 断言是负向的（「没进信任库」）：先等到主机真的处理过一帧再断言，
+            // 否则「什么都没发生」也会通过 —— 这类用例最容易假绿的地方就在这里。
+            awaitTrue(timeoutMs = 5_000) { hostTransport.rejectedInbound >= 1 }
             assertFalse(host.isTrustedFingerprint(other.fingerprint), "冒名公钥不许进信任库")
             assertFalse(host.isTrustedFingerprint(phone.fingerprint), "会话身份也不该被顺带信任")
             assertTrue(hostTransport.rejectedInbound >= 1)
@@ -336,13 +321,8 @@ class LuciolaSecureChannelTest {
         strangerTransport.start()
         try {
             val garbage = frame("node-stranger", "not-a-pairing-frame")
-            repeat(20) {
-                strangerTransport.send(garbage, "127.0.0.1", portHost)
-                delay(50)
-            }
-            withTimeout(8_000) {
-                while (hostTransport.rejectedInbound < 1) delay(50)
-            }
+            deliverRepeatedly(times = 20) { strangerTransport.send(garbage, "127.0.0.1", portHost) }
+            awaitTrue(timeoutMs = 8_000) { hostTransport.rejectedInbound >= 1 }
             assertTrue(hostTransport.rejectedInbound >= 1, "超时未配对必须断开并计数")
         } finally {
             hostTransport.stop()
@@ -367,16 +347,51 @@ class LuciolaSecureChannelTest {
         phoneTransport.start()
         try {
             val accepted = async { withTimeout(10_000) { phoneTransport.pairingResults.first() } }
-            withTimeout(10_000) {
-                while (!phoneTransport.requestPairing("127.0.0.1", portHost, "phone-node")) {
-                    delay(50)
-                }
+            // 轮询间隔与改动前一致（50ms）：`requestPairing` 有副作用（每次调用都排一帧），
+            // 这里要的是「它成功」，不是刷得越快越好 —— 20ms 会让同一轮多排一倍帧。
+            awaitTrue(timeoutMs = 10_000, pollMs = 50) {
+                phoneTransport.requestPairing("127.0.0.1", portHost, "phone-node")
             }
             assertTrue(accepted.await().accepted, "带正确 secret 的配对帧必须被接受")
-            withTimeout(5_000) { while (!host.isTrustedFingerprint(phone.fingerprint)) delay(50) }
+            awaitTrue(timeoutMs = 5_000) { host.isTrustedFingerprint(phone.fingerprint) }
 
             val payload = frame("phone-node", "paired-by-scan")
             val atHost = async { withTimeout(20_000) { hostTransport.incoming.first() } }
+            sendUntil(phoneTransport, payload, "127.0.0.1", portHost, atHost)
+            assertContentEquals(payload, atHost.await().bytes)
+        } finally {
+            hostTransport.stop()
+            phoneTransport.stop()
+        }
+    }
+
+    /**
+     * 回归:扫码后**只发一次**配对帧(不做重试)也必须送达。
+     * 真机缺陷(2026-10-26):首次 send 早于握手完成 ⇒ 帧被丢,主机永远不信任本机。
+     * 修法是信道把帧存到 "connected" 再补发;本用例用单次调用钉住它。
+     */
+    @Test
+    fun pairingRequestSentBeforeHandshakeStillArrives() = runBlocking {
+        val portHost = freeTcpPort()
+        val portPhone = freeTcpPort()
+        val host = factory(portHost, 30)
+        val phone = factory(portPhone, 31)
+        phone.pairPeer(
+            "127.0.0.1", portHost, host.publicKey,
+            secret = Base64.UrlSafe.decode(host.pairSecretBase64()),
+        )
+        val hostTransport = host.createTransport(registryWith("host-node", "phone-node", "127.0.0.1", portPhone))
+        val phoneTransport = phone.createTransport(PeerRegistry("phone-node"))
+        hostTransport.start()
+        phoneTransport.start()
+        try {
+            // 只调一次,不看返回值 —— 这正是扫码路径的行为。
+            phoneTransport.requestPairing("127.0.0.1", portHost, "phone-node")
+            val accepted = withTimeout(10_000) { phoneTransport.pairingResults.first() }
+            assertTrue(accepted.accepted, "握手前发出的配对帧也必须在连上后补发并被接受")
+
+            val payload = frame("phone-node", "paired-once")
+            val atHost = async { withTimeout(15_000) { hostTransport.incoming.first() } }
             sendUntil(phoneTransport, payload, "127.0.0.1", portHost, atHost)
             assertContentEquals(payload, atHost.await().bytes)
         } finally {

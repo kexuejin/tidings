@@ -65,6 +65,13 @@ class SecureChannelTransport(
     private val selfPublicKey: ByteArray = ByteArray(0),
 ) : DatagramTransport {
     private val outbound = ConcurrentHashMap<String, SecureSession>()
+
+    /**
+     * 握手完成前发出的配对帧(扫码后立刻触发时几乎必然遇到):
+     * send 在未连接时返回 false,帧会丢 —— 这里先存下来,等 "connected" 再补发。
+     * 真机实测:不补发时主机永远收不到 TLPAIR1,表现为"扫码后一直不配对"。
+     */
+    private val pendingPairing = ConcurrentHashMap<String, ByteArray>()
     private val inboundByEndpoint = ConcurrentHashMap<String, SecureSession>()
 
     private val _incoming = MutableSharedFlow<ReceivedDatagram>(extraBufferCapacity = 256)
@@ -89,6 +96,8 @@ class SecureChannelTransport(
     @Volatile
     var rejectedInbound: Int = 0
         private set
+
+    private val unattributedDrops = java.util.concurrent.atomic.AtomicInteger()
 
     override val boundPort: Int get() = if (listenPort > 0) listenPort else -1
 
@@ -125,10 +134,12 @@ class SecureChannelTransport(
      * 发起侧配对:用主机二维码里的 secret 自证「扫过码」。返回 false = 没扫过/未配对,
      * 或信道还没连上(调用方退避重试,与普通发送同一套语义)。
      */
-    override suspend fun requestPairing(host: String, port: Int, peerNodeId: String): Boolean {
+    override suspend fun requestPairing(host: String, port: Int, selfNodeId: String): Boolean {
         val secret = pairingSecretOf(host, port) ?: return false
         if (selfPublicKey.size != PairingFrame.ED25519_PUBLIC_KEY_SIZE) return false
-        return send(PairingFrame.encodeRequest(peerNodeId, selfPublicKey, secret), host, port)
+        val frame = PairingFrame.encodeRequest(selfNodeId, selfPublicKey, secret)
+        pendingPairing[endpointKey(host, port)] = frame
+        return send(frame, host, port)
     }
 
     override suspend fun send(bytes: ByteArray, host: String, port: Int): Boolean {
@@ -150,6 +161,12 @@ class SecureChannelTransport(
                     listOf(host), port.toUShort(), pinned, /*autoReconnect=*/true,
                     object : SecureSessionListener {
                         override fun onState(state: String, detail: String?) {
+                            if (state == "connected") {
+                                // 扫码后立刻发出的配对帧可能早于握手完成:连上就补发一次。
+                                pendingPairing.remove(key)?.let { queued ->
+                                    runCatching { session.send(queued) }
+                                }
+                            }
                             if (state == "error" || state == "closed") {
                                 outbound.remove(key, session)
                             }
@@ -216,7 +233,14 @@ class SecureChannelTransport(
             // 未通过信任手续的对端,一帧业务数据都不许进入应用层。
             if (!trusted) return
             val from = senderOf(message) ?: return
-            val endpoint = endpointOf(from) ?: return
+            val endpoint = endpointOf(from)
+            if (endpoint == null) {
+                // 没有 registry 记录就无法把帧交上去(也回不了 ACK)。默认只计数,
+                // 每 25 次打一行 —— 真机上"配对成功但消息一直发送中"就是这一条。
+                val n = unattributedDrops.incrementAndGet()
+                if (n % 25 == 1) println("[luciola] drop frame: no endpoint for " + from + " (total=" + n + ")")
+                return
+            }
             inboundByEndpoint[endpointKey(endpoint.host, endpoint.port)] = session
             _incoming.tryEmit(ReceivedDatagram(message, endpoint.host, endpoint.port))
         }

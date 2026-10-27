@@ -26,6 +26,7 @@ import kotlin.test.assertNull
 import kotlin.test.assertTrue
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.runBlocking
+import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.buildJsonObject
 import kotlinx.serialization.json.put
@@ -117,6 +118,173 @@ class RelayControllerGroupTest {
         assertNull(controller.createGroup("自言自语", listOf(self, "  ")))
         assertEquals(BannerMessage.GroupNeedsMember, controller.state.value.banner?.message)
         assertTrue(controller.state.value.settings.groups.isEmpty())
+    }
+
+    // ---- 工作区建群（真机反馈：「无法快速建群，一直提示要至少一个人」）----
+
+    /**
+     * 只在自己这一台设备上（或者对端全离线）也必须能建出工作区群。
+     *
+     * 旧行为：`handleCreateGroup` 要求「除自己外至少一个成员」，而工作区建群对话框的成员
+     * 来源只有**当前在线设备**、它自己又不是成员选择器 —— 于是单机用户永远建不出来，
+     * 只得到一句「至少再选一个人」，对话框却已经关掉、里面根本没有可勾的人。
+     *
+     * 反向验证：把 `handleCreateWorkspaceGroup` 的 `allowEmptyMembers` 改回 false，
+     * 这条用例在 `assertNotNull(groupId)` 处变红。
+     */
+    @Test
+    fun aWorkspaceGroupIsCreatedEvenWithNoOtherDeviceOnline() = runBlocking {
+        val controller = controller()
+        controller.recordLocalWorkspace(
+            wsId = "ws-alpha",
+            wsTitle = "teahouse-mobile",
+            wsPath = "/srv/teahouse-mobile",
+            agentKey = "dsh",
+            agentKind = "DSH",
+        )
+
+        val groupId = controller.createWorkspaceGroup(
+            name = "teahouse-mobile 协同群",
+            wsId = "ws-alpha",
+            memberIds = emptyList(),
+            description = "/srv/teahouse-mobile",
+        )
+
+        assertNotNull(groupId, "单机（没有任何在线设备）也要能把工作区群建出来")
+        val meta = controller.state.value.settings.groups.single { it.groupId == groupId }
+        assertEquals(listOf(self), meta.members, "人类成员只有自己 —— 但群里还有那个 agent")
+        val seat = meta.virtualAgents?.single()
+        assertNotNull(seat, "工作区群必须把工作区上的 agent 声明进群（否则两个人都没有，@ 也没人可叫）")
+        // 工作区没上报 agentId（真机主形态）时退到 agentKind —— 与「邀请新智能体入驻」同一条兜底。
+        assertEquals("DSH", seat.agentId)
+        assertEquals(self, seat.hostNodeId)
+        assertEquals("ws-alpha", seat.wsId)
+        assertEquals(
+            BannerMessage.GroupCreatedWithoutMembers("teahouse-mobile 协同群"),
+            controller.state.value.banner?.message,
+            "0 人时要给「先建群、再加设备」的文案，而不是「正在通知 0 位成员」",
+        )
+    }
+
+    @Test
+    fun aWorkspaceGroupStillTakesTheOtherDevicesItHas() = runBlocking {
+        // 有人在线时行为不变：人类成员照旧，agent 声明与它们并存（不是二选一）。
+        val controller = controller()
+        controller.recordLocalWorkspace(
+            wsId = "ws-alpha",
+            wsTitle = "teahouse-mobile",
+            wsPath = "/srv/teahouse-mobile",
+            agentKey = "dsh",
+            agentKind = "DSH",
+        )
+
+        val groupId = controller.createWorkspaceGroup(
+            name = "teahouse-mobile 协同群",
+            wsId = "ws-alpha",
+            memberIds = listOf(lin),
+            description = "/srv/teahouse-mobile",
+        )
+
+        assertNotNull(groupId)
+        val meta = controller.state.value.settings.groups.single()
+        assertEquals(listOf(self, lin), meta.members)
+        assertEquals(1, meta.virtualAgents?.size)
+        assertEquals(BannerMessage.GroupCreated("teahouse-mobile 协同群", 1), controller.state.value.banner?.message)
+    }
+
+    @Test
+    fun aWorkspaceGroupForANewDirectoryIsStillCreated() = runBlocking {
+        // 「关联本地全新目录」分支：目录还没被任何 agent 宣告成工作区（wsId = null），
+        // 因此没有可入驻的 agent。群照样要建出来 —— 它是这个目录的协同通道，
+        // 设备与工作区随后再接上；这里钉住的是「没有工作区行时不会退化成旧判据」。
+        val controller = controller()
+
+        val groupId = controller.createWorkspaceGroup(
+            name = "new-feature 协同群",
+            wsId = null,
+            memberIds = emptyList(),
+            description = "/srv/new-feature",
+        )
+
+        assertNotNull(groupId, "新目录分支同样不该被「至少再选一个人」挡住")
+        val meta = controller.state.value.settings.groups.single { it.groupId == groupId }
+        assertEquals(listOf(self), meta.members)
+        assertNull(meta.virtualAgents, "还没有工作区行 ⇒ 没有可声明的 agent（不许替他编一个）")
+    }
+
+    // ---- 解散群 ----
+
+    /**
+     * 群主解散 = 一次性的全员移出：成员表裁到只剩自己、rev+1、本机删掉群。
+     *
+     * 为什么值得钉住：这条路径**不新增任何帧**，靠的是对端 GroupMerge 判 Removed。
+     * 一旦成员表裁错（比如还留着别人），对端收到后会当成一次普通的「有人退群」，
+     * 群在别人那里继续存在 —— 而用户以为已经解散了。
+     */
+    @Test
+    fun theOwnerCanDisbandAGroup() = runBlocking {
+        val controller = controller()
+        val groupId = controller.createGroup("要解散的群", listOf(lin, zhou))!!
+
+        controller.dissolveGroup(groupId)
+
+        assertNull(
+            controller.state.value.settings.groups.firstOrNull { it.groupId == groupId },
+            "解散后本机不再持有这个群",
+        )
+        assertEquals(
+            BannerMessage.GroupDisbanded("要解散的群"),
+            controller.state.value.banner?.message,
+            "回执要说清是「解散」，不是「我被移出」",
+        )
+    }
+
+    @Test
+    fun aNonOwnerCannotDisband() = runBlocking {
+        // 非群主解散必须被拒：它会让别人的群凭空消失。这里用「群里只有自己」的一档 ——
+        // 自己建群必然是群主，所以改成先由 lin 建群不现实（协议上没有代建），
+        // 于是直接构造一个群主是别人的元数据。
+        val controller = controller()
+        val groupId = "group-owned-by-other"
+        val meta = GroupMeta(
+            groupId = groupId,
+            name = "别人的群",
+            members = listOf(self, lin),
+            rev = 1,
+            updatedBy = lin,
+            updatedTs = 1L,
+            creatorId = lin,
+            ownerId = lin,
+            adminIds = emptyList(),
+        )
+        controller.onInbound(groupInfo(meta))
+
+        controller.dissolveGroup(groupId)
+
+        assertNotNull(
+            controller.state.value.settings.groups.firstOrNull { it.groupId == groupId },
+            "非群主解散必须被拒，群还在",
+        )
+        assertEquals(BannerMessage.GroupNoPermission, controller.state.value.banner?.message)
+    }
+    @Test
+    fun aPlainGroupDoesNotSeatAnyAgent() = runBlocking {
+        // 决策边界：只有**工作区群**才有「agent 是第二个参与者」这个前提。
+        // 普通建群（会话列表那颗按钮）就算简介写成了某个工作区的路径，也不替用户入驻任何
+        // agent —— 群里的 agent 只有「显式入驻」一个来源。
+        val controller = controller()
+        controller.recordLocalWorkspace(
+            wsId = "ws-alpha",
+            wsTitle = "teahouse-mobile",
+            wsPath = "/srv/teahouse-mobile",
+            agentKey = "dsh",
+            agentKind = "DSH",
+        )
+
+        val groupId = controller.createGroup("随手拉的群", listOf(lin), "/srv/teahouse-mobile")
+
+        assertNotNull(groupId)
+        assertNull(controller.state.value.settings.groups.single().virtualAgents)
     }
 
     @Test
@@ -295,6 +463,91 @@ class RelayControllerGroupTest {
             controller.state.value.messagesWith(ConvId.group("g-1"))
                 .any { it.notice == NoticeKind.RemovedFromGroup },
         )
+    }
+
+    @Test
+    fun aRemovedMemberCanStillDeleteTheLocalGroup() = runBlocking {
+        // 被移出后 `GroupMerge.Removed` 会**保留**元数据（成员表里没有自己 = 它回答
+        // 「我为什么发不出话」的唯一依据）。但保留不等于删不掉：那条群里的
+        // 「退出群聊」此前在 `!hasMember(self)` 处直接 return —— 按下去什么都不发生、
+        // 连提示都没有，用户被卡在一个既删不掉又发不出话的群上。
+        val controller = controller()
+        val owner = remoteGroup("g-1", "上线小组", listOf(self, lin), rev = 1, updatedBy = lin)
+            .copy(ownerId = lin, adminIds = emptyList())
+        controller.onInbound(groupInfo(owner))
+        controller.onInbound(groupInfo(owner.copy(rev = 2, members = listOf(lin), updatedBy = lin)))
+        assertFalse(controller.state.value.settings.groups.single().hasMember(self))
+
+        controller.leaveGroup("g-1")
+
+        assertTrue(
+            controller.state.value.settings.groups.none { it.groupId == "g-1" },
+            "已经被移出的人也必须能把本地这条群删掉，否则它永远留在会话列表里",
+        )
+        assertEquals(
+            BannerMessage.GroupLeft,
+            controller.state.value.banner?.message,
+            "回执必须如实说「你已被移出」，不能说成「已退出」",
+        )
+    }
+
+    @Test
+    fun theRealWorldRemovalFrameIsApplied() = runBlocking {
+        // **真机帧原文**（2026-10-26 15:54:08，手机端把本机移出「协同群」）：
+        // 桌面收到了它（messages.log 里能从解码出来），却没有把成员表更新过来。
+        // 这条用例把这帧逐字节喂进同一条入站路径，让接收侧自己给出结论。
+        val controller = controller()
+        val groupId = "81b6078b-3084-4fff-9de1-1966783bb6b6"
+        val phone = "c3d4e5f6-9382-40a6-831d-1b199a044946"
+        // 先让它成为成员（rev 1），
+        controller.onInbound(
+            groupInfo(
+                GroupMeta(
+                    groupId = groupId, name = "协同群", members = listOf(phone, self),
+                    rev = 1, updatedBy = phone, updatedTs = 1792992719409L,
+                    creatorIp = "", creatorId = phone, ownerId = phone, adminIds = emptyList(),
+                ),
+            ),
+        )
+        assertTrue(controller.state.value.settings.groups.single().hasMember(self))
+
+        // 再喂那一帧原文（走**真实解码**，不是构造 GroupMeta）。
+        val payload = Json.parseToJsonElement(
+            """
+            {
+        "op": "info",
+        "group": {
+                "groupId": "81b6078b-3084-4fff-9de1-1966783bb6b6",
+                "name": "协同群",
+                "members": [
+                        "c3d4e5f6-9382-40a6-831d-1b199a044946"
+                ],
+                "rev": 2,
+                "updatedBy": "c3d4e5f6-9382-40a6-831d-1b199a044946",
+                "updatedTs": 1793001249934,
+                "creatorIp": "",
+                "creatorId": "c3d4e5f6-9382-40a6-831d-1b199a044946",
+                "ownerId": "c3d4e5f6-9382-40a6-831d-1b199a044946",
+                "adminIds": [],
+                "description": "/sdcard/verify-wsu",
+                "memberNicks": {
+                        "c3d4e5f6-9382-40a6-831d-1b199a044946": "Pixel 6"
+                }
+        }
+}
+            """.trimIndent(),
+        ) as JsonObject
+        controller.onInbound(
+            Envelope(
+                v = 1, type = MsgTypes.GROUP,
+                id = "8fe96c00-f3ba-4f59-83bf-e3115e4ef9af",
+                from = phone, ts = 1793001249938L, payload = payload,
+            ),
+        )
+
+        val meta = controller.state.value.settings.groups.single()
+        assertEquals(2, meta.rev, "真机那一帧是 rev 2，本机必须跟上")
+        assertFalse(meta.hasMember(self), "群主把本机移出后，成员表里不该再有自己")
     }
 
     @Test

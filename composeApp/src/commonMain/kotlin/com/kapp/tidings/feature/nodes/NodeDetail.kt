@@ -48,6 +48,7 @@ import com.kapp.tidings.generated.resources.nodes_menu_copied
 import com.kapp.tidings.generated.resources.nodes_menu_copy
 import com.kapp.tidings.generated.resources.nodes_menu_remove
 import com.kapp.tidings.generated.resources.nodes_remove_confirm_body
+import com.kapp.tidings.generated.resources.nodes_forget_confirm_body
 import com.kapp.tidings.generated.resources.nodes_remove_confirm_title
 import com.kapp.tidings.ui.components.AppButton
 import com.kapp.tidings.ui.components.AppButtonSize
@@ -62,6 +63,7 @@ import com.kapp.tidings.ui.components.PeerAvatar
 import com.kapp.tidings.ui.components.StatusDot
 import com.kapp.tidings.ui.theme.accents
 import com.kapp.tidings.domain.ManualPeerEntry
+import com.kapp.tidings.domain.NodeRemoval
 import kotlinx.coroutines.delay
 import org.jetbrains.compose.resources.stringResource
 import androidx.compose.material3.HorizontalDivider
@@ -168,14 +170,17 @@ internal fun NodeDetailBody(
     onSetPeerRemark: ((String, String) -> Unit)?,
     onOpenChat: ((String) -> Unit)?,
     /**
-     * 「移除节点」按下并确认后调用（参数是这条行的手动记录）。
+     * 「移除节点」按下并确认后调用。参数是**这一行是什么**（[NodeRemoval]）。
      *
      * `null` = 这个壳没有移除这条路，详情页不画那颗动作 —— 而不是给一个按了
-     * 什么都不发生的按钮。**只有 `item.manualEntry != null` 的行画**：
-     * 移除的语义是"删掉本机存的这条手动地址"（`RelayController.removeManualPeer`），
-     * 局域网扫到、没有手动记录的对端没有可删的东西。
+     * 什么都不发生的按钮。
+     *
+     * **手动地址与发现来的节点都画**：此前只对 `manualEntry != null` 的行画，于是
+     * 「局域网里看到一台设备」这种最常见的一行反而没有删除入口（真机：manualPeers=0、
+     * known-peers=16，按钮一次都不出现）。两者的后果不同，由 [NodeRemoval] 说清、
+     * 由控制器分派，界面不猜。
      */
-    onRemovePeer: ((ManualPeerEntry) -> Unit)? = null,
+    onRemovePeer: ((NodeRemoval) -> Unit)? = null,
     /**
      * 「连接」一条**已保存但当前不通**的手动地址（见 `RelayController.reconnectManualPeer`）。
      *
@@ -243,11 +248,17 @@ internal fun NodeDetailBody(
         SendMessageButton(target = nodeId, onOpenChat = onOpenChat)
 
         // 管理动作收在详情页底部（原型把行尾 ⋯ 菜单从列表撤掉时留下的判据：
-        // 「管理动作不进主列表」）。复制对任何行都有；移除只对手动地址有。
-        // `manualEntry` 先落进局部 val：编译器穿不过 lambda 里的智能转换，
+        // 「管理动作不进主列表」）。复制对任何行都有；移除对两种行都有，但**含义不同**。
+        // `manualEntry` / `nodeId` 先落进局部 val：编译器穿不过 lambda 里的智能转换，
         // 直接写 `item.manualEntry` 会拿到可空类型。
         val manualEntry = item.manualEntry
-        val removeAction = onRemovePeer?.takeIf { manualEntry != null }
+        val nodeId = item.nodeId
+        val removal: NodeRemoval? = when {
+            manualEntry != null -> NodeRemoval.ManualAddress(manualEntry)
+            nodeId != null -> NodeRemoval.DiscoveredNode(nodeId)
+            else -> null
+        }
+        val removeAction = onRemovePeer?.takeIf { removal != null }
         // 只在「手动保存过、现在不在线」时给「连接」：这是 mDNS 行被判重滤掉之后，
         // 用户唯一能把那台设备连回来的动作（重新添加会被控制器判重复）。
         val reconnectAction = onReconnectPeer?.takeIf { manualEntry != null && !item.online }
@@ -259,11 +270,19 @@ internal fun NodeDetailBody(
             } else {
                 null
             },
-            onRemoveConfirmed = if (removeAction != null && manualEntry != null) {
-                { removeAction(manualEntry) }
+            onRemoveConfirmed = if (removeAction != null && removal != null) {
+                { removeAction(removal) }
             } else {
                 null
             },
+            // 两种删除的后果不同，确认框必须分开说（见两条 strings 的注释）。
+            confirmBody = stringResource(
+                if (removal is NodeRemoval.ManualAddress) {
+                    Res.string.nodes_remove_confirm_body
+                } else {
+                    Res.string.nodes_forget_confirm_body
+                },
+            ),
         )
     }
 }
@@ -284,6 +303,8 @@ private fun DetailManageActions(
     displayName: String,
     onRemoveConfirmed: (() -> Unit)?,
     onReconnect: (() -> Unit)? = null,
+    /** 确认框正文：手动地址与发现来的节点后果不同，由调用方按行类型给。 */
+    confirmBody: String = "",
 ) {
     val sp = LocalAppSpacing.current
     val clipboard = LocalClipboardManager.current
@@ -342,7 +363,7 @@ private fun DetailManageActions(
             title = { Text(stringResource(Res.string.nodes_remove_confirm_title)) },
             content = {
                 Text(
-                    text = stringResource(Res.string.nodes_remove_confirm_body),
+                    text = confirmBody,
                     style = MaterialTheme.typography.bodyMedium,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )

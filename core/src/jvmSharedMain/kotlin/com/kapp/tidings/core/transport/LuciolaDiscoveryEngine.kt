@@ -77,10 +77,15 @@ class LuciolaDiscoveryEngine(
         adapter?.stop()
     }
 
+    private val loggedPeers = java.util.concurrent.ConcurrentHashMap.newKeySet<String>()
+
     private fun applyPeer(peer: PeerUiModel) {
         val raw = peer.extra ?: return
         val profile = runCatching { json.decodeFromString(Profile.serializer(), raw) }.getOrNull() ?: return
         synchronized(idMapLock) { idMap[peer.nodeId] = profile.nodeId }
+        if (loggedPeers.add(profile.nodeId)) {
+            println("[luciola] discovered " + profile.nodeId + " at " + peer.ip + ":" + peer.udpPort)
+        }
         // 源地址用 luciola 观察到的可达地址;地址表随 Tidings 资料走。
         registry.touch(profile.nodeId, peer.ip, peer.udpPort, profile, confirmed = true)
     }

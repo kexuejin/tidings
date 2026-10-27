@@ -261,6 +261,16 @@ internal fun ConversationRow(
     onToggleMute: (() -> Unit)? = null,
     onDeleteConversation: (() -> Unit)? = null,
     /**
+     * 群会话的「删除并退出群聊」：删除确认框里的第二个动作（见
+     * [DeleteConversationConfirmDialog] 的 `onConfirmAndLeave`）。
+     *
+     * 为什么删群会话要顺带提供退群：删掉的只是本机记录，群还在，下一条群消息会把
+     * 会话重建 —— 用户以为「删了就没了」，其实只是清空了历史。要真正离开得走群信息
+     * 里的「退出群聊」；把两者放进同一个确认框，用户才不用先删再找。
+     * null = 这个壳没有退群能力（单聊 / 预览）。
+     */
+    onLeaveGroup: (() -> Unit)? = null,
+    /**
      * 群会话预览该署的**发送者显示名**；null = 不署名（私聊、最后一条是自己说的、
      * 或解析不出 —— 名字由域层解析，见 `RelayUiState.previewSenderNameOf`，UI 不自拼）。
      */
@@ -395,6 +405,18 @@ internal fun ConversationRow(
             onConfirm = {
                 confirmDelete = false
                 onDeleteConversation?.invoke()
+            },
+            isGroup = row.isGroup,
+            // 顺序：先退群（本机把群去掉），再清本机记录 —— 反过来的话，退群时写进去的
+            // 那条提示会被同一次删除清掉，看上去像「没退成功」。
+            onConfirmAndLeave = if (row.isGroup && onLeaveGroup != null && onDeleteConversation != null) {
+                {
+                    confirmDelete = false
+                    onLeaveGroup()
+                    onDeleteConversation()
+                }
+            } else {
+                null
             },
         )
     }

@@ -26,6 +26,8 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import com.kapp.tidings.generated.resources.Res
+import com.kapp.tidings.generated.resources.chat_group_confirm_dissolve
+import com.kapp.tidings.generated.resources.chat_group_dissolve
 import com.kapp.tidings.generated.resources.chat_group_add_no_peers
 import com.kapp.tidings.generated.resources.chat_group_add_title
 import com.kapp.tidings.generated.resources.chat_group_announce_hint
@@ -139,6 +141,40 @@ internal fun ConfirmRemoveMemberDialog(
             // 原型 `.btn.danger-o`（描边 + `--on-error-c` 文字）—— 危险动作。
             RelayDialogButton(
                 text = stringResource(Res.string.chat_group_remove_member),
+                onClick = onConfirm,
+                danger = true,
+            )
+        },
+        dismissButton = {
+            RelayDialogButton(text = stringResource(Res.string.common_cancel), onClick = onDismiss)
+        },
+    )
+}
+
+/**
+ * 「解散群聊」的前置确认（仅群主）。
+ *
+ * 与 [ConfirmLeaveGroupDialog] 分成两个对话框，因为**后果不同**：退出只是自己离开
+ * （群对别人继续存在，群主退出还会转交群主）；解散对**所有成员**生效，且不可撤销。
+ * 把两者塞进同一个对话框，用户点危险按钮时根本分不清自己在做哪一件。
+ */
+@Composable
+internal fun ConfirmDissolveGroupDialog(
+    onDismiss: () -> Unit,
+    onConfirm: () -> Unit,
+) {
+    RelayDialog(
+        onDismissRequest = onDismiss,
+        title = { Text(stringResource(Res.string.chat_group_dissolve)) },
+        content = {
+            Text(
+                text = stringResource(Res.string.chat_group_confirm_dissolve),
+                style = MaterialTheme.typography.bodyMedium,
+            )
+        },
+        confirmButton = {
+            RelayDialogButton(
+                text = stringResource(Res.string.chat_group_dissolve),
                 onClick = onConfirm,
                 danger = true,
             )

@@ -530,9 +530,20 @@ class RelayController(
 
     // ------------------------------------------------------------------ 委托动作：群组
     override fun createGroup(name: String, memberIds: List<String>, description: String): String? = groupsCtl.handleCreateGroup(name, memberIds, description)
+
+    /** 工作区群：允许 0 个其它设备 + 把该工作区的 agent 声明进群（见 [handleCreateWorkspaceGroup]）。 */
+    override fun createWorkspaceGroup(
+        name: String,
+        wsId: String?,
+        memberIds: List<String>,
+        description: String,
+    ): String? = groupsCtl.handleCreateWorkspaceGroup(name, wsId, memberIds, description)
     override fun addGroupMembers(groupId: String, newMemberIds: List<String>) = groupsCtl.handleAddGroupMembers(groupId, newMemberIds)
     override fun removeGroupMember(groupId: String, memberId: String) = groupsCtl.handleRemoveGroupMember(groupId, memberId)
     override fun leaveGroup(groupId: String) = groupsCtl.handleLeaveGroup(groupId)
+
+    /** 群主解散群：广播全员移出后删本机元数据（见 [handleDissolveGroup]）。 */
+    override fun dissolveGroup(groupId: String) = groupsCtl.handleDissolveGroup(groupId)
     override fun updateGroupMeta(groupId: String, description: String?, announce: String?) =
         groupsCtl.handleUpdateGroupMeta(groupId, description, announce)
     /** 执行名单：**转给宿主侧桥**；没接（手机壳）就返回 null，界面不画配置区。 */
@@ -1397,11 +1408,11 @@ class RelayController(
                         warn(BannerMessage.ScanFailed("luciola-pair-rejected"))
                     } else {
                         // 记住 pin/secret 只是"愿意信它";还要把自证发过去,主机才放行本机。
-                        val peerId = parsed.nodeId
-                        val rt = runtime
-                        if (peerId != null && rt != null) {
+                        // 配对帧里的 nodeId 必须是**本机**(发送方)的;拿扫码结果里的对端 id
+                        // 会把主机的信任库记成本机 id(真机实测过一次,entry 全是自己的 id)。
+                        runtime?.let { rt ->
                             scope.launch {
-                                runCatching { rt.requestLuciolaPairing(parsed.host, parsed.port, peerId) }
+                                runCatching { rt.requestLuciolaPairing(parsed.host, parsed.port) }
                             }
                         }
                     }
@@ -1538,6 +1549,32 @@ class RelayController(
         val name = manualPeerDisplayName(entry, _state.value.peers)
         handlePersist(settings.copy(manualPeers = manualPeersWithout(settings.manualPeers, entry)))
         info(BannerMessage.PeerRemoved(name))
+    }
+
+    /**
+     * 「移除节点」的统一入口：手动地址删记录，发现的节点删身份记忆。
+     *
+     * 为什么要一个统一入口：界面只有一颗按钮（详情页的「移除「名字」」），但它面前
+     * 混着两种行。让界面去判断「这行是什么」，等于把领域规则抄一份到 UI；这里按
+     * [NodeRemoval] 分派，界面只负责把「这一行是什么」如实说出来。
+     */
+    override fun removeNode(removal: NodeRemoval) {
+        when (removal) {
+            is NodeRemoval.ManualAddress -> removeManualPeer(removal.entry)
+            is NodeRemoval.DiscoveredNode -> {
+                val rt = runtime
+                if (rt == null) {
+                    warn(BannerMessage.NodeNotStarted)
+                    return
+                }
+                val name = _state.value.peer(removal.nodeId)?.displayName ?: removal.nodeId
+                if (rt.forgetPeer(removal.nodeId)) {
+                    info(BannerMessage.PeerForgotten(name))
+                }
+                refreshPeers()
+                publish()
+            }
+        }
     }
 
     /**

@@ -118,6 +118,14 @@ fun ConversationsScreen(
      */
     onCreateGroup: ((String, List<String>) -> Unit)? = null,
     /**
+     * 「关联工作区建群」。null = 这个壳不画该入口。
+     *
+     * 与 [onCreateGroup] 并列而不是合并：成员来源不同（一个是人工勾选，一个是工作区 +
+     * 它的 agent），但**入口必须在同一处** —— 手机上此前只有普通建群，工作区建群只存在于
+     * 两栏布局的侧栏与桌面工作区看板，compact 用户根本走不到（真机：工作区页只有「刷新」）。
+     */
+    onCreateWorkspaceGroup: (() -> Unit)? = null,
+    /**
      * 会话草稿（convId → 草稿正文；null = 该会话没有草稿）。
      *
      * 草稿表活在壳里（手机 App.kt 的 draftsByConv、桌面 DesktopShell），这一屏拿不到，
@@ -154,6 +162,8 @@ fun ConversationsScreen(
     onTogglePin: ((String) -> Unit)? = null,
     onToggleMute: ((String) -> Unit)? = null,
     onDeleteConversation: ((String) -> Unit)? = null,
+    /** 群会话「删除并退出群聊」用；null = 这个壳没有退群能力（见 ConversationRow 同名参数）。 */
+    onLeaveGroup: ((String) -> Unit)? = null,
     /**
      * 打开**全局搜索**（原型 `m-gsearch`）。null = 这个壳没有这条出口，那颗放大镜整颗不画。
      *
@@ -299,6 +309,7 @@ fun ConversationsScreen(
                     ) {
                         ConversationsOverflowItems(
                             onCreateGroup = onCreateGroup?.let { { creating = true } },
+                            onCreateWorkspaceGroup = onCreateWorkspaceGroup,
                             onGoToPairing = onGoToPairing,
                             onOnlyUnread = { filter = "unread" },
                             onMarkAllRead = onMarkAllRead,
@@ -451,6 +462,7 @@ fun ConversationsScreen(
                 onTogglePin = onTogglePin,
                 onToggleMute = onToggleMute,
                 onDeleteConversation = onDeleteConversation,
+                onLeaveGroup = onLeaveGroup,
                 // 群预览的发送者署名：名字的解析权威在域层（与 convTitle 同一个解析器）。
                 previewSenderNameOf = state::previewSenderNameOf,
                 draftPreviewOf = draftPreviewOf,

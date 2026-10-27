@@ -142,6 +142,9 @@
          正文必须同时说清两件事：只删本机（对方不受影响）、不可恢复。 -->
     <string name="conv_delete_confirm_title">删除这个会话？</string>
     <string name="conv_delete_confirm_body">只删除本机的聊天记录，对方不受影响；删除后不可恢复。</string>
+    <!-- 群会话的删除与单聊不是一回事：群还在，下一条群消息会把会话重建。 -->
+    <string name="conv_delete_confirm_body_group">只清掉本机这个群的聊天记录，群和成员关系不变；下一条群消息会把会话重新建出来。删除后不可恢复。</string>
+    <string name="conv_delete_and_leave">删除并退出群聊</string>
     <!-- 会话行上的行内标识与无障碍标签。置顶 tag 与动作菜单的「置顶」是两个语境，
          英文一个用过去分词、一个用动词，所以不共用同一个键。 -->
     <string name="conv_row_pinned">置顶</string>
@@ -188,8 +191,12 @@
     <string name="banner_group_name_too_long">群名太长了，最多 %1$d 个字。</string>
     <string name="banner_group_needs_member">至少再选一个人。只有自己的群发不出任何东西。</string>
     <string name="banner_group_created">「%1$s」建好了，正在通知 %2$d 位成员。</string>
+    <!-- 工作区群允许先建群、再把设备拉进来：0 人不是失败，文案给出下一步。 -->
+    <string name="banner_group_created_no_members">「%1$s」建好了。群里还没有其它设备 —— 对端上线后可从群信息里添加成员。</string>
     <string name="banner_group_unknown">这个群的成员表还没同步过来，稍等一下，或者让对方在群里发一条消息。</string>
     <string name="banner_group_left">你已经被移出这个群，发不出去了。</string>
+    <!-- 群主解散：对所有成员生效，与「我退出去」不是一回事，所以单独一句。 -->
+    <string name="banner_group_disbanded">「%1$s」已解散。聊天记录仍留在本机。</string>
     <string name="banner_group_members_added">已邀请 %1$d 位新成员，正在通知全群。</string>
     <!-- 一次传输的文件数超过上限。参数：%1$d = 实际个数，%2$d = 上限。 -->
     <!-- 拖进来的文件夹展开后超过单次上限（参数：上限）。 -->
@@ -396,10 +403,14 @@
     <string name="nodes_menu_copy">复制地址</string>
     <string name="nodes_menu_remove">移除「%1$s」</string>
     <string name="nodes_removed_notice">已移除「%1$s」（本机聊天记录仍保留）</string>
+    <!-- 移除的是「发现来的节点」时，回执要带上「它会再回来」—— 不说这句会像拉黑。 -->
+    <string name="banner_peer_forgotten">已移除「%1$s」。它下次被发现在网上时会重新出现。</string>
     <string name="nodes_menu_copied">地址已复制</string>
     <!-- 「移除节点」的二次确认。后果要说清：这只改**本机**的节点表，对方不受影响。 -->
     <string name="nodes_remove_confirm_title">移除节点？</string>
     <string name="nodes_remove_confirm_body">只从这台设备的节点表移除，不影响对方；已保存的聊天记录仍保留。</string>
+    <!-- 发现来的节点（没有手动地址记录）的确认文案：后果与手动地址不同，必须分开说。 -->
+    <string name="nodes_forget_confirm_body">把它从本机的节点表移除。它下次被发现在网上时会重新出现；已保存的聊天记录仍保留。</string>
     <!--
         「我的二维码」是节点页底部那条 krow（原型 `screenNodes()` 里紧跟 `.rows` 的
         `<div class="krow">`，`prototype/relay.html:3363-3368`）。文案逐字取自原型：
@@ -1633,7 +1644,12 @@
     <string name="chat_group_me">我</string>
     <string name="chat_group_none">无</string>
     <string name="chat_group_leave">退出群聊</string>
+    <!-- 已经被移出/群已解散的人：这颗按钮的动作是「删掉本地这条」，不是「退出」。 -->
+    <string name="chat_group_forget_local">删除这个群（已被移出）</string>
     <string name="chat_group_confirm_leave">确定要退出该群聊吗？</string>
+    <!-- 群主解散：对所有成员生效，与「我退出去」不是一回事，措辞必须分开。 -->
+    <string name="chat_group_dissolve">解散群聊</string>
+    <string name="chat_group_confirm_dissolve">解散后这个群对所有成员都不再存在，无法撤销；本机的聊天记录会保留。</string>
     <string name="chat_group_progress_working">%1$s 正在执行：%2$s</string>
     <string name="chat_voice_record">语音消息</string>
     <string name="chat_voice_start">点击开始录音</string>

@@ -33,6 +33,7 @@ import androidx.compose.ui.unit.dp
 import com.kapp.tidings.ui.theme.IconSizes
 import com.kapp.tidings.ui.theme.LocalAppSpacing
 import com.kapp.tidings.domain.ManualPeerEntry
+import com.kapp.tidings.domain.NodeRemoval
 import com.kapp.tidings.domain.ManualPeerStatus
 import com.kapp.tidings.domain.RelayController
 import com.kapp.tidings.domain.RelayUiState
@@ -99,7 +100,7 @@ import com.kapp.tidings.domain.model.PeerUi
 fun NodesScreen(
     state: RelayUiState,
     onAddPeer: (String, String) -> Unit,
-    onRemovePeer: (ManualPeerEntry) -> Unit,
+    onRemovePeer: (NodeRemoval) -> Unit,
     onCleanupUnreachable: () -> Unit,
     /**
      * 「重连」一条已保存但当前不通的手动地址（见 `RelayController.reconnectManualPeer`）。

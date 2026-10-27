@@ -49,6 +49,8 @@ internal fun ConversationListPanel(
     onTogglePin: ((String) -> Unit)? = null,
     onToggleMute: ((String) -> Unit)? = null,
     onDeleteConversation: ((String) -> Unit)? = null,
+    /** 群会话「删除并退出群聊」用；null = 这个壳没有退群能力（见 ConversationRow 同名参数）。 */
+    onLeaveGroup: ((String) -> Unit)? = null,
     modifier: Modifier = Modifier,
     contentPadding: PaddingValues = PaddingValues(),
     /**
@@ -105,6 +107,7 @@ internal fun ConversationListPanel(
                     onTogglePin = onTogglePin?.let { act -> { act(item.conv.convId) } },
                     onToggleMute = onToggleMute?.let { act -> { act(item.conv.convId) } },
                     onDeleteConversation = onDeleteConversation?.let { act -> { act(item.conv.convId) } },
+                    onLeaveGroup = onLeaveGroup?.let { act -> { act(item.conv.convId) } },
                     previewSenderName = previewSenderNameOf?.invoke(item.conv.convId),
                     draftPreview = draftPreviewOf?.invoke(item.conv.convId),
                     selected = selectedConvId != null && item.conv.convId == selectedConvId,

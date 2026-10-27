@@ -40,12 +40,29 @@ class NodesRemovalEntryGuardTest {
     // ── 移除节点 ─────────────────────────────────────────────────────────────
 
     @Test
-    fun removeActionIsGatedToManualEntries() {
+    fun removeActionCoversBothKindsOfRows() {
+        // 这条守卫守的是**覆盖面**：此前「移除」只对有手动记录的行画，于是局域网里
+        // 发现的一行根本没有删除入口（真机：manualPeers=0 / known-peers=16，按钮一次
+        // 都不出现）。现在两种行都画，但必须说出「这一行是什么」—— 混成一种，控制器
+        // 就分不清该删记录还是删身份记忆。
         val text = GuardSourceScan.stripComments(GuardSourceScan.read(nodeDetail))
         assertTrue(
-            text.contains("onRemovePeer?.takeIf { manualEntry != null }"),
-            "「移除」只对有手动记录的行成立：移除的语义是删本机存的手动地址，" +
-                "局域网扫到的对端没有可删的东西（没有这条闸会画出按了必炸的按钮）。",
+            text.contains("manualEntry != null -> NodeRemoval.ManualAddress(manualEntry)"),
+            "手动地址那一行要落成 NodeRemoval.ManualAddress。",
+        )
+        assertTrue(
+            text.contains("nodeId != null -> NodeRemoval.DiscoveredNode(nodeId)"),
+            "发现来的那一行要落成 NodeRemoval.DiscoveredNode —— 否则它没有删除入口。",
+        )
+        assertTrue(
+            text.contains("onRemovePeer?.takeIf { removal != null }"),
+            "两颗按钮都以「这一行有没有可删的东西」为准，而不是只看 manualEntry。",
+        )
+        // 两种删除的后果不同（手动地址 vs 身份记忆），确认框文案必须分流。
+        assertTrue(
+            text.contains("nodes_remove_confirm_body") &&
+                text.contains("nodes_forget_confirm_body"),
+            "确认框正文要按行类型分流：说错后果等于骗用户点那颗危险按钮。",
         )
     }
 
@@ -76,8 +93,8 @@ class NodesRemovalEntryGuardTest {
         )
         val desktop = GuardSourceScan.stripComments(GuardSourceScan.read(desktopNodesPane))
         assertTrue(
-            callSpanContaining(desktop, "NodeDetailPane(", "onRemovePeer = controller::removeManualPeer").isNotEmpty(),
-            "桌面宽档要把 controller::removeManualPeer 接进右栏详情。",
+            callSpanContaining(desktop, "NodeDetailPane(", "onRemovePeer = controller::removeNode").isNotEmpty(),
+            "桌面宽档要把 controller::removeNode 接进右栏详情。",
         )
         // NodeDetailPane 内部必须真的把它传给 NodeDetailBody（参数接了不传 = 空接线）。
         assertTrue(
