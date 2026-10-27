@@ -48,6 +48,7 @@ import com.kapp.tidings.domain.isPendingApproval
 import com.kapp.tidings.domain.mayDecideApproval
 import com.kapp.tidings.domain.pendingApprovalCount
 import com.kapp.tidings.core.nowMillis
+import com.kapp.tidings.core.protocol.MsgTypes
 import com.kapp.tidings.generated.resources.Res
 import com.kapp.tidings.feature.agents.AgentSessionBar
 import com.kapp.tidings.feature.agents.AgentSessionPickerDialog
@@ -710,7 +711,7 @@ fun ChatScreen(
                 // 入口**不再因为对方离线而整颗消失**（那会让人以为功能被删了）。
                 // 保留入口 → 点开确认表单 → 发送时由控制器给出既有的「当前无法查看屏幕」横幅，
                 // 失败有话说。真正在群里/对 agent 时仍然不给入口（那两档没有语义）。
-                onRequestScreenView = onRequestScreenView?.takeIf { group == null && !peer.isAgent }
+                onRequestScreenView = onRequestScreenView?.takeIf { group == null && (!peer.isAgent || MsgTypes.CAP_REMOTE_SHARE in peer.caps) }
                     ?.let { req -> { req(peer.nodeId) } },
                 initialConfirmOpen = initialScreenRequestConfirmOpen,
                 group = group,

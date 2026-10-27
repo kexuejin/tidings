@@ -38,6 +38,7 @@ import com.kapp.tidings.generated.resources.chat_group_members_action
 import com.kapp.tidings.generated.resources.chat_group_owner_label
 import com.kapp.tidings.generated.resources.chat_group_rev
 import com.kapp.tidings.core.protocol.GroupMeta
+import com.kapp.tidings.core.protocol.MsgTypes
 import com.kapp.tidings.feature.chat.ChatScreen
 import com.kapp.tidings.feature.chat.ClearConversationDialog
 import com.kapp.tidings.feature.chat.ChatScreenActions
@@ -258,7 +259,7 @@ public fun ChatPane(
             onCopyId = if (group == null) ({ onCopyPeerId(peer.nodeId) }) else null,
             onOpenInNewWindow = onOpenInNewWindow?.let { open -> { open(peer.nodeId) } },
             onRequestScreenView = controller::requestScreenView
-                .takeIf { group == null && !peer.isAgent && peer.online }
+                .takeIf { group == null && (!peer.isAgent || MsgTypes.CAP_REMOTE_SHARE in peer.caps) && peer.online }
                 ?.let { req -> { req(peer.nodeId) } },
             avatarBytes = peer.avatarHash?.let { state.avatarCache[it] },
             // 「戳一碰」不在这里传：按原型它落在工具行（`DesktopComposer` 的 `ToolIcon`），

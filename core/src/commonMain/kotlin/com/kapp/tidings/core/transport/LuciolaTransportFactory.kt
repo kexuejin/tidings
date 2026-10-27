@@ -382,7 +382,18 @@ class LuciolaTransportFactory(
             val unique = sameHost.all { it.second.contentEquals(first) }
             if (unique) return first
         }
-        val record = registry.findByEndpoint(host, port)
+        var record = registry.findByEndpoint(host, port)
+        if (record == null) {
+            // 端口可能属于同一节点的独立数据面（如 screenPort 或 luciolaPort）
+            record = registry.values().firstOrNull { rec ->
+                (rec.ip == host || com.kapp.tidings.core.protocol.IpAddressUtils.isSameHost(rec.ip, host)) &&
+                    (rec.profile.screenPort == port || rec.profile.luciolaPort == port)
+            } ?: registry.values().filter {
+                it.ip == host || com.kapp.tidings.core.protocol.IpAddressUtils.isSameHost(it.ip, host)
+            }.let { matches ->
+                if (matches.size == 1) matches.first() else null
+            }
+        }
         val pin = record?.let { rec ->
             rustTrustStore.entries().firstOrNull { it.deviceId == rec.profile.nodeId }?.publicKey
         }

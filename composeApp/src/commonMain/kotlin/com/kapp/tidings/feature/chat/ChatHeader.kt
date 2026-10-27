@@ -283,10 +283,8 @@ internal fun ChatHeader(
                 overflow = TextOverflow.Ellipsis,
             )
         }
-        // 顶栏动作：前 2 颗直出成 `.ibtn` 方块、第 3 颗起收进「⋯」菜单
-        // （原型 `actsHTML(acts, 2)`，`prototype/relay.html:2834-2845`）。
-        // 顺序照原型聊天页的槽位：第一颗是「会话 / 群」这个语境动作，第二颗是戳一碰。
-        // 方块取**聊天页档** 30dp / 16dp 图标（`.topbar.chat .ibtn`，`:570-571`）。
+        // 顶栏动作：移动端为保证对端标题、身份标签与状态有充裕宽度展示不被截断，
+        // 全部动作统一收进「⋯」更多菜单中，避免常驻多个图标挤压标题。
         val actions = mutableListOf<ChatHeaderAction>()
         if (group == null && peerIsAgent && onOpenSessionPicker != null) {
             // 数的是**这一屏可见**的会话：① 子代理/空壳会话不算（否则一个只有 1 条
@@ -380,37 +378,35 @@ internal fun ChatHeader(
         // 常驻图标位上（agent 会话只剩一个「切换会话」时就是这种情形）。
         val inlineActions = actions.filterNot { it.overflowOnly }
         val overflowActions = inlineActions.drop(ChatHeaderInlineActions) + actions.filter { it.overflowOnly }
-        Row(
-            verticalAlignment = Alignment.CenterVertically,
-            // 原型 `.topbar .acts{gap:6px}`（`:580`）—— 动作方块之间 6px。
-            // 砖块只有 30dp（[ChatIbtnSize]），而命中区被撑到 48dp（xxxl），
-            // 所以视觉缝必须扣掉这 18dp：与设置页顶栏走**同一个**补偿函数，
-            // 否则同一套 48dp 触达会在两屏给出不同的缝隙（24dp vs 14dp）。
-            horizontalArrangement = Arrangement.spacedBy(
-                topBarActionRowGap(LocalAppSpacing.current.xxxl, ChatIbtnSize, 6.dp),
-            ),
-        ) {
-            inlineActions.take(ChatHeaderInlineActions).forEach { action ->
-                TopBarIconAction(
-                    contentDescription = action.label,
-                    onClick = action.onClick,
-                    size = ChatIbtnSize,
-                    icon = { action.icon(ChatIbtnIconSize) },
-                )
-            }
-            if (overflowActions.isNotEmpty()) {
-                TopBarOverflowAction(
-                    items = overflowActions.map { action ->
-                        TopBarOverflowItem(
-                            label = action.label,
-                            onClick = action.onClick,
-                            leadingIcon = { action.icon(ChatIbtnIconSize) },
-                        )
-                    },
-                    size = ChatIbtnSize,
-                    iconSize = ChatIbtnIconSize,
-                    contentDescription = stringResource(Res.string.chat_more_actions),
-                )
+        if (overflowActions.isNotEmpty() || inlineActions.take(ChatHeaderInlineActions).isNotEmpty()) {
+            Row(
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(
+                    topBarActionRowGap(LocalAppSpacing.current.xxxl, ChatIbtnSize, 6.dp),
+                ),
+            ) {
+                inlineActions.take(ChatHeaderInlineActions).forEach { action ->
+                    TopBarIconAction(
+                        contentDescription = action.label,
+                        onClick = action.onClick,
+                        size = ChatIbtnSize,
+                        icon = { action.icon(ChatIbtnIconSize) },
+                    )
+                }
+                if (overflowActions.isNotEmpty()) {
+                    TopBarOverflowAction(
+                        items = overflowActions.map { action ->
+                            TopBarOverflowItem(
+                                label = action.label,
+                                onClick = action.onClick,
+                                leadingIcon = { action.icon(ChatIbtnIconSize) },
+                            )
+                        },
+                        size = ChatIbtnSize,
+                        iconSize = ChatIbtnIconSize,
+                        contentDescription = stringResource(Res.string.chat_more_actions),
+                    )
+                }
             }
         }
         // Dialog 不进 Row 的布局（它画在另一个窗口里），放这儿只是为了贴着它的触发按钮。
@@ -426,8 +422,8 @@ internal fun ChatHeader(
     }
 }
 
-/** 聊天页顶栏的直出上限：原型 `actsHTML(acts, 2)`（`prototype/relay.html:2834-2845`）。 */
-private const val ChatHeaderInlineActions = 2
+/** 聊天页顶栏的直出上限：移动端统一收进「⋯」更多菜单以保障标题区可读性。 */
+private const val ChatHeaderInlineActions = 0
 
 /**
  * 聊天页顶栏的一颗动作。

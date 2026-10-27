@@ -902,7 +902,7 @@ class RelayController(
         // 画面信道：独立一条 luciola 会话，端口取「发现端口 + 10」——
         // 刻意避开 legacy 的三兄弟（+1 tcp、+2 tls、+3/+2 跨网文件与投屏），
         // 也避开 17879/17881/17882（luciola 模式下这三个不许再出现在 lsof 里）。
-        val screenChannelPort = if (luciolaMode) (settings.udpPort + 10).takeIf { it in 1..65535 } else null
+        val screenChannelPort = if (luciolaMode && isShareSupported) (settings.udpPort + 10).takeIf { it in 1..65535 } else null
         val screenChannelHostFactory = luciolaHost?.screenChannelHostFactory(scope, screenChannelPort)
         if (luciolaMode) {
             // 只有**确认**数据面可用之后才声明 `fch1`：声明了却收不了字节，对端会推、
@@ -914,8 +914,8 @@ class RelayController(
                 remoteShare = isShareSupported,
                 advertiseAgent = advertiseAgent,
                 fileOverChannel = true,
-                // 只有画面信道真的会起监听才声明 scr1（声明了没人听，对端会一直等握手）。
-                screenOverChannel = screenChannelPort != null && screenChannelHostFactory != null,
+                // 画面信道宿主可用即声明 scr1（具备作为观众查看画面的能力；若同时支持分享则已起监听）
+                screenOverChannel = screenChannelHostFactory != null,
             )
             luciolaHost?.configure(profile, settings.udpPort)
         }

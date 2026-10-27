@@ -99,7 +99,7 @@ class FileChannelRouterTest {
     @Test
     fun nonChunkNonAckFrameIsNotSwallowed() = runTest {
         val router = FileChannelRouter(sendToPeer = { _, _ -> true })
-        val envelopeLike = """{"v":1,"type":"msg","id":"m","from":"p","ts":1,"payload":{}}""".toByteArray()
+        val envelopeLike = """{"v":1,"type":"msg","id":"m","from":"p","ts":1,"payload":{}}""".encodeToByteArray()
         assertFalse(router.onBinaryFrame(envelopeLike), "不像 TDCH/TDCA 的帧必须交回上层")
     }
 }

@@ -9,6 +9,7 @@ import kotlinx.cinterop.usePinned
 import platform.Foundation.NSData
 import platform.Foundation.NSDate
 import platform.Foundation.NSFileManager
+import platform.Foundation.NSProcessInfo
 import platform.Foundation.NSURL
 import platform.Foundation.create
 import platform.Foundation.timeIntervalSince1970
@@ -61,6 +62,9 @@ class IosScreenSharingService : ScreenSharingService {
     private val fm = NSFileManager.defaultManager
 
     override fun isShareSupported(): Boolean {
+        if (NSProcessInfo.processInfo.environment["SIMULATOR_DEVICE_NAME"] != null) {
+            return false
+        }
         val url = NSURL.URLWithString(IosScreenShare.EXTENSION_URL) ?: return false
         return UIApplication.sharedApplication.canOpenURL(url)
     }

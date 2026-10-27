@@ -12,6 +12,7 @@ import com.kapp.tidings.platform.IosAppPlatform
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.launch
 
 /**
  * iOS 入口。
@@ -22,10 +23,11 @@ import kotlinx.coroutines.SupervisorJob
  */
 private val controller: RelayController by lazy {
     val platform = IosAppPlatform()
+    val scope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
     val controller = RelayController(
         platform = platform,
         store = createSettingsStore(platform),
-        scope = CoroutineScope(SupervisorJob() + Dispatchers.Default),
+        scope = scope,
         // 「消息落盘」开关背后必须是真的文件存储，否则它活不过一次重启。
         messageStore = createMessageStore(platform),
         agentStore = createAgentStore(platform),
@@ -39,7 +41,34 @@ private val controller: RelayController by lazy {
     platform.pushNotificationHandler.setOnNotificationTap { peerId ->
         controller.requestFocus(peerId)
     }
+    startScreenViewProbeIfRequested(controller, scope)
     controller
+}
+
+/**
+ * 验收用：`TIDINGS_SCREEN_VIEW=<对端 nodeId>` 时，启动后自动向该对端发起一次
+ * 屏幕协助（Viewer 侧）。
+ */
+private fun startScreenViewProbeIfRequested(
+    controller: RelayController,
+    scope: CoroutineScope,
+) {
+    val env = platform.Foundation.NSProcessInfo.processInfo.environment
+    val peerId = (env["TIDINGS_SCREEN_VIEW"] as? String)?.trim()?.takeIf { it.isNotEmpty() } ?: return
+    val seconds = (env["TIDINGS_SCREEN_VIEW_SECONDS"] as? String)?.toLongOrNull() ?: 30L
+    scope.launch {
+        val deadline = com.kapp.tidings.core.nowMillis() + 60_000
+        while (com.kapp.tidings.core.nowMillis() < deadline) {
+            val online = controller.state.value.peers.any { it.nodeId == peerId && it.online }
+            if (online) break
+            kotlinx.coroutines.delay(500)
+        }
+        println("[screen] ios probe start peer=" + peerId + " seconds=" + seconds)
+        controller.requestScreenView(peerId)
+        kotlinx.coroutines.delay(seconds * 1000)
+        controller.stopScreenView()
+        println("[screen] ios probe stop")
+    }
 }
 
 fun MainViewController() = ComposeUIViewController {

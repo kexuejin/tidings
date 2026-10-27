@@ -30,7 +30,7 @@ import org.jetbrains.compose.resources.getString
 internal object ResourceUiTexts : RelayUiTexts {
 
     override suspend fun screenCardText(record: ScreenRecordUi): String =
-        runCatching { screenCardText(record) }.getOrNull().orEmpty()
+        runCatching { com.kapp.tidings.ui.components.screenCardText(record) }.getOrNull().orEmpty()
 
     override suspend fun nudgeNotice(): String =
         runCatching { getString(Res.string.chat_nudge_peer) }.getOrNull().orEmpty()

@@ -5,6 +5,8 @@ package com.kapp.tidings.feature.conversations
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.focusable
+import androidx.compose.foundation.gestures.awaitEachGesture
+import androidx.compose.foundation.gestures.awaitFirstDown
 import androidx.compose.foundation.hoverable
 import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.interaction.collectIsHoveredAsState
@@ -33,9 +35,11 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.focus.onFocusChanged
 import androidx.compose.ui.hapticfeedback.HapticFeedbackType
+import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.platform.LocalHapticFeedback
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.unit.DpOffset
 import androidx.compose.ui.unit.dp
 import com.kapp.tidings.ui.components.KindBadge
 import com.kapp.tidings.ui.components.PeerAvatar
@@ -184,12 +188,17 @@ public fun ConversationActionsMenuContent(
 @Composable
 private fun ConversationRowMenu(
     row: ConversationUi,
+    offset: DpOffset = DpOffset.Zero,
     onDismiss: () -> Unit,
     onTogglePin: (() -> Unit)?,
     onToggleMute: (() -> Unit)?,
     onDelete: (() -> Unit)?,
 ) {
-    DropdownMenu(expanded = true, onDismissRequest = onDismiss) {
+    DropdownMenu(
+        expanded = true,
+        offset = offset,
+        onDismissRequest = onDismiss,
+    ) {
         ConversationActionsMenuContent(
             isPinned = row.isPinned,
             isMuted = row.isMuted,
@@ -330,6 +339,8 @@ internal fun ConversationRow(
     // 列表（全仓唯一的 .focusable() 是桌面壳根 Column，用来收字母快捷键），于是"打开一个会话"
     // 在桌面上只能靠鼠标。这里补两件：可聚焦 + 一圈明确的焦点环（primary 2dp，
     // 与"选中"的 1dp outline 环刻意不同 —— 两个状态可能同时成立，颜色/粗细都要分得开）。
+    val density = LocalDensity.current
+    var touchOffset by remember { mutableStateOf(DpOffset.Zero) }
     var focused by remember { mutableStateOf(false) }
     val modifier = Modifier
         .fillMaxWidth()
@@ -337,6 +348,7 @@ internal fun ConversationRow(
         .background(background)
         .onFocusChanged { focused = it.isFocused }
         .focusable()
+        .hoverable(interaction)
         .then(
             // 选中态的 1px 内描边（原型那圈 `0 0 0 1px var(--hair)`）。
             // 用 drawBehind 而不是 border：border 会被外层的 clip 裁掉一半。
@@ -369,6 +381,16 @@ internal fun ConversationRow(
                 Modifier
             },
         )
+        // 捕获按下时的横向触控偏移，供菜单对齐触发区域
+        .pointerInput(Unit) {
+            awaitEachGesture {
+                val down = awaitFirstDown(requireUnconsumed = false)
+                touchOffset = DpOffset(
+                    x = (down.position.x / density.density).dp,
+                    y = 0.dp,
+                )
+            }
+        }
         // 长按开菜单；单击仍是打开会话。combinedClickable 必须给 onClick ——
         // 这里的 onClick 本来就有真动作（打开），不是死按钮。
         //
@@ -388,47 +410,16 @@ internal fun ConversationRow(
             } else null,
         )
 
-    if (menuOpen) {
-        ConversationRowMenu(
-            row = row,
-            onDismiss = { menuOpen = false },
-            onTogglePin = onTogglePin?.let { act -> { menuOpen = false; act() } },
-            onToggleMute = onToggleMute?.let { act -> { menuOpen = false; act() } },
-            // 删除项不再直接执行：先把确认框立起来（见 confirmDelete 的注释）。
-            onDelete = onDeleteConversation?.let { act -> { menuOpen = false; confirmDelete = true } },
-        )
-    }
-
-    if (confirmDelete) {
-        DeleteConversationConfirmDialog(
-            onDismiss = { confirmDelete = false },
-            onConfirm = {
-                confirmDelete = false
-                onDeleteConversation?.invoke()
-            },
-            isGroup = row.isGroup,
-            // 顺序：先退群（本机把群去掉），再清本机记录 —— 反过来的话，退群时写进去的
-            // 那条提示会被同一次删除清掉，看上去像「没退成功」。
-            onConfirmAndLeave = if (row.isGroup && onLeaveGroup != null && onDeleteConversation != null) {
-                {
-                    confirmDelete = false
-                    onLeaveGroup()
-                    onDeleteConversation()
-                }
-            } else {
-                null
-            },
-        )
-    }
-
-    Row(
-        modifier = modifier
-            .defaultMinSize(minHeight = sp.xxxl)
-            .hoverable(interaction)
-            .padding(horizontal = sp.osm9, vertical = sp.osm7),
-        verticalAlignment = Alignment.CenterVertically,
-        horizontalArrangement = Arrangement.spacedBy(sp.md10),
+    Box(
+        modifier = modifier.defaultMinSize(minHeight = sp.xxxl),
     ) {
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(horizontal = sp.osm9, vertical = sp.osm7),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(sp.md10),
+        ) {
         // 头像 32dp + 圆角 12（原型 `.li .av{width:32px;height:32px;border-radius:12px}`）。
         // 会话行是原型里**唯一**用方形头像的地方。
         Box {
@@ -568,6 +559,41 @@ internal fun ConversationRow(
             }
         }
     }
+
+    if (menuOpen) {
+        ConversationRowMenu(
+            row = row,
+            offset = touchOffset,
+            onDismiss = { menuOpen = false },
+            onTogglePin = onTogglePin?.let { act -> { menuOpen = false; act() } },
+            onToggleMute = onToggleMute?.let { act -> { menuOpen = false; act() } },
+            // 删除项不再直接执行：先把确认框立起来（见 confirmDelete 的注释）。
+            onDelete = onDeleteConversation?.let { act -> { menuOpen = false; confirmDelete = true } },
+        )
+    }
+}
+
+if (confirmDelete) {
+    DeleteConversationConfirmDialog(
+        onDismiss = { confirmDelete = false },
+        onConfirm = {
+            confirmDelete = false
+            onDeleteConversation?.invoke()
+        },
+        isGroup = row.isGroup,
+        // 顺序：先退群（本机把群去掉），再清本机记录 —— 反过来的话，退群时写进去的
+        // 那条提示会被同一次删除清掉，看上去像「没退成功」。
+        onConfirmAndLeave = if (row.isGroup && onLeaveGroup != null && onDeleteConversation != null) {
+            {
+                confirmDelete = false
+                onLeaveGroup()
+                onDeleteConversation()
+            }
+        } else {
+            null
+        },
+    )
+}
 }
 
 /**
