@@ -78,8 +78,18 @@ private data class FactoryStateJson(
 @OptIn(ExperimentalEncodingApi::class)
 class LuciolaTransportFactory(
     private val profile: Profile,
-    /** 发现 UDP 端口;同时也是加密信道的 TCP 监听端口(同号不同协议)。 */
+    /** 发现 UDP 端口(广播/组播收发)。 */
     private val udpPort: Int = DEFAULT_DISCOVERY_PORT,
+    /**
+     * 加密信道的 **TCP 监听端口**，默认与 [udpPort] 相同（"同号不同协议"）。
+     *
+     * 为什么允许分开：同一台机器上跑两个实例时（典型：桌面 App + iOS 模拟器，
+     * 或两台桌面实例），它们的"自己的 IP"是同一个，若信道端口也相同，对端拨
+     * `<ip>:<port>` 会连到**它自己**而不是你 —— 2026-10-27 在模拟器上实测到：
+     * 互发现成功、拨号却打到本机。分开之后，本机把不同的 luciolaPort 广播出去，
+     * 对端就能拨到正确的那一个。
+     */
+    private val channelListenPort: Int = udpPort,
     private val legacyPinStore: PeerPinStore? = null,
     /**
      * Ed25519 seed 的持久化回调(32 字节 hex)——存 Keychain / Keystore /
@@ -269,7 +279,7 @@ class LuciolaTransportFactory(
         SecureChannelTransport(
             identitySeed = identity.seed,
             peerKey = { host, port -> pinFor(host, port, registry) },
-            listenPort = udpPort,
+            listenPort = channelListenPort,
             isTrustedFingerprint = { fingerprint -> isTrustedFingerprint(fingerprint) },
             endpointOf = { nodeId ->
                 registry.get(nodeId)?.let { PeerEndpoint(it.ip, it.udpPort) }

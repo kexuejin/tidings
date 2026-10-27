@@ -91,6 +91,7 @@ class IosLuciolaHost(
             factory = LuciolaTransportFactory(
                 profile = profile,
                 udpPort = udpPort,
+                channelListenPort = channelListenPortPref() ?: udpPort,
                 seedPersist = { readOrCreateSeedHex() },
                 stateStore = object : SecureStateStore {
                     override fun load(): String? = keychainRead(ACCOUNT_STATE)
@@ -133,6 +134,24 @@ class IosLuciolaHost(
         }
 
     // ------------------------------------------------------------------ seed
+
+    /**
+     * 信道监听端口的**调试覆盖**（NSUserDefaults 键 `luciola.channelPort`）。
+     *
+     * 为什么需要：iOS 模拟器与桌面 App 跑在同一台 Mac 上，两者"自己的 IP"相同；
+     * 若信道端口也相同（默认都 17878），对端拨过来的包会打到桌面自己。把模拟器
+     * 的信道端口错开（发现仍用 17878，才能互相发现），端到端才可能通。
+     *
+     * 为什么不写在代码常量里：真机上不需要这个错开，写死一个偏移会让真机也
+     * 监听一个没人预期的端口。所以做成"默认跟随 udpPort，需要时用 defaults 注入"：
+     *
+     *   xcrun simctl spawn booted defaults write com.kapp.tidings luciola.channelPort -int 17978
+     */
+    private fun channelListenPortPref(): Int? =
+        platform.Foundation.NSUserDefaults.standardUserDefaults
+            .integerForKey(CHANNEL_PORT_KEY)   // Kotlin/Native 上返回 Long
+            .toInt()
+            .takeIf { it in 1..65535 }
 
     private fun readOrCreateSeedHex(): String {
         keychainRead(ACCOUNT_SEED)?.trim()?.takeIf { it.length == SEED_HEX_CHARS }?.let { return it }
@@ -269,6 +288,7 @@ class IosLuciolaHost(
         const val SEED_BYTES = 32
         const val SEED_HEX_CHARS = 64
         const val FALLBACK_PREFIX = "luciola.fallback."
+        const val CHANNEL_PORT_KEY = "luciola.channelPort"
     }
 }
 
