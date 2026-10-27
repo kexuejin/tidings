@@ -880,7 +880,7 @@ class RelayController(
         scope.launch { platform.backgroundConnection?.setEnabled(settings.keepConnectionAlive) }
 
         val isShareSupported = platform.screenSharing?.isShareSupported() == true
-        val profile = settings.toProfile(
+        var profile = settings.toProfile(
             host = platform.deviceInfo.hostName(),
             ver = version,
             remoteView = true,
@@ -899,6 +899,19 @@ class RelayController(
         // 发现引擎的 extra 必须用运行时 selfProfile(含 luciolaPort):工厂构造时的静态
         // profile 没有那个字段,对端会拿发现临时端口来拨号(真机实测拨错)。
         val luciolaMode = luciolaTransport != null && luciolaDiscovery != null
+        if (luciolaMode) {
+            // 只有**确认**数据面可用之后才声明 `fch1`：声明了却收不了字节，对端会推、
+            // 本端永远等文件（"对方说发了、我一直卡在接收中"）。
+            profile = settings.toProfile(
+                host = platform.deviceInfo.hostName(),
+                ver = version,
+                remoteView = true,
+                remoteShare = isShareSupported,
+                advertiseAgent = advertiseAgent,
+                fileOverChannel = true,
+            )
+            luciolaHost?.configure(profile, settings.udpPort)
+        }
         val rt = NodeRuntime(
             profile = profile,
             udpPort = settings.udpPort,
@@ -952,6 +965,9 @@ class RelayController(
             // 实验:luciola 传输与发现（两件都非空才生效,见上面 luciolaMode）。
             messengerTransportFactory = luciolaTransport.takeIf { luciolaMode },
             extraDiscoveryFactory = luciolaDiscovery.takeIf { luciolaMode },
+            // 文件字节走加密信道（fch1）：**只有**实验信道启用时才建路由器。
+            // 关着 = null ⇒ TransferManager 照旧拨号拉取，行为一字不变。
+            fileChannelEnabled = luciolaMode,
             // 配对码里那一池候选地址（按 nodeId 存）：换网之后发送/心跳的兜底。
             peerEndpointStore = persist.peerEndpoints,
             // 配对码里那枚 tlsPin：K2 公网长连接的信任根（没它就不建公网连接）。

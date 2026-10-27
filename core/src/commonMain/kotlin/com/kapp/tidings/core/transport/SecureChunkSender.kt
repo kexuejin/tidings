@@ -152,7 +152,21 @@ class SecureChunkReceiver(
     private val totalSize: Long,
     private val onAck: suspend (Long) -> Unit,
 ) {
-    private val received = BooleanArray(if (totalSize > Int.MAX_VALUE) Int.MAX_VALUE else totalSize.toInt())
+    /**
+     * 逐块收齐标记。
+     *
+     * **按块而不是按字节**：原来用 `BooleanArray(totalSize.toInt())` —— 50MB 文件就是
+     * 50MB 的布尔数组，而且是**每个在途文件一份**。真机 ≥50MB 验收立刻会撞上这个：
+     * 手机上一次多文件传输能吃掉几百 MB。按块记只占 `ceil(size/chunk)` 位，
+     * 64MiB 的文件约 1024 个元素。
+     */
+    private val receivedChunks = BooleanArray(((totalSize + CHUNK) / CHUNK).toInt().coerceAtLeast(1))
+
+    /**
+     * 只对**部分到达**的块分配位图（整块一次到齐是常态，所以这个 map 通常是空的）。
+     * 不能省：分包/部分重传会把一块拆成两帧，不记"哪半到了"就永远凑不成整块。
+     */
+    private val partialCoverage = HashMap<Int, BooleanArray>()
     private var contiguous: Long = 0
 
     /** 当前已连续确认到的字节数。 */
@@ -170,20 +184,57 @@ class SecureChunkReceiver(
         val start = frame.offset
         val end = start + frame.payload.size
         if (start < 0 || end > totalSize) return false
+        // 只记"这一块已到"：块必须是已知尺寸的整块，否则连续前缀算不准 ——
+        // 所以不足一块的尾块按它真实长度处理(尾块也是唯一合法的不整块)。
+        val firstIdx = (start / CHUNK).toInt()
+        val lastIdx = ((end - 1) / CHUNK).toInt()
         var fresh = false
-        for (i in frame.payload.indices) {
-            val idx = (start + i).toInt()
-            if (idx in received.indices && !received[idx]) {
-                received[idx] = true
-                fresh = true
+        for (idx in firstIdx..lastIdx) {
+            if (idx !in receivedChunks.indices) continue
+            val needStart = idx.toLong() * CHUNK
+            val needEnd = minOf(totalSize, needStart + CHUNK)
+            if (start <= needStart && end >= needEnd) {
+                if (!receivedChunks[idx]) {
+                    receivedChunks[idx] = true
+                    fresh = true
+                }
+            } else {
+                // 半块:数据是新的(要落盘),但要记"哪半到了" —— 不记的话第二半到达时
+                // 仍凑不成整块,连续前缀会永远停住(实测:半块用例卡在 0)。
+                val covered = partialCoverage.getOrPut(idx) { BooleanArray(CHUNK) }
+                val from = maxOf(start, needStart).toInt()
+                val to = minOf(end, needEnd).toInt()
+                val base = needStart.toInt()
+                for (pos in from until to) {
+                    val i = pos - base
+                    if (!covered[i]) {
+                        covered[i] = true
+                        fresh = true
+                    }
+                }
+                var full = true
+                for (pos in base until needEnd.toInt()) {
+                    if (!covered[pos - base]) { full = false; break }
+                }
+                if (full) receivedChunks[idx] = true
             }
         }
         var advanced = false
-        while (contiguous < totalSize && contiguous.toInt() in received.indices && received[contiguous.toInt()]) {
-            contiguous++
+        while (true) {
+            val idx = (contiguous / CHUNK).toInt()
+            if (idx !in receivedChunks.indices || !receivedChunks[idx]) break
+            // 这一块到了，把连续前缀推过整块；最后一块只推到 totalSize。
+            val nextBoundary = minOf(totalSize, (idx + 1).toLong() * CHUNK)
+            if (contiguous >= nextBoundary) break
+            contiguous = nextBoundary
             advanced = true
         }
         if (advanced || !fresh) onAck(contiguous)
         return fresh
+    }
+
+    companion object {
+        /** 收块粒度,必须与发送端 SecureChunkSender.chunkSize 一致(默认都是 64KiB)。 */
+        const val CHUNK: Int = 64 * 1024
     }
 }

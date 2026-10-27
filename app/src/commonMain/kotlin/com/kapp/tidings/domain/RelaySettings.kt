@@ -367,7 +367,16 @@ data class RelaySettings(
         remoteShare: Boolean = false,
         customAvatar: Boolean = false,
         advertiseAgent: Boolean = false,
+        /**
+         * 本机是否**能收**加密信道送来的文件字节（`fch1`）。
+         *
+         * 只有 luciola 数据面可用时才该为 true —— 声明了却收不了，对端会推字节而本端
+         * 永远等文件，症状是"对方说发了、我这边一直卡在接收中"。默认 false 让所有
+         * 既有调用点（测试、预览、未开实验开关的宿主）行为不变。
+         */
+        fileOverChannel: Boolean = false,
     ): List<String> = buildList {
+        if (fileOverChannel) add(MsgTypes.CAP_FILE_CHANNEL)
         // `ag1` 在最前：它是「这个节点能承载 agent 会话」的身份声明，与后面的帧能力不同层。
         // 桌面端（托盘常驻）与 agentNode 都声明它；手机端不声明。
         if (advertiseAgent) add(MsgTypes.CAP_AGENT)
@@ -438,6 +447,8 @@ data class RelaySettings(
         remoteShare: Boolean = false,
         customAvatar: Boolean = false,
         advertiseAgent: Boolean = false,
+        /** 实验 luciola 数据面可用时传 true ⇒ 声明 `fch1`（见 [caps]）。 */
+        fileOverChannel: Boolean = false,
     ): Profile = Profile.mobile(
         nodeId = nodeId,
         nick = nick.take(LIMIT_NICK),
@@ -457,6 +468,7 @@ data class RelaySettings(
             remoteShare = remoteShare,
             customAvatar = customAvatar,
             advertiseAgent = advertiseAgent,
+            fileOverChannel = fileOverChannel,
         ),
     )
 

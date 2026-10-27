@@ -177,6 +177,23 @@ class TransferManager(
      */
     private val dataPlane: FileDataPlane? = null,
     /**
+     * 信道数据面的**接管缝**（`fch1` 协商通过时由宿主注入）。
+     *
+     * 为什么是函数而不是路由器类型：`FileChannelRouter` 在 jvmShared（平台侧），
+     * 而本类是 commonMain —— 类型引不进来。宿主把"登记一次入站 transfer"绑上来即可。
+     *
+     * 返回 true = **已接管**（调用方必须**不发 pull**：字节会由信道推进来）；
+     * 返回 false = 没接管（未启用 / 路径越界），调用方走 legacy 拨号拉取。
+     */
+    private val registerChannelInbound: ((IncomingOffer, saveDir: String) -> Boolean)? = null,
+    /**
+     * 信道数据面的**出站缝**（与 [registerChannelInbound] 成对由宿主注入）。
+     *
+     * 对端 `accept` 之后调用：把本机的每个文件按窗口推到对端，返回已推字节数。
+     * null = 今天的行为（对端自己拨号来拉）。
+     */
+    private val pushFileOnChannel: (suspend (transferId: String, peerId: String, files: List<OutgoingFile>) -> Unit)? = null,
+    /**
      * F1（task-39）：跨网文件的**主机侧原始 TLS 监听**（方案 B 的入口）。
      *
      * null = 不起这条入口 ⇒ 行为与今天一字不差（局域网原路径）。平台不支持 TLS 服务端
@@ -581,8 +598,39 @@ class TransferManager(
                 return@launch
             }
             sendSimple(offer.peerId, FileCtlOps.ACCEPT, transferId)
+            // 信道模式：登记后由路由器收字节（不发 pull）；否则走 legacy 拨号拉取。
+            if (registerOnChannel(offer)) return@launch
             pull(offer)
         }
+    }
+
+    /**
+     * 把一次入站 transfer 登记到信道路由器。返回 true = 已接管（调用方**不要**再 pull）。
+     *
+     * 两种不接管的情形，都必须 **fallback 到 legacy**而不是静默失败：
+     *  - 没传路由器（未开 fch1 / 未开实验信道）；
+     *  - 某个文件的相对路径越界（`path-escape`）—— 那是拒绝，不是改走 legacy。
+     */
+    private fun registerOnChannel(offer: IncomingOffer): Boolean {
+        val register = registerChannelInbound ?: return false
+        // 目录由本类算（与 legacy 拉取同一个公式），宿主只负责登记 —— 这样
+        // "信道模式的文件落到别处"这类问题在结构上就不可能发生。
+        return register(offer, saveDirFor(offer))
+    }
+
+    /**
+     * 一次入站 transfer 的落盘目录（`<downloadDir>/<rootName>`，rootName 先过路径净化）。
+     *
+     * 抽出来给信道接管缝用：host 侧登记时要与 legacy 拨号拉取**写同一个目录**，
+     * 否则同一个 transfer 在两条路径下会落到两个地方（用户看到"文件传完了但找不到"）。
+     */
+    internal fun saveDirFor(offer: IncomingOffer): String {
+        val root = downloadDir()
+        makeDirectories(root)
+        val safeRoot = sanitizeRelativePath(offer.rootName) ?: offer.transferId
+        val saveDir = pathJoin(root, safeRoot)
+        makeDirectories(saveDir)
+        return saveDir
     }
 
     /** 续传失败的入站传输。对齐 files.ts，仅用于入站 Failed 续拉。 */
@@ -699,7 +747,8 @@ class TransferManager(
             _events.tryEmit(TransferEvent.Offered(assembled))
             if (autoAccept) {
                 sendSimple(assembled.peerId, FileCtlOps.ACCEPT, assembled.transferId)
-                pull(assembled)
+                // 信道模式：登记后由路由器收字节（不发 pull）；否则走 legacy 拨号拉取。
+                if (!registerOnChannel(assembled)) pull(assembled)
             }
         }
     }
@@ -707,8 +756,15 @@ class TransferManager(
     private fun onAccept(payload: JsonObject) {
         val simple = decodeSimple(payload) ?: return
         scope.launch {
-            stateLock.withLock {
-                outgoing[simple.transferId]?.accepted = true
+            val transfer = stateLock.withLock {
+                outgoing[simple.transferId]?.also { it.accepted = true }
+            }
+            // 信道模式：对方接下之后**我们推**字节（它不会再拨 17879/17881 来拉）。
+            // 失败只记一条诊断，不把已经 accept 的传输判死 —— 用户重试 / 对端也会回 cancel。
+            val push = pushFileOnChannel
+            if (transfer != null && push != null) {
+                runCatching { push(transfer.transferId, transfer.peerId, transfer.files) }
+                    .onFailure { println("[luciola] push failed " + simple.transferId + ": " + it) }
             }
         }
     }

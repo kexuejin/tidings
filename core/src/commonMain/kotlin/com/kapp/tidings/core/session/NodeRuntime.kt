@@ -25,6 +25,9 @@ import io.ktor.utils.io.ByteWriteChannel
 import com.kapp.tidings.core.transport.DIRECTION_IN
 import com.kapp.tidings.core.transport.DedupStore
 import com.kapp.tidings.core.transport.DatagramTransport
+import com.kapp.tidings.core.transport.FileChannelRouter
+import com.kapp.tidings.core.transport.FileChannelNegotiation
+import com.kapp.tidings.core.transport.ChunkFileTarget
 import com.kapp.tidings.core.transport.Discovery
 import com.kapp.tidings.core.transport.DiscoveryEngine
 import com.kapp.tidings.core.transport.SYNTHETIC_NICK_PREFIX
@@ -165,6 +168,13 @@ class NodeRuntime(
      */
     private val messengerTransportFactory: ((PeerRegistry) -> DatagramTransport)? = null,
     /**
+     * 是否启用**信道文件数据面**（`fch1` 协商通过时由宿主传 true）。
+     *
+     * 为什么在运行时这一层判断：路由器要同时知道「传输面怎么发帧」与「registry 里
+     * 对端是谁」，那两样只有本类有。false = 不启用（逐字回到 legacy）。
+     */
+    private val fileChannelEnabled: Boolean = false,
+    /**
      * 额外发现引擎(阶段二 B-3:luciola 桥接)。与主 Discovery 并存:
      * registry 按 nodeId 去重;luciola 补 IPv6 多播/防 TUN 的发现覆盖,
      * legacy 继续承载 msg 帧(阶段三切 SecureChannel 后移除)。
@@ -270,6 +280,29 @@ class NodeRuntime(
     private val resolvedExtraDiscovery: DiscoveryEngine? =
         extraDiscovery ?: extraDiscoveryFactory?.invoke(registry, { selfProfile })
     private val tcp: TcpFramedChannel? = if (enableTcp) TcpFramedChannel() else null
+
+    /**
+     * 信道文件数据路由器（仅 `fileChannelEnabled` 时存在）。
+     *
+     * 发送面绑到「registry 查端点 → transport.send」：加密信道是 TCP，端口用对端的
+     * `luciolaPort`（发现登记时已归一到 registry 的 udpPort，见 LuciolaDiscoveryEngine）。
+     */
+    val fileChannel: FileChannelRouter? =
+        if (fileChannelEnabled) {
+            FileChannelRouter(
+                sendToPeer = { peerId, bytes ->
+                    val record = registry.get(peerId)
+                    if (record == null || !record.online) {
+                        false
+                    } else {
+                        transport.send(bytes, record.ip, record.udpPort)
+                    }
+                },
+            )
+        } else {
+            null
+        }
+
 
     /**
      * 长连接开关。
@@ -741,6 +774,17 @@ class NodeRuntime(
         for ((nodeId, pin) in peerPinStore.load()) {
             registry.setPin(nodeId, pin, pinSources[nodeId] ?: PeerRegistry.PIN_SOURCE_UNKNOWN)
         }
+        // 信道数据帧（文件/投屏字节）在 **Messenger 之前**分流：它们是二进制帧，
+        // 交给 Messenger 的 Envelope 解码只会被判成坏帧丢掉；而一条已经被认领的
+        // TDCH/TDCA 帧不应该再进可靠消息管线（它本来就不需要 ACK/去重）。
+        fileChannel?.let { router ->
+            runScope.launch {
+                transport.incoming.collect { datagram ->
+                    runCatching { router.onBinaryFrame(datagram.bytes) }
+                }
+            }
+        }
+
         discovery.start(runScope)
         resolvedExtraDiscovery?.start(runScope)
         messenger.start(runScope)
@@ -868,6 +912,48 @@ class NodeRuntime(
                 // 「允许同事直接发送文件」开关走，所以关掉时我们一条都不发 —— 决定权在收端。
                 peerSupportsDirect = { peerId ->
                     registry.get(peerId)?.profile?.caps?.contains(MsgTypes.CAP_FILE_DIRECT) == true
+                },
+                // 信道文件数据面：**只有** 启用 + 对端声明 fch1 才接管。
+                // 接管 = 登记到路由器且**不发 pull**；否则返回 false，走 legacy 拨号拉取。
+                registerChannelInbound = fileChannel?.let { router ->
+                    register@ { offer, saveDir ->
+                        val allows = FileChannelNegotiation.canUseChannel(
+                            selfCaps = selfProfile.caps,
+                            peerCaps = registry.get(offer.peerId)?.profile?.caps,
+                        )
+                        if (!allows) return@register false
+
+                        var registered = 0
+                        for (file in offer.files) {
+                            if (file.isDir) continue
+                            val ok = router.registerInbound(
+                                peerId = offer.peerId,
+                                transferId = offer.transferId,
+                                fileId = file.fileId,
+                                // 信道模式先只校验长度；sha 由 done 帧给（后续步骤）。
+                                target = ChunkFileTarget(file.relPath, file.size, null),
+                                root = saveDir,
+                            )
+                            if (ok) registered++
+                        }
+                        registered > 0
+                    }
+                },
+                // 出站：对端 accept 之后我们**推**。sha 由对端按长度校验（与 legacy 同一纪律）。
+                pushFileOnChannel = fileChannel?.let { router ->
+                    push@ { transferId, peerId, files ->
+                        for (file in files) {
+                            if (!router.sendFile(
+                                    peerId = peerId,
+                                    transferId = transferId,
+                                    fileId = file.fileId,
+                                    source = com.kapp.tidings.core.transport.DiskFileChunkSource(file.absPath),
+                                ).let { it >= file.size }
+                            ) {
+                                throw IllegalStateException("channel push incomplete for " + file.fileId)
+                            }
+                        }
+                    }
                 },
                 // TCP 回退的长文本（>800 字节）也走这条监听器，收下后与 UDP 路径共用投递纪律。
                 receiveMessage = { envelope, remoteAddress ->
