@@ -98,6 +98,8 @@ class DesktopDataDirectory(
 }
 
 internal fun defaultDataDirectory(): String {
+    // 开发/验收用:允许显式指定数据目录(独立实例、CI、冒烟脚本),不影响正常启动。
+    System.getenv("TIDINGS_DATA_DIR")?.takeIf { it.isNotBlank() }?.let { return it }
     val home = System.getProperty("user.home") ?: "."
     val os = System.getProperty("os.name").orEmpty()
     val base = if (os.contains("Mac")) {

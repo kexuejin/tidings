@@ -5,7 +5,8 @@ import kotlinx.serialization.Serializable
 import kotlinx.serialization.json.Json
 import uniffi.luciola_uniffi.identityFingerprint
 import java.security.MessageDigest
-import java.util.Base64
+import kotlin.io.encoding.Base64
+import kotlin.io.encoding.ExperimentalEncodingApi
 
 /**
  * 配对准入:让「手机上扫了主机二维码」的那台设备，能把自己**自证的公钥**交给主机，
@@ -127,10 +128,11 @@ object PairingFrame {
         return null
     }
 
-    private fun b64(bytes: ByteArray): String = Base64.getEncoder().encodeToString(bytes)
+    @OptIn(ExperimentalEncodingApi::class)
+    private fun b64(bytes: ByteArray): String = Base64.UrlSafe.encode(bytes)
 
     private fun unb64(text: String): ByteArray? =
-        runCatching { Base64.getDecoder().decode(text) }.getOrNull()
+        runCatching { Base64.UrlSafe.decode(text) }.getOrNull()
 
     internal const val ED25519_PUBLIC_KEY_SIZE = 32
 }

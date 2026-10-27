@@ -10,7 +10,8 @@ import uniffi.luciola_uniffi.TrustLevel
 import uniffi.luciola_uniffi.identityFingerprint
 import uniffi.luciola_uniffi.identityFromSeed
 import java.security.SecureRandom
-import java.util.Base64
+import kotlin.io.encoding.Base64
+import kotlin.io.encoding.ExperimentalEncodingApi
 import java.util.concurrent.ConcurrentHashMap
 
 /**
@@ -71,6 +72,7 @@ private data class FactoryStateJson(
  * 存量 PeerPins 是 P-256 SPKI;luciola 身份是 Ed25519 —— **无自动转换**。
  * 新配对走 luciola QR(重扫码);过渡期两套并存。
  */
+@OptIn(ExperimentalEncodingApi::class)
 class LuciolaTransportFactory(
     private val profile: Profile,
     /** 发现 UDP 端口;同时也是加密信道的 TCP 监听端口(同号不同协议)。 */
@@ -99,14 +101,14 @@ class LuciolaTransportFactory(
     /** "host:port" → public key;配对后立即生效,重启从 stateStore 恢复。 */
     private val endpoints = ConcurrentHashMap<String, ByteArray>().apply {
         state.endpoints.forEach { (key, b64) ->
-            runCatching { put(key, Base64.getDecoder().decode(b64)) }
+            runCatching { put(key, Base64.UrlSafe.decode(b64)) }
         }
     }
 
     /** "host:port" → 扫到的对端配对密钥(发起侧用);缺 = 这个对端没扫过码。 */
     private val pairingSecrets = ConcurrentHashMap<String, ByteArray>().apply {
         state.pairingSecrets.forEach { (key, b64) ->
-            runCatching { put(key, Base64.getDecoder().decode(b64)) }
+            runCatching { put(key, Base64.UrlSafe.decode(b64)) }
         }
     }
 
@@ -119,7 +121,7 @@ class LuciolaTransportFactory(
      * 使二维码在重启后仍然有效;想强制所有已扫码设备重新配对 = 换一个 secret。
      */
     private val pairSecret: ByteArray = state.pairSecret
-        ?.let { runCatching { Base64.getDecoder().decode(it) }.getOrNull() }
+        ?.let { runCatching { Base64.UrlSafe.decode(it) }.getOrNull() }
         ?.takeIf { it.size >= MIN_PAIR_SECRET_BYTES }
         ?: ByteArray(DEFAULT_PAIR_SECRET_BYTES).also { SecureRandom().nextBytes(it) }
 
@@ -128,7 +130,7 @@ class LuciolaTransportFactory(
     }
 
     /** 二维码/luciola 配对页要展示的 secret(base64)。 */
-    fun pairSecretBase64(): String = Base64.getEncoder().encodeToString(pairSecret)
+    fun pairSecretBase64(): String = Base64.UrlSafe.encode(pairSecret)
 
     /** 原始 secret(16 字节) —— 二维码构造器要字节形态。返回副本,调用方改不到内部状态。 */
     fun pairSecretBytes(): ByteArray = pairSecret.copyOf()
@@ -276,10 +278,10 @@ class LuciolaTransportFactory(
     private fun persist() {
         val next = FactoryStateJson(
             trust = runCatching { rustTrustStore.toJson() }.getOrNull(),
-            endpoints = endpoints.mapValues { Base64.getEncoder().encodeToString(it.value) },
+            endpoints = endpoints.mapValues { Base64.UrlSafe.encode(it.value) },
             trustedFingerprints = trustedFingerprints.toList(),
-            pairSecret = Base64.getEncoder().encodeToString(pairSecret),
-            pairingSecrets = pairingSecrets.mapValues { Base64.getEncoder().encodeToString(it.value) },
+            pairSecret = Base64.UrlSafe.encode(pairSecret),
+            pairingSecrets = pairingSecrets.mapValues { Base64.UrlSafe.encode(it.value) },
         )
         state = next
         runCatching { stateStore.save(json.encodeToString(FactoryStateJson.serializer(), next)) }

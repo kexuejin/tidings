@@ -93,6 +93,14 @@ android {
     }
 
     buildTypes {
+        debug {
+            // 调试包与已安装的正式签名包**共存**:真机上面装的是正式签名的 Tidings,
+            // 直接装 debug 会 INSTALL_FAILED_UPDATE_INCOMPATIBLE,而卸载会清掉用户历史。
+            // namespace 不变(见上方注释),只换 applicationId。
+            applicationIdSuffix = ".debug"
+            versionNameSuffix = "-debug"
+            isMinifyEnabled = false
+        }
         release {
             isMinifyEnabled = false
             signingConfig = if (releaseSigningConfigured) {

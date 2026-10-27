@@ -28,6 +28,9 @@ dependencies {
     // 单独看一个 pane；`composeApp` 把这个依赖声明在自己的 androidMain 里，
     // `implementation` 不进消费者的编译 classpath，所以桌面端要自己再声明一次。
     implementation(libs.compose.ui.tooling.preview)
+    // 测试里用 Codec 造真实信封(手写 JSON 过不了 Codec 的字段校验 —— 这不是测试取巧,
+    // 正是协议层要求"帧必须由编解码器产生")。
+    testImplementation(libs.kotlinx.serialization.json)
     implementation(compose.material3)
     implementation(compose.materialIconsExtended)
     implementation(libs.kotlinx.coroutines.core)
@@ -155,6 +158,9 @@ compose.desktop {
         )
 
         nativeDistributions {
+            // luciola 的 uniffi 原生库随安装包分发:运行时从
+            // compose.application.resources.dir/native 找到它(见 DesktopLuciolaHost)。
+            appResourcesRootDir.set(project.layout.projectDirectory.dir("resources"))
             // 先产出可分发目录/DMG；签名与公证交给 DSL，不手工跑 xcrun。
             targetFormats(TargetFormat.Dmg, TargetFormat.Msi, TargetFormat.Deb)
             packageName = "Tidings"
@@ -258,6 +264,51 @@ tasks.withType<Test>().configureEach {
     // luciola(JNA/uniffi)在测试里加载本地库;与 :core 同一份临时路径(阶段接线期)。
     systemProperty("jna.library.path", System.getProperty("jna.library.path") ?: "/workspace/RustBuild/cargo-target/debug")
 }
+
+// 开发验收用:真实进程(./gradlew :desktopApp:run)也能加载 luciola 原生库。
+// 正式发行把库复制进 resources/native(见 copyLuciolaNative),运行时自动找到。
+tasks.withType<JavaExec>().configureEach {
+    System.getenv("TIDINGS_LUCIOLA_NATIVE")?.takeIf { it.isNotBlank() }?.let {
+        systemProperty("jna.library.path", it)
+    }
+}
+
+/**
+ * 把 luciola 的 uniffi 原生库复制进 app resources —— jpackage 会把它打进安装包,
+ * 运行时 [DesktopLuciolaHost] 从 compose.application.resources.dir/native 加载。
+ *
+ * 来源优先级:TIDINGS_LUCIOLA_NATIVE 环境变量 → 本机 Rust 构建产物(开发机)。
+ * 正式发版应改为从 luciola 的发布构件取并校验 sha256(待 Android 发布形态一起做)。
+ */
+val luciolaNativeDir: Provider<String> =
+    providers.environmentVariable("TIDINGS_LUCIOLA_NATIVE").orElse("/workspace/RustBuild/cargo-target/debug")
+
+val copyLuciolaNative by tasks.registering(Copy::class) {
+    from(luciolaNativeDir) {
+        include("libluciola_uniffi.dylib", "libluciola_uniffi.so", "luciola_uniffi.dll")
+    }
+    // Compose Desktop 的 appResourcesRootDir 约定:common/ 下的内容对全平台分发,
+    // 打包后落在 app resources 根(运行时用 compose.application.resources.dir 找到)。
+    into(project.layout.projectDirectory.dir("resources/common/native"))
+    // 校验:复制完必须真的有一份库。缺了就在打包前失败,而不是等用户装完启动才崩
+    // (2026-10-26 实测:没有这步时 jpackage 能成功产出"没有库"的安装包)。
+    doLast {
+        val dir = project.layout.projectDirectory.dir("resources/common/native").asFile
+        val libs = dir.listFiles { f -> f.isFile && f.name.startsWith("libluciola_uniffi") || f.name == "luciola_uniffi.dll" }
+        if (libs.isNullOrEmpty()) {
+            throw GradleException(
+                "luciola native library missing under ${dir}. Set TIDINGS_LUCIOLA_NATIVE to the cargo target dir.",
+            )
+        }
+    }
+}
+
+// 顺序必须显式:prepareAppResources 会扫描 appResourcesRootDir,若与 copy 并发,
+// 会读到"文件正在变"的目录而失败(实测 Failed 一次、单独跑又成功)。
+tasks.matching {
+    it.name.startsWith("createDistributable") || it.name.startsWith("package") ||
+        it.name == "prepareAppResources"
+}.configureEach { dependsOn(copyLuciolaNative) }
 
 // 不切 JUnit Platform：libs.kotlin.test 默认走 JUnit4，和 :composeApp / :agentNode 保持一致。
 // 写成 useJUnitPlatform() 而 classpath 上没有 kotlin-test-junit5，Gradle 会报「找不到引擎」。

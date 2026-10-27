@@ -29,6 +29,7 @@ class DesktopLuciolaHost(
 
     override fun configure(profile: Profile, udpPort: Int) {
         if (!enabled) return
+        installNativeLibraryPath()
         synchronized(lock) {
             if (factory != null && configuredProfile == profile) return
             val dir = File(dataDirectory(), "luciola").apply { mkdirs() }
@@ -46,6 +47,8 @@ class DesktopLuciolaHost(
                 },
             )
             configuredProfile = profile
+            // 启动证据:真实进程日志里能看到这一行,冒烟/排障据此判断实验信道到底有没有装配。
+            println("[luciola] host configured port=" + udpPort + " fp=" + factory!!.fingerprint.take(12))
         }
     }
 
@@ -73,6 +76,28 @@ class DesktopLuciolaHost(
     }
 
     companion object {
+        /**
+         * 让 JNA/uniffi 找到原生库:安装包内置在 `compose.application.resources.dir/native`,
+         * 开发机可用 TIDINGS_LUCIOLA_NATIVE 指到 Rust 构建产物。必须在首次触碰
+         * luciola 之前调用(否则 uniffi 已尝试加载并失败)。
+         */
+        internal fun installNativeLibraryPath() {
+            val candidates = buildList {
+                System.getenv("TIDINGS_LUCIOLA_NATIVE")
+                    ?.takeIf { it.isNotBlank() }
+                    ?.let(::add)
+                System.getProperty("compose.application.resources.dir")
+                    ?.let { File(it, "native") }
+                    ?.takeIf { it.isDirectory }
+                    ?.let { add(it.absolutePath) }
+            }
+            if (candidates.isEmpty()) return
+            val existing = System.getProperty("jna.library.path")
+            val path = (candidates + listOfNotNull(existing?.takeIf { it.isNotBlank() }))
+                .joinToString(File.pathSeparator)
+            System.setProperty("jna.library.path", path)
+        }
+
         fun envEnabled(): Boolean =
             System.getenv("TIDINGS_LUCIOLA")?.let { it == "1" || it.equals("true", ignoreCase = true) } == true
 

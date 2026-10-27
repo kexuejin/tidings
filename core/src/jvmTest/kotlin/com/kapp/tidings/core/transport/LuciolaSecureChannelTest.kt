@@ -13,7 +13,8 @@ import kotlinx.coroutines.withTimeout
 import kotlinx.coroutines.withTimeoutOrNull
 import kotlinx.coroutines.withTimeoutOrNull as timeoutOrNull
 import java.net.ServerSocket
-import java.util.Base64
+import kotlin.io.encoding.Base64
+import kotlin.io.encoding.ExperimentalEncodingApi
 import kotlin.test.Test
 import kotlin.test.assertContentEquals
 import kotlin.test.assertEquals
@@ -27,6 +28,7 @@ import kotlin.test.assertTrue
  * **全部走真实引擎与真实 TCP 回环** —— 不 mock 信道;端口取自系统临时端口,
  * 不依赖本机是否装了 VPN/代理(见「测试不许依赖用户环境」的教训)。
  */
+@OptIn(ExperimentalEncodingApi::class)
 class LuciolaSecureChannelTest {
 
     // ------------------------------------------------------------------ 夹具
@@ -224,7 +226,7 @@ class LuciolaSecureChannelTest {
         hostTransport.start()
         phoneTransport.start()
         try {
-            val secret = Base64.getDecoder().decode(host.pairSecretBase64())
+            val secret = Base64.UrlSafe.decode(host.pairSecretBase64())
             val request = PairingFrame.encodeRequest("phone-node", phone.publicKey, secret, "Phone")
 
             val accepted = async { withTimeout(10_000) { phoneTransport.pairingResults.first() } }
@@ -291,7 +293,7 @@ class LuciolaSecureChannelTest {
         hostTransport.start()
         phoneTransport.start()
         try {
-            val secret = Base64.getDecoder().decode(host.pairSecretBase64())
+            val secret = Base64.UrlSafe.decode(host.pairSecretBase64())
             // 会话证明的是 phone 的私钥,却声称另一把公钥 ⇒ 指纹绑定必须拦下。
             val forged = PairingFrame.encodeRequest("phone-node-3", other.publicKey, secret)
             repeat(40) {
@@ -357,7 +359,7 @@ class LuciolaSecureChannelTest {
         val phone = factory(portPhone, 21)
         phone.pairPeer(
             "127.0.0.1", portHost, host.publicKey,
-            secret = Base64.getDecoder().decode(host.pairSecretBase64()),
+            secret = Base64.UrlSafe.decode(host.pairSecretBase64()),
         )
         val hostTransport = host.createTransport(registryWith("host-node", "phone-node", "127.0.0.1", portPhone))
         val phoneTransport = phone.createTransport(PeerRegistry("phone-node"))

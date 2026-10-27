@@ -59,7 +59,9 @@ kotlin {
     sourceSets {
         // luciola 发现引擎(JVM/Android;iOS 保留自研)。luciola 仓库 docs/MIGRATION-tidings.md 阶段一。
         val jvmMain by getting { dependencies { implementation(libs.luciola) } }
-        val androidMain by getting { dependencies { implementation(libs.luciola) } }
+        // Android 必须用 AAR 变体:luciola-jvm 只有桌面 dylib,JNA 在 Android 上加载不到;
+        // AAR 里带 jniLibs/*.so(见 luciola 仓 verifyNativeLib 的守卫)。
+        val androidMain by getting { dependencies { implementation(libs.luciola.android) } }
         getByName("jvmSharedMain").dependencies {
             implementation(libs.kotlinx.coroutines.core)
             implementation(libs.ktor.network)

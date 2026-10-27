@@ -1,5 +1,5 @@
 [versions]
-luciola = "0.4.3"
+luciola = "0.4.4"
 agp = "9.4.1"
 android-compileSdk = "36"
 android-buildToolsVersion = "36.1.0"
@@ -39,6 +39,7 @@ markdown-renderer = "0.41.0"
 
 [libraries]
 luciola = { module = "io.github.kexuejin:luciola-jvm", version.ref = "luciola" }
+luciola-android = { module = "io.github.kexuejin:luciola-android", version.ref = "luciola" }
 kotlin-test = { module = "org.jetbrains.kotlin:kotlin-test", version.ref = "kotlin" }
 
 androidx-core-ktx = { module = "androidx.core:core-ktx", version.ref = "androidx-core" }
