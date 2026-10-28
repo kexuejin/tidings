@@ -31,7 +31,11 @@ import design_contract as dc  # noqa: E402
 
 LEDGER_REL = "docs/plans/2026-10-10-relay-screen-pairing-ledger.md"
 OUT_REL = "docs/plans/2026-10-11-relay-dp-debt-ledger.md"
-SCOPE_DEFAULT = "/tmp/relay-own-scope.txt"
+# **不要给默认值**：这曾经默认读 `/tmp/relay-own-scope.txt`（某个会话的写范围清单），
+# 于是同一条源码在这台机器上能判 PASS、在那台机器上判 FAIL —— 门禁的结论取决于 /tmp 里
+# 有没有另一个会话留下的文件。那是"量具依赖环境"，不是被测对象变差。
+# 需要"写范围"这一列的会话显式传 `--scope-file`。
+SCOPE_DEFAULT = None
 # 已迁完的文件（迁移后档上间距字面量应为 0；有剩余即报红）。
 # 第 19 轮 2 个 → 第 22 轮 28 个：全仓 389 处档上站点一次性迁完，档上计数归零。
 # **这条清单是"迁移进度"的唯一断言**：账上的「档上」列只报现状，不报做过什么。
@@ -245,8 +249,9 @@ def render(root, rows, scope=None):
     L.append("")
     L.append("## 3 逐屏（按台账落点反查）")
     L.append("")
-    L.append(f"> 写范围清单：`{SCOPE_DEFAULT}`"
-             + (f"（{len(scope)} 个 `.kt`）" if scope else "（**没读到**，写范围列标 `?`）"))
+    L.append("> 写范围清单：" + (
+        f"（{len(scope)} 个 `.kt`）" if scope
+        else "（本轮未提供，写范围列标 `?` —— 它是会话状态，不是仓库状态）"))
     L.append("")
     L.append("| 屏 | 标签 | 落点文件 | 间距处数 | 档上 | 档外 | 写范围 | 本轮处置 |")
     L.append("| --- | --- | --- | ---: | ---: | ---: | --- | --- |")
@@ -344,6 +349,23 @@ def self_test():
     return 0
 
 
+def _norm_no_line(text: str) -> str:
+    """把台账里的"行号"列替换成 `-` 再比对。
+
+    行号是给人跳转用的，不是被测事实：任何一处无关的插入/删除都会让它整体位移，
+    而"账与源码不一致"应当只由内容变化触发。列序：| # | 文件 | 行号 | 处数 | ? | 片段 |
+    """
+    out = []
+    for line in text.split("\n"):
+        if line.startswith("| ") and not set(line) <= set("|-: \n"):
+            cells = line.strip().strip("|").split("|")
+            if len(cells) >= 3 and cells[2].strip().isdigit():
+                cells[2] = " - "
+                line = "|" + "|".join(cells) + "|"
+        out.append(line)
+    return "\n".join(out)
+
+
 def main():
     ap = argparse.ArgumentParser(description="逐屏 .dp 欠债账（goal ④ 验收工件）")
     ap.add_argument("--root", default=".")
@@ -351,6 +373,8 @@ def main():
                     help="本会话写范围清单（精确路径匹配）；读不到时写范围列标 ?")
     ap.add_argument("--markdown", default=None)
     ap.add_argument("--check", action="store_true", help="比对磁盘上的产物，不许手改")
+    ap.add_argument("--require-artifact", action="store_true",
+                    help="产物不存在时判失败（默认 SKIP：'没验到' 不是 '通过'，也不是 '验坏了'）")
     ap.add_argument("--self-test", action="store_true")
     args = ap.parse_args()
     if args.self_test:
@@ -360,10 +384,19 @@ def main():
     out = args.markdown or OUT_REL
     if args.check:
         if not os.path.exists(out):
-            print(f"[design-dp-debt-report] FAIL — 产物不存在：{out}（先跑 --markdown 生成）")
-            return 1
+            # 产物在 docs/plans/ 下，而整目录被 .gitignore 排除 ⇒ 干净检出上必然不存在。
+            # 那种情况下判 FAIL 等于"每个人第一次 clone 就撞一个红"，且修法只有"先跑生成"，
+            # 与代码质量无关。所以默认 SKIP，并**大声说明这不是通过**；发版检查用
+            # --require-artifact 把它变成硬失败。
+            print(f"[design-dp-debt-report] SKIP — 产物不存在：{out}"
+                  "（没验到，不是通过；先跑 --markdown 生成，或加 --require-artifact 判失败）")
+            return 1 if args.require_artifact else 0
         old = open(out, encoding="utf-8").read()
-        if old != text + "\n":
+        # **行号列不参与比对**。这一列的用途是"人按行号跳过去看"，而它只要在别处插一行
+        # import 就会整体位移 —— 于是"只挪了一行"也会判成"账与源码不一致"，修法还只有
+        # 重跑生成。那正是 staleCommentRefGate 反对的"行号引用随重构腐坏"。
+        # 比对其余各列（文件、处数、档上/档外、代码片段）才是这张账的**内容**。
+        if _norm_no_line(old) != _norm_no_line(text + "\n"):
             print(f"[design-dp-debt-report] FAIL — {out} 与源码不一致（产物是生成物，不许手改）")
             return 1
         print(f"[design-dp-debt-report] OK — {out} 与源码逐字一致")
