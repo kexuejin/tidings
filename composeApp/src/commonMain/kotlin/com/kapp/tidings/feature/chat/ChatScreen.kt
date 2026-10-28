@@ -75,6 +75,7 @@ import com.kapp.tidings.ui.EmptyState
 import kotlinx.coroutines.launch
 import org.jetbrains.compose.resources.stringResource
 import com.kapp.tidings.domain.model.MessageUi
+import com.kapp.tidings.domain.model.NoticeKind
 import com.kapp.tidings.domain.model.TransferState
 import com.kapp.tidings.generated.resources.action_find_nodes
 import com.kapp.tidings.generated.resources.chat_attach
@@ -329,6 +330,7 @@ fun ChatScreen(
         }
     }
     val coroutineScope = rememberCoroutineScope()
+    var highlightedMessageId by remember { mutableStateOf<String?>(null) }
     // 引用卡 / 历史搜索命中「跳到那条消息」的唯一出口。
     //
     // 列表是「数据倒序 + reverseLayout」双翻结构：`messages` 里的正序下标不能直接喂给
@@ -337,7 +339,14 @@ fun ChatScreen(
     fun scrollToMessage(messageId: String) {
         val idx = messages.indexOfFirst { it.id == messageId }
         if (idx >= 0) {
-            coroutineScope.launch { listState.animateScrollToItem(visualIndexOf(idx, messages.size)) }
+            highlightedMessageId = messageId
+            coroutineScope.launch {
+                listState.animateScrollToItem(visualIndexOf(idx, messages.size))
+                kotlinx.coroutines.delay(1200)
+                if (highlightedMessageId == messageId) {
+                    highlightedMessageId = null
+                }
+            }
         }
     }
     // 引用卡 / 回复预览上「谁说的」的显示名。走**与气泡署名同一个解析器**（一个事实
@@ -366,6 +375,7 @@ fun ChatScreen(
     }
 
     var draft by remember(peerId) { mutableStateOf(initialDraft) }
+    var lastRecalledText by remember(peerId) { mutableStateOf<String?>(null) }
     var replyingToMessage by remember(peerId) { mutableStateOf<MessageUi?>(null) }
     // **发送的唯一出口**：手机内置输入栏与桌面输入卡片（composerSlot）共用这一个函数。
     //
@@ -928,6 +938,9 @@ fun ChatScreen(
                 // 此前每条带引用的气泡在**每次重组**时 `firstOrNull` 线性扫全表，
                 // 长会话里一屏几十条引用就是每帧几十次全扫。
                 val messagesById = remember(messages) { messages.associateBy { it.id } }
+                val messagePositions = remember(messages) {
+                    messages.withIndex().associate { (idx, msg) -> msg.id to idx }
+                }
                 LazyColumn(
                     state = listState,
                     modifier = Modifier.fillMaxSize(),
@@ -975,6 +988,14 @@ fun ChatScreen(
                                                 ?.let(req)
                                         }
                                     },
+                                onReEdit = if (notice == NoticeKind.RecalledBySelf && !lastRecalledText.isNullOrBlank()) {
+                                    {
+                                        val textToRestore = lastRecalledText.orEmpty()
+                                        draft = textToRestore
+                                        peerId?.let { onDraftChangeExternal?.invoke(it, textToRestore) }
+                                        requestComposerFocus()
+                                    }
+                                } else null,
                             )
                         } else if (message.screen != null) {
                             // 跨模块 public 属性先落成局部量，否则 smart cast 不成立。
@@ -992,6 +1013,28 @@ fun ChatScreen(
                                 ScreenHistoryCard(record = screenRecord, now = now)
                             }
                         } else {
+                            val originalIndex = messagePositions[message.id] ?: -1
+                            val prevMsg = if (originalIndex > 0) messages.getOrNull(originalIndex - 1) else null
+                            val nextMsg = if (originalIndex in 0 until messages.size - 1) messages.getOrNull(originalIndex + 1) else null
+
+                            val isSameSenderWith = { a: MessageUi, b: MessageUi ->
+                                a.notice == null && b.notice == null &&
+                                    a.screen == null && b.screen == null &&
+                                    a.mine == b.mine &&
+                                    (a.mine || a.senderId == b.senderId) &&
+                                    kotlin.math.abs(a.at - b.at) < 90_000L
+                            }
+
+                            val hasPrevSender = prevMsg != null &&
+                                isSameSenderWith(prevMsg, message) &&
+                                message.id !in timelineSeparators &&
+                                message.id !in sessionTransitions
+
+                            val hasNextSender = nextMsg != null &&
+                                isSameSenderWith(message, nextMsg) &&
+                                nextMsg.id !in timelineSeparators &&
+                                nextMsg.id !in sessionTransitions
+
                             // 「重发」接的是已有的 onSend：以原文本再发一条，不是服务端重试 ——
                             // core 没有按 messageId 重投的接口，而让用户自己照着抄一遍是白给的摩擦。
                             // 所以这里只在有真文本时给出口：文件消息重发不了（本地路径早就没了）。
@@ -1028,7 +1071,14 @@ fun ChatScreen(
                                 // 只剩"不能撤回"这一个事实时，把它藏起来等于不解释（见 recallBlockedReason）。
                                 onRecall = onRecallMessage
                                     ?.takeIf { canRecall(message, now) }
-                                    ?.let { recall -> { recall(message) } },
+                                    ?.let { recall ->
+                                        {
+                                            if (message.text.isNotBlank()) {
+                                                lastRecalledText = message.text
+                                            }
+                                            recall(message)
+                                        }
+                                    },
                                 recallVisible = onRecallMessage != null &&
                                     recallBlockedReason(message) == null,
                                 recallMeta = formatRecallRemaining(recallRemainingMs(message, now))
@@ -1096,6 +1146,9 @@ fun ChatScreen(
                                     senderIsAgent = senderIdentity?.isAgent == true,
                                     senderId = message.senderId,
                                 ),
+                                isHighlighted = message.id == highlightedMessageId,
+                                hasPrevSender = hasPrevSender,
+                                hasNextSender = hasNextSender,
                             )
                         }
                         // **两条分隔线必须画在气泡之后，不能画在之前。**

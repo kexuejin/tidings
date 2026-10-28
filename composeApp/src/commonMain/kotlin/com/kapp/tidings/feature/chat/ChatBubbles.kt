@@ -3,6 +3,8 @@
 package com.kapp.tidings.feature.chat
 
 import com.kapp.tidings.generated.resources.chat_agent_request_grant
+import androidx.compose.animation.animateColorAsState
+import androidx.compose.animation.core.tween
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
@@ -39,6 +41,7 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.hapticfeedback.HapticFeedbackType
 import androidx.compose.ui.platform.LocalHapticFeedback
@@ -60,6 +63,8 @@ import androidx.compose.ui.unit.dp
 import com.kapp.tidings.domain.MediaKind
 import com.kapp.tidings.domain.mediaKindOf
 import com.kapp.tidings.domain.RelayUiState
+import com.kapp.tidings.core.protocol.PkGames
+import com.kapp.tidings.core.protocol.RpsValues
 import com.kapp.tidings.generated.resources.Res
 import com.kapp.tidings.platform.ReceivedFileActions
 import com.kapp.tidings.ui.components.PkCardView
@@ -86,6 +91,13 @@ import com.kapp.tidings.generated.resources.chat_group_members_changed
 import com.kapp.tidings.generated.resources.chat_group_member_removed
 import com.kapp.tidings.generated.resources.chat_agent_not_authorized
 import com.kapp.tidings.generated.resources.chat_group_member_added
+import com.kapp.tidings.generated.resources.chat_image
+import com.kapp.tidings.generated.resources.chat_pk_dice_outcome
+import com.kapp.tidings.generated.resources.chat_pk_dice_title
+import com.kapp.tidings.generated.resources.chat_pk_rock
+import com.kapp.tidings.generated.resources.chat_pk_paper
+import com.kapp.tidings.generated.resources.chat_pk_scissors
+import com.kapp.tidings.generated.resources.chat_pk_rps
 import com.kapp.tidings.generated.resources.common_name_list_separator
 import com.kapp.tidings.generated.resources.chat_group_removed
 import com.kapp.tidings.generated.resources.chat_group_renamed
@@ -94,6 +106,7 @@ import com.kapp.tidings.generated.resources.chat_nudge_self
 import com.kapp.tidings.generated.resources.chat_delete_local
 import com.kapp.tidings.generated.resources.chat_recall
 import com.kapp.tidings.generated.resources.chat_recall_peer
+import com.kapp.tidings.generated.resources.chat_recall_re_edit
 import com.kapp.tidings.generated.resources.chat_recall_self
 import com.kapp.tidings.generated.resources.chat_reply_action
 import com.kapp.tidings.generated.resources.common_cancel
@@ -122,7 +135,8 @@ import com.kapp.tidings.generated.resources.file_share
 import com.kapp.tidings.generated.resources.file_state_active_in
 import com.kapp.tidings.generated.resources.file_state_active_out
 import com.kapp.tidings.generated.resources.file_state_completed_in
-import com.kapp.tidings.generated.resources.file_state_completed_out
+import com.kapp.tidings.generated.resources.file_state_sent_success
+import com.kapp.tidings.generated.resources.file_transfer_direct
 import com.kapp.tidings.generated.resources.file_state_declined
 import com.kapp.tidings.generated.resources.file_state_failed
 import com.kapp.tidings.generated.resources.file_state_offered_in
@@ -130,6 +144,8 @@ import com.kapp.tidings.generated.resources.file_state_offered_out
 import com.kapp.tidings.generated.resources.file_table_hide_text
 import com.kapp.tidings.generated.resources.file_table_show_text
 import com.kapp.tidings.generated.resources.file_table_truncated
+import com.kapp.tidings.generated.resources.ic_check_double
+import com.kapp.tidings.generated.resources.ic_clock_pending
 import com.kapp.tidings.generated.resources.ic_close
 import com.kapp.tidings.generated.resources.ic_file
 import com.kapp.tidings.generated.resources.ic_folder
@@ -138,6 +154,7 @@ import com.kapp.tidings.generated.resources.ic_speaker
 import com.kapp.tidings.generated.resources.r2_chat_folder_progress
 import com.kapp.tidings.generated.resources.r2_chat_folder_receiving
 import com.kapp.tidings.generated.resources.r2_chat_folder_sending
+import com.kapp.tidings.generated.resources.screen_card_title
 import com.kapp.tidings.generated.resources.transfer_action_resume
 import com.kapp.tidings.generated.resources.transfer_folder_count
 import com.kapp.tidings.generated.resources.transfer_resume_hint
@@ -159,6 +176,69 @@ import com.kapp.tidings.ui.components.AppTextButton
  * （见 `RelayUiState.toRestored` 的说明），重启后没人认得那条旧信封，
  * 与其假装能恢复，不如给一个用户自己能验证的行为。
  */
+/**
+ * 引用源消息的正文摘要生成。防止当源消息是 PK 游戏、文件或屏幕分享时留空。
+ */
+@Composable
+internal fun quotedMessagePreview(quoted: MessageUi): String {
+    if (quoted.text.isNotBlank()) return quoted.text
+    quoted.file?.let { file ->
+        return file.name.ifBlank { stringResource(Res.string.chat_image) }
+    }
+    quoted.pk?.let { pk ->
+        return if (pk.game == PkGames.DICE) {
+            val dots = pk.value.toIntOrNull() ?: 1
+            "[" + stringResource(Res.string.chat_pk_dice_title) + ": " +
+                stringResource(Res.string.chat_pk_dice_outcome, dots) + "]"
+        } else {
+            val label = when (pk.value) {
+                RpsValues.ROCK -> stringResource(Res.string.chat_pk_rock)
+                RpsValues.PAPER -> stringResource(Res.string.chat_pk_paper)
+                RpsValues.SCISSORS -> stringResource(Res.string.chat_pk_scissors)
+                else -> pk.value
+            }
+            "[" + stringResource(Res.string.chat_pk_rps) + ": " + label + "]"
+        }
+    }
+    if (quoted.screen != null) {
+        return "[" + stringResource(Res.string.screen_card_title) + "]"
+    }
+    return quoted.text
+}
+
+/**
+ * 出站消息在左下侧的极简投递指示对勾。
+ */
+@Composable
+internal fun DeliveryCheckmark(
+    delivery: DeliveryState?,
+    isFileCompleted: Boolean,
+    modifier: Modifier = Modifier,
+) {
+    if (isFileCompleted || delivery == DeliveryState.Sent) {
+        Icon(
+            painter = painterResource(Res.drawable.ic_check_double),
+            contentDescription = null,
+            tint = MaterialTheme.colorScheme.primary,
+            modifier = modifier.size(IconSizes.Badge),
+        )
+    } else if (delivery == DeliveryState.Sending) {
+        Icon(
+            painter = painterResource(Res.drawable.ic_clock_pending),
+            contentDescription = null,
+            tint = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.7f),
+            modifier = modifier.size(IconSizes.Badge),
+        )
+    } else if (delivery == DeliveryState.Queued) {
+        Icon(
+            painter = painterResource(Res.drawable.ic_clock_pending),
+            contentDescription = null,
+            tint = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.5f),
+            modifier = modifier.size(IconSizes.Badge),
+        )
+    }
+}
+
 /**
  * `.msg .mav` 那颗 26dp 方头像要的三样东西。
  *
@@ -229,6 +309,12 @@ internal fun MessageBubble(
      * 人发的消息保持纯文本 —— 用户打的 `*星号*` 就该原样显示，而不是被当成强调。
      */
     renderMarkdown: Boolean = false,
+    /** 引用跳转时的平滑高亮脉冲。 */
+    isHighlighted: Boolean = false,
+    /** 连续发件编组：前一条消息来自同一发件人。 */
+    hasPrevSender: Boolean = false,
+    /** 连续发件编组：后一条消息来自同一发件人。 */
+    hasNextSender: Boolean = false,
 ) {
     // 空气泡防线：正文只有看不见的字符、又没有文件 / PK / 思考块可画时，整条不画。
     // 判据只看"有没有东西可显示"，不看 delivery —— 待发/失败的文件消息有 file 卡，
@@ -241,7 +327,17 @@ internal fun MessageBubble(
         return
     }
     val sp = LocalAppSpacing.current
-    val bubbleColor = if (message.mine) {
+    val card = message.file
+    val previewImagePath = if (card != null && card.state == TransferState.Completed && mediaKindOf(card) == MediaKind.Image) {
+        if (card.mine) card.localPaths.firstOrNull() else card.savedPaths.firstOrNull()
+    } else null
+    val isPureImage = previewImagePath != null
+    val isFileCard = card != null && !isPureImage
+    val isCustomCard = isPureImage || isFileCard || message.pk != null
+
+    val bubbleColor = if (isCustomCard) {
+        Color.Transparent
+    } else if (message.mine) {
         MaterialTheme.colorScheme.primaryContainer
     } else {
         MaterialTheme.colorScheme.surfaceVariant
@@ -252,82 +348,88 @@ internal fun MessageBubble(
     // 长按菜单的触感确认（HapticFeedbackType.LongPress）：气泡的长按是唯一入口，
     // 没有触感时用户分不清「按住了」与「按了个寂寞」—— 尤其菜单弹出有延迟的时候。
     val haptics = LocalHapticFeedback.current
-    // 原型 `.bub{border:1px solid var(--hair)}`，`.msg.me .bub{border-color:transparent}`。
-    // `--hair` 在 `:root` 里是 rgba(0,0,0,.07)；`outlineVariant` 即它的
-    // 真值（半透明黑），不再是「借一个同灰族的近似」。`--surface-3` 是另一个**填充** token，
-    // 落在 `MaterialTheme.accents.surface3`（见 ui/theme/Accents.kt 的语义拆分说明）。
-    val bubbleBorder = if (message.mine) null else BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant)
-    // 原型 `.bub{border-radius:var(--r-bubble);border-top-left-radius:6px}` +
-    // `.msg.me .bub{border-top-right-radius:6px}`：**说话方那一侧**的上角收成 6px，
-    // 其余三角是 `--r-bubble`（= shapes.medium 12）。
-    val bubbleShape = if (message.mine) {
-        RoundedCornerShape(topStart = 12.dp, topEnd = 6.dp, bottomEnd = 12.dp, bottomStart = 12.dp)
-    } else {
-        RoundedCornerShape(topStart = 6.dp, topEnd = 12.dp, bottomEnd = 12.dp, bottomStart = 12.dp)
-    }
-    // 原型 `.msg{display:flex;gap:8px}` + `.msg .mav{margin-top:auto}`：头像与气泡列并排
-    // 8px，头像贴的是这一行的**下沿**，不是上沿。
+    val bubbleBorder = if (isCustomCard || message.mine) null else BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant)
+
+    val topStartRadius = if (!message.mine && hasPrevSender) 4.dp else if (!message.mine) 6.dp else 12.dp
+    val topEndRadius = if (message.mine && hasPrevSender) 4.dp else if (message.mine) 6.dp else 12.dp
+    val bottomStartRadius = if (!message.mine && hasNextSender) 4.dp else 12.dp
+    val bottomEndRadius = if (message.mine && hasNextSender) 4.dp else 12.dp
+
+    val bubbleShape = RoundedCornerShape(
+        topStart = topStartRadius,
+        topEnd = topEndRadius,
+        bottomEnd = bottomEndRadius,
+        bottomStart = bottomStartRadius,
+    )
+
+    val highlightColor by animateColorAsState(
+        targetValue = if (isHighlighted) MaterialTheme.colorScheme.primary.copy(alpha = 0.28f) else Color.Transparent,
+        animationSpec = tween(durationMillis = 350),
+    )
+
     Row(
         modifier = Modifier.fillMaxWidth(),
         horizontalArrangement = if (message.mine) Arrangement.End else Arrangement.Start,
         verticalAlignment = Alignment.Bottom,
     ) {
-        senderAvatar?.let { av ->
-            // 长按头像 = 直接 @：入口挂在**头像**上而不是气泡上 —— 气泡的长按已经是
-            // 「回复 / 撤回 / 复制 / 转发」那个菜单，两个手势落在同一个目标上会打架。
-            // 包一层 Box 而不是给 PeerAvatar 加 modifier：头像组件是全仓共用的，为一个
-            // 手势往它身上开口子，下一个使用点就会照着这个口子长出别的自由度。
-            val avatarContent: @Composable () -> Unit = {
-                PeerAvatar(
-                    name = av.name,
-                    isAgent = av.isAgent,
-                    size = 26.dp,
-                    avatar = av.avatar,
-                    shape = ShapeRoles.Avatar,
-                )
+        if (!message.mine) {
+            senderAvatar?.let { av ->
+                if (!hasNextSender) {
+                    val avatarContent: @Composable () -> Unit = {
+                        PeerAvatar(
+                            name = av.name,
+                            isAgent = av.isAgent,
+                            size = 26.dp,
+                            avatar = av.avatar,
+                            shape = ShapeRoles.Avatar,
+                        )
+                    }
+                    if (onMentionSender != null) {
+                        Box(
+                            modifier = Modifier.pointerInput(av.name, onMentionSender) {
+                                detectTapGestures(onLongPress = { onMentionSender() })
+                            },
+                        ) { avatarContent() }
+                    } else {
+                        avatarContent()
+                    }
+                } else {
+                    Spacer(Modifier.width(26.dp))
+                }
+                Spacer(Modifier.width(sp.sm))
             }
-            if (onMentionSender != null) {
-                // 只用长按手势，**不挂 onClick**：combinedClickable 必须给一个 onClick，
-                // 而"点了没反应"的空实现正是 DeadButtonGuard 盯的那种死按钮（同一个文件
-                // 已有气泡自己那一处，再多一处就会被判红）。detectTapGestures 只注册
-                // onLongPress，单击在这个头像上本来就是"没有动作"。
-                Box(
-                    modifier = Modifier.pointerInput(av.name, onMentionSender) {
-                        detectTapGestures(onLongPress = { onMentionSender() })
-                    },
-                ) { avatarContent() }
-            } else {
-                avatarContent()
-            }
-            Spacer(Modifier.width(sp.sm))
+        } else {
+            // 出站消息在左下侧伴随极简投递标记
+            DeliveryCheckmark(
+                delivery = message.delivery,
+                isFileCompleted = card?.state == TransferState.Completed,
+                modifier = Modifier.padding(end = sp.xs, bottom = sp.xs),
+            )
         }
         // 菜单要锚在气泡上，所以外面套一层 BoxWithConstraints；气泡上限见 bubbleMaxWidth。
         BoxWithConstraints {
             Column {
-            // 原型 `.msg .sender{font-size:11px;color:var(--on-2);margin:0 0 3px 3px}`：
-            // 署名在气泡**外面**、气泡上方，左缩进 3、下边距 3。
-            senderName?.let {
-                Text(
-                    text = it,
-                    style = MaterialTheme.typography.labelSmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    modifier = Modifier.padding(start = 3.dp, bottom = 3.dp),
-                )
+            if (!hasPrevSender) {
+                senderName?.let {
+                    Text(
+                        text = it,
+                        style = MaterialTheme.typography.labelSmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        modifier = Modifier.padding(start = 3.dp, bottom = 3.dp),
+                    )
+                }
             }
             Surface(
                 color = bubbleColor,
                 shape = bubbleShape,
                 border = bubbleBorder,
                 modifier = Modifier
-                    // `maxWidth` 要显式取外层 BoxWithConstraints 的接收者：`Column` 与
-                    // `BoxWithConstraints` 都带 `@LayoutScopeMarker`，嵌套后外层被遮蔽。
-                    // 长文本按内容放开（见 bubbleMaxWidthForText 的 KDoc：比例本身与原型一致，
-                    // 但 80 字以上的中文在 271dp 里要折 6~7 行，读起来太费劲）。
                     .bubbleMaxWidthForText(
                         availableWidth = this@BoxWithConstraints.maxWidth,
                         fraction = bubbleFraction,
                         text = message.text,
                     )
+                    .background(highlightColor, shape = bubbleShape)
                     .combinedClickable(
                         onClick = {},
                         onLongClick = {
@@ -336,19 +438,15 @@ internal fun MessageBubble(
                         },
                     ),
             ) {
-                // 原型 `.bub{padding:8px 12px}`；纯文件气泡 `.bub.bf{padding:5px}`
-                // （文件卡自带内边距，外面只留一圈）。
-                val bubblePad = if (message.file != null || message.pk != null) {
-                    PaddingValues(sp.sm6)
+                val bubblePad = if (isCustomCard) {
+                    PaddingValues(0.dp)
                 } else {
                     PaddingValues(horizontal = sp.md, vertical = sp.sm)
                 }
                 Column(Modifier.padding(bubblePad)) {
                 // 被引用的源消息卡片：点击可跳至原消息
                 if (quotedMessage != null) {
-                    val quotedBody = quotedMessage.text.ifBlank { quotedMessage.file?.name.orEmpty() }
-                    // 发送者名走身份解析（调用方算好传进来）；资料没到就如实说
-                    // 「未知成员」，不再印 8 位 hex。
+                    val quotedBody = quotedMessagePreview(quotedMessage)
                     val quotedSender = quotedSenderName
                         ?: stringResource(Res.string.common_unknown_member)
                     Surface(
@@ -399,9 +497,13 @@ internal fun MessageBubble(
                         }
                     }
                 }
-                val card = message.file
                 val pk = message.pk
-                if (card != null) {
+                if (isPureImage && previewImagePath != null) {
+                    InlineImagePreview(
+                        path = previewImagePath,
+                        onClick = onImageClick?.let { click -> { click(previewImagePath) } },
+                    )
+                } else if (card != null) {
                     FileCardView(
                         card = card,
                         onAcceptTransfer = onAcceptTransfer,
@@ -428,63 +530,26 @@ internal fun MessageBubble(
                         if (renderMarkdown) {
                             MarkdownMessage(message.text)
                         } else {
-                            // 人发的消息**不渲染 Markdown**（用户打的星号就该原样显示），
-                            // 但 URL 仍然要能点 —— 这两件事不是一回事。局域网场景里贴地址很常见，
-                            // 之前整条纯文本连识别都没有，对端只能看着。
                             Text(text = linkifyPlainText(message.text), style = MaterialTheme.typography.bodyMedium)
                         }
                     }
                 }
-                Row(
-                    modifier = Modifier.padding(top = sp.xs),
-                    horizontalArrangement = Arrangement.spacedBy(sp.sm),
-                    verticalAlignment = Alignment.CenterVertically,
-                ) {
-                    val metaColor = if (message.mine) {
-                        MaterialTheme.colorScheme.onPrimaryContainer.copy(alpha = 0.75f)
-                    } else {
-                        MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.8f)
-                    }
-                    Text(
-                        text = formatClock(message.at),
-                        style = MaterialTheme.typography.labelSmall,
-                        color = metaColor,
-                    )
-                    if (message.mine) {
-                        // 只有真的知道投递状态时才显示。文件气泡的 delivery 是 null（它由传输
-                        // 事件驱动，不走 msg 的 ACK 状态），上一版这里落到 `common_unknown`，
-                        // 于是真机上文件卡片旁边挂着两个字「未知」—— 不知道就别说话。
-                        message.delivery?.let { delivery ->
-                            val tint = when (delivery) {
-                                DeliveryState.Failed -> MaterialTheme.colorScheme.error
-                                DeliveryState.Queued -> MaterialTheme.colorScheme.onPrimaryContainer.copy(alpha = 0.85f)
-                                DeliveryState.Sending -> MaterialTheme.colorScheme.onPrimaryContainer.copy(alpha = 0.85f)
-                                else -> MaterialTheme.colorScheme.primary
-                            }
-                            Row(
-                                verticalAlignment = Alignment.CenterVertically,
-                                horizontalArrangement = Arrangement.spacedBy(3.dp),
-                            ) {
-                                // 已送达与已排队各有各的图标语义（design-spec: delivered / queued），
-                                // 失败和撤回只有文案，不硬凑图标。
-                                delivery.stateIcon()?.let { icon ->
-                                    Icon(
-                                        painter = painterResource(icon),
-                                        contentDescription = null,
-                                        tint = tint,
-                                        modifier = Modifier.size(13.dp),
-                                    )
-                                }
-                                Text(
-                                    text = delivery.label(),
-                                    style = MaterialTheme.typography.labelSmall,
-                                    color = tint,
-                                )
-                            }
+                if (!isCustomCard) {
+                    Row(
+                        modifier = Modifier.padding(top = sp.xs),
+                        horizontalArrangement = Arrangement.spacedBy(sp.sm),
+                        verticalAlignment = Alignment.CenterVertically,
+                    ) {
+                        val metaColor = if (message.mine) {
+                            MaterialTheme.colorScheme.onPrimaryContainer.copy(alpha = 0.75f)
+                        } else {
+                            MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.8f)
                         }
-                        // 「发送失败」是唯一一种用户还能做点什么的状态，所以重发出口只挂在这里。
-                        // 入站消息没有投递态（[MessageUi.delivery] 只对自己发出的有意义），
-                        // 没有 onRetry 的壳也不画 —— 一个按下去没反应的按钮比没有按钮更糟。
+                        Text(
+                            text = formatClock(message.at),
+                            style = MaterialTheme.typography.labelSmall,
+                            color = metaColor,
+                        )
                         if (message.mine && message.delivery == DeliveryState.Failed && onRetry != null) {
                             AppTextButton(
                                 text = stringResource(Res.string.chat_delivery_resend),
@@ -693,6 +758,8 @@ internal fun NoticeLine(
      * 组件不该知道「这台设备是不是 agent 宿主」「node 起没起来」这些事。
      */
     onRequestGrant: (() -> Unit)? = null,
+    /** 自己撤回消息后的快速「重新编辑」出口。 */
+    onReEdit: (() -> Unit)? = null,
 ) {
     val sp = LocalAppSpacing.current
     Row(
@@ -706,7 +773,8 @@ internal fun NoticeLine(
             modifier = Modifier.padding(vertical = sp.xs),
         ) {
             Row(verticalAlignment = Alignment.CenterVertically) {
-                val hasAction = kind == NoticeKind.AgentNotAuthorized && onRequestGrant != null
+                val hasAction = (kind == NoticeKind.AgentNotAuthorized && onRequestGrant != null) ||
+                    (kind == NoticeKind.RecalledBySelf && onReEdit != null)
                 Text(
                     text = noticeText(kind, detail, displayNameOf),
                     style = MaterialTheme.typography.labelSmall,
@@ -724,6 +792,13 @@ internal fun NoticeLine(
                     AppTextButton(
                         text = stringResource(Res.string.chat_agent_request_grant),
                         onClick = onRequestGrant,
+                        size = AppButtonSize.Small,
+                    )
+                }
+                if (kind == NoticeKind.RecalledBySelf && onReEdit != null) {
+                    AppTextButton(
+                        text = stringResource(Res.string.chat_recall_re_edit),
+                        onClick = onReEdit,
                         size = AppButtonSize.Small,
                     )
                 }
@@ -864,13 +939,31 @@ internal fun FileCardView(
             Column(Modifier.weight(1f)) {
         // `.fn{font-size:12px;font-weight:600;overflow:hidden;text-overflow:ellipsis;
         // white-space:nowrap}` —— 一行，超出省略（原型不让它折出第二行）。
-        Text(
-            text = card.name,
-            style = MaterialTheme.typography.bodySmall,
-            fontWeight = FontWeight.SemiBold,
-            maxLines = 1,
-            overflow = TextOverflow.Ellipsis,
-        )
+        Row(
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(sp.xs),
+        ) {
+            Text(
+                text = card.name,
+                style = MaterialTheme.typography.bodySmall,
+                fontWeight = FontWeight.SemiBold,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
+                modifier = Modifier.weight(1f, fill = false),
+            )
+            Surface(
+                shape = RelayShapes.extraSmall,
+                color = MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.6f),
+            ) {
+                Text(
+                    text = stringResource(Res.string.file_transfer_direct),
+                    style = MaterialTheme.typography.labelSmall,
+                    color = MaterialTheme.colorScheme.primary,
+                    fontWeight = FontWeight.Medium,
+                    modifier = Modifier.padding(horizontal = sp.xs, vertical = sp.xxs),
+                )
+            }
+        }
         Text(
             // 原型 folderCard 的 accepted 分支把**进度口径**写在这一行：
             // `${pct}% · ${sz} / ${sz} · ${spd}`（relay.html:4259-4261），状态行只留状态词。
@@ -1063,15 +1156,32 @@ internal fun FileCardView(
                         MediaKind.Other -> Unit
                     }
                 }
-                Text(
-                    text = if (card.mine) {
-                        stringResource(Res.string.file_state_completed_out)
-                    } else {
-                        stringResource(Res.string.file_state_completed_in)
-                    },
-                    style = MaterialTheme.typography.labelSmall,
-                    color = MaterialTheme.colorScheme.primary,
-                )
+                if (card.mine) {
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(sp.xs),
+                        modifier = Modifier.padding(top = sp.xxs),
+                    ) {
+                        Icon(
+                            painter = painterResource(Res.drawable.ic_check_double),
+                            contentDescription = null,
+                            tint = MaterialTheme.colorScheme.primary,
+                            modifier = Modifier.size(IconSizes.Badge),
+                        )
+                        Text(
+                            text = stringResource(Res.string.file_state_sent_success),
+                            style = MaterialTheme.typography.labelSmall,
+                            color = MaterialTheme.colorScheme.primary,
+                            fontWeight = FontWeight.Medium,
+                        )
+                    }
+                } else {
+                    Text(
+                        text = stringResource(Res.string.file_state_completed_in),
+                        style = MaterialTheme.typography.labelSmall,
+                        color = MaterialTheme.colorScheme.primary,
+                    )
+                }
                 val savedPath = card.savedPaths.firstOrNull()
                 savedPath?.let { path ->
                     // 「已存到 <路径>」是**事实陈述**，必须保留（见 [ReceivedFileActions] 的 KDoc：

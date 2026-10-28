@@ -69,8 +69,11 @@ import androidx.compose.runtime.setValue
  * 紧挨着它的那行文字就是文件名，再读一遍是重复。
  */
 @Composable
-internal fun InlineImagePreview(path: String, onClick: (() -> Unit)? = null) {
-    val sp = LocalAppSpacing.current
+internal fun InlineImagePreview(
+    path: String,
+    onClick: (() -> Unit)? = null,
+    modifier: Modifier = Modifier,
+) {
     val bitmap by produceState<ImageBitmap?>(initialValue = null, path) {
         value = withContext(ioDispatcher) {
             readFileBytes(path)?.let { decodeImageBytes(it) }
@@ -87,8 +90,7 @@ internal fun InlineImagePreview(path: String, onClick: (() -> Unit)? = null) {
     Surface(
         shape = RelayShapes.medium,
         border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant),
-        modifier = Modifier
-            .padding(top = sp.sm6)
+        modifier = modifier
             .size(naturalWidth * scale, naturalHeight * scale)
             .clip(RelayShapes.medium)
             .then(if (onClick != null) Modifier.clickable { onClick() } else Modifier),

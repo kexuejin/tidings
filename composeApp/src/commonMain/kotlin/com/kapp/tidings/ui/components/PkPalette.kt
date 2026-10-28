@@ -3,6 +3,8 @@
 
 package com.kapp.tidings.ui.components
 
+import androidx.compose.foundation.BorderStroke
+import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
@@ -10,15 +12,18 @@ import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.FilledTonalButton
 import androidx.compose.material3.HorizontalDivider
+import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
@@ -26,27 +31,132 @@ import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
-import androidx.compose.ui.unit.sp
 import androidx.compose.ui.window.Dialog
-import com.kapp.tidings.domain.pkEmojiPreview
 import com.kapp.tidings.core.protocol.PkGames
 import com.kapp.tidings.core.protocol.RpsValues
 import com.kapp.tidings.generated.resources.Res
 import com.kapp.tidings.generated.resources.chat_pk_dice
-import com.kapp.tidings.generated.resources.chat_pk_dice_val
+import com.kapp.tidings.generated.resources.chat_pk_dice_outcome
+import com.kapp.tidings.generated.resources.chat_pk_dice_title
 import com.kapp.tidings.generated.resources.chat_pk_paper
 import com.kapp.tidings.generated.resources.chat_pk_rock
 import com.kapp.tidings.generated.resources.chat_pk_rps
+import com.kapp.tidings.generated.resources.chat_pk_rps_outcome
 import com.kapp.tidings.generated.resources.chat_pk_scissors
 import com.kapp.tidings.generated.resources.chat_pk_title
 import com.kapp.tidings.generated.resources.common_cancel
+import com.kapp.tidings.generated.resources.ic_hand
+import com.kapp.tidings.generated.resources.ic_pk
+import org.jetbrains.compose.resources.painterResource
 import org.jetbrains.compose.resources.stringResource
 
+import com.kapp.tidings.ui.theme.IconSizes
 import com.kapp.tidings.ui.theme.LocalAppSpacing
+import com.kapp.tidings.ui.theme.RelayElevations
 import com.kapp.tidings.ui.theme.RelayShapes
 import com.kapp.tidings.domain.model.PkCardUi
+import com.kapp.tidings.domain.pkEmojiPreview
+
+/**
+ * 骰子自绘点数白瓷板（1~6 点）。
+ */
+@Composable
+public fun DiceTile(
+    dots: Int,
+    modifier: Modifier = Modifier,
+) {
+    val clampedDots = dots.coerceIn(1, 6)
+    val dotColor = MaterialTheme.colorScheme.onSurface
+    val sp = LocalAppSpacing.current
+    Surface(
+        shape = RelayShapes.small,
+        color = MaterialTheme.colorScheme.surface,
+        border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.6f)),
+        shadowElevation = RelayElevations.Card,
+        modifier = modifier.size(42.dp),
+    ) {
+        Canvas(modifier = Modifier.padding(sp.sm6).fillMaxSize()) {
+            val dotRadius = size.width * 0.1f
+            val w = size.width
+            val h = size.height
+
+            val left = w * 0.28f
+            val midX = w * 0.5f
+            val right = w * 0.72f
+
+            val top = h * 0.28f
+            val midY = h * 0.5f
+            val bottom = h * 0.72f
+
+            when (clampedDots) {
+                1 -> {
+                    drawCircle(color = dotColor, radius = dotRadius * 1.35f, center = Offset(midX, midY))
+                }
+                2 -> {
+                    drawCircle(color = dotColor, radius = dotRadius, center = Offset(left, top))
+                    drawCircle(color = dotColor, radius = dotRadius, center = Offset(right, bottom))
+                }
+                3 -> {
+                    drawCircle(color = dotColor, radius = dotRadius, center = Offset(left, top))
+                    drawCircle(color = dotColor, radius = dotRadius, center = Offset(midX, midY))
+                    drawCircle(color = dotColor, radius = dotRadius, center = Offset(right, bottom))
+                }
+                4 -> {
+                    drawCircle(color = dotColor, radius = dotRadius, center = Offset(left, top))
+                    drawCircle(color = dotColor, radius = dotRadius, center = Offset(right, top))
+                    drawCircle(color = dotColor, radius = dotRadius, center = Offset(left, bottom))
+                    drawCircle(color = dotColor, radius = dotRadius, center = Offset(right, bottom))
+                }
+                5 -> {
+                    drawCircle(color = dotColor, radius = dotRadius, center = Offset(left, top))
+                    drawCircle(color = dotColor, radius = dotRadius, center = Offset(right, top))
+                    drawCircle(color = dotColor, radius = dotRadius, center = Offset(midX, midY))
+                    drawCircle(color = dotColor, radius = dotRadius, center = Offset(left, bottom))
+                    drawCircle(color = dotColor, radius = dotRadius, center = Offset(right, bottom))
+                }
+                6 -> {
+                    val y1 = h * 0.24f
+                    val y2 = h * 0.5f
+                    val y3 = h * 0.76f
+                    drawCircle(color = dotColor, radius = dotRadius, center = Offset(left, y1))
+                    drawCircle(color = dotColor, radius = dotRadius, center = Offset(left, y2))
+                    drawCircle(color = dotColor, radius = dotRadius, center = Offset(left, y3))
+                    drawCircle(color = dotColor, radius = dotRadius, center = Offset(right, y1))
+                    drawCircle(color = dotColor, radius = dotRadius, center = Offset(right, y2))
+                    drawCircle(color = dotColor, radius = dotRadius, center = Offset(right, y3))
+                }
+            }
+        }
+    }
+}
+
+/**
+ * 猜拳手势白瓷板（石头 / 剪刀 / 布）。
+ */
+@Composable
+public fun RpsTile(
+    value: String,
+    modifier: Modifier = Modifier,
+) {
+    val emoji = pkEmojiPreview(PkGames.RPS, value)
+    Surface(
+        shape = RelayShapes.small,
+        color = MaterialTheme.colorScheme.surface,
+        border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.6f)),
+        shadowElevation = RelayElevations.Card,
+        modifier = modifier.size(42.dp),
+    ) {
+        Box(contentAlignment = Alignment.Center) {
+            Text(
+                text = emoji,
+                style = MaterialTheme.typography.titleLarge,
+            )
+        }
+    }
+}
 
 /**
  * PK 小游戏卡片视图（猜拳 / 骰子），嵌入消息气泡中。
@@ -56,49 +166,70 @@ public fun PkCardView(
     pk: PkCardUi,
     modifier: Modifier = Modifier,
 ) {
-    val gameTitle = if (pk.game == PkGames.RPS) {
-        stringResource(Res.string.chat_pk_rps)
+    val isDice = pk.game == PkGames.DICE
+    val gameTitle = if (isDice) {
+        stringResource(Res.string.chat_pk_dice_title)
     } else {
-        stringResource(Res.string.chat_pk_dice)
+        stringResource(Res.string.chat_pk_rps)
     }
-    val valueLabel = when (pk.game) {
-        PkGames.RPS -> when (pk.value) {
+    val valueLabel = if (isDice) {
+        val dots = pk.value.toIntOrNull() ?: 1
+        stringResource(Res.string.chat_pk_dice_outcome, dots)
+    } else {
+        val label = when (pk.value) {
             RpsValues.ROCK -> stringResource(Res.string.chat_pk_rock)
             RpsValues.PAPER -> stringResource(Res.string.chat_pk_paper)
             RpsValues.SCISSORS -> stringResource(Res.string.chat_pk_scissors)
             else -> pk.value
         }
-        PkGames.DICE -> stringResource(Res.string.chat_pk_dice_val, pk.value.toIntOrNull() ?: 1)
-        else -> pk.value
+        stringResource(Res.string.chat_pk_rps_outcome, label)
     }
-    val emoji = pkEmojiPreview(pk.game, pk.value)
 
+    val sp = LocalAppSpacing.current
     Surface(
         shape = RelayShapes.medium,
-        color = MaterialTheme.colorScheme.surface.copy(alpha = 0.55f),
-        modifier = modifier.fillMaxWidth(),
+        color = MaterialTheme.colorScheme.surface.copy(alpha = 0.75f),
+        border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.5f)),
+        modifier = modifier.widthIn(min = 160.dp),
     ) {
-        Column(
-            modifier = Modifier.padding(horizontal = LocalAppSpacing.current.lg, vertical = LocalAppSpacing.current.md),
-            horizontalAlignment = Alignment.CenterHorizontally,
+        Row(
+            modifier = Modifier.padding(horizontal = sp.md10, vertical = sp.sm),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(sp.md10),
         ) {
-            Text(
-                text = gameTitle,
-                style = MaterialTheme.typography.labelSmall,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-            )
-            Spacer(Modifier.height(LocalAppSpacing.current.sm))
-            Text(
-                text = emoji,
-                fontSize = 40.sp,
-            )
-            Spacer(Modifier.height(LocalAppSpacing.current.sm))
-            Text(
-                text = valueLabel,
-                style = MaterialTheme.typography.titleMedium,
-                fontWeight = FontWeight.SemiBold,
-                color = MaterialTheme.colorScheme.onSurface,
-            )
+            if (isDice) {
+                DiceTile(dots = pk.value.toIntOrNull() ?: 1)
+            } else {
+                RpsTile(value = pk.value)
+            }
+            Column(
+                verticalArrangement = Arrangement.Center,
+            ) {
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(sp.xs),
+                ) {
+                    Icon(
+                        painter = painterResource(if (isDice) Res.drawable.ic_pk else Res.drawable.ic_hand),
+                        contentDescription = null,
+                        tint = MaterialTheme.colorScheme.primary,
+                        modifier = Modifier.size(IconSizes.Badge),
+                    )
+                    Text(
+                        text = gameTitle,
+                        style = MaterialTheme.typography.labelSmall,
+                        color = MaterialTheme.colorScheme.primary,
+                        fontWeight = FontWeight.Medium,
+                    )
+                }
+                Spacer(Modifier.height(sp.xxs))
+                Text(
+                    text = valueLabel,
+                    style = MaterialTheme.typography.titleMedium,
+                    fontWeight = FontWeight.SemiBold,
+                    color = MaterialTheme.colorScheme.onSurface,
+                )
+            }
         }
     }
 }

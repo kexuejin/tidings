@@ -99,6 +99,7 @@
     <string name="chat_forward">转发</string>
     <string name="chat_recall_peer">对方撤回了一条消息</string>
     <string name="chat_recall_self">你撤回了一条消息</string>
+    <string name="chat_recall_re_edit">重新编辑</string>
     <!-- 戳一碰。协议里它是"窗口震动"，手机上没有对应的动效，所以文案说的是"戳了一下"；
          失败那条必须说清"不会补发"，否则用户会以为稍后能到（协议 §8 决议 #109）。 -->
     <string name="chat_nudge">戳一碰</string>
@@ -961,6 +962,9 @@
     <string name="file_state_active_out">正在发送 %1$d%</string>
     <string name="file_state_completed_in">已接收</string>
     <string name="file_state_completed_out">已送达</string>
+    <string name="file_state_sent_success">发送成功</string>
+    <string name="file_state_received_success">接收成功</string>
+    <string name="file_transfer_direct">直接</string>
     <string name="file_state_failed">传输失败：%1$s</string>
     <string name="chat_file_send_failed_hint">发送失败，请重新选择文件发送</string>
     <string name="file_state_declined">对方已拒绝</string>
@@ -1598,6 +1602,9 @@
     <string name="chat_pk_hint_offline">在线的对端才有得玩</string>
     <string name="chat_pk_rps">猜拳</string>
     <string name="chat_pk_dice">掷骰子</string>
+    <string name="chat_pk_dice_title">骰子</string>
+    <string name="chat_pk_dice_outcome">掷出 %1$d 点</string>
+    <string name="chat_pk_rps_outcome">出拳：%1$s</string>
     <string name="chat_pk_rock">石头</string>
     <string name="chat_pk_paper">布</string>
     <string name="chat_pk_scissors">剪刀</string>

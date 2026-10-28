@@ -95,6 +95,7 @@
     <string name="chat_forward">Forward</string>
     <string name="chat_recall_peer">The other party recalled a message</string>
     <string name="chat_recall_self">You recalled a message</string>
+    <string name="chat_recall_re_edit">Re-edit</string>
     <!-- 戳一碰。协议里它是"窗口震动"，手机上没有对应的动效，所以文案说的是"戳了一下"；
          失败那条必须说清"不会补发"，否则用户会以为稍后能到（协议 §8 决议 #109）。 -->
     <string name="chat_nudge">Nudge</string>
@@ -826,6 +827,9 @@
     <string name="file_state_active_out">Sending %1$d%%</string>
     <string name="file_state_completed_in">Received</string>
     <string name="file_state_completed_out">Delivered</string>
+    <string name="file_state_sent_success">Sent</string>
+    <string name="file_state_received_success">Received</string>
+    <string name="file_transfer_direct">Direct</string>
     <string name="file_state_failed">Transfer failed: %1$s</string>
     <string name="chat_file_send_failed_hint">Send failed. Please pick the file again to send it</string>
     <string name="file_state_declined">Peer declined transfer</string>
@@ -1444,6 +1448,9 @@
     <string name="chat_pk_hint_offline">Available only when peer is online</string>
     <string name="chat_pk_rps">Rock-Paper-Scissors</string>
     <string name="chat_pk_dice">Roll Dice</string>
+    <string name="chat_pk_dice_title">Dice</string>
+    <string name="chat_pk_dice_outcome">Rolled %1$d</string>
+    <string name="chat_pk_rps_outcome">Played %1$s</string>
     <string name="chat_pk_rock">Rock</string>
     <string name="chat_pk_paper">Paper</string>
     <string name="chat_pk_scissors">Scissors</string>
