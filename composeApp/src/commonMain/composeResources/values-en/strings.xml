@@ -1085,6 +1085,8 @@
 
     <!-- 消息协作进阶：转发与群元数据编辑 -->
     <string name="chat_forward_title">Forward message to</string>
+    <string name="chat_forward_search_placeholder">Search conversations</string>
+    <string name="chat_drop_target_title">Send files to</string>
     <string name="chat_forward_success">Message forwarded</string>
     <string name="chat_reply_action">Reply</string>
     <string name="chat_reply_preview_prefix">Reply %1$s: %2$s</string>

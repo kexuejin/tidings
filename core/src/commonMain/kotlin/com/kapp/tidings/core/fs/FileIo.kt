@@ -86,6 +86,40 @@ fun sanitizeRelativePath(raw: String): String? {
 private val WINDOWS_DRIVE = Regex("^[A-Za-z]:")
 
 /**
+ * Windows 保留设备名（大小写不敏感）：设备名本体在第一个点之前就算，带不带扩展名都保留。
+ */
+private val WINDOWS_RESERVED = setOf(
+    "CON", "PRN", "AUX", "NUL",
+    "COM1", "COM2", "COM3", "COM4", "COM5", "COM6", "COM7", "COM8", "COM9",
+    "LPT1", "LPT2", "LPT3", "LPT4", "LPT5", "LPT6", "LPT7", "LPT8", "LPT9",
+)
+
+/**
+ * Windows 保留设备名清洗（接收落盘侧，对每一段路径生效）。
+ *
+ * 对端发来的名字是不可信输入：`CON.txt`、`Nul`、`report .`（尾随空格）这类名字在
+ * Windows 上落盘会静默失败或被系统改写，而发送端并不知道 —— 接收端写不出来还报
+ * 「传输失败」，两头都对不上账。这里在接收侧统一清洗：
+ *  - 先剥掉段尾的空格与点（Windows 会吞掉它们，剩下的才是真实文件名）；
+ *  - 设备名本体（第一个点之前、大小写不敏感）命中保留名时加 `_` 前缀。
+ *
+ * **所有平台都清洗**，不只 Windows：一是接收行为可预测（同名文件在任何设备上
+ * 落成同一个名字）；二是收到的文件将来可能被转发给 Windows 用户，源头干净
+ * 比转发时再补清洗可靠。清洗只改本地写盘名，不进 wire —— 旧端无感。
+ */
+fun sanitizeWindowsReservedNames(path: String): String =
+    path.split('/').joinToString("/") { segment ->
+        val trimmed = segment.trimEnd(' ', '.')
+        if (trimmed.isEmpty()) {
+            // 空段不该出现（sanitizeRelativePath 已拒 `..` 与空段），原样放行不猜。
+            segment
+        } else {
+            val stem = trimmed.substringBefore('.', missingDelimiterValue = trimmed)
+            if (stem.uppercase() in WINDOWS_RESERVED) "_$trimmed" else trimmed
+        }
+    }
+
+/**
  * 读一个小文件的全部字节。文件不存在、读不动、空文件、超过 [maxBytes]，一律返回 null。
  *
  * 为什么要有上限：调用方拿它去解码（图片内联预览就是第一个），而"先整个读进来再说"

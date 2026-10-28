@@ -284,8 +284,6 @@ fun SettingsConnectionSubpage(
                     tlsPin = state.network.selfTlsPin,
                     // 带昵称：对方扫完立刻看见真名，而不是 node-a1b2c3d4。
                     nick = state.settings.nick,
-                    // 实验 luciola：开了才带这一段（与 pin 互斥，见 QrPairing）。
-                    luciola = state.network.luciolaQr,
                 )
                 // 编码器对超长内容抛异常（它拒绝截断）；这里既不能让它把整屏打崩，
                 // 也绝不画一张「能扫、但内容是错的」码 —— 三种情况各自说清。
@@ -413,20 +411,23 @@ fun SettingsConnectionSubpage(
                             label = { Text(stringResource(Res.string.cidr_input_label)) },
                             placeholder = { Text(stringResource(Res.string.cidr_input_hint)) },
                             modifier = Modifier.weight(1f),
-                            singleLine = true,
+                            singleLine = false,
+                            maxLines = 4,
                             isError = cidrInvalid,
                         )
                         // 原型这颗是 `.btn sm pri`（`prototype/relay.html:5097`）：输入框右侧的密排位置。
                         AppButton(
                             text = stringResource(Res.string.cidr_add_action),
                             onClick = {
-                                val target = normalizeScanRangeOrNull(newCidr)
+                                val batch = parseBatchScanRanges(newCidr)
+                                val target = normalizeScanRangeOrNull(newCidr) ?: batch.valid.firstOrNull()
                                 if (target == null) {
                                     cidrInvalid = true
                                 } else {
-                                    cidrInvalid = false
+                                    cidrInvalid = batch.invalid.isNotEmpty()
                                     addRange(target)
-                                    newCidr = ""
+                                    if (batch.invalid.isEmpty()) newCidr = "" else newCidr = batch.invalid.joinToString("\n")
+                                    for (item in batch.valid) if (item != target) addRange(item)
                                 }
                             },
                             size = AppButtonSize.Small,
@@ -573,6 +574,38 @@ internal fun parsePortInput(raw: String, fallback: Int): Int? {
 internal fun normalizeScanRangeOrNull(raw: String): String? {
     val normalized = CidrUtils.normalizeCidr(raw.trim()) ?: return null
     return if (CidrUtils.parseCidrHosts(normalized) != null) normalized else null
+}
+
+data class CidrBatchParseResult(
+    val valid: List<String>,
+    val invalid: List<String>,
+)
+
+/**
+ * 批量解析与规范化 CIDR 列表（纯函数，可单测）。
+ *
+ * 支持以换行、逗号、分号分隔的多行粘贴输入。
+ * 规范化主机位、去重、检查主机数上限（≤ 1024），保留非法条目以便反馈。
+ */
+internal fun parseBatchScanRanges(raw: String, maxItems: Int = 50): CidrBatchParseResult {
+    val tokens = raw.split(Regex("[\\r\\n,;]+"))
+        .map { it.trim() }
+        .filter { it.isNotEmpty() }
+    val valid = mutableListOf<String>()
+    val invalid = mutableListOf<String>()
+    for (token in tokens) {
+        val normalized = normalizeScanRangeOrNull(token)
+        if (normalized != null) {
+            if (!valid.contains(normalized)) {
+                if (valid.size < maxItems) {
+                    valid.add(normalized)
+                }
+            }
+        } else {
+            invalid.add(token)
+        }
+    }
+    return CidrBatchParseResult(valid = valid, invalid = invalid)
 }
 
 /**

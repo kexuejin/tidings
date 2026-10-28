@@ -12,6 +12,7 @@ import com.kapp.tidings.core.fs.openRandomAccess
 import com.kapp.tidings.core.fs.pathJoin
 import com.kapp.tidings.core.fs.renameFile
 import com.kapp.tidings.core.fs.sanitizeRelativePath
+import com.kapp.tidings.core.fs.sanitizeWindowsReservedNames
 import com.kapp.tidings.core.ioDispatcher
 import com.kapp.tidings.core.nowMillis
 import com.kapp.tidings.core.protocol.FileTransfer
@@ -382,7 +383,8 @@ private class PullSession(private val opts: PullOptions) {
     private suspend fun pullOne(plan: IncomingFilePlan) {
         phase(PullStage.Prepare)
 
-        val safe = sanitizeRelativePath(plan.relPath) ?: fail("path-escape")
+        val safe = sanitizeRelativePath(plan.relPath)?.let(::sanitizeWindowsReservedNames)
+            ?: fail("path-escape")
         val finalPath = pathJoin(root, safe)
         // 最后一道闸。relPath 已经 sanitize 过（无 `..`、无前导 `/`），这里正常不会触发；
         // 留着是因为"对端给的路径"这件事本身就是不可信输入，多一道便宜的检查不亏。
@@ -533,7 +535,8 @@ private class PullSession(private val opts: PullOptions) {
         finalPathOf(plan) + PART_SUFFIX
 
     private fun finalPathOf(plan: IncomingFilePlan): String {
-        val safe = sanitizeRelativePath(plan.relPath) ?: fail("path-escape")
+        val safe = sanitizeRelativePath(plan.relPath)?.let(::sanitizeWindowsReservedNames)
+            ?: fail("path-escape")
         return pathJoin(root, safe)
     }
 

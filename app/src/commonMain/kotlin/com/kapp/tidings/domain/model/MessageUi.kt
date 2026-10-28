@@ -49,6 +49,8 @@ data class FileCardUi(
     val size: Long,
     val fileCount: Int = 1,
     val done: Long = 0L,
+    /** 整次传输的采样速率（字节/秒，EMA 平滑）；null = 没有可信读数，界面不画。 */
+    val speedBps: Long? = null,
     val mine: Boolean = false,
     val isFolder: Boolean = false,
     val state: TransferState = TransferState.Offered,

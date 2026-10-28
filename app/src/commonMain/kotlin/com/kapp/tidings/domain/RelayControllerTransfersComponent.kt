@@ -379,6 +379,7 @@ fun handleOnTransfer(event: TransferEvent) {
                 convId,
                 card.copy(
                     done = event.done,
+                    speedBps = event.speedBps,
                     // **分母只在 Offered 里定，这里不改。**
                     //
                     // 原来写 `size = maxOf(card.size, event.total)`：`card.size` 是

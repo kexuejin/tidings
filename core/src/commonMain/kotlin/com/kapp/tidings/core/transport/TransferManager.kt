@@ -23,12 +23,15 @@ import io.ktor.network.sockets.Socket
 import io.ktor.utils.io.ByteReadChannel
 import io.ktor.utils.io.ByteWriteChannel
 import kotlin.concurrent.Volatile
+import kotlin.math.roundToLong
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableSharedFlow
+import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharedFlow
 import kotlinx.coroutines.flow.asSharedFlow
+import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
@@ -119,6 +122,42 @@ internal suspend fun resolveAfterAcceptGrace(
         resolve()?.let { return it }
     }
     return null
+}
+
+/**
+ * 单次传输的速度采样状态。[perFile] 按 fileId 记各文件已传字节 —— 速度必须按
+ * **整次传输**算：单文件口径在「换下一个文件」的瞬间会归零一次，界面上速度
+ * 会周期性跳成 0，看起来像卡住。
+ */
+internal class TransferSpeedSample(
+    val nowMs: Long,
+    internal val perFile: Map<String, Long>,
+    internal val emaBps: Double?,
+) {
+    val totalDone: Long get() = perFile.values.sum()
+}
+
+/** 采样间隔下限：两次事件挨得太近就不重算，沿用上次 EMA（速率读数才有秒级稳定性）。 */
+internal const val SPEED_SAMPLE_INTERVAL_MS = 500L
+
+/**
+ * 由上一次采样推出下一次。EMA 系数 0.4/0.6：新采样占四成，压掉 TCP 吞吐的抖动，
+ * 又不至于让暂停后的恢复慢半拍。首个采样没有基准，[TransferSpeedSample.emaBps]
+ * 为 null —— 界面在 null 时不画速度，而不是编一个 0。
+ */
+internal fun nextTransferSpeed(
+    prev: TransferSpeedSample?,
+    fileId: String,
+    done: Long,
+    nowMs: Long,
+): TransferSpeedSample {
+    val perFile = (prev?.perFile ?: emptyMap()) + (fileId to done)
+    if (prev == null) return TransferSpeedSample(nowMs, perFile, null)
+    val elapsed = nowMs - prev.nowMs
+    if (elapsed < SPEED_SAMPLE_INTERVAL_MS) return prev
+    val inst = (perFile.values.sum() - prev.totalDone).coerceAtLeast(0L) * 1000.0 / elapsed
+    val ema = prev.emaBps?.let { inst * 0.4 + it * 0.6 } ?: inst
+    return TransferSpeedSample(nowMs, perFile, ema)
 }
 
 class TransferManager(
@@ -264,6 +303,30 @@ class TransferManager(
 
     private val stateLock = Mutex()
     private val outgoing = mutableMapOf<String, OutgoingTransfer>()
+
+    /**
+     * 速度采样表（transferId → 采样）。出站事件来自 server 事件收集协程、入站来自
+     * 拉取协程，两条线程都会写 —— 用 CAS 原子表而不是 Mutex：进度事件很密，
+     * 采样又便宜到不值得为它挂起。
+     */
+    private val speedSamples = MutableStateFlow<Map<String, TransferSpeedSample>>(emptyMap())
+
+    /** 记一次进度采样并返回当前平滑速率（首采样为 null，界面不画）。 */
+    private fun sampleSpeed(transferId: String, fileId: String, done: Long): Long? {
+        val now = nowMillis()
+        var resultBps: Long? = null
+        speedSamples.update { current ->
+            val prev = current[transferId]
+            val next = nextTransferSpeed(prev, fileId, done, now)
+            resultBps = next.emaBps?.roundToLong()
+            current + (transferId to next)
+        }
+        return resultBps
+    }
+
+    private fun clearSpeedSample(transferId: String) {
+        speedSamples.update { it - transferId }
+    }
 
     /**
      * 报价的**投递状态**（task-62 只读出口）：transferId → 状态，环形上限 [MAX_TRACKED_DELIVERIES]。
@@ -420,7 +483,8 @@ class TransferManager(
         eventJob = scope.launch {
             server.events.collect { event ->
                 when (event) {
-                    is TransferServerEvent.Served ->
+                    is TransferServerEvent.Served -> {
+                        clearSpeedSample(event.transferId)
                         _events.tryEmit(
                             TransferEvent.Completed(
                                 transferId = event.transferId,
@@ -429,8 +493,10 @@ class TransferManager(
                                 savedPaths = emptyList(),
                             ),
                         )
+                    }
 
-                    is TransferServerEvent.Disconnected ->
+                    is TransferServerEvent.Disconnected -> {
+                        clearSpeedSample(event.transferId)
                         _events.tryEmit(
                             TransferEvent.Failed(
                                 transferId = event.transferId,
@@ -439,6 +505,7 @@ class TransferManager(
                                 reason = "disconnected",
                             ),
                         )
+                    }
 
                     is TransferServerEvent.DiagnosticError ->
                         _events.tryEmit(
@@ -450,7 +517,8 @@ class TransferManager(
                             ),
                         )
 
-                    is TransferServerEvent.Progress ->
+                    is TransferServerEvent.Progress -> {
+                        val speed = sampleSpeed(event.transferId, event.fileId, event.sent)
                         _events.tryEmit(
                             TransferEvent.Progress(
                                 transferId = event.transferId,
@@ -459,8 +527,10 @@ class TransferManager(
                                 done = event.sent,
                                 total = event.size,
                                 incoming = false,
+                                speedBps = speed,
                             ),
                         )
+                    }
                 }
             }
         }
@@ -658,16 +728,20 @@ class TransferManager(
             offer,
             saveDir,
             { fileId, done, total ->
-                _events.tryEmit(
-                    TransferEvent.Progress(
-                        transferId = offer.transferId,
-                        peerId = offer.peerId,
-                        fileId = fileId,
-                        done = done,
-                        total = total,
-                        incoming = true,
-                    ),
-                )
+                scope.launch {
+                    val speed = sampleSpeed(offer.transferId, fileId, done)
+                    _events.tryEmit(
+                        TransferEvent.Progress(
+                            transferId = offer.transferId,
+                            peerId = offer.peerId,
+                            fileId = fileId,
+                            done = done,
+                            total = total,
+                            incoming = true,
+                            speedBps = speed,
+                        ),
+                    )
+                }
             },
             { fileId, savedPath ->
                 scope.launch {
@@ -680,6 +754,7 @@ class TransferManager(
                         finished
                     }
                     if (allCompleted) {
+                        clearSpeedSample(offer.transferId)
                         val saved = nonDirFiles.mapNotNull { completedPaths[it.fileId] }
                         _events.tryEmit(
                             TransferEvent.Completed(
@@ -694,6 +769,7 @@ class TransferManager(
             },
             { fileId, reason ->
                 scope.launch {
+                    clearSpeedSample(offer.transferId)
                     stateLock.withLock {
                         acceptedOffers.remove(offer.transferId)
                     }
@@ -872,6 +948,7 @@ class TransferManager(
             if (transfer != null && push != null) {
                 runCatching {
                     push(transfer.transferId, transfer.peerId, transfer.files) { fileId, done, total ->
+                        val speed = sampleSpeed(transfer.transferId, fileId, done)
                         _events.tryEmit(
                             TransferEvent.Progress(
                                 transferId = transfer.transferId,
@@ -880,11 +957,13 @@ class TransferManager(
                                 done = done,
                                 total = total,
                                 incoming = false,
+                                speedBps = speed,
                             ),
                         )
                     }
                 }
                     .onSuccess {
+                        clearSpeedSample(transfer.transferId)
                         stateLock.withLock { outgoing.remove(transfer.transferId) }
                         _events.tryEmit(
                             TransferEvent.Completed(
@@ -896,6 +975,7 @@ class TransferManager(
                         )
                     }
                     .onFailure { t ->
+                        clearSpeedSample(transfer.transferId)
                         println("[luciola] push failed " + simple.transferId + ": " + t)
                         stateLock.withLock { outgoing.remove(transfer.transferId) }
                         _events.tryEmit(
@@ -1019,6 +1099,7 @@ class TransferManager(
                     onProgress = { fileId, delta ->
                         val done = (received[fileId] ?: 0L) + delta
                         received[fileId] = done
+                        val speed = sampleSpeed(offer.transferId, fileId, done)
                         _events.tryEmit(
                             TransferEvent.Progress(
                                 transferId = offer.transferId,
@@ -1027,6 +1108,7 @@ class TransferManager(
                                 done = done,
                                 total = totals[fileId] ?: 0L,
                                 incoming = true,
+                                speedBps = speed,
                             ),
                         )
                     },
@@ -1060,6 +1142,7 @@ class TransferManager(
                 )
             }
         } finally {
+            clearSpeedSample(offer.transferId)
             stateLock.withLock { if (pulling[offer.transferId] === active) pulling.remove(offer.transferId) }
         }
     }

@@ -1225,6 +1225,8 @@
 
     <!-- 消息协作进阶：转发与群元数据编辑 -->
     <string name="chat_forward_title">转发消息到</string>
+    <string name="chat_forward_search_placeholder">搜索会话</string>
+    <string name="chat_drop_target_title">发送文件到</string>
     <string name="chat_forward_success">消息已转发</string>
     <string name="chat_reply_action">回复</string>
     <string name="chat_reply_preview_prefix">回复 %1$s: %2$s</string>

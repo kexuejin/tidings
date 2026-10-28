@@ -8,6 +8,7 @@ import com.kapp.tidings.core.fs.fileExists
 import com.kapp.tidings.core.fs.fileSize
 import com.kapp.tidings.core.fs.openRandomAccess
 import com.kapp.tidings.core.fs.pathJoin
+import com.kapp.tidings.core.fs.sanitizeWindowsReservedNames
 import com.kapp.tidings.core.testing.createTempDir
 import com.kapp.tidings.core.testing.removeRecursively
 import io.ktor.network.selector.SelectorManager
@@ -214,6 +215,77 @@ class TransferRoundTripTest {
             removeRecursively(srcDir)
             removeRecursively(dstDir)
         }
+    }
+
+    /**
+     * Windows 保留设备名在接收端清洗（`CON.txt` → `_CON.txt`，目录同样处理）。
+     *
+     * 发送侧的**源文件名是任意的**（对端的 relPath 才是不可信输入），所以这里不创建
+     * 保留名源文件 —— 那在 Windows 上根本写不出来。清洗只改本地写盘名、不进 wire，
+     * 旧端无感；反向验证：摘掉 TransferClient 两处 `sanitizeWindowsReservedNames`
+     * 接线，收到的就是未清洗的 `CON.txt`，这条立刻红。
+     */
+    @Test
+    fun windowsReservedNamesAreSanitizedOnReceive() {
+        val srcDir = createTempDir("relay-src")
+        val dstDir = createTempDir("relay-dst")
+        val harness = Harness()
+        try {
+            val payload = "捎话保留名清洗".encodeToByteArray()
+            val srcPath = pathJoin(srcDir, "plain-name.bin")
+            writeAll(srcPath, payload)
+
+            val lookup = StubLookup(
+                files = mapOf(
+                    "f1" to OutgoingFile("f1", srcPath, payload.size.toLong()),
+                    "f2" to OutgoingFile("f2", srcPath, payload.size.toLong()),
+                ),
+                transferId = "t-reserved",
+            )
+            val port = kotlinx.coroutines.runBlocking { harness.start(lookup) }
+
+            kotlinx.coroutines.runBlocking {
+                pullTransfer(
+                    PullOptions(
+                        host = "127.0.0.1",
+                        port = port,
+                        selfId = "self-1",
+                        transferId = "t-reserved",
+                        files = listOf(
+                            IncomingFilePlan("f1", "CON.txt", payload.size.toLong()),
+                            IncomingFilePlan("f2", "nul/report ..", payload.size.toLong()),
+                        ),
+                        saveDir = dstDir,
+                        supportsWait = true,
+                    ),
+                )
+
+                // 设备名本体命中（带不带扩展名、大小写如何）都加前缀；目录段同样处理；
+                // 段尾的点与空格剥掉 —— 它们在 Windows 上本来就不属于文件名。
+                assertContentEquals(payload, readAll(pathJoin(dstDir, "_CON.txt")))
+                assertContentEquals(payload, readAll(pathJoin(dstDir, "_nul", "report")))
+                assertFalse(fileExists(pathJoin(dstDir, "CON.txt")), "未清洗的保留名不能落盘")
+            }
+        } finally {
+            kotlinx.coroutines.runBlocking { harness.stop() }
+            removeRecursively(srcDir)
+            removeRecursively(dstDir)
+        }
+    }
+
+    @Test
+    fun sanitizeWindowsReservedNamesEdgeTable() {
+        // 纯函数的边界表：与 round-trip 那条互补，钉住不经过网络的单点行为。
+        assertEquals("_CON", sanitizeWindowsReservedNames("CON"))
+        assertEquals("_con.txt", sanitizeWindowsReservedNames("con.txt"))
+        assertEquals("_Com1.tar.gz", sanitizeWindowsReservedNames("Com1.tar.gz"))
+        // "Null" 不是保留名（NUL 才是），不能误伤普通单词
+        assertEquals("Null", sanitizeWindowsReservedNames("Null"))
+        assertEquals("report", sanitizeWindowsReservedNames("report .."))
+        assertEquals("report", sanitizeWindowsReservedNames("report . "))
+        assertEquals(".bashrc", sanitizeWindowsReservedNames(".bashrc"), "前导点不是设备名本体")
+        assertEquals("contents", sanitizeWindowsReservedNames("contents"), "子串命中不算命中")
+        assertEquals("notes/_lpt9/x.txt", sanitizeWindowsReservedNames("notes/lpt9/x.txt"), "每段独立处理")
     }
 
     @Test

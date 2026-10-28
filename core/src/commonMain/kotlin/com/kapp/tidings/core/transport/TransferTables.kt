@@ -165,7 +165,13 @@ sealed interface TransferEvent {
      */
     data class Offered(val offer: IncomingOffer) : TransferEvent
 
-    /** [done] 是累计字节数（含续传起点），[incoming] 为真表示我们在收。 */
+    /**
+     * [done] 是累计字节数（含续传起点），[incoming] 为真表示我们在收。
+     *
+     * [speedBps] 是**整次传输**的采样速率（EMA 平滑，字节/秒）：事件太密时沿用
+     * 上一次采样，采样间隔不足 500ms 不重算 —— 首个事件与暂停后没有可信读数时为
+     * null，界面据此不画速度。桌面版同口径（FileCard.vue 的 transfers.speed）。
+     */
     data class Progress(
         val transferId: String,
         val peerId: String,
@@ -173,6 +179,7 @@ sealed interface TransferEvent {
         val done: Long,
         val total: Long,
         val incoming: Boolean,
+        val speedBps: Long? = null,
     ) : TransferEvent
 
     data class Completed(

@@ -18,7 +18,12 @@ import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
+import androidx.compose.material3.TextFieldDefaults
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
@@ -43,6 +48,14 @@ import com.kapp.tidings.feature.chat.localDayKey
 import com.kapp.tidings.generated.resources.chat_day_divider_today
 import com.kapp.tidings.generated.resources.chat_day_divider_yesterday
 import com.kapp.tidings.generated.resources.chat_forward_title
+import com.kapp.tidings.generated.resources.chat_forward_search_placeholder
+import com.kapp.tidings.generated.resources.conv_empty_title
+import com.kapp.tidings.generated.resources.hist_search_empty
+import com.kapp.tidings.generated.resources.action_clear_search
+import com.kapp.tidings.generated.resources.ic_search
+import com.kapp.tidings.generated.resources.ic_close
+import com.kapp.tidings.ui.theme.IconSizes
+import com.kapp.tidings.ui.theme.ShapeRoles
 import com.kapp.tidings.generated.resources.common_cancel
 import androidx.compose.ui.unit.sp
 import com.kapp.tidings.domain.BannerMessage
@@ -764,37 +777,106 @@ fun ForwardTargetDialog(
     sessions: List<ConversationUi>,
     onSelectTarget: (String) -> Unit,
     onDismiss: () -> Unit,
+    /** 覆盖标题；null = 用转发默认标题（拖放选收件人等调用方传自己的文案）。 */
+    title: String? = null,
 ) {
     val sp = LocalAppSpacing.current
+    var query by remember { mutableStateOf("") }
+    val filtered = remember(sessions, query) {
+        val q = query.trim()
+        if (q.isEmpty()) sessions
+        else sessions.filter { it.title.contains(q, ignoreCase = true) }
+    }
     // 骨架（底色 / 20dp 圆角 / 16sp·700 标题 / 描边按钮）见同目录 `RelayDialog.kt`。
     RelayDialog(
         onDismissRequest = onDismiss,
-        title = { Text(stringResource(Res.string.chat_forward_title)) },
+        title = { Text(title ?: stringResource(Res.string.chat_forward_title)) },
         content = {
-            LazyColumn(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .heightIn(max = 360.dp),
+            Column(
+                modifier = Modifier.fillMaxWidth(),
                 verticalArrangement = Arrangement.spacedBy(sp.xs),
             ) {
-                items(sessions, key = { it.convId }) { conv ->
-                    Row(
+                if (sessions.size > 3) {
+                    OutlinedTextField(
+                        value = query,
+                        onValueChange = { query = it },
+                        singleLine = true,
+                        textStyle = MaterialTheme.typography.bodySmall,
+                        leadingIcon = {
+                            Icon(
+                                painterResource(Res.drawable.ic_search),
+                                contentDescription = null,
+                                modifier = Modifier.size(IconSizes.Label),
+                            )
+                        },
+                        trailingIcon = if (query.isNotEmpty()) {
+                            {
+                                AppIconButton(
+                                    icon = Res.drawable.ic_close,
+                                    contentDescription = stringResource(Res.string.action_clear_search),
+                                    onClick = { query = "" },
+                                )
+                            }
+                        } else null,
+                        placeholder = {
+                            Text(
+                                stringResource(Res.string.chat_forward_search_placeholder),
+                                style = MaterialTheme.typography.bodySmall,
+                            )
+                        },
+                        shape = ShapeRoles.Avatar,
+                        colors = TextFieldDefaults.colors(
+                            focusedContainerColor = MaterialTheme.colorScheme.surfaceContainerLow,
+                            unfocusedContainerColor = MaterialTheme.colorScheme.surfaceContainerLow,
+                            focusedIndicatorColor = Color.Transparent,
+                            unfocusedIndicatorColor = Color.Transparent,
+                        ),
                         modifier = Modifier
                             .fillMaxWidth()
-                            .clickable { onSelectTarget(conv.convId) }
-                            .padding(horizontal = sp.sm, vertical = sp.md10),
-                        verticalAlignment = Alignment.CenterVertically,
-                        horizontalArrangement = Arrangement.spacedBy(sp.md10),
+                            .padding(bottom = sp.xxs),
+                    )
+                }
+                if (filtered.isEmpty()) {
+                    Box(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(vertical = sp.lg),
+                        contentAlignment = Alignment.Center,
                     ) {
-                        PeerAvatar(conv.title, isAgent = conv.isAgent, size = 36.dp, isGroup = conv.isGroup)
                         Text(
-                            text = conv.title,
-                            style = MaterialTheme.typography.bodyMedium,
-                            fontWeight = FontWeight.Medium,
-                            maxLines = 1,
-                            overflow = TextOverflow.Ellipsis,
-                            modifier = Modifier.weight(1f),
+                            text = if (query.isEmpty()) stringResource(Res.string.conv_empty_title)
+                            else stringResource(Res.string.hist_search_empty),
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
                         )
+                    }
+                } else {
+                    LazyColumn(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .heightIn(max = 320.dp),
+                        verticalArrangement = Arrangement.spacedBy(sp.xs),
+                    ) {
+                        items(filtered, key = { it.convId }) { conv ->
+                            Row(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .clickable { onSelectTarget(conv.convId) }
+                                    .padding(horizontal = sp.sm, vertical = sp.md10),
+                                verticalAlignment = Alignment.CenterVertically,
+                                horizontalArrangement = Arrangement.spacedBy(sp.md10),
+                            ) {
+                                PeerAvatar(conv.title, isAgent = conv.isAgent, size = 36.dp, isGroup = conv.isGroup)
+                                Text(
+                                    text = conv.title,
+                                    style = MaterialTheme.typography.bodyMedium,
+                                    fontWeight = FontWeight.Medium,
+                                    maxLines = 1,
+                                    overflow = TextOverflow.Ellipsis,
+                                    modifier = Modifier.weight(1f),
+                                )
+                            }
+                        }
                     }
                 }
             }
