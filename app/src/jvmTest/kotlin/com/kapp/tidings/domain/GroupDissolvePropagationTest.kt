@@ -67,7 +67,7 @@ class GroupDissolvePropagationTest {
             // 既有语义（GroupMerge.Removed 的 KDoc）：对端**保留**元数据，但成员表里
             // 不再有自己 —— 那是它回答「我为什么发不出话」的唯一依据。删掉反而更糟：
             // 历史消息还在，会话键会退化成标题里的一串 group:ab。
-            awaitUntil("B 收到解除（成员表里不再有自己）", timeoutMs = 10_000) {
+            awaitUntil("B 收到解除（成员表里不再有自己）") {
                 b.state.value.settings.groups
                     .firstOrNull { it.groupId == groupId }
                     ?.hasMember(selfB) == false
@@ -114,7 +114,7 @@ class GroupDissolvePropagationTest {
             a.dissolveGroup(groupId)
 
             // B 收到的那份解除帧里，自己已经不在成员表里 —— 这是它判 Removed 的依据。
-            awaitUntil("B 的成员表里不再有自己", timeoutMs = 10_000) {
+            awaitUntil("B 的成员表里不再有自己") {
                 b.state.value.settings.groups
                     .firstOrNull { it.groupId == groupId }
                     ?.hasMember(selfB) == false

@@ -16,8 +16,11 @@ import kotlinx.coroutines.withTimeoutOrNull
  * withTimeout 的 lambda，读的人不知道是哪个条件没等到。
  *
  * @param what 期望发生的事（写进失败消息，例如"对端进节点表"）。
- * @param timeoutMs 上限；到点还没满足就判红。默认 5 秒 —— 真机握手往返远小于它，
- *   慢 CI 也不会因为差几百毫秒就偶发红。
+ * @param timeoutMs 上限；到点还没满足就判红。默认见 [AWAIT_TIMEOUT_MS]。
+ *   **这是"观测预算"，不是断言**：断言的是"这件事最终会发生"，预算只决定等多久。
+ *   定得太紧时，红的不是产品行为而是调度延迟 —— 真机上把 10s 卡在两节点 UDP 握手 +
+ *   群元数据传播上，在跑满 700+ 用例的 JVM 里会偶发超时（实测 3 轮里红 1 轮，
+ *   单跑该类 5/5 全绿）。
  * @param condition 幂等、无副作用的条件（会被反复调）。
  */
 suspend fun awaitUntil(
@@ -35,5 +38,15 @@ suspend fun awaitUntil(
 /** 轮询间隔：足够细（不拖慢成功路径），又不会把一个 5 秒等待变成十万次读状态。 */
 private const val AWAIT_POLL_MS: Long = 10
 
-/** 默认上限：见 [awaitUntil] 的参数说明。 */
-const val AWAIT_TIMEOUT_MS: Long = 10_000
+/**
+ * 默认上限。
+ *
+ * 为什么是 30 秒而不是 5/10 秒：这些用例跑的是**真 UDP 回环**（两个 RelayController
+ * 互拨、Agent 节点握手、群元数据扇出）。在本机单跑时全都在 1 秒内完成，但当整个
+ * `:app:jvmTest`（700+ 用例）串行跑、或与别的构建共用 CPU 时，握手会明显变慢。
+ * 观测预算给到 30 秒，仍然远小于"真出问题"的量级（真卡死会稳定红），
+ * 而调度抖动不再被误判成产品缺陷。
+ *
+ * **不要**用它来掩盖"条件永远不会成立"：那种用例单跑也红，与预算无关。
+ */
+const val AWAIT_TIMEOUT_MS: Long = 30_000
