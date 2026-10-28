@@ -3,7 +3,8 @@
 package com.kapp.tidings.feature.nodes
 
 import androidx.compose.foundation.background
-import androidx.compose.foundation.border
+import androidx.compose.ui.draw.clip
+import com.kapp.tidings.ui.theme.LocalCardShape
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
@@ -482,26 +483,17 @@ fun NodesScreen(
                         }
                     }
 
-                    // 添加节点：不再是一张塞在页面底部的表单，而是入口行 ——
-                    // 非空态只有「我的二维码」一条，空态多一条「添加节点」。
-                    // 「扫码配对 / 填地址」两个入口现在都只在弹层里（顶栏那颗「+」开的就是它），
-                    // 原型 `screenNodes()` 逐字：`rows` 之后只有一条 `.krow` →
-                    // `<div class="krow" onclick="go('m-myqr')">`（`prototype/relay.html:3361-3365`）；
-                    // `screenNodesEmpty()` 才是两条（`:3422-3429`）。
-                    //
-                    // 这一块**不是卡片**：`.krow{background:var(--surface);border-bottom:1px solid var(--hair)}`
-                    // 平铺、无圆角、行与行之间只有一条发丝线（`prototype/relay.html:199-200` +
-                    // `.krow:last-child{border-bottom:0}` `:223`）。上一版套了一层
-                    // `Surface(shape = shapes.medium, tonalElevation = …)` ⇒ 一屏里凭空多出一张
-                    // 圆角卡、多一层色调浮起，而且把「入口行」画成了「卡片」这一档语义。
-                    // 上一版还在它前面挂了一行 `SectionHeader(nodes_group_add)`：新稿非空态
-                    // 根本没有「添加节点」这个小节标题（`screenNodes()` 只有 `节点（N）` 一个）。
-                    Column(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .background(MaterialTheme.colorScheme.surface),
-                    ) {
-                        if (isEmpty) {
+                    // 添加节点入口：空态在空白说明卡下方展示「添加节点」与「我的二维码」两条引导；
+                    // 列表中已有节点时不再在底部常驻显示，避免粘连列表，
+                    // 统一由顶栏「+」弹层与设置页直达。
+                    if (isEmpty) {
+                        Column(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .padding(top = LocalAppSpacing.current.md10)
+                                .clip(LocalCardShape.current)
+                                .background(MaterialTheme.colorScheme.surface),
+                        ) {
                             AddNodeEntryRow(
                                 title = stringResource(Res.string.nodes_group_add),
                                 subtitle = stringResource(Res.string.nodes_add_entry_sub),
@@ -509,18 +501,14 @@ fun NodesScreen(
                                 onClick = { sheetOpen = true },
                                 showDivider = true,
                             )
+                            AddNodeEntryRow(
+                                title = stringResource(Res.string.nodes_my_qr_entry_title),
+                                subtitle = stringResource(Res.string.nodes_my_qr_entry_sub),
+                                icon = Res.drawable.ic_qr_code_scanner,
+                                onClick = { myQrOpen = true },
+                                showDivider = false,
+                            )
                         }
-                        // 「扫码配对」是"我去扫别人"，这一条是"让别人扫我" —— 少了它，
-                        // 扫码配对就只做通了一半。原型 Gen2 把二维码**从页面正文搬到了这条入口后面**
-                        // （见 `MyQrSheet` 的 KDoc：那张码原来占节点页一整张卡，实测 276px、
-                        // 占该页内容 20%，把「有哪些节点」这个主任务挤到了第二屏）。
-                        AddNodeEntryRow(
-                            title = stringResource(Res.string.nodes_my_qr_entry_title),
-                            subtitle = stringResource(Res.string.nodes_my_qr_entry_sub),
-                            icon = Res.drawable.ic_qr_code_scanner,
-                            onClick = { myQrOpen = true },
-                            showDivider = false,
-                        )
                     }
                 }
         }
@@ -530,6 +518,7 @@ fun NodesScreen(
     if (sheetOpen) {
         AddNodeSheet(
             state = state,
+            onShowMyQr = { myQrOpen = true },
             // **不在这里关弹层**：连接是异步握手，「发出」不等于「连上」。上一版同拍
             // `sheetOpen = false`，于是弹层里那套"3.2 秒超时红字 + 原地重试"在生产上
             // 一次都走不到 —— 用户点完「连接」弹层直接消失，连没连上全靠去列表里找。

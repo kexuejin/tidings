@@ -346,6 +346,8 @@ fun AddNodeSheet(
     onConnectNamed: ((String, String, String) -> Unit)? = null,
     /** 「名字（可选）」框的初始值，只给截图门禁喂"已经填好"的那一档用。 */
     initialName: String = "",
+    /** 出示「我的二维码」，供对方扫描本设备。 */
+    onShowMyQr: (() -> Unit)? = null,
 ) {
     // 传进来的优先：截图门禁要的是一个**已经展开**的静态帧，而
     // rememberModalBottomSheetState 交出的永远是 Hidden，得靠动画走到位 ——
@@ -504,6 +506,16 @@ fun AddNodeSheet(
                             }
                         },
                         enabled = !importing,
+                        modifier = Modifier.fillMaxWidth().padding(bottom = LocalAppSpacing.current.md10),
+                    )
+                }
+                if (onShowMyQr != null) {
+                    AppOutlinedButton(
+                        text = stringResource(Res.string.nodes_my_qr_title),
+                        onClick = {
+                            onDismiss()
+                            onShowMyQr()
+                        },
                         modifier = Modifier.fillMaxWidth().padding(bottom = LocalAppSpacing.current.md10),
                     )
                 }
