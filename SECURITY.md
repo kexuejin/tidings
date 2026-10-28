@@ -52,6 +52,24 @@ A sender that does not check the receiver's budget does not get an error — the
 whole frame (`bad-payload`). So `NodeOutbound.clampGroupText` / `clampGroupReasoning` exist to make
 "we never emit a frame that is guaranteed to be rejected" an invariant rather than a hope.
 
+**Do not fold the two budgets into one.** The numbers above bound an *application envelope* (how long
+one message may be). A data-plane chunk frame carries raw file bytes and caps its payload at
+**256 KiB** per chunk — a different quantity with a different purpose; neither number bounds or
+widens the other (`PROTOCOL-EXTENSION.md` §15.3).
+
+### 1.1.2 A third surface: the always-encrypted data plane
+
+Besides the two tiers above there is a data plane that carries file bytes and screen frames
+(`luciolaPort` / `screenPort` in the profile, caps `fch1` / `scr1`). It is encrypted **even on the
+LAN**, so it is not governed by the LAN/public judgement at all, and its trust root is **separate**
+from the TLS pin (see the last section of this file).
+
+- It is **on by default**. The cost is a visibility one: a peer that has not upgraded becomes
+  mutually *invisible* — legacy discovery stops, so there is no node to send to. That is not the same
+  failure as a message that is silently dropped; do not document it as one.
+- The only rollback is turning the switch off and **restarting the node**. There is no per-peer
+  downgrade, and adding one would turn a security boundary into a toggle.
+
 ### 1.2 Trust roots: how a peer key becomes trusted
 
 - A **pin** is `sha256:` + SHA-256 of the peer's SubjectPublicKeyInfo (DER), 64 hex chars.
@@ -146,3 +164,33 @@ We will acknowledge receipt within 48 hours and work with you on validation and 
   公网档 fail-closed 不变。
 - 恢复包导出/导入的失败一律 fail-closed：成套校验（manifest 与载荷咬合）、
   半截包（缺钥匙）在解码层拒收。
+
+---
+
+## 加密数据面（luciola）的信任根与准入
+
+文件字节与投屏画面走的是**始终加密**的数据面（局域网里也不降明文）。它是与 §1.2 的 TLS pin **并行**的第二套信任根，两者不要互相替代：
+
+| | TLS pin（K1/K2 长连接、跨网文件与投屏） | 加密数据面（luciola） |
+|---|---|---|
+| 身份 | EC P-256 自签证书；pin = SPKI DER 的 SHA-256 | Ed25519 身份；指纹 = 公钥指纹 |
+| 落盘 | `stores/peer-pins.json`（`pairing` / `tofu` / `unknown` 记来源） | 地址→公钥表 + 指纹账本（同一份 JSON） |
+| 回答什么问题 | 这条 TLS 连接是不是那台设备 | 该往哪个地址发、这条入站会话是不是已受信 |
+
+**deny-by-default 是双侧的**：
+
+- **出站**：目标地址在地址→公钥表里查不到 ⇒ **不拨**（查不到就是对端未配对）。出站方向没有「谁先连进来就信谁」这种入口。
+- **入站**：握手出来的指纹不在信任账本里 ⇒ 直接断开；若本机开着配对准入，则给它一个**自证窗口**（默认 30 秒），窗口内**一帧业务数据都不进应用层**，超时断开。
+- **准入三关**（传输层控制帧，`TLPAIR1`）：① 帧里公钥的指纹必须**等于**这条会话握手出来的指纹（防冒名：不能拿别人的公钥来配对）；② 帧里的配对密钥与本机二维码里那段做**常量时间**相等比较（证明确实扫过码，不是撞上来的；换成普通比较会让人按响应时间逐字节猜）；③ **落信任成功**才算通过，落盘失败按拒绝处理。任一条不过：先回拒绝帧（带原因）**再**断开 —— 顺序反了，对端只看到「超时」，而超时不可诊断。
+- **pin/指纹与配对密钥的分工**：指纹回答「这是不是那台设备」（长期、可入账本、重启后仍在）；配对密钥回答「它是不是从我的二维码里拿到地址的」（一次性、**不进发现广播**、换掉即等于强制所有已扫码设备重新配对）。两者缺一不可 —— 只有指纹，首次使用存在 TOFU 竞态；只有密钥，任何拿到二维码的人都能冒充。
+- **控制帧不进 `Messenger`**：它在传输层被分流。`Envelope` 解码会把它整条判成坏帧，所以它既不进消息流，也不需要任何白名单。
+
+**信任材料的落盘位置与保护强度（三端不同，如实写在这里）**：
+
+| 端 | 位置 | 形态与强度 |
+|---|---|---|
+| Android | 应用私有 `filesDir/luciola/`（`ed25519-seed.hex` + `state.json`） | 明文 hex seed + 明文 JSON；边界是应用沙箱（root / 设备备份可读），卸载即清 |
+| 桌面 | 数据目录下的 `luciola/`（同样两个文件） | 同上；seed 文件尽力收成 0600，但仍是明文 |
+| iOS | 钥匙串（独立 service / account，两条条目） | 由系统密钥链保护；**不做 iCloud 同步** —— 跨设备同步身份是恢复身份包那条通道的职责，这里越权会让两台设备争同一份 seed；卸载后仍在 |
+
+所以「同一套判据、不同强度的落盘」是**事实**，不是遗漏：指纹绑定、常量时间比较、落盘失败即拒绝这三条三端共用一份实现；只有「存哪、被谁能读」因平台而异。威胁模型上这意味着：**能读应用私有目录的攻击者可以直接换掉 seed 冒充本机**，而 iOS 上同样的攻击需要先突破钥匙串。

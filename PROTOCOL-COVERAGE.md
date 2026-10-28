@@ -104,6 +104,20 @@
 `tbl1` 的**发送侧**也已支持：`POST /v1/send-file` 接受 `tableText`，并且按协议只向声明了 `tbl1`
 的对端附带它（对端没声明回 409 `peer-unsupported`）。
 
+**两块加密数据面的能力位 `fch1` / `scr1` 不在上面两份清单里**：它们由壳按「数据面是不是真的起来了」条件声明
+（`RelaySettings.caps` 的 `fileOverChannel` / `screenOverChannel`），语义是「文件**字节**可以经加密信道推给我」
+与「投屏**画面**可以经一条独立加密会话推给我」。派发规则是**双方都声明**才走新数据面（`scr1` 还要求对端
+档案里带 `screenPort`），任一条件不满足就整体退回 legacy —— 所以它们是**灰度开关**，不是「我有这个功能」
+的广告位。与 `fd1`（要不要弹接收确认）、`rv1`/`rvs1`（会话能不能建立）是三件事，对照表在
+`PROTOCOL-EXTENSION.md` §15.2。
+
+上面那两份「实测手机上广播的 caps」读自**未启用加密数据面**的构建；数据面可用时还会追加 `fch1`（文件字节）
+与 `scr1`（画面），见 §五关于老端的边界。
+
+> **这两块数据面的帧不是信封类型**：文件字节是 `TDCH`/`TDCA` 裸帧、配对准入是 `TLPAIR1` 控制帧，两者都
+> **不进** `MsgTypes.KNOWN`，因此本文件开头的「28 种」不因它们而变，也不需要在处置表里为它们写行 —— 它们由
+> `:core` 的加密信道在传输层分流，不经过 `Messenger`（`PROTOCOL-EXTENSION.md` §15.3 / §15.4）。
+
 **不声明的**（能力位键名以点对点协议规范为准：`docs/protocol.md` 里的 `grp1` 在实现里叫 `gr1`，
 而文档里的 `img1` 在实现里根本没有这一位 —— 见 `README.md` 的「能力声明（caps）」一节）：
 `gr1`（群子集已落地，完整 RBAC 含管理密码路径没做，见 §5）、`img1`（实现里不存在的键；图片仍作为
@@ -150,6 +164,7 @@
 | **云推送** | **设计已交付、未实现** | `docs/cloud-push-design.md`；当前后台唤醒靠 Android 前台服务（`remoteMessaging`）+ 离线增量游标同步 |
 | **附件「点开下载」** | **未实现**：agent 事件附件只带 `attachmentId`，缺 `fileId`/路径 | 卡片能渲染，点开落盘要等协议补 `fileId` |
 | **外部来源配对确认** | **已实现**（task-54）：deep link 与 debug 广播注入都只登记，用户在确认框上点「允许」才落盘；拒绝零副作用 | 理由：把外部输入的密钥存成信任根是不可逆的信任建立。测试 `androidApp/src/test/.../ExternalPairingGateTest.kt`、`composeApp/src/jvmTest/.../ExternalPairingPreviewPurityTest.kt` |
+| **未升级的老客户端与加密数据面** | **无权参与**：不声明 `fch1`/`scr1`、档案里也没有 `luciolaPort`/`screenPort` ⇒ 一律继续走 legacy 路，本机不会向它推字节 | 反过来也成立：本机开着数据面时不启动 legacy 发现 ⇒ 双方**互相发现不到**（节点表里没有它，因此不是「消息丢了」）。回退 = 关掉开关并重启节点，见 `PROTOCOL-EXTENSION.md` §15.5 |
 
 ---
 

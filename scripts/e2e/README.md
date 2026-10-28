@@ -48,13 +48,26 @@ scripts/e2e/
 | 真手机插着、`adb` 里有设备 | `adb devices` 出现 `<serial>\tdevice` | 没有设备时夹具会走到退出码 **2**（`relay_e2e.py:421 require_device()`） |
 | 手机 IP | 默认 `192.168.2.22`（`relay_e2e.py:104 DEFAULT_PHONE`，Pixel 6 `SERIAL-TEST-01`） | 换了网络要显式传 `--phone` |
 | 本机 Mac 的 LAN IP | 默认 `192.168.2.82`（`relay_e2e.py:105 DEFAULT_HOST_IP`，`en1`） | **必须和手机同一个网段**：它会被写进夹具 profile 的 `host` 字段，空字符串会让手机整帧看不明白（`relay_e2e.py:165-174 set_host()`） |
-| 对端空闲 | `scripts/relay-liveness.sh --quiet; echo $?` | **跑任何夹具之前先跑它**。`0` = 对面空闲，可以开始；`1` = 对面正在写，等它停；`2` = 用法错误。外部进程可能占用 `UDP *:17878` 与 `TCP *:17879`，它跑着的时候夹具的握手会被抢 |
+| 对端空闲 | `scripts/relay-liveness.sh --quiet; echo $?` | **跑任何夹具之前先跑它**。`0` = 对面空闲，可以开始；`1` = 对面正在写，等它停；`2` = 用法错误。外部进程可能占用 `UDP *:17878`、`TCP *:17878`（加密数据面的监听口）与 `TCP *:17879`（legacy），它跑着的时候夹具的握手会被抢 |
 | 手机装了被测包 | `adb shell pm list packages \| grep app.relay` | 包名 `app.relay` |
 | 手机和本机在同一 Wi-Fi、没开 VPN | 手机节点页顶部同步条变绿 | VPN 会让 mDNS/广播收不到（界面会出 `disc_vpn_warning`） |
 
 > 本机若还要跑桌面轨（`:desktopApp:run`），先确认默认端口没被占用：
-> `lsof -nP -iUDP:17878 -iTCP:17879`。
+> `lsof -nP -iUDP:17878 -iTCP:17878 -iTCP:17879`（加密数据面开启时监听的是 `TCP 17878`，不是 17879）。
 > 构建要 `JAVA_HOME=/opt/homebrew/opt/openjdk@21`。
+
+### 2.1 夹具占哪些端口，以及被测端要先回到 legacy
+
+夹具演的是**老协议的替身**：它广播 `entry`、在 `--tcp-port` 上等 4 字节大端分帧。所以端口账要分开算：
+
+| 端口 | 谁占 | 说明 |
+|---|---|---|
+| `UDP 17878` | 被测端（发现）+ 夹具（`UdpPeer` / `--udp-listen` sink） | 夹具往这个端口广播 `entry`；`e2e_share.py` 要求它没被外部节点占用 |
+| `TCP 17878` | 被测端（加密信道的监听口，与发现端口**同号不同协议**） | 只在加密数据面开启时存在；不是给夹具拨的 |
+| `TCP 17879` | **legacy 档**的被测端（明文 TCP 帧），也是夹具自己的 `--tcp-port` 默认值 | 加密数据面开启后被测端**不再监听** 17879；17881/17882 同理退役 |
+| `TCP 179xx` | 夹具（`--tcp-port`） | 本机同时跑桌面轨或别的夹具时用它避开 17879，例如 `--tcp-port 17920` |
+
+**前提：被测端要先把加密数据面关掉并重启节点。** 默认开着时，被测端既不启动 legacy 发现、也不监听 17879/17881/17882 —— 夹具广播的 `entry` 没人解，长文本也没有 TCP 那条落点，结果是「夹具连握手都建立不起来」，而不是「夹具抓到了缺陷」。这不是夹具退步：这九个夹具验的就是 legacy 路，加密数据面自己的验收在 `ACCEPTANCE.md` 的 A21。
 
 ---
 
@@ -251,7 +264,7 @@ echo "$out" | tail -1
 - `v` 必须严格等于 `1`（`PROTOCOL_VERSION`），对不上手机整帧丢弃、**连 reason 都只在日志里**。
 - 信封六个字段一个都不能少：`v / type / id / from / ts / payload`。
 - `id` 每帧唯一：手机侧 `dedupStore` 按它去重，重复 id 会被当重传。
-- 文本判据是 **UTF-8 字节**不是字符：`> 800 B` 走 TCP 17879；**单聊** `> 4096 B` 被拒，
+- 文本判据是 **UTF-8 字节**不是字符：`> 800 B` 走 TCP（夹具这条腿是 **legacy 17879**；加密数据面下走加密信道，17879 已退役，见 §2.1）；**单聊** `> 4096 B` 被拒，
   **群文本** `> 32 KiB` 才被拒（`Limits.GROUP_TEXT_TCP_LIMIT`，见 `PROTOCOL-EXTENSION.md` §7.1）。
 - 出站单包上限 1200 B、入站硬上限 4096 B（`UDP_MAX_PAYLOAD` / `UDP_MAX_INBOUND`）。
 - 文本走 TCP 后要等 `msg-ack`，精确超时 **7000 ms**（`TCP_ACK_TIMEOUT_MS`）。
