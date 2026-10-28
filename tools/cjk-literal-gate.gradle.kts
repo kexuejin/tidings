@@ -285,6 +285,9 @@ val cjkConfig = CjkGateConfig(
         "app/src/androidMain",
         "app/src/iosMain",
         "app/src/jvmMain",
+        // jvmSharedMain 是 JVM 与 Android 共享的 actual（SettingsStore / StateLock），
+        // 也是领域层的一部分；漏掉它等于让一半生产代码不受 CJK 门禁约束。
+        "app/src/jvmSharedMain",
         "composeApp/src/commonMain",
         "composeApp/src/androidMain",
         "composeApp/src/iosMain",

@@ -56,6 +56,7 @@ DEFAULT_ROOTS = (
     "app/src/androidMain",
     "app/src/iosMain",
     "app/src/jvmMain",
+    "app/src/jvmSharedMain",
     "app/src/commonTest",
     "app/src/jvmTest",
     "composeApp/src/commonMain",
@@ -64,8 +65,14 @@ DEFAULT_ROOTS = (
     "composeApp/src/jvmMain",
     "composeApp/src/commonTest",
     "composeApp/src/jvmTest",
+    # 2026-10-28 补：core 的 jvmMain / jvmSharedMain / iosMain / jvmTest 原来不在名单里。
+    # jvmSharedMain 是"新传输实现写这里"的接缝（AGENTS.md §0），漏掉它等于漏掉一半新代码。
     "core/src/commonMain",
+    "core/src/jvmMain",
+    "core/src/jvmSharedMain",
+    "core/src/iosMain",
     "core/src/commonTest",
+    "core/src/jvmTest",
     "agentNode/src/main",
     "desktopApp/src/main",
     "cli/src/main",

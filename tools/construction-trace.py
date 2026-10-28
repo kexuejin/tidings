@@ -211,6 +211,19 @@ def scan(base, roots):
         for dirpath, dirnames, filenames in os.walk(top):
             dirnames[:] = [d for d in dirnames if d != "build"]
             for fn in sorted(filenames):
+                # 源码根里不该躺着文档/工作笔记：曾经有一份 LUCIOLA_WIRING.md 带着日期、
+                # 行号引用（NodeRuntime.kt:291）和"下一个会话执行"睡在 transport/ 下，
+                # 而所有注释门禁都只收 *.kt —— 它谁也没挡住。
+                if fn.endswith(".md") and not os.path.normpath(
+                    os.path.relpath(os.path.join(dirpath, fn), base),
+                ) in FILE_EXEMPT:
+                    rel = os.path.relpath(os.path.join(dirpath, fn), base)
+                    hits.append({
+                        "file": rel, "line": 1, "rule": "stray-doc",
+                        "label": "源码根里的文档",
+                        "snippet": fn, "text": "工作笔记/文档请放 docs/ 或 design/",
+                    })
+                    continue
                 if not fn.endswith(".kt"):
                     continue
                 full = os.path.join(dirpath, fn)
@@ -266,11 +279,15 @@ def main():
 
     base = os.path.abspath(args.root)
     roots = args.root_dir or [
-        "core/src/commonMain",
+        # **core 的四个源码集都要扫**。曾经只有 commonMain —— 而 jvmSharedMain 正是
+        # AGENTS.md §0 指定的"新传输实现写这里"的接缝，一次重构把大量生产代码搬进去之后，
+        # 门禁就静默停止覆盖它了。scan() 对不存在的根是跳过，所以缺口不会自己报错。
+        "core/src/commonMain", "core/src/jvmMain", "core/src/jvmSharedMain",
+        "core/src/iosMain",
         # 领域层现在住在 :app。漏掉这几行不会报错 —— scan() 对不存在的根是跳过，
         # 于是"整层没被扫过"会显示成"无新增"。
         "app/src/commonMain", "app/src/androidMain",
-        "app/src/iosMain", "app/src/jvmMain",
+        "app/src/iosMain", "app/src/jvmMain", "app/src/jvmSharedMain",
         "composeApp/src/commonMain", "composeApp/src/androidMain",
         "composeApp/src/iosMain", "composeApp/src/jvmMain",
         "agentNode/src/main", "desktopApp/src/main", "androidApp/src/main",
