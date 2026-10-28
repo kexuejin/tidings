@@ -241,6 +241,38 @@ python3 tools/unused-imports.py --check
 2. **"只共享一半"是最常见的失败形态**：合并了行却留着两个列表容器、合并了叶子组件却留着两个
    模型类型 —— 分叉会从没合的地方重新长回来。合并时**先统一模型，再统一组件，最后才拆外壳**。
 
+### 2.7 可复现性：构建、门禁、依赖 —— 「在我机器上是绿的」不算绿
+
+这一节来自一次真实的推送前评审：单测全绿、门禁全绿，但**别人 clone 下来一行都编不过**，
+而且三条门禁的判定取决于「这台机器上有没有某个文件」。共同形态是：**结论依赖环境，
+却没有任何地方把它说出来。**
+
+1. **第三方坐标必须能从公共仓解析。** 只发到 mavenLocal 就入库，等于把「能构建」绑定到
+   作者本机。判据：公共仓上的 pom 路径必须返回 200。做不到就 vendored 进仓库并校验
+   sha256，或在 CONTRIBUTING 里写清前置步骤。
+2. **构建脚本里不许写死个人绝对路径**（作者 home、外接卷）。原生库这类外部产物一律走
+   「显式 env / -P → 仓库相对约定目录 → 找不到就**大声说**」，且**缺库时用例要跳过并打印
+   怎么补**，不要让它变成运行期的 `UnsatisfiedLinkError` —— 那个报错里没有一个字指向配置。
+   反例形态：把个人路径塞进 `orElse(...)` 当默认回退，配置阶段不报错、运行期才炸。
+3. **门禁必须只依赖仓库内容。** 不许读 `/tmp` 里的会话状态（真身：某个设计门禁读
+   `/tmp/relay-own-scope.txt`，同一个工作树在有/没有该文件时判定相反）；不许依赖被
+   `.gitignore` 排除的生成物却把「缺失」判成失败。**缺输入 = 没验到**：默认 `SKIP` 并
+   打印「这不是通过」，需要硬失败的入口显式 `--require-artifact`。
+4. **门禁的扫描根要覆盖所有生产源集。** 一次重构把代码搬进 `jvmSharedMain` 之后，注释门禁
+   的根清单没跟上，那一层就**静默不被扫描**（工具注释自己写着「对不存在的根是跳过，于是
+   整层没被扫过会显示成无新增」）。改源集时同步 `tools/construction-trace.py`、
+   `tools/construction-trace-gate.gradle.kts`、`tools/stale-comment-ref.py`、
+   `tools/cjk-literal-gate.gradle.kts`。**源码根里也不许放 `.md`**：工作笔记会带着日期、
+   行号引用和「下一步」睡在源码目录里，而所有注释门禁都只收 `.kt`。
+5. **门禁清单三处同源**：本文件 §1 / README「质量门禁与验证」/ `.github/workflows/ci.yml`。
+   它们曾经发散过：README 写「五个模块」漏掉 `:app:jvmTest` 与 `:cli:test`，还声称与本文件
+   §1 同口径；CI 又照 README 抄了一遍 —— 于是 `:cli`（领域层零 Compose 的可执行验收物）与
+   `:domainComposeFreeGate`（守那条边界的门禁）长期不在 CI 里跑。改一处就改三处。
+6. **观测预算不是断言。** 真 UDP / 真 socket 用例里的等待上限是「愿意等多久」，不是
+   「允许多慢」。全量串行跑（700+ 用例）时握手明显变慢，预算定在 10 秒会得到「每 3 轮红
+   1 轮、单跑恒绿」。给足预算（见 `app/src/commonTest/.../testutil/Await.kt` 的说明），
+   但**不许**用它掩盖「条件永远不成立」—— 那种用例单跑也红。
+
 ---
 
 ## 3. 「静默丢失」清单 —— 本仓最贵的一类缺陷
@@ -351,6 +383,23 @@ python3 tools/unused-imports.py --check
   「老库/老端会怎样」。只写「做了什么」的提交信息在这个仓没有价值。
 - `.sq` / 协议 / 传输的改动，提交信息里必须写清兼容性后果。
 
+### 7.0 推送前自检（四条命令，缺一不可）
+
+推送是这个仓唯一**不可撤销**的操作（公开仓，历史一旦上去就删不掉）。逐条跑：
+
+```bash
+# ① 有没有把本机/真机身份带出去（序列号、主机名、家网段、个人路径、真 nodeId）
+git diff origin/main..HEAD | grep -nE "^\+.*(SERIAL-TEST|kedeMac-|/Users/[a-z]|/Volumes/[A-Za-z])" | head
+# ② 提交邮箱是不是 noreply（真邮箱写进公开历史后要再重写一次历史才能改）
+git log origin/main..HEAD --format="%an <%ae>" | sort -u
+# ③ 有没有被忽略的文件其实已入库
+git ls-files | while read f; do git check-ignore -q "$f" && echo "IGNORED-BUT-TRACKED: $f"; done
+# ④ 依赖能不能在别人机器上解析（mavenLocal-only 的坐标会让 CI 与新人直接编不过）
+grep -nE "mavenLocal|SNAPSHOT" settings.gradle.kts gradle/libs.versions.toml
+```
+
+第 ④ 条判据是「**别的机器**上能不能解析」，不是「我这台能不能构建」。
+
 ### 7.1 「一件事」的判据（不是「一次尝试」）
 
 **判据：把这条提交单独 `checkout` 出来，它能不能独立编译、通过门禁，并自己解释清楚为什么？**
@@ -403,6 +452,11 @@ python3 tools/unused-imports.py --check
 | 新增文件 | 确认它是源码 / 测试 / 正式文档，不是临时产物 |
 | 报告真机结果 | 先 grep 新产物里的新符号，证明装的是新代码 |
 | 写桌面壳里的屏 | 先问"这是**内容**还是**外壳**"：内容（列表行/详情卡/气泡/按钮）与手机共用一份，外壳（两栏、快捷键、chrome）参数化 —— 照抄 `ChatScreen + ChatScreenChrome` 的形状，别照抄"复制一份再改"（见 §2.6） |
+| 把代码搬进 `jvmSharedMain` / 新源集 | 同步四份门禁扫描根（`construction-trace.py` / `construction-trace-gate.gradle.kts` / `stale-comment-ref.py` / `cjk-literal-gate.gradle.kts`）—— 漏了不会报错，只会静默不扫（§2.7-4） |
+| 新增第三方依赖 / 升级上游坐标 | 先确认**公共仓能解析**（不是「我这台能构建」）；mavenLocal-only 会让 CI 与新人直接编不过（§2.7-1） |
+| 给 Profile 加可选键（端口一类） | 不只是加字段：`validateProfile` 要校验范围，**消费端还要再校验一次** —— 发现层解码 `peer.extra` 不走 `validateProfile`，越界端口会被 `toUShort()` 静默截断（§3） |
+| 让门禁去读一个生成物 | 缺输入 = 没验到：默认 SKIP 并说「这不是通过」，硬失败用 `--require-artifact`；别让门禁读 `/tmp` 里的会话状态（§2.7-3） |
+| 加真 UDP / 真 socket 的用例 | 等待上限是观测预算不是断言；`awaitUntil` 默认 30s，别自己写 10s 赌时序（§2.7-6） |
 | 合并共享组件之后 `:designScreenDiffGate` 红了 | 那是**量具缺口**不是代码偏离：先逐字确认新值确实在原型里（贴行号）再 `--baseline --reason` 记账，别直接刷。根治方案见主计划 §0.7（工具已实现"按调用点并共享取值、且只许关闭'只原型'"） |
 
 ---
