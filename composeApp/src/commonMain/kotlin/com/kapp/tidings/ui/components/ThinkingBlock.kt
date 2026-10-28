@@ -7,19 +7,25 @@ import androidx.compose.animation.expandVertically
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
 import androidx.compose.animation.shrinkVertically
+import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.IntrinsicSize
 import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.text.selection.SelectionContainer
 import androidx.compose.material3.CircularProgressIndicator
+import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
@@ -29,15 +35,22 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.draw.rotate
+import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
 import com.kapp.tidings.generated.resources.Res
 import com.kapp.tidings.generated.resources.agent_thought_process
 import com.kapp.tidings.generated.resources.agent_thought_process_elapsed
 import com.kapp.tidings.generated.resources.agent_thought_thinking
+import com.kapp.tidings.generated.resources.ic_chevd
+import org.jetbrains.compose.resources.painterResource
 import org.jetbrains.compose.resources.stringResource
 
 import androidx.compose.foundation.shape.CircleShape
+import com.kapp.tidings.ui.theme.IconSizes
 import com.kapp.tidings.ui.theme.LocalAppSpacing
+import com.kapp.tidings.ui.theme.RelayShapes
 
 /**
  * 思考流与推理交互折叠组件（Goal 2）。
@@ -73,32 +86,41 @@ fun ThinkingBlock(
     }
 
     Column(modifier = modifier.fillMaxWidth()) {
-        Row(
-            verticalAlignment = Alignment.CenterVertically,
-            horizontalArrangement = Arrangement.spacedBy(sp.xs),
+        Surface(
+            color = MaterialTheme.colorScheme.surface.copy(alpha = 0.5f),
+            shape = RelayShapes.small,
+            border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.5f)),
             modifier = Modifier
-                .clip(MaterialTheme.shapes.small)
-                .clickable { expanded = !expanded }
-                .padding(vertical = sp.xs, horizontal = sp.sm),
+                .clip(RelayShapes.small)
+                .clickable { expanded = !expanded },
         ) {
-            if (isStreaming) {
-                CircularProgressIndicator(
-                    modifier = Modifier.size(ThinkingIndicatorSize),
-                    strokeWidth = ThinkingIndicatorStroke,
-                    color = MaterialTheme.colorScheme.primary,
-                )
-            } else {
+            Row(
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(sp.xs),
+                modifier = Modifier.padding(horizontal = sp.sm, vertical = sp.xs),
+            ) {
+                if (isStreaming) {
+                    CircularProgressIndicator(
+                        modifier = Modifier.size(ThinkingIndicatorSize),
+                        strokeWidth = ThinkingIndicatorStroke,
+                        color = MaterialTheme.colorScheme.primary,
+                    )
+                } else {
+                    Icon(
+                        painter = painterResource(Res.drawable.ic_chevd),
+                        contentDescription = null,
+                        tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                        modifier = Modifier
+                            .size(IconSizes.Inline)
+                            .rotate(if (expanded) 180f else 0f),
+                    )
+                }
                 Text(
-                    text = if (expanded) "⌃" else "⌄",
-                    style = MaterialTheme.typography.labelMedium,
+                    text = label,
+                    style = MaterialTheme.typography.labelSmall.copy(fontWeight = FontWeight.Medium),
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
             }
-            Text(
-                text = label,
-                style = MaterialTheme.typography.labelSmall,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-            )
         }
 
         AnimatedVisibility(
@@ -106,27 +128,37 @@ fun ThinkingBlock(
             enter = expandVertically() + fadeIn(),
             exit = shrinkVertically() + fadeOut(),
         ) {
-            Row(
+            Surface(
+                color = MaterialTheme.colorScheme.surface.copy(alpha = 0.35f),
+                shape = RelayShapes.small,
                 modifier = Modifier
                     .fillMaxWidth()
-                    .padding(start = sp.sm, top = sp.xxs, bottom = sp.xs),
+                    .padding(top = sp.xs),
             ) {
-                // 左侧纵向引用指示线
-                Box(
+                Row(
                     modifier = Modifier
-                        .width(ThinkingGuidelineWidth)
-                        .background(
-                            color = MaterialTheme.colorScheme.outlineVariant,
-                            shape = CircleShape,
-                        ),
-                )
-                SelectionContainer {
-                    Text(
-                        text = reasoning,
-                        style = MaterialTheme.typography.bodySmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                        modifier = Modifier.padding(start = sp.sm),
+                        .fillMaxWidth()
+                        .height(IntrinsicSize.Min)
+                        .padding(horizontal = sp.sm, vertical = sp.sm6),
+                ) {
+                    // 左侧纵向引用指示线
+                    Box(
+                        modifier = Modifier
+                            .fillMaxHeight()
+                            .width(ThinkingGuidelineWidth)
+                            .background(
+                                color = MaterialTheme.colorScheme.primary.copy(alpha = 0.5f),
+                                shape = CircleShape,
+                            ),
                     )
+                    SelectionContainer {
+                        Text(
+                            text = reasoning,
+                            style = MaterialTheme.typography.bodySmall.copy(lineHeight = 18.sp),
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            modifier = Modifier.padding(start = sp.sm),
+                        )
+                    }
                 }
             }
         }

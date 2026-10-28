@@ -4,6 +4,7 @@ package com.kapp.tidings.feature.chat
 
 import com.kapp.tidings.generated.resources.chat_agent_request_grant
 import androidx.compose.foundation.Image
+import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.gestures.detectTapGestures
@@ -12,8 +13,10 @@ import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.IntrinsicSize
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
@@ -25,7 +28,6 @@ import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.Button
 import androidx.compose.material3.Icon
-import androidx.compose.material3.IconButton
 import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
@@ -141,10 +143,13 @@ import com.kapp.tidings.generated.resources.transfer_folder_count
 import com.kapp.tidings.generated.resources.transfer_resume_hint
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.setValue
+import com.kapp.tidings.ui.theme.RelayShapes
 import com.kapp.tidings.ui.theme.ShapeRoles
 import com.kapp.tidings.ui.components.AppButton
-import com.kapp.tidings.ui.components.AppTextButton
 import com.kapp.tidings.ui.components.AppButtonSize
+import com.kapp.tidings.ui.components.AppButtonTone
+import com.kapp.tidings.ui.components.AppIconButton
+import com.kapp.tidings.ui.components.AppTextButton
 
 /**
  * 一条消息气泡。
@@ -347,8 +352,9 @@ internal fun MessageBubble(
                     val quotedSender = quotedSenderName
                         ?: stringResource(Res.string.common_unknown_member)
                     Surface(
-                        color = MaterialTheme.colorScheme.surface.copy(alpha = 0.65f),
-                        shape = RoundedCornerShape(6.dp),
+                        color = MaterialTheme.colorScheme.surface.copy(alpha = 0.7f),
+                        shape = RelayShapes.small,
+                        border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.5f)),
                         modifier = Modifier
                             .fillMaxWidth()
                             .padding(bottom = sp.sm6)
@@ -356,14 +362,41 @@ internal fun MessageBubble(
                                 if (onScrollToQuoted != null) Modifier.clickable(onClick = onScrollToQuoted) else Modifier
                             ),
                     ) {
-                        Text(
-                            text = "$quotedSender: $quotedBody",
-                            style = MaterialTheme.typography.labelSmall,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant,
-                            maxLines = 2,
-                            overflow = TextOverflow.Ellipsis,
-                            modifier = Modifier.padding(horizontal = sp.sm, vertical = sp.xs),
-                        )
+                        Row(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .height(IntrinsicSize.Min)
+                                .padding(end = sp.sm, top = sp.xs, bottom = sp.xs),
+                            verticalAlignment = Alignment.CenterVertically,
+                        ) {
+                            Box(
+                                modifier = Modifier
+                                    .fillMaxHeight()
+                                    .width(3.dp)
+                                    .background(MaterialTheme.colorScheme.primary, CircleShape),
+                            )
+                            Column(
+                                modifier = Modifier
+                                    .weight(1f)
+                                    .padding(start = sp.sm),
+                            ) {
+                                Text(
+                                    text = quotedSender,
+                                    style = MaterialTheme.typography.labelSmall.copy(fontWeight = FontWeight.SemiBold),
+                                    color = MaterialTheme.colorScheme.primary,
+                                    maxLines = 1,
+                                    overflow = TextOverflow.Ellipsis,
+                                )
+                                Text(
+                                    text = quotedBody,
+                                    style = MaterialTheme.typography.bodySmall,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                    maxLines = 2,
+                                    overflow = TextOverflow.Ellipsis,
+                                    modifier = Modifier.padding(top = sp.xxs),
+                                )
+                            }
+                        }
                     }
                 }
                 val card = message.file
@@ -407,28 +440,25 @@ internal fun MessageBubble(
                     horizontalArrangement = Arrangement.spacedBy(sp.sm),
                     verticalAlignment = Alignment.CenterVertically,
                 ) {
+                    val metaColor = if (message.mine) {
+                        MaterialTheme.colorScheme.onPrimaryContainer.copy(alpha = 0.75f)
+                    } else {
+                        MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.8f)
+                    }
                     Text(
                         text = formatClock(message.at),
                         style = MaterialTheme.typography.labelSmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        color = metaColor,
                     )
                     if (message.mine) {
                         // 只有真的知道投递状态时才显示。文件气泡的 delivery 是 null（它由传输
                         // 事件驱动，不走 msg 的 ACK 状态），上一版这里落到 `common_unknown`，
                         // 于是真机上文件卡片旁边挂着两个字「未知」—— 不知道就别说话。
                         message.delivery?.let { delivery ->
-                            // 「已排队」在原型里用的是 --on-queued-c（浅色 #5C3D1E / 深色
-                            // #F5E6D3），那对颜色正好等于本主题的 onSecondaryContainer：
-                            // 原型的 queued 容器色就是 secondaryContainer（#F5E6D3 / #5C3D1E）。
-                            // 之前这里落回中灰 onSurfaceVariant，浅色下和已送达的 primary 混成一片，
-                            // 看不出「这条还在排队」。顺带一提：这对颜色对页面底色分别是
-                            // 8.01:1 与 12.6:1，小字也够，不是拿对比度换的。
                             val tint = when (delivery) {
                                 DeliveryState.Failed -> MaterialTheme.colorScheme.error
-                                DeliveryState.Queued -> MaterialTheme.colorScheme.onSecondaryContainer
-                                // 「发送中」用与「已排队」同一档的弱色调：它既不是失败（不该红），
-                                // 也不是既成事实（不该用 primary 那种"已送达"的确定感）。
-                                DeliveryState.Sending -> MaterialTheme.colorScheme.onSecondaryContainer
+                                DeliveryState.Queued -> MaterialTheme.colorScheme.onPrimaryContainer.copy(alpha = 0.85f)
+                                DeliveryState.Sending -> MaterialTheme.colorScheme.onPrimaryContainer.copy(alpha = 0.85f)
                                 else -> MaterialTheme.colorScheme.primary
                             }
                             Row(
@@ -456,15 +486,12 @@ internal fun MessageBubble(
                         // 入站消息没有投递态（[MessageUi.delivery] 只对自己发出的有意义），
                         // 没有 onRetry 的壳也不画 —— 一个按下去没反应的按钮比没有按钮更糟。
                         if (message.mine && message.delivery == DeliveryState.Failed && onRetry != null) {
-                            TextButton(
+                            AppTextButton(
+                                text = stringResource(Res.string.chat_delivery_resend),
+                                size = AppButtonSize.Compact,
+                                tone = AppButtonTone.Danger,
                                 onClick = { onRetry(message.text) },
-                                contentPadding = PaddingValues(horizontal = sp.sm),
-                            ) {
-                                Text(
-                                    text = stringResource(Res.string.chat_delivery_resend),
-                                    style = MaterialTheme.typography.labelSmall,
-                                )
-                            }
+                            )
                         }
                     }
                 }
@@ -552,6 +579,7 @@ public fun MessagePressActions(
     onDismiss: (() -> Unit)? = null,
 ) {
     val clipboardManager = LocalClipboardManager.current
+    val haptics = androidx.compose.ui.platform.LocalHapticFeedback.current
     // 复制反馈：点完把这一项的字翻成「已复制」，短暂停留后收起菜单。
     var copied by remember { mutableStateOf(false) }
     LaunchedEffect(copied) {
@@ -606,6 +634,7 @@ public fun MessagePressActions(
             },
             onClick = {
                 clipboardManager.setText(AnnotatedString(copyText))
+                haptics.performHapticFeedback(androidx.compose.ui.hapticfeedback.HapticFeedbackType.TextHandleMove)
                 copied = true
             },
         )
@@ -624,7 +653,10 @@ public fun MessagePressActions(
                     color = MaterialTheme.colorScheme.error,
                 )
             },
-            onClick = onDelete,
+            onClick = {
+                haptics.performHapticFeedback(androidx.compose.ui.hapticfeedback.HapticFeedbackType.LongPress)
+                onDelete()
+            },
         )
     }
 }
@@ -674,11 +706,17 @@ internal fun NoticeLine(
             modifier = Modifier.padding(vertical = sp.xs),
         ) {
             Row(verticalAlignment = Alignment.CenterVertically) {
+                val hasAction = kind == NoticeKind.AgentNotAuthorized && onRequestGrant != null
                 Text(
                     text = noticeText(kind, detail, displayNameOf),
                     style = MaterialTheme.typography.labelSmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    modifier = Modifier.padding(start = sp.md10, end = sp.xs, top = 3.dp, bottom = 3.dp),
+                    modifier = Modifier.padding(
+                        start = sp.md10,
+                        end = if (hasAction) sp.xs else sp.md10,
+                        top = 3.dp,
+                        bottom = 3.dp,
+                    ),
                 )
                 // 「申请授权」只在无权限那一档上出现：用户读到「没有执行」的同时就有一个动作，
                 // 而不是让他自己去某个页面上找入口。
@@ -790,37 +828,40 @@ internal fun FileCardView(
     // min-width:196px}`（`.win .filecard` 是 210）。文件夹走的是同一个 `.filecard`
     // （`folderCard`），区别只在 `.fi` 里那颗图标 —— 所以「文件夹」这三个字不再另画
     // 一枚徽章：下面 `.fs` 那行本来就有「N 个文件 · 大小」，徽章是同一件事的第二个说法。
-    Row(
-        modifier = Modifier
-            .widthIn(min = 196.dp)
-            .border(1.dp, MaterialTheme.colorScheme.outlineVariant, MaterialTheme.shapes.medium)
-            .padding(horizontal = sp.md10, vertical = 9.dp),
-        horizontalArrangement = Arrangement.spacedBy(sp.md10),
-        verticalAlignment = Alignment.CenterVertically,
+    Surface(
+        color = MaterialTheme.colorScheme.surface,
+        shape = RelayShapes.medium,
+        border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant),
+        modifier = Modifier.widthIn(min = 196.dp),
     ) {
-        // `.filecard .fi{width:34px;height:34px;border-radius:9px;background:var(--primary-c);
-        // color:var(--on-primary-c)}` + `.fi svg{18px}`。取哪一颗图标沿用 `mediaKindOf`。
-        val fiIcon = when {
-            card.isFolder -> Res.drawable.ic_folder
-            mediaKindOf(card) == MediaKind.Image -> Res.drawable.ic_image
-            mediaKindOf(card) == MediaKind.Audio -> Res.drawable.ic_speaker
-            else -> Res.drawable.ic_file
-        }
-        Surface(
-            shape = ShapeRoles.Avatar,
-            color = MaterialTheme.colorScheme.primaryContainer,
-            modifier = Modifier.size(34.dp),
+        Row(
+            modifier = Modifier.padding(horizontal = sp.md10, vertical = 9.dp),
+            horizontalArrangement = Arrangement.spacedBy(sp.md10),
+            verticalAlignment = Alignment.CenterVertically,
         ) {
-            Box(contentAlignment = Alignment.Center) {
-                Icon(
-                    painter = painterResource(fiIcon),
-                    contentDescription = null,
-                    tint = MaterialTheme.colorScheme.onPrimaryContainer,
-                    modifier = Modifier.size(IconSizes.Body),
-                )
+            // `.filecard .fi{width:34px;height:34px;border-radius:9px;background:var(--primary-c);
+            // color:var(--on-primary-c)}` + `.fi svg{18px}`。取哪一颗图标沿用 `mediaKindOf`。
+            val fiIcon = when {
+                card.isFolder -> Res.drawable.ic_folder
+                mediaKindOf(card) == MediaKind.Image -> Res.drawable.ic_image
+                mediaKindOf(card) == MediaKind.Audio -> Res.drawable.ic_speaker
+                else -> Res.drawable.ic_file
             }
-        }
-        Column(Modifier.weight(1f)) {
+            Surface(
+                shape = ShapeRoles.Avatar,
+                color = MaterialTheme.colorScheme.primaryContainer,
+                modifier = Modifier.size(34.dp),
+            ) {
+                Box(contentAlignment = Alignment.Center) {
+                    Icon(
+                        painter = painterResource(fiIcon),
+                        contentDescription = null,
+                        tint = MaterialTheme.colorScheme.onPrimaryContainer,
+                        modifier = Modifier.size(IconSizes.Body),
+                    )
+                }
+            }
+            Column(Modifier.weight(1f)) {
         // `.fn{font-size:12px;font-weight:600;overflow:hidden;text-overflow:ellipsis;
         // white-space:nowrap}` —— 一行，超出省略（原型不让它折出第二行）。
         Text(
@@ -835,8 +876,9 @@ internal fun FileCardView(
             // `${pct}% · ${sz} / ${sz} · ${spd}`（relay.html:4259-4261），状态行只留状态词。
             // 代码原来无论什么状态都只画计数，于是「62%」被挪进状态行、这一行退化成
             // 纯计数 —— 与原型「副行看进度、状态行看状态」的分工相反。
-            // 速率（1.2 MB/s）本端没有采样管线（FileCardUi 无速度字段，见
-            // third_source/teahouse .../FileCard.vue:82 的 transfers.speed），故缺末段。
+            // 速率末段（`· 1.2 MB/s`）现在有了：core 的 TransferManager 采样（EMA，
+            // 按**整次传输**算，换文件不归零），Active 且有可信读数时才追加；
+            // "MB/s" 是 ASCII 单位不走文案资源。
             text = if (card.isFolder && card.state == TransferState.Active) {
                 stringResource(
                     Res.string.r2_chat_folder_progress,
@@ -851,7 +893,7 @@ internal fun FileCardView(
                     " · " + formatBytes(card.size)
             } else {
                 formatBytes(card.size)
-            },
+            } + card.speedSuffix(),
             style = MaterialTheme.typography.labelSmall,
             color = MaterialTheme.colorScheme.onSurfaceVariant,
         )
@@ -864,22 +906,18 @@ internal fun FileCardView(
         val tableText = card.tableText
         if (tableText != null) {
             var showTableText by remember(card.transferId) { mutableStateOf(false) }
-            TextButton(
+            AppTextButton(
+                text = stringResource(
+                    if (showTableText) {
+                        Res.string.file_table_hide_text
+                    } else {
+                        Res.string.file_table_show_text
+                    },
+                ),
+                size = AppButtonSize.Compact,
                 onClick = { showTableText = !showTableText },
-                contentPadding = PaddingValues(),
                 modifier = Modifier.padding(top = sp.xxs),
-            ) {
-                Text(
-                    text = stringResource(
-                        if (showTableText) {
-                            Res.string.file_table_hide_text
-                        } else {
-                            Res.string.file_table_show_text
-                        },
-                    ),
-                    style = MaterialTheme.typography.labelSmall,
-                )
-            }
+            )
             if (showTableText) {
                 Surface(
                     color = MaterialTheme.colorScheme.surfaceVariant,
@@ -930,18 +968,17 @@ internal fun FileCardView(
                     ) {
                         // 主操作「接收」实心、次操作「拒绝」降级成文字 —— 与 Completed
                         // 分支的「打开 / 分享」用同一条规矩，两张卡的手感才一致。
-                        Button(
+                        AppButton(
+                            text = stringResource(Res.string.file_accept),
+                            size = AppButtonSize.Compact,
                             onClick = { onAcceptTransfer(card.transferId) },
-                            contentPadding = PaddingValues(horizontal = sp.md10, vertical = sp.xs),
-                        ) {
-                            Text(stringResource(Res.string.file_accept), style = MaterialTheme.typography.labelSmall)
-                        }
-                        TextButton(
+                        )
+                        AppTextButton(
+                            text = stringResource(Res.string.file_decline),
+                            size = AppButtonSize.Compact,
+                            tone = AppButtonTone.Danger,
                             onClick = { onDeclineTransfer(card.transferId) },
-                            contentPadding = PaddingValues(horizontal = sp.sm, vertical = sp.xs),
-                        ) {
-                            Text(stringResource(Res.string.file_decline), style = MaterialTheme.typography.labelSmall)
-                        }
+                        )
                     }
                 }
             }
@@ -995,17 +1032,12 @@ internal fun FileCardView(
                     // 「正在发」是唯一一个用户仍然反悔得回来的时刻：撤了就是撤了，
                     // 传到一半的文件留在那里只会让人以为还在跑。
                     if (onCancel != null && card.mine) {
-                        IconButton(
+                        AppIconButton(
+                            icon = Res.drawable.ic_close,
+                            contentDescription = stringResource(Res.string.common_cancel),
                             onClick = { onCancel() },
                             modifier = Modifier.size(28.dp),
-                        ) {
-                            Icon(
-                                painter = painterResource(Res.drawable.ic_close),
-                                contentDescription = stringResource(Res.string.common_cancel),
-                                modifier = Modifier.size(16.dp),
-                                tint = MaterialTheme.colorScheme.onSurfaceVariant,
-                            )
-                        }
+                        )
                     }
                 }
             }
@@ -1123,19 +1155,18 @@ internal fun FileCardView(
                             style = MaterialTheme.typography.labelSmall,
                             color = MaterialTheme.colorScheme.primary,
                         )
-                        Button(
+                        AppButton(
+                            text = stringResource(Res.string.transfer_action_resume),
+                            size = AppButtonSize.Compact,
                             onClick = { onResumeTransfer(card.transferId) },
-                            contentPadding = PaddingValues(horizontal = sp.md10, vertical = sp.xs),
-                        ) {
-                            Text(stringResource(Res.string.transfer_action_resume), style = MaterialTheme.typography.labelSmall)
-                        }
+                        )
                         if (onCancel != null) {
-                            TextButton(
+                            AppTextButton(
+                                text = stringResource(Res.string.common_cancel),
+                                size = AppButtonSize.Compact,
+                                tone = AppButtonTone.Danger,
                                 onClick = onCancel,
-                                contentPadding = PaddingValues(horizontal = sp.sm, vertical = sp.xs),
-                            ) {
-                                Text(stringResource(Res.string.common_cancel), style = MaterialTheme.typography.labelSmall)
-                            }
+                            )
                         }
                     }
                 }
@@ -1147,6 +1178,7 @@ internal fun FileCardView(
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
         }
+    }
     }
     }
 }
@@ -1170,6 +1202,17 @@ internal fun elidePathTail(path: String, maxChars: Int = 34): String {
     val slash = tail.indexOf('/')
     val readable = if (slash > 0) tail.substring(slash) else tail
     return "…" + readable
+}
+
+/**
+ * 副行的速率末段（` · 1.2 MB/s`）。只在 [TransferState.Active] 且 core 给了
+ * 可信读数时出现 —— Offered 的静置、Completed 的定格都不该带一个过期的速率。
+ * "MB/s" 是 ASCII 单位，不走文案资源（也就不受新增 key 的解析问题影响）。
+ */
+internal fun FileCardUi.speedSuffix(): String {
+    if (state != TransferState.Active) return ""
+    val bps = speedBps ?: return ""
+    return " · " + formatBytes(bps) + "/s"
 }
 
 /**
