@@ -26,7 +26,7 @@ class GroupRemovalByOwnerTest {
     private companion object {
         const val GROUP = "group-real-device"
         const val SELF = "a1b2c3d4-6e74-4a7c-aab1-20a1d1284cd6"
-        const val PHONE = "c3d4e5f6-9382-40a6-831d-1b199a044946"
+        const val PHONE = "00000000-0000-4000-8000-0000000000a1"
         const val TS = 1_793_000_000_000L
     }
 

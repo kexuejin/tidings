@@ -1327,7 +1327,7 @@
     <string name="cidr_section_title">网段探测与同步</string>
     <string name="cidr_section_sub">跨网段自动探测与对端网段共享</string>
     <string name="cidr_input_label">添加网段 (CIDR)</string>
-    <string name="cidr_input_hint">例如 192.168.2.0/24</string>
+    <string name="cidr_input_hint">例如 192.168.1.0/24</string>
     <string name="cidr_add_action">添加网段</string>
     <string name="cidr_scan_now">立即探测</string>
     <string name="cidr_scanning">正在探测…</string>

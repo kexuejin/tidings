@@ -20,14 +20,14 @@ class RelayControllerRemoveNodeTest {
 
     @Test
     fun removingAManualAddressDeletesOnlyThatRecord() = runBlocking {
-        val entry = ManualPeerEntry(host = "192.168.2.9", name = "老周的旧笔记本")
+        val entry = ManualPeerEntry(host = "10.20.30.9", name = "同事的旧笔记本")
         val controller = controller(listOf(entry))
 
         controller.removeNode(NodeRemoval.ManualAddress(entry))
 
         assertTrue(controller.state.value.settings.manualPeers.isEmpty(), "手动地址必须从设置里消失")
         assertEquals(
-            BannerMessage.PeerRemoved("老周的旧笔记本"),
+            BannerMessage.PeerRemoved("同事的旧笔记本"),
             controller.state.value.banner?.message,
             "回执与按钮同一个名字来源（manualPeerDisplayName）",
         )

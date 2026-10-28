@@ -1181,7 +1181,7 @@
     <string name="cidr_section_title">Network Discovery &amp; Sync</string>
     <string name="cidr_section_sub">Cross-subnet discovery and CIDR range gossip</string>
     <string name="cidr_input_label">Add CIDR Range</string>
-    <string name="cidr_input_hint">e.g. 192.168.2.0/24</string>
+    <string name="cidr_input_hint">e.g. 192.168.1.0/24</string>
     <string name="cidr_add_action">Add Range</string>
     <string name="cidr_scan_now">Scan Now</string>
     <string name="cidr_scanning">Scanning…</string>

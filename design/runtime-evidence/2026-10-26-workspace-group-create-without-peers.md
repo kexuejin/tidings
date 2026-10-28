@@ -35,7 +35,7 @@
 ```
 AXStaticText | 「DS Bot 协同群」建好了。群里还没有其它设备 —— 对端上线后可从群信息里添加成员。
 AXStaticText | DS Bot 协同群, 同事, 还没聊过，打个招呼, 0/1 人在线
-AXStaticText | 1 位成员 · rev 1 · 群主 demo-mac-97
+AXStaticText | 1 位成员 · rev 1 · 群主 <host>
 ```
 
 `settings.json` 里新增的那条（原样摘录，未改动）：
@@ -47,7 +47,7 @@ AXStaticText | 1 位成员 · rev 1 · 群主 demo-mac-97
   "members": ["a1b2c3d4-6e74-4a7c-aab1-20a1d1284cd6"],
   "ownerId": "a1b2c3d4-6e74-4a7c-aab1-20a1d1284cd6",
   "rev": 1,
-  "description": "/Users/ci/.dsh/bot/workspace",
+  "description": "$HOME/.dsh/bot/workspace",
   "virtualAgents": [
     { "agentId": "DSH", "hostNodeId": "a1b2c3d4-6e74-4a7c-aab1-20a1d1284cd6",
       "name": "dsh-ds-bot", "wsId": "ws-e76a78ba85ef" }

@@ -498,7 +498,7 @@ class RelayControllerGroupTest {
         // 这条用例把这帧逐字节喂进同一条入站路径，让接收侧自己给出结论。
         val controller = controller()
         val groupId = "81b6078b-3084-4fff-9de1-1966783bb6b6"
-        val phone = "c3d4e5f6-9382-40a6-831d-1b199a044946"
+        val phone = "00000000-0000-4000-8000-0000000000a1"
         // 先让它成为成员（rev 1），
         controller.onInbound(
             groupInfo(
@@ -520,18 +520,18 @@ class RelayControllerGroupTest {
                 "groupId": "81b6078b-3084-4fff-9de1-1966783bb6b6",
                 "name": "协同群",
                 "members": [
-                        "c3d4e5f6-9382-40a6-831d-1b199a044946"
+                        "00000000-0000-4000-8000-0000000000a1"
                 ],
                 "rev": 2,
-                "updatedBy": "c3d4e5f6-9382-40a6-831d-1b199a044946",
+                "updatedBy": "00000000-0000-4000-8000-0000000000a1",
                 "updatedTs": 1793001249934,
                 "creatorIp": "",
-                "creatorId": "c3d4e5f6-9382-40a6-831d-1b199a044946",
-                "ownerId": "c3d4e5f6-9382-40a6-831d-1b199a044946",
+                "creatorId": "00000000-0000-4000-8000-0000000000a1",
+                "ownerId": "00000000-0000-4000-8000-0000000000a1",
                 "adminIds": [],
                 "description": "/sdcard/verify-wsu",
                 "memberNicks": {
-                        "c3d4e5f6-9382-40a6-831d-1b199a044946": "Pixel 6"
+                        "00000000-0000-4000-8000-0000000000a1": "Pixel 6"
                 }
         }
 }

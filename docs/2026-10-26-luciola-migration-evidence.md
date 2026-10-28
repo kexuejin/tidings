@@ -33,10 +33,10 @@
   - 原生库加载成功（无 `UnsatisfiedLinkError`；logcat 出现 `luciola-uniffi-` 线程）；
   - `files/luciola/ed25519-seed.hex`（64 hex）与 `state.json`（含 `trust`/`pairSecret`）
     已生成；**强停重启后 seed 哈希不变**（身份持久化）；
-  - 加密信道监听落地：从 Mac `nc -z 192.168.2.22 17878` → `succeeded`（TCP 17878 已开；
+  - 加密信道监听落地：从 Mac `nc -z 192.0.2.22 17878` → `succeeded`（TCP 17878 已开；
     Android 上 Rust 的 `TcpListener::bind` 正常）；
-  - luciola 发现在真机网络上工作：节点页显示 `1 个节点 · 1 在线`（`demo-mac-97`
-    192.168.2.82:17878）。
+  - luciola 发现在真机网络上工作：节点页显示 `1 个节点 · 1 在线`（`<host>`
+    192.0.2.82:17878）。
 - **两台设备之间的完整配对：2026-10-26 已用「二维码图片导入」验证通过**（无需相机）：
   1. 桌面 headless 宿主（`TIDINGS_DATA_DIR=/tmp/luciola-e2e-host`，实验开关开）；
   2. 用它的 settings + seed（→Ed25519 公钥）+ pairSecret 生成**真实二维码 PNG**，
@@ -103,7 +103,7 @@
 真机最终结果（主机控制面 POST /v1/send）：
 
 ```
-{"lastSend":"outcome=sent-via-udp elapsed=100ms endpoints=[192.168.2.22:17878 acked 100ms] link=true"}
+{"lastSend":"outcome=sent-via-udp elapsed=100ms endpoints=[192.0.2.22:17878 acked 100ms] link=true"}
 [host log] [luciola] paired node=0f39bd5f-... fp=sha256:3754378087d
 [host log] [send] peer=0f39bd5f channel=TRANSPORT
 ```

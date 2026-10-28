@@ -23,7 +23,7 @@ class LuciolaQrTest {
 
     private fun payload(
         addresses: List<String> = listOf("192.168.1.10"),
-        nick: String? = "demo-mac",
+        nick: String? = "mac-mini",
         tlsPin: String? = "sha256:" + "ab".repeat(32),
         luciola: LuciolaQrInfo? = info,
     ): String? = qrPairingPayloadForAddresses(

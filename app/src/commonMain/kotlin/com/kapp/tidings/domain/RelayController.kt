@@ -2063,7 +2063,7 @@ internal fun manualPeersWithUpdatedAddress(
      * 早先配对时对端还没在二维码里带昵称，于是写进去的是合成名 `node-a1b2c3d4`。
      * 那个名字只在「还没握上手」时顶替 `host:port` 显示，可一旦对端换了地址、
      * 这条便条被改写，合成名就跟着一直留着 —— 真机红米的 `manualPeers[0].name`
-     * 就是 `node-a1b2c3d4`，而它明明已经认识对方叫 `demo-mac-97`。
+     * 就是 `node-a1b2c3d4`，而它明明已经认识对方叫 `mac-mini`。
      *
      * 只换**空的或合成名**：用户自己起的便条（原型里的「老周的旧笔记本」）不许被覆盖。
      */

@@ -7,11 +7,11 @@
 同一个 Mac 上跑桌面 App 与 iOS 模拟器，两者都在 17878：
 
 - **互发现成功**：iOS 侧打印
-  `[luciola] discovered d4e5f6a7-… at 192.168.2.82:17878`（桌面），
-  桌面 `/v1/peers` 里也有 `iPhone 17 Pro 192.168.2.82 online=true`。
+  `[luciola] discovered d4e5f6a7-… at 192.0.2.82:17878`（桌面），
+  桌面 `/v1/peers` 里也有 `iPhone 17 Pro 192.0.2.82 online=true`。
 - **拨号失败**：桌面 `/v1/send` 返回
   `outcome=queued endpoints=[-] tcp=fail(connect-failed)`，
-  日志 `pin lookup 192.168.2.82:17878 pinned=false`。
+  日志 `pin lookup 192.0.2.82:17878 pinned=false`。
 
 ## 两个原因叠在一起
 
@@ -19,7 +19,7 @@
 这不是缺陷；要通必须先配对。
 
 **② 同机时端口就是冲突的（这个才是硬限制）。**
-iOS 模拟器与桌面进程共享同一个网络栈，两者看到的"自己的 IP"都是 `192.168.2.82`。
+iOS 模拟器与桌面进程共享同一个网络栈，两者看到的"自己的 IP"都是 `192.0.2.82`。
 而桌面拨对端用的是对端**广播出来的地址与端口**：
 
 ```
@@ -27,7 +27,7 @@ SecureChannelTransport(listenPort = udpPort)      // 信道监听端口 = 发现
 selfProfile.luciolaPort = transport.boundPort     // 广播出去的就是它
 ```
 
-于是桌面拨 `192.168.2.82:17878` 实际连到**它自己**的监听。让一边换端口也不行：
+于是桌面拨 `192.0.2.82:17878` 实际连到**它自己**的监听。让一边换端口也不行：
 `udpPort` 同时是发现端口，两边一旦不同就再也发现不到对方（实测：桌面改 17898 后，
 iOS 只发现手机、发现不到桌面）。
 

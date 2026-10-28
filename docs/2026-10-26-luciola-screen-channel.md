@@ -23,7 +23,7 @@ luciolaPort 占住了；而投屏是连续、低延迟、允许丢一步但不�
 **legacy 明文 socket** 与 **luciola 画面会话**上跑 40 帧 × 100KiB × 10fps：
 
 ```
-SCREEN_ARM engine=/workspace/RustBuild/cargo-target/release
+SCREEN_ARM engine=<cargo-target>/release
 SCREEN_ARM legacy-plaintext      offered=40 delivered=40 onTime=1.000 fps=9.99 p95=6.0ms mean=1.1ms
 SCREEN_ARM luciola-screen-channel offered=40 delivered=40 onTime=1.000 fps=9.98 p95=6.0ms mean=3.1ms
 ```

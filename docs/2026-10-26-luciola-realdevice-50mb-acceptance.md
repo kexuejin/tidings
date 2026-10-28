@@ -2,9 +2,9 @@
 
 日期：2026-10-26。goal 第 (3) 步的真机落点。
 
-设备：Pixel 6（Android 15，arm64）`SERIAL-TEST-01` ↔ macOS（`demo-mac-156.local`，192.168.2.82）。
+设备：Pixel 6（Android 15，arm64）`<device-serial>` ↔ macOS（`<host>.local`，192.0.2.82）。
 两端都在 luciola 模式（`experimentalLuciola=true`），宿主用 release 引擎
-（`TIDINGS_LUCIOLA_NATIVE=/workspace/RustBuild/cargo-target/release`）。
+（`TIDINGS_LUCIOLA_NATIVE=<cargo-target>/release`）。
 
 ## 结果
 
@@ -37,8 +37,8 @@ a0227abc351658b69a9e170f1d3097a988ee7fc9d94dfffa7a0b0ae7d92a5a05   # 52,428,800 
 $ lsof -nP -a -p 17149 -iTCP -sTCP:LISTEN
 *:17880  *:17882  *:17888  127.0.0.1:8788
 # 信道连接（双向各一条）
-192.168.2.82:57658->192.168.2.22:17878
-192.168.2.82:17878->192.168.2.22:48288
+192.0.2.82:57658->192.0.2.22:17878
+192.0.2.82:17878->192.0.2.22:48288
 
 # 手机 TCP 监听
 $ adb shell ss -tlpn

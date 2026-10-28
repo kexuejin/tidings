@@ -5,7 +5,7 @@
 ## 0. 结论速览
 
 1. **手机入口**：`ConversationsOverflowItems` 新增一项「关联工作区建群」（紧跟「建群」），`App.kt` 不再按 `twoPane` 分支；工作区看板顶栏那颗按钮也随之在 compact 出现。真机（Pixel 6 / 1080×2400 竖屏）实测：⋮ → 关联工作区建群 → 对话框打开 → 填 `/sdcard/verify-ws` → 立即创建协同群 → 进入群聊，横幅「「协同群」建好了，正在通知 1 位成员。」
-2. **多设备入群**：桌面端在**0 台在线设备**时建出「care-in-china 协同群」：`members=[self]`、`rev=1`、`virtualAgents=[{agentId:DSH, hostNodeId:self, name:dsh-care-in-china, wsId:ws-6edc4e1c993f}]`；随后从群信息「邀请新成员」把 Pixel 6 加进来 ⇒ `rev=2`、`members=[self, c3d4e5f6-…]`，**手机端收到并显示**：`协同人类成员 (2)` + `入驻智能体 (1) dsh-care-in-china` + `@dsh-care-in-china`。
+2. **多设备入群**：桌面端在**0 台在线设备**时建出「care-in-china 协同群」：`members=[self]`、`rev=1`、`virtualAgents=[{agentId:DSH, hostNodeId:self, name:dsh-care-in-china, wsId:ws-redacted}]`；随后从群信息「邀请新成员」把 Pixel 6 加进来 ⇒ `rev=2`、`members=[self, c3d4e5f6-…]`，**手机端收到并显示**：`协同人类成员 (2)` + `入驻智能体 (1) dsh-care-in-china` + `@dsh-care-in-china`。
 3. **两条既有红灯已清**：`envDependentTestGate`（Luciola 两个测试里 17+4 处固定 `delay` 当同步）与 `designPreviewPairingGate`（4 个 settings 预览缺 `onExperimentalLuciolaChange`）都转绿，判据见 §4。
 
 ## 1. 环境
@@ -52,18 +52,18 @@
    members: ["a1b2c3d4-6e74-4a7c-aab1-20a1d1284cd6"]
    rev: 1
    virtualAgents: [{ agentId: "DSH", hostNodeId: "a1b2c3d4-…",
-                     name: "dsh-care-in-china", wsId: "ws-6edc4e1c993f" }]
+                     name: "dsh-care-in-china", wsId: "ws-redacted" }]
    ```
 4. 手机重新上线后，桌面群信息 → 邀请新成员 → 选「Pixel 6, 在线」→ 确定：
    ```
-   2 位成员 · rev 2 · 群主 demo-mac-97
+   2 位成员 · rev 2 · 群主 <host>
    已邀请 1 位新成员，正在通知全群。
-   members: ["a1b2c3d4-…", "c3d4e5f6-9382-40a6-831d-1b199a044946"]
+   members: ["a1b2c3d4-…", "00000000-0000-4000-8000-0000000000a1"]
    virtualAgents: [dsh-care-in-china]   ← 加人没有把它冲掉
    ```
 5. **手机端（关键）**：会话列表出现「care-in-china 协同群 1/2 人在线」；进群 → 群信息：
    ```
-   协同人类成员 (2)   Pixel 6 / demo-mac-97（群主）
+   协同人类成员 (2)   Pixel 6 / <host>（群主）
    入驻智能体 (1)     dsh-care-in-china   智能体   @dsh-care-in-china
    ```
    ⇒ `virtualAgents` 随 `group.info` 同步到对端，且 @ token 在手机侧可用。

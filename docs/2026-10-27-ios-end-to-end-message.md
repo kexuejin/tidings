@@ -8,7 +8,7 @@
 
 ```json
 {"status":"sent","to":"ee8ea7fe-…",
- "lastSend":"outcome=sent-via-udp elapsed=3ms endpoints=[192.168.2.82:17978 acked 2ms]
+ "lastSend":"outcome=sent-via-udp elapsed=3ms endpoints=[192.0.2.82:17978 acked 2ms]
              tcp=not-tried redial=no link=false peerOnline=true",
  "note":"对方已 ACK"}
 ```
@@ -26,7 +26,7 @@ iOS 模拟器 stdout：
 **① 同机串话** —— 模拟器与桌面共享网络栈、都在 17878，对端拨 `<ip>:port` 打到的是自己。
 解决：`LuciolaTransportFactory` 增加 `channelListenPort`（发现端口不变），
 模拟器用 `defaults write com.kapp.tidings luciola.channelPort -int 17978` 注入。
-证据：宿主日志从 `pin lookup 192.168.2.82:17878` 变成 `…:17978`，`lsof` 里
+证据：宿主日志从 `pin lookup 192.0.2.82:17878` 变成 `…:17978`，`lsof` 里
 `Tidings *:17978` 就是模拟器自己的监听。
 
 **② 配对** —— 模拟器没有相机、也没有触控注入，App 也没注册 URL scheme，
