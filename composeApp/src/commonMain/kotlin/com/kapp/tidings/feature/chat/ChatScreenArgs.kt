@@ -7,6 +7,7 @@ import com.kapp.tidings.domain.MessageSearchResult
 import com.kapp.tidings.domain.model.MessageUi
 import com.kapp.tidings.domain.RelayUiState
 import com.kapp.tidings.core.nowMillis
+import com.kapp.tidings.core.transport.LocalFile
 import com.kapp.tidings.platform.ReceivedFileActions
 import com.kapp.tidings.ui.ContentWidths
 import androidx.compose.runtime.Composable
@@ -72,6 +73,7 @@ data class ChatScreenState(
     /** 默认真实时钟；截图夹具传固定值（见 [ChatScreen] 的 `now` 说明）。 */
     val now: Long = nowMillis(),
     val cacheDir: String? = null,
+    val initialStagedFiles: List<LocalFile> = emptyList(),
 )
 
 /**
@@ -111,6 +113,10 @@ data class ChatScreenActions(
     val onDismissBanner: (() -> Unit)? = null,
     /** null = 输入栏不画附件图标。 */
     val onAttachFile: ((String) -> Unit)? = null,
+    /** 附件多选选取函数；为 null 时降级到 [onAttachFile]。 */
+    val onPickFiles: (suspend () -> List<LocalFile>)? = null,
+    /** 暂存附件同发函数；(peerId, files) -> Unit。 */
+    val onSendFiles: ((peerId: String, files: List<LocalFile>) -> Unit)? = null,
     val onAcceptTransfer: ((String) -> Unit)? = null,
     val onDeclineTransfer: ((String) -> Unit)? = null,
     /** null = 文件卡片不画取消按钮。 */
@@ -380,6 +386,10 @@ data class ComposerSlotArgs(
      * 与手机内置输入栏同一语义。
      */
     val readOnlyReason: String? = null,
+    val stagedFiles: List<LocalFile> = emptyList(),
+    val onRemoveStagedFile: ((LocalFile) -> Unit)? = null,
+    val onAttachFiles: (() -> Unit)? = null,
+    val onStageFiles: ((List<LocalFile>) -> Unit)? = null,
 )
 
 data class ChatScreenChrome(
@@ -411,6 +421,7 @@ data class ChatScreenChrome(
      * @param text 当前草稿全文；空串表示草稿被清掉（发送后）。
      */
     val onDraftChange: ((convId: String, text: String) -> Unit)? = null,
+    val onStagedFilesChange: ((convId: String, files: List<LocalFile>) -> Unit)? = null,
     val initialDraft: String = "",
     val initialEmojiOpen: Boolean = false,
     val initialHistorySearch: Boolean = false,

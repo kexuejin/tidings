@@ -53,4 +53,25 @@ class DesktopComposerSendGateTest {
         assertEquals(ComposeByteMode.Tcp, modeOf(tcp))
         assertTrue(desktopComposerCanSend(tcp, modeOf(tcp)), "TCP 档照样发")
     }
+
+    @Test
+    fun blankDraftWithAttachmentsSends() {
+        assertTrue(
+            desktopComposerCanSend("", ComposeByteMode.Udp, hasAttachments = true),
+            "正文为空但有暂存附件时放行",
+        )
+        assertTrue(
+            desktopComposerCanSend("   ", ComposeByteMode.Udp, hasAttachments = true),
+            "纯空白正文但有暂存附件时放行",
+        )
+    }
+
+    @Test
+    fun overLimitDraftWithAttachmentsIsStillRefused() {
+        val over = "字".repeat(Protocol.TEXT_TCP_LIMIT)
+        assertFalse(
+            desktopComposerCanSend(over, modeOf(over), hasAttachments = true),
+            "正文超限即使带附件也必须拦下",
+        )
+    }
 }

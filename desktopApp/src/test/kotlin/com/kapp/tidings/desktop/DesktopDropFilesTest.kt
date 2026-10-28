@@ -3,6 +3,9 @@
 package com.kapp.tidings.desktop
 
 import java.io.File
+import com.kapp.tidings.domain.DesktopPaneActions
+import com.kapp.tidings.ui.desktop.DesktopPreviewActions
+import com.kapp.tidings.core.transport.LocalFile
 import kotlin.test.AfterTest
 import kotlin.test.Test
 import kotlin.test.assertEquals
@@ -146,5 +149,120 @@ class DesktopDropFilesTest {
         val payload = expandDropped(listOf(real, File(root, "a.bin.sha256")))
 
         assertEquals(listOf("a.bin"), payload.files.map { it.name })
+    }
+
+    private class FakeDesktopPaneActions : DesktopPaneActions by DesktopPreviewActions {
+        var sentPeerId: String? = null
+        var sentFiles: List<LocalFile> = emptyList()
+        var isFolder: Boolean = false
+        var folderRootName: String? = null
+
+        override fun sendFiles(
+            peerId: String,
+            files: List<LocalFile>,
+            isFolder: Boolean,
+            folderRootName: String?,
+        ) {
+            sentPeerId = peerId
+            sentFiles = files
+            this.isFolder = isFolder
+            this.folderRootName = folderRootName
+        }
+    }
+
+    private val testTexts = DropTexts(
+        pickConversation = "pick",
+        tooMany = "tooMany",
+        emptyDirsSkipped = "emptyDirsSkipped",
+    )
+
+    /** 选中会话时拖入普通文件：暂存到附件区，不立即发出 offer。 */
+    @Test
+    fun whenPeerSelectedAndFilesDroppedTheyAreStagedNotSent() {
+        val root = tempDir("stage")
+        val f = write(root, "photo.jpg", 100)
+        val actions = FakeDesktopPaneActions()
+        var staged = listOf<LocalFile>()
+
+        handleDroppedFiles(
+            controller = actions,
+            peerId = "peer-1",
+            dropped = listOf(f),
+            notify = {},
+            texts = testTexts,
+            onStageFiles = { staged = it },
+        )
+
+        assertEquals(1, staged.size, "文件必须交给暂存回调")
+        assertEquals("photo.jpg", staged.first().name)
+        assertEquals(null, actions.sentPeerId, "暂存后不得直接发送 offer")
+    }
+
+    /** 选中会话时拖入文件夹：继续走文件夹传输通道直发，不落暂存区。 */
+    @Test
+    fun whenPeerSelectedAndFolderDroppedItIsSentNotStaged() {
+        val root = tempDir("folder-send")
+        val folder = File(root, "docs").apply { mkdirs() }
+        write(folder, "doc1.txt", 10)
+        val actions = FakeDesktopPaneActions()
+        var staged = listOf<LocalFile>()
+
+        handleDroppedFiles(
+            controller = actions,
+            peerId = "peer-1",
+            dropped = listOf(folder),
+            notify = {},
+            texts = testTexts,
+            onStageFiles = { staged = it },
+        )
+
+        assertTrue(staged.isEmpty(), "文件夹不得落入普通附件暂存区")
+        assertEquals("peer-1", actions.sentPeerId, "文件夹直接发给选中对端")
+        assertTrue(actions.isFolder, "必须标明为文件夹传输")
+    }
+
+    /** 未选中会话时拖入文件：触发目标选择器，不暂存也不直发。 */
+    @Test
+    fun whenPeerNotSelectedDropTriggersOnPickTarget() {
+        val root = tempDir("no-peer")
+        val f = write(root, "file.pdf", 20)
+        val actions = FakeDesktopPaneActions()
+        var pickedPayload: DroppedPayload? = null
+        var staged = listOf<LocalFile>()
+
+        handleDroppedFiles(
+            controller = actions,
+            peerId = null,
+            dropped = listOf(f),
+            notify = {},
+            texts = testTexts,
+            onPickTarget = { pickedPayload = it },
+            onStageFiles = { staged = it },
+        )
+
+        assertTrue(staged.isEmpty(), "未选会话时不得暂存")
+        assertEquals(null, actions.sentPeerId, "未选会话时不得发送")
+        assertEquals(1, pickedPayload?.files?.size, "必须交给 onPickTarget 弹窗选人")
+    }
+
+    /** 未接入暂存回调时：安全回退为直发。 */
+    @Test
+    fun whenOnStageFilesNotProvidedFallsBackToSend() {
+        val root = tempDir("fallback")
+        val f = write(root, "fallback.txt", 15)
+        val actions = FakeDesktopPaneActions()
+
+        handleDroppedFiles(
+            controller = actions,
+            peerId = "peer-2",
+            dropped = listOf(f),
+            notify = {},
+            texts = testTexts,
+            onStageFiles = null,
+        )
+
+        assertEquals("peer-2", actions.sentPeerId, "无暂存回调时回退直发")
+        assertFalse(actions.isFolder)
+        assertEquals(1, actions.sentFiles.size)
     }
 }

@@ -21,6 +21,7 @@ import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.outlined.DragHandle
@@ -46,6 +47,8 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.graphics.Color
+import com.kapp.tidings.core.transport.LocalFile
+import com.kapp.tidings.feature.chat.AttachmentStagingRow
 import androidx.compose.ui.graphics.painter.Painter
 import androidx.compose.ui.input.key.Key
 import androidx.compose.ui.input.key.KeyEventType
@@ -108,6 +111,7 @@ import org.jetbrains.compose.resources.painterResource
 import org.jetbrains.compose.resources.StringResource
 import org.jetbrains.compose.resources.stringResource
 import com.kapp.tidings.ui.components.AppIconButton
+import com.kapp.tidings.ui.components.PressableSurface
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
 import com.kapp.tidings.feature.chat.COMPOSER_FOCUS_REQUEST_IDLE
@@ -173,8 +177,8 @@ private val ComposerToolIconSize = 28.dp
  * 发送侧收不到任何错误 —— AGENTS §3 的「静默丢失」形态）。两处各写一遍判据，
  * 就必然有一处漏；抽成纯函数让「Enter 与按钮同一条门」可被单测钉住。
  */
-internal fun desktopComposerCanSend(text: String, mode: ComposeByteMode): Boolean =
-    text.isNotBlank() && !mode.overLimit
+internal fun desktopComposerCanSend(text: String, mode: ComposeByteMode, hasAttachments: Boolean = false): Boolean =
+    (text.isNotBlank() || hasAttachments) && !mode.overLimit
 
 @Composable
 public fun DesktopComposer(
@@ -266,6 +270,9 @@ public fun DesktopComposer(
      * 让用户打完字再吃一条「发送失败」是最糟的形状。
      */
     readOnlyReason: String? = null,
+    stagedFiles: List<LocalFile> = emptyList(),
+    onRemoveStagedFile: ((LocalFile) -> Unit)? = null,
+    onAttachFiles: (() -> Unit)? = null,
 ) {
     val density = LocalDensity.current
     var split by remember { mutableStateOf(ComposerSplit(ComposerSplit.DEFAULT_RATIO)) }
@@ -342,9 +349,9 @@ public fun DesktopComposer(
         // 对端按字节预算整帧拒收，发送侧收不到任何错误 —— 按 Enter 后输入框被清空、
         // 字没了、消息实际没发出去，正是「静默丢失」的形态。这里不拦，
         // Enter 那条路就是唯一绕过按钮置灰的门。
-        if (!desktopComposerCanSend(value.text, mode)) return
+        if (!desktopComposerCanSend(value.text, mode, hasAttachments = stagedFiles.isNotEmpty())) return
         val text = value.text.trim()
-        if (text.isEmpty()) return
+        if (text.isEmpty() && stagedFiles.isEmpty()) return
         // **带 replyId 走 ChatScreen 的出口**（[onSend]）：从前这一行是
         // `controller.sendToConversation(peer.nodeId, text)` —— 「回复」的 replyId 与
         // 发送后的引用态清理都在这条路上丢了。现在发送、清草稿、清引用是同一个动作。
@@ -432,17 +439,20 @@ public fun DesktopComposer(
                                     overflow = TextOverflow.Ellipsis,
                                     modifier = Modifier.weight(1f),
                                 )
-                                IconButton(onClick = onCancelReply, modifier = Modifier.size(24.dp)) {
-                                    Icon(
-                                        imageVector = Icons.Default.Close,
-                                        contentDescription = stringResource(Res.string.chat_reply_cancel),
-                                        tint = MaterialTheme.colorScheme.onSurfaceVariant,
-                                        modifier = Modifier.size(16.dp),
-                                    )
-                                }
+                                AppIconButton(
+                                    iconVector = Icons.Default.Close,
+                                    contentDescription = stringResource(Res.string.chat_reply_cancel),
+                                    onClick = onCancelReply,
+                                    modifier = Modifier.size(24.dp),
+                                )
                             }
                         }
                     }
+                    AttachmentStagingRow(
+                        files = stagedFiles,
+                        onRemove = { onRemoveStagedFile?.invoke(it) },
+                        modifier = Modifier.padding(bottom = LocalAppSpacing.current.xs),
+                    )
                     BoxWithConstraints(Modifier.fillMaxWidth()) {
                         // 工具行照原型 `toolsRow(group=false)` 逐颗对齐
                         // （`prototype/relay.html:3103-3118`）：表情 · PK · 窗口震动 · 截图 ·
@@ -508,14 +518,18 @@ public fun DesktopComposer(
                             // `arrayOf("*/*")`（`androidMain/.../AndroidFilePicker.kt` 的 `pick`），图片本来
                             // 就是文件；手机端就是这么画的（`ChatScreen.kt` 的 id="image" 与
                             // `:627` 的 id="file" 共用 `attach`），桌面照它对齐。
-                            ToolIcon(painterResource(Res.drawable.ic_image), stringResource(Res.string.chat_image)) { controller.pickAndSendFiles(peer.nodeId) }
+                            ToolIcon(painterResource(Res.drawable.ic_image), stringResource(Res.string.chat_image)) {
+                                if (onAttachFiles != null) onAttachFiles() else controller.pickAndSendFiles(peer.nodeId)
+                            }
                             // 发文件：原型第 6 颗是**回形针**（`i-clip`，`relay.html:3117`），不是文件夹
                             // —— 文件夹在原型里是第 7 颗「发送文件夹」（`i-folder`），本端没有那条链路
                             // （不画，理由见 `fidelity-deviations.yaml` 的 toolsRow 那两节）。
                             // 标签用 `chat_attach`（「发文件」）而不是桌面那份 `desktop_composer_attach`
                             // （「文件…」）：手机端同一颗用的就是前者（`ChatScreen.kt`），
                             // 而带省略号的标签是给带文字的按钮用的，做 contentDescription 读起来是残句。
-                            ToolIcon(painterResource(Res.drawable.ic_attachment), stringResource(Res.string.chat_attach)) { controller.pickAndSendFiles(peer.nodeId) }
+                            ToolIcon(painterResource(Res.drawable.ic_attachment), stringResource(Res.string.chat_attach)) {
+                                if (onAttachFiles != null) onAttachFiles() else controller.pickAndSendFiles(peer.nodeId)
+                            }
                             // 群聊多一句 `.shint`（原型 `toolsRow(group=true)` 的
                             // `<span class="shint">仅在线群成员可接收图片/文件</span>`，
                             // `prototype/relay.html:3162`；样式 `.tools .shint{font-size:11px;
@@ -730,7 +744,7 @@ public fun DesktopComposer(
                                 Text(" " + stringResource(Res.string.desktop_composer_send_hint), style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
                             }
                             Spacer(Modifier.width(LocalAppSpacing.current.md))
-                            Button2(stringResource(Res.string.chat_send), Icons.AutoMirrored.Outlined.Send, enabled = desktopComposerCanSend(value.text, mode), onClick = { send() })
+                            Button2(stringResource(Res.string.chat_send), Icons.AutoMirrored.Outlined.Send, enabled = desktopComposerCanSend(value.text, mode, hasAttachments = stagedFiles.isNotEmpty()), onClick = { send() })
                         }
                     }
                 }
@@ -785,8 +799,15 @@ private fun ToolIcon(
     enabled: Boolean = true,
     onClick: () -> Unit,
 ) {
-    IconButton(onClick = onClick, enabled = enabled, modifier = Modifier.size(ComposerToolIconSize)) {
-        Icon(painter, contentDescription = label, modifier = Modifier.size(IconSizes.Label))
+    PressableSurface(
+        onClick = onClick,
+        enabled = enabled,
+        modifier = Modifier.size(ComposerToolIconSize),
+        shape = CircleShape,
+    ) {
+        Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+            Icon(painter, contentDescription = label, modifier = Modifier.size(IconSizes.Label))
+        }
     }
 }
 

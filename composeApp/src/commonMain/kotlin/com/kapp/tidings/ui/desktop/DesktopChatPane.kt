@@ -3,6 +3,7 @@
 package com.kapp.tidings.ui.desktop
 
 import com.kapp.tidings.domain.DesktopPaneActions
+import com.kapp.tidings.core.transport.LocalFile
 
 import org.jetbrains.compose.resources.painterResource
 import androidx.compose.foundation.layout.Arrangement
@@ -106,6 +107,8 @@ public fun ChatPane(
      * 默认 0 = 没有未读或没采到：指示条会退化成不带数字的「回到最新」，不编条数。
      */
     unreadOnEntry: Int = 0,
+    initialStagedFiles: List<LocalFile> = emptyList(),
+    onStagedFilesChange: ((String, List<LocalFile>) -> Unit)? = null,
 ) {
     // 「中断 agent run」走控制面（§6.6 agent-cancel），需要协程作用域；
     // 与手机壳（App.kt 里 chatScope.launch）同一条纪律。
@@ -126,6 +129,7 @@ public fun ChatPane(
                 activeSessionId = activeSessionId,
                 unreadOnEntry = unreadOnEntry,
                 cacheDir = null,
+                initialStagedFiles = initialStagedFiles,
             ),
             actions = ChatScreenActions(
                 onSend = controller::sendToConversation,
@@ -133,6 +137,8 @@ public fun ChatPane(
                 onSelectAgentSession = onSelectAgentSession,
                 onDismissBanner = controller::dismissBanner,
                 onAttachFile = controller::pickAndSendFiles,
+                onPickFiles = controller::pickFiles,
+                onSendFiles = controller::sendFiles,
                 onAcceptTransfer = controller::acceptTransfer,
                 onDeclineTransfer = controller::declineTransfer,
                 // 与手机端同一个入口：按原 id 重放，不新发一条。
@@ -204,6 +210,7 @@ public fun ChatPane(
                 modifier = chatModifier,
                 initialDraft = initialDraft,
                 onDraftChange = onDraftChange,
+                onStagedFilesChange = onStagedFilesChange,
                 composerSlot = if (peer == null) {
                     null
                 } else {
@@ -231,6 +238,9 @@ public fun ChatPane(
                             focusRequest = args.focusRequest,
                             // 被移出群时与手机同一句话（历史只读）。
                             readOnlyReason = args.readOnlyReason,
+                            stagedFiles = args.stagedFiles,
+                            onRemoveStagedFile = args.onRemoveStagedFile,
+                            onAttachFiles = args.onAttachFiles,
                         )
                     }
                 },

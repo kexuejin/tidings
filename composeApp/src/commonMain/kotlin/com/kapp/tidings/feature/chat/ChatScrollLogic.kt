@@ -121,18 +121,56 @@ internal fun localDayKey(atMillis: Long): String =
  * @param dayKey 把时间戳归到「哪一天」的函数。传进来而不是在这里算时区，
  *   因为时区是平台事实，而纯函数要能被 jvmTest 用固定时区钉住。
  */
-internal fun dayDividerIds(messages: List<MessageUi>, dayKey: (Long) -> String): Set<String> {
+/**
+ * 消息时间/日期分隔阈值（毫秒）。
+ * 相邻两条消息间隔大于或等于 5 分钟（300,000ms），或跨越自然日时，在消息上方展示时间分割线。
+ */
+internal const val TIMELINE_SEPARATOR_THRESHOLD_MS: Long = 5 * 60 * 1000L
+
+/**
+ * 判定当前消息 [currentAt] 是否应该在前一条消息 [previousAt] 之后展示时间/日期分割线。
+ *
+ * 规则（主流 IM 交互规范）：
+ * 1. 列表首条消息（[previousAt] == null）：必须展示时间锚点；
+ * 2. 跨日历日（[dayKey] 改变）：展示日期与时间；
+ * 3. 间隔跨度：同一天内与上一条消息的时间间隔 >= 5 分钟。
+ *
+ * @param previousAt 前一条消息的时间戳（正序遍历下的上一条），首条为 null
+ * @param currentAt 当前消息的时间戳
+ * @param dayKey 归属日期的映射函数
+ */
+internal fun shouldShowSeparator(
+    previousAt: Long?,
+    currentAt: Long,
+    dayKey: (Long) -> String,
+): Boolean {
+    if (previousAt == null) return true
+    if (dayKey(previousAt) != dayKey(currentAt)) return true
+    return (currentAt - previousAt) >= TIMELINE_SEPARATOR_THRESHOLD_MS
+}
+
+/**
+ * 计算需要展示时间/日期分割线的消息 id 集合。
+ *
+ * 遍历正序消息列表，标记所有满足 [shouldShowSeparator] 的消息 id。
+ */
+internal fun timelineSeparatorIds(messages: List<MessageUi>, dayKey: (Long) -> String): Set<String> {
     val out = mutableSetOf<String>()
-    var lastDay: String? = null
+    var previousAt: Long? = null
     for (m in messages) {
-        val day = dayKey(m.at)
-        if (day != lastDay) {
+        if (shouldShowSeparator(previousAt, m.at, dayKey)) {
             out += m.id
-            lastDay = day
         }
+        previousAt = m.at
     }
     return out
 }
+
+/**
+ * 兼容旧命名的日期分隔计算，委托给 [timelineSeparatorIds]。
+ */
+internal fun dayDividerIds(messages: List<MessageUi>, dayKey: (Long) -> String): Set<String> =
+    timelineSeparatorIds(messages, dayKey)
 
 /**
  * 新消息到达后是否应该把视野带回最新。

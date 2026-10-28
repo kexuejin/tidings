@@ -2,7 +2,7 @@
 
 package com.kapp.tidings.desktop
 
-import com.kapp.tidings.domain.RelayController
+import com.kapp.tidings.domain.DesktopPaneActions
 import com.kapp.tidings.core.protocol.FileTransfer
 import com.kapp.tidings.core.transport.LocalFile
 import java.io.File
@@ -134,15 +134,19 @@ internal class DropTexts(
  * 主窗与独立会话窗**共用这一份**：同一件事不该因为窗口不同而有两种行为。
  * 三种结果各自有话说 ——
  *  · 展开后超过上限 ⇒ **明确拒绝**（不截断后照发：那等于悄悄少传一半）；
+ *  · 没有选中会话 ⇒ 交给 [onPickTarget] 弹目标选择器（空态文案承诺的是
+ *    "捎话会问你要发给谁"，不是只弹一句通知）；宿主没给选择器才退回通知；
  *  · 跳过了空文件夹 ⇒ 如实告知（发送侧暂不支持 `isDir`）；
  *  · 其余 ⇒ 正常发送。
  */
 internal fun handleDroppedFiles(
-    controller: RelayController,
+    controller: DesktopPaneActions,
     peerId: String?,
     dropped: List<File>,
     notify: (String) -> Unit,
     texts: DropTexts,
+    onPickTarget: ((DroppedPayload) -> Unit)? = null,
+    onStageFiles: ((List<LocalFile>) -> Unit)? = null,
 ) {
     val payload = expandDropped(dropped)
     if (payload.isEmpty) return
@@ -152,14 +156,19 @@ internal fun handleDroppedFiles(
         return
     }
     if (peerId == null) {
-        notify(texts.pickConversation)
+        val pick = onPickTarget
+        if (pick != null) pick(payload) else notify(texts.pickConversation)
         return
     }
     if (payload.skippedEmptyDirs > 0) notify(texts.emptyDirsSkipped)
-    controller.sendFiles(
-        peerId = peerId,
-        files = payload.files,
-        isFolder = payload.isFolder,
-        folderRootName = payload.folderRootName,
-    )
+    if (onStageFiles != null && !payload.isFolder) {
+        onStageFiles(payload.files)
+    } else {
+        controller.sendFiles(
+            peerId = peerId,
+            files = payload.files,
+            isFolder = payload.isFolder,
+            folderRootName = payload.folderRootName,
+        )
+    }
 }

@@ -75,7 +75,7 @@ private val FOLDER_CONTENT_TYPES: List<Any> = listOf<Any>(UTTypeFolder)
  * 持有者是 [DocumentPickerSession.activeDelegate] 字段，不是局部变量，正是为了排除这种可能。
  */
 private class DocumentPickerDelegate(
-    private val deferred: CompletableDeferred<NSURL?>,
+    private val deferred: CompletableDeferred<List<NSURL>?>,
 ) : NSObject(), UIDocumentPickerDelegateProtocol {
 
     override fun documentPicker(
@@ -85,7 +85,7 @@ private class DocumentPickerDelegate(
         // 先完成 deferred 再 dismiss：反过来的话，程序化 dismiss 有可能再触发一次
         // documentPickerWasCancelled，把刚刚这次选择覆盖成 null。`complete` 幂等，
         // 所以顺序换过来就是"选择偶尔丢失"，而且只在真机上偶发。
-        deferred.complete(didPickDocumentsAtURLs.firstOrNull() as? NSURL)
+        deferred.complete(didPickDocumentsAtURLs.filterIsInstance<NSURL>())
         // 系统自己也会关掉 picker；这里再关一次是为了覆盖它不关的那些路径，重复调用无害。
         controller.dismissViewControllerAnimated(true, completion = null)
     }
@@ -97,7 +97,7 @@ private class DocumentPickerDelegate(
 }
 
 /**
- * 一次"打开选择器并等一个 URL"的会话。
+ * 一次"打开选择器并等 URL 列表"的会话。
  *
  * 两个 picker 各持一个实例，而不是各写一份：delegate 的持有规则（见
  * [DocumentPickerDelegate]）是**同一条**约束，复制两份的话，将来只修好其中一份就会
@@ -118,15 +118,15 @@ private class DocumentPickerSession {
     /**
      * 在主线程打开选择器并等待回调。
      *
-     * 返回选中项的安全作用域 URL；用户取消、等待超时、拿不到可以 present 的控制器，
+     * 返回选中项的安全作用域 URL 列表；用户取消、等待超时、拿不到可以 present 的控制器，
      * 都返回 null。
      */
-    suspend fun select(contentTypes: List<Any>, asCopy: Boolean): NSURL? =
+    suspend fun select(contentTypes: List<Any>, asCopy: Boolean, allowsMultiple: Boolean = false): List<NSURL>? =
         withContext(Dispatchers.Main) {
             // UIKit 只能从主线程碰；present 更是必须主线程，所以整段都在 Main 上。
             val root = topMostViewController() ?: return@withContext null
 
-            val deferred = CompletableDeferred<NSURL?>()
+            val deferred = CompletableDeferred<List<NSURL>?>()
             val delegate = DocumentPickerDelegate(deferred)
             // 参数名必须写全：`forOpeningContentTypes:` 与 `forExportingURLs:` 生成出来的
             // 构造器签名都是 (List<*>, Boolean)，位置参数在这里是二义的。
@@ -134,6 +134,7 @@ private class DocumentPickerSession {
                 forOpeningContentTypes = contentTypes,
                 asCopy = asCopy,
             )
+            picker.allowsMultipleSelection = allowsMultiple
             activeDelegate = delegate
             picker.delegate = delegate
 
@@ -159,11 +160,19 @@ class IosFilePicker : FilePicker {
     override suspend fun pick(): PickedFile? = guarded {
         // asCopy = true 让系统先把内容复制到我们沙箱里再交给我们：这样即便后面的
         // 拷贝失败，我们也从没从沙箱外的路径上读过字节。
-        val url = session.select(FILE_CONTENT_TYPES, asCopy = true) ?: return@guarded null
+        val urls = session.select(FILE_CONTENT_TYPES, asCopy = true, allowsMultiple = false) ?: return@guarded null
+        val url = urls.firstOrNull() ?: return@guarded null
         // 拷贝可能几百 MB，放主线程会直接冻结界面 —— 与 Android 侧把 SAF 读挪到
         // Dispatchers.IO 是同一条理由。
         withContext(Dispatchers.Default) { copyPickedFile(url) }
     }
+
+    override suspend fun pickMultiple(): List<PickedFile> = guarded {
+        val urls = session.select(FILE_CONTENT_TYPES, asCopy = true, allowsMultiple = true) ?: return@guarded emptyList()
+        withContext(Dispatchers.Default) {
+            urls.mapNotNull { copyPickedFile(it) }
+        }
+    } ?: emptyList()
 }
 
 /** 系统目录选择器 → 一个用户可以往里面写收到文件的绝对路径。 */
@@ -174,7 +183,8 @@ class IosSaveDirectoryPicker : SaveDirectoryPicker {
     override suspend fun pickDirectory(): String? = guarded {
         // asCopy = false：目录没法"先拷一份再交出去"（拷一棵目录树既慢又不是用户要的），
         // 所以回给我们的就是沙箱外那条真实路径的安全作用域授权。
-        val url = session.select(FOLDER_CONTENT_TYPES, asCopy = false) ?: return@guarded null
+        val urls = session.select(FOLDER_CONTENT_TYPES, asCopy = false, allowsMultiple = false) ?: return@guarded null
+        val url = urls.firstOrNull() ?: return@guarded null
 
         // 读 `path()` 本身不需要授权，但传输层收完文件要往这个目录**写**，那需要。
         // 这里显式打开作用域，并且**有意不关**：

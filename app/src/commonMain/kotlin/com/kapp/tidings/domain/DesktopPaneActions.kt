@@ -4,6 +4,7 @@
 package com.kapp.tidings.domain
 
 import com.kapp.tidings.core.transport.SendOutcome
+import com.kapp.tidings.core.transport.LocalFile
 import com.kapp.tidings.domain.ManualPeerEntry
 import com.kapp.tidings.platform.ReceivedFileActions
 // ExecDeviceRow 现在住在同一个包（领域侧）：它由 execDeviceRows() 算出来。
@@ -199,6 +200,15 @@ public interface DesktopPaneActions {
     fun dissolveGroup(groupId: String): Unit = Unit
 
     fun pickAndSendFiles(peerId: String)
+
+    suspend fun pickFiles(): List<LocalFile> = emptyList()
+
+    fun sendFiles(
+        peerId: String,
+        files: List<LocalFile>,
+        isFolder: Boolean = false,
+        folderRootName: String? = null,
+    ) {}
 
     fun acceptTransfer(transferId: String)
 

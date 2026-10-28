@@ -4,6 +4,11 @@ package com.kapp.tidings.feature.chat
 
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.ui.ExperimentalComposeUiApi
+import androidx.compose.ui.input.key.Key
+import androidx.compose.ui.input.key.KeyEventType
+import androidx.compose.ui.input.key.key
+import androidx.compose.ui.input.key.onPreviewKeyEvent
+import androidx.compose.ui.input.key.type
 import androidx.compose.ui.backhandler.BackHandler
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Box
@@ -48,12 +53,13 @@ import com.kapp.tidings.domain.isPendingApproval
 import com.kapp.tidings.domain.mayDecideApproval
 import com.kapp.tidings.domain.pendingApprovalCount
 import com.kapp.tidings.core.nowMillis
-import com.kapp.tidings.core.protocol.MsgTypes
+import com.kapp.tidings.core.transport.LocalFile
 import com.kapp.tidings.generated.resources.Res
 import com.kapp.tidings.feature.agents.AgentSessionBar
 import com.kapp.tidings.feature.agents.AgentSessionPickerDialog
 import com.kapp.tidings.ui.components.AppBanner
 import com.kapp.tidings.ui.components.DayDivider
+import com.kapp.tidings.ui.components.TimelineSeparator
 import com.kapp.tidings.ui.components.ComposerCapability
 import com.kapp.tidings.ui.components.PkPickerDialog
 import com.kapp.tidings.ui.components.VoiceRecordDialog
@@ -84,6 +90,7 @@ import com.kapp.tidings.generated.resources.chat_no_selection_title
 import com.kapp.tidings.generated.resources.chat_nudge
 import com.kapp.tidings.generated.resources.chat_peer_offline
 import com.kapp.tidings.generated.resources.chat_pk
+import com.kapp.tidings.generated.resources.common_agent
 import com.kapp.tidings.generated.resources.common_profile_unavailable
 import com.kapp.tidings.generated.resources.chat_voice_record
 import com.kapp.tidings.generated.resources.hist_search_title
@@ -149,6 +156,8 @@ fun ChatScreen(
     val onOpenAgentConsole = actions.onOpenAgentConsole
     val onDismissBanner = actions.onDismissBanner
     val onAttachFile = actions.onAttachFile
+    val onPickFiles = actions.onPickFiles
+    val onSendFiles = actions.onSendFiles
     val onAcceptTransfer = actions.onAcceptTransfer
     val onDeclineTransfer = actions.onDeclineTransfer
     val onCancelTransfer = actions.onCancelTransfer
@@ -179,6 +188,7 @@ fun ChatScreen(
     // 草稿的外部存放处（可空槽）。壳接住它，切会话时再作为 initialDraft 喂回来，
     // 于是"写到一半切走再回来"不会丢字。传 null = 这个壳不关心，行为不变。
     val onDraftChangeExternal = chrome.onDraftChange
+    val onStagedFilesChangeExternal = chrome.onStagedFilesChange
     val initialEmojiOpen = chrome.initialEmojiOpen
     val initialHistorySearch = chrome.initialHistorySearch
     val initialScreenRequestConfirmOpen = chrome.initialScreenRequestConfirmOpen
@@ -339,6 +349,21 @@ fun ChatScreen(
         else -> resolveNodeIdentity(peer.nodeId, bubbleCtx)
             .takeIf { it.hasProfile }?.displayName
     }
+    var stagedFiles by remember(peerId, data.initialStagedFiles) { mutableStateOf(data.initialStagedFiles) }
+
+    fun stageFiles(files: List<LocalFile>) {
+        if (files.isEmpty()) return
+        val merged = mergeStagedFiles(stagedFiles, files)
+        stagedFiles = merged
+        peerId?.let { onStagedFilesChangeExternal?.invoke(it, merged) }
+    }
+
+    fun removeStagedFile(file: LocalFile) {
+        val updated = stagedFiles.filterNot { it.path == file.path }
+        stagedFiles = updated
+        peerId?.let { onStagedFilesChangeExternal?.invoke(it, updated) }
+    }
+
     var draft by remember(peerId) { mutableStateOf(initialDraft) }
     var replyingToMessage by remember(peerId) { mutableStateOf<MessageUi?>(null) }
     // **发送的唯一出口**：手机内置输入栏与桌面输入卡片（composerSlot）共用这一个函数。
@@ -352,10 +377,18 @@ fun ChatScreen(
     // 从前直接调 `controller.sendToConversation`，于是 ②③④ 全在它那条路上缺失 ——
     // 补一个出口比补三处调用更难漏。接线由 `ComposerSlotSendWiringTest` 盯住。
     fun submitMessage(body: String, replyId: String?) {
+        val filesToSend = stagedFiles
+        stagedFiles = emptyList()
+        peerId?.let { onStagedFilesChangeExternal?.invoke(it, emptyList()) }
         draft = ""
         replyingToMessage = null
         notifyDraftCleared(peerId, onDraftChangeExternal)
-        onSend(peer.nodeId, body, replyId)
+        if (body.isNotBlank() || filesToSend.isEmpty()) {
+            onSend(peer.nodeId, body, replyId)
+        }
+        if (filesToSend.isNotEmpty()) {
+            onSendFiles?.invoke(peer.nodeId, filesToSend)
+        }
     }
     var forwardingMessage by remember { mutableStateOf<MessageUi?>(null) }
     var showGroupInfo by remember(peerId) { mutableStateOf(false) }
@@ -688,7 +721,27 @@ fun ChatScreen(
         unreadOnEntry = 0
     }
 
-    Column(modifier.fillMaxSize()) {
+    Column(
+        modifier
+            .fillMaxSize()
+            .onPreviewKeyEvent { event ->
+                if (event.type == KeyEventType.KeyDown && event.key == Key.Escape) {
+                    when {
+                        forwardingMessage != null -> { forwardingMessage = null; true }
+                        previewingImagePath != null -> { previewingImagePath = null; true }
+                        showClearConfirm -> { showClearConfirm = false; true }
+                        showGroupInfo -> { showGroupInfo = false; true }
+                        showVoiceRecord -> { showVoiceRecord = false; true }
+                        showPkPicker -> { showPkPicker = false; true }
+                        showHistorySearch -> { showHistorySearch = false; true }
+                        showSessionPicker -> { showSessionPicker = false; true }
+                        else -> false
+                    }
+                } else {
+                    false
+                }
+            },
+    ) {
         if (showHeader) {
             ChatHeader(
                 peer = peer,
@@ -711,7 +764,7 @@ fun ChatScreen(
                 // 入口**不再因为对方离线而整颗消失**（那会让人以为功能被删了）。
                 // 保留入口 → 点开确认表单 → 发送时由控制器给出既有的「当前无法查看屏幕」横幅，
                 // 失败有话说。真正在群里/对 agent 时仍然不给入口（那两档没有语义）。
-                onRequestScreenView = onRequestScreenView?.takeIf { group == null && (!peer.isAgent || MsgTypes.CAP_REMOTE_SHARE in peer.caps) }
+                onRequestScreenView = onRequestScreenView?.takeIf { group == null && !peer.isAgent }
                     ?.let { req -> { req(peer.nodeId) } },
                 initialConfirmOpen = initialScreenRequestConfirmOpen,
                 group = group,
@@ -828,7 +881,8 @@ fun ChatScreen(
             }
             if (activeAgentRun != null) {
                 val agentName = group.virtualAgents?.firstOrNull { it.hostNodeId == activeAgentRun.peerId }?.name
-                    ?: activeAgentRun.peerId.take(8)
+                    ?: state.peer(activeAgentRun.peerId)?.displayName
+                    ?: stringResource(Res.string.common_agent)
                 GroupProgressBar(
                     agentName = agentName,
                     activeRun = activeAgentRun,
@@ -863,9 +917,8 @@ fun ChatScreen(
                 )
             } else {
                 val sessionTransitions = remember(messages) { sessionTransitionIds(messages) }
-                // 日期分隔：每换一天的第一条。判据只看 `message.at`（不碰 id 前缀），
-                // 所以两端永远一致 —— 这一点与 SessionDivider 不同，见 dayDividerIds 的 KDoc。
-                val dayDividers = remember(messages) { dayDividerIds(messages, ::localDayKey) }
+                // 时间/日期分隔线：列表首条、自然日切换或相邻消息间隔 >= 5 分钟。
+                val timelineSeparators = remember(messages) { timelineSeparatorIds(messages, ::localDayKey) }
                 // 引用气泡按 id 找源消息：倒一次表 O(n) 变成建一次 map O(n) + 每次查 O(1)。
                 // 此前每条带引用的气泡在**每次重组**时 `firstOrNull` 线性扫全表，
                 // 长会话里一屏几十条引用就是每帧几十次全扫。
@@ -1049,8 +1102,8 @@ fun ChatScreen(
                         //
                         // 判据：在 reverseLayout 里，**后画的元素在视觉上方**。所以日期线与
                         // 会话线都要写在 MessageBubble 之后。改顺序时请连这条注释一起想。
-                        if (message.id in dayDividers) {
-                            DayDivider(at = message.at, now = now)
+                        if (message.id in timelineSeparators) {
+                            TimelineSeparator(at = message.at, now = now)
                         }
                         if (message.id in sessionTransitions) {
                             // **必须与 `sessionTransitionIds` 用同一个判据取 sid。**
@@ -1178,6 +1231,19 @@ fun ChatScreen(
                         draft = next
                         peerId?.let { onDraftChangeExternal?.invoke(it, next) }
                     },
+                    stagedFiles = stagedFiles,
+                    onRemoveStagedFile = ::removeStagedFile,
+                    onAttachFiles = {
+                        onPickFiles?.let { pick ->
+                            coroutineScope.launch {
+                                val picked = pick()
+                                if (picked.isNotEmpty()) {
+                                    stageFiles(picked)
+                                }
+                            }
+                        }
+                    },
+                    onStageFiles = ::stageFiles,
                     // 「回复」必须真的是回复：把手机内置输入栏用的**同一个**出口交出去，
                     // 桌面发出去的消息才会带上 replyId，发完引用条才会一起消失。
                     onSend = ::submitMessage,
@@ -1200,6 +1266,8 @@ fun ChatScreen(
                     draft = next
                     peerId?.let { onDraftChangeExternal?.invoke(it, next) }
                 },
+                stagedFiles = stagedFiles,
+                onRemoveStagedFile = ::removeStagedFile,
                 // 发文件夹时计数行右端换掉：见上面 `sendingFolder` 的注释。
                 hintTrailing = if (sendingFolder) {
                     stringResource(Res.string.chat_folder_limit_hint)
@@ -1258,7 +1326,7 @@ fun ChatScreen(
                         )
                     },
                     // 「图片」与「文件」走**同一条** `pick()` 链路：`AndroidFilePicker.pick()`
-                    // 拉的是 `arrayOf("*/*")`（`AndroidFilePicker.kt:98`），图片本来就是文件，
+                    // 拉的是 `arrayOf("*/*")`（见 `AndroidFilePicker.pick`），图片本来就是文件，
                     // 所以这颗不需要新的平台 API、也不需要新的发送链路。两颗的差别只有图标与
                     // 标签 —— 这正是原型把「截图 / 图片 / 文件夹」画成三颗的样子里，本端**唯一
                     // 真能通**的那一颗。另外两颗为什么不画，见 `fidelity-deviations.yaml`。
@@ -1268,7 +1336,18 @@ fun ChatScreen(
                             id = "image",
                             label = Res.string.chat_image,
                             icon = Res.drawable.ic_image,
-                            onPick = { attach(peer.nodeId) },
+                            onPick = {
+                                if (onPickFiles != null) {
+                                    coroutineScope.launch {
+                                        val picked = onPickFiles()
+                                        if (picked.isNotEmpty()) {
+                                            stageFiles(picked)
+                                        }
+                                    }
+                                } else {
+                                    attach(peer.nodeId)
+                                }
+                            },
                         )
                     },
                     onAttachFile?.let { attach ->
@@ -1276,7 +1355,18 @@ fun ChatScreen(
                             id = "file",
                             label = Res.string.chat_attach,
                             icon = Res.drawable.ic_attachment,
-                            onPick = { attach(peer.nodeId) },
+                            onPick = {
+                                if (onPickFiles != null) {
+                                    coroutineScope.launch {
+                                        val picked = onPickFiles()
+                                        if (picked.isNotEmpty()) {
+                                            stageFiles(picked)
+                                        }
+                                    }
+                                } else {
+                                    attach(peer.nodeId)
+                                }
+                            },
                         )
                     },
                     onSendVoice?.takeIf { !peer.isAgent && cacheDir != null }?.let {

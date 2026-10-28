@@ -12,6 +12,8 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.BasicTextField
+import androidx.compose.ui.hapticfeedback.HapticFeedbackType
+import androidx.compose.ui.platform.LocalHapticFeedback
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.text.KeyboardActions
@@ -21,6 +23,8 @@ import androidx.compose.material.icons.outlined.EmojiEmotions
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.foundation.layout.heightIn
 import androidx.compose.ui.draw.clip
+import com.kapp.tidings.core.transport.LocalFile
+import com.kapp.tidings.feature.chat.AttachmentStagingRow
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import com.kapp.tidings.generated.resources.chat_more_actions
@@ -30,7 +34,6 @@ import com.kapp.tidings.generated.resources.ic_plus
 import com.kapp.tidings.ui.theme.IconSizes
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
-import androidx.compose.material3.FilledIconButton
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
@@ -323,14 +326,17 @@ public fun MessageComposer(
      * `.tsep`）—— 它说的是左边那几颗能不能用，不是右端那颗搜索的注脚。
      */
     toolsHint: String? = null,
+    stagedFiles: List<LocalFile> = emptyList(),
+    onRemoveStagedFile: (LocalFile) -> Unit = {},
 ) {
     // 字节口径与桌面端同一个算法（见 ui/desktop/DesktopLayout.kt 的 draftByteCount）：
     // 中文一行 3 字节，按字符数算会把"看着没超"的草稿发失败。
     val bytes = draft.encodeToByteArray().size
     val byteState = composerByteState(bytes)
     val overLimit = byteState == ComposerByteState.Over
-    val canSend = draft.isNotBlank() && !overLimit
+    val canSend = (draft.isNotBlank() || stagedFiles.isNotEmpty()) && !overLimit
     val onUdp = byteState == ComposerByteState.Udp
+    val haptics = LocalHapticFeedback.current
 
     // 草稿仍然归调用方所有（`draft` 是唯一事实来源），这里多存一份 `TextFieldValue`
     // 只是为了知道**光标在哪** —— 表情要插在光标处，而不是一律追加到末尾。
@@ -409,6 +415,11 @@ public fun MessageComposer(
                     }
                 }
             }
+            AttachmentStagingRow(
+                files = stagedFiles,
+                onRemove = onRemoveStagedFile,
+                modifier = Modifier.padding(bottom = LocalAppSpacing.current.xs),
+            )
             if (offlineHint != null) {
                 Text(
                     text = offlineHint,
@@ -481,7 +492,12 @@ public fun MessageComposer(
                                 cursorBrush = SolidColor(MaterialTheme.colorScheme.primary),
                                 maxLines = 5,
                                 keyboardOptions = KeyboardOptions(imeAction = ImeAction.Send),
-                                keyboardActions = KeyboardActions(onSend = { if (canSend) onSend() }),
+                                keyboardActions = KeyboardActions(onSend = {
+                                    if (canSend) {
+                                        haptics.performHapticFeedback(HapticFeedbackType.TextHandleMove)
+                                        onSend()
+                                    }
+                                }),
                                 modifier = if (focusRequester != null) Modifier.fillMaxWidth().focusRequester(focusRequester) else Modifier.fillMaxWidth(),
                                 decorationBox = { inner ->
                                     Box {
@@ -566,7 +582,9 @@ public fun MessageComposer(
                         }
 
                         // 表情排在输入框右侧内部：内置能力，随时插表情且不挤占外部按钮位置
-                        IconButton(
+                        AppIconButton(
+                            iconVector = Icons.Outlined.EmojiEmotions,
+                            contentDescription = stringResource(Res.string.chat_emoji),
                             onClick = {
                                 if (emojiOpen) {
                                     emojiOpen = false
@@ -578,24 +596,16 @@ public fun MessageComposer(
                                 }
                             },
                             modifier = Modifier.size(36.dp),
-                        ) {
-                            Icon(
-                                imageVector = Icons.Outlined.EmojiEmotions,
-                                contentDescription = stringResource(Res.string.chat_emoji),
-                                tint = if (emojiOpen) {
-                                    MaterialTheme.colorScheme.primary
-                                } else {
-                                    MaterialTheme.colorScheme.onSurfaceVariant
-                                },
-                                modifier = Modifier.size(IconSizes.Title),
-                            )
-                        }
+                            tone = if (emojiOpen) AppButtonTone.Primary else AppButtonTone.Neutral,
+                        )
                     }
                 }
 
                 if (allCapabilities.isNotEmpty()) {
                     // 「+」号更多面板入口
-                    IconButton(
+                    AppIconButton(
+                        icon = Res.drawable.ic_plus,
+                        contentDescription = stringResource(Res.string.chat_more_actions),
                         onClick = {
                             if (moreOpen) {
                                 moreOpen = false
@@ -607,31 +617,22 @@ public fun MessageComposer(
                             }
                         },
                         modifier = Modifier.size(44.dp),
-                    ) {
-                        Icon(
-                            painter = painterResource(Res.drawable.ic_plus),
-                            contentDescription = stringResource(Res.string.chat_more_actions),
-                            tint = if (moreOpen) {
-                                MaterialTheme.colorScheme.primary
-                            } else {
-                                MaterialTheme.colorScheme.onSurfaceVariant
-                            },
-                            modifier = Modifier.size(IconSizes.Title),
-                        )
-                    }
-                }
-
-                FilledIconButton(
-                    onClick = onSend,
-                    enabled = canSend,
-                    modifier = Modifier.size(44.dp),
-                ) {
-                    Icon(
-                        painter = painterResource(Res.drawable.ic_send),
-                        contentDescription = stringResource(Res.string.chat_send),
-                        modifier = Modifier.size(IconSizes.Body),
+                        tone = if (moreOpen) AppButtonTone.Primary else AppButtonTone.Neutral,
                     )
                 }
+
+                AppIconButton(
+                    icon = Res.drawable.ic_send,
+                    contentDescription = stringResource(Res.string.chat_send),
+                    onClick = {
+                        haptics.performHapticFeedback(HapticFeedbackType.TextHandleMove)
+                        onSend()
+                    },
+                    enabled = canSend,
+                    modifier = Modifier.size(44.dp),
+                    tone = AppButtonTone.Primary,
+                    filled = true,
+                )
             }
             // 计数行**常显**（原型 `.composer .hintline`）：草稿为空时它写「0 / 800 字节」，
             // 说的不是"你打了 0 个字"，而是"这条消息最多能有多长、会走哪条路" —— 那两条

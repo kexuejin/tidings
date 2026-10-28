@@ -99,6 +99,11 @@ class MainActivity : ComponentActivity() {
                 ActivityResultContracts.OpenDocument(),
             ) { uri -> bridge.deliver(uri?.toString()) }
 
+            // 选多个文件：结果是 List<Uri>。
+            val multipleFileLauncher = rememberLauncherForActivityResult(
+                ActivityResultContracts.OpenMultipleDocuments(),
+            ) { uris -> bridge.deliverMultiple(uris.map { it.toString() }) }
+
             // 选目录：输入是 Uri?（起始位置），这里没有"上次去过的目录"，给 null。
             val directoryLauncher = rememberLauncherForActivityResult(
                 ActivityResultContracts.OpenDocumentTree(),
@@ -121,6 +126,9 @@ class MainActivity : ComponentActivity() {
                     } else {
                         fileLauncher.launch(mimeTypes)
                     }
+                }
+                bridge.attachMultiple { mimeTypes ->
+                    multipleFileLauncher.launch(mimeTypes)
                 }
             }
 

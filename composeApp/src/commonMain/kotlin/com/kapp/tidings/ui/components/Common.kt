@@ -45,7 +45,6 @@ import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.layout.heightIn
 import com.kapp.tidings.feature.chat.localDayKey
-import com.kapp.tidings.generated.resources.chat_day_divider_today
 import com.kapp.tidings.generated.resources.chat_day_divider_yesterday
 import com.kapp.tidings.generated.resources.chat_forward_title
 import com.kapp.tidings.generated.resources.chat_forward_search_placeholder
@@ -646,26 +645,23 @@ internal fun formatDay(atMillis: Long): String {
     val year = if (m <= 2) y + 1 else y
     return "${year}-${m.toString().padStart(2, '0')}-${d.toString().padStart(2, '0')}"
 }
+
 /**
- * 聊天流的日期分隔条：「今天 / 昨天 / 年-月-日」。
- *
- * 与 `SessionDivider`（会话分段）是同族组件、不同维度 —— 那个回答「换了一段任务」，
- * 这个回答「换了一天」。翻历史时后者才是用户真正在找的锚点。
- *
- * 日期口径与 [formatClock] **同一套**（+8 粗算，见 `localDayKey`），
- * 所以不会出现「气泡时间说今天、分隔线说昨天」这种自相矛盾。
+ * 消息流时间/日期分隔徽章（TimelineSeparator）：
+ * - 当天：显示 "HH:mm"；
+ * - 昨天：显示 "昨天 HH:mm"；
+ * - 更早：显示 "YYYY-MM-DD HH:mm"。
  */
 @Composable
-internal fun DayDivider(at: Long, now: Long, modifier: Modifier = Modifier) {
+internal fun TimelineSeparator(at: Long, now: Long, modifier: Modifier = Modifier) {
     val todayKey = localDayKey(now)
     val dayKey = localDayKey(at)
+    val clock = formatClock(at)
     val label = when {
-        dayKey == todayKey -> stringResource(Res.string.chat_day_divider_today)
-        // 「昨天」= 日历上的前一天。用 key 的差而不是 86_400_000 的窗口：
-        // 后者在跨月/跨年边界上会说错，而 key 是「自纪元第几天」，差 1 就是昨天。
+        dayKey == todayKey -> clock
         dayKey.toLongOrNull() == todayKey.toLongOrNull()?.minus(1) ->
-            stringResource(Res.string.chat_day_divider_yesterday)
-        else -> formatDay(at)
+            "${stringResource(Res.string.chat_day_divider_yesterday)} $clock"
+        else -> "${formatDay(at)} $clock"
     }
     Row(
         modifier = modifier.fillMaxWidth().padding(vertical = LocalAppSpacing.current.sm),
@@ -684,6 +680,20 @@ internal fun DayDivider(at: Long, now: Long, modifier: Modifier = Modifier) {
             )
         }
     }
+}
+
+/**
+ * 聊天流的日期分隔条：「今天 / 昨天 / 年-月-日」。
+ *
+ * 与 `SessionDivider`（会话分段）是同族组件、不同维度 —— 那个回答「换了一段任务」，
+ * 这个回答「换了一天」。翻历史时后者才是用户真正在找的锚点。
+ *
+ * 日期口径与 [formatClock] **同一套**（+8 粗算，见 `localDayKey`），
+ * 所以不会出现「气泡时间说今天、分隔线说昨天」这种自相矛盾。
+ */
+@Composable
+internal fun DayDivider(at: Long, now: Long, modifier: Modifier = Modifier) {
+    TimelineSeparator(at = at, now = now, modifier = modifier)
 }
 /** 消息气泡上的时间：HH:mm（本地时区，按 UTC 偏移粗算即可，不需要秒级精度）。 */
 fun formatClock(atMillis: Long): String {

@@ -24,6 +24,7 @@ class AndroidPickerBridge {
 
     /** 当前注册的启动器。 */
     private var launcher: ((Array<String>) -> Unit)? = null
+    private var multipleLauncher: ((Array<String>) -> Unit)? = null
 
     /**
      * 当前挂起的那一次选择。
@@ -32,6 +33,7 @@ class AndroidPickerBridge {
      * 那个挂起的调用方就只能干等到超时，所以第二次直接回 null。
      */
     private var pending: CompletableDeferred<String?>? = null
+    private var pendingMultiple: CompletableDeferred<List<String>?>? = null
 
     /**
      * Compose 层注册进来的启动器；未注册时 pick() 直接返回 null。
@@ -43,6 +45,11 @@ class AndroidPickerBridge {
         launcher = launch
     }
 
+    /** Compose 层注册的多文件启动器。 */
+    fun attachMultiple(launch: (Array<String>) -> Unit) {
+        multipleLauncher = launch
+    }
+
     /**
      * 宿主离开时断开。
      *
@@ -51,8 +58,11 @@ class AndroidPickerBridge {
      */
     fun detach() {
         launcher = null
+        multipleLauncher = null
         pending?.complete(null)
         pending = null
+        pendingMultiple?.complete(null)
+        pendingMultiple = null
     }
 
     /** Compose 层在 ActivityResultCallback 里调用，把结果交回挂起的 pick()。 */
@@ -61,10 +71,15 @@ class AndroidPickerBridge {
         pending?.complete(uri)
     }
 
+    /** Compose 层在多选回调里调用，把结果交回挂起的 pickMultiple()。 */
+    fun deliverMultiple(uris: List<String>) {
+        pendingMultiple?.complete(uris)
+    }
+
     /** 挂起等待；没有桥或用户取消返回 null。 */
     suspend fun launch(mimeTypes: Array<String>, timeoutMs: Long = 5 * 60_000L): String? {
         val start = launcher ?: return null
-        if (pending != null) return null
+        if (pending != null || pendingMultiple != null) return null
 
         val deferred = CompletableDeferred<String?>()
         pending = deferred
@@ -75,6 +90,24 @@ class AndroidPickerBridge {
         } finally {
             // 只有自己那一次才清，避免把后来者的 deferred 抹掉。
             if (pending === deferred) pending = null
+        }
+    }
+
+    /** 挂起等待多选文件；未附着多选桥或用户取消返回空列表。 */
+    suspend fun launchMultiple(mimeTypes: Array<String>, timeoutMs: Long = 5 * 60_000L): List<String> {
+        val start = multipleLauncher
+        if (start == null) {
+            return launch(mimeTypes, timeoutMs)?.let { listOf(it) } ?: emptyList()
+        }
+        if (pending != null || pendingMultiple != null) return emptyList()
+
+        val deferred = CompletableDeferred<List<String>?>()
+        pendingMultiple = deferred
+        return try {
+            start(mimeTypes)
+            withTimeoutOrNull(timeoutMs) { deferred.await() } ?: emptyList()
+        } finally {
+            if (pendingMultiple === deferred) pendingMultiple = null
         }
     }
 }
@@ -97,6 +130,14 @@ class AndroidFilePicker(
     override suspend fun pick(): PickedFile? {
         val uriString = bridge.launch(arrayOf("*/*")) ?: return null
         return withContext(Dispatchers.IO) { copyToCache(Uri.parse(uriString)) }
+    }
+
+    override suspend fun pickMultiple(): List<PickedFile> {
+        val uriStrings = bridge.launchMultiple(arrayOf("*/*"))
+        if (uriStrings.isEmpty()) return emptyList()
+        return withContext(Dispatchers.IO) {
+            uriStrings.mapNotNull { copyToCache(Uri.parse(it)) }
+        }
     }
 
     private fun copyToCache(uri: Uri): PickedFile? {

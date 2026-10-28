@@ -4,11 +4,15 @@ package com.kapp.tidings.ui.desktop
 
 import org.jetbrains.compose.resources.painterResource
 import androidx.compose.foundation.background
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
+import com.kapp.tidings.platform.PlatformScrollbar
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
@@ -82,16 +86,15 @@ fun DesktopTransferLogPane(
     now: Long = nowMillis(),
 ) {
     val sp = LocalAppSpacing.current
+    val scrollState = rememberScrollState()
 
-    Column(
-        // 原型 `.setbody{padding:16px}`：整页左右上下各 16px 内边距。
-        // 少了它，进度记录卡会贴着窗口左边缘（参考图 `desk-transferlog-filled` 里 x=0），
-        // 与原型（x≈16dp）对不上 —— `design-screen-diff.py --screen d-transferlog` 报的
-        // `spacing 只原型{16}` 就是这一处，是**真缺口**，不是 snap。
-        modifier = modifier.fillMaxSize().padding(sp.lg),
-        // 原型 `.setbody>*{flex:none}`：两张卡之间**没有间距**，靠 `--shadow` 分缝。
-        // （`Arrangement.spacedBy(0.dp)` 与默认的 `Arrangement.Top` 逐像素等价，是句空话，删掉。）
-    ) {
+    Box(modifier = modifier.fillMaxSize()) {
+        Column(
+            modifier = Modifier
+                .fillMaxSize()
+                .verticalScroll(scrollState)
+                .padding(sp.lg),
+        ) {
         // `.grphead`（`.win` 档 `padding:12px 3px 5px`、11px / 600 / `letter-spacing:.06em`）
         Text(
             text = stringResource(Res.string.transfer_log_group_head),
@@ -163,6 +166,11 @@ fun DesktopTransferLogPane(
                 }
             }
         }
+    }
+        PlatformScrollbar(
+            state = scrollState,
+            modifier = Modifier.align(Alignment.CenterEnd).fillMaxHeight(),
+        )
     }
 }
 

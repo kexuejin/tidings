@@ -591,17 +591,18 @@ class RelayController(
 
     // ------------------------------------------------------------------ 委托动作：文件传输
     override fun pickAndSendFiles(peerId: String) = transfersCtl.handlePickAndSendFiles(peerId)
+    override suspend fun pickFiles(): List<LocalFile> = transfersCtl.handlePickFiles()
     /**
      * 把本地文件发给对端 / 群。
      *
      * [isFolder] 为真时这一批被当成**一个文件夹**（对端按相对路径还原目录树，界面显示文件夹角标）。
      * 传目录进来之前必须先由调用方展开成文件列表 —— 这一层不认识文件系统。
      */
-    fun sendFiles(
+    override fun sendFiles(
         peerId: String,
         files: List<LocalFile>,
-        isFolder: Boolean = false,
-        folderRootName: String? = null,
+        isFolder: Boolean,
+        folderRootName: String?,
     ) = transfersCtl.handleSendFiles(peerId, files, isFolder, folderRootName)
     override fun acceptTransfer(transferId: String) = transfersCtl.handleAcceptTransfer(transferId)
     override fun declineTransfer(transferId: String) = transfersCtl.handleDeclineTransfer(transferId)

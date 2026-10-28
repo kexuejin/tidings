@@ -160,6 +160,12 @@ data class PickedFile(
 
 interface FilePicker {
     suspend fun pick(): PickedFile?
+
+    /**
+     * 多选文件契约。
+     * 默认实现回退至 [pick] 包装成单项列表，保证向后兼容性。
+     */
+    suspend fun pickMultiple(): List<PickedFile> = pick()?.let { listOf(it) } ?: emptyList()
 }
 
 interface SaveDirectoryPicker {
@@ -550,6 +556,9 @@ private const val NOT_IMPLEMENTED_DISCOVERY = "自动发现是 P4，本期未实
 
 object UnavailableFilePicker : FilePicker {
     override suspend fun pick(): PickedFile? =
+        throw PlatformCapabilityUnavailable("FilePicker", NOT_IMPLEMENTED_FILE_TRANSFER)
+
+    override suspend fun pickMultiple(): List<PickedFile> =
         throw PlatformCapabilityUnavailable("FilePicker", NOT_IMPLEMENTED_FILE_TRANSFER)
 }
 

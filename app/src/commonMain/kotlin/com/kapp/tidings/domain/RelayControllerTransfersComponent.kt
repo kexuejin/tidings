@@ -67,6 +67,17 @@ fun handlePickAndSendFiles(peerId: String) {
     }
 }
 
+suspend fun handlePickFiles(): List<LocalFile> {
+    val picked = runCatching { host.platform.filePicker.pickMultiple() }
+        .onFailure {
+            host.warn(
+                it.messageOrNull()?.let(BannerMessage::PickFailed) ?: BannerMessage.UnknownError,
+            )
+        }
+        .getOrNull() ?: return emptyList()
+    return picked.map { LocalFile(it.path, it.name, it.sizeBytes) }
+}
+
 
 fun handleSendFiles(
     peerId: String,

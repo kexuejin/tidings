@@ -463,6 +463,8 @@ fun RelayApp(
                             },
                             onDismissBanner = controller::dismissBanner,
                             onAttachFile = controller::pickAndSendFiles,
+                            onPickFiles = controller::pickFiles,
+                            onSendFiles = controller::sendFiles,
                             onAcceptTransfer = controller::acceptTransfer,
                             onDeclineTransfer = controller::declineTransfer,
                             onCancelTransfer = controller::cancelTransfer,

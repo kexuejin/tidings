@@ -29,6 +29,7 @@ import com.kapp.tidings.domain.RelayUiState
 import com.kapp.tidings.domain.resolveNodeIdentity
 import com.kapp.tidings.core.protocol.GroupMeta
 import com.kapp.tidings.generated.resources.Res
+import com.kapp.tidings.ui.components.AppIconButton
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.outlined.SwapHoriz
 import com.kapp.tidings.ui.components.ChatIbtnIconSize
@@ -172,12 +173,11 @@ internal fun ChatHeader(
         horizontalArrangement = Arrangement.spacedBy(sp.md),
     ) {
         if (onBack != null) {
-            IconButton(onClick = onBack) {
-                Icon(
-                    painter = painterResource(Res.drawable.ic_arrow_back),
-                    contentDescription = stringResource(Res.string.action_back),
-                )
-            }
+            AppIconButton(
+                icon = Res.drawable.ic_arrow_back,
+                contentDescription = stringResource(Res.string.action_back),
+                onClick = onBack,
+            )
         }
         // 原型 `.topbar.chat .hav{width:36px;height:36px;border-radius:12px;font-size:14px}`
         // —— 聊天顶栏头像是 **36dp 圆角方块**，不是 40dp 正圆。

@@ -2,6 +2,7 @@
 
 package com.kapp.tidings.feature.chat
 
+import com.kapp.tidings.domain.model.MessageUi
 import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertFalse
@@ -182,5 +183,64 @@ class ChatScrollLogicTest {
                 assertEquals(idx, visualIndexOf(visualIndexOf(idx, size), size))
             }
         }
+    }
+
+    private fun msg(id: String, at: Long) = MessageUi(
+        id = id,
+        peerId = "peer-1",
+        mine = true,
+        text = "hello",
+        at = at,
+    )
+
+    @Test
+    fun firstMessageAlwaysShowsSeparator() {
+        assertTrue(shouldShowSeparator(previousAt = null, currentAt = 1000L, dayKey = { "day-1" }))
+    }
+
+    @Test
+    fun messagesWithinSameDayUnderFiveMinutesDoNotShowSeparator() {
+        assertFalse(
+            shouldShowSeparator(
+                previousAt = 1000L,
+                currentAt = 1000L + 4 * 60 * 1000L,
+                dayKey = { "day-1" },
+            ),
+        )
+    }
+
+    @Test
+    fun messagesWithinSameDayAtFiveMinutesThresholdShowsSeparator() {
+        assertTrue(
+            shouldShowSeparator(
+                previousAt = 1000L,
+                currentAt = 1000L + 5 * 60 * 1000L,
+                dayKey = { "day-1" },
+            ),
+        )
+    }
+
+    @Test
+    fun messagesAcrossDayBoundaryAlwaysShowSeparator() {
+        assertTrue(
+            shouldShowSeparator(
+                previousAt = 1000L,
+                currentAt = 1000L + 60 * 1000L,
+                dayKey = { if (it <= 1000L) "day-1" else "day-2" },
+            ),
+        )
+    }
+
+    @Test
+    fun timelineSeparatorIdsCollectsCorrectSetOfIds() {
+        val messages = listOf(
+            msg("m1", 1000L),
+            msg("m2", 1000L + 60_000L),
+            msg("m3", 1000L + 360_000L),
+            msg("m4", 1000L + 400_000L),
+        )
+        val dayKey: (Long) -> String = { if (it < 1000L + 400_000L) "day-1" else "day-2" }
+        val ids = timelineSeparatorIds(messages, dayKey)
+        assertEquals(setOf("m1", "m3", "m4"), ids)
     }
 }

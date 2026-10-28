@@ -3,15 +3,20 @@
 package com.kapp.tidings.feature.conversations
 
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.PaddingValues
+import androidx.compose.foundation.layout.fillMaxHeight
+import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.LazyListState
 import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.lazy.LazyListScope
 import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.runtime.Composable
+import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import com.kapp.tidings.domain.WorkspaceUnitUi
+import com.kapp.tidings.platform.PlatformLazyListScrollbar
 import com.kapp.tidings.ui.theme.LocalAppSpacing
 
 /**
@@ -90,39 +95,45 @@ internal fun ConversationListPanel(
     trailingContent: (LazyListScope.() -> Unit)? = null,
 ) {
     val sp = LocalAppSpacing.current
-    LazyColumn(
-        state = state,
-        modifier = modifier,
-        contentPadding = contentPadding,
-        // 原型 \`.sidelist{gap:1px}\` —— 行间 2dp（档位里最接近的）。用 8dp 会让
-        // 圆角行看起来像一张张独立的卡，反而与"扁平行 + 分割线"这套分组打架。
-        verticalArrangement = Arrangement.spacedBy(sp.xxs),
-    ) {
-        itemsIndexed(feed, key = { _, item -> item.key }) { index, item ->
-            when (item) {
-                is InboxFeedItem.Conversation -> ConversationRow(
-                    row = item.conv,
-                    now = now,
-                    onOpenChat = onOpenChat,
-                    onTogglePin = onTogglePin?.let { act -> { act(item.conv.convId) } },
-                    onToggleMute = onToggleMute?.let { act -> { act(item.conv.convId) } },
-                    onDeleteConversation = onDeleteConversation?.let { act -> { act(item.conv.convId) } },
-                    onLeaveGroup = onLeaveGroup?.let { act -> { act(item.conv.convId) } },
-                    previewSenderName = previewSenderNameOf?.invoke(item.conv.convId),
-                    draftPreview = draftPreviewOf?.invoke(item.conv.convId),
-                    selected = selectedConvId != null && item.conv.convId == selectedConvId,
-                )
+    Box(modifier = modifier) {
+        LazyColumn(
+            state = state,
+            modifier = Modifier.fillMaxSize(),
+            contentPadding = contentPadding,
+            // 原型 `.sidelist{gap:1px}` —— 行间 2dp（档位里最接近的）。用 8dp 会让
+            // 圆角行看起来像一张张独立的卡，反而与"扁平行 + 分割线"这套分组打架。
+            verticalArrangement = Arrangement.spacedBy(sp.xxs),
+        ) {
+            itemsIndexed(feed, key = { _, item -> item.key }) { index, item ->
+                when (item) {
+                    is InboxFeedItem.Conversation -> ConversationRow(
+                        row = item.conv,
+                        now = now,
+                        onOpenChat = onOpenChat,
+                        onTogglePin = onTogglePin?.let { act -> { act(item.conv.convId) } },
+                        onToggleMute = onToggleMute?.let { act -> { act(item.conv.convId) } },
+                        onDeleteConversation = onDeleteConversation?.let { act -> { act(item.conv.convId) } },
+                        onLeaveGroup = onLeaveGroup?.let { act -> { act(item.conv.convId) } },
+                        previewSenderName = previewSenderNameOf?.invoke(item.conv.convId),
+                        draftPreview = draftPreviewOf?.invoke(item.conv.convId),
+                        selected = selectedConvId != null && item.conv.convId == selectedConvId,
+                    )
 
-                is InboxFeedItem.Workspace -> WorkspaceFeedRow(
-                    unit = item.unit,
-                    group = item.group,
-                    now = now,
-                    onOpenWorkspaceUnit = { onOpenWorkspaceUnit?.invoke(it) },
-                )
+                    is InboxFeedItem.Workspace -> WorkspaceFeedRow(
+                        unit = item.unit,
+                        group = item.group,
+                        now = now,
+                        onOpenWorkspaceUnit = { onOpenWorkspaceUnit?.invoke(it) },
+                    )
+                }
+                // 最后一行下面不画线：列表尾部再挂一条会看起来像"下面还有东西"。
+                if (index != feed.lastIndex) ConversationListDivider()
             }
-            // 最后一行下面不画线：列表尾部再挂一条会看起来像"下面还有东西"。
-            if (index != feed.lastIndex) ConversationListDivider()
+            trailingContent?.invoke(this)
         }
-        trailingContent?.invoke(this)
+        PlatformLazyListScrollbar(
+            state = state,
+            modifier = Modifier.align(Alignment.CenterEnd).fillMaxHeight(),
+        )
     }
 }
