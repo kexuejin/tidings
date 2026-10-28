@@ -274,6 +274,11 @@
     <string name="chat_clear_local_title">清空本会话聊天记录</string>
     <string name="chat_clear_local_body">只删除本机「%1$s」这个会话的记录，对方那里不受影响；删除后不可恢复。</string>
     <string name="chat_clear_local_confirm">清空</string>
+    <!-- 「关闭并清空会话」（聊天页头部 → ⋮）。语义：从本机删除会话及记录并退出聊天页回到列表，对方不受影响。 -->
+    <string name="chat_close_and_clear_action">关闭并清空会话</string>
+    <string name="chat_close_and_clear_title">关闭并清空会话</string>
+    <string name="chat_close_and_clear_body">从本机删除与「%1$s」的会话及全部聊天记录并退出，对方不受影响；删除后不可恢复。</string>
+    <string name="chat_close_and_clear_confirm">关闭并清空</string>
     <!-- 消息流右下角那颗浮起胶囊（真机反馈 #5）。数字来自「进入会话那一刻的未读」
          （ChatScreenState.unreadOnEntry，由壳在清未读之前采下）+「进入后新到的」；
          两个都拿不到时**不写数字**，只留「回到最新」这一句。 -->

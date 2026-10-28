@@ -210,6 +210,13 @@ data class ChatScreenActions(
      * `clearAllMessages`）。null = 头部不画这个入口（预览 / 没有这条能力的壳）。
      */
     val onClearMessages: (() -> Unit)? = null,
+    /**
+     * 「关闭并清空会话」—— 从本机删除该会话及其全部聊天记录并退出当前会话回到列表，对方不受影响。
+     *
+     * 与 [onClearMessages]（清空但留在当前聊天页）不同：这里既清空记录，又关闭离开当前会话。
+     * null = 头部不画这个入口（预览 / 没有这条能力的壳）。
+     */
+    val onCloseAndClearConversation: (() -> Unit)? = null,
 )
 
 /**

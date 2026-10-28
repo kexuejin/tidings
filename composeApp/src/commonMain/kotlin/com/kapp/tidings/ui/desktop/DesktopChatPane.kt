@@ -42,6 +42,7 @@ import com.kapp.tidings.core.protocol.GroupMeta
 import com.kapp.tidings.core.protocol.MsgTypes
 import com.kapp.tidings.feature.chat.ChatScreen
 import com.kapp.tidings.feature.chat.ClearConversationDialog
+import com.kapp.tidings.feature.chat.CloseAndClearConversationDialog
 import com.kapp.tidings.feature.chat.ChatScreenActions
 import com.kapp.tidings.feature.chat.ChatScreenChrome
 import com.kapp.tidings.feature.chat.ChatScreenGroupActions
@@ -60,8 +61,10 @@ import com.kapp.tidings.generated.resources.desktop_action_copy_node_id_short
 import com.kapp.tidings.generated.resources.desktop_action_list
 import com.kapp.tidings.generated.resources.desktop_action_open_in_new_window
 import com.kapp.tidings.generated.resources.chat_clear_local_action
+import com.kapp.tidings.generated.resources.chat_close_and_clear_action
 import com.kapp.tidings.generated.resources.chat_group_online
 import com.kapp.tidings.generated.resources.common_profile_unavailable
+import com.kapp.tidings.generated.resources.ic_close
 import com.kapp.tidings.generated.resources.ic_copy
 import com.kapp.tidings.generated.resources.ic_external
 import com.kapp.tidings.generated.resources.ic_groups
@@ -258,6 +261,7 @@ public fun ChatPane(
     // 「清空本会话记录」的确认框开合。桌面头部（DesktopChatHeader）画在这一层之下，
     // 所以触发与确认框都由本层持有；手机那条壳的同类确认框在 ChatScreen 里。
     var showClearConfirm by remember(selectedPeerId) { mutableStateOf(false) }
+    var showCloseAndClearConfirm by remember(selectedPeerId) { mutableStateOf(false) }
     Column(modifier) {
         DesktopChatHeader(
             peer = peer,
@@ -300,6 +304,7 @@ public fun ChatPane(
             // 群=group:<groupId>）—— 与 ChatScreenActions 里别的回调同一口径。
             // 与手机端共用同一个确认框（见 ClearConversationDialog）。
             onClearMessages = { showClearConfirm = true },
+            onCloseAndClearConversation = { showCloseAndClearConfirm = true },
         )
         HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
         chat(Modifier.weight(1f).fillMaxWidth())
@@ -341,6 +346,19 @@ public fun ChatPane(
                     // 只清本机：走既有 RelayController.clearMessages（不是 clearAllMessages）。
                     // selectedPeerId 可空，这里已在"有会话"的分支里（peer 非空），再 let 一次即可。
                     selectedPeerId?.let { controller.clearMessages(it) }
+                },
+            )
+        }
+        if (showCloseAndClearConfirm) {
+            CloseAndClearConversationDialog(
+                conversationName = peer.displayName,
+                onDismiss = { showCloseAndClearConfirm = false },
+                onConfirm = {
+                    showCloseAndClearConfirm = false
+                    selectedPeerId?.let {
+                        controller.deleteConversation(it)
+                        onBack?.invoke()
+                    }
                 },
             )
         }
@@ -409,6 +427,7 @@ public fun DesktopChatHeader(
      * 壳负责确认与执行"在两条壳上是同一条规矩。
      */
     onClearMessages: (() -> Unit)? = null,
+    onCloseAndClearConversation: (() -> Unit)? = null,
 ) {
     // 「请求查看屏幕」的确认表单：以前点那颗图标按钮**直接发请求**，原型 d30-reqscreen
     // 在中间有一张确认卡（说明 + 取消 / 发送请求）。改成先开表单、确认后才发。
@@ -582,6 +601,13 @@ public fun DesktopChatHeader(
                             TopBarIconAction(Res.drawable.ic_trash, stringResource(Res.string.chat_clear_local_action), clear)
                         } else {
                             ToolbarButton(stringResource(Res.string.chat_clear_local_action), painterResource(Res.drawable.ic_trash), clear)
+                        }
+                    }
+                    onCloseAndClearConversation?.let { closeAndClear ->
+                        if (iconOnlyActions) {
+                            TopBarIconAction(Res.drawable.ic_close, stringResource(Res.string.chat_close_and_clear_action), closeAndClear)
+                        } else {
+                            ToolbarButton(stringResource(Res.string.chat_close_and_clear_action), painterResource(Res.drawable.ic_close), closeAndClear)
                         }
                     }
                 }

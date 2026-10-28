@@ -491,6 +491,13 @@ fun RelayApp(
                             onClearMessages = {
                                 nav.activeSessionId?.let { convId -> controller.clearMessages(convId) }
                             },
+                            // 「关闭并清空会话」：清空本机消息并删除会话，同时离开聊天页回到会话列表。
+                            onCloseAndClearConversation = {
+                                nav.activeSessionId?.let { convId ->
+                                    controller.deleteConversation(convId)
+                                    nav = nav.leaveChatDetail()
+                                }
+                            },
                         ),
                         groupActions = ChatScreenGroupActions(
                             onAddGroupMembers = controller::addGroupMembers,

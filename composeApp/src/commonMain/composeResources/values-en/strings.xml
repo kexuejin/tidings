@@ -224,6 +224,11 @@
     <string name="chat_clear_local_title">Clear this chat's history</string>
     <string name="chat_clear_local_body">Removes the history of “%1$s” on this device only; the other side is not affected. This cannot be undone.</string>
     <string name="chat_clear_local_confirm">Clear</string>
+    <!-- "Close and clear conversation" (chat header -> overflow menu). Semantics: deletes conversation and messages locally and leaves chat to list. -->
+    <string name="chat_close_and_clear_action">Close and clear</string>
+    <string name="chat_close_and_clear_title">Close and clear conversation</string>
+    <string name="chat_close_and_clear_body">Deletes conversation and chat history with “%1$s” on this device only and closes it; the other side is not affected. This cannot be undone.</string>
+    <string name="chat_close_and_clear_confirm">Close and clear</string>
     <!-- Floating chip in the message stream (user report #5). The number is "unread at the
          moment this conversation was opened" (ChatScreenState.unreadOnEntry, captured by the
          shell before it clears the badge) plus messages that arrived afterwards; when neither

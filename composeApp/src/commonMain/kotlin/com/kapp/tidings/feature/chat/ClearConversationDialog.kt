@@ -13,6 +13,9 @@ import com.kapp.tidings.generated.resources.Res
 import com.kapp.tidings.generated.resources.chat_clear_local_body
 import com.kapp.tidings.generated.resources.chat_clear_local_confirm
 import com.kapp.tidings.generated.resources.chat_clear_local_title
+import com.kapp.tidings.generated.resources.chat_close_and_clear_body
+import com.kapp.tidings.generated.resources.chat_close_and_clear_confirm
+import com.kapp.tidings.generated.resources.chat_close_and_clear_title
 import com.kapp.tidings.generated.resources.common_cancel
 import com.kapp.tidings.ui.components.RelayDialog
 import com.kapp.tidings.ui.components.RelayDialogButton
@@ -77,3 +80,45 @@ internal fun ClearConversationDialog(
         },
     )
 }
+
+/**
+ * 「关闭并清空会话」的二次确认（从本机清空记录并退出当前会话回到列表）。
+ */
+@Composable
+internal fun CloseAndClearConversationDialog(
+    conversationName: String,
+    onDismiss: () -> Unit,
+    onConfirm: () -> Unit,
+) {
+    val sp = LocalAppSpacing.current
+    RelayDialog(
+        onDismissRequest = onDismiss,
+        title = { Text(stringResource(Res.string.chat_close_and_clear_title)) },
+        content = {
+            Column(
+                modifier = Modifier.fillMaxWidth(),
+                verticalArrangement = Arrangement.spacedBy(sp.sm),
+            ) {
+                Text(
+                    text = stringResource(Res.string.chat_close_and_clear_body, conversationName),
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+            }
+        },
+        confirmButton = {
+            RelayDialogButton(
+                text = stringResource(Res.string.chat_close_and_clear_confirm),
+                danger = true,
+                onClick = onConfirm,
+            )
+        },
+        dismissButton = {
+            RelayDialogButton(
+                text = stringResource(Res.string.common_cancel),
+                onClick = onDismiss,
+            )
+        },
+    )
+}
+

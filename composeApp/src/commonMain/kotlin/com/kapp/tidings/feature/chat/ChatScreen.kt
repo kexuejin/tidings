@@ -174,6 +174,7 @@ fun ChatScreen(
     val onRespondChoice = actions.onRespondChoice
     val onSearchInConversation = actions.onSearchInConversation
     val onClearMessages = actions.onClearMessages
+    val onCloseAndClearConversation = actions.onCloseAndClearConversation
     val onAddGroupMembers = groupActions.onAddGroupMembers
     val onRemoveGroupMember = groupActions.onRemoveGroupMember
     val onUpdateGroupMeta = groupActions.onUpdateGroupMeta
@@ -395,6 +396,7 @@ fun ChatScreen(
     // 「清空本会话记录」的确认框开合。动作来自头部（⋮），确认框画在这一层 —— 桌面壳的
     // 头部不进 ChatScreen，它自己那份确认框在 DesktopChatPane 里。
     var showClearConfirm by remember(peerId) { mutableStateOf(false) }
+    var showCloseAndClearConfirm by remember(peerId) { mutableStateOf(false) }
     var showVoiceRecord by remember(peerId) { mutableStateOf(false) }
     var previewingImagePath by remember { mutableStateOf<String?>(null) }
     var showHistorySearch by remember(peerId) { mutableStateOf(initialHistorySearch) }
@@ -428,13 +430,14 @@ fun ChatScreen(
     // 谁先收到事件取决于组合顺序，那是一种"看运气"的行为。
     BackHandler(
         enabled = forwardingMessage != null || previewingImagePath != null ||
-            showClearConfirm || showGroupInfo || showVoiceRecord || showPkPicker ||
+            showClearConfirm || showCloseAndClearConfirm || showGroupInfo || showVoiceRecord || showPkPicker ||
             showHistorySearch || showSessionPicker,
     ) {
         when {
             forwardingMessage != null -> forwardingMessage = null
             previewingImagePath != null -> previewingImagePath = null
             showClearConfirm -> showClearConfirm = false
+            showCloseAndClearConfirm -> showCloseAndClearConfirm = false
             showGroupInfo -> showGroupInfo = false
             showVoiceRecord -> showVoiceRecord = false
             showPkPicker -> showPkPicker = false
@@ -730,6 +733,7 @@ fun ChatScreen(
                         forwardingMessage != null -> { forwardingMessage = null; true }
                         previewingImagePath != null -> { previewingImagePath = null; true }
                         showClearConfirm -> { showClearConfirm = false; true }
+                        showCloseAndClearConfirm -> { showCloseAndClearConfirm = false; true }
                         showGroupInfo -> { showGroupInfo = false; true }
                         showVoiceRecord -> { showVoiceRecord = false; true }
                         showPkPicker -> { showPkPicker = false; true }
@@ -774,6 +778,7 @@ fun ChatScreen(
                 // 「清空本会话记录」：只在壳真的接了这条动作时画（null = 不画），
                 // 点了先开确认框，确认后才真的清（见 ClearConversationDialog）。
                 onClearMessages = onClearMessages?.let { { showClearConfirm = true } },
+                onCloseAndClearConversation = onCloseAndClearConversation?.let { { showCloseAndClearConfirm = true } },
                 onOpenSessionPicker = if (group == null && peer.isAgent) ({ showSessionPicker = true }) else null,
                 // 「切换会话」的资格与选择器列表必须同集合：这里传的就是下面
                 // `agentSessions` 那份（已 visible 过滤 + 已按 wsId 收窄）。
@@ -1514,6 +1519,17 @@ fun ChatScreen(
             onConfirm = {
                 showClearConfirm = false
                 onClearMessages()
+            },
+        )
+    }
+
+    if (showCloseAndClearConfirm && onCloseAndClearConversation != null) {
+        CloseAndClearConversationDialog(
+            conversationName = peer.displayName,
+            onDismiss = { showCloseAndClearConfirm = false },
+            onConfirm = {
+                showCloseAndClearConfirm = false
+                onCloseAndClearConversation()
             },
         )
     }

@@ -58,7 +58,9 @@ import com.kapp.tidings.generated.resources.chat_group_info_title
 import com.kapp.tidings.generated.resources.chat_group_members
 import com.kapp.tidings.generated.resources.chat_group_online
 import com.kapp.tidings.generated.resources.chat_clear_local_action
+import com.kapp.tidings.generated.resources.chat_close_and_clear_action
 import com.kapp.tidings.generated.resources.chat_more_actions
+import com.kapp.tidings.generated.resources.ic_close
 import com.kapp.tidings.generated.resources.chat_nudge
 import com.kapp.tidings.generated.resources.chat_restored_offline
 import com.kapp.tidings.generated.resources.common_offline
@@ -115,6 +117,8 @@ internal fun ChatHeader(
      * （[ClearConversationDialog]，由 [ChatScreen] 持有）。
      */
     onClearMessages: (() -> Unit)? = null,
+    /** 「关闭并清空会话」。null = 不画这个入口。只进 ⋮ 菜单。 */
+    onCloseAndClearConversation: (() -> Unit)? = null,
     onOpenSessionPicker: (() -> Unit)? = null,
     /**
      * 用户是从哪个**工作区**点进来的；null = 直接在跟这个节点聊。
@@ -368,6 +372,20 @@ internal fun ChatHeader(
                 Icon(
                     painter = painterResource(Res.drawable.ic_trash),
                     contentDescription = stringResource(Res.string.chat_clear_local_action),
+                    tint = MaterialTheme.colorScheme.onSurface,
+                    modifier = Modifier.size(size),
+                )
+            }
+        }
+        onCloseAndClearConversation?.let { closeAndClear ->
+            actions += ChatHeaderAction(
+                label = stringResource(Res.string.chat_close_and_clear_action),
+                onClick = closeAndClear,
+                overflowOnly = true,
+            ) { size ->
+                Icon(
+                    painter = painterResource(Res.drawable.ic_close),
+                    contentDescription = stringResource(Res.string.chat_close_and_clear_action),
                     tint = MaterialTheme.colorScheme.onSurface,
                     modifier = Modifier.size(size),
                 )
