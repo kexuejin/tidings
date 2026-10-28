@@ -122,6 +122,12 @@ class LuciolaDiscoveryEngine(
     }
 
     override suspend fun announceTo(host: String, port: Int) {
+        // 越界端口不能进 toUShort()：它会**静默截断**成另一个端口（70000 → 4464），
+        // 于是"拨了但没人应答"，日志里只有一次超时。
+        if (port !in 1..65535) {
+            println("[luciola] refuse announceTo with bad port=" + port)
+            return
+        }
         adapter?.dial(host, port.toUShort())
     }
 
@@ -135,19 +141,41 @@ class LuciolaDiscoveryEngine(
         peersLock.withLock { knownPeers[peer.nodeId] = peer }
         val raw = peer.extra ?: return
         val profile = runCatching { json.decodeFromString(Profile.serializer(), raw) }.getOrNull() ?: return
-        idMapLock.withLock { idMap[peer.nodeId] = profile.nodeId }
+        // **两个 id 都要登记**：引擎在 Found/Updated 里报的是它自己的 nodeId，而 Lost 里
+        // 报的 id 在部分引擎版本里是信标里那个（我们自己的 Tidings nodeId）。只登记前者时，
+        // Lost 查不到映射 ⇒ `onLuciolaLost` 直接 return ⇒ 对端明明下线了，
+        // 本端节点表**永远显示在线**（这正是 §3 那类"看起来正常、实际收不到"的形态）。
+        idMapLock.withLock {
+            idMap[peer.nodeId] = profile.nodeId
+            idMap[profile.nodeId] = profile.nodeId
+        }
         if (loggedPeers.add(profile.nodeId)) {
             println("[luciola] discovered " + profile.nodeId + " at " + peer.ip + ":" + peer.udpPort)
         }
         // 端口优先用档案里的 luciolaPort:发现引擎上报的 udpPort 可能是临时端口,
         // 而加密信道监听在固定端口(真机实测 52213 vs 17878)。老档案没这个键才回退。
-        val sendPort = profile.luciolaPort ?: peer.udpPort
+        //
+        // **这里必须自己校验范围**:这段 JSON 来自 native 引擎的 `peer.extra`,
+        // **不经过** CodecProfile.validateProfile(那条路只覆盖信封里的 profile)。
+        // 越界值若原样进 registry,会被 toUShort() 截断成另一个端口 —— 发不出去、也没有报错。
+        val advertisedPort = profile.luciolaPort
+        val sendPort = if (advertisedPort != null && advertisedPort !in 1..65535) {
+            println("[luciola] ignore out-of-range luciolaPort=" + advertisedPort)
+            peer.udpPort
+        } else {
+            advertisedPort ?: peer.udpPort
+        }
         registry.touch(profile.nodeId, peer.ip, sendPort, profile, confirmed = true)
     }
 
     private fun onLuciolaLost(luciolaNodeId: String) {
         peersLock.withLock { knownPeers.remove(luciolaNodeId) }
-        val tidingsId = idMapLock.withLock { idMap.remove(luciolaNodeId) } ?: return
+        val tidingsId = idMapLock.withLock { idMap.remove(luciolaNodeId) }
+        if (tidingsId == null) {
+            // 不许静默 return：那条分支会让"对端下线了但节点表永远在线"变成无声故障。
+            println("[luciola] lost event for unknown node id=" + luciolaNodeId + "（未找到映射，节点表不会翻转）")
+            return
+        }
         registry.markOffline(tidingsId)
     }
 }

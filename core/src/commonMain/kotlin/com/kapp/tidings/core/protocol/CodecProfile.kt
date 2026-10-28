@@ -69,6 +69,16 @@ object CodecProfile {
             strAllowEmptyOrNull(c, Limits.CAP_ITEM) ?: return false
         }
 
+        // 可选键：两个 luciola 数据面端口。老端没有这些键 ⇒ 跳过。
+        //
+        // **必须与 tcpPort 同一条纪律做范围校验**。它们是**拨号目标**：越界值不会被拒，
+        // 而是原样进 registry，再由 `port.toUShort()` 截断成另一个端口 —— 表现是
+        // 「消息发不出去、也没有任何错误」，正是 §3 那类静默丢失。
+        // 注意：发现层解码 `peer.extra` 时**不走这里**（那是 native 引擎给的原始 JSON），
+        // 所以消费端（LuciolaDiscoveryEngine.applyPeer）另有一道 range 护栏，两处都要有。
+        if (o.containsKey("luciolaPort") && !isPortNumber(o["luciolaPort"])) return false
+        if (o.containsKey("screenPort") && !isPortNumber(o["screenPort"])) return false
+
         // 可选键：本机全部可路由地址（含 Tailscale / ZeroTier 段）。老端没有这个键 ⇒ 跳过。
         //
         // 与 `caps` 同款逐项校验：元素是 IP 字面量（IPv6 最长 45），数量封顶
@@ -83,6 +93,12 @@ object CodecProfile {
         }
 
         return true
+    }
+
+    /** 端口字面量：整数且落在 1..65535。显式 null 视为非法（与 avatarHash 同口径）。 */
+    private fun isPortNumber(x: JsonElement?): Boolean {
+        val p = intOf(x) ?: return false
+        return p in 1..65535
     }
 
     internal fun validateProfilePayload(o: JsonObject): Boolean {
