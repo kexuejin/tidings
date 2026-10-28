@@ -170,7 +170,7 @@ public fun RailButton(
             horizontalAlignment = Alignment.CenterHorizontally,
         ) {
             NavIconWithBadge(icon = icon, label = label, tint = tint, badge = badge)
-            Spacer(Modifier.height(3.dp))
+            Spacer(Modifier.height(LocalAppSpacing.current.oxs3))
             Text(label, style = MaterialTheme.typography.labelSmall, color = tint)
         }
     }

@@ -364,7 +364,7 @@ private fun ToolbarOverflowItemRow(
                 )
             }
         },
-        contentPadding = PaddingValues(horizontal = 11.dp, vertical = 9.dp),
+        contentPadding = PaddingValues(horizontal = LocalAppSpacing.current.olg11, vertical = LocalAppSpacing.current.osm9),
     )
 }
 
@@ -569,7 +569,7 @@ public fun ToolbarButton(
                 // （原型 .win .btn.sm：padding 5px 9px / font-size 11px / border-radius 9px），
                 // 它盖掉全局 .btn 的 12px。
                 .background(bg, ShapeRoles.Avatar)
-                .padding(horizontal = LocalAppSpacing.current.md, vertical = 7.dp),
+                .padding(horizontal = LocalAppSpacing.current.md, vertical = LocalAppSpacing.current.osm7),
             verticalAlignment = Alignment.CenterVertically,
             horizontalArrangement = Arrangement.spacedBy(LocalAppSpacing.current.sm6),
         ) {

@@ -162,6 +162,7 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.setValue
 import com.kapp.tidings.ui.theme.RelayShapes
 import com.kapp.tidings.ui.theme.ShapeRoles
+import com.kapp.tidings.ui.theme.ComponentSizes
 import com.kapp.tidings.ui.components.AppButton
 import com.kapp.tidings.ui.components.AppButtonSize
 import com.kapp.tidings.ui.components.AppButtonTone
@@ -379,7 +380,7 @@ internal fun MessageBubble(
                         PeerAvatar(
                             name = av.name,
                             isAgent = av.isAgent,
-                            size = 26.dp,
+                            size = ComponentSizes.MessageAvatar,
                             avatar = av.avatar,
                             shape = ShapeRoles.Avatar,
                         )
@@ -394,7 +395,8 @@ internal fun MessageBubble(
                         avatarContent()
                     }
                 } else {
-                    Spacer(Modifier.width(26.dp))
+                    // 与头像同宽：连续消息折叠头像后，文字仍要与上一行对齐。
+                    Spacer(Modifier.width(ComponentSizes.MessageAvatar))
                 }
                 Spacer(Modifier.width(sp.sm))
             }

@@ -1,7 +1,7 @@
 {
   "generatedAt": "85691b3d6e26",
   "note": "逐屏差集棘轮：每个键的差集只许变小。--check 报「新增的值」。",
-  "reason": "导入副标题与代码同改（点名 .rlrb、区分自动备份），原型仅此一行位移，新值已逐字核实于第 5188 行",
+  "reason": "两类量具口径差：①m-chat/m-chat-solo/m-chat-group/m-msgmenu/m-screencard 的 radius=4：原型 .msg code/.annot code（relay.html 内联代码片，border-radius:4px）在代码侧落在共享 AppOutlinedButton 上，而按钮族收敛后不再暴露 shape（设计上刻意不暴露样式自由度），字面量消失 ⇒ 量具读不到；②d-tray：原型 d15-tray 属宿主轨（AWT 托盘，Layoutlib 到不了），代码新增 10/2 间距、9dp 圆角、500 字重是 AWT PopupMenu 实现细节，原型无对应物可表达。两条都不是本轮新增的视觉回归，但都应由设计确认后再决定是否改代码。",
   "rowCount": 70,
   "signature": {
     "d-agentdetail|__error__": [
@@ -40,9 +40,6 @@
       "1",
       "13"
     ],
-    "d-capture-tools|font-size|proto": [
-      "11"
-    ],
     "d-capture-tools|font-weight|proto": [
       "600"
     ],
@@ -54,16 +51,10 @@
       "12"
     ],
     "d-capture-tools|spacing|proto": [
-      "5",
       "7",
       "8",
-      "9",
       "11",
-      "14",
       "32"
-    ],
-    "d-capture|font-size|proto": [
-      "11"
     ],
     "d-capture|font-weight|proto": [
       "600"
@@ -76,12 +67,9 @@
       "12"
     ],
     "d-capture|spacing|proto": [
-      "5",
       "7",
       "8",
-      "9",
       "11",
-      "14",
       "32"
     ],
     "d-chat-group|font-size|code": [
@@ -118,7 +106,6 @@
       "400"
     ],
     "d-chat|radius|code": [
-      "4",
       "6",
       "10",
       "16",
@@ -179,7 +166,6 @@
       "700"
     ],
     "d-emoji|radius|code": [
-      "4",
       "6",
       "10",
       "16",
@@ -275,7 +261,6 @@
       "400"
     ],
     "d-groupcreate|radius|code": [
-      "4",
       "6",
       "8",
       "10",
@@ -303,7 +288,6 @@
       "700"
     ],
     "d-histsearch|radius|code": [
-      "4",
       "6",
       "10",
       "16",
@@ -548,7 +532,6 @@
     "d-settings|spacing|proto": [
       "1.5",
       "3",
-      "5",
       "7",
       "11"
     ],
@@ -572,15 +555,14 @@
       "7",
       "11"
     ],
-    "d-tray|font-size|proto": [
-      "11",
-      "12",
-      "14"
+    "d-tray|font-weight|code": [
+      "500"
     ],
     "d-tray|font-weight|proto": [
       "700"
     ],
     "d-tray|radius|code": [
+      "9",
       "12"
     ],
     "d-tray|radius|proto": [
@@ -591,17 +573,14 @@
       "15"
     ],
     "d-tray|spacing|code": [
+      "2",
       "8",
+      "10",
       "16"
     ],
     "d-tray|spacing|proto": [
       "1",
-      "4",
-      "5",
-      "6",
       "7",
-      "9",
-      "14",
       "24"
     ],
     "d-viewscreen|font-size|code": [
@@ -725,6 +704,7 @@
       "22"
     ],
     "m-chat-group|radius|proto": [
+      "4",
       "13",
       "20"
     ],
@@ -753,6 +733,7 @@
       "22"
     ],
     "m-chat-solo|radius|proto": [
+      "4",
       "13",
       "20"
     ],
@@ -781,6 +762,7 @@
       "22"
     ],
     "m-chat|radius|proto": [
+      "4",
       "13",
       "20"
     ],
@@ -801,7 +783,6 @@
       "28"
     ],
     "m-folderin|radius|code": [
-      "4",
       "8",
       "10",
       "16",
@@ -899,7 +880,6 @@
       "400"
     ],
     "m-histdate|radius|code": [
-      "4",
       "6",
       "10",
       "16",
@@ -1033,6 +1013,7 @@
       "22"
     ],
     "m-msgmenu|radius|proto": [
+      "4",
       "13",
       "20"
     ],
@@ -1148,6 +1129,7 @@
     ],
     "m-screencard|radius|proto": [
       "2",
+      "4",
       "13"
     ],
     "m-screencard|spacing|code": [
@@ -1164,7 +1146,6 @@
       "28"
     ],
     "m-sendfolder|radius|code": [
-      "4",
       "8",
       "10",
       "16",
@@ -1298,7 +1279,6 @@
     ],
     "m-settings|spacing|proto": [
       "2",
-      "5",
       "13"
     ],
     "m-workspacedetail|__error__": [

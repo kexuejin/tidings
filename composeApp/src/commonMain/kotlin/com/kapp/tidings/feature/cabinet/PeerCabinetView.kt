@@ -401,7 +401,7 @@ internal fun PeerCabinetView(
                                     onToggleSelection(entry.name)
                                 }
                             }
-                            .padding(horizontal = LocalAppSpacing.current.lg14, vertical = 9.dp),
+                            .padding(horizontal = LocalAppSpacing.current.lg14, vertical = LocalAppSpacing.current.osm9),
                         verticalAlignment = Alignment.CenterVertically,
                         horizontalArrangement = Arrangement.spacedBy(LocalAppSpacing.current.md10),
                     ) {
@@ -685,9 +685,9 @@ private fun CrumbSeg(
         Modifier.minimumInteractiveComponentSize()
             .clip(MaterialTheme.shapes.small)
             .clickable(enabled = enabled, onClick = onClick)
-            .padding(horizontal = 7.dp, vertical = 3.dp),
+            .padding(horizontal = LocalAppSpacing.current.osm7, vertical = LocalAppSpacing.current.oxs3),
         verticalAlignment = Alignment.CenterVertically,
-        horizontalArrangement = Arrangement.spacedBy(3.dp),
+        horizontalArrangement = Arrangement.spacedBy(LocalAppSpacing.current.oxs3),
     ) {
         if (icon != null) {
             Icon(
@@ -745,7 +745,7 @@ private fun SmallButton(
     val label: @Composable () -> Unit = {
         if (icon != null) {
             Icon(icon, contentDescription = null, modifier = Modifier.size(IconSizes.Label))
-            Spacer(Modifier.width(5.dp))
+            Spacer(Modifier.width(LocalAppSpacing.current.oxs5))
         }
         Text(
             text,
