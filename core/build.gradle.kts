@@ -92,16 +92,66 @@ kotlin {
 // **优先 release**：debug 引擎的 AES-GCM/握手是未优化的，同一条数据面实测慢 6-8 倍
 // （投屏 10fps×100KiB 的单帧 p95：release 6ms / debug 29ms；50MB 文件 3s vs 46s）。
 // 拿 debug 的数去验收会得到「加密信道就是慢」的错误结论 —— 而真机装的是 release。
-val luciolaNativeDir: String = runCatching {
-    val base = file("/workspace/RustBuild/cargo-target")
-    listOf(base.resolve("release"), base.resolve("debug"))
-        .firstOrNull { it.resolve("libluciola_uniffi.dylib").exists() }
-        ?.absolutePath
-        ?: base.resolve("debug").absolutePath
-}.getOrDefault("/workspace/RustBuild/cargo-target/debug")
+// ## 原生库定位：**不写死任何个人绝对路径**
+//
+// 解析顺序（先到先得）：
+//   ① `-PluciolaNativeDir=<dir>` 或环境变量 `TIDINGS_LUCIOLA_NATIVE`（显式指定：CI / 发版 / 非常规布局）
+//   ② 仓库根的兄弟目录 `../RustBuild/cargo-target/{release,debug}`（本机开发常见布局）
+//   ③ `$HOME/RustBuild/cargo-target/{release,debug}`
+//
+// 找不到就**不设** `jna.library.path`，并把 `tidings.luciola.nativeDir` 置空：真引擎用例由
+// `LuciolaNativeGuard` 跳过并打印原因。**不要**退回一条个人路径当默认值 —— 那样别人 clone
+// 后拿到的是一堆 `UnsatisfiedLinkError`，症状看起来像产品缺陷，根因却是配置。
+private val luciolaLibNames = listOf(
+    "libluciola_uniffi.dylib", "libluciola_uniffi.so", "luciola_uniffi.dll",
+)
+
+fun resolveLuciolaNativeDir(): File? {
+    fun hasLib(dir: File) = luciolaLibNames.any { File(dir, it).isFile }
+
+    // ① 显式指定：允许直接给 cargo-target 根，也允许给 release/debug 目录。
+    //    显式配置了却找不到库 ⇒ 仍然返回该目录（让用例**响亮地失败**，而不是静默跳过）：
+    //    「我明明配了」和「我没配」必须能区分开。
+    val explicit = (findProperty("luciolaNativeDir") as String?)
+        ?: System.getenv("TIDINGS_LUCIOLA_NATIVE")
+    // 注意区分「没设」与「设成空」：没设 ⇒ 走约定目录；显式设成空 ⇒ 就是没有（CI 用它稳定跳过）。
+    if (explicit != null && explicit.isBlank()) return null
+    if (explicit != null) {
+        val dir = File(explicit)
+        return listOf(dir, File(dir, "release"), File(dir, "debug"))
+            .firstOrNull { hasLib(it) }
+            ?: dir.takeIf { it.isDirectory }
+            ?: dir
+    }
+
+    // ②③ 约定目录（找不到就是 null，不猜）。
+    val roots = listOf(
+        File(project.rootDir.parentFile, "RustBuild/cargo-target"),
+        project.rootDir.parentFile.parentFile?.let { File(it, "RustBuild/cargo-target") },
+        File(System.getProperty("user.home"), "RustBuild/cargo-target"),
+    ).filterNotNull()
+    return roots.filter { it.isDirectory }
+        .flatMap { listOf(File(it, "release"), File(it, "debug")) }
+        .firstOrNull { hasLib(it) }
+}
+
+val luciolaNativeDir: File? = resolveLuciolaNativeDir()
+
+if (luciolaNativeDir == null) {
+    logger.warn(
+        ":core luciola 原生库未找到 —— 依赖真引擎的用例将被跳过（不是失败）。" +
+            "要跑它们：TIDINGS_LUCIOLA_NATIVE=<cargo-target/release 或 debug> ./gradlew :core:jvmTest",
+    )
+}
 
 tasks.withType<Test>().configureEach {
-    systemProperty("jna.library.path", System.getProperty("jna.library.path") ?: luciolaNativeDir)
+    val override = System.getProperty("jna.library.path")
+    when {
+        override != null -> systemProperty("jna.library.path", override)
+        luciolaNativeDir != null -> systemProperty("jna.library.path", luciolaNativeDir.absolutePath)
+    }
+    // 让用例自己判断「能不能跑真引擎」；空串 = 没有。
+    systemProperty("tidings.luciola.nativeDir", luciolaNativeDir?.absolutePath ?: "")
 }
 
 // ## 为什么验收用例要单独一个 JVM
@@ -136,7 +186,13 @@ val jvmAcceptanceTest = tasks.register<Test>("jvmAcceptanceTest") {
     //      **一次都没被这条验收执行过**，因为它加载的是另一个 .so/.dylib；
     //   ③ 装上 0.4.6 的 6 字段 LinkStats 后，debug 那份旧引擎只有 4 字段，
     //      读 stats() 直接 BufferUnderflowException —— 这才把真相暴露出来。
-    systemProperty("jna.library.path", System.getProperty("jna.library.path") ?: luciolaNativeDir)
+    // 与上面 tasks.withType<Test> 同一份解析结果（不要在这里另算一遍，否则又是两份真相）。
+    val override = System.getProperty("jna.library.path")
+    when {
+        override != null -> systemProperty("jna.library.path", override)
+        luciolaNativeDir != null -> systemProperty("jna.library.path", luciolaNativeDir.absolutePath)
+    }
+    systemProperty("tidings.luciola.nativeDir", luciolaNativeDir?.absolutePath ?: "")
     // 一次只跑一条：这条用例独占端口与磁盘，并行只会互相干扰。
     maxParallelForks = 1
 }

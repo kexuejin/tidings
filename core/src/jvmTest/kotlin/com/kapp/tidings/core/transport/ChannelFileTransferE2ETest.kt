@@ -16,6 +16,7 @@ import java.net.ServerSocket
 import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertTrue
+import org.junit.Before
 
 /**
  * goal 第 (3) 步的**替代验收**：真机走不通（宿主控制面有个独立 bug 拖死了 16 个 handler
@@ -27,6 +28,10 @@ import kotlin.test.assertTrue
  */
 @OptIn(kotlin.io.encoding.ExperimentalEncodingApi::class)
 class ChannelFileTransferE2ETest {
+
+    /** 真引擎用例：本机没有 luciola 原生库时跳过（不是失败），配了却用不了则失败。 */
+    @Before
+    fun requireLuciolaNative() = LuciolaNativeGuard.assumeAvailable()
 
     private fun profile(id: String) = Profile(
         nodeId = id, nick = id, company = "", dept = "", team = "", avatar = 1,

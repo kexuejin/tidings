@@ -4,6 +4,7 @@ package com.kapp.tidings.core.transport
 import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertTrue
+import org.junit.Before
 
 /**
  * **守住「Kotlin 绑定与本地库是同一版」这件事。**
@@ -23,6 +24,10 @@ import kotlin.test.assertTrue
  * 2. 断言 `diagnostics()` **不会**把统计异常吞成空串（失败时要能看见原因）。
  */
 class LinkStatsBindingContractTest {
+
+    /** 真引擎用例：本机没有 luciola 原生库时跳过（不是失败），配了却用不了则失败。 */
+    @Before
+    fun requireLuciolaNative() = LuciolaNativeGuard.assumeAvailable()
 
     @Test
     fun statsIsCallableAndExposesAllCounters() {

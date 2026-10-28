@@ -13,6 +13,7 @@ import java.util.concurrent.atomic.AtomicLong
 import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertTrue
+import org.junit.Before
 
 /**
  * 文件/投屏数据面迁移的**可行性量具**：直接压 luciola 的 SecureSession，
@@ -23,6 +24,10 @@ import kotlin.test.assertTrue
  *  - send 返回 false（队列满）时的退避节奏是否够用。
  */
 class LuciolaChannelThroughputSpikeTest {
+
+    /** 真引擎用例：本机没有 luciola 原生库时跳过（不是失败），配了却用不了则失败。 */
+    @Before
+    fun requireLuciolaNative() = LuciolaNativeGuard.assumeAvailable()
 
     private fun freePort(): Int = ServerSocket(0).use { it.localPort }
 

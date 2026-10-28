@@ -8,6 +8,7 @@ import kotlin.test.Test
 import kotlin.test.assertContentEquals
 import kotlin.test.assertEquals
 import kotlin.test.assertNotNull
+import org.junit.Before
 
 /**
  * 入站**二进制帧**（文件/画面字节）的归属判据：握手指纹 → 对端端点。
@@ -21,6 +22,10 @@ import kotlin.test.assertNotNull
  * 而两边都不报错（"对方说发了、我这边卡在接收中"）。
  */
 class EndpointOfFingerprintTest {
+
+    /** 真引擎用例：本机没有 luciola 原生库时跳过（不是失败），配了却用不了则失败。 */
+    @Before
+    fun requireLuciolaNative() = LuciolaNativeGuard.assumeAvailable()
 
     private fun profile(id: String) = Profile(
         nodeId = id, nick = id, company = "", dept = "", team = "", avatar = 1,

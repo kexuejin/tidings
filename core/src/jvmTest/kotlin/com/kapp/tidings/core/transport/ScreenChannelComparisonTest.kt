@@ -22,6 +22,7 @@ import kotlinx.coroutines.withTimeout
 import java.net.ServerSocket
 import kotlin.test.Test
 import kotlin.test.assertTrue
+import org.junit.Before
 
 /**
  * goal 第 (4) 步的**替代验收**：同一段投屏流量，加密信道 vs legacy 明文 socket，
@@ -41,6 +42,10 @@ import kotlin.test.assertTrue
  * 而投屏的实际负载是 ~1MB/s（10fps × 100KiB），两个数量级之下都不构成瓶颈。
  */
 class ScreenChannelComparisonTest {
+
+    /** 真引擎用例：本机没有 luciola 原生库时跳过（不是失败），配了却用不了则失败。 */
+    @Before
+    fun requireLuciolaNative() = LuciolaNativeGuard.assumeAvailable()
 
     private data class Arm(val viewer: ScreenWire, val sharer: ScreenWire, val close: () -> Unit)
 

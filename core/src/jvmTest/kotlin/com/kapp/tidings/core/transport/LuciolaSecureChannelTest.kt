@@ -22,6 +22,7 @@ import kotlin.test.assertEquals
 import kotlin.test.assertFalse
 import kotlin.test.assertNotNull
 import kotlin.test.assertTrue
+import org.junit.Before
 
 /**
  * 阶段三验收:配对 → SecureChannelTransport 的双向收发 + 重启后 pin 仍生效。
@@ -31,6 +32,10 @@ import kotlin.test.assertTrue
  */
 @OptIn(ExperimentalEncodingApi::class)
 class LuciolaSecureChannelTest {
+
+    /** 真引擎用例：本机没有 luciola 原生库时跳过（不是失败），配了却用不了则失败。 */
+    @Before
+    fun requireLuciolaNative() = LuciolaNativeGuard.assumeAvailable()
 
     // ------------------------------------------------------------------ 夹具
 

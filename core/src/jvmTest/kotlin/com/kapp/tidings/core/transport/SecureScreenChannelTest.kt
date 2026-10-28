@@ -17,6 +17,7 @@ import kotlin.test.Test
 import kotlin.test.assertContentEquals
 import kotlin.test.assertNotNull
 import kotlin.test.assertTrue
+import org.junit.Before
 
 /**
  * 投屏的**独立加密会话**：一条专用信道上的双向字节流。
@@ -26,6 +27,10 @@ import kotlin.test.assertTrue
  * 封套、切片、队列满重试，任一环节把字节弄丢或弄乱，这里都会红。
  */
 class SecureScreenChannelTest {
+
+    /** 真引擎用例：本机没有 luciola 原生库时跳过（不是失败），配了却用不了则失败。 */
+    @Before
+    fun requireLuciolaNative() = LuciolaNativeGuard.assumeAvailable()
 
     private fun profile(id: String) = Profile(
         nodeId = id, nick = id, company = "", dept = "", team = "", avatar = 1,

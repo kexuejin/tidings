@@ -267,10 +267,15 @@ tasks.withType<Test>().configureEach {
     // （"Could not initialize class uniffi.luciola_uniffi"）—— 不是 DllNotFound，
     // 是"加载到了，但版本对不上"，比找不到更难认。
     // 与 :core 同一个教训：debug/release 两份 dylib 混用曾让 50MB 验收差了 538 倍。
-    systemProperty(
-        "jna.library.path",
-        System.getProperty("jna.library.path") ?: "/workspace/RustBuild/cargo-target/release",
-    )
+    // 路径解析与 :core 同一套规则（见 core/build.gradle.kts 的 resolveLuciolaNativeDir）：
+    // 显式 env / -P → 约定目录 → 找不到就不设。**不写死个人绝对路径**。
+    val override = System.getProperty("jna.library.path")
+    when {
+        override != null -> systemProperty("jna.library.path", override)
+        desktopLuciolaNativeDir() != null ->
+            systemProperty("jna.library.path", desktopLuciolaNativeDir()!!.absolutePath)
+    }
+    systemProperty("tidings.luciola.nativeDir", desktopLuciolaNativeDir()?.absolutePath ?: "")
 }
 
 // 开发验收用:真实进程(./gradlew :desktopApp:run)也能加载 luciola 原生库。
@@ -288,12 +293,44 @@ tasks.withType<JavaExec>().configureEach {
  * 来源优先级:TIDINGS_LUCIOLA_NATIVE 环境变量 → 本机 Rust 构建产物(开发机)。
  * 正式发版应改为从 luciola 的发布构件取并校验 sha256(待 Android 发布形态一起做)。
  */
+private val luciolaLibNames = listOf(
+    "libluciola_uniffi.dylib", "libluciola_uniffi.so", "luciola_uniffi.dll",
+)
+
+/**
+ * 原生库目录解析（与 :core 同一套规则，**不写死个人绝对路径**）：
+ * 显式 env / -P → 仓库兄弟目录 ../RustBuild/cargo-target/{release,debug} → $HOME/RustBuild/cargo-target/{release,debug}
+ * 找不到返回 null；打包任务据 null 给出明确的 `Set TIDINGS_LUCIOLA_NATIVE` 指引。
+ */
+fun desktopLuciolaNativeDir(): File? {
+    fun hasLib(dir: File) = luciolaLibNames.any { File(dir, it).isFile }
+    val explicit = (findProperty("luciolaNativeDir") as String?)
+        ?: System.getenv("TIDINGS_LUCIOLA_NATIVE")
+    if (explicit != null && explicit.isBlank()) return null
+    if (explicit != null) {
+        val dir = File(explicit)
+        return listOf(dir, File(dir, "release"), File(dir, "debug")).firstOrNull { hasLib(it) } ?: dir
+    }
+    return listOfNotNull(
+        File(project.rootDir.parentFile, "RustBuild/cargo-target"),
+        project.rootDir.parentFile.parentFile?.let { File(it, "RustBuild/cargo-target") },
+        File(System.getProperty("user.home"), "RustBuild/cargo-target"),
+    ).filter { it.isDirectory }
+        .flatMap { listOf(File(it, "release"), File(it, "debug")) }
+        .firstOrNull { hasLib(it) }
+}
+
 val luciolaNativeDir: Provider<String> =
-    providers.environmentVariable("TIDINGS_LUCIOLA_NATIVE").orElse("/workspace/RustBuild/cargo-target/release")
+    providers.provider { desktopLuciolaNativeDir()?.absolutePath ?: "" }
 
 val copyLuciolaNative by tasks.registering(Copy::class) {
-    from(luciolaNativeDir) {
-        include("libluciola_uniffi.dylib", "libluciola_uniffi.so", "luciola_uniffi.dll")
+    // 空串 = 没解析到：不要 `from("")`（那会指向工程目录、扫描一大片），直接不复制，
+    // 由下面的 doLast 给出「缺库 + 怎么补」的明确失败。
+    val src = luciolaNativeDir.get()
+    if (src.isNotBlank()) {
+        from(src) {
+            include("libluciola_uniffi.dylib", "libluciola_uniffi.so", "luciola_uniffi.dll")
+        }
     }
     // Compose Desktop 的 appResourcesRootDir 约定:common/ 下的内容对全平台分发,
     // 打包后落在 app resources 根(运行时用 compose.application.resources.dir 找到)。
@@ -305,7 +342,9 @@ val copyLuciolaNative by tasks.registering(Copy::class) {
         val libs = dir.listFiles { f -> f.isFile && f.name.startsWith("libluciola_uniffi") || f.name == "luciola_uniffi.dll" }
         if (libs.isNullOrEmpty()) {
             throw GradleException(
-                "luciola native library missing under ${dir}. Set TIDINGS_LUCIOLA_NATIVE to the cargo target dir.",
+                "luciola native library missing under ${dir}. " +
+                    "Set TIDINGS_LUCIOLA_NATIVE=<cargo-target/release 或 debug> (or -PluciolaNativeDir=…) " +
+                    "before packaging —— 不带库的安装包会在用户机器上启动即崩。",
             )
         }
     }

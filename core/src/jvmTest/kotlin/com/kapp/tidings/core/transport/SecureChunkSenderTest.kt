@@ -15,6 +15,7 @@ import java.util.concurrent.atomic.AtomicBoolean
 import kotlin.test.Test
 import kotlin.test.assertContentEquals
 import kotlin.test.assertTrue
+import org.junit.Before
 
 /**
  * 加密信道数据面第 2/3 步的验收：窗口发送 + 连续前缀 ACK + 丢块重传。
@@ -24,6 +25,10 @@ import kotlin.test.assertTrue
  */
 @OptIn(kotlin.io.encoding.ExperimentalEncodingApi::class)
 class SecureChunkSenderTest {
+
+    /** 真引擎用例：本机没有 luciola 原生库时跳过（不是失败），配了却用不了则失败。 */
+    @Before
+    fun requireLuciolaNative() = LuciolaNativeGuard.assumeAvailable()
 
     private fun profile(id: String) = Profile(
         nodeId = id, nick = id, company = "", dept = "", team = "", avatar = 1,
