@@ -2,6 +2,7 @@
 
 package com.kapp.tidings.ui.desktop
 
+import androidx.compose.ui.input.key.Key
 import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertFalse
@@ -63,12 +64,20 @@ class DesktopMenuCommandsTest {
     @Test
     fun noMenuShortcutFiresWithoutThePrimaryModifier() {
         // 裸键绝不能触发：否则在输入框里打 n / o / , 就会顺手新建会话或导入文件。
-        listOf("n", "o", ",", "a", "d", "q").forEach { key ->
+        listOf("n", "o", ",", "a", "d", "q", "f", "k").forEach { key ->
             assertNull(
                 desktopShortcutFor(key = key, isPrimaryModifier = false, isShift = true, isAlt = true),
                 "$key 不该在没有主修饰键时命中任何命令",
             )
         }
+    }
+
+    @Test
+    fun findAndSearchShortcutsResolveToFocusSearch() {
+        assertEquals(DesktopShortcut.FocusSearch, primary("f"), "⌘F 聚焦搜索")
+        assertEquals(DesktopShortcut.FocusSearch, primary("k"), "⌘K 聚焦搜索")
+        assertEquals("f", desktopShortcutKeySpec(Key.F))
+        assertEquals("k", desktopShortcutKeySpec(Key.K))
     }
 
     @Test

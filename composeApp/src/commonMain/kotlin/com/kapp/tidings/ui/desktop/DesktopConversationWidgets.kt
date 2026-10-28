@@ -3,7 +3,6 @@
 package com.kapp.tidings.ui.desktop
 
 import androidx.compose.foundation.background
-import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -20,6 +19,7 @@ import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
+import com.kapp.tidings.ui.components.PressableSurface
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.remember
@@ -163,8 +163,6 @@ public fun ConversationSidebar(
     onTogglePin: ((String) -> Unit)? = null,
     onToggleMute: ((String) -> Unit)? = null,
     onDeleteConversation: ((String) -> Unit)? = null,
-    /** 群会话「删除并退出群聊」用；null = 这个壳没有退群能力（见 ConversationRow 同名参数）。 */
-    onLeaveGroup: ((String) -> Unit)? = null,
     /** 群会话预览的发送者署名解析（权威在域层，与 convTitle 同一个解析器）。 */
     previewSenderNameOf: ((String) -> String?)? = null,
     onSearchGlobal: ((String) -> com.kapp.tidings.domain.GlobalSearchResult)? = null,
@@ -325,7 +323,6 @@ public fun ConversationSidebar(
                 onTogglePin = onTogglePin,
                 onToggleMute = onToggleMute,
                 onDeleteConversation = onDeleteConversation,
-                onLeaveGroup = onLeaveGroup,
                 previewSenderNameOf = previewSenderNameOf,
                 draftPreviewOf = draftPreviewOf,
                 modifier = Modifier.fillMaxSize(),
@@ -367,14 +364,17 @@ public fun DesktopMessageSearchRow(
     now: Long,
     onSelect: (String) -> Unit,
 ) {
-    Row(
-        Modifier
-            .fillMaxWidth()
-            .clickable { onSelect(result.convId) }
-            .padding(horizontal = LocalAppSpacing.current.lg14, vertical = LocalAppSpacing.current.sm),
-        verticalAlignment = Alignment.CenterVertically,
-        horizontalArrangement = Arrangement.spacedBy(LocalAppSpacing.current.md10),
+    PressableSurface(
+        onClick = { onSelect(result.convId) },
+        modifier = Modifier.fillMaxWidth(),
     ) {
+        Row(
+            Modifier
+                .fillMaxWidth()
+                .padding(horizontal = LocalAppSpacing.current.lg14, vertical = LocalAppSpacing.current.sm),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(LocalAppSpacing.current.md10),
+        ) {
         Column(Modifier.weight(1f)) {
             Text(
                 title,
@@ -397,4 +397,5 @@ public fun DesktopMessageSearchRow(
             color = MaterialTheme.colorScheme.onSurfaceVariant,
         )
     }
+}
 }

@@ -18,10 +18,11 @@ import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.Icon
-import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
+import com.kapp.tidings.ui.components.AppButtonTone
+import com.kapp.tidings.ui.components.AppIconButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -283,21 +284,17 @@ fun WorkspaceDetailView(
 
             Row(verticalAlignment = Alignment.CenterVertically) {
                 if (onRefresh != null) {
-                    IconButton(onClick = onRefresh) {
-                        Icon(
-                            painter = painterResource(Res.drawable.ic_refresh),
-                            contentDescription = stringResource(Res.string.desktop_action_refresh),
-                            modifier = Modifier.size(20.dp),
-                        )
-                    }
-                }
-                IconButton(onClick = onOpenChat) {
-                    Icon(
-                        painter = painterResource(Res.drawable.ic_chat_bubble),
-                        contentDescription = stringResource(Res.string.agent_open_chat),
-                        modifier = Modifier.size(20.dp),
+                    AppIconButton(
+                        icon = Res.drawable.ic_refresh,
+                        contentDescription = stringResource(Res.string.desktop_action_refresh),
+                        onClick = onRefresh,
                     )
                 }
+                AppIconButton(
+                    icon = Res.drawable.ic_chat_bubble,
+                    contentDescription = stringResource(Res.string.agent_open_chat),
+                    onClick = onOpenChat,
+                )
             }
         }
 
@@ -796,17 +793,13 @@ fun WorkspaceDetailView(
                             )
                             Row(verticalAlignment = Alignment.CenterVertically) {
                                 if (onOpenSessionChat != null) {
-                                    IconButton(
+                                    AppIconButton(
+                                        icon = Res.drawable.ic_chat_bubble,
+                                        contentDescription = stringResource(Res.string.agent_open_chat),
                                         onClick = { onOpenSessionChat(recent.sessionId) },
                                         modifier = Modifier.size(28.dp),
-                                    ) {
-                                        Icon(
-                                            painter = painterResource(Res.drawable.ic_chat_bubble),
-                                            contentDescription = stringResource(Res.string.agent_open_chat),
-                                            tint = MaterialTheme.colorScheme.primary,
-                                            modifier = Modifier.size(16.dp),
-                                        )
-                                    }
+                                        tone = AppButtonTone.Primary,
+                                    )
                                 }
                                 Text(
                                     text = stringResource(Res.string.workspace_recent_session_open),
@@ -869,8 +862,6 @@ fun WorkspaceDetailView(
             tlsPin = if (qrIsSelf) state.network.selfTlsPin else null,
             // 同理：昵称也只在"这张码指向本机"时才带（对端的码印我们的名字会张冠李戴）。
             nick = if (qrIsSelf) state.settings.nick else null,
-            // 实验 luciola：同理只在"码指向本机"时带。
-            luciola = if (qrIsSelf) state.network.luciolaQr else null,
             onDismiss = { showQrDialog = false },
         )
     }

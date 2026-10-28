@@ -30,10 +30,12 @@ import androidx.compose.material3.FilterChip
 import androidx.compose.material3.FilterChipDefaults
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
-import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
+import com.kapp.tidings.ui.components.AppButtonSize
+import com.kapp.tidings.ui.components.AppIconButton
+import com.kapp.tidings.ui.components.AppTextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
@@ -59,6 +61,7 @@ import com.kapp.tidings.domain.MessageSearchResult
 import com.kapp.tidings.generated.resources.Res
 import com.kapp.tidings.generated.resources.common_cancel
 import com.kapp.tidings.generated.resources.common_close
+import com.kapp.tidings.generated.resources.common_profile_unavailable
 import com.kapp.tidings.generated.resources.hist_date_clear
 import com.kapp.tidings.generated.resources.hist_date_confirm
 import com.kapp.tidings.generated.resources.hist_date_end
@@ -549,7 +552,7 @@ internal fun HistoryHitItem(
             // `utils/time.ts` 的 `listTime` 同口径（原型那句「周三 10:41」是稿子的美化字面量）。
             val who = hit.senderId?.let { peerNames[it] }
                 ?: peerNames[hit.peerId]
-                ?: (hit.senderId ?: hit.peerId).take(8)
+                ?: stringResource(Res.string.common_profile_unavailable)
             val subText = "$who · ${historyDayLabel(hit.timestamp, now)}"
             // `.hshit .t2{font-size:11px;color:var(--on-2);margin-top:2px}` —— 同样没有
             // font-weight，而 `labelSmall` 是 Medium，所以这里显式压回 Normal。
@@ -637,9 +640,11 @@ internal fun HistoryDateSheet(
                             style = MaterialTheme.typography.titleMedium,
                             fontWeight = FontWeight.Bold,
                         )
-                        IconButton(onClick = onDismiss) {
-                            Icon(Icons.Default.Close, contentDescription = stringResource(Res.string.common_close))
-                        }
+                        AppIconButton(
+                            iconVector = Icons.Default.Close,
+                            contentDescription = stringResource(Res.string.common_close),
+                            onClick = onDismiss,
+                        )
                     }
 
                     // 开始 / 结束字段展示
@@ -874,18 +879,22 @@ internal fun CalendarGrid(
             horizontalArrangement = Arrangement.SpaceBetween,
             verticalAlignment = Alignment.CenterVertically,
         ) {
-            IconButton(onClick = onPrevMonth) {
-                Text("<", fontWeight = FontWeight.Bold)
-            }
+            AppTextButton(
+                text = "<",
+                size = AppButtonSize.Small,
+                onClick = onPrevMonth,
+            )
             Text(
                 // 带年份：月份可以无限前后翻，"10月"无法区分是哪一年（跨年查找时无解）。
                 text = stringResource(Res.string.hist_date_month_year, curYear, curMonth),
                 style = MaterialTheme.typography.titleSmall,
                 fontWeight = FontWeight.Bold,
             )
-            IconButton(onClick = onNextMonth) {
-                Text(">", fontWeight = FontWeight.Bold)
-            }
+            AppTextButton(
+                text = ">",
+                size = AppButtonSize.Small,
+                onClick = onNextMonth,
+            )
         }
 
         // 星期标头

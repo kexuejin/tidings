@@ -73,6 +73,18 @@ class GroupMemberRowLeakGuardTest {
         )
     }
 
+    @Test
+    fun theGroupIdCopyReceiptSelfClears() {
+        // 「已复制」翻上去之后必须 2 秒自清（与节点详情/连接页同一范式）：
+        // 不自清的话反馈会挂到对话框关闭为止，同一次打开里再点没有变化可看 —— 等于没有反馈。
+        // 反向验证：删掉 GroupInfoDialog 里的 LaunchedEffect 自清块，这条立刻红。
+        val live = GuardSourceScan.stripComments(GuardSourceScan.read(GROUP_INFO))
+        assertTrue(
+            live.contains("LaunchedEffect(copied)") && live.contains("copied = false"),
+            "复制群 ID 的回执缺自清：需要 LaunchedEffect(copied) + copied = false",
+        )
+    }
+
     private companion object {
         const val GROUP_INFO =
             "composeApp/src/commonMain/kotlin/com/kapp/tidings/ui/components/GroupInfoDialog.kt"

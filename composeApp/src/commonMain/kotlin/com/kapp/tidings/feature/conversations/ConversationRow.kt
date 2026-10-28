@@ -3,7 +3,6 @@
 package com.kapp.tidings.feature.conversations
 
 import androidx.compose.foundation.background
-import androidx.compose.foundation.clickable
 import androidx.compose.foundation.focusable
 import androidx.compose.foundation.gestures.awaitEachGesture
 import androidx.compose.foundation.gestures.awaitFirstDown
@@ -25,6 +24,7 @@ import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
+import com.kapp.tidings.ui.components.PressableSurface
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
@@ -608,15 +608,15 @@ internal fun WorkspaceFeedRow(
     onOpenWorkspaceUnit: (WorkspaceUnitUi) -> Unit,
 ) {
     val sp = LocalAppSpacing.current
-    Surface(
+    PressableSurface(
+        onClick = { onOpenWorkspaceUnit(unit) },
         color = MaterialTheme.colorScheme.surface,
         // 与 `ConversationRow` 同一张卡、同一口径（原型 `.card` 的 `--r-card`，见上）。
         shape = LocalCardShape.current,
         modifier = Modifier
             .fillMaxWidth()
             // 与会话行同一张卡、同一投影口径（见 `relayCardShadow`）。
-            .relayCardShadow()
-            .clickable { onOpenWorkspaceUnit(unit) },
+            .relayCardShadow(),
     ) {
         Row(
             modifier = Modifier.padding(horizontal = sp.lg, vertical = sp.md),

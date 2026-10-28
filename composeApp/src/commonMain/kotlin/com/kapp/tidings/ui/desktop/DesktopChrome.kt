@@ -16,6 +16,8 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.heightIn
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.focus.FocusRequester
+import androidx.compose.ui.focus.focusRequester
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
@@ -25,7 +27,6 @@ import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
-import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Surface
@@ -201,6 +202,7 @@ public fun DesktopToolbar(
     onToggleSearch: (() -> Unit)? = null,
     searching: Boolean = false,
     overflowItems: List<DesktopToolbarOverflowItem> = emptyList(),
+    searchFocusRequester: FocusRequester? = null,
 ) {
     // Expanded 的搜索框是常驻的（原型稿那一行就是这么画的），窄档位则按 `searching` 现开现关。
     val searchPanelVisible = sizeClass == DesktopWindowSizeClass.Expanded || searching
@@ -241,15 +243,11 @@ public fun DesktopToolbar(
                         // （`d27-search-empty` 的空态只有两行居中文字）。
                         trailingIcon = if (query.isNotEmpty()) {
                             {
-                                IconButton(
+                                AppIconButton(
+                                    icon = Res.drawable.ic_close,
+                                    contentDescription = stringResource(Res.string.action_clear_search),
                                     onClick = { onQueryChange("") },
-                                ) {
-                                    Icon(
-                                        painterResource(Res.drawable.ic_close),
-                                        contentDescription = stringResource(Res.string.action_clear_search),
-                                        modifier = Modifier.size(IconSizes.Body),
-                                    )
-                                }
+                                )
                             }
                         } else {
                             null
@@ -265,11 +263,11 @@ public fun DesktopToolbar(
                         ),
                         // 窄档位里输入框要和按钮抢一行：给它弹性但设上限，收起时也不至于把
                         // 右侧动作按钮挤出可视区。
-                        modifier = if (sizeClass == DesktopWindowSizeClass.Expanded) {
+                        modifier = (if (sizeClass == DesktopWindowSizeClass.Expanded) {
                             Modifier.width(300.dp)
                         } else {
                             Modifier.weight(1f, fill = false).widthIn(min = 140.dp, max = 300.dp)
-                        },
+                        }).let { if (searchFocusRequester != null) it.focusRequester(searchFocusRequester) else it },
                     )
                 }
                 Spacer(Modifier.weight(1f))
@@ -412,13 +410,11 @@ internal fun CompactSearchRow(
             },
             trailingIcon = if (query.isNotEmpty()) {
                 {
-                    IconButton(onClick = { onQueryChange("") }) {
-                        Icon(
-                            painterResource(Res.drawable.ic_close),
-                            contentDescription = stringResource(Res.string.action_clear_search),
-                            modifier = Modifier.size(IconSizes.Body),
-                        )
-                    }
+                    AppIconButton(
+                        icon = Res.drawable.ic_close,
+                        contentDescription = stringResource(Res.string.action_clear_search),
+                        onClick = { onQueryChange("") },
+                    )
                 }
             } else {
                 null

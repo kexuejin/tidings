@@ -483,21 +483,16 @@ fun RemoteViewSessionDialog(
 
                         Spacer(Modifier.width(LocalAppSpacing.current.md))
 
-                        IconButton(
+                        AppIconButton(
+                            icon = Res.drawable.ic_close,
+                            contentDescription = stringResource(Res.string.common_close),
                             onClick = onStop,
                             modifier = Modifier
                                 // 48dp 触达（视觉圆仍由 background 画在 IconButton 的默认盒子里）：
                                 // 远程查看是全屏覆盖层，关闭是唯一出口，36dp 在手持时点不到。
                                 .size(48.dp)
                                 .background(Color.White.copy(alpha = 0.2f), CircleShape),
-                        ) {
-                            Icon(
-                                painter = painterResource(Res.drawable.ic_close),
-                                contentDescription = stringResource(Res.string.common_close),
-                                tint = Color.White,
-                                modifier = Modifier.size(IconSizes.Body),
-                            )
-                        }
+                        )
                     }
 
                     Spacer(Modifier.height(LocalAppSpacing.current.sm))
@@ -597,14 +592,11 @@ fun ScreenRequestConfirmDialog(
                         color = MaterialTheme.colorScheme.onSurface,
                         modifier = Modifier.weight(1f),
                     )
-                    IconButton(onClick = onCancel) {
-                        Icon(
-                            painter = painterResource(Res.drawable.ic_close),
-                            contentDescription = stringResource(Res.string.common_close),
-                            tint = MaterialTheme.colorScheme.onSurfaceVariant,
-                            modifier = Modifier.size(IconSizes.Body),
-                        )
-                    }
+                    AppIconButton(
+                        icon = Res.drawable.ic_close,
+                        contentDescription = stringResource(Res.string.common_close),
+                        onClick = onCancel,
+                    )
                 }
                 Surface(
                     shape = RoundedCornerShape(10.dp),

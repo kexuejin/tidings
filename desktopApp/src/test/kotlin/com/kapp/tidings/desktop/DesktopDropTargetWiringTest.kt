@@ -71,4 +71,26 @@ class DesktopDropTargetWiringTest {
             )
         }
     }
+
+    @Test
+    fun 主窗未选会话时把拖放交给目标选择器而不是只弹通知() {
+        // 空态文案承诺「捎话会问你要发给谁」（r2_shell_nosel_hint），旧行为却是
+        // 只弹一条「请先选会话」系统通知 —— 文案在撒谎。守卫钉住补上的行为。
+        // 反向验证：把 DesktopWindow 的 onPickTarget 参数删掉，这条立刻红。
+        assertTrue(
+            read("DesktopDropFiles.kt").contains("onPickTarget: ((DroppedPayload) -> Unit)? = null"),
+            "handleDroppedFiles 缺 onPickTarget 接缝：宿主没有「问发给谁」的入口",
+        )
+        val window = read("DesktopWindow.kt")
+        assertTrue(
+            window.contains("onPickTarget = { payload ->"),
+            "主窗拖放没接 onPickTarget —— 未选会话时只会弹通知，不会问「发给谁」",
+        )
+        assertTrue(
+            window.contains("host.pendingDropFiles?.let { payload ->") &&
+                window.contains("ForwardTargetDialog(") &&
+                window.contains("title = stringResource(Res.string.chat_drop_target_title)"),
+            "主窗没有为待发拖放文件弹目标选择器或标题未设为发送文件到",
+        )
+    }
 }

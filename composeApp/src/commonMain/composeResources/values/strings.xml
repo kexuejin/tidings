@@ -74,10 +74,10 @@
          但"这个图标是表情"是同一件事（同 chat_send 被两边共用）。 -->
     <string name="chat_emoji">表情</string>
     <string name="chat_more_actions">更多功能</string>
-    <string name="chat_byte_hint">%1$d / %2$d 字节</string>
-    <string name="chat_byte_over">超出单条上限（%1$d 字节），请分两条发。</string>
+    <string name="chat_byte_hint">%1$d / %2$d 字符</string>
+    <string name="chat_byte_over">超出单条上限（%1$d 字符），请分两条发。</string>
     <!-- 输入栏状态行的右半边：这条草稿实际会走哪条路。手机上没法像桌面那样把两条路摆成两个模式，
-         所以要说清楚"现在这样发出去是什么后果"，而不是只给一个字节数。 -->
+         所以要说清楚"现在这样发出去是什么后果"，而不是只给一个大小。 -->
     <string name="chat_route_udp">局域网直连</string>
     <string name="chat_route_tcp">超出单播上限，自动改走 TCP</string>
     <string name="chat_delivery_sending">发送中</string>
@@ -266,7 +266,7 @@
     <string name="chat_mention_title">选择要 @ 的成员</string>
     <string name="chat_peer_offline">对方离线，消息会排队</string>
     <string name="chat_restored_offline">离线 · 下面是本机存下来的历史</string>
-    <string name="chat_caps_label">能力：%1$s</string>
+    <string name="chat_caps_label">支持特性：%1$s</string>
     <string name="chat_tcp_port">TCP %1$d</string>
     <!-- 「清空本会话聊天记录」（聊天页头部 → ⋮）。语义：只删**本机**这个会话的记录，
          对方那里不受影响；%1$s 是会话显示名，写进正文是为了让人核对清的是哪一个。 -->
@@ -922,7 +922,7 @@
     <string name="node_not_started">节点还没启动，先到设置页启动或重试。</string>
 
     <!-- 控制器动作的反馈文案（由 BannerMessage 结构化传出来，在这里翻译） -->
-    <string name="chat_send_too_long">这条消息 %1$d 字节，超过单条上限 %2$d 字节，请分两条发。</string>
+    <string name="chat_send_too_long">这条消息长 %1$d 字符，超过单条上限 %2$d 字符，请分两条发。</string>
     <string name="chat_send_failed">发送失败：%1$s</string>
     <string name="set_ports_saved">端口已保存：UDP %1$d / TCP %2$d；正在重新监听。</string>
     <string name="file_pick_failed">打开选择器失败：%1$s</string>
@@ -933,7 +933,7 @@
     <string name="file_reason_peer_offline">对方当前离线，等它上线后再试</string>
     <string name="file_reason_timeout">连接超时，对方网络可能不稳定，可以重试</string>
     <string name="file_reason_hash_mismatch">文件内容校验不一致，可能传坏了，请重新接收</string>
-    <string name="file_reason_size_mismatch">收到的字节数与声明不符，请重新接收</string>
+    <string name="file_reason_size_mismatch">收到的文件大小与声明不符，请重新接收</string>
     <string name="file_reason_socket_error">网络连接中断，可以重试</string>
     <string name="file_reason_write_error">写入本机磁盘失败，请检查剩余空间</string>
     <string name="file_reason_path_escape">文件名不合法，已拒绝写入</string>
@@ -1086,7 +1086,7 @@
     <string name="desktop_composer_placeholder">写点什么…</string>
     <string name="desktop_composer_draft">草稿 %1$d / %2$d B · %3$s</string>
     <string name="desktop_composer_send_hint">发送 · Shift+Enter 换行</string>
-    <string name="desktop_composer_emoji_note">表情按 UTF-8 计 · 多数占 4 字节</string>
+    <string name="desktop_composer_emoji_note">表情按 UTF-8 计 · 多数占 4 字符容量</string>
     <string name="desktop_composer_route_udp">局域网直连</string>
     <string name="desktop_composer_route_tcp">自动改走 TCP</string>
 
@@ -1488,7 +1488,7 @@
     <string name="hist_search_results_count">%1$d 条</string>
     <string name="hist_search_results_section">结果</string>
     <string name="hist_search_clear_filter">清空筛选</string>
-    <string name="hist_search_footer_hint">已列出这 %1$d 条 · LIKE 最多取 50 条</string>
+    <string name="hist_search_footer_hint">已列出这 %1$d 条 · 最多显示 50 条</string>
     <string name="hist_date_range_title">日期范围</string>
     <string name="hist_date_start">开始</string>
     <string name="hist_date_end">结束</string>

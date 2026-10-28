@@ -31,6 +31,7 @@ import org.jetbrains.compose.resources.DrawableResource
 import org.jetbrains.compose.resources.painterResource
 import androidx.compose.ui.graphics.Shape
 import com.kapp.tidings.ui.theme.ShapeRoles
+import androidx.compose.ui.graphics.vector.ImageVector
 
 /**
  * 按钮族 —— **唯一决定按钮字号、内边距、圆角与配色的地方**。
@@ -171,9 +172,10 @@ private fun AppButtonContent(
     text: String,
     size: AppButtonSize,
     leadingIcon: DrawableResource?,
+    leadingIconVector: ImageVector? = null,
     iconTint: Color,
 ) {
-    if (leadingIcon == null) {
+    if (leadingIcon == null && leadingIconVector == null) {
         Text(text = text, style = size.textStyle())
         return
     }
@@ -181,12 +183,21 @@ private fun AppButtonContent(
         verticalAlignment = Alignment.CenterVertically,
         horizontalArrangement = Arrangement.spacedBy(LocalAppSpacing.current.sm6),
     ) {
-        Icon(
-            painter = painterResource(leadingIcon),
-            contentDescription = null,
-            tint = iconTint,
-            modifier = Modifier.size(IconSizes.Label),
-        )
+        if (leadingIcon != null) {
+            Icon(
+                painter = painterResource(leadingIcon),
+                contentDescription = null,
+                tint = iconTint,
+                modifier = Modifier.size(IconSizes.Label),
+            )
+        } else if (leadingIconVector != null) {
+            Icon(
+                imageVector = leadingIconVector,
+                contentDescription = null,
+                tint = iconTint,
+                modifier = Modifier.size(IconSizes.Label),
+            )
+        }
         Text(text = text, style = size.textStyle())
     }
 }
@@ -201,6 +212,7 @@ fun AppButton(
     size: AppButtonSize = AppButtonSize.Medium,
     tone: AppButtonTone = AppButtonTone.Primary,
     leadingIcon: DrawableResource? = null,
+    leadingIconVector: ImageVector? = null,
 ) {
     Button(
         onClick = onClick,
@@ -224,7 +236,7 @@ fun AppButton(
         },
         contentPadding = size.contentPadding(),
     ) {
-        AppButtonContent(text, size, leadingIcon, Color.Unspecified)
+        AppButtonContent(text, size, leadingIcon, leadingIconVector, Color.Unspecified)
     }
 }
 
@@ -238,6 +250,7 @@ fun AppOutlinedButton(
     size: AppButtonSize = AppButtonSize.Medium,
     tone: AppButtonTone = AppButtonTone.Neutral,
     leadingIcon: DrawableResource? = null,
+    leadingIconVector: ImageVector? = null,
 ) {
     val contentColor = when (tone) {
         AppButtonTone.Danger -> MaterialTheme.colorScheme.onErrorContainer
@@ -268,7 +281,7 @@ fun AppOutlinedButton(
         ),
         contentPadding = size.contentPadding(),
     ) {
-        AppButtonContent(text, size, leadingIcon, contentColor)
+        AppButtonContent(text, size, leadingIcon, leadingIconVector, contentColor)
     }
 }
 
@@ -282,6 +295,7 @@ fun AppTextButton(
     size: AppButtonSize = AppButtonSize.Medium,
     tone: AppButtonTone = AppButtonTone.Neutral,
     leadingIcon: DrawableResource? = null,
+    leadingIconVector: ImageVector? = null,
 ) {
     val contentColor = when (tone) {
         AppButtonTone.Danger -> MaterialTheme.colorScheme.error
@@ -295,7 +309,7 @@ fun AppTextButton(
         colors = ButtonDefaults.textButtonColors(contentColor = contentColor),
         contentPadding = size.contentPadding(),
     ) {
-        AppButtonContent(text, size, leadingIcon, contentColor)
+        AppButtonContent(text, size, leadingIcon, leadingIconVector, contentColor)
     }
 }
 
@@ -326,36 +340,98 @@ fun AppIconButton(
     modifier: Modifier = Modifier,
     enabled: Boolean = true,
     tone: AppButtonTone = AppButtonTone.Neutral,
+    filled: Boolean = false,
 ) {
-    val tint = when (tone) {
-        AppButtonTone.Danger -> MaterialTheme.colorScheme.error
-        AppButtonTone.Primary -> MaterialTheme.colorScheme.primary
-        AppButtonTone.Neutral -> MaterialTheme.colorScheme.onSurfaceVariant
+    AppIconButtonImpl(
+        icon = icon,
+        iconVector = null,
+        contentDescription = contentDescription,
+        onClick = onClick,
+        modifier = modifier,
+        enabled = enabled,
+        tone = tone,
+        filled = filled,
+    )
+}
+
+@Composable
+fun AppIconButton(
+    iconVector: ImageVector,
+    contentDescription: String,
+    onClick: () -> Unit,
+    modifier: Modifier = Modifier,
+    enabled: Boolean = true,
+    tone: AppButtonTone = AppButtonTone.Neutral,
+    filled: Boolean = false,
+) {
+    AppIconButtonImpl(
+        icon = null,
+        iconVector = iconVector,
+        contentDescription = contentDescription,
+        onClick = onClick,
+        modifier = modifier,
+        enabled = enabled,
+        tone = tone,
+        filled = filled,
+    )
+}
+
+@Composable
+private fun AppIconButtonImpl(
+    icon: DrawableResource?,
+    iconVector: ImageVector?,
+    contentDescription: String,
+    onClick: () -> Unit,
+    modifier: Modifier = Modifier,
+    enabled: Boolean = true,
+    tone: AppButtonTone = AppButtonTone.Neutral,
+    filled: Boolean = false,
+) {
+    val containerColor = if (filled) {
+        when (tone) {
+            AppButtonTone.Primary -> if (enabled) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.surfaceVariant
+            AppButtonTone.Danger -> if (enabled) MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.surfaceVariant
+            AppButtonTone.Neutral -> MaterialTheme.colorScheme.surfaceVariant
+        }
+    } else {
+        Color.Transparent
     }
-    // 走 [PressableSurface] 而不是 M3 的 IconButton：图标按钮是"按下去要形变"的典型
-    // （没有文字可以变色，也没有边距可以挪），而且这样 [PressableSurface] 就有了一个
-    // **真实使用者** —— 一个建好却零调用点的原语，等于把死代码伪装成基础设施。
+    val contentColor = if (filled) {
+        when (tone) {
+            AppButtonTone.Primary -> if (enabled) MaterialTheme.colorScheme.onPrimary else MaterialTheme.colorScheme.onSurfaceVariant
+            AppButtonTone.Danger -> if (enabled) MaterialTheme.colorScheme.onError else MaterialTheme.colorScheme.onSurfaceVariant
+            AppButtonTone.Neutral -> MaterialTheme.colorScheme.onSurfaceVariant
+        }
+    } else {
+        when (tone) {
+            AppButtonTone.Danger -> MaterialTheme.colorScheme.error
+            AppButtonTone.Primary -> MaterialTheme.colorScheme.primary
+            AppButtonTone.Neutral -> MaterialTheme.colorScheme.onSurfaceVariant
+        }
+    }
     PressableSurface(
         onClick = onClick,
-        // `size` 而不是 `defaultMinSize`：内层是 `Box(Modifier.fillMaxSize())`，而
-        // `defaultMinSize` **不限制上限** —— 父容器高度可伸缩时（Column 里没有 weight 的槽、
-        // 或整屏 Column），`fillMaxSize` 会把按钮撑到整列可用高度，其余内容被挤成 0，
-        // 视觉上表现为"整屏空白 + 一颗居中的图标"。
-        //
-        // 真身：扫码屏与全局搜索屏换成 AppIconButton 后，三张状态参考图**塌成同一张空白**，
-        // 被 `:designDupFrameGate` 抓出来。`size` 同时给上下限，内层只填这 48dp；
-        // 调用方传自己的 `size(...)` 时外层约束先生效，仍然覆盖得住。
         modifier = modifier.size(LocalAppSpacing.current.xxxl),
         enabled = enabled,
         shape = CircleShape,
+        color = containerColor,
     ) {
         Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
-            Icon(
-                painter = painterResource(icon),
-                contentDescription = contentDescription,
-                tint = tint,
-                modifier = Modifier.size(IconSizes.Label),
-            )
+            if (icon != null) {
+                Icon(
+                    painter = painterResource(icon),
+                    contentDescription = contentDescription,
+                    tint = contentColor,
+                    modifier = Modifier.size(IconSizes.Label),
+                )
+            } else if (iconVector != null) {
+                Icon(
+                    imageVector = iconVector,
+                    contentDescription = contentDescription,
+                    tint = contentColor,
+                    modifier = Modifier.size(IconSizes.Label),
+                )
+            }
         }
     }
 }

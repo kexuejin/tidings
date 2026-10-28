@@ -102,13 +102,11 @@ fun LargeTitleBar(
             if (onBack != null) {
                 // 可点目标必须读得出来：给 null 的后果是读屏软件只会念"按钮"，
                 // 用户不知道它做什么（装饰性图标才该用 null，见同文件下游那几颗）。
-                IconButton(onClick = onBack) {
-                    Icon(
-                        painter = painterResource(Res.drawable.ic_arrow_back),
-                        contentDescription = stringResource(Res.string.action_back),
-                        tint = MaterialTheme.colorScheme.onSurface,
-                    )
-                }
+                AppIconButton(
+                    icon = Res.drawable.ic_arrow_back,
+                    contentDescription = stringResource(Res.string.action_back),
+                    onClick = onBack,
+                )
             }
             Column(
                 modifier = Modifier.weight(1f),

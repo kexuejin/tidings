@@ -7,7 +7,8 @@ import com.kapp.tidings.domain.DesktopPaneActions
 import org.jetbrains.compose.resources.painterResource
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
-import androidx.compose.foundation.clickable
+import androidx.compose.foundation.border
+import com.kapp.tidings.ui.components.PressableSurface
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.BoxWithConstraints
@@ -23,11 +24,12 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.lazy.items
+import com.kapp.tidings.platform.PlatformLazyListScrollbar
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.Icon
-import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
@@ -62,6 +64,7 @@ import com.kapp.tidings.feature.nodes.nodeNameOrder
 import com.kapp.tidings.ui.components.AddNodeAction
 import com.kapp.tidings.ui.components.AppBanner
 import com.kapp.tidings.ui.components.AppButtonSize
+import com.kapp.tidings.ui.components.AppIconButton
 import com.kapp.tidings.ui.components.AppTextButton
 import com.kapp.tidings.ui.components.KindBadge
 import com.kapp.tidings.ui.components.PeerAvatar
@@ -440,18 +443,26 @@ private fun NodeList(
             }
             AddNodeAction(onClick = onAddNode, modifier = Modifier.padding(end = sp.xs))
         }
-        LazyColumn(
-            modifier = Modifier.weight(1f),
-            contentPadding = PaddingValues(horizontal = sp.sm, vertical = sp.xs),
-            verticalArrangement = Arrangement.spacedBy(sp.xxs),
-        ) {
-            items(entries, key = { it.key }) { entry ->
-                NodeListRow(
-                    entry = entry,
-                    selected = entry.key == selectedKey,
-                    onClick = { onSelect(entry) },
-                )
+        val listState = rememberLazyListState()
+        Box(modifier = Modifier.weight(1f).fillMaxWidth()) {
+            LazyColumn(
+                state = listState,
+                modifier = Modifier.fillMaxSize(),
+                contentPadding = PaddingValues(horizontal = sp.sm, vertical = sp.xs),
+                verticalArrangement = Arrangement.spacedBy(sp.xxs),
+            ) {
+                items(entries, key = { it.key }) { entry ->
+                    NodeListRow(
+                        entry = entry,
+                        selected = entry.key == selectedKey,
+                        onClick = { onSelect(entry) },
+                    )
+                }
             }
+            PlatformLazyListScrollbar(
+                state = listState,
+                modifier = Modifier.align(Alignment.CenterEnd).fillMaxHeight(),
+            )
         }
         if (unreachableCount > 0) {
             AppTextButton(
@@ -493,14 +504,14 @@ private fun NodeCountLine(count: Int, onlineCount: Int) {
 private fun NodeListRow(entry: NodeListItem, selected: Boolean, onClick: () -> Unit) {
     val sp = LocalAppSpacing.current
     val scheme = MaterialTheme.colorScheme
-    Surface(
+    val borderStroke = if (selected) BorderStroke(1.dp, scheme.outlineVariant) else null
+    PressableSurface(
+        onClick = onClick,
         color = if (selected) scheme.surface else Color.Transparent,
-        contentColor = scheme.onSurface,
         shape = MaterialTheme.shapes.medium,
-        border = if (selected) BorderStroke(1.dp, scheme.outlineVariant) else null,
         modifier = Modifier
             .fillMaxWidth()
-            .clickable(onClick = onClick),
+            .then(if (borderStroke != null) Modifier.border(borderStroke, MaterialTheme.shapes.medium) else Modifier),
     ) {
         Row(
             // `.li{padding:7px 9px;min-height:52px}` + 32px 头像 ⇒ 上下各 10px 时正好 52；
@@ -605,7 +616,7 @@ private fun NodeDetailPane(
     now: Long,
     onSetPeerRemark: (String, String) -> Unit,
     onOpenChat: (String) -> Unit,
-    /** 「移除节点」确认后直通 `controller::removeManualPeer`（见 [NodeDetailBody]）。 */
+    /** 「移除节点」确认后直通 `controller::removeNode`（见 [NodeDetailBody]）。 */
     onRemovePeer: (NodeRemoval) -> Unit,
     /** 「连接」一条已保存但不通的手动地址（见 `RelayController.reconnectManualPeer`）。 */
     onReconnectPeer: ((ManualPeerEntry) -> Unit)? = null,
@@ -706,13 +717,12 @@ public fun SelfNodeIdStrip(
                         overflow = TextOverflow.Ellipsis,
                     )
                 }
-                IconButton(onClick = onCopy, modifier = Modifier.size(28.dp)) {
-                    Icon(
-                        painterResource(Res.drawable.ic_copy),
-                        contentDescription = stringResource(Res.string.desktop_nodes_copy_id),
-                        modifier = Modifier.size(14.dp),
-                    )
-                }
+                AppIconButton(
+                    icon = Res.drawable.ic_copy,
+                    contentDescription = stringResource(Res.string.desktop_nodes_copy_id),
+                    onClick = onCopy,
+                    modifier = Modifier.size(28.dp),
+                )
             }
         }
     }

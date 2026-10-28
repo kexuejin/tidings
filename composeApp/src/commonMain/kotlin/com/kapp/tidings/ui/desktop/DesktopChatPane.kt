@@ -60,6 +60,7 @@ import com.kapp.tidings.generated.resources.desktop_action_list
 import com.kapp.tidings.generated.resources.desktop_action_open_in_new_window
 import com.kapp.tidings.generated.resources.chat_clear_local_action
 import com.kapp.tidings.generated.resources.chat_group_online
+import com.kapp.tidings.generated.resources.common_profile_unavailable
 import com.kapp.tidings.generated.resources.ic_copy
 import com.kapp.tidings.generated.resources.ic_external
 import com.kapp.tidings.generated.resources.ic_groups
@@ -280,7 +281,8 @@ public fun ChatPane(
                         // 空昵称要当"查不到"处理：否则会渲染出「群主 」这样半截的标签
                         // （远端刚上线、资料还没同步过来时 displayName 可能是空串）。
                         ?.takeIf { it.isNotBlank() }
-                        ?: owner.take(8)
+                        ?: state.peer(owner)?.displayName?.takeIf { it.isNotBlank() }
+                        ?: stringResource(Res.string.common_profile_unavailable)
                 }
             },
             onViewGroupInfo = if (group != null) ({ showGroupInfo = true }) else null,

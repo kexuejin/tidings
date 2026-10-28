@@ -12,7 +12,6 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.shape.CircleShape
-import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
@@ -48,7 +47,6 @@ import com.kapp.tidings.generated.resources.ic_close
 import com.kapp.tidings.platform.ReceivedFileActions
 import com.kapp.tidings.platform.decodeImageBytes
 import kotlinx.coroutines.withContext
-import org.jetbrains.compose.resources.painterResource
 import org.jetbrains.compose.resources.stringResource
 
 import com.kapp.tidings.ui.theme.LocalAppSpacing
@@ -187,17 +185,12 @@ fun ImageViewerDialog(
                     shape = CircleShape,
                     color = Color.Black.copy(alpha = 0.5f),
                 ) {
-                    IconButton(
+                    AppIconButton(
+                        icon = Res.drawable.ic_close,
+                        contentDescription = stringResource(Res.string.chat_image_preview_close),
                         onClick = onDismiss,
                         modifier = Modifier.size(40.dp),
-                    ) {
-                        Icon(
-                            painter = painterResource(Res.drawable.ic_close),
-                            contentDescription = stringResource(Res.string.chat_image_preview_close),
-                            tint = Color.White,
-                            modifier = Modifier.size(20.dp),
-                        )
-                    }
+                    )
                 }
             }
         }

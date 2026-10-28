@@ -9,9 +9,6 @@ import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.verticalScroll
-import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.outlined.ContentCopy
-import androidx.compose.material.icons.outlined.QrCodeScanner
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
@@ -33,12 +30,16 @@ import com.kapp.tidings.core.protocol.AgentGrantScopes
 import com.kapp.tidings.core.protocol.AgentGrantStates
 import com.kapp.tidings.core.qr.QrEncoder
 import com.kapp.tidings.generated.resources.*
+import com.kapp.tidings.ui.components.AppButton
+import com.kapp.tidings.ui.components.AppButtonSize
+import com.kapp.tidings.ui.components.AppButtonTone
+import com.kapp.tidings.ui.components.AppOutlinedButton
+import com.kapp.tidings.ui.components.AppTextButton
 import com.kapp.tidings.ui.components.PeerAvatar
 import com.kapp.tidings.ui.components.QrCodeView
 import com.kapp.tidings.ui.theme.LocalAppSpacing
 import com.kapp.tidings.ui.theme.RelayShapes
 import com.kapp.tidings.ui.theme.accents
-import com.kapp.tidings.ui.theme.IconSizes
 import kotlinx.coroutines.launch
 import org.jetbrains.compose.resources.stringResource
 
@@ -327,7 +328,7 @@ internal fun DesktopTrustedDevicesPanel(
             lastReply?.let { outcome ->
                 GrantReplyStatusLine(
                     outcome = outcome,
-                    peerLabel = state.peer(outcome.nodeId)?.displayName ?: outcome.nodeId.take(8),
+                    peerLabel = state.peer(outcome.nodeId)?.displayName ?: stringResource(Res.string.common_profile_unavailable),
                 )
             }
         }
@@ -376,22 +377,16 @@ internal fun DesktopTrustedDevicesPanel(
                             color = MaterialTheme.colorScheme.onSurfaceVariant,
                         )
                         Row(horizontalArrangement = Arrangement.spacedBy(sp.sm)) {
-                            OutlinedButton(
+                            AppOutlinedButton(
+                                text = stringResource(Res.string.trusted_devices_copy_node_id),
+                                size = AppButtonSize.Small,
                                 onClick = { onCopyNodeId(state.selfNodeId) },
-                                contentPadding = PaddingValues(horizontal = sp.sm, vertical = sp.xxs),
-                            ) {
-                                Icon(Icons.Outlined.ContentCopy, contentDescription = null, modifier = Modifier.size(IconSizes.Inline))
-                                Spacer(Modifier.width(sp.xs))
-                                Text(stringResource(Res.string.trusted_devices_copy_node_id), style = MaterialTheme.typography.labelSmall)
-                            }
-                            OutlinedButton(
+                            )
+                            AppOutlinedButton(
+                                text = stringResource(Res.string.trusted_devices_copy_pairing_link),
+                                size = AppButtonSize.Small,
                                 onClick = { onCopyPairingLink(pairingPayload) },
-                                contentPadding = PaddingValues(horizontal = sp.sm, vertical = sp.xxs),
-                            ) {
-                                Icon(Icons.Outlined.QrCodeScanner, contentDescription = null, modifier = Modifier.size(IconSizes.Inline))
-                                Spacer(Modifier.width(sp.xs))
-                                Text(stringResource(Res.string.trusted_devices_copy_pairing_link), style = MaterialTheme.typography.labelSmall)
-                            }
+                            )
                         }
                     }
                 }
@@ -461,7 +456,7 @@ internal fun DesktopTrustedDevicesPanel(
                         fontWeight = FontWeight.SemiBold,
                     )
                     pendingRequests.forEach { req ->
-                        val peerNick = state.peer(req.nodeId)?.displayName ?: req.nodeId.take(8)
+                        val peerNick = state.peer(req.nodeId)?.displayName ?: stringResource(Res.string.common_profile_unavailable)
                         Surface(
                             color = MaterialTheme.colorScheme.surfaceVariant,
                             shape = RelayShapes.small,
@@ -475,7 +470,6 @@ internal fun DesktopTrustedDevicesPanel(
                                 PeerAvatar(name = peerNick, size = 40.dp)
                                 Column(modifier = Modifier.weight(1f)) {
                                     Text(text = peerNick, style = MaterialTheme.typography.bodyMedium, fontWeight = FontWeight.Bold)
-                                    Text(text = "nodeId: ${req.nodeId.take(8)}", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
                                     // task-50 审查补的那一半：**如实显示对端申请的是哪一档**，并标出
                                     // 本机两个按钮各自的上限。封顶只解决「给多了」，不解决「用户不知道
                                     // 自己在批什么」—— 后者正是「界面不许比事实更少」。
@@ -498,7 +492,9 @@ internal fun DesktopTrustedDevicesPanel(
                                     )
                                 }
                                 Row(horizontalArrangement = Arrangement.spacedBy(sp.xs)) {
-                                    Button(
+                                    AppButton(
+                                        text = stringResource(Res.string.trusted_devices_approve_as_my),
+                                        size = AppButtonSize.Small,
                                         onClick = {
                                             decisions?.let { d ->
                                                 uiScope.launch {
@@ -507,11 +503,10 @@ internal fun DesktopTrustedDevicesPanel(
                                                 }
                                             }
                                         },
-                                        contentPadding = PaddingValues(horizontal = sp.sm, vertical = sp.xxs),
-                                    ) {
-                                        Text(stringResource(Res.string.trusted_devices_approve_as_my), style = MaterialTheme.typography.labelSmall)
-                                    }
-                                    OutlinedButton(
+                                    )
+                                    AppOutlinedButton(
+                                        text = stringResource(Res.string.trusted_devices_approve_normal),
+                                        size = AppButtonSize.Small,
                                         onClick = {
                                             decisions?.let { d ->
                                                 uiScope.launch {
@@ -520,11 +515,11 @@ internal fun DesktopTrustedDevicesPanel(
                                                 }
                                             }
                                         },
-                                        contentPadding = PaddingValues(horizontal = sp.sm, vertical = sp.xxs),
-                                    ) {
-                                        Text(stringResource(Res.string.trusted_devices_approve_normal), style = MaterialTheme.typography.labelSmall)
-                                    }
-                                    TextButton(
+                                    )
+                                    AppTextButton(
+                                        text = stringResource(Res.string.trusted_devices_reject),
+                                        size = AppButtonSize.Small,
+                                        tone = AppButtonTone.Danger,
                                         onClick = {
                                             decisions?.let { d ->
                                                 uiScope.launch {
@@ -533,10 +528,7 @@ internal fun DesktopTrustedDevicesPanel(
                                                 }
                                             }
                                         },
-                                        contentPadding = PaddingValues(horizontal = sp.sm, vertical = sp.xxs),
-                                    ) {
-                                        Text(stringResource(Res.string.trusted_devices_reject), style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.error)
-                                    }
+                                    )
                                 }
                             }
                         }
@@ -570,7 +562,7 @@ internal fun DesktopTrustedDevicesPanel(
                     displayNodeIds.forEach { nId ->
                         val grant = allGrants.firstOrNull { it.nodeId == nId }
                         val peer = state.peer(nId)
-                        val name = peer?.displayName ?: nId.take(8)
+                        val name = peer?.displayName ?: stringResource(Res.string.common_profile_unavailable)
                         val isOnline = peer?.online == true
                         val isMyDevice = grant?.isMyDevice == true
 
@@ -639,7 +631,9 @@ internal fun DesktopTrustedDevicesPanel(
 
                             Row(horizontalArrangement = Arrangement.spacedBy(sp.xs)) {
                                 if (!isMyDevice) {
-                                    Button(
+                                    AppButton(
+                                        text = stringResource(Res.string.trusted_devices_btn_mark_my),
+                                        size = AppButtonSize.Small,
                                         onClick = {
                                             decisions?.let { d ->
                                                 uiScope.launch {
@@ -648,13 +642,13 @@ internal fun DesktopTrustedDevicesPanel(
                                                 }
                                             }
                                         },
-                                        contentPadding = PaddingValues(horizontal = sp.sm, vertical = sp.xxs),
-                                    ) {
-                                        Text(stringResource(Res.string.trusted_devices_btn_mark_my), style = MaterialTheme.typography.labelSmall)
-                                    }
+                                    )
                                 }
                                 if (grant != null) {
-                                    OutlinedButton(
+                                    AppOutlinedButton(
+                                        text = stringResource(Res.string.trusted_devices_btn_revoke),
+                                        size = AppButtonSize.Small,
+                                        tone = AppButtonTone.Danger,
                                         onClick = {
                                             decisions?.let { d ->
                                                 uiScope.launch {
@@ -663,10 +657,7 @@ internal fun DesktopTrustedDevicesPanel(
                                                 }
                                             }
                                         },
-                                        contentPadding = PaddingValues(horizontal = sp.sm, vertical = sp.xxs),
-                                    ) {
-                                        Text(stringResource(Res.string.trusted_devices_btn_revoke), style = MaterialTheme.typography.labelSmall)
-                                    }
+                                    )
                                 }
                             }
                         }

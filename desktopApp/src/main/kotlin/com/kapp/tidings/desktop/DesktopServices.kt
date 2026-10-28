@@ -25,14 +25,30 @@ import javax.swing.filechooser.FileNameExtensionFilter
  */
 internal object DesktopDialogs {
 
+    private const val CHOOSE_FILE_TITLE = "选择要发送的文件"
+
     /** 单文件选择。返回 null 表示用户取消，不是「没有文件」。 */
     fun chooseFile(parent: Frame?): File? {
-        val dialog = FileDialog(parent, "选择要发送的文件", FileDialog.LOAD)
+        val dialog = FileDialog(parent, CHOOSE_FILE_TITLE, FileDialog.LOAD)
         dialog.isMultipleMode = false
         dialog.isVisible = true
         val dir = dialog.directory ?: return null
         val name = dialog.file ?: return null
         return File(dir, name).takeIf { it.exists() }
+    }
+
+    /** 多文件选择。返回空列表表示用户取消。 */
+    fun chooseFiles(parent: Frame?): List<File> {
+        val dialog = FileDialog(parent, CHOOSE_FILE_TITLE, FileDialog.LOAD)
+        dialog.isMultipleMode = true
+        dialog.isVisible = true
+        val files = dialog.files
+        if (!files.isNullOrEmpty()) {
+            return files.filter { it.exists() }
+        }
+        val dir = dialog.directory ?: return emptyList()
+        val name = dialog.file ?: return emptyList()
+        return listOfNotNull(File(dir, name).takeIf { it.exists() })
     }
 
     /** 目录选择。AWT `FileDialog` 只能选文件，所以目录走 Swing。 */

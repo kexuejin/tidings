@@ -19,12 +19,12 @@ import androidx.compose.ui.unit.dp
 import com.kapp.tidings.domain.model.AgentRunUi
 import com.kapp.tidings.generated.resources.Res
 import com.kapp.tidings.generated.resources.chat_group_progress_working
+import com.kapp.tidings.ui.components.AppButtonSize
+import com.kapp.tidings.ui.components.AppButtonTone
+import com.kapp.tidings.ui.components.AppOutlinedButton
 import com.kapp.tidings.ui.theme.LocalAppSpacing
 import org.jetbrains.compose.resources.stringResource
 
-import androidx.compose.foundation.layout.PaddingValues
-import androidx.compose.foundation.shape.RoundedCornerShape
-import androidx.compose.material3.OutlinedButton
 import com.kapp.tidings.generated.resources.agent_interrupt_btn
 
 /**
@@ -74,23 +74,13 @@ fun GroupProgressBar(
             // 改成控制面（agent-cancel）之后，宿主没接线时宁可让人看见"这个动作现在不可用"，
             // 也不要让按钮凭空消失（消失会让人以为"这个群没有在跑的任务"）。
             // 更不要退回"发一条假消息"：那会广播给所有成员，而且根本没中断。
-            OutlinedButton(
+            AppOutlinedButton(
+                text = stringResource(Res.string.agent_interrupt_btn),
                 onClick = { onInterrupt?.invoke() },
                 enabled = onInterrupt != null,
-                contentPadding = PaddingValues(horizontal = 8.dp, vertical = 2.dp),
-                shape = RoundedCornerShape(4.dp),
-            ) {
-                Text(
-                    text = stringResource(Res.string.agent_interrupt_btn),
-                    style = MaterialTheme.typography.labelSmall,
-                    color = if (onInterrupt != null) {
-                        MaterialTheme.colorScheme.error
-                    } else {
-                        MaterialTheme.colorScheme.onSurfaceVariant
-                    },
-                    fontWeight = FontWeight.SemiBold,
-                )
-            }
+                size = AppButtonSize.Small,
+                tone = AppButtonTone.Danger,
+            )
         }
     }
 }

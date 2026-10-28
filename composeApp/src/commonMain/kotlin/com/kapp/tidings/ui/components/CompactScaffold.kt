@@ -5,6 +5,8 @@ package com.kapp.tidings.ui.components
 import androidx.compose.foundation.background
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
+import androidx.compose.ui.hapticfeedback.HapticFeedbackType
+import androidx.compose.ui.platform.LocalHapticFeedback
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -119,10 +121,14 @@ fun CompactScaffold(
                     tonalElevation = RelayElevations.Sheet,
                     windowInsets = WindowInsets(0),
                 ) {
+                    val haptics = LocalHapticFeedback.current
                     navItems.forEach { item ->
                         NavigationBarItem(
                             selected = item.id == selectedScreenId,
-                            onClick = { onScreenSelected(item.id) },
+                            onClick = {
+                                haptics.performHapticFeedback(HapticFeedbackType.TextHandleMove)
+                                onScreenSelected(item.id)
+                            },
                             icon = { NavIcon(item, badges[item.id] ?: 0) },
                             label = {
                                 Text(
@@ -250,9 +256,13 @@ private fun NavRailButton(
     } else {
         MaterialTheme.colorScheme.onSurfaceVariant
     }
+    val haptics = LocalHapticFeedback.current
     Column(
         modifier = Modifier
-            .clickable(onClick = onClick, role = Role.Tab)
+            .clickable(onClick = {
+                haptics.performHapticFeedback(HapticFeedbackType.TextHandleMove)
+                onClick()
+            }, role = Role.Tab)
             .semantics(mergeDescendants = true) { this.selected = selected }
             .padding(vertical = LocalAppSpacing.current.md10)
             .width(COMPACT_RAIL_WIDTH_DP.dp),

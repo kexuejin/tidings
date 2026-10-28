@@ -5,6 +5,7 @@ package com.kapp.tidings.desktop
 import com.kapp.tidings.ui.desktop.*
 import com.kapp.tidings.core.protocol.FileTransfer
 import com.kapp.tidings.generated.resources.Res
+import com.kapp.tidings.generated.resources.conv_title
 import com.kapp.tidings.generated.resources.desktop_drop_pick_conversation
 import com.kapp.tidings.generated.resources.desktop_notification_title
 import com.kapp.tidings.generated.resources.file_folder_empty_skipped
@@ -117,8 +118,9 @@ private fun DesktopPeerWindow(
     // 会话可能还没落到 conversations 里（刚配对完就开窗）：退回节点昵称，再退回节点 ID。
     val peer = state.peer(peerId)
     val title = conversation?.title
+        ?: peer?.displayName?.takeIf { it.isNotBlank() }
         ?: peer?.nick?.takeIf { it.isNotBlank() }
-        ?: "会话 ${peerId.take(8)}"
+        ?: stringResource(Res.string.conv_title)
 
     Window(
         onCloseRequest = { host.closePeerWindow(peerId) },
@@ -156,6 +158,9 @@ private fun DesktopPeerWindow(
                     peerId = peerId,
                     dropped = files,
                     notify = { body -> DesktopNotifications.show(dropAppTitle, body) },
+                    onStageFiles = { staged ->
+                        host.stageFilesFor(peerId, staged)
+                    },
                     texts = DropTexts(
                         pickConversation = dropPickConversation,
                         tooMany = dropTooMany,
@@ -182,11 +187,9 @@ private fun DesktopPeerWindow(
                     onImportFiles = { id -> controller.pickAndSendFiles(id) },
                     onCopyPairingLink = { link ->
                         putTextOnClipboard(link)
-                        DesktopNotifications.show("捎话", "已复制配对链接")
                     },
                     onCopyNodeId = { nodeId ->
                         putTextOnClipboard(nodeId)
-                        DesktopNotifications.show("捎话", "已复制本机节点 ID")
                     },
                     onOpenPeerWindow = { id -> host.openPeerWindow(id) },
                     onQuit = onExitApplication,
@@ -222,6 +225,8 @@ private fun DesktopPeerWindow(
                             controlPlanePort = host.extension.controlPlanePort,
                             actions = actions,
                             initialPeerId = peerId,
+                            stagedFilesByConv = host.stagedFilesByConv,
+                            onStagedFilesChange = host::updateStagedFiles,
                         )
                     }
                 }

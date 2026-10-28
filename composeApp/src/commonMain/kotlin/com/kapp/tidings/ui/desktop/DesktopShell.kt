@@ -23,6 +23,7 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.saveable.Saver
 import androidx.compose.runtime.saveable.rememberSaveable
+import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.backhandler.BackHandler
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
@@ -43,6 +44,7 @@ import com.kapp.tidings.domain.GlobalSearchResult
 import com.kapp.tidings.domain.RelayUiState
 import com.kapp.tidings.domain.model.WorkspaceUi
 import com.kapp.tidings.core.nowMillis
+import com.kapp.tidings.core.transport.LocalFile
 import com.kapp.tidings.feature.agents.AgentConsoleScreen
 import com.kapp.tidings.feature.chat.draftOf
 import com.kapp.tidings.feature.chat.updateDraft
@@ -299,6 +301,8 @@ public fun DesktopShell(
      * 生产调用方一律用默认值；只有截图预览传 `true`。
      */
     overflowPanelPreview: Boolean = false,
+    stagedFilesByConv: Map<String, List<LocalFile>> = emptyMap(),
+    onStagedFilesChange: (convId: String, files: List<LocalFile>) -> Unit = { _, _ -> },
     actions: DesktopShellActions,
     modifier: Modifier = Modifier,
 ) {
@@ -321,6 +325,16 @@ public fun DesktopShell(
     }
     var selectedPeerId by rememberSaveable { mutableStateOf(initialPeerId) }
 
+    // 复制回执：状态栏右侧「已复制」小字，2 秒自清 —— 与行内回执同一范式，
+    // 取代「复制一发系统通知」的旧做法（一次性动作留在窗内就够，不该进通知中心）。
+    var copyReceiptAt by remember { mutableStateOf(0L) }
+    LaunchedEffect(copyReceiptAt) {
+        if (copyReceiptAt != 0L) {
+            kotlinx.coroutines.delay(2_000)
+            copyReceiptAt = 0L
+        }
+    }
+
     // 每个会话各自的草稿 —— 与手机壳同一条理由（见 App.kt 的 draftsByConv）：
     // ChatScreen 的 draft 是 `remember(peerId)` 的，切会话就重建，写到一半切走回来字没了。
     // 桌面窗口常驻，这张表活得比手机更久，但同样只活在进程内（不落盘）。
@@ -333,6 +347,18 @@ public fun DesktopShell(
     var draftsByConv by rememberSaveable(stateSaver = DraftsByConvSaver) {
         mutableStateOf(mapOf<String, String>())
     }
+    var internalStagedFilesByConv by remember {
+        mutableStateOf(mapOf<String, List<LocalFile>>())
+    }
+    val effectiveStagedFilesByConv = if (stagedFilesByConv.isNotEmpty()) stagedFilesByConv else internalStagedFilesByConv
+    val effectiveOnStagedFilesChange: (String, List<LocalFile>) -> Unit = { convId, files ->
+        onStagedFilesChange(convId, files)
+        internalStagedFilesByConv = if (files.isEmpty()) {
+            internalStagedFilesByConv - convId
+        } else {
+            internalStagedFilesByConv + (convId to files)
+        }
+    }
     var selectedWsId by rememberSaveable { mutableStateOf<String?>(null) }
     var selectedAgentSessionId by rememberSaveable(selectedPeerId) { mutableStateOf<String?>(null) }
     var showWsQrFor by remember { mutableStateOf<WorkspaceUi?>(null) }
@@ -341,6 +367,15 @@ public fun DesktopShell(
     // 面板收起后 query 仍保留：否则用户点一下「关闭」就把正在用的筛选无声清空了。
     var searching by rememberSaveable { mutableStateOf(false) }
     var showCreateWsDialog by rememberSaveable { mutableStateOf(false) }
+    val searchFocusRequester = remember { FocusRequester() }
+    var pendingFocusSearch by remember { mutableStateOf(false) }
+
+    LaunchedEffect(pendingFocusSearch) {
+        if (pendingFocusSearch) {
+            searchFocusRequester.requestFocus()
+            pendingFocusSearch = false
+        }
+    }
 
     // 系统返回键（平板 two-pane）。
     //
@@ -468,6 +503,7 @@ public fun DesktopShell(
         // 标成「指纹」会让人以为它验证了密钥。
         DesktopShortcut.CopyNodeId -> {
             actions.onCopyNodeId(state.selfNodeId)
+            copyReceiptAt = now
             true
         }
 
@@ -483,6 +519,11 @@ public fun DesktopShell(
         DesktopShortcut.ViewAgents -> { view = DesktopView.Agents; true }
         DesktopShortcut.ScreenCapture -> {
             controller.triggerScreenCapture(selectedPeerId)
+            true
+        }
+        DesktopShortcut.FocusSearch -> {
+            searching = true
+            pendingFocusSearch = true
             true
         }
     }
@@ -526,7 +567,7 @@ public fun DesktopShell(
                 ),
                 DesktopToolbarOverflowItem(
                     label = stringResource(Res.string.desktop_menu_copy_node_id),
-                    onClick = { actions.onCopyNodeId(state.selfNodeId) },
+                    onClick = { actions.onCopyNodeId(state.selfNodeId); copyReceiptAt = now },
                     dividerBefore = true,
                     icon = painterResource(Res.drawable.ic_copy),
                 ),
@@ -580,6 +621,43 @@ public fun DesktopShell(
                         return@onPreviewKeyEvent true
                     }
                 }
+                // Esc 关自绘浮层与弹窗栈：自顶向下逐层收口（Modal Dialog Stack Unwinding）
+                if (event.key == androidx.compose.ui.input.key.Key.Escape) {
+                    when (nextModalLayerToDismiss(
+                        hasWsQr = showWsQrFor != null,
+                        hasGroupCreatePrompt = groupCreatePromptFor != null,
+                        hasCreateWs = showCreateWsDialog,
+                        hasSearchQuery = query.isNotEmpty(),
+                        isSearching = searching,
+                        hasAgentSession = selectedAgentSessionId != null,
+                    )) {
+                        DesktopModalLayer.WsQr -> {
+                            showWsQrFor = null
+                            return@onPreviewKeyEvent true
+                        }
+                        DesktopModalLayer.GroupCreatePrompt -> {
+                            groupCreatePromptFor = null
+                            return@onPreviewKeyEvent true
+                        }
+                        DesktopModalLayer.CreateWs -> {
+                            showCreateWsDialog = false
+                            return@onPreviewKeyEvent true
+                        }
+                        DesktopModalLayer.SearchQuery -> {
+                            query = ""
+                            return@onPreviewKeyEvent true
+                        }
+                        DesktopModalLayer.Searching -> {
+                            searching = false
+                            return@onPreviewKeyEvent true
+                        }
+                        DesktopModalLayer.AgentSession -> {
+                            selectedAgentSessionId = null
+                            return@onPreviewKeyEvent true
+                        }
+                        DesktopModalLayer.None -> Unit
+                    }
+                }
                 val spec = desktopShortcutKeySpec(event.key) ?: return@onPreviewKeyEvent false
                 val shortcut = desktopShortcutFor(
                     key = spec,
@@ -626,6 +704,7 @@ public fun DesktopShell(
                 // 桌面传空列表，菜单栏继续独占这些动作 —— 两套 chrome 各管各的，
                 // 不做「桌面上也塞一份溢出菜单」的重复。
                 overflowItems = overflowItems,
+                searchFocusRequester = searchFocusRequester,
             )
         }
 
@@ -651,14 +730,23 @@ public fun DesktopShell(
                             draftPreviewOf = { convId -> draftsByConv[convId]?.takeIf { it.isNotBlank() } },
                             query = query,
                             onClearQuery = { query = "" },
-                            onCopyPeerId = { actions.onCopyNodeId(it) },
+                            onCopyPeerId = { actions.onCopyNodeId(it); copyReceiptAt = now },
                             onOpenInNewWindow = actions.onOpenPeerWindow,
                             onSelect = { id ->
-                                val ws = state.workspaceOfConv(id)
-                                selectedPeerId = id
-                                selectedWsId = ws?.wsId
-                                selectedAgentSessionId = null
-                                openConversation(id)
+                                // **再点当前会话 = 收起**（对齐上游 #59 的交互）：
+                                // 宽窗右栏回到欢迎页，草稿留在 draftsByConv 里不丢，
+                                // 再点同一行原样恢复。收起不清未读（没点开就不算看过）。
+                                if (id == selectedPeerId) {
+                                    selectedPeerId = null
+                                    selectedWsId = null
+                                    selectedAgentSessionId = null
+                                } else {
+                                    val ws = state.workspaceOfConv(id)
+                                    selectedPeerId = id
+                                    selectedWsId = ws?.wsId
+                                    selectedAgentSessionId = null
+                                    openConversation(id)
+                                }
                             },
                             onGoToPairing = { view = DesktopView.Nodes },
                             now = now,
@@ -668,6 +756,8 @@ public fun DesktopShell(
                             onDraftChange = { convId, text ->
                                 draftsByConv = updateDraft(draftsByConv, convId, text)
                             },
+                            initialStagedFiles = effectiveStagedFilesByConv[selectedPeerId].orEmpty(),
+                            onStagedFilesChange = effectiveOnStagedFilesChange,
                             initialGlobalSearch = initialGlobalSearch,
                             onCreateGroup = { name, members, description ->
                                 val gid = controller.createGroup(name, members, description)
@@ -747,9 +837,7 @@ public fun DesktopShell(
                                         // 必须同源 —— 否则同一次建群在两端叫两个名字。
                                         val name = groupNameFormat.replace("%s", ws.wsTitle ?: ws.wsId)
                                         val members = state.peers.filter { it.online }.map { it.nodeId }
-                                        // 工作区群走专用入口：0 个在线设备也能建，并把该工作区的 agent
-                                        // 声明进群（普通 createGroup 会判「至少再选一个人」）。
-                                        val gid = controller.createWorkspaceGroup(name, ws.wsId, members, ws.wsPath ?: ws.wsId)
+                                        val gid = controller.createGroup(name, members, ws.wsPath ?: ws.wsId)
                                         if (gid != null) {
                                             val convId = com.kapp.tidings.core.protocol.ConvId.group(gid)
                                             selectedPeerId = convId
@@ -762,8 +850,7 @@ public fun DesktopShell(
                                     onCreateNew = { path, _, groupName, _ ->
                                         showCreateWsDialog = false
                                         val members = state.peers.filter { it.online }.map { it.nodeId }
-                                        // 「关联本地全新目录」：还没有工作区行（wsId = null）。
-                                        val gid = controller.createWorkspaceGroup(groupName, null, members, path)
+                                        val gid = controller.createGroup(groupName, members, path)
                                         if (gid != null) {
                                             val convId = com.kapp.tidings.core.protocol.ConvId.group(gid)
                                             val ws = state.workspaceOfGroup(gid)
@@ -863,7 +950,7 @@ public fun DesktopShell(
                             // 只关心「变了」，所以合并不会漏触发。
                             externalAddNodeRequest = externalAddNodeRequest + addNodeRequest,
                             // 新稿不再画「本机节点 ID」条，这个实参只为兼容第一轮帧文件保留。
-                            onCopyNodeId = { actions.onCopyNodeId(state.selfNodeId) },
+                            onCopyNodeId = { actions.onCopyNodeId(state.selfNodeId); copyReceiptAt = now },
                             onSetPeerRemark = controller::setPeerRemark,
                             // 壳的 `initialPeerId` 本来就是「帧要预置选中的那个对端」，
                             // 节点页借用同一条接缝：它既接受 nodeId，也接受节点行的 key
@@ -892,6 +979,15 @@ public fun DesktopShell(
                     }
                 }
 
+            // 窄档下详情类二级页是否盖满内容区：会话详情（选中会话即详情）与
+            // 同事文件柜（controller 状态、两壳共享）。节点与 Agent 面板的详情
+            // 分支状态收在各自的组合内部，壳读不到 —— 那两处不并入本规则。
+            val compactDetailOnTop = sizeClass == DesktopWindowSizeClass.Compact &&
+                (
+                    (view == DesktopView.Conversations && selectedPeerId != null) ||
+                        state.cabinet.activePeerId != null
+                    )
+
             when (sizeClass) {
                 // 竖导是唯一的视图切换器：工具栏里那一排 chips 已经删掉，
                 // Expanded 再不给切换入口，宽窗（尤其是没有菜单栏的平板横屏）
@@ -904,7 +1000,8 @@ public fun DesktopShell(
                 }
 
                 // Compact：底导常驻。再点一次当前页的「会话」从详情退回列表 ——
-                // 底导是窄窗里唯一的返回入口，只切视图会让用户卡在详情里。
+                // 底导是窄窗里唯一的返回入口，只切视图会让用户卡在详情里；
+                // 详情盖满内容区时（见下）底导整个不画，退路是详情自己的顶栏返回。
                 DesktopWindowSizeClass.Compact -> Column(Modifier.fillMaxSize()) {
                     // 窄窗补搜索入口：这一档整条工具栏都不渲染，而 query 仍是壳层状态 ——
                     // 从宽窗收窄过来时列表会一直被旧词过滤，却没有任何输入框（review #8）。
@@ -913,13 +1010,19 @@ public fun DesktopShell(
                         CompactSearchRow(query = query, onQueryChange = { query = it })
                     }
                     Box(Modifier.weight(1f).fillMaxWidth()) { viewContent() }
-                    CompactNavigationBar(
-                        view = view,
-                        onViewChange = { next ->
-                            if (next == view && next == DesktopView.Conversations) selectedPeerId = null else view = next
-                        },
-                        badges = desktopNavBadges(state),
-                    )
+                    // 二级页（详情）盖满内容区时不再画底导 —— 与手机壳同一条规则：
+                    // tab 页是唯一挂底导的层。此前聊天详情保留底导，与手机（聊天全屏、
+                    // 其余子页留底导）凑成三套规则；窄窗详情的退路是详情自己的顶栏
+                    // （会话详情头的「列表」、同事文件柜的返回）。
+                    if (!compactDetailOnTop) {
+                        CompactNavigationBar(
+                            view = view,
+                            onViewChange = { next ->
+                                if (next == view && next == DesktopView.Conversations) selectedPeerId = null else view = next
+                            },
+                            badges = desktopNavBadges(state),
+                        )
+                    }
                 }
             }
         }
@@ -931,6 +1034,8 @@ public fun DesktopShell(
                 sizeClass = sizeClass,
                 controlPlanePort = controlPlanePort,
                 actions = actions,
+                copyReceiptActive = copyReceiptAt != 0L,
+                onCopied = { copyReceiptAt = now },
             )
         }
 
@@ -956,8 +1061,6 @@ public fun DesktopShell(
                 nodeId = state.selfNodeId,
                 // task-86：直通码也必须带 pin，否则手机建不出公网 TLS 目标。
                 tlsPin = state.network.selfTlsPin,
-                // 实验 luciola：直通码也带同一段（与 pin 互斥）。
-                luciola = state.network.luciolaQr,
                 // 带昵称：扫完立刻是真名，不是 node-a1b2c3d4。
                 nick = state.settings.nick,
                 onDismiss = { showWsQrFor = null },
@@ -978,7 +1081,7 @@ public fun DesktopShell(
                     groupCreatePromptFor = null
                     val name = groupNameFormat.replace("%s", ws.wsTitle ?: ws.wsId)
                     val members = state.peers.filter { it.online }.map { it.nodeId }
-                    val gid = controller.createWorkspaceGroup(name, ws.wsId, members, ws.wsPath ?: ws.wsId)
+                    val gid = controller.createGroup(name, members, ws.wsPath ?: ws.wsId)
                     if (gid != null) {
                         val convId = com.kapp.tidings.core.protocol.ConvId.group(gid)
                         selectedPeerId = convId

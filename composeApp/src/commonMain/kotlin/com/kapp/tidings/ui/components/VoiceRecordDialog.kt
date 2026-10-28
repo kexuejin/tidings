@@ -20,13 +20,8 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.outlined.Mic
-import androidx.compose.material.icons.outlined.PlayArrow
-import androidx.compose.material.icons.outlined.Stop
-import androidx.compose.material3.Button
-import androidx.compose.material3.FilledIconButton
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
@@ -49,7 +44,6 @@ import com.kapp.tidings.generated.resources.chat_voice_record
 import com.kapp.tidings.generated.resources.chat_voice_recording
 import com.kapp.tidings.generated.resources.chat_voice_rerecord
 import com.kapp.tidings.generated.resources.ic_refresh
-import com.kapp.tidings.ui.theme.IconSizes
 import org.jetbrains.compose.resources.StringResource
 import com.kapp.tidings.generated.resources.chat_voice_start
 import com.kapp.tidings.generated.resources.chat_voice_stop
@@ -122,7 +116,9 @@ fun VoiceRecordDialog(
             ) {
                 when (val cur = stage) {
                     is RecordStage.Idle -> {
-                        FilledIconButton(
+                        AppIconButton(
+                            iconVector = Icons.Outlined.Mic,
+                            contentDescription = stringResource(Res.string.chat_voice_start),
                             onClick = {
                                 errorRes = null
                                 val path = "$cacheDir/voice_${nowMillis()}.m4a"
@@ -133,9 +129,9 @@ fun VoiceRecordDialog(
                                 }
                             },
                             modifier = Modifier.size(68.dp),
-                        ) {
-                            Icon(Icons.Outlined.Mic, contentDescription = null, modifier = Modifier.size(32.dp))
-                        }
+                            tone = AppButtonTone.Primary,
+                            filled = true,
+                        )
                         Spacer(Modifier.height(LocalAppSpacing.current.md))
                         Text(
                             text = stringResource(Res.string.chat_voice_start),
@@ -176,7 +172,8 @@ fun VoiceRecordDialog(
                             color = MaterialTheme.colorScheme.onSurfaceVariant,
                         )
                         Spacer(Modifier.height(LocalAppSpacing.current.lg))
-                        Button(
+                        AppButton(
+                            text = stringResource(Res.string.chat_voice_stop),
                             onClick = {
                                 val duration = RelayAudioRecording.stop()
                                 if (duration < 1000L) {
@@ -186,10 +183,7 @@ fun VoiceRecordDialog(
                                     stage = RecordStage.Done(cur.path, duration)
                                 }
                             },
-                        ) {
-                            Icon(Icons.Outlined.Stop, contentDescription = null, modifier = Modifier.size(IconSizes.Body))
-                            Text(stringResource(Res.string.chat_voice_stop), modifier = Modifier.padding(start = LocalAppSpacing.current.sm6))
-                        }
+                        )
                     }
 
                     is RecordStage.Done -> {
@@ -204,12 +198,10 @@ fun VoiceRecordDialog(
                             horizontalArrangement = Arrangement.spacedBy(LocalAppSpacing.current.lg),
                             verticalAlignment = Alignment.CenterVertically,
                         ) {
-                            OutlinedButton(
+                            AppOutlinedButton(
+                                text = stringResource(Res.string.file_play_audio),
                                 onClick = { RelayAudioPlayback.play(cur.path) },
-                            ) {
-                                Icon(Icons.Outlined.PlayArrow, contentDescription = null, modifier = Modifier.size(IconSizes.Body))
-                                Text(stringResource(Res.string.file_play_audio), modifier = Modifier.padding(start = LocalAppSpacing.current.xs))
-                            }
+                            )
                             AppOutlinedButton(
                                 text = stringResource(Res.string.chat_voice_rerecord),
                                 onClick = {

@@ -34,6 +34,7 @@ public enum class DesktopShortcut {
     ViewNodes,
     ViewAgents,
     ScreenCapture,
+    FocusSearch,
 }
 
 /**
@@ -95,6 +96,8 @@ public fun desktopShortcutFor(
         "3" -> DesktopShortcut.ViewCabinet
         "4" -> DesktopShortcut.ViewNodes
         "5" -> DesktopShortcut.ViewAgents
+        "f" -> DesktopShortcut.FocusSearch
+        "k" -> DesktopShortcut.FocusSearch
         else -> null
     }
 }
@@ -118,5 +121,42 @@ public fun desktopShortcutKeySpec(key: Key): String? = when (key) {
     Key.Three -> "3"
     Key.Four -> "4"
     Key.Five -> "5"
+    Key.F -> "f"
+    Key.K -> "k"
     else -> null
+}
+
+/**
+ * 桌面窗全局 Esc 键弹窗栈回退层级（从顶层至底层）。
+ */
+public enum class DesktopModalLayer {
+    WsQr,
+    GroupCreatePrompt,
+    CreateWs,
+    SearchQuery,
+    Searching,
+    AgentSession,
+    None,
+}
+
+/**
+ * 计算当前 Esc 击中时应当关闭的最上层弹窗/浮层。
+ *
+ * 顺序原则：层叠深度倒序（越晚打开/越靠上的浮层优先关闭），无浮层时返回 [DesktopModalLayer.None]。
+ */
+public fun nextModalLayerToDismiss(
+    hasWsQr: Boolean,
+    hasGroupCreatePrompt: Boolean,
+    hasCreateWs: Boolean,
+    hasSearchQuery: Boolean,
+    isSearching: Boolean,
+    hasAgentSession: Boolean,
+): DesktopModalLayer = when {
+    hasWsQr -> DesktopModalLayer.WsQr
+    hasGroupCreatePrompt -> DesktopModalLayer.GroupCreatePrompt
+    hasCreateWs -> DesktopModalLayer.CreateWs
+    hasSearchQuery -> DesktopModalLayer.SearchQuery
+    isSearching -> DesktopModalLayer.Searching
+    hasAgentSession -> DesktopModalLayer.AgentSession
+    else -> DesktopModalLayer.None
 }

@@ -71,8 +71,8 @@
          但"这个图标是表情"是同一件事（同 chat_send 被两边共用）。 -->
     <string name="chat_emoji">Emoji</string>
     <string name="chat_more_actions">More actions</string>
-    <string name="chat_byte_hint">%1$d / %2$d bytes</string>
-    <string name="chat_byte_over">Exceeds message limit (%1$d bytes). Please split into multiple messages.</string>
+    <string name="chat_byte_hint">%1$d / %2$d characters</string>
+    <string name="chat_byte_over">Exceeds message limit (%1$d characters). Please split into multiple messages.</string>
     <!-- 输入栏状态行的右半边：这条草稿实际会走哪条路。手机上没法像桌面那样把两条路摆成两个模式，
          所以要说清楚"现在这样发出去是什么后果"，而不是只给一个字节数。 -->
     <string name="chat_route_udp">Direct on this network</string>

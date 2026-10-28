@@ -42,6 +42,7 @@ import com.kapp.tidings.generated.resources.desktop_status_local
 import com.kapp.tidings.generated.resources.desktop_status_pairing_link
 import com.kapp.tidings.generated.resources.desktop_status_pending
 import com.kapp.tidings.generated.resources.desktop_status_waiting
+import com.kapp.tidings.generated.resources.chat_group_id_copied
 import com.kapp.tidings.generated.resources.node_state_stopped
 import com.kapp.tidings.generated.resources.ic_eye
 import com.kapp.tidings.generated.resources.ic_link
@@ -58,6 +59,10 @@ public fun DesktopStatusBar(
     sizeClass: DesktopWindowSizeClass,
     controlPlanePort: Int,
     actions: DesktopShellActions,
+    /** 复制回执是否亮着（壳持有状态并 2 秒自清）。 */
+    copyReceiptActive: Boolean = false,
+    /** 状态栏自己的复制动作（配对链接）完成时通知壳亮回执。 */
+    onCopied: () -> Unit = {},
 ) {
     val phaseColor = when (state.network.phase) {
         NodePhase.Running -> MaterialTheme.colorScheme.primary
@@ -89,8 +94,6 @@ public fun DesktopStatusBar(
         port = selfPort,
         // task-86：复制链接这条路也要带 pin —— 公网目标要求 pin != null（fail-closed）。
         tlsPin = state.network.selfTlsPin,
-        // 实验 luciola：同一个载荷里带公钥/配对密钥（与 pin 互斥，见 QrPairing）。
-        luciola = state.network.luciolaQr,
     )
     Surface(color = MaterialTheme.colorScheme.surfaceContainer, tonalElevation = RelayElevations.Card) {
         Row(
@@ -164,12 +167,25 @@ public fun DesktopStatusBar(
                 )
             }
             if (pairingLink != null) {
-                StatusBarAction(stringResource(Res.string.desktop_status_pairing_link), painterResource(Res.drawable.ic_link), compact) { actions.onCopyPairingLink(pairingLink) }
+                StatusBarAction(stringResource(Res.string.desktop_status_pairing_link), painterResource(Res.drawable.ic_link), compact) {
+                    actions.onCopyPairingLink(pairingLink)
+                    onCopied()
+                }
             }
             // 诊断包是桌面专属能力：调用方给 null 时整条动作不画。
             val exportDiagnostics = actions.onExportDiagnostics
             if (exportDiagnostics != null) {
                 StatusBarAction(stringResource(Res.string.desktop_menu_diagnostics), painterResource(Res.drawable.ic_eye), compact, exportDiagnostics)
+            }
+            // 复制回执（壳持有，2 秒自清）：一次复制发一条系统通知太重、还会进通知中心；
+            // 行内小字足够，且随界面语言走（复用「已复制」既有文案，不新增 key）。
+            if (copyReceiptActive) {
+                Text(
+                    stringResource(Res.string.chat_group_id_copied),
+                    style = MaterialTheme.typography.labelSmall,
+                    color = MaterialTheme.colorScheme.primary,
+                    maxLines = 1,
+                )
             }
         }
     }

@@ -6,9 +6,11 @@ import com.kapp.tidings.ui.desktop.*
 import androidx.compose.foundation.isSystemInDarkTheme
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.material3.MaterialTheme
+import com.kapp.tidings.ui.components.ForwardTargetDialog
 import com.kapp.tidings.ui.theme.ThemeMode
 import com.kapp.tidings.core.protocol.FileTransfer
 import com.kapp.tidings.generated.resources.Res
+import com.kapp.tidings.generated.resources.chat_drop_target_title
 import com.kapp.tidings.generated.resources.desktop_drop_pick_conversation
 import com.kapp.tidings.generated.resources.desktop_notification_title
 import com.kapp.tidings.generated.resources.file_folder_empty_skipped
@@ -39,6 +41,8 @@ import androidx.compose.ui.input.key.KeyEventType
 import androidx.compose.ui.input.key.key
 import androidx.compose.ui.input.key.type
 import com.kapp.tidings.domain.RelayController
+import com.kapp.tidings.core.transport.LocalFile
+import com.kapp.tidings.feature.chat.mergeStagedFiles
 import com.kapp.tidings.domain.RelayUiState
 import com.kapp.tidings.ui.theme.AppTheme
 import kotlinx.coroutines.CoroutineScope
@@ -73,6 +77,32 @@ internal class DesktopHost(
 
     /** 当前会话选择。真正的拥有者是 [DesktopShell]，这里只是它的观察者。 */
     var selectedPeerId by mutableStateOf<String?>(null)
+
+    /** 每个会话的附件暂存列表：拖拽文件落入暂存区。 */
+    var stagedFilesByConv by mutableStateOf<Map<String, List<LocalFile>>>(emptyMap())
+        private set
+
+    fun stageFilesFor(convId: String, files: List<LocalFile>) {
+        val current = stagedFilesByConv[convId].orEmpty()
+        val merged = mergeStagedFiles(current, files)
+        stagedFilesByConv = stagedFilesByConv + (convId to merged)
+    }
+
+    fun updateStagedFiles(convId: String, files: List<LocalFile>) {
+        stagedFilesByConv = if (files.isEmpty()) {
+            stagedFilesByConv - convId
+        } else {
+            stagedFilesByConv + (convId to files)
+        }
+    }
+
+    /**
+     * 拖了文件但没有会话可发：暂存展开结果，等用户在目标选择器里点人。
+     *
+     * 拖放回调是 AWT 回调，弹不了 Compose 对话框 —— 「发给谁」只能交给组合层
+     * （DesktopWindow 里的 ForwardTargetDialog）；null = 没有待发文件。
+     */
+    var pendingDropFiles by mutableStateOf<DroppedPayload?>(null)
 
     /**
      * 已经用**独立窗口**打开的会话。主窗不在这张表里。
@@ -454,6 +484,18 @@ private fun DesktopMainWindow(
             ),
         ),
         title = "捎话 Tidings",
+        onPreviewKeyEvent = { event ->
+            if (event.type == KeyEventType.KeyDown && event.key == Key.Escape) {
+                if (host.pendingDropFiles != null) {
+                    host.pendingDropFiles = null
+                    true
+                } else {
+                    false
+                }
+            } else {
+                false
+            }
+        },
     ) {
         // 以下全部装在 Window 内容里：只有这里才有 FrameWindowScope.window 这个
         // 真实 AWT 窗口。此前这里 new 了一个游离 java.awt.Frame，改标题/隐藏的都是
@@ -493,6 +535,17 @@ private fun DesktopMainWindow(
                     peerId = host.selectedPeerId,
                     dropped = files,
                     notify = { body -> DesktopNotifications.show(dropAppTitle, body) },
+                    onPickTarget = { payload ->
+                        // 一个会话都没有就没有可问的人：如实退回通知，别弹一个空列表。
+                        if (state.conversations.isEmpty()) {
+                            DesktopNotifications.show(dropAppTitle, dropPickConversation)
+                        } else {
+                            host.pendingDropFiles = payload
+                        }
+                    },
+                    onStageFiles = { staged ->
+                        host.selectedPeerId?.let { host.stageFilesFor(it, staged) }
+                    },
                     texts = DropTexts(
                         pickConversation = dropPickConversation,
                         tooMany = dropTooMany,
@@ -524,11 +577,9 @@ private fun DesktopMainWindow(
                     onImportFiles = { peerId -> controller.pickAndSendFiles(peerId) },
                     onCopyPairingLink = { link ->
                         putTextOnClipboard(link)
-                        DesktopNotifications.show("捎话", "已复制配对链接")
                     },
                     onCopyNodeId = { nodeId ->
                         putTextOnClipboard(nodeId)
-                        DesktopNotifications.show("捎话", "已复制本机节点 ID")
                     },
                     onOpenPeerWindow = { peerId ->
                         // D10：真的开一扇独立窗口，而不是把主窗的选择改掉 ——
@@ -581,8 +632,33 @@ private fun DesktopMainWindow(
                             externalAddNodeRequest = host.addNodeTicks,
                             externalFilesRequest = host.filesViewTicks,
                             focusPeerId = state.focusRequest,
+                            stagedFilesByConv = host.stagedFilesByConv,
+                            onStagedFilesChange = host::updateStagedFiles,
                         )
                     }
+                }
+
+                // 拖放回调（AWT）弹不了对话框：没选会话就拖文件时，把展开结果暂存到
+                // host.pendingDropFiles，在这里问「发给谁」—— 空态文案承诺的就是这个，
+                // 而不是只弹一句「请先选会话」。
+                host.pendingDropFiles?.let { payload ->
+                    ForwardTargetDialog(
+                        title = stringResource(Res.string.chat_drop_target_title),
+                        sessions = state.conversations,
+                        onSelectTarget = { convId ->
+                            host.pendingDropFiles = null
+                            controller.sendFiles(
+                                peerId = convId,
+                                files = payload.files,
+                                isFolder = payload.isFolder,
+                                folderRootName = payload.folderRootName,
+                            )
+                            if (payload.skippedEmptyDirs > 0) {
+                                DesktopNotifications.show(dropAppTitle, dropEmptyDirs)
+                            }
+                        },
+                        onDismiss = { host.pendingDropFiles = null },
+                    )
                 }
             }
         }

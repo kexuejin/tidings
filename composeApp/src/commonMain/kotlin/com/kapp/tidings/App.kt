@@ -334,17 +334,22 @@ fun RelayApp(
                 // 接不住 —— 不接管的话，用户在取景框上按返回会直接退出应用。
                 BackKeyHandler(enabled = nav.scanning) { nav = nav.stopScanning() }
 
-                // 节点详情也要接管返回键：原型 `m-nodedetail` 是**节点页签内部的一个分支**
-                // （顶栏返回键跳 `m-nodes`、底栏照画，见 `NodesScreen` 的 `detailPeerId` KDoc），
-                // 所以它不像聊天详情那样整屏，但返回键仍应先回列表而不是退出应用。
+                // 节点详情也要接管返回键：它是节点页签的二级页（顶栏返回键回列表），
+                // 按「详情类一律全屏」的统一规则整屏渲染（见 mobileContent 之前的全屏分支注释）。
                 // 与上面那条同一条理由要 `!twoPane`：两栏模式下列表本来就看得见，
                 // 宽屏壳自己管选中项、根本不吃 `nav.detailPeerId`。
                 val peerDetailOnTop = nav.inPeerDetail && !twoPane
                 BackKeyHandler(enabled = peerDetailOnTop) { nav = nav.leavePeerDetail() }
 
-                // 浏览同事文件柜时也要接管返回键：从同事文件列表回到我的文件柜，避免直接退出应用
+                // 同事文件柜（原型 `m-cabinet`）同样是二级页（顶栏有返回键），接管返回键先退回列表
                 val peerCabinetOnTop = state.cabinet.activePeerId != null
                 BackKeyHandler(enabled = peerCabinetOnTop) { controller.selectCabinetPeer(null) }
+
+                // 设置子页与聊天详情同为二级页，按同一条规则整屏渲染。必须钉住当前
+                // 页签：settingsPage 只在「设置」页签下才代表一块在看的屏 —— 若在别的
+                // 页签残留了旧状态（全屏化之前用户可以带着子页状态切页签），无条件并入
+                // 全屏分支就会劫持别的页签。
+                val settingsSubpageOnTop = nav.selectedTabId == AppRoutes.SETTINGS && settingsPage != null
 
                 // 工作区详情与会话详情也要接管返回键：从会话详情回到工作区详情，从工作区详情回到看板
                 val agentSubpageOnTop = nav.inAgentSubpage && !twoPane
@@ -1065,9 +1070,20 @@ fun RelayApp(
                             null
                         },
                     )
-                } else if (chatDetailOnTop || agentSubpageOnTop) {
-                    // 紧凑布局下的聊天详情与 Agent 子页（工作区详情、会话详情）均是**整屏全屏**（原型 m-chat、m-workspacedetail 与 m-session-detail 均标记 full:true）。
-                    // 详情页底下不画底部导航栏，避免侵占屏幕空间及误触；详情页退出靠顶栏返回或系统返回键回到看板。
+                } else if (
+                    globalSearchOpen ||
+                    chatDetailOnTop ||
+                    agentSubpageOnTop ||
+                    settingsSubpageOnTop ||
+                    peerDetailOnTop ||
+                    peerCabinetOnTop
+                ) {
+                    // 二级页一律**整屏全屏**（m-chat、m-workspacedetail 与 m-session-detail
+                    // 本就标记 full:true）。规则只有一条：**tab 页是唯一挂底导的层**，详情类
+                    // 全屏、退路是各自的顶栏返回或系统返回键。
+                    // 旧规则是两套并存：聊天详情全屏，而全局搜索/设置子页/节点详情/同事
+                    // 文件柜底下仍挂着一级页的底导 —— 同为「详情」行为却分裂，二级页里
+                    // 底导既误触又暗示「当前屏是页签」，与它的实际层级不符。
                     mobileContent(Modifier.fillMaxSize())
                 } else {
                     CompactScaffold(

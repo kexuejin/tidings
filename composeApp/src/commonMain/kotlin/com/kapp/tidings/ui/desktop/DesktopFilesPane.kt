@@ -6,7 +6,8 @@ import com.kapp.tidings.domain.transferIdDetailLabel
 
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
-import androidx.compose.foundation.clickable
+import androidx.compose.foundation.border
+import com.kapp.tidings.ui.components.PressableSurface
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.BoxWithConstraints
@@ -32,7 +33,6 @@ import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
@@ -59,6 +59,7 @@ import com.kapp.tidings.ui.components.relativeTime
 import com.kapp.tidings.ui.theme.IconSizes
 import com.kapp.tidings.ui.theme.LocalAppSpacing
 import com.kapp.tidings.generated.resources.Res
+import com.kapp.tidings.generated.resources.common_profile_unavailable
 import com.kapp.tidings.generated.resources.action_clear_search
 import com.kapp.tidings.generated.resources.desktop_action_list
 import com.kapp.tidings.generated.resources.desktop_action_refresh
@@ -416,19 +417,23 @@ private fun FileListRow(
     onClick: () -> Unit,
 ) {
     val spacing = LocalAppSpacing.current
-    Surface(
-        // 选中态与原型 `.li[aria-selected="true"]{background:var(--surface);
-        // box-shadow:0 0 0 1px var(--hair)}`（`:690`）同构：白底 + 1px hairline。
-        // `MaterialTheme.shapes.medium` = 12dp，正是 `.li{border-radius:12px}`（`:688`）。
-        color = if (selected) MaterialTheme.colorScheme.surface else Color.Transparent,
-        shape = MaterialTheme.shapes.medium,
-        border = if (selected) {
+    // 选中态与原型 `.li[aria-selected="true"]{background:var(--surface);
+    // box-shadow:0 0 0 1px var(--hair)}`（`:690`）同构：白底 + 1px hairline。
+    // `MaterialTheme.shapes.medium` = 12dp，正是 `.li{border-radius:12px}`（`:688`）。
+    val borderStroke = if (selected) {
             BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant)
         } else {
             null
-        },
-        modifier = Modifier.fillMaxWidth().heightIn(min = FileListRowMinHeight).clickable(onClick = onClick),
-    ) {
+        }
+        PressableSurface(
+            onClick = onClick,
+            color = if (selected) MaterialTheme.colorScheme.surface else Color.Transparent,
+            shape = MaterialTheme.shapes.medium,
+            modifier = Modifier
+                .fillMaxWidth()
+                .heightIn(min = FileListRowMinHeight)
+                .then(if (borderStroke != null) Modifier.border(borderStroke, MaterialTheme.shapes.medium) else Modifier),
+        ) {
         // 已落盘的文件行本身就是拖拽源：按住这一行拖到访达/资源管理器/编辑器就能带走，
         // 语义是复制（startDrag 用 ACTION_COPY）。路径没落地或被删过的时候
         // desktopFileDragSource 会原样返回，不挂任何手势。挂在内容 Row 上（与 R1 一致），
@@ -624,7 +629,7 @@ public fun FileDetailPane(
         }
         Spacer(Modifier.height(LocalAppSpacing.current.sm))
         SectionCard(stringResource(Res.string.desktop_files_info_card)) {
-            FileDetailRow(stringResource(Res.string.desktop_files_row_source), peerId.take(8), monospace = true)
+            FileDetailRow(stringResource(Res.string.desktop_files_row_source), peerTitle.ifBlank { stringResource(Res.string.common_profile_unavailable) }, monospace = false)
             FileDetailRow(stringResource(Res.string.desktop_files_row_direction), if (file.mine) stringResource(Res.string.desktop_files_dir_out) else stringResource(Res.string.desktop_files_dir_in))
             // 内部临时键（乐观插入的 pending-…）不上屏：它不是用户认得出的传输编号。
             transferIdDetailLabel(file.transferId)?.let { shown ->

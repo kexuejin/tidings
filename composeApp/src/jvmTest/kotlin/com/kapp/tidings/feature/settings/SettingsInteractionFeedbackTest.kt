@@ -66,6 +66,27 @@ class SettingsInteractionFeedbackTest {
     }
 
     @Test
+    fun batchScanRangeParsingNormalizesDeduplicatesAndPreservesInvalidTokens() {
+        val input = """
+            192.168.1.100/24
+            192.168.1.200/24, 10.0.0.0/30; 172.16.0.0/16
+            invalid_cidr
+        """.trimIndent()
+        val result = parseBatchScanRanges(input)
+        // 192.168.1.100/24 与 192.168.1.200/24 规范化后同为 192.168.1.0/24，只留一份
+        assertEquals(listOf("192.168.1.0/24", "10.0.0.0/30"), result.valid)
+        // /16 (>1024 主机) 与 invalid_cidr 归入 invalid 列表保留反馈
+        assertEquals(listOf("172.16.0.0/16", "invalid_cidr"), result.invalid)
+    }
+
+    @Test
+    fun batchScanRangeParsingRespectsMaxItemsCap() {
+        val many = (1..60).joinToString("\n") { "10.0.$it.0/24" }
+        val result = parseBatchScanRanges(many, maxItems = 10)
+        assertEquals(10, result.valid.size)
+    }
+
+    @Test
     fun invalidCidrKeepsTheTypedTextAndReportsInline() {
         val text = GuardSourceScan.stripComments(GuardSourceScan.read(conn))
         // 非法分支：只标红，不碰输入框。

@@ -155,4 +155,66 @@ class ShellAccessibilityGuardTest {
         assertFalse(body.contains("nav."), "宽屏壳的返回键改到了 App 的 nav 状态：同一次返回会被消费两次")
         assertFalse(body.contains("controller."), "宽屏壳的返回键改到了 controller 状态（那一条归 App.kt）")
     }
+
+    // ---------------------------------------------------------------- 48dp 命中区下限
+
+    @Test
+    fun theShellEscapeClosesTheSearchPanel() {
+        // 桌面 Esc 的收口点：M3 Dialog/DropdownMenu 各自处理 Esc，壳级自绘的搜索面板
+        // 不会 —— 壳的 onPreviewKeyEvent 必须在 shortcut 判读之前吃掉 Esc（面板开着时）。
+        // 反向验证：删掉 DesktopShell 里的 Esc 分支，这条立刻红。
+        val text = src(desktopShell)
+        assertTrue(
+            text.contains("Key.Escape && searching") ||
+                (text.contains("Key.Escape") && text.contains("DesktopModalLayer.Searching")),
+            "壳级 Esc 没有关搜索面板：自绘浮层缺统一键盘出口",
+        )
+    }
+
+    @Test
+    fun clickingTheActiveConversationCollapsesIt() {
+        // 宽窗侧栏「再点当前会话 = 收起」（对齐上游 #59）：再点一次回到欢迎页，
+        // 草稿留在壳的 draftsByConv 里。反向验证：删掉 DesktopShell onSelect 里的
+        // 相等分支，这条立刻红。
+        val text = src(desktopShell)
+        assertTrue(
+            text.contains("if (id == selectedPeerId) {"),
+            "宽窗侧栏再点当前会话没有收起：onSelect 缺相等分支",
+        )
+    }
+
+    @Test
+    fun cabinetPrimaryTouchTargetsKeepTheInteractiveFloor() {
+        // 文件柜的权限分段（手机上主要的权限入口）与路径面包屑（目录导航唯一入口）
+        // 自身 padding 只撑到 ~26dp/~22dp，拇指常点空 —— 同屏的动作小钮都补了
+        // minimumInteractiveComponentSize，这两处漏网。反向验证：删掉对应
+        // .minimumInteractiveComponentSize()，这条立刻红。
+        val screen = src("composeApp/src/commonMain/kotlin/com/kapp/tidings/feature/cabinet/CabinetScreen.kt")
+        assertTrue(
+            Regex("minimumInteractiveComponentSize[\\s\\S]{0,250}clickable \\{ onSetShareMode\\(m\\) \\}").containsMatchIn(screen),
+            "权限分段控件缺 48dp 命中区（minimumInteractiveComponentSize）",
+        )
+        val peer = src("composeApp/src/commonMain/kotlin/com/kapp/tidings/feature/cabinet/PeerCabinetView.kt")
+        assertTrue(
+            Regex("minimumInteractiveComponentSize[\\s\\S]{0,120}clickable\\(enabled = enabled, onClick = onClick\\)").containsMatchIn(peer),
+            "路径面包屑缺 48dp 命中区（minimumInteractiveComponentSize）",
+        )
+    }
+
+    @Test
+    fun forwardTargetDialogSupportsSearchAndEmptyPrompt() {
+        // 转发与文件拖放目标选择器支持实时搜索过滤与空态提示（对齐上游 #66）。
+        // 会话数量较多时出现搜索框，过滤无结果时给出反馈。
+        // 反向验证：删掉 ForwardTargetDialog 内的 query 或 OutlinedTextField，这条立刻红。
+        val text = src(common)
+        val dialog = GuardSourceScan.bracedBlockAfter(text, "fun ForwardTargetDialog(")
+        assertTrue(
+            dialog.contains("var query by remember") && dialog.contains("OutlinedTextField("),
+            "ForwardTargetDialog 缺实时搜索过滤输入框",
+        )
+        assertTrue(
+            dialog.contains("filtered.isEmpty()") && dialog.contains("hist_search_empty"),
+            "ForwardTargetDialog 缺无搜索匹配时的空态提示",
+        )
+    }
 }

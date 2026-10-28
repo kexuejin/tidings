@@ -4,7 +4,6 @@ package com.kapp.tidings.feature.nodes
 
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
-import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
@@ -16,6 +15,7 @@ import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
+import com.kapp.tidings.ui.components.PressableSurface
 import androidx.compose.material3.minimumInteractiveComponentSize
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
@@ -102,7 +102,9 @@ internal fun NodeRow(
     // 状态由「头像右下角的三色点 + 文字本身（在线/离线/没有回应）」共同表达：颜色是辅助，
     // 文字才是判据（读屏也只读文字）。上一版"三档三色"把颜色压在了文字上。
     val stateColor = MaterialTheme.colorScheme.onSurfaceVariant
-    Surface(
+    PressableSurface(
+        onClick = onOpen ?: {},
+        enabled = onOpen != null,
         color = MaterialTheme.colorScheme.surface,
         // 节点行圆角 = 卡片圆角：原型 `.row{...border-radius:var(--r-card)}`
         // （`prototype/relay.html:147-148`），手机 16px / 桌面窗 12px —— 正好是
@@ -110,18 +112,10 @@ internal fun NodeRow(
         // 原型少 4dp（差集 `m-nodes` 的「radius 只原型{16}」）。
         shape = LocalCardShape.current,
         modifier = Modifier.fillMaxWidth(),
-        shadowElevation = RelayElevations.Card,
     ) {
         Row(
             modifier = Modifier
                 .fillMaxWidth()
-                .then(
-                    if (onOpen != null) {
-                        Modifier.clickable(onClick = onOpen)
-                    } else {
-                        Modifier
-                    },
-                )
                 .padding(horizontal = sp.lg, vertical = sp.md),
             verticalAlignment = Alignment.CenterVertically,
         ) {

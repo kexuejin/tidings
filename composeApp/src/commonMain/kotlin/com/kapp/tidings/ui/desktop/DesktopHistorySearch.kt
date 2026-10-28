@@ -27,12 +27,12 @@ import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material3.HorizontalDivider
-import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.VerticalDivider
+import com.kapp.tidings.ui.components.AppIconButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
@@ -85,7 +85,6 @@ import com.kapp.tidings.generated.resources.r2_shell_hist_keyword
 import com.kapp.tidings.generated.resources.r2_shell_hist_title
 import org.jetbrains.compose.resources.stringResource
 
-import com.kapp.tidings.ui.theme.IconSizes
 import com.kapp.tidings.ui.theme.LocalAppSpacing
 import com.kapp.tidings.domain.model.PeerUi
 import com.kapp.tidings.ui.theme.SurfaceTiers
@@ -208,7 +207,9 @@ public fun DesktopHistorySearchDialog(
                         // `.ibtn{width:34px;height:34px;border-radius:var(--r-ctl);background:var(--surface-2)}`
                         // （`:583`）+ 16px 图标 —— 原型那颗关闭是 **34dp 灰底方块**，
                         // 不是裸 48dp 的 M3 IconButton（帧上原本只有一枚大 ✕）。
-                        IconButton(
+                        AppIconButton(
+                            iconVector = Icons.Default.Close,
+                            contentDescription = stringResource(Res.string.common_close),
                             onClick = onDismiss,
                             modifier = Modifier
                                 .size(34.dp)
@@ -217,13 +218,7 @@ public fun DesktopHistorySearchDialog(
                                     color = SurfaceTiers.Inset,
                                     shape = MaterialTheme.shapes.medium,
                                 ),
-                        ) {
-                            Icon(
-                                imageVector = Icons.Default.Close,
-                                contentDescription = stringResource(Res.string.common_close),
-                                modifier = Modifier.size(IconSizes.Label),
-                            )
-                        }
+                        )
                     }
                     HorizontalDivider()
 

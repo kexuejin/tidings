@@ -9,8 +9,10 @@ import androidx.compose.foundation.layout.ColumnScope
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.RowScope
 import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
+import com.kapp.tidings.platform.PlatformScrollbar
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.rememberScrollState
@@ -126,22 +128,33 @@ internal fun SettingsPageScaffold(
             }
         }
 
-        Column(
+        val scrollState = rememberScrollState()
+        Box(
             modifier = Modifier
                 .weight(1f)
-                // 与 SettingsScreen 同一口径（原型 `.pad.set` 的 640，:1045）。
-                // 放 scroll 之前，理由同那里。
-                .centerCapped(ContentWidths.Settings)
-                .verticalScroll(rememberScrollState())
-                .padding(
-                    start = LocalAppSpacing.current.lg,
-                    top = LocalAppSpacing.current.lg14,
-                    end = LocalAppSpacing.current.lg,
-                    bottom = LocalAppSpacing.current.lg,
-                ),
-            verticalArrangement = Arrangement.spacedBy(LocalAppSpacing.current.md),
-            content = content,
-        )
+                .fillMaxWidth(),
+        ) {
+            Column(
+                modifier = Modifier
+                    .fillMaxSize()
+                    // 与 SettingsScreen 同一口径（原型 `.pad.set` 的 640，:1045）。
+                    // 放 scroll 之前，理由同那里。
+                    .centerCapped(ContentWidths.Settings)
+                    .verticalScroll(scrollState)
+                    .padding(
+                        start = LocalAppSpacing.current.lg,
+                        top = LocalAppSpacing.current.lg14,
+                        end = LocalAppSpacing.current.lg,
+                        bottom = LocalAppSpacing.current.lg,
+                    ),
+                verticalArrangement = Arrangement.spacedBy(LocalAppSpacing.current.md),
+                content = content,
+            )
+            PlatformScrollbar(
+                state = scrollState,
+                modifier = Modifier.align(Alignment.CenterEnd).fillMaxHeight(),
+            )
+        }
     }
 }
 

@@ -4,7 +4,7 @@ package com.kapp.tidings.ui.desktop
 
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
-import androidx.compose.foundation.clickable
+import androidx.compose.foundation.border
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -19,6 +19,8 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
+import com.kapp.tidings.platform.PlatformScrollbar
+import com.kapp.tidings.ui.components.PressableSurface
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
@@ -249,10 +251,10 @@ public fun DesktopSettingsSidebar(
                     } else {
                         null
                     }
-                    Surface(
+                    PressableSurface(
+                        onClick = { onSelect(nav) },
                         color = bg,
                         shape = RelayShapes.medium,
-                        border = stroke,
                         modifier = Modifier
                             .fillMaxWidth()
                             // 6 / 8 / 8 全部落在档上（`AppSpacing` 的 sm6 / sm），必须消费 token。
@@ -260,7 +262,7 @@ public fun DesktopSettingsSidebar(
                             // 内层横向 8px 与 gap 8px 是逐字真值，外层 6dp 是条目外边距（snap 1dp，政策②）。
                             // 值一字未改 ⇒ 渲染逐字节不变。
                             .padding(horizontal = sp.sm6)
-                            .clickable { onSelect(nav) },
+                            .then(if (stroke != null) Modifier.border(stroke, RelayShapes.medium) else Modifier),
                     ) {
                         Row(
                             modifier = Modifier
@@ -366,13 +368,15 @@ public fun DesktopPrefsPanel(
     modifier: Modifier = Modifier,
 ) {
     val sp = LocalAppSpacing.current
-    Column(
-        modifier = modifier
-            .fillMaxSize()
-            .verticalScroll(rememberScrollState())
-            .padding(sp.lg),
-        verticalArrangement = Arrangement.spacedBy(sp.md),
-    ) {
+    val scrollState = rememberScrollState()
+    Box(modifier = modifier.fillMaxSize()) {
+        Column(
+            modifier = Modifier
+                .fillMaxSize()
+                .verticalScroll(scrollState)
+                .padding(sp.lg),
+            verticalArrangement = Arrangement.spacedBy(sp.md),
+        ) {
         Column {
             Text(
                 text = stringResource(Res.string.desk_nav_desktop),
@@ -477,6 +481,11 @@ public fun DesktopPrefsPanel(
                 }
             }
         }
+        }
+        PlatformScrollbar(
+            state = scrollState,
+            modifier = Modifier.align(Alignment.CenterEnd).fillMaxHeight(),
+        )
     }
 }
 

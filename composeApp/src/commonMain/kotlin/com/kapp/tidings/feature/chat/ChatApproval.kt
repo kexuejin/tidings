@@ -5,7 +5,6 @@ package com.kapp.tidings.feature.chat
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Column
-import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
@@ -14,7 +13,8 @@ import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
-import androidx.compose.material3.TextButton
+import com.kapp.tidings.ui.components.AppButtonSize
+import com.kapp.tidings.ui.components.AppTextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.produceState
@@ -35,6 +35,7 @@ import com.kapp.tidings.generated.resources.Res
 import com.kapp.tidings.platform.RelayAudioPlayback
 import com.kapp.tidings.platform.decodeImageBytes
 import com.kapp.tidings.ui.theme.LocalAppSpacing
+import com.kapp.tidings.ui.theme.RelayShapes
 import kotlinx.coroutines.withContext
 import org.jetbrains.compose.resources.DrawableResource
 import org.jetbrains.compose.resources.stringResource
@@ -83,16 +84,21 @@ internal fun InlineImagePreview(path: String, onClick: (() -> Unit)? = null) {
     val longest = maxOf(naturalWidth, naturalHeight)
     val scale = if (longest > MAX_PREVIEW_SIDE) MAX_PREVIEW_SIDE / longest else 1f
 
-    Image(
-        bitmap = image,
-        contentDescription = null,
-        contentScale = ContentScale.Fit,
+    Surface(
+        shape = RelayShapes.medium,
+        border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant),
         modifier = Modifier
             .padding(top = sp.sm6)
             .size(naturalWidth * scale, naturalHeight * scale)
-            .clip(MaterialTheme.shapes.small)
+            .clip(RelayShapes.medium)
             .then(if (onClick != null) Modifier.clickable { onClick() } else Modifier),
-    )
+    ) {
+        Image(
+            bitmap = image,
+            contentDescription = null,
+            contentScale = ContentScale.Fit,
+        )
+    }
 }
 
 /**
@@ -110,16 +116,12 @@ internal fun InlineAudioPreview(transferId: String, path: String) {
     val sp = LocalAppSpacing.current
     var unsupported by remember(transferId) { mutableStateOf(false) }
     Column {
-        TextButton(
+        AppTextButton(
+            text = stringResource(Res.string.file_play_audio),
             onClick = { unsupported = !RelayAudioPlayback.play(path) },
-            contentPadding = PaddingValues(),
+            size = AppButtonSize.Small,
             modifier = Modifier.padding(top = sp.xxs),
-        ) {
-            Text(
-                text = stringResource(Res.string.file_play_audio),
-                style = MaterialTheme.typography.labelSmall,
-            )
-        }
+        )
         if (unsupported) {
             Text(
                 text = stringResource(Res.string.file_audio_unsupported),

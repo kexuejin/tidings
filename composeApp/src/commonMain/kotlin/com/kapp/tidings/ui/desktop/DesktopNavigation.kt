@@ -3,7 +3,10 @@
 package com.kapp.tidings.ui.desktop
 
 import androidx.compose.foundation.background
-import androidx.compose.foundation.clickable
+import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.hapticfeedback.HapticFeedbackType
+import androidx.compose.ui.platform.LocalHapticFeedback
+import com.kapp.tidings.ui.components.PressableSurface
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -150,17 +153,26 @@ public fun RailButton(
     badge: Int = 0,
 ) {
     val tint = if (selected) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant
-    Column(
-        Modifier
-            .clickable(onClick = onClick, role = Role.Tab)
+    val haptics = LocalHapticFeedback.current
+    PressableSurface(
+        onClick = {
+            haptics.performHapticFeedback(HapticFeedbackType.TextHandleMove)
+            onClick()
+        },
+        role = Role.Tab,
+        color = Color.Transparent,
+        modifier = Modifier
             .semantics(mergeDescendants = true) { this.selected = selected }
-            .padding(vertical = LocalAppSpacing.current.md10)
             .width(DesktopMetrics.MEDIUM_RAIL_PX.dp),
-        horizontalAlignment = Alignment.CenterHorizontally,
     ) {
-        NavIconWithBadge(icon = icon, label = label, tint = tint, badge = badge)
-        Spacer(Modifier.height(3.dp))
-        Text(label, style = MaterialTheme.typography.labelSmall, color = tint)
+        Column(
+            Modifier.padding(vertical = LocalAppSpacing.current.md10),
+            horizontalAlignment = Alignment.CenterHorizontally,
+        ) {
+            NavIconWithBadge(icon = icon, label = label, tint = tint, badge = badge)
+            Spacer(Modifier.height(3.dp))
+            Text(label, style = MaterialTheme.typography.labelSmall, color = tint)
+        }
     }
 }
 
@@ -171,6 +183,7 @@ public fun CompactNavigationBar(
     onViewChange: (DesktopView) -> Unit,
     badges: Map<DesktopView, Int> = emptyMap(),
 ) {
+    val haptics = LocalHapticFeedback.current
     Column(Modifier.fillMaxWidth()) {
         TitleBarDivider()
         Surface(color = MaterialTheme.colorScheme.surface) {
@@ -187,16 +200,22 @@ public fun CompactNavigationBar(
                     val selected = item == view
                     val tint = if (selected) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant
                     val label = stringResource(desktopViewLabel(item))
-                    Column(
-                        Modifier
-                            // 与 [RailButton] 同一套语义：角色 Tab + 选中态 + 合并后代。
-                            .clickable(onClick = { onViewChange(item) }, role = Role.Tab)
-                            .semantics(mergeDescendants = true) { this.selected = selected }
-                            .padding(horizontal = LocalAppSpacing.current.lg, vertical = LocalAppSpacing.current.xs),
-                        horizontalAlignment = Alignment.CenterHorizontally,
+                    PressableSurface(
+                        onClick = {
+                            haptics.performHapticFeedback(HapticFeedbackType.TextHandleMove)
+                            onViewChange(item)
+                        },
+                        role = Role.Tab,
+                        color = Color.Transparent,
+                        modifier = Modifier.semantics(mergeDescendants = true) { this.selected = selected },
                     ) {
-                        NavIconWithBadge(icon = desktopViewIcon(item), label = label, tint = tint, badge = badges[item] ?: 0)
-                        Text(label, style = MaterialTheme.typography.labelSmall, color = tint)
+                        Column(
+                            Modifier.padding(horizontal = LocalAppSpacing.current.lg, vertical = LocalAppSpacing.current.xs),
+                            horizontalAlignment = Alignment.CenterHorizontally,
+                        ) {
+                            NavIconWithBadge(icon = desktopViewIcon(item), label = label, tint = tint, badge = badges[item] ?: 0)
+                            Text(label, style = MaterialTheme.typography.labelSmall, color = tint)
+                        }
                     }
                 }
             }

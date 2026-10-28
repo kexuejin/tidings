@@ -19,6 +19,7 @@ import androidx.compose.ui.graphics.Shape
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.hapticfeedback.HapticFeedbackType
 import androidx.compose.ui.platform.LocalHapticFeedback
+import androidx.compose.ui.semantics.Role
 import androidx.compose.foundation.background
 
 /**
@@ -82,6 +83,7 @@ fun PressableSurface(
     color: Color = Color.Unspecified,
     pressScale: Float = PressFeedback.PRESS_SCALE,
     haptic: Boolean = false,
+    role: Role? = null,
     content: @Composable () -> Unit,
 ) {
     val interactionSource = remember { MutableInteractionSource() }
@@ -113,6 +115,7 @@ fun PressableSurface(
                 interactionSource = interactionSource,
                 indication = null,
                 enabled = enabled,
+                role = role,
                 onClick = onClick,
             ),
     ) {

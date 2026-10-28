@@ -28,16 +28,17 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.outlined.FileDownload
 import androidx.compose.material.icons.outlined.FileUpload
 import androidx.compose.material.icons.automirrored.outlined.InsertDriveFile
-import androidx.compose.material3.Button
-import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
-import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Surface
 import androidx.compose.material3.minimumInteractiveComponentSize
 import androidx.compose.material3.Text
+import com.kapp.tidings.ui.components.AppButton
+import com.kapp.tidings.ui.components.AppIconButton
+import com.kapp.tidings.ui.components.AppOutlinedButton
+import com.kapp.tidings.generated.resources.action_back
+import com.kapp.tidings.generated.resources.common_profile_unavailable
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -157,7 +158,9 @@ internal fun PeerCabinetView(
 ) {
     val cabinet = state.cabinet
     val peer = state.peer(cabinet.activePeerId)
-    val peerName = peer?.nick ?: cabinet.activePeerId.orEmpty().take(8)
+    val peerName = peer?.displayName
+        ?: peer?.nick
+        ?: stringResource(Res.string.common_profile_unavailable)
     val canUpload = cabinet.currentPerm == "write" &&
         onUploadToCabinet != null &&
         cabinet.activePeerId != null
@@ -172,16 +175,17 @@ internal fun PeerCabinetView(
             verticalAlignment = Alignment.CenterVertically,
             horizontalArrangement = Arrangement.spacedBy(LocalAppSpacing.current.md10),
         ) {
-            if (onBack != null) IconButton(onClick = onBack) {
+            if (onBack != null) {
                 // 原型顶栏的返回键是 `topbar(..., back='m-cabinet', ...)` 画出来的
                 // `ic('back')`，即 `i-back`（`prototype/relay.html:1558`，一条 stroke 细
                 // chevron）。上一版用 M3 `Icons.AutoMirrored.Outlined.ArrowBack` —— 那是
                 // Material 的长尾箭头，笔画更重、尾巴更长，并排图里一眼能看出不是同一个字形。
                 // 仓里的 `ic_arrow_back.xml`（`M15 5 8 12l7 7`，stroke 1.7）与原型同源，
                 // 同仓先例：`ui/components/TopBars.kt`、`feature/chat/ChatHeader.kt`。
-                Icon(
-                    painterResource(Res.drawable.ic_arrow_back),
-                    contentDescription = null,
+                AppIconButton(
+                    icon = Res.drawable.ic_arrow_back,
+                    contentDescription = stringResource(Res.string.action_back),
+                    onClick = onBack,
                 )
             }
             PeerHeadAvatar(name = peerName, avatar = peer?.avatar ?: -1, online = peer?.online == true)
@@ -623,9 +627,7 @@ private fun PeerHeadAvatar(name: String, avatar: Int, online: Boolean) {
                 // （`peerName` 来自 `PeerUi.displayName`，链路末端已经回落到 host/ip/nodeId，
                 // `RelayUiState.kt:89`），所以这里放一个**非 CJK** 的占位，而不是为一条
                 // 不可达分支新增中文资源；`cjkLiteralGate` 的基线里 `Common.kt` 只留了 1 条
-                // （那条 CJK 字面量 `"茶"`），本文件不在基线里，多一条就是新增违规。
-                // 这里原本写的是 `Common.kt` 的行号，而 `Common` 一加 import 行号就整体后移、
-                // 引用立刻指向一个孤立括号 —— 门禁 `:staleCommentRefGate` 正是为这种腐坏设的。
+                // `"茶"`（`PeerAvatar`），本文件不在基线里，多一条就是新增违规。
                 name.take(1).uppercase().ifBlank { "?" },
                 // 原型 `.hav{font-size:14px;font-weight:700}`：14sp 用排版角色取，
                 // 字重覆写成 700 —— 不写裸 `14.sp`，否则字号就绕过了唯一权威源。
@@ -678,7 +680,10 @@ private fun CrumbSeg(
         else -> MaterialTheme.colorScheme.outline
     }
     Row(
-        Modifier.clip(MaterialTheme.shapes.small)
+        // 面包屑是目录导航的唯一入口，命中区抬到 48dp 下限（原样只有 ~22dp）；
+        // 视觉不变、内容在扩大热区内居中，与同屏的动作小钮同一纪律。
+        Modifier.minimumInteractiveComponentSize()
+            .clip(MaterialTheme.shapes.small)
             .clickable(enabled = enabled, onClick = onClick)
             .padding(horizontal = 7.dp, vertical = 3.dp),
         verticalAlignment = Alignment.CenterVertically,
@@ -753,23 +758,20 @@ private fun SmallButton(
     }
     // 命中区 48dp（视觉高度不动）：底栏这几颗是触屏上唯一的动作入口。
     if (primary) {
-        Button(
+        AppButton(
+            text = text,
             onClick = onClick,
-            modifier = Modifier.height(smallButtonHeight()).minimumInteractiveComponentSize(),
-            shape = MaterialTheme.shapes.medium,
-            contentPadding = contentPadding,
             enabled = enabled,
-        ) { label() }
+            size = AppButtonSize.Small,
+            leadingIconVector = icon,
+        )
     } else {
-        OutlinedButton(
+        AppOutlinedButton(
+            text = text,
             onClick = onClick,
-            modifier = Modifier.height(smallButtonHeight()).minimumInteractiveComponentSize(),
-            shape = MaterialTheme.shapes.medium,
-            contentPadding = contentPadding,
             enabled = enabled,
-            colors = ButtonDefaults.outlinedButtonColors(
-                contentColor = MaterialTheme.colorScheme.onSurface,
-            ),
-        ) { label() }
+            size = AppButtonSize.Small,
+            leadingIconVector = icon,
+        )
     }
 }

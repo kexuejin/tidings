@@ -25,6 +25,7 @@ import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
+import androidx.compose.material3.minimumInteractiveComponentSize
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -88,6 +89,7 @@ import com.kapp.tidings.generated.resources.cabinet_recent_title
 import com.kapp.tidings.generated.resources.cabinet_share_dir_title
 import com.kapp.tidings.generated.resources.cabinet_stop_share
 import com.kapp.tidings.generated.resources.common_cancel
+import com.kapp.tidings.generated.resources.common_profile_unavailable
 import com.kapp.tidings.generated.resources.ic_close
 import com.kapp.tidings.generated.resources.ic_external
 import com.kapp.tidings.generated.resources.ic_folder
@@ -553,6 +555,10 @@ internal fun MineCabinetView(
                                     fontWeight = if (selected) FontWeight.SemiBold else FontWeight.Medium,
                                     color = if (selected) MaterialTheme.colorScheme.onSurface else MaterialTheme.colorScheme.onSurfaceVariant,
                                     modifier = Modifier
+                                        // 手机上这是主要的权限入口，命中区必须到 48dp 下限
+                                        // （视觉尺寸不变，内容在扩大的热区里居中）—— 与节点页
+                                        // 小按钮、同事柜动作钮同一条无障碍纪律。
+                                        .minimumInteractiveComponentSize()
                                         .clip(MaterialTheme.shapes.small)
                                         .background(if (selected) MaterialTheme.colorScheme.surface else Color.Transparent)
                                         .clickable { onSetShareMode(m) }
@@ -593,7 +599,9 @@ internal fun MineCabinetView(
                     )
                     Spacer(Modifier.height(LocalAppSpacing.current.sm6))
                     settings.shareGrants.forEach { grant ->
-                        val nick = state.humanPeers.firstOrNull { it.nodeId == grant.nodeId }?.nick ?: grant.nodeId.take(8)
+                        val nick = state.humanPeers.firstOrNull { it.nodeId == grant.nodeId }?.nick
+                            ?: state.peer(grant.nodeId)?.displayName
+                            ?: stringResource(Res.string.common_profile_unavailable)
                         // 原型在这一行挂了高亮底 `.cbfpen` + `style="background:var(--primary-c)"`
                         // （`prototype/relay.html:4107`，浅色 `#B7E4C7`）。原型那处是**硬编码昵称**
                         // `${g.nick==='老周'?' style="background:var(--primary-c)"':''}`，代码里

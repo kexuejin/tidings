@@ -19,10 +19,12 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
+import kotlinx.coroutines.delay
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.input.pointer.pointerInput
@@ -270,6 +272,12 @@ fun GroupInfoDialog(
                                 // 收进「复制群 ID」次级动作 —— 需要对 ID 的人（报障、对账）
                                 // 仍然一键可取，不关心的人不再被迫看一串十六进制。
                                 var copied by remember { mutableStateOf(false) }
+                                LaunchedEffect(copied) {
+                                    if (copied) {
+                                        delay(2_000)
+                                        copied = false
+                                    }
+                                }
                                 val clipboard = LocalClipboardManager.current
                                 AppTextButton(
                                     text = stringResource(

@@ -2,7 +2,6 @@
 
 package com.kapp.tidings.desktop.capture
 
-import org.jetbrains.compose.resources.painterResource
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
@@ -20,13 +19,10 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.outlined.Undo
 import androidx.compose.material3.BasicAlertDialog
 import androidx.compose.material3.ExperimentalMaterial3Api
-import androidx.compose.material3.Icon
-import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
-import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
@@ -57,7 +53,6 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.rememberTextMeasurer
 import androidx.compose.ui.unit.IntOffset
 import androidx.compose.ui.unit.dp
-import com.kapp.tidings.ui.theme.IconSizes
 import com.kapp.tidings.ui.theme.LocalAppSpacing
 import androidx.compose.ui.unit.sp
 import com.kapp.tidings.generated.resources.Res
@@ -79,6 +74,9 @@ import com.kapp.tidings.generated.resources.ic_text_select
 import com.kapp.tidings.generated.resources.ic_capture_arrow
 import com.kapp.tidings.generated.resources.ic_capture_mosaic
 import com.kapp.tidings.ui.theme.RelayPrimary
+import com.kapp.tidings.ui.components.AppButtonTone
+import com.kapp.tidings.ui.components.AppIconButton
+import com.kapp.tidings.ui.components.AppTextButton
 import org.jetbrains.compose.resources.stringResource
 import java.awt.BasicStroke
 import java.awt.Graphics2D
@@ -386,61 +384,41 @@ fun CaptureOverlayView(
                     modifier = Modifier.padding(horizontal = LocalAppSpacing.current.sm6, vertical = LocalAppSpacing.current.xxs),
                     verticalAlignment = Alignment.CenterVertically,
                 ) {
-                    IconButton(
+                    AppIconButton(
+                        icon = Res.drawable.ic_scissors,
+                        contentDescription = stringResource(Res.string.capture_rect_tool),
                         onClick = { currentTool = if (currentTool == CaptureTool.Rect) CaptureTool.Select else CaptureTool.Rect },
-                        modifier = Modifier.size(36.dp)
-                    ) {
-                        Icon(
-                            painterResource(Res.drawable.ic_scissors),
-                            contentDescription = stringResource(Res.string.capture_rect_tool),
-                            tint = if (currentTool == CaptureTool.Rect) RelayPrimary else MaterialTheme.colorScheme.onSurface,
-                            modifier = Modifier.size(IconSizes.Body),
-                        )
-                    }
-                    IconButton(
+                        modifier = Modifier.size(36.dp),
+                        tone = if (currentTool == CaptureTool.Rect) AppButtonTone.Primary else AppButtonTone.Neutral,
+                    )
+                    AppIconButton(
+                        icon = Res.drawable.ic_capture_arrow,
+                        contentDescription = stringResource(Res.string.capture_arrow_tool),
                         onClick = { currentTool = if (currentTool == CaptureTool.Arrow) CaptureTool.Select else CaptureTool.Arrow },
-                        modifier = Modifier.size(36.dp)
-                    ) {
-                        Icon(
-                            painterResource(Res.drawable.ic_capture_arrow),
-                            contentDescription = stringResource(Res.string.capture_arrow_tool),
-                            tint = if (currentTool == CaptureTool.Arrow) RelayPrimary else MaterialTheme.colorScheme.onSurface,
-                            modifier = Modifier.size(IconSizes.Title),
-                        )
-                    }
-                    IconButton(
+                        modifier = Modifier.size(36.dp),
+                        tone = if (currentTool == CaptureTool.Arrow) AppButtonTone.Primary else AppButtonTone.Neutral,
+                    )
+                    AppIconButton(
+                        icon = Res.drawable.ic_text_select,
+                        contentDescription = stringResource(Res.string.capture_text_tool),
                         onClick = { currentTool = if (currentTool == CaptureTool.Text) CaptureTool.Select else CaptureTool.Text },
-                        modifier = Modifier.size(36.dp)
-                    ) {
-                        Icon(
-                            painterResource(Res.drawable.ic_text_select),
-                            contentDescription = stringResource(Res.string.capture_text_tool),
-                            tint = if (currentTool == CaptureTool.Text) RelayPrimary else MaterialTheme.colorScheme.onSurface,
-                            modifier = Modifier.size(IconSizes.Body),
-                        )
-                    }
-                    IconButton(
+                        modifier = Modifier.size(36.dp),
+                        tone = if (currentTool == CaptureTool.Text) AppButtonTone.Primary else AppButtonTone.Neutral,
+                    )
+                    AppIconButton(
+                        icon = Res.drawable.ic_capture_mosaic,
+                        contentDescription = stringResource(Res.string.capture_mosaic_tool),
                         onClick = { currentTool = if (currentTool == CaptureTool.Mosaic) CaptureTool.Select else CaptureTool.Mosaic },
-                        modifier = Modifier.size(36.dp)
-                    ) {
-                        Icon(
-                            painterResource(Res.drawable.ic_capture_mosaic),
-                            contentDescription = stringResource(Res.string.capture_mosaic_tool),
-                            tint = if (currentTool == CaptureTool.Mosaic) RelayPrimary else MaterialTheme.colorScheme.onSurface,
-                            modifier = Modifier.size(IconSizes.Body),
-                        )
-                    }
+                        modifier = Modifier.size(36.dp),
+                        tone = if (currentTool == CaptureTool.Mosaic) AppButtonTone.Primary else AppButtonTone.Neutral,
+                    )
                     if (annotations.isNotEmpty()) {
-                        IconButton(
+                        AppIconButton(
+                            iconVector = Icons.AutoMirrored.Outlined.Undo,
+                            contentDescription = stringResource(Res.string.capture_undo),
                             onClick = { annotations.removeLastOrNull() },
-                            modifier = Modifier.size(36.dp)
-                        ) {
-                            Icon(
-                                Icons.AutoMirrored.Outlined.Undo,
-                                contentDescription = stringResource(Res.string.capture_undo),
-                                modifier = Modifier.size(IconSizes.Body),
-                            )
-                        }
+                            modifier = Modifier.size(36.dp),
+                        )
                     }
 
                     Box(
@@ -450,44 +428,32 @@ fun CaptureOverlayView(
                             .background(MaterialTheme.colorScheme.outlineVariant)
                     )
 
-                    IconButton(
+                    AppIconButton(
+                        icon = Res.drawable.ic_close,
+                        contentDescription = stringResource(Res.string.capture_cancel),
                         onClick = onCancel,
-                        modifier = Modifier.size(36.dp)
-                    ) {
-                        Icon(
-                            painterResource(Res.drawable.ic_close),
-                            contentDescription = stringResource(Res.string.capture_cancel),
-                            tint = MaterialTheme.colorScheme.error,
-                            modifier = Modifier.size(IconSizes.Body),
-                        )
-                    }
-                    IconButton(
+                        modifier = Modifier.size(36.dp),
+                        tone = AppButtonTone.Danger,
+                    )
+                    AppIconButton(
+                        icon = Res.drawable.ic_copy,
+                        contentDescription = stringResource(Res.string.capture_copy),
                         onClick = {
                             val target = buildAnnotatedCrop() ?: rawImage
                             onCopy(target)
                         },
-                        modifier = Modifier.size(36.dp)
-                    ) {
-                        Icon(
-                            painterResource(Res.drawable.ic_copy),
-                            contentDescription = stringResource(Res.string.capture_copy),
-                            modifier = Modifier.size(IconSizes.Body),
-                        )
-                    }
-                    IconButton(
+                        modifier = Modifier.size(36.dp),
+                    )
+                    AppIconButton(
+                        icon = Res.drawable.ic_check_double,
+                        contentDescription = stringResource(Res.string.capture_send),
                         onClick = {
                             val target = buildAnnotatedCrop() ?: rawImage
                             onConfirm(target)
                         },
-                        modifier = Modifier.size(36.dp)
-                    ) {
-                        Icon(
-                            painterResource(Res.drawable.ic_check_double),
-                            contentDescription = stringResource(Res.string.capture_send),
-                            tint = RelayPrimary,
-                            modifier = Modifier.size(IconSizes.Title),
-                        )
-                    }
+                        modifier = Modifier.size(36.dp),
+                        tone = AppButtonTone.Primary,
+                    )
                 }
             }
         }
@@ -517,16 +483,15 @@ fun CaptureOverlayView(
                                 .weight(1f)
                                 .focusRequester(textFocusRequester)
                         )
-                        TextButton(
+                        AppTextButton(
+                            text = stringResource(Res.string.common_confirm),
                             onClick = {
                                 if (pendingTextValue.isNotBlank()) {
                                     annotations.add(AnnotationItem.TextAnn(pos, pendingTextValue))
                                 }
                                 textInputPos = null
-                            }
-                        ) {
-                            Text(stringResource(Res.string.common_confirm))
-                        }
+                            },
+                        )
                     }
                 }
             }
