@@ -6,11 +6,20 @@
 # 而"记得跑"不是门禁，是纪律。截图门禁尤其如此 —— 它挡的是"改了界面没重录参考图"，
 # 恰恰是最容易被本地增量缓存掩盖的一类回归。
 #
-# 跑的就是 README:164-166 那七条，一个字都不多：
-#   :core:allTests :composeApp:allTests :desktopApp:test :agentNode:test
-#   :desktopApp:compileKotlin :cjkLiteralGate
+# 跑的就是 AGENTS.md §1 的两份清单（测试七条 + 门禁十条），一个字都不多。
 #
-# 截图门禁（:androidApp:validateDebugScreenshotTest）**不在 CI 里跑**：参考图按 .gitignore:44
+# **三份清单必须同步**：AGENTS.md §1 / README「质量门禁与验证」/ 本文件。
+# 它们曾经发散过：README 写「五个模块」漏掉 :app:jvmTest 与 :cli:test（还声称"与
+# AGENTS.md §1 同一口径"），CI 又照 README 抄了一遍，于是 :cli（领域层零 Compose 的
+# 可执行验收物）和 :domainComposeFreeGate（守那条边界的门禁）长期不在 CI 里跑。
+# 对账命令：grep -n 'Gate\|jvmTest\|cli:test' AGENTS.md README.md .github/workflows/ci.yml
+#
+# 依赖 luciola 原生库的用例（:core:jvmTest 里 8 个类）**没有原生库时自动跳过**：
+# 走 LuciolaNativeGuard，没配 TIDINGS_LUCIOLA_NATIVE 就 Assume 跳过并打印指引，
+# 不会把「这台机器没装引擎」伪装成代码失败；配了却用不了则会响亮失败。
+#
+# 截图门禁（:androidApp:validateDebugScreenshotTest）**不在 CI 里跑**：参考图按 .gitignore 里
+# 「截图测试基准图」那一段
 # 由本机生成、不入库，全新检出上没有参考图，跑了只会报「234 张都是新增」。它是本地门禁，
 # 命令与判据见 AGENTS.md §1。
 # 外加三条注释门禁，都来自 `docs/relay-comment-audit.md` §4 的政策 ——
@@ -31,7 +40,7 @@
 # （check-render / check-contrast / check-refs / shoot-relay --verify-only），
 # 2026-10-15 起接在本文件末尾。它们挡的是"稿子改了但验收图没重拍"这一整类。
 #
-# 不需要设备或模拟器：截图测试在宿主 JVM 上渲染 Compose 预览（README:171）。
+# 不需要设备或模拟器：截图测试在宿主 JVM 上渲染 Compose 预览（见 README「质量门禁与验证」）。
 # 也不需要 -PrelayMirror=aliyun —— 那个开关是给连不上 dl.google.com 的开发机用的，
 # GitHub 的 runner 连得上官方源。
 #
@@ -61,7 +70,7 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      # README:150-151 钉的是 JDK 21（本地是 /opt/homebrew/opt/openjdk@21）。
+      # JDK 21 与 README「构建」一节同源（本地是 /opt/homebrew/opt/openjdk@21）。
       - uses: actions/setup-java@v4
         with:
           distribution: temurin
@@ -89,24 +98,30 @@ jobs:
       - name: 门禁任务链（七条 + 设计契约三条）
         run: |
           chmod +x ./gradlew
-          # --no-build-cache：判"干净"就不能吃缓存（README:168-169）。
+          # --no-build-cache：判"干净"就不能吃缓存（README「质量门禁与验证」有说明）。
           # 这里不写 --rerun-tasks：CI 每次都是全新检出，本来就没有增量状态，
           # 加它只是让同样的活重跑一遍。
           # --max-workers=1：六个模块的测试 JVM 并行时，异步用例会互相饿死 —— 实测每轮都有
           # 1-2 条「单跑恒绿、全量必红」的红（旋转在 UdpTransportBroadcast / GroupText /
           # TransferPeerCancel / FileMessageStore 之间），串行跑一次 3m45s 全绿。
           ./gradlew \
-            :core:allTests \
-            :composeApp:allTests \
-            :desktopApp:test \
+            :core:jvmTest \
+            :app:jvmTest \
+            :cli:test \
+            :composeApp:jvmTest \
+            :composeApp:testAndroidHostTest \
             :agentNode:test \
-            :desktopApp:compileKotlin \
+            :desktopApp:test \
             :cjkLiteralGate \
-            :staleCommentRefGate \
             :constructionTraceGate \
+            :staleCommentRefGate \
+            :domainComposeFreeGate \
+            :envDependentTestGate \
             :designSpecDrift \
             :designTokenUsageGate \
             :designStateSlotGate \
+            :designLocaleParityGate \
+            :jlinkModulesGate \
             --no-build-cache \
             --max-workers=1 \
             --console=plain \

@@ -145,14 +145,16 @@ open Tidings.xcodeproj
 Tidings enforces strict engineering standards with automated verification gates. Before opening a Pull Request, verify that the **complete** pipeline passes locally — this list matches [AGENTS.md](AGENTS.md) §1, which is the authoritative note for anyone changing code here:
 
 ```bash
-# Tests (five modules)
-./gradlew :core:jvmTest :composeApp:jvmTest :composeApp:testAndroidHostTest \
-          :agentNode:test :desktopApp:test --continue
+# Tests (seven tasks / six modules)
+./gradlew :core:jvmTest :app:jvmTest :cli:test :composeApp:jvmTest \
+          :composeApp:testAndroidHostTest :agentNode:test :desktopApp:test --continue \
+          --max-workers=1
 
 # Gates (all required)
 ./gradlew :cjkLiteralGate :constructionTraceGate :staleCommentRefGate \
-          :designSpecDrift :designTokenUsageGate :designStateSlotGate \
-          :designLocaleParityGate :jlinkModulesGate --continue
+          :domainComposeFreeGate :envDependentTestGate :designSpecDrift \
+          :designTokenUsageGate :designStateSlotGate :designLocaleParityGate \
+          :jlinkModulesGate --continue
 python3 tools/unused-imports.py --check
 ```
 

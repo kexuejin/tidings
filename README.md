@@ -165,18 +165,23 @@ open Tidings.xcodeproj
 [AGENTS.md](AGENTS.md) §1 同一口径（那边是改代码时的权威说明）：
 
 ```bash
-# 测试（五个模块）
-./gradlew :core:jvmTest :composeApp:jvmTest :composeApp:testAndroidHostTest \
-          :agentNode:test :desktopApp:test --continue
+# 测试（七个任务 / 六个模块）
+./gradlew :core:jvmTest :app:jvmTest :cli:test :composeApp:jvmTest \
+          :composeApp:testAndroidHostTest :agentNode:test :desktopApp:test --continue \
+          --max-workers=1
 
 # 门禁（缺一不可）
 ./gradlew :cjkLiteralGate :constructionTraceGate :staleCommentRefGate \
-          :designSpecDrift :designTokenUsageGate :designStateSlotGate \
-          :designLocaleParityGate :jlinkModulesGate --continue
+          :domainComposeFreeGate :envDependentTestGate :designSpecDrift \
+          :designTokenUsageGate :designStateSlotGate :designLocaleParityGate \
+          :jlinkModulesGate --continue
 python3 tools/unused-imports.py --check
 ```
 
 > **加 `--continue`**：不加的话第一个红就停，你看到的「绿」可能只是没跑到。
+> **判「这批能不能交」时加 `--max-workers=1`**：六个模块的测试 JVM 并行时，异步用例会
+> 互相饿死（表现为「每轮换一条红、单跑恒绿」）。
+> `:cli:test` 不是重复劳动 —— 它是「领域层真的能脱离 Compose」的可执行验收物。
 
 动了 UI / 设计 token / 截图夹具，还要跑 `designScreenDiffGate`、`designIconGate`、
 `designConvergeGate`、`designFormPairingGate`、`designPreviewPairingGate`、
