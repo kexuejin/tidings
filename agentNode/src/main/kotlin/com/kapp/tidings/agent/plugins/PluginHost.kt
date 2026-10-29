@@ -79,34 +79,42 @@ class PluginHost(
         seenIds: MutableSet<String>,
         managed: MutableSet<String>,
     ): SpawnReport {
+        // 每个不拉起的分支都要把原因**落进插件目录旁的 process.log**：桌面壳没有
+        // 可看的 stdout，只靠返回值上报等于把诊断藏进没人读的地方（真机现场：
+        // 目录名与 pluginId 不一致被跳过，图形界面上连一句解释都找不到）。
+        fun skipped(reason: String, pluginId: String? = null, command: List<String> = emptyList()): SpawnReport {
+            appendProcessLog(pluginDir, reason)
+            return SpawnReport(pluginDir.name, pluginId, command, started = false, reason = reason)
+        }
+
         val manifestFile = File(pluginDir, MANIFEST_FILE)
         if (!manifestFile.isFile) {
-            return SpawnReport(pluginDir.name, null, emptyList(), started = false, reason = "no " + MANIFEST_FILE)
+            return skipped("no " + MANIFEST_FILE)
         }
         val manifest = try {
             PluginManifestJson.parse(manifestFile.readText())
         } catch (t: Throwable) {
-            return SpawnReport(pluginDir.name, null, emptyList(), started = false, reason = "manifest unreadable: " + (t.message ?: "parse error"))
+            return skipped("manifest unreadable: " + (t.message ?: "parse error"))
         }
         val pluginId = manifest.pluginId
         if (pluginId in seenIds || pluginId in managed) {
             // 已注册（守护进程模式自己连进来了）或本进程已经拉起过：不重复拉起。
-            return SpawnReport(pluginDir.name, pluginId, emptyList(), started = false, reason = "already managed or registered")
+            return skipped("already managed or registered", pluginId)
         }
         val entrypoint = manifest.entrypoint?.trim()
         if (entrypoint.isNullOrEmpty()) {
-            return SpawnReport(pluginDir.name, pluginId, emptyList(), started = false, reason = "manifest has no entrypoint (daemon-mode plugins manage their own process)")
+            return skipped("manifest has no entrypoint (daemon-mode plugins manage their own process)", pluginId)
         }
         val command = entrypoint.split(' ').map { it.trim() }.filter { it.isNotEmpty() }
         if (command.isEmpty()) {
-            return SpawnReport(pluginDir.name, pluginId, command, started = false, reason = "entrypoint is blank")
+            return skipped("entrypoint is blank", pluginId, command)
         }
         // 目录名必须与 pluginId 一致才拉起：目录就是插件的身份载体（清单里报另一个
         // id 会让台账与磁盘对不上账 —— 与「合成名要被真名顶掉」同一条对账纪律）。
         if (pluginDir.name != pluginId) {
-            return SpawnReport(
-                pluginDir.name, pluginId, command, started = false,
-                reason = "directory name \"" + pluginDir.name + "\" must match manifest pluginId \"" + pluginId + "\"",
+            return skipped(
+                "directory name \"" + pluginDir.name + "\" must match manifest pluginId \"" + pluginId + "\"",
+                pluginId, command,
             )
         }
         val env = mapOf(

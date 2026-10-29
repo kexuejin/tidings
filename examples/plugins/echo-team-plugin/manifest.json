@@ -1,5 +1,5 @@
 {
-  "pluginId": "echo-team",
+  "pluginId": "echo-team-plugin",
   "name": "Echo Team",
   "version": "1.0.0",
   "type": "team",

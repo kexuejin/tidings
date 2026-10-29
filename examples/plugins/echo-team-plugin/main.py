@@ -99,17 +99,17 @@ def register(manifest, port, token):
     while time.time() < deadline:
         try:
             status, text = http_post(control_url() + "/v1/plugin/register", body, headers)
-            print("[echo-team] registered: HTTP %d %s" % (status, text[:200]), flush=True)
+            print("[echo-team-plugin] registered: HTTP %d %s" % (status, text[:200]), flush=True)
             return status == 200
         except urllib.error.HTTPError as e:
-            print("[echo-team] register rejected: HTTP %d %s" % (e.code, e.read().decode("utf-8")[:200]), flush=True)
+            print("[echo-team-plugin] register rejected: HTTP %d %s" % (e.code, e.read().decode("utf-8")[:200]), flush=True)
             if e.code in (400, 401, 403, 503):
                 return False  # 被拒不是「还没就绪」，重试没有意义
             time.sleep(REGISTER_INTERVAL)
         except (urllib.error.URLError, OSError) as e:
-            print("[echo-team] control plane not ready (%s), retrying..." % e, flush=True)
+            print("[echo-team-plugin] control plane not ready (%s), retrying..." % e, flush=True)
             time.sleep(REGISTER_INTERVAL)
-    print("[echo-team] register timed out after %ss" % REGISTER_TIMEOUT, flush=True)
+    print("[echo-team-plugin] register timed out after %ss" % REGISTER_TIMEOUT, flush=True)
     return False
 
 
@@ -122,7 +122,7 @@ def unregister(plugin_id, token):
             timeout=3,
         )
     except Exception as e:  # 尽力而为：宿主的探测周期会自行把尸体翻成离线
-        print("[echo-team] unregister failed (ignored): %s" % e, flush=True)
+        print("[echo-team-plugin] unregister failed (ignored): %s" % e, flush=True)
 
 
 # ---------------------------------------------------------------- 会话与任务状态
@@ -248,7 +248,7 @@ class IpcHandler(BaseHTTPRequestHandler):
             prompt = str(payload.get("prompt") or "")
             self._send_ndjson(handle_execute(session_id, prompt))
         elif path == "/task/action":
-            print("[echo-team] action received: %s (decided by %s)" % (
+            print("[echo-team-plugin] action received: %s (decided by %s)" % (
                 payload.get("actionId"), payload.get("decidedBy")), flush=True)
             self._send_json(200, {"ok": True})
         elif path == "/task/queryProgress":
@@ -268,7 +268,7 @@ class IpcHandler(BaseHTTPRequestHandler):
             self._send_json(404, {"error": "not-found"})
 
     def log_message(self, fmt, *args):
-        print("[echo-team] " + fmt % args, flush=True)
+        print("[echo-team-plugin] " + fmt % args, flush=True)
 
 
 def main():
@@ -276,21 +276,21 @@ def main():
     token = find_token()
     if not token:
         # fail-closed：没有 token 就不去敲门 —— 宿主反正会拒（§2.3 强制校验）。
-        print("[echo-team] no token found (TIDINGS_PLUGIN_TOKEN / plugin-token file); cannot register", flush=True)
+        print("[echo-team-plugin] no token found (TIDINGS_PLUGIN_TOKEN / plugin-token file); cannot register", flush=True)
         return 2
 
     port = int(os.environ.get("TIDINGS_PLUGIN_PORT", "0"))
     server = ThreadingHTTPServer(("127.0.0.1", port), IpcHandler)
     server.daemon_threads = True
     bound_port = server.server_address[1]
-    print("[echo-team] IPC listening on 127.0.0.1:%d" % bound_port, flush=True)
+    print("[echo-team-plugin] IPC listening on 127.0.0.1:%d" % bound_port, flush=True)
 
     if not register(manifest, bound_port, token):
         server.server_close()
         return 1
 
     def on_term(signum, frame):
-        print("[echo-team] shutting down", flush=True)
+        print("[echo-team-plugin] shutting down", flush=True)
         unregister(manifest["pluginId"], token)
         threading.Thread(target=server.shutdown, daemon=True).start()
 

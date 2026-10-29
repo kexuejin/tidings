@@ -65,11 +65,11 @@ TIDINGS_PLUGIN_TOKEN=<token> python3 main.py
 ## 手动冒烟（桌面端）
 
 1. 拷贝目录到插件目录（模式一），启动捎话桌面端；
-2. 看注册：`curl -s http://127.0.0.1:8788/v1/plugins`（`echo-team` 应为 `online`）；
+2. 看注册：`curl -s http://127.0.0.1:8788/v1/plugins`（`echo-team-plugin` 应为 `online`）；
 3. 派单：
    ```bash
    curl -s -X POST http://127.0.0.1:8788/v1/plugin/task \
-     -d '{"pluginId":"echo-team","prompt":"hello echo"}'
+     -d '{"pluginId":"echo-team-plugin","prompt":"hello echo"}'
    ```
    回执的 `events` 里有 `card` 事件；`curl -s "http://127.0.0.1:8788/v1/agent/sessions?sessionId=<回执里的 sessionId>"`
    能看到同一批事件（台账）；
