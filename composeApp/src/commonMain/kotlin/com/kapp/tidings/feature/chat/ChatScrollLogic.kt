@@ -114,7 +114,7 @@ internal fun localDayKey(atMillis: Long): String =
  *
  * ## 为什么判据是 `at` 而不是 id
  *
- * `SessionDivider` 的判据绑在消息 id 前缀上（`agent-ev-`），那件事本身有缺陷
+ * `SessionDivider` 的判据曾经绑在消息 id 前缀上（已随债#1 删除，只认协议字段），那件事本身有缺陷
  * （见 task-16：手机端拿不到那个前缀）。日期分隔**不重复那个错误** ——
  * 它只看 `message.at`，两端永远一致。
  *

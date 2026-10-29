@@ -1166,15 +1166,11 @@ fun ChatScreen(
                         if (message.id in sessionTransitions) {
                             // **必须与 `sessionTransitionIds` 用同一个判据取 sid。**
                             //
-                            // 这里原来写的是 `extractSessionId(message.id)` —— 只认 id 前缀。
-                            // 而判定那边用的是 `sessionIdOf`（优先协议字段 `agentSessionId`，
-                            // 再退回前缀）。两者对**手机端**给出的答案不同：
-                            //
-                            //   桌面：id = `agent-ev-session-xxx-12` ⇒ 前缀能取到 ⇒ 有分割线
-                            //   手机：id = 信封 UUID（转发时换掉了）⇒ 前缀取不到 ⇒ **整条不画**
-                            //
-                            // 于是「判定说这里是切换点、渲染说自己取不到 sid 就跳过」—— 手机端
-                            // 永远画不出那条线，而数据是对的。这正是用户报的「桌面有、移动端没有」。
+                            // 这里原来写的是按 id 前缀取会话（`extractSessionId`，已随债#1 删除）：
+                            // 它只认 `agent-ev-` 开头的 id —— 那是桌面端本地构造消息的副产物，
+                            // 对**手机端**（id = 信封 UUID）恒为 null，于是「判定说这里是切换点、
+                            // 渲染说自己取不到 sid 就跳过」—— 手机端永远画不出那条线，而数据是对的。
+                            // 这正是用户报的「桌面有、移动端没有」。现在两边同源：协议字段。
                             val sid = sessionIdOf(message)
                             if (sid != null) {
                                 // **标题优先用消息自带的那一份。**
@@ -1665,19 +1661,13 @@ private fun hasMoreSessionsLocal(state: RelayUiState, peerId: String, wsId: Stri
  * 抽成纯函数是为了能被单测钉住：新会话是否真的会产生一条分隔线，不该只能靠真机肉眼确认。
  */
 /**
- * 一条消息属于哪个 agent 会话：**优先读协议字段**，id 前缀只作为旧数据的回退。
+ * 一条消息属于哪个 agent 会话：**只认协议字段**（债#1）。
  *
- * ## 为什么要这个顺序
- *
- * 字段（`agentSessionId`）是**事实**，由协议携带，两端一致；
- * id 前缀（`agent-ev-`）是桌面端本地构造消息时的副产物，转发进群时并不会带过去 ——
- * 手机端落库用的是信封 UUID，前缀判据在那里恒为 null，于是桌面有分段线、手机一条都没有。
- *
- * 保留回退是为了**已经落库的旧数据**（升级前收到的 agent 消息 id 里仍带前缀）：
- * 不然老会话的分段线会在升级后消失。新消息一律走字段那条路。
+ * 字段（`agentSessionId`）是**事实**，由协议携带，两端一致；id 前缀（`agent-ev-`）是
+ * 桌面端本地构造消息的副产物，不是协议事实 —— 解析它的 `extractSessionId` 已删。
+ * 旧落库行（只有前缀、没有字段）的分段线不迁移：兼容约束已按裁决解除。
  */
-internal fun sessionIdOf(message: MessageUi): String? =
-    message.agentSessionId ?: extractSessionId(message.id)
+internal fun sessionIdOf(message: MessageUi): String? = message.agentSessionId
 
 internal fun sessionTransitionIds(messages: List<MessageUi>): Set<String> {
     val transitions = mutableSetOf<String>()
@@ -1700,27 +1690,6 @@ internal fun sessionTransitionIds(messages: List<MessageUi>): Set<String> {
  */
 internal fun sessionDividerTitle(sessionTitle: String?): String? =
     sessionTitle?.takeIf { it.isNotBlank() }
-
-internal fun extractSessionId(msgId: String): String? {
-    if (!msgId.startsWith("agent-ev-")) return null
-    val rest = msgId.removePrefix("agent-ev-")
-    val parts = rest.split("-")
-    if (parts.size >= 3) {
-        val last = parts.last().toLongOrNull()
-        val secondLast = parts[parts.size - 2].toLongOrNull()
-        // 格式为 agent-ev-${sessionId}-${cursor}-${at}，其中 at 是毫秒级时间戳（> 1e12）
-        if (last != null && last > 1_000_000_000_000L && secondLast != null) {
-            return parts.dropLast(2).joinToString("-")
-        }
-    }
-    if (parts.size >= 2) {
-        val last = parts.last().toLongOrNull()
-        if (last != null) {
-            return parts.dropLast(1).joinToString("-")
-        }
-    }
-    return rest
-}
 
 /**
  * 消息流两端的边界提示（"正在加载更早的消息" / "已经到最早一条了"）。

@@ -19,13 +19,12 @@ import kotlin.test.assertTrue
  *
  * ## 原因：两套判据
  *
- * - 判定（`sessionTransitionIds`）用 `sessionIdOf` —— **优先协议字段 `agentSessionId`**，
- *   取不到才退回 id 前缀；
- * - 渲染时却用 `extractSessionId(message.id)` —— **只认 id 前缀**。
+ * - 判定（`sessionTransitionIds`）用 `sessionIdOf` —— 只认协议字段 `agentSessionId`；
+ * - 渲染时却按 **id 前缀**取会话（`extractSessionId`，已随债#1 删除）。
  *
  * 两个端拿到的 id 形态不同：
  *
- * | 端 | 消息 id | `extractSessionId` |
+ * | 端 | 消息 id | id 前缀判据 |
  * |---|---|---|
  * | 桌面 | `agent-ev-session-xxx-12` | 能取到 ⇒ 画线 |
  * | 手机 | 信封 UUID（转发时换掉了） | null ⇒ **跳过不画** |
@@ -67,14 +66,7 @@ class SessionDividerUsesTheSameSourceTest {
         }
         // **渲染那一行必须也用 `sessionIdOf` —— 见下面那条源码级守卫。**
         // 这里只能测纯函数：渲染长在 Composable 里，单元测试进不去。只测函数的话，
-        // 渲染改回 `extractSessionId(message.id)` 这条测试依然是绿的（假绿）。
-    }
-
-    /** 老形态（桌面：id 前缀里有会话）仍然要能取到。 */
-    @Test
-    fun theLegacyIdPrefixStillWorks() {
-        val m = msg("agent-ev-session-cccc-7", null)
-        assertNotNull(sessionIdOf(m), "id 前缀那条回退不能丢")
+        // 渲染改回按 id 前缀取会话这条测试依然是绿的（假绿）—— 所以下面是源码级守卫。
     }
 
     /** 同一会话连续多条 ⇒ 只有第一条是切换点，不重复画线。 */
@@ -97,15 +89,12 @@ class SessionDividerUsesTheSameSourceTest {
     }
 
     /**
-     * **源码级守卫：渲染分割线时取 sid 必须用 `sessionIdOf`，不能用 `extractSessionId`。**
+     * **源码级守卫：渲染分割线取 sid 必须用 `sessionIdOf`（协议字段），不能按 id 前缀取。**
      *
      * 为什么需要它：这条判据住在 Composable 里，单元测试进不去。只测纯函数（`sessionIdOf` /
-     * `sessionTransitionIds`）的话，渲染改回 `extractSessionId(message.id)` 依然是绿的 ——
-     * 那是假绿，而真机症状是「手机端永远画不出那条线」。
-     *
-     * 为什么 `extractSessionId(message.id)` 在这里是错的：手机的消息 id 是**信封 UUID**
-     * （转发时被换掉了），前缀里没有会话 —— 它返回 null，那一整块 `if` 就被跳过。
-     * 桌面能画，只因它的 id 恰好是 `agent-ev-session-xxx-12`。
+     * `sessionTransitionIds`）的话，渲染改回按 id 前缀取会话依然是绿的 —— 那是假绿，
+     * 而真机症状是「手机端永远画不出那条线」。前缀解析函数（`extractSessionId`）已随债#1
+     * 删除；这条守卫钉住渲染路径不许再发明第二套取法。
      */
     @Test
     fun theRenderPathResolvesTheSessionTheSameWayTheDetectorDoes() {

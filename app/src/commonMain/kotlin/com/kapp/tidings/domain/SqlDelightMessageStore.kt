@@ -810,7 +810,7 @@ private fun com.kapp.tidings.db.MessageEntity.toUi(): MessageUi {
         reasoning = parsedReasoning,
         // **会话归属读回来**：聊天流的分段线靠它判（`sessionIdOf`）。
         //
-        // 缺这一行，重启后所有分段线都会消失 —— 桌面端还能靠 id 前缀 `agent-ev-` 回退，
+        // 缺这一行，重启后所有分段线都会消失（字段是分段线的唯一来源，id 前缀回退已随债#1 删除）
         // 手机端连那条回退都没有（转发进群的消息 id 是信封 UUID）。
         // 老库这一列是 NULL（迁移补列、不回填）：那确实不知道，与「这条不属于任何会话」
         // 是同一档，`sessionIdOf` 会继续退回 id 前缀那条旧判据。
