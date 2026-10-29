@@ -99,6 +99,16 @@ internal class DesktopExtension(
     private var inboundJob: Job? = null
 
     /**
+     * 托管模式插件宿主（M2）：扫描数据目录下的 `plugins/`、拉起子进程并注入
+     * 控制面地址与插件 token；插件就绪后自己注册。随控制面同生命周期：
+     * [detach] 时 SIGTERM 全部子进程（插件会先注销再退）。
+     *
+     * 拉起失败**绝不**上抛：插件是加装能力，坏了最多是「没有插件入驻」，
+     * 不能拖垮桌面壳。
+     */
+    private var pluginHost: com.kapp.tidings.agent.plugins.PluginHost? = null
+
+    /**
      * 两条兜底文案（事件没带 summary 时用）。
      *
      * 资源在 composeResources，取用 API 是 suspend；而这个回调
@@ -475,6 +485,23 @@ internal class DesktopExtension(
             plane = created
             attachedRuntime = runtime
             sessions = registry
+            // 托管模式插件：目录里有就拉起（token 注入 + 自注册）；坏了如实记录但不上抛。
+            runCatching {
+                val host = com.kapp.tidings.agent.plugins.PluginHost(
+                    dataDirectory = java.io.File(controller.dataDirectory),
+                    controlBaseUrl = { "http://127.0.0.1:" + created.boundPort },
+                    plugins = created.plugins,
+                )
+                val reports = host.start()
+                pluginHost = host
+                reports.forEach { r ->
+                    if (!r.started) {
+                        println("[RELAY-PLUGIN] skipped " + r.dirName + ": " + (r.reason ?: "unknown"))
+                    }
+                }
+            }.onFailure { t ->
+                println("[RELAY-PLUGIN] host failed (ignored): " + (t.message ?: t::class.simpleName))
+            }
             backfillMissingAgentEvents()
             // 补发时机：启动（StateFlow 的首个值）与**重连 / 对端上线 / 换网**。
             // 不能只等下一次启动 —— 用户离线一分钟回来，那条消息就该在一分钟内到。
@@ -609,6 +636,9 @@ internal class DesktopExtension(
     private fun detach() {
         controller.onLocalSessionPageRequest = null
         controller.onAgentPrompt = null
+        // 先停插件（SIGTERM，插件会注销再退）再停控制面：注销要走控制面的 HTTP 路由。
+        pluginHost?.stop()
+        pluginHost = null
         plane?.stop()
         plane = null
         attachedRuntime = null
