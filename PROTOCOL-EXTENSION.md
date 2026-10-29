@@ -63,7 +63,7 @@
 | `agr1` | 授权回路（D7） | 三张 grant 帧；**宿主在投递 agent 帧前按策略过滤** —— 没授权 = 没数据，沉默 ≠ 拒绝 |
 | `agp1` | 会话分页（D8） | `agent-session-page`：设备向宿主要一页历史会话（与 `agn1` 是两个方向的能力） |
 | `att1` | agent 事件附件卡片（task-45） | 发送方据此决定要不要在 `agent-event` 里带 `attachment`；**不声明就只发文本占位** |
-| `gta1` | 带发送者归属的群文本 | 发送方据此决定群文本带不带 `senderId` / `reasoning` / `agentSessionId`+`agentCursor`；**不声明就发同 id 的裁剪版**（只含上游白名单字段，见 §6.10 / §6.11） |
+| `gta1` | 带扩展键的群文本 | 发送方据此决定群文本带不带 `senderId` / `agentSessionId`+`agentCursor` / `agentIntent` / `agentState` / `card`；**不声明就发同 id 的裁剪版**（只含上游白名单字段，见 §6.10–§6.12） |
 | `lnk1` | 长连接下行（K1/K2） | 由**主机**声明；手机据此决定要不要拨号（见 `ARCHITECTURE.md` §5.4） |
 | `fch1` | 文件**字节**能从加密信道推给我（见 §15.2） | 双方都声明才走新数据面；不声明 ⇒ 继续 legacy 拨号拉取 |
 | `scr1` | 投屏**画面**能经一条独立加密会话推给我（见 §15.2） | 双方都声明**且**对端档案里有 `screenPort` 才走；否则继续 legacy |
@@ -229,24 +229,22 @@
 思考过程只落在桌面自己的库里。于是同一个群：
 
 1. 手机端把 agent 的话显示成「桌面端发的」，桌面端显示 `agent:DSH` —— 两端发送者不一致，
-   用户以为群里多了一个人；
-2. 桌面端气泡有「思考」折叠块，手机端没有 —— 用户看到的是「过程只在桌面，手机只剩最后一句」。
+   用户以为群里多了一个人。
 
-**做法**：`msg`/`kind:"group-text"` 的载荷加两个可选键：
+**做法**：`msg`/`kind:"group-text"` 的载荷加一个可选键：
 
 ```json
 {"kind":"group-text","text":"1509 项测试全部通过。","groupId":"…","groupRev":7,
- "senderId":"agent:dsh","reasoning":"先把 FTS 的写入路径读一遍…"}
+ "senderId":"agent:6f9a2b7c8d01…:dsh"}
 ```
 
-| 方面 | `senderId` | `reasoning` |
-|---|---|---|
-| 类型 | 字符串 | 字符串 |
-| 必填 | 否（旧端不发 ⇒ 接收方按信封 `from` 处理，与以前一致） | 否（旧端不发 ⇒ 没有思考块） |
-| 取值 | 真人 = nodeId；agent = `agent:<小写 kind>` | 就是桌面端 `MessageUi.reasoning` 那一份 |
-| 约束 | `Limits.ID`（64 字符）、非空 | UTF-8 字节 ≤ `Limits.GROUP_REASONING_BYTES`（24 KiB）、非空 |
-| 语义 | **只用于显示归属**，不参与鉴权 | **只用于显示**，不参与任何判定 |
-| 超长 | 拒帧 | 拒帧；发送侧必须先截断（`NodeOutbound.clampGroupReasoning`） |
+| 方面 | 取值 |
+|---|---|
+| 类型 | 字符串，`Limits.ID`（64 字符）、非空 |
+| 必填 | 否（不发 ⇒ 接收方按信封 `from` 处理，与以前一致） |
+| 取值 | 真人 = nodeId；agent = `agent:<hostNodeId>:<agentId>`（`AgentSenderId.of` 的**完整形态**，写侧只产这一种；`agentId` slug 化后 ≤ 21 字符。老形态 `agent:<kind>` 只存在于历史消息里，读侧兼容分支已删） |
+| 语义 | **只用于显示归属**，不参与鉴权 |
+| 超长 | 拒帧 |
 
 **⚠️ 加可选键必须同步加进 `CodecMsg.GROUP_TEXT_KEYS`。** 群文本走的是**严格字段白名单**
 （多一个键整帧丢弃，golden vector `neg-group-text-extra-field` 守着这条）。
@@ -257,7 +255,7 @@
 **能力门控（`gta1`）：白名单只解决「本仓两端都升级」。** 对**不是本仓**的接收端，多一个键就是
 整帧丢弃：上游茶话间 0.61.2 的 `group-text` 白名单逐字只有
 `kind / text / groupId / groupRev / mentions / resend / replyTo`（`validatePayload`，多键返回 `false`）。
-所以从 `gta1` 起，这两个键按**逐成员的能力**发：
+所以从 `gta1` 起，这些扩展键按**逐成员的能力**发：
 
 - 声明了 `gta1` 的成员收**带键**的那一份；没声明的收**同一信封 `id`、同一 `ts`** 的裁剪版；
 - 同一 id 是硬约束 —— 两个变体若换 id，同一条话会在群里出现两次，撤回也只能撤其中一份；
@@ -269,14 +267,13 @@
 `SendOutcome.SENT`）。测试：`GroupTextCapabilityGatingTest`（6 条：模拟上游 7 键白名单、两变体同
 id/ts、legacy 成员无键、真实扇出逐成员、队列两行各存各的、群重发仍保持门控与原 id）。
 
-**为什么 `reasoning` 是独立字段，而不是把 ` thinking…</think>` 塞回 `text`**：正文与思考各有各的
-上限。混在 `text` 里时，正文 + 思考一起顶到通道上限（UDP 800 / TCP 4096 字节）会被整帧拒收 ——
-那正是「带思考的原文发出去、对端反而收不到」的形态。分开之后思考有 24 KiB 预算，
-正文仍受原上限约束，两者互不挤占。
+**`reasoning` 键已整体退场（本仓裁决：CoT 禁止进群聊）**。思考过程留在桌面本地
+（`MessageUi.reasoning`），不再随群帧广播；`GROUP_REASONING_BYTES` / `clampGroupReasoning`
+与配套测试同批删除，其 24 KiB 预算位由 §6.12 的 `card`（`Limits.CARD_BYTES`）顶替。
 
-**安全边界**：两个键都只影响显示。任何群成员本来就能在群里说任何话，把 `senderId` 写成别人的
-nodeId 只会让那条气泡挂在别人名下（本协议不防冒名，群内成员互信）；`reasoning` 同理，
-伪造一个思考块没有任何特权收益。所以只校验长度形态，不做归属校验。
+**安全边界**：这个键只影响显示。任何群成员本来就能在群里说任何话，把 `senderId` 写成别人的
+nodeId 只会让那条气泡挂在别人名下（本协议不防冒名，群内成员互信）。
+所以只校验长度形态，不做归属校验。
 
 ### 6.11 群文本的 `agentSessionId` / `agentCursor`（可选键，**纯展示分段**）
 
@@ -304,10 +301,29 @@ nodeId 只会让那条气泡挂在别人名下（本协议不防冒名，群内�
 `aSessionWithoutCursorIsRejected`。
 
 测试：`core/src/commonTest/.../CodecTest.kt` 的
-`groupTextWithSenderIdSurvivesInboundValidation`（**回归：走解码而不是只断言 JSON 里有键**）、
-`groupTextCarriesReasoningAlongsideTheAnswer`、`groupTextWithoutReasoningKeepsTheOldShape`、
-`oversizedReasoningIsRejected`；`GroupReasoningClampTest.kt` 四条（原样 / 空为 null /
-按字节截断且过校验 / 不在代理对中间切）。
+`groupTextWithSenderIdSurvivesInboundValidation`（**回归：走解码而不是只断言 JSON 里有键**）。
+
+---
+
+### 6.12 群文本的 `agentIntent` / `agentState` / `card`（可选键，意图与声明式卡片）
+
+| 键 | 类型 | 语义与约束 |
+|---|---|---|
+| `agentIntent` | 对象 | **单帧原子意图**（人类 → 插件）：`{agentId, wsId?, resumeSessionId?, mode}` 随正文一次发出，宿主原子化「开会话 + 派单」，乐观发送零等待；`validateMsg` 校验对象形态 |
+| `agentState` | 字符串 | 执行状态（插件 → 全群）：限 `accept` / `blocked` / `completed` / `failed` 四态，越界拒帧 |
+| `card` | 对象 | **声明式卡片**（插件定义，IM 原生渲染）：`{type, version, cardId, rev, …}`；渲染只认 5 类受限原子组件（Banner / Progress / StepList / DiffViewer / ButtonGroup）；UTF-8 字节 ≤ `Limits.CARD_BYTES`（24 KiB） |
+
+**卡片预算三处同源**：发送（宿主驱动校验，超限**拒绝**并回错误事件给插件）、接收（bad-payload
+判拒）、队列重放（`decodeTcp` 同一份校验）。**截断的 JSON 解不了——「截断后发出去」等于产出
+注定被拒的帧**，所以超限一律拒绝、绝不截断；信封数学与 §7.1 一致（正文 32 KiB + 卡片 24 KiB +
+开销 < 64 KiB 整帧硬上限）。
+
+**卡片原位刷新**：更新以**新消息**进流——同 `cardId`、`rev` 递增的新帧；落库是追加式新行
+（messages 表新增 `card_json` / `agent_state` 两列，**不进 FTS**），**不重写旧消息行**。
+「不刷屏」是 UI 语义：按 `cardId` 折叠、只渲染最新 `rev`。审批锁定事件同理走新帧。
+
+**能力门控与旧端行为**：三键都在 `gta1` 的逐成员门控清单里（§4）；不认识这些键的旧端整帧丢弃
+（本仓裁决：两端同版本，不做兼容）。
 
 ---
 
@@ -375,7 +391,7 @@ nodeId 只会让那条气泡挂在别人名下（本协议不防冒名，群内�
 > 那条才是**真的没了**。两条一起改完，长消息才既收得下、又补得回。
 
 **为什么是 32 KiB 而不是 65536**：一帧的硬上限是 64 KiB（`Link.MAX_FRAME_BYTES`），
-而群文本还可以同时带 §6.10 的 `reasoning`（24 KiB）—— 正文必须先给它们留出余量。
+而群文本还可以同时带 §6.12 的 `card`（`Limits.CARD_BYTES`，24 KiB）—— 正文必须先给它们留出余量。
 
 **两条配套纪律**（缺一条就还会静默丢）：
 
@@ -586,7 +602,7 @@ budget 类断言（最坏样本落在 UDP 800 / TCP 4096 内）在
 2. **分段重置**：切换工作区或会话分段时，宿主物理重置 Prompt 上下文，移动端保留完整滚动历史。
 
 ### 14.5 群聊多 Agent 协同（Chief Pattern）
-1. **虚拟群成员**：`GroupMeta` 扩展 `virtualAgents: List<VirtualAgentMember>`。
+1. **虚拟群成员**：`GroupMeta` 扩展 `virtualAgents: List<VirtualAgentMember>`（**当前形态**：`agentId`/`hostNodeId`/`name`/`entityType`/`teamMembers`/`allowedWorkspaces`/`defaultWsId`；`wsId`/`role` 已退场；**本机绝对路径不进协议**，只广播 wsId 与标题）。
 2. **精确路由**：群聊内遵循 `@Agent` 唤醒或 Chief 编排，未被唤醒时不消耗 Token。
 3. **工作态广播**：群内通过 `GroupProgress` 广播当前正在执行的任务状态。
 
@@ -669,7 +685,7 @@ FTS 索引崩毁，方案 §5.6）。
 
 - **确认是连续前缀**：`ackedUpTo` 一旦前进就代表「这之前的字节都到了」。发送侧超时从 `ackedUpTo` 整窗重传，接收侧按 `offset` 写 —— 重传天然幂等。
 - 两块帧的 magic 不同（`TDCH` / `TDCA`），画面数据面用的是另一条信道实例、另一套判据；一条信道上的帧不会被另一条误认。
-- ⚠️ **两套上限不要混成一个**：`AGENTS.md` §2.2 的 UDP 800 B / TCP 4096 B / 群文本 32 KiB / reasoning 24 KiB / agent-event 64 KiB / 整帧 64 KiB 是**应用层信封**的预算（一条消息能有多长）；256 KiB 是**信道内一块二进制帧**的上限（一次搬运多少字节）。前者既不约束后者，后者也不放宽前者。
+- ⚠️ **两套上限不要混成一个**：`AGENTS.md` §2.2 的 UDP 800 B / TCP 4096 B / 群文本 32 KiB / 卡片 24 KiB（`CARD_BYTES`）/ agent-event 64 KiB / 整帧 64 KiB 是**应用层信封**的预算（一条消息能有多长）；256 KiB 是**信道内一块二进制帧**的上限（一次搬运多少字节）。前者既不约束后者，后者也不放宽前者。
 
 ### 15.4 传输层控制帧 `TLPAIR1`（配对自证）
 

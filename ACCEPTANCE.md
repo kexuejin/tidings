@@ -915,6 +915,28 @@ messaging **PASS 38**（`/tmp/messaging-run14.log`），全量套件 **run11 9/9
 
 ---
 
+## 10. Agent-IM 里程碑 M1–M3（2026-10-30）
+
+协议纯化、插件宿主网关与共享界面三件套的验收判据（文字证据：`design/runtime-evidence/` 下
+`2026-10-30-m1-protocol-purification-and-debts.md`、`2026-10-29-m2-plugin-host-gateway-smoke.md`、
+`2026-10-29-m3-shared-ui-redesign.md`）：
+
+1. **群文本白名单 14 键**：`@agent` 消息带 `agentIntent` 可通全链路；带 `reasoning` 的帧被整帧
+   拒收（键已退场）；`card` 超 `CARD_BYTES`（24 KiB）判 bad-payload，发送侧超限**拒绝不截断**。
+2. **插件全生命周期**：echo 插件（`examples/plugins/echo-team-plugin/`）放进插件目录 → 桌面启动
+   约 15 秒自动注册 online；派单后事件流（含卡片）进台账；`kill -9` 后**等满 90 秒**
+   （`offlineAfter`）确认翻 offline、主程序 `closeCount` 不增；守护进程模式凭 0600 token 文件
+   重注册回 online。
+3. **注册鉴权负路径**：无 token / 错 token 的注册请求被拒（401/503），本机任意进程不能自我入驻。
+4. **卡片折叠**：任务推进时 DB 新增同 `cardId`、`rev+1` 的**新行**（旧行不重写）；UI 只渲染最新
+   `rev`、不新增可见气泡。
+5. **授权面板**：仅插件宿主可编辑；非宿主只读且不显示本机路径（路径不进协议）；保存后 `rev+1`
+   广播到全群。
+6. **上下文胶囊**：键入 `@agent` 或回复 agent 发言时唤起；粘帖文本不误触发；多 @ 只绑首个执行
+   主体；点选会话可精确投递（会话已不存在则如实不投，不静默换投）。
+
+---
+
 ## 7. 单条记录模板
 
 ```text

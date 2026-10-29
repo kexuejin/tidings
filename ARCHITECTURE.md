@@ -254,13 +254,25 @@ data class Envelope(
 
 ---
 
+### 7.3 进程外插件宿主（M2 起）
+
+插件是**独立进程**（Python / Node / 任意可执行），主包内不含任何具体 Agent 的业务代码：
+
+- **目录约定**：`<数据目录>/plugins/<pluginId>/`（目录名必须等于 `pluginId`，对不上账不拉起）；清单 `manifest.json` 声明身份、leader、组员、能力与授权工作区（`allowedWorkspaces` / `defaultWsId`；**本机绝对路径不进协议**，只广播 wsId 与标题）。
+- **两种接入**：托管子进程（`PluginHost` 扫描目录并拉起，注入 `TIDINGS_PLUGIN_TOKEN`）；独立守护进程自注册（token 来自插件自身配置或宿主数据目录 0600 受控文件）。两种都必须持 token——`PluginTokenGate` 在两处来源皆缺时 503 整体关闸，防本机任意进程自我入驻。
+- **端点**：`POST /v1/plugin/register` / `unregister`、`POST /v1/plugin/task`（派单事件流）、`POST /v1/plugin/action`（卡片动作回传）。派单/操作路由按**回环信任**（与 `/v1/send` 同一模型）；设备侧授权仍走 `/v1/agent/*` 的 grants 判据。
+- **`ExternalPluginDriver`**：主包内唯一的通用插件驱动（`AgentDriver` 的实现之一），只经回环 HTTP 转发 `openSession` / `executeTask`（流式）/ `handleAction` / `queryProgress`，零业务代码；能力清单读 manifest，能力 ACL 由宿主在驱动外层把关、不透传给插件。
+- **参考插件**：`examples/plugins/echo-team-plugin/`（Python 标准库，零第三方依赖）。
+
+---
+
 ## 8. 持久化存储设计
 
 数据持久化使用 SQLDelight 构建跨平台统一的 SQLite 存储层：
 
 ### 8.1 聊天消息表 (`relay.db`)
 
-- **`messages`**：存储人类聊天记录（单聊、群聊），自增 `seq` 作为单调排序键。
+- **`messages`**：存储人类聊天记录（单聊、群聊），自增 `seq` 作为单调排序键。agent 相关列：`agent_session_id` / `agent_session_title`（会话分段）与 `card_json` / `agent_state`（声明式卡片与执行状态）；卡片更新是**追加式新行**（同 `cardId`、`rev+1`），不重写旧行；这些列**不进 FTS**。
 - **`conversations`**：会话元数据（会话 ID、未读数、最后消息摘要、置顶与静音标记）。
 - **`peers`**：节点 Profile 缓存（NodeId、名称、IP、端口、caps、更新版本）。
 - **`send_queue`**：离线暂存队列，存储尚未完成 ACK 确认的报文。

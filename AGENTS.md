@@ -109,12 +109,12 @@ python3 tools/unused-imports.py --check
 |---|---|---|
 | 单聊 `kind:"text"` | 800 B | 4096 B |
 | 群文本 `kind:"group-text"` | 800 B | **32 KiB** |
-| 群文本 `reasoning` | — | 24 KiB |
+| 群文本 `card` | — | 24 KiB（`CARD_BYTES`，超限拒绝不截断） |
 | `agent-event` body | — | 64 KiB |
 | **整帧硬上限** | — | 64 KiB |
 
-- 发送侧必须自己截断（`NodeOutbound.clampGroupText` / `clampGroupReasoning`），让「不产出
-  注定被拒的帧」成为**不变量**，而不是「希望调用方别写太长」。
+- 发送侧必须自己截断（`NodeOutbound.clampGroupText`；卡片超限由宿主驱动**拒绝**不截断），
+  让「不产出注定被拒的帧」成为**不变量**，而不是「希望调用方别写太长」。
 - **同一份上限要在发送、接收、队列重放三处一致**。队列重放必须用 `Codec.decodeTcp`；
   用 `Codec.decode`（UDP 那套）会把长消息**从队列里删掉** —— 比发不出去更糟。
 - Golden vectors（`GOLDEN_VECTORS` / `EXTENSION_VECTORS` / `OLD_NODE_EXTENSION_VERDICTS`）

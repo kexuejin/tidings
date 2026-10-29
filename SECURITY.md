@@ -44,12 +44,13 @@ not inherited. Three of them are worth stating explicitly:
 
 | Frame | Budget | Why |
 | :--- | :--- | :--- |
-| `msg` / `group-text` text | UDP 800 B, **TCP 32 KiB** | 4096 B was a UDP-era number; agent replies routinely exceed it, and a rejected frame is silently lost. 32 KiB leaves room for the 24 KiB `reasoning` field inside one 64 KiB frame. |
+| `msg` / `group-text` text | UDP 800 B, **TCP 32 KiB** | 4096 B was a UDP-era number; agent replies routinely exceed it, and a rejected frame is silently lost. 32 KiB leaves room for the 24 KiB `card` field (`CARD_BYTES`) inside one 64 KiB frame. |
 | `agent-event` body | TCP 64 KiB | code blocks, diffs, deep reasoning |
 | one-to-one `kind:"text"` | 4096 B (unchanged) | hand-typed text; no reason to widen the surface |
 
 A sender that does not check the receiver's budget does not get an error — the receiver drops the
-whole frame (`bad-payload`). So `NodeOutbound.clampGroupText` / `clampGroupReasoning` exist to make
+whole frame (`bad-payload`). So `NodeOutbound.clampGroupText` (and the host driver's hard refusal
+of oversized `card` payloads, never truncation) exist to make
 "we never emit a frame that is guaranteed to be rejected" an invariant rather than a hope.
 
 **Do not fold the two budgets into one.** The numbers above bound an *application envelope* (how long
