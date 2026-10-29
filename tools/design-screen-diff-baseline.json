@@ -1,5 +1,5 @@
 {
-  "generatedAt": "85691b3d6e26",
+  "generatedAt": "b137725ec90a",
   "note": "逐屏差集棘轮：每个键的差集只许变小。--check 报「新增的值」。",
   "reason": "两类量具口径差：①m-chat/m-chat-solo/m-chat-group/m-msgmenu/m-screencard 的 radius=4：原型 .msg code/.annot code（relay.html 内联代码片，border-radius:4px）在代码侧落在共享 AppOutlinedButton 上，而按钮族收敛后不再暴露 shape（设计上刻意不暴露样式自由度），字面量消失 ⇒ 量具读不到；②d-tray：原型 d15-tray 属宿主轨（AWT 托盘，Layoutlib 到不了），代码新增 10/2 间距、9dp 圆角、500 字重是 AWT PopupMenu 实现细节，原型无对应物可表达。两条都不是本轮新增的视觉回归，但都应由设计确认后再决定是否改代码。",
   "rowCount": 70,
