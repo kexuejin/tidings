@@ -10,7 +10,7 @@
 
 装置
   Android   Pixel 6 / SERIAL-TEST-01 / Android 15 (SDK 35) / 1080x2400 / 密度 420
-            nodeId bc19885f-0775-47a5-8342-662ca227f769，昵称「我的手机」，192.168.2.22，udp 17878 / tcp 17879
+            nodeId bc19885f-0775-47a5-8342-662ca227f769，昵称「我的手机」，192.0.2.22，udp 17878 / tcp 17879
   iOS       iPhone 17 Pro 模拟器 / 00000000-FEF7-409D-AE33-803A77C62376 / iOS 26.2
             屏 402x874 pt（1206x2622 px @3x）/ nodeId 27272e70-6c18-41e0-a3ee-569173f5eee6，昵称「iOS验收」
   Mac 上的桌面端与 agentNode 控制面（HTTP 8799）作为第三方在场节点，让两端各自有别的会话可看，

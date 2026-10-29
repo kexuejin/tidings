@@ -47,7 +47,7 @@ TS 参考实现（`/tmp/th_asar/out/main/index.js:2826-2831`，`FrameReader` 回
 后果：`lookup.openScreen(...)` 永远不被调用，每条入站 `screen-open` 连接都被 `return` 掉。
 
 症状：手机侧 accept 后 `phase=Connecting` 等 15s；对端 TCP 明明连上了（手机能抓到
-来自 192.168.2.82 的 TIME_WAIT），却始终等不到 `screen-ready`，最后
+来自 192.0.2.82 的 TIME_WAIT），却始终等不到 `screen-ready`，最后
 `screen-phase ended reason=disconnected`（`/tmp/orch-out.txt` 实测：t+17.5s
 `"phase":"ended","reason":"disconnected"`）。
 
@@ -72,7 +72,7 @@ TS 参考实现（`/tmp/th_asar/out/main/index.js:2826-2831`，`FrameReader` 回
 
 ## 方向一：手机当 Sharer（对端 Viewer）—— 实跑 PASS 60 帧
 
-    python3 scripts/relay-screen-fixture.py viewer --phone 192.168.2.22 --secs 150 > /tmp/fixture-viewer2.log
+    python3 scripts/relay-screen-fixture.py viewer --phone 192.0.2.22 --secs 150 > /tmp/fixture-viewer2.log
 
 夹具（`scripts/relay-screen-fixture.py`，本仓新文件）是一台「看得懂 screen 的桌面茶话间」线协议替身。
 **为什么用夹具而不是真茶话间**：真茶话间 0.61.1 的桌面 GUI 只能当 Sharer（应答入站邀请），

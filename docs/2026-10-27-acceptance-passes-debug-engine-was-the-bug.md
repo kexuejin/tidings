@@ -111,5 +111,5 @@ AAR  jni/arm64-v8a/libluciola_uniffi.so   201eab4d40395f99094199fb9ecf2d40d5f153
 ## 还没做的一件事
 
 **真机 50MB 需要重测一次**。上一轮真机读数是 90s / 0.55 MB/s，那时用的是带
-「32 倍重传放大」的旧 `SecureChunkSender`；那个缺陷在 `a3a8fc30` 已修，
+「32 倍重传放大」的旧 `SecureChunkSender`；那个缺陷在 `52f78ee2` 已修，
 而真机有真实 RTT，这笔账比回环上大得多。现在引擎身份已核对，重测的结论可信。

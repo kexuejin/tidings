@@ -14,7 +14,7 @@
 
 | 项 | 基线值（2026-10-18 12:2x 实测） | 取法 |
 |---|---|---|
-| 桌面 peer 表里红米那条 | `ip = 192.168.2.140`（**IPv4**），`online = true`，`udpPort=17878`，`tcpPort=17879` | `curl -s http://127.0.0.1:8788/v1/peers` |
+| 桌面 peer 表里红米那条 | `ip = 192.0.2.140`（**IPv4**），`online = true`，`udpPort=17878`，`tcpPort=17879` | `curl -s http://127.0.0.1:8788/v1/peers` |
 | 桌面 UDP 监听族 | `udp46 *.17878`（**双栈**） | `netstat -an -p udp | grep 17878` |
 | 桌面 TCP 监听族 | `tcp46 *.17879 (LISTEN)`（**双栈**） | `netstat -an -p tcp | grep 17879` |
 | 手机 UDP/TCP 监听 | `/proc/net/udp6` 有 `::`:45D6（17878）；`/proc/net/tcp6` 有 `::`:45D7（17879）LISTEN —— 也是双栈 | `adb -s <device-serial> shell "grep 45D6 /proc/net/udp6; grep 45D7 /proc/net/tcp6"` |
@@ -80,14 +80,14 @@
    `ifconfig en1 | grep inet6` → 例如 `2001:db8:2020:cb44:1400:fdbb:f0d0:7679`。
 2. 手机：节点页 → 「添加节点」→ 地址填 **`[2001:db8:2020:cb44:1400:fdbb:f0d0:7679]:17878`**（带方括号；端口是 **UDP 17878**，不是 17879）。
    代码依据：`RelayController.kt:1076-1105 splitHostPort` 认 `[v6]:port`；`:1070-1074 isPlausibleHost` 接受该串；`:922` 立刻 `announceTo`。
-3. 判据 A（**唯一无歧义**的判据）：桌面 `curl -s http://127.0.0.1:8788/v1/peers` → REDMI K80 那条的 `"ip"` 变成 **IPv6 字面量**且 `online=true`（基线是 `192.168.2.140`）。
+3. 判据 A（**唯一无歧义**的判据）：桌面 `curl -s http://127.0.0.1:8788/v1/peers` → REDMI K80 那条的 `"ip"` 变成 **IPv6 字面量**且 `online=true`（基线是 `192.0.2.140`）。
 4. 判据 B：桌面 `netstat -an -p tcp | grep 17879` → 出现 `tcp6 <手机v6>.x <桌面v6>.17879 ESTABLISHED`。
    想立刻逼出一条 TCP：在会话里发 **>800 字节**的长文本（`Messenger.kt:249` 走 TCP 回退），或发一个文件。
 5. 判据 C（手机侧）：`adb -s <device-serial> shell "grep 45D7 /proc/net/tcp6"` → 出现 remote 为桌面 v6 的 `01`(ESTABLISHED) 行。
 
 ### 1.6 失败长什么样
 
-- peer 表 `ip` 仍是 `192.168.2.140` → 手机压根没走 v6（手动节点没生效 / 被同地址去重 / Android 路由选了 v4）。
+- peer 表 `ip` 仍是 `192.0.2.140` → 手机压根没走 v6（手动节点没生效 / 被同地址去重 / Android 路由选了 v4）。
 - peer 表里出现 v6 但 `online=false` 且 `lastSeen` 不前进 → ENTRY 发出去但桌面没收到（防火墙？`udp46` 被占？）。
 - peer 表 v6 + online，但 TCP 判据不成立 → TCP 17879 的 v6 不可达（对端 `tcpPort` 不匹配 / 中间设备拦 v6）。
 - 手机 UI 只显示"离线"而桌面已在线 → 回包走了 v4 到旧地址（registry 里 ip 被后到的 v4 数据报覆盖，见 `Discovery.kt:221-234` 每次都 `touch`）。
@@ -212,6 +212,6 @@
 
 ## 附：三条最省事的"一眼判据"
 
-1. **IPv6 是否真的走了**：`curl -s http://127.0.0.1:8788/v1/peers` 里红米那条的 `ip` 是不是 IPv6 字面量（基线是 `192.168.2.140`）。
+1. **IPv6 是否真的走了**：`curl -s http://127.0.0.1:8788/v1/peers` 里红米那条的 `ip` 是不是 IPv6 字面量（基线是 `192.0.2.140`）。
 2. **授信是否真的生效**：`curl -s http://127.0.0.1:8788/v1/agent/grants` + 手机「授权管理」对话框那一行是不是「我的设备」。
 3. **断网是否如实降级**：消息气泡是"已排队"还是"已送达"，节点点是不是灰的。

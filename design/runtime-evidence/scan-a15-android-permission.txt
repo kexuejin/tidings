@@ -1,7 +1,7 @@
 # Android 真机扫码授权与退路证据（Pixel 6, SERIAL-TEST-01, Android 15 / SDK 35, 1080x2400, density 420）
 # 构建: scaffold/androidApp/build/outputs/apk/debug/androidApp-debug.apk (44.8 MB, 2026-10-06 23:49)
 #       构建命令 /tmp/relay-gate.sh :androidApp:assembleDebug（日志 /tmp/relay-apk.log）
-# 对端: /Applications/Teahouse.app (Mac 192.168.2.82, UDP *:17878 / TCP *:17879)
+# 对端: /Applications/Teahouse.app (Mac 192.0.2.82, UDP *:17878 / TCP *:17879)
 # 取证时间: 2026-10-06 23:49–23:54
 #
 # 本文件记录的是「扫码配对」里**不需要另一台设备对准镜头**就能验的部分：
@@ -17,7 +17,7 @@ $ adb shell am force-stop app.relay && adb shell am start -n app.relay/.app.Main
 # —— A1：节点页自检（真机） ——
 # UI dump（adb shell uiautomator dump /sdcard/ui.xml）里的原文：
 #   mDNS 广播中 · UDP 17878 / TCP 17879
-#   本机地址      192.168.2.22:17878
+#   本机地址      192.0.2.22:17878
 #   发现方式      mDNS _relay._udp · 每 5 秒
 #   状态          正常 · 本机防火墙已放行
 #   在线节点      1 / 1
@@ -25,7 +25,7 @@ $ adb shell am force-stop app.relay && adb shell am start -n app.relay/.app.Main
 
 # —— A14：我的二维码（真机画出，25 模块） ——
 #   content-desc  配对二维码，让对方用「节点 → 扫码配对」扫它
-#   下方原文      relay://192.168.2.22:17878
+#   下方原文      relay://192.0.2.22:17878
 #   说明原文      对方在「节点 → 扫码配对」里扫这张码，就会把你加进他的节点表。
 #                 两台设备要在同一个局域网里。
 
@@ -73,6 +73,6 @@ $ adb shell pm grant app.relay android.permission.CAMERA
 # —— 仍未完成：真正扫到码的往返 ——
 # 取景区在真机上是全黑（手机镜头朝下），无法据此判断「预览没挂上」还是「镜头对着暗处」。
 # 判断它只能让镜头对准一块屏：Mac 上已用 Safari 打开 /tmp/pair.html（820x820 白底，
-# 内容是 qrencode -l M -s 8 -m 4 'relay://192.168.2.82:17878' 生成的二维码，下方印原文）。
+# 内容是 qrencode -l M -s 8 -m 4 'relay://192.0.2.82:17878' 生成的二维码，下方印原文）。
 # 手机扫中后会把它加成手动节点（Teahouse 正在跑，可直接验证在线与收发）。
 # 这一步需要人工把手机举起来对准屏幕，故 ACCEPTANCE A15 的这一步在真机上仍未打勾。

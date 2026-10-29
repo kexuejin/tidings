@@ -1,6 +1,6 @@
 # Android 真机「收到的文件能打开/分享」证据（Pixel 6, SERIAL-TEST-01, 1080x2400, density 420）
 # 对端: 本仓 agentNode「证据节点」 aeb471f0-84da-43f3-8444-536719656776
-#       (Mac 192.168.2.82, UDP 17893 / HTTP 127.0.0.1:8799)
+#       (Mac 192.0.2.82, UDP 17893 / HTTP 127.0.0.1:8799)
 # 取证时间: 2026-10-07 02:21–02:24
 
 $ adb shell getprop ro.product.model; adb shell getprop ro.build.version.release
@@ -18,8 +18,8 @@ $ md5 -q /tmp/a7-photo.png
 $ curl -s -X POST http://127.0.0.1:8799/v1/send-file \
     -H "Authorization: Bearer $(cat /tmp/relay-ev-token)" \
     -H 'Content-Type: application/json' \
-    -d '{"to":"192.168.2.22","port":17878,"path":"/tmp/a7-photo.png","name":"a7-photo.png"}'
-{"status":"offered","to":"bc19885f-0775-47a5-8342-662ca227f769","toHost":"192.168.2.22","transferId":"98cd2dbf-2988-4b7a-bd35-3f25f752027f","name":"a7-photo.png","size":2498,"note":"只是报价：对方接受后才开始传，进度与结果在对方界面上"}
+    -d '{"to":"192.0.2.22","port":17878,"path":"/tmp/a7-photo.png","name":"a7-photo.png"}'
+{"status":"offered","to":"bc19885f-0775-47a5-8342-662ca227f769","toHost":"192.0.2.22","transferId":"98cd2dbf-2988-4b7a-bd35-3f25f752027f","name":"a7-photo.png","size":2498,"note":"只是报价：对方接受后才开始传，进度与结果在对方界面上"}
 
 # 手机侧：会话页（adb shell uiautomator dump，下同；只摘与文件卡有关的部分）。
 # 报价到了、但**没有替用户点头** —— 2 KB 的 png 在没有 purpose 时仍要用户按「接收」。

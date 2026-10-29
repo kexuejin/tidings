@@ -389,7 +389,9 @@ python3 tools/unused-imports.py --check
 
 ```bash
 # ① 有没有把本机/真机身份带出去（序列号、主机名、家网段、个人路径、真 nodeId）
-git diff origin/main..HEAD | grep -nE "^\+.*(SERIAL-TEST|kedeMac-|/Users/[a-z]|/Volumes/[A-Za-z])" | head
+#    序列号按**形态**判（12 位以上大写字母数字），不再写具体那台机器的前缀 —— 它已经从
+#    仓库里清掉了，把前缀留在守卫里等于守卫自己又泄露一次。命中常量名属正常，人工过一眼。
+git diff origin/main..HEAD | grep -nE "^\+.*([A-Z0-9]{12}|/Users/[a-z]|/Volumes/[A-Za-z]|192\.168\.|2408:)" | head
 # ② 提交邮箱是不是 noreply（真邮箱写进公开历史后要再重写一次历史才能改）
 git log origin/main..HEAD --format="%an <%ae>" | sort -u
 # ③ 有没有被忽略的文件其实已入库

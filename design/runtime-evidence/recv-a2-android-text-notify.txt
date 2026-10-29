@@ -1,5 +1,5 @@
 # Android 真机「收到文本 → 弹通知 → 落盘」证据（Pixel 6, SERIAL-TEST-01, Android 15 / SDK 35, 1080x2400, density 420）
-# 对端: 证据节点 aeb471f0-84da-43f3-8444-536719656776（Mac 192.168.2.82, UDP 17893 / TCP 17894）
+# 对端: 证据节点 aeb471f0-84da-43f3-8444-536719656776（Mac 192.0.2.82, UDP 17893 / TCP 17894）
 # 取证时间: 2026-10-07 02:08–02:10
 
 对应 ACCEPTANCE.md 的 A2（通知）与 A1 里「冷启动后恢复出上次的会话线程」那一条。
@@ -8,8 +8,8 @@
 ## 1. 发送（Mac → 手机，单播到手机的 UDP 17878）
 
 $ curl -sS -X POST http://127.0.0.1:8799/v1/send -H "Authorization: Bearer $RELAY_EV_TOKEN" \
-    -d '{"to":"192.168.2.22","port":17878,"text":"真机接收方向验收：这是一条从 Mac 上的 agentNode 发出的消息，用来验证 Pixel 6 能收到、能落盘、能弹通知。"}'
-{"status":"sent","to":"bc19885f-0775-47a5-8342-662ca227f769","toHost":"192.168.2.22","note":"对方已 ACK"}
+    -d '{"to":"192.0.2.22","port":17878,"text":"真机接收方向验收：这是一条从 Mac 上的 agentNode 发出的消息，用来验证 Pixel 6 能收到、能落盘、能弹通知。"}'
+{"status":"sent","to":"bc19885f-0775-47a5-8342-662ca227f769","toHost":"192.0.2.22","note":"对方已 ACK"}
 
 ## 2. 系统通知真的弹了（A2）
 
@@ -31,7 +31,7 @@ text='证据节点'   desc=''  click=false [252,866][425,927]
 text='刚刚'      desc=''  click=false [937,872][996,912]
 $ （点进会话页）
 text='在线'                                            desc=''  click=false [650,172][709,212]
-text='192.168.2.82 · TCP 17894 · 能力：ag1 tw1 agn1'      desc=''  click=false [306,218][796,258]
+text='192.0.2.82 · TCP 17894 · 能力：ag1 tw1 agn1'      desc=''  click=false [306,218][796,258]
 text='真机接收方向验收：这是一条从 Mac 上的 agentNode 发出的消息，用来验证 Pixel 6 能收到、能落盘、能弹通知。'
 
 ## 4. 落盘（A1 的持久化）

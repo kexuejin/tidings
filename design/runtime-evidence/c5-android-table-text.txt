@@ -1,6 +1,6 @@
 # Android 真机「表格图片文字视图 tbl1」证据（Pixel 6, SERIAL-TEST-01, 1080x2400, density 420）
 # 对端: 本仓 agentNode「证据节点」 aeb471f0-84da-43f3-8444-536719656776
-#       (Mac 192.168.2.82, UDP 17893 / HTTP 127.0.0.1:8799)
+#       (Mac 192.0.2.82, UDP 17893 / HTTP 127.0.0.1:8799)
 # 取证时间: 2026-10-07 02:43–02:47
 
 # 这条验收问三件事：① 带 tableText 的图片报价，气泡里该出现「看表格文字」开关；
@@ -29,10 +29,10 @@ $ ls -l /tmp/a7-photo.png; md5 -q /tmp/a7-photo.png
 $ curl -s -X POST http://127.0.0.1:8799/v1/send-file \
     -H "Authorization: Bearer $(cat /tmp/relay-ev-token)" \
     -H 'Content-Type: application/json' \
-    -d '{"to":"192.168.2.22","port":17878,"path":"/tmp/a7-photo.png",
+    -d '{"to":"192.0.2.22","port":17878,"path":"/tmp/a7-photo.png",
          "name":"table-2026-10.png","purpose":"image",
          "tableText":"月份\t收入\t支出\n1月\t12000\t8400\n2月\t9800\t10150\n3月\t15300\t7200"}'
-{"status":"offered","to":"bc19885f-0775-47a5-8342-662ca227f769","toHost":"192.168.2.22","transferId":"74d4728c-83c4-4fda-8d3f-cd1cd5cfda3f","name":"table-2026-10.png","size":2498,"note":"只是报价：对方接受后才开始传，进度与结果在对方界面上"}
+{"status":"offered","to":"bc19885f-0775-47a5-8342-662ca227f769","toHost":"192.0.2.22","transferId":"74d4728c-83c4-4fda-8d3f-cd1cd5cfda3f","name":"table-2026-10.png","size":2498,"note":"只是报价：对方接受后才开始传，进度与结果在对方界面上"}
 
 $ python3 /tmp/pxd.py dump        # 摘录
 text='table-2026-10.png'   [84,1603][389,1646]
@@ -61,9 +61,9 @@ text='月份&#9;收入&#9;支出&#10;1月&#9;12000&#9;8400&#10;2月&#9;9800&#9;1
 $ curl -s -X POST http://127.0.0.1:8799/v1/send-file \
     -H "Authorization: Bearer $(cat /tmp/relay-ev-token)" \
     -H 'Content-Type: application/json' \
-    -d '{"to":"192.168.2.22","port":17878,"path":"/tmp/a7-photo.png",
+    -d '{"to":"192.0.2.22","port":17878,"path":"/tmp/a7-photo.png",
          "name":"plain-photo.png","purpose":"image"}'
-{"status":"offered","to":"bc19885f-0775-47a5-8342-662ca227f769","toHost":"192.168.2.22","transferId":"4b61073c-8acc-443b-9154-1bf3d1339e67","name":"plain-photo.png","size":2498,"note":"只是报价：对方接受后才开始传，进度与结果在对方界面上"}
+{"status":"offered","to":"bc19885f-0775-47a5-8342-662ca227f769","toHost":"192.0.2.22","transferId":"4b61073c-8acc-443b-9154-1bf3d1339e67","name":"plain-photo.png","size":2498,"note":"只是报价：对方接受后才开始传，进度与结果在对方界面上"}
 
 $ python3 /tmp/pxd.py dump        # 摘录
 text='plain-photo.png'     [84,1652][345,1695]

@@ -56,7 +56,7 @@ Wi-Fi 省电模式下能否收到、TCP 直连、托盘/深链/多窗口、通�
 - 注意：**没有 `INTERNET` 权限时 `DatagramSocket` 在真机抛 `SocketException: Permission denied`，
   而构建与单测全绿** —— 这是清单里最容易被漏掉的一类缺陷。
 - 证据（2026-10-07，Pixel 6）：`design/runtime-evidence/scan-a15-android-permission.txt`
-  记着顶部「mDNS 广播中 · UDP 17878 / TCP 17879」、本机地址 `192.168.2.22:17878`、
+  记着顶部「mDNS 广播中 · UDP 17878 / TCP 17879」、本机地址 `192.0.2.22:17878`、
   状态「正常 · 本机防火墙已放行」、在线节点 `1 / 1`，且冷启动后恢复出上次的会话线程。
   > **这条读数要按模式读**：它取自带该同步条的构建。加密数据面开启后，顶部不再出现 `TCP 17879`
   > —— 那个监听已退役（判据见 A21）；**legacy 模式下仍是 17879**。`UDP 17878` 两种模式都在。
@@ -229,7 +229,7 @@ Wi-Fi 省电模式下能否收到、TCP 直连、托盘/深链/多窗口、通�
   这只证明「像素里那张码是对的」，**不能替代拿手机扫**。
 - 真机证据（2026-10-07，Pixel 6）：节点页「我的二维码」卡画出 25 模块的码，
   content-desc 是「配对二维码，让对方用「节点 → 扫码配对」扫它」，下面印
-  `relay://192.168.2.22:17878` 与说明句 —— 见
+  `relay://192.0.2.22:17878` 与说明句 —— 见
   `design/runtime-evidence/scan-a15-android-permission.txt`。
 
 ### A15 扫码配对（1、3、4 与拒绝授权已跑；**第 2 步真机对扫还没跑过**）
@@ -255,7 +255,7 @@ Wi-Fi 省电模式下能否收到、TCP 直连、托盘/深链/多窗口、通�
 - **第 3 步已经用另一条路跑完了（2026-10-07）**：扫码页多了一个「从图片导入二维码」，
   从一张**已有的图片**里读码，不需要相机、也不需要第二块屏幕。Android（Pixel 6）与
   iOS（iPhone 17 Pro 模拟器）都验过：删空「已保存的节点」→ 导入一张编着
-  `relay://192.168.2.82:17878` 的图 → 横幅「已向 192.168.2.82:17878 打招呼，等它回应。」，
+  `relay://192.0.2.82:17878` 的图 → 横幅「已向 192.0.2.82:17878 打招呼，等它回应。」，
   落盘设置里多出那一条；两张反例图分别给出「这个二维码不是捎话的配对码。」与
   「这张图里没找到二维码。换一张对着码拍的照片，或者直接用相机扫。」。全程命令与原始输出见
   [`design/runtime-evidence/scan-import-image.txt`](design/runtime-evidence/scan-import-image.txt)。
@@ -323,14 +323,14 @@ Wi-Fi 省电模式下能否收到、TCP 直连、托盘/深链/多窗口、通�
 - **自动化真跑（2026-10-10，Pixel 6 真机，`--ui-assist`）**：两个方向都已在夹具里跑绿，
   这是 A17 的**机器读数**（不是上面 `--mode watch` 那 22 条）：
   * 方向①（手机当 Sharer，真 MediaProjection）`python3 scripts/e2e/e2e_screen.py --mode viewer
-    --ui-assist --secs 150 --phone 192.168.2.22 --host-ip 192.168.2.82 --tcp-port 17920`
+    --ui-assist --secs 150 --phone 192.0.2.22 --host-ip 192.0.2.82 --tcp-port 17920`
     ⇒ **`result PASS 24`**（`/tmp/screen-viewer4.log`）：assist 按 dump 坐标依次点
     `同意共享` (719,1336) → `共享一个应用` (540,1143) → `共享整个屏幕` (461,1332) →
     `共享屏幕` (859,1597)，随后 TCP 收到 **60 帧 / 8 种尺寸**（`frames-ok(60/10)`）。
   * 方向②（手机当 Viewer，夹具当 Sharer）`--mode sharer --ui-assist --secs 120 --tcp-port 17921`
     ⇒ **`result PASS 24`**（`/tmp/screen-sharer3.log`）：assist 点会话行 → 点「屏幕协助」→
     夹具收到 `screen.request`（`udp<- type=screen → ACK`）→ 回 `screen.accept` →
-    手机 TCP 连入 `192.168.2.22:57176` → `screen-open` 的 sessionId/token 与 accept 一致 →
+    手机 TCP 连入 `192.0.2.22:57176` → `screen-open` 的 sessionId/token 与 accept 一致 →
     泵出 **40 帧**假 JPEG（`frames-ok(40/20)`）。
   * 跑绿路上抓出的东西（**门禁全绿也照样红**）：①系统投屏授权对话框的模式是 **Spinner**，
     默认「共享一个应用」⇒ 确认键是「下一步」，切到「共享整个屏幕」才变「共享屏幕」；
@@ -669,7 +669,7 @@ Wi-Fi 省电模式下能否收到、TCP 直连、托盘/深链/多窗口、通�
 
 ### C8 戳一碰收到时通知并定位到该会话（✅ 已跑 2026-10-07，Pixel 6 真机）
 - 步骤：手机停在**别的**标签页（比如「设置」），Mac 上的 agentNode 发 `POST /v1/nudge`
-  （`{"to":"192.168.2.22","port":17878}`）。
+  （`{"to":"192.0.2.22","port":17878}`）。
 - 期望：手机弹出一条系统通知；点开应用后**直接落在与那个对端的会话里**（不用自己找）。
 - 实测（`design/runtime-evidence/c8-android-nudge-focus.txt` 是原始输出）：
   - 停在「设置」页时戳一下 ⇒ 5 秒后界面**自己切进**「证据节点」会话（昵称、Agent 徽章、在线）。

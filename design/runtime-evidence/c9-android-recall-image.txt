@@ -1,5 +1,5 @@
 # Android 真机「自己发出的图片能撤回」证据（Pixel 6, SERIAL-TEST-01, Android 15 / SDK 35, 1080x2400, density 420）
-# 对端: 证据节点 aeb471f0-84da-43f3-8444-536719656776（Mac 192.168.2.82, UDP 17893 / TCP 17894）
+# 对端: 证据节点 aeb471f0-84da-43f3-8444-536719656776（Mac 192.0.2.82, UDP 17893 / TCP 17894）
 # 取证时间: 2026-10-07 03:25–03:35
 
 对应 ACCEPTANCE.md 的 C9。发送侧是装在 Pixel 6 上的 `app.relay`（真机界面点「发文件」走
@@ -74,7 +74,7 @@ $ curl -s http://127.0.0.1:8799/healthz -H "Authorization: Bearer $(cat /tmp/rel
 
 text='证据节点'                                       desc=''  click=false [306,166][452,218]
 text='在线'                                         desc=''  click=false [650,172][709,212]
-text='192.168.2.82 · TCP 17894 · 能力：ag1 tw1 agn1'  desc=''  click=false [306,218][796,258]
+text='192.0.2.82 · TCP 17894 · 能力：ag1 tw1 agn1'  desc=''  click=false [306,218][796,258]
 
 
 ## 4. 重发：报价带着 msgId 出去

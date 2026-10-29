@@ -40,8 +40,8 @@ ACCEPTANCE 的 A2 只跑过「授权后弹通知」的正向路径，P1-7 加的
 设置（装机默认，未注入任何开关）：
   notifyAgentMessages = true / notifyMentionOnly = true / notifyQuietHours = false
 
-  POST /v1/send {"to":"192.168.2.22","port":17878,"text":"notify-t1-112400"}
-  → {"status":"sent","toHost":"192.168.2.22","note":"对方已 ACK"}
+  POST /v1/send {"to":"192.0.2.22","port":17878,"text":"notify-t1-112400"}
+  → {"status":"sent","toHost":"192.0.2.22","note":"对方已 ACK"}
 
   dumpsys notification --noredact:
     NotificationRecord(... pkg=app.relay id=1001 importance=3
@@ -60,7 +60,7 @@ ACCEPTANCE 的 A2 只跑过「授权后弹通知」的正向路径，P1-7 加的
   adb shell run-as app.relay cp /data/local/tmp/set.json files/relay/settings.json
   adb shell am start -n app.relay/.app.MainActivity     # 重启后读新设置
 
-  POST /v1/send {"to":"192.168.2.22","port":17878,"text":"notify-t2-112730"}
+  POST /v1/send {"to":"192.0.2.22","port":17878,"text":"notify-t2-112730"}
   → {"status":"sent",...,"note":"对方已 ACK"}
 
   adb shell run-as app.relay grep -c notify-t2-112730 files/relay/messages.json  → 1
@@ -77,7 +77,7 @@ ACCEPTANCE 的 A2 只跑过「授权后弹通知」的正向路径，P1-7 加的
   adb shell cmd alarm set-timezone Asia/Dubai        # UTC+4
   adb shell date → Wed Oct  7 07:27:xx +04 2026      # 07:2x < 8 ✓
 
-  POST /v1/send {"to":"192.168.2.22","port":17878,"text":"notify-t3-1129xx"}
+  POST /v1/send {"to":"192.0.2.22","port":17878,"text":"notify-t3-1129xx"}
   → {"status":"sent",...,"note":"对方已 ACK"}
   messages.json grep -c → 1 ；dumpsys notification grep -c → 0
 
@@ -114,7 +114,7 @@ ACCEPTANCE 的 A2 只跑过「授权后弹通知」的正向路径，P1-7 加的
 五、戳一碰（C8）：前台能到，后台要看冻结脸色
 --------------------------------------------------------------------------------
 前台（app 在前台）：
-  POST /v1/nudge {"to":"192.168.2.22","port":17878}
+  POST /v1/nudge {"to":"192.0.2.22","port":17878}
   → {"status":"sent",...,"note":"对方已 ACK；按协议戳一碰不排队，没 ACK 就是没送到"}
   dumpsys notification:
     android.title=String (证据节点)
@@ -134,7 +134,7 @@ ACCEPTANCE 的 C8 只记了「应用在后台时戳不到」。实测范围更�
   trimMemoryLevel=0
 同时刻：
   curl /v1/peers                → online=false
-  nc -z -G 3 192.168.2.22 17879 → 连不上（app 在前台时同一命令 TCP open）
+  nc -z -G 3 192.0.2.22 17879 → 连不上（app 在前台时同一命令 TCP open）
 
 不是这两种常见嫌疑（都查了，都不是）：
   adb shell am get-standby-bucket app.relay → 10（ACTIVE）
@@ -163,7 +163,7 @@ iOS 根本没有 API）」。
   adb shell settings put global auto_time_zone 1     # 时区回 Asia/Shanghai（CST）
   adb shell am force-stop app.relay
   adb shell run-as app.relay cp /data/local/tmp/set.json files/relay/settings.json
-    → {"nodeId":"bc19885f-...","manualPeers":[{"host":"192.168.2.82"}],
+    → {"nodeId":"bc19885f-...","manualPeers":[{"host":"192.0.2.82"}],
        "profileRev":4,"persistMessages":true}        # 回到注入前的 4 个键
   adb shell pm grant app.relay android.permission.POST_NOTIFICATIONS
   adb shell am start -n app.relay/.app.MainActivity

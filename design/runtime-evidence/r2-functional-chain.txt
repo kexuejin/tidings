@@ -2,8 +2,8 @@
 时间: 2026-10-12 21:10–22:00 CST
 执行: Lead（本会话）
 环境:
-  - 桌面: macOS 26 (darwin), 内网 IP 192.168.2.82 (en1)
-  - 移动: Pixel 6 `SERIAL-TEST-01`, app.relay, IP 192.168.2.22, UDP 17878 / TCP 17879
+  - 桌面: macOS 26 (darwin), 内网 IP 192.0.2.82 (en1)
+  - 移动: Pixel 6 `SERIAL-TEST-01`, app.relay, IP 192.0.2.22, UDP 17878 / TCP 17879
   - agentNode: 本机常驻 JVM, 控制面 127.0.0.1:8788 (pid 21309)
   - 打包产物: scaffold/desktopApp/build/compose/binaries/main/app/捎话 Tidings.app
                 scaffold/desktopApp/build/compose/binaries/main/dmg/捎话 Tidings-1.0.0.dmg (129771392 B, 20:31:39)
@@ -25,9 +25,9 @@
 命令:
   curl -s -X POST http://127.0.0.1:8788/v1/send \
     -H 'content-type: application/json' \
-    -d '{"to":"192.168.2.22","text":"R2功能链路验证 215744"}'
+    -d '{"to":"192.0.2.22","text":"R2功能链路验证 215744"}'
 返回:
-  {"status":"sent","to":"f6a7b8c9-ede7-4ed1-84a4-4941d21cf81d","toHost":"192.168.2.22","note":"对方已 ACK"}
+  {"status":"sent","to":"f6a7b8c9-ede7-4ed1-84a4-4941d21cf81d","toHost":"192.0.2.22","note":"对方已 ACK"}
 期望: 手机「消息」列表出现该文本，且来源显示为 Agent 节点。
 实际（真机无障碍树，消息页）:
   'Tidings Agent'  'Agent'  'R2功能链路验证 215744'  '1 分钟前'  [未读徽标 1]
@@ -55,7 +55,7 @@
 --------------------------------------------------------------------
 命令:
   export ANDROID_HOME=$HOME/Library/Android/sdk
-  python3 scripts/e2e/e2e_agent.py --phone 192.168.2.22 --host-ip 192.168.2.82
+  python3 scripts/e2e/e2e_agent.py --phone 192.0.2.22 --host-ip 192.0.2.82
 结果: **result PASS 61**
 覆盖面（夹具自检 + 真机断言）:
   - 夹具先自检 22 条（信封形状、UDP 上限、CAP 声明、payload 白名单、cursor 必须是 JSON number…）
@@ -99,12 +99,12 @@
 5. 复现命令汇总
 --------------------------------------------------------------------
   # 真机 Agent 会话/事件
-  python3 scripts/e2e/e2e_agent.py --phone 192.168.2.22 --host-ip 192.168.2.82
+  python3 scripts/e2e/e2e_agent.py --phone 192.0.2.22 --host-ip 192.0.2.82
   # 短/长文本 + 离线补发
-  python3 scripts/e2e/e2e_messaging.py --phone 192.168.2.22 --host-ip 192.168.2.82
+  python3 scripts/e2e/e2e_messaging.py --phone 192.0.2.22 --host-ip 192.0.2.82
   # agentNode → 手机（控制面）
   curl -s -X POST http://127.0.0.1:8788/v1/send -H 'content-type: application/json' \
-       -d '{"to":"192.168.2.22","text":"…"}'
+       -d '{"to":"192.0.2.22","text":"…"}'
   # 手机 → agentNode（读台账）
   curl -s "http://127.0.0.1:8788/v1/inbox?since=0&limit=500" | python3 -c \
        "import json,sys; [print(m['envelope']['from'][:8], m['envelope']['payload'].get('text')) \

@@ -46,8 +46,8 @@ scripts/e2e/
 | 前提 | 怎么确认 | 说明 |
 |---|---|---|
 | 真手机插着、`adb` 里有设备 | `adb devices` 出现 `<serial>\tdevice` | 没有设备时夹具会走到退出码 **2**（`relay_e2e.py:421 require_device()`） |
-| 手机 IP | 默认 `192.168.2.22`（`relay_e2e.py:104 DEFAULT_PHONE`，Pixel 6 `SERIAL-TEST-01`） | 换了网络要显式传 `--phone` |
-| 本机 Mac 的 LAN IP | 默认 `192.168.2.82`（`relay_e2e.py:105 DEFAULT_HOST_IP`，`en1`） | **必须和手机同一个网段**：它会被写进夹具 profile 的 `host` 字段，空字符串会让手机整帧看不明白（`relay_e2e.py:165-174 set_host()`） |
+| 手机 IP | 默认 `192.0.2.22`（`relay_e2e.py:104 DEFAULT_PHONE`，Pixel 6 `SERIAL-TEST-01`） | 换了网络要显式传 `--phone` |
+| 本机 Mac 的 LAN IP | 默认 `192.0.2.82`（`relay_e2e.py:105 DEFAULT_HOST_IP`，`en1`） | **必须和手机同一个网段**：它会被写进夹具 profile 的 `host` 字段，空字符串会让手机整帧看不明白（`relay_e2e.py:165-174 set_host()`） |
 | 对端空闲 | `scripts/relay-liveness.sh --quiet; echo $?` | **跑任何夹具之前先跑它**。`0` = 对面空闲，可以开始；`1` = 对面正在写，等它停；`2` = 用法错误。外部进程可能占用 `UDP *:17878`、`TCP *:17878`（加密数据面的监听口）与 `TCP *:17879`（legacy），它跑着的时候夹具的握手会被抢 |
 | 手机装了被测包 | `adb shell pm list packages \| grep app.relay` | 包名 `app.relay` |
 | 手机和本机在同一 Wi-Fi、没开 VPN | 手机节点页顶部同步条变绿 | VPN 会让 mDNS/广播收不到（界面会出 `disc_vpn_warning`） |
@@ -80,7 +80,7 @@ scripts/e2e/
 scripts/relay-liveness.sh --quiet || exit 1
 
 # 2) 跑一个夹具
-python3 scripts/e2e/e2e_messaging.py --phone 192.168.2.22 --host-ip 192.168.2.82 --secs 90
+python3 scripts/e2e/e2e_messaging.py --phone 192.0.2.22 --host-ip 192.0.2.82 --secs 90
 ```
 
 统一 CLI（`relay_e2e.py:1030-1078 main_wrapper()` 提供，所有夹具一致）：
@@ -92,13 +92,13 @@ python3 scripts/e2e/e2e_<feature>.py --phone <手机IP[:UDP端口]> [--host-ip <
 
 | 参数 | 默认 | 含义 |
 |---|---|---|
-| `--phone` | `192.168.2.22` | 手机 IP，可带 `:UDP端口`；也接受 `[v6]:port` 写法 |
-| `--host-ip` | `192.168.2.82` | 本机 LAN IP，写进夹具 profile 的 `host`；非合法 IPv4 直接退出码 2 |
+| `--phone` | `192.0.2.22` | 手机 IP，可带 `:UDP端口`；也接受 `[v6]:port` 写法 |
+| `--host-ip` | `192.0.2.82` | 本机 LAN IP，写进夹具 profile 的 `host`；非合法 IPv4 直接退出码 2 |
 | `--secs` | `90` | 本夹具的总预算秒数（等待窗口的上界），不是超时后强杀 |
 | `--dry-run` | 关 | 只做参数与纯本地自检：**不碰网络、不碰设备**，退出码 0 |
 
 > **注意**：契约文档写 `--phone` 必填，但共享库给了默认值（`relay_e2e.py:1039`），
-> 不传也能跑起来、且会去连 `192.168.2.22`。**建议永远显式传**，否则你在别的网段会
+> 不传也能跑起来、且会去连 `192.0.2.22`。**建议永远显式传**，否则你在别的网段会
 > 得到一个「连不上」的假失败。
 
 ### 3.2 跑全部夹具
@@ -137,7 +137,7 @@ scripts/relay-liveness.sh --quiet || exit 1
 rc=0
 for f in scripts/e2e/e2e_*.py; do
   echo "=== $f ==="
-  python3 "$f" --phone 192.168.2.22 --host-ip 192.168.2.82 || rc=$?
+  python3 "$f" --phone 192.0.2.22 --host-ip 192.0.2.82 || rc=$?
 done
 echo "overall exit=$rc"
 ```
@@ -176,7 +176,7 @@ if __name__ == "__main__":
 ### 4.1 三种行
 
 ```
-[EVID] host-ip=192.168.2.82 phone=192.168.2.22:17878 nodeId=3f9a1c02   ← 证据，给人看的
+[EVID] host-ip=192.0.2.82 phone=192.0.2.22:17878 nodeId=3f9a1c02   ← 证据，给人看的
 [ ok ] short-envelope-fits-udp-packet — 214B <= 1200B                   ← 断言通过
 [FAIL] long-envelope-forces-tcp — 780B > 1200B                          ← 断言失败
 ```
@@ -210,7 +210,7 @@ result FAIL 12 failed=long-envelope-forces-tcp,profile-caps-within-limits
 CLI 上一般这样连读，别只看退出码：
 
 ```bash
-out=$(python3 scripts/e2e/e2e_messaging.py --phone 192.168.2.22 2>&1); rc=$?
+out=$(python3 scripts/e2e/e2e_messaging.py --phone 192.0.2.22 2>&1); rc=$?
 echo "$out" | tail -1
 [ "$rc" -eq 0 ] && echo "PASS" || echo "不通过（$rc）"
 ```
