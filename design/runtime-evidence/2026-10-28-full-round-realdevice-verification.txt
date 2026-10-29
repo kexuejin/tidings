@@ -1,0 +1,200 @@
+全功能真实验证轮 —— 2026-10-28 深夜(测试手机真机 + Mac 桌面端)
+
+结论 → 链路 → 参数 → 逐项读数(怎么做的 / 期望 / 实际 / 判定)。
+
+> 脱敏口径(与「证据与文档脱敏」同一套):设备序列号 → `<device-serial>`;主机名 → `<host>`;
+> 家网段 → 192.0.2.x(RFC 5737 文档段);真 nodeId / groupId / agentKey / wsId → 同长度的合成值。
+> 仓库是公开的,读数里的**结论**保留,能指向某台具体设备的标识不保留。
+
+## 0. 装置与产物
+
+- 手机:测试手机(`<device-serial>`,Android 15,IP 192.0.2.22,debug 包 com.kapp.tidings.debug)
+- 桌面:Mac(`<host>`,IP 192.0.2.82,/Applications/Tidings.app)
+- 构建产物(HEAD = 01fcedf8):
+  - APK:~/Downloads/relay-build-2026-10-28/androidApp-debug.apk
+    sha256 = cea45ebb02a4d3ed5fb69bf10a96dbedc011eebf69a9b84736519b58c3a10f9a
+  - 桌面:~/Downloads/relay-build-2026-10-28/Tidings.app(Contents/MacOS/Tidings)
+    sha256 = e0303219b76d14a6a2a4d6d200bcf9d64517955e3003deb54a169b3042d22850
+- 新代码证明:HEAD 上 ae21370b 新增的 `ComponentSizes.MessageAvatar` 在 APK classes2/classes12.dex
+  与桌面 composeApp-jvm-95dd6defdb088e944419b35c0994831.jar 中均命中(字节级检索)。
+- 装机:APK `install -r -d` Success,lastUpdateTime 2026-10-28 23:12:19;
+  桌面 ditto 替换 + `lsregister -f -R -trusted` + `open -a`,进程起来后
+  lsof 可见 UDP *:17878、TCP *:17879、TCP *:17880、TCP 127.0.0.1:8788 四个监听。
+
+## 1. A1 首启与端口 —— 通过
+
+- 手机首启:会话列表恢复(41 个会话),节点页「41 个节点 · 2 在线」。
+- 桌面四端口就绪(见上);控制面 GET /v1/peers 正常返回。
+
+## 2. 文本与长文本 —— 通过
+
+| 步骤 | 读数 |
+|---|---|
+| B1 桌面→手机短文本 | `POST /v1/send` → `outcome=sent-via-link elapsed=30ms,对方已 ACK`;手机 messages.log 行 411 `type=msg kind=text`,messages.json 里同 id `89360f91`,文本一致 |
+| B2 手机→桌面短文本 | 手机 UI 逐键注入并发送 → 出站帧 id `8284a6d3`;桌面 relay.db MessageEntity 同 id,conv_id=0a1b2c3d(1:1),mine=0 |
+| B3 桌面→手机长文本 2408 字节 | >800B,经链路 94ms 送达;手机收到的 UTF-8 字节数 = 2408,头尾逐字一致 |
+| TCP 兜底路径 | 本轮对端走的是链路(TCP 兜底不触发);该路径由 e2e_messaging 夹具覆盖(见 §9) |
+
+## 3. 文件双向 —— 通过(在手机关掉 luciola 后;默认态有 P1 缺陷,见 §8)
+
+| 步骤 | 读数 |
+|---|---|
+| C1 图片(桌面→手机,purpose=image) | 首测卡在「等你接收」(见 §8 缺陷 ①);手机关 luciola 重启后重发 → **自动接收**,落盘 `downloads/c1-round28.png/c1-round28.png`,sha256 `8568015f…61ac` 与源一致;气泡渲染内联缩略图(截图存本地 c1-round28.png) |
+| C2 普通文件(桌面→手机,purpose=share) | 卡片出「接收/拒绝」按钮;点「接收」→ `downloads/c2-doc.txt/c2-doc.txt` 落盘;Completed 分支出「打开/分享」 |
+| C3 语音(.m4a) | 接收后出「播放」,点击后 logcat `MediaPlayerService onAudioDeviceUpdate` + `audio_hw prepare low-latency-playback`(真实出声);落盘 sha256 `8b4b5341…80b7` 与源一致 |
+| C4 手机→桌面 | 聊天页附件 → 「发文件」 → 系统文档选择器选 /sdcard/Download/c4-up.txt → 附件芯片 → 点发送 → 桌面收到入站 offer(帧 `op:offer transferId 44f1857a`,桌面 messages.log 行 273131)→ 桌面 UI 点「接收」→ `downloads/c4-up.txt/c4-up.txt` sha256 `5669308a…b12c` 与源一致 |
+| 桌面收卡出口 | 桌面 UI 的已接收卡有「打开/分享」两个按钮(截图 desktop-2.png);手机已接收语音卡有「播放/打开/分享」 |
+
+判读要点:手动「接收」的第一击有概率无响应(23:30 两次点「接收」只有第二次产生 accept 帧;
+23:43 一次点击完全无帧)。重放即可成功,单测覆盖不到这条 UI 层偶发。
+
+## 4. 撤回与戳一碰 —— 通过
+
+- D1 撤回:手机发 `d1 recall probe zz9` → 长按 → 撤回 → 手机显示「你撤回了一条消息」;
+  桌面 relay.db 出现 `text='RecalledByPeer'` 行(id 3a2a3f7c);桌面聊天页 UI 渲染「对方撤回了一条消息」(截图 desktop-2.png)。
+- D2 戳一碰:`POST /v1/nudge` → 手机停在设置页 → 自动定位进 dsh 会话;
+  `dumpsys notification`:pkg=com.kapp.tidings.debug id=1001 channel=relay_messages_v2 flags=AUTO_CANCEL。
+  另发现:通知列表里有 `channel=后台保持连接 … FOREGROUND_SERVICE` 常驻通知 —— C8 时代
+  「manifest 没有任何 <service>」的现状已经变了(现在是前台服务形态),此结论需另核。
+
+## 5. 群聊 —— 通过(建群/同步/双向群文本)
+
+- 手机建群 `round28-grp`(成员:自己 + 桌面):横幅「「round28-grp」建好了,正在通知 1 位成员。」
+- 群元数据同步:桌面 settings.json 出现同 groupId 4e5f6071,members=2,rev=1。
+- g1 手机→桌面群文本:桌面 DB `conv_id=group:4e5f6071…,sender_id=0a1b2c3d(用户 nodeId,不是 agent)`,mine=0;桌面 UI 气泡署名测试手机。
+- d2 桌面→手机群文本:桌面 UI 输入发送(经 System Events 键入),DB row mine=1;手机 messages.log 命中 1 条。
+- 群 @ 与群文件扇出:留给 e2e_group 夹具(见 §9);手机侧群文件扇出未单独手测。
+
+## 6. Agent 会话/事件帧(PPE-1)—— 部分通过(门禁闭环验证了负例;正例归夹具)
+
+- 手机在「工作区 → 工作区详情」点「申请授权」→ 手机横幅「申请已发出,等对端确认。」;
+  桌面 `GET /v1/agent/grants` 的 `pending` 出现该申请(nodeId 0a1b2c3d, agentKey dsh-5f607182, wsId ws-60718293a4b5)。
+- **授权未批时发 agent-session/event → 控制面回 `not-granted`**(策略 request,fail-closed,对端无帧):
+  错误信息指路「桌面端捎话 → 授权里批准」。
+- 桌面授权批准入口未找到:菜单栏「捎话 Tidings」只有 设置/诊断包;设置窗「可信设备与配对」是
+  配对信任(设备级),不是 agent 授权;托盘菜单(AXMenuBarItem)不可脚本化展开。
+  这一条按「没做成」记录,不下结论。
+- 正例(会话卡/事件流/游标排序)由 e2e_agent 夹具覆盖(见 §9)。
+
+## 7. 搜索与离线判定 —— 通过
+
+- 手机全局搜索浮层:键入 round28 → 「与 dsh 的聊天 · 2 条相关」+ 命中行;有 全部/联系人/聊天记录/文件 四个分页。
+- A12:force-stop 手机进程(00:10:09)→ 桌面 /v1/peers 该 peer online 翻 false 的时刻在 **+90s**(80s 时仍 true)—— Timings.offlineAfter 如实生效。
+
+## 8. 本轮抓到的缺陷与观察(按严重度)
+
+① **P1 · 默认态文件传输死锁(手机↔桌面)**:两端全新默认安装(luciola 实验信道手机默认开、
+   桌面需 TIDINGS_LUCIOLA=1 才开)时,桌面→手机的图片/文件永远停在「等你接收」、目录建了但 0 字节;
+   手机点「接收」后桌面 `accepted=true` 也不推。手机侧日志 `[luciola] accept … channel=true`(登记信道等推),
+   桌面侧 `[luciola] accept-in … push=false`(无信道不推)—— **两端互等**。手机把 luciola 开关关掉重启后
+   `[luciola] accept … channel=false` → legacy 拨 17879 拉取,sha256 全对。机制:手机 fileChannel 非空时按
+   `canUseChannel(self fch1, peer fch1)` 判定,而手机注册表里桌面身份的 caps 含 fch1(陈旧资料;桌面现在的
+   profile 不带 fch1,profileRev 恒 0,同版本号不触发 entry 重取)。夹具演的对端不声明 fch1,所以 9 夹具全绿
+   也测不到这条。相关三处:RelaySettings.experimentalLuciola 默认 true vs 设置页注释「默认关」;
+   FileChannelNegotiation 只看静态 caps;PeerRegistry 同 rev 不刷新 caps。
+② **P2 · 同一台桌面在手机上以两个节点出现**:1b2c3d4e/`<host>`-97 与 2c3d4e5f/`<host>`-156.local
+   (后者 nick 为空时回退 host 名)同 IP:17878 同时在线广播,能力表一致,tlsPin 不同;链路层还分别对着两个
+   身份各拨 17879(每 3-4 秒一次)。桌面建群成员选择器里同样列出 5 个同名设备条目。
+   §2.4「一个事实只有一个来源」在这条上不成立,待根因(第二个身份的来源未定位到代码)。
+③ **P2 · 控制面按 IP 发送解析到陈旧身份**:`POST /v1/send-file {"to":"192.0.2.22"}` 解析到了
+   3d4e5f60(旧测试手机身份)而不是在线的 0a1b2c3d,offer 发进虚空;必须显式传 nodeId。
+④ **P3 · 文件卡「直接」徽章无条件渲染**:ChatBubbles.kt:961 的 file_transfer_direct 徽章没有 if 包裹,
+   所有文件卡(收/发/任何传输)都显示「直接」,徽章失去信息量。
+⑤ **P3 · 桌面会话列表对新群会话刷新滞后**:g1 群文本 23:57 落库(ConversationSummary 有行),
+   23:58-00:00 的列表多次截屏都不显示 round28-grp,00:06 切换侧栏后才出现。
+⑥ **观察 · 桌面「待发送 304」**:状态栏的待发送计数长期挂着三位数(对陈旧身份的 scan-ranges 退避重试),
+   读数含义被稀释。
+⑦ **观察 · 桌面 DSH agent 消息会把手机端 1:1 会话标题顶成 "dsh"**:agent:1b2c3d4e…:dsh 的转发消息
+   落进 conv 1b2c3d4e 后,该会话行/聊天页标题从 `<host>`-97 变成 dsh(§2.4 真名被顶掉的变体)。
+⑧ **观察 · 手机手动点「接收」首击偶发无响应**(§3),重放成功。
+
+## 9. e2e 夹具套件(同轮)—— 本轮未完成(环境受阻,如实记录)
+
+- 前置:桌面端退出(释放 UDP 17878);手机 luciola 关(legacy 模式);lastUpdateTime 23:12:19(三轮全程未变,装机未被重装)。
+- 命令:`python3 scripts/e2e/run_all.py --phone 192.0.2.22 --host-ip 192.0.2.82`
+- run12(00:13)作废:轮内我此前误开的 Google Photos 一直占着前台,messaging 36 条 UI 断言全灭
+  (`前台=com.example.photoapp/.pager.HostPhotoPagerActivity` 级联),属环境错非产品信号。
+- run13(00:20)在预检被拒:`relay-liveness.sh` 报 BUSY —— 复核发现「对面在写」的其实是
+  **本文件自己**(证据文件写盘落入 600s 窗口);另注:该脚本名字像探活对端,实际守的是
+  scaffold/ 共享面与批次进度,查的是仓库工作树,与手机无关。
+- run14(00:22,--skip-liveness)再次被环境打断:设备上另一个应用
+  `com.example.otherapp` 反复抢前台,uiautomator dump 反复「不属于本 app」,UI 注入不可用。
+  本轮主动停跑 —— 手机不是本会话独占设备,不该和它抢屏。
+- **结论:夹具套件留待设备可独占时重跑;交互轮(§1-§7)已人工覆盖其中 messaging/files/media
+  的大部分判据,group 的 @ 通知与 agent 会话卡正例是本轮真正的留白。**
+
+## 9b. luciola / A21 加密数据面 —— 手机侧判据全过;桌面侧存在产品缺口
+
+- 桌面:退出后以 `TIDINGS_LUCIOLA=1` 从终端拉起(已用 `ps eww` 确认 env 进入进程),seed 文件存在 ——
+  **但 luciolaMode 仍为 false**:`DesktopAppPlatform` **没有覆写 `luciolaHost`**(接口默认 null),
+  `DesktopLuciolaHost` 整个类(含 env 门、seed/信任库、配对、三个工厂)是**从未接线的死代码**,
+  单测覆盖它,生产路径永远拿不到。P1 级发现:桌面端目前**不存在**开启加密数据面的路径。
+- 手机(luciola 显式 true,重启节点)端口账 —— 与 A21 完全一致:
+  - `nc -z 192.0.2.22 17878`(TCP)→ **通**(加密信道,与发现端口同号不同协议);
+  - 17879 / 17881 / 17882 → **connection refused**;`/proc/net/tcp` 实测监听 {17878, 17880, 17888}。
+- 陌生连接准入:
+  - 空闲陌生 TCP(不发配对帧)→ **35s+ 仍未被断开**(A21 写的是 30s 窗口)—— 未复现,如实记录;
+  - 发垃圾帧 → **立即收到密文回包**(Noise 形态),且 link.json 不新增任何节点 ——
+    「业务帧不进应用层」这半条成立。
+- 混合态(手机 luciola ON + 桌面 legacy)文件互传即 §8 缺陷 ① 的死锁态,不再重复测。
+- 「两端 luciola ON 的探测、≥50MB 大文件、配对错误密钥被拒(bad_secret)」因桌面缺口无法执行,留白。
+
+## 10. 修复轮(2026-10-29,同会话续)
+
+对 §8 的缺陷逐项修复,反向验证均做(把旧行为放回去看测试变红,再恢复):
+
+| 缺陷 | 修法 | 测试 |
+|---|---|---|
+| ① 文件传输死锁 | **stall 看门狗**(TransferManager):登记上信道的入站传输,窗口(默认 10s)内零字节 ⇒ 摘掉信道登记、回退 legacy 拨号拉取。FileChannelRouter 加 `hasReceivedBytes` 探针;NodeRuntime 注入 `channelInboundHasBytes` / `channelForgetInbound`。任何 caps 陈旧形态都能自愈 | TransferChannelStallFallbackTest 3 条(零字节回退/有字节不回退/无探针不启用);反向验证:短路看门狗 ⇒ 红 |
+| ① 之根因(cap 陈旧) | **caps 指纹联动 profileRev**(RelaySettings.withCapsFingerprint):启动时对外声明的那组 caps 与落盘指纹比对,变了 ⇒ rev+1 + 落盘。对端据此单播 entry 换回新 caps(A13c 通道) | CapsFingerprintRevTest 3 条(变一次 bump 一档/没变同实例/旧库首轮建基准) |
+| ② 桌面 luciola 死代码 | DesktopAppPlatform 覆写 `luciolaHost = DesktopLuciolaHost(...)`;env + 设置开关双重门控不变,默认行为零变化 | DesktopLuciolaHostWiringTest 2 条(平台必须提供宿主/env 未开 configure 是 no-op) |
+| ③ 控制面按 IP 解析到陈旧身份 | resolvePeerByHost:在线优先 + lastSeen 新到旧;只剩离线记录时**先向地址要一次当前身份**(3s)再退回离线最新一条(排队语义不变)。选半抽纯函数 | PickPeerRecordForHostTest 4 条(在线必中/全离线取最新/onlineOnly/端口过滤) |
+| ④ 「直接」徽章 | 删除无条件徽章与其文案资源(8ef647b6 引入;设计规格无此元素,每卡都画=零信息量) | 设计门禁回归 |
+| ⑦ 会话标题漂移 | convTitle 1:1 恒为对端节点名;agent 归属由消息署名与 Agent 徽标表达 | RelayUiStateTest 增 1 条(agent 数据到齐后标题不变);反向验证:换回 resolveSenderIdentity ⇒ 红 |
+
+修复轮之后追加的两条(针对 §8-② 的双身份抖动,属数据卫生):
+
+| 项 | 修法 | 测试 |
+|---|---|---|
+| registry 只进不出 | `PeerRegistry.pruneOfflineOlderThan`:启动时剪掉 7 天没露面且不在保留名单(群成员)里的离线身份;节点行/候选池/档案新鲜度一起摘,**pin 不动**(自动过期是数据卫生,撤销信任是用户显式删节点) | PeerRegistryPruneTest 6 条(超窗剪/窗口内留/keep 不剪/在线不剪/候选池清而 pin 留/forget 仍撤 pin) |
+| 同一端点两条链路 | `LinkClient.linkEndpoints`:端点键(host\|port\|安全档)被别的身份占住时不再拨,`dialSkipReason` 记 `endpoint-served-by-*`。快速路径(可靠发送的 `ensureLinked`)同一条纪律 | LinkEndpointDedupTest 4 条(同端点让位/端口或主机不同不算同一端点/自己不算冲突/TLS 与明文是两个端点) |
+
+未修(如实):
+
+- **② 双身份**:来源收敛到「独立数据目录的 headless CLI/agentNode 遗留身份」(空 nick = 从未设过
+  昵称的第二份 settings;host = 机器名)。registry 里还堆着 fixture 时代的旧身份(preview-device、
+  取证探针等)。上面两条只让它**不再抖动**(不重复拨号、过期身份自动退场),**没有**消除第二个身份的来源。
+  与它纠缠的桌面侧 closeCount 持续增长需要**线上**抓证,留待下一步。
+- **⑤ 桌面新群会话列表滞后**:数据流(commit/merge/conversations 派生)逐段读过,逻辑正确;
+  无线上复现不下结论。
+- **⑧ 接收首击偶发无响应**:非确定性 UI 时序,未复现到可测粒度。
+
+## 11. 修复后的真机复验(2026-10-29)
+
+产物:~/Downloads/relay-build-2026-10-29/{androidApp-debug.apk, Tidings.app}
+APK sha256 = 3d3aab53c30f55f9c02a03eb865d0f973718bf48b94ec0a5e5f478a0e9a48a5b
+桌面 sha256 = fed5b03a2915762d670062769a487d70e9e5067fb082c4ac8525bdd9fbdde37d
+新符号证明:APK classes13.dex 与桌面 core-jvm jar 中均命中 `scheduleChannelStallFallback`(本轮修复独有)。
+装机:两端按流程替换/重装(lastUpdateTime 2026-10-29 07:20:52;桌面 lsregister 重注册)。
+
+复验(手机 luciola **开** + 桌面 legacy —— 即当初的死锁形态):
+
+- 桌面→手机图片(purpose=image,自动接收):手机日志
+  `[luciola] channel inbound declined: selfFch1=true peerCaps=[ag1, lnk1, tw1, …]` ——
+  **peerCaps 已无 fch1**(caps 指纹联动让桌面 rev 0→1、手机经 entry 重学了新 caps),
+  协商如实拒绝信道 ⇒ 立即 legacy 拨号,**t=+8s 落盘,sha256 与源逐字一致**。
+  (看门狗本身由单测覆盖;此场景里 caps 修好后协商已不需要它 —— 它守的是其余陈旧形态。)
+- 桌面 settings.json:`profileRev=1`、`capsFingerprint=352ac92e519da4d3` 落盘(首轮基准 bump 生效)。
+- 桌面→手机手动文件(purpose=share):点「接收」→ 落盘 sha256 与源一致。
+- 桌面→手机文本:sent-via-link,手机落库 ✓。
+- 会话标题:手机上与桌面的 1:1 会话标题恒为 `<host>`-97(不再漂移成 dsh);群行预览
+  的 "dsh：" 是**群预览署名**(previewSenderNameOf,设计如此),与会话标题是两回事。
+- 桌面会话列表:新构建首轮即显示 round28-grp(此前 §8-⑤ 的滞后未再出现;未根因定位,
+  不宣称已修,如实记录"当前构建未复现")。
+
+## 12. 未验/留白(如实)
+
+- 群 @ 通知、群文件扇出、agent 会话卡正例:夹具轮未跑成(§9)。
+- 桌面 luciola(A21 两端形态)、A19 改后触发规则真值表:桌面侧产品缺口/未批授权。
+- 桌面授权批准入口:菜单/设置窗/托盘均未找到(agent-grant pending 停留在两端台账上)。
+- 权限弹窗、相机扫码对扫、输入法六项等「机器代替不了」的项仍按 ACCEPTANCE §6 保持未验。
