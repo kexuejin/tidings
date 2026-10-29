@@ -31,6 +31,8 @@ dependencies {
     // 测试里用 Codec 造真实信封(手写 JSON 过不了 Codec 的字段校验 —— 这不是测试取巧,
     // 正是协议层要求"帧必须由编解码器产生")。
     testImplementation(libs.kotlinx.serialization.json)
+    // 源码级守卫共用的读盘工具（只被测试引用，永不进 Tidings.app —— AGENTS §0）。
+    testImplementation(project(":testsupport"))
     implementation(compose.material3)
     implementation(compose.materialIconsExtended)
     implementation(libs.kotlinx.coroutines.core)

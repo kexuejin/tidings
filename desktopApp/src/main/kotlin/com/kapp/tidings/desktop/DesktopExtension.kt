@@ -599,6 +599,91 @@ internal class DesktopExtension(
                     grants.revoke(nodeId = nodeId, scope = AgentGrantScopes.AGENT, agentKey = agentKey)
                 }
             }
+            // M4 跨端派单（规格 §6.2/§6.3）：域层 ↔ 控制面的双向装配。
+            //
+            // 派发方向：`/v1/agent/invoke` 的 HTTP 入口只解包，真正的派发（租约、
+            // 看板卡、零刷屏纪律、审批防重）都在域层网道 —— 这里只把两者接起来。
+            created.invokeDispatcher = { groupId, agentId, prompt, wsId, deadlineMs ->
+                controller.dispatchCrossHostInvoke(groupId, agentId, prompt, wsId, deadlineMs)
+            }
+            // 执行方向：本机承接派单 = 找本机插件 → executePluginTask。与
+            // `/v1/plugin/task`（面板派单）走**同一个**实现，台账同源 —— 两处各写一份，
+            // 迟早漂成「面板派单有台账、执行桥派单没台账」。
+            controller.invokeExecutor = object : com.kapp.tidings.domain.AgentInvokeExecutor {
+                override suspend fun execute(
+                    request: com.kapp.tidings.domain.AgentInvokeTaskRequest,
+                ): com.kapp.tidings.domain.AgentInvokeExecution {
+                    val self = controller.state.value.selfNodeId
+                    // wsId → 路径的解析表只在宿主本机（隐私收口：路径不出宿主）。
+                    val wsPath = request.wsId?.trim()?.takeIf { it.isNotEmpty() }?.let { id ->
+                        controller.state.value.agentWorkspaces.values
+                            .firstOrNull { it.peerId == self && it.wsId == id }?.wsPath
+                    }
+                    val entry = created.pluginForAgent(request.agentId)
+                        ?: return com.kapp.tidings.domain.AgentInvokeExecution(
+                            status = com.kapp.tidings.core.protocol.CodecInvoke.InvokeResultStates.NO_PLUGIN,
+                            error = "no local plugin hosts agent \"" + request.agentId + "\"",
+                        )
+                    val workerCard = java.util.concurrent.atomic.AtomicReference<String?>(null)
+                    var finishSummary: String? = null
+                    var lastError: String? = null
+                    val (sessionId, status, error) = created.executePluginTask(
+                        entry, request.prompt, wsPath, null,
+                    ) { eventType, _, summary, body ->
+                        when (eventType) {
+                            // body 是卡片 JSON 的**文本**（解析在域层的 done 工厂里做 ——
+                            // 这边的类路径上没有 kotlinx-serialization，也不该有）。
+                            "card" -> workerCard.set(body)
+                            "finished" -> finishSummary = summary
+                            "error" -> lastError = summary
+                        }
+                    }
+                    val states = com.kapp.tidings.core.protocol.CodecInvoke.InvokeResultStates
+                    return when {
+                        // 会话都开不出来（插件不可达）：如实回 error，不冒充 no-plugin
+                        // —— 插件在台账里，只是此刻够不着。
+                        sessionId == null -> com.kapp.tidings.domain.AgentInvokeExecution(
+                            status = states.ERROR,
+                            error = error ?: "cannot open a session with \"" + entry.pluginId + "\"",
+                        )
+                        status == "error" -> com.kapp.tidings.domain.AgentInvokeExecution(
+                            status = states.ERROR,
+                            summary = finishSummary,
+                            error = lastError ?: "plugin task ended in error",
+                        )
+                        else -> com.kapp.tidings.domain.AgentInvokeExecution.done(finishSummary, workerCard.get())
+                    }
+                }
+            }
+            // 授权三桥（§6.3）：可信设备判据、每 agent 执行范围、未授权申请进台账
+            // （面板的待批列表会冒出来 —— 面板在设置深处，不主动通知就没人去批）。
+            controller.invokeGrantAllows = { agentId, nodeId ->
+                grants.allows(nodeId, agentKey = agentId, forExecution = true)
+            }
+            controller.invokeExecPolicyOf = { agentId -> execPolicies.policyOf(agentId) }
+            controller.invokeRecordGrantRequest = { nodeId, agentId, reason ->
+                grants.recordRequest(nodeId, agentId, reason, System.currentTimeMillis())
+            }
+            // 宿主侧卡片动作出口（§7.3-2 的插件转发段）：判定记账与全群广播在域层
+            // 原子台账，这里只负责把动作送进插件。会话解析：调用方给的优先，缺了按
+            // agent 最近一次会话兜；都拿不到就如实放弃（不编一个 id 给插件）。
+            controller.onHostCardAction = { agentId, sessionId, _, actionId, decidedBy ->
+                val entry = created.pluginForAgent(agentId)
+                if (entry == null) {
+                    println("[RELAY-INVOKE] card action " + actionId + " for agent " + agentId + " has no local plugin (dropped)")
+                } else {
+                    val sid = sessionId?.takeIf { it.isNotBlank() }
+                        ?: created.latestSessionForAgent(agentId)?.sessionId
+                    if (sid == null) {
+                        println("[RELAY-INVOKE] card action " + actionId + " for agent " + agentId + " has no session to land on (dropped)")
+                    } else {
+                        runCatching { runBlocking { created.pluginAction(entry, sid, actionId, decidedBy) } }
+                            .onFailure { t ->
+                                println("[RELAY-INVOKE] card action " + actionId + " failed: " + (t.message ?: (t::class.simpleName ?: "unknown")))
+                            }
+                    }
+                }
+            }
             // **执行由 DSH 注入桥承担，这里不再跑本地驱动。**
             //
             // 原先这里接的是 `driverRegistry` 里的 `native` 驱动 —— 它自己 KDoc 写着
@@ -636,6 +721,12 @@ internal class DesktopExtension(
     private fun detach() {
         controller.onLocalSessionPageRequest = null
         controller.onAgentPrompt = null
+        // M4 跨端派单五桥随控制面一起撤：留着它们，域层会把派单交给一个已停止的控制面。
+        controller.invokeExecutor = null
+        controller.invokeGrantAllows = null
+        controller.invokeExecPolicyOf = null
+        controller.invokeRecordGrantRequest = null
+        controller.onHostCardAction = null
         // 先停插件（SIGTERM，插件会注销再退）再停控制面：注销要走控制面的 HTTP 路由。
         pluginHost?.stop()
         pluginHost = null

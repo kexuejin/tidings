@@ -310,6 +310,39 @@ class RelayController(
     var onExecDevices: ((agentKey: String?) -> List<ExecDeviceRow>?)? = null
     var onSetExecDeviceAllowed: ((agentKey: String, nodeId: String, allowed: Boolean) -> Unit)? = null
 
+    // ------------------------------------------------ M4 跨端派单的壳层桥（规格 §6.2/§6.3）
+    //
+    // 五个桥都是 `invokeCtl` 里对应字段的公开转发：执行器与授权台账住在壳层
+    // （desktopApp 的 ControlPlane / AgentGrantStore），领域层拿不到 —— 与
+    // `onAgentPrompt` / `onExecDevices` 同一条接缝纪律。没装桥时行为是**诚实的
+    // 降级**：入站派单答一帧 no-executor 拒绝、授权走 fail-closed，绝不沉默。
+    // 手机壳不装执行桥（它不是插件宿主），但可装授权台账桥（它有自己的台账）。
+
+    /** 执行器桥：谁装了它，谁就是能承接派单的宿主。null = 本机没有执行器。 */
+    var invokeExecutor: AgentInvokeExecutor?
+        get() = invokeCtl.executor
+        set(value) { invokeCtl.executor = value }
+
+    /** 可信设备判据：`(agentId, nodeId) → 是否已批准执行`。null = 没有台账可用。 */
+    var invokeGrantAllows: ((agentId: String, nodeId: String) -> Boolean)?
+        get() = invokeCtl.grantAllows
+        set(value) { invokeCtl.grantAllows = value }
+
+    /** 每个 agent 的执行范围（[AgentExecPolicies] 取值）；null = 缺省最严档。 */
+    var invokeExecPolicyOf: ((agentId: String) -> String?)?
+        get() = invokeCtl.execPolicyOf
+        set(value) { invokeCtl.execPolicyOf = value }
+
+    /** 未授权派单的机主裁决入口：记录申请 + 通知机主（复用 grants）。 */
+    var invokeRecordGrantRequest: ((nodeId: String, agentId: String?, reason: String) -> Unit)?
+        get() = invokeCtl.recordGrantRequest
+        set(value) { invokeCtl.recordGrantRequest = value }
+
+    /** 宿主侧卡片动作出口：`(agentId, sessionId?, cardId, actionId, decidedBy)` → 插件。 */
+    var onHostCardAction: ((agentId: String, sessionId: String?, cardId: String, actionId: String, decidedBy: String) -> Unit)?
+        get() = invokeCtl.onHostCardAction
+        set(value) { invokeCtl.onHostCardAction = value }
+
     /**
      * 控制器持有的可变会话表。搬出本类是为了让「这张表归谁」写在类型上，
      * 而不是一个 `internal` 字段 + 全靠约定的纪律。

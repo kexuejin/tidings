@@ -645,8 +645,13 @@ class ControlPlane(
         var error: String? = null
         val collected = mutableListOf<JsonObject>()
         runBlocking {
-            val outcome = executePluginTask(entry, prompt, wsPath, requestedSessionId) { _, eventRow ->
-                collected += eventRow
+            val outcome = executePluginTask(entry, prompt, wsPath, requestedSessionId) { eventType, cursor, summary, body ->
+                collected += buildJsonObject {
+                    put("cursor", cursor)
+                    put("eventType", eventType)
+                    summary?.let { put("summary", it) }
+                    body?.let { put("body", it) }
+                }
             }
             sessionId = outcome.first
             status = outcome.second
@@ -681,15 +686,18 @@ class ControlPlane(
      * 迟早漂成「面板派单有台账、执行桥派单没台账」那种分叉。
      *
      * @return (sessionId, status, error)；sessionId = null 表示会话都开不出来（插件不可达）。
-     * [onEvent] 收 (eventType, 该事件在台账里的那一行) —— 卡片事件连同原始 JSON 一起给，
-     * 执行桥靠它把卡片带回发起方（§6.2 的看板卡）。
+     * [onEvent] 收 (eventType, cursor, summary, body)：cursor 是台账里的**真实**游标
+     * （按会话续走，不从头重数）—— HTTP 面要靠它拼回事件行，重数会把上次的事件覆盖掉
+     * （PluginDispatchTest 钉的就是它）。body 是**原始 JSON 文本**（卡片事件就是卡片
+     * JSON 本身）—— 故意给原语而不是 JsonObject：执行桥住在 desktopApp，那边的编译
+     * 类路径上没有 kotlinx-serialization（既有纪律），让它只碰 String，解析留给消费侧。
      */
     suspend fun executePluginTask(
         entry: PluginRegistry.Entry,
         prompt: String,
         wsPath: String?,
         requestedSessionId: String?,
-        onEvent: (String, JsonObject) -> Unit,
+        onEvent: (eventType: String, cursor: Long, summary: String?, body: String?) -> Unit,
     ): Triple<String?, String, String?> {
         val driver = driverFor(entry)
         // 会话：接续调用方点名的，或开一个新的。开不出来（插件不可达）→ 如实上抛路径回，
@@ -738,12 +746,7 @@ class ControlPlane(
                 summary = summary,
                 body = body,
             )
-            onEvent(eventType, buildJsonObject {
-                put("cursor", c)
-                put("eventType", eventType)
-                summary?.let { put("summary", it) }
-                body?.let { put("body", it) }
-            })
+            onEvent(eventType, c, summary, body)
             if (event is DriverEvent.Error) endedInError = true
         }
 
@@ -854,12 +857,12 @@ class ControlPlane(
             return
         }
         try {
-            runBlocking { driverFor(entry).handleAction(sessionId, actionId, decidedBy) }
+            runBlocking { pluginAction(entry, sessionId, actionId, decidedBy) }
         } catch (t: Throwable) {
             respond(
                 exchange,
                 502,
-                errorJson("plugin-unreachable", "action could not reach \"" + pluginId + "\": " + (t.message ?: t::class.simpleName)),
+                errorJson("plugin-unreachable", "action could not reach \"" + pluginId + "\": " + (t.message ?: (t::class.simpleName ?: "unknown"))),
             )
             return
         }
@@ -873,6 +876,28 @@ class ControlPlane(
                 put("actionId", actionId)
             },
         )
+    }
+
+    /**
+     * 卡片动作进插件的**唯一实现**：HTTP 的 `/v1/plugin/action` 与 M4 宿主动作桥
+     * （`onHostCardAction` 的 desktopApp 实现）都走它 —— 与 [executePluginTask]
+     * 同一条「两处各写一份迟早漂」的对账纪律。动作不可达时抛给调用方如实处理。
+     */
+    suspend fun pluginAction(entry: PluginRegistry.Entry, sessionId: String, actionId: String, decidedBy: String) {
+        driverFor(entry).handleAction(sessionId, actionId, decidedBy)
+    }
+
+    /**
+     * 这个 agent 最近一次会话（卡片动作没有会话上下文时的解析来源）：动作必须落在
+     * 会话上，而卡片帧里不带 sessionId（它是群流上的展示物）。按 [pluginForAgent]
+     * 解析出的插件找**它名下**最近更新的会话；找不到 ⇒ null，转发方据此如实放弃 ——
+     * 不编一个 id 给插件。
+     */
+    fun latestSessionForAgent(agentId: String): AgentSessionRegistry.SessionRecord? {
+        val entry = pluginForAgent(agentId) ?: return null
+        return sessions.sessions()
+            .filter { it.nodeId == runtime.nodeId && it.agentKind == entry.pluginId }
+            .maxByOrNull { it.updatedAt }
     }
 
     private fun driverFor(entry: PluginRegistry.Entry): ExternalPluginDriver =

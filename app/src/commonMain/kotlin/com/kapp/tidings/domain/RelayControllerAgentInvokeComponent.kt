@@ -18,6 +18,7 @@ import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
+import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonElement
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.JsonPrimitive
@@ -742,7 +743,23 @@ data class AgentInvokeExecution(
     val error: String? = null,
     /** 执行产出的卡片（组员的卡；Leader 上群时会把它收进自己的 cardId 域）。 */
     val card: JsonObject? = null,
-)
+) {
+    companion object {
+        /**
+         * 成功结果，卡片来自事件流的 **JSON 文本**。壳层（desktopApp）的编译类路径上
+         * 没有 kotlinx-serialization（既有纪律），执行桥拿到的卡片只能是一段 String ——
+         * 解析在这层完成，壳层永远不点名 JsonObject；解析不出的卡片如实丢弃
+         * （结果仍算 done，看板卡少一段内容，不谎报失败）。
+         */
+        fun done(summary: String?, cardJsonText: String?): AgentInvokeExecution = AgentInvokeExecution(
+            status = com.kapp.tidings.core.protocol.CodecInvoke.InvokeResultStates.DONE,
+            summary = summary,
+            card = cardJsonText?.let { text ->
+                runCatching { Json.parseToJsonElement(text) as? JsonObject }.getOrNull()
+            },
+        )
+    }
+}
 
 /**
  * 执行器桥：desktopApp 接到 ControlPlane 的插件派单（`/v1/plugin/task` 语义）；
