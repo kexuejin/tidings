@@ -167,7 +167,7 @@ fun initialCheckedWsIds(rows: List<GroupAuthWorkspaceRow>): Set<String> =
     rows.filter { it.fromLocalMachine && it.authorized }.map { it.wsId }.toSet()
 
 @Composable
-internal fun SetGroupAgentWorkspacesDialog(
+fun SetGroupAgentWorkspacesDialog(
     /** 群里已声明的 agent（读侧唯一来源：`GroupMeta.virtualAgents`）。 */
     declaredAgents: List<VirtualAgentMember>,
     /** 本机工作区表（宿主的编辑对象）；空 = 非宿主（或宿主还没登记工作区），面板只读。 */

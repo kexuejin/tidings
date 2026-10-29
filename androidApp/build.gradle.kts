@@ -129,6 +129,9 @@ dependencies {
     // 预览数据要造真实时间戳（相对时间恒定 ⇒ 参考图恒定），`nowMillis()` 在 :core。
     // composeApp 把它当 implementation，不对外暴露，所以这里单独声明。
     screenshotTestImplementation(project(":core"))
+    // 同理：卡片引擎的预览夹具要构造 `MessageUi.card`（JsonObject）—— composeApp
+    // 把 kotlinx-serialization-json 当 implementation，预览源集拿不到，单独声明。
+    screenshotTestImplementation(libs.kotlinx.serialization.json)
 
     // 纯 JVM 单测（不需要设备/Robolectric）：目前钉的是「测试注入口只在可调试构建里注册」
     // 这类**纯判定**。宿主 APK 里能单测的东西不多，但这类安全闸门值得一条。

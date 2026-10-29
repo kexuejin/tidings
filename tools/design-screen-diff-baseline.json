@@ -1,7 +1,7 @@
 {
   "generatedAt": "b137725ec90a",
   "note": "逐屏差集棘轮：每个键的差集只许变小。--check 报「新增的值」。",
-  "reason": "两类量具口径差：①m-chat/m-chat-solo/m-chat-group/m-msgmenu/m-screencard 的 radius=4：原型 .msg code/.annot code（relay.html 内联代码片，border-radius:4px）在代码侧落在共享 AppOutlinedButton 上，而按钮族收敛后不再暴露 shape（设计上刻意不暴露样式自由度），字面量消失 ⇒ 量具读不到；②d-tray：原型 d15-tray 属宿主轨（AWT 托盘，Layoutlib 到不了），代码新增 10/2 间距、9dp 圆角、500 字重是 AWT PopupMenu 实现细节，原型无对应物可表达。两条都不是本轮新增的视觉回归，但都应由设计确认后再决定是否改代码。",
+  "reason": "M3 新增三件共享组件（方案 §5/§7.3：AgentCards 卡片引擎 / AgentContextCapsule 上下文胶囊 / SetGroupAgentWorkspacesDialog 授权面板）在聊天屏切片里新增 11 个「只代码」取值：radius 11/7 来自全应用已有的角色 token（ShapeRoles.ListCard=11 / ShapeRoles.DayCell=7，ConversationRow、NodeRows 等早已在用），spacing 24 来自 AppSpacing.xl。原型 relay.html 里没有这三件组件的对应屏（逐字核实：搜 team-task-board/任务看板/目标胶囊 均无卡片或胶囊行；「胶囊」6 处命中全是审批状态药丸与筛选 chip 的注释），取值不可能是「原型有、代码抄错」——它们是本里程碑的新交付物，原型稿尚未跟上。与基线里 d-tray 那条同一类：宿主轨/新组件在原型无对应物可表达，待设计补稿后再收敛。",
   "rowCount": 70,
   "signature": {
     "d-agentdetail|__error__": [
@@ -107,7 +107,9 @@
     ],
     "d-chat|radius|code": [
       "6",
+      "7",
       "10",
+      "11",
       "16",
       "22"
     ],
@@ -168,6 +170,7 @@
     "d-emoji|radius|code": [
       "6",
       "10",
+      "11",
       "16",
       "22"
     ],
@@ -178,6 +181,7 @@
       "14",
       "16",
       "20",
+      "24",
       "48"
     ],
     "d-emoji|spacing|proto": [
@@ -262,8 +266,10 @@
     ],
     "d-groupcreate|radius|code": [
       "6",
+      "7",
       "8",
       "10",
+      "11",
       "16",
       "22"
     ],
@@ -290,11 +296,9 @@
     "d-histsearch|radius|code": [
       "6",
       "10",
+      "11",
       "16",
       "22"
-    ],
-    "d-histsearch|radius|proto": [
-      "7"
     ],
     "d-histsearch|spacing|code": [
       "1.5",
@@ -698,8 +702,10 @@
       "400"
     ],
     "m-chat-group|radius|code": [
+      "7",
       "8",
       "10",
+      "11",
       "16",
       "22"
     ],
@@ -727,8 +733,10 @@
       "400"
     ],
     "m-chat-solo|radius|code": [
+      "7",
       "8",
       "10",
+      "11",
       "16",
       "22"
     ],
@@ -756,8 +764,10 @@
       "400"
     ],
     "m-chat|radius|code": [
+      "7",
       "8",
       "10",
+      "11",
       "16",
       "22"
     ],
@@ -785,6 +795,7 @@
     "m-folderin|radius|code": [
       "8",
       "10",
+      "11",
       "16",
       "22"
     ],
@@ -796,6 +807,7 @@
       "4",
       "11",
       "20",
+      "24",
       "48"
     ],
     "m-folderin|spacing|proto": [
@@ -823,6 +835,7 @@
     ],
     "m-groupinfo|radius|code": [
       "4",
+      "7",
       "8",
       "20"
     ],
@@ -887,8 +900,6 @@
     ],
     "m-histdate|radius|proto": [
       "0",
-      "7",
-      "11",
       "13",
       "28"
     ],
@@ -1009,6 +1020,7 @@
       "6",
       "9",
       "10",
+      "11",
       "16",
       "22"
     ],
@@ -1026,7 +1038,6 @@
       "1",
       "1.5",
       "13",
-      "24",
       "30"
     ],
     "m-myqr|font-weight|code": [
@@ -1124,6 +1135,7 @@
     "m-screencard|radius|code": [
       "8",
       "10",
+      "11",
       "16",
       "22"
     ],
@@ -1134,6 +1146,7 @@
     ],
     "m-screencard|spacing|code": [
       "20",
+      "24",
       "48"
     ],
     "m-screencard|spacing|proto": [
@@ -1148,6 +1161,7 @@
     "m-sendfolder|radius|code": [
       "8",
       "10",
+      "11",
       "16",
       "22"
     ],
@@ -1159,6 +1173,7 @@
       "4",
       "11",
       "20",
+      "24",
       "48"
     ],
     "m-sendfolder|spacing|proto": [
