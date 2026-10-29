@@ -1836,4 +1836,42 @@
     <string name="cidr_scan_never">还没探测过</string>
     <string name="cidr_scan_last">上次探测 %1$s，扫到 %2$d 个</string>
     <string name="scan_open_settings">去设置</string>
+
+    <!-- Agent 卡片（声明式卡片渲染引擎，方案 §4.3/§5.3） -->
+    <string name="card_status_done">已完成</string>
+    <string name="card_status_running">进行中</string>
+    <string name="card_status_pending">待开始</string>
+    <string name="card_status_failed">失败</string>
+    <string name="card_status_blocked">受阻</string>
+    <!-- 卡片右上角的版本小字：原位刷新时让「这是第几版」可读，而不是默默变形。 -->
+    <string name="card_rev_tag">第 %1$d 版</string>
+    <string name="card_progress_label">进展 %1$d%%</string>
+    <string name="card_diff_title">代码变更</string>
+    <string name="card_diff_summary">%1$s +%2$d −%3$d</string>
+    <!-- 审批锁三态的后两态（§5.3）：本机乐观置灰后的等待说明，与宿主判定后的全员提示。 -->
+    <string name="card_pending_confirm">已提交，等待宿主确认</string>
+    <string name="card_decided_by">已由 %1$s 处理</string>
+
+    <!-- 上下文唤起胶囊（方案 §5.2） -->
+    <string name="capsule_entity_team">团队</string>
+    <string name="capsule_default_ws">默认</string>
+    <string name="capsule_new_task">新任务</string>
+    <string name="capsule_expand_hint">轻点选择工作区与任务</string>
+    <string name="capsule_dismiss">关闭目标胶囊，保留输入</string>
+    <string name="capsule_sheet_title">选择目标</string>
+    <string name="capsule_sheet_recent">最近任务</string>
+    <string name="capsule_sheet_new_task">发起新任务</string>
+    <string name="capsule_sheet_empty">这个 agent 还没有授权的工作区，轻点「发起新任务」直接派单。</string>
+
+    <!-- 群设置 · 智能体与工作区授权面板（方案 §5.1，替换 ExposeAgentDialog） -->
+    <string name="group_auth_title">智能体与工作区授权</string>
+    <string name="group_auth_note">授权决定权在机主：勾选哪些工作区，群里就能把任务派到哪些目录。保存后全群同步。</string>
+    <string name="group_auth_agents_section">群内智能体与团队</string>
+    <string name="group_auth_workspaces_section">授权工作区（白名单）</string>
+    <string name="group_auth_readonly_note">本机不是这台群的工作区宿主，面板只读。</string>
+    <string name="group_auth_path_host_only">仅宿主可见</string>
+    <string name="group_auth_empty">这台机器上还没有可授权的工作区。</string>
+    <string name="group_auth_save">保存并广播</string>
+    <string name="group_auth_badge_default">默认</string>
+    <string name="group_auth_team_members">%1$d 名组员</string>
 </resources>

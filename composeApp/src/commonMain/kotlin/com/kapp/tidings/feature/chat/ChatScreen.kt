@@ -377,6 +377,10 @@ fun ChatScreen(
     var draft by remember(peerId) { mutableStateOf(initialDraft) }
     var lastRecalledText by remember(peerId) { mutableStateOf<String?>(null) }
     var replyingToMessage by remember(peerId) { mutableStateOf<MessageUi?>(null) }
+    // 声明式卡片的**本机乐观记账**（方案 §5.3）：点击审批按钮先置灰再发动作，
+    // 键是 "cardId|actionId"。会话切换即重建（remember(peerId)）—— 换个会话看别的卡，
+    // 这份 pending 没有意义；宿主判定（rev+1 新帧）到达后由三态判据接管。
+    var pendingCardActions by remember(peerId) { mutableStateOf<Set<String>>(emptySet()) }
     // **发送的唯一出口**：手机内置输入栏与桌面输入卡片（composerSlot）共用这一个函数。
     //
     // 四件事必须一起发生，漏一件都是一条独立的真机缺陷：
@@ -941,6 +945,10 @@ fun ChatScreen(
                 val messagePositions = remember(messages) {
                     messages.withIndex().associate { (idx, msg) -> msg.id to idx }
                 }
+                // 卡片原位刷新的**可见集**（方案 §5.3）：按 cardId 折叠、只渲染最新 rev。
+                // 落库是追加式新行（同 cardId、rev+1），「不刷屏」在这里成立 ——
+                // 旧 rev 的行还在库里（历史翻得到），只是不再渲染。
+                val visibleCardIds = remember(messages) { latestRevCardMessageIds(messages) }
                 LazyColumn(
                     state = listState,
                     modifier = Modifier.fillMaxSize(),
@@ -1011,6 +1019,33 @@ fun ChatScreen(
                                 contentAlignment = if (message.mine) Alignment.CenterEnd else Alignment.CenterStart,
                             ) {
                                 ScreenHistoryCard(record = screenRecord, now = now)
+                            }
+                        } else if (message.card != null) {
+                            // 声明式卡片（方案 §4.3）：数据源是消息库（`MessageUi.card`），
+                            // 与其它消息同一条读回路径。两道闸都过不了就整行不画：
+                            //  · 解析不出身份键（cardId/rev 缺失）—— 不是一张卡；
+                            //  · 不是本 cardId 的最新 rev —— 原位刷新把它收起（§5.3）。
+                            val parsedCard = remember(message.id, message.card) { parseAgentCard(message.card) }
+                            if (parsedCard != null && message.id in visibleCardIds) {
+                                Box(
+                                    modifier = Modifier.fillMaxWidth(),
+                                    contentAlignment = if (message.mine) Alignment.CenterEnd else Alignment.CenterStart,
+                                ) {
+                                    AgentCardBubble(
+                                        card = parsedCard,
+                                        pendingActions = pendingCardActions,
+                                        // 可空槽：null = 这个壳没有动作通路（跨端派发 M4 才接），
+                                        // 按钮组整块不画 —— 按下去没反应的按钮比没有更糟。
+                                        onAction = actions.onCardAction?.let { dispatch ->
+                                            { card: AgentCardUi, actionId: String ->
+                                                // 本机乐观置灰先行（§5.3）：即使动作派发失败，
+                                                // 「我点过了」也是本机事实；宿主判定到达后三态接管。
+                                                pendingCardActions = pendingCardActions + "${card.cardId}|$actionId"
+                                                dispatch(peer.nodeId, card, actionId)
+                                            }
+                                        },
+                                    )
+                                }
                             }
                         } else {
                             val originalIndex = messagePositions[message.id] ?: -1

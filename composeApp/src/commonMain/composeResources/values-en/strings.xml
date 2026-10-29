@@ -1665,4 +1665,40 @@
     <string name="cidr_scan_never">Never scanned</string>
     <string name="cidr_scan_last">Last scan %1$s · %2$d found</string>
     <string name="scan_open_settings">Open Settings</string>
+
+    <!-- Agent cards (declarative card engine, plan §4.3/§5.3) -->
+    <string name="card_status_done">Done</string>
+    <string name="card_status_running">Running</string>
+    <string name="card_status_pending">Pending</string>
+    <string name="card_status_failed">Failed</string>
+    <string name="card_status_blocked">Blocked</string>
+    <string name="card_rev_tag">Rev %1$d</string>
+    <string name="card_progress_label">%1$d%% progress</string>
+    <string name="card_diff_title">Code changes</string>
+    <string name="card_diff_summary">%1$s +%2$d −%3$d</string>
+    <string name="card_pending_confirm">Submitted, waiting for the host to confirm</string>
+    <string name="card_decided_by">Decided by %1$s</string>
+
+    <!-- Context capsule (plan §5.2) -->
+    <string name="capsule_entity_team">Team</string>
+    <string name="capsule_default_ws">Default</string>
+    <string name="capsule_new_task">New task</string>
+    <string name="capsule_expand_hint">Tap to choose workspace and task</string>
+    <string name="capsule_dismiss">Dismiss target capsule, keep text</string>
+    <string name="capsule_sheet_title">Choose target</string>
+    <string name="capsule_sheet_recent">Recent tasks</string>
+    <string name="capsule_sheet_new_task">Start a new task</string>
+    <string name="capsule_sheet_empty">No authorized workspace for this agent yet. Tap “Start a new task” to dispatch directly.</string>
+
+    <!-- Group settings · agent & workspace authorization panel (plan §5.1) -->
+    <string name="group_auth_title">Agents &amp; workspace authorization</string>
+    <string name="group_auth_note">Authorization belongs to the machine owner: checked workspaces are the directories this group can dispatch tasks to. Saving syncs to everyone.</string>
+    <string name="group_auth_agents_section">Agents &amp; teams in this group</string>
+    <string name="group_auth_workspaces_section">Authorized workspaces (whitelist)</string>
+    <string name="group_auth_readonly_note">This device is not the workspace host of this group; the panel is read-only.</string>
+    <string name="group_auth_path_host_only">Visible to the host only</string>
+    <string name="group_auth_empty">No workspace on this machine to authorize yet.</string>
+    <string name="group_auth_save">Save &amp; broadcast</string>
+    <string name="group_auth_badge_default">Default</string>
+    <string name="group_auth_team_members">%1$d members</string>
 </resources>

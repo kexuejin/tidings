@@ -211,6 +211,17 @@ data class ChatScreenActions(
      */
     val onClearMessages: (() -> Unit)? = null,
     /**
+     * 声明式卡片的**动作派发**（方案 §5.3 / §7.3）：`(会话键, 卡片, actionId)`。
+     *
+     * ChatScreen 在调用前已经完成本机乐观置灰（`pendingCardActions` 记账），
+     * 这里收到的只是"要把这次点击送往宿主"的意图 —— 真正的跨端 ack 广播是 M4 的
+     * 交付物，M3 里两个生产壳都还没有通路 ⇒ 传 null，卡片按钮组**整块不画**。
+     *
+     * 为什么不借 `onSend`：动作是**控制意图**，把它拼成聊天文本发出去，就是方案 §8
+     * 要断言为零的「跨端中间文本」。null = 不画按钮，与「戳一碰」「中断」同一条规矩。
+     */
+    val onCardAction: ((convId: String, card: AgentCardUi, actionId: String) -> Unit)? = null,
+    /**
      * 「关闭并清空会话」—— 从本机删除该会话及其全部聊天记录并退出当前会话回到列表，对方不受影响。
      *
      * 与 [onClearMessages]（清空但留在当前聊天页）不同：这里既清空记录，又关闭离开当前会话。
