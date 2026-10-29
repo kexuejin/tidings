@@ -3,6 +3,9 @@
 package com.kapp.tidings.agent
 
 import com.kapp.tidings.core.protocol.mentionedVirtualAgent
+import com.kapp.tidings.agent.plugins.PluginRegistration
+import com.kapp.tidings.agent.plugins.PluginRegistry
+import com.kapp.tidings.agent.plugins.PluginTokenGate
 import com.kapp.tidings.core.protocol.AgentGrantAccess
 import com.kapp.tidings.core.protocol.AgentGrantPolicies
 import com.kapp.tidings.core.protocol.AgentGrantScopes
@@ -173,6 +176,18 @@ class ControlPlane(
      * 表里没有的 agent 一律 `HOST_ONLY`（由 store 兜底）。新装的 agent 因此自动安全。
      */
     private val execPolicies: AgentExecPolicyStore = AgentExecPolicyStore(File(defaultGrantFile().parentFile, "agent-exec-policies.json")),
+    /**
+     * 已注册插件台账（M2 宿主网关）。注册请求来自插件进程（回环上的另一个进程），
+     * 台账在宿主这一侧；GET /v1/plugins 读它，驱动与派单路径也用它。
+     */
+    val plugins: PluginRegistry = PluginRegistry(),
+    /**
+     * 插件注册的 token 门闸（**强制**，方案 §2.3）。默认来源 = 环境变量
+     * `TIDINGS_PLUGIN_TOKEN`，其次数据目录下 0600 的 `plugins/plugin-token`；
+     * 两者都没有时注册端点整体关闸（fail-closed）。它与控制面自身的 [token] 是
+     * 两把不同的锁：插件注册只认插件 token，其余路由只认 [token]。
+     */
+    val pluginTokenGate: PluginTokenGate = PluginTokenGate.fromEnvironment(),
 ) {
 
     private val json = Json { ignoreUnknownKeys = true }
@@ -214,6 +229,8 @@ class ControlPlane(
         s.start()
         server = s
         boundPort = s.address.port
+        // 插件健康探测随控制面起停：控制面活着，探测就活着；stop() 之后不再探测。
+        plugins.startMonitoring()
     }
 
     /**
@@ -229,6 +246,7 @@ class ControlPlane(
     }.getOrNull()
 
     fun stop() {
+        plugins.stopMonitoring()
         server?.stop(0)
         server = null
     }
@@ -296,6 +314,16 @@ class ControlPlane(
                 exchange.close()
                 return
             }
+            // 插件注册两条路由**不走** authorized()：它们认的是插件 token（强制），
+            // 不是控制面自身的 [token]。放在鉴权之前，两个 token 体系互不牵连。
+            if (path == "/v1/plugin/register" && method == "POST") {
+                pluginRegister(exchange)
+                return
+            }
+            if (path == "/v1/plugin/unregister" && method == "POST") {
+                pluginUnregister(exchange)
+                return
+            }
             if (!authorized(exchange)) {
                 respond(exchange, 401, errorJson("unauthorized", "缺少或错误的 token"))
                 return
@@ -337,6 +365,8 @@ class ControlPlane(
                 // 每个 agent 的执行范围（谁能让它干活）。与 grants 分开：那条是白名单，这条是策略。
                 path == "/v1/agent/exec-policies" && method == "GET" -> readExecPolicies(exchange)
                 path == "/v1/agent/exec-policies" && method == "PUT" -> writeExecPolicies(exchange)
+                // 已注册插件台账（只读；宿主进程与面板看「装了哪些插件、各在线与否」）。
+                path == "/v1/plugins" && method == "GET" -> pluginsList(exchange)
                 // 某个 agent 的执行名单（谁能让它干活）—— 逐设备勾选。
                 path == "/v1/agent/exec-devices" && method == "GET" -> readExecDeviceList(exchange)
                 path == "/v1/agent/exec-devices" && method == "PUT" -> writeExecDevice(exchange)
@@ -363,6 +393,184 @@ class ControlPlane(
         if (bearer != null && bearer.removePrefix("Bearer ").trim() == token) return true
         return exchange.requestHeaders.getFirst("X-Tidings-Token") == token
     }
+
+    // ------------------------------------------------------------ 插件注册（M2 宿主网关）
+    //
+    // 方案 §2.3：`POST /v1/plugin/register` 是插件的唯一入驻口，**强制**校验
+    // TIDINGS_PLUGIN_TOKEN（没有它，本机任意进程都能自我入驻并领到任务与工作区授权）。
+    // 注册通过后插件条目进 [plugins]，宿主按 baseUrl 主动探测 healthz 维护在线状态。
+
+    /** 插件注册/注销共用的 token 门：没配（关闸）与不匹配（拒绝）是两个不同的答案。 */
+    private fun pluginTokenGuard(exchange: HttpExchange): Boolean {
+        if (!pluginTokenGate.isConfigured()) {
+            respond(
+                exchange,
+                503,
+                errorJson(
+                    "plugin-token-unconfigured",
+                    "plugin registration is disabled: set TIDINGS_PLUGIN_TOKEN or ensure the " +
+                        "plugins/plugin-token file under the host data dir (fail-closed by design)",
+                ),
+            )
+            return false
+        }
+        val presented = presentedPluginToken(exchange)
+        if (presented == null) {
+            respond(
+                exchange,
+                401,
+                errorJson(
+                    "unauthorized",
+                    "plugin registration requires a token: Authorization: Bearer <TIDINGS_PLUGIN_TOKEN> " +
+                        "or X-Tidings-Token header",
+                ),
+            )
+            return false
+        }
+        if (!pluginTokenGate.matches(presented)) {
+            respond(exchange, 401, errorJson("unauthorized", "plugin token mismatch"))
+            return false
+        }
+        return true
+    }
+
+    /** 插件 token 的请求头读取：与 [authorized] 同一份头约定（Bearer / X-Tidings-Token）。 */
+    private fun presentedPluginToken(exchange: HttpExchange): String? {
+        val bearer = exchange.requestHeaders.getFirst("Authorization")
+        if (bearer != null) {
+            val value = bearer.removePrefix("Bearer ").trim()
+            if (value.isNotEmpty()) return value
+        }
+        return exchange.requestHeaders.getFirst("X-Tidings-Token")?.takeIf { it.isNotEmpty() }
+    }
+
+    private fun pluginRegister(exchange: HttpExchange) {
+        if (!pluginTokenGuard(exchange)) return
+        val obj = readJsonObject(exchange) ?: return
+        val manifestElement = obj["manifest"]
+        if (manifestElement == null || manifestElement !is JsonObject) {
+            respond(
+                exchange,
+                400,
+                errorJson(
+                    "bad-request",
+                    "body must be {\"manifest\": {…§2.2…}, \"httpPort\": <1..65535>} " +
+                        "(httpPort = the plugin's own loopback IPC port)",
+                ),
+            )
+            return
+        }
+        val httpPort = numberOrNull(obj["httpPort"])
+        if (httpPort == null || httpPort < 1 || httpPort > 65535) {
+            respond(
+                exchange,
+                400,
+                errorJson("bad-request", "httpPort must be an integer in 1..65535"),
+            )
+            return
+        }
+        val verdict = PluginRegistration.parse(manifestElement, runtime.nodeId)
+        val accepted = when (verdict) {
+            is PluginRegistration.Verdict.Accepted -> verdict
+            is PluginRegistration.Verdict.Rejected -> {
+                respond(exchange, 400, errorJson(verdict.error, verdict.message))
+                return
+            }
+        }
+        val manifest = accepted.manifest
+        // 端口冲突检查：两个插件不能共用同一条回环 IPC（驱动会互相打穿对方的会话）。
+        plugins.findByPort(httpPort.toInt())?.let { existing ->
+            if (existing.pluginId != manifest.pluginId) {
+                respond(
+                    exchange,
+                    409,
+                    errorJson(
+                        "port-conflict",
+                        "port " + httpPort + " is already claimed by plugin \"" + existing.pluginId + "\"",
+                    ),
+                )
+                return
+            }
+        }
+        val baseUrl = "http://" + LOOPBACK + ":" + httpPort
+        val entry = plugins.register(manifest, baseUrl, httpPort.toInt(), accepted.agentSenderIds)
+        respond(
+            exchange,
+            200,
+            buildJsonObject {
+                put("ok", true)
+                put("pluginId", manifest.pluginId)
+                put("status", entry.status)
+                put("baseUrl", baseUrl)
+                putJsonArray("agentSenderIds") {
+                    accepted.agentSenderIds.forEach { add(JsonPrimitive(it)) }
+                }
+                put(
+                    "note",
+                    "registered; the host probes " + baseUrl + "/healthz every " +
+                        plugins.probeIntervalMs + "ms and flips status to offline when it stops answering",
+                )
+            },
+        )
+    }
+
+    private fun pluginUnregister(exchange: HttpExchange) {
+        if (!pluginTokenGuard(exchange)) return
+        val obj = readJsonObject(exchange) ?: return
+        val pluginId = obj["pluginId"]?.jsonPrimitiveOrNull()?.contentOrNull?.trim().orEmpty()
+        if (pluginId.isEmpty()) {
+            respond(exchange, 400, errorJson("bad-request", "pluginId is required"))
+            return
+        }
+        val removed = plugins.unregister(pluginId)
+        if (!removed) {
+            respond(exchange, 404, errorJson("not-found", "no registered plugin \"" + pluginId + "\""))
+            return
+        }
+        respond(
+            exchange,
+            200,
+            buildJsonObject {
+                put("ok", true)
+                put("pluginId", pluginId)
+                put("removed", true)
+            },
+        )
+    }
+
+    private fun pluginsList(exchange: HttpExchange) {
+        val rows = plugins.list()
+        respond(
+            exchange,
+            200,
+            buildJsonObject {
+                putJsonArray("plugins") {
+                    rows.forEach { entry ->
+                        addJsonObject {
+                            put("pluginId", entry.pluginId)
+                            put("name", entry.manifest.name)
+                            put("version", entry.manifest.version)
+                            put("type", entry.manifest.type)
+                            put("leader", entry.manifest.leader?.agentId)
+                            put("status", entry.status)
+                            put("baseUrl", entry.baseUrl)
+                            put("httpPort", entry.httpPort)
+                            putJsonArray("capabilities") {
+                                entry.manifest.capabilities.forEach { add(JsonPrimitive(it)) }
+                            }
+                            putJsonArray("agentSenderIds") {
+                                entry.agentSenderIds.forEach { add(JsonPrimitive(it)) }
+                            }
+                            put("registeredAt", entry.registeredAt)
+                            entry.lastError?.let { put("lastError", it) }
+                        }
+                    }
+                }
+                put("total", rows.size)
+            },
+        )
+    }
+
 
     // --------------------------------------------------------------- handlers
 
@@ -2601,6 +2809,14 @@ class ControlPlane(
                 ),
             )
             add(JsonPrimitive("GET  /v1/pairing-qr   公网中继配对二维码（响应含令牌，只走回环）"))
+            add(
+                JsonPrimitive(
+                    "POST /v1/plugin/register   {\"manifest\":{…§2.2…},\"httpPort\":<1..65535>}   " +
+                        "插件入驻（强制 TIDINGS_PLUGIN_TOKEN；回环 IPC 基座，M2 宿主网关）",
+                ),
+            )
+            add(JsonPrimitive("POST /v1/plugin/unregister   {\"pluginId\":\"…\"}   插件注销（同 token 门）"))
+            add(JsonPrimitive("GET  /v1/plugins   已注册插件台账（状态/端口/能力声明/healthz 探测结果）"))
             if (devRoutesEnabled) {
                 add(JsonPrimitive("POST /v1/dev/pair      仅开发：向已扫码的对端发起配对自证"))
             }
@@ -2802,16 +3018,8 @@ class ControlPlane(
          * `dataDirectory/agent-grants.json`；这个默认值只服务于不传 grants 的调用方
          * （测试、以及将来可能有的独立 CLI）。
          */
-        internal fun defaultGrantFile(): File {
-            val home = System.getProperty("user.home") ?: "."
-            val os = System.getProperty("os.name").orEmpty()
-            val base = if (os.contains("Mac")) {
-                "$home/Library/Application Support"
-            } else {
-                System.getenv("XDG_DATA_HOME") ?: "$home/.local/share"
-            }
-            return File("$base/捎话 Tidings", "agent-grants.json")
-        }
+        internal fun defaultGrantFile(): File =
+            File(com.kapp.tidings.agent.plugins.HostDirs.default(), "agent-grants.json")
         private const val DEFAULT_LIMIT: Int = 200
         private const val MAX_LIMIT: Int = 1000
 

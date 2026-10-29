@@ -80,8 +80,12 @@ object AgentSenderId {
      * 是「群内可被 @ 的名字」，这一份的职责是「senderId 的字段边界」。两者将来若要放宽
      * （比如允许中文名），放宽的代价不一样 —— 例如这里一旦允许非 ASCII 就必须同时改
      * `Limits.ID` 的字节预算。
+     *
+     * 公开给**注册侧**（agentNode 的插件清单校验，M2）：注册方用它对 `agentId` 做同样的
+     * 归一化并检查长度预算（slug 为空或超过 [MAX_AGENT_ID] 就拒绝注册），让「不产出注定
+     * 被拒的帧」在插件入驻这一刻成立，而不是等到发消息才发现对方什么都没收到。
      */
-    private fun slugForSenderId(raw: String): String {
+    fun slugForSenderId(raw: String): String {
         if (raw.isEmpty()) return ""
         val sb = StringBuilder(raw.length)
         var lastDash = false
