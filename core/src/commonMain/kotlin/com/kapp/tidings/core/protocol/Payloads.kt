@@ -3,6 +3,7 @@
 package com.kapp.tidings.core.protocol
 
 import kotlinx.serialization.Serializable
+import kotlinx.serialization.json.JsonObject
 
 /**
  * 出站载荷的 `@Serializable` 形状。
@@ -141,6 +142,36 @@ data class GroupTextMsgPayload(
      * 旧接收端不认识这个键 ⇒ 整帧丢弃；两端需同版本（与 [agentSessionId] 同一取舍）。
      */
     val agentSessionTitle: String? = null,
+    /**
+     * 人类 → 插件的**单帧原子意图**（可选）。随正文一次发出，宿主原子化完成
+     * 「开会话 + 派单执行」，乐观发送零网络等待 —— 不再有「先发消息、再调一次
+     * 派单接口」的两步时序。
+     *
+     * 值必须是一个 JSON 对象（接收侧 `validateMsg` 按对象校验，其余形状整帧拒收）；
+     * 内部字段（agentId / wsId / resumeSessionId / mode 等）由插件清单定义，协议层
+     * 不逐字段校验。旧接收端不认识这个键 ⇒ 整帧丢弃；两端需同版本（与 [senderId] 同一取舍）。
+     */
+    val agentIntent: JsonObject? = null,
+    /**
+     * 插件 → 全群的**执行状态**（可选）：`accept` / `blocked` / `completed` / `failed` 四态。
+     *
+     * 四态之外一律拒收 —— 状态机是协议事实，不是自由文本；界面的状态徽标只画这四态，
+     * 多出来的值等于 UI 上的一个空洞，不如在协议层就挡住。旧接收端不认识 ⇒ 整帧丢弃。
+     */
+    val agentState: String? = null,
+    /**
+     * **声明式卡片负载**（可选）：插件定义的 JSON，IM 用原生组件渲染，不进正文。
+     *
+     * 字节上限 [Limits.CARD_BYTES]（UTF-8，序列化后的对象）：
+     * - **发送侧超限一律拒绝、绝不截断** —— 截断的 JSON 解不了，「截断后发出去」等于
+     *   产出注定被拒的帧；宿主驱动回错误事件给插件，由插件瘦身重发。
+     * - 接收侧超限判 bad-payload；队列重放走 `decodeTcp` 时校验同源（见 `validateMsg`）。
+     * - `cardId` 是卡片身份（原位刷新的折叠键），`rev` 单调递增；卡片更新以**新消息**
+     *   进流（同 cardId、rev+1 的新帧），不重写旧行。
+     *
+     * 旧接收端不认识这个键 ⇒ 整帧丢弃；两端需同版本（与 [senderId] 同一取舍）。
+     */
+    val card: JsonObject? = null,
 )
 
 /**

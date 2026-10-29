@@ -10,6 +10,7 @@ import com.kapp.tidings.core.protocol.DEFAULT_TIMINGS
 import com.kapp.tidings.core.protocol.Envelope
 import kotlinx.serialization.json.JsonArray
 import kotlinx.serialization.json.JsonElement
+import kotlinx.serialization.json.JsonObject
 import com.kapp.tidings.core.protocol.IpAddressUtils
 import com.kapp.tidings.core.protocol.GroupMeta
 import com.kapp.tidings.core.protocol.MsgTypes
@@ -1486,14 +1487,22 @@ class NodeRuntime(
         /** 会话内游标（可选，与 [agentSessionId] 配对）。 */
         agentCursor: Long? = null,
         /** 会话标题（可选）。分段线在对端显示「任务：xxx」的唯一来源。 */
-        agentSessionTitle: String? = null,) =
-        // **位置参数**：顺序必须与 `NodeOutbound.sendGroupText` 的形参表一致
-        // （agentSessionId, agentCursor, agentSessionTitle, envelopeId）。
+        agentSessionTitle: String? = null,
+        /** 人类 → 插件的单帧原子意图（可选）。见 `NodeOutbound.sendGroupText`。 */
+        agentIntent: JsonObject? = null,
+        /** 插件 → 全群的执行状态（可选，四态）。 */
+        agentState: String? = null,
+        /** 声明式卡片负载（可选）。超限在发送侧拒绝（抛出），绝不截断。 */
+        card: JsonObject? = null,) =
+        // **位置参数**：调用点的实参顺序必须与 `NodeOutbound.sendGroupText` 的形参表
+        // 一致（agentSessionId, agentCursor, agentSessionTitle, agentIntent, agentState,
+        // card, envelopeId）—— 本签名里 envelopeId 排在 reasoning 之后，但**实参按
+        // 出站形参序排列**，两处一旦顺序不同就编译失败。
         // 这里用位置而不是命名，是为了让两处一旦顺序不同就编译失败 —— 命名参数反而
         // 会把这个约束藏起来。
         outbound.sendGroupText(
             text, groupId, groupRev, members, mentions, replyTo, senderId, reasoning,
-            agentSessionId, agentCursor, agentSessionTitle, envelopeId,
+            agentSessionId, agentCursor, agentSessionTitle, agentIntent, agentState, card, envelopeId,
         )
 
     suspend fun sendPk(peerId: String,

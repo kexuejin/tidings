@@ -177,7 +177,9 @@ internal class GroupTextVariants(
  * 构造同 id 的两份群文本信封（见 [GroupTextVariants]）。
  *
  * 传进来的 [text] / [reasoning] 必须**已经截断**（[clampGroupText] / [clampGroupReasoning]）：
- * 这里只负责形状，不负责预算 —— 预算一旦有两个执行点，迟早有一处漏掉。
+ * 截断类预算只有一个执行点。唯一在这里执行的预算是**卡片的拒绝**（不是截断）：
+ * 截断后的 JSON 解不了，所以卡片超限只能整单拒绝 —— 发送与重放两条路都经过本函数，
+ * 「发送侧不产出注定被拒的帧」在这里成为不变量。
  */
 internal fun groupTextVariants(
     from: String,
@@ -205,10 +207,25 @@ internal fun groupTextVariants(
      * 详情见 `GroupTextMsgPayload.agentSessionTitle` 的 KDoc。
      */
     agentSessionTitle: String? = null,
+    /** 人类 → 插件的单帧原子意图（可选）。见 `GroupTextMsgPayload.agentIntent`。 */
+    agentIntent: JsonObject? = null,
+    /** 插件 → 全群的执行状态（可选，四态）。见 `GroupTextMsgPayload.agentState`。 */
+    agentState: String? = null,
+    /**
+     * 声明式卡片负载（可选）。**超限在这里拒绝（抛出），绝不截断**：
+     * 截断的 JSON 解不了，发出去就是一帧注定被对端判 bad-payload 的帧。
+     * 上限 [Limits.CARD_BYTES]，覆盖发送与重放两条路（都经过本函数）。
+     */
+    card: JsonObject? = null,
     resend: Boolean? = null,
     id: String = newId(),
     ts: Long = nowMillis(),
 ): GroupTextVariants {
+    // 卡片预算是发送侧不变量，不是「希望调用方别写太长」：拒绝必须发生在构造变体
+    // 之前（sendGroupText 先调这里、后落库，抛在这里 = 本地历史一行不落）。
+    require(
+        card == null || Codec.utf8ByteLength(card.toString()) <= Limits.CARD_BYTES,
+    ) { "card exceeds Limits.CARD_BYTES; refuse instead of truncating (truncated JSON cannot be decoded)" }
     val plain = makeEnvelope(
         MsgTypes.MSG,
         from,
@@ -222,8 +239,11 @@ internal fun groupTextVariants(
     // **任何扩展键存在就必须走 attributed 那一份**。会话归属也是扩展键：
     // 只加进 senderId/reasoning 的判断而漏了它，带会话归属的消息就会被当成
     // 「没有扩展键」发 plain —— 接收端仍然画不出分段线，而发送侧一切正常。
+    // agentIntent / agentState / card 三个新键同理：漏判 = 键被整个裁掉，
+    // 卡片消息发出去就成了纯正文（卡片从此消失，且没有任何报错）。
     val hasExtendedKeys = senderId != null || reasoning != null ||
-        (agentSessionId != null && agentCursor != null)
+        (agentSessionId != null && agentCursor != null) ||
+        agentIntent != null || agentState != null || card != null
     if (!hasExtendedKeys) return GroupTextVariants(plain, plain)
     val attributed = makeEnvelope(
         MsgTypes.MSG,
@@ -236,6 +256,9 @@ internal fun groupTextVariants(
             agentSessionId = agentSessionId,
             agentCursor = agentCursor,
             agentSessionTitle = clampGroupTitle(agentSessionTitle),
+            agentIntent = agentIntent,
+            agentState = agentState,
+            card = card,
         ),
         id = id,
         ts = ts,
@@ -267,6 +290,12 @@ data class OutgoingReplay(
     val replyTo: String? = null,
     val senderId: String? = null,
     val reasoning: String? = null,
+    /** 声明式卡片负载（可选）。重放沿用它 —— 补发出去的必须是当初那条卡片消息。 */
+    val card: JsonObject? = null,
+    /** 单帧原子意图（可选）。同上：重放不许丢。 */
+    val agentIntent: JsonObject? = null,
+    /** 执行状态（可选，四态）。同上。 */
+    val agentState: String? = null,
     /** 原来入队的时刻（保住补发顺序与 TTL 起点）；默认现在。 */
     val createdAt: Long = nowMillis(),
 )
@@ -442,6 +471,19 @@ internal class NodeOutbound(
         /** 会话标题（可选）。见 `GroupTextMsgPayload.agentSessionTitle`。 */
         agentSessionTitle: String? = null,
         /**
+         * 人类 → 插件的单帧原子意图（可选）。见 `GroupTextMsgPayload.agentIntent`。
+         */
+        agentIntent: JsonObject? = null,
+        /** 插件 → 全群的执行状态（可选，四态）。见 `GroupTextMsgPayload.agentState`。 */
+        agentState: String? = null,
+        /**
+         * 声明式卡片负载（可选）。**超限抛出拒绝、绝不截断**（[Limits.CARD_BYTES]）：
+         * 截断的 JSON 解不了，发出去等于产出注定被拒的帧。调用方（宿主驱动）捕获后
+         * 回错误事件给插件，由插件瘦身重发。拒绝发生在本地落库之前 —— 历史里不会
+         * 多出一条永远没人收到的卡片消息。
+         */
+        card: JsonObject? = null,
+        /**
          * 这次发送用的信封 id；**不传就生成一个**。
          *
          * 为什么要能传：群聊的乐观插入需要一个**从一开始就等于信封 id** 的本地行 id ——
@@ -463,6 +505,9 @@ internal class NodeOutbound(
             agentSessionId = agentSessionId,
             agentCursor = agentCursor,
             agentSessionTitle = clampGroupTitle(agentSessionTitle),
+            agentIntent = agentIntent,
+            agentState = agentState,
+            card = card,
         )
         messageStore.append(
             peerId = ConvId.group(groupId),
@@ -525,6 +570,9 @@ internal class NodeOutbound(
                 replyTo = request.replyTo,
                 senderId = request.senderId,
                 reasoning = clampGroupReasoning(request.reasoning),
+                card = request.card,
+                agentIntent = request.agentIntent,
+                agentState = request.agentState,
                 resend = true,
                 id = request.msgId,
             )

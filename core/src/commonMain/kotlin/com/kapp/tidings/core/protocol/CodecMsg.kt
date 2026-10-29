@@ -31,6 +31,9 @@ object CodecMsg {
      * **加可选键时必须同时加进这里**。只加 data class 属性而不加白名单，本端编码得出、
      * 对端 `hasOnlyKeys` 直接判成 extra-field 整帧拒收 —— 表现为「发送侧一切正常、
      * 接收侧什么都没有」，比编译错误难查得多（`senderId` 曾经就是这样漏掉的）。
+     *
+     * **当前是 15 键的过渡态**：`agentIntent` / `agentState` / `card` 三个新键已入列，
+     * `reasoning` 与其预算链随后退场（T2）—— 退场之后是规格的终态 14 键。
      */
     private val GROUP_TEXT_KEYS = setOf(
         "kind", "text", "groupId", "groupRev", "mentions", "resend", "replyTo",
@@ -41,6 +44,10 @@ object CodecMsg {
         // 会话标题：分段线要显示「任务：xxx」，而那个标题是宿主本机的数据，不跟着消息走
         // 就永远只能是「新会话」。
         "agentSessionTitle",
+        // 单帧原子意图（人类 → 插件）：随正文一次发出，宿主原子化「开会话 + 派单」。
+        "agentIntent",
+        // 执行状态（插件 → 全群）与声明式卡片：四态枚举与对象校验见 [validateMsg]。
+        "agentState", "card",
     )
 
     /**
@@ -135,8 +142,35 @@ object CodecMsg {
         }
 
         // 严格字段白名单：多一个字段整帧丢弃（neg-group-text-extra-field 就是这条）。
-        return hasOnlyKeys(o, GROUP_TEXT_KEYS)
+        if (!hasOnlyKeys(o, GROUP_TEXT_KEYS)) return false
+
+        // ---- 值类型校验（白名单只管键的存在，不管值的形状）----
+
+        // 单帧原子意图（可选）：必须是一个 JSON 对象。字符串形态的「意图」是坏载荷 ——
+        // 意图的内部字段由插件清单定义，协议层不逐字段校验，但「不是对象」连形状都不是。
+        if (o.containsKey("agentIntent")) {
+            if (o["agentIntent"] !is JsonObject) return false
+        }
+
+        // 声明式卡片（可选）：必须是对象，且受 [Limits.CARD_BYTES] 字节预算约束。
+        // 发送侧超限**拒绝不截断**（`NodeOutbound.groupTextVariants`），接收侧按同一
+        // 数值整帧拒收 —— 队列重放走 `decodeTcp`，同一份校验再跑一遍，三处同源。
+        if (o.containsKey("card")) {
+            val card = o["card"] as? JsonObject ?: return false
+            if (utf8ByteLength(card.toString()) > Limits.CARD_BYTES) return false
+        }
+
+        // 执行状态（可选）：四态枚举。状态机是协议事实，不是自由文本 —— 界面的状态
+        // 徽标只画这四态，多出来的值等于 UI 上的一个空洞，不如在协议层就挡住。
+        if (o.containsKey("agentState")) {
+            val state = (o["agentState"] as? JsonPrimitive)?.takeIf { it.isString } ?: return false
+            if (state.content !in GROUP_AGENT_STATES) return false
+        }
+        return true
     }
+
+    /** `agentState` 的四态（规格 §4.1）：界面的执行状态徽标只画这四个。 */
+    private val GROUP_AGENT_STATES = setOf("accept", "blocked", "completed", "failed")
 
     /** recall / pk 的群引用一致性：有 groupId 就必须有非负 groupRev，反之亦然。 */
     internal fun validateGroupRef(o: JsonObject): Boolean {
@@ -180,6 +214,12 @@ object CodecMsg {
         agentCursor: Long? = null,
         /** 会话标题（可选）。分段线显示「任务：xxx」用它；缺省时界面显示「新会话」。 */
         agentSessionTitle: String? = null,
+        /** 人类 → 插件的单帧原子意图（可选）。见 `GroupTextMsgPayload.agentIntent`。 */
+        agentIntent: JsonObject? = null,
+        /** 插件 → 全群的执行状态（可选，四态）。见 `GroupTextMsgPayload.agentState`。 */
+        agentState: String? = null,
+        /** 声明式卡片负载（可选）。见 `GroupTextMsgPayload.card` 的预算与拒绝纪律。 */
+        card: JsonObject? = null,
     ): JsonElement = wireJson.encodeToJsonElement(
         GroupTextMsgPayload.serializer(),
         GroupTextMsgPayload(
@@ -195,6 +235,9 @@ object CodecMsg {
             agentSessionId = agentSessionId,
             agentCursor = agentCursor,
             agentSessionTitle = agentSessionTitle,
+            agentIntent = agentIntent,
+            agentState = agentState,
+            card = card,
         ),
     )
 

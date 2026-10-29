@@ -132,6 +132,61 @@ class GroupTextCapabilityGatingTest {
         )
     }
 
+    /**
+     * 新增的 agent 键（`agentIntent` / `agentState` / `card`）与 senderId/reasoning
+     * 走**同一条** `gta1` 门：legacy 成员的帧里一个都不能出现，否则上游整帧拒收；
+     * gta1 成员拿到的全量帧则三键齐全。判据是「legacy 收到的字节」，不是「能不能编码」。
+     */
+    @Test
+    fun theNewAgentKeysAreGatedLikeTheOldOnes() = runBlocking {
+        val rig = rig(
+            mapOf(
+                "legacy" to listOf(MsgTypes.CAP_MOBILE_TEXT),
+                "modern" to listOf(MsgTypes.CAP_MOBILE_TEXT, MsgTypes.CAP_GROUP_TEXT_ATTRIBUTED),
+            ),
+        )
+        rig.start()
+        try {
+            rig.registry.touch("legacy", "127.0.0.1", 17991, profile("legacy", emptyList(), 20001), profileTs = 1L, confirmed = true)
+            rig.registry.touch("modern", "127.0.0.1", 17992, profile("modern", emptyList(), 20002), profileTs = 1L, confirmed = true)
+
+            val intent = kotlinx.serialization.json.buildJsonObject {
+                put("agentId", kotlinx.serialization.json.JsonPrimitive("dev-lead"))
+            }
+            val card = kotlinx.serialization.json.buildJsonObject {
+                put("cardId", kotlinx.serialization.json.JsonPrimitive("task-89"))
+            }
+            val outcome = rig.outbound.sendGroupText(
+                text = "派单正文",
+                groupId = "grp-1",
+                groupRev = 7,
+                members = listOf("self", "legacy", "modern"),
+                agentIntent = intent,
+                agentState = "accept",
+                card = card,
+            )
+            assertEquals(SendOutcome.SENT, outcome)
+
+            val byPort = rig.tcp.frames.associate { (port, envelope) -> port to envelope }
+            val legacy = assertNotNull(byPort[20001], "legacy 成员那一帧没发出去")
+            val modern = assertNotNull(byPort[20002], "modern 成员那一帧没发出去")
+            assertEquals(legacy.id, modern.id, "两个成员收到的必须是同一个信封 id")
+
+            val legacyPayload = legacy.payload.jsonObject
+            for (key in listOf("agentIntent", "agentState", "card")) {
+                assertNull(legacyPayload[key], "legacy 成员的帧带了 $key ⇒ 上游整帧丢弃")
+            }
+            assertTrue(upstreamAccepts(legacyPayload), "legacy 成员收到的必须是上游能收的那份：$legacyPayload")
+
+            val modernPayload = modern.payload.jsonObject
+            assertTrue(modernPayload.containsKey("agentIntent"), "gta1 成员必须拿到 agentIntent")
+            assertEquals("accept", (modernPayload["agentState"] as JsonPrimitive).content)
+            assertTrue(modernPayload.containsKey("card"), "gta1 成员必须拿到 card")
+        } finally {
+            rig.close()
+        }
+    }
+
     // ---------------------------------------------------------------- 真实 Messenger 扇出
 
     private fun profile(nodeId: String, caps: List<String>, tcpPort: Int = 20000) = Profile(
@@ -367,6 +422,53 @@ class GroupTextCapabilityGatingTest {
                 rig.messageStore.since("group:grp-1", 0, 10).size,
                 "重发不许再写一条本地历史：那条消息当初已经写过（再写就是本地多一条）",
             )
+        } finally {
+            rig.close()
+        }
+    }
+
+    /** 重放路径与发送路径同一条门：卡片随原 id 重放，legacy 成员拿到的仍是无键那份。 */
+    @Test
+    fun theReplayCarriesTheCardThroughTheSameGate() = runBlocking {
+        val rig = rig(
+            mapOf(
+                "legacy" to emptyList(),
+                "modern" to listOf(MsgTypes.CAP_GROUP_TEXT_ATTRIBUTED),
+            ),
+        )
+        rig.start()
+        try {
+            rig.registry.touch("legacy", "127.0.0.1", 17991, profile("legacy", emptyList(), 20001), profileTs = 1L, confirmed = true)
+            rig.registry.touch("modern", "127.0.0.1", 17992, profile("modern", emptyList(), 20002), profileTs = 1L, confirmed = true)
+
+            val originalId = "0f8fad5b-d9cb-469f-a165-70867728950f"
+            val card = kotlinx.serialization.json.buildJsonObject {
+                put("cardId", kotlinx.serialization.json.JsonPrimitive("task-89"))
+                put("rev", kotlinx.serialization.json.JsonPrimitive(4))
+            }
+            val outcome = rig.outbound.replayOutgoing(
+                OutgoingReplay(
+                    peerId = "group:grp-1",
+                    msgId = originalId,
+                    text = "补发的卡片消息",
+                    groupId = "grp-1",
+                    groupRev = 9,
+                    members = listOf("self", "legacy", "modern"),
+                    card = card,
+                    agentState = "completed",
+                ),
+            )
+            assertEquals(SendOutcome.SENT, outcome)
+
+            val byPort = rig.tcp.frames.associate { (port, envelope) -> port to envelope }
+            val legacy = assertNotNull(byPort[20001])
+            val modern = assertNotNull(byPort[20002])
+            assertEquals(originalId, legacy.id, "重放必须沿用原 id")
+            assertEquals(originalId, modern.id)
+            assertNull(legacy.payload.jsonObject["card"], "legacy 成员的重放帧同样不能带卡片")
+            assertNull(legacy.payload.jsonObject["agentState"], "legacy 成员的重放帧同样不能带状态")
+            assertEquals("completed", (modern.payload.jsonObject["agentState"] as JsonPrimitive).content)
+            assertTrue(modern.payload.jsonObject.containsKey("card"), "gta1 成员的重放帧必须带卡片")
         } finally {
             rig.close()
         }

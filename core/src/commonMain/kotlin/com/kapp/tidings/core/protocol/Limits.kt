@@ -127,6 +127,20 @@ object Limits {
     const val GROUP_REASONING_BYTES = 24 * 1024
 
     /**
+     * 群消息可选字段 `card`（声明式卡片负载）的 UTF-8 字节上限（序列化后的对象）。
+     *
+     * 取 24 KiB，顶替 `reasoning` 同档的预算位 —— 信封数学：
+     * 正文 [GROUP_TEXT_TCP_LIMIT]（32 KiB）+ 卡片 24 KiB + 信封开销 < 64 KiB 整帧硬上限。
+     *
+     * **超限一律拒绝、绝不截断**（与正文/思考过程的「截断」策略相反）：卡片是一个
+     * JSON 对象，截断之后它就解不了 —— 截断后发出去等于发送侧自己生产一帧注定被判
+     * bad-payload 的帧。发送侧（`NodeOutbound.groupTextVariants`）超限直接抛出，
+     * 由调用方回错误事件给插件、让插件瘦身重发；接收侧按同一数值整帧拒收；
+     * 队列重放走 `decodeTcp`，校验同源（`validateMsg`）。
+     */
+    const val CARD_BYTES = 24 * 1024
+
+    /**
      * PPE-1 增补 D1/D6（`docs/PROTOCOL-AGENT-WORKSPACE.md`）：
      * `agent-session` 的四个**可选**键。全部可选 = 旧接收端仍收得下；
      * `wsPath` 只进详情不进卡片主位（隐私纪律，父稿 §0）。
