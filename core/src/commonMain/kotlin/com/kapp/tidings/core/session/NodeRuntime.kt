@@ -1557,6 +1557,37 @@ class NodeRuntime(
         prompt: String? = null,
         queuedAt: Long? = null,) = outbound.sendAgentQueue(peerId, taskId, sessionId, op, prompt, queuedAt)
 
+    /** M4 跨端派单网道（规格 §6.2）：请求帧，点对点、不经群聊。 */
+    suspend fun sendAgentInvoke(peerId: String,
+        invokeId: String,
+        op: String,
+        agentId: String,
+        requestedBy: String,
+        deadlineMs: Long,
+        prompt: String? = null,
+        actionId: String? = null,
+        cardId: String? = null,
+        cardRev: Int? = null,
+        decidedBy: String? = null,
+        sessionId: String? = null,
+        groupId: String? = null,
+        groupRev: Int? = null,
+        wsId: String? = null,
+        at: Long? = null,) = outbound.sendAgentInvoke(
+        peerId, invokeId, op, agentId, requestedBy, deadlineMs, prompt, actionId, cardId,
+        cardRev, decidedBy, sessionId, groupId, groupRev, wsId, at,
+    )
+
+    /** `agent-invoke` 的应答帧（cap `agi1`）。 */
+    suspend fun sendAgentInvokeResult(peerId: String,
+        invokeId: String,
+        ok: Boolean,
+        status: String,
+        summary: String? = null,
+        error: String? = null,
+        card: JsonObject? = null,
+        at: Long? = null,) = outbound.sendAgentInvokeResult(peerId, invokeId, ok, status, summary, error, card, at)
+
     suspend fun sendAgentRun(peerId: String,
         sessionId: String,
         runId: String,

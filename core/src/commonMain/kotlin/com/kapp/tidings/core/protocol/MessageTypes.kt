@@ -102,6 +102,23 @@ object MsgTypes {
     const val AGENT_SESSION_PAGE = "agent-session-page"
 
     /**
+     * M4 跨端派单网道（规格 §6.2「地下铁」）：宿主 A 的 Leader 把子任务派到宿主 B 的
+     * 插件（cap `agi1`）。请求-响应式 RPC 走 P2P SecureStream 点对点传输，
+     * **不经群聊** —— 主群里一条跨设备交接文本都不产生，全群只看一张汇总看板卡。
+     *
+     * 与 `/v1/agent/run`（PPE-1 §6.4）的区别：run 是**单向执行状态宣告帧**，
+     * invoke 是**带租约（deadlineMs）的任务派发请求**，目标节点必须经
+     * `AgentExecAuthorizer` 授权后应答 `agent-invoke-result`。两种职责不共用一帧。
+     *
+     * `op` 两态：`task`（派单执行）与 `action`（卡片动作转发 —— 手机点了宿主插件
+     * 卡片上的按钮，控制意图走网道直达宿主，绝不拼成群文本）。
+     */
+    const val AGENT_INVOKE = "agent-invoke"
+
+    /** `agent-invoke` 的应答帧（cap `agi1`）：结果状态 + 可选的执行产出卡片。 */
+    const val AGENT_INVOKE_RESULT = "agent-invoke-result"
+
+    /**
      * 身份恢复 L2：恢复后的设备向**持有双边副本的对端**要历史（方案 §6.3）。
      *
      * 载荷为空对象 `{}`（严格白名单，多一个键整帧拒收）—— 要什么是隐含的：
@@ -130,6 +147,7 @@ object MsgTypes {
         AGENT_ARTIFACT,
         AGENT_WORKSPACE, AGENT_GRANT_REQUEST, AGENT_GRANT, AGENT_GRANT_LIST, AGENT_SESSION_PAGE,
         RECOVERY_REQ, RECOVERY_DATA,
+        AGENT_INVOKE, AGENT_INVOKE_RESULT,
     )
 
     /**
@@ -150,6 +168,9 @@ object MsgTypes {
         // 请求帧同样必须在 RELIABLE 里：不在的话它到不了对端 inbound（见上文那条），
         // 表现是「手机点了加载更多，宿主根本没收到」。
         AGENT_SESSION_PAGE,
+        // 派单请求与结果都必须可靠：请求丢了靠重传兜底；结果丢了，发起方会把
+        // 「已经完成」误判成「超时中断」—— 比丢请求更糟。
+        AGENT_INVOKE, AGENT_INVOKE_RESULT,
     )
 
     /**
@@ -165,6 +186,9 @@ object MsgTypes {
             // 手机端收发的群文本都可能带扩展键（senderId 与 agent 意图/状态/卡片）⇒ 如实声明。
             // 不声明的话「对端按能力门控」会连**我们自己的宿主**一起退化成不带归属的那一份。
             CAP_GROUP_TEXT_ATTRIBUTED,
+            // 跨端派单网道（M4）：手机要能点宿主插件卡片上的按钮（action 请求只发
+            // 给声明 agi1 的对端）；被误指名派单时也应答一帧诚实的 no-executor 拒绝。
+            CAP_AGENT_INVOKE,
         )
 
     /**
@@ -361,6 +385,20 @@ object MsgTypes {
     const val CAP_GROUP_TEXT_ATTRIBUTED = "gta1"
 
     /**
+     * `agi1` = **跨端派单网道**（规格 §6.2 / §6.3，M4）。
+     *
+     * 语义：声明方认识 `agent-invoke` / `agent-invoke-result` 两帧 ——
+     * 能**收** invoke 并按 `AgentExecAuthorizer` 授权应答（哪怕应答一个诚实的拒绝：
+     * 没有执行器、未授权、目标插件不存在，都是一帧如实的结果而不是沉默），
+     * 能**发** action 请求（手机点击宿主插件卡片按钮的那条控制通路）。
+     *
+     * 两端（MOBILE_CAPS 与 AGENT_CAPS）都声明：手机永不承载任务执行，但手机会点卡片
+     * 按钮 —— action 请求只发给声明了 `agi1` 的宿主；反过来手机也可能被恶意指名
+     * 派单，如实声明后它会应答一帧 `no-executor` 拒绝，而不是让发起方白等租约超时。
+     */
+    const val CAP_AGENT_INVOKE = "agi1"
+
+    /**
      * agent 节点的 caps：`ag1`（身份）+ 一个人类节点也会有的文本能力 + `agn1`（会话帧）
      * + `aws1`（工作区键与宣告帧，D1/D2/D3 已实现）+ `agr1`（授权回路，D7 已实现）
      * + `lnk1`（长连接下行，K1 已实现）+ `gta1`（带发送者归属的群文本）。
@@ -372,7 +410,7 @@ object MsgTypes {
         listOf(
             CAP_AGENT, CAP_MOBILE_TEXT, CAP_AGENT_SESSION, CAP_AGENT_QUEUE,
             CAP_AGENT_WORKSPACE, CAP_AGENT_GRANT, CAP_AGENT_SESSION_PAGE, CAP_LINK,
-            CAP_GROUP_TEXT_ATTRIBUTED,
+            CAP_GROUP_TEXT_ATTRIBUTED, CAP_AGENT_INVOKE,
         )
 
     /**
@@ -392,6 +430,7 @@ object MsgTypes {
         AGENT_WORKSPACE, AGENT_GRANT_REQUEST, AGENT_GRANT, AGENT_GRANT_LIST, AGENT_SESSION_PAGE,
         GROUP, SHARE, SCAN_RANGES, SCREEN, AVATAR,
         RECOVERY_REQ, RECOVERY_DATA,
+        AGENT_INVOKE, AGENT_INVOKE_RESULT,
     )
 
     /**

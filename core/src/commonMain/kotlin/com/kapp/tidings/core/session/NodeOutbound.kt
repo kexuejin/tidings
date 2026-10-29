@@ -841,6 +841,58 @@ internal class NodeOutbound(
         ),
     )
 
+    /**
+     * M4 跨端派单网道的请求帧（cap `agi1`）。**不经群聊** —— 这是规格 §6.2 的
+     * 「地下铁」：派单与交接只走点对点，主群聊一条跨设备中间文本都不产生。
+     */
+    suspend fun sendAgentInvoke(
+        peerId: String,
+        invokeId: String,
+        op: String,
+        agentId: String,
+        requestedBy: String,
+        deadlineMs: Long,
+        prompt: String? = null,
+        actionId: String? = null,
+        cardId: String? = null,
+        cardRev: Int? = null,
+        decidedBy: String? = null,
+        sessionId: String? = null,
+        groupId: String? = null,
+        groupRev: Int? = null,
+        wsId: String? = null,
+        at: Long? = null,
+    ): SendOutcome = messenger.sendUserMessage(
+        peerId,
+        makeEnvelope(
+            MsgTypes.AGENT_INVOKE,
+            selfId(),
+            Codec.agentInvokePayload(
+                invokeId, op, agentId, requestedBy, deadlineMs, prompt, actionId, cardId,
+                cardRev, decidedBy, sessionId, groupId, groupRev, wsId, at,
+            ),
+        ),
+    )
+
+    /** `agent-invoke` 的应答帧：结果状态 + 可选的执行产出卡片（由发起方拼看板卡上群）。 */
+    suspend fun sendAgentInvokeResult(
+        peerId: String,
+        invokeId: String,
+        ok: Boolean,
+        status: String,
+        summary: String? = null,
+        error: String? = null,
+        card: JsonObject? = null,
+        at: Long? = null,
+    ): SendOutcome = messenger.sendUserMessage(
+        peerId,
+        makeEnvelope(
+            MsgTypes.AGENT_INVOKE_RESULT,
+            selfId(),
+            Codec.agentInvokeResultPayload(invokeId, ok, status, summary, error, card, at),
+        ),
+    )
+
     suspend fun sendAgentRun(
         peerId: String,
         sessionId: String,

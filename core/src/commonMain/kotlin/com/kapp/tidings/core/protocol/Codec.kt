@@ -316,4 +316,35 @@ object Codec {
     fun decodePkMsg(payload: JsonElement?) = CodecPk.decodePkMsg(payload)
 
     fun decodeShareMessage(payload: JsonElement?) = CodecShare.decodeShareMessage(payload)
+
+    fun agentInvokePayload(
+        invokeId: String,
+        op: String,
+        agentId: String,
+        requestedBy: String,
+        deadlineMs: Long,
+        prompt: String? = null,
+        actionId: String? = null,
+        cardId: String? = null,
+        cardRev: Int? = null,
+        decidedBy: String? = null,
+        sessionId: String? = null,
+        groupId: String? = null,
+        groupRev: Int? = null,
+        wsId: String? = null,
+        at: Long? = null,
+    ) = CodecInvoke.agentInvokePayload(
+        invokeId, op, agentId, requestedBy, deadlineMs, prompt, actionId, cardId, cardRev,
+        decidedBy, sessionId, groupId, groupRev, wsId, at,
+    )
+
+    fun agentInvokeResultPayload(
+        invokeId: String,
+        ok: Boolean,
+        status: String,
+        summary: String? = null,
+        error: String? = null,
+        card: JsonObject? = null,
+        at: Long? = null,
+    ) = CodecInvoke.agentInvokeResultPayload(invokeId, ok, status, summary, error, card, at)
 }

@@ -458,6 +458,9 @@ data class RelaySettings(
         // 与 tbl1/att1 同一类事实声明：它决定对端发不发归属键，不是用户偏好；
         // 漏了就是 lnk1/att1 那次静默 —— 手机自己收得到，对端永远不带。
         add(MsgTypes.CAP_GROUP_TEXT_ATTRIBUTED)
+        // agi1：跨端派单网道（M4）。本端认识 agent-invoke 族帧 —— 能发卡片动作请求
+        // （只发给声明它的对端）、被误指名派单时也答一帧诚实的拒绝而不是沉默。
+        add(MsgTypes.CAP_AGENT_INVOKE)
         if (remoteView) add(MsgTypes.CAP_REMOTE_VIEW)
         if (remoteShare) add(MsgTypes.CAP_REMOTE_SHARE)
         if (isShareEnabled()) add(MsgTypes.CAP_SHARE)
