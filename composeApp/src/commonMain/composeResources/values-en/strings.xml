@@ -1550,7 +1550,6 @@
     <string name="workspace_member_section_agents">Resident Bots (%1$d)</string>
     <string name="workspace_member_agent_dsh">DSH · Terminal &amp; Execution</string>
     <string name="workspace_member_agent_gemini">Gemini · Review &amp; Architecture</string>
-    <string name="workspace_member_add_agent">+ Add Agent Bot…</string>
     <string name="workspace_member_no_workspace">No local project to expose yet</string>
     <string name="workspace_qr_dialog_desc">Scan this direct QR with Tidings on mobile to pair node and authorize workspace access. One-time credential, valid for 15 minutes.</string>
     <string name="workspace_qr_no_address">Cannot obtain candidate addresses. Please make sure the network is connected and port is open.</string>
@@ -1628,11 +1627,6 @@
     <string name="agent_exec_add_title">Add a device</string>
     <string name="agent_exec_add_empty">Every device is already on the list.</string>
 
-    <string name="group_expose_agent_title">Agents from this machine</string>
-    <string name="group_expose_agent_note">Checked agents can be @-mentioned in this group. Only agents on this machine can be exposed.</string>
-    <string name="group_expose_agent_empty">No workspace on this machine to expose yet. Create one in the board first.</string>
-    <string name="group_expose_agent_confirm">Expose</string>
-    <string name="group_expose_agent_done">Exposed %1$s. The group can @ it now.</string>
 
     <string name="chat_history_loading">Loading earlier messages…</string>
     <string name="chat_history_begin">This is the beginning of the conversation</string>
@@ -1701,4 +1695,6 @@
     <string name="group_auth_save">Save &amp; broadcast</string>
     <string name="group_auth_badge_default">Default</string>
     <string name="group_auth_team_members">%1$d members</string>
+    <string name="group_auth_badge_self">Declared here</string>
+    <string name="group_auth_entry">Authorization</string>
 </resources>

@@ -1705,7 +1705,6 @@
     <string name="workspace_member_section_agents">入驻智能体 (%1$d)</string>
     <string name="workspace_member_agent_dsh">DSH · 本地终端与执行引擎</string>
     <string name="workspace_member_agent_gemini">Gemini · 架构设计与代码审阅</string>
-    <string name="workspace_member_add_agent">+ 邀请新智能体入驻…</string>
     <string name="workspace_member_no_workspace">本机还没有可暴露的项目</string>
     <string name="workspace_no_title_banner">这个工作区没有名字。对端只上报了它的标识 %1$s，没有上报名字 —— 我们不用那串标识冒充名字，等它补上。</string>
     <string name="workspace_sessions_section">会话 (%1$d)</string>
@@ -1798,13 +1797,6 @@
     <string name="agent_exec_add_title">添加设备</string>
     <string name="agent_exec_add_empty">所有设备都已经在名单里了。</string>
 
-    <!-- 群内加减 agent：暴露本机 agent / 已暴露的移除 -->
-    <string name="group_expose_agent_title">本机可入驻的 Agent</string>
-    <string name="group_expose_agent_note">选了哪些，群里就能 @ 到它们。只能暴露这台机器上的 agent。</string>
-    <string name="group_expose_agent_empty">这台机器上还没有可入驻的工作区。先在「工作台」里建一个。</string>
-    <string name="group_expose_agent_confirm">入驻</string>
-    <string name="group_expose_agent_done">已入驻 %1$s。群里现在可以 @ 它了。</string>
-
     <string name="chat_history_loading">正在加载更早的消息…</string>
     <string name="chat_history_begin">已经到最早一条了</string>
     <string name="hist_date_month_year">%1$d年%2$d月</string>
@@ -1874,4 +1866,6 @@
     <string name="group_auth_save">保存并广播</string>
     <string name="group_auth_badge_default">默认</string>
     <string name="group_auth_team_members">%1$d 名组员</string>
+    <string name="group_auth_badge_self">本机声明</string>
+    <string name="group_auth_entry">授权管理</string>
 </resources>

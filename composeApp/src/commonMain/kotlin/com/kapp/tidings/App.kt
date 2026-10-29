@@ -507,6 +507,9 @@ fun RelayApp(
                         groupActions = ChatScreenGroupActions(
                             onAddGroupMembers = controller::addGroupMembers,
                             onRemoveGroupMember = controller::removeGroupMember,
+                            // 授权面板（方案 §5.1）的保存通路：手机也是「一台机器」，
+                            // 有本机工作区时同样可编辑；没有时面板只读（本机主权不变）。
+                            onExposeWorkspaces = controller::setGroupAgentWorkspaces,
                             onUpdateGroupMeta = controller::updateGroupMeta,
                             onLeaveGroup = { groupId ->
                                 controller.leaveGroup(groupId)

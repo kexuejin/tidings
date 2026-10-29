@@ -57,8 +57,8 @@ import com.kapp.tidings.generated.resources.chat_group_owner_label
 import com.kapp.tidings.generated.resources.chat_group_remove_member
 import com.kapp.tidings.generated.resources.common_close
 import com.kapp.tidings.generated.resources.common_profile_unavailable
+import com.kapp.tidings.generated.resources.group_auth_entry
 import com.kapp.tidings.generated.resources.group_member_agent_badge
-import com.kapp.tidings.generated.resources.workspace_member_add_agent
 import com.kapp.tidings.generated.resources.workspace_member_section_agents
 import com.kapp.tidings.generated.resources.workspace_member_section_humans
 import org.jetbrains.compose.resources.stringResource
@@ -400,9 +400,11 @@ fun GroupInfoDialog(
                             // （`showAddDialog`）—— 而真正的暴露入口 `onExposeWorkspaces`
                             // 从未被渲染过（全文只出现一次，就是声明）。
                             // 于是「群内加减 agent」这条能力在界面上根本不存在。
-                            if (onExposeWorkspaces != null) {
+                            // 授权面板（方案 §5.1）的入口：宿主来编辑，别的成员来只读查看
+                            // （「群里授权了哪些目录」本来就是全群可见的声明）。
+                            if (onExposeWorkspaces != null || rows.agents.isNotEmpty()) {
                                 AppTextButton(
-                                    text = stringResource(Res.string.workspace_member_add_agent),
+                                    text = stringResource(Res.string.group_auth_entry),
                                     onClick = { showExposeDialog = true },
                                     size = AppButtonSize.Small,
                                 )
@@ -522,17 +524,22 @@ fun GroupInfoDialog(
         },
     )
 
-    // 暴露本机 agent 对话框（群内加减 agent 的入口）。
+    // 智能体与工作区授权面板（方案 §5.1，替换 ExposeAgentDialog）。
+    // 宿主可编辑（保存走 handleSetGroupAgentWorkspaces 一次成像）；其它成员只读，
+    // 且路径列显示「仅宿主可见」—— 路径本来就不进协议，非宿主根本没有。
     val expose = onExposeWorkspaces
-    if (showExposeDialog && expose != null) {
-        ExposeAgentDialog(
+    if (showExposeDialog) {
+        SetGroupAgentWorkspacesDialog(
+            declaredAgents = group.virtualAgents.orEmpty(),
             localWorkspaces = localWorkspaces,
             exposedWsIds = group.virtualAgents.orEmpty()
                 .filter { it.hostNodeId == selfNodeId }
                 .mapNotNull { it.defaultWsId }
                 .toSet(),
+            selfNodeId = selfNodeId,
+            wsTitleOf = { wsId -> localWorkspaces.firstOrNull { it.wsId == wsId }?.wsTitle },
             onDismiss = { showExposeDialog = false },
-            onConfirm = { chosen -> expose(chosen) },
+            onSave = expose,
         )
     }
 
