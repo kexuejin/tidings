@@ -1,0 +1,21 @@
+{
+  "pluginId": "echo-team",
+  "name": "Echo Team",
+  "version": "1.0.0",
+  "type": "team",
+  "entrypoint": "python3 main.py",
+  "leader": {
+    "agentId": "echo-lead",
+    "name": "echo-lead",
+    "role": "Team Orchestrator"
+  },
+  "members": [
+    { "agentId": "echo-coder", "name": "echo-coder", "role": "Engineer" },
+    { "agentId": "echo-tester", "name": "echo-tester", "role": "QA Engineer" }
+  ],
+  "allowedWorkspaces": [
+    { "wsId": "demo-workspace", "title": "Demo Workspace" }
+  ],
+  "defaultWsId": "demo-workspace",
+  "capabilities": ["task-dag", "progress-stream", "card"]
+}
