@@ -130,12 +130,13 @@ public interface DesktopPaneActions {
      */
     fun updateGroupMeta(groupId: String, description: String?, announce: String?)
     /**
-     * 把**本机的一个 workspace** 暴露/收起进这个群（`virtualAgents` 的成员入口）。
+     * 把**本机**在这个群的 agent 声明集合整体改写为 [wsIds]（授权面板「保存」的落点）。
      *
-     * [wsId] 传 null = 收起。暴露单位是 `(agentId, wsId)`：一台设备可以装多个 agent，
-     * 不同 agent 也可能操作同一个 workspace。
+     * 一次成像：调用方交的是**最终集合**，实现一次 rev+1、一次广播，没有中间态。
+     * 主权边界：只覆盖本机自己的声明，其它设备的原样保留（见
+     * `RelayControllerGroupsComponent.setGroupAgentWorkspaces`）。
      */
-    fun exposeWorkspace(groupId: String, wsId: String?, agentId: String?)
+    fun setGroupAgentWorkspaces(groupId: String, wsIds: List<String>)
 
     /**
      * 算「谁能用这个 agent 干活」的逐设备勾选状态。

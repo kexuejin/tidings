@@ -125,7 +125,7 @@ fun handleSend(peerId: String, text: String) {
         val route = RelayController.agentPromptRoute(
             text = body,
             groupId = groupId,
-            isWorkspaceGroup = groupId != null && host.isWorkspaceGroup(groupId),
+            isWorkspaceGroup = groupId != null && host.groupHasDeclaredAgents(groupId),
             repliedToIsAgent = false,
             localAgentPresent = localAgentPresent,
             remoteAgentPresent = remoteAgentPresent,
@@ -588,7 +588,7 @@ fun handleOnInbound(envelope: Envelope) {
     val route = RelayController.agentPromptRoute(
         text = cleanedText,
         groupId = groupId,
-        isWorkspaceGroup = groupId != null && host.isWorkspaceGroup(groupId),
+        isWorkspaceGroup = groupId != null && host.groupHasDeclaredAgents(groupId),
         repliedToIsAgent = repliedToIsAgent,
         localAgentPresent = routeFacts.localAgentPresent,
         remoteAgentPresent = routeFacts.remoteAgentPresent,

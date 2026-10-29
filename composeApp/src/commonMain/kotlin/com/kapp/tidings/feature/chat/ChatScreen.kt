@@ -1513,13 +1513,9 @@ fun ChatScreen(
             localWorkspaces = state.agentWorkspaces.values.filter { it.peerId == state.selfNodeId },
             onExposeWorkspaces = groupActions.onExposeWorkspaces?.let { expose ->
                 { chosen ->
-                    // 先收起已取消的，再暴露新勾的 —— 两个方向都要处理，
-                    // 否则"取消勾选"在界面上看起来生效、实际没移除。
-                    val before = group.virtualAgents.orEmpty()
-                        .filter { it.hostNodeId == state.selfNodeId }
-                        .mapNotNull { it.defaultWsId }
-                    (before - chosen.toSet()).forEach { expose(group.groupId, it, null) }
-                    chosen.forEach { wsId -> expose(group.groupId, wsId, null) }
+                    // 一次成像：chosen 就是**最终集合**，收起与暴露在一次调用里完成
+                    // （旧实现先撤再增、逐条调用，每条各发一份元数据，中间态会广播给全群）。
+                    expose(group.groupId, chosen)
                 }
             },
         )

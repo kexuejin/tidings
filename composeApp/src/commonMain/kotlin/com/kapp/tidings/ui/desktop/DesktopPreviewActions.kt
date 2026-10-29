@@ -40,7 +40,7 @@ public object DesktopPreviewActions : DesktopPaneActions {
     override fun forwardMessage(message: MessageUi, targetConvId: String): Unit = Unit
 
     override fun updateGroupMeta(groupId: String, description: String?, announce: String?): Unit = Unit
-    override fun exposeWorkspace(groupId: String, wsId: String?, agentId: String?): Unit = Unit
+    override fun setGroupAgentWorkspaces(groupId: String, wsIds: List<String>): Unit = Unit
 
     /**
      * 预览里建群不做事，但**必须回一个 id**：`DesktopShell` 的会话侧栏拿到 null

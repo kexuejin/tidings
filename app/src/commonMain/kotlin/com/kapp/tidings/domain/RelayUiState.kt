@@ -340,14 +340,18 @@ data class RelayUiState(
     /** 按会话键取群：`group:<groupId>` → [GroupMeta]。私聊键恒返回 null。 */
     fun groupOfConv(convId: String?): GroupMeta? = groupOf(convId?.let { ConvId.groupIdOf(it) })
 
-    /** 该群绑定的工作区；未绑定或未宣告时返回 null。 */
+    /**
+     * 该群绑定的工作区；未绑定时返回 null。
+     *
+     * 绑定看**声明**（债#2：按简介/群名子串猜测的旧实现已删）—— 群里 agent 声明的
+     * `defaultWsId` 对工作区表做精确 id 匹配。群没绑定工作区是合法状态
+     * （任何群都可以向授权目录派单，见方案 §3），不是缺失。
+     */
     fun workspaceOfGroup(groupId: String?): WorkspaceUi? {
         val meta = groupOf(groupId) ?: return null
-        val desc = meta.description.orEmpty().trim()
-        return agentWorkspaces.values.firstOrNull { ws ->
-            (desc.isNotBlank() && (desc == ws.wsPath || desc == ws.wsId || (ws.wsPath?.isNotBlank() == true && desc.contains(ws.wsPath)))) ||
-                (ws.wsTitle?.isNotBlank() == true && meta.name.contains(ws.wsTitle))
-        }
+        val declared = meta.virtualAgents.orEmpty().mapNotNull { it.defaultWsId }.toSet()
+        if (declared.isEmpty()) return null
+        return agentWorkspaces.values.firstOrNull { it.wsId in declared }
     }
 
     /** 该会话绑定的工作区：`group:<groupId>` → [WorkspaceUi]。私聊键恒返回 null。 */

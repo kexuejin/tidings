@@ -329,11 +329,8 @@ public fun ChatPane(
                 // 「添加智能体」= 暴露**本机项目**（与手机端同一份语义）。
                 localWorkspaces = state.agentWorkspaces.values.filter { it.peerId == state.selfNodeId },
                 onExposeWorkspaces = { chosen ->
-                    val before = group.virtualAgents.orEmpty()
-                        .filter { it.hostNodeId == state.selfNodeId }
-                        .mapNotNull { it.defaultWsId }
-                    (before - chosen.toSet()).forEach { wsId -> controller.exposeWorkspace(group.groupId, wsId, null) }
-                    chosen.forEach { wsId -> controller.exposeWorkspace(group.groupId, wsId, null) }
+                    // 一次成像：chosen 就是**最终集合**（旧实现先撤再增、逐条调用）。
+                    controller.setGroupAgentWorkspaces(group.groupId, chosen)
                 },
             )
         }

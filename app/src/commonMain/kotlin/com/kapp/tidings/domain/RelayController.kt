@@ -553,8 +553,8 @@ class RelayController(
         onSetExecDeviceAllowed?.invoke(agentKey, nodeId, allowed)
     }
 
-    override fun exposeWorkspace(groupId: String, wsId: String?, agentId: String?) =
-        handleExposeWorkspace(groupId, wsId, agentId)
+    override fun setGroupAgentWorkspaces(groupId: String, wsIds: List<String>) =
+        groupsCtl.run { handleSetGroupAgentWorkspaces(groupId, wsIds) }
     /**
      * 打开某条会话时把它标为已读。
      *
@@ -855,9 +855,8 @@ class RelayController(
         at: Long = com.kapp.tidings.core.nowMillis(),
     ) = agentCtl.handleRecordLocalEvent(nodeId, sessionId, cursor, eventType, summary, body, ref, at)
 
-    fun isWorkspaceGroup(groupId: String): Boolean = groupsCtl.isWorkspaceGroup(groupId)
-
-    fun workspaceOfGroup(groupId: String): com.kapp.tidings.domain.model.WorkspaceUi? = groupsCtl.workspaceOfGroup(groupId)
+    /** 这个群有没有 agent 声明（「工作区群」的声明式判据；子串猜测已随债#2 删除）。 */
+    fun groupHasDeclaredAgents(groupId: String): Boolean = groupsCtl.groupHasDeclaredAgents(groupId)
 
     // ------------------------------------------------------------------ 生命周期
     fun start() {

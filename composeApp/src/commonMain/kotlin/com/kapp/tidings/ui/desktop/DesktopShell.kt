@@ -837,7 +837,14 @@ public fun DesktopShell(
                                         // 必须同源 —— 否则同一次建群在两端叫两个名字。
                                         val name = groupNameFormat.replace("%s", ws.wsTitle ?: ws.wsId)
                                         val members = state.peers.filter { it.online }.map { it.nodeId }
-                                        val gid = controller.createGroup(name, members, ws.wsPath ?: ws.wsId)
+                                        // 走工作区建群：agent 声明（含 defaultWsId）与群一起落库 ——
+                                        // 绑定是声明，不靠简介子串反猜（债#2）。简介留给展示名，
+                                        // 不写本机路径（真机反馈 #4）。
+                                        val gid = controller.createWorkspaceGroup(
+                                            name = name,
+                                            wsId = ws.wsId,
+                                            memberIds = members,
+                                        )
                                         if (gid != null) {
                                             val convId = com.kapp.tidings.core.protocol.ConvId.group(gid)
                                             selectedPeerId = convId
@@ -850,7 +857,14 @@ public fun DesktopShell(
                                     onCreateNew = { path, _, groupName, _ ->
                                         showCreateWsDialog = false
                                         val members = state.peers.filter { it.online }.map { it.nodeId }
-                                        val gid = controller.createGroup(groupName, members, path)
+                                        // 全新目录还没有工作区行（wsId=null）：群先建出来当协同通道，
+                                        // 工作区行随后接上；此时没有可声明的 agent，与旧行为一致。
+                                        val gid = controller.createWorkspaceGroup(
+                                            name = groupName,
+                                            wsId = null,
+                                            memberIds = members,
+                                            description = path,
+                                        )
                                         if (gid != null) {
                                             val convId = com.kapp.tidings.core.protocol.ConvId.group(gid)
                                             val ws = state.workspaceOfGroup(gid)
@@ -1081,7 +1095,12 @@ public fun DesktopShell(
                     groupCreatePromptFor = null
                     val name = groupNameFormat.replace("%s", ws.wsTitle ?: ws.wsId)
                     val members = state.peers.filter { it.online }.map { it.nodeId }
-                    val gid = controller.createGroup(name, members, ws.wsPath ?: ws.wsId)
+                    // 走工作区建群：agent 声明与群一起落库（绑定是声明，不靠简介反猜）。
+                    val gid = controller.createWorkspaceGroup(
+                        name = name,
+                        wsId = ws.wsId,
+                        memberIds = members,
+                    )
                     if (gid != null) {
                         val convId = com.kapp.tidings.core.protocol.ConvId.group(gid)
                         selectedPeerId = convId

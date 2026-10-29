@@ -47,22 +47,16 @@ internal class RelayControllerGroupsComponent(
     private val host: RelayController,
 ) {
 
-fun isWorkspaceGroup(groupId: String): Boolean {
+/**
+ * 这个群有没有 agent 声明（= 界面语境里的「工作区群」）。
+ *
+ * 债#2：旧的 `isWorkspaceGroup` 拿群简介/群名对工作区路径、id、标题做**子串匹配** ——
+ * 简介被人编辑过判定就翻转，普通群提到路径会被误判。声明是唯一事实：
+ * `virtualAgents` 非空 ⇒ 群里有 agent，回复它不必再 @ 一遍。
+ */
+fun groupHasDeclaredAgents(groupId: String): Boolean {
     val meta = host._state.value.settings.groups.firstOrNull { it.groupId == groupId } ?: return false
-    val desc = meta.description.orEmpty().trim()
-    return host._state.value.agentWorkspaces.values.any { ws ->
-        (desc.isNotBlank() && (desc == ws.wsPath || desc == ws.wsId || (ws.wsPath?.isNotBlank() == true && desc.contains(ws.wsPath)))) ||
-            (ws.wsTitle?.isNotBlank() == true && meta.name.contains(ws.wsTitle))
-    }
-}
-
-fun workspaceOfGroup(groupId: String): com.kapp.tidings.domain.model.WorkspaceUi? {
-    val meta = host._state.value.settings.groups.firstOrNull { it.groupId == groupId } ?: return null
-    val desc = meta.description.orEmpty().trim()
-    return host._state.value.agentWorkspaces.values.firstOrNull { ws ->
-        (desc.isNotBlank() && (desc == ws.wsPath || desc == ws.wsId || (ws.wsPath?.isNotBlank() == true && desc.contains(ws.wsPath)))) ||
-            (ws.wsTitle?.isNotBlank() == true && meta.name.contains(ws.wsTitle))
-    }
+    return !meta.virtualAgents.isNullOrEmpty()
 }
 
 fun handleSyncWorkspaceGroups() {
@@ -71,9 +65,12 @@ fun handleSyncWorkspaceGroups() {
     var changed = false
     val updated = settings.groups.map { group ->
         if (group.description.isNullOrBlank()) {
-            val matchedWs = host._state.value.agentWorkspaces.values.firstOrNull { ws ->
-                ws.wsTitle?.isNotBlank() == true && group.name.contains(ws.wsTitle)
-            }
+            // 绑定看**声明**（债#2：子串猜测已删）：简介回填的是声明里默认工作区的
+            // 展示名。声明没有可解析的默认工作区（没声明 / defaultWsId 为空 /
+            // 本机工作区表里没有那一行）就不填 —— 空着比编一个强。
+            val declaredWsId = group.virtualAgents.orEmpty().firstNotNullOfOrNull { it.defaultWsId }
+            val matchedWs = declaredWsId
+                ?.let { id -> host._state.value.agentWorkspaces.values.firstOrNull { it.wsId == id } }
             if (matchedWs != null) {
                 changed = true
                 // **不写文件系统路径**：群简介是给群成员看的，本机目录路径
@@ -173,13 +170,9 @@ private fun handleCreateGroupInternal(
         host.warn(BannerMessage.GroupNeedsMember)
         return null
     }
-    val autoDesc = if (description.isNotBlank()) description.trim() else {
-        val foundWs = host._state.value.agentWorkspaces.values.firstOrNull { ws ->
-            ws.wsTitle?.isNotBlank() == true && trimmed.contains(ws.wsTitle)
-        }
-        // 同上：简介用**展示名**，不用路径 / wsId（那是内部标识，不是给人读的）。
-        foundWs?.wsTitle.orEmpty()
-    }
+    // 简介回填：调用方显式传了就用它；没传而工作区在手，用工作区**展示名**
+    // （债#2：按群名子串反猜工作区的兜底已删 —— 绑定看声明，不猜）。
+    val autoDesc = if (description.isNotBlank()) description.trim() else workspace?.wsTitle.orEmpty()
     val created = GroupMeta.create(
         groupId = newId(),
         name = trimmed,
@@ -200,16 +193,8 @@ private fun handleCreateGroupInternal(
     // 另外三条写元数据的路径（加人/移人/收到 host.info）都登记了，只有这里是漏的。
     host.core.groupNeeds.noteKnown(meta.groupId, meta.rev)
 
-    // 显式传进来的那个工作区优先：调用方已经知道是哪一行，不必再靠简介/群名反猜。
-    val targetWs = workspace ?: if (autoDesc.isNotBlank()) {
-        host._state.value.agentWorkspaces.values.firstOrNull { ws ->
-            autoDesc == ws.wsPath || autoDesc == ws.wsId || (ws.wsPath?.isNotBlank() == true && autoDesc.contains(ws.wsPath))
-        }
-    } else {
-        host._state.value.agentWorkspaces.values.firstOrNull { ws ->
-            ws.wsTitle?.isNotBlank() == true && trimmed.contains(ws.wsTitle)
-        }
-    }
+    // 显式传进来的那个工作区是唯一来源（调用方已经知道是哪一行，无需反猜）。
+    val targetWs = workspace
 
     if (targetWs != null) {
         // `wsId` 在 WorkspaceUi 上是非空的（见 AgentUi 的声明），所以这里不用再兜到描述串 ——
@@ -621,7 +606,7 @@ fun handleSendToGroup(
         val route = RelayController.agentPromptRoute(
             text = body,
             groupId = groupId,
-            isWorkspaceGroup = isWorkspaceGroup(groupId),
+            isWorkspaceGroup = groupHasDeclaredAgents(groupId),
             repliedToIsAgent = repliedToIsAgent,
             localAgentPresent = routeFacts.localAgentPresent,
             remoteAgentPresent = routeFacts.remoteAgentPresent,
@@ -886,45 +871,61 @@ internal fun RelayController.agentRouteFactsOf(groupId: String): GroupAgentRoute
 
 
 /**
- * 把**本机的一个 workspace** 暴露/收起进这个群（`virtualAgents` 的成员入口）。
+ * 把**本机**在这个群的 agent 声明集合整体改写为 [wsIds]（类型安全的暴露/收起入口）。
  *
- * 为什么单独一个方法而不是复用 `updateGroupMeta`：那条路的语义是「改简介/公告」，
- * 而「这个群用不用我机器上这个项目」是另一件事 —— 混在一起会让权限判断、rev 递增
- * 与提示文案都说不清。
+ * ## 为什么是一次成像而不是逐条 toggle
  *
- * @param wsId 要暴露的 workspace id；传 null 表示**收起**（移除本机这一条声明）。
- * @param agentId 该 workspace 上的 agent 身份；null 时按本机 workspace 表查。
+ * 旧的 `handleExposeWorkspace(groupId, wsId?, agentId?)` 一次动一条，界面上「保存」
+ * 要么连发 N 次调用（每次 rev+1、每次广播一份元数据），要么自己先算好差集再逐条调 ——
+ * 两条路都会把「改到一半」的声明集合广播给全群，而且每条各发一份 `group.info`。
+ * 现在调用方交的就是**最终集合**（授权面板的勾选结果），这里一次改写、一次 rev、
+ * 一次广播 —— 中间态不存在。
+ *
+ * ## 主权边界
+ *
+ * 只改写 `hostNodeId == 本机` 的声明：其它设备声明进来的条目原样保留。
+ * 撤回是机主主权，覆盖不到别人。
+ *
+ * 名字稳定性：已经声明过的工作区沿用**现有名字**（`@` token 不能漂 —— 换名等于把
+ * 别人正在打的 mention 打断）；只有新暴露的工作区才走 [AgentMemberName.base] +
+ * [AgentMemberName.unique] 生成群内唯一名。
+ *
+ * @param wsIds 本机要暴露的工作区 id 全集；空列表 = 撤掉本机全部声明。
  */
-fun RelayController.handleExposeWorkspace(groupId: String, wsId: String?, agentId: String?) {
+fun RelayController.handleSetGroupAgentWorkspaces(groupId: String, wsIds: List<String>) {
     val meta = _state.value.settings.groups.firstOrNull { it.groupId == groupId } ?: return
     val self = _state.value.selfNodeId
     // 暴露自己的机器是**本机主权**，不需要群主/管理员身份；但要能改元数据就得在群里。
     if (self !in meta.members) return
     val current = meta.virtualAgents.orEmpty()
-    val next = if (wsId == null) {
-        // 收起：只移除「本机 + 这个 ws」那一条，别的设备与别的 ws 原样保留。
-        // （调用方把要撤的 wsId 从 `declaredWorkspaceOfSender` 拿到后经 agentId 传入。）
-        current.filterNot { it.hostNodeId == self && it.defaultWsId == agentId }
-    } else {
-        val ws = _state.value.agentWorkspaces.values
-            .firstOrNull { it.peerId == self && it.wsId == wsId } ?: return
+    val chosenIds = wsIds.map { it.trim() }.filter { it.isNotEmpty() }.distinct()
+    // 逐个解析本机工作区行：声明必须挂在本机真实存在的工作区上。
+    val rowsByWsId = _state.value.agentWorkspaces.values
+        .filter { it.peerId == self }
+        .associateBy { it.wsId }
+    val resolved = chosenIds.mapNotNull { wsId ->
+        val existing = current.firstOrNull { it.hostNodeId == self && it.defaultWsId == wsId }
+        if (existing != null) return@mapNotNull existing
+        val ws = rowsByWsId[wsId] ?: return@mapNotNull null
         // 身份键的兜底规则抽在 core 里（`resolveVirtualAgentKey`），这里只消费：
-        // 显式传入 > 工作区自报 agentId > agentKind。真机数据里工作区的 agentId 常为空，
+        // 工作区自报 agentId > agentKind。真机数据里工作区的 agentId 常为空，
         // 原先那条「为空就静默放弃」让入驻按钮看起来没用。
-        val resolvedAgentId = resolveVirtualAgentKey(agentId, ws.agentId, ws.agentKind)
-        if (resolvedAgentId.isNullOrBlank()) return
+        val resolvedAgentId = resolveVirtualAgentKey(null, ws.agentId, ws.agentKind)
+        if (resolvedAgentId.isNullOrBlank()) return@mapNotNull null
         val base = AgentMemberName.base(ws.agentKind, resolvedAgentId, ws.wsTitle, wsId)
-        // 名字冲突范围 = 群内其它声明（不含本机这一条，它会被替换）。
-        val taken = current
-            .filterNot { it.hostNodeId == self && it.defaultWsId == wsId }
-            .map { it.name }
-            .toMutableSet()
-        val name = AgentMemberName.unique(base, taken)
-        current.filterNot { it.hostNodeId == self && it.defaultWsId == wsId } +
-            VirtualAgentMember(agentId = resolvedAgentId, hostNodeId = self, name = name, defaultWsId = wsId)
+        // 名字冲突范围 = 群内其它声明（本机这条是新建的，不在池里）。
+        val taken = current.map { it.name }.toMutableSet()
+        VirtualAgentMember(
+            agentId = resolvedAgentId,
+            hostNodeId = self,
+            name = AgentMemberName.unique(base, taken),
+            defaultWsId = wsId,
+        )
     }
+    // 本机声明整体替换为 resolved（含「沿用既有名字」的那些）；外来声明不受影响。
+    val next = current.filterNot { it.hostNodeId == self } + resolved
     val updated = meta.copy(
-        virtualAgents = next.ifEmpty { null },
+        virtualAgents = next.distinct().ifEmpty { null },
         rev = meta.rev + 1,
         updatedBy = self,
         updatedTs = nowMillis(),

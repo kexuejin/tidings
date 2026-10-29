@@ -227,12 +227,13 @@ data class ChatScreenGroupActions(
     val onAddGroupMembers: ((groupId: String, memberIds: List<String>) -> Unit)? = null,
     val onRemoveGroupMember: ((groupId: String, memberId: String) -> Unit)? = null,
     /**
-     * 把**本机的一个 workspace** 暴露/收起进群（`virtualAgents` 的成员入口）。
+     * 把**本机**在群里的 agent 声明集合整体改写为 [wsIds]（授权面板「保存」的落点）。
      *
-     * `wsId` 为 null 时表示收起。与 `onAddGroupMembers` 是两件事：那个加**人**，
-     * 这个暴露**本机项目**（暴露单位是 `(agentId, wsId)`）。
+     * 一次成像：调用方交的是**最终集合**，控制器一次 rev+1、一次广播 —— 撤回是
+     * 机主主权，只覆盖本机自己的声明（见 `DesktopPaneActions.setGroupAgentWorkspaces`）。
+     * 与 `onAddGroupMembers` 是两件事：那个加**人**，这个暴露**本机项目**。
      */
-    val onExposeWorkspaces: ((groupId: String, wsId: String?, agentId: String?) -> Unit)? = null,
+    val onExposeWorkspaces: ((groupId: String, wsIds: List<String>) -> Unit)? = null,
     val onUpdateGroupMeta: ((groupId: String, description: String?, announce: String?) -> Unit)? = null,
     val onLeaveGroup: ((groupId: String) -> Unit)? = null,
     /**
