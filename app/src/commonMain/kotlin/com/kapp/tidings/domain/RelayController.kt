@@ -832,11 +832,16 @@ class RelayController(
         // **提示永远不出现**。那正是这个判定最初写错时在真机上的表现。
         //
         // 真正该问的是「**那台宿主**会不会执行我」，所以 self 传宿主的 nodeId。
+        //
+        // **授权台账与执行路径必须是同一个事实源**（M4）：装配了台账桥（桌面）时，
+        // 这里消费的就是执行时消费的那一份 —— 否则会出现「执行桥放行并跑了任务、
+        // 这条提示却说没权」的自相矛盾（真机现场：卡片与「没有执行」同屏出现）。
+        // 没装配桥（手机等）时保持 null = 只按宿主用户判，fail-closed 方向不变。
         val verdict = AgentExecAuthorizer.authorize(
             senderId = senderId,
             group = meta,
-            grantAllows = null,
-            policy = null,
+            grantAllows = { node -> invokeCtl.grantAllows?.invoke(hit.agentId, node) == true },
+            policy = invokeCtl.execPolicyOf?.invoke(hit.agentId),
             selfNodeId = hit.hostNodeId,
         )
         if (AgentExecAuthorizer.run { verdict.permitsExecution() }) return null

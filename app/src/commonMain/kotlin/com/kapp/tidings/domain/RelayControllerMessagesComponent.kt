@@ -585,7 +585,8 @@ fun handleOnInbound(envelope: Envelope) {
     // 目标在别的宿主上时不在这里动 —— 那条群消息按群协议已经送达目标设备，由它接管。
     if (groupId != null) {
         val intent = payload?.get("agentIntent") as? kotlinx.serialization.json.JsonObject
-        if (intent != null) host.invokeCtl.handleInboundAgentIntent(groupId, envelope.from, intent)
+        // 正文一起给：意图帧只带目标不带任务话，执行器的 prompt 从消息正文剥 @ 而来。
+        if (intent != null) host.invokeCtl.handleInboundAgentIntent(groupId, envelope.from, intent, cleanedText)
     }
     // 接话判据：这条是不是在回复 agent 自己发的那条（只有群文本才有 `replyTo`）。
     val replyToId = if (groupId != null) replyToOf(envelope) else null

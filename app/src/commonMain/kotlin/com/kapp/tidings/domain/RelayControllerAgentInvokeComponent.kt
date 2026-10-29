@@ -273,8 +273,12 @@ internal class RelayControllerAgentInvokeComponent(private val host: RelayContro
      * 入站群文本带了 `agentIntent` 且目标 agent 由**本机**托管 ⇒ 本机执行、卡片进群。
      * 目标在别的宿主上时不做任何事：那条群消息按群协议已经送达目标设备，
      * 由它自己的这条路径接管（谁托管谁执行，与 onAgentPrompt 的路由判据同一条）。
+     *
+     * @param messageText 那条群文本的正文（调用方从信封取）——意图帧只带**目标**
+     *   不带任务文本，任务话在消息里；剥掉 @ token 的剩余部分就是给执行器的 prompt。
+     *   真机现场：不传它，插件收到的是空串 —— 执行了、卡片也进了群，但任务话丢了。
      */
-    fun handleInboundAgentIntent(groupId: String, senderNode: String, intent: JsonObject?) {
+    fun handleInboundAgentIntent(groupId: String, senderNode: String, intent: JsonObject?, messageText: String? = null) {
         if (intent == null) return
         val agentId = intent.strField("agentId")?.takeIf { it.isNotBlank() } ?: return
         val wsId = intent.strField("wsId")?.takeIf { it.isNotBlank() }
@@ -283,7 +287,6 @@ internal class RelayControllerAgentInvokeComponent(private val host: RelayContro
         val self = st.selfNodeId
         val seat = meta.virtualAgents.orEmpty().firstOrNull { it.agentId == agentId } ?: return
         if (seat.hostNodeId != self) return
-        val text = intent.strField("prompt") // 协议不校验意图内部字段；prompt 由派单文本承载
         val verdict = AgentExecAuthorizer.authorize(
             senderId = senderNode,
             group = meta,
@@ -306,7 +309,10 @@ internal class RelayControllerAgentInvokeComponent(private val host: RelayContro
             return
         }
         val ex = executor ?: return
-        val prompt = text ?: ""
+        val tokens = setOfNotNull(seat.agentId.takeIf { it.isNotBlank() }, seat.name.takeIf { it.isNotBlank() })
+        val prompt = intent.strField("prompt")
+            ?: messageText?.let { RelayController.extractAgentPrompt(it, tokens) }
+            ?: ""
         host.scope.launch {
             runCatching {
                 ex.execute(AgentInvokeTaskRequest(agentId = agentId, prompt = prompt, wsId = wsId, groupId = groupId))
