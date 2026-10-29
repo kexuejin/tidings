@@ -765,19 +765,23 @@ class ControlPlane(
 
     /**
      * 按 agentId 找**本机**承接该 agent 的插件：leader 的 agentId 优先，组员兜底。
-     * 两边都按 senderId 的同一套 slug 规则归一 —— 群声明里的 agentId 与 manifest 里
-     * 的 agentId 若大小写不一致，用裸相等会静默找不到（「插件明明在线却 no-plugin」）。
+     *
+     * 匹配用 **core 的 [com.kapp.tidings.core.protocol.sameAgent]**（大小写不敏感 +
+     * 「截到 `-` 之前」的精度容忍），不能用 [com.kapp.tidings.core.protocol.AgentSenderId.slugForSenderId]
+     * 当身份匹配器：它的职责是 **senderId 的字段安全**（只留 a-z0-9，其余折 `-`），
+     * 大写字母会被它整个抹掉 —— 真机现场：老席位声明的 agentId 是 `DSH`（工作区 kind
+     * 的大小写原样入驻），slug 归一后是**空串**，插件明明在线却答 no-plugin。
+     * 协议层为「入驻写 `DSH`、会话报 `dsh-029b`」这类精度差专门定了 [sameAgent]
+     * —— 身份匹配只有这一个来源。
      */
     fun pluginForAgent(agentId: String): PluginRegistry.Entry? {
-        val wanted = com.kapp.tidings.core.protocol.AgentSenderId.slugForSenderId(agentId.trim())
+        val wanted = agentId.trim()
         if (wanted.isEmpty()) return null
         val online = plugins.list().filter { it.status == "online" }
         return online.firstOrNull { entry ->
-            entry.manifest.leader?.agentId?.let { com.kapp.tidings.core.protocol.AgentSenderId.slugForSenderId(it) } == wanted
+            entry.manifest.leader?.agentId?.let { com.kapp.tidings.core.protocol.sameAgent(it, null, wanted) } == true
         } ?: online.firstOrNull { entry ->
-            entry.manifest.members.any {
-                com.kapp.tidings.core.protocol.AgentSenderId.slugForSenderId(it.agentId) == wanted
-            }
+            entry.manifest.members.any { com.kapp.tidings.core.protocol.sameAgent(it.agentId, null, wanted) }
         }
     }
 
