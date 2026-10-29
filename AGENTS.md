@@ -128,7 +128,8 @@ python3 tools/unused-imports.py --check
 > 真身：FTS 触发器的修复只改了 `.sq`，装新版本**只换代码不换库** —— 老用户升级后索引
 > 照样堆孤儿。产品层面等于没修。
 
-- SQLDelight 版本号 = **迁移文件数 + 1**（9 个迁移 ⇒ 版本 10）。加 `.sqm` 要同步改
+- SQLDelight 版本号 = **迁移文件数 + 1**（当前 15 个迁移 ⇒ 版本 16；别把这个数字当常量记，
+  它每加一个 `.sqm` 就腐坏一次 —— 以 `RelayDatabase.Schema.version` 为准）。加 `.sqm` 要同步改
   `ScreenHistoryRecordTest` 里那条**故意写死**的版本断言（它存在就是为了逼你想一遍迁移）。
 - **不变量：`MessageFts_docsize` 行数 ≡ `MessageEntity` 行数。** 违反它 = 磁盘被吃光
   （现场：真实消息 941 条 / 索引 4,554,999 条 / 库 21 GB）。
@@ -374,8 +375,10 @@ python3 tools/unused-imports.py --check
 ## 7. git 纪律
 
 - **绝不入库**：密钥（`link-key.pk8` / `link-cert.der` / `link-pub.spki`）、`*.log` / `*.db` /
-  `*.apk` / `*.dmg` / `*.aab`、构建产物、`.workbuddy/`、工作材料（`docs/plans/`、`PLAN.md`、
-  `docs/research/`、`docs/runtime-evidence/`）。
+  `*.apk` / `*.dmg` / `*.aab`、构建产物、agent 记忆目录（`.workbuddy/` **和** `.workbuddy-ai/`
+  —— 两个名字都要写：只忽略带点的旧名，新目录会一直是裸露的未跟踪状态，一次 `git add -A`
+ 就把逐日笔记带进公开仓）、工作材料（`docs/plans/`、`PLAN.md`、`docs/research/`、
+  `docs/runtime-evidence/`）。
 - `.gitignore` **只增不删**。加规则时顺手确认「原来的规则一条都没被拿掉」。
 - `git add -A` 不会加被忽略的文件，但**别据此推断**「没提交过被忽略的东西」——
   提交前用 `git ls-files | while read f; do git check-ignore -q "$f" && echo "$f"; done` 复查一次。
@@ -388,9 +391,9 @@ python3 tools/unused-imports.py --check
 推送是这个仓唯一**不可撤销**的操作（公开仓，历史一旦上去就删不掉）。逐条跑：
 
 ```bash
-# ① 有没有把本机/真机身份带出去（序列号、主机名、家网段、个人路径、真 nodeId）
+# ① 这次要推的增量里有没有本机/真机身份（序列号、家网段、个人路径、真 nodeId）
 #    序列号按**形态**判（12 位以上大写字母数字），不再写具体那台机器的前缀 —— 它已经从
-#    仓库里清掉了，把前缀留在守卫里等于守卫自己又泄露一次。命中常量名属正常，人工过一眼。
+#    仓库里清掉了，把前缀留在守卫里等于守卫自己又泄露一次。
 git diff origin/main..HEAD | grep -nE "^\+.*([A-Z0-9]{12}|/Users/[a-z]|/Volumes/[A-Za-z]|192\.168\.|2408:)" | head
 # ② 提交邮箱是不是 noreply（真邮箱写进公开历史后要再重写一次历史才能改）
 git log origin/main..HEAD --format="%an <%ae>" | sort -u
@@ -401,6 +404,14 @@ grep -nE "mavenLocal|SNAPSHOT" settings.gradle.kts gradle/libs.versions.toml
 ```
 
 第 ④ 条判据是「**别的机器**上能不能解析」，不是「我这台能不能构建」。
+
+**① 是噪声过滤器，不是判据。** `111111111111`、毫秒时间戳、`CONVERSATIONS` 这类常量都会命中
+（实测全树 698 处），所以它的用法是「人逐条过一眼这几十行」，**不是**「没输出就等于干净」。
+反过来，**别把它改成树级 `git grep 192.168.`**：代码里本来就有一批家网段（为什么留、留了哪些，
+见 `docs/privacy-scan-2026-10-29.md` §4），树级扫描会永远红，而永远红的守卫等于没有。
+
+**① ② 只看「还没推上去的东西」**，所以历史重写之后它们是空的 —— 那一刻要查的不是增量，而是
+**已经公开的那一份**。这两件事不能合成一条命令，见 §7.5。
 
 ### 7.1 「一件事」的判据（不是「一次尝试」）
 
@@ -423,18 +434,75 @@ grep -nE "mavenLocal|SNAPSHOT" settings.gradle.kts gradle/libs.versions.toml
 全仓改包名 / 改模块边界这类改动，任何中间态都编译不过 —— 切分成「按模块评审」仍然有价值，
 **但要在提交信息里明说「只有本序列最后一条是绿的」**，不许让人以为每条都能独立 build。
 
-### 7.3 重写历史的三条硬要求
+### 7.3 重写历史（一）：内容不变的重写
 
-只有在「历史本身不可评审」时才重写，且必须：
+只有在「历史本身不可评审」时才重写（提交太碎、混进了不该有的文件）。这类重写**不碰任何
+字节**，只重新组织提交。三条硬要求：
 
-1. **先备份**：`git branch backup/<日期> HEAD && git tag <日期> HEAD`（本地即可）；
+1. **先做一份真备份**：`git bundle create ~/pre-rewrite-<日期>.bundle --all`。
+   **`git branch backup/<日期> HEAD` 不算备份** —— filter-repo 重写**所有 ref**，那个分支会被
+   一起映射到新提交上，备份跟着一起被改掉。备份必须是 `.git` 之外的独立文件。
 2. **用树哈希证明内容零变化**，不要靠肉眼：`git rev-parse <备份>^{tree}` 必须等于
-   `git rev-parse HEAD^{tree}`。相等意味着每个文件的每个字节都没动，测试与门禁结论也
-   必然不变 —— 此时**不必重跑测试冒充「又验了一次」**；
-3. 用 `git push --force-with-lease`，不要 `--force`：远端若被别人动过应当拒绝，
-   而不是把别人的提交冲掉。
+   `git rev-parse HEAD^{tree}`（备份在 bundle 里就先
+   `git fetch ~/pre-rewrite.bundle 'refs/heads/main:refs/backup/main'` 再比）。
+   但它**只证明末端**：中间提交理论上仍可能被改（改了又改回来）。实际上只关心末端就够了
+   —— 测试与门禁只跑末端，所以此时**不必重跑测试冒充「又验了一次」**。
+   这句话的边界必须写清，否则下一个人会拿它给脱敏重写背书（见 §7.4）。
+3. 用 `git push --force-with-lease`，不要 `--force`：远端若被别人动过应当拒绝，而不是把
+   别人的提交冲掉。
 
-重写后把备份分支/标签留着，等验收通过再由人删。
+重写后把 bundle 留着，等验收通过再由人删。另外 filter-repo 会**顺手删掉 `origin` remote**
+（防误推），跑完要重新 `git remote add origin …` 才能推 —— 别以为那是网络故障。
+
+### 7.4 重写历史（二）：内容必须变的重写（脱敏）
+
+把真机序列号、家网段、个人路径从历史里摘掉只能靠改 blob —— 于是 §7.3 那三条**全部不够**。
+下面每一条都是踩过的：
+
+1. **`--blob-callback` 给的文件内容是「函数体」，不是「函数定义」。** 写成
+   `def blob_callback(blob):` 会创建一个**永远不会被调用**的嵌套函数：filter-repo 正常结束、
+   退出码 0、一个字节都没改。先用两条提交的临时仓验一遍替换真的生效，再动真仓。
+2. **按判据扫，不要按样例扫。** 第一遍只替换了手边看到的那段地址，真正的家网段（一整条
+   `/64` 加几条主机地址）原样留着 —— 因为「我看到的样本」不等于「全集」。先按前缀把全集
+   列出来（`git grep -nE "(2408|2409|240e):"`），再逐条判定要不要改。
+3. **内容变了 ⇒ 必须重跑测试与门禁。** 这跟 §7.3 正好相反：脱敏改注释与文档，
+   `constructionTraceGate`、`cjkLiteralGate` 都可能因此变红；树哈希也必然全变，证明不了任何事。
+4. **所有文档里的短 SHA 立刻失效。** 重写后每个 `<旧短 SHA>` 都指向不存在的对象，`git show`
+   直接落空。用 `.git/filter-repo/commit-map`（旧 SHA → 新 SHA）逐条重映射；映射不上的
+   （更早的重写留下的死引用）**删掉引用或换成符号名**，别留着让人查不到。
+   实测本仓一次脱敏重写后有 **77 处**短 SHA 引用失效。
+   **这条也管本文自己**：拿一个真 SHA 当反例写进文档，等于在文档里留一条新的死引用 ——
+   要写就写 `<旧短 SHA>` 这种形状。
+5. **`--force --tags` 会把本地备份标签一起推上去。** 用 `--force-with-lease` 且只推分支；
+   备份标签推上去等于把旧历史又公开一遍 —— 白重写。
+6. **force-push 不能召回旧对象。** 它只移动 ref。旧提交在 GitHub 上仍可按 SHA 访问，直到
+   删库重建或联系 GitHub Support 做 GC。所以这条纪律的价值是**别让它上去**，不是「上去之后
+   还能补救」。
+
+### 7.5 已经公开之后怎么查（树 + 全历史）
+
+重写之后 `origin/main..HEAD` 是空的，§7.0 的 ① ② 查不到任何东西。这时要查的是**已经公开的
+那一份**，判据也不同：只查「必须为零」的形态。
+
+```bash
+# 树：个人绝对路径 / 公网 IPv6 前缀（2408 / 2409 / 240e 是中国大陆常见分配段）。
+# 第二个 grep 排除文档里的占位用户名（me / demo / ci 那一类）。
+# 注意这两条命令**自己也会命中自己**：注释里照抄一个真路径或真前缀，守卫就红了 ——
+# 所以下面刻意不写实例（这正是 §4 说的「守卫被自己的注释绊倒」）。
+git grep -nE "/Users/[a-z][a-z0-9._-]*/|/Volumes/[A-Za-z]|(^|[^0-9a-f])(2408|2409|240e):[0-9a-f]{4}" \
+  | grep -vE "/Users/(me|demo|ci|x|a|work|workspace|someone|you|user)/"
+
+# 全历史：每个提交的 `+` 行扫一遍（150 条约 3 秒）。空输出才是干净。
+git log --all -p 2>/dev/null \
+  | grep -nE "^\+[^+].*(/Users/[a-z][a-z0-9._-]*/|/Volumes/[A-Za-z]|(2408|2409|240e):[0-9a-f]{4})"
+
+# 最后一步不可省：从公开仓深 1 克隆再查一遍。本地 .git 里还留着 filter-repo 的 refs，
+# 本地查绿不等于远端绿。
+git clone --depth 1 <公开地址> /tmp/audit && git -C /tmp/audit grep -nE "<同上>"
+```
+
+`192.168.x.x` **故意不在上面三条里**：代码里本来就有一批家网段（理由与清单见
+`docs/privacy-scan-2026-10-29.md` §4）。把它加进「必须为零」的检查，守卫会永远红。
 
 ---
 
@@ -460,6 +528,8 @@ grep -nE "mavenLocal|SNAPSHOT" settings.gradle.kts gradle/libs.versions.toml
 | 让门禁去读一个生成物 | 缺输入 = 没验到：默认 SKIP 并说「这不是通过」，硬失败用 `--require-artifact`；别让门禁读 `/tmp` 里的会话状态（§2.7-3） |
 | 加真 UDP / 真 socket 的用例 | 等待上限是观测预算不是断言；`awaitUntil` 默认 30s，别自己写 10s 赌时序（§2.7-6） |
 | 合并共享组件之后 `:designScreenDiffGate` 红了 | 那是**量具缺口**不是代码偏离：先逐字确认新值确实在原型里（贴行号）再 `--baseline --reason` 记账，别直接刷。根治方案见主计划 §0.7（工具已实现"按调用点并共享取值、且只许关闭'只原型'"） |
+| **要重写历史**（脱敏 / 重整提交） | `git bundle create … --all` 备份（`git branch backup/x` **不算**，它会被一起重写）；脱敏后必须重跑测试门禁并重映射所有短 SHA；`--force` 召不回旧对象（§7.3–§7.5） |
+| 想确认「仓库里没有本机身份」 | 别用 `git grep 192.168.` 当判据 —— 代码里本来就有一批家网段，那样查永远红。按 §7.5 的「必须为零」形态查 |
 
 ---
 
@@ -477,6 +547,7 @@ grep -nE "mavenLocal|SNAPSHOT" settings.gradle.kts gradle/libs.versions.toml
 | 跨网/保活/公开传输的设计与实测 | `docs/cross-network-*.md`、`docs/public-transport-security.md` |
 | Agent 协议（PPE-1） | `docs/PROTOCOL-AGENT-WORKSPACE.md` |
 | 真机证据（文字） | `design/runtime-evidence/` |
+| 仓库里哪些真机身份被清掉了、哪些是**有意保留**的 | `docs/privacy-scan-2026-10-29.md`（§4 是「家网段为什么不整体替换」） |
 
 ---
 
