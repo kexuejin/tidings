@@ -478,6 +478,10 @@ grep -nE "mavenLocal|SNAPSHOT" settings.gradle.kts gradle/libs.versions.toml
 6. **force-push 不能召回旧对象。** 它只移动 ref。旧提交在 GitHub 上仍可按 SHA 访问，直到
    删库重建或联系 GitHub Support 做 GC。所以这条纪律的价值是**别让它上去**，不是「上去之后
    还能补救」。
+7. **`--blob-callback` 只改内容，一个字都不碰提交说明。** 序列号、内网 IP 经常也写在提交
+   信息里（「真机 <serial> 的 APK sha256 …」），blob 回调看不见它们。要挂
+   `--message-callback`（它必须 `return message`）。**而且你自己的提交信息也是泄露面**：
+   写「把 `2408:…` 换成文档段」这种说明，等于在历史里又留一份 —— 本仓干过两次。
 
 ### 7.5 已经公开之后怎么查（树 + 全历史）
 
