@@ -1672,6 +1672,11 @@
     <string name="card_diff_summary">%1$s +%2$d −%3$d</string>
     <string name="card_pending_confirm">Submitted, waiting for the host to confirm</string>
     <string name="card_decided_by">Decided by %1$s</string>
+    <!-- Cross-host invoke mesh (M4): timeout card title and its two actions. These go
+         through the RelayUiTexts bridge into the card JSON (broadcast with the group text). -->
+    <string name="agent_invoke_timeout_title">Subtask timed out: @%1$s</string>
+    <string name="agent_invoke_action_retry">Retry</string>
+    <string name="agent_invoke_action_fallback_local">Fall back to local</string>
 
     <!-- Context capsule (plan §5.2) -->
     <string name="capsule_entity_team">Team</string>

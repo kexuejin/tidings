@@ -49,10 +49,26 @@ interface RelayUiTexts {
      * @param busy 该会话此刻在不在忙（由领域判定，措辞由实现选）
      */
     suspend fun workspaceSessionBrief(sessionTitle: String, busy: Boolean): String
+
+    /**
+     * 跨端派单超时卡的标题（M4 §7.3-1）。
+     *
+     * 它是看板卡 JSON 里的**数据**（banner.text），要随群文本广播给全群 ——
+     * 所以必须从 strings.xml 取，而不是在领域层硬编码（CJK 门禁 + 多语言对账）。
+     *
+     * @param agentName 承接子任务的 agent 展示名（群里的人认得的是它，不是 nodeId）
+     */
+    suspend fun invokeTimeoutTitle(agentName: String): String
+
+    /** 超时卡上「重试」按钮的标签。 */
+    suspend fun invokeActionRetryLabel(): String
+
+    /** 超时卡上「降级为本地执行」按钮的标签。 */
+    suspend fun invokeActionFallbackLabel(): String
 }
 
 /**
- * 「没装桥」的实现：每个方法都返回空串。
+ * 「没装桥」的实现：每个方法返回空串。
  *
  * 空串而不是兜底中文：领域侧编一句中文会绕开 CJK 门禁与多语言对账，而那条路一旦
  * 开了一个口子，下一个需要文案的人就会照着抄。空串的可见后果是「这条记录没有正文」，
@@ -63,4 +79,7 @@ object NoUiTexts : RelayUiTexts {
     override suspend fun nudgeNotice(): String = ""
     override suspend fun workspaceGreeting(agentKind: String, workspaceTitle: String): String = ""
     override suspend fun workspaceSessionBrief(sessionTitle: String, busy: Boolean): String = ""
+    override suspend fun invokeTimeoutTitle(agentName: String): String = ""
+    override suspend fun invokeActionRetryLabel(): String = ""
+    override suspend fun invokeActionFallbackLabel(): String = ""
 }

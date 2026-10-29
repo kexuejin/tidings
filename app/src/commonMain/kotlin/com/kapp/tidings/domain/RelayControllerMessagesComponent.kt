@@ -448,6 +448,16 @@ fun handleOnInbound(envelope: Envelope) {
         host.agentCtl.handleOnAgentQueue(envelope)
         return
     }
+    // M4 跨端派单网道（规格 §6.2/§6.3）：这两帧的归宿是 invoke 组件（租约/门禁/看板卡），
+    // 不是聊天流 —— 它们必须像其余 agent 帧一样在 CHAT_INBOUND_TYPES 之前接走。
+    if (envelope.type == MsgTypes.AGENT_INVOKE) {
+        host.invokeCtl.handleOnAgentInvoke(envelope)
+        return
+    }
+    if (envelope.type == MsgTypes.AGENT_INVOKE_RESULT) {
+        host.invokeCtl.handleOnAgentInvokeResult(envelope)
+        return
+    }
     if (envelope.type == MsgTypes.AGENT_RUN) {
         host.agentCtl.handleOnAgentRun(envelope)
         return
@@ -571,6 +581,12 @@ fun handleOnInbound(envelope: Envelope) {
         incoming = true,
     )
     if (groupId != null) host.runtime?.let { host.groupsCtl.handleSyncGroupMetaIfNeeded(it, envelope) }
+    // 单帧原子意图（方案 §4.2，M4 接执行）：目标 agent 由本机托管 ⇒ 派单执行、卡片进群。
+    // 目标在别的宿主上时不在这里动 —— 那条群消息按群协议已经送达目标设备，由它接管。
+    if (groupId != null) {
+        val intent = payload?.get("agentIntent") as? kotlinx.serialization.json.JsonObject
+        if (intent != null) host.invokeCtl.handleInboundAgentIntent(groupId, envelope.from, intent)
+    }
     // 接话判据：这条是不是在回复 agent 自己发的那条（只有群文本才有 `replyTo`）。
     val replyToId = if (groupId != null) replyToOf(envelope) else null
     val repliedToIsAgent = replyToId != null && RelayController.isAgentAuthored(

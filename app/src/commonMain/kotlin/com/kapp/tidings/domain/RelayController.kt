@@ -327,6 +327,8 @@ class RelayController(
     internal val cidrCtl = RelayControllerCidrComponent(this)
     internal val screenCtl = RelayControllerScreenComponent(this)
     internal val agentCtl = RelayControllerAgentComponent(this)
+    /** 跨端派单网道（M4）：租约、执行门禁、看板卡广播与审批防重都住在这一族。 */
+    internal val invokeCtl = RelayControllerAgentInvokeComponent(this)
     internal val cabinetCtl = RelayControllerCabinetComponent(this)
     internal val groupsCtl = RelayControllerGroupsComponent(this)
     internal val settingsCtl = RelayControllerSettingsComponent(this)
@@ -893,6 +895,9 @@ class RelayController(
         if (_state.value.network.phase == NodePhase.Starting) return
         val restored = messagesCtl.handleRestoreMessages()
         agentCtl.handleRestoreAgentData()
+        // 审批防重台账（M4 §7.3-2）从落库卡片行回填：重启不能把「已由 X 处理」忘掉，
+        // 否则宿主重启后同一条审批会被再判一次。
+        invokeCtl.rebuildActionLedger()
         groupsCtl.handleSyncWorkspaceGroups()
         // var：caps 指纹比对可能 bump profileRev（见下方 withCapsFingerprint 一段），
         // bump 后的这份要落盘并供本次启动全程使用。
@@ -1107,6 +1112,9 @@ class RelayController(
                 )
             }
             observe(rt)
+            // 租约巡检（M4 §7.3-1）：跨端派单的 deadline 到期翻 Timeout。挂进 jobs，
+            // stop 随之取消 —— 节点都停了，租约没有存在的意义。
+            invokeCtl.startLeaseTicker()
             // 手机侧诊断出口（task-34）：每 5 秒把同一批 link* 字段落成 JSON 文件。
             // 只读、本机、无凭据；不监听端口、不进协议（约束：不要开放到局域网）。
             jobs += scope.launch {

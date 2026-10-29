@@ -5,6 +5,9 @@ package com.kapp.tidings.ui
 import com.kapp.tidings.domain.RelayUiTexts
 import com.kapp.tidings.domain.model.ScreenRecordUi
 import com.kapp.tidings.generated.resources.Res
+import com.kapp.tidings.generated.resources.agent_invoke_action_fallback_local
+import com.kapp.tidings.generated.resources.agent_invoke_action_retry
+import com.kapp.tidings.generated.resources.agent_invoke_timeout_title
 import com.kapp.tidings.generated.resources.chat_nudge_peer
 import com.kapp.tidings.generated.resources.workspace_group_initial_greeting
 import com.kapp.tidings.generated.resources.workspace_group_session_brief
@@ -51,4 +54,13 @@ internal object ResourceUiTexts : RelayUiTexts {
             getString(Res.string.workspace_group_session_brief, sessionTitle, stateText)
         }.getOrNull() ?: sessionTitle
     }
+
+    override suspend fun invokeTimeoutTitle(agentName: String): String =
+        runCatching { getString(Res.string.agent_invoke_timeout_title, agentName) }.getOrNull().orEmpty()
+
+    override suspend fun invokeActionRetryLabel(): String =
+        runCatching { getString(Res.string.agent_invoke_action_retry) }.getOrNull().orEmpty()
+
+    override suspend fun invokeActionFallbackLabel(): String =
+        runCatching { getString(Res.string.agent_invoke_action_fallback_local) }.getOrNull().orEmpty()
 }

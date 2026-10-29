@@ -90,6 +90,13 @@ data class RelayUiState(
     val agentTasks: Map<String, AgentQueueTaskUi> = emptyMap(),
     /** 按 `(peerId, runId)` 索引的执行状态（PPE-1 §6.4）。 */
     val agentRuns: Map<AgentRunKey, AgentRunUi> = emptyMap(),
+    /**
+     * 跨端派单的租约表（M4 §7.3-1），键 = invokeId。
+     *
+     * **只活在内存里**：租约的意义是「此刻还在等谁」，进程结束它自然作废 ——
+     * 用户在重启后看到的事实是群里那张超时/结果看板卡（落库），不是一张复活了的租约。
+     */
+    val agentInvokes: Map<String, AgentInvokeLease> = emptyMap(),
     /** 按 `(peerId, artifactId)` 索引的产物元数据（PPE-1 §6.7）。 */
     val agentArtifacts: Map<AgentArtifactKey, AgentArtifactUi> = emptyMap(),
     /**

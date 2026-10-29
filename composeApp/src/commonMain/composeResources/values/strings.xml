@@ -1843,6 +1843,11 @@
     <!-- 审批锁三态的后两态（§5.3）：本机乐观置灰后的等待说明，与宿主判定后的全员提示。 -->
     <string name="card_pending_confirm">已提交，等待宿主确认</string>
     <string name="card_decided_by">已由 %1$s 处理</string>
+    <!-- 跨端派单网道（M4 §7.3-1）：超时卡的标题与两个动作的标签。这些串经 RelayUiTexts 桥
+         进卡片 JSON（随群文本广播），不是界面常量 —— 所以走资源而不是领域层硬编码。 -->
+    <string name="agent_invoke_timeout_title">子任务超时中断：@%1$s</string>
+    <string name="agent_invoke_action_retry">重试</string>
+    <string name="agent_invoke_action_fallback_local">降级为本地执行</string>
 
     <!-- 上下文唤起胶囊（方案 §5.2） -->
     <string name="capsule_entity_team">团队</string>
