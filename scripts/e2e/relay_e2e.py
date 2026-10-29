@@ -109,8 +109,15 @@ DEFAULT_PHONE = "192.168.2.22"     # Pixel 6 @ LAN
 DEFAULT_HOST_IP = "192.168.2.82"   # 本机 Mac 的 LAN IP
 DEFAULT_SERIAL = "SERIAL-TEST-01"  # Pixel 6 adb 序列号
 DEFAULT_NICK = "E2E夹具"
-PKG = "com.kapp.tidings"
-LAUNCH_ACTIVITY = "com.kapp.tidings/.app.MainActivity"
+# 被测包名。debug 变体带 `.debug` 后缀（androidApp 的 applicationIdSuffix），
+# 与正式包**共存**在同一台设备上；夹具默认打正式包，想测 debug 包就设
+# `RELAY_E2E_PKG=com.kapp.tidings.debug`。不设时行为与从前完全一致。
+PKG = os.environ.get("RELAY_E2E_PKG") or "com.kapp.tidings"
+# 活动类名两个变体相同（namespace 是 `com.kapp.tidings`），只有包前缀不同。
+# 原来写死 `com.kapp.tidings/.app.MainActivity` —— 那是 namespace 还叫
+# `com.kapp.tidings.app` 时的形态，改 namespace 后就再也拉不起来（`am start`
+# 报 Activity not found，夹具表现为"应用没在前台"）。改成由 PKG 派生。
+LAUNCH_ACTIVITY = PKG + "/com.kapp.tidings.MainActivity"
 # 2026-10-10：原来写 `/sdcard/relay-e2e-ui.xml`，而 Pixel 6 的模拟存储走 FUSE，
 # 跑久/负载高时会整片打嗝 —— `cat: /sdcard/relay-e2e-ui.xml: Transport endpoint is
 # not connected`，随后每一次 dump 都失败（读数会退化成"什么都找不到"）。改用
@@ -825,11 +832,21 @@ def _raw_nodes(xml):
 
 
 def switch_in_row(label, xml=None, tolerance=CHECKABLE_ROW_TOLERANCE_PX):
-    """读「`label` 那一行、标签右侧」的开关。返回 dict（含 checked/center）或 None。
+    """读「`label` 那一行」的开关。返回 dict（含 checked/center）或 None。
 
     Compose 的 `SettingSwitchRow` 把开关画成 `android.view.View`，只有
     `checkable="true"` 与 `checked` 两个属性可认；没有 content-desc，所以只能按
     「与标签同一水平行」这个几何关系找。
+
+    两种形态都要认，因为它们在同一个应用里并存：
+
+    1. **标签右侧有独立开关**：checkable 节点在标签右边，纵向与标签对齐。
+       早期所有行都是这个形态，所以原来只按「checkable 的左边界 ≥ 标签右边界」筛。
+    2. **整行可切换**：checkable 节点的 bounds **包住**标签（一个行级 View，
+       标签与说明都是它的子节点）。`luciola 加密信道` / `消息落盘` 现在就是这一种
+       —— 按形态 1 的规则筛，checkable 的左边界（84）永远小于标签右边界（346），
+       于是永远返回 None，调用方把它读成「这一行没有开关」，接下来只会跳过。
+       这不是 UI 退步，是行组件换了，夹具要跟着换。
     """
     xml = ui_xml_raw() if xml is None else xml
     nodes = _raw_nodes(xml)
@@ -849,6 +866,19 @@ def switch_in_row(label, xml=None, tolerance=CHECKABLE_ROW_TOLERANCE_PX):
             continue
         if best is None or abs(cy - ly) < abs((best["bounds"][1] + best["bounds"][3]) // 2 - ly):
             best = n
+    if best is not None:
+        return best
+    # 形态 2：行级 toggle —— checkable 的矩形把标签整个包进去
+    for n in nodes:
+        if not n["checkable"]:
+            continue
+        x1, y1, x2, y2 = n["bounds"]
+        lx1, ly1, lx2, ly2 = lab["bounds"]
+        if x1 <= lx1 and y1 <= ly1 and x2 >= lx2 and y2 >= ly2:
+            if best is None or (x2 - x1) * (y2 - y1) < (best["bounds"][2] - best["bounds"][0]) * (
+                best["bounds"][3] - best["bounds"][1]
+            ):
+                best = n
     return best
 
 
