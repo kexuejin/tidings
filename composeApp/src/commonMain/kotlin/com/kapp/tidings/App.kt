@@ -404,6 +404,11 @@ fun RelayApp(
                         ),
                         actions = ChatScreenActions(
                             onSend = controller::sendToConversation,
+                            // 胶囊选中的意图随正文一帧发出（方案 §4.2）：域层入口
+                            // sendToConversation(convId, text, replyTo, agentIntent)。
+                            onSendWithIntent = { targetId, text, replyTo, intent ->
+                                controller.sendToConversation(targetId, text, replyTo, intent)
+                            },
                             // 「重发」按原消息 id 重放（core 的 replayOutgoing）：换 id 重发会让
                             // 对端多落一条（真机现场同一句话两个 id）。
                             onRetryMessage = controller::retryMessage,

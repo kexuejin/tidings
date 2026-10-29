@@ -482,8 +482,34 @@ class RelayController(
             send(convId, text)
         }
     }
-    fun sendToGroup(groupId: String, text: String, mentions: List<String>? = null, replyTo: String? = null) =
-        groupsCtl.handleSendToGroup(groupId, text, mentions, replyTo)
+
+    /**
+     * 带意图的发送（方案 §4.2）：上下文唤起胶囊（§5.2）选中目标后，正文与
+     * `agentIntent` **一帧**发出 —— 没有「先发消息、再调一次派单」的两步时序。
+     *
+     * 与 [sendToConversation] 分开而不是加默认参：这个签名只给聊天页的
+     * `ChatScreenActions.onSendWithIntent` 走，普通发送别被意图参数淹着。
+     * 群会话键走 `sendToGroup`（意图只定义在群文本上）；单聊忽略意图 ——
+     * `agentIntent` 不是 1:1 文本的键，塞进去会被白名单整帧拒收（AGENTS §3）。
+     */
+    override fun sendToConversation(convId: String, text: String, replyTo: String?, agentIntent: JsonObject?) {
+        val groupId = ConvId.groupIdOf(convId)
+        if (groupId != null) {
+            sendToGroup(groupId, text, replyTo = replyTo, agentIntent = agentIntent)
+        } else {
+            // 单聊没有意图键：静默降级为普通发送会吞掉用户的选择 —— 大声失败？
+            // 不。胶囊只出现在群会话里（见 AgentContextCapsule 的唤起判据），
+            // 这里到不了；防御式忽略并照常发送，比在输入路径上抛异常诚实。
+            send(convId, text)
+        }
+    }
+    fun sendToGroup(
+        groupId: String,
+        text: String,
+        mentions: List<String>? = null,
+        replyTo: String? = null,
+        agentIntent: JsonObject? = null,
+    ) = groupsCtl.handleSendToGroup(groupId, text, mentions, replyTo, agentIntent)
     override fun sendPk(convId: String, game: String, value: String) = pkCtl.handleSendPk(convId, game, value)
     override fun forwardMessage(message: MessageUi, targetConvId: String) {
         val body = message.text.ifBlank { message.file?.name.orEmpty() }

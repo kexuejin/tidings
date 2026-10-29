@@ -136,6 +136,10 @@ public fun ChatPane(
             ),
             actions = ChatScreenActions(
                 onSend = controller::sendToConversation,
+                // 胶囊选中的意图随正文一帧发出（方案 §4.2），与手机壳同一条域层入口。
+                onSendWithIntent = { targetId, text, replyTo, intent ->
+                    controller.sendToConversation(targetId, text, replyTo, intent)
+                },
                 onOpenAgentConsole = onSelect,
                 onSelectAgentSession = onSelectAgentSession,
                 onDismissBanner = controller::dismissBanner,

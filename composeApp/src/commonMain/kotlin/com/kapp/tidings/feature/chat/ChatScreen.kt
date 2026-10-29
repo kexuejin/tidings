@@ -154,6 +154,7 @@ fun ChatScreen(
     val now = data.now
     val cacheDir = data.cacheDir
     val onSend = actions.onSend
+    val onSendWithIntent = actions.onSendWithIntent
     val onOpenAgentConsole = actions.onOpenAgentConsole
     val onDismissBanner = actions.onDismissBanner
     val onAttachFile = actions.onAttachFile
@@ -381,6 +382,53 @@ fun ChatScreen(
     // 键是 "cardId|actionId"。会话切换即重建（remember(peerId)）—— 换个会话看别的卡，
     // 这份 pending 没有意义；宿主判定（rev+1 新帧）到达后由三态判据接管。
     var pendingCardActions by remember(peerId) { mutableStateOf<Set<String>>(emptySet()) }
+
+    // ── 上下文唤起胶囊（方案 §5.2，交付 2）──────────────────────────────
+    // 键是 @ token —— 与 @ 候选（MentionTarget.token）、气泡署名同一份事实
+    // （`GroupMeta.virtualAgents[].name`），不另造名字。
+    // 只在**群**里建：agentIntent 是群文本的键，单聊塞了会被白名单整帧拒收。
+    val capsuleAgents = remember(group, state.agentWorkspaces) {
+        if (group == null) {
+            emptyMap()
+        } else {
+            val wsTitles = state.agentWorkspaces.values
+                .associate { it.wsId to it.wsTitle.orEmpty() }
+            group.virtualAgents.orEmpty().mapNotNull { member ->
+                val name = member.name.trim().takeIf { it.isNotEmpty() } ?: return@mapNotNull null
+                val token = "@" + name
+                // 白名单的标题优先用声明自带的（随 group.info 广播，非宿主也有）；
+                // 声明没带时退回本机工作区表，再退回 wsId 本身 —— 三档都不编路径。
+                val workspaces = member.allowedWorkspaces
+                    .map { CapsuleWorkspaceOption(it.wsId, it.title.ifBlank { wsTitles[it.wsId] ?: it.wsId }) }
+                    .ifEmpty {
+                        member.defaultWsId?.let { wsId ->
+                            listOf(CapsuleWorkspaceOption(wsId, wsTitles[wsId]?.takeIf { it.isNotBlank() } ?: wsId))
+                        }
+                    }
+                    .orEmpty()
+                token to CapsuleAgentInfo(
+                    agentToken = token,
+                    agentName = name,
+                    agentId = member.agentId,
+                    hostNodeId = member.hostNodeId,
+                    isTeam = member.entityType == "team" || member.teamMembers.isNotEmpty(),
+                    workspaces = workspaces,
+                    defaultWsId = member.defaultWsId,
+                )
+            }.toMap()
+        }
+    }
+    var capsuleState by remember(peerId) { mutableStateOf(CapsuleState.Empty) }
+    // 草稿变更的**唯一入口**（手机内置输入栏与桌面输入卡片共用）：赋值之外，
+    // 同一步评估胶囊的唤起判据（§5.2）—— 键入合法 @agent 唤起、粘帖不误触发。
+    // 分散在两个输入形态里各评一遍，迟早有一处漏。
+    fun updateDraftAndCapsule(next: String) {
+        val previous = draft
+        draft = next
+        capsuleState = capsuleOnDraftEdit(capsuleState, previous, next, capsuleAgents)
+        peerId?.let { onDraftChangeExternal?.invoke(it, next) }
+    }
+
     // **发送的唯一出口**：手机内置输入栏与桌面输入卡片（composerSlot）共用这一个函数。
     //
     // 四件事必须一起发生，漏一件都是一条独立的真机缺陷：
@@ -398,8 +446,17 @@ fun ChatScreen(
         draft = ""
         replyingToMessage = null
         notifyDraftCleared(peerId, onDraftChangeExternal)
+        // 胶囊选中的意图随正文**一帧**发出（方案 §4.2 单帧原子意图）：
+        // 壳接了 onSendWithIntent 才装键，null = 这个壳没有意图通路，退回普通发送。
+        // 发送即意图消费完毕：胶囊随之清空（草稿也没了，绑定依据不复存在）。
+        val intentSelection = capsuleState.selection
+        capsuleState = CapsuleState.Empty
         if (body.isNotBlank() || filesToSend.isEmpty()) {
-            onSend(peer.nodeId, body, replyId)
+            if (intentSelection != null && onSendWithIntent != null) {
+                onSendWithIntent(peer.nodeId, body, replyId, intentSelection.toIntentJson())
+            } else {
+                onSend(peer.nodeId, body, replyId)
+            }
         }
         if (filesToSend.isNotEmpty()) {
             onSendFiles?.invoke(peer.nodeId, filesToSend)
@@ -432,6 +489,8 @@ fun ChatScreen(
     }
     val effectiveWsId = data.wsId ?: matchedWs?.wsId
     var showSessionPicker by remember(peerId, effectiveWsId) { mutableStateOf(false) }
+    // 目标选择 Bottom Sheet（§5.2）的开合。跟会话走：切走即关（remember(peerId)）。
+    var showTaskPicker by remember(peerId) { mutableStateOf(false) }
 
     // ## 浮层必须吃返回键（UX 审计 §5 的 P0）
     //
@@ -445,7 +504,7 @@ fun ChatScreen(
     BackHandler(
         enabled = forwardingMessage != null || previewingImagePath != null ||
             showClearConfirm || showCloseAndClearConfirm || showGroupInfo || showVoiceRecord || showPkPicker ||
-            showHistorySearch || showSessionPicker,
+            showHistorySearch || showSessionPicker || showTaskPicker,
     ) {
         when {
             forwardingMessage != null -> forwardingMessage = null
@@ -457,6 +516,7 @@ fun ChatScreen(
             showPkPicker -> showPkPicker = false
             showHistorySearch -> showHistorySearch = false
             showSessionPicker -> showSessionPicker = false
+            showTaskPicker -> showTaskPicker = false
         }
     }
     // 空会话那条状态要把光标直接送进输入框（见下面 messages.isEmpty() 分支）。
@@ -631,6 +691,11 @@ fun ChatScreen(
             token = identity.mentionToken,
         )
         draft = next
+        // @ 候选点选/长按头像是**手动唤起**（§5.2「手动键入 @ 选中」）；点的是人
+        // （不在 capsuleAgents 里）就不唤起 —— 胶囊只绑执行主体。
+        capsuleAgents[identity.mentionToken]?.let { picked ->
+            capsuleState = capsuleOnAgentPick(capsuleState, picked, next, capsuleAgents)
+        }
         // 桌面上这条 @ 会经 ComposerSlotArgs.draft 流进输入卡片，但**焦点不会**自己过去：
         // 走统一入口，让卡片的 requester 把光标落进来（否则用户 @ 完还得再点输入框）。
         requestComposerFocus()
@@ -657,6 +722,24 @@ fun ChatScreen(
             openHistory(historyTargetNodeId, requestWsId)
         }
     }
+    // 「回复 agent 发言」唤起胶囊（§5.2 的第二个时机）：挂在 replyingToMessage 上，
+    // 回复谁、取消回复都在这一处生效 —— 不必在每条气泡的 onReply 里各写一遍。
+    // 绑定用的 token 来自与气泡署名同一个解析器（capsuleAgents 的键 = @token）。
+    LaunchedEffect(replyingToMessage, capsuleAgents) {
+        val msg = replyingToMessage
+        val agent = if (msg == null) {
+            null
+        } else {
+            val token = if (group != null) {
+                resolveSenderIdentity(msg.senderId, bubbleCtx)?.mentionToken
+            } else {
+                null // 单聊没有 agentIntent 键，胶囊只服务群（见 capsuleAgents 的建表条件）
+            }
+            token?.let(capsuleAgents::get)
+        }
+        capsuleState = capsuleOnReply(capsuleState, agent)
+    }
+
     // 新消息到达时**只在已经贴底时**才自动滚。原来的写法无条件滚，于是用户往上翻旧消息
     // 时，任何一条新消息（包括屏幕协助记下来的那条）都会把视图拽回底部 —— 读旧消息这件事
     // 就没法做了。判据提在 [isNearBottomAfterLayout]（纯函数、有单测）：它同时覆盖
@@ -753,6 +836,7 @@ fun ChatScreen(
                         showPkPicker -> { showPkPicker = false; true }
                         showHistorySearch -> { showHistorySearch = false; true }
                         showSessionPicker -> { showSessionPicker = false; true }
+                        showTaskPicker -> { showTaskPicker = false; true }
                         else -> false
                     }
                 } else {
@@ -1309,6 +1393,19 @@ fun ChatScreen(
             now = data.now,
         )
 
+        // 目标胶囊（方案 §5.2）：只在唤起时出现（平时 100% 纯净 —— 常驻目标条已废除）。
+        // 长在共享 ChatScreen 里，手机与桌面天然同源（AGENTS §2.6）。
+        val boundCapsule = capsuleState
+        if (group != null && boundCapsule.agent != null) {
+            AgentContextCapsule(
+                agent = boundCapsule.agent,
+                selection = boundCapsule.selection,
+                onExpand = { showTaskPicker = true },
+                onDismiss = { capsuleState = capsuleOnDismiss(capsuleState) },
+                modifier = Modifier.padding(horizontal = sp.lg14, vertical = sp.xs),
+            )
+        }
+
         if (composerSlot != null) {
             // 草稿仍由 ChatScreen 持有（remember(peerId)），所以切换会话时桌面输入卡片也不会串内容。
             // 回复条 / 新任务 token / 命中跳转同机同源：桌面输入卡片拿到的是与手机
@@ -1316,10 +1413,7 @@ fun ChatScreen(
             composerSlot(
                 ComposerSlotArgs(
                     draft = draft,
-                    onDraftChange = { next ->
-                        draft = next
-                        peerId?.let { onDraftChangeExternal?.invoke(it, next) }
-                    },
+                    onDraftChange = ::updateDraftAndCapsule,
                     stagedFiles = stagedFiles,
                     onRemoveStagedFile = ::removeStagedFile,
                     onAttachFiles = {
@@ -1351,10 +1445,7 @@ fun ChatScreen(
         } else {
             MessageComposer(
                 draft = draft,
-                onDraftChange = { next ->
-                    draft = next
-                    peerId?.let { onDraftChangeExternal?.invoke(it, next) }
-                },
+                onDraftChange = ::updateDraftAndCapsule,
                 stagedFiles = stagedFiles,
                 onRemoveStagedFile = ::removeStagedFile,
                 // 发文件夹时计数行右端换掉：见上面 `sendingFolder` 的注释。
@@ -1631,6 +1722,41 @@ fun ChatScreen(
         )
     }
 
+    // 「最近任务」：胶囊绑定的那个 agent 宿主名下的可见会话（活动倒序，取前几条）。
+    // 与会话切换条同一份来源（state.agentSessions）+ 同一套可见性两键（子代理/空壳剔除）。
+    // 这一段在 Column 之外（浮层区），所以重新读一次 capsuleState —— 它在 Column 内
+    // 取的别名（boundCapsule）到不了这里。
+    val pickedCapsuleAgent = capsuleState.agent
+    val capsuleTasks = remember(state.agentSessions, pickedCapsuleAgent) {
+        val host = pickedCapsuleAgent?.hostNodeId
+        if (host == null) {
+            emptyList()
+        } else {
+            state.agentSessions.values
+                .filter {
+                    it.peerId == host && !it.isSubagent && !it.isArchived &&
+                        it.title?.isNotBlank() == true
+                }
+                .sortedByDescending { it.sortActivityAt }
+                .distinctBy { it.sessionId }
+                .take(CAPSULE_RECENT_TASK_LIMIT)
+                .map { CapsuleTaskOption(it.sessionId, it.title.orEmpty(), it.wsId) }
+        }
+    }
+    if (showTaskPicker && pickedCapsuleAgent != null) {
+        AgentTaskPickerSheet(
+            agent = pickedCapsuleAgent,
+            selection = capsuleState.selection,
+            recentTasks = capsuleTasks,
+            // 点选即刻生效（零锁死）：状态直接落，然后收 sheet —— 没有「确认中」。
+            onPick = { selection ->
+                capsuleState = capsuleOnSelect(capsuleState, selection)
+                showTaskPicker = false
+            },
+            onDismiss = { showTaskPicker = false },
+        )
+    }
+
     if (showSessionPicker && group == null && peer.isAgent && (agentSessions.isNotEmpty() || archivedSessions.isNotEmpty())) {
         // 「加载更多」的落点：要的是**当前会话所属工作区**的下一页。
         // 用第一条会话的 wsId 而不是"用户选中的"：选择器列出的是同一个工作区里的会话
@@ -1749,6 +1875,9 @@ private fun HistoryEdgeMarker(text: String) {
 
 /** 「正在加载更早的消息」最多显示多久（域层在"没有更早的了"时不发信号，这里只防永远转圈）。 */
 private const val HISTORY_LOADING_GIVE_UP_MS = 6_000L
+
+/** 目标选择 Sheet 里「最近任务」的条数上限：它是快捷入口，不是会话列表。 */
+private const val CAPSULE_RECENT_TASK_LIMIT = 8
 
 @Composable
 private fun SessionDivider(

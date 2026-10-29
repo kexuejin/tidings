@@ -8,6 +8,7 @@ import com.kapp.tidings.core.transport.LocalFile
 import com.kapp.tidings.domain.ManualPeerEntry
 import com.kapp.tidings.platform.ReceivedFileActions
 // ExecDeviceRow 现在住在同一个包（领域侧）：它由 execDeviceRows() 算出来。
+import kotlinx.serialization.json.JsonObject
 import com.kapp.tidings.domain.model.MessageUi
 import com.kapp.tidings.domain.model.PeerUi
 
@@ -92,6 +93,18 @@ public interface DesktopPaneActions {
      * "这是群还是私聊"，就是把同一套判断抄到每一处，漏一处就是"在群里说话却发给了某个人"。
      */
     fun sendToConversation(convId: String, text: String, replyTo: String? = null)
+
+    /**
+     * 带意图的发送（方案 §4.2）：上下文唤起胶囊（§5.2）选中目标后，正文与
+     * `agentIntent` **一帧**发出（宿主原子化「开会话 + 派单」）。
+     *
+     * 默认实现**忽略意图**、退回普通发送：预览/截图夹具没有意图通路，
+     * 行为与没有这个方法时完全一致 —— 与 [loadOlderMessages] 的默认空实现同一取舍。
+     * [RelayController] 覆盖它走群文本的 `agentIntent` 键。
+     */
+    fun sendToConversation(convId: String, text: String, replyTo: String?, agentIntent: JsonObject?) {
+        sendToConversation(convId, text, replyTo)
+    }
 
     /**
      * 「重发」：按**原消息 id** 重放（core 的 `replayOutgoing`），不新发一条。

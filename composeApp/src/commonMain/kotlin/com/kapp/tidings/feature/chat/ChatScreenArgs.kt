@@ -2,6 +2,7 @@
 
 package com.kapp.tidings.feature.chat
 
+import kotlinx.serialization.json.JsonObject
 import com.kapp.tidings.domain.HistorySearchFilter
 import com.kapp.tidings.domain.MessageSearchResult
 import com.kapp.tidings.domain.model.MessageUi
@@ -85,6 +86,15 @@ data class ChatScreenState(
  */
 data class ChatScreenActions(
     val onSend: (targetId: String, text: String, replyTo: String?) -> Unit,
+    /**
+     * 带意图的发送（方案 §4.2）：胶囊（§5.2）选中目标后，正文与 `agentIntent`
+     * **一帧**发出。null = 这个壳没有意图通路 —— 胶囊照样唤起（选择目标仍然
+     * 生效于 UI），只是发送退回普通路径，不装键。
+     *
+     * 与 [onSend] 分开而不是改它的签名：35+ 个调用点里只有两个生产壳接意图，
+     * 改主签名等于让全部调用点为一条通路陪跑。
+     */
+    val onSendWithIntent: ((targetId: String, text: String, replyTo: String?, agentIntent: JsonObject) -> Unit)? = null,
     /**
      * 失败气泡上的「重发」。
      *

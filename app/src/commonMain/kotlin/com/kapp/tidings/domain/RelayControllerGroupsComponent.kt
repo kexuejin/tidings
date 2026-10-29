@@ -569,6 +569,14 @@ fun handleSendToGroup(
     text: String,
     mentions: List<String>? = null,
     replyTo: String? = null,
+    /**
+     * 人类 → 插件的**单帧原子意图**（方案 §4.2，M1 已上线 `agentIntent` 键）。
+     *
+     * 由上下文唤起胶囊（§5.2）装填、随正文一次发出 —— 宿主原子化完成
+     * 「开会话 + 派单执行」，乐观发送零网络等待。null = 普通群聊（胶囊没唤起，
+     * 或者这个壳没接意图通路）。形状由调用方保证是 JSON 对象（协议校验按对象收）。
+     */
+    agentIntent: JsonObject? = null,
 ) {
     val body = text.trim()
     if (body.isEmpty()) return
@@ -600,6 +608,7 @@ fun handleSendToGroup(
                 mentions = mentions,
                 replyTo = replyTo,
                 envelopeId = envelopeId,
+                agentIntent = agentIntent,
             )
         } ?: return@launch
         val repliedToIsAgent = replyTo != null && RelayController.isAgentAuthored(
