@@ -31,6 +31,8 @@ class PluginHost(
     private val plugins: PluginRegistry,
     /** 拉起进程的出口；默认真 [ProcessBuilder]（输出追加到插件目录旁的日志文件）。 */
     private val spawner: (command: List<String>, workDir: File, env: Map<String, String>, logFile: File) -> Process = ::defaultSpawner,
+    /** 裸命令名的搜索目录；null = 宿主 PATH + 常见安装位（测试注入临时目录）。 */
+    private val searchDirectories: List<String>? = null,
 ) {
 
     /** 一个插件目录的处理结果：`pluginId` 来自 manifest（解析失败时为 null）。 */
@@ -110,16 +112,30 @@ class PluginHost(
         val env = mapOf(
             ENV_CONTROL_URL to controlBaseUrl(),
             ENV_PLUGIN_TOKEN to token,
+            // GUI 的 PATH 补偿：子进程里 `#!/usr/bin/env …` 也要能解析（execvp 用的是
+            // 父进程 PATH，启动前替换命令头；子进程 PATH 再补上同一批目录）。
+            "PATH" to ((System.getenv("PATH") ?: "/usr/bin:/bin") + ":" +
+                (searchDirectories ?: defaultSearchDirectories()).joinToString(":")),
         )
+        val resolved = resolveExecutable(command)
+        if (resolved == null) {
+            val searched = (searchDirectories ?: defaultSearchDirectories()).joinToString(" : ")
+            val reason = "executable \"" + command.first() + "\" not found in " + searched +
+                " (GUI processes get a minimal PATH; use an absolute path in the entrypoint, or install the runtime into one of these directories)"
+            appendProcessLog(pluginDir, reason)
+            return SpawnReport(pluginDir.name, pluginId, command, started = false, reason = reason)
+        }
         val logFile = File(pluginDir, PROCESS_LOG_FILE)
         return try {
-            val process = spawner(command, pluginDir, env, logFile)
+            val process = spawner(resolved, pluginDir, env, logFile)
             synchronized(processes) { processes += pluginId to process }
             seenIds += pluginId
             managed += pluginId
-            SpawnReport(pluginDir.name, pluginId, command, started = true)
+            SpawnReport(pluginDir.name, pluginId, resolved, started = true)
         } catch (t: Throwable) {
-            SpawnReport(pluginDir.name, pluginId, command, started = false, reason = "spawn failed: " + (t.message ?: t::class.simpleName))
+            val reason = "spawn failed: " + (t.message ?: t::class.simpleName)
+            appendProcessLog(pluginDir, reason)
+            SpawnReport(pluginDir.name, pluginId, resolved, started = false, reason = reason)
         }
     }
 
@@ -144,6 +160,53 @@ class PluginHost(
 
     private val managedPluginIds: Set<String>
         get() = synchronized(processes) { processes.map { it.first }.toSet() }
+
+    // ---------------------------------------------------------------- 可执行文件解析
+
+    /**
+     * 把 entrypoint 的裸命令名解析成绝对路径。
+     *
+     * ## 为什么宿主要自己解析（GUI 的 PATH 补偿）
+     *
+     * 桌面壳由 launchd 拉起，PATH 只有系统最小组 —— 用户 shell 里的 pyenv/homebrew
+     * 一律不在其中。`python3 main.py` 在终端里能跑、被 GUI 宿主拉起就 `error=2`，
+     * 而且那次失败在图形界面上没有任何可见面（stdout 不可看）。所以宿主在拉起前按
+     * 搜索目录自己找一遍，找到的绝对路径替换进命令头；子进程 PATH 也补上同一批目录
+     * （见 [spawnOne] 的 env），让脚本内部的 `#!/usr/bin/env …` 同样能解析。
+     * 裸命令找不到 ⇒ 返回 null：调用方拒绝拉起，把全量搜索清单写进拒绝理由并落
+     * 插件目录旁的 process.log（图形界面上唯一可诊断的地方）—— 一个注定 error=2
+     * 的 spawn 不值得发。
+     */
+    internal fun resolveExecutable(command: List<String>): List<String>? {
+        val head = command.firstOrNull() ?: return command
+        if (head.contains('/')) {
+            return command
+        }
+        for (dir in searchDirectories ?: defaultSearchDirectories()) {
+            val candidate = File(dir, head)
+            if (candidate.isFile && candidate.canExecute()) {
+                return listOf(candidate.absolutePath) + command.drop(1)
+            }
+        }
+        return null
+    }
+
+    /** 裸命令名的搜索目录：宿主 PATH + 常见安装位（shell 与 GUI 的 PATH 差异的补偿）。 */
+    private fun defaultSearchDirectories(): List<String> {
+        val fromPath = (System.getenv("PATH") ?: "")
+            .split(':')
+            .filter { it.isNotBlank() }
+        return (fromPath + listOf("/usr/local/bin", "/opt/homebrew/bin", "/usr/bin", "/bin")).distinct()
+    }
+
+    /** 拉起失败的原因落进插件目录的 process.log —— 图形界面上唯一可诊断的地方。 */
+    private fun appendProcessLog(pluginDir: File, line: String) {
+        runCatching {
+            File(pluginDir, PROCESS_LOG_FILE).appendText(
+                java.time.Instant.now().toString() + " [plugin-host] " + line + "\n",
+            )
+        }
+    }
 
     companion object {
         const val MANIFEST_FILE: String = "manifest.json"

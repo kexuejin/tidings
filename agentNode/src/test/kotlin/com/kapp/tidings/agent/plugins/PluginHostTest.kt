@@ -134,16 +134,26 @@ class PluginHostTest {
     @Test
     fun aValidPluginIsSpawnedInTheItsOwnDirectoryWithBothKeysInjected() {
         val dataDir = tempPluginData()
+        // 可执行文件解析的搜索目录由测试注入：夹一个本机必然存在的假命令，
+        // 判据就不依赖这台机器装没装 python（envDependentTestGate 纪律）。
+        val searchDir = java.nio.file.Files.createTempDirectory("relay-pluginhost-search-").toFile()
+        val fakeCmd = File(searchDir, "fakecmd").apply {
+            writeText("#!/bin/sh\nexit 0\n")
+            setExecutable(true)
+        }
         try {
-            val dir = writePlugin(dataDir, "echo-team", manifestJson("echo-team", "python3 main.py"))
+            val dir = writePlugin(dataDir, "echo-team", manifestJson("echo-team", "fakecmd main.py"))
             val spawner = RecordingSpawner()
-            val host = PluginHost(dataDir, { "http://127.0.0.1:8788" }, PluginRegistry(), spawner::spawn)
+            val host = PluginHost(
+                dataDir, { "http://127.0.0.1:8788" }, PluginRegistry(), spawner::spawn,
+                searchDirectories = listOf(searchDir.absolutePath),
+            )
             val reports = host.start()
 
             assertEquals(1, reports.size)
             val report = reports.single()
             assertEquals(true, report.started, report.reason ?: "")
-            assertEquals(listOf("python3", "main.py"), report.command, "entrypoint 按空格切命令")
+            assertEquals(listOf(fakeCmd.absolutePath, "main.py"), report.command, "裸命令解析成绝对路径后交给进程")
             val call = spawner.calls.single()
             assertEquals(dir, call.workDir, "工作目录是插件目录本身（相对路径的 entrypoint 才找得到自己的文件）")
             assertEquals("http://127.0.0.1:8788", call.env[PluginHost.ENV_CONTROL_URL])
@@ -157,6 +167,38 @@ class PluginHostTest {
             assertTrue(!spawner.fakeProcesses.single().alive, "停机要终结子进程（先 SIGTERM 再兜底强杀）")
         } finally {
             dataDir.deleteRecursively()
+            searchDir.deleteRecursively()
+        }
+    }
+
+    @Test
+    fun anUnresolvableBareCommandIsRejectedWithTheSearchListAndLoggedNextToThePlugin() {
+        val dataDir = tempPluginData()
+        // 搜索目录指向一个空目录：裸命令必然解析不到（不依赖机器装了什么）。
+        val searchDir = java.nio.file.Files.createTempDirectory("relay-pluginhost-search-empty-").toFile()
+        try {
+            val dir = writePlugin(dataDir, "echo-team", manifestJson("echo-team", "definitely-not-a-command main.py"))
+            val spawner = RecordingSpawner()
+            val host = PluginHost(
+                dataDir, { "http://127.0.0.1:8788" }, PluginRegistry(), spawner::spawn,
+                searchDirectories = listOf(searchDir.absolutePath),
+            )
+            val reports = host.start()
+            val report = reports.single()
+            assertEquals(false, report.started)
+            assertTrue(
+                (report.reason ?: "").contains("definitely-not-a-command") &&
+                    (report.reason ?: "").contains(searchDir.absolutePath),
+                "拒绝理由要给出可操作的方向（命令名 + 搜索过的目录）：" + report.reason,
+            )
+            assertEquals(0, spawner.calls.size)
+            assertTrue(
+                File(dir, PluginHost.PROCESS_LOG_FILE).readText().contains("definitely-not-a-command"),
+                "解析失败也要落进插件旁的 process.log（图形界面上唯一可诊断的地方）",
+            )
+        } finally {
+            dataDir.deleteRecursively()
+            searchDir.deleteRecursively()
         }
     }
 
