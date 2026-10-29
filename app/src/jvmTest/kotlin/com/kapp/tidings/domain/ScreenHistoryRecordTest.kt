@@ -211,7 +211,9 @@ class ScreenHistoryRecordTest {
         // 这条测试本身就是"老库升级"的现场，所以下面还要断言回填出来的 seq 是有值的。
         // 16 = 15.sqm 之后。15.sqm 建的是 ConversationSummary（会话摘要表）并**回填**它 ——
         // 不回填的话，把 conversations 改成读摘要表之后，会话列表会整片消失（不是少一个优化）。
-        assertEquals(16L, RelayDatabase.Schema.version, "迁移文件数 + 1 —— 加一个 .sqm 就得同步改这条")
+        // 17 = 16.sqm 之后。16.sqm 给 MessageEntity 补 card_json / agent_state 两列（声明式
+        // 卡片与执行状态，方案 §4.3）—— 只补列、不回填，老行 NULL 与「没有卡片」同义。
+        assertEquals(17L, RelayDatabase.Schema.version, "迁移文件数 + 1 —— 加一个 .sqm 就得同步改这条")
 
         val database = RelayDatabase(driver)
         val old = database.relayDatabaseQueries.selectMessagesByConv("peer-1").executeAsList().single()
@@ -239,6 +241,8 @@ class ScreenHistoryRecordTest {
             agent_session_title = null,
             // 新建库这条路的取号：会话内 MAX(seq)+1。老行已是 1，所以这条是 2。
             seq = 2L,
+            card_json = null,
+            agent_state = null,
         )
         val fresh = database.relayDatabaseQueries.selectMessagesByConv("peer-1").executeAsList()
             .single { it.id == "new-1" }

@@ -6,6 +6,7 @@ import com.kapp.tidings.core.protocol.ScreenPhase
 import com.kapp.tidings.core.protocol.ScreenRole
 import com.kapp.tidings.core.protocol.ScreenSessionState
 import kotlinx.serialization.Serializable
+import kotlinx.serialization.json.JsonObject
 /**
  * 一条消息**此刻**的投递状态。
  *
@@ -280,6 +281,16 @@ data class MessageUi(
     val reasoning: String? = null,
     /** 思考过程耗时（毫秒）。为 null 时显示"思考中"或不显示耗时。 */
     val reasoningElapsedMs: Long? = null,
+    /**
+     * 声明式卡片负载（方案 §4.3）：协议 `card` 键的原样 JSON。
+     *
+     * **落库是追加式新行**（同 cardId、rev+1 的新帧，见方案 §5.3）—— 不重写旧行，
+     * 绕开 `INSERT OR REPLACE` / FTS 那套不变量；「不刷屏」是 UI 语义（按 cardId
+     * 折叠、只渲染最新 rev），不是存储语义。UI 渲染引擎是 M3 的交付物。
+     */
+    val card: JsonObject? = null,
+    /** 插件 → 全群的执行状态（方案 §4.1 四态）：accept / blocked / completed / failed。 */
+    val agentState: String? = null,
 )
 
 /**

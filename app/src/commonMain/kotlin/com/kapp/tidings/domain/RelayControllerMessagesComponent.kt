@@ -560,6 +560,10 @@ fun handleOnInbound(envelope: Envelope) {
             // 标题跟着消息来（不是另一次会话元数据同步）：分段线要显示「任务：xxx」。
             // 缺省 null ⇒ 界面显示「新会话」那句中性说明，而不是静默不画线。
             agentSessionTitle = payload?.let { stringField(it, "agentSessionTitle") },
+            // 卡片与执行状态（方案 §4.1/§4.3）：形状校验在协议层（validateMsg），这里如实落库。
+            // 卡片是 JSON 对象原样进列（cardJson）；渲染引擎是 M3 的交付物。
+            card = payload?.get("card") as? kotlinx.serialization.json.JsonObject,
+            agentState = payload?.let { stringField(it, "agentState") },
             replyTo = if (groupId != null) replyToOf(envelope) else null,
             reasoning = parsedReasoning,
             reasoningElapsedMs = reasoningElapsedMs,

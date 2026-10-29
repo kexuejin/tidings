@@ -232,6 +232,8 @@ class SqlDelightMessageStore(
                         agent_session_id = values.agentSessionId,
                         agent_session_title = values.agentSessionTitle,
                         seq = seq,
+                        card_json = values.cardJson,
+                        agent_state = values.agentState,
                     )
                     changed = true
                     touched += values.convId
@@ -816,6 +818,13 @@ private fun com.kapp.tidings.db.MessageEntity.toUi(): MessageUi {
         // 是同一档，`sessionIdOf` 会继续退回 id 前缀那条旧判据。
         agentSessionId = agent_session_id,
         agentSessionTitle = agent_session_title,
+        // 卡片与执行状态**读回来**：原位刷新的折叠键（cardId/rev）与状态徽标跨重启存活。
+        // 解析失败当「这条没有卡片」（runCatching），不让一条坏 JSON 拖死整条消息 ——
+        // 与 screen / noticeDetail 同一条规矩。
+        card = card_json?.let {
+            runCatching { MessageStore.json.parseToJsonElement(it) as? kotlinx.serialization.json.JsonObject }.getOrNull()
+        },
+        agentState = agent_state,
     )
 }
 
@@ -944,6 +953,8 @@ private data class MessageRowValues(
     val screenJson: String?,
     val agentSessionId: String?,
     val agentSessionTitle: String?,
+    val cardJson: String?,
+    val agentState: String?,
 )
 
 /**
@@ -977,6 +988,8 @@ private fun MessageUi.toRowValues(peerId: String): MessageRowValues {
         screenJson = screen?.let { runCatching { MessageStore.json.encodeToString(it) }.getOrNull() },
         agentSessionId = agentSessionId,
         agentSessionTitle = agentSessionTitle,
+        cardJson = card?.let { runCatching { MessageStore.json.encodeToString(kotlinx.serialization.json.JsonObject.serializer(), it) }.getOrNull() },
+        agentState = agentState,
     )
 }
 
@@ -1000,5 +1013,7 @@ private fun com.kapp.tidings.db.MessageEntity.matches(values: MessageRowValues):
         file_json == values.fileJson &&
         screen_json == values.screenJson &&
         agent_session_id == values.agentSessionId &&
-        agent_session_title == values.agentSessionTitle
+        agent_session_title == values.agentSessionTitle &&
+        card_json == values.cardJson &&
+        agent_state == values.agentState
 

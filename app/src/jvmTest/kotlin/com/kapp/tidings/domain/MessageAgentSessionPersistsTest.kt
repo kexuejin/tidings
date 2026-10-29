@@ -84,4 +84,53 @@ class MessageAgentSessionPersistsTest {
         )
         assertNull(store.load().values.flatten().single().agentSessionId)
     }
+
+    /**
+     * **卡片与执行状态必须跨重启存活**（方案 §4.3 / §5.3）。
+     *
+     * 卡片是原位刷新的折叠键（cardId/rev 都在卡片 JSON 里），执行状态驱动徽标 ——
+     * 两者只活在内存的话，重启后卡片退化为纯文本、状态徽标消失。落库是**追加式新行**
+     * （同 cardId、rev+1 的新帧），不重写旧行，绕开 INSERT OR REPLACE / FTS 那套不变量。
+     */
+    @Test
+    fun theCardAndAgentStateSurviveAPersistRoundTrip() {
+        val card = kotlinx.serialization.json.buildJsonObject {
+            put("type", kotlinx.serialization.json.JsonPrimitive("team-task-board"))
+            put("cardId", kotlinx.serialization.json.JsonPrimitive("task-89"))
+            put("rev", kotlinx.serialization.json.JsonPrimitive(3))
+        }
+        store.save(
+            mapOf(
+                "group:g2" to listOf(
+                    MessageUi(
+                        id = "agent-ev-card-1",
+                        peerId = "group:g2",
+                        mine = false,
+                        text = "看板",
+                        at = 2000,
+                        agentState = "accept",
+                        card = card,
+                    ),
+                ),
+            ),
+        )
+        val back = store.load().values.flatten().single()
+        assertEquals("accept", back.agentState, "执行状态必须落库")
+        assertEquals(card, back.card, "卡片必须原样落库（cardId/rev 是原位刷新的折叠键）")
+    }
+
+    /** 普通消息没有卡片与状态：列为 NULL，读回来就是 null，不能编一个空对象。 */
+    @Test
+    fun aPlainMessageHasNoCardAndNoState() {
+        store.save(
+            mapOf(
+                "peer-2" to listOf(
+                    MessageUi(id = "m2", peerId = "peer-2", mine = false, text = "纯文本", at = 3000),
+                ),
+            ),
+        )
+        val back = store.load().values.flatten().single()
+        assertNull(back.card)
+        assertNull(back.agentState)
+    }
 }

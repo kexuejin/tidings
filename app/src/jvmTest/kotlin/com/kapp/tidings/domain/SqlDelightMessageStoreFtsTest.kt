@@ -158,6 +158,9 @@ class SqlDelightMessageStoreFtsTest {
         runCatching { driver.execute(null, "ALTER TABLE MessageEntity DROP COLUMN agent_session_id", 0) }
         runCatching { driver.execute(null, "ALTER TABLE MessageEntity DROP COLUMN agent_session_title", 0) }
         runCatching { driver.execute(null, "ALTER TABLE MessageEntity DROP COLUMN notice_detail", 0) }
+        // 16.sqm 的 card_json / agent_state 同理（声明式卡片与执行状态，方案 §4.3）。
+        runCatching { driver.execute(null, "ALTER TABLE MessageEntity DROP COLUMN card_json", 0) }
+        runCatching { driver.execute(null, "ALTER TABLE MessageEntity DROP COLUMN agent_state", 0) }
         // 14.sqm 的 seq 同理：最新 .sq 建表已含它，退回旧形状时也要退掉。
         // 索引必须先删 —— SQLite 不允许删一个被索引引用的列。
         runCatching { driver.execute(null, "DROP INDEX IF EXISTS message_conv_seq", 0) }

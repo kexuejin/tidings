@@ -32,7 +32,14 @@ CREATE TABLE MessageEntity (
     -- 同一毫秒可能有多条（agent 流式回复尤甚），用时间做游标要么重复要么漏。
     -- 老库由 14.sqm 按 (timestamp, id) 回填，新建库由 insertMessage 的 MAX(seq)+1 取号，
     -- 两条路给出同一种语义（会话内从 1 起、连续、无重复）。
-    seq INTEGER
+    seq INTEGER,
+    -- 声明式卡片负载（方案 §4.3）：协议 `card` 键的 JSON 原文。
+    -- **不进 FTS**：卡片是结构化数据，进索引只会让搜索命中一堆 JSON 碎片
+    -- （与 notice_detail 同一条纪律）。老库由 16.sqm 补列，NULL = 这条没有卡片。
+    card_json TEXT,
+    -- 插件 → 全群的执行状态（方案 §4.1 四态）：accept / blocked / completed / failed。
+    -- 校验在协议层（validateMsg 限四态），这里是如实存储。
+    agent_state TEXT
 );
 
 CREATE INDEX idx_message_conv_time ON MessageEntity(conv_id, timestamp);
@@ -115,9 +122,9 @@ WHERE conv_id = :convId;
 insertMessage:
 INSERT OR REPLACE INTO MessageEntity (
     id, conv_id, peer_id, sender_id, mine, text, timestamp, delivery, notice, notice_detail, file_json, screen_json,
-    agent_session_id, agent_session_title, seq
+    agent_session_id, agent_session_title, seq, card_json, agent_state
 ) VALUES (
-    ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?
+    ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?
 );
 
 selectMessagesByConv:
