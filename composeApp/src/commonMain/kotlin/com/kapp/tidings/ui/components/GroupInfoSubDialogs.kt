@@ -291,7 +291,7 @@ internal fun EditGroupMetaDialog(
  * **不给手改入口**（产品决定：默认生成唯一名字，后面再加的不允许冲突）。
  *
  * 上一版这里还有一个 `AddGroupWorkspaceDialog`（同形状、按勾选提交 wsId 列表）——
- * 全仓 0 调用点（真实的暴露入口是 `ExposeAgentDialog`，挂在 [GroupInfoDialog] 里），
+ * 全仓 0 调用点（真实的暴露入口是 `SetGroupAgentWorkspacesDialog`，挂在 [GroupInfoDialog] 里），
  * 已删除：一份没人走的第二实现只会让人在改「加 agent」交互时改错那一份。
  */
 
