@@ -12,6 +12,10 @@ import kotlin.test.assertTrue
  *
  * 真机回归：pin ≈ 78 字节，长键名 + pin 会让载荷越过 213 字节 ⇒ QrEncoder 抛异常
  * ⇒ 桌面端只剩一句「二维码过长」，码画不出来。
+ *
+ * 断言一律绑**候选类型**（[PeerCandidateTypes.PUBLIC_V6]），不绑地址字面值：夹具里的公网 v6
+ * 曾从某个运营商前缀换成文档段（脱敏），而断言当时写的是 `host.contains("2408:")` ——
+ * 于是这条用例在脱敏当天就变红，却没人重跑测试，红了很久才被发现。类型是语义，前缀是夹具细节。
  */
 class QrPayloadBudgetTest {
 
@@ -28,7 +32,10 @@ class QrPayloadBudgetTest {
         // payload.contains(...) 判断"带没带"。判据要问解析器：它才是载荷语义的权威。
         val parsed = parseQr(payload) as? ParsedQr.LanPeer ?: error("载荷解析不出来: " + payload)
         assertEquals(pin, parsed.tlsPin, "必须带 pin（解析回 wire 形态）: " + payload)
-        assertTrue(parsed.candidates.any { it.host.contains("2408:") }, "必须留下公网 v6: " + payload)
+        assertTrue(
+            parsed.candidates.any { it.type == PeerCandidateTypes.PUBLIC_V6 },
+            "必须留下公网 v6: " + payload,
+        )
     }
 
     /**
@@ -45,7 +52,10 @@ class QrPayloadBudgetTest {
         val parsed = parseQr(payload) as? ParsedQr.LanPeer ?: error("载荷解析不出来: " + payload)
         assertEquals(nick, parsed.nick, "昵称必须在码里：不带它，对方节点表就只能显示合成名")
         assertEquals(pin, parsed.tlsPin, "带昵称不能把 pin 挤掉")
-        assertTrue(parsed.candidates.any { it.host.contains("2408:") }, "也不能把公网 v6 挤掉")
+        assertTrue(
+            parsed.candidates.any { it.type == PeerCandidateTypes.PUBLIC_V6 },
+            "也不能把公网 v6 挤掉",
+        )
     }
 
     /** 没有昵称时行为不变（老调用点与截图夹具不该因为这条新参数而改变）。 */
@@ -63,6 +73,9 @@ class QrPayloadBudgetTest {
         assertTrue(parsed != null, "二进制形态的载荷必须能被自己的解析器读回: " + payload)
         assertEquals(nodeId, parsed.nodeId, "nodeId 必须读回")
         assertEquals(pin, parsed.tlsPin, "pin 必须读回")
-        assertTrue(parsed.candidates.any { it.host.contains("2408:") }, "公网 v6 必须读回")
+        assertTrue(
+            parsed.candidates.any { it.type == PeerCandidateTypes.PUBLIC_V6 },
+            "公网 v6 必须读回",
+        )
     }
 }
