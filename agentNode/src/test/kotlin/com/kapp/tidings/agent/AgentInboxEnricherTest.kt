@@ -3,6 +3,7 @@
 package com.kapp.tidings.agent
 
 import com.kapp.tidings.core.protocol.AgentExecPolicies
+import com.kapp.tidings.core.protocol.AgentSessionPick
 import com.kapp.tidings.core.protocol.GroupMeta
 import com.kapp.tidings.core.protocol.VirtualAgentMember
 import kotlin.test.Test
@@ -187,5 +188,56 @@ class AgentInboxEnricherTest {
             grantAllows = { true },
         )
         assertEquals(true, h?.senderIsAgent, "agent 自己的话必须能被认出来，否则会自激")
+    }
+
+    // ---------------------------------------------------------------- 会话点选
+
+    private fun candidates(vararg ids: String) =
+        ids.map { AgentSessionPick.Candidate(sessionId = it, wsId = null) }
+
+    /**
+     * 用户点着某条 agent 会话消息回复 ⇒ 载荷带 `agentSessionId`，它必须赢过「最近活跃」默认。
+     *
+     * 悬空现场：hint 的 `requestedSessionId` 从未被赋值，判定也从不把它传给
+     * `AgentSessionPick` —— 无论用户点哪条，永远投进最近那条。
+     */
+    @Test
+    fun aRequestedSessionBeatsTheMostRecentDefault() {
+        val h = resolveAgentInboxHint(
+            meta = meta(agent("dsh")),
+            senderId = host,
+            text = "@dsh 在这条里继续",
+            candidates = candidates("s-new", "s-old"),
+            requestedSessionId = "s-old",
+        )
+        assertEquals("s-old", h?.targetSessionId, "显式点选的会话必须赢过最近活跃默认")
+        assertEquals("s-old", h?.requestedSessionId, "点选值要带给桥接侧（开/续会话与说清失败都用它）")
+    }
+
+    /** 点选的会话已不在（结束/换归属）⇒ 不投，且绝不静默换成别的会话。 */
+    @Test
+    fun aRequestedSessionGoneIsNotSilentlySwapped() {
+        val h = resolveAgentInboxHint(
+            meta = meta(agent("dsh")),
+            senderId = host,
+            text = "@dsh 在这条里继续",
+            candidates = candidates("s-new"),
+            requestedSessionId = "s-gone",
+        )
+        assertNull(h?.targetSessionId, "指定的会话没了就如实不投，不许偷偷换投最近那条")
+        assertEquals("s-gone", h?.requestedSessionId, "桥接侧要拿到点选值，才说得出「你点的会话没了」")
+    }
+
+    /** 没点选 ⇒ 维持默认：最近活跃那条（护栏，防接线时把默认路径改坏）。 */
+    @Test
+    fun noRequestKeepsTheMostRecentDefault() {
+        val h = resolveAgentInboxHint(
+            meta = meta(agent("dsh")),
+            senderId = host,
+            text = "@dsh 跑",
+            candidates = candidates("s-new", "s-old"),
+        )
+        assertEquals("s-new", h?.targetSessionId)
+        assertNull(h?.requestedSessionId)
     }
 }

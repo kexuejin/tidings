@@ -133,6 +133,11 @@ fun resolveAgentInboxHint(
      * 传空列表 = 没有可投的会话（判定会如实返回 null 的 targetSessionId）。
      */
     candidates: List<AgentSessionPick.Candidate> = emptyList(),
+    /**
+     * 用户**显式点选**的会话 id（载荷的 `agentSessionId`：点着某条 agent 会话消息回复/续聊时带上）。
+     * null = 没点选，走默认。
+     */
+    requestedSessionId: String? = null,
     /** 本机 nodeId —— 判据据此认「我在自己机器上」。null = 不知道，此时不放行本机用户。 */
     selfNodeId: String? = null,
 ): AgentInboxHint? {
@@ -154,11 +159,18 @@ fun resolveAgentInboxHint(
     }
     val hit = meta.mentionedVirtualAgent(text, tokens) ?: return null
     val verdict = AgentExecAuthorizer.authorize(senderId, meta, grantAllows, execPolicy, selfNodeId)
+    // **点选先归一化，判定与回带给桥接侧用同一个值** —— 否则 pick 判的是一份、
+    // 桥接收到的是另一份，排查时两个答案对不上。
+    val requested = requestedSessionId?.trim()?.takeIf { it.isNotEmpty() }
     // **投给哪个会话也在这里算**（判据在 core，桥接侧只消费）。
     // 只有「@ 到了 agent」且「有会话」时才有值；其余为 null（不投）。
+    // 点选过就用点选判：在候选里 ⇒ 精确投它（赢了「最近活跃」）；
+    // 不在 ⇒ `RequestedSessionGone`，targetSessionId 为 null（不投）——
+    // **绝不静默换投**：用户以为命令进了 A、实际进了 B，比不投更糟。
     val picked = AgentSessionPick.pick(
         boundWsId = hit.wsId,
         candidates = candidates,
+        requestedSessionId = requested,
     )
     val targetSessionId = (picked as? AgentSessionPick.Result.Pick)?.sessionId
     // **必须走 `permitsExecution()`，不要在这里另写一遍判据。**
@@ -173,6 +185,9 @@ fun resolveAgentInboxHint(
     return AgentInboxHint(
         addressedToAgent = true,
         boundWsId = hit.wsId,
+        // 点选值随行：桥接侧在 RequestedSessionGone（不投）时也拿得到它，
+        // 才能说清「你点的会话没了」，而不是一句「没反应」。
+        requestedSessionId = requested,
         agentName = hit.name,
         senderMayExecute = allowed,
         senderIsAgent = senderId != null && AgentSenderId.parse(senderId) != null,

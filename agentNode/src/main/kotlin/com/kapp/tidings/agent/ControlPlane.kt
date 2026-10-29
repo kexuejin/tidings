@@ -2339,6 +2339,11 @@ class ControlPlane(
                                                 )
                                             }
                                     }.getOrElse { emptyList() },
+                                    // **用户点选的会话**：载荷的 `agentSessionId`（点着某条 agent
+                                    // 会话消息回复/续聊时带上）。此前这根线断着 —— hint 的
+                                    // requestedSessionId 恒为空、pick 永远走「最近活跃」默认，
+                                    // 无论用户点哪条都投进同一条。
+                                    requestedSessionId = view.agentSessionId,
                                 )
                                 if (hint != null) {
                                     putJsonObject("agentHint") {
