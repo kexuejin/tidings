@@ -3,6 +3,8 @@
 package com.kapp.tidings.agent
 
 import com.kapp.tidings.core.protocol.mentionedVirtualAgent
+import com.kapp.tidings.agent.drivers.DriverEvent
+import com.kapp.tidings.agent.drivers.ExternalPluginDriver
 import com.kapp.tidings.agent.plugins.PluginRegistration
 import com.kapp.tidings.agent.plugins.PluginRegistry
 import com.kapp.tidings.agent.plugins.PluginTokenGate
@@ -194,6 +196,13 @@ class ControlPlane(
 
     private var server: HttpServer? = null
 
+    /**
+     * 插件事件的**每会话游标**（sessionId → 递增计数）。台账按游标排序、同游标就地
+     * 替换 —— 每次派单从 1 重数会把上一次的事件覆盖掉。键随插件会话数增长，
+     * 与台账（AgentSessionRegistry）同生命周期、同量级。
+     */
+    private val pluginEventCursors = java.util.concurrent.ConcurrentHashMap<String, java.util.concurrent.atomic.AtomicLong>()
+
     init {
         // 审批回执的**授权门禁**（fail-closed）：宿主在这里自己装判据，而不是相信客户端。
         // 台账由外部建好传进来（桌面端内嵌控制面与独立进程共用同一个实例），门禁装在这一层，
@@ -367,6 +376,9 @@ class ControlPlane(
                 path == "/v1/agent/exec-policies" && method == "PUT" -> writeExecPolicies(exchange)
                 // 已注册插件台账（只读；宿主进程与面板看「装了哪些插件、各在线与否」）。
                 path == "/v1/plugins" && method == "GET" -> pluginsList(exchange)
+                // 宿主侧派单/操作/点查：插件网关的执行入口（Layer 3 与群聊桥都走这里）。
+                path == "/v1/plugin/task" && method == "POST" -> pluginDispatch(exchange)
+                path == "/v1/plugin/action" && method == "POST" -> pluginAction(exchange)
                 // 某个 agent 的执行名单（谁能让它干活）—— 逐设备勾选。
                 path == "/v1/agent/exec-devices" && method == "GET" -> readExecDeviceList(exchange)
                 path == "/v1/agent/exec-devices" && method == "PUT" -> writeExecDevice(exchange)
@@ -570,6 +582,178 @@ class ControlPlane(
             },
         )
     }
+
+    // ------------------------------------------------------- 宿主侧派单（M2 网关执行面）
+    //
+    // `POST /v1/plugin/task` 是「宿主把任务交给插件」的唯一入口：Layer 3 的
+    // 「模拟群内派发任务」走它，群聊桥（@agent → 派单）接线后也走它。与 /v1/send
+    // 同一信任模型（回环调用方 = 机主），因此不再过 grants；而插件侧写台账需要的
+    // 身份只有一个来源 —— 注册时算好的 AgentSenderId（本处理器不拼任何前缀）。
+
+    /** 派单/操作共用的条目解析；null = 已回过响应。 */
+    private fun pluginEntryOrRespond(exchange: HttpExchange, pluginId: String): PluginRegistry.Entry? {
+        if (pluginId.isEmpty()) {
+            respond(exchange, 400, errorJson("bad-request", "pluginId is required"))
+            return null
+        }
+        val entry = plugins.get(pluginId)
+        if (entry == null) {
+            respond(
+                exchange,
+                404,
+                errorJson("plugin-not-found", "no registered plugin \"" + pluginId + "\" (GET /v1/plugins lists what is registered)"),
+            )
+            return null
+        }
+        return entry
+    }
+
+    private fun pluginDispatch(exchange: HttpExchange) {
+        val obj = readJsonObject(exchange) ?: return
+        val pluginId = obj["pluginId"]?.jsonPrimitiveOrNull()?.contentOrNull?.trim().orEmpty()
+        val entry = pluginEntryOrRespond(exchange, pluginId) ?: return
+        val prompt = obj["prompt"]?.jsonPrimitiveOrNull()?.contentOrNull.orEmpty()
+        if (prompt.isEmpty()) {
+            respond(exchange, 400, errorJson("bad-request", "prompt is required (an empty task text would be rejected by the protocol anyway)"))
+            return
+        }
+        val wsPath = obj["wsPath"]?.jsonPrimitiveOrNull()?.contentOrNull
+        val requestedSessionId = obj["sessionId"]?.jsonPrimitiveOrNull()?.contentOrNull?.takeIf { it.isNotBlank() }
+        val driver = driverFor(entry)
+
+        // 会话：接续调用方点名的，或开一个新的。开不出来（插件不可达）→ 502 如实回，
+        // 不编一个 sessionId 进台账。
+        val sessionId = requestedSessionId ?: run {
+            val handle = try {
+                runBlocking { driver.openSession(wsPath ?: "", null) }
+            } catch (t: Throwable) {
+                respond(
+                    exchange,
+                    502,
+                    errorJson("plugin-unreachable", "cannot open a session with \"" + pluginId + "\": " + (t.message ?: t::class.simpleName)),
+                )
+                return
+            }
+            handle.sessionId
+        }
+
+        // 会话进台账（busy → done/error），身份字段全部来自注册的 manifest。
+        sessions.recordSession(
+            nodeId = runtime.nodeId,
+            sessionId = sessionId,
+            agentKind = entry.pluginId,
+            agentId = entry.manifest.leader?.agentId,
+            state = AgentSessionStates.BUSY,
+            title = prompt.take(80),
+            wsPath = wsPath,
+            outbound = true,
+        )
+
+        // 游标按会话续走：台账按游标排序、同游标就地替换 —— 每次派单从 1 重数会把
+        // 上一次的事件覆盖掉（测试 PluginDispatchTest.consecutiveDispatches 钉的就是它）。
+        val cursor = pluginEventCursors.computeIfAbsent(sessionId) { java.util.concurrent.atomic.AtomicLong(0) }
+        val collected = mutableListOf<JsonObject>()
+        var endedInError = false
+
+        runBlocking {
+            driver.executeTask(sessionId, prompt) { event ->
+                val (eventType, summary, body) = when (event) {
+                    is DriverEvent.ThoughtDelta -> Triple("thought.delta", null, event.delta)
+                    is DriverEvent.TokenDelta -> Triple("token.delta", null, event.delta)
+                    is DriverEvent.ToolCall -> Triple("tool.started", event.tool, event.inputJson)
+                    is DriverEvent.Card -> Triple("card", null, event.cardJson)
+                    is DriverEvent.Finished -> Triple("finished", event.finishReason, null)
+                    is DriverEvent.Error -> Triple("error", null, event.message)
+                }
+                val c = cursor.incrementAndGet()
+                sessions.recordEvent(
+                    nodeId = runtime.nodeId,
+                    sessionId = sessionId,
+                    cursor = c,
+                    eventType = eventType,
+                    summary = summary,
+                    body = body,
+                )
+                collected += buildJsonObject {
+                    put("cursor", c)
+                    put("eventType", eventType)
+                    summary?.let { put("summary", it) }
+                    body?.let { put("body", it) }
+                }
+                if (event is DriverEvent.Error) endedInError = true
+            }
+        }
+
+        sessions.recordSession(
+            nodeId = runtime.nodeId,
+            sessionId = sessionId,
+            agentKind = entry.pluginId,
+            agentId = entry.manifest.leader?.agentId,
+            state = if (endedInError) AgentSessionStates.ERROR else AgentSessionStates.DONE,
+            title = prompt.take(80),
+            wsPath = wsPath,
+            outbound = true,
+        )
+
+        respond(
+            exchange,
+            200,
+            buildJsonObject {
+                put("ok", true)
+                put("pluginId", pluginId)
+                put("sessionId", sessionId)
+                put("status", if (endedInError) "error" else "finished")
+                putJsonArray("events") { collected.forEach { add(it) } }
+                put("note", "events are recorded in the session ledger (GET /v1/agent/sessions?sessionId=…)")
+            },
+        )
+    }
+
+    private fun pluginAction(exchange: HttpExchange) {
+        val obj = readJsonObject(exchange) ?: return
+        val pluginId = obj["pluginId"]?.jsonPrimitiveOrNull()?.contentOrNull?.trim().orEmpty()
+        val entry = pluginEntryOrRespond(exchange, pluginId) ?: return
+        val sessionId = obj["sessionId"]?.jsonPrimitiveOrNull()?.contentOrNull.orEmpty()
+        val actionId = obj["actionId"]?.jsonPrimitiveOrNull()?.contentOrNull.orEmpty()
+        val decidedBy = obj["decidedBy"]?.jsonPrimitiveOrNull()?.contentOrNull.orEmpty()
+        if (sessionId.isEmpty() || actionId.isEmpty() || decidedBy.isEmpty()) {
+            respond(
+                exchange,
+                400,
+                errorJson("bad-request", "action needs pluginId / sessionId / actionId / decidedBy (the host needs to know who decided)"),
+            )
+            return
+        }
+        try {
+            runBlocking { driverFor(entry).handleAction(sessionId, actionId, decidedBy) }
+        } catch (t: Throwable) {
+            respond(
+                exchange,
+                502,
+                errorJson("plugin-unreachable", "action could not reach \"" + pluginId + "\": " + (t.message ?: t::class.simpleName)),
+            )
+            return
+        }
+        respond(
+            exchange,
+            200,
+            buildJsonObject {
+                put("ok", true)
+                put("pluginId", pluginId)
+                put("sessionId", sessionId)
+                put("actionId", actionId)
+            },
+        )
+    }
+
+    private fun driverFor(entry: PluginRegistry.Entry): ExternalPluginDriver =
+        ExternalPluginDriver(
+            driverId = entry.pluginId,
+            displayName = entry.manifest.name,
+            baseUrl = entry.baseUrl,
+            manifest = entry.manifest,
+            onConnectionLost = { reason -> plugins.markOffline(entry.pluginId, reason) },
+        )
 
 
     // --------------------------------------------------------------- handlers
