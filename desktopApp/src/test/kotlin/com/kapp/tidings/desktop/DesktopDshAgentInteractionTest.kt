@@ -81,6 +81,17 @@ class DesktopDshAgentInteractionTest {
                 is DriverEvent.Error -> {
                     answer.append(event.message)
                 }
+                is DriverEvent.Card -> {
+                    // 演示驱动不发卡片；分支只为完备（M2 起 DriverEvent 有卡片事件）。
+                    sessionRegistry.recordEvent(
+                        nodeId = "test-node",
+                        sessionId = sessionId,
+                        cursor = System.currentTimeMillis(),
+                        eventType = "card",
+                        summary = "card",
+                        body = event.cardJson,
+                    )
+                }
             }
         }
 

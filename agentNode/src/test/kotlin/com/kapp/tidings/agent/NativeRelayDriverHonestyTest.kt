@@ -3,7 +3,7 @@
 package com.kapp.tidings.agent
 
 import com.kapp.tidings.agent.drivers.DriverEvent
-import com.kapp.tidings.agent.drivers.NativeRelayDriver
+import com.kapp.tidings.agent.drivers.DriverRegistry
 import kotlinx.coroutines.runBlocking
 import kotlin.test.Test
 import kotlin.test.assertEquals
@@ -24,7 +24,7 @@ class NativeRelayDriverHonestyTest {
 
     private fun run(prompt: String): List<DriverEvent> = runBlocking {
         val events = mutableListOf<DriverEvent>()
-        NativeRelayDriver().executeTask("s-honesty", prompt) { events += it }
+        DriverRegistry().getDriver("native")!!.executeTask("s-honesty", prompt) { events += it }
         events
     }
 
@@ -65,10 +65,11 @@ class NativeRelayDriverHonestyTest {
     @Test
     fun aDisabledCapabilityStillFailsLoudly() {
         val events = runBlocking {
-            val driver = NativeRelayDriver()
-            driver.updateCapabilityAcl(setOf("fs_read"))
+            // ACL 状态在宿主（DriverRegistry），驱动经注入谓词读它（M2 收编）。
+            val registry = DriverRegistry()
+            registry.updateCapabilityAcl("native", setOf("fs_read"))
             val out = mutableListOf<DriverEvent>()
-            driver.executeTask("s-acl", "please list files") { out += it }
+            registry.getDriver("native")!!.executeTask("s-acl", "please list files") { out += it }
             out
         }
         assertTrue(

@@ -5,7 +5,6 @@ package com.kapp.tidings.agent
 import com.kapp.tidings.agent.drivers.DriverEvent
 import com.kapp.tidings.agent.drivers.DriverRegistry
 import com.kapp.tidings.agent.drivers.DsBotDriver
-import com.kapp.tidings.agent.drivers.NativeRelayDriver
 import kotlinx.coroutines.runBlocking
 import kotlin.test.Test
 import kotlin.test.assertEquals
@@ -13,14 +12,20 @@ import kotlin.test.assertTrue
 
 class DriverTest {
 
+    /**
+     * 能力 ACL 收归宿主（M2）后的治理语义不变：宿主禁用 bash ⇒ native 驱动
+     * 对 bash 类任务回报 ACL 错误，而不是静默执行。名单经 [DriverRegistry] 写入
+     * （原先是直接调驱动上的 updateCapabilityAcl —— 该成员已从接口移除）。
+     */
     @Test
     fun testNativeRelayDriverAclAndExecution() = runBlocking {
-        val driver = NativeRelayDriver()
-        assertTrue(driver.isCapabilityAllowed("bash"))
+        val registry = DriverRegistry()
+        val driver = registry.getDriver("native")!!
+        assertTrue(registry.isCapabilityAllowed("native", "bash"))
 
-        // Disable bash
-        driver.updateCapabilityAcl(setOf("fs_read", "fs_write"))
-        assertEquals(false, driver.isCapabilityAllowed("bash"))
+        // Disable bash on the host side
+        registry.updateCapabilityAcl("native", setOf("fs_read", "fs_write"))
+        assertEquals(false, registry.isCapabilityAllowed("native", "bash"))
 
         val events = mutableListOf<DriverEvent>()
         driver.executeTask("sess-1", "please list files", onEvent = { events.add(it) })

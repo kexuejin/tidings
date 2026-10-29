@@ -31,15 +31,11 @@ import kotlinx.serialization.json.put
 class DsBotDriver(
     private val endpointUrl: String = "http://127.0.0.1:11434",
     private val model: String = "deepseek-r1",
+    /** 宿主侧 ACL 谓词（[DriverRegistry] 注入）；驱动自己不持有名单。 */
+    private val aclAllows: (String) -> Boolean = { true },
 ) : AgentDriver {
     override val driverId: String = "ds-bot"
     override val displayName: String = "演示驱动（未连接）"
-
-    private val activeAcl = mutableSetOf(
-        "bash",
-        "websearch",
-        "codesearch",
-    )
 
     override suspend fun listCapabilities(): List<DriverCapability> {
         return listOf(
@@ -48,36 +44,29 @@ class DsBotDriver(
                 name = "DeepSeek Shell Execution",
                 description = "Execute shell commands via DS-Bot environment",
                 category = "system",
-                enabled = isCapabilityAllowed("bash"),
+                enabled = aclAllows("bash"),
             ),
             DriverCapability(
                 id = "websearch",
                 name = "DeepSeek Web Search",
                 description = "Search web using DeepSeek retrieval system",
                 category = "model",
-                enabled = isCapabilityAllowed("websearch"),
+                enabled = aclAllows("websearch"),
             ),
             DriverCapability(
                 id = "codesearch",
                 name = "Code Reasoning",
                 description = "DeepSeek R1 semantic code reasoning",
                 category = "model",
-                enabled = isCapabilityAllowed("codesearch"),
+                enabled = aclAllows("codesearch"),
             ),
         )
     }
 
-    override suspend fun updateCapabilityAcl(enabledCapabilityIds: Set<String>) {
-        synchronized(activeAcl) {
-            activeAcl.clear()
-            activeAcl.addAll(enabledCapabilityIds)
-        }
-    }
-
-    override fun isCapabilityAllowed(capabilityId: String): Boolean {
-        return synchronized(activeAcl) {
-            capabilityId in activeAcl
-        }
+    override suspend fun openSession(wsPath: String, resumeSessionId: String?): SessionHandle {
+        throw UnsupportedOperationException(
+            "demo driver is a local simulator; it does not manage sessions (endpoint $endpointUrl is never contacted)",
+        )
     }
 
     override suspend fun executeTask(
@@ -96,7 +85,7 @@ class DsBotDriver(
         if (trimmed.contains("search", ignoreCase = true) || trimmed.contains("find", ignoreCase = true) ||
             trimmed.contains("查") || trimmed.contains("搜")
         ) {
-            if (isCapabilityAllowed("websearch")) {
+            if (aclAllows("websearch")) {
                 val toolId = "ds-call-" + nextToolCallId()
                 toolCallsMade.add("websearch")
                 onEvent(
@@ -107,7 +96,7 @@ class DsBotDriver(
                         riskLevel = "L1",
                     )
                 )
-            } else if (isCapabilityAllowed("codesearch")) {
+            } else if (aclAllows("codesearch")) {
                 val toolId = "ds-call-" + nextToolCallId()
                 toolCallsMade.add("codesearch")
                 onEvent(
@@ -122,7 +111,7 @@ class DsBotDriver(
         } else if (trimmed.contains("test", ignoreCase = true) || trimmed.contains("测") ||
             trimmed.contains("build", ignoreCase = true) || trimmed.contains("编")
         ) {
-            if (isCapabilityAllowed("bash")) {
+            if (aclAllows("bash")) {
                 val toolId = "ds-call-" + nextToolCallId()
                 toolCallsMade.add("bash")
                 onEvent(
@@ -137,7 +126,7 @@ class DsBotDriver(
         } else if (trimmed.contains("git", ignoreCase = true) || trimmed.contains("status", ignoreCase = true) ||
             trimmed.contains("状态")
         ) {
-            if (isCapabilityAllowed("bash")) {
+            if (aclAllows("bash")) {
                 val toolId = "ds-call-" + nextToolCallId()
                 toolCallsMade.add("bash")
                 onEvent(
@@ -163,6 +152,17 @@ class DsBotDriver(
             ),
         )
         onEvent(DriverEvent.Finished(finishReason = "stop", totalTokens = 0))
+    }
+
+    override suspend fun handleAction(sessionId: String, actionId: String, decidedBy: String) {
+        throw UnsupportedOperationException(
+            "demo driver is a local simulator; it does not accept card actions",
+        )
+    }
+
+    override suspend fun queryProgress(sessionId: String): TaskProgressSnapshot? {
+        // null = 没有可报告的进度（契约语义）：模拟器没有任何在跑的任务。
+        return null
     }
 }
 

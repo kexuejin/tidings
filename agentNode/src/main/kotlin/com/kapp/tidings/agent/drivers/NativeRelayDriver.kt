@@ -9,22 +9,22 @@ import kotlinx.coroutines.delay
  *
  * **它当前没有挂载执行运行时**：`executeTask` 既不启动进程、也不读写文件，
  * 只是把"我收到了这条 prompt"回报成事件。能力清单与 ACL 仍然是真实存在的接缝
- * （手机端远程治理下发后即时生效），但"能力被允许"不等于"这次真的执行了"。
+ * （ACL 状态在宿主 [DriverRegistry]，本驱动经 [aclAllows] 谓词读它），但"能力被允许"
+ * 不等于"这次真的执行了"。
  *
  * 因此这里**不许**产出任何完成断言（驱动诚信，见 `DriverHonestyTest` /
  * `NativeRelayDriverHonestyTest`）：以前无条件回一句「执行完毕：本地任务已成功处理。」
  * 就是「为没发生过的活报完成」，用户在群里看到的正是这句。
+ *
+ * 会话生命周期三个成员如实宣告不支持：没有运行时的驱动开不出会话、接不了操作，
+ * [queryProgress] 如实回 null（没有进度可报，不是失败）。
  */
-class NativeRelayDriver : AgentDriver {
+class NativeRelayDriver(
+    /** 宿主侧 ACL 谓词（[DriverRegistry] 注入）；驱动自己不持有名单。 */
+    private val aclAllows: (String) -> Boolean = { true },
+) : AgentDriver {
     override val driverId: String = "native"
     override val displayName: String = "Native Tidings Driver"
-
-    private val activeAcl = mutableSetOf(
-        "bash",
-        "fs_read",
-        "fs_write",
-        "codesearch",
-    )
 
     override suspend fun listCapabilities(): List<DriverCapability> {
         return listOf(
@@ -33,43 +33,36 @@ class NativeRelayDriver : AgentDriver {
                 name = "Bash Command Execution",
                 description = "Execute shell commands and scripts in host workspace",
                 category = "system",
-                enabled = isCapabilityAllowed("bash"),
+                enabled = aclAllows("bash"),
             ),
             DriverCapability(
                 id = "fs_read",
                 name = "File System Read",
                 description = "Read files and directories in workspace",
                 category = "system",
-                enabled = isCapabilityAllowed("fs_read"),
+                enabled = aclAllows("fs_read"),
             ),
             DriverCapability(
                 id = "fs_write",
                 name = "File System Write",
                 description = "Create or edit files in workspace",
                 category = "system",
-                enabled = isCapabilityAllowed("fs_write"),
+                enabled = aclAllows("fs_write"),
             ),
             DriverCapability(
                 id = "codesearch",
                 name = "Codegraph Search",
                 description = "Code graph indexing and symbol resolution",
                 category = "system",
-                enabled = isCapabilityAllowed("codesearch"),
+                enabled = aclAllows("codesearch"),
             ),
         )
     }
 
-    override suspend fun updateCapabilityAcl(enabledCapabilityIds: Set<String>) {
-        synchronized(activeAcl) {
-            activeAcl.clear()
-            activeAcl.addAll(enabledCapabilityIds)
-        }
-    }
-
-    override fun isCapabilityAllowed(capabilityId: String): Boolean {
-        return synchronized(activeAcl) {
-            capabilityId in activeAcl
-        }
+    override suspend fun openSession(wsPath: String, resumeSessionId: String?): SessionHandle {
+        throw UnsupportedOperationException(
+            "native driver has no execution runtime; it cannot open sessions (execution goes through the host bridge)",
+        )
     }
 
     override suspend fun executeTask(
@@ -85,7 +78,7 @@ class NativeRelayDriver : AgentDriver {
         )
         delay(10)
         if (prompt.contains("list") || prompt.contains("dir")) {
-            if (!isCapabilityAllowed("bash")) {
+            if (!aclAllows("bash")) {
                 onEvent(DriverEvent.Error("Capability 'bash' is disabled by mobile ACL policy"))
                 return
             }
@@ -108,5 +101,16 @@ class NativeRelayDriver : AgentDriver {
         )
         // finishReason 也如实：这不是一次完成（stop / succeeded），是没有运行时可用。
         onEvent(DriverEvent.Finished(finishReason = "no-runtime", totalTokens = 0))
+    }
+
+    override suspend fun handleAction(sessionId: String, actionId: String, decidedBy: String) {
+        throw UnsupportedOperationException(
+            "native driver has no execution runtime; it cannot accept card actions",
+        )
+    }
+
+    override suspend fun queryProgress(sessionId: String): TaskProgressSnapshot? {
+        // null = 没有可报告的进度（契约语义），不是错误：本驱动没有任务在跑。
+        return null
     }
 }

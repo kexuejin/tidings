@@ -8,14 +8,11 @@ package com.kapp.tidings.agent.drivers
 class OpenAiDriver(
     private val endpointUrl: String = "http://127.0.0.1:11434/v1",
     private val model: String = "qwen2.5-coder",
+    /** 宿主侧 ACL 谓词（[DriverRegistry] 注入）；驱动自己不持有名单。 */
+    private val aclAllows: (String) -> Boolean = { true },
 ) : AgentDriver {
     override val driverId: String = "openai"
     override val displayName: String = "OpenAI-Compatible Driver (Ollama/vLLM)"
-
-    private val activeAcl = mutableSetOf(
-        "filesystem",
-        "bash",
-    )
 
     override suspend fun listCapabilities(): List<DriverCapability> {
         return listOf(
@@ -24,29 +21,22 @@ class OpenAiDriver(
                 name = "File Context Provider",
                 description = "Inject file contents into chat completions",
                 category = "system",
-                enabled = isCapabilityAllowed("filesystem"),
+                enabled = aclAllows("filesystem"),
             ),
             DriverCapability(
                 id = "bash",
                 name = "Command Invocation",
                 description = "Function calling for shell execution",
                 category = "system",
-                enabled = isCapabilityAllowed("bash"),
+                enabled = aclAllows("bash"),
             ),
         )
     }
 
-    override suspend fun updateCapabilityAcl(enabledCapabilityIds: Set<String>) {
-        synchronized(activeAcl) {
-            activeAcl.clear()
-            activeAcl.addAll(enabledCapabilityIds)
-        }
-    }
-
-    override fun isCapabilityAllowed(capabilityId: String): Boolean {
-        return synchronized(activeAcl) {
-            capabilityId in activeAcl
-        }
+    override suspend fun openSession(wsPath: String, resumeSessionId: String?): SessionHandle {
+        throw UnsupportedOperationException(
+            "openai-compatible driver has no session manager wired; endpoint $endpointUrl is never contacted",
+        )
     }
 
     override suspend fun executeTask(
@@ -57,5 +47,16 @@ class OpenAiDriver(
         onEvent(DriverEvent.ThoughtDelta("Parsing prompt for function calls..."))
         onEvent(DriverEvent.TokenDelta("OpenAI driver stream response."))
         onEvent(DriverEvent.Finished())
+    }
+
+    override suspend fun handleAction(sessionId: String, actionId: String, decidedBy: String) {
+        throw UnsupportedOperationException(
+            "openai-compatible driver has no card action path wired",
+        )
+    }
+
+    override suspend fun queryProgress(sessionId: String): TaskProgressSnapshot? {
+        // null = 没有可报告的进度（契约语义）：这条驱动没有任务台账。
+        return null
     }
 }
