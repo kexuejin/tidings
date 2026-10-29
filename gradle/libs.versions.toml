@@ -1,5 +1,5 @@
 [versions]
-luciola = "0.6.0"
+luciola = "0.8.0"
 agp = "9.4.1"
 android-compileSdk = "36"
 android-buildToolsVersion = "36.1.0"
