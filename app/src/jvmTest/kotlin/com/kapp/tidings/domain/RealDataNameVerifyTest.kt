@@ -72,14 +72,12 @@ class RealDataNameVerifyTest {
         assertEquals("@dsh-teahouse-mobile", identity?.mentionToken)
     }
 
-    /** 老形态 `agent:dsh`（无 host 段）同样要认出来。 */
+    /**
+     * 债#4：老形态 `agent:dsh`（无 host 段）**不再被解析** —— 写侧只产三段式，
+     * 读侧的兼容分支已删。谁把两段式分支加回来，这条红。
+     */
     @Test
-    fun theLegacySenderShapeAlsoUsesTheExposeName() {
-        val identity = resolveSenderIdentity("agent:dsh", realCtx())
-        assertEquals(
-            "dsh-teahouse-mobile",
-            identity?.displayName,
-            "老形态也要用声明名 —— 否则同一句 agent 的话在两条历史里两个署名",
-        )
+    fun theLegacySenderShapeIsNoLongerResolved() {
+        assertEquals(null, resolveSenderIdentity("agent:dsh", realCtx()))
     }
 }

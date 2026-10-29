@@ -125,7 +125,7 @@ data class SenderIdentity(
  *   agent-session 帧）。一个宿主够了：D6 的 `agentId` 属于"同一宿主的同类多实例"，
  *   群里展示仍以 kind 为准。
  * @param agentAliasesByHost 宿主 nodeId → 宿主自报的 alias（优先于 kind 做显示名）。
- * @param agentSenderIds 这个会话里以 `agent:<kind>` 署过名的发送者（消息里出现过就算成员）。
+ * @param agentSenderIds 这个会话里以 `agent:<host>:<id>` 署过名的发送者（消息里出现过就算成员）。
  */
 data class SenderIdentityContext(
     val selfNodeId: String,
@@ -251,9 +251,17 @@ fun resolveSenderIdentity(senderId: String?, ctx: SenderIdentityContext): Sender
     val id = senderId?.trim()?.takeIf { it.isNotBlank() } ?: return null
     val agentPart = if (isAgentSenderId(id)) id.removePrefix(AGENT_SENDER_PREFIX).trim() else null
     if (agentPart != null) {
-        if (agentPart.contains(':')) {
-            // `agent:<hostNodeId>:<agentId>`：显示 agentId（宿主给 agent 起的身份名），
-            // 绝不拿宿主节点昵称顶替（用户要的是 agent 名，不是那台机器的名字）。
+        if (!agentPart.contains(':')) {
+            // **债#4：老形态 `agent:<kind>` 的读侧兼容分支已删。**
+            //
+            // 写侧经 `AgentSenderId.of` 早已只产完整形态 `agent:<hostNodeId>:<agentId>`；
+            // 两段式只存在于旧构建写下的历史行。按「缺失身份」处理（与 senderId 缺失
+            // 同一条路）—— 界面画「未知成员」，不编一个人出来。谁把两段式解析加回来，
+            // `SenderIdentityTest.anOldShapedAgentIdIsNoLongerResolved` 会红。
+            return null
+        }
+        // `agent:<hostNodeId>:<agentId>`：显示 agentId（宿主给 agent 起的身份名），
+        // 绝不拿宿主节点昵称顶替（用户要的是 agent 名，不是那台机器的名字）。
             val hostNodeId = agentPart.substringBefore(':').trim().ifBlank { null }
             val agentId = agentPart.substringAfterLast(':').trim().ifBlank { null }
             // **大小写必须忽略**：真机里声明写的是 `DSH`（入驻时按 agentKind 兜底），
@@ -278,49 +286,18 @@ fun resolveSenderIdentity(senderId: String?, ctx: SenderIdentityContext): Sender
             // 这里不做 uppercase，与老形态 `agent:<kind>` 的 DSH 大写**不冲突**：
             // 老形态里 kind 是驱动类型（当产品名显示，全大写），而三段式里的 agentId
             // 是**宿主给这个 agent 起的名字**，用户起的名字不该被改大小写。
-            val name = virtualName ?: agentId ?: "Agent"
-            val hostPeer = hostNodeId?.let { ctx.peerOf(it) }
-            return SenderIdentity(
-                id = id,
-                displayName = name,
-                avatar = hostPeer?.avatar?.takeIf { it >= 0 },
-                isAgent = true,
-                agentKind = null,
-                agentAlias = virtualName,
-                online = hostPeer?.online,
-                isSelf = false,
-                isMember = ctx.isParticipant(hostNodeId),
-                nameSource = DisplayNameSource.AgentKind,
-                hasProfile = true,
-            )
-        }
-        val kind = agentPart
-        val host = ctx.hostForKind(kind)
-        val alias = host?.let { ctx.agentAliasesByHost[it] }
-        val hostPeer = host?.let { ctx.peerOf(it) }
-        // **名字只有一份**：老形态（`agent:dsh`，没有 host 段）也要用群里登记的名字。
-        //
-        // 否则同一个 agent 的气泡署名是 `DSH`、@ 候选插入 `@dsh-teahouse-mobile`、
-        // 群列表又是另一个值 —— 用户按看到的名字打，判据却认别的。
-        // 只有确实没登记（没入驻 / 旧版对端）才退回 kind。
-        val declaredName = ctx.group?.virtualAgents.orEmpty()
-            .firstOrNull { agent ->
-                agent.agentId.equals(kind, ignoreCase = true) ||
-                    agent.name.equals(kind, ignoreCase = true)
-            }
-            ?.name
-            ?.trim()
-            ?.takeIf { it.isNotBlank() }
+        val name = virtualName ?: agentId ?: "Agent"
+        val hostPeer = hostNodeId?.let { ctx.peerOf(it) }
         return SenderIdentity(
             id = id,
-            displayName = declaredName ?: agentDisplayName(kind, alias),
+            displayName = name,
             avatar = hostPeer?.avatar?.takeIf { it >= 0 },
             isAgent = true,
-            agentKind = kind.lowercase(),
-            agentAlias = alias,
+            agentKind = null,
+            agentAlias = virtualName,
             online = hostPeer?.online,
             isSelf = false,
-            isMember = ctx.isParticipant(host),
+            isMember = ctx.isParticipant(hostNodeId),
             nameSource = DisplayNameSource.AgentKind,
             hasProfile = true,
         )
@@ -609,9 +586,6 @@ fun agentHostsInGroup(ctx: SenderIdentityContext): Set<String> {
 
 private fun SenderIdentityContext.peerOf(nodeId: String): PeerUi? =
     peers.firstOrNull { it.nodeId == nodeId }
-
-private fun SenderIdentityContext.hostForKind(kind: String): String? =
-    agentKindsByHost.entries.firstOrNull { (_, kinds) -> kinds.any { it.equals(kind, ignoreCase = true) } }?.key
 
 private fun SenderIdentityContext.isParticipant(nodeId: String?): Boolean {
     if (group == null) return true

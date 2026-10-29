@@ -94,7 +94,7 @@ class SenderIdentityTest {
         // 一台设备可以装多个 agent ⇒ 宿主 → kind **集合**。
         agentKindsByHost: Map<String, Set<String>> = mapOf(host to setOf("dsh")),
         agentAliasesByHost: Map<String, String> = mapOf(host to "DSH"),
-        agentSenderIds: Set<String> = setOf("agent:dsh"),
+        agentSenderIds: Set<String> = setOf("agent:$host:dsh"),
     ): SenderIdentityContext = SenderIdentityContext(
         selfNodeId = self,
         // 自己不在 peers 里 —— 昵称必须单独给，否则群主显示成 nodeId 前 8 位。
@@ -110,17 +110,30 @@ class SenderIdentityTest {
 
     /**
      * 真机现象：群里显示「DSH Agent」但头像/Markdown 不认，成员列表显示宿主机器名。
-     * 解析器必须把 `agent:dsh` 解析成 **DSH**，而不是"未知成员"或宿主的昵称。
+     * 解析器必须把三段式 agent id 解析成**声明里的名字**，而不是"未知成员"或宿主的昵称。
      */
     @Test
-    fun anAgentSenderIsNamedByItsKindNotByTheHostNickname() {
-        val identity = assertNotNull(resolveSenderIdentity("agent:dsh", ctx()))
+    fun anAgentSenderIsNamedByItsDeclarationNotByTheHostNickname() {
+        val identity = assertNotNull(resolveSenderIdentity("agent:$host:dsh", ctx()))
         assertEquals("dsh", identity.displayName)
         assertTrue(identity.isAgent)
-        assertEquals("dsh", identity.agentKind)
         assertEquals("@dsh", identity.mentionToken)
         assertTrue(identity.isMember, "在群里说过话的 agent 就是群成员")
         assertEquals(true, identity.online, "agent 的在线态来自它的宿主")
+    }
+
+    /**
+     * **债#4：读侧老形态 `agent:<kind>` 分支已删** —— 两段式 agent id 不再被解析。
+     *
+     * 写侧经 `AgentSenderId.of` 早已只产完整形态 `agent:<hostNodeId>:<agentId>`；
+     * 老形态只存在于旧构建写下的历史行，按裁决解除兼容。谁把两段式分支加回来，这条红。
+     */
+    @Test
+    fun anOldShapedAgentIdIsNoLongerResolved() {
+        assertNull(
+            resolveSenderIdentity("agent:dsh", ctx()),
+            "两段式 agent id 不是本仓写侧会产出的形态：按缺失身份处理，不编一个人出来",
+        )
     }
 
     /** 宿主昵称 / 群昵称都**不**参与 agent 那一档：用户要的是 DSH，不是 mac mini。 */
@@ -141,24 +154,24 @@ class SenderIdentityTest {
      * `OPENCODE` 比会话别名稳定；alias 只在 kind 缺失时兜底。
      */
     @Test
-    fun anAliasNeverOverridesTheKind() {
+    fun anAliasNeverOverridesTheAgentId() {
         val identity = assertNotNull(
             resolveSenderIdentity(
-                "agent:opencode",
+                "agent:$host:opencode",
                 ctx(agentKindsByHost = mapOf(host to setOf("opencode")), agentAliasesByHost = mapOf(host to "#协同优化测试")),
             ),
         )
         assertEquals("opencode", identity.displayName)
         // @ 的 token 走 AgentMemberName.token：归一化成小写 ASCII（与触发正则同一套）。
-        assertEquals("@opencode", identity.mentionToken, "@ 的 token 必须与触发判据同源") 
+        assertEquals("@opencode", identity.mentionToken, "@ 的 token 必须与触发判据同源")
     }
 
-    /** kind 缺失时才用 alias 兜底（老宿主可能只报别名）。 */
+    /** 声明缺失时显示 agentId 原样（alias 是会话别名，不进署名）。 */
     @Test
-    fun anAliasIsUsedOnlyWhenTheKindIsMissing() {
+    fun anAgentIdIsShownVerbatimWhenNothingElseIsDeclared() {
         val identity = assertNotNull(
             resolveSenderIdentity(
-                "agent:dsh",
+                "agent:$host:dsh",
                 ctx(agentAliasesByHost = mapOf(host to "DSH")),
             ),
         )
@@ -351,7 +364,7 @@ class SenderIdentityTest {
                 group = group(virtualAgents = null),
                 agentKindsByHost = emptyMap(),
                 agentAliasesByHost = emptyMap(),
-                agentSenderIds = setOf("agent:dsh"),
+                agentSenderIds = setOf("agent:$host:dsh"),
             ),
         )
         assertTrue(
