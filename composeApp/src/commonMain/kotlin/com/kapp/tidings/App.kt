@@ -412,6 +412,15 @@ fun RelayApp(
                             // 「重发」按原消息 id 重放（core 的 replayOutgoing）：换 id 重发会让
                             // 对端多落一条（真机现场同一句话两个 id）。
                             onRetryMessage = controller::retryMessage,
+                            // 卡片动作真通路（M4 任务 5，§7.3-2）：两壳同源走同一个域层入口。
+                            // 参数接原语（groupId/cardId/rev/actionId），不把壳的 AgentCardUi
+                            // 模型拖进域层（AGENTS §2.6 第四步）；本机乐观置灰在 ChatScreen
+                            // 里已先行记账，这里只负责把点击送往宿主。
+                            onCardAction = { convId, card, actionId ->
+                                ConvId.groupIdOf(convId)?.let { groupId ->
+                                    controller.handleCardAction(groupId, card.cardId, card.rev, actionId)
+                                }
+                            },
                             // 审批三参（含「本会话免审」）：聊天里复用看板那一行，
                             // 判据与看板同源（:core AgentApprovalAuthority），这里只转发意图。
                             onRespondChoice = controller::respondApproval,

@@ -843,6 +843,24 @@ class RelayController(
         agentCtl.handleRespondApproval(approvalId, allow, allowSession)
     override fun cancelAgentTask(taskId: String) = agentCtl.handleCancelAgentTask(taskId)
 
+    /**
+     * 卡片动作的**两壳同源入口**（M4 任务 5，§7.3-2）。参数接原语 —— 壳的卡片模型
+     * （AgentCardUi）不进域层；转发与原子记账见 invokeCtl.handleCardAction。
+     */
+    override fun handleCardAction(groupId: String, cardId: String, cardRev: Int, actionId: String) =
+        invokeCtl.handleCardAction(groupId, cardId, cardRev, actionId)
+    /**
+     * 跨端派单的公开入口（M4）：Leader 把子任务派给 [agentId] 的宿主。
+     * ControlPlane 的 `/v1/agent/invoke` 路由与超时卡的「重试」都走它。
+     */
+    fun dispatchCrossHostInvoke(
+        groupId: String,
+        agentId: String,
+        prompt: String,
+        wsId: String? = null,
+        deadlineMs: Long = RelayControllerAgentInvokeComponent.DEFAULT_INVOKE_DEADLINE_MS,
+    ): String? = invokeCtl.dispatchCrossHostInvoke(groupId, agentId, prompt, wsId, deadlineMs)
+
     fun recordLocalWorkspace(
         wsId: String,
         wsTitle: String?,

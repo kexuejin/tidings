@@ -349,6 +349,15 @@ public interface DesktopPaneActions {
     fun cancelAgentTask(taskId: String): Unit = Unit
     fun requestAgentSessionPage(peerId: String, wsId: String, offset: Long = 0, limit: Long? = null): Unit = Unit
 
+    /**
+     * 卡片动作真通路（M4 任务 5，§7.3-2）：群里的审批/控制按钮 → 宿主原子记账 + 全群广播。
+     *
+     * 参数接**原语**（groupId / cardId / rev / actionId）—— 壳的卡片模型不进域层。
+     * 默认空实现是**正当**的：预览/截图夹具没有宿主可派发动作，与「默认实现不许假装成功」
+     * 的纪律一致 —— 真正的控制面在 [RelayController] 里（原子台账 + 广播）。
+     */
+    fun handleCardAction(groupId: String, cardId: String, cardRev: Int, actionId: String): Unit = Unit
+
     // ------------------------------------------------------------------ 会话与节点
     fun selectConversation(convId: String): Unit = Unit
     fun refreshPeers(): Unit = Unit

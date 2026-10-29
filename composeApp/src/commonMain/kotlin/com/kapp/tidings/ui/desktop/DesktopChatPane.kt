@@ -150,6 +150,13 @@ public fun ChatPane(
                 onDeclineTransfer = controller::declineTransfer,
                 // 与手机端同一个入口：按原 id 重放，不新发一条。
                 onRetryMessage = controller::retryMessage,
+                // 卡片动作真通路（M4 任务 5）：与手机壳同一个域层入口（两壳同源）。
+                // 参数接原语；本机乐观置灰已在 ChatScreen 里先行记账。
+                onCardAction = { convId, card, actionId ->
+                    ConvId.groupIdOf(convId)?.let { groupId ->
+                        controller.handleCardAction(groupId, card.cardId, card.rev, actionId)
+                    }
+                },
                 // 与手机端同一条路：从「@ 了但没执行」那一行直接申请授权。
                 onRequestAgentGrant = { agentName ->
                     val conv = selectedPeerId
