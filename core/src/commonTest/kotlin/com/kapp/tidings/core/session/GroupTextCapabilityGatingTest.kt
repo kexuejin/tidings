@@ -38,7 +38,7 @@ import kotlin.test.assertNull
 import kotlin.test.assertTrue
 
 /**
- * `group-text` 的扩展键（`senderId` / `reasoning`）必须**按对端能力**（`gta1`）门控。
+ * `group-text` 的扩展键（`senderId` 与 agent 意图/状态/卡片族）必须**按对端能力**（`gta1`）门控。
  *
  * 立这条测试的理由是真机上付出的代价：上游茶话间对这份载荷做**严格字段白名单**，多一个键
  * 就整帧丢弃 —— 于是「agent 转发进群的消息」在对方那边一条都没有，而本端 SENT、本地落库、
@@ -78,7 +78,7 @@ class GroupTextCapabilityGatingTest {
             groupId = "grp-1",
             groupRev = 1,
             senderId = "agent:dsh",
-            reasoning = "先看 A",
+            agentState = "accept",
         ).jsonObject
         assertTrue(
             attributed.keys.any { it !in upstreamGroupTextKeys },
@@ -86,7 +86,7 @@ class GroupTextCapabilityGatingTest {
         )
         assertFalse(
             upstreamAccepts(attributed),
-            "带 senderId/reasoning 的群文本在上游是**整帧丢弃** —— 这正是问题 8 的根因",
+            "带 senderId/agentState 的群文本在上游是**整帧丢弃** —— 这正是问题 8 的根因",
         )
 
         val plain = Codec.groupTextPayload(text = "hi", groupId = "grp-1", groupRev = 1).jsonObject
@@ -104,7 +104,7 @@ class GroupTextCapabilityGatingTest {
             groupId = "grp-1",
             groupRev = 3,
             senderId = "agent:dsh",
-            reasoning = "先看 A",
+            agentState = "accept",
         )
         assertTrue(variants.hasExtensions)
         assertEquals(variants.plain.id, variants.attributed.id, "两个变体必须是同一条消息")
@@ -112,12 +112,12 @@ class GroupTextCapabilityGatingTest {
         val plain = variants.plain.payload.jsonObject
         val attributed = variants.attributed.payload.jsonObject
         assertEquals(
-            setOf("senderId", "reasoning"),
+            setOf("senderId", "agentState"),
             attributed.keys - plain.keys,
-            "两份载荷只许差这两个键；正文/群引用/mentions/replyTo 一个都不能少",
+            "两份载荷只许差扩展键；正文/群引用/mentions/replyTo 一个都不能少",
         )
         assertNull(plain["senderId"])
-        assertNull(plain["reasoning"])
+        assertNull(plain["agentState"])
         assertEquals("hi", (plain["text"] as JsonPrimitive).content)
         assertEquals("grp-1", (plain["groupId"] as JsonPrimitive).content)
     }
@@ -133,7 +133,7 @@ class GroupTextCapabilityGatingTest {
     }
 
     /**
-     * 新增的 agent 键（`agentIntent` / `agentState` / `card`）与 senderId/reasoning
+     * 新增的 agent 键（`agentIntent` / `agentState` / `card`）与 senderId
      * 走**同一条** `gta1` 门：legacy 成员的帧里一个都不能出现，否则上游整帧拒收；
      * gta1 成员拿到的全量帧则三键齐全。判据是「legacy 收到的字节」，不是「能不能编码」。
      */
@@ -293,7 +293,7 @@ class GroupTextCapabilityGatingTest {
                 groupRev = 7,
                 members = listOf("self", "legacy", "modern"),
                 senderId = "agent:dsh",
-                reasoning = "先看 A 再看 B",
+                agentState = "accept",
             )
             assertEquals(SendOutcome.SENT, outcome, "两个成员都 ACK 了才算 SENT")
 
@@ -305,12 +305,12 @@ class GroupTextCapabilityGatingTest {
 
             val legacyPayload = legacy.payload.jsonObject
             assertNull(legacyPayload["senderId"], "legacy 成员的帧带了 senderId ⇒ 茶话间整帧丢弃")
-            assertNull(legacyPayload["reasoning"], "legacy 成员的帧带了 reasoning ⇒ 茶话间整帧丢弃")
+            assertNull(legacyPayload["agentState"], "legacy 成员的帧带了 agentState ⇒ 茶话间整帧丢弃")
             assertTrue(upstreamAccepts(legacyPayload), "legacy 成员收到的必须是上游能收的那份：$legacyPayload")
 
             val modernPayload = modern.payload.jsonObject
             assertEquals("agent:dsh", (modernPayload["senderId"] as JsonPrimitive).content)
-            assertEquals("先看 A 再看 B", (modernPayload["reasoning"] as JsonPrimitive).content)
+            assertEquals("accept", (modernPayload["agentState"] as JsonPrimitive).content)
 
             // 正文/群引用在两个变体里都不许少。
             for (payload in listOf(legacyPayload, modernPayload)) {
@@ -348,7 +348,7 @@ class GroupTextCapabilityGatingTest {
                 groupRev = 2,
                 members = listOf("self", "legacy", "modern"),
                 senderId = "agent:dsh",
-                reasoning = "think",
+                agentState = "accept",
             )
             assertEquals(SendOutcome.QUEUED, outcome, "两个成员都不在线 ⇒ QUEUED（入队等补发）")
 
@@ -402,7 +402,7 @@ class GroupTextCapabilityGatingTest {
                     groupRev = 9,
                     members = listOf("self", "legacy", "modern"),
                     senderId = "agent:dsh",
-                    reasoning = "think",
+                    agentState = "accept",
                 ),
             )
             assertEquals(SendOutcome.SENT, outcome)

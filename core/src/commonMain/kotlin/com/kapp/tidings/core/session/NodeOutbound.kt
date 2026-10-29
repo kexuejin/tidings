@@ -163,7 +163,7 @@ internal suspend fun sendGroupTextFanOut(
 internal class GroupTextVariants(
     /** 只含上游白名单字段的那一份（`kind/text/groupId/groupRev/mentions/resend/replyTo`）。 */
     val plain: Envelope,
-    /** 带 `senderId` / `reasoning` 的那一份；没有扩展键时它与 [plain] 是**同一个对象**。 */
+    /** 带 `senderId` 与 agent 扩展键（意图/状态/卡片/会话归属）的那一份；没有扩展键时它与 [plain] 是**同一个对象**。 */
     val attributed: Envelope,
 ) {
     /** 这条消息到底有没有本仓扩展键。没有 ⇒ 谁都不用做门控，字节完全一样。 */
@@ -176,8 +176,8 @@ internal class GroupTextVariants(
 /**
  * 构造同 id 的两份群文本信封（见 [GroupTextVariants]）。
  *
- * 传进来的 [text] / [reasoning] 必须**已经截断**（[clampGroupText] / [clampGroupReasoning]）：
- * 截断类预算只有一个执行点。唯一在这里执行的预算是**卡片的拒绝**（不是截断）：
+ * 传进来的 [text] 必须**已经截断**（[clampGroupText]）：截断类预算只有一个执行点。
+ * 唯一在这里执行的预算是**卡片的拒绝**（不是截断）：
  * 截断后的 JSON 解不了，所以卡片超限只能整单拒绝 —— 发送与重放两条路都经过本函数，
  * 「发送侧不产出注定被拒的帧」在这里成为不变量。
  */
@@ -189,11 +189,10 @@ internal fun groupTextVariants(
     mentions: List<String>? = null,
     replyTo: String? = null,
     senderId: String? = null,
-    reasoning: String? = null,
     /**
      * 这条消息属于哪个 agent 会话（可选）。与 [agentCursor] 成对出现。
      *
-     * 与 senderId / reasoning 同属**扩展键**：只有对端声明了 `Cap GroupTextAttributed`
+     * 与 senderId / agent 键同属**扩展键**：只有对端声明了 `Cap GroupTextAttributed`
      * 才带（见 GroupTextVariants）。旧对端不认识这些键，带过去就是整帧拒收。
      */
     agentSessionId: String? = null,
@@ -237,11 +236,11 @@ internal fun groupTextVariants(
         ts = ts,
     )
     // **任何扩展键存在就必须走 attributed 那一份**。会话归属也是扩展键：
-    // 只加进 senderId/reasoning 的判断而漏了它，带会话归属的消息就会被当成
+    // 只加进 senderId 的判断而漏了它，带会话归属的消息就会被当成
     // 「没有扩展键」发 plain —— 接收端仍然画不出分段线，而发送侧一切正常。
-    // agentIntent / agentState / card 三个新键同理：漏判 = 键被整个裁掉，
+    // agentIntent / agentState / card 三个键同理：漏判 = 键被整个裁掉，
     // 卡片消息发出去就成了纯正文（卡片从此消失，且没有任何报错）。
-    val hasExtendedKeys = senderId != null || reasoning != null ||
+    val hasExtendedKeys = senderId != null ||
         (agentSessionId != null && agentCursor != null) ||
         agentIntent != null || agentState != null || card != null
     if (!hasExtendedKeys) return GroupTextVariants(plain, plain)
@@ -252,7 +251,6 @@ internal fun groupTextVariants(
             text, groupId, groupRev,
             mentions = mentions, resend = resend, replyTo = replyTo,
             senderId = senderId,
-            reasoning = reasoning,
             agentSessionId = agentSessionId,
             agentCursor = agentCursor,
             agentSessionTitle = clampGroupTitle(agentSessionTitle),
@@ -289,7 +287,6 @@ data class OutgoingReplay(
     val mentions: List<String>? = null,
     val replyTo: String? = null,
     val senderId: String? = null,
-    val reasoning: String? = null,
     /** 声明式卡片负载（可选）。重放沿用它 —— 补发出去的必须是当初那条卡片消息。 */
     val card: JsonObject? = null,
     /** 单帧原子意图（可选）。同上：重放不许丢。 */
@@ -392,15 +389,15 @@ internal class NodeOutbound(
      *
      * ### 扩展键按对端能力门控（`gta1`）—— 兼容性后果
      *
-     * `senderId` / `reasoning` 是本仓加在 `group-text` 上的两个可选键，而上游茶话间对这份
-     * 载荷做的是**严格字段白名单**：多一个键 ⇒ 整帧丢弃。所以「带扩展键的群消息发给老端」
-     * 不是"对方少看到归属信息"，而是**这条消息对方根本收不到**（发送侧仍 SENT、本地仍落库，
-     * 就是本仓 §3 那类静默丢失）。
+     * `senderId` 与 agent 扩展键（意图/状态/卡片/会话归属）是本仓加在 `group-text` 上的
+     * 可选键，而上游茶话间对这份载荷做的是**严格字段白名单**：多一个键 ⇒ 整帧丢弃。
+     * 所以「带扩展键的群消息发给老端」不是"对方少看到归属信息"，而是**这条消息对方根本
+     * 收不到**（发送侧仍 SENT、本地仍落库，就是本仓 §3 那类静默丢失）。
      *
      * 因此每一份载荷都按**该成员**是否声明了 [MsgTypes.CAP_GROUP_TEXT_ATTRIBUTED] 决定：
-     * - 声明了 ⇒ 收全量那份（带 `senderId` / `reasoning`）；
+     * - 声明了 ⇒ 收全量那份（带 `senderId` 与 agent 扩展键）；
      * - 没声明（茶话间、老 Tidings 构建）⇒ 收 [GroupTextVariants.plain]，**同一个 id**，
-     *   只少这两个键；正文、mentions、replyTo、resend 一个不少。
+     *   只少这些扩展键；正文、mentions、replyTo、resend 一个不少。
      *
      * 判据只用 caps，**不看 `ver`、也不拿 `agn1` 当代理**：`agn1` 说的是 agent 会话帧，
      * 与群文本白名单毫无关系；版本号是自由字符串，拿它做能力判定等于让每个发送方各维护一份
@@ -455,13 +452,6 @@ internal class NodeOutbound(
         /** 真正的说话者（可选）。见 `GroupTextMsgPayload.senderId` 的 KDoc。 */
         senderId: String? = null,
         /**
-         * 思考过程（可选）。见 `GroupTextMsgPayload.reasoning` 的 KDoc。
-         *
-         * 超长在这里截断（[Limits.GROUP_REASONING_BYTES]，UTF-8 字节）：接收侧把超限的帧
-         * 整帧拒收，所以「不截就发」的后果不是显示变短，而是**这条消息彻底不到**。
-         */
-        reasoning: String? = null,
-        /**
          * 这条消息属于哪个 agent 会话（可选，与 [agentCursor] 成对）。带上它，
          * 接收端才能画出「任务分段线」—— 在此之前那条线只存在于桌面端本地。
          */
@@ -501,7 +491,6 @@ internal class NodeOutbound(
             mentions = mentions,
             replyTo = replyTo,
             senderId = senderId,
-            reasoning = clampGroupReasoning(reasoning),
             agentSessionId = agentSessionId,
             agentCursor = agentCursor,
             agentSessionTitle = clampGroupTitle(agentSessionTitle),
@@ -569,7 +558,6 @@ internal class NodeOutbound(
                 mentions = request.mentions,
                 replyTo = request.replyTo,
                 senderId = request.senderId,
-                reasoning = clampGroupReasoning(request.reasoning),
                 card = request.card,
                 agentIntent = request.agentIntent,
                 agentState = request.agentState,
@@ -1078,27 +1066,9 @@ internal class NodeOutbound(
 }
 
 /**
- * 把思考过程截到 [Limits.GROUP_REASONING_BYTES] 个 UTF-8 字节以内（超长则保留开头 + 省略号）。
- *
- * ## 为什么必须截，而不是「发出去再说」
- *
- * 接收侧对 `reasoning` 做的是**字节上限校验**，超限 = 整帧 `badPayload` 丢弃。
- * 所以不截断的后果不是「对方显示得短一点」，而是**这条消息彻底不到** ——
- * 与「正文顶到 4096 上限被拒收」是同一类静默丢失。
- *
- * ## 为什么按字节切而不是 `take(n)`
- *
- * `take(n)` 数的是 UTF-16 码元，中文一个字 3 字节：同样 4096 个码元，中文是 12 KB、
- * 英文是 4 KB —— 用码元切会得到一个**比上限还大**的字符串。切点还必须落在码点边界上：
- * 从中间切开一个代理对会留下半个字符（界面显示成 U+FFFD 方块）。
- */
-internal fun clampGroupReasoning(reasoning: String?): String? =
-    clampUtf8(reasoning?.takeIf { it.isNotBlank() }, Limits.GROUP_REASONING_BYTES)
-
-/**
  * 群文本**正文**在发送前的截断（[Limits.GROUP_TEXT_TCP_LIMIT]）。
  *
- * 与思考过程同一个理由，只是上限不同：接收侧的正文校验一旦不过就是整帧丢弃，
+ * 接收侧的正文校验一旦不过就是整帧丢弃，
  * 而 4096 字节这个旧上限**真机上已经吃掉了 140 条群消息**（最大 9902 字节）。
  * 上限抬到 32 KiB 之后仍要留一道截断，是为了让「发送侧永远不产出注定被拒的帧」
  * 成为一条**不变量**，而不是「希望 agent 别写太长」。

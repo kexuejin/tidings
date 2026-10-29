@@ -8,64 +8,18 @@ import com.kapp.tidings.core.protocol.MsgTypes
 import com.kapp.tidings.core.protocol.Protocol
 import kotlin.test.Test
 import kotlin.test.assertEquals
-import kotlin.test.assertNull
 import kotlin.test.assertTrue
 
 /**
- * 群消息进群前的**字节截断**：正文（[clampGroupText]）与思考过程（[clampGroupReasoning]）。
+ * 群消息**正文**进群前的字节截断（[clampGroupText]）。
  *
- * 为什么值得单独测：接收侧对这两个字段做的都是**字节上限校验**，超限 = 整帧丢弃。
- * 截断本身写错的后果不是「短一点」，而是三种静默丢失 ——
- * 按码元数截（中文 3 字节/字）会得到**仍然超限**的字符串；在代理对中间切会留下半个字符；
- * 上限取小了则「正文 + 思考」一起把 64 KiB 的整帧顶爆。
+ * 为什么值得单独测：接收侧对正文做的是**字节上限校验**，超限 = 整帧丢弃。
+ * 截断本身写错的后果不是「短一点」，而是两种静默丢失 ——
+ * 按码元数截（中文 3 字节/字）会得到**仍然超限**的字符串；在代理对中间切会留下半个字符。
+ *
+ * `reasoning` 的同档截断已随该键一起退场（CoT 不进群，白名单终态 14 键）。
  */
 class GroupTextClampTest {
-
-    @Test
-    fun shortReasoningIsUntouched() {
-        assertEquals("先看 A 再看 B", clampGroupReasoning("先看 A 再看 B"))
-    }
-
-    /** 空/空白思考过程一律当作「没有」，别把一个空字符串送上线路。 */
-    @Test
-    fun blankReasoningBecomesNull() {
-        assertNull(clampGroupReasoning(null))
-        assertNull(clampGroupReasoning(""))
-        assertNull(clampGroupReasoning("   \n\t"))
-    }
-
-    /** 超长思考过程按 UTF-8 字节截到上限以内，并且**过得了接收侧校验**。 */
-    @Test
-    fun overlongReasoningIsCutToTheByteLimit() {
-        val clamped = clampGroupReasoning("汉".repeat(Limits.GROUP_REASONING_BYTES))!!
-        val bytes = Codec.utf8ByteLength(clamped)
-        assertTrue(bytes <= Limits.GROUP_REASONING_BYTES, "截断后仍超限：" + bytes + " 字节")
-        assertTrue(clamped.endsWith("…"), "截断处必须留下省略号")
-        assertTrue(
-            Codec.validatePayload(
-                MsgTypes.MSG,
-                Codec.groupTextPayload("hi", "grp-1", 1, reasoning = clamped),
-                Protocol.TEXT_TCP_LIMIT,
-            ),
-            "截断后的思考过程必须过得了入站校验",
-        )
-    }
-
-    /** 一个 3 字节字符都不该被留下半个：截断点必须落在码点边界上。 */
-    @Test
-    fun cuttingNeverLeavesAHalfSurrogatePair() {
-        val clamped = clampGroupReasoning("😀".repeat(100_000))!!
-        assertTrue(Codec.utf8ByteLength(clamped) <= Limits.GROUP_REASONING_BYTES)
-        assertNoLoneSurrogate(clamped.removeSuffix("…"))
-    }
-
-    /** 刚好等于上限时不该截断（边界是「超过才截」）。 */
-    @Test
-    fun exactlyAtTheLimitIsNotCut() {
-        val exact = "a".repeat(Limits.GROUP_REASONING_BYTES)
-        assertEquals(exact, clampGroupReasoning(exact))
-        assertTrue(!clampGroupReasoning(exact)!!.endsWith("…"))
-    }
 
     // ------------------------------------------------------------------ 正文
 
@@ -115,22 +69,12 @@ class GroupTextClampTest {
         )
     }
 
-    /** 正文截断同样不许在代理对中间切。 */
+    /** 正文截断不许在代理对中间切。 */
     @Test
     fun textCuttingNeverLeavesAHalfSurrogatePair() {
         val clamped = clampGroupText("😀".repeat(100_000))
         assertTrue(Codec.utf8ByteLength(clamped) <= Limits.GROUP_TEXT_TCP_LIMIT)
         assertNoLoneSurrogate(clamped.removeSuffix("…"))
-    }
-
-    /** 正文（32 KiB）+ 思考过程（24 KiB）合起来必须仍在 64 KiB 的整帧上限之内。 */
-    @Test
-    fun textPlusReasoningStillFitsInOneFrame() {
-        val frameCap = 64 * 1024
-        assertTrue(
-            Limits.GROUP_TEXT_TCP_LIMIT + Limits.GROUP_REASONING_BYTES < frameCap,
-            "正文 + 思考必须给信封开销留出余量，否则整帧被传输层拒掉",
-        )
     }
 
     private fun assertNoLoneSurrogate(body: String) {

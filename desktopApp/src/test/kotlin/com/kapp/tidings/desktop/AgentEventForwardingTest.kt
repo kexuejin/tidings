@@ -45,36 +45,29 @@ class AgentEventForwardingTest {
     }
 
     /**
-     * 所有转发路径（实时 / 补发）必须**都**把思考过程带上。
+     * 转发路径**不许再携带 reasoning**（规格 §4.1 铁律：CoT 禁止进群）。
      *
-     * 只发正文的后果是用户可见的：同一个群里桌面端的气泡有「思考」折叠块、手机端没有，
-     * 看起来就是「过程只在桌面，手机只剩最后一句」。每处各写一遍参数，漏一处就少一截，
-     * 而单测各自只覆盖自己那条 —— 所以这里做**源码级守卫**：把每个 `sendGroupText(`
-     * 的参数表切出来，逐个要求里面有 `reasoning`。
+     * 历史上的守卫方向相反：曾要求每条 `sendGroupText(` 都带 `reasoning` —— 那是
+     * 「过程只在桌面、手机只剩最后一句」的修法。但过程收敛的终局是**思考块根本不进群**
+     * （协议白名单已把 `reasoning` 退场，带它的帧对端整帧拒收），于是这条守卫反转为
+     * **负面清单**：谁把 `reasoning` 加回任何一条转发路径，这里照样会红。
      *
-     * ## 为什么门槛从三条降到两条
-     *
-     * 原先第三条是 **native 驱动的回复**。那个驱动自己 KDoc 写着「没有挂载执行运行时：
-     * 这次不会执行命令、不读写文件、不产出结果」—— 它发进群的是那句
-     * 「本机 native 驱动没有挂载执行运行时」的兜底话术，不是 agent 的回答。
-     *
-     * 真机上这条表现为群里冒出一个 `NATIVE` 发送者、内容全是「我没有运行时」。
-     * 已删除：一个**永远成功但什么都不做**的执行器比没有执行器更糟 ——
-     * 它让用户以为 agent 收到了、只是干不了活。真正的执行路径是 dsh-tidings 的 inbox 注入。
-     *
-     * 门槛因此是 **2**。但不要因为「反正只剩两条」就把它当摆设：
-     * 谁再加一条 `sendGroupText(` 而不带 `reasoning`，这里照样会红。
+     * 源码级守卫在这类「多处必须一致」的纪律上是正当手段（类型系统表达不了
+     * 「每条转发路径都不许带」），但它必须能区分对错 —— 带与不带就是可区分的。
      */
     @Test
-    fun everyGroupForwardPathCarriesTheReasoning() {
+    fun noGroupForwardPathCarriesReasoning() {
         val argLists = groupTextArgumentLists(
             RepoSource.read("desktopApp/src/main/kotlin/com/kapp/tidings/desktop/DesktopExtension.kt"),
         )
         assertTrue(argLists.size >= 2, "转发路径应当至少两条（实时 / 补发），实测 " + argLists.size)
         argLists.forEachIndexed { index, args ->
-            assertTrue(
-                args.contains("reasoning"),
-                "第 " + (index + 1) + " 条 sendGroupText 没带 reasoning（手机端会少掉思考块）：" + args,
+            // 只看**活代码**：解释这条纪律的注释里正当地提到那个键名，
+            // 不剥掉的话守卫会被自己的说明文字绊倒。
+            val code = args.lines().joinToString("\n") { it.substringBefore("//") }
+            assertFalse(
+                code.contains("reasoning"),
+                "第 " + (index + 1) + " 条 sendGroupText 带了 reasoning（CoT 不进群，白名单也会整帧拒收）：" + args,
             )
         }
     }

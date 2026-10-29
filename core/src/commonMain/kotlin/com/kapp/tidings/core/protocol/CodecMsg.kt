@@ -32,12 +32,12 @@ object CodecMsg {
      * 对端 `hasOnlyKeys` 直接判成 extra-field 整帧拒收 —— 表现为「发送侧一切正常、
      * 接收侧什么都没有」，比编译错误难查得多（`senderId` 曾经就是这样漏掉的）。
      *
-     * **当前是 15 键的过渡态**：`agentIntent` / `agentState` / `card` 三个新键已入列，
-     * `reasoning` 与其预算链随后退场（T2）—— 退场之后是规格的终态 14 键。
+     * `reasoning` 已按规格 §4.1 从这里**退场**（CoT 禁止进群）—— 谁把它加回来，
+     * `CodecTest.reasoningIsNoLongerAccepted` 会红。终态 14 键。
      */
     private val GROUP_TEXT_KEYS = setOf(
         "kind", "text", "groupId", "groupRev", "mentions", "resend", "replyTo",
-        "senderId", "reasoning",
+        "senderId",
         // 会话归属（agent 事件的群转发用）：让接收端能画出「任务分段线」，
         // 而不是靠猜消息 id 前缀。**没加进这里的可选键 = 对端整帧拒收**。
         "agentSessionId", "agentCursor",
@@ -114,13 +114,6 @@ object CodecMsg {
         // 真正的说话者（可选）：真人 = nodeId，agent = `agent:<kind>`。
         if (o.containsKey("senderId")) {
             if (!isStr(o["senderId"], Limits.ID)) return false
-        }
-
-        // 思考过程（可选）：按**字节**而非码元校验，与发送侧的截断口径一致。
-        if (o.containsKey("reasoning")) {
-            val reasoning = (o["reasoning"] as? JsonPrimitive)?.takeIf { it.isString } ?: return false
-            if (reasoning.content.isEmpty()) return false
-            if (utf8ByteLength(reasoning.content) > Limits.GROUP_REASONING_BYTES) return false
         }
 
         // 会话归属（可选）：让接收端画出「任务分段线」。
@@ -201,11 +194,6 @@ object CodecMsg {
          */
         senderId: String? = null,
         /**
-         * 思考过程（可选）。调用方应保证已按 [Limits.GROUP_REASONING_BYTES] 截断 ——
-         * 这里不截，超限的帧接收侧会整帧拒收。
-         */
-        reasoning: String? = null,
-        /**
          * 这条消息属于哪个 agent 会话（可选）。带上它，接收端才能画出「任务分段线」。
          * 旧接收端不认识 ⇒ 整帧丢弃，两端需同版本。
          */
@@ -231,7 +219,6 @@ object CodecMsg {
             resend = resend,
             replyTo = replyTo,
             senderId = senderId,
-            reasoning = reasoning,
             agentSessionId = agentSessionId,
             agentCursor = agentCursor,
             agentSessionTitle = agentSessionTitle,

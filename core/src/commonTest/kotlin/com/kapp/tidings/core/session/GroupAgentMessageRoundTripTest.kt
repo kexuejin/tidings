@@ -125,10 +125,10 @@ class GroupAgentMessageRoundTripTest {
                 groupRev = 4,
                 members = listOf(host, phone),
                 senderId = AgentSenderId.of(host, "dsh"),
-                reasoning = "先看 A 再看 B",
                 agentSessionId = "sess-1",
                 agentCursor = 7L,
                 agentSessionTitle = "上线任务",
+                agentState = "accept",
             )
             assertEquals(SendOutcome.SENT, outcome, "群消息没送达：SENT 要求成员真的 ACK")
             val got = withTimeout(5_000) { received.await() }
@@ -151,7 +151,7 @@ class GroupAgentMessageRoundTripTest {
                 AgentSenderId.parse(senderId),
                 "接收端必须还能把这条归给宿主上的 dsh，而不是宿主本人",
             )
-            assertEquals("先看 A 再看 B", payload["reasoning"]?.jsonPrimitive?.content, "思考块没跟着进群")
+            assertEquals("accept", payload["agentState"]?.jsonPrimitive?.content, "执行状态没跟着进群")
             assertEquals("sess-1", payload["agentSessionId"]?.jsonPrimitive?.content, "缺它就没有任务分段线")
             assertEquals(7L, payload["agentCursor"]?.jsonPrimitive?.content?.toLong())
             assertEquals("上线任务", payload["agentSessionTitle"]?.jsonPrimitive?.content)
@@ -188,7 +188,7 @@ class GroupAgentMessageRoundTripTest {
                 groupRev = 2,
                 members = listOf(host, legacy),
                 senderId = AgentSenderId.of(host, "dsh"),
-                reasoning = "先看 A",
+                agentState = "accept",
             )
             assertEquals(SendOutcome.SENT, outcome)
             val got = withTimeout(5_000) { received.await() }
@@ -204,7 +204,7 @@ class GroupAgentMessageRoundTripTest {
                 payload["senderId"],
                 "对不认识 gta1 的成员必须裁剪：多一个键会被上游白名单整帧拒收",
             )
-            assertNull(payload["reasoning"], "reasoning 同理")
+            assertNull(payload["agentState"], "agentState 同理：legacy 成员的帧里不许有扩展键")
         } finally {
             old.stop()
             desktop.stop()

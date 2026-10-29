@@ -162,7 +162,7 @@ object MsgTypes {
             // task-45：手机能把 agent 事件的附件元数据渲染成卡片 ⇒ 如实声明。
             // 发送方（桥/宿主）据此决定 agent-event 里带不带 attachment；不声明就只发文本占位。
             CAP_ATTACHMENT,
-            // 手机端收发群文本都可能带 senderId / reasoning（agent 转发、思考态）⇒ 如实声明。
+            // 手机端收发的群文本都可能带扩展键（senderId 与 agent 意图/状态/卡片）⇒ 如实声明。
             // 不声明的话「对端按能力门控」会连**我们自己的宿主**一起退化成不带归属的那一份。
             CAP_GROUP_TEXT_ATTRIBUTED,
         )
@@ -338,15 +338,16 @@ object MsgTypes {
     /**
      * `gta1` = **带发送者归属的群文本**（group-text attributed）。
      *
-     * 声明它的意思是「我看得懂 `group-text` 载荷里的 `senderId` / `reasoning` 两个扩展键」。
-     * 发送侧**只给声明了它的成员**附带这两个键；没声明的成员收到的是**同一封信封 id**、
+     * 声明它的意思是「我看得懂 `group-text` 载荷里本仓的扩展键」（`senderId` 与
+     * agent 意图/状态/卡片族；`reasoning` 已退场，CoT 不进群）。
+     * 发送侧**只给声明了它的成员**附带扩展键；没声明的成员收到的是**同一封信封 id**、
      * 但只含上游白名单内字段的另一份载荷。
      *
      * ## 为什么必须是独立能力位，而不是"复用 agn1 / 猜版本号"
      *
      * 上游茶话间（0.61.2）对 `group-text` 做的是**严格字段白名单**
      * （`kind/text/groupId/groupRev/mentions/resend/replyTo`）：多一个键 ⇒ `validatePayload`
-     * 返回 false ⇒ **整帧丢弃**。而本仓的 `senderId` / `reasoning` 恰好在那份白名单之外，
+     * 返回 false ⇒ **整帧丢弃**。而本仓的扩展键恰好在那份白名单之外，
      * 所以「agent 转发进群的消息」在茶话间侧是**静默消失**的：发送侧 SENT、本地落库成功、
      * 对端什么都没有。
      *

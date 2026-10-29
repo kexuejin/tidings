@@ -454,7 +454,7 @@ data class RelaySettings(
         // task-45：手机能把 agent 事件的附件元数据渲染成卡片 ⇒ 如实声明（顺序跟 MOBILE_CAPS 一致）。
         // 漏了这一行就是 task-31 那类静默：桥永远只发文本占位，而代码里"明明支持附件"。
         add(MsgTypes.CAP_ATTACHMENT)
-        // gta1：本端能**收**带 senderId / reasoning 的群文本，也**发**得出去。
+        // gta1：本端能收发带扩展键（senderId 与 agent 意图/状态/卡片）的群文本。
         // 与 tbl1/att1 同一类事实声明：它决定对端发不发归属键，不是用户偏好；
         // 漏了就是 lnk1/att1 那次静默 —— 手机自己收得到，对端永远不带。
         add(MsgTypes.CAP_GROUP_TEXT_ATTRIBUTED)

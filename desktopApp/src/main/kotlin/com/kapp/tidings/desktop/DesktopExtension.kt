@@ -410,10 +410,10 @@ internal class DesktopExtension(
                                             // 而这里原来无条件写 `agentSenderIdFor(agentKind)` ⇒ 用户自己在群里
                                             // 打的字，在别人设备上显示成「agent 说的」（真机红米库里就是这么存的）。
                                             senderId = agentSenderId,
-                                            // 思考过程**跟着一起进群**：只发正文的话，同一个群里
-                                            // 桌面端的气泡有「思考」折叠块、手机端没有 —— 用户看到
-                                            // 的就是「过程只在桌面、手机只剩最后一句」。
-                                            reasoning = parsedReasoning,
+                                            // 思考过程**不进群**（规格 §4.1 铁律：CoT 禁止进群，
+                                            // 白名单已把 `reasoning` 退场 —— 带它的帧对端整帧拒收）。
+                                            // 思考块仍然落在桌面本地消息里（本地 `MessageUi.reasoning`），
+                                            // 界面上折叠显示；群里只有解析后的正文。
                                             // **会话归属**：把「这条属于哪个 agent 会话」一起送出去。
                                             // 此前只写进本地消息 id 前缀、转发时没带 —— 于是桌面有
                                             // 「任务分段线」、手机一条都没有（同一件事两端两个样）。
@@ -825,9 +825,8 @@ internal class DesktopExtension(
                                     // 与实时那条同源：用共用构造算出来的发送者，
                                     // 而不是按 kind 现拼（用户自己的话同样会拼错）。
                                     senderId = message.senderId,
-                                    // 补发与实时必须带同一份思考过程：只补正文会让
-                                    // 「离线一会儿回来」的那条在手机上比别人的短一截。
-                                    reasoning = message.reasoning,
+                                    // 思考过程**不进群**（与实时那条同一条铁律：CoT 禁止进群，
+                                    // 白名单已把 `reasoning` 退场 —— 带它的帧对端整帧拒收）。
                                     // 补发与实时必须带同一个标题：只带正文会让「离线一会儿回来」
                                     // 的那条在手机上显示成「新会话」，而实时的显示真标题。
                                     agentSessionId = message.agentSessionId,

@@ -110,28 +110,28 @@ class CodecTest {
         assertEquals("agent:dsh", (obj["senderId"] as JsonPrimitive).content)
     }
 
-    /** 思考过程随群文本一起走，且**不混进 `text`**（正文与思考各有各的上限）。 */
+    /**
+     * `reasoning` 已从群文本白名单**退场**（规格 §4.1 铁律：CoT 禁止进群）——
+     * 现在带这个键的帧是 extra-field，整帧拒收。
+     *
+     * 这条是反向护栏：谁把 `reasoning` 加回 `GROUP_TEXT_KEYS`，这里立刻红。
+     */
     @Test
-    fun groupTextCarriesReasoningAlongsideTheAnswer() {
+    fun reasoningIsNoLongerAccepted() {
         val payload = Codec.groupTextPayload(
             text = "答案",
             groupId = "grp-1",
             groupRev = 1,
-            reasoning = "先看 A 再看 B",
         ).toString()
-        assertTrue(payload.contains("\"reasoning\""), payload)
-        val decoded = Codec.decodeTcp(env("msg", payload)) as? DecodeResult.Ok
-            ?: fail("带 reasoning 的群文本被入站校验拒了：$payload")
-        val obj = decoded.env.payload as JsonObject
-        assertEquals("先看 A 再看 B", (obj["reasoning"] as JsonPrimitive).content)
-        assertEquals("答案", (obj["text"] as JsonPrimitive).content)
-    }
-
-    /** 不传 reasoning 时载荷与以前逐字节相同（键缺席，不是 `"reasoning":null`）。 */
-    @Test
-    fun groupTextWithoutReasoningKeepsTheOldShape() {
-        val legacy = Codec.groupTextPayload("hi", "grp-1", 1).toString()
-        assertFalse(legacy.contains("reasoning"), "不传 reasoning 时载荷里不该出现这个键：" + legacy)
+        assertTrue(!payload.contains("reasoning"), "出站编码不许再产出这个键：$payload")
+        val rawFrame = """{"v":1,"type":"msg","id":"33333333-3333-4333-8333-333333333333",""" +
+            """"from":"11111111-1111-4111-8111-111111111111","ts":1700000000000,""" +
+            """"payload":{"kind":"group-text","text":"hi","groupId":"grp-1","groupRev":1,"reasoning":"先看 A"}}"""
+        assertEquals(
+            RejectReason.badPayload(MsgTypes.MSG),
+            (Codec.decodeTcp(rawFrame) as? DecodeResult.Rejected)?.reason,
+            "带 reasoning 的群文本必须整帧拒收（CoT 不进群）",
+        )
     }
 
     /**
@@ -186,21 +186,6 @@ class CodecTest {
             "汉".repeat(Limits.GROUP_TEXT_TCP_LIMIT),
             "grp-1",
             1,
-        ).toString()
-        assertEquals(
-            RejectReason.badPayload(MsgTypes.MSG),
-            (Codec.decodeTcp(env("msg", payload)) as? DecodeResult.Rejected)?.reason,
-        )
-    }
-
-    /** 超过上限的 reasoning 被整帧拒收 ⇒ 发送侧必须先截断（`clampGroupReasoning`）。 */
-    @Test
-    fun oversizedReasoningIsRejected() {
-        val payload = Codec.groupTextPayload(
-            text = "hi",
-            groupId = "grp-1",
-            groupRev = 1,
-            reasoning = "汉".repeat(Limits.GROUP_REASONING_BYTES),
         ).toString()
         assertEquals(
             RejectReason.badPayload(MsgTypes.MSG),

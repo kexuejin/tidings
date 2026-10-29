@@ -112,25 +112,17 @@ object Limits {
      *
      * 与 `agent-event` 的 body 同一档思路（那边早就放宽到 `AGENT_BODY_TCP_LIMIT`），
      * 但一帧的硬上限是 64 KiB（`Link.MAX_FRAME_BYTES`），而群文本还可以同时带
-     * [GROUP_REASONING_BYTES]（24 KiB）的思考过程 —— 正文必须先给它们留出余量，
-     * 否则「正文 + 思考」合起来把整帧顶爆，等于把刚修好的路径又堵回去。
+     * [CARD_BYTES]（24 KiB）的声明式卡片 —— 正文必须先给它们留出余量，
+     * 否则「正文 + 卡片」合起来把整帧顶爆，等于把刚修好的路径又堵回去。
      */
     const val GROUP_TEXT_TCP_LIMIT = 32 * 1024
 
     /**
-     * 群消息可选字段 `reasoning`（思考过程）的 UTF-8 字节上限。
-     *
-     * 取 24 KiB 而不是跟 `text` 共用通道上限：一帧的硬上限是 64 KiB（`Link.MAX_FRAME_BYTES`），
-     * 正文本身还可以占到 4 KiB，留足余量才能保证「正文 + 思考过程」不会把整帧顶爆。
-     * 超长由发送侧截断（见 `NodeOutbound.sendGroupText`），接收侧按同一数值校验。
-     */
-    const val GROUP_REASONING_BYTES = 24 * 1024
-
-    /**
      * 群消息可选字段 `card`（声明式卡片负载）的 UTF-8 字节上限（序列化后的对象）。
      *
-     * 取 24 KiB，顶替 `reasoning` 同档的预算位 —— 信封数学：
-     * 正文 [GROUP_TEXT_TCP_LIMIT]（32 KiB）+ 卡片 24 KiB + 信封开销 < 64 KiB 整帧硬上限。
+     * 取 24 KiB：信封数学 = 正文 [GROUP_TEXT_TCP_LIMIT]（32 KiB）+ 卡片 24 KiB +
+     * 信封开销 < 64 KiB 整帧硬上限。（`reasoning` 的同档预算已随该键一起退场 ——
+     * CoT 不进群，见规格 §4.1。）
      *
      * **超限一律拒绝、绝不截断**（与正文/思考过程的「截断」策略相反）：卡片是一个
      * JSON 对象，截断之后它就解不了 —— 截断后发出去等于发送侧自己生产一帧注定被判

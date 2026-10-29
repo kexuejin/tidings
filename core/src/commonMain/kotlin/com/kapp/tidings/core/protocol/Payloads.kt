@@ -43,7 +43,7 @@ data class TextMsgPayload(
  * msg kind=group-text。
  *
  * key 顺序对齐 TS 侧白名单 `kind|text|groupId|groupRev|mentions|resend|replyTo`，
- * 之后是本仓扩展的 `senderId` / `reasoning`。
+ * 之后是本仓扩展键（`senderId` 与 agent 意图/状态/卡片族）。
  *
  * 老节点对群消息做**严格字段白名单**校验，多一个 key 就整帧丢弃（golden vector
  * `neg-group-text-extra-field` 覆盖了这条）⇒ **每加一个可选键，必须同步加进
@@ -80,23 +80,6 @@ data class GroupTextMsgPayload(
      * 只限制长度形态（见 `CodecMsg.validateMsg`）。
      */
     val senderId: String? = null,
-    /**
-     * 这条群消息的**思考过程**（可选，就是 `MessageUi.reasoning` 那一份）。
-     *
-     * ## 为什么需要它（用户可见缺陷）
-     *
-     * 桌面端把 agent 事件转发进群时，此前只发**剥掉思考块之后的正文**：思考过程
-     * 只落在桌面自己的库里，于是同一个群里桌面端的气泡有「思考」折叠块、手机端没有 ——
-     * 用户看到的是「过程在桌面，手机上只剩最后一句」。
-     *
-     * 这里把思考过程作为**独立字段**送过来（而不是把 ` thinking…` 原样塞回 `text`）：
-     * 正文与思考各有各的上限，混在 `text` 里会让正文顶到 4096 的通道上限而被整帧拒收 ——
-     * 那正是此前「带思考的原文发出去、对端反而收不到」的形态。
-     *
-     * 超长由发送侧截断到 [Limits.GROUP_REASONING_BYTES]（UTF-8 字节）。
-     * 旧接收端不认识这个键 ⇒ 整帧丢弃；两端需同版本（与 `senderId` 同一取舍）。
-     */
-    val reasoning: String? = null,
     /**
      * 这条群消息属于**哪个 agent 会话**（可选）。与 [agentCursor] 一起构成会话分段标识。
      *

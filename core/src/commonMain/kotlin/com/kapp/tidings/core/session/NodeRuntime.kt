@@ -1470,13 +1470,6 @@ class NodeRuntime(
          * 「桌面端发的」，而桌面端自己是按 `agent:<kind>` 落库的，两端不一致。
          */
         senderId: String? = null,
-        /**
-         * 思考过程（可选）。见 `GroupTextMsgPayload.reasoning` 的 KDoc。
-         *
-         * 带它进群是「过程 + 最终回复都有」的前提：不带的话，同一个群里桌面端的气泡
-         * 有思考折叠块、手机端没有。超长由 [NodeOutbound.sendGroupText] 截断。
-         */
-        reasoning: String? = null,
         /** 这次发送用的信封 id（见 `NodeOutbound.sendGroupText`）；不传就生成一个。 */
         envelopeId: String? = null,
         /**
@@ -1495,13 +1488,13 @@ class NodeRuntime(
         /** 声明式卡片负载（可选）。超限在发送侧拒绝（抛出），绝不截断。 */
         card: JsonObject? = null,) =
         // **位置参数**：调用点的实参顺序必须与 `NodeOutbound.sendGroupText` 的形参表
-        // 一致（agentSessionId, agentCursor, agentSessionTitle, agentIntent, agentState,
-        // card, envelopeId）—— 本签名里 envelopeId 排在 reasoning 之后，但**实参按
-        // 出站形参序排列**，两处一旦顺序不同就编译失败。
+        // 一致（senderId, agentSessionId, agentCursor, agentSessionTitle, agentIntent,
+        // agentState, card, envelopeId）—— 本签名里 envelopeId 排在 senderId 之后，
+        // 但**实参按出站形参序排列**，两处一旦顺序不同就编译失败。
         // 这里用位置而不是命名，是为了让两处一旦顺序不同就编译失败 —— 命名参数反而
         // 会把这个约束藏起来。
         outbound.sendGroupText(
-            text, groupId, groupRev, members, mentions, replyTo, senderId, reasoning,
+            text, groupId, groupRev, members, mentions, replyTo, senderId,
             agentSessionId, agentCursor, agentSessionTitle, agentIntent, agentState, card, envelopeId,
         )
 

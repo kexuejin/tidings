@@ -109,7 +109,6 @@ object Codec {
         resend: Boolean? = null,
         replyTo: String? = null,
         senderId: String? = null,
-        reasoning: String? = null,
         agentSessionId: String? = null,
         agentCursor: Long? = null,
         agentSessionTitle: String? = null,
@@ -117,7 +116,7 @@ object Codec {
         agentState: String? = null,
         card: JsonObject? = null,
     ) = CodecMsg.groupTextPayload(
-        text, groupId, groupRev, mentions, resend, replyTo, senderId, reasoning,
+        text, groupId, groupRev, mentions, resend, replyTo, senderId,
         agentSessionId, agentCursor, agentSessionTitle, agentIntent, agentState, card,
     )
 

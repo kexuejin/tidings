@@ -182,7 +182,6 @@ fun handleRetryMessage(message: MessageUi) {
                     members = group?.members,
                     replyTo = message.replyTo,
                     senderId = message.senderId,
-                    reasoning = message.reasoning,
                 ),
             )
         }.onFailure {
@@ -526,8 +525,9 @@ fun handleOnInbound(envelope: Envelope) {
     val rawText = textOf(envelope) ?: return
     val (parsedReasoning, cleanedText) = parseThinkingContent(rawText)
     val payload = envelope.payload as? JsonObject
-    val explicitReasoning = payload?.let { stringField(it, "reasoning") }
-    val finalReasoning = explicitReasoning ?: parsedReasoning
+    // 群文本的 `reasoning` 键已从协议退场（CoT 不进群）：思考块只剩「正文里带
+    // <think> 块」这一种来源（parseThinkingContent），落库进 MessageUi.reasoning
+    // 供界面折叠显示 —— 线上不再有独立键。
     val reasoningElapsedMs = payload?.let { longField(it, "reasoningElapsedMs") }
     val groupId = if (isGroupText(envelope)) groupIdOf(envelope) else null
     val convId = groupId?.let(ConvId::group) ?: envelope.from
@@ -561,7 +561,7 @@ fun handleOnInbound(envelope: Envelope) {
             // 缺省 null ⇒ 界面显示「新会话」那句中性说明，而不是静默不画线。
             agentSessionTitle = payload?.let { stringField(it, "agentSessionTitle") },
             replyTo = if (groupId != null) replyToOf(envelope) else null,
-            reasoning = finalReasoning,
+            reasoning = parsedReasoning,
             reasoningElapsedMs = reasoningElapsedMs,
         ),
         incoming = true,
