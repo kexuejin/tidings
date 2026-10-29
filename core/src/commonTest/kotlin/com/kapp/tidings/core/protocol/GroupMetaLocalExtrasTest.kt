@@ -27,7 +27,7 @@ class GroupMetaLocalExtrasTest {
         agentId = "DSH",
         hostNodeId = self,
         name = "dsh-teahouse-mobile",
-        wsId = "ws-1",
+        defaultWsId = "ws-1",
     )
 
     private fun meta(
@@ -62,7 +62,7 @@ class GroupMetaLocalExtrasTest {
     /** 本机确实有声明时要覆盖（那是新的真事）。 */
     @Test
     fun aLocalDeclarationOverridesTheIncomingOne() {
-        val mine = VirtualAgentMember(agentId = "codex", hostNodeId = self, name = "codex-a", wsId = "ws-2")
+        val mine = VirtualAgentMember(agentId = "codex", hostNodeId = self, name = "codex-a", defaultWsId = "ws-2")
         val after = meta(agents = listOf(declared())).withLocalExtras(emptyMap(), listOf(mine))
         assertEquals(listOf(mine), after.virtualAgents)
     }

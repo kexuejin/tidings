@@ -28,7 +28,7 @@ class RealDataTriggerVerifyTest {
                     agentId = "DSH",
                     hostNodeId = self,
                     name = "dsh-teahouse-mobile",
-                    wsId = "ws-e9b18063d183",
+                    defaultWsId = "ws-e9b18063d183",
                 ),
             ),
         ),

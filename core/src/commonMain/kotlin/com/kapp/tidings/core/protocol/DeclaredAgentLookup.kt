@@ -3,7 +3,7 @@
 package com.kapp.tidings.core.protocol
 
 /**
- * 找出一份 `virtualAgents` 里**属于某个发送者身份**的那一条，返回它的 `wsId`。
+ * 找出一份 `virtualAgents` 里**属于某个发送者身份**的那一条，返回它的默认工作区 id。
  *
  * ## 为什么需要它
  *
@@ -27,7 +27,7 @@ package com.kapp.tidings.core.protocol
  * @param senderId `SenderIdentity.id`。
  * @param declaredAgents 群元数据里的 `virtualAgents`。
  * @param hostNodeId 只认这一台宿主的声明（撤回是机主主权）。
- * @return 该声明的 `wsId`；没匹配到或那条没绑工作区时为 null。
+ * @return 该声明的 [VirtualAgentMember.defaultWsId]；没匹配到或那条没指定默认工作区时为 null。
  */
 fun declaredWorkspaceOfSender(
     senderId: String?,
@@ -49,5 +49,5 @@ fun declaredWorkspaceOfSender(
                     (sameAgent(parsedAgent, null, declared.agentId) || declared.name == parsedAgent)
             }
         }
-        ?.wsId
+        ?.defaultWsId
 }

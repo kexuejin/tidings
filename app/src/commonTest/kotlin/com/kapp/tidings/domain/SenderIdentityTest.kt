@@ -53,7 +53,7 @@ class SenderIdentityTest {
         agentId = "dsh",
         hostNodeId = host,
         name = "dsh-teahouse-mobile",
-        wsId = "ws-teahouse",
+        defaultWsId = "ws-teahouse",
     )
 
     private fun group(
@@ -219,8 +219,8 @@ class SenderIdentityTest {
             ctx(
                 group = group(
                     virtualAgents = listOf(
-                        VirtualAgentMember(agentId = "codex", hostNodeId = host, name = "codex-a", wsId = "ws-a"),
-                        VirtualAgentMember(agentId = "opencode", hostNodeId = host, name = "opencode-b", wsId = "ws-b"),
+                        VirtualAgentMember(agentId = "codex", hostNodeId = host, name = "codex-a", defaultWsId = "ws-a"),
+                        VirtualAgentMember(agentId = "opencode", hostNodeId = host, name = "opencode-b", defaultWsId = "ws-b"),
                     ),
                 ),
                 agentKindsByHost = mapOf(host to setOf("codex", "opencode")),
@@ -500,7 +500,7 @@ class SenderIdentityTest {
                     agentId = "DSH",
                     hostNodeId = host,
                     name = "dsh-teahouse-mobile",
-                    wsId = "ws-1",
+                    defaultWsId = "ws-1",
                 ),
             ),
         )
@@ -561,7 +561,7 @@ class SenderIdentityTest {
             groupId = "g-1", name = "群", members = listOf(self, host),
             rev = 7, updatedBy = host, updatedTs = 0L,
             virtualAgents = listOf(
-                VirtualAgentMember(agentId = "DSH", hostNodeId = host, name = "dsh-teahouse-mobile", wsId = "ws-1"),
+                VirtualAgentMember(agentId = "DSH", hostNodeId = host, name = "dsh-teahouse-mobile", defaultWsId = "ws-1"),
             ),
         )
         // 成员列表的 ctx（默认：宿主按 agent 渲染）
@@ -597,7 +597,7 @@ class SenderIdentityTest {
             groupId = "g-1", name = "群", members = listOf(self, host),
             rev = 7, updatedBy = host, updatedTs = 0L,
             virtualAgents = listOf(
-                VirtualAgentMember(agentId = "DSH", hostNodeId = host, name = "dsh-teahouse-mobile", wsId = "ws-1"),
+                VirtualAgentMember(agentId = "DSH", hostNodeId = host, name = "dsh-teahouse-mobile", defaultWsId = "ws-1"),
             ),
         )
         val base = ctx(

@@ -26,32 +26,32 @@ class VirtualAgentMentionTest {
         virtualAgents = agents.toList(),
     )
 
-    private fun agent(name: String, wsId: String? = null) = VirtualAgentMember(
-        agentId = name, hostNodeId = "host-a", name = name, wsId = wsId,
+    private fun agent(name: String, defaultWsId: String? = null) = VirtualAgentMember(
+        agentId = name, hostNodeId = "host-a", name = name, defaultWsId = defaultWsId,
     )
 
     /**
-     * **绑了 workspace 的 agent**：@ 到它时，必须能拿到 wsId ——
+     * **绑了 workspace 的 agent**：@ 到它时，必须能拿到默认工作区 id ——
      * 注入方据此投给该工作区的会话。
      */
     @Test
-    fun aWorkspaceBoundAgentCarriesItsWsId() {
-        val m = meta(agent("dsh-teahouse", wsId = "ws-42"))
+    fun aWorkspaceBoundAgentCarriesItsDefaultWsId() {
+        val m = meta(agent("dsh-teahouse", defaultWsId = "ws-42"))
         val hit = m.mentionedVirtualAgent("@dsh-teahouse 看一下构建", listOf("dsh-teahouse"))
-        assertEquals("ws-42", hit?.wsId, "绑定的工作区必须带出来")
+        assertEquals("ws-42", hit?.defaultWsId, "绑定的工作区必须带出来")
     }
 
     /**
      * **没绑 workspace 的 agent 同样可以被 @** —— 这是一等状态，不是缺失。
      *
-     * wsId == null 时注入方投给它自己的会话（不带工作区的那个）。
+     * defaultWsId == null 时注入方投给它自己的会话（不带工作区的那个）。
      */
     @Test
     fun anUnboundAgentIsStillMentionable() {
         val m = meta(agent("dsh"))
         val hit = m.mentionedVirtualAgent("@dsh 你好", listOf("dsh"))
         assertEquals("dsh", hit?.name)
-        assertNull(hit?.wsId, "没绑定就是 null，不能编一个工作区出来")
+        assertNull(hit?.defaultWsId, "没绑定就是 null，不能编一个工作区出来")
     }
 
     /** 没 @ 到任何 agent ⇒ null（调用方据此不注入）。 */
@@ -68,7 +68,7 @@ class VirtualAgentMentionTest {
      */
     @Test
     fun aLongerTokenWins() {
-        val m = meta(agent("dsh"), agent("dsh-teahouse", wsId = "ws-1"))
+        val m = meta(agent("dsh"), agent("dsh-teahouse", defaultWsId = "ws-1"))
         val hit = m.mentionedVirtualAgent("@dsh-teahouse 干活", listOf("dsh", "dsh-teahouse"))
         assertEquals("dsh-teahouse", hit?.name)
     }

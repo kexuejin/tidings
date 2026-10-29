@@ -172,26 +172,65 @@ object GroupOps {
 }
 
 /**
- * 群里一个可被 @ 的智能体（PPE-2 / Goal 5）。
+ * 群里一个可被 @ 的智能体（PPE-2 / Goal 5；Group-Agent 方案 §3 改版）。
  *
- * ## 身份是三元组
+ * ## 身份是二元组
  *
- * `(hostNodeId, agentId, wsId)` —— 见 [com.kapp.tidings.core.protocol.AgentMemberName] 的 KDoc：
- * 一台设备可以装多个 agent，不同 agent 也可能操作同一个 workspace，所以单项都不足以定位。
+ * `(hostNodeId, agentId)` —— 一台设备可以装多个 agent，`name` 是 `@` 后面要打的
+ * token（群内唯一，见 [AgentMemberName]）。
  *
- * ## `name` 是**暴露名**，不是显示名
+ * ## 实体形态：单兵 or 团队
  *
- * 它是 `@` 后面要打的那个 token（`codex-teahouse`），由 [AgentMemberName.base] 生成、
- * 由 [AgentMemberName.unique] 保证群内不冲突。**默认生成、不可手改**（加成员时不许冲突）。
+ * [entityType] = `"single"`（单兵，默认）| `"team"`（协同团队）。团队形态下
+ * [teamMembers] 列出组员 —— **对外单一窗口**：全群只认 [name]（leader 的 token），
+ * 组员间交互走宿主内部通道，禁止向主群平铺中间碎片对话。
  *
- * 与显示名的分工：气泡上显示什么由 `SenderIdentity.displayName` 决定（可以更漂亮、可以跟随
- * wsTitle），而 `@` 要打什么必须是稳定且 ASCII 的 —— 两者不必是同一个字符串。
+ * ## 工作区：白名单 + 默认项（不再单绑定）
  *
- * ## `wsId` 为 null 表示"没有绑定工作区"
- *
- * 这种 agent 仍然可以被 @（做问答、跑命令），只是没有"在哪个目录里干活"这回事。
- * 合法的一等状态，不是缺失。
+ * 旧模型的 `wsId`（单绑定）与 `role`（展示）已按方案 §3 删除：工作区从群主干解绑，
+ * 降格为「机主授予本群的目录资产白名单」——
+ * - [allowedWorkspaces]：机主授权该群可访问的工作区清单。**路径不进协议**：
+ *   [GroupWorkspaceInfo] 只有 id 与标题，`wsId → 路径` 的解析表只在宿主本机。
+ * - [defaultWsId]：本群默认绑定的工作区；必须是 [allowedWorkspaces] 里的 id
+ *   （宿主注册时校验）。null = 未指定。
  */
+@Serializable
+data class VirtualAgentMember(
+    val agentId: String,
+    val hostNodeId: String,
+    /** `@` 后面要打的 token；群内唯一。团队的 token 挂在 leader 上。 */
+    val name: String,
+    /** `"single"` 单兵（默认）| `"team"` 协同团队。 */
+    val entityType: String = "single",
+    /** 团队组员清单（[entityType] = "team" 时有效）；对外单一窗口，组员不出现在群成员表。 */
+    val teamMembers: List<TeamMemberInfo> = emptyList(),
+    /** 机主授权本群可访问的工作区白名单。见类 KDoc 的隐私收口：路径不出宿主。 */
+    val allowedWorkspaces: List<GroupWorkspaceInfo> = emptyList(),
+    /** 本群默认绑定的工作区 id；必须是 [allowedWorkspaces] 里的 id，null = 未指定。 */
+    val defaultWsId: String? = null,
+)
+
+/** 团队组员（仅展示与内部调度用；不参与成员判定与权限，越界键由解码侧丢弃）。 */
+@Serializable
+data class TeamMemberInfo(
+    val agentId: String,
+    val name: String,
+    val role: String,
+)
+
+/**
+ * 机主授予本群的一个工作区（白名单条目）。
+ *
+ * **隐私收口：只含 id 与标题，不含路径。** `virtualAgents` 随 `group.info` 广播给全群，
+ * 本机绝对路径永不出宿主：宿主本地维护 `wsId → 路径` 的解析表，非宿主设备一律只见
+ * id 与标题（群设置面板亦然）。
+ */
+@Serializable
+data class GroupWorkspaceInfo(
+    val wsId: String,
+    val title: String,
+    val description: String? = null,
+)
 /**
  * 从群元数据里找出发送方 @ 到的那个 agent（用于「把手机的一句话交给它」）。
  *
@@ -205,9 +244,9 @@ object GroupOps {
  *
  * 「添加 agent 进群的时候，要么这个 agent 就绑定了某个 workspace，要么就是没绑定。」
  *
- * - **绑了 workspace**（`wsId != null`）：那这个 agent 在群里的活儿都属于那个工作区。
- *   注入时按 `wsId` 找该工作区的会话。
- * - **没绑**（`wsId == null`）：它不属于任何工作区，注入只能投给**它自己的会话**
+ * - **绑了 workspace**（`defaultWsId != null`）：那这个 agent 在群里的活儿默认都属于
+ *   那个工作区；授权范围以 [VirtualAgentMember.allowedWorkspaces] 白名单为准。
+ * - **没绑**（`defaultWsId == null`）：它不属于任何工作区，注入只能投给**它自己的会话**
  *   （不带 wsId 的会话）。
  *
  * 两者都不猜「最近一个」：猜错的后果是 agent 在无关目录里执行命令。
@@ -268,22 +307,6 @@ internal fun mentionsToken(text: String, token: String): Boolean {
         from = at + 1
     }
 }
-
-@Serializable
-data class VirtualAgentMember(
-    val agentId: String,
-    val hostNodeId: String,
-    /** `@` 后面要打的 token；群内唯一。见上面的 KDoc。 */
-    val name: String,
-    val role: String? = null,
-    /**
-     * 绑定的工作区 id；null = 不绑。
-     *
-     * **加可选键 ⇒ 旧节点整帧拒收**（`hasOnlyKeys` 判 extra-field）。本仓的取舍是
-     * 两端必须同版本，不能悄悄加 —— 见 AGENTS.md §2.2。
-     */
-    val wsId: String? = null,
-)
 
 /**
  * 广播 `group.info` 前补齐**本机能提供的**那部分：成员昵称 + 本机声明。

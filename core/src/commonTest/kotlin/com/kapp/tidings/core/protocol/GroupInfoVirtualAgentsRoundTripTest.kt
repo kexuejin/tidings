@@ -5,6 +5,7 @@ package com.kapp.tidings.core.protocol
 import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertNotNull
+import kotlin.test.assertNull
 import kotlin.test.assertTrue
 
 /**
@@ -47,7 +48,7 @@ class GroupInfoVirtualAgentsRoundTripTest {
                     agentId = "DSH",
                     hostNodeId = "host-a",
                     name = "dsh-teahouse-mobile",
-                    wsId = "ws-e9b18063d183",
+                    defaultWsId = "ws-e9b18063d183",
                 ),
             ),
         )
@@ -62,7 +63,87 @@ class GroupInfoVirtualAgentsRoundTripTest {
         assertEquals("DSH", agent.agentId)
         assertEquals("host-a", agent.hostNodeId)
         assertEquals("dsh-teahouse-mobile", agent.name)
-        assertEquals("ws-e9b18063d183", agent.wsId)
+        assertEquals("ws-e9b18063d183", agent.defaultWsId)
+    }
+
+    /**
+     * **团队形态与工作区白名单必须原样解回来**（方案 §3）。
+     *
+     * 解码是手写逐字段，编码是 `@Serializable` —— 新字段只加 data class 不加解码，
+     * 症状与当年 `virtualAgents` 整个丢失同型：线上数据完整、落库全空、
+     * 授权面板（非宿主侧只见 id 与标题）与 @ 候选一起失效。所以这条走**解码**断言，
+     * 不只断言 JSON 里有键。
+     */
+    @Test
+    fun teamShapeAndWorkspaceGrantsSurviveTheRoundTrip() {
+        val original = meta(
+            listOf(
+                VirtualAgentMember(
+                    agentId = "dev-lead",
+                    hostNodeId = "host-a",
+                    name = "dev-lead",
+                    entityType = "team",
+                    teamMembers = listOf(
+                        TeamMemberInfo(agentId = "coder", name = "coder", role = "FullStack Engineer"),
+                        TeamMemberInfo(agentId = "tester", name = "tester", role = "QA Engineer"),
+                    ),
+                    allowedWorkspaces = listOf(
+                        GroupWorkspaceInfo(wsId = "ws-mobile", title = "Teahouse Mobile"),
+                        GroupWorkspaceInfo(wsId = "ws-backend", title = "Teahouse Backend", description = "后端服务"),
+                    ),
+                    defaultWsId = "ws-mobile",
+                ),
+                VirtualAgentMember(
+                    agentId = "solo",
+                    hostNodeId = "host-a",
+                    name = "solo",
+                ),
+            ),
+        )
+        val payload = Codec.groupInfoPayload(original)
+        val decoded = assertNotNull(Codec.decodeGroupInfo(payload))
+        val team = assertNotNull(
+            decoded.virtualAgents?.firstOrNull { it.agentId == "dev-lead" },
+            "团队声明必须解回来",
+        )
+        assertEquals("team", team.entityType, "entityType 在解码时丢了")
+        assertEquals(2, team.teamMembers.size, "teamMembers 在解码时丢了")
+        assertEquals(TeamMemberInfo(agentId = "coder", name = "coder", role = "FullStack Engineer"), team.teamMembers.first())
+        assertEquals(2, team.allowedWorkspaces.size, "allowedWorkspaces 在解码时丢了 —— 非宿主设备的授权面板会全空")
+        assertEquals(GroupWorkspaceInfo(wsId = "ws-backend", title = "Teahouse Backend", description = "后端服务"), team.allowedWorkspaces.last())
+        assertEquals("ws-mobile", team.defaultWsId, "defaultWsId 在解码时丢了")
+
+        val solo = assertNotNull(decoded.virtualAgents?.firstOrNull { it.agentId == "solo" })
+        assertEquals("single", solo.entityType, "缺省 entityType 解码为单兵")
+        assertEquals(emptyList(), solo.teamMembers)
+        assertEquals(emptyList(), solo.allowedWorkspaces)
+        assertNull(solo.defaultWsId)
+    }
+
+    /**
+     * 旧形状（带 `role` / `wsId` 键的声明）**照样解码**：`group` 帧没有字段白名单，
+     * 旧键只是被忽略 —— 不该让旧设备广播的元数据整帧失效。
+     */
+    @Test
+    fun anOldShapeDeclarationStillDecodesWithoutTheRemovedKeys() {
+        val original = meta(
+            listOf(VirtualAgentMember(agentId = "DSH", hostNodeId = "host-a", name = "dsh-teahouse-mobile")),
+        )
+        val payload = Codec.groupInfoPayload(original).toString()
+        // 在编码产物上手工加回旧键（编码器已不再产出它们），模拟旧构建的帧。
+        // virtualAgents 是 group 对象的最后一个键，数组之后紧跟两层收括号。
+        val patched = payload.replace(
+            """}]}}""",
+            ""","role":"Senior Engineer","wsId":"ws-legacy"}]}}""",
+        )
+        assertTrue(patched != payload, "前提：补丁必须真的插进去了")
+        val decoded = assertNotNull(
+            Codec.decodeGroupInfo(Codec.wireJson.parseToJsonElement(patched)),
+            "旧形状的 info 帧必须能解回来",
+        )
+        val agent = decoded.virtualAgents?.single()
+        assertNotNull(agent, "旧形状的声明不能被丢掉")
+        assertNull(agent.defaultWsId, "旧键被忽略：不产出默认工作区")
     }
 
     /**

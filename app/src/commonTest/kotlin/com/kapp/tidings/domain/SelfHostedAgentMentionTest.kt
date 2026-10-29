@@ -43,7 +43,7 @@ class SelfHostedAgentMentionTest {
                     agentId = "dsh",
                     hostNodeId = self,
                     name = "dsh-teahouse-mobile",
-                    wsId = "ws-teahouse",
+                    defaultWsId = "ws-teahouse",
                 ),
             ),
         )

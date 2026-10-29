@@ -43,7 +43,7 @@ class GroupMentionWithRealDataTest {
                     agentId = "DSH",
                     hostNodeId = host,
                     name = "dsh-teahouse-mobile",
-                    wsId = "ws-teahouse",
+                    defaultWsId = "ws-teahouse",
                 ),
             ),
         )

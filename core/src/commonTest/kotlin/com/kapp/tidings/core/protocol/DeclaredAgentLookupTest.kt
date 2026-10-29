@@ -21,8 +21,8 @@ class DeclaredAgentLookupTest {
         host: String = self,
         agentId: String = "DSH",
         name: String = "dsh-teahouse-mobile",
-        wsId: String? = ws,
-    ) = VirtualAgentMember(agentId = agentId, hostNodeId = host, name = name, wsId = wsId)
+        defaultWsId: String? = ws,
+    ) = VirtualAgentMember(agentId = agentId, hostNodeId = host, name = name, defaultWsId = defaultWsId)
 
     /** **真机那一对必须对上** —— id 是 `agent:<host>:dsh`，声明是 host + `DSH`。 */
     @Test
@@ -55,7 +55,7 @@ class DeclaredAgentLookupTest {
         assertNull(
             declaredWorkspaceOfSender(
                 senderId = "agent:$self:dsh",
-                declaredAgents = listOf(declared(wsId = null)),
+                declaredAgents = listOf(declared(defaultWsId = null)),
                 hostNodeId = self,
             ),
         )

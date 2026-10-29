@@ -158,7 +158,7 @@ class RelayControllerGroupTest {
         // 工作区没上报 agentId（真机主形态）时退到 agentKind —— 与「邀请新智能体入驻」同一条兜底。
         assertEquals("DSH", seat.agentId)
         assertEquals(self, seat.hostNodeId)
-        assertEquals("ws-alpha", seat.wsId)
+        assertEquals("ws-alpha", seat.defaultWsId)
         assertEquals(
             BannerMessage.GroupCreatedWithoutMembers("teahouse-mobile 协同群"),
             controller.state.value.banner?.message,
@@ -194,7 +194,7 @@ class RelayControllerGroupTest {
 
     @Test
     fun aWorkspaceGroupForANewDirectoryIsStillCreated() = runBlocking {
-        // 「关联本地全新目录」分支：目录还没被任何 agent 宣告成工作区（wsId = null），
+        // 「关联本地全新目录」分支：目录还没被任何 agent 宣告成工作区（defaultWsId = null），
         // 因此没有可入驻的 agent。群照样要建出来 —— 它是这个目录的协同通道，
         // 设备与工作区随后再接上；这里钉住的是「没有工作区行时不会退化成旧判据」。
         val controller = controller()

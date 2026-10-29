@@ -305,7 +305,7 @@ private fun virtualAgentMemberFor(ws: WorkspaceUi): VirtualAgentMember? {
         agentId = agentId,
         hostNodeId = host._state.value.selfNodeId,
         name = AgentMemberName.base(ws.agentKind, agentId, ws.wsTitle, ws.wsId),
-        wsId = ws.wsId,
+        defaultWsId = ws.wsId,
     )
 }
 
@@ -903,7 +903,8 @@ fun RelayController.handleExposeWorkspace(groupId: String, wsId: String?, agentI
     val current = meta.virtualAgents.orEmpty()
     val next = if (wsId == null) {
         // 收起：只移除「本机 + 这个 ws」那一条，别的设备与别的 ws 原样保留。
-        current.filterNot { it.hostNodeId == self && it.wsId == agentId }
+        // （调用方把要撤的 wsId 从 `declaredWorkspaceOfSender` 拿到后经 agentId 传入。）
+        current.filterNot { it.hostNodeId == self && it.defaultWsId == agentId }
     } else {
         val ws = _state.value.agentWorkspaces.values
             .firstOrNull { it.peerId == self && it.wsId == wsId } ?: return
@@ -915,12 +916,12 @@ fun RelayController.handleExposeWorkspace(groupId: String, wsId: String?, agentI
         val base = AgentMemberName.base(ws.agentKind, resolvedAgentId, ws.wsTitle, wsId)
         // 名字冲突范围 = 群内其它声明（不含本机这一条，它会被替换）。
         val taken = current
-            .filterNot { it.hostNodeId == self && it.wsId == wsId }
+            .filterNot { it.hostNodeId == self && it.defaultWsId == wsId }
             .map { it.name }
             .toMutableSet()
         val name = AgentMemberName.unique(base, taken)
-        current.filterNot { it.hostNodeId == self && it.wsId == wsId } +
-            VirtualAgentMember(agentId = resolvedAgentId, hostNodeId = self, name = name, wsId = wsId)
+        current.filterNot { it.hostNodeId == self && it.defaultWsId == wsId } +
+            VirtualAgentMember(agentId = resolvedAgentId, hostNodeId = self, name = name, defaultWsId = wsId)
     }
     val updated = meta.copy(
         virtualAgents = next.ifEmpty { null },
@@ -1044,12 +1045,12 @@ private fun RelayController.virtualAgentsFor(meta: GroupMeta): List<VirtualAgent
             agentId = agentId,
             hostNodeId = self,
             name = name,
-            wsId = wsId,
+            defaultWsId = wsId,
         )
     }
     // 合并：本机的声明覆盖**同一 (agentId, wsId)** 的旧声明，其它设备的原样保留。
     val kept = meta.virtualAgents.orEmpty().filterNot { va ->
-        va.hostNodeId == self && mine.any { it.agentId == va.agentId && it.wsId == va.wsId }
+        va.hostNodeId == self && mine.any { it.agentId == va.agentId && it.defaultWsId == va.defaultWsId }
     }
     return kept + mine
 }

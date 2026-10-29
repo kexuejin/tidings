@@ -32,13 +32,13 @@ class AgentInboxEnricherTest {
         virtualAgents = agents.toList(),
     )
 
-    private fun agent(name: String, wsId: String? = null) =
-        VirtualAgentMember(agentId = name, hostNodeId = host, name = name, wsId = wsId)
+    private fun agent(name: String, defaultWsId: String? = null) =
+        VirtualAgentMember(agentId = name, hostNodeId = host, name = name, defaultWsId = defaultWsId)
 
     /** 绑了工作区的 agent：hint 必须带出 wsId。 */
     @Test
     fun aBoundAgentHintCarriesTheWorkspace() {
-        val hint = resolveAgentInboxHint(meta(agent("dsh-t", wsId = "ws-9")), owner, "@dsh-t 跑测试")
+        val hint = resolveAgentInboxHint(meta(agent("dsh-t", defaultWsId = "ws-9")), owner, "@dsh-t 跑测试")
         assertEquals(true, hint?.addressedToAgent)
         assertEquals("ws-9", hint?.boundWsId)
         assertEquals("dsh-t", hint?.agentName)

@@ -49,7 +49,7 @@ class AgentNotAuthorizedNoticeTest {
                     agentId = "DSH",
                     name = "dsh-teahouse-mobile",
                     hostNodeId = agentHost,
-                    wsId = "ws-1",
+                    defaultWsId = "ws-1",
                 ),
             )
         } else {

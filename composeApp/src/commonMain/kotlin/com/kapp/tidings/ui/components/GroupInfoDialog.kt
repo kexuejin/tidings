@@ -529,7 +529,7 @@ fun GroupInfoDialog(
             localWorkspaces = localWorkspaces,
             exposedWsIds = group.virtualAgents.orEmpty()
                 .filter { it.hostNodeId == selfNodeId }
-                .mapNotNull { it.wsId }
+                .mapNotNull { it.defaultWsId }
                 .toSet(),
             onDismiss = { showExposeDialog = false },
             onConfirm = { chosen -> expose(chosen) },
@@ -585,7 +585,7 @@ fun GroupInfoDialog(
                 // 撤回 = 传一份**不含它**的列表给同一个回调。
                 val keep = group.virtualAgents.orEmpty()
                     .filter { it.hostNodeId == selfNodeId }
-                    .mapNotNull { it.wsId }
+                    .mapNotNull { it.defaultWsId }
                     .filterNot { it == wsToRevoke }
                 exposeWorkspaces(keep)
             },

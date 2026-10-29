@@ -44,7 +44,7 @@ class SenderSideUnauthorizedNoticeTest {
                 agentId = "DSH",
                 name = "dsh-teahouse-mobile",
                 hostNodeId = hostNode,
-                wsId = "ws-1",
+                defaultWsId = "ws-1",
             ),
         ),
     )

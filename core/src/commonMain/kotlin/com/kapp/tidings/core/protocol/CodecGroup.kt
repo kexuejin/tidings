@@ -162,14 +162,38 @@ object CodecGroup {
             //
             // 真机排查了很久：帧确实到了、数据确实完整（`messages.log` 里那个数组清清楚楚），
             // 但落库的结果一直是空。**编码与解码各写一遍，就是会漏在这一边。**
+            // （`GroupInfoVirtualAgentsRoundTripTest` 为此做往返断言；新字段
+            // `entityType` / `teamMembers` / `allowedWorkspaces` / `defaultWsId` 都在解码侧
+            // 逐字段解出 —— 授权面板与 @ 候选全靠它们。）
             virtualAgents = (meta["virtualAgents"] as? JsonArray)?.mapNotNull { item ->
                 val a = item as? JsonObject ?: return@mapNotNull null
                 VirtualAgentMember(
                     agentId = strOrNull(a["agentId"], Limits.ID) ?: return@mapNotNull null,
                     hostNodeId = strOrNull(a["hostNodeId"], Limits.FROM) ?: return@mapNotNull null,
                     name = strOrNull(a["name"], Limits.NICK) ?: return@mapNotNull null,
-                    role = strOrNull(a["role"], Limits.ID),
-                    wsId = strOrNull(a["wsId"], Limits.ID),
+                    // 实体形态：缺省按单兵（与 @Serializable 的默认值同口径）。
+                    entityType = strOrNull(a["entityType"], Limits.AGENT_KIND) ?: "single",
+                    // 组员与工作区白名单：逐项按形状收，形状不对的那一项丢弃 ——
+                    // 一条坏组员不该让整条声明（以及它的宿主归属）消失。
+                    teamMembers = (a["teamMembers"] as? JsonArray)?.mapNotNull { tm ->
+                        val t = tm as? JsonObject ?: return@mapNotNull null
+                        TeamMemberInfo(
+                            agentId = strOrNull(t["agentId"], Limits.ID) ?: return@mapNotNull null,
+                            name = strOrNull(t["name"], Limits.NICK) ?: return@mapNotNull null,
+                            role = strOrNull(t["role"], Limits.AGENT_KIND) ?: return@mapNotNull null,
+                        )
+                    }.orEmpty(),
+                    // 隐私收口（方案 §3）：白名单条目只有 id/标题/描述 —— 路径即使被人塞进来
+                    // 也不是这个形状的键，直接被忽略；本仓编码侧从不产出路径。
+                    allowedWorkspaces = (a["allowedWorkspaces"] as? JsonArray)?.mapNotNull { aw ->
+                        val w = aw as? JsonObject ?: return@mapNotNull null
+                        GroupWorkspaceInfo(
+                            wsId = strOrNull(w["wsId"], Limits.ID) ?: return@mapNotNull null,
+                            title = strOrNull(w["title"], Limits.GROUP_NAME) ?: return@mapNotNull null,
+                            description = strOrNull(w["description"], Limits.GROUP_DESCRIPTION),
+                        )
+                    }.orEmpty(),
+                    defaultWsId = strOrNull(a["defaultWsId"], Limits.ID),
                 )
             }?.takeIf { it.isNotEmpty() },
         )

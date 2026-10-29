@@ -168,7 +168,7 @@ fun resolveAgentInboxHint(
     // 不在 ⇒ `RequestedSessionGone`，targetSessionId 为 null（不投）——
     // **绝不静默换投**：用户以为命令进了 A、实际进了 B，比不投更糟。
     val picked = AgentSessionPick.pick(
-        boundWsId = hit.wsId,
+        boundWsId = hit.defaultWsId,
         candidates = candidates,
         requestedSessionId = requested,
     )
@@ -184,7 +184,7 @@ fun resolveAgentInboxHint(
     val allowed = verdict.permitsExecution()
     return AgentInboxHint(
         addressedToAgent = true,
-        boundWsId = hit.wsId,
+        boundWsId = hit.defaultWsId,
         // 点选值随行：桥接侧在 RequestedSessionGone（不投）时也拿得到它，
         // 才能说清「你点的会话没了」，而不是一句「没反应」。
         requestedSessionId = requested,

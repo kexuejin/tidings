@@ -551,7 +551,7 @@ private fun resolveAgentOfHost(host: String, kind: String, ctx: SenderIdentityCo
         // 会拿到同一个值。去重键用的是 agentAlias，继承过来就会把 codex 与 opencode
         // 合并成一行（实测：面板里只剩 codex，`@opencode` 匹配不上）。
         agentAlias = null,
-        // 这个 agent 在群里声明的 workspace（`virtualAgents` 里按 host + kind 找）。
+        // 这个 agent 在群里声明的默认工作区（`virtualAgents` 里按 host + kind 找）。
         // 找不到就是 null —— 那就是没有绑定 workspace 的 agent，@ 只用 kind。
         //
         // **这里要的是工作区的名字，不是它的 id。**
@@ -560,7 +560,7 @@ private fun resolveAgentOfHost(host: String, kind: String, ctx: SenderIdentityCo
         // 「agent + workspace 名」（`@dsh-teahouse-mobile`）。
         workspaceName = ctx.group?.virtualAgents
             ?.firstOrNull { it.hostNodeId == host && it.agentId.equals(k, ignoreCase = true) }
-            ?.wsId
+            ?.defaultWsId
             ?.let { wsId -> ctx.workspaceTitles[wsId] },
     )
 }

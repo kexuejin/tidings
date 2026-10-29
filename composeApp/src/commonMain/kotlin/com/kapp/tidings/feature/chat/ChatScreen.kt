@@ -1517,7 +1517,7 @@ fun ChatScreen(
                     // 否则"取消勾选"在界面上看起来生效、实际没移除。
                     val before = group.virtualAgents.orEmpty()
                         .filter { it.hostNodeId == state.selfNodeId }
-                        .mapNotNull { it.wsId }
+                        .mapNotNull { it.defaultWsId }
                     (before - chosen.toSet()).forEach { expose(group.groupId, it, null) }
                     chosen.forEach { wsId -> expose(group.groupId, wsId, null) }
                 }

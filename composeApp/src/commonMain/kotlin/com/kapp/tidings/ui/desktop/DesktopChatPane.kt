@@ -331,7 +331,7 @@ public fun ChatPane(
                 onExposeWorkspaces = { chosen ->
                     val before = group.virtualAgents.orEmpty()
                         .filter { it.hostNodeId == state.selfNodeId }
-                        .mapNotNull { it.wsId }
+                        .mapNotNull { it.defaultWsId }
                     (before - chosen.toSet()).forEach { wsId -> controller.exposeWorkspace(group.groupId, wsId, null) }
                     chosen.forEach { wsId -> controller.exposeWorkspace(group.groupId, wsId, null) }
                 },

@@ -15,7 +15,6 @@ class VirtualAgentGroupTest {
             agentId = "coder-01",
             hostNodeId = "node-macbook",
             name = "Code Assistant",
-            role = "Senior Engineer",
         )
         val group = GroupMeta(
             groupId = "group-100",

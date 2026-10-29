@@ -2020,7 +2020,7 @@ override fun requestAgentGrantFromNotice(groupId: String, agentName: String) {
         sendAgentGrantRequest(
             peerId = hostNodeId,
             agentKey = declared.agentId?.takeIf { it.isNotBlank() },
-            wsId = declared.wsId,
+            wsId = declared.defaultWsId,
         )
     }
 }

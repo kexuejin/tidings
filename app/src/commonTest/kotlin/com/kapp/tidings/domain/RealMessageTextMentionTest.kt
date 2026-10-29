@@ -27,7 +27,7 @@ class RealMessageTextMentionTest {
                 agentId = "DSH",
                 name = "dsh-teahouse-mobile",
                 hostNodeId = "a1b2c3d4-6e74-4a7c-aab1-20a1d1284cd6",
-                wsId = "ws-e9b18063d183",
+                defaultWsId = "ws-e9b18063d183",
             ),
         ),
     )

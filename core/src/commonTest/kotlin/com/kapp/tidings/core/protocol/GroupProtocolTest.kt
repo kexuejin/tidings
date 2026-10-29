@@ -658,7 +658,7 @@ class GroupProtocolTest {
         agentId = "DSH",
         hostNodeId = OWNER,
         name = "dsh-teahouse-mobile",
-        wsId = "ws-1",
+        defaultWsId = "ws-1",
     )
 
     /**
@@ -689,7 +689,7 @@ class GroupProtocolTest {
     @Test
     fun aSameRevisionDoesNotOverwriteExistingVirtualAgents() {
         val local = metaWithAgents(rev = 7, agents = listOf(oneAgent()))
-        val other = VirtualAgentMember(agentId = "CODEX", hostNodeId = BOB, name = "codex-b", wsId = "ws-2")
+        val other = VirtualAgentMember(agentId = "CODEX", hostNodeId = BOB, name = "codex-b", defaultWsId = "ws-2")
         val incoming = metaWithAgents(rev = 7, agents = listOf(other))
         val decision = GroupMerge.decide(local, incoming, SELF)
         assertTrue(
