@@ -11,6 +11,8 @@ import kotlin.test.assertTrue
 /** 用桌面端真实数据，验证 `@dsh-teahouse-mobile` 到底能不能触发。 */
 class RealDataTriggerVerifyTest {
 
+    private val KINDS = setOf("dsh")
+
     private val self = "a1b2c3d4-6e74-4a7c-aab1-20a1d1284cd6"
 
     private fun realCtx() = SenderIdentityContext(

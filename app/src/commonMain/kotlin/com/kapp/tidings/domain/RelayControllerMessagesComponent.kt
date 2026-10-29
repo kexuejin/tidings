@@ -119,9 +119,9 @@ fun handleSend(peerId: String, text: String) {
         val remoteAgentPresent = targetPeer?.isAgent == true
         val localAgentPresent = host.onAgentPrompt != null && !remoteAgentPresent
         // 该宿主上**所有** kind（一台设备可以装多个 agent）。取不到才退回默认集。
-        val agentKinds = host._state.value.agentKindsByHost()[peerId]
-            ?.takeIf { it.isNotEmpty() }
-            ?: RelayController.DEFAULT_AGENT_KINDS
+        // kinds 只来自**声明**（会话/工作区帧自报）：没有声明就没有可点名的对象，
+        // 不再退回任何内置默认种类（债#6）。
+        val agentKinds = host._state.value.agentKindsByHost()[peerId].orEmpty()
         val route = RelayController.agentPromptRoute(
             text = body,
             groupId = groupId,
@@ -580,7 +580,8 @@ fun handleOnInbound(envelope: Envelope) {
         val senderPeer = host._state.value.peer(envelope.from)
         val remote = senderPeer?.isAgent == true
         GroupAgentRouteFacts(
-            agentKinds = RelayController.DEFAULT_AGENT_KINDS,
+            // 单聊里本机驱动执行：可点名的种类 = **本机**声明过的那些（债#6：无内置默认）。
+            agentKinds = host._state.value.agentKindsByHost()[host._state.value.selfNodeId].orEmpty(),
             localAgentPresent = host.onAgentPrompt != null && !remote,
             remoteAgentPresent = remote,
         )

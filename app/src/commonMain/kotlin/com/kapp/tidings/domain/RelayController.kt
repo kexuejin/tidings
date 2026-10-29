@@ -1792,14 +1792,6 @@ class RelayController(
         internal const val MENTION_ALL: String = "@all"
 
         /**
-         * 默认要认的 agent kind（兼容老调用点与历史测试）。
-         *
-         * 真正的口径是**这个会话里有哪些 agent**（解析器的 `GroupParticipantRows.agentKinds`），
-         * 由调用方传进来；默认值只是让「只有一个 dsh agent」的旧场景保持原样。
-         */
-        val DEFAULT_AGENT_KINDS: Set<String> = setOf("dsh")
-
-        /**
          * 点名正则：`@<kind>`，case-insensitive，词边界。
          *
          * kind 来自**解析器**（`SenderIdentity.mentionToken` 与它同源），所以「@ 候选里
@@ -1833,20 +1825,21 @@ class RelayController(
             return Regex("(?i)@(?:" + alternatives.joinToString("|") + ")(?![a-z0-9_-])")
         }
 
-        /** 这条文本有没有点名这个会话里的某个 agent（默认只认 `@dsh`）。 */
+        /**
+         * 这条文本有没有点名这个会话里的某个 agent。
+         *
+         * [agentKinds] 来自**声明**（`agentKindsByHost()` / 群成员解析），没有默认值 ——
+         * 债#6 之后本仓不认任何内置种类：没声明就没有可点名的对象。
+         */
         fun isMentioningAgent(
             text: String,
-            agentKinds: Set<String> = DEFAULT_AGENT_KINDS,
+            agentKinds: Set<String>,
         ): Boolean {
             val regex = agentMentionRegex(agentKinds) ?: return false
             return text.contains(regex)
         }
 
-        /** 兼容旧调用点的名字（只认 dsh）。 */
-        fun isMentioningDsh(text: String): Boolean =
-            isMentioningAgent(text, DEFAULT_AGENT_KINDS)
-
-        /** 这条消息是不是 agent 说的（`senderId` 形如 `agent:<kind>`）。 */
+        /** 这条消息是不是 agent 说的（`senderId` 形如 `agent:<host>:<id>`）。 */
         fun isAgentAuthored(message: MessageUi?): Boolean =
             message?.senderId?.startsWith(AGENT_SENDER_PREFIX) == true
 
@@ -1875,7 +1868,7 @@ class RelayController(
             groupId: String?,
             isWorkspaceGroup: Boolean,
             repliedToIsAgent: Boolean,
-            agentKinds: Set<String> = DEFAULT_AGENT_KINDS,
+            agentKinds: Set<String>,
         ): Boolean {
             if (groupId == null) return true
             if (isMentioningAgent(text, agentKinds)) return true
@@ -1907,7 +1900,7 @@ class RelayController(
             repliedToIsAgent: Boolean,
             localAgentPresent: Boolean,
             remoteAgentPresent: Boolean,
-            agentKinds: Set<String> = DEFAULT_AGENT_KINDS,
+            agentKinds: Set<String>,
         ): AgentPromptRoute {
             if (!shouldTriggerAgent(text, groupId, isWorkspaceGroup, repliedToIsAgent, agentKinds)) {
                 return AgentPromptRoute.None
@@ -1929,7 +1922,7 @@ class RelayController(
          */
         fun extractAgentPrompt(
             text: String,
-            agentKinds: Set<String> = DEFAULT_AGENT_KINDS,
+            agentKinds: Set<String>,
         ): String {
             val regex = agentMentionRegex(agentKinds)
                 ?: return text.trim().ifBlank { text }
@@ -1938,10 +1931,6 @@ class RelayController(
                 .trim()
                 .ifBlank { text }
         }
-
-        /** 兼容旧调用点的名字（只剥 `@dsh`）。 */
-        fun extractDshPrompt(text: String): String =
-            extractAgentPrompt(text, DEFAULT_AGENT_KINDS)
 
         internal fun isGroupText(envelope: Envelope): Boolean =
             envelope.type == MsgTypes.MSG && msgKindOf(envelope) == MsgKinds.GROUP_TEXT

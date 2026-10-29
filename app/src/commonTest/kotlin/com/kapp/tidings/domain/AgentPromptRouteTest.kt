@@ -23,6 +23,8 @@ import kotlin.test.assertEquals
  */
 class AgentPromptRouteTest {
 
+    private val KINDS = setOf("dsh")
+
     private fun route(
         text: String = "@dsh 跑一下测试",
         groupId: String? = "g-1",

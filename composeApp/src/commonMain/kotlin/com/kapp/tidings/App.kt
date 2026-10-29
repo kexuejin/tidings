@@ -1153,7 +1153,7 @@ fun RelayApp(
                                 openChat(com.kapp.tidings.core.protocol.ConvId.group(gid))
                             }
                         },
-                        onCreateNew = { path, _, groupName, _ ->
+                        onCreateNew = { path, groupName, _ ->
                             showCreateWsDialog = false
                             val members = state.peers.filter { it.online }.map { it.nodeId }
                             // 「关联本地全新目录」分支：还没有工作区行（wsId = null），

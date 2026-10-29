@@ -854,7 +854,7 @@ public fun DesktopShell(
                                             openConversation(convId)
                                         }
                                     },
-                                    onCreateNew = { path, _, groupName, _ ->
+                                    onCreateNew = { path, groupName, _ ->
                                         showCreateWsDialog = false
                                         val members = state.peers.filter { it.online }.map { it.nodeId }
                                         // 全新目录还没有工作区行（wsId=null）：群先建出来当协同通道，

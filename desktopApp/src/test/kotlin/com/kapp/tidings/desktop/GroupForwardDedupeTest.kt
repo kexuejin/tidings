@@ -41,6 +41,7 @@ class GroupForwardDedupeTest {
                 existingMessages = existing,
                 finalAnswer = "test2",          // ← relay 剥离后的正文
                 eventAt = 1_500L,
+                agentKind = "dsh",
             ),
             "剥掉 @token 之后内容相同 ⇒ 群里已经有了，不能再发一条",
         )
@@ -56,6 +57,7 @@ class GroupForwardDedupeTest {
                 existingMessages = existing,
                 finalAnswer = "部署到测试机",
                 eventAt = 1_500L,
+                agentKind = "dsh",
             ),
             "内容不同就该正常转发",
         )
@@ -74,6 +76,7 @@ class GroupForwardDedupeTest {
                 existingMessages = emptyList(),
                 finalAnswer = "帮我看下构建",
                 eventAt = 1_000L,
+                agentKind = "dsh",
             ),
             "用户在 DSH 里打的字群里没有 ⇒ 必须转发，否则手机端永远看不到",
         )
@@ -88,6 +91,7 @@ class GroupForwardDedupeTest {
                 existingMessages = listOf(msg("test2", at = 1_000L)),
                 finalAnswer = "test2",
                 eventAt = 1_500L,
+                agentKind = "dsh",
             ),
             "agent 的回答走正常转发，不参与这条去重",
         )
@@ -103,6 +107,7 @@ class GroupForwardDedupeTest {
                 existingMessages = existing,
                 finalAnswer = "test2",
                 eventAt = 1_000L + 200_000L,     // 200s 后
+                agentKind = "dsh",
             ),
             "隔几分钟重新执行同一条是合理的，不该被当重复吞掉",
         )

@@ -81,15 +81,6 @@ import org.jetbrains.compose.resources.stringResource
  * - 10% 场景（分支 A）：全新目录挑选路径，自动联动群名，默认自动同步信任设备。
  */
 
-/**
- * 分支 A 实际下发的宿主 agent 种类（[onCreateNew] 的 `agentKind` 实参）。
- *
- * 此前这里硬编码 `"Codex"`，而同一张表单上只读展示的却是「DSH（默认本地执行助理）」
- * —— 显示与传参两个来源各说各话。领域侧默认常驻宿主只有 `dsh` 一个
- * （RelayController 的 DEFAULT_AGENT_KINDS），所以显示与传参统一到它。
- */
-internal const val WORKSPACE_CREATE_DEFAULT_AGENT_KIND = "dsh"
-
 @Composable
 public fun WorkspaceGroupCreateDialog(
     workspaces: List<WorkspaceUi>,
@@ -98,7 +89,7 @@ public fun WorkspaceGroupCreateDialog(
     onOpenChat: (groupId: String) -> Unit,
     onShowQr: (workspace: WorkspaceUi) -> Unit,
     onQuickCreate: (workspace: WorkspaceUi, syncMyDevice: Boolean) -> Unit,
-    onCreateNew: (path: String, agentKind: String, groupName: String, syncMyDevice: Boolean) -> Unit,
+    onCreateNew: (path: String, groupName: String, syncMyDevice: Boolean) -> Unit,
     initialNewPath: String = "",
 ) {
     val sp = LocalAppSpacing.current
@@ -303,7 +294,6 @@ public fun WorkspaceGroupCreateDialog(
                 onClick = {
                     onCreateNew(
                         newPath.trim(),
-                        WORKSPACE_CREATE_DEFAULT_AGENT_KIND,
                         groupName.trim(),
                         syncMyDevice,
                     )

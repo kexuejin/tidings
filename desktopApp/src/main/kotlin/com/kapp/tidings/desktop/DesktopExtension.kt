@@ -267,8 +267,11 @@ internal class DesktopExtension(
                     ?: allSessionsForId.firstOrNull { !it.wsId.isNullOrBlank() }?.wsId
                 var wsTitle: String? = localSess?.wsTitle?.takeIf { it.isNotBlank() }
                     ?: allSessionsForId.firstOrNull { !it.wsTitle.isNullOrBlank() }?.wsTitle
-                val agentKind: String = localSess?.agentKind?.takeIf { it.isNotBlank() }
-                    ?: allSessionsForId.firstOrNull { !it.agentKind.isNullOrBlank() }?.agentKind ?: "dsh"
+                // kind 只来自**声明**（会话帧自报）：没有任何声明 ⇒ 没有可署名的身份，
+                // 不再退回内置默认种类（债#6）。此时 chatMessageFor 返回 null，
+                // 事件照常落本地台账，只是不进群（无人能给它署名）。
+                val agentKind: String? = localSess?.agentKind?.takeIf { it.isNotBlank() }
+                    ?: allSessionsForId.firstOrNull { !it.agentKind.isNullOrBlank() }?.agentKind
                 val sessionTitle: String? = localSess?.title?.takeIf { it.isNotBlank() }
                     ?: allSessionsForId.firstOrNull { !it.title.isNullOrBlank() }?.title
 
@@ -347,6 +350,7 @@ internal class DesktopExtension(
                                 existingMessages = controller.state.value.messages[convId].orEmpty(),
                                 finalAnswer = finalAnswer,
                                 eventAt = rec.at,
+                                agentKind = agentKind,
                             )
                             if (!shouldForwardAgentEventToGroup(isUserAuthoredPrompt = isUserPrompt, alreadyInChat = alreadyInChat)) {
                                 logEventRoute(rec.eventType, rec.sessionId, rec.cursor, finalAnswer.length, "duplicate-in-chat")
@@ -640,7 +644,7 @@ internal class DesktopExtension(
         rec: AgentSessionRegistry.EventRecord,
         sessionTitle: String?,
         selfNodeId: String,
-        agentKind: String,
+        agentKind: String?,
     ): AgentChatMessage? = agentChatMessageFor(
         rec = rec,
         sessionTitle = sessionTitle,
@@ -803,7 +807,6 @@ internal class DesktopExtension(
                         .firstOrNull { it.sessionId == rec.sessionId && !it.title.isNullOrBlank() }?.title
                     val backfillKind = state.agentSessions.values
                         .firstOrNull { it.sessionId == rec.sessionId && !it.agentKind.isNullOrBlank() }?.agentKind
-                        ?: "dsh"
                     val message = chatMessageFor(
                         rec = rec,
                         sessionTitle = backfillTitle,
@@ -883,7 +886,6 @@ internal class DesktopExtension(
                         .firstOrNull { it.sessionId == sessionId && !it.title.isNullOrBlank() }?.title
                     val backfillAgentKind = state.agentSessions.values
                         .firstOrNull { it.sessionId == sessionId && !it.agentKind.isNullOrBlank() }?.agentKind
-                        ?: "dsh"
                     val message = chatMessageFor(
                         rec = rec,
                         sessionTitle = backfillTitle,
@@ -905,6 +907,7 @@ internal class DesktopExtension(
                                 existingMessages = controller.state.value.messages[convId].orEmpty(),
                                 finalAnswer = finalAnswer,
                                 eventAt = rec.at,
+                                agentKind = backfillAgentKind,
                             )
                         ) {
                             continue
@@ -984,11 +987,14 @@ internal fun alreadyForwardedToGroup(
     existingMessages: List<com.kapp.tidings.domain.model.MessageUi>,
     finalAnswer: String,
     eventAt: Long,
+    agentKind: String?,
 ): Boolean {
     if (!isUserAuthoredPrompt) return false
-    val answer = com.kapp.tidings.domain.RelayController.extractAgentPrompt(finalAnswer)
+    // kinds 由调用方给（会话自报的那一个）；两侧用同一份 ⇒ 去重口径一致。
+    val kinds = setOfNotNull(agentKind?.trim()?.lowercase()?.takeIf { it.isNotBlank() })
+    val answer = com.kapp.tidings.domain.RelayController.extractAgentPrompt(finalAnswer, kinds)
     return existingMessages.any { existing ->
-        com.kapp.tidings.domain.RelayController.extractAgentPrompt(existing.text) == answer &&
+        com.kapp.tidings.domain.RelayController.extractAgentPrompt(existing.text, kinds) == answer &&
             kotlin.math.abs(existing.at - eventAt) < 120_000L
     }
 }
@@ -1142,7 +1148,7 @@ internal fun agentChatMessageFor(
     rec: AgentSessionRegistry.EventRecord,
     sessionTitle: String?,
     selfNodeId: String,
-    agentKind: String,
+    agentKind: String?,
     format: (AgentSessionRegistry.EventRecord, String?) -> String?,
     /**
      * 只有思考、没有正文时的替代正文（空串 = 维持旧行为，直接丢弃这条）。
@@ -1153,6 +1159,9 @@ internal fun agentChatMessageFor(
      */
     thinkingOnlyFallback: String = "",
 ): AgentChatMessage? {
+    // 债#6：没有 kind（且没有 agentId）就没有可署名的身份 —— 不产出发送者，
+    // 事件不进群。身份必须来自声明；本地台账照记（recordLocalEvent 在调用方）。
+    if (agentKind.isNullOrBlank()) return null
     val eventText = format(rec, sessionTitle) ?: return null
     if (!hasVisibleText(eventText)) return null
     val isUserPrompt = rec.eventType.lowercase() == "user.message"

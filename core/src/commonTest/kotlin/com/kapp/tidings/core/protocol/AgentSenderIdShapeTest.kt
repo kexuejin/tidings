@@ -4,6 +4,7 @@ package com.kapp.tidings.core.protocol
 
 import kotlin.test.Test
 import kotlin.test.assertEquals
+import kotlin.test.assertFailsWith
 import kotlin.test.assertTrue
 
 /**
@@ -27,12 +28,11 @@ class AgentSenderIdShapeTest {
 
     private val host = "a1b2c3d4-6e74-4a7c-aab1-20a1d1284cd6"
 
-    /** **产出的 id 必须放得进 `Limits.ID` 字节。** 中文 agent 名也不许超。 */
+    /** **产出的 id 必须放得进 `Limits.ID` 字节。** 混合名里的 ASCII 部分也不许超。 */
     @Test
     fun theProducedIdNeverExceedsTheByteBudget() {
         val cases = listOf(
             "dsh",
-            "智能体名字很长很长的二十一个字",
             "a".repeat(200),
             "codex-with-a-very-long-alias",
             "中文-混合-English-名字",
@@ -65,7 +65,7 @@ class AgentSenderIdShapeTest {
     /** 往返恒等：任意输入产出的 id，parse 回来必须还是 (host, 规范化后的名字)。 */
     @Test
     fun everyProducedIdRoundTrips() {
-        val names = listOf("dsh", "DSH", "my:agent", "中文名", "a b_c", "x".repeat(80))
+        val names = listOf("dsh", "DSH", "my:agent", "a b_c", "x".repeat(80))
         for (raw in names) {
             val id = AgentSenderId.of(host, raw, "dsh")
             val parsed = AgentSenderId.parse(id)
@@ -85,5 +85,20 @@ class AgentSenderIdShapeTest {
         val parsed = AgentSenderId.parse("agent:dsh")
         assertEquals(null, parsed?.first, "老形态没有 host")
         assertEquals("dsh", parsed?.second)
+    }
+
+    /**
+     * **全非 ASCII 的名字拒绝产出身份**（债#6）：slug 归一化后为空 ⇒ 大声失败，
+     * 而不是静默退回某个内置种类的幽灵身份。注册方（插件清单）必须在源头给出
+     * 可 slug 化的名字。混合名（含 ASCII 段）不受影响 —— 保留 ASCII 部分即可。
+     */
+    @Test
+    fun aNameThatCannotBeSlugifiedIsRejected() {
+        assertFailsWith<IllegalArgumentException> {
+            AgentSenderId.of(host, "智能体名字很长很长的二十一个字", null)
+        }
+        assertFailsWith<IllegalArgumentException> {
+            AgentSenderId.of(host, "中文名", null)
+        }
     }
 }

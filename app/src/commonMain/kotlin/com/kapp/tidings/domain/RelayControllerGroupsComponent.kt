@@ -200,7 +200,11 @@ private fun handleCreateGroupInternal(
         // `wsId` 在 WorkspaceUi 上是非空的（见 AgentUi 的声明），所以这里不用再兜到描述串 ——
         // 那个兜底是死代码，编译器会报「Elvis 恒取左操作数」。
         val wsName = targetWs.wsTitle ?: targetWs.wsId
-        val agentKind = targetWs.agentKind ?: "DSH"
+        // 展示与署名用的 kind：工作区自报优先；工作区没报时用声明的身份键
+        // （seat 存在 ⇒ resolveVirtualAgentKey 已兜过 agentId/agentKind 之一）。
+        // 两者都拿不到 ⇒ 没有可署名的身份（债#6：无内置默认种类），不发开场白。
+        val agentKind = targetWs.agentKind?.takeIf { it.isNotBlank() } ?: seat?.agentId
+        if (agentKind != null) {
         // agent 的身份是 **(设备, agent)**，不是裸 kind —— 否则两台设备上同名 agent
         // 在 senderId 里完全一样，会被合并成同一个人（见 AgentSenderId 的 KDoc）。
         // 开场白的署名必须与群里那条声明**同一个人**：声明用的是兜底后的身份键
@@ -248,6 +252,7 @@ private fun handleCreateGroupInternal(
                 )
             }
         }
+    }
     }
 
     // 「正在通知 0 位成员」读起来像失败。工作区群允许先建后拉，所以 0 人时换一句

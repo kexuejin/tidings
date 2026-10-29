@@ -23,23 +23,27 @@ import kotlin.test.assertTrue
  */
 class AgentTriggerRuleTest {
 
+    /** 测试样本种类：kind 是声明数据的替身，不是生产默认（债#6）。 */
+    private val KINDS = setOf("dsh")
+
+
     @Test
     fun aOneToOneMessageAlwaysTriggers() {
         // 1:1：进这个会话本身就是在指名 agent，没有第三方旁观。
-        assertTrue(RelayController.shouldTriggerAgent("随便聊两句", groupId = null, isWorkspaceGroup = false, repliedToIsAgent = false))
-        assertTrue(RelayController.shouldTriggerAgent("@dsh 跑一下测试", groupId = null, isWorkspaceGroup = false, repliedToIsAgent = false))
+        assertTrue(RelayController.shouldTriggerAgent("随便聊两句", groupId = null, isWorkspaceGroup = false, repliedToIsAgent = false, agentKinds = KINDS))
+        assertTrue(RelayController.shouldTriggerAgent("@dsh 跑一下测试", groupId = null, isWorkspaceGroup = false, repliedToIsAgent = false, agentKinds = KINDS))
     }
 
     @Test
     fun anOrdinaryGroupNeedsTheMention() {
-        assertTrue(RelayController.shouldTriggerAgent("@dsh 帮我看看", groupId = "g-1", isWorkspaceGroup = false, repliedToIsAgent = false))
+        assertTrue(RelayController.shouldTriggerAgent("@dsh 帮我看看", groupId = "g-1", isWorkspaceGroup = false, repliedToIsAgent = false, agentKinds = KINDS))
         assertFalse(
-            RelayController.shouldTriggerAgent("我先去吃饭", groupId = "g-1", isWorkspaceGroup = false, repliedToIsAgent = false),
+            RelayController.shouldTriggerAgent("我先去吃饭", groupId = "g-1", isWorkspaceGroup = false, repliedToIsAgent = false, agentKinds = KINDS),
             "普通群里闲聊不该拉起宿主的 bash / 文件读写",
         )
         // 「回复 agent 那条」在**普通群**里不算触发 —— 那是工作区群才有的接话语义。
         assertFalse(
-            RelayController.shouldTriggerAgent("好", groupId = "g-1", isWorkspaceGroup = false, repliedToIsAgent = true),
+            RelayController.shouldTriggerAgent("好", groupId = "g-1", isWorkspaceGroup = false, repliedToIsAgent = true, agentKinds = KINDS),
             "普通群里的接话不该变成一次执行",
         )
     }
@@ -47,26 +51,26 @@ class AgentTriggerRuleTest {
     @Test
     fun aWorkspaceGroupTriggersOnTheMentionOrOnAPickUp() {
         assertTrue(
-            RelayController.shouldTriggerAgent("@dsh 继续", groupId = "ws-1", isWorkspaceGroup = true, repliedToIsAgent = false),
+            RelayController.shouldTriggerAgent("@dsh 继续", groupId = "ws-1", isWorkspaceGroup = true, repliedToIsAgent = false, agentKinds = KINDS),
             "点名永远算",
         )
         assertTrue(
-            RelayController.shouldTriggerAgent("那就按这个来吧", groupId = "ws-1", isWorkspaceGroup = true, repliedToIsAgent = true),
+            RelayController.shouldTriggerAgent("那就按这个来吧", groupId = "ws-1", isWorkspaceGroup = true, repliedToIsAgent = true, agentKinds = KINDS),
             "接 agent 的话不必再 @ 一遍 —— 否则收窄群规则就成了纯损失",
         )
         assertFalse(
-            RelayController.shouldTriggerAgent("我先去吃饭", groupId = "ws-1", isWorkspaceGroup = true, repliedToIsAgent = false),
+            RelayController.shouldTriggerAgent("我先去吃饭", groupId = "ws-1", isWorkspaceGroup = true, repliedToIsAgent = false, agentKinds = KINDS),
             "工作区群里**别人之间的闲聊**不该触发 —— 这条正是这次改掉的东西",
         )
     }
 
     @Test
     fun theMentionMatchIsCaseInsensitiveAndWordBounded() {
-        assertTrue(RelayController.isMentioningDsh("@dsh 在吗"))
-        assertTrue(RelayController.isMentioningDsh("@DSH 在吗"))
-        assertTrue(RelayController.isMentioningDsh("hey @Dsh 在吗"))
-        assertFalse(RelayController.isMentioningDsh("@dshx 这不是点名"), "词边界：@dshx 不是 @dsh")
-        assertFalse(RelayController.isMentioningDsh("dsh 没有 @"))
+        assertTrue(RelayController.isMentioningAgent("@dsh 在吗", KINDS))
+        assertTrue(RelayController.isMentioningAgent("@DSH 在吗", KINDS))
+        assertTrue(RelayController.isMentioningAgent("hey @Dsh 在吗", KINDS))
+        assertFalse(RelayController.isMentioningAgent("@dshx 这不是点名", KINDS), "词边界：@dshx 不是 @dsh")
+        assertFalse(RelayController.isMentioningAgent("dsh 没有 @", KINDS))
     }
 
     /**
@@ -77,13 +81,13 @@ class AgentTriggerRuleTest {
      */
     @Test
     fun aWorkspaceQualifiedMentionAlsoWakesTheAgent() {
-        assertTrue(RelayController.isMentioningDsh("@dsh-teahouse 跑一下测试"))
-        assertTrue(RelayController.isMentioningDsh("@DSH-TEAHOUSE 大小写不敏感"))
+        assertTrue(RelayController.isMentioningAgent("@dsh-teahouse 跑一下测试", KINDS))
+        assertTrue(RelayController.isMentioningAgent("@DSH-TEAHOUSE 大小写不敏感", KINDS))
         // 边界仍然要严：`@dshx` 与 `@dsh_extra` 都不是点名（既有测试钉着，别放松）。
-        assertFalse(RelayController.isMentioningDsh("@dshx 不是"))
-        assertFalse(RelayController.isMentioningDsh("@dsh_extra 不是"))
+        assertFalse(RelayController.isMentioningAgent("@dshx 不是", KINDS))
+        assertFalse(RelayController.isMentioningAgent("@dsh_extra 不是", KINDS))
         // 剥掉 mention 之后正文要干净（`-` 那段一起剥，不留残渣）。
-        assertEquals("跑一下测试", RelayController.extractDshPrompt("@dsh-teahouse 跑一下测试"))
+        assertEquals("跑一下测试", RelayController.extractAgentPrompt("@dsh-teahouse 跑一下测试", KINDS))
     }
 
     @Test

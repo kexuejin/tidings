@@ -43,12 +43,17 @@ object AgentSenderId {
      * @param hostNodeId 托管它的设备（本机发消息时就是本机 nodeId）。
      * @param agentId agent 自己的身份名；空则退回 [kind]。
      * @param kind 驱动类型（`dsh` / `native` …），只作 [agentId] 缺失时的兜底与去重提示。
+     * @throws IllegalArgumentException [agentId] 与 [kind] 双缺（或归一化后为空）时 ——
+     *   **不再有任何内置默认种类**（债#6）：身份必须来自注册的清单（M2 起）或会话/
+     *   工作区帧里自报的 kind。静默产出一个 `dsh` 幽灵身份，收端会把它当成真实 agent 渲染。
      */
     fun of(hostNodeId: String, agentId: String?, kind: String? = null): String {
         val host = hostNodeId.trim()
+        require(host.isNotEmpty()) { "agent identity requires a host nodeId (two-part ids have no reader since the legacy branch was removed)" }
         val raw = (agentId?.trim()?.takeIf { it.isNotBlank() }
-            ?: kind?.trim()?.takeIf { it.isNotBlank() }
-            ?: "dsh").lowercase()
+            ?: kind?.trim()?.takeIf { it.isNotBlank() })
+            ?.lowercase()
+            ?: throw IllegalArgumentException("agent identity requires agentId or kind; no built-in default kind exists")
         // **截断要按字节，且必须同时消掉冒号 —— 两件事都源自同一处不对称。**
         //
         // ① 按字节：`Limits.ID` 校验的是 UTF-8 长度，而 `take(21)` 数的是**字符**。
@@ -62,9 +67,8 @@ object AgentSenderId {
         //
         // 归一化成 ASCII 短名（与 `AgentMemberName.slug` 同一套字符集）之后，两个问题一起
         // 消失：没有多字节字符，也没有分隔符。
-        val name = slugForSenderId(raw).take(MAX_AGENT_ID).trimEnd('-').ifBlank { "dsh" }
-        // 宿主 id 缺失时退回老形态：宁可少一个字段，也不要产出 `agent::dsh` 这种怪东西。
-        if (host.isBlank()) return AGENT_SENDER_PREFIX + name
+        val name = slugForSenderId(raw).take(MAX_AGENT_ID).trimEnd('-')
+        require(name.isNotEmpty()) { "agent identity is empty after normalization: $raw" }
         return AGENT_SENDER_PREFIX + host + ":" + name
     }
 

@@ -4,6 +4,7 @@ package com.kapp.tidings.core.protocol
 
 import kotlin.test.Test
 import kotlin.test.assertEquals
+import kotlin.test.assertFailsWith
 import kotlin.test.assertNull
 import kotlin.test.assertTrue
 
@@ -32,12 +33,29 @@ class AgentSenderIdTest {
         assertTrue(a != b, "两台设备上的 dsh 不能被当成同一个人：$a vs $b")
     }
 
-    /** agentId 缺失时退回 kind；两者都空时退回 `dsh`，绝不产出 `agent::` 这种怪东西。 */
+    /** agentId 缺失时退回 kind —— 这是唯一的兜底；kind 也没有就**拒绝产出身份**。 */
     @Test
     fun aMissingAgentIdFallsBackToTheKind() {
         assertEquals("agent:$host:native", AgentSenderId.of(host, null, "native"))
-        assertEquals("agent:$host:dsh", AgentSenderId.of(host, "  ", null))
-        assertEquals("agent:dsh", AgentSenderId.of("", "dsh"), "宿主缺失时退回老形态，不产出 agent::dsh")
+    }
+
+    /**
+     * **债#6：不再有任何内置默认种类。** agentId 与 kind 双缺（或归一化后为空）时
+     * 大声失败，而不是静默产出一个 `agent:<host>:dsh` 的幽灵身份 —— 那个名字不是
+     * 任何声明给的，收端却会把它当成一个真实 agent 渲染。身份必须来自注册的清单
+     * （M2 起）或会话/工作区帧里自报的 kind。
+     */
+    @Test
+    fun anUnnamedAgentRefusesToProduceAnIdentity() {
+        assertFailsWith<IllegalArgumentException>("agentId 与 kind 双缺必须大声失败") {
+            AgentSenderId.of(host, "  ", null)
+        }
+        assertFailsWith<IllegalArgumentException> {
+            AgentSenderId.of(host, null, "///")
+        }
+        assertFailsWith<IllegalArgumentException>("宿主缺失同样不许产出两段式幽灵身份") {
+            AgentSenderId.of("", "dsh")
+        }
     }
 
     /**

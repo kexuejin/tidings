@@ -205,7 +205,7 @@ public fun ConversationsPane(
                     onSelect(com.kapp.tidings.core.protocol.ConvId.group(gid))
                 }
             },
-            onCreateNew = { path, _, groupName, _ ->
+            onCreateNew = { path, groupName, _ ->
                 creatingWorkspaceGroup = false
                 val members = state.peers.filter { it.online }.map { it.nodeId }
                 val gid = onCreateGroup(groupName, members, path)
