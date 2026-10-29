@@ -123,6 +123,19 @@ private fun JsonElement.jsonPrimitiveOrNull(): JsonPrimitive? =
 private val JsonPrimitive.contentOrNull: String?
     get() = if (isString) content else null
 
+/**
+ * 跨端派单的宿主侧委托（M4，规格 §6.2）。
+ *
+ * `POST /v1/agent/invoke` 只做 HTTP 解包：真正的派发（P2P 网道、租约、看板卡广播）
+ * 由**装配了域层的那一侧**实现（desktopApp 把它接到 `RelayController.dispatchCrossHostInvoke`）。
+ * agentNode 单进程没有域层（没有群、没有消息库），这个属性就是 null ⇒ 路由如实回 503，
+ * 不假装接了单。
+ */
+fun interface AgentInvokeDispatcher {
+    /** @return invokeId（派单已受理，租约已登记）；null = 群里没有这个 agent 的声明。 */
+    suspend fun dispatch(groupId: String, agentId: String, prompt: String, wsId: String?, deadlineMs: Long): String?
+}
+
 class ControlPlane(
     private val runtime: NodeRuntime,
     private val httpPort: Int,
@@ -190,6 +203,11 @@ class ControlPlane(
      * 两把不同的锁：插件注册只认插件 token，其余路由只认 [token]。
      */
     val pluginTokenGate: PluginTokenGate = PluginTokenGate.fromEnvironment(),
+    /**
+     * 跨端派单的宿主侧委托（M4）。见 [AgentInvokeDispatcher] 的 KDoc：
+     * desktopApp 装配域层后接上；agentNode 单进程保持 null ⇒ 503。
+     */
+    var invokeDispatcher: AgentInvokeDispatcher? = null,
 ) {
 
     private val json = Json { ignoreUnknownKeys = true }
@@ -379,6 +397,9 @@ class ControlPlane(
                 // 宿主侧派单/操作/点查：插件网关的执行入口（Layer 3 与群聊桥都走这里）。
                 path == "/v1/plugin/task" && method == "POST" -> pluginDispatch(exchange)
                 path == "/v1/plugin/action" && method == "POST" -> pluginAction(exchange)
+                // 跨端派单（M4，规格 §6.2）：HTTP 入口只解包，派发委托给域层网道（§6.2 裁决：
+                // 与 /v1/agent/run 的单向宣告帧是两种职责，详见追踪器的路由对账记录）。
+                path == "/v1/agent/invoke" && method == "POST" -> agentInvoke(exchange)
                 // 某个 agent 的执行名单（谁能让它干活）—— 逐设备勾选。
                 path == "/v1/agent/exec-devices" && method == "GET" -> readExecDeviceList(exchange)
                 path == "/v1/agent/exec-devices" && method == "PUT" -> writeExecDevice(exchange)
@@ -619,20 +640,65 @@ class ControlPlane(
         }
         val wsPath = obj["wsPath"]?.jsonPrimitiveOrNull()?.contentOrNull
         val requestedSessionId = obj["sessionId"]?.jsonPrimitiveOrNull()?.contentOrNull?.takeIf { it.isNotBlank() }
-        val driver = driverFor(entry)
+        var sessionId: String? = null
+        var status = "finished"
+        var error: String? = null
+        val collected = mutableListOf<JsonObject>()
+        runBlocking {
+            val outcome = executePluginTask(entry, prompt, wsPath, requestedSessionId) { _, eventRow ->
+                collected += eventRow
+            }
+            sessionId = outcome.first
+            status = outcome.second
+            error = outcome.third
+        }
+        val sid = sessionId
+        if (sid == null) {
+            respond(
+                exchange,
+                502,
+                errorJson("plugin-unreachable", "cannot open a session with \"" + pluginId + "\": " + (error ?: "unknown")),
+            )
+            return
+        }
+        respond(
+            exchange,
+            200,
+            buildJsonObject {
+                put("ok", true)
+                put("pluginId", pluginId)
+                put("sessionId", sid)
+                put("status", status)
+                putJsonArray("events") { collected.forEach { add(it) } }
+                put("note", "events are recorded in the session ledger (GET /v1/agent/sessions?sessionId=…)")
+            },
+        )
+    }
 
-        // 会话：接续调用方点名的，或开一个新的。开不出来（插件不可达）→ 502 如实回，
+    /**
+     * 本机插件派单的**唯一实现**：HTTP 的 `/v1/plugin/task` 与 M4 执行桥
+     * （`AgentInvokeExecutor` 的 desktopApp 实现）都走它 —— 两处各写一份，
+     * 迟早漂成「面板派单有台账、执行桥派单没台账」那种分叉。
+     *
+     * @return (sessionId, status, error)；sessionId = null 表示会话都开不出来（插件不可达）。
+     * [onEvent] 收 (eventType, 该事件在台账里的那一行) —— 卡片事件连同原始 JSON 一起给，
+     * 执行桥靠它把卡片带回发起方（§6.2 的看板卡）。
+     */
+    suspend fun executePluginTask(
+        entry: PluginRegistry.Entry,
+        prompt: String,
+        wsPath: String?,
+        requestedSessionId: String?,
+        onEvent: (String, JsonObject) -> Unit,
+    ): Triple<String?, String, String?> {
+        val driver = driverFor(entry)
+        // 会话：接续调用方点名的，或开一个新的。开不出来（插件不可达）→ 如实上抛路径回，
         // 不编一个 sessionId 进台账。
         val sessionId = requestedSessionId ?: run {
             val handle = try {
-                runBlocking { driver.openSession(wsPath ?: "", null) }
+                driver.openSession(wsPath ?: "", null)
             } catch (t: Throwable) {
-                respond(
-                    exchange,
-                    502,
-                    errorJson("plugin-unreachable", "cannot open a session with \"" + pluginId + "\": " + (t.message ?: t::class.simpleName)),
-                )
-                return
+                return Triple(null, "error", t.message ?: t::class.simpleName)
             }
             handle.sessionId
         }
@@ -652,36 +718,33 @@ class ControlPlane(
         // 游标按会话续走：台账按游标排序、同游标就地替换 —— 每次派单从 1 重数会把
         // 上一次的事件覆盖掉（测试 PluginDispatchTest.consecutiveDispatches 钉的就是它）。
         val cursor = pluginEventCursors.computeIfAbsent(sessionId) { java.util.concurrent.atomic.AtomicLong(0) }
-        val collected = mutableListOf<JsonObject>()
         var endedInError = false
 
-        runBlocking {
-            driver.executeTask(sessionId, prompt) { event ->
-                val (eventType, summary, body) = when (event) {
-                    is DriverEvent.ThoughtDelta -> Triple("thought.delta", null, event.delta)
-                    is DriverEvent.TokenDelta -> Triple("token.delta", null, event.delta)
-                    is DriverEvent.ToolCall -> Triple("tool.started", event.tool, event.inputJson)
-                    is DriverEvent.Card -> Triple("card", null, event.cardJson)
-                    is DriverEvent.Finished -> Triple("finished", event.finishReason, null)
-                    is DriverEvent.Error -> Triple("error", null, event.message)
-                }
-                val c = cursor.incrementAndGet()
-                sessions.recordEvent(
-                    nodeId = runtime.nodeId,
-                    sessionId = sessionId,
-                    cursor = c,
-                    eventType = eventType,
-                    summary = summary,
-                    body = body,
-                )
-                collected += buildJsonObject {
-                    put("cursor", c)
-                    put("eventType", eventType)
-                    summary?.let { put("summary", it) }
-                    body?.let { put("body", it) }
-                }
-                if (event is DriverEvent.Error) endedInError = true
+        driver.executeTask(sessionId, prompt) { event ->
+            val (eventType, summary, body) = when (event) {
+                is DriverEvent.ThoughtDelta -> Triple("thought.delta", null, event.delta)
+                is DriverEvent.TokenDelta -> Triple("token.delta", null, event.delta)
+                is DriverEvent.ToolCall -> Triple("tool.started", event.tool, event.inputJson)
+                is DriverEvent.Card -> Triple("card", null, event.cardJson)
+                is DriverEvent.Finished -> Triple("finished", event.finishReason, null)
+                is DriverEvent.Error -> Triple("error", null, event.message)
             }
+            val c = cursor.incrementAndGet()
+            sessions.recordEvent(
+                nodeId = runtime.nodeId,
+                sessionId = sessionId,
+                cursor = c,
+                eventType = eventType,
+                summary = summary,
+                body = body,
+            )
+            onEvent(eventType, buildJsonObject {
+                put("cursor", c)
+                put("eventType", eventType)
+                summary?.let { put("summary", it) }
+                body?.let { put("body", it) }
+            })
+            if (event is DriverEvent.Error) endedInError = true
         }
 
         sessions.recordSession(
@@ -694,17 +757,83 @@ class ControlPlane(
             wsPath = wsPath,
             outbound = true,
         )
+        return Triple(sessionId, if (endedInError) "error" else "finished", null)
+    }
 
-        respond(
-            exchange,
-            200,
-            buildJsonObject {
-                put("ok", true)
-                put("pluginId", pluginId)
-                put("sessionId", sessionId)
-                put("status", if (endedInError) "error" else "finished")
-                putJsonArray("events") { collected.forEach { add(it) } }
-                put("note", "events are recorded in the session ledger (GET /v1/agent/sessions?sessionId=…)")
+    /**
+     * 按 agentId 找**本机**承接该 agent 的插件：leader 的 agentId 优先，组员兜底。
+     * 两边都按 senderId 的同一套 slug 规则归一 —— 群声明里的 agentId 与 manifest 里
+     * 的 agentId 若大小写不一致，用裸相等会静默找不到（「插件明明在线却 no-plugin」）。
+     */
+    fun pluginForAgent(agentId: String): PluginRegistry.Entry? {
+        val wanted = com.kapp.tidings.core.protocol.AgentSenderId.slugForSenderId(agentId.trim())
+        if (wanted.isEmpty()) return null
+        val online = plugins.list().filter { it.status == "online" }
+        return online.firstOrNull { entry ->
+            entry.manifest.leader?.agentId?.let { com.kapp.tidings.core.protocol.AgentSenderId.slugForSenderId(it) } == wanted
+        } ?: online.firstOrNull { entry ->
+            entry.manifest.members.any {
+                com.kapp.tidings.core.protocol.AgentSenderId.slugForSenderId(it.agentId) == wanted
+            }
+        }
+    }
+
+    /**
+     * `POST /v1/agent/invoke` —— 跨端派单的 HTTP 入口（M4，规格 §6.2）。
+     *
+     * 职责对账结论（追踪器 M4 裁决）：现有 /v1/agent/ 下的全部路由都是 PPE-1 单向宣告帧发送器，
+     * 「带租约的任务派发 RPC」是独立职责 ⇒ 新开路由；`/v1/agent/run` 原语义不动。
+     * 这里只做解包与**如实**的失败面：域层没装配（agentNode 单进程）= 503，
+     * 群里没有这个 agent = 404 —— 都不假装接了单。
+     */
+    private fun agentInvoke(exchange: HttpExchange) {
+        val obj = readJsonObject(exchange) ?: return
+        val groupId = obj["groupId"]?.jsonPrimitiveOrNull()?.contentOrNull?.trim().orEmpty()
+        val agentId = obj["agentId"]?.jsonPrimitiveOrNull()?.contentOrNull?.trim().orEmpty()
+        val prompt = obj["prompt"]?.jsonPrimitiveOrNull()?.contentOrNull.orEmpty()
+        if (groupId.isEmpty() || agentId.isEmpty() || prompt.isEmpty()) {
+            respond(exchange, 400, errorJson("bad-request", "groupId / agentId / prompt are all required"))
+            return
+        }
+        val wsId = obj["wsId"]?.jsonPrimitiveOrNull()?.contentOrNull
+        val deadlineMs = obj["deadlineMs"]?.let { Codec.intOf(it) } ?: DEFAULT_INVOKE_DEADLINE_MS
+        if (deadlineMs <= 0) {
+            respond(exchange, 400, errorJson("bad-request", "deadlineMs must be positive (a lease without a deadline waits forever)"))
+            return
+        }
+        val dispatcher = invokeDispatcher
+        if (dispatcher == null) {
+            respond(
+                exchange,
+                503,
+                errorJson("invoke-not-wired", "no domain layer in this process; cross-host dispatch lives in the desktop shell"),
+            )
+            return
+        }
+        // fold 而不是 onFailure+getOrNull：两条路径都只许回**一次**响应 ——
+        // 域层抛了异常再补一个 404，第二条 respond 会砸在同一个 exchange 上。
+        runCatching { runBlocking { dispatcher.dispatch(groupId, agentId, prompt, wsId, deadlineMs) } }.fold(
+            onSuccess = { invokeId ->
+                if (invokeId == null) {
+                    respond(
+                        exchange,
+                        404,
+                        errorJson("agent-not-found", "no virtual agent \"" + agentId + "\" declared in group " + groupId),
+                    )
+                    return
+                }
+                respond(
+                    exchange,
+                    200,
+                    buildJsonObject {
+                        put("ok", true)
+                        put("invokeId", invokeId)
+                        put("note", "dispatched over the P2P mesh; the group sees only the leader's board card (zero cross-host text)")
+                    },
+                )
+            },
+            onFailure = { t ->
+                respond(exchange, 500, errorJson("invoke-failed", t.message ?: (t::class.simpleName ?: "unknown")))
             },
         )
     }
@@ -3162,6 +3291,8 @@ class ControlPlane(
         runCatching { URLDecoder.decode(value, "UTF-8") }.getOrDefault(value)
 
     companion object {
+        /** 跨端派单的缺省期限（HTTP 入口未指定时）；与域层缺省同一数值。 */
+        const val DEFAULT_INVOKE_DEADLINE_MS: Long = 10L * 60_000
         const val LOOPBACK: String = "127.0.0.1"
         const val DEFAULT_HTTP_PORT: Int = 8788
 
