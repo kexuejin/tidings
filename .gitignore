@@ -91,6 +91,10 @@ androidApp/src/screenshotTest*/reference/
 # .workbuddy/ 是开发期 agent 记忆（逐日笔记 + MEMORY.md），内容是内部推理过程
 # 与当时的判断依据，不是产品文档；它对当前工作树是资产，对公开仓库不是。
 /.workbuddy/
+# 同一条理由适用于新一代目录名：`.workbuddy-ai/` 是同一个记忆目录的新位置，
+# 早先只忽略了带点的旧名，新目录一直是裸露的未跟踪状态 —— 一次 `git add -A`
+# 就会把逐日笔记带进公开仓。
+/.workbuddy-ai/
 # Python 探针的字节码缓存：tools/ 与 scripts/ 下的 .py 每跑一遍就会生成一份，
 # 且按解释器版本分裂（cpython-313/314 各一份），对仓库没有任何价值。
 __pycache__/
