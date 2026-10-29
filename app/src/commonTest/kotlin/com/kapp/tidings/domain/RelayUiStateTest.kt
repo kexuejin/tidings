@@ -743,4 +743,28 @@ class RelayUiStateTest {
         val (state, conv) = signedGroupState(withMessage = false)
         assertNull(state.previewSenderNameOf(conv), "最后一条不在内存窗口时不应署名")
     }
+
+    @Test
+    fun oneToOneConversationTitleIsStableWhenAgentDataArrives() {
+        // 真机现场（验证轮抓到）：与桌面宿主的 1:1 会话标题先是 demo-mac-97，
+        // DSH 的 agent 消息到达后变成 "dsh" —— 同一个会话两个名字。1:1 标题必须恒为
+        // **对端节点的名字**；agent 归属由每条消息的署名与会话行的 Agent 徽标表达。
+        // （反向验证：把 convTitle 换回 resolveSenderIdentity 那条路，本用例变红。）
+        val hostId = "a1b2c3d4-6e74-4a7c-aab1-20a1d1284cd6"
+        val withAgentData = RelayUiState(
+            peers = listOf(peer(hostId, "demo-mac-97", online = true, caps = listOf(MsgTypes.CAP_AGENT))),
+            agentSessions = mapOf(
+                AgentSessionKey(peerId = hostId, sessionId = "s-1") to AgentSessionUi(
+                    peerId = hostId,
+                    sessionId = "s-1",
+                    agentKind = "dsh",
+                    state = "busy",
+                    startedAt = 1_000L,
+                ),
+            ),
+        )
+
+        assertEquals("demo-mac-97", withAgentData.convTitle(hostId))
+    }
+
 }

@@ -964,7 +964,6 @@
     <string name="file_state_completed_out">已送达</string>
     <string name="file_state_sent_success">发送成功</string>
     <string name="file_state_received_success">接收成功</string>
-    <string name="file_transfer_direct">直接</string>
     <string name="file_state_failed">传输失败：%1$s</string>
     <string name="chat_file_send_failed_hint">发送失败，请重新选择文件发送</string>
     <string name="file_state_declined">对方已拒绝</string>

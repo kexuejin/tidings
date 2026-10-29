@@ -869,7 +869,9 @@ class RelayController(
         val restored = messagesCtl.handleRestoreMessages()
         agentCtl.handleRestoreAgentData()
         groupsCtl.handleSyncWorkspaceGroups()
-        val settings = _state.value.settings
+        // var：caps 指纹比对可能 bump profileRev（见下方 withCapsFingerprint 一段），
+        // bump 后的这份要落盘并供本次启动全程使用。
+        var settings = _state.value.settings
         for (group in settings.groups) core.groupNeeds.noteKnown(group.groupId, group.rev)
         _state.update { it.copy(network = it.network.copy(phase = NodePhase.Starting, failure = null)) }
 
@@ -905,19 +907,39 @@ class RelayController(
         // 也避开 17879/17881/17882（luciola 模式下这三个不许再出现在 lsof 里）。
         val screenChannelPort = if (luciolaMode && isShareSupported) (settings.udpPort + 10).takeIf { it in 1..65535 } else null
         val screenChannelHostFactory = luciolaHost?.screenChannelHostFactory(scope, screenChannelPort)
-        if (luciolaMode) {
-            // 只有**确认**数据面可用之后才声明 `fch1`：声明了却收不了字节，对端会推、
-            // 本端永远等文件（"对方说发了、我一直卡在接收中"）。
-            profile = settings.toProfile(
-                host = platform.deviceInfo.hostName(),
-                ver = version,
+        // 对外最终声明的那组 caps。fch1/scr1 只在**确认**数据面/画面信道可用后声明：
+        // 声明了却收不了字节，对端会推、本端永远等文件（"对方说发了、我一直卡在接收中"）。
+        val fileOverChannel = luciolaMode
+        val screenOverChannel = screenChannelHostFactory != null
+
+        // caps 指纹联动 profileRev：caps 会随实验开关/平台能力变，却不经过任何"改资料"
+        // 的入口 —— 不 bump 的话对端永远拿着旧 caps 行事（真机死锁现场见
+        // TransferManager.scheduleChannelStallFallback 的 KDoc）。必须在构建对外 profile
+        // **之前**完成：profileRev 要进 profile，晚了这一拍对端看到的还是旧 rev。
+        val capsAligned = settings.withCapsFingerprint(
+            settings.caps(
                 remoteView = true,
                 remoteShare = isShareSupported,
                 advertiseAgent = advertiseAgent,
-                fileOverChannel = true,
-                // 画面信道宿主可用即声明 scr1（具备作为观众查看画面的能力；若同时支持分享则已起监听）
-                screenOverChannel = screenChannelHostFactory != null,
-            )
+                fileOverChannel = fileOverChannel,
+                screenOverChannel = screenOverChannel,
+            ),
+        )
+        if (capsAligned != settings) {
+            settings = capsAligned
+            handlePersist(settings)
+        }
+
+        profile = settings.toProfile(
+            host = platform.deviceInfo.hostName(),
+            ver = version,
+            remoteView = true,
+            remoteShare = isShareSupported,
+            advertiseAgent = advertiseAgent,
+            fileOverChannel = fileOverChannel,
+            screenOverChannel = screenOverChannel,
+        )
+        if (luciolaMode) {
             luciolaHost?.configure(profile, settings.udpPort)
         }
         val rt = NodeRuntime(
@@ -970,6 +992,10 @@ class RelayController(
             queueStore = persist.queue,
             dedupStore = dedupStore,
             messageStore = persist.messages,
+            // 陈旧身份修剪的保留名单：群成员必须认领（离线队列还要为他们留着位）。
+            // 手动节点是**地址**便条（ManualPeerEntry 只有 host:port，没有 nodeId），
+            // 不在此列 —— 被剪的旧身份再出现时发现流程原样学回来，地址便条不受影响。
+            keepNode = { nodeId -> _state.value.settings.groups.any { nodeId in it.members } },
             // 实验:luciola 传输与发现（两件都非空才生效,见上面 luciolaMode）。
             messengerTransportFactory = luciolaTransport.takeIf { luciolaMode },
             extraDiscoveryFactory = luciolaDiscovery.takeIf { luciolaMode },

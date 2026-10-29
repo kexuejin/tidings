@@ -615,6 +615,17 @@ class LinkClient(
 
     private val lock = createCoreLock()
     private val links = HashMap<String, LinkConnection>()
+    /**
+     * peerId → 已建立连接占用的端点（[endpointKeyOf] 的键）。
+     *
+     * **同一端点只许一条连接**：registry 里同一台机器可能挂着多条身份（重装/迁移留下的
+     * 旧 nodeId，真机现场是一台桌面在手机上同时以两个 nodeId 出现），它们的目标指向
+     * **同一个** host:port —— 各拨一条的话，服务端按 hello 里的 nodeId 只认一个对端，
+     * 另一条每次都被 `replaced` 顶掉，两端就永远在"建连→被顶→重拨"里打转
+     * （桌面侧 closeCount 十几分钟涨 78 的来源）。端点已被别的身份占住时就不再拨。
+     */
+    private val linkEndpoints = HashMap<String, String>()
+
 
     /** nodeId → 下一次允许重连的时刻（退避）。 */
     private val nextAttemptAt = HashMap<String, Long>()
@@ -728,6 +739,14 @@ class LinkClient(
         val record = registry.get(peerId) ?: return false
         val targets = linkTargets(record)
         if (targets.isEmpty()) return false
+        // 与 tick() 同一条去重纪律：端点被别的身份占住时**不拨**（否则快速路径会绕过
+        // 去重，把"同一台服务器两条连接"的抖动重新养出来）。调用方（可靠发送）拿 false
+        // 会照原样退回 UDP/TCP —— 与"没连上"同一语义。
+        val servedBy = lock.withLock { servedByOtherPeer(targets, linkEndpoints, peerId) }
+        if (servedBy != null) {
+            lock.withLock { dialSkipReason[peerId] = "endpoint-served-by-" + servedBy.take(8) }
+            return false
+        }
         val busy = lock.withLock {
             if (peerId in connecting) {
                 true
@@ -764,6 +783,7 @@ class LinkClient(
             // 在 Kotlin/Native 暴露）。`.map { it.key to it.value }` 取的是**值引用**，clear 之后仍然有效。
             val all = links.map { (peerId, connection) -> peerId to connection }
             links.clear()
+            linkEndpoints.clear()
             all
         }
         for ((peerId, connection) in closing) {
@@ -818,6 +838,14 @@ class LinkClient(
             lock.withLock { dialSkipReason.remove(record.profile.nodeId) }
             val peerId = record.profile.nodeId
             if (isConnected(peerId)) continue
+            // 同一端点已被**别的**身份占住 ⇒ 这条不再拨（见 linkEndpoints 的 KDoc）。
+            val servedBy = lock.withLock {
+                servedByOtherPeer(targets, linkEndpoints, peerId)
+            }
+            if (servedBy != null) {
+                lock.withLock { dialSkipReason[peerId] = "endpoint-served-by-" + servedBy.take(8) }
+                continue
+            }
             val ready = lock.withLock {
                 if (peerId in connecting) return@withLock false
                 val at = nextAttemptAt[peerId] ?: 0L
@@ -831,7 +859,7 @@ class LinkClient(
     }
 
     /** 一次连接的目标：地址、端口、以及要不要验 pin。 */
-    private data class LinkTarget(
+    internal data class LinkTarget(
         val peerId: String,
         val host: String,
         val port: Int,
@@ -948,6 +976,7 @@ class LinkClient(
         }
         lock.withLock {
             links[peerId] = connection
+            linkEndpoints[peerId] = endpointKeyOf(target.host, target.port, target.secure)
             nextAttemptAt.remove(peerId)
             attemptCount.remove(peerId)
         }
@@ -1037,7 +1066,10 @@ class LinkClient(
             }
         } finally {
             heartbeat.cancel()
-            lock.withLock { if (links[peerId] === connection) links.remove(peerId) }
+            lock.withLock {
+                if (links[peerId] === connection) links.remove(peerId)
+                linkEndpoints.remove(peerId)
+            }
             runCatching { connection.close() }
             backoff(peerId)
         }
@@ -1059,6 +1091,29 @@ class LinkClient(
         const val DEFAULT_TICK_MS: Long = 2_000
         const val MAX_BACKOFF_MS: Long = 60_000
     }
+}
+
+/** 端点键：同一台服务器（同 host、同口、同安全档）在拨号簿里必须算**同一个**。 */
+internal fun endpointKeyOf(host: String, port: Int, secure: Boolean): String =
+    host + "|" + port + "|" + (if (secure) "tls" else "plain")
+
+/**
+ * 这批拨号目标里有没有哪个端点已经被**别的**身份的已建连接占住。
+ * 抽纯函数是为了让"同端点去重"这条纪律能被直接测到（LinkClient 的真套接字装置
+ * 很难在同一端口上摆出两条身份）。
+ */
+internal fun servedByOtherPeer(
+    targets: List<LinkClient.LinkTarget>,
+    establishedEndpoints: Map<String, String>,
+    selfPeerId: String,
+): String? {
+    for (target in targets) {
+        val key = endpointKeyOf(target.host, target.port, target.secure)
+        for ((peerId, endpoint) in establishedEndpoints) {
+            if (peerId != selfPeerId && endpoint == key) return peerId
+        }
+    }
+    return null
 }
 
 /** 连接结束原因（只读诊断口径，task-40 ①）。 */

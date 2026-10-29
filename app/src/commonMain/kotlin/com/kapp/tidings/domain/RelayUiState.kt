@@ -718,10 +718,14 @@ data class RelayUiState(
     fun convTitle(convId: String): String {
         groupOfConv(convId)?.name?.let { return it }
         if (!ConvId.isGroup(convId)) {
-            // 1:1 会话标题也走**同一个解析器**：agent 节点的会话就是「跟那个 agent 说话」
-            // （1:1 的每条消息都触发它），标题因此必须是 agent 名（`DSH`），
-            // 而不是那台宿主机器的昵称（用户看到的是「mac mini」，找不到 DSH）。
-            resolveSenderIdentity(convId, senderContext(convId))?.displayName?.let { return it }
+            // 1:1 会话标题恒为**对端节点的名字**。这里曾走 resolveSenderIdentity 让
+            // agent 宿主的会话显示 agent 名（"会话就是跟那个 agent 说话"）—— 但 agent
+            // 身份要等 agent 帧/会话数据到齐才解析得出，于是同一个会话的标题会**中途换名**：
+            // 真机现场（验证轮抓到）：demo-mac-97 的会话在 DSH 的消息到达后变成 "dsh"，
+            // 一个会话两个名字。agent 的归属已经由每条消息的署名与会话行上的 Agent 徽标
+            // 表达（§2.4 的单一来源），标题必须稳定 —— 名字随数据到齐而漂移比"不够聪明"
+            // 更伤：用户靠它认会话。
+            peer(convId)?.displayName?.let { return it }
         }
         return fallbackTitle(convId)
     }

@@ -3,6 +3,7 @@ package com.kapp.tidings.core.session
 
 import com.kapp.tidings.core.protocol.MsgTypes
 import com.kapp.tidings.core.protocol.Profile
+import com.kapp.tidings.core.nowMillis
 import com.kapp.tidings.core.protocol.newId
 import com.kapp.tidings.core.persist.KnownPeer
 import com.kapp.tidings.core.transport.KnownPeerStore
@@ -81,6 +82,26 @@ class ScreenChannelWiringTest {
         override fun save(peers: List<KnownPeer>) = Unit
     }
 
+    /**
+     * 一条"最近见过"的已知对端夹具。
+     *
+     * `lastSeen` **必须是最近**：NodeRuntime 启动时会把久未露面的离线身份剪掉
+     * （REGISTRY_PRUNE_MS，7 天），夹具里写死一个 1970 的时间戳会让它在拨号之前就被剪掉，
+     * 症状是"0 条通路"。这条测试关心的是**接线**，修剪有自己的测试
+     * （PeerRegistryPruneTest），两者不该在这里互相绊住。
+     */
+    private fun knownPeer(
+        peerId: String,
+        caps: List<String>,
+        ip: String,
+        screenPort: Int? = null,
+    ) = KnownPeer(
+        profile = profile(peerId, caps, screenPort = screenPort),
+        ip = ip,
+        udpPort = freePort(),
+        lastSeen = nowMillis(),
+    )
+
     @Test
     fun secureScreenPathIsPreferredWhenNegotiatedAndListenerStarts() = runBlocking {
         val scope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
@@ -97,12 +118,7 @@ class ScreenChannelWiringTest {
             // 对端从"已知对端"名录里恢复：档案带 scr1 + 画面端口，与真机重启后的形态一致。
             knownPeerStore = FixedKnownPeers(
                 listOf(
-                    KnownPeer(
-                        profile = profile(peerId, listOf(MsgTypes.CAP_SCREEN_CHANNEL), screenPort = screenPort),
-                        ip = "127.0.0.1",
-                        udpPort = freePort(),
-                        lastSeen = 1_000L,
-                    ),
+                    knownPeer(peerId, listOf(MsgTypes.CAP_SCREEN_CHANNEL), "127.0.0.1", screenPort),
                 ),
             ),
         )
@@ -135,12 +151,7 @@ class ScreenChannelWiringTest {
             screenChannelHostFactory = { _: PeerRegistry -> fake },
             knownPeerStore = FixedKnownPeers(
                 listOf(
-                    KnownPeer(
-                        profile = profile(peerId, emptyList(), screenPort = freePort()),
-                        ip = "127.0.0.1",
-                        udpPort = freePort(),
-                        lastSeen = 1_000L,
-                    ),
+                    knownPeer(peerId, emptyList(), "127.0.0.1"),
                 ),
             ),
         )
@@ -176,12 +187,7 @@ class ScreenChannelWiringTest {
             screenChannelHostFactory = { _: PeerRegistry -> fake },
             knownPeerStore = FixedKnownPeers(
                 listOf(
-                    KnownPeer(
-                        profile = profile(peerId, listOf(MsgTypes.CAP_SCREEN_CHANNEL), screenPort = screenPort),
-                        ip = "192.168.2.22",
-                        udpPort = freePort(),
-                        lastSeen = 1_000L,
-                    ),
+                    knownPeer(peerId, listOf(MsgTypes.CAP_SCREEN_CHANNEL), "192.168.2.22", screenPort),
                 ),
             ),
             // 公网候选地址从候选池注入（与真机上"上一次配对/发现学到的地址"同一条路）。

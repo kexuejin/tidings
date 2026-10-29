@@ -245,6 +245,16 @@ class TransferManager(
         onProgress: (fileId: String, done: Long, total: Long) -> Unit,
     ) -> Unit)? = null,
     /**
+     * 信道入站是否**已经收到过字节**（[scheduleChannelStallFallback] 的探针）。
+     * 与 [registerChannelInbound] 成对由宿主注入；null = 没有探针 ⇒ 看门狗不启用，
+     * 行为与没有看门狗时逐字一致（测试、未接路由器的宿主）。
+     */
+    private val channelInboundHasBytes: (suspend (transferId: String) -> Boolean)? = null,
+    /** 回退 legacy 拨号前把信道上的在途收器摘掉，防同一路径双写。 */
+    private val channelForgetInbound: ((transferId: String) -> Unit)? = null,
+    /** 信道 stall 看门狗的窗口（毫秒）。测试注入小值。 */
+    private val channelStallFallbackMs: Long = 10_000L,
+    /**
      * F1（task-39）：跨网文件的**主机侧原始 TLS 监听**（方案 B 的入口）。
      *
      * null = 不起这条入口 ⇒ 行为与今天一字不差（局域网原路径）。平台不支持 TLS 服务端
@@ -706,7 +716,10 @@ class TransferManager(
                 "[luciola] accept " + transferId.take(8) + " channel=" + channelTook +
                     " files=" + offer.files.size + " peer=" + offer.peerId.take(8),
             )
-            if (channelTook) return@launch
+            if (channelTook) {
+                scheduleChannelStallFallback(offer)
+                return@launch
+            }
             pull(offer)
         }
     }
@@ -926,8 +939,49 @@ class TransferManager(
             if (autoAccept) {
                 sendSimple(assembled.peerId, FileCtlOps.ACCEPT, assembled.transferId)
                 // 信道模式：登记后由路由器收字节（不发 pull）；否则走 legacy 拨号拉取。
-                if (!registerOnChannel(assembled)) pull(assembled)
+                if (!registerOnChannel(assembled)) {
+                    pull(assembled)
+                } else {
+                    scheduleChannelStallFallback(assembled)
+                }
             }
+        }
+    }
+
+    /**
+     * 信道入站的 **stall 看门狗**：登记上信道之后若窗口内一个字节都没进来，
+     * 摘掉信道登记、回退 legacy 拨号拉取。
+     *
+     * 为什么必须有：`FileChannelNegotiation.canUseChannel` 只看**双方声明过的 caps**，
+     * 而 caps 来自对端 profile 最近一次 entry —— 那份资料可能已经过期（对端降级回
+     * legacy、luciola 开关变了而 profileRev 没动）。声明与现实不符时两端各按各的
+     * 信念行事：收端登记后等推送，发端（无信道、`push=false`）等对端来拉 ——
+     * **互等死锁**，文件永远不来。真机现场（手机 luciola 开 + 桌面 legacy，验证轮抓到）：
+     * 桌面→手机的图片永远停在「等你接收」，目录建了、0 字节；桌面日志
+     * `accept-in … push=false`，手机日志 `accept … channel=true`。
+     *
+     * 三个不回退的出口：
+     * - 窗口内来过**任何**字节（哪怕重复帧）—— 信道活着，余下的交给重传/窗口纪律；
+     * - `acceptedOffers` 已摘（收齐/被撤回/本地放弃）；
+     * - 宿主没注入 [channelInboundHasBytes]（看门狗整条不启用，行为与从前一致）。
+     *
+     * 回退前必须先 [channelForgetInbound]：迟到的信道帧落进路由器的"未登记一律丢弃"，
+     * 不会与 legacy 拉取写同一个 `.part`。
+     */
+    private fun scheduleChannelStallFallback(offer: IncomingOffer) {
+        val hasBytes = channelInboundHasBytes ?: return
+        scope.launch {
+            delay(channelStallFallbackMs)
+            val stillWanted = stateLock.withLock { acceptedOffers.containsKey(offer.transferId) }
+            if (!stillWanted) return@launch
+            if (hasBytes(offer.transferId)) return@launch
+            println(
+                "[luciola] channel stalled " + offer.transferId.take(8) +
+                    " peer=" + offer.peerId.take(8) +
+                    " window=" + channelStallFallbackMs + "ms -> fallback to legacy pull",
+            )
+            channelForgetInbound?.invoke(offer.transferId)
+            pull(offer)
         }
     }
 

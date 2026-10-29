@@ -136,7 +136,6 @@ import com.kapp.tidings.generated.resources.file_state_active_in
 import com.kapp.tidings.generated.resources.file_state_active_out
 import com.kapp.tidings.generated.resources.file_state_completed_in
 import com.kapp.tidings.generated.resources.file_state_sent_success
-import com.kapp.tidings.generated.resources.file_transfer_direct
 import com.kapp.tidings.generated.resources.file_state_declined
 import com.kapp.tidings.generated.resources.file_state_failed
 import com.kapp.tidings.generated.resources.file_state_offered_in
@@ -953,18 +952,10 @@ internal fun FileCardView(
                 overflow = TextOverflow.Ellipsis,
                 modifier = Modifier.weight(1f, fill = false),
             )
-            Surface(
-                shape = RelayShapes.extraSmall,
-                color = MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.6f),
-            ) {
-                Text(
-                    text = stringResource(Res.string.file_transfer_direct),
-                    style = MaterialTheme.typography.labelSmall,
-                    color = MaterialTheme.colorScheme.primary,
-                    fontWeight = FontWeight.Medium,
-                    modifier = Modifier.padding(horizontal = sp.xs, vertical = sp.xxs),
-                )
-            }
+            // 这里曾有一枚无条件渲染的「直接」徽章（8ef647b6 引入）：每个文件卡
+            // （收/发/任何传输、任何数据面）都画，徽章失去信息量，设计规格里也没有
+            // 这个元素。要么按事实渲染（卡片模型没有"走哪条数据面"的字段），要么不画 ——
+            // 按本仓"诊断字段要么如实、要么不存在"的同一纪律，选不画。
         }
         Text(
             // 原型 folderCard 的 accepted 分支把**进度口径**写在这一行：

@@ -216,6 +216,47 @@ class PeerRegistry(private val selfNodeId: String) {
     fun get(nodeId: String): PeerRecord? = lock.withLock { peers[nodeId] }
 
     /**
+     * 修剪**久未露面的离线身份**：`now - lastSeen > maxAgeMs` 且 `online == false` 且
+     * [keep] 不认领的条目。返回实际修剪掉的 nodeId 列表。
+     *
+     * 为什么必须有：registry 只进不出 —— 重装换过身份的手机、联调留下的旧实例、
+     * 夹具的一次性节点，全都永久留在节点表与建群成员选择器里（真机现场：一台桌面在
+     * 手机上是 5 个同名设备条目）。修剪是**数据卫生**不是拉黑：设备再出现时发现流程
+     * 会原样把它学回来（profile 带 caps/pin，真名跟着回来）。
+     *
+     * [keep] 认领的绝不剪：群成员（离线队列还要为它留着）、用户手动加的地址、
+     * 自己。正在线的不在本函数语义里（只看 offline 条目）。
+     *
+     * ## 只剪"记忆"，**不动信任根**
+     *
+     * 这条走 [remove] 的 `revokeTrust = false` 支路：节点行、候选池、档案新鲜度判据都摘掉，
+     * 但 `peerPins` / `pinSources` **留着**。区别在于两种删除的语义不同：
+     * - 用户显式删节点（[forget]）= **撤销信任**，pin 必须一起消失；
+     * - 自动过期 = **数据卫生**，只是"不再显示"。pin 是对端的公钥指纹，把它一起剪掉意味着
+     *   那台设备下次出现时落到 TOFU 首次固定（[setPin] 的 `tofu` 支路，本身带首次使用
+     *   竞态）—— 一次纯展示层的清理**静默**把信任锚降级了，与「公网必须 TLS + 双向 pin、
+     *   验不过就拒」的 fail-closed 立场相反。留着的 pin 是惰性的：`pinOf` 只在
+     *   [PeerRecord] 还在表里时被 [LinkClient.linkTargets] / 握手校验读到，没有节点行时
+     *   谁也拿不到它；等那台设备再出现，它反而成了"还是原来那台"的证据（换了密钥就验不过，
+     *   正是 pin 该有的行为）。
+     *
+     * 逐条走 [remove] 而不是自抄一份字段清单：那条路已经把候选池 / 档案新鲜度判据都摘干净
+     * 并发 Removed 事件（known-peers 的落盘合并窗口靠它标脏）—— 两处各写一遍迟早一处漏字段。
+     */
+    fun pruneOfflineOlderThan(
+        maxAgeMs: Long,
+        keep: (nodeId: String) -> Boolean,
+        now: Long = nowMillis(),
+    ): List<String> {
+        val stale = lock.withLock {
+            peers.values.filter { record ->
+                !record.online && (now - record.lastSeen) > maxAgeMs && !keep(record.profile.nodeId)
+            }.map { it.profile.nodeId }
+        }
+        return stale.filter { remove(it, revokeTrust = false) }
+    }
+
+    /**
      * 按 (ip, port) 反查对端 —— luciola 模式下，主机通过入站配对 (TLPAIR1) 拿到的是
      * "nodeId + 公钥"，没有端点映射；要反向拨号时只能靠 registry 把 nodeId 找回来，
      * 再从 TrustStore 取它的 pin。
@@ -395,14 +436,25 @@ class PeerRegistry(private val selfNodeId: String) {
      *
      * @return 这条节点此前是否存在过。
      */
-    fun forget(nodeId: String): Boolean {
+    fun forget(nodeId: String): Boolean = remove(nodeId, revokeTrust = true)
+
+    /**
+     * [forget] 的实现本体，多一个 [revokeTrust] 开关供**自动过期**（[pruneOfflineOlderThan]）
+     * 复用：过期只剪记忆，不撤销信任（理由见后者的 KDoc）。
+     *
+     * 两条支路共享同一份字段清单 —— 分头各写一遍，漏一个字段就会变成"删不干净"，
+     * 而那类缺陷在真机上只表现为"它又回来了"。
+     */
+    private fun remove(nodeId: String, revokeTrust: Boolean): Boolean {
         val existed = lock.withLock { peers.remove(nodeId) != null }
         lock.withLock {
             profileTimes.remove(nodeId)
             profileConfirmationOnly.remove(nodeId)
             candidateEndpoints.remove(nodeId)
-            peerPins.remove(nodeId)
-            pinSources.remove(nodeId)
+            if (revokeTrust) {
+                peerPins.remove(nodeId)
+                pinSources.remove(nodeId)
+            }
         }
         if (existed) emit(PeerEvent.Removed(nodeId))
         return existed

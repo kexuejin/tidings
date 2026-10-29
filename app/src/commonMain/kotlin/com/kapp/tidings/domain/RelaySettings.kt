@@ -124,6 +124,18 @@ data class RelaySettings(
     val manualPeers: List<ManualPeerEntry> = emptyList(),
     val profileRev: Int = 0,
     /**
+     * 上一次**对外声明**的 caps 指纹（`capsFingerprintOf` 的输出）。
+     *
+     * caps 不是用户资料，却随实验开关（luciola）与平台能力变 —— 而对端刷新资料的判据
+     * 只有 [profileRev]（A13c：rev 失配 ⇒ 单播 entry 换回全量资料）。开关变了 rev 不动，
+     * 对端就永远拿着旧 caps 行事：真机现场（验证轮抓到）：手机注册表里桌面身份一直带着
+     * `fch1`（桌面早就不声明了），文件字节被登记到一条并不存在的信道上，两端互等。
+     *
+     * 启动时比对指纹、变了就 bump rev（见 [withCapsFingerprint]）。null = 旧版本落盘的
+     * 设置，首轮启动补一次基准。
+     */
+    val capsFingerprint: String? = null,
+    /**
      * 聊天记录是否落盘（设置屏 2「数据与存储」里的那个开关）。
      *
      * 它必须住在这里而不是只活在内存里：一个**用户偏好**如果重启就自己弹回 OFF，
@@ -511,6 +523,17 @@ data class RelaySettings(
          */
         const val LIMIT_REMARK = 32
         const val LIMIT_HOST = 64
+
+        /**
+         * caps 列表的指纹（sha256 前 16 位 hex）。只要求**稳定**与**碰撞性足够低**：
+         * 它的唯一用途是"这次的 caps 和上次对外声明的那份是不是同一份"。
+         */
+        fun capsFingerprintOf(caps: List<String>): String {
+            val digest = com.kapp.tidings.core.crypto.Sha256()
+            digest.update(caps.joinToString(",").encodeToByteArray())
+            return digest.hexDigest().take(16)
+        }
+
         const val LIMIT_VER = 16
 
         /**
@@ -523,6 +546,20 @@ data class RelaySettings(
          */
         fun firstRun(defaultNick: String = ""): RelaySettings =
             RelaySettings(nodeId = newId(), nick = defaultNick)
+    }
+
+    /**
+     * caps 变了就 bump [profileRev] 并记下新指纹；没变就原样返回 `this`。
+     *
+     * 为什么必须由它来 bump：对端刷新资料的唯一判据是 profileRev（A13c），而 caps 会随
+     * 实验开关/平台能力变，**不经过任何"改资料"的入口** —— 没有这一步，对端永远拿着旧
+     * caps 行事（真机现场见 [capsFingerprint] 的 KDoc）。返回新实例；调用方负责落盘。
+     * 纯函数，方便单测钉住"变了才 bump、没变不 bump"两条。
+     */
+    fun withCapsFingerprint(caps: List<String>): RelaySettings {
+        val fingerprint = RelaySettings.capsFingerprintOf(caps)
+        if (capsFingerprint == fingerprint) return this
+        return copy(capsFingerprint = fingerprint, profileRev = profileRev + 1)
     }
 }
 

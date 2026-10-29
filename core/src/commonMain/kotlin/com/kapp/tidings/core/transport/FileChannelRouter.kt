@@ -44,6 +44,9 @@ class FileChannelRouter(
          * 文件其实早已转正、part 已改名，两边却都以为没传完）。
          */
         var finished: Boolean = false
+
+        /** 这一路已经进来的字节数（stall 看门狗的探针，见 [hasReceivedBytes]）。 */
+        var bytesReceived: Long = 0L
     }
 
     private val lock = com.kapp.tidings.core.createCoreLock()
@@ -87,6 +90,8 @@ class FileChannelRouter(
                 entry.receiver.append(frame.offset, frame.payload)
                 entry.onProgress?.invoke(entry.chunks.ackedUpTo, entry.receiver.expectedSize)
             }
+            // 计数放在判重之外：重复帧也算"信道活着"。只做探针用，不参与校验。
+            entry.bytesReceived += frame.payload.size
             if (entry.chunks.isComplete) completeOnce(entry)
             return true
         }
@@ -152,6 +157,18 @@ class FileChannelRouter(
             inbound.keys.filter { it.startsWith(transferId + "#") }.forEach { inbound.remove(it) }
             outboundAcks.keys.filter { it.startsWith(transferId + "#") }.forEach { outboundAcks.remove(it) }
         }
+    }
+
+    /**
+     * 这次传输的信道入站是否**已经收到过字节**（哪怕一个重复帧）。
+     *
+     * TransferManager 的 stall 看门狗据此区分"信道活着，只是还没收完"与
+     * "登记了却一个字节都不来 —— 声明了 fch1 的对端其实没有信道"。
+     * 前者继续等，后者必须回退 legacy 拨号，否则两端互等（真机死锁现场，
+     * 见 TransferManager.scheduleChannelStallFallback 的 KDoc）。
+     */
+    fun hasReceivedBytes(transferId: String): Boolean = lock.withLock {
+        inbound.entries.any { it.key.startsWith(transferId + "#") && it.value.bytesReceived > 0L }
     }
 
     private fun keyOf(transferId: String, fileId: String): String = transferId + "#" + fileId

@@ -829,7 +829,6 @@
     <string name="file_state_completed_out">Delivered</string>
     <string name="file_state_sent_success">Sent</string>
     <string name="file_state_received_success">Received</string>
-    <string name="file_transfer_direct">Direct</string>
     <string name="file_state_failed">Transfer failed: %1$s</string>
     <string name="chat_file_send_failed_hint">Send failed. Please pick the file again to send it</string>
     <string name="file_state_declined">Peer declined transfer</string>

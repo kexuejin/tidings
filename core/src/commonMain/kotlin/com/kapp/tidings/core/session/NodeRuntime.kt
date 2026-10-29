@@ -160,6 +160,12 @@ class NodeRuntime(
      */
     private val knownPeerStore: KnownPeerStore? = null,
     /**
+     * 修剪陈旧身份时的**保留名单**（数据卫生，见 [REGISTRY_PRUNE_MS]）：群成员、
+     * 用户手动维护的地址要认领。默认 `{ false }` = 只要不在线超过窗口就剪
+     * （测试与无群宿主的行为）。
+     */
+    private val keepNode: (nodeId: String) -> Boolean = { false },
+    /**
      * 阶段三(合并切):提供时 Messenger 的传输面换成它(认证加密信道)且
      * legacy Discovery 不启动——发现由 extraDiscovery(luciola)承担。
      * 不提供 = 完全 legacy(iOS / 未迁移宿主)。
@@ -638,6 +644,16 @@ class NodeRuntime(
          *  - 长到不会把心跳帧变成磁盘写入（否则一个在线群体每秒几十次 IO）。
          */
         const val KNOWN_PEER_FLUSH_MS: Long = 1_500L
+
+        /**
+         * 离线身份的修剪窗口（7 天）：超过这么久没露面且不在保留名单里的节点条目，
+         * 启动时连 pin/候选池一起剪掉（[keepNode] 认领的除外）。
+         *
+         * 为什么是 7 天而不是更短：群成员之外的对端，7 天没见大概率是退役设备/一次性
+         * 身份；也不至于把"出长差回来"的同事剪掉。剪了不是拉黑 —— 设备再出现时发现
+         * 流程会原样把它学回来。
+         */
+        const val REGISTRY_PRUNE_MS: Long = 7L * 24 * 60 * 60 * 1000
     }
     /**
      * 记下某个节点的**候选端点**（配对码里那一池地址）并落盘。
@@ -828,13 +844,29 @@ class NodeRuntime(
         knownPeerStore?.load()?.forEach { known ->
             registry.restoreOffline(known.profile, known.ip, known.udpPort, known.lastSeen)
         }
-        startKnownPeerPersistence(runScope)
         // 同理，上一次配对学到的 pin 也先装回来：公网长连接的信任根跨重启必须还在。
         // 来源一起装回来 —— 否则重启后 linkPinSource 就再也看不出"这枚其实是 TOFU 学来的"。
         val pinSources = peerPinStore.loadSources()
         for ((nodeId, pin) in peerPinStore.load()) {
             registry.setPin(nodeId, pin, pinSources[nodeId] ?: PeerRegistry.PIN_SOURCE_UNKNOWN)
         }
+        // 数据卫生：恢复回来的名录里剪掉久未露面的离线身份（重装换过身份的手机、
+        // 联调/夹具留下的一次性节点 —— 真机上节点表与建群成员选择器被它们堆到 40+ 条）。
+        // 放在 restore/pin 恢复之后、拨号循环之前：剪完的名单就是本次运行拨号的底册。
+        // 设备再出现时发现流程会原样学回来，所以这只影响"多久没见就不再显示"。
+        //
+        // 修剪**不动 pin**（见 PeerRegistry.pruneOfflineOlderThan 的 KDoc）：所以下面只把
+        // 名录与候选池落盘，pin 表保持原样 —— 别在这里顺手 save 一遍 pin，那会把
+        // "过期 = 撤销信任"重新写回来。
+        val pruned = registry.pruneOfflineOlderThan(REGISTRY_PRUNE_MS, keepNode)
+        if (pruned.isNotEmpty()) {
+            println("[registry] pruned " + pruned.size + " stale offline identities" +
+                " (older than " + REGISTRY_PRUNE_MS + "ms)")
+            // 两份落盘跟着缩，不等合并窗口 —— 否则重启时被剪的身份又原样回来。
+            runCatching { knownPeerStore?.save(knownPeersSnapshot()) }
+            runCatching { peerEndpointStore.save(registry.allCandidates()) }
+        }
+        startKnownPeerPersistence(runScope)
         // 信道数据帧（文件/投屏字节）在 **Messenger 之前**分流：它们是二进制帧，
         // 交给 Messenger 的 Envelope 解码只会被判成坏帧丢掉；而一条已经被认领的
         // TDCH/TDCA 帧不应该再进可靠消息管线（它本来就不需要 ACK/去重）。
@@ -1050,6 +1082,15 @@ class NodeRuntime(
                             }
                         }
                     }
+                },
+                // stall 看门狗的两根探针： caps 声明与现实不符时（对端降级回 legacy 而本端
+                // 还拿着它声明过 fch1 的旧资料），登记上信道的收器一个字节都等不到 ——
+                // 看门狗据此回退 legacy 拨号，文件不再死在「两端互等」上。
+                channelInboundHasBytes = fileChannel?.let { router ->
+                    { transferId: String -> router.hasReceivedBytes(transferId) }
+                },
+                channelForgetInbound = fileChannel?.let { router ->
+                    { transferId: String -> router.forget(transferId) }
                 },
                 // TCP 回退的长文本（>800 字节）也走这条监听器，收下后与 UDP 路径共用投递纪律。
                 receiveMessage = { envelope, remoteAddress ->
@@ -1630,25 +1671,22 @@ class NodeRuntime(
         port: Int? = null,
         timeoutMs: Long = 3_000L,
     ): PeerRecord? {
-        fun pick(): PeerRecord? {
-            // 同地址可能有多条记录（设备换了网卡、nodeId 换了、或者测试机里两个节点
-            // 共用一个口）。先排掉已离线的：投给一条离线记录注定等不到 ACK，调用方只会
-            // 看到"已入队等上线"，而真正在线的那条就永远收不到这条消息。
-            val atHost = registry.values().filter { it.ip == host }
-                .sortedByDescending { it.online }
-            return if (port == null) atHost.firstOrNull() else atHost.firstOrNull { it.udpPort == port }
-        }
-
-        pick()?.let { return it }
+        pickPeerRecordForHost(registry.values(), host, port, onlineOnly = true)?.let { return it }
+        // 只剩离线记录 ⇒ 这台机器的账可能已经换了身份（重装/身份轮换后旧 nodeId 还挂在
+        // 同一串 IP 上）。真机现场（验证轮抓到）：按 IP 投文件被解析到一条陈旧 nodeId，
+        // offer 发进虚空；正确做法是先向地址要一次**当前**身份，再退回离线记录 ——
+        // 排队语义由发送侧的离线队列承接，这里不把"记录离线"当成解析的终点。
         discovery.announceTo(host, port ?: Protocol.DEFAULT_UDP_PORT)
-        return withTimeoutOrNull(timeoutMs) {
+        val live = withTimeoutOrNull(timeoutMs) {
             var found: PeerRecord? = null
             while (found == null) {
-                found = pick()
+                found = pickPeerRecordForHost(registry.values(), host, port, onlineOnly = true)
                 if (found == null) delay(100L)
             }
             found
         }
+        live?.let { return it }
+        return pickPeerRecordForHost(registry.values(), host, port, onlineOnly = false)
     }
 
     fun peerDeclares(peerId: String, cap: String): Boolean =
@@ -1746,3 +1784,25 @@ data class OutgoingText(
     val envelopeId: String,
     val envelopeJson: String,
 )
+
+/**
+ * 同一串主机地址上挑一条解析目标（[NodeRuntime.resolvePeerByHost] 的选取半，抽纯以便测试）。
+ *
+ * 排序口径：**在线优先，再按 lastSeen 新到旧** —— "这串 IP 现在是谁"的账，最近听到的那条
+ * 最可信。同地址多条记录的来历：设备换了网卡、nodeId 轮换（重装/迁移）、测试机里两个节点
+ * 共用一个口。旧实现只按 online 排、并列时落回 registry 插入序 ⇒ 会选中一条**陈旧**
+ * 的离线身份（真机现场：按 IP 投文件被解析到重装前的旧 nodeId，offer 发进虚空）。
+ *
+ * [onlineOnly] = true 时离线记录一律不返回（调用方据此走"先握手再退回"那步）。
+ */
+internal fun pickPeerRecordForHost(
+    records: List<PeerRecord>,
+    host: String,
+    port: Int?,
+    onlineOnly: Boolean,
+): PeerRecord? {
+    val atHost = records.filter { it.ip == host }
+        .sortedWith(compareByDescending<PeerRecord> { it.online }.thenByDescending { it.lastSeen })
+    val candidate = if (port == null) atHost.firstOrNull() else atHost.firstOrNull { it.udpPort == port }
+    return candidate?.takeIf { !onlineOnly || it.online }
+}
