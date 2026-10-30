@@ -915,11 +915,11 @@ messaging **PASS 38**（`/tmp/messaging-run14.log`），全量套件 **run11 9/9
 
 ---
 
-## 10. Agent-IM 里程碑 M1–M3（2026-10-30）
+## 10. Agent-IM 里程碑 M1–M4（2026-10-30）
 
-协议纯化、插件宿主网关与共享界面三件套的验收判据（文字证据：`design/runtime-evidence/` 下
+协议纯化、插件宿主网关、共享界面三件套与跨端派单网道的验收判据（文字证据：`design/runtime-evidence/` 下
 `2026-10-30-m1-protocol-purification-and-debts.md`、`2026-10-29-m2-plugin-host-gateway-smoke.md`、
-`2026-10-29-m3-shared-ui-redesign.md`）：
+`2026-10-29-m3-shared-ui-redesign.md`、`2026-10-30-m4-cross-host-invoke-mesh.md`）：
 
 1. **群文本白名单 14 键**：`@agent` 消息带 `agentIntent` 可通全链路；带 `reasoning` 的帧被整帧
    拒收（键已退场）；`card` 超 `CARD_BYTES`（24 KiB）判 bad-payload，发送侧超限**拒绝不截断**。
@@ -934,6 +934,32 @@ messaging **PASS 38**（`/tmp/messaging-run14.log`），全量套件 **run11 9/9
    广播到全群。
 6. **上下文胶囊**：键入 `@agent` 或回复 agent 发言时唤起；粘帖文本不误触发；多 @ 只绑首个执行
    主体；点选会话可精确投递（会话已不存在则如实不投，不静默换投）。
+
+**M4 跨端派单网道（读数：`design/runtime-evidence/2026-10-30-m4-cross-host-invoke-mesh.md`）**：
+
+7. **Layer 4 双节点仿真**（`:app:jvmTest` 的 `TwoNodeAgentInvokeTest`）：跨端派单到达
+   （执行器逐字拿到 prompt）；群流零跨端中间文本 —— 两端库本回路新增行**全部是看板卡**，
+   判据可区分「没产生」与「被判坏帧删掉」；宿主断连后租约在 `deadlineMs` 到期原子翻
+   Timeout（超时卡带 [重试]/[降级为本地执行]）；审批防重跨端回路（首个判定生效 rev+1
+   广播全群、晚到点击幂等丢弃、丢弃 ≠ 消息卡住）。
+8. **`/v1/agent/invoke` 路由**（真桌面、真打包）：缺必填字段 ⇒ 400 `bad-request`；
+   群里没有这个 agent ⇒ 404 `agent-not-found`；自派 ⇒ 200 + invokeId，随后租约翻 Done、
+   看板卡进群、插件台账 `state=done`。`/v1/agent/run` 原语义一字未动（路由对账裁定见
+   执行追踪器 M4 节：run 是执行状态宣告帧，invoke 是带租约的派发 RPC，不构成平行端点）。
+9. **`@agent` 完整回路**（M2 遗留复测）：手机胶囊 @ → 意图帧 → 宿主授权（可信设备档
+   放行）→ 执行桥 → 插件执行（台账 `state=done`、prompt 逐字、会话标题 = 剥掉 @ 之后的
+   任务话原文）→ 卡片进群 → 手机渲染卡片、**零假横幅**、群流零跨端中间文本；桌面
+   FTS 不变量（`MessageFts_docsize` ≡ `MessageEntity`）顺带复核。
+10. **真机抓出的三处缺陷的验收方法**（各有反向验证，红→绿）：
+    - 插件身份匹配用了 slug（真机现象：HTTP 200 + invokeId 但零会话零卡片、三处静默）
+      ⇒ 修后 `PluginForAgentMatchTest` 4 条 + 真机同流程全通；
+    - @ 意图回路 prompt 丢失（真机读数：插件会话标题为空）⇒ `AgentIntentPromptAndGrantBridgeTest`；
+    - 「没有执行」横幅与执行不同源（修前装机横幅先出）⇒ 真机同流程零横幅 + 守卫钉住
+      「带意图的发送跳过发送侧本地自检」（授权归宿主）。
+
+**如实降级**：双桌面跨端（A 派单 → B 执行）的真机验收**未做** —— 只有一台桌面；该条由
+Layer 4 仿真覆盖，真机环节为桌面自派 + 手机 `@agent` 回路（M5 矩阵同步记账，不包装）。
+已知边界：宿主拒绝跨端意图时发起端暂无回执（`PROTOCOL-COVERAGE.md` §五）。
 
 ---
 

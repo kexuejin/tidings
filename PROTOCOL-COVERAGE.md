@@ -7,9 +7,11 @@
 `share` / `screen` / `agent-session` / `agent-event`）和 **5 种 `msg` 的 kind**
 （`text` / `group-text` / `recall` / `nudge` / `pk`）。
 
-本仓在 PPE-1 上又扩了 **11 种**（`agent-queue` / `agent-run` / `agent-approval` /
-`agent-cancel` / `agent-ack` / `agent-artifact` / `agent-workspace` /
-`agent-grant-request` / `agent-grant` / `agent-grant-list` / `agent-session-page`）—— 合计 **28 种**，
+本仓在 PPE-1 之上又扩了 **15 种** —— PPE-1 的 11 种（`agent-queue` / `agent-run` /
+`agent-approval` / `agent-cancel` / `agent-ack` / `agent-artifact` / `agent-workspace` /
+`agent-grant-request` / `agent-grant` / `agent-grant-list` / `agent-session-page`）、
+身份恢复的 2 种（`recovery-req` / `recovery-data`，§六）与 M4 跨端派单的 2 种
+（`agent-invoke` / `agent-invoke-result`，cap `agi1`）—— 合计 **32 种**，
 就是下面这张表要覆盖的全集（`MsgTypes.KNOWN` 与它逐项对齐，由
 `MsgTypeDispositionTest` 钉住"新增一种帧就要当场表态"）。
 
@@ -26,7 +28,7 @@
 
 ---
 
-## 一、会处理的（28 种）
+## 一、会处理的（32 种）
 
 > 数量口径 = `MsgTypes.HANDLED` 的元素个数（下面的表按**帧族合并**成行，所以行数少于类型数）。
 > `HANDLED` 与 `UNHANDLED` 必须构成 `KNOWN` 的一个**划分**，由
@@ -53,6 +55,7 @@
 | `agent-grant-request` / `agent-grant` / `agent-grant-list` | 收：`RelayControllerMessagesComponent.kt:280` / `:288`（cap `agr1`）；执行：agentNode `ControlPlane.resolveAgentTarget` 投递前过滤 | 设备申请 / 宿主决定 / 宿主回清单。四档状态（未申请/待批/已授权/已拒绝）+「申请查看」；**撤销不回收历史**（只拦未来投递） |
 | `agent-session-page` | 发：`RelayController.kt:522` `requestAgentSessionPage`（cap `agp1`）；收后排队：agentNode `AgentSessionPageStore`；应答：宿主插件 | 设备向宿主要**一页**历史会话（`wsId`/`offset`/`limit`）。宿主用已有的 `agent-session` 逐条回填，触发点是按需打开工作区 |
 | `avatar` | `RelayController`（cap `av1`） | 自定义头像获取与广播：`op:"get"`、`op:"data"`、`op:"miss"`，SHA-256 缓存 |
+| `agent-invoke` / `agent-invoke-result` | 收：`RelayControllerMessagesComponent.kt` → 域层网道 `RelayControllerAgentInvokeComponent`（cap `agi1`）；发：同组件（发起方派单 / 结果回传） | 跨端派单 RPC：`task` 进执行门禁（core 的 `AgentExecAuthorizer`，可信设备放行）→ 本机插件执行（`executePluginTask` 唯一实现）；`action` 进卡片动作原子台账（首个判定生效、晚到点击幂等丢弃）。结果帧落租约终态、看板卡以**新帧**上群；两帧都在 `RELIABLE` —— 结果丢失会让发起方把「已完成」误判成超时（键表与 op 互斥见 `PROTOCOL-EXTENSION.md` §6.13） |
 | `share` | 传输层 ACK，业务层**只有壳** | 共享文件柜：`share` ∈ `RELIABLE_TYPES` ⇒ 入站帧在传输层被 ACK，业务层不发 `share:list` |
 | `scan-ranges` | `RelayControllerCidr` | CIDR 网段扫描探活与手动网段配置 |
 | `screen` | 投屏与桌面镜像（cap `rv1`/`rvs1`） | 桌面捕获/推流与屏幕会话展示 |
@@ -146,6 +149,12 @@
 | `agr1` | 手机 | 授权回路三帧 + **投递前按策略过滤**（沉默 = 未授权） |
 | `agp1` | 手机 | 认识 `agent-session-page`（向宿主要一页历史会话） |
 
+**2026-10-30 起常量又多了三位，上面「固定的四位」的计数已落后于代码**（以
+`MessageTypes.MOBILE_CAPS` 为准）：`att1`（附件卡片，task-45）、`gta1`（群文本扩展键：
+归属/会话分段/意图/状态/卡片 —— 手机收发都可能带键，不声明会对自家宿主也退化成
+裁剪版）、`agi1`（M4 跨端派单网道：手机要能点宿主插件卡片上的按钮，被误指名派单时
+也应答一帧诚实的 `no-executor` 拒绝，见 `PROTOCOL-EXTENSION.md` §6.13）。
+
 > **守卫**：core 侧有一条台账测试钉住「每个 cap 常数要么被 profile 清单声明、要么在台账里带**理由**豁免（`fd1` 只读 / `ams1` 预埋 / `shr1`·`rv1`·`rvs1`·`av1` 由壳按条件声明）」，另有源码级守卫断言新加的 cap 必须同步进台账：
 > `core/src/commonTest/kotlin/app/relay/core/protocol/CapabilityDeclarationTest.kt` 与 `core/src/jvmTest/.../CapabilityDeclarationSourceTest.kt`。
 
@@ -163,6 +172,7 @@
 | **跨网屏幕协助** | **未实现**：投屏/协助仍要求两端在同一局域网 | 跨网只做**文件**传输；屏幕的采集/渲染链路假定低延迟同网，跨网要先解决抖动与授权（见 `docs/cross-network-file-screen-design.md`） |
 | **云推送** | **设计已交付、未实现** | `docs/cloud-push-design.md`；当前后台唤醒靠 Android 前台服务（`remoteMessaging`）+ 离线增量游标同步 |
 | **附件「点开下载」** | **未实现**：agent 事件附件只带 `attachmentId`，缺 `fileId`/路径 | 卡片能渲染，点开落盘要等协议补 `fileId` |
+| **跨端拒绝回执** | **未实现**：宿主拒绝一条跨端派单或 `@agent` 意图时，只落宿主本机台账，发起端**没有回执** | 发起端要看到「为什么没执行」，需要一条宿主 → 发起方的拒绝回执帧；当前发起端只能靠租约超时才知道事情没成（跨端派单的 `agent-invoke-result` 有 `denied` 态，但群文本意图路径没有对应回执） |
 | **外部来源配对确认** | **已实现**（task-54）：deep link 与 debug 广播注入都只登记，用户在确认框上点「允许」才落盘；拒绝零副作用 | 理由：把外部输入的密钥存成信任根是不可逆的信任建立。测试 `androidApp/src/test/.../ExternalPairingGateTest.kt`、`composeApp/src/jvmTest/.../ExternalPairingPreviewPurityTest.kt` |
 | **未升级的老客户端与加密数据面** | **无权参与**：不声明 `fch1`/`scr1`、档案里也没有 `luciolaPort`/`screenPort` ⇒ 一律继续走 legacy 路，本机不会向它推字节 | 反过来也成立：本机开着数据面时不启动 legacy 发现 ⇒ 双方**互相发现不到**（节点表里没有它，因此不是「消息丢了」）。回退 = 关掉开关并重启节点，见 `PROTOCOL-EXTENSION.md` §15.5 |
 

@@ -25,8 +25,17 @@ scripts/e2e/
   e2e_agent.py       # Agent 档会话与事件流（R80–R87）
   e2e_search.py      # 检索（R100–R102）
   e2e_screen.py      # 屏幕协助双向（A17）
+  e2e_workspace_collaboration.py  # 工作区协作面：外部来源配对二次确认（N5 的
+                                  # qr-pairing-confirmed，脚本真的点确认框）与授权面板
   README.md          # 本文件
 ```
+
+> **M4 的 `agi1` 帧族（`agent-invoke` / `agent-invoke-result`）与 `/v1/agent/invoke`
+> 路由没有真机夹具**。跨端派单的覆盖在 JVM 双节点仿真（`app/src/jvmTest/.../TwoNodeAgentInvokeTest.kt`：
+> 到达 / 零刷屏 / 断连租约超时 / 审批防重）与控制面契约测试（`agentNode/src/test/.../AgentInvokeRouteTest.kt`：
+> 400/404/503 失败面），真机读数在 `design/runtime-evidence/2026-10-30-m4-cross-host-invoke-mesh.md`
+> （invoke 路由三档读数 + 手机 `@agent` 完整回路）。要给派单补真机夹具，按 §5 的规矩
+> 新增 `e2e_agent_invoke.py`，不要改既有文件。
 
 **行数故意不写在这里**：本文件曾经写「`relay_e2e.py` 1118 行」，而它早已是 1321 行 ——
 硬编的数字一定会烂掉。要准确清单跑 `wc -l scripts/e2e/*.py`。

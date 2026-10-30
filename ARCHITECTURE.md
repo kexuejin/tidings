@@ -266,6 +266,39 @@ data class Envelope(
 
 ---
 
+### 7.4 跨端派单网道（M4 起）
+
+`agentIntent`（§7.3 的插件宿主收到后派单）只覆盖「本群宿主本机执行」；跨端派单让
+A 宿主把子任务派到 B 宿主的插件上执行、结果回传，由发起方 Leader 拼看板卡上群 ——
+**主群聊里一条跨设备交接文本都不产生**（P2P 点对点网道，群流零刷屏）。
+
+- **协议**：`agent-invoke` / `agent-invoke-result` 两帧（cap `agi1`；键表、op 互斥与
+  结果状态机见 `PROTOCOL-EXTENSION.md` §6.13）。`POST /v1/agent/invoke` 是唯一 HTTP
+  入口，**只解包**：派发委托装配了域层的那一侧，未接域层的进程如实回 503。
+- **域层网道**（`:app` 的 `RelayControllerAgentInvokeComponent`，控制器字段 `invokeCtl`）：
+  - **租约表**（`AgentInvokeLeaseTable`）：每条派单登记 `deadlineMs`；先记账再发帧
+    （发送失败也有一条可超时的租约，而不是无声消失）；终态翻转是**原子的** —— 结果帧
+    与超时巡检并发竞争同一条租约时恰好一次生效；巡检协程把过期 RUNNING 租约翻
+    Timeout 并发超时卡（[重试] / [降级为本地执行]）。
+  - **审批防重台账**（`AgentCardActionLedger`）：卡片动作首个判定生效（rev+1 广播全群），
+    晚到的并发点击幂等丢弃；两壳的 `onCardAction` 槽都接到这份原子台账（M3 槽位的真通路）。
+- **desktopApp 装配**（把协议、域层、控制面三段接成通路的唯一一处，源码级守卫
+  `DesktopInvokeWiringGuardTest`）：`invokeDispatcher`（HTTP → 域层派发）、
+  `invokeExecutor`（本机承接 = `pluginForAgent` → `executePluginTask`）、
+  `invokeGrantAllows` / `invokeExecPolicyOf` / `invokeRecordGrantRequest`（授权三桥，
+  威胁模型见 `SECURITY.md`）、`onHostCardAction`（宿主侧卡片动作出口）；detach 全清，
+  留着野通路会把派单交给已停止的控制面。
+- **本机派单唯一实现**：`executePluginTask` 与 `pluginAction` 都住在 `:agentNode` 的
+  `ControlPlane` —— HTTP 的 `/v1/plugin/task`、`/v1/plugin/action`（面板路径）与 M4
+  执行桥（跨端路径）走**同一份**实现，台账同源；两处各写一份迟早漂成「面板派单有
+  台账、执行桥派单没台账」。卡片过桥用 JSON **文本**（desktopApp 类路径无
+  serialization，解析在域层的 done 工厂）。
+- **授权**：跨端派单必须过目标节点的 `AgentExecAuthorizer`（core）：可信设备
+  （`OWNER` / `RW` / 面板批准）自动放行，群主与管理员不默认放行，未授权请求进
+  宿主申请台账待机主点头。
+
+---
+
 ## 8. 持久化存储设计
 
 数据持久化使用 SQLDelight 构建跨平台统一的 SQLite 存储层：

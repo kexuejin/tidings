@@ -62,6 +62,7 @@
 | `aws1` | 工作区身份与宣告帧（D1/D2/D3） | `agent-session` 的四个可选键 + `agent-workspace` 帧（见 `docs/PROTOCOL-AGENT-WORKSPACE.md`） |
 | `agr1` | 授权回路（D7） | 三张 grant 帧；**宿主在投递 agent 帧前按策略过滤** —— 没授权 = 没数据，沉默 ≠ 拒绝 |
 | `agp1` | 会话分页（D8） | `agent-session-page`：设备向宿主要一页历史会话（与 `agn1` 是两个方向的能力） |
+| `agi1` | **跨端派单网道**（M4） | `agent-invoke` / `agent-invoke-result` 两帧（§6.13）；action 请求只发给声明了 `agi1` 的宿主；被误指名的对端也会应答一帧诚实的拒绝结果，而不是沉默 |
 | `att1` | agent 事件附件卡片（task-45） | 发送方据此决定要不要在 `agent-event` 里带 `attachment`；**不声明就只发文本占位** |
 | `gta1` | 带扩展键的群文本 | 发送方据此决定群文本带不带 `senderId` / `agentSessionId`+`agentCursor` / `agentIntent` / `agentState` / `card`；**不声明就发同 id 的裁剪版**（只含上游白名单字段，见 §6.10–§6.12） |
 | `lnk1` | 长连接下行（K1/K2） | 由**主机**声明；手机据此决定要不要拨号（见 `ARCHITECTURE.md` §5.4） |
@@ -89,7 +90,7 @@
 
 ---
 
-## 6. 消息类型（8 个）
+## 6. 消息类型（PPE-1 八种；§6.13 是 M4 跨端派单的两帧）
 
 全部为扁平 payload；`agent-*` 前缀确保不与上游 15 个已知类型冲突。
 
@@ -324,6 +325,65 @@ nodeId 只会让那条气泡挂在别人名下（本协议不防冒名，群内�
 
 **能力门控与旧端行为**：三键都在 `gta1` 的逐成员门控清单里（§4）；不认识这些键的旧端整帧丢弃
 （本仓裁决：两端同版本，不做兼容）。
+
+---
+
+### 6.13 `agent-invoke` / `agent-invoke-result` — 跨端派单网道（cap: `agi1`，M4）
+
+群文本的 `agentIntent`（§6.12）把**意图**送进本群宿主；跨端派单回答的是另一件事：
+A 的 Leader 要把子任务派到 B 的插件上执行、拿回结果 —— 走 P2P 点对点（「地下铁」），
+**主群聊里一条跨设备交接文本都不产生**，全群人类只看一张汇总的看板卡。它与
+`agent-run`（执行状态宣告帧）职责不同：一个是请求-响应式的任务派发 RPC，一个是对端
+单向宣告 —— 路由对账裁定（为什么不扩 `run` 而新开两帧）记录在执行追踪器 M4 节。
+
+**严格白名单**（与 `group-text` 同一条宪法：多一键整帧拒收）。
+
+`agent-invoke`（请求，发起方 → 目标宿主）：
+
+| 键 | 约束 |
+|---|---|
+| `invokeId` | string，≤ 64（`Limits.AGENT_RUN_ID`） |
+| `op` | `task` \| `action`（封闭集合；**两态字段互斥**，混写拒帧） |
+| `agentId` | string，≤ 64 —— 派给哪个 agent |
+| `requestedBy` | string，≤ 64 —— 发起方 nodeId |
+| `deadlineMs` | 正整数，**必填** —— 租约期限；没有期限的派单等于永远等 |
+| `prompt` | 仅 `task`：非空，UTF-8 ≤ 4096（`AGENT_PROMPT`）；带 `actionId` / `cardId` / `cardRev` / `decidedBy` 之一 ⇒ 拒帧 |
+| `actionId` / `cardId` / `decidedBy` | 仅 `action`：必填（哪颗按钮、哪张卡、谁批的）；带 `prompt` ⇒ 拒帧 |
+| `cardRev` | 仅 `action`：非负整数 |
+| `sessionId` / `groupId` / `groupRev` / `wsId` / `at` | 可选 |
+
+`agent-invoke-result`（应答，目标宿主 → 发起方）：
+
+| 键 | 约束 |
+|---|---|
+| `invokeId` | 回指请求 |
+| `ok` + `status` | 必须自洽：`ok` 为真 ⟺ `status == "done"` —— 一帧自相矛盾的结果比丢帧更糟（发起方会把失败当成功记进看板） |
+| `status` | `done` \| `denied`（目标节点授权门禁拒绝）\| `no-executor`（声明了 `agi1` 但没有执行器 —— 手机被误指名时的诚实应答）\| `no-plugin`（目标节点上没有这个 agentId 的插件）\| `timeout`（目标侧租约先到期）\| `error`（执行中出错） |
+| `card` | 仅 `done` 时允许；对象，UTF-8 ≤ `Limits.CARD_BYTES`（24 KiB）—— 被拒的派单不该带执行卡片 |
+| `summary` | 可选，≤ 2000 字符（`AGENT_INVOKE_SUMMARY`）；进发起方拼装的看板卡 |
+| `error` | 可选，≤ `Limits.AGENT_NOTE`（200） |
+| `at` | 可选 |
+
+**两帧都在 `RELIABLE` 里**：请求丢了靠重传兜底；**结果帧丢了，发起方会把「已经完成」
+误判成「超时中断」—— 比丢请求更糟**。
+
+**HTTP 入口**：`POST /v1/agent/invoke`（body：`groupId` / `agentId` / `prompt` 必填，
+`wsId` / `deadlineMs` 可选）。**HTTP 只解包**：真正的派发（租约登记、点对点帧、
+看板卡广播、零刷屏纪律）由**装配了域层的那一侧**实现；没有域层的进程（headless
+`agentNode`）如实回 503，不假装接了单。失败面：缺必填字段或 `deadlineMs ≤ 0` ⇒ 400；
+未接域层 ⇒ 503 `invoke-not-wired`；群里没有这个 agent 的声明 ⇒ 404 `agent-not-found`；
+派发抛错 ⇒ 500。
+
+**已知边界（如实）**：宿主**拒绝**一条跨端意图时，目前只落宿主本机台账，发起端
+**没有回执** —— 发起端要看到「为什么没执行」，需要一条宿主 → 发起方的拒绝回执，
+尚未实现（见 `PROTOCOL-COVERAGE.md` §五）。
+
+**旧节点行为**：不认识这两帧 ⇒ 静默丢弃（未知类型）。派单照发、租约照走：旧端会
+ACK 后丢弃，租约到期给出如实的超时卡 —— 比发送侧静默猜强。
+
+测试：`core/src/commonTest/.../AgentInvokeCodecTest.kt`（键表、op 互斥、结果自洽、
+卡片只在 done、预算）；`app/src/jvmTest/.../TwoNodeAgentInvokeTest.kt`（双节点全回路：
+到达 / 零刷屏 / 断连超时 / 审批防重）。
 
 ---
 
@@ -575,6 +635,8 @@ budget 类断言（最坏样本落在 UDP 800 / TCP 4096 内）在
 | `agent-grant` | `agr1` | ~180 B | 静默丢弃 | ✅ | ✅ | ✅ |
 | `agent-grant-list` | `agr1` | ~200 B | 静默丢弃 | ✅ | ✅ | ✅ |
 | `agent-session-page` | `agp1` | ~180 B | 静默丢弃 | ✅ | ✅ | ✅ |
+| `agent-invoke` | `agi1` | ~200 B + prompt | 静默丢弃 | ✅ | ✅ | ✅ |
+| `agent-invoke-result` | `agi1` | ~150 B（+ 卡片 ≤24 KiB） | 静默丢弃 | ✅ | ✅ | ✅ |
 | `avatar` | `av1` | ~100 B~32 KB | 静默丢弃 | ✅ | ✅ | ✅ |
 | `recovery-req` | —（pin 认证） | ~80 B | 静默丢弃 | ✅ | ✅ | ✅ |
 | `recovery-data` | —（pin 认证） | ≤24 KiB/批 | 静默丢弃 | ✅ | ✅ | ✅ |
