@@ -307,8 +307,15 @@ We will acknowledge receipt within 48 hours and work with you on validation and 
 1. 「始终允许」的入口与可达性都已闭环：入口在审批行第二行（与「本会话免审」并排，
    首行只留拒绝/批准）；宿主在插件没声明 `choices` 时补
    `approved,denied,allow_session,always`，对端才看得见这一档。插件显式声明时以插件为准。
-2. 免批表在界面上**没有列表/撤销入口**，只有 `AgentToolApprovalStore.revoke` 这个 API。
-   要回收只能等面板补上，或在数据目录里删 `agent-tool-approvals.json`（整表清空）。
+2. 免批表有了回收口：桌面「设置 → 可信设备」最下方的「免批规则」列出本机全部规则，
+   每条一个「撤销」。三条如实说明：
+   - **回收口在宿主侧**（跑 agent 的那台机器），不在手机。表本来就只在宿主进程里：
+     手机按「始终允许」只是把决定送过来，规则不存在手机上。跨端撤销要新开一条控制面
+     路由，属协议面，未做。
+   - 撤销走 `revokeExactly`（三元逐字相等），**不是** `revoke(nodeId, agentKey, tool)`：
+     后者的 `agentKey = null` 意思是「不按 agent 过滤」，会把同设备同工具的其它 agent
+     规则一起删掉 —— 撤一行、少几行，而界面只消失一行。
+   - 撤销只影响**之后**的请求：正在等批准的那一条仍在等，已执行的不会回滚。
 3. 「过期」的边界在仓里有**两种口径**：审批用开区间 `now > expiresAt`
    （`isAgentApprovalExpired`），会话卡片用闭区间 `now >= expiresAt`
    （`AgentCards.isCardExpired`）。同一秒的行为因此不同；未统一，先记在这里。
