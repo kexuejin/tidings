@@ -599,17 +599,39 @@ fun AgentCardBubble(
 /** 原子 1/5 · Banner（§7.3）：一行带色的说明。 */
 @Composable
 private fun CardBannerRow(banner: AgentCardBanner) {
-    val sp = LocalAppSpacing.current
-    val (container, content) = bannerColorsOf(banner.tone)
-    Surface(shape = ShapeRoles.DayCell, color = container, contentColor = content) {
-        Text(
-            text = banner.text,
-            style = MaterialTheme.typography.bodySmall,
-            maxLines = CARD_BANNER_MAX_LINES,
-            overflow = TextOverflow.Ellipsis,
-            modifier = Modifier.fillMaxWidth().padding(horizontal = sp.sm, vertical = sp.sm6),
-        )
+    BannerSurface(tone = banner.tone) { BannerText(banner.text) }
+}
+
+/**
+ * 横幅的**外壳**（圆角 + 底色 + 内边距）：卡内 Banner 与群流执行状态横幅共用。
+ *
+ * 抽出来的理由与 [bannerColorsOf] 相同，只是更进一步：只共用颜色、不共用外壳，
+ * 两处的圆角/内边距迟早会各走各的 —— 那时同一个「失败」不但颜色对不上，
+ * 连块的大小都不一样，看起来像两个不同组件在说两件事。
+ */
+@Composable
+private fun BannerSurface(
+    tone: AgentCardBannerTone,
+    modifier: Modifier = Modifier,
+    content: @Composable () -> Unit,
+) {
+    val (container, contentColor) = bannerColorsOf(tone)
+    Surface(shape = ShapeRoles.DayCell, color = container, contentColor = contentColor, modifier = modifier) {
+        content()
     }
+}
+
+/** 横幅的**正文**（字阶 / 行数上限 / 省略）。与 [BannerSurface] 成对，一处定义。 */
+@Composable
+private fun BannerText(text: String) {
+    val sp = LocalAppSpacing.current
+    Text(
+        text = text,
+        style = MaterialTheme.typography.bodySmall,
+        maxLines = CARD_BANNER_MAX_LINES,
+        overflow = TextOverflow.Ellipsis,
+        modifier = Modifier.fillMaxWidth().padding(horizontal = sp.sm, vertical = sp.sm6),
+    )
 }
 
 /**
@@ -660,17 +682,11 @@ fun agentStateBannerToneOf(state: String?): AgentCardBannerTone? = when (state) 
 @Composable
 fun AgentStateBannerRow(state: String, text: String, modifier: Modifier = Modifier) {
     val tone = agentStateBannerToneOf(state) ?: return
-    val sp = LocalAppSpacing.current
-    val (container, content) = bannerColorsOf(tone)
-    Surface(shape = ShapeRoles.DayCell, color = container, contentColor = content, modifier = modifier.fillMaxWidth()) {
-        Text(
-            text = text.ifBlank {
+    BannerSurface(tone = tone, modifier = modifier.fillMaxWidth()) {
+        BannerText(
+            text.ifBlank {
                 if (state == "failed") stringResource(Res.string.agent_state_banner_failed) else ""
             },
-            style = MaterialTheme.typography.bodySmall,
-            maxLines = CARD_BANNER_MAX_LINES,
-            overflow = TextOverflow.Ellipsis,
-            modifier = Modifier.fillMaxWidth().padding(horizontal = sp.sm, vertical = sp.sm6),
         )
     }
 }
