@@ -65,17 +65,27 @@
 | FTS 不变量 | `MessageFts_docsize` 7877 ≡ `MessageEntity` 7877 |
 | UI 不新增可见气泡 | 同一位置由「第 1 版」变「第 2 版」，卡片数量不变 |
 
-## 3. 第 3 条：双端审批防重 ⚠️ 部分
+## 3. 第 3 条：双端审批防重 ✅（语义层与帧层成立；桌面像素明确不可判定）
 
 | 判据 | 读数 |
 |---|---|
 | 第一个 ack 生效 | `decidedBy=Pixel 6` 落在 rev 2 那一行；此后该卡片按钮**二次点击 no-op**：再点一次，`MessageEntity` 仍 7877 行、`rev` 没有出现 3 |
-| 另一端置灰并显示批准人 | **未取到读数**：桌面端是 Compose 自绘，`screencapture` 在本机被系统权限拒绝（`could not create image from display`），`osascript` UI 脚本同样被拒（-10004）。桌面与手机读的是同一行（`decidedBy=Pixel 6`），置灰是 `cardActionUiOf` 的纯函数结果、由 `MultiDeviceApprovalLockTest` 3 条仿真判据钉住，但**真机截图这一格是空的** |
-| 并发双端同时点 | **未做**：只有一台手机 + 一台桌面，且两端点击无法在同一毫秒窗口内由人手触发。本轮只验了「已决之后第二次点击不产生新 ack」 |
+| 决策**跨端传播**（帧层） | 桌面 `messages.log` seq **300757**（`dir=out`）携带 `rev=2`、`decidedBy=Pixel 6`、`decidedActionId=echo-again`，消息 id `b1e15741` 与手机落库行**同一个 id** ⇒ 广播帧确实发出并被对端落库 |
+| 置灰 + 显示批准人（语义层） | 手机 `am force-stop` + 冷启动后进群，`uiautomator dump`：按钮容器节点 `enabled="false"`（Compose 禁用态），上方文案「已由 Pixel 6 处理」。**这一档没有任何本地点按**（进程重建、乐观台账为空）⇒ 禁用态由帧/库驱动，不是「我点过所以我知道」 |
+| 禁用态真的不响应 | 点该按钮容器中心（540,1444）→ 桌面帧日志行数 **20135 → 20135（delta=0）**，没有新 ack 帧 |
+| 并发双端同时点 | **未做**：只有一台手机 + 一台桌面，两端点击无法在同一毫秒窗口内由人手触发。本轮只验了「已决之后第二次点击不产生新 ack」 |
 
-## 4. 第 4 条：插件热拔 ⚠️ 部分（翻离线的机制与矩阵预设不同）
+**这一格还剩什么不可判定**：桌面端的**像素**。`screencapture` 被系统权限拒绝
+（`could not create image from display`），`osascript` UI 脚本同样被拒（-10004），
+「桌面上那颗按钮长什么样」本轮无法取证。另有一条必须写明的差别：上面那档读数里
+`decidedBy` 恰好是**本机名**（Pixel 6 = 这台手机），所以它证的是「Decided 由帧驱动」
+这条路径 —— 与真正的「另一端」走的是**同一个** `cardActionUiOf(lock=Decided)`，
+但严格说不是「另一台设备的字面像素」。两者叠起来判成立，边界如上。
+
+## 4. 第 4 条：插件热拔 ✅（翻离线是秒级；主进程与链路零新增 close）
 
 **操作**：`kill -9` 掉 `dsh-echo-bridge` 的进程（pid 16613，监听 63675），按 30 / 60 / 100 秒三档采样。
+补测（本轮，为把口径钉准）：再 kill 两次（pid 30205 @55883、pid 83634 @60617），用 250 ms 轮询 `/v1/plugins` 记翻离线的精确耗时。
 
 | 采样点 | `GET /v1/plugins` 读数 |
 |---|---|
@@ -85,10 +95,26 @@
 | t+100s（09:30:24） | offline（同上） |
 | 主程序 | pid 16573 存活，未崩 |
 
-**判据偏差（必须写清）**：矩阵写的是「按 `offlineAfter`=90s 翻离线」，实测**≤30 秒**就翻了。
-原因在代码里：`offlineAfter`（`Limits.kt` 的 90_000）是 `PeerRegistry.sweep` 的**节点 presence 超时**，
-而插件/agent 的在线态走的是 **healthz 探测**（`PluginRegistry`），探测周期远短于 90s。
-两者不是同一个时钟 —— 矩阵那一格的口径要改，否则下一个人会照着 90s 去等一个早就发生的事实。
+**判据偏差（必须写清）**：矩阵原文是「按 `offlineAfter`=90s 翻离线」，实测**秒级**就翻了
+（本轮补测两个样本：**2.0s / 8.0s**）。原因在代码里，两者不是同一个时钟：
+
+- `offlineAfter`（`Limits.kt` 的 `90_000`）是 `PeerRegistry.sweep` 的**节点 presence 超时**；
+- 插件/agent 的在线态走 **healthz 探测**：`PluginRegistry(probeIntervalMs = 15_000, probeTimeoutMs = 2_000)`，
+  桌面端 `ControlPlane` 用默认值构造。kill 后状态在**下一次探测 tick** 翻 offline，
+  所以落在 **[0, 15s] + 连接超时**（端口被拒是立即，被过滤才吃满 2s），上界 **17s**。
+
+| 样本 | 翻 offline 耗时 | 说明 |
+|---|---|---|
+| #1 | **2.0s** | tick 恰好在 kill 后 2s 到 |
+| #2 | **8.0s** | 同一机制、相位不同 ⇒ 读数离散是**预期**，不是不稳定 |
+
+口径改为：**「kill 后 ≤17s（探测周期 15s + 超时 2s）翻 offline」**，而不是 90s。
+
+**顺带钉死一条容易误判的事实**：托管模式（`PluginHost`）确实会 spawn 插件
+（`ProcessBuilder`，注入 token），但**只在宿主启动挂接时拉起一次，没有监管循环** ——
+所以 kill 掉之后它不会自愈，要么重启宿主、要么手动把进程起回来。本轮两个样本都是
+手动重启插件进程（`python3 main.py`），不是宿主拉起的。这不是缺陷，是「拉起一次」
+的语义；但矩阵里写「热拔」时要分清**谁把它拔掉的、谁该把它插回去**。
 
 **主程序 closeCount**：这一档期间桌面主进程存活，链路上没有新增 close（当时桌面→手机 `closeCount=4`，
 `closeReason=replaced`，全部来自本次会话里两端的重启，没有一条 `timeout`/`error`）。
@@ -97,20 +123,33 @@
 （第 7 条第一段就是这个现场：手机发了 @dsh，桌面无插件可派，手机端既没有卡片也没有「不可用」提示，
 UI 上连一个「失败/离线」字样都搜不到）。设计稿 v2 §4.8「插件离线的动作反馈」尚未落地，这是它的真机证据。
 
-## 5. 第 5 条：链路稳定 ⚠️ 部分（飞机模式没真的断网）
+## 5. 第 5 条：链路稳定 ✅（真断网重跑：全程零异常 close）
 
-| 操作 | 手机 `closeCount` 合计 | 手机 `lastError` 数 | 桌面→手机 |
+**操作**：`svc wifi disable`（不用飞机模式）→ 6 秒后 `ip route` 为空（**真断网**，`src 192.168.2.22` 即本机）
+→ 按 t+26s / t+25min 采样 → `svc wifi enable` → 12 秒采样 → `am force-stop` + 冷启动 → 14 秒采样。
+（断网窗口原计划 1 分钟，中途撞上 `/Volumes/Kapp` 满盘、沙箱起不来，实际拉长到约 25 分钟 ——
+这个意外反而补到了「长时断网」这一档。）
+
+| 阶段 | 手机 `closeSum` | 手机 `lastError` | 桌面 `closeCount` / 原因 |
 |---|---|---|---|
-| 基线（09:31:40） | 0 | 0 | online / linkConnected / close 4 / replaced |
-| `cmd connectivity airplane-mode enable` 后 20s | 0 | **2** | **仍 linkConnected=true** |
-| 关飞机模式后 25s | 0 | 1 → 0 | online |
-| 冷启动（force-stop + start）后 20s | 0 | 0 | close 4 → **5**（replaced） |
+| 基线 | 0 | 0 | 4 / 全 `replaced` |
+| 真断网 t+26s | **0** | 2 条 `connect-timeout` | 4 / 全 `replaced`，**仍 `linkConnected=true`** |
+| 真断网 t+25min | **0** | 2 条（未再涨） | 4 / 全 `replaced`，**`connected=0`** |
+| 开网 t+12s | **0** | 0（清零） | **5** / `replaced` |
+| 冷启动 t+14s | **0** | 0 | **6** / `replaced` |
 
-**结论与坑**：`cmd connectivity airplane-mode` **没有真的切断 Wi-Fi**（Android 12+ 保留已开启的 Wi-Fi），
-所以那一档只验到「部分网络路径抖动下链路不抖」，不是全断网。改用 `svc wifi disable`
-（`ip route` 为空 = 真断）重做，读数见第 7 条。
-**真正判据成立的部分**：全程 `closeCount` 没有一次是因为超时/报错而涨 —— 每一次增长都是 `replaced`
-（新链路顶掉旧链路），且 `lastError` 在恢复后清零；没有出现 AGENTS §2.5 说的「每 8.1 秒断一次」那种形态。
+**判据怎么落**：矩阵写的是「换网/断网/冷启动全程 `closeCount`=0」。
+
+- **手机侧字面成立**：`closeSum` 全程 **0**，断网期间只记 `connect-timeout`（连不上，不是断已连的），恢复后清零。
+- **桌面侧字面不成立、但语义成立**：4 → 5 → 6，**每一次增长都是 `replaced`**（新链路顶掉旧链路），
+  没有一条 `timeout`/`error`。`replaced` 是重连的**正常语义**，把它算成「不稳定」等于把「重连过」判成「断过」。
+- **一条必须记下的盲区**：桌面侧在断网期间 `linkConnected` 从 `true` 翻 `false`，
+  **`closeCount` 一动不动**（4 不变）。也就是说**只盯 `closeCount` 会漏掉「链路其实已经死了」** ——
+  那一格是靠 presence/online 判定翻的，不是靠 socket close。这条判据以后要配 `connected` 一起看。
+
+**为什么这一档是 ✅ 而不是 ⚠️**：上一轮用飞机模式（`cmd connectivity airplane-mode`）在 Android 12+ 上
+**没有真的切断 Wi-Fi**，所以那一轮只验到「部分抖动」。这一轮 `ip route` 为空是真断，
+四档读数覆盖了「断 / 长断 / 恢复 / 冷启动」四种形态，异常 close 一条没有。
 
 ## 6. 第 6 条：授权面板 ✅（非宿主只读 + 无路径成立；rev+1 广播未验）
 
@@ -172,9 +211,9 @@ UI 上连一个「失败/离线」字样都搜不到）。设计稿 v2 §4.8「�
 |---|---|---|
 | 1 | 手机 @agent 派单 → 桌面执行 → 手机收卡片 | ✅（60 ms，零中间文本，intent 键在） |
 | 2 | 卡片原位刷新 | ✅（新行 rev+1，旧行不重写，FTS 不变量成立） |
-| 3 | 双端审批防重 | ⚠️ 本端成立（二次点击 no-op），另一端置灰无截图 |
-| 4 | 插件热拔 | ⚠️ 翻离线 ≤30s（healthz，不是 90s presence）；顺带抓到「agent 离线零反馈」 |
-| 5 | 链路稳定 | ⚠️ 飞机模式没真断网；`closeCount` 只涨 `replaced`，无超时/报错型断开 |
+| 3 | 双端审批防重 | ✅ 二次点击 no-op；决策帧跨端传播（seq 300757）；冷启动后按钮 `enabled=false` + 批准人可见，点它 delta=0。桌面像素不可判定 |
+| 4 | 插件热拔 | ✅ 秒级翻离线（2.0s / 8.0s，上界 17s = 15s 探测 + 2s 超时，不是 90s presence）；主进程存活、链路零新增 close。顺带抓到「agent 离线零反馈」 |
+| 5 | 链路稳定 | ✅ 真断网（`ip route` 空）四档采样：手机 `closeSum` 全程 0，桌面 4→5→6 **全是 `replaced`**、零 `timeout`/`error`。盲区：断网期间 `closeCount` 不动，要配 `connected` 一起看 |
 | 6 | 授权面板 | ✅ 只读 + 无路径成立（入口在头部溢出 → 群信息 → 滚到底 → 授权管理）；宿主侧 rev+1 广播未验 |
 | 7 | 队列重放 | ⚠️ 文本 + 卡片帧都到，UI 被夹具的固定 `cardId`/`rev` 压住（夹具已改名，复跑见 §7.1） |
 
@@ -190,8 +229,11 @@ UI 上连一个「失败/离线」字样都搜不到）。设计稿 v2 §4.8「�
 4. **只读态下「保存并广播」未禁用**（6.1-2）：先验它到底能不能写，再决定是禁用还是保留。
    风险点是它可能把宿主白名单清空。
 
-**口径要改的一处**：第 4 条的「按 `offlineAfter`=90s」→「按 healthz 探测周期（实测 ≤30s）」。
-90s 是 `PeerRegistry.sweep` 的 peer presence 超时，与插件/agent 在线态不是一个时钟。
+**口径已改的一处**：第 4 条从「按 `offlineAfter`=90s」改为「按 healthz 探测周期
+（`probeIntervalMs`=15s + `probeTimeoutMs`=2s ⇒ **≤17s**，实测 2.0s / 8.0s）」。
+90s 是 `PeerRegistry.sweep` 的 peer presence 超时，与插件/agent 在线态不是一个时钟 ——
+照 90s 去等，等于等一个早就发生的事实。
 
-**没有包装的**：第 3 条的并发双端点击与桌面截图、第 6 条的宿主侧广播、第 7 条的渲染层。
-本轮只跑了一台手机 + 一台桌面，双桌面跨端仍由 Layer 4 仿真覆盖（M4 的裁决继续有效）。
+**没有包装的**：第 3 条的**桌面像素**与并发双端同时点、第 6 条的宿主侧 rev+1 广播、
+第 7 条的渲染层（夹具已修，复跑排在 S6）。本轮只跑了一台手机 + 一台桌面，
+双桌面跨端仍由 Layer 4 仿真覆盖（M4 的裁决继续有效）。
