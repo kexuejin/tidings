@@ -4,6 +4,7 @@ package com.kapp.tidings.feature.chat
 
 import com.kapp.tidings.core.protocol.AgentExecAuthorizer
 import com.kapp.tidings.core.protocol.AgentExecAuthorizer.Verdict
+import com.kapp.tidings.domain.model.MessageUi
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonObject
 import kotlin.test.Test
@@ -119,6 +120,75 @@ class AgentCardPolicyTest {
         assertEquals(CardBlock.values().toSet(), presentBlocksOf(full), "六类原子组件都要能被识别出来")
         assertEquals("report.pdf", full.artifacts.single().name)
         assertEquals(2_048L, full.artifacts.single().bytes)
+    }
+
+    // ── 卡片行的三种去向（S21：解析失败不许静默吞行）───────────────────────────
+
+    private fun cardMessage(
+        id: String,
+        card: String,
+        text: String = "",
+    ): MessageUi = MessageUi(
+        id = id,
+        peerId = "group:g1",
+        mine = false,
+        text = text,
+        at = 0L,
+        card = Json.parseToJsonElement(card) as JsonObject,
+    )
+
+    @Test
+    fun malformedCardFallsBackToTextInsteadOfVanishing() {
+        // 少写一个 `rev` 的卡：现在的行为是「整行不画」——群里凭空少一句话，
+        // 两端都不报错。S21 裁决：退成普通文本（宁可朴素，不许消失）。
+        val message = cardMessage(
+            id = "m1",
+            card = """{"cardId":"c1","type":"result","title":"跑完了"}""",
+            text = "插件说：跑完了",
+        )
+        assertEquals(
+            CardRowOutcome.FallbackToText("插件说：跑完了"),
+            cardRowOutcome(message, visibleCardMessageIds = emptySet()),
+        )
+    }
+
+    @Test
+    fun cardWithoutCardIdAlsoFallsBack() {
+        val message = cardMessage(id = "m1", card = """{"rev":1,"title":"x"}""", text = "原文")
+        assertEquals(CardRowOutcome.FallbackToText("原文"), cardRowOutcome(message, emptySet()))
+    }
+
+    @Test
+    fun fallbackWinsOverTheVisibilityGate() {
+        // 判据顺序不可交换：坏数据**永远**不在可见集里（折叠函数跳过了它），
+        // 若先判可见集，它就既画不成卡也退不成文本 —— 又回到静默。
+        val message = cardMessage(id = "m1", card = """{"cardId":"c1"}""", text = "原文")
+        assertEquals(
+            CardRowOutcome.FallbackToText("原文"),
+            cardRowOutcome(message, visibleCardMessageIds = setOf("m1")),
+        )
+    }
+
+    @Test
+    fun staleRevisionIsHiddenNotFallenBack() {
+        // 折叠与退档是两件事：旧 rev 的**数据是好的**，只是原位刷新把它收起了。
+        // 退成文本就等于把每一次刷新都当新消息播一遍，正是 §5.3 要消灭的刷屏。
+        val messages = listOf(
+            cardMessage(id = "m1", card = """{"cardId":"c1","rev":1,"progress":10}"""),
+            cardMessage(id = "m2", card = """{"cardId":"c1","rev":2,"progress":100}"""),
+        )
+        val visible = latestRevCardMessageIds(messages)
+        assertEquals(setOf("m2"), visible, "同 cardId 只留最新 rev")
+        assertEquals(CardRowOutcome.Hidden, cardRowOutcome(messages[0], visible))
+        assertTrue(cardRowOutcome(messages[1], visible) is CardRowOutcome.Render)
+    }
+
+    @Test
+    fun blankFallbackTextStaysBlankForTheRendererToFill() {
+        // 纯函数不碰资源（否则 `cjkLiteralGate` 与双语对账都会红，且帧无法固定）；
+        // 空串由渲染层补一句本地兜底文案。这里只钉住「原样透传」。
+        val message = cardMessage(id = "m1", card = """{"cardId":"c1"}""", text = "")
+        assertEquals(CardRowOutcome.FallbackToText(""), cardRowOutcome(message, emptySet()))
     }
 
     // ── 动作资格（§4.8：判定在宿主，UI 只消费结论；无资格**不画按钮组**）───────

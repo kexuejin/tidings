@@ -275,6 +275,37 @@ fun latestRevCardMessageIds(messages: List<MessageUi>): Set<String> {
     return latest.values.map { it.second }.toSet()
 }
 
+/**
+ * 一条**带卡片负载**的消息在会话流里的去向（设计稿 v2 §4.3-S21）。
+ *
+ * 三种，不是两种 —— 这是 S21 的全部要点：
+ * - [Render]：身份键齐全且是本 cardId 的最新 rev ⇒ 画卡；
+ * - [Hidden]：不是最新 rev ⇒ 原位刷新已把它收起（§5.3，历史翻得到、当下不刷屏）；
+ * - [FallbackToText]：身份键**缺了**（`cardId` 或 `rev` 不在）⇒ 退成一条普通文本。
+ *
+ * 为什么第三种必须存在：解析不出身份键时「整行不画」是**静默吞行** —— 插件一次手误
+ * （少写一个 `rev`）在群里就变成「凭空少了一句话」，而两端都不报错、门禁也全绿。
+ * 宁可显示一条样式朴素的消息。这与 [latestRevCardMessageIds] 的折叠语义是两件事：
+ * 折叠是「这条不是最新」，退档是「这条根本不是一张卡」。
+ *
+ * 判据顺序**不可交换**：身份键判在可见集之前。反过来的话，坏数据永远不在可见集里，
+ * 于是它既画不成卡也退不成文本 —— 又回到静默。
+ *
+ * [FallbackToText.text] 是消息原文，可能为空（卡片帧本来就不带正文）；渲染层在空串时
+ * 补一句本地兜底文案。纯函数不碰资源，才能被合成输入钉死。
+ */
+sealed interface CardRowOutcome {
+    data class Render(val card: AgentCardUi) : CardRowOutcome
+    data class FallbackToText(val text: String) : CardRowOutcome
+    data object Hidden : CardRowOutcome
+}
+
+/** 见 [CardRowOutcome] 的 KDoc：`visibleCardMessageIds` 来自 [latestRevCardMessageIds]。 */
+fun cardRowOutcome(message: MessageUi, visibleCardMessageIds: Set<String>): CardRowOutcome {
+    val card = parseAgentCard(message.card) ?: return CardRowOutcome.FallbackToText(message.text)
+    return if (message.id in visibleCardMessageIds) CardRowOutcome.Render(card) else CardRowOutcome.Hidden
+}
+
 // ── 策略层纯函数（设计稿 v2 阶段 A）───────────────────────────────────────
 //
 // 这一段的三个函数**只吃入参**：不读时钟、不读全局状态、不碰 Compose。

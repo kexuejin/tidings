@@ -78,6 +78,7 @@ import com.kapp.tidings.domain.model.MessageUi
 import com.kapp.tidings.domain.model.NoticeKind
 import com.kapp.tidings.domain.model.TransferState
 import com.kapp.tidings.generated.resources.action_find_nodes
+import com.kapp.tidings.generated.resources.card_unreadable
 import com.kapp.tidings.generated.resources.chat_attach
 import com.kapp.tidings.generated.resources.chat_recall_expired
 import com.kapp.tidings.generated.resources.chat_empty_message
@@ -1060,6 +1061,16 @@ fun ChatScreen(
                     // 两者必须同时翻：数据倒序 + reverseLayout，才等价于原来的「最旧在上」。
                     items(messages.asReversed(), key = { it.id }) { message ->
                         val notice = message.notice
+                        // 带卡片的消息有三种去向（§4.3-S21，判据在 `cardRowOutcome` 里）：
+                        // 画卡 / 旧 rev 收起 / 读不出来就退成普通文本。不带卡的消息是 null，
+                        // 保持原来的分支顺序不变 —— 否则纯文本消息会被「不画」那一支吃掉。
+                        val cardOutcome = if (message.card != null) {
+                            remember(message.id, message.card, visibleCardIds) {
+                                cardRowOutcome(message, visibleCardIds)
+                            }
+                        } else {
+                            null
+                        }
                         if (notice != null) {
                             // 系统提示行不是消息：撤回与戳一碰都只留一行居中的灰字（协议 §8）。
                             NoticeLine(
@@ -1104,36 +1115,38 @@ fun ChatScreen(
                             ) {
                                 ScreenHistoryCard(record = screenRecord, now = now)
                             }
-                        } else if (message.card != null) {
+                        } else if (cardOutcome is CardRowOutcome.Render) {
                             // 声明式卡片（方案 §4.3）：数据源是消息库（`MessageUi.card`），
-                            // 与其它消息同一条读回路径。两道闸都过不了就整行不画：
-                            //  · 解析不出身份键（cardId/rev 缺失）—— 不是一张卡；
-                            //  · 不是本 cardId 的最新 rev —— 原位刷新把它收起（§5.3）。
-                            val parsedCard = remember(message.id, message.card) { parseAgentCard(message.card) }
-                            if (parsedCard != null && message.id in visibleCardIds) {
-                                Box(
-                                    modifier = Modifier.fillMaxWidth(),
-                                    contentAlignment = if (message.mine) Alignment.CenterEnd else Alignment.CenterStart,
-                                ) {
-                                    AgentCardBubble(
-                                        card = parsedCard,
-                                        pendingActions = pendingCardActions,
-                                        // 会话里已经有一份时钟（屏幕协助卡在用同一个）：
-                                        // 过期子态跟着它走，组件自己不读表 —— 可测、可截帧。
-                                        now = now,
-                                        // 可空槽：null = 这个壳没有动作通路（跨端派发 M4 才接），
-                                        // 按钮组整块不画 —— 按下去没反应的按钮比没有更糟。
-                                        onAction = actions.onCardAction?.let { dispatch ->
-                                            { card: AgentCardUi, actionId: String ->
-                                                // 本机乐观置灰先行（§5.3）：即使动作派发失败，
-                                                // 「我点过了」也是本机事实；宿主判定到达后三态接管。
-                                                pendingCardActions = pendingCardActions + "${card.cardId}|$actionId"
-                                                dispatch(peer.nodeId, card, actionId)
-                                            }
-                                        },
-                                    )
-                                }
+                            // 与其它消息同一条读回路径。画不画由 `cardRowOutcome` 一处判：
+                            //  · 解析不出身份键（cardId/rev 缺失）⇒ 退成普通文本（S21），
+                            //    这一支**接不到**那种消息 —— 它落到下面的文本分支去了；
+                            //  · 不是本 cardId 的最新 rev ⇒ 原位刷新把它收起（§5.3）。
+                            Box(
+                                modifier = Modifier.fillMaxWidth(),
+                                contentAlignment = if (message.mine) Alignment.CenterEnd else Alignment.CenterStart,
+                            ) {
+                                AgentCardBubble(
+                                    card = cardOutcome.card,
+                                    pendingActions = pendingCardActions,
+                                    // 会话里已经有一份时钟（屏幕协助卡在用同一个）：
+                                    // 过期子态跟着它走，组件自己不读表 —— 可测、可截帧。
+                                    now = now,
+                                    // 可空槽：null = 这个壳没有动作通路（跨端派发 M4 才接），
+                                    // 按钮组整块不画 —— 按下去没反应的按钮比没有更糟。
+                                    onAction = actions.onCardAction?.let { dispatch ->
+                                        { card: AgentCardUi, actionId: String ->
+                                            // 本机乐观置灰先行（§5.3）：即使动作派发失败，
+                                            // 「我点过了」也是本机事实；宿主判定到达后三态接管。
+                                            pendingCardActions = pendingCardActions + "${card.cardId}|$actionId"
+                                            dispatch(peer.nodeId, card, actionId)
+                                        }
+                                    },
+                                )
                             }
+                        } else if (cardOutcome is CardRowOutcome.Hidden) {
+                            // 旧 rev：库里的旧行还在（历史翻得到），只是不再渲染（§5.3）。
+                            // 这一支刻意留空且**不留注释以外的东西** —— 加任何占位都会把
+                            // 「收起」变成「换一种方式显示」。
                         } else if (message.agentState != null) {
                             // 执行状态轻横幅（设计稿 v2 §5「失败如实」）：宿主在
                             // 「插件接不了活 / 执行没做成」时发的那条 agent 署名群文本。
@@ -1147,6 +1160,17 @@ fun ChatScreen(
                                 AgentStateBannerRow(state = state.orEmpty(), text = message.text)
                             }
                         } else {
+                            // S21 退档：卡片负载读不出来时，原文照常按普通消息渲染。
+                            // 连正文都没有时补一句本地兜底 —— 否则「退档」只画出一个空气泡，
+                            // 与原来的「整行不画」一样是「什么都没说」。
+                            val bubbleMessage = if (cardOutcome is CardRowOutcome.FallbackToText) {
+                                when {
+                                    cardOutcome.text.isNotBlank() -> message.copy(text = cardOutcome.text)
+                                    else -> message.copy(text = stringResource(Res.string.card_unreadable))
+                                }
+                            } else {
+                                message
+                            }
                             val originalIndex = messagePositions[message.id] ?: -1
                             val prevMsg = if (originalIndex > 0) messages.getOrNull(originalIndex - 1) else null
                             val nextMsg = if (originalIndex in 0 until messages.size - 1) messages.getOrNull(originalIndex + 1) else null
@@ -1184,7 +1208,7 @@ fun ChatScreen(
                                 else -> resolveNodeIdentity(peer.nodeId, bubbleCtx)
                             }
                             MessageBubble(
-                                message = message,
+                                message = bubbleMessage,
                                 bubbleFraction = bubbleFraction,
                                 onAcceptTransfer = onAcceptTransfer ?: {},
                                 onDeclineTransfer = onDeclineTransfer ?: {},

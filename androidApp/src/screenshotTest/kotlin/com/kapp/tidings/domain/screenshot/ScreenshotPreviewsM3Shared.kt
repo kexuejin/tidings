@@ -18,6 +18,7 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.width
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
+import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.tooling.preview.Preview
@@ -26,15 +27,19 @@ import com.android.tools.screenshot.PreviewTest
 import com.kapp.tidings.core.protocol.GroupWorkspaceInfo
 import com.kapp.tidings.core.protocol.TeamMemberInfo
 import com.kapp.tidings.core.protocol.VirtualAgentMember
+import com.kapp.tidings.domain.model.MessageUi
 import com.kapp.tidings.domain.model.WorkspaceUi
 import com.kapp.tidings.feature.chat.AgentCardBubble
 import com.kapp.tidings.feature.chat.AgentContextCapsule
 import com.kapp.tidings.feature.chat.AgentTaskPickerSheet
 import com.kapp.tidings.feature.chat.CardActionEligibility
+import com.kapp.tidings.feature.chat.CardRowOutcome
 import com.kapp.tidings.feature.chat.CapsuleSelection
 import com.kapp.tidings.feature.chat.CapsuleTaskOption
 import com.kapp.tidings.feature.chat.CapsuleWorkspaceOption
 import com.kapp.tidings.feature.chat.CapsuleAgentInfo
+import com.kapp.tidings.feature.chat.cardRowOutcome
+import com.kapp.tidings.feature.chat.latestRevCardMessageIds
 import com.kapp.tidings.feature.chat.parseAgentCard
 import com.kapp.tidings.ui.components.SetGroupAgentWorkspacesDialog
 import com.kapp.tidings.ui.theme.AppTheme
@@ -810,6 +815,127 @@ private fun V2StateBannerPhonePreview() {
                     state = "done",
                     text = "已完成：12 个文件，3 分钟",
                 )
+            }
+        }
+    }
+}
+
+/**
+ * 一条带卡片负载的会话消息夹具。
+ *
+ * 走的是**真实的** `MessageUi`，不是只有 JSON —— P15/P16 要验的是「这条消息在会话流里
+ * 落到哪一支」，而那个判据的入参就是 `MessageUi`（`cardRowOutcome(message, 可见集)`）。
+ */
+private fun cardMessageOf(
+    id: String,
+    cardJson: JsonObject,
+    text: String = "",
+    at: Long = 0L,
+) = MessageUi(id = id, peerId = "group:g1", mine = false, text = text, at = at, card = cardJson)
+
+/**
+ * P15 · `cardId`/`rev` 缺失的**退档**（S21）。
+ *
+ * 这一帧钉的是一件事：**坏负载不再消失**。以前解析不出身份键就「整行不画」——
+ * 插件少写一个 `rev`，群里就凭空少一句话，两端都不报错。现在它退成一条普通文本：
+ * 有正文就照原文显示，连正文都没有就显示一句本地兜底。
+ *
+ * 帧里第二行那颗朴素气泡是**就地画的**，不是生产气泡：`MessageBubble` 是
+ * composeApp 的 `internal`，截图源集取不到。判定与文案都来自生产代码
+ * （`cardRowOutcome` / `card_unreadable`），只有外壳形状是示意 —— 这一行的验证点是
+ * 「它没消失、且不是一张卡」，不是气泡圆角。
+ */
+@PreviewTest
+@Preview(name = "v2-card-p15-fallback", widthDp = 393, heightDp = 852, showBackground = true, locale = "zh-rCN")
+@Composable
+private fun V2CardFallbackPhonePreview() {
+    val withText = cardMessageOf(
+        id = "m-1",
+        // 少了 `rev`：这是一张**读不出来的卡**。
+        cardJson = buildJsonObject { put("cardId", "task-89"); put("title", "重构网络传输层") },
+        text = "插件只发了半张卡：重构网络传输层（进度 70%）",
+    )
+    val withoutText = cardMessageOf(
+        id = "m-2",
+        cardJson = buildJsonObject { put("rev", 2); put("title", "无 cardId 的卡") },
+        text = "",
+    )
+    AppTheme(darkTheme = false) {
+        Surface(color = MaterialTheme.colorScheme.surface, modifier = Modifier.fillMaxSize()) {
+            Column(
+                modifier = Modifier.padding(12.dp),
+                verticalArrangement = Arrangement.spacedBy(8.dp),
+            ) {
+                for (message in listOf(withText, withoutText)) {
+                    // 判定来自生产代码：坏负载一律 `FallbackToText`，不可能进 `Render`。
+                    val outcome = cardRowOutcome(message, visibleCardMessageIds = emptySet())
+                    check(outcome is CardRowOutcome.FallbackToText) { "P15 夹具必须是退档，实际 $outcome" }
+                    Surface(
+                        shape = MaterialTheme.shapes.medium,
+                        color = MaterialTheme.colorScheme.surfaceVariant,
+                    ) {
+                        Text(
+                            // 正文为空时补兜底文案 —— 与 ChatScreen 同一口径（那里的
+                            // 取值是资源 `card_unreadable`；截图源集拿不到 compose 资源
+                            // 运行时，这里写字面量并在漂移时靠人看一眼，不假装是同源）。
+                            text = outcome.text.ifBlank { "这条卡片消息读不出来" },
+                            style = MaterialTheme.typography.bodyMedium,
+                            modifier = Modifier.padding(horizontal = 12.dp, vertical = 8.dp),
+                        )
+                    }
+                }
+            }
+        }
+    }
+}
+
+/**
+ * P16 · 同 `cardId` 多 rev 的**折叠**（§5.3）：三条消息只画一张卡。
+ *
+ * 落库是追加式新行（同 cardId、rev+1），所以「不刷屏」只能是 UI 语义。这一帧喂三条
+ * 同 cardId 的消息进去，折叠与去向都走生产函数（`latestRevCardMessageIds` /
+ * `cardRowOutcome`）：rev 1、2 落到 `Hidden`（整行不画），只有 rev 3 出卡。
+ *
+ * 为什么值得一帧：折叠一旦坏了，表现是「每刷新一次就多一条卡」—— 会话流被同一件事
+ * 刷满，而单条渲染的测试全绿（每条都画得对，错的是**条数**）。
+ */
+@PreviewTest
+@Preview(name = "v2-card-p16-collapse", widthDp = 393, heightDp = 852, showBackground = true, locale = "zh-rCN")
+@Composable
+private fun V2CardCollapsePhonePreview() {
+    val messages = listOf(10, 70, 100).mapIndexed { index, progress ->
+        cardMessageOf(
+            id = "m-${index + 1}",
+            at = index * 1_000L,
+            cardJson = buildJsonObject {
+                put("cardId", "task-89")
+                put("rev", index + 1)
+                put("type", "team-task-board")
+                put("title", "重构网络传输层")
+                put("progress", progress)
+            },
+        )
+    }
+    val visible = latestRevCardMessageIds(messages)
+    AppTheme(darkTheme = false) {
+        Surface(color = MaterialTheme.colorScheme.surface, modifier = Modifier.fillMaxSize()) {
+            Column(
+                modifier = Modifier.padding(12.dp),
+                verticalArrangement = Arrangement.spacedBy(8.dp),
+            ) {
+                for (message in messages) {
+                    when (val outcome = cardRowOutcome(message, visible)) {
+                        is CardRowOutcome.Render -> AgentCardBubble(
+                            card = outcome.card,
+                            pendingActions = emptySet(),
+                            now = 0L,
+                            onAction = null,
+                        )
+                        // 旧 rev：整行不画。帧里「只有一张卡」就是这条判据的读数。
+                        is CardRowOutcome.Hidden -> Unit
+                        is CardRowOutcome.FallbackToText -> error("P16 夹具的数据都是好卡：$outcome")
+                    }
+                }
             }
         }
     }

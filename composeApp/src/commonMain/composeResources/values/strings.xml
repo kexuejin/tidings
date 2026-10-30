@@ -1850,6 +1850,9 @@
     <string name="card_artifact_title">产物</string>
     <string name="card_details_show">展开明细</string>
     <string name="card_details_hide">收起明细</string>
+    <!-- S21 退档的兜底文案：卡片负载连身份键都缺、正文也没有时，退档后是空气泡 ——
+         那和「整行不画」一样是「什么都没说」。这句只在这种坏数据上出现。 -->
+    <string name="card_unreadable">这条卡片消息读不出来</string>
     <!-- 跨端派单网道（M4 §7.3-1）：超时卡的标题与两个动作的标签。这些串经 RelayUiTexts 桥
          进卡片 JSON（随群文本广播），不是界面常量 —— 所以走资源而不是领域层硬编码。 -->
     <string name="agent_invoke_timeout_title">子任务超时中断：@%1$s</string>

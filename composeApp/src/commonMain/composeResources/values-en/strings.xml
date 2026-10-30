@@ -1679,6 +1679,10 @@
     <string name="card_artifact_title">Artifacts</string>
     <string name="card_details_show">Show details</string>
     <string name="card_details_hide">Hide details</string>
+    <!-- S21 fallback copy: when a card payload has no identity keys *and* no body text,
+         falling back to text would draw an empty bubble — which says nothing, exactly
+         like the old "skip the row" behaviour. Only bad data ever reaches this string. -->
+    <string name="card_unreadable">This card message could not be read</string>
     <!-- Cross-host invoke mesh (M4): timeout card title and its two actions. These go
          through the RelayUiTexts bridge into the card JSON (broadcast with the group text). -->
     <string name="agent_invoke_timeout_title">Subtask timed out: @%1$s</string>
