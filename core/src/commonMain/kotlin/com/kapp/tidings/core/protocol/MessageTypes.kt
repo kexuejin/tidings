@@ -119,6 +119,27 @@ object MsgTypes {
     const val AGENT_INVOKE_RESULT = "agent-invoke-result"
 
     /**
+     * `agent-channel`（cap `agc1`，M7-T2）：跨宿主任务委派——`assign`（所有权保留、
+     * 调用方等结果）与 `transfer`（所有权转移、调用方退出）。先例即 [AGENT_INVOKE]：
+     * 两种职责不共用一帧。op 两态互斥的判法在 `CodecChannel.validateChannel`。
+     */
+    const val AGENT_CHANNEL = "agent-channel"
+
+    /**
+     * `agent-channel` 的应答帧：`status` **复用** `CodecInvoke.InvokeResultStates` 词汇
+     * （不另立第二份结果状态机）；产物只回执引用（`artifactIds`），与 T3 同一条
+     * 「元数据 + 按需拉取」纪律。
+     */
+    const val AGENT_CHANNEL_RESULT = "agent-channel-result"
+
+    /**
+     * `agc1` = 跨宿主 Channel 委派（M7-T2）。声明它 = 认识 `agent-channel` /
+     * `agent-channel-result` 两帧。手机端**不**声明：Channel 是宿主↔宿主的委派网道，
+     * 手机不承接任务（与 `ag1`「我是 agent 节点」不同层的判据，见CapabilityInventory）。
+     */
+    const val CAP_AGENT_CHANNEL = "agc1"
+
+    /**
      * 身份恢复 L2：恢复后的设备向**持有双边副本的对端**要历史（方案 §6.3）。
      *
      * 载荷为空对象 `{}`（严格白名单，多一个键整帧拒收）—— 要什么是隐含的：
@@ -148,6 +169,7 @@ object MsgTypes {
         AGENT_WORKSPACE, AGENT_GRANT_REQUEST, AGENT_GRANT, AGENT_GRANT_LIST, AGENT_SESSION_PAGE,
         RECOVERY_REQ, RECOVERY_DATA,
         AGENT_INVOKE, AGENT_INVOKE_RESULT,
+        AGENT_CHANNEL, AGENT_CHANNEL_RESULT,
     )
 
     /**
@@ -171,6 +193,9 @@ object MsgTypes {
         // 派单请求与结果都必须可靠：请求丢了靠重传兜底；结果丢了，发起方会把
         // 「已经完成」误判成「超时中断」—— 比丢请求更糟。
         AGENT_INVOKE, AGENT_INVOKE_RESULT,
+        // Channel 委派与结果同理（M7-T2）：assign 丢了 = 调用方干等；结果丢了 =
+        // 所有权交接的状态机断在半空。
+        AGENT_CHANNEL, AGENT_CHANNEL_RESULT,
     )
 
     /**
@@ -446,7 +471,11 @@ object MsgTypes {
     /**
      * 本端**认得、但有意不处理**的已知类型。
      */
-    val UNHANDLED: Set<String> = setOf(UPDATE, PEERS)
+    // Channel 两帧（M7-T2）：**帧层已实现**（编解码 + 校验 + 向量钉住），但编排器
+    // （互斥台账 / 结果分派）未落地——先入 UNHANDLED 如实记录「认识但不消费」。
+    // 编排器落地的那一刻挪进 HANDLED 并同时在 AGENT_CAPS 声明 `agc1`
+    // （声明了却不处理 = 静默吞帧，PPE-1 §4 的红线）。
+    val UNHANDLED: Set<String> = setOf(UPDATE, PEERS, AGENT_CHANNEL, AGENT_CHANNEL_RESULT)
 }
 
 /** 这个节点是否声明了自己是 agent 节点（见 [MsgTypes.CAP_AGENT]）。 */

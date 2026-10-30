@@ -219,6 +219,36 @@ object Codec {
         summary: String? = null,
     ) = CodecAgent.agentArtifactPayload(sessionId, artifactId, name, fileId, bytes, mime, sha256, summary)
 
+    fun channelPayload(
+        channelId: String,
+        op: String,
+        fromAgent: String,
+        task: String,
+        toAgent: String? = null,
+        targetTag: String? = null,
+        expectedResult: String? = null,
+        resources: List<String>? = null,
+        sourceMessageIds: List<String>? = null,
+        deadlineMs: Long? = null,
+        sessionId: String? = null,
+        groupId: String? = null,
+        groupRev: Long? = null,
+        at: Long? = null,
+    ) = CodecChannel.channelPayload(
+        channelId, op, fromAgent, task, toAgent, targetTag, expectedResult,
+        resources, sourceMessageIds, deadlineMs, sessionId, groupId, groupRev, at,
+    )
+
+    fun channelResultPayload(
+        channelId: String,
+        ok: Boolean,
+        status: String,
+        summary: String? = null,
+        artifactIds: List<String>? = null,
+        error: String? = null,
+        at: Long? = null,
+    ) = CodecChannel.channelResultPayload(channelId, ok, status, summary, artifactIds, error, at)
+
     /** PPE-1 增补 D3：宣告一个工作区（cap `aws1`，尽力而为、不在 RELIABLE）。 */
     @Suppress("LongParameterList")
     fun agentWorkspacePayload(

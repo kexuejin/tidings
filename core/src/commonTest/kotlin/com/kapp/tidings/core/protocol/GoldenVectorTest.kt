@@ -59,7 +59,7 @@ class GoldenVectorTest {
         // 本端实现这两个类型之后，同一批字节的结论不再与 TS 一致，留在 parity 集里就是错的。
         assertEquals(14, GOLDEN_VECTORS.size, "向量数量变了，说明生成脚本或夹具被改动过")
         assertEquals(2, OLD_NODE_EXTENSION_VERDICTS.size, "老节点结论记录被改动过")
-        assertEquals(14, EXTENSION_VECTORS.size, "PPE-1 扩展向量数量变了（M7-T3 追加 agent-artifact-verified 正/负两条，12→14）")
+        assertEquals(17, EXTENSION_VECTORS.size, "PPE-1 扩展向量数量变了（M7-T3 +2、M7-T2 +3）")
     }
 
     @Test
@@ -193,6 +193,35 @@ class GoldenVectorTest {
                 mime = "text/markdown",
                 sha256 = "a1b2c3d4e5f60718293a4b5c6d7e8f90a1b2c3d4e5f60718293a4b5c6d7e8f90",
                 summary = "构建报告",
+            ),
+        )
+        // M7-T2（cap agc1）出站字节护栏：键序 = Payloads.kt 声明序（决策包 §1.4 的表序）。
+        assertTyped(
+            "agent-channel-assign", MsgTypes.AGENT_CHANNEL, PEER,
+            Codec.channelPayload(
+                channelId = "c-1",
+                op = ChannelOps.ASSIGN,
+                fromAgent = "dsh-main",
+                toAgent = "dsh-cli",
+                task = "跑一遍回归测试",
+                expectedResult = "全部绿",
+                resources = listOf("gpu", "workspace:/src/teahouse"),
+                sourceMessageIds = listOf("m-1", "m-2"),
+                deadlineMs = 600000,
+                groupId = "grp-1",
+                groupRev = 7,
+                at = TS,
+            ),
+        )
+        assertTyped(
+            "agent-channel-result-done", MsgTypes.AGENT_CHANNEL_RESULT, PEER,
+            Codec.channelResultPayload(
+                channelId = "c-1",
+                ok = true,
+                status = CodecInvoke.InvokeResultStates.DONE,
+                summary = "全部通过",
+                artifactIds = listOf("a-1"),
+                at = TS,
             ),
         )
         // PPE-1 增补 D3/D7 的出站字节护栏（键序 = Payloads.kt 声明序）。

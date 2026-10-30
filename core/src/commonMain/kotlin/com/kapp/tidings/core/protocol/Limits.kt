@@ -104,6 +104,18 @@ object Limits {
     const val AGENT_INVOKE_SUMMARY = 2000
 
     /**
+     * M7-T2：`agent-channel.targetTag` 的长度上限。形状校验在 `ChannelTags.isWellFormed`
+     * （单一定义）—— 长度在这里、形状在那里，两处合起来才是完整判据。
+     */
+    const val AGENT_CHANNEL_TAG = 32
+
+    /** M7-T2：一条 `agent-channel.resources` 声明的互斥资源上限。 */
+    const val AGENT_CHANNEL_RESOURCES_MAX = 8
+
+    /** M7-T2：`agent-channel.sourceMessageIds` 的出处回指上限。 */
+    const val AGENT_CHANNEL_SOURCES_MAX = 8
+
+    /**
      * 群文本**正文**在 TCP 通道上的上限（UTF-8 字节）。
      *
      * ## 为什么不能继续用 4096

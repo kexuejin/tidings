@@ -404,6 +404,49 @@ data class AgentArtifactPayload(
 )
 
 /**
+ * M7-T2 `agent-channel`：跨宿主任务委派（cap `agc1`）——决策包 §1.4。
+ *
+ * 字段顺序即线上键序（与 `CodecChannel.CHANNEL_EXPECTED_KEYS` 一致）。op 两态互斥：
+ * `assign`（`deadlineMs` 必填、`targetTag`/`toAgent` 恰一）与 `transfer`（禁
+ * `deadlineMs`/`expectedResult`/`targetTag`、`toAgent` 必填）——判法在
+ * `CodecChannel.validateChannel`，与 `CodecInvoke.validateInvoke` 的 op 分支同一形状。
+ */
+@Serializable
+data class AgentChannelPayload(
+    val channelId: String,
+    val op: String,
+    val fromAgent: String,
+    val toAgent: String? = null,
+    val targetTag: String? = null,
+    val task: String,
+    val expectedResult: String? = null,
+    val resources: List<String>? = null,
+    val sourceMessageIds: List<String>? = null,
+    val deadlineMs: Long? = null,
+    val sessionId: String? = null,
+    val groupId: String? = null,
+    val groupRev: Long? = null,
+    val at: Long? = null,
+)
+
+/**
+ * M7-T2 `agent-channel-result`：Channel 委派的应答。`status` 复用
+ * `CodecInvoke.InvokeResultStates`（不另立第二份结果状态机）；`ok` ⟺ `status == "done"`
+ * 的自洽判法照抄 `CodecInvoke.validateInvokeResult`。产物只回执引用
+ * （[artifactIds] 指向接收方已宣告的 `agent-artifact` 帧）。
+ */
+@Serializable
+data class AgentChannelResultPayload(
+    val channelId: String,
+    val ok: Boolean,
+    val status: String,
+    val summary: String? = null,
+    val artifactIds: List<String>? = null,
+    val error: String? = null,
+    val at: Long? = null,
+)
+
+/**
  * PPE-1 增补 D3 `agent-workspace`：宿主主动宣告**一个**工作区（cap `aws1`）。
  *
  * 一帧一个工作区，不做批量数组（父稿 §2.2：单帧预算好算；批量上界未证明）。

@@ -173,6 +173,8 @@ object CodecWire {
             MsgTypes.AGENT_SESSION_PAGE -> validateAgentSessionPage(o)
             MsgTypes.AGENT_INVOKE -> CodecInvoke.validateInvoke(o)
             MsgTypes.AGENT_INVOKE_RESULT -> CodecInvoke.validateInvokeResult(o)
+            MsgTypes.AGENT_CHANNEL -> CodecChannel.validateChannel(o)
+            MsgTypes.AGENT_CHANNEL_RESULT -> CodecChannel.validateChannelResult(o)
             MsgTypes.RECOVERY_REQ -> CodecRecovery.validateRecoveryReq(o)
             MsgTypes.RECOVERY_DATA -> CodecRecovery.validateRecoveryData(o)
             MsgTypes.GROUP -> validateGroup(o)
