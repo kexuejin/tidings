@@ -62,4 +62,22 @@ class DriverRegistry(private val acl: DriverCapabilityAcl = DriverCapabilityAcl(
         acl.allows(driverId, capabilityId)
 
     private val defaultDriverId: String = "native"
+
+    companion object {
+        /**
+         * 生产装配：内置三驱动 + 本机发现的 CLI 驱动（M7-T1）。装了 Claude Code / Codex
+         * CLI 的宿主自动获得；没装的跳过并打印可操作提示（凭证继承 `HOME`/`XDG_*`，
+         * 不索要 Key），不 crash。
+         *
+         * 为什么 CLI 探测不放进 [DriverRegistry.init]：init 走真实 PATH 探测会让
+         * **每一个**裸构造 `DriverRegistry()` 的测试随「本机装没装 CLI」漂移
+         * （envDependentTestGate 的口径）—— 测试用裸构造（确定性），生产用本工厂（完整装配）。
+         */
+        fun withCliDrivers(acl: DriverCapabilityAcl = DriverCapabilityAcl()): DriverRegistry =
+            DriverRegistry(acl).also { registry ->
+                for (driver in cliDriverRegistrations()) {
+                    registry.register(driver)
+                }
+            }
+    }
 }
