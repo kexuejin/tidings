@@ -615,4 +615,51 @@ class AgentFramesTest {
         assertTrue(ackOk.known)
         assertEquals(ack, Codec.encode(ackOk.env))
     }
+
+    /**
+     * 审批处置的 `kind` **每一个都过得了线** —— 这条守的是「发得出去」与「收得下」一致。
+     *
+     * ## 为什么它必须是一条判据
+     *
+     * 客户端早就在发 `allow_session`（「本次免审」）与 `revoke_session`（撤销免审），
+     * 但校验白名单里只有 §6.8 正文那五个值。于是这两条帧**在编码后立刻被对端解码拒收**：
+     * 发送侧 `sendAgentAck` 不校验（它只拼帧），接收侧 `validatePayload` 整帧退回。
+     * 结果是用户点了「本次免审」、界面显示已生效、宿主那边一直停在 `pending` ——
+     * 又一条「界面上一切正常、动作到了线上就没了」。
+     *
+     * 判据放在编解码层，因为这是**唯一**能同时守住两端的地方：谁再加一个 kind，
+     * 只要它进不了 [Codec.agentAckPayload] 的合法集合，这条就会红。
+     */
+    @Test
+    fun everyApprovalDecisionKindSurvivesTheWire() {
+        // 前五个是 §6.8 正文；后两个是本端已在使用、但正文没列出的处置结果。
+        val kinds = listOf(
+            "queued", "approved", "denied", "cancelled", "received",
+            "allow_session", "revoke_session",
+        )
+        kinds.forEach { kind ->
+            val json = Codec.encode(
+                makeEnvelope(
+                    MsgTypes.AGENT_ACK, PEER,
+                    Codec.agentAckPayload("appr-1", kind, TS),
+                    ID, TS,
+                ),
+            )
+            val ok = Codec.decode(json)
+            assertTrue(
+                ok is DecodeResult.Ok,
+                "kind=「$kind」被线上一脚踢回：${(ok as? DecodeResult.Rejected)?.reason}",
+            )
+        }
+    }
+
+    /** 反方向：白名单外的值仍必须拒收（放宽不等于不设防）。 */
+    @Test
+    fun anUnknownApprovalDecisionKindIsStillRejected() {
+        val json = frame(
+            MsgTypes.AGENT_ACK,
+            """{"ackOf":"appr-1","kind":"whatever"}""",
+        )
+        assertEquals("bad-payload:agent-ack", reject(json))
+    }
 }

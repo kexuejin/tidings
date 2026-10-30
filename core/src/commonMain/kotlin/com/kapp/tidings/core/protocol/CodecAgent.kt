@@ -201,7 +201,10 @@ object CodecAgent {
     internal fun validateAgentAck(o: JsonObject): Boolean {
         if (!isStr(o["ackOf"], Limits.ID)) return false
         val kind = (o["kind"] as? JsonPrimitive)?.takeIf { it.isString }?.content ?: return false
-        if (kind !in setOf("queued", "approved", "denied", "cancelled", "received")) return false
+        // **取值域只有一份**（[AgentAckKinds]）：这里放宽成「本端认得的全部处置结果」。
+        // 从前这里写死 §6.8 正文那五个值，于是 `allow_session` / `revoke_session` 这两条
+        // 客户端早就在发的帧**在接收侧整帧退回** —— 点了「本次免审」宿主永远停在 pending。
+        if (!AgentAckKinds.isKnown(kind)) return false
         if (o.containsKey("at") && intOf(o["at"]) == null) return false
         if (o.containsKey("decidedBy") && !isStrAllowEmpty(o["decidedBy"], Limits.NICK)) return false
         return hasOnlyKeys(o, AGENT_ACK_EXPECTED_KEYS)

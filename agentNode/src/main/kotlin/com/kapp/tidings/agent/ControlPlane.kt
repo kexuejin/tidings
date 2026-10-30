@@ -8,6 +8,7 @@ import com.kapp.tidings.agent.drivers.ExternalPluginDriver
 import com.kapp.tidings.agent.plugins.PluginRegistration
 import com.kapp.tidings.agent.plugins.PluginRegistry
 import com.kapp.tidings.agent.plugins.PluginTokenGate
+import com.kapp.tidings.core.protocol.AgentAckKinds
 import com.kapp.tidings.core.protocol.AgentGrantAccess
 import com.kapp.tidings.core.protocol.AgentGrantPolicies
 import com.kapp.tidings.core.protocol.AgentGrantScopes
@@ -3373,8 +3374,11 @@ class ControlPlane(
         /** §6.4 的 `state` 取值。 */
         private val RUN_STATES = listOf("running", "succeeded", "failed", "cancelled")
 
-        /** §6.8 的 `kind` 取值。 */
-        private val ACK_KINDS = listOf("queued", "approved", "denied", "cancelled", "received")
+        /**
+         * §6.8 的 `kind` 取值 —— **不在这里再写一份**，直接引用 `:core` 的
+         * [AgentAckKinds]（见那里的 KDoc：三处各写一份已经让「本次免审」静默失效过）。
+         */
+        private val ACK_KINDS = AgentAckKinds.VALUES.toList()
     }
 }
 

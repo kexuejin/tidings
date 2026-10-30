@@ -536,3 +536,58 @@ object AgentGrantPolicies {
     const val REQUEST = "request"
     val VALUES: Set<String> = setOf(AUTO, BY_DEVICE, REQUEST)
 }
+
+/**
+ * `agent-ack.kind` 的取值域（§6.8）—— **全仓唯一一份**。
+ *
+ * ## 为什么必须只有一份
+ *
+ * 这个值同时出现在三个地方：编解码的校验（收得下吗）、控制面的入口白名单（认得吗）、
+ * 台账的处置分派（怎么应用）。三处各写一份的下场已经发生过一次：
+ * 客户端早就在发 `allow_session` / `revoke_session`，而校验白名单里只有正文那五个值 ——
+ * 帧在**接收侧解码时整帧退回**，于是「本次免审」点了、界面显示已生效、宿主一直停在
+ * `pending`。发送侧不校验（它只拼帧），所以这条错误在两端都不会报，只能靠人发现。
+ *
+ * ## 前五个是 §6.8 正文，后两个是本端增补
+ *
+ * | kind | 语义 | 出处 |
+ * |---|---|---|
+ * | `queued` | 收到排队请求 | §6.8 |
+ * | `approved` / `denied` | 单条批准 / 拒绝 | §6.8 |
+ * | `cancelled` | 收到取消 | §6.8 |
+ * | `received` | 仅确认收到 | §6.8 |
+ * | `allow_session` | 本会话免审（此后同类请求不再询问） | 本端增补 |
+ * | `revoke_session` | 撤销本会话免审 | 本端增补 |
+ * | `always` | 这个 **tool** 以后免审（宿主落授权表） | 本端增补 |
+ *
+ * 增补值复用 `kind` 这一个键（**不新增帧、不新增键**）：旧宿主不认识某个值时，
+ * 只会停在原来的处置状态 —— 与它今天的行为一致，不会更糟。
+ */
+object AgentAckKinds {
+    const val QUEUED = "queued"
+    const val APPROVED = "approved"
+    const val DENIED = "denied"
+    const val CANCELLED = "cancelled"
+    const val RECEIVED = "received"
+
+    /** 本会话免审：此后该会话的同类请求不再询问。 */
+    const val ALLOW_SESSION = "allow_session"
+
+    /** 撤销本会话免审。 */
+    const val REVOKE_SESSION = "revoke_session"
+
+    /**
+     * **这个 tool 以后免审**（按 tool 名粒度，不是整 agent）。
+     *
+     * 与 [ALLOW_SESSION] 的区别是范围：那条只管一个会话，这条跨会话但只管一个工具名。
+     * 宿主侧把它落进授权表（`AgentToolApprovalStore`），命中时不再打扰对端。
+     */
+    const val ALWAYS = "always"
+
+    val VALUES: Set<String> = setOf(
+        QUEUED, APPROVED, DENIED, CANCELLED, RECEIVED,
+        ALLOW_SESSION, REVOKE_SESSION, ALWAYS,
+    )
+
+    fun isKnown(kind: String): Boolean = kind in VALUES
+}
