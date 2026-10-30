@@ -41,6 +41,7 @@
       "onTertiaryContainer": "#173B4E",
       "online": "#2E9E5B",
       "outline": "#D4D4D0",
+      "outlineStrong": "#8A8D8A",
       "outlineVariant": "#12000000",
       "primary": "#2D6A4F",
       "primaryContainer": "#B7E4C7",
@@ -87,6 +88,7 @@
       "onTertiaryContainer": "#CDE2EF",
       "online": "#6FD69A",
       "outline": "#3A3C3B",
+      "outlineStrong": "#8A8D8A",
       "outlineVariant": "#17FFFFFF",
       "primary": "#74C69D",
       "primaryContainer": "#1B4332",
@@ -112,7 +114,7 @@
       "hairline": "outlineVariant 两态必须显式钉死（浅 #E4E9E7 / 深 #2B3331）：M3 默认值是紫调的 #CAC4D0 / #49454F，落在这套暖中性色板上会显脏。发丝线的低对比（深 1.47:1、浅 1.23:1）是设计意图，不计入无障碍缺陷。",
       "textContrast": "文字与状态点必须 ≥4.5:1（大字 ≥3:1）。原型的深色值正是按这条选的：#B9A6FF on #312A52 = 6.29:1、#6FD69A on #121413 = 10.36:1、#E3B75A on #121413 = 9.85:1。排队色当文字时用 secondaryContainer/onSecondaryContainer 那对（浅 8.01:1），不要用 queued 本身（浅色下只有 1.60:1）。",
       "palette": {
-        "note": "设计侧批准过的核心调色板角色。tokens.colors 现在是代码全量投影（44 键/主题），这个列表保留「哪些是设计明确批准过的」这一信息，不参与漂移比对。",
+        "note": "设计侧批准过的核心调色板角色。tokens.colors 现在是代码全量投影（45 键/主题），这个列表保留「哪些是设计明确批准过的」这一信息，不参与漂移比对。",
         "roles": [
           "primary",
           "onPrimary",
@@ -425,7 +427,7 @@
             "status": "pending"
           },
           "error": {
-            "sites": 46,
+            "sites": 42,
             "status": "enforced",
             "first": "composeApp/src/commonMain/kotlin/com/kapp/tidings/ui/desktop/DesktopChrome.kt:349"
           },
@@ -458,22 +460,22 @@
           "onError": {
             "sites": 4,
             "status": "enforced",
-            "first": "composeApp/src/commonMain/kotlin/com/kapp/tidings/ui/components/AppButtons.kt:229"
+            "first": "composeApp/src/commonMain/kotlin/com/kapp/tidings/ui/components/AppButtons.kt:230"
           },
           "onErrorContainer": {
-            "sites": 15,
+            "sites": 19,
             "status": "enforced",
             "first": "composeApp/src/commonMain/kotlin/com/kapp/tidings/ui/desktop/DesktopSettingsChrome.kt:467"
           },
           "onPrimary": {
             "sites": 11,
             "status": "enforced",
-            "first": "composeApp/src/commonMain/kotlin/com/kapp/tidings/ui/desktop/DesktopChrome.kt:551"
+            "first": "composeApp/src/commonMain/kotlin/com/kapp/tidings/ui/desktop/DesktopChrome.kt:552"
           },
           "onPrimaryContainer": {
             "sites": 35,
             "status": "enforced",
-            "first": "composeApp/src/commonMain/kotlin/com/kapp/tidings/ui/desktop/DesktopChrome.kt:552"
+            "first": "composeApp/src/commonMain/kotlin/com/kapp/tidings/ui/desktop/DesktopChrome.kt:553"
           },
           "onSecondary": {
             "sites": 0,
@@ -487,10 +489,10 @@
           "onSurface": {
             "sites": 72,
             "status": "enforced",
-            "first": "composeApp/src/commonMain/kotlin/com/kapp/tidings/ui/desktop/DesktopChrome.kt:553"
+            "first": "composeApp/src/commonMain/kotlin/com/kapp/tidings/ui/desktop/DesktopChrome.kt:554"
           },
           "onSurfaceVariant": {
-            "sites": 417,
+            "sites": 426,
             "status": "enforced",
             "first": "composeApp/src/commonMain/kotlin/com/kapp/tidings/ui/AppStates.kt:104"
           },
@@ -509,9 +511,14 @@
             "first": "composeApp/src/commonMain/kotlin/com/kapp/tidings/ui/desktop/DesktopNodesPane.kt:395"
           },
           "outline": {
-            "sites": 21,
+            "sites": 8,
             "status": "enforced",
             "first": "composeApp/src/commonMain/kotlin/com/kapp/tidings/ui/desktop/DesktopComposer.kt:387"
+          },
+          "outlineStrong": {
+            "sites": 7,
+            "status": "enforced",
+            "first": "composeApp/src/commonMain/kotlin/com/kapp/tidings/ui/components/AppButtons.kt:290"
           },
           "outlineVariant": {
             "sites": 57,
@@ -588,7 +595,7 @@
             "status": "pending"
           },
           "surfaceVariant": {
-            "sites": 75,
+            "sites": 78,
             "status": "enforced",
             "first": "composeApp/src/commonMain/kotlin/com/kapp/tidings/ui/desktop/CabinetPane.kt:258"
           },
@@ -648,7 +655,7 @@
           "labelLarge": {
             "sites": 20,
             "status": "enforced",
-            "first": "composeApp/src/commonMain/kotlin/com/kapp/tidings/ui/desktop/DesktopChrome.kt:577"
+            "first": "composeApp/src/commonMain/kotlin/com/kapp/tidings/ui/desktop/DesktopChrome.kt:578"
           },
           "labelMedium": {
             "sites": 45,
@@ -710,7 +717,7 @@
           "osm7": {
             "sites": 4,
             "status": "enforced",
-            "first": "composeApp/src/commonMain/kotlin/com/kapp/tidings/ui/desktop/DesktopChrome.kt:572"
+            "first": "composeApp/src/commonMain/kotlin/com/kapp/tidings/ui/desktop/DesktopChrome.kt:573"
           },
           "osm9": {
             "sites": 7,
@@ -750,7 +757,7 @@
           "xxl": {
             "sites": 1,
             "status": "enforced",
-            "first": "composeApp/src/commonMain/kotlin/com/kapp/tidings/feature/cabinet/PeerCabinetView.kt:137"
+            "first": "composeApp/src/commonMain/kotlin/com/kapp/tidings/feature/cabinet/PeerCabinetView.kt:138"
           },
           "xxs": {
             "sites": 38,
@@ -760,7 +767,7 @@
           "xxxl": {
             "sites": 7,
             "status": "enforced",
-            "first": "composeApp/src/commonMain/kotlin/com/kapp/tidings/ui/desktop/DesktopChrome.kt:561"
+            "first": "composeApp/src/commonMain/kotlin/com/kapp/tidings/ui/desktop/DesktopChrome.kt:562"
           }
         },
         "shape": {
@@ -835,7 +842,7 @@
           "title": {
             "sites": 5,
             "status": "enforced",
-            "first": "composeApp/src/commonMain/kotlin/com/kapp/tidings/ui/components/GroupCreateDialog.kt:215"
+            "first": "composeApp/src/commonMain/kotlin/com/kapp/tidings/ui/components/GroupCreateDialog.kt:216"
           }
         },
         "shapeRoles": {
@@ -864,7 +871,7 @@
         }
       },
       "adoption": {
-        "colors": "31/44",
+        "colors": "32/45",
         "typography": "11/15",
         "spacing": "17/17",
         "shape": "4/5",
@@ -1247,7 +1254,7 @@
           "colors.onError",
           "colors.onErrorContainer",
           "colors.onSurface",
-          "colors.outline",
+          "colors.outlineStrong",
           "colors.onSurfaceVariant"
         ],
         "stress": [
