@@ -1134,6 +1134,54 @@ class ControlPlaneTest {
     }
 
     /**
+     * 插件没声明 `choices` ⇒ 宿主替它填「本机能兑现的全部处置」。
+     *
+     * 判据盯的是**帧**而不是接口返回：对端只看得到帧。填进台账却没填进帧，手机端照样
+     * 只画得出批准/拒绝 —— 「始终允许」长期没有入口，一半原因就在这里（入口画得出来，
+     * 但对端从没声明过 `always`）。
+     */
+    @Test
+    fun approvalWithoutPluginChoicesAdvertisesEveryChoiceTheHostCanHonour() {
+        val res = post(
+            "/v1/agent/approval",
+            """{"to":"$LOOPBACK","port":${desktop.boundPort},"approvalId":"a-choices-default","sessionId":"s-choices",""" +
+                """"expiresAt":${Long.MAX_VALUE},"tool":"bash","summary":"run the test suite"}""",
+        )
+        assertEquals(200, res.first, res.second)
+
+        val frame = approvalFrameOf("a-choices-default")
+        assertEquals(
+            listOf("approved", "denied", "allow_session", "always"),
+            choicesOf(frame).orEmpty().split(","),
+            "宿主兜底必须四档齐全 —— 少了 always，对端那颗「始终允许」永远不出现",
+        )
+    }
+
+    /** 插件显式声明时以它为准（它只想给两档就是两档）：兜底不许盖掉插件的决定权。 */
+    @Test
+    fun pluginDeclaredChoicesAreForwardedVerbatim() {
+        val res = post(
+            "/v1/agent/approval",
+            """{"to":"$LOOPBACK","port":${desktop.boundPort},"approvalId":"a-choices-narrow","sessionId":"s-choices2",""" +
+                """"expiresAt":${Long.MAX_VALUE},"tool":"rm","summary":"x","choices":"allow,deny"}""",
+        )
+        assertEquals(200, res.first, res.second)
+
+        assertEquals("allow,deny", choicesOf(approvalFrameOf("a-choices-narrow")))
+    }
+
+    /** 等对端真的收到这一条审批帧（按 approvalId 认，避免串到别的用例上）。 */
+    private fun approvalFrameOf(approvalId: String): JsonObject = Await.value("对端收到 $approvalId 的审批帧") {
+        desktopFrames.firstOrNull {
+            it["type"]?.jsonPrimitive?.contentOrNull == MsgTypes.AGENT_APPROVAL &&
+                it["payload"]?.jsonObject?.get("approvalId")?.jsonPrimitive?.contentOrNull == approvalId
+        }
+    }
+
+    private fun choicesOf(frame: JsonObject): String? =
+        frame["payload"]?.jsonObject?.get("choices")?.jsonPrimitive?.contentOrNull
+
+    /**
      * task-35：**阻塞式 POST 占满处理器线程池时，/v1/peers 仍必须快**。
      *
      * 真机现场：手机切到移动网后，本机 127.0.0.1:8788 连续 5 次 HTTP 000、每次卡满 8.00s，

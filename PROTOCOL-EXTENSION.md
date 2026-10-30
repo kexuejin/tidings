@@ -154,9 +154,18 @@
 | `tool` | string | | 待审批工具名 |
 | `summary` | string | | 一句话说明 |
 | `expiresAt` | int | ✅ | epoch ms；过期后双方均视为失效 |
-| `choices` | string | | CSV：`allow,deny` / `allow,deny,always` |
+| `choices` | string | | CSV：`allow,deny` / `allow,deny,always`；宿主另有默认值，见下 |
 
 > 审批**不得**降级为"已送达"（§10）。
+
+**`choices` 省略时宿主填什么**：`approved,denied,allow_session,always`（四档，即这台宿主
+真正能兑现的全部处置）。理由：这个字段问的是「**对端可以怎么答**」，而某一档能不能兑现是
+宿主的本事 —— `always` 要落宿主的免批表、`allow_session` 要走宿主的回执应用点，插件两样都
+不掌握，让它来声明等于让不知道的人替有本事的人写菜单。插件**显式声明**时一律以插件为准
+（含它只想给两档的情况），那是它的决定权。
+
+> 对端只画它认识的值：旧客户端忽略多出来的 token，不会因此拒帧 —— 这一栏是**能力声明**，
+> 不是白名单。
 
 ### 6.6 `agent-cancel` — 取消（cap: `agq1`）
 

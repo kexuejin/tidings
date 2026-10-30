@@ -304,11 +304,9 @@ We will acknowledge receipt within 48 hours and work with you on validation and 
 
 **已知边界（如实）**：
 
-1. 「始终允许」的入口已补上（审批行第二行，与「本会话免审」并排；首行只留拒绝/批准）。
-   但它**只在宿主声明的 `choices` 含 `always` 时出现** —— 宿主目前把 `choices` 原样转发
-   插件传来的同名字段，而仓内没有任何插件填过它，所以真机上这颗按钮暂时不会出现。
-   这不是安全问题（少一颗按钮不会多批一次），是**可达性**没闭环：见
-   `docs/plans/GOAL.md` 的 S4-2d。
+1. 「始终允许」的入口与可达性都已闭环：入口在审批行第二行（与「本会话免审」并排，
+   首行只留拒绝/批准）；宿主在插件没声明 `choices` 时补
+   `approved,denied,allow_session,always`，对端才看得见这一档。插件显式声明时以插件为准。
 2. 免批表在界面上**没有列表/撤销入口**，只有 `AgentToolApprovalStore.revoke` 这个 API。
    要回收只能等面板补上，或在数据目录里删 `agent-tool-approvals.json`（整表清空）。
 3. 「过期」的边界在仓里有**两种口径**：审批用开区间 `now > expiresAt`

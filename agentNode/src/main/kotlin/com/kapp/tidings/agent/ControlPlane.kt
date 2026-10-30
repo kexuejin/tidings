@@ -2280,6 +2280,32 @@ class ControlPlane(
     }
 
     /**
+     * 插件**没声明** `choices` 时，宿主替它填的那一份：这台宿主能兑现的全部处置。
+     *
+     * ## 为什么这个默认值归宿主，不归插件
+     *
+     * `choices` 是「**对端可以怎么答**」，而能不能兑现某一档是**宿主**的事实 ——
+     * `always` 要落进宿主的免批表（`AgentToolApprovalStore`）、`allow_session` 要走
+     * `applyAckToApproval`，插件两样都不掌握。插件不声明时留空，等于让对端只看得见
+     * 「批准 / 拒绝」，一条它其实能兑现的路永远没有入口（现场：手机端「始终允许」
+     * 的按钮画得出来、却因为没人声明而从不出现）。
+     *
+     * ## 为什么四个值都写进来，而不是只写协议文档那三个
+     *
+     * 文档 §6.5 的值域是 `allow,deny` / `allow,deny,always`；`allow_session` 是本端增补的
+     * 第五个回执取值，宿主同样兑现。少写它，对端就会以为只能整条批准或整个工具批准，
+     * 中间那一档（只管这个会话）凭空消失。
+     *
+     * 插件**显式声明**时一律以插件为准（含它只想给两档的情况）：那是它的决定权，不是我们的。
+     */
+    private val defaultApprovalChoices: String = listOf(
+        AgentAckKinds.APPROVED,
+        AgentAckKinds.DENIED,
+        AgentAckKinds.ALLOW_SESSION,
+        AgentAckKinds.ALWAYS,
+    ).joinToString(",")
+
+    /**
      * `POST /v1/agent/approval` —— 请对端确认一个受控动作（§6.5，cap `agq1`）。
      *
      * §6.5 把它标成「⚠️ 关键控制路径」，并规定审批**不得**降级为「已送达」：所以
@@ -2310,7 +2336,8 @@ class ControlPlane(
         }
         val tool = obj["tool"]?.jsonPrimitive?.contentOrNull
         val summary = obj["summary"]?.jsonPrimitive?.contentOrNull
-        val choices = obj["choices"]?.jsonPrimitive?.contentOrNull
+        val choices = obj["choices"]?.jsonPrimitive?.contentOrNull?.takeIf { it.isNotBlank() }
+            ?: defaultApprovalChoices
         val riskLevel = obj["riskLevel"]?.jsonPrimitive?.contentOrNull
         val diff = obj["diff"]?.jsonPrimitive?.contentOrNull
         // **「始终允许」在入口短路**：对端点过一次「这个 tool 以后免审」，此后同一
