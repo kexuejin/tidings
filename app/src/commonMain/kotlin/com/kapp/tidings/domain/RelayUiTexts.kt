@@ -86,6 +86,17 @@ interface RelayUiTexts {
      * 混成一句会让用户以为插件掉线了。
      */
     suspend fun agentNotCompletedNotice(agentName: String): String
+
+    /**
+     * 「这个人没有资格驱动这个 agent」的群流横幅（设计稿 v2 §4.8）。
+     *
+     * 触发面：卡片动作到了宿主，但点击者过不了 `AgentExecAuthorizer`。
+     * 宿主**必须**回一句 —— 静默丢弃等于把「点了没反应」换个地方发生。
+     *
+     * @param actor 点击者的展示名（群成员昵称；认不出时是 nodeId）
+     * @param agentName 被驱动的 agent 展示名
+     */
+    suspend fun agentActionDeniedNotice(actor: String, agentName: String): String
 }
 
 /**
@@ -105,4 +116,5 @@ object NoUiTexts : RelayUiTexts {
     override suspend fun invokeActionFallbackLabel(): String = ""
     override suspend fun agentUnavailableNotice(agentName: String): String = ""
     override suspend fun agentNotCompletedNotice(agentName: String): String = ""
+    override suspend fun agentActionDeniedNotice(actor: String, agentName: String): String = ""
 }

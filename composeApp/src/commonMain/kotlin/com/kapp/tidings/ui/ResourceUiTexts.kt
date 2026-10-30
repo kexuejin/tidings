@@ -8,6 +8,7 @@ import com.kapp.tidings.generated.resources.Res
 import com.kapp.tidings.generated.resources.agent_invoke_action_fallback_local
 import com.kapp.tidings.generated.resources.agent_invoke_action_retry
 import com.kapp.tidings.generated.resources.agent_invoke_timeout_title
+import com.kapp.tidings.generated.resources.agent_action_denied_notice
 import com.kapp.tidings.generated.resources.agent_not_completed_notice
 import com.kapp.tidings.generated.resources.agent_unavailable_notice
 import com.kapp.tidings.generated.resources.chat_nudge_peer
@@ -71,4 +72,7 @@ internal object ResourceUiTexts : RelayUiTexts {
 
     override suspend fun agentNotCompletedNotice(agentName: String): String =
         runCatching { getString(Res.string.agent_not_completed_notice, agentName) }.getOrNull().orEmpty()
+
+    override suspend fun agentActionDeniedNotice(actor: String, agentName: String): String =
+        runCatching { getString(Res.string.agent_action_denied_notice, actor, agentName) }.getOrNull().orEmpty()
 }

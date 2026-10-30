@@ -70,6 +70,7 @@ class AgentOfflineFeedbackTest {
         override suspend fun invokeActionFallbackLabel(): String = ""
         override suspend fun agentUnavailableNotice(agentName: String): String = "$agentName · offline"
         override suspend fun agentNotCompletedNotice(agentName: String): String = "$agentName · not completed"
+        override suspend fun agentActionDeniedNotice(actor: String, agentName: String): String = "$actor · denied"
     }
 
     private fun hostedGroup(host: RelayController): String {

@@ -619,6 +619,13 @@ internal class RelayControllerAgentInvokeComponent(private val host: RelayContro
      * 晚到的并发点击在这里被幂等丢弃 —— 各端按钮的最终一致由广播保证。
      */
     internal fun handleHostCardAction(groupId: String, agentId: String, cardId: String, actionId: String, decidedBy: String) {
+        // **资格门（§4.8）**：判定在宿主侧 —— 资格台账在宿主手上，客户端算不出远端资格。
+        // 此前这里只判「decidedBy 是不是帧的发送者」（防冒名），于是任何群成员都能点
+        // 别人卡片上的审批/暂停按钮，宿主照单全收。
+        if (!mayDriveCard(groupId, agentId, decidedBy)) {
+            announceCardActionDenied(groupId, agentId, cardId, actionId, decidedBy)
+            return
+        }
         val won = actionLedger.firstWin(cardId, actionId, decidedBy)
         if (!won) return
         // 看板卡的网格级动作（重试 / 降级）不走插件：它们是 Leader 自己的命令。
@@ -653,6 +660,53 @@ internal class RelayControllerAgentInvokeComponent(private val host: RelayContro
         onHostCardAction?.invoke(agentId, null, cardId, actionId, decidedBy)
         broadcastDecision(cardId, actionId, groupId, agentId, decidedBy)
     }
+
+    /**
+     * 谁能驱动这张卡上的动作（§4.8）：**宿主机主永远可以，其他成员必须过
+     * [AgentExecAuthorizer]**（与派单同一份判定、同一份台账，不维护第二份名单）。
+     *
+     * 本机点击（`decidedBy == self`）直接放行：`handleHostCardAction` 只在本机是卡片
+     * 宿主时被调用，而回环帧在运行时就被丢弃（`env.from == selfId` 不回环），
+     * 所以「decidedBy == self」只可能是本人点的。
+     */
+    private fun mayDriveCard(groupId: String, agentId: String, decidedBy: String): Boolean {
+        val st = host._state.value
+        if (decidedBy == st.selfNodeId) return true
+        val meta = st.settings.groups.firstOrNull { it.groupId == groupId } ?: return false
+        val verdict = AgentExecAuthorizer.authorize(
+            senderId = decidedBy,
+            group = meta,
+            grantAllows = { node -> grantAllows?.invoke(agentId, node) == true },
+            policy = execPolicyOf?.invoke(agentId),
+            selfNodeId = st.selfNodeId,
+        )
+        return with(AgentExecAuthorizer) { verdict.permitsExecution() }
+    }
+
+    /**
+     * 被拒的点击**不许沉默**（M3 的既有裁决：按下去没反应比没有更糟）。
+     *
+     * 回一条 `agentState=failed` 轻横幅，指名「谁被拒了、驱动的是谁」—— 复用 S4-4 的
+     * 同一条通路，不新增协议键、不动卡片的 rev（把卡片写成「已决」是假事实，
+     * 比不决更糟）。
+     *
+     * **同一个人的同一次尝试只回一条**：否则任何人拿它就能刷屏。
+     */
+    private fun announceCardActionDenied(groupId: String, agentId: String, cardId: String, actionId: String, decidedBy: String) {
+        if (!deniedAttempts.add("$cardId|$actionId|$decidedBy")) return
+        host.scope.launch {
+            val st = host._state.value
+            val meta = st.settings.groups.firstOrNull { it.groupId == groupId }
+            val actorName = meta?.memberNicks?.get(decidedBy)?.takeIf { it.isNotBlank() } ?: decidedBy
+            val agentName = meta?.virtualAgents.orEmpty().firstOrNull { it.agentId == agentId }?.name ?: agentId
+            val text = runCatching { host.uiTexts.agentActionDeniedNotice(actorName, agentName) }
+                .getOrNull().orEmpty()
+            broadcastAgentState(groupId, agentId, AGENT_STATE_FAILED, text)
+        }
+    }
+
+    /** 已经公告过的「被拒尝试」（键 = `cardId|actionId|decidedBy`），见 [announceCardActionDenied]。 */
+    private val deniedAttempts = ConcurrentHashMap.newKeySet<String>()
 
     /**
      * 判定结果的广播：**同 cardId、rev+1 的新帧**（原位刷新的存储语义，M1 定死：

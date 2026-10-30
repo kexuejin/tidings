@@ -267,4 +267,6 @@ internal object PlainTextUiTexts : RelayUiTexts {
         "[" + agentName + "] is offline; nothing was executed"
     override suspend fun agentNotCompletedNotice(agentName: String): String =
         "[" + agentName + "] did not finish the task"
+    override suspend fun agentActionDeniedNotice(actor: String, agentName: String): String =
+        actor + " is not allowed to drive [" + agentName + "]"
 }

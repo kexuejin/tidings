@@ -1686,6 +1686,7 @@
     <string name="agent_invoke_action_fallback_local">Fall back to local</string>
     <string name="agent_unavailable_notice">%1$s is offline — this task was not executed</string>
     <string name="agent_not_completed_notice">%1$s did not finish this task</string>
+    <string name="agent_action_denied_notice">%1$s is not allowed to drive %2$s — the action did not run</string>
     <string name="agent_state_banner_failed">Not executed</string>
 
     <!-- Context capsule (plan §5.2) -->

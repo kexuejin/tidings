@@ -1860,6 +1860,7 @@
          一个是「它在但没做成」—— 混成一句会让用户以为插件掉线了。 -->
     <string name="agent_unavailable_notice">「%1$s」当前离线，这条任务没有执行</string>
     <string name="agent_not_completed_notice">「%1$s」没有完成这次任务</string>
+    <string name="agent_action_denied_notice">「%1$s」没有权限驱动「%2$s」，这个动作没有生效</string>
     <!-- 执行状态横幅在正文为空时的兜底（帧由没有 UI 文案桥的壳发出时才会用到）。 -->
     <string name="agent_state_banner_failed">执行未完成</string>
 
