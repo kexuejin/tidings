@@ -23,6 +23,7 @@ import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
+import com.kapp.tidings.core.protocol.AgentExecAuthorizer
 import com.kapp.tidings.domain.model.MessageUi
 import com.kapp.tidings.generated.resources.Res
 import com.kapp.tidings.generated.resources.card_decided_by
@@ -97,6 +98,16 @@ data class AgentCardDiff(
     val deletions: Int? = null,
 )
 
+/**
+ * 产物元数据（对齐 `agent-artifact`）：**只描述不传二进制** ——
+ * 文件本体走 file-msg 那条通路，卡片里放的是「有这么个东西」。
+ */
+data class AgentCardArtifact(
+    val name: String,
+    val bytes: Long? = null,
+    val mime: String? = null,
+)
+
 data class AgentCardBanner(
     val text: String,
     val tone: AgentCardBannerTone = AgentCardBannerTone.Info,
@@ -125,6 +136,15 @@ data class AgentCardUi(
     val diff: AgentCardDiff? = null,
     val banner: AgentCardBanner? = null,
     val actions: List<AgentCardAction> = emptyList(),
+    /** 产物元数据（只描述，不传二进制）。 */
+    val artifacts: List<AgentCardArtifact> = emptyList(),
+    /**
+     * 审批到期时刻（毫秒，插件给的绝对时间）；null = 不会过期。
+     *
+     * **不占 `agentState` 四态**：过期是渲染层按 `expiresAt` 判出来的子态
+     * （设计稿 v2 §6），协议面一个字没动。
+     */
+    val expiresAt: Long? = null,
     /** 宿主判定人（随 rev+1 的新帧到达）；null = 还没有判定。 */
     val decidedBy: String? = null,
     /** 宿主判定的 actionId；与 [decidedBy] 成对。 */
@@ -192,6 +212,16 @@ fun parseAgentCard(json: JsonObject?): AgentCardUi? {
         },
         decidedBy = json.str("decidedBy")?.takeIf { it.isNotBlank() },
         decidedActionId = json.str("decidedActionId")?.takeIf { it.isNotBlank() },
+        artifacts = json.array("artifacts").mapNotNull { el ->
+            val obj = el as? JsonObject ?: return@mapNotNull null
+            val name = obj.str("name")?.takeIf { it.isNotBlank() } ?: return@mapNotNull null
+            AgentCardArtifact(
+                name = name,
+                bytes = obj.long("bytes"),
+                mime = obj.str("mime")?.takeIf { it.isNotBlank() },
+            )
+        },
+        expiresAt = json.long("expiresAt"),
     )
 }
 
@@ -201,6 +231,10 @@ private fun JsonObject.str(key: String): String? =
 private fun JsonObject.int(key: String): Int? =
     (this[key] as? JsonPrimitive)?.takeIf { it !is kotlinx.serialization.json.JsonNull }
         ?.content?.toIntOrNull()
+
+private fun JsonObject.long(key: String): Long? =
+    (this[key] as? JsonPrimitive)?.takeIf { it !is kotlinx.serialization.json.JsonNull }
+        ?.content?.toLongOrNull()
 
 private fun JsonObject.boolean(key: String): Boolean? =
     (this[key] as? JsonPrimitive)?.takeIf { it !is kotlinx.serialization.json.JsonNull }
@@ -229,6 +263,117 @@ fun latestRevCardMessageIds(messages: List<MessageUi>): Set<String> {
         }
     }
     return latest.values.map { it.second }.toSet()
+}
+
+// ── 策略层纯函数（设计稿 v2 阶段 A）───────────────────────────────────────
+//
+// 这一段的三个函数**只吃入参**：不读时钟、不读全局状态、不碰 Compose。
+// 这样它们能被合成输入钉死（`AgentCardPolicyTest`），也不会被 `envDependentTestGate`
+// 判红 —— 一条「过期了没有」的判据如果自己读 `System.currentTimeMillis()`，
+// 它在慢机器与快机器上就是两条不同的测试。
+
+/**
+ * 审批是否已过期（§4.3-S12）。
+ *
+ * 边界取**闭区间**：`now == expiresAt` 算过期 —— 留给用户的时间已经用完，
+ * 按钮不该还能点。`expiresAt` 缺席 ⇒ 永不过期（绝大多数卡都没有这个字段，
+ * 不能因为字段缺席就判成过期）。
+ *
+ * [now] 是**入参**而不是内部读时钟：预览帧要能固定，测试要能钉边界。
+ */
+fun isCardExpired(expiresAt: Long?, now: Long): Boolean = expiresAt != null && now >= expiresAt
+
+/** 五类原子组件 + 产物条目（§7.3-3 的渲染块，产物条目随设计稿 v2 新增）。 */
+enum class CardBlock {
+    Banner,
+    Progress,
+    StepList,
+    DiffViewer,
+    ButtonGroup,
+    ArtifactList,
+}
+
+/**
+ * 卡片类型注册表（设计稿 v2 §3）：`type → 推荐构成`。
+ *
+ * **这是建议层，不是白名单。** 协议侧早已裁决「未知 type 不拒帧」，这里也不做闸：
+ * 查不到就返回 null，渲染照旧按数据里的块走。它存在的意义只有三个 ——
+ * 给插件一份稳定契约、给 UI 一处「这类卡该长什么样」的收敛点、给 `@Preview` 一份帧清单依据。
+ *
+ * null 与空集语义不同：**null = 没有建议**（按块渲染），**空集 = 这类卡什么都不该画**。
+ * 目前没有任何一类是空集，保留这个区分是为了不让将来「故意画空」和「不认识」混为一谈。
+ */
+object CardTypeRegistry {
+
+    /** 七类卡的推荐构成（顺序无关，是集合不是序列）。 */
+    val recommended: Map<String, Set<CardBlock>> = mapOf(
+        "task-board" to setOf(CardBlock.Progress, CardBlock.StepList, CardBlock.ButtonGroup),
+        "approval" to setOf(CardBlock.Banner, CardBlock.DiffViewer, CardBlock.ButtonGroup),
+        "result" to setOf(CardBlock.Banner, CardBlock.StepList, CardBlock.DiffViewer, CardBlock.ArtifactList),
+        // 生命周期轻通知：只有横幅。给它按钮就把「不抢眼」破坏了。
+        "status" to setOf(CardBlock.Banner),
+        "timeout" to setOf(CardBlock.Banner, CardBlock.ButtonGroup),
+        "diff-review" to setOf(CardBlock.DiffViewer, CardBlock.ButtonGroup),
+        "assignment" to setOf(CardBlock.StepList),
+    )
+
+    /** 查建议构成；未知 type（含 null / 空白）返回 null = 没有建议，不是拒绝。 */
+    fun recommendedBlocksOf(type: String?): Set<CardBlock>? =
+        type?.trim()?.takeIf { it.isNotEmpty() }?.let { recommended[it] }
+}
+
+/**
+ * 这张卡**实际**有哪些块 —— 从数据推，不看注册表。
+ *
+ * 与 [CardTypeRegistry] 的关系是「建议 vs 事实」：注册表说 approval 该有横幅与按钮，
+ * 但插件没给横幅，就没有横幅。空卡片不会因为 type 对了就凭空长出内容。
+ */
+fun presentBlocksOf(card: AgentCardUi): Set<CardBlock> {
+    val blocks = mutableSetOf<CardBlock>()
+    if (card.banner != null) blocks += CardBlock.Banner
+    if (card.progress != null) blocks += CardBlock.Progress
+    if (card.steps.isNotEmpty()) blocks += CardBlock.StepList
+    if (card.diff != null) blocks += CardBlock.DiffViewer
+    if (card.actions.isNotEmpty()) blocks += CardBlock.ButtonGroup
+    if (card.artifacts.isNotEmpty()) blocks += CardBlock.ArtifactList
+    return blocks
+}
+
+/**
+ * 这台设备上的人**能不能点这张卡的按钮**（设计稿 v2 §4.8）。
+ *
+ * 三态而不是布尔量：只读态要的是「**整块不画按钮组**」（按下去没反应的按钮比没有更糟，
+ * M3 的既有原则），而 agent 回声要的是「跳过交互」—— 这两件事在渲染上不同，
+ * 用 `false` 一个值表达不了。
+ */
+enum class CardActionEligibility {
+    /** 有资格：画按钮组，可点。 */
+    Actionable,
+
+    /** 无资格：**不画按钮组**，只读形态。 */
+    ReadOnly,
+
+    /** 这条消息是 agent 自己发的：回声不渲染交互。 */
+    AgentEcho,
+}
+
+/**
+ * 把 `AgentExecAuthorizer` 的判定翻成卡片交互资格。
+ *
+ * **不维护第二份名单**：能不能点完全由 [AgentExecAuthorizer.Verdict.permitsExecution]
+ * 决定（判定在宿主侧，它才有权威授权表；UI 只消费结论）。将来枚举多一档，
+ * 这里自动跟着走，不会有一档静默变成可点。
+ *
+ * 判不了（`verdict == null`：没有群元数据 / 没有台账）⇒ [CardActionEligibility.ReadOnly]。
+ * fail-closed：「不知道能不能」和「能」不是一回事。
+ */
+fun cardActionEligibilityOf(
+    senderIsAgent: Boolean,
+    verdict: AgentExecAuthorizer.Verdict?,
+): CardActionEligibility {
+    if (senderIsAgent) return CardActionEligibility.AgentEcho
+    val permitted = verdict != null && AgentExecAuthorizer.run { verdict.permitsExecution() }
+    return if (permitted) CardActionEligibility.Actionable else CardActionEligibility.ReadOnly
 }
 
 // ── 审批锁三态（§5.3）────────────────────────────────────────────────────
