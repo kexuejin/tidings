@@ -256,4 +256,9 @@ internal object PlainTextUiTexts : RelayUiTexts {
         "[" + agentKind + "] " + workspaceTitle
     override suspend fun workspaceSessionBrief(sessionTitle: String, busy: Boolean): String =
         sessionTitle + (if (busy) " busy" else " ready")
+    // M4 跨端派单的三条卡片文案：超时标题是看板卡的数据（随群文本广播），CLI 用纯 ASCII。
+    override suspend fun invokeTimeoutTitle(agentName: String): String =
+        "[" + agentName + "] subtask timed out"
+    override suspend fun invokeActionRetryLabel(): String = "retry"
+    override suspend fun invokeActionFallbackLabel(): String = "run locally"
 }
