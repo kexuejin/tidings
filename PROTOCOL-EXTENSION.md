@@ -154,30 +154,23 @@
 | `tool` | string | | 待审批工具名 |
 | `summary` | string | | 一句话说明 |
 | `expiresAt` | int | ✅ | epoch ms；过期后双方均视为失效 |
-| `choices` | string | | CSV，回答「对端可以怎么答」：`allow,deny` / `allow,deny,always`。宿主省略时填什么见下（**词汇有分叉，见下方注**） |
+| `choices` | string | | CSV，回答「对端可以怎么答」：`allow,deny` / `allow,deny,always`。宿主省略时填 `allow,deny,allow_session,always`（见下） |
 
 > 审批**不得**降级为"已送达"（§10）。
 
-**`choices` 省略时宿主填什么**：`approved,denied,allow_session,always`（四档，即这台宿主
+**`choices` 省略时宿主填什么**：`allow,deny,allow_session,always`（四档，即这台宿主
 真正能兑现的全部处置）。理由：这个字段问的是「**对端可以怎么答**」，而某一档能不能兑现是
 宿主的本事 —— `always` 要落宿主的免批表、`allow_session` 要走宿主的回执应用点，插件两样都
 不掌握，让它来声明等于让不知道的人替有本事的人写菜单。插件**显式声明**时一律以插件为准
 （含它只想给两档的情况），那是它的决定权。
 
-> **词汇分叉（如实记下，未收口）**：这一栏历史上是 `allow,deny`（插件、`scripts/run-live-dsh-flow.py`、
-> 各测试夹具都这么写），而宿主兜底用的是**回执 `kind` 的词汇** `approved,denied`
-> （直接拼 `AgentAckKinds`，不在第二个地方重抄字符串）。两套词汇描述的其实是同一件事
-> ——「对端可以怎么答」= 它能回哪几个 `agent-ack.kind`。
->
-> 当前**不影响功能**：客户端只消费 `always` 这一个 token（`choicesDeclare`），而两套写法里
-> `always` 同名。但一个照本文档实现、去读 `allow`/`deny` 的第三方，遇到宿主兜底的帧会看到
-> 两个陌生 token —— 它会退回"没声明可选项"从而只画默认按钮，结果仍等价，只是把一次**明确
-> 声明**读成了**沉默**。
->
-> **未收口**，两条路都要改出站帧上远端能看到的取值，属协议面（§6.6）：① 全仓统一到 `kind`
-> 词汇（连带改 `scripts/run-live-dsh-flow.py` 与仓外插件的写法）；② 宿主兜底退回
-> `allow,deny` 词汇（那就在第二个地方重抄一套字符串，换来的是与既有生态同词）。选哪条需要
-> 拍板，本文档只如实记下现状。
+> **词汇分叉（已收口，S4-2f，2026-10-31 拍板）**：这一栏历史上是 `allow,deny`（插件、
+> `scripts/run-live-dsh-flow.py`、各测试夹具都这么写），而宿主兜底曾用**回执 `kind` 的词汇**
+> `approved,denied` —— 一个照文档实现、去读 `allow`/`deny` 的第三方，会把宿主的
+> **明确声明**读成**沉默**。现宿主兜底改说生态词：`allow,deny,allow_session,always`
+> （CSV 单一来源在 core 的 `defaultApprovalChoicesCsv()`，与 `AgentAckKinds` 同文件；
+> 回执 `agent-ack.kind` 的取值域不动，词汇分叉只收在 `choices` 这一个字段上）。
+> 客户端消费面（只按词比 `always`，两种写法同名）不受影响。
 
 > 对端只画它认识的值：旧客户端忽略多出来的 token，不会因此拒帧 —— 这一栏是**能力声明**，
 > 不是白名单。

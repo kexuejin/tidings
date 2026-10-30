@@ -9,6 +9,7 @@ import com.kapp.tidings.agent.plugins.PluginRegistration
 import com.kapp.tidings.agent.plugins.PluginRegistry
 import com.kapp.tidings.agent.plugins.PluginTokenGate
 import com.kapp.tidings.core.protocol.AgentAckKinds
+import com.kapp.tidings.core.protocol.defaultApprovalChoicesCsv
 import com.kapp.tidings.core.protocol.AgentGrantAccess
 import com.kapp.tidings.core.protocol.AgentGrantPolicies
 import com.kapp.tidings.core.protocol.AgentGrantScopes
@@ -2308,13 +2309,12 @@ class ControlPlane(
      * 中间那一档（只管这个会话）凭空消失。
      *
      * 插件**显式声明**时一律以插件为准（含它只想给两档的情况）：那是它的决定权，不是我们的。
+     *
+     * CSV 本体收编进 core 的 `defaultApprovalChoicesCsv()`（S4-2f 收口）：前两档改说
+     * **生态词** `allow,deny` —— 此前用回执词汇 `approved,denied`，照文档读的第三方会把
+     * 宿主的明确声明读成沉默。取值单一来源，agentNode 不再自己拼。
      */
-    private val defaultApprovalChoices: String = listOf(
-        AgentAckKinds.APPROVED,
-        AgentAckKinds.DENIED,
-        AgentAckKinds.ALLOW_SESSION,
-        AgentAckKinds.ALWAYS,
-    ).joinToString(",")
+    private val defaultApprovalChoices: String = defaultApprovalChoicesCsv()
 
     /**
      * `POST /v1/agent/approval` —— 请对端确认一个受控动作（§6.5，cap `agq1`）。

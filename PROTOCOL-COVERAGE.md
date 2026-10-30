@@ -109,19 +109,20 @@
 **这一档得先能被点到**：客户端只在审批请求的 `choices` 含 `always` 时画那颗按钮。
 `choices` 是**插件填的**字段（`PROTOCOL-EXTENSION` §6.5），而仓内 `examples/`、`plugins/`
 里没有任何插件填过它 —— 曾经因此出过一次「按钮画好了、真机上永远不出现」。现在宿主在
-插件**没声明**（缺省/空白）时补 `approved,denied,allow_session,always`（四个值由
-`AgentAckKinds` 拼出，不重抄），插件显式声明时一律以插件为准 —— 兜底不许盖掉它的
+插件**没声明**（缺省/空白）时补 `allow,deny,allow_session,always`（S4-2f 收口：前两档
+**生态词**，CSV 单一来源 `defaultApprovalChoicesCsv()`，与 `AgentAckKinds` 同文件），
+插件显式声明时一律以插件为准 —— 兜底不许盖掉它的
 决定权。**改的是出站帧上的值、不是键**，旧客户端忽略未知值不受影响。
 
 **回收口**：免批表在桌面「设置 → 可信设备」的「免批规则」块里可看、可逐条撤销
 （`revokeExactly`，三元逐字相等）。撤销只影响**之后**的请求。跨端撤销（手机上看/撤宿主
 的规则）没做，见 §五。
 
-**`choices` 的词汇分叉（如实记，未收口）**：这一栏历史上写 `allow,deny`（插件、
-`scripts/run-live-dsh-flow.py`、各夹具），宿主兜底填的是回执 `kind` 词汇
-`approved,denied,allow_session,always`。两者说的是同一件事；当前只消费 `always`（两种写法
-里同名），所以不影响功能。要不要统一、往哪边统一，属协议面，两条路的代价见
-`PROTOCOL-EXTENSION.md` §6.5 的注。
+**`choices` 的词汇分叉（已收口，S4-2f）**：这一栏历史上写 `allow,deny`（插件、
+`scripts/run-live-dsh-flow.py`、各夹具），宿主兜底曾填回执 `kind` 词汇
+`approved,denied,allow_session,always`。2026-10-31 拍板：宿主兜底改说生态词
+`allow,deny,allow_session,always`；当前消费面（只按词比 `always`，同名）不受影响，
+回执 `agent-ack.kind` 取值域不动。详情见 `PROTOCOL-EXTENSION.md` §6.5 的注。
 
 ## 三、协议层有意不处理的（2 种）
 

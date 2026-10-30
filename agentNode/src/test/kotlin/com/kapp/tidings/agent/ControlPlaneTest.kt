@@ -1151,9 +1151,10 @@ class ControlPlaneTest {
 
         val frame = approvalFrameOf("a-choices-default")
         assertEquals(
-            listOf("approved", "denied", "allow_session", "always"),
+            listOf("allow", "deny", "allow_session", "always"),
             choicesOf(frame).orEmpty().split(","),
-            "宿主兜底必须四档齐全 —— 少了 always，对端那颗「始终允许」永远不出现",
+            "宿主兜底必须四档齐全，且前两档说生态词（S4-2f：照文档读 allow/deny 的第三方" +
+                "不再把宿主的明确声明读成沉默）—— 少了 always，对端那颗「始终允许」永远不出现",
         )
     }
 

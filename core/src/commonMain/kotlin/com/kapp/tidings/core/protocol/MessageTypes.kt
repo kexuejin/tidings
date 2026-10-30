@@ -591,3 +591,34 @@ object AgentAckKinds {
 
     fun isKnown(kind: String): Boolean = kind in VALUES
 }
+
+/**
+ * `choices` 的**生态词汇**（§6.5 文档值域）：插件、`scripts/run-live-dsh-flow.py`、
+ * 各测试夹具的历史写法。
+ *
+ * ## 为什么宿主兜底说这个词，而不是 [AgentAckKinds] 的 `approved` / `denied`（S4-2f 决议）
+ *
+ * `choices` 读它的是**第三方**：照文档写 `allow/deny` 的插件，遇上宿主兜底的
+ * `approved/denied` 会把一次**明确声明**读成**沉默**。宿主改说生态词，两边一个词汇表；
+ * `always` 两边同名照旧，`allow_session` 是本端增补的回执取值，照旧附带。
+ * 词汇分叉只收在 `choices` 这一个字段上 —— 回执（`agent-ack.kind`）仍是 [AgentAckKinds]，
+ * 取值域不动。
+ */
+object ApprovalChoiceWords {
+    const val ALLOW = "allow"
+    const val DENY = "deny"
+}
+
+/**
+ * 宿主兜底的 `choices` CSV（§6.5「省略时宿主填什么」）：生态词两档 + 本端增补的两档回执。
+ *
+ * 这是**出站帧上远端能看到的取值**，全仓唯一来源（S4-2f 收口：此前拼在 agentNode 的
+ * `ControlPlane` 里，用的是 `approved,denied`）。插件**显式声明**时以插件为准 ——
+ * 兜底不许盖掉它的决定权。
+ */
+fun defaultApprovalChoicesCsv(): String = listOf(
+    ApprovalChoiceWords.ALLOW,
+    ApprovalChoiceWords.DENY,
+    AgentAckKinds.ALLOW_SESSION,
+    AgentAckKinds.ALWAYS,
+).joinToString(",")
