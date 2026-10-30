@@ -171,7 +171,7 @@ fun StatusDot(online: Boolean, size: Dp = 8.dp, color: Color? = null) {
             .size(size)
             .background(
                 color = color
-                    ?: if (online) MaterialTheme.accents.online else MaterialTheme.colorScheme.outline,
+                    ?: if (online) MaterialTheme.accents.online else MaterialTheme.colorScheme.onSurfaceVariant,
                 shape = CircleShape,
             ),
     )

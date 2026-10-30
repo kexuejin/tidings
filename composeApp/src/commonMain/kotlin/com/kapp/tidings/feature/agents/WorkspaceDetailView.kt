@@ -790,7 +790,7 @@ fun WorkspaceDetailView(
                             Text(
                                 text = relativeTime(lastEvent?.at ?: recent.sortActivityAt, now),
                                 style = MaterialTheme.typography.labelSmall,
-                                color = MaterialTheme.colorScheme.outline,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant,
                             )
                             Row(verticalAlignment = Alignment.CenterVertically) {
                                 if (onOpenSessionChat != null) {

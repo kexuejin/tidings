@@ -36,6 +36,7 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import com.kapp.tidings.ui.theme.LocalAppSpacing
 import com.kapp.tidings.ui.theme.IconSizes
+import com.kapp.tidings.ui.theme.accents
 import com.kapp.tidings.ui.theme.ShapeRoles
 import com.kapp.tidings.generated.resources.Res
 import com.kapp.tidings.generated.resources.action_create
@@ -217,7 +218,7 @@ private fun MemberCheckbox(checked: Boolean) {
             .background(if (checked) MaterialTheme.colorScheme.primary else Color.Transparent)
             .border(
                 width = LocalAppSpacing.current.xxs,
-                color = if (checked) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.outline,
+                color = if (checked) MaterialTheme.colorScheme.primary else MaterialTheme.accents.outlineStrong,
                 shape = RoundedCornerShape(LocalAppSpacing.current.oxs5),
             ),
         contentAlignment = Alignment.Center,

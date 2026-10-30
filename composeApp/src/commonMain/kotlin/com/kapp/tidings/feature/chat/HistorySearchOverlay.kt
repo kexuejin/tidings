@@ -204,7 +204,7 @@ fun HistorySearchOverlay(
                         .focusRequester(searchFocus)
                         .clip(MaterialTheme.shapes.medium)
                         .background(MaterialTheme.colorScheme.surface)
-                        .border(1.dp, MaterialTheme.colorScheme.outline, MaterialTheme.shapes.medium)
+                        .border(1.dp, MaterialTheme.accents.outlineStrong, MaterialTheme.shapes.medium)
                         .padding(horizontal = sp.md, vertical = sp.md10),
                     textStyle = MaterialTheme.typography.bodyMedium.copy(
                         color = MaterialTheme.colorScheme.onSurface,
@@ -230,7 +230,7 @@ fun HistorySearchOverlay(
                     modifier = Modifier
                         .clip(MaterialTheme.shapes.medium)
                         .background(MaterialTheme.colorScheme.surface)
-                        .border(1.dp, MaterialTheme.colorScheme.outline, MaterialTheme.shapes.medium)
+                        .border(1.dp, MaterialTheme.accents.outlineStrong, MaterialTheme.shapes.medium)
                         .clickable(onClick = onDismiss)
                         .padding(horizontal = 9.dp, vertical = sp.sm6),
                 ) {
@@ -297,7 +297,7 @@ fun HistorySearchOverlay(
                                     .border(
                                         1.dp,
                                         if (on) MaterialTheme.colorScheme.primary
-                                        else MaterialTheme.colorScheme.outline,
+                                        else MaterialTheme.accents.outlineStrong,
                                         MaterialTheme.shapes.small,
                                     )
                                     .clickable { selectedKind = kind }
@@ -369,7 +369,7 @@ fun HistorySearchOverlay(
                             .clip(MaterialTheme.shapes.small)
                             .border(
                                 1.dp,
-                                MaterialTheme.colorScheme.outline,
+                                MaterialTheme.accents.outlineStrong,
                                 MaterialTheme.shapes.small,
                             )
                             .clickable {
@@ -910,7 +910,7 @@ internal fun CalendarGrid(
         Row(modifier = Modifier.fillMaxWidth()) {
             for (w in weekDays) {
                 Box(modifier = Modifier.weight(1f), contentAlignment = Alignment.Center) {
-                    Text(text = w, style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.outline)
+                    Text(text = w, style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
                 }
             }
         }

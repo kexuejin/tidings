@@ -26,6 +26,7 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.unit.dp
 import com.kapp.tidings.ui.theme.IconSizes
+import com.kapp.tidings.ui.theme.accents
 import com.kapp.tidings.ui.theme.LocalAppSpacing
 import org.jetbrains.compose.resources.DrawableResource
 import org.jetbrains.compose.resources.painterResource
@@ -276,7 +277,8 @@ fun AppOutlinedButton(
             color = if (tone == AppButtonTone.Danger) {
                 MaterialTheme.colorScheme.error
             } else {
-                MaterialTheme.colorScheme.outline
+                // D2（WP-D1）：控件边框档 outlineStrong（≥3:1）；outline 是装饰细线（1.4:1）。
+                MaterialTheme.accents.outlineStrong
             },
         ),
         contentPadding = size.contentPadding(),

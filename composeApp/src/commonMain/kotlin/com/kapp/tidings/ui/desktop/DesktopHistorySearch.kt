@@ -492,7 +492,7 @@ public fun DesktopHistorySearchDialog(
                                         Text(
                                             text = stringResource(Res.string.hist_search_empty_hint),
                                             style = MaterialTheme.typography.bodySmall,
-                                            color = MaterialTheme.colorScheme.outline,
+                                            color = MaterialTheme.colorScheme.onSurfaceVariant,
                                         )
                                     }
                                 }

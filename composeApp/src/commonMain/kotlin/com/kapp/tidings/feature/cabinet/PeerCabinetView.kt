@@ -105,6 +105,7 @@ import com.kapp.tidings.ui.components.StatusDot
 import com.kapp.tidings.ui.components.formatBytes
 import com.kapp.tidings.ui.components.formatCount
 import com.kapp.tidings.ui.theme.IconSizes
+import com.kapp.tidings.ui.theme.accents
 import com.kapp.tidings.ui.theme.LocalAppSpacing
 import org.jetbrains.compose.resources.DrawableResource
 import org.jetbrains.compose.resources.painterResource
@@ -581,7 +582,7 @@ private fun CabinetCheckbox(
         val borderColor = if (checked) {
             MaterialTheme.colorScheme.primary
         } else {
-            MaterialTheme.colorScheme.outline
+            MaterialTheme.accents.outlineStrong
         }
         Box(
             Modifier.size(16.dp)

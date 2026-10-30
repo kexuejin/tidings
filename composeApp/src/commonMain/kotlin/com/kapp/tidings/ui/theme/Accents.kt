@@ -72,6 +72,12 @@ data class RelayAccents(
      */
     val surface3: Color,
     /**
+     * 控件**边框**专用档（WP-D1/D2）：非文本 UI 要 3:1，`outline`（1.42–1.49）不够、
+     * `onSurfaceVariant`（6+，文字档）太重。亮暗同值 `#8A8D8A`：对 #FAFAF8 = 3.06、
+     * 对 #1E201F = 4.97，双双达标。装饰性细线仍用 `outline` / `outlineVariant`。
+     */
+    val outlineStrong: Color,
+    /**
      * 原型 `--agent-t`：Agent **字母标签的文字**色，浅 `#5333C9` / 深 `#C9BCFF`。
      *
      * 与 [agentAccent] 分工：那个是图形色（只要 3:1），这个是 11sp 小字色（要 4.5:1）。
@@ -101,6 +107,7 @@ val RelayLightAccents = RelayAccents(
     agentAccentContainer = Color(0xFFE6E0FB),
     online = RelaySuccess,
     surface3 = Color(0xFFE4E9E7),
+    outlineStrong = Color(0xFF8A8D8A),
     agentAccentText = Color(0xFF5333C9),
     badge = Color(0xFFC1341F),
     onBadge = Color.White,
@@ -112,6 +119,7 @@ val RelayDarkAccents = RelayAccents(
     agentAccentContainer = Color(0xFF312A52),
     online = Color(0xFF6FD69A),
     surface3 = Color(0xFF2B3331),
+    outlineStrong = Color(0xFF8A8D8A),
     agentAccentText = Color(0xFFC9BCFF),
     badge = Color(0xFFFFB4AB),
     onBadge = Color(0xFF5C0011),
