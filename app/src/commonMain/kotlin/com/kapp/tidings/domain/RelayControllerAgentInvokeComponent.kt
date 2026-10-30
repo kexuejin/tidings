@@ -277,8 +277,16 @@ internal class RelayControllerAgentInvokeComponent(private val host: RelayContro
      * @param messageText 那条群文本的正文（调用方从信封取）——意图帧只带**目标**
      *   不带任务文本，任务话在消息里；剥掉 @ token 的剩余部分就是给执行器的 prompt。
      *   真机现场：不传它，插件收到的是空串 —— 执行了、卡片也进了群，但任务话丢了。
+     * @param messageId 那条群文本的信封 id。只用于「同一次派单只公告一次失败」
+     *   的去重（队列重放会把同一个信封再处理一遍）。
      */
-    fun handleInboundAgentIntent(groupId: String, senderNode: String, intent: JsonObject?, messageText: String? = null) {
+    fun handleInboundAgentIntent(
+        groupId: String,
+        senderNode: String,
+        intent: JsonObject?,
+        messageText: String? = null,
+        messageId: String? = null,
+    ) {
         if (intent == null) return
         val agentId = intent.strField("agentId")?.takeIf { it.isNotBlank() } ?: return
         val wsId = intent.strField("wsId")?.takeIf { it.isNotBlank() }
@@ -308,7 +316,14 @@ internal class RelayControllerAgentInvokeComponent(private val host: RelayContro
             )
             return
         }
-        val ex = executor ?: return
+        val ex = executor
+        if (ex == null) {
+            // **插件接不了活**（被 kill / 从没注册 / 宿主壳没接桥）：此前这里 `?: return`，
+            // 群流里一条都没有 —— 点 @ 的人看到的和「派单成功、任务在跑」一模一样。
+            // 设计稿 v2 §5「失败如实」：宿主回一条 agentState=failed 的轻横幅。
+            announceAgentGaveUp(groupId, agentId, seat.name, messageId, unavailable = true)
+            return
+        }
         val tokens = setOfNotNull(seat.agentId.takeIf { it.isNotBlank() }, seat.name.takeIf { it.isNotBlank() })
         val prompt = intent.strField("prompt")
             ?: messageText?.let { RelayController.extractAgentPrompt(it, tokens) }
@@ -317,8 +332,106 @@ internal class RelayControllerAgentInvokeComponent(private val host: RelayContro
             runCatching {
                 ex.execute(AgentInvokeTaskRequest(agentId = agentId, prompt = prompt, wsId = wsId, groupId = groupId))
             }.onSuccess { outcome ->
-                outcome.card?.let { broadcastBoardCard(groupId, agentId, it) }
+                // 卡片是成功路径的回执；**没有卡片又没有 done** 才是沉默 —— 补一条反馈。
+                if (outcome.card != null) {
+                    broadcastBoardCard(groupId, agentId, outcome.card)
+                } else if (outcome.status != com.kapp.tidings.core.protocol.CodecInvoke.InvokeResultStates.DONE) {
+                    announceAgentGaveUp(groupId, agentId, seat.name, messageId, unavailable = false)
+                }
+            }.onFailure {
+                // 执行器抛错同样是「点了没反应」：插件进程死在任务中间就长这样。
+                announceAgentGaveUp(groupId, agentId, seat.name, messageId, unavailable = false)
             }
+        }
+    }
+
+    // ---------------------------------------------------------------- 失败反馈（S4-4）
+
+    /**
+     * 已经公告过的派单（键 = 那条群文本的 id）。**同一次派单只出 1 条横幅**：
+     * 队列重放 / 去重表边界会让同一个信封被处理两次，而「一片红」比沉默更糟 ——
+     * 用户会以为插件连续失败了三次。
+     *
+     * 用无界 set 是有意的：条目是一个 36 字符的 id，一次派单一条，会话生命周期内
+     * 也就几百条；换成 LRU 反而会在重放迟到时漏判（那时才是它该起作用的时候）。
+     */
+    private val announcedDispatches = ConcurrentHashMap.newKeySet<String>()
+
+    /**
+     * 把「这次没做成」播进群流：`agentState=failed` 的 agent 署名群文本。
+     *
+     * 为什么是群文本而不是本地 notice：notice 是**纯本地数据、不进协议**（见
+     * `NoticeKind` 的 KDoc），只有宿主自己看得到；而「@ 了没反应」这件事是
+     * **全群**都该知道的 —— 别的人接着 @ 同一个 agent 也会撞上同一堵墙。
+     *
+     * 为什么不发卡片：设计稿把它定为「轻横幅」—— 一次没做成的派单不值得占一张卡的位置，
+     * 也不该进卡片的折叠/rev 体系（它没有 rev，也永远不会刷新）。
+     *
+     * @param unavailable true = 本机根本没有执行器；false = 有执行器但没做成
+     */
+    private fun announceAgentGaveUp(
+        groupId: String,
+        agentId: String,
+        agentName: String,
+        dispatchId: String?,
+        unavailable: Boolean,
+    ) {
+        // 没有 dispatchId 的调用点（老测试/内部直调）按内容去重，至少不会连发两条。
+        val key = dispatchId ?: ("$groupId|$agentId|$agentName|$unavailable")
+        if (!announcedDispatches.add(key)) return
+        host.scope.launch {
+            val text = runCatching {
+                if (unavailable) host.uiTexts.agentUnavailableNotice(agentName)
+                else host.uiTexts.agentNotCompletedNotice(agentName)
+            }.getOrNull().orEmpty()
+            // 文案取不到也照落库：**帧本身**（agentState=failed）就是那条事实，
+            // 界面层会在正文为空时补一句本地兜底（见 `AgentStateBannerRow`）。
+            // 线上那一份则要求非空（协议对群文本 `text` 的判据），见 broadcastAgentState。
+            broadcastAgentState(groupId, agentId, AGENT_STATE_FAILED, text)
+        }
+    }
+
+    /**
+     * 以 agent 署名发一条只带执行状态的群文本（`agentState` 键 M1 已在白名单，
+     * 不新增协议键）。本机落库与线上同帧同 id —— 与 [broadcastBoardCard] 同一纪律。
+     */
+    internal suspend fun broadcastAgentState(groupId: String, agentId: String, state: String, text: String) {
+        val st = host._state.value
+        val meta = st.settings.groups.firstOrNull { it.groupId == groupId } ?: return
+        if (st.selfNodeId !in meta.members) return
+        val sender = AgentSenderId.of(st.selfNodeId, agentId)
+        val envelopeId = newId()
+        // **先落库再发**：这条事实属于本机用户，不该因为运行时还没起来（或已经停了）
+        // 就连自己都看不到。发送失败只影响别人看不看得到。
+        host.handleAppendMessage(
+            MessageUi(
+                id = envelopeId,
+                peerId = ConvId.group(groupId),
+                mine = false,
+                text = text,
+                at = nowMillis(),
+                delivery = null,
+                senderId = sender,
+                agentState = state,
+            ),
+            incoming = true,
+        )
+        val rt = host.runtime ?: return
+        // **空正文不发帧**：协议侧 `validateMsg` 对群文本要求 `text` 非空（`text.isEmpty()`
+        // 整帧拒收）。发一条注定被拒的帧比不发更糟 —— 本端显示「已发送」，对端一条没有。
+        // 空正文只可能来自没装文案桥的壳（CLI / 测试宿主）；装了 `ResourceUiTexts` 的
+        // 产品壳永远有措辞。
+        if (text.isEmpty()) return
+        runCatching {
+            rt.sendGroupText(
+                text = text,
+                groupId = groupId,
+                groupRev = meta.rev,
+                members = meta.members,
+                senderId = sender,
+                envelopeId = envelopeId,
+                agentState = state,
+            )
         }
     }
 
@@ -578,6 +691,12 @@ internal class RelayControllerAgentInvokeComponent(private val host: RelayContro
 
         /** 终态租约的保留时长：超时卡随时可能被点重试，太早清掉就没法重派。 */
         const val LEASE_TTL_MS: Long = 60L * 60_000
+
+        /**
+         * `agentState` 四态里的失败档（协议取值，见 `CodecMsg` 的白名单校验）。
+         * 不写成裸串：这个值出现在帧里，写错一个字母就是整帧拒收。
+         */
+        const val AGENT_STATE_FAILED: String = "failed"
     }
 }
 

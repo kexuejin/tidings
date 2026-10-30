@@ -46,6 +46,7 @@ import com.kapp.tidings.generated.resources.card_status_failed
 import com.kapp.tidings.generated.resources.card_status_pending
 import com.kapp.tidings.generated.resources.card_status_running
 import com.kapp.tidings.generated.resources.card_waiting_host
+import com.kapp.tidings.generated.resources.agent_state_banner_failed
 import com.kapp.tidings.ui.components.AppButton
 import com.kapp.tidings.ui.components.AppButtonSize
 import com.kapp.tidings.ui.components.AppButtonTone
@@ -599,7 +600,25 @@ fun AgentCardBubble(
 @Composable
 private fun CardBannerRow(banner: AgentCardBanner) {
     val sp = LocalAppSpacing.current
-    val (container, content) = when (banner.tone) {
+    val (container, content) = bannerColorsOf(banner.tone)
+    Surface(shape = ShapeRoles.DayCell, color = container, contentColor = content) {
+        Text(
+            text = banner.text,
+            style = MaterialTheme.typography.bodySmall,
+            maxLines = CARD_BANNER_MAX_LINES,
+            overflow = TextOverflow.Ellipsis,
+            modifier = Modifier.fillMaxWidth().padding(horizontal = sp.sm, vertical = sp.sm6),
+        )
+    }
+}
+
+/**
+ * 色调 → (容器色, 内容色)。**只此一份**：卡内 Banner 与群流里的执行状态横幅共用它，
+ * 否则同一个「失败」在两处会长成两种红（§2.6 一个 UI 元素只有一处定义）。
+ */
+@Composable
+private fun bannerColorsOf(tone: AgentCardBannerTone): Pair<androidx.compose.ui.graphics.Color, androidx.compose.ui.graphics.Color> =
+    when (tone) {
         AgentCardBannerTone.Info ->
             MaterialTheme.colorScheme.secondaryContainer to MaterialTheme.colorScheme.onSecondaryContainer
         AgentCardBannerTone.Success ->
@@ -609,9 +628,45 @@ private fun CardBannerRow(banner: AgentCardBanner) {
         AgentCardBannerTone.Error ->
             MaterialTheme.colorScheme.errorContainer to MaterialTheme.colorScheme.onErrorContainer
     }
-    Surface(shape = ShapeRoles.DayCell, color = container, contentColor = content) {
+
+/**
+ * 执行状态四态 → 横幅色调（设计稿 v2 §3 的 `status` 口径：
+ * accept→Info、blocked→Warn、completed→Done、failed→Danger）。
+ *
+ * **未知状态返回 null ⇒ 不画**：协议层已经只放行这四个值，走到这里的未知值只可能来自
+ * 更早版本的库或手工构造的测试数据 —— 画一个没有色调的横幅比不画更让人困惑。
+ */
+fun agentStateBannerToneOf(state: String?): AgentCardBannerTone? = when (state) {
+    "accept" -> AgentCardBannerTone.Info
+    "blocked" -> AgentCardBannerTone.Warn
+    "completed" -> AgentCardBannerTone.Success
+    "failed" -> AgentCardBannerTone.Error
+    else -> null
+}
+
+/**
+ * 群流里的**执行状态轻横幅**（设计稿 v2 §5「失败如实」）。
+ *
+ * 数据来源是消息库里的 `MessageUi.agentState`（协议 `agentState` 键，M1 已在白名单）：
+ * 宿主在「插件接不了活 / 执行没做成」时发一条 agent 署名的群文本，正文由领域侧的
+ * `RelayUiTexts` 给出。这里只管画 —— 判定在领域层，措辞在 strings.xml。
+ *
+ * 为什么不是气泡：它不是「谁说了句话」，是「这次派单没成」的状态说明。用横幅画，
+ * 位置与语气都不抢卡片，也不会被当成一条可以回复的消息。
+ *
+ * 正文为空时（帧由没有文案桥的壳发出）用一句本地兜底：**空横幅等于沉默**，
+ * 而沉默正是这个组件存在的理由。
+ */
+@Composable
+fun AgentStateBannerRow(state: String, text: String, modifier: Modifier = Modifier) {
+    val tone = agentStateBannerToneOf(state) ?: return
+    val sp = LocalAppSpacing.current
+    val (container, content) = bannerColorsOf(tone)
+    Surface(shape = ShapeRoles.DayCell, color = container, contentColor = content, modifier = modifier.fillMaxWidth()) {
         Text(
-            text = banner.text,
+            text = text.ifBlank {
+                if (state == "failed") stringResource(Res.string.agent_state_banner_failed) else ""
+            },
             style = MaterialTheme.typography.bodySmall,
             maxLines = CARD_BANNER_MAX_LINES,
             overflow = TextOverflow.Ellipsis,

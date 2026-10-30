@@ -586,7 +586,12 @@ fun handleOnInbound(envelope: Envelope) {
     if (groupId != null) {
         val intent = payload?.get("agentIntent") as? kotlinx.serialization.json.JsonObject
         // 正文一起给：意图帧只带目标不带任务话，执行器的 prompt 从消息正文剥 @ 而来。
-        if (intent != null) host.invokeCtl.handleInboundAgentIntent(groupId, envelope.from, intent, cleanedText)
+        // 信封 id 也一起给：同一次派单只许公告一次失败（队列重放会重复处理同一帧）。
+        if (intent != null) {
+            host.invokeCtl.handleInboundAgentIntent(
+                groupId, envelope.from, intent, cleanedText, messageId = envelope.id,
+            )
+        }
     }
     // 接话判据：这条是不是在回复 agent 自己发的那条（只有群文本才有 `replyTo`）。
     val replyToId = if (groupId != null) replyToOf(envelope) else null

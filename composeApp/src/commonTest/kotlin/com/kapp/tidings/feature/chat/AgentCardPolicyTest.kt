@@ -247,4 +247,23 @@ class AgentCardPolicyTest {
         assertEquals("1.5 KB", formatArtifactSize(1536L))
         assertEquals("2.0 MB", formatArtifactSize(2L * 1024L * 1024L))
     }
+
+    /**
+     * 执行状态横幅的色调（设计稿 v2 §3 的 status 口径）。
+     *
+     * 这条映射是**用户读到的第一个信号**：插件没做成事却画成蓝色「进行中」，
+     * 比不画更糟。所以四态逐个钉，且未知值必须**不画**（null）——
+     * 协议层已只放行这四个值，剩下的只可能是坏数据。
+     */
+    @Test
+    fun agentStatesMapToBannerTonesAndUnknownStatesDrawNothing() {
+        assertEquals(AgentCardBannerTone.Info, agentStateBannerToneOf("accept"))
+        assertEquals(AgentCardBannerTone.Warn, agentStateBannerToneOf("blocked"))
+        assertEquals(AgentCardBannerTone.Success, agentStateBannerToneOf("completed"))
+        assertEquals(AgentCardBannerTone.Error, agentStateBannerToneOf("failed"))
+        // 大小写不是协议事实的变体：`Failed` 不等于 `failed`（帧里写错就是坏数据）。
+        assertNull(agentStateBannerToneOf("Failed"))
+        assertNull(agentStateBannerToneOf(""))
+        assertNull(agentStateBannerToneOf(null))
+    }
 }

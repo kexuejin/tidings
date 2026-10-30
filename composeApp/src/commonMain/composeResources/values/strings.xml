@@ -1855,6 +1855,13 @@
     <string name="agent_invoke_timeout_title">子任务超时中断：@%1$s</string>
     <string name="agent_invoke_action_retry">重试</string>
     <string name="agent_invoke_action_fallback_local">降级为本地执行</string>
+    <!-- 插件接不了活时的群流反馈（设计稿 v2 §5「失败如实」）。这两句随群文本广播，
+         所以同样经 RelayUiTexts 桥取自资源，不是界面常量。分开两句：一个是「它不在」，
+         一个是「它在但没做成」—— 混成一句会让用户以为插件掉线了。 -->
+    <string name="agent_unavailable_notice">「%1$s」当前离线，这条任务没有执行</string>
+    <string name="agent_not_completed_notice">「%1$s」没有完成这次任务</string>
+    <!-- 执行状态横幅在正文为空时的兜底（帧由没有 UI 文案桥的壳发出时才会用到）。 -->
+    <string name="agent_state_banner_failed">执行未完成</string>
 
     <!-- 上下文唤起胶囊（方案 §5.2） -->
     <string name="capsule_entity_team">团队</string>

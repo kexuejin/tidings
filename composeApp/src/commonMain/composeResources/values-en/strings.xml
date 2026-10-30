@@ -1684,6 +1684,9 @@
     <string name="agent_invoke_timeout_title">Subtask timed out: @%1$s</string>
     <string name="agent_invoke_action_retry">Retry</string>
     <string name="agent_invoke_action_fallback_local">Fall back to local</string>
+    <string name="agent_unavailable_notice">%1$s is offline — this task was not executed</string>
+    <string name="agent_not_completed_notice">%1$s did not finish this task</string>
+    <string name="agent_state_banner_failed">Not executed</string>
 
     <!-- Context capsule (plan §5.2) -->
     <string name="capsule_entity_team">Team</string>

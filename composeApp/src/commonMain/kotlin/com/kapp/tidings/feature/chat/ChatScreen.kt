@@ -1134,6 +1134,18 @@ fun ChatScreen(
                                     )
                                 }
                             }
+                        } else if (message.agentState != null) {
+                            // 执行状态轻横幅（设计稿 v2 §5「失败如实」）：宿主在
+                            // 「插件接不了活 / 执行没做成」时发的那条 agent 署名群文本。
+                            // 判在**卡片之后**：同一帧既带卡又带状态时卡才是主体，
+                            // 横幅再画一遍等于同一条事实说两遍。
+                            val state = message.agentState
+                            Box(
+                                modifier = Modifier.fillMaxWidth(),
+                                contentAlignment = if (message.mine) Alignment.CenterEnd else Alignment.CenterStart,
+                            ) {
+                                AgentStateBannerRow(state = state.orEmpty(), text = message.text)
+                            }
                         } else {
                             val originalIndex = messagePositions[message.id] ?: -1
                             val prevMsg = if (originalIndex > 0) messages.getOrNull(originalIndex - 1) else null

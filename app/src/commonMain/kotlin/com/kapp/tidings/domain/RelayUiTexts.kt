@@ -65,6 +65,27 @@ interface RelayUiTexts {
 
     /** 超时卡上「降级为本地执行」按钮的标签。 */
     suspend fun invokeActionFallbackLabel(): String
+
+    /**
+     * 「这个 agent 现在接不了活」的群流横幅（设计稿 v2 §5「失败如实」）。
+     *
+     * 触发面：宿主收到带 `agentIntent` 的群文本，而本机**没有执行器**
+     * （插件被 kill、从没注册、宿主壳没接桥）。此前那条路径 `?: return`，
+     * 群流里一条都没有 —— 点 @ 的人看到的和「派单成功、任务在跑」一模一样。
+     *
+     * 文案要进群文本（随帧广播），所以必须来自 strings.xml：领域层不编中文。
+     *
+     * @param agentName 席位的展示名 —— 群里认的是它，不是 agentId
+     */
+    suspend fun agentUnavailableNotice(agentName: String): String
+
+    /**
+     * 「这次任务没做完」的群流横幅：执行器抛错，或执行器回了非 done 且没给卡片。
+     *
+     * 与 [agentUnavailableNotice] 分开：一个是「它不在」，一个是「它在但没做成」——
+     * 混成一句会让用户以为插件掉线了。
+     */
+    suspend fun agentNotCompletedNotice(agentName: String): String
 }
 
 /**
@@ -82,4 +103,6 @@ object NoUiTexts : RelayUiTexts {
     override suspend fun invokeTimeoutTitle(agentName: String): String = ""
     override suspend fun invokeActionRetryLabel(): String = ""
     override suspend fun invokeActionFallbackLabel(): String = ""
+    override suspend fun agentUnavailableNotice(agentName: String): String = ""
+    override suspend fun agentNotCompletedNotice(agentName: String): String = ""
 }
