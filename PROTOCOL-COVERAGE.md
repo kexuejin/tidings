@@ -76,6 +76,36 @@
 | `nudge` | 收发都有 | 仅单聊、可靠 ACK、**不入离线队列**；限流同一对端 60 秒 2 次、相邻 ≥15 秒。**收端**：限流通过后除了写本地提示行，还会发系统通知并把界面定位到该会话（`focusRequest`），静音时段内不打扰（`shouldNotifyNudge`）。通知本身**可点**（Android 挂 `PendingIntent` + `launchMode="singleTop"` + `onNewIntent`，点开直接落在那个会话；iOS/桌面收下参数但不生效）。已知未解决：应用在后台被系统冻结时戳不到（协议不允许排队，所以没有 ACK 就没有通知） |
 | `pk` | 不做 | `Codec.validateMsg` 直接 `return false`（失败关闭），不放坏形状通过 |
 
+## 二·附、`agent-ack` 的 kind（8 种）
+
+`kind` 是**一个键、一组取值**，不是一个自由字符串。取值域只有一份：
+`core/.../protocol/MessageTypes.kt` 的 `AgentAckKinds`，编解码校验（收得下吗）与
+控制面入口白名单（认得吗）都引用它。
+
+| kind | 语义 | 出处 |
+|---|---|---|
+| `queued` | 收到排队请求 | §6.8 正文 |
+| `approved` / `denied` | 单条批准 / 拒绝 | §6.8 正文 |
+| `cancelled` | 收到取消 | §6.8 正文 |
+| `received` | 仅确认收到 | §6.8 正文 |
+| `allow_session` | 本会话免审（此后同类请求不再询问） | 本端增补 |
+| `revoke_session` | 撤销本会话免审 | 本端增补 |
+| `always` | 这个 **tool** 以后免审（宿主落免批表） | 本端增补 |
+
+增补值全部复用 `kind` 这一个键 —— **不新增帧、不新增键**。旧宿主不认识某个值时只会
+停在原来的处置状态（不推进、也不放行），与它今天的行为一致。
+
+> **一条真实踩过的坑（2026-10-30 修）**：校验白名单曾经写死正文那五个值，而客户端
+> 早在发 `allow_session` / `revoke_session`。发送侧 `sendAgentAck` 只拼帧、不校验，
+> 接收侧 `validatePayload` 整帧退回 —— 于是「本次免审」点了、界面显示已生效、
+> 宿主台账一直停在 `pending`。既有测试没抓到，是因为它把 `makeEnvelope` 直接交给
+> `recordInbound`，**绕过了编解码那一层**。判据现在补在编解码上
+> （`AgentFramesTest.everyApprovalDecisionKindSurvivesTheWire`），白名单外的值仍然整帧拒收。
+
+`always` 的落地在宿主侧：`AgentToolApprovalStore` 按 **(设备, agent, tool)** 三维记规则，
+`POST /v1/agent/approval` 命中时直接记 `approved` 并回 `status=auto-approved`
+（**不是** `sent` —— 那一帧根本没出门），对端不再被打扰。
+
 ## 三、协议层有意不处理的（2 种）
 
 这 2 种属于**局域网 P2P 点对点基础协议层面的信封类型**。本端没有对外声明对应的 cap（如 `upd1`），所以对端不会按"你能收"的方式发过来。
