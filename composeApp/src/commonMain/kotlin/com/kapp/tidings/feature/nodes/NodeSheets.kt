@@ -676,7 +676,7 @@ fun AddNodeSheet(
                 Text(
                     text = timeoutError,
                     style = MaterialTheme.typography.labelSmall,
-                    color = MaterialTheme.colorScheme.error,
+                    color = MaterialTheme.colorScheme.onErrorContainer,
                     modifier = Modifier.padding(top = LocalAppSpacing.current.sm),
                 )
                 // 超时后的出路就是原地的「连接」：地址还在框里，再按一次就是重试
@@ -726,7 +726,7 @@ fun AddNodeSheet(
                     Text(
                         text = portError,
                         style = MaterialTheme.typography.labelSmall,
-                        color = MaterialTheme.colorScheme.error,
+                        color = MaterialTheme.colorScheme.onErrorContainer,
                     )
                 }
                 if (trimmedHost.isNotEmpty() && !hostOk) {
@@ -736,7 +736,7 @@ fun AddNodeSheet(
                     Text(
                         text = if (portInHost && trimmedPort.isNotEmpty()) bothPortsError else hostError,
                         style = MaterialTheme.typography.labelSmall,
-                        color = MaterialTheme.colorScheme.error,
+                        color = MaterialTheme.colorScheme.onErrorContainer,
                     )
                 }
             }

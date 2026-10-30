@@ -271,7 +271,9 @@ internal fun LabeledFieldWithKey(
                 // 禁用态提示用 RelayWarning #E9C46A 作前景只有约 1.6:1，改用 secondaryContainer 的 on 色。
                 // 报错优先于禁用态：值不合法时用户最需要看清的就是那句话。
                 color = when {
-                    isError -> MaterialTheme.colorScheme.error
+                    // D4（WP-D1）：报错文字档换 onErrorContainer —— error 留给图标/描边；
+                    // #93000A 对本页四个底 6.6–9.4:1，#E63946 只有 3.4–3.8（11sp 小字要 4.5）。
+                    isError -> MaterialTheme.colorScheme.onErrorContainer
                     !enabled -> MaterialTheme.colorScheme.onSecondaryContainer
                     else -> MaterialTheme.colorScheme.onSurfaceVariant
                 },

@@ -67,8 +67,15 @@ fun AppSwitch(
             modifier = Modifier
                 .size(width = 42.dp, height = sp.xl)
                 .clip(MaterialTheme.shapes.medium)
-                .background(if (checked) MaterialTheme.colorScheme.primary else MaterialTheme.accents.surface3)
-                .alpha(if (enabled) 1f else 0.45f),
+                // D5（WP-D1）：禁用态不用 alpha（合成后 1.70:1，看起来像没渲染）——
+                // 弱化只靠容器：禁用走 surfaceVariant，字重/形状不变。
+                .background(
+                    when {
+                        !enabled -> MaterialTheme.colorScheme.surfaceVariant
+                        checked -> MaterialTheme.colorScheme.primary
+                        else -> MaterialTheme.accents.surface3
+                    },
+                ),
         ) {
             Box(
                 modifier = Modifier

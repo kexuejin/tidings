@@ -547,7 +547,8 @@ public fun ToolbarButton(
         else -> MaterialTheme.colorScheme.surfaceContainerHighest
     }
     val fg = when {
-        !enabled -> MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.5f)
+        // D5（WP-D1）：禁用不靠 alpha（合成 2.11:1）—— 弱化靠字色档，5.52:1。
+        !enabled -> MaterialTheme.colorScheme.onSurfaceVariant
         primary -> MaterialTheme.colorScheme.onPrimary
         selected -> MaterialTheme.colorScheme.onPrimaryContainer
         else -> MaterialTheme.colorScheme.onSurface

@@ -396,7 +396,8 @@ private fun AvatarModeSegments(
                             style = MaterialTheme.typography.labelMedium,
                             fontWeight = if (active) FontWeight.SemiBold else null,
                             color = when {
-                                !enabled -> MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.38f)
+                                // D5（WP-D1）：禁用不靠 alpha（合成 1.79:1）—— 5.61:1 的整档字色。
+                                !enabled -> MaterialTheme.colorScheme.onSurfaceVariant
                                 active -> MaterialTheme.colorScheme.onSurface
                                 else -> MaterialTheme.colorScheme.onSurfaceVariant
                             },

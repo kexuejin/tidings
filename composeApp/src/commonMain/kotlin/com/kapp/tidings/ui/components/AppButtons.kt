@@ -228,11 +228,17 @@ fun AppButton(
             AppButtonTone.Danger -> ButtonDefaults.buttonColors(
                 containerColor = MaterialTheme.colorScheme.error,
                 contentColor = MaterialTheme.colorScheme.onError,
+                // D5（WP-D1）：禁用态一档统一（容器 surfaceVariant / 字 onSurfaceVariant，
+                // 5.6:1）—— M3 默认叠色只有 1.70:1，用户分不清「还不能点」与「坏了」。
+                disabledContainerColor = MaterialTheme.colorScheme.surfaceVariant,
+                disabledContentColor = MaterialTheme.colorScheme.onSurfaceVariant,
             )
 
             else -> ButtonDefaults.buttonColors(
                 containerColor = MaterialTheme.colorScheme.primary,
                 contentColor = MaterialTheme.colorScheme.onPrimary,
+                disabledContainerColor = MaterialTheme.colorScheme.surfaceVariant,
+                disabledContentColor = MaterialTheme.colorScheme.onSurfaceVariant,
             )
         },
         contentPadding = size.contentPadding(),
@@ -271,6 +277,9 @@ fun AppOutlinedButton(
             // 强调该由**确认框**承担（那里才是不可逆动作真正发生的地方）。
             containerColor = Color.Transparent,
             contentColor = contentColor,
+            // D5（WP-D1）：禁用态一档统一 —— 弱化只靠容器与字色，不靠 M3 默认叠色（1.79:1）。
+            disabledContainerColor = Color.Transparent,
+            disabledContentColor = MaterialTheme.colorScheme.onSurfaceVariant,
         ),
         border = BorderStroke(
             width = 1.dp,
