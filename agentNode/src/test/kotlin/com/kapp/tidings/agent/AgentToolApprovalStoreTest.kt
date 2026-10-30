@@ -116,4 +116,32 @@ class AgentToolApprovalStoreTest {
         assertEquals(2, s.revoke("phone-1"), "按设备撤：把这条设备上剩下的全撤掉")
         assertFalse(s.isAlwaysApproved("phone-1", "codex", "bash"))
     }
+
+    /**
+     * [AgentToolApprovalStore.revokeExactly] 与 [AgentToolApprovalStore.revoke] 的差别，
+     * 全在 `agentKey = null` 上：
+     *
+     * - `Rule.agentKey = null` ⇒ 这条规则**覆盖所有 agent**（是一条通配规则）；
+     * - `revoke(agentKey = null)` ⇒ **不按 agent 过滤**（整批撤）。
+     *
+     * 面板逐条撤销时拿前者去调后者，会把同设备同工具的其它 agent 规则一起删掉 ——
+     * 界面上只消失一行，实际少了好几行。方向是收紧（只会多问一次），但它让界面
+     * 变成假账，所以逐条撤销必须有这个「三元逐字相等」的入口。
+     */
+    @Test
+    fun revokeExactlyTellsTheWildcardAgentApartFromAnyAgent() {
+        val s = store()
+        s.remember(nodeId = "phone-1", agentKey = null, tool = "bash", at = 10L)
+        s.remember(nodeId = "phone-1", agentKey = "dsh-cli", tool = "bash", at = 20L)
+
+        assertEquals(1, s.revokeExactly("phone-1", agentKey = null, tool = "bash"))
+        assertTrue(
+            s.isAlwaysApproved("phone-1", "dsh-cli", "bash"),
+            "按 agent 记的那条是另一条规则，不在这次撤销范围内",
+        )
+        assertEquals(1, s.snapshot().size)
+
+        assertEquals(1, s.revokeExactly("phone-1", agentKey = "dsh-cli", tool = "bash"))
+        assertEquals(0, s.snapshot().size)
+    }
 }

@@ -70,8 +70,29 @@ class AgentToolApprovalStore(private val file: File) {
     private val rwLock = ReentrantReadWriteLock()
     private var rules: MutableList<Rule> = mutableListOf()
 
+    /**
+     * 「表变了」的回调（与 [AgentGrantStore.changeListeners] 同一套写法）。
+     *
+     * 为什么这份表也需要它：写它的人**不在这块 UI 上** —— 对端按「始终允许」发一条
+     * `agent-ack.kind=always`，宿主在控制面线程里落表。没有通知的话，桌面设置页开着
+     * 也看不到刚产生的规则，用户会以为那一下没生效（或以为表里只有他手动撤掉的几条）。
+     * 回调在锁**外**触发，同一线程按注册顺序同步调用。
+     */
+    private val changeListeners = mutableListOf<() -> Unit>()
+
     init {
         load()
+    }
+
+    /** 注册一个「表变了」的回调；返回值用于注销。 */
+    fun addChangeListener(listener: () -> Unit): () -> Unit {
+        synchronized(changeListeners) { changeListeners += listener }
+        return { synchronized(changeListeners) { changeListeners -= listener } }
+    }
+
+    private fun notifyChanged() {
+        val snapshotOfListeners = synchronized(changeListeners) { changeListeners.toList() }
+        snapshotOfListeners.forEach { runCatching { it() } }
     }
 
     /** 全部规则（只读快照，按 `grantedAt` 降序）。 */
@@ -116,6 +137,7 @@ class AgentToolApprovalStore(private val file: File) {
             trimLocked()
             persistLocked()
         }
+        notifyChanged()
         return true
     }
 
@@ -132,6 +154,35 @@ class AgentToolApprovalStore(private val file: File) {
             rules.removeAll(doomed.toSet())
             persistLocked()
         }
+        if (removed > 0) notifyChanged()
+        return removed
+    }
+
+    /**
+     * 撤销**界面上那一条**：三元逐字相等才算命中。
+     *
+     * ## 为什么不直接用 [revoke]
+     *
+     * [revoke] 的 `agentKey = null` 说的是「**不按 agent 过滤**」（那是它给
+     * 「按设备整批撤」留的语义），而 [Rule.agentKey] 的 `null` 说的是另一件事：
+     * 「这条规则覆盖这台设备上**所有** agent 的该 tool」。两个 `null` 含义相反 ——
+     * 拿后者去调前者，用户点「撤销这一条」会把同设备同 tool 的**其它 agent 专属规则
+     * 一起删掉**。方向是收紧（多撤销只会多问一次，不会多放行），但它让界面变成了
+     * 假账：列表上还留着别的行，用户以为它们仍在免批，实际已经被顺手删了。
+     *
+     * 所以面板的逐条撤销走这里；[revoke] 保留原语义给「整批撤」用。
+     */
+    fun revokeExactly(nodeId: String, agentKey: String?, tool: String): Int {
+        var removed = 0
+        rwLock.write {
+            val doomed = rules.filter {
+                it.nodeId == nodeId && it.agentKey == agentKey && it.tool == tool
+            }
+            removed = doomed.size
+            rules.removeAll(doomed.toSet())
+            if (removed > 0) persistLocked()
+        }
+        if (removed > 0) notifyChanged()
         return removed
     }
 

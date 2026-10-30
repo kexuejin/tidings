@@ -19,6 +19,7 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.kapp.tidings.agent.AgentGrantStore
+import com.kapp.tidings.agent.AgentToolApprovalStore
 import com.kapp.tidings.agent.GrantReplyOutcome
 import com.kapp.tidings.domain.RelayController
 import com.kapp.tidings.domain.RelayUiState
@@ -248,6 +249,14 @@ internal fun DesktopTrustedDevicesPanel(
     state: RelayUiState,
     controller: RelayController,
     grantStore: AgentGrantStore?,
+    /**
+     * 「始终允许」免批表（同一页最下方那块「免批规则」）。
+     *
+     * 与 [grantStore] 是**两张不同的表**：那张回答「哪台设备能看/能执行我的 agent」，
+     * 这张回答「某个工具批准过一次之后还要不要再问」。同一页因为它们同属
+     * 「我给出去的权限」，用户收回的地方也应该在同一处。
+     */
+    toolApprovalStore: AgentToolApprovalStore? = null,
     /**
      * 把决定回给设备的出口（实现在 DesktopExtension → ControlPlane）。
      *
@@ -666,6 +675,16 @@ internal fun DesktopTrustedDevicesPanel(
                 }
             }
         }
+
+        // 同一页的最后一块：**把「始终允许」收回来**。免批表此前只有写入口
+        // （审批行那颗按钮），界面上既看不见也撤不回 —— 想收回只能删整张 json。
+        DesktopToolApprovalsSection(
+            store = toolApprovalStore,
+            // 设备名的取法与上面那张列表同一口径：昵称，取不到就退到可读的短 id。
+            peerLabel = { nId ->
+                state.peer(nId)?.displayName ?: nId.take(8)
+            },
+        )
     }
 }
 

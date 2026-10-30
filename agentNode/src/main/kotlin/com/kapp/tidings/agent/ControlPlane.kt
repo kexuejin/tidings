@@ -255,6 +255,17 @@ class ControlPlane(
     var boundPort: Int = httpPort
         private set
 
+    /**
+     * 「始终允许」免批表（给宿主自己的设置面板读/撤销用）。
+     *
+     * 暴露的是**同一个实例**，不是一份副本：面板上看到的那几行必须就是
+     * [agentApproval] 入口判定时查的那张表。另起一个 `AgentToolApprovalStore`
+     * 指同一个文件也不保险 —— 两个实例各有各的内存与锁，面板撤掉的规则要等
+     * 下一次落盘才被入口看见（中间那段时间里"已撤销"是假的）。
+     */
+    val toolApprovalStore: AgentToolApprovalStore
+        get() = toolApprovals
+
     fun start() {
         if (server != null) return
         val s = HttpServer.create(InetSocketAddress(LOOPBACK, httpPort), 16)

@@ -605,6 +605,16 @@
     <string name="trusted_devices_access_admin">admin (admin)</string>
     <string name="trusted_devices_access_owner">owner (owner)</string>
     <string name="trusted_devices_reject">Reject</string>
+    <string name="tool_approvals_title">Tool approvals</string>
+    <string name="tool_approvals_desc">Tools you allowed with \"Always allow\" are listed here. Revoking one makes the next request for that tool ask again; a request already waiting for approval is unaffected.</string>
+    <string name="tool_approvals_empty">No tool approvals yet. Tapping \"Always allow\" on an approval produces one and lists it here.</string>
+    <string name="tool_approvals_unavailable">The control plane is not running, so the approval list cannot be read right now.</string>
+    <string name="tool_approvals_agent">agent %1$s</string>
+    <string name="tool_approvals_all_agents">all agents</string>
+    <string name="tool_approvals_row_meta">%1$s · %2$s</string>
+    <string name="tool_approvals_revoke">Revoke</string>
+    <string name="tool_approvals_revoked">Revoked %1$d rule(s); the next request for that tool will ask again</string>
+    <string name="tool_approvals_gone">That rule is already gone (it may have been revoked before)</string>
     <string name="desk_nav_connection">Connection</string>
     <string name="desk_nav_notifications">Notifications</string>
     <string name="desk_nav_appearance">Appearance</string>

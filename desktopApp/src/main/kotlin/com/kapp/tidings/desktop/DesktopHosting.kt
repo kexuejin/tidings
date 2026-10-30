@@ -969,6 +969,9 @@ internal fun DesktopSettingsPane(
                                             state = state,
                                             controller = controller,
                                             grantStore = host.extension.grantStore,
+                                            // 免批表取控制面上的同一实例（面板读的就是入口判的那张）。
+                                            // 控制面没起时它是 null，面板据此显示「暂时读不到」。
+                                            toolApprovalStore = host.extension.toolApprovalStore,
                                             // 面板的每个决定都经这里回给设备（agent-grant 帧）。此前面板够不到
                                             // 发帧能力，只能写本机台账 ⇒ 用户点完手机看不到。
                                             grantReplySender = host.extension::sendGrantReply,

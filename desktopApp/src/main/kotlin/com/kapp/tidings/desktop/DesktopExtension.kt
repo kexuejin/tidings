@@ -9,6 +9,7 @@ import com.kapp.tidings.domain.rebroadcastGroupMeta
 import com.kapp.tidings.domain.ExecGrantView
 import com.kapp.tidings.core.protocol.GroupMeta
 import com.kapp.tidings.agent.AgentGrantStore
+import com.kapp.tidings.agent.AgentToolApprovalStore
 import com.kapp.tidings.agent.AgentSessionRegistry
 import com.kapp.tidings.agent.AgentWorkspaceRegistry
 import com.kapp.tidings.agent.AgentInboxEnricher
@@ -158,6 +159,20 @@ internal class DesktopExtension(
         get() = plane?.boundPort ?: 0
 
     var grantStore: AgentGrantStore? = null
+
+    /**
+     * 「始终允许」免批表 —— 桌面设置页「可信设备」里那一块读/撤销用的。
+     *
+     * 直取控制面上的**同一个实例**（`ControlPlane.toolApprovalStore`），不是另开一个
+     * store 指同一个文件：这份表由对端的 `agent-ack.kind=always` 写、由审批入口读，
+     * 面板只是第三只手；两个实例各有各的内存与锁，面板撤掉的规则要等下一次落盘才被
+     * 入口看见 —— 中间那段时间里界面上的「已撤销」是假账。
+     *
+     * 控制面没挂上（未 start / 已 detach）时为 null：面板据此如实显示「暂时读不到」，
+     * 而不是画一张看起来"一条规则都没有"的空表（那会让用户以为免批已被清空）。
+     */
+    val toolApprovalStore: AgentToolApprovalStore?
+        get() = plane?.toolApprovalStore
 
     /**
      * 每个 agent 的执行范围（谁能让它干活）。与 [grantStore] 同一档暴露给 UI ——

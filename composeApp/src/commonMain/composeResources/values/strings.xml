@@ -708,6 +708,16 @@
     <string name="trusted_devices_access_admin">管理员 admin</string>
     <string name="trusted_devices_access_owner">所有者 owner</string>
     <string name="trusted_devices_reject">拒绝</string>
+    <string name="tool_approvals_title">免批规则</string>
+    <string name="tool_approvals_desc">你按过「始终允许」的工具会列在这里。撤销后，下一次同工具请求会重新询问；已经在等批准的那一条不受影响。</string>
+    <string name="tool_approvals_empty">还没有免批规则。审批时点「始终允许」会产生一条，并出现在这里。</string>
+    <string name="tool_approvals_unavailable">控制面未运行，暂时读不到免批表。</string>
+    <string name="tool_approvals_agent">agent %1$s</string>
+    <string name="tool_approvals_all_agents">全部 agent</string>
+    <string name="tool_approvals_row_meta">%1$s · %2$s</string>
+    <string name="tool_approvals_revoke">撤销</string>
+    <string name="tool_approvals_revoked">已撤销 %1$d 条，下一次同工具请求会重新询问</string>
+    <string name="tool_approvals_gone">这条规则已经不在了（可能已被撤销过）</string>
     <string name="desk_nav_connection">连接</string>
     <string name="desk_nav_notifications">通知</string>
     <string name="desk_nav_appearance">外观</string>
