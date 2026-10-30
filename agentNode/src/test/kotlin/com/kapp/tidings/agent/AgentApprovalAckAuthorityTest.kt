@@ -2,6 +2,7 @@
 
 package com.kapp.tidings.agent
 
+import com.kapp.tidings.core.protocol.AgentAckKinds
 import com.kapp.tidings.core.protocol.AgentGrantAccess
 import com.kapp.tidings.core.protocol.Codec
 import com.kapp.tidings.core.protocol.MsgTypes
@@ -213,5 +214,57 @@ class AgentApprovalAckAuthorityTest {
             AgentSessionRegistry.AckOutcome.UNKNOWN_KIND.wire,
             registry.ack(peer, approvalId)?.outcome,
         )
+    }
+
+    /**
+     * 「始终允许」：这一条先被批准，**并且**把"这个 tool 以后免审"记进宿主侧的表。
+     *
+     * 两件事必须一起成立 —— 只批不记等于按钮没有意义（下次照问），只记不批等于
+     * 这一轮的任务卡住了。
+     */
+    @Test
+    fun alwaysAckApprovesThisOneAndRemembersTheTool() {
+        val grants = store().also { grant(it, AgentGrantAccess.OWNER) }
+        val registry = registry(grants)
+        val rules = AgentToolApprovalStore(File.createTempFile("relay-always-", ".json").apply { delete() })
+        registry.approvalPolicy = { record, agentKey ->
+            record.tool?.let { rules.remember(record.nodeId, agentKey, it, at = record.updatedAt) }
+        }
+
+        ack(registry, AgentAckKinds.ALWAYS)
+
+        assertEquals("approved", status(registry), "「始终允许」先要批准当前这一条")
+        assertEquals(
+            AgentSessionRegistry.AckOutcome.APPLIED.wire,
+            registry.ack(peer, approvalId)?.outcome,
+        )
+        assertEquals(true, rules.isAlwaysApproved(peer, agentKey, "bash"), "规则要落在宿主侧的表里")
+        assertEquals(
+            false,
+            rules.isAlwaysApproved(peer, agentKey, "rm"),
+            "记的必须是 tool，不是整个 agent —— 否则等于把高危动作一并放行",
+        )
+    }
+
+    /**
+     * 被拒的回执**不许**留下免批规则。
+     *
+     * 这是最坏的一种组合：一条过期/无权的回执既没批准这一条，又换来一张"以后都别问了"
+     * 的空白通行证 —— 等于用一次失败换一次永久放行。
+     */
+    @Test
+    fun aRejectedAlwaysAckLeavesNoRuleBehind() {
+        val grants = store().also { grant(it, AgentGrantAccess.RW) } // RW 不足以代为批准
+        val registry = registry(grants)
+        val rules = AgentToolApprovalStore(File.createTempFile("relay-always-", ".json").apply { delete() })
+        registry.approvalPolicy = { record, agentKey ->
+            record.tool?.let { rules.remember(record.nodeId, agentKey, it, at = record.updatedAt) }
+        }
+
+        ack(registry, AgentAckKinds.ALWAYS)
+
+        assertNull(status(registry))
+        assertEquals(false, rules.isAlwaysApproved(peer, agentKey, "bash"), "没批准就不许记规则")
+        assertEquals(0, rules.snapshot().size)
     }
 }

@@ -58,7 +58,9 @@ class ControlPlaneTest {
     private lateinit var registry: AgentSessionRegistry
     private lateinit var workspaceRegistry: AgentWorkspaceRegistry
     private lateinit var grantStore: AgentGrantStore
+    private lateinit var toolStore: AgentToolApprovalStore
     private val grantFile: File = File.createTempFile("relay-grants-test-", ".json").apply { delete() }
+    private val toolFile: File = File.createTempFile("relay-tool-approvals-test-", ".json").apply { delete() }
     private val desktopFrames = java.util.concurrent.CopyOnWriteArrayList<JsonObject>()
 
     @BeforeTest
@@ -101,6 +103,8 @@ class ControlPlaneTest {
         workspaceRegistry = AgentWorkspaceRegistry()
         grantStore = AgentGrantStore(File(grantFile.absolutePath + "." + System.nanoTime()))
         grantStore.setPolicy(AgentGrantPolicies.AUTO)
+        // 免批表同样每个用例一份独立文件：它也是持久化状态。
+        toolStore = AgentToolApprovalStore(File(toolFile.absolutePath + "." + System.nanoTime()))
         scope.launch {
             desktop.inbound.collect { env ->
                 desktopFrames += Codec.wireJson.parseToJsonElement(Codec.encode(env)).jsonObject
@@ -109,6 +113,7 @@ class ControlPlaneTest {
         plane = ControlPlane(
             agent, httpPort = 0, token = "",
             sessions = registry, workspaces = workspaceRegistry, grants = grantStore,
+            toolApprovals = toolStore,
         )
         plane.start()
         // 与 Main / DesktopExtension 同一条路：三张台账的入站解析只有 observeInbound 这一份。
@@ -1059,6 +1064,73 @@ class ControlPlaneTest {
         val root = obj(json)
         val arr: JsonArray = root["messages"]?.jsonArray ?: root["peers"]!!.jsonArray
         return arr.map { it.jsonObject }
+    }
+
+    // ------------------------------------------------------ 「始终允许」（按 tool 名免批）
+
+    /**
+     * 命中免批规则 ⇒ **一帧都不发**，并且台账里留下"批过"这条事实。
+     *
+     * ## 为什么要同时断三件事
+     *
+     * 「不打扰」有三种假实现：还是发了帧（只是不让用户点）、发了但没记账（审计里查不到
+     * 谁批的）、记了但状态不对（插件读到 `pending` 继续等）。所以这里同时钉：
+     * 返回 `auto-approved`、台账 `status=approved`、对端**没收到**那一帧。
+     *
+     * 判据不读时钟：先发一条普通消息当"管道通了"的哨兵，再检查收到的帧里没有
+     * `agent-approval` —— 免得用 sleep 等一个"没发生的事"。
+     */
+    @Test
+    fun anAlwaysAllowRuleApprovesLocallyWithoutTouchingThePeer() {
+        // 规则：这台设备、任意 agent、只限 bash。
+        toolStore.remember(nodeId = desktop.nodeId, agentKey = null, tool = "bash", at = 1L)
+
+        val res = post(
+            "/v1/agent/approval",
+            """{"to":"$LOOPBACK","port":${desktop.boundPort},"approvalId":"a-auto","sessionId":"s-auto",""" +
+                """"expiresAt":${Long.MAX_VALUE},"tool":"bash","summary":"run the test suite"}""",
+        )
+        assertEquals(200, res.first, res.second)
+        val json = obj(res.second)
+        assertEquals(
+            "auto-approved",
+            json["status"]?.jsonPrimitive?.contentOrNull,
+            "命中免批还回 sent 就是在说「帧已投递」—— 而它根本没出门",
+        )
+        assertEquals(true, json["autoApproved"]?.jsonPrimitive?.content?.toBoolean())
+        assertEquals(
+            "approved",
+            registry.approvals(desktop.nodeId, "s-auto").first { it.approvalId == "a-auto" }.status,
+            "台账里必须有「谁批的、什么时候」—— 免批不等于无记录",
+        )
+
+        // 哨兵：管道确实通着（它到了，说明"没收到审批帧"不是因为整条链路没走）。
+        // 同一条管道、先发审批后发哨兵 —— 若审批真发过，它一定排在哨兵之前。
+        post("/v1/send", """{"to":"$LOOPBACK","port":${desktop.boundPort},"text":"sentinel"}""")
+        Await.value("哨兵到达") {
+            desktopFrames.firstOrNull { it["type"]?.jsonPrimitive?.contentOrNull == MsgTypes.MSG }
+        }
+        assertTrue(
+            desktopFrames.none { it["type"]?.jsonPrimitive?.contentOrNull == MsgTypes.AGENT_APPROVAL },
+            "免批的意义就是别再问它一次；发过去再让对端自动回一条等于打扰两次",
+        )
+    }
+
+    /** 没命中规则的工具照常投递（放宽一条规则不等于把审批这道门拆了）。 */
+    @Test
+    fun aToolWithoutARuleStillAsksThePeer() {
+        toolStore.remember(nodeId = desktop.nodeId, agentKey = null, tool = "bash", at = 1L)
+
+        val res = post(
+            "/v1/agent/approval",
+            """{"to":"$LOOPBACK","port":${desktop.boundPort},"approvalId":"a-ask","sessionId":"s-ask",""" +
+                """"expiresAt":${Long.MAX_VALUE},"tool":"rm","summary":"delete the build dir"}""",
+        )
+        assertEquals(200, res.first, res.second)
+        assertEquals("sent", obj(res.second)["status"]?.jsonPrimitive?.contentOrNull)
+        Await.value("对端收到 rm 的审批") {
+            desktopFrames.firstOrNull { it["type"]?.jsonPrimitive?.contentOrNull == MsgTypes.AGENT_APPROVAL }
+        }
     }
 
     /**

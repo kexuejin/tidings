@@ -2,6 +2,7 @@
 
 package com.kapp.tidings.agent
 
+import com.kapp.tidings.core.protocol.AgentAckKinds
 import com.kapp.tidings.core.protocol.isAgentApprovalExpired
 import java.util.concurrent.ConcurrentHashMap
 import java.util.concurrent.ConcurrentLinkedQueue
@@ -243,6 +244,23 @@ class AgentSessionRegistry(
      */
     var approvalAuthority: ((ApprovalRecord) -> Boolean)? = null
 
+    /**
+     * 「这个 tool 以后免审」的**落地钩子**：一条 `agent-ack.kind = always` 被应用之后调一次。
+     *
+     * ## 为什么是钩子，不是直接持有那张表
+     *
+     * 台账（本类）只回答"这条审批被处置成什么"，而"以后还要不要问"是**另一张表**的语义
+     * （`AgentToolApprovalStore`，按 tool 名粒度）。让本类直接依赖那张表，等于把两个问题
+     * 焊在一起；而让调用方在 `recordAck` 之后自己判一次 `kind == always`，又会出现
+     * "两处各判一次"的老毛病 —— 于是钩子挂在**唯一会应用回执的那一处**（[applyAckToApproval]）。
+     *
+     * `null` = 没有表可写（只读诊断工具 / 没接线的进程）：这时"始终允许"只对**当前这条**
+     * 审批生效，下次照常问 —— 方向是收紧，不是放行。
+     *
+     * 参数：被应用的那条审批 + 该会话的 `agentKey`（可能为空，见 store 的通配说明）。
+     */
+    var approvalPolicy: ((ApprovalRecord, agentKey: String?) -> Unit)? = null
+
     /** `agent-ack` 的键是 `(nodeId, ackOf)` —— `ackOf` 是被确认的 msgId，不是 sessionId。 */
     private val acks = ConcurrentHashMap<Key, AckRecord>()
     private val ackOrder = ConcurrentLinkedQueue<Key>()
@@ -461,20 +479,25 @@ class AgentSessionRegistry(
         at: Long = System.currentTimeMillis(),
     ): AckOutcome {
         val status = when (kind) {
-            "approved" -> "approved"
-            "allow_session" -> "allow_session"
-            "denied" -> "denied"
-            "cancelled" -> "cancelled"
+            AgentAckKinds.APPROVED -> "approved"
+            AgentAckKinds.ALLOW_SESSION -> "allow_session"
+            AgentAckKinds.DENIED -> "denied"
+            AgentAckKinds.CANCELLED -> "cancelled"
             // 撤销「本会话免审」：把那条审批从 allow_session 改成 revoked。
             // 复用 agent-ack 现有的 kind 字段（不新增帧/键），旧宿主不认识这个值时
             // 只会停在 allow_session —— 与它今天的行为一致，不会更糟。
-            "revoke_session" -> "revoked"
+            AgentAckKinds.REVOKE_SESSION -> "revoked"
+            // 「这个 tool 以后免审」：**这一条本身先被批准**（工具要能继续跑），
+            // 免批规则由 [approvalPolicy] 落进宿主侧的表 —— 见那个属性的 KDoc。
+            AgentAckKinds.ALWAYS -> "approved"
             else -> return AckOutcome.UNKNOWN_KIND
         }
         var found = false
         var applied = false
         var expired = false
         var unauthorized = false
+        /** 真的被应用的那一条（`always` 要拿它的 tool 去记规则）。 */
+        var appliedRecord: ApprovalRecord? = null
         approvals.forEach { (key, list) ->
             if (key.nodeId != nodeId) return@forEach
             synchronized(lockFor(key)) {
@@ -488,9 +511,15 @@ class AgentSessionRegistry(
                     else -> {
                         list[i] = record.copy(status = status, updatedAt = at)
                         applied = true
+                        appliedRecord = list[i]
                     }
                 }
             }
+        }
+        // **只在真的应用之后**才记免批：一条过期/无权的回执连审批都没推进，
+        // 更不该留下一条"以后都别问了"的规则（那等于用一条被拒的回执换一张空白通行证）。
+        if (kind == AgentAckKinds.ALWAYS) {
+            appliedRecord?.let { rec -> approvalPolicy?.invoke(rec, sessionOrNull(nodeId, rec.sessionId)?.let { it.agentId ?: it.agentKind }) }
         }
         return when {
             applied -> AckOutcome.APPLIED

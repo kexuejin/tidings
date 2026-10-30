@@ -740,6 +740,9 @@ fun handleOnAgentAck(envelope: Envelope) {
                 // 修复前这两种 kind 都被当成"推进不了"，于是同一会话在两台设备上
                 // 一台显示「会话免审」、另一台还显示「已批准」。
                 "allow_session" -> "allow_session"
+                // 「始终允许（这个工具）」：这一条本身是被批准的，免批规则落在宿主侧的表里。
+                // 本端只把它显示成「已批准」—— 规则的范围是宿主的策略，不是这一条审批的状态。
+                "always" -> "approved"
                 // 撤销同理：宿主/别的设备把免审收回，本端必须跟着回到 revoked。
                 "revoke_session", "revoked" -> "revoked"
                 else -> current.status

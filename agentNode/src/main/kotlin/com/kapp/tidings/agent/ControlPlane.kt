@@ -169,6 +169,14 @@ class ControlPlane(
      * `GET/PUT /v1/agent/grants` 写），这里只拦。
      */
     private val grants: AgentGrantStore = AgentGrantStore(defaultGrantFile()),
+    /**
+     * 「这个 tool 以后免审」的表（按 **tool 名**粒度，不是整 agent）。
+     *
+     * 它只在 `POST /v1/agent/approval` 的**入口**被查一次：命中就不再打扰对端，
+     * 直接记一条 `approved` 并回 `status=auto-approved`。规则由对端点「始终允许」
+     * （`agent-ack.kind = always`）产生，见 [AgentSessionRegistry.approvalPolicy]。
+     */
+    private val toolApprovals: AgentToolApprovalStore = AgentToolApprovalStore(defaultToolApprovalFile()),
     /** PPE-1 增补 D8：设备发来的会话分页请求，留给宿主答（见 AgentSessionPageStore 的 KDoc）。 */
     private val sessionPages: AgentSessionPageStore = AgentSessionPageStore(),
     /**
@@ -227,6 +235,20 @@ class ControlPlane(
         // 台账由外部建好传进来（桌面端内嵌控制面与独立进程共用同一个实例），门禁装在这一层，
         // 两种进程模型才不可能各判一套。
         sessions.approvalAuthority = approvalAuthorityFor(grants, sessions)
+        // 「始终允许」的落地：一条 `agent-ack.kind = always` 被应用之后才记规则。
+        // 装在**应用回执的唯一那一处**（applyAckToApproval 的钩子），而不是在这里再判一次
+        // `kind == always` —— 那样"要不要记"就有了两个判据。
+        sessions.approvalPolicy = { record, agentKey ->
+            record.tool?.let { tool ->
+                toolApprovals.remember(
+                    nodeId = record.nodeId,
+                    agentKey = agentKey,
+                    tool = tool,
+                    grantedBy = record.nodeId,
+                    at = record.updatedAt,
+                )
+            }
+        }
     }
 
     /** 实际监听端口。`httpPort` 传 0 时在 [start] 之后才有效。 */
@@ -2291,6 +2313,49 @@ class ControlPlane(
         val choices = obj["choices"]?.jsonPrimitive?.contentOrNull
         val riskLevel = obj["riskLevel"]?.jsonPrimitive?.contentOrNull
         val diff = obj["diff"]?.jsonPrimitive?.contentOrNull
+        // **「始终允许」在入口短路**：对端点过一次「这个 tool 以后免审」，此后同一
+        // (设备, agent, tool) 的请求不再打扰它 —— 这正是那个按钮的全部意义。
+        //
+        // 为什么必须在这里、而不是等对端再答一次：免批的用户价值就是"别再问我"。
+        // 仍然发一帧过去再让对端自动回一条，等于把"不打扰"做成了"打扰两次"。
+        //
+        // 为什么 `status` 是新值 `auto-approved` 而不是沿用 `sent`：`sent` 的意思是
+        // "帧已经交给传输层"，而这里**什么都没发**。让机器字段说谎，下一个读它的人
+        // （或插件）就会以为对端已经知道这件事 —— 本仓在 `已送达 ≠ 对方知道` 上
+        // 已经付过一次代价。`autoApproved: true` 给不需要读字符串的调用方。
+        if (toolApprovals.isAlwaysApproved(
+            nodeId = nodeId,
+            // 与审批授权判据取同一个字段（`agentId ?: agentKind`）—— 两处取不同的名字，
+            // 同一条会话就会在"谁能批"与"免批记给谁"上被判成两个 agent。
+            agentKey = sessions.sessionOrNull(nodeId, sessionId)?.let { it.agentId ?: it.agentKind },
+            tool = tool,
+        )) {
+            // 台账里记成**已批准**（`outbound = false`：这帧没有出门，是宿主按策略批的）。
+            // 记下来才有审计：否则"这个动作谁批的"在台账里是一片空白。
+            sessions.recordApproval(
+                nodeId = nodeId,
+                sessionId = sessionId,
+                approvalId = approvalId,
+                tool = tool,
+                summary = summary,
+                expiresAt = expiresAt,
+                choices = choices,
+                status = "approved",
+                outbound = false,
+            )
+            respond(
+                exchange,
+                200,
+                buildJsonObject {
+                    put("status", "auto-approved")
+                    put("to", nodeId)
+                    put("type", MsgTypes.AGENT_APPROVAL)
+                    put("autoApproved", true)
+                    put("note", "matched an 'always allow' rule for tool=" + (tool ?: "") + "; approved locally, not delivered")
+                },
+            )
+            return
+        }
         deliverAgentFrame(
             exchange = exchange,
             nodeId = nodeId,
@@ -3365,6 +3430,17 @@ class ControlPlane(
          */
         internal fun defaultGrantFile(): File =
             File(com.kapp.tidings.agent.plugins.HostDirs.default(), "agent-grants.json")
+
+        /**
+         * 「始终允许」免批表的默认落点。
+         *
+         * 与 [defaultGrantFile] 同一套规矩（用户数据目录，不是 `tmpdir`）：这份表记的是
+         * 人点过的"这个工具以后别问我了"，重启即失等于每次启动都重新问一遍 ——
+         * 而"忘了"的方向是收紧（多问一次），不会放行，所以这里丢文件的代价比授权台账小，
+         * 但同样没有理由让它落在一个会消失的目录里。
+         */
+        internal fun defaultToolApprovalFile(): File =
+            File(com.kapp.tidings.agent.plugins.HostDirs.default(), "agent-tool-approvals.json")
         private const val DEFAULT_LIMIT: Int = 200
         private const val MAX_LIMIT: Int = 1000
 
