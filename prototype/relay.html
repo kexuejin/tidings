@@ -492,6 +492,66 @@ button.c[aria-pressed="true"]{background:#B7E4C7;border-color:#B7E4C7;color:#1B4
 .offline .ot{font-size:14px;font-weight:700;color:var(--on-error-c)}
 .offline .om{font-size:12px;color:var(--on-error-c);opacity:.9;margin-top:4px;line-height:1.55}
 
+/* ---------- 会话内 Agent 交互卡片（M3 卡片引擎 AgentCards.kt 的原型对照）----------
+   与上面 .appr 的区别：.appr 是 Agent 控制台的审批**行**（一张 .lst 卡装多行）；
+   这里是**聊天流里的独立气泡**，一张卡 = 一条消息，宽度吃 --msg-max。
+   卡 = 插件给的块组合（banner/progress/steps/diff/artifact/actions），
+   身份是 (cardId, rev) —— 头部永远带 rev 游标（原位刷新 S6 的可见性）。
+   场景编号见设计稿 v2（docs/plans/2026-10-30-agent-card-interaction-design.md §4）。 */
+.acard{background:var(--surface);border-radius:var(--r-card);box-shadow:var(--shadow);
+  max-width:var(--msg-max);overflow:hidden}
+.acard .hd{display:flex;align-items:center;gap:6px;padding:10px 14px 8px}
+.acard .hd .tt{flex:1;min-width:0;font-size:14px;font-weight:700;color:var(--on);
+  overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.acard .hd .rv{flex:none;font-size:11px;color:var(--on-2);
+  font-variant-numeric:tabular-nums;font-family:var(--font-mono)}
+/* 横幅：tone 四态映射 agentState（accept→info / blocked→warn / completed→done / failed→danger）。
+   只换配色对，结构一份 —— 与 .apst/.offline 同一套语义色。 */
+.acard .bn{padding:8px 14px;font-size:12px;line-height:1.45;word-break:break-word}
+.acard .bn.info{background:var(--surface-2);color:var(--on-2)}
+.acard .bn.done{background:var(--primary-c);color:var(--on-primary-c)}
+.acard .bn.warn{background:var(--queued-c);color:var(--on-queued-c)}
+.acard .bn.danger{background:var(--error-c);color:var(--on-error-c)}
+/* 进度：6px 细条 + 等宽百分比。P1/P2/P3 三帧共用。 */
+.acard .pg{display:flex;align-items:center;gap:8px;padding:8px 14px 4px}
+.acard .pg .bar{flex:1;height:6px;border-radius:var(--r-chip);background:var(--surface-3);
+  overflow:hidden}
+.acard .pg .bar i{display:block;height:100%;background:var(--primary)}
+.acard .pg .pc{flex:none;font-size:11px;color:var(--on-2);
+  font-variant-numeric:tabular-nums;font-family:var(--font-mono)}
+/* 步骤：五态图标（颜色语义复用在线/排队/错误既有对），assignee 徽标复用 agent 紫。 */
+.acard .sts{padding:4px 14px 8px;display:flex;flex-direction:column}
+.acard .st{display:flex;align-items:flex-start;gap:8px;padding:5px 0;font-size:12px}
+.acard .st + .st{border-top:1px solid var(--hair)}
+.acard .st .ic{flex:none;width:16px;text-align:center;font-size:12px;line-height:19px}
+.acard .st.done .ic{color:var(--online)}      .acard .st.run .ic{color:var(--primary)}
+.acard .st.pend .ic{color:var(--outline)}     .acard .st.fail .ic{color:var(--error)}
+.acard .st.blk .ic{color:var(--on-queued-c)}
+.acard .st .lb{flex:1;min-width:0;color:var(--on);overflow:hidden;text-overflow:ellipsis;
+  white-space:nowrap}
+.acard .st .asg{flex:none;font-size:11px;padding:1px 7px;border-radius:var(--r-chip);
+  background:var(--agent-c);color:var(--agent-t)}
+/* Diff：路径 + 增删计数（git 惯例绿/红对）+ 摘要。 */
+.acard .df{padding:8px 14px;font-family:var(--font-mono);font-size:12px}
+.acard .df .pt{color:var(--on);word-break:break-all}
+.acard .df .add{color:var(--online)} .acard .df .del{color:var(--error)}
+.acard .df .note{font-size:12px;color:var(--on-2);margin-top:3px;line-height:1.45;
+  word-break:break-word;font-family:ui-monospace,SFMono-Regular,Menlo,monospace}
+/* 产物条目：只读（S16 的现状限制如实——能看不能存，入口仍给）。 */
+.acard .art{display:flex;align-items:center;gap:8px;padding:8px 14px;border-top:1px solid var(--hair)}
+.acard .art .nm{flex:1;min-width:0;font-size:14px;color:var(--primary);font-weight:600;
+  overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.acard .art .mt{flex:none;font-size:11px;color:var(--on-2);font-family:var(--font-mono)}
+/* 按钮组：复用 .btn 体系；approval 与 .appr 同序（拒绝描边在左、批准实心在右）。
+   decided/expired/wait 三种形态占同一个位置 —— 竖着扫下来一条直线（.appr 同款理由）。 */
+.acard .acts{display:flex;gap:8px;padding:10px 14px 12px;border-top:1px solid var(--hair)}
+.acard .decided{padding:6px 14px 10px;font-size:11px;color:var(--on-2)}
+.acard .decided .apst{margin-right:6px}
+/* 过期标签（S12，新增子态）：中性灰对 —— 过期不是错误，是「不再可用」。 */
+.apst.exp{background:var(--surface-2);color:var(--on-2)}
+/* 只读形态（§4.8 无资格成员）：没有 .acts 块，一行说明代替。 */
+.acard .wait{padding:6px 14px 10px;font-size:11px;color:var(--on-2)}
+
 /* 待办角标：会话条 / 选择器每一条 / 工作区 chip 共用同一份。 */
 .pcount{flex:none;font-size:11px;font-weight:600;padding:1.5px 6px;border-radius:var(--r-chip);
   background:var(--error-c);color:var(--on-error-c)}
@@ -1989,6 +2049,41 @@ const MSGS_AGENT = [
    text:'桌面端发的那条 group-text 我这边当时没收到，现在已同步。'},
   {mine:true, text:'ci-runner 现在还离线，这条它自己排着，等上线会补发。'},
   {mine:true, text:'这条草稿超过 800 字节，会自动改走 TCP 兜底通道。'},
+  {ini:'AI', c:'#6B4EE6', sender:'teahouse-mobile',
+   card:{type:'task-board', title:'重构网络传输层', rev:3, progress:70,
+     steps:[{label:'协议定义更新', status:'done', assignee:'@architect'},
+            {label:'核心通道编写 · 正在跑测试', status:'run', assignee:'@coder'},
+            {label:'回归测试校验', status:'pend', assignee:'@tester'}],
+     actions:[{label:'暂停任务'},{label:'查看调用明细'}]}},
+  {ini:'AI', c:'#6B4EE6', sender:'teahouse-mobile',
+   card:{type:'approval', title:'需要审批 · git push', rev:1,
+     banner:{tone:'danger', text:'即将推送 3 个提交到 origin/main'},
+     diff:{path:'core/src/commonMain/…/NodeOutbound.kt', add:42, del:7,
+           note:'发送侧预算改为三处同源'},
+     actions:[{label:'拒绝'},{label:'批准', pri:true}]}},
+  {ini:'AI', c:'#6B4EE6', sender:'teahouse-mobile',
+   card:{type:'approval', title:'需要审批 · 删除构建目录', rev:2,
+     banner:{tone:'danger', text:'rm -rf build/（高危命令）'},
+     decided:{ok:false, label:'已拒绝', by:'已由 Alice 拒绝 · 14:32'}}},
+  {ini:'AI', c:'#6B4EE6', sender:'teahouse-mobile',
+   card:{type:'approval', title:'需要审批 · 修改 CI 配置', rev:1,
+     banner:{tone:'warn', text:'审批请求已过期（5 分钟未处理）'},
+     expired:'未处理 · 请求于 14:20 失效'}},
+  {ini:'AI', c:'#6B4EE6', sender:'teahouse-mobile',
+   card:{type:'timeout', title:'GPU 回归 · 子任务超时中断', rev:1,
+     banner:{tone:'danger', text:'远程算力节点失联超过 3 分钟，租约已到期'},
+     actions:[{label:'降级为本地执行'},{label:'重试', pri:true}]}},
+  {ini:'AI', c:'#6B4EE6', sender:'teahouse-mobile',
+   card:{type:'result', title:'重构网络传输层 · 完成', rev:4,
+     banner:{tone:'done', text:'1509 项测试全部通过'},
+     artifact:{name:'refactor-report.md', meta:'18 KB · text/markdown'}}},
+  {ini:'AI', c:'#6B4EE6', sender:'teahouse-mobile',
+   card:{type:'status', title:'任务状态', rev:1,
+     banner:{tone:'info', text:'插件离线，动作未执行（可稍后重试）'}}},
+  {ini:'AI', c:'#6B4EE6', sender:'teahouse-mobile',
+   card:{type:'approval', title:'需要审批 · 清理发布分支', rev:1,
+     banner:{tone:'danger', text:'即将删除远端分支 release/1.4'},
+     wait:'等待机主处理'}},
   {notice:'RecalledBySelf'},
 ];
 
@@ -3334,12 +3429,33 @@ function fileCard(f){
       ${acts.length?`<div class="frow">${acts.join('')}</div>`:''}
     </div></div>`;
 }
-/** 一条消息。m.notice → 系统提示行；m.file → 文件气泡；否则文字气泡。 */
+/* 会话内 Agent 交互卡片（设计稿 v2 §3 注册表）：卡 = 块组合，type 只是徽标文案 ——
+   渲染是宽容的（有什么块画什么块），与 AgentCards.kt 的 parseAgentCard 同一哲学。
+   decided / expired / wait 三种终态互斥地占按钮组的位置。 */
+function agentCard(c){
+  const TONE = {info:'', done:'done', warn:'warn', danger:'danger'};
+  const ST = {done:['✓','done'], run:['▶','run'], pend:['○','pend'], fail:['✕','fail'], blk:['⏸','blk']};
+  const hd = `<div class="hd"><span class="tag agent">${c.type}</span><span class="tt">${c.title}</span><span class="rv">rev ${c.rev}</span></div>`;
+  const bn = c.banner ? `<div class="bn ${TONE[c.banner.tone]||''}">${c.banner.text}</div>` : '';
+  const pg = c.progress!=null ? `<div class="pg"><span class="bar"><i style="width:${c.progress}%"></i></span><span class="pc">${c.progress}%</span></div>` : '';
+  const steps = (c.steps||[]).map(s=>{const g=ST[s.status]||ST.pend;
+    return `<div class="st ${g[1]}"><span class="ic">${g[0]}</span><span class="lb">${s.label}</span>${s.assignee?`<span class="asg">${s.assignee}</span>`:''}</div>`}).join('');
+  const df = c.diff ? `<div class="df"><span class="pt">${c.diff.path}</span> <span class="add">+${c.diff.add||0}</span> <span class="del">−${c.diff.del||0}</span>${c.diff.note?`<div class="note">${c.diff.note}</div>`:''}</div>` : '';
+  const art = c.artifact ? `<div class="art"><span class="nm">${c.artifact.name}</span><span class="mt">${c.artifact.meta}</span></div>` : '';
+  const tail = c.decided ? `<div class="decided"><span class="apst ${c.decided.ok?'ok':'no'}">${c.decided.label}</span>${c.decided.by}</div>`
+    : c.expired ? `<div class="decided"><span class="apst exp">已过期</span>${c.expired}</div>`
+    : c.wait ? `<div class="wait">${c.wait}</div>`
+    : (c.actions&&c.actions.length) ? `<div class="acts">${c.actions.map(a=>`<button class="btn sm${a.pri?' pri':''}">${a.label}</button>`).join('')}</div>` : '';
+  return hd + bn + pg + (steps?`<div class="sts">${steps}</div>`:'') + df + art + tail;
+}
+/** 一条消息。m.notice → 系统提示行；m.file → 文件气泡；m.card → Agent 交互卡片（不带 .bub 壳，与 ChatScreen 同构）；否则文字气泡。 */
 function msg(m){
   // 分隔条文案 = time.ts:26-33：同一天 HH:mm、跨天 YYYY-MM-DD HH:mm，没有「今天」。
   if (m.day)  return `<div class="daysep">${m.day}</div>`;
   if (m.notice) return `<div class="notice">${NOTICE[m.notice]}</div>`;
-  const bub = m.file
+  const bub = m.card
+    ? `<div class="acard">${agentCard(m.card)}</div>`
+    : m.file
     ? `<div class="bub bf">${fileCard(m.file)}</div>`
     : `<div class="bub">${m.text}</div>`;
   return `<div class="msg ${m.mine?'me':''}">

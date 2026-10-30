@@ -1,7 +1,7 @@
 {
-  "generatedAt": "b137725ec90a",
+  "generatedAt": "4676260ad684",
   "note": "逐屏差集棘轮：每个键的差集只许变小。--check 报「新增的值」。",
-  "reason": "M3 新增三件共享组件（方案 §5/§7.3：AgentCards 卡片引擎 / AgentContextCapsule 上下文胶囊 / SetGroupAgentWorkspacesDialog 授权面板）在聊天屏切片里新增 11 个「只代码」取值：radius 11/7 来自全应用已有的角色 token（ShapeRoles.ListCard=11 / ShapeRoles.DayCell=7，ConversationRow、NodeRows 等早已在用），spacing 24 来自 AppSpacing.xl。原型 relay.html 里没有这三件组件的对应屏（逐字核实：搜 team-task-board/任务看板/目标胶囊 均无卡片或胶囊行；「胶囊」6 处命中全是审批状态药丸与筛选 chip 的注释），取值不可能是「原型有、代码抄错」——它们是本里程碑的新交付物，原型稿尚未跟上。与基线里 d-tray 那条同一类：宿主轨/新组件在原型无对应物可表达，待设计补稿后再收敛。",
+  "reason": "设计先行（卡片设计稿 v2 B0）：Agent 交互卡片七类区块进原型 —— ac 卡片族挂在共享的 msg() 上，凡渲染消息列表的屏（m-sendfolder/m-folderin/m-screencard/d-resume）切片都会带上新值（font-size 13、spacing 1/7/1.5，来自步骤行/assignee 徽标/进度条）；代码侧卡片只在 chat 屏渲染，对齐随实施 A–B 阶段（docs/plans/2026-10-30-agent-card-interaction-design.md §9）。属第三类量具口径差（共享渲染函数 pull-in），非代码缺失；基线 generatedAt 同步到原型新 sha c66faaa03817。",
   "rowCount": 70,
   "signature": {
     "d-agentdetail|__error__": [
@@ -429,17 +429,19 @@
     "d-resume|font-size|code": [
       "16"
     ],
+    "d-resume|font-size|proto": [
+      "13"
+    ],
     "d-resume|radius|proto": [
       "2",
       "6"
     ],
     "d-resume|spacing|code": [
-      "2",
-      "4",
       "24"
     ],
     "d-resume|spacing|proto": [
       "1",
+      "1.5",
       "3",
       "11",
       "13"
@@ -706,7 +708,6 @@
       "8",
       "10",
       "11",
-      "16",
       "22"
     ],
     "m-chat-group|radius|proto": [
@@ -737,7 +738,6 @@
       "8",
       "10",
       "11",
-      "16",
       "22"
     ],
     "m-chat-solo|radius|proto": [
@@ -768,7 +768,6 @@
       "8",
       "10",
       "11",
-      "16",
       "22"
     ],
     "m-chat|radius|proto": [
@@ -792,11 +791,13 @@
       "22",
       "28"
     ],
+    "m-folderin|font-size|proto": [
+      "13"
+    ],
     "m-folderin|radius|code": [
       "8",
       "10",
       "11",
-      "16",
       "22"
     ],
     "m-folderin|radius|proto": [
@@ -804,14 +805,15 @@
       "13"
     ],
     "m-folderin|spacing|code": [
-      "4",
       "11",
       "20",
       "24",
       "48"
     ],
     "m-folderin|spacing|proto": [
-      "1.5"
+      "1",
+      "1.5",
+      "7"
     ],
     "m-groupcreate|radius|code": [
       "9"
@@ -1132,11 +1134,13 @@
       "22",
       "28"
     ],
+    "m-screencard|font-size|proto": [
+      "13"
+    ],
     "m-screencard|radius|code": [
       "8",
       "10",
       "11",
-      "16",
       "22"
     ],
     "m-screencard|radius|proto": [
@@ -1151,18 +1155,21 @@
     ],
     "m-screencard|spacing|proto": [
       "1",
-      "1.5"
+      "1.5",
+      "7"
     ],
     "m-sendfolder|font-size|code": [
       "16",
       "22",
       "28"
     ],
+    "m-sendfolder|font-size|proto": [
+      "13"
+    ],
     "m-sendfolder|radius|code": [
       "8",
       "10",
       "11",
-      "16",
       "22"
     ],
     "m-sendfolder|radius|proto": [
@@ -1170,14 +1177,15 @@
       "13"
     ],
     "m-sendfolder|spacing|code": [
-      "4",
       "11",
       "20",
       "24",
       "48"
     ],
     "m-sendfolder|spacing|proto": [
-      "1.5"
+      "1",
+      "1.5",
+      "7"
     ],
     "m-set-appear|radius|proto": [
       "16"
