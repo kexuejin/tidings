@@ -9,11 +9,11 @@
 
 | 事实 | 提交 | 说明 |
 |---|---|---|
-| `GROUP_TEXT_KEYS` 12 → 15 键（过渡态）→ **14 键终态** | `c1fbb0d9` / `c039ae64` | 新键 `agentIntent` / `agentState` / `card`；`reasoning` 与其预算链整链退场（CoT 不进群） |
-| `Limits.CARD_BYTES = 24 KiB` | `c1fbb0d9` | 信封数学：正文 32 KiB + 卡片 24 KiB + 开销 < 64 KiB 整帧硬上限。发送侧（`groupTextVariants`）超限**拒绝不截断**（截断的 JSON 解不了），接收侧 `validateMsg` 判 bad-payload，队列重放走 `decodeTcp` 同一份校验 —— 三处同源 |
-| `validateMsg` 值类型校验 | `c1fbb0d9` | `agentState` 限四态（accept/blocked/completed/failed）、`agentIntent`/`card` 限对象、card 超预算整帧拒 |
-| `VirtualAgentMember` 改版 | `b042904c` | `wsId`/`role` 退场；`entityType` / `teamMembers` / `allowedWorkspaces` / `defaultWsId` 入列。**隐私收口：路径不进协议**（`GroupWorkspaceInfo` 只有 id 与标题） |
-| `decodeGroupInfo` 补齐新字段解析 | `b042904c` | 编码走 `@Serializable`、解码手写 —— 不补就是当年「virtualAgents 整个丢失」的同型事故；`GroupInfoVirtualAgentsRoundTripTest` 往返钉住 |
+| `GROUP_TEXT_KEYS` 12 → 15 键（过渡态）→ **14 键终态** | `b3fef68b` / `1dade7ac` | 新键 `agentIntent` / `agentState` / `card`；`reasoning` 与其预算链整链退场（CoT 不进群） |
+| `Limits.CARD_BYTES = 24 KiB` | `b3fef68b` | 信封数学：正文 32 KiB + 卡片 24 KiB + 开销 < 64 KiB 整帧硬上限。发送侧（`groupTextVariants`）超限**拒绝不截断**（截断的 JSON 解不了），接收侧 `validateMsg` 判 bad-payload，队列重放走 `decodeTcp` 同一份校验 —— 三处同源 |
+| `validateMsg` 值类型校验 | `b3fef68b` | `agentState` 限四态（accept/blocked/completed/failed）、`agentIntent`/`card` 限对象、card 超预算整帧拒 |
+| `VirtualAgentMember` 改版 | `ead8c5f0` | `wsId`/`role` 退场；`entityType` / `teamMembers` / `allowedWorkspaces` / `defaultWsId` 入列。**隐私收口：路径不进协议**（`GroupWorkspaceInfo` 只有 id 与标题） |
+| `decodeGroupInfo` 补齐新字段解析 | `ead8c5f0` | 编码走 `@Serializable`、解码手写 —— 不补就是当年「virtualAgents 整个丢失」的同型事故；`GroupInfoVirtualAgentsRoundTripTest` 往返钉住 |
 
 **vectors 怎么处理的**：`GOLDEN_VECTORS` / `EXTENSION_VECTORS`（`GoldenVectorsData.kt`）
 核过 —— 没有任何一条带 `reasoning` / `agentIntent` / `agentState` / `card` 的群文本向量，
@@ -25,14 +25,14 @@
 
 | # | 债 | 提交 | 反向验证（哪个测试因它红过） |
 |---|---|---|---|
-| 1 | `extractSessionId` 删除，分段线只认协议字段 | `79d01463` | `anIdPrefixAloneIsNoLongerASessionSource`：删除前红（旧回退把前缀解析成会话 id）、删除后绿 |
-| 2 | `workspaceOfGroup`/`isWorkspaceGroup` 子串猜测删除 → 声明式绑定 + `setGroupAgentWorkspaces` 一次成像 | `310afb1c` | 旧模糊匹配回放 → `aDescriptionOnlyGroupIsNoLongerBoundToAWorkspace` 红 |
-| 3 | `requestedSessionId` 接进 `AgentSessionPick` | `9d891d66` | 先红 2 条（点选被忽略）、接线后 17 条全绿（T0） |
-| 4 | 读侧老形态 `agent:<kind>` 分支 + `hostForKind` 反查删除 | `aec38000` | `anOldShapedAgentIdIsNoLongerResolved`：删除前红（解析出 kind 身份）、删除后 25 绿 |
-| 5 | reasoning 预算链退场 | `c039ae64` | `reasoningIsNoLongerAccepted` + `noGroupForwardPathCarriesReasoning`：删除前双红、删除后绿 |
-| 6 | `"dsh"` 默认种类清理 | `586ee899` | `anUnnamedAgentRefusesToProduceAnIdentity`：`of()` 收紧前红（静默产出 `agent:<host>:dsh`）、收紧后绿。附带发现：`AgentSenderIdShapeTest` 原字节预算用例一直靠 dsh 兜底才通过（全中文名 slug 后为空），已按新契约拆分 |
+| 1 | `extractSessionId` 删除，分段线只认协议字段 | `bf3382c3` | `anIdPrefixAloneIsNoLongerASessionSource`：删除前红（旧回退把前缀解析成会话 id）、删除后绿 |
+| 2 | `workspaceOfGroup`/`isWorkspaceGroup` 子串猜测删除 → 声明式绑定 + `setGroupAgentWorkspaces` 一次成像 | `022513a8` | 旧模糊匹配回放 → `aDescriptionOnlyGroupIsNoLongerBoundToAWorkspace` 红 |
+| 3 | `requestedSessionId` 接进 `AgentSessionPick` | `92b9ddda` | 先红 2 条（点选被忽略）、接线后 17 条全绿（T0） |
+| 4 | 读侧老形态 `agent:<kind>` 分支 + `hostForKind` 反查删除 | `7482fd04` | `anOldShapedAgentIdIsNoLongerResolved`：删除前红（解析出 kind 身份）、删除后 25 绿 |
+| 5 | reasoning 预算链退场 | `1dade7ac` | `reasoningIsNoLongerAccepted` + `noGroupForwardPathCarriesReasoning`：删除前双红、删除后绿 |
+| 6 | `"dsh"` 默认种类清理 | `5fd26b73` | `anUnnamedAgentRefusesToProduceAnIdentity`：`of()` 收紧前红（静默产出 `agent:<host>:dsh`）、收紧后绿。附带发现：`AgentSenderIdShapeTest` 原字节预算用例一直靠 dsh 兜底才通过（全中文名 slug 后为空），已按新契约拆分 |
 
-## 3. 存储（T8，`bf5c81b1`）
+## 3. 存储（T8，`40889ebc`）
 
 - `MessageEntity` 加 `card_json` / `agent_state` 两列，16.sqm 自包含，版本断言 16 → 17。
 - **都不进 FTS**（与 notice_detail 同一条纪律）；`AFTER UPDATE` 触发器的
@@ -40,7 +40,7 @@
 - 存储链四处同步：insert / toRowValues / toUi 读回 / `matches()` 逐列对应。
 - 落库语义按方案 §5.3 定死：卡片更新是**追加式新行**（同 cardId、rev+1），不重写旧行。
 
-## 4. 真机装机冒烟（HEAD = `bf5c81b1`）
+## 4. 真机装机冒烟（HEAD = `40889ebc`）
 
 | 项 | 读数 |
 |---|---|

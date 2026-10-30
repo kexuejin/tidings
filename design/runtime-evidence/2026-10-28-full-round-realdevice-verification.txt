@@ -10,12 +10,12 @@
 
 - 手机:测试手机(`<device-serial>`,Android 15,IP 192.0.2.22,debug 包 com.kapp.tidings.debug)
 - 桌面:Mac(`<host>`,IP 192.0.2.82,/Applications/Tidings.app)
-- 构建产物(HEAD = d789eaba):
+- 构建产物(HEAD = a813c838):
   - APK:~/Downloads/relay-build-2026-10-28/androidApp-debug.apk
     sha256 = cea45ebb02a4d3ed5fb69bf10a96dbedc011eebf69a9b84736519b58c3a10f9a
   - 桌面:~/Downloads/relay-build-2026-10-28/Tidings.app(Contents/MacOS/Tidings)
     sha256 = e0303219b76d14a6a2a4d6d200bcf9d64517955e3003deb54a169b3042d22850
-- 新代码证明:HEAD 上 52b04f7e 新增的 `ComponentSizes.MessageAvatar` 在 APK classes2/classes12.dex
+- 新代码证明:HEAD 上 f29b4e15 新增的 `ComponentSizes.MessageAvatar` 在 APK classes2/classes12.dex
   与桌面 composeApp-jvm-95dd6defdb088e944419b35c0994831.jar 中均命中(字节级检索)。
 - 装机:APK `install -r -d` Success,lastUpdateTime 2026-10-28 23:12:19;
   桌面 ditto 替换 + `lsregister -f -R -trusted` + `open -a`,进程起来后
@@ -149,7 +149,7 @@
 | ① 之根因(cap 陈旧) | **caps 指纹联动 profileRev**(RelaySettings.withCapsFingerprint):启动时对外声明的那组 caps 与落盘指纹比对,变了 ⇒ rev+1 + 落盘。对端据此单播 entry 换回新 caps(A13c 通道) | CapsFingerprintRevTest 3 条(变一次 bump 一档/没变同实例/旧库首轮建基准) |
 | ② 桌面 luciola 死代码 | DesktopAppPlatform 覆写 `luciolaHost = DesktopLuciolaHost(...)`;env + 设置开关双重门控不变,默认行为零变化 | DesktopLuciolaHostWiringTest 2 条(平台必须提供宿主/env 未开 configure 是 no-op) |
 | ③ 控制面按 IP 解析到陈旧身份 | resolvePeerByHost:在线优先 + lastSeen 新到旧;只剩离线记录时**先向地址要一次当前身份**(3s)再退回离线最新一条(排队语义不变)。选半抽纯函数 | PickPeerRecordForHostTest 4 条(在线必中/全离线取最新/onlineOnly/端口过滤) |
-| ④ 「直接」徽章 | 删除无条件徽章与其文案资源(60e999cb 引入;设计规格无此元素,每卡都画=零信息量) | 设计门禁回归 |
+| ④ 「直接」徽章 | 删除无条件徽章与其文案资源(4e34d84a 引入;设计规格无此元素,每卡都画=零信息量) | 设计门禁回归 |
 | ⑦ 会话标题漂移 | convTitle 1:1 恒为对端节点名;agent 归属由消息署名与 Agent 徽标表达 | RelayUiStateTest 增 1 条(agent 数据到齐后标题不变);反向验证:换回 resolveSenderIdentity ⇒ 红 |
 
 修复轮之后追加的两条(针对 §8-② 的双身份抖动,属数据卫生):

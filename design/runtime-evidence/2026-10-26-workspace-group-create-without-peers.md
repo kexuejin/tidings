@@ -2,7 +2,7 @@
 
 > **一句话结论：新构建的桌面端在 0 台在线设备时点「一键建群 / 共享」建群成功** —— 群成员只有自己 + 该工作区的 agent 入驻（`virtualAgents` 一条），不再出现「至少再选一个人」；旧构建的同一按钮会拒收并弹那句横幅。
 
-对应提交 `65275c20`（`fix(group): 工作区建群不再要求「至少再选一个人」`）。
+对应提交 `0b71cf15`（`fix(group): 工作区建群不再要求「至少再选一个人」`）。
 
 ## 0. 结论速览（可直接引用）
 
@@ -15,7 +15,7 @@
 
 | 项 | 值 |
 |---|---|
-| 桌面产物 | `:desktopApp:createDistributable`（源 = `65275c20`），替换 `/Applications/Tidings.app` 后 `lsregister -f -R -trusted` |
+| 桌面产物 | `:desktopApp:createDistributable`（源 = `0b71cf15`），替换 `/Applications/Tidings.app` 后 `lsregister -f -R -trusted` |
 | 新代码判据 | `/Applications/Tidings.app/Contents/app/app-jvm-*.jar` 里 `handleCreateWorkspaceGroup` 出现 **6** 次；`DesktopShellKt` 有 **3** 处 `invokeinterface DesktopPaneActions.createWorkspaceGroup`（`javap`） |
 | 隔离运行 | `TIDINGS_DATA_DIR=/tmp/tidings-verify-data`（真实数据目录的**副本**），`settings.json` 端口改 `27878/27879`，避免与线上实例撞端口 |
 | 真实数据 | **未被写入**：实测结束后 `~/Library/Application Support/捎话 Tidings/settings.json` 的 groups 仍是原来 3 个 |
@@ -97,14 +97,14 @@ dex      classes3.dex: createWorkspaceGroup×4, GroupCreatedWithoutMembers×3
 | designPreviewPairingGate | **红（既有）** |
 | `tools/unused-imports.py --check` | **红（既有）** |
 
-三条既有红都不是本提交引入，证据是**父提交 `19369be5` 里同样存在、且本提交没碰那些文件**：
+三条既有红都不是本提交引入，证据是**父提交 `91bd719a` 里同样存在、且本提交没碰那些文件**：
 
 ```
-git show 19369be5:core/src/jvmTest/.../LuciolaSecureChannelTest.kt        | grep -c 'delay('   → 12
-git show 19369be5:desktopApp/src/test/.../DesktopLuciolaHostTest.kt       | grep -c 'delay('   → 2
-git show 19369be5:core/src/jvmTest/.../NodeRuntimeExtraDiscoveryFactoryTest.kt | grep assertFalse → 1
-git log -S onExperimentalLuciolaChange -- .../SettingsDataSubpage.kt      → 83a5e706（luciola 批次）
-git diff --name-only 19369be5 65275c20 | grep -iE 'settings|preview'     → 无
+git show 91bd719a:core/src/jvmTest/.../LuciolaSecureChannelTest.kt        | grep -c 'delay('   → 12
+git show 91bd719a:desktopApp/src/test/.../DesktopLuciolaHostTest.kt       | grep -c 'delay('   → 2
+git show 91bd719a:core/src/jvmTest/.../NodeRuntimeExtraDiscoveryFactoryTest.kt | grep assertFalse → 1
+git log -S onExperimentalLuciolaChange -- .../SettingsDataSubpage.kt      → 04858b33（luciola 批次）
+git diff --name-only 91bd719a 0b71cf15 | grep -iE 'settings|preview'     → 无
 ```
 
 `designDpDebtGate` 校验的是**生成物** `docs/plans/2026-10-11-relay-dp-debt-ledger.md`（`docs/plans/` 在 `.gitignore` 里）。本次改动让 `Common.kt` 等文件行数位移，账本随之漂移，重跑生成即一致 —— 这一条不需要进提交。
@@ -113,7 +113,7 @@ git diff --name-only 19369be5 65275c20 | grep -iE 'settings|preview'     → 无
 
 1. **量具踩坑**：第一轮我用 AppleScript 的 `click e` 点 Compose 按钮 —— 它**不触发** onClick，于是得到「新构建仍弹旧横幅」的假阴性；改成 `perform action "AXPress"` 后立刻成功。先证明量具能动，再相信读数。
 2. **手机侧没走到工作区建群**：手机没有工作区宣告（`0 工作区`），且 compact 布局里没有「关联工作区建群」入口（该入口目前只在两栏布局的会话侧栏接线）。本次只证明「手机装了新包、群同步正常」，**不证明**手机侧工作区建群可用。
-3. **旧构建不能靠 `TIDINGS_DATA_DIR` 隔离**：实测旧包（2026-10-25 构建）忽略该变量、直接打开真实数据目录（差点污染用户数据）。原因已查明：该变量由 `adfae453`（2026-10-26，luciola 批次）才引入，旧包里根本没有这条分支。以后拿旧包做 A/B 必须换设备或先备份库。
+3. **旧构建不能靠 `TIDINGS_DATA_DIR` 隔离**：实测旧包（2026-10-25 构建）忽略该变量、直接打开真实数据目录（差点污染用户数据）。原因已查明：该变量由 `970e8e70`（2026-10-26，luciola 批次）才引入，旧包里根本没有这条分支。以后拿旧包做 A/B 必须换设备或先备份库。
 4. **没测多设备入群**：0 成员时按设计不会发 `group.info`；把成员加进来之后 `virtualAgents` 能否同步给对端，本次未实测。
 
 ## 6. 复现命令

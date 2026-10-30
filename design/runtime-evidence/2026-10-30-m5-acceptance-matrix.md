@@ -12,7 +12,7 @@
 | 装机方式 | `adb install -r -d` → Success；产物 `~/Downloads/relay-build-2026-10-30-m5/androidApp-debug.apk`，sha256 `bf290bb0a447…f63` |
 | **新代码符号探针**（回读设备 base.apk 的 dex） | `handleSetGroupAgentWorkspaces` 20 / `agentIntent` 8 / `card_json` 11 / `agent-invoke` 6 / `agi1` 2；**旧符号 0**（`extractSessionId` 0、`hostForKind` 0）⇒ 装的是 M1–M4 之后的代码 |
 | 桌面端 | `/Applications/Tidings.app`，二进制 mtime `2026-10-30 08:02`；jar 侧探针 `card_json` 12 / `handleSetGroupAgentWorkspaces` 27 / `agent-invoke` 6 / `agi1` 1 |
-| 两端与 HEAD 的关系 | 08:02 之后只有三个提交（`11d8ce03` cli、`d325c37c` docs、`223e7e7b` proto），**都不进 Android/桌面产物** ⇒ 两端二进制代码等价 HEAD |
+| 两端与 HEAD 的关系 | 08:02 之后只有三个提交（`5e013c3d` cli、`42aa00ef` docs、`58f15ffb` proto），**都不进 Android/桌面产物** ⇒ 两端二进制代码等价 HEAD |
 | 手机节点 | nick `Pixel 6`，nodeId `e4bd7b99…`，profileRev 3 |
 | 桌面节点 | nick `kedeMac-mini-97`，nodeId `46c23456…`，profileRev 2 |
 | 共同群 | `teahouse-mobile 协同群`：两端均 **rev 12 / 6 名成员**（一致） |
