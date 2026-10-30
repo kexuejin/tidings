@@ -647,7 +647,7 @@ budget 类断言（最坏样本落在 UDP 800 / TCP 4096 内）在
 | `agent-run` | `agq1` | ~200 B | 静默丢弃 | ✅ | ✅ | ✅ |
 | `agent-approval` | `agq1` | ~280 B | 静默丢弃 | ✅ | ✅ | ✅ |
 | `agent-cancel` | `agq1` | ~170 B | 静默丢弃 | ✅ | ✅ | ✅ |
-| `agent-artifact` | `agn1` | ~240 B | 静默丢弃 | ✅ | ✅（收元数据） | ✅ |
+| `agent-artifact` | `agn1`（校验增量 `agf1`） | ~240 B（带 agf1 两键最坏 ~530 B） | 静默丢弃 | ✅ | ✅（收元数据） | ✅ |
 | `agent-ack` | `agq1` | ~150 B | 静默丢弃 | ✅ | ✅ | ✅ |
 | `agent-workspace` | `aws1` | ~300 B | 静默丢弃 | ✅ | ✅ | ✅ |
 | `agent-grant-request` | `agr1` | ~180 B | 静默丢弃 | ✅ | ✅ | ✅ |

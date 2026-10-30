@@ -250,7 +250,7 @@ data class Envelope(
 - **`agent-event`**：增量事件流推送（支持增量 cursor 与幂等去重）。
 - **`agent-queue` / `agent-run`**：代理任务队列与执行状态机流转。
 - **`agent-approval` / `agent-ack`**：需要人类介入确认的高风险动作审批（未确认 ≠ 已执行）。
-- **`agent-artifact`**：任务产物文件元数据交换。
+- **`agent-artifact`**：任务产物文件元数据交换（M7-T3 起 `sha256`/`summary` 两键走 `agf1` 门控——发送方实测哈希随元数据走，接收方按需校验；对不声明 `agf1` 的对端不带新键）。
 
 ---
 
