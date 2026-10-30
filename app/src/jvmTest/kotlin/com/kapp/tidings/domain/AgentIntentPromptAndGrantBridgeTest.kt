@@ -29,9 +29,14 @@ class AgentIntentPromptAndGrantBridgeTest {
 
     private val scope = CoroutineScope(Job())
 
-    private fun controller(): RelayController = RelayController(
+    private fun controller(udpPort: Int = 0, tcpPort: Int = 0): RelayController = RelayController(
         platform = InMemoryAppPlatform(),
-        store = InMemorySettingsStore(RelaySettings.firstRun().copy(persistMessagesDecided = true)),
+        store = InMemorySettingsStore(
+            RelaySettings.firstRun().copy(
+                udpPort = udpPort, tcpPort = tcpPort,
+                persistMessages = false, persistMessagesDecided = true,
+            ),
+        ),
         messageStore = InMemoryMessageStore(),
         agentStore = InMemoryAgentStore(),
         scope = scope,
@@ -114,5 +119,69 @@ class AgentIntentPromptAndGrantBridgeTest {
         )
         assertTrue(host.invokeGrantAllows == null)
         host.stop()
+    }
+
+    /**
+     * 发送侧自检与意图帧的关系（真机抓到的第三处自相矛盾）：带意图的消息由**宿主**
+     * 授权（谁托管谁执行），发送者的本地台账对远端宿主没有发言权 —— 横幅说
+     * 「没有执行」而宿主跑完任务回了卡片。修后：带 agentIntent 的发送不出本地横幅
+     * （授权与横幅由入站意图路径一处出）；不带意图的普通 @ 仍按本地判据出横幅。
+     */
+    @Test
+    fun anIntentCarryingSendSkipsTheLocalSenderSideBanner() = runBlocking {
+        // 两个真节点（照 TwoNodeDeliveryTest 的形状）：sender 发，host 授权与执行。
+        val portS = java.net.ServerSocket(0).use { it.localPort }
+        val portH = java.net.ServerSocket(0).use { it.localPort }
+        val sender = controller(portS, portS + 1)
+        val host = controller(portH, portH + 1)
+        try {
+            sender.start()
+            host.start()
+            com.kapp.tidings.testutil.awaitUntil("两节点起来") {
+                sender.state.value.network.phase.name == "Running" &&
+                    host.state.value.network.phase.name == "Running"
+            }
+            val selfH = host.state.value.selfNodeId
+            val selfS = sender.state.value.selfNodeId
+            sender.addManualPeer("127.0.0.1", portH.toString())
+            host.addManualPeer("127.0.0.1", portS.toString())
+            com.kapp.tidings.testutil.awaitUntil("互认") {
+                sender.state.value.peers.any { it.nodeId == selfH } &&
+                    host.state.value.peers.any { it.nodeId == selfS }
+            }
+            // host 建群 + 声明座位（宿主 = 群主），sender 收到元数据。
+            val groupId = host.createGroup("mesh", listOf(selfS))!!
+            host.recordLocalWorkspace(
+                wsId = "ws-1", wsTitle = "WS", wsPath = null,
+                agentKey = null, agentKind = "gpu-runner", online = true,
+            )
+            host.handleSetGroupAgentWorkspaces(groupId, listOf("ws-1"))
+            com.kapp.tidings.testutil.awaitUntil("sender 收到座位") {
+                sender.state.value.settings.groups.firstOrNull { it.groupId == groupId }
+                    ?.virtualAgents.orEmpty().isNotEmpty()
+            }
+            val seatName = sender.state.value.settings.groups.single().virtualAgents!!.single().name
+
+            // 带意图的发送：本地不出横幅（授权归宿主）。
+            sender.sendToGroup(
+                groupId, "@" + seatName + " go", agentIntent = intentOf("gpu-runner"),
+            )
+            // 不带意图的普通 @：本地横幅照出（fail-closed 原样）。
+            sender.sendToGroup(groupId, "@" + seatName + " go again")
+            val conv = com.kapp.tidings.core.protocol.ConvId.group(groupId)
+            com.kapp.tidings.testutil.awaitUntil("普通 @ 的横幅出现") {
+                sender.state.value.messages[conv].orEmpty()
+                    .any { it.notice == com.kapp.tidings.domain.model.NoticeKind.AgentNotAuthorized }
+            }
+            val notices = sender.state.value.messages[conv].orEmpty()
+                .filter { it.notice == com.kapp.tidings.domain.model.NoticeKind.AgentNotAuthorized }
+            assertEquals(
+                1, notices.size,
+                "带意图的发送不许出本地横幅（宿主会回答）——只有不带意图的那条出",
+            )
+        } finally {
+            sender.stop()
+            host.stop()
+        }
     }
 }

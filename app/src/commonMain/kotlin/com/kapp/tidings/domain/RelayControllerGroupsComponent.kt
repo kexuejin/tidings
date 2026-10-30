@@ -642,20 +642,27 @@ fun handleSendToGroup(
         //
         // 为什么必须放在发送侧：用户 @ 完盯着**自己的**屏幕，而那条执行在他人的机器上。
         // 只在他人的机器上留一行字，等于他自己永远看不到为什么没反应 —— 那依然是静默。
-        val selfMsg = host._state.value.selfNodeId
-        val missing = host.unathorizedAgentMention(body, groupId, selfMsg)
-        if (missing != null) {
-            host.handleAppendMessage(
-                MessageUi(
-                    id = host.localMessageId(),
-                    peerId = ConvId.group(groupId),
-                    mine = false,
-                    text = "",
-                    at = nowMillis(),
-                    notice = NoticeKind.AgentNotAuthorized,
-                    noticeDetail = NoticeDetail(actor = missing),
-                ),
-            )
+        //
+        // **带意图的消息跳过这条本地自检**（M4）：意图帧让**宿主**用它自己的台账与执行档
+        // 做授权（谁托管谁执行），本机台账对远端宿主没有发言权 —— 真机现场：宿主放行并
+        // 跑完任务回了卡片，这条横幅却说「没有执行」，同屏自相矛盾。意图消息的授权与
+        // 横幅由入站意图路径一处出（handleInboundAgentIntent），不再两边各说一遍。
+        if (agentIntent == null) {
+            val selfMsg = host._state.value.selfNodeId
+            val missing = host.unathorizedAgentMention(body, groupId, selfMsg)
+            if (missing != null) {
+                host.handleAppendMessage(
+                    MessageUi(
+                        id = host.localMessageId(),
+                        peerId = ConvId.group(groupId),
+                        mine = false,
+                        text = "",
+                        at = nowMillis(),
+                        notice = NoticeKind.AgentNotAuthorized,
+                        noticeDetail = NoticeDetail(actor = missing),
+                    ),
+                )
+            }
         }
     }
 }
