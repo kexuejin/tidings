@@ -162,6 +162,19 @@ fun groupAuthAgentRows(
 fun groupDefaultWsIdOf(declaredAgents: List<VirtualAgentMember>): String? =
     declaredAgents.firstOrNull { it.defaultWsId != null }?.defaultWsId
 
+/**
+ * 面板是不是可编辑的 —— 也就是**画不画勾选框与保存按钮**。
+ *
+ * **M5 真机抓到的缺陷**：面板已经写了「本机不是这台群的工作区宿主，面板只读」，
+ * 「保存并广播」却照常渲染。一个明说只读、又给保存入口的面板比不说更糟：
+ * 用户会以为说明写错了，点下去还得担心把宿主的白名单清掉。
+ *
+ * 判据放在这里而不是内联进 `if`：谁改渲染都得先面对这条函数的测试。
+ * 两个条件缺一不可 —— 壳没有保存通路、或本机没有工作区表（不是宿主），都不该可写。
+ */
+internal fun groupAuthEditable(hasSaveChannel: Boolean, localWorkspaceCount: Int): Boolean =
+    hasSaveChannel && localWorkspaceCount > 0
+
 /** 面板打开时的勾选集合 = **本机**行的当前授权（外来声明不可勾，进不了保存集合）。 */
 fun initialCheckedWsIds(rows: List<GroupAuthWorkspaceRow>): Set<String> =
     rows.filter { it.fromLocalMachine && it.authorized }.map { it.wsId }.toSet()
@@ -186,7 +199,7 @@ fun SetGroupAgentWorkspacesDialog(
     onSave: ((wsIds: List<String>) -> Unit)? = null,
 ) {
     val sp = LocalAppSpacing.current
-    val editable = onSave != null && localWorkspaces.isNotEmpty()
+    val editable = groupAuthEditable(onSave != null, localWorkspaces.size)
     val defaultWsId = groupDefaultWsIdOf(declaredAgents)
     val rows = groupAuthWorkspaceRows(localWorkspaces, declaredAgents, exposedWsIds, defaultWsId, wsTitleOf)
     val agentRows = groupAuthAgentRows(declaredAgents, selfNodeId, wsTitleOf)
@@ -349,12 +362,12 @@ fun SetGroupAgentWorkspacesDialog(
             }
         },
         confirmButton = {
-            if (onSave != null) {
+            if (editable) {
                 RelayDialogButton(
                     text = stringResource(Res.string.group_auth_save),
                     onClick = {
                         // 一次成像：勾选集合就是最终集合（空集合 = 撤掉本机全部声明）。
-                        onSave(checked.filterValues { it }.keys.toList())
+                        onSave?.invoke(checked.filterValues { it }.keys.toList())
                         onDismiss()
                     },
                     primary = true,
@@ -367,7 +380,7 @@ fun SetGroupAgentWorkspacesDialog(
             }
         },
         dismissButton = {
-            if (onSave != null) {
+            if (editable) {
                 RelayDialogButton(text = stringResource(Res.string.common_cancel), onClick = onDismiss)
             }
         },

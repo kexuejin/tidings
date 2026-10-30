@@ -247,6 +247,8 @@
     <string name="chat_group_owner_label">群主</string>
     <string name="chat_group_admin_label">管理员</string>
     <string name="chat_group_desc_label">群简介</string>
+    <!-- 简介会原样同步给全群：填了本机路径就等于把目录结构发出去。提醒，不拦截。 -->
+    <string name="chat_group_desc_path_warning">这段会同步给所有成员，本机路径对他们没有意义</string>
     <string name="chat_group_announce_label">群公告</string>
     <string name="chat_group_id_label">groupId</string>
     <!-- 36 字符 groupId 收进次级动作：需要的人一键复制，其余人不必看一串十六进制。 -->

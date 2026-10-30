@@ -8,6 +8,7 @@ import com.kapp.tidings.core.protocol.VirtualAgentMember
 import com.kapp.tidings.domain.model.WorkspaceUi
 import kotlin.test.Test
 import kotlin.test.assertEquals
+import kotlin.test.assertFalse
 import kotlin.test.assertNull
 import kotlin.test.assertTrue
 
@@ -237,5 +238,17 @@ class GroupAgentWorkspacesPanelTest {
         )
         assertNull(groupDefaultWsIdOf(listOf(member(host = self, name = "a"))), "没有任何声明带默认 ⇒ 没有群默认")
         assertNull(groupDefaultWsIdOf(emptyList()))
+    }
+
+    // ── 只读态不画保存按钮（M5 真机缺陷的回归判据）──────────────────────
+
+    @Test
+    fun readOnlyPanelHasNoSaveEntry() {
+        // 真机现场：面板已经写了「本机不是这台群的工作区宿主，面板只读」，
+        // 「保存并广播」却照常渲染 —— 明说只读又给保存入口，比不说更糟。
+        // 判据：可编辑 = 有保存通路 **且** 本机有工作区表（不是宿主时后者为空）。
+        assertFalse(groupAuthEditable(hasSaveChannel = true, localWorkspaceCount = 0))
+        assertFalse(groupAuthEditable(hasSaveChannel = false, localWorkspaceCount = 3))
+        assertTrue(groupAuthEditable(hasSaveChannel = true, localWorkspaceCount = 1))
     }
 }

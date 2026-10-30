@@ -198,6 +198,8 @@
     <string name="chat_group_owner_label">Owner</string>
     <string name="chat_group_admin_label">Admin</string>
     <string name="chat_group_desc_label">Description</string>
+    <!-- The description is broadcast to the whole group: a local path leaks the directory layout. -->
+    <string name="chat_group_desc_path_warning">This is shared with every member; a local path means nothing to them</string>
     <string name="chat_group_announce_label">Announcement</string>
     <string name="chat_group_id_label">groupId</string>
     <string name="chat_group_copy_id">Copy group ID</string>

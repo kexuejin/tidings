@@ -36,6 +36,7 @@ import com.kapp.tidings.generated.resources.chat_group_confirm_leave
 import com.kapp.tidings.generated.resources.chat_group_confirm_remove
 import com.kapp.tidings.generated.resources.chat_group_desc_hint
 import com.kapp.tidings.generated.resources.chat_group_desc_label
+import com.kapp.tidings.generated.resources.chat_group_desc_path_warning
 import com.kapp.tidings.generated.resources.chat_group_edit_meta
 import com.kapp.tidings.generated.resources.chat_group_edit_save
 import com.kapp.tidings.generated.resources.chat_group_leave
@@ -241,6 +242,15 @@ internal fun EditGroupMetaDialog(
                     maxLines = 3,
                     modifier = Modifier.fillMaxWidth(),
                 )
+                // 简介会被**原样同步给全群**：填了本机路径就等于把目录结构发出去。
+                // 不拦（那是用户的内容），只在他看得见的地方说一次。
+                if (looksLikeLocalPath(editDesc)) {
+                    Text(
+                        text = stringResource(Res.string.chat_group_desc_path_warning),
+                        style = MaterialTheme.typography.labelSmall,
+                        color = MaterialTheme.colorScheme.error,
+                    )
+                }
                 OutlinedTextField(
                     value = editAnnounce,
                     onValueChange = { if (it.length <= 1024) editAnnounce = it },
@@ -295,3 +305,39 @@ internal fun EditGroupMetaDialog(
  * 已删除：一份没人走的第二实现只会让人在改「加 agent」交互时改错那一份。
  */
 
+// ── 群简介里的本机路径提醒（M5 真机发现的缺陷）─────────────────────────────
+
+/**
+ * 这段文字里有没有「本机绝对路径」的形态。
+ *
+ * **真机现场**：群简介被填成了本机仓库目录，然后**原样同步给了全群** ——
+ * 对别人来说那串字符既没有意义，又暴露了本机的目录结构（`/Volumes/…`、用户名、
+ * 仓库名全在里面）。它不是授权面板的 `wsPath`（那条 M1-T3 已经收口），
+ * 而是**群简介字段本身**被填成了路径。
+ *
+ * 这里**不做拦截**（简介是用户的内容，拦了会莫名其妙），只做提醒 ——
+ * 编辑时看见就告诉他这段会同步给所有成员。
+ *
+ * 判据保守：只认「像路径」的 token，且要求它**以分隔符开头**
+ * （`/` 后还有一段、`~/`、`X:\`）。这样 `2026/10/30`、`1/2` 这类日期与比例不会误报。
+ */
+internal fun looksLikeLocalPath(text: String): Boolean {
+    if (text.isBlank()) return false
+    return text.split(PATH_TOKEN_SEPARATORS).any { raw ->
+        val token = raw.trim(*PATH_TRIM_CHARS)
+        when {
+            token.length < 3 -> false
+            token.startsWith("~/") -> true
+            token.startsWith("/") -> token.drop(1).contains('/')
+            PATH_DRIVE_PREFIX.containsMatchIn(token) -> true
+            else -> false
+        }
+    }
+}
+
+private val PATH_TOKEN_SEPARATORS = Regex("[\\s,;]+")
+
+/** 只剥 ASCII 引号与括号：中日韩标点不进字面量（CJK 门禁的边界，也让判据不依赖语言）。 */
+private val PATH_TRIM_CHARS = charArrayOf('"', '\'', '`', '(', ')')
+
+private val PATH_DRIVE_PREFIX = Regex("^[A-Za-z]:[\\\\/]")
