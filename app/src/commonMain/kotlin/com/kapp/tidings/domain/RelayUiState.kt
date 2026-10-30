@@ -184,6 +184,15 @@ data class RelayUiState(
      * 移除选择时与 bytes、hash 一起清空。
      */
     val pickedAvatarName: String? = null,
+    /**
+     * 宿主侧桥存储的心跳（WP-A0/B1）。
+     *
+     * 执行名单这类「行数据住在宿主侧、UI 经 `onExecDevices` 桥拉」的值不在 [RelayUiState]
+     * 里 —— 桥写完后若只做一次恒等 `commit`，相等的新值会被 StateFlow 吞掉，重组不发生，
+     * 勾选框停在旧值。桥写完由 controller 推一档这个计数
+     * （`RelayStateWriter.publishExternalChange`），观察者重组后重新拉桥 ⇒ ≤1 帧回显。
+     */
+    val externalStoreTick: Long = 0,
 ) {
     val selfNodeId: String get() = settings.nodeId
 

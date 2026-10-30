@@ -617,7 +617,12 @@ class RelayController(
     override fun execDevicesOf(agentKey: String?): List<ExecDeviceRow>? = onExecDevices?.invoke(agentKey)
 
     override fun setExecDeviceAllowed(agentKey: String, nodeId: String, allowed: Boolean) {
-        onSetExecDeviceAllowed?.invoke(agentKey, nodeId, allowed)
+        onSetExecDeviceAllowed?.invoke(agentKey, nodeId, allowed) ?: return
+        // WP-A0/B1：执行名单的行数据经 `onExecDevices` 桥来自宿主侧存储，不在 state 里。
+        // 只 publish 不够 —— 恒等 commit 的相等新值会被 StateFlow 吞掉，重组不发生，
+        // 勾选框停在旧值（overhaul-plan 诊断 B1）。推一档 externalStoreTick 让值真的变
+        // ⇒ 下一帧重组重新拉桥 ⇒ ≤1 帧回显。手机壳没桥，原样 no-op。
+        writer.publishExternalChange()
     }
 
     override fun setGroupAgentWorkspaces(groupId: String, wsIds: List<String>) =

@@ -171,4 +171,10 @@ internal class RelayStateWriter(
 
     /** 不带变换地推一次（表已改完，只是还没通知 UI）。 */
     fun publish() = commit { it }
+
+    /**
+     * 宿主侧桥存储变了（执行名单等，WP-A0/B1）：推一档 [RelayUiState.externalStoreTick]。
+     * 恒等 `commit` 的相等新值会被 StateFlow 吞掉 —— 桥数据的刷新必须让值**真的变**。
+     */
+    fun publishExternalChange() = commit { it.copy(externalStoreTick = it.externalStoreTick + 1) }
 }
