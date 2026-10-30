@@ -3,6 +3,7 @@
 package com.kapp.tidings.desktop
 
 import com.kapp.tidings.ui.desktop.*
+import com.kapp.tidings.ui.InstallRelayUiTexts
 import androidx.compose.foundation.isSystemInDarkTheme
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.material3.MaterialTheme
@@ -354,6 +355,14 @@ internal fun DesktopApp(
     onExitApplication: () -> Unit,
 ) {
     val controller = host.controller
+    // **桌面也是产品壳，也要装文案桥。**
+    //
+    // 修复前桌面从不经 `RelayApp`（它自己组合本函数），`controller.uiTexts` 一直是
+    // `NoUiTexts` ⇒ 每句文案都是空串。而 `broadcastAgentState` 有「空正文不发帧」的
+    // 纪律，于是 `agentState=failed` 只落在本机、**群流里谁都看不到** —— 真机上
+    // 「kill 插件 → @agent」在手机端一条反馈都没有。读数与推演见
+    // `ui/RelayUiTextsBridge.kt` 的 KDoc。
+    InstallRelayUiTexts(controller)
     val state by controller.state.collectAsState()
     val scope = rememberCoroutineScope()
     val systemDark = isSystemInDarkTheme()

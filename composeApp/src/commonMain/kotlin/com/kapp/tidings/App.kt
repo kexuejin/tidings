@@ -145,10 +145,10 @@ fun RelayApp(
     // 就位（启动卫生那条路径会马上读文案），并且在离开组合时摘掉 —— 留下一个指向
     // 已离开组合的实现的桥，比没有桥更糟。摘掉之后回落到 [NoUiTexts]（空串），
     // 而不是崩溃。
-    DisposableEffect(controller) {
-        controller.uiTexts = com.kapp.tidings.ui.ResourceUiTexts
-        onDispose { controller.uiTexts = com.kapp.tidings.domain.NoUiTexts }
-    }
+    // 装/摘都交给 [InstallRelayUiTexts]：桌面宿主不经过本函数，它另有一次同样的调用
+    // （见 `DesktopApp`）。修复前只有这里装，于是桌面的文案恒为空串 —— 空正文不发帧，
+    // 「@ 了没人执行」的群流反馈在手机上一条都没有。
+    com.kapp.tidings.ui.InstallRelayUiTexts(controller)
 
     // 外观是「跟随系统 / 浅色 / 深色」三选一，不是布尔量：只有三选一才能既表达
     // 「不表态」，又让状态栏图标亮度拿到一个确定的答案（见 CareSystemBars）。
