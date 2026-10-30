@@ -963,6 +963,45 @@ Layer 4 仿真覆盖，真机环节为桌面自派 + 手机 `@agent` 回路（M5
 
 ---
 
+## 10b. Agent-IM M5 审批面与免批表（2026-10-30）
+
+`always`（「始终允许」）从「宿主有表」到「用户点得到、也收得回」的验收判据。
+
+**本机可验证（已跑，2026-10-30 21:56：`:core:jvmTest` / `:app:jvmTest` / `:composeApp:jvmTest` /
+`:agentNode:test` / `:desktopApp:test` 五个模块按用例定向跑，33 秒全绿）**：
+
+1. **回执过线**：`AgentFramesTest.everyApprovalDecisionKindSurvivesTheWire` —— 八个 `kind` 全部
+   穿过编解码，白名单外的值仍整帧拒收。（修前 `allow_session`/`revoke_session` 过不了线：
+   界面显示已生效、宿主一直 `pending`，而既有测试绿是因为它绕过了编解码。）
+2. **出口存在**：`RelayControllerApprovalResponseTest.alwaysDecisionSendsAlwaysAckAndApprovesTheCurrentRequest`
+   —— 四态决策里 `ALLOW_ALWAYS` 发的是 `kind=always`，本地记 `approved`（宿主侧的语义是
+   「先批掉这一条 + 记一条规则」，本端不发明一个自己不掌握的状态）。反向验证：把 `ackKind`
+   改成 `APPROVED` ⇒ 该用例红。
+3. **入口出现得有依据**：`AgentApprovalCardsTest.alwaysEntryFollowsTheHostDeclaration` —— 只在
+   请求的 `choices` 含 `always` 时画那颗按钮；`choicesAreMatchedAsWordsNotSubstrings` 守
+   `notalways` 不算命中。反向验证：改成无条件画 ⇒ 红。
+4. **宿主替插件兜底**：`ControlPlaneTest.approvalWithoutPluginChoicesAdvertisesEveryChoiceTheHostCanHonour`
+   —— 插件没声明 `choices` 时出站**帧**带四个值；`pluginDeclaredChoicesAreForwardedVerbatim`
+   守插件显式声明时不被盖掉。反向验证：去掉兜底 ⇒ 前者红、后者仍绿（判据没互相糊住）。
+   判据盯的是帧不是接口返回：填进台账却没填进帧，对端照样只看得到两档。
+5. **回收口撤得准**：`ToolApprovalAdminTest`（6 条）+
+   `AgentToolApprovalStoreTest.revokeExactlyTellsTheWildcardAgentApartFromAnyAgent` ——
+   逐条撤销只删界面上那一行；`Rule.agentKey = null`（覆盖所有 agent）与
+   `revoke(agentKey = null)`（不按 agent 过滤）两个相反语义不许混。反向验证：把
+   `ToolApprovalAdmin.revoke` 换回 `store.revoke(...)` ⇒
+   `revokingTheAllAgentsRowLeavesAgentSpecificRulesAlone` 红，其余 5 条仍绿。
+6. **落盘与通知**：撤销后重启不复活；`remember` / `revoke` 都触发变更监听（设置页开着也能
+   看到对端刚产生的规则，而不是等下次进页面）。
+
+**真机待跑（未做，不包装）**：
+
+- 桌面宿主 + Pixel 6：手机按「始终允许」→ 桌面「设置 → 可信设备 → 免批规则」出现该工具一行
+  → 点撤销 → 同一工具的下一次请求重新弹审批。判据两半：撤销前该请求 `status=auto-approved`
+  且对端不被打扰；撤销后再来一条，宿主重新发审批帧而不是自动放行。
+- 这条同时是 M5 矩阵第 7 条的复跑内容（夹具已修，待真机）。
+
+---
+
 ## 7. 单条记录模板
 
 ```text

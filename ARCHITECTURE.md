@@ -313,6 +313,17 @@ A 宿主把子任务派到 B 宿主的插件上执行、结果回传，由发起
   `agent-tool-approvals.json`）：键是 `(设备 nodeId, agentKey?, tool)`，只在回执真的
   生效时写入，读不回来就是空表（退回"要问"）。命中时不打扰对端，本地记
   `auto-approved`。
+- **这一档得先能被点到**：客户端只在审批请求的 `choices` 含 `always` 时画那颗按钮，
+  而 `choices` 是插件填的字段。宿主在插件**没声明**时补
+  `approved,denied,allow_session,always`（`PROTOCOL-EXTENSION` §6.5），插件显式声明时
+  以插件为准 —— 入口画了却没人能点到，等于没做（`70acda4f`）。
+- **免批表有回收口**：桌面「设置 → 可信设备」最下方一块「免批规则」列出本机全部规则，
+  每条一个「撤销」。它握的是**控制面上的同一个实例**（`ControlPlane.toolApprovalStore`），
+  不是另开一个 store 指同一文件 —— 两个实例各有各的内存与锁，面板撤掉的规则要等下一次
+  落盘才被入口看见，那段时间里的「已撤销」是假账。逐条撤销走 `revokeExactly`
+  （三元逐字相等），**不是** `revoke(nodeId, agentKey, tool)`：后者的 `agentKey = null`
+  意思是「不按 agent 过滤」，会把同设备同工具的其它 agent 规则一起删掉。控制面没起时
+  面板显示「暂时读不到」，不画空表。
 - 威胁模型、fail-closed 方向与三条已知边界见 `SECURITY.md`「审批面」一节。
 
 ---
