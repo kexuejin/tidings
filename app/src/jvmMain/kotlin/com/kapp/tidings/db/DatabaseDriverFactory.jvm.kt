@@ -80,14 +80,19 @@ internal fun openDesktopDatabase(
         // 比当前 schema 还新（降级场景）：什么都不做，也别把版本号往回写。
         current >= schema.version -> return
         current == LEGACY_UNVERSIONED -> {
-            // 0 号库有两种可能，靠「`1.sqm` 加的那一列在不在」区分：
-            //  - 列不在 ⇒ 真的停在第 1 版：从第 1 版开始跑（`1.sqm` + 其后所有 `.sqm`）；
-            //  - 列在   ⇒ 结构已等于第 2 版，只是没人盖过章：必须从第 2 版开始跑，
-            //             否则再跑一遍 `1.sqm` 就是 `duplicate column name: screen_json`。
-            // 不能简成「结构新就什么都不做」：第 2 版之后新增的表（`2.sqm` 的四张 agent 表）
-            // 在这类库上还没建，跳过它一样开不了库。那些 `.sqm` 是**幂等**的
-            // （`CREATE TABLE IF NOT EXISTS`），所以对已经最新的库重跑一遍是安全的。
-            val from = if (SCREEN_COLUMN in columns) LEGACY_BASELINE_VERSION + 1 else LEGACY_BASELINE_VERSION
+            // 0 号库有三种可能：
+            //  - 结构就是**当前形状**（`FtsTolerantSchema.create` 建的、只是没人盖章，
+            //    哨兵 = 最新迁移的判别列）⇒ 补章即可，一条迁移都不许跑 —— 17.sqm 起是
+            //    ALTER 类迁移，对已含新列的表重跑就是 `duplicate column name`，
+            //    直接把 App 拦在启动前；
+            //  - 列在 `1.sqm` 的哨兵但**不是**当前形状（盖章机制上线前的历史库）⇒
+            //    从第 2 版开始跑（`2.sqm` 起的 CREATE 全是 IF NOT EXISTS，重跑安全）；
+            //  - 列不在 ⇒ 真的停在第 1 版：从第 1 版开始跑。
+            val from = when {
+                "sha256" in columnsOf(driver, ARTIFACT_TABLE) -> schema.version
+                SCREEN_COLUMN in columns -> LEGACY_BASELINE_VERSION + 1
+                else -> LEGACY_BASELINE_VERSION
+            }
             schema.migrate(driver, from, schema.version)
         }
         else -> schema.migrate(driver, current, schema.version)
@@ -137,6 +142,9 @@ private const val LEGACY_UNVERSIONED: Long = 0L
 private const val LEGACY_BASELINE_VERSION: Long = 1L
 
 internal const val MESSAGE_TABLE: String = "MessageEntity"
+
+/** `AgentArtifactEntity` 的 M7-T3 哨兵列（17.sqm）：在 = 结构已是当前形状。 */
+internal const val ARTIFACT_TABLE: String = "AgentArtifactEntity"
 
 /**
  * `1.sqm` 加的那一列。0 号库靠它在不在，判断该从第 1 版还是第 2 版开始跑迁移

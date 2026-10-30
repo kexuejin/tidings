@@ -545,6 +545,8 @@ CREATE TABLE AgentArtifactEntity (
     name TEXT NOT NULL,
     bytes INTEGER,
     mime TEXT,
+    sha256 TEXT,
+    summary TEXT,
     at INTEGER NOT NULL,
     PRIMARY KEY (node_id, artifact_id)
 );
@@ -672,9 +674,9 @@ ORDER BY at DESC;
 
 insertAgentArtifact:
 INSERT OR REPLACE INTO AgentArtifactEntity (
-    node_id, artifact_id, session_id, file_id, name, bytes, mime, at
+    node_id, artifact_id, session_id, file_id, name, bytes, mime, sha256, summary, at
 ) VALUES (
-    ?, ?, ?, ?, ?, ?, ?, ?
+    ?, ?, ?, ?, ?, ?, ?, ?, ?, ?
 );
 
 selectAllAgentArtifacts:

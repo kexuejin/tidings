@@ -908,6 +908,8 @@ fun handleOnAgentArtifact(envelope: Envelope) {
         name = name,
         bytes = longField(payload, "bytes"),
         mime = stringField(payload, "mime"),
+        sha256 = stringField(payload, "sha256"),
+        summary = stringField(payload, "summary"),
         at = nowMillis(),
     )
     host._state.update { s ->

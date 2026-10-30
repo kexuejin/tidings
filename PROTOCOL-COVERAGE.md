@@ -50,7 +50,7 @@
 | `agent-session` | `RelayControllerMessagesComponent.kt:238`（cap `agn1`） | Agent 会话宣告 → Agent 控制台；四个可选键（`agentId`/`wsId`/`wsTitle`/`wsPath`，cap `aws1` 门控）持久化至数据库 |
 | `agent-event` | `RelayControllerMessagesComponent.kt:242` | 会话事件 → 控制台，按 cursor 去重、`takeLast(200)` |
 | `agent-queue` / `agent-run` / `agent-approval` / `agent-cancel` / `agent-ack` | `RelayControllerMessagesComponent.kt:246`–`:262`（cap `agq1`） | 队列任务 / 执行状态 / 审批请求与处置 / 取消 / 回执，独立分表跨重启留存；审批的处置结果由 `agent-ack` 推进，**未确认 ≠ 已送达** |
-| `agent-artifact` | `RelayControllerMessagesComponent.kt:266`（cap `agn1`） | 只收**元数据**（`fileId` 指向已发过的 `file-msg`），不自动下载二进制 |
+| `agent-artifact` | `RelayControllerMessagesComponent.kt:266`（cap `agn1`） | 只收**元数据**（`fileId` 指向已发过的 `file-msg`），不自动下载二进制；M7-T3 起额外收 `sha256`/`summary`（cap `agf1` 门控，只对声明它的对端出现），两列入库留存 —— 下载校验与重启后重拉的凭据 |
 | `agent-workspace` | `RelayControllerMessagesComponent.kt:272`（cap `aws1`） | 工作区宣告 → 工作区看板；覆盖「工作区存在但零会话」场景（`declaredOnly`） |
 | `agent-grant-request` / `agent-grant` / `agent-grant-list` | 收：`RelayControllerMessagesComponent.kt:280` / `:288`（cap `agr1`）；执行：agentNode `ControlPlane.resolveAgentTarget` 投递前过滤 | 设备申请 / 宿主决定 / 宿主回清单。四档状态（未申请/待批/已授权/已拒绝）+「申请查看」；**撤销不回收历史**（只拦未来投递） |
 | `agent-session-page` | 发：`RelayController.kt:522` `requestAgentSessionPage`（cap `agp1`）；收后排队：agentNode `AgentSessionPageStore`；应答：宿主插件 | 设备向宿主要**一页**历史会话（`wsId`/`offset`/`limit`）。宿主用已有的 `agent-session` 逐条回填，触发点是按需打开工作区 |

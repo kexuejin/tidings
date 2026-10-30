@@ -230,6 +230,16 @@ class AgentStorePersistenceTest {
                     "PRIMARY KEY (node_id, session_id, cursor))",
                 0,
             )
+            // 真实的第 2 版库（2.sqm 起）就有这张表 —— 迁移夹具不许少：17.sqm 会对它
+            // ALTER（M7-T3），表缺席 = `no such table`（AGENTS.md §2.3：夹具也可能没有）。
+            driver.execute(
+                null,
+                "CREATE TABLE AgentArtifactEntity (" +
+                    "node_id TEXT NOT NULL, artifact_id TEXT NOT NULL, session_id TEXT NOT NULL, " +
+                    "file_id TEXT, name TEXT NOT NULL, bytes INTEGER, mime TEXT, at INTEGER NOT NULL, " +
+                    "PRIMARY KEY (node_id, artifact_id))",
+                0,
+            )
             driver.execute(null, "PRAGMA user_version = 2", 0)
             assertTrue(
                 tables(driver).none { it.startsWith("AgentApproval") },
@@ -370,6 +380,15 @@ class AgentStorePersistenceTest {
                     "VALUES ('peer-old', 's-old', '加列之前的会话', 'busy', 42, 1, 'ws-old')",
                 0,
             )
+            // 真实的第 6 版库就有这张表（2.sqm 起）—— 17.sqm 要对它 ALTER，缺席即 no such table。
+            driver.execute(
+                null,
+                "CREATE TABLE AgentArtifactEntity (" +
+                    "node_id TEXT NOT NULL, artifact_id TEXT NOT NULL, session_id TEXT NOT NULL, " +
+                    "file_id TEXT, name TEXT NOT NULL, bytes INTEGER, mime TEXT, at INTEGER NOT NULL, " +
+                    "PRIMARY KEY (node_id, artifact_id))",
+                0,
+            )
             driver.execute(null, "PRAGMA user_version = 6", 0)
 
             openDesktopDatabase(driver)
@@ -436,6 +455,15 @@ class AgentStorePersistenceTest {
                 "INSERT INTO AgentSessionEntity " +
                     "(node_id, session_id, alias, state, updated_at, announced, ws_id, host_updated_at) " +
                     "VALUES ('peer-v', 's-v', '加列之前的会话', 'done', 42, 1, 'ws-v', 7)",
+                0,
+            )
+            // 真实的第 7 版库就有这张表（2.sqm 起）—— 17.sqm 要对它 ALTER，缺席即 no such table。
+            driver.execute(
+                null,
+                "CREATE TABLE AgentArtifactEntity (" +
+                    "node_id TEXT NOT NULL, artifact_id TEXT NOT NULL, session_id TEXT NOT NULL, " +
+                    "file_id TEXT, name TEXT NOT NULL, bytes INTEGER, mime TEXT, at INTEGER NOT NULL, " +
+                    "PRIMARY KEY (node_id, artifact_id))",
                 0,
             )
             driver.execute(null, "PRAGMA user_version = 7", 0)
@@ -598,6 +626,15 @@ class AgentStorePersistenceTest {
                 null,
                 "INSERT INTO AgentGrantEntity (node_id, agent_key, scope, state, at) " +
                     "VALUES ('peer-old', 'agent-old', 'agent', 'approved', 12345)",
+                0,
+            )
+            // 真实的第 9 版库就有这张表（2.sqm 起）—— 17.sqm 要对它 ALTER，缺席即 no such table。
+            driver.execute(
+                null,
+                "CREATE TABLE AgentArtifactEntity (" +
+                    "node_id TEXT NOT NULL, artifact_id TEXT NOT NULL, session_id TEXT NOT NULL, " +
+                    "file_id TEXT, name TEXT NOT NULL, bytes INTEGER, mime TEXT, at INTEGER NOT NULL, " +
+                    "PRIMARY KEY (node_id, artifact_id))",
                 0,
             )
             driver.execute(null, "PRAGMA user_version = 9", 0)

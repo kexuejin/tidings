@@ -8,6 +8,7 @@ import com.kapp.tidings.agent.drivers.ExternalPluginDriver
 import com.kapp.tidings.agent.plugins.PluginRegistration
 import com.kapp.tidings.agent.plugins.PluginRegistry
 import com.kapp.tidings.agent.plugins.PluginTokenGate
+import com.kapp.tidings.core.crypto.isSha256Hex
 import com.kapp.tidings.core.protocol.AgentAckKinds
 import com.kapp.tidings.core.protocol.defaultApprovalChoicesCsv
 import com.kapp.tidings.core.protocol.AgentGrantAccess
@@ -2476,12 +2477,24 @@ class ControlPlane(
         val fileId = obj["fileId"]?.jsonPrimitive?.contentOrNull
         val bytes = numberOrNull(obj["bytes"])
         val mime = obj["mime"]?.jsonPrimitive?.contentOrNull
+        // M7-T3（cap agf1）：进门即用 isSha256Hex 预校验 —— 消费端再校验一次的规矩，
+        // 防「发端拼一帧注定被拒的帧」。格式不对 400，不带这键完全合法（老插件零改动）。
+        val sha256 = obj["sha256"]?.jsonPrimitive?.contentOrNull
+        if (sha256 != null && !isSha256Hex(sha256)) {
+            respond(exchange, 400, errorJson("bad-request", "sha256 必须是 64 个小写 hex 字符（M7-T3 校验增量）"))
+            return
+        }
+        val summary = obj["summary"]?.jsonPrimitive?.contentOrNull
         deliverAgentFrame(
             exchange = exchange,
             nodeId = nodeId,
             type = MsgTypes.AGENT_ARTIFACT,
-            payload = Codec.agentArtifactPayload(sessionId, artifactId, name, fileId, bytes, mime),
-            send = { runtime.sendAgentArtifact(nodeId, sessionId, artifactId, name, fileId, bytes, mime) },
+            payload = Codec.agentArtifactPayload(sessionId, artifactId, name, fileId, bytes, mime, sha256, summary),
+            send = {
+                runtime.sendAgentArtifact(
+                    nodeId, sessionId, artifactId, name, fileId, bytes, mime, sha256, summary,
+                )
+            },
             onSent = {
                 sessions.recordArtifact(
                     nodeId = nodeId,
@@ -2491,6 +2504,8 @@ class ControlPlane(
                     fileId = fileId,
                     bytes = bytes,
                     mime = mime,
+                    sha256 = sha256,
+                    summary = summary,
                     outbound = true,
                 )
             },

@@ -124,6 +124,10 @@ data class AgentArtifactUi(
     val name: String,
     val bytes: Long? = null,
     val mime: String? = null,
+    /** 发送方对产物文件实测的哈希（M7-T3，cap `agf1`）；NULL = 发送方没报（旧端帧）。 */
+    val sha256: String? = null,
+    /** 一行人话摘要（M7-T3）；NULL = 发送方没报。 */
+    val summary: String? = null,
     /** 本端收到这一帧的时刻。 */
     val at: Long = 0,
 )

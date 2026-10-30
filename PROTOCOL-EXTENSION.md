@@ -196,7 +196,9 @@
 | `fileId` | string | | 指向已发送的 `file-msg.id` |
 | `name` | string | ✅ | 如 `report.md` |
 | `bytes` | int | | 文件大小 |
-| `mime` | string | | |
+| `mime` | string | |
+| `sha256` | string | | M7-T3（cap `agf1` 门控）：发送方对产物文件**实测**的哈希，恰好 64 个小写 hex（`isSha256Hex`）；接收方下载转正后实测比对，不符重试（≤3 次）、绝不静默接受 |
+| `summary` | string | | M7-T3（cap `agf1` 门控）：一行人话摘要，≤200 B（`AGENT_SUMMARY`，卡片标题槽的量） |
 
 ### 6.8 `agent-ack` — 队列 / 审批回执（cap: `agq1`）
 

@@ -777,6 +777,8 @@ class SqlDelightAgentStore(
             name = artifact.name,
             bytes = artifact.bytes,
             mime = artifact.mime,
+            sha256 = artifact.sha256,
+            summary = artifact.summary,
             at = artifact.at,
         )
     }

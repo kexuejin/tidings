@@ -215,6 +215,8 @@ class AgentSessionRegistry(
         val name: String,
         val bytes: Long?,
         val mime: String?,
+        val sha256: String?,
+        val summary: String?,
         val at: Long,
         val outbound: Boolean,
     )
@@ -546,7 +548,7 @@ class AgentSessionRegistry(
         evictIfNeeded()
     }
 
-    /** 记下一件产物元数据（§6.7）。同一 `(sessionId, artifactId)` 重投就地替换。 */
+    /** 记下一件产物元数据（§6.7；sha256/summary 为 M7-T3 增量，agf1 门控键）。同一 `(sessionId, artifactId)` 重投就地替换。 */
     fun recordArtifact(
         nodeId: String,
         sessionId: String,
@@ -555,12 +557,14 @@ class AgentSessionRegistry(
         fileId: String? = null,
         bytes: Long? = null,
         mime: String? = null,
+        sha256: String? = null,
+        summary: String? = null,
         outbound: Boolean,
         at: Long = System.currentTimeMillis(),
     ) {
         val key = Key(nodeId, sessionId)
         upsert(key, artifacts, { it.artifactId == artifactId }) {
-            ArtifactRecord(nodeId, sessionId, artifactId, fileId, name, bytes, mime, at, outbound)
+            ArtifactRecord(nodeId, sessionId, artifactId, fileId, name, bytes, mime, sha256, summary, at, outbound)
         }
         ensureSession(nodeId, sessionId, at)
         evictIfNeeded()
