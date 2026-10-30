@@ -389,6 +389,7 @@
     <string name="nodes_port_bad">端口要在 1 到 65535 之间。</string>
     <string name="nodes_recognized">已识别</string>
     <string name="nodes_scan_connect">连接</string>
+    <string name="nodes_scan_connecting">正在连接…</string>
     <string name="nodes_error_host">地址看起来不对。</string>
     <string name="nodes_error_two_ports">地址里已经带了端口，下面的端口框就留空吧。</string>
     <string name="nodes_timeout">对方 3 秒内没回应握手。检查两台设备是不是在同一个 Wi-Fi、对方是不是正在运行。</string>
@@ -1826,7 +1827,7 @@
     <string name="nodes_mdns_row_desc">发现到的设备，尚未配对</string>
     <!-- T21 审批权限/记录/免审撤销、授权清单人话、Agent 空态分档、远程查看陈旧帧 -->
     <string name="agent_approval_status_revoked">已撤销</string>
-    <string name="agent_approval_allow_session_hint">「本会话免审」让本会话内同类请求不再询问，可用下方「恢复逐条审批」撤回。</string>
+    <string name="agent_approval_allow_session_hint">「本会话免审」让本会话内同类请求不再询问；要撤回请到该会话的详情页。</string>
     <string name="agent_approval_scope_hint">「本会话免审」只管当前会话；「此工具始终允许」跨会话，只管这一个工具名。</string>
     <string name="agent_approval_revoke_session">恢复逐条审批</string>
     <string name="agent_approval_history_title">审批记录</string>

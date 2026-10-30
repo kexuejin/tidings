@@ -78,6 +78,7 @@ import com.kapp.tidings.generated.resources.nodes_port_ok
 import com.kapp.tidings.generated.resources.nodes_recognized
 import com.kapp.tidings.generated.resources.nodes_scan_action
 import com.kapp.tidings.generated.resources.nodes_scan_connect
+import com.kapp.tidings.generated.resources.nodes_scan_connecting
 import com.kapp.tidings.generated.resources.nodes_scan_field_host
 import com.kapp.tidings.generated.resources.nodes_scan_field_host_hint
 import com.kapp.tidings.generated.resources.nodes_manual_name
@@ -379,6 +380,9 @@ fun AddNodeSheet(
     var timedOut by remember { mutableStateOf(false) }
     // 每按一次「连接」+1：同一目标重试时 `attempted` 不变，计时器要靠它重新起跑。
     var attemptGen by remember { mutableStateOf(0) }
+    // B21（WP-A0）：提交中禁用 —— 连点会把超时钟重置，红字反而更晚出现，
+    // 用户更确信「没点上」。形状与 `SettingsConnectionSubpage` 的「正在重启…」一致。
+    var connecting by remember { mutableStateOf(false) }
 
     // **超时钟只挂在「这一次尝试」上**（`attempted` / `attemptGen` 变化才重走）。
     // 上一版把它和成功判定合在一条 `LaunchedEffect(attempted, state.peers)` 里 ——
@@ -394,6 +398,7 @@ fun AddNodeSheet(
         // 红字出现的那一拍，页面横幅「已向 x 打招呼，等它回应」也该退场。
         delay(CONNECT_ATTEMPT_TIMEOUT_MS)
         timedOut = true
+        connecting = false // 超时认输：按钮恢复，地址还在框里，再按一次就是重试
     }
 
     // **成功即关**：节点表里出现了这次尝试的目标（`ip` 或自报的 `host` 撞上）就收弹层。
@@ -685,8 +690,11 @@ fun AddNodeSheet(
             if (!scanMode) {
                 // 原型这颗是 `.cardfoot` 里的绿实心 `.btn`（标准档）通栏行动。
                 AppButton(
-                    text = stringResource(Res.string.nodes_scan_connect),
+                    text = stringResource(
+                        if (connecting) Res.string.nodes_scan_connecting else Res.string.nodes_scan_connect,
+                    ),
                     onClick = {
+                        connecting = true
                         // 记的是**解析后**的主机名：超时判据要拿它去比对节点表里的 ip/host，
                         // 原串 `1.2.3.4:17899` 永远比不中。
                         attempted = resolved?.first ?: trimmedHost
@@ -702,7 +710,7 @@ fun AddNodeSheet(
                             onConnect(trimmedHost, trimmedPort)
                         }
                     },
-                    enabled = hostOk && portOk,
+                    enabled = hostOk && portOk && !connecting,
                     modifier = Modifier
                         .fillMaxWidth()
                         .padding(top = LocalAppSpacing.current.lg, bottom = LocalAppSpacing.current.xl),

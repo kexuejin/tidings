@@ -29,6 +29,8 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
+import androidx.compose.ui.focus.FocusRequester
+import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -264,6 +266,9 @@ private fun SearchTopBar(
     onQueryChange: (String) -> Unit,
     onBack: () -> Unit,
 ) {
+    // B15（WP-A0）：进页即聚焦 —— 用户点放大镜就是要打字，光标不在框里等于「搜索坏了」。
+    val focus = remember { FocusRequester() }
+    LaunchedEffect(Unit) { focus.requestFocus() }
     val sp = LocalAppSpacing.current
     Row(
         modifier = Modifier
@@ -284,11 +289,15 @@ private fun SearchTopBar(
             // `--surface-2`，且带一条 `--outline` 描边 —— 代码原来用 `surfaceVariant`
             // 做填充底、没有描边，视觉上是「灰底块」而不是「白底细框」。
             // 圆角 9px 落在档位之间，取 `shapes.small`(8dp)，差 1dp ≤2dp（归宿 2）。
+            // B17（WP-A0）：描边从 `outline` 换 `onSurfaceVariant` —— outline 在纸白上
+            // 只有 1.42:1，低于非文本 UI 的 3:1 门槛（强光下框看不见，像一段空白）。
+            // 先用现成 token 达标；收敛成专用 `outlineStrong` 归 WP-D1。不调 alpha：
+            // 那会让它和其它卡片的描边不是一套。
             modifier = Modifier
                 .weight(1f)
                 .clip(MaterialTheme.shapes.small)
                 .background(MaterialTheme.colorScheme.background)
-                .border(1.dp, MaterialTheme.colorScheme.outline, MaterialTheme.shapes.small)
+                .border(1.dp, MaterialTheme.colorScheme.onSurfaceVariant, MaterialTheme.shapes.small)
                 .padding(horizontal = sp.md, vertical = sp.sm6),
             verticalAlignment = Alignment.CenterVertically,
             horizontalArrangement = Arrangement.spacedBy(sp.sm),
@@ -302,7 +311,7 @@ private fun SearchTopBar(
             BasicTextField(
                 value = query,
                 onValueChange = onQueryChange,
-                modifier = Modifier.weight(1f),
+                modifier = Modifier.weight(1f).focusRequester(focus),
                 textStyle = MaterialTheme.typography.bodyMedium.copy(
                     color = MaterialTheme.colorScheme.onSurface,
                 ),
@@ -330,7 +339,11 @@ private fun SearchTopBar(
                     modifier = Modifier
                         .size(48.dp)
                         .clip(CircleShape)
-                        .clickable(onClick = { onQueryChange("") }),
+                        // 清完光标回框：用户清空通常是为了换词重打（B15 同一条纪律）。
+                        .clickable(onClick = {
+                            onQueryChange("")
+                            focus.requestFocus()
+                        }),
                     contentAlignment = Alignment.Center,
                 ) {
                     Box(

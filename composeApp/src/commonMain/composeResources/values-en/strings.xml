@@ -371,6 +371,7 @@
     <string name="nodes_port_bad">Port must be between 1 and 65535.</string>
     <string name="nodes_recognized">Recognized</string>
     <string name="nodes_scan_connect">Connect</string>
+    <string name="nodes_scan_connecting">Connecting…</string>
     <string name="nodes_error_host">Invalid address format.</string>
     <string name="nodes_error_two_ports">Address already includes a port; leave port field empty.</string>
     <string name="nodes_timeout">Peer did not respond within 3s. Ensure both devices are on the same Wi-Fi.</string>
@@ -1657,7 +1658,7 @@
     <string name="nodes_mdns_row_desc">Discovered device, not paired yet</string>
     <!-- T21 approval authority/records/revoke, grant list wording, agent-empty buckets, stale frame -->
     <string name="agent_approval_status_revoked">Revoked</string>
-    <string name="agent_approval_allow_session_hint">"Allow for this session" stops asking for similar requests in this session. Undo it with "Ask again for each request" below.</string>
+    <string name="agent_approval_allow_session_hint">"Allow for this session" stops asking for similar requests in this session. Undo it from that session's detail page.</string>
     <string name="agent_approval_scope_hint">"Allow for this session" covers the current session only; "Always allow this tool" spans sessions but only this one tool name.</string>
     <string name="agent_approval_revoke_session">Ask again for each request</string>
     <string name="agent_approval_history_title">Approval history</string>
