@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: GPL-3.0-only
 package com.kapp.tidings.feature.agents
 
+import com.kapp.tidings.domain.model.AgentApprovalDecision
 import com.kapp.tidings.domain.model.AgentApprovalUi
 import com.kapp.tidings.domain.pendingApprovalCount
 import com.kapp.tidings.core.protocol.AgentApprovalPayload
@@ -211,6 +212,77 @@ class AgentApprovalCardsTest {
         // 7. Observer (ro) -> cannot approve
         val observerGrant = makeGrant(peerId = "node-observer", isMyDevice = false, access = com.kapp.tidings.core.protocol.AgentGrantAccess.RO)
         kotlin.test.assertFalse(canApprove(selfNode, "node-observer", observerGrant))
+    }
+
+    /**
+     * 第二行画哪几档免审：`always` 是**宿主声明的能力**，不是本端能自己决定的。
+     *
+     * 反向验证：把 `choicesDeclare(approval.choices, "always")` 换成 `true`
+     * （无条件画）⇒ 「声明了没有 always」那条变红。它守的就是「不画一颗可能没人接的按钮」。
+     */
+    @Test
+    fun alwaysEntryFollowsTheHostDeclaration() {
+        fun ui(choices: String?, status: String = "pending") = AgentApprovalUi(
+            approvalId = "appr-1", sessionId = "sess-1", peerId = "node-1",
+            choices = choices, status = status,
+        )
+
+        // 老宿主：压根不带 choices ⇒ 只有「本会话免审」（它在 choices 这个概念之前就存在；
+        // 拿一个更晚出现的声明去关掉在用的入口，只会让老用户的按钮凭空消失）。
+        assertEquals(
+            listOf(AgentApprovalDecision.ALLOW_SESSION),
+            secondaryApprovalChoicesOf(ui(null), isExpired = false, isReadOnly = false, canChoose = true),
+        )
+        // 声明了 always ⇒ 两档都在，顺序固定（范围小的在前）。
+        assertEquals(
+            listOf(AgentApprovalDecision.ALLOW_SESSION, AgentApprovalDecision.ALLOW_ALWAYS),
+            secondaryApprovalChoicesOf(ui("allow,deny,always"), isExpired = false, isReadOnly = false, canChoose = true),
+        )
+        // 声明了「只有批准/拒绝」⇒ 退回一档：插件有否决权。
+        assertEquals(
+            listOf(AgentApprovalDecision.ALLOW_SESSION),
+            secondaryApprovalChoicesOf(ui("allow,deny"), isExpired = false, isReadOnly = false, canChoose = true),
+        )
+
+        // 已决 / 过期 / 只读 / 没有四态回调 ⇒ 一条都不画（第二行整行消失）。
+        val alwaysDeclared = "allow,deny,always"
+        assertEquals(
+            emptyList(),
+            secondaryApprovalChoicesOf(ui(alwaysDeclared, status = "approved"), false, false, true),
+            "已决的审批不该再给出任何按钮",
+        )
+        assertEquals(
+            emptyList(),
+            secondaryApprovalChoicesOf(ui(alwaysDeclared), isExpired = true, isReadOnly = false, canChoose = true),
+            "过期的审批不该再给出任何按钮",
+        )
+        assertEquals(
+            emptyList(),
+            secondaryApprovalChoicesOf(ui(alwaysDeclared), isExpired = false, isReadOnly = true, canChoose = true),
+            "无审批权时只该有「只读」胶囊",
+        )
+        assertEquals(
+            emptyList(),
+            secondaryApprovalChoicesOf(ui(alwaysDeclared), isExpired = false, isReadOnly = false, canChoose = false),
+            "只接了旧两参回调的壳画不出免审档",
+        )
+    }
+
+    /**
+     * `choices` 按**词**比，不做子串包含。
+     *
+     * 反向验证：把 `choicesDeclare` 改成 `choices.contains(value)` ⇒ `notalways` 那条变红。
+     */
+    @Test
+    fun choicesAreMatchedAsWordsNotSubstrings() {
+        kotlin.test.assertTrue(choicesDeclare("allow,deny,always", "always"))
+        // 大小写与空白归一：这个字段是别的进程填的，不该由我们赌它规整。
+        kotlin.test.assertTrue(choicesDeclare(" ALLOW , always ", "Always"))
+        kotlin.test.assertFalse(choicesDeclare("allow,deny", "always"))
+        // 子串不算命中 —— 这一段判的是一件不可逆的事（点下去就再也不问了）。
+        kotlin.test.assertFalse(choicesDeclare("notalways", "always"))
+        kotlin.test.assertFalse(choicesDeclare(null, "always"))
+        kotlin.test.assertFalse(choicesDeclare("   ", "always"))
     }
 }
 

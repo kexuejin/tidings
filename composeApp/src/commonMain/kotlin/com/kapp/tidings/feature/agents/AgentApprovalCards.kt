@@ -52,10 +52,13 @@ import com.kapp.tidings.ui.components.AppOutlinedButton
 import com.kapp.tidings.ui.components.AppTextButton
 import com.kapp.tidings.ui.components.RelayDialog
 import com.kapp.tidings.ui.components.RelayDialogButton
+import com.kapp.tidings.generated.resources.agent_approval_allow_always
 import com.kapp.tidings.generated.resources.agent_approval_allow_session
 import com.kapp.tidings.generated.resources.agent_approval_allow_session_hint
+import com.kapp.tidings.generated.resources.agent_approval_confirm_always_body
 import com.kapp.tidings.generated.resources.agent_approval_confirm_l3_body
 import com.kapp.tidings.generated.resources.agent_approval_confirm_l3_title
+import com.kapp.tidings.generated.resources.agent_approval_scope_hint
 import com.kapp.tidings.generated.resources.agent_approval_diff_title
 import com.kapp.tidings.generated.resources.agent_approval_expires_label
 import com.kapp.tidings.generated.resources.agent_approval_risk_l1
@@ -90,6 +93,7 @@ import com.kapp.tidings.domain.model.AgentApprovalUi
 import com.kapp.tidings.domain.model.AgentArtifactUi
 import com.kapp.tidings.domain.model.AgentQueueTaskUi
 import com.kapp.tidings.domain.model.AgentRunUi
+import com.kapp.tidings.domain.model.AgentApprovalDecision
 
 /**
  * 一条审批的风险等级。
@@ -160,6 +164,50 @@ internal fun visibleApprovalRows(
     }
 }
 
+/**
+ * 宿主在这一条审批里声明了哪些处置（`choices` 是 CSV，如 `allow,deny,always`）。
+ *
+ * 为什么按**词**比而不是 `contains("always")`：`notalways` 这类值会误命中，
+ * 而这一段判的是一件不可逆的事（点下去就再也不问了）。大小写与空白一并归一 ——
+ * 这个字段是别的进程填的，不该由我们来赌它一定规整。
+ */
+internal fun choicesDeclare(choices: String?, value: String): Boolean {
+    if (choices.isNullOrBlank()) return false
+    return choices.split(',').any { it.trim().equals(value, ignoreCase = true) }
+}
+
+/**
+ * 审批行**第二行**该画哪几档免审 —— 空列表 = 不画第二行。
+ *
+ * 三档处置的层次：首行两颗是「这次做不做」（拒绝 / 批准），第二行两档是「以后还问不问」。
+ * 分行的理由不是审美：首行再塞一颗，393dp 上 `工具: {tool}` 就只剩二十几个 dp，
+ * 而那是用户唯一能确认「我批的是哪条命令」的字段。
+ *
+ * ## 「始终允许」为什么必须由 `choices` 说了算
+ *
+ * 它不是本端的权力，是**宿主的能力**：只有宿主会把这条决定落成免批规则。对端没声明
+ * `always` 时把按钮画出来，用户点下去得到的是：本端显示「已批准」，宿主当成一个不认识的
+ * 取值、当前这条都没批 —— 正好是本仓最贵的那类缺陷（发送侧一切正常、接收侧什么都没有）。
+ * 所以宁可少一颗按钮，也不画一颗可能没人接的按钮。
+ *
+ * 「本会话免审」**不**受 `choices` 约束：它有独立的回执取值（`allow_session`），
+ * 而且比 `choices` 这个字段先落地 —— 拿一个更晚出现的声明去关掉一个在用的入口，
+ * 只会让老宿主上的用户凭空少一颗按钮。
+ */
+internal fun secondaryApprovalChoicesOf(
+    approval: AgentApprovalUi,
+    isExpired: Boolean,
+    isReadOnly: Boolean,
+    canChoose: Boolean,
+): List<AgentApprovalDecision> {
+    if (!canChoose || isReadOnly || isExpired || approval.status != "pending") return emptyList()
+    val choices = buildList {
+        add(AgentApprovalDecision.ALLOW_SESSION)
+        if (choicesDeclare(approval.choices, "always")) add(AgentApprovalDecision.ALLOW_ALWAYS)
+    }
+    return choices
+}
+
 @Composable
 internal fun RiskLevelBadge(level: String, modifier: Modifier = Modifier) {
     val (labelRes, containerColor, contentColor) = when (level) {
@@ -228,7 +276,7 @@ internal fun RiskLevelBadge(level: String, modifier: Modifier = Modifier) {
 public fun AgentApprovalsSection(
     approvals: List<AgentApprovalUi>,
     onRespond: ((approvalId: String, allow: Boolean) -> Unit)? = null,
-    onRespondChoice: ((approvalId: String, allow: Boolean, allowSession: Boolean) -> Unit)? = null,
+    onRespondChoice: ((approvalId: String, decision: AgentApprovalDecision) -> Unit)? = null,
     isReadOnly: ((AgentApprovalUi) -> Boolean)? = null,
     modifier: Modifier = Modifier,
     /**
@@ -306,7 +354,7 @@ internal fun AgentApprovalRow(
     approval: AgentApprovalUi,
     now: Long,
     onRespond: ((approvalId: String, allow: Boolean) -> Unit)?,
-    onRespondChoice: ((approvalId: String, allow: Boolean, allowSession: Boolean) -> Unit)? = null,
+    onRespondChoice: ((approvalId: String, decision: AgentApprovalDecision) -> Unit)? = null,
     isReadOnly: Boolean = false,
     /** 归属（"设备 · 工作区"）：只有看板这种跨来源清单会传，见 AgentApprovalsSection 的同名参数。 */
     attribution: String? = null,
@@ -314,8 +362,8 @@ internal fun AgentApprovalRow(
     val spacing = LocalAppSpacing.current
     val isExpired = isApprovalExpired(approval, now)
     var showDiffDialog by remember { mutableStateOf(false) }
-    // L3 的高危批准先过一道确认卡；确认目标记下（允许 / 允许并免审），卡里只做放行这一件事。
-    var confirmAllow by remember { mutableStateOf<Boolean?>(null) }
+    // L3 的高危批准先过一道确认卡；确认目标记下（批准 / 本次免审 / 始终允许），卡里只做放行这一件事。
+    var confirmDecision by remember { mutableStateOf<AgentApprovalDecision?>(null) }
 
     val statusText = when {
         approval.status == "approved" -> stringResource(Res.string.agent_approval_status_approved)
@@ -330,13 +378,32 @@ internal fun AgentApprovalRow(
 
     val riskLevel = resolveRiskLevel(approval.riskLevel, approval.tool)
 
-    // 批准（含「本会话免审」）都从这里走：高危先确认，低危直接放行。
-    val requestAllow: (Boolean) -> Unit = { allowSession ->
-        if (shouldConfirmApproval(riskLevel)) {
-            confirmAllow = allowSession
+    // 第二行能画哪几档免审：由 choices（宿主的声明）与状态一起决定，见 [secondaryApprovalChoicesOf]。
+    val secondary = secondaryApprovalChoicesOf(
+        approval = approval,
+        isExpired = isExpired,
+        isReadOnly = isReadOnly,
+        canChoose = onRespondChoice != null,
+    )
+
+    /** 把用户点的那一档原样交上去（本层不做任何本地推断）。 */
+    val dispatch: (AgentApprovalDecision) -> Unit = { decision ->
+        if (onRespondChoice != null) {
+            onRespondChoice(approval.approvalId, decision)
         } else {
-            if (onRespondChoice != null) onRespondChoice(approval.approvalId, true, allowSession)
-            else onRespond?.invoke(approval.approvalId, true)
+            // 只接了旧的两参回调：那种壳上压根画不出免审档（见 [secondaryApprovalChoicesOf]），
+            // 走到这里只可能是批准/拒绝。
+            onRespond?.invoke(approval.approvalId, decision != AgentApprovalDecision.DENY)
+        }
+    }
+
+    // 放行类处置（批准 / 本次免审 / 始终允许）都从这里走：高危先确认，低危直接放行。
+    // 拒绝不确认 —— 它不会让任何东西被执行，在这一步加闸只会拖慢「该停手的时候」。
+    val requestDecision: (AgentApprovalDecision) -> Unit = { decision ->
+        if (decision != AgentApprovalDecision.DENY && shouldConfirmApproval(riskLevel)) {
+            confirmDecision = decision
+        } else {
+            dispatch(decision)
         }
     }
 
@@ -418,37 +485,23 @@ internal fun AgentApprovalRow(
                         )
                     }
                 } else if (approval.status == "pending" && !isExpired && (onRespond != null || onRespondChoice != null)) {
-                    // 原型这一行是 `.btn sm out` + `.btn sm pri`（`prototype/relay.html:2223`）：
-                    // 审批行是列表行，三颗都走小档。拒绝用中性描边（原型是 `.out`，不是 `.danger-o`）。
+                    // 首行只放**决定做不做**那两颗：原型的 `.appr` 就是 `拒绝`(描边) + `批准`(实心)
+                    // 两颗，别的都另起一行。393dp 上塞第四颗会把 `工具: {tool}` 压到读不出名字。
                     // 小档的视觉高度是原型值（6×10 / 12sp），但**触达**不许低于 48dp：
                     // M3 的 Button 默认最小高 40dp，在审批行这种"每颗都不可撤销"的位置
                     // 差 8dp 就是误触一次写操作。视觉仍交给 AppButtonSize.Small，只兜底高度。
                     AppOutlinedButton(
                         text = stringResource(Res.string.agent_approval_deny),
-                        onClick = {
-                            if (onRespondChoice != null) onRespondChoice(approval.approvalId, false, false)
-                            else onRespond?.invoke(approval.approvalId, false)
-                        },
+                        onClick = { dispatch(AgentApprovalDecision.DENY) },
                         size = AppButtonSize.Small,
                         modifier = Modifier.heightIn(min = 48.dp),
                     )
                     AppButton(
                         text = stringResource(Res.string.agent_approval_allow),
-                        onClick = { requestAllow(false) },
+                        onClick = { requestDecision(AgentApprovalDecision.ALLOW) },
                         size = AppButtonSize.Small,
                         modifier = Modifier.heightIn(min = 48.dp),
                     )
-                    if (onRespondChoice != null) {
-                        // 同一行里语义最低的一颗（只在本次会话内免审）：走同一小档，
-                        // 不再单独压字阶 —— 层级靠 tone 与位置表达，不靠第五个字号。
-                        // 它与「批准」同属放行：高危请求同样先过确认卡，免审不能成为绕过确认的旁路。
-                        AppTextButton(
-                            text = stringResource(Res.string.agent_approval_allow_session),
-                            onClick = { requestAllow(true) },
-                            size = AppButtonSize.Small,
-                            modifier = Modifier.heightIn(min = 48.dp),
-                        )
-                    }
                 } else if (statusText != null) {
                     val badgeColor = when (approval.status) {
                         "approved" -> MaterialTheme.colorScheme.primaryContainer
@@ -478,10 +531,38 @@ internal fun AgentApprovalRow(
             }
         }
 
-        // 「本会话免审」的范围说明：一个词说不清它覆盖什么（修复前它连撤销入口都没有）。
-        if (approval.status == "pending" && !isExpired && !isReadOnly && onRespondChoice != null) {
+        // 第二行：两档免审。它们都属放行（所以高危同样先过确认卡，免审不能成为绕过确认的旁路），
+        // 但语义都比「批准」低一档，而且**范围必须说清** —— 一个词说不清它覆盖到哪儿：
+        // 「本会话免审」只管当前会话，「此工具始终允许」跨会话、只管这一个工具名。
+        // 首行塞不下第四颗：393dp 上会把 `工具: {tool}` 压到读不出名字（见上面那段注释）。
+        if (secondary.isNotEmpty()) {
+            Row(
+                modifier = Modifier.padding(top = spacing.xxs),
+                horizontalArrangement = Arrangement.spacedBy(spacing.sm6),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                secondary.forEach { decision ->
+                    AppTextButton(
+                        text = stringResource(
+                            when (decision) {
+                                AgentApprovalDecision.ALLOW_ALWAYS -> Res.string.agent_approval_allow_always
+                                else -> Res.string.agent_approval_allow_session
+                            },
+                        ),
+                        onClick = { requestDecision(decision) },
+                        size = AppButtonSize.Small,
+                        modifier = Modifier.heightIn(min = 48.dp),
+                    )
+                }
+            }
             Text(
-                text = stringResource(Res.string.agent_approval_allow_session_hint),
+                text = stringResource(
+                    if (AgentApprovalDecision.ALLOW_ALWAYS in secondary) {
+                        Res.string.agent_approval_scope_hint
+                    } else {
+                        Res.string.agent_approval_allow_session_hint
+                    },
+                ),
                 style = MaterialTheme.typography.labelSmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
                 modifier = Modifier.padding(top = spacing.xxs),
@@ -509,16 +590,26 @@ internal fun AgentApprovalRow(
         }
     }
 
-    if (confirmAllow != null) {
+    // 局部 val：`confirmDecision` 是委托属性，直接读会被拆成 getter，智能转换用不上。
+    val confirming = confirmDecision
+    if (confirming != null) {
         // L3 的最后一道闸：标题说明「高危」，正文说明「批准即放行」，
         // 卡里复读工具名 —— 用户确认的必须是这一条，不是任何一个名字相同的请求。
+        // 「始终允许」的正文必须换：它放行的不只是这一次，范围写错就等于替人批了一整类操作。
+        val confirmAlways = confirming == AgentApprovalDecision.ALLOW_ALWAYS
         RelayDialog(
-            onDismissRequest = { confirmAllow = null },
+            onDismissRequest = { confirmDecision = null },
             title = { Text(stringResource(Res.string.agent_approval_confirm_l3_title)) },
             content = {
                 Column(verticalArrangement = Arrangement.spacedBy(spacing.sm)) {
                     Text(
-                        text = stringResource(Res.string.agent_approval_confirm_l3_body),
+                        text = stringResource(
+                            if (confirmAlways) {
+                                Res.string.agent_approval_confirm_always_body
+                            } else {
+                                Res.string.agent_approval_confirm_l3_body
+                            },
+                        ),
                         style = MaterialTheme.typography.bodyMedium,
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                     )
@@ -538,20 +629,25 @@ internal fun AgentApprovalRow(
             },
             confirmButton = {
                 RelayDialogButton(
-                    text = stringResource(Res.string.agent_approval_allow),
+                    text = stringResource(
+                        if (confirmAlways) Res.string.agent_approval_allow_always
+                        else Res.string.agent_approval_allow,
+                    ),
                     primary = true,
                     onClick = {
-                        val allowSession = confirmAllow == true
-                        confirmAllow = null
-                        if (onRespondChoice != null) onRespondChoice(approval.approvalId, true, allowSession)
-                        else onRespond?.invoke(approval.approvalId, true)
+                        confirmDecision = null
+                        if (onRespondChoice != null) {
+                            onRespondChoice(approval.approvalId, confirming)
+                        } else {
+                            onRespond?.invoke(approval.approvalId, true)
+                        }
                     },
                 )
             },
             dismissButton = {
                 RelayDialogButton(
                     text = stringResource(Res.string.common_cancel),
-                    onClick = { confirmAllow = null },
+                    onClick = { confirmDecision = null },
                 )
             },
         )

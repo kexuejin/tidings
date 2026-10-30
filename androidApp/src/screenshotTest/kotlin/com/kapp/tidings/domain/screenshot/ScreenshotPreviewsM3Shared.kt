@@ -721,7 +721,7 @@ private fun ApprovalFrame(approvals: List<com.kapp.tidings.domain.model.AgentApp
     com.kapp.tidings.feature.agents.AgentApprovalsSection(
         approvals = approvals,
         onRespond = { _, _ -> },
-        onRespondChoice = { _, _, _ -> },
+        onRespondChoice = { _, _ -> },
     )
 }
 
@@ -787,7 +787,7 @@ private fun V2ApprovalExpiredPhonePreview() {
                 com.kapp.tidings.feature.agents.AgentApprovalsSection(
                     approvals = listOf(approvalOf(expiresAt = 1L)),
                     onRespond = { _, _ -> },
-                    onRespondChoice = { _, _, _ -> },
+                    onRespondChoice = { _, _ -> },
                     // 过期项默认不画（它是"待办"）；会话详情用这个开关把它们当历史画出来。
                     includeExpiredPending = true,
                 )

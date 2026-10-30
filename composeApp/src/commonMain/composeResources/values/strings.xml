@@ -1622,12 +1622,14 @@
     <string name="agent_approval_tool_label">工具</string>
     <string name="agent_approval_expires_label">有效至</string>
     <string name="agent_approval_allow_session">本会话免审</string>
+    <string name="agent_approval_allow_always">此工具始终允许</string>
     <string name="agent_approval_status_allowed_session">会话免审</string>
     <string name="agent_approval_view_diff">查看详情</string>
     <string name="agent_approval_diff_title">调用参数与变更详情</string>
     <!-- L3（高危）的批准不再是按了立即生效：先弹这张确认卡（issue：一键批准无确认无撤销）。 -->
     <string name="agent_approval_confirm_l3_title">确认批准高危操作</string>
     <string name="agent_approval_confirm_l3_body">这条请求要求执行高危操作，批准后将直接放行。</string>
+    <string name="agent_approval_confirm_always_body">确认后，这台设备上的这个 agent 再调用该工具时不再询问。</string>
     <!-- 对端帧里没有声明风险等级时不猜：宁可显示「未分级」，也不替对端宣布它是安全的。 -->
     <string name="agent_approval_risk_unrated">未分级</string>
     <string name="agent_approval_risk_l1">L1 只读</string>
@@ -1815,6 +1817,7 @@
     <!-- T21 审批权限/记录/免审撤销、授权清单人话、Agent 空态分档、远程查看陈旧帧 -->
     <string name="agent_approval_status_revoked">已撤销</string>
     <string name="agent_approval_allow_session_hint">「本会话免审」让本会话内同类请求不再询问，可用下方「恢复逐条审批」撤回。</string>
+    <string name="agent_approval_scope_hint">「本会话免审」只管当前会话；「此工具始终允许」跨会话，只管这一个工具名。</string>
     <string name="agent_approval_revoke_session">恢复逐条审批</string>
     <string name="agent_approval_history_title">审批记录</string>
     <string name="agent_empty_agents_only_title">已收到 Agent</string>

@@ -25,6 +25,7 @@ import com.kapp.tidings.navigation.resolveAgentSessionId
 import com.kapp.tidings.ui.ContentWidths
 import com.kapp.tidings.ui.centerCapped
 import com.kapp.tidings.ui.theme.LocalAppSpacing
+import com.kapp.tidings.domain.model.AgentApprovalDecision
 
 /**
  * 工作区（原 Agent）控制台，对齐 DSH 看板与会话详情台。
@@ -65,7 +66,7 @@ fun AgentConsoleScreen(
      * controller 的三参 `respondApproval`；两参版本保留给只认批准/拒绝的旧调用点。
      * null 时审批段退回 [onRespondApproval]（不画「本会话免审」按钮）。
      */
-    onRespondChoice: ((approvalId: String, allow: Boolean, allowSession: Boolean) -> Unit)? = null,
+    onRespondChoice: ((approvalId: String, decision: AgentApprovalDecision) -> Unit)? = null,
     /** 撤销「本会话免审」（见 SessionDetailView 的同名形参）。 */
     onRevokeSessionApproval: ((sessionId: String) -> Unit)? = null,
     onCancelTask: ((taskId: String) -> Unit)? = null,

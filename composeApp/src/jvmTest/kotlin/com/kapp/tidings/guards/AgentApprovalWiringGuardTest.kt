@@ -111,17 +111,29 @@ class AgentApprovalWiringGuardTest {
         }
     }
 
-    /** 按钮本身还有两道闸：三参必须能传进 section 的按钮，L3 必须先过确认卡。 */
+    /**
+     * 按钮本身还有三道闸：处置原样直通回调、`always` 由 `choices` 判、L3 必须先过确认卡。
+     *
+     * 第一条变了（原来是断言 `onRespondChoice(id, true, allowSession)`）：处置从「两个布尔」
+     * 收成了一个枚举，所以守的不再是「allowSession 有没有被丢掉」，而是「点的那一档有没有被
+     * 折成别的档」—— 具体地说，`ALLOW_ALWAYS` 若在这里被降级成 `ALLOW`，用户点的是
+     * 「以后别再问」，得到的是「这次批了、下次还问」，而界面上那一下看起来一模一样。
+     */
     @Test
     fun sectionDrawsTheSessionAllowButtonAndKeepsTheL3Gate() {
         val text = GuardSourceScan.stripComments(GuardSourceScan.read(approvalCards))
         assertTrue(
-            text.contains("onRespondChoice(approval.approvalId, true, allowSession)"),
-            "「本会话免审」/批准按钮必须把 allowSession 原样交给三参回调，" +
-                "否则免审在按钮这一端就被降级成普通批准。",
+            text.contains("onRespondChoice(approval.approvalId, decision)"),
+            "两档免审必须把用户点的那一档**原样**交给回调，否则免审在按钮这一端就被降级成普通批准。",
         )
         assertTrue(
-            text.contains("if (shouldConfirmApproval(riskLevel))"),
+            text.contains("secondaryApprovalChoicesOf(") &&
+                text.contains("AgentApprovalDecision.ALLOW_ALWAYS"),
+            "「始终允许」必须由 secondaryApprovalChoicesOf 按 choices 判出来，不能无条件画 —— " +
+                "对端不认这个取值时，用户点到的是一颗没人接的按钮（发送侧一切正常、接收侧什么都没有）。",
+        )
+        assertTrue(
+            text.contains("shouldConfirmApproval(riskLevel)"),
             "L3 的确认卡闸门不能丢：免审不能成为绕过确认的旁路。",
         )
     }

@@ -1468,11 +1468,13 @@
     <string name="agent_approval_tool_label">Tool</string>
     <string name="agent_approval_expires_label">Expires</string>
     <string name="agent_approval_allow_session">Allow for this session</string>
+    <string name="agent_approval_allow_always">Always allow this tool</string>
     <string name="agent_approval_status_allowed_session">Session Allowed</string>
     <string name="agent_approval_view_diff">View Details</string>
     <string name="agent_approval_diff_title">Parameters &amp; Diff Details</string>
     <string name="agent_approval_confirm_l3_title">Approve this high-risk action?</string>
     <string name="agent_approval_confirm_l3_body">This request runs a high-risk operation. Once approved, it goes through immediately.</string>
+    <string name="agent_approval_confirm_always_body">After confirming, this agent will not ask again on this device when it calls this tool.</string>
     <string name="agent_approval_risk_unrated">Unrated</string>
     <string name="agent_approval_risk_l1">L1 Read-Only</string>
     <string name="agent_approval_risk_l2">L2 Modify</string>
@@ -1646,6 +1648,7 @@
     <!-- T21 approval authority/records/revoke, grant list wording, agent-empty buckets, stale frame -->
     <string name="agent_approval_status_revoked">Revoked</string>
     <string name="agent_approval_allow_session_hint">"Allow for this session" stops asking for similar requests in this session. Undo it with "Ask again for each request" below.</string>
+    <string name="agent_approval_scope_hint">"Allow for this session" covers the current session only; "Always allow this tool" spans sessions but only this one tool name.</string>
     <string name="agent_approval_revoke_session">Ask again for each request</string>
     <string name="agent_approval_history_title">Approval history</string>
     <string name="agent_empty_agents_only_title">Agent reported</string>

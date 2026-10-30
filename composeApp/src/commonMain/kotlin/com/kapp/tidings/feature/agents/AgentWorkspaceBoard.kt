@@ -81,6 +81,7 @@ import com.kapp.tidings.ui.components.TopBarIconAction
 import com.kapp.tidings.ui.components.relativeTime
 import com.kapp.tidings.domain.model.PeerUi
 import com.kapp.tidings.ui.theme.relayCardShadow
+import com.kapp.tidings.domain.model.AgentApprovalDecision
 
 /**
  * 工作区页签的一级视图：**按节点分组的工作区列表**。
@@ -134,7 +135,7 @@ internal fun WorkspaceBoardView(
     onRefresh: (() -> Unit)?,
     onRespondApproval: ((approvalId: String, allow: Boolean) -> Unit)?,
     /** 三参处置（「本会话免审」）：null 时退回 [onRespondApproval]，不画免审按钮。 */
-    onRespondChoice: ((approvalId: String, allow: Boolean, allowSession: Boolean) -> Unit)? = null,
+    onRespondChoice: ((approvalId: String, decision: AgentApprovalDecision) -> Unit)? = null,
     onCreateWorkspaceGroup: (() -> Unit)? = null,
 ) {
     // 与消息页同一份派生（排序 / 上限 / 待审批 join / 降级都在里面做完）。

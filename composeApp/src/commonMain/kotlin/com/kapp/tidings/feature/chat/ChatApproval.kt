@@ -39,6 +39,7 @@ import com.kapp.tidings.ui.theme.RelayShapes
 import kotlinx.coroutines.withContext
 import org.jetbrains.compose.resources.DrawableResource
 import org.jetbrains.compose.resources.stringResource
+import com.kapp.tidings.domain.model.AgentApprovalDecision
 import com.kapp.tidings.domain.model.AgentApprovalUi
 import com.kapp.tidings.domain.model.DeliveryState
 import com.kapp.tidings.feature.agents.AgentApprovalRow
@@ -181,7 +182,7 @@ internal fun ChatApprovalBanner(
     approvals: List<AgentApprovalUi>,
     now: Long,
     onRespond: ((approvalId: String, allow: Boolean) -> Unit)?,
-    onRespondChoice: ((approvalId: String, allow: Boolean, allowSession: Boolean) -> Unit)? = null,
+    onRespondChoice: ((approvalId: String, decision: AgentApprovalDecision) -> Unit)? = null,
     modifier: Modifier = Modifier,
     isReadOnly: ((AgentApprovalUi) -> Boolean)? = null,
 ) {

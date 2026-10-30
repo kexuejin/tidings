@@ -5,6 +5,7 @@ package com.kapp.tidings.feature.chat
 import kotlinx.serialization.json.JsonObject
 import com.kapp.tidings.domain.HistorySearchFilter
 import com.kapp.tidings.domain.MessageSearchResult
+import com.kapp.tidings.domain.model.AgentApprovalDecision
 import com.kapp.tidings.domain.model.MessageUi
 import com.kapp.tidings.domain.RelayUiState
 import com.kapp.tidings.core.nowMillis
@@ -160,7 +161,7 @@ data class ChatScreenActions(
      * 为什么两参版本还留着：聊天横幅在**旧调用点**（其它壳、预览）只认批准/拒绝。
      * 只接了 [onRespondApproval] 时，L3 确认与摘要照常工作，只是不画「本会话免审」。
      */
-    val onRespondChoice: ((approvalId: String, allow: Boolean, allowSession: Boolean) -> Unit)? = null,
+    val onRespondChoice: ((approvalId: String, decision: AgentApprovalDecision) -> Unit)? = null,
     /** 会话内历史搜索；null = 输入栏右端不画那颗搜索。 */
     val onSearchInConversation: ((query: String, filter: HistorySearchFilter) -> List<MessageSearchResult>)? = null,
     /**

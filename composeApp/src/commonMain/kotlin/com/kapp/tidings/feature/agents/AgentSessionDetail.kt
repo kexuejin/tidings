@@ -70,6 +70,7 @@ import com.kapp.tidings.domain.mayDecideApproval
 import com.kapp.tidings.domain.pendingApprovalCount
 import com.kapp.tidings.domain.model.ScanProgressUi
 import com.kapp.tidings.ui.components.AppButtonTone
+import com.kapp.tidings.domain.model.AgentApprovalDecision
 
 
 /**
@@ -123,7 +124,7 @@ internal fun SessionDetailView(
     onOpenChat: (String) -> Unit,
     onRespondApproval: ((approvalId: String, allow: Boolean) -> Unit)?,
     /** 三参处置（「本会话免审」）：null 时退回 [onRespondApproval]，不画免审按钮。 */
-    onRespondChoice: ((approvalId: String, allow: Boolean, allowSession: Boolean) -> Unit)? = null,
+    onRespondChoice: ((approvalId: String, decision: AgentApprovalDecision) -> Unit)? = null,
     /**
      * 撤销「本会话免审」：null = 不提供入口。
      *

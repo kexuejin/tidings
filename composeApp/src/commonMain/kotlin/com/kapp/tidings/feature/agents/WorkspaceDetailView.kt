@@ -124,6 +124,7 @@ import com.kapp.tidings.ui.theme.RelayElevations
 import kotlinx.coroutines.launch
 import org.jetbrains.compose.resources.painterResource
 import org.jetbrains.compose.resources.stringResource
+import com.kapp.tidings.domain.model.AgentApprovalDecision
 
 /**
  * 工作区详情（二级）= **工作区操作中心**。
@@ -166,7 +167,7 @@ fun WorkspaceDetailView(
     onOpenSessionChat: ((sessionId: String) -> Unit)? = null,
     onRespondApproval: ((approvalId: String, allow: Boolean) -> Unit)? = null,
     /** 三参处置（「本会话免审」）：null 时退回 [onRespondApproval]，不画免审按钮。 */
-    onRespondChoice: ((approvalId: String, allow: Boolean, allowSession: Boolean) -> Unit)? = null,
+    onRespondChoice: ((approvalId: String, decision: AgentApprovalDecision) -> Unit)? = null,
     onRefresh: (() -> Unit)? = null,
     /**
      * **谁能用这个 agent 干活** —— 逐设备的勾选状态；null = 这个宿主不提供该配置
