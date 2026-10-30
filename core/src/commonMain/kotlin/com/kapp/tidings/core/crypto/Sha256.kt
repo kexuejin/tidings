@@ -262,3 +262,15 @@ class Sha256 {
 
 /** 一次性便捷函数：直接算 [bytes] 的十六进制摘要。 */
 fun sha256Hex(bytes: ByteArray): String = Sha256().apply { update(bytes) }.hexDigest()
+
+/**
+ * 严格的小写 SHA-256 十六进制串判据：恰好 64 个字符（[Sha256] 摘要的 hex 长度）、
+ * 全部是小写 hex。
+ *
+ * 单一定义（编解码与 HTTP 处理器共用）：大写或 63 位都算不合法 —— 上游 [sha256Hex] 的
+ * 输出本就是小写，放宽只会制造「同一个哈希两种拼法」的第二取值域（AGENTS.md §3 #7）。
+ */
+fun isSha256Hex(value: String?): Boolean {
+    if (value == null || value.length != 64) return false
+    return value.all { it in '0'..'9' || it in 'a'..'f' }
+}

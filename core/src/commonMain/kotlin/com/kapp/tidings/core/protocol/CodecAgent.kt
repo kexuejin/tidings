@@ -5,6 +5,8 @@ package com.kapp.tidings.core.protocol
 import kotlinx.serialization.json.JsonElement
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.JsonPrimitive
+import kotlinx.serialization.json.contentOrNull
+import com.kapp.tidings.core.crypto.isSha256Hex
 import com.kapp.tidings.core.protocol.CodecWire.boolOf
 import com.kapp.tidings.core.protocol.CodecWire.hasOnlyKeys
 import com.kapp.tidings.core.protocol.CodecWire.intOf
@@ -64,7 +66,7 @@ object CodecAgent {
     internal val AGENT_GRANT_EXPECTED_KEYS = setOf("state", "scope", "agentKey", "wsId", "access", "isMyDevice", "delegatedApproval", "at")
     internal val AGENT_GRANT_LIST_EXPECTED_KEYS = setOf("scope", "agentKey", "wsId", "access", "total", "at")
     internal val AGENT_SESSION_PAGE_EXPECTED_KEYS = setOf("wsId", "offset", "limit", "at")
-    internal val AGENT_ARTIFACT_EXPECTED_KEYS = setOf("sessionId", "artifactId", "fileId", "name", "bytes", "mime")
+    internal val AGENT_ARTIFACT_EXPECTED_KEYS = setOf("sessionId", "artifactId", "fileId", "name", "bytes", "mime", "sha256", "summary")
 
     // --------------------------------------------------------------- agent-* 校验
 
@@ -334,6 +336,11 @@ object CodecAgent {
             if (bytes < 0) return false
         }
         if (o.containsKey("mime") && !isStrAllowEmpty(o["mime"], Limits.AGENT_ARTIFACT_MIME)) return false
+        // M7-T3（cap agf1）：端到端完整性凭据。sha256 必须恰好 64 个**小写** hex
+        // （大写 / 63 位都拒，负向量钉住）；summary 与 agent-event.summary 同角色同界
+        // （AGENT_SUMMARY=200，是卡片标题槽的量，不是正文槽）。
+        if (o.containsKey("sha256") && !isSha256Hex((o["sha256"] as? JsonPrimitive)?.contentOrNull)) return false
+        if (o.containsKey("summary") && !isStrAllowEmpty(o["summary"], Limits.AGENT_SUMMARY)) return false
         return hasOnlyKeys(o, AGENT_ARTIFACT_EXPECTED_KEYS)
     }
 
@@ -485,6 +492,8 @@ object CodecAgent {
         fileId: String? = null,
         bytes: Long? = null,
         mime: String? = null,
+        sha256: String? = null,
+        summary: String? = null,
     ): JsonElement = wireJson.encodeToJsonElement(
         AgentArtifactPayload.serializer(),
         AgentArtifactPayload(
@@ -494,6 +503,8 @@ object CodecAgent {
             name = name,
             bytes = bytes,
             mime = mime,
+            sha256 = sha256,
+            summary = summary,
         ),
     )
 

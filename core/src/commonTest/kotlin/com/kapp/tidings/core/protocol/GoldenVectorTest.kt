@@ -59,7 +59,7 @@ class GoldenVectorTest {
         // 本端实现这两个类型之后，同一批字节的结论不再与 TS 一致，留在 parity 集里就是错的。
         assertEquals(14, GOLDEN_VECTORS.size, "向量数量变了，说明生成脚本或夹具被改动过")
         assertEquals(2, OLD_NODE_EXTENSION_VERDICTS.size, "老节点结论记录被改动过")
-        assertEquals(12, EXTENSION_VECTORS.size, "PPE-1 扩展向量数量变了")
+        assertEquals(14, EXTENSION_VECTORS.size, "PPE-1 扩展向量数量变了（M7-T3 追加 agent-artifact-verified 正/负两条，12→14）")
     }
 
     @Test
@@ -179,6 +179,20 @@ class GoldenVectorTest {
                 cursor = 42,
                 eventType = "tool.started",
                 summary = "跑测试",
+            ),
+        )
+        // M7-T3（cap agf1）出站字节护栏：新键在 mime **之后**（Payloads.kt 声明序 = 线上键序）。
+        assertTyped(
+            "agent-artifact-verified", MsgTypes.AGENT_ARTIFACT, PEER,
+            Codec.agentArtifactPayload(
+                sessionId = "s-1",
+                artifactId = "a-1",
+                name = "report.md",
+                fileId = "f-1",
+                bytes = 2048,
+                mime = "text/markdown",
+                sha256 = "a1b2c3d4e5f60718293a4b5c6d7e8f90a1b2c3d4e5f60718293a4b5c6d7e8f90",
+                summary = "构建报告",
             ),
         )
         // PPE-1 增补 D3/D7 的出站字节护栏（键序 = Payloads.kt 声明序）。

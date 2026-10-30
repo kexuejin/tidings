@@ -215,7 +215,9 @@ object Codec {
         fileId: String? = null,
         bytes: Long? = null,
         mime: String? = null,
-    ) = CodecAgent.agentArtifactPayload(sessionId, artifactId, name, fileId, bytes, mime)
+        sha256: String? = null,
+        summary: String? = null,
+    ) = CodecAgent.agentArtifactPayload(sessionId, artifactId, name, fileId, bytes, mime, sha256, summary)
 
     /** PPE-1 增补 D3：宣告一个工作区（cap `aws1`，尽力而为、不在 RELIABLE）。 */
     @Suppress("LongParameterList")

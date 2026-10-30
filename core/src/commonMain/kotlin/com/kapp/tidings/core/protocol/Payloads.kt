@@ -381,10 +381,15 @@ data class AgentAckPayload(
 )
 
 /**
- * PPE-1 §6.7 `agent-artifact`：产物元数据（cap `agn1`）。
+ * PPE-1 §6.7 `agent-artifact`：产物元数据（cap `agn1`；校验增量走 `agf1`，M7-T3）。
  *
  * **只描述产物，不传二进制** —— 二进制走 `file-msg`，这里用 [fileId] 指向已发送的那条。
  * 字段顺序即线上键序，与 `Codec.AGENT_ARTIFACT_EXPECTED_KEYS` 一致。
+ *
+ * [sha256]（发送方对产物文件**实测**的哈希）与 [summary]（一行人话）是 M7-T3 增补：
+ * `wireJson` 是 `encodeDefaults=false` + `explicitNulls=false`，两键缺席时旧帧字节逐位不变
+ * （既有向量因此一字不动）；新键只发给声明 `agf1` 的对端（门控在 `NodeRuntime.sendAgentArtifact`，
+ * 先例是 `att1`/attachment）。
  */
 @Serializable
 data class AgentArtifactPayload(
@@ -394,6 +399,8 @@ data class AgentArtifactPayload(
     val name: String,
     val bytes: Long? = null,
     val mime: String? = null,
+    val sha256: String? = null,
+    val summary: String? = null,
 )
 
 /**

@@ -461,6 +461,10 @@ data class RelaySettings(
         // agi1：跨端派单网道（M4）。本端认识 agent-invoke 族帧 —— 能发卡片动作请求
         // （只发给声明它的对端）、被误指名派单时也答一帧诚实的拒绝而不是沉默。
         add(MsgTypes.CAP_AGENT_INVOKE)
+        // agf1（M7-T3）：本端认识 agent-artifact 的校验增量键（sha256/summary）——
+        // 收方语义的事实声明：发送方按它决定带不带新键。漏了就是 lnk1/att1 那类静默：
+        // 宿主实测了哈希也发不过来，端到端校验永远空转。
+        add(MsgTypes.CAP_AGENT_ARTIFACT_VERIFIED)
         if (remoteView) add(MsgTypes.CAP_REMOTE_VIEW)
         if (remoteShare) add(MsgTypes.CAP_REMOTE_SHARE)
         if (isShareEnabled()) add(MsgTypes.CAP_SHARE)

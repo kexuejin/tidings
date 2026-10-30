@@ -1623,7 +1623,18 @@ class NodeRuntime(
         name: String,
         fileId: String? = null,
         bytes: Long? = null,
-        mime: String? = null,) = outbound.sendAgentArtifact(peerId, sessionId, artifactId, name, fileId, bytes, mime)
+        mime: String? = null,
+        sha256: String? = null,
+        summary: String? = null,): SendOutcome {
+        // M7-T3 cap 门控（决策包 §2.2 方案 C）：对端没声明 `agf1` 就**不发**新键 ——
+        // 旧端 hasOnlyKeys 会整帧拒收 + 队列重传（静默丢失的「过一会儿才到」形态，永远差一条）。
+        val verified = registry.get(peerId)?.profile?.caps?.contains(MsgTypes.CAP_AGENT_ARTIFACT_VERIFIED) == true
+        return outbound.sendAgentArtifact(
+            peerId, sessionId, artifactId, name, fileId, bytes, mime,
+            sha256 = sha256.takeIf { verified },
+            summary = summary.takeIf { verified },
+        )
+    }
 
     /** PPE-1 增补 D3：工作区宣告（可靠但不入队；返回值 = 对端有没有 ACK）。 */
     @Suppress("LongParameterList")

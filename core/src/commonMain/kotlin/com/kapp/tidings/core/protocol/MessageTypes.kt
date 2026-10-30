@@ -189,6 +189,8 @@ object MsgTypes {
             // 跨端派单网道（M4）：手机要能点宿主插件卡片上的按钮（action 请求只发
             // 给声明 agi1 的对端）；被误指名派单时也应答一帧诚实的 no-executor 拒绝。
             CAP_AGENT_INVOKE,
+            // M7-T3（agf1）：手机收产物卡片时能显示端到端校验摘要 —— 如实声明（收方语义）。
+            CAP_AGENT_ARTIFACT_VERIFIED,
         )
 
     /**
@@ -218,6 +220,14 @@ object MsgTypes {
      * 但不支持批量帧与 `GET /v1/inbox?cursor=` 续读，那是 PPE-1 §12 的 P1.5。
      */
     const val CAP_AGENT_SESSION = "agn1"
+
+    /**
+     * `agf1` = `agent-artifact` 的**校验增量**（M7-T3）：声明它 = 认识 payload 里的
+     * `sha256` / `summary` 两键。为什么单开而不是塞进 `agn1`：只有 `agn1` 的老端，
+     * 其 `hasOnlyKeys` 会把带新键的帧**整帧拒收**——发送侧按对端 caps 决定带不带
+     * （先例 `att1`/attachment），「两端必须同版本」的组合因此收窄为「声明 `agf1` 的对端」。
+     */
+    const val CAP_AGENT_ARTIFACT_VERIFIED = "agf1"
 
     const val CAP_MOBILE_TEXT = "tw1"
     const val CAP_MOBILE_RECORD = "mrec1"
@@ -410,7 +420,7 @@ object MsgTypes {
         listOf(
             CAP_AGENT, CAP_MOBILE_TEXT, CAP_AGENT_SESSION, CAP_AGENT_QUEUE,
             CAP_AGENT_WORKSPACE, CAP_AGENT_GRANT, CAP_AGENT_SESSION_PAGE, CAP_LINK,
-            CAP_GROUP_TEXT_ATTRIBUTED, CAP_AGENT_INVOKE,
+            CAP_GROUP_TEXT_ATTRIBUTED, CAP_AGENT_INVOKE, CAP_AGENT_ARTIFACT_VERIFIED,
         )
 
     /**

@@ -957,10 +957,14 @@ internal class NodeOutbound(
     )
 
     /**
-     * 发一条产物元数据（PPE-1 §6.7，类型 `agent-artifact`，cap `agn1`）。
+     * 发一条产物元数据（PPE-1 §6.7，类型 `agent-artifact`，cap `agn1`；校验增量 `agf1`）。
      *
      * 归 `agn1` 而不是 `agq1`：它和 §6.1/§6.2 一样只描述会话，不带控制语义。
      * **调用方必须先发 `file-msg`**，这里的 `fileId` 只是引用；本方法不代发二进制。
+     *
+     * [sha256] / [summary] 是 M7-T3 增补：**对端 caps 的门控在调用方**
+     * （`NodeRuntime.sendAgentArtifact` 查 `agf1`，先例 attachment/att1）—— 对不声明
+     * `agf1` 的对端发新键 = 整帧拒收 + 队列重传。
      */
     suspend fun sendAgentArtifact(
         peerId: String,
@@ -970,12 +974,14 @@ internal class NodeOutbound(
         fileId: String? = null,
         bytes: Long? = null,
         mime: String? = null,
+        sha256: String? = null,
+        summary: String? = null,
     ): SendOutcome = messenger.sendUserMessage(
         peerId,
         makeEnvelope(
             MsgTypes.AGENT_ARTIFACT,
             selfId(),
-            Codec.agentArtifactPayload(sessionId, artifactId, name, fileId, bytes, mime),
+            Codec.agentArtifactPayload(sessionId, artifactId, name, fileId, bytes, mime, sha256, summary),
         ),
     )
 

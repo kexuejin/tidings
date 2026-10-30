@@ -214,6 +214,22 @@ internal val EXTENSION_VECTORS: List<GoldenVector> = listOf(
         json = """{"v":1,"type":"agent-artifact","id":"33333333-3333-4333-8333-333333333333","from":"11111111-1111-4111-8111-111111111111","ts":1700000000000,"payload":{"sessionId":"s-1","artifactId":"a-1","fileId":"f-1","name":"report.md","bytes":2048,"mime":"text/markdown"}}""",
     ),
     GoldenVector(
+        name = "agent-artifact-verified",
+        note = "M7-T3（cap agf1）：带 sha256 + summary 的完整形状；追加不改写 —— 旧向量因 encodeDefaults=false 字节逐位不变",
+        known = true,
+        decodes = true,
+        reason = null,
+        json = """{"v":1,"type":"agent-artifact","id":"33333333-3333-4333-8333-333333333333","from":"11111111-1111-4111-8111-111111111111","ts":1700000000000,"payload":{"sessionId":"s-1","artifactId":"a-1","fileId":"f-1","name":"report.md","bytes":2048,"mime":"text/markdown","sha256":"a1b2c3d4e5f60718293a4b5c6d7e8f90a1b2c3d4e5f60718293a4b5c6d7e8f90","summary":"构建报告"}}""",
+    ),
+    GoldenVector(
+        name = "neg-agent-artifact-verified-bad-sha",
+        note = "M7-T3 负向量：sha256 大写/不足 64 位 ⇒ 整帧拒 —— 取值域校验真的在拒（isSha256Hex 单一定义）",
+        known = true,
+        decodes = false,
+        reason = "bad-payload:agent-artifact",
+        json = """{"v":1,"type":"agent-artifact","id":"33333333-3333-4333-8333-333333333333","from":"11111111-1111-4111-8111-111111111111","ts":1700000000000,"payload":{"sessionId":"s-1","artifactId":"a-1","fileId":"f-1","name":"report.md","mime":"text/markdown","sha256":"A1B2C3D4E5F6","summary":"x"}}""",
+    ),
+    GoldenVector(
         name = "agent-unknown-extension",
         note = "PPE-1 容忍契约：本端**未实现**的扩展类型（如未来的 `agent-batch`）照样解码通过、known=false、静默忽略、不崩",
         known = false,

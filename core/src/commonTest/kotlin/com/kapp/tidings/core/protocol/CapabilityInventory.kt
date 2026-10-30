@@ -25,6 +25,7 @@ internal object CapabilityInventory {
     val constants: Map<String, String> = mapOf(
         "CAP_AGENT" to MsgTypes.CAP_AGENT,
         "CAP_AGENT_SESSION" to MsgTypes.CAP_AGENT_SESSION,
+        "CAP_AGENT_ARTIFACT_VERIFIED" to MsgTypes.CAP_AGENT_ARTIFACT_VERIFIED,
         "CAP_MOBILE_TEXT" to MsgTypes.CAP_MOBILE_TEXT,
         "CAP_MOBILE_RECORD" to MsgTypes.CAP_MOBILE_RECORD,
         "CAP_TABLE_TEXT" to MsgTypes.CAP_TABLE_TEXT,
