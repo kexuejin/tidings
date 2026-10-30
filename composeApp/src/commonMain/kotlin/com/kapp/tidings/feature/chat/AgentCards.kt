@@ -16,6 +16,10 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.semantics.contentDescription
@@ -26,9 +30,13 @@ import androidx.compose.ui.unit.dp
 import com.kapp.tidings.core.protocol.AgentExecAuthorizer
 import com.kapp.tidings.domain.model.MessageUi
 import com.kapp.tidings.generated.resources.Res
+import com.kapp.tidings.generated.resources.card_artifact_title
 import com.kapp.tidings.generated.resources.card_decided_by
+import com.kapp.tidings.generated.resources.card_details_hide
+import com.kapp.tidings.generated.resources.card_details_show
 import com.kapp.tidings.generated.resources.card_diff_summary
 import com.kapp.tidings.generated.resources.card_diff_title
+import com.kapp.tidings.generated.resources.card_expired
 import com.kapp.tidings.generated.resources.card_pending_confirm
 import com.kapp.tidings.generated.resources.card_progress_label
 import com.kapp.tidings.generated.resources.card_rev_tag
@@ -37,6 +45,7 @@ import com.kapp.tidings.generated.resources.card_status_done
 import com.kapp.tidings.generated.resources.card_status_failed
 import com.kapp.tidings.generated.resources.card_status_pending
 import com.kapp.tidings.generated.resources.card_status_running
+import com.kapp.tidings.generated.resources.card_waiting_host
 import com.kapp.tidings.ui.components.AppButton
 import com.kapp.tidings.ui.components.AppButtonSize
 import com.kapp.tidings.ui.components.AppButtonTone
@@ -376,6 +385,74 @@ fun cardActionEligibilityOf(
     return if (permitted) CardActionEligibility.Actionable else CardActionEligibility.ReadOnly
 }
 
+/**
+ * 一张卡**这一刻该画成什么样**（渲染决策，纯函数）。
+ *
+ * 为什么把它从 Composable 里抽出来：`AgentCardBubble` 有五条「画不画」的分支
+ * （有没有动作通路 / 有没有资格 / 过没过期 / 是不是回声 / 有没有已决人），
+ * 写在 `if` 里就只能靠截图验；抽成数据以后，判据是普通的 assert，
+ * 帧只是它的投影。这也是本仓 `cardActionUiOf` 一开始就用的形状。
+ */
+data class CardRenderPlan(
+    /** 画按钮组吗？无资格、agent 回声、壳没有动作通路 —— 三者任一都不画。 */
+    val showActions: Boolean,
+    /** 画了的话按钮能不能点。过期 ⇒ 全部禁用（`cardActionUiOf` 的三态之上再压一层）。 */
+    val actionsEnabled: Boolean,
+    /** 过期标签：`expiresAt` 已到。 */
+    val showExpiredTag: Boolean,
+    /** 审批卡 + 无资格 ⇒ 「等待机主处理」。没有这行，只读态就是一张「不知道为什么没有按钮」的卡。 */
+    val showWaitingForHost: Boolean,
+)
+
+/**
+ * 算这张卡的渲染决策。
+ *
+ * [hasActionChannel] 是「这个壳有没有动作通路」：没有通路时按钮组整块不画
+ * （按下去没反应的按钮比没有更糟，M3 既有原则）。
+ * [now] 由调用方给，组件自己不读时钟 —— 与 [isCardExpired] 同一条理由。
+ */
+fun cardRenderPlanOf(
+    card: AgentCardUi,
+    eligibility: CardActionEligibility,
+    hasActionChannel: Boolean,
+    now: Long,
+): CardRenderPlan {
+    val expired = isCardExpired(card.expiresAt, now)
+    val hasActions = card.actions.isNotEmpty()
+    return CardRenderPlan(
+        showActions = hasActionChannel && hasActions && eligibility == CardActionEligibility.Actionable,
+        actionsEnabled = !expired,
+        showExpiredTag = expired,
+        showWaitingForHost = hasActions && eligibility == CardActionEligibility.ReadOnly,
+    )
+}
+
+/**
+ * 产物体积的人读形式（ASCII 单位，不翻译：`KB`/`MB` 在两种语言里是同一个词）。
+ *
+ * 只在卡片里显示，不进协议、不参与判定 —— 所以它容忍「不知道」（null 由调用方跳过）。
+ */
+fun formatArtifactSize(bytes: Long): String = when {
+    bytes < 1024L -> "$bytes B"
+    bytes < 1024L * 1024L -> "${bytes / 1024}.${(bytes % 1024) * 10 / 1024} KB"
+    bytes < 1024L * 1024L * 1024L -> "${bytes / (1024L * 1024L)}.${(bytes % (1024L * 1024L)) * 10 / (1024L * 1024L)} MB"
+    else -> "${bytes / (1024L * 1024L * 1024L)}.${(bytes % (1024L * 1024L * 1024L)) * 10 / (1024L * 1024L * 1024L)} GB"
+}
+
+// ── 插件文本字段的渲染上限（§7）─────────────────────────────────────────
+//
+// 卡片体是**插件定义**的：一条超长 label / summary 不该把整张卡撑破，也不该把
+// 同一屏的其它消息挤走。上限集中在这里，不散落在各 `maxLines` 调用点 ——
+// 改上限时只改一处，也不会出现「标题收 2 行、横幅收 5 行」这种不一致。
+private const val CARD_TITLE_MAX_LINES = 2
+private const val CARD_BANNER_MAX_LINES = 3
+private const val CARD_STEP_LABEL_MAX_LINES = 2
+private const val CARD_DIFF_SUMMARY_MAX_LINES = 2
+private const val CARD_ARTIFACT_NAME_MAX_LINES = 1
+
+/** 摘要超过这个字符数才给「展开」入口：短摘要配一个展开按钮是骗点击。 */
+private const val CARD_DIFF_SUMMARY_EXPAND_OVER = 48
+
 // ── 审批锁三态（§5.3）────────────────────────────────────────────────────
 
 enum class CardActionLock {
@@ -420,8 +497,13 @@ fun cardActionUiOf(card: AgentCardUi, pendingActions: Set<String>, actionId: Str
  * 手机与桌面**共用这一份**（AGENTS §2.6：内容共享、外壳参数化）—— 两条壳都从
  * [com.kapp.tidings.feature.chat.ChatScreen] 的消息流里走到这里，没有第二份实现。
  *
- * [onAction] 是可空槽：null = 这个壳还没有动作通路（跨端派发 M4 才接），
- * 按钮组**整块不画** —— 一个按下去没反应的按钮比没有更糟（DeadButtonGuard 同一条规矩）。
+ * [onAction] 是可空槽：null = 这个壳还没有动作通路，按钮组**整块不画** ——
+ * 一个按下去没反应的按钮比没有更糟（DeadButtonGuard 同一条规矩）。
+ * [eligibility] 是「这个人有没有资格驱动这个 agent」（§4.8 的结论，判定在宿主侧）：
+ * [CardActionEligibility.ReadOnly] 同样整块不画按钮，而不是画一颗灰按钮。
+ * [now] 由调用方给（会话里已经有一份时钟），组件自己不读 —— 过期子态因此可测、可截帧。
+ *
+ * 画不画、能不能点，全部由 [cardRenderPlanOf] 一个纯函数决定；这里只负责把它画出来。
  * `pendingActions` 由调用方持有（会话切换即重建），本组件不存状态。
  */
 @Composable
@@ -429,9 +511,17 @@ fun AgentCardBubble(
     card: AgentCardUi,
     pendingActions: Set<String>,
     onAction: ((card: AgentCardUi, actionId: String) -> Unit)?,
+    eligibility: CardActionEligibility = CardActionEligibility.Actionable,
+    now: Long = 0L,
     modifier: Modifier = Modifier,
 ) {
     val sp = LocalAppSpacing.current
+    val plan = cardRenderPlanOf(
+        card = card,
+        eligibility = eligibility,
+        hasActionChannel = onAction != null,
+        now = now,
+    )
     Surface(
         shape = ShapeRoles.ListCard,
         color = MaterialTheme.colorScheme.surface,
@@ -442,8 +532,8 @@ fun AgentCardBubble(
             modifier = Modifier.padding(horizontal = sp.md, vertical = sp.sm),
             verticalArrangement = Arrangement.spacedBy(sp.sm),
         ) {
-            // 头行：标题 + 版本小字。没有标题就不画头行 —— 不编一个。
-            if (card.title != null || card.rev > 0) {
+            // 头行：标题 + 版本小字（+ 过期标签）。没有标题就不画头行 —— 不编一个。
+            if (card.title != null || card.rev > 0 || plan.showExpiredTag) {
                 Row(verticalAlignment = Alignment.CenterVertically) {
                     if (card.title != null) {
                         Text(
@@ -451,11 +541,19 @@ fun AgentCardBubble(
                             style = MaterialTheme.typography.titleSmall,
                             fontWeight = FontWeight.SemiBold,
                             modifier = Modifier.weight(1f),
-                            maxLines = 2,
+                            maxLines = CARD_TITLE_MAX_LINES,
                             overflow = TextOverflow.Ellipsis,
                         )
                     } else {
                         Box(Modifier.weight(1f))
+                    }
+                    if (plan.showExpiredTag) {
+                        Text(
+                            text = stringResource(Res.string.card_expired),
+                            style = MaterialTheme.typography.labelSmall,
+                            color = MaterialTheme.colorScheme.error,
+                            modifier = Modifier.padding(end = sp.xs),
+                        )
                     }
                     Text(
                         text = stringResource(Res.string.card_rev_tag, card.rev),
@@ -470,6 +568,9 @@ fun AgentCardBubble(
                 CardStepListColumn(card.steps)
             }
             card.diff?.let { CardDiffViewerRow(it) }
+            if (card.artifacts.isNotEmpty()) {
+                CardArtifactRows(card.artifacts)
+            }
             // 宿主判定的知情行：它不是按钮，是「这件事已被谁定了」的事实 ——
             // 就算这个壳没有动作通路（onAction == null），它也照画。
             card.decidedBy?.let { decided ->
@@ -479,8 +580,16 @@ fun AgentCardBubble(
                     color = MaterialTheme.colorScheme.primary,
                 )
             }
-            if (onAction != null && card.actions.isNotEmpty()) {
-                CardButtonGroupRow(card, pendingActions, onAction)
+            // 只读态必须说清「为什么没有按钮」：否则它就是一张看起来坏了的卡。
+            if (plan.showWaitingForHost) {
+                Text(
+                    text = stringResource(Res.string.card_waiting_host),
+                    style = MaterialTheme.typography.labelMedium,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+            }
+            if (plan.showActions) {
+                CardButtonGroupRow(card, pendingActions, plan.actionsEnabled, onAction!!)
             }
         }
     }
@@ -504,6 +613,8 @@ private fun CardBannerRow(banner: AgentCardBanner) {
         Text(
             text = banner.text,
             style = MaterialTheme.typography.bodySmall,
+            maxLines = CARD_BANNER_MAX_LINES,
+            overflow = TextOverflow.Ellipsis,
             modifier = Modifier.fillMaxWidth().padding(horizontal = sp.sm, vertical = sp.sm6),
         )
     }
@@ -576,7 +687,7 @@ private fun CardStepRow(step: AgentCardStep) {
         Text(
             text = step.label,
             style = MaterialTheme.typography.bodyMedium,
-            maxLines = 1,
+            maxLines = CARD_STEP_LABEL_MAX_LINES,
             overflow = TextOverflow.Ellipsis,
             modifier = Modifier.weight(1f),
         )
@@ -590,10 +701,19 @@ private fun CardStepRow(step: AgentCardStep) {
     }
 }
 
-/** 原子 4/5 · DiffViewer（§7.3）：路径/摘要一行，+ − 计数靠色。 */
+/**
+ * 原子 4/5 · DiffViewer（§7.3）：路径/摘要一行，+ − 计数靠色。
+ *
+ * 摘要默认收 [CARD_DIFF_SUMMARY_MAX_LINES] 行；**只有真的可能被截断时才给「展开」**
+ * （设计稿 v2 §7 的「明细折叠入口」）。短摘要配一个展开按钮是骗点击 ——
+ * 点开以后什么都没变，用户会以为按钮坏了。
+ */
 @Composable
 private fun CardDiffViewerRow(diff: AgentCardDiff) {
     val sp = LocalAppSpacing.current
+    var expanded by remember(diff.summary) { mutableStateOf(false) }
+    val summary = diff.summary
+    val expandable = summary != null && summary.length > CARD_DIFF_SUMMARY_EXPAND_OVER
     Surface(shape = ShapeRoles.DayCell, color = MaterialTheme.colorScheme.surfaceVariant) {
         Column(
             modifier = Modifier.fillMaxWidth().padding(horizontal = sp.sm, vertical = sp.sm6),
@@ -628,24 +748,79 @@ private fun CardDiffViewerRow(diff: AgentCardDiff) {
                     )
                 }
             }
-            diff.summary?.let {
+            if (summary != null) {
                 Text(
-                    text = stringResource(Res.string.card_diff_summary, it, diff.additions ?: 0, diff.deletions ?: 0),
+                    text = stringResource(Res.string.card_diff_summary, summary, diff.additions ?: 0, diff.deletions ?: 0),
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    maxLines = 2,
+                    maxLines = if (expanded) Int.MAX_VALUE else CARD_DIFF_SUMMARY_MAX_LINES,
                     overflow = TextOverflow.Ellipsis,
+                )
+            }
+            if (expandable) {
+                AppButton(
+                    text = stringResource(
+                        if (expanded) Res.string.card_details_hide else Res.string.card_details_show,
+                    ),
+                    onClick = { expanded = !expanded },
+                    size = AppButtonSize.Small,
+                    tone = AppButtonTone.Neutral,
                 )
             }
         }
     }
 }
 
+/** 原子 6/6 · ArtifactList（设计稿 v2 §3 的 `result` 卡）：产物名 + 类型/体积。 */
+@Composable
+private fun CardArtifactRows(artifacts: List<AgentCardArtifact>) {
+    val sp = LocalAppSpacing.current
+    Column(verticalArrangement = Arrangement.spacedBy(sp.sm6)) {
+        Text(
+            text = stringResource(Res.string.card_artifact_title),
+            style = MaterialTheme.typography.labelSmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+        )
+        artifacts.forEach { artifact ->
+            Row(
+                horizontalArrangement = Arrangement.spacedBy(sp.sm),
+                verticalAlignment = Alignment.CenterVertically,
+                modifier = Modifier.fillMaxWidth(),
+            ) {
+                Text(
+                    text = artifact.name,
+                    style = MaterialTheme.typography.bodySmall,
+                    maxLines = CARD_ARTIFACT_NAME_MAX_LINES,
+                    overflow = TextOverflow.Ellipsis,
+                    modifier = Modifier.weight(1f),
+                )
+                val meta = listOfNotNull(
+                    artifact.mime,
+                    artifact.bytes?.let { formatArtifactSize(it) },
+                ).joinToString(SEP_META)
+                if (meta.isNotEmpty()) {
+                    Text(
+                        text = meta,
+                        style = MaterialTheme.typography.labelSmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        maxLines = 1,
+                    )
+                }
+            }
+        }
+    }
+}
+
+/** 元信息分隔符：一处定义，改样式不用翻三个调用点。 */
+private const val SEP_META = " · "
+
 /** 原子 5/5 · ButtonGroup（§7.3）：审批防重的 UI 落点（三态见 [cardActionUiOf]）。 */
 @Composable
 private fun CardButtonGroupRow(
     card: AgentCardUi,
     pendingActions: Set<String>,
+    /** 过期时整组禁用：这是 [CardRenderPlan.actionsEnabled]，不是每颗按钮各自的事。 */
+    actionsEnabled: Boolean,
     onAction: (card: AgentCardUi, actionId: String) -> Unit,
 ) {
     val sp = LocalAppSpacing.current
@@ -661,7 +836,7 @@ private fun CardButtonGroupRow(
                     else -> action.label
                 },
                 onClick = { onAction(card, action.actionId) },
-                enabled = !ui.disabled,
+                enabled = actionsEnabled && !ui.disabled,
                 size = AppButtonSize.Small,
                 tone = if (action.approval) AppButtonTone.Primary else AppButtonTone.Neutral,
                 modifier = if (index == 0) Modifier.weight(1f) else Modifier.weight(1f),

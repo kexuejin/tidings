@@ -175,4 +175,76 @@ class AgentCardPolicyTest {
             assertEquals(expected, cardActionEligibilityOf(senderIsAgent = false, verdict = verdict), "$verdict")
         }
     }
+
+    // ── 渲染决策（阶段 B：把「画不画」从 Composable 里抽成数据）────────────────
+
+    private val actionableCard = """
+        {"cardId":"c","rev":1,"type":"approval","actions":[{"actionId":"allow","label":"Allow","approval":true}]}
+    """.trimIndent()
+
+    @Test
+    fun readOnlyNeverDrawsTheButtonGroup() {
+        // 无资格 = **整块不画**，不是画一颗灰按钮（M3 的既有原则）。
+        // 但要说清「为什么没有按钮」，否则这张卡看起来就是坏的。
+        val plan = cardRenderPlanOf(
+            card = parse(actionableCard),
+            eligibility = CardActionEligibility.ReadOnly,
+            hasActionChannel = true,
+            now = 0L,
+        )
+        assertFalse(plan.showActions, "无资格时按钮组整块不存在")
+        assertTrue(plan.showWaitingForHost, "只读态要有一行「等待机主处理」")
+    }
+
+    @Test
+    fun noActionChannelMeansNoButtonsEvenForTheHost() {
+        // 壳没有动作通路（onAction == null）时，机主也看不到按钮 —— 能点但不通，
+        // 与「没有」是同一件事。
+        val plan = cardRenderPlanOf(
+            card = parse(actionableCard),
+            eligibility = CardActionEligibility.Actionable,
+            hasActionChannel = false,
+            now = 0L,
+        )
+        assertFalse(plan.showActions)
+        assertFalse(plan.showWaitingForHost, "没有通路不是「没资格」，不该挂等待机主那行")
+    }
+
+    @Test
+    fun agentEchoDrawsNothingInteractive() {
+        val plan = cardRenderPlanOf(
+            card = parse(actionableCard),
+            eligibility = CardActionEligibility.AgentEcho,
+            hasActionChannel = true,
+            now = 0L,
+        )
+        assertFalse(plan.showActions)
+        assertFalse(plan.showWaitingForHost)
+    }
+
+    @Test
+    fun expiredStillDrawsTheButtonsButDisablesThem() {
+        // 过期**不隐藏**按钮组：用户要看得见「本来能点、现在不能了」，
+        // 这比整块消失更能解释发生了什么。禁用是整组的事，不是每颗按钮各自判断。
+        val card = parse(
+            """{"cardId":"c","rev":1,"expiresAt":1000,
+                "actions":[{"actionId":"allow","label":"Allow","approval":true}]}""",
+        )
+        val expired = cardRenderPlanOf(card, CardActionEligibility.Actionable, hasActionChannel = true, now = 1_000L)
+        assertTrue(expired.showActions)
+        assertFalse(expired.actionsEnabled)
+        assertTrue(expired.showExpiredTag)
+
+        val live = cardRenderPlanOf(card, CardActionEligibility.Actionable, hasActionChannel = true, now = 999L)
+        assertTrue(live.actionsEnabled)
+        assertFalse(live.showExpiredTag)
+    }
+
+    @Test
+    fun artifactSizesAreHumanReadable() {
+        assertEquals("512 B", formatArtifactSize(512L))
+        assertEquals("1.0 KB", formatArtifactSize(1024L))
+        assertEquals("1.5 KB", formatArtifactSize(1536L))
+        assertEquals("2.0 MB", formatArtifactSize(2L * 1024L * 1024L))
+    }
 }
