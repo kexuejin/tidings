@@ -254,6 +254,64 @@ We will acknowledge receipt within 48 hours and work with you on validation and 
   目前**没有拒绝回执** —— 那条「为什么没执行」要等跨端拒绝回执补上
   （见 `PROTOCOL-COVERAGE.md` §五）。
 
+### 审批面：谁能批、批一次管多久（M3–M5）
+
+「能执行」与「能替别人批准」是**两条独立的判据**，不要混着读：
+
+| 问题 | 唯一判据 | 在哪 |
+|---|---|---|
+| 这个请求**能不能执行** | `AgentExecAuthorizer` | `core` · `AgentExecAuthorizer.kt` |
+| 这个人**能不能处置**这条待批 | `canApproveAgentRequest(isLocalHost, isMyDevice, access, delegatedApproval)` | `core` · `AgentApprovalAuthority.kt` |
+
+- **放行名单只有四类**：本机宿主（它就在自己机器上）、`isMyDevice` 标过的设备、
+  `access == owner`、`access == admin` **且**开了委托审批。其余一律 false。
+- **`rw` 不在审批名单里**：能对话、能派活不等于能替宿主批准高危操作 —— 这正是
+  这条判据存在的理由。`admin` 没开委托审批时同样拒绝。
+- **fail-closed**：四项入参都是"已确认的事实"，任何一项拿不到就必须传最保守取值
+  （`null` / `false`），判据对未知一律返回 false。函数体把每一档 `access` 显式列出来，
+  就是为了"以后加了新档不会自动放行"。
+- **有效期是另一条判据**：`isAgentApprovalExpired(expiresAt, now)`（`expiresAt == 0`
+  表示对端没声明，按永不过期处理）。处置时必须"有权"**且**"还来得及"同时成立，
+  合成判据是 `mayDecideAgentApproval` —— 客户端画按钮、宿主应用回执，都用它。
+
+**回执的取值域只有一份**（`core` · `AgentAckKinds`，8 个值）：`queued` / `approved` /
+`denied` / `cancelled` / `received`，加上本端增补的 `allow_session`（本会话免审）/
+`revoke_session`（撤销本会话免审）/ `always`（**这个 tool 以后免审**）。增补值复用
+`kind` 一个键，不新增帧、不新增键。
+
+> **这里踩过一次**：`CodecAgent` 曾经用一份写死的五值白名单校验 `kind`，而
+> `allow_session` / `revoke_session` 早就在用 —— 于是「本次免审」的回执**过不了线**：
+> 发送侧构造合法、`sendAgentAck` 不校验，拒收只发生在对端解码时，两端都不报错。
+> 现在取值域只有一个 `AgentAckKinds.VALUES`，编解码与面板共用它。
+
+**`always` 的粒度是 `(设备, agent, tool)`，不是 agent**（`agentNode` ·
+`AgentToolApprovalStore`）：
+
+- **必须带 tool 名**：「允许它跑 `git status`」与「允许它跑 `rm -rf`」是同一个 agent 的
+  两个动作，风险差着量级。按 agent 免批 = 用户为了少点一次"同意看目录"，把整个 agent
+  的高危动作一并放行。`tool` 为空时 `remember` 直接拒绝写入、`isAlwaysApproved`
+  永不命中 —— 不静默写成"通配"。
+- **必须带 nodeId**：只按 (agent, tool) 记，等于 A 按过一次、B 的设备从此也不用问，
+  而 B 从没同意过。授权的单位是**设备**（与 `AgentGrantStore` 同一立场）。
+- **只在回执真的生效时记**：挂在 `AgentSessionRegistry` 的单一应用点上，被拒的
+  `always`（无权/过期/重复）不留规则 —— 否则一条被拒的放宽会静默变成永久放宽。
+- **读不回来时是"要问"**：文件缺失 / 读不出 / 解析不了 ⇒ 空表。丢一条免批只会让
+  用户多点一次；反方向则是替用户批准。上限 500 条（防坏文件撑爆控制面），落盘走
+  临时文件 + rename，临时文件与目标文件都设 0600 —— 这份文件是**安全策略**，
+  同机其它用户能写它，就等于能给自己免批。
+- 命中规则时宿主的处置是 `status=auto-approved` 且**不向对端发 `sent`**：
+  「已送达」与「对方知道了」是两件事，本地免批不代表对端收到过任何东西。
+
+**已知边界（如实）**：
+
+1. 手机端**没有**「始终允许」的入口 —— 宿主侧的表、`kind=always`、入口短路都已就位，
+   缺的是审批行那颗按钮（版面：393dp 上已有三颗）。见 `docs/plans/GOAL.md` S4-2b。
+2. 免批表在界面上**没有列表/撤销入口**，只有 `AgentToolApprovalStore.revoke` 这个 API。
+   要回收只能等面板补上，或在数据目录里删 `agent-tool-approvals.json`（整表清空）。
+3. 「过期」的边界在仓里有**两种口径**：审批用开区间 `now > expiresAt`
+   （`isAgentApprovalExpired`），会话卡片用闭区间 `now >= expiresAt`
+   （`AgentCards.isCardExpired`）。同一秒的行为因此不同；未统一，先记在这里。
+
 ### 冒烟配置的回收提示（2026-10-30）
 
 M4 真机冒烟为打通 `@agent` 回路做过三处**产品配置**（非代码，逐项留了备份与读数）：

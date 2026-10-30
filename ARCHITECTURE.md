@@ -297,6 +297,24 @@ A 宿主把子任务派到 B 宿主的插件上执行、结果回传，由发起
   （`OWNER` / `RW` / 面板批准）自动放行，群主与管理员不默认放行，未授权请求进
   宿主申请台账待机主点头。
 
+### 7.5 审批面与免批表（M5 起）
+
+派单网道（§7.4）解决「请求能不能到达」，审批面解决「到了之后谁点头、点一次管多久」。
+两条判据分开，都在 `:core`，客户端与宿主共用同一份实现：
+
+- **谁能处置**：`canApproveAgentRequest`（`AgentApprovalAuthority.kt`）—— 本机宿主 /
+  `isMyDevice` / `owner` / 开了委托审批的 `admin`；`rw` 与群角色都不在里面。
+  画不画按钮与认不认回执都走它，两边各写一份的结果是「手机上只读、看板上能点」。
+- **还来不来得及**：`isAgentApprovalExpired`；处置要求两条同时成立
+  （`mayDecideAgentApproval`）。
+- **回执取值域**：`AgentAckKinds`（8 值，含本端增补的 `allow_session` /
+  `revoke_session` / `always`），编解码与面板共用这一个集合。
+- **免批表**（`:agentNode` 的 `AgentToolApprovalStore`，数据目录
+  `agent-tool-approvals.json`）：键是 `(设备 nodeId, agentKey?, tool)`，只在回执真的
+  生效时写入，读不回来就是空表（退回"要问"）。命中时不打扰对端，本地记
+  `auto-approved`。
+- 威胁模型、fail-closed 方向与三条已知边界见 `SECURITY.md`「审批面」一节。
+
 ---
 
 ## 8. 持久化存储设计
