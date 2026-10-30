@@ -169,6 +169,61 @@ class AgentOfflineFeedbackTest {
     }
 
     @Test
+    fun anOfflinePluginIsAnsweredImmediatelyInsteadOfLeasingIntoTheVoid() = runBlocking {
+        // S4-4b（矩阵 §7.6 真机读数：插件判离线后 @ 派单，14 分钟内无卡、无横幅、无超时卡）。
+        // 派单前先查插件在线状态：offline ⇒ 立刻一条 failed 横幅，且**不再派进租约**。
+        val host = controller()
+        val groupId = hostedGroup(host)
+        host.uiTexts = OfflineTexts
+        host.invokeGrantAllows = { _, _ -> true }
+        val dispatched = java.util.concurrent.atomic.AtomicInteger()
+        host.invokeExecutor = object : AgentInvokeExecutor {
+            override suspend fun execute(request: AgentInvokeTaskRequest): AgentInvokeExecution {
+                dispatched.incrementAndGet()
+                throw IllegalStateException("判离线就不许把活派进租约 —— 那正是 14 分钟沉默的来源")
+            }
+        }
+        host.invokePluginPresenceOf = { agentId -> if (agentId == "gpu-runner") PluginPresence.OFFLINE else null }
+
+        host.invokeCtl.handleInboundAgentIntent(
+            groupId, phoneNode, intentOf("gpu-runner"), messageText = "@gpu-runner go", messageId = "s4-4b-off-1",
+        )
+
+        com.kapp.tidings.testutil.awaitUntil("离线插件也要立刻有回声") { host.agentMessages(groupId).isNotEmpty() }
+        val row = host.agentMessages(groupId).single()
+        assertEquals("failed", row.agentState, "插件离线 = 宿主接不了这个活：协议事实是 failed")
+        assertTrue(row.text.isNotBlank(), "正文非空 —— 空正文等于什么都没说")
+        assertEquals(0, dispatched.get(), "判离线就不许把活派进租约")
+        host.stop()
+    }
+
+    @Test
+    fun onlineOrUnknownPresenceKeepsDispatchingWithoutBanner() = runBlocking {
+        // online 与「状态拿不到」都必须走原路（派单进租约）—— 查不到不拒派，否则
+        // 一个状态桥的抖动会把还能用的插件整条封死。
+        val host = controller()
+        val groupId = hostedGroup(host)
+        host.uiTexts = OfflineTexts
+        host.invokeGrantAllows = { _, _ -> true }
+        val executed = java.util.concurrent.atomic.AtomicInteger()
+        host.invokeExecutor = object : AgentInvokeExecutor {
+            override suspend fun execute(request: AgentInvokeTaskRequest): AgentInvokeExecution {
+                executed.incrementAndGet()
+                return AgentInvokeExecution(status = InvokeLeaseStates.DONE)
+            }
+        }
+        host.invokePluginPresenceOf = { agentId -> if (agentId == "gpu-runner") PluginPresence.ONLINE else null }
+
+        host.invokeCtl.handleInboundAgentIntent(
+            groupId, phoneNode, intentOf("gpu-runner"), messageText = "@gpu-runner go", messageId = "s4-4b-on-1",
+        )
+
+        com.kapp.tidings.testutil.awaitUntil("online 照常派单") { executed.get() == 1 }
+        assertEquals(0, host.agentMessages(groupId).size, "online 正常执行（done 无卡片）不许出横幅")
+        host.stop()
+    }
+
+    @Test
     fun aSuccessfulDispatchWithACardAddsNoBanner() = runBlocking {
         val host = controller()
         val groupId = hostedGroup(host)

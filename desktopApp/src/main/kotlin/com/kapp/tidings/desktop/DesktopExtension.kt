@@ -624,6 +624,19 @@ internal class DesktopExtension(
             // 执行方向：本机承接派单 = 找本机插件 → executePluginTask。与
             // `/v1/plugin/task`（面板派单）走**同一个**实现，台账同源 —— 两处各写一份，
             // 迟早漂成「面板派单有台账、执行桥派单没台账」。
+            // S4-4b：派单前先看目标插件在不在（`/v1/plugins` 的 status，PluginRegistry 按 healthz 探活维护）。
+            // offline ⇒ 域层立刻回 failed 横幅；unknown/online ⇒ 域层照旧派单，租约兜底。
+            controller.invokePluginPresenceOf = { agentId ->
+                created.pluginForAgent(agentId)?.status?.let { status ->
+                    when (status) {
+                        com.kapp.tidings.agent.plugins.PluginRegistry.STATUS_ONLINE ->
+                            com.kapp.tidings.domain.PluginPresence.ONLINE
+                        com.kapp.tidings.agent.plugins.PluginRegistry.STATUS_OFFLINE ->
+                            com.kapp.tidings.domain.PluginPresence.OFFLINE
+                        else -> null
+                    }
+                }
+            }
             controller.invokeExecutor = object : com.kapp.tidings.domain.AgentInvokeExecutor {
                 override suspend fun execute(
                     request: com.kapp.tidings.domain.AgentInvokeTaskRequest,
@@ -738,6 +751,7 @@ internal class DesktopExtension(
         controller.onAgentPrompt = null
         // M4 跨端派单五桥随控制面一起撤：留着它们，域层会把派单交给一个已停止的控制面。
         controller.invokeExecutor = null
+        controller.invokePluginPresenceOf = null
         controller.invokeGrantAllows = null
         controller.invokeExecPolicyOf = null
         controller.invokeRecordGrantRequest = null

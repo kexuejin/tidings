@@ -62,6 +62,14 @@ internal class RelayControllerAgentInvokeComponent(private val host: RelayContro
     var executor: AgentInvokeExecutor? = null
 
     /**
+     * 目标插件在线状态（S4-4b）：`(agentId) → [PluginPresence]` 取值或 null。
+     * null / 查不到 = 状态拿不到 ⇒ **一切照旧**（派单进租约兜底），绝不因查不到而拒派。
+     * 数据源是 agentNode `/v1/plugins` 的 `status`（`PluginRegistry` 按 healthz 探活维护），
+     * 由壳层装桥映射进来 —— :app 不依赖 :agentNode。
+     */
+    var pluginPresenceOf: ((agentId: String) -> String?)? = null
+
+    /**
      * 授权台账查询（§6.3 的「可信设备」判据）：`(agentKey, nodeId) → 是否已批准`。
      * null = 没有台账可用 ⇒ 只有 agent 宿主用户与群内成员判据兜底（fail-closed 方向）。
      */
@@ -321,6 +329,12 @@ internal class RelayControllerAgentInvokeComponent(private val host: RelayContro
             // **插件接不了活**（被 kill / 从没注册 / 宿主壳没接桥）：此前这里 `?: return`，
             // 群流里一条都没有 —— 点 @ 的人看到的和「派单成功、任务在跑」一模一样。
             // 设计稿 v2 §5「失败如实」：宿主回一条 agentState=failed 的轻横幅。
+            announceAgentGaveUp(groupId, agentId, seat.name, messageId, unavailable = true)
+            return
+        }
+        // S4-4b：插件**判离线**还把活派进租约 = 点 @ 的人盯着群流干等 10+ 分钟（矩阵 §7.6 真机读数）。
+        // 立刻回 agentState=failed 的轻横幅；online / 状态拿不到 ⇒ 照旧派单（查不到不拒派，租约兜底）。
+        if (pluginPresenceOf?.invoke(agentId) == PluginPresence.OFFLINE) {
             announceAgentGaveUp(groupId, agentId, seat.name, messageId, unavailable = true)
             return
         }
@@ -970,6 +984,16 @@ data class AgentInvokeExecution(
  */
 interface AgentInvokeExecutor {
     suspend fun execute(request: AgentInvokeTaskRequest): AgentInvokeExecution
+}
+
+/**
+ * 插件在线取值域（S4-4b）：域层自己认得的两个词。取值与 agentNode `PluginRegistry`
+ * 的 `STATUS_ONLINE` / `STATUS_OFFLINE` 同形，由壳层装桥时映射进来（:app 不依赖
+ * :agentNode，映射落在 desktopApp；两套常量的同值关系由桌面测试钉死）。
+ */
+object PluginPresence {
+    const val ONLINE = "online"
+    const val OFFLINE = "offline"
 }
 
 /** 看板卡的构造键（发卡片那侧的纯函数，宿主是谁、任务是什么都从参数进）。 */

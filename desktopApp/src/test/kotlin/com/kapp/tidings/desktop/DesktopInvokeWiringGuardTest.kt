@@ -4,6 +4,7 @@ package com.kapp.tidings.desktop
 
 import com.kapp.tidings.testsupport.GuardSourceScan
 import kotlin.test.Test
+import kotlin.test.assertEquals
 import kotlin.test.assertTrue
 
 /**
@@ -51,6 +52,10 @@ class DesktopInvokeWiringGuardTest {
             source.contains("created.executePluginTask("),
             "执行必须走 executePluginTask 唯一实现：另写一份，台账就漂成两本",
         )
+        assertTrue(
+            source.contains("controller.invokePluginPresenceOf = "),
+            "插件在线状态桥必须装上（S4-4b）：没有它，插件判离线后派单照样干等租约 —— 真机读数是 14 分钟零反馈",
+        )
         assertTrue(source.contains("controller.invokeGrantAllows = "), "可信设备判据桥必须装上（§6.3）")
         assertTrue(source.contains("controller.invokeExecPolicyOf = "), "每 agent 执行范围桥必须装上（§6.3）")
         assertTrue(source.contains("controller.invokeRecordGrantRequest = "), "未授权申请桥必须装上（面板要能冒出待批项）")
@@ -58,10 +63,25 @@ class DesktopInvokeWiringGuardTest {
     }
 
     @Test
+    fun presenceVocabularyMatchesThePluginRegistry() {
+        // 域层的两个词必须与 agentNode `/v1/plugins` 的 status 同形 —— 映射错一个字母，
+        // S4-4b 的「离线即回声」就永远不触发。两套常量的同值关系在这里钉死。
+        assertEquals(
+            com.kapp.tidings.agent.plugins.PluginRegistry.STATUS_ONLINE,
+            com.kapp.tidings.domain.PluginPresence.ONLINE,
+        )
+        assertEquals(
+            com.kapp.tidings.agent.plugins.PluginRegistry.STATUS_OFFLINE,
+            com.kapp.tidings.domain.PluginPresence.OFFLINE,
+        )
+    }
+
+    @Test
     fun detachClearsEveryInvokeBridge() {
         val source = live()
         for (bridge in listOf(
             "controller.invokeExecutor = null",
+            "controller.invokePluginPresenceOf = null",
             "controller.invokeGrantAllows = null",
             "controller.invokeExecPolicyOf = null",
             "controller.invokeRecordGrantRequest = null",

@@ -324,6 +324,11 @@ class RelayController(
         get() = invokeCtl.executor
         set(value) { invokeCtl.executor = value }
 
+    /** 目标插件在线状态（S4-4b）：null = 状态拿不到，域层照旧派单（租约兜底）。 */
+    var invokePluginPresenceOf: ((agentId: String) -> String?)?
+        get() = invokeCtl.pluginPresenceOf
+        set(value) { invokeCtl.pluginPresenceOf = value }
+
     /** 可信设备判据：`(agentId, nodeId) → 是否已批准执行`。null = 没有台账可用。 */
     var invokeGrantAllows: ((agentId: String, nodeId: String) -> Boolean)?
         get() = invokeCtl.grantAllows
