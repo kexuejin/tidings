@@ -697,7 +697,7 @@ internal class RelayControllerAgentInvokeComponent(private val host: RelayContro
         host.scope.launch {
             val st = host._state.value
             val meta = st.settings.groups.firstOrNull { it.groupId == groupId }
-            val actorName = meta?.memberNicks?.get(decidedBy)?.takeIf { it.isNotBlank() } ?: decidedBy
+            val actorName = decidedDisplayName(decidedBy, meta?.memberNicks, st.selfNodeId, st.settings.nick)
             val agentName = meta?.virtualAgents.orEmpty().firstOrNull { it.agentId == agentId }?.name ?: agentId
             val text = runCatching { host.uiTexts.agentActionDeniedNotice(actorName, agentName) }
                 .getOrNull().orEmpty()
@@ -710,8 +710,7 @@ internal class RelayControllerAgentInvokeComponent(private val host: RelayContro
 
     /**
      * 判定结果的广播：**同 cardId、rev+1 的新帧**（原位刷新的存储语义，M1 定死：
-     * 追加式新行，不重写旧行）。决定人显示名用群成员昵称 —— 群里的人都认得昵称，
-     * nodeId 只在昵称缺失时兜底。
+     * 追加式新行，不重写旧行）。决定人显示名见 [decidedDisplayName]。
      */
     private fun broadcastDecision(cardId: String, actionId: String, groupId: String, agentId: String, decidedBy: String) {
         val st = host._state.value
@@ -721,7 +720,7 @@ internal class RelayControllerAgentInvokeComponent(private val host: RelayContro
             ?.card ?: return
         val currentRev = (latest["rev"] as? JsonPrimitive)?.contentOrNull?.toIntOrNull() ?: return
         val meta = st.settings.groups.firstOrNull { it.groupId == groupId }
-        val displayName = meta?.memberNicks?.get(decidedBy)?.takeIf { it.isNotBlank() } ?: decidedBy
+        val displayName = decidedDisplayName(decidedBy, meta?.memberNicks, st.selfNodeId, st.settings.nick)
         val next = JsonObject(
             latest.toMap() +
                 ("rev" to JsonPrimitive(currentRev + 1)) +
@@ -872,6 +871,31 @@ internal class AgentInvokeLeaseTable(private val now: () -> Long) {
         }
         return won
     }
+}
+
+/**
+ * 「已由 **X** 处理」里的 X 怎么取（卡片上给人看的那一格）。
+ *
+ * 顺序：**群成员昵称 → 本机自己的昵称 → nodeId 兜底**。
+ *
+ * 中间那一档是补上的：传进来的 `decidedBy` 是 nodeId，而**本机自己**既不在对端
+ * 表里（那张表装的是「别人」），也不一定被写进本群的 `memberNicks` —— 建群方点
+ * 自己那张卡时，两处都查不到，于是界面上直接出现「已由 46c23456-6e74-4a7c-… 处理」，
+ * 而用户明明给这台机器起过名字。`desktopApp` 的「可信设备」列表早就为同一个坑
+ * 补过一档本机昵称，卡片这一格当时漏了。
+ *
+ * 判据只认「名字」这一件事：台账、权限、防重仍然用 nodeId —— 把显示名当身份会
+ * 让两个同名设备互相当成对方。
+ */
+internal fun decidedDisplayName(
+    decidedBy: String,
+    memberNicks: Map<String, String>?,
+    selfNodeId: String,
+    selfNick: String,
+): String {
+    memberNicks?.get(decidedBy)?.takeIf { it.isNotBlank() }?.let { return it }
+    if (decidedBy == selfNodeId) selfNick.takeIf { it.isNotBlank() }?.let { return it }
+    return decidedBy
 }
 
 /**
