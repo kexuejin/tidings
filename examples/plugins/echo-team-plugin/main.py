@@ -130,6 +130,7 @@ def unregister(plugin_id, token):
 LOCK = threading.Lock()
 SESSIONS = {}       # sessionId -> {"progress": int, "state": str, "stage": str}
 NEXT_SESSION = [0]
+NEXT_TASK = [0]     # 每次 execute 一个新任务号 —— 卡片的身份不能挂在 session 上（见 handle_execute）
 
 
 def event_line(kind, **fields):
@@ -158,10 +159,18 @@ def handle_execute(session_id, prompt):
     """回声任务：标准事件流（thought → token → card → finished），一行一个 JSON。
 
     prompt 含 "fail" 时回 error 事件 —— 给热拔/失败路径一个手动触发的开关。
+
+    **卡片身份挂在任务上，不挂在会话上**：宿主按 `(cardId, rev)` 折叠（只渲染
+    同 cardId 的最大 rev，见方案 §5.3）。同一会话里连派两次若是同一个 cardId，
+    第二张卡就被第一张按「旧 rev」收起 —— 那是夹具的 bug，不是产品的 bug，但
+    它会伪装成产品缺陷（M5 矩阵第 7 条就是这么被误判的）。所以每次 execute
+    取一个新的任务号：`echo-card-<sessionId>-<n>`，rev 仍从 1 开始。
     """
     with LOCK:
         SESSIONS.setdefault(session_id, {"progress": 0, "state": "running", "stage": "executing"})
         SESSIONS[session_id].update({"progress": 30, "state": "running", "stage": "thinking"})
+        NEXT_TASK[0] += 1
+        task_no = NEXT_TASK[0]
 
     yield event_line("thought", delta="echo-team thinking about: %s" % prompt[:80])
     with LOCK:
@@ -178,9 +187,9 @@ def handle_execute(session_id, prompt):
     card = {
         "type": "team-task-board",
         "version": 1,
-        "cardId": "echo-card-%s" % session_id,
+        "cardId": "echo-card-%s-%d" % (session_id, task_no),
         "rev": 1,
-        "title": "Echo task",
+        "title": "Echo task #%d" % task_no,
         "progress": 100,
         "items": [
             {"id": "1", "label": "receive prompt", "status": "done", "assignee": "@echo-lead"},
