@@ -2,11 +2,13 @@
 package com.kapp.tidings.domain
 
 import com.kapp.tidings.core.nowMillis
+import com.kapp.tidings.core.protocol.AgentAckKinds
 import com.kapp.tidings.core.protocol.Codec
 import com.kapp.tidings.core.protocol.Profile
 import com.kapp.tidings.core.protocol.makeEnvelope
 import com.kapp.tidings.core.protocol.MsgTypes
 import com.kapp.tidings.core.session.NodeRuntime
+import com.kapp.tidings.domain.model.AgentApprovalDecision
 import com.kapp.tidings.platform.InMemoryAppPlatform
 import com.kapp.tidings.platform.MdnsAdvertiser
 import com.kapp.tidings.platform.MdnsBrowser
@@ -209,6 +211,51 @@ class RelayControllerApprovalResponseTest {
             kinds.isNotEmpty() && controller.state.value.agentApprovals["appr-revoke"]?.status == "revoked"
         }
         assertEquals(listOf("appr-revoke:revoke_session"), kinds.toList(), "撤销发的必须是一条 revoke_session ack")
+    }
+
+    /**
+     * 「始终允许」（`always`）：客户端要发的那一条回执是 `kind=always`，**不是** `approved`。
+     *
+     * 为什么这条判据值钱：宿主侧只有收到 `always` 才会记免批规则（按 tool 名、跨会话）。
+     * 客户端若把它悄悄降级成 `approved`，用户点的是「以后别再问」，得到的却是
+     * 「这次批了、下次还问」—— 而界面上那一下看起来一模一样，事后也没有任何痕迹。
+     * 发送侧不校验 `kind` 的取值域，这个差别只有线上那一条字符串能证明。
+     */
+    @Test
+    fun alwaysDecisionSendsAlwaysAckAndApprovesTheCurrentRequest() = runBlocking {
+        injectApproval("appr-always")
+        val kinds = java.util.concurrent.CopyOnWriteArrayList<String>()
+        controller.agentCtl.ackSenderForTest = { _, ackOf, kind -> kinds += ackOf + ":" + kind }
+
+        controller.respondApproval("appr-always", AgentApprovalDecision.ALLOW_ALWAYS)
+
+        awaitUntil("always 回执发出") { kinds.isNotEmpty() }
+        assertEquals(
+            listOf("appr-always:always"),
+            kinds.toList(),
+            "「始终允许」发的必须是一条 always ack —— 宿主靠它记免批规则",
+        )
+        // 本端如实显示「已批准」：用户点的这一下确实批准了当前请求；
+        // 「以后不再问」是宿主侧的事实，本端没有那张表，也不发明一个自己并不掌握的状态。
+        assertEquals("approved", controller.state.value.agentApprovals["appr-always"]?.status)
+    }
+
+    /**
+     * 四态取值里的 `kind` 必须都在 [`AgentAckKinds`] 的白名单里。
+     *
+     * 这不是仪式：`allow_session` / `revoke_session` 曾经「在用但不在白名单」，于是回执
+     * 在接收侧被整帧拒收，界面却显示已生效（本仓付过一次的代价）。枚举引用常量能防重抄，
+     * 但防不住「常量本身漏进白名单」—— 那一条由这里钉住。
+     */
+    @Test
+    fun everyDecisionKindIsInTheAckWhitelist() {
+        AgentApprovalDecision.entries.forEach { decision ->
+            kotlin.test.assertTrue(
+                AgentAckKinds.isKnown(decision.ackKind),
+                "取值 ${decision.name} 的 kind=「${decision.ackKind}」不在 AgentAckKinds.VALUES 里 —— " +
+                    "对端会整帧拒收，而发送侧不会报任何错",
+            )
+        }
     }
 
     private class ApprovalTestSettingsStore(

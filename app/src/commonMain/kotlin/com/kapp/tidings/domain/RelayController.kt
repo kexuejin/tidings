@@ -60,6 +60,7 @@ import kotlinx.serialization.json.JsonPrimitive
 /** 版本号会作为协议 `Profile.ver` 发给对端（≤16 字符）。 */
 // 更新检查器现在住在同一个包（领域侧）：它零 Compose，而消费它的是控制器。
 // ExecDeviceRow 现在住在同一个包（领域侧）：它由 execDeviceRows() 算出来。
+import com.kapp.tidings.domain.model.AgentApprovalDecision
 import com.kapp.tidings.domain.model.DeliveryState
 import com.kapp.tidings.domain.model.MdnsServiceUi
 import com.kapp.tidings.domain.model.MessageUi
@@ -879,6 +880,8 @@ class RelayController(
     override fun respondApproval(approvalId: String, allow: Boolean) = agentCtl.handleRespondApproval(approvalId, allow)
     override fun respondApproval(approvalId: String, allow: Boolean, allowSession: Boolean) =
         agentCtl.handleRespondApproval(approvalId, allow, allowSession)
+    override fun respondApproval(approvalId: String, decision: AgentApprovalDecision) =
+        agentCtl.handleRespondApproval(approvalId, decision)
     override fun cancelAgentTask(taskId: String) = agentCtl.handleCancelAgentTask(taskId)
 
     /**

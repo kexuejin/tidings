@@ -346,6 +346,15 @@ public interface DesktopPaneActions {
     // ------------------------------------------------------------------ Agent 审批与控制
     fun respondApproval(approvalId: String, allow: Boolean): Unit = Unit
     fun respondApproval(approvalId: String, allow: Boolean, allowSession: Boolean): Unit = Unit
+
+    /**
+     * 四态处置：拒绝 / 批准 / 本次免审 / **始终允许**。
+     *
+     * 默认实现是空的（预览与截图夹具没有宿主可派发）—— 与上面两条同一条纪律：
+     * **默认实现不许假装成功**。多出来的那一档（`ALLOW_ALWAYS`）由宿主记免批规则，
+     * 壳这边只负责把用户点的那一种原样交上去，不做任何本地推断。
+     */
+    fun respondApproval(approvalId: String, decision: com.kapp.tidings.domain.model.AgentApprovalDecision): Unit = Unit
     fun cancelAgentTask(taskId: String): Unit = Unit
     fun requestAgentSessionPage(peerId: String, wsId: String, offset: Long = 0, limit: Long? = null): Unit = Unit
 

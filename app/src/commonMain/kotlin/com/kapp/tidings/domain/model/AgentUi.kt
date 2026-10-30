@@ -3,6 +3,7 @@
 package com.kapp.tidings.domain.model
 
 import kotlinx.serialization.Serializable
+import com.kapp.tidings.core.protocol.AgentAckKinds
 import com.kapp.tidings.core.protocol.AgentGrantAccess
 import com.kapp.tidings.core.protocol.AgentGrantStates
 import com.kapp.tidings.core.protocol.AgentSessionStates
@@ -30,6 +31,45 @@ data class AgentApprovalUi(
     /** 参数或文本差异变更（Diff / JSON 参数预览）。 */
     val diff: String? = null,
 )
+
+/**
+ * 一次审批处置的取值 —— **出站**方向：用户在界面上点的是哪一种。
+ *
+ * ## 为什么是一个枚举，而不是第三个布尔
+ *
+ * 上一个版本是 `respondApproval(approvalId, allow, allowSession)`：两参已经让调用点长出
+ * `respondApproval(id, true, false)` 这种「两个真假值，哪一个是什么」的读法；再塞一个
+ * `always` 就是三个布尔 —— 8 种组合、只有 4 种合法，而且编译器一个都不拦。
+ *
+ * 更要紧的是**取值只有一个来源**：[ackKind] 直接引用 [`AgentAckKinds`]，
+ * 不在第二个地方重抄字符串。本仓为「三处各写一份取值」付过一次代价 ——
+ * `allow_session` 的回执曾经过不了线（发送侧不校验、接收侧整帧退回），
+ * 界面上「点了、显示已生效」，宿主那边什么都没发生。
+ *
+ * ## 为什么 [status] 与 [ackKind] 不总是同名
+ *
+ * `always` 在宿主侧的语义是「**先把当前这一条批掉**，再记一条按 tool 名的免批规则」。
+ * 所以本端如实显示「已批准」（`approved`）；「以后不再问」是宿主侧的事实，本端没有
+ * 那张表，也不该发明一个自己并不掌握的状态去让界面分支。
+ */
+enum class AgentApprovalDecision(val ackKind: String, val status: String) {
+    /** 拒绝这一次。 */
+    DENY(AgentAckKinds.DENIED, "denied"),
+
+    /** 只批准这一次。 */
+    ALLOW(AgentAckKinds.APPROVED, "approved"),
+
+    /** 本会话内同类请求免审（`allow_session`）。 */
+    ALLOW_SESSION(AgentAckKinds.ALLOW_SESSION, "allow_session"),
+
+    /**
+     * 这个 **tool** 以后免审（`always`），粒度是 tool 名、跨会话。
+     *
+     * 与 [ALLOW_SESSION] 的区别是范围：那条只管一个会话，这条管这台设备上与这个 agent 的
+     * 全部会话 —— 但它**不是**「给这个 agent 全权」。
+     */
+    ALLOW_ALWAYS(AgentAckKinds.ALWAYS, "approved"),
+}
 
 /** Agent 队列任务 UI 模型（PPE-1 §6.3）。 */
 @Serializable

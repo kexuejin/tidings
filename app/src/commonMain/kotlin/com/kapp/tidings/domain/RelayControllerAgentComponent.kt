@@ -3,6 +3,7 @@
 package com.kapp.tidings.domain
 
 import com.kapp.tidings.domain.RelayController.Companion.MAX_AGENT_EVENTS
+import com.kapp.tidings.domain.model.AgentApprovalDecision
 import com.kapp.tidings.domain.model.AgentApprovalUi
 import com.kapp.tidings.domain.model.AgentArtifactKey
 import com.kapp.tidings.domain.model.AgentArtifactUi
@@ -929,6 +930,22 @@ fun handleOnAgentArtifact(envelope: Envelope) {
 internal var ackSenderForTest: (suspend (peerId: String, ackOf: String, kind: String) -> Unit)? = null
 
 /**
+ * 旧的两参 + 免审布尔入口：转发到四态版本，行为与取值一一对应。
+ *
+ * 保留它是因为「批准 / 拒绝」这两个最常用的动作不该逼调用方去写一个枚举；
+ * 但**免审那一档不再靠布尔表达** —— 见 [AgentApprovalDecision] 的 KDoc。
+ */
+fun handleRespondApproval(approvalId: String, allow: Boolean, allowSession: Boolean = false) =
+    handleRespondApproval(
+        approvalId,
+        when {
+            allowSession -> AgentApprovalDecision.ALLOW_SESSION
+            allow -> AgentApprovalDecision.ALLOW
+            else -> AgentApprovalDecision.DENY
+        },
+    )
+
+/**
  * 处置一条审批：翻本地状态、落盘、把决定以 `agent-ack` 送达对端。
  *
  * ## 「发送成功」不等于「对方知道」（本仓最贵的一类缺陷，这里是它的审批入口）
@@ -945,7 +962,7 @@ internal var ackSenderForTest: (suspend (peerId: String, ackOf: String, kind: St
  *    不是故障 —— 本地仍按用户的选择记账（决定本身是本端产生的），但横幅必须说明
  *    「最终以对方 Agent 宿主实际执行为准」，不能让「已批准」暗示对方已经知道。
  */
-fun handleRespondApproval(approvalId: String, allow: Boolean, allowSession: Boolean = false) {
+fun handleRespondApproval(approvalId: String, decision: AgentApprovalDecision) {
     val approval = host._state.value.agentApprovals[approvalId] ?: return
     // **先问唯一判据**：过期或无权 ⇒ 这一下根本不该发生（UI 也不该画出按钮）。
     // 不发 ack、也不翻本地状态。修复前这里既不查权限也不查有效期：翻完就发，
@@ -953,8 +970,8 @@ fun handleRespondApproval(approvalId: String, allow: Boolean, allowSession: Bool
     // 因为它让用户以为自己已经批准了一件其实没人执行的事）。
     if (!host._state.value.mayDecideApproval(approval, nowMillis())) return
     val rt = host.runtime
-    val kind = if (allowSession) "allow_session" else if (allow) "approved" else "denied"
-    val nextStatus = if (allowSession) "allow_session" else if (allow) "approved" else "denied"
+    val kind = decision.ackKind
+    val nextStatus = decision.status
     if (rt == null) {
         // 处境 1：连离线队列都不存在，这个决定送不出去 —— 不翻状态，直接如实说。
         host.warn(BannerMessage.AgentAckSendFailed)
