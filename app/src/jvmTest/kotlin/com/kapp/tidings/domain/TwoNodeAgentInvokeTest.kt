@@ -244,6 +244,94 @@ class TwoNodeAgentInvokeTest {
         }
     }
 
+    /**
+     * 超时卡上的**重试**：点下去必须真的把同一条任务再派一次（S4-1）。
+     *
+     * 此前只钉了「超时卡带这两个动作」（见上一个用例），没有一条断言证明**点下去会发生什么** ——
+     * 于是「按钮画出来了但接线断了」这种缺陷可以一路绿到真机。这里钉的是通路本身：
+     * 动作 → 宿主处理 → 新的 `agent-invoke` 帧 → 对端执行器第二次收到**同一条 prompt**。
+     *
+     * 为什么让第一次执行挂住：重试的语义是「上一次没成」，而租约在任何状态下都能重派；
+     * 挂住只是为了让「第二次到达」与「第一次到达」可区分，不依赖任何时钟。
+     */
+    @Test
+    fun retryOnTheBoardCardDispatchesTheSamePromptAgain() = runBlocking {
+        val (leader, host, groupId) = hostedGroup()
+        val release = kotlinx.coroutines.CompletableDeferred<Unit>()
+        try {
+            val prompts = java.util.concurrent.CopyOnWriteArrayList<String>()
+            host.invokeExecutor = object : com.kapp.tidings.domain.AgentInvokeExecutor {
+                override suspend fun execute(request: com.kapp.tidings.domain.AgentInvokeTaskRequest): com.kapp.tidings.domain.AgentInvokeExecution {
+                    prompts += request.prompt
+                    release.await()
+                    return com.kapp.tidings.domain.AgentInvokeExecution.done(summary = "ok", cardJsonText = null)
+                }
+            }
+            val invokeId = leader.dispatchCrossHostInvoke(
+                groupId = groupId, agentId = "gpu-runner", prompt = "deploy", wsId = null, deadlineMs = 30_000L,
+            )
+            assertNotNull(invokeId, "派单必须受理")
+            awaitUntil("宿主收到第一次派单") { prompts.size == 1 }
+
+            leader.invokeCtl.handleHostCardAction(
+                groupId, "gpu-runner", "invoke-" + invokeId, InvokeBoardActions.RETRY, selfOf(leader),
+            )
+            awaitUntil("重试把同一条任务再派一次（不是只画了个按钮）") { prompts.size == 2 }
+            assertEquals(
+                listOf("deploy", "deploy"), prompts.toList(),
+                "重试必须原样重派同一条 prompt —— 换一条等于替用户改了任务",
+            )
+        } finally {
+            release.complete(Unit)
+            leader.stop()
+            host.stop()
+        }
+    }
+
+    /**
+     * 超时卡上的**降级为本地执行**：点下去必须在本机跑同一条任务（S4-1）。
+     *
+     * 与重试的分工：重试是「再试一次远端」，降级是「别等它了，我自己来」。
+     * 两者都必须**有执行证据**，否则「点了没反应」只是从远端搬到了本机。
+     */
+    @Test
+    fun fallbackLocalRunsTheSamePromptOnTheLeader() = runBlocking {
+        val (leader, host, groupId) = hostedGroup()
+        val release = kotlinx.coroutines.CompletableDeferred<Unit>()
+        try {
+            host.invokeExecutor = object : com.kapp.tidings.domain.AgentInvokeExecutor {
+                override suspend fun execute(request: com.kapp.tidings.domain.AgentInvokeTaskRequest): com.kapp.tidings.domain.AgentInvokeExecution {
+                    release.await()
+                    return com.kapp.tidings.domain.AgentInvokeExecution.done(summary = "ok", cardJsonText = null)
+                }
+            }
+            val localPrompts = java.util.concurrent.CopyOnWriteArrayList<String>()
+            leader.invokeExecutor = object : com.kapp.tidings.domain.AgentInvokeExecutor {
+                override suspend fun execute(request: com.kapp.tidings.domain.AgentInvokeTaskRequest): com.kapp.tidings.domain.AgentInvokeExecution {
+                    localPrompts += request.prompt
+                    return com.kapp.tidings.domain.AgentInvokeExecution.done(summary = "ran locally", cardJsonText = null)
+                }
+            }
+            val invokeId = leader.dispatchCrossHostInvoke(
+                groupId = groupId, agentId = "gpu-runner", prompt = "deploy", wsId = null, deadlineMs = 30_000L,
+            )
+            assertNotNull(invokeId)
+
+            leader.invokeCtl.handleHostCardAction(
+                groupId, "gpu-runner", "invoke-" + invokeId, InvokeBoardActions.FALLBACK_LOCAL, selfOf(leader),
+            )
+            awaitUntil("降级在本机执行了同一条任务") { localPrompts.isNotEmpty() }
+            assertEquals(
+                listOf("deploy"), localPrompts.toList(),
+                "降级必须在本机跑同一条 prompt，且只跑一次",
+            )
+        } finally {
+            release.complete(Unit)
+            leader.stop()
+            host.stop()
+        }
+    }
+
     // ---------------------------------------------------------------- 装置
 
     /**
