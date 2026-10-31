@@ -264,6 +264,18 @@ data class Envelope(
 - **`ExternalPluginDriver`**：主包内唯一的通用插件驱动（`AgentDriver` 的实现之一），只经回环 HTTP 转发 `openSession` / `executeTask`（流式）/ `handleAction` / `queryProgress`，零业务代码；能力清单读 manifest，能力 ACL 由宿主在驱动外层把关、不透传给插件。
 - **参考插件**：`examples/plugins/echo-team-plugin/`（Python 标准库，零第三方依赖）。
 
+**CLI 驱动与 Git Worktree 沙箱（升级轮 T-3a/T-3b，D-024）**：装了 Claude Code / Codex /
+`agy` CLI 的宿主经 `DriverRegistry.withCliDrivers` 自动获得 CLI 驱动（凭证继承
+`HOME`/`XDG_*` 与宿主登录态，模型凭证经 `ModelEnvMapper` 注入子进程环境，绝不出机）。
+带工作区的任务默认进 **Git Worktree 沙箱**（`WorktreeSandboxExecutor`）：每任务在宿主仓的
+独立 worktree（分支 `task-<taskId>`）里执行，宿主工作树零变化；结束后提取 `git diff`
+**提纯**为产物 —— `report.json` 只装结构化事实（终态 / 文件数 / +A −D / SHA256 指针），
+全量 patch 与原始输出各落 `patch.diff` / `task.log`，绝不内联进信令；diff-review 卡只带
+统计摘要（预算永不触碰 `CARD_BYTES`）。中止（外部 abort 或租约超时的协程取消）= 进程树
+SIGTERM → 3s → SIGKILL + worktree/分支**无痕清理**；产物目录在沙箱外存活。非 git 的工作区
+**大声失败**（无静默降级到裸跑的档位）；沙箱根 = `TIDINGS_SANDBOX_ROOT` env 覆盖 →
+`/tmp/tidings-ws` 公共约定。
+
 ---
 
 ### 7.4 跨端派单网道（M4 起）
@@ -341,7 +353,7 @@ A 宿主把子任务派到 B 宿主的插件上执行、结果回传，由发起
 
 ### 8.1 聊天消息表 (`relay.db`)
 
-- **`messages`**：存储人类聊天记录（单聊、群聊），自增 `seq` 作为单调排序键。agent 相关列：`agent_session_id` / `agent_session_title`（会话分段）与 `card_json` / `agent_state`（声明式卡片与执行状态）；卡片更新是**追加式新行**（同 `cardId`、`rev+1`），不重写旧行；这些列**不进 FTS**。
+- **`messages`**：存储人类聊天记录（单聊、群聊），自增 `seq` 作为单调排序键。agent 相关列：`agent_session_id` / `agent_session_title`（会话分段）与 `card_json` / `agent_state` / `card_payload`（声明式卡片与执行状态）；卡片是**单卡槽**：同 `cardId` 的 rev 推进 = 同一行原位替换（`card_json` 首帧原文、`card_payload` 最新载荷），表行数不涨；这些列**不进 FTS**（`MessageFts_docsize ≡ MessageEntity` 行数的不变量因此保持）。
 - **`conversations`**：会话元数据（会话 ID、未读数、最后消息摘要、置顶与静音标记）。
 - **`peers`**：节点 Profile 缓存（NodeId、名称、IP、端口、caps、更新版本）。
 - **`send_queue`**：离线暂存队列，存储尚未完成 ACK 确认的报文。

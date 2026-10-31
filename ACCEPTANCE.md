@@ -928,7 +928,7 @@ messaging **PASS 38**（`/tmp/messaging-run14.log`），全量套件 **run11 9/9
    （`offlineAfter`）确认翻 offline、主程序 `closeCount` 不增；守护进程模式凭 0600 token 文件
    重注册回 online。
 3. **注册鉴权负路径**：无 token / 错 token 的注册请求被拒（401/503），本机任意进程不能自我入驻。
-4. **卡片折叠**：任务推进时 DB 新增同 `cardId`、`rev+1` 的**新行**（旧行不重写）；UI 只渲染最新
+4. **单卡槽原位刷新**：任务推进时同 `cardId` 的行被**原位替换**（`card_payload` 更新为最新 rev，`card_json` 保持首帧原文，表**行数不涨**）；UI 与两端库的末行同值。真机口径：数「同 cardId 的行数」恒为 1，不再是「新行追加」
    `rev`、不新增可见气泡。
 5. **授权面板**：仅插件宿主可编辑；非宿主只读且不显示本机路径（路径不进协议）；保存后 `rev+1`
    广播到全群。
@@ -1004,6 +1004,28 @@ Layer 4 仿真覆盖，真机环节为桌面自派 + 手机 `@agent` 回路（M5
    这不是缺陷，是 `canApproveAgentRequest` 的 fail-closed 判据。
 2. 造这条场景用的是宿主的 `POST /v1/agent/approval`（仓内没有会发审批的插件），
    走的仍是插件→宿主→手机的同一条帧。
+
+---
+
+## 10c. CLI 沙箱派单（升级轮 T-3b，D-024）
+
+真机/本机怎么验「群里派的活没弄脏宿主仓」：
+
+1. **宿主工作树零变化**：群内 `@agent` 派一条带工作区的任务（该宿主装了任一 CLI）；
+   任务运行期间与结束后，宿主仓 `git status` 恒空、`git worktree list` 只剩主工作树。
+   判据：`/tmp/tidings-ws/<taskId>/` 存在过（任务期间），结束后不存在。
+2. **产物可对账**：`/tmp/tidings-ws/artifacts/<taskId>/` 下有 `patch.diff` / `report.json` /
+   `task.log`；`report.json` 的 `patchSha256` 与 `sha256 patch.diff` 一致；report 里
+   **没有** task.log 的原文（提纯判据 —— grep task.log 任一行原始输出不得命中 report）。
+3. **卡面是摘要**：群流的 diff-review 卡只有统计（文件数 / +A −D），全量 diff 在文件里。
+4. **中止无痕**：租约超时（或宿主中止）后，worktree 目录与 `task-<taskId>` 分支都消失；
+   `ps` 里没有残留的 CLI 进程。
+5. **非 git 工作区大声失败**：派单到非 git 目录的工作区 → 群内收到失败横幅（Error 指向
+   沙箱建不出来），**没有**任何「在宿主仓裸跑」的副作用。
+
+本机判据（测试名）：`WorktreeSandboxExecutorTest`（7 用例，反向验证：摘清理/摘校验红）、
+`SandboxedCliDriverTest`（3 用例，反向验证：摘出卡/静默裸跑红）。真机项按「设备在线则验」
+口径记账。
 
 ---
 

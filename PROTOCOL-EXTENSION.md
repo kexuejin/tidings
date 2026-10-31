@@ -331,16 +331,20 @@ nodeId 只会让那条气泡挂在别人名下（本协议不防冒名，群内�
 |---|---|---|
 | `agentIntent` | 对象 | **单帧原子意图**（人类 → 插件）：`{agentId, wsId?, resumeSessionId?, mode}` 随正文一次发出，宿主原子化「开会话 + 派单」，乐观发送零等待；`validateMsg` 校验对象形态 |
 | `agentState` | 字符串 | 执行状态（插件 → 全群）：限 `accept` / `blocked` / `completed` / `failed` 四态，越界拒帧 |
-| `card` | 对象 | **声明式卡片**（插件定义，IM 原生渲染）：`{type, version, cardId, rev, …}`；渲染只认 5 类受限原子组件（Banner / Progress / StepList / DiffViewer / ButtonGroup）；UTF-8 字节 ≤ `Limits.CARD_BYTES`（24 KiB） |
+| `card` | 对象 | **声明式卡片**（插件定义，IM 原生渲染）：`{type, version, cardId, rev, …}`；渲染只认 7 类受限原子组件（Banner / Progress / StepList / DiffViewer / ButtonGroup / ArtifactList / OptionList）；`type` 是建议层不是白名单（未知 type 不拒帧，UI 按数据里的块走）；`options`（`ask_question` 反向多选卡，升级稿 §7.9）= `[{label, recommended?}]`，点选回传 actionId = 选项文本；UTF-8 字节 ≤ `Limits.CARD_BYTES`（24 KiB） |
 
 **卡片预算三处同源**：发送（宿主驱动校验，超限**拒绝**并回错误事件给插件）、接收（bad-payload
 判拒）、队列重放（`decodeTcp` 同一份校验）。**截断的 JSON 解不了——「截断后发出去」等于产出
 注定被拒的帧**，所以超限一律拒绝、绝不截断；信封数学与 §7.1 一致（正文 32 KiB + 卡片 24 KiB +
 开销 < 64 KiB 整帧硬上限）。
 
-**卡片原位刷新**：更新以**新消息**进流——同 `cardId`、`rev` 递增的新帧；落库是追加式新行
-（messages 表新增 `card_json` / `agent_state` 两列，**不进 FTS**），**不重写旧消息行**。
-「不刷屏」是 UI 语义：按 `cardId` 折叠、只渲染最新 `rev`。审批锁定事件同理走新帧。
+**卡片原位刷新（T-2d 单卡槽，升级轮 §6.2/§7.2-2 改版）**：一个任务恒占 **1 个槽位**——
+rev 推进 = **同一行原位替换**（`card_json` 列保持首帧原文、`card_payload` 列携带最新载荷，
+行数不涨、不进 FTS），不再是追加式新行（旧语义作废）。宿主广播的 rev 推进帧对本端与远端
+成员都是同一份替换语义（本机落库也走原位替换，与入站拦截对称）。UI 与存储只读
+「最新载荷」这一份（首帧锚 vs 最新由 `renderCard` 一处收口）；「不刷屏」从 UI 折叠
+**下沉为存储语义**（表行数恒等由测试钉住）。审批判定（`decidedBy`/`decidedActionId`）
+随 rev 推进原位上屏；判定的幂等台账在宿主的 action 台账（首个判定生效），不在消息行数上。
 
 **能力门控与旧端行为**：三键都在 `gta1` 的逐成员门控清单里（§4）；不认识这些键的旧端整帧丢弃
 （本仓裁决：两端同版本，不做兼容）。
