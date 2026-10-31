@@ -88,4 +88,75 @@ class DesktopMenuCommandsTest {
         assertFalse(canImportFiles("   "), "空白也不是")
         assertTrue(canImportFiles("peer-1"), "选中了就能按")
     }
+
+    // ── WP-D4（N1/N2）：菜单五组的「印出的组合必须解析得出同一动作」全比对 ──
+
+    @Test
+    fun everyMenuKeyCombinationResolvesToItsOwnAction() {
+        // 应用组（设置/诊断包/退出）+ 文件组（新建/导入）+ 编辑组（⌘⇧C/⌘⇧D）
+        // + 视图组（⌘1–5/⌘R/⌘F/⌘⇧A）+ 窗口组（⌘⇧N/⌘W）。
+        assertEquals(DesktopShortcut.OpenSettings, primary(","), "设置 ⌘,")
+        assertEquals(DesktopShortcut.ExportDiagnostics, primary("d", alt = true), "诊断包 ⌥⌘D")
+        assertEquals(DesktopShortcut.Quit, primary("q"), "退出 ⌘Q")
+        assertEquals(DesktopShortcut.NewConversation, primary("n"), "新建会话 ⌘N")
+        assertEquals(DesktopShortcut.ImportFiles, primary("o"), "导入文件 ⌘O")
+        assertEquals(DesktopShortcut.CopyNodeId, primary("c", shift = true), "复制本机 ID ⌘⇧C")
+        assertEquals(DesktopShortcut.ToggleTheme, primary("d", shift = true), "切换深浅色 ⌘⇧D")
+        assertEquals(DesktopShortcut.ViewConversations, primary("1"), "会话 ⌘1")
+        assertEquals(DesktopShortcut.ViewFiles, primary("2"), "文件 ⌘2")
+        assertEquals(DesktopShortcut.ViewCabinet, primary("3"), "文件柜 ⌘3")
+        assertEquals(DesktopShortcut.ViewNodes, primary("4"), "节点 ⌘4")
+        assertEquals(DesktopShortcut.ViewAgents, primary("5"), "工作区 ⌘5")
+        assertEquals(DesktopShortcut.RefreshNodes, primary("r"), "刷新节点 ⌘R")
+        assertEquals(DesktopShortcut.FocusSearch, primary("f"), "搜索 ⌘F")
+        assertEquals(DesktopShortcut.ScreenCapture, primary("a", shift = true), "截屏协助 ⌘⇧A")
+        assertEquals(DesktopShortcut.NewWindow, primary("n", shift = true), "新窗口 ⌘⇧N")
+        assertEquals(DesktopShortcut.CloseWindow, primary("w"), "关闭窗口 ⌘W")
+        assertEquals("w", desktopShortcutKeySpec(Key.W), "KeySpec 必须认得 W")
+        assertEquals("n", desktopShortcutKeySpec(Key.N))
+    }
+
+    @Test
+    fun menuCombinationsAreAllDistinctActions() {
+        // 菜单上两个条目印同一个组合 = 用户按下去只能到其中一个（与六条版同一条判据的扩展）。
+        val actions = listOf(
+            primary(","), primary("d", alt = true), primary("q"),
+            primary("n"), primary("o"),
+            primary("c", shift = true), primary("d", shift = true),
+            primary("1"), primary("2"), primary("3"), primary("4"), primary("5"),
+            primary("r"), primary("f"), primary("a", shift = true),
+            primary("n", shift = true), primary("w"),
+        )
+        assertEquals(17, actions.toSet().size, "17 个组合必须解析成 17 个不同动作：$actions")
+    }
+
+    // ── 反向验证的判据钉（每个新快捷键一条：摘掉对应分支 ⇒ 这里的断言红） ──
+
+    @Test
+    fun cmdWResolvesToCloseWindowOnlyViaTheWBranch() {
+        // 反向验证锚点：摘掉解析器里的 "w" -> CloseWindow 分支 ⇒ 本断言红。
+        assertEquals(DesktopShortcut.CloseWindow, primary("w"))
+        // 不搭 Shift：⌘⇧W 不是任何命令（复制族才是 ⇧ 那一档）。
+        assertNull(primary("w", shift = true), "⌘⇧W 不该命中任何命令")
+    }
+
+    @Test
+    fun cmdShiftNResolvesToNewWindowOnlyViaTheShiftNBranch() {
+        // 反向验证锚点：摘掉 isShift 分支里的 "n" -> NewWindow ⇒ 本断言红。
+        // 它必须压过裸 ⌘N 的分支（Shift 先判）—— 否则「新窗口」会变成「新建会话」。
+        assertEquals(DesktopShortcut.NewWindow, primary("n", shift = true))
+    }
+
+    @Test
+    fun listOpenKeyJudgementCoversEnterAndCmdDown() {
+        // 反向验证锚点：摘掉 isListOpenKey 的 enter / ⌘down 两支 ⇒ 本断言红。
+        assertTrue(isListOpenKey(key = "enter", isPrimaryModifier = false), "裸 Enter 打开选中项")
+        assertTrue(isListOpenKey(key = "down", isPrimaryModifier = true), "⌘↓ 打开选中项")
+        assertFalse(isListOpenKey(key = "down", isPrimaryModifier = false), "裸 ↓ 是移动不是打开")
+        assertFalse(isListOpenKey(key = "up", isPrimaryModifier = true), "⌘↑ 不是打开")
+        // 打开目标：没有选中 = 列表头；选中在列 = 它自己；空列表 = null（不消费）。
+        assertEquals("a", nextSelectionToOpen(null, listOf("a", "b")))
+        assertEquals("b", nextSelectionToOpen("b", listOf("a", "b")))
+        assertNull(nextSelectionToOpen("b", emptyList()))
+    }
 }

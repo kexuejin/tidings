@@ -192,6 +192,9 @@ private fun DesktopPeerWindow(
                         putTextOnClipboard(nodeId)
                     },
                     onOpenPeerWindow = { id -> host.openPeerWindow(id) },
+                    // ⌘W 在这扇窗 = 关自己（与它的 onCloseRequest 同一条路）；
+                    // 主窗的 ⌘W = 收进托盘（hideMain），两处语义各自成立、同源不同向。
+                    onCloseWindow = { host.closePeerWindow(peerId); true },
                     onQuit = onExitApplication,
                     // 刻意**不**往 host 报本窗的选中：host.selectedPeerId 是主窗拖放
                     // 接收的目标，被别的窗口改掉会让主窗把文件发给错的会话。
@@ -207,6 +210,7 @@ private fun DesktopPeerWindow(
             DesktopSystemMenuBar(
                 onOpenSettings = actions.onOpenSettings,
                 onScreenCapture = { controller.triggerScreenCapture(peerId) },
+                onCloseWindow = { host.closePeerWindow(peerId) },
                 onExportDiagnostics = actions.onExportDiagnostics,
                 onQuit = onExitApplication,
             )

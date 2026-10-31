@@ -238,6 +238,25 @@ internal class DesktopHost(
         private set
 
     /**
+     * 菜单的 shell 意图计数（视图组的会话/工作区档与搜索）：view 与 searching 归
+     * [com.kapp.tidings.ui.desktop.DesktopShell] 独占，窗口层只表达意图 ——
+     * 与 [nodesViewTicks]/[filesViewTicks] 同一套「计数器而不是 Bool」约定，
+     * 消费方各自 `LaunchedEffect`。
+     */
+    var shellNavTicks by mutableStateOf(0)
+    var shellAgentsTicks by mutableStateOf(0)
+    var shellSearchTicks by mutableStateOf(0)
+
+    /** 帮助组「输入法自检」：直达设置窗诊断域里的观测页（ImeSmokePane）。 */
+    fun openImeSelfCheck() {
+        showImeSmokeTicks++
+    }
+
+    /** 输入法自检请求计数（消费方：设置窗的 ImeSmokePane 装配处）。 */
+    var showImeSmokeTicks by mutableStateOf(0)
+        private set
+
+    /**
      * 托盘菜单项的统一落点。
      *
      * 为什么收在这里而不是留在组合里的那个 `when`：托盘现在**不依赖任何窗口**存在
@@ -600,7 +619,8 @@ private fun DesktopMainWindow(
                 )
             }
 
-            // 系统菜单栏：主窗给全 6 条（新建会话 / 导入文件 / 设置 / 截图 / 诊断包 / 退出）。
+            // 系统菜单栏：五组（N1）—— 应用（设置/诊断包/输入法自检/退出）｜文件｜编辑｜视图｜窗口。
+            // 键盘处理与菜单印刷的一致性由 DesktopMenuCommandsTest 枚举全比对钉住。
             DesktopSystemMenuBar(
                 onNewConversation = {
                     // **窗口层这条入口要真的把面板打开**，不能只切视图。
@@ -615,10 +635,33 @@ private fun DesktopMainWindow(
                 },
                 onImportFiles = { host.selectedPeerId?.let(actions.onImportFiles) },
                 canImportFiles = canImportFiles(host.selectedPeerId),
+                onOpenDownloadsFolder = actions.onOpenDownloadsFolder,
                 onOpenSettings = actions.onOpenSettings,
+                onCopyNodeId = { putTextOnClipboard(host.controller.state.value.settings.nodeId) },
+                onToggleTheme = { host.toggleTheme() },
+                onRefreshNodes = { controller.refreshPeers(); controller.handshake() },
+                onViewChange = { shortcut ->
+                    // 视图切换的窗口层表达 = 意图计数（files/nodes 有现成通道，与托盘同一形状）。
+                    // Conversations/Agents 归 shell 的 view 独占 —— 经 external 观察计数表达
+                    //（与 externalNodesRequest 同一套「计数器而不是 Bool」约定）。
+                    when (shortcut) {
+                        DesktopShortcut.ViewConversations -> host.shellNavTicks++
+                        DesktopShortcut.ViewFiles -> host.requestFilesView()
+                        DesktopShortcut.ViewNodes -> host.requestNodesView()
+                        DesktopShortcut.ViewAgents -> host.shellAgentsTicks++
+                        else -> Unit
+                    }
+                },
+                onFocusSearch = { host.shellSearchTicks++ },
                 // 与 DesktopShell 的 ⌘⇧A 逐字同一个表达式：截图覆盖窗是独立窗，
                 // 不在这里顺带改视图（那条纪律原来写在自绘菜单栏上，见 task-25）。
                 onScreenCapture = { controller.triggerScreenCapture(host.selectedPeerId) },
+                onMinimize = { window.setState(java.awt.Frame.ICONIFIED) },
+                onNewWindow = {
+                    host.selectedPeerId?.let { peer -> host.openPeerWindow(peer) }
+                },
+                onCloseWindow = { host.hideMain() },
+                onImeSelfCheck = { host.openImeSelfCheck() },
                 onExportDiagnostics = actions.onExportDiagnostics,
                 onQuit = onExitApplication,
             )
@@ -640,6 +683,9 @@ private fun DesktopMainWindow(
                             externalNodesRequest = host.nodesViewTicks,
                             externalAddNodeRequest = host.addNodeTicks,
                             externalFilesRequest = host.filesViewTicks,
+                            externalConversationsRequest = host.shellNavTicks,
+                            externalAgentsRequest = host.shellAgentsTicks,
+                            externalSearchRequest = host.shellSearchTicks,
                             focusPeerId = state.focusRequest,
                             stagedFilesByConv = host.stagedFilesByConv,
                             onStagedFilesChange = host::updateStagedFiles,

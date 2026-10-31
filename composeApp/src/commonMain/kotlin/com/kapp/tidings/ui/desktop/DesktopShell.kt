@@ -116,6 +116,14 @@ public class DesktopShellActions(
     val onExportDiagnostics: (() -> Unit)? = null,
     val onOpenDownloadsFolder: (() -> Unit)? = null,
     /**
+     * 关窗请求（⌘W）。主窗的宿主把它接到与关窗按钮（onCloseRequest）同一条路 ——
+     * 收进托盘；独立会话窗的宿主接到关自己。null = 这个壳没有窗口语义（平板），
+     * ⌘W 不消费按键。
+     */
+    val onCloseWindow: (() -> Boolean)? = null,
+    /** 「输入法自检」直达（帮助组菜单项）。null = 没有这条通路（平板）。 */
+    val onOpenImeSelfCheck: (() -> Unit)? = null,
+    /**
      * 「在文件管理器里打开**共享目录**」。null = 宿主给不出这条出口（或本机还没设
      * 共享目录），文件柜那张卡上的「打开」按钮**整颗不画**（与 [onOpenDownloadsFolder]
      * 同一判据：能力不存在就不给一个按下去没反应的入口）。
@@ -216,6 +224,12 @@ public fun DesktopShell(
      * 与 [externalNodesRequest] 同一套约定：计数器而不是 Bool，第二次请求才会再触发。
      */
     externalFilesRequest: Int = 0,
+    /** 系统菜单「会话」/「工作区」档的意图计数（view 归 shell 独占的同一约定）。 */
+    externalConversationsRequest: Int = 0,
+    /** 系统菜单「工作区」档的意图计数（打开 Agents 视图 = ⌘5 同一条 when 的路）。 */
+    externalAgentsRequest: Int = 0,
+    /** 系统菜单「搜索」的意图计数（⌘F 同一条 searching + pendingFocusSearch 路）。 */
+    externalSearchRequest: Int = 0,
     /**
      * 打开时落在哪个视图。
      *
@@ -323,6 +337,7 @@ public fun DesktopShell(
     LaunchedEffect(externalFilesRequest) {
         if (externalFilesRequest > 0) view = DesktopView.Files
     }
+    // 菜单五组的窗口层表达（WP-D4）：与托盘同一形状 —— 只报请求，路由仍归 shell。
     var selectedPeerId by rememberSaveable { mutableStateOf(initialPeerId) }
 
     // 复制回执：状态栏右侧「已复制」小字，2 秒自清 —— 与行内回执同一范式，
@@ -429,6 +444,18 @@ public fun DesktopShell(
     // （自带标题行 + 关闭按钮）。视图切换器已经表达了"离开这一屏"，浮层那套
     // 开关/关闭按钮在第五视图里没有对应物。
     val openAgents: () -> Unit = { view = DesktopView.Agents }
+    LaunchedEffect(externalConversationsRequest) {
+        if (externalConversationsRequest > 0) view = DesktopView.Conversations
+    }
+    LaunchedEffect(externalAgentsRequest) {
+        if (externalAgentsRequest > 0) openAgents()
+    }
+    LaunchedEffect(externalSearchRequest) {
+        if (externalSearchRequest > 0) {
+            searching = true
+            pendingFocusSearch = true
+        }
+    }
 
     // 往窗口层报当前会话，供拖放接收与托盘跳转使用。见 [DesktopShellActions.onSelectionChange]。
     // 同一条变化线也把"正看着谁"推给控制器：桌面壳不走 `nav`，控制器自己看不见选中项，
@@ -525,6 +552,55 @@ public fun DesktopShell(
             searching = true
             pendingFocusSearch = true
             true
+        }
+
+        // ⌘W：关窗语义与关窗按钮/托盘策略是**同一条** —— 主窗 = 收进托盘（close 请求
+        // 走 onCloseRequest 的同一条路），独立会话窗由自己的 Window onCloseRequest 关自己。
+        // 这里的消费前提：这个壳跑在**主窗**里；独立窗复用 DesktopShell 的那份壳时
+        // 走的也是同一个 onCloseRequest 通路（见 DesktopPeerWindow 的 onCloseRequest）。
+        DesktopShortcut.CloseWindow -> {
+            actions.onCloseWindow?.invoke() ?: false
+        }
+
+        // ⌘⇧N：新窗口。判据复用工具栏「在新窗口打开」那颗按钮的 canOpenInNewWindow
+        // （有选中会话 && 宿主提供了多窗口通路），没选中时不消费按键 —— 与 ImportFiles
+        // 的「没选中就让它往下传」同一条纪律。
+        DesktopShortcut.NewWindow -> {
+            val peer = selectedPeerId
+            if (peer == null || actions.onOpenPeerWindow == null) false
+            else {
+                actions.onOpenPeerWindow?.invoke(peer)
+                true
+            }
+        }
+
+        // ⌘⇧O? 不占用 —— 打开下载目录在菜单上有项、没有快捷键（overhaul §2.3-1 只点名
+        // ⌘N/⌘O/⌘Q/⌘⇧C/⌘⇧D/⌘1-5/⌘R/⌘F/⌘⇧A/⌘W/⌘⇧N/⌘,）。
+        DesktopShortcut.OpenDownloadsFolder -> {
+            actions.onOpenDownloadsFolder?.invoke()
+            true
+        }
+
+        DesktopShortcut.OpenImeSelfCheck -> {
+            actions.onOpenImeSelfCheck?.invoke()
+            true
+        }
+
+        // Enter / ⌘↓：列表行打开（与 Alt+↑/↓ 同族）。只在会话视图消费；列表为空或
+        // 没有可打开项时不消费（让输入框拿回车发消息）。
+        DesktopShortcut.OpenSelection -> {
+            if (view != DesktopView.Conversations) false
+            else {
+                nextSelectionToOpen(
+                    selectedId = selectedPeerId,
+                    ids = sessions.map { it.convId },
+                )?.let { id ->
+                    selectedPeerId = id
+                    selectedWsId = state.workspaceOfConv(id)?.wsId
+                    selectedAgentSessionId = null
+                    openConversation(id)
+                } != null
+            }
         }
     }
 
@@ -655,8 +731,27 @@ public fun DesktopShell(
                             selectedAgentSessionId = null
                             return@onPreviewKeyEvent true
                         }
+                        // inspector 层（WP-D3 落地前 hasInspectorOpen 恒 false，走不到）：
+                        // 到那时由壳把折叠意图发给 inspector 容器。
+                        DesktopModalLayer.InspectorCollapse -> Unit
                         DesktopModalLayer.None -> Unit
                     }
+                }
+                // 列表行打开（Enter / ⌘↓）先于菜单命令解析：它们是导航键，
+                // 不进菜单（印在菜单上的组合必须解析得出同一动作 —— Enter 不是菜单命令）。
+                // 判据进纯函数层（isListOpenKey），与 Alt+↑/↓ 同族同源。
+                if (view == DesktopView.Conversations &&
+                    isListOpenKey(
+                        key = when (event.key) {
+                            androidx.compose.ui.input.key.Key.Enter, androidx.compose.ui.input.key.Key.NumPadEnter -> "enter"
+                            androidx.compose.ui.input.key.Key.DirectionDown -> "down"
+                            else -> ""
+                        },
+                        isPrimaryModifier = event.isMetaPressed || event.isCtrlPressed,
+                    ) &&
+                    !(event.isAltPressed || event.isShiftPressed)
+                ) {
+                    if (handleShortcut(DesktopShortcut.OpenSelection)) return@onPreviewKeyEvent true
                 }
                 val spec = desktopShortcutKeySpec(event.key) ?: return@onPreviewKeyEvent false
                 val shortcut = desktopShortcutFor(
@@ -1046,7 +1141,6 @@ public fun DesktopShell(
                 state = state,
                 view = view,
                 sizeClass = sizeClass,
-                controlPlanePort = controlPlanePort,
                 actions = actions,
                 copyReceiptActive = copyReceiptAt != 0L,
                 onCopied = { copyReceiptAt = now },

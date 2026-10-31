@@ -35,6 +35,16 @@ public enum class DesktopShortcut {
     ViewAgents,
     ScreenCapture,
     FocusSearch,
+    /** 窗口组：关窗。主窗 = 收进托盘（与关窗按钮/托盘策略同一条语义），独立窗 = 关自己。 */
+    CloseWindow,
+    /** 窗口组：把当前选中的会话开进独立窗口（判据复用 canOpenInNewWindow）。 */
+    NewWindow,
+    /** 文件组：打开接收目录（工具栏溢出清单同一条动作）。 */
+    OpenDownloadsFolder,
+    /** 帮助组：打开「输入法自检」观测页（桌面诊断页的二级入口）。 */
+    OpenImeSelfCheck,
+    /** 列表行打开：Enter / ⌘↓ 在会话列表里打开选中项（与 Alt+↑↓ 同族）。 */
+    OpenSelection,
 }
 
 /**
@@ -76,6 +86,7 @@ public fun desktopShortcutFor(
             "c" -> DesktopShortcut.CopyNodeId
             "d" -> DesktopShortcut.ToggleTheme
             "a" -> DesktopShortcut.ScreenCapture
+            "n" -> DesktopShortcut.NewWindow
             else -> null
         }
     }
@@ -87,6 +98,7 @@ public fun desktopShortcutFor(
     }
     return when (key) {
         "n" -> DesktopShortcut.NewConversation
+        "w" -> DesktopShortcut.CloseWindow
         "o" -> DesktopShortcut.ImportFiles
         "r" -> DesktopShortcut.RefreshNodes
         "," -> DesktopShortcut.OpenSettings
@@ -115,6 +127,7 @@ public fun desktopShortcutKeySpec(key: Key): String? = when (key) {
     Key.D -> "d"
     Key.R -> "r"
     Key.Q -> "q"
+    Key.W -> "w"
     Key.Comma -> ","
     Key.One -> "1"
     Key.Two -> "2"
@@ -136,6 +149,8 @@ public enum class DesktopModalLayer {
     SearchQuery,
     Searching,
     AgentSession,
+    /** inspector 折叠（WP-D3 的 Inspector 落地后由壳接线；先占层位，条件恒 false 不消费）。 */
+    InspectorCollapse,
     None,
 }
 
@@ -144,6 +159,26 @@ public enum class DesktopModalLayer {
  *
  * 顺序原则：层叠深度倒序（越晚打开/越靠上的浮层优先关闭），无浮层时返回 [DesktopModalLayer.None]。
  */
+/**
+ * 列表行打开（Enter / ⌘↓）的两条纯判据 —— 与 Alt+↑/↓ 同族（`DesktopShell` 的
+ * 会话列表移动共用 `sessions` 的同一份顺序）。
+ *
+ * - [isListOpenKey]：这次按键是不是「打开选中项」。裸 Enter 与 ⌘↓ 都算；⌘↑ 与
+ *   其它键不算。裸 ↓/↑ 不在判据里 —— 那是「移动选中」，不是「打开」。
+ * - [nextSelectionToOpen]：给出选中项与列表顺序，算出要打开的那一条。没有选中时
+ *   打开第一条（列表头就是入口），空列表返回 null（没什么可打开的，调用方让
+ *   事件继续往下传 —— 与 `desktopShortcutFor` 的「不认识就返回 null」同一条纪律）。
+ */
+public fun isListOpenKey(key: String, isPrimaryModifier: Boolean): Boolean =
+    (key == "enter") || (isPrimaryModifier && key == "down")
+
+public fun nextSelectionToOpen(selectedId: String?, ids: List<String>): String? {
+    if (ids.isEmpty()) return null
+    if (selectedId == null) return ids.first()
+    val index = ids.indexOf(selectedId)
+    return if (index >= 0) ids[index] else ids.first()
+}
+
 public fun nextModalLayerToDismiss(
     hasWsQr: Boolean,
     hasGroupCreatePrompt: Boolean,
@@ -151,6 +186,8 @@ public fun nextModalLayerToDismiss(
     hasSearchQuery: Boolean,
     isSearching: Boolean,
     hasAgentSession: Boolean,
+    /** inspector 展开中（WP-D3 落地前恒 false）：Esc 先折它，再逐层收弹窗。 */
+    hasInspectorOpen: Boolean = false,
 ): DesktopModalLayer = when {
     hasWsQr -> DesktopModalLayer.WsQr
     hasGroupCreatePrompt -> DesktopModalLayer.GroupCreatePrompt
@@ -158,5 +195,6 @@ public fun nextModalLayerToDismiss(
     hasSearchQuery -> DesktopModalLayer.SearchQuery
     isSearching -> DesktopModalLayer.Searching
     hasAgentSession -> DesktopModalLayer.AgentSession
+    hasInspectorOpen -> DesktopModalLayer.InspectorCollapse
     else -> DesktopModalLayer.None
 }

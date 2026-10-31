@@ -3,6 +3,23 @@
 package com.kapp.tidings.desktop
 
 import com.kapp.tidings.generated.resources.Res
+import com.kapp.tidings.generated.resources.desktop_action_open_in_new_window
+import com.kapp.tidings.generated.resources.desktop_ime_tab
+import com.kapp.tidings.generated.resources.desktop_action_open_downloads
+import com.kapp.tidings.generated.resources.desktop_menu_edit
+import com.kapp.tidings.generated.resources.desktop_menu_copy_node_id
+import com.kapp.tidings.generated.resources.desktop_menu_edit_toggle_theme
+import com.kapp.tidings.generated.resources.desktop_menu_view
+import com.kapp.tidings.generated.resources.desktop_view_conversations
+import com.kapp.tidings.generated.resources.desktop_view_files
+import com.kapp.tidings.generated.resources.desktop_view_cabinet
+import com.kapp.tidings.generated.resources.desktop_view_nodes
+import com.kapp.tidings.generated.resources.desktop_view_agents
+import com.kapp.tidings.generated.resources.desktop_menu_refresh_nodes
+import com.kapp.tidings.generated.resources.desktop_menu_view_search
+import com.kapp.tidings.generated.resources.desktop_menu_window
+import com.kapp.tidings.generated.resources.desktop_menu_window_minimize
+import com.kapp.tidings.generated.resources.desktop_menu_window_close
 import com.kapp.tidings.generated.resources.chat_toolbar_capture
 import com.kapp.tidings.generated.resources.desktop_action_quit
 import com.kapp.tidings.generated.resources.desktop_app_title
@@ -388,9 +405,29 @@ internal fun FrameWindowScope.DesktopSystemMenuBar(
     onImportFiles: (() -> Unit)? = null,
     /** 当前有没有选中会话；false 时「导入文件」置灰（缺陷③）。 */
     canImportFiles: Boolean = false,
+    /** 「打开下载目录」（文件组）。null = 不画。 */
+    onOpenDownloadsFolder: (() -> Unit)? = null,
     onOpenSettings: (() -> Unit)? = null,
-    /** 「截图」：`controller.triggerScreenCapture(选中会话)`，与 ⌘⇧A 同一个表达式。 */
+    /** 「复制本机 ID」（编辑组，⌘⇧C）。null = 不画。 */
+    onCopyNodeId: (() -> Unit)? = null,
+    /** 「切换深浅色」（编辑组，⌘⇧D）。null = 不画。 */
+    onToggleTheme: (() -> Unit)? = null,
+    /** 「刷新节点」（视图组，⌘R）。null = 不画。 */
+    onRefreshNodes: (() -> Unit)? = null,
+    /** 五个视图切换（视图组，⌘1–5）。null = 整组不画（会话独立窗没有视图）。 */
+    onViewChange: ((DesktopShortcut) -> Unit)? = null,
+    /** 「搜索」（视图组，⌘F）。null = 不画。 */
+    onFocusSearch: (() -> Unit)? = null,
+    /** 「截图」（视图组，⌘⇧A）：`controller.triggerScreenCapture(选中会话)`。 */
     onScreenCapture: (() -> Unit)? = null,
+    /** 「最小化」（窗口组）。null = 不画。 */
+    onMinimize: (() -> Unit)? = null,
+    /** 「新窗口」（窗口组，⌘⇧N）。null = 不画。 */
+    onNewWindow: (() -> Unit)? = null,
+    /** 「关闭窗口」（窗口组，⌘W）。null = 不画。 */
+    onCloseWindow: (() -> Unit)? = null,
+    /** 「输入法自检」（帮助组）。null = 不画。 */
+    onImeSelfCheck: (() -> Unit)? = null,
     onExportDiagnostics: (() -> Unit)? = null,
     onQuit: (() -> Unit)? = null,
 ) {
@@ -420,6 +457,13 @@ internal fun FrameWindowScope.DesktopSystemMenuBar(
                     shortcut = KeyShortcut(Key.D, ctrl = !primaryModifierIsMeta, meta = primaryModifierIsMeta, alt = true),
                 )
             }
+            if (onImeSelfCheck != null) {
+                Separator()
+                Item(
+                    stringResource(Res.string.desktop_ime_tab),
+                    onClick = onImeSelfCheck,
+                )
+            }
             // 退出项**只在非 macOS** 上由我们提供。
             //
             // 真机证据（在 Mac 上用 System Events 读菜单栏）：
@@ -438,7 +482,9 @@ internal fun FrameWindowScope.DesktopSystemMenuBar(
                 )
             }
         }
-        if (onNewConversation != null || onImportFiles != null || onScreenCapture != null) {
+        // 文件组（N1）：新建会话 ⌘N / 导入文件 ⌘O / 打开下载目录。截图归视图组
+        //（overhaul-plan §2.3-1 的分组口径：⌘⇧A 与「搜索」「刷新」同属视图）。
+        if (onNewConversation != null || onImportFiles != null || onOpenDownloadsFolder != null) {
             Menu(stringResource(Res.string.desktop_menu_file), mnemonic = null) {
                 onNewConversation?.let { start ->
                     Item(
@@ -455,11 +501,108 @@ internal fun FrameWindowScope.DesktopSystemMenuBar(
                         shortcut = KeyShortcut(Key.O, ctrl = !primaryModifierIsMeta, meta = primaryModifierIsMeta),
                     )
                 }
+                onOpenDownloadsFolder?.let { downloads ->
+                    Item(
+                        stringResource(Res.string.desktop_action_open_downloads),
+                        onClick = downloads,
+                    )
+                }
+            }
+        }
+        // 编辑组（N1）：复制本机 ID ⌘⇧C / 切换深浅色 ⌘⇧D。
+        if (onCopyNodeId != null || onToggleTheme != null) {
+            Menu(stringResource(Res.string.desktop_menu_edit), mnemonic = null) {
+                onCopyNodeId?.let { copy ->
+                    Item(
+                        stringResource(Res.string.desktop_menu_copy_node_id),
+                        onClick = copy,
+                        shortcut = KeyShortcut(Key.C, ctrl = !primaryModifierIsMeta, meta = primaryModifierIsMeta, shift = true),
+                    )
+                }
+                onToggleTheme?.let { toggle ->
+                    Item(
+                        stringResource(Res.string.desktop_menu_edit_toggle_theme),
+                        onClick = toggle,
+                        shortcut = KeyShortcut(Key.D, ctrl = !primaryModifierIsMeta, meta = primaryModifierIsMeta, shift = true),
+                    )
+                }
+            }
+        }
+        // 视图组（N1）：五视图 ⌘1–5 / 刷新节点 ⌘R / 搜索 ⌘F / 截屏协助 ⌘⇧A。
+        if (onViewChange != null || onRefreshNodes != null || onFocusSearch != null || onScreenCapture != null) {
+            Menu(stringResource(Res.string.desktop_menu_view), mnemonic = null) {
+                onViewChange?.let { change ->
+                    Item(
+                        stringResource(Res.string.desktop_view_conversations),
+                        onClick = { change(DesktopShortcut.ViewConversations) },
+                        shortcut = KeyShortcut(Key.One, ctrl = !primaryModifierIsMeta, meta = primaryModifierIsMeta),
+                    )
+                    Item(
+                        stringResource(Res.string.desktop_view_files),
+                        onClick = { change(DesktopShortcut.ViewFiles) },
+                        shortcut = KeyShortcut(Key.Two, ctrl = !primaryModifierIsMeta, meta = primaryModifierIsMeta),
+                    )
+                    Item(
+                        stringResource(Res.string.desktop_view_cabinet),
+                        onClick = { change(DesktopShortcut.ViewCabinet) },
+                        shortcut = KeyShortcut(Key.Three, ctrl = !primaryModifierIsMeta, meta = primaryModifierIsMeta),
+                    )
+                    Item(
+                        stringResource(Res.string.desktop_view_nodes),
+                        onClick = { change(DesktopShortcut.ViewNodes) },
+                        shortcut = KeyShortcut(Key.Four, ctrl = !primaryModifierIsMeta, meta = primaryModifierIsMeta),
+                    )
+                    Item(
+                        stringResource(Res.string.desktop_view_agents),
+                        onClick = { change(DesktopShortcut.ViewAgents) },
+                        shortcut = KeyShortcut(Key.Five, ctrl = !primaryModifierIsMeta, meta = primaryModifierIsMeta),
+                    )
+                }
+                onRefreshNodes?.let { refresh ->
+                    Item(
+                        stringResource(Res.string.desktop_menu_refresh_nodes),
+                        onClick = refresh,
+                        shortcut = KeyShortcut(Key.R, ctrl = !primaryModifierIsMeta, meta = primaryModifierIsMeta),
+                    )
+                }
+                onFocusSearch?.let { search ->
+                    Item(
+                        stringResource(Res.string.desktop_menu_view_search),
+                        onClick = search,
+                        shortcut = KeyShortcut(Key.F, ctrl = !primaryModifierIsMeta, meta = primaryModifierIsMeta),
+                    )
+                }
                 onScreenCapture?.let { capture ->
                     Item(
                         stringResource(Res.string.chat_toolbar_capture),
                         onClick = capture,
                         shortcut = KeyShortcut(Key.A, ctrl = !primaryModifierIsMeta, meta = primaryModifierIsMeta, shift = true),
+                    )
+                }
+            }
+        }
+        // 窗口组（N1）：最小化 / 新窗口 ⌘⇧N / 关闭窗口 ⌘W。设置在应用菜单（macOS 惯例），
+        // 不在窗口组重复 —— 菜单上两个条目印同一个动作比少一条更糟。
+        if (onMinimize != null || onNewWindow != null || onCloseWindow != null) {
+            Menu(stringResource(Res.string.desktop_menu_window), mnemonic = null) {
+                onMinimize?.let { minimize ->
+                    Item(
+                        stringResource(Res.string.desktop_menu_window_minimize),
+                        onClick = minimize,
+                    )
+                }
+                onNewWindow?.let { newWindow ->
+                    Item(
+                        stringResource(Res.string.desktop_action_open_in_new_window),
+                        onClick = newWindow,
+                        shortcut = KeyShortcut(Key.N, ctrl = !primaryModifierIsMeta, meta = primaryModifierIsMeta, shift = true),
+                    )
+                }
+                onCloseWindow?.let { close ->
+                    Item(
+                        stringResource(Res.string.desktop_menu_window_close),
+                        onClick = close,
+                        shortcut = KeyShortcut(Key.W, ctrl = !primaryModifierIsMeta, meta = primaryModifierIsMeta),
                     )
                 }
             }

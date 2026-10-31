@@ -1054,6 +1054,11 @@
     <string name="desktop_menu_view">视图</string>
     <string name="desktop_menu_window">窗口</string>
     <string name="desktop_menu_help">帮助</string>
+    <string name="desktop_action_open_downloads">打开下载目录</string>
+    <string name="desktop_menu_edit_toggle_theme">切换深浅色</string>
+    <string name="desktop_menu_view_search">搜索</string>
+    <string name="desktop_menu_window_minimize">最小化</string>
+    <string name="desktop_menu_window_close">关闭窗口</string>
     <string name="desktop_toolbar_import">导入文件</string>
     <string name="desktop_toolbar_search">搜索</string>
     <string name="desktop_toolbar_search_placeholder">搜索会话 / 文件 / 节点</string>
