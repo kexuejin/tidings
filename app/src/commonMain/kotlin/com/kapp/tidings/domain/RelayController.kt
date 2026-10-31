@@ -633,6 +633,10 @@ class RelayController(
      * `InvokeResultStates`（done/denied/no-executor/no-plugin/timeout/error），
      * 不在本层再翻译一层。
      */
+    /** 同一 channelId 的结果只落**第一条**（T-G10：发送侧重投安全的前提 ——
+     *  首赢语义与动作台账同族；重放/重投的重复帧不再复制群流消息）。 */
+    private val seenChannelResults = java.util.concurrent.ConcurrentHashMap.newKeySet<String>()
+
     internal fun onChannelResultObserved(
         envelope: Envelope,
         channelId: String,
@@ -641,6 +645,7 @@ class RelayController(
         summary: String?,
         error: String?,
     ) {
+        if (!seenChannelResults.add(channelId)) return
         val detail = listOfNotNull(summary, error).joinToString(" · ")
         val text = if (detail.isEmpty()) {
             "channel " + channelId + " -> " + status

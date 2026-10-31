@@ -520,7 +520,22 @@ internal class DesktopExtension(
                 }
             },
             sendResult = { toNode, channelId, ok, status, summary, artifactIds, error ->
-                runtime.sendAgentChannelResult(toNode, channelId, ok, status, summary, artifactIds, error)
+                // T-G10：结果投递有界重试（对端离线时丢一次 = 发起方白等租约超时）。
+                // 安全性：发起侧结果消费按 channelId 首赢去重（域层），重投不复制消息。
+                var attempt = 0
+                while (true) {
+                    val outcome = runCatching {
+                        runtime.sendAgentChannelResult(toNode, channelId, ok, status, summary, artifactIds, error)
+                    }
+                    if (outcome.isSuccess || attempt >= 3) {
+                        if (outcome.isFailure) {
+                            println("[channel] result delivery failed after " + (attempt + 1) + " attempts: " + channelId)
+                        }
+                        break
+                    }
+                    attempt++
+                    delay(2_000L * attempt)
+                }
             },
             scope = scope,
         )
@@ -701,6 +716,24 @@ internal class DesktopExtension(
             // payload 已由 :app 解码成 AgentChannelPayload（desktopApp 类路径上没有
             // kotlinx-serialization，解析不过河 —— M4 执行桥同一条纪律）。
             controller.channelOrchestrator = { payload, fromNode ->
+                // T-G9 transfer 宣告（v1）：接管开始时向原宿主宣告会话（origin=
+                // transferred）—— 原主的看板看到「任务已移交本机」。执行仍归编排器
+                // （租约/互斥/幂等都在它那里），宣告只管可见性。
+                if (payload.op == com.kapp.tidings.core.protocol.ChannelOps.TRANSFER) {
+                    runCatching {
+                        runBlocking {
+                            runtime.sendAgentSession(
+                                peerId = fromNode,
+                                sessionId = "ch-" + payload.channelId,
+                                agentKind = payload.fromAgent,
+                                state = com.kapp.tidings.core.protocol.AgentSessionStates.BUSY,
+                                title = payload.task.take(80),
+                                origin = "transferred",
+                                updatedAt = System.currentTimeMillis(),
+                            )
+                        }
+                    }
+                }
                 // T-G2 ④：targetTag 帧此前一律 NO_PLUGIN（"lands with M7-T4" 的悬空账）。
                 // 现在：路由方选中**本机**才会把帧送到这 —— 校验本机真持有该标签（防御：
                 // 不持标签不接活），持有则照常走授权 + 执行；不持才如实 NO_PLUGIN。

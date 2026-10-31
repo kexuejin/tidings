@@ -88,6 +88,22 @@ class DesktopInvokeWiringGuardTest {
             source.contains("node does not hold tag"),
             "接收侧没有持标签校验 —— 不持标签的节点不该接活（防御门）",
         )
+        // T-G9/T-G10：transfer 宣告（原主可见「已移交」）+ 结果有界重投 + 域层首赢去重。
+        assertTrue(
+            source.contains("origin = \"transferred\""),
+            "transfer 没有向原宿主宣告接管 —— 原主的看板永远不知道任务去了哪",
+        )
+        assertTrue(
+            source.contains("result delivery failed after"),
+            "结果投递没有有界重试 —— 对端离线丢一次 = 发起方白等租约超时",
+        )
+        val domain = GuardSourceScan.stripComments(
+            GuardSourceScan.read("app/src/commonMain/kotlin/com/kapp/tidings/domain/RelayController.kt"),
+        )
+        assertTrue(
+            domain.contains("seenChannelResults.add(channelId)"),
+            "结果消费没有按 channelId 首赢去重 —— 重投会复制群流消息",
+        )
         assertTrue(source.contains("controller.invokeGrantAllows = "), "可信设备判据桥必须装上（§6.3）")
         assertTrue(source.contains("controller.invokeExecPolicyOf = "), "每 agent 执行范围桥必须装上（§6.3）")
         assertTrue(source.contains("controller.invokeRecordGrantRequest = "), "未授权申请桥必须装上（面板要能冒出待批项）")
