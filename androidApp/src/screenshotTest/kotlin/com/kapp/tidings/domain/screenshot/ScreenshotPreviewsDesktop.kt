@@ -23,7 +23,6 @@ import com.kapp.tidings.ui.desktop.desktopPreviewCabinetPeerLoadingState
 import com.kapp.tidings.ui.desktop.desktopPreviewCabinetPeerState
 import com.kapp.tidings.ui.desktop.desktopPreviewCabinetState
 import com.kapp.tidings.ui.desktop.desktopPreviewCabinetUnsetState
-import com.kapp.tidings.ui.desktop.desktopPreviewEmptyState
 import com.kapp.tidings.ui.desktop.desktopPreviewFailedState
 import com.kapp.tidings.ui.desktop.desktopPreviewFilesBannerState
 import com.kapp.tidings.ui.desktop.desktopPreviewFilesState
@@ -213,14 +212,6 @@ private fun DeskOfflinePeerExpandedPreview() {
         state = desktopPreviewOfflinePeerState(),
         initialPeerId = zhouPeer().nodeId,
     )
-}
-
-/** 一个对端都没有：空态文案与「新建会话」入口。这是配对完成后的第一屏。 */
-@PreviewTest
-@Preview(name = "desk-empty-expanded", widthDp = 1100, heightDp = 720, showBackground = true, locale = "zh-rCN")
-@Composable
-private fun DeskEmptyExpandedPreview() {
-    Desk(1100, 720, state = desktopPreviewEmptyState(), initialPeerId = null)
 }
 
 /**
