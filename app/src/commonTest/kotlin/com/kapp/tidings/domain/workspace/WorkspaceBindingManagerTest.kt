@@ -47,6 +47,18 @@ class WorkspaceBindingManagerTest {
         assertTrue(m.bindWorkspace("g-1", "host-a", "/repo/tea").isSuccess)
         val second = m.bindWorkspace("g-2", "host-a", "/repo/tea")
         assertTrue(second.isFailure, "同宿主同路径已被 g-1 绑定 ⇒ g-2 绑不上（1:1 防重）")
+        // P3 补笔（S14 复核）：两级判定的失败**类型**各自可断言 —— 异群占路径 =
+        // PathBoundByOther（带回占着的绑定），不是 Storage（那是磁盘/意外的档）。
+        val failure = second.exceptionOrNull() as? WorkspaceBindException
+        assertTrue(
+            failure?.failure is WorkspaceBindFailure.PathBoundByOther,
+            "失败类型必须是 PathBoundByOther（可区分性判据）：实际 " + second.exceptionOrNull(),
+        )
+        assertEquals(
+            "g-1",
+            (failure?.failure as? WorkspaceBindFailure.PathBoundByOther)?.binding?.groupId,
+            "失败里带回的是**占着的那条**绑定（UI 说得出被哪个群占着）",
+        )
         assertTrue(m.isPathBound("host-a", "/repo/tea"), "路径仍归 g-1")
     }
 
