@@ -80,15 +80,20 @@ internal fun openDesktopDatabase(
         // 比当前 schema 还新（降级场景）：什么都不做，也别把版本号往回写。
         current >= schema.version -> return
         else -> {
-            // **盖章库与 unversioned 库走同一张判别表**（D-028）：user_version 的语义有
-            // 歧义（17 到底是「17.sqm 应用完」还是「待跑」—— SQLDelight 2.0.2 的段条件
-            // oldVersion <= N 让 migrate(17,19) 重跑 17.sqm，实证 duplicate sha256），
-            // 不信任它，用列形状算 from —— 判据单一来源（resolveMigrateFrom），
-            // 两个分支不许漂移。
-            val from = resolveMigrateFrom(
-                messageColumns = columns,
-                artifactColumns = columnsOf(driver, ARTIFACT_TABLE),
-                schemaVersion = schema.version,
+            // **盖章库与 unversioned 库走同一张判别表**（D-028 / D-029 修正）：
+            // SQLDelight 2.0.2 的段条件 oldVersion <= N 让 migrate(N, ...) 重跑 N.sqm
+            // （实证 migrate(17,19) duplicate sha256；AgentStorePersistenceTest 实证
+            // migrate(6,19) 重跑 5/6.sqm 洗掉 D1/D6 列）—— user_version 单独用会踩重跑。
+            // 判据 = **max(user_version, 列形状下限)**：列形状只能「抬高」起点
+            // （card_payload 在 ⇒ 库真实进度 ≥19），绝不降低 —— 降低会让换表重建段
+            // 重跑把老列洗掉。两个分支共用 resolveMigrateFrom，不许漂移。
+            val from = maxOf(
+                current,
+                resolveMigrateFrom(
+                    messageColumns = columns,
+                    artifactColumns = columnsOf(driver, ARTIFACT_TABLE),
+                    schemaVersion = schema.version,
+                ),
             )
             if (from < schema.version) schema.migrate(driver, from, schema.version)
         }
