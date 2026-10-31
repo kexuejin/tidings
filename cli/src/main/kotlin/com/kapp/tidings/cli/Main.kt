@@ -260,6 +260,8 @@ internal object PlainTextUiTexts : RelayUiTexts {
     override suspend fun invokeTimeoutTitle(agentName: String): String =
         "[" + agentName + "] subtask timed out"
     override suspend fun invokeActionRetryLabel(): String = "retry"
+    override suspend fun tagNoMatchTitle(tag: String): String =
+        "no online node supports [" + tag + "]; task suspended"
     override suspend fun invokeActionFallbackLabel(): String = "run locally"
     // 插件接不了活时的群流反馈：同样是纯 ASCII，且**非空** ——
     // 空正文的群文本帧会被协议侧整帧拒收（`validateMsg` 要求 text 非空）。
