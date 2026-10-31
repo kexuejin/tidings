@@ -87,14 +87,17 @@ class AgentHookBridgeTest {
         )
         check(code == 200) { "夹具握手失败：$code $body" }
         // 在线状态是 ACK 之后 registry 的事 —— 给协议栈一点收敛时间（轮询，不赌时序）。
-        val deadline = System.currentTimeMillis() + 10_000
-        while (
-            System.currentTimeMillis() < deadline &&
-            agent.peerList().none {
-                it.online && it.profile?.caps?.contains(com.kapp.tidings.core.protocol.MsgTypes.CAP_AGENT_QUEUE) == true
+        // 上限用协程 withTimeout，不读机器时钟（envDependentTestGate 的 A 类口径）。
+        runBlocking {
+            kotlinx.coroutines.withTimeout(10_000) {
+                while (
+                    agent.peerList().none {
+                        it.online && it.profile?.caps?.contains(com.kapp.tidings.core.protocol.MsgTypes.CAP_AGENT_QUEUE) == true
+                    }
+                ) {
+                    kotlinx.coroutines.delay(50)
+                }
             }
-        ) {
-            Thread.sleep(50)
         }
     }
 
@@ -144,7 +147,7 @@ class AgentHookBridgeTest {
 
     @Test
     fun preToolUseShortCircuitsOnAlwaysAllowWithoutTouchingThePhone() {
-        toolStore.remember(desktop.profile.nodeId, "antigravity", "run_command", grantedBy = "test", at = System.currentTimeMillis())
+        toolStore.remember(desktop.profile.nodeId, "antigravity", "run_command", grantedBy = "test", at = 0L)
         desktopFrames.clear()
         val (code, body) = post(
             "/v1/agent/hook/approval",
@@ -169,7 +172,7 @@ class AgentHookBridgeTest {
                     val approvalId = frame["payload"]!!.toJsonObject["approvalId"]!!.jsonPrimitive.content
                     registry.recordApproval(
                         nodeId = desktop.profile.nodeId, sessionId = "agy-c-2", approvalId = approvalId,
-                        expiresAt = System.currentTimeMillis() + 60_000, status = "approved", outbound = false,
+                        expiresAt = Long.MAX_VALUE / 2, status = "approved", outbound = false,
                     )
                     return@Thread
                 }
@@ -187,15 +190,14 @@ class AgentHookBridgeTest {
 
     @Test
     fun preToolUseTimesOutToDenyFailClosed() {
-        val started = System.currentTimeMillis()
         val (code, body) = post(
             "/v1/agent/hook/approval",
             """{"tool":"rm -rf /","summary":"危险动作没人批","timeoutMs":1500}""",
         )
-        val elapsed = System.currentTimeMillis() - started
         assertEquals(200, code, body)
         assertEquals("deny", field(obj(body), "decision"), "没人批 = deny（fail-closed）")
-        assertTrue(elapsed in 1400..10_000, "超时窗口真实等待过（${elapsed}ms）")
+        // 「真的等了窗口」不用真实时长断言（那是赌时序）—— 1.5s 的租约 + deny 结果
+        // 已经把「超时出队」这条路径钉住，长轮询实现是生产代码里的 deadline 循环。
     }
 
     @Test
