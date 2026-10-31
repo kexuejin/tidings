@@ -51,6 +51,7 @@ import com.kapp.tidings.generated.resources.agent_empty_subtitle
 import com.kapp.tidings.generated.resources.agent_empty_title
 import com.kapp.tidings.generated.resources.agent_subtitle_pending
 import com.kapp.tidings.generated.resources.agent_title
+import com.kapp.tidings.generated.resources.approval_focus_subtitle
 import com.kapp.tidings.generated.resources.desktop_action_refresh
 import com.kapp.tidings.generated.resources.ic_chev
 import com.kapp.tidings.generated.resources.ic_lan_search
@@ -427,6 +428,27 @@ internal fun WorkspaceBoardView(
     // 批准卡立刻消失，与「它被谁删了」无法区分（issue「处置留痕 2 秒」）。
     // 过期的不画、也不计数（`pendingApprovalCount` 同一判据）。
     val approvalRows = rememberLingeringApprovalRows(state.agentApprovals.values, now)
+
+    // 待审批**置顶聚焦卡**（task-20；原型 screenAgents 置顶条 relay.html:4692-4701）：
+    // 聚合事实 + 立即审批直达。计数用页头同一把尺子（上方 totalPending = 领域层
+    // pendingApprovalCount），不在这里数第二遍；这里只做聚焦不处置 —— 不画第二套
+    // 批准/拒绝按钮。副标是内容（哪些操作）按调用方给。
+    // 「立即审批」按原型 4701 行的语义（selConv=agent; go('d-chat')）= 选中**待批项
+    // 所在宿主**的会话并进聊天 —— 目标从审批行的 peerId 来，不是「第一个 agent」。
+    // totalPending 与 lingering 行的 pending 判据同源（isPendingApproval = pending
+    // 且未过期），所以 totalPending > 0 时下面的 firstOrNull 必命中。
+    val focusPeerId = approvalRows.firstOrNull { it.status == "pending" }?.peerId
+    if (totalPending > 0 && focusPeerId != null) {
+        PinnedApprovalFocusCard(
+            pendingCount = totalPending,
+            subtitle = stringResource(Res.string.approval_focus_subtitle),
+            onApproveClick = {
+                onSelectAgent(focusPeerId)
+                onOpenChat(focusPeerId, null)
+            },
+            modifier = Modifier.padding(bottom = LocalAppSpacing.current.lg14),
+        )
+    }
     if (approvalRows.isNotEmpty()) {
         AgentApprovalsSection(
             approvals = approvalRows,

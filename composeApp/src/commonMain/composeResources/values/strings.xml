@@ -1055,6 +1055,9 @@
     <string name="desktop_menu_view">视图</string>
     <string name="desktop_menu_window">窗口</string>
     <string name="desktop_menu_help">帮助</string>
+    <string name="approval_focus_title">有 %1$s 项高危操作等待机主审批</string>
+    <string name="approval_focus_action">立即审批</string>
+    <string name="approval_focus_subtitle">涉及 Git 远程推送与敏感文件修改，请及时处理</string>
     <string name="desktop_action_open_downloads">打开下载目录</string>
     <string name="desktop_menu_edit_toggle_theme">切换深浅色</string>
     <string name="desktop_menu_view_search">搜索</string>

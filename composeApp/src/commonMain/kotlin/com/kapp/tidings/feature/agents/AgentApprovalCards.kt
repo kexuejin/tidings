@@ -36,6 +36,8 @@ import com.kapp.tidings.core.nowMillis
 import com.kapp.tidings.domain.isApprovalExpired as domainIsApprovalExpired
 import kotlinx.coroutines.delay
 import com.kapp.tidings.generated.resources.Res
+import com.kapp.tidings.generated.resources.approval_focus_title
+import com.kapp.tidings.generated.resources.approval_focus_action
 import com.kapp.tidings.generated.resources.agent_approval_allow
 import com.kapp.tidings.generated.resources.agent_approval_deny
 import com.kapp.tidings.generated.resources.agent_artifact_verify_missing
@@ -53,6 +55,11 @@ import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.ui.text.font.FontFamily
 import com.kapp.tidings.ui.components.AppButton
+import androidx.compose.foundation.BorderStroke
+import androidx.compose.foundation.shape.CircleShape
+import com.kapp.tidings.ui.components.AppButtonTone
+import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.background
 import com.kapp.tidings.ui.components.AppButtonSize
 import com.kapp.tidings.ui.components.AppOutlinedButton
 import com.kapp.tidings.ui.components.AppTextButton
@@ -90,6 +97,7 @@ import com.kapp.tidings.generated.resources.common_close
 import com.kapp.tidings.ui.components.SectionHeader
 import com.kapp.tidings.ui.components.formatClock
 import com.kapp.tidings.ui.components.formatCount
+import com.kapp.tidings.ui.theme.IconSizes
 import com.kapp.tidings.ui.theme.LocalAppSpacing
 import com.kapp.tidings.ui.theme.LocalCardShape
 import com.kapp.tidings.ui.theme.relayCardShadow
@@ -980,5 +988,72 @@ private fun artifactSubtitle(artifact: AgentArtifactUi): String {
         stringResource(Res.string.agent_artifact_no_file)
     } else {
         parts.joinToString(" · ")
+    }
+}
+
+/**
+ * 待审批**置顶聚焦卡**（升级轮 task-20；原型 screenAgents 置顶条 relay.html:4692-4701）：
+ * error 微晕底 + 20% error 细边 + r12 + 脉冲点（8px 实心 + 3px 同色 20% 环）+ 主标
+ * 13/600 error + 副标 11 on-2 + 实心 error「立即审批」。**同一数据源**：消费
+ * state.agentApprovals 的聚合（与 AgentApprovalsSection 队列同源不两套）—— 这里只画
+ * 「聚合事实 + 直达」，逐条处置仍在队列（不画第二套批准/拒绝按钮）。
+ */
+@Composable
+public fun PinnedApprovalFocusCard(
+    pendingCount: Int,
+    subtitle: String,
+    onApproveClick: () -> Unit,
+    modifier: Modifier = Modifier,
+) {
+    if (pendingCount <= 0) return
+    // r12 走 MaterialTheme.shapes.medium（token 档内的 12dp）；1dp 描边走
+    // BorderStroke 参数（AppButtons / ThinkingBlock 的既定惯用法），不写
+    // Modifier.border(1.dp, …) 字面量 —— designTokenUsageGate 的棘轮只许降不许升。
+    Surface(
+        shape = MaterialTheme.shapes.medium,
+        color = MaterialTheme.colorScheme.error.copy(alpha = 0.08f),
+        border = BorderStroke(width = 1.dp, color = MaterialTheme.colorScheme.error.copy(alpha = 0.2f)),
+        modifier = modifier.fillMaxWidth(),
+    ) {
+        Row(
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(LocalAppSpacing.current.md10),
+            modifier = Modifier.padding(
+                horizontal = LocalAppSpacing.current.lg14,
+                vertical = LocalAppSpacing.current.md10,
+            ),
+        ) {
+            Box(
+                modifier = Modifier
+                    .size(IconSizes.Inline)
+                    .background(MaterialTheme.colorScheme.error.copy(alpha = 0.2f), CircleShape),
+                contentAlignment = Alignment.Center,
+            ) {
+                Box(
+                    modifier = Modifier
+                        .size(LocalAppSpacing.current.sm)
+                        .background(MaterialTheme.colorScheme.error, CircleShape),
+                )
+            }
+            Column(Modifier.weight(1f)) {
+                Text(
+                    text = stringResource(Res.string.approval_focus_title, formatCount(pendingCount.toLong())),
+                    style = MaterialTheme.typography.bodyMedium,
+                    fontWeight = FontWeight.SemiBold,
+                    color = MaterialTheme.colorScheme.error,
+                )
+                Text(
+                    text = subtitle,
+                    style = MaterialTheme.typography.labelSmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+            }
+            AppButton(
+                text = stringResource(Res.string.approval_focus_action),
+                onClick = onApproveClick,
+                size = AppButtonSize.Small,
+                tone = AppButtonTone.Danger,
+            )
+        }
     }
 }

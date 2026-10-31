@@ -61,9 +61,12 @@ class AgentCardPolicyTest {
     fun registryCoversTheSevenDesignedTypes() {
         assertEquals(
             setOf("task-board", "approval", "result", "status", "timeout", "diff-review", "assignment"),
-            CardTypeRegistry.recommended.keys,
-            "设计稿 §3 的七类卡都要有推荐构成",
+            // 升级轮 task-20 新增第 8 类（ask_question，detailed-design §7.9）——
+            // 集合改为「包含七类设计稿 + ask_question」的断言：七类缺席仍然红。
+            CardTypeRegistry.recommended.keys.filter { it != "ask_question" }.toSet(),
+            "设计稿 §3 的七类卡 + 升级稿 ask_question 都要有推荐构成",
         )
+        assertTrue("ask_question" in CardTypeRegistry.recommended.keys, "升级稿 ask_question 必须在注册表")
         // 抽查两条容易画错的：审批必须有按钮组与警示横幅；状态轻通知**不该**有按钮。
         assertTrue(CardBlock.ButtonGroup in CardTypeRegistry.recommendedBlocksOf("approval").orEmpty())
         assertTrue(CardBlock.Banner in CardTypeRegistry.recommendedBlocksOf("approval").orEmpty())
@@ -117,9 +120,22 @@ class AgentCardPolicyTest {
                 "actions":[{"actionId":"open","label":"Open"}],
                 "artifacts":[{"name":"report.pdf","bytes":2048,"mime":"application/pdf"}]}""",
         )
-        assertEquals(CardBlock.values().toSet(), presentBlocksOf(full), "六类原子组件都要能被识别出来")
+        // OptionList 不在 result 卡里 —— 它是 ask_question 专属块（§7.9），
+        // 用一张 ask_question 夹具单独钉「第七类块能被识别」。
+        assertEquals(
+            CardBlock.values().toSet() - CardBlock.OptionList,
+            presentBlocksOf(full),
+            "六类原子组件都要能被识别出来（OptionList 单独钉）",
+        )
         assertEquals("report.pdf", full.artifacts.single().name)
         assertEquals(2_048L, full.artifacts.single().bytes)
+        val ask = parse(
+            """{"cardId":"c","rev":1,"type":"ask_question",
+                "banner":{"text":"按什么顺序？","tone":"info"},
+                "options":[{"label":"在线节点优先 (推荐)","recommended":true},{"label":"ID 字典序"}]}""",
+        )
+        assertEquals(setOf(CardBlock.Banner, CardBlock.OptionList), presentBlocksOf(ask))
+        assertTrue(ask.options.first().recommended, "recommended 布尔要能从载荷读出")
     }
 
     // ── 卡片行的三种去向（S21：解析失败不许静默吞行）───────────────────────────

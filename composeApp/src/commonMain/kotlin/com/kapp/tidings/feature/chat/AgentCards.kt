@@ -128,6 +128,15 @@ data class AgentCardArtifact(
     val mime: String? = null,
 )
 
+/**
+ * 反向多选卡的一个预设选项（detailed-design §7.9：手机端拇指一点决策，Agent 拿到
+ * 确定性参数再开工）。[recommended] 是插件标注的推荐项（原型 `(推荐)` 后缀的语义化）。
+ */
+data class AgentCardOption(
+    val label: String,
+    val recommended: Boolean = false,
+)
+
 data class AgentCardBanner(
     val text: String,
     val tone: AgentCardBannerTone = AgentCardBannerTone.Info,
@@ -169,6 +178,8 @@ data class AgentCardUi(
     val decidedBy: String? = null,
     /** 宿主判定的 actionId；与 [decidedBy] 成对。 */
     val decidedActionId: String? = null,
+    /** 反向多选预设选项（ask_question，§7.9）；空 = 这张卡没有选项块。 */
+    val options: List<AgentCardOption> = emptyList(),
 )
 
 /** 宽容解析：未知字段忽略、未知状态退档；身份键（cardId/rev）缺失整卡作废。 */
@@ -242,6 +253,11 @@ fun parseAgentCard(json: JsonObject?): AgentCardUi? {
             )
         },
         expiresAt = json.long("expiresAt"),
+        options = json.array("options").mapNotNull { el ->
+            val obj = el as? JsonObject ?: return@mapNotNull null
+            val label = obj.str("label")?.takeIf { it.isNotBlank() } ?: return@mapNotNull null
+            AgentCardOption(label = label, recommended = obj.boolean("recommended") == true)
+        },
     )
 }
 
@@ -342,6 +358,8 @@ enum class CardBlock {
     DiffViewer,
     ButtonGroup,
     ArtifactList,
+    /** 反向多选（升级稿 ask_question，detailed-design §7.9）：预设选项点选。 */
+    OptionList,
 }
 
 /**
@@ -366,6 +384,8 @@ object CardTypeRegistry {
         "timeout" to setOf(CardBlock.Banner, CardBlock.ButtonGroup),
         "diff-review" to setOf(CardBlock.DiffViewer, CardBlock.ButtonGroup),
         "assignment" to setOf(CardBlock.StepList),
+        // 反向多选（§7.9）：横幅说问题，选项块给决策 —— 给它按钮之外的块是稀释。
+        "ask_question" to setOf(CardBlock.Banner, CardBlock.OptionList),
     )
 
     /** 查建议构成；未知 type（含 null / 空白）返回 null = 没有建议，不是拒绝。 */
@@ -387,6 +407,7 @@ fun presentBlocksOf(card: AgentCardUi): Set<CardBlock> {
     if (card.diff != null) blocks += CardBlock.DiffViewer
     if (card.actions.isNotEmpty()) blocks += CardBlock.ButtonGroup
     if (card.artifacts.isNotEmpty()) blocks += CardBlock.ArtifactList
+    if (card.options.isNotEmpty()) blocks += CardBlock.OptionList
     return blocks
 }
 
@@ -630,6 +651,9 @@ fun AgentCardBubble(
             card.diff?.let { CardDiffViewerRow(it) }
             if (card.artifacts.isNotEmpty()) {
                 CardArtifactRows(card.artifacts)
+            }
+            if (card.options.isNotEmpty()) {
+                CardOptionListRows(card, onAction)
             }
             // 宿主判定的知情行（.decided{padding:6px 14px 10px}，11px on-2）：
             // 它不是按钮，是「这件事已被谁定了」的事实 —— 就算这个壳没有动作通路
@@ -1195,6 +1219,42 @@ private fun CardButtonGroupRow(
                         modifier = Modifier.weight(1f),
                     )
                 }
+            }
+        }
+    }
+}
+
+/**
+ * 反向多选块（升级稿 ask_question，detailed-design §7.9）：预设选项**竖排全宽**，
+ * 手机拇指一点即决策。推荐项实心 primary、其余描边（原型 .acts .pri-row 的
+ * btn/pri 同一做法）；动作路由复用 onAction 槽 —— actionId = 选项文本，
+ * 宿主/插件侧拿到确定性参数（§7.9 第 3 条「获得确定性参数后再开工」）。
+ * 无动作通路时整块不画（与 ButtonGroup 同一条 DeadButtonGuard 纪律）。
+ */
+@Composable
+private fun CardOptionListRows(
+    card: AgentCardUi,
+    onAction: ((card: AgentCardUi, actionId: String) -> Unit)?,
+) {
+    if (onAction == null) return  // 没有动作通路 = 点了没反应的按钮比没有更糟
+    Column(verticalArrangement = Arrangement.spacedBy(LocalAppSpacing.current.sm)) {
+        card.options.forEach { option ->
+            if (option.recommended) {
+                AppButton(
+                    text = option.label,
+                    onClick = { onAction(card, option.label) },
+                    size = AppButtonSize.Small,
+                    tone = AppButtonTone.Primary,
+                    modifier = Modifier.fillMaxWidth(),
+                )
+            } else {
+                AppOutlinedButton(
+                    text = option.label,
+                    onClick = { onAction(card, option.label) },
+                    size = AppButtonSize.Small,
+                    tone = AppButtonTone.Neutral,
+                    modifier = Modifier.fillMaxWidth(),
+                )
             }
         }
     }

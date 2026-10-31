@@ -354,6 +354,7 @@ private fun cardOf(
     diff: Triple<String, String, Pair<Int, Int>>? = null,
     actions: List<Triple<String, String, Boolean>> = emptyList(),
     artifacts: List<Triple<String, Long?, String?>> = emptyList(),
+    options: List<Pair<String, Boolean>> = emptyList(),
     expiresAt: Long? = null,
 ) = parseAgentCard(buildJsonObject {
     put("type", type)
@@ -403,6 +404,16 @@ private fun cardOf(
         }
     }
     expiresAt?.let { put("expiresAt", it) }
+    if (options.isNotEmpty()) {
+        putJsonArray("options") {
+            options.forEach { (label, recommended) ->
+                add(buildJsonObject {
+                    put("label", label)
+                    if (recommended) put("recommended", true)
+                })
+            }
+        }
+    }
 })!!
 
 /** P1 · 进度 0%：插件刚接下任务，一步都还没走。 */
@@ -1413,6 +1424,96 @@ private fun V2ApprovalExpiredDeskPreview() {
                     onRespond = { _, _ -> },
                     onRespondChoice = { _, _ -> },
                     includeExpiredPending = true,
+                )
+            }
+        }
+    }
+}
+
+
+// ── T-2e：待审批置顶聚焦卡 + 反向多选卡（task-20）─────────────────────────
+
+/** P4' 置顶聚焦卡（手机）：聚合事实 + 直达按钮（原型 screenAgents 置顶条 relay.html:4692-4701）。 */
+@PreviewTest
+@Preview(name = "v2-pinned-approval-phone", widthDp = 393, heightDp = 852, showBackground = true, locale = "zh-rCN")
+@Composable
+private fun PinnedApprovalFocusPhonePreview() {
+    AppTheme(darkTheme = false) {
+        Surface(color = MaterialTheme.colorScheme.surface, modifier = Modifier.fillMaxSize()) {
+            Box(Modifier.padding(12.dp)) {
+                com.kapp.tidings.feature.agents.PinnedApprovalFocusCard(
+                    pendingCount = 3,
+                    subtitle = "涉及 Git 远程推送与敏感文件修改，请及时处理",
+                    onApproveClick = {},
+                )
+            }
+        }
+    }
+}
+
+/** P4' 置顶聚焦卡（桌面）：同一份在 720 列宽。 */
+@PreviewTest
+@Preview(name = "desk-v2-pinned-approval", widthDp = 1280, heightDp = 800, showBackground = true, locale = "zh-rCN")
+@Composable
+private fun PinnedApprovalFocusDeskPreview() {
+    AppTheme(darkTheme = false) {
+        Surface(color = MaterialTheme.colorScheme.surface, modifier = Modifier.fillMaxSize()) {
+            Box(Modifier.padding(16.dp).width(DeskCardWidth)) {
+                com.kapp.tidings.feature.agents.PinnedApprovalFocusCard(
+                    pendingCount = 3,
+                    subtitle = "涉及 Git 远程推送与敏感文件修改，请及时处理",
+                    onApproveClick = {},
+                )
+            }
+        }
+    }
+}
+
+/** P19 · 反向多选卡（手机，ask_question §7.9）：推荐实心 + 其余描边，拇指一点。 */
+@PreviewTest
+@Preview(name = "v2-card-p19-ask-question", widthDp = 393, heightDp = 852, showBackground = true, locale = "zh-rCN")
+@Composable
+private fun V2CardAskQuestionPhonePreview() {
+    AppTheme(darkTheme = false) {
+        Surface(color = MaterialTheme.colorScheme.surface, modifier = Modifier.fillMaxSize()) {
+            Box(Modifier.padding(12.dp)) {
+                AgentCardBubble(
+                    card = cardOf(
+                        type = "ask_question",
+                        banner = "检测到多个候选节点，按什么顺序派发任务？" to "info",
+                        options = listOf(
+                            "在线节点优先 (推荐)" to true,
+                            "ID 字典序" to false,
+                        ),
+                    ),
+                    pendingActions = emptySet(),
+                    onAction = { _, _ -> },
+                )
+            }
+        }
+    }
+}
+
+/** P19 桌面：反向多选卡 720 列宽（同一份实现）。 */
+@PreviewTest
+@Preview(name = "desk-v2-card-p19-ask-question", widthDp = 1280, heightDp = 800, showBackground = true, locale = "zh-rCN")
+@Composable
+private fun V2CardAskQuestionDeskPreview() {
+    AppTheme(darkTheme = false) {
+        Surface(color = MaterialTheme.colorScheme.surface, modifier = Modifier.fillMaxSize()) {
+            Box(Modifier.padding(16.dp)) {
+                AgentCardBubble(
+                    card = cardOf(
+                        type = "ask_question",
+                        banner = "检测到多个候选节点，按什么顺序派发任务？" to "info",
+                        options = listOf(
+                            "在线节点优先 (推荐)" to true,
+                            "ID 字典序" to false,
+                        ),
+                    ),
+                    pendingActions = emptySet(),
+                    onAction = { _, _ -> },
+                    modifier = Modifier.width(DeskCardWidth),
                 )
             }
         }
