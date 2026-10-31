@@ -190,6 +190,32 @@ class ChatReviewGuardTest {
         )
     }
 
+    /**
+     * T-2d 单卡槽的调用侧纪律：卡片行的 `remember` 键必须跟着 `renderCard` 走。
+     *
+     * 为什么只能看源码：原位刷新（同 id、同首帧 card、只有 cardPayload 在走）下，
+     * remember 键若停在 `message.card`，缓存的 [cardRowOutcome] 永远停在首帧 ——
+     * 判定横幅、步骤推进都不上屏。这是行为测试够不到的缓存 staleness（本仓没有
+     * Compose UI 测试基建；截图帧每次都是全新组合，也抓不到）。
+     *
+     * 回退方式：把键改回 `remember(message.id, message.card, visibleCardIds)` ⇒ 本条红。
+     */
+    @Test
+    fun cardRowRememberTracksTheLatestPayloadNotTheFirstFrame() {
+        val chat = live(CHAT_SCREEN)
+        val keys = Regex("remember\\(([^)]*)\\)\\s*\\{\\s*cardRowOutcome\\(message, visibleCardIds\\)")
+            .find(chat)?.groupValues?.get(1)
+        assertTrue(keys != null, "cardRowOutcome 的 remember 调用找不到了 —— 调用形状变了，守卫要跟着改")
+        assertTrue(
+            keys!!.contains("renderCard"),
+            "卡片行的 remember 键没有 renderCard：单卡槽原位刷新后缓存停在首帧（T-2d 的 UI 侧回退）",
+        )
+        assertFalse(
+            keys.contains("message.card,") || keys.contains("message.card)"),
+            "remember 键里还有 message.card：首帧原文在原位刷新下永不变化，进键只会造成『看着在跟、实际不跟』的错觉",
+        )
+    }
+
     private companion object {
         const val CHAT_SCREEN =
             "composeApp/src/commonMain/kotlin/com/kapp/tidings/feature/chat/ChatScreen.kt"

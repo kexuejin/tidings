@@ -165,6 +165,9 @@ class SqlDelightMessageStoreFtsTest {
         // 最新 .sq 建表已含它们，退回旧形状时同样要退掉。
         runCatching { driver.execute(null, "ALTER TABLE AgentArtifactEntity DROP COLUMN sha256", 0) }
         runCatching { driver.execute(null, "ALTER TABLE AgentArtifactEntity DROP COLUMN summary", 0) }
+        // 18.sqm 的 card_payload 同理（升级轮 T-2a，(cardId, rev) 原位刷新的最新载荷）——
+        // 漏退这一列的现场：migrate(10→19) 跑 18.sqm 的 ALTER 时 duplicate column name。
+        runCatching { driver.execute(null, "ALTER TABLE MessageEntity DROP COLUMN card_payload", 0) }
         // 14.sqm 的 seq 同理：最新 .sq 建表已含它，退回旧形状时也要退掉。
         // 索引必须先删 —— SQLite 不允许删一个被索引引用的列。
         runCatching { driver.execute(null, "DROP INDEX IF EXISTS message_conv_seq", 0) }

@@ -115,7 +115,7 @@ class TwoNodeAgentInvokeTest {
                 selfOf(leader), hostOf(cardOnA.senderId!!),
                 "看板卡的署名宿主必须是 Leader（A），不是被派单的 B —— 全群只听 Leader 发言",
             )
-            assertEquals("回归完成", cardOnB.card!!.strOf("title"), "组员卡片的内容原样收编进看板")
+            assertEquals("回归完成", cardOnB.renderCard!!.strOf("title"), "组员卡片的内容原样收编进看板")
 
             // 3)【核心】零刷屏：本回路在两端新增的行全部是卡，没有一行纯文本。
             val newRowsA = leader.rows(groupId).drop(beforeA)
@@ -203,18 +203,18 @@ class TwoNodeAgentInvokeTest {
             val selfB = selfOf(host)
 
             // B 端点击：卡片宿主在 A ⇒ op=action 帧直达 A（§7.3-2 的跨端通路）。
-            val rev1 = leader.rows(groupId).first { it.cardId() == cardId }.card!!.intOf("rev")!!
+            val rev1 = leader.rows(groupId).first { it.cardId() == cardId }.renderCard!!.intOf("rev")!!
             host.handleCardAction(groupId, cardId, rev1, "approve")
             awaitUntil("A 记下首个判定并广播 rev+1") {
-                leader.rows(groupId).any { it.cardId() == cardId && it.card!!.intOf("rev") == rev1 + 1 }
+                leader.rows(groupId).any { it.cardId() == cardId && it.renderCard!!.intOf("rev") == rev1 + 1 }
             }
             awaitUntil("B 收到全群广播的判定结果") {
-                host.rows(groupId).any { it.cardId() == cardId && it.card!!.intOf("rev") == rev1 + 1 }
+                host.rows(groupId).any { it.cardId() == cardId && it.renderCard!!.intOf("rev") == rev1 + 1 }
             }
-            val decided = leader.rows(groupId).first { it.cardId() == cardId && it.card!!.intOf("rev") == rev1 + 1 }
-            assertEquals("approve", decided.card!!.strOf("decidedActionId"), "判定动作随卡广播")
+            val decided = leader.rows(groupId).first { it.cardId() == cardId && it.renderCard!!.intOf("rev") == rev1 + 1 }
+            assertEquals("approve", decided.renderCard!!.strOf("decidedActionId"), "判定动作随卡广播")
             val expectedB = leader.state.value.settings.groups.first().memberNicks?.get(selfB) ?: selfB
-            assertEquals(expectedB, decided.card!!.strOf("decidedBy"), "批准人显示名来自群成员昵称（认不出时兜 nodeId）")
+            assertEquals(expectedB, decided.renderCard!!.strOf("decidedBy"), "批准人显示名来自群成员昵称（认不出时兜 nodeId）")
 
             // A 本机晚到点击同一动作：幂等丢弃 —— 台账只认首个判定。
             leader.handleCardAction(groupId, cardId, rev1 + 1, "approve")
@@ -222,19 +222,21 @@ class TwoNodeAgentInvokeTest {
             // 且它之前的「丢弃」不是消息卡住（丢弃与卡住在此处分得开）。
             leader.handleCardAction(groupId, cardId, rev1 + 1, "deny")
             awaitUntil("第二个不同动作正常生效（rev+2）") {
-                leader.rows(groupId).any { it.cardId() == cardId && it.card!!.intOf("rev") == rev1 + 2 }
+                leader.rows(groupId).any { it.cardId() == cardId && it.renderCard!!.intOf("rev") == rev1 + 2 }
             }
             awaitUntil("deny 的判定也广播到 B") {
-                host.rows(groupId).any { it.cardId() == cardId && it.card!!.intOf("rev") == rev1 + 2 }
+                host.rows(groupId).any { it.cardId() == cardId && it.renderCard!!.intOf("rev") == rev1 + 2 }
             }
 
-            val revs = leader.rows(groupId).filter { it.cardId() == cardId }.map { it.card!!.intOf("rev")!! }
-            assertEquals(listOf(rev1, rev1 + 1, rev1 + 2), revs, "原位刷新 = 同 cardId 的追加式新行，不许有第 4 行")
-            assertEquals(
-                1,
-                leader.rows(groupId).count { it.cardId() == cardId && it.card!!.strOf("decidedActionId") == "approve" },
-                "approve 判定恰好广播一次：晚到的并发点击被幂等丢弃（§7.3-2）",
-            )
+            // T-2d 单卡槽：rev 推进 = 同一行原位替换（renderCard 指向最新 rev），
+            // 行数恒为 1 —— 旧断言「追加式新行 [rev1, rev1+1, rev1+2]」随存储语义升级作废。
+            val revRows = leader.rows(groupId).filter { it.cardId() == cardId }
+            assertEquals(1, revRows.size, "单卡槽：同 cardId 恒占 1 行（§7.2-2）")
+            assertEquals(rev1 + 2, revRows.single().renderCard!!.intOf("rev")!!, "原位替换后 renderCard 指向最新 rev")
+            // T-2d 单卡槽语义下，「approve 恰好一次」的判据移到台账（下面两行
+            // decidedBy 断言）：行上只有**最新**状态（deny 已覆盖 approve 的展示），
+            // 历史次数归 actionLedger.firstWin 记账 —— 单行数历史次数是旧追加模型
+            // 的读法，原位刷新后不再成立。
             val ledger = leader.invokeCtl.actionLedger
             assertEquals(selfB, ledger.decidedBy(cardId, "approve"), "approve 的判定人是 B（首个 agent-ack）")
             assertEquals(selfA, ledger.decidedBy(cardId, "deny"), "deny 的判定人是 A（本机点击）")
@@ -402,7 +404,7 @@ class TwoNodeAgentInvokeTest {
 
     // ---- MessageUi / JsonObject 的小读取器 ----
 
-    private fun com.kapp.tidings.domain.model.MessageUi.cardId(): String? = card?.strOf("cardId")
+    private fun com.kapp.tidings.domain.model.MessageUi.cardId(): String? = renderCard?.strOf("cardId")
 
     private fun JsonObject.strOf(key: String): String? =
         (this[key] as? JsonPrimitive)?.takeIf { it !is kotlinx.serialization.json.JsonNull }?.content

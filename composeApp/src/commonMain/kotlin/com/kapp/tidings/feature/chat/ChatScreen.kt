@@ -1065,7 +1065,11 @@ fun ChatScreen(
                         // 画卡 / 旧 rev 收起 / 读不出来就退成普通文本。不带卡的消息是 null，
                         // 保持原来的分支顺序不变 —— 否则纯文本消息会被「不画」那一支吃掉。
                         val cardOutcome = if (message.renderCard != null) {
-                            remember(message.id, message.card, visibleCardIds) {
+                            // T-2d 单卡槽（§6.2）：rev 推进 = **同一行**原位替换 —— id 与
+                            // card（首帧原文）都不变，只有 renderCard（cardPayload）在走。
+                            // remember 键若停在 card 上，缓存永远停在首帧（判定横幅、
+                            // 步骤推进都不上屏）；键必须跟着 renderCard 与 text 走。
+                            remember(message.id, message.renderCard, message.text, visibleCardIds) {
                                 cardRowOutcome(message, visibleCardIds)
                             }
                         } else {

@@ -11,7 +11,6 @@ import kotlin.test.AfterTest
 import kotlin.test.BeforeTest
 import kotlin.test.Test
 import kotlin.test.assertEquals
-import kotlin.test.assertTrue
 
 /**
  * T-2d 卡片 (cardId, rev) 原位刷新的存储判据（升级方案 §6.2 / 不变量 3 / §7.2-2）：

@@ -663,19 +663,43 @@ internal class RelayControllerAgentInvokeComponent(private val host: RelayContro
         val title = card.strField("title").orEmpty().ifBlank { card.strField("cardId").orEmpty() }
         if (title.isBlank()) return
         val envelopeId = newId()
-        host.handleAppendMessage(
-            MessageUi(
-                id = envelopeId,
-                peerId = ConvId.group(groupId),
-                mine = false,
-                text = title,
-                at = nowMillis(),
-                delivery = null,
-                senderId = AgentSenderId.of(st.selfNodeId, agentId),
-                card = card,
-            ),
-            incoming = true,
-        )
+        // T-2d 单卡槽（§6.2 / 不变量 3）：本机广播的 rev 推进帧，**本机的落库**也走
+        // 原位替换 —— 找同 cardId 的既有槽位，同 id 重写（card 首帧原文不动、
+        // cardPayload = 最新），不是追加新行。远端成员的替换由他们的入站拦截
+        // （RelayControllerMessagesComponent 的 T-2d 分支）对称完成。
+        // 没有 cardId（理论不发生：看板卡必带）或首帧（无同 cardId 槽位）才走追加。
+        val cardId = (card["cardId"] as? JsonPrimitive)?.contentOrNull
+        val existingSlot = cardId?.let { id ->
+            st.messages[ConvId.group(groupId)].orEmpty().lastOrNull { row ->
+                (row.renderCard?.get("cardId") as? JsonPrimitive)?.contentOrNull == id
+            }
+        }
+        if (cardId == null || existingSlot == null) {
+            // 首帧：本机落库 id 与线上信封 id **同一个** —— 补发与去重按信封 id 对账
+            // （同帧同 id 是既有判据，拆开就丢掉这层对账）。
+            host.handleAppendMessage(
+                MessageUi(
+                    id = envelopeId,
+                    peerId = ConvId.group(groupId),
+                    mine = false,
+                    text = title,
+                    at = nowMillis(),
+                    delivery = null,
+                    senderId = AgentSenderId.of(st.selfNodeId, agentId),
+                    card = card,
+                ),
+                incoming = true,
+            )
+        } else {
+            host.handleReplaceMessage(
+                existingSlot.peerId,
+                existingSlot.copy(
+                    text = title,
+                    at = nowMillis(),
+                    cardPayload = card,
+                ),
+            )
+        }
         runCatching {
             rt.sendGroupText(
                 text = title,
@@ -845,9 +869,11 @@ internal class RelayControllerAgentInvokeComponent(private val host: RelayContro
     private fun broadcastDecision(cardId: String, actionId: String, groupId: String, agentId: String, decidedBy: String) {
         val st = host._state.value
         val convId = ConvId.group(groupId)
+        // T-2d：最新载荷看 renderCard（cardPayload ?: card）—— 原位刷新后 row.card
+        // 永远停在首帧 rev，读它会算出重复的 currentRev（rev 永不推进的真 bug 现场）。
         val latest = st.messages[convId].orEmpty()
-            .lastOrNull { row -> (row.card?.get("cardId") as? JsonPrimitive)?.contentOrNull == cardId }
-            ?.card ?: return
+            .lastOrNull { row -> (row.renderCard?.get("cardId") as? JsonPrimitive)?.contentOrNull == cardId }
+            ?.renderCard ?: return
         val currentRev = (latest["rev"] as? JsonPrimitive)?.contentOrNull?.toIntOrNull() ?: return
         val meta = st.settings.groups.firstOrNull { it.groupId == groupId }
         val displayName = decidedDisplayName(decidedBy, meta?.memberNicks, st.selfNodeId, st.settings.nick)
