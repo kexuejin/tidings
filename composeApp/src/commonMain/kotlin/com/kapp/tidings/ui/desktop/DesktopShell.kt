@@ -1126,6 +1126,13 @@ public fun DesktopShell(
                                         controller.respondApproval(approvalId, allow)
                                     },
                                 )
+                                // T-G3 实时输出：最近的 busy 会话的流式日志（不落库的
+                                // 那一半可见性）。没有 busy 会话就不挂 —— inspector
+                                // 不画填料。
+                                com.kapp.tidings.feature.agents.AgentLiveLogPanel(
+                                    sessionId = state.agentSessions.values
+                                        .firstOrNull { it.state == "busy" }?.sessionId,
+                                )
                                 HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
                                 // 免批表入口：选中哪个 agent 就看谁的名单（看板下钻的
                                 // 第一层提前到这里；空选中如实画空表，不编内容）。

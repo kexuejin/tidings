@@ -59,4 +59,24 @@ class DesktopInspectorContentGuardTest {
             "Wide 会话视图的 inspector 信息行没有复用 peerHeaderLine —— 别再拼第二份地址行",
         )
     }
+
+    /** T-G3：实时输出面板挂在 Agents inspector（不落库的那一半可见性）。 */
+    @Test
+    fun liveLogPanelIsMountedAndEphemeralEventsAreFiltered() {
+        val shell = live("composeApp/src/commonMain/kotlin/com/kapp/tidings/ui/desktop/DesktopShell.kt")
+        assertTrue(
+            shell.contains("AgentLiveLogPanel("),
+            "Agents inspector 没挂实时输出面板 —— delta 类「不落库」后就没有任何可见处了",
+        )
+        val widgets = live("composeApp/src/commonMain/kotlin/com/kapp/tidings/feature/agents/AgentSessionWidgets.kt")
+        assertTrue(
+            widgets.contains("shouldPersist("),
+            "会话详情事件列表没有过滤瞬态事件 —— 活着可见、重启消失的两副面孔",
+        )
+        val domain = live("app/src/commonMain/kotlin/com/kapp/tidings/domain/RelayControllerAgentComponent.kt")
+        assertTrue(
+            domain.contains("shouldPersist("),
+            "域层 saveEvent 没有过滤瞬态事件 —— 不变量 3「日志不存库」被打破的写入口",
+        )
+    }
 }

@@ -355,7 +355,11 @@ fun handleRecordLocalEvent(
     savedEvent?.let { event ->
         host.scope.launch {
             updatedSession?.let { session -> runCatching { host.agentStore.saveSession(session) } }
-            runCatching { host.agentStore.saveEvent(event) }
+            // T-G3（不变量 3）：瞬态增量（token/thought delta）**不落库** —— 它们的
+            // 可见性走实时管道；写进 SQLite 就是下一个 21GB 现场。
+            if (com.kapp.tidings.core.protocol.AgentEventKinds.shouldPersist(event.eventType)) {
+                runCatching { host.agentStore.saveEvent(event) }
+            }
         }
     }
 }
@@ -603,7 +607,11 @@ fun handleOnAgentEvent(envelope: Envelope) {
     savedEvent?.let { event ->
         host.scope.launch {
             updatedSession?.let { session -> runCatching { host.agentStore.saveSession(session) } }
-            runCatching { host.agentStore.saveEvent(event) }
+            // T-G3（不变量 3）：瞬态增量（token/thought delta）**不落库** —— 它们的
+            // 可见性走实时管道；写进 SQLite 就是下一个 21GB 现场。
+            if (com.kapp.tidings.core.protocol.AgentEventKinds.shouldPersist(event.eventType)) {
+                runCatching { host.agentStore.saveEvent(event) }
+            }
         }
     }
 }

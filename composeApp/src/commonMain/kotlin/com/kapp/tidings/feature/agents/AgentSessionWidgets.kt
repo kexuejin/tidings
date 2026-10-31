@@ -166,8 +166,11 @@ internal fun AgentSessionCard(
             // 默认只画最近 MAX_SHOWN_EVENTS 条；有更早的就给一颗按钮，每点一次多 50 条。
             // revealed 是纯 UI 记账（本卡展开到哪了），不进领域状态 —— 会话事件本身没变。
             var revealed by remember { mutableStateOf(0) }
-            val visibleCount = visibleEventCount(events.size, revealed)
-            val shown = events.takeLast(visibleCount)
+            // T-G3：瞬态增量不进台账视图（与 DB 过滤同口径）—— 它们的可见处是实时
+            // 管道；留在会话详情里会「活着可见、重启消失」，两副面孔。
+            val persisted = events.filter { com.kapp.tidings.core.protocol.AgentEventKinds.shouldPersist(it.eventType) }
+            val visibleCount = visibleEventCount(persisted.size, revealed)
+            val shown = persisted.takeLast(visibleCount)
             if (visibleCount < events.size) {
                 Text(
                     text = stringResource(Res.string.agent_session_events_shown, events.size - visibleCount),

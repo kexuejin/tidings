@@ -530,6 +530,19 @@ object Platforms {
  * Agent 会话状态枚举与分类（PPE-1 §6.1 / 方案 D-2 会话生命周期）。
  * 协议层取值开放，本集合用于 UI 翻译与客户端软淘汰分类。
  */
+/**
+ * 事件类型的**瞬态集合**（T-G3，不变量 3「实时 stdout 走抽屉管道不存库」）：
+ * 这两类是流式增量 —— 落 SQLite 只会堆出「只写不读」的表（真机 57,644 行 / 5.2MB
+ * 的现场），它们的可见性由实时管道（桌面 Inspector / 内存态）承担，重启即逝
+ * 是**设计语义**：终局事实走 result 卡与台账，增量不留底。
+ */
+object AgentEventKinds {
+    val EPHEMERAL = setOf("token.delta", "thought.delta")
+
+    /** 唯一判定入口：这条事件类型要不要落持久层（调用方 = 域层两处 + UI 过滤）。 */
+    fun shouldPersist(eventType: String): Boolean = eventType !in EPHEMERAL
+}
+
 object AgentSessionStates {
     const val IDLE = "idle"
     const val BUSY = "busy"

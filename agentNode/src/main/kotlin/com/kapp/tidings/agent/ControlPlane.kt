@@ -144,6 +144,15 @@ fun interface AgentInvokeDispatcher {
     suspend fun dispatch(groupId: String, agentId: String, prompt: String, wsId: String?, deadlineMs: Long): String?
 }
 
+/** 实时增量事件（T-G3）：进程内管道的载荷，不进任何协议帧。 */
+data class LiveAgentEvent(
+    val nodeId: String,
+    val sessionId: String,
+    val eventType: String,
+    val body: String?,
+    val at: Long,
+)
+
 class ControlPlane(
     private val runtime: NodeRuntime,
     private val httpPort: Int,
@@ -841,8 +850,14 @@ class ControlPlane(
 
         driver.executeTask(sessionId, prompt) { event ->
             val (eventType, summary, body) = when (event) {
-                is DriverEvent.ThoughtDelta -> Triple("thought.delta", null, event.delta)
-                is DriverEvent.TokenDelta -> Triple("token.delta", null, event.delta)
+                is DriverEvent.ThoughtDelta -> {
+                    liveAgentEvents.tryEmit(LiveAgentEvent(runtime.nodeId, sessionId, "thought.delta", event.delta, System.currentTimeMillis()))
+                    Triple("thought.delta", null, event.delta)
+                }
+                is DriverEvent.TokenDelta -> {
+                    liveAgentEvents.tryEmit(LiveAgentEvent(runtime.nodeId, sessionId, "token.delta", event.delta, System.currentTimeMillis()))
+                    Triple("token.delta", null, event.delta)
+                }
                 is DriverEvent.ToolCall -> Triple("tool.started", event.tool, event.inputJson)
                 is DriverEvent.Card -> Triple("card", null, event.cardJson)
                 is DriverEvent.Artifact -> {
@@ -2739,6 +2754,16 @@ class ControlPlane(
 
     /** hook 卡片的会话内游标（同一会话多张卡按序推进，面板按游标排序）。 */
     private val hookCardCursors = java.util.concurrent.ConcurrentHashMap<String, java.util.concurrent.atomic.AtomicLong>()
+
+    /**
+     * 实时增量流（T-G3）：delta 类事件的**进程内**管道 —— 「不落库」的可见性由它
+     * 承担（桌面 Inspector 订阅）。replay=0：后来者不看历史（历史在 result 卡与
+     * 台账的终局事件里），extraBufferCapacity 给流式峰值留缓冲，满了丢最旧语义
+     * 由 tryEmit 的调用方容忍（日志丢行 ≠ 状态丢帧）。
+     */
+    val liveAgentEvents = kotlinx.coroutines.flow.MutableSharedFlow<LiveAgentEvent>(
+        replay = 0, extraBufferCapacity = 1024,
+    )
 
     private fun agentApproval(exchange: HttpExchange) {
         val obj = readJsonObject(exchange) ?: return

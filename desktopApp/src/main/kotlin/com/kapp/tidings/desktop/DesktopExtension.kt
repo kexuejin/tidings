@@ -846,6 +846,12 @@ internal class DesktopExtension(
             // T-G2 ③：发起侧标签路由两桥的**生产装配**（T-2c 只留了 nullable 缝，
             // 本体一直没接 —— 桥不装，requiredTag 消费端永远走失败横幅）。
             // 选择语义 = PeerTagRouter（在线优先 + nodeId 字典序，1e774b1a 钉过）。
+            // T-G3：实时增量流 → 进程内环形缓冲（Inspector 面板读它；不落库）。
+            scope.launch {
+                created.liveAgentEvents.collect { event ->
+                    com.kapp.tidings.feature.agents.AgentLiveLog.append(event.sessionId, event.body ?: "")
+                }
+            }
             controller.peerTagRouter = { tag ->
                 com.kapp.tidings.core.persist.PeerTagRouter.resolve(
                     tag,
