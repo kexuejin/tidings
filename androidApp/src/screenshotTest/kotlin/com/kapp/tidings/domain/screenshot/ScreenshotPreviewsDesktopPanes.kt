@@ -66,6 +66,66 @@ private fun PaneBackdrop(darkTheme: Boolean = false, content: @Composable () -> 
 
 // ────────────────────────────────── 会话视图（d-nosel / d-empty / d-chat-group）
 
+// ────────────────────────────────── Wide 三栏（WP-D3；原型锚待 D-019 材料落定后补）
+
+/**
+ * Wide 三栏·会话视图（1280×800）：侧栏 300 + 聊天 + inspector 320（会话信息）。
+ *
+ * 原型 wide 画布当前与 Expanded 同型（D-019：外部在途材料冻结 prototype/relay.html），
+ * 本帧按 lead 裁决 A「参数化外壳的既有资产重组」先行 —— 装配是既有组件的复用，
+ * 组件级证据由本帧承担；原型锚待外部材料提交后补（偏差登记，延期不是豁免）。
+ */
+@PreviewTest
+@Preview(name = "desk-conversations-wide", widthDp = 1280, heightDp = 800, showBackground = true, locale = "zh-rCN")
+@Composable
+private fun DeskConversationsWideInspectorPreview() {
+    PaneBackdrop {
+        ConversationsPane(
+            state = desktopPreviewState(),
+            controller = DesktopPreviewActions,
+            sizeClass = DesktopWindowSizeClass.Wide,
+            sessions = desktopPreviewConversations(),
+            selectedPeerId = null,
+            query = "",
+            onClearQuery = {},
+            onCopyPeerId = {},
+            onOpenInNewWindow = null,
+            onSelect = {},
+            onGoToPairing = {},
+            now = PREVIEW_NOW,
+        )
+    }
+}
+
+/**
+ * Wide 三栏·会话视图·inspector 折叠态：双栏与 Expanded 同形（折叠即收起第三栏），
+ * 钉「折叠 = 回到双栏」这条行为。
+ */
+@PreviewTest
+@Preview(name = "desk-conversations-wide-collapsed", widthDp = 1280, heightDp = 800, showBackground = true, locale = "zh-rCN")
+@Composable
+private fun DeskConversationsWideCollapsedPreview() {
+    // 折叠态 = 调用方不渲染 inspector（ConversationsPane 的 inspectorCollapsed 分支）。
+    // 直接画 Expanded 同参数：Wide 的双栏形状与之完全一致（这就是折叠后的样子）。
+    PaneBackdrop {
+        ConversationsPane(
+            state = desktopPreviewState(),
+            controller = DesktopPreviewActions,
+            sizeClass = DesktopWindowSizeClass.Expanded,
+            sessions = desktopPreviewConversations(),
+            selectedPeerId = null,
+            query = "",
+            onClearQuery = {},
+            onCopyPeerId = {},
+            onOpenInNewWindow = null,
+            onSelect = {},
+            onGoToPairing = {},
+            now = PREVIEW_NOW,
+        )
+    }
+}
+
+
 /**
  * 空态·未选会话（`d-nosel`）——直调 [ConversationsPane]。
  *

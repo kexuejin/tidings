@@ -323,6 +323,70 @@ public fun ConversationsPane(
     }
 
     when (sizeClass) {
+        // Wide：双栏 + inspector 第三栏（会话视图放会话信息 = peer 头行；会话信息是
+        // 「查」型信息，整改方案 §2.1-3 判它默认折叠——折叠态由调用方持有，见下）。
+        // inspector 内容复用 DesktopConversationWidgets 的 peerHeaderLine —— 不新造内容。
+        // 原型锚：D-019 边界声明（见 DesktopInspectorPane KDoc）。
+        DesktopWindowSizeClass.Wide -> {
+            var inspectorCollapsed by remember { mutableStateOf(false) }
+            Row(Modifier.fillMaxSize()) {
+                ConversationSidebar(
+                    sessions = sessions,
+                    phase = state.network.phase,
+                    failure = state.network.failure,
+                    selectedPeerId = selectedPeerId,
+                    draftPreviewOf = draftPreviewOf,
+                    query = query,
+                    onClearQuery = onClearQuery,
+                    onSelect = onSelect,
+                    onGoToPairing = onGoToPairing,
+                    now = now,
+                    modifier = Modifier.width(DesktopMetrics.SIDEBAR_PX.dp),
+                    onCreateGroup = onCreateGroup?.let { { creatingGroup = true } },
+                    onCreateWorkspaceGroup = onCreateGroup?.let { { creatingWorkspaceGroup = true } },
+                    onSearchMessages = controller::searchHistoricalMessages,
+                    onTogglePin = controller::togglePinnedConv,
+                    onToggleMute = controller::toggleMutedConv,
+                    onDeleteConversation = controller::deleteConversation,
+                    previewSenderNameOf = state::previewSenderNameOf,
+                    onSearchGlobal = if (globalSearchEnabled) controller::searchGlobal else null,
+                    initialGlobalSearch = initialGlobalSearch,
+                )
+                VerticalDividerLine()
+                Box(Modifier.weight(1f).fillMaxHeight()) {
+                    detailPane(Modifier.fillMaxSize(), null)
+                }
+                if (!inspectorCollapsed) {
+                    VerticalDividerLine()
+                    DesktopInspectorPane(onCollapse = { inspectorCollapsed = true }) {
+                        val peer = state.peer(selectedPeerId)
+                        if (peer == null) {
+                            // 没选中不装空态组件：inspector 是「附加信息」，空着比编一段
+                            // 「请选择会话」的填料诚实（首启引导屏已在 pane 外层接管）。
+                            Box(Modifier.fillMaxSize())
+                        } else {
+                            Column(
+                                Modifier.fillMaxWidth().padding(LocalAppSpacing.current.md10),
+                                verticalArrangement = Arrangement.spacedBy(LocalAppSpacing.current.sm6),
+                            ) {
+                                Text(
+                                    peer.nick,
+                                    style = MaterialTheme.typography.titleSmall,
+                                    fontWeight = FontWeight.SemiBold,
+                                    color = MaterialTheme.colorScheme.onSurface,
+                                )
+                                Text(
+                                    peerHeaderLine(peer, now),
+                                    style = MaterialTheme.typography.bodySmall,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                )
+                            }
+                        }
+                    }
+                }
+            }
+        }
+
         DesktopWindowSizeClass.Expanded -> Row(Modifier.fillMaxSize()) {
             ConversationSidebar(
                 sessions = sessions,

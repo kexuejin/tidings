@@ -1012,6 +1012,38 @@
         ]
       },
       {
+        "id": "DesktopInspectorPane",
+        "file": "composeApp/src/commonMain/kotlin/com/kapp/tidings/ui/desktop/DesktopInspectorPane.kt",
+        "screens": [
+          "conversations",
+          "agents"
+        ],
+        "states": [
+          "normal",
+          "empty"
+        ],
+        "previews": [
+          "DeskConversationsWideInspectorPreview",
+          "DeskAgentsWidePreview"
+        ],
+        "expectGroups": [
+          "colors",
+          "shape",
+          "typography",
+          "spacing"
+        ],
+        "requiredTokens": [
+          "colors.surfaceContainerLow",
+          "colors.outlineVariant",
+          "colors.onSurfaceVariant",
+          "typography.labelLarge"
+        ],
+        "stress": [
+          "未选中会话时空槽不装填料",
+          "折叠钮只在有持久化通路的宿主出现"
+        ]
+      },
+      {
         "id": "SectionCard",
         "file": "composeApp/src/commonMain/kotlin/com/kapp/tidings/ui/SectionCard.kt",
         "screens": [
@@ -1666,7 +1698,7 @@
         "id": "wide",
         "scope": "cross-cutting",
         "match": "(?i)wide",
-        "why": "超宽窗口（≥1440）：桌面三栏"
+        "why": "桌面三栏（Wide 档，WIDE_MIN_PX=1280 起；1440 为原型画布档）"
       },
       {
         "id": "two_pane_min",

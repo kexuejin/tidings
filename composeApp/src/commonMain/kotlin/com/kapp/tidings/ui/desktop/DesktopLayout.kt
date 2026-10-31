@@ -52,13 +52,17 @@ public enum class DesktopWindowSizeClass {
     Compact,
     Medium,
     Expanded,
+    Wide,
     ;
 
-    /** Expanded 才双栏；Medium 用竖导 + 列表详情；Compact 退化成底导单栏。 */
-    val twoPane: Boolean get() = this == Expanded
+    /** Expanded/Wide 都双栏；Medium 用竖导 + 列表详情；Compact 退化成底导单栏。 */
+    val twoPane: Boolean get() = this == Expanded || this == Wide
 
-    /** Medium/Compact 都需要一块导航条，位置不同而已。 */
-    val usesRail: Boolean get() = this == Medium
+    /** Medium/Wide 用竖导；Compact 用底导。 */
+    val usesRail: Boolean get() = this == Medium || this == Wide
+
+    /** 只有 Wide 有第三栏（inspector）；Expanded 维持双栏不动 —— 它是现有帧与测试的地基。 */
+    val hasInspector: Boolean get() = this == Wide
 }
 
 /**
@@ -111,6 +115,17 @@ public object DesktopMetrics {
 
     /** 双栏阈值。低于它就换竖导，因为侧栏 300px 加聊天区会把详情挤成一条缝。 */
     const val EXPANDED_MIN_PX = 1000
+
+    /**
+     * 第三栏阈值（整改方案 §2.1-1）：≥ [WIDE_MIN_PX] 在双栏之外再加 inspector 右栏
+     * （[INSPECTOR_MIN_PX]，可折叠）。Expanded（1000–1279）维持双栏不动 —— 它是
+     * 现有帧与测试的地基，不在这一批里换版面。
+     *
+     * 取 1280：桌面原型四档画布的下一档（wide=1440）与常见 1280 宽窗的中点，
+     * 且 1280 − 竖导 64 − 侧栏 300 − inspector 320 = 596 ≥ [MIN_CHAT_PANE_PX]，
+     * 三栏摆下后聊天区仍是完整的（DesktopLayoutTest 钉着这条推导）。
+     */
+    const val WIDE_MIN_PX = 1280
 
     /**
      * 聊天栏的下限宽度，[MEDIUM_MIN_PX] 由它反推（Kotlin 的 `const val` 不能前向引用，
@@ -178,6 +193,12 @@ public fun desktopWindowSizeClass(
     val usableHeight = (heightPx - DesktopMetrics.chromeHeightPx(chromeMode)).coerceAtLeast(0)
     return when {
         // 高度太矮时双栏没有意义：列表和详情各分一半，谁都放不下。
+        // Wide 只属于桌面 chrome（inspector 与 window.json 折叠记忆是桌面壳层的资产）；
+        // 平板 1280×800 维持 Expanded —— 平板帧与平板宿主不在这一批的装配面里。
+        chromeMode == DesktopChromeMode.Desktop &&
+            widthPx >= DesktopMetrics.WIDE_MIN_PX &&
+            usableHeight >= DesktopMetrics.MIN_CHAT_HEIGHT_PX ->
+            DesktopWindowSizeClass.Wide
         widthPx >= DesktopMetrics.EXPANDED_MIN_PX && usableHeight >= DesktopMetrics.MIN_CHAT_HEIGHT_PX ->
             DesktopWindowSizeClass.Expanded
         widthPx >= DesktopMetrics.MEDIUM_MIN_PX -> DesktopWindowSizeClass.Medium

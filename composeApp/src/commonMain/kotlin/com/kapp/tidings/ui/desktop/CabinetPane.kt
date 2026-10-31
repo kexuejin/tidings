@@ -188,7 +188,10 @@ public fun CabinetPane(
 
             when (tier) {
                 // Expanded：原型 d-cabinet 画的就是这一档，左栏 300 + 右栏吃掉剩余宽度。
-                DesktopWindowSizeClass.Expanded -> Row(Modifier.fillMaxSize()) {
+                // Wide 并进同型（文件柜不在 inspector 装配的四视图清单里，整改方案 §2.1-3）。
+                DesktopWindowSizeClass.Wide,
+                DesktopWindowSizeClass.Expanded,
+                -> Row(Modifier.fillMaxSize()) {
                     sidebar(Modifier.width(ContentWidths.Sidebar).fillMaxHeight(), controller::selectCabinetPeer)
                     VerticalDividerLine()
                     detail(Modifier.weight(1f).fillMaxHeight(), null)

@@ -23,9 +23,9 @@ class DesktopLayoutTest {
     @Test
     fun theThreeAcceptanceSizesLandInTheThreeTiers() {
         assertEquals(
-            DesktopWindowSizeClass.Expanded,
+            DesktopWindowSizeClass.Wide,
             desktopWindowSizeClass(1440, 900),
-            "1440×900（原型 wide 档）该是双栏",
+            "1440×900（原型 wide 档）该是三栏",
         )
         assertEquals(
             DesktopWindowSizeClass.Expanded,
@@ -104,6 +104,32 @@ class DesktopLayoutTest {
             "差 1px 就退到单栏，而不是硬塞一个坏掉的输入栏",
         )
         assertEquals(DesktopWindowSizeClass.Medium, desktopWindowSizeClass(664, 720))
+    }
+
+    @Test
+    fun theWideTierStartsAt1280AndKeepsExpandedUntouched() {
+        // 1280 是 Wide 的下界：Expanded（1000–1279）维持双栏不动（现有帧与测试的地基）。
+        assertEquals(1280, DesktopMetrics.WIDE_MIN_PX)
+        assertEquals(DesktopWindowSizeClass.Wide, desktopWindowSizeClass(1280, 800))
+        assertEquals(DesktopWindowSizeClass.Expanded, desktopWindowSizeClass(1279, 800), "差 1px 仍是双栏 Expanded")
+        assertEquals(DesktopWindowSizeClass.Expanded, desktopWindowSizeClass(1100, 720))
+        // 三栏在 Wide 下界的预算：64 竖导 + 300 侧栏 + 320 inspector = 684，聊天区剩 596。
+        val chatAtWideFloor = 1280 - DesktopMetrics.MEDIUM_RAIL_PX - DesktopMetrics.SIDEBAR_PX - DesktopMetrics.INSPECTOR_MIN_PX
+        assertEquals(596, chatAtWideFloor)
+        assertTrue(chatAtWideFloor >= DesktopMetrics.MIN_CHAT_PANE_PX, "三栏摆下后聊天区必须完整")
+        // 矮窗不给第三栏（inspector 与聊天区抢高度，矮窗退化回 Expanded 的双栏判断）。
+        assertEquals(
+            DesktopWindowSizeClass.Medium,
+            desktopWindowSizeClass(1440, 500),
+            "矮窗连双栏的可用高度都不够，退竖导档（与 1440×500 原断言同一条纪律）",
+        )
+        // 档位旗标一致。
+        assertTrue(DesktopWindowSizeClass.Wide.twoPane)
+        assertTrue(DesktopWindowSizeClass.Wide.usesRail)
+        assertTrue(DesktopWindowSizeClass.Wide.hasInspector)
+        assertFalse(DesktopWindowSizeClass.Expanded.hasInspector)
+        assertFalse(DesktopWindowSizeClass.Medium.hasInspector)
+        assertFalse(DesktopWindowSizeClass.Compact.hasInspector)
     }
 
     @Test

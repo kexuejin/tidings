@@ -14,6 +14,7 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.width
+import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.CompositionLocalProvider
@@ -45,6 +46,8 @@ import com.kapp.tidings.domain.RelayUiState
 import com.kapp.tidings.domain.model.WorkspaceUi
 import com.kapp.tidings.core.nowMillis
 import com.kapp.tidings.core.transport.LocalFile
+import com.kapp.tidings.feature.agents.AgentApprovalsSection
+import com.kapp.tidings.feature.agents.AgentExecDeviceChecklist
 import com.kapp.tidings.feature.agents.AgentConsoleScreen
 import com.kapp.tidings.feature.chat.draftOf
 import com.kapp.tidings.feature.chat.updateDraft
@@ -1103,11 +1106,45 @@ public fun DesktopShell(
                 // 竖导是唯一的视图切换器：工具栏里那一排 chips 已经删掉，
                 // Expanded 再不给切换入口，宽窗（尤其是没有菜单栏的平板横屏）
                 // 就只剩菜单项能换页，触屏/窄键盘都摸不到。
+                DesktopWindowSizeClass.Wide,
                 DesktopWindowSizeClass.Expanded,
                 DesktopWindowSizeClass.Medium,
                 -> Row(Modifier.fillMaxSize()) {
                     NavigationRail(view = view, onViewChange = { view = it }, badges = desktopNavBadges(state), onOpenSettings = actions.onOpenSettings)
                     Box(Modifier.weight(1f).fillMaxHeight()) { viewContent() }
+                    // A5 的桌面常驻审批面：Wide 且工作区视图时，审批队列 + 免批表入口
+                    // 常驻第三栏（原来埋在工作区看板 → 详情的两层下钻里）。其余视图
+                    // 不挂 inspector —— 节点/文件双栏已含详情（内容重复），会话视图的
+                    // 装配在 ConversationsPane 自己的 Wide 分支里（会话信息是「查」型）。
+                    if (sizeClass.hasInspector && view == DesktopView.Agents) {
+                        VerticalDividerLine()
+                        DesktopInspectorPane(onCollapse = null) {
+                            Column(Modifier.fillMaxWidth()) {
+                                AgentApprovalsSection(
+                                    approvals = state.agentApprovals.values.toList(),
+                                    onRespond = { approvalId, allow ->
+                                        controller.respondApproval(approvalId, allow)
+                                    },
+                                )
+                                HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
+                                // 免批表入口：选中哪个 agent 就看谁的名单（看板下钻的
+                                // 第一层提前到这里；空选中如实画空表，不编内容）。
+                                AgentExecDeviceChecklist(
+                                    devices = selectedPeerId
+                                        ?.let { controller.execDevicesOf(it).orEmpty() }
+                                        .orEmpty(),
+                                    onToggle = { nodeId: String, checked: Boolean ->
+                                        // 空选中时没有 agentKey：勾选动作没有落点，直接忽略
+                                        // （UI 层画的是空表，本就没有可勾的行 —— 防御而非功能）。
+                                        val agentKey = selectedPeerId
+                                        if (agentKey != null) {
+                                            controller.setExecDeviceAllowed(agentKey, nodeId, checked)
+                                        }
+                                    },
+                                )
+                            }
+                        }
+                    }
                 }
 
                 // Compact：底导常驻。再点一次当前页的「会话」从详情退回列表 ——

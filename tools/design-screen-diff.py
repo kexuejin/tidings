@@ -922,6 +922,10 @@ SHARED_COMPONENT_FILES = (
     # 迁进来之后，原来写在屏上的 `shape = ShapeRoles.Avatar`(9) / `shapes.medium`(12) /
     # `contentPadding = 9×5` 全都**搬进了这个文件**，逐屏切片里自然就"没有"了。
     "composeApp/src/commonMain/kotlin/com/kapp/tidings/ui/components/AppButtons.kt",
+    # Wide 三栏的 inspector 容器（WP-D3）：会话与 agents 两类装配共用同一份容器取值
+    # （宽度 320 / 标题行 / 分隔线）。D-019 期间原型锚延期，组件级证据由
+    # desk-conversations-wide / desk-agents-wide 两帧承担。
+    "composeApp/src/commonMain/kotlin/com/kapp/tidings/ui/desktop/DesktopInspectorPane.kt",
 )
 
 _SHARED_CACHE = {}

@@ -201,6 +201,26 @@ private fun DeskAgentsExpandedPreview() {
     Desk(1100, 720, agentsView = true)
 }
 
+/**
+ * Wide 三栏·工作区视图（1280×800）：审批队列 + 免批表入口常驻第三栏（A5 ——
+ * 原来埋在工作区看板 → 详情两层下钻里的审批面升为常驻）。
+ * 原型锚：D-019 边界声明（见 DesktopInspectorPane KDoc），偏差登记延期补。
+ */
+@PreviewTest
+@Preview(name = "desk-agents-wide", widthDp = 1280, heightDp = 800, showBackground = true, locale = "zh-rCN")
+@Composable
+private fun DeskAgentsWidePreview() {
+    Desk(1280, 800, agentsView = true)
+}
+
+/** Wide 三栏·会话视图（1280×800）：侧栏 + 聊天 + 会话信息第三栏。 */
+@PreviewTest
+@Preview(name = "desk-conversations-wide-shell", widthDp = 1280, heightDp = 800, showBackground = true, locale = "zh-rCN")
+@Composable
+private fun DeskConversationsWideShellPreview() {
+    Desk(1280, 800)
+}
+
 /** 离线会话：列表行、时间戳、状态栏都要显示离线语义，且不能和「待发」混淆。 */
 @PreviewTest
 @Preview(name = "desk-offline-peer-expanded", widthDp = 1100, heightDp = 720, showBackground = true, locale = "zh-rCN")
