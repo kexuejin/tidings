@@ -421,6 +421,7 @@ data class AgentChannelPayload(
     val task: String,
     val expectedResult: String? = null,
     val resources: List<String>? = null,
+    val tools: List<String>? = null,
     val sourceMessageIds: List<String>? = null,
     val deadlineMs: Long? = null,
     val sessionId: String? = null,

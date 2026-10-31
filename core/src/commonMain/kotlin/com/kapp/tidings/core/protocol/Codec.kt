@@ -228,6 +228,7 @@ object Codec {
         targetTag: String? = null,
         expectedResult: String? = null,
         resources: List<String>? = null,
+        tools: List<String>? = null,
         sourceMessageIds: List<String>? = null,
         deadlineMs: Long? = null,
         sessionId: String? = null,
@@ -236,7 +237,7 @@ object Codec {
         at: Long? = null,
     ) = CodecChannel.channelPayload(
         channelId, op, fromAgent, task, toAgent, targetTag, expectedResult,
-        resources, sourceMessageIds, deadlineMs, sessionId, groupId, groupRev, at,
+        resources, tools, sourceMessageIds, deadlineMs, sessionId, groupId, groupRev, at,
     )
 
     fun channelResultPayload(

@@ -1001,6 +1001,7 @@ internal class NodeOutbound(
         targetTag: String? = null,
         expectedResult: String? = null,
         resources: List<String>? = null,
+        tools: List<String>? = null,
         sourceMessageIds: List<String>? = null,
         deadlineMs: Long? = null,
         sessionId: String? = null,
@@ -1014,7 +1015,7 @@ internal class NodeOutbound(
             selfId(),
             Codec.channelPayload(
                 channelId, op, fromAgent, task, toAgent, targetTag, expectedResult,
-                resources, sourceMessageIds, deadlineMs, sessionId, groupId, groupRev, at,
+                resources, tools, sourceMessageIds, deadlineMs, sessionId, groupId, groupRev, at,
             ),
         ),
     )

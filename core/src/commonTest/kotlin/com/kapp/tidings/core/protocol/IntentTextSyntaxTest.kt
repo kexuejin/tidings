@@ -4,6 +4,10 @@ package com.kapp.tidings.core.protocol
 
 import kotlin.test.Test
 import kotlin.test.assertEquals
+import kotlin.test.assertTrue
+import kotlinx.serialization.json.JsonObject
+import kotlinx.serialization.json.jsonObject
+import kotlinx.serialization.json.decodeFromJsonElement
 
 /** T-G2 ②：`require:` 文本语法解析（派单指令 vs 聊天内容的分界）。 */
 class IntentTextSyntaxTest {
@@ -57,5 +61,48 @@ class IntentTextSyntaxTest {
         // 形状不合法（大写）⇒ 宁可不路由也不猜：整段按普通文本保留。
         val original = "派活 require:GPU"
         assertEquals(original to emptyList(), IntentTextSyntax.parse(original))
+    }
+}
+
+
+/** T-G6b：`tools` 键（D-034）—— 白名单 + 载荷往返 + 缺省缺席（AGENTS §4 测试走解码）。 */
+class ChannelToolsKeyTest {
+
+    private fun wire(withTools: Boolean): JsonObject {
+        val payload = Codec.channelPayload(
+            channelId = "ch-1", op = ChannelOps.ASSIGN, fromAgent = "a", task = "t",
+            targetTag = "gpu", deadlineMs = 60_000,
+            tools = if (withTools) listOf("read_file", "run_command") else null,
+        )
+        return payload.jsonObject
+    }
+
+    @Test
+    fun toolsKeyWhitelistedAndRoundTrips() {
+        val o = wire(withTools = true)
+        assertTrue("tools" in o, "载荷带 tools 键")
+        assertEquals(true, CodecWire.validatePayload(MsgTypes.AGENT_CHANNEL, o, Int.MAX_VALUE), "白名单放行")
+        val back = Codec.wireJson.decodeFromJsonElement(AgentChannelPayload.serializer(), o)
+        assertEquals(listOf("read_file", "run_command"), back.tools)
+    }
+
+    @Test
+    fun absentToolsStaysOffTheWireAndValidates() {
+        val o = wire(withTools = false)
+        assertTrue("tools" !in o, "null 键不上线（encodeDefaults=false 同一哲学）")
+        assertEquals(true, CodecWire.validatePayload(MsgTypes.AGENT_CHANNEL, o, Int.MAX_VALUE))
+    }
+
+    @Test
+    fun malformedToolShapeIsRejectedAtBuildTime() {
+        try {
+            Codec.channelPayload(
+                channelId = "ch-1", op = ChannelOps.ASSIGN, fromAgent = "a", task = "t",
+                deadlineMs = 60_000, tools = listOf("Bad Tool"),
+            )
+            error("应该抛")
+        } catch (expected: IllegalArgumentException) {
+            assertTrue(expected.message!!.contains("tools"))
+        }
     }
 }

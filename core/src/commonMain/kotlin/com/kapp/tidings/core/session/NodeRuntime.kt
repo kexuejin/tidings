@@ -1654,6 +1654,7 @@ class NodeRuntime(
         targetTag: String? = null,
         expectedResult: String? = null,
         resources: List<String>? = null,
+        tools: List<String>? = null,
         sourceMessageIds: List<String>? = null,
         deadlineMs: Long? = null,
         sessionId: String? = null,
@@ -1661,7 +1662,7 @@ class NodeRuntime(
         groupRev: Long? = null,
         at: Long? = null,): SendOutcome = outbound.sendAgentChannel(
         peerId, channelId, op, fromAgent, task, toAgent, targetTag, expectedResult,
-        resources, sourceMessageIds, deadlineMs, sessionId, groupId, groupRev, at,
+        resources, tools, sourceMessageIds, deadlineMs, sessionId, groupId, groupRev, at,
     )
 
     /** 发一条 Channel 委派应答（M7-T2）——回给刚发来 `agent-channel` 的那个对端。 */

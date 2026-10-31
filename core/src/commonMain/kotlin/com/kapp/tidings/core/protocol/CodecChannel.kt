@@ -87,8 +87,19 @@ object CodecChannel {
 
     internal val CHANNEL_EXPECTED_KEYS = setOf(
         "channelId", "op", "fromAgent", "toAgent", "targetTag", "task", "expectedResult",
-        "resources", "sourceMessageIds", "deadlineMs", "sessionId", "groupId", "groupRev", "at",
+        "resources", "tools", "sourceMessageIds", "deadlineMs", "sessionId", "groupId", "groupRev", "at",
     )
+
+    /**
+     * `tools`（固定层工具声明，§7.7 / D-034）：发起方告诉执行侧「本任务只许用这些
+     * 工具」。形状 = 小写 snake/点 id，≤64 字符（与 CLI 的 --allowedTools 词法同族）。
+     * 执行侧消费是插件/驱动自己的责任（协议只管形状与传递）。
+     */
+    object ChannelTools {
+        fun isWellFormed(value: String): Boolean =
+            value.length in 1..64 &&
+                value.all { it in 'a'..'z' || it in '0'..'9' || it == '.' || it == '_' || it == '-' }
+    }
 
     internal val RESULT_EXPECTED_KEYS = setOf("channelId", "ok", "status", "summary", "artifactIds", "error", "at")
 
@@ -180,6 +191,7 @@ object CodecChannel {
         targetTag: String? = null,
         expectedResult: String? = null,
         resources: List<String>? = null,
+        tools: List<String>? = null,
         sourceMessageIds: List<String>? = null,
         deadlineMs: Long? = null,
         sessionId: String? = null,
@@ -190,6 +202,9 @@ object CodecChannel {
         require(op in ChannelOps.ALL) { "unknown channel op \"$op\"" }
         require(resources == null || resources.all { ChannelResources.isWellFormed(it) }) {
             "resources 里有不在取值域内的项"
+        }
+        require(tools == null || tools.all { ChannelTools.isWellFormed(it) }) {
+            "tools 里有形状不合法的项"
         }
         require(targetTag == null || ChannelTags.isWellFormed(targetTag)) { "targetTag 形状不合法" }
         when (op) {
@@ -212,6 +227,7 @@ object CodecChannel {
                 task = task,
                 expectedResult = expectedResult,
                 resources = resources,
+                tools = tools,
                 sourceMessageIds = sourceMessageIds,
                 deadlineMs = deadlineMs,
                 sessionId = sessionId,
