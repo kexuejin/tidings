@@ -1061,10 +1061,10 @@ class RelayController(
         // 也避开 17879/17881/17882（luciola 模式下这三个不许再出现在 lsof 里）。
         val screenChannelPort = if (luciolaMode && isShareSupported) (settings.udpPort + 10).takeIf { it in 1..65535 } else null
         val screenChannelHostFactory = luciolaHost?.screenChannelHostFactory(scope, screenChannelPort)
-        // 对外最终声明的那组 caps。fch1/scr1 只在**确认**数据面/画面信道可用后声明：
-        // 声明了却收不了字节，对端会推、本端永远等文件（"对方说发了、我一直卡在接收中"）。
-        val fileOverChannel = luciolaMode
-        val screenOverChannel = screenChannelHostFactory != null
+        // 对外最终声明的那组 caps。fch1/scr1 **不再声明**（D-018 分级声明，task-10 实锤：
+        // luciola-on 桌面广播超限被对端拒收）：本端数据面可用性是**本地事实**，
+        // 协商判据（FileChannelNegotiation / ScreenChannelNegotiation）在收发路径上
+        // 用它 × 对端 caps —— 不再经广播面。
 
         // caps 指纹联动 profileRev：caps 会随实验开关/平台能力变，却不经过任何"改资料"
         // 的入口 —— 不 bump 的话对端永远拿着旧 caps 行事（真机死锁现场见
@@ -1075,8 +1075,6 @@ class RelayController(
                 remoteView = true,
                 remoteShare = isShareSupported,
                 advertiseAgent = advertiseAgent,
-                fileOverChannel = fileOverChannel,
-                screenOverChannel = screenOverChannel,
                 // D-017 修订：桌面（advertiseAgent）不声明 agc1 —— caps 预算 16/16 满额，
                 // 且桌面↔桌面网道今天没有消费者；手机声明（误指名回诚实拒绝）。
                 channelCapable = !advertiseAgent,
@@ -1093,8 +1091,6 @@ class RelayController(
             remoteView = true,
             remoteShare = isShareSupported,
             advertiseAgent = advertiseAgent,
-            fileOverChannel = fileOverChannel,
-            screenOverChannel = screenOverChannel,
             channelCapable = !advertiseAgent,
         )
         if (luciolaMode) {

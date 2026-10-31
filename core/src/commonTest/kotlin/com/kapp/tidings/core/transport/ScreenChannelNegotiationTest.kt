@@ -8,10 +8,13 @@ import kotlin.test.assertFalse
 import kotlin.test.assertTrue
 
 /**
- * `scr1` 的协商判据：**双方都声明 + 对端给出端口**才算数。
+ * `scr1` 的协商判据（分级声明版，D-018 方案 b）：**本端画面信道事实 × 对端声明 +
+ * 对端给出端口** 才算数。
  *
  * 这三种"缺一条"的组合就是灰度期间的全部可能，每一种都必须落回 legacy ——
  * 半升级最坏的结果是"双方都在等对方"，而投屏是用户点了「看屏幕」就在等画面的交互。
+ * 分级后 self 侧从 caps 声明改为**本地事实**（画面信道真的起来了 —— scr1 停止广播，
+ * 广播面被 Limits.CAPS=16 卡死，见 TieredChannelNegotiationMatrixTest 的 KDoc）。
  */
 class ScreenChannelNegotiationTest {
 
@@ -24,49 +27,55 @@ class ScreenChannelNegotiationTest {
     private val both = listOf(MsgTypes.CAP_REMOTE_VIEW, MsgTypes.CAP_SCREEN_CHANNEL)
 
     @Test
-    fun onlyWhenBothSidesDeclareAndPeerAdvertisesPort() {
-        val self = profile("self", both)
+    fun channelUpWithDeclaringPeerAndPortTakesOver() {
         val peer = profile("peer", both, screenPort = 17900)
-        assertTrue(ScreenChannelNegotiation.canUseChannel(self, peer))
+        assertTrue(ScreenChannelNegotiation.canUseChannel(selfChannelAvailable = true, peer = peer))
     }
 
     @Test
     fun nullPeerIsLegacy() {
-        assertFalse(ScreenChannelNegotiation.canUseChannel(profile("self", both), null))
+        assertFalse(ScreenChannelNegotiation.canUseChannel(selfChannelAvailable = true, peer = null))
     }
 
     @Test
-    fun selfWithoutCapFallsBack() {
-        val self = profile("self", listOf(MsgTypes.CAP_REMOTE_VIEW))
-        assertFalse(ScreenChannelNegotiation.canUseChannel(self, profile("peer", both, 17900)))
+    fun selfChannelDownFallsBack() {
+        val peer = profile("peer", both, screenPort = 17900)
+        assertFalse(
+            ScreenChannelNegotiation.canUseChannel(selfChannelAvailable = false, peer = peer),
+            "本端画面信道没起 ⇒ legacy（声明与现实不符 = 互等形状）",
+        )
     }
 
     @Test
     fun peerWithoutCapFallsBack() {
         val peer = profile("peer", listOf(MsgTypes.CAP_REMOTE_VIEW), 17900)
-        assertFalse(ScreenChannelNegotiation.canUseChannel(profile("self", both), peer))
+        assertFalse(ScreenChannelNegotiation.canUseChannel(selfChannelAvailable = true, peer = peer))
     }
 
     @Test
     fun peerWithoutPortFallsBack() {
         // 声明了能力却没给端口：不许"猜一个端口"去拨（老端可能把 17882 当画面口）。
-        assertFalse(ScreenChannelNegotiation.canUseChannel(profile("self", both), profile("peer", both)))
+        assertFalse(
+            ScreenChannelNegotiation.canUseChannel(
+                selfChannelAvailable = true,
+                peer = profile("peer", both),
+            ),
+        )
     }
 
     @Test
     fun outOfRangePortFallsBack() {
-        assertFalse(ScreenChannelNegotiation.canUseChannel(profile("self", both), profile("peer", both, 0)))
-        assertFalse(ScreenChannelNegotiation.canUseChannel(profile("self", both), profile("peer", both, 70000)))
-    }
-
-    @Test
-    fun capsOverloadAgreesWithProfileOverload() {
-        val self = profile("self", both)
-        val peer = profile("peer", both, 17900)
-        assertTrue(
-            ScreenChannelNegotiation.canUseChannel(self.caps, peer.caps, peer.screenPort) ==
-                ScreenChannelNegotiation.canUseChannel(self, peer),
+        assertFalse(
+            ScreenChannelNegotiation.canUseChannel(
+                selfChannelAvailable = true,
+                peer = profile("peer", both, 0),
+            ),
         )
-        assertFalse(ScreenChannelNegotiation.canUseChannel(self.caps, null, 17900))
+        assertFalse(
+            ScreenChannelNegotiation.canUseChannel(
+                selfChannelAvailable = true,
+                peer = profile("peer", both, 70000),
+            ),
+        )
     }
 }

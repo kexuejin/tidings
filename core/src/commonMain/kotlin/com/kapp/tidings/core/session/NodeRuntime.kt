@@ -744,8 +744,13 @@ class NodeRuntime(
         val host = screenChannelHost
         val peer = record.profile
         val screenPort = peer.screenPort
+        // 分级声明（D-018）：self 侧用画面信道的**本地事实**（host 是否起来），
+        // 不再回看广播 caps —— scr1 已停止广播。
         if (host != null && screenPort != null &&
-            ScreenChannelNegotiation.canUseChannel(selfProfile, peer)
+            ScreenChannelNegotiation.canUseChannel(
+                selfChannelAvailable = true,
+                peer = peer,
+            )
         ) {
             val addresses = buildList {
                 add(record.ip)
@@ -1019,8 +1024,10 @@ class NodeRuntime(
                 registerChannelInbound = fileChannel?.let { router ->
                     register@ { offer, saveDir, onProgress, onCompleted, onFailed ->
                         val peerCaps = registry.get(offer.peerId)?.profile?.caps
+                        // 分级声明（D-018）：self 侧用**数据面事实**（fileChannelEnabled），
+                        // 不再回看广播 caps —— fch1 已停止广播，广播里没有不代表本端解不动。
                         val allows = FileChannelNegotiation.canUseChannel(
-                            selfCaps = selfProfile.caps,
+                            selfChannelAvailable = fileChannelEnabled,
                             peerCaps = peerCaps,
                         )
                         if (!allows) {
@@ -1028,7 +1035,7 @@ class NodeRuntime(
                             // "对端没声明 fch1" 与 "我自己没声明" 是两种完全不同的故障。
                             println(
                                 "[luciola] channel inbound declined: selfFch1=" +
-                                    selfProfile.caps.contains(MsgTypes.CAP_FILE_CHANNEL) +
+                                    fileChannelEnabled +
                                     " peerCaps=" + peerCaps,
                             )
                             return@register false

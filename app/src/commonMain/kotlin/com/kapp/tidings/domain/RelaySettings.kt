@@ -397,29 +397,17 @@ data class RelaySettings(
         customAvatar: Boolean = false,
         advertiseAgent: Boolean = false,
         /**
-         * 本机是否**能收**加密信道送来的文件字节（`fch1`）。
-         *
-         * 只有 luciola 数据面可用时才该为 true —— 声明了却收不了，对端会推字节而本端
-         * 永远等文件，症状是"对方说发了、我这边一直卡在接收中"。默认 false 让所有
-         * 既有调用点（测试、预览、未开实验开关的宿主）行为不变。
-         */
-        fileOverChannel: Boolean = false,
-        /**
-         * 本机是否能**收**独立加密会话送来的投屏画面（`scr1`）。
-         *
-         * 与 [fileOverChannel] 同一条纪律：只有画面信道真的起来（luciola 模式 +
-         * 已绑上 screenPort）才声明 —— 声明了却没人听，对端会一直等 `screen-ready`。
-         */
-        screenOverChannel: Boolean = false,
-        /**
          * 本机是否声明 `agc1`（M7-T2，D-017 修订）。默认 true = 手机姿态（解得动
          * Channel 帧，误指名回诚实拒绝）；桌面端传 false —— caps 预算 16/16 满额，
          * 见 [MsgTypes.CAP_AGENT_CHANNEL] 与 buildList 体内那条注释。
          */
         channelCapable: Boolean = true,
     ): List<String> = buildList {
-        if (fileOverChannel) add(MsgTypes.CAP_FILE_CHANNEL)
-        if (screenOverChannel) add(MsgTypes.CAP_SCREEN_CHANNEL)
+        // fch1 / scr1 **不进广播 caps**（D-018 分级声明）：桌面 caps 16/16 满额，
+        // luciola-on 时这两项把广播撑到 18 项 ⇒ 对端整份拒收 profile（task-10 实锤，
+        // 存量自拒自 56688102 起）。本端「能不能走信道」改由本地事实承担（luciola
+        // 数据面是否真的起来），协商判据在 FileChannelNegotiation / ScreenChannelNegotiation：
+        // 对端声明（远端事实）× 本端数据面（本地事实）。
         // `ag1` 在最前：它是「这个节点能承载 agent 会话」的身份声明，与后面的帧能力不同层。
         // 桌面端（托盘常驻）与 agentNode 都声明它；手机端不声明。
         if (advertiseAgent) add(MsgTypes.CAP_AGENT)
@@ -504,10 +492,6 @@ data class RelaySettings(
         remoteShare: Boolean = false,
         customAvatar: Boolean = false,
         advertiseAgent: Boolean = false,
-        /** 实验 luciola 数据面可用时传 true ⇒ 声明 `fch1`（见 [caps]）。 */
-        fileOverChannel: Boolean = false,
-        /** 画面信道可用时传 true ⇒ 声明 `scr1`（见 [caps]）。 */
-        screenOverChannel: Boolean = false,
         /** 手机 true / 桌面 false（D-017 修订，见 [caps] 的 channelCapable）。 */
         channelCapable: Boolean = true,
     ): Profile = Profile.mobile(
@@ -529,8 +513,6 @@ data class RelaySettings(
             remoteShare = remoteShare,
             customAvatar = customAvatar,
             advertiseAgent = advertiseAgent,
-            fileOverChannel = fileOverChannel,
-            screenOverChannel = screenOverChannel,
             channelCapable = channelCapable,
         ),
     )
