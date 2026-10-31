@@ -1,0 +1,12 @@
+{
+  "_comment": "Tidings MCP Server（形态 C）注册示例。拷进 ~/.gemini/config/mcp_config.json 的 mcpServers 段，SCRIPT_PATH 换成 tidings-mcp-server.py 的绝对路径。宿主 Tidings 桌面端需在跑（控制面 127.0.0.1:8788）；凭证同 hook 脚本（TIDINGS_PLUGIN_TOKEN 或 0600 受控文件）。",
+  "mcpServers": {
+    "tidings": {
+      "command": "python3",
+      "args": ["SCRIPT_PATH"],
+      "env": {
+        "TIDINGS_HOST_URL": "http://127.0.0.1:8788"
+      }
+    }
+  }
+}

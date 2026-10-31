@@ -482,6 +482,7 @@ class ControlPlane(
                 path == "/v1/agent/hook/approval" && method == "POST" -> agentHookApproval(exchange)
                 path == "/v1/agent/hook/inject" && method == "POST" -> agentHookInject(exchange)
                 path == "/v1/agent/hook/inject-feed" && method == "POST" -> agentHookInjectFeed(exchange)
+                path == "/v1/agent/hook/card" && method == "POST" -> agentHookCard(exchange)
                 path == "/v1/agent/cancel" && method == "POST" -> agentCancel(exchange)
                 path == "/v1/agent/artifact" && method == "POST" -> agentArtifact(exchange)
                 path == "/v1/agent/ack" && method == "POST" -> agentAck(exchange)
@@ -2677,6 +2678,46 @@ class ControlPlane(
         }
         respond(exchange, 202, buildJsonObject { put("queued", queued); put("key", key) })
     }
+
+    /**
+     * `POST /v1/agent/hook/card` —— MCP `tidings_send_group_card` 的宿主落点：
+     * 卡片 JSON 落 hook 会话的台账（type=card，与插件卡片同一渲染管线），随
+     * 会话分页到手机。**归属即会话**：没有活跃 hook 会话 = 404，不替它造一个
+     * （卡片挂错会话比发不出去更难排查）。
+     */
+    private fun agentHookCard(exchange: HttpExchange) {
+        val obj = readJsonObject(exchange) ?: return
+        val conversationId = obj["conversationId"]?.jsonPrimitive?.contentOrNull?.trim().orEmpty()
+        val cardJson = obj["card"]?.jsonPrimitive?.contentOrNull?.takeIf { it.isNotBlank() }
+        if (conversationId.isEmpty() || cardJson == null) {
+            respond(exchange, 400, errorJson("bad-request", "conversationId 与 card 都必填"))
+            return
+        }
+        val key = hookKeyOf(conversationId)
+        if (sessions.sessionOrNull(runtime.nodeId, key) == null) {
+            respond(exchange, 404, errorJson("no-session", "没有宣告中的 hook 会话 " + key + "（先 SessionStart）"))
+            return
+        }
+        // 卡片预算：与 §6.12 同一把尺子 —— 超限拒绝不截断（发送侧不产出注定被拒的帧）。
+        val bytes = cardJson.toByteArray(Charsets.UTF_8).size
+        if (bytes > com.kapp.tidings.core.protocol.Limits.CARD_BYTES) {
+            respond(exchange, 400, errorJson("card-too-large", "card " + bytes + " B 超过预算 " + com.kapp.tidings.core.protocol.Limits.CARD_BYTES + " B（拒绝不截断）"))
+            return
+        }
+        val cursor = hookCardCursors.computeIfAbsent(key) { java.util.concurrent.atomic.AtomicLong(0) }
+        sessions.recordEvent(
+            nodeId = runtime.nodeId,
+            sessionId = key,
+            cursor = cursor.incrementAndGet(),
+            eventType = "card",
+            summary = null,
+            body = cardJson,
+        )
+        respond(exchange, 200, buildJsonObject { put("recorded", true); put("cursor", cursor.get()) })
+    }
+
+    /** hook 卡片的会话内游标（同一会话多张卡按序推进，面板按游标排序）。 */
+    private val hookCardCursors = java.util.concurrent.ConcurrentHashMap<String, java.util.concurrent.atomic.AtomicLong>()
 
     private fun agentApproval(exchange: HttpExchange) {
         val obj = readJsonObject(exchange) ?: return

@@ -219,6 +219,35 @@ class AgentHookBridgeTest {
     }
 
     @Test
+    fun hookCardLandsInTheSessionLedgerAndRefusesTheBadShapes() {
+        post("/v1/agent/hook/session", """{"event":"start","conversationId":"c-4","wsPaths":["/repo/tea"]}""")
+        val card = "{\"cardId\":\"k-1\",\"rev\":1,\"type\":\"status\",\"title\":\"编译完成\"}"
+        val (code, body) = post(
+            "/v1/agent/hook/card",
+            "{\"conversationId\":\"c-4\",\"card\":\"" + card.replace("\"", "\\\"") + "\"}",
+        )
+        assertEquals(200, code, body)
+        assertEquals("true", field(obj(body), "recorded"))
+        val cardEvents = registry.events(runtimeNodeId(), "agy-c-4").filter { it.eventType == "card" }
+        assertEquals(1, cardEvents.size, "card 事件落会话台账（手机会话详情的渲染源）")
+        assertTrue(cardEvents.single().body!!.contains("编译完成"))
+        // 没有宣告的会话 → 404，不替它造会话。
+        val (missCode, missBody) = post(
+            "/v1/agent/hook/card",
+            """{"conversationId":"c-missing","card":"{}"}""",
+        )
+        assertEquals(404, missCode, missBody)
+        // 预算：超限拒绝不截断（§6.12 同一把尺子）。
+        val oversized = "x".repeat(com.kapp.tidings.core.protocol.Limits.CARD_BYTES + 10)
+        val (tooBigCode, tooBigBody) = post(
+            "/v1/agent/hook/card",
+            """{"conversationId":"c-4","card":"{\"cardId\":\"k-2\",\"pad\":\"$oversized\"}"}""",
+        )
+        assertEquals(400, tooBigCode, tooBigBody.take(120))
+        assertTrue(tooBigBody.contains("card-too-large"))
+    }
+
+    @Test
     fun injectFeedWithoutALiveSessionIsRejectedLoudly() {
         val (code, body) = post("/v1/agent/hook/inject-feed", """{"wsPath":"/no/such/ws","message":"hello"}""")
         assertEquals(404, code, body)
