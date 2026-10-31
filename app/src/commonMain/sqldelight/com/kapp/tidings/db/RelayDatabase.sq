@@ -39,7 +39,13 @@ CREATE TABLE MessageEntity (
     card_json TEXT,
     -- 插件 → 全群的执行状态（方案 §4.1 四态）：accept / blocked / completed / failed。
     -- 校验在协议层（validateMsg 限四态），这里是如实存储。
-    agent_state TEXT
+    agent_state TEXT,
+    -- (cardId, rev) 原位刷新的**最新载荷**（升级轮 T-2a，D-026 裁决 b）。
+    -- card_json 保持「首帧原文」语义完全不动（M4 卡片渲染链路零变化）；本列 NULL
+    -- （老消息 / 未刷新）时消费方回退读 card_json。更新走 INSERT OR REPLACE +
+    -- insertMessageDropStaleIndex（FTS 纪律同既有），AFTER UPDATE 触发器的
+    -- WHEN old.text IS NOT new.text 保证它不触发全文重写。
+    cardPayload TEXT DEFAULT NULL
 );
 
 CREATE INDEX idx_message_conv_time ON MessageEntity(conv_id, timestamp);
@@ -552,6 +558,38 @@ CREATE TABLE AgentArtifactEntity (
 );
 
 CREATE INDEX idx_agent_artifact_session ON AgentArtifactEntity(node_id, session_id);
+
+-- 工作区 1:1 物理隔离与防重（升级轮 T-2a，D-021；设计 §5.2）。
+-- groupId + hostNodeId + wsPath 唯一：同一个宿主的同一条物理路径只能被一个群绑定 ——
+-- 防重的落点是数据库唯一索引，不是应用层先查后插。消费方：WorkspaceBindingManager（T-2b）。
+CREATE TABLE WorkspaceBindingEntity (
+    workspaceId TEXT PRIMARY KEY NOT NULL,
+    groupId TEXT NOT NULL,
+    hostNodeId TEXT NOT NULL,
+    wsPath TEXT NOT NULL,
+    gitBranch TEXT NOT NULL,
+    isHostActive INTEGER NOT NULL DEFAULT 1,
+    createdAt INTEGER NOT NULL,
+    updatedAt INTEGER NOT NULL
+);
+
+CREATE UNIQUE INDEX idx_ws_binding_unique
+ON WorkspaceBindingEntity(groupId, hostNodeId, wsPath);
+
+-- 工作区作用域免批规则的持久化层（升级轮 T-2a，D-021 / D-023 / D-025 ④）。
+-- 维度分工：本表 = workspaceId + toolPattern + scope(session|always) + expiresAt；
+-- 既有 AgentToolApprovalStore = 宿主级 tool 粒度免批（M4/S4-2 线，内存+JSON）。
+-- 各管各的维度不互抄字段 —— D-023「不建第二套台账」的本意是不重复存同样的规则。
+-- expiresAt = 0 表示不过期。消费方：ApprovalPolicyEngine（T-3 线）。
+CREATE TABLE AgentGrantRuleEntity (
+    ruleId TEXT PRIMARY KEY NOT NULL,
+    workspaceId TEXT NOT NULL,
+    toolPattern TEXT NOT NULL,
+    scope TEXT NOT NULL,
+    grantedBy TEXT NOT NULL,
+    createdAt INTEGER NOT NULL,
+    expiresAt INTEGER NOT NULL
+);
 
 insertAgentSession:
 INSERT OR REPLACE INTO AgentSessionEntity (

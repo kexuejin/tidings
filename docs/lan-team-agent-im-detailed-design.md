@@ -238,8 +238,9 @@ ON WorkspaceBindingEntity(groupId, hostNodeId, wsPath);
 --       零迁移零协议键。若未来出现 SQL 级查询需求再议迁表，须先过停机条件 6（数据库迁移先问人）。
 
 -- 3. 本地免批授权规则表 (安全策略)
---    注意：宿主已有内存 + JSON 的 ToolApprovalAdmin / AgentGrantStore（M4/S4-2 线），
---    本表只在其上补「工作区作用域」维度；开工前先对账既有 AgentGrantStore 结构，避免第二套台账。
+--    分工（D-025④）：AgentToolApprovalStore = 宿主级（tool 粒度）免批，既有 M4/S4-2 线资产；
+--    本表 = 工作区作用域免批规则的持久化层（新维度：workspaceId + toolPattern + scope + expiresAt）。
+--    两层各管各的维度，不互抄字段、不重复存同样规则；开工前先对账既有 AgentGrantStore 结构。
 CREATE TABLE IF NOT EXISTS AgentGrantRuleEntity (
     ruleId TEXT PRIMARY KEY NOT NULL,
     workspaceId TEXT NOT NULL,
@@ -390,31 +391,35 @@ stateDiagram-v2
 
 所有接口声明在 `:app` 模块的 `commonMain` 中，**禁止导入任何 Compose 库**。
 
-### 5.1 `ChannelOrchestrator`（协同编排器）
+### 5.1 `ChannelDispatchCoordinator`（发起侧协同协调器，:app）
+> **命名（D-025①）**：接收侧编排器 = agentNode `ChannelOrchestrator`（已交付，互斥台账/租约/回执，名字不动）；
+> 本节是**发起侧**的 :app 协调器，改名避免 import 撞车。两侧经 `agent-channel` / `agent-channel-result` 帧族通信。
+> **实现口径（D-025②）**：消费既有路径，不新建第二套——意图提炼走 `agentIntent`（`handleInboundAgentIntent`），
+> 节点选择用 `PeerTagRouter.resolve`（已交付 `1e774b1a`，返回 `nodeId: String?`；`NodeEntry` 不存在，节点表不在库），
+> 跨机派单复用 `sendAgentChannel`（`NodeRuntime` 发送门）与 M4 的 `dispatchCrossHostInvoke` 经验。
 ```kotlin
-// 文件落点: app/src/commonMain/kotlin/.../orchestrator/ChannelOrchestrator.kt
-interface ChannelOrchestrator {
-    /** 监听协同群消息，过滤出 @Agent 指令并启动协同链路 */
-    fun observeChannelInbound(groupId: String): Flow<OrchestrationTask>
+// 文件落点: app/src/commonMain/kotlin/.../orchestrator/ChannelDispatchCoordinator.kt
+interface ChannelDispatchCoordinator {
+    /** 根据算力/模型需求标签选择匹配的在线节点（PeerTagRouter 封装；null = 无匹配 ⇒ 柔性提示卡 4.4-4） */
+    suspend fun resolveExecutionNode(requiredTags: Set<String>): String?
 
-    /** 根据算力需求标签选择匹配的物理节点 */
-    suspend fun resolveExecutionNode(requiredTags: Set<String>): NodeEntry?
-
-    /** 分发任务到目标物理节点沙箱 */
+    /** 按既有发送门（对端 caps agc1）分发任务到目标节点宿主（op=assign，租约必填） */
     suspend fun dispatchToNode(
         targetNodeId: String,
         taskPayload: TaskDispatchPayload
     ): DispatchOutcome
 
-    /** 取消当前正在执行的任务 (打断执行) */
+    /** 取消当前正在执行的任务 (打断执行；接收侧中止语义见 4.4-3 级联杀进程) */
     suspend fun abortTask(taskId: String): Boolean
 }
 ```
 
-### 5.2 `WorkspaceManager`（工作区 1:1 防重管理器）
+### 5.2 `WorkspaceBindingManager`（工作区 1:1 防重管理器，:app）
+> **命名（D-025③）**：与 agentNode `WorkspaceRegistry`（agent-workspace 帧的会话台账）是两套东西——
+> 本节管 relay.db 的 `WorkspaceBindingEntity`（群 ↔ 宿主物理工作区绑定）；后者管跨端工作区宣告帧的台账。分工不混。
 ```kotlin
-// 文件落点: app/src/commonMain/kotlin/.../workspace/WorkspaceManager.kt
-interface WorkspaceManager {
+// 文件落点: app/src/commonMain/kotlin/.../workspace/WorkspaceBindingManager.kt
+interface WorkspaceBindingManager {
     /** 将群聊与具体的物理宿主工作区绑定 (防重校验) */
     suspend fun bindWorkspace(
         groupId: String, 
@@ -611,6 +616,12 @@ object ModelEnvMapper {
                 "OPENCODE_API_KEY" to config.apiKey,
                 "OPENCODE_MODEL" to config.defaultModel
             )
+            "antigravity" -> mapOf(
+                // agy CLI 默认复用 ~/.gemini 登录凭证；若自定义模型网关则注入兼容端点
+                "OPENAI_BASE_URL" to config.apiBaseUrl,
+                "OPENAI_API_KEY" to config.apiKey,
+                "ANTIGRAVITY_MODEL" to config.defaultModel
+            )
             else -> mapOf(
                 "OPENAI_BASE_URL" to config.apiBaseUrl,
                 "OPENAI_API_KEY" to config.apiKey
@@ -625,6 +636,12 @@ object ModelEnvMapper {
 1. **凭证永不离机**：API Key 与 Session Token 仅落盘于节点本地的持久化加密区（或凭证文件），**绝对禁止在局域网 P2P 报文（`group-text`、`agent-event` 等）中携带任何鉴权密钥**。
 2. **算力节点自主鉴权**：委派任务时，主理端只传递任务 Prompt、上下文快照与所需标签；算力节点沙箱在接收到指令后，使用算力节点自身的凭证调用模型。
 3. **标签虚假防御**：如果某节点打上 `model:claude` 标签但实际调用超时或鉴权失败，`ChannelOrchestrator` 会记录其 `lastError=auth-failed` 并降级该节点在该标签下的路由权重，同时在群内以柔性卡片提示机主排查该节点凭证。
+
+#### 6. Google Antigravity 专属协同契约 (Hooks & Inverse Injection)
+详细方案见独立设计规范 `docs/ANTIGRAVITY-INTEGRATION-DESIGN.md`。核心契约如下：
+- **主动派单 (agy)**：`CliSubprocessDriver` 探测到 `~/.local/bin/agy` 或系统 `$PATH` 时自动注册 `agent:antigravity`，启动命令追加 `--output-format stream-json --workspace <worktree>`，将 `step_update` 流式转换为群内任务看板卡原位刷新；
+- **被动审批 (PreToolUse)**：Hook 拦截危险工具（如 `Bash: git push`），向宿主发起审批请求，群内推送双行审批卡，手机端点击 `[批准]` 后，Hook 向进程 stdout 吐出 `{"decision":"allow"}` 放行；
+- **反向注入 (PreInvocation)**：手机端在群聊中输入补充修正指令时，暂存于宿主中继队列。Antigravity 触发 `PreInvocation` 时通过 `injectSteps[].userMessage` 将手机消息作为用户输入反向注入当前推理上下文，实现免开电脑直接纠偏。
 
 ---
 

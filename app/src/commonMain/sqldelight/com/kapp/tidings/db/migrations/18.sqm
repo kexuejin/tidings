@@ -1,0 +1,42 @@
+-- D-021 / D-026（升级轮 T-2a）：局域网团队协同的持久化演进（版本 18 -> 19）。
+--
+-- 1. WorkspaceBindingEntity — 工作区 1:1 物理隔离与防重（设计 §5.2）。
+--    groupId + hostNodeId + wsPath 唯一：同一个宿主的同一条物理路径
+--    只能被一个群绑定 —— 防重的落点是**数据库唯一索引**，不是应用层先查后插。
+-- 2. AgentGrantRuleEntity — 工作区作用域免批规则的持久化层（D-023 / D-025 ④）。
+--    维度分工：本表 = workspaceId + toolPattern + scope(session|always) + expiresAt；
+--    既有 AgentToolApprovalStore = 宿主级 tool 粒度免批（M4/S4-2 线，内存+JSON）。
+--    各管各的维度，不互抄字段 —— D-023「不建第二套台账」的本意是不重复存同样的规则。
+-- 3. MessageEntity.cardPayload — (cardId, rev) 原位刷新的**最新载荷**（D-026 裁决 b）。
+--    card_json 保持「首帧原文」语义完全不动（M4 卡片渲染链路零变化）；cardPayload 为
+--    NULL（老消息 / 未刷新）时消费方回退读 card_json（T-2d 判据）。首帧与最新是两个事实，
+--    各有一列 = 一个事实一个来源（§2.4），而不是两处真相。
+--
+-- 纪律全套：迁移自包含（IF NOT EXISTS 补建，不假设任何表已存在）；触发器
+-- WHEN old.text IS NOT new.text 已在主 .sq（RelayDatabase.sq:84-85）——cardPayload
+-- 更新严禁触发 FTS 重写；原位刷新重写消息前先 insertMessageDropStaleIndex（FTS5 'delete'）。
+-- ALTER 类：unversioned 哨兵链同步加 cardPayload 判别（DatabaseDriverFactory.jvm.kt）。
+CREATE TABLE IF NOT EXISTS WorkspaceBindingEntity (
+    workspaceId TEXT PRIMARY KEY NOT NULL,
+    groupId TEXT NOT NULL,
+    hostNodeId TEXT NOT NULL,
+    wsPath TEXT NOT NULL,
+    gitBranch TEXT NOT NULL,
+    isHostActive INTEGER NOT NULL DEFAULT 1,
+    createdAt INTEGER NOT NULL,
+    updatedAt INTEGER NOT NULL
+);
+CREATE UNIQUE INDEX IF NOT EXISTS idx_ws_binding_unique
+ON WorkspaceBindingEntity(groupId, hostNodeId, wsPath);
+
+CREATE TABLE IF NOT EXISTS AgentGrantRuleEntity (
+    ruleId TEXT PRIMARY KEY NOT NULL,
+    workspaceId TEXT NOT NULL,
+    toolPattern TEXT NOT NULL,
+    scope TEXT NOT NULL,
+    grantedBy TEXT NOT NULL,
+    createdAt INTEGER NOT NULL,
+    expiresAt INTEGER NOT NULL
+);
+
+ALTER TABLE MessageEntity ADD COLUMN cardPayload TEXT DEFAULT NULL;

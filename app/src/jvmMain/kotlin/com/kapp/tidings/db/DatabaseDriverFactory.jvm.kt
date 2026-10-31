@@ -79,25 +79,50 @@ internal fun openDesktopDatabase(
         columns.isEmpty() -> schema.create(driver)
         // 比当前 schema 还新（降级场景）：什么都不做，也别把版本号往回写。
         current >= schema.version -> return
-        current == LEGACY_UNVERSIONED -> {
-            // 0 号库有三种可能：
-            //  - 结构就是**当前形状**（`FtsTolerantSchema.create` 建的、只是没人盖章，
-            //    哨兵 = 最新迁移的判别列）⇒ 补章即可，一条迁移都不许跑 —— 17.sqm 起是
-            //    ALTER 类迁移，对已含新列的表重跑就是 `duplicate column name`，
-            //    直接把 App 拦在启动前；
-            //  - 列在 `1.sqm` 的哨兵但**不是**当前形状（盖章机制上线前的历史库）⇒
-            //    从第 2 版开始跑（`2.sqm` 起的 CREATE 全是 IF NOT EXISTS，重跑安全）；
-            //  - 列不在 ⇒ 真的停在第 1 版：从第 1 版开始跑。
-            val from = when {
-                "sha256" in columnsOf(driver, ARTIFACT_TABLE) -> schema.version
-                SCREEN_COLUMN in columns -> LEGACY_BASELINE_VERSION + 1
-                else -> LEGACY_BASELINE_VERSION
-            }
-            schema.migrate(driver, from, schema.version)
+        else -> {
+            // **盖章库与 unversioned 库走同一张判别表**（D-028）：user_version 的语义有
+            // 歧义（17 到底是「17.sqm 应用完」还是「待跑」—— SQLDelight 2.0.2 的段条件
+            // oldVersion <= N 让 migrate(17,19) 重跑 17.sqm，实证 duplicate sha256），
+            // 不信任它，用列形状算 from —— 判据单一来源（resolveMigrateFrom），
+            // 两个分支不许漂移。
+            val from = resolveMigrateFrom(
+                messageColumns = columns,
+                artifactColumns = columnsOf(driver, ARTIFACT_TABLE),
+                schemaVersion = schema.version,
+            )
+            if (from < schema.version) schema.migrate(driver, from, schema.version)
         }
-        else -> schema.migrate(driver, current, schema.version)
     }
     writeUserVersion(driver, schema.version)
+}
+
+/**
+ * 按**列形状**判这个库的真实迁移起点（D-028）。
+ *
+ * 哨兵链按「最新优先」排列，**每个哨兵的值 = 该迁移跑完后库的真实版本**：
+ *  - cardPayload（18.sqm 的 ALTER 产物，D-026 原位刷新载荷列）在 ⇒ 库已到
+ *    schemaVersion，补章跳迁移；
+ *  - sha256（17.sqm 的产物）在而 cardPayload 不在 ⇒ 库已到 18，从 18 跑 18.sqm
+ *    到 19（只补 18.sqm 那一段）；
+ *  - SCREEN_COLUMN 在 ⇒ 盖章机制上线后的历史库，从 2 开始跑（2.sqm 起的 CREATE
+ *    全是 IF NOT EXISTS，重跑安全）；
+ *  - 都不在 ⇒ 停在第 1 版，从 1 开始跑。
+ *
+ * 哨兵与版本号**写死**（与 ScreenHistoryRecordTest 的版本断言同一条哲学：逼加迁移的
+ * 人想一遍每一档库形态 —— unversioned(0) 与盖章档现在共用这一张表，防两处漂移）。
+ * 5c1d1b46 的教训：缺哨兵的库会被重跑 ALTER 拦在启动前；哨兵值算错是另一种炸法 ——
+ * 18.sqm 首跑时把 sha256 哨兵算成 17，migrate(17,19) 重跑了 17.sqm，duplicate
+ * sha256（迁移夹具当场抓住）。
+ */
+private fun resolveMigrateFrom(
+    messageColumns: Set<String>,
+    artifactColumns: Set<String>,
+    schemaVersion: Long,
+): Long = when {
+    "cardPayload" in messageColumns -> schemaVersion
+    "sha256" in artifactColumns -> 18L
+    SCREEN_COLUMN in messageColumns -> LEGACY_BASELINE_VERSION + 1
+    else -> LEGACY_BASELINE_VERSION
 }
 
 /**

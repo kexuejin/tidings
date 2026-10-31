@@ -213,7 +213,11 @@ class ScreenHistoryRecordTest {
         // 不回填的话，把 conversations 改成读摘要表之后，会话列表会整片消失（不是少一个优化）。
         // 18 = 17.sqm 之后。17.sqm 给 AgentArtifactEntity 补 sha256 / summary 两列（M7-T3
         // 端到端完整性凭据，cap agf1）—— 只补列、不回填，老行 NULL 与「发送方没报」同义。
-        assertEquals(18L, RelayDatabase.Schema.version, "迁移文件数 + 1 —— 加一个 .sqm 就得同步改这条")
+        // 19 = 18.sqm 之后（升级轮 T-2a，D-021）。18.sqm 三件：WorkspaceBindingEntity
+        // （工作区 1:1 绑定 + 唯一索引防重）、AgentGrantRuleEntity（工作区作用域免批规则
+        // 持久化，D-023 两层分工）、MessageEntity.cardPayload（D-026 原位刷新的最新载荷，
+        // card_json 首帧原文不动，NULL 回退读 card_json）。
+        assertEquals(19L, RelayDatabase.Schema.version, "迁移文件数 + 1 —— 加一个 .sqm 就得同步改这条")
 
         val database = RelayDatabase(driver)
         val old = database.relayDatabaseQueries.selectMessagesByConv("peer-1").executeAsList().single()
