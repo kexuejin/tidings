@@ -148,7 +148,7 @@ class LuciolaDiscoveryEngineTest {
         val selfP = profile("o_self", "Self")
         val peerP = profile("o_peer", "Gone")
         val registry = PeerRegistry(selfP.nodeId)
-        val engine = LuciolaDiscoveryEngine(registry, { selfP }, udpPort = enginePort2)
+        val engine = LuciolaDiscoveryEngine(registry, { selfP }, udpPort = enginePort2, heartbeatJitterMs = 0)
         val peerAdapter = UniffiEngineAdapter(
             sessionName = peerP.nick,
             discoveryPort = peerPort2.toUShort(),
@@ -183,7 +183,7 @@ class LuciolaDiscoveryEngineTest {
         val json = Json { encodeDefaults = false; ignoreUnknownKeys = true }
         val selfP = profile("r_self", "Self")
         val registry = PeerRegistry(selfP.nodeId)
-        val engine = LuciolaDiscoveryEngine(registry, { selfP }, udpPort = enginePort3)
+        val engine = LuciolaDiscoveryEngine(registry, { selfP }, udpPort = enginePort3, heartbeatJitterMs = 0)
 
         // 对端 rev=2
         val peerP2 = profile("r_peer", "Refreshed", rev = 2)

@@ -64,6 +64,7 @@ class PluginRegistrationTest {
         runBlocking { runtime.start(scope) }
         plane = ControlPlane(
             runtime, httpPort = 0, token = "",
+            loadProbe = { null },
             sessions = AgentSessionRegistry(),
             pluginTokenGate = PluginTokenGate.fromExplicit(token),
             plugins = PluginRegistry(probeIntervalMs = 100, probeTimeoutMs = 1000),

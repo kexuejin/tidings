@@ -61,6 +61,7 @@ class PluginDispatchTest {
         sessions = AgentSessionRegistry()
         plane = ControlPlane(
             runtime, httpPort = 0, token = "",
+            loadProbe = { null },
             sessions = sessions,
             pluginTokenGate = PluginTokenGate.fromExplicit(token),
             plugins = PluginRegistry(probeIntervalMs = 100, probeTimeoutMs = 1000),
