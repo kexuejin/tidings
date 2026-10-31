@@ -66,6 +66,15 @@ class DesktopInvokeWiringGuardTest {
             source.contains("controller.sendFiles(") && source.contains("ConvId.group(deliverGroupId)"),
             "产物没有投进派单来源的群（sendFiles + ConvId.group 群路径）—— patch 只躺在宿主本机",
         )
+        // T-G1 审查合流：merge-patch 动作在宿主本机落地（git apply），冲突落台账。
+        assertTrue(
+            source.contains("actionId == \"merge-patch\"") && source.contains("DesktopPatchMerge.apply("),
+            "合流动作没有接 DesktopPatchMerge —— diff 卡上的 [合并此补丁] 点了没反应",
+        )
+        assertTrue(
+            source.contains("latestPatchRefFor(") && source.contains("eventType = \"merge-result\""),
+            "合流没有按会话找回 patch（latestPatchRefFor）或没有把冲突落台账（merge-result）",
+        )
         assertTrue(source.contains("controller.invokeGrantAllows = "), "可信设备判据桥必须装上（§6.3）")
         assertTrue(source.contains("controller.invokeExecPolicyOf = "), "每 agent 执行范围桥必须装上（§6.3）")
         assertTrue(source.contains("controller.invokeRecordGrantRequest = "), "未授权申请桥必须装上（面板要能冒出待批项）")

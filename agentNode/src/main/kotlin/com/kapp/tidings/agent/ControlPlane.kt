@@ -847,9 +847,13 @@ class ControlPlane(
                 is DriverEvent.Card -> Triple("card", null, event.cardJson)
                 is DriverEvent.Artifact -> {
                     // 产物（T-3b）：结构化回调给桥（桌面执行桥拿路径发群文件），台账里
-                    // 只落展示事实（name + sha）—— 路径是本机事实，进内存台账不出机。
+                    // 落展示事实（name + sha）+ **本机路径** —— 路径不进协议帧，但
+                    // 合流动作（merge-patch）要在本机按它找回 patch 文件。
                     onArtifact?.invoke(event.path, event.name, event.bytes, event.mime, event.sha256)
-                    Triple("artifact", event.name, "sha256=" + event.sha256 + " bytes=" + event.bytes)
+                    Triple(
+                        "artifact", event.name,
+                        "sha256=" + event.sha256 + " bytes=" + event.bytes + " path=" + event.path,
+                    )
                 }
                 is DriverEvent.Finished -> Triple("finished", event.finishReason, null)
                 is DriverEvent.Error -> Triple("error", null, event.message)
@@ -2677,6 +2681,23 @@ class ControlPlane(
             list.size
         }
         respond(exchange, 202, buildJsonObject { put("queued", queued); put("key", key) })
+    }
+
+    /**
+     * 合流动作（T-G1）的本机事实查询：某会话最近一次沙箱 patch 的 (工作区路径, patch 路径)。
+     * 两条都齐才返回 —— 合流要同时知道「patch 在哪」与「应用到哪个仓」。
+     * 路径是本机事实，只经进程内返回，不进任何协议帧。
+     */
+    fun latestPatchRefFor(sessionId: String): Pair<String, String>? {
+        val nodeId = runtime.nodeId
+        val wsPath = sessions.sessionOrNull(nodeId, sessionId)?.wsPath?.takeIf { it.isNotBlank() } ?: return null
+        val patchPath = sessions.events(nodeId, sessionId)
+            .lastOrNull { it.eventType == "artifact" && it.body?.contains("path=") == true }
+            ?.body
+            ?.split("path=")?.lastOrNull()?.trim()
+            ?.takeIf { it.isNotEmpty() }
+            ?: return null
+        return wsPath to patchPath
     }
 
     /**

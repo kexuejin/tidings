@@ -97,6 +97,7 @@ class SandboxedCliDriverTest {
         assertTrue(card.cardJson.contains("\"type\":\"diff-review\""), "卡类型 = diff-review")
         assertTrue(card.cardJson.contains("\"additions\":2"), "提纯统计进卡面")
         assertTrue(card.cardJson.contains("patch.diff"), "产物条目进卡面（name/bytes/mime 展示元数据）")
+        assertTrue(card.cardJson.contains("\"actionId\":\"merge-patch\""), "合流动作进卡（T-G1：审查闭环的最后一环）")
         assertTrue(!card.cardJson.contains(artifact.path), "本机路径绝不进协议卡（既有收口）")
         // 产物在、工作面无痕。
         assertTrue(

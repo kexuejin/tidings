@@ -813,8 +813,34 @@ internal class DesktopExtension(
             // 宿主侧卡片动作出口（§7.3-2 的插件转发段）：判定记账与全群广播在域层
             // 原子台账，这里只负责把动作送进插件。会话解析：调用方给的优先，缺了按
             // agent 最近一次会话兜；都拿不到就如实放弃（不编一个 id 给插件）。
-            controller.onHostCardAction = { agentId, sessionId, _, actionId, decidedBy ->
-                val entry = created.pluginForAgent(agentId)
+            controller.onHostCardAction = { agentId, sessionId, cardId, actionId, decidedBy ->
+                // 审查合流（T-G1）：diff-review 卡的 [合并此补丁] 在宿主本机落地 ——
+                // 按 sessionId 找回（工作区, patch 路径），git apply 两段式执行；
+                // 结果落台账（merge-result 事件，会话详情可见）。不走插件转发：
+                // 合流是宿主仓的写操作，不是插件的活。
+                if (actionId == "merge-patch" && sessionId != null) {
+                    val ref = created.latestPatchRefFor(sessionId)
+                    val outcome = when {
+                        ref == null -> DesktopPatchMerge.Outcome.Conflict("no sandbox patch recorded for session")
+                        else -> DesktopPatchMerge.apply(patchPath = ref.second, workspacePath = ref.first)
+                    }
+                    when (outcome) {
+                        is DesktopPatchMerge.Outcome.Applied ->
+                            println("[RELAY-INVOKE] patch merged into workspace by " + decidedBy + " (card " + cardId + ")")
+                        is DesktopPatchMerge.Outcome.Conflict -> {
+                            println("[RELAY-INVOKE] patch merge FAILED (card " + cardId + "): " + outcome.detail)
+                            sessions?.recordEvent(
+                                nodeId = runtime.profile.nodeId,
+                                sessionId = sessionId,
+                                cursor = System.currentTimeMillis(),
+                                eventType = "merge-result",
+                                summary = "conflict",
+                                body = outcome.detail,
+                            )
+                        }
+                    }
+                } else {
+                    val entry = created.pluginForAgent(agentId)
                 if (entry == null) {
                     println("[RELAY-INVOKE] card action " + actionId + " for agent " + agentId + " has no local plugin (dropped)")
                 } else {
@@ -828,6 +854,7 @@ internal class DesktopExtension(
                                 println("[RELAY-INVOKE] card action " + actionId + " failed: " + (t.message ?: (t::class.simpleName ?: "unknown")))
                             }
                     }
+                }
                 }
             }
             // **执行由 DSH 注入桥承担，这里不再跑本地驱动。**

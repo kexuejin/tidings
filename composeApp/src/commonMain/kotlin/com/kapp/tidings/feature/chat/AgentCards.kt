@@ -45,6 +45,7 @@ import com.kapp.tidings.generated.resources.card_details_hide
 import com.kapp.tidings.generated.resources.card_details_show
 import com.kapp.tidings.generated.resources.card_diff_summary
 import com.kapp.tidings.generated.resources.card_expired
+import com.kapp.tidings.generated.resources.card_action_merge_patch
 import com.kapp.tidings.generated.resources.card_pending_confirm
 import com.kapp.tidings.generated.resources.card_progress_label
 import com.kapp.tidings.generated.resources.card_rev_tag
@@ -338,6 +339,9 @@ fun cardRowOutcome(message: MessageUi, visibleCardMessageIds: Set<String>): Card
 // 这样它们能被合成输入钉死（`AgentCardPolicyTest`），也不会被 `envDependentTestGate`
 // 判红 —— 一条「过期了没有」的判据如果自己读 `System.currentTimeMillis()`，
 // 它在慢机器与快机器上就是两条不同的测试。
+
+/** 宿主端自己发出的系统动作 id（卡片 JSON 里 label 只是占位，文案端上本地化）。 */
+const val SYSTEM_ACTION_MERGE_PATCH = "merge-patch"
 
 /**
  * 审批是否已过期（§4.3-S12）。
@@ -1196,8 +1200,11 @@ private fun CardButtonGroupRow(
         ) {
             card.actions.forEach { action ->
                 val ui = cardActionUiOf(card, pendingActions, action.actionId)
-                val text = when (ui.lock) {
-                    CardActionLock.PendingConfirm -> stringResource(Res.string.card_pending_confirm)
+                // 已知系统动作的文案由端上本地化（宿主发出的卡只带 actionId 占位 ——
+                // 数据不背文案，cjkLiteralGate 的口径也不容生产源码硬编码文案）。
+                val text = when {
+                    ui.lock == CardActionLock.PendingConfirm -> stringResource(Res.string.card_pending_confirm)
+                    action.actionId == SYSTEM_ACTION_MERGE_PATCH -> stringResource(Res.string.card_action_merge_patch)
                     else -> action.label
                 }
                 if (action.approval) {

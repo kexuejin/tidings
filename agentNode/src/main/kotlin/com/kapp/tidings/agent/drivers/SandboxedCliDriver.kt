@@ -150,6 +150,14 @@ class SandboxedCliDriver(
         put("rev", JsonPrimitive(1))
         put("type", JsonPrimitive("diff-review"))
         put("title", JsonPrimitive("${File(hostRepo).name} 沙箱任务完成"))
+        // 合流动作（T-G1）：宿主机主在卡上点 [合并此补丁] → 宿主 git apply。
+        // label 放 actionId 占位 —— 手机端按已知系统 actionId 本地化（数据不背文案）。
+        put("actions", buildJsonArray {
+            add(buildJsonObject {
+                put("actionId", JsonPrimitive("merge-patch"))
+                put("label", JsonPrimitive("merge-patch"))
+            })
+        })
         put("diff", buildJsonObject {
             put("path", JsonPrimitive(File(hostRepo).name))
             put("summary", JsonPrimitive("${harvest.filesChanged} 个文件 +${harvest.additions} −${harvest.deletions}"))
