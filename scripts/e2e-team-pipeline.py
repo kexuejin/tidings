@@ -88,8 +88,8 @@ def act1_workspace() -> bool:
     print(f"  workspace 就绪: {WORKSPACE}")
     # 工作区宣告路由存在与否是**第 0 号发现**的一部分：没有就把缺口如实打出来。
     code, body = call("POST", "/v1/agent/workspace", {
-        "nodeId": "self", "wsId": "weather-app", "wsTitle": "天气 App",
-        "wsPath": WORKSPACE,
+        "to": "self", "wsId": "weather-app", "wsTitle": "天气 App",
+        "wsPath": WORKSPACE, "agentKind": "antigravity",
     })
     print(f"  工作区宣告 -> {code} {str(body)[:120]}")
     if code == 404:
@@ -120,11 +120,15 @@ def wait_for_card(kind: str, timeout: int = 300):
 
 
 def act2_design(requirement: str) -> bool:
-    """幕 2 · 设计派单：@antigravity 出设计 + 原型（沙箱 + diff 卡 + 产物）。"""
-    step("幕 2 · 设计派单（@antigravity）")
-    code, body = send_group(f"@antigravity 为天气App出设计稿与HTML原型：{requirement}。完成后用 ask_question 卡让机主选样式。")
+    """幕 2 · 设计派单：hook/dispatch 直驱 agy（沙箱 + diff 卡 + 产物）。"""
+    step("幕 2 · 设计派单（antigravity via E1 桥）")
+    code, body = call("POST", "/v1/agent/hook/dispatch", {
+        "agentKey": "antigravity",
+        "prompt": f"为天气App出设计稿与单文件HTML原型（{requirement}）。把原型写入 prototype.html。完成后结束。",
+        "wsPath": WORKSPACE,
+    }, timeout=60)
     print(f"  派单 -> {code} {str(body)[:120]}")
-    if code != 200:
+    if code != 202:
         return False
     card = wait_for_card("diff-review")
     if card is None:
@@ -148,19 +152,27 @@ def act3_style_gate() -> bool:
 
 
 def act4_implement() -> bool:
-    """幕 4 · 实现派单：@dsh 按原型实现。"""
-    step("幕 4 · 实现派单（@dsh）")
-    code, body = send_group("@dsh 按已确认的原型实现天气 App 页面")
+    """幕 4 · 实现派单：antigravity 按原型实现（v1 同驱动；DSH bot 接线后切 @dsh）。"""
+    step("幕 4 · 实现派单（antigravity 实现）")
+    code, body = call("POST", "/v1/agent/hook/dispatch", {
+        "agentKey": "antigravity",
+        "prompt": "按 prototype.html 的设计实现 weather.html（单文件，含7天预报数据渲染）。",
+        "wsPath": WORKSPACE,
+    }, timeout=60)
     print(f"  派单 -> {code} {str(body)[:120]}")
-    return code == 200
+    return code == 202
 
 
 def act5_review() -> bool:
-    """幕 5 · 验收审查：@antigravity 验收。"""
-    step("幕 5 · 验收审查（@antigravity）")
-    code, body = send_group("@antigravity 验收 dsh 的实现，出验收 diff 卡")
+    """幕 5 · 验收审查：antigravity 验收实现。"""
+    step("幕 5 · 验收审查（antigravity）")
+    code, body = call("POST", "/v1/agent/hook/dispatch", {
+        "agentKey": "antigravity",
+        "prompt": "审查 weather.html 与 prototype.html 的一致性，输出验收结论。",
+        "wsPath": WORKSPACE,
+    }, timeout=60)
     print(f"  派单 -> {code} {str(body)[:120]}")
-    return code == 200
+    return code == 202
 
 
 def act6_merge_and_notify() -> bool:

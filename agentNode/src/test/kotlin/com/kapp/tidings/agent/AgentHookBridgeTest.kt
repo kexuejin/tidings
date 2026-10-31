@@ -214,6 +214,39 @@ class AgentHookBridgeTest {
     }
 
     @Test
+    fun cliTaskExecutionResolvesByAliasAndRecordsTheLedger() = kotlinx.coroutines.runBlocking {
+        // E1：@antigravity → agy-cli 别名解析 + 事件映射 + 台账终态。
+        // 夹具吐真 NDJSON 行（/bin/echo 的裸文本不是 JSON，行映射如实跳过）。
+        val cliBin = java.nio.file.Files.createTempDirectory("e1-cli").toFile().resolve("agy")
+        cliBin.writeText("#!/bin/sh\nprintf '{\"type\":\"text\",\"text\":\"cli hello\"}\\n'\nexit 0\n")
+        kotlin.test.assertTrue(cliBin.setExecutable(true))
+        val cliRegistry = com.kapp.tidings.agent.drivers.DriverRegistry().also { r ->
+            r.register(com.kapp.tidings.agent.drivers.CliSubprocessDriver(
+                driverId = "agy-cli", displayName = "Antigravity (agy CLI)",
+                cliPath = cliBin.absolutePath, argSpec = { listOf(it) },
+            ))
+        }
+        val planeWithCli = ControlPlane(
+            agent, httpPort = 0, token = "", sessions = registry,
+            loadProbe = { null }, cliDrivers = cliRegistry,
+        )
+        val events = mutableListOf<Triple<String, Long, String?>>()
+        val (sessionId, status, error) = planeWithCli.executeCliTask(
+            "antigravity", "hello from e2e", null, null,
+        ) { type, cursor, summary, body -> events.add(Triple(type, cursor, body)) }
+        assertTrue(sessionId != null, "别名解析命中（antigravity → agy-cli）：$error")
+        assertEquals("finished", status, "退出码 0 = finished（$error）")
+        assertTrue(events.any { it.first == "token.delta" }, "行事件进台账")
+        val record = registry.sessionOrNull(agent.profile.nodeId, sessionId!!)
+        assertEquals("agy-cli", record?.agentKind, "会话台账记驱动身份")
+        // 反向验证锚：解析不到的 agentKey = 如实 error 不静默。
+        val (sid2, status2, error2) = planeWithCli.executeCliTask(
+            "no-such-agent", "x", null, null,
+        ) { _, _, _, _ -> }
+        assertTrue(sid2 == null && status2 == "error", "未知 agent 如实报错：$error2")
+    }
+
+    @Test
     fun hookApprovalDefaultTimeoutAlignsTheFiveMinuteTtl() {
         // D-032：hook 审批的缺省等待预算 = Limits.APPROVAL_TTL_MS（5 分钟）。
         // 判据走「超时语义」：timeoutMs 缺省时用例不传 —— 但 5 分钟太长，这里改为

@@ -539,8 +539,15 @@ internal class DesktopExtension(
             },
             scope = scope,
         )
+        // T-3b/E1：CLI 驱动注册表（沙箱装配）—— 必须先于 ControlPlane（构造注入）。
+        val driverRegistry = com.kapp.tidings.agent.drivers.DriverRegistry.withCliDrivers(
+            sandbox = com.kapp.tidings.agent.drivers.WorktreeSandboxExecutor(
+                com.kapp.tidings.agent.drivers.WorktreeSandboxExecutor.defaultRoot(),
+            ),
+        )
         val created = ControlPlane(
             runtime, httpPort, token,
+            cliDrivers = driverRegistry,
             sessions = registry, workspaces = workspaces, grants = grants, execPolicies = execPolicies,
             channelOrchestrator = channelOrchestrator,
             // **注入判定**：判据只有一份（core 的 mentionedVirtualAgent），这里只提供
@@ -615,15 +622,6 @@ internal class DesktopExtension(
                 created.recordSessionPage(peerId, wsId, offset, limit)
                 true
             }
-            // T-3b：CLI 驱动带上 Git Worktree 沙箱装配（群内派的活跑独立 worktree，
-            // 交付 diff 产物；中止 = 进程树 TERM→3s→KILL + worktree 无痕清理）。
-            // 装了 CLI 的宿主自动获得；没装的跳过（withCliDrivers 的既有纪律）。
-            val driverRegistry = com.kapp.tidings.agent.drivers.DriverRegistry.withCliDrivers(
-                sandbox = com.kapp.tidings.agent.drivers.WorktreeSandboxExecutor(
-                    com.kapp.tidings.agent.drivers.WorktreeSandboxExecutor.defaultRoot(),
-                ),
-            )
-
             // **执行名单的宿主侧实现**：台账在桌面端（`AgentGrantStore`），控制器拿不到。
             //
             // 名单 = `scope=AGENT` 且 agentKey 匹配的授权记录；可信 = `scope=ALL`。
@@ -799,6 +797,36 @@ internal class DesktopExtension(
                         controller.state.value.agentWorkspaces.values
                             .firstOrNull { it.peerId == self && it.wsId == id }?.wsPath
                     }
+                    // E1：插件优先，**CLI 驱动兜底** —— @antigravity/@claude/@codex 这类
+                    // 没有插件进程的 agent 走 DriverRegistry 的本机子进程驱动（沙箱
+                    // 语义在驱动内）。两路共享台账与产物回调（ControlPlane 内部）。
+                    if (created.pluginForAgent(request.agentId) == null &&
+                        created.resolveCliDriver(request.agentId) != null
+                    ) {
+                        val cliArtifacts = mutableListOf<Triple<String, String, Long>>()
+                        val workerCardCli = java.util.concurrent.atomic.AtomicReference<String?>(null)
+                        var cliSummary: String? = null
+                        var cliError: String? = null
+                        val (cliSessionId, cliStatus, cliError0) = created.executeCliTask(
+                            request.agentId, request.prompt, wsPath, null,
+                            onArtifact = { path, name, bytes, _, _ -> cliArtifacts.add(Triple(path, name, bytes)) },
+                        ) { eventType, _, summary, body ->
+                            when (eventType) {
+                                "card" -> workerCardCli.set(body)
+                                "finished" -> cliSummary = summary
+                                "error" -> cliError = summary
+                            }
+                        }
+                        if (cliStatus == "error") {
+                            return com.kapp.tidings.domain.AgentInvokeExecution(
+                                status = com.kapp.tidings.core.protocol.CodecInvoke.InvokeResultStates.ERROR,
+                                summary = cliSummary,
+                                error = cliError ?: cliError0 ?: "cli task ended in error",
+                            )
+                        }
+                        deliverCliArtifacts(cliArtifacts, request.groupId)
+                        return com.kapp.tidings.domain.AgentInvokeExecution.done(cliSummary, workerCardCli.get())
+                    }
                     val entry = created.pluginForAgent(request.agentId)
                         ?: return com.kapp.tidings.domain.AgentInvokeExecution(
                             status = com.kapp.tidings.core.protocol.CodecInvoke.InvokeResultStates.NO_PLUGIN,
@@ -807,6 +835,7 @@ internal class DesktopExtension(
                     val workerCard = java.util.concurrent.atomic.AtomicReference<String?>(null)
                     var finishSummary: String? = null
                     var lastError: String? = null
+                    val deliverGroupId = request.groupId
                     // 沙箱产物（T-3b）：结构化回调收集（路径只走进程内），任务成功后
                     // 投进群 —— 群文件扇出由域层负责（RelayControllerTransfers 的群
                     // 路径），这里只把本机文件交给它。回调在 executePluginTask 的挂起
@@ -842,23 +871,7 @@ internal class DesktopExtension(
                             // 域层；sendFiles 的群路径按 ConvId.group 收敛）。投递失败
                             // 不改写结果状态 —— 文件没送到是投递事实，不是任务失败；
                             // 卡片（含产物条目）照常上群，可从 report.json 对账。
-                            val deliverGroupId = request.groupId
-                            if (deliverGroupId != null && artifacts.isNotEmpty()) {
-                                artifacts.forEach { (path, name, bytes) ->
-                                    runCatching {
-                                        controller.sendFiles(
-                                            com.kapp.tidings.core.protocol.ConvId.group(deliverGroupId),
-                                            listOf(com.kapp.tidings.core.transport.LocalFile(
-                                                path = path, name = name, size = bytes,
-                                            )),
-                                            isFolder = false,
-                                            folderRootName = null,
-                                        )
-                                    }.onFailure { t ->
-                                        println("[RELAY-INVOKE] artifact delivery failed for " + name + ": " + (t.message ?: (t::class.simpleName ?: "unknown")))
-                                    }
-                                }
-                            }
+                            deliverCliArtifacts(artifacts, deliverGroupId)
                             com.kapp.tidings.domain.AgentInvokeExecution.done(finishSummary, workerCard.get())
                         }
                     }
@@ -1123,6 +1136,26 @@ internal class DesktopExtension(
      * fail-closed：wsPath/wsId/wsTitle 全空、或同一个 sessionId 在不同设备上报出了**不同的
      * 工作区归属**（跨设备撞 sessionId）时返回空 —— 宁可不投，也不要把甲设备的活投进乙设备的群。
      */
+    /** 产物投递（T-G1/E1 共用）：本机文件 → 派单来源的群（扇出在域层）。 */
+    private fun deliverCliArtifacts(
+        artifacts: List<Triple<String, String, Long>>,
+        deliverGroupId: String?,
+    ) {
+        if (deliverGroupId == null) return
+        artifacts.forEach { (path, name, bytes) ->
+            runCatching {
+                controller.sendFiles(
+                    com.kapp.tidings.core.protocol.ConvId.group(deliverGroupId),
+                    listOf(com.kapp.tidings.core.transport.LocalFile(path = path, name = name, size = bytes)),
+                    isFolder = false,
+                    folderRootName = null,
+                )
+            }.onFailure { t ->
+                println("[RELAY-INVOKE] artifact delivery failed for " + name + ": " + (t.message ?: (t::class.simpleName ?: "unknown")))
+            }
+        }
+    }
+
     private fun groupsForSession(
         state: com.kapp.tidings.domain.RelayUiState,
         sessionId: String,

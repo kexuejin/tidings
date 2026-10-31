@@ -160,6 +160,8 @@ class ControlPlane(
     private val token: String,
     /** 宿主负载探针（T-G7）：null/缺省 = 真实 CPU 探针；测试注入固定值。 */
     private val loadProbe: (() -> Double?)? = { com.kapp.tidings.agent.HostLoadGuard.systemCpuLoad() },
+    /** CLI 驱动注册表（E1）：@claude/@codex/@antigravity 的群内派单执行桥。 */
+    private val cliDrivers: com.kapp.tidings.agent.drivers.DriverRegistry? = null,
     private val startedAt: Long = System.currentTimeMillis(),
     /**
      * 公网入口（隧道暴露的控制面地址），空串 = 没配 ⇒ 配对二维码不生成。
@@ -495,6 +497,7 @@ class ControlPlane(
                 path == "/v1/agent/hook/inject" && method == "POST" -> agentHookInject(exchange)
                 path == "/v1/agent/hook/inject-feed" && method == "POST" -> agentHookInjectFeed(exchange)
                 path == "/v1/agent/hook/card" && method == "POST" -> agentHookCard(exchange)
+                path == "/v1/agent/hook/dispatch" && method == "POST" -> agentHookDispatch(exchange)
                 path == "/v1/agent/cancel" && method == "POST" -> agentCancel(exchange)
                 path == "/v1/agent/artifact" && method == "POST" -> agentArtifact(exchange)
                 path == "/v1/agent/ack" && method == "POST" -> agentAck(exchange)
@@ -908,6 +911,108 @@ class ControlPlane(
             agentId = entry.manifest.leader?.agentId,
             state = if (endedInError) AgentSessionStates.ERROR else AgentSessionStates.DONE,
             title = prompt.take(80),
+            wsPath = wsPath,
+            outbound = true,
+        )
+        return Triple(sessionId, if (endedInError) "error" else "finished", null)
+    }
+
+    /**
+     * E1：群内派单的 **CLI 驱动解析** —— agentKey 匹配 driverId / 去掉 `-cli` 后缀
+     * / `antigravity`→agy-cli 三个别名。找不到 = null（调用方走插件路径或 no-plugin）。
+     */
+    fun resolveCliDriver(agentKey: String): com.kapp.tidings.agent.drivers.AgentDriver? {
+        val key = agentKey.trim().lowercase()
+        if (key.isEmpty() || cliDrivers == null) return null
+        return cliDrivers!!.listDrivers().firstOrNull { driver ->
+            driver.driverId == key ||
+                driver.driverId == key + "-cli" ||
+                (key == "antigravity" && driver.driverId == "agy-cli") ||
+                driver.driverId == key.removeSuffix("-cli") + "-cli"
+        }
+    }
+
+    /**
+     * E1：CLI 驱动任务执行 —— 与 [executePluginTask] 共享同一套事件映射、台账、
+     * 实时流与产物回调（两处各写一份迟早漂）。差异只在驱动来源：插件经 HTTP
+     * 桥，CLI 是本机子进程（沙箱语义在驱动内）。
+     */
+    suspend fun executeCliTask(
+        agentKey: String,
+        prompt: String,
+        wsPath: String?,
+        requestedSessionId: String?,
+        onArtifact: ((path: String, name: String, bytes: Long, mime: String, sha256: String) -> Unit)? = null,
+        onEvent: (eventType: String, cursor: Long, summary: String?, body: String?) -> Unit,
+    ): Triple<String?, String, String?> {
+        val driver = resolveCliDriver(agentKey)
+            ?: return Triple(null, "error", "no cli driver for \"$agentKey\"")
+        val cpuLoad = loadProbe?.invoke()
+        if (com.kapp.tidings.agent.HostLoadGuard.shouldRefuse(cpuLoad)) {
+            return Triple(
+                null, "error",
+                "host overloaded (cpu=" + ((cpuLoad ?: 0.0) * 100).toInt() + "%) — refusing new tasks politely",
+            )
+        }
+        val clipped = com.kapp.tidings.core.protocol.TaskPromptBudget.clamp(prompt)
+        val sessionId = requestedSessionId ?: run {
+            val handle = try {
+                driver.openSession(wsPath ?: "", null)
+            } catch (t: Throwable) {
+                return Triple(null, "error", t.message ?: t::class.simpleName)
+            }
+            handle.sessionId
+        }
+        sessions.recordSession(
+            nodeId = runtime.nodeId,
+            sessionId = sessionId,
+            agentKind = driver.driverId,
+            agentId = null,
+            state = com.kapp.tidings.core.protocol.AgentSessionStates.BUSY,
+            title = clipped.take(80),
+            wsPath = wsPath,
+            outbound = true,
+        )
+        val cursor = pluginEventCursors.computeIfAbsent(sessionId) { java.util.concurrent.atomic.AtomicLong(0) }
+        var endedInError = false
+        driver.executeTask(sessionId, clipped) { event ->
+            val (eventType, summary, body) = when (event) {
+                is com.kapp.tidings.agent.drivers.DriverEvent.ThoughtDelta -> {
+                    liveAgentEvents.tryEmit(LiveAgentEvent(runtime.nodeId, sessionId, "thought.delta", event.delta, System.currentTimeMillis()))
+                    Triple("thought.delta", null, event.delta)
+                }
+                is com.kapp.tidings.agent.drivers.DriverEvent.TokenDelta -> {
+                    liveAgentEvents.tryEmit(LiveAgentEvent(runtime.nodeId, sessionId, "token.delta", event.delta, System.currentTimeMillis()))
+                    Triple("token.delta", null, event.delta)
+                }
+                is com.kapp.tidings.agent.drivers.DriverEvent.ToolCall -> Triple("tool.started", event.tool, event.inputJson)
+                is com.kapp.tidings.agent.drivers.DriverEvent.Card -> Triple("card", null, event.cardJson)
+                is com.kapp.tidings.agent.drivers.DriverEvent.Artifact -> {
+                    onArtifact?.invoke(event.path, event.name, event.bytes, event.mime, event.sha256)
+                    Triple("artifact", event.name, "sha256=" + event.sha256 + " bytes=" + event.bytes + " path=" + event.path)
+                }
+                is com.kapp.tidings.agent.drivers.DriverEvent.Finished -> Triple("finished", event.finishReason, null)
+                is com.kapp.tidings.agent.drivers.DriverEvent.Error -> Triple("error", null, event.message)
+            }
+            val c = cursor.incrementAndGet()
+            sessions.recordEvent(
+                nodeId = runtime.nodeId,
+                sessionId = sessionId,
+                cursor = c,
+                eventType = eventType,
+                summary = summary,
+                body = body,
+            )
+            onEvent(eventType, c, summary, body)
+            if (event is com.kapp.tidings.agent.drivers.DriverEvent.Error) endedInError = true
+        }
+        sessions.recordSession(
+            nodeId = runtime.nodeId,
+            sessionId = sessionId,
+            agentKind = driver.driverId,
+            agentId = null,
+            state = if (endedInError) com.kapp.tidings.core.protocol.AgentSessionStates.ERROR else com.kapp.tidings.core.protocol.AgentSessionStates.DONE,
+            title = clipped.take(80),
             wsPath = wsPath,
             outbound = true,
         )
@@ -2531,6 +2636,11 @@ class ControlPlane(
     /** conversationId 键 → 待注入消息（FIFO，封顶 50 条防涨潮）。 */
     private val hookInjectPool = java.util.concurrent.ConcurrentHashMap<String, MutableList<String>>()
 
+    /** E2E 派单的执行 scope（HTTP 线程不能被沙箱任务占住；独立于调用方）。 */
+    private val dispatchScope = kotlinx.coroutines.CoroutineScope(
+        kotlinx.coroutines.SupervisorJob() + kotlinx.coroutines.Dispatchers.Default,
+    )
+
     /** wsPath → 最近一次宣告它的 hook 会话键（feed 方按工作区投递的别名解析）。 */
     private val hookWsAlias = java.util.concurrent.ConcurrentHashMap<String, String>()
 
@@ -2783,6 +2893,32 @@ class ControlPlane(
     val liveAgentEvents = kotlinx.coroutines.flow.MutableSharedFlow<LiveAgentEvent>(
         replay = 0, extraBufferCapacity = 1024,
     )
+
+    /**
+     * `POST /v1/agent/hook/dispatch` —— E2E 指挥入口（T-G 装置）：直驱 [executeCliTask]
+     * （agentKey 别名解析 → CLI 驱动 → 沙箱）。绕过群座席（席位由 UI/工作区宣告形成，
+     * 脚本场景没有 UI）—— 台账/实时流/产物回调与群路径**同一套**。
+     */
+    private fun agentHookDispatch(exchange: HttpExchange) {
+        val obj = readJsonObject(exchange) ?: return
+        val agentKey = obj["agentKey"]?.jsonPrimitive?.contentOrNull?.trim().orEmpty()
+        val prompt = obj["prompt"]?.jsonPrimitive?.contentOrNull?.takeIf { it.isNotBlank() }
+        val wsPath = obj["wsPath"]?.jsonPrimitive?.contentOrNull?.takeIf { it.isNotBlank() }
+        if (agentKey.isEmpty() || prompt == null) {
+            respond(exchange, 400, errorJson("bad-request", "agentKey 与 prompt 都必填"))
+            return
+        }
+        if (resolveCliDriver(agentKey) == null) {
+            respond(exchange, 404, errorJson("no-driver", "没有匹配 agentKey 的 CLI 驱动（装了 agy/claude/codex 才有）"))
+            return
+        }
+        respond(exchange, 202, buildJsonObject { put("accepted", true) })
+        // 执行异步（HTTP 线程不被沙箱任务占住）；结果走台账与 liveAgentEvents。
+        dispatchScope.launch {
+            val (sessionId, status, error) = executeCliTask(agentKey, prompt, wsPath, null) { _, _, _, _ -> }
+            println("[e2e] dispatch done: agentKey=" + agentKey + " sessionId=" + sessionId + " status=" + status + (error?.let { " error=" + it } ?: ""))
+        }
+    }
 
     private fun agentApproval(exchange: HttpExchange) {
         val obj = readJsonObject(exchange) ?: return
