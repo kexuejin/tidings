@@ -138,8 +138,24 @@ button.c[aria-pressed="true"]{background:#B7E4C7;border-color:#B7E4C7;color:#1B4
 .caption{font-size:12px;color:var(--on-2);text-align:center;max-width:660px;line-height:1.6}
 
 /* ============================ 4. 共用原子 ============================ */
-/* 卡片 */
+/* 卡片通用节奏与边界 */
 .card{background:var(--surface);border-radius:var(--r-card);box-shadow:var(--shadow);overflow:hidden}
+.card + .card{margin-top:12px}
+.card + .grphead{margin-top:16px}
+.grphead + .card{margin-top:4px}
+.card + .banner{margin-top:12px}
+.banner + .card{margin-top:12px}
+.card + .hint{margin-top:10px}
+.hint + .card{margin-top:12px}
+.card + .btn, .card + .krow, .card + .navrow{margin-top:12px}
+.krow + .card, .navrow + .card{margin-top:12px}
+.idcard + .card, .card + .idcard{margin-top:12px}
+.card + .session-list, .session-list + .card{margin-top:12px}
+.session-list + .grphead{margin-top:16px}
+.session-card + .session-card{margin-top:10px}
+.ws-block + .ws-block{margin-top:18px}
+.rows + .krow{margin-top:14px;border-radius:var(--r-card);border-bottom:0;box-shadow:var(--shadow)}
+.krow + .krow{margin-top:8px}
 .card>h3{font-size:var(--fs-ctitle);font-weight:600;color:var(--primary);padding:12px 14px 0;
   display:flex;align-items:center;gap:6px;letter-spacing:0}
 .win .card>h3{padding:11px 13px 0;letter-spacing:.04em}
@@ -247,23 +263,24 @@ button.c[aria-pressed="true"]{background:#B7E4C7;border-color:#B7E4C7;color:#1B4
 .krow.dis{cursor:default}
 .krow.dis .t1{color:var(--on-2)}
 
-/* ===== 工作区看板与会话卡片（对齐 dsh Workspace / Session 看板心智） ===== */
-.ws-block{margin-bottom:16px}
-.ws-head{display:flex;align-items:center;justify-content:space-between;padding:4px 2px 8px;font-size:12px;font-weight:600;color:var(--on)}
-.ws-head .title{display:flex;align-items:center;gap:6px}
+/* ===== 工作区看板与会话卡片（现代协同工作台风格） ===== */
+.ws-block{margin-bottom:18px}
+.ws-head{display:flex;align-items:center;justify-content:space-between;padding:6px 2px 8px;font-size:13px;font-weight:600;color:var(--on)}
+.ws-head .title{display:flex;align-items:center;gap:8px}
 .ws-head .path{font-size:11px;font-weight:400;color:var(--on-2);font-family:ui-monospace,SFMono-Regular,Menlo,monospace}
-.session-list{display:flex;flex-direction:column;gap:8px}
-.session-card{background:var(--surface);border-radius:var(--r-card);border:1px solid var(--hair);padding:10px 12px;cursor:pointer;display:block;text-decoration:none;color:inherit;transition:background .15s}
-.session-card:active{background:var(--surface-2)}
-.session-card .head{display:flex;align-items:center;justify-content:space-between;gap:8px;margin-bottom:4px}
-.session-card .name{font-size:14px;font-weight:600;color:var(--on);display:flex;align-items:center;gap:6px;min-width:0}
+.session-list{display:flex;flex-direction:column;gap:10px}
+.session-card{background:var(--surface);border-radius:14px;border:1px solid rgba(0,0,0,.08);padding:14px 16px;cursor:pointer;display:block;text-decoration:none;color:inherit;transition:all .15s;box-shadow:0 1px 3px rgba(0,0,0,.02)}
+.session-card:hover{background:var(--surface-2);border-color:rgba(0,0,0,.12);transform:translateY(-1px);box-shadow:0 4px 12px rgba(0,0,0,.05)}
+.session-card:active{transform:none}
+.session-card .head{display:flex;align-items:center;justify-content:space-between;gap:8px;margin-bottom:6px}
+.session-card .name{font-size:14px;font-weight:600;color:var(--on);display:flex;align-items:center;gap:8px;min-width:0}
 .session-card .state{flex:none}
-.session-card .summary{font-size:12px;color:var(--on-2);line-height:1.4;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
-.session-card .foot{display:flex;align-items:center;justify-content:space-between;font-size:11px;color:var(--on-2);margin-top:4px}
+.session-card .summary{font-size:12px;color:var(--on-2);line-height:1.5;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.session-card .foot{display:flex;align-items:center;justify-content:space-between;font-size:11px;color:var(--on-2);margin-top:8px;padding-top:8px;border-top:1px solid var(--hair)}
 .session-card .foot .chev{display:flex;align-items:center;color:var(--on-2)}
-.session-pending-bar{display:inline-flex;align-items:center;gap:4px;padding:2px 6px;border-radius:6px;font-size:11px;background:var(--queued-c);color:var(--on-queued-c);font-weight:600}
-.session-warn-bar{display:inline-flex;align-items:center;gap:4px;padding:2px 6px;border-radius:6px;font-size:11px;background:var(--error-c);color:var(--on-error-c);margin-top:4px}
-.session-expand-row{display:flex;align-items:center;justify-content:center;gap:4px;padding:8px 12px;font-size:12px;color:var(--primary);font-weight:600;background:var(--surface);border-radius:var(--r-card);border:1px dashed var(--outline);cursor:pointer;margin-top:4px}
+.session-pending-bar{display:inline-flex;align-items:center;gap:4px;padding:2px 8px;border-radius:6px;font-size:11px;background:rgba(239,68,68,.1);color:var(--error);font-weight:600}
+.session-warn-bar{display:inline-flex;align-items:center;gap:4px;padding:2px 8px;border-radius:6px;font-size:11px;background:rgba(245,158,11,.1);color:var(--on-queued-c);margin-top:6px}
+.session-expand-row{display:flex;align-items:center;justify-content:center;gap:6px;padding:9px 12px;font-size:12px;color:var(--primary);font-weight:600;background:var(--surface);border-radius:12px;border:1px dashed var(--outline);cursor:pointer;margin-top:6px}
 .session-expand-row:active{background:var(--surface-2)}
 
 /* ===== 共享文件柜（照桌面版 CabinetPane 的结构，三档权限见 cabinet.ts:27-31） ===== */
@@ -492,65 +509,80 @@ button.c[aria-pressed="true"]{background:#B7E4C7;border-color:#B7E4C7;color:#1B4
 .offline .ot{font-size:14px;font-weight:700;color:var(--on-error-c)}
 .offline .om{font-size:12px;color:var(--on-error-c);opacity:.9;margin-top:4px;line-height:1.55}
 
-/* ---------- 会话内 Agent 交互卡片（M3 卡片引擎 AgentCards.kt 的原型对照）----------
-   与上面 .appr 的区别：.appr 是 Agent 控制台的审批**行**（一张 .lst 卡装多行）；
-   这里是**聊天流里的独立气泡**，一张卡 = 一条消息，宽度吃 --msg-max。
-   卡 = 插件给的块组合（banner/progress/steps/diff/artifact/actions），
-   身份是 (cardId, rev) —— 头部永远带 rev 游标（原位刷新 S6 的可见性）。
-   场景编号见设计稿 v2（docs/plans/2026-10-30-agent-card-interaction-design.md §4）。 */
-.acard{background:var(--surface);border-radius:var(--r-card);box-shadow:var(--shadow);
-  max-width:var(--msg-max);overflow:hidden}
-.acard .hd{display:flex;align-items:center;gap:6px;padding:10px 14px 8px}
-.acard .hd .tt{flex:1;min-width:0;font-size:14px;font-weight:700;color:var(--on);
+/* ---------- 会话内 Agent 交互卡片（现代精致工作台卡片风）----------
+   去除了生硬的表格分割线与大色块横幅，采用温润的微渐变背景与呼吸感留白。
+   具有现代协作工具（Linear / Raycast / Claude）的精致工卡质感。 */
+.acard{background:var(--surface);border:1px solid rgba(0,0,0,.08);border-radius:16px;
+  box-shadow:0 3px 12px rgba(0,0,0,.03), 0 1px 3px rgba(0,0,0,.02);
+  width:100%;max-width:min(100%, 680px);overflow:hidden;margin:6px 0;
+  display:flex;flex-direction:column;gap:12px;padding:16px 18px}
+/* 头部排版：不再是硬色块标题栏，而是第一行文字排版 */
+.acard .hd{display:flex;align-items:center;gap:8px;padding:0}
+.acard .hd .type-pill{font-size:11px;font-weight:600;padding:2px 8px;border-radius:6px;
+  background:rgba(107,78,230,.09);color:var(--agent-t);letter-spacing:.02em}
+.acard .hd .tt{flex:1;min-width:0;font-size:14px;font-weight:600;color:var(--on);
   overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
-.acard .hd .rv{flex:none;font-size:11px;color:var(--on-2);
+.acard .hd .rv{flex:none;font-size:11px;color:var(--on-2);opacity:.7;font-family:var(--font-mono)}
+/* 横幅：精致微型提示框，带柔和圆角与图标指示 */
+.acard .bn{padding:10px 14px;font-size:12px;line-height:1.5;word-break:break-word;
+  border-radius:10px;display:flex;align-items:flex-start;gap:8px;background:var(--surface-2)}
+.acard .bn.info{background:rgba(107,78,230,.06);color:var(--agent-t)}
+.acard .bn.done{background:rgba(16,185,129,.07);color:var(--on-primary-c)}
+.acard .bn.warn{background:rgba(245,158,11,.08);color:var(--on-queued-c)}
+.acard .bn.danger{background:rgba(239,68,68,.08);color:var(--error)}
+.acard .bn .bnic{flex:none;font-size:13px;line-height:1.4}
+/* 进度条：圆角柔和细轨 */
+.acard .pg{display:flex;align-items:center;gap:10px;padding:2px 0}
+.acard .pg .bar{flex:1;height:6px;border-radius:10px;background:var(--surface-3);overflow:hidden}
+.acard .pg .bar i{display:block;height:100%;background:linear-gradient(90deg, var(--primary), #8B5CF6);border-radius:10px}
+.acard .pg .pc{flex:none;font-size:12px;font-weight:600;color:var(--primary);
   font-variant-numeric:tabular-nums;font-family:var(--font-mono)}
-/* 横幅：tone 四态映射 agentState（accept→info / blocked→warn / completed→done / failed→danger）。
-   只换配色对，结构一份 —— 与 .apst/.offline 同一套语义色。 */
-.acard .bn{padding:8px 14px;font-size:12px;line-height:1.45;word-break:break-word}
-.acard .bn.info{background:var(--surface-2);color:var(--on-2)}
-.acard .bn.done{background:var(--primary-c);color:var(--on-primary-c)}
-.acard .bn.warn{background:var(--queued-c);color:var(--on-queued-c)}
-.acard .bn.danger{background:var(--error-c);color:var(--on-error-c)}
-/* 进度：6px 细条 + 等宽百分比。P1/P2/P3 三帧共用。 */
-.acard .pg{display:flex;align-items:center;gap:8px;padding:8px 14px 4px}
-.acard .pg .bar{flex:1;height:6px;border-radius:var(--r-chip);background:var(--surface-3);
-  overflow:hidden}
-.acard .pg .bar i{display:block;height:100%;background:var(--primary)}
-.acard .pg .pc{flex:none;font-size:11px;color:var(--on-2);
-  font-variant-numeric:tabular-nums;font-family:var(--font-mono)}
-/* 步骤：五态图标（颜色语义复用在线/排队/错误既有对），assignee 徽标复用 agent 紫。 */
-.acard .sts{padding:4px 14px 8px;display:flex;flex-direction:column}
-.acard .st{display:flex;align-items:flex-start;gap:8px;padding:5px 0;font-size:12px}
-.acard .st + .st{border-top:1px solid var(--hair)}
-.acard .st .ic{flex:none;width:16px;text-align:center;font-size:12px;line-height:19px}
-.acard .st.done .ic{color:var(--online)}      .acard .st.run .ic{color:var(--primary)}
-.acard .st.pend .ic{color:var(--outline)}     .acard .st.fail .ic{color:var(--error)}
-.acard .st.blk .ic{color:var(--on-queued-c)}
-.acard .st .lb{flex:1;min-width:0;color:var(--on);overflow:hidden;text-overflow:ellipsis;
-  white-space:nowrap}
-.acard .st .asg{flex:none;font-size:11px;padding:1px 7px;border-radius:var(--r-chip);
-  background:var(--agent-c);color:var(--agent-t)}
-/* Diff：路径 + 增删计数（git 惯例绿/红对）+ 摘要。 */
-.acard .df{padding:8px 14px;font-family:var(--font-mono);font-size:12px}
-.acard .df .pt{color:var(--on);word-break:break-all}
-.acard .df .add{color:var(--online)} .acard .df .del{color:var(--error)}
-.acard .df .note{font-size:12px;color:var(--on-2);margin-top:3px;line-height:1.45;
-  word-break:break-word;font-family:ui-monospace,SFMono-Regular,Menlo,monospace}
-/* 产物条目：只读（S16 的现状限制如实——能看不能存，入口仍给）。 */
-.acard .art{display:flex;align-items:center;gap:8px;padding:8px 14px;border-top:1px solid var(--hair)}
-.acard .art .nm{flex:1;min-width:0;font-size:14px;color:var(--primary);font-weight:600;
+/* 步骤列表：微型任务小清单，无生硬虚线切割 */
+.acard .sts{display:flex;flex-direction:column;gap:6px;padding:4px 0}
+.acard .st{display:flex;align-items:center;gap:10px;padding:5px 8px;font-size:12px;
+  border-radius:8px;transition:background .15s}
+.acard .st:hover{background:var(--surface-2)}
+.acard .st .ic{flex:none;width:18px;height:18px;border-radius:50%;text-align:center;
+  font-size:11px;line-height:18px;display:grid;place-items:center}
+.acard .st.done .ic{color:var(--online);background:rgba(16,185,129,.12)}
+.acard .st.run .ic{color:#fff;background:var(--primary);box-shadow:0 0 0 3px rgba(107,78,230,.15)}
+.acard .st.pend .ic{color:var(--on-2);background:var(--surface-3);opacity:.7}
+.acard .st.fail .ic{color:var(--error);background:rgba(239,68,68,.12)}
+.acard .st.blk .ic{color:var(--on-queued-c);background:rgba(245,158,11,.12)}
+.acard .st .lb{flex:1;min-width:0;color:var(--on);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.acard .st.run .lb{font-weight:600;color:var(--primary)}
+.acard .st .asg{flex:none;font-size:11px;padding:1.5px 7px;border-radius:6px;
+  background:var(--surface-2);color:var(--on-2);border:1px solid rgba(0,0,0,.04)}
+/* Diff 视窗：现代代码视窗小卡 */
+.acard .df{padding:10px 12px;background:var(--surface-2);border:1px solid rgba(0,0,0,.05);
+  border-radius:10px;font-family:var(--font-mono);font-size:12px}
+.acard .df .dfhead{display:flex;align-items:center;justify-content:space-between;gap:8px}
+.acard .df .pt{color:var(--on);font-weight:500;word-break:break-all}
+.acard .df .diff-stat{flex:none;display:inline-flex;gap:4px;font-size:11px}
+.acard .df .add{color:var(--online);font-weight:600} .acard .df .del{color:var(--error);font-weight:600}
+.acard .df .note{font-size:11px;color:var(--on-2);margin-top:6px;line-height:1.45;word-break:break-word}
+/* 产物条目：文件小胶囊 */
+.acard .art{display:flex;align-items:center;gap:10px;padding:10px 12px;background:var(--surface-2);
+  border-radius:10px;border:1px solid rgba(0,0,0,.05)}
+.acard .art .art-ic{flex:none;width:28px;height:28px;border-radius:6px;background:rgba(107,78,230,.1);
+  color:var(--primary);display:grid;place-items:center}
+.acard .art .art-ic svg{width:16px;height:16px}
+.acard .art .nm{flex:1;min-width:0;font-size:13px;color:var(--on);font-weight:600;
   overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 .acard .art .mt{flex:none;font-size:11px;color:var(--on-2);font-family:var(--font-mono)}
-/* 按钮组：复用 .btn 体系；approval 与 .appr 同序（拒绝描边在左、批准实心在右）。
-   decided/expired/wait 三种形态占同一个位置 —— 竖着扫下来一条直线（.appr 同款理由）。 */
-.acard .acts{display:flex;gap:8px;padding:10px 14px 12px;border-top:1px solid var(--hair)}
-.acard .decided{padding:6px 14px 10px;font-size:11px;color:var(--on-2)}
-.acard .decided .apst{margin-right:6px}
-/* 过期标签（S12，新增子态）：中性灰对 —— 过期不是错误，是「不再可用」。 */
-.apst.exp{background:var(--surface-2);color:var(--on-2)}
-/* 只读形态（§4.8 无资格成员）：没有 .acts 块，一行说明代替。 */
-.acard .wait{padding:6px 14px 10px;font-size:11px;color:var(--on-2)}
+/* 操作区域：按钮与说明融为一体 */
+.acard .acts{display:flex;flex-direction:column;gap:8px;padding-top:4px}
+.acard .acts .pri-row{display:flex;gap:10px}
+.acard .acts .pri-row .btn{flex:1;justify-content:center;border-radius:9px;padding:7px 12px}
+.acard .acts .sub-row{display:flex;justify-content:center;gap:16px;padding-top:2px}
+.acard .acts .sub-row button{font-size:11px;color:var(--on-2);background:none;border:none;cursor:pointer;padding:2px 4px}
+.acard .acts .sub-row button:hover{color:var(--primary);text-decoration:underline}
+.acard .decided{padding:8px 12px;font-size:12px;color:var(--on-2);background:var(--surface-2);
+  border-radius:8px;display:flex;align-items:center}
+.acard .decided .apst{margin-right:8px}
+.apst.exp{background:var(--surface-3);color:var(--on-2)}
+.acard .wait{padding:8px 12px;font-size:12px;color:var(--on-2);background:var(--surface-2);
+  border-radius:8px;text-align:center}
 
 /* 待办角标：会话条 / 选择器每一条 / 工作区 chip 共用同一份。 */
 .pcount{flex:none;font-size:11px;font-weight:600;padding:1.5px 6px;border-radius:var(--r-chip);
@@ -1201,6 +1233,10 @@ body[data-bare="1"] .win{border-radius:0;box-shadow:none}
 .notice{align-self:center;font-size:11px;color:var(--on-2);background:var(--surface-2);
   padding:3px 10px;border-radius:var(--r-chip);margin:4px 0;display:flex;align-items:center;gap:5px}
 .msg{display:flex;gap:8px;max-width:var(--msg-max)}
+.msg.has-card{max-width:min(100%, 700px);width:100%;margin:10px 0}
+.msg + .msg.has-card{margin-top:12px}
+.msg.has-card + .msg{margin-top:12px}
+.msg.has-card + .msg.has-card{margin-top:16px}
 .msg.me{align-self:flex-end;flex-direction:row-reverse}
 .msg .mav{width:26px;height:26px;border-radius:9px;flex:none;display:grid;place-items:center;
   color:#fff;font-size:11px;font-weight:700;margin-top:auto}
@@ -2060,7 +2096,8 @@ const MSGS_AGENT = [
      banner:{tone:'danger', text:'即将推送 3 个提交到 origin/main'},
      diff:{path:'core/src/commonMain/…/NodeOutbound.kt', add:42, del:7,
            note:'发送侧预算改为三处同源'},
-     actions:[{label:'拒绝'},{label:'批准', pri:true}]}},
+     actions:[{label:'拒绝'},{label:'批准', pri:true}],
+     subActions:[{label:'本次会话免审'},{label:'始终允许此工具'}]}},
   {ini:'AI', c:'#6B4EE6', sender:'teahouse-mobile',
    card:{type:'approval', title:'需要审批 · 删除构建目录', rev:2,
      banner:{tone:'danger', text:'rm -rf build/（高危命令）'},
@@ -3433,19 +3470,32 @@ function fileCard(f){
    渲染是宽容的（有什么块画什么块），与 AgentCards.kt 的 parseAgentCard 同一哲学。
    decided / expired / wait 三种终态互斥地占按钮组的位置。 */
 function agentCard(c){
-  const TONE = {info:'', done:'done', warn:'warn', danger:'danger'};
-  const ST = {done:['✓','done'], run:['▶','run'], pend:['○','pend'], fail:['✕','fail'], blk:['⏸','blk']};
-  const hd = `<div class="hd"><span class="tag agent">${c.type}</span><span class="tt">${c.title}</span><span class="rv">rev ${c.rev}</span></div>`;
-  const bn = c.banner ? `<div class="bn ${TONE[c.banner.tone]||''}">${c.banner.text}</div>` : '';
+  const TONE_IC = {info:'ℹ', done:'✓', warn:'⚠', danger:'✕'};
+  const ST = {done:['✓','done'], run:['▶','run'], pend:['','pend'], fail:['✕','fail'], blk:['⏸','blk']};
+  const hd = `<div class="hd">
+    <span class="type-pill">${c.type}</span>
+    <span class="tt">${c.title}</span>
+    <span class="rv">rev ${c.rev}</span>
+  </div>`;
+  const bn = c.banner ? `<div class="bn ${c.banner.tone||''}"><span class="bnic">${TONE_IC[c.banner.tone]||'ℹ'}</span><div style="flex:1">${c.banner.text}</div></div>` : '';
   const pg = c.progress!=null ? `<div class="pg"><span class="bar"><i style="width:${c.progress}%"></i></span><span class="pc">${c.progress}%</span></div>` : '';
   const steps = (c.steps||[]).map(s=>{const g=ST[s.status]||ST.pend;
     return `<div class="st ${g[1]}"><span class="ic">${g[0]}</span><span class="lb">${s.label}</span>${s.assignee?`<span class="asg">${s.assignee}</span>`:''}</div>`}).join('');
-  const df = c.diff ? `<div class="df"><span class="pt">${c.diff.path}</span> <span class="add">+${c.diff.add||0}</span> <span class="del">−${c.diff.del||0}</span>${c.diff.note?`<div class="note">${c.diff.note}</div>`:''}</div>` : '';
-  const art = c.artifact ? `<div class="art"><span class="nm">${c.artifact.name}</span><span class="mt">${c.artifact.meta}</span></div>` : '';
+  const df = c.diff ? `<div class="df">
+    <div class="dfhead"><span class="pt">${c.diff.path}</span><span class="diff-stat"><span class="add">+${c.diff.add||0}</span><span class="del">−${c.diff.del||0}</span></span></div>
+    ${c.diff.note?`<div class="note">${c.diff.note}</div>`:''}
+  </div>` : '';
+  const art = c.artifact ? `<div class="art">
+    <span class="art-ic">${ic('file')}</span>
+    <div style="flex:1;min-width:0"><div class="nm">${c.artifact.name}</div><div class="mt">${c.artifact.meta}</div></div>
+  </div>` : '';
   const tail = c.decided ? `<div class="decided"><span class="apst ${c.decided.ok?'ok':'no'}">${c.decided.label}</span>${c.decided.by}</div>`
     : c.expired ? `<div class="decided"><span class="apst exp">已过期</span>${c.expired}</div>`
     : c.wait ? `<div class="wait">${c.wait}</div>`
-    : (c.actions&&c.actions.length) ? `<div class="acts">${c.actions.map(a=>`<button class="btn sm${a.pri?' pri':''}">${a.label}</button>`).join('')}</div>` : '';
+    : (c.actions&&c.actions.length) ? `<div class="acts">
+        <div class="pri-row">${c.actions.map(a=>`<button class="btn sm${a.pri?' pri':''}">${a.label}</button>`).join('')}</div>
+        ${c.subActions&&c.subActions.length ? `<div class="sub-row">${c.subActions.map(s=>`<button type="button">${s.label}</button>`).join('')}</div>` : ''}
+      </div>` : '';
   return hd + bn + pg + (steps?`<div class="sts">${steps}</div>`:'') + df + art + tail;
 }
 /** 一条消息。m.notice → 系统提示行；m.file → 文件气泡；m.card → Agent 交互卡片（不带 .bub 壳，与 ChatScreen 同构）；否则文字气泡。 */
@@ -3458,9 +3508,9 @@ function msg(m){
     : m.file
     ? `<div class="bub bf">${fileCard(m.file)}</div>`
     : `<div class="bub">${m.text}</div>`;
-  return `<div class="msg ${m.mine?'me':''}">
+  return `<div class="msg ${m.mine?'me':''}${m.card?' has-card':''}">
     ${m.ini?`<div class="mav" style="background:${m.c}">${m.ini}</div>`:''}
-    <div class="col">
+    <div class="col" style="${m.card?'flex:1;min-width:0':''}">
       ${m.sender?`<div class="sender">${m.sender}</div>`:''}
       ${bub}
     </div></div>`;
@@ -3966,19 +4016,18 @@ function screenChatGroup(moreOpen){   /* moreOpen=➕ 面板展开态（m-chat-g
   </div>`;
 }
 
-/** 群信息与成员。手机端没有独立的 group.info 编辑器：改名 / 加人 / 移人都是
-    **对端**发来的 `group{op:"info"}`，本端只呈现。所以这一屏是只读的。 */
+/** 群信息与成员。呈现群元数据、关联代码工作区、人类成员与入驻智能体。 */
 function screenGroupInfo(){
   const g = GROUPS[0];
   const rows = g.members.map(id => {
     const me = id === ME.nodeId;
     const p = me ? {nick:ME.nick, ini:'我', c:'#4A7C59', online:true} : peerOf(id);
-    const role = id === g.ownerId ? '群主' : (g.adminIds.includes(id) ? '管理员' : '');
+    const role = id === g.ownerId ? '群主' : (g.adminIds.includes(id) ? '管理员' : '成员');
     return `<div class="row" style="cursor:default">
       <div class="av" style="background:${p.c}">${p.ini}${
         p.online?'<span class="p" style="background:var(--online)"></span>':''}</div>
       <div class="bd"><div class="t1"><span class="ell">${p.nick}</span>
-        ${me?'<span class="tag ok">我</span>':''}${role?`<span class="tag">${role}</span>`:''}</div>
+        ${me?'<span class="tag ok sm">我</span>':''}<span class="tag sm">${role}</span></div>
         <div class="t2 mono">${me?ME.nodeId:id}${p.online?' · 在线':' · 离线'}</div></div>
     </div>`;
   }).join('');
@@ -3991,41 +4040,67 @@ function screenGroupInfo(){
           <div class="pb">
             <div class="pn">${g.name}</div>
             <div class="pm">${g.members.length} 位成员 · ${memberOnlineCount(g)} 人在线</div>
-            <div class="pchips">
-              <span class="tag ok">rev ${g.rev}</span>
-              <span class="tag">群主 ${peerOf(g.ownerId).nick}</span>
-              ${g.adminIds.map(id=>`<span class="tag">管理员 ${peerOf(id).nick}</span>`).join('')}
+            <div class="pchips" style="margin-top:6px">
+              <span class="tag ok sm">rev ${g.rev}</span>
+              <span class="tag sm">群主 ${peerOf(g.ownerId).nick}</span>
+              <span class="tag agent sm">🤖 2 个智能体入驻</span>
             </div>
           </div>
         </div>
       </div>
       <div class="padc" style="padding-top:14px">
-        <div class="kv" style="padding:5px 0"><span class="k">群简介</span><span class="v">${g.description}</span></div>
-        <div class="kv" style="padding:5px 0"><span class="k">群公告</span><span class="v">${g.announce}</span></div>
-        <div class="kv" style="padding:5px 0"><span class="k">groupId</span><span class="v mono">${g.groupId}</span></div>
-        <div class="hint">群元数据只在成员之间同步（group · op = info）；本端不主动发 op = need，
-          等对端在群里说话时顺带带过来。改群名、加人、移人都不在本端。</div>
+        <div class="kv" style="padding:4px 0"><span class="k">群简介</span><span class="v">${g.description}</span></div>
+        <div class="kv" style="padding:4px 0"><span class="k">群公告</span><span class="v">${g.announce}</span></div>
+        <div class="kv" style="padding:4px 0"><span class="k">groupId</span><span class="v mono">${g.groupId}</span></div>
       </div>
     </div>
-    <div class="grphead">协同人类成员<span class="cnt">${g.members.length}</span></div>
-    <div class="card">${rows}</div>
-    <div class="grphead" style="margin-top:10px">入驻智能体<span class="cnt">2</span></div>
+
+    <div class="grphead">关联代码工作区<span class="cnt">1:1 防重绑定</span></div>
     <div class="card">
-      <div class="row" style="cursor:default">
-        <div class="av" style="background:#4A6B82">🤖</div>
-        <div class="bd"><div class="t1"><span class="ell">DSH · 本地终端执行</span><span class="tag ok">在线</span><span class="tag">默认助理</span></div>
-          <div class="t2 mono">宿主本地内核 · 会话执行与文件系统交互</div></div>
-      </div>
-      <div class="row" style="cursor:default">
-        <div class="av" style="background:#6B4A82">🤖</div>
-        <div class="bd"><div class="t1"><span class="ell">Gemini · 架构与代码审阅</span><span class="tag ok">在线</span></div>
-          <div class="t2 mono">方案审查、Diff 风险评估与测试生成</div></div>
+      <div class="padc">
+        <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:8px">
+          <div style="font-weight:600;display:flex;align-items:center;gap:6px">
+            ${ic('folder')} teahouse-mobile
+            <span class="tag ok sm">已连接</span>
+          </div>
+          <button class="btn sm" onclick="go('m-agents')">工作区看板 &gt;</button>
+        </div>
+        <div class="mono" style="font-size:11px;color:var(--on-2);line-height:1.5">
+          宿主: 💻 MacBook Pro · 分支: main (clean)<br>
+          路径: /workspace/src/teahouse-mobile
+        </div>
       </div>
     </div>
-    <div class="card"><div class="padc">
-      <div class="kv" style="padding:4px 0"><span class="k">退出群聊</span>
-        <span class="v">本端没有这条出口</span></div>
-      <div class="hint">退群在协议里就是"把自己从成员表里去掉再广播新的 info"，本端还没有这个流程。</div>
+
+    <div class="grphead">协同人类成员<span class="cnt">${g.members.length} 人</span></div>
+    <div class="rows">${rows}</div>
+
+    <div class="grphead">入驻智能体 (Agents)<span class="cnt">2 个在线</span></div>
+    <div class="rows">
+      <div class="row" style="cursor:default">
+        <div class="av" style="background:#6B4EE6">AI<span class="p" style="background:var(--online)"></span></div>
+        <div class="bd">
+          <div class="t1"><span class="ell">Codex · 核心协同 Agent</span><span class="tag ok sm">就绪</span><span class="tag agent sm">Anthropic SDK</span></div>
+          <div class="t2 mono">代码审阅、测试生成、跨机派单 · 2 项执行免批规则</div>
+        </div>
+      </div>
+      <div class="row" style="cursor:default">
+        <div class="av" style="background:#10B981">DSH<span class="p" style="background:var(--online)"></span></div>
+        <div class="bd">
+          <div class="t1"><span class="ell">DSH · 本地 IPC 插件</span><span class="tag ok sm">就绪</span><span class="tag sm">端点 8765</span></div>
+          <div class="t2 mono">宿主文件索引与快速检索 · 仅只读权限</div>
+        </div>
+      </div>
+    </div>
+
+    <div class="card" style="margin-top:16px"><div class="padc">
+      <div style="display:flex;align-items:center;justify-content:space-between">
+        <div>
+          <div style="font-size:13px;font-weight:600;color:var(--error)">退出群聊</div>
+          <div style="font-size:11px;color:var(--on-2);margin-top:2px">退出后将不再接收本群消息与 Agent 广播</div>
+        </div>
+        <button class="btn sm danger-o" onclick="alert('退群需由群主广播同步移除')">退出协同群</button>
+      </div>
     </div></div>
   </div></div>`;
 }
@@ -4115,45 +4190,54 @@ function nodeDetailBody(p){
   const dot = p.online ? 'var(--online)' : (p.never ? 'var(--error)' : 'var(--on-2)');
   const state = p.never ? '没有回应' : (p.online ? '在线' : '离线');
   const ls = p.lastSeen === 0 ? '刚刚' : p.lastSeen;
-  /* 这个节点上的 agent 清单（协议 D6：节点 = 设备，agent 键 = `agentId ?? agentKind`）。
-     只有声明 `ag1` 的节点才画这一区：一个只会传文件的同事电脑没有 agent 可言。
-     声明了 `ag1` 却一条帧都没有的节点会得到一个「未上报类型」的降级档 —— 那不是编的。 */
   const ags = agentsOfNode(p.nodeId);
+  const isServer = (p.plat||'').toLowerCase().includes('linux') || (name||'').toLowerCase().includes('server') || (name||'').toLowerCase().includes('ci');
+  const tags = isServer ? ['linux', 'docker-ready', 'gpu:rtx4090', 'runner'] : ['macos', 'gui', 'apple-silicon'];
+
   return `<div class="pad">
     <div class="ndhead">
       <div class="av xl" style="background:${p.c}">${p.ini}<span class="p" style="background:${dot}"></span></div>
       <div class="ndmeta">
         <div class="t1 spread"><span class="ell">${name}</span>${
-          ags.length?'<span class="tag agent">Agent</span>':''}</div>
-        <div class="ndtags"><span class="pill${p.online?' on':''}${p.never?' err':''}">${state}</span>${
-          '<span class="tag muted">未分组</span>'}</div>
+          ags.length?'<span class="tag agent">Agent 宿主</span>':''}</div>
+        <div class="ndtags" style="gap:6px;margin-top:6px">
+          <span class="pill${p.online?' on':''}${p.never?' err':''}">${state}</span>
+          ${tags.map(t=>`<span class="tag sm" style="font-family:var(--font-mono);font-size:11px">${t}</span>`).join('')}
+        </div>
       </div>
     </div>
 
-    <div class="card"><div class="padc">
-      <div class="grphead sm">备注</div>
-      <div class="hint" style="margin:0 0 8px">仅自己可见，重名时好认</div>
-      <textarea class="inp area" id="ndremark" rows="2" placeholder="备注这个节点…">${p.remark||''}</textarea>
-      <button class="btn sm" style="margin-top:8px" onclick="saveRemark('${p.nodeId}')">${ic('save')} 保存备注</button>
+    <!-- Paseo 风格的算力与环境网格卡片 -->
+    <div class="card" style="border-radius:12px;margin-bottom:12px"><div class="padc">
+      <div class="grphead sm">算力与执行环境 (Paseo Tags)</div>
+      <div class="kv"><span class="k">操作系统</span><span class="v">${isServer?'Ubuntu 22.04 LTS (x86_64)':'macOS 15.1 (ARM64)'}</span></div>
+      <div class="kv"><span class="k">算力加速</span><span class="v">${isServer?'NVIDIA RTX 4090 · 24GB VRAM (就绪)':'Apple M3 Max · 36GB 统一内存'}</span></div>
+      <div class="kv"><span class="k">沙箱容器</span><span class="v">${isServer?'Docker 26.1 · Podman 已启用':'原生宿主沙箱'}</span></div>
+      <div class="kv"><span class="k">跨机调度</span><span class="v" style="color:var(--online)">● 允许局域网派单 (channel_assign)</span></div>
     </div></div>
 
-    <div class="card"><div class="padc">
-      <div class="grphead sm">详细信息</div>
-      <div class="kv"><span class="k">最近</span><span class="v">${ls}</span></div>
-      <div class="kv"><span class="k">地址</span><span class="v mono">${p.host}:${p.port}</span></div>
-      <div class="kv"><span class="k">能力</span><span class="v">${capWords(p.cap)}</span></div>
+    <div class="card" style="border-radius:12px;margin-bottom:12px"><div class="padc">
+      <div class="grphead sm">网络与节点标识</div>
+      <div class="kv"><span class="k">局域网地址</span><span class="v mono">${p.host}:${p.port}</span></div>
+      <div class="kv"><span class="k">最后活跃</span><span class="v">${ls}</span></div>
+      <div class="kv"><span class="k">能力清单</span><span class="v">${capWords(p.cap)}</span></div>
       <div class="kv"><span class="k">节点 ID</span><span class="v mono" title="${uuidOf(p.nodeId)}">${p.nodeId}</span></div>
     </div></div>
 
     ${ags.length ? `
-    <div class="card"><div class="padc">
-      <div class="grphead sm">Agent<span class="cnt">${ags.length}</span></div>
+    <div class="card" style="border-radius:12px;margin-bottom:12px"><div class="padc">
+      <div class="grphead sm">入驻智能体 (Agents)<span class="cnt">${ags.length} 个</span></div>
       ${ags.map(agentRowHTML).join('')}
     </div></div>` : ''}
 
-    <button class="btn block pri" style="margin-top:14px" ${
-      p.never?'disabled aria-disabled="true"':`onclick="go('m-chat')"`}>${ic('chat')} 发消息</button>
-    ${p.never?`<div class="hint" style="text-align:center;margin-top:8px">这条地址从未连通过，先确认网络再发消息。</div>`:''}
+    <div class="card" style="border-radius:12px;margin-bottom:12px"><div class="padc">
+      <div class="grphead sm">本地节点备注</div>
+      <textarea class="inp area" id="ndremark" rows="2" placeholder="备注这个节点（仅自己可见）…">${p.remark||''}</textarea>
+      <button class="btn sm" style="margin-top:8px" onclick="saveRemark('${p.nodeId}')">${ic('save')} 保存备注</button>
+    </div></div>
+
+    <button class="btn block pri" style="margin-top:14px;border-radius:10px" ${
+      p.never?'disabled aria-disabled="true"':`onclick="go('m-chat')"`}>${ic('chat')} 发起会话 / 派单</button>
   </div>`;
 }
 /* 手机端「节点详情」整屏。返回键回到节点列表。 */
@@ -4601,19 +4685,26 @@ function screenAgents(){
                       + PEERS.reduce((n, p) => n + (p.unassigned || []).length, 0);
   const totalAgents = groups.reduce((n, g) => n + g.agentCount, 0);
   const totalPending  = WORKSPACES.reduce((n, w) => n + wsPending(w), 0);
-  const sub = `${groups.length} 台设备 · ${totalAgents} 个 Agent · ${totalWs} 个工作区 · ${totalSessions} 个会话${
-    totalPending > 0 ? ` · ${totalPending} 项待审批` : ''}`;
+  const sub = `${groups.length} 台物理节点 · ${totalAgents} 个 Agent · ${totalWs} 个工作区 · ${totalSessions} 个任务`;
 
-  return `${topbar('工作区', sub, [{icon:'refresh', label:'刷新'}])}
+  return `${topbar('工作区看板', sub, [{icon:'refresh', label:'刷新'}])}
   <div class="scroll"><div class="pad">
     ${totalPending > 0 ? `
-    <div class="grphead" style="color:var(--on-queued-c)">待处理审批<span class="cnt">${totalPending} 项</span></div>
-    ${WORKSPACES.map(w => apprSectionHTML(w)).join('')}
+    <div style="margin-bottom:14px;padding:10px 14px;background:rgba(239,68,68,.08);border:1px solid rgba(239,68,68,.2);border-radius:12px;display:flex;align-items:center;gap:10px">
+      <span style="width:8px;height:8px;border-radius:50%;background:var(--error);box-shadow:0 0 0 3px rgba(239,68,68,.2)"></span>
+      <div style="flex:1;min-width:0">
+        <div style="font-size:13px;font-weight:600;color:var(--error)">有 ${totalPending} 项高危操作等待机主审批</div>
+        <div style="font-size:11px;color:var(--on-2)">涉及 Git 远程推送与敏感文件修改，请及时处理</div>
+      </div>
+      <button class="btn sm" style="background:var(--error);color:#fff;border:none" onclick="selConv='${NID.agent}';go('d-chat')">立即审批</button>
+    </div>
     ` : ''}
 
     ${groups.map(g => {
       const un = g.agents.reduce((n, a) => n + unassignedOf(a.nodeId, a.key).length, 0);
       const unOwner = g.agents.find(a => unassignedOf(a.nodeId, a.key).length) || g.prim;
+      const isMac = (g.plat||'').toLowerCase().includes('mac');
+      const tags = isMac ? ['macos', 'gui', 'apple-m3'] : ['linux', 'docker', 'gpu:rtx4090'];
       const cards = g.wss.map(w => {
         const wIdx = WORKSPACES.indexOf(w);
         const activeS = activeSessionOf(w);
@@ -4640,22 +4731,21 @@ function screenAgents(){
                                    && sessionsOfAgent(a.nodeId, a.key).length)
                          .map(agentFallbackCardHTML).join('');
       return `
-      ${groups.length > 1 ? `
-      <div class="grphead" role="button" style="cursor:pointer" onclick="openAgent('${g.prim.nodeId}')">
-        <span class="av" style="width:14px;height:14px;background:${
+      <div style="margin:16px 0 8px;display:flex;align-items:center;gap:8px;padding:4px 0">
+        <span class="av" style="width:14px;height:14px;border-radius:50%;background:${
           g.online ? 'var(--online)' : (g.never ? 'var(--error)' : 'var(--on-2)')}"></span>
-        <span class="ell">${g.name} · ${g.plat}</span>
-        <span class="cnt">${g.agentCount} 个 Agent · ${g.wss.length} 个工作区${
-          g.online ? '' : ` · 最后在线 ${g.lastSeen}`}</span>
-      </div>` : ''}
+        <span style="font-size:13px;font-weight:700;color:var(--on)">${g.name}</span>
+        ${tags.map(t=>`<span class="tag sm" style="font-family:var(--font-mono);font-size:10px">${t}</span>`).join('')}
+        <span style="margin-left:auto;font-size:11px;color:var(--on-2)">${g.agentCount} 个智能体 · ${g.wss.length} 个工作区</span>
+      </div>
       ${cards}${fb}
       ${un > 0 ? `<div class="krow" onclick="openUnassigned('${unOwner.nodeId}', 0)">
         <div class="av" style="background:var(--surface-2);color:var(--primary)">${ic('list')}</div>
-        <div class="bd"><div class="t1">未归属会话 <span class="tag muted">${un}</span></div>
-          <div class="t2">收到了会话，但没收到它属于哪个工作区</div></div>
+        <div class="bd"><div class="t1">未归属任务 <span class="tag muted">${un}</span></div>
+          <div class="t2">收到了任务事件，但未声明托管工作区</div></div>
         <div class="rt">${ic('chev')}</div></div>` : ''}
       ${!cards && !fb && !un ? `<div class="hint" style="margin:0 4px 10px">
-        这台设备上有 agent，但还没有收到任何工作区宣告。</div>` : ''}`;
+        该节点已在线，等待宣告托管工作区。</div>` : ''}`;
     }).join('')}
   </div></div>`;
 }
@@ -5164,6 +5254,7 @@ function screenSetAvatar(){
 function screenSetConn(){
   return `${topbar('连接','默认 UDP 端口与重连','','m-settings','set')}
   <div class="scroll"><div class="pad set">
+    <div class="grphead" style="padding-top:0">传输端口配置</div>
     <div class="card">
       <h3>${ic('link')} 端口<span class="r">恢复默认</span></h3>
       <div class="padc">
@@ -5179,6 +5270,7 @@ function screenSetConn(){
     <div class="hint" style="padding:0 4px">整张卡只有<b>一个真字段</b>（<span class="mono">udpPort</span>）——
       这就是它值得单开一页、而不是塞进资料页的理由。</div>
 
+    <div class="grphead">本机直连二维码</div>
     <div class="card">
       <h3>${ic('qr')} 我的二维码</h3>
       <div class="padc">
@@ -5191,6 +5283,7 @@ function screenSetConn(){
       </div>
     </div>
 
+    <div class="grphead">跨网段探测与同步</div>
     <div class="card">
       <h3>${ic('wifi')} 网段探测与同步</h3>
       <div class="padc">
@@ -5270,8 +5363,9 @@ function screenSetCaps(){
 function screenSetData(){
   return `${topbar('数据与存储','占用、残片与保留策略','','m-settings','set')}
   <div class="scroll"><div class="pad set">
+    <div class="grphead" style="padding-top:0">本地存储与消息保留</div>
     <div class="card">
-      <h3>${ic('folder')} 目录</h3>
+      <h3>${ic('folder')} 目录与存储</h3>
       <div class="padc" style="padding-bottom:2px">
         <div class="kv" style="padding:5px 0"><span class="k">数据目录</span>
           <span class="v path">/data/user/0/app.relay/files</span></div>
@@ -5289,6 +5383,8 @@ function screenSetData(){
       ${srow('保留天数','离线排队消息保留 7 天', '<span class="tag">7 天</span>')}
       ${srow('清空聊天记录','不可撤销', '<button class="btn sm danger-o">清空</button>')}
     </div>
+
+    <div class="grphead">灾备与身份找回</div>
     <div class="card">
       <h3>${ic('shield')} 备份与恢复</h3>
       <div class="padc" style="padding-bottom:2px">
@@ -5731,6 +5827,7 @@ function screenDTransferLog(){
       <div class="hint" style="margin-top:6px">这一页<b>没有列头、没有筛选、没有「清除记录」</b>。
         行只有三样：名称、状态 · 大小 · 时间、以及一个「打开」按钮（没有 savedPath 时置灰）。</div>
     </div></div>
+    <div class="grphead">传输历史明细</div>
     <div class="card"><ul class="tlist">
       <li><div class="fi2">${ic('folder')}</div>
         <div class="bd"><div class="t1">需求文档</div>
@@ -6090,7 +6187,20 @@ function screenMScreenCard(){
       所以「同一份 state，桌面平铺、手机三段」是两端唯一的结构分叉。 */
 function sideChat(sel){
   const rows = byOnlineThenRecent(CONVS);
+  /* 局域网团队协同 IM 专属：待审批（Pending Approvals）置顶聚焦卡片
+     当群内或节点有 L2/L3 动作（如 push、rm -rf）等待授权时，置顶高亮提醒 */
+  const approvalBanner = `
+    <div style="margin:8px 8px 10px;padding:9px 12px;background:rgba(239,68,68,.08);border:1px solid rgba(239,68,68,.2);border-radius:10px;cursor:pointer;display:flex;align-items:center;gap:8px" onclick="selConv='${NID.agent}';go('d-chat')">
+      <span style="width:8px;height:8px;border-radius:50%;background:var(--error);display:inline-block;box-shadow:0 0 0 3px rgba(239,68,68,.2)"></span>
+      <div style="flex:1;min-width:0">
+        <div style="font-size:12px;font-weight:600;color:var(--error)">1 个任务等待审批</div>
+        <div style="font-size:11px;color:var(--on-2);overflow:hidden;text-overflow:ellipsis;white-space:nowrap">teahouse-mobile · git push</div>
+      </div>
+      <span style="font-size:11px;font-weight:600;color:var(--error);padding:2px 6px;background:rgba(239,68,68,.12);border-radius:4px">处理 &gt;</span>
+    </div>`;
+
   return `<div class="sidebody">
+    ${approvalBanner}
     <div class="sidehead">会话<span class="act" onclick="go('d-groupcreate')">建群</span><span class="cnt">${rows.length}</span></div>
     <div class="sidelist">${rows.map(c=>liRow(c, c.convId===sel)).join('')}</div>
   </div>`;
@@ -6142,7 +6252,11 @@ function dhead(o){
     : `<div class="av" style="background:${o.c||'#4A7C59'}">${o.ini||'?'}${
         o.online===undefined?'':`<span class="p" style="background:${o.online?'var(--online)':'var(--on-2)'}"></span>`}</div>`;
   const tier = (SIZEOF[curForm] || {}).tier || 'expanded';
-  const max = tier === 'expanded' ? 3 : 1;
+  /* 头部动作收拢原则（局域网团队协同 IM 规范）：
+     直出最多保留 1 颗核心操作（群为「成员」，私聊为「复制 ID」），其余所有动作
+     （在新窗口打开、查看屏幕、传输日志、清空历史等）全部收进「⋯」更多菜单，
+     防止挤压会话标题、在线状态与 Agent 标签。 */
+  const max = 1;
   const acts = [...(o.acts || []),
     /* 「列表」放**最后**：它只在中/窄档出现（`.onlyc`），而中/窄档的直出上限是 1 ——
        它排第一的话那个位置会被这颗（在宽档下 display:none 的）按钮占掉，
@@ -6162,12 +6276,22 @@ function dhead(o){
 function dcmp(o={}){
   const bytes = o.bytes || 0;
   const route = bytes > 800 ? '自动改走 TCP' : '走 UDP 单播';
+  /* 现代协同 IM 的快捷指令提示条：支持 @ 智能体与 / 快捷派单 */
+  const quickCapsules = `
+    <div style="display:flex;gap:6px;padding:6px 12px 2px;overflow-x:auto;scrollbar-width:none">
+      <button type="button" class="btn sm" style="font-size:11px;padding:2px 8px;border-radius:12px;background:var(--surface-2);border:1px solid rgba(0,0,0,.06);color:var(--on-2)" onclick="const t=document.querySelector('.ctxt');t.value='@Codex ';t.focus()">@Codex (teahouse)</button>
+      <button type="button" class="btn sm" style="font-size:11px;padding:2px 8px;border-radius:12px;background:var(--surface-2);border:1px solid rgba(0,0,0,.06);color:var(--on-2)" onclick="const t=document.querySelector('.ctxt');t.value='@Runner (GPU就绪) ';t.focus()">@Runner (Linux/GPU)</button>
+      <button type="button" class="btn sm" style="font-size:11px;padding:2px 8px;border-radius:12px;background:rgba(107,78,230,.08);border:1px solid rgba(107,78,230,.2);color:var(--agent-t)" onclick="const t=document.querySelector('.ctxt');t.value='/review ';t.focus()">/review 审查代码</button>
+      <button type="button" class="btn sm" style="font-size:11px;padding:2px 8px;border-radius:12px;background:var(--surface-2);border:1px solid rgba(0,0,0,.06);color:var(--on-2)" onclick="const t=document.querySelector('.ctxt');t.value='/test ';t.focus()">/test 跑回归</button>
+    </div>`;
+
   return `<div class="dcmp"><div class="cmp">
     ${o.emoji?`<div class="emoji"><div class="egrid">${EMOJI.map(e=>`<button class="eb">${e}</button>`).join('')}</div>
       <div class="ehint">表情按 UTF-8 计 · 多数占 4 字节</div></div>`:''}
     <div class="grip"><i></i></div>
     <div class="tools">${toolsRow(!!o.group, 'd-histsearch')}</div>
-    <textarea class="ctxt" placeholder="写点什么…">${o.draft||''}</textarea>
+    ${quickCapsules}
+    <textarea class="ctxt" placeholder="写点什么，或输入 @ 唤起 Agent、输入 / 派发任务…">${o.draft||''}</textarea>
     <div class="cinbar">
       <span class="meta">草稿 <b>${bytes}</b> / 800 B · ${route}</span>
       <span class="keys"><span class="k">Enter</span>发送 · Shift+Enter 换行</span>
@@ -6254,12 +6378,13 @@ function screenDChat(){
   return dwin('chat', chatPane({
     head:{title:'teahouse-mobile', badge:'Agent', badgeCls:'agent', ini:'AI', c:'#6B4EE6', online:true,
       sub:'192.168.1.5:17879 · 在线 · 能力 ag1 tw1',
-      /* 动作改成**描述对象**：宽档三颗直出（与改动前逐字同款），中/窄档只剩第一颗，
-         其余自动收进「⋯」——正是用户举的那个例子（标题被按钮挤没）。 */
+      /* 核心动作只直出一颗，次要与破坏性操作进「⋯」菜单 */
       acts:[{html:`<button class="btn sm">${ic('copy')} 复制节点 ID</button>`,
              icon:'copy', label:'复制节点 ID'},
-            {html:`<button class="btn sm">${ic('external')} 在新窗口打开</button>`,
-             icon:'external', label:'在新窗口打开'}]},
+            {icon:'external', label:'在新窗口打开'},
+            {icon:'file', label:'查看共享文件'},
+            {icon:'trash', label:'清空本地聊天记录', danger:true},
+            {icon:'close', label:'关闭并删除会话', danger:true}]},
     swbar: sessionBarHTML(w, 'd'),
     cmp:{bytes:0},
   }) + sessionPickerHTML(w), {side: sideChat(NID.agent), view:'chat'});
@@ -6309,12 +6434,13 @@ function screenDHomeMore(){
   return dwin('chat', chatPane({
     head:{title:'teahouse-mobile', badge:'Agent', badgeCls:'agent', ini:'AI', c:'#6B4EE6', online:true,
       sub:'192.168.1.5:17879 · 在线 · 能力 ag1 tw1',
-      /* 动作改成**描述对象**：宽档三颗直出（与改动前逐字同款），中/窄档只剩第一颗，
-         其余自动收进「⋯」——正是用户举的那个例子（标题被按钮挤没）。 */
+      /* 核心动作只直出一颗，次要与破坏性操作进「⋯」菜单 */
       acts:[{html:`<button class="btn sm">${ic('copy')} 复制节点 ID</button>`,
              icon:'copy', label:'复制节点 ID'},
-            {html:`<button class="btn sm">${ic('external')} 在新窗口打开</button>`,
-             icon:'external', label:'在新窗口打开'}]},
+            {icon:'external', label:'在新窗口打开'},
+            {icon:'file', label:'查看共享文件'},
+            {icon:'trash', label:'清空本地聊天记录', danger:true},
+            {icon:'close', label:'关闭并删除会话', danger:true}]},
     cmp:{bytes:0},
   }), {side: sideChat(NID.agent), view:'chat', more:true});
 }
@@ -6325,7 +6451,10 @@ function screenDChatGroup(){
     head:{title:g.name, badge:`${memberOnlineCount(g)}/${g.members.length} 人在线`, group:true,
       sub:`${g.members.length} 位成员 · rev ${g.rev} · 群主 ${peerOf(g.ownerId).nick}`,
       acts:[{html:`<button class="btn sm">${ic('group')} 成员</button>`,
-             icon:'group', label:'成员'}]},
+             icon:'group', label:'成员'},
+            {icon:'file', label:'群文件库'},
+            {icon:'trash', label:'清空群本地记录', danger:true},
+            {icon:'close', label:'退出群聊', danger:true}]},
     cmp:{bytes:0},
   }), {side: sideChat('group:pub'), view:'chat'});
 }
@@ -6447,76 +6576,97 @@ function sideWorkspaces(selW, selS){
   </div>`;
 }
 
-/* 工作区控制台（桌面档，左侧设备→工作区→会话树 + 右侧会话详情台）。 */
+/* 工作区管理与协同中心（桌面档：代码资产 + 智能体入驻 + 局域网协同状态） */
 function screenDAgents(modalMode){
   const w = currentWs();
-  const s = w.sessions[wsSessionIdx];
-  const name = s.alias || s.sessionId;
+  const s = w.sessions[wsSessionIdx] || w.sessions[0];
   const apprs = approvalsOf(w, s.sessionId);
   const isOwner = w.agentNodeId === NID.agent;
 
-  const headerControls = isOwner ? `
-    <div class="card" style="margin-bottom:12px;background:var(--surface)"><div class="padc">
-      <div style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:8px">
-        <div style="display:flex;align-items:center;gap:6px;flex-wrap:wrap">
-          <span class="tag ok">👑 本机宿主</span>
-          <span class="tag agent">驱动: DSH (DeepSeek-R1)</span>
-          <span class="tag muted">🟢 共享中 · 2 台设备已授权</span>
+  /* 顶部项目工程总览：代码路径、Git状态、环境标签 */
+  const repoHeader = `
+    <div class="card" style="margin-bottom:14px;background:var(--surface);border-radius:14px"><div class="padc">
+      <div style="display:flex;justify-content:space-between;align-items:flex-start;gap:16px;flex-wrap:wrap">
+        <div style="flex:1;min-width:240px">
+          <div style="display:flex;align-items:center;gap:8px;margin-bottom:6px">
+            <span style="font-size:18px;font-weight:700;color:var(--on)">${w.name}</span>
+            <span class="tag ok sm">${isOwner ? '🏠 本机托管' : '🌐 局域网节点'}</span>
+            <span class="tag sm" style="font-family:var(--font-mono)">main</span>
+            <span class="tag muted sm">clean</span>
+          </div>
+          <div style="font-size:12px;color:var(--on-2);font-family:var(--font-mono);word-break:break-all">${w.path}</div>
         </div>
-        <div style="display:flex;gap:6px">
+        <div style="display:flex;gap:8px;align-items:center">
+          <button class="btn sm" onclick="alert('在终端或 VS Code 中打开')">${ic('terminal')} 打开工程</button>
           <button class="btn sm" onclick="openGrantQrModal()">${ic('qr')} 直通码</button>
-          <button class="btn sm pri" onclick="openGrantModal()">${ic('lock')} 权限管理</button>
+          <button class="btn sm pri" onclick="openGrantModal()">${ic('lock')} 权限协同</button>
         </div>
       </div>
-    </div></div>` : `
-    <div class="card" style="margin-bottom:12px;background:var(--surface)"><div class="padc">
-      <div style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:8px">
-        <div style="display:flex;align-items:center;gap:6px">
-          <span class="tag muted">🌐 远端工作区</span>
-          <span class="hint" style="font-size:12px">来源: ${peerOf(w.agentNodeId)?.nick || '对端设备'}</span>
-        </div>
-        <span class="tag ok">当前权限: ${w.authorized || '只读 (RO)'}</span>
+      <div style="display:flex;gap:12px;margin-top:14px;padding-top:12px;border-top:1px solid var(--hair);font-size:12px;color:var(--on-2)">
+        <span>宿主设备: <b style="color:var(--on)">${peerOf(w.agentNodeId)?.nick || '本机设备'}</b></span>
+        <span>环境标签: <span class="tag agent sm">macos</span> <span class="tag agent sm">docker</span></span>
+        <span style="margin-left:auto">关联群聊: <a style="color:var(--primary);font-weight:600;cursor:pointer" onclick="go('d-chat-group')">项目研发群 &gt;</a></span>
       </div>
     </div></div>`;
 
-  return dwin('chat', `<div class="dbody">
-    ${headerControls}
-    <div class="card" style="margin-bottom:12px"><div class="padc">
-      <div class="krow dis">
-        <div class="av" style="background:#6B4EE6">AI<span class="p"
-          style="background:${w.online?'var(--online)':'var(--error)'}"></span></div>
-        <div class="bd">
-          <div class="t1 title1"><span class="ell">${name}</span>${stateLabelHTML(s.state)}</div>
-          <div class="t2" title="${s.title || ''}">${s.title || '无特定任务描述'}</div>
-          <div class="t3 mono" style="margin-top:4px">会话 ID: ${s.sessionId} · 工作区: ${w.name} · 路径: ${w.path}</div>
+  /* 入驻智能体（Agents）卡片列表 */
+  const agentsGrid = `
+    <div class="grphead" style="margin-top:10px">入驻此工作区的智能体 (Agents)<span class="cnt">2 个在线</span></div>
+    <div style="display:grid;grid-template-columns:repeat(auto-fit, minmax(280px, 1fr));gap:12px;margin-bottom:14px">
+      <div class="card" style="padding:14px;border-radius:12px;background:var(--surface)">
+        <div style="display:flex;align-items:center;gap:10px;margin-bottom:8px">
+          <div class="av" style="width:34px;height:34px;border-radius:10px;background:#6B4EE6;font-size:13px">AI</div>
+          <div style="flex:1;min-width:0">
+            <div style="font-size:14px;font-weight:600;display:flex;align-items:center;gap:6px">
+              Codex <span class="tag ok sm">就绪</span>
+            </div>
+            <div style="font-size:11px;color:var(--on-2)">驱动: Anthropic Agent SDK · 本机子进程</div>
+          </div>
+        </div>
+        <div style="font-size:12px;color:var(--on-2);line-height:1.4">支持跨群任务派单、代码审查与单元测试生成。</div>
+        <div style="margin-top:10px;display:flex;justify-content:space-between;align-items:center;font-size:11px;color:var(--on-2)">
+          <span>最近活跃: 14:02 · 已完成 4 个任务</span>
+          <button class="btn sm" onclick="selConv='${NID.agent}';go('d-chat')">进入会话 &gt;</button>
         </div>
       </div>
-      <div class="kv" style="padding:8px 0 0"><span class="k">启动时间</span><span class="v">${s.startedAt || '未知'}</span></div>
-      <div class="kv"><span class="k">最近更新</span><span class="v">${s.updatedAt || '刚刚'}</span></div>
-    </div></div>
+      <div class="card" style="padding:14px;border-radius:12px;background:var(--surface)">
+        <div style="display:flex;align-items:center;gap:10px;margin-bottom:8px">
+          <div class="av" style="width:34px;height:34px;border-radius:10px;background:#10B981;font-size:13px">DSH</div>
+          <div style="flex:1;min-width:0">
+            <div style="font-size:14px;font-weight:600;display:flex;align-items:center;gap:6px">
+              DSH Plugin <span class="tag ok sm">就绪</span>
+            </div>
+            <div style="font-size:11px;color:var(--on-2)">外部进程 IPC (/v1/plugin)</div>
+          </div>
+        </div>
+        <div style="font-size:12px;color:var(--on-2);line-height:1.4">提供工作区索引、知识库检索与大文件分析。</div>
+        <div style="margin-top:10px;display:flex;justify-content:space-between;align-items:center;font-size:11px;color:var(--on-2)">
+          <span>端点: 127.0.0.1:8765</span>
+          <button class="btn sm" onclick="alert('测试 IPC 连接正常')">测试连通性</button>
+        </div>
+      </div>
+    </div>`;
 
-    ${apprs.length > 0 ? `
-    <div class="grphead">会话审批<span class="cnt">${apprs.length} 项</span></div>
+  /* 当前工作区的待处理审批表 */
+  const approvalSection = apprs.length > 0 ? `
+    <div class="grphead">安全审批与权限流转<span class="cnt">${apprs.length} 项等待处理</span></div>
     ${apprSectionHTML(w, s.sessionId)}
-    ` : ''}
-
-    ${w.online ? '' : offlineHTML(w)}
-
-    <div class="grphead">事件流<span class="cnt">${s.events.length} 条事件</span></div>
-    <div class="card"><div class="padc">
-      ${s.events.map(eventRowHTML).join('')}
-    </div></div>
-
-    <div class="grphead">追加交互指令</div>
-    <div class="card"><div class="padc">
-      <div class="field" style="margin-bottom:8px">
-        <input class="inp" placeholder="向此工作区会话追加 Prompt 指令…" />
+  ` : `
+    <div class="grphead">安全与授权规则</div>
+    <div class="card" style="padding:12px 14px;border-radius:12px;margin-bottom:14px">
+      <div style="display:flex;align-items:center;justify-content:space-between">
+        <div>
+          <div style="font-size:13px;font-weight:600">当前执行免批规则：2 项已启用</div>
+          <div style="font-size:11px;color:var(--on-2);margin-top:2px">git status, pytest 在本机执行免审批，其余高危命令拦截并提审。</div>
+        </div>
+        <button class="btn sm" onclick="openGrantModal()">查看规则清单</button>
       </div>
-      <div style="display:flex;justify-content:space-between;align-items:center">
-        <div class="hint">通过 ams1 能力通道与宿主双向交互</div>
-        <button class="btn sm pri">${ic('send')} 发送</button>
-      </div>
-    </div></div>
+    </div>`;
+
+  return dwin('chat', `<div class="dbody">
+    ${repoHeader}
+    ${agentsGrid}
+    ${approvalSection}
   </div>` + sessionPickerHTML(w) + grantModalHTML(w, modalMode === 'grant') + grantQrModalHTML(w, modalMode === 'grantqr') + createWsModalHTML(w, modalMode === 'createws'), {side: sideWorkspaces(wsIdx, wsSessionIdx), view:'agents'});
 }
 
@@ -6732,6 +6882,7 @@ function screenDSettingsData(){
         手机端取用文件走会话里那张文件卡，所以那边没有这两个按钮。</div>
     </div><div class="cardfoot"><button class="btn">${ic('folder')} 更改目录</button>
       <button class="btn">${ic('external')} 打开</button></div></div>
+    <div class="grphead">断点续传与残片管理</div>
     <div class="card"><div class="padc">
       <div class="tt"><b>续传残片</b>
         <p>下载失败时留下的半成品，留着才能续传；删掉就等于放弃这些续传。</p></div>
@@ -6837,24 +6988,58 @@ function screenDEmoji(){
   }), {side: sideChat(NID.agent), view:'chat'});
 }
 function screenDGroupCreate(){
+  const rows = PEERS.slice().sort((a,b)=>(b.online?1:0)-(a.online?1:0));
   return screenDChat() + `<div class="dlg gc" style="position:absolute;left:50%;top:50%;
-    transform:translate(-50%,-50%);z-index:40">
-    <h2>建群</h2>
-    <div class="dbody">
-      <div class="field"><label>群名</label><input class="inp" value="项目研发 · 协同群"/></div>
-      <div style="font-size:12px;margin:8px 0;padding:6px 10px;background:var(--surface-2);border-radius:8px;display:flex;justify-content:space-between;align-items:center"><span>要协同本地代码工作区？</span><a style="color:var(--primary);font-weight:600;cursor:pointer" onclick="go('d-createws')">关联工作区建群 &gt;</a></div>
-      <div class="avedit-lb" style="margin-bottom:4px">选成员（自己一定在里面）</div>
-      ${PEERS.slice().sort((a,b)=>(b.online?1:0)-(a.online?1:0)).map(p=>`
-        <div class="mem" role="checkbox" aria-checked="${[NID.ka, NID.lin, NID.huang].includes(p.nodeId)}">
-          <span class="cb">${ic('check')}</span>
-          <div class="av" style="width:30px;height:30px;border-radius:9px;background:${p.c};
-            display:grid;place-items:center;color:#fff;font-size:12px;font-weight:600;flex:none">${p.ini}</div>
-          <div class="bd"><div class="nm">${p.nick}</div>
-            <div class="st2">${p.online?'在线':'离线'}</div></div>
-          ${p.isAgent?'<span class="tag agent">Agent</span>':''}
-        </div>`).join('')}
+    transform:translate(-50%,-50%);z-index:40;max-width:520px;width:90%;box-shadow:0 12px 36px rgba(0,0,0,.2)">
+    <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px">
+      <h2 style="margin:0">创建协同群聊</h2>
+      <button class="ibtn plain" onclick="go('d-chat')">${ic('close')}</button>
     </div>
-    <div class="acts"><button class="btn">取消</button><button class="btn pri">创建</button></div>
+    <div class="dbody" style="gap:12px">
+      <!-- 推荐分支：关联本地代码工作区 -->
+      <div class="card" style="padding:12px;background:var(--surface-2);border-radius:12px">
+        <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px">
+          <div style="font-size:12px;font-weight:600;color:var(--primary);display:flex;align-items:center;gap:6px">
+            ${ic('folder')} 关联已有代码工作区 (推荐)
+          </div>
+          <span class="tag ok sm">1:1 防重绑定</span>
+        </div>
+        <div style="display:flex;justify-content:space-between;align-items:center">
+          <div>
+            <div style="font-weight:600;font-size:13px">teahouse-mobile <span class="tag agent sm">🤖 Codex 入驻</span></div>
+            <div class="mono" style="font-size:11px;color:var(--on-2)">/workspace/src/teahouse-mobile · main</div>
+          </div>
+          <button class="btn sm pri" onclick="go('d-chat-group')">一键进入协同群</button>
+        </div>
+      </div>
+
+      <div class="field" style="margin-bottom:0">
+        <label>群聊名称</label>
+        <input class="inp" value="项目研发 · 协同群"/>
+      </div>
+
+      <div class="grphead" style="padding:6px 2px 2px">选择人类成员与入驻智能体<span class="cnt">已选 4 位</span></div>
+      <div style="max-height:200px;overflow-y:auto;display:flex;flex-direction:column;gap:6px">
+        ${rows.map(p=>`
+          <div class="mem" role="checkbox" aria-checked="${[NID.ka, NID.lin, NID.huang].includes(p.nodeId)}" style="border-radius:10px;padding:8px 10px">
+            <span class="cb">${ic('check')}</span>
+            <div class="av" style="width:28px;height:28px;border-radius:8px;background:${p.c};
+              display:grid;place-items:center;color:#fff;font-size:11px;font-weight:600;flex:none">${p.ini}</div>
+            <div class="bd"><div class="nm" style="font-size:13px">${p.nick}</div>
+              <div class="st2" style="font-size:11px">${p.online?'在线':'离线'}</div></div>
+            ${p.isAgent?'<span class="tag agent sm">Agent</span>':''}
+          </div>`).join('')}
+      </div>
+
+      <div style="font-size:12px;color:var(--on-2);display:flex;align-items:center;gap:6px;padding:4px 0">
+        <input type="checkbox" checked id="d_sync_cb" />
+        <label for="d_sync_cb">自动向信任圈手机同步群凭证（免扫码配对）</label>
+      </div>
+    </div>
+    <div class="acts" style="justify-content:flex-end;gap:8px">
+      <button class="btn" onclick="go('d-chat')">取消</button>
+      <button class="btn pri" onclick="go('d-chat-group')">立即创建协同群</button>
+    </div>
   </div>`;
 }
 const SCREENFN_D = {
