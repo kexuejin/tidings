@@ -45,7 +45,7 @@ CREATE TABLE MessageEntity (
     -- （老消息 / 未刷新）时消费方回退读 card_json。更新走 INSERT OR REPLACE +
     -- insertMessageDropStaleIndex（FTS 纪律同既有），AFTER UPDATE 触发器的
     -- WHEN old.text IS NOT new.text 保证它不触发全文重写。
-    cardPayload TEXT DEFAULT NULL
+    card_payload TEXT DEFAULT NULL
 );
 
 CREATE INDEX idx_message_conv_time ON MessageEntity(conv_id, timestamp);
@@ -128,9 +128,9 @@ WHERE conv_id = :convId;
 insertMessage:
 INSERT OR REPLACE INTO MessageEntity (
     id, conv_id, peer_id, sender_id, mine, text, timestamp, delivery, notice, notice_detail, file_json, screen_json,
-    agent_session_id, agent_session_title, seq, card_json, agent_state
+    agent_session_id, agent_session_title, seq, card_json, agent_state, card_payload
 ) VALUES (
-    ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?
+    ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?
 );
 
 selectMessagesByConv:
@@ -575,6 +575,9 @@ CREATE TABLE WorkspaceBindingEntity (
 
 CREATE UNIQUE INDEX idx_ws_binding_unique
 ON WorkspaceBindingEntity(groupId, hostNodeId, wsPath);
+-- R4 补强（S14）：同宿主同路径**全局**只能被一个群绑 —— 1:1 防重的正判据。
+CREATE UNIQUE INDEX idx_ws_host_path
+ON WorkspaceBindingEntity(hostNodeId, wsPath);
 
 -- 工作区作用域免批规则的持久化层（升级轮 T-2a，D-021 / D-023 / D-025 ④）。
 -- 维度分工：本表 = workspaceId + toolPattern + scope(session|always) + expiresAt；
@@ -592,7 +595,10 @@ CREATE TABLE AgentGrantRuleEntity (
 );
 
 insertWorkspaceBinding:
-INSERT OR REPLACE INTO WorkspaceBindingEntity (
+-- S14：**INSERT 不带 OR REPLACE** —— 静默顶掉正是 AGENTS §2.3/§3 点名的形状
+--（隐蔽、无回执、UI 说谎）。同群换路径的语义在管理器里先 delete 再 insert
+--（显式两步，有账可查）；竞态与越权重绑由两条 UNIQUE INDEX 炸进 Storage 分支。
+INSERT INTO WorkspaceBindingEntity (
     workspaceId, groupId, hostNodeId, wsPath, gitBranch, isHostActive, createdAt, updatedAt
 ) VALUES (?, ?, ?, ?, ?, ?, ?, ?);
 

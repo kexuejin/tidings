@@ -28,6 +28,11 @@ CREATE TABLE IF NOT EXISTS WorkspaceBindingEntity (
 );
 CREATE UNIQUE INDEX IF NOT EXISTS idx_ws_binding_unique
 ON WorkspaceBindingEntity(groupId, hostNodeId, wsPath);
+-- R4 补强（S14）：同宿主同路径**全局**只能被一个群绑 —— 1:1 防重的正判据。
+-- idx_ws_binding_unique（groupId 打头）只防「同群同宿主同路径」的重复行，
+-- 防不了「g-1 先绑 / g-2 再绑同路径」的顶掉形状。
+CREATE UNIQUE INDEX IF NOT EXISTS idx_ws_host_path
+ON WorkspaceBindingEntity(hostNodeId, wsPath);
 
 CREATE TABLE IF NOT EXISTS AgentGrantRuleEntity (
     ruleId TEXT PRIMARY KEY NOT NULL,
@@ -39,4 +44,4 @@ CREATE TABLE IF NOT EXISTS AgentGrantRuleEntity (
     expiresAt INTEGER NOT NULL
 );
 
-ALTER TABLE MessageEntity ADD COLUMN cardPayload TEXT DEFAULT NULL;
+ALTER TABLE MessageEntity ADD COLUMN card_payload TEXT DEFAULT NULL;

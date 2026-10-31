@@ -247,6 +247,7 @@ class ScreenHistoryRecordTest {
             seq = 2L,
             card_json = null,
             agent_state = null,
+            card_payload = null,
         )
         val fresh = database.relayDatabaseQueries.selectMessagesByConv("peer-1").executeAsList()
             .single { it.id == "new-1" }

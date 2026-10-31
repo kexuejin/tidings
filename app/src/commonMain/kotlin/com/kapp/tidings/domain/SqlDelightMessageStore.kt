@@ -234,6 +234,7 @@ class SqlDelightMessageStore(
                         seq = seq,
                         card_json = values.cardJson,
                         agent_state = values.agentState,
+                        card_payload = values.cardPayload,
                     )
                     changed = true
                     touched += values.convId
@@ -823,7 +824,13 @@ private fun com.kapp.tidings.db.MessageEntity.toUi(): MessageUi {
         // 卡片与执行状态**读回来**：原位刷新的折叠键（cardId/rev）与状态徽标跨重启存活。
         // 解析失败当「这条没有卡片」（runCatching），不让一条坏 JSON 拖死整条消息 ——
         // 与 screen / noticeDetail 同一条规矩。
+        // T-2d 读侧（D-021 两列分工）：card = card_json（首帧原文，永不被刷新覆盖）；
+        // cardPayload = card_payload（最新 rev 载荷，NULL = 从未刷新）。渲染层统一走
+        // MessageUi.renderCard（= cardPayload ?: card），不直读两字段。
         card = card_json?.let {
+            runCatching { MessageStore.json.parseToJsonElement(it) as? kotlinx.serialization.json.JsonObject }.getOrNull()
+        },
+        cardPayload = card_payload?.let {
             runCatching { MessageStore.json.parseToJsonElement(it) as? kotlinx.serialization.json.JsonObject }.getOrNull()
         },
         agentState = agent_state,
@@ -956,6 +963,7 @@ private data class MessageRowValues(
     val agentSessionId: String?,
     val agentSessionTitle: String?,
     val cardJson: String?,
+    val cardPayload: String?,
     val agentState: String?,
 )
 
@@ -991,6 +999,7 @@ private fun MessageUi.toRowValues(peerId: String): MessageRowValues {
         agentSessionId = agentSessionId,
         agentSessionTitle = agentSessionTitle,
         cardJson = card?.let { runCatching { MessageStore.json.encodeToString(kotlinx.serialization.json.JsonObject.serializer(), it) }.getOrNull() },
+        cardPayload = cardPayload?.let { runCatching { MessageStore.json.encodeToString(kotlinx.serialization.json.JsonObject.serializer(), it) }.getOrNull() },
         agentState = agentState,
     )
 }
@@ -1017,5 +1026,6 @@ private fun com.kapp.tidings.db.MessageEntity.matches(values: MessageRowValues):
         agent_session_id == values.agentSessionId &&
         agent_session_title == values.agentSessionTitle &&
         card_json == values.cardJson &&
+        card_payload == values.cardPayload &&
         agent_state == values.agentState
 

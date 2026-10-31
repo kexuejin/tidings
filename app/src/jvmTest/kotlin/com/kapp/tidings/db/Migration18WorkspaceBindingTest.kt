@@ -185,6 +185,38 @@ class Migration18WorkspaceBindingTest {
         }
     }
 
+    /** S14：同宿主同路径**全局**唯一 —— 跨群重绑必须被 idx_ws_host_path 拦下。 */
+    @Test
+    fun sameHostSamePathIsGloballyUniqueAcrossGroups() {
+        val driver = JdbcSqliteDriver(JdbcSqliteDriver.IN_MEMORY)
+        try {
+            openDesktopDatabase(driver)
+            val row = "(workspaceId, groupId, hostNodeId, wsPath, gitBranch, isHostActive, createdAt, updatedAt) " +
+                "VALUES ('%WID%', '%GRP%', 'host-1', '/repo/a', 'main', 1, 1, 1)"
+            driver.execute(null, "INSERT INTO WorkspaceBindingEntity " + row.replace("%WID%", "w1").replace("%GRP%", "g-1"), 0)
+            try {
+                driver.execute(null, "INSERT INTO WorkspaceBindingEntity " + row.replace("%WID%", "w2").replace("%GRP%", "g-2"), 0)
+                fail("g-2 重绑 g-1 已占的路径必须被 idx_ws_host_path 拦下（R4 全局防重）")
+            } catch (e: Exception) {
+                assertTrue(
+                    (e.message ?: "").contains("UNIQUE", ignoreCase = true) ||
+                        (e.cause?.message ?: "").contains("UNIQUE", ignoreCase = true),
+                    "炸的原因必须是 UNIQUE 约束：" + e.message,
+                )
+            }
+            // 不同宿主的同名路径互不相干（索引含 hostNodeId）。
+            driver.execute(
+                null,
+                "INSERT INTO WorkspaceBindingEntity " +
+                    "(workspaceId, groupId, hostNodeId, wsPath, gitBranch, isHostActive, createdAt, updatedAt) " +
+                    "VALUES ('w3', 'g-2', 'host-2', '/repo/a', 'main', 1, 1, 1)",
+                0,
+            )
+        } finally {
+            driver.close()
+        }
+    }
+
     @Test
     fun legacyRowsHaveNullCardPayload() {
         val driver = JdbcSqliteDriver(JdbcSqliteDriver.IN_MEMORY)
