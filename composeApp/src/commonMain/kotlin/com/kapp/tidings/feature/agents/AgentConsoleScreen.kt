@@ -81,6 +81,8 @@ fun AgentConsoleScreen(
     /** 「添加设备」的出口。 */
     onAddExecDevice: (() -> Unit)? = null,
     onCreateWorkspaceGroup: (() -> Unit)? = null,
+    /** M7-T3 2b：产物校验的按需实测桥（见 SessionDetailView 同名形参）。 */
+    artifactDigestOf: (suspend (fileName: String) -> String?)? = null,
     // 只给截图门禁用，见 `SessionDetailView(initialPicking = …)`。
     initialSessionPickerOpen: Boolean = false,
     onLoadWorkspaceSessions: ((peerId: String, wsId: String) -> Unit)? = null,
@@ -171,6 +173,7 @@ fun AgentConsoleScreen(
             onCancelTask = onCancelTask,
             modifier = modifier,
             initialPicking = initialSessionPickerOpen,
+            artifactDigestOf = artifactDigestOf,
         )
     } else if (selected != null && effectiveWsId != null) {
         val allSessions = state.visibleAgentSessionsOf(selected.nodeId)

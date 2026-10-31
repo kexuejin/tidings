@@ -405,6 +405,17 @@ interface AppPlatform {
     val receivedFileActions: ReceivedFileActions?
         get() = null
 
+    /**
+     * M7-T3 2b（D-015 ②）：按文件名在**本端下载目录**实测一份文件的 SHA-256。
+     *
+     * 只读、按需：产物详情卡展示校验状态时由 UI 层调用，找不到文件返回 null（⇒
+     * FILE_MISSING 语义，判定在 `ArtifactVerification`，这里只管读盘）。平台没有
+     * 下载目录概念（iOS 沙盒 / 测试预览）保持默认 null —— UI 据此展示「无法实测」，
+     * 不装成已校验。
+     */
+    val artifactDigestOf: (suspend (fileName: String) -> String?)?
+        get() = null
+
     // 相机取景框那个可空槽已移到独立接口 [QrPreviewProvider]：它返回 Compose 类型，
     // 留在本接口里会让整个 platform 契约依赖 Compose（搬成 :app 后编译不过）。
     // 它只有界面会读，领域层从不读 → 拆出去代价很小。见 QrPreviewProvider 的 KDoc。

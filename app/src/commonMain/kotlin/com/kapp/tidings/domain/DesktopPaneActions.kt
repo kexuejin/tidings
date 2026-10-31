@@ -33,6 +33,10 @@ public interface DesktopPaneActions {
      */
     val receivedFileActions: ReceivedFileActions?
 
+    /** M7-T3 2b：产物校验的按需实测桥（平台读下载目录；null = 本设备无法实测）。 */
+    val artifactDigestOf: (suspend (fileName: String) -> String?)?
+        get() = null
+
     /**
      * 中断对端上的一次 agent 运行（PPE-1 §6.6）。
      *

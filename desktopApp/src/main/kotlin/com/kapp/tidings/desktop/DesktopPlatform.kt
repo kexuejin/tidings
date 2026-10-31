@@ -49,6 +49,35 @@ class DesktopAppPlatform(
     override val mdnsBrowser: DesktopMdnsBrowser = DesktopMdnsBrowser(),
     override val pushNotificationHandler: DesktopNotificationHandler = DesktopNotificationHandler(),
     override val receivedFileActions: com.kapp.tidings.platform.ReceivedFileActions = DesktopReceivedFileActions(),
+    /**
+     * M7-T3 2b（D-015 ②）：按文件名在下载目录实测 SHA-256 —— 产物详情卡的校验状态
+     * 消费这个桥。下载目录与 [com.kapp.tidings.domain.RelayController] 装配
+     * `NodeRuntime(downloadDir)` 用的同一个（pathJoin(dataDirectory, "downloads")）；
+     * 文件不在（未下载 / 已清）返回 null ⇒ FILE_MISSING 语义，判定在 core。
+     */
+    override val artifactDigestOf: (suspend (fileName: String) -> String?) = { fileName ->
+        val file = java.io.File(
+            com.kapp.tidings.core.fs.pathJoin(dataDirectory.dataDirectory(), "downloads"),
+            fileName,
+        )
+        if (file.isFile) {
+            // 流式摘要：产物可能是几百 MB 的视频，readBytes 全量进内存会出事。
+            runCatching {
+                val digest = com.kapp.tidings.core.crypto.Sha256()
+                file.inputStream().use { input ->
+                    val buf = ByteArray(64 * 1024)
+                    while (true) {
+                        val n = input.read(buf)
+                        if (n < 0) break
+                        digest.update(buf, 0, n)
+                    }
+                }
+                digest.hexDigest()
+            }.getOrNull()
+        } else {
+            null
+        }
+    },
     override val urlOpener: com.kapp.tidings.platform.UrlOpener = DesktopUrlOpener(),
     override val screenCapture: com.kapp.tidings.platform.ScreenCaptureService? = null,
     override val screenSharing: com.kapp.tidings.platform.ScreenSharingService = com.kapp.tidings.desktop.capture.DesktopScreenSharingService(),

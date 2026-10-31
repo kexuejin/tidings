@@ -986,6 +986,8 @@ public fun DesktopShell(
                                 // 「添加设备」只要有台账就给出口；候选为空时弹层自己说「都已经在名单里了」，
                                 // 那比把入口藏起来好 —— 藏起来用户会以为这个功能没有。
                                 onAddExecDevice = {},
+                                // M7-T3 2b：产物校验的按需实测桥（desktopApp 平台实现读下载目录）。
+                                artifactDigestOf = controller.artifactDigestOf,
                                 selectedAgentId = selectedPeerId,
                                 onSelectAgent = { selectedPeerId = it },
                                 onOpenChat = { id, wsId ->

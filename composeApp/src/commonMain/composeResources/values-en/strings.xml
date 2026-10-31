@@ -1518,6 +1518,11 @@
     <string name="agent_run_state_failed">Failed</string>
     <string name="agent_run_state_cancelled">Cancelled</string>
     <string name="agent_artifacts_title">Artifacts</string>
+    <string name="agent_artifact_verify_ok">Verified</string>
+    <string name="agent_artifact_verify_mismatch">Verification failed (file differs from declared digest)</string>
+    <string name="agent_artifact_verify_undeclared">Sender did not declare a digest</string>
+    <string name="agent_artifact_verify_missing">File not downloaded; nothing to verify</string>
+    <string name="agent_artifact_verify_unavailable">This device cannot verify digests</string>
     <string name="agent_artifact_no_file">Metadata only, no linked file</string>
     <string name="chat_group_me">Me</string>
     <string name="chat_group_none">None</string>

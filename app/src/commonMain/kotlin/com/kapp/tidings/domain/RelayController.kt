@@ -1667,6 +1667,9 @@ class RelayController(
 
     override val receivedFileActions: ReceivedFileActions? = platform.receivedFileActions
 
+    /** M7-T3 2b：产物校验的按需实测桥（平台读下载目录；null = 本平台无法实测）。 */
+    override val artifactDigestOf: (suspend (fileName: String) -> String?)? = platform.artifactDigestOf
+
     internal fun requestNotificationPermission() {
         scope.launch {
             val granted = platform.pushNotificationHandler.requestPermission()

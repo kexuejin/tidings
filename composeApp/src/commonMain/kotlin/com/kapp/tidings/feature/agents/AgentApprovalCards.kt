@@ -31,12 +31,18 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
+import com.kapp.tidings.core.crypto.ArtifactVerification
 import com.kapp.tidings.core.nowMillis
 import com.kapp.tidings.domain.isApprovalExpired as domainIsApprovalExpired
 import kotlinx.coroutines.delay
 import com.kapp.tidings.generated.resources.Res
 import com.kapp.tidings.generated.resources.agent_approval_allow
 import com.kapp.tidings.generated.resources.agent_approval_deny
+import com.kapp.tidings.generated.resources.agent_artifact_verify_missing
+import com.kapp.tidings.generated.resources.agent_artifact_verify_mismatch
+import com.kapp.tidings.generated.resources.agent_artifact_verify_ok
+import com.kapp.tidings.generated.resources.agent_artifact_verify_undeclared
+import com.kapp.tidings.generated.resources.agent_artifact_verify_unavailable
 import com.kapp.tidings.generated.resources.agent_approval_expired
 import com.kapp.tidings.generated.resources.agent_approval_readonly
 import com.kapp.tidings.generated.resources.agent_approval_status_approved
@@ -870,6 +876,11 @@ public fun AgentRunsSection(
 public fun AgentArtifactsSection(
     artifacts: List<AgentArtifactUi>,
     modifier: Modifier = Modifier,
+    /**
+     * M7-T3 2b（D-015 ②）：按需实测桥（平台读下载目录）。null = 本设备无法实测
+     * （桥没装配）—— 有 declared 的产物如实展示「无法实测」，不装成已校验。
+     */
+    artifactDigestOf: (suspend (fileName: String) -> String?)? = null,
 ) {
     if (artifacts.isEmpty()) return
 
@@ -906,6 +917,37 @@ public fun AgentArtifactsSection(
                         style = MaterialTheme.typography.bodySmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                     )
+                    // M7-T3 2b：校验状态（端到端那道门 —— agent declared vs 落盘实测）。
+                    // 纯展示，无自动重拉（D-015 裁决）；判定在 core 的 ArtifactVerification。
+                    // 桥缺失（平台装不了实测）⇒ 如实说「无法实测」，不装成已校验。
+                    var digest by remember(artifact.artifactId) { mutableStateOf<String?>(null) }
+                    var probed by remember(artifact.artifactId) { mutableStateOf(false) }
+                    LaunchedEffect(artifact.artifactId, artifact.name) {
+                        digest = artifactDigestOf?.invoke(artifact.name)
+                        probed = true
+                    }
+                    val verifyLabel = when {
+                        artifactDigestOf == null -> Res.string.agent_artifact_verify_unavailable
+                        !probed -> null // 桥在、首帧未测完：先不画（下一帧就有结果）。
+                        else -> when (val status = ArtifactVerification.verify(artifact.sha256, digest)) {
+                            ArtifactVerification.Status.OK -> Res.string.agent_artifact_verify_ok
+                            ArtifactVerification.Status.MISMATCH -> Res.string.agent_artifact_verify_mismatch
+                            ArtifactVerification.Status.UNDECLARED -> Res.string.agent_artifact_verify_undeclared
+                            ArtifactVerification.Status.FILE_MISSING -> Res.string.agent_artifact_verify_missing
+                        }
+                    }
+                    verifyLabel?.let { label ->
+                        Spacer(Modifier.height(LocalAppSpacing.current.xs))
+                        Text(
+                            text = stringResource(label),
+                            style = MaterialTheme.typography.labelSmall,
+                            color = if (label == Res.string.agent_artifact_verify_mismatch) {
+                                MaterialTheme.colorScheme.error
+                            } else {
+                                MaterialTheme.colorScheme.onSurfaceVariant
+                            },
+                        )
+                    }
                 }
             }
         }

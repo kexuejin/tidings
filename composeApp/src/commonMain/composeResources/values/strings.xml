@@ -1673,6 +1673,11 @@
     <string name="agent_run_state_failed">失败</string>
     <string name="agent_run_state_cancelled">已取消</string>
     <string name="agent_artifacts_title">产物</string>
+    <string name="agent_artifact_verify_ok">已校验</string>
+    <string name="agent_artifact_verify_mismatch">校验失败（文件与声明不一致）</string>
+    <string name="agent_artifact_verify_undeclared">发送方未声明校验值</string>
+    <string name="agent_artifact_verify_missing">文件未下载，无法校验</string>
+    <string name="agent_artifact_verify_unavailable">本设备无法实测校验值</string>
     <string name="agent_artifact_no_file">只有元数据，没有关联文件</string>
     <string name="chat_group_me">我</string>
     <string name="chat_group_none">无</string>

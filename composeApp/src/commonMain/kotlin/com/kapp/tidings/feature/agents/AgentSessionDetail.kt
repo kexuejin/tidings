@@ -133,6 +133,8 @@ internal fun SessionDetailView(
      */
     onRevokeSessionApproval: ((sessionId: String) -> Unit)? = null,
     onCancelTask: ((taskId: String) -> Unit)?,
+    /** M7-T3 2b：产物校验的按需实测桥（desktopApp 装配；null = 无法实测，UI 如实展示）。 */
+    artifactDigestOf: (suspend (fileName: String) -> String?)? = null,
     modifier: Modifier = Modifier,
     // 只给截图门禁用：把「切换会话」浮层默认打开。生产侧一律走默认值（点击 `AgentSessionBar`
     // 才开），所以它不改变任何运行时行为，只是给回归帧一个能看见浮层的入口
@@ -345,6 +347,7 @@ internal fun SessionDetailView(
                 // 专属产物卡片（PPE-1 §6.7 agent-artifact，只有元数据）
                 AgentArtifactsSection(
                     artifacts = state.agentArtifactsOf(peer.nodeId, activeSession.sessionId),
+                    artifactDigestOf = artifactDigestOf,
                 )
 
                 // 真实聊天气泡流

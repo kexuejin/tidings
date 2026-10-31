@@ -946,6 +946,7 @@ fun RelayApp(
                                             // —— 用户报的「手机上没法建工作区群」就是这个。对话框本体
                                             // 在两种布局下是同一个，窄屏上它自己会收成整幅宽弹层。
                                             onCreateWorkspaceGroup = { showCreateWsDialog = true },
+                                            artifactDigestOf = controller.artifactDigestOf,
                                             modifier = Modifier.weight(1f).fillMaxWidth(),
                                         )
                                     }
