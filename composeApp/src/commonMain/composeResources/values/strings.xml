@@ -213,6 +213,7 @@
     <string name="banner_group_no_permission">只有群主或管理员有权移出成员。</string>
     <!-- 无权限者 @ 了 agent：说明为什么没执行，并给一个申请入口。%1$s = agent 名。 -->
     <string name="chat_agent_not_authorized">%1$s 没有执行：你不在它的授权名单里</string>
+    <string name="chat_agent_delegated_by_tag">%1$s 本机接不了，任务已按标签 %2$s 委派给远端节点</string>
     <string name="chat_agent_request_grant">申请授权</string>
     <string name="chat_agent_grant_requested">已发出授权申请，等设备方确认</string>
     <string name="chat_agent_grant_failed">申请没发出去，稍后再试</string>

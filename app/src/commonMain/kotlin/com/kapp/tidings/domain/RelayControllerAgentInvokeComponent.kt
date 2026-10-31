@@ -79,6 +79,19 @@ internal class RelayControllerAgentInvokeComponent(private val host: RelayContro
     var channelOrchestrator: ((payload: AgentChannelPayload, fromNode: String) -> Boolean)? = null
 
     /**
+     * T-2c（D-029 前置）：标签路由候选桥 —— (tag) → 已选定的远端 nodeId；null = 没有
+     * 节点挂着这个标签（no-tag-match）。由壳层装配（PeerTagFileStore + registry 在线态
+     * 在壳可达）；null 桥 = 本机不做标签委派（executor 缺位走既有失败横幅）。
+     */
+    var peerTagRouter: ((tag: String) -> String?)? = null
+
+    /**
+     * T-2c：发起侧 agent-channel 帧出口 —— (targetNodeId, channelId, tag, task, deadlineMs)
+     * → SendOutcome。由壳层装配（rt.sendAgentChannel 已含对端 agc1 门控的调用方职责）。
+     */
+    var channelDispatch: ((nodeId: String, channelId: String, tag: String, task: String, deadlineMs: Long) -> Unit)? = null
+
+    /**
      * 入站 `agent-channel`（M7-T2，cap `agc1`）。
      *
      * 手机端永不执行任务：本机没有承接器 ⇒ 回一帧诚实的 `no-executor`（决策包
@@ -401,6 +414,34 @@ internal class RelayControllerAgentInvokeComponent(private val host: RelayContro
         }
         val ex = executor
         if (ex == null) {
+            // T-2c（发起侧编排接线，D-029）：本机插件接不了活时，**按算力标签把任务委派出去**
+            // （设计 §4.1 流程 A：托管宿主解析所需算力 → 按标签路由到算力节点）。
+            // tag 来源 = intent.requiredTag（agentIntent 是 JsonObject 开放结构，内部键
+            // 不动群文本白名单）；候选与选择走 PeerTagRouter（已交付 1e774b1a，桥注入）。
+            // 没桥 / 没标签 / 无匹配节点 ⇒ 落回既有失败横幅（如实，不静默）。
+            val requiredTag = intent.strField("requiredTag")?.takeIf { it.isNotBlank() }
+            val routed = if (requiredTag != null) peerTagRouter?.invoke(requiredTag) else null
+            if (requiredTag != null && routed != null) {
+                val channelId = "ch-" + newId().take(20)
+                val task = intent.strField("prompt")
+                    ?: messageText?.let {
+                        RelayController.extractAgentPrompt(it, setOfNotNull(seat.agentId.takeIf { t -> t.isNotBlank() }, seat.name))
+                    }
+                    ?: ""
+                channelDispatch?.invoke(routed, channelId, requiredTag, task, DEFAULT_INVOKE_DEADLINE_MS)
+                host.handleAppendMessage(
+                    MessageUi(
+                        id = host.localMessageId(),
+                        peerId = ConvId.group(groupId),
+                        mine = false,
+                        text = "",
+                        at = nowMillis(),
+                        notice = NoticeKind.AgentDelegatedByTag,
+                        noticeDetail = NoticeDetail(actor = seat.name, detail = requiredTag + " -> " + routed.take(8)),
+                    ),
+                )
+                return
+            }
             // **插件接不了活**（被 kill / 从没注册 / 宿主壳没接桥）：此前这里 `?: return`，
             // 群流里一条都没有 —— 点 @ 的人看到的和「派单成功、任务在跑」一模一样。
             // 设计稿 v2 §5「失败如实」：宿主回一条 agentState=failed 的轻横幅。

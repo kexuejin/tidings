@@ -89,6 +89,7 @@ import com.kapp.tidings.generated.resources.chat_delivery_resend
 import com.kapp.tidings.generated.resources.chat_forward
 import com.kapp.tidings.generated.resources.chat_group_members_changed
 import com.kapp.tidings.generated.resources.chat_group_member_removed
+import com.kapp.tidings.generated.resources.chat_agent_delegated_by_tag
 import com.kapp.tidings.generated.resources.chat_agent_not_authorized
 import com.kapp.tidings.generated.resources.chat_group_member_added
 import com.kapp.tidings.generated.resources.chat_image
@@ -856,6 +857,14 @@ private fun noticeText(
             return stringResource(Res.string.chat_agent_not_authorized, agentName)
         }
     }
+    if (kind == NoticeKind.AgentDelegatedByTag) {
+        // T-2c：任务按算力标签委派给了远端节点 —— 说清「哪个 agent、按什么标签、去了哪台」。
+        val agentName = detail?.actor?.takeIf { it.isNotBlank() }
+        val routing = detail?.detail?.takeIf { it.isNotBlank() }
+        if (agentName != null && routing != null) {
+            return stringResource(Res.string.chat_agent_delegated_by_tag, agentName, routing)
+        }
+    }
     return stringResource(
         when (kind) {
             NoticeKind.RecalledByPeer -> Res.string.chat_recall_peer
@@ -865,6 +874,7 @@ private fun noticeText(
             NoticeKind.GroupMembersChanged -> Res.string.chat_group_members_changed
             // @ 到了 agent 但没有执行权：如实说是「没执行」，不给用户留悬念。
             NoticeKind.AgentNotAuthorized -> Res.string.chat_agent_not_authorized
+            NoticeKind.AgentDelegatedByTag -> Res.string.chat_agent_delegated_by_tag
             NoticeKind.GroupRenamed -> Res.string.chat_group_renamed
             NoticeKind.RemovedFromGroup -> Res.string.chat_group_removed
         },

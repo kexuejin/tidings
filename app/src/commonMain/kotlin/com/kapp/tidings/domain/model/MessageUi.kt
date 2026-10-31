@@ -138,9 +138,15 @@ data class NoticeDetail(
     val added: List<String> = emptyList(),
     /** 被移出群/主动退出的成员（nodeId）。 */
     val removed: List<String> = emptyList(),
+    /**
+     * 自由文本细节槽（升级轮 T-2c）：[NoticeKind.AgentDelegatedByTag] 用它携带
+     * 「标签 → 目标节点前缀」的路由读数。可空默认 null —— 既有三类通知的序列化
+     * 字节不变（字段追加，encodeDefaults=false 不产出 null）。
+     */
+    val detail: String? = null,
 ) {
     /** 没有任何可展示的细节 ⇒ 渲染端退回那句中性文案。 */
-    val isEmpty: Boolean get() = actor == null && added.isEmpty() && removed.isEmpty()
+    val isEmpty: Boolean get() = actor == null && added.isEmpty() && removed.isEmpty() && detail == null
 }
 
 /**
@@ -169,6 +175,14 @@ enum class NoticeKind {
      * 与 [GroupMembersChanged] 同一类：它是**系统的解释**，不是任何人说的话，所以走 notice 行。
      */
     AgentNotAuthorized,
+
+    /**
+     * **@ 到的 agent 本机接不了活，任务已按算力标签委派给远端节点**（升级轮 T-2c）。
+     *
+     * 与 [AgentNotAuthorized] 同类：它是**系统的解释**，不是任何人说的话，走 notice 行。
+     * detail 携带「标签 → 目标节点前缀」，用户看得见任务去了哪台机器。
+     */
+    AgentDelegatedByTag,
 
     /** 群名改了。 */
     GroupRenamed,
@@ -289,6 +303,13 @@ data class MessageUi(
      * 折叠、只渲染最新 rev），不是存储语义。UI 渲染引擎是 M3 的交付物。
      */
     val card: JsonObject? = null,
+    /**
+     * (cardId, rev) 原位刷新的**最新载荷**（T-2d / 升级方案 §6.2）：rev 推进时更新这一列，
+     * [card] 保持首帧原文（D-021：card_json 列语义不动）。null = 从未刷新过（老消息 /
+     * 未刷新），读侧回退 [card]。存储语义由追加式改为单卡槽原位替换 —— 「不刷屏」
+     * 从 UI 折叠下沉为存储行数恒等（SqlDelightMessageStoreCardInPlaceTest）。
+     */
+    val cardPayload: JsonObject? = null,
     /** 插件 → 全群的执行状态（方案 §4.1 四态）：accept / blocked / completed / failed。 */
     val agentState: String? = null,
 )

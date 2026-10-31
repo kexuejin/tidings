@@ -178,6 +178,7 @@
     <string name="banner_group_member_removed">Member removed. Notifying group.</string>
     <string name="banner_group_no_permission">Only the group owner or admins can remove members.</string>
     <string name="chat_agent_not_authorized">%1$s did not run: you are not on its authorization list</string>
+    <string name="chat_agent_delegated_by_tag">%1$s cannot run it locally; the task was dispatched by tag %2$s to a remote node</string>
     <string name="chat_agent_request_grant">Request access</string>
     <string name="chat_agent_grant_requested">Access requested — waiting for the device owner to approve</string>
     <string name="chat_agent_grant_failed">Could not send the request; try again later</string>
