@@ -39,7 +39,10 @@ val RelayLightOutline = Color(0xFFD4D4D0)
 
 // ── 暗色模式 ────────────────────────────────────────────
 val RelayDarkBackground = Color(0xFF121413)
-val RelayDarkSurface = Color(0xFF1E201F)
+// D10（WP-D6④）：暗色卡面抬一档 —— surfaceTint==surface 后层次全靠阴影，暗色
+    // 自绘投影最深 1.02:1，卡与页糊成一片（d 审计 D10）。#232625 对 #121413 = 1.24，
+    // 亮色侧不动（亮色 1.05 是白系纸感的既有层次，d 审计未判缺陷）。
+    val RelayDarkSurface = Color(0xFF232625)
 val RelayDarkSurfaceVariant = Color(0xFF2A2C2B)
 val RelayDarkOnSurface = Color(0xFFE8E8E6)
 val RelayDarkOnSurfaceVariant = Color(0xFFA0A3A0)
@@ -145,11 +148,11 @@ val RelayDarkColors = darkColorScheme(
     onSurfaceVariant = RelayDarkOnSurfaceVariant,
     outline = RelayDarkOutline,
     // 深色侧同理：--hair 是 rgba(255,255,255,.09)（prototype/relay.html:83），
-    // 9% 白叠在 #1E201F 上 → #323433；#2B3331 是 --surface-3 的深色值，
+    // 9% 白叠在卡面上 → #323433 一族；#2B3331 是 --surface-3 的深色值，
     // 已改由 accents.surface3 提供。
     outlineVariant = Color(0x17FFFFFF),
     // 与浅色一侧同理：这一组不写就漏回 Material 基线的紫。深色阶梯是
-    // background #121413 → surface #1E201F → surfaceVariant #2A2C2B。
+    // background #121413 → surface（D10 抬档后 #232625）→ surfaceVariant #2A2C2B。
     surfaceContainerLowest = Color(0xFF161817),
     surfaceContainerLow = RelayDarkSurface,
     surfaceContainer = Color(0xFF222423),
@@ -161,7 +164,7 @@ val RelayDarkColors = darkColorScheme(
     inverseOnSurface = RelayDarkSurfaceVariant,
     inversePrimary = RelayPrimary,
     // 与浅色同理：surfaceTint == surface 之后海拔叠层是恒等变换。
-    // 深色面 #1E201F 原被 5.12% 的 #74C69D 染成 #222825 —— 同样是原型
+    // 深色面原被 5.12% 的 #74C69D 染色（原型推导，面色随 D10 抬档）——
     // .card{background:var(--surface)} 里不存在的颜色。
     surfaceTint = RelayDarkSurface,
     scrim = Color(0xFF000000),

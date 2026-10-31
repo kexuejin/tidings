@@ -600,7 +600,9 @@ private fun CabinetCheckbox(
                     painterResource(Res.drawable.ic_check_double),
                     contentDescription = null,
                     modifier = Modifier.size(12.dp),
-                    tint = Color.White,
+                    // D8：同 AppSwitch —— onPrimary 两态都达标，与 GroupCreateDialog 的
+                    // 同动作对齐（那边用的就是 onPrimary，一份对一份错的历史）。
+                    tint = MaterialTheme.colorScheme.onPrimary,
                 )
             }
         }
@@ -615,7 +617,9 @@ private fun PeerHeadAvatar(name: String, avatar: Int, online: Boolean) {
     } else {
         MaterialTheme.colorScheme.primaryContainer
     }
-    val foreground = if (avatar >= 0) Color.White else MaterialTheme.colorScheme.primary
+    // D8：杏黄底上白字 2.95:1 —— 过 AvatarPalette.foregroundOn 亮度判断（与
+    // Common.kt 的头像同源函数），亮底自动翻黑，不再长第二份前景判据。
+    val foreground = if (avatar >= 0) AvatarPalette.foregroundOn(AvatarPalette.resolveBg(avatar, name)) else MaterialTheme.colorScheme.primary
     Box(Modifier.size(40.dp)) {
         Box(
             Modifier.size(40.dp)// 原型 `.hav`：radius 13 的圆角方头像（不是圆）

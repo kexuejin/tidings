@@ -447,7 +447,7 @@ fun AgentTaskPickerSheet(
                     )
                 }
             }
-            HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.35f))
+            HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
             Box(Modifier.padding(bottom = sp.xl))
         }
     }

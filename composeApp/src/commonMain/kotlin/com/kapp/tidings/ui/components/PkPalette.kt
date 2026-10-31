@@ -74,7 +74,7 @@ public fun DiceTile(
     Surface(
         shape = RelayShapes.small,
         color = MaterialTheme.colorScheme.surface,
-        border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.6f)),
+        border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant),
         shadowElevation = RelayElevations.Card,
         modifier = modifier.size(42.dp),
     ) {
@@ -145,7 +145,7 @@ public fun RpsTile(
     Surface(
         shape = RelayShapes.small,
         color = MaterialTheme.colorScheme.surface,
-        border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.6f)),
+        border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant),
         shadowElevation = RelayElevations.Card,
         modifier = modifier.size(42.dp),
     ) {
@@ -189,7 +189,7 @@ public fun PkCardView(
     Surface(
         shape = RelayShapes.medium,
         color = MaterialTheme.colorScheme.surface.copy(alpha = 0.75f),
-        border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.5f)),
+        border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant),
         modifier = modifier.widthIn(min = 160.dp),
     ) {
         Row(

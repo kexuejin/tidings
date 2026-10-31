@@ -321,7 +321,7 @@ private fun WorkspaceItemCard(
     Surface(
         color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f),
         shape = RelayShapes.small,
-        border = androidx.compose.foundation.BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.5f)),
+        border = androidx.compose.foundation.BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant),
         modifier = Modifier.fillMaxWidth(),
     ) {
         Row(

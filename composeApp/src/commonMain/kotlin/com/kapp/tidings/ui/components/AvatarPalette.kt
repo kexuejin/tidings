@@ -299,7 +299,7 @@ fun AvatarPicker(
                 Text(
                     text = "${currentAnimalIdx + 1} / ${AvatarPalette.ANIMALS.size}",
                     style = MaterialTheme.typography.labelSmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.75f),
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
             }
             BoxWithConstraints(modifier = Modifier.fillMaxWidth()) {

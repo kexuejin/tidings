@@ -89,7 +89,7 @@ fun ThinkingBlock(
         Surface(
             color = MaterialTheme.colorScheme.surface.copy(alpha = 0.5f),
             shape = RelayShapes.small,
-            border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.5f)),
+            border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant),
             modifier = Modifier
                 .clip(RelayShapes.small)
                 .clickable { expanded = !expanded },

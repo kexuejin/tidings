@@ -955,7 +955,7 @@ fun ChatScreen(
             androidx.compose.material3.Surface(
                 color = androidx.compose.material3.MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.7f),
                 shape = androidx.compose.foundation.shape.RoundedCornerShape(8.dp),
-                border = androidx.compose.foundation.BorderStroke(1.dp, androidx.compose.material3.MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.5f)),
+                border = androidx.compose.foundation.BorderStroke(1.dp, androidx.compose.material3.MaterialTheme.colorScheme.outlineVariant),
                 modifier = Modifier.padding(horizontal = sp.lg, vertical = sp.xs).fillMaxWidth(),
             ) {
                 androidx.compose.foundation.layout.Row(
@@ -1946,14 +1946,14 @@ private fun SessionDivider(
     ) {
         HorizontalDivider(
             modifier = Modifier.weight(1f).padding(end = 12.dp),
-            color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.35f),
+            color = MaterialTheme.colorScheme.outlineVariant,
         )
         Surface(
             shape = RoundedCornerShape(12.dp),
             color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f),
             border = androidx.compose.foundation.BorderStroke(
                 1.dp,
-                MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.35f),
+                MaterialTheme.colorScheme.outlineVariant,
             ),
         ) {
             Row(
@@ -1978,7 +1978,7 @@ private fun SessionDivider(
         }
         HorizontalDivider(
             modifier = Modifier.weight(1f).padding(start = 12.dp),
-            color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.35f),
+            color = MaterialTheme.colorScheme.outlineVariant,
         )
     }
 }

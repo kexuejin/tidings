@@ -965,7 +965,7 @@ internal fun CalendarGrid(
                         isEdge -> MaterialTheme.colorScheme.onPrimary
                         inRange -> MaterialTheme.colorScheme.onPrimaryContainer
                         isCurrentMonth -> MaterialTheme.colorScheme.onSurface
-                        else -> MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.4f)
+                        else -> MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.55f)
                     }
 
                     Box(

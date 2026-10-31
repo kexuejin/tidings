@@ -81,7 +81,10 @@ fun AppSwitch(
                 modifier = Modifier
                     .padding(start = knobOffset, top = LocalAppSpacing.current.oxs3)
                     .size(IconSizes.Body)
-                    .background(Color.White, CircleShape),
+                    // D8（WP-D6④）：旋钮色用 onPrimary —— 亮色它就是白（6.39:1 不变），
+                    // 暗色 onPrimary=#003826 对 #74C69D = 6.47:1（原 Color.White 只有 2.04）。
+                    // 两态不再跳档：暗色下「钮在哪一边」重新看得见。
+                    .background(MaterialTheme.colorScheme.onPrimary, CircleShape),
             )
         }
     }

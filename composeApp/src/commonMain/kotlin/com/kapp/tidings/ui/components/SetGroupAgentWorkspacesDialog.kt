@@ -287,7 +287,7 @@ fun SetGroupAgentWorkspacesDialog(
                             }
                         }
                     }
-                    HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.35f))
+                    HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
                 }
 
                 // ── 工作区白名单 ────────────────────────────────────────
