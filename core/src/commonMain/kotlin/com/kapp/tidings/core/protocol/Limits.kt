@@ -183,6 +183,9 @@ object Limits {
     /** 派单 prompt 预算（§7.7 上下文裁剪：字符数；超限头尾保留 + 截断标注）。 */
     const val AGENT_TASK_BUDGET: Int = 8_000
 
+    /** 宿主 CPU 拒单阈值（§7.12：>85% 自动拒单避让 —— 接收侧自保门）。 */
+    const val HOST_CPU_REJECT: Double = 0.85
+
     /** §6.7 `agent-artifact`：产物标识、展示名与 MIME。 */
     const val AGENT_ARTIFACT_ID = 64
     const val AGENT_ARTIFACT_NAME = 200

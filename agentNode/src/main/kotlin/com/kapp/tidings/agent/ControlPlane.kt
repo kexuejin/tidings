@@ -158,6 +158,8 @@ class ControlPlane(
     private val runtime: NodeRuntime,
     private val httpPort: Int,
     private val token: String,
+    /** 宿主负载探针（T-G7）：null/缺省 = 真实 CPU 探针；测试注入固定值。 */
+    private val loadProbe: (() -> Double?)? = { com.kapp.tidings.agent.HostLoadGuard.systemCpuLoad() },
     private val startedAt: Long = System.currentTimeMillis(),
     /**
      * 公网入口（隧道暴露的控制面地址），空串 = 没配 ⇒ 配对二维码不生成。
@@ -820,6 +822,15 @@ class ControlPlane(
         onArtifact: ((path: String, name: String, bytes: Long, mime: String, sha256: String) -> Unit)? = null,
         onEvent: (eventType: String, cursor: Long, summary: String?, body: String?) -> Unit,
     ): Triple<String?, String, String?> {
+        // 自保门（T-G7，§7.12）：CPU 超阈值拒单避让 —— 如实回因，不静默不排队
+        // （排队的任务会在宿主喘过气前堆成新的过载）。
+        val cpuLoad = loadProbe?.invoke()
+        if (com.kapp.tidings.agent.HostLoadGuard.shouldRefuse(cpuLoad)) {
+            return Triple(
+                null, "error",
+                "host overloaded (cpu=" + ((cpuLoad ?: 0.0) * 100).toInt() + "%) — refusing new tasks politely",
+            )
+        }
         // §7.7 上下文裁剪（T-G6）：超预算的 prompt 头尾保留 + 如实标注 —— 上游长
         // 上下文（前序日志/大段引用）不原样灌给执行侧。
         val prompt = com.kapp.tidings.core.protocol.TaskPromptBudget.clamp(rawPrompt)
@@ -1045,8 +1056,11 @@ class ControlPlane(
         val groupRev = obj["groupRev"]?.let { Codec.intOf(it) }?.toLong()
         val payload = try {
             Codec.channelPayload(
-                channelId, op, fromAgent, task, toAgent, targetTag, expectedResult,
-                resources, sourceMessageIds, deadlineMs, sessionId, groupId, groupRev,
+                channelId = channelId, op = op, fromAgent = fromAgent, task = task,
+                toAgent = toAgent, targetTag = targetTag, expectedResult = expectedResult,
+                resources = resources, sourceMessageIds = sourceMessageIds,
+                deadlineMs = deadlineMs, sessionId = sessionId, groupId = groupId,
+                groupRev = groupRev,
             )
         } catch (e: IllegalArgumentException) {
             // 门 2：构造期 require —— op 互斥 / 恰一 / 租约，违反 = 调用方的形状错误。
