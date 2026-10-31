@@ -43,6 +43,12 @@ class CliSubprocessDriver(
     /** 启动参数（prompt 如何交给 CLI）。真 CLI 的参数变更只动装配处一处。 */
     private val argSpec: (prompt: String) -> List<String>,
     private val newSessionId: () -> String = { java.util.UUID.randomUUID().toString() },
+    /**
+     * 每次任务注入子进程的**模型凭证环境变量**（升级轮 T-3a，ModelEnvMapper 产物）。
+     * 默认空 = 凭证继承 HOME/XDG_*（既有行为零变化）；非空时逐键 put 进
+     * ProcessBuilder.environment() —— 值只进子进程环境，绝不进日志/台账/报文。
+     */
+    private val envOverrides: Map<String, String> = emptyMap(),
 ) : AgentDriver {
 
     /** sessionId → wsPath（空串 = 无工作区上下文，合法）。 */
@@ -82,6 +88,8 @@ class CliSubprocessDriver(
             val exitCode = withContext(Dispatchers.IO) {
                 val pb = ProcessBuilder(listOf(cliPath) + argSpec(prompt))
                 File(wsPath).takeIf { it.isDirectory }?.let { pb.directory(it) }
+                // T-3a：模型凭证注入（节点本地 → 子进程环境）。值绝不进日志/台账/报文。
+                envOverrides.forEach { (key, value) -> pb.environment()[key] = value }
                 // stderr 合并进 stdout：认不出的行会被 mapLine 如实跳过，同时避免双流对拷的死锁。
                 pb.redirectErrorStream(true)
                 val proc = pb.start()
