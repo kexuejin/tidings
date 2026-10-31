@@ -61,14 +61,13 @@ import com.kapp.tidings.generated.resources.desktop_peer_header
 import com.kapp.tidings.generated.resources.desktop_peer_last_seen
 import com.kapp.tidings.generated.resources.desktop_title_agents
 import com.kapp.tidings.generated.resources.desktop_title_files
-import com.kapp.tidings.generated.resources.desktop_title_nodes
-import com.kapp.tidings.generated.resources.desktop_title_tagline
 import com.kapp.tidings.generated.resources.desktop_toolbar_import
 import com.kapp.tidings.generated.resources.desktop_toolbar_more
 import com.kapp.tidings.generated.resources.desktop_toolbar_open_new_window
 import com.kapp.tidings.generated.resources.desktop_toolbar_search
 import com.kapp.tidings.generated.resources.desktop_toolbar_search_placeholder
 import com.kapp.tidings.generated.resources.desktop_view_cabinet
+import com.kapp.tidings.generated.resources.nodes_subtitle_short
 import com.kapp.tidings.generated.resources.ic_add_node
 import com.kapp.tidings.generated.resources.ic_close
 import com.kapp.tidings.generated.resources.ic_external
@@ -84,22 +83,20 @@ import com.kapp.tidings.ui.components.AppIconButton
 @Composable
 public fun DesktopTitleBar(state: RelayUiState, view: DesktopView, selectedPeerId: String?, now: Long) {
     val peer = state.peer(selectedPeerId)
-    val subtitle = when {
+    // 副标题只在「有内容可说」时出现（V2 精简）：
+    //   · 会话视图：有选中才有 peer 头（地址 · 在线 · 最后在线）；没有选中就**不印** ——
+    //     旧版回退到 tagline（「局域网直连的消息与文件传输」），那句在窗口打开的每一秒都
+    //     成立，不需要每秒重读一遍；空着比重复更诚实。
+    //   · 节点视图：印「N 个节点 · M 在线」（`nodes_subtitle_short`，与手机 NodesScreen
+    //     同一个 key），**不印** `selfNodeId.take(8)`（B13 同族泄漏：完整 id 在节点详情
+    //     与设置里点得到，那里是「身份」的合法语境；标题栏是「这一页是什么」的语境，
+    //     一串 8 位十六进制在那里没有信息量、只有噪音）。原型 `tsub` 印了
+    //     「本机 a3f9c21e」，此处**有意偏离原型** —— 泄漏判据高于逐字保真。
+    //   · 文件/文件柜/工作区：屏说明句照旧（原型 `tsub` 同款）。
+    val subtitle: String? = when {
         view == DesktopView.Files -> stringResource(Res.string.desktop_title_files)
         view == DesktopView.Cabinet -> stringResource(Res.string.desktop_view_cabinet)
-        // 桌面副标题与手机**不是**同一个 key：原型 `tsub(v)`（`prototype/relay.html:4853`）逐字
-        // 「4 个节点在线 · 本机 a3f9c21e」；手机那条（`prototype/relay.html:3357`）是
-        // 「${nodes.length} 个节点 · ${online} 在线」= `nodes_subtitle_short`。
-        // 收敛时这一行被误换成手机 key（`desktop_title_nodes` 一度全仓 0 消费点），
-        // 现按 Lead 裁决（D-N1）改回；`nodes_subtitle_short` 仍由手机 `NodesScreen` 与
-        // 无标题栏宿主的兜底 `NodeCountLine`（`DesktopNodesPane.kt`）消费。
-        view == DesktopView.Nodes -> stringResource(
-            Res.string.desktop_title_nodes,
-            state.onlineCount,
-            state.selfNodeId.take(8),
-        )
-        // 工作区副标题：这一屏没有「选中项」可描述（选中一个 Agent 也不改标题栏，
-        // 选择态住在屏内），所以给一句说明它是什么，与文件柜那条同形。
+        view == DesktopView.Nodes -> stringResource(Res.string.nodes_subtitle_short, state.peers.size, state.onlineCount)
         view == DesktopView.Agents -> stringResource(Res.string.desktop_title_agents)
         peer != null -> stringResource(
             Res.string.desktop_peer_header,
@@ -107,7 +104,7 @@ public fun DesktopTitleBar(state: RelayUiState, view: DesktopView, selectedPeerI
             if (peer.online) stringResource(Res.string.desktop_peer_connected) else stringResource(Res.string.common_offline),
             stringResource(Res.string.desktop_peer_last_seen, relativeTime(peer.lastSeenAt, now)),
         )
-        else -> stringResource(Res.string.desktop_title_tagline)
+        else -> null
     }
     Surface(color = MaterialTheme.colorScheme.surface) {
         Row(
@@ -115,14 +112,16 @@ public fun DesktopTitleBar(state: RelayUiState, view: DesktopView, selectedPeerI
             verticalAlignment = Alignment.CenterVertically,
         ) {
             Text(stringResource(Res.string.desktop_app_title), style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.SemiBold)
-            Spacer(Modifier.width(LocalAppSpacing.current.md))
-            Text(
-                subtitle,
-                style = MaterialTheme.typography.bodySmall,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-                maxLines = 1,
-                overflow = TextOverflow.Ellipsis,
-            )
+            subtitle?.let { sub ->
+                Spacer(Modifier.width(LocalAppSpacing.current.md))
+                Text(
+                    sub,
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                )
+            }
             Spacer(Modifier.weight(1f))
             Text(
                 stringResource(view.label),

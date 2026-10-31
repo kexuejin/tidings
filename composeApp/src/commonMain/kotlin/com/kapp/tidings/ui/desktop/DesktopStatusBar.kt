@@ -31,7 +31,6 @@ import com.kapp.tidings.domain.RelayUiState
 import com.kapp.tidings.ui.components.StatusDot
 import com.kapp.tidings.ui.theme.RelayElevations
 import com.kapp.tidings.generated.resources.Res
-import com.kapp.tidings.generated.resources.desktop_menu_diagnostics
 import com.kapp.tidings.generated.resources.desktop_phase_failed
 import com.kapp.tidings.generated.resources.desktop_phase_running
 import com.kapp.tidings.generated.resources.desktop_phase_starting
@@ -44,7 +43,6 @@ import com.kapp.tidings.generated.resources.desktop_status_pending
 import com.kapp.tidings.generated.resources.desktop_status_waiting
 import com.kapp.tidings.generated.resources.chat_group_id_copied
 import com.kapp.tidings.generated.resources.node_state_stopped
-import com.kapp.tidings.generated.resources.ic_eye
 import com.kapp.tidings.generated.resources.ic_link
 import com.kapp.tidings.domain.model.NodePhase
 import org.jetbrains.compose.resources.StringResource
@@ -57,7 +55,6 @@ public fun DesktopStatusBar(
     state: RelayUiState,
     view: DesktopView,
     sizeClass: DesktopWindowSizeClass,
-    controlPlanePort: Int,
     actions: DesktopShellActions,
     /** 复制回执是否亮着（壳持有状态并 2 秒自清）。 */
     copyReceiptActive: Boolean = false,
@@ -142,41 +139,18 @@ public fun DesktopStatusBar(
                 )
             }
             Spacer(Modifier.weight(1f))
-            // 端口与控制面属「次要项」：原型在 Medium 就把次要项收起来（README:79-80）。
-            // 两者都只在这一处出现 —— 早先额外渲染过一个裸的 boundUdpPort，
-            // 和后面的「UDP … · TCP …」并排就成了「17878 UDP 17878」。
-            if (sizeClass == DesktopWindowSizeClass.Expanded) {
-                Text(
-                    // TCP 端口同样不能从 `state.peers` 里找自己（见上面配对链接那段）：
-                    // 那会恒读成 0。设置里那个才是配着要用的端口（`ScanRangeEntry`）。
-                    "UDP $selfPort · TCP ${state.settings.tcpPort}",
-                    style = MaterialTheme.typography.labelSmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    maxLines = 1,
-                    softWrap = false,
-                )
-                // controlPlaneLabel 自带「控制面」前缀，这里不要再拼一次，
-                // 否则读作「控制面 控制面 127.0.0.1:56744」。
-                Text(
-                    // 「控制面未启用」那条没有占位符，多传的参数不会渲染出来。
-                    stringResource(controlPlaneLabel(controlPlanePort), controlPlanePort),
-                    style = MaterialTheme.typography.labelSmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    maxLines = 1,
-                    softWrap = false,
-                )
-            }
+            // V2 精简：端口与控制面整段摘除 —— 它们是诊断包导出里就有的结构化字段，
+            // 印在每个窗口的 26px 里换不来任何动作（观测项的重复）。真要看端口：
+            // 设置 · 连接 / 诊断包。曾经为这段维护的「不能从 state.peers 找自己」、
+            // 「controlPlaneLabel 别拼两次」两条注释随分支一起退场。
             if (pairingLink != null) {
                 StatusBarAction(stringResource(Res.string.desktop_status_pairing_link), painterResource(Res.drawable.ic_link), compact) {
                     actions.onCopyPairingLink(pairingLink)
                     onCopied()
                 }
             }
-            // 诊断包是桌面专属能力：调用方给 null 时整条动作不画。
-            val exportDiagnostics = actions.onExportDiagnostics
-            if (exportDiagnostics != null) {
-                StatusBarAction(stringResource(Res.string.desktop_menu_diagnostics), painterResource(Res.drawable.ic_eye), compact, exportDiagnostics)
-            }
+            // 诊断包动作随 V2 归并进系统菜单（同一条 + ⌘ 快捷键可达）：双入口重复；
+            // 配对链接没有第二入口，照原型 .r 保留。
             // 复制回执（壳持有，2 秒自清）：一次复制发一条系统通知太重、还会进通知中心；
             // 行内小字足够，且随界面语言走（复用「已复制」既有文案，不新增 key）。
             if (copyReceiptActive) {
@@ -242,10 +216,3 @@ public fun phaseLabel(phase: NodePhase): StringResource = when (phase) {
     NodePhase.Running -> Res.string.desktop_phase_running
     NodePhase.Failed -> Res.string.desktop_phase_failed
 }
-
-/**
- * 控制面那一行。带端口的那条是 `%1$d`，端口由调用点自己传进来 ——
- * [StringResource] 只记得住"是哪条文案"，记不住参数。
- */
-public fun controlPlaneLabel(port: Int): StringResource =
-    if (port > 0) Res.string.desktop_status_control_plane else Res.string.desktop_status_control_plane_off
