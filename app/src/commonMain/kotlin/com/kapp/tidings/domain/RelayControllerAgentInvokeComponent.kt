@@ -438,19 +438,20 @@ internal class RelayControllerAgentInvokeComponent(private val host: RelayContro
                 tagBoards[cardId] = TagBoardEntry(groupId, agentId, seat, tagTask, wsId, requiredTag)
                 host.scope.launch {
                     val bannerTitle = runCatching { host.uiTexts.tagNoMatchTitle(requiredTag) }.getOrNull().orEmpty()
-                        .ifEmpty { "任务已挂起（标签 " + requiredTag + " 无在线节点）" }
                     runCatching {
-                        broadcastBoardCard(
-                            groupId, agentId,
-                            buildJsonObject {
-                                put("cardId", cardId)
-                                put("rev", 1)
-                                put("type", "team-task-board")
-                                put("title", tagTask.take(80))
+                        // 文案桥空（未装文案壳）= 卡不带 banner（空正文不发帧的既有纪律
+                        // 同族：横幅缺失仍有点题 title 与动作，不算沉默）。
+                        val card = buildJsonObject {
+                            put("cardId", cardId)
+                            put("rev", 1)
+                            put("type", "team-task-board")
+                            put("title", tagTask.take(80))
+                            if (bannerTitle.isNotEmpty()) {
                                 put("banner", buildJsonObject {
                                     put("text", bannerTitle)
                                     put("tone", "warn")
                                 })
+                            }
                                 put("actions", kotlinx.serialization.json.buildJsonArray {
                                     add(buildJsonObject {
                                         put("actionId", TagBoardActions.RETRY)
@@ -463,8 +464,8 @@ internal class RelayControllerAgentInvokeComponent(private val host: RelayContro
                                         put("style", "primary")
                                     })
                                 })
-                            },
-                        )
+                            }
+                        broadcastBoardCard(groupId, agentId, card)
                     }
                     runCatching { announceAgentGaveUp(groupId, agentId, seat.name, messageId, unavailable = true) }
                 }

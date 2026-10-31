@@ -4,6 +4,7 @@ package com.kapp.tidings.feature.agents
 
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
@@ -16,8 +17,10 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
-import androidx.compose.ui.unit.dp
 import com.kapp.tidings.ui.theme.LocalAppSpacing
+import com.kapp.tidings.generated.resources.Res
+import com.kapp.tidings.generated.resources.agent_live_log_title
+import org.jetbrains.compose.resources.stringResource
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
@@ -76,7 +79,7 @@ fun AgentLiveLogPanel(sessionId: String?, modifier: Modifier = Modifier) {
     val scroll = rememberScrollState()
     Column(modifier = modifier.fillMaxWidth()) {
         Text(
-            text = "实时输出",
+            text = stringResource(Res.string.agent_live_log_title),
             style = MaterialTheme.typography.labelMedium,
             fontWeight = FontWeight.SemiBold,
             color = MaterialTheme.colorScheme.onSurface,
@@ -84,7 +87,7 @@ fun AgentLiveLogPanel(sessionId: String?, modifier: Modifier = Modifier) {
         Column(
             Modifier
                 .fillMaxWidth()
-                .height(180.dp)
+                .fillMaxHeight(0.4f)
                 .background(MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.4f))
                 .verticalScroll(scroll)
                 .padding(LocalAppSpacing.current.md10),
