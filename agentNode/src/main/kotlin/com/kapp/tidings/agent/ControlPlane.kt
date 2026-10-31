@@ -19,11 +19,14 @@ import com.kapp.tidings.core.protocol.AgentGrantStates
 import com.kapp.tidings.core.protocol.AgentSessionPick
 import com.kapp.tidings.core.protocol.AgentSessionStates
 import com.kapp.tidings.core.protocol.sameAgent
+import com.kapp.tidings.core.protocol.AgentChannelPayload
+import com.kapp.tidings.core.protocol.CodecInvoke
 import com.kapp.tidings.core.protocol.Codec
 import com.kapp.tidings.core.protocol.DecodeResult
 import com.kapp.tidings.core.protocol.MsgTypes
 import com.kapp.tidings.core.protocol.Protocol
 import com.kapp.tidings.core.protocol.makeEnvelope
+import com.kapp.tidings.core.protocol.newId
 import com.kapp.tidings.core.session.NodeRuntime
 import com.kapp.tidings.core.transport.LocalFile
 import com.kapp.tidings.core.transport.SendOutcome
@@ -35,6 +38,7 @@ import kotlinx.coroutines.Job
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.runBlocking
 import kotlinx.serialization.json.Json
+import kotlinx.serialization.json.JsonArray
 import kotlinx.serialization.json.JsonElement
 import kotlinx.serialization.json.JsonNull
 import kotlinx.serialization.json.JsonObject
@@ -219,6 +223,14 @@ class ControlPlane(
      * desktopApp 装配域层后接上；agentNode 单进程保持 null ⇒ 503。
      */
     var invokeDispatcher: AgentInvokeDispatcher? = null,
+    /**
+     * M7-T2（D-016 后半步）：Channel 委派的**接收宿主侧编排器**。null = 本机不承接
+     * 委派（agentNode 单进程测试 / 未装配的宿主）—— 入站帧如实答 no-executor，
+     * 不静默吞（AGENTS §3：_declare 了就要能答_）。
+     *
+     * 由装配方在 [start] 之前传入；入站分派与 HTTP 受理判定都读它。
+     */
+    val channelOrchestrator: ChannelOrchestrator? = null,
 ) {
 
     private val json = Json { ignoreUnknownKeys = true }
@@ -332,6 +344,10 @@ class ControlPlane(
                 workspaces.recordInboundWorkspace(envelope)
                 // 会话历史在宿主侧，节点答不了：只排队，等宿主来读（见该 store 的 KDoc）。
                 sessionPages.recordInbound(envelope)
+                // M7-T2：agent-channel **不在这里直通编排器**。决策包 §1.6 的入站授权
+                // （AgentExecAuthorizer：群成员身份 + 可信设备）判据住在域层，agentNode
+                // 只有设备级 grants —— 直通等于绕过那道门。唯一入口是 [channelAccepted]，
+                // 由域层在授权通过后调用；没有域层的帧由域层的诚实拒绝兜底（no-executor）。
                 if (grants.recordInboundGrant(envelope)) {
                     val snap = grants.snapshot()
                     // 能发来 grant-request 就说明对方认识 grant 帧（cap 门控在它的发送侧做），
@@ -361,6 +377,53 @@ class ControlPlane(
                 }
             }
         }
+
+    /**
+     * 把一条入站 `agent-channel` 交给编排器；拆不出来的帧如实回 no-executor。
+     *
+     * 为什么不在这里做授权：决策包 §1.6 说入站过 `AgentExecAuthorizer`，但那道门的
+     * 判据（群元数据 / virtualAgents / 可信设备台账）住在**域层**；agentNode 只有
+     * grants 白名单（对设备，不对发起 agent）。桌面壳装配时把 [channelAccepted]
+     * 接到域层分流（授权判据复用 invokeCtl 那一套）；agentNode 单进程没有域层 ⇒
+     * [channelOrchestrator] 为 null，一律诚实拒绝 —— 与 /v1/agent/invoke 的 503
+     * 同一条「不假装接了单」的纪律。
+     */
+    private suspend fun offerToChannelOrchestrator(envelope: com.kapp.tidings.core.protocol.Envelope) {
+        val orchestrator = channelOrchestrator
+        val payload = (envelope.payload as? kotlinx.serialization.json.JsonObject)
+            ?.let { runCatching { Codec.wireJson.decodeFromJsonElement(AgentChannelPayload.serializer(), it) }.getOrNull() }
+        if (orchestrator == null || payload == null) {
+            // 帧已过 Codec 校验才可能到这儿；拆不出来 = 内部错。即便如此也要答：
+            // 发起方在等一帧结果，沉默会让它白等到租约超时。
+            val channelId = (envelope.payload as? kotlinx.serialization.json.JsonObject)
+                ?.get("channelId")?.let { it as? kotlinx.serialization.json.JsonPrimitive }?.content
+                ?: return
+            runCatching {
+                runtime.sendAgentChannelResult(
+                    peerId = envelope.from,
+                    channelId = channelId,
+                    ok = false,
+                    status = CodecInvoke.InvokeResultStates.NO_EXECUTOR,
+                    error = "this host has no channel orchestrator",
+                )
+            }
+            return
+        }
+        orchestrator.offer(payload, envelope.from)
+    }
+
+    /**
+     * 域层分流判定（桌面壳装配用）：这台宿主此刻**愿不愿意承接**这条委派？
+     *
+     * 返回 true = 编排器已受理（幂等/互斥/租约/回执都归它）；false = 调用方按
+     * 自己的判据回 no-executor。授权判据在调用方（域层才有群元数据），编排器
+     * 只答「本机有没有承接能力」。null = 本机没有编排器。
+     */
+    fun channelAccepted(payload: AgentChannelPayload, fromNode: String): Boolean {
+        val orchestrator = channelOrchestrator ?: return false
+        orchestrator.offer(payload, fromNode)
+        return true
+    }
 
     // ---------------------------------------------------------------- routing
 
@@ -436,6 +499,9 @@ class ControlPlane(
                 // 跨端派单（M4，规格 §6.2）：HTTP 入口只解包，派发委托给域层网道（§6.2 裁决：
                 // 与 /v1/agent/run 的单向宣告帧是两种职责，详见追踪器的路由对账记录）。
                 path == "/v1/agent/invoke" && method == "POST" -> agentInvoke(exchange)
+                // M7-T2（决策包 §1.6）：Channel 委派的 HTTP 入口 —— 发起侧的门在这里：
+                // 对端没声明 agc1 ⇒ 409，帧根本不构造（发送侧不产出注定被拒的帧）。
+                path == "/v1/agent/channel" && method == "POST" -> agentChannel(exchange)
                 // 某个 agent 的执行名单（谁能让它干活）—— 逐设备勾选。
                 path == "/v1/agent/exec-devices" && method == "GET" -> readExecDeviceList(exchange)
                 path == "/v1/agent/exec-devices" && method == "PUT" -> writeExecDevice(exchange)
@@ -878,6 +944,83 @@ class ControlPlane(
             onFailure = { t ->
                 respond(exchange, 500, errorJson("invoke-failed", t.message ?: (t::class.simpleName ?: "unknown")))
             },
+        )
+    }
+
+    /**
+     * `POST /v1/agent/channel` —— Channel 委派的 HTTP 发起入口（M7-T2，决策包 §1.6）。
+     *
+     * 形状：`{"to":"<IP 或 nodeId>","channelId":"…","op":"assign|transfer","fromAgent":"…","task":"…",""" +
+        """"toAgent"/"targetTag" 恰一, "expectedResult"/"resources"/"sourceMessageIds"/"deadlineMs"/"sessionId"/"groupId"/"groupRev" 可选}`。
+     *
+     * 三道门（顺序即责任链）：
+     *  1. **caps 门（决策包 §1.6 的「发送前逐类门控」）**：对端没声明 `agc1` ⇒ 409，
+     *     帧**不构造**——RELIABLE 发进老端 = ACK 后整帧拒收 + 队列重传（AGENTS §3
+     *     第 2 种「没收到」的时间形态），发送侧不产出注定被拒的帧；
+     *  2. **构造期校验**：`Codec.channelPayload` 的 require（op 互斥 / toAgent ⊕ targetTag
+     *     恰一 / assign 必带租约）—— 违反 400，崩在发送侧而不是对端；
+     *  3. **自检闭环**：`deliverAgentFrame` 把要发的帧先 `decodeTcp` 回来，自己都不收就不发。
+     */
+    private fun agentChannel(exchange: HttpExchange) {
+        val obj = readJsonObject(exchange) ?: return
+        val to = obj["to"]?.jsonPrimitiveOrNull()?.contentOrNull?.trim().orEmpty()
+        if (to.isEmpty()) {
+            respond(exchange, 400, errorJson("bad-request", "缺少 to（对方 IP 或 nodeId）"))
+            return
+        }
+        val nodeId = resolveTargetNodeId(to, obj["port"]?.jsonPrimitiveOrNull()?.contentOrNull?.toIntOrNull())
+        if (nodeId == null) {
+            respond(
+                exchange,
+                404,
+                errorJson("peer-unreachable", "3 秒内无法与 " + to + " 建立握手（对方设备是否已启动？）"),
+            )
+            return
+        }
+        // 门 1：caps —— 逐类查 agc1（不许按 agn1 放行，决策包 §1.6）。
+        if (!runtime.peerDeclares(nodeId, MsgTypes.CAP_AGENT_CHANNEL)) {
+            respond(
+                exchange,
+                409,
+                errorJson(
+                    "peer-unsupported",
+                    "对方（" + to + "）未声明 " + MsgTypes.CAP_AGENT_CHANNEL +
+                        "（Channel 委派网道），按 PPE-1 §4 不发这一帧；" +
+                        "对端升级前这个委派只能走别的方式",
+                ),
+            )
+            return
+        }
+        val channelId = obj["channelId"]?.jsonPrimitiveOrNull()?.contentOrNull?.takeIf { it.isNotBlank() }
+            ?: newId()
+        val op = obj["op"]?.jsonPrimitiveOrNull()?.contentOrNull.orEmpty()
+        val fromAgent = obj["fromAgent"]?.jsonPrimitiveOrNull()?.contentOrNull.orEmpty()
+        val task = obj["task"]?.jsonPrimitiveOrNull()?.contentOrNull.orEmpty()
+        val toAgent = obj["toAgent"]?.jsonPrimitiveOrNull()?.contentOrNull
+        val targetTag = obj["targetTag"]?.jsonPrimitiveOrNull()?.contentOrNull
+        val expectedResult = obj["expectedResult"]?.jsonPrimitiveOrNull()?.contentOrNull
+        val resources = (obj["resources"] as? JsonArray)?.mapNotNull { it.jsonPrimitiveOrNull()?.contentOrNull }
+        val sourceMessageIds = (obj["sourceMessageIds"] as? JsonArray)?.mapNotNull { it.jsonPrimitiveOrNull()?.contentOrNull }
+        val deadlineMs = obj["deadlineMs"]?.let { Codec.intOf(it) }?.toLong()
+        val sessionId = obj["sessionId"]?.jsonPrimitiveOrNull()?.contentOrNull
+        val groupId = obj["groupId"]?.jsonPrimitiveOrNull()?.contentOrNull
+        val groupRev = obj["groupRev"]?.let { Codec.intOf(it) }?.toLong()
+        val payload = try {
+            Codec.channelPayload(
+                channelId, op, fromAgent, task, toAgent, targetTag, expectedResult,
+                resources, sourceMessageIds, deadlineMs, sessionId, groupId, groupRev,
+            )
+        } catch (e: IllegalArgumentException) {
+            // 门 2：构造期 require —— op 互斥 / 恰一 / 租约，违反 = 调用方的形状错误。
+            respond(exchange, 400, errorJson("bad-request", e.message ?: "invalid channel payload"))
+            return
+        }
+        deliverAgentFrame(
+            exchange,
+            nodeId,
+            MsgTypes.AGENT_CHANNEL,
+            payload,
+            send = { runtime.sendAgentChannel(peerId = nodeId, channelId = channelId, op = op, fromAgent = fromAgent, task = task, toAgent = toAgent, targetTag = targetTag, expectedResult = expectedResult, resources = resources, sourceMessageIds = sourceMessageIds, deadlineMs = deadlineMs, sessionId = sessionId, groupId = groupId, groupRev = groupRev) },
         )
     }
 

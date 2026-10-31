@@ -49,15 +49,15 @@ class CapabilityAndNotificationSettingsTest {
     fun theTwoSwitchesNarrowTheDeclaredCapabilities() {
         assertEquals(MsgTypes.MOBILE_CAPS, settings().caps(), "两个都开 = 原来那套 MOBILE_CAPS，顺序都不能变")
         assertEquals(
-            listOf(MsgTypes.CAP_MOBILE_TEXT, MsgTypes.CAP_AGENT_SESSION, MsgTypes.CAP_AGENT_QUEUE, MsgTypes.CAP_AGENT_WORKSPACE, MsgTypes.CAP_AGENT_GRANT, MsgTypes.CAP_AGENT_SESSION_PAGE, MsgTypes.CAP_TABLE_TEXT, MsgTypes.CAP_ATTACHMENT, MsgTypes.CAP_GROUP_TEXT_ATTRIBUTED, MsgTypes.CAP_AGENT_INVOKE, MsgTypes.CAP_AGENT_ARTIFACT_VERIFIED),
+            listOf(MsgTypes.CAP_MOBILE_TEXT, MsgTypes.CAP_AGENT_SESSION, MsgTypes.CAP_AGENT_QUEUE, MsgTypes.CAP_AGENT_WORKSPACE, MsgTypes.CAP_AGENT_GRANT, MsgTypes.CAP_AGENT_SESSION_PAGE, MsgTypes.CAP_TABLE_TEXT, MsgTypes.CAP_ATTACHMENT, MsgTypes.CAP_GROUP_TEXT_ATTRIBUTED, MsgTypes.CAP_AGENT_INVOKE, MsgTypes.CAP_AGENT_ARTIFACT_VERIFIED, MsgTypes.CAP_AGENT_CHANNEL),
             settings(record = false).caps(),
         )
         assertEquals(
-            listOf(MsgTypes.CAP_MOBILE_RECORD, MsgTypes.CAP_AGENT_SESSION, MsgTypes.CAP_AGENT_QUEUE, MsgTypes.CAP_AGENT_WORKSPACE, MsgTypes.CAP_AGENT_GRANT, MsgTypes.CAP_AGENT_SESSION_PAGE, MsgTypes.CAP_TABLE_TEXT, MsgTypes.CAP_ATTACHMENT, MsgTypes.CAP_GROUP_TEXT_ATTRIBUTED, MsgTypes.CAP_AGENT_INVOKE, MsgTypes.CAP_AGENT_ARTIFACT_VERIFIED),
+            listOf(MsgTypes.CAP_MOBILE_RECORD, MsgTypes.CAP_AGENT_SESSION, MsgTypes.CAP_AGENT_QUEUE, MsgTypes.CAP_AGENT_WORKSPACE, MsgTypes.CAP_AGENT_GRANT, MsgTypes.CAP_AGENT_SESSION_PAGE, MsgTypes.CAP_TABLE_TEXT, MsgTypes.CAP_ATTACHMENT, MsgTypes.CAP_GROUP_TEXT_ATTRIBUTED, MsgTypes.CAP_AGENT_INVOKE, MsgTypes.CAP_AGENT_ARTIFACT_VERIFIED, MsgTypes.CAP_AGENT_CHANNEL),
             settings(text = false).caps(),
         )
         assertEquals(
-            listOf(MsgTypes.CAP_AGENT_SESSION, MsgTypes.CAP_AGENT_QUEUE, MsgTypes.CAP_AGENT_WORKSPACE, MsgTypes.CAP_AGENT_GRANT, MsgTypes.CAP_AGENT_SESSION_PAGE, MsgTypes.CAP_TABLE_TEXT, MsgTypes.CAP_ATTACHMENT, MsgTypes.CAP_GROUP_TEXT_ATTRIBUTED, MsgTypes.CAP_AGENT_INVOKE, MsgTypes.CAP_AGENT_ARTIFACT_VERIFIED),
+            listOf(MsgTypes.CAP_AGENT_SESSION, MsgTypes.CAP_AGENT_QUEUE, MsgTypes.CAP_AGENT_WORKSPACE, MsgTypes.CAP_AGENT_GRANT, MsgTypes.CAP_AGENT_SESSION_PAGE, MsgTypes.CAP_TABLE_TEXT, MsgTypes.CAP_ATTACHMENT, MsgTypes.CAP_GROUP_TEXT_ATTRIBUTED, MsgTypes.CAP_AGENT_INVOKE, MsgTypes.CAP_AGENT_ARTIFACT_VERIFIED, MsgTypes.CAP_AGENT_CHANNEL),
             settings(text = false, record = false).caps(),
             "两个开关都关掉也不影响 agn1 / agq1 / aws1 / tbl1 / agi1 / agf1：它们是事实声明，不是用户偏好",
         )
@@ -81,7 +81,7 @@ class CapabilityAndNotificationSettingsTest {
     fun theDeclaredCapabilitiesReachTheProfileThatGetsBroadcast() {
         val profile = settings(text = false).toProfile(host = "192.168.1.44", ver = "relay-0.1.0")
         assertEquals(
-            listOf(MsgTypes.CAP_MOBILE_RECORD, MsgTypes.CAP_AGENT_SESSION, MsgTypes.CAP_AGENT_QUEUE, MsgTypes.CAP_AGENT_WORKSPACE, MsgTypes.CAP_AGENT_GRANT, MsgTypes.CAP_AGENT_SESSION_PAGE, MsgTypes.CAP_TABLE_TEXT, MsgTypes.CAP_ATTACHMENT, MsgTypes.CAP_GROUP_TEXT_ATTRIBUTED, MsgTypes.CAP_AGENT_INVOKE, MsgTypes.CAP_AGENT_ARTIFACT_VERIFIED),
+            listOf(MsgTypes.CAP_MOBILE_RECORD, MsgTypes.CAP_AGENT_SESSION, MsgTypes.CAP_AGENT_QUEUE, MsgTypes.CAP_AGENT_WORKSPACE, MsgTypes.CAP_AGENT_GRANT, MsgTypes.CAP_AGENT_SESSION_PAGE, MsgTypes.CAP_TABLE_TEXT, MsgTypes.CAP_ATTACHMENT, MsgTypes.CAP_GROUP_TEXT_ATTRIBUTED, MsgTypes.CAP_AGENT_INVOKE, MsgTypes.CAP_AGENT_ARTIFACT_VERIFIED, MsgTypes.CAP_AGENT_CHANNEL),
             profile.caps,
         )
         assertEquals("self", profile.nodeId, "收窄 caps 不该顺手改动档案的其它字段")
@@ -150,9 +150,24 @@ class CapabilityAndNotificationSettingsTest {
     /** 桌面端的 profile 必须带上 ag1（caps 进了 profile 才是真广播出去的东西）。 */
     @Test
     fun theAgentHostProfileCarriesAg1() {
-        val profile = settings().toProfile(host = "mac-mini", ver = "relay-test", advertiseAgent = true)
+        // channelCapable=false 是桌面装配点（RelayController.start）传的：桌面不声明 agc1。
+        val profile = settings().toProfile(
+            host = "mac-mini", ver = "relay-test", advertiseAgent = true,
+            channelCapable = false,
+        )
         assertTrue(MsgTypes.CAP_AGENT in profile.caps, "profile.caps 必须含 ag1：${profile.caps}")
         assertTrue(profile.isAgentNode(), "isAgentNode() 必须为真 —— 手机端就是读它")
+        // D-017 修订：桌面不声明 agc1 —— caps 预算 16/16 满额（Limits.CAPS=16，
+        // share 支持的宿主加一项整份 profile 被对端拒收），且桌面↔桌面网道今天没有
+        // 消费者；手机侧照常声明（误指名回诚实拒绝）。桌面激活等用户裁决。
+        assertFalse(
+            MsgTypes.CAP_AGENT_CHANNEL in profile.caps,
+            "桌面 profile 不该含 agc1（D-017 修订）：${profile.caps}",
+        )
+        assertTrue(
+            MsgTypes.CAP_AGENT_CHANNEL in settings().caps(),
+            "手机 caps() 必须含 agc1：${settings().caps()}",
+        )
 
         val plain = settings().toProfile(host = "mac-mini", ver = "relay-test")
         assertFalse(plain.isAgentNode(), "默认（手机）必须不为 agent 节点：${plain.caps}")
@@ -222,7 +237,7 @@ class CapabilityAndNotificationSettingsTest {
 
         assertEquals(false, controller.state.value.settings.waitFrameCapability)
         assertEquals(
-            listOf(MsgTypes.CAP_MOBILE_RECORD, MsgTypes.CAP_AGENT_SESSION, MsgTypes.CAP_AGENT_QUEUE, MsgTypes.CAP_AGENT_WORKSPACE, MsgTypes.CAP_AGENT_GRANT, MsgTypes.CAP_AGENT_SESSION_PAGE, MsgTypes.CAP_TABLE_TEXT, MsgTypes.CAP_ATTACHMENT, MsgTypes.CAP_GROUP_TEXT_ATTRIBUTED, MsgTypes.CAP_AGENT_INVOKE, MsgTypes.CAP_AGENT_ARTIFACT_VERIFIED),
+            listOf(MsgTypes.CAP_MOBILE_RECORD, MsgTypes.CAP_AGENT_SESSION, MsgTypes.CAP_AGENT_QUEUE, MsgTypes.CAP_AGENT_WORKSPACE, MsgTypes.CAP_AGENT_GRANT, MsgTypes.CAP_AGENT_SESSION_PAGE, MsgTypes.CAP_TABLE_TEXT, MsgTypes.CAP_ATTACHMENT, MsgTypes.CAP_GROUP_TEXT_ATTRIBUTED, MsgTypes.CAP_AGENT_INVOKE, MsgTypes.CAP_AGENT_ARTIFACT_VERIFIED, MsgTypes.CAP_AGENT_CHANNEL),
             controller.state.value.settings.caps(),
             "重启后广播出去的能力必须还是用户关掉之后的那个（agn1 / agq1 / aws1 / tbl1 / agf1 恒在，与开关无关）",
         )

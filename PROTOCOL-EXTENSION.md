@@ -404,6 +404,65 @@ ACK 后丢弃，租约到期给出如实的超时卡 —— 比发送侧静默�
 卡片只在 done、预算）；`app/src/jvmTest/.../TwoNodeAgentInvokeTest.kt`（双节点全回路：
 到达 / 零刷屏 / 断连超时 / 审批防重）。
 
+### 6.14 `agent-channel` / `agent-channel-result` — 跨宿主任务委派（cap: `agc1`，M7-T2）
+
+agent ↔ agent 的结构化协作原语：`assign`（子任务委派、**所有权保留**、调用方挂起等
+结果）与 `transfer`（完整移交、**所有权转移**、调用方退出）。与 `agent-invoke`（M4）
+的分工是「两种职责不共用一帧」的既定裁定：invoke 是人类 Leader → 插件的派单 RPC，
+channel 是 agent 之间的委派原语；资源互斥（`resources` 声明式串行化）也只在这族帧里
+表达。判法照抄 `CodecInvoke`：op 两态互斥混写拒帧、result 的 `ok ⟺ status==done` 自洽。
+
+**取值域单一来源**（防「键在、值不在」的整帧拒收）：`ChannelOps`（两值封闭）、
+`ChannelTags.isWellFormed`（标签形状）、`ChannelResources.isWellFormed`（`browser` /
+`gpu` 固定 token + `workspace:<绝对路径>` 前缀族）——校验器（收端）、构造器（发端）、
+编排器（互斥台账）三处引用同一份谓词。
+
+`agent-channel`（请求，发起方宿主 → 接收方宿主，单播 P2P）：
+
+| 键 | 约束 |
+|---|---|
+| `channelId` | string ≤ 64；幂等键 + 结果回指 |
+| `op` | `assign` \| `transfer`（封闭；两态字段互斥） |
+| `fromAgent` | string ≤ 64 —— 调用方 agent |
+| `toAgent` / `targetTag` | **恰一**（指名 vs 按标签路由，M7-T4）；`transfer` 只许 `toAgent` |
+| `task` | 非空，UTF-8 ≤ 4096 |
+| `expectedResult` | 仅 `assign`（做成什么样算完）；`transfer` 禁（验收标准归新所有者） |
+| `resources` | 可选 JSON 数组 ≤ 8，每项过 `ChannelResources.isWellFormed` —— 声明式互斥 |
+| `sourceMessageIds` | 可选数组 ≤ 8 —— 任务出处的群消息回指 |
+| `deadlineMs` | **仅 assign 必填**（租约；排队 + 执行全程计租）；`transfer` 禁 |
+| `sessionId` / `groupId` / `groupRev` / `at` | 可选 —— 归属与溯源 |
+
+`agent-channel-result`（应答，接收方 → 发起方）：
+
+| 键 | 约束 |
+|---|---|
+| `channelId` | 回指请求 |
+| `ok` + `status` | 自洽：`ok` ⟺ `status == "done"` |
+| `status` | **复用 `CodecInvoke.InvokeResultStates` 词汇**（不另立第二份结果状态机） |
+| `summary` / `error` | 可选（≤ 2000 / ≤ 200） |
+| `artifactIds` | 可选数组 ≤ 8 —— 只回执引用不回执内容（产物走 `agent-artifact` + 按需拉取） |
+| `at` | 可选 |
+
+**互斥的执行点**：接收方宿主的 `ChannelOrchestrator`（agentNode）—— `workspace:<路径>`
+与 `browser`/`gpu` 都是宿主本地命名空间，宿主本地互斥即全局互斥。每个资源一把锁、
+多资源原子获取（声明序拿、逆序放）；同 `channelId` 重投幂等；排队中的 assign 超过自身
+`deadlineMs` 回 `timeout` 并出队（不静默吞）。
+
+**声明语义（D-017 修订）**：手机声明 `agc1` = 「解得动这族帧」——被误指名时回一帧
+诚实的 `no-executor`，不沉默到对端租约超时；**桌面端（`RelaySettings.caps()`）暂不声明**
+—— caps 预算 16/16 满额（`Limits.CAPS=16`，多一项整份 profile 被对端拒收），且桌面↔桌面
+网道当前没有消费者，激活等用户裁决。`agentNode` 的编排器（承接执行）经 domain 桥装配；
+`POST /v1/agent/channel` 是发起入口，对端不声明 `agc1` ⇒ 409，帧不构造。
+
+**旧节点行为**：不声明 `agc1` ⇒ 发送侧连帧都不发（门控在调用方）；违规发出的帧会被
+整帧拒收 + 队列重传 —— 这正是门控要拦住的事故。
+
+测试：`core/src/commonTest/.../AgentChannelRoundTripTest.kt`（双节点线上回路）+
+GoldenVectorTest 的 channel 向量（键序 / op 互斥负例）；
+`agentNode/src/test/.../ChannelOrchestratorTest.kt`（互斥 FIFO / 幂等 / 租约出队 /
+诚信回执）；`agentNode/src/test/.../AgentChannelGateTest.kt`（HTTP 409 门）；
+`app/src/jvmTest/.../ChannelHonestRejectionTest.kt`（手机误指名回 no-executor）。
+
 ---
 
 ## 7. 传输预算与批量上限

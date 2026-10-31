@@ -7,11 +7,12 @@
 `share` / `screen` / `agent-session` / `agent-event`）和 **5 种 `msg` 的 kind**
 （`text` / `group-text` / `recall` / `nudge` / `pk`）。
 
-本仓在 PPE-1 之上又扩了 **15 种** —— PPE-1 的 11 种（`agent-queue` / `agent-run` /
+本仓在 PPE-1 之上又扩了 **17 种** —— PPE-1 的 11 种（`agent-queue` / `agent-run` /
 `agent-approval` / `agent-cancel` / `agent-ack` / `agent-artifact` / `agent-workspace` /
 `agent-grant-request` / `agent-grant` / `agent-grant-list` / `agent-session-page`）、
-身份恢复的 2 种（`recovery-req` / `recovery-data`，§六）与 M4 跨端派单的 2 种
-（`agent-invoke` / `agent-invoke-result`，cap `agi1`）—— 合计 **32 种**，
+身份恢复的 2 种（`recovery-req` / `recovery-data`，§六）、M4 跨端派单的 2 种
+（`agent-invoke` / `agent-invoke-result`，cap `agi1`）与 M7-T2 任务委派的 2 种
+（`agent-channel` / `agent-channel-result`，cap `agc1`）—— 合计 **34 种**，
 就是下面这张表要覆盖的全集（`MsgTypes.KNOWN` 与它逐项对齐，由
 `MsgTypeDispositionTest` 钉住"新增一种帧就要当场表态"）。
 
@@ -56,6 +57,7 @@
 | `agent-session-page` | 发：`RelayController.kt:522` `requestAgentSessionPage`（cap `agp1`）；收后排队：agentNode `AgentSessionPageStore`；应答：宿主插件 | 设备向宿主要**一页**历史会话（`wsId`/`offset`/`limit`）。宿主用已有的 `agent-session` 逐条回填，触发点是按需打开工作区 |
 | `avatar` | `RelayController`（cap `av1`） | 自定义头像获取与广播：`op:"get"`、`op:"data"`、`op:"miss"`，SHA-256 缓存 |
 | `agent-invoke` / `agent-invoke-result` | 收：`RelayControllerMessagesComponent.kt` → 域层网道 `RelayControllerAgentInvokeComponent`（cap `agi1`）；发：同组件（发起方派单 / 结果回传） | 跨端派单 RPC：`task` 进执行门禁（core 的 `AgentExecAuthorizer`，可信设备放行）→ 本机插件执行（`executePluginTask` 唯一实现）；`action` 进卡片动作原子台账（首个判定生效、晚到点击幂等丢弃）。结果帧落租约终态、看板卡以**新帧**上群；两帧都在 `RELIABLE` —— 结果丢失会让发起方把「已完成」误判成超时（键表与 op 互斥见 `PROTOCOL-EXTENSION.md` §6.13） |
+| `agent-channel` / `agent-channel-result` | 收：`RelayController.onInbound` → `RelayControllerAgentInvokeComponent.handleOnAgentChannel`（手机回诚实 `no-executor`；桌面壳把编排器接到 `channelOrchestrator` 桥，授权门复用 grants 执行面）；发：agentNode `POST /v1/agent/channel`（cap `agc1` 门，对端未声明 ⇒ 409 帧不构造） | 跨宿主任务委派（M7-T2）：`assign`/`transfer` 两态、`resources` 声明式互斥（执行点 = 接收宿主 `ChannelOrchestrator`：FIFO 串行 + channelId 幂等 + 租约超时出队）、结果帧复用 `InvokeResultStates`。手机声明 `agc1` 只承诺「解得动」；桌面端暂不声明（caps 16/16 满额，D-017 修订）。键表与互斥语义见 `PROTOCOL-EXTENSION.md` §6.14 |
 | `share` | 传输层 ACK，业务层**只有壳** | 共享文件柜：`share` ∈ `RELIABLE_TYPES` ⇒ 入站帧在传输层被 ACK，业务层不发 `share:list` |
 | `scan-ranges` | `RelayControllerCidr` | CIDR 网段扫描探活与手动网段配置 |
 | `screen` | 投屏与桌面镜像（cap `rv1`/`rvs1`） | 桌面捕获/推流与屏幕会话展示 |

@@ -3,6 +3,7 @@
 package com.kapp.tidings.domain
 
 import com.kapp.tidings.core.nowMillis
+import com.kapp.tidings.core.protocol.AgentChannelPayload
 import com.kapp.tidings.core.protocol.AgentExecAuthorizer
 import com.kapp.tidings.core.protocol.AgentSenderId
 import com.kapp.tidings.core.protocol.ConvId
@@ -60,6 +61,80 @@ internal class RelayControllerAgentInvokeComponent(private val host: RelayContro
      * （手机、未接插件宿主的测试宿主）—— 入站派单如实回 `no-executor`。
      */
     var executor: AgentInvokeExecutor? = null
+
+    /**
+     * Channel 委派的**本机承接器**（M7-T2，D-017）：桌面壳把 agentNode 的编排器接到这里；
+     * 手机与未装配的测试宿主保持 null ⇒ 入站 `agent-channel` 一律回诚实的
+     * `no-executor`。返回值 = 「已应答」（true：受理 / denied / tag 兜底都算）；
+     * false = 没人应答，调用方回 no-executor。
+     *
+     * 参数是**已解码**的 [AgentChannelPayload]：desktopApp 的编译类路径上没有
+     * kotlinx-serialization（M4 执行桥同一条纪律），解析留在 :app 这一层。
+     *
+     * 为什么是「承接器」而不是执行器：决策包 §1.5 把互斥台账、租约与结果分派都
+     * 裁给了**接收宿主侧编排器**（agentNode，`ChannelOrchestrator`）——域层不该
+     * 再抄一份台账（两份台账迟早漂成「面板说在跑、宿主说在排队」）。域层做的是
+     * **授权 + 分流**：过授权门交给编排器，没过/没装就如实拒绝。
+     */
+    var channelOrchestrator: ((payload: AgentChannelPayload, fromNode: String) -> Boolean)? = null
+
+    /**
+     * 入站 `agent-channel`（M7-T2，cap `agc1`）。
+     *
+     * 手机端永不执行任务：本机没有承接器 ⇒ 回一帧诚实的 `no-executor`（决策包
+     * §1.6 的设计意图；声明 agc1 的语义是「解得动这族帧」，沉默到对端租约超时
+     * 才是违背它）。桌面端由 desktopApp 装配时把 [channelOrchestrator] 接到
+     * agentNode 编排器（授权门也在那一侧）—— 编排器自己负责幂等、互斥、租约与
+     * 结果回执。
+     *
+     * **双应答防线**：桥返回 true = 已有人应答过（受理 / denied / tag 兜底），
+     * 本函数不再回帧；false 或没装桥 = 回 no-executor。判据只有这一个，两处各判
+     * 一遍迟早漂。
+     */
+    fun handleOnAgentChannel(envelope: Envelope) {
+        val p = envelope.payload as? JsonObject ?: return
+        val parsed = runCatching {
+            com.kapp.tidings.core.protocol.Codec.wireJson.decodeFromJsonElement(
+                AgentChannelPayload.serializer(), p,
+            )
+        }.getOrNull()
+        val orchestrator = channelOrchestrator
+        if (parsed != null && orchestrator != null && orchestrator(parsed, envelope.from)) return
+        val channelId = parsed?.channelId
+            ?: (p["channelId"] as? JsonPrimitive)?.contentOrNull
+            ?: return
+        val rt = host.runtime ?: return
+        host.scope.launch {
+            runCatching {
+                rt.sendAgentChannelResult(
+                    peerId = envelope.from,
+                    channelId = channelId,
+                    ok = false,
+                    status = com.kapp.tidings.core.protocol.CodecInvoke.InvokeResultStates.NO_EXECUTOR,
+                    error = "this node does not host a channel executor",
+                )
+            }
+        }
+    }
+
+    /**
+     * 入站 `agent-channel-result`（M7-T2）：result 帧的台账归宿。
+     *
+     * 发起方在域层（M4 同款）：result 落本机消息流（预览与未读照常），看板卡/会话
+     * 时间线按 channelId 关联。编排器在**接收**侧；发起侧的展示跟随通消息走，
+     * 这里只做「帧到了、被记下」的最小处理（payload 本身已过 Codec 校验）。
+     */
+    fun handleOnAgentChannelResult(envelope: Envelope) {
+        val p = envelope.payload as? JsonObject ?: return
+        val channelId = p.strField("channelId") ?: return
+        val ok = (p["ok"] as? JsonPrimitive)?.contentOrNull?.toBooleanStrictOrNull() ?: return
+        val status = p.strField("status") ?: return
+        host.onChannelResultObserved(
+            envelope, channelId, ok, status,
+            summary = p.strField("summary"),
+            error = p.strField("error"),
+        )
+    }
 
     /**
      * 目标插件在线状态（S4-4b）：`(agentId) → [PluginPresence]` 取值或 null。

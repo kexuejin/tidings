@@ -15,6 +15,7 @@ import com.kapp.tidings.domain.recovery.PlatformRecoveryStore
 import com.kapp.tidings.domain.recovery.RecoveryService
 import com.kapp.tidings.domain.recovery.RecoveryPendingPeers
 import com.kapp.tidings.core.protocol.DEFAULT_TIMINGS
+import com.kapp.tidings.core.protocol.AgentChannelPayload
 import com.kapp.tidings.core.protocol.Envelope
 import com.kapp.tidings.core.protocol.MsgKinds
 import com.kapp.tidings.core.protocol.AGENT_SENDER_PREFIX
@@ -349,6 +350,11 @@ class RelayController(
         get() = invokeCtl.onHostCardAction
         set(value) { invokeCtl.onHostCardAction = value }
 
+    /** M7-T2：入站 Channel 委派的承接桥（授权 + 分流），转发到 invokeCtl。 */
+    var channelOrchestrator: ((payload: AgentChannelPayload, fromNode: String) -> Boolean)?
+        get() = invokeCtl.channelOrchestrator
+        set(value) { invokeCtl.channelOrchestrator = value }
+
     /**
      * 控制器持有的可变会话表。搬出本类是为了让「这张表归谁」写在类型上，
      * 而不是一个 `internal` 字段 + 全靠约定的纪律。
@@ -593,7 +599,56 @@ class RelayController(
         filter: HistorySearchFilter,
         limit: Long,
     ): List<MessageSearchResult> = messagesCtl.handleSearchInConversationInternal(convId, query, filter, limit)
-    internal fun onInbound(envelope: Envelope) = messagesCtl.handleOnInbound(envelope)
+    internal fun onInbound(envelope: Envelope) {
+        // M7-T2（cap agc1）：Channel 两帧的归宿是委派网道（编排器 / 诚实拒绝 / 结果台账），
+        // 不是聊天流 —— 与 agent-invoke 同一条「在 CHAT_INBOUND_TYPES 之前接走」的纪律。
+        if (envelope.type == MsgTypes.AGENT_CHANNEL) {
+            invokeCtl.handleOnAgentChannel(envelope)
+            return
+        }
+        if (envelope.type == MsgTypes.AGENT_CHANNEL_RESULT) {
+            invokeCtl.handleOnAgentChannelResult(envelope)
+            return
+        }
+        messagesCtl.handleOnInbound(envelope)
+    }
+
+    /**
+     * M7-T2：发起方收到 `agent-channel-result` 的**最小记账** —— 结果进发起会话流
+     * （result 帧是 P2P 回执，会话键就是回执方的 nodeId；channelId 是关联键）。
+     *
+     * 为什么是最小的：发起侧的看板卡 / 会话时间线聚合是 M7 后续切片的 UI 交付物；
+     * 这一步只保证「回执到了、被如实记下、用户看得见」—— 绝不静默吞（那是
+     * UNHANDLED 时代的行为，D-016 后半步要消灭的就是它）。状态词直接透传
+     * `InvokeResultStates`（done/denied/no-executor/no-plugin/timeout/error），
+     * 不在本层再翻译一层。
+     */
+    internal fun onChannelResultObserved(
+        envelope: Envelope,
+        channelId: String,
+        ok: Boolean,
+        status: String,
+        summary: String?,
+        error: String?,
+    ) {
+        val detail = listOfNotNull(summary, error).joinToString(" · ")
+        val text = if (detail.isEmpty()) {
+            "channel " + channelId + " -> " + status
+        } else {
+            "channel " + channelId + " -> " + status + " (" + detail + ")"
+        }
+        handleAppendMessage(
+            MessageUi(
+                id = envelope.id,
+                peerId = envelope.from,
+                mine = false,
+                text = text,
+                at = envelope.ts,
+                delivery = null,
+            ),
+            incoming = true,
+        )
+    }
 
     // ------------------------------------------------------------------ 委托动作：群组
     override fun createGroup(name: String, memberIds: List<String>, description: String): String? = groupsCtl.handleCreateGroup(name, memberIds, description)
@@ -1022,6 +1077,9 @@ class RelayController(
                 advertiseAgent = advertiseAgent,
                 fileOverChannel = fileOverChannel,
                 screenOverChannel = screenOverChannel,
+                // D-017 修订：桌面（advertiseAgent）不声明 agc1 —— caps 预算 16/16 满额，
+                // 且桌面↔桌面网道今天没有消费者；手机声明（误指名回诚实拒绝）。
+                channelCapable = !advertiseAgent,
             ),
         )
         if (capsAligned != settings) {
@@ -1037,6 +1095,7 @@ class RelayController(
             advertiseAgent = advertiseAgent,
             fileOverChannel = fileOverChannel,
             screenOverChannel = screenOverChannel,
+            channelCapable = !advertiseAgent,
         )
         if (luciolaMode) {
             luciolaHost?.configure(profile, settings.udpPort)

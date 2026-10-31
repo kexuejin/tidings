@@ -26,7 +26,6 @@ internal object CapabilityInventory {
         "CAP_AGENT" to MsgTypes.CAP_AGENT,
         "CAP_AGENT_SESSION" to MsgTypes.CAP_AGENT_SESSION,
         "CAP_AGENT_ARTIFACT_VERIFIED" to MsgTypes.CAP_AGENT_ARTIFACT_VERIFIED,
-        "CAP_AGENT_CHANNEL" to MsgTypes.CAP_AGENT_CHANNEL,
         "CAP_MOBILE_TEXT" to MsgTypes.CAP_MOBILE_TEXT,
         "CAP_MOBILE_RECORD" to MsgTypes.CAP_MOBILE_RECORD,
         "CAP_TABLE_TEXT" to MsgTypes.CAP_TABLE_TEXT,
@@ -69,9 +68,6 @@ internal object CapabilityInventory {
                 + "与 fch1 同一族的第二块数据面；声明了却不起画面监听，对端会一直等握手",
         MsgTypes.CAP_MSG_AGENT_SESSION to
             "预埋：阶段 C1 未实现，本端既不声明也不解析（见 docs/plans/2026-10-12-relay-agent-session-scheme.md）",
-        MsgTypes.CAP_AGENT_CHANNEL to
-            "预埋（M7-T2）：帧层已实现（编解码 + 校验 + 向量），但编排器未落地——" +
-                "声明了却不处理 = 静默吞帧（PPE-1 §4），故暂不声明；编排器落地时移入 AGENT_CAPS 并进 HANDLED",
         MsgTypes.CAP_SHARE to
             "由壳按开关条件声明（RelaySettings.caps 的 isShareEnabled）",
         MsgTypes.CAP_REMOTE_VIEW to

@@ -134,8 +134,10 @@ object MsgTypes {
 
     /**
      * `agc1` = 跨宿主 Channel 委派（M7-T2）。声明它 = 认识 `agent-channel` /
-     * `agent-channel-result` 两帧。手机端**不**声明：Channel 是宿主↔宿主的委派网道，
-     * 手机不承接任务（与 `ag1`「我是 agent 节点」不同层的判据，见CapabilityInventory）。
+     * `agent-channel-result` 两帧。宿主声明 = 编排器承接（互斥台账 + 插件执行）；
+     * 手机也声明（D-017）：声明的语义是「解得动这族帧」，不是「我执行」——手机被
+     * 误指名时回一帧诚实的 `no-executor`（决策包 §1.6 的设计意图），而不是沉默到
+     * 对端租约超时。与 `ag1`「我是 agent 节点」不同层的判据。
      */
     const val CAP_AGENT_CHANNEL = "agc1"
 
@@ -216,6 +218,10 @@ object MsgTypes {
             CAP_AGENT_INVOKE,
             // M7-T3（agf1）：手机收产物卡片时能显示端到端校验摘要 —— 如实声明（收方语义）。
             CAP_AGENT_ARTIFACT_VERIFIED,
+            // M7-T2（agc1，D-017）：手机解得动 Channel 委派族帧。声明的语义是「这族帧
+            // 发给我不会石沉大海」——被误指名时回一帧诚实的 no-executor（手机永不执行
+            // 任务，执行只发生在宿主编排器），而不是沉默到对端租约超时。
+            CAP_AGENT_CHANNEL,
         )
 
     /**
@@ -446,6 +452,10 @@ object MsgTypes {
             CAP_AGENT, CAP_MOBILE_TEXT, CAP_AGENT_SESSION, CAP_AGENT_QUEUE,
             CAP_AGENT_WORKSPACE, CAP_AGENT_GRANT, CAP_AGENT_SESSION_PAGE, CAP_LINK,
             CAP_GROUP_TEXT_ATTRIBUTED, CAP_AGENT_INVOKE, CAP_AGENT_ARTIFACT_VERIFIED,
+            // agc1（M7-T2，D-017）：宿主是 Channel 委派的承接方（编排器 + 插件执行器
+            // 都在本进程）——「宣告与记账成对」的记账在这一刻补齐（AgentSessionRegistry
+            // KDoc 纪律：声明 agc1 的同一批改动里必须有入站处理与诚实拒绝路径）。
+            CAP_AGENT_CHANNEL,
         )
 
     /**
@@ -455,6 +465,10 @@ object MsgTypes {
      * （`RelayController.CHAT_INBOUND_TYPES`，消费点在 `RelayControllerMessagesComponent`）不含它，帧会被丢掉，共享文件柜
      * 至今只有界面壳。这一处「声明了却没有实现」已如实写进 `PROTOCOL-COVERAGE.md` 的 §三/§五，
      * 由 `scripts/e2e/e2e_share.py` 的壳契约断言钉住。
+     *
+     * Channel 两帧（M7-T2，D-016 后半步）：接收宿主侧的编排器（agentNode
+     * `ChannelOrchestrator`：互斥台账 / 租约 / 结果分派）与手机侧的诚实拒绝
+     * （no-executor）已落地 ⇒ 进 HANDLED 并声明 [CAP_AGENT_CHANNEL]。
      */
     val HANDLED: Set<String> = setOf(
         ENTRY, ALIVE, EXIT, PRESENCE, PROFILE,
@@ -466,16 +480,13 @@ object MsgTypes {
         GROUP, SHARE, SCAN_RANGES, SCREEN, AVATAR,
         RECOVERY_REQ, RECOVERY_DATA,
         AGENT_INVOKE, AGENT_INVOKE_RESULT,
+        AGENT_CHANNEL, AGENT_CHANNEL_RESULT,
     )
 
     /**
      * 本端**认得、但有意不处理**的已知类型。
      */
-    // Channel 两帧（M7-T2）：**帧层已实现**（编解码 + 校验 + 向量钉住），但编排器
-    // （互斥台账 / 结果分派）未落地——先入 UNHANDLED 如实记录「认识但不消费」。
-    // 编排器落地的那一刻挪进 HANDLED 并同时在 AGENT_CAPS 声明 `agc1`
-    // （声明了却不处理 = 静默吞帧，PPE-1 §4 的红线）。
-    val UNHANDLED: Set<String> = setOf(UPDATE, PEERS, AGENT_CHANNEL, AGENT_CHANNEL_RESULT)
+    val UNHANDLED: Set<String> = setOf(UPDATE, PEERS)
 }
 
 /** 这个节点是否声明了自己是 agent 节点（见 [MsgTypes.CAP_AGENT]）。 */

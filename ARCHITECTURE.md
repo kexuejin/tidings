@@ -296,6 +296,13 @@ A 宿主把子任务派到 B 宿主的插件上执行、结果回传，由发起
 - **授权**：跨端派单必须过目标节点的 `AgentExecAuthorizer`（core）：可信设备
   （`OWNER` / `RW` / 面板批准）自动放行，群主与管理员不默认放行，未授权请求进
   宿主申请台账待机主点头。
+- **Channel 委派编排器（M7-T2）**：`ChannelOrchestrator` 住在 `:agentNode`（接收宿主
+  侧），desktopApp 装配时把「解析 + 执行」接到与 `/v1/plugin/task` 同源的
+  `executePluginTask`；幂等（channelId）、声明式资源互斥（每资源一把锁、多资源原子
+  获取）与租约（deadlineMs 含排队全程）都在编排器内。域层桥（`channelOrchestrator`）
+  负责授权与分流：未授权回 `denied` 并记 grant 申请，`targetTag` 寻址（T4）如实答
+  `no-plugin`。发起入口 `POST /v1/agent/channel` 在 caps 门处拒发未声明 `agc1` 的对端
+  （键表与语义见 `PROTOCOL-EXTENSION.md` §6.14）。
 
 ### 7.5 审批面与免批表（M5 起）
 

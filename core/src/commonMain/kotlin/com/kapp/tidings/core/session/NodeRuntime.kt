@@ -1636,6 +1636,40 @@ class NodeRuntime(
         )
     }
 
+    /** 发一条 Channel 委派（M7-T2）。对端 caps 门控在调用方（发起侧编排器，查 `agc1`）。 */
+    suspend fun sendAgentChannel(
+        peerId: String,
+        channelId: String,
+        op: String,
+        fromAgent: String,
+        task: String,
+        toAgent: String? = null,
+        targetTag: String? = null,
+        expectedResult: String? = null,
+        resources: List<String>? = null,
+        sourceMessageIds: List<String>? = null,
+        deadlineMs: Long? = null,
+        sessionId: String? = null,
+        groupId: String? = null,
+        groupRev: Long? = null,
+        at: Long? = null,): SendOutcome = outbound.sendAgentChannel(
+        peerId, channelId, op, fromAgent, task, toAgent, targetTag, expectedResult,
+        resources, sourceMessageIds, deadlineMs, sessionId, groupId, groupRev, at,
+    )
+
+    /** 发一条 Channel 委派应答（M7-T2）——回给刚发来 `agent-channel` 的那个对端。 */
+    suspend fun sendAgentChannelResult(
+        peerId: String,
+        channelId: String,
+        ok: Boolean,
+        status: String,
+        summary: String? = null,
+        artifactIds: List<String>? = null,
+        error: String? = null,
+        at: Long? = null,): SendOutcome = outbound.sendAgentChannelResult(
+        peerId, channelId, ok, status, summary, artifactIds, error, at,
+    )
+
     /** PPE-1 增补 D3：工作区宣告（可靠但不入队；返回值 = 对端有没有 ACK）。 */
     @Suppress("LongParameterList")
     suspend fun sendAgentWorkspace(peerId: String,

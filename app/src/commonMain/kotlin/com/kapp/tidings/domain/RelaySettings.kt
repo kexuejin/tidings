@@ -411,6 +411,12 @@ data class RelaySettings(
          * 已绑上 screenPort）才声明 —— 声明了却没人听，对端会一直等 `screen-ready`。
          */
         screenOverChannel: Boolean = false,
+        /**
+         * 本机是否声明 `agc1`（M7-T2，D-017 修订）。默认 true = 手机姿态（解得动
+         * Channel 帧，误指名回诚实拒绝）；桌面端传 false —— caps 预算 16/16 满额，
+         * 见 [MsgTypes.CAP_AGENT_CHANNEL] 与 buildList 体内那条注释。
+         */
+        channelCapable: Boolean = true,
     ): List<String> = buildList {
         if (fileOverChannel) add(MsgTypes.CAP_FILE_CHANNEL)
         if (screenOverChannel) add(MsgTypes.CAP_SCREEN_CHANNEL)
@@ -465,6 +471,13 @@ data class RelaySettings(
         // 收方语义的事实声明：发送方按它决定带不带新键。漏了就是 lnk1/att1 那类静默：
         // 宿主实测了哈希也发不过来，端到端校验永远空转。
         add(MsgTypes.CAP_AGENT_ARTIFACT_VERIFIED)
+        // agc1（M7-T2，D-017 修订）：手机声明「解得动 Channel 委派族帧」（误指名回
+        // no-executor）；**桌面端不声明** —— 桌面 caps() 在 share 支持的宿主上已 16/16
+        // 满额（Limits.CAPS=16，多一项整份 profile 被对端拒收），而桌面↔桌面网道今天
+        // 没有消费者。桌面激活等用户裁决，另行任务。条件声明而不是删常量：
+        // caps() 是手机/桌面共用的一个函数，无条件删行会把手机的有效声明一起删掉
+        // （lnk1/att1 的「常数在、生效清单没有」形状）。
+        if (channelCapable) add(MsgTypes.CAP_AGENT_CHANNEL)
         if (remoteView) add(MsgTypes.CAP_REMOTE_VIEW)
         if (remoteShare) add(MsgTypes.CAP_REMOTE_SHARE)
         if (isShareEnabled()) add(MsgTypes.CAP_SHARE)
@@ -495,6 +508,8 @@ data class RelaySettings(
         fileOverChannel: Boolean = false,
         /** 画面信道可用时传 true ⇒ 声明 `scr1`（见 [caps]）。 */
         screenOverChannel: Boolean = false,
+        /** 手机 true / 桌面 false（D-017 修订，见 [caps] 的 channelCapable）。 */
+        channelCapable: Boolean = true,
     ): Profile = Profile.mobile(
         nodeId = nodeId,
         nick = nick.take(LIMIT_NICK),
@@ -516,6 +531,7 @@ data class RelaySettings(
             advertiseAgent = advertiseAgent,
             fileOverChannel = fileOverChannel,
             screenOverChannel = screenOverChannel,
+            channelCapable = channelCapable,
         ),
     )
 

@@ -13,6 +13,7 @@ import com.kapp.tidings.agent.AgentToolApprovalStore
 import com.kapp.tidings.agent.AgentSessionRegistry
 import com.kapp.tidings.agent.AgentWorkspaceRegistry
 import com.kapp.tidings.agent.AgentInboxEnricher
+import com.kapp.tidings.agent.ChannelOrchestrator
 import com.kapp.tidings.agent.ControlPlane
 import com.kapp.tidings.agent.JsonObjectLike
 import com.kapp.tidings.agent.GrantReplyOutcome
@@ -477,9 +478,51 @@ internal class DesktopExtension(
             java.io.File(controller.dataDirectory, "agent-exec-policies.json"),
         )
         execPolicyStore = execPolicies
+        // M7-T2（D-016 后半步）：Channel 委派的接收宿主侧编排器。幂等 / 互斥 / 租约 /
+        // 结果回执都在编排器内；这里只把「解析 + 执行」接到与 /v1/plugin/task 同源的
+        // executePluginTask（两处各写一份迟早漂）。授权门在域层（controller 的
+        // channelOrchestrator 桥，见下）：编排器只管承接后的调度，不做授权判定。
+        // 编排器要先于 ControlPlane 建（构造参数），而 resolve/execute 要用 ControlPlane
+        // 的 pluginForAgent / executePluginTask —— 用局部 lateinit 解这个环（start() 之前
+        // 编排器不可能被触发：帧进不来）。
+        lateinit var createdPlane: ControlPlane
+        val channelOrchestrator = ChannelOrchestrator(
+            resolve = { payload -> payload.toAgent?.let { createdPlane.pluginForAgent(it) } },
+            execute = { entry, payload ->
+                var finishSummary: String? = null
+                var lastError: String? = null
+                val (sessionId, status, error) = createdPlane.executePluginTask(
+                    entry, payload.task, null, payload.sessionId,
+                ) { eventType, _, summary, _ ->
+                    when (eventType) {
+                        "finished" -> finishSummary = summary
+                        "error" -> lastError = summary
+                    }
+                }
+                if (sessionId == null) {
+                    // 会话都开不出来（插件不可达）：如实 error，不冒充 no-plugin ——
+                    // 插件在台账里，只是此刻够不着（与 invoke 桥同一口径）。
+                    ChannelOrchestrator.Outcome(
+                        ok = false,
+                        error = error ?: "cannot open a session with " + entry.pluginId,
+                    )
+                } else {
+                    ChannelOrchestrator.Outcome(
+                        ok = status != "error",
+                        summary = finishSummary,
+                        error = if (status == "error") (lastError ?: "plugin task ended in error") else null,
+                    )
+                }
+            },
+            sendResult = { toNode, channelId, ok, status, summary, artifactIds, error ->
+                runtime.sendAgentChannelResult(toNode, channelId, ok, status, summary, artifactIds, error)
+            },
+            scope = scope,
+        )
         val created = ControlPlane(
             runtime, httpPort, token,
             sessions = registry, workspaces = workspaces, grants = grants, execPolicies = execPolicies,
+            channelOrchestrator = channelOrchestrator,
             // **注入判定**：判据只有一份（core 的 mentionedVirtualAgent），这里只提供
             // 「这个群的元数据长什么样」这个事实 —— desktopApp 能读到 composeApp 的
             // settings.groups，agentNode 读不到，所以由这里注入。
@@ -495,6 +538,7 @@ internal class DesktopExtension(
             },
         )
         try {
+            createdPlane = created
             created.start()
             inboundJob = created.observeInbound(scope)
             plane = created
@@ -634,6 +678,44 @@ internal class DesktopExtension(
                         com.kapp.tidings.agent.plugins.PluginRegistry.STATUS_OFFLINE ->
                             com.kapp.tidings.domain.PluginPresence.OFFLINE
                         else -> null
+                    }
+                }
+            }
+            // M7-T2（D-016 后半步 / D-017 修订）：入站 agent-channel 的域层分流。
+            // 授权门在这里（域层才有群元数据）——编排器只管承接后的调度。
+            // 判据复用 grants 的执行面判定（同一批可信设备，forExecution 口径）：
+            // 发起 agent 必须已获批执行；未授权回 denied（如实拒绝，记 grant 申请），
+            // 而不是交给编排器跑出去。targetTag 寻址（T4）暂不支持 ⇒ 如实答 no-plugin。
+            // payload 已由 :app 解码成 AgentChannelPayload（desktopApp 类路径上没有
+            // kotlinx-serialization，解析不过河 —— M4 执行桥同一条纪律）。
+            controller.channelOrchestrator = { payload, fromNode ->
+                if (payload.targetTag != null) {
+                    runCatching {
+                        runBlocking {
+                            runtime.sendAgentChannelResult(
+                                fromNode, payload.channelId, false,
+                                com.kapp.tidings.core.protocol.CodecInvoke.InvokeResultStates.NO_PLUGIN,
+                                null, null, "tag routing lands with M7-T4",
+                            )
+                        }
+                    }
+                    true // 已应答：调用方不再回 no-executor
+                } else {
+                    val grantOk = grants.allows(fromNode, agentKey = payload.fromAgent, forExecution = true)
+                    if (!grantOk) {
+                        runCatching {
+                            runBlocking {
+                                runtime.sendAgentChannelResult(
+                                    fromNode, payload.channelId, false,
+                                    com.kapp.tidings.core.protocol.CodecInvoke.InvokeResultStates.DENIED,
+                                    null, null, "execution not authorized for " + payload.fromAgent,
+                                )
+                            }
+                        }
+                        grants.recordRequest(fromNode, payload.fromAgent, "cross-host channel", System.currentTimeMillis())
+                        true // 已应答（denied）
+                    } else {
+                        created.channelAccepted(payload, fromNode) // 授权过 ⇒ 编排器承接
                     }
                 }
             }

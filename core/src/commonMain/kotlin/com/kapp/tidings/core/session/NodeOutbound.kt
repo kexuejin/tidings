@@ -986,6 +986,59 @@ internal class NodeOutbound(
     )
 
     /**
+     * 发一条 Channel 委派（M7-T2，类型 `agent-channel`，cap `agc1`）——单播 RELIABLE。
+     *
+     * **对端 caps 的门控在调用方**（查 `agc1`）；op 两态的互斥由 `Codec.channelPayload`
+     * 的构造期 require 保证（发送侧不产出注定被拒的帧）。
+     */
+    suspend fun sendAgentChannel(
+        peerId: String,
+        channelId: String,
+        op: String,
+        fromAgent: String,
+        task: String,
+        toAgent: String? = null,
+        targetTag: String? = null,
+        expectedResult: String? = null,
+        resources: List<String>? = null,
+        sourceMessageIds: List<String>? = null,
+        deadlineMs: Long? = null,
+        sessionId: String? = null,
+        groupId: String? = null,
+        groupRev: Long? = null,
+        at: Long? = null,
+    ): SendOutcome = messenger.sendUserMessage(
+        peerId,
+        makeEnvelope(
+            MsgTypes.AGENT_CHANNEL,
+            selfId(),
+            Codec.channelPayload(
+                channelId, op, fromAgent, task, toAgent, targetTag, expectedResult,
+                resources, sourceMessageIds, deadlineMs, sessionId, groupId, groupRev, at,
+            ),
+        ),
+    )
+
+    /** 发一条 Channel 委派的应答（M7-T2，类型 `agent-channel-result`）——回给请求方。 */
+    suspend fun sendAgentChannelResult(
+        peerId: String,
+        channelId: String,
+        ok: Boolean,
+        status: String,
+        summary: String? = null,
+        artifactIds: List<String>? = null,
+        error: String? = null,
+        at: Long? = null,
+    ): SendOutcome = messenger.sendUserMessage(
+        peerId,
+        makeEnvelope(
+            MsgTypes.AGENT_CHANNEL_RESULT,
+            selfId(),
+            Codec.channelResultPayload(channelId, ok, status, summary, artifactIds, error, at),
+        ),
+    )
+
+    /**
      * 发一条工作区宣告（PPE-1 增补 D3，类型 `agent-workspace`，cap `aws1`）。
      *
      * **可靠但不入队**（[Messenger.sendReliableNoQueue]）：这帧必须在 RELIABLE 里才会被
