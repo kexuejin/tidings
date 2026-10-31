@@ -224,6 +224,19 @@ private val MutedPreviewWeight = FontWeight.Normal
 private val ActivePreviewWeight = FontWeight.Medium
 
 /**
+ * dense 档的行高下限：40dp（原型 .winset .li 的 min-height:40px，prototype/relay.html:1651）。
+ *
+ * regular 档沿用 sp.xxxl(48) —— 它是间距 token 棘轮里的既有取值（手机帧零变化），
+ * 不因本次改造动它。dense 是新开的取值，进的是**壳的度量**语境：与 DesktopMetrics 的
+ * 行高类常量同一性质，用具名常量而不是 40.dp 字面量（token 棘轮只许降）。
+ * 头像 24dp = IconSizes 里最接近原型 26px 的组合档 —— 头像尺寸与 IconSizes 棘轮同源，
+ * 不在行组件里另开一档。
+ */
+private val denseRowMinHeight = 40.dp
+private val denseAvatar = IconSizes.Hero - IconSizes.Badge
+
+
+/**
  * 行内的「置顶」小标识。
  *
  * `design/icon` 与 drawable 资源里都**没有**已映射的图钉图标（查过
@@ -284,6 +297,21 @@ internal fun ConversationRow(
      * 或解析不出 —— 名字由域层解析，见 `RelayUiState.previewSenderNameOf`，UI 不自拼）。
      */
     previewSenderName: String? = null,
+    /**
+     * 桌面密度档（状态提升模式，参数接原语）：行更矮、头像更小、内边距更紧。
+     *
+     * 为什么做成参数而不是桌面另一份行实现：**行是内容，两端共用一份**（AGENTS §2.6
+     * 参数化），桌面侧栏（`ConversationSidebar`）传 true，手机不传 —— 默认 false 让
+     * 信息最少的一侧直接调对，手机帧逐像素不变。这是桌面 UI 整改方案 §2.1-2 的
+     * 「密度档做在内容组件上」。
+     *
+     * 取值锚在原型真实的密集档，不是随手挑的：`prototype/relay.html` 的
+     * `.winset .li{min-height:40px;padding:5px 8px;gap:8px}`（:1651）与
+     * `.winset .li .t1{font-size:12px}`（:1654）—— 原型注释自己写着「设置窗的左栏
+     * 排得比会话列表密」。三处取值：min-height 52→40、padding 9×7→8×5、
+     * 标题 14→12px；头像用最小的 [IconSizes] 档（24dp），图文间距并入同一档。
+     */
+    dense: Boolean = false,
     /**
      * 这个会话的草稿预览（**已经拼好、带「草稿」标记**的最终文案）；null = 没有草稿。
      *
@@ -410,23 +438,29 @@ internal fun ConversationRow(
             } else null,
         )
 
+    // 密度分派（原型 .winset .li，见 dense 参数 KDoc）：三处取值、一个布尔，没有第二个行实现。
+    val rowMinHeight = if (dense) denseRowMinHeight else sp.xxxl
+    val avatarSize = if (dense) denseAvatar else sp.xxl
+    val rowGap = if (dense) sp.sm else sp.md10
+
     Box(
-        modifier = modifier.defaultMinSize(minHeight = sp.xxxl),
+        modifier = modifier.defaultMinSize(minHeight = rowMinHeight),
     ) {
         Row(
             modifier = Modifier
                 .fillMaxWidth()
-                .padding(horizontal = sp.osm9, vertical = sp.osm7),
+                .padding(horizontal = if (dense) sp.sm else sp.osm9, vertical = if (dense) sp.oxs5 else sp.osm7),
             verticalAlignment = Alignment.CenterVertically,
-            horizontalArrangement = Arrangement.spacedBy(sp.md10),
+            horizontalArrangement = Arrangement.spacedBy(rowGap),
         ) {
-        // 头像 32dp + 圆角 12（原型 `.li .av{width:32px;height:32px;border-radius:12px}`）。
+        // 头像 32dp（dense 24dp）+ 圆角 12（原型 `.li .av{width:32px;height:32px;border-radius:12px}`；
+        // 密集档 `.winset .li .fi2` 是 26px，代码取 [IconSizes] 最接近的 24 档）。
         // 会话行是原型里**唯一**用方形头像的地方。
         Box {
             PeerAvatar(
                 name = row.title,
                 isAgent = row.isAgent,
-                size = sp.xxl,
+                size = avatarSize,
                 isGroup = row.isGroup,
                 avatar = row.avatar,
                 shape = MaterialTheme.shapes.medium,
@@ -458,12 +492,13 @@ internal fun ConversationRow(
             ) {
                 Text(
                     text = row.title,
-                    // 原型 `.li .t1{font-size:14px;font-weight:600}`。
+                    // 原型 `.li .t1{font-size:14px;font-weight:600}`；密集档 `.winset .li .t1` 降 12px
+                    // ⇒ [RelayTypography.labelMedium]（字阶里 12sp 的那一档，lineHeight 16）。
                     // 合并前手机用 bodyLarge(16sp)/Medium(500)、桌面用 bodyMedium(14sp)/Medium，
                     // 两边都不对：字号与字重都要按原型走。
                     // 字重没有 token 组（`tokens.weights` 为 null），而 `FontWeight.SemiBold`
                     // 在生产里已用 126 次 —— 用它就是本仓惯例。
-                    style = MaterialTheme.typography.bodyMedium,
+                    style = if (dense) MaterialTheme.typography.labelMedium else MaterialTheme.typography.bodyMedium,
                     fontWeight = FontWeight.SemiBold,
                     maxLines = 1,
                     overflow = TextOverflow.Ellipsis,
@@ -500,6 +535,8 @@ internal fun ConversationRow(
                 // 颜色两档相同，保证小字始终 ≥4.5:1。
                 // 草稿用主色（一眼看出"这行是我的未完成输入"，而不是一条已发消息）；
                 // 其余仍用次级色 + 字重区分静音。
+                // maxLines 恒为 1：regular 档本来就单行，dense 的「预览强制单行」因此
+                // 无条件成立 —— 「草稿：…」前缀与正文同一条文案里截断，不占第二行。
                 color = if (draftPreview != null) {
                     MaterialTheme.colorScheme.primary
                 } else {

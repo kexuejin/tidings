@@ -174,6 +174,15 @@ public fun ConversationSidebar(
      * `initialResult`）。生产调用方一律用默认值（null）。
      */
     initialGlobalSearch: com.kapp.tidings.domain.GlobalSearchResult? = null,
+    /**
+     * 桌面密度档（默认开）：300dp 侧栏里每行占高按原型密集档（`.winset .li`）收 40dp，
+     * 720dp 高的侧栏可见行数比手机密度多约三成 —— 整改方案 §6-2 的判据。
+     *
+     * 为什么默认 true：密度是**桌面壳层**的决定（窗口上下文），不是每个调用点的决定；
+     * 与 `LocalCardShape`「按窗口上下文取」同一条理由。需要手机密度的桌面场景
+     * （截图门禁的对照帧）显式传 false。
+     */
+    dense: Boolean = true,
 ) {
     if (query.isNotBlank() && onSearchGlobal != null) {
         Column(modifier.background(MaterialTheme.colorScheme.surface)) {
@@ -326,6 +335,7 @@ public fun ConversationSidebar(
                 previewSenderNameOf = previewSenderNameOf,
                 draftPreviewOf = draftPreviewOf,
                 modifier = Modifier.fillMaxSize(),
+                dense = dense,
                 selectedConvId = selectedPeerId,
                 trailingContent = if (searchResults.isEmpty()) {
                     null

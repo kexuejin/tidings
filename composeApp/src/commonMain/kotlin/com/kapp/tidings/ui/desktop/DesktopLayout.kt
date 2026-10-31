@@ -125,6 +125,26 @@ public object DesktopMetrics {
     /** 竖导阈值。再窄下去竖导本身放不下三个图标带文字，退化成底部三段。 */
     const val MEDIUM_MIN_PX = MEDIUM_RAIL_PX + SIDEBAR_PX + MIN_CHAT_PANE_PX
 
+    /**
+     * Medium 档的侧栏宽度（原 `DesktopConversationsPane` Medium 分支里的 ``240.dp`` 字面量）。
+     *
+     * 收编是整改方案 L6 的一半：侧栏宽度「三处写死且不在 token」，本包先收 Medium 这一处
+     * （Expanded 的 [SIDEBAR_PX] 本来就在这里，`DesktopToolbar` 的搜索框宽度归 WP-D8 chrome）。
+     * 依据：Medium 下 664px 宽减去竖导 64 与本栏 240，聊天栏还剩 360px ≥ [MIN_CHAT_PANE_PX]，
+     * 再宽侧栏就该退回 Compact 单栏（即 [MEDIUM_MIN_PX] 的推导）。
+     */
+    const val MEDIUM_SIDEBAR_PX = 240
+
+    /**
+     * Inspector 右栏的最小宽度（WP-D3 Wide 三栏的**预备常量**，本包先落位）。
+     *
+     * 取 320：等于桌面原型侧栏在 Expanded 档的宽度（[SIDEBAR_PX]）—— 同一应用里
+     * 两个辅栏不该一种密两种宽；且 1280 宽窗（Wide 下界）减去竖导 64、侧栏 280 与
+     * inspector 320 后，聊天区仍有约 45%（整改方案 §6-1 的可见判据）。
+     * WP-D3 落地时从这里取值，不许在 pane 里重写字面量。
+     */
+    const val INSPECTOR_MIN_PX = 320
+
     /** 窗口最小尺寸，与 ComposeWindow 的 minSize 一致：560×620。 */
     const val MIN_WINDOW_WIDTH_PX = 560
     const val MIN_WINDOW_HEIGHT_PX = 620

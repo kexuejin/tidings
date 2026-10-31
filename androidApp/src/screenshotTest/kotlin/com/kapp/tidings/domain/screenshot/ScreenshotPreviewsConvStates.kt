@@ -134,6 +134,63 @@ private fun ConversationsRowStatesDeskPreview() {
     }
 }
 
+// ── 密度四帧（双端 × 双密度）─────────────────────────────────────────────
+//
+// 手机端一帧 dense 形态证据（手机壳不传 dense，这是组件级证据、不是屏级）；
+// 桌面端 regular 与 dense 各一张 720dp 高侧栏 —— 720 正是默认窗（1100×720）的侧栏
+// 高度，两张同高帧的可见行数就是整改方案 §6-2 判据③的实测读数来源。
+// 三帧与既有的 conv-row-states（手机 regular 屏级帧）合成「双端 × 双密度」矩阵：
+// 夹具同源（行级四状态的会话子集），唯一自由变量是 dense —— 改一处两端都变的检验
+// 就落在这几帧的差分上。
+
+@PreviewTest
+@Preview(name = "conv-row-dense-phone", widthDp = 393, heightDp = 852, showBackground = true, locale = "zh-rCN")
+@Composable
+private fun ConversationsRowDensePhonePreview() {
+    DensityABRows(dense = true)
+}
+
+@PreviewTest
+@Preview(name = "desk-conv-row-regular-720", widthDp = 1280, heightDp = 720, showBackground = true, locale = "zh-rCN")
+@Composable
+private fun ConversationsRowRegularDeskPreview() {
+    DensityABRows(dense = false)
+}
+
+@PreviewTest
+@Preview(name = "desk-conv-row-dense-720", widthDp = 1280, heightDp = 720, showBackground = true, locale = "zh-rCN")
+@Composable
+private fun ConversationsRowDenseDeskPreview() {
+    DensityABRows(dense = true)
+}
+
+/** A/B 共用的行渲染体：两帧唯一差异是 [dense] 实参 —— 除此之外逐字节相同。 */
+@Composable
+private fun DensityABRows(dense: Boolean) {
+    val state = conversationRowStates()
+    AppTheme(darkTheme = false) {
+        Surface(color = MaterialTheme.colorScheme.surface, modifier = Modifier.fillMaxSize()) {
+            ConversationSidebar(
+                sessions = state.conversations,
+                phase = state.network.phase,
+                failure = state.network.failure,
+                selectedPeerId = null,
+                query = "",
+                onClearQuery = {},
+                onSelect = {},
+                onGoToPairing = {},
+                now = PREVIEW_NOW,
+                modifier = Modifier.width(300.dp),
+                onTogglePin = {},
+                onToggleMute = {},
+                onDeleteConversation = {},
+                previewSenderNameOf = state::previewSenderNameOf,
+                dense = dense,
+            )
+        }
+    }
+}
+
 // ── Failed 空态（手机 / 桌面，同一份实现）────────────────────────────────────
 
 @PreviewTest

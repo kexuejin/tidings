@@ -353,6 +353,7 @@ public fun ConversationsPane(
         }
 
         // Medium：侧栏收窄到 240px，否则 600px 宽装不下 300px 侧栏。
+        // 宽度进了 DesktopMetrics.MEDIUM_SIDEBAR_PX（L6 收编），不再写字面量。
         // 竖导不在这里 —— 它属于壳，由 DesktopShell 铺在左侧（见 NavigationRail 的说明）。
         DesktopWindowSizeClass.Medium -> Row(Modifier.fillMaxSize()) {
             ConversationSidebar(
@@ -366,7 +367,7 @@ public fun ConversationsPane(
                 onSelect = onSelect,
                 onGoToPairing = onGoToPairing,
                 now = now,
-                modifier = Modifier.width(240.dp),
+                modifier = Modifier.width(DesktopMetrics.MEDIUM_SIDEBAR_PX.dp),
                 onCreateGroup = onCreateGroup?.let { { creatingGroup = true } },
                 onCreateWorkspaceGroup = onCreateGroup?.let { { creatingWorkspaceGroup = true } },
                 onSearchMessages = controller::searchHistoricalMessages,

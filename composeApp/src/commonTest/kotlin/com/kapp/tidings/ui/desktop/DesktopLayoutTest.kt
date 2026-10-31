@@ -107,6 +107,26 @@ class DesktopLayoutTest {
     }
 
     @Test
+    fun theMediumSidebarWidthAndInspectorMinimumLiveInMetrics() {
+        // Medium 侧栏 240：从 DesktopConversationsPane 的字面量收编（整改方案 L6）。
+        assertEquals(240, DesktopMetrics.MEDIUM_SIDEBAR_PX)
+        // Medium 下限处聊天栏 = 窗宽 - 竖导 - Medium 侧栏，必须仍 ≥ 输入栏下限。
+        val chatAtMediumFloor = DesktopMetrics.MEDIUM_MIN_PX - DesktopMetrics.MEDIUM_RAIL_PX - DesktopMetrics.MEDIUM_SIDEBAR_PX
+        assertTrue(
+            chatAtMediumFloor >= DesktopMetrics.MIN_CHAT_PANE_PX,
+            "Medium 下限处聊天栏只剩 $chatAtMediumFloor px，低于输入栏下限",
+        )
+        // Inspector 最小宽度：WP-D3 的预备常量。取 320 —— 与 Expanded 侧栏同宽，
+        // 两个辅栏不该一种密两种宽；Wide 下界窗里它必须留得出聊天区。
+        assertEquals(320, DesktopMetrics.INSPECTOR_MIN_PX)
+        val chatAtWideFloor = 1280 - DesktopMetrics.MEDIUM_RAIL_PX - DesktopMetrics.SIDEBAR_PX - DesktopMetrics.INSPECTOR_MIN_PX
+        assertTrue(
+            chatAtWideFloor >= DesktopMetrics.MIN_CHAT_PANE_PX,
+            "Wide 下界（1280）三栏摆下后聊天区只剩 $chatAtWideFloor px",
+        )
+    }
+
+    @Test
     fun theTabletDeductsItsOwnChromeNotTheDesktops() {
         // 平板只留工具栏：按 112 扣会让 800×1280 凭空少 66dp，竖向判定跟着漂。
         assertEquals(DesktopMetrics.TOOLBAR_PX, DesktopMetrics.TABLET_CHROME_PX)

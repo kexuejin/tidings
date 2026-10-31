@@ -93,6 +93,13 @@ internal fun ConversationListPanel(
      * 参数化会在这儿长出一堆条件分支。插槽的边界很清楚 —— 会话行那部分仍然只有一份。
      */
     trailingContent: (LazyListScope.() -> Unit)? = null,
+    /**
+     * 桌面密度档，原样透传给 [ConversationRow]（见它的 dense KDoc）。
+     *
+     * 容器也是共享组件（AGENTS §2.6）：绕过它把密度直接传给行，等于把「行的容器」
+     * 又拆回两份。默认 false = 手机调用方不传即手机帧零变化。
+     */
+    dense: Boolean = false,
 ) {
     val sp = LocalAppSpacing.current
     Box(modifier = modifier) {
@@ -117,6 +124,7 @@ internal fun ConversationListPanel(
                         previewSenderName = previewSenderNameOf?.invoke(item.conv.convId),
                         draftPreview = draftPreviewOf?.invoke(item.conv.convId),
                         selected = selectedConvId != null && item.conv.convId == selectedConvId,
+                        dense = dense,
                     )
 
                     is InboxFeedItem.Workspace -> WorkspaceFeedRow(
