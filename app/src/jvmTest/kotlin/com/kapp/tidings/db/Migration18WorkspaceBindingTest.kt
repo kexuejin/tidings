@@ -14,10 +14,10 @@ import kotlin.test.fail
  * 18.sqm（升级轮 T-2a，版本 18 → 19）的迁移夹具（DesktopDatabaseOpenTest 同款夹具风格）。
  *
  * 反向验证四钉：
- * 1. **v18 库跑 18.sqm**：WorkspaceBindingEntity / AgentGrantRuleEntity / cardPayload
- *    全部到位；老行 cardPayload 为 NULL（与「没刷新过」同义，回退读 card_json）；
+ * 1. **v18 库跑 18.sqm**：WorkspaceBindingEntity / AgentGrantRuleEntity / card_payload
+ *    全部到位；老行 card_payload 为 NULL（与「没刷新过」同义，回退读 card_json）；
  * 2. **哨兵库不被二次 ALTER**：表已是当前形状但 user_version=0（5c1d1b46 教训的那档）⇒
- *    补章跳迁移，duplicate column 不许出现 —— 缺 cardPayload 哨兵时这条红；
+ *    补章跳迁移，duplicate column 不许出现 —— 缺 card_payload 哨兵时这条红；
  * 3. **盖章 19**；
  * 4. **1:1 防重唯一索引真的拦重绑**：同 (groupId, hostNodeId, wsPath) 第二条插入必须炸
  *    （防重的落点是数据库约束，不是应用层先查后插）。
@@ -56,9 +56,9 @@ class Migration18WorkspaceBindingTest {
         return version
     }
 
-    /** 停在 17 的库（17.sqm 已跑：AgentArtifactEntity 有 sha256；cardPayload 不存在）。 */
+    /** 停在 17 的库（17.sqm 已跑：AgentArtifactEntity 有 sha256；card_payload 不存在）。 */
     private fun createV17Database(driver: SqlDriver) {
-        // 手写 v17 真实形状：MessageEntity 十八列（**不含** cardPayload）+
+        // 手写 v17 真实形状：MessageEntity 十八列（**不含** card_payload）+
         // AgentArtifactEntity（含 sha256 —— 17.sqm 已跑的凭证）。不借
         // FtsTolerantSchema().create 再拆：SQLite 对被触发器/FTS content 引用的表
         // 做 DROP COLUMN 会报 "error in table ... after drop column"，借建再拆的路
@@ -115,7 +115,7 @@ class Migration18WorkspaceBindingTest {
     /**
      * D-028 的核心判据（**先红过**：哨兵值算成 17 时 migrate(17,19) 重跑 17.sqm，
      * duplicate sha256 红；列形状判 from=18 后绿）：user_version=17 的盖章库
-     * （AgentArtifactEntity 已有 sha256、cardPayload 不在）升 19 **只补 18.sqm 段**。
+     * （AgentArtifactEntity 已有 sha256、card_payload 不在）升 19 **只补 18.sqm 段**。
      */
     @Test
     fun stampedV17DatabaseRunsOnlySegment18() {
@@ -129,7 +129,7 @@ class Migration18WorkspaceBindingTest {
                 columnsOf(driver, "WorkspaceBindingEntity").contains("workspaceId"),
                 "绑定表由 18.sqm 建出",
             )
-            assertTrue(columnsOf(driver, MESSAGE_TABLE).contains("cardPayload"))
+            assertTrue(columnsOf(driver, MESSAGE_TABLE).contains("card_payload"))
             assertEquals(19L, readUserVersion(driver), "盖章 19")
             // sha256 列原样保留（17.sqm 的产物不许被破坏）。
             assertTrue(
@@ -157,8 +157,8 @@ class Migration18WorkspaceBindingTest {
                 "免批规则表要建出来",
             )
             assertTrue(
-                columnsOf(driver, MESSAGE_TABLE).contains("cardPayload"),
-                "cardPayload 列要补出来",
+                columnsOf(driver, MESSAGE_TABLE).contains("card_payload"),
+                "card_payload 列要补出来",
             )
             assertEquals(19L, readUserVersion(driver), "迁移完盖章 19")
         } finally {
@@ -170,14 +170,14 @@ class Migration18WorkspaceBindingTest {
     fun unversionedCurrentSchemaIsNotReAlteredBy18() {
         val driver = JdbcSqliteDriver(JdbcSqliteDriver.IN_MEMORY)
         try {
-            // 「表已最新、没人盖章」：FtsTolerantSchema 建的就是当前形状（含 cardPayload）。
+            // 「表已最新、没人盖章」：FtsTolerantSchema 建的就是当前形状（含 card_payload）。
             FtsTolerantSchema().create(driver)
             setUserVersion(driver, 0)
             val before = columnsOf(driver, MESSAGE_TABLE).toSet()
 
             openDesktopDatabase(driver)
 
-            // 缺 cardPayload 哨兵时：18.sqm 的 ALTER 重跑 ⇒ duplicate column 拦在启动前。
+            // 缺 card_payload 哨兵时：18.sqm 的 ALTER 重跑 ⇒ duplicate column 拦在启动前。
             assertEquals(before, columnsOf(driver, MESSAGE_TABLE).toSet(), "不许重复加列")
             assertEquals(19L, readUserVersion(driver), "补章 19")
         } finally {
@@ -231,10 +231,10 @@ class Migration18WorkspaceBindingTest {
             openDesktopDatabase(driver)
             driver.executeQuery(
                 identifier = null,
-                sql = "SELECT cardPayload, card_json FROM MessageEntity WHERE id = 'm1'",
+                sql = "SELECT card_payload, card_json FROM MessageEntity WHERE id = 'm1'",
                 mapper = { cursor ->
                     assertTrue(cursor.next().value, "老行必须还在")
-                    kotlin.test.assertNull(cursor.getString(0), "老行 cardPayload 是 NULL = 未刷新（回退读 card_json）")
+                    kotlin.test.assertNull(cursor.getString(0), "老行 card_payload 是 NULL = 未刷新（回退读 card_json）")
                     QueryResult.Value(Unit)
                 },
                 parameters = 0,
