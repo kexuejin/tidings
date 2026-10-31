@@ -940,3 +940,481 @@ private fun V2CardCollapsePhonePreview() {
         }
     }
 }
+
+/** 桌面卡帧的统一列宽：与 [AgentCardDeskPreview] / 桌面气泡同一档（720 上限内）。 */
+private val DeskCardWidth = 720.dp
+
+
+// ── 桌面帧（S5 补做：WP-D5 ②）────────────────────────────────────────────
+//
+// §8 清单的每一条信息形态在 1280×800 再拍一张 —— 同一个 [AgentCardBubble] / 同一份
+// [AgentApprovalsSection]，只有视口与列宽不同（AGENTS §2.6：内容共享、外壳参数化）。
+// 这些帧此前整档缺失（designFormPairingGate 口径下「内容组件桌面无证据」）。
+
+@PreviewTest
+@Preview(name = "desk-v2-card-p1-zero", widthDp = 1280, heightDp = 800, showBackground = true, locale = "zh-rCN")
+@Composable
+private fun V2CardZeroDeskPreview() {
+    AppTheme(darkTheme = false) {
+        Surface(color = MaterialTheme.colorScheme.surface, modifier = Modifier.fillMaxSize()) {
+            Box(Modifier.padding(16.dp)) {
+                AgentCardBubble(
+                    card = cardOf(
+                        progress = 0,
+                        steps = listOf(
+                            Triple("读取仓库结构", "pending", null),
+                            Triple("生成迁移脚本", "pending", null),
+                            Triple("跑回归", "pending", null),
+                        ),
+                    ),
+                    pendingActions = emptySet(),
+                    onAction = { _, _ -> },
+                    modifier = Modifier.width(DeskCardWidth),
+                )
+            }
+        }
+    }
+}
+
+@PreviewTest
+@Preview(name = "desk-v2-card-p2-mixed", widthDp = 1280, heightDp = 800, showBackground = true, locale = "zh-rCN")
+@Composable
+private fun V2CardMixedDeskPreview() {
+    AppTheme(darkTheme = false) {
+        Surface(color = MaterialTheme.colorScheme.surface, modifier = Modifier.fillMaxSize()) {
+            Box(Modifier.padding(16.dp)) {
+                AgentCardBubble(
+                    card = cardOf(
+                        progress = 45,
+                        steps = listOf(
+                            Triple("协议定义更新", "done", "@architect"),
+                            Triple("核心通道编写", "running", "@coder"),
+                            Triple("兼容层适配", "failed", "@coder"),
+                            Triple("回归测试校验", "pending", "@tester"),
+                        ),
+                    ),
+                    pendingActions = emptySet(),
+                    onAction = { _, _ -> },
+                    modifier = Modifier.width(DeskCardWidth),
+                )
+            }
+        }
+    }
+}
+
+@PreviewTest
+@Preview(name = "desk-v2-card-p3-done", widthDp = 1280, heightDp = 800, showBackground = true, locale = "zh-rCN")
+@Composable
+private fun V2CardDoneDeskPreview() {
+    AppTheme(darkTheme = false) {
+        Surface(color = MaterialTheme.colorScheme.surface, modifier = Modifier.fillMaxSize()) {
+            Box(Modifier.padding(16.dp)) {
+                AgentCardBubble(
+                    card = cardOf(
+                        progress = 100,
+                        steps = listOf(
+                            Triple("协议定义更新", "done", "@architect"),
+                            Triple("核心通道编写", "done", "@coder"),
+                            Triple("回归测试校验", "done", "@tester"),
+                        ),
+                    ),
+                    pendingActions = emptySet(),
+                    onAction = { _, _ -> },
+                    modifier = Modifier.width(DeskCardWidth),
+                )
+            }
+        }
+    }
+}
+
+/** P4 · 审批主形态（桌面）：primary 批准 + 中性暂停，两颗都可达。 */
+@PreviewTest
+@Preview(name = "desk-v2-card-p4-approval", widthDp = 1280, heightDp = 800, showBackground = true, locale = "zh-rCN")
+@Composable
+private fun V2CardApprovalDeskPreview() {
+    AppTheme(darkTheme = false) {
+        Surface(color = MaterialTheme.colorScheme.surface, modifier = Modifier.fillMaxSize()) {
+            Box(Modifier.padding(16.dp)) {
+                AgentCardBubble(
+                    card = cardOf(
+                        progress = 70,
+                        steps = listOf(
+                            Triple("协议定义更新", "done", "@architect"),
+                            Triple("核心通道编写", "running", "@coder"),
+                        ),
+                        actions = listOf(
+                            Triple("pause-task", "暂停任务", false),
+                            Triple("approve", "批准", true),
+                        ),
+                    ),
+                    pendingActions = emptySet(),
+                    onAction = { _, _ -> },
+                    modifier = Modifier.width(DeskCardWidth),
+                )
+            }
+        }
+    }
+}
+
+@PreviewTest
+@Preview(name = "desk-v2-card-p8-banner-tones", widthDp = 1280, heightDp = 800, showBackground = true, locale = "zh-rCN")
+@Composable
+private fun V2CardBannerTonesDeskPreview() {
+    val tones = listOf(
+        "info" to "正在等待宿主任命工作区",
+        "success" to "三步全部通过",
+        "warn" to "有一步被跳过，请确认",
+        "error" to "执行失败：命令返回 128",
+    )
+    AppTheme(darkTheme = false) {
+        Surface(color = MaterialTheme.colorScheme.surface, modifier = Modifier.fillMaxSize()) {
+            Column(
+                modifier = Modifier.padding(16.dp),
+                verticalArrangement = Arrangement.spacedBy(8.dp),
+            ) {
+                tones.forEach { (tone, text) ->
+                    AgentCardBubble(
+                        card = cardOf(progress = 60, banner = text to tone),
+                        pendingActions = emptySet(),
+                        onAction = null,
+                        modifier = Modifier.width(DeskCardWidth),
+                    )
+                }
+            }
+        }
+    }
+}
+
+@PreviewTest
+@Preview(name = "desk-v2-card-p9-timeout", widthDp = 1280, heightDp = 800, showBackground = true, locale = "zh-rCN")
+@Composable
+private fun V2CardTimeoutDeskPreview() {
+    AppTheme(darkTheme = false) {
+        Surface(color = MaterialTheme.colorScheme.surface, modifier = Modifier.fillMaxSize()) {
+            Box(Modifier.padding(16.dp)) {
+                AgentCardBubble(
+                    card = cardOf(
+                        progress = 30,
+                        steps = listOf(
+                            Triple("拉取依赖", "done", null),
+                            Triple("构建产物", "running", null),
+                        ),
+                        banner = "gpu-runner 90 秒没有回音" to "error",
+                        actions = listOf(
+                            Triple("invoke-retry", "重试", false),
+                            Triple("invoke-fallback-local", "降级为本地执行", false),
+                        ),
+                    ),
+                    pendingActions = emptySet(),
+                    onAction = { _, _ -> },
+                    modifier = Modifier.width(DeskCardWidth),
+                )
+            }
+        }
+    }
+}
+
+@PreviewTest
+@Preview(name = "desk-v2-card-p10-artifacts", widthDp = 1280, heightDp = 800, showBackground = true, locale = "zh-rCN")
+@Composable
+private fun V2CardArtifactsDeskPreview() {
+    AppTheme(darkTheme = false) {
+        Surface(color = MaterialTheme.colorScheme.surface, modifier = Modifier.fillMaxSize()) {
+            Box(Modifier.padding(16.dp)) {
+                AgentCardBubble(
+                    card = cardOf(
+                        progress = 100,
+                        steps = listOf(Triple("打包", "done", null)),
+                        banner = "产物已上传" to "success",
+                        artifacts = listOf(
+                            Triple("tidings-0.62.0.apk", 52_428_800L, "application/vnd.android.package-archive"),
+                            Triple("build-report.html", 1_536L, "text/html"),
+                            Triple("checksums.txt", 512L, null),
+                        ),
+                    ),
+                    pendingActions = emptySet(),
+                    onAction = { _, _ -> },
+                    modifier = Modifier.width(DeskCardWidth),
+                )
+            }
+        }
+    }
+}
+
+@PreviewTest
+@Preview(name = "desk-v2-card-p11-diff-short", widthDp = 1280, heightDp = 800, showBackground = true, locale = "zh-rCN")
+@Composable
+private fun V2CardDiffShortDeskPreview() {
+    AppTheme(darkTheme = false) {
+        Surface(color = MaterialTheme.colorScheme.surface, modifier = Modifier.fillMaxSize()) {
+            Box(Modifier.padding(16.dp)) {
+                AgentCardBubble(
+                    card = cardOf(
+                        progress = 80,
+                        diff = Triple("core/…/NodeOutbound.kt", "发送侧三处预算对齐", 12 to 3),
+                    ),
+                    pendingActions = emptySet(),
+                    onAction = { _, _ -> },
+                    modifier = Modifier.width(DeskCardWidth),
+                )
+            }
+        }
+    }
+}
+
+@PreviewTest
+@Preview(name = "desk-v2-card-p12-diff-long", widthDp = 1280, heightDp = 800, showBackground = true, locale = "zh-rCN")
+@Composable
+private fun V2CardDiffLongDeskPreview() {
+    AppTheme(darkTheme = false) {
+        Surface(color = MaterialTheme.colorScheme.surface, modifier = Modifier.fillMaxSize()) {
+            Box(Modifier.padding(16.dp)) {
+                AgentCardBubble(
+                    card = cardOf(
+                        progress = 80,
+                        diff = Triple(
+                            "core/src/commonMain/kotlin/com/kapp/tidings/core/session/NodeOutbound.kt",
+                            "把发送侧的 UDP 预算、TCP 预算与队列重放预算对齐到同一个常量，并把三处硬编码的 4096 换成协议里的唯一来源，顺带补上两条越界判据",
+                            128 to 34,
+                        ),
+                    ),
+                    pendingActions = emptySet(),
+                    onAction = { _, _ -> },
+                    modifier = Modifier.width(DeskCardWidth),
+                )
+            }
+        }
+    }
+}
+
+@PreviewTest
+@Preview(name = "desk-v2-card-p13-assignment", widthDp = 1280, heightDp = 800, showBackground = true, locale = "zh-rCN")
+@Composable
+private fun V2CardAssignmentDeskPreview() {
+    AppTheme(darkTheme = false) {
+        Surface(color = MaterialTheme.colorScheme.surface, modifier = Modifier.fillMaxSize()) {
+            Box(Modifier.padding(16.dp)) {
+                AgentCardBubble(
+                    card = cardOf(
+                        progress = 60,
+                        steps = listOf(
+                            Triple("接口契约评审", "done", "@architect"),
+                            Triple("实现与自测", "running", "@coder"),
+                            Triple("端到端复验", "pending", "@qa-lead-with-a-very-long-name"),
+                        ),
+                    ),
+                    pendingActions = emptySet(),
+                    onAction = { _, _ -> },
+                    modifier = Modifier.width(DeskCardWidth),
+                )
+            }
+        }
+    }
+}
+
+@PreviewTest
+@Preview(name = "desk-v2-card-p14-unknown-type", widthDp = 1280, heightDp = 800, showBackground = true, locale = "zh-rCN")
+@Composable
+private fun V2CardUnknownTypeDeskPreview() {
+    AppTheme(darkTheme = false) {
+        Surface(color = MaterialTheme.colorScheme.surface, modifier = Modifier.fillMaxSize()) {
+            Box(Modifier.padding(16.dp)) {
+                AgentCardBubble(
+                    card = cardOf(
+                        type = "future-card-type-from-a-newer-plugin",
+                        progress = 50,
+                        steps = listOf(Triple("一步", "running", null)),
+                    ),
+                    pendingActions = emptySet(),
+                    onAction = { _, _ -> },
+                    modifier = Modifier.width(DeskCardWidth),
+                )
+            }
+        }
+    }
+}
+
+@PreviewTest
+@Preview(name = "desk-v2-card-p17-readonly", widthDp = 1280, heightDp = 800, showBackground = true, locale = "zh-rCN")
+@Composable
+private fun V2CardReadOnlyDeskPreview() {
+    AppTheme(darkTheme = false) {
+        Surface(color = MaterialTheme.colorScheme.surface, modifier = Modifier.fillMaxSize()) {
+            Box(Modifier.padding(16.dp)) {
+                AgentCardBubble(
+                    card = cardOf(
+                        progress = 70,
+                        steps = listOf(
+                            Triple("协议定义更新", "done", "@architect"),
+                            Triple("核心通道编写", "running", "@coder"),
+                        ),
+                        actions = listOf(
+                            Triple("pause-task", "暂停任务", false),
+                            Triple("approve", "批准", true),
+                        ),
+                    ),
+                    pendingActions = emptySet(),
+                    onAction = { _, _ -> },
+                    eligibility = CardActionEligibility.ReadOnly,
+                    modifier = Modifier.width(DeskCardWidth),
+                )
+            }
+        }
+    }
+}
+
+/** P15 的桌面帧：退档两态在 1280 宽下同样可见（判定走生产 cardRowOutcome）。 */
+@PreviewTest
+@Preview(name = "desk-v2-card-p15-fallback", widthDp = 1280, heightDp = 800, showBackground = true, locale = "zh-rCN")
+@Composable
+private fun V2CardFallbackDeskPreview() {
+    val withText = cardMessageOf(
+        id = "m-1",
+        cardJson = buildJsonObject { put("cardId", "task-89"); put("title", "重构网络传输层") },
+        text = "插件只发了半张卡：重构网络传输层（进度 70%）",
+    )
+    val withoutText = cardMessageOf(
+        id = "m-2",
+        cardJson = buildJsonObject { put("rev", 2); put("title", "无 cardId 的卡") },
+        text = "",
+    )
+    AppTheme(darkTheme = false) {
+        Surface(color = MaterialTheme.colorScheme.surface, modifier = Modifier.fillMaxSize()) {
+            Column(
+                modifier = Modifier.padding(16.dp),
+                verticalArrangement = Arrangement.spacedBy(8.dp),
+            ) {
+                for (message in listOf(withText, withoutText)) {
+                    val outcome = cardRowOutcome(message, visibleCardMessageIds = emptySet())
+                    check(outcome is CardRowOutcome.FallbackToText) { "P15 桌面夹具必须是退档，实际 $outcome" }
+                    Surface(
+                        shape = MaterialTheme.shapes.medium,
+                        color = MaterialTheme.colorScheme.surfaceVariant,
+                        modifier = Modifier.width(DeskCardWidth),
+                    ) {
+                        Text(
+                            text = outcome.text.ifBlank { "这条卡片消息读不出来" },
+                            style = MaterialTheme.typography.bodyMedium,
+                            modifier = Modifier.padding(horizontal = 12.dp, vertical = 8.dp),
+                        )
+                    }
+                }
+            }
+        }
+    }
+}
+
+/** P16 的桌面帧：折叠语义在桌面同一条生产函数上成立（三条只出一张卡）。 */
+@PreviewTest
+@Preview(name = "desk-v2-card-p16-collapse", widthDp = 1280, heightDp = 800, showBackground = true, locale = "zh-rCN")
+@Composable
+private fun V2CardCollapseDeskPreview() {
+    val messages = listOf(10, 70, 100).mapIndexed { index, progress ->
+        cardMessageOf(
+            id = "m-${index + 1}",
+            at = index * 1_000L,
+            cardJson = buildJsonObject {
+                put("cardId", "task-89")
+                put("rev", index + 1)
+                put("type", "team-task-board")
+                put("title", "重构网络传输层")
+                put("progress", progress)
+            },
+        )
+    }
+    val visible = latestRevCardMessageIds(messages)
+    AppTheme(darkTheme = false) {
+        Surface(color = MaterialTheme.colorScheme.surface, modifier = Modifier.fillMaxSize()) {
+            Column(
+                modifier = Modifier.padding(16.dp),
+                verticalArrangement = Arrangement.spacedBy(8.dp),
+            ) {
+                for (message in messages) {
+                    when (val outcome = cardRowOutcome(message, visible)) {
+                        is CardRowOutcome.Render -> AgentCardBubble(
+                            card = outcome.card,
+                            pendingActions = emptySet(),
+                            now = 0L,
+                            onAction = null,
+                            modifier = Modifier.width(DeskCardWidth),
+                        )
+                        is CardRowOutcome.Hidden -> Unit
+                        is CardRowOutcome.FallbackToText -> error("P16 桌面夹具的数据都是好卡：$outcome")
+                    }
+                }
+            }
+        }
+    }
+}
+
+/** P18 的桌面帧：failed / done 两条轻横幅在 720 列宽（同一份 BannerSurface 壳）。 */
+@PreviewTest
+@Preview(name = "desk-v2-banner-p18-plugin-offline", widthDp = 1280, heightDp = 800, showBackground = true, locale = "zh-rCN")
+@Composable
+private fun V2StateBannerDeskPreview() {
+    AppTheme(darkTheme = false) {
+        Surface(color = MaterialTheme.colorScheme.surface, modifier = Modifier.fillMaxSize()) {
+            Column(
+                modifier = Modifier.padding(16.dp),
+                verticalArrangement = Arrangement.spacedBy(8.dp),
+            ) {
+                com.kapp.tidings.feature.chat.AgentStateBannerRow(
+                    state = "failed",
+                    text = "插件离线，这个动作没有执行",
+                    modifier = Modifier.width(DeskCardWidth),
+                )
+                com.kapp.tidings.feature.chat.AgentStateBannerRow(
+                    state = "done",
+                    text = "已完成：12 个文件，3 分钟",
+                    modifier = Modifier.width(DeskCardWidth),
+                )
+            }
+        }
+    }
+}
+
+// ── 审批行的桌面帧（P4/P6/P7 的 1280 形态）───────────────────────────────
+
+@PreviewTest
+@Preview(name = "desk-v2-approval-p4-pending", widthDp = 1280, heightDp = 800, showBackground = true, locale = "zh-rCN")
+@Composable
+private fun V2ApprovalPendingDeskPreview() {
+    AppTheme(darkTheme = false) {
+        Surface(color = MaterialTheme.colorScheme.surface, modifier = Modifier.fillMaxSize()) {
+            Box(Modifier.padding(16.dp).width(DeskCardWidth)) {
+                ApprovalFrame(listOf(approvalOf()))
+            }
+        }
+    }
+}
+
+@PreviewTest
+@Preview(name = "desk-v2-approval-p6-decided", widthDp = 1280, heightDp = 800, showBackground = true, locale = "zh-rCN")
+@Composable
+private fun V2ApprovalDecidedDeskPreview() {
+    AppTheme(darkTheme = false) {
+        Surface(color = MaterialTheme.colorScheme.surface, modifier = Modifier.fillMaxSize()) {
+            Box(Modifier.padding(16.dp).width(DeskCardWidth)) {
+                ApprovalFrame(listOf(approvalOf(status = "approved")))
+            }
+        }
+    }
+}
+
+@PreviewTest
+@Preview(name = "desk-v2-approval-p7-expired", widthDp = 1280, heightDp = 800, showBackground = true, locale = "zh-rCN")
+@Composable
+private fun V2ApprovalExpiredDeskPreview() {
+    AppTheme(darkTheme = false) {
+        Surface(color = MaterialTheme.colorScheme.surface, modifier = Modifier.fillMaxSize()) {
+            Box(Modifier.padding(16.dp).width(DeskCardWidth)) {
+                com.kapp.tidings.feature.agents.AgentApprovalsSection(
+                    approvals = listOf(approvalOf(expiresAt = 1L)),
+                    onRespond = { _, _ -> },
+                    onRespondChoice = { _, _ -> },
+                    includeExpiredPending = true,
+                )
+            }
+        }
+    }
+}

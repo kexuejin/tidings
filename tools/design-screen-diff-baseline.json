@@ -1,7 +1,7 @@
 {
   "generatedAt": "4676260ad684",
   "note": "逐屏差集棘轮：每个键的差集只许变小。--check 报「新增的值」。",
-  "reason": "设计先行（卡片设计稿 v2 B0）：Agent 交互卡片七类区块进原型 —— ac 卡片族挂在共享的 msg() 上，凡渲染消息列表的屏（m-sendfolder/m-folderin/m-screencard/d-resume）切片都会带上新值（font-size 13、spacing 1/7/1.5，来自步骤行/assignee 徽标/进度条）；代码侧卡片只在 chat 屏渲染，对齐随实施 A–B 阶段（docs/plans/2026-10-30-agent-card-interaction-design.md §9）。属第三类量具口径差（共享渲染函数 pull-in），非代码缺失；基线 generatedAt 同步到原型新 sha c66faaa03817。",
+  "reason": "WP-D5 卡片视觉对齐（任务 task-7）：m-chat 三屏 spacing|code 新增 7 来自 AgentCards 承办人徽标——逐字对齐原型 .acard .st .asg{padding:1px 7px}（prototype/relay.html:532，区块 .acard 步骤行段），值本身是原型真值。判为量具口径缺口：.acard 挂在共享 msg() 上，代码侧 AgentCards.kt 整文件取值并入每个渲染卡片消息的屏切片（merge_shared_values 机制），而 m-chat 三屏的原型夹具卡没画 assignee 徽标 ⇒ 原型侧集合没有 7。与基线 note 已记的 B0 同族（font-size 13、spacing 1/1.5/7 的 pull-in），非代码偏离；--check 下 7 进基线签名，后续只许降。",
   "rowCount": 70,
   "signature": {
     "d-agentdetail|__error__": [
@@ -123,7 +123,6 @@
     ],
     "d-chat|spacing|proto": [
       "1",
-      "7",
       "13",
       "30"
     ],
@@ -280,7 +279,6 @@
       "48"
     ],
     "d-groupcreate|spacing|proto": [
-      "7",
       "13",
       "30"
     ],
@@ -308,7 +306,6 @@
     ],
     "d-histsearch|spacing|proto": [
       "1",
-      "7",
       "13",
       "15"
     ],
@@ -428,9 +425,6 @@
     ],
     "d-resume|font-size|code": [
       "16"
-    ],
-    "d-resume|font-size|proto": [
-      "13"
     ],
     "d-resume|radius|proto": [
       "2",
@@ -716,6 +710,7 @@
       "20"
     ],
     "m-chat-group|spacing|code": [
+      "7",
       "9",
       "11",
       "20",
@@ -746,6 +741,7 @@
       "20"
     ],
     "m-chat-solo|spacing|code": [
+      "7",
       "9",
       "11",
       "20",
@@ -776,6 +772,7 @@
       "20"
     ],
     "m-chat|spacing|code": [
+      "7",
       "9",
       "11",
       "20",
@@ -790,9 +787,6 @@
       "16",
       "22",
       "28"
-    ],
-    "m-folderin|font-size|proto": [
-      "13"
     ],
     "m-folderin|radius|code": [
       "8",
@@ -823,8 +817,6 @@
     ],
     "m-groupcreate|spacing|code": [
       "1",
-      "3",
-      "7",
       "48"
     ],
     "m-groupcreate|spacing|proto": [
@@ -911,9 +903,6 @@
       "20",
       "24",
       "48"
-    ],
-    "m-histdate|spacing|proto": [
-      "7"
     ],
     "m-histsearch|font-size|code": [
       "16"
@@ -1134,9 +1123,6 @@
       "22",
       "28"
     ],
-    "m-screencard|font-size|proto": [
-      "13"
-    ],
     "m-screencard|radius|code": [
       "8",
       "10",
@@ -1162,9 +1148,6 @@
       "16",
       "22",
       "28"
-    ],
-    "m-sendfolder|font-size|proto": [
-      "13"
     ],
     "m-sendfolder|radius|code": [
       "8",
