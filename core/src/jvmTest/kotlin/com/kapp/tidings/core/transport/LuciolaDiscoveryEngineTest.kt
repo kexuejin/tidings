@@ -41,7 +41,7 @@ class LuciolaDiscoveryEngineTest {
         val peerP = profile("t_peer", "Peer")
         val registry = PeerRegistry(selfP.nodeId)
 
-        val engine = LuciolaDiscoveryEngine(registry, { selfP }, udpPort = enginePort1)
+        val engine = LuciolaDiscoveryEngine(registry, { selfP }, udpPort = enginePort1, heartbeatJitterMs = 0)
 
         // 对端:纯 luciola 适配器,extra 携带它的 Tidings Profile。
         val peerAdapter = UniffiEngineAdapter(
@@ -84,7 +84,7 @@ class LuciolaDiscoveryEngineTest {
         val selfP = profile("hb_self", "Self")
         val peerP = profile("hb_peer", "Alive")
         val registry = PeerRegistry(selfP.nodeId)
-        val engine = LuciolaDiscoveryEngine(registry, { selfP }, udpPort = enginePort4, heartbeatMs = 300)
+        val engine = LuciolaDiscoveryEngine(registry, { selfP }, udpPort = enginePort4, heartbeatMs = 300, heartbeatJitterMs = 0)
         val peerAdapter = UniffiEngineAdapter(
             sessionName = peerP.nick,
             discoveryPort = peerPort4.toUShort(),
@@ -122,7 +122,7 @@ class LuciolaDiscoveryEngineTest {
         val selfP = profile("lp_self", "Self")
         val peerP = profile("lp_peer", "FixedPort").copy(luciolaPort = 19999)
         val registry = PeerRegistry(selfP.nodeId)
-        val engine = LuciolaDiscoveryEngine(registry, { selfP }, udpPort = enginePort5)
+        val engine = LuciolaDiscoveryEngine(registry, { selfP }, udpPort = enginePort5, heartbeatJitterMs = 0)
         val peerAdapter = UniffiEngineAdapter(
             sessionName = peerP.nick,
             discoveryPort = peerPort5.toUShort(),
