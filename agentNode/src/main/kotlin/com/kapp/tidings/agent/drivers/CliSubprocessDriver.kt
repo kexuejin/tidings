@@ -203,7 +203,18 @@ fun cliDriverRegistrations(
                     // 真 CLI 实测（agy 1.2.x）：无 --workspace 旗标 —— cwd 即工作区
                     //（沙箱 worktree 的 directory() 已就位）；stream-json 信封见
                     // CliLineEventMapper 的实测注记。
-                    argSpec = { prompt -> listOf("-p", prompt, "--output-format", "stream-json") },
+                    //
+                    // --dangerously-skip-permissions：agy 在 headless 下无法弹内部权限
+                    // 提示，--mode auto 也压不住（E2E 两次实测 auto-denied）—— 这个
+                    // 旗标**只在此处安全**：所有写操作落在一次性 worktree（宿主仓
+                    // 零接触），人的守门点 = 合并审查（merge-patch）。隔离边界是我们的
+                    // worktree + 合流审批，不是 agy 的交互提示层。
+                    argSpec = { prompt ->
+                        listOf(
+                            "-p", prompt, "--output-format", "stream-json",
+                            "--mode", "auto", "--dangerously-skip-permissions",
+                        )
+                    },
                     sandbox = sandbox,
                 )
             } else {

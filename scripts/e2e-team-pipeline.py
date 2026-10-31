@@ -106,15 +106,14 @@ def send_group(text: str, required_tag: str = None):
 
 
 def wait_for_card(kind: str, timeout: int = 300):
-    """轮询会话台账等一张卡出现（kind 子串匹配）。"""
+    """等产物落地（patch.diff = 沙箱交付的地面真相；卡片是其信使）。"""
     deadline = time.time() + timeout
+    arts = "/tmp/tidings-ws/artifacts"
     while time.time() < deadline:
-        code, body = call("GET", "/v1/agent/sessions")
-        if code == 200:
-            for s in body.get("sessions", []):
-                code2, page = call("GET", f"/v1/agent/session-page?nodeId={s.get('nodeId')}&sessionId={s.get('sessionId')}")
-                if code2 == 200 and kind in json.dumps(page):
-                    return page
+        for d in sorted(os.listdir(arts), reverse=True):
+            patch = os.path.join(arts, d, "patch.diff")
+            if os.path.isfile(patch):
+                return {"dir": d, "patch": patch}
         time.sleep(3)
     return None
 
