@@ -184,14 +184,22 @@ class ChannelOrchestratorTest {
         assertEquals(false, c2Reply.second, "超时 = 失败回执")
         assertEquals("timeout", c2Reply.third, "status 复用 InvokeResultStates.TIMEOUT")
         c1CanFinish.complete(Unit)
-        // 回执序由因果决定：c-3 拿到锁后 execute 无挂起立即完成；c-1 要等
-        // c1CanFinish 放行后的下一次推进 —— c-3 的 done 必然先到。先读 c-3 再读 c-1
-        // 是在断言因果必然，不是赌时序（本用例首版把两行读反，实测红在
-        // 「expected (c-1,done) but was (c-3,done)」——实现是对的，断言序错了）。
-        val c3Reply = withTimeout(5_000) { replies.receive() }
-        assertEquals("c-3" to (true to "done"), c3Reply.first to (c3Reply.second to c3Reply.third), "c-2 超时出队后 c-3 拿到锁并完成（锁已释放的判别读数）")
-        val c1Reply = withTimeout(5_000) { replies.receive() }
-        assertEquals("c-1" to (true to "done"), c1Reply.first to (c1Reply.second to c1Reply.third), "c-1 放行后正常完成")
+        // 放行之后的两笔成功回执，**谁先到不是因果事实**：c-1 的 send 与放锁、
+        // c-3 的锁唤醒分属不同协程，相对次序是调度细节 —— 两向都实测出现过
+        // （首版断言 c-1 先到，红在 actual=(c-3,done)；改成 c-3 先到后又在别的
+        // 轮次红在 actual=(c-1,done)，约 3 轮 1 红）。所以只断言**集合**：
+        // 两笔都到、都是 done —— 顺序不进断言。「锁已释放」的判别读数仍在：
+        // c-3 排队在 gpu 锁后面，它的 done 能在窗口内到达本身就需要 c-1 先放锁，
+        // 集合两笔齐 = 超时出队与放锁两件事都发生了。
+        val successes = listOf(
+            withTimeout(5_000) { replies.receive() },
+            withTimeout(5_000) { replies.receive() },
+        ).map { it.first to (it.second to it.third) }.toSet()
+        assertEquals(
+            setOf("c-3" to (true to "done"), "c-1" to (true to "done")),
+            successes,
+            "c-2 超时出队后 c-1 与 c-3 都正常完成（c-3 到达 = 锁已释放的判别读数）",
+        )
         Unit
     }
 
