@@ -55,6 +55,7 @@ import com.kapp.tidings.ui.components.ScreenRequestConfirmDialog
 import com.kapp.tidings.ui.components.StatusDot
 import com.kapp.tidings.ui.components.TopBarIconAction
 import com.kapp.tidings.generated.resources.Res
+import com.kapp.tidings.generated.resources.chat_caps_section
 import com.kapp.tidings.generated.resources.chat_group_agents_ready
 import com.kapp.tidings.generated.resources.desktop_more_actions
 import com.kapp.tidings.generated.resources.ic_screen_share
@@ -544,7 +545,7 @@ public fun DesktopChatHeader(
                     // token（peer.caps，如 ag1/tw1）接在行尾 —— 「这台机器能干什么」
                     // 在头部可读，不用下钻节点详情。caps 码是协议 token，原样展示。
                     val privateLine = peerHeaderLine(peer, now).let { base ->
-                        if (peer.caps.isNotEmpty()) base + " · 能力 " + peer.caps.joinToString(" ") else base
+                        if (peer.caps.isNotEmpty()) base + " · " + stringResource(Res.string.chat_caps_section) + " " + peer.caps.joinToString(" ") else base
                     }
                     Text(
                         if (groupLine == null) {

@@ -935,6 +935,7 @@
     <string name="desktop_inspector_title">Details</string>
     <string name="desktop_inspector_collapse">Collapse details</string>
     <string name="chat_group_agents_ready">%1$d agents ready</string>
+    <string name="chat_caps_section">Capabilities</string>
     <string name="desktop_more_actions">More actions</string>
     <string name="desktop_title_files">Saved and active files</string>
     <string name="desktop_title_nodes">%1$d nodes online · Local %2$s</string>
