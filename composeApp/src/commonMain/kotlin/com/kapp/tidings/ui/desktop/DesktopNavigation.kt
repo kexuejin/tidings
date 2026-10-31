@@ -19,13 +19,6 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.selection.selectableGroup
-import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.automirrored.outlined.Chat
-import androidx.compose.material.icons.outlined.Devices
-import androidx.compose.material.icons.outlined.Folder
-import androidx.compose.material.icons.outlined.Inventory2
-import androidx.compose.material.icons.outlined.Settings
-import androidx.compose.material.icons.outlined.Terminal
 import androidx.compose.material3.Badge
 import androidx.compose.material3.BadgedBox
 import androidx.compose.material3.Icon
@@ -49,8 +42,15 @@ import com.kapp.tidings.ui.theme.accents
 import com.kapp.tidings.domain.model.FileCardUi
 import com.kapp.tidings.domain.model.TransferState
 import com.kapp.tidings.generated.resources.Res
+import com.kapp.tidings.generated.resources.ic_chat_bubble
+import com.kapp.tidings.generated.resources.ic_folder
+import com.kapp.tidings.generated.resources.ic_hdd
+import com.kapp.tidings.generated.resources.ic_lan_search
+import com.kapp.tidings.generated.resources.ic_settings
+import com.kapp.tidings.generated.resources.ic_terminal
 import com.kapp.tidings.generated.resources.screen_settings
 import org.jetbrains.compose.resources.StringResource
+import org.jetbrains.compose.resources.painterResource
 import org.jetbrains.compose.resources.stringResource
 
 // ------------------------------------------------------------------ 导航条
@@ -123,7 +123,7 @@ public fun NavigationRail(
             Spacer(Modifier.weight(1f))
             RailButton(
                 label = stringResource(Res.string.screen_settings),
-                icon = Icons.Outlined.Settings,
+                icon = painterResource(Res.drawable.ic_settings),
                 selected = false,
                 onClick = onOpenSettings,
             )
@@ -147,7 +147,7 @@ public fun NavigationRail(
 @Composable
 public fun RailButton(
     label: String,
-    icon: androidx.compose.ui.graphics.vector.ImageVector,
+    icon: androidx.compose.ui.graphics.painter.Painter,
     selected: Boolean,
     onClick: () -> Unit,
     badge: Int = 0,
@@ -236,7 +236,7 @@ public fun CompactNavigationBar(
  */
 @Composable
 private fun NavIconWithBadge(
-    icon: androidx.compose.ui.graphics.vector.ImageVector,
+    icon: androidx.compose.ui.graphics.painter.Painter,
     label: String,
     tint: androidx.compose.ui.graphics.Color,
     badge: Int,
@@ -257,14 +257,17 @@ private fun NavIconWithBadge(
 
 public fun desktopViewLabel(view: DesktopView): StringResource = view.label
 
-public fun desktopViewIcon(view: DesktopView): androidx.compose.ui.graphics.vector.ImageVector = when (view) {
-    DesktopView.Conversations -> Icons.AutoMirrored.Outlined.Chat
-    DesktopView.Files -> Icons.Outlined.Folder
-    DesktopView.Cabinet -> Icons.Outlined.Inventory2
-    DesktopView.Nodes -> Icons.Outlined.Devices
-    // 工作区用终端图标：与原型 `DVIEWS` 里 agents 那一格的 `icon:'terminal'` 同一枚，
-    // 也与溢出菜单里那颗 `ic_terminal` 指向同一件事（这里是矢量图，那边是 drawable）。
-    DesktopView.Agents -> Icons.Outlined.Terminal
+@Composable
+public fun desktopViewIcon(view: DesktopView): androidx.compose.ui.graphics.painter.Painter = when (view) {
+    // 五视图图标 = 原型 DVIEWS 的 sprite symbol（chat/folder/hdd/lan/terminal，relay.html:3161-3167）
+    // 经 design/icon-mapping.json 对账的 drawable（vector:ic_chat_bubble / ic_folder /
+    // ic_hdd / ic_lan_search / ic_terminal）。V4 收敛：material-icons 字形在导航层退场，
+    // 图标从「两个来源」回到「sprite 一张表」—— 改原型 sprite 这里才会跟着变。
+    DesktopView.Conversations -> painterResource(Res.drawable.ic_chat_bubble)
+    DesktopView.Files -> painterResource(Res.drawable.ic_folder)
+    DesktopView.Cabinet -> painterResource(Res.drawable.ic_hdd)
+    DesktopView.Nodes -> painterResource(Res.drawable.ic_lan_search)
+    DesktopView.Agents -> painterResource(Res.drawable.ic_terminal)
 }
 
 @Composable
