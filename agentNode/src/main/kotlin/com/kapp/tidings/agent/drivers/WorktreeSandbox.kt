@@ -111,10 +111,25 @@ class WorktreeSandboxExecutor(
         try {
             // worktree add：hostRepo 不是 git 仓 / 分支已存在 / 路径被占都会在这里炸，
             // stderr 尾巴随 Failed 上去 —— 大声失败，不静默回退到裸跑。
-            val createdResult = git.run(
+            var createdResult = git.run(
                 listOf("worktree", "add", "-b", branchOf(taskId), worktree.absolutePath),
                 cwd = File(hostRepo),
             )
+            if (!createdResult.ok && createdResult.stderr.contains("already")) {
+                // 一次性自愈（T-G11a）：上次异常留下的同名 worktree/分支（进程被
+                // SIGKILL 时无痕清理没跑到）。与 cleanupTask 同序：remove --force
+                // （它可能是**已注册**的工作树，prune 只清幽灵注册）→ prune →
+                // branch -D → 重试一次；再失败才是真冲突（如实 Failed，不无限重试）。
+                if (worktree.exists()) {
+                    git.run(listOf("worktree", "remove", "--force", worktree.absolutePath), cwd = File(hostRepo))
+                }
+                git.run(listOf("worktree", "prune"), cwd = File(hostRepo))
+                git.run(listOf("branch", "-D", branchOf(taskId)), cwd = File(hostRepo))
+                createdResult = git.run(
+                    listOf("worktree", "add", "-b", branchOf(taskId), worktree.absolutePath),
+                    cwd = File(hostRepo),
+                )
+            }
             if (!createdResult.ok) {
                 return Outcome.Failed(
                     -1,

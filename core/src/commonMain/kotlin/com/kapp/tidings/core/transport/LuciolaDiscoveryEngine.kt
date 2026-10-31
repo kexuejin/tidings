@@ -39,6 +39,13 @@ class LuciolaDiscoveryEngine(
      */
     private val heartbeatMs: Long = 5_000,
     /**
+     * 心跳抖动幅度（T-G8，§7.10 Jitter Ping）：每次间隔 = heartbeatMs ± jitterMs
+     * 的均匀随机 —— 全队同频心跳会在加入瞬间同相共振（广播风暴），抖动把相位
+     * 打散。0 = 关（测试钉固定节拍用）；可注入随机源让分布可测。
+     */
+    private val heartbeatJitterMs: Long = 1_500,
+    private val jitterRandom: kotlin.random.Random = kotlin.random.Random,
+    /**
      * 把信标身份钉到宿主自己的零信任体系上(luciola 0.6.0):
      * - [engineNodeId]:信标携带宿主自己的 nodeId,信标身份 = 信道身份,不再由
      *   引擎随机生成第二套;
@@ -102,7 +109,11 @@ class LuciolaDiscoveryEngine(
         }
         heartbeatJob = scope.launch {
             while (isActive) {
-                delay(heartbeatMs)
+                // ±jitter 的均匀抖动（§7.10）：同频共振的防风暴，不是随机丢包。
+                val jitter = if (heartbeatJitterMs > 0) {
+                    jitterRandom.nextLong(-heartbeatJitterMs, heartbeatJitterMs + 1)
+                } else 0L
+                delay((heartbeatMs + jitter).coerceAtLeast(1))
                 peersLock.withLock { knownPeers.values.toList() }.forEach { applyPeer(it) }
             }
         }

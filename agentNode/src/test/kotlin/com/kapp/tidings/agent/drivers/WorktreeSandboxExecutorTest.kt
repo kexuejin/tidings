@@ -250,6 +250,24 @@ class WorktreeSandboxExecutorTest {
     }
 
     @Test
+    fun staleWorktreeFromACrashSelfHealsOnCreate() = runBlocking {
+        val root = tempDir()
+        val host = tempDir()
+        gitRepo(host)
+        // 预置「上次崩溃的残骸」：同分支 + 同路径 worktree 挂着（模拟 SIGKILL 后无痕清理没跑到）。
+        runGit(host, "worktree", "add", "-b", "task-t7", File(root, "t7").absolutePath)
+        File(root, "t7").resolve("stale.txt").writeText("stale\n")
+        val cli = script(root, "cli", "echo recovered >> seed.txt; exit 0")
+        val exe = executor(root)
+        val outcome = exe.run("t7", host.absolutePath, listOf(cli), emptyMap(), {})
+        assertTrue(outcome is WorktreeSandboxExecutor.Outcome.Finished, "残骸自愈后正常执行，实际 $outcome")
+        // 执行后无痕：不残留第二份。
+        assertTrue(!File(root, "t7").exists())
+        val worktrees = gitLines(host, "worktree", "list").filter { it.contains(File(root, "t7").canonicalPath) }
+        assertTrue(worktrees.isEmpty())
+    }
+
+    @Test
     fun malformedTaskIdIsRejectedBeforeAnyGitCall() {
         val root = tempDir()
         val exe = executor(root)
