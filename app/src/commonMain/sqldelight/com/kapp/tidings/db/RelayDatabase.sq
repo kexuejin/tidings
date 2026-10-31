@@ -591,6 +591,26 @@ CREATE TABLE AgentGrantRuleEntity (
     expiresAt INTEGER NOT NULL
 );
 
+insertWorkspaceBinding:
+INSERT OR REPLACE INTO WorkspaceBindingEntity (
+    workspaceId, groupId, hostNodeId, wsPath, gitBranch, isHostActive, createdAt, updatedAt
+) VALUES (?, ?, ?, ?, ?, ?, ?, ?);
+
+selectWorkspaceBindingsByGroup:
+SELECT * FROM WorkspaceBindingEntity WHERE groupId = ?;
+
+selectWorkspaceBindingByGroupAndHost:
+SELECT * FROM WorkspaceBindingEntity WHERE groupId = ? AND hostNodeId = ?;
+
+selectWorkspaceBindingByHostAndPath:
+SELECT * FROM WorkspaceBindingEntity WHERE hostNodeId = ? AND wsPath = ?;
+
+deleteWorkspaceBinding:
+DELETE FROM WorkspaceBindingEntity WHERE groupId = ? AND hostNodeId = ?;
+
+deleteWorkspaceBindingsByGroup:
+DELETE FROM WorkspaceBindingEntity WHERE groupId = ?;
+
 insertAgentSession:
 INSERT OR REPLACE INTO AgentSessionEntity (
     node_id, session_id, alias, agent_kind, state, title, started_at, updated_at, announced,
