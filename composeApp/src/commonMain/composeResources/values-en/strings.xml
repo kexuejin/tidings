@@ -928,6 +928,8 @@
     <!-- 标题栏 -->
     <string name="desktop_app_title">Tidings</string>
     <string name="desktop_title_tagline">Direct LAN messaging and file transfers</string>
+    <string name="desktop_inspector_title">Details</string>
+    <string name="desktop_inspector_collapse">Collapse details</string>
     <string name="desktop_title_files">Saved and active files</string>
     <string name="desktop_title_nodes">%1$d nodes online · Local %2$s</string>
     <!-- Sub-title of the Workspaces view. The prototype's tsub() has no branch for d-agents

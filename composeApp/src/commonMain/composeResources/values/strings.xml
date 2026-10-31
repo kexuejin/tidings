@@ -1068,6 +1068,8 @@
     <!-- 标题栏 -->
     <string name="desktop_app_title">捎话 Tidings</string>
     <string name="desktop_title_tagline">局域网直连的消息与文件传输</string>
+    <string name="desktop_inspector_title">详情</string>
+    <string name="desktop_inspector_collapse">收起详情栏</string>
     <string name="desktop_title_files">已落盘与传输中的文件</string>
     <string name="desktop_title_nodes">%1$d 个节点在线 · 本机 %2$s</string>
     <!-- 工作区视图的标题栏副标题。原型 d-agents 的 tsub() 没有这一支（回落成了节点那句），
