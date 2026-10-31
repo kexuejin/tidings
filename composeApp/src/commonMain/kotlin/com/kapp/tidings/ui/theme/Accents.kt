@@ -62,6 +62,20 @@ data class RelayAccents(
     val agentAccent: Color,
     /** Agent 头像/标签的容器底色，对应规范 `tokens.colors.agentAccentContainer`。 */
     val agentAccentContainer: Color,
+
+    /**
+     * 警示琥珀（升级稿 .acard 的 warn 档：`rgba(245,158,11,X)` 微底，亮暗同值）。
+     *
+     * 出处：prototype/relay.html:531（.bn.warn）/ :551（.st.blk）的公式色。queued
+     * （secondaryContainer #F5E6D3）是黄褐族、色相不同；45 键里没有琥珀近亲 ——
+     * 按 outlineStrong 先例（WP-D1）入 token：主题内定义不算字面量欠债，而
+     * color 字面量棘轮 13/13 已满，写 Color(0xFFF59E0B) 于 feature 层必红。
+     * 亮暗同值：升级稿对四态公式色只给了一份（叠在两主题底上按 alpha 成色）。
+     */
+    val warn: Color,
+
+    /** 升级稿 .pg .bar i 渐变终点紫（prototype/relay.html:537 的 #8B5CF6），亮暗同值。 */
+    val accentGradientEnd: Color,
     /** 在线状态点。深色下必须换值，否则深绿落在深底上几乎看不见。 */
     val online: Color,
     /**
@@ -105,6 +119,8 @@ data class RelayAccents(
 val RelayLightAccents = RelayAccents(
     agentAccent = Color(0xFF6B4EE6),
     agentAccentContainer = Color(0xFFE6E0FB),
+    warn = Color(0xFFF59E0B),
+    accentGradientEnd = Color(0xFF8B5CF6),
     online = RelaySuccess,
     surface3 = Color(0xFFE4E9E7),
     outlineStrong = Color(0xFF8A8D8A),
@@ -117,6 +133,8 @@ val RelayLightAccents = RelayAccents(
 val RelayDarkAccents = RelayAccents(
     agentAccent = Color(0xFFB9A6FF),
     agentAccentContainer = Color(0xFF312A52),
+    warn = Color(0xFFF59E0B),
+    accentGradientEnd = Color(0xFF8B5CF6),
     online = Color(0xFF6FD69A),
     surface3 = Color(0xFF2B3331),
     outlineStrong = Color(0xFF8A8D8A),

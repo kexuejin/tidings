@@ -1,7 +1,7 @@
 {
   "generatedAt": "511d0c0c8aec",
   "note": "逐屏差集棘轮：每个键的差集只许变小。--check 报「新增的值」。",
-  "reason": "升级稿定稿重投影（T-1a / D-020：goal-cf8e1a7e 局域网团队协同 Agent IM 的 relay.html 631 行升级稿已 verbatim 入库 2be50c57，视觉权威源整体换代；旧基线记于升级前原型 sha 4676260ad684，与本稿不可比。新稿引入的新档位（radius/font-size 新取值）是升级设计的一部分，随 T-1b 卡片重对齐逐步收敛。",
+  "reason": "T-1b（task-14，D-020）：升级稿 .acard 重写为现代工卡风，AgentCards.kt 重对齐后 spacing 18 进入 chat 族切片（m-histdate/m-msgmenu/d-chat/d-histsearch/d-groupcreate/d-emoji 六屏经 ChatScreen.kt 的调用图 BFS pull-in）。18 是升级稿真值：.acard{padding:16px 18px}（prototype/relay.html:518）与 .st .ic{width:18px;height:18px}（:545）。同 B0/assignee-7 记账族（共享渲染 pull-in），非代码偏离；旧稿的 14 已随重写退场。",
   "rowCount": 70,
   "signature": {
     "d-agentdetail|__error__": [
@@ -102,9 +102,6 @@
       "24",
       "28"
     ],
-    "d-chat|font-weight|proto": [
-      "400"
-    ],
     "d-chat|radius|code": [
       "6",
       "7",
@@ -118,6 +115,7 @@
     ],
     "d-chat|spacing|code": [
       "2",
+      "18",
       "20",
       "48"
     ],
@@ -179,6 +177,7 @@
       "12",
       "14",
       "16",
+      "18",
       "20",
       "24",
       "48"
@@ -260,9 +259,6 @@
       "24",
       "28"
     ],
-    "d-groupcreate|font-weight|proto": [
-      "400"
-    ],
     "d-groupcreate|radius|code": [
       "6",
       "7",
@@ -274,6 +270,7 @@
     ],
     "d-groupcreate|spacing|code": [
       "2",
+      "18",
       "20",
       "48"
     ],
@@ -299,6 +296,7 @@
     ],
     "d-histsearch|spacing|code": [
       "1.5",
+      "18",
       "20",
       "24",
       "48"
@@ -702,9 +700,6 @@
       "22",
       "28"
     ],
-    "m-chat-group|font-weight|proto": [
-      "400"
-    ],
     "m-chat-group|radius|code": [
       "7",
       "8",
@@ -727,15 +722,11 @@
     "m-chat-group|spacing|proto": [
       "1",
       "13",
-      "18",
       "30"
     ],
     "m-chat-solo|font-size|code": [
       "22",
       "28"
-    ],
-    "m-chat-solo|font-weight|proto": [
-      "400"
     ],
     "m-chat-solo|radius|code": [
       "7",
@@ -759,15 +750,11 @@
     "m-chat-solo|spacing|proto": [
       "1",
       "13",
-      "18",
       "30"
     ],
     "m-chat|font-size|code": [
       "22",
       "28"
-    ],
-    "m-chat|font-weight|proto": [
-      "400"
     ],
     "m-chat|radius|code": [
       "7",
@@ -791,7 +778,6 @@
     "m-chat|spacing|proto": [
       "1",
       "13",
-      "18",
       "30"
     ],
     "m-folderin|font-size|code": [
@@ -818,8 +804,7 @@
     ],
     "m-folderin|spacing|proto": [
       "1.5",
-      "7",
-      "18"
+      "7"
     ],
     "m-groupcreate|radius|code": [
       "9"
@@ -912,6 +897,7 @@
     "m-histdate|spacing|code": [
       "1.5",
       "4",
+      "18",
       "20",
       "24",
       "48"
@@ -1034,6 +1020,7 @@
     ],
     "m-msgmenu|spacing|code": [
       "3",
+      "18",
       "20",
       "48"
     ],
@@ -1155,8 +1142,7 @@
     "m-screencard|spacing|proto": [
       "1",
       "1.5",
-      "7",
-      "18"
+      "7"
     ],
     "m-sendfolder|font-size|code": [
       "16",
@@ -1182,8 +1168,7 @@
     ],
     "m-sendfolder|spacing|proto": [
       "1.5",
-      "7",
-      "18"
+      "7"
     ],
     "m-set-appear|radius|proto": [
       "16"

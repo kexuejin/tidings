@@ -4,6 +4,8 @@ package com.kapp.tidings.feature.chat
 
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
+import androidx.compose.foundation.border
+import androidx.compose.ui.draw.clip
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -14,7 +16,8 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.HorizontalDivider
+import androidx.compose.material3.Icon
+import org.jetbrains.compose.resources.painterResource
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
@@ -26,6 +29,8 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
+import androidx.compose.ui.semantics.clearAndSetSemantics
+import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
@@ -34,6 +39,7 @@ import androidx.compose.ui.unit.dp
 import com.kapp.tidings.core.protocol.AgentExecAuthorizer
 import com.kapp.tidings.domain.model.MessageUi
 import com.kapp.tidings.generated.resources.Res
+import com.kapp.tidings.generated.resources.ic_file
 import com.kapp.tidings.generated.resources.card_decided_by
 import com.kapp.tidings.generated.resources.card_details_hide
 import com.kapp.tidings.generated.resources.card_details_show
@@ -53,8 +59,8 @@ import com.kapp.tidings.ui.components.AppButton
 import com.kapp.tidings.ui.components.AppOutlinedButton
 import com.kapp.tidings.ui.components.AppButtonSize
 import com.kapp.tidings.ui.components.AppButtonTone
-import com.kapp.tidings.ui.theme.IconSizes
 import com.kapp.tidings.ui.theme.LocalAppSpacing
+import com.kapp.tidings.ui.theme.RelayElevations
 import com.kapp.tidings.ui.theme.SurfaceTiers
 import com.kapp.tidings.ui.theme.accents
 import kotlinx.serialization.json.JsonArray
@@ -268,7 +274,7 @@ private fun JsonObject.array(key: String): List<JsonElement> =
 fun latestRevCardMessageIds(messages: List<MessageUi>): Set<String> {
     val latest = LinkedHashMap<String, Pair<Int, String>>() // cardId -> (rev, messageId)
     for (message in messages) {
-        val card = message.card ?: continue
+        val card = message.renderCard ?: continue
         val cardId = (card["cardId"] as? JsonPrimitive)?.content ?: continue
         val rev = (card["rev"] as? JsonPrimitive)?.content?.toIntOrNull() ?: continue
         val current = latest[cardId]
@@ -306,7 +312,7 @@ sealed interface CardRowOutcome {
 
 /** 见 [CardRowOutcome] 的 KDoc：`visibleCardMessageIds` 来自 [latestRevCardMessageIds]。 */
 fun cardRowOutcome(message: MessageUi, visibleCardMessageIds: Set<String>): CardRowOutcome {
-    val card = parseAgentCard(message.card) ?: return CardRowOutcome.FallbackToText(message.text)
+    val card = parseAgentCard(message.renderCard) ?: return CardRowOutcome.FallbackToText(message.text)
     return if (message.id in visibleCardMessageIds) CardRowOutcome.Render(card) else CardRowOutcome.Hidden
 }
 
@@ -475,6 +481,15 @@ fun formatArtifactSize(bytes: Long): String = when {
     else -> "${bytes / (1024L * 1024L * 1024L)}.${(bytes % (1024L * 1024L * 1024L)) * 10 / (1024L * 1024L * 1024L)} GB"
 }
 
+/** 元信息行：mime 与人读体积拼一行（新稿 .art .mt 的单行 meta）。
+ * 两者都缺 = 没有元信息（null 由调用方跳过 —— 与 formatArtifactSize 同一条口径）。
+ */
+private fun artifactMetaLine(artifact: AgentCardArtifact): String? =
+    listOfNotNull(artifact.mime, artifact.bytes?.let { formatArtifactSize(it) }).joinToString(SEP_META).ifBlank { null }
+
+/** 元信息分隔符：一处定义。 */
+private const val SEP_META = " · "
+
 // ── 插件文本字段的渲染上限（§7）─────────────────────────────────────────
 //
 // 卡片体是**插件定义**的：一条超长 label / summary 不该把整张卡撑破，也不该把
@@ -559,25 +574,26 @@ fun AgentCardBubble(
         now = now,
     )
     Surface(
-        // 原型 .acard{border-radius:var(--r-card)}，--r-card:16 —— 大圆角卡族
-        // （M3 shapes.large=16）；ListCard(11) 是行卡族的角色，整幅宽的独立消息卡不是行卡。
+        // 升级稿 .acard（prototype/relay.html:515-518）：surface 底 + 8% 黑细边 + 16 圆角
+        // + 双层柔和投影 + 壳自带 16×18 内边距与 12 的块间 gap（flex column）。
+        // 旧稿（fdc4e1d6）的「块自带 padding + 发丝线」结构随升级稿整段作废。
         shape = MaterialTheme.shapes.large,
         color = MaterialTheme.colorScheme.surface,
-        border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant),
+        border = BorderStroke(1.dp, MaterialTheme.colorScheme.outline.copy(alpha = 0.08f)),
+        shadowElevation = RelayElevations.Card,
         modifier = modifier.fillMaxWidth(),
     ) {
-        // 原型 .acard 的结构（prototype/relay.html .acard 区块）：壳只管圆角/底色/描边，
-        // **每个块自带内边距**，块与块之间靠 padding 与发丝线分隔（.st+.st / .art / .acts
-        // 的 border-top）—— 不是壳统一缩进。照抄统一缩进会让色块与卡缘之间多出一圈
-        // 卡面同色的空带，1280 宽下尤其明显。
-        Column(modifier = Modifier.fillMaxWidth()) {
+        Column(
+            modifier = Modifier.fillMaxWidth().padding(horizontal = 18.dp, vertical = 16.dp),
+            verticalArrangement = Arrangement.spacedBy(12.dp),
+        ) {
             // 头行（.hd{padding:10px 14px 8px}）：type 徽标 + 标题（.tt）+ rev 游标（.rv）。
             // 没有任何头部信息就不画头行 —— 不编一个。
             if (card.type != null || card.title != null || card.rev > 0 || plan.showExpiredTag) {
                 Row(
                     verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.spacedBy(sp.sm6),
-                    modifier = Modifier.padding(start = sp.lg14, end = sp.lg14, top = sp.md10, bottom = sp.sm),
+                    horizontalArrangement = Arrangement.spacedBy(sp.sm),
+                    modifier = Modifier.padding(0.dp),
                 ) {
                     card.type?.let { CardTypeTag(it) }
                     if (card.title != null) {
@@ -619,20 +635,29 @@ fun AgentCardBubble(
             // 它不是按钮，是「这件事已被谁定了」的事实 —— 就算这个壳没有动作通路
             // （onAction == null），它也照画。
             card.decidedBy?.let { decided ->
+                // 升级稿 .decided（relay.html:580-581）：surface-2 底 + r8 + 12 on-2，块化知情行。
                 Text(
                     text = stringResource(Res.string.card_decided_by, decided),
                     style = MaterialTheme.typography.labelMedium,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    modifier = Modifier.padding(start = sp.lg14, end = sp.lg14, top = sp.sm6, bottom = sp.md10),
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .background(SurfaceTiers.Raised, MaterialTheme.shapes.small)
+                        .padding(horizontal = 12.dp, vertical = 8.dp),
                 )
             }
-            // 只读态必须说清「为什么没有按钮」（.wait 同 .decided 的位置与字阶）。
+            // 只读态必须说清「为什么没有按钮」（.wait 同 .decided：580 段的另一形态，
+            // text-align:center —— relay.html:584-585）。
             if (plan.showWaitingForHost) {
                 Text(
                     text = stringResource(Res.string.card_waiting_host),
                     style = MaterialTheme.typography.labelMedium,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    modifier = Modifier.padding(start = sp.lg14, end = sp.lg14, top = sp.sm6, bottom = sp.md10),
+                    textAlign = TextAlign.Center,
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .background(SurfaceTiers.Raised, MaterialTheme.shapes.small)
+                        .padding(horizontal = 12.dp, vertical = 8.dp),
                 )
             }
             if (plan.showActions) {
@@ -649,13 +674,15 @@ fun AgentCardBubble(
 @Composable
 private fun CardTypeTag(type: String) {
     val sp = LocalAppSpacing.current
+    // 升级稿 .hd .type-pill（relay.html:521-522）：11/600、2×8、圆角 6（--r 低档，
+    // 非胶囊 999）、底 = agent 紫的 9% 微晕（rgba(107,78,230,.09)）—— 不再是 agent-c 实色。
     Text(
         text = type,
         style = MaterialTheme.typography.labelSmall,
         fontWeight = FontWeight.SemiBold,
         color = MaterialTheme.accents.agentAccentText,
         modifier = Modifier
-            .background(MaterialTheme.accents.agentAccentContainer, RoundedCornerShape(50))
+            .background(MaterialTheme.accents.agentAccent.copy(alpha = 0.09f), RoundedCornerShape(6.dp))
             .padding(horizontal = sp.sm, vertical = 1.5.dp),
     )
 }
@@ -682,7 +709,30 @@ private fun CardNeutralTag(text: String) {
 /** 原子 1/5 · Banner（§7.3）：一行带色的说明。 */
 @Composable
 private fun CardBannerRow(banner: AgentCardBanner) {
-    BannerSurface(tone = banner.tone) { BannerText(banner.text) }
+    // 升级稿 .bn 结构（agentCard 模板 relay.html:3480）：前置状态字形（.bnic 13px）
+    // + 弹性正文。字形按 tone 四态映射（TONE_IC：info=ℹ done=✓ warn=⚠ danger=✕）。
+    val glyph = when (banner.tone) {
+        AgentCardBannerTone.Info -> "ℹ"
+        AgentCardBannerTone.Success -> "✓"
+        AgentCardBannerTone.Warn -> "⚠"
+        AgentCardBannerTone.Error -> "✕"
+    }
+    val (container, contentColor) = bannerColorsOf(banner.tone)
+    BannerSurface(tone = banner.tone) {
+        Row(
+            verticalAlignment = Alignment.Top,
+            horizontalArrangement = Arrangement.spacedBy(8.dp),
+        ) {
+            // .bnic（relay.html:533）：13px 字形，语义色直印（容器微晕上该色过 3:1）。
+            Text(
+                text = glyph,
+                style = MaterialTheme.typography.bodyMedium,
+                color = contentColor,
+                modifier = Modifier.clearAndSetSemantics {},
+            )
+            BannerText(banner.text)
+        }
+    }
 }
 
 /**
@@ -703,7 +753,9 @@ private fun BannerSurface(
     content: @Composable () -> Unit,
 ) {
     val (container, contentColor) = bannerColorsOf(tone)
-    Surface(shape = MaterialTheme.shapes.medium, color = container, contentColor = contentColor, modifier = modifier) {
+    // 升级稿 .bn（relay.html:527-528）：圆角 10 + 柔和微底；形状 10 是档外值，
+    // 按 ShapeRoles 表头裁决走并排就近归并 = shapes.small(8) 最近的在档值。
+    Surface(shape = MaterialTheme.shapes.small, color = container, contentColor = contentColor, modifier = modifier) {
         content()
     }
 }
@@ -717,8 +769,8 @@ private fun BannerText(text: String) {
         style = MaterialTheme.typography.bodySmall,
         maxLines = CARD_BANNER_MAX_LINES,
         overflow = TextOverflow.Ellipsis,
-        // 原型 .bn{padding:8px 14px}：横幅正文自带内边距（--fs 12px 档 = bodySmall）。
-        modifier = Modifier.fillMaxWidth().padding(horizontal = sp.lg14, vertical = sp.sm),
+        // 升级稿 .bn{padding:10px 14px}（relay.html:527）。
+        modifier = Modifier.fillMaxWidth().padding(horizontal = sp.lg14, vertical = sp.md10),
     )
 }
 
@@ -740,14 +792,17 @@ private fun BannerText(text: String) {
 @Composable
 private fun bannerColorsOf(tone: AgentCardBannerTone): Pair<androidx.compose.ui.graphics.Color, androidx.compose.ui.graphics.Color> =
     when (tone) {
+        // 升级稿 .bn 四态（relay.html:529-532）：微晕底 + 语义色直印（不再是 on-container 对）。
+        // 公式色归一：紫 107,78,230 = agentAccent、绿 16,185,129 = --online 族（RelaySuccess）、
+        // 琥珀 245,158,11 = accents.warn（本次新增 token）、红 239,68,68 = error（#E63946 近亲）。
         AgentCardBannerTone.Info ->
-            MaterialTheme.colorScheme.surfaceVariant to MaterialTheme.colorScheme.onSurfaceVariant
+            MaterialTheme.accents.agentAccent.copy(alpha = 0.06f) to MaterialTheme.accents.agentAccentText
         AgentCardBannerTone.Success ->
-            MaterialTheme.colorScheme.primaryContainer to MaterialTheme.colorScheme.onPrimaryContainer
+            MaterialTheme.accents.online.copy(alpha = 0.07f) to MaterialTheme.colorScheme.onPrimaryContainer
         AgentCardBannerTone.Warn ->
-            MaterialTheme.colorScheme.secondaryContainer to MaterialTheme.colorScheme.onSecondaryContainer
+            MaterialTheme.accents.warn.copy(alpha = 0.08f) to MaterialTheme.colorScheme.onSecondaryContainer
         AgentCardBannerTone.Error ->
-            MaterialTheme.colorScheme.errorContainer to MaterialTheme.colorScheme.onErrorContainer
+            MaterialTheme.colorScheme.error.copy(alpha = 0.08f) to MaterialTheme.colorScheme.error
     }
 
 /**
@@ -797,35 +852,42 @@ private fun CardProgressRow(progress: Int) {
     val label = stringResource(Res.string.card_progress_label, progress)
     Row(
         verticalAlignment = Alignment.CenterVertically,
-        horizontalArrangement = Arrangement.spacedBy(sp.sm),
-        // .pg{padding:8px 14px 4px}
+        horizontalArrangement = Arrangement.spacedBy(sp.md10),
+        // 升级稿 .pg{padding:2px 0}（relay.html:535）—— 块间 12 gap 由壳承担。
         modifier = Modifier
-            .padding(start = sp.lg14, end = sp.lg14, top = sp.sm, bottom = sp.xs)
+            .padding(vertical = 2.dp)
             .semantics { contentDescription = label },
     ) {
-        // .pg .bar：轨道 = --surface-3（小内嵌控件那档，SurfaceTiers.Inset），圆角
-        // --r-chip（胶囊）。以前挂 surfaceVariant（=--surface-2，标签档）说不出出处。
+        // .pg .bar（relay.html:536-537）：6px 轨、圆角 10、底 = --surface-3（Inset 档）。
         Surface(
-            shape = RoundedCornerShape(50),
+            shape = RoundedCornerShape(10.dp),
             color = SurfaceTiers.Inset,
             modifier = Modifier.weight(1f).height(6.dp),
         ) {
             Box(Modifier.fillMaxWidth()) {
-                // .pg .bar i：已走的部分画 primary 填充 —— 进度条没有填充就不是进度条
-                // （0% 帧自然为空，P1 验证点不受影响；100% 满条，P3 验证点看得到终态）。
+                // .pg .bar i：填充 = primary → #8B5CF6 的 90° 渐变（升级稿给定的唯一
+                // 渐变；终点紫 = accents.accentGradientEnd（#8B5CF6，升级稿 relay.html:537 原型给定的渐变终点）。
                 Box(
                     modifier = Modifier
                         .fillMaxWidth(progress / 100f)
                         .height(6.dp)
-                        .background(MaterialTheme.colorScheme.primary),
+                        .background(
+                            Brush.horizontalGradient(
+                                listOf(
+                                    MaterialTheme.colorScheme.primary,
+                                    MaterialTheme.accents.accentGradientEnd,
+                                ),
+                            ),
+                        ),
                 )
             }
         }
-        // .pg .pc：11px on-2 等宽（tabular-nums 由 Mono 字体承担）。
+        // .pg .pc（relay.html:538-539）：12/600 mono tabular（labelSmall 11 → bodySmall 档带 600）。
         Text(
             text = label,
-            style = MaterialTheme.typography.labelSmall,
-            color = MaterialTheme.colorScheme.onSurfaceVariant,
+            style = MaterialTheme.typography.labelMedium,
+            fontWeight = FontWeight.SemiBold,
+            color = MaterialTheme.colorScheme.primary,
             fontFamily = FontFamily.Monospace,
         )
     }
@@ -837,21 +899,13 @@ private fun CardProgressRow(progress: Int) {
  */
 @Composable
 private fun CardStepListColumn(steps: List<AgentCardStep>) {
-    val sp = LocalAppSpacing.current
+    // 升级稿 .sts{gap:6px;padding:4px 0}（relay.html:541）：微型任务清单，
+    // 无生硬分割线（升级稿注释原话）。
     Column(
-        // .sts 的上下 padding 由首尾行自带；这里只管容器。
-        modifier = Modifier.padding(top = sp.xs, bottom = sp.sm),
+        verticalArrangement = Arrangement.spacedBy(6.dp),
+        modifier = Modifier.padding(vertical = 4.dp),
     ) {
-        steps.forEachIndexed { index, step ->
-            if (index > 0) {
-                HorizontalDivider(
-                    thickness = 1.dp,
-                    color = MaterialTheme.colorScheme.outlineVariant,
-                    modifier = Modifier.padding(horizontal = sp.lg14),
-                )
-            }
-            CardStepRow(step)
-        }
+        steps.forEach { step -> CardStepRow(step) }
     }
 }
 
@@ -859,22 +913,37 @@ private fun CardStepListColumn(steps: List<AgentCardStep>) {
 private fun CardStepRow(step: AgentCardStep) {
     val sp = LocalAppSpacing.current
     val statusGlyph = when (step.status) {
-        // 字形对齐原型 ST 表（.st 五态：✓ done / ▶ run / ○ pend / ✕ fail / ⏸ blk）。
+        // 字形对齐升级稿 ST 表（agentCard 模板 relay.html:3474：✓/▶/空/✕/⏸；
+        // pend 用空字形 —— 18px 圆底自己表达「未开始」）。
         AgentCardStepStatus.Done -> "✓"
         AgentCardStepStatus.Running -> "▶"
-        AgentCardStepStatus.Pending -> "○"
+        AgentCardStepStatus.Pending -> ""
         AgentCardStepStatus.Failed -> "✕"
         AgentCardStepStatus.Blocked -> "⏸"
     }
-    val statusColor = when (step.status) {
-        // .st.done→--online / .run→--primary / .pend→--outline / .fail→--error /
-        // .blk→--on-queued-c（queued 对的内容色，即 onSecondaryContainer）。
+    // .st .ic 五态（relay.html:545-551）：18×18 圆形着色底 —— done 绿 12% 晕 /
+    // run primary 实底白字 + 3px 紫晕 / pend surface-3 70% / fail 红 12% / blk 琥珀 12%。
+    val iconGlyphColor = when (step.status) {
         AgentCardStepStatus.Done -> MaterialTheme.accents.online
-        AgentCardStepStatus.Running -> MaterialTheme.colorScheme.primary
+        AgentCardStepStatus.Running -> MaterialTheme.colorScheme.onPrimary
         AgentCardStepStatus.Failed -> MaterialTheme.colorScheme.error
         AgentCardStepStatus.Blocked -> MaterialTheme.colorScheme.onSecondaryContainer
-        AgentCardStepStatus.Pending -> MaterialTheme.colorScheme.outline
+        AgentCardStepStatus.Pending -> MaterialTheme.colorScheme.onSurfaceVariant
     }
+    val iconContainerColor = when (step.status) {
+        AgentCardStepStatus.Done -> MaterialTheme.accents.online.copy(alpha = 0.12f)
+        AgentCardStepStatus.Running -> MaterialTheme.colorScheme.primary
+        AgentCardStepStatus.Failed -> MaterialTheme.colorScheme.error.copy(alpha = 0.12f)
+        AgentCardStepStatus.Blocked -> MaterialTheme.accents.warn.copy(alpha = 0.12f)
+        AgentCardStepStatus.Pending -> SurfaceTiers.Inset
+    }
+    // .st .lb（relay.html:552-553）：label 默认 on；running 行加粗 + primary。
+    val labelColor = if (step.status == AgentCardStepStatus.Running) {
+        MaterialTheme.colorScheme.primary
+    } else {
+        MaterialTheme.colorScheme.onSurface
+    }
+    val labelWeight = if (step.status == AgentCardStepStatus.Running) FontWeight.SemiBold else FontWeight.Normal
     // 状态全称仍以语义描述进无障碍树（.st .ic 只有字形，屏幕阅读器需要全称）。
     val statusLabel = when (step.status) {
         AgentCardStepStatus.Done -> stringResource(Res.string.card_status_done)
@@ -884,39 +953,62 @@ private fun CardStepRow(step: AgentCardStep) {
         AgentCardStepStatus.Blocked -> stringResource(Res.string.card_status_blocked)
     }
     Row(
-        // .st{padding:5px 0}：行的竖向内边距，横向缩进由容器 .sts 的 14px 承担。
+        // 升级稿 .st（relay.html:542-543）：居中对齐、gap 10、行内 5×8、圆角 8、
+        // hover surface-2（Compose 桌面 hover 属壳层，不进内容组件）。
         verticalAlignment = Alignment.CenterVertically,
-        horizontalArrangement = Arrangement.spacedBy(sp.sm),
+        horizontalArrangement = Arrangement.spacedBy(sp.md10),
         modifier = Modifier
             .fillMaxWidth()
-            .padding(horizontal = sp.lg14, vertical = sp.oxs5)
+            .clip(RoundedCornerShape(8.dp))
+            .padding(horizontal = 8.dp, vertical = 5.dp)
             .semantics { contentDescription = statusLabel },
     ) {
-        // .st .ic：16px 字形槽（flex:none;width:16px;text-align:center）。
-        Text(
-            text = statusGlyph,
-            style = MaterialTheme.typography.bodySmall,
-            color = statusColor,
-            modifier = Modifier.size(IconSizes.Label),
-            textAlign = TextAlign.Center,
-        )
+        // .st .ic：18×18 圆形着色底（run 态 3px 紫晕由外圈 border 模拟：0.15 alpha 的
+        // 紫环 = box-shadow 0 0 0 3px rgba(107,78,230,.15)）。
+        Box(
+            modifier = Modifier
+                .size(18.dp)
+                .then(
+                    if (step.status == AgentCardStepStatus.Running) {
+                        Modifier.border(
+                            3.dp,
+                            MaterialTheme.accents.agentAccent.copy(alpha = 0.15f),
+                            RoundedCornerShape(50),
+                        )
+                    } else {
+                        Modifier
+                    },
+                )
+                .background(iconContainerColor, RoundedCornerShape(50)),
+            contentAlignment = Alignment.Center,
+        ) {
+            Text(
+                text = statusGlyph,
+                style = MaterialTheme.typography.labelSmall,
+                color = iconGlyphColor,
+                textAlign = TextAlign.Center,
+            )
+        }
         Text(
             text = step.label,
             style = MaterialTheme.typography.bodySmall,
-            color = MaterialTheme.colorScheme.onSurface,
-            maxLines = CARD_STEP_LABEL_MAX_LINES,
+            fontWeight = labelWeight,
+            color = labelColor,
+            maxLines = 1,
             overflow = TextOverflow.Ellipsis,
             modifier = Modifier.weight(1f),
         )
-        // .st .asg：承办人徽标 —— agent 紫对（.tag.agent 同款：agent-c/agent-t）。
+        // .st .asg（relay.html:554-555）：11px、1.5×7、圆角 6、surface-2 底 + on-2 字
+        // + 4% 黑细边 —— 不再是 agent 紫对（新稿把承办人降为中性清单元）。
         step.assignee?.let {
             Text(
                 text = it,
                 style = MaterialTheme.typography.labelSmall,
-                color = MaterialTheme.accents.agentAccentText,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
                 modifier = Modifier
-                    .background(MaterialTheme.accents.agentAccentContainer, RoundedCornerShape(50))
-                    .padding(horizontal = sp.osm7, vertical = 1.5.dp),
+                    .border(1.dp, MaterialTheme.colorScheme.outline.copy(alpha = 0.04f), RoundedCornerShape(6.dp))
+                    .background(SurfaceTiers.Raised, RoundedCornerShape(6.dp))
+                    .padding(horizontal = 7.dp, vertical = 1.5.dp),
             )
         }
     }
@@ -929,26 +1021,33 @@ private fun CardStepRow(step: AgentCardStep) {
  * （设计稿 v2 §7 的「明细折叠入口」）。短摘要配一个展开按钮是骗点击 ——
  * 点开以后什么都没变，用户会以为按钮坏了。
  */
+/**
+ * 原子 4/5 · DiffViewer（§7.3）：升级稿「现代代码视窗小卡」（relay.html:557-563）——
+ * surface-2 底 + 5% 黑细边 + 圆角 10 + mono；.dfhead 两端分推路径与 .diff-stat，
+ * note 11px on-2。摘要收 2 行，>48 字符才给「展开」（短摘要配展开是骗点击）。
+ */
 @Composable
 private fun CardDiffViewerRow(diff: AgentCardDiff) {
-    val sp = LocalAppSpacing.current
     var expanded by remember(diff.summary) { mutableStateOf(false) }
     val summary = diff.summary
     val expandable = summary != null && summary.length > CARD_DIFF_SUMMARY_EXPAND_OVER
-    // 原型 .df{padding:8px 14px}：无底色的等宽块（路径 on、+add/−del 计数、note 12px on-2）。
-    // 以前套 surfaceVariant 小卡 + 「代码变更」标题 —— 原型 .acard .df 区块里没有这两个东西。
     Column(
         modifier = Modifier
             .fillMaxWidth()
-            .padding(horizontal = sp.lg14, vertical = sp.sm),
-        verticalArrangement = Arrangement.spacedBy(sp.xxs),
+            .border(1.dp, MaterialTheme.colorScheme.outline.copy(alpha = 0.05f), RoundedCornerShape(10.dp))
+            .background(SurfaceTiers.Raised, RoundedCornerShape(10.dp))
+            .padding(horizontal = 12.dp, vertical = 10.dp),
+        verticalArrangement = Arrangement.spacedBy(6.dp),
     ) {
-        Row(horizontalArrangement = Arrangement.spacedBy(sp.sm)) {
+        Row(
+            horizontalArrangement = Arrangement.spacedBy(4.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
             if (diff.path != null) {
-                // .df .pt{color:var(--on)}；word-break:break-all 由省略承担。
                 Text(
                     text = diff.path,
                     style = MaterialTheme.typography.bodySmall,
+                    fontWeight = FontWeight.Medium,
                     color = MaterialTheme.colorScheme.onSurface,
                     fontFamily = FontFamily.Monospace,
                     maxLines = 1,
@@ -957,26 +1056,27 @@ private fun CardDiffViewerRow(diff: AgentCardDiff) {
                 )
             }
             if (diff.additions != null || diff.deletions != null) {
-                // .df .add{color:var(--online)} / .df .del{color:var(--error)}（git 惯例对）。
                 Text(
                     text = "+${diff.additions ?: 0}",
-                    style = MaterialTheme.typography.bodySmall,
+                    style = MaterialTheme.typography.labelSmall,
+                    fontWeight = FontWeight.SemiBold,
                     color = MaterialTheme.accents.online,
                     fontFamily = FontFamily.Monospace,
                 )
                 Text(
                     text = "−${diff.deletions ?: 0}",
-                    style = MaterialTheme.typography.bodySmall,
+                    style = MaterialTheme.typography.labelSmall,
+                    fontWeight = FontWeight.SemiBold,
                     color = MaterialTheme.colorScheme.error,
                     fontFamily = FontFamily.Monospace,
                 )
             }
         }
         if (summary != null) {
-                    Text(
-                        text = stringResource(Res.string.card_diff_summary, summary, diff.additions ?: 0, diff.deletions ?: 0),
-                        style = MaterialTheme.typography.bodySmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+            Text(
+                text = stringResource(Res.string.card_diff_summary, summary, diff.additions ?: 0, diff.deletions ?: 0),
+                style = MaterialTheme.typography.labelSmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
                 maxLines = if (expanded) Int.MAX_VALUE else CARD_DIFF_SUMMARY_MAX_LINES,
                 overflow = TextOverflow.Ellipsis,
             )
@@ -994,84 +1094,82 @@ private fun CardDiffViewerRow(diff: AgentCardDiff) {
     }
 }
 
-/** 原子 6/6 · ArtifactList（设计稿 v2 §3 的 `result` 卡）：产物名 + 类型/体积（原型 `.art` 区块）。 */
+/**
+ * 原子 6/6 · ArtifactList：升级稿「文件小胶囊」（relay.html:565-572）—— surface-2 底
+ * + 圆角 10 + 细边框 + 28×28 图标座（agent 紫 10% 底、ic_file 16px）+ nm 13/600 + mt mono。
+ */
 @Composable
 private fun CardArtifactRows(artifacts: List<AgentCardArtifact>) {
-    val sp = LocalAppSpacing.current
-    Column {
-        artifacts.forEachIndexed { index, artifact ->
-            if (index > 0) {
-                // .art{border-top:1px solid var(--hair)}：条目间发丝线。
-                HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
-            }
-            // .art{display:flex;gap:8px;padding:8px 14px}
+    Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+        artifacts.forEach { artifact ->
             Row(
-                horizontalArrangement = Arrangement.spacedBy(sp.sm),
                 verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(10.dp),
                 modifier = Modifier
                     .fillMaxWidth()
-                    .padding(horizontal = sp.lg14, vertical = sp.sm),
+                    .border(1.dp, MaterialTheme.colorScheme.outline.copy(alpha = 0.05f), RoundedCornerShape(10.dp))
+                    .background(SurfaceTiers.Raised, RoundedCornerShape(10.dp))
+                    .padding(horizontal = 12.dp, vertical = 10.dp),
             ) {
-                // .art .nm：14px primary 600，单行省略（--fs-body 档 = bodyMedium）。
-                Text(
-                    text = artifact.name,
-                    style = MaterialTheme.typography.bodyMedium,
-                    color = MaterialTheme.colorScheme.primary,
-                    fontWeight = FontWeight.SemiBold,
-                    maxLines = CARD_ARTIFACT_NAME_MAX_LINES,
-                    overflow = TextOverflow.Ellipsis,
-                    modifier = Modifier.weight(1f),
-                )
-                // .art .mt：11px on-2 等宽。
-                val meta = listOfNotNull(
-                    artifact.mime,
-                    artifact.bytes?.let { formatArtifactSize(it) },
-                ).joinToString(SEP_META)
-                if (meta.isNotEmpty()) {
-                    Text(
-                        text = meta,
-                        style = MaterialTheme.typography.labelSmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                        fontFamily = FontFamily.Monospace,
-                        maxLines = 1,
+                // .art .art-ic：28×28 图标座（agent 紫 10% 底 + primary 图标）。
+                Box(
+                    modifier = Modifier
+                        .size(28.dp)
+                        .background(MaterialTheme.accents.agentAccent.copy(alpha = 0.1f), RoundedCornerShape(6.dp)),
+                    contentAlignment = Alignment.Center,
+                ) {
+                    Icon(
+                        painter = painterResource(Res.drawable.ic_file),
+                        contentDescription = null,
+                        tint = MaterialTheme.colorScheme.primary,
+                        modifier = Modifier.size(16.dp),
                     )
+                }
+                Column(Modifier.weight(1f)) {
+                    // .art .nm：13/600 on 单行省略（relay.html:570-571）。
+                    Text(
+                        text = artifact.name,
+                        style = MaterialTheme.typography.bodyMedium,
+                        fontWeight = FontWeight.SemiBold,
+                        color = MaterialTheme.colorScheme.onSurface,
+                        maxLines = CARD_ARTIFACT_NAME_MAX_LINES,
+                        overflow = TextOverflow.Ellipsis,
+                    )
+                    // .art .mt：11px on-2 mono（meta 与名字两行 —— 新稿布局）。
+                    artifactMetaLine(artifact)?.let { meta ->
+                        Text(
+                            text = meta,
+                            style = MaterialTheme.typography.labelSmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            fontFamily = FontFamily.Monospace,
+                            maxLines = 1,
+                        )
+                    }
                 }
             }
         }
     }
 }
 
-/** 元信息分隔符：一处定义，改样式不用翻三个调用点。 */
-private const val SEP_META = " · "
-
-/** 原子 5/5 · ButtonGroup（§7.3）：审批防重的 UI 落点（三态见 [cardActionUiOf]）。 */
+/**
+ * 原子 5/5 · ButtonGroup：升级稿「按钮与说明融为一体」（relay.html:574-579）——
+ * .acts 竖排：.pri-row（btn sm 等分 r9 7×12）+ .sub-row 居中次级文字按钮（11 on-2、
+ * 无底无边框）。本仓动作模型暂无 subActions 数据键（载荷 Schema 无此键，
+ * detailed-design §2.1）—— sub-row 的样式接缝先不落（数据到不了的字段不画）,
+ * 只落 pri-row 的等分布局。审批防重三态判据不变。
+ */
 @Composable
 private fun CardButtonGroupRow(
     card: AgentCardUi,
     pendingActions: Set<String>,
-    /** 过期时整组禁用：这是 [CardRenderPlan.actionsEnabled]，不是每颗按钮各自的事。 */
     actionsEnabled: Boolean,
     onAction: (card: AgentCardUi, actionId: String) -> Unit,
 ) {
-    val sp = LocalAppSpacing.current
-    // .acts{border-top:1px solid var(--hair)} + {padding:10px 14px 12px}：
-    // 按钮组是卡片的收尾块，与上面内容之间一条发丝线（.hd/.pg/.sts/.df 同一个体系）。
-    Column {
-        HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
+    Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
         Row(
-            horizontalArrangement = Arrangement.spacedBy(sp.sm),
-            modifier = Modifier
-                .fillMaxWidth()
-                .padding(start = sp.lg14, end = sp.lg14, top = sp.md10, bottom = sp.md),
+            horizontalArrangement = Arrangement.spacedBy(10.dp),
+            modifier = Modifier.fillMaxWidth(),
         ) {
-            // 原型 `.acts` 的按钮是 `.btn.sm(`.pri`?)`（relay.html 的 agentCard 模板）：
-            // **实心只给 `.pri`**（审批/主行动），其余走 `.btn` 基类 —— surface 底 +
-            // 描边（relay.html 的 `.btn` 基类）。原型注释原话「之前那颗漏了 `.pri`，两颗长得
-            // 一模一样」—— AppButton 的 Neutral 分支恰是那个形态（实心 primary），
-            // 所以这里与 .appr 行同一做法：非审批用 [AppOutlinedButton]（描边档，
-            // 描边色 outlineStrong = WP-D1 收编后的控件描边口径，原型 `.btn` 的
-            // `.outline` 描边正是被 D2 清账的对象）。按钮宽按内容（`.acts` 是
-            // inline-flex，不均分；48dp 触控下限由按钮组件自带兜底）。
             card.actions.forEach { action ->
                 val ui = cardActionUiOf(card, pendingActions, action.actionId)
                 val text = when (ui.lock) {
@@ -1085,6 +1183,7 @@ private fun CardButtonGroupRow(
                         enabled = actionsEnabled && !ui.disabled,
                         size = AppButtonSize.Small,
                         tone = AppButtonTone.Primary,
+                        modifier = Modifier.weight(1f),
                     )
                 } else {
                     AppOutlinedButton(
@@ -1093,6 +1192,7 @@ private fun CardButtonGroupRow(
                         enabled = actionsEnabled && !ui.disabled,
                         size = AppButtonSize.Small,
                         tone = AppButtonTone.Neutral,
+                        modifier = Modifier.weight(1f),
                     )
                 }
             }

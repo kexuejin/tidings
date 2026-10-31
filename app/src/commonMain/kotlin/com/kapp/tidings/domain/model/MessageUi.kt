@@ -312,7 +312,15 @@ data class MessageUi(
     val cardPayload: JsonObject? = null,
     /** 插件 → 全群的执行状态（方案 §4.1 四态）：accept / blocked / completed / failed。 */
     val agentState: String? = null,
-)
+) {
+    /**
+     * 渲染用载荷 = 原位刷新的最新（[cardPayload]），从未刷新回退首帧（[card]）。
+     * UI（ChatScreen / AgentCards）一律读这里，**不直读两个字段** ——
+     * 「card 是首帧锚、cardPayload 是最新」的分工由这一处收口，渲染层不再各自判断。
+     */
+    val renderCard: JsonObject?
+        get() = cardPayload ?: card
+}
 
 /**
  * 从文本中解析 `<think>...</think>` 推理内容与正式回答文本。

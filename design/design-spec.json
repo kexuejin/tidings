@@ -16,6 +16,7 @@
   },
   "tokens": {
     "colors": {
+      "accentGradientEnd": "#8B5CF6",
       "agentAccent": "#6B4EE6",
       "agentAccentContainer": "#E6E0FB",
       "agentAccentText": "#5333C9",
@@ -64,6 +65,7 @@
       "warn": "#F59E0B"
     },
     "colorsDark": {
+      "accentGradientEnd": "#8B5CF6",
       "agentAccent": "#B9A6FF",
       "agentAccentContainer": "#312A52",
       "agentAccentText": "#C9BCFF",
@@ -116,7 +118,7 @@
       "hairline": "outlineVariant 两态必须显式钉死（浅 #E4E9E7 / 深 #2B3331）：M3 默认值是紫调的 #CAC4D0 / #49454F，落在这套暖中性色板上会显脏。发丝线的低对比（深 1.47:1、浅 1.23:1）是设计意图，不计入无障碍缺陷。",
       "textContrast": "文字与状态点必须 ≥4.5:1（大字 ≥3:1）。原型的深色值正是按这条选的：#B9A6FF on #312A52 = 6.29:1、#6FD69A on #121413 = 10.36:1、#E3B75A on #121413 = 9.85:1。排队色当文字时用 secondaryContainer/onSecondaryContainer 那对（浅 8.01:1），不要用 queued 本身（浅色下只有 1.60:1）。",
       "palette": {
-        "note": "设计侧批准过的核心调色板角色。tokens.colors 现在是代码全量投影（46 键/主题），这个列表保留「哪些是设计明确批准过的」这一信息，不参与漂移比对。",
+        "note": "设计侧批准过的核心调色板角色。tokens.colors 现在是代码全量投影（47 键/主题），这个列表保留「哪些是设计明确批准过的」这一信息，不参与漂移比对。",
         "roles": [
           "primary",
           "onPrimary",
@@ -399,18 +401,23 @@
       "note": "本段是投影，不是手写：sites 只数**真的引用了该 token** 的代码行（正则由 token 名推导）；status=enforced 表示有真实消费点，pending 表示 0 处消费、必须在 tokens.pendingNotes 里写明原因。",
       "groups": {
         "colors": {
+          "accentGradientEnd": {
+            "sites": 1,
+            "status": "enforced",
+            "first": "composeApp/src/commonMain/kotlin/com/kapp/tidings/feature/chat/AgentCards.kt:878"
+          },
           "agentAccent": {
-            "sites": 3,
+            "sites": 5,
             "status": "enforced",
             "first": "composeApp/src/commonMain/kotlin/com/kapp/tidings/ui/components/Common.kt:210"
           },
           "agentAccentContainer": {
-            "sites": 3,
+            "sites": 2,
             "status": "enforced",
             "first": "composeApp/src/commonMain/kotlin/com/kapp/tidings/ui/components/Common.kt:204"
           },
           "agentAccentText": {
-            "sites": 4,
+            "sites": 3,
             "status": "enforced",
             "first": "composeApp/src/commonMain/kotlin/com/kapp/tidings/ui/components/Common.kt:266"
           },
@@ -429,7 +436,7 @@
             "status": "pending"
           },
           "error": {
-            "sites": 43,
+            "sites": 44,
             "status": "enforced",
             "first": "composeApp/src/commonMain/kotlin/com/kapp/tidings/ui/desktop/DesktopChrome.kt:348"
           },
@@ -470,7 +477,7 @@
             "first": "composeApp/src/commonMain/kotlin/com/kapp/tidings/ui/desktop/DesktopSettingsChrome.kt:467"
           },
           "onPrimary": {
-            "sites": 13,
+            "sites": 14,
             "status": "enforced",
             "first": "composeApp/src/commonMain/kotlin/com/kapp/tidings/ui/desktop/DesktopChrome.kt:551"
           },
@@ -494,7 +501,7 @@
             "first": "composeApp/src/commonMain/kotlin/com/kapp/tidings/ui/desktop/DesktopChrome.kt:553"
           },
           "onSurfaceVariant": {
-            "sites": 425,
+            "sites": 426,
             "status": "enforced",
             "first": "composeApp/src/commonMain/kotlin/com/kapp/tidings/ui/AppStates.kt:104"
           },
@@ -508,12 +515,12 @@
             "first": "composeApp/src/commonMain/kotlin/com/kapp/tidings/feature/agents/AgentApprovalCards.kt:228"
           },
           "online": {
-            "sites": 8,
+            "sites": 9,
             "status": "enforced",
             "first": "composeApp/src/commonMain/kotlin/com/kapp/tidings/ui/desktop/DesktopNodesPane.kt:395"
           },
           "outline": {
-            "sites": 10,
+            "sites": 12,
             "status": "enforced",
             "first": "composeApp/src/commonMain/kotlin/com/kapp/tidings/ui/desktop/DesktopComposer.kt:387"
           },
@@ -523,12 +530,12 @@
             "first": "composeApp/src/commonMain/kotlin/com/kapp/tidings/ui/components/AppButtons.kt:290"
           },
           "outlineVariant": {
-            "sites": 61,
+            "sites": 58,
             "status": "enforced",
             "first": "composeApp/src/commonMain/kotlin/com/kapp/tidings/ui/desktop/DesktopChatPane.kt:328"
           },
           "primary": {
-            "sites": 108,
+            "sites": 110,
             "status": "enforced",
             "first": "composeApp/src/commonMain/kotlin/com/kapp/tidings/ui/SectionCard.kt:73"
           },
@@ -612,9 +619,9 @@
             "first": "composeApp/src/commonMain/kotlin/com/kapp/tidings/ui/components/GroupInfoDialog.kt:438"
           },
           "warn": {
-            "sites": 1,
+            "sites": 2,
             "status": "enforced",
-            "first": "composeApp/src/commonMain/kotlin/com/kapp/tidings/feature/chat/AgentCards.kt:787"
+            "first": "composeApp/src/commonMain/kotlin/com/kapp/tidings/feature/chat/AgentCards.kt:803"
           }
         },
         "typography": {
@@ -629,7 +636,7 @@
             "first": "composeApp/src/commonMain/kotlin/com/kapp/tidings/ui/AppStates.kt:73"
           },
           "bodySmall": {
-            "sites": 158,
+            "sites": 154,
             "status": "enforced",
             "first": "composeApp/src/commonMain/kotlin/com/kapp/tidings/ui/desktop/CabinetPane.kt:312"
           },
@@ -665,12 +672,12 @@
             "first": "composeApp/src/commonMain/kotlin/com/kapp/tidings/ui/desktop/DesktopChrome.kt:577"
           },
           "labelMedium": {
-            "sites": 46,
+            "sites": 47,
             "status": "enforced",
             "first": "composeApp/src/commonMain/kotlin/com/kapp/tidings/ui/SectionCard.kt:87"
           },
           "labelSmall": {
-            "sites": 262,
+            "sites": 265,
             "status": "enforced",
             "first": "composeApp/src/commonMain/kotlin/com/kapp/tidings/ui/desktop/CabinetPane.kt:276"
           },
@@ -805,7 +812,7 @@
         },
         "elevation": {
           "card": {
-            "sites": 24,
+            "sites": 25,
             "status": "enforced",
             "first": "composeApp/src/commonMain/kotlin/com/kapp/tidings/ui/desktop/DesktopNodesPane.kt:688"
           },
@@ -842,7 +849,7 @@
             "first": "composeApp/src/commonMain/kotlin/com/kapp/tidings/ui/SectionCard.kt:74"
           },
           "label": {
-            "sites": 26,
+            "sites": 25,
             "status": "enforced",
             "first": "composeApp/src/commonMain/kotlin/com/kapp/tidings/ui/desktop/DesktopChrome.kt:239"
           },
@@ -878,7 +885,7 @@
         }
       },
       "adoption": {
-        "colors": "33/46",
+        "colors": "34/47",
         "typography": "11/15",
         "spacing": "17/17",
         "shape": "4/5",
@@ -890,14 +897,14 @@
       "shapeInventory": {
         "rawRoundedCornerShape": {
           "14": 2,
-          "8": 16,
-          "6": 12,
+          "8": 17,
+          "6": 15,
           "12": 21,
           "4": 10,
           "22": 2,
           "5": 3,
           "20": 2,
-          "10": 4,
+          "10": 9,
           "9": 1,
           "16": 3,
           "2": 2,
@@ -908,8 +915,8 @@
         },
         "circleShapeSites": 81,
         "offScale": {
-          "6": 12,
-          "10": 4,
+          "6": 15,
+          "10": 9,
           "5": 3,
           "14": 2,
           "22": 2,
@@ -921,13 +928,13 @@
         "note": "offScale = 没有任何 M3 槽位能表达的半径，这些点只能靠字面量写出来，是「看着不精致」最直接的一类证据。"
       },
       "debt": {
-        "shape": 77,
+        "shape": 86,
         "typography": 5,
         "color": 13,
-        "elevation": 7,
-        "iconSizes": 34,
-        "dimension": 136,
-        "spacing": 103
+        "elevation": 6,
+        "iconSizes": 35,
+        "dimension": 145,
+        "spacing": 119
       },
       "shapeSemantics": {
         "bubble": {
@@ -1426,9 +1433,11 @@
         ],
         "requiredTokens": [
           "colors.primary",
-          "colors.outlineVariant",
           "colors.error",
-          "typography.titleSmall"
+          "typography.titleSmall",
+          "colors.outline",
+          "colors.surface",
+          "colors.onPrimaryContainer"
         ],
         "stress": [
           "未知卡片字段不崩",

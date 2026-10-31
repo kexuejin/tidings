@@ -1064,7 +1064,7 @@ fun ChatScreen(
                         // 带卡片的消息有三种去向（§4.3-S21，判据在 `cardRowOutcome` 里）：
                         // 画卡 / 旧 rev 收起 / 读不出来就退成普通文本。不带卡的消息是 null，
                         // 保持原来的分支顺序不变 —— 否则纯文本消息会被「不画」那一支吃掉。
-                        val cardOutcome = if (message.card != null) {
+                        val cardOutcome = if (message.renderCard != null) {
                             remember(message.id, message.card, visibleCardIds) {
                                 cardRowOutcome(message, visibleCardIds)
                             }

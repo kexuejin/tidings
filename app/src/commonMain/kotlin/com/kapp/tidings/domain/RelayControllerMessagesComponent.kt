@@ -15,6 +15,8 @@ import com.kapp.tidings.domain.model.MessageUi
 import com.kapp.tidings.domain.model.NoticeDetail
 import com.kapp.tidings.domain.model.NoticeKind
 import com.kapp.tidings.domain.model.parseThinkingContent
+import kotlinx.serialization.json.JsonPrimitive
+import kotlinx.serialization.json.contentOrNull
 import kotlinx.serialization.json.JsonObject
 import com.kapp.tidings.domain.model.PeerUi
 import com.kapp.tidings.domain.model.TransferState
@@ -547,6 +549,43 @@ fun handleOnInbound(envelope: Envelope) {
     // 「对方说发了、我这边没收到」与「收到了但没渲染」区分开 ——
     // 在模拟器等难以直接触控取证的环境中，靠它确认消息真的落库。
     println("[msg] inbound from=" + envelope.from + " conv=" + convId + " len=" + cleanedText.length)
+    // T-2d（升级方案 §6.2 / §7.2-2，不变量 3）：同一个任务的卡片恒占 **1 个槽位** ——
+    // rev+1 的帧到达时，若本会话已有同 cardId 的卡片消息，则**原位替换**那一条
+    // （id 不变、card 首帧原文不动、cardPayload 携带最新载荷、text/agentState 推进），
+    // 不追加新行；然后按替换路径持久化（save() 的同 id 重写已带
+    // insertMessageDropStaleIndex 纪律，FTS docsize 恒等由
+    // SqlDelightMessageStoreCardInPlaceTest 钉住）。
+    // 判据：帧带 card 且 cardId/rev 可解析；新 rev **大于**已有 rev 才替换
+    // （乱序重放旧帧不回退状态）。替换或丢弃即 return —— 不再走追加。
+    val incomingCard = payload?.get("card") as? kotlinx.serialization.json.JsonObject
+    if (incomingCard != null) {
+        val cardId = (incomingCard["cardId"] as? JsonPrimitive)?.contentOrNull
+        val rev = (incomingCard["rev"] as? JsonPrimitive)?.content?.toIntOrNull()
+        if (cardId != null && rev != null) {
+            val existing = host._state.value.messages[convId]?.firstOrNull { msg ->
+                (msg.renderCard?.get("cardId") as? JsonPrimitive)?.contentOrNull == cardId
+            }
+            if (existing != null) {
+                val existingRev = (existing.renderCard?.get("rev") as? JsonPrimitive)?.content?.toIntOrNull() ?: 0
+                if (rev > existingRev) {
+                    host.handleReplaceMessage(
+                        convId,
+                        existing.copy(
+                            text = cleanedText,
+                            at = envelope.ts,
+                            cardPayload = incomingCard,
+                            agentState = payload?.let { stringField(it, "agentState") },
+                        ),
+                    )
+                    if (groupId != null) host.runtime?.let { host.groupsCtl.handleSyncGroupMetaIfNeeded(it, envelope) }
+                    return
+                }
+                // rev 不大于已有：乱序/重放旧帧 —— 丢弃（状态不能回退），也不追加。
+                return
+            }
+            // 没有同 cardId 槽位：首帧，走下面的追加路径（card=原文、cardPayload=null）。
+        }
+    }
     host.handleAppendMessage(
         MessageUi(
             id = envelope.id,
