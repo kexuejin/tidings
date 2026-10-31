@@ -193,6 +193,92 @@ internal object DesktopUiPrefs {
 }
 
 /**
+ * 窗口几何持久化（整改方案 N5）：`window.json`。
+ *
+ * 与 [DesktopUiPrefs] 同一条纪律：**只存用户自己改过的东西**（尺寸/位置/最大化），
+ * 读不出来（首次启动、文件损坏、只读目录）退回 null 走默认尺寸 —— 偏好缺失不是
+ * 错误，更不能让应用起不来。整条几何要么完整、要么不用：缺一个字段的半条几何
+ * 拿去猜值，会把窗口恢复到屏幕外的坐标上。
+ *
+ * 为什么不是 ui-prefs.properties 里的几个键：位置/尺寸是**一组**值，缺一不可；
+ * JSON 的整读整写在「半条几何」这一判据上比逐键 Properties 更不容易写坏。
+ * 多显示器恢复（坐标跨屏）按桌面方案「窗口几何」一节的待实测清单记账 —— 真机取证项。
+ */
+internal object DesktopWindowPrefs {
+    private const val FILE_NAME = "window.json"
+
+    /** 一条**完整**的窗口几何；[isMaximized] 单独成键，不靠像素猜。 */
+    data class Geometry(val x: Int, val y: Int, val width: Int, val height: Int, val isMaximized: Boolean)
+
+    fun load(dataDirectory: String): Geometry? {
+        val file = File(dataDirectory, FILE_NAME)
+        if (!file.isFile) return null
+        return try {
+            parse(file.readText())
+        } catch (_: Exception) {
+            // 损坏/半截内容：退回默认（首次启动同款），不让启动崩。
+            null
+        }
+    }
+
+    fun save(dataDirectory: String, geometry: Geometry) {
+        val dir = File(dataDirectory)
+        if (!dir.isDirectory && !dir.mkdirs()) return
+        try {
+            File(dir, FILE_NAME).writeText(serialize(geometry))
+        } catch (_: java.io.IOException) {
+            // 写不进去只丢这次几何，不该让关窗流程跟着失败。
+        }
+    }
+
+    /**
+     * 只认**自己写出**的扁平形状：五个键、整数/布尔、无嵌套。
+     * 不为五个数字引一个 JSON 运行时（kotlinx-serialization 在 desktopApp 只有
+     * testImplementation）；键外的任何内容（多余键、引号差异、嵌套）一律判 null ——
+     * 读档的宽容只该给「完整且是我们写的」，半条几何拿去猜值会把窗口恢复到屏幕外。
+     */
+    internal fun parse(text: String): Geometry? {
+        fun intOf(key: String): Int? {
+            val marker = '"' + key + '"' + ':'
+            val at = text.indexOf(marker)
+            if (at < 0) return null
+            var i = at + marker.length
+            while (i < text.length && text[i] == ' ') i++
+            val start = i
+            while (i < text.length && text[i].isDigit()) i++
+            if (i == start) return null
+            return text.substring(start, i).toIntOrNull()
+        }
+        fun boolOf(key: String): Boolean? {
+            val marker = '"' + key + '"' + ':'
+            val at = text.indexOf(marker)
+            if (at < 0) return null
+            return when {
+                text.regionMatches(at + marker.length, "true", 0, 4) -> true
+                text.regionMatches(at + marker.length, "false", 0, 5) -> false
+                else -> null
+            }
+        }
+        val x = intOf("x") ?: return null
+        val y = intOf("y") ?: return null
+        val width = intOf("width") ?: return null
+        val height = intOf("height") ?: return null
+        val maximized = boolOf("isMaximized") ?: return null
+        // 健全性：宽高与坐标不是任何数都收 —— 负尺寸/极端坐标会让窗口恢复到屏幕外。
+        if (width <= 0 || height <= 0) return null
+        return Geometry(x, y, width, height, maximized)
+    }
+
+    internal fun serialize(geometry: Geometry): String {
+        // 键名带引号、值全是数字/布尔 —— 没有别的转义面。（proto-lead 代修：原稿的 '"x"'
+        // 多字符 char literal 不是合法 Kotlin 字面量，等价改写为普通字符串转义；设计不变。）
+        return "{\"x\":" + geometry.x + ",\"y\":" + geometry.y + "," +
+            "\"width\":" + geometry.width + ",\"height\":" + geometry.height + "," +
+            "\"isMaximized\":" + geometry.isMaximized + "}"
+    }
+}
+
+/**
  * 一次「已经落到原生对象上」的渲染。
  *
  * 用它和下一份渲染做差，避免把没有变化的原生写操作重做一遍 —— 每一次

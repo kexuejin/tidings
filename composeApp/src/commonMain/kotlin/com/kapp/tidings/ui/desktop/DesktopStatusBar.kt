@@ -35,8 +35,6 @@ import com.kapp.tidings.generated.resources.desktop_phase_failed
 import com.kapp.tidings.generated.resources.desktop_phase_running
 import com.kapp.tidings.generated.resources.desktop_phase_starting
 import com.kapp.tidings.generated.resources.desktop_status_connected
-import com.kapp.tidings.generated.resources.desktop_status_control_plane
-import com.kapp.tidings.generated.resources.desktop_status_control_plane_off
 import com.kapp.tidings.generated.resources.desktop_status_local
 import com.kapp.tidings.generated.resources.desktop_status_pairing_link
 import com.kapp.tidings.generated.resources.desktop_status_pending

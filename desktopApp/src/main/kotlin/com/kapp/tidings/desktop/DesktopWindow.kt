@@ -36,6 +36,7 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.window.FrameWindowScope
 import androidx.compose.ui.window.Window
 import androidx.compose.ui.window.WindowPosition
+import androidx.compose.ui.window.WindowPlacement
 import androidx.compose.ui.window.rememberWindowState
 import androidx.compose.ui.input.key.Key
 import androidx.compose.ui.input.key.KeyEventType
@@ -503,14 +504,54 @@ private fun DesktopMainWindow(
     val controller = host.controller
     val scope = rememberCoroutineScope()
 
-    Window(
-        onCloseRequest = onClose,
-        state = rememberWindowState(
+    // N5 窗口几何持久化：上次关窗时的尺寸/位置/最大化在本次启动恢复；
+    // 没有存档（首次启动/文件损坏）走默认 1100×720、位置交给窗口管理器 ——
+    // 与 ui-prefs 同一条「读不出来退默认，不让应用起不来」的纪律（见 DesktopWindowPrefs）。
+    val savedGeometry = remember { DesktopWindowPrefs.load(controller.dataDirectory) }
+    val windowState = if (savedGeometry != null) {
+        rememberWindowState(
+            size = DpSize(savedGeometry.width.dp, savedGeometry.height.dp),
+            position = WindowPosition.Absolute(savedGeometry.x.dp, savedGeometry.y.dp),
+        )
+    } else {
+        rememberWindowState(
             size = DpSize(
                 DesktopMetrics.DEFAULT_WINDOW_WIDTH_PX.dp,
                 DesktopMetrics.DEFAULT_WINDOW_HEIGHT_PX.dp,
             ),
-        ),
+        )
+    }
+
+    Window(
+        onCloseRequest = {
+            // 关窗那一刻窗口还在：先记几何再走原路径。收进托盘（hideMain）不走这里 ——
+            // 托盘隐藏是「窗口还在」，几何没变；重复写反而会记到隐藏瞬间的过渡态。
+            // position 可能是 Aligned（用户没动过窗口）：那档不写坐标，只记尺寸 ——
+            // 半条几何不如让窗口管理器下次再摆一次。
+            val pos = windowState.position
+            DesktopWindowPrefs.save(
+                controller.dataDirectory,
+                if (pos is WindowPosition.Absolute) {
+                    DesktopWindowPrefs.Geometry(
+                        x = pos.x.value.toInt(),
+                        y = pos.y.value.toInt(),
+                        width = windowState.size.width.value.toInt(),
+                        height = windowState.size.height.value.toInt(),
+                        isMaximized = windowState.placement == WindowPlacement.Maximized,
+                    )
+                } else {
+                    DesktopWindowPrefs.Geometry(
+                        x = 0,
+                        y = 0,
+                        width = windowState.size.width.value.toInt(),
+                        height = windowState.size.height.value.toInt(),
+                        isMaximized = windowState.placement == WindowPlacement.Maximized,
+                    )
+                },
+            )
+            onClose()
+        },
+        state = windowState,
         title = "捎话 Tidings",
         onPreviewKeyEvent = { event ->
             if (event.type == KeyEventType.KeyDown && event.key == Key.Escape) {
