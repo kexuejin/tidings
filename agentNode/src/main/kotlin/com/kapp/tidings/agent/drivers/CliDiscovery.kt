@@ -28,6 +28,10 @@ object CliDiscovery {
     const val CLAUDE_BIN = "claude"
     const val CODEX_BIN = "codex"
 
+    /** Antigravity CLI（形态 A）：Google 登录态继承，无 Key 可配。 */
+    const val ENV_AGY_CLI = "TIDINGS_AGY_CLI"
+    const val AGY_BIN = "agy"
+
     fun resolveClaudeCli(
         env: Map<String, String> = System.getenv(),
         pathDirs: List<String> = pathDirsOf(env),
@@ -37,6 +41,11 @@ object CliDiscovery {
         env: Map<String, String> = System.getenv(),
         pathDirs: List<String> = pathDirsOf(env),
     ): String? = resolve(env[ENV_CODEX_CLI], CODEX_BIN, pathDirs)
+
+    fun resolveAgyCli(
+        env: Map<String, String> = System.getenv(),
+        pathDirs: List<String> = pathDirsOf(env),
+    ): String? = resolve(env[ENV_AGY_CLI], AGY_BIN, pathDirs)
 
     /** 探测目录：`$PATH` 全量 + 公开约定目录（去重，保序 = 优先级）。 */
     fun pathDirsOf(env: Map<String, String>): List<String> {

@@ -157,10 +157,11 @@ class CliSubprocessDriverTest {
         val drivers = cliDriverRegistrations(
             resolveClaude = { null },
             resolveCodex = { null },
+            resolveAgy = { null },
             hint = { hints.add(it) },
         )
         assertTrue(drivers.isEmpty(), "没装就不注册")
-        assertEquals(2, hints.size, "每个没装的 CLI 一条提示")
+        assertEquals(3, hints.size, "每个没装的 CLI 一条提示（claude/codex/agy）")
         assertTrue(hints[0].contains(CliDiscovery.ENV_CLAUDE_CLI), "提示必须可操作：写清 env 名")
     }
 
@@ -169,8 +170,9 @@ class CliSubprocessDriverTest {
         val drivers = cliDriverRegistrations(
             resolveClaude = { "/bin/true" },
             resolveCodex = { "/bin/true" },
+            resolveAgy = { "/bin/true" },
             hint = {},
         )
-        assertEquals(listOf("claude-cli", "codex-cli"), drivers.map { it.driverId })
+        assertEquals(listOf("claude-cli", "codex-cli", "agy-cli"), drivers.map { it.driverId })
     }
 }

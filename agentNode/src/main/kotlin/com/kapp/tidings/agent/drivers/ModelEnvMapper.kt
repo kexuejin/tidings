@@ -52,6 +52,10 @@ object ModelEnvMapper {
                 "OPENCODE_API_KEY" to config.apiKey,
                 "OPENCODE_MODEL" to config.defaultModel,
             )
+            // agy（Antigravity CLI）：凭证 = 宿主 Google 登录态（~/.gemini），**没有
+            // Key 可配** —— 空映射即收编（映射缺失会拒单，这里显式列出才认识它）。
+            // reasonerModel 键缺席 = 键不进环境（encodeDefaults=false 同一哲学）。
+            "agy" -> emptyMap()
             else -> throw IllegalArgumentException(
                 "unknown targetCli \"$targetCli\" — refusing to guess env mapping " +
                     "(silently using the wrong model is worse than refusing the task)",

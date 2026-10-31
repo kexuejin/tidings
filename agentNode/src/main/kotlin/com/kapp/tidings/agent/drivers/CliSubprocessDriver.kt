@@ -145,6 +145,7 @@ class CliSubprocessDriver(
 fun cliDriverRegistrations(
     resolveClaude: () -> String? = { CliDiscovery.resolveClaudeCli() },
     resolveCodex: () -> String? = { CliDiscovery.resolveCodexCli() },
+    resolveAgy: () -> String? = { CliDiscovery.resolveAgyCli() },
     hint: (String) -> Unit = { println(it) },
     sandbox: WorktreeSandboxExecutor? = null,
 ): List<AgentDriver> {
@@ -189,6 +190,35 @@ fun cliDriverRegistrations(
         hint(
             "[drivers] codex CLI not found; skipping codex-cli driver " +
                 "(install it or set ${CliDiscovery.ENV_CODEX_CLI})",
+        )
+    }
+    val agy = resolveAgy()
+    if (agy != null) {
+        drivers.add(
+            if (sandbox != null) {
+                SandboxedCliDriver(
+                    driverId = "agy-cli",
+                    displayName = "Antigravity (agy CLI)",
+                    cliPath = agy,
+                    // 真 CLI 实测（agy 1.2.x）：无 --workspace 旗标 —— cwd 即工作区
+                    //（沙箱 worktree 的 directory() 已就位）；stream-json 信封见
+                    // CliLineEventMapper 的实测注记。
+                    argSpec = { prompt -> listOf("-p", prompt, "--output-format", "stream-json") },
+                    sandbox = sandbox,
+                )
+            } else {
+                CliSubprocessDriver(
+                    driverId = "agy-cli",
+                    displayName = "Antigravity (agy CLI)",
+                    cliPath = agy,
+                    argSpec = { prompt -> listOf("-p", prompt, "--output-format", "stream-json") },
+                )
+            },
+        )
+    } else {
+        hint(
+            "[drivers] agy CLI not found; skipping agy-cli driver " +
+                "(install it or set ${CliDiscovery.ENV_AGY_CLI})",
         )
     }
     return drivers
