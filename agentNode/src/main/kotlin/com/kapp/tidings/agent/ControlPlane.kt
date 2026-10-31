@@ -41,6 +41,7 @@ import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonArray
 import kotlinx.serialization.json.JsonElement
 import kotlinx.serialization.json.JsonNull
+import kotlinx.serialization.json.buildJsonArray
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.JsonPrimitive
 import kotlinx.serialization.json.addJsonObject
@@ -477,6 +478,10 @@ class ControlPlane(
                 path == "/v1/agent/queue" && method == "POST" -> agentQueue(exchange)
                 path == "/v1/agent/run" && method == "POST" -> agentRun(exchange)
                 path == "/v1/agent/approval" && method == "POST" -> agentApproval(exchange)
+                path == "/v1/agent/hook/session" && method == "POST" -> agentHookSession(exchange)
+                path == "/v1/agent/hook/approval" && method == "POST" -> agentHookApproval(exchange)
+                path == "/v1/agent/hook/inject" && method == "POST" -> agentHookInject(exchange)
+                path == "/v1/agent/hook/inject-feed" && method == "POST" -> agentHookInjectFeed(exchange)
                 path == "/v1/agent/cancel" && method == "POST" -> agentCancel(exchange)
                 path == "/v1/agent/artifact" && method == "POST" -> agentArtifact(exchange)
                 path == "/v1/agent/ack" && method == "POST" -> agentAck(exchange)
@@ -2476,6 +2481,203 @@ class ControlPlane(
      * 这里的回执仍是 `deliverAgentFrame` 的 `sent` / `queued`（那是**传输**状态），
      * 审批本身的状态在台账里是 `status`，由 §6.8 的 `agent-ack` 推进。
      */
+    // ── Antigravity hook 桥（形态 B，升级轮）───────────────────────────────────
+    //
+    // 桌面 Antigravity（App/IDE/agy）经 `antigravity-tidings-hook` 脚本（stdin/stdout
+    // JSON）打到这四条回环路由：SessionStart/Stop 宣告会话（手机看板可见）、
+    // PreToolUse 走免批表+手机审批（**fail-closed**：联系不上或超时 = deny）、
+    // PreInvocation 拉走手机端注入池里的待注入消息（RFC §4 的 injectSteps 契约）。
+    // 注入池按 hook 会话键（"agy-<conversationId>"）归集；feed 方（桌面壳/手机侧
+    // 桥接）可按 conversationId 或 wsPath 投递。
+
+    /** conversationId 键 → 待注入消息（FIFO，封顶 50 条防涨潮）。 */
+    private val hookInjectPool = java.util.concurrent.ConcurrentHashMap<String, MutableList<String>>()
+
+    /** wsPath → 最近一次宣告它的 hook 会话键（feed 方按工作区投递的别名解析）。 */
+    private val hookWsAlias = java.util.concurrent.ConcurrentHashMap<String, String>()
+
+    private fun hookKeyOf(conversationId: String): String = "agy-" + conversationId.trim()
+
+    /** hook 审批的收件人对端：显式 to 优先；缺省 = 在线且声明 agq1 的对端里 nodeId 最小的（确定性）。 */
+    private fun resolveHookPeer(exchange: HttpExchange, obj: JsonObject): String? {
+        val explicit = obj["to"]?.jsonPrimitive?.contentOrNull?.trim().orEmpty()
+        if (explicit.isNotEmpty()) return explicit
+        val candidates = runtime.peerList()
+            .filter { it.online && it.profile?.caps?.contains(MsgTypes.CAP_AGENT_QUEUE) == true }
+            .sortedBy { it.profile?.nodeId ?: "" }
+        val picked = candidates.firstOrNull()?.profile?.nodeId
+        if (picked == null) {
+            respond(exchange, 503, errorJson("no-phone", "没有在线且声明 agq1 的对端可收审批 —— 手机不在线时 hook 按超时拒绝"))
+        }
+        return picked
+    }
+
+    /**
+     * `POST /v1/agent/hook/session` —— SessionStart / Stop 宣告。
+     * 本机台账 + 送达给 hook 收件人对端（手机看板「正在运行」的来源）。
+     */
+    private fun agentHookSession(exchange: HttpExchange) {
+        val obj = readJsonObject(exchange) ?: return
+        val conversationId = obj["conversationId"]?.jsonPrimitive?.contentOrNull?.trim().orEmpty()
+        if (conversationId.isEmpty()) {
+            respond(exchange, 400, errorJson("bad-request", "缺少 conversationId"))
+            return
+        }
+        val event = obj["event"]?.jsonPrimitive?.contentOrNull ?: "start"
+        if (event !in setOf("start", "stop")) {
+            respond(exchange, 400, errorJson("bad-request", "event 只认 start / stop"))
+            return
+        }
+        val wsPaths = (obj["wsPaths"] as? JsonArray)?.mapNotNull { (it as? JsonPrimitive)?.contentOrNull }.orEmpty()
+        val sessionId = hookKeyOf(conversationId)
+        val state = if (event == "start") AgentSessionStates.BUSY else AgentSessionStates.DONE
+        val title = obj["title"]?.jsonPrimitive?.contentOrNull?.takeIf { it.isNotBlank() } ?: "Antigravity 会话"
+        sessions.recordSession(
+            nodeId = runtime.nodeId,
+            sessionId = sessionId,
+            agentKind = "antigravity",
+            agentId = null,
+            state = state,
+            title = title,
+            wsPath = wsPaths.firstOrNull(),
+            outbound = true,
+        )
+        if (event == "start" && wsPaths.isNotEmpty()) hookWsAlias[wsPaths.first()] = sessionId
+        if (event == "stop") {
+            hookWsAlias.entries.removeIf { it.value == sessionId }
+            hookInjectPool.remove(sessionId)
+        }
+        // 宣告给对端（手机看板）：失败只记日志 —— 会话可见性是尽力而为，不是审批安全面。
+        var announcedTo: String? = null
+        val peer = resolveHookPeer(exchange, obj)
+        if (peer != null) {
+            runCatching {
+                runBlocking {
+                    runtime.sendAgentSession(
+                        peerId = peer, sessionId = sessionId, agentKind = "antigravity", state = state,
+                        title = title, wsPath = wsPaths.firstOrNull(), updatedAt = System.currentTimeMillis(),
+                    )
+                }
+            }.onSuccess { announcedTo = peer }
+                .onFailure { println("[hook] session announce failed: " + it.message) }
+        }
+        respond(exchange, 200, buildJsonObject {
+            put("sessionId", sessionId)
+            put("state", state)
+            put("announcedTo", announcedTo?.let { JsonPrimitive(it) } ?: JsonNull)
+        })
+    }
+
+    /**
+     * `POST /v1/agent/hook/approval` —— PreToolUse 审批（**长轮询**）。
+     * 顺序：免批表短路（不打扰）→ 手机审批卡 → 阻塞等 ack → 决定。
+     * fail-closed：没有可收审批的对端 / 送达失败 / 超时，一律 `deny`。
+     */
+    private fun agentHookApproval(exchange: HttpExchange) {
+        val obj = readJsonObject(exchange) ?: return
+        val tool = obj["tool"]?.jsonPrimitive?.contentOrNull
+        val summary = obj["summary"]?.jsonPrimitive?.contentOrNull
+        val conversationId = obj["conversationId"]?.jsonPrimitive?.contentOrNull?.trim().orEmpty()
+        val riskLevel = obj["riskLevel"]?.jsonPrimitive?.contentOrNull
+        val diff = obj["diff"]?.jsonPrimitive?.contentOrNull
+        val timeoutMs = (numberOrNull(obj["timeoutMs"]) ?: 60_000.0).toLong().coerceIn(1_000, 180_000)
+        val peer = resolveHookPeer(exchange, obj) ?: return
+        val agentKey = "antigravity"
+        if (tool != null && toolApprovals.isAlwaysApproved(nodeId = peer, agentKey = agentKey, tool = tool)) {
+            respond(exchange, 200, buildJsonObject {
+                put("decision", "allow")
+                put("reason", "matched an always-allow rule for tool=$tool")
+            })
+            return
+        }
+        val sessionId = if (conversationId.isEmpty()) "agy-approval" else hookKeyOf(conversationId)
+        val approvalId = "hook-" + java.util.UUID.randomUUID()
+        val expiresAt = System.currentTimeMillis() + timeoutMs
+        val choices = defaultApprovalChoices
+        val delivered = runCatching {
+            runBlocking {
+                runtime.sendAgentApproval(peer, approvalId, sessionId, tool, summary, expiresAt, choices, riskLevel, diff)
+            }
+        }
+        if (delivered.isFailure) {
+            sessions.recordApproval(peer, sessionId, approvalId, tool, summary, expiresAt, choices,
+                status = "denied", outbound = true)
+            respond(exchange, 200, buildJsonObject {
+                put("decision", "deny")
+                put("reason", "approval delivery failed: " + (delivered.exceptionOrNull()?.message ?: "unknown"))
+            })
+            return
+        }
+        sessions.recordApproval(peer, sessionId, approvalId, tool, summary, expiresAt, choices,
+            status = "sent", outbound = true)
+        // 长轮询：ack 落台账（agent-ack 的入站处理推进 status）即返回；超时 = deny。
+        val deadline = System.currentTimeMillis() + timeoutMs
+        var finalStatus: String? = null
+        while (System.currentTimeMillis() < deadline) {
+            val status = sessions.approvals(peer, sessionId)
+                .firstOrNull { it.approvalId == approvalId }?.status
+            if (status != null && status != "pending" && status != "sent") {
+                finalStatus = status
+                break
+            }
+            Thread.sleep(200)
+        }
+        val allow = finalStatus in setOf("approved", "allow_session")
+        respond(exchange, 200, buildJsonObject {
+            put("decision", if (allow) "allow" else "deny")
+            put("reason", finalStatus ?: "approval timeout — denied fail-closed")
+            put("approvalId", approvalId)
+        })
+    }
+
+    /** `POST /v1/agent/hook/inject` —— PreInvocation 拉取并清空注入池（RFC §4 契约原样返回）。 */
+    private fun agentHookInject(exchange: HttpExchange) {
+        val obj = readJsonObject(exchange) ?: return
+        val conversationId = obj["conversationId"]?.jsonPrimitive?.contentOrNull?.trim().orEmpty()
+        if (conversationId.isEmpty()) {
+            respond(exchange, 400, errorJson("bad-request", "缺少 conversationId"))
+            return
+        }
+        val key = hookKeyOf(conversationId)
+        val messages = synchronized(hookInjectPool) { hookInjectPool[key]?.toList().orEmpty() }
+        if (messages.isNotEmpty()) {
+            synchronized(hookInjectPool) { hookInjectPool[key]?.clear() }
+        }
+        respond(exchange, 200, buildJsonObject {
+            put("decision", "continue")
+            put("injectSteps", buildJsonArray {
+                messages.forEach { m ->
+                    add(buildJsonObject { put("userMessage", JsonPrimitive(m)) })
+                }
+            })
+        })
+    }
+
+    /** `POST /v1/agent/hook/inject-feed` —— 手机侧桥接投递（按 conversationId 或 wsPath 寻池）。 */
+    private fun agentHookInjectFeed(exchange: HttpExchange) {
+        val obj = readJsonObject(exchange) ?: return
+        val message = obj["message"]?.jsonPrimitive?.contentOrNull?.takeIf { it.isNotBlank() }
+        if (message == null) {
+            respond(exchange, 400, errorJson("bad-request", "缺少 message（要注入的正文）"))
+            return
+        }
+        val key = obj["conversationId"]?.jsonPrimitive?.contentOrNull?.trim()?.takeIf { it.isNotEmpty() }
+            ?.let { hookKeyOf(it) }
+            ?: obj["wsPath"]?.jsonPrimitive?.contentOrNull?.trim()?.takeIf { it.isNotEmpty() }
+                ?.let { hookWsAlias[it] }
+        if (key == null) {
+            respond(exchange, 404, errorJson("no-session", "没有活跃的 hook 会话对得上这次投递（先 SessionStart 宣告）"))
+            return
+        }
+        val queued = synchronized(hookInjectPool) {
+            val list = hookInjectPool.getOrPut(key) { mutableListOf() }
+            list.add(message)
+            while (list.size > 50) list.removeAt(0)
+            list.size
+        }
+        respond(exchange, 202, buildJsonObject { put("queued", queued); put("key", key) })
+    }
+
     private fun agentApproval(exchange: HttpExchange) {
         val obj = readJsonObject(exchange) ?: return
         val nodeId = resolveAgentTarget(exchange, obj, MsgTypes.CAP_AGENT_QUEUE, requireRw = true) ?: return
