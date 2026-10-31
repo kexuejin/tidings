@@ -112,6 +112,7 @@ class ControlPlaneTest {
         }
         plane = ControlPlane(
             agent, httpPort = 0, token = "",
+            loadProbe = { null },
             sessions = registry, workspaces = workspaceRegistry, grants = grantStore,
             toolApprovals = toolStore,
         )
@@ -238,7 +239,7 @@ class ControlPlaneTest {
 
     @Test
     fun tokenIsEnforcedWhenConfiguredAndInvisibleInResponses() {
-        val guarded = ControlPlane(agent, httpPort = 0, token = "s3cret-token", sessions = AgentSessionRegistry())
+        val guarded = ControlPlane(agent, httpPort = 0, token = "s3cret-token", sessions = AgentSessionRegistry(), loadProbe = { null })
         guarded.start()
         try {
             assertEquals(401, get("/healthz", port = guarded.boundPort).first)

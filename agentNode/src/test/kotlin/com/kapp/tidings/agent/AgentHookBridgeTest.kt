@@ -74,7 +74,8 @@ class AgentHookBridgeTest {
         toolStore = AgentToolApprovalStore(java.io.File(toolFile.absolutePath + "." + System.nanoTime()))
         scope.launch { desktop.inbound.collect { env -> desktopFrames += Codec.encode(env).let(Codec.wireJson::parseToJsonElement).toJsonObject } }
         plane = ControlPlane(
-            agent, httpPort = 0, token = "", sessions = registry,
+            agent, httpPort = 0, token = "", loadProbe = { null },
+            sessions = registry,
             grants = AgentGrantStore(java.io.File(grantFile.absolutePath + "." + System.nanoTime())),
             toolApprovals = toolStore,
         )

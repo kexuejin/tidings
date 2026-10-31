@@ -48,7 +48,7 @@ class PluginForAgentMatchTest {
             bindHost = ControlPlane.LOOPBACK,
         )
         runBlocking { agent.start(scope) }
-        plane = ControlPlane(agent, httpPort = 0, token = "", sessions = AgentSessionRegistry())
+        plane = ControlPlane(agent, httpPort = 0, token = "", sessions = AgentSessionRegistry(), loadProbe = { null })
         plane.start()
     }
 

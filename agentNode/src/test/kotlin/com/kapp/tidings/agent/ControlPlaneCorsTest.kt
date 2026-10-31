@@ -66,7 +66,7 @@ class ControlPlaneCorsTest {
         // 这条用例会拿到 401 —— 那正是浏览器侧表现为「跨域被拒」的成因。
         plane = ControlPlane(
             agent, httpPort = 0, token = "secret-token",
-            sessions = AgentSessionRegistry(),
+            sessions = AgentSessionRegistry(), loadProbe = { null },
             workspaces = AgentWorkspaceRegistry(),
             grants = AgentGrantStore(java.io.File.createTempFile("relay-cors-", ".json").apply { delete() }),
         )

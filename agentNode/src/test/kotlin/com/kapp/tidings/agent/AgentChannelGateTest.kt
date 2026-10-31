@@ -70,7 +70,7 @@ class AgentChannelGateTest {
         com.kapp.tidings.agent.testutil.Await.condition("agent 没学到 oldPeer 的资料") {
             agent.getPeer(oldPeer.nodeId)?.profile?.nodeId == oldPeer.nodeId
         }
-        plane = ControlPlane(agent, httpPort = 0, token = "", sessions = AgentSessionRegistry())
+        plane = ControlPlane(agent, httpPort = 0, token = "", sessions = AgentSessionRegistry(), loadProbe = { null })
         plane.start()
     }
 
