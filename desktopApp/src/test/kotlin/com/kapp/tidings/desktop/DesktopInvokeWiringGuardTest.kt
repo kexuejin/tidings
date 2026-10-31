@@ -88,6 +88,16 @@ class DesktopInvokeWiringGuardTest {
             source.contains("node does not hold tag"),
             "接收侧没有持标签校验 —— 不持标签的节点不该接活（防御门）",
         )
+        // E1：CLI 驱动执行桥 —— @antigravity/@claude/@codex 的本机子进程通路。
+        assertTrue(
+            source.contains("created.resolveCliDriver(request.agentId) != null") &&
+                source.contains("created.executeCliTask("),
+            "CLI 驱动回退没接 —— @antigravity 派单永远 no-plugin（E2E 幕 2 起全黑）",
+        )
+        assertTrue(
+            source.contains("cliDrivers = driverRegistry"),
+            "CLI 注册表没注入 ControlPlane —— executeCliTask 无驱动可解析",
+        )
         // T-G9/T-G10：transfer 宣告（原主可见「已移交」）+ 结果有界重投 + 域层首赢去重。
         assertTrue(
             source.contains("origin = \"transferred\""),
