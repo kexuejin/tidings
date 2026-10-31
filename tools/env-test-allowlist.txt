@@ -32,3 +32,4 @@ core/src/commonTest/kotlin/com/kapp/tidings/core/transport/LinkAcceptPolicyTest.
 core/src/commonTest/kotlin/com/kapp/tidings/core/session/OutgoingReplayTest.kt | B | 「重放后收端只该有 1 条」判据的固有形态（证明没有第二条必须有静默窗口）；替代方案需协议层序号确认、属生产行为变更，已评估不采纳
 core/src/commonTest/kotlin/com/kapp/tidings/core/transport/NetworkChangeQueueRetryTest.kt | B | 订阅探针的 delay(50) 是**重发间隔**（SharedFlow 无 replay，单发会丢），退出由 seenIds 是否收到决定，不是盲等
 
+agentNode/src/test/kotlin/com/kapp/tidings/agent/ChannelOrchestratorTest.kt | B | delay(300) 在 execute 内模拟「一个要跑一会儿的活」= 被测行为本身（transfer 无租约不被掐断的判据），不参与断言同步；断言侧全部用 Channel/CompletableDeferred 因果探针
