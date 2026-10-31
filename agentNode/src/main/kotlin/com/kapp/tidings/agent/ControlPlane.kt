@@ -799,6 +799,9 @@ class ControlPlane(
         prompt: String,
         wsPath: String?,
         requestedSessionId: String?,
+        /** 任务产物（沙箱 patch 等）的结构化回调：路径只走这里，不进台账帧体。
+         *  排在 [onEvent] **前面** —— 既有调用点的尾部 lambda 必须继续绑到 onEvent。 */
+        onArtifact: ((path: String, name: String, bytes: Long, mime: String, sha256: String) -> Unit)? = null,
         onEvent: (eventType: String, cursor: Long, summary: String?, body: String?) -> Unit,
     ): Triple<String?, String, String?> {
         val driver = driverFor(entry)
@@ -836,6 +839,12 @@ class ControlPlane(
                 is DriverEvent.TokenDelta -> Triple("token.delta", null, event.delta)
                 is DriverEvent.ToolCall -> Triple("tool.started", event.tool, event.inputJson)
                 is DriverEvent.Card -> Triple("card", null, event.cardJson)
+                is DriverEvent.Artifact -> {
+                    // 产物（T-3b）：结构化回调给桥（桌面执行桥拿路径发群文件），台账里
+                    // 只落展示事实（name + sha）—— 路径是本机事实，进内存台账不出机。
+                    onArtifact?.invoke(event.path, event.name, event.bytes, event.mime, event.sha256)
+                    Triple("artifact", event.name, "sha256=" + event.sha256 + " bytes=" + event.bytes)
+                }
                 is DriverEvent.Finished -> Triple("finished", event.finishReason, null)
                 is DriverEvent.Error -> Triple("error", null, event.message)
             }

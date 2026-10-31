@@ -41,6 +41,20 @@ sealed interface DriverEvent {
      */
     data class Card(val cardJson: String) : DriverEvent
 
+    /**
+     * 任务产物（进程内事件，T-3b）：沙箱 harvest 等交付物的**本机路径只走进程内**，
+     * 绝不进协议帧 —— 「本机绝对路径不进协议」的既有收口不破。消费方（桌面执行桥）
+     * 拿到后经控制器的群文件面投递；协议侧的展示元数据（name/bytes/mime）走卡片
+     * 的 artifacts 块。
+     */
+    data class Artifact(
+        val path: String,
+        val name: String,
+        val bytes: Long,
+        val mime: String,
+        val sha256: String,
+    ) : DriverEvent
+
     /** 任务完成。 */
     data class Finished(
         val finishReason: String = "stop",

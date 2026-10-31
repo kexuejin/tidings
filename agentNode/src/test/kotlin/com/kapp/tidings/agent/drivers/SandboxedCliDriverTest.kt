@@ -83,12 +83,21 @@ class SandboxedCliDriverTest {
             driver.executeTask(session.sessionId, "do things") { queue.put(it) }
         }
         val types = collected.map { it::class.simpleName }
-        assertTrue(types.containsAll(listOf("TokenDelta", "Card", "Finished")), "三类事件都在：$types")
+        assertTrue(types.containsAll(listOf("TokenDelta", "Artifact", "Card", "Finished")), "四类事件都在：$types")
         assertEquals("Finished", types.last(), "Finished 收尾")
         assertEquals(1, types.count { it == "Card" }, "有 diff 才出卡，且恰好一张")
+        // 产物事件先于卡片：桥按这个顺序「先收文件、再读说明」。
+        assertEquals(types.indexOf("Artifact"), types.indexOf("Card") - 1, "Artifact 必须紧跟在 Card 之前")
+        val artifact = collected.filterIsInstance<DriverEvent.Artifact>().single()
+        assertEquals("patch.diff", artifact.name)
+        assertEquals("text/x-diff", artifact.mime)
+        assertEquals(64, artifact.sha256.length, "SHA256 指针进事件（对账用），路径只走进程内")
+        assertTrue(artifact.path.contains("artifacts"), "path 指向沙箱外产物目录")
         val card = collected.filterIsInstance<DriverEvent.Card>().single()
         assertTrue(card.cardJson.contains("\"type\":\"diff-review\""), "卡类型 = diff-review")
         assertTrue(card.cardJson.contains("\"additions\":2"), "提纯统计进卡面")
+        assertTrue(card.cardJson.contains("patch.diff"), "产物条目进卡面（name/bytes/mime 展示元数据）")
+        assertTrue(!card.cardJson.contains(artifact.path), "本机路径绝不进协议卡（既有收口）")
         // 产物在、工作面无痕。
         assertTrue(
             File(root, "artifacts").list().orEmpty().any { it.startsWith("t-") },

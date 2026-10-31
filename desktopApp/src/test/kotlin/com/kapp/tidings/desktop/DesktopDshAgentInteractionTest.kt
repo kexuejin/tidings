@@ -68,6 +68,9 @@ class DesktopDshAgentInteractionTest {
                 is DriverEvent.TokenDelta -> {
                     answer.append(event.delta)
                 }
+                is DriverEvent.Artifact -> {
+                    // 测试里的假驱动不发产物 —— 这个分支只为 when 完备性存在。
+                }
                 is DriverEvent.Finished -> {
                     sessionRegistry.recordEvent(
                         nodeId = "test-node",

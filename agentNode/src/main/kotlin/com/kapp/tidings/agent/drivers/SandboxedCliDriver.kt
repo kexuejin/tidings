@@ -7,6 +7,7 @@ import java.io.File
 import java.util.concurrent.ConcurrentHashMap
 import java.util.concurrent.atomic.AtomicLong
 import kotlinx.serialization.json.JsonPrimitive
+import kotlinx.serialization.json.buildJsonArray
 import kotlinx.serialization.json.buildJsonObject
 
 /**
@@ -104,6 +105,18 @@ class SandboxedCliDriver(
             is WorktreeSandboxExecutor.Outcome.Finished -> {
                 val harvest = outcome.harvest
                 if (harvest != null) {
+                    // 产物事件先于卡片：桥收到后把文件投进群，卡片紧随其后说明这是什么。
+                    // 只发 patch.diff —— report.json 本身就是摘要（随卡与台账走），
+                    // 而 Harvest 里没有它的 SHA（硬凑一个 log 的哈希是假元数据）。
+                    onEvent(
+                        DriverEvent.Artifact(
+                            path = harvest.patchPath.absolutePath,
+                            name = "patch.diff",
+                            bytes = harvest.patchPath.length(),
+                            mime = "text/x-diff",
+                            sha256 = harvest.patchSha256,
+                        ),
+                    )
                     onEvent(DriverEvent.Card(diffCardJson(taskId, wsPath, harvest)))
                 }
                 onEvent(DriverEvent.Finished())
@@ -142,6 +155,15 @@ class SandboxedCliDriver(
             put("summary", JsonPrimitive("${harvest.filesChanged} 个文件 +${harvest.additions} −${harvest.deletions}"))
             put("additions", JsonPrimitive(harvest.additions))
             put("deletions", JsonPrimitive(harvest.deletions))
+        })
+        // 产物条目（展示元数据：name/bytes/mime —— 路径与 SHA 不进协议，路径只走
+        // 进程内的 Artifact 事件；SHA256 的对账在 report.json 里）。
+        put("artifacts", buildJsonArray {
+            add(buildJsonObject {
+                put("name", JsonPrimitive("patch.diff"))
+                put("bytes", JsonPrimitive(harvest.patchPath.length()))
+                put("mime", JsonPrimitive("text/x-diff"))
+            })
         })
     }.toString()
 }

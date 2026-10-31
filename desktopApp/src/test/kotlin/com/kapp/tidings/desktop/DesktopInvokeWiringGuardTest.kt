@@ -56,6 +56,16 @@ class DesktopInvokeWiringGuardTest {
             source.contains("controller.invokePluginPresenceOf = "),
             "插件在线状态桥必须装上（S4-4b）：没有它，插件判离线后派单照样干等租约 —— 真机读数是 14 分钟零反馈",
         )
+        // T-3b 产物投递：沙箱 patch.diff 经结构化回调收下、成功后投进派单来源的群。
+        // 摘掉任何一环（不接回调 / 不发群）⇒ patch 只躺在宿主 /tmp 里，群里永远看不到。
+        assertTrue(
+            source.contains("onArtifact = { path, name, bytes, _, _ -> artifacts.add(Triple(path, name, bytes)) }"),
+            "执行桥没有接 onArtifact 回调 —— 沙箱产物到不了投递环节（T-3b 断链）",
+        )
+        assertTrue(
+            source.contains("controller.sendFiles(") && source.contains("ConvId.group(deliverGroupId)"),
+            "产物没有投进派单来源的群（sendFiles + ConvId.group 群路径）—— patch 只躺在宿主本机",
+        )
         assertTrue(source.contains("controller.invokeGrantAllows = "), "可信设备判据桥必须装上（§6.3）")
         assertTrue(source.contains("controller.invokeExecPolicyOf = "), "每 agent 执行范围桥必须装上（§6.3）")
         assertTrue(source.contains("controller.invokeRecordGrantRequest = "), "未授权申请桥必须装上（面板要能冒出待批项）")

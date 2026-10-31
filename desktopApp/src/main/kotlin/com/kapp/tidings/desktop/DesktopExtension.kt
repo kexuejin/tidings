@@ -744,8 +744,14 @@ internal class DesktopExtension(
                     val workerCard = java.util.concurrent.atomic.AtomicReference<String?>(null)
                     var finishSummary: String? = null
                     var lastError: String? = null
+                    // 沙箱产物（T-3b）：结构化回调收集（路径只走进程内），任务成功后
+                    // 投进群 —— 群文件扇出由域层负责（RelayControllerTransfers 的群
+                    // 路径），这里只把本机文件交给它。回调在 executePluginTask 的挂起
+                    // 调用内顺序发生，普通 List 收集无并发窗口。
+                    val artifacts = mutableListOf<Triple<String, String, Long>>()
                     val (sessionId, status, error) = created.executePluginTask(
                         entry, request.prompt, wsPath, null,
+                        onArtifact = { path, name, bytes, _, _ -> artifacts.add(Triple(path, name, bytes)) },
                     ) { eventType, _, summary, body ->
                         when (eventType) {
                             // body 是卡片 JSON 的**文本**（解析在域层的 done 工厂里做 ——
@@ -768,7 +774,30 @@ internal class DesktopExtension(
                             summary = finishSummary,
                             error = lastError ?: "plugin task ended in error",
                         )
-                        else -> com.kapp.tidings.domain.AgentInvokeExecution.done(finishSummary, workerCard.get())
+                        else -> {
+                            // 成功且带产物：patch.diff 投进派单来源的群（群文件扇出在
+                            // 域层；sendFiles 的群路径按 ConvId.group 收敛）。投递失败
+                            // 不改写结果状态 —— 文件没送到是投递事实，不是任务失败；
+                            // 卡片（含产物条目）照常上群，可从 report.json 对账。
+                            val deliverGroupId = request.groupId
+                            if (deliverGroupId != null && artifacts.isNotEmpty()) {
+                                artifacts.forEach { (path, name, bytes) ->
+                                    runCatching {
+                                        controller.sendFiles(
+                                            com.kapp.tidings.core.protocol.ConvId.group(deliverGroupId),
+                                            listOf(com.kapp.tidings.core.transport.LocalFile(
+                                                path = path, name = name, size = bytes,
+                                            )),
+                                            isFolder = false,
+                                            folderRootName = null,
+                                        )
+                                    }.onFailure { t ->
+                                        println("[RELAY-INVOKE] artifact delivery failed for " + name + ": " + (t.message ?: (t::class.simpleName ?: "unknown")))
+                                    }
+                                }
+                            }
+                            com.kapp.tidings.domain.AgentInvokeExecution.done(finishSummary, workerCard.get())
+                        }
                     }
                 }
             }
