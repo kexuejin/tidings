@@ -55,6 +55,8 @@ import com.kapp.tidings.ui.components.ScreenRequestConfirmDialog
 import com.kapp.tidings.ui.components.StatusDot
 import com.kapp.tidings.ui.components.TopBarIconAction
 import com.kapp.tidings.generated.resources.Res
+import com.kapp.tidings.generated.resources.chat_group_agents_ready
+import com.kapp.tidings.generated.resources.desktop_more_actions
 import com.kapp.tidings.generated.resources.ic_screen_share
 import com.kapp.tidings.generated.resources.screen_remote_view_action
 import com.kapp.tidings.generated.resources.desktop_action_copy_node_id_short
@@ -293,6 +295,12 @@ public fun ChatPane(
             // 与这一行的 `onRequestScreenView` 同源）。
             group = group,
             memberOnlineCount = group?.let { state.memberOnlineCount(it) } ?: 0,
+            // K 个智能体就绪 = 群成员 ∩ 已知 agent 对端 ∩ 在线（头部只画，判定在 state）。
+            agentReadyCount = group?.members?.count { memberId ->
+                memberId != state.selfNodeId &&
+                    state.peer(memberId)?.isAgent == true &&
+                    state.peer(memberId)?.online == true
+            } ?: 0,
             // 群主名：**本机群主先比对 `selfNodeId`，不能只查节点表** ——
             // `state.peers` 是远端节点表，本机不在里面，所以自己建的群在这里会静默丢掉
             // 整段「群主 X」（生产行为，不只是截图夹具）。回落链与手机端
@@ -426,6 +434,12 @@ public fun DesktopChatHeader(
     memberOnlineCount: Int = 0,
     /** 群主的显示名（`group.ownerId` 在节点表里的 `displayName`）。取不到时第二行只省掉「群主 X」那一段。 */
     groupOwnerName: String? = null,
+    /**
+     * 群成员里**在线的智能体**数（T-1c 头部信息价值：「K 个智能体就绪」）。
+     * 只在 [group] 非空时有意义；0 时 badge 不带这一段 —— 不说「0 个就绪」的空话。
+     * 由调用方从 state 算（agentWorkspaces × members × online），头部只画。
+     */
+    agentReadyCount: Int = 0,
     onViewGroupInfo: (() -> Unit)? = null,
     /**
      * 「清空本会话聊天记录」。null = 不画这个入口。
@@ -500,13 +514,17 @@ public fun DesktopChatHeader(
                             // 所以和团队标签同一条规矩：窄时不画，人数在第二行仍有出处
                             // （第二行第一段就是成员数，在线数则退化成看成员列表）。
                             if (!narrow) {
-                                HeadChip(
-                                    stringResource(
-                                        Res.string.chat_group_online,
-                                        memberOnlineCount,
-                                        group.members.size,
-                                    ),
-                                )
+                                // T-1c 头部信息价值：badge = 「N/M 人在线」+（K>0 时）
+                                // 「K 个智能体就绪」—— 群头回答"现在找谁、谁能干活"，
+                                // 在线人数与就绪 agent 数是同一行的两个真相。
+                                val badgeText = buildString {
+                                    append(stringResource(Res.string.chat_group_online, memberOnlineCount, group.members.size))
+                                    if (agentReadyCount > 0) {
+                                        append(" · ")
+                                        append(stringResource(Res.string.chat_group_agents_ready, agentReadyCount))
+                                    }
+                                }
+                                HeadChip(badgeText)
                             }
                         }
                     }
@@ -522,9 +540,15 @@ public fun DesktopChatHeader(
                             owner?.let { "$ownerLabel $it" },
                         ).joinToString(" · ")
                     }
+                    // T-1c 头部信息价值（私聊）：地址 · 在线 · 最后在线 之外，把能力
+                    // token（peer.caps，如 ag1/tw1）接在行尾 —— 「这台机器能干什么」
+                    // 在头部可读，不用下钻节点详情。caps 码是协议 token，原样展示。
+                    val privateLine = peerHeaderLine(peer, now).let { base ->
+                        if (peer.caps.isNotEmpty()) base + " · 能力 " + peer.caps.joinToString(" ") else base
+                    }
                     Text(
                         if (groupLine == null) {
-                            peerHeaderLine(peer, now)
+                            privateLine
                         } else {
                             groupLine
                         },
@@ -534,14 +558,56 @@ public fun DesktopChatHeader(
                         overflow = TextOverflow.Ellipsis,
                     )
                 }
-                // 动作之间是原型 `.dhead .acts{gap:7px}`（`prototype/relay.html:755`）：
-                // 34dp 的 `.ibtn` 方块换成共享件之后必须显式给间距，否则方块贴死。
+                // T-1c 头部动作收拢（原型 `dhead` max=1，`prototype/relay.html:6255-6261`
+                // 的注释逐字「直出最多保留 1 颗核心操作」）：群直出「成员」、私聊直出
+                // 「复制节点 ID」，其余全部收进溢出菜单；破坏性动作（清空 / 关闭并删除）
+                // 排菜单末尾。动作清单是**一份模型**（label + 图标 + onClick + danger），
+                // 直出的文字按钮与菜单里的一行由它分别渲染 —— 挪动只改清单顺序，
+                // 不会出现"两处各写一份"（与手机 ChatHeader 的动作模型同一条纪律）。
+                data class HeaderAction(
+                    val label: String,
+                    val icon: org.jetbrains.compose.resources.DrawableResource,
+                    val onClick: () -> Unit,
+                    val danger: Boolean = false,
+                )
+                val directAction: HeaderAction? = when {
+                    group != null && onViewGroupInfo != null -> HeaderAction(
+                        label = stringResource(Res.string.chat_group_members_action),
+                        icon = Res.drawable.ic_groups,
+                        onClick = onViewGroupInfo,
+                    )
+                    group == null && onCopyId != null -> HeaderAction(
+                        label = stringResource(Res.string.desktop_action_copy_node_id_short),
+                        icon = Res.drawable.ic_copy,
+                        onClick = onCopyId,
+                    )
+                    else -> null
+                }
+                val overflowActions = listOfNotNull(
+                    onOpenInNewWindow?.let { open ->
+                        HeaderAction(stringResource(Res.string.desktop_action_open_in_new_window), Res.drawable.ic_external, open)
+                    },
+                    onRequestScreenView?.let { reqScreen ->
+                        HeaderAction(
+                            label = stringResource(Res.string.screen_remote_view_action),
+                            icon = Res.drawable.ic_screen_share,
+                            // 确认表单仍由头部持有（d30-reqscreen 的「先开表单再发」）。
+                            onClick = { screenRequestConfirmOpen = true },
+                        )
+                    },
+                    onClearMessages?.let { clear ->
+                        HeaderAction(stringResource(Res.string.chat_clear_local_action), Res.drawable.ic_trash, clear, danger = true)
+                    },
+                    onCloseAndClearConversation?.let { closeAndClear ->
+                        HeaderAction(stringResource(Res.string.chat_close_and_clear_action), Res.drawable.ic_close, closeAndClear, danger = true)
+                    },
+                )
                 Row(
                     verticalAlignment = Alignment.CenterVertically,
                     horizontalArrangement = Arrangement.spacedBy(7.dp),
                 ) {
-                    // 「列表」只在 Compact 出现：宽窗下左侧列表本来就在旁边，多一个按钮
-                    // 只会让右栏头变宽；原型给这个按钮挂的类就叫 `.onlyc`（index.html:185-186）。
+                    // 「列表」只在 Compact 出现（原型 `.onlyc`），且**排最后** ——
+                    // 原型 dhead 的注释：直出上限 1，列表排最后才不会占掉直出格。
                     if (compact && onList != null) {
                         if (iconOnlyActions) {
                             TopBarIconAction(Res.drawable.ic_list, stringResource(Res.string.desktop_action_list), onList)
@@ -549,74 +615,29 @@ public fun DesktopChatHeader(
                             ToolbarButton(stringResource(Res.string.desktop_action_list), painterResource(Res.drawable.ic_list), onList)
                         }
                     }
-                    // 「戳一碰」**不在头部**：原型把它放在工具行第 3 颗
-                    // （`prototype/relay.html:3114` 的 `i-nudge`，语义注释见 `:1588`），
-                    // 本端照此落到 `DesktopComposer` 的工具行（`ui/desktop/DesktopComposer.kt`）。
-                    // 头部这一格腾出来之后，宽档直出的动作正好是原型那一排三颗 ——
-                    // 查看屏幕 / 复制节点 ID / 在新窗口打开（`prototype/relay.html:4900-4905`
-                    // 逐字「宽档三颗直出」，其中查看屏幕的入口在 `:4629` 有注解：就在私聊头部）。
-                    onViewGroupInfo?.let { viewInfo ->
-                        // 桌面这一档的标签是「成员」，不是手机那屏的长标签「群信息与成员」：
-                        // 原型 `prototype/relay.html:4970` 桌面 `screenDChatGroup` 逐字是
-                        // `{html:`<button class="btn sm">${ic('group')} 成员</button>`, icon:'group', label:'成员'}`，
-                        // 而手机 `screenChatGroup`（`prototype/relay.html:3161`）用
-                        // `{icon:'info', label:'群信息与成员', to:'m-groupinfo'}` —— 原型自己按形态做了选择。
-                        if (iconOnlyActions) {
-                            TopBarIconAction(Res.drawable.ic_groups, stringResource(Res.string.chat_group_members_action), viewInfo)
-                        } else {
-                            ToolbarButton(stringResource(Res.string.chat_group_members_action), painterResource(Res.drawable.ic_groups), viewInfo)
-                        }
+                    directAction?.let { action ->
+                        ToolbarButton(action.label, painterResource(action.icon), action.onClick)
                     }
-                    onRequestScreenView?.let { reqScreen ->
-                        // 点一下先开确认表单；真正的发送在 onSend 里（原型 d30-reqscreen 的「发送请求」）。
-                        val openConfirm = { screenRequestConfirmOpen = true }
-                        if (iconOnlyActions) {
-                            TopBarIconAction(Res.drawable.ic_screen_share, stringResource(Res.string.screen_remote_view_action), openConfirm)
-                        } else {
-                            ToolbarButton(stringResource(Res.string.screen_remote_view_action), org.jetbrains.compose.resources.painterResource(Res.drawable.ic_screen_share), openConfirm)
-                        }
-                        // Dialog 不进 Row 的布局（它画在另一个窗口里），放这儿只是为了贴着它的触发按钮。
-                        if (screenRequestConfirmOpen) {
-                            ScreenRequestConfirmDialog(
-                                onCancel = { screenRequestConfirmOpen = false },
-                                onSend = {
-                                    screenRequestConfirmOpen = false
-                                    reqScreen()
-                                },
-                            )
-                        }
+                    if (overflowActions.isNotEmpty()) {
+                        com.kapp.tidings.ui.components.TopBarOverflowAction(
+                            items = overflowActions.map { action ->
+                                com.kapp.tidings.ui.components.TopBarOverflowItem(
+                                    label = action.label,
+                                    onClick = action.onClick,
+                                )
+                            },
+                            contentDescription = stringResource(Res.string.desktop_more_actions),
+                        )
                     }
-                    onCopyId?.let { copyId ->
-                        if (iconOnlyActions) {
-                            TopBarIconAction(Res.drawable.ic_copy, stringResource(Res.string.desktop_action_copy_node_id_short), copyId)
-                        } else {
-                            ToolbarButton(stringResource(Res.string.desktop_action_copy_node_id_short), painterResource(Res.drawable.ic_copy), copyId)
-                        }
-                    }
-                    // 窄窗下再开一个窗口只会更挤；原型 Compact 的 .dhead 也只有前两个动作。
-                    // onOpenInNewWindow 为 null（没有多窗口能力）时同样不画。
-                    if (!compact && onOpenInNewWindow != null) {
-                        if (iconOnlyActions) {
-                            TopBarIconAction(Res.drawable.ic_external, stringResource(Res.string.desktop_action_open_in_new_window), onOpenInNewWindow)
-                        } else {
-                            ToolbarButton(stringResource(Res.string.desktop_action_open_in_new_window), painterResource(Res.drawable.ic_external), onOpenInNewWindow)
-                        }
-                    }
-                    // 「清空本会话记录」排在末尾：它是低频 + 破坏性动作，跟"复制 / 在新窗口打开"
-                    // 一样按窄档退成图标（内容描述即标签）。点了先过确认框，不直接删。
-                    onClearMessages?.let { clear ->
-                        if (iconOnlyActions) {
-                            TopBarIconAction(Res.drawable.ic_trash, stringResource(Res.string.chat_clear_local_action), clear)
-                        } else {
-                            ToolbarButton(stringResource(Res.string.chat_clear_local_action), painterResource(Res.drawable.ic_trash), clear)
-                        }
-                    }
-                    onCloseAndClearConversation?.let { closeAndClear ->
-                        if (iconOnlyActions) {
-                            TopBarIconAction(Res.drawable.ic_close, stringResource(Res.string.chat_close_and_clear_action), closeAndClear)
-                        } else {
-                            ToolbarButton(stringResource(Res.string.chat_close_and_clear_action), painterResource(Res.drawable.ic_close), closeAndClear)
-                        }
+                    // 「请求查看屏幕」的确认框贴着它的触发按钮（菜单项触发的开合也在这一层画）。
+                    if (screenRequestConfirmOpen) {
+                        ScreenRequestConfirmDialog(
+                            onCancel = { screenRequestConfirmOpen = false },
+                            onSend = {
+                                screenRequestConfirmOpen = false
+                                onRequestScreenView?.invoke()
+                            },
+                        )
                     }
                 }
             }

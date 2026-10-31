@@ -60,7 +60,8 @@
       "surfaceTint": "#FFFFFF",
       "surfaceVariant": "#F0EFE9",
       "tertiary": "#457B9D",
-      "tertiaryContainer": "#CDE2EF"
+      "tertiaryContainer": "#CDE2EF",
+      "warn": "#F59E0B"
     },
     "colorsDark": {
       "agentAccent": "#B9A6FF",
@@ -107,14 +108,15 @@
       "surfaceTint": "#232625",
       "surfaceVariant": "#2A2C2B",
       "tertiary": "#89B4C8",
-      "tertiaryContainer": "#173B4E"
+      "tertiaryContainer": "#173B4E",
+      "warn": "#F59E0B"
     },
     "colorNotes": {
       "source": "浅色取 ui/theme/Color.kt 的 RelayLightColors，深色取 RelayDarkColors；agentAccent / agentAccentContainer / online 两态在 ui/theme/Accents.kt（M3 的 ColorScheme 没有对应槽，用 CompositionLocal 挂），queued 深色值 #E3B75A 来自原型、代码里还没有对应槽。",
       "hairline": "outlineVariant 两态必须显式钉死（浅 #E4E9E7 / 深 #2B3331）：M3 默认值是紫调的 #CAC4D0 / #49454F，落在这套暖中性色板上会显脏。发丝线的低对比（深 1.47:1、浅 1.23:1）是设计意图，不计入无障碍缺陷。",
       "textContrast": "文字与状态点必须 ≥4.5:1（大字 ≥3:1）。原型的深色值正是按这条选的：#B9A6FF on #312A52 = 6.29:1、#6FD69A on #121413 = 10.36:1、#E3B75A on #121413 = 9.85:1。排队色当文字时用 secondaryContainer/onSecondaryContainer 那对（浅 8.01:1），不要用 queued 本身（浅色下只有 1.60:1）。",
       "palette": {
-        "note": "设计侧批准过的核心调色板角色。tokens.colors 现在是代码全量投影（45 键/主题），这个列表保留「哪些是设计明确批准过的」这一信息，不参与漂移比对。",
+        "note": "设计侧批准过的核心调色板角色。tokens.colors 现在是代码全量投影（46 键/主题），这个列表保留「哪些是设计明确批准过的」这一信息，不参与漂移比对。",
         "roles": [
           "primary",
           "onPrimary",
@@ -398,17 +400,17 @@
       "groups": {
         "colors": {
           "agentAccent": {
-            "sites": 1,
+            "sites": 3,
             "status": "enforced",
             "first": "composeApp/src/commonMain/kotlin/com/kapp/tidings/ui/components/Common.kt:210"
           },
           "agentAccentContainer": {
-            "sites": 4,
+            "sites": 3,
             "status": "enforced",
             "first": "composeApp/src/commonMain/kotlin/com/kapp/tidings/ui/components/Common.kt:204"
           },
           "agentAccentText": {
-            "sites": 3,
+            "sites": 4,
             "status": "enforced",
             "first": "composeApp/src/commonMain/kotlin/com/kapp/tidings/ui/components/Common.kt:266"
           },
@@ -427,12 +429,12 @@
             "status": "pending"
           },
           "error": {
-            "sites": 42,
+            "sites": 43,
             "status": "enforced",
             "first": "composeApp/src/commonMain/kotlin/com/kapp/tidings/ui/desktop/DesktopChrome.kt:348"
           },
           "errorContainer": {
-            "sites": 10,
+            "sites": 9,
             "status": "enforced",
             "first": "composeApp/src/commonMain/kotlin/com/kapp/tidings/ui/components/Common.kt:452"
           },
@@ -463,7 +465,7 @@
             "first": "composeApp/src/commonMain/kotlin/com/kapp/tidings/ui/components/AppButtons.kt:230"
           },
           "onErrorContainer": {
-            "sites": 19,
+            "sites": 18,
             "status": "enforced",
             "first": "composeApp/src/commonMain/kotlin/com/kapp/tidings/ui/desktop/DesktopSettingsChrome.kt:467"
           },
@@ -487,12 +489,12 @@
             "first": "composeApp/src/commonMain/kotlin/com/kapp/tidings/ui/desktop/DesktopConversationsPane.kt:549"
           },
           "onSurface": {
-            "sites": 74,
+            "sites": 75,
             "status": "enforced",
             "first": "composeApp/src/commonMain/kotlin/com/kapp/tidings/ui/desktop/DesktopChrome.kt:553"
           },
           "onSurfaceVariant": {
-            "sites": 426,
+            "sites": 425,
             "status": "enforced",
             "first": "composeApp/src/commonMain/kotlin/com/kapp/tidings/ui/AppStates.kt:104"
           },
@@ -506,12 +508,12 @@
             "first": "composeApp/src/commonMain/kotlin/com/kapp/tidings/feature/agents/AgentApprovalCards.kt:228"
           },
           "online": {
-            "sites": 7,
+            "sites": 8,
             "status": "enforced",
             "first": "composeApp/src/commonMain/kotlin/com/kapp/tidings/ui/desktop/DesktopNodesPane.kt:395"
           },
           "outline": {
-            "sites": 9,
+            "sites": 10,
             "status": "enforced",
             "first": "composeApp/src/commonMain/kotlin/com/kapp/tidings/ui/desktop/DesktopComposer.kt:387"
           },
@@ -521,9 +523,9 @@
             "first": "composeApp/src/commonMain/kotlin/com/kapp/tidings/ui/components/AppButtons.kt:290"
           },
           "outlineVariant": {
-            "sites": 62,
+            "sites": 61,
             "status": "enforced",
-            "first": "composeApp/src/commonMain/kotlin/com/kapp/tidings/ui/desktop/DesktopChatPane.kt:320"
+            "first": "composeApp/src/commonMain/kotlin/com/kapp/tidings/ui/desktop/DesktopChatPane.kt:328"
           },
           "primary": {
             "sites": 108,
@@ -531,7 +533,7 @@
             "first": "composeApp/src/commonMain/kotlin/com/kapp/tidings/ui/SectionCard.kt:73"
           },
           "primaryContainer": {
-            "sites": 40,
+            "sites": 39,
             "status": "enforced",
             "first": "composeApp/src/commonMain/kotlin/com/kapp/tidings/ui/desktop/CabinetPane.kt:261"
           },
@@ -545,7 +547,7 @@
             "status": "pending"
           },
           "secondaryContainer": {
-            "sites": 11,
+            "sites": 10,
             "status": "enforced",
             "first": "composeApp/src/commonMain/kotlin/com/kapp/tidings/ui/desktop/CabinetPane.kt:302"
           },
@@ -595,7 +597,7 @@
             "status": "pending"
           },
           "surfaceVariant": {
-            "sites": 77,
+            "sites": 76,
             "status": "enforced",
             "first": "composeApp/src/commonMain/kotlin/com/kapp/tidings/ui/desktop/CabinetPane.kt:261"
           },
@@ -608,6 +610,11 @@
             "sites": 3,
             "status": "enforced",
             "first": "composeApp/src/commonMain/kotlin/com/kapp/tidings/ui/components/GroupInfoDialog.kt:438"
+          },
+          "warn": {
+            "sites": 1,
+            "status": "enforced",
+            "first": "composeApp/src/commonMain/kotlin/com/kapp/tidings/feature/chat/AgentCards.kt:787"
           }
         },
         "typography": {
@@ -617,7 +624,7 @@
             "first": "composeApp/src/commonMain/kotlin/com/kapp/tidings/ui/components/MessageComposer.kt:489"
           },
           "bodyMedium": {
-            "sites": 108,
+            "sites": 109,
             "status": "enforced",
             "first": "composeApp/src/commonMain/kotlin/com/kapp/tidings/ui/AppStates.kt:73"
           },
@@ -786,12 +793,12 @@
             "first": "composeApp/src/commonMain/kotlin/com/kapp/tidings/ui/components/MessageComposer.kt:776"
           },
           "medium": {
-            "sites": 61,
+            "sites": 60,
             "status": "enforced",
             "first": "composeApp/src/commonMain/kotlin/com/kapp/tidings/ui/desktop/DesktopChrome.kt:494"
           },
           "small": {
-            "sites": 14,
+            "sites": 17,
             "status": "enforced",
             "first": "composeApp/src/commonMain/kotlin/com/kapp/tidings/ui/desktop/DesktopHistorySearch.kt:366"
           }
@@ -871,7 +878,7 @@
         }
       },
       "adoption": {
-        "colors": "32/45",
+        "colors": "33/46",
         "typography": "11/15",
         "spacing": "17/17",
         "shape": "4/5",
@@ -884,7 +891,7 @@
         "rawRoundedCornerShape": {
           "14": 2,
           "8": 16,
-          "6": 11,
+          "6": 12,
           "12": 21,
           "4": 10,
           "22": 2,
@@ -901,7 +908,7 @@
         },
         "circleShapeSites": 81,
         "offScale": {
-          "6": 11,
+          "6": 12,
           "10": 4,
           "5": 3,
           "14": 2,
@@ -914,13 +921,13 @@
         "note": "offScale = 没有任何 M3 槽位能表达的半径，这些点只能靠字面量写出来，是「看着不精致」最直接的一类证据。"
       },
       "debt": {
-        "shape": 76,
+        "shape": 77,
         "typography": 5,
         "color": 13,
-        "elevation": 6,
+        "elevation": 7,
         "iconSizes": 34,
         "dimension": 136,
-        "spacing": 94
+        "spacing": 103
       },
       "shapeSemantics": {
         "bubble": {
@@ -928,7 +935,7 @@
           "scaleSlot": "medium",
           "mode": "slot",
           "rawSites": 21,
-          "slotSites": 61,
+          "slotSites": 60,
           "circleShapeSites": 0
         },
         "card": {
@@ -944,7 +951,7 @@
           "scaleSlot": "medium",
           "mode": "slot",
           "rawSites": 21,
-          "slotSites": 61,
+          "slotSites": 60,
           "circleShapeSites": 0
         },
         "chip": {
