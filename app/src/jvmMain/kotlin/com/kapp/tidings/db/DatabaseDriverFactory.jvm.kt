@@ -119,7 +119,7 @@ private fun resolveMigrateFrom(
     artifactColumns: Set<String>,
     schemaVersion: Long,
 ): Long = when {
-    "cardPayload" in messageColumns -> schemaVersion
+    "card_payload" in messageColumns -> schemaVersion
     "sha256" in artifactColumns -> 18L
     SCREEN_COLUMN in messageColumns -> LEGACY_BASELINE_VERSION + 1
     else -> LEGACY_BASELINE_VERSION
