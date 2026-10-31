@@ -49,4 +49,18 @@ class TagBoardGuardTest {
             "无匹配时横幅没了 —— 不点卡的人完全没有回声",
         )
     }
+
+    /** T-G5 定向呼叫：显式宿主 = 只有被点名的机器处理（群帧全员可见，执行只有一家）。 */
+    @Test
+    fun explicitHostIntentIsProcessedOnlyByTheNamedHost() {
+        val body = live(component)
+        assertTrue(
+            body.contains("val explicitHost = intent.strField(\"hostNodeId\")"),
+            "接收侧没有读 hostNodeId —— 定向呼叫无人认领",
+        )
+        assertTrue(
+            body.contains("if (explicitHost != null && explicitHost != self) return"),
+            "非目标宿主没有让路 —— 每台有同名 agent 的机器都会抢着跑（§2.1 的原始困境）",
+        )
+    }
 }

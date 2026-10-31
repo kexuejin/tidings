@@ -389,8 +389,12 @@ internal class RelayControllerAgentInvokeComponent(private val host: RelayContro
         val st = host._state.value
         val meta = st.settings.groups.firstOrNull { it.groupId == groupId } ?: return
         val self = st.selfNodeId
+        // 定向呼叫（T-G5）：显式 hostNodeId = 只有被点名的宿主处理这条意图
+        // （群帧全员可见，执行只有一家 —— 否则每台有同名 agent 的机器都抢着跑）。
+        val explicitHost = intent.strField("hostNodeId")?.takeIf { it.isNotBlank() }
+        if (explicitHost != null && explicitHost != self) return
         val seat = meta.virtualAgents.orEmpty().firstOrNull { it.agentId == agentId } ?: return
-        if (seat.hostNodeId != self) return
+        val effectiveHost = explicitHost ?: seat.hostNodeId
         val verdict = AgentExecAuthorizer.authorize(
             senderId = senderNode,
             group = meta,

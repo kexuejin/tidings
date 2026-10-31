@@ -36,6 +36,23 @@ class IntentTextSyntaxTest {
     }
 
     @Test
+    fun trailingHostDirectiveIsExtractedAndStripped() {
+        val (text, hostRef) = IntentTextSyntax.parseHost("@Codex 排查环境 +host:Alice-Mac")
+        assertEquals("@Codex 排查环境", text, "宿主指令从正文剥掉")
+        assertEquals("Alice-Mac", hostRef)
+    }
+
+    @Test
+    fun hostDirectiveWithoutMarkerOrMalformedIsPlainText() {
+        assertEquals("正常聊天" to null, IntentTextSyntax.parseHost("正常聊天"))
+        val original = "提到 +host: 但是普通文本"
+        assertEquals(original to null, IntentTextSyntax.parseHost(original))
+        // 非法字符（空格）= 不认，整段保留。
+        val bad = "派给 +host:Alice Mac 去做"
+        assertEquals(bad to null, IntentTextSyntax.parseHost(bad))
+    }
+
+    @Test
     fun malformedTagsKeepTheWholeText() {
         // 形状不合法（大写）⇒ 宁可不路由也不猜：整段按普通文本保留。
         val original = "派活 require:GPU"

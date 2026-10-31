@@ -578,21 +578,13 @@ fun handleSendToGroup(
      */
     agentIntent: JsonObject? = null,
 ) {
-    // require: 文本语法（T-G2，D-031）：`@Agent 干活 require:gpu,linux` —— 标签进
-    // agentIntent.requiredTag，指令本体从正文剥掉（它是派单指令不是聊天内容）。
+    // require: / +host: 文本语法（T-G2/T-G5，D-031）：派单指令不是聊天内容 ——
+    // 标签进 agentIntent.requiredTag、宿主引用进 hostNodeId，本体从正文剥掉。
+    // 词法在这里，**语义解析（昵称→nodeId）在 meta 之后**（它才有成员表）。
     val (cleanedText, requireTags) = com.kapp.tidings.core.protocol.IntentTextSyntax.parse(rawText)
-    val body = cleanedText.trim()
+    val (hostCleanedText, hostRef) = com.kapp.tidings.core.protocol.IntentTextSyntax.parseHost(cleanedText)
+    val body = hostCleanedText.trim()
     if (body.isEmpty()) return
-    val effectiveIntent = if (requireTags.isEmpty()) {
-        agentIntent
-    } else {
-        (agentIntent ?: kotlinx.serialization.json.buildJsonObject { }).let { base ->
-            kotlinx.serialization.json.buildJsonObject {
-                base.forEach { (k, v) -> put(k, v) }
-                put("requiredTag", kotlinx.serialization.json.JsonPrimitive(requireTags.joinToString(",")))
-            }
-        }
-    }
     val meta = host._state.value.settings.groups.firstOrNull { it.groupId == groupId }
     if (meta == null) {
         host.warn(BannerMessage.GroupUnknown)
@@ -601,6 +593,32 @@ fun handleSendToGroup(
     if (!meta.hasMember(host._state.value.selfNodeId)) {
         host.warn(BannerMessage.GroupLeft)
         return
+    }
+    // 定向呼叫的宿主解析（T-G5）：昵称精确匹配优先，nodeId 直等兜底；解析不到
+    // 就当普通文本发出去（不猜 —— 猜错宿主比不路由更糟）。
+    val effectiveHostNodeId = hostRef?.let { ref ->
+        meta.memberNicks?.entries?.firstOrNull { it.value == ref }?.key
+            ?: meta.members.firstOrNull { it == ref }
+    }
+    val effectiveIntent = run {
+        var base = agentIntent
+        if (requireTags.isNotEmpty()) {
+            base = (base ?: kotlinx.serialization.json.buildJsonObject { }).let { prev ->
+                kotlinx.serialization.json.buildJsonObject {
+                    prev.forEach { (k, v) -> put(k, v) }
+                    put("requiredTag", kotlinx.serialization.json.JsonPrimitive(requireTags.joinToString(",")))
+                }
+            }
+        }
+        if (effectiveHostNodeId != null) {
+            base = (base ?: kotlinx.serialization.json.buildJsonObject { }).let { prev ->
+                kotlinx.serialization.json.buildJsonObject {
+                    prev.forEach { (k, v) -> put(k, v) }
+                    put("hostNodeId", kotlinx.serialization.json.JsonPrimitive(effectiveHostNodeId))
+                }
+            }
+        }
+        base
     }
     val bytes = body.encodeToByteArray().size
     if (bytes > Protocol.TEXT_TCP_LIMIT) {

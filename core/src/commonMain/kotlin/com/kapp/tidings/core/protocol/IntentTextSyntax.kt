@@ -19,6 +19,8 @@ object IntentTextSyntax {
 
     const val REQUIRE_MARKER = "require:"
 
+    const val HOST_MARKER = "+host:"
+
     /**
      * @return (剥掉指令后的正文, 标签列表)；没有指令 = (原文, 空表)。
      *  只认**末尾**的 require: 段（正文中间的 `require:` 是普通文本）；
@@ -35,5 +37,26 @@ object IntentTextSyntax {
         if (tags.isEmpty() || tags.any { !ChannelTags.isWellFormed(it) }) return text to emptyList()
         val cleaned = before.trimEnd()
         return cleaned to tags
+    }
+
+    /**
+     * 定向呼叫（T-G5，D-031；方案 §2.3 模式 B）：尾部 ` +host:<昵称|nodeId>` 指定
+     * 承接宿主。返回 (剥掉指令后的正文, 宿主引用原文)；没有指令 = (原文, null)。
+     * **昵称 → nodeId 的解析在域层**（它才有群成员表），这里只裁词法。
+     */
+    fun parseHost(text: String): Pair<String, String?> {
+        val marker = text.lastIndexOf(HOST_MARKER)
+        if (marker < 0) return text to null
+        val before = text.substring(0, marker)
+        if (before.isNotBlank() && !before.endsWith(' ')) return text to null
+        val hostRef = text.substring(marker + HOST_MARKER.length).trim()
+        // 字符集收 ASCII —— isLetterOrDigit 会把中文当字母（实测：中文正文被当成
+        // 宿主名剥掉）。宿主昵称/id 是 ASCII 域的既有事实。
+        if (hostRef.isEmpty() || !hostRef.all {
+                it in 'a'..'z' || it in 'A'..'Z' || it in '0'..'9' || it == '.' || it == '_' || it == '-'
+            }) {
+            return text to null
+        }
+        return before.trimEnd() to hostRef
     }
 }
