@@ -201,6 +201,18 @@ class AgentHookBridgeTest {
     }
 
     @Test
+    fun dispatchPromptClampIsWiredAtTheEntry() {
+        // T-G6：预算裁剪的唯一消费点 = executePluginTask 入口（§7.7 第一层）。
+        val source = java.io.File("agentNode/src/main/kotlin/com/kapp/tidings/agent/ControlPlane.kt")
+            .takeIf { it.isFile }?.readText()
+            ?: java.io.File("../agentNode/src/main/kotlin/com/kapp/tidings/agent/ControlPlane.kt").readText()
+        assertTrue(
+            source.contains("TaskPromptBudget.clamp(rawPrompt)"),
+            "派单 prompt 没过预算裁剪 —— 上游长上下文会原样灌进执行侧",
+        )
+    }
+
+    @Test
     fun hookApprovalDefaultTimeoutAlignsTheFiveMinuteTtl() {
         // D-032：hook 审批的缺省等待预算 = Limits.APPROVAL_TTL_MS（5 分钟）。
         // 判据走「超时语义」：timeoutMs 缺省时用例不传 —— 但 5 分钟太长，这里改为

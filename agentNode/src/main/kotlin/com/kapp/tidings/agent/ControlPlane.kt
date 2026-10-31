@@ -812,7 +812,7 @@ class ControlPlane(
      */
     suspend fun executePluginTask(
         entry: PluginRegistry.Entry,
-        prompt: String,
+        rawPrompt: String,
         wsPath: String?,
         requestedSessionId: String?,
         /** 任务产物（沙箱 patch 等）的结构化回调：路径只走这里，不进台账帧体。
@@ -820,6 +820,9 @@ class ControlPlane(
         onArtifact: ((path: String, name: String, bytes: Long, mime: String, sha256: String) -> Unit)? = null,
         onEvent: (eventType: String, cursor: Long, summary: String?, body: String?) -> Unit,
     ): Triple<String?, String, String?> {
+        // §7.7 上下文裁剪（T-G6）：超预算的 prompt 头尾保留 + 如实标注 —— 上游长
+        // 上下文（前序日志/大段引用）不原样灌给执行侧。
+        val prompt = com.kapp.tidings.core.protocol.TaskPromptBudget.clamp(rawPrompt)
         val driver = driverFor(entry)
         // 会话：接续调用方点名的，或开一个新的。开不出来（插件不可达）→ 如实上抛路径回，
         // 不编一个 sessionId 进台账。

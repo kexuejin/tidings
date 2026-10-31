@@ -180,6 +180,9 @@ object Limits {
     /** 审批 TTL（方案 §2.6 不变量 4：5 分钟，超时自动转挂起释放宿主，严禁锁屏死锁）。 */
     const val APPROVAL_TTL_MS: Long = 300_000L
 
+    /** 派单 prompt 预算（§7.7 上下文裁剪：字符数；超限头尾保留 + 截断标注）。 */
+    const val AGENT_TASK_BUDGET: Int = 8_000
+
     /** §6.7 `agent-artifact`：产物标识、展示名与 MIME。 */
     const val AGENT_ARTIFACT_ID = 64
     const val AGENT_ARTIFACT_NAME = 200
