@@ -2,7 +2,6 @@
 
 package com.kapp.tidings.domain.workspace
 
-import app.cash.sqldelight.db.SqlDriver
 import com.kapp.tidings.db.RelayDatabase
 import com.kapp.tidings.db.WorkspaceBindingEntity
 import com.kapp.tidings.core.nowMillis

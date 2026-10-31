@@ -4,7 +4,6 @@ package com.kapp.tidings.ui.desktop
 
 import com.kapp.tidings.testsupport.GuardSourceScan
 import kotlin.test.Test
-import kotlin.test.assertFalse
 import kotlin.test.assertTrue
 
 /**

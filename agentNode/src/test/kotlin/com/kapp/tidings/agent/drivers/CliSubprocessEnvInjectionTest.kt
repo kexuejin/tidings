@@ -3,7 +3,6 @@
 package com.kapp.tidings.agent.drivers
 
 import kotlin.test.Test
-import kotlin.test.assertEquals
 import kotlin.test.assertTrue
 
 /**
