@@ -75,6 +75,19 @@ class DesktopInvokeWiringGuardTest {
             source.contains("latestPatchRefFor(") && source.contains("eventType = \"merge-result\""),
             "合流没有按会话找回 patch（latestPatchRefFor）或没有把冲突落台账（merge-result）",
         )
+        // T-G2 标签路由：两桥装配 + 接收侧持标签校验（缺一整条链就黑）。
+        assertTrue(
+            source.contains("controller.peerTagRouter = ") && source.contains("controller.channelDispatch = "),
+            "发起侧标签路由两桥没装配 —— requiredTag 消费端永远走失败横幅（T-2c 悬空账）",
+        )
+        assertTrue(
+            source.contains("PeerTagRouter.resolve(") && source.contains("nodeIdsWithTag("),
+            "路由语义没接 PeerTagRouter（在线优先 + 字典序）或没读标签 store",
+        )
+        assertTrue(
+            source.contains("node does not hold tag"),
+            "接收侧没有持标签校验 —— 不持标签的节点不该接活（防御门）",
+        )
         assertTrue(source.contains("controller.invokeGrantAllows = "), "可信设备判据桥必须装上（§6.3）")
         assertTrue(source.contains("controller.invokeExecPolicyOf = "), "每 agent 执行范围桥必须装上（§6.3）")
         assertTrue(source.contains("controller.invokeRecordGrantRequest = "), "未授权申请桥必须装上（面板要能冒出待批项）")

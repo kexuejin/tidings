@@ -2,6 +2,12 @@
 
 package com.kapp.tidings.agent.drivers
 
+import java.io.File
+import kotlinx.serialization.json.Json
+import kotlinx.serialization.json.JsonObject
+import kotlinx.serialization.json.JsonPrimitive
+import kotlinx.serialization.json.contentOrNull
+
 /**
  * 一个模型 Provider 的**节点本地**凭证配置（升级轮 T-3a，设计 §5.5）。
  *
@@ -34,6 +40,33 @@ data class ModelProviderConfig(
  *    （与帧纪律 encodeDefaults=false 同一条哲学：不下发空值）。
  */
 object ModelEnvMapper {
+
+    /** 节点本地模型凭证文件名（数据目录下；0600 建议 —— 它装着 API Key）。 */
+    const val CREDENTIALS_FILE = "model-credentials.json"
+
+    /**
+     * 节点本地凭证装载（T-G2 ⑤）：`{ "<targetCli>": {apiBaseUrl, apiKey, defaultModel,
+     * reasonerModel?} }`。文件缺席/形状不对 = 空表 —— 没配凭证的节点如实不带模型
+     * 环境（CLI 驱动回退凭证继承宿主登录态的既有行为），**不编造**。
+     */
+    fun loadCredentials(dir: File): Map<String, ModelProviderConfig> {
+        val file = File(dir, CREDENTIALS_FILE)
+        if (!file.isFile) return emptyMap()
+        val root = runCatching { Json.parseToJsonElement(file.readText()) }.getOrNull() as? JsonObject ?: return emptyMap()
+        return root.mapNotNull { (cli, value) ->
+            val o = value as? JsonObject ?: return@mapNotNull null
+            val baseUrl = (o["apiBaseUrl"] as? JsonPrimitive)?.contentOrNull?.takeIf { it.isNotBlank() } ?: return@mapNotNull null
+            val key = (o["apiKey"] as? JsonPrimitive)?.contentOrNull?.takeIf { it.isNotBlank() } ?: return@mapNotNull null
+            val model = (o["defaultModel"] as? JsonPrimitive)?.contentOrNull?.takeIf { it.isNotBlank() } ?: return@mapNotNull null
+            cli to ModelProviderConfig(
+                providerId = cli,
+                apiBaseUrl = baseUrl,
+                apiKey = key,
+                defaultModel = model,
+                reasonerModel = (o["reasonerModel"] as? JsonPrimitive)?.contentOrNull,
+            )
+        }.toMap()
+    }
 
     /** 子进程环境注入的统一入口。 */
     fun buildEnvironment(config: ModelProviderConfig, targetCli: String): Map<String, String> {

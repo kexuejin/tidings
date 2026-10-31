@@ -350,6 +350,16 @@ class RelayController(
         get() = invokeCtl.onHostCardAction
         set(value) { invokeCtl.onHostCardAction = value }
 
+    /** 标签路由桥（T-G2 ③）：tag → 承接节点 id（null = 无匹配，调用方走失败横幅）。 */
+    var peerTagRouter: ((tag: String) -> String?)?
+        get() = invokeCtl.peerTagRouter
+        set(value) { invokeCtl.peerTagRouter = value }
+
+    /** 标签委派桥（T-G2 ③）：把 agent-channel 帧发到选定节点。 */
+    var channelDispatch: ((nodeId: String, channelId: String, tag: String, task: String, deadlineMs: Long) -> Unit)?
+        get() = invokeCtl.channelDispatch
+        set(value) { invokeCtl.channelDispatch = value }
+
     /** M7-T2：入站 Channel 委派的承接桥（授权 + 分流），转发到 invokeCtl。 */
     var channelOrchestrator: ((payload: AgentChannelPayload, fromNode: String) -> Boolean)?
         get() = invokeCtl.channelOrchestrator

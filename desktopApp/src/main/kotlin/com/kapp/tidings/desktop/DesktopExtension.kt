@@ -473,6 +473,11 @@ internal class DesktopExtension(
             onRecord = { rec -> recordLocalWorkspaceFrom(controller, rec) },
         )
         val grants = AgentGrantStore(java.io.File(controller.dataDirectory, "agent-grants.json"))
+        // T-G2：标签路由的存储与装配 —— peer-tags.json（D-021 裁决：不建表）。
+        val tagStore = com.kapp.tidings.core.persist.PeerTagFileStore(
+            java.io.File(controller.dataDirectory, "peer-tags.json").absolutePath,
+        )
+        tagStore.load()
         grantStore = grants
         val execPolicies = AgentExecPolicyStore(
             java.io.File(controller.dataDirectory, "agent-exec-policies.json"),
@@ -696,17 +701,42 @@ internal class DesktopExtension(
             // payload 已由 :app 解码成 AgentChannelPayload（desktopApp 类路径上没有
             // kotlinx-serialization，解析不过河 —— M4 执行桥同一条纪律）。
             controller.channelOrchestrator = { payload, fromNode ->
-                if (payload.targetTag != null) {
-                    runCatching {
-                        runBlocking {
-                            runtime.sendAgentChannelResult(
-                                fromNode, payload.channelId, false,
-                                com.kapp.tidings.core.protocol.CodecInvoke.InvokeResultStates.NO_PLUGIN,
-                                null, null, "tag routing lands with M7-T4",
-                            )
+                // T-G2 ④：targetTag 帧此前一律 NO_PLUGIN（"lands with M7-T4" 的悬空账）。
+                // 现在：路由方选中**本机**才会把帧送到这 —— 校验本机真持有该标签（防御：
+                // 不持标签不接活），持有则照常走授权 + 执行；不持才如实 NO_PLUGIN。
+                val requestedTag = payload.targetTag
+                if (requestedTag != null) {
+                    val localNodeId = runtime.profile.nodeId
+                    val holdsTag = tagStore.nodeIdsWithTag(requestedTag).contains(localNodeId)
+                    if (!holdsTag) {
+                        runCatching {
+                            runBlocking {
+                                runtime.sendAgentChannelResult(
+                                    fromNode, payload.channelId, false,
+                                    com.kapp.tidings.core.protocol.CodecInvoke.InvokeResultStates.NO_PLUGIN,
+                                    null, null, "node does not hold tag " + requestedTag,
+                                )
+                            }
+                        }
+                        true // 已应答：调用方不再回 no-executor
+                    } else {
+                        // 本机持标签 = 有承接资格；授权判据与无标签路径同一条。
+                        val grantOk = grants.allows(fromNode, agentKey = payload.fromAgent, forExecution = true)
+                        if (!grantOk) {
+                            runCatching {
+                                runBlocking {
+                                    runtime.sendAgentChannelResult(
+                                        fromNode, payload.channelId, false,
+                                        com.kapp.tidings.core.protocol.CodecInvoke.InvokeResultStates.DENIED,
+                                        null, null, "execution not authorized for " + payload.fromAgent,
+                                    )
+                                }
+                            }
+                            true
+                        } else {
+                            true // 授权通过：交给编排器（调用方不再回 no-executor，执行走下方 execute）
                         }
                     }
-                    true // 已应答：调用方不再回 no-executor
                 } else {
                     val grantOk = grants.allows(fromNode, agentKey = payload.fromAgent, forExecution = true)
                     if (!grantOk) {
@@ -813,6 +843,34 @@ internal class DesktopExtension(
             // 宿主侧卡片动作出口（§7.3-2 的插件转发段）：判定记账与全群广播在域层
             // 原子台账，这里只负责把动作送进插件。会话解析：调用方给的优先，缺了按
             // agent 最近一次会话兜；都拿不到就如实放弃（不编一个 id 给插件）。
+            // T-G2 ③：发起侧标签路由两桥的**生产装配**（T-2c 只留了 nullable 缝，
+            // 本体一直没接 —— 桥不装，requiredTag 消费端永远走失败横幅）。
+            // 选择语义 = PeerTagRouter（在线优先 + nodeId 字典序，1e774b1a 钉过）。
+            controller.peerTagRouter = { tag ->
+                com.kapp.tidings.core.persist.PeerTagRouter.resolve(
+                    tag,
+                    tagStore.nodeIdsWithTag(tag),
+                ) { nodeId ->
+                    runtime.peerList().firstOrNull { it.profile?.nodeId == nodeId }?.online == true
+                }
+            }
+            controller.channelDispatch = { nodeId, channelId, tag, task, deadlineMs ->
+                scope.launch {
+                    runCatching {
+                        runtime.sendAgentChannel(
+                            peerId = nodeId,
+                            channelId = channelId,
+                            op = com.kapp.tidings.core.protocol.ChannelOps.ASSIGN,
+                            fromAgent = "tidings-host",
+                            task = task,
+                            targetTag = tag,
+                            deadlineMs = deadlineMs,
+                        )
+                    }.onFailure { t ->
+                        println("[RELAY-INVOKE] channel dispatch failed: " + (t.message ?: (t::class.simpleName ?: "unknown")))
+                    }
+                }
+            }
             controller.onHostCardAction = { agentId, sessionId, cardId, actionId, decidedBy ->
                 // 审查合流（T-G1）：diff-review 卡的 [合并此补丁] 在宿主本机落地 ——
                 // 按 sessionId 找回（工作区, patch 路径），git apply 两段式执行；

@@ -33,12 +33,27 @@ object ChannelOps {
 /**
  * `targetTag` 的形状谓词（唯一来源）：`[a-z0-9][a-z0-9._-]*`，≤ [Limits.AGENT_CHANNEL_TAG]。
  * 标签是**能力声明**（`gpu` / `docker-sandbox` 这类），路由到「有能力的那台」而不是写死 ID。
+ *
+ * `model:` 前缀族（D-030，方案 §2.5「模型即能力标签」）：`model:claude` /
+ * `model:deepseek-v4` 这类模型标签 —— 冒号**只认这一个前缀**（不开放任意冒号，
+ * 避免标签空间被任意 namespace 撑爆）；前缀后的后缀走同一字符集。
  */
 object ChannelTags {
-    fun isWellFormed(value: String): Boolean =
-        value.length in 1..Limits.AGENT_CHANNEL_TAG &&
+    const val MODEL_PREFIX = "model:"
+
+    fun isWellFormed(value: String): Boolean {
+        if (value.length !in 1..Limits.AGENT_CHANNEL_TAG) return false
+        return if (value.startsWith(MODEL_PREFIX)) {
+            // model: 后缀：同一字符集但**不含冒号**（嵌套 namespace 不开放），
+            // 首字符不限小写字母 —— 模型版本号可能以数字开头。
+            val suffix = value.drop(MODEL_PREFIX.length)
+            suffix.isNotEmpty() &&
+                suffix.all { it in 'a'..'z' || it in '0'..'9' || it == '.' || it == '_' || it == '-' }
+        } else {
             value.first() in 'a'..'z' &&
-            value.all { it in 'a'..'z' || it in '0'..'9' || it == '.' || it == '_' || it == '-' }
+                value.all { it in 'a'..'z' || it in '0'..'9' || it == '.' || it == '_' || it == '-' }
+        }
+    }
 }
 
 /**

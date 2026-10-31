@@ -566,7 +566,7 @@ fun handleUpdateGroupMeta(
 
 fun handleSendToGroup(
     groupId: String,
-    text: String,
+    rawText: String,
     mentions: List<String>? = null,
     replyTo: String? = null,
     /**
@@ -578,8 +578,21 @@ fun handleSendToGroup(
      */
     agentIntent: JsonObject? = null,
 ) {
-    val body = text.trim()
+    // require: 文本语法（T-G2，D-031）：`@Agent 干活 require:gpu,linux` —— 标签进
+    // agentIntent.requiredTag，指令本体从正文剥掉（它是派单指令不是聊天内容）。
+    val (cleanedText, requireTags) = com.kapp.tidings.core.protocol.IntentTextSyntax.parse(rawText)
+    val body = cleanedText.trim()
     if (body.isEmpty()) return
+    val effectiveIntent = if (requireTags.isEmpty()) {
+        agentIntent
+    } else {
+        (agentIntent ?: kotlinx.serialization.json.buildJsonObject { }).let { base ->
+            kotlinx.serialization.json.buildJsonObject {
+                base.forEach { (k, v) -> put(k, v) }
+                put("requiredTag", kotlinx.serialization.json.JsonPrimitive(requireTags.joinToString(",")))
+            }
+        }
+    }
     val meta = host._state.value.settings.groups.firstOrNull { it.groupId == groupId }
     if (meta == null) {
         host.warn(BannerMessage.GroupUnknown)
@@ -608,7 +621,7 @@ fun handleSendToGroup(
                 mentions = mentions,
                 replyTo = replyTo,
                 envelopeId = envelopeId,
-                agentIntent = agentIntent,
+                agentIntent = effectiveIntent,
             )
         } ?: return@launch
         val repliedToIsAgent = replyTo != null && RelayController.isAgentAuthored(

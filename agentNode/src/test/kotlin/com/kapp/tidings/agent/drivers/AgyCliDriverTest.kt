@@ -125,6 +125,21 @@ class AgyCliDriverTest {
     }
 
     @Test
+    fun credentialsLoaderReadsNodeLocalFileOrStaysHonest() {
+        val dir = java.nio.file.Files.createTempDirectory("model-cred").toFile()
+        // 缺席 = 空表（没配凭证的节点不带模型环境，不编造）。
+        assertEquals(emptyMap(), ModelEnvMapper.loadCredentials(dir))
+        // 形状齐全的键装载；缺必填键的条目跳过（宁缺毋错）。
+        dir.resolve(ModelEnvMapper.CREDENTIALS_FILE).writeText(
+            """{"claude":{"apiBaseUrl":"http://x","apiKey":"k","defaultModel":"claude-4"},
+               "codex":{"apiBaseUrl":"http://y"},"bad-entry":{}}""",
+        )
+        val loaded = ModelEnvMapper.loadCredentials(dir)
+        assertEquals(setOf("claude"), loaded.keys, "缺 apiKey 的条目跳过")
+        assertEquals("claude-4", loaded["claude"]?.defaultModel)
+    }
+
+    @Test
     fun sandboxedAgyStreamsTextAndDeliversDiff() {
         val root = Files.createTempDirectory("agy-sandbox").toFile()
         val host = Files.createTempDirectory("agy-host").toFile()

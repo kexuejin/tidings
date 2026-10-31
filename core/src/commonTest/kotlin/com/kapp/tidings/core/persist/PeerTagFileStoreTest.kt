@@ -92,6 +92,12 @@ class PeerTagFileStoreTest {
             // 与 CodecChannel 同一份谓词：大写 / 越界 / 空串都不合法。
             assertTrue(!ChannelTags.isWellFormed("GPU"))
             assertTrue(!ChannelTags.isWellFormed("a".repeat(33)))
+            // model: 前缀族（D-030，方案 §2.5）：冒号只认这一个前缀。
+            assertTrue(ChannelTags.isWellFormed("model:claude"), "model: 标签合法")
+            assertTrue(ChannelTags.isWellFormed("model:deepseek-v4.1"), "模型版本号含点合法")
+            assertTrue(!ChannelTags.isWellFormed("model:"), "空前缀后缀不合法")
+            assertTrue(!ChannelTags.isWellFormed("custom:thing"), "任意 namespace 不开放（冒号只认 model:）")
+            assertTrue(!ChannelTags.isWellFormed("Model:claude"), "前缀大小写敏感（标签全小写域）")
             assertTrue(!ChannelTags.isWellFormed(""))
             assertEquals(
                 emptyList(),
