@@ -33,3 +33,8 @@ core/src/commonTest/kotlin/com/kapp/tidings/core/session/OutgoingReplayTest.kt |
 core/src/commonTest/kotlin/com/kapp/tidings/core/transport/NetworkChangeQueueRetryTest.kt | B | 订阅探针的 delay(50) 是**重发间隔**（SharedFlow 无 replay，单发会丢），退出由 seenIds 是否收到决定，不是盲等
 
 agentNode/src/test/kotlin/com/kapp/tidings/agent/ChannelOrchestratorTest.kt | B | delay(300) 在 execute 内模拟「一个要跑一会儿的活」= 被测行为本身（transfer 无租约不被掐断的判据），不参与断言同步；断言侧全部用 Channel/CompletableDeferred 因果探针
+
+# ---- agentNode：T-3b Worktree 沙箱执行器（真 git + 真 subprocess 的 D 类 E2E）----
+# delay 全部在 while 条件轮询体内（进程起没起 / worktree 在不在 / 分支删没删），
+# 退出由「确定会发生的状态」+ withTimeout 决定，不是盲等 —— 同 LinkPresenceFromHeartbeatTest 口径。
+agentNode/src/test/kotlin/com/kapp/tidings/agent/drivers/WorktreeSandboxExecutorTest.kt | B | delay 在条件轮询体内等待真 git/进程状态收敛，退出由条件+withTimeout 决定（D 类真 git E2E，git 是构建链硬前置）

@@ -595,7 +595,14 @@ internal class DesktopExtension(
                 created.recordSessionPage(peerId, wsId, offset, limit)
                 true
             }
-            val driverRegistry = com.kapp.tidings.agent.drivers.DriverRegistry()
+            // T-3b：CLI 驱动带上 Git Worktree 沙箱装配（群内派的活跑独立 worktree，
+            // 交付 diff 产物；中止 = 进程树 TERM→3s→KILL + worktree 无痕清理）。
+            // 装了 CLI 的宿主自动获得；没装的跳过（withCliDrivers 的既有纪律）。
+            val driverRegistry = com.kapp.tidings.agent.drivers.DriverRegistry.withCliDrivers(
+                sandbox = com.kapp.tidings.agent.drivers.WorktreeSandboxExecutor(
+                    com.kapp.tidings.agent.drivers.WorktreeSandboxExecutor.defaultRoot(),
+                ),
+            )
 
             // **执行名单的宿主侧实现**：台账在桌面端（`AgentGrantStore`），控制器拿不到。
             //

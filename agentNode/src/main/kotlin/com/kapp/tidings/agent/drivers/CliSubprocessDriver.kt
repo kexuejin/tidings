@@ -7,11 +7,6 @@ import java.io.File
 import java.util.concurrent.ConcurrentHashMap
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
-import kotlinx.serialization.json.Json
-import kotlinx.serialization.json.JsonArray
-import kotlinx.serialization.json.JsonObject
-import kotlinx.serialization.json.JsonPrimitive
-import kotlinx.serialization.json.contentOrNull
 
 /**
  * CLI 子进程驱动（M7-T1）：把用户**已登录**的 Claude Code / Codex CLI 拉起为 agent，
@@ -121,37 +116,7 @@ class CliSubprocessDriver(
      * `message.content[].text`、result 行收尾）与 codex 的 JSONL（`type` 顶层判别）。
      * 完成与否**不由行裁决** —— 行级的 "result"/"done" 只做参考，诚信裁决在退出码。
      */
-    private fun mapLine(line: String): DriverEvent? {
-        val trimmed = line.trim()
-        if (trimmed.isEmpty()) return null
-        val obj = runCatching { Json.parseToJsonElement(trimmed) }.getOrNull() as? JsonObject ?: return null
-        val type = (obj["type"] as? JsonPrimitive)?.contentOrNull ?: return textOf(obj)?.let { DriverEvent.TokenDelta(it) }
-        return when (type) {
-            "error" -> DriverEvent.Error(
-                (obj["message"] as? JsonPrimitive)?.contentOrNull
-                    ?: (obj["error"] as? JsonPrimitive)?.contentOrNull
-                    ?: "cli reported an error",
-            )
-            "result", "done" -> null
-            else -> textOf(obj)?.let { DriverEvent.TokenDelta(it) }
-        }
-    }
-
-    /** 浅探测 + claude 的 assistant 行嵌套形状；都取不到 = 这行没有文本，如实跳过。 */
-    private fun textOf(obj: JsonObject): String? {
-        (obj["text"] as? JsonPrimitive)?.contentOrNull?.let { return it }
-        (obj["delta"] as? JsonPrimitive)?.contentOrNull?.let { return it }
-        val content = (obj["message"] as? JsonObject)?.get("content") ?: obj["content"]
-        if (content is JsonArray) {
-            for (item in content) {
-                val entry = item as? JsonObject ?: continue
-                if ((entry["type"] as? JsonPrimitive)?.contentOrNull == "text") {
-                    (entry["text"] as? JsonPrimitive)?.contentOrNull?.let { return it }
-                }
-            }
-        }
-        return null
-    }
+    private fun mapLine(line: String): DriverEvent? = CliLineEventMapper.map(line)
 
     companion object {
         fun claude(cliPath: String): CliSubprocessDriver = CliSubprocessDriver(
@@ -173,16 +138,32 @@ class CliSubprocessDriver(
 /**
  * 按发现结果装配 CLI 驱动清单：找到的装配，没找到的**跳过并打印可操作提示**——
  * 提示里写清怎么补（装 CLI 或设 env），不静默、不 crash。`DriverRegistry.withCliDrivers` 消费它。
+ *
+ * [sandbox] 非空（T-3b）= 每个 CLI 装配成 [SandboxedCliDriver]（Git Worktree 沙箱 +
+ * diff 产物）；null = 裸 [CliSubprocessDriver]（T-3a 语义，既有测试的确定形状）。
  */
 fun cliDriverRegistrations(
     resolveClaude: () -> String? = { CliDiscovery.resolveClaudeCli() },
     resolveCodex: () -> String? = { CliDiscovery.resolveCodexCli() },
     hint: (String) -> Unit = { println(it) },
-): List<CliSubprocessDriver> {
-    val drivers = mutableListOf<CliSubprocessDriver>()
+    sandbox: WorktreeSandboxExecutor? = null,
+): List<AgentDriver> {
+    val drivers = mutableListOf<AgentDriver>()
     val claude = resolveClaude()
     if (claude != null) {
-        drivers.add(CliSubprocessDriver.claude(claude))
+        drivers.add(
+            if (sandbox != null) {
+                SandboxedCliDriver(
+                    driverId = "claude-cli",
+                    displayName = "Claude Code (CLI)",
+                    cliPath = claude,
+                    argSpec = { prompt -> listOf("-p", prompt, "--output-format", "stream-json", "--verbose") },
+                    sandbox = sandbox,
+                )
+            } else {
+                CliSubprocessDriver.claude(claude)
+            },
+        )
     } else {
         hint(
             "[drivers] claude CLI not found; skipping claude-cli driver " +
@@ -191,7 +172,19 @@ fun cliDriverRegistrations(
     }
     val codex = resolveCodex()
     if (codex != null) {
-        drivers.add(CliSubprocessDriver.codex(codex))
+        drivers.add(
+            if (sandbox != null) {
+                SandboxedCliDriver(
+                    driverId = "codex-cli",
+                    displayName = "Codex (CLI)",
+                    cliPath = codex,
+                    argSpec = { prompt -> listOf("exec", "--json", prompt) },
+                    sandbox = sandbox,
+                )
+            } else {
+                CliSubprocessDriver.codex(codex)
+            },
+        )
     } else {
         hint(
             "[drivers] codex CLI not found; skipping codex-cli driver " +

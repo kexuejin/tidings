@@ -73,9 +73,12 @@ class DriverRegistry(private val acl: DriverCapabilityAcl = DriverCapabilityAcl(
          * **每一个**裸构造 `DriverRegistry()` 的测试随「本机装没装 CLI」漂移
          * （envDependentTestGate 的口径）—— 测试用裸构造（确定性），生产用本工厂（完整装配）。
          */
-        fun withCliDrivers(acl: DriverCapabilityAcl = DriverCapabilityAcl()): DriverRegistry =
+        fun withCliDrivers(
+            acl: DriverCapabilityAcl = DriverCapabilityAcl(),
+            sandbox: WorktreeSandboxExecutor? = null,
+        ): DriverRegistry =
             DriverRegistry(acl).also { registry ->
-                for (driver in cliDriverRegistrations()) {
+                for (driver in cliDriverRegistrations(sandbox = sandbox)) {
                     registry.register(driver)
                 }
             }
