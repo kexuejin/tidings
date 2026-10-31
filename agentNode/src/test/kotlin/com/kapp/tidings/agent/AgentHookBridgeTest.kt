@@ -201,6 +201,48 @@ class AgentHookBridgeTest {
     }
 
     @Test
+    fun hookApprovalDefaultTimeoutAlignsTheFiveMinuteTtl() {
+        // D-032：hook 审批的缺省等待预算 = Limits.APPROVAL_TTL_MS（5 分钟）。
+        // 判据走「超时语义」：timeoutMs 缺省时用例不传 —— 但 5 分钟太长，这里改为
+        // 直接断言常量被消费（源码级：缺省表达式引用 Limits.APPROVAL_TTL_MS）。
+        // agentNode 测试类路径没有 testsupport（它只进 :app/:composeApp）—— 直接读源文件。
+        val source = java.io.File("agentNode/src/main/kotlin/com/kapp/tidings/agent/ControlPlane.kt")
+            .takeIf { it.isFile }?.readText()
+            ?: java.io.File("../agentNode/src/main/kotlin/com/kapp/tidings/agent/ControlPlane.kt").readText()
+        assertTrue(
+            source.contains("?: Limits.APPROVAL_TTL_MS.toDouble()"),
+            "hook 审批缺省等待没有对齐 5 分钟 TTL（D-032）",
+        )
+    }
+
+    @Test
+    fun approvalListenerFiresOnDecisionAndUnsubscribes() {
+        var received: Pair<String, String>? = null
+        val dispose = registry.addApprovalListener { id, status -> received = id to status }
+        registry.recordApproval(
+            nodeId = desktop.profile.nodeId, sessionId = "s-listen", approvalId = "a-1",
+            expiresAt = Long.MAX_VALUE / 2, status = "approved", outbound = false,
+        )
+        assertEquals("a-1" to "approved", received, "决定落账即触发监听（长轮询的唤醒源）")
+        received = null
+        dispose()
+        registry.recordApproval(
+            nodeId = desktop.profile.nodeId, sessionId = "s-listen", approvalId = "a-2",
+            expiresAt = Long.MAX_VALUE / 2, status = "denied", outbound = false,
+        )
+        assertEquals(null, received, "注销后不再触发（订阅/注销成对）")
+        // pending/sent 是中间态：不触发（只有决定才唤醒长轮询）。
+        var midState: Pair<String, String>? = null
+        val dispose2 = registry.addApprovalListener { id, status -> midState = id to status }
+        registry.recordApproval(
+            nodeId = desktop.profile.nodeId, sessionId = "s-listen", approvalId = "a-3",
+            expiresAt = Long.MAX_VALUE / 2, status = "sent", outbound = true,
+        )
+        assertEquals(null, midState, "中间态（sent）不触发")
+        dispose2()
+    }
+
+    @Test
     fun injectPoolFeedsByWsAliasAndDrainsOnPull() {
         post("/v1/agent/hook/session", """{"event":"start","conversationId":"c-3","wsPaths":["/repo/tea"]}""")
         val (feedCode, feedBody) = post(

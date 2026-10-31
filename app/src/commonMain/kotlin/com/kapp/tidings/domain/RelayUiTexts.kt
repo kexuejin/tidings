@@ -66,6 +66,9 @@ interface RelayUiTexts {
     /** 超时卡上「降级为本地执行」按钮的标签。 */
     suspend fun invokeActionFallbackLabel(): String
 
+    /** R3 柔性卡（T-G4）：标签无匹配的挂起横幅文案（tag 会被插进占位）。 */
+    suspend fun tagNoMatchTitle(tag: String): String
+
     /**
      * 「这个 agent 现在接不了活」的群流横幅（设计稿 v2 §5「失败如实」）。
      *
@@ -114,6 +117,7 @@ object NoUiTexts : RelayUiTexts {
     override suspend fun invokeTimeoutTitle(agentName: String): String = ""
     override suspend fun invokeActionRetryLabel(): String = ""
     override suspend fun invokeActionFallbackLabel(): String = ""
+    override suspend fun tagNoMatchTitle(tag: String): String = ""
     override suspend fun agentUnavailableNotice(agentName: String): String = ""
     override suspend fun agentNotCompletedNotice(agentName: String): String = ""
     override suspend fun agentActionDeniedNotice(actor: String, agentName: String): String = ""

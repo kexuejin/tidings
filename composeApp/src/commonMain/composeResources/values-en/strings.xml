@@ -1719,6 +1719,7 @@
          through the RelayUiTexts bridge into the card JSON (broadcast with the group text). -->
     <string name="agent_invoke_timeout_title">Subtask timed out: @%1$s</string>
     <string name="agent_invoke_action_retry">Retry</string>
+    <string name="agent_tag_no_match_title">No online node supports [%1$s] right now. Task suspended.</string>
     <string name="agent_invoke_action_fallback_local">Fall back to local</string>
     <string name="agent_unavailable_notice">%1$s is offline — this task was not executed</string>
     <string name="agent_not_completed_notice">%1$s did not finish this task</string>

@@ -1889,6 +1889,7 @@
          进卡片 JSON（随群文本广播），不是界面常量 —— 所以走资源而不是领域层硬编码。 -->
     <string name="agent_invoke_timeout_title">子任务超时中断：@%1$s</string>
     <string name="agent_invoke_action_retry">重试</string>
+    <string name="agent_tag_no_match_title">当前局域网无在线节点支持 [%1$s]，任务已挂起</string>
     <string name="agent_invoke_action_fallback_local">降级为本地执行</string>
     <!-- 插件接不了活时的群流反馈（设计稿 v2 §5「失败如实」）。这两句随群文本广播，
          所以同样经 RelayUiTexts 桥取自资源，不是界面常量。分开两句：一个是「它不在」，

@@ -177,6 +177,9 @@ object Limits {
     const val AGENT_GRANT_AGENT_KEY = 64
     const val AGENT_GRANT_REASON = 200
 
+    /** 审批 TTL（方案 §2.6 不变量 4：5 分钟，超时自动转挂起释放宿主，严禁锁屏死锁）。 */
+    const val APPROVAL_TTL_MS: Long = 300_000L
+
     /** §6.7 `agent-artifact`：产物标识、展示名与 MIME。 */
     const val AGENT_ARTIFACT_ID = 64
     const val AGENT_ARTIFACT_NAME = 200

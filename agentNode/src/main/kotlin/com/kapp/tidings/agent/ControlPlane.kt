@@ -23,6 +23,7 @@ import com.kapp.tidings.core.protocol.AgentChannelPayload
 import com.kapp.tidings.core.protocol.CodecInvoke
 import com.kapp.tidings.core.protocol.Codec
 import com.kapp.tidings.core.protocol.DecodeResult
+import com.kapp.tidings.core.protocol.Limits
 import com.kapp.tidings.core.protocol.MsgTypes
 import com.kapp.tidings.core.protocol.Protocol
 import com.kapp.tidings.core.protocol.makeEnvelope
@@ -2600,7 +2601,7 @@ class ControlPlane(
         val conversationId = obj["conversationId"]?.jsonPrimitive?.contentOrNull?.trim().orEmpty()
         val riskLevel = obj["riskLevel"]?.jsonPrimitive?.contentOrNull
         val diff = obj["diff"]?.jsonPrimitive?.contentOrNull
-        val timeoutMs = (numberOrNull(obj["timeoutMs"]) ?: 60_000.0).toLong().coerceIn(1_000, 180_000)
+        val timeoutMs = (numberOrNull(obj["timeoutMs"]) ?: Limits.APPROVAL_TTL_MS.toDouble()).toLong().coerceIn(1_000, 180_000)
         val peer = resolveHookPeer(exchange, obj) ?: return
         val agentKey = "antigravity"
         if (tool != null && toolApprovals.isAlwaysApproved(nodeId = peer, agentKey = agentKey, tool = tool)) {
@@ -2630,17 +2631,18 @@ class ControlPlane(
         }
         sessions.recordApproval(peer, sessionId, approvalId, tool, summary, expiresAt, choices,
             status = "sent", outbound = true)
-        // 长轮询：ack 落台账（agent-ack 的入站处理推进 status）即返回；超时 = deny。
-        val deadline = System.currentTimeMillis() + timeoutMs
-        var finalStatus: String? = null
-        while (System.currentTimeMillis() < deadline) {
-            val status = sessions.approvals(peer, sessionId)
-                .firstOrNull { it.approvalId == approvalId }?.status
-            if (status != null && status != "pending" && status != "sent") {
-                finalStatus = status
-                break
+        // 长轮询改「决定落账信号」唤醒（T-G4）：recordApproval 推进 status 时触发
+        // 监听 —— 不再 200ms 盲睡占线程。超时 = deny（fail-closed 语义不变）。
+        val signal = kotlinx.coroutines.CompletableDeferred<String>()
+        val disposeListener = sessions.addApprovalListener { id, status ->
+            if (id == approvalId) signal.complete(status)
+        }
+        val finalStatus = try {
+            runBlocking {
+                kotlinx.coroutines.withTimeoutOrNull(timeoutMs) { signal.await() }
             }
-            Thread.sleep(200)
+        } finally {
+            disposeListener()
         }
         val allow = finalStatus in setOf("approved", "allow_session")
         respond(exchange, 200, buildJsonObject {

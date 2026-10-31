@@ -7,6 +7,7 @@ import com.kapp.tidings.domain.model.ScreenRecordUi
 import com.kapp.tidings.generated.resources.Res
 import com.kapp.tidings.generated.resources.agent_invoke_action_fallback_local
 import com.kapp.tidings.generated.resources.agent_invoke_action_retry
+import com.kapp.tidings.generated.resources.agent_tag_no_match_title
 import com.kapp.tidings.generated.resources.agent_invoke_timeout_title
 import com.kapp.tidings.generated.resources.agent_action_denied_notice
 import com.kapp.tidings.generated.resources.agent_not_completed_notice
@@ -66,6 +67,9 @@ internal object ResourceUiTexts : RelayUiTexts {
 
     override suspend fun invokeActionFallbackLabel(): String =
         runCatching { getString(Res.string.agent_invoke_action_fallback_local) }.getOrNull().orEmpty()
+
+    override suspend fun tagNoMatchTitle(tag: String): String =
+        runCatching { getString(Res.string.agent_tag_no_match_title, tag) }.getOrNull().orEmpty()
 
     override suspend fun agentUnavailableNotice(agentName: String): String =
         runCatching { getString(Res.string.agent_unavailable_notice, agentName) }.getOrNull().orEmpty()

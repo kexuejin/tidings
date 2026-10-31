@@ -421,6 +421,51 @@ internal class RelayControllerAgentInvokeComponent(private val host: RelayContro
             // 没桥 / 没标签 / 无匹配节点 ⇒ 落回既有失败横幅（如实，不静默）。
             val requiredTag = intent.strField("requiredTag")?.takeIf { it.isNotBlank() }
             val routed = if (requiredTag != null) peerTagRouter?.invoke(requiredTag) else null
+            if (requiredTag != null && routed == null) {
+                // R3 兜底卡（T-G4）：指定了标签但无匹配节点 —— 用户要的是「有 gpu 的那台」，
+                // 静默落回本机执行违背意图。挂起成卡，两个动作各自可达（重试路由 /
+                // 降级本机），横幅文案照旧出一条（不点卡的人也有回声）。
+                val tagTask = intent.strField("prompt")
+                    ?: messageText?.let {
+                        RelayController.extractAgentPrompt(it, setOfNotNull(seat.agentId.takeIf { t -> t.isNotBlank() }, seat.name))
+                    }
+                    ?: ""
+                val cardId = "tagboard-" + newId().take(16)
+                tagBoards[cardId] = TagBoardEntry(groupId, agentId, seat, tagTask, wsId, requiredTag)
+                host.scope.launch {
+                    val bannerTitle = runCatching { host.uiTexts.tagNoMatchTitle(requiredTag) }.getOrNull().orEmpty()
+                        .ifEmpty { "任务已挂起（标签 " + requiredTag + " 无在线节点）" }
+                    runCatching {
+                        broadcastBoardCard(
+                            groupId, agentId,
+                            buildJsonObject {
+                                put("cardId", cardId)
+                                put("rev", 1)
+                                put("type", "team-task-board")
+                                put("title", tagTask.take(80))
+                                put("banner", buildJsonObject {
+                                    put("text", bannerTitle)
+                                    put("tone", "warn")
+                                })
+                                put("actions", kotlinx.serialization.json.buildJsonArray {
+                                    add(buildJsonObject {
+                                        put("actionId", TagBoardActions.RETRY)
+                                        put("label", runCatching { host.uiTexts.invokeActionRetryLabel() }.getOrNull().orEmpty().ifEmpty { "retry" })
+                                        put("style", "secondary")
+                                    })
+                                    add(buildJsonObject {
+                                        put("actionId", TagBoardActions.FALLBACK_LOCAL)
+                                        put("label", runCatching { host.uiTexts.invokeActionFallbackLabel() }.getOrNull().orEmpty().ifEmpty { "fallback" })
+                                        put("style", "primary")
+                                    })
+                                })
+                            },
+                        )
+                    }
+                    runCatching { announceAgentGaveUp(groupId, agentId, seat.name, messageId, unavailable = true) }
+                }
+                return
+            }
             if (requiredTag != null && routed != null) {
                 val channelId = "ch-" + newId().take(20)
                 val task = intent.strField("prompt")
@@ -486,6 +531,18 @@ internal class RelayControllerAgentInvokeComponent(private val host: RelayContro
      * 也就几百条；换成 LRU 反而会在重放迟到时漏判（那时才是它该起作用的时候）。
      */
     private val announcedDispatches = ConcurrentHashMap.newKeySet<String>()
+
+    /** 标签看板卡（T-G4）：cardId → 重试/降级所需的全量上下文。 */
+    private val tagBoards = ConcurrentHashMap<String, TagBoardEntry>()
+
+    private data class TagBoardEntry(
+        val groupId: String,
+        val agentId: String,
+        val seat: VirtualAgentMember,
+        val task: String,
+        val wsId: String?,
+        val tag: String,
+    )
 
     /**
      * 把「这次没做成」播进群流：`agentState=failed` 的 agent 署名群文本。
@@ -784,6 +841,44 @@ internal class RelayControllerAgentInvokeComponent(private val host: RelayContro
         if (!won) return
         // 看板卡的网格级动作（重试 / 降级）不走插件：它们是 Leader 自己的命令。
         when (actionId) {
+            TagBoardActions.RETRY -> {
+                val board = tagBoards[cardId]
+                if (board != null) {
+                    broadcastDecision(cardId, actionId, groupId, agentId, decidedBy)
+                    // 重试 = 重新过一遍路由：节点可能已上线；仍无匹配 ⇒ 再次挂起成新卡。
+                    val routed = peerTagRouter?.invoke(board.tag)
+                    if (routed != null) {
+                        val channelId = "ch-" + newId().take(20)
+                        channelDispatch?.invoke(routed, channelId, board.tag, board.task, DEFAULT_INVOKE_DEADLINE_MS)
+                    } else {
+                        // 仍无匹配：如实再报一次（去重键用 cardId —— 同一张卡的重试只出一条横幅）。
+                        host.scope.launch {
+                            runCatching {
+                                announceAgentGaveUp(board.groupId, board.agentId, board.seat.name, cardId, unavailable = true)
+                            }
+                        }
+                    }
+                    return
+                }
+            }
+            TagBoardActions.FALLBACK_LOCAL -> {
+                val board = tagBoards[cardId]
+                if (board != null) {
+                    broadcastDecision(cardId, actionId, groupId, agentId, decidedBy)
+                    host.scope.launch {
+                        executeLocallyAndBroadcast(
+                            invokeId = cardId + "-local",
+                            groupId = board.groupId,
+                            agentId = board.agentId,
+                            seat = board.seat,
+                            prompt = board.task,
+                            wsId = board.wsId,
+                            requester = decidedBy,
+                        )
+                    }
+                    return
+                }
+            }
             InvokeBoardActions.RETRY -> {
                 val lease = leases.snapshot().firstOrNull { boardCardIdOf(it.invokeId) == cardId }
                 if (lease != null) {
@@ -927,6 +1022,12 @@ object InvokeLeaseStates {
 object InvokeBoardActions {
     const val RETRY = "invoke-retry"
     const val FALLBACK_LOCAL = "invoke-fallback-local"
+}
+
+/** 标签看板卡的动作（T-G4，R3 兜底）：重试路由 / 降级本机。 */
+object TagBoardActions {
+    const val RETRY = "tag-retry"
+    const val FALLBACK_LOCAL = "tag-fallback-local"
 }
 
 /** 一条跨端派单的租约（发起方视角）。落进 [RelayUiState.agentInvokes]，界面与测试都能读。 */

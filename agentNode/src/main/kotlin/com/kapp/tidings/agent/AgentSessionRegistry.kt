@@ -426,6 +426,15 @@ class AgentSessionRegistry(
      * 同一 `approvalId` 重投就地替换，但**已处置的状态不会被抹掉**：对端重复宣告同一个
      * `approvalId`（重传、补发）时，本端已经点过的「同意」不该退回 `null`。
      */
+    /** 审批状态推进监听（T-G4）：长轮询用它做「决定落账」的信号，不盲睡轮询。 */
+    private val approvalListeners = java.util.concurrent.CopyOnWriteArrayList<(approvalId: String, status: String) -> Unit>()
+
+    /** 注册监听，返回**注销函数**（订阅/注销成对，调用方 finally 里执行）。 */
+    fun addApprovalListener(listener: (approvalId: String, status: String) -> Unit): () -> Unit {
+        approvalListeners += listener
+        return { approvalListeners -= listener }
+    }
+
     fun recordApproval(
         nodeId: String,
         sessionId: String,
@@ -455,6 +464,8 @@ class AgentSessionRegistry(
         }
         ensureSession(nodeId, sessionId, at)
         evictIfNeeded()
+        val effective = status?.takeIf { it != "pending" && it != "sent" }
+        if (effective != null) approvalListeners.forEach { it(approvalId, effective) }
     }
 
     /**

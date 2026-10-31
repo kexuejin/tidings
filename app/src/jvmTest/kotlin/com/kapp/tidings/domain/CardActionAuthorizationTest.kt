@@ -71,6 +71,7 @@ class CardActionAuthorizationTest {
         override suspend fun invokeTimeoutTitle(agentName: String): String = ""
         override suspend fun invokeActionRetryLabel(): String = ""
         override suspend fun invokeActionFallbackLabel(): String = ""
+        override suspend fun tagNoMatchTitle(tag: String): String = ""
         override suspend fun agentUnavailableNotice(agentName: String): String = ""
         override suspend fun agentNotCompletedNotice(agentName: String): String = ""
         override suspend fun agentActionDeniedNotice(actor: String, agentName: String): String =
