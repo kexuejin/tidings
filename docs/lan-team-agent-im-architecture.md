@@ -25,8 +25,9 @@ flowchart TD
         end
         subgraph Agents["智能体入驻 (私有 Agent)"]
             A1["Codex (宿主: Alice-Mac)"]
-            A2["Claude (宿主: Bob-Mac)"]
-            A3["Runner (宿主: Linux-Server)"]
+            A2["Antigravity / agy (宿主: Alice-Mac)"]
+            A3["Claude (宿主: Bob-Mac)"]
+            A4["Runner (宿主: Linux-Server)"]
         end
         G["同一个项目协作群聊 (Team Group Chat)"]
         H1 <-->|P2P 文字 / 截图 / 大文件直传| H2
@@ -84,6 +85,12 @@ flowchart TD
 4. **移动端审批自收敛 (TTL)**：审批带 5 分钟超时，超时自动转挂起释放 CPU，严禁因手机锁屏导致宿主电脑编译死锁；
 5. **极简单向责任链 (Pipeline)**：`Architect` $\rightarrow$ `Coder` $\rightarrow$ `Tester` 单向传递产物，严禁 Agent 之间双向私聊发散；
 6. **宿主硬件水位与低电量自保**：节点在心跳中上报硬件负载，`CPU > 85%` 自动拒单，`电池 < 20%` 自动避让重任务，做懂礼貌的智能算力宿主。
+
+### 2.7 Google Antigravity 深度支持：双向注入与无缝跨端 (Antigravity Integration)
+将 Google Antigravity（App / CLI `agy` / IDE 插件）作为平台核心一等公民支持：
+- **主动派单 (CLI Mode)**：支持通过 `CliSubprocessDriver` 自动拉起 `agy`，在 Git Worktree 沙箱中以流式双工（`stream-json`）执行任务并原位推流卡片，零额外配置 Key；
+- **被动投射与移动审批 (Hooks Mode)**：通过全局 `hooks.json` 监听桌面 Antigravity 会话，`PreToolUse` 拦截危险命令向手机弹双行审批；
+- **杀手级反向注入 (PreInvocation)**：手机端在群聊中发送的文字，通过 Antigravity 官方 `PreInvocation.injectSteps` 后门**直接注入当前推理上下文**，实现“人走动在手机上说一句，电脑 IDE 里的 Agent 就地纠偏继续干”。
 
 ---
 
