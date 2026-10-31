@@ -1,7 +1,7 @@
 {
   "source": {
     "path": "prototype/relay.html",
-    "sha256": "d96d85c3d4e0"
+    "sha256": "511d0c0c8aec"
   },
   "dimensions": {
     "spacing": {
@@ -12,17 +12,17 @@
       "special": 6
     },
     "radius": {
-      "distinct": 23,
+      "distinct": 24,
       "afterDistinct": 5,
       "variable": 5,
-      "review": 5,
+      "review": 6,
       "special": 2
     },
     "font-size": {
-      "distinct": 15,
+      "distinct": 16,
       "afterDistinct": 5,
       "variable": 7,
-      "review": 0,
+      "review": 1,
       "special": 3
     },
     "font-weight": {
