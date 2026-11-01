@@ -2646,14 +2646,13 @@ class ControlPlane(
 
     private fun hookKeyOf(conversationId: String): String = "agy-" + conversationId.trim()
 
-    /** hook 审批的收件人对端：显式 to 优先；缺省 = 在线且声明 agq1 的对端里 nodeId 最小的（确定性）。 */
+    /**
+     * hook 审批的收件人对端：显式 to 优先；缺省走 [pickHookPeer]（先折叠同端点旧记录，再取确定性）。
+     */
     private fun resolveHookPeer(exchange: HttpExchange, obj: JsonObject): String? {
         val explicit = obj["to"]?.jsonPrimitive?.contentOrNull?.trim().orEmpty()
         if (explicit.isNotEmpty()) return explicit
-        val candidates = runtime.peerList()
-            .filter { it.online && it.profile?.caps?.contains(MsgTypes.CAP_AGENT_QUEUE) == true }
-            .sortedBy { it.profile?.nodeId ?: "" }
-        val picked = candidates.firstOrNull()?.profile?.nodeId
+        val picked = pickHookPeer(runtime.peerList())
         if (picked == null) {
             respond(exchange, 503, errorJson("no-phone", "没有在线且声明 agq1 的对端可收审批 —— 手机不在线时 hook 按超时拒绝"))
         }
@@ -4181,3 +4180,27 @@ private fun jsonShapeOk(
         else -> false
     }
 }
+/**
+ * 从在线对端里挑「收这条 hook」的那一台（`hook/approval` / `hook/session` 共用）。
+ *
+ * 为什么不是「nodeId 最小的在线对端」：同一台手机重装或重配对后，节点表里会留下两条指向
+ * 同一个 `ip:udpPort` 的记录 —— 旧那条 `profileRev` 停在旧值，`lastSeen` 却仍被同一台设备
+ * 的广播刷新，于是**两条都算在线**。审批按 `to` 这个 nodeId 落账，回执却由手机**当前**的
+ * nodeId 发出（`applyAckToApproval` 按 `key.nodeId == envelope.from` 匹配），挑错那条等于
+ * 把审批记在一个永远不会回执的身份上：手机明明点了批准，宿主却等到超时按 fail-closed 拒绝。
+ *
+ * 所以先按端点折叠 —— 同一 `ip:udpPort` 只留 `profileRev` 最大的一条（rev 随资料变更单调增，
+ * 旧记录永远是停住的那条），并列取 `lastSeen` 更新的；折叠完再按 nodeId 取最小保确定性。
+ */
+internal fun pickHookPeer(peers: List<com.kapp.tidings.core.transport.PeerRecord>): String? =
+    peers
+        .filter { it.online && it.profile.caps.contains(MsgTypes.CAP_AGENT_QUEUE) }
+        .groupBy { it.ip + ":" + it.udpPort }
+        .map { (_, sameEndpoint) ->
+            sameEndpoint.maxWithOrNull(
+                compareBy<com.kapp.tidings.core.transport.PeerRecord> { it.profile.profileRev }
+                    .thenBy { it.lastSeen },
+            ) ?: sameEndpoint.first()
+        }
+        .map { it.profile.nodeId }
+        .minOrNull()
