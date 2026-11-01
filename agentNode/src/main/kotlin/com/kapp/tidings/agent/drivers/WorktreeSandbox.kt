@@ -220,9 +220,28 @@ class WorktreeSandboxExecutor(
                             // （宿主 HTTP / 调用方取消），超时是宿主自主止损。混成一档，
                             // 复盘时会把一次自主止损读成一次人为中断。
                             if (!timedOut.get()) aborted.add(taskId)
-                            proc.descendants().forEach { it.destroy() }
-                            proc.destroy()
+                            // 这里原来只发 SIGTERM 就交还控制权。**取消路径上 SIGKILL 升级
+                            // 执行不到**：`ensureActive()` 抛出后异常已经离开 `use{}`，下面
+                            // 那段 `forceKill` 被跳过，忽略 SIGTERM 的子进程就此活下来 ——
+                            // 与 `abort()` 修掉的是同一个洞，只是换了入口。
+                            // `NonCancellable`：取消中再调 suspend 会立刻又抛一次。
+                            withContext(NonCancellable) {
+                                val t0 = System.currentTimeMillis()
+                                val tree = destroyProcessTree(proc)
+                                val alive = tree.filter { isAlive(it) }
+                                note(
+                                    logFile,
+                                    "[sandbox] task $taskId teardown (timedOut=${timedOut.get()}): " +
+                                        "killed ${tree.size - alive.size}/${tree.size} pid(s) in " +
+                                        "${System.currentTimeMillis() - t0}ms" +
+                                        if (alive.isEmpty()) "" else ", still alive: ${alive.joinToString(",")}",
+                                )
+                            }
                         }
+                        // 取消路径走不到 `withContext` 之后那行 `running.remove`（异常已经抛出）。
+                        // 留下一条死进程条目会让 `hasRunningSandboxes()` 恒真 —— 下一轮 stop
+                        // 就去打一具尸体，而真正活着的进程仍在跑。
+                        running.remove(taskId)
                         reader.join(2_000)
                     }
                 }
@@ -292,14 +311,22 @@ class WorktreeSandboxExecutor(
     suspend fun abort(taskId: String): Boolean {
         val proc = running[taskId] ?: return false
         aborted.add(taskId)
+        // 入口时刻与耗时必须落到任务自己的日志里。宿主 stdout 重定向后不刷行，
+        // 「stop 什么时候进来、树什么时候摘干净」这两件事在事发时一个字都取不到，
+        // 事后只能靠人回忆 —— 而这两件事正是判断「打断到底慢在哪」的唯一依据。
+        val log = taskLog(taskId)
+        val t0 = System.currentTimeMillis()
+        note(log, "[sandbox] abort $taskId: entered at $t0, destroying process tree")
         val tree = destroyProcessTree(proc)
         // 幸存者必须**看得见**。「一次 stop 没杀干净」这个现场（同群并发派单，一条被收掉、
         // 另一条活到第二次 stop）事后只能靠人回忆，就是因为这条路上一个字都没打。
         val survivors = tree.filter { isAlive(it) }
-        if (survivors.isNotEmpty()) {
-            println("[sandbox] abort $taskId: ${survivors.size} process(es) still alive after SIGKILL: " +
-                survivors.joinToString(",") { "$it" })
-        }
+        note(
+            log,
+            "[sandbox] abort $taskId: killed ${tree.size - survivors.size}/${tree.size} pid(s) in " +
+                "${System.currentTimeMillis() - t0}ms" +
+                if (survivors.isEmpty()) "" else ", still alive: ${survivors.joinToString(",")}",
+        )
         return true
     }
 
@@ -340,7 +367,13 @@ class WorktreeSandboxExecutor(
         }
         val leftover = running.keys.filter { it !in seen }
         if (leftover.isNotEmpty()) {
-            println("[sandbox] abortAll: ${leftover.size} task(s) registered after ${ABORT_ROUNDS} rounds, left running: $leftover")
+            // 同样落盘：stdout 重定向后这行是取不到的，而「重扫都没抓到」恰恰是最需要证据的一种。
+            for (id in leftover) {
+                note(
+                    taskLog(id),
+                    "[sandbox] abortAll: task $id registered too late, still running after $ABORT_ROUNDS rounds",
+                )
+            }
         }
         return killed
     }
@@ -376,6 +409,16 @@ class WorktreeSandboxExecutor(
         println(line)
         runCatching { logFile.appendText(line + "\n") }
     }
+
+    /**
+     * 某个任务的产物日志路径。
+     *
+     * `abort()` 手里只有 taskId（taskId 是驱动内部生成的，编排器的工单只认会话/群），
+     * 但取证要落在**同一条时间线**上 —— 任务日志里已经有 `turn.started` / 逐条命令，
+     * 打断的入口时刻只有追加到同一份文件里才能和它们对齐。
+     */
+    private fun taskLog(taskId: String): File =
+        File(File(sandboxRoot, ARTIFACTS_DIR), taskId).resolve("task.log")
 
     /** `git diff HEAD` 提纯成 patch + report（两个文件 + 结构化摘要），写到产物目录。 */
     private fun harvestAndWrite(
