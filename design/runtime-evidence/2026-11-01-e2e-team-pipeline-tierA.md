@@ -83,3 +83,21 @@ E2E_AGENT_KEY=codex python3 scripts/e2e-team-pipeline.py --act 4 --tier real
 2. **幽灵 peer 的全局治理**：`pickHookPeer` 只保住了审批一条路，发送侧 `[send] peer=44608041` 还在。
 3. **派单缺少超时**：CLI 挂住时任务会一直占着 worktree（这轮靠人工 kill 两次）。止损点应在宿主侧，不该靠人盯。
 4. **沙箱不是边界**：上一轮 102 条命令里 27 条直接操作宿主用户目录（`cd ~/e2e-weather-app && git …`、`find ~ -name …`），`SandboxedCliDriver` 只改 cwd，没有路径约束。
+
+## 7. 落账（一个缺陷一笔）
+
+| commit | 内容 | 反向验证 |
+|---|---|---|
+| `d2f369d2` | 审批回执推进后唤醒长轮询（`applyAckToApproval` 打通知） | `appliedAckWakesTheWaitingLongPoll`：摘掉通知行即红 |
+| `a22fdf04` | 幽灵 peer：抽 `pickHookPeer`，先按 `ip:udpPort` 折叠取 `profileRev` 最大，再取 nodeId 最小 | `HookPeerPickTest` 4 条：摘掉折叠即红 |
+| `a6646b08` | 派单三条阻断：spawn 后关 stdin / codex 固定 `--sandbox workspace-write`（留 `TIDINGS_CODEX_SANDBOX` 逃生口）/ `CliDiscovery.childPath()` 补解释器 PATH；收割路径两处静默 `return null` 改 `note()` | `childPath` 与 `codexSandboxMode` 两条用例；stdin 一条只真机可复现（单测里子进程 stdin 已是 EOF），已在代码注释写明 |
+| `584f54b5` | E2E 判据改成真机可证的读数（群消息不发只观测、守门看卡片 `decidedBy`、产物只认本次新增、`relay.db-wal` 同读）+ 本文件 | 幕表重跑：判据改完后幕 4/5 仍绿、幕 6 如实红 |
+
+收工读数：`:agentNode:test` 全量绿 2m6s；施工痕迹门禁 17 根 0 命中；`git status` 净。
+
+## 8. 剩余风险
+
+- 发送路径仍会选中幽灵身份（`[send] peer=44608041 channel=TCP`），折叠只护住审批一侧。
+- 派单无超时止损：CLI 挂住就一直占 worktree（本轮人工 kill 两次）。
+- 沙箱只改 `cwd`、无路径约束（§6 第 4 条）。
+
