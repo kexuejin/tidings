@@ -7,6 +7,7 @@ import java.nio.file.Files
 import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertFailsWith
+import kotlin.test.assertFalse
 import kotlin.test.assertTrue
 import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.CoroutineScope
@@ -208,8 +209,72 @@ class WorktreeSandboxExecutorTest {
         scope.cancel()
     }
 
-    // ── 5. 协程取消 = 同一条中止路径 ─────────────────────────────────────────
+    /**
+     * 中止必须收掉**忽略 SIGTERM 的子进程**，不能只看根进程死没死。
+     *
+     * ## 这条守的是哪个现场
+     *
+     * 真机现场：手机发「停」，卡片翻成 `Aborted`，而同一沙箱里的 `codex exec`
+     * 七分钟后仍在跑 —— 直到第二次 stop 才收掉。
+     *
+     * 根因在 `destroyProcessTree` 的判据：它把「根进程 `proc.isAlive == false`」当成
+     * 「整棵树没了」。而 `ProcessHandle.descendants()` 有两个性质（见该方法 KDoc）：
+     * 是**快照**、且**只对活着的祖先有效**。根一死，后代被过继给 init，句柄再也枚举不到。
+     *
+     * ## 这条用例为什么能区分新旧实现
+     *
+     * 假 CLI 起一个 `trap "" TERM` 的子进程（忽略 SIGTERM，只能 SIGKILL 收）：
+     * - 旧实现：SIGTERM 打给根 → 根立刻死 → 宽限循环只盯根，立即退出 →
+     *   `forceKill(proc)` 因根已死而跳过 → **子进程存活**，用例红；
+     * - 新实现：按 pid 逐个核对，宽限 3s 后对幸存者 SIGKILL → 子进程死，用例绿。
+     */
+    @Test
+    fun abortKillsDescendantsThatIgnoreSigterm() = runBlocking {
+        val root = tempDir()
+        val host = tempDir()
+        gitRepo(host)
+        val pidFile = File(root, "pids.txt")
+        // `trap "" TERM; exec sleep` —— 忽略 TERM 之后 exec，忽略处置会被继承，
+        // 于是这个 `sleep` 只会被 SIGKILL 收掉。（多一条命令就不会 exec 优化，
+        // 会多一层 fork，也让 `$!` 指向的不是它。）
+        val cli = script(
+            root,
+            "cli",
+            "sh -c 'trap \"\" TERM; exec sleep 120' &\n" +
+                "echo \"\$\$ \$!\" > '${pidFile.absolutePath}'\n" +
+                "wait",
+        )
+        val exe = executor(root)
+        val scope = CoroutineScope(Job() + kotlinx.coroutines.Dispatchers.Default)
+        val done = CompletableDeferred<WorktreeSandboxExecutor.Outcome>()
+        scope.launch { done.complete(exe.run("t6", host.absolutePath, listOf(cli), emptyMap(), {})) }
 
+        withTimeout(15_000) {
+            while (!pidFile.isFile || pidFile.readText().isBlank()) delay(50)
+        }
+        val (rootPid, childPid) = pidFile.readText().trim().split(" ").map { it.toLong() }
+        assertTrue(aliveOf(rootPid), "前置：根进程在跑")
+        assertTrue(aliveOf(childPid), "前置：忽略 SIGTERM 的子进程在跑")
+
+        val killed = withTimeout(20_000) { exe.abortAll() }
+        assertTrue(killed >= 1, "abortAll 必须命中这条任务，实际 $killed")
+
+        withTimeout(20_000) {
+            while (aliveOf(rootPid) || aliveOf(childPid)) delay(50)
+        }
+        assertFalse(aliveOf(childPid), "忽略 SIGTERM 的子进程也必须被 SIGKILL 收掉 —— 只收根就是真机那次「stop 之后还在跑」")
+        assertFalse(aliveOf(rootPid), "根进程必须被杀掉")
+
+        val outcome = withTimeout(10_000) { done.await() }
+        assertTrue(outcome is WorktreeSandboxExecutor.Outcome.Aborted, "终局是 Aborted，实际 $outcome")
+        scope.cancel()
+    }
+
+    /** pid 还活着吗（进程不存在 / 已退出都算 false，不抛）。 */
+    private fun aliveOf(pid: Long): Boolean =
+        ProcessHandle.of(pid).map { it.isAlive }.orElse(false)
+
+    // ── 5. 协程取消 = 同一条中止路径 ─────────────────────────────────────────
     @Test
     fun coroutineCancellationRunsTheSameAbortPath() = runBlocking {
         val root = tempDir()

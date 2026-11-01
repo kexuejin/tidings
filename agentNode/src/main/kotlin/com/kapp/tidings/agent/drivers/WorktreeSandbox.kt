@@ -292,7 +292,14 @@ class WorktreeSandboxExecutor(
     suspend fun abort(taskId: String): Boolean {
         val proc = running[taskId] ?: return false
         aborted.add(taskId)
-        destroyProcessTree(proc)
+        val tree = destroyProcessTree(proc)
+        // 幸存者必须**看得见**。「一次 stop 没杀干净」这个现场（同群并发派单，一条被收掉、
+        // 另一条活到第二次 stop）事后只能靠人回忆，就是因为这条路上一个字都没打。
+        val survivors = tree.filter { isAlive(it) }
+        if (survivors.isNotEmpty()) {
+            println("[sandbox] abort $taskId: ${survivors.size} process(es) still alive after SIGKILL: " +
+                survivors.joinToString(",") { "$it" })
+        }
         return true
     }
 
@@ -307,14 +314,35 @@ class WorktreeSandboxExecutor(
      *
      * 语义上这是对的：用户说「停」要停的是**这台机器正在干的活**，不是某个内部 id。
      * 代价是一次停掉全部在跑任务 —— 但宿主同一时刻本来就是一条队列。
+     *
+     * ## 为什么要重扫而不是取一次快照
+     *
+     * `running` 的条目是在 `pb.start()` **之后**才写进去的。并发派单（一条消息被两个执行者
+     * 各派一次的那轮，见 §9.3）时，第二条的 `pb.start()` 完全可能落在本方法取快照之后 ——
+     * 于是「一次 stop 只摘掉一个」。真机形态：16:14 那次 stop 摘掉 `t-12`，`t-11` 还活着，
+     * 直到 16:17 第二次 stop 才收掉。
+     *
+     * 所以这里按「还没处理过的 taskId」反复扫，直到没有新的为止（有界，不会自旋）。
      */
     suspend fun abortAll(): Int {
-        val tasks = running.keys.toList()
-        var n = 0
-        for (id in tasks) {
-            if (abort(id)) n++
+        val seen = mutableSetOf<String>()
+        var killed = 0
+        repeat(ABORT_ROUNDS) {
+            val fresh = running.keys.filter { it !in seen }
+            if (fresh.isEmpty()) return killed
+            for (id in fresh) {
+                seen += id
+                if (abort(id)) killed++
+            }
+            // 给"正在 pb.start() 的那条"一点时间把条目写进来，再扫一轮。
+            if (running.keys.none { it !in seen }) return killed
+            delay(ABORT_RESCAN_MS)
         }
-        return n
+        val leftover = running.keys.filter { it !in seen }
+        if (leftover.isNotEmpty()) {
+            println("[sandbox] abortAll: ${leftover.size} task(s) registered after ${ABORT_ROUNDS} rounds, left running: $leftover")
+        }
+        return killed
     }
 
     /** 当前在跑的任务数（「停」要不要消费这条消息，看它）。 */
@@ -430,14 +458,49 @@ class WorktreeSandboxExecutor(
         )
     }
 
-    /** 进程树 SIGTERM → 至多 3s → SIGKILL（D-024 的中止序；挂起版，供显式 abort 走）。 */
-    private suspend fun destroyProcessTree(proc: Process) {
-        proc.descendants().forEach { it.destroy() }
-        proc.destroy()
+    /**
+     * 进程树 SIGTERM → 至多 3s → SIGKILL（D-024 的中止序；挂起版，供显式 abort 走）。
+     *
+     * 返回**本次记下的整棵树**（含根），供调用方事后核对死活。
+     *
+     * ## 为什么不靠 `proc.descendants()`
+     *
+     * `ProcessHandle.descendants()` 有两个性质决定了它单独用会漏杀：
+     *
+     * 1. **是快照**。调用那一刻之后 fork 出来的层不在里面。
+     * 2. **只对活着的祖先有效**。根进程一退出，它的后代被过继给 init，
+     *    `proc.descendants()` 从此恒空 —— 那些进程还在跑，但再也没有句柄能枚举到它们。
+     *
+     * 真机形态（一次 stop 之后）：`codex` 这一层被 SIGTERM 干净地收掉，
+     * `proc.isAlive` 立刻为 false，于是宽限循环直接退出、`forceKill(proc)` 被跳过，
+     * 而它下面起的那层还活着 —— 卡片已经翻 `Aborted`，工作树还在被改。
+     *
+     * 所以这里先把整棵树的 pid 记下来，之后**按 pid 逐个核对死活**，与根的死活解耦。
+     */
+    private suspend fun destroyProcessTree(proc: Process): List<Long> {
+        val tracked = trackTree(proc)
+        tracked.forEach { pid -> aliveHandle(pid)?.destroy() }
         val deadline = clock() + GRACE_MS
-        while (clock() < deadline && proc.isAlive) delay(50)
-        forceKill(proc)
+        while (clock() < deadline && tracked.any { isAlive(it) }) delay(50)
+        // 宽限期内可能又 fork 过一层：再取一次并进同一个集合，然后统一 SIGKILL。
+        tracked += trackTree(proc)
+        tracked.forEach { pid -> aliveHandle(pid)?.destroyForcibly() }
+        return tracked.toList()
     }
+
+    /** 记下 [proc] 及其当前后代的 pid（根恒在集合里，即使它已死）。 */
+    private fun trackTree(proc: Process): MutableSet<Long> {
+        val pids = linkedSetOf(proc.pid())
+        // 进程可能在我们取快照的同时就退了 —— 拿不到后代不是错误，只是"没有后代"。
+        runCatching { proc.descendants().forEach { pids += it.pid() } }
+        return pids
+    }
+
+    /** 按 pid 取句柄；已退出或不存在返回 null（不抛）。 */
+    private fun aliveHandle(pid: Long): ProcessHandle? =
+        ProcessHandle.of(pid).orElse(null)?.takeIf { it.isAlive }
+
+    private fun isAlive(pid: Long): Boolean = ProcessHandle.of(pid).map { it.isAlive }.orElse(false)
 
     private fun forceKill(proc: Process) {
         if (proc.isAlive) {
@@ -463,6 +526,12 @@ class WorktreeSandboxExecutor(
         const val ARTIFACTS_DIR = "artifacts"
 
         const val GRACE_MS = 3_000L
+
+        /** `abortAll` 的重扫轮数上限：只为了吃掉"快照之后才注册"的那一两条，不该自旋。 */
+        const val ABORT_ROUNDS = 5
+
+        /** 两轮重扫之间的间隔：够 `pb.start()` 把条目写进 `running`。 */
+        const val ABORT_RESCAN_MS = 100L
 
         /** 派单止损的 env 名（毫秒）。显式覆盖优先于默认值。 */
         const val ENV_TIMEOUT_MS = "TIDINGS_SANDBOX_TIMEOUT_MS"
