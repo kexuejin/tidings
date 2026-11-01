@@ -29,7 +29,7 @@
    - **Precondition for public direct connection**: the remote router must allow inbound IPv6. This app does no NAT traversal and does not change your network settings.
 3. **Mobile App (`:composeApp` / `:androidApp` / `:iosApp`)**: Built on Compose Multiplatform, delivering native UX, responsive adaptive layout, and sandboxed storage across Android and iOS devices.
 4. **Desktop App (`:desktopApp`)**: Standalone Compose Desktop client sharing core business state and UI components, optimized for widescreen split-pane workflows, window management, and background tray execution.
-5. **Headless Agent Node & Pluggable Drivers (`:agentNode`)**: Decouples network communication from LLM inference engines. Supports `NativeRelayDriver`, `DsBotDriver`, `OpenAiDriver`, and MCP (Model Context Protocol) tool extensions via a local loopback HTTP control plane (`127.0.0.1:8788`) and WebSocket gateway.
+5. **Headless Agent Node & Pluggable Drivers (`:agentNode`)**: Decouples network communication from LLM inference engines. Ships an honest fallback driver plus Claude Code / Codex / agy CLI drivers (Git Worktree sandbox), supports MCP (Model Context Protocol) tool extensions, and exposes a local loopback HTTP control plane (`127.0.0.1:8788`).
 
 ### Supported connection paths
 

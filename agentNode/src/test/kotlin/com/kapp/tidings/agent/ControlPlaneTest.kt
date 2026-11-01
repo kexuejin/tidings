@@ -945,12 +945,13 @@ class ControlPlaneTest {
         )
         assertEquals(200, sessionRes.first, "只读设备允许读取/监听 session：${sessionRes.second}")
 
-        // 写操作（例如 agent/queue 提交任务）必须被 403 拒绝
+        // 写操作（例如 agent/approval 提请审批）必须被 403 拒绝
         val queueRes = post(
-            "/v1/agent/queue",
-            "{\"to\":\"127.0.0.1\",\"port\":${desktop.boundPort},\"taskId\":\"t-ro\",\"sessionId\":\"s-ro\",\"op\":\"enqueue\",\"agentKind\":\"dsh\",\"wsId\":\"ws-1\"}",
+            "/v1/agent/approval",
+            "{\"to\":\"127.0.0.1\",\"port\":${desktop.boundPort},\"approvalId\":\"a-ro\",\"sessionId\":\"s-ro\"," +
+                "\"expiresAt\":9999999999999,\"agentKind\":\"dsh\",\"wsId\":\"ws-1\"}",
         )
-        assertEquals(403, queueRes.first, "只读设备不允许提交 queue 任务")
+        assertEquals(403, queueRes.first, "只读设备不允许提请审批")
         assertTrue(queueRes.second.contains("只读权限"), "错误文案指明只读限制：${queueRes.second}")
 
         // 升级为读写权限
@@ -960,12 +961,13 @@ class ControlPlaneTest {
         )
         assertEquals(200, grantRw.first, grantRw.second)
 
-        // 再次提交 queue 任务，成功放行
+        // 再次提请审批，成功放行
         val queueRwRes = post(
-            "/v1/agent/queue",
-            "{\"to\":\"127.0.0.1\",\"port\":${desktop.boundPort},\"taskId\":\"t-rw\",\"sessionId\":\"s-ro\",\"op\":\"enqueue\",\"agentKind\":\"dsh\",\"wsId\":\"ws-1\"}",
+            "/v1/agent/approval",
+            "{\"to\":\"127.0.0.1\",\"port\":${desktop.boundPort},\"approvalId\":\"a-rw\",\"sessionId\":\"s-ro\"," +
+                "\"expiresAt\":9999999999999,\"agentKind\":\"dsh\",\"wsId\":\"ws-1\"}",
         )
-        assertEquals(200, queueRwRes.first, "读写设备允许提交 queue 任务：${queueRwRes.second}")
+        assertEquals(200, queueRwRes.first, "读写设备允许提请审批：${queueRwRes.second}")
     }
 
     @Test

@@ -8,8 +8,6 @@ import com.kapp.tidings.agent.drivers.ExternalPluginDriver
 import com.kapp.tidings.agent.plugins.PluginRegistration
 import com.kapp.tidings.agent.plugins.PluginRegistry
 import com.kapp.tidings.agent.plugins.PluginTokenGate
-import com.kapp.tidings.core.crypto.isSha256Hex
-import com.kapp.tidings.core.protocol.AgentAckKinds
 import com.kapp.tidings.core.protocol.defaultApprovalChoicesCsv
 import com.kapp.tidings.core.protocol.AgentGrantAccess
 import com.kapp.tidings.core.protocol.AgentGrantPolicies
@@ -505,12 +503,8 @@ class ControlPlane(
                 // 集成测试）里完成「扫码后向对端发配对自证」这一步。前提是 pin 与
                 // pairingSecrets 已由扫码流程写进宿主状态 —— 它只负责发帧，不建立信任。
                 path == "/v1/dev/pair" && method == "POST" && devRoutesEnabled -> devPair(exchange)
-                path == "/v1/announce" && method == "POST" -> announce(exchange)
-                path == "/v1/candidates" && method == "GET" -> candidates(exchange)
                 path == "/v1/agent/session" && method == "POST" -> agentSession(exchange)
                 path == "/v1/agent/event" && method == "POST" -> agentEvent(exchange)
-                path == "/v1/agent/queue" && method == "POST" -> agentQueue(exchange)
-                path == "/v1/agent/run" && method == "POST" -> agentRun(exchange)
                 path == "/v1/agent/approval" && method == "POST" -> agentApproval(exchange)
                 path == "/v1/agent/hook/session" && method == "POST" -> agentHookSession(exchange)
                 path == "/v1/agent/hook/approval" && method == "POST" -> agentHookApproval(exchange)
@@ -518,9 +512,6 @@ class ControlPlane(
                 path == "/v1/agent/hook/inject-feed" && method == "POST" -> agentHookInjectFeed(exchange)
                 path == "/v1/agent/hook/card" && method == "POST" -> agentHookCard(exchange)
                 path == "/v1/agent/hook/dispatch" && method == "POST" -> agentHookDispatch(exchange)
-                path == "/v1/agent/cancel" && method == "POST" -> agentCancel(exchange)
-                path == "/v1/agent/artifact" && method == "POST" -> agentArtifact(exchange)
-                path == "/v1/agent/ack" && method == "POST" -> agentAck(exchange)
                 path == "/v1/agent/sessions" && method == "GET" -> agentSessions(exchange)
                 path == "/v1/agent/workspace" && method == "POST" -> agentWorkspace(exchange)
                 path == "/v1/agent/workspaces" && method == "GET" -> agentWorkspaces(exchange)
@@ -529,9 +520,6 @@ class ControlPlane(
                 path == "/v1/agent/session-pages/resolve" && method == "POST" -> resolveAgentSessionPage(exchange)
                 path == "/v1/agent/grants" && method == "GET" -> readGrants(exchange)
                 path == "/v1/agent/grants" && method == "PUT" -> writeGrants(exchange)
-                // 每个 agent 的执行范围（谁能让它干活）。与 grants 分开：那条是白名单，这条是策略。
-                path == "/v1/agent/exec-policies" && method == "GET" -> readExecPolicies(exchange)
-                path == "/v1/agent/exec-policies" && method == "PUT" -> writeExecPolicies(exchange)
                 // 已注册插件台账（只读；宿主进程与面板看「装了哪些插件、各在线与否」）。
                 path == "/v1/plugins" && method == "GET" -> pluginsList(exchange)
                 // 宿主侧派单/操作/点查：插件网关的执行入口（Layer 3 与群聊桥都走这里）。
@@ -547,9 +535,6 @@ class ControlPlane(
                 // 「原型 → 开发 → 验收」，每棒独立沙箱、棒间以提交交接。与 /v1/agent/invoke
                 // （单棒派单）是两种粒度：那条一次只跑一棒，这条一次跑一条链。
                 path == "/v1/agent/chain" && method == "POST" -> agentChain(exchange)
-                // 某个 agent 的执行名单（谁能让它干活）—— 逐设备勾选。
-                path == "/v1/agent/exec-devices" && method == "GET" -> readExecDeviceList(exchange)
-                path == "/v1/agent/exec-devices" && method == "PUT" -> writeExecDevice(exchange)
                 (path == "/v1/inbox" || path == "/v1/messages") && method == "GET" -> inbox(exchange)
                 else -> respond(
                     exchange,
@@ -1416,89 +1401,7 @@ class ControlPlane(
      * 而不必先起一个桌面宿主、再用鼠标点它的头部手指图标。
      */
     /**
-     * `POST /v1/announce` —— **向一个具体地址握手一次**（`{"host":"100.x.y.z","port":17878}`）。
-     *
-     * ## 为什么需要这条
-     *
-     * 对端地址原先只来自「发现包的源地址」。而 UDP 广播**不跨 VPN 网段**（Tailscale/
-     * ZeroTier 是点对点三层隧道），于是两边各自切到 VPN 后，**双方都还记着对方已不可达的
-     * 局域网地址**，而广播到不了新地址 —— 形成死锁：谁都收不到谁的包，所以谁都学不到
-     * 谁的新地址。
-     *
-     * 真机现场：红米 30 分钟一个包都没到本机（`lastSeen` 停在 30 分钟前），
-     * 而本机 `ping` 它的 Tailscale 地址 2.2 秒就通 —— **网络通、协议不知道怎么走**。
-     *
-     * 这条路由打破死锁：只要有一方知道对方的可达地址，戳一下，
-     * 对方的回包就会走 `PeerRegistry.rememberSource` 进候选池，之后自动恢复。
-     * 它是**运维/诊断入口**，不是日常路径 —— 比它更重要的是 Profile 带 `addresses`。
-     */
-    private fun announce(exchange: HttpExchange) {
-        val obj = readJsonObject(exchange) ?: return
-        val host = obj["host"]?.jsonPrimitive?.contentOrNull?.trim().orEmpty()
-        if (host.isEmpty()) {
-            respond(exchange, 400, errorJson("bad-request", "缺少 host（对方可达地址）"))
-            return
-        }
-        val port = obj["port"]?.jsonPrimitive?.intOrNull ?: Protocol.DEFAULT_UDP_PORT
-        if (port !in 1..65535) {
-            respond(exchange, 400, errorJson("bad-request", "port 越界：$port"))
-            return
-        }
-        val sent = try {
-            runBlocking { runtime.announceTo(host, port) }
-            true
-        } catch (t: Throwable) {
-            respond(exchange, 502, errorJson("announce-failed", t.message ?: "握手失败"))
-            return
-        }
-        respond(
-            exchange,
-            200,
-            buildJsonObject {
-                put("status", if (sent) "sent" else "unreachable")
-                put("host", host)
-                put("port", port)
-                // 诚实说明它能治什么、不能治什么：这是「把包送到」，不是「对方已经认了我」。
-                put(
-                    "note",
-                    "握手包已发出。对方的回包会被记进候选地址；若对方仍在线，几秒内应恢复。",
-                )
-            },
-        )
-    }
-
-    /**
-     * `GET /v1/candidates` —— 每个对端**当前记着的候选地址**。
-     *
-     * 与 `/v1/peers` 的分工：那里只有「正在用的那一个」（`ip`），这里是「还可以试哪些」。
-     * 排查「换了网就连不上」时，先看这里有没有对方的 VPN 地址 —— 没有就说明
-     * 死锁还没破（见 [announce] 的 KDoc）。
-     */
-    private fun candidates(exchange: HttpExchange) {
-        val all = runtime.candidateEndpoints()
-        respond(
-            exchange,
-            200,
-            buildJsonObject {
-                putJsonArray("candidates") {
-                    all.forEach { (nodeId, list) ->
-                        addJsonObject {
-                            put("nodeId", nodeId)
-                            putJsonArray("endpoints") {
-                            list.forEach { ep ->
-                                addJsonObject {
-                                    put("host", ep.component1())
-                                    put("port", ep.component2())
-                                }
-                            }
-                            }
-                        }
-                    }
-                }
-            },
-        )
-    }
-    /** 是否注册仅开发可用的路由（默认关：生产路径不该有它）。 */
+     * 是否注册仅开发可用的路由（默认关：生产路径不该有它）。 */
     private val devRoutesEnabled: Boolean =
         System.getenv("TIDINGS_DEV_ROUTES")?.let { it == "1" || it.equals("true", ignoreCase = true) } == true
 
@@ -1858,7 +1761,7 @@ class ControlPlane(
         // 宽容（拒收整帧会让对端一直重传到队列剪枝）。控制面是**发送方**，`state` 是我们自己
         // 写的字符串，收紧的代价只是一个可操作的 400 —— 而不是让一个拼错/超长的值走到自检
         // 那一步，换回一句「这一帧我们自己都拒收：…」。取值集复用 `AgentSessionStates.ALL`，
-        // 不另造第二套真源（`agentRun` 的 `RUN_STATES` 是同一写法）。
+        // 不另造第二套真源。
         if (state != null && state !in AgentSessionStates.ALL) {
             respond(
                 exchange,
@@ -2258,154 +2161,6 @@ class ControlPlane(
      * （入站帧没有写台账的分支）。将来要改任何一边之前，先读这段。
      */
 
-    /**
-     * 读每个 agent 的执行范围。
-     *
-     * 返回**全部已配置项**；没配过的 agent 不在里面 —— 调用方按最严一档处理
-     * （`AgentExecPolicies.normalize(null)` 会兜底）。
-     *
-     * 为什么不像 grants 那样列全量：agent 的清单会随宿主装了什么而变，
-     * 由调用方（面板）拿它自己的 agent 列表来对照，比这里猜一份更准。
-     */
-    private fun readExecPolicies(exchange: HttpExchange) {
-        respond(
-            exchange,
-            200,
-            buildJsonObject {
-                putJsonObject("policies") {
-                    execPolicies.snapshot().toSortedMap().forEach { (agentKey, policy) ->
-                        put(agentKey, JsonPrimitive(policy))
-                    }
-                }
-                // 可取值一并给出：面板不必硬编码四档，取值域只有一个来源。
-                putJsonArray("values") {
-                    com.kapp.tidings.core.protocol.AgentExecPolicies.VALUES.sorted().forEach { add(JsonPrimitive(it)) }
-                }
-            },
-        )
-    }
-
-    /**
-     * 写某个 agent 的执行范围。`{"agentKey":"dsh","policy":"trustedDevices"}`；
-     * `policy` 传空串表示**清除**（回到最严一档）。
-     *
-     * 非法档位一律 400 且**不做任何修改** —— 不静默写成默认，
-     * 那会让用户以为自己配了某个档，实际是默认档。
-     */
-
-    /**
-     * 某个 agent 的执行名单：**谁能让它干活**。
-     *
-     * 与 `/v1/agent/grants`（全量授权表）分开：那条回答「谁能看」，这条只回答「谁能执行」，
-     * 而且按 agent 切好 —— 面板一次只配一个 agent，不该让它读整张表再自己筛。
-     */
-    private fun readExecDeviceList(exchange: HttpExchange) {
-        val query = parseQuery(exchange.requestURI.rawQuery)
-        val agentKey = query["agentKey"]?.trim()
-        if (agentKey.isNullOrEmpty()) {
-            respond(exchange, 400, errorJson("bad-request", "agentKey 不能为空"))
-            return
-        }
-        val snapshot = grants.snapshot()
-        respond(
-            exchange,
-            200,
-            buildJsonObject {
-                put("agentKey", agentKey)
-                // 名单 = `scope=AGENT` 且 agentKey 匹配的那些节点。
-                // **只给这个集合**，不给整张表：面板拿它做勾选状态，多的信息只会让它自己再筛一遍。
-                putJsonArray("allowedNodeIds") {
-                    snapshot.grants
-                        .filter {
-                            it.scope == com.kapp.tidings.core.protocol.AgentGrantScopes.AGENT &&
-                                it.agentKey == agentKey
-                        }
-                        .map { it.nodeId }
-                        .distinct()
-                        .sorted()
-                        .forEach { add(JsonPrimitive(it)) }
-                }
-                // 可信设备（`scope=ALL`）：面板据此把它们列出来、标上「可信」。
-                putJsonArray("trustedNodeIds") {
-                    snapshot.grants
-                        .filter { it.scope == com.kapp.tidings.core.protocol.AgentGrantScopes.ALL }
-                        .map { it.nodeId }
-                        .distinct()
-                        .sorted()
-                        .forEach { add(JsonPrimitive(it)) }
-                }
-            },
-        )
-    }
-
-    /**
-     * 勾选 / 取消某台设备对这个 agent 的执行权。
-     *
-     * `{"agentKey":"dsh","nodeId":"node-a","allowed":true}`
-     *
-     * ## 只动 `scope=AGENT` 这一档
-     *
-     * 取消时**不碰** `scope=ALL` 的可信设备记录 —— 「不许它执行这个 agent」与「不再信任这台设备」
-     * 是两件事。前者是收紧一个 agent，后者会连带影响查看与其它 agent；
-     * 混在一起的后果是用户取消一个勾，结果把人整台设备都踢了。
-     */
-    private fun writeExecDevice(exchange: HttpExchange) {
-        val obj = readJsonObject(exchange) ?: return
-        val agentKey = obj["agentKey"]?.jsonPrimitive?.contentOrNull?.trim()
-        val nodeId = obj["nodeId"]?.jsonPrimitive?.contentOrNull?.trim()
-        val allowed = (obj["allowed"] as? JsonPrimitive)?.booleanOrNull
-        if (agentKey.isNullOrEmpty() || nodeId.isNullOrEmpty() || allowed == null) {
-            respond(
-                exchange,
-                400,
-                errorJson("bad-request", "需要 agentKey / nodeId / allowed 三个字段"),
-            )
-            return
-        }
-        if (allowed) {
-            grants.grant(
-                nodeId = nodeId,
-                scope = com.kapp.tidings.core.protocol.AgentGrantScopes.AGENT,
-                agentKey = agentKey,
-                grantedBy = "panel",
-                at = System.currentTimeMillis(),
-            )
-        } else {
-            grants.revoke(
-                nodeId = nodeId,
-                scope = com.kapp.tidings.core.protocol.AgentGrantScopes.AGENT,
-                agentKey = agentKey,
-            )
-        }
-        respond(exchange, 200, buildJsonObject { put("ok", true) })
-    }
-    private fun writeExecPolicies(exchange: HttpExchange) {
-        val obj = readJsonObject(exchange) ?: return
-        val agentKey = obj["agentKey"]?.jsonPrimitive?.contentOrNull?.trim()
-        if (agentKey.isNullOrEmpty()) {
-            respond(exchange, 400, errorJson("bad-request", "agentKey 不能为空"))
-            return
-        }
-        val policy = obj["policy"]?.jsonPrimitive?.contentOrNull?.trim().orEmpty()
-        if (policy.isEmpty()) {
-            execPolicies.clear(agentKey)
-            respond(exchange, 200, buildJsonObject { put("ok", true) })
-            return
-        }
-        if (!execPolicies.set(agentKey, policy)) {
-            respond(
-                exchange,
-                400,
-                errorJson(
-                    "bad-request",
-                    "policy 只能是 " + com.kapp.tidings.core.protocol.AgentExecPolicies.VALUES.sorted()
-                        .joinToString(" / ") + "；收到「" + policy + "」",
-                ),
-            )
-            return
-        }
-        respond(exchange, 200, buildJsonObject { put("ok", true) })
-    }
     private fun writeGrants(exchange: HttpExchange) {
         val obj = readJsonObject(exchange) ?: return
         var changed = false
@@ -2591,99 +2346,6 @@ class ControlPlane(
                     summary = summary,
                     body = body,
                     ref = ref,
-                )
-            },
-        )
-    }
-
-    /**
-     * `POST /v1/agent/queue` —— 投递一条队列帧（§6.3，cap `agq1`）。
-     *
-     * `op` 只收 `enqueue` / `dequeue`（§6.3 的两个取值）。**取消一个排队中的任务就是
-     * `dequeue`**，不是第三个 op 值 —— 早先移动端在这里发过 `op="cancel"`，会被
-     * `Codec.validateAgentQueue` 拒收，`deliverAgentFrame` 的自检于是回 400
-     * 「这一帧我们自己都拒收」。取消**一个执行中的 run** 走 §6.6 的 `/v1/agent/cancel`。
-     */
-    private fun agentQueue(exchange: HttpExchange) {
-        val obj = readJsonObject(exchange) ?: return
-        val nodeId = resolveAgentTarget(exchange, obj, MsgTypes.CAP_AGENT_QUEUE, requireRw = true) ?: return
-        val taskId = obj["taskId"]?.jsonPrimitive?.contentOrNull.orEmpty()
-        if (taskId.isEmpty()) {
-            respond(exchange, 400, errorJson("bad-request", "缺少 taskId（§6.3 的必填字段）"))
-            return
-        }
-        val op = obj["op"]?.jsonPrimitive?.contentOrNull.orEmpty()
-        if (op !in QUEUE_OPS) {
-            respond(
-                exchange,
-                400,
-                errorJson("bad-request", "op 只能是 ${QUEUE_OPS.joinToString(" / ")}（§6.3）；收到「$op」"),
-            )
-            return
-        }
-        val sessionId = obj["sessionId"]?.jsonPrimitive?.contentOrNull
-        val prompt = obj["prompt"]?.jsonPrimitive?.contentOrNull
-        val queuedAt = numberOrNull(obj["queuedAt"])
-        deliverAgentFrame(
-            exchange = exchange,
-            nodeId = nodeId,
-            type = MsgTypes.AGENT_QUEUE,
-            payload = Codec.agentQueuePayload(taskId, sessionId, op, prompt, queuedAt),
-            send = { runtime.sendAgentQueue(nodeId, taskId, sessionId, op, prompt, queuedAt) },
-            onSent = {
-                sessions.recordQueue(
-                    nodeId = nodeId,
-                    taskId = taskId,
-                    sessionId = sessionId,
-                    op = op,
-                    prompt = prompt,
-                    queuedAt = queuedAt,
-                    outbound = true,
-                )
-            },
-        )
-    }
-
-    /** `POST /v1/agent/run` —— 宣告一次执行的开始/结束（§6.4，cap `agq1`）。 */
-    private fun agentRun(exchange: HttpExchange) {
-        val obj = readJsonObject(exchange) ?: return
-        val nodeId = resolveAgentTarget(exchange, obj, MsgTypes.CAP_AGENT_QUEUE) ?: return
-        val sessionId = obj["sessionId"]?.jsonPrimitive?.contentOrNull.orEmpty()
-        if (sessionId.isEmpty()) {
-            respond(exchange, 400, errorJson("bad-request", "缺少 sessionId（§6.4 的必填字段）"))
-            return
-        }
-        val runId = obj["runId"]?.jsonPrimitive?.contentOrNull.orEmpty()
-        if (runId.isEmpty()) {
-            respond(exchange, 400, errorJson("bad-request", "缺少 runId（§6.4 的必填字段）"))
-            return
-        }
-        val state = obj["state"]?.jsonPrimitive?.contentOrNull.orEmpty()
-        if (state !in RUN_STATES) {
-            respond(
-                exchange,
-                400,
-                errorJson("bad-request", "state 只能是 ${RUN_STATES.joinToString(" / ")}（§6.4）；收到「$state」"),
-            )
-            return
-        }
-        val at = numberOrNull(obj["at"])
-        val note = obj["note"]?.jsonPrimitive?.contentOrNull
-        deliverAgentFrame(
-            exchange = exchange,
-            nodeId = nodeId,
-            type = MsgTypes.AGENT_RUN,
-            payload = Codec.agentRunPayload(sessionId, runId, state, at, note),
-            send = { runtime.sendAgentRun(nodeId, sessionId, runId, state, at, note) },
-            onSent = {
-                sessions.recordRun(
-                    nodeId = nodeId,
-                    sessionId = sessionId,
-                    runId = runId,
-                    state = state,
-                    at = at,
-                    note = note,
-                    outbound = true,
                 )
             },
         )
@@ -3132,139 +2794,6 @@ class ControlPlane(
                     choices = choices,
                     outbound = true,
                 )
-            },
-        )
-    }
-
-    /**
-     * `POST /v1/agent/cancel` —— 取消一次执行或整个会话（§6.6，cap `agq1`）。
-     *
-     * `runId` 省略表示取消整个会话。§6.6 明确**禁止**复用 `file-msg.ctl` 的
-     * accept/decline/cancel —— 那三个值的语义是文件领取，与任务取消无关。
-     */
-    private fun agentCancel(exchange: HttpExchange) {
-        val obj = readJsonObject(exchange) ?: return
-        val nodeId = resolveAgentTarget(exchange, obj, MsgTypes.CAP_AGENT_QUEUE, requireRw = true) ?: return
-        val sessionId = obj["sessionId"]?.jsonPrimitive?.contentOrNull.orEmpty()
-        if (sessionId.isEmpty()) {
-            respond(exchange, 400, errorJson("bad-request", "缺少 sessionId（§6.6 的必填字段）"))
-            return
-        }
-        val runId = obj["runId"]?.jsonPrimitive?.contentOrNull
-        val reason = obj["reason"]?.jsonPrimitive?.contentOrNull
-        deliverAgentFrame(
-            exchange = exchange,
-            nodeId = nodeId,
-            type = MsgTypes.AGENT_CANCEL,
-            payload = Codec.agentCancelPayload(sessionId, runId, reason),
-            send = { runtime.sendAgentCancel(nodeId, sessionId, runId, reason) },
-            onSent = {
-                sessions.recordCancel(
-                    nodeId = nodeId,
-                    sessionId = sessionId,
-                    runId = runId,
-                    reason = reason,
-                    outbound = true,
-                )
-            },
-        )
-    }
-
-    /**
-     * `POST /v1/agent/artifact` —— 宣告一件产物（§6.7，cap **`agn1`**）。
-     *
-     * 归 `agn1` 不归 `agq1`：§6.7 与 §6.1/§6.2 同类，只描述会话，不带控制语义。
-     * **只描述产物，不传二进制** —— 二进制要先自己发 `file-msg`，这里只带它的 `id`。
-     */
-    private fun agentArtifact(exchange: HttpExchange) {
-        val obj = readJsonObject(exchange) ?: return
-        val nodeId = resolveAgentTarget(exchange, obj, MsgTypes.CAP_AGENT_SESSION) ?: return
-        val sessionId = obj["sessionId"]?.jsonPrimitive?.contentOrNull.orEmpty()
-        if (sessionId.isEmpty()) {
-            respond(exchange, 400, errorJson("bad-request", "缺少 sessionId（§6.7 的必填字段）"))
-            return
-        }
-        val artifactId = obj["artifactId"]?.jsonPrimitive?.contentOrNull.orEmpty()
-        if (artifactId.isEmpty()) {
-            respond(exchange, 400, errorJson("bad-request", "缺少 artifactId（§6.7 的必填字段）"))
-            return
-        }
-        val name = obj["name"]?.jsonPrimitive?.contentOrNull.orEmpty()
-        if (name.isEmpty()) {
-            respond(exchange, 400, errorJson("bad-request", "缺少 name（§6.7 的必填字段）"))
-            return
-        }
-        val fileId = obj["fileId"]?.jsonPrimitive?.contentOrNull
-        val bytes = numberOrNull(obj["bytes"])
-        val mime = obj["mime"]?.jsonPrimitive?.contentOrNull
-        // M7-T3（cap agf1）：进门即用 isSha256Hex 预校验 —— 消费端再校验一次的规矩，
-        // 防「发端拼一帧注定被拒的帧」。格式不对 400，不带这键完全合法（老插件零改动）。
-        val sha256 = obj["sha256"]?.jsonPrimitive?.contentOrNull
-        if (sha256 != null && !isSha256Hex(sha256)) {
-            respond(exchange, 400, errorJson("bad-request", "sha256 必须是 64 个小写 hex 字符（M7-T3 校验增量）"))
-            return
-        }
-        val summary = obj["summary"]?.jsonPrimitive?.contentOrNull
-        deliverAgentFrame(
-            exchange = exchange,
-            nodeId = nodeId,
-            type = MsgTypes.AGENT_ARTIFACT,
-            payload = Codec.agentArtifactPayload(sessionId, artifactId, name, fileId, bytes, mime, sha256, summary),
-            send = {
-                runtime.sendAgentArtifact(
-                    nodeId, sessionId, artifactId, name, fileId, bytes, mime, sha256, summary,
-                )
-            },
-            onSent = {
-                sessions.recordArtifact(
-                    nodeId = nodeId,
-                    sessionId = sessionId,
-                    artifactId = artifactId,
-                    name = name,
-                    fileId = fileId,
-                    bytes = bytes,
-                    mime = mime,
-                    sha256 = sha256,
-                    summary = summary,
-                    outbound = true,
-                )
-            },
-        )
-    }
-
-    /**
-     * `POST /v1/agent/ack` —— 对一条收到的帧给回执（§6.8，cap `agq1`）。
-     *
-     * `ackOf` 是被确认帧的 `msgId`。`kind` 里的 `approved` / `denied` / `cancelled`
-     * 会顺带推进台账里那条审批的 `status`（见 `AgentSessionRegistry.applyAckToApproval`）——
-     * 审批的"已处置"只有这一条路能产生，§10 不许它由"送达"冒充。
-     */
-    private fun agentAck(exchange: HttpExchange) {
-        val obj = readJsonObject(exchange) ?: return
-        val nodeId = resolveAgentTarget(exchange, obj, MsgTypes.CAP_AGENT_QUEUE) ?: return
-        val ackOf = obj["ackOf"]?.jsonPrimitive?.contentOrNull.orEmpty()
-        if (ackOf.isEmpty()) {
-            respond(exchange, 400, errorJson("bad-request", "缺少 ackOf（§6.8 的必填字段）"))
-            return
-        }
-        val kind = obj["kind"]?.jsonPrimitive?.contentOrNull.orEmpty()
-        if (kind !in ACK_KINDS) {
-            respond(
-                exchange,
-                400,
-                errorJson("bad-request", "kind 只能是 ${ACK_KINDS.joinToString(" / ")}（§6.8）；收到「$kind」"),
-            )
-            return
-        }
-        val at = numberOrNull(obj["at"])
-        deliverAgentFrame(
-            exchange = exchange,
-            nodeId = nodeId,
-            type = MsgTypes.AGENT_ACK,
-            payload = Codec.agentAckPayload(ackOf, kind, at),
-            send = { runtime.sendAgentAck(nodeId, ackOf, kind, at) },
-            onSent = {
-                sessions.recordAck(nodeId = nodeId, ackOf = ackOf, kind = kind, at = at, outbound = true)
             },
         )
     }
@@ -3809,8 +3338,7 @@ class ControlPlane(
                 400,
                 errorJson(
                     "no-public-url",
-                    "没配公网入口，印不出配对码。启动时加 --public-url https://<域名>/relay" +
-                        "（隧道暴露的控制面地址，见 tools/CROSS-NET-RUNBOOK.md）。",
+                    "没配公网入口，印不出配对码。启动时加 --public-url https://<域名>/relay（公网暴露的控制面地址）。",
                 ),
             )
             return
@@ -4216,18 +3744,6 @@ class ControlPlane(
             File(com.kapp.tidings.agent.plugins.HostDirs.default(), "agent-tool-approvals.json")
         private const val DEFAULT_LIMIT: Int = 200
         private const val MAX_LIMIT: Int = 1000
-
-        /** §6.3 的 `op` 取值。取消排队中的任务是 `dequeue`，不是第三个值。 */
-        private val QUEUE_OPS = listOf("enqueue", "dequeue")
-
-        /** §6.4 的 `state` 取值。 */
-        private val RUN_STATES = listOf("running", "succeeded", "failed", "cancelled")
-
-        /**
-         * §6.8 的 `kind` 取值 —— **不在这里再写一份**，直接引用 `:core` 的
-         * [AgentAckKinds]（见那里的 KDoc：三处各写一份已经让「本次免审」静默失效过）。
-         */
-        private val ACK_KINDS = AgentAckKinds.VALUES.toList()
     }
 }
 

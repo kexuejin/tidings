@@ -16,8 +16,7 @@ import kotlinx.coroutines.runBlocking
  * stream-json` 实测捕获，见 CliLineEventMapper 的实测注记）：init 信封 / step_update
  * （state + step_type + text_delta）/ result（status）。三件事：
  * 1. 映射按实测契约分流（event 键与 claude/codex 的 type 键无交集）；
- * 2. 发现器 = 显式 env > $PATH > 公开约定目录（含 `~/.local/bin`，agy 的默认安装位）；
- * 3. ModelEnvMapper 认识 agy（凭证继承 Google 登录态 = 空 env 映射，缺失即拒单）。
+ * 2. 发现器 = 显式 env > $PATH > 公开约定目录（含 `~/.local/bin`，agy 的默认安装位）。
  */
 class AgyCliDriverTest {
 
@@ -105,38 +104,6 @@ class AgyCliDriverTest {
         )
         assertEquals(listOf("agy-cli"), drivers.map { it.driverId }, "只装了 agy 的宿主只有 agy-cli")
         assertTrue(drivers.single() is CliSubprocessDriver, "无沙箱装配 = 裸驱动")
-    }
-
-    @Test
-    fun modelEnvMapperKnowsAgyAndRefusesUnknown() {
-        val config = ModelProviderConfig(
-            providerId = "google",
-            apiBaseUrl = "http://x", apiKey = "k", defaultModel = "gemini-pro",
-        )
-        assertEquals(
-            emptyMap(),
-            ModelEnvMapper.buildEnvironment(config, "agy"),
-            "agy = 凭证继承 Google 登录态，空 env 映射即收编",
-        )
-        // 拒单判据仍在：未知 targetCli 照旧抛。
-        kotlin.test.assertFailsWith<IllegalArgumentException> {
-            ModelEnvMapper.buildEnvironment(config, "unknown-cli")
-        }
-    }
-
-    @Test
-    fun credentialsLoaderReadsNodeLocalFileOrStaysHonest() {
-        val dir = java.nio.file.Files.createTempDirectory("model-cred").toFile()
-        // 缺席 = 空表（没配凭证的节点不带模型环境，不编造）。
-        assertEquals(emptyMap(), ModelEnvMapper.loadCredentials(dir))
-        // 形状齐全的键装载；缺必填键的条目跳过（宁缺毋错）。
-        dir.resolve(ModelEnvMapper.CREDENTIALS_FILE).writeText(
-            """{"claude":{"apiBaseUrl":"http://x","apiKey":"k","defaultModel":"claude-4"},
-               "codex":{"apiBaseUrl":"http://y"},"bad-entry":{}}""",
-        )
-        val loaded = ModelEnvMapper.loadCredentials(dir)
-        assertEquals(setOf("claude"), loaded.keys, "缺 apiKey 的条目跳过")
-        assertEquals("claude-4", loaded["claude"]?.defaultModel)
     }
 
     @Test

@@ -30,7 +30,7 @@
 
 3. **移动端（Mobile App）**：基于 Compose Multiplatform 开发，面向 Android 与 iOS 平台提供符合原生设计规范与安全沙盒机制的现代移动界面。
 4. **自研桌面端（Compose Desktop）**：独立桌面客户端（`desktopApp`），共享底层业务状态与组件库，支持宽屏自适应双栏交互与多任务操作。
-5. **无头 Agent 节点与可插拔驱动（Agent Node & Drivers）**：解耦底层通信与模型运行时，支持 `NativeRelayDriver`、`DsBotDriver`、`OpenAiDriver` 及 MCP 扩展工具接入，提供本地 HTTP 控制面与 WebSocket 网关。
+5. **无头 Agent 节点与可插拔驱动（Agent Node & Drivers）**：解耦底层通信与模型运行时，内置诚实兜底驱动与 Claude Code / Codex / agy CLI 驱动（Git Worktree 沙箱），支持 MCP 扩展工具接入，提供本地回环 HTTP 控制面。
 
 ### 支持哪些连接方式
 
@@ -250,7 +250,7 @@ python3 tools/unused-imports.py --check
 是配套插件 **[`dsh-tidings-bridge`](https://github.com/kexuejin/dsh-tidings-bridge)**：
 
 - 它**只**说控制面的回环 HTTP，从不直接碰线协议 —— 线协议的一切都留在本仓；
-- 方向一：把控制面投影进 DSH（九个 agent 工具：节点状态、邻居、收发消息、宣告会话/工作区）；
+- 方向一：把控制面投影进 DSH（九个 agent 工具：节点状态、邻居、收发消息、宣告会话/工作区；枚举本体与实现都在插件仓，本仓无法逐个核对 —— 以插件仓 README 为准）；
 - 方向二：把 DSH 的会话与工作区状态推回控制面，于是手机上能看到这个会话在工作、
   并收到它的思考与正文。
 

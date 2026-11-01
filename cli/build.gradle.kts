@@ -24,11 +24,8 @@ dependencies {
     // **只依赖 :app**（它会传递 :core）。刻意不依赖 :composeApp ——
     // 那会把一份 Compose 栈拖进这个"没有 UI"的程序里，验收就假了。
     implementation(project(":app"))
-    // 控制面是 :agentNode —— 与桌面端承载的是**同一个**类，所以 --serve 这条
-    // 才真的能证明「领域层 + 控制面在没有 UI 时是自足的」。
-    implementation(project(":agentNode"))
     // :core 是 api 暴露的类型（Timings / NodeRuntime / ScreenPhase）真正住的地方。
-    // 不写这一行，上面两行都只是 implementation —— 它们的 api 不会传递过来。
+    // 不写这一行，上面那行只是 implementation —— 它的 api 不会传递过来。
     implementation(project(":core"))
     implementation(libs.kotlinx.coroutines.core)
     testImplementation(libs.kotlin.test)

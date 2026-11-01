@@ -266,7 +266,7 @@ data class Envelope(
 
 **CLI 驱动与 Git Worktree 沙箱（升级轮 T-3a/T-3b，D-024）**：装了 Claude Code / Codex /
 `agy` CLI 的宿主经 `DriverRegistry.withCliDrivers` 自动获得 CLI 驱动（凭证继承
-`HOME`/`XDG_*` 与宿主登录态，模型凭证经 `ModelEnvMapper` 注入子进程环境，绝不出机）。
+`HOME`/`XDG_*` 与宿主登录态（凭证不落配置文件，绝不进子进程日志/台账/报文）。
 带工作区的任务默认进 **Git Worktree 沙箱**（`WorktreeSandboxExecutor`）：每任务在宿主仓的
 独立 worktree（分支 `task-<taskId>`）里执行，宿主工作树零变化；结束后提取 `git diff`
 **提纯**为产物 —— `report.json` 只装结构化事实（终态 / 文件数 / +A −D / SHA256 指针），

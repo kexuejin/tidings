@@ -21,8 +21,6 @@ class DriverRegistry(private val acl: DriverCapabilityAcl = DriverCapabilityAcl(
         // 内置驱动共享宿主 ACL：注入的是**谓词**（活的引用，按各自的 driverId 绑定），
         // 宿主名单一变，驱动下一次自报/门控立即看到新状态，不需要任何重新注册。
         register(NativeRelayDriver({ cap -> acl.allows("native", cap) }))
-        register(DsBotDriver(aclAllows = { cap -> acl.allows("ds-bot", cap) }))
-        register(OpenAiDriver(aclAllows = { cap -> acl.allows("openai", cap) }))
     }
 
     fun register(driver: AgentDriver) {
@@ -83,7 +81,7 @@ class DriverRegistry(private val acl: DriverCapabilityAcl = DriverCapabilityAcl(
 
     companion object {
         /**
-         * 生产装配：内置三驱动 + 本机发现的 CLI 驱动（M7-T1）。装了 Claude Code / Codex
+         * 生产装配：内置驱动 + 本机发现的 CLI 驱动（M7-T1）。装了 Claude Code / Codex
          * CLI 的宿主自动获得；没装的跳过并打印可操作提示（凭证继承 `HOME`/`XDG_*`，
          * 不索要 Key），不 crash。
          *

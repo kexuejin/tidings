@@ -28,7 +28,7 @@ relay/
 ├── composeApp/   # Compose Multiplatform 共享 UI（Android / iOS / Desktop 共用）
 ├── androidApp/   # Android 宿主外壳与截屏门禁
 ├── desktopApp/   # 自研桌面端外壳（基于 Compose Multiplatform）
-├── agentNode/    # Headless Agent 协同服务与 WsGateway 验证网关
+├── agentNode/    # Headless Agent 协同服务（控制面 HTTP 底座）
 ├── tools/        # 自动化质量门禁与辅助工具脚本
 ├── docs/         # 架构文档、设计契约与 ADR 决议
 └── .github/      # CI 工作流与 issue/PR 模板
@@ -88,7 +88,7 @@ python3 tools/unused-imports.py --check
 2. **Commit Message 风格**:
    - 保持清晰简洁，建议包含组件标签（例如 `core`, `agentNode`, `composeApp`, `docs`）：
      - `core: fix mutex deadlock in Messenger retry queue`
-     - `agentNode: handle token authentication in WsGateway`
+     - `agentNode: handle token authentication in ControlPlane`
      - `composeApp: extract common NodePresence components`
 3. **改完要重启什么**（只影响开发，不影响使用者）:
    - 桥（`dsh-tidings`）的适配器改动**要重启 DSH 宿主**才生效；热改桥不会生效。

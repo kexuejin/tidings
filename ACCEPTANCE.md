@@ -871,8 +871,7 @@ messaging **PASS 38**（`/tmp/messaging-run14.log`），全量套件 **run11 9/9
   其中一部分有单测兜底（`desktopApp/src/test/` 六个文件），但**单测证明不了行为**。
   清单见 [`design/host-surface-checklist.md`](design/host-surface-checklist.md)。
 - 手机侧进程被杀时的告别帧（A12，没有生命周期钩子）。
-- 外网侧的 IPv6 / 跨出口链路 —— 那部分有单独的手册：
-  [agentNode/tools/CROSS-NET-RUNBOOK.md](agentNode/tools/CROSS-NET-RUNBOOK.md)。
+- 外网侧的 IPv6 / 跨出口链路（跨网 WS 隧道方案已退役，见 legacy-cleanup-audit）。
 
 ## 8. 公网（TLS + pin）、长连接与跨网文件（2026-10-18 新增）
 

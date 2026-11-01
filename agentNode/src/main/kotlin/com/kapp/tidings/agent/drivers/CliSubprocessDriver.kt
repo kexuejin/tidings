@@ -39,7 +39,7 @@ class CliSubprocessDriver(
     private val argSpec: (prompt: String) -> List<String>,
     private val newSessionId: () -> String = { java.util.UUID.randomUUID().toString() },
     /**
-     * 每次任务注入子进程的**模型凭证环境变量**（升级轮 T-3a，ModelEnvMapper 产物）。
+     * 每次任务注入子进程的**模型凭证环境变量**。
      * 默认空 = 凭证继承 HOME/XDG_*（既有行为零变化）；非空时逐键 put 进
      * ProcessBuilder.environment() —— 值只进子进程环境，绝不进日志/台账/报文。
      */
