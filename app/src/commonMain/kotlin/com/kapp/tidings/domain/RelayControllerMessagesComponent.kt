@@ -572,7 +572,7 @@ fun handleOnInbound(envelope: Envelope) {
                         convId,
                         existing.copy(
                             text = cleanedText,
-                            at = envelope.ts,
+                            at = maxOf(existing.at, envelope.ts),
                             cardPayload = incomingCard,
                             agentState = payload?.let { stringField(it, "agentState") },
                         ),
@@ -586,13 +586,18 @@ fun handleOnInbound(envelope: Envelope) {
             // 没有同 cardId 槽位：首帧，走下面的追加路径（card=原文、cardPayload=null）。
         }
     }
+    // 因果保序与跨设备时钟差对齐：若对端物理时钟慢于本端当前最新消息，
+    // 单纯按 envelope.ts 插入会把卡片或新回复逆流排到刚刚发出的需求上方。
+    // 保底取 max(envelope.ts, lastMsgAt + 1)，保证响应帧永远在因果链之后。
+    val lastMsgAt = host._state.value.messages[convId]?.lastOrNull()?.at ?: 0L
+    val effectiveAt = maxOf(envelope.ts, lastMsgAt + 1L)
     host.handleAppendMessage(
         MessageUi(
             id = envelope.id,
             peerId = convId,
             mine = false,
             text = cleanedText,
-            at = envelope.ts,
+            at = effectiveAt,
             delivery = null,
             // **说话者归属**（真机缺陷）：群消息不能直接用信封 `from`。
             //
@@ -620,8 +625,27 @@ fun handleOnInbound(envelope: Envelope) {
         incoming = true,
     )
     if (groupId != null) host.runtime?.let { host.groupsCtl.handleSyncGroupMetaIfNeeded(it, envelope) }
+    // **打断判定必须在路由之前**（测试方案 §6.1 真机 FAIL 的根因）。
+    //
+    // 「停」/「取消」不 @ 任何人、也不是在回复 agent，`agentPromptRoute` 按定义
+    // 不会把它判成 prompt，所以打断分支只要长在 `handlePrompt` 里就永远进不去：
+    // 手机发了、宿主收到了（`[msg] inbound ... len=4`），然后什么都不发生。
+    // 这里前移到**入站文本**：每条文本先问一句，命中即消费并 return。
+    // 放在落库之后：用户仍能看到自己那条「停」，而不是点了没反应。
+    if (host.onAgentAbort?.invoke(convId, cleanedText) == true) return
+    if (host.onAgentFollowUp?.invoke(convId, envelope.from, cleanedText) == true) return
     // 单帧原子意图（方案 §4.2，M4 接执行）：目标 agent 由本机托管 ⇒ 派单执行、卡片进群。
     // 目标在别的宿主上时不在这里动 —— 那条群消息按群协议已经送达目标设备，由它接管。
+    //
+    // **一条帧只许有一个执行者**（真机实测：一个群文本跑出两个沙箱）。
+    // 带 `agentIntent` 的帧本来由这条路执行（它管授权、算力标签、跨端委派）；上一轮把
+    // `onAgentPrompt` 接到 DSH 编排器之后，下面的文本路由**也**派了一次单 ⇒ 同一句话
+    // 两个 worktree、两批 token，且编排器只记得最后一张工单，前一个从此停不掉。
+    // 判据取"本机有没有 invoke 执行器"，而不是"有没有 intent"：没有执行器时意图会走
+    // 委派/挂卡，那时文本路由也不该抢着跑（授权已经在上面判过了）。
+    val intentOwnsDispatch = groupId != null &&
+        payload?.get("agentIntent") is kotlinx.serialization.json.JsonObject &&
+        host.invokeCtl.intentExecutorPresent()
     if (groupId != null) {
         val intent = payload?.get("agentIntent") as? kotlinx.serialization.json.JsonObject
         // 正文一起给：意图帧只带目标不带任务话，执行器的 prompt 从消息正文剥 @ 而来。
@@ -660,7 +684,7 @@ fun handleOnInbound(envelope: Envelope) {
         remoteAgentPresent = routeFacts.remoteAgentPresent,
         agentKinds = routeFacts.agentKinds,
     )
-    if (route == AgentPromptRoute.Local) {
+    if (route == AgentPromptRoute.Local && !intentOwnsDispatch) {
         val prompt = RelayController.extractAgentPrompt(cleanedText, routeFacts.agentKinds)
         host.scope.launch {
             host.onAgentPrompt?.invoke(convId, envelope.from, prompt, envelope.id)

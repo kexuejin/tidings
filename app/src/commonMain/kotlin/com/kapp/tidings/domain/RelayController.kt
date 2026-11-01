@@ -282,6 +282,31 @@ class RelayController(
     var onAgentPrompt: (suspend (convId: String, senderPeerId: String, prompt: String, replyToId: String?) -> Unit)? = null
 
     /**
+     * **打断桥**（测试方案 §6.1 的落点，真机实测 FAIL 后补的缝）。
+     *
+     * 为什么不能复用 [onAgentPrompt]：「停」/「取消」既没有 @ 任何人，也不是在回复
+     * agent 发的那条 —— `agentPromptRoute` 按定义不会把它判成 prompt，于是当时长在
+     * `handlePrompt` 里的打断分支**永远进不去**。真机现场：手机发「停」，宿主日志明明
+     * 打了 `[msg] inbound ... len=4`，3 秒后 codex 照跑，只能人工 kill。
+     *
+     * 所以判据前移到**入站文本**：每一条文本先问「这是不是打断」，命中就吞掉，
+     * 不再往下走路由。返回 `true` = 已消费（调用方应当 return，不派单）。
+     *
+     * **必须是同步返回**：写成 suspend 就只能 `launch` 出去，那和「晚一点再判断」
+     * 没区别 —— 同一条消息的派单分支会先跑。真正的取消由实现方**同步**发出
+     * （500ms 断言看的是进程死没死，不是网络回执）。
+     */
+    var onAgentAbort: ((convId: String, text: String) -> Boolean)? = null
+
+    /**
+     * 群内活跃工单的追问与微调桥（测试方案阶段 A 原型确认与追问唤醒）。
+     *
+     * 当群内有工单处于 prototype 或 blocked 等待决策状态时，用户在群内的
+     * 回复直接作为该工单的补充上下文消费，返回 true 拦截正常派单路由。
+     */
+    var onAgentFollowUp: ((convId: String, senderPeerId: String, text: String) -> Boolean)? = null
+
+    /**
      * **领域层要「一句话」的唯一出口**（见 [RelayUiTexts] 的 KDoc）。
      *
      * 为什么需要桥：这些话住在 composeResources 的 `strings.xml` 里，取它要
@@ -981,6 +1006,28 @@ class RelayController(
         wsId: String? = null,
         deadlineMs: Long = RelayControllerAgentInvokeComponent.DEFAULT_INVOKE_DEADLINE_MS,
     ): String? = invokeCtl.dispatchCrossHostInvoke(groupId, agentId, prompt, wsId, deadlineMs)
+
+    /**
+     * 责任链的进度卡（一链一卡，rev 递增）走**与看板卡同一条**广播路径。
+     *
+     * 为什么必须复用而不是另写一条发送：T-2d 的原位替换（同 cardId 在本机落库重写 +
+     * 远端入站拦截对称替换）只在 [RelayControllerAgentInvokeComponent.broadcastBoardCard]
+     * 里实现过一份。另写一份就是「同一个语义两套实现」，先分叉，再以其中一套的 bug 收场。
+     *
+     * 收 **JSON 字符串**而不是 `JsonObject`：调用方在 `desktopApp`，那个模块的主源集
+     * 没有 `kotlinx.serialization.json` 的编译期依赖。解析放在这里（本模块依赖齐备），
+     * 跨模块只传字符串；解析不了就如实打日志，不静默丢帧。
+     */
+    suspend fun broadcastChainCard(groupId: String, agentId: String, cardJson: String) {
+        val card = runCatching {
+            kotlinx.serialization.json.Json.parseToJsonElement(cardJson) as JsonObject
+        }.getOrNull()
+        if (card == null) {
+            println("[CHAIN] chain card json is not an object, dropped: " + cardJson.take(120))
+            return
+        }
+        invokeCtl.broadcastBoardCard(groupId, agentId, card)
+    }
 
     fun recordLocalWorkspace(
         wsId: String,

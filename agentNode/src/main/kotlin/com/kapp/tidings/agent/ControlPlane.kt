@@ -258,6 +258,14 @@ class ControlPlane(
      * 由装配方在 [start] 之前传入；入站分派与 HTTP 受理判定都读它。
      */
     val channelOrchestrator: ChannelOrchestrator? = null,
+    /**
+     * 单向责任链的执行器（`docs/DYNAMIC-MULTI-AGENT-TEAM-ORCHESTRATION.md` §2）。
+     *
+     * 与 [invokeDispatcher] 同一个接缝纪律：执行体在壳层（要 git、要群、要卡片广播），
+     * agentNode 单进程保持 null ⇒ `/v1/agent/chain` 如实回 503，不假装接了单。
+     * 写成 `var` 是因为壳里要拿 `created.executeCliTask` —— 它得等 ControlPlane 造完才存在。
+     */
+    var chainDispatcher: AgentChainDispatcher? = null,
 ) {
 
     private val json = Json { ignoreUnknownKeys = true }
@@ -535,6 +543,10 @@ class ControlPlane(
                 // M7-T2（决策包 §1.6）：Channel 委派的 HTTP 入口 —— 发起侧的门在这里：
                 // 对端没声明 agc1 ⇒ 409，帧根本不构造（发送侧不产出注定被拒的帧）。
                 path == "/v1/agent/channel" && method == "POST" -> agentChannel(exchange)
+                // 单向责任链（DYNAMIC-MULTI-AGENT-TEAM-ORCHESTRATION §2）：一次请求跑完
+                // 「原型 → 开发 → 验收」，每棒独立沙箱、棒间以提交交接。与 /v1/agent/invoke
+                // （单棒派单）是两种粒度：那条一次只跑一棒，这条一次跑一条链。
+                path == "/v1/agent/chain" && method == "POST" -> agentChain(exchange)
                 // 某个 agent 的执行名单（谁能让它干活）—— 逐设备勾选。
                 path == "/v1/agent/exec-devices" && method == "GET" -> readExecDeviceList(exchange)
                 path == "/v1/agent/exec-devices" && method == "PUT" -> writeExecDevice(exchange)
@@ -930,6 +942,18 @@ class ControlPlane(
     }
 
     /**
+     * 摘掉本机所有在跑的沙箱任务（入站「停」的确定性落点），返回个数。
+     *
+     * 为什么要这一条而不是只靠取消协程：取消是"请它自己停"，而 CLI 可能卡在阻塞读上；
+     * 真机实测（2026-11-01 16:04）卡片已经翻成 `Aborted by user request`，同一个沙箱里的
+     * `codex exec` 七分钟后仍在跑。这条直接对 `Process` 动手，是「停」的最后一道。
+     */
+    suspend fun abortRunningSandboxes(): Int = cliDrivers?.abortRunningSandboxes() ?: 0
+
+    /** 本机当前有没有在跑的沙箱任务（决定入站「停」是不是该被消费）。 */
+    fun hasRunningSandboxes(): Boolean = (cliDrivers?.runningSandboxCount() ?: 0) > 0
+
+    /**
      * E1：群内派单的 **CLI 驱动解析** —— agentKey 匹配 driverId / 去掉 `-cli` 后缀
      * / `antigravity`→agy-cli 三个别名。找不到 = null（调用方走插件路径或 no-plugin）。
      */
@@ -1127,6 +1151,58 @@ class ControlPlane(
      *     恰一 / assign 必带租约）—— 违反 400，崩在发送侧而不是对端；
      *  3. **自检闭环**：`deliverAgentFrame` 把要发的帧先 `decodeTcp` 回来，自己都不收就不发。
      */
+    /**
+     * `POST /v1/agent/chain` —— 一次受理、后台跑完整条责任链。
+     *
+     * 载荷 `{groupId?, repoPath?, title?, stages:[{role, agentKey, instruction}]}`；
+     * 回执 `{chainId, stages}`。回执只代表**受理**：进度与结论都在群里的那张链卡上
+     * （一链一卡、rev 递增），这条路由不返回产物 —— 产物在宿主仓的提交里。
+     *
+     * 三处入口校验，都是「宁可 400 也不要开跑」：没装执行器 ⇒ 503；stages 空了或
+     * 某棒缺 role/agentKey/instruction ⇒ 400；执行器拒绝（读不到 HEAD 之类）⇒ 409。
+     */
+    private fun agentChain(exchange: HttpExchange) {
+        val dispatcher = chainDispatcher
+        if (dispatcher == null) {
+            respond(exchange, 503, errorJson("no-chain-executor", "本机没有链执行器（需要壳层装配 chainDispatcher）"))
+            return
+        }
+        val obj = readJsonObject(exchange) ?: return
+        val stages = (obj["stages"] as? JsonArray).orEmpty().mapNotNull { el ->
+            val o = el as? JsonObject ?: return@mapNotNull null
+            val role = o["role"]?.jsonPrimitiveOrNull()?.contentOrNull?.trim().orEmpty()
+            val key = o["agentKey"]?.jsonPrimitiveOrNull()?.contentOrNull?.trim().orEmpty()
+            val instruction = o["instruction"]?.jsonPrimitiveOrNull()?.contentOrNull?.trim().orEmpty()
+            // 缺一样就整棒作废：拿默认值凑出来的棒等于替调用方编了一份任务书。
+            if (role.isEmpty() || key.isEmpty() || instruction.isEmpty()) return@mapNotNull null
+            ChainStage(role = role, agentKey = key, instruction = instruction)
+        }
+        if (stages.isEmpty()) {
+            respond(
+                exchange,
+                400,
+                errorJson("bad-request", "stages 至少要有一棒，且每棒都要 role/agentKey/instruction"),
+            )
+            return
+        }
+        val groupId = obj["groupId"]?.jsonPrimitiveOrNull()?.contentOrNull?.takeIf { it.isNotBlank() }
+        val repoPath = obj["repoPath"]?.jsonPrimitiveOrNull()?.contentOrNull?.takeIf { it.isNotBlank() }
+        val title = obj["title"]?.jsonPrimitiveOrNull()?.contentOrNull?.takeIf { it.isNotBlank() } ?: "责任链"
+        val chainId = runBlocking { dispatcher.start(groupId, repoPath, title, stages) }
+        if (chainId == null) {
+            respond(exchange, 409, errorJson("chain-rejected", "链执行器拒绝了这次请求（原因见宿主日志）"))
+            return
+        }
+        respond(
+            exchange,
+            200,
+            buildJsonObject {
+                put("chainId", chainId)
+                put("stages", stages.size)
+            },
+        )
+    }
+
     private fun agentChannel(exchange: HttpExchange) {
         val obj = readJsonObject(exchange) ?: return
         val to = obj["to"]?.jsonPrimitiveOrNull()?.contentOrNull?.trim().orEmpty()

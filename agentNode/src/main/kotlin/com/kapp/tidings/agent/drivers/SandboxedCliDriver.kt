@@ -79,6 +79,18 @@ class SandboxedCliDriver(
         )
     }
 
+    /**
+     * 把本驱动名下所有在跑的沙箱任务摘掉，返回个数。
+     *
+     * 「停」的**确定性落点**：编排器那条协程取消对慢启动/阻塞读的 CLI 不一定及时落地
+     * （真机实测：卡片已 `Aborted`，进程 7 分钟后仍在），而这里直接对着 `running`
+     * 里的 Process 动手。两条一起用，取消是常态、这条是兜底。
+     */
+    suspend fun abortAll(): Int = sandbox.abortAll()
+
+    /** 当前在跑的任务数（入站「停」要不要被消费，看它）。 */
+    fun runningCount(): Int = sandbox.runningCount()
+
     override suspend fun executeTask(
         sessionId: String,
         prompt: String,

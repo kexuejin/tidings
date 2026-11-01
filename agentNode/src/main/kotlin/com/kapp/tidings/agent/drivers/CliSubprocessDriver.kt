@@ -91,15 +91,19 @@ class CliSubprocessDriver(
                 envOverrides.forEach { (key, value) -> pb.environment()[key] = value }
                 // stderr 合并进 stdout：认不出的行会被 mapLine 如实跳过，同时避免双流对拷的死锁。
                 pb.redirectErrorStream(true)
-                val proc = pb.start()
-                // 子进程的 stdin 必须立刻关掉：ProcessBuilder 默认给一条管道，我们不往里
-                // 写也永不关闭，而**会读 stdin 的 CLI 会一直等 EOF**。codex 就是这种形态
-                // （`codex exec` 支持管道喂 prompt），实测不关时它只打一行
+                // 子进程的 stdin **在内核层**接 /dev/null：会读 stdin 的 CLI 会一直等 EOF，
+                // codex 就是这种形态（`codex exec` 支持管道喂 prompt），只打一行
                 // 「Reading additional input from stdin...」就再无下文：连会话都不建、
                 // 占着 worktree 不放。prompt 已经在 argv 里，无需 stdin。
+                //
+                // 用 `Redirect.from(/dev/null)` 而不是启动后 `outputStream.close()`：
+                // 后者在真机上**没兜住**（责任链首棒曾在此路径长期挂起
+                // 零输出，杀掉才刷出那行提示）。关流给出的是"我们不再写"，不等于子进程
+                // 立刻读到 EOF；/dev/null 从打开那一刻就是 EOF，与 JDK 的缓冲实现无关。
                 // 注：这条**只能真机验**——Gradle 测试进程给子进程的 stdin 已经是 EOF，
-                // 单测复现不出这个挂起（试过 cat/read 两种假 CLI，都是立刻返回）。
-                runCatching { proc.outputStream.close() }
+                // 单测复现不出这个挂起。
+                pb.redirectInput(ProcessBuilder.Redirect.from(java.io.File("/dev/null")))
+                val proc = pb.start()
                 proc.inputStream.bufferedReader().useLines { lines ->
                     for (line in lines) {
                         mapLine(line)?.let { onEvent(it) }

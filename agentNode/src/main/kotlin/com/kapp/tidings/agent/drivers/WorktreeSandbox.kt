@@ -163,11 +163,22 @@ class WorktreeSandboxExecutor(
                 // 同 CliSubprocessDriver：GUI 启动的宿主只有最小 PATH，脚本型 CLI
                 // （`#!/usr/bin/env node`）会找不到解释器 → 127。env 显式给了 PATH 就不动它。
                 if (env["PATH"] == null) pb.environment()["PATH"] = CliDiscovery.childPath(pb.environment())
+                if (env["HOME"] == null) {
+                    val sandboxHome = prepareSandboxHome(artifactsDir)
+                    pb.environment()["HOME"] = sandboxHome.absolutePath
+                }
                 pb.redirectErrorStream(true)
+                // stdin **在内核层**接 /dev/null，而不是"启动后关流"。
+                //
+                // 关流那条（`proc.outputStream.close()`）理论上会给出 EOF，实测不够：
+                // 真机上 codex 打了 `Reading additional input from stdin...` 之后
+                // **永久阻塞**（责任链首棒曾出现零输出、无 socket、
+                // 无 session 文件，只有杀掉那一刻缓冲区才随进程退出刷出来）。读 stdin 的 CLI
+                // 拿到的是"还没 EOF 的管道"，不是"已关闭的 stdin"。
+                // `Redirect.from(/dev/null)` 让子进程从打开那一刻起就读到 EOF，与关流无关，
+                // 也与 JDK 的缓冲实现无关 —— prompt 走 argv，本来就不需要 stdin。
+                pb.redirectInput(ProcessBuilder.Redirect.from(java.io.File("/dev/null")))
                 val proc = pb.start()
-                // 同 CliSubprocessDriver：stdin 不关 = 一条永不 EOF 的管道，读 stdin 的
-                // CLI（codex）会在这里静默挂死。prompt 走 argv，不需要 stdin。
-                runCatching { proc.outputStream.close() }
                 running[taskId] = proc
                 // 读行不在当前线程上阻塞：子进程的输出由专用读线程灌进队列，本协程
                 // 每 ≤100ms 醒一次（poll 超时）做 `ensureActive()` —— 取消在百毫秒级
@@ -217,12 +228,14 @@ class WorktreeSandboxExecutor(
                 }
                 // 宽限后升级 SIGKILL，并**等它真死**再交还：worktree 里的文件还被占着时
                 // `git worktree remove` 会失败 —— 那样「无痕清理」就成了口号。
-                if (timedOut.get()) {
+                if (proc.isAlive) {
                     val killBy = System.currentTimeMillis() + GRACE_MS
                     while (System.currentTimeMillis() < killBy && proc.isAlive) {
                         Thread.sleep(50)
                     }
-                    forceKill(proc)
+                    if (proc.isAlive) {
+                        forceKill(proc)
+                    }
                     runCatching { proc.waitFor() }
                 }
                 exit
@@ -283,6 +296,30 @@ class WorktreeSandboxExecutor(
         return true
     }
 
+    /**
+     * 把当前**所有**在跑的沙箱任务摘掉，返回摘掉的数量。
+     *
+     * 为什么需要这条「一刀切」的入口：手机的「停」到达时，宿主未必知道那条任务挂在哪个
+     * taskId 上 —— taskId 是驱动内部生成的，编排器的工单只认会话/群。真机实测：卡片已经
+     * 翻成 `Aborted by user request`，而同一沙箱里的 `codex exec` 七分钟后仍在跑 ——
+     * 因为取消只发了协程取消，没落到进程上；而 [abort] 这条确定性的路从来没被调用过
+     * （HTTP 面只发协议帧，不杀本地进程）。
+     *
+     * 语义上这是对的：用户说「停」要停的是**这台机器正在干的活**，不是某个内部 id。
+     * 代价是一次停掉全部在跑任务 —— 但宿主同一时刻本来就是一条队列。
+     */
+    suspend fun abortAll(): Int {
+        val tasks = running.keys.toList()
+        var n = 0
+        for (id in tasks) {
+            if (abort(id)) n++
+        }
+        return n
+    }
+
+    /** 当前在跑的任务数（「停」要不要消费这条消息，看它）。 */
+    fun runningCount(): Int = running.size
+
     /** worktree + 分支无痕清理（幂等：已不在时 git 报错被吞 —— 目标态是「不在」，
      *  但非「已不在」的失败要大声打印 —— 静默吞掉会让「无痕」变成没人验过的口号）。 */
     private fun cleanupTask(taskId: String) {
@@ -336,8 +373,12 @@ class WorktreeSandboxExecutor(
             )
             return null // 没有可 diff 的基线 = 没有交付物，如实为空（不是失败）。
         }
-        val (files, adds, dels) = parseStat(stat.stdout)
-        if (files == 0 && adds == 0 && dels == 0) {
+        // 「有没有交付物」的判据是 **patch 本体**，不是 stat 的文案解析结果。
+        // 判据曾经是 `parseStat(...) == (0,0,0)`，而 parseStat 当时只认单数
+        // "file changed"（git 多文件打的是 "3 files changed"），于是 3 个文件的真实改动
+        // 被判成假空、整批丢弃（真机 cmvx822p7 第一棒，AC5 修复就这么没了）。
+        // patch 非空就是有货；统计口径只影响报告里的数字，不该有权决定丢不丢。
+        if (patch.stdout.isBlank()) {
             note(
                 logFile,
                 "[sandbox] harvest $taskId: nothing to harvest — add.exit=" + add.exitCode +
@@ -346,6 +387,19 @@ class WorktreeSandboxExecutor(
                     " patchBytes=" + patch.stdout.length,
             )
             return null
+        }
+        var (files, adds, dels) = parseStat(stat.stdout)
+        if (files == 0 && adds == 0 && dels == 0) {
+            // stat 认不出来时退回 patch 自数，读数照实上报，不再"解析失败即无改动"。
+            val fallback = countsFromPatch(patch.stdout)
+            files = fallback.first
+            adds = fallback.second
+            dels = fallback.third
+            note(
+                logFile,
+                "[sandbox] harvest $taskId: stat unparsed, counted from patch" +
+                    " (files=$files +$adds -$dels)",
+            )
         }
         val patchFile = File(artifactsDir, "patch.diff").apply { writeText(patch.stdout) }
         val reportFile = File(artifactsDir, "report.json")
@@ -443,14 +497,78 @@ class WorktreeSandboxExecutor(
 
         fun branchOf(taskId: String): String = "task-$taskId"
 
-        /** `git diff --stat` 尾行：" 1 file changed, 2 insertions(+), 1 deletion(-)"。 */
+        /**
+         * `git diff --stat` 尾行：` 1 file changed, 2 insertions(+), 1 deletion(-)`。
+         *
+         * **单复数都要认**：多文件时 git 打 `3 files changed`，而 `"files changed"`
+         * 里并不包含 `"file changed"` 这个子串 —— 曾经只用单数做判据，导致凡是
+         * 改动 ≥2 个文件的派单全被判「无交付物」（真机 cmvx822p7 第一棒实测）。
+         */
         fun parseStat(text: String): Triple<Int, Int, Int> {
-            val line = text.lineSequence().lastOrNull { it.contains("file changed") }
+            val line = text.lineSequence().lastOrNull { STAT_SUMMARY.containsMatchIn(it) }
                 ?: return Triple(0, 0, 0)
             fun num(marker: String): Int =
                 Regex("(\\d+) $marker").find(line)?.groupValues?.get(1)?.toIntOrNull() ?: 0
-            val files = Regex("(\\d+) files? changed").find(line)?.groupValues?.get(1)?.toIntOrNull() ?: 0
+            val files = STAT_FILES.find(line)?.groupValues?.get(1)?.toIntOrNull() ?: 0
             return Triple(files, num("insertion"), num("deletion"))
+        }
+
+        /**
+         * 直接从 unified diff 自数（stat 认不出来时的兜底口径）。
+         *
+         * 比解析 stat 更抗环境：不依赖 git 的本地化文案与汇总行格式。
+         * 只数 `+`/`-` 正文行，`+++`/`---` 文件头不算；二进制块计 1 个文件、0 行。
+         */
+        fun countsFromPatch(patch: String): Triple<Int, Int, Int> {
+            var files = 0
+            var adds = 0
+            var dels = 0
+            patch.lineSequence().forEach { line ->
+                when {
+                    line.startsWith("diff --git ") -> files++
+                    line.startsWith("+++") || line.startsWith("---") -> Unit
+                    line.startsWith("+") -> adds++
+                    line.startsWith("-") -> dels++
+                }
+            }
+            return Triple(files, adds, dels)
+        }
+
+        /** stat 汇总行判据：`N file changed` 或 `N files changed`。 */
+        private val STAT_SUMMARY = Regex("\\b\\d+ files? changed\\b")
+
+        /** stat 汇总行里的文件数。 */
+        private val STAT_FILES = Regex("(\\d+) files? changed")
+
+        /**
+         * 为沙箱准备隔离的 HOME 目录（防止 CLI 进程扫描读取宿主家目录敏感文件）。
+         *
+         * 只白名单符号链接必要的工具配置，绝不暴露宿主私有敏感目录。
+         */
+        fun prepareSandboxHome(artifactsDir: File): File {
+            val sandboxHome = File(artifactsDir, ".sandbox-home").apply { mkdirs() }
+            val userHome = System.getProperty("user.home") ?: return sandboxHome
+            val hostHome = File(userHome)
+            if (!hostHome.isDirectory) return sandboxHome
+            val essentialEntries = listOf(
+                ".codex",
+                ".claude",
+                ".claude.json",
+                ".gemini",
+                ".npm",
+                ".nvm",
+                ".gitconfig",
+            )
+            for (name in essentialEntries) {
+                val src = File(hostHome, name)
+                val dst = File(sandboxHome, name)
+                if (src.exists() && !dst.exists()) {
+                    runCatching {
+                        java.nio.file.Files.createSymbolicLink(dst.toPath(), src.toPath())
+                    }
+                }
+            }
+            return sandboxHome
         }
 
         fun sha256Hex(file: File): String {

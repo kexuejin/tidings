@@ -1,0 +1,451 @@
+// SPDX-License-Identifier: GPL-3.0-only
+
+package com.kapp.tidings.agent
+
+import kotlinx.serialization.json.JsonArray
+import kotlinx.serialization.json.JsonElement
+import kotlinx.serialization.json.JsonObject
+import kotlinx.serialization.json.JsonPrimitive
+import kotlinx.serialization.json.add
+import kotlinx.serialization.json.buildJsonArray
+import kotlinx.serialization.json.buildJsonObject
+import kotlinx.serialization.json.put
+import kotlinx.serialization.json.putJsonObject
+
+/**
+ * 单向责任链的执行体 —— `docs/DYNAMIC-MULTI-AGENT-TEAM-ORCHESTRATION.md` §2/§3.3 的落地件。
+ *
+ * ## 它补的是什么
+ *
+ * 派单本身早就通了（群席位 → 沙箱 → diff 卡 → 回群 → 手机合并），缺的是**棒与棒之间**：
+ * 一台宿主连跑 N 棒，第 N+1 棒的起点必须是第 N 棒的**提交**，而不是把上一棒的日志灌进
+ * prompt 里假装交接。真机跑过一次手工版（三棒 6m10s/11m24s/18m39s），每一步都是操作方
+ * 手动合入 —— 这一层就是把那些手工动作沉成代码。
+ *
+ * ## 三条规矩（都是踩过坑换来的）
+ *
+ * 1. **棒间只传摘要 + 指针**（§7.7）：下一棒拿到的是「基线提交 + ≤200 字摘要 + 产物路径」。
+ *    原始 stdout 动辄几十 KB，塞进 prompt 既超预算又会把上一棒的幻觉一起传下去。
+ * 2. **交接靠提交，不靠上下文**：每棒收割成 patch 后由链在宿主仓 `git apply` + `commit`，
+ *    下一棒的沙箱从那个提交拉 worktree —— 这就是「产物真的传下去了」的可核对证据。
+ * 3. **失败即停机**：某棒 `ok=false` 就出 blocked 卡并停，绝不「继续跑下一棒」把空改动
+ *    一路传到底（那正是「绿了但什么都没做」的来源）。
+ *
+ * ## 与文档的差异（落地取舍）
+ *
+ * 文档 §3.2 的动态点将（PeerTagRouter 撮合跨机节点）与 §3.4 的四级降级**不在这一层**：
+ * 这一层只管本机单仓的顺序链。跨机委派走既有的 `agent-channel`（channelDispatch 桥），
+ * 二者不是一件事，混在一起写只会两边都写不清。
+ */
+data class ChainStage(
+    /** 展示用角色名（「原型」「开发」「验收」）。不参与路由。 */
+    val role: String,
+    /** 驱动键：`ControlPlane.resolveCliDriver` 的入参（`agy` / `codex` / `claude`）。 */
+    val agentKey: String,
+    /** 本棒要干的活。业务指令，不含交接仪式（交接由 [StageChain.promptOf] 统一拼）。 */
+    val instruction: String,
+)
+
+/** 一棒的起点事实：上一棒停在哪、它说了什么、产物指针在哪。 */
+data class StageSeed(
+    val baseSha: String,
+    val repoPath: String,
+    val previousSummary: String? = null,
+    val previousArtifacts: List<String> = emptyList(),
+)
+
+/** 一棒的结论。[ok] = 这棒真的做成了（驱动诚信：不为没发生的活报 done）。 */
+data class StageRun(
+    val ok: Boolean,
+    val sessionId: String? = null,
+    val patchPath: String? = null,
+    val summary: String? = null,
+    val error: String? = null,
+    /** 本棒落地后的提交；null = 这棒没有产生改动或没落成。 */
+    val sha: String? = null,
+)
+
+/** 补丁与改动摘要（展示给机主审查与决定是否合流）。 */
+data class ChainDiff(
+    val path: String? = null,
+    val summary: String? = null,
+    val additions: Int? = null,
+    val deletions: Int? = null,
+)
+
+/** 链条的一次对外播报（一张卡一次 rev）。 */
+data class ChainProgress(
+    val chainId: String,
+    val rev: Int,
+    /** `executing` / `prototype` / `review_ready` / `blocked` / `aborted`（§6.1 的中止终态，不是 blocked）。 */
+    val state: String,
+    val title: String,
+    val currentRole: String? = null,
+    val stages: List<Pair<String, String>> = emptyList(),
+    val percent: Int = 0,
+    val banner: String? = null,
+    val options: List<Pair<String, Boolean>> = emptyList(),
+    val artifacts: List<Pair<String, Long>> = emptyList(),
+    val diff: ChainDiff? = null,
+)
+
+object StageChain {
+
+    /** §7.7 的 200 字预算：摘要就是摘要，不是日志的另一个名字。 */
+    const val MAX_SUMMARY = 200
+
+    /** 摘要被截断时的标注。宁可承认缺了，也不要让下游以为自己看到了全文。 */
+    const val TRUNCATION_MARKER = " …（上游摘要已截断）"
+
+    /**
+     * 拼一棒的 prompt。
+     *
+     * **只吃 [StageSeed]，不吃上一棒的原始输出** —— 这是 §7.7 唯一真正的约束，
+     * 也是唯一能在这里用类型挡住的地方（签名里根本没有装日志的参数）。
+     */
+    fun promptOf(stage: ChainStage, seed: StageSeed): String = buildString {
+        appendLine("你是一条多智能体责任链上的「${stage.role}」这一棒。只做本棒的事，不要越到下一棒。")
+        appendLine()
+        appendLine("## 起点")
+        appendLine("- 仓库（就是当前工作目录）：" + seed.repoPath)
+        appendLine("- 基线提交：" + seed.baseSha + " —— 先 `git log --oneline -1` 核对，对不上就先停下来说明原因")
+        if (!seed.previousSummary.isNullOrBlank()) {
+            appendLine()
+            appendLine("## 上一棒交接（摘要，原始日志不外传）")
+            appendLine(seed.previousSummary.trim())
+        }
+        if (seed.previousArtifacts.isNotEmpty()) {
+            appendLine()
+            appendLine("## 上一棒产物指针")
+            seed.previousArtifacts.forEach { appendLine("- " + it) }
+        }
+        appendLine()
+        appendLine("## 本棒任务")
+        appendLine(stage.instruction.trim())
+        appendLine()
+        appendLine("## 纪律")
+        appendLine("- 只改本棒职责范围内的文件；与本棒无关的改动一律不动。")
+        appendLine("- 不要执行 `git commit` / `git push`：宿主会替你提交，并把那个提交交给下一棒。")
+        appendLine("- 收尾用一句话说清「改了什么、依据是什么、留了什么风险」—— 这句话会被截到 "
+            + MAX_SUMMARY + " 字交给下一棒。")
+    }
+
+    /**
+     * 把一段自由文本压成 ≤[max] 字的摘要。
+     *
+     * 先折叠空白：CLI 的收尾说明常带一行一个字的折行，直接截会截成一堆空行。
+     * 超长时**保留头部**并挂 [TRUNCATION_MARKER] —— 结论通常在开头，尾部多是复述。
+     */
+    fun summarize(raw: String?, max: Int = MAX_SUMMARY): String? {
+        val folded = raw?.replace(Regex("\\s+"), " ")?.trim().orEmpty()
+        if (folded.isEmpty()) return null
+        if (folded.length <= max) return folded
+        val keep = (max - TRUNCATION_MARKER.length).coerceAtLeast(1)
+        return folded.take(keep).trimEnd() + TRUNCATION_MARKER
+    }
+
+    /**
+     * 链卡的形状：与手机端 `parseAgentCard` 认的字段名一字不差。
+     *
+     * 卡片字段不是自由发挥 —— 手机只认 `cardId/rev/type/items/progress/banner`，写错一个键
+     * 的后果是「群里出现一张空白卡」，两端都不报错。所以形状定义放在模型旁边，
+     * 由 [StageChainTest] 钉住，而不是散在桌面壳的字符串拼接里。
+     *
+     * `type` 取 `task-board`（手机注册表里已有的那类：Progress + StepList + ButtonGroup），
+     * 不新造 `orchestration_kanban` —— 新类型名不会让卡变得更好看，只会让它查不到推荐构成。
+     */
+    fun cardOf(progress: ChainProgress): JsonObject = buildJsonObject {
+        put("cardId", "chain-" + progress.chainId)
+        put("rev", progress.rev)
+        put("type", "task-board")
+        put("title", progress.title)
+        put("progress", progress.percent)
+        put("items", buildJsonArray {
+            progress.stages.forEach { (role, status) ->
+                add(buildJsonObject {
+                    put("id", role)
+                    put("label", role)
+                    put("status", status)
+                })
+            }
+        })
+        progress.banner?.let { text ->
+            putJsonObject("banner") {
+                put("text", text)
+                put("tone", toneOf(progress.state))
+            }
+        }
+        if (progress.options.isNotEmpty()) {
+            put("options", buildJsonArray {
+                progress.options.forEach { (label, recommended) ->
+                    add(buildJsonObject {
+                        put("label", label)
+                        put("recommended", recommended)
+                    })
+                }
+            })
+        }
+        if (progress.artifacts.isNotEmpty()) {
+            put("artifacts", buildJsonArray {
+                progress.artifacts.forEach { (name, bytes) ->
+                    add(buildJsonObject {
+                        put("name", name)
+                        put("bytes", bytes)
+                        if (name.endsWith(".html")) put("mime", "text/html")
+                        else if (name.endsWith(".diff")) put("mime", "text/x-diff")
+                    })
+                }
+            })
+        }
+        progress.diff?.let { d ->
+            putJsonObject("diff") {
+                d.path?.let { put("path", it) }
+                d.summary?.let { put("summary", it) }
+                d.additions?.let { put("additions", it) }
+                d.deletions?.let { put("deletions", it) }
+            }
+        }
+        if (progress.state == "review_ready") {
+            put("actions", buildJsonArray {
+                add(buildJsonObject {
+                    put("actionId", "merge-patch")
+                    put("label", "Merge")
+                    put("approval", true)
+                })
+            })
+        } else if (progress.state == "prototype") {
+            put("actions", buildJsonArray {
+                add(buildJsonObject {
+                    put("actionId", "approve-prototype")
+                    put("label", "Approve & Develop")
+                    put("approval", true)
+                })
+            })
+        } else if (progress.state == "blocked") {
+            put("actions", buildJsonArray {
+                add(buildJsonObject {
+                    put("actionId", "retry")
+                    put("label", "Retry")
+                })
+            })
+        }
+    }
+
+    /**
+     * 从 CLI 的输出里捞出**它真说的话**。
+     *
+     * 为什么不能直接截日志尾部：三个驱动各有各的信封 —— codex 是
+     * `{"type":"item.completed","item":{"type":"agent_message","text":…}}`，agy 是
+     * `{"event":"step_update","step_update":{…}}`，claude 又是另一种。截尾部的结果是
+     * 把 `"_response","text_delta"` 这种机器噪声当成交接摘要传给下一棒（真机实测，
+     * 责任链提交信息曾全被噪声占满）。
+     *
+     * 判据：**逐行试 JSON**，命中已知的文本键就取出来；一行都没命中（纯文本 CLI）
+     * 就原样返回，交给 [summarize] 折叠截断。识别不了也不猜 —— 宁可退回原文。
+     */
+    fun saidText(raw: String?): String? {
+        if (raw.isNullOrBlank()) return null
+        val picked = StringBuilder()
+        var sawJson = false
+        raw.lineSequence().forEach { line ->
+            val trimmed = line.trim()
+            if (!trimmed.startsWith("{") || !trimmed.endsWith("}")) return@forEach
+            sawJson = true
+            val element = runCatching { Json.parseToJsonElement(trimmed) }.getOrNull() ?: return@forEach
+            collectText(element)?.takeIf { it.isNotBlank() }?.let { text ->
+                if (picked.isNotEmpty()) picked.append(' ')
+                picked.append(text)
+            }
+        }
+        if (picked.isNotBlank()) return picked.toString()
+        // 全是 JSON 但一个文本键都没认出来（未知信封）：如实退回原文，不假装拿到了摘要。
+        return if (sawJson) raw.trim() else raw.trim()
+    }
+
+    /** 深度优先找 `text` / `text_delta` / `delta` 这类字符串值（各驱动的共同落点）。 */
+    private fun collectText(element: JsonElement): String? = when (element) {
+        is JsonObject -> element.entries
+            .filter { it.key in TEXT_KEYS }
+            .mapNotNull { (_, value) -> (value as? JsonPrimitive)?.takeIf { it.isString }?.content }
+            .joinToString(" ")
+            .ifBlank { element.values.mapNotNull { collectText(it) }.joinToString(" ") }
+            .ifBlank { null }
+
+        is JsonArray -> element.mapNotNull { collectText(it) }.joinToString(" ").ifBlank { null }
+        else -> null
+    }
+
+    private val TEXT_KEYS = setOf("text", "text_delta", "delta", "message", "summary")
+
+    private fun toneOf(state: String): String = when (state) {
+        "blocked", "aborted" -> "error"
+        "review_ready" -> "success"
+        else -> "info"
+    }
+
+    /**
+     * 把自然语言提示词解析为多角色责任链。
+     *
+     * 支持「角色(驱动键): 任务」或「角色: 任务」格式（分号或换行分隔）。
+     * 至少匹配到 2 棒才视为链（否则返回空列表，退回单 Agent 任务）。
+     */
+    fun parseStages(text: String, defaultKey: String = "codex"): List<ChainStage> {
+        val lines = text.split(Regex("[\r\n;\uff1b]+")).map { it.trim() }.filter { it.isNotBlank() }
+        val rolePattern = Regex("""^([^\s:()\uff1a]+)(?:\(([^()]+)\))?[:\uff1a]\s*(.+)$""")
+        val matched = lines.mapNotNull { line ->
+            val match = rolePattern.find(line) ?: return@mapNotNull null
+            val role = match.groupValues[1].trim()
+            val explicitKey = match.groupValues[2].trim().takeIf { it.isNotEmpty() }
+            val instruction = match.groupValues[3].trim()
+            if (role.isEmpty() || instruction.isEmpty()) null
+            else ChainStage(role = role, agentKey = explicitKey ?: defaultKey, instruction = instruction)
+        }
+        return if (matched.size >= 2) matched else emptyList()
+    }
+
+    /**
+     * 卡片的**跨模块形态**：一串 JSON。
+     *
+     * 为什么不让桌面壳直接拿 [JsonObject]：`desktopApp` 的主源集没有
+     * `kotlinx.serialization.json` 的编译期依赖（只有 testImplementation，见该模块
+     * build.gradle.kts 的注释），引用这个类型会直接编译不过。形状留在本模块定义、
+     * 跨模块只传字符串 —— 解析交给同样依赖齐备的域层。
+     */
+    fun cardJsonOf(progress: ChainProgress): String = cardOf(progress).toString()
+
+    /**
+     * 解析沙箱产物目录里的 report.json 或 patch.diff，提纯用于卡片展示的 Diff 与字节大小。
+     */
+    fun parseHarvest(patchFile: java.io.File, repoName: String? = null): Pair<ChainDiff, Long>? {
+        if (!patchFile.exists() || patchFile.length() == 0L) return null
+        val reportFile = java.io.File(patchFile.parentFile, "report.json")
+        var files = 1
+        var adds = 0
+        var dels = 0
+        if (reportFile.exists()) {
+            runCatching {
+                val rep = Json.parseToJsonElement(reportFile.readText()) as? JsonObject
+                if (rep != null) {
+                    files = (rep["filesChanged"] as? JsonPrimitive)?.content?.toIntOrNull() ?: 1
+                    adds = (rep["additions"] as? JsonPrimitive)?.content?.toIntOrNull() ?: 0
+                    dels = (rep["deletions"] as? JsonPrimitive)?.content?.toIntOrNull() ?: 0
+                }
+            }
+        } else {
+            val text = patchFile.readText()
+            files = maxOf(1, text.split("diff --git").size - 1)
+            adds = text.lineSequence().count { it.startsWith("+") && !it.startsWith("+++") }
+            dels = text.lineSequence().count { it.startsWith("-") && !it.startsWith("---") }
+        }
+        val summaryText = "$files file(s) (+$adds -$dels)"
+        return Pair(
+            ChainDiff(
+                path = repoName,
+                summary = summaryText,
+                additions = adds,
+                deletions = dels,
+            ),
+            patchFile.length(),
+        )
+    }
+}
+
+/** 链执行器只需要一个只读的 JSON 解析器（逐行拆 CLI 的各种信封）。 */
+private val Json = kotlinx.serialization.json.Json { ignoreUnknownKeys = true }
+
+/** 外壳装配链执行器；null 的重返值 = 这条请求接不了（宿主没装驱动器等）。 */
+fun interface AgentChainDispatcher {
+    /** @return chainId（已受理，后台在跑）；null = 没有链执行器。 */
+    suspend fun start(
+        groupId: String?,
+        repoPath: String?,
+        title: String,
+        stages: List<ChainStage>,
+    ): String?
+}
+
+/**
+ * 顺序跑一条链。
+ *
+ * 四个动作全部注入：读 HEAD、跑一棒、把一棒的产出落到宿主仓、播报。
+ * 这样这一层不碰进程、不碰 git、不碰 UI，判据可以写成普通断言（见 StageChainTest）。
+ */
+class StageChainRunner(
+    private val headSha: suspend (repoPath: String) -> String?,
+    private val runStage: suspend (stage: ChainStage, prompt: String, repoPath: String) -> StageRun,
+    /**
+     * 落一棒：把 patch 应用到宿主仓并提交。返回新 HEAD。
+     * null = 这棒没有产生可提交的改动（**不是**失败：审查棒只读也能判 PASS）。
+     */
+    private val land: suspend (repoPath: String, run: StageRun, message: String) -> String?,
+    private val report: suspend (ChainProgress) -> Unit = {},
+) {
+
+    suspend fun run(
+        chainId: String,
+        repoPath: String,
+        title: String,
+        stages: List<ChainStage>,
+    ): List<StageRun> {
+        require(stages.isNotEmpty()) { "chain $chainId has no stages" }
+        var rev = 0
+        val statuses = stages.map { it.role to "pending" }.toMutableList()
+        // 读不到基线就不开跑：没有起点的链跑出来的「全绿」谁也核对不了。
+        val base = headSha(repoPath) ?: run {
+            report(ChainProgress(chainId, ++rev, "blocked", title, null, statuses.toList(), 0,
+                "读不到 " + repoPath + " 的 HEAD —— 这不是 git 仓库，或宿主动不了它"))
+            return emptyList()
+        }
+        report(ChainProgress(chainId, ++rev, "executing", title, null, statuses.toList(), 0,
+            "链条开工：" + stages.size + " 棒，基线 " + base.take(8)))
+
+        var cursor = base
+        var prevSummary: String? = null
+        var prevArtifacts: List<String> = emptyList()
+        val done = mutableListOf<StageRun>()
+
+        for ((index, stage) in stages.withIndex()) {
+            statuses[index] = stage.role to "running"
+            report(ChainProgress(chainId, ++rev, "executing", title, stage.role, statuses.toList(),
+                percentOf(index, stages.size), stage.role + " 开跑（第 " + (index + 1) + "/" + stages.size + " 棒）"))
+
+            val prompt = StageChain.promptOf(stage, StageSeed(cursor, repoPath, prevSummary, prevArtifacts))
+            val run = runStage(stage, prompt, repoPath)
+            if (!run.ok) {
+                // 停机而不是跳过：一棒失败还继续跑，产出的「全绿」是假的。
+                statuses[index] = stage.role to "failed"
+                report(ChainProgress(chainId, ++rev, "blocked", title, stage.role, statuses.toList(),
+                    percentOf(index, stages.size),
+                    "第 " + (index + 1) + " 棒失败，链条已停：" + (run.error ?: "原因未报")))
+                return done + run
+            }
+            val summary = StageChain.summarize(run.summary)
+            val sha = land(repoPath, run.copy(summary = summary),
+                commitMessageOf(chainId, index, stages.size, stage, summary))
+            statuses[index] = stage.role to "done"
+            done += run.copy(summary = summary, sha = sha)
+            if (sha != null) cursor = sha
+            prevSummary = summary
+            prevArtifacts = listOfNotNull(run.patchPath)
+            report(ChainProgress(chainId, ++rev, "executing", title, stage.role, statuses.toList(),
+                percentOf(index + 1, stages.size),
+                stage.role + " 完成" + (if (sha == null) "（无改动）" else "（提交 " + sha.take(8) + "）")))
+        }
+
+        report(ChainProgress(chainId, ++rev, "review_ready", title, stages.last().role, statuses.toList(),
+            100, "全部 " + stages.size + " 棒完成，等待机主终审"))
+        return done
+    }
+
+    private fun percentOf(finished: Int, total: Int): Int =
+        if (total <= 0) 0 else (finished * 100 / total).coerceIn(0, 100)
+
+    private fun commitMessageOf(
+        chainId: String,
+        index: Int,
+        total: Int,
+        stage: ChainStage,
+        summary: String?,
+    ): String = "chain(" + chainId + ") " + (index + 1) + "/" + total + " " + stage.role + ": " +
+        (summary ?: "无摘要")
+}

@@ -63,6 +63,15 @@ internal class RelayControllerAgentInvokeComponent(private val host: RelayContro
     var executor: AgentInvokeExecutor? = null
 
     /**
+     * 本机能否承接一条带 `agentIntent` 的派单。
+     *
+     * 入站层用它做**执行者仲裁**：装得下就走意图这条路，装不下（手机 / 未接插件的宿主）
+     * 才轮到文本路由的执行体。两条路都真跑过同一个 prompt 的现场见
+     * `handleOnInbound` 里 `intentOwnsDispatch` 的注释。
+     */
+    fun intentExecutorPresent(): Boolean = executor != null
+
+    /**
      * Channel 委派的**本机承接器**（M7-T2，D-017）：桌面壳把 agentNode 的编排器接到这里；
      * 手机与未装配的测试宿主保持 null ⇒ 入站 `agent-channel` 一律回诚实的
      * `no-executor`。返回值 = 「已应答」（true：受理 / denied / tag 兜底都算）；
@@ -736,19 +745,29 @@ internal class RelayControllerAgentInvokeComponent(private val host: RelayContro
                 (row.renderCard?.get("cardId") as? JsonPrimitive)?.contentOrNull == id
             }
         }
+        val existingRev = (existingSlot?.renderCard?.get("rev") as? JsonPrimitive)?.contentOrNull?.toIntOrNull() ?: 0
+        val passedRev = (card["rev"] as? JsonPrimitive)?.contentOrNull?.toIntOrNull() ?: 1
+        val finalRev = if (existingSlot != null && passedRev <= existingRev) existingRev + 1 else passedRev
+        val finalCard = if (finalRev != passedRev) {
+            JsonObject(card.toMap() + ("rev" to JsonPrimitive(finalRev)))
+        } else {
+            card
+        }
         if (cardId == null || existingSlot == null) {
             // 首帧：本机落库 id 与线上信封 id **同一个** —— 补发与去重按信封 id 对账
             // （同帧同 id 是既有判据，拆开就丢掉这层对账）。
+            val lastAt = st.messages[ConvId.group(groupId)].orEmpty().lastOrNull()?.at ?: 0L
+            val effectiveAt = maxOf(nowMillis(), lastAt + 1L)
             host.handleAppendMessage(
                 MessageUi(
                     id = envelopeId,
                     peerId = ConvId.group(groupId),
                     mine = false,
                     text = title,
-                    at = nowMillis(),
+                    at = effectiveAt,
                     delivery = null,
                     senderId = AgentSenderId.of(st.selfNodeId, agentId),
-                    card = card,
+                    card = finalCard,
                 ),
                 incoming = true,
             )
@@ -757,8 +776,8 @@ internal class RelayControllerAgentInvokeComponent(private val host: RelayContro
                 existingSlot.peerId,
                 existingSlot.copy(
                     text = title,
-                    at = nowMillis(),
-                    cardPayload = card,
+                    at = maxOf(existingSlot.at, nowMillis()),
+                    cardPayload = finalCard,
                 ),
             )
         }
@@ -770,7 +789,7 @@ internal class RelayControllerAgentInvokeComponent(private val host: RelayContro
                 members = meta.members,
                 senderId = AgentSenderId.of(st.selfNodeId, agentId),
                 envelopeId = envelopeId,
-                card = card,
+                card = finalCard,
             )
         }
     }

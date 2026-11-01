@@ -294,24 +294,26 @@ class WorktreeSandboxExecutorTest {
         gitRepo(host)
         val cli = script(root, "cli", "sleep 300")
         val exe = executor(root)
-        val startedAt = System.currentTimeMillis()
         // 外层 withTimeout 只是兜底（防测试本身挂死），真正的判据是下面的 TimedOut。
-        val outcome = withTimeout(20_000) {
-            exe.run(
-                taskId = "t-deadline",
-                hostRepo = host.absolutePath,
-                command = listOf(cli),
-                env = emptyMap(),
-                onLine = {},
-                timeoutMs = 800L,
-            )
+        lateinit var outcome: WorktreeSandboxExecutor.Outcome
+        val elapsed = kotlin.time.measureTime {
+            outcome = withTimeout(20_000) {
+                exe.run(
+                    taskId = "t-deadline",
+                    hostRepo = host.absolutePath,
+                    command = listOf(cli),
+                    env = emptyMap(),
+                    onLine = {},
+                    timeoutMs = 800L,
+                )
+            }
         }
-        val elapsed = System.currentTimeMillis() - startedAt
         assertTrue(
             outcome is WorktreeSandboxExecutor.Outcome.TimedOut,
             "挂住的派单必须以 TimedOut 收场（不是 Aborted，也不是永远等下去），实际 $outcome",
         )
-        assertTrue(elapsed < 15_000, "止损要真的摘掉进程树，而不是「不再等」：实际 $elapsed ms")
+        val elapsedMs = elapsed.inWholeMilliseconds
+        assertTrue(elapsedMs < 15_000, "止损要真的摘掉进程树，而不是「不再等」：实际 $elapsedMs ms")
         assertEquals(800L, outcome.timeoutMs)
         assertFalse(File(root, "t-deadline").exists(), "超时也要无痕清理 worktree")
         assertEquals(0, gitLines(host, "branch", "--list", "task-t-deadline").size, "分支也要清掉")
@@ -354,6 +356,18 @@ class WorktreeSandboxExecutorTest {
                 "TIDINGS_SANDBOX_TIMEOUT_MS=<$junk> 必须回落默认，不能变成立刻杀",
             )
         }
+    }
+
+    @Test
+    fun prepareSandboxHomeCreatesIsolatedDirectory() {
+        val root = tempDir()
+        val artifacts = File(root, "artifacts-t-1").apply { mkdirs() }
+        val sandboxHome = WorktreeSandboxExecutor.prepareSandboxHome(artifacts)
+        assertTrue(sandboxHome.exists() && sandboxHome.isDirectory, "sandbox home must exist")
+        assertEquals(File(artifacts, ".sandbox-home").absolutePath, sandboxHome.absolutePath)
+        // Ensure sensitive directories like .workbuddy or .ssh are NOT exposed
+        assertFalse(File(sandboxHome, ".workbuddy").exists(), ".workbuddy must NOT be exposed")
+        assertFalse(File(sandboxHome, ".ssh").exists(), ".ssh must NOT be exposed")
     }
 
     private fun assertFalse(actual: Boolean, message: String) {

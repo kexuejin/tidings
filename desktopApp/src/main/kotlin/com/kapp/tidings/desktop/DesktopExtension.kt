@@ -110,6 +110,8 @@ internal class DesktopExtension(
      */
     private var pluginHost: com.kapp.tidings.agent.plugins.PluginHost? = null
 
+    private var workerOrchestrator: DesktopWorkerOrchestrator? = null
+
     /**
      * 两条兜底文案（事件没带 summary 时用）。
      *
@@ -566,6 +568,10 @@ internal class DesktopExtension(
         )
         try {
             createdPlane = created
+            // 责任链执行体（`POST /v1/agent/chain`）：接上 CLI 沙箱、宿主仓 git 与群卡片广播。
+            // 在 `created` 之后装配 —— 执行体要用 `created.executeCliTask`（同一个实例，
+            // 否则链跑的会话与面板看到的台账是两份）。
+            created.chainDispatcher = DesktopStageChain.dispatcher({ createdPlane }, controller, scope)
             created.start()
             inboundJob = created.observeInbound(scope)
             plane = created
@@ -931,8 +937,8 @@ internal class DesktopExtension(
                 //
                 // **必须留按卡片反查这条路**：动作帧（op=action）里只有 cardId，没有会话，
                 // 上游那一跳传进来的 sessionId 恒为 null。从前判据写成 `sessionId != null`，
-                // 于是合并分支在真机上永远进不去（2026-11-01 幕 6 实测：卡面变成「已由
-                // Pixel 6 处理」，宿主仓零提交）。现在 null 就按卡片回台账里找会话。
+                // 于是合并分支在真机上永远进不去（实测卡面提示已处理，宿主仓零提交）。
+                // 现在 null 就按卡片回台账里找会话。
                 if (actionId == "merge-patch") {
                     val ref = sessionId?.takeIf { it.isNotBlank() }
                         ?.let { sid ->
@@ -966,6 +972,10 @@ internal class DesktopExtension(
                             }
                         }
                     }
+                } else if (actionId == "approve-prototype") {
+                    workerOrchestrator?.approvePrototypeByCard(cardId)
+                } else if (workerOrchestrator?.followUpByCard(cardId, actionId) == true) {
+                    println("[RELAY-INVOKE] card action \"$actionId\" consumed as follow-up by $decidedBy")
                 } else {
                     val entry = created.pluginForAgent(agentId)
                 if (entry == null) {
@@ -1000,8 +1010,40 @@ internal class DesktopExtension(
             //
             // 代价（如实记在这里）：**没装 dsh-tidings 的宿主，@agent 将得不到任何回复**。
             // 那比回一句「我没有运行时」诚实 —— 后者让用户以为 agent 收到了却干不了活。
-            controller.onAgentPrompt = { _, _, _, _ ->
-                // 有意为空。执行由 dsh-tidings 从 inbox 取走并注入宿主会话。
+            // DSH Super-Agent alignment: single worker direct dispatch, follow-up wake-up, immediate abort
+            val workerOrchestrator = DesktopWorkerOrchestrator({ createdPlane }, controller, scope)
+            this.workerOrchestrator = workerOrchestrator
+            controller.onAgentPrompt = { convId, senderPeerId, prompt, replyToId ->
+                workerOrchestrator.handlePrompt(convId, senderPeerId, prompt, replyToId)
+            }
+            // §6.1 打断桥：挂在**入站文本**上，不挂在 onAgentPrompt 上 ——
+            // 「停」不是 prompt，挂在后者就永远进不来（真机实测：收到了、没反应）。
+            //
+            // 两件事都要做，缺一不成：
+            // 1. 编排器侧取消工单（卡片立刻翻 `Aborted by user request`）；
+            // 2. **直接摘进程**（`abortRunningSandboxes`）—— 取消只是"请它自己停"，卡在阻塞读
+            //    的 CLI 未必及时响应；真机实测卡片已 aborted、同一沙箱里的 `codex exec`
+            //    七分钟后仍在跑。进程摘掉的路径不经过协程，所以它才是「停」的确定性那一半。
+            //
+            // 消费条件：命中关键词，且**本机确实有活在跑**（有工单，或有沙箱任务）。
+            // 否则「停」就是一句普通的话（没派单时它不该被吞）。
+            controller.onAgentAbort = { convId, text ->
+                val planeNow = createdPlane
+                if (!workerOrchestrator.isAbortSignal(text)) {
+                    false
+                } else {
+                    val hadTicket = workerOrchestrator.abortIfRequested(convId, text)
+                    if (hadTicket || planeNow.hasRunningSandboxes()) {
+                        scope.launch { planeNow.abortRunningSandboxes() }
+                        true
+                    } else {
+                        false
+                    }
+                }
+            }
+            // 阶段 A 追问与微调桥：挂在入站文本上
+            controller.onAgentFollowUp = { convId, senderPeerId, text ->
+                workerOrchestrator.followUpIfActive(convId, text)
             }
         } catch (t: Throwable) {
             // 控制面是「加装」能力，绑不上（例如 8788 被别的进程占了）不能拖垮整个桌面壳：
@@ -1009,8 +1051,11 @@ internal class DesktopExtension(
             plane = null
             attachedRuntime = null
             sessions = null
+            workerOrchestrator = null
             controller.onLocalSessionPageRequest = null
             controller.onAgentPrompt = null
+            controller.onAgentAbort = null
+            controller.onAgentFollowUp = null
             controller.onExecDevices = null
             controller.onSetExecDeviceAllowed = null
             inboundJob?.cancel()
@@ -1019,8 +1064,11 @@ internal class DesktopExtension(
     }
 
     private fun detach() {
+        workerOrchestrator = null
         controller.onLocalSessionPageRequest = null
         controller.onAgentPrompt = null
+        controller.onAgentAbort = null
+        controller.onAgentFollowUp = null
         // M4 跨端派单五桥随控制面一起撤：留着它们，域层会把派单交给一个已停止的控制面。
         controller.invokeExecutor = null
         controller.invokePluginPresenceOf = null

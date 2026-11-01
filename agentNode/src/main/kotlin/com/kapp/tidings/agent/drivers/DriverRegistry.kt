@@ -61,6 +61,24 @@ class DriverRegistry(private val acl: DriverCapabilityAcl = DriverCapabilityAcl(
     fun isCapabilityAllowed(driverId: String, capabilityId: String): Boolean =
         acl.allows(driverId, capabilityId)
 
+    /**
+     * 摘掉**所有**在跑的沙箱任务，返回个数。入站「停」的落点之一。
+     *
+     * 只对沙箱驱动有效：裸路径（无 git 仓）的进程由它自己的取消路径收；插件驱动的任务
+     * 在别的进程里，宿主没有杀手柄 —— 不假装能停（`abort` 帧才是那条路）。
+     */
+    suspend fun abortRunningSandboxes(): Int {
+        var n = 0
+        for (driver in listDrivers()) {
+            if (driver is SandboxedCliDriver) n += driver.abortAll()
+        }
+        return n
+    }
+
+    /** 在跑的沙箱任务总数。 */
+    fun runningSandboxCount(): Int =
+        listDrivers().filterIsInstance<SandboxedCliDriver>().sumOf { it.runningCount() }
+
     private val defaultDriverId: String = "native"
 
     companion object {
