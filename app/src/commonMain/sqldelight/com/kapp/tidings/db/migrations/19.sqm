@@ -1,0 +1,14 @@
+-- 历史遗留清理（版本 19 -> 20）：铲两张**已建未接线**的表。
+--
+-- 1. WorkspaceBindingEntity —— 工作区 1:1 物理隔离（升级轮 T-2a 预埋，18.sqm 建）。
+--    消费方 WorkspaceBindingManager 只被自己的测试构造过，产品路径零接线（T-2b 半成品，
+--    工作区绑定实际走 AgentWorkspaceRegistry / 控制面宣告，不走本表）。
+-- 2. AgentGrantRuleEntity —— 工作区作用域免批规则（18.sqm 建）。注释声称的消费方
+--    ApprovalPolicyEngine 全仓不存在；免批实际由 AgentToolApprovalStore（JSON）承担。
+--
+-- 两表在产品路径上零读写（DROP 前已全仓核对），删除无数据损失。
+-- 18.sqm 保持原样不动：迁移链是版本哨兵，不能回头改。
+DROP TABLE IF EXISTS WorkspaceBindingEntity;
+DROP TABLE IF EXISTS AgentGrantRuleEntity;
+DROP INDEX IF EXISTS idx_ws_binding_unique;
+DROP INDEX IF EXISTS idx_ws_host_path;

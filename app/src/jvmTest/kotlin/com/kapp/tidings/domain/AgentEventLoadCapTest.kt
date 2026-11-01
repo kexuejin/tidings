@@ -42,7 +42,6 @@ import kotlin.test.assertTrue
 class AgentEventLoadCapTest {
 
     private lateinit var driver: JdbcSqliteDriver
-    private lateinit var database: RelayDatabase
     private lateinit var store: SqlDelightAgentStore
 
     private val peerA = "agent-node-1"
@@ -52,8 +51,7 @@ class AgentEventLoadCapTest {
     fun setUp() {
         driver = JdbcSqliteDriver(JdbcSqliteDriver.IN_MEMORY)
         RelayDatabase.Schema.create(driver)
-        database = RelayDatabase(driver)
-        store = SqlDelightAgentStore(database)
+        store = SqlDelightAgentStore(database = RelayDatabase(driver))
     }
 
     @AfterTest
@@ -120,8 +118,8 @@ class AgentEventLoadCapTest {
         // 前提（正常时序）：cursor 与到达序同向，窗口取的是最高 cursor 那批 ⇒
         // 窗口内最大 at 就是全量最大 at。前提被打破的形态见下一条。
         fill(peerA, "s-1", 500)
-        val fullMax = database.relayDatabaseQueries.selectAgentEventsBySession(peerA, "s-1")
-            .executeAsList().maxOf { it.at }
+        // 全量对照：大上限一次性取回全部（夹具只有 500 条），其最大 at 就是全量真值。
+        val fullMax = store.loadEvents(1_000).getValue(AgentSessionKey(peerA, "s-1")).maxOf { it.at }
         val windowed = store.loadEvents(RelayController.MAX_AGENT_EVENTS)
             .getValue(AgentSessionKey(peerA, "s-1"))
         assertEquals(
@@ -146,8 +144,7 @@ class AgentEventLoadCapTest {
         // 一条**迟到**的旧事件：cursor 比窗口下界还小，但 at 是全量最新。
         store.saveEvent(event(peerA, "s-1", cursor = 3L, at = 2_000_000L))
 
-        val fullMax = database.relayDatabaseQueries.selectAgentEventsBySession(peerA, "s-1")
-            .executeAsList().maxOf { it.at }
+        val fullMax = store.loadEvents(1_000).getValue(AgentSessionKey(peerA, "s-1")).maxOf { it.at }
         assertEquals(2_000_000L, fullMax, "夹具本身：全量最新时刻就是那条迟到的旧事件")
 
         val windowed = store.loadEvents(RelayController.MAX_AGENT_EVENTS)

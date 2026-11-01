@@ -217,7 +217,9 @@ class ScreenHistoryRecordTest {
         // （工作区 1:1 绑定 + 唯一索引防重）、AgentGrantRuleEntity（工作区作用域免批规则
         // 持久化，D-023 两层分工）、MessageEntity.cardPayload（D-026 原位刷新的最新载荷，
         // card_json 首帧原文不动，NULL 回退读 card_json）。
-        assertEquals(19L, RelayDatabase.Schema.version, "迁移文件数 + 1 —— 加一个 .sqm 就得同步改这条")
+        // 20 = 19.sqm 之后。19.sqm 只做 DROP：18.sqm 建的 WorkspaceBindingEntity 与
+        // AgentGrantRuleEntity 在产品路径上零读写（历史遗留清理），铲表不丢数据。
+        assertEquals(20L, RelayDatabase.Schema.version, "迁移文件数 + 1 —— 加一个 .sqm 就得同步改这条")
 
         val database = RelayDatabase(driver)
         val old = database.relayDatabaseQueries.selectMessagesByConv("peer-1").executeAsList().single()

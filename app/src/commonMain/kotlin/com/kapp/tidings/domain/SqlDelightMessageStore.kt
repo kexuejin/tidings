@@ -125,6 +125,8 @@ class SqlDelightMessageStore(
     private fun loadInternal(limitPerConversation: Int?): Map<String, List<MessageUi>> {
         val convIds = queries.selectDistinctConvIds().executeAsList()
         if (convIds.isNotEmpty()) {
+            // SQLite 已经是事实源：旧版 JSON 镜像的历史使命结束，退役（删文件 + 停写）。
+            retireLegacyMirror()
             val result = LinkedHashMap<String, List<MessageUi>>(convIds.size)
             for (convId in convIds) {
                 val rows = if (limitPerConversation == null) {
@@ -145,6 +147,9 @@ class SqlDelightMessageStore(
         if (legacy.isNotEmpty()) {
             save(legacy)
             runCatching { legacyStore?.clear() }
+            // 迁移完成：镜像退役。不退役的话 save() 会立刻把刚 clear 掉的文件再写回去，
+            // 然后每个会话每次写入都全量重写 4 MB —— 纯写放大。
+            retireLegacyMirror()
             return legacy
         }
 
@@ -152,7 +157,29 @@ class SqlDelightMessageStore(
     }
 
     /**
-     * 旧版 JSON 镜像（messages.json）需要重写。
+     * 旧版 JSON 镜像（messages.json）的**退役开关**。
+     *
+     * 镜像唯一的用途是 SQLite 为空时的一次性迁移（[loadInternal] 的 legacy 分支）；
+     * SQLite 一旦有数据，它就是纯写放大（真机 6656 条 / 4 MB，每次 save 整份重编码 +
+     * 落盘，比 SQLite 那几行贵一个数量级）。所以：
+     *
+     * - 首次观察到 SQLite 非空（含迁移成功）即退役：删镜像文件、停写；
+     * - 退役后 [save] 不再维护镜像 —— SQLite 是唯一事实源。
+     *
+     * 为什么保留「删除也标脏」的历史注释不删：退役前的窗口里它仍然成立（镜像留在盘上
+     * 的那段时间不许撒谎）。
+     */
+    private var mirrorRetired = false
+
+    private fun retireLegacyMirror() {
+        if (mirrorRetired) return
+        mirrorRetired = true
+        mirrorDirty = false
+        runCatching { legacyStore?.clear() }
+    }
+
+    /**
+     * 旧版 JSON 镜像需要重写。
      *
      * 为什么用一个脏标记而不是"每次 save 都写"：那份镜像有 4 MB（真机 6656 条），
      * 每次 save 都整份重编码 + 落盘，比 SQLite 那几行贵一个数量级。
@@ -165,6 +192,8 @@ class SqlDelightMessageStore(
 
     override fun save(threads: Map<String, List<MessageUi>>) {
         var changed = false
+        // 事务前库里有没有行 —— 出了事务块还要用（镜像退役判据，见 save 尾部）。
+        var dbHadRows = false
         // 这一趟动过哪些会话 —— 只重算这些的摘要（会话数几十，全量重算也不贵，
         // 但按 touched 来更诚实：没动的会话没有任何理由被重写）。
         val touched = HashSet<String>()
@@ -181,6 +210,7 @@ class SqlDelightMessageStore(
             //
             // 这次查询仍然要留：它给出"库里现在长什么样"，用来判断每条消息有没有变。
             val existing = queries.selectAllMessages().executeAsList().associateBy { it.id }
+            dbHadRows = existing.isNotEmpty()
             for ((peerId, list) in threads) {
                 for (message in list) {
                     // 这一条相对库里那一行有没有变化。没变就整条跳过：
@@ -244,10 +274,15 @@ class SqlDelightMessageStore(
             // 增量维护要在每条写入/删除路径上都记得更新，漏一处就是「预览停在旧消息」。
             for (convId in touched) refreshSummary(convId)
         }
-        // 只在"真的动过库"时重写镜像：内容一字未变就把同样的 4 MB 再落一遍盘，
-        // 是纯浪费（真机 6656 条 / 4 MB）。删除也会把 mirrorDirty 置脏，
-        // 否则镜像会与库不一致。
-        if (changed || mirrorDirty) {
+        // 镜像的生死判据是**库的事实**，不是"load 有没有被调过"：
+        // - 库里已有数据 ⇒ SQLite 已是事实源，镜像退役（删文件 + 停写）—— 那是纯写放大
+        //   （真机 6656 条 / 4 MB，每次 save 整份重编码 + 落盘）；
+        // - 库还是空的（升级用户的首笔写入）⇒ 保持旧行为写镜像：load 的迁移分支
+        //   （SQLite 为空时）此刻还没跑，此刻删文件会把还没迁的历史一起删掉。
+        // 退役由 retireLegacyMirror 的幂等保证只做一次。
+        if (dbHadRows) {
+            retireLegacyMirror()
+        } else if (changed || mirrorDirty) {
             mirrorDirty = false
             runCatching { legacyStore?.save(threads) }
         }

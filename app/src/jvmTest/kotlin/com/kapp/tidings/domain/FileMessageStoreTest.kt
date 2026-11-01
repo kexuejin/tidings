@@ -80,7 +80,8 @@ class FileMessageStoreTest {
 
     @Test
     fun whatIsStoredIsHonestAboutPendingAndFileTransfers() {
-        createMessageStore(platform).save(
+        val store = createMessageStore(platform)
+        store.save(
             mapOf(
                 "peer-b" to listOf(
                     MessageUi(id = "m1", peerId = "peer-b", mine = true, text = "", at = 1, delivery = DeliveryState.Queued),
@@ -106,6 +107,14 @@ class FileMessageStoreTest {
             ),
         )
 
+        // 退役**前**的镜像仍须诚实（迁移窗口期不撒谎）：save() 落的那份字节里
+        // 排队事实在场，而文件卡片的死字段不在。
+        val onDisk = File(directory, "messages.json").readText()
+        assertTrue(onDisk.contains("\"Queued\""), "排队事实要真的写到字节里，而不是读回来才凭空补上")
+        assertFalse(onDisk.contains("报告.pdf"), "落盘的 JSON 里不该有文件名")
+        assertFalse(onDisk.contains("savedPaths"), "落盘的 JSON 里不该有保存路径")
+        assertFalse(onDisk.contains("transferId"), "落盘的 JSON 里不该有传输编号")
+
         val reloaded = createMessageStore(platform).load()["peer-b"].orEmpty()
 
         // 这一层只管"忠实记录发生过什么"，不管重启之后该怎么办——策略在恢复那一刻
@@ -113,32 +122,34 @@ class FileMessageStoreTest {
         assertEquals(DeliveryState.Queued, reloaded.first { it.id == "m1" }.delivery, "排队事实要如实落盘，别在这一层被抹平")
         assertEquals(DeliveryState.Failed, reloaded.first { it.id == "m2" }.delivery, "失败是既成事实，要留着")
         assertTrue(reloaded.all { it.file == null }, "文件卡片不落盘：路径可能已失效，传输管理器也不认旧的 transferId")
-        // 更硬的一条：磁盘上的字节里根本不该出现文件名或路径，否则磁盘上留着死卡片，
-        // 以后哪次改了策略就会把它当成真实历史读回来。
-        val onDisk = File(directory, "messages.json").readText()
-        assertTrue(onDisk.contains("\"Queued\""), "排队事实要真的写到字节里，而不是读回来才凭空补上")
-        assertFalse(onDisk.contains("报告.pdf"), "落盘的 JSON 里不该有文件名")
-        assertFalse(onDisk.contains("savedPaths"), "落盘的 JSON 里不该有保存路径")
-        assertFalse(onDisk.contains("transferId"), "落盘的 JSON 里不该有传输编号")
+
+        // 镜像退役语义（历史遗留清理）：SQLite 已有数据 ⇒ 首次 load() 即退役——
+        // 删镜像文件并停写。此后磁盘上根本没有 messages.json，「死卡片留在盘上」
+        // 这一类问题整体消失。
+        assertFalse(File(directory, "messages.json").exists(), "SQLite 有数据后，镜像必须退役（文件删除）")
+        // 退役后再 save 也不许把镜像写回来。
+        store.save(mapOf("peer-b" to listOf(MessageUi(id = "m4", peerId = "peer-b", mine = true, text = "退役后新消息", at = 4))))
+        assertFalse(File(directory, "messages.json").exists(), "退役后 save 不许再写镜像")
     }
 
     @Test
-    fun 删除之后镜像不再包含那条消息() {
-        // messages.json 是"库的导出"，不是只写一次的备份：删除必须也反映到它上面。
-        // 否则 SQLite 一旦为空（重装/库损坏），load() 会拿这份陈旧镜像做一次性迁移，
-        // 把用户删过的消息复活。
+    fun 删除之后镜像退役不再包含已删消息() {
+        // 镜像退役语义（历史遗留清理）：SQLite 已有数据后，save 会让镜像退役（文件删除）。
+        // 「已删消息不许复活」的旧担忧随之整体消失——盘上根本没有那份导出了；
+        // 这条测试现在钉的是：退役发生，且比旧语义更彻底（不是内容更新，是文件消失）。
         val store = createMessageStore(platform)
         val keep = MessageUi(id = "k1", peerId = "peer-g", mine = false, text = "这条要留下来", at = 2)
         val gone = MessageUi(id = "g1", peerId = "peer-g", mine = false, text = "这条要被删掉", at = 1)
         store.save(mapOf("peer-g" to listOf(gone, keep)))
         val file = File(directory, "messages.json")
-        assertTrue(file.readText().contains("这条要被删掉"), "先确认镜像里确实有它")
+        assertTrue(file.readText().contains("这条要被删掉"), "库为空的首笔写入仍维护镜像（升级用户迁移窗口）")
 
         // 真实顺序与 handleDeleteMessage 一致：先显式删库，再落一次快照。
         store.deleteMessage("g1")
         store.save(mapOf("peer-g" to listOf(keep)))
-        assertFalse(file.readText().contains("这条要被删掉"), "删掉的消息不能继续留在导出里")
-        assertTrue(file.readText().contains("这条要留下来"), "没删的那条仍要在导出里")
+        // 库里此刻有数据（keep）⇒ 镜像退役，文件整体消失 —— 「删掉的消息留在导出里」
+        // 这一类问题不存在了。
+        assertFalse(file.exists(), "SQLite 有数据后镜像退役：文件删除，已删消息无从复活")
     }
 
     @Test

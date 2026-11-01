@@ -201,23 +201,6 @@ WHERE conv_id = :convId AND seq < :beforeSeq
 ORDER BY seq DESC
 LIMIT :limit;
 
--- 向下翻（更新）。游标是**当前窗口最大的 seq**，不含端点。
-selectMessagesAfter:
-SELECT * FROM MessageEntity
-WHERE conv_id = :convId AND seq > :afterSeq
-ORDER BY seq ASC
-LIMIT :limit;
-
-updateDelivery:
-UPDATE MessageEntity
-SET delivery = :delivery
-WHERE id = :id;
-
-updateMessage:
-UPDATE MessageEntity
-SET text = :text, notice = :notice, file_json = :fileJson, screen_json = :screenJson, delivery = :delivery
-WHERE id = :id;
-
 deleteMessage:
 DELETE FROM MessageEntity
 WHERE id = :id;
@@ -559,64 +542,6 @@ CREATE TABLE AgentArtifactEntity (
 
 CREATE INDEX idx_agent_artifact_session ON AgentArtifactEntity(node_id, session_id);
 
--- 工作区 1:1 物理隔离与防重（升级轮 T-2a，D-021；设计 §5.2）。
--- groupId + hostNodeId + wsPath 唯一：同一个宿主的同一条物理路径只能被一个群绑定 ——
--- 防重的落点是数据库唯一索引，不是应用层先查后插。消费方：WorkspaceBindingManager（T-2b）。
-CREATE TABLE WorkspaceBindingEntity (
-    workspaceId TEXT PRIMARY KEY NOT NULL,
-    groupId TEXT NOT NULL,
-    hostNodeId TEXT NOT NULL,
-    wsPath TEXT NOT NULL,
-    gitBranch TEXT NOT NULL,
-    isHostActive INTEGER NOT NULL DEFAULT 1,
-    createdAt INTEGER NOT NULL,
-    updatedAt INTEGER NOT NULL
-);
-
-CREATE UNIQUE INDEX idx_ws_binding_unique
-ON WorkspaceBindingEntity(groupId, hostNodeId, wsPath);
--- R4 补强（S14）：同宿主同路径**全局**只能被一个群绑 —— 1:1 防重的正判据。
-CREATE UNIQUE INDEX idx_ws_host_path
-ON WorkspaceBindingEntity(hostNodeId, wsPath);
-
--- 工作区作用域免批规则的持久化层（升级轮 T-2a，D-021 / D-023 / D-025 ④）。
--- 维度分工：本表 = workspaceId + toolPattern + scope(session|always) + expiresAt；
--- 既有 AgentToolApprovalStore = 宿主级 tool 粒度免批（M4/S4-2 线，内存+JSON）。
--- 各管各的维度不互抄字段 —— D-023「不建第二套台账」的本意是不重复存同样的规则。
--- expiresAt = 0 表示不过期。消费方：ApprovalPolicyEngine（T-3 线）。
-CREATE TABLE AgentGrantRuleEntity (
-    ruleId TEXT PRIMARY KEY NOT NULL,
-    workspaceId TEXT NOT NULL,
-    toolPattern TEXT NOT NULL,
-    scope TEXT NOT NULL,
-    grantedBy TEXT NOT NULL,
-    createdAt INTEGER NOT NULL,
-    expiresAt INTEGER NOT NULL
-);
-
-insertWorkspaceBinding:
--- S14：**INSERT 不带 OR REPLACE** —— 静默顶掉正是 AGENTS §2.3/§3 点名的形状
---（隐蔽、无回执、UI 说谎）。同群换路径的语义在管理器里先 delete 再 insert
---（显式两步，有账可查）；竞态与越权重绑由两条 UNIQUE INDEX 炸进 Storage 分支。
-INSERT INTO WorkspaceBindingEntity (
-    workspaceId, groupId, hostNodeId, wsPath, gitBranch, isHostActive, createdAt, updatedAt
-) VALUES (?, ?, ?, ?, ?, ?, ?, ?);
-
-selectWorkspaceBindingsByGroup:
-SELECT * FROM WorkspaceBindingEntity WHERE groupId = ?;
-
-selectWorkspaceBindingByGroupAndHost:
-SELECT * FROM WorkspaceBindingEntity WHERE groupId = ? AND hostNodeId = ?;
-
-selectWorkspaceBindingByHostAndPath:
-SELECT * FROM WorkspaceBindingEntity WHERE hostNodeId = ? AND wsPath = ?;
-
-deleteWorkspaceBinding:
-DELETE FROM WorkspaceBindingEntity WHERE groupId = ? AND hostNodeId = ?;
-
-deleteWorkspaceBindingsByGroup:
-DELETE FROM WorkspaceBindingEntity WHERE groupId = ?;
-
 insertAgentSession:
 INSERT OR REPLACE INTO AgentSessionEntity (
     node_id, session_id, alias, agent_kind, state, title, started_at, updated_at, announced,
@@ -628,11 +553,6 @@ INSERT OR REPLACE INTO AgentSessionEntity (
 
 selectAllAgentSessions:
 SELECT * FROM AgentSessionEntity
-ORDER BY updated_at DESC;
-
-selectAgentSessionsByNode:
-SELECT * FROM AgentSessionEntity
-WHERE node_id = :nodeId
 ORDER BY updated_at DESC;
 
 insertAgentEvent:
@@ -663,16 +583,6 @@ SELECT * FROM AgentEventEntity
 WHERE node_id = :nodeId AND session_id = :sessionId
 ORDER BY cursor DESC
 LIMIT :limit;
-
--- 整表读：留作诊断/导出用（恢复路径**不再**走它 —— 那正是 57,644 条事件常驻的来源）。
-selectAllAgentEvents:
-SELECT * FROM AgentEventEntity
-ORDER BY cursor ASC;
-
-selectAgentEventsBySession:
-SELECT * FROM AgentEventEntity
-WHERE node_id = :nodeId AND session_id = :sessionId
-ORDER BY cursor ASC;
 
 insertAgentApproval:
 INSERT OR REPLACE INTO AgentApprovalEntity (
