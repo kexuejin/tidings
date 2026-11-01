@@ -304,3 +304,83 @@ SIGTERM 打过去、根干净退出后，它的后代立刻被过继给 init，�
 资源串上。这三条是全篇最大的口径缺口：它们在第 1 版的 §0 表里被写成 ✅ 已实现。
 
 
+## 9.8 第三轮：工作区打包复验（含并发写入者的改动）
+
+### 9.8.1 打包口径：从工作区构建，但先证产物里真有那笔修复
+
+原本打算用干净 worktree（`git worktree add /tmp/tv-head fd292fd0`）只验已提交的部分，
+后来改成**直接从主工作区构建** —— 这一轮要验的就是"仓库当前状态"（含另一个 agent
+未提交的 `AgentCards.kt` / `DesktopExtension.kt` / `ChatBubbles.kt` / `DesktopNavigation.kt`）。
+
+时间戳只能当参考，所以直接查产物字节码：
+
+```
+javap -p agentNode-*.jar 里的 WorktreeSandboxExecutor
+  → destroyProcessTree(Process, Continuation<List<Long>>)   # 按 pid 集合返回，新签名
+  → trackTree / aliveHandle / abortAll                      # 三个新方法都在
+```
+
+顺带记一个坑：`WorktreeSandbox.kt` 里的类叫 **`WorktreeSandboxExecutor`**（文件名与类名
+不一致），照文件名去找 `WorktreeSandbox.class` 会扑空，别据此误判"修复没进产物"。
+
+### 9.8.2 「一次 stop 摘干净整棵树」：真机成立
+
+- 17:28 派单 `run sleep 900`，树上三层：`node`(24789) → `codex`(24790) → `sleep 900`(25008)；
+- 17:30 只发**一次** `stop`；
+- 三个 pid 在 17:32:30 **同一时刻**全部消失，之后 `codex=0 / sandbox=0`，没有第二次操作。
+
+这是 §9.7.1 的核心断言，此前只有单测（`abortKillsDescendantsThatIgnoreSigterm`），
+现在有真机读数。
+
+### 9.8.3 纠正：那 108 秒是**投递**，不是打断 —— 我算错过一次
+
+按 DB 时间戳我第一次得出的结论是「stop 17:30:29 到达、进程 17:32:30 才死 ⇒ 打断慢了 108 秒」。
+**这个结论是错的**，根因是把 `MessageEntity.timestamp` 当成了到达时刻。
+
+判定过程：`max(timestamp)` 在 17:43:10 那次查询里还是 `17:32:30`，到 17:43:18 才跳到 `17:41:22`。
+说明那一行是**在 17:43:14 前后才写进去的**，而它盖的戳是 17:41:22 —— 即该列存的是
+**发送方时钟**，手机比宿主快 13 秒。
+
+换算后：投递 ≈ **120–125 s**（三次独立读数一致：17:41 派单、17:45 派单、17:30 的 stop），
+而打断**到达即生效**。所以 §6.1 的端到端延迟完全由投递支配，与打断路径无关。
+
+> 口径：这台机器上 `MessageEntity.timestamp` 只能用来排**同一发送方**的消息序，
+> 不能当到达时刻。要量到达，就轮询 `max(timestamp)` 的**跳变时刻**。
+
+### 9.8.4 新缺陷：消息会乱序，且迟到十几分钟
+
+- 手机 17:24:35 发的 `run all tests`，界面显示 **✓（已送达）**，实际 **17:43:56** 才落到宿主
+  —— 迟到 19 分 21 秒，并在 17:46 真的起了一个沙箱干这条活。
+- 相邻两条（17:24 的 `run tests`、17:28 的 `run sleep 900`）都标**「重发」**，却都即时执行了。
+
+所以手机端的送达标识与实际送达**无关**，且**两个方向都错**：标「重发」的多半已送达；
+标 ✓ 的可能压根没到。§9.7.2 记的"重发是谎"只覆盖了一个方向。
+
+后果比单纯"慢"严重：**用户看到 ✓ 却不敢确定对方收到，看到「重发」又可能重发一份
+已经执行过的派单** —— 这正是"一次操作跑两遍"的现实来源。
+
+### 9.8.5 本轮代码改动（`agentNode`，取消路径的两个洞）
+
+1. **取消路径上的 SIGKILL 升级执行不到**。`ensureActive()` 抛出后异常已经离开 `use{}`，
+   后面那段 `forceKill` 被整段跳过，只剩 `finally` 里的 SIGTERM ⇒ 忽略 SIGTERM 的子进程
+   活下来。这与 `abort()` 修掉的是同一个洞，只是换了入口。改为
+   `withContext(NonCancellable) { destroyProcessTree(proc) }`。
+2. **`running.remove(taskId)` 在取消路径上被跳过**，`running` 里留下一条死进程
+   ⇒ `hasRunningSandboxes()` 恒真 ⇒ 下一轮 stop 去打一具尸体，真正活着的进程反而漏掉。
+   移到 `finally`。
+3. **打断取证落盘**：`abort()` 记入口时刻 / 杀了几个人 / 耗时；teardown 记 `timedOut` 与
+   同样三项；`abortAll` 的"重扫完仍漏"也落盘。全部写进该任务自己的 `task.log` ——
+   宿主 stdout 重定向后不刷行，事发时一个字都取不到，这条是给下一次复盘留的。
+
+`:agentNode:test` 全绿；`abortKillsDescendantsThatIgnoreSigterm` 仍能区分新旧实现
+（旧语义下 20 s 超时红）。
+
+### 9.8.6 仍未复验：阶段 A 原型 / 追问唤醒 / 自愈退单
+
+本轮试了三次"长任务"想留出打断窗口，全部落空：
+- `run sleep 900` 两次 —— agent 一次选择等（沙箱活了 4 分钟，见 9.8.2），一次把命令丢到
+  后台就 `turn.completed` 退出；
+- `run npm test 200 times` —— 35 秒跑完（`npm test` 85 ms × 200）。
+
+叠上 120 s 投递延迟，**任务活得比 stop 到得还短**。下一轮要验打断，得给"必须由 agent
+自己长时间动手"的任务（大范围重构），不能指望单条命令撑住。
