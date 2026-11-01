@@ -63,8 +63,8 @@ class DesktopInvokeWiringGuardTest {
             "执行桥没有接 onArtifact 回调 —— 沙箱产物到不了投递环节（T-3b 断链）",
         )
         assertTrue(
-            source.contains("controller.sendFiles(") && source.contains("ConvId.group(deliverGroupId)"),
-            "产物没有投进派单来源的群（sendFiles + ConvId.group 群路径）—— patch 只躺在宿主本机",
+            source.contains("controller.sendAgentArtifacts(") && source.contains("ConvId.group(deliverGroupId)"),
+            "产物没有投进派单来源的群（sendAgentArtifacts + ConvId.group 群路径）—— patch 只躺在宿主本机",
         )
         // T-G1 审查合流：merge-patch 动作在宿主本机落地（git apply），冲突落台账。
         assertTrue(

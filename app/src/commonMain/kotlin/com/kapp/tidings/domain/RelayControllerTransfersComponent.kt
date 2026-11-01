@@ -84,6 +84,7 @@ fun handleSendFiles(
     files: List<LocalFile>,
     isFolder: Boolean = false,
     folderRootName: String? = null,
+    purpose: String? = null,
 ) {
     if (files.isEmpty()) return
     // **先判数量、给出具体数。** 传输层超限时只 `return null`，界面只会看到「这张传不出去」，
@@ -105,7 +106,7 @@ fun handleSendFiles(
         }
     }
     val rt = host.runtime ?: run { host.warn(BannerMessage.NodeNotStarted); return }
-    host.scope.launch { handleOfferFiles(rt, peerId, files, isFolder, folderRootName) }
+    host.scope.launch { handleOfferFiles(rt, peerId, files, isFolder, folderRootName, purpose) }
 }
 
 
@@ -115,6 +116,7 @@ suspend fun handleOfferFiles(
     files: List<LocalFile>,
     isFolder: Boolean = false,
     folderRootName: String? = null,
+    purpose: String? = null,
 ) =
     handleOfferFilesWith(peerId, files) { member, msgId, groupId, groupRev ->
         runCatching {
@@ -127,6 +129,7 @@ suspend fun handleOfferFiles(
                 folderRootName = folderRootName,
                 groupId = groupId,
                 groupRev = groupRev,
+                purpose = purpose,
             )
         }.getOrNull()
     }

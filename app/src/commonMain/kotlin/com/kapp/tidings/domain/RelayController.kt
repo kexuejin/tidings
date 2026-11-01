@@ -771,6 +771,13 @@ class RelayController(
         isFolder: Boolean,
         folderRootName: String?,
     ) = transfersCtl.handleSendFiles(peerId, files, isFolder, folderRootName)
+
+    /**
+     * agent 任务的产物投递：purpose=artifact。与 [sendFiles] 的差别只在免确认 ——
+     * 要不要合并是任务卡上的决策，文件本身是随附资料，不该再要一次「接收/拒绝」。
+     */
+    fun sendAgentArtifacts(peerId: String, files: List<LocalFile>) =
+        transfersCtl.handleSendFiles(peerId, files, isFolder = false, folderRootName = null, purpose = com.kapp.tidings.core.protocol.FilePurpose.ARTIFACT)
     override fun acceptTransfer(transferId: String) = transfersCtl.handleAcceptTransfer(transferId)
     override fun declineTransfer(transferId: String) = transfersCtl.handleDeclineTransfer(transferId)
     override fun cancelTransfer(transferId: String) = transfersCtl.handleCancelTransfer(transferId)

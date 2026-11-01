@@ -44,6 +44,13 @@ object FileTransfer {
     /** 群聊图片内联上限。超限按普通文件发送，需手动领取。 */
     const val GROUP_IMG_AUTO_ACCEPT: Long = 10L * 1024 * 1024
 
+    /**
+     * agent 产物自动接收阈值。产物（补丁、报告）是任务的附件，不是用户请求要决策的
+     * 东西 —— 「待接收」按钮对它是一个多余的决策点。超过阈值退化为手动领取，
+     * 防止异常大的产物悄悄占满磁盘。
+     */
+    const val ARTIFACT_AUTO_ACCEPT: Long = 50L * 1024 * 1024
+
     /** 表格图片消息的原始 TSV 文本视图上限。 */
     const val TABLE_TEXT_LIMIT_BYTES: Int = Protocol.TEXT_TCP_LIMIT
 
@@ -85,7 +92,10 @@ object FilePurpose {
     const val SHARE_GET = "share-get"
     const val SHARE_PUT = "share-put"
 
-    val ALL: Set<String> = setOf(IMAGE, STICKER, UPDATE, SHARE_GET, SHARE_PUT)
+    /** agent 任务的产物（补丁、报告）：决策在任务卡上，文件只是随附的资料。 */
+    const val ARTIFACT = "artifact"
+
+    val ALL: Set<String> = setOf(IMAGE, STICKER, UPDATE, SHARE_GET, SHARE_PUT, ARTIFACT)
 
     /** 媒体类用途（进聊天记录，可自动接收）。 */
     val MEDIA: Set<String> = setOf(IMAGE, STICKER)
@@ -511,6 +521,9 @@ object TcpFrames {
  * 卡片却还显示「对方发来的文件，等你接收」并给着按钮 —— 就是两端分叉的后果。
  */
 fun autoAcceptsFile(purpose: String?, totalSize: Long, isGroup: Boolean): Boolean {
+    // agent 产物免确认：要不要合并是卡片上的决策，文件本身只是资料。
+    // 私聊/群聊同一阈值 —— 产物的大小与群人数无关。
+    if (purpose == FilePurpose.ARTIFACT) return totalSize <= FileTransfer.ARTIFACT_AUTO_ACCEPT
     if (purpose != "image") return false
     val limit = if (isGroup) FileTransfer.GROUP_IMG_AUTO_ACCEPT else FileTransfer.IMG_AUTO_ACCEPT
     return totalSize <= limit

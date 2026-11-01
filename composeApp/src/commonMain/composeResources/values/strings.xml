@@ -969,6 +969,7 @@
     <!-- 文件卡片与传输状态 -->
     <string name="file_bubble_count">%1$d 个文件</string>
     <string name="file_state_offered_in">对方发来的文件，等你接收</string>
+    <string name="file_state_offered_auto">自动接收中</string>
     <string name="file_state_offered_out">已发出，等对方接收</string>
     <!-- 百分号写一个就行：CMP 的 replaceWithArgs 用正则 %(\d+)\$[ds] 替换，
          不是 String.format，所以 %% 不会被还原成 %，会原样显示两个。 -->

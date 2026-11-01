@@ -139,6 +139,7 @@ import com.kapp.tidings.generated.resources.file_state_completed_in
 import com.kapp.tidings.generated.resources.file_state_sent_success
 import com.kapp.tidings.generated.resources.file_state_declined
 import com.kapp.tidings.generated.resources.file_state_failed
+import com.kapp.tidings.generated.resources.file_state_offered_auto
 import com.kapp.tidings.generated.resources.file_state_offered_in
 import com.kapp.tidings.generated.resources.file_state_offered_out
 import com.kapp.tidings.generated.resources.file_table_hide_text
@@ -1049,6 +1050,10 @@ internal fun FileCardView(
                 Text(
                     text = if (card.mine) {
                         stringResource(Res.string.file_state_offered_out)
+                    } else if (card.autoAccepted) {
+                        // 字节已经自动在收了，这句再喊「等你接收」就是把刚做完的事
+                        // 又推回给用户决定一次（历史教训里那条两端分叉的另一半）。
+                        stringResource(Res.string.file_state_offered_auto)
                     } else {
                         stringResource(Res.string.file_state_offered_in)
                     },

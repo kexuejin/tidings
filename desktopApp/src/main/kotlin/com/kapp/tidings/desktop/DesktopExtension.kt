@@ -1285,11 +1285,11 @@ internal class DesktopExtension(
         if (deliverGroupId == null) return
         artifacts.forEach { (path, name, bytes) ->
             runCatching {
-                controller.sendFiles(
+                // purpose=artifact：对端免确认收下。任务卡才是决策面，「接收/拒绝」
+                // 对随附的补丁/报告是一个多余的决策点（产物双路问题的另一半）。
+                controller.sendAgentArtifacts(
                     com.kapp.tidings.core.protocol.ConvId.group(deliverGroupId),
                     listOf(com.kapp.tidings.core.transport.LocalFile(path = path, name = name, size = bytes)),
-                    isFolder = false,
-                    folderRootName = null,
                 )
             }.onFailure { t ->
                 println("[RELAY-INVOKE] artifact delivery failed for " + name + ": " + (t.message ?: (t::class.simpleName ?: "unknown")))
