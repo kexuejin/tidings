@@ -229,10 +229,12 @@ cd ~/weather-relay && git status --short                     # 应有输出为�
 1. **一次 stop 没杀干净并发派单的另一个沙箱**：16:14 那次 stop 之后 `t-12` 死了、`t-11` 还活着，
    直到 16:17 第二次 stop 才摘掉。`abortAll` 快照的是 `running.keys`，具体漏在"注册时机"还是
    "工单归属"要靠日志定死（本轮没打日志）。
+   → **已定死并修掉（原因两者都不是：是"杀不干净"），见 §9.7.1。**
 2. **手机→宿主投递延迟 60–95 s，且手机持续显示"重发"**：实测 stop 15:38:07 发出 → 15:38:35 落地；
    16:13:07 发出 → 16:14:42 落地。宿主已收到并执行，手机端仍挂"重发"标记 —— 这正是"一次操作
    跑两遍"的现实来源（队列重放）。**只要这条不修，§6.1 的"端到端 500 ms"就不可能成立**，
    它现在被投递支配，而不是被打断路径支配。
+   → **已定位到判据（60 s 兜底超时 + 15 s 重试节拍 + ≈14 s 一次尝试 ≈ 89 s），未修，见 §9.7.2。**
 3. 阶段 A 原型 / 追问唤醒 / 自愈退单三条**仍未在真机复验**（本轮全部时间用在打断与派单上）。
 
 ### 9.6 复跑要点（补 §5）
@@ -247,5 +249,58 @@ cd ~/weather-relay && git status --short                     # 应有输出为�
 - 宿主 stdout 重定向到文件时**不刷行**（`script -q` 的 pty 也一样），实时观测请改读
   `~/Library/Application Support/捎话 Tidings/relay.db`（`MessageEntity`）与
   `/private/tmp/tidings-ws/artifacts/*/task.log`。
+- `constructionTraceGate` 会拦注释里的 **ISO 日期**（`2026-11-01` 这种），理由是日期会让
+  下一个人以为结论有时效。写缺陷史时写「真机现场：…」不带日期；要留完整时间线就建 ADR。
+  本轮为这个栽了两次。
+
+## 9.7 第二轮：9.5 第 1 条定死并修掉，第 2 条定位到判据
+
+### 9.7.1 「一次 stop 没杀干净」→ 已修（`cd401ad8`）
+
+**根因不是原以为的二选一**（"注册时机"还是"工单归属"），而是**根本杀不干净**：
+
+`destroyProcessTree` 把「根进程 `isAlive == false`」当成「整棵树没了」。而
+`ProcessHandle.descendants()` 有两个性质 —— 是**快照**，且**只对活着的祖先有效**。
+SIGTERM 打过去、根干净退出后，它的后代立刻被过继给 init，句柄再也枚举不到；于是
+宽限循环只等根、立刻退出，`forceKill(proc)` 因根已死而跳过，**下层还在跑**。
+界面形态就是「卡片已经翻 `Aborted`，工作树还在被改」。
+
+修法两层：
+1. `destroyProcessTree` 先把整棵树的 pid 记进集合，之后**按 pid 逐个核对死活**，与根的
+   死活解耦；宽限期内补一次快照，最后对幸存者统一 SIGKILL。
+2. `abortAll` 从"取一次 `running.keys` 快照"改成**重扫**（≤5 轮 / 100ms 间隔）——
+   `running` 的条目是在 `pb.start()` **之后**才写进去的，并发派单时第二条完全可能落在
+   快照之后。这是"一次 stop 只摘掉一个"的另一半成因。
+
+守卫 `abortKillsDescendantsThatIgnoreSigterm`：假 CLI 起一个 `trap "" TERM` 的子进程
+（只能 SIGKILL 收），`abortAll()` 之后断言根与子都必须死。**对旧实现会红**（已实测：
+换回旧写法 → `TimeoutCancellationException: Timed out waiting for 20000 ms`，
+子进程永远不死）。新实现 `:agentNode:test` 13/13 绿。
+
+### 9.7.2 投递 60–95 s + 手机挂「重发」→ 定位到具体判据，**未修**
+
+原先记的是"投递延迟"。实际是**两个状态机在互相骗**：
+
+- 群发路径 `runGroupSend` 有 60 s 兜底硬超时（`SEND_HARD_TIMEOUT_MS`），超时走
+  `outcome == null` 分支把气泡收尾成 `DeliveryState.Failed`
+  （`RelayControllerGroupsComponent.kt` 的 null 分支）；
+- 而那条消息的帧**可能早就进了 `Messenger` 的积压队列**，队列每 15 s 一拍
+  （`DEFAULT_QUEUE_RETRY_INTERVAL_MS`）继续补发，最终送达；
+- 一次失败尝试本身要 ≈14 s：UDP 退避 1+2+4 s，再回退 TCP 7 s。
+
+算术：60（超时）+ ≤15（重试节拍）+ ≈14（一次尝试）≈ **89 s**，正落在实测 60–95 s 区间。
+所以手机挂「重发」是**谎**：它既没失败、也没停，只是慢。
+
+修法方向（下一轮）：`Messenger` 要把「已入队」这个事实回给上层（它现在返回 `QUEUED`），
+群发路径按它置 `Queued` 而不是 `Failed`；`Failed` 只留给"队列已丢弃该帧"。
+注意这与 `RelayControllerGroupsComponent` 现有那条注释（"终态恒为 `Sent`，不按
+`SendOutcome` 折 `Queued`"）冲突 —— 那条注释的理由是"群扇出没有逐成员回执，
+折 Queued 会让已收到的人被标错"。所以真正要加的是**第三态**（已排队 / 在补发），
+不是把 Queued 套上去。1:1 路径已经在按 `SendOutcome` 折 `Queued`，可作参照。
+
+### 9.7.3 仍未复验
+
+阶段 A 原型 / 追问唤醒 / 自愈退单三条**依旧只有单测**，本轮全部时间用在修打断与
+资源串上。这三条是全篇最大的口径缺口：它们在第 1 版的 §0 表里被写成 ✅ 已实现。
 
 
