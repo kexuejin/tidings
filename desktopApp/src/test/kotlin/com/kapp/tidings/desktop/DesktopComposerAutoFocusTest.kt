@@ -17,7 +17,6 @@ import androidx.compose.ui.input.key.KeyEventType
 import androidx.compose.ui.unit.Density
 import com.kapp.tidings.ui.desktop.DesktopComposer
 import com.kapp.tidings.ui.desktop.DesktopPreviewActions
-import com.kapp.tidings.ui.desktop.zhouPeer
 import com.kapp.tidings.ui.theme.AppTheme
 import kotlin.test.Test
 import kotlin.test.assertEquals

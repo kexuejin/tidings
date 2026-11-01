@@ -456,7 +456,7 @@ tasks.register("cjkLiteralGateSelfTest") {
             "composeApp/src/commonTest/kotlin/B.kt" to false,
             "composeApp/src/jvmTest/kotlin/B.kt" to false,
             "androidApp/src/screenshotTest/kotlin/Preview.kt" to false,
-            "composeApp/src/commonMain/kotlin/com/kapp/tidings/ui/desktop/PreviewState.kt" to false,
+            "androidApp/src/screenshotTest/kotlin/com/kapp/tidings/ui/desktop/PreviewState.kt" to false,
             "desktopApp/src/test/kotlin/C.kt" to false,
         )
         exclusionCases.forEach { (path, expected) ->

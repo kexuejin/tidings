@@ -155,11 +155,7 @@
     <!-- 消息页签的「工作区」分区（m-home-recent 的第二段）。与会话区是两把尺子：
          上面按最后一条消息、下面按最近活动；两个红点也不同义（未读条数 / 待审批条数）。
          阶段一（协议还没有 wsId）标题是 Agent 行，阶段二才是工作区行。 -->
-    <string name="conv_inbox_ws_title">工作区</string>
-    <string name="conv_inbox_ws_count_short">%1$d 个</string>
-    <string name="conv_inbox_ws_count_short_agents">%1$d 个 Agent</string>
     <string name="conv_inbox_ws_pending">待审批 %1$d</string>
-    <string name="conv_inbox_ws_group_counts">%1$d 个 Agent · %2$d 个工作区</string>
     <string name="conv_inbox_ws_group_offline"> · %1$s在线</string>
     <string name="conv_inbox_ws_row_agent_sessions">%1$d 个会话 · 对端还没宣告过工作区</string>
     <string name="conv_inbox_ws_row_agent_none">尚未收到会话宣告</string>
@@ -167,7 +163,6 @@
     <!-- 未归属会话行的副行（原型 relay.html:4260 的 .t2，原样）。 -->
     <string name="conv_inbox_ws_row_unassigned_body">收到了会话，但没收到它属于哪个工作区</string>
     <!-- 未归属会话那一行的计数（父稿 §2.5：一行计数，**不造卡**）。 -->
-    <string name="conv_inbox_ws_row_unassigned_count">%1$d 个会话没报工作区</string>
     <string name="conv_inbox_ws_row_ws_sessions">%1$s · %2$d 个会话</string>
     <string name="conv_inbox_ws_row_unnamed">未命名工作区</string>
     <string name="conv_inbox_ws_row_unnamed_hint">没收到工作区名（不拿路径顶替）</string>
@@ -176,11 +171,7 @@
     <string name="conv_inbox_ws_pending_pill">%1$d 项待批</string>
     <!-- Agent 段（工作区页签的第二层：节点 → Agent → 工作区）。首行是这个 Agent 的身份键。 -->
     <string name="workspace_agent_section_sessions">%1$d 个会话</string>
-    <string name="workspace_agent_section_none">对端还没宣告过工作区</string>
     <string name="workspace_agent_section_pending">%1$d 项待批</string>
-    <string name="conv_inbox_ws_tail_title">还有 %1$d 行</string>
-    <string name="conv_inbox_ws_tail_body">去工作区看板看全部</string>
-    <string name="conv_inbox_ws_tail_body_pending">其中 %1$d 项待审批 · 去工作区看板看全部</string>
     <string name="conv_inbox_ws_open_chat">打开聊天</string>
 
     <!-- 全局搜索（m-gsearch / m-gsearch-empty）。三段标题只有三个词，没有数量徽标。 -->
@@ -215,8 +206,6 @@
     <string name="chat_agent_not_authorized">%1$s 没有执行：你不在它的授权名单里</string>
     <string name="chat_agent_delegated_by_tag">%1$s 本机接不了，任务已按标签 %2$s 委派给远端节点</string>
     <string name="chat_agent_request_grant">申请授权</string>
-    <string name="chat_agent_grant_requested">已发出授权申请，等设备方确认</string>
-    <string name="chat_agent_grant_failed">申请没发出去，稍后再试</string>
     <string name="chat_group_members_changed">群成员有变化</string>
     <!--
          成员变动**带上谁做的、涉及谁**。
@@ -267,11 +256,8 @@
     <string name="chat_image_preview_title">查看图片</string>
     <string name="chat_image_preview_close">关闭预览</string>
     <string name="chat_mention_all">所有人</string>
-    <string name="chat_mention_title">选择要 @ 的成员</string>
     <string name="chat_peer_offline">对方离线，消息会排队</string>
     <string name="chat_restored_offline">离线 · 下面是本机存下来的历史</string>
-    <string name="chat_caps_label">支持特性：%1$s</string>
-    <string name="chat_tcp_port">TCP %1$d</string>
     <!-- 「清空本会话聊天记录」（聊天页头部 → ⋮）。语义：只删**本机**这个会话的记录，
          对方那里不受影响；%1$s 是会话显示名，写进正文是为了让人核对清的是哪一个。 -->
     <string name="chat_clear_local_action">清空本会话记录</string>
@@ -294,22 +280,8 @@
     <!-- 大标题下的副标题。三个数分开写而不做成「5 个已知 · 4 在线」这种拼接，
          是因为拼接串在英文或其它语言下语序就崩了。 -->
     <string name="nodes_subtitle">%1$d 个已知 · %2$d 在线 · %3$d 离线</string>
-    <string name="nodes_syncbar">mDNS 广播中 · UDP %1$d / TCP %2$d</string>
-    <string name="nodes_syncbar_down">广播已停 · UDP %1$d / TCP %2$d</string>
     <!-- 原型同步条右端那颗动作（relay.html:3312「刷新」/ :3399「重新监听」）。 -->
-    <string name="nodes_syncbar_refresh">刷新</string>
-    <string name="nodes_local_card">本机</string>
-    <string name="nodes_local_address">本机地址</string>
     <!-- 原型 m10-nodes-empty 的本机卡：地址还没拿到时不是印「—」，而是把原因写出来。 -->
-    <string name="nodes_local_address_missing">还没拿到本机地址</string>
-    <string name="nodes_local_discovery">发现方式</string>
-    <string name="nodes_discovery_on">mDNS _relay._udp · 每 5 秒</string>
-    <string name="nodes_discovery_off">没有在广播，别人的节点页里看不到你</string>
-    <string name="nodes_local_status">状态</string>
-    <string name="nodes_state_ok">正常 · 本机防火墙已放行</string>
-    <string name="nodes_state_starting">正在监听端口…</string>
-    <string name="nodes_loading">正在启动节点…</string>
-    <string name="nodes_state_failed">启动失败 · 见下方提示</string>
     <string name="node_state_stopped">已停止</string>
     <!-- 节点详情（原型 m-nodedetail / d-nodes 右栏，2026-10-12 新增）。
          昵称一律 remark || nick，所以详情页标题与列表行都用 displayName。 -->
@@ -345,21 +317,12 @@
     <string name="nodes_my_qr_hint">对方在「节点 → 扫码配对」里扫这张码就能加上你：同一 Wi-Fi 直接连；码里带了公网候选，跨网也能让对方扫。</string>
     <string name="nodes_my_qr_no_address">节点还没拿到本机地址，现在印不出二维码。等网络就绪后再打开试试。</string>
     <string name="nodes_my_qr_too_long">地址太长，印不成二维码。让对方在「添加节点 → 填地址」里手动输入。</string>
-    <string name="nodes_group_lan">局域网发现</string>
     <string name="nodes_lan_empty">同一局域网里还没发现别的节点。对方也要开着捎话才会被搜到。</string>
-    <string name="nodes_group_saved">已保存的节点（管理）</string>
-    <string name="nodes_add_manual_sub">IPv4 或 ip:port，端口默认 %1$d</string>
     <!-- 分组标题把条数写进同一句：拼接出来的句子换个语序就散架，所以各留一个带参的 key。 -->
-    <string name="nodes_group_lan_count">局域网发现（%1$d）</string>
-    <string name="nodes_group_saved_count">已保存的节点（管理）（%1$d）</string>
-    <string name="nodes_saved_empty">还没有手动保存的节点。若对端设备未开启自动发现，可填它的地址加进来。</string>
     <string name="nodes_group_add">添加节点</string>
     <string name="nodes_scan_title">扫码配对</string>
-    <string name="nodes_add_manual_title">填对方地址</string>
-    <string name="nodes_footer">最多保存 %1$d 个手动节点。节点离线时消息会排队，重连后自动补发。</string>
 
     <!-- 添加节点底部弹层 -->
-    <string name="nodes_add_sheet_sub">扫描对方二维码，或直接填地址</string>
     <!--
         节点页空态 krow① 的副行（原型 `prototype/relay.html:3427` 逐字「扫码或填对方地址」）。
         与上面 `nodes_add_sheet_sub` 不是同一句：那条是**弹层内**的说明（弹层已经开了，
@@ -443,7 +406,6 @@
     <string name="nodes_manual_name">名字（可选）</string>
     <string name="nodes_manual_name_hint">只在这台设备上显示。对方握手后，列表里显示的是它自己的昵称。</string>
 
-    <string name="disc_peers_online">在线节点</string>
     <string name="disc_retry_start">重新监听</string>
     <string name="disc_connect">连接</string>
     <!--
@@ -482,8 +444,6 @@
     <!-- 工作区看板与会话详情 -->
     <string name="agent_title">工作区</string>
     <string name="agent_subtitle_pending">%1$d 项待审批</string>
-    <string name="workspace_global_pending_banner">有 %1$d 项操作等待审批</string>
-    <string name="workspace_active_session_label">活跃会话</string>
     <string name="workspace_no_sessions">暂无会话</string>
     <!-- 工作区详情的整屏空态：工作区对象不存在且一条会话都没有时。
          此前这一屏只剩一张写着「暂无会话」的小卡，大半屏是空的 —— 空态没有"出路"。 -->
@@ -503,23 +463,17 @@
       判据：**「没有」与「还没拿到」是两件事，前者可以断言，后者只能如实说。**
     -->
     <string name="workspace_sessions_not_synced">这里还没同步到会话（服务器报告有 %1$d 个）；点「打开聊天」进这个工作区就会拉出来。</string>
-    <string name="workspace_total_sessions_format">共 %1$d 个会话 · 最新活动 %2$s</string>
     <!-- 工作区卡片底部 at-a-glance：把六类型里 board 层没透出的三类（队列/执行/产物）一并露出。
          格式为「X 队列 · Y 执行 · Z 产物」，仅在有数据时显示。 -->
     <string name="workspace_board_queue_format">%1$d 队列</string>
     <string name="workspace_board_runs_format">%1$d 执行</string>
     <string name="workspace_board_artifacts_format">%1$d 产物</string>
-    <string name="session_detail_title">会话详情</string>
-    <string name="session_detail_switch_action">切换会话</string>
-    <string name="session_detail_pending_approval">待审批操作</string>
     <string name="agent_count_items">%1$s 项</string>
     <!-- 原型 wsCardHTML 可见行是「在线 · ~/src/… · TCP 17879」；path 在协议里没有字段，
          这一行按真值只画它能画的两段（在线/离线 + TCP 端口）。TCP 是原样保留的协议词。 -->
-    <string name="agent_summary_line">%1$s · TCP %2$d</string>
     <!-- 页头汇总。原型 relay.html:4208-4211 的 sub =「N 台设备 · N 个 Agent · N 个工作区 · N 个会话[ · N 项待审批]」；
          代码此前只在有待批时印后半句，设备/Agent/工作区/会话四个数一个都没有。 -->
     <string name="workspace_board_subtitle">%1$d 台设备 · %2$d Agent · %3$d 工作区 · %4$d 会话</string>
-    <string name="workspace_bar_title">当前工作区</string>
     <string name="workspace_bar_switch">切换工作区</string>
     <string name="workspace_new_segment">开启新分段</string>
     <string name="workspace_branch_label">分支</string>
@@ -537,17 +491,12 @@
     <string name="agent_empty_exit_body">确认对方在线，再回来看这里</string>
     <string name="agent_offline_title">Agent 离线</string>
     <string name="agent_offline_message">它上次在线是 %1$s。消息会排队，等它回来自动补发。</string>
-    <string name="agent_status_host">主机</string>
-    <string name="agent_status_port">TCP 端口</string>
-    <string name="agent_status_last_seen">最近在线</string>
-    <string name="agent_timeline_title">事件流</string>
     <string name="agent_messages_title">聊天消息</string>
     <string name="agent_sessions_empty">还没有会话。等对方设备上的 Agent 开始工作，这里就会出现它的会话。</string>
     <string name="agent_sessions_memory_note">会话与它的动态都保存在这台设备上，重启应用后仍在。</string>
     <!-- 会话分页（PPE-1 增补 D8）：点开工作区时按需拉历史会话，底部可继续加载。 -->
     <string name="agent_session_load_more">加载更多</string>
     <string name="agent_session_load_more_busy">加载中…</string>
-    <string name="agent_session_load_more_hint">宿主的会话历史只在你打开工作区时才拉取</string>
 
     <string name="agent_session_switch_title">切换会话</string>
     <string name="agent_session_archived_section">已归档会话 (%1$d)</string>
@@ -579,7 +528,6 @@
     <string name="agent_events_note">下面是该 Agent 与你的真实聊天消息（一条消息一张卡），不是结构化事件。</string>
     <string name="agent_timeline_empty">这个 Agent 还没有和你聊过天。</string>
     <string name="agent_open_chat">打开聊天</string>
-    <string name="agent_event_count">%1$d 条消息</string>
     <string name="agent_event_dir_out">我 → Agent</string>
     <string name="agent_event_dir_in">Agent → 我</string>
     <string name="agent_thought_process">思索过程</string>
@@ -604,7 +552,6 @@
     <!-- 新会话还没有标题时的分段标记（task-42 ④）。不用 sessionId 兜底：身份键不是标题；
          但也不能整条不画 —— 那会让「新建会话」看起来没有任何分段。 -->
     <!-- 聊天流的日期分隔：今天 / 昨天 / 具体日期（yyyy-MM-dd 由 UI 拼，不写死在这里）。 -->
-    <string name="chat_day_divider_today">今天</string>
     <string name="chat_day_divider_yesterday">昨天</string>
     <string name="chat_task_divider_new">新会话</string>
 
@@ -612,7 +559,6 @@
 
     <!-- 设置：屏1 身份与连接 -->
     <string name="set_title">设置</string>
-    <string name="set_title_sub">身份与连接</string>
     <string name="set_home_subtitle">连接、通知、外观、能力、数据与诊断</string>
     <string name="set_profile_title">我的资料</string>
     <!-- 资料子页顶栏副标题与表单卡里的占位兜底（原来硬编码在 Kotlin 里，进了 CJK 基线）。
@@ -623,8 +569,6 @@
     <string name="set_company">公司</string>
     <string name="set_dept">部门</string>
     <string name="set_team">团队</string>
-    <string name="set_avatar_label">头像 %1$d</string>
-    <string name="set_avatar_custom">自定义</string>
     <!-- 设置 · 上传头像（m-set-avatar / m15e-set-avatar-dark）。原型 relay.html:3735-3809；
          三张卡 + 一段「协议没通」的说明，全部是页面正文，没有 CHROME 元素。 -->
     <string name="set_avatar_page_title">上传头像</string>
@@ -684,7 +628,6 @@
     <string name="desk_nav_group_appear">外观与能力</string>
     <string name="desk_nav_group_data">数据与诊断</string>
     <string name="desk_nav_group_desk">这台电脑</string>
-    <string name="desk_nav_identity">身份与连接</string>
     <string name="desk_nav_trusted_devices">可信设备与配对</string>
     <string name="trusted_devices_desc">局域网与双栈可信设备管理。手机扫描此二维码即可快速配对加入信任圈。</string>
     <string name="trusted_devices_qr_title">本机配对二维码</string>
@@ -700,7 +643,6 @@
     <string name="trusted_devices_btn_mark_my">设为我的设备</string>
     <string name="trusted_devices_btn_revoke">撤销信任</string>
     <string name="trusted_devices_requests_title">待处理设备申请</string>
-    <string name="trusted_devices_requests_empty">暂无待处理的接入申请</string>
     <string name="trusted_devices_approve_as_my">批准为我的设备 (完全信任)</string>
     <string name="trusted_devices_approve_normal">批准协同</string>
     <string name="trusted_devices_request_access_label">对端申请：%1$s</string>
@@ -728,7 +670,6 @@
     <string name="desk_nav_transfers">传输记录</string>
     <string name="desk_nav_diagnostics">诊断</string>
     <string name="desk_nav_desktop">桌面</string>
-    <string name="desk_nav_ime">输入法自检</string>
     <string name="desk_nav_desktop_only">仅桌面端</string>
     <string name="desk_prefs_hint">托盘常驻与后台行为。这些设置只影响这台电脑，不会同步给对方 —— 所以它落在「这台电脑」这一组里，而这一组在移动端不画。</string>
     <string name="desk_prefs_power_title">省电后台档</string>
@@ -746,7 +687,6 @@
     <!-- 手机侧不显示私有绝对路径（/data/user/0/... 对用户没有信息量），换成这句。桌面保留真实路径。 -->
     <string name="set_data_dir_private">应用内部存储</string>
     <string name="set_conn_title">连接</string>
-    <string name="set_conn_reset">恢复默认</string>
     <!-- 卡头那枚小字的真实行为：只把默认端口填进输入框，不落盘 —— 名字必须与行为一致
          （「恢复默认」读起来像已保存）。 -->
     <string name="set_conn_fill_default_port">填入默认端口</string>
@@ -767,9 +707,6 @@
     <string name="set_conn_qr_fallback">相机坏了、码太远扫不清时，把上面这串字抄给对方，一样能加。</string>
 
     <!-- 设置：屏2 通知、外观、能力、数据与诊断 -->
-    <string name="set_more_subtitle">通知、外观、能力、数据与诊断</string>
-    <string name="set_more_entry_title">更多设置</string>
-    <string name="set_more_entry_sub">通知、外观、能力声明、数据与诊断</string>
     <string name="set_more_notif_title">通知</string>
     <!-- 原型这张卡的标题（prototype/relay.html:3877），与页面标题不是同一个词 -->
     <string name="set_notify_card_title">提醒</string>
@@ -915,7 +852,6 @@
     <!-- 诊断页：本机身份证书的到期日（会在此前自动续签，配对关系不受影响） -->
     <string name="set_diag_cert_expiry">证书到期</string>
     <string name="set_diag_crypto_value">无 · 局域网内明文</string>
-    <string name="set_diag_rerun">重新自检</string>
     <string name="set_diag_selfcheck_unavailable">除「导出诊断包」外，这一屏只显示实时状态；其它自检动作尚未接线。</string>
     <!-- 与上一条互斥：宿主连「导出诊断包」都没接时用这条 —— 不能引用一颗不存在的按钮。 -->
     <string name="set_diag_selfcheck_unavailable_no_export">这一屏只显示实时状态；自检动作尚未接线。</string>
@@ -976,9 +912,7 @@
     <string name="file_state_active_in">正在接收 %1$d%</string>
     <string name="file_state_active_out">正在发送 %1$d%</string>
     <string name="file_state_completed_in">已接收</string>
-    <string name="file_state_completed_out">已送达</string>
     <string name="file_state_sent_success">发送成功</string>
-    <string name="file_state_received_success">接收成功</string>
     <string name="file_state_failed">传输失败：%1$s</string>
     <string name="chat_file_send_failed_hint">发送失败，请重新选择文件发送</string>
     <string name="file_state_declined">对方已拒绝</string>
@@ -1046,8 +980,6 @@
     <string name="desktop_menu_import_files">导入文件…</string>
     <string name="desktop_menu_agents">工作区</string>
     <string name="desktop_menu_copy_node_id">复制本机 ID</string>
-    <string name="desktop_menu_theme_light">浅色</string>
-    <string name="desktop_menu_theme_dark">深色</string>
     <string name="desktop_menu_refresh_nodes">刷新节点</string>
     <string name="desktop_menu_diagnostics">诊断包</string>
     <string name="desktop_action_quit">退出</string>
@@ -1055,7 +987,6 @@
     <string name="desktop_menu_edit">编辑</string>
     <string name="desktop_menu_view">视图</string>
     <string name="desktop_menu_window">窗口</string>
-    <string name="desktop_menu_help">帮助</string>
     <string name="approval_focus_title">有 %1$s 项高危操作等待机主审批</string>
     <string name="card_action_merge_patch">合并此补丁</string>
     <!-- 停止：把「中止」从一句要背下来的咒语（stop/abort/cancel/停/取消）变成卡上的一点。
@@ -1084,7 +1015,6 @@
     <string name="chat_caps_section">能力</string>
     <string name="desktop_more_actions">更多操作</string>
     <string name="desktop_title_files">已落盘与传输中的文件</string>
-    <string name="desktop_title_nodes">%1$d 个节点在线 · 本机 %2$s</string>
     <!-- 工作区视图的标题栏副标题。原型 d-agents 的 tsub() 没有这一支（回落成了节点那句），
          这里补一句真的：这一屏看的就是「哪些工作区、各有几个会话在动」。 -->
     <string name="desktop_title_agents">已上报的工作区与会话</string>
@@ -1103,8 +1033,6 @@
     <string name="desktop_status_local">本机 %1$s · %2$s</string>
     <string name="desktop_status_pending">待补发 %1$d</string>
     <string name="desktop_status_pairing_link">配对链接</string>
-    <string name="desktop_status_control_plane">控制面 127.0.0.1:%1$d</string>
-    <string name="desktop_status_control_plane_off">控制面未启用</string>
     <!-- 和 nodes_state_* 不是同一套：桌面上 Running 报的是「已连接」（状态栏已经在数节点），
          所以启动中/已连接/启动失败各自独立。只有「已停止」两边同义，共用 node_state_stopped。 -->
     <string name="desktop_phase_starting">启动中</string>
@@ -1117,13 +1045,10 @@
 
     <!-- 输入框 -->
     <string name="desktop_composer_resize">拖动调整输入框高度</string>
-    <string name="desktop_composer_attach">文件…</string>
     <!-- 原型的工具行这里是「端到端加密」+ 盾牌（prototype/desktop/index.html:712），
          但协议层没有加密：线格式是明文 JSON（ARCHITECTURE.md:744/860，golden vector 就是明文），
          全仓零加密实现。盾牌与这句话都是原型的 mock 遗留，已改成如实描述传输路径。
          「局域网直连」只说真的：不经服务器、同一局域网内点对点。 -->
-    <string name="desktop_composer_e2e">局域网直连</string>
-    <string name="desktop_composer_tcp_split">超 800B · 走 TCP 分包</string>
     <string name="desktop_composer_placeholder">写点什么…</string>
     <string name="desktop_composer_draft">草稿 %1$d / %2$d B · %3$s</string>
     <string name="desktop_composer_send_hint">发送 · Shift+Enter 换行</string>
@@ -1357,7 +1282,6 @@
 
     <!-- 网段扫描与自动同步 -->
     <string name="cidr_section_title">网段探测与同步</string>
-    <string name="cidr_section_sub">跨网段自动探测与对端网段共享</string>
     <string name="cidr_input_label">添加网段 (CIDR)</string>
     <string name="cidr_input_hint">例如 192.168.1.0/24</string>
     <string name="cidr_add_action">添加网段</string>
@@ -1501,9 +1425,7 @@
 
     <!-- 历史消息检索 (History Search) -->
     <string name="hist_search_title">查找聊天记录</string>
-    <string name="hist_search_hint">搜索聊天记录</string>
     <string name="hist_search_input_hint">搜索当前会话</string>
-    <string name="hist_search_loading">搜索中...</string>
     <string name="hist_filter_all">全部</string>
     <string name="hist_filter_image">图片</string>
     <string name="hist_filter_file">文件</string>
@@ -1513,11 +1435,8 @@
     <string name="hist_search_empty">没有找到相关记录</string>
     <string name="hist_search_guide">输入关键词，搜索这个会话的聊天记录</string>
     <string name="hist_search_empty_hint">换个关键词试试</string>
-    <string name="hist_date_select_title">按日期查找</string>
     <string name="hist_date_clear">清除</string>
     <string name="hist_date_confirm">确定</string>
-    <string name="hist_date_month_day">%1$d月%2$d日</string>
-    <string name="hist_date_month_title">%1$d月</string>
     <!-- 命中行副行 = 「人名 · 相对日 时刻」，原型 HITS 逐字「老周 · 昨天 18:02」。
          相对日只做「昨天」一档（今天直接写时刻），更早写月日（复用 hist_date_month_day）
          —— 这是规范 listTime 口径；原型那句
@@ -1535,8 +1454,6 @@
     <string name="hist_date_range_title">日期范围</string>
     <string name="hist_date_start">开始</string>
     <string name="hist_date_end">结束</string>
-    <string name="hist_date_prev_month">上个月</string>
-    <string name="hist_date_next_month">下个月</string>
     <string name="hist_week_mon">一</string>
     <string name="hist_week_tue">二</string>
     <string name="hist_week_wed">三</string>
@@ -1546,7 +1463,6 @@
     <string name="hist_week_sun">日</string>
 
     <!-- 全局聚合检索 (Global Search) -->
-    <string name="global_search_title">全局搜索</string>
     <string name="global_search_hint">搜索联系人、聊天记录、文件…</string>
     <string name="global_search_section_contacts">联系人</string>
     <string name="global_search_section_messages">聊天记录</string>
@@ -1568,37 +1484,23 @@
          若将来 `GlobalSearchContactHit` 带上真实的最近互动时间再恢复这一格。 -->
 
     <!-- 文件夹与断点续传 (Folder Transfer & Resume) -->
-    <string name="transfer_folder_badge">文件夹</string>
     <string name="transfer_folder_count">%1$d 个文件</string>
-    <string name="transfer_folder_summary">%1$s 等 %2$d 个文件</string>
-    <string name="composer_action_folder">发送文件夹</string>
-    <string name="composer_folder_tooltip">发送文件夹</string>
     <string name="transfer_action_resume">继续</string>
     <string name="transfer_resume_hint">可续传</string>
 
     <!-- 传输记录 (Transfer Logs) -->
-    <string name="set_nav_transfers">传输记录</string>
     <string name="transfer_log_group_head">聊天与文件</string>
     <string name="transfer_log_title">传输记录</string>
     <string name="transfer_log_sub">显示最近 30 条文件传输。</string>
     <string name="transfer_log_hint">这一页没有列头、没有筛选、没有「清除记录」。行只有三样：名称、状态 · 大小 · 时间、以及一个「打开」按钮（没有 savedPath 时置灰）。</string>
-    <string name="transfer_log_clear">清除记录</string>
     <string name="transfer_log_empty">暂无传输记录</string>
-    <string name="transfer_log_direction_in">接收</string>
-    <string name="transfer_log_direction_out">发送</string>
     <!-- 传输记录行的状态词：原型 `TSTAT`（prototype/relay.html:4330-4336）done:'完成' / failed:'失败' / canceled:'已取消'。
          注意与文件卡那套（'已完成' / '发送成功'，:4351）不同 —— 本 key 只被 DesktopTransferLogPane 消费。 -->
     <string name="transfer_log_status_success">完成</string>
     <string name="transfer_log_status_failed">失败</string>
-    <string name="transfer_log_status_canceled">已取消</string>
 
     <!-- 自定义头像与诊断 (Avatar & Diagnostics) -->
-    <string name="avatar_custom_title">自定义头像</string>
-    <string name="avatar_custom_pick">选择图片</string>
-    <string name="avatar_custom_desc">支持 JPG、PNG、WebP，将自动裁切为 192×192</string>
-    <string name="avatar_preset_title">预设头像</string>
     <string name="diag_adaptive_title">适配对照与诊断</string>
-    <string name="diag_adaptive_desc">查看当前窗口尺寸类别、断点匹配与响应式布局状态</string>
     <!-- m-insets 适配对照页正文（原型 prototype/relay.html:3975-4004 screenInsets()，逐字照抄）。 -->
     <string name="r2_set_insets_goal">目标：整屏 edge-to-edge。根 Surface 铺满并绘制底色， safe-area 只在内容里应用一次，系统窗口色永远不可见。</string>
     <string name="r2_set_insets_old_title">旧版（真机症状）</string>
@@ -1626,12 +1528,9 @@
     <string name="r2_set_insets_iphone">顶部 62 pt · 底部 34 pt</string>
     <string name="r2_set_insets_k_gate">门禁</string>
     <string name="r2_set_insets_gate">必须真机截图 + 像素比测量，不能只看 Preview</string>
-    <string name="menu_create_group">新建群聊</string>
-    <string name="menu_search">搜索</string>
 
     <!-- PK 猜拳与掷骰子 (PK Games) -->
     <string name="chat_pk">PK（猜拳 / 骰子）</string>
-    <string name="chat_pk_hint_offline">在线的对端才有得玩</string>
     <string name="chat_pk_rps">猜拳</string>
     <string name="chat_pk_dice">掷骰子</string>
     <string name="chat_pk_dice_title">骰子</string>
@@ -1640,7 +1539,6 @@
     <string name="chat_pk_rock">石头</string>
     <string name="chat_pk_paper">布</string>
     <string name="chat_pk_scissors">剪刀</string>
-    <string name="chat_pk_dice_val">%1$d 点</string>
     <string name="chat_pk_title">互动游戏</string>
 
     <!-- Agent 审批与控制 (Agent Approvals & Controls) -->
@@ -1680,7 +1578,6 @@
     <string name="workspace_source_label">来源: %1$s</string>
     <string name="workspace_perm_label">当前权限: %1$s</string>
     <string name="agent_queue_title">任务队列</string>
-    <string name="agent_queue_empty">暂无队列任务</string>
     <string name="agent_queue_cancel">取消任务</string>
     <string name="agent_runs_title">执行状态</string>
     <string name="agent_run_state_running">进行中</string>
@@ -1710,7 +1607,6 @@
     <string name="chat_voice_stop">完成录音</string>
     <string name="chat_voice_rerecord">重录</string>
     <string name="chat_voice_too_short">说话时间太短</string>
-    <string name="chat_voice_failed">录音失败</string>
     <string name="chat_voice_permission_denied">无法开始录音，请检查麦克风权限</string>
 
     <!-- 协同群与权限进阶（群聊工作区协同体系） -->
@@ -1725,7 +1621,6 @@
     <string name="workspace_create_group_quick_btn">一键建群 / 共享</string>
     <string name="workspace_create_group_or_new">或关联本地全新目录</string>
     <string name="workspace_create_group_new_title">关联本地新目录</string>
-    <string name="workspace_create_group_browse">浏览目录…</string>
     <string name="workspace_create_group_agent_label">驻群智能体</string>
     <string name="workspace_create_group_name_label">群聊名称 (自动联动)</string>
     <string name="workspace_create_group_sync_devices">自动同步到我的移动设备 (免扫码)</string>
@@ -1743,16 +1638,9 @@
     <string name="workspace_default_resident_agent">🤖 DSH (默认本地执行助理)</string>
     <string name="workspace_member_section_humans">协同人类成员 (%1$d)</string>
     <string name="workspace_member_section_agents">入驻智能体 (%1$d)</string>
-    <string name="workspace_member_agent_dsh">DSH · 本地终端与执行引擎</string>
-    <string name="workspace_member_agent_gemini">Gemini · 架构设计与代码审阅</string>
-    <string name="workspace_member_no_workspace">本机还没有可暴露的项目</string>
     <string name="workspace_no_title_banner">这个工作区没有名字。对端只上报了它的标识 %1$s，没有上报名字 —— 我们不用那串标识冒充名字，等它补上。</string>
-    <string name="workspace_sessions_section">会话 (%1$d)</string>
-    <string name="workspace_events_section">事件流 (%1$d 条 · %2$s)</string>
     <string name="workspace_session_warn_no_announce">只收到事件，没收到会话宣告</string>
     <string name="workspace_session_pending_count">⚠️ %1$d 项待审</string>
-    <string name="workspace_unknown_task_desc">无特定任务描述</string>
-    <string name="workspace_event_empty">暂无结构化事件流</string>
     <string name="workspace_qr_dialog_desc">手机使用「捎话」扫描工作区直通码，自动完成「节点配对 + 工作区授权」。一次性授权凭证 · 15分钟有效。</string>
     <string name="workspace_qr_no_address">无法获取本机候选地址，请确保网络已连接并开放端口。</string>
     <string name="pairing_public_ipv6_hint">本机有公网 IPv6 候选：能否直连取决于路由器/主机防火墙是否放行入站，本应用不做打洞、也不代你改网络设置。同网段优先，跨网络时才试公网地址。</string>
@@ -1763,7 +1651,6 @@
     <string name="workspace_group_session_busy">执行中</string>
     <string name="workspace_group_session_ready">就绪</string>
     <string name="workspace_group_session_brief">📋 工作区当前会话: 「%1$s」 (%2$s)\n协同通道已连接，工作区事件与进度将实时同步至本群。</string>
-    <string name="agent_demo_driver_notice">演示驱动：未执行真实任务，未连接任何模型或工具。</string>
     <string name="agent_event_thinking_only_fallback">这一轮只有思考过程，没有正文</string>
 
     <!-- ===== issue 6：工作区三层 IA 重构（workspace-ia, task-4）===== -->
@@ -1815,15 +1702,6 @@
     <string name="diag_export_failed_write">诊断包没写出来：存储空间或权限不足。没有生成文件。</string>
     <string name="diag_export_failed_unexpected">导出失败：打包过程中出错了，请稍后重试。</string>
     <!-- 每个 agent 的执行范围（谁能让它干活）。四档从严到宽，每档都写清后果。 -->
-    <string name="agent_exec_policy_title">谁能让它干活</string>
-    <string name="agent_exec_policy_host_only">只有我</string>
-    <string name="agent_exec_policy_host_only_note">只接受这台机器上的操作。最安全。</string>
-    <string name="agent_exec_policy_trusted">我和我批准过的设备</string>
-    <string name="agent_exec_policy_trusted_note">可信设备面板里批准过的设备可以下指令。</string>
-    <string name="agent_exec_policy_owner_admin">再加上群主和管理员</string>
-    <string name="agent_exec_policy_owner_admin_note">群主与管理员无需另外批准即可下指令。</string>
-    <string name="agent_exec_policy_any_member">群内任何人</string>
-    <string name="agent_exec_policy_any_member_note">进这个群的所有人都能在这台机器上执行命令。</string>
 
     <!-- 每个 agent 的执行权限：逐设备勾选 -->
     <string name="agent_exec_who_title">谁能让它干活</string>
@@ -1882,7 +1760,6 @@
     <string name="card_type_approval">待审批</string>
     <string name="card_type_ask_question">方案决策</string>
     <!-- 卡片右上角的版本小字：原位刷新时让「这是第几版」可读，而不是默默变形。 -->
-    <string name="card_rev_tag">第 %1$d 版</string>
     <string name="card_progress_label">进展 %1$d%</string>
     <string name="card_diff_summary">%1$s +%2$d −%3$d</string>
     <!-- 审批锁三态的后两态（§5.3）：本机乐观置灰后的等待说明，与宿主判定后的全员提示。 -->
@@ -1934,4 +1811,21 @@
     <string name="group_auth_team_members">%1$d 名组员</string>
     <string name="group_auth_badge_self">本机声明</string>
     <string name="group_auth_entry">授权管理</string>
+    <string name="card_rev_tag">第 %1$d 版</string>
+
+    <string name="chat_caps_label">支持特性：%1$s</string>
+
+    <string name="desktop_composer_attach">文件…</string>
+
+    <string name="desktop_title_nodes">%1$d 个节点在线 · 本机 %2$s</string>
+
+    <string name="nodes_add_sheet_sub">扫描对方二维码，或直接填地址</string>
+
+    <string name="nodes_state_starting">正在监听端口…</string>
+
+    <string name="nodes_syncbar_down">广播已停 · UDP %1$d / TCP %2$d</string>
+
+    <string name="transfer_folder_badge">文件夹</string>
+
+    <string name="workspace_create_group_browse">浏览目录…</string>
 </resources>

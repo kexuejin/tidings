@@ -1,5 +1,11 @@
 # 历史遗留清理清单 · 2026-11-01 全量排查
 
+> **执行记录（同日深夜，按本文档执行清理）**：
+> - **已删**：A1（WsGateway/WsCodec + tests + agentNode/tools 跨网五件 + 文档提法）、A2（ModelEnvMapper + 2 测试 + AgyCliDriverTest 两用例）、A3（6 个零调用 SQL 查询；AgentEventLoadCapTest 改用 store 全量对照）、A4（cli 的 :agentNode 依赖）、A5（123 个死字符串 key，中英成对，机器核对零引用）、B1（OpenAiDriver）、B2（DsBotDriver + selectDriverIdForUserPrompt + DriverHonestyTest）、B4（**修正后 10 条**：见下）、B5（AgentGrantRuleEntity，19.sqm DROP）、B6（WorkspaceBindingEntity + Manager + 2 测试，19.sqm DROP）、B9（legacy JSON 镜像：SQLite 非空/迁移完成即 retire——删文件停写，save 加退役守卫）、B10（PreviewState.kt 挪进 androidApp/src/screenshotTest，同包免改 import）、C2/C3（16.sqm 注释、agentSenderIdFor 死兜底 KDoc）、D1-D7（前一轮已修）。
+> - **B4 修正**：原列 11 条中 `GET /v1/pairing-qr` 与 `GET/POST /v1/agent/session-pages*` **保留**——用户指出消费方在 `dsh-relay` 仓（src/tidings.ts:854/889/900 实调，session-pages 队列由其 session-page-responder 轮询回填，PROTOCOL-COVERAGE.md:57 同证）。实际删除：`/v1/announce`、`/v1/candidates`、`/v1/agent/queue`、`/v1/agent/run`、`/v1/agent/cancel`、`/v1/agent/artifact`、`/v1/agent/ack`、`GET/PUT /v1/agent/exec-policies`、`GET/PUT /v1/agent/exec-devices`（dsh-relay 全部路由调用面已核对，均不在其中）。
+> - **保留不动（附因）**：B3 NativeRelayDriver（注册在案的默认兜底，非死代码）；B7 FilePurpose.UPDATE/STICKER（对端协议互通词汇，删前须对齐对端）；B8 CAP_MSG_AGENT_SESSION（互通约定名）；C4 last_message_id（写而不读但无害，随下次换表迁移去）；D8 已在 README 补「枚举以插件仓为准」；D9 产品裁决未做（DSH 会话无任务卡终态面）。
+> - 数据库版本 19 → **20**（19.sqm 只做 DROP）；ScreenHistoryRecordTest 版本断言同步 20。
+
 > 排查口径：产品定位已调整（agent 主线 = CLI 派单 + dsh 状态投影桥），按「最终代码没有任何历史包袱」的标准逐文件核对引用方。每一条都附 grep 级证据；「仅测试引用」与「零引用」分开列，删除动作分三档：**A 可直接删 / B 待裁决删 / C 必修的断链（不是删，是补）**。
 >
 > 本文档只列清单与风险，不含任何代码改动。

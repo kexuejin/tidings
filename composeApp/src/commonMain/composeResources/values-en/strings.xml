@@ -132,18 +132,13 @@
     <string name="conv_menu_sort_recent">Sort: most recent first</string>
     <!-- Workspace section on the conversations tab (the second block of m-home-recent).
          Stage one (no wsId on the wire yet) titles Agent rows; stage two titles workspace rows. -->
-    <string name="conv_inbox_ws_title">Workspaces</string>
-    <string name="conv_inbox_ws_count_short">%1$d</string>
-    <string name="conv_inbox_ws_count_short_agents">%1$d agents</string>
     <string name="conv_inbox_ws_pending">%1$d awaiting approval</string>
-    <string name="conv_inbox_ws_group_counts">%1$d agents · %2$d workspaces</string>
     <string name="conv_inbox_ws_group_offline"> · online %1$s</string>
     <string name="conv_inbox_ws_row_agent_sessions">%1$d conversations · the peer never announced a workspace</string>
     <string name="conv_inbox_ws_row_agent_none">No conversation announced yet</string>
     <string name="conv_inbox_ws_row_unassigned">Unassigned conversations</string>
     <!-- Sub-line of the unassigned row (prototype relay.html:4260 .t2). -->
     <string name="conv_inbox_ws_row_unassigned_body">got the conversations, not which workspace they belong to</string>
-    <string name="conv_inbox_ws_row_unassigned_count">%1$d conversations did not report a workspace</string>
     <string name="conv_inbox_ws_row_ws_sessions">%1$s · %2$d conversations</string>
     <string name="conv_inbox_ws_row_unnamed">Unnamed workspace</string>
     <string name="conv_inbox_ws_row_unnamed_hint">No workspace name received (we do not fall back to the path)</string>
@@ -151,11 +146,7 @@
     <string name="conv_inbox_ws_badge_unknown_kind">Type not reported</string>
     <string name="conv_inbox_ws_pending_pill">%1$d to approve</string>
     <string name="workspace_agent_section_sessions">%1$d conversations</string>
-    <string name="workspace_agent_section_none">The peer never announced a workspace</string>
     <string name="workspace_agent_section_pending">%1$d to approve</string>
-    <string name="conv_inbox_ws_tail_title">%1$d more rows</string>
-    <string name="conv_inbox_ws_tail_body">See all in the workspace board</string>
-    <string name="conv_inbox_ws_tail_body_pending">%1$d awaiting approval · see all in the workspace board</string>
     <string name="conv_inbox_ws_open_chat">Open chat</string>
     <string name="conv_search_hint_global">Search</string>
 
@@ -180,8 +171,6 @@
     <string name="chat_agent_not_authorized">%1$s did not run: you are not on its authorization list</string>
     <string name="chat_agent_delegated_by_tag">%1$s cannot run it locally; the task was dispatched by tag %2$s to a remote node</string>
     <string name="chat_agent_request_grant">Request access</string>
-    <string name="chat_agent_grant_requested">Access requested — waiting for the device owner to approve</string>
-    <string name="chat_agent_grant_failed">Could not send the request; try again later</string>
     <string name="chat_group_members_changed">Group members updated</string>
     <string name="common_name_list_separator">, </string>
     <string name="chat_group_member_added">%1$s invited %2$s to the group</string>
@@ -216,11 +205,8 @@
     <string name="chat_image_preview_title">View Image</string>
     <string name="chat_image_preview_close">Close Preview</string>
     <string name="chat_mention_all">All</string>
-    <string name="chat_mention_title">Select member to @mention</string>
     <string name="chat_peer_offline">Peer is offline; messages will be queued</string>
     <string name="chat_restored_offline">Offline · Local conversation history</string>
-    <string name="chat_caps_label">Capabilities: %1$s</string>
-    <string name="chat_tcp_port">TCP %1$d</string>
     <!-- "Clear this chat" (chat header to overflow menu). Semantics: removes this conversation's
          history on THIS device only, the other side is untouched; %1$s is the conversation name,
          shown so the reader can confirm which chat is being cleared. -->
@@ -248,7 +234,6 @@
     <!-- Divider label for a new session whose title has not arrived yet (task-42 ④).
          We do not fall back to the sessionId (an identity key is not a title), but we also
          do not omit the divider — that would make a new session look like it never started. -->
-    <string name="chat_day_divider_today">Today</string>
     <string name="chat_day_divider_yesterday">Yesterday</string>
     <string name="chat_task_divider_new">New session</string>
 
@@ -257,21 +242,7 @@
     <!-- 大标题下的副标题。三个数分开写而不做成「5 个已知 · 4 在线」这种拼接，
          是因为拼接串在英文或其它语言下语序就崩了。 -->
     <string name="nodes_subtitle">%1$d known · %2$d online · %3$d offline</string>
-    <string name="nodes_syncbar">mDNS broadcasting · UDP %1$d / TCP %2$d</string>
-    <string name="nodes_syncbar_down">Broadcasting stopped · UDP %1$d / TCP %2$d</string>
-    <string name="nodes_syncbar_refresh">Refresh</string>
-    <string name="nodes_local_card">Local Device</string>
-    <string name="nodes_local_address">Local address</string>
     <!-- Prototype m10-nodes-empty writes the reason here instead of printing a dash. -->
-    <string name="nodes_local_address_missing">Local address not yet acquired</string>
-    <string name="nodes_local_discovery">Discovery method</string>
-    <string name="nodes_discovery_on">mDNS _relay._udp · every 5s</string>
-    <string name="nodes_discovery_off">Not broadcasting; hidden from others' node lists</string>
-    <string name="nodes_local_status">Status</string>
-    <string name="nodes_state_ok">Normal · Allowed by firewall</string>
-    <string name="nodes_state_starting">Listening on ports…</string>
-    <string name="nodes_loading">Starting node…</string>
-    <string name="nodes_state_failed">Startup failed · see details below</string>
     <string name="node_state_stopped">Stopped</string>
     <!-- Node detail (prototype m-nodedetail / d-nodes right pane, added 2026-10-12). -->
     <string name="nodes_subtitle_short">%1$d peers · %2$d online</string>
@@ -304,18 +275,10 @@
     <string name="nodes_my_qr_hint">Have the other side scan this code in "Nodes → Scan to Pair" to add you: same Wi-Fi connects directly; the code also carries public-network candidates, so it works across networks.</string>
     <string name="nodes_my_qr_no_address">The node has no local address yet, so the QR code cannot be generated. Try again once the network is ready.</string>
     <string name="nodes_my_qr_too_long">The address is too long to encode as a QR code. Ask the other side to enter it in "Add Node → Enter Address".</string>
-    <string name="nodes_group_lan">LAN Discovery</string>
     <string name="nodes_lan_empty">No other nodes discovered on LAN. Others must also run Tidings to be discovered.</string>
-    <string name="nodes_group_saved">Saved Nodes (Managed)</string>
-    <string name="nodes_add_manual_sub">IPv4 or ip:port; default port %1$d</string>
     <!-- 分组标题把条数写进同一句：拼接出来的句子换个语序就散架，所以各留一个带参的 key。 -->
-    <string name="nodes_group_lan_count">LAN Discovery (%1$d)</string>
-    <string name="nodes_group_saved_count">Saved Nodes (Managed) (%1$d)</string>
-    <string name="nodes_saved_empty">No manually saved nodes. Desktop nodes will not appear automatically; add their address manually.</string>
     <string name="nodes_group_add">Add Node</string>
     <string name="nodes_scan_title">Scan to Pair</string>
-    <string name="nodes_add_manual_title">Enter Peer Address</string>
-    <string name="nodes_footer">Up to %1$d manual nodes can be saved. Messages are queued when nodes are offline.</string>
 
     <!--
         节点页合并列表 / 行尾 ⋯ 菜单 / 「出示我的二维码」入口（W2 本轮落地）。
@@ -346,7 +309,6 @@
     <string name="nodes_manual_name_hint">Shown on this device only. After the handshake, the list shows the other side's own nickname.</string>
 
     <!-- 添加节点底部弹层 -->
-    <string name="nodes_add_sheet_sub">Scan QR code or enter address manually</string>
     <!-- 节点页空态入口行副行；与上面那条不是同一句（见 zh 版注释）。 -->
     <string name="nodes_add_entry_sub">Scan a code or type their address</string>
     <string name="nodes_seg_scan">Scan QR</string>
@@ -377,7 +339,6 @@
     <string name="nodes_error_two_ports">Address already includes a port; leave port field empty.</string>
     <string name="nodes_timeout">Peer did not respond within 3s. Ensure both devices are on the same Wi-Fi.</string>
 
-    <string name="disc_peers_online">Online Nodes</string>
     <string name="disc_retry_start">Listen Again</string>
     <string name="disc_connect">Connect</string>
     <string name="disc_vpn_warning">VPN / overlay network detected. Devices on the same network can connect by scanning the QR; after pairing, switching networks recovers automatically — no re-scan needed.</string>
@@ -410,27 +371,19 @@
     <!-- 工作区看板与会话详情 -->
     <string name="agent_title">Workspaces</string>
     <string name="agent_subtitle_pending">%1$d approvals waiting</string>
-    <string name="workspace_global_pending_banner">%1$d operations pending approval</string>
-    <string name="workspace_active_session_label">Active Session</string>
     <string name="workspace_no_sessions">No sessions</string>
     <string name="workspace_detail_empty_title">This workspace has no sessions yet</string>
     <string name="workspace_detail_empty_body">The agent host has not reported any sessions for it yet. Wait for it to run, or go back to the workspace list.</string>
     <string name="workspace_detail_empty_back">Back to workspaces</string>
     <string name="workspace_sessions_not_synced">Sessions are not synced here yet (the host reports %1$d); opening this workspace pulls them.</string>
-    <string name="workspace_total_sessions_format">%1$d sessions · Latest activity %2$s</string>
     <string name="workspace_board_queue_format">%1$d queued</string>
     <string name="workspace_board_runs_format">%1$d running</string>
     <string name="workspace_board_artifacts_format">%1$d artifacts</string>
-    <string name="session_detail_title">Session Detail</string>
-    <string name="session_detail_switch_action">Switch Session</string>
-    <string name="session_detail_pending_approval">Pending Approval</string>
     <string name="agent_count_items">%1$s items</string>
     <!-- Prototype wsCardHTML shows "online · ~/src/… · TCP 17879"; there is no path field in the
          protocol, so this line carries the two parts it can, from real values. -->
-    <string name="agent_summary_line">%1$s · TCP %2$d</string>
     <!-- Board header summary; prototype relay.html:4208-4211. -->
     <string name="workspace_board_subtitle">%1$d devices · %2$d agents · %3$d spaces · %4$d chats</string>
-    <string name="workspace_bar_title">Active Workspace</string>
     <string name="workspace_bar_switch">Switch Workspace</string>
     <string name="workspace_new_segment">New Segment</string>
     <string name="workspace_branch_label">Branch</string>
@@ -446,16 +399,11 @@
     <string name="agent_empty_exit_body">Confirm the peer is online, then come back</string>
     <string name="agent_offline_title">Agent Offline</string>
     <string name="agent_offline_message">Last seen %1$s. Messages will be queued and sent upon reconnect.</string>
-    <string name="agent_status_host">Host</string>
-    <string name="agent_status_port">TCP Port</string>
-    <string name="agent_status_last_seen">Last Seen</string>
-    <string name="agent_timeline_title">Event Stream</string>
     <string name="agent_messages_title">Chat Messages</string>
     <string name="agent_sessions_empty">No sessions yet. Once an Agent starts working on the other device, its sessions will appear here.</string>
     <string name="agent_sessions_memory_note">Sessions and their activity are kept on this device and survive a restart.</string>
     <string name="agent_session_load_more">Load more</string>
     <string name="agent_session_load_more_busy">Loading…</string>
-    <string name="agent_session_load_more_hint">The host fetches conversation history only when you open a workspace</string>
 
     <string name="agent_session_switch_title">Switch session</string>
     <string name="agent_session_archived_section">Archived sessions (%1$d)</string>
@@ -487,7 +435,6 @@
     <string name="agent_events_note">Chat history with this Agent (one card per message), not structured events.</string>
     <string name="agent_timeline_empty">No conversation with this Agent yet.</string>
     <string name="agent_open_chat">Open Chat</string>
-    <string name="agent_event_count">%1$d messages</string>
     <string name="agent_event_dir_out">Me → Agent</string>
     <string name="agent_event_dir_in">Agent → Me</string>
     <string name="agent_thought_process">Thought process</string>
@@ -498,7 +445,6 @@
 
     <!-- 设置：屏1 身份与连接 -->
     <string name="set_title">Settings</string>
-    <string name="set_title_sub">Identity &amp; Connection</string>
     <string name="set_home_subtitle">Connection, notifications, appearance, capabilities, data &amp; diagnostics</string>
     <string name="set_profile_title">My Profile</string>
     <!-- 资料子页顶栏副标题与表单卡里的占位兜底（原来硬编码在 Kotlin 里，进了 CJK 基线）。
@@ -509,8 +455,6 @@
     <string name="set_company">Company</string>
     <string name="set_dept">Department</string>
     <string name="set_team">Team</string>
-    <string name="set_avatar_label">Avatar %1$d</string>
-    <string name="set_avatar_custom">Custom</string>
     <!-- 设置 · 上传头像（m-set-avatar / m15e-set-avatar-dark）。原型 relay.html:3735-3809；
          三张卡 + 一段「协议没通」的说明，全部是页面正文，没有 CHROME 元素。 -->
     <string name="set_avatar_page_title">Upload Avatar</string>
@@ -581,7 +525,6 @@
     <string name="desk_nav_group_appear">Appearance &amp; capabilities</string>
     <string name="desk_nav_group_data">Data &amp; diagnostics</string>
     <string name="desk_nav_group_desk">This computer</string>
-    <string name="desk_nav_identity">Identity &amp; connection</string>
     <string name="desk_nav_trusted_devices">Trusted Devices &amp; Pairing</string>
     <string name="trusted_devices_desc">LAN &amp; dual-stack trusted device management. Scan this QR code on your mobile device to pair.</string>
     <string name="trusted_devices_qr_title">Pairing QR Code</string>
@@ -597,7 +540,6 @@
     <string name="trusted_devices_btn_mark_my">Mark as My Device</string>
     <string name="trusted_devices_btn_revoke">Revoke Trust</string>
     <string name="trusted_devices_requests_title">Pending Device Requests</string>
-    <string name="trusted_devices_requests_empty">No pending requests</string>
     <string name="trusted_devices_approve_as_my">Approve as My Device (Full Trust)</string>
     <string name="trusted_devices_approve_normal">Approve</string>
     <string name="trusted_devices_request_access_label">Requested: %1$s</string>
@@ -625,7 +567,6 @@
     <string name="desk_nav_transfers">Transfer log</string>
     <string name="desk_nav_diagnostics">Diagnostics</string>
     <string name="desk_nav_desktop">Desktop</string>
-    <string name="desk_nav_ime">IME self-check</string>
     <string name="desk_nav_desktop_only">Desktop only</string>
     <string name="desk_prefs_hint">Tray residency and background behaviour. These settings only affect this computer and are never synced to the other side — which is why they live under "This computer", a group that is not drawn on mobile.</string>
     <string name="desk_prefs_power_title">Power saver background mode</string>
@@ -643,7 +584,6 @@
     <!-- 手机侧不显示私有绝对路径（/data/user/0/... 对用户没有信息量），换成这句。桌面保留真实路径。 -->
     <string name="set_data_dir_private">App-internal storage</string>
     <string name="set_conn_title">Connection</string>
-    <string name="set_conn_reset">Restore Defaults</string>
     <!-- 卡头那枚小字的真实行为：只把默认端口填进输入框，不落盘 —— 名字必须与行为一致
          （「恢复默认」读起来像已保存）。 -->
     <string name="set_conn_fill_default_port">Fill in Default Port</string>
@@ -663,9 +603,6 @@
     <string name="set_conn_qr_fallback">If the camera is broken or the code is too far to scan, read the string above to the other side — it works just as well.</string>
 
     <!-- 设置：屏2 通知、外观、能力、数据与诊断 -->
-    <string name="set_more_subtitle">Notifications, appearance, capabilities, data &amp; diagnostics</string>
-    <string name="set_more_entry_title">More Settings</string>
-    <string name="set_more_entry_sub">Notifications, appearance, capabilities, data &amp; diagnostics</string>
     <string name="set_more_notif_title">Notifications</string>
     <string name="set_more_notif_agent">Agent Notifications</string>
     <string name="set_more_notif_agent_sub">Notify on new messages in Agent sessions</string>
@@ -785,7 +722,6 @@
     <string name="set_diag_crypto">Transport Encryption</string>
     <string name="set_diag_cert_expiry">Certificate expires</string>
     <string name="set_diag_crypto_value">None · Plaintext on LAN</string>
-    <string name="set_diag_rerun">Rerun Diagnostics</string>
     <string name="set_diag_selfcheck_unavailable">Apart from exporting a diagnostics package, this screen only shows live state; other self-checks are not wired yet.</string>
     <!-- 与上一条互斥：宿主连「导出诊断包」都没接时用这条 —— 不能引用一颗不存在的按钮。 -->
     <string name="set_diag_selfcheck_unavailable_no_export">This screen shows live state only; self-check actions are not wired up yet.</string>
@@ -841,9 +777,7 @@
     <string name="file_state_active_in">Receiving %1$d%</string>
     <string name="file_state_active_out">Sending %1$d%</string>
     <string name="file_state_completed_in">Received</string>
-    <string name="file_state_completed_out">Delivered</string>
     <string name="file_state_sent_success">Sent</string>
-    <string name="file_state_received_success">Received</string>
     <string name="file_state_failed">Transfer failed: %1$s</string>
     <string name="chat_file_send_failed_hint">Send failed. Please pick the file again to send it</string>
     <string name="file_state_declined">Peer declined transfer</string>
@@ -906,8 +840,6 @@
     <string name="desktop_menu_import_files">Import Files…</string>
     <string name="desktop_menu_agents">Workspaces</string>
     <string name="desktop_menu_copy_node_id">Copy Node ID</string>
-    <string name="desktop_menu_theme_light">Light</string>
-    <string name="desktop_menu_theme_dark">Dark</string>
     <string name="desktop_menu_refresh_nodes">Refresh Nodes</string>
     <string name="desktop_menu_diagnostics">Diagnostics Package</string>
     <string name="desktop_action_quit">Quit</string>
@@ -915,7 +847,6 @@
     <string name="desktop_menu_edit">Edit</string>
     <string name="desktop_menu_view">View</string>
     <string name="desktop_menu_window">Window</string>
-    <string name="desktop_menu_help">Help</string>
     <string name="approval_focus_title">%1$s high-risk operations awaiting host approval</string>
     <string name="card_action_merge_patch">Merge patch</string>
     <string name="card_action_abort">Stop</string>
@@ -942,7 +873,6 @@
     <string name="chat_caps_section">Capabilities</string>
     <string name="desktop_more_actions">More actions</string>
     <string name="desktop_title_files">Saved and active files</string>
-    <string name="desktop_title_nodes">%1$d nodes online · Local %2$s</string>
     <!-- Sub-title of the Workspaces view. The prototype's tsub() has no branch for d-agents
          (it falls back to the nodes line); this one says what the screen is actually about. -->
     <string name="desktop_title_agents">Workspaces and sessions reported</string>
@@ -961,8 +891,6 @@
     <string name="desktop_status_local">Local %1$s · %2$s</string>
     <string name="desktop_status_pending">Pending %1$d</string>
     <string name="desktop_status_pairing_link">Pairing Link</string>
-    <string name="desktop_status_control_plane">Control Plane 127.0.0.1:%1$d</string>
-    <string name="desktop_status_control_plane_off">Control plane disabled</string>
     <!-- 和 nodes_state_* 不是同一套：桌面上 Running 报的是「已连接」（状态栏已经在数节点），
          所以启动中/已连接/启动失败各自独立。只有「已停止」两边同义，共用 node_state_stopped。 -->
     <string name="desktop_phase_starting">Starting</string>
@@ -975,13 +903,10 @@
 
     <!-- 输入框 -->
     <string name="desktop_composer_resize">Drag to resize input area</string>
-    <string name="desktop_composer_attach">Files…</string>
     <!-- 原型的工具行这里是「端到端加密」+ 盾牌（prototype/desktop/index.html:712），
          但协议层没有加密：线格式是明文 JSON（ARCHITECTURE.md:744/860，golden vector 就是明文），
          全仓零加密实现。盾牌与这句话都是原型的 mock 遗留，已改成如实描述传输路径。
          「局域网直连」只说真的：不经服务器、同一局域网内点对点。 -->
-    <string name="desktop_composer_e2e">Direct LAN</string>
-    <string name="desktop_composer_tcp_split">Over 800B · TCP split</string>
     <string name="desktop_composer_placeholder">Write something…</string>
     <string name="desktop_composer_draft">Draft %1$d / %2$d B · %3$s</string>
     <string name="desktop_composer_send_hint">Send · Shift+Enter for newline</string>
@@ -1209,7 +1134,6 @@
 
     <!-- Network Range Scan & Sync -->
     <string name="cidr_section_title">Network Discovery &amp; Sync</string>
-    <string name="cidr_section_sub">Cross-subnet discovery and CIDR range gossip</string>
     <string name="cidr_input_label">Add CIDR Range</string>
     <string name="cidr_input_hint">e.g. 192.168.1.0/24</string>
     <string name="cidr_add_action">Add Range</string>
@@ -1349,9 +1273,7 @@
 
     <!-- History Search -->
     <string name="hist_search_title">Search Chat History</string>
-    <string name="hist_search_hint">Search chat messages</string>
     <string name="hist_search_input_hint">Search this conversation</string>
-    <string name="hist_search_loading">Searching...</string>
     <string name="hist_filter_all">All</string>
     <string name="hist_filter_image">Media</string>
     <string name="hist_filter_file">Files</string>
@@ -1361,11 +1283,8 @@
     <string name="hist_search_empty">No matching messages found</string>
     <string name="hist_search_guide">Type keywords to search this conversation</string>
     <string name="hist_search_empty_hint">Try searching with different keywords</string>
-    <string name="hist_date_select_title">Search by Date</string>
     <string name="hist_date_clear">Reset</string>
     <string name="hist_date_confirm">Confirm</string>
-    <string name="hist_date_month_day">%1$d/%2$d</string>
-    <string name="hist_date_month_title">Month %1$d</string>
     <!-- Hit-row secondary line = "name · relative day + clock"; mirrors the prototype's
          "老周 · 昨天 18:02". Only yesterday is relative (today prints a bare clock), anything
          older falls back to the month/day key (listTime relative timestamp semantics).
@@ -1383,8 +1302,6 @@
     <string name="hist_date_range_title">Date Range</string>
     <string name="hist_date_start">Start</string>
     <string name="hist_date_end">End</string>
-    <string name="hist_date_prev_month">Previous Month</string>
-    <string name="hist_date_next_month">Next Month</string>
     <string name="hist_week_mon">M</string>
     <string name="hist_week_tue">T</string>
     <string name="hist_week_wed">W</string>
@@ -1394,7 +1311,6 @@
     <string name="hist_week_sun">S</string>
 
     <!-- Global Search -->
-    <string name="global_search_title">Search</string>
     <string name="global_search_hint">Search contacts, messages, files…</string>
     <string name="global_search_section_contacts">Contacts</string>
     <string name="global_search_section_messages">Messages</string>
@@ -1413,37 +1329,23 @@
          carries a real last-interaction time. -->
 
     <!-- Folder Transfer & Resume -->
-    <string name="transfer_folder_badge">Folder</string>
     <string name="transfer_folder_count">%1$d files</string>
-    <string name="transfer_folder_summary">%1$s and %2$d more files</string>
-    <string name="composer_action_folder">Send Folder</string>
-    <string name="composer_folder_tooltip">Send Folder</string>
     <string name="transfer_action_resume">Resume</string>
     <string name="transfer_resume_hint">Resumable</string>
 
     <!-- Transfer Logs -->
-    <string name="set_nav_transfers">Transfers</string>
     <string name="transfer_log_group_head">Chat &amp; Files</string>
     <string name="transfer_log_title">Transfer Records</string>
     <string name="transfer_log_sub">Keeping up to 30 recent transfer records</string>
     <string name="transfer_log_hint">This page has no column headers, no filters and no “Clear Records”. A row has only three things: name, status · size · time, plus an “Open” button (dimmed when there is no savedPath).</string>
-    <string name="transfer_log_clear">Clear Records</string>
     <string name="transfer_log_empty">No transfer records</string>
-    <string name="transfer_log_direction_in">Received</string>
-    <string name="transfer_log_direction_out">Sent</string>
     <!-- Transfer-record row status words: prototype `TSTAT` (prototype/relay.html:4330-4336) uses done:'完成'.
          Kept distinct from the file-card vocabulary ('已完成' / '发送成功', :4351); this key is consumed only by DesktopTransferLogPane. -->
     <string name="transfer_log_status_success">Done</string>
     <string name="transfer_log_status_failed">Failed</string>
-    <string name="transfer_log_status_canceled">Canceled</string>
 
     <!-- Avatar & Diagnostics -->
-    <string name="avatar_custom_title">Custom Avatar</string>
-    <string name="avatar_custom_pick">Choose Image</string>
-    <string name="avatar_custom_desc">Supports JPG, PNG, WebP; automatically cropped to 192×192</string>
-    <string name="avatar_preset_title">Preset Avatars</string>
     <string name="diag_adaptive_title">Adaptive Layout Diagnostics</string>
-    <string name="diag_adaptive_desc">View current window size class, breakpoint matches, and responsive layout state</string>
     <string name="r2_set_insets_goal">Goal: full-screen edge-to-edge. The root Surface fills the screen and paints the background; the safe area is applied exactly once inside the content, and the system window colour must never be visible.</string>
     <string name="r2_set_insets_old_title">Old version (real-device symptoms)</string>
     <string name="r2_set_insets_old_hint">enableEdgeToEdge missing + theme XML missing + Scaffold not taking over contentWindowInsets</string>
@@ -1470,12 +1372,9 @@
     <string name="r2_set_insets_iphone">Top 62 pt · bottom 34 pt</string>
     <string name="r2_set_insets_k_gate">Gate</string>
     <string name="r2_set_insets_gate">Requires a real-device screenshot plus pixel-ratio measurement; Preview alone is not enough</string>
-    <string name="menu_create_group">New Group</string>
-    <string name="menu_search">Search</string>
 
     <!-- PK Games -->
     <string name="chat_pk">PK (RPS / Dice)</string>
-    <string name="chat_pk_hint_offline">Available only when peer is online</string>
     <string name="chat_pk_rps">Rock-Paper-Scissors</string>
     <string name="chat_pk_dice">Roll Dice</string>
     <string name="chat_pk_dice_title">Dice</string>
@@ -1484,7 +1383,6 @@
     <string name="chat_pk_rock">Rock</string>
     <string name="chat_pk_paper">Paper</string>
     <string name="chat_pk_scissors">Scissors</string>
-    <string name="chat_pk_dice_val">%1$d</string>
     <string name="chat_pk_title">Games</string>
 
     <!-- Agent Approvals & Controls -->
@@ -1523,7 +1421,6 @@
     <string name="workspace_source_label">Source: %1$s</string>
     <string name="workspace_perm_label">Permission: %1$s</string>
     <string name="agent_queue_title">Task Queue</string>
-    <string name="agent_queue_empty">No tasks in queue</string>
     <string name="agent_queue_cancel">Cancel task</string>
     <string name="agent_runs_title">Runs</string>
     <string name="agent_run_state_running">Running</string>
@@ -1551,7 +1448,6 @@
     <string name="chat_voice_stop">Finish recording</string>
     <string name="chat_voice_rerecord">Re-record</string>
     <string name="chat_voice_too_short">Recording too short</string>
-    <string name="chat_voice_failed">Recording failed</string>
     <string name="chat_voice_permission_denied">Microphone permission required</string>
 
     <!-- Workspace Group & Permission Governance -->
@@ -1568,7 +1464,6 @@
     <string name="workspace_create_group_quick_btn">Create &amp; Share</string>
     <string name="workspace_create_group_or_new">Or link a new local directory</string>
     <string name="workspace_create_group_new_title">Link Local Directory</string>
-    <string name="workspace_create_group_browse">Browse…</string>
     <string name="workspace_create_group_agent_label">Resident Bot</string>
     <string name="workspace_create_group_name_label">Group Name</string>
     <string name="workspace_create_group_sync_devices">Auto-sync to my devices (no QR needed)</string>
@@ -1586,9 +1481,6 @@
     <string name="workspace_default_resident_agent">🤖 DSH (Default Host Agent)</string>
     <string name="workspace_member_section_humans">Human Members (%1$d)</string>
     <string name="workspace_member_section_agents">Resident Bots (%1$d)</string>
-    <string name="workspace_member_agent_dsh">DSH · Terminal &amp; Execution</string>
-    <string name="workspace_member_agent_gemini">Gemini · Review &amp; Architecture</string>
-    <string name="workspace_member_no_workspace">No local project to expose yet</string>
     <string name="workspace_qr_dialog_desc">Scan this direct QR with Tidings on mobile to pair node and authorize workspace access. One-time credential, valid for 15 minutes.</string>
     <string name="workspace_qr_no_address">Cannot obtain candidate addresses. Please make sure the network is connected and port is open.</string>
     <string name="pairing_public_ipv6_hint">A public IPv6 candidate is included: whether it works depends on your router/host firewall allowing inbound connections. This app does not punch through NAT or change your network settings. LAN is preferred; the public address is the cross-network fallback.</string>
@@ -1599,7 +1491,6 @@
     <string name="workspace_group_session_busy">Running</string>
     <string name="workspace_group_session_ready">Ready</string>
     <string name="workspace_group_session_brief">📋 Current workspace session: "%1$s" (%2$s)\nCollaboration channel connected; workspace events and progress will sync to this group in real time.</string>
-    <string name="agent_demo_driver_notice">Demo driver: no real task was executed and no model or tool was contacted.</string>
     <string name="agent_event_thinking_only_fallback">This turn produced only thinking, no answer text</string>
 
     <!-- ===== issue 6: workspace 3-level IA rework (workspace-ia, task-4) ===== -->
@@ -1615,13 +1506,9 @@
     <string name="workspace_group_prompt_skip">Chat without a group</string>
     <!-- issue 6 leftovers: these keys live in values/ but had no English translation,
          so English users silently fell back to Chinese (design-locale-parity gate). -->
-    <string name="workspace_sessions_section">Conversations (%1$d)</string>
-    <string name="workspace_events_section">Events (%1$d · %2$s)</string>
-    <string name="workspace_event_empty">No structured event stream yet</string>
     <string name="workspace_no_title_banner">This workspace has no name. The peer reported only its identifier %1$s, no name — we will not pass that identifier off as a name; waiting for it to fill one in.</string>
     <string name="workspace_session_pending_count">⚠️ %1$d pending</string>
     <string name="workspace_session_warn_no_announce">Only events received, no session announcement</string>
-    <string name="workspace_unknown_task_desc">No specific task description</string>
 
     <!-- ===== task-10: phone-side access request + remote workspace grants ===== -->
     <string name="workspace_grant_request_btn">Request access</string>
@@ -1644,15 +1531,6 @@
     <string name="diag_export_done_saved">Created %1$s (%2$s) in the app's file directory.</string>
     <string name="diag_export_failed_write">The diagnostics package could not be written: not enough space or no permission. No file was created.</string>
     <string name="diag_export_failed_unexpected">Export failed: packaging hit an unexpected error. Try again.</string>
-    <string name="agent_exec_policy_title">Who can run it</string>
-    <string name="agent_exec_policy_host_only">Only me</string>
-    <string name="agent_exec_policy_host_only_note">Accepts input from this machine only. Safest.</string>
-    <string name="agent_exec_policy_trusted">Me and my approved devices</string>
-    <string name="agent_exec_policy_trusted_note">Devices approved in Trusted devices can send tasks.</string>
-    <string name="agent_exec_policy_owner_admin">Also the owner and admins</string>
-    <string name="agent_exec_policy_owner_admin_note">The group owner and admins need no separate approval.</string>
-    <string name="agent_exec_policy_any_member">Anyone in the group</string>
-    <string name="agent_exec_policy_any_member_note">Every member can run commands on this machine.</string>
 
     <string name="agent_exec_who_title">Who can run it</string>
     <string name="agent_exec_who_note">Only checked devices can run commands through this agent. A new agent starts with just you.</string>
@@ -1710,7 +1588,6 @@
     <string name="card_type_prototype">Prototype</string>
     <string name="card_type_approval">Approval</string>
     <string name="card_type_ask_question">Decision</string>
-    <string name="card_rev_tag">Rev %1$d</string>
     <string name="card_progress_label">%1$d% progress</string>
     <string name="card_diff_summary">%1$s +%2$d −%3$d</string>
     <string name="card_pending_confirm">Submitted, waiting for the host to confirm</string>
@@ -1758,4 +1635,21 @@
     <string name="group_auth_team_members">%1$d members</string>
     <string name="group_auth_badge_self">Declared here</string>
     <string name="group_auth_entry">Authorization</string>
+    <string name="card_rev_tag">Rev %1$d</string>
+
+    <string name="chat_caps_label">Capabilities: %1$s</string>
+
+    <string name="desktop_composer_attach">Files…</string>
+
+    <string name="desktop_title_nodes">%1$d nodes online · Local %2$s</string>
+
+    <string name="nodes_add_sheet_sub">Scan QR code or enter address manually</string>
+
+    <string name="nodes_state_starting">Listening on ports…</string>
+
+    <string name="nodes_syncbar_down">Broadcasting stopped · UDP %1$d / TCP %2$d</string>
+
+    <string name="transfer_folder_badge">Folder</string>
+
+    <string name="workspace_create_group_browse">Browse…</string>
 </resources>

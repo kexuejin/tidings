@@ -100,8 +100,8 @@ FILE_EXEMPT = {
     os.path.normpath("core/src/commonMain/kotlin/com/kapp/tidings/core/protocol/CidrUtils.kt"),
     # 二维码载荷格式说明
     os.path.normpath("core/src/commonMain/kotlin/com/kapp/tidings/core/qr/QrEncoder.kt"),
-    # 截图夹具的假数据（虽然不在根里，防御性保留）
-    os.path.normpath("composeApp/src/commonMain/kotlin/com/kapp/tidings/ui/desktop/PreviewState.kt"),
+    # 截图夹具的假数据（现已搬进 androidApp/src/screenshotTest，本来就不在扫描根里）
+    os.path.normpath("androidApp/src/screenshotTest/kotlin/com/kapp/tidings/ui/desktop/PreviewState.kt"),
     # agentNode 控制面的 curl 示例
     os.path.normpath("agentNode/src/main/kotlin/com/kapp/tidings/agent/ControlPlane.kt"),
     # 桌面端深链格式与私网判据
