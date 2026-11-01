@@ -75,6 +75,13 @@ class DesktopInvokeWiringGuardTest {
             source.contains("latestPatchRefFor(") && source.contains("eventType = \"merge-result\""),
             "合流没有按会话找回 patch（latestPatchRefFor）或没有把冲突落台账（merge-result）",
         )
+        // 动作帧（op=action）里没有会话位，这一跳拿到的 sessionId 恒为 null —— 只按会话
+        // 找 patch 的判据在真机上永远不成立（2026-11-01 幕 6：卡面「已由 Pixel 6 处理」，
+        // 宿主仓零提交）。按卡片反查这条路必须同时在，否则「合并」是个假按钮。
+        assertTrue(
+            source.contains("latestPatchRefForCard("),
+            "合流没有按卡片找回 patch（latestPatchRefForCard）—— 动作帧不带会话，合并分支永远进不去",
+        )
         // T-G2 标签路由：两桥装配 + 接收侧持标签校验（缺一整条链就黑）。
         assertTrue(
             source.contains("controller.peerTagRouter = ") && source.contains("controller.channelDispatch = "),

@@ -925,28 +925,45 @@ internal class DesktopExtension(
             }
             controller.onHostCardAction = { agentId, sessionId, cardId, actionId, decidedBy ->
                 // 审查合流（T-G1）：diff-review 卡的 [合并此补丁] 在宿主本机落地 ——
-                // 按 sessionId 找回（工作区, patch 路径），git apply 两段式执行；
+                // 按会话找回（工作区, patch 路径），git apply 两段式执行；
                 // 结果落台账（merge-result 事件，会话详情可见）。不走插件转发：
                 // 合流是宿主仓的写操作，不是插件的活。
-                if (actionId == "merge-patch" && sessionId != null) {
-                    val ref = created.latestPatchRefFor(sessionId)
-                    val outcome = when {
-                        ref == null -> DesktopPatchMerge.Outcome.Conflict("no sandbox patch recorded for session")
-                        else -> DesktopPatchMerge.apply(patchPath = ref.second, workspacePath = ref.first)
+                //
+                // **必须留按卡片反查这条路**：动作帧（op=action）里只有 cardId，没有会话，
+                // 上游那一跳传进来的 sessionId 恒为 null。从前判据写成 `sessionId != null`，
+                // 于是合并分支在真机上永远进不去（2026-11-01 幕 6 实测：卡面变成「已由
+                // Pixel 6 处理」，宿主仓零提交）。现在 null 就按卡片回台账里找会话。
+                if (actionId == "merge-patch") {
+                    val ref = sessionId?.takeIf { it.isNotBlank() }
+                        ?.let { sid ->
+                            created.latestPatchRefFor(sid)?.let { (ws, patch) ->
+                                com.kapp.tidings.agent.SandboxPatchRef(sid, ws, patch)
+                            }
+                        }
+                        ?: created.latestPatchRefForCard(cardId)
+                    val outcome = when (ref) {
+                        null -> DesktopPatchMerge.Outcome.Conflict("no sandbox patch recorded for card " + cardId)
+                        else -> DesktopPatchMerge.apply(patchPath = ref.patchPath, workspacePath = ref.workspacePath)
                     }
                     when (outcome) {
                         is DesktopPatchMerge.Outcome.Applied ->
                             println("[RELAY-INVOKE] patch merged into workspace by " + decidedBy + " (card " + cardId + ")")
                         is DesktopPatchMerge.Outcome.Conflict -> {
                             println("[RELAY-INVOKE] patch merge FAILED (card " + cardId + "): " + outcome.detail)
-                            sessions?.recordEvent(
-                                nodeId = runtime.profile.nodeId,
-                                sessionId = sessionId,
-                                cursor = System.currentTimeMillis(),
-                                eventType = "merge-result",
-                                summary = "conflict",
-                                body = outcome.detail,
-                            )
+                            // 冲突也要落台账；没有会话可落时如实打日志，不假装记过账。
+                            val sid = ref?.sessionId
+                            if (sid == null) {
+                                println("[RELAY-INVOKE] patch merge has no session to record on (card " + cardId + ")")
+                            } else {
+                                sessions?.recordEvent(
+                                    nodeId = runtime.profile.nodeId,
+                                    sessionId = sid,
+                                    cursor = System.currentTimeMillis(),
+                                    eventType = "merge-result",
+                                    summary = "conflict",
+                                    body = outcome.detail,
+                                )
+                            }
                         }
                     }
                 } else {

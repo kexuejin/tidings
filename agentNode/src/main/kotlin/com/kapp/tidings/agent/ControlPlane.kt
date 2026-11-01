@@ -145,6 +145,18 @@ fun interface AgentInvokeDispatcher {
     suspend fun dispatch(groupId: String, agentId: String, prompt: String, wsId: String?, deadlineMs: Long): String?
 }
 
+/**
+ * 合流要的三样本机事实：patch 在哪个会话、应用到哪个仓、patch 文件在哪。
+ *
+ * 三样必须一起给出 —— 只给 (仓, patch) 的话，合并结果（`merge-result` 事件）就落不回
+ * 那个会话；只给会话的话，动作侧还得再查一次。合成一个值，调用点就没有漏一半的机会。
+ */
+data class SandboxPatchRef(
+    val sessionId: String,
+    val workspacePath: String,
+    val patchPath: String,
+)
+
 /** 实时增量事件（T-G3）：进程内管道的载荷，不进任何协议帧。 */
 data class LiveAgentEvent(
     val nodeId: String,
@@ -2841,6 +2853,34 @@ class ControlPlane(
             ?.takeIf { it.isNotEmpty() }
             ?: return null
         return wsPath to patchPath
+    }
+
+    /**
+     * 同 [latestPatchRefFor]，但按**卡片**找回 —— 动作帧只带 cardId，从来不携带会话。
+     *
+     * 这不是「顺手多写一个重载」：`onHostCardAction` 那一处签名里的 `sessionId` 在
+     * 现有链路上**恒为 null**（动作帧由 `groupId/cardId/rev/actionId` 组成，协议里没有
+     * 会话位），于是按会话合流的判据永远不成立，点「合并此补丁」只会改卡面状态、
+     * 宿主仓零提交 —— 真机实测（2026-11-01 幕 6）就是这样。
+     *
+     * 归属本来就落在台账里：派单出卡时写了一条 `card` 事件，body 就是卡片 JSON。
+     * 按它反查会话最稳，也不引入协议键：同一张卡只可能由一个会话发出。
+     */
+    fun latestPatchRefForCard(cardId: String): SandboxPatchRef? {
+        if (cardId.isBlank()) return null
+        val nodeId = runtime.nodeId
+        // 先按 cardId 找会话（最近的排前面），再用它复用会话那条路径 —— 两条查询的
+        // 「哪条 artifact 才算这次的 patch」判据只写一遍。
+        val owner = sessions.sessions()
+            .filter { it.nodeId == nodeId }
+            .sortedByDescending { it.updatedAt }
+            .firstOrNull { rec ->
+                sessions.events(nodeId, rec.sessionId)
+                    .any { it.eventType == "card" && it.body?.contains(cardId) == true }
+            }
+            ?: return null
+        val (wsPath, patchPath) = latestPatchRefFor(owner.sessionId) ?: return null
+        return SandboxPatchRef(owner.sessionId, wsPath, patchPath)
     }
 
     /**
