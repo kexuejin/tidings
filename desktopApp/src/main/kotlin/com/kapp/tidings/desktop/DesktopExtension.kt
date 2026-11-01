@@ -21,8 +21,6 @@ import com.kapp.tidings.domain.RelayController
 import com.kapp.tidings.domain.model.hasVisibleText
 import com.kapp.tidings.core.session.NodeRuntime
 import com.kapp.tidings.generated.resources.Res
-import com.kapp.tidings.generated.resources.agent_event_error_fallback
-import com.kapp.tidings.generated.resources.agent_event_finished_fallback
 import com.kapp.tidings.generated.resources.agent_event_thinking_only_fallback
 import org.jetbrains.compose.resources.getString
 import kotlinx.coroutines.CoroutineScope
@@ -116,22 +114,6 @@ internal class DesktopExtension(
     private var pluginHost: com.kapp.tidings.agent.plugins.PluginHost? = null
 
     private var workerOrchestrator: DesktopWorkerOrchestrator? = null
-
-    /**
-     * 两条兜底文案（事件没带 summary 时用）。
-     *
-     * 资源在 composeResources，取用 API 是 suspend；而这个回调
-     * （`AgentSessionRegistry.onRecordEvent`）是**非 suspend** 的（agentNode 的签名，不在本任务范围内），
-     * 所以这里 `by lazy` + `runBlocking` **只在第一次用到时**取一次并缓存 —— 不是每条事件都阻塞。
-     * 取不到时给空串：调用点的 `hasVisibleText` 会把空文本挡掉（少一条气泡，好过编一句中文）。
-     */
-    private val finishedFallback: String by lazy {
-        runCatching { runBlocking { getString(Res.string.agent_event_finished_fallback) } }.getOrDefault("")
-    }
-
-    private val errorFallback: String by lazy {
-        runCatching { runBlocking { getString(Res.string.agent_event_error_fallback) } }.getOrDefault("")
-    }
 
     /**
      * 「这一轮只有思考、没有正文」时的**替代正文**。
@@ -820,6 +802,7 @@ internal class DesktopExtension(
                         var cliError: String? = null
                         val (cliSessionId, cliStatus, cliError0) = created.executeCliTask(
                             request.agentId, request.prompt, wsPath, null,
+                            sessionTitle = sessionTitleFor(request.prompt),
                             onArtifact = { path, name, bytes, _, _ -> cliArtifacts.add(Triple(path, name, bytes)) },
                         ) { eventType, _, summary, body ->
                             when (eventType) {
@@ -869,6 +852,7 @@ internal class DesktopExtension(
                     val artifacts = mutableListOf<Triple<String, String, Long>>()
                     val (sessionId, status, error) = created.executePluginTask(
                         entry, request.prompt, wsPath, null,
+                        sessionTitle = sessionTitleFor(request.prompt),
                         onArtifact = { path, name, bytes, _, _ -> artifacts.add(Triple(path, name, bytes)) },
                     ) { eventType, _, summary, body ->
                         when (eventType) {
@@ -1203,39 +1187,34 @@ internal class DesktopExtension(
         thinkingOnlyFallback = thinkingOnlyFallback,
     )
 
+    /**
+     * 会话事件 → 聊天气泡的**白名单**（实时与补发共用，策略只有这一份）。
+     *
+     * 全新显示方案（替代旧的逐类黑名单）：群聊只承载**对话** ——
+     * 用户说的话、Agent 的真实文本输出。其余一切（终态、错误、工具、重试……）
+     * 都不是消息：
+     *
+     * - 终态（成功/待合并/受阻/已停止）由**任务卡**原位表达，卡片横幅是唯一的
+     *   人话终态面 —— 旧的「✅ …」庆祝气泡与「⚠️ Agent 异常: …」刷屏从构造上消失。
+     * - 瞬态自愈（CLI 断线重连 N/M、tls handshake）在成功时**就该无事发生**，
+     *   失败时受挫卡一次说清 —— 中间过程一条都不该出声。
+     * - 未知事件类型**默认沉默**：黑名单治不了「明天新增的 plumbing 类型」，
+     *   白名单才能保证未来的执行细节不会再漏进对话流（会话轨迹仍在台账里可查）。
+     */
     internal fun formatAgentEventForChat(rec: AgentSessionRegistry.EventRecord, sessionTitle: String?): String? {
         val evtType = rec.eventType.lowercase()
         return when {
-        evtType == "turn.end" -> {
-            val body = rec.body?.trim().orEmpty()
-            // 只有当有真实内容时才作为消息展示，空 body 不再输出 "执行完成" / "turn 1" 等垃圾气泡。
-            // hasVisibleText 而不是 isNotEmpty：只含零宽字符的 body 也算空（空气泡的真凶）。
-            if (hasVisibleText(body)) body else null
-        }
-        evtType in listOf("assistant.text", "assistant.message", "text", "message") -> {
-            rec.body?.trim()?.takeIf { hasVisibleText(it) }
-        }
-        evtType == "user.message" -> {
-            rec.body?.trim()?.takeIf { hasVisibleText(it) } ?: rec.summary?.trim()?.takeIf { hasVisibleText(it) }
-        }
-        evtType == "finished" -> {
-            val s = rec.summary ?: finishedFallback
-            val b = rec.body?.takeIf { it.isNotBlank() }?.let { "\n$it" }.orEmpty()
-            "✅ $s$b"
-        }
-        // 工具调用、产物与卡片是底层执行与结构化协议，绝不应作为纯文本刷屏污染聊天气泡
-        evtType in listOf("tool.started", "tool.call", "tool.completed", "tool.result", "artifact", "card") -> null
-        evtType == "session.started" -> null
-        evtType == "error" -> {
-            "⚠️ ${rec.summary ?: errorFallback}: ${rec.body.orEmpty()}"
-        }
-        else -> {
-            if (!evtType.contains("delta") && !evtType.contains("thought") && !evtType.contains("tool") && !evtType.contains("turn")) {
-                rec.body?.takeIf { it.isNotBlank() }
-            } else null
+            evtType in listOf("assistant.text", "assistant.message", "text", "message") -> {
+                rec.body?.trim()?.takeIf { hasVisibleText(it) }
+            }
+            // turn 收尾若带正文，就是 Agent 这一轮的收束语 —— 属于对话。
+            evtType == "turn.end" -> rec.body?.trim()?.takeIf { hasVisibleText(it) }
+            evtType == "user.message" -> {
+                rec.body?.trim()?.takeIf { hasVisibleText(it) } ?: rec.summary?.trim()?.takeIf { hasVisibleText(it) }
+            }
+            else -> null
         }
     }
-}
 
     /**
      * 「这条用户消息**已经发过群**」的水位（sessionId → 已转发到群的最大 cursor）。
@@ -1700,9 +1679,24 @@ internal class EventRouterDiagnostics(private val capacity: Int = 32) {
  */
 internal val eventDebugEnabled: Boolean = System.getProperty("relay.debug.events") == "1"
 
+/**
+ * 从任务 prompt 派生**会话标题**（divider 上显示的那个）的消毒规则。
+ *
+ * prompt 不是给人读的标题：首行可能是编排器注入的系统前导（真机 divider 出现过
+ * 「You are working strictly inside…」整句英文），也可能带着 @ 提派 token
+ * （「@codex-e2e create …」—— 那是路由地址，不是任务内容）。规则：
+ * 取首个非空行 → 剥掉行首的 @ token → 超长截断。空 prompt 返回 null，
+ * 让 ControlPlane 退回自己的缺省。
+ */
+internal fun sessionTitleFor(prompt: String): String? {
+    val line = prompt.lineSequence().firstOrNull { it.isNotBlank() }?.trim() ?: return null
+    val bare = line.replace(Regex("^(@\\S+\\s+)+"), "").trim()
+    val title = bare.ifBlank { line }
+    return title.take(80)
+}
+
 /** 一条 agent 事件在聊天通道里的最终形态（实时与补发共用的构造产物）。 */
-internal data class AgentChatMessage(
-    val text: String,
+internal data class AgentChatMessage(    val text: String,
     val reasoning: String?,
     val isUserPrompt: Boolean,
     val senderId: String,

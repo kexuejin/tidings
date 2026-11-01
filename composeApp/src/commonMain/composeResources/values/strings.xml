@@ -1763,9 +1763,7 @@
     <string name="workspace_group_session_busy">执行中</string>
     <string name="workspace_group_session_ready">就绪</string>
     <string name="workspace_group_session_brief">📋 工作区当前会话: 「%1$s」 (%2$s)\n协同通道已连接，工作区事件与进度将实时同步至本群。</string>
-    <string name="agent_event_finished_fallback">任务已完成</string>
     <string name="agent_demo_driver_notice">演示驱动：未执行真实任务，未连接任何模型或工具。</string>
-    <string name="agent_event_error_fallback">Agent 异常</string>
     <string name="agent_event_thinking_only_fallback">这一轮只有思考过程，没有正文</string>
 
     <!-- ===== issue 6：工作区三层 IA 重构（workspace-ia, task-4）===== -->

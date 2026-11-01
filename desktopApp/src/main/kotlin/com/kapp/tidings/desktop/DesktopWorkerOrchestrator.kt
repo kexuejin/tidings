@@ -280,6 +280,7 @@ internal class DesktopWorkerOrchestrator(
                     prompt = protoPrompt,
                     wsPath = repoPath,
                     requestedSessionId = null,
+                    sessionTitle = title,
                     onArtifact = { _, name, _, _, _ -> if (name.contains("prototype") || name.endsWith(".html") || name == "patch.diff") protoCreated = true },
                     onEvent = { _, _, _, _ -> },
                 )
@@ -328,6 +329,7 @@ internal class DesktopWorkerOrchestrator(
                             prompt = refinePrompt,
                             wsPath = repoPath,
                             requestedSessionId = null,
+                            sessionTitle = title,
                             onArtifact = { _, _, _, _, _ -> },
                             onEvent = { _, _, _, _ -> },
                         )
@@ -420,6 +422,9 @@ internal class DesktopWorkerOrchestrator(
                 prompt = currentPrompt,
                 wsPath = repoPath,
                 requestedSessionId = null,
+                // 会话标题用工单标题：prompt 首行是系统前导（containment preamble），
+                // 从 prompt 截标题就会把整句英文 plumbing 摆上 divider。
+                sessionTitle = title,
                 onArtifact = { path, name, _, _, _ -> if (name == "patch.diff") patchPath = path },
                 onEvent = { eventType, _, summary, body ->
                     // **只累「人话」。** 其余事件的 body 都不是给人读的：

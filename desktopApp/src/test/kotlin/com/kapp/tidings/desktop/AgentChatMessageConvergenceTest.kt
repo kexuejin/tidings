@@ -82,12 +82,60 @@ class AgentChatMessageConvergenceTest {
         assertNull(message, "只有零宽字符的事件不该产出气泡（空气泡那条）")
     }
 
+    /**
+     * 会话标题（divider）的消毒：prompt 不是标题。
+     *
+     * 真机两次翻车：divider 出现过整句系统前导「You are working strictly inside…」，
+     * 也出现过带着 @ 提派 token 的「@codex-e2e create …」—— 那分别是编排器的注入
+     * 与路由地址，都不是用户该读的任务名。
+     */
     @Test
-    fun cardAndArtifactEventsFilteredOut() {
+    fun sessionTitleIsSanitizedFromPrompt() {
+        // @ token 剥掉，任务正文保留。
+        assertEquals(
+            "create hello.txt take2",
+            sessionTitleFor("@codex-e2e create hello.txt take2"),
+            "行首的 @ 提派 token 是路由地址，不许出现在 divider 上",
+        )
+        // 多个 @ token（改派场景）也全剥。
+        assertEquals(
+            "create hello.txt",
+            sessionTitleFor("@a @b create hello.txt"),
+        )
+        // 空行打头：取首个非空行。
+        assertEquals("real task", sessionTitleFor("\n  \nreal task"))
+        // 全空：交回 ControlPlane 的缺省。
+        assertNull(sessionTitleFor("  \n "))
+        assertNull(sessionTitleFor(""))
+        // 超长截断到 80（与台账标题预算一致）。
+        val long = "x".repeat(200)
+        assertEquals(80, sessionTitleFor(long)?.length)
+    }
+
+    @Test
+    fun chatBubblesAreWhitelistedToDialogueEventsOnly() {
         val text = RepoSource.read("desktopApp/src/main/kotlin/com/kapp/tidings/desktop/DesktopExtension.kt")
+        val fn = text
+            .substringAfter("internal fun formatAgentEventForChat")
+            .substringBefore("internal fun sessionTitleFor")
+        // 全新显示方案（「卡片即终态，气泡只承载对话」）：格式化器是**白名单** ——
+        // 只有对话类型（assistant 文本 / turn 收束语 / user.message）允许进气泡，
+        // 缺省分支必须沉默。
         assertTrue(
-            text.contains("\"artifact\"") && text.contains("\"card\""),
-            "formatAgentEventForChat 必须将 artifact 与 card 列入过滤清单，防止裸 JSON 与底层对账路径进群污染聊天流",
+            fn.contains("else -> null"),
+            "formatAgentEventForChat 的缺省分支必须是 else -> null：未知事件类型默认沉默，" +
+                "未来的 plumbing 事件（重试、对账、机器 JSON）不能再漏进对话流",
+        )
+        // 终态与错误由任务卡表达（review_ready/blocked/aborted 都有终态卡）——
+        // 「✅ …」庆祝气泡与「⚠️ Agent 异常: …」刷屏不允许回来。
+        assertTrue(
+            !fn.contains("\"finished\"") && !fn.contains("\"error\""),
+            "finished/error 事件不再产生文本气泡：终态与错误的人话面是任务卡横幅，不是聊天气泡",
+        )
+        // 工具调用、产物与卡片是结构化协议，从白名单上就进不了气泡。
+        assertTrue(
+            !fn.contains("\"artifact\"") && !fn.contains("\"card\""),
+            "artifact 与 card 事件不进气泡（裸 JSON 与底层对账路径不许污染聊天流）",
         )
     }
 

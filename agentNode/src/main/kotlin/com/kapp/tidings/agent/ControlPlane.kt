@@ -844,6 +844,10 @@ class ControlPlane(
         rawPrompt: String,
         wsPath: String?,
         requestedSessionId: String?,
+        /** 会话标题（divider 上显示的那个）。缺省才从 prompt 截取 —— prompt 首行可能是
+         *  系统前导或 @ 提派 token，当标题就是把 plumbing 摊给用户（真机 divider 出现过
+         *  「You are working strictly inside…」），所以**任务路径必须显式传**。 */
+        sessionTitle: String? = null,
         /** 任务产物（沙箱 patch 等）的结构化回调：路径只走这里，不进台账帧体。
          *  排在 [onEvent] **前面** —— 既有调用点的尾部 lambda 必须继续绑到 onEvent。 */
         onArtifact: ((path: String, name: String, bytes: Long, mime: String, sha256: String) -> Unit)? = null,
@@ -874,13 +878,14 @@ class ControlPlane(
         }
 
         // 会话进台账（busy → done/error），身份字段全部来自注册的 manifest。
+        val resolvedTitle = sessionTitle?.takeIf { it.isNotBlank() } ?: prompt.take(80)
         sessions.recordSession(
             nodeId = runtime.nodeId,
             sessionId = sessionId,
             agentKind = entry.pluginId,
             agentId = entry.manifest.leader?.agentId,
             state = AgentSessionStates.BUSY,
-            title = prompt.take(80),
+            title = resolvedTitle,
             wsPath = wsPath,
             outbound = true,
         )
@@ -934,7 +939,7 @@ class ControlPlane(
             agentKind = entry.pluginId,
             agentId = entry.manifest.leader?.agentId,
             state = if (endedInError) AgentSessionStates.ERROR else AgentSessionStates.DONE,
-            title = prompt.take(80),
+            title = resolvedTitle,
             wsPath = wsPath,
             outbound = true,
         )
@@ -978,6 +983,9 @@ class ControlPlane(
         prompt: String,
         wsPath: String?,
         requestedSessionId: String?,
+        /** 会话标题（divider 上显示的那个）。缺省才从 prompt 截取 —— prompt 首行可能是
+         *  系统前导或 @ 提派 token，当标题就是把 plumbing 摊给用户，任务路径必须显式传。 */
+        sessionTitle: String? = null,
         onArtifact: ((path: String, name: String, bytes: Long, mime: String, sha256: String) -> Unit)? = null,
         onEvent: (eventType: String, cursor: Long, summary: String?, body: String?) -> Unit,
     ): Triple<String?, String, String?> {
@@ -991,6 +999,7 @@ class ControlPlane(
             )
         }
         val clipped = com.kapp.tidings.core.protocol.TaskPromptBudget.clamp(prompt)
+        val resolvedTitle = sessionTitle?.takeIf { it.isNotBlank() } ?: clipped.take(80)
         val sessionId = requestedSessionId ?: run {
             val handle = try {
                 driver.openSession(wsPath ?: "", null)
@@ -1005,7 +1014,7 @@ class ControlPlane(
             agentKind = driver.driverId,
             agentId = null,
             state = com.kapp.tidings.core.protocol.AgentSessionStates.BUSY,
-            title = clipped.take(80),
+            title = resolvedTitle,
             wsPath = wsPath,
             outbound = true,
         )
@@ -1048,7 +1057,7 @@ class ControlPlane(
             agentKind = driver.driverId,
             agentId = null,
             state = if (endedInError) com.kapp.tidings.core.protocol.AgentSessionStates.ERROR else com.kapp.tidings.core.protocol.AgentSessionStates.DONE,
-            title = clipped.take(80),
+            title = resolvedTitle,
             wsPath = wsPath,
             outbound = true,
         )
