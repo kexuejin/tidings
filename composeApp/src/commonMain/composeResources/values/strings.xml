@@ -1872,9 +1872,16 @@
     <string name="card_status_pending">待开始</string>
     <string name="card_status_failed">失败</string>
     <string name="card_status_blocked">受阻</string>
+    <string name="card_status_review_ready">待合并</string>
+    <string name="card_status_aborted">已取消</string>
+    <string name="card_type_task_board">工单任务</string>
+    <string name="card_type_diff_review">代码审查</string>
+    <string name="card_type_prototype">原型方案</string>
+    <string name="card_type_approval">待审批</string>
+    <string name="card_type_ask_question">方案决策</string>
     <!-- 卡片右上角的版本小字：原位刷新时让「这是第几版」可读，而不是默默变形。 -->
     <string name="card_rev_tag">第 %1$d 版</string>
-    <string name="card_progress_label">进展 %1$d%%</string>
+    <string name="card_progress_label">进展 %1$d%</string>
     <string name="card_diff_summary">%1$s +%2$d −%3$d</string>
     <!-- 审批锁三态的后两态（§5.3）：本机乐观置灰后的等待说明，与宿主判定后的全员提示。 -->
     <string name="card_pending_confirm">已提交，等待宿主确认</string>

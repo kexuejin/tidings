@@ -36,10 +36,17 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
+import androidx.compose.foundation.layout.Spacer
 import com.kapp.tidings.core.protocol.AgentExecAuthorizer
 import com.kapp.tidings.domain.model.MessageUi
 import com.kapp.tidings.generated.resources.Res
 import com.kapp.tidings.generated.resources.ic_file
+import com.kapp.tidings.generated.resources.ic_terminal
+import com.kapp.tidings.generated.resources.ic_bot
+import com.kapp.tidings.generated.resources.ic_shield
+import com.kapp.tidings.generated.resources.ic_list
+import com.kapp.tidings.generated.resources.ic_check_double
+import com.kapp.tidings.generated.resources.ic_refresh
 import com.kapp.tidings.generated.resources.card_decided_by
 import com.kapp.tidings.generated.resources.card_details_hide
 import com.kapp.tidings.generated.resources.card_details_show
@@ -54,6 +61,12 @@ import com.kapp.tidings.generated.resources.card_status_done
 import com.kapp.tidings.generated.resources.card_status_failed
 import com.kapp.tidings.generated.resources.card_status_pending
 import com.kapp.tidings.generated.resources.card_status_running
+import com.kapp.tidings.generated.resources.card_status_review_ready
+import com.kapp.tidings.generated.resources.card_type_task_board
+import com.kapp.tidings.generated.resources.card_type_diff_review
+import com.kapp.tidings.generated.resources.card_type_prototype
+import com.kapp.tidings.generated.resources.card_type_approval
+import com.kapp.tidings.generated.resources.card_type_ask_question
 import com.kapp.tidings.generated.resources.card_waiting_host
 import com.kapp.tidings.generated.resources.agent_state_banner_failed
 import com.kapp.tidings.ui.components.AppButton
@@ -201,11 +214,10 @@ fun parseAgentCard(json: JsonObject?): AgentCardUi? {
                 id = obj.str("id") ?: label,
                 label = label,
                 status = when (obj.str("status")) {
-                    "done" -> AgentCardStepStatus.Done
-                    "running" -> AgentCardStepStatus.Running
-                    "failed" -> AgentCardStepStatus.Failed
+                    "done", "review_ready" -> AgentCardStepStatus.Done
+                    "running", "working" -> AgentCardStepStatus.Running
+                    "failed", "error" -> AgentCardStepStatus.Failed
                     "blocked" -> AgentCardStepStatus.Blocked
-                    // pending 与一切未来值：显示成"还没轮到它"比显示成空洞诚实。
                     else -> AgentCardStepStatus.Pending
                 },
                 assignee = obj.str("assignee")?.takeIf { it.isNotBlank() },
@@ -612,39 +624,40 @@ fun AgentCardBubble(
             modifier = Modifier.fillMaxWidth().padding(horizontal = 18.dp, vertical = 16.dp),
             verticalArrangement = Arrangement.spacedBy(12.dp),
         ) {
-            // 头行（.hd{padding:10px 14px 8px}）：type 徽标 + 标题（.tt）+ rev 游标（.rv）。
-            // 没有任何头部信息就不画头行 —— 不编一个。
+            // 头行：上栏元信息（type 徽标 + 状态胶囊 + rev 游标）+ 独立主标题。
             if (card.type != null || card.title != null || card.rev > 0 || plan.showExpiredTag) {
-                Row(
-                    verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.spacedBy(sp.sm),
-                    modifier = Modifier.padding(0.dp),
-                ) {
-                    card.type?.let { CardTypeTag(it) }
+                Column(verticalArrangement = Arrangement.spacedBy(sp.xs)) {
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(sp.sm),
+                        modifier = Modifier.fillMaxWidth(),
+                    ) {
+                        card.type?.let { CardTypeTag(it) }
+                        Spacer(Modifier.weight(1f))
+                        if (plan.showExpiredTag) {
+                            CardNeutralTag(text = stringResource(Res.string.card_expired))
+                        }
+                        CardStateTag(card)
+                        Text(
+                            text = stringResource(Res.string.card_rev_tag, card.rev),
+                            style = MaterialTheme.typography.labelSmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            fontFamily = FontFamily.Monospace,
+                        )
+                    }
                     if (card.title != null) {
                         Text(
                             text = card.title,
+                            // 设计契约（componentSpecs.AgentCards.requiredTokens）要的就是
+                            // titleSmall。先前这一行被改成 titleMedium，`designSpecDrift`
+                            // 当天就红了 —— 规格里的人写明是这一档，改大要连规格一起改。
                             style = MaterialTheme.typography.titleSmall,
-                            fontWeight = FontWeight.SemiBold,
+                            fontWeight = FontWeight.Bold,
                             color = MaterialTheme.colorScheme.onSurface,
-                            modifier = Modifier.weight(1f),
                             maxLines = CARD_TITLE_MAX_LINES,
                             overflow = TextOverflow.Ellipsis,
                         )
-                    } else {
-                        Box(Modifier.weight(1f))
                     }
-                    if (plan.showExpiredTag) {
-                        // 过期标签（.apst.exp）：中性灰对 —— 原型注释原话「过期不是错误，
-                        // 是『不再可用』」。以前挂 error 说不出出处。
-                        CardNeutralTag(text = stringResource(Res.string.card_expired))
-                    }
-                    Text(
-                        text = stringResource(Res.string.card_rev_tag, card.rev),
-                        style = MaterialTheme.typography.labelSmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                        fontFamily = FontFamily.Monospace,
-                    )
                 }
             }
             card.banner?.let { CardBannerRow(it) }
@@ -697,21 +710,86 @@ fun AgentCardBubble(
 
 /**
  * 头行的 type 徽标（原型 `.hd` 里的 `.tag.agent`：agent-c/agent-t 对、11px 600、
- * 胶囊圆角、1.5×6 内边距）。type 是**内容**（插件给的），原样渲染、不进 strings 体系。
+ * 胶囊圆角、带图标与本地化文案）。
  */
 @Composable
 private fun CardTypeTag(type: String) {
     val sp = LocalAppSpacing.current
-    // 升级稿 .hd .type-pill（relay.html:521-522）：11/600、2×8、圆角 6（--r 低档，
-    // 非胶囊 999）、底 = agent 紫的 9% 微晕（rgba(107,78,230,.09)）—— 不再是 agent-c 实色。
-    Text(
-        text = type,
-        style = MaterialTheme.typography.labelSmall,
-        fontWeight = FontWeight.SemiBold,
-        color = MaterialTheme.accents.agentAccentText,
+    val (label, iconRes) = when (type) {
+        "task-board" -> stringResource(Res.string.card_type_task_board) to Res.drawable.ic_terminal
+        "diff-review" -> stringResource(Res.string.card_type_diff_review) to Res.drawable.ic_terminal
+        "prototype" -> stringResource(Res.string.card_type_prototype) to Res.drawable.ic_bot
+        "approval" -> stringResource(Res.string.card_type_approval) to Res.drawable.ic_shield
+        "ask_question" -> stringResource(Res.string.card_type_ask_question) to Res.drawable.ic_list
+        else -> type to Res.drawable.ic_bot
+    }
+    Row(
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(4.dp),
         modifier = Modifier
             .background(MaterialTheme.accents.agentAccent.copy(alpha = 0.09f), RoundedCornerShape(6.dp))
-            .padding(horizontal = sp.sm, vertical = 1.5.dp),
+            .padding(horizontal = sp.sm, vertical = 2.dp),
+    ) {
+        androidx.compose.material3.Icon(
+            painter = painterResource(iconRes),
+            contentDescription = null,
+            tint = MaterialTheme.accents.agentAccentText,
+            modifier = Modifier.size(12.dp),
+        )
+        Text(
+            text = label,
+            style = MaterialTheme.typography.labelSmall,
+            fontWeight = FontWeight.SemiBold,
+            color = MaterialTheme.accents.agentAccentText,
+        )
+    }
+}
+
+/** 任务状态胶囊（待合并/待确认/进行中/已完成/受阻）。 */
+@Composable
+private fun CardStateTag(card: AgentCardUi) {
+    val sp = LocalAppSpacing.current
+    val (label, bg, fg) = when {
+        card.actions.any { it.actionId == SYSTEM_ACTION_MERGE_PATCH } ->
+            Triple(
+                stringResource(Res.string.card_status_review_ready),
+                MaterialTheme.accents.online.copy(alpha = 0.12f),
+                MaterialTheme.accents.online,
+            )
+        card.actions.any { it.actionId == "approve-prototype" } ->
+            Triple(
+                stringResource(Res.string.card_status_review_ready),
+                MaterialTheme.accents.agentAccent.copy(alpha = 0.12f),
+                MaterialTheme.accents.agentAccentText,
+            )
+        card.actions.any { it.actionId == "retry" } ->
+            Triple(
+                stringResource(Res.string.card_status_blocked),
+                MaterialTheme.accents.warn.copy(alpha = 0.12f),
+                MaterialTheme.colorScheme.onSecondaryContainer,
+            )
+        card.progress == 100 ->
+            Triple(
+                stringResource(Res.string.card_status_done),
+                MaterialTheme.accents.online.copy(alpha = 0.12f),
+                MaterialTheme.accents.online,
+            )
+        card.progress != null ->
+            Triple(
+                stringResource(Res.string.card_status_running),
+                MaterialTheme.colorScheme.primary.copy(alpha = 0.12f),
+                MaterialTheme.colorScheme.primary,
+            )
+        else -> null
+    } ?: return
+    Text(
+        text = label,
+        style = MaterialTheme.typography.labelSmall,
+        fontWeight = FontWeight.SemiBold,
+        color = fg,
+        modifier = Modifier
+            .background(bg, RoundedCornerShape(6.dp))
+            .padding(horizontal = sp.sm, vertical = 2.dp),
     )
 }
 
@@ -1068,36 +1146,53 @@ private fun CardDiffViewerRow(diff: AgentCardDiff) {
         verticalArrangement = Arrangement.spacedBy(6.dp),
     ) {
         Row(
-            horizontalArrangement = Arrangement.spacedBy(4.dp),
+            horizontalArrangement = Arrangement.spacedBy(6.dp),
             verticalAlignment = Alignment.CenterVertically,
+            modifier = Modifier.fillMaxWidth(),
         ) {
+            androidx.compose.material3.Icon(
+                painter = painterResource(Res.drawable.ic_terminal),
+                contentDescription = null,
+                tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                modifier = Modifier.size(14.dp),
+            )
             if (diff.path != null) {
                 Text(
                     text = diff.path,
                     style = MaterialTheme.typography.bodySmall,
-                    fontWeight = FontWeight.Medium,
+                    fontWeight = FontWeight.SemiBold,
                     color = MaterialTheme.colorScheme.onSurface,
                     fontFamily = FontFamily.Monospace,
                     maxLines = 1,
                     overflow = TextOverflow.Ellipsis,
                     modifier = Modifier.weight(1f, fill = false),
                 )
+            } else {
+                Spacer(Modifier.weight(1f))
             }
             if (diff.additions != null || diff.deletions != null) {
-                Text(
-                    text = "+${diff.additions ?: 0}",
-                    style = MaterialTheme.typography.labelSmall,
-                    fontWeight = FontWeight.SemiBold,
-                    color = MaterialTheme.accents.online,
-                    fontFamily = FontFamily.Monospace,
-                )
-                Text(
-                    text = "−${diff.deletions ?: 0}",
-                    style = MaterialTheme.typography.labelSmall,
-                    fontWeight = FontWeight.SemiBold,
-                    color = MaterialTheme.colorScheme.error,
-                    fontFamily = FontFamily.Monospace,
-                )
+                Row(horizontalArrangement = Arrangement.spacedBy(4.dp)) {
+                    Text(
+                        text = "+${diff.additions ?: 0}",
+                        style = MaterialTheme.typography.labelSmall,
+                        fontWeight = FontWeight.Bold,
+                        color = MaterialTheme.accents.online,
+                        fontFamily = FontFamily.Monospace,
+                        modifier = Modifier
+                            .background(MaterialTheme.accents.online.copy(alpha = 0.12f), RoundedCornerShape(4.dp))
+                            .padding(horizontal = 5.dp, vertical = 1.dp),
+                    )
+                    Text(
+                        text = "−${diff.deletions ?: 0}",
+                        style = MaterialTheme.typography.labelSmall,
+                        fontWeight = FontWeight.Bold,
+                        color = MaterialTheme.colorScheme.error,
+                        fontFamily = FontFamily.Monospace,
+                        modifier = Modifier
+                            .background(MaterialTheme.colorScheme.error.copy(alpha = 0.12f), RoundedCornerShape(4.dp))
+                            .padding(horizontal = 5.dp, vertical = 1.dp),
+                    )
+                }
             }
         }
         if (summary != null) {
@@ -1207,13 +1302,20 @@ private fun CardButtonGroupRow(
                     action.actionId == SYSTEM_ACTION_MERGE_PATCH -> stringResource(Res.string.card_action_merge_patch)
                     else -> action.label
                 }
+                val iconRes = when (action.actionId) {
+                    SYSTEM_ACTION_MERGE_PATCH -> Res.drawable.ic_check_double
+                    "approve-prototype" -> Res.drawable.ic_check_double
+                    "retry" -> Res.drawable.ic_refresh
+                    else -> null
+                }
                 if (action.approval) {
                     AppButton(
                         text = text,
                         onClick = { onAction(card, action.actionId) },
                         enabled = actionsEnabled && !ui.disabled,
-                        size = AppButtonSize.Small,
+                        size = AppButtonSize.Medium,
                         tone = AppButtonTone.Primary,
+                        leadingIcon = iconRes,
                         modifier = Modifier.weight(1f),
                     )
                 } else {
@@ -1221,8 +1323,9 @@ private fun CardButtonGroupRow(
                         text = text,
                         onClick = { onAction(card, action.actionId) },
                         enabled = actionsEnabled && !ui.disabled,
-                        size = AppButtonSize.Small,
+                        size = AppButtonSize.Medium,
                         tone = AppButtonTone.Neutral,
+                        leadingIcon = iconRes,
                         modifier = Modifier.weight(1f),
                     )
                 }

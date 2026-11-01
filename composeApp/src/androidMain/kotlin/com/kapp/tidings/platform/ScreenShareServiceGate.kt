@@ -76,7 +76,7 @@ object ScreenShareServiceGate {
         return latestFrame
     }
 
-    fun startService(context: Context, serviceClass: Class<*>, channel: String, body: String) {
+    fun startService(context: Context, serviceClass: Class<*>, channel: String, body: String): Boolean = runCatching {
         val intent = Intent(context, serviceClass)
             .setAction(ACTION_START)
             .putExtra(AndroidScreenSharingService.EXTRA_CHANNEL, channel)
@@ -86,7 +86,7 @@ object ScreenShareServiceGate {
         } else {
             context.startService(intent)
         }
-    }
+    }.isSuccess
 
     fun stopService(context: Context, serviceClass: Class<*>) {
         context.startService(Intent(context, serviceClass).setAction(ACTION_STOP))

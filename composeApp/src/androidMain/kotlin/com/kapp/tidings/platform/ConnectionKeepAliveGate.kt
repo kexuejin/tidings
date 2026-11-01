@@ -37,7 +37,7 @@ object ConnectionKeepAliveGate {
      */
     const val NOTIFICATION_ID = 4202
 
-    fun start(context: Context, serviceClass: Class<*>, channel: String, title: String, body: String) {
+    fun start(context: Context, serviceClass: Class<*>, channel: String, title: String, body: String): Boolean = runCatching {
         val intent = Intent(context, serviceClass)
             .setAction(ACTION_START)
             .putExtra(EXTRA_CHANNEL, channel)
@@ -48,7 +48,7 @@ object ConnectionKeepAliveGate {
         } else {
             context.startService(intent)
         }
-    }
+    }.isSuccess
 
     /**
      * 停服务用 `stopService`，**不是** `startService(ACTION_STOP)`。

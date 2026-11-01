@@ -29,6 +29,8 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.platform.LocalClipboardManager
+import androidx.compose.ui.semantics.onLongClick
+import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
@@ -190,7 +192,7 @@ fun GroupInfoDialog(
             LazyColumn(
                 modifier = Modifier
                     .fillMaxWidth()
-                    .heightIn(max = 420.dp),
+                    .heightIn(max = 560.dp),
                 verticalArrangement = Arrangement.spacedBy(LocalAppSpacing.current.sm),
             ) {
                 item {
@@ -669,9 +671,17 @@ private fun GroupMemberRow(
                     // 只注册长按，不挂 onClick：combinedClickable 必须给单击槽，而
                     // "点了没反应"的空实现会进 DeadButtonGuard 的欠账簿（那个白名单只收
                     // 三处有理由的用法，且每文件一处）。成员行本来就没有单击动作。
-                    Modifier.pointerInput(identity.displayName, onLongPressMention) {
-                        detectTapGestures(onLongPress = { onLongPressMention() })
-                    }
+                    // 补齐 semantics 声明，无障碍服务与自动化测试（uiautomator）均可识别为可长按节点。
+                    Modifier
+                        .semantics {
+                            onLongClick(label = "Mention " + identity.displayName) {
+                                onLongPressMention()
+                                true
+                            }
+                        }
+                        .pointerInput(identity.displayName, onLongPressMention) {
+                            detectTapGestures(onLongPress = { onLongPressMention() })
+                        }
                 } else {
                     Modifier
                 },
