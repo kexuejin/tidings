@@ -14,11 +14,11 @@
 | ✅ 成立 | 手机派单 → 宿主接单 → 独立 worktree 执行 | `[msg] inbound ... len=111` → 新沙箱 `t-3-8e10ccf4` | 成立，但**落点曾不确定**（同群两条落两个仓，§9.2，已修） |
 | ✅ 成立 | 宿主主工作树隔离 | 全程 `git status` 为空，工作面在 `/private/tmp/tidings-ws/t-*` | 成立 |
 | ✅ 成立 | 单测回归基线 | `npm test` → 72 pass / 0 fail / 238 ms（校准判定口径 <500 ms） | 成立 |
-| ⚠️ 降级 | 毫秒级打断（§6.1） | 入站层 `onAgentAbort` 顶层拦截，剥离 agentPromptRoute 依赖，收到 `stop/停` 即刻 cancel 并置 card 为 `aborted` | **只翻了卡片，没杀进程**（§9.4，已补直杀通道）；且端到端延迟被投递支配，60–95 s（§9.5 第 2 条，**仍未闭环**） |
+| ⚠️ 降级 | 毫秒级打断（§6.1） | 入站层 `onAgentAbort` 顶层拦截，剥离 agentPromptRoute 依赖，收到 `stop/停` 即刻 cancel 并置 card 为 `aborted` | **只翻了卡片，没杀进程**（§9.4，已补直杀通道；真机验成「一次 stop 摘干净整棵树」，§9.8.2）；端到端延迟被**投递**支配，实测 120–125 s 而非路径本身（§9.8.3）；且打断与编排器无关（§9.9） |
 | ⚠️ 待复验 | 沙箱用户主目录隔离（隐私越权） | `prepareSandboxHome` 白名单建立隔离 `.sandbox-home`，封锁 `~/.workbuddy` 与 `~/.ssh`，加 `forceKill` 根治僵尸 | 仅单测；本轮真机未复测该条 |
-| ⚠️ 待复验 | 原型阶段 / 决策卡 / 选项卡（阶段 A） | 增加 `prototype` 状态流转、`prototype.html` 生成、`OptionList` 选项卡与 `[Approve & Develop]` 确认推进 | 仅单测；§9.5 第 3 条列为本轮未做 |
-| ⚠️ 待复验 | 上下文追问唤醒（阶段 A / 交互） | 入站层 `onAgentFollowUp` 优先唤醒当前活跃工单的 `onFollowUp` 回调，支持追问连续迭代 | 仅单测；同上 |
-| ⚠️ 待复验 | 自愈循环 `maxHealRounds` / 退单（§6.2） | 编排器实现最多 3 轮测试红绿循环自愈，超纲失败触发 `Handed back` 退单卡 | 仅单测；同上 |
+| ❌ 未接通 | 原型阶段 / 决策卡 / 选项卡（阶段 A） | 增加 `prototype` 状态流转、`prototype.html` 生成、`OptionList` 选项卡与 `[Approve & Develop]` 确认推进 | **真机不触发**：`mockup` 派单后 agent 收到的是原文、没有工单卡片（§9.9）。根因是编排器只挂在 `onAgentPrompt` 上，而真机 `@agent` 走 `invokeExecutor` 直接 `executeCliTask` |
+| ❌ 未接通 | 上下文追问唤醒（阶段 A / 交互） | 入站层 `onAgentFollowUp` 优先唤醒当前活跃工单的 `onFollowUp` 回调，支持追问连续迭代 | 同 §9.9：没有活跃工单（编排器不在场），追问无处可唤醒 |
+| ❌ 未接通 | 自愈循环 `maxHealRounds` / 退单（§6.2） | 编排器实现最多 3 轮测试红绿循环自愈，超纲失败触发 `Handed back` 退单卡 | 同 §9.9：自愈循环在 `runTicket` 里，真机路径进不到 |
 | ✅ 已验证 | 全量单测与质量门禁 | `:agentNode:test` / `:desktopApp:test` / `:core:jvmTest` / `:app:jvmTest` / `:cli:test` 及 5 项门禁全部通过 | 成立（复验后**门禁另抓到 `jlinkModulesGate` 回归**，§9.1，已修） |
 
 **这一轮真正学到的一句**：「代码接上了」和「真机上那件事发生」是两件事，而这批缺陷全是
@@ -384,3 +384,51 @@ javap -p agentNode-*.jar 里的 WorktreeSandboxExecutor
 
 叠上 120 s 投递延迟，**任务活得比 stop 到得还短**。下一轮要验打断，得给"必须由 agent
 自己长时间动手"的任务（大范围重构），不能指望单条命令撑住。
+
+## 9.9 阶段 A 原型在真机上没触发 —— 不是「未复验」，是**没接在派单路径上**
+
+### 观测
+
+18:00 发 `@codex-e2e mockup page`（`mockup` 是 `isPrototypeIntent` 的三个关键词之一），
+沙箱起来了、agent 也干活了，但：
+
+- 它收到的 prompt 就是原文 `mockup page`。证据是 task.log 里 agent 自己的推理：
+  「User says "mockup page". We need infer task. … Probably task in a benchmark workspace」——
+  而原型分支该注入的是 `You are designing an interactive single-file prototype HTML …`；
+- 全程**没有工单卡片**：DB 里该群从 17:24 到此刻一条 `CARD` 都没有；
+- 于是也没有 `state=prototype`、三个 Layout 选项、`[Approve & Develop]`。
+
+先排除了"打包漏代码"：`unzip -p desktopApp-*.jar | strings | grep "You are designing an
+interactive single-file prototype"` → 1 命中，那段串在产物里。
+
+### 根因：真机的 `@agent` 走的是 invoke 执行器，不是编排器
+
+| 入口 | 落到哪 | 有编排器吗 |
+| :-- | :-- | :-- |
+| `onAgentPrompt`（文本路由 `agentPromptRoute == Local`） | `DesktopWorkerOrchestrator.handlePrompt` → `runTicket` | **有**：工单卡片 / 阶段 A 原型 / 追问唤醒 / 自愈退单全在这里 |
+| `controller.invokeExecutor`（入站帧带 `agentIntent`，M4 派单） | `DesktopExtension:816` 直接 `executeCliTask(...)` | **没有** |
+
+手机的 `@agent` 消息带 `agentIntent`，于是走第二条。`DesktopWorkerOrchestrator` 成了一个
+只有单测、以及 `onAgentPrompt` 这条**在真机上进不去的路**才能到的地方。
+
+更直接的旁证：`RelayControllerMessagesComponent` 的仲裁 `intentOwnsDispatch`（本轮修
+"一条消息派两次单"时加的）在命中 `agentIntent` 且宿主有 executor 时**主动不再调
+`onAgentPrompt`** —— 即便两条路曾经都跑过，现在也只剩 invoke 这一条。
+
+### 为什么打断仍然有效（一个必须记住的推论）
+
+打断桥（`onAgentAbort` + `abortRunningSandboxes`）挂在 `DesktopExtension` 上，**与编排器无关**，
+所以照常工作 —— 这正是 §9.8.2 能验成的原因。反过来也成立：**不能拿"打断有效"推断编排器在跑**。
+上一轮把"卡片翻 Aborted"当成编排器活着的证据，其实那也可能是编排器不在场、只有摘进程生效。
+
+### 下一轮第一件事
+
+让 invoke 执行器**交给**编排器而不是绕过它。难点是语义不匹配：`invokeExecutor.execute` 是
+请求-响应（要回 `AgentInvokeExecution` 的 status/summary/error），`handlePrompt` 是
+fire-and-forget。两条候选：
+1. `handlePrompt` 加一个能返回结果（`Deferred` 或回调）的重载，invoke 侧 await；
+2. invoke 只做受理、立刻回 `accepted`，结论仍走工单卡片。
+
+无论选哪条，都要配一条守卫：断言 `invokeExecutor` 的实现体里出现**编排器调用**，
+而不是 `executeCliTask(` —— 照 `DesktopStageChainTest` 的写法。那个测试正是为
+「执行体写好了却没人装」设的，而这里坏的是同一类：**能力写好了，但真机那条路上没有它**。
