@@ -49,6 +49,7 @@ PREFERRED_ORDER = [
     "group",
     "share",
     "agent",
+    "workspace_collaboration",
     "search",
     "screen",
 ]

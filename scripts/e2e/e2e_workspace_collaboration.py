@@ -209,9 +209,10 @@ def run_checks(args):
         ack_sess = peer.wait_ack(env_sess_live["id"], timeout=5.0)
         R.check("session-frame-acked", ack_sess is not None, "agent-session 得到手机 ACK")
 
-        # 3.4 投递事件流
+        # 3.4 投递事件流。eventType 用线协议词 `tool.started`（点分）——
+        # `tool_call` 能 ACK 能落台账，但进不了思考折叠等任何语义分支。
         env_evt = peer.env("agent-event", {
-            "sessionId": SESS_ID, "cursor": 10001, "eventType": "tool_call",
+            "sessionId": SESS_ID, "cursor": 10001, "eventType": "tool.started",
             "summary": "正在执行协同架构全流程自动化断言",
         })
         peer.send(env_evt)

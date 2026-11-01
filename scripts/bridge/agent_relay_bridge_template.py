@@ -24,9 +24,15 @@ DEFAULT_RELAY_ENDPOINT = "http://127.0.0.1:8788"
 
 
 class AgentRelayBridge:
-    def __init__(self, endpoint: str = DEFAULT_RELAY_ENDPOINT, agent_kind: str = "Gemini"):
+    def __init__(self, endpoint: str = DEFAULT_RELAY_ENDPOINT, agent_kind: str = "Gemini",
+                 agent_id: Optional[str] = None):
         self.endpoint = endpoint.rstrip("/")
         self.agent_kind = agent_kind
+        # agentId 是手机端归组键的一部分（agentKind 只决定"哪一类"）。
+        # 工作区帧只报 agentKind 会让同一个 agent 在手机上被拆成两行 ——
+        # verify-dsh-workspace-session.py 的注释就是为这个坑写的。默认用
+        # agentKind 的小写形式（稳定、可重算），显式传 agent_id 可覆盖。
+        self.agent_id = agent_id or agent_kind.lower()
 
     def _post_json(self, path: str, data: Dict[str, Any]) -> Dict[str, Any]:
         url = f"{self.endpoint}{path}"
@@ -103,6 +109,7 @@ class AgentRelayBridge:
             "wsTitle": ws_title,
             "wsPath": ws_path,
             "agentKind": self.agent_kind,
+            "agentId": self.agent_id,
             "online": online,
             "at": int(time.time() * 1000),
         }
@@ -126,6 +133,7 @@ class AgentRelayBridge:
             "to": target,
             "sessionId": session_id,
             "agentKind": self.agent_kind,
+            "agentId": self.agent_id,
             "state": state,  # "busy", "idle", "paused"
             "alias": alias,
             "title": title,
@@ -162,8 +170,10 @@ class AgentRelayBridge:
     def pull_inbox(self, since_ms: int = 0, limit: int = 50) -> List[Dict[str, Any]]:
         """Pull incoming commands or approval results from remote peers."""
         import urllib.parse
+        # 控制面返回键是 `messages`（不是早期规格里的 `items`）——
+        # 抄旧规格会把这里写成永远返回空。
         resp = self._get_json("/v1/inbox", {"since": since_ms, "limit": limit})
-        return resp.get("items", [])
+        return resp.get("messages", [])
 
     # 5. Send Proactive Message to Peer or Channel
     def send_message(self, to_peer: str, text: str) -> Dict[str, Any]:

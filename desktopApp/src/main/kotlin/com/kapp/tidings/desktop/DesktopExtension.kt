@@ -1785,7 +1785,8 @@ internal fun agentChatMessageFor(
  * 同一形态 —— 两端显示同一条气泡时必须得到同一个发送者，否则同一个群在手机上写"桌面端"、
  * 在桌面上写 "DSH"，用户会以为多了一个人。
  *
- * kind 为空时退回 `agent:dsh`：宁可显示一个通用 agent 名，也不要退回成"桌面端"这个**错的人**。
+ * kind 为空时调用链在 `agentChatMessageFor` 已先行 return null，本函数不会以空 kind 到达；
+ * core 的 `AgentSenderId.of` 兜底行为只是防御，不代表真实路径。
  */
 internal fun agentSenderIdFor(selfNodeId: String, agentKind: String?, agentId: String? = null): String =
     // 交给 core 的**唯一来源**：它产出 `agent:<hostNodeId>:<agentId>`，并处理长度预算

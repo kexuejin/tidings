@@ -56,81 +56,113 @@
 
 ## 三、 本地回环接口规范 (`http://127.0.0.1:8788`)
 
-### 1. 事件与状态上报 (`POST /v1/inbound`)
-适配器将智能体的生命周期转译为标准 JSON 信封投递：
+> **契约说明**：控制面**没有**统一的 `POST /v1/inbound` 信封投递口 —— 上报按**帧型分路由**，
+> 每条请求是扁平 JSON（不是信封包裹），目标对端放 `to` 键。以下为现行实现的真实形状
+> （与 `agentNode/.../ControlPlane.kt` 路由表、`scripts/verify-dsh-workspace-session.py` 一致）。
 
-* **工作区宣告 (`agent-workspace`)**：
+### 1. 状态与事件上报（按帧型分路由）
+
+* **工作区宣告 (`POST /v1/agent/workspace`)**：
   ```json
   {
-    "type": "agent-workspace",
-    "payload": {
-      "wsId": "ws-my-project",
-      "wsTitle": "my-project",
-      "wsPath": "/workspace/src/my-project",
-      "agentKind": "DSH",
-      "online": true,
-      "at": 1729000000000
-    }
+    "to": "<目标 nodeId>",
+    "wsId": "ws-my-project",
+    "wsTitle": "my-project",
+    "wsPath": "/workspace/src/my-project",
+    "agentKind": "DSH",
+    "agentId": "dsh-cli",
+    "online": true,
+    "sessionCount": 0,
+    "order": 99
+  }
+  ```
+  > **必须带 `agentId`**：它（连同 agentKind）是手机端归组键的一部分 —— 工作区帧只报
+  > agentKind 会让同一个 agent 在手机上被拆成两行。
+
+* **任务会话状态 (`POST /v1/agent/session`)**：
+  ```json
+  {
+    "to": "<目标 nodeId>",
+    "sessionId": "sess-task-01",
+    "agentKind": "DSH",
+    "agentId": "dsh-cli",
+    "state": "busy",
+    "alias": "#修复支付崩溃",
+    "title": "处理支付回调时的空指针异常",
+    "wsId": "ws-my-project",
+    "wsTitle": "my-project",
+    "wsPath": "/workspace/src/my-project",
+    "startedAt": 1729000000000,
+    "updatedAt": 1729000000000
   }
   ```
 
-* **任务会话状态 (`agent-session`)**：
+* **事件流 (`POST /v1/agent/event`)**：`cursor` 必须是**数字**且会话内单调（非时间戳）；
+  `eventType` 用线协议点分词（`assistant.text` / `tool.started` …）。
   ```json
   {
-    "type": "agent-session",
-    "payload": {
-      "sessionId": "sess-task-01",
-      "agentKind": "DSH",
-      "state": "busy",
-      "alias": "#修复支付崩溃",
-      "title": "处理支付回调时的空指针异常",
-      "wsId": "ws-my-project",
-      "wsTitle": "my-project",
-      "wsPath": "/workspace/src/my-project",
-      "startedAt": 1729000000000
-    }
+    "to": "<目标 nodeId>",
+    "sessionId": "sess-task-01",
+    "cursor": 42,
+    "eventType": "assistant.text",
+    "summary": "正在跑测试",
+    "body": "单元测试 12/12 通过"
   }
   ```
 
-* **阻断执行审批 (`agent-approval`)**：
+* **阻断执行审批 (`POST /v1/agent/approval`)**：
   ```json
   {
-    "type": "agent-approval",
-    "payload": {
-      "approvalId": "appr-exec-101",
-      "sessionId": "sess-task-01",
-      "tool": "terminal",
-      "summary": "执行数据库迁移与热补丁: ./gradlew flywayMigrate",
-      "expiresAt": 1729000120000
-    }
+    "to": "<目标 nodeId>",
+    "approvalId": "appr-exec-101",
+    "sessionId": "sess-task-01",
+    "tool": "terminal",
+    "summary": "执行数据库迁移与热补丁: ./gradlew flywayMigrate",
+    "choices": "allow,deny,allow_session,always",
+    "expiresAt": 1729000120000
   }
   ```
+  > `choices` 基线四档：`allow, deny, allow_session, always` —— 漏掉后两档手机端就看不到
+  > 「本次免审 / 总是允许」入口。
 
 ### 2. 用户指令与审批结果下拉 (`GET /v1/inbox`)
-适配器通过轮询或长连接拉取来自远端设备的指令与批复：
-* **查询参数**：`since=<timestamp>&limit=50`
-* **响应格式**：
+适配器通过轮询拉取来自远端设备的指令与批复：
+* **查询参数**：`since=<epoch毫秒>&limit=50`
+* **响应格式**（数组键是 **`messages`**，每项含投递元数据 + 原信封；判定给 agent 的消息
+  会额外带 `agentHint`）：
   ```json
   {
-    "items": [
+    "since": 1729000000000,
+    "messages": [
       {
-        "type": "agent-ack",
-        "payload": {
-          "ackFor": "appr-exec-101",
-          "status": "approved",
-          "decidedBy": "📱 iPhone 15 (所有者)"
+        "seq": 1201,
+        "peerId": "node-phone-uuid",
+        "direction": "in",
+        "at": 1729000050000,
+        "envelope": {
+          "v": 1, "type": "agent-ack", "id": "...", "from": "node-phone-uuid", "ts": 1729000050000,
+          "payload": {
+            "ackOf": "appr-exec-101",
+            "kind": "approved",
+            "at": 1729000049000
+          }
         }
       },
       {
-        "type": "msg",
-        "payload": {
-          "text": "@DSH 继续优化索引配置",
-          "sender": "node-phone-uuid"
+        "seq": 1202,
+        "peerId": "node-phone-uuid",
+        "direction": "in",
+        "at": 1729000060000,
+        "envelope": {
+          "v": 1, "type": "msg", "id": "...", "from": "node-phone-uuid", "ts": 1729000060000,
+          "payload": { "text": "@DSH 继续优化索引配置" }
         }
       }
     ]
   }
   ```
+  > 审批批复是 `type=agent-ack` 的信封，批复字段为 **`ackOf` / `kind` / `at`**
+  > （不是旧稿写的 `ackFor` / `status` / `decidedBy`）。
 
 ### 3. 主动下发消息 (`POST /v1/send`)
 智能体向群聊或指定对端推送文本、文件或执行进度：

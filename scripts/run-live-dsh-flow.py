@@ -56,11 +56,9 @@ def find_target_node():
         # Match online mobile peer
         if p.get("online") and ("手机" in p.get("nick", "") or p.get("platform") == "linux"):
             return p["nodeId"], p.get("nick"), p.get("ip")
-    # Fallback to known nodeId if present
-    for p in peers_info["peers"]:
-        if p["nodeId"] == "f6a7b8c9-ede7-4ed1-84a4-4941d21cf81d":
-            return p["nodeId"], p.get("nick"), p.get("ip")
-    raise RuntimeError(f"Mobile peer not found in peers: {peers_info}")
+    # 没有在线手机就明确失败 —— 写死某个历史 nodeId 的兜底只会让换设备后
+    # 静默选错目标，报错比选错好。
+    raise RuntimeError(f"No online mobile peer found: {peers_info}")
 
 print("==================================================")
 print("DSH 全链路真机自动化验证流程")
@@ -106,7 +104,9 @@ a_resp = post_json("/v1/agent/approval", {
     "summary": "./gradlew :core:jvmTest --tests NetworkMonitorTest",
     "riskLevel": "L3",
     "diff": "--- a/core/NetworkMonitor.kt\n+++ b/core/NetworkMonitor.kt\n@@ -15,3 +15,5 @@\n+    val isVpnActive: StateFlow<Boolean>",
-    "choices": "allow,deny",
+    # choices 基线四档（MessageTypes.kt ApprovalChoiceWords）：显式声明合法，
+    # 但漏掉 allow_session/always 的话手机端看不到「本次免审 / 总是允许」。
+    "choices": "allow,deny,allow_session,always",
     "expiresAt": now_ms + 600000
 })
 print("Agent approval response:", a_resp)
