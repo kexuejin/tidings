@@ -89,11 +89,25 @@ class WorktreeSandboxExecutor(
 
         /** 被 [abort] 或协程取消中止（清理已跑完）。 */
         data class Aborted(val message: String) : Outcome
+
+        /**
+         * 跑过 [timeoutMs] 仍未结束：进程树按 D-024 中止序摘掉、worktree 无痕清理。
+         *
+         * 为什么单列一档而不是并进 [Aborted]：中止是**外部要求**（宿主 HTTP / 调用方取消），
+         * 超时是**宿主自己止损**。混在一档里，审计会把一次自主止损读成一次人为中断，
+         * 而「是谁结束的」正是复盘时最先要看的那一格。
+         */
+        data class TimedOut(val timeoutMs: Long) : Outcome
     }
 
     /**
      * 在独立 worktree 里执行一条命令。[onLine] 收原始输出行（信令走这里，文件走
      * task.log）。执行期间协程被取消 = 触发中止路径并上抛取消。
+     *
+     * [timeoutMs] 是**墙钟**止损：从拉起进程算起，超过它就按 D-024 中止序摘掉进程树、
+     * 无痕清理、如实回 [Outcome.TimedOut]。不设这一条时，一个挂住的 CLI（本轮实测两次）
+     * 会一直占着 worktree 与分支，直到人去 kill —— 无人值守的流水线就卡在这里不动。
+     * 默认值走 [timeoutMsOf]（env 可覆盖），测试用短值注入。
      */
     suspend fun run(
         taskId: String,
@@ -101,6 +115,7 @@ class WorktreeSandboxExecutor(
         command: List<String>,
         env: Map<String, String> = emptyMap(),
         onLine: suspend (String) -> Unit,
+        timeoutMs: Long = timeoutMsOf(env),
     ): Outcome {
         require(TASK_ID.matches(taskId)) {
             "taskId \"$taskId\" must match ${TASK_ID.pattern} — it becomes a path segment and a branch name"
@@ -138,6 +153,10 @@ class WorktreeSandboxExecutor(
             }
             val started = clock()
             val logFile = File(artifactsDir, "task.log")
+            val deadlineAt = started + timeoutMs
+            // 跨上下文可见：赋值发生在 Dispatchers.IO 的工作线程上，判定在与它不同的
+            // 线程上做 —— 普通 Boolean 在这里是不可靠的（读方可能永远看不到写）。
+            val timedOut = java.util.concurrent.atomic.AtomicBoolean(false)
             val exitCode = withContext(Dispatchers.IO) {
                 val pb = ProcessBuilder(command).directory(worktree)
                 env.forEach { (k, v) -> pb.environment()[k] = v }
@@ -168,27 +187,59 @@ class WorktreeSandboxExecutor(
                     try {
                         while (true) {
                             ensureActive()
+                            // 墙钟止损与取消观测同一个周期（≤POLL_MS），所以「挂住」
+                            // 最多比 timeoutMs 多等一个 tick 就被收场。
+                            if (clock() >= deadlineAt) {
+                                timedOut.set(true)
+                                break
+                            }
                             val line = queue.poll(POLL_MS, TimeUnit.MILLISECONDS) ?: continue
                             if (line === POISON) break
                             log.appendLine(line as String)
                             onLine(line)
                         }
-                        proc.waitFor()
+                        // 超时分支不取退出码：进程是被我们杀的，它的退出码没有信息量
+                        // （外层 when 先判 timedOut，不会把它误读成 Failed）。
+                        if (timedOut.get()) EXIT_TIMEOUT else proc.waitFor()
                     } finally {
                         // 取消也要等到真死：不等 waitFor 的自然退出 —— 进程树摘掉后
                         // waitFor 才会返回（读线程随 EOF 结束）。
                         if (proc.isAlive) {
-                            aborted.add(taskId)
+                            // **超时不写 aborted 标记**：Aborted 的语义是「外部要求中止」
+                            // （宿主 HTTP / 调用方取消），超时是宿主自主止损。混成一档，
+                            // 复盘时会把一次自主止损读成一次人为中断。
+                            if (!timedOut.get()) aborted.add(taskId)
                             proc.descendants().forEach { it.destroy() }
                             proc.destroy()
                         }
                         reader.join(2_000)
                     }
                 }
+                // 宽限后升级 SIGKILL，并**等它真死**再交还：worktree 里的文件还被占着时
+                // `git worktree remove` 会失败 —— 那样「无痕清理」就成了口号。
+                if (timedOut.get()) {
+                    val killBy = System.currentTimeMillis() + GRACE_MS
+                    while (System.currentTimeMillis() < killBy && proc.isAlive) {
+                        Thread.sleep(50)
+                    }
+                    forceKill(proc)
+                    runCatching { proc.waitFor() }
+                }
                 exit
             }
             running.remove(taskId)
             return when {
+                timedOut.get() -> {
+                    // 超时是结局，不是一个说不清的退出码：真因（跑了多久、上限多少、
+                    // 已摘进程树）写进 task.log，外部取证只看产物目录也读得到。
+                    note(
+                        logFile,
+                        "[sandbox] task $taskId timeout: ran ${clock() - started}ms, limit=${timeoutMs}ms, " +
+                            "process tree killed (D-024 abort order), worktree cleaned",
+                    )
+                    cleanupTask(taskId)
+                    Outcome.TimedOut(timeoutMs)
+                }
                 aborted.remove(taskId) -> {
                     cleanupTask(taskId)
                     Outcome.Aborted("task aborted (SIGTERM/SIGKILL)")
@@ -359,11 +410,36 @@ class WorktreeSandboxExecutor(
 
         const val GRACE_MS = 3_000L
 
+        /** 派单止损的 env 名（毫秒）。显式覆盖优先于默认值。 */
+        const val ENV_TIMEOUT_MS = "TIDINGS_SANDBOX_TIMEOUT_MS"
+
+        /**
+         * 派单墙钟上限，默认 30 分钟。
+         *
+         * 取值依据是本轮真机读数，不是拍脑袋：幕 4 实现 395 s、幕 5 审查约 10 min、
+         * 幕 2 设计 201 s。30 min 给最慢一幕留了 ~3 倍余量，同时把「挂住」的代价从
+         * 「无限期占着 worktree，等人发现」压到「半小时后自动收场」。
+         * 真跑大重构需要更长时，用 env 显式抬高 —— 但**不会**默认无限。
+         */
+        const val DEFAULT_TIMEOUT_MS = 30L * 60L * 1000L
+
+        /**
+         * 从 env 解析超时。**认不出的值一律回落默认**：`0`、负数、乱写都不许变成
+         * 「立刻杀掉」—— 那会把一个配置笔误变成一次全量派单失败。
+         */
+        fun timeoutMsOf(env: Map<String, String> = System.getenv()): Long {
+            val raw = env[ENV_TIMEOUT_MS]?.trim()?.toLongOrNull()
+            return raw?.takeIf { it > 0L } ?: DEFAULT_TIMEOUT_MS
+        }
+
         /** 取消观测周期：主循环每这么久醒一次做 ensureActive()。 */
         const val POLL_MS = 100L
 
         /** 读线程收尾哨兵。 */
         private val POISON = Any()
+
+        /** 超时分支的退出码哨兵（见 `run` 里的注释：外层先判 timedOut，不读它）。 */
+        const val EXIT_TIMEOUT = -2
 
         fun branchOf(taskId: String): String = "task-$taskId"
 

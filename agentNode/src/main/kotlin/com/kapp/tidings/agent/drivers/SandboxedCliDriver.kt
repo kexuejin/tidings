@@ -125,6 +125,15 @@ class SandboxedCliDriver(
                 onEvent(DriverEvent.Error(outcome.message))
             is WorktreeSandboxExecutor.Outcome.Aborted ->
                 onEvent(DriverEvent.Error("task aborted in sandbox (SIGTERM/SIGKILL)"))
+            is WorktreeSandboxExecutor.Outcome.TimedOut ->
+                // 超时对用户就是一条失败：讲清发生了什么（跑了多久、已收场），
+                // 不给「还在跑」的错觉 —— 那条工作树此刻已经清理干净了。
+                onEvent(
+                    DriverEvent.Error(
+                        "task timed out in sandbox after ${outcome.timeoutMs}ms — process tree killed, " +
+                            "worktree cleaned (raise TIDINGS_SANDBOX_TIMEOUT_MS for genuinely long tasks)",
+                    ),
+                )
         }
     }
 

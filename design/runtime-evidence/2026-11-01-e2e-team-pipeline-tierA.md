@@ -81,7 +81,7 @@ E2E_AGENT_KEY=codex python3 scripts/e2e-team-pipeline.py --act 4 --tier real
 
 1. **会话/卡片下发到手机**（挡住幕 6，也是「团队流水线」的产品闭环缺口）：派单会话要能到手机，diff 卡要能在手机上点 [合并此补丁]。
 2. **幽灵 peer 的全局治理**：`pickHookPeer` 只保住了审批一条路，发送侧 `[send] peer=44608041` 还在。
-3. **派单缺少超时**：CLI 挂住时任务会一直占着 worktree（这轮靠人工 kill 两次）。止损点应在宿主侧，不该靠人盯。
+3. **派单缺少超时**：CLI 挂住时任务会一直占着 worktree（这轮靠人工 kill 两次）。止损点应在宿主侧，不该靠人盯。→ **已修（§9）**。
 4. **沙箱不是边界**：上一轮 102 条命令里 27 条直接操作宿主用户目录（`cd ~/e2e-weather-app && git …`、`find ~ -name …`），`SandboxedCliDriver` 只改 cwd，没有路径约束。
 
 ## 7. 落账（一个缺陷一笔）
@@ -98,6 +98,24 @@ E2E_AGENT_KEY=codex python3 scripts/e2e-team-pipeline.py --act 4 --tier real
 ## 8. 剩余风险
 
 - 发送路径仍会选中幽灵身份（`[send] peer=44608041 channel=TCP`），折叠只护住审批一侧。
-- 派单无超时止损：CLI 挂住就一直占 worktree（本轮人工 kill 两次）。
 - 沙箱只改 `cwd`、无路径约束（§6 第 4 条）。
+
+## 9. 派单止损（§6 第 3 条的落地）
+
+`WorktreeSandboxExecutor.run` 加了**墙钟**上限：默认 30 min（`TIDINGS_SANDBOX_TIMEOUT_MS` 可覆盖，
+认不出的值一律回落默认 —— `0` / 负数 / 乱写不许变成「立刻杀掉」）。超过上限按 D-024 中止序
+摘掉进程树、宽限后 SIGKILL、**等它真死**再清理 worktree，然后回一个新的终局
+`Outcome.TimedOut(timeoutMs)`，并与 `task.log` 里写一行真因。
+
+为什么单列一档而不是并进 `Aborted`：中止是**外部要求**（宿主 HTTP / 调用方取消），超时是
+**宿主自主止损**。混成一档，复盘时会把一次自主止损读成一次人为中断。
+
+默认 30 min 的取值依据就是本文件的读数：幕 2 201 s / 幕 4 395 s / 幕 5 ≈10 min，留 ~3 倍余量。
+
+反向验证（真行为的红，不是编译红）：`aHungCliIsStoppedAtTheDeadlineAndTheWorktreeIsCleaned`
+用一个 `sleep 300`、一个字都不打的假 CLI —— 接线前它跑到测试外层 `withTimeout(20s)` 抛
+`TimeoutCancellationException`（「挂住的派单永远不结束」），接线后 800 ms 上限 + 宽限共 ~4 s
+内收场，并验 worktree 与分支都清掉、`task.log` 里有 `timeout`。守反向一条
+`aFastRunInsideTheDeadlineIsNotKilled`（60 s 里跑完的不许误杀）+ env 回落一条。
+
 

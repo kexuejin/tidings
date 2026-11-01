@@ -280,6 +280,82 @@ class WorktreeSandboxExecutorTest {
         }
     }
 
+    // ── 8. 派单止损（挂住的 CLI 不许无限期占着 worktree）────────────────────
+
+    /**
+     * 一个**一个字都不打、也永不退出**的 CLI —— 正是真机现场的形状（codex 挂住时
+     * 只打一行 `Reading additional input from stdin...` 就再无下文）。没有止损时它会
+     * 一直占着 worktree 与分支，本轮真机两次靠人工 kill 才释放。
+     */
+    @Test
+    fun aHungCliIsStoppedAtTheDeadlineAndTheWorktreeIsCleaned() = runBlocking {
+        val root = tempDir()
+        val host = tempDir()
+        gitRepo(host)
+        val cli = script(root, "cli", "sleep 300")
+        val exe = executor(root)
+        val startedAt = System.currentTimeMillis()
+        // 外层 withTimeout 只是兜底（防测试本身挂死），真正的判据是下面的 TimedOut。
+        val outcome = withTimeout(20_000) {
+            exe.run(
+                taskId = "t-deadline",
+                hostRepo = host.absolutePath,
+                command = listOf(cli),
+                env = emptyMap(),
+                onLine = {},
+                timeoutMs = 800L,
+            )
+        }
+        val elapsed = System.currentTimeMillis() - startedAt
+        assertTrue(
+            outcome is WorktreeSandboxExecutor.Outcome.TimedOut,
+            "挂住的派单必须以 TimedOut 收场（不是 Aborted，也不是永远等下去），实际 $outcome",
+        )
+        assertTrue(elapsed < 15_000, "止损要真的摘掉进程树，而不是「不再等」：实际 $elapsed ms")
+        assertEquals(800L, outcome.timeoutMs)
+        assertFalse(File(root, "t-deadline").exists(), "超时也要无痕清理 worktree")
+        assertEquals(0, gitLines(host, "branch", "--list", "task-t-deadline").size, "分支也要清掉")
+        val log = File(File(root, "artifacts/t-deadline"), "task.log")
+        assertTrue(log.exists(), "超时是结局，产物目录要留证据")
+        assertTrue(
+            log.readText().contains("timeout"),
+            "task.log 里要留下超时这条真因（外部取证只有产物目录）：${log.readText()}",
+        )
+    }
+
+    /** 守反向：正常的快任务不许被止损误杀。 */
+    @Test
+    fun aFastRunInsideTheDeadlineIsNotKilled() = runBlocking {
+        val root = tempDir()
+        val host = tempDir()
+        gitRepo(host)
+        val cli = script(root, "cli", "echo done >> seed.txt; exit 0")
+        val outcome = executor(root).run(
+            taskId = "t-inside-deadline",
+            hostRepo = host.absolutePath,
+            command = listOf(cli),
+            env = emptyMap(),
+            onLine = {},
+            timeoutMs = 60_000L,
+        )
+        assertTrue(outcome is WorktreeSandboxExecutor.Outcome.Finished, "60s 里跑完的不许被判超时：$outcome")
+    }
+
+    /** env 解析：认不出的值回落默认 —— 一个笔误不许变成「立刻杀掉」。 */
+    @Test
+    fun timeoutEnvFallsBackToTheDefaultOnJunkInsteadOfKillingImmediately() {
+        val default = WorktreeSandboxExecutor.DEFAULT_TIMEOUT_MS
+        assertEquals(default, WorktreeSandboxExecutor.timeoutMsOf(emptyMap()))
+        assertEquals(60_000L, WorktreeSandboxExecutor.timeoutMsOf(mapOf("TIDINGS_SANDBOX_TIMEOUT_MS" to "60000")))
+        for (junk in listOf("0", "-1", "", "  ", "soon", "1e9")) {
+            assertEquals(
+                default,
+                WorktreeSandboxExecutor.timeoutMsOf(mapOf("TIDINGS_SANDBOX_TIMEOUT_MS" to junk)),
+                "TIDINGS_SANDBOX_TIMEOUT_MS=<$junk> 必须回落默认，不能变成立刻杀",
+            )
+        }
+    }
+
     private fun assertFalse(actual: Boolean, message: String) {
         kotlin.test.assertFalse(actual, message)
     }
