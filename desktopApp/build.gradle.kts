@@ -189,7 +189,12 @@ compose.desktop {
             // UDP 17878 / TCP 17879 照常绑定，只有 8788 永远不出现 —— 2026-10-15 实测
             // 装好新版 .app 后正是这个现象（手机看不到这台机器、插件设置页显示未连接）。
             // 与 java.sql 那条同源：只在打包产物里出现，`:/desktopApp:run` 永远发现不了。
-            modules("java.sql", "jdk.httpserver")
+            //
+            // jdk.management：`HostLoadGuard` 把 `OperatingSystemMXBean` 转成
+            // `com.sun.management.OperatingSystemMXBean` 读 CPU 负载（T-G7 宿主自保门），
+            // 那个扩展接口在 jdk.management 里，同样不在默认模块集。缺它的症状比上面两条
+            // 更隐蔽：自保门拿不到负载只能当"未知"放行，派单照接，只是**避让不生效**。
+            modules("java.sql", "jdk.httpserver", "jdk.management")
 
             macOS {
                 bundleID = "com.kapp.tidings.desktop"
