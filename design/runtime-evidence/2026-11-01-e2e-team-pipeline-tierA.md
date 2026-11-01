@@ -1,6 +1,6 @@
 # 真机实测：多 Agent 团队流水线 Tier A（人 + 手机 + 宿主，2026-11-01）
 
-> **一句话结论**：五幕里 **0/1/2/3/4/5 全部真机跑通**（幕 4 实现 59 KB 补丁、幕 5 审查给出 `VERDICT: PASS` 并挑出 4 条真问题），但**幕 6「人点合并」在真机上没有入口**：派单会话与 diff 卡都没到手机，手机侧 Agent 会话还停在旧会话，合流动作只能从宿主 UI 的卡片点击触发。过程中修掉三个**阻断性缺陷**（审批回执不唤醒长轮询、幽灵 peer 抢占审批收件人、CLI 子进程 stdin 永不关导致挂死）与两处会让人误判的静默。
+> **一句话结论**：五幕里 **0/1/2/3/4/5 全部真机跑通**（幕 4 实现 59 KB 补丁、幕 5 审查给出 `VERDICT: PASS` 并挑出 4 条真问题）。**幕 6 当日判成「手机上没入口」是误判，已在同一天补测推翻并修好**（§10）：手机派单、收卡、点卡都可用；真正的缺陷是宿主 `onHostCardAction` 那一跳把 `sessionId` 恒传 `null`，导致 [合并此补丁] 这条分支从来没执行过。过程中修掉四个**阻断性缺陷**（审批回执不唤醒长轮询、幽灵 peer 抢占审批收件人、CLI 子进程 stdin 永不关导致挂死、合流分支恒假判据）与两处会让人误判的静默。
 
 ## 0. 结论速览
 
@@ -12,7 +12,7 @@
 | 幕 3 守门 | 审批长轮询 **12 s / 12 s 两次均 allow**，手机库对应行 `approved` | ✓（修完缺陷 A/B 后） |
 | 幕 4 实现 | `t-2-23bf313f` → patch.diff **59242 B**（weather.html 1663 行），395 s | ✓ |
 | 幕 5 审查 | `t-3-a66c413e` → patch.diff **3414 B**（REVIEW.md 20 行，`VERDICT: PASS` + 4 条问题），≈10 min | ✓ |
-| 幕 6 合流 | **无法执行**：手机上既没有 diff 卡、也没有这条会话 | ✗ 阻塞（第 2 号发现） |
+| 幕 6 合流 | 当日：**判成「手机上没入口」**（§3）；补测（§10）：手机派单 91 s 出卡、手机点卡 44 s 后宿主仓 `git apply` 落地 `MEREPROOF@c` | ✗→✓（§10 修完） |
 | 注入 I2 超时 | 不批、等满 TTL → 长轮询 `deny`（fail-closed 未被缺陷 A 的修复改坏） | ✓ |
 
 ## 1. 三个阻断性缺陷（都靠真机才暴露）
@@ -51,6 +51,11 @@
 
 ## 3. 第 2 号发现 · 幕 6 在真机上没有入口
 
+> **§10 已推翻本节结论**（同一台真机、同一天补测）。本节的三条证据都成立，但归因错了：
+> 缺的**不是**「会话/卡片下发」这一段产品能力，而是①群里没有 CLI 席位（装置问题，补一条
+> `virtualAgents` 即可）②`onHostCardAction` 那条跳把 `sessionId` 恒传 null，合并分支永远进不去
+> （真缺陷，已在 §10 修）。手机侧派单、收卡、点卡全部可用。
+
 三类证据同时指向同一件事：
 
 1. **手机库里没有这条会话**：`AgentSessionEntity` 最新的仍是 `dsh` 的旧会话（`m5-approve-1` 等），幕 4/5 的 `codex-cli` 会话一条都没有。
@@ -79,7 +84,7 @@ E2E_AGENT_KEY=codex python3 scripts/e2e-team-pipeline.py --act 4 --tier real
 
 ## 6. 该修什么（按优先级）
 
-1. **会话/卡片下发到手机**（挡住幕 6，也是「团队流水线」的产品闭环缺口）：派单会话要能到手机，diff 卡要能在手机上点 [合并此补丁]。
+1. ~~**会话/卡片下发到手机**~~ → **归因错误，撤回**（§10）：下发是通的；真缺陷是合流分支的恒假判据（`sessionId` 恒 null）。→ **已修（§10.3/§10.4）**。
 2. **幽灵 peer 的全局治理**：`pickHookPeer` 只保住了审批一条路，发送侧 `[send] peer=44608041` 还在。
 3. **派单缺少超时**：CLI 挂住时任务会一直占着 worktree（这轮靠人工 kill 两次）。止损点应在宿主侧，不该靠人盯。→ **已修（§9）**。
 4. **沙箱不是边界**：上一轮 102 条命令里 27 条直接操作宿主用户目录（`cd ~/e2e-weather-app && git …`、`find ~ -name …`），`SandboxedCliDriver` 只改 cwd，没有路径约束。
@@ -117,5 +122,105 @@ E2E_AGENT_KEY=codex python3 scripts/e2e-team-pipeline.py --act 4 --tier real
 `TimeoutCancellationException`（「挂住的派单永远不结束」），接线后 800 ms 上限 + 宽限共 ~4 s
 内收场，并验 worktree 与分支都清掉、`task.log` 里有 `timeout`。守反向一条
 `aFastRunInsideTheDeadlineIsNotKilled`（60 s 里跑完的不许误杀）+ env 回落一条。
+
+## 10. 幕 6 补测 · 手机派单与点卡合流（推翻 §3）
+
+**驱动方式**：全程 adb 驱动真机（Pixel 6 / `com.kapp.tidings.debug`），未经人手；宿主是
+`open -a /Applications/Tidings.app` 起的 GUI 进程（PID 38550，控制面 `:8788`）。
+
+### 10.1 装置准备（不是产品路径）
+
+群里要有一个 CLI 席位，`@` 候选才有得选。宿主与手机的 `settings.json` 各写一条、`rev` 置 2：
+
+```json
+{"agentId":"codex","hostNodeId":"46c23456-6e74-4a7c-aab1-20a1d1284cd6",
+ "name":"codex-e2e","defaultWsId":"ws-weather-e2e"}
+```
+
+补发**不靠产品路径**：`rebroadcastGroupMeta` 挂在「网络相位 + 在线对端集合」的
+`distinctUntilChanged` 上，而对端集合里有个永远在线的幽灵 peer（§8 第 1 条），集合不变 ⇒
+永不重发。只能改文件。这条本身是 §8 第 1 条的又一个后果。
+
+### 10.2 一次派单的完整读数（09:05:24 → 09:06:56，91 s）
+
+| 环节 | 读数 |
+|---|---|
+| 手机发群消息 | 气泡 `create MEREPROOF.md …`，09:55 落库 `8e842e3e`（`conv=group:626bed34…`） |
+| 宿主开沙箱 | `/tmp/tidings-ws/t-1-0bb5f2eb` + `artifacts/t-1-0bb5f2eb/task.log` 同时出现 |
+| CLI 执行 | `task.log` 里 `item_4 file_change` 建 `MEREPROOF.md`，`item_6 cat` 回 `e2e ok`，`turn.completed` |
+| 收割 | `[sandbox] harvest t-1-0bb5f2eb: +1 -0 in 1 file(s), patch=140 B`；`report.json` `durationMs=91054` |
+| 无痕清理 | worktree 与分支在收场后消失，只留 `artifacts/` 三件（`task.log` / `patch.diff` / `report.json`） |
+| 回群 | `MessageEntity` 新增 `8cb1720e`，`sender_id=agent:46c23456…:codex`，`card_json` rev 1（308 B） |
+| 到手机 | 群里出现 diff-review 卡「e2e-weather-app 沙箱任务完成 · 第 1 版 +1 −0」，`patch.diff 140 B`，带 **[合并此补丁]** |
+
+⇒ **手机派单 → 宿主沙箱 → CLI → 收割 → 卡回群 → 手机上可点**，这一整段是通的。§3 的
+「产品缺会话/卡片下发」不成立。
+
+### 10.3 点卡不合并（真缺陷 · 已修）
+
+点 [合并此补丁]（09:57:26）后：卡面变成「第 2 版 · 已由 Pixel 6 处理」，宿主 `card_payload`
+落 `decidedBy=Pixel 6 / decidedActionId=merge-patch`（说明动作帧到了宿主、过了资格门、
+rev+1 也广播了），但宿主仓 `git log` 一个提交都没有、`git status` 空。
+
+真因是一条**恒假判据**：
+
+```kotlin
+// RelayControllerAgentInvokeComponent.kt:914 —— 唯一调用点，第二参写死 null
+onHostCardAction?.invoke(agentId, null, cardId, actionId, decidedBy)
+
+// DesktopExtension.kt:931 —— 合并分支要求它非空
+if (actionId == "merge-patch" && sessionId != null) { … DesktopPatchMerge.apply(…) }
+```
+
+`op=action` 帧的载荷是 `groupId/cardId/rev/actionId/decidedBy`，**协议里没有会话位**，
+所以那一跳永远是 `null`，合并分支在这个产品里从来没有执行过；点击只会掉进 else 被当成
+插件动作丢掉。会话归属其实一直在台账里（派单出卡时写了 `eventType=card`、`body=` 卡片 JSON），
+只是没人去反查。
+
+修法（按卡片反查，不新增协议键）：
+
+- `ControlPlane.latestPatchRefForCard(cardId)`：按 `card` 事件里的 cardId 反查会话，
+  复用会话那条 `latestPatchRefFor`，返回 `SandboxPatchRef(sessionId, workspacePath, patchPath)` 三样一起给
+  —— 冲突要落 `merge-result` 事件，没有会话就落不了账。
+- `DesktopExtension`：`sessionId` 为空就按卡片找；冲突且无会话时如实打日志，不假装记过账。
+- 守卫测试加一条：源码里必须同时有 `latestPatchRefForCard(` —— 旧守卫只锚了
+  `latestPatchRefFor(`，所以这个缺陷能活到真机。
+
+### 10.4 修后复验（09:07:00 → 09:07:44，44 s）
+
+重打包 → 换 `/Applications/Tidings.app`（旧的挪到 `/tmp/Tidings.app.old-20261101-090203`）→
+重启宿主，然后同一条手机链路重跑一遍（新 cardId `diff-t-1-7ee79fe2`，避开按 `cardId|action`
+幂等的判定台账）：
+
+| 环节 | 读数 |
+|---|---|
+| 派单出卡 | `report.json` `durationMs=12372`、`filesChanged=1`；卡「第 1 版 +0 −0」到手机 |
+| 点 [合并此补丁] 前 | 宿主仓 `git status` 空、无 `MEREPROOF*` |
+| 点后 | **`?? MEREPROOF@c`**（0 字节，09:07，正是 83 B patch 里 `new file mode 100644` 那个文件） |
+
+⇒ 「人在手机上点一下 → 宿主仓被 `git apply` 改掉」这条现在是**真行为**，不是推演。
+（`DesktopPatchMerge` 只 apply 不提交 —— 提交是机主的下一步，判据就该看工作区而不是 `git log`。）
+
+### 10.5 同轮撞出来的两个观察项（未修，待定性）
+
+1. **群信息面板「入驻智能体 (1)」有计数没有行**：`入驻智能体 (1)` 与下面的 `解散群聊` 之间
+   没有任何可点节点（`uiautomator dump` 逐节点验过），于是面板里那条「长按成员行直接 @」
+   的入口在当前装置上摸不到。是行高为 0 还是被过滤，未定论。
+2. **后台拉起即崩**：锁屏状态下 `am start` / `monkey` 拉起时，`RelayApp.onCreate` 里
+   `RelayService.start` 抛 `ForegroundServiceStartNotAllowedException`
+   （`mAllowStartForeground false`，Android 12+ 限制）⇒ 进程直接 FATAL。
+   正常点图标进是前台态、不复现，但「开机/自启/被通知拉起」这类路径会踩到。
+
+### 10.6 装置坑（下一轮别再踩）
+
+- **`adb shell input text` 会在 @ 候选浮层上吞字**：`@codex-e2e` 被截成 `@code`、`MEREPROOF.md`
+  掉成 `MEREPROOF.d`、`create` 掉成 `ceate`。可行组合是「打 `@c` → 点候选 → 一个空格键触发一次
+  逐字编辑」，胶囊在那一刻才绑上（`capsuleOnDraftEdit` 只认 ±2 的编辑，整段插入算 `Pasted`、
+  不动胶囊；大段删除同理，能**保留**已有绑定）。
+- **`input keyevent 4`（BACK）会把 App 退出到锁屏**，别用它关浮层；点消息区空白处即可。
+- **手机 `sqlite3` 查库必须连带 `-wal`**（否则看不到刚写进去的行）。
+- `ps` 在本机沙箱里被拒（`operation not permitted`），判进程要用 `pgrep -f`；我一开始把
+  `ps` 的空输出读成「没进程」，差点误判派单没起来。
+
 
 
