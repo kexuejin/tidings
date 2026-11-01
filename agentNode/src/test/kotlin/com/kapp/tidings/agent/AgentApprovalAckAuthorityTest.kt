@@ -108,6 +108,32 @@ class AgentApprovalAckAuthorityTest {
         )
     }
 
+    /**
+     * 回执推进了状态，**必须**唤醒在等这条审批的长轮询。
+     *
+     * 真机现场（Tier A 幕 3）：手机 23:40:32 点了批准、`AgentApprovalEntity` 落成 approved，
+     * 宿主的 `POST /v1/agent/hook/approval` 却在 120.1 s 后返回
+     * `decision=deny reason=approval timeout`。原因不在授权也不在过期（都通过），而在
+     * 通知口只挂在 `recordApproval` 上：回执走的是 `recordAck → applyAckToApproval`，
+     * 状态改了但 `approvalListeners` 一次都没响，`CompletableDeferred` 只能等满超时。
+     *
+     * 这条测试就是那个信号：摘掉 `applyAckToApproval` 里的通知 ⇒ 变红。
+     */
+    @Test
+    fun appliedAckWakesTheWaitingLongPoll() {
+        val registry = registry(store().also { grant(it, AgentGrantAccess.OWNER) })
+        val woke = java.util.concurrent.CopyOnWriteArrayList<Pair<String, String>>()
+        registry.addApprovalListener { id, status -> woke += id to status }
+
+        ack(registry, "approved")
+
+        assertEquals(
+            listOf(approvalId to "approved"),
+            woke.toList(),
+            "审批推进了却不打信号 ⇒ 长轮询只能等满 timeoutMs 再 deny（批准被记成拒绝）",
+        )
+    }
+
     @Test
     fun adminWithoutDelegatedApprovalIsRejected() {
         val grants = store().also { grant(it, AgentGrantAccess.ADMIN, delegatedApproval = false) }

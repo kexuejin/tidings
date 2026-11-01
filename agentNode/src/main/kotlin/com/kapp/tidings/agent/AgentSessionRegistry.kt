@@ -426,7 +426,13 @@ class AgentSessionRegistry(
      * 同一 `approvalId` 重投就地替换，但**已处置的状态不会被抹掉**：对端重复宣告同一个
      * `approvalId`（重传、补发）时，本端已经点过的「同意」不该退回 `null`。
      */
-    /** 审批状态推进监听（T-G4）：长轮询用它做「决定落账」的信号，不盲睡轮询。 */
+    /**
+     * 审批状态推进监听（T-G4）：长轮询用它做「决定落账」的信号，不盲睡轮询。
+     *
+     * 两个入口都要打这个信号 —— [recordApproval]（宿主自己把状态写成 denied 之类）与
+     * [applyAckToApproval]（对端回执推进审批）。少打一处，那条路径上的长轮询就退化成
+     * 「等满超时再 deny」。
+     */
     private val approvalListeners = java.util.concurrent.CopyOnWriteArrayList<(approvalId: String, status: String) -> Unit>()
 
     /** 注册监听，返回**注销函数**（订阅/注销成对，调用方 finally 里执行）。 */
@@ -528,6 +534,13 @@ class AgentSessionRegistry(
                     }
                 }
             }
+        }
+        // **推进了状态就要通知在等这条审批的长轮询**（`hook/approval` 的 `CompletableDeferred`
+        // 只认这个信号）。修复前通知口只挂在 [recordApproval] 上，而手机回执走的是本函数 ——
+        // 于是"手机已经点了批准"在宿主侧永远表现为等满 `timeoutMs` 后 `deny`
+        // （fail-closed 把一次成功的批准记成了拒绝，且拖满整个超时）。
+        appliedRecord?.let { rec ->
+            approvalListeners.forEach { it(rec.approvalId, rec.status ?: status) }
         }
         // **只在真的应用之后**才记免批：一条过期/无权的回执连审批都没推进，
         // 更不该留下一条"以后都别问了"的规则（那等于用一条被拒的回执换一张空白通行证）。
