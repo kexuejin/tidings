@@ -3,6 +3,7 @@
 package com.kapp.tidings.feature.chat
 
 import androidx.compose.foundation.BorderStroke
+import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.ui.draw.clip
@@ -29,8 +30,13 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
-import androidx.compose.ui.semantics.clearAndSetSemantics
+import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Brush
+import androidx.compose.ui.graphics.Path
+import androidx.compose.ui.graphics.StrokeCap
+import androidx.compose.ui.graphics.StrokeJoin
+import androidx.compose.ui.graphics.drawscope.Fill
+import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
@@ -47,15 +53,20 @@ import com.kapp.tidings.generated.resources.ic_shield
 import com.kapp.tidings.generated.resources.ic_list
 import com.kapp.tidings.generated.resources.ic_check_double
 import com.kapp.tidings.generated.resources.ic_refresh
+import com.kapp.tidings.generated.resources.ic_info
+import com.kapp.tidings.generated.resources.ic_warn
+import com.kapp.tidings.generated.resources.ic_close
 import com.kapp.tidings.generated.resources.card_decided_by
 import com.kapp.tidings.generated.resources.card_details_hide
 import com.kapp.tidings.generated.resources.card_details_show
 import com.kapp.tidings.generated.resources.card_diff_summary
 import com.kapp.tidings.generated.resources.card_expired
+import com.kapp.tidings.generated.resources.card_action_abort
 import com.kapp.tidings.generated.resources.card_action_merge_patch
 import com.kapp.tidings.generated.resources.card_pending_confirm
 import com.kapp.tidings.generated.resources.card_progress_label
 import com.kapp.tidings.generated.resources.card_rev_tag
+import com.kapp.tidings.generated.resources.card_status_aborted
 import com.kapp.tidings.generated.resources.card_status_blocked
 import com.kapp.tidings.generated.resources.card_status_done
 import com.kapp.tidings.generated.resources.card_status_failed
@@ -194,6 +205,16 @@ data class AgentCardUi(
     val decidedActionId: String? = null,
     /** 反向多选预设选项（ask_question，§7.9）；空 = 这张卡没有选项块。 */
     val options: List<AgentCardOption> = emptyList(),
+    /**
+     * 发出方声明的任务状态（`working` / `review_ready` / `blocked` / `aborted`）。
+     *
+     * null = 老卡没带这个字段，此时退回「按 actions 与 progress 反推」的老办法。
+     *
+     * 为什么要有显式字段：反推那套里没有「已中止」的位置 —— 用户按了停止，
+     * 卡片还挂着「待合并」。谁结束的、怎么结束的，
+     * 该由发出方说了算，不该让渲染层猜。
+     */
+    val state: String? = null,
 )
 
 /** 宽容解析：未知字段忽略、未知状态退档；身份键（cardId/rev）缺失整卡作废。 */
@@ -206,6 +227,7 @@ fun parseAgentCard(json: JsonObject?): AgentCardUi? {
         rev = rev,
         type = json.str("type")?.takeIf { it.isNotBlank() },
         title = json.str("title")?.takeIf { it.isNotBlank() },
+        state = json.str("state")?.takeIf { it.isNotBlank() },
         progress = json.int("progress")?.coerceIn(0, 100),
         steps = json.array("items").mapNotNull { el ->
             val obj = el as? JsonObject ?: return@mapNotNull null
@@ -354,6 +376,15 @@ fun cardRowOutcome(message: MessageUi, visibleCardMessageIds: Set<String>): Card
 
 /** 宿主端自己发出的系统动作 id（卡片 JSON 里 label 只是占位，文案端上本地化）。 */
 const val SYSTEM_ACTION_MERGE_PATCH = "merge-patch"
+
+/**
+ * 「停止这件活」。宿主侧接在 `onHostCardAction`，直接摘进程树。
+ *
+ * 存在的理由：在此之前，中止任务的唯一办法是在群里打 `stop`/`abort`/`cancel`/`停`/`取消`
+ * 之一（`AbortSignals`）。打错一个字（`stp`）就完全无效，而且界面一句话都不说 ——
+ * 用户以为停了，任务还在跑。一个关键动作不该靠背诵。
+ */
+const val SYSTEM_ACTION_ABORT_TASK = "abort-task"
 
 /**
  * 审批是否已过期（§4.3-S12）。
@@ -638,12 +669,11 @@ fun AgentCardBubble(
                             CardNeutralTag(text = stringResource(Res.string.card_expired))
                         }
                         CardStateTag(card)
-                        Text(
-                            text = stringResource(Res.string.card_rev_tag, card.rev),
-                            style = MaterialTheme.typography.labelSmall,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant,
-                            fontFamily = FontFamily.Monospace,
-                        )
+                        // 这里曾经显示「第 N 版」。删掉的理由不是省地方，是它没有意义：
+                        // rev 每广播一次就 +1（受理、结论、处理人落定各一次），真机上同一
+                        // 张刚跑完的卡写着「第 4 版」—— 用户会以为前面还有三次任务。
+                        // 卡的「变了没有」由状态胶囊和横幅表达；版本号是协议内部的事，
+                        // 不该占用户的注意力。
                     }
                     if (card.title != null) {
                         Text(
@@ -745,11 +775,36 @@ private fun CardTypeTag(type: String) {
     }
 }
 
-/** 任务状态胶囊（待合并/待确认/进行中/已完成/受阻）。 */
+/** 任务状态胶囊（待合并/进行中/已完成/受阻/已取消）。 */
 @Composable
 private fun CardStateTag(card: AgentCardUi) {
     val sp = LocalAppSpacing.current
-    val (label, bg, fg) = when {
+    // 发出方声明的 state 优先。反推那套（下面）留着给不带 state 的老卡：
+    // 它认不出「已中止」，会把一张停掉的卡继续标成「待合并」。
+    val declared = when (card.state) {
+        "aborted" -> Triple(
+            stringResource(Res.string.card_status_aborted),
+            MaterialTheme.accents.warn.copy(alpha = 0.12f),
+            MaterialTheme.colorScheme.onSecondaryContainer,
+        )
+        "blocked" -> Triple(
+            stringResource(Res.string.card_status_blocked),
+            MaterialTheme.accents.warn.copy(alpha = 0.12f),
+            MaterialTheme.colorScheme.onSecondaryContainer,
+        )
+        "review_ready" -> Triple(
+            stringResource(Res.string.card_status_review_ready),
+            MaterialTheme.accents.online.copy(alpha = 0.12f),
+            MaterialTheme.accents.online,
+        )
+        "working" -> Triple(
+            stringResource(Res.string.card_status_running),
+            MaterialTheme.colorScheme.primary.copy(alpha = 0.12f),
+            MaterialTheme.colorScheme.primary,
+        )
+        else -> null
+    }
+    val (label, bg, fg) = declared ?: when {
         card.actions.any { it.actionId == SYSTEM_ACTION_MERGE_PATCH } ->
             Triple(
                 stringResource(Res.string.card_status_review_ready),
@@ -815,28 +870,35 @@ private fun CardNeutralTag(text: String) {
 /** 原子 1/5 · Banner（§7.3）：一行带色的说明。 */
 @Composable
 private fun CardBannerRow(banner: AgentCardBanner) {
-    // 升级稿 .bn 结构（agentCard 模板 relay.html:3480）：前置状态字形（.bnic 13px）
-    // + 弹性正文。字形按 tone 四态映射（TONE_IC：info=ℹ done=✓ warn=⚠ danger=✕）。
-    val glyph = when (banner.tone) {
-        AgentCardBannerTone.Info -> "ℹ"
-        AgentCardBannerTone.Success -> "✓"
-        AgentCardBannerTone.Warn -> "⚠"
-        AgentCardBannerTone.Error -> "✕"
+    val (_, contentColor) = bannerColorsOf(banner.tone)
+    val iconRes = when (banner.tone) {
+        AgentCardBannerTone.Info -> Res.drawable.ic_info
+        AgentCardBannerTone.Success -> Res.drawable.ic_check_double
+        AgentCardBannerTone.Warn -> Res.drawable.ic_warn
+        AgentCardBannerTone.Error -> Res.drawable.ic_close
     }
-    val (container, contentColor) = bannerColorsOf(banner.tone)
     BannerSurface(tone = banner.tone) {
         Row(
-            verticalAlignment = Alignment.Top,
+            verticalAlignment = Alignment.CenterVertically,
             horizontalArrangement = Arrangement.spacedBy(8.dp),
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(horizontal = 12.dp, vertical = 8.dp),
         ) {
-            // .bnic（relay.html:533）：13px 字形，语义色直印（容器微晕上该色过 3:1）。
-            Text(
-                text = glyph,
-                style = MaterialTheme.typography.bodyMedium,
-                color = contentColor,
-                modifier = Modifier.clearAndSetSemantics {},
+            Icon(
+                painter = painterResource(iconRes),
+                contentDescription = null,
+                tint = contentColor,
+                modifier = Modifier.size(16.dp),
             )
-            BannerText(banner.text)
+            Text(
+                text = banner.text,
+                style = MaterialTheme.typography.bodySmall,
+                color = contentColor,
+                maxLines = CARD_BANNER_MAX_LINES,
+                overflow = TextOverflow.Ellipsis,
+                modifier = Modifier.weight(1f),
+            )
         }
     }
 }
@@ -1015,42 +1077,143 @@ private fun CardStepListColumn(steps: List<AgentCardStep>) {
     }
 }
 
+/**
+ * 步骤状态指示图标（16×16）：使用 Canvas 精准绘制，消除字体字形基准线偏心与视觉重量不均。
+ */
+@Composable
+private fun StepStatusIcon(status: AgentCardStepStatus) {
+    val onlineColor = MaterialTheme.accents.online
+    val primaryColor = MaterialTheme.colorScheme.primary
+    val errorColor = MaterialTheme.colorScheme.error
+    val warnColor = MaterialTheme.accents.warn
+    val insetColor = SurfaceTiers.Inset
+    val surfaceVariantColor = MaterialTheme.colorScheme.onSurfaceVariant
+
+    Canvas(modifier = Modifier.size(16.dp)) {
+        val radius = size.minDimension / 2f
+        val center = Offset(size.width / 2f, size.height / 2f)
+
+        when (status) {
+            AgentCardStepStatus.Done -> {
+                drawCircle(
+                    color = onlineColor.copy(alpha = 0.15f),
+                    radius = radius,
+                    center = center,
+                )
+                val checkPath = Path().apply {
+                    moveTo(size.width * 0.28f, size.height * 0.52f)
+                    lineTo(size.width * 0.44f, size.height * 0.68f)
+                    lineTo(size.width * 0.72f, size.height * 0.34f)
+                }
+                drawPath(
+                    path = checkPath,
+                    color = onlineColor,
+                    style = Stroke(
+                        width = 1.8.dp.toPx(),
+                        cap = StrokeCap.Round,
+                        join = StrokeJoin.Round,
+                    ),
+                )
+            }
+            AgentCardStepStatus.Running -> {
+                drawCircle(
+                    color = primaryColor.copy(alpha = 0.14f),
+                    radius = radius,
+                    center = center,
+                )
+                drawCircle(
+                    color = primaryColor.copy(alpha = 0.35f),
+                    radius = radius - 0.5.dp.toPx(),
+                    center = center,
+                    style = Stroke(width = 1.2.dp.toPx()),
+                )
+                val trianglePath = Path().apply {
+                    val shiftX = 0.5.dp.toPx()
+                    val halfH = 3.2.dp.toPx()
+                    val halfW = 2.8.dp.toPx()
+                    moveTo(center.x - halfW * 0.7f + shiftX, center.y - halfH)
+                    lineTo(center.x + halfW * 1.3f + shiftX, center.y)
+                    lineTo(center.x - halfW * 0.7f + shiftX, center.y + halfH)
+                    close()
+                }
+                drawPath(
+                    path = trianglePath,
+                    color = primaryColor,
+                    style = Fill,
+                )
+            }
+            AgentCardStepStatus.Pending -> {
+                drawCircle(
+                    color = insetColor,
+                    radius = radius,
+                    center = center,
+                )
+                drawCircle(
+                    color = surfaceVariantColor.copy(alpha = 0.4f),
+                    radius = 2.2.dp.toPx(),
+                    center = center,
+                )
+            }
+            AgentCardStepStatus.Failed -> {
+                drawCircle(
+                    color = errorColor.copy(alpha = 0.15f),
+                    radius = radius,
+                    center = center,
+                )
+                val strokeW = 1.8.dp.toPx()
+                val offset = 4.dp.toPx()
+                drawLine(
+                    color = errorColor,
+                    start = Offset(center.x - offset, center.y - offset),
+                    end = Offset(center.x + offset, center.y + offset),
+                    strokeWidth = strokeW,
+                    cap = StrokeCap.Round,
+                )
+                drawLine(
+                    color = errorColor,
+                    start = Offset(center.x + offset, center.y - offset),
+                    end = Offset(center.x - offset, center.y + offset),
+                    strokeWidth = strokeW,
+                    cap = StrokeCap.Round,
+                )
+            }
+            AgentCardStepStatus.Blocked -> {
+                drawCircle(
+                    color = warnColor.copy(alpha = 0.15f),
+                    radius = radius,
+                    center = center,
+                )
+                val strokeW = 1.8.dp.toPx()
+                val barH = 3.5.dp.toPx()
+                val barGap = 2.2.dp.toPx()
+                drawLine(
+                    color = warnColor,
+                    start = Offset(center.x - barGap, center.y - barH),
+                    end = Offset(center.x - barGap, center.y + barH),
+                    strokeWidth = strokeW,
+                    cap = StrokeCap.Round,
+                )
+                drawLine(
+                    color = warnColor,
+                    start = Offset(center.x + barGap, center.y - barH),
+                    end = Offset(center.x + barGap, center.y + barH),
+                    strokeWidth = strokeW,
+                    cap = StrokeCap.Round,
+                )
+            }
+        }
+    }
+}
+
 @Composable
 private fun CardStepRow(step: AgentCardStep) {
     val sp = LocalAppSpacing.current
-    val statusGlyph = when (step.status) {
-        // 字形对齐升级稿 ST 表（agentCard 模板 relay.html:3474：✓/▶/空/✕/⏸；
-        // pend 用空字形 —— 18px 圆底自己表达「未开始」）。
-        AgentCardStepStatus.Done -> "✓"
-        AgentCardStepStatus.Running -> "▶"
-        AgentCardStepStatus.Pending -> ""
-        AgentCardStepStatus.Failed -> "✕"
-        AgentCardStepStatus.Blocked -> "⏸"
-    }
-    // .st .ic 五态（relay.html:545-551）：18×18 圆形着色底 —— done 绿 12% 晕 /
-    // run primary 实底白字 + 3px 紫晕 / pend surface-3 70% / fail 红 12% / blk 琥珀 12%。
-    val iconGlyphColor = when (step.status) {
-        AgentCardStepStatus.Done -> MaterialTheme.accents.online
-        AgentCardStepStatus.Running -> MaterialTheme.colorScheme.onPrimary
-        AgentCardStepStatus.Failed -> MaterialTheme.colorScheme.error
-        AgentCardStepStatus.Blocked -> MaterialTheme.colorScheme.onSecondaryContainer
-        AgentCardStepStatus.Pending -> MaterialTheme.colorScheme.onSurfaceVariant
-    }
-    val iconContainerColor = when (step.status) {
-        AgentCardStepStatus.Done -> MaterialTheme.accents.online.copy(alpha = 0.12f)
-        AgentCardStepStatus.Running -> MaterialTheme.colorScheme.primary
-        AgentCardStepStatus.Failed -> MaterialTheme.colorScheme.error.copy(alpha = 0.12f)
-        AgentCardStepStatus.Blocked -> MaterialTheme.accents.warn.copy(alpha = 0.12f)
-        AgentCardStepStatus.Pending -> SurfaceTiers.Inset
-    }
-    // .st .lb（relay.html:552-553）：label 默认 on；running 行加粗 + primary。
     val labelColor = if (step.status == AgentCardStepStatus.Running) {
         MaterialTheme.colorScheme.primary
     } else {
         MaterialTheme.colorScheme.onSurface
     }
     val labelWeight = if (step.status == AgentCardStepStatus.Running) FontWeight.SemiBold else FontWeight.Normal
-    // 状态全称仍以语义描述进无障碍树（.st .ic 只有字形，屏幕阅读器需要全称）。
     val statusLabel = when (step.status) {
         AgentCardStepStatus.Done -> stringResource(Res.string.card_status_done)
         AgentCardStepStatus.Running -> stringResource(Res.string.card_status_running)
@@ -1059,8 +1222,6 @@ private fun CardStepRow(step: AgentCardStep) {
         AgentCardStepStatus.Blocked -> stringResource(Res.string.card_status_blocked)
     }
     Row(
-        // 升级稿 .st（relay.html:542-543）：居中对齐、gap 10、行内 5×8、圆角 8、
-        // hover surface-2（Compose 桌面 hover 属壳层，不进内容组件）。
         verticalAlignment = Alignment.CenterVertically,
         horizontalArrangement = Arrangement.spacedBy(sp.md10),
         modifier = Modifier
@@ -1069,32 +1230,7 @@ private fun CardStepRow(step: AgentCardStep) {
             .padding(horizontal = 8.dp, vertical = 5.dp)
             .semantics { contentDescription = statusLabel },
     ) {
-        // .st .ic：18×18 圆形着色底（run 态 3px 紫晕由外圈 border 模拟：0.15 alpha 的
-        // 紫环 = box-shadow 0 0 0 3px rgba(107,78,230,.15)）。
-        Box(
-            modifier = Modifier
-                .size(18.dp)
-                .then(
-                    if (step.status == AgentCardStepStatus.Running) {
-                        Modifier.border(
-                            3.dp,
-                            MaterialTheme.accents.agentAccent.copy(alpha = 0.15f),
-                            RoundedCornerShape(50),
-                        )
-                    } else {
-                        Modifier
-                    },
-                )
-                .background(iconContainerColor, RoundedCornerShape(50)),
-            contentAlignment = Alignment.Center,
-        ) {
-            Text(
-                text = statusGlyph,
-                style = MaterialTheme.typography.labelSmall,
-                color = iconGlyphColor,
-                textAlign = TextAlign.Center,
-            )
-        }
+        StepStatusIcon(step.status)
         Text(
             text = step.label,
             style = MaterialTheme.typography.bodySmall,
@@ -1104,8 +1240,6 @@ private fun CardStepRow(step: AgentCardStep) {
             overflow = TextOverflow.Ellipsis,
             modifier = Modifier.weight(1f),
         )
-        // .st .asg（relay.html:554-555）：11px、1.5×7、圆角 6、surface-2 底 + on-2 字
-        // + 4% 黑细边 —— 不再是 agent 紫对（新稿把承办人降为中性清单元）。
         step.assignee?.let {
             Text(
                 text = it,
@@ -1300,10 +1434,12 @@ private fun CardButtonGroupRow(
                 val text = when {
                     ui.lock == CardActionLock.PendingConfirm -> stringResource(Res.string.card_pending_confirm)
                     action.actionId == SYSTEM_ACTION_MERGE_PATCH -> stringResource(Res.string.card_action_merge_patch)
+                    action.actionId == SYSTEM_ACTION_ABORT_TASK -> stringResource(Res.string.card_action_abort)
                     else -> action.label
                 }
                 val iconRes = when (action.actionId) {
                     SYSTEM_ACTION_MERGE_PATCH -> Res.drawable.ic_check_double
+                    SYSTEM_ACTION_ABORT_TASK -> Res.drawable.ic_close
                     "approve-prototype" -> Res.drawable.ic_check_double
                     "retry" -> Res.drawable.ic_refresh
                     else -> null

@@ -34,6 +34,11 @@ import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.runBlocking
 import com.kapp.tidings.core.protocol.AgentSenderId
+import kotlinx.serialization.json.JsonPrimitive
+import kotlinx.serialization.json.contentOrNull
+import kotlinx.serialization.json.buildJsonArray
+import kotlinx.serialization.json.buildJsonObject
+import kotlinx.serialization.json.putJsonObject
 
 /**
  * 桌面版的「扩展装配」：让 agent 与 UI 活在同一个进程里。
@@ -818,16 +823,31 @@ internal class DesktopExtension(
                             onArtifact = { path, name, bytes, _, _ -> cliArtifacts.add(Triple(path, name, bytes)) },
                         ) { eventType, _, summary, body ->
                             when (eventType) {
-                                "card" -> workerCardCli.set(body)
+                                "card" -> {
+                                    workerCardCli.set(body)
+                                    // **立刻上群**，不要攒到 done 随结果一起回去。
+                                    // invoke 是请求-响应，`done(summary, card)` 要等任务整个
+                                    // 结束才发得出去 —— 于是「派单到结论」之间群里一片空白：
+                                    // 派了活，屏幕上连一张本轮任务卡都没有，用户只能
+                                    // 盯着自己发的那条消息猜它在不在跑。驱动现在会在 run 之前
+                                    // 先发一张受理卡（同 cardId、rev=1），这条广播让它在派单后
+                                    // 一两秒内可见；终态卡（rev=2）随后原位替换同一张。
+                                    publishCardNow(request.groupId, request.agentId, body)
+                                }
                                 "finished" -> cliSummary = summary
                                 "error" -> cliError = summary
                             }
                         }
                         if (cliStatus == "error") {
-                            return com.kapp.tidings.domain.AgentInvokeExecution(
+                            // **带上卡片**：中止/失败时驱动已经发了一张收尾卡（state=aborted
+                            // 或 blocked），把它随结果带回去，派单处就不会再补一条「没有完成
+                            // 这次任务」的横幅 —— 用户按了停止，看到「已取消」就够了，不需要
+                            // 再被告知一次「它没干完」（那件事他已经知道了）。
+                            return com.kapp.tidings.domain.AgentInvokeExecution.withCard(
                                 status = com.kapp.tidings.core.protocol.CodecInvoke.InvokeResultStates.ERROR,
                                 summary = cliSummary,
                                 error = cliError ?: cliError0 ?: "cli task ended in error",
+                                cardJsonText = workerCardCli.get(),
                             )
                         }
                         deliverCliArtifacts(cliArtifacts, request.groupId)
@@ -956,6 +976,47 @@ internal class DesktopExtension(
                             println("[RELAY-INVOKE] patch merged into workspace by " + decidedBy + " (card " + cardId + ")")
                         is DesktopPatchMerge.Outcome.Conflict -> {
                             println("[RELAY-INVOKE] patch merge FAILED (card " + cardId + "): " + outcome.detail)
+                            // **失败必须回到卡上。** 判定的那一刻手机已经把卡标成「已由
+                            // <设备> 处理」，而宿主这边一个字节都没变 —— 用户只有下次打开
+                            // 文件时才发现没合上。把同一张卡改成「受阻」并给出下一步，
+                            // 比任何日志都管用。
+                            val hint = DesktopPatchMerge.hintFor(outcome.detail)
+                            val conflictCard = buildJsonObject {
+                                put("cardId", JsonPrimitive(cardId))
+                                // rev 给 1 即可：broadcastBoardCard 发现不比既有大时会 +1。
+                                put("rev", JsonPrimitive(1))
+                                put("type", JsonPrimitive("diff-review"))
+                                put("state", JsonPrimitive("blocked"))
+                                put("title", JsonPrimitive("没能合并这次改动"))
+                                putJsonObject("banner") {
+                                    put("text", JsonPrimitive(hint))
+                                    put("tone", JsonPrimitive("error"))
+                                }
+                                // 合并按钮留着：用户处理掉冲突就能再点一次（这张新卡不带
+                                // decidedActionId，按钮回到可点状态）。
+                                put("actions", buildJsonArray {
+                                    add(buildJsonObject {
+                                        put("actionId", JsonPrimitive("merge-patch"))
+                                        put("label", JsonPrimitive("merge-patch"))
+                                    })
+                                })
+                            }.toString()
+                            // 失败卡回到**这张卡所在的会话**：动作帧（op=action）不带
+                            // groupId，但卡片消息就落在本机 —— 按 cardId 反查会话键，
+                            // 那是权威答案。此前按工作区名去猜群（groupsForSession），
+                            // 派单群 ≠ 工作区同名群时失败卡会发到别的群，点合并的人
+                            // 永远看不到「没能合并」。
+                            val conflictGroupId = controller.state.value.messages.values
+                                .asSequence()
+                                .flatten()
+                                .lastOrNull { row ->
+                                    (row.renderCard?.get("cardId") as? JsonPrimitive)?.contentOrNull == cardId
+                                }?.peerId?.let(com.kapp.tidings.core.protocol.ConvId::groupIdOf)
+                            if (conflictGroupId == null) {
+                                println("[RELAY-INVOKE] merge conflict has no group to report on (card " + cardId + ")")
+                            } else {
+                                publishCardNow(conflictGroupId, agentId, conflictCard)
+                            }
                             // 冲突也要落台账；没有会话可落时如实打日志，不假装记过账。
                             val sid = ref?.sessionId
                             if (sid == null) {
@@ -970,6 +1031,22 @@ internal class DesktopExtension(
                                     body = outcome.detail,
                                 )
                             }
+                        }
+                    }
+                } else if (actionId == "abort-task") {
+                    // 卡上的「停止」：与群里发 stop 落到**同一个**动作（摘进程树），
+                    // 只是入口从「背下来的关键词」换成按钮。落地后由驱动把同一张卡
+                    // 收尾成 state=aborted，用户看到的是「已取消」而不是「失败」。
+                    scope.launch {
+                        val killed = runCatching { created.abortRunningSandboxes() }.getOrDefault(0)
+                        println(
+                            "[RELAY-INVOKE] abort requested by " + decidedBy +
+                                " (card " + cardId + "), sandbox tasks killed=" + killed,
+                        )
+                        if (killed == 0) {
+                            // 没有在跑的沙箱：这张卡已经结束了，动作来晚了。如实记下来，
+                            // 不要静默 —— 否则「点了没反应」又要被当成缺陷重查一遍。
+                            println("[RELAY-INVOKE] abort had nothing to stop (card " + cardId + ")")
                         }
                     }
                 } else if (actionId == "approve-prototype") {
@@ -1126,40 +1203,39 @@ internal class DesktopExtension(
         thinkingOnlyFallback = thinkingOnlyFallback,
     )
 
-
-    private fun formatAgentEventForChat(rec: AgentSessionRegistry.EventRecord, sessionTitle: String?): String? {
+    internal fun formatAgentEventForChat(rec: AgentSessionRegistry.EventRecord, sessionTitle: String?): String? {
         val evtType = rec.eventType.lowercase()
         return when {
-            evtType == "turn.end" -> {
-                val body = rec.body?.trim().orEmpty()
-                // 只有当有真实内容时才作为消息展示，空 body 不再输出 "执行完成" / "turn 1" 等垃圾气泡。
-                // hasVisibleText 而不是 isNotEmpty：只含零宽字符的 body 也算空（空气泡的真凶）。
-                if (hasVisibleText(body)) body else null
-            }
-            evtType in listOf("assistant.text", "assistant.message", "text", "message") -> {
-                rec.body?.trim()?.takeIf { hasVisibleText(it) }
-            }
-            evtType == "user.message" -> {
-                rec.body?.trim()?.takeIf { hasVisibleText(it) } ?: rec.summary?.trim()?.takeIf { hasVisibleText(it) }
-            }
-            evtType == "finished" -> {
-                val s = rec.summary ?: finishedFallback
-                val b = rec.body?.takeIf { it.isNotBlank() }?.let { "\n$it" }.orEmpty()
-                "✅ $s$b"
-            }
-            // 工具调用是底层执行细节，绝不应刷屏污染聊天气泡
-            evtType in listOf("tool.started", "tool.call", "tool.completed", "tool.result") -> null
-            evtType == "session.started" -> null
-            evtType == "error" -> {
-                "⚠️ ${rec.summary ?: errorFallback}: ${rec.body.orEmpty()}"
-            }
-            else -> {
-                if (!evtType.contains("delta") && !evtType.contains("thought") && !evtType.contains("tool") && !evtType.contains("turn")) {
-                    rec.body?.takeIf { it.isNotBlank() }
-                } else null
-            }
+        evtType == "turn.end" -> {
+            val body = rec.body?.trim().orEmpty()
+            // 只有当有真实内容时才作为消息展示，空 body 不再输出 "执行完成" / "turn 1" 等垃圾气泡。
+            // hasVisibleText 而不是 isNotEmpty：只含零宽字符的 body 也算空（空气泡的真凶）。
+            if (hasVisibleText(body)) body else null
+        }
+        evtType in listOf("assistant.text", "assistant.message", "text", "message") -> {
+            rec.body?.trim()?.takeIf { hasVisibleText(it) }
+        }
+        evtType == "user.message" -> {
+            rec.body?.trim()?.takeIf { hasVisibleText(it) } ?: rec.summary?.trim()?.takeIf { hasVisibleText(it) }
+        }
+        evtType == "finished" -> {
+            val s = rec.summary ?: finishedFallback
+            val b = rec.body?.takeIf { it.isNotBlank() }?.let { "\n$it" }.orEmpty()
+            "✅ $s$b"
+        }
+        // 工具调用、产物与卡片是底层执行与结构化协议，绝不应作为纯文本刷屏污染聊天气泡
+        evtType in listOf("tool.started", "tool.call", "tool.completed", "tool.result", "artifact", "card") -> null
+        evtType == "session.started" -> null
+        evtType == "error" -> {
+            "⚠️ ${rec.summary ?: errorFallback}: ${rec.body.orEmpty()}"
+        }
+        else -> {
+            if (!evtType.contains("delta") && !evtType.contains("thought") && !evtType.contains("tool") && !evtType.contains("turn")) {
+                rec.body?.takeIf { it.isNotBlank() }
+            } else null
         }
     }
+}
 
     /**
      * 「这条用户消息**已经发过群**」的水位（sessionId → 已转发到群的最大 cursor）。
@@ -1218,6 +1294,26 @@ internal class DesktopExtension(
             }.onFailure { t ->
                 println("[RELAY-INVOKE] artifact delivery failed for " + name + ": " + (t.message ?: (t::class.simpleName ?: "unknown")))
             }
+        }
+    }
+
+    /**
+     * 把驱动刚发的一张卡**立刻**推进群，不占用 invoke 的返回值通道。
+     *
+     * 为什么不是等 `done(summary, card)`：那条路要等任务完全结束。执行中的状态
+     * 只有在执行中发出去才有意义。域层的 `broadcastBoardCard` 负责「同 cardId
+     * 本机落库重写 + 远端入站对称替换」，所以受理卡与终态卡会合并成一张。
+     *
+     * 投不出去不吞：广播失败只影响「看不看得见」，任务本身照跑，但必须留痕 ——
+     * 否则下次又会以「卡片没出现」的形式重新查一遍。
+     */
+    private fun publishCardNow(groupId: String?, agentId: String, cardJson: String?) {
+        if (groupId.isNullOrBlank() || cardJson.isNullOrBlank()) return
+        scope.launch {
+            runCatching { controller.broadcastChainCard(groupId, agentId, cardJson) }
+                .onFailure { t ->
+                    println("[RELAY-INVOKE] card broadcast failed: " + (t.message ?: t::class.simpleName))
+                }
         }
     }
 

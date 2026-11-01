@@ -337,7 +337,11 @@ object StageChain {
             adds = text.lineSequence().count { it.startsWith("+") && !it.startsWith("+++") }
             dels = text.lineSequence().count { it.startsWith("-") && !it.startsWith("---") }
         }
-        val summaryText = "$files file(s) (+$adds -$dels)"
+        // summary **只放文件数**：`+N −N` 由渲染侧按 additions/deletions 单独上色。
+        // 这里再写一遍，卡片上就会显示「15 个文件 +1817 −449 +1817 −449」
+        // （真机截图上亲眼见过，SandboxedCliDriver 的 diffCardJson 有同一个毛病）。
+        // 卡面上给人读的一句话：与驱动侧同一写法（「2 个文件」），不把英文复数后缀露给用户。
+        val summaryText = "$files 个文件"
         return Pair(
             ChainDiff(
                 path = repoName,

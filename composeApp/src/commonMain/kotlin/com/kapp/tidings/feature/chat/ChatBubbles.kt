@@ -208,33 +208,37 @@ internal fun quotedMessagePreview(quoted: MessageUi): String {
 }
 
 /**
- * 出站消息在左下侧的极简投递指示对勾。
+ * 出站消息的极简投递指示对勾。
  */
 @Composable
 internal fun DeliveryCheckmark(
     delivery: DeliveryState?,
-    isFileCompleted: Boolean,
+    isFileCompleted: Boolean = false,
+    tint: Color? = null,
     modifier: Modifier = Modifier,
 ) {
+    val activeTint = tint ?: MaterialTheme.colorScheme.primary
+    val pendingTint = tint?.copy(alpha = 0.7f) ?: MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.7f)
+    val queuedTint = tint?.copy(alpha = 0.5f) ?: MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.5f)
     if (isFileCompleted || delivery == DeliveryState.Sent) {
         Icon(
             painter = painterResource(Res.drawable.ic_check_double),
             contentDescription = null,
-            tint = MaterialTheme.colorScheme.primary,
+            tint = activeTint,
             modifier = modifier.size(IconSizes.Badge),
         )
     } else if (delivery == DeliveryState.Sending) {
         Icon(
             painter = painterResource(Res.drawable.ic_clock_pending),
             contentDescription = null,
-            tint = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.7f),
+            tint = pendingTint,
             modifier = modifier.size(IconSizes.Badge),
         )
     } else if (delivery == DeliveryState.Queued) {
         Icon(
             painter = painterResource(Res.drawable.ic_clock_pending),
             contentDescription = null,
-            tint = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.5f),
+            tint = queuedTint,
             modifier = modifier.size(IconSizes.Badge),
         )
     }
@@ -400,13 +404,6 @@ internal fun MessageBubble(
                 }
                 Spacer(Modifier.width(sp.sm))
             }
-        } else {
-            // 出站消息在左下侧伴随极简投递标记
-            DeliveryCheckmark(
-                delivery = message.delivery,
-                isFileCompleted = card?.state == TransferState.Completed,
-                modifier = Modifier.padding(end = sp.xs, bottom = sp.xs),
-            )
         }
         // 菜单要锚在气泡上，所以外面套一层 BoxWithConstraints；气泡上限见 bubbleMaxWidth。
         BoxWithConstraints {
@@ -552,6 +549,12 @@ internal fun MessageBubble(
                             style = MaterialTheme.typography.labelSmall,
                             color = metaColor,
                         )
+                        if (message.mine) {
+                            DeliveryCheckmark(
+                                delivery = message.delivery,
+                                tint = metaColor,
+                            )
+                        }
                         if (message.mine && message.delivery == DeliveryState.Failed && onRetry != null) {
                             AppTextButton(
                                 text = stringResource(Res.string.chat_delivery_resend),

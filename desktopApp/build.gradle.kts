@@ -31,6 +31,10 @@ dependencies {
     // 测试里用 Codec 造真实信封(手写 JSON 过不了 Codec 的字段校验 —— 这不是测试取巧,
     // 正是协议层要求"帧必须由编解码器产生")。
     testImplementation(libs.kotlinx.serialization.json)
+    // 主源集也要能拼卡片 JSON：合并失败时宿主得把「受阻」帧发回群（见
+    // DesktopExtension 的 merge-patch 分支）。手拼字符串在含引号/换行的错误详情上
+    // 会出非法 JSON，那是静默丢卡 —— 不如把序列化放进编译类路径。
+    implementation(libs.kotlinx.serialization.json)
     // 源码级守卫共用的读盘工具（只被测试引用，永不进 Tidings.app —— AGENTS §0）。
     testImplementation(project(":testsupport"))
     implementation(compose.material3)

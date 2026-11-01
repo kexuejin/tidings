@@ -82,6 +82,15 @@ class AgentChatMessageConvergenceTest {
         assertNull(message, "只有零宽字符的事件不该产出气泡（空气泡那条）")
     }
 
+    @Test
+    fun cardAndArtifactEventsFilteredOut() {
+        val text = RepoSource.read("desktopApp/src/main/kotlin/com/kapp/tidings/desktop/DesktopExtension.kt")
+        assertTrue(
+            text.contains("\"artifact\"") && text.contains("\"card\""),
+            "formatAgentEventForChat 必须将 artifact 与 card 列入过滤清单，防止裸 JSON 与底层对账路径进群污染聊天流",
+        )
+    }
+
     /**
      * agent 的发送者标签**只有一个来源**（`agentSenderIdFor`）。
      *

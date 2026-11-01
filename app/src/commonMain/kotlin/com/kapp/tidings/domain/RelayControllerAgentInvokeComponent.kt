@@ -728,11 +728,29 @@ internal class RelayControllerAgentInvokeComponent(private val host: RelayContro
      */
     internal suspend fun broadcastBoardCard(groupId: String, agentId: String, card: JsonObject) {
         val st = host._state.value
-        val meta = st.settings.groups.firstOrNull { it.groupId == groupId } ?: return
-        if (st.selfNodeId !in meta.members) return
-        val rt = host.runtime ?: return
+        // 每一条早退都要留痕。这里从前是四个静默 `return`：宿主判定「这张卡发不出去」
+        // 时既不上群也不报警，调用方看到的是「函数正常返回」—— 「合并失败却什么都没
+        // 发生」就是这么查不出来的。
+        val meta = st.settings.groups.firstOrNull { it.groupId == groupId } ?: run {
+            println("[CARD] dropped: group " + groupId + " not in settings")
+            return
+        }
+        if (st.selfNodeId !in meta.members) {
+            println(
+                "[CARD] dropped: self " + st.selfNodeId + " is not a member of " + groupId +
+                    " (members=" + meta.members.joinToString(",") + ")",
+            )
+            return
+        }
+        val rt = host.runtime ?: run {
+            println("[CARD] dropped: no runtime attached")
+            return
+        }
         val title = card.strField("title").orEmpty().ifBlank { card.strField("cardId").orEmpty() }
-        if (title.isBlank()) return
+        if (title.isBlank()) {
+            println("[CARD] dropped: card has neither title nor cardId")
+            return
+        }
         val envelopeId = newId()
         // T-2d 单卡槽（§6.2 / 不变量 3）：本机广播的 rev 推进帧，**本机的落库**也走
         // 原位替换 —— 找同 cardId 的既有槽位，同 id 重写（card 首帧原文不动、
@@ -1238,6 +1256,31 @@ data class AgentInvokeExecution(
         fun done(summary: String?, cardJsonText: String?): AgentInvokeExecution = AgentInvokeExecution(
             status = com.kapp.tidings.core.protocol.CodecInvoke.InvokeResultStates.DONE,
             summary = summary,
+            card = cardJsonText?.let { text ->
+                runCatching { Json.parseToJsonElement(text) as? JsonObject }.getOrNull()
+            },
+        )
+
+        /**
+         * 非成功结果**带卡片**（中止、失败、超时）。
+         *
+         * 为什么要有它：调用方（域层派单处）的反馈判据是「有没有卡」——有卡就不再
+         * 补一条横幅。此前失败/中止一律不带卡，于是用户按了停止，群里弹出一句
+         * 「没有完成这次任务」：卡片明明已经把「已取消」写清楚了，横幅又把它说成
+         * 机器的故障。卡片是回执，横幅只是卡片缺席时的兜底。
+         *
+         * 与 [done] 同一条纪律：只收 JSON **文本**，解析留在这层 —— 壳层的编译类路径
+         * 上没有 kotlinx-serialization。
+         */
+        fun withCard(
+            status: String,
+            summary: String?,
+            error: String?,
+            cardJsonText: String?,
+        ): AgentInvokeExecution = AgentInvokeExecution(
+            status = status,
+            summary = summary,
+            error = error,
             card = cardJsonText?.let { text ->
                 runCatching { Json.parseToJsonElement(text) as? JsonObject }.getOrNull()
             },

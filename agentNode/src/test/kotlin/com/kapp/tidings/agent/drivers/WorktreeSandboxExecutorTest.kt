@@ -267,6 +267,12 @@ class WorktreeSandboxExecutorTest {
 
         val outcome = withTimeout(10_000) { done.await() }
         assertTrue(outcome is WorktreeSandboxExecutor.Outcome.Aborted, "终局是 Aborted，实际 $outcome")
+        // 产物目录也要跟着消失：中止的活没有 patch 可交，留着目录只是让沙箱根目录
+        // 越积越多（真机实测一次中止留一个，验收 §10d 第 5 条要求「目录消失」）。
+        assertFalse(
+            File(root, "artifacts/t6").exists(),
+            "中止后产物目录必须清掉：${File(root, "artifacts/t6").absolutePath}",
+        )
         scope.cancel()
     }
 

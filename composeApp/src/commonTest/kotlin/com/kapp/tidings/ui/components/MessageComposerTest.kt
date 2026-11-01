@@ -100,6 +100,24 @@ class MessageComposerTest {
         assertEquals("@DSH " to 5, insertMention("@", start = 1, end = 1, token = "@DSH"))
     }
 
+    /**
+     * 候选是按「@ 后面打到哪儿」过滤出来的，点中之后那段前缀必须被**替换**掉。
+     *
+     * 从前是往光标处追加，于是打 `@c` 再点候选得到 `@c@codex-e2e` —— 用户得自己回头
+     * 删掉 `@c` 才能发出去。
+     */
+    @Test
+    fun thePartialQueryTypedAfterAtIsReplaced() {
+        assertEquals("@codex-e2e " to 11, insertMention("@c", start = 2, end = 2, token = "@codex-e2e"))
+        assertEquals("@codex-e2e " to 11, insertMention("@cod", start = 4, end = 4, token = "@codex-e2e"))
+    }
+
+    /** 在已经完整的 token 上再点一次同一个候选：不重复、不叠空格。 */
+    @Test
+    fun pickingTheSameMentionTwiceDoesNotDoubleIt() {
+        assertEquals("@DSH 看一下" to 4, insertMention("@DSH 看一下", start = 4, end = 4, token = "@DSH"))
+    }
+
     /** 有选区时替换选区（与表情同一套光标语义）。 */
     @Test
     fun mentionReplacesTheSelection() {

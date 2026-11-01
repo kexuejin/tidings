@@ -48,6 +48,25 @@ object DesktopPatchMerge {
         return Outcome.Applied
     }
 
+    /**
+     * 把 git 的 stderr 尾巴翻成一句用户能照做的话。
+     *
+     * 为什么必须翻：`error: hello.txt: already exists in working directory` 是给写
+     * 补丁的人看的，不是给点按钮的人看的 —— 他需要知道的是「下一步做什么」。
+     */
+    fun hintFor(detail: String): String {
+        val d = detail.lowercase()
+        return when {
+            d.contains("already exists") ->
+                "补丁要新建的文件在工作区里已经有了。先把它挪开或提交，再点一次合并"
+            d.contains("does not apply") || d.contains("patch failed") || d.contains("corrupt patch") ->
+                "补丁和当前文件对不上 —— 这些地方可能已经被改过，需要手工对一下"
+            detail.startsWith("patch file missing") -> "补丁文件已经不在了，让执行方重跑一次"
+            detail.startsWith("workspace missing") -> "工作区目录找不到了，确认它还在原位置"
+            else -> "补丁没能应用：" + detail.take(160)
+        }
+    }
+
     private fun git(cwd: File, vararg args: String): GitOutput {
         val proc = ProcessBuilder(listOf("git") + args.toList())
             .directory(cwd)

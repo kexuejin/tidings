@@ -148,31 +148,37 @@ public data class MentionTarget(
  * 群成员/气泡头像长按「直接 @」。两处各写一遍 token 拼装，迟早一处多一个空格、
  * 一处少一个词边界，症状就是「@ 了没反应」。
  *
- * 已经刚敲出一个 `@` 时不再补第二个（与旧的内联实现同一行为）。
+ * 已经敲出的那截 `@query` 会被**替换**，不是在它后面追加：候选列表本身就是按那段
+ * 前缀过滤出来的，点中之后它该消失。从前这里只往光标处插入，于是「打 `@c`、点候选」
+ * 得到的是 `@c@codex-e2e`，用户还得回头把 `@c` 删掉才能发。
  */
 internal fun insertMention(text: String, start: Int, end: Int, token: String): Pair<String, Int> {
     val from = start.coerceIn(0, text.length)
     val to = end.coerceIn(from, text.length)
     val name = token.trim().removePrefix("@")
-    val alreadyTypedAt = from > 0 && text[from - 1] == '@'
-    val insertion = (if (alreadyTypedAt) "" else "@") + name + " "
-    val cursor = from + insertion.length
+    // 替换段的起点：光标前那段还没打完的 `@xxx`（没有就退化成「在光标处插入」）。
+    val mentionStart = partialMentionStart(text, from)
+    val tail = text.substring(to)
+    // 后面已经跟着空白就不再补空格，否则「@panda」连点两次会得到两个空格。
+    val sep = if (tail.startsWith(" ")) "" else " "
+    val insertion = "@" + name + sep
+    return text.substring(0, mentionStart) + insertion + tail to (mentionStart + insertion.length)
+}
 
-    // **已经打完整个 token 时不再插一次。**
-    //
-    // 真身：在 `@panda` 后面再选一次 `@panda`，旧实现会得到 `@panda@panda ` ——
-    // 用户按了候选、结果 token 变成两截，`@` 也重复了。判据是"光标左侧已经恰好
-    // 是这个 token"（含其后的空格），那就只移动光标。
-    val typedToken = (if (alreadyTypedAt) "" else "@") + name
-    val leftOfCursor = text.substring(0, from)
-    if (leftOfCursor.endsWith(typedToken)) {
-        // 后面还没空格就补一个，已经有的不重复补。
-        val needsSpace = !text.substring(from).startsWith(" ")
-        val tail = if (needsSpace) text.substring(0, from) + " " + text.substring(from) else text
-        return tail to (if (needsSpace) from + 1 else from)
+/**
+ * 光标前那段「还没打完的 @ 输入」的起点（`@` 所在下标）；不是 @ 输入则返回 [from]。
+ *
+ * 判据与 [mentionQueryBeforeCursor] 同一套：从光标往回找，遇到空白就说明这段已经结束。
+ */
+private fun partialMentionStart(text: String, from: Int): Int {
+    var i = from - 1
+    while (i >= 0) {
+        val ch = text[i]
+        if (ch.isWhitespace()) return from
+        if (ch == '@') return i
+        i--
     }
-
-    return text.substring(0, from) + insertion + text.substring(to) to cursor
+    return from
 }
 
 /**

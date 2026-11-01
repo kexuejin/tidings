@@ -274,6 +274,11 @@ class WorktreeSandboxExecutor(
                 }
                 aborted.remove(taskId) -> {
                     cleanupTask(taskId)
+                    // 中止的任务没有产物可留：patch 没生成，task.log 记的是「被叫停」
+                    // 这一件事 —— 而那个人正是按停止的人，他已经知道了。
+                    // 留着只会让沙箱根目录越积越多（真机实测：一次中止留一个目录，
+                    // 验收 §10d 第 5 条要求「目录消失」）。
+                    runCatching { artifactsDir.deleteRecursively() }
                     Outcome.Aborted("task aborted (SIGTERM/SIGKILL)")
                 }
                 exitCode == 0 -> {
@@ -299,6 +304,9 @@ class WorktreeSandboxExecutor(
                     destroyProcessTree(proc)
                 }
                 cleanupTask(taskId)
+                // 与 aborted 分支同一条：取消掉的活没有产物，目录不该留
+                // （验收 §10d 第 5 条「目录消失」）。
+                runCatching { artifactsDir.deleteRecursively() }
             }
             throw e
         } finally {

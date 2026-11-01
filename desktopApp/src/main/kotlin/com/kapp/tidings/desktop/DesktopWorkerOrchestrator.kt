@@ -407,13 +407,14 @@ internal class DesktopWorkerOrchestrator(
         var healRound = 0
         var currentPrompt = containedPrompt
         var patchPath: String? = null
-        var lastSaid: String? = null
+        // CLI **自己说的话**（token/思考增量拼起来）。卡面摘要只能从这里来。
+        var said = StringBuilder()
         var executionError: String? = null
 
         while (healRound < maxHealRounds) {
             healRound++
             patchPath = null
-            lastSaid = null
+            said = StringBuilder()
             val (_, status, error) = host.executeCliTask(
                 agentKey = defaultAgent,
                 prompt = currentPrompt,
@@ -421,11 +422,14 @@ internal class DesktopWorkerOrchestrator(
                 requestedSessionId = null,
                 onArtifact = { path, name, _, _, _ -> if (name == "patch.diff") patchPath = path },
                 onEvent = { eventType, _, summary, body ->
-                    if (eventType != "finished" && eventType != "heartbeat" && eventType != "artifact") {
-                        val candidate = (body ?: summary)?.trim()
-                        if (!candidate.isNullOrBlank() && candidate != "stop") {
-                            lastSaid = candidate
-                        }
+                    // **只累「人话」。** 其余事件的 body 都不是给人读的：
+                    // `card` 是卡片 JSON（原样贴进卡面就是把 `{"cardId":…}` 摊给用户）、
+                    // `artifact` 是路径/SHA 对账、`tool.started` 是调用参数、
+                    // `error` 是英文诊断。从前用的是黑名单（只排 finished/heartbeat/
+                    // artifact），于是最后落进摘要的总是那张卡片 JSON。
+                    if (eventType == "thought.delta" || eventType == "token.delta") {
+                        val chunk = body ?: summary
+                        if (!chunk.isNullOrBlank()) said.append(chunk)
                     }
                 },
             )
@@ -469,11 +473,12 @@ internal class DesktopWorkerOrchestrator(
         val patchBytes = harvest?.second ?: 0L
         val artifactsList = if (patchPath != null) listOf("patch.diff" to patchBytes) else emptyList()
         val defaultSummary = if (diff != null) {
-            "${diff.summary ?: "Changes ready"}, all tests verified"
+            diff.summary ?: "改动已就绪，等你合并"
         } else {
             "Implementation ready in isolated worktree for review"
         }
-        val summary = StageChain.summarize(lastSaid) ?: defaultSummary
+        // 取**尾部**再压：结论在最后，开头多是「我先看看仓库」这类过程话。
+        val summary = StageChain.summarize(said.toString().takeLast(600)) ?: defaultSummary
         publishTicketCard(
             groupId = groupId,
             ticketId = ticketId,

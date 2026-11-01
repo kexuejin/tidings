@@ -166,7 +166,9 @@ public fun RailButton(
             .width(DesktopMetrics.MEDIUM_RAIL_PX.dp),
     ) {
         Column(
-            Modifier.padding(vertical = LocalAppSpacing.current.md10),
+            Modifier
+                .fillMaxWidth()
+                .padding(vertical = LocalAppSpacing.current.md10),
             horizontalAlignment = Alignment.CenterHorizontally,
         ) {
             NavIconWithBadge(icon = icon, label = label, tint = tint, badge = badge)

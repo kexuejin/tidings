@@ -6,6 +6,7 @@ import java.io.File
 import java.nio.file.Files
 import kotlin.test.Test
 import kotlin.test.assertEquals
+import kotlin.test.assertNotNull
 import kotlin.test.assertTrue
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.runBlocking
@@ -47,6 +48,10 @@ class SandboxedCliDriverTest {
         assertEquals(0, proc.waitFor(), "git ${args.joinToString(" ")} 失败: $err")
     }
 
+    /** 从卡片 JSON 里取 cardId（断言「是不是同一张卡」用）。 */
+    private fun cardIdOf(json: String): String? =
+        Regex("\"cardId\":\"([^\"]+)\"").find(json)?.groupValues?.get(1)
+
     private fun events(block: suspend (java.util.concurrent.LinkedBlockingQueue<DriverEvent>) -> Unit):
         List<DriverEvent> {
         val queue = java.util.concurrent.LinkedBlockingQueue<DriverEvent>()
@@ -85,20 +90,42 @@ class SandboxedCliDriverTest {
         val types = collected.map { it::class.simpleName }
         assertTrue(types.containsAll(listOf("TokenDelta", "Artifact", "Card", "Finished")), "四类事件都在：$types")
         assertEquals("Finished", types.last(), "Finished 收尾")
-        assertEquals(1, types.count { it == "Card" }, "有 diff 才出卡，且恰好一张")
+        val cards = collected.filterIsInstance<DriverEvent.Card>()
+        // 两张卡事件 = **同一张卡的两个状态**：先受理（rev=1），后结论（rev=2）。
+        // 派单后到结论之间必须已经有一张卡，否则用户在整个执行期间看不到任何东西
+        // （真机 2026-11-01 18:47：派了活，群里连一张本轮任务卡都没有）。
+        assertEquals(2, cards.size, "受理卡 + 结论卡，恰好两张事件")
+        assertTrue(cards[0].cardJson.contains("\"state\":\"working\""), "第一张是受理卡：${cards[0].cardJson}")
+        assertTrue(cards[1].cardJson.contains("\"state\":\"review_ready\""), "第二张是结论卡：${cards[1].cardJson}")
+        assertEquals(
+            cardIdOf(cards[0].cardJson),
+            cardIdOf(cards[1].cardJson),
+            "同一 cardId ⇒ 前端原位刷新，一次任务恒一张卡",
+        )
+        assertTrue(
+            cards[0].cardJson.contains("\"actionId\":\"abort-task\""),
+            "进行中必须给「停止」出口 —— 中止不该靠用户背 stop 这个词",
+        )
+        assertTrue(cards[0].cardJson.contains("\"rev\":1") && cards[1].cardJson.contains("\"rev\":2"), "rev 单调推进")
         // 产物事件先于卡片：桥按这个顺序「先收文件、再读说明」。
-        assertEquals(types.indexOf("Artifact"), types.indexOf("Card") - 1, "Artifact 必须紧跟在 Card 之前")
+        assertEquals(types.lastIndexOf("Artifact"), types.lastIndexOf("Card") - 1, "Artifact 必须紧跟在结论卡之前")
         val artifact = collected.filterIsInstance<DriverEvent.Artifact>().single()
         assertEquals("patch.diff", artifact.name)
         assertEquals("text/x-diff", artifact.mime)
         assertEquals(64, artifact.sha256.length, "SHA256 指针进事件（对账用），路径只走进程内")
         assertTrue(artifact.path.contains("artifacts"), "path 指向沙箱外产物目录")
-        val card = collected.filterIsInstance<DriverEvent.Card>().single()
+        val card = cards.last()
         assertTrue(card.cardJson.contains("\"type\":\"diff-review\""), "卡类型 = diff-review")
         assertTrue(card.cardJson.contains("\"additions\":2"), "提纯统计进卡面")
         assertTrue(card.cardJson.contains("patch.diff"), "产物条目进卡面（name/bytes/mime 展示元数据）")
         assertTrue(card.cardJson.contains("\"actionId\":\"merge-patch\""), "合流动作进卡（T-G1：审查闭环的最后一环）")
         assertTrue(!card.cardJson.contains(artifact.path), "本机路径绝不进协议卡（既有收口）")
+        // summary 只放文件数：`+N −N` 由渲染侧按 additions/deletions 上色。
+        // 两处都写 ⇒ 卡片显示「15 个文件 +1817 −449 +1817 −449」（真机 18:41 截图）。
+        assertTrue(
+            !card.cardJson.contains("+2") && !card.cardJson.contains("−2"),
+            "summary 不得自带 +N −N：${card.cardJson}",
+        )
         // 产物在、工作面无痕。
         assertTrue(
             File(root, "artifacts").list().orEmpty().any { it.startsWith("t-") },
@@ -154,6 +181,65 @@ class SandboxedCliDriverTest {
         assertEquals(1, errors.size, "恰好一条 Error：$collected")
         assertTrue(errors.single().message.contains("sandbox"), "失败信息指向真原因（沙箱建不出来）")
         assertTrue(!marker.exists(), "CLI 没有被执行 —— 非仓工作区不许静默裸跑")
+    }
+
+    /**
+     * 中止必须产出 **state=aborted 的收尾卡**，而不是只丢一条 Error。
+     *
+     * 真机对照（2026-11-01 18:47–18:48）：用户在群里发 `stop` 后进程确实被摘掉了，
+     * 但卡面没有任何变化、手机端还弹了一句「没有完成这次任务」—— 用户做的决定被
+     * 报成了机器的故障。这里钉死两件事：① 中止有专属状态；② 受理卡一定被收尾，
+     * 不会永远停在「进行中」。
+     */
+    @Test
+    fun abortEndsTheRunningCardAsAborted() {
+        val root = tempDir()
+        val host = tempDir()
+        gitRepo(host)
+        // 忽略 SIGTERM：中止必须走到 SIGKILL 那一档，与真机上 codex 的表现一致。
+        val cli = script(root, "cli", "trap '' TERM\nsleep 120")
+        val sandbox = WorktreeSandboxExecutor(sandboxRoot = root)
+        val driver = SandboxedCliDriver(
+            driverId = "claude-cli",
+            displayName = "Claude Code (CLI)",
+            cliPath = cli,
+            argSpec = { listOf("-p", it) },
+            sandbox = sandbox,
+        )
+        val queue = java.util.concurrent.LinkedBlockingQueue<DriverEvent>()
+        runBlocking {
+            val session = driver.openSession(host.absolutePath, null)
+            val job = launch(kotlinx.coroutines.Dispatchers.Default) {
+                driver.executeTask(session.sessionId, "long task") { queue.put(it) }
+            }
+            // 等受理卡出现（它必须在任务真正开跑时就发出来）。
+            val deadline = System.currentTimeMillis() + 20_000
+            var sawWorking = false
+            while (System.currentTimeMillis() < deadline && !sawWorking) {
+                val ev = queue.poll(200, java.util.concurrent.TimeUnit.MILLISECONDS) ?: continue
+                if (ev is DriverEvent.Card && ev.cardJson.contains("\"state\":\"working\"")) sawWorking = true
+            }
+            assertTrue(sawWorking, "任务开始就必须有受理卡，否则执行期间用户看到的是空白")
+            // 受理卡比沙箱登记更早（卡先发、worktree 后建），要等真的跑起来再中止 ——
+            // 否则测的是「空跑一次 abortAll」，什么也没证明。
+            val runDeadline = System.currentTimeMillis() + 20_000
+            while (System.currentTimeMillis() < runDeadline && driver.runningCount() == 0) {
+                Thread.sleep(50)
+            }
+            assertEquals(1, driver.runningCount(), "沙箱任务已登记在跑")
+            assertEquals(1, driver.abortAll(), "一个在跑的沙箱任务被摘掉")
+            job.join()
+        }
+        val rest = generateSequence { queue.poll() }.toList()
+        val aborted = rest.filterIsInstance<DriverEvent.Card>()
+            .firstOrNull { it.cardJson.contains("\"state\":\"aborted\"") }
+        assertNotNull(aborted, "中止要出 aborted 卡，而不是只丢一条 Error：$rest")
+        assertTrue(
+            aborted.cardJson.contains("\"cardId\":\"diff-"),
+            "收尾卡与受理卡同一 cardId（原位刷新）：${aborted.cardJson}",
+        )
+        assertTrue(rest.any { it is DriverEvent.Error }, "终局事件仍要有（台账与 invoke 结果要靠它）")
+        assertTrue(rest.none { it is DriverEvent.Finished }, "中止不发 Finished")
     }
 
     private fun gitLines(cwd: File, vararg args: String): List<String> {
