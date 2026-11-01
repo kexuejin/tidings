@@ -391,18 +391,27 @@ internal class RelayControllerAgentInvokeComponent(private val host: RelayContro
         intent: JsonObject?,
         messageText: String? = null,
         messageId: String? = null,
+        isSeatSyncRetry: Boolean = false,
     ) {
         if (intent == null) return
         val agentId = intent.strField("agentId")?.takeIf { it.isNotBlank() } ?: return
         val wsId = intent.strField("wsId")?.takeIf { it.isNotBlank() }
         val st = host._state.value
-        val meta = st.settings.groups.firstOrNull { it.groupId == groupId } ?: return
+        val meta = st.settings.groups.firstOrNull { it.groupId == groupId }
+        if (meta == null) {
+            scheduleSeatSyncRetry(groupId, senderNode, intent, messageText, messageId, isSeatSyncRetry)
+            return
+        }
         val self = st.selfNodeId
         // 定向呼叫（T-G5）：显式 hostNodeId = 只有被点名的宿主处理这条意图
         // （群帧全员可见，执行只有一家 —— 否则每台有同名 agent 的机器都抢着跑）。
         val explicitHost = intent.strField("hostNodeId")?.takeIf { it.isNotBlank() }
         if (explicitHost != null && explicitHost != self) return
-        val seat = meta.virtualAgents.orEmpty().firstOrNull { it.agentId == agentId } ?: return
+        val seat = meta.virtualAgents.orEmpty().firstOrNull { it.agentId == agentId }
+        if (seat == null) {
+            scheduleSeatSyncRetry(groupId, senderNode, intent, messageText, messageId, isSeatSyncRetry)
+            return
+        }
         val effectiveHost = explicitHost ?: seat.hostNodeId
         val verdict = AgentExecAuthorizer.authorize(
             senderId = senderNode,
@@ -531,6 +540,42 @@ internal class RelayControllerAgentInvokeComponent(private val host: RelayContro
                 // 执行器抛错同样是「点了没反应」：插件进程死在任务中间就长这样。
                 announceAgentGaveUp(groupId, agentId, seat.name, messageId, unavailable = false)
             }
+        }
+    }
+
+    // ---------------------------------------------------------------- 席位同步竞态（单次重投）
+
+    /**
+     * 席位同步竞态的**单次**重投（真机 E2E 判红过一次）。
+     *
+     * 手机端改群 meta（rev+1）与紧随其后的派单帧经常**同秒**到达宿主；派单帧先被处理时
+     * 群 meta / 虚拟席位还没进 state，旧代码在 `meta == null` / `seat == null` 两道门上
+     * **静默 return** —— 用户看到的是「派单发出去，什么都没发生」。修法：首次命中把
+     * 同一意图延迟 [SEAT_SYNC_RETRY_DELAY_MS] 重投一次，meta 在途时自愈。
+     *
+     * 重投仍找不到席位就按旧语义沉默 —— 那是真·席位不存在：全群每台宿主都收得到群帧，
+     * 「不是我的席位」若出声会变成 N 台机器各回一条错误横幅。
+     */
+    private fun scheduleSeatSyncRetry(
+        groupId: String,
+        senderNode: String,
+        intent: JsonObject?,
+        messageText: String?,
+        messageId: String?,
+        isSeatSyncRetry: Boolean,
+    ) {
+        if (isSeatSyncRetry) return
+        host.scope.launch {
+            delay(SEAT_SYNC_RETRY_DELAY_MS)
+            if (!isActive) return@launch
+            handleInboundAgentIntent(
+                groupId = groupId,
+                senderNode = senderNode,
+                intent = intent,
+                messageText = messageText,
+                messageId = messageId,
+                isSeatSyncRetry = true,
+            )
         }
     }
 
@@ -1028,6 +1073,12 @@ internal class RelayControllerAgentInvokeComponent(private val host: RelayContro
     companion object {
         /** 派单租约的缺省期限。给足一个真实任务的工作窗口；调用方可按子任务改小。 */
         const val DEFAULT_INVOKE_DEADLINE_MS: Long = 10L * 60_000
+
+        /**
+         * 席位/meta 在途时的重投等待：同秒竞态在 1–2s 内自愈；太长会让派单的人
+         * 白等（受理卡迟迟不出），太短盖不住慢的 meta 重传。
+         */
+        const val SEAT_SYNC_RETRY_DELAY_MS: Long = 2_000L
 
         /** 卡片动作请求的期限：动作必须立刻被处理，等不了任务那个量级。 */
         const val ACTION_INVOKE_DEADLINE_MS: Long = 15_000

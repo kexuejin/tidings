@@ -638,6 +638,10 @@ class SqlDelightAgentStore(
                 name = row.name,
                 bytes = row.bytes,
                 mime = row.mime,
+                // sha256/summary 必须跟着读回来：不读的话重启后这两列虽在盘上，
+                // UI 校验却退化成 UNDECLARED（写而不读 = 白写，M7-T3 就断在这一行）。
+                sha256 = row.sha256,
+                summary = row.summary,
                 at = row.at,
             )
         }

@@ -122,6 +122,42 @@ class AgentIntentPromptAndGrantBridgeTest {
     }
 
     /**
+     * 席位同步竞态（真机 E2E 判红）：派单帧先于席位进 state 时，
+     * 旧代码在 `seat == null` 门上**静默 return** —— 用户派单石沉大海，第二单才好。
+     * 修后：首次命中延迟单次重投，meta/席位在途时自愈（执行器最终收到 prompt）。
+     */
+    @Test
+    fun aDispatchBeforeTheSeatArrivesStillExecutesAfterTheRetry() = runBlocking {
+        val host = controller()
+        val seen = mutableListOf<String>()
+        host.invokeExecutor = object : AgentInvokeExecutor {
+            override suspend fun execute(request: AgentInvokeTaskRequest): AgentInvokeExecution {
+                seen += request.prompt
+                return AgentInvokeExecution(status = InvokeLeaseStates.DONE)
+            }
+        }
+        // 先建群（meta 在、席位还没有）→ 立刻派单 —— 复刻「帧比席位先到」的时序。
+        val groupId = host.createGroup("mesh", listOf(phoneNode))!!
+        host.invokeCtl.handleInboundAgentIntent(
+            groupId, host.state.value.selfNodeId, intentOf("gpu-runner"),
+            messageText = "@gpu-runner race the meta",
+        )
+        // 席位随后到达（与手机端 rev+1 宣告同一套动作）。
+        host.recordLocalWorkspace(
+            wsId = "ws-1", wsTitle = "WS", wsPath = null,
+            agentKey = null, agentKind = "gpu-runner", online = true,
+        )
+        host.handleSetGroupAgentWorkspaces(groupId, listOf("ws-1"))
+        // 重投窗口 2s：轮询等到它发生（awaitUntil 纪律，不睡固定时长）。
+        com.kapp.tidings.testutil.awaitUntil("席位迟到仍能执行", timeoutMs = 10_000) { seen.isNotEmpty() }
+        assertEquals(
+            "race the meta", seen.single(),
+            "席位晚到不许吞单：重投后执行器必须收到原任务",
+        )
+        host.stop()
+    }
+
+    /**
      * 发送侧自检与意图帧的关系（真机抓到的第三处自相矛盾）：带意图的消息由**宿主**
      * 授权（谁托管谁执行），发送者的本地台账对远端宿主没有发言权 —— 横幅说
      * 「没有执行」而宿主跑完任务回了卡片。修后：带 agentIntent 的发送不出本地横幅

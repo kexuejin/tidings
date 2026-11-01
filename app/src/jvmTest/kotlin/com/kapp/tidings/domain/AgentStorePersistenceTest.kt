@@ -112,6 +112,11 @@ class AgentStorePersistenceTest {
                     name = "patch.diff",
                     bytes = 2048,
                     mime = "text/x-diff",
+                    // 17.sqm（M7-T3）的两列：校验展示与摘要都靠它们。夹具刻意写上
+                    // 非空值 —— 曾经 loadArtifacts 不读这两列，重启后校验退化成
+                    // UNDECLARED，而「没写」的夹具是测不出这种断链的。
+                    sha256 = "b6c4a0e1",
+                    summary = "改动摘要：seed.txt 加一行",
                     at = 1_700_000_000_300L,
                 ),
             )
@@ -143,6 +148,8 @@ class AgentStorePersistenceTest {
             assertEquals("patch.diff", artifact?.name)
             assertEquals(2048L, artifact?.bytes)
             assertEquals("text/x-diff", artifact?.mime)
+            assertEquals("b6c4a0e1", artifact?.sha256, "sha256 没跨重启存活（loadArtifacts 不读就是写而不读）")
+            assertEquals("改动摘要：seed.txt 加一行", artifact?.summary, "summary 没跨重启存活")
         }
     }
 
