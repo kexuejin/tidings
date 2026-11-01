@@ -739,6 +739,13 @@ internal suspend fun sendGroupTextOptimistic(
      * 用真超时测要等 60 秒，那种用例没人会在本地跑，等于没有。
      */
     hardTimeoutMs: Long = SEND_HARD_TIMEOUT_MS,
+    /**
+     * 这条信封此刻是否**还在待发队列里**。null = 问 core（[NodeRuntime.pendingOutgoingMessages]）。
+     *
+     * 做成可注入的形参只为一件事：让「超时但已入队 ⇒ Queued」这条能用毫秒级验证 ——
+     * 起一个真节点、造一条真队列只为了断言一个分支，那种用例太脆、没人会跑。
+     */
+    queuedProbe: ((String) -> Boolean)? = null,
     send: suspend () -> SendOutcome,
 ): SendOutcome? {
     val convId = ConvId.group(groupId)
@@ -759,23 +766,45 @@ internal suspend fun sendGroupTextOptimistic(
     // 而 `DeliveryState.Sending` 的 KDoc 承诺过「不会永远转下去」，且它**没有重发出口**
     // （只有 `Failed` 才挂重发）。所以「永远转」既欺骗又不可恢复。
     //
-    // 值取 [GROUP_FANOUT_BUDGET_MS] 的 6 倍：内层 10 秒预算到点会把未完成的记成
+    // 值取 [GROUP_FANOUT_BUDGET_MS] 的 4 倍：内层预算到点会把未完成的记成
     // `QUEUED` 正常返回，所以**正常路径用不到这条兜底**；能走到这里的只有真正的挂死。
     // 给足 60 秒是为了不误伤慢网（UDP 退避 1/2/4s 再逐端点试 TCP 各 7s，
-    // 跨网最坏在 40 秒量级），一旦超时就走下面的 `outcome == null` 分支收尾成失败。
+    // 跨网最坏在 40 秒量级），一旦超时就走下面的 `outcome == null` 分支 ——
+    // 而那个分支现在会先问队列：还在队列里就是「已排队」，不是失败。
     val outcome = runCatching {
         withTimeoutOrNull(hardTimeoutMs) { send() }
     }
         .onFailure {
+            // 抛了什么必须留痕：这条分支以前只弹一个「发送失败」横幅，异常本身被吞掉 ——
+            // 真机上「消息标失败、对端却收到了」因此只能靠两端库对比才看得出来。
+            println(
+                "[send] group=$groupId id=${optimistic.id.take(8)} threw " +
+                    "${it::class.simpleName}: ${it.message}",
+            )
             host.warn(
                 it.messageOrNull()?.let(BannerMessage::SendFailed) ?: BannerMessage.UnknownError,
             )
         }
         .getOrNull()
     if (outcome == null) {
-        // 发送路径自己抛了：**必须**把那个「发送中」收尾成失败，否则它会永远转下去
-        // （那是比「不显示气泡」更糟的谎）。
-        host.replaceMessage(convId, optimistic.id, optimistic.copy(delivery = DeliveryState.Failed))
+        // **超时 ≠ 没发出去。**
+        //
+        // `outcome == null` 只有两种来源：抛了异常，或者 60 秒兜底到点。后者在真机上的
+        // 典型形状是「扇出 10 秒预算耗尽 → 重试用尽 → 硬超时」，而那一帧**通常已经送达**
+        // （对端库里有这条）。一律标 [DeliveryState.Failed] 会挂出「重发」按钮，用户据此
+        // 反复手打，队列越积越长、下一次更慢 —— 一个自我加速的假失败循环。
+        //
+        // 判据不猜：**问队列**。这条信封还在待发队列里 ⇒ 它真的是「已排队/在补发」，
+        // 那是 [DeliveryState.Queued] 的语义；队列里也没有才是不折不扣的失败。
+        val stillQueued = (queuedProbe ?: { id ->
+            host.runtime?.pendingOutgoingMessages()?.any { it.msgId == id } == true
+        }).invoke(optimistic.id)
+        val settled = if (stillQueued) DeliveryState.Queued else DeliveryState.Failed
+        println(
+            "[send] group=$groupId id=${optimistic.id.take(8)} settled=$settled " +
+                "queued=$stillQueued timeout=$hardTimeoutMs",
+        )
+        host.replaceMessage(convId, optimistic.id, optimistic.copy(delivery = settled))
         return null
     }
     // 按**同一个 id** 就地改写终态：id 从插入那一刻就等于信封 id，不需要再换。

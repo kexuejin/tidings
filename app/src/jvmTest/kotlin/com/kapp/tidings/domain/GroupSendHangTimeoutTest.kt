@@ -69,6 +69,46 @@ class GroupSendHangTimeoutTest {
         )
     }
 
+    /**
+     * **超时但那条信封已经进了队列 ⇒ `Queued`，不是 `Failed`。**
+     *
+     * ## 这条挡的是真机上一整屏「重发」
+     *
+     * 现场：手机端每条群消息 60 秒后都挂出「重发」红字，而桌面库里有同一时刻的同一句话
+     * （`ping` 18:08:05 两边都在）—— 消息**已经到了**，本地却判失败。用户据此反复手打，
+     * 队列越积越长、下一次更慢，是一个自我加速的假失败循环。
+     *
+     * 判据不猜：超时只说明「没在预算内拿到结论」，**在不在队列里**才是「还活着」的证据。
+     * 在 ⇒ [DeliveryState.Queued]（已排队/补发中，界面上没有重发出口，用户不会重复发）；
+     * 不在 ⇒ 才是真失败。
+     */
+    @Test
+    fun aTimedOutSendThatIsAlreadyQueuedIsNotReportedAsFailed() = runBlocking {
+        val controller = controller()
+        val groupId = controller.createGroup("上线小组", listOf(lin))!!
+        val convId = ConvId.group(groupId)
+        val envelopeId = "e-已入队"
+
+        val outcome = controller.groupsCtl.sendGroupTextOptimistic(
+            groupId, "在吗", null,
+            envelopeId = envelopeId,
+            hardTimeoutMs = 50L,
+            queuedProbe = { true },
+        ) {
+            awaitCancellation()
+        }
+
+        assertNull(outcome, "超时仍应返回 null（这条路径没有结论）")
+        val row = withTimeout(2_000) {
+            awaitMessage(controller, convId) { it.id == envelopeId }
+        }
+        assertEquals(
+            DeliveryState.Queued,
+            row.delivery,
+            "已入队就不许挂「重发」—— 那条消息只是还没等到回执，不是没发出去",
+        )
+    }
+
     /** 正常返回时不受兜底超时影响（别把慢网误伤成失败）。 */
     @Test
     fun aNormalSendIsUnaffectedByTheGuard() = runBlocking {

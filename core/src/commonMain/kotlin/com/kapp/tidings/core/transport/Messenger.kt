@@ -187,6 +187,10 @@ class Messenger(
         val payload = envelope.payload as? JsonObject ?: return
         val ackFor = (payload["ackFor"] as? JsonPrimitive)?.takeIf { it.isString }?.content ?: return
         val deferred = pendingLock.withLock { pending.remove("${envelope.from}|$ackFor") }
+        // 命中与未命中都要留痕：**未命中才是那条真缺陷的形状** —— ACK 到了、key 却没对上
+        // （对端 nodeId 与发送时的 peerId 不一致），现象与「ACK 根本没到」在外部完全一样。
+        // 以前这里两句话都没有，于是「消息标失败但对端已收到」只能靠两端库对比才看得出来。
+        if (deferred == null) println("[ack] miss from=${envelope.from.take(8)} for=$ackFor")
         deferred?.complete(true)
     }
 
@@ -599,12 +603,30 @@ class Messenger(
             return false
         }
         val endpoints = endpointsFor(peerId)
+        // 多网卡的机器会宣告**一串**地址（局域网 IPv4、两个 IPv6、VPN、Tailscale…），
+        // 把它们全部串行试完是 5 × 7.4 秒。主端点之外的候选只留两个：
+        // 候选的职责是「换网时还能摸到对端」，不是「把所有网卡都试一遍」——
+        // 试通任意一个都会 setActiveEndpoint，下次它就排到第一位。
+        val endpointsToTry = endpoints.take(1) + endpoints.drop(1).take(MAX_CANDIDATE_ENDPOINTS)
         // 离线但有候选：**照样试**（task-21 ③）。"离线"只说明当前地址那条路最近没通，
         // 不代表候选也不通 —— 跨网时正是候选（公网地址）通、当前地址（局域网地址）不通。
-        // 每个端点只试一次（完整退避留给在线路径），试通就 setActiveEndpoint 把它翻回在线。
-        val schedule = if (quick) quickSchedule() else if (record.online) timings.ackRetrySchedule else quickSchedule()
-        for (endpoint in endpoints) {
+        //
+        // **只有当前端点配得上完整退避，候选一律快试一次。**
+        //
+        // 原实现把同一个 schedule 套给了每一个端点 —— 而上面这句注释早就写着「每个端点
+        // 只试一次（完整退避留给在线路径）」。两者不是一个意思，代码跟的是前者：
+        // 真机读数：桌面宣告了 5 个地址（局域网 IPv4 + 两个 IPv6 + VPN + Tailscale），
+        // 每个等满 7.37 秒 ⇒ 一条消息 37 秒，远超群扇出预算 ⇒ 回回超窗、回回入队，
+        // 界面挂满「重发」。候选的职责是"换网兜底"，它的正确形状是**快速失败**，
+        // 不该把主路径一起拖死。
+        val primarySchedule = when {
+            quick -> quickSchedule()
+            record.online -> timings.ackRetrySchedule
+            else -> quickSchedule()
+        }
+        for ((index, endpoint) in endpointsToTry.withIndex()) {
             val t0 = nowMillis()
+            val schedule = if (index == 0) primarySchedule else quickSchedule()
             val acked = sendUdpAwaitAck(
                 peerId = peerId,
                 envelope = envelope,
@@ -619,6 +641,13 @@ class Messenger(
                 port = endpoint.port,
                 acked = acked,
                 elapsedMs = nowMillis() - t0,
+            )
+            // 逐端点留痕：真机上「消息其实到了、本地却判失败」只有这一行能区分
+            // 「没发出去」「发出去没人回 ACK」「ACK 回来了但没认出来」三种成因。
+            println(
+                "[send] peer=${peerId.take(8)} id=${envelope.id.take(8)} " +
+                    "ep=${endpoint.host}:${endpoint.port} acked=$acked " +
+                    "in=${nowMillis() - t0}ms online=${record.online} schedule=$schedule",
             )
             if (acked) {
                 registry.setActiveEndpoint(peerId, endpoint.host, endpoint.port)
@@ -721,6 +750,11 @@ class Messenger(
         }
         val done = CompletableDeferred<Unit>()
         pendingLock.withLock { flushing[peerId] = done }
+        // 排空是**没有超时的串行循环**（一条失败就 return，但每条自身最长要等满退避 + TCP）。
+        // 真机事故：它被群扇出的预算路径同步调用，把「10 秒出结论」拖成「60 秒硬超时」。
+        // 起止两行是这条因果唯一的直接证据 —— 谁调用了它、排了几条、占了多久。
+        val flushStarted = nowMillis()
+        val flushFrom = queueStore.listByPeer(peerId).size
         try {
             for (item in queueStore.listByPeer(peerId)) {
                 // **必须用 TCP 的上限解码，不能用 `Codec.decode`（UDP 那套）**。
@@ -765,6 +799,10 @@ class Messenger(
             return queueStore.listByPeer(peerId).isEmpty()
         } finally {
             pendingLock.withLock { flushing.remove(peerId) }
+            println(
+                "[flush] peer=${peerId.take(8)} from=$flushFrom left=${queueStore.listByPeer(peerId).size} " +
+                    "in=${nowMillis() - flushStarted}ms",
+            )
             // 叫醒所有在等这一轮结束的调用方（包括「重发」那条）。
             done.complete(Unit)
         }
@@ -823,7 +861,20 @@ class Messenger(
      *   `prune` 的 TTL 也才从最初排队时算起。
      * @return 信封能否解码；`false` 表示这份落盘数据已经没救（调用方应把它标成 failed）。
      */
-    suspend fun requeue(peerId: String, envelopeJson: String, createdAt: Long): Boolean {
+    suspend fun requeue(
+        peerId: String,
+        envelopeJson: String,
+        createdAt: Long,
+        /**
+         * 入队后是否**当场**排空一次。
+         *
+         * 默认 true（启动恢复、用户点「重发」走这条：那时候没有别的路径会很快接手）。
+         * 群扇出的预算到点那条路必须传 false —— 它已经耗完 10 秒预算了，再同步排空整条队列
+         * 会把这次发送拖到上层 60 秒硬超时（真机：消息标失败、对端其实已收到，满屏「重发」）。
+         * 补发交给既有的 15 秒定时重试与「离线→在线」事件，一条都不会丢。
+         */
+        flushNow: Boolean = true,
+    ): Boolean {
         // 与 [flushQueue] 同一条理由：落盘的信封是「重放素材」，按 TCP 上限读。
         // 用 UDP 的上限读会把长群消息判成没救（`return false` ⇒ 调用方标 failed）。
         val decoded = Codec.decodeTcp(envelopeJson)
@@ -835,7 +886,7 @@ class Messenger(
         }
         // 恢复时对端可能**已经**在线了（对方的 Online 事件早于本次重注入），所以显式补一次 flush，
         // 不能只靠事件驱动。
-        if (registry.get(peerId)?.online == true) flushQueue(peerId)
+        if (flushNow && registry.get(peerId)?.online == true) flushQueue(peerId)
         return true
     }
 
@@ -896,6 +947,16 @@ class Messenger(
         const val LINK_COOLDOWN_MS: Long = 15_000L
         /** 给 ACK 留一点网络回程余量，避免本地回环上卡在边界。 */
         const val ACK_GRACE_MS = 120L
+
+        /**
+         * 一次发送最多试几个**候选**端点（不含当前端点）。
+         *
+         * 候选是「换网兜底」：多网卡的对端会宣告一串地址（局域网 + IPv6 + VPN + Tailscale），
+         * 逐个等满退避是 5 × 7.4 秒 —— 一条群消息就这样耗光了扇出预算，界面挂「重发」。
+         * 两个够覆盖「局域网不通但公网/Tailscale 通」这类真实换网场景；试通哪个都会
+         * 被记为活跃端点，下次它排第一位。
+         */
+        const val MAX_CANDIDATE_ENDPOINTS = 2
 
         /**
          * 积压队列的默认定时重试间隔。

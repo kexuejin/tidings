@@ -36,11 +36,18 @@ import kotlinx.coroutines.withTimeoutOrNull
  * 群扇出的总预算（毫秒）。
  *
  * 超过它就不再等剩下的成员：没完成的按 [SendOutcome.QUEUED] 计，并把同一条信封重新入队。
- * 取 10s 的依据：单个离线成员的退避 + TCP 兜底通常在这个量级内结束，所以正常离线群不会
- * 触碰上限；它挡的是病态情况（对端半死、多个端点各等一次 TCP 超时），让一条群消息不被
- * 一个慢成员无限拖住。
+ * 它挡的是病态情况（对端半死、多个端点各等一次超时），让一条群消息不被一个慢成员无限拖住。
+ *
+ * ## 为什么从 10s 提到 15s
+ *
+ * 10s 挡不住**正常**的一次发送：当前端点的完整退避是 1+2+4s（+ACK 余量），再加两个候选
+ * 各快试一次，最坏 10.1s —— 正好卡在预算线上。真机读数：桌面宣告了 5 个地址，一条群消息
+ * 在 10s 到点时被判「没结论」，界面挂出「重发」，而消息其实已经送达。
+ *
+ * 15s 比最坏路径多出 5s 余量；配合「超预算但已入队 ⇒ Queued（而不是 Failed）」，
+ * 慢网只会显示「已排队」，不会再冒出重发按钮。
  */
-internal const val GROUP_FANOUT_BUDGET_MS: Long = 10_000L
+internal const val GROUP_FANOUT_BUDGET_MS: Long = 15_000L
 
 /**
  * 一个成员的扇出任务：他那一份信封的 JSON + 这次投递的结果。
@@ -137,6 +144,7 @@ internal suspend fun sendGroupTextFanOut(
     }
     // 预算到点：先把还在飞的成员重新入队，再取消它们的投递（顺序见 KDoc）。
     val unfinished = jobs.filter { !it.delivery.isCompleted }
+    println("[fanout] budget exhausted unfinished=${unfinished.map { it.member.take(8) }} of ${targets.size}")
     for (job in unfinished) {
         try {
             requeue(job.member, job.envelopeJson, nowMillis())
@@ -511,7 +519,13 @@ internal class NodeOutbound(
             envelopeFor = { member ->
                 variants.forMember(peerDeclares(member, MsgTypes.CAP_GROUP_TEXT_ATTRIBUTED))
             },
-            requeue = { member, json, createdAt -> messenger.requeue(member, json, createdAt) },
+            // `flushNow = false`：这里是**扇出预算已经耗完**的那条路（见 [sendGroupTextFanOut]）。
+            // 顺手同步排空队列会把这次发送从 10 秒拖到上层 60 秒硬超时 —— 真机现象是
+            // 「消息标发送失败、对端库里有这条」，用户看到满屏「重发」并重复手打。
+            // 补发由 15 秒定时重试与「离线→在线」事件接手，一条都不会丢。
+            requeue = { member, json, createdAt ->
+                messenger.requeue(member, json, createdAt, flushNow = false)
+            },
             send = { member, envelope -> messenger.sendUserMessage(member, envelope) },
         )
     }
@@ -571,7 +585,13 @@ internal class NodeOutbound(
                 envelopeFor = { member ->
                     variants.forMember(peerDeclares(member, MsgTypes.CAP_GROUP_TEXT_ATTRIBUTED))
                 },
-                requeue = { member, json, createdAt -> messenger.requeue(member, json, createdAt) },
+                // `flushNow = false`：这里是**扇出预算已经耗完**的那条路（见 [sendGroupTextFanOut]）。
+            // 顺手同步排空队列会把这次发送从 10 秒拖到上层 60 秒硬超时 —— 真机现象是
+            // 「消息标发送失败、对端库里有这条」，用户看到满屏「重发」并重复手打。
+            // 补发由 15 秒定时重试与「离线→在线」事件接手，一条都不会丢。
+            requeue = { member, json, createdAt ->
+                messenger.requeue(member, json, createdAt, flushNow = false)
+            },
                 send = { member, envelope -> messenger.sendUserMessage(member, envelope) },
             )
         }
