@@ -141,8 +141,14 @@ class WorktreeSandboxExecutor(
             val exitCode = withContext(Dispatchers.IO) {
                 val pb = ProcessBuilder(command).directory(worktree)
                 env.forEach { (k, v) -> pb.environment()[k] = v }
+                // 同 CliSubprocessDriver：GUI 启动的宿主只有最小 PATH，脚本型 CLI
+                // （`#!/usr/bin/env node`）会找不到解释器 → 127。env 显式给了 PATH 就不动它。
+                if (env["PATH"] == null) pb.environment()["PATH"] = CliDiscovery.childPath(pb.environment())
                 pb.redirectErrorStream(true)
                 val proc = pb.start()
+                // 同 CliSubprocessDriver：stdin 不关 = 一条永不 EOF 的管道，读 stdin 的
+                // CLI（codex）会在这里静默挂死。prompt 走 argv，不需要 stdin。
+                runCatching { proc.outputStream.close() }
                 running[taskId] = proc
                 // 读行不在当前线程上阻塞：子进程的输出由专用读线程灌进队列，本协程
                 // 每 ≤100ms 醒一次（poll 超时）做 `ensureActive()` —— 取消在百毫秒级
@@ -193,6 +199,10 @@ class WorktreeSandboxExecutor(
                     Outcome.Finished(harvest)
                 }
                 else -> {
+                    // 同一条纪律：非零退出也是一条**要看得见**的结局。CLI 起不来（账号/网络/
+                    // 配额）时这一支原来静默清理，外面只看到「没有产物」，分不清是没人干活
+                    // 还是干完了没收成 —— task.log 里才有真因（实测：上游 Bad Gateway）。
+                    note(logFile, "[sandbox] task $taskId failed: cli exit=$exitCode (cause in task.log)")
                     cleanupTask(taskId)
                     Outcome.Failed(exitCode, "cli exited with code $exitCode in sandbox")
                 }
@@ -241,6 +251,16 @@ class WorktreeSandboxExecutor(
         }
     }
 
+    /**
+     * 诊断行**同时**写进 `task.log`：桌面端被 `open`/GUI 拉起时 stdout 没有人接（实测
+     * `open --stdout` 不落盘），外部取证只剩产物目录。结论必须跟着产物走，否则同一句
+     * 「没有交付物」在不同启动方式下一个看得见、一个看不见。
+     */
+    private fun note(logFile: File, line: String) {
+        println(line)
+        runCatching { logFile.appendText(line + "\n") }
+    }
+
     /** `git diff HEAD` 提纯成 patch + report（两个文件 + 结构化摘要），写到产物目录。 */
     private fun harvestAndWrite(
         taskId: String,
@@ -252,14 +272,30 @@ class WorktreeSandboxExecutor(
         // CLI 新建的文件是 untracked —— 裸 `git diff` 看不见它们。worktree 是一次性
         // 工作面，先把一切 stage 进临时索引再取 stat 与 diff（两处都要在 add 之后，
         // 先 stat 后 add 会把统计读成全零 —— 提纯返回 null 的假空）。
-        git.run(listOf("add", "-A"), cwd = worktree)
+        val add = git.run(listOf("add", "-A"), cwd = worktree)
         val stat = git.run(listOf("diff", "--stat", "HEAD"), cwd = worktree)
         val patch = git.run(listOf("diff", "HEAD"), cwd = worktree)
         if (!patch.ok) {
+            // 这两条 null 分支原先**一行都不打** —— 「没有交付物」与「收割失败」在外部
+            // 完全同形，一次 16 分钟的真实执行因此无法归因（幕 4 实测踩到）。
+            note(
+                logFile,
+                "[sandbox] harvest $taskId: git diff HEAD failed exit=" + patch.exitCode +
+                    " stderr=" + patch.stderr.takeLast(300).replace("\n", " "),
+            )
             return null // 没有可 diff 的基线 = 没有交付物，如实为空（不是失败）。
         }
         val (files, adds, dels) = parseStat(stat.stdout)
-        if (files == 0 && adds == 0 && dels == 0) return null
+        if (files == 0 && adds == 0 && dels == 0) {
+            note(
+                logFile,
+                "[sandbox] harvest $taskId: nothing to harvest — add.exit=" + add.exitCode +
+                    " add.stderr=" + add.stderr.takeLast(200).replace("\n", " ") +
+                    " stat=" + stat.stdout.takeLast(200).replace("\n", " ") +
+                    " patchBytes=" + patch.stdout.length,
+            )
+            return null
+        }
         val patchFile = File(artifactsDir, "patch.diff").apply { writeText(patch.stdout) }
         val reportFile = File(artifactsDir, "report.json")
         val report: JsonObject = buildJsonObject {
@@ -276,6 +312,7 @@ class WorktreeSandboxExecutor(
             put("logSha256", JsonPrimitive(sha256Hex(logFile)))
         }
         reportFile.writeText(report.toString())
+        note(logFile, "[sandbox] harvest $taskId: +$adds -$dels in $files file(s), patch=${patchFile.length()} B")
         return Harvest(
             filesChanged = files,
             additions = adds,

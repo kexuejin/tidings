@@ -84,10 +84,22 @@ class CliSubprocessDriver(
                 val pb = ProcessBuilder(listOf(cliPath) + argSpec(prompt))
                 File(wsPath).takeIf { it.isDirectory }?.let { pb.directory(it) }
                 // T-3a：模型凭证注入（节点本地 → 子进程环境）。值绝不进日志/台账/报文。
+                // PATH 必须先补齐：GUI 启动的宿主只有最小 PATH，脚本型 CLI 会因为找不到
+                // 解释器直接 127（见 CliDiscovery.childPath）。envOverrides 在其后覆盖，
+                // 显式注入仍然赢。
+                pb.environment()["PATH"] = CliDiscovery.childPath(pb.environment())
                 envOverrides.forEach { (key, value) -> pb.environment()[key] = value }
                 // stderr 合并进 stdout：认不出的行会被 mapLine 如实跳过，同时避免双流对拷的死锁。
                 pb.redirectErrorStream(true)
                 val proc = pb.start()
+                // 子进程的 stdin 必须立刻关掉：ProcessBuilder 默认给一条管道，我们不往里
+                // 写也永不关闭，而**会读 stdin 的 CLI 会一直等 EOF**。codex 就是这种形态
+                // （`codex exec` 支持管道喂 prompt），实测不关时它只打一行
+                // 「Reading additional input from stdin...」就再无下文：连会话都不建、
+                // 占着 worktree 不放。prompt 已经在 argv 里，无需 stdin。
+                // 注：这条**只能真机验**——Gradle 测试进程给子进程的 stdin 已经是 EOF，
+                // 单测复现不出这个挂起（试过 cat/read 两种假 CLI，都是立刻返回）。
+                runCatching { proc.outputStream.close() }
                 proc.inputStream.bufferedReader().useLines { lines ->
                     for (line in lines) {
                         mapLine(line)?.let { onEvent(it) }
@@ -126,11 +138,42 @@ class CliSubprocessDriver(
             argSpec = { prompt -> listOf("-p", prompt, "--output-format", "stream-json", "--verbose") },
         )
 
+        /**
+         * codex 的命令行参数（两处装配共用，防漂）。
+         *
+         * `--sandbox workspace-write` 是必需的，不是可选优化：`codex exec` **默认
+         * read-only**，agent 连自己 worktree 里的文件都写不了，工具调用全部被拒
+         * （`writing is blocked by read-only sandbox`），于是每一次派单都「跑完了但
+         * 没有交付物」。写权限的边界由**本仓的 worktree 沙箱**决定（一次性 worktree +
+         * 分支，收割后无痕清理），codex 自己那层再设成只读等于让驱动报废。
+         */
+        fun codexArgs(prompt: String, env: Map<String, String> = System.getenv()): List<String> =
+            listOf("exec", "--json", "--sandbox", codexSandboxMode(env), prompt)
+
+        /**
+         * codex 自己的沙箱模式，默认 `workspace-write`。
+         *
+         * 唯一需要改的理由是**嵌不进**：宿主进程本身已经在 seatbelt 里跑时（例如集成测试
+         * 装置、或被别的沙箱包着启动），codex 再套一层会拿到
+         * `sandbox-exec: sandbox_apply: Operation not permitted`，于是它退化成一个连
+         * 自己 worktree 都写不了的只读会话 —— 派单永远是「跑完但没交付物」。
+         * 这种情况下把 `TIDINGS_CODEX_SANDBOX=danger-full-access` 显式打开，隔离边界
+         * 只剩本仓的一次性 worktree（一次性分支 + 收割后无痕清理）。
+         * 认不出的值一律回落默认，不猜、不静默放开。
+         */
+        fun codexSandboxMode(env: Map<String, String> = System.getenv()): String {
+            val raw = env["TIDINGS_CODEX_SANDBOX"]?.trim()
+            return when (raw) {
+                "read-only", "workspace-write", "danger-full-access" -> raw
+                else -> "workspace-write"
+            }
+        }
+
         fun codex(cliPath: String): CliSubprocessDriver = CliSubprocessDriver(
             driverId = "codex-cli",
             displayName = "Codex (CLI)",
             cliPath = cliPath,
-            argSpec = { prompt -> listOf("exec", "--json", prompt) },
+            argSpec = { prompt -> codexArgs(prompt) },
         )
     }
 }
@@ -179,7 +222,7 @@ fun cliDriverRegistrations(
                     driverId = "codex-cli",
                     displayName = "Codex (CLI)",
                     cliPath = codex,
-                    argSpec = { prompt -> listOf("exec", "--json", prompt) },
+                    argSpec = { prompt -> CliSubprocessDriver.codexArgs(prompt) },
                     sandbox = sandbox,
                 )
             } else {

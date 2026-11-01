@@ -57,6 +57,36 @@ object CliDiscovery {
         return dirs.distinct()
     }
 
+    /**
+     * 拉子进程时该给它的 `PATH`。
+     *
+     * 为什么不能直接继承宿主进程的 `PATH`：macOS 上从 Finder/Dock（LaunchServices）启动的
+     * app 只拿到最小 `PATH`（`/usr/bin:/bin:/usr/sbin:/sbin`）。而 CLI 经常是
+     * `#!/usr/bin/env node` 的脚本（codex 就是 `@openai/codex/bin/codex.js`），
+     * 于是**发现得到二进制、却拉不起来**：子进程以 127 退出，`env: node: No such file
+     * or directory`。实测就是这样：同一个 codex，从终端起宿主能跑，从 GUI 起宿主直接
+     * `cli exit=127`。
+     *
+     * 所以补三类目录：宿主现有 `PATH` + 发现器已用的公开约定目录 + **Node 版本管理器的
+     * bin**（nvm/volta/bun 与 homebrew 的 node 公式）。只留真实存在的目录，避免给子进程
+     * 塞一串死路径。
+     */
+    fun childPath(env: Map<String, String> = System.getenv()): String {
+        val dirs = mutableListOf<String>()
+        dirs.addAll(pathDirsOf(env))
+        val home = env["HOME"].orEmpty()
+        if (home.isNotBlank()) {
+            java.io.File(home, ".nvm/versions/node").listFiles()
+                ?.sortedByDescending { it.name }
+                ?.forEach { dirs.add(java.io.File(it, "bin").absolutePath) }
+            dirs.add(java.io.File(home, ".volta/bin").absolutePath)
+            dirs.add(java.io.File(home, ".bun/bin").absolutePath)
+        }
+        dirs.add("/opt/homebrew/opt/node/bin")
+        dirs.add("/usr/local/opt/node/bin")
+        return dirs.filter { it.isNotBlank() && File(it).isDirectory }.distinct().joinToString(":")
+    }
+
     /** 显式 env 指向的文件必须**可执行**才算数；否则按 PATH 逐目录找第一份可执行的。 */
     private fun resolve(explicit: String?, binaryName: String, pathDirs: List<String>): String? {
         explicit?.takeIf { it.isNotBlank() }?.let { path ->

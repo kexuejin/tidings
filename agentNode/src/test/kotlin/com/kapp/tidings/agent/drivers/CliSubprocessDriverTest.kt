@@ -67,6 +67,20 @@ class CliSubprocessDriverTest {
     }
 
     @Test
+    fun childPathAddsInterpreterDirsThatAGuiLaunchLacks() {
+        // GUI（LaunchServices）拉起的宿主只有最小 PATH，而 codex 是
+        // `#!/usr/bin/env node` 的脚本 —— 不补 node 的 bin，子进程直接 127。
+        val home = tempDir()
+        val nvmBin = java.io.File(home, ".nvm/versions/node/v20.1.0/bin").apply { mkdirs() }
+        val parts = CliDiscovery.childPath(
+            mapOf("PATH" to "/usr/bin:/bin", "HOME" to home.absolutePath),
+        ).split(":")
+        assertTrue(nvmBin.absolutePath in parts, "必须补上 nvm 的 node bin：$parts")
+        assertTrue("/usr/bin" in parts, "宿主原有 PATH 不能丢")
+        assertTrue(parts.none { it.isBlank() }, "不能塞空路径（等于把 cwd 放进 PATH）")
+    }
+
+    @Test
     fun nothingFoundIsNullNotAnException() {
         val empty = tempDir()
         assertEquals(null, CliDiscovery.resolveClaudeCli(env = emptyMap(), pathDirs = listOf(empty.absolutePath)))
@@ -107,6 +121,21 @@ class CliSubprocessDriverTest {
         driver.executeTask(handle.sessionId, "go") { events.add(it) }
         assertTrue(events.any { it is DriverEvent.Error }, "非零退出必须报 Error")
         assertTrue(events.none { it is DriverEvent.Finished }, "驱动诚信：没完成的活不许报 Finished")
+    }
+
+    @Test
+    fun codexSandboxModeDefaultsToWorkspaceWriteAndRejectsJunk() {
+        assertEquals("workspace-write", CliSubprocessDriver.codexSandboxMode(emptyMap()))
+        assertEquals(
+            "danger-full-access",
+            CliSubprocessDriver.codexSandboxMode(mapOf("TIDINGS_CODEX_SANDBOX" to "danger-full-access")),
+            "嵌不进沙箱的宿主需要一个显式逃生口",
+        )
+        assertEquals(
+            "workspace-write",
+            CliSubprocessDriver.codexSandboxMode(mapOf("TIDINGS_CODEX_SANDBOX" to "yes-please")),
+            "认不出的值不许静默放开权限",
+        )
     }
 
     @Test
