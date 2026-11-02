@@ -6,6 +6,7 @@ import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
+import androidx.compose.foundation.clickable
 import androidx.compose.ui.draw.clip
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -15,6 +16,7 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Icon
@@ -61,6 +63,7 @@ import com.kapp.tidings.generated.resources.card_details_hide
 import com.kapp.tidings.generated.resources.card_details_show
 import com.kapp.tidings.generated.resources.card_diff_summary
 import com.kapp.tidings.generated.resources.card_expired
+import com.kapp.tidings.generated.resources.card_option_recommended
 import com.kapp.tidings.generated.resources.card_action_abort
 import com.kapp.tidings.generated.resources.card_action_merge_patch
 import com.kapp.tidings.generated.resources.card_pending_confirm
@@ -701,7 +704,7 @@ fun AgentCardBubble(
                 CardArtifactRows(card.artifacts)
             }
             if (card.options.isNotEmpty()) {
-                CardOptionListRows(card, onAction)
+                CardOptionListRows(card, pendingActions, plan.actionsEnabled, onAction)
             }
             // 宿主判定的知情行（.decided{padding:6px 14px 10px}，11px on-2）：
             // 它不是按钮，是「这件事已被谁定了」的事实 —— 就算这个壳没有动作通路
@@ -1492,37 +1495,103 @@ private fun CardButtonGroupRow(
 }
 
 /**
- * 反向多选块（升级稿 ask_question，detailed-design §7.9）：预设选项**竖排全宽**，
- * 手机拇指一点即决策。推荐项实心 primary、其余描边（原型 .acts .pri-row 的
- * btn/pri 同一做法）；动作路由复用 onAction 槽 —— actionId = 选项文本，
- * 宿主/插件侧拿到确定性参数（§7.9 第 3 条「获得确定性参数后再开工」）。
+ * 预设选项块（升级稿 ask_question，detailed-design §7.9）→ **单选行**，不是按钮。
+ *
+ * 为什么不再画成按钮（真机真实用户反馈）：原型待选卡曾经是「推荐项 = 实心主按钮
+ * + 另两项描边按钮 + Approve & Develop 实心主按钮」，四个同一种视觉语言 ——
+ * 用户看到的是四个平级按钮，真相却是「三选一 + 一个确认」。
+ * 选型是**选择**不是**动作**：radio 行表达「从这几个里挑一个」，推荐项用角标说
+ * 「推荐」而不是用实心填充抢「主动作」的地位；实心主按钮只留给卡上唯一的确认
+ * 动作（如 Approve & Develop）。
+ * 动作路由不变：actionId = 选项文本（§7.9 第 3 条「获得确定性参数后再开工」）。
+ * 已判定/已提交的选择行照实亮起（与按钮组同一套 [cardActionUiOf] 锁态）。
  * 无动作通路时整块不画（与 ButtonGroup 同一条 DeadButtonGuard 纪律）。
  */
 @Composable
 private fun CardOptionListRows(
     card: AgentCardUi,
+    pendingActions: Set<String>,
+    actionsEnabled: Boolean,
     onAction: ((card: AgentCardUi, actionId: String) -> Unit)?,
 ) {
-    if (onAction == null) return  // 没有动作通路 = 点了没反应的按钮比没有更糟
-    Column(verticalArrangement = Arrangement.spacedBy(LocalAppSpacing.current.sm)) {
+    if (onAction == null) return  // 没有动作通路 = 点了没反应的选项比没有更糟
+    val sp = LocalAppSpacing.current
+    Column(verticalArrangement = Arrangement.spacedBy(sp.sm)) {
         card.options.forEach { option ->
-            if (option.recommended) {
-                AppButton(
+            val ui = cardActionUiOf(card, pendingActions, option.label)
+            val checked = ui.lock != CardActionLock.Editable
+            val shape = MaterialTheme.shapes.small
+            val borderStroke = BorderStroke(
+                1.dp,
+                if (checked) MaterialTheme.accents.agentAccent.copy(alpha = 0.45f)
+                else MaterialTheme.colorScheme.outline.copy(alpha = 0.16f),
+            )
+            Row(
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(sp.md10),
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .clip(shape)
+                    .background(
+                        if (checked) MaterialTheme.accents.agentAccent.copy(alpha = 0.10f)
+                        else SurfaceTiers.Raised,
+                        shape,
+                    )
+                    .border(borderStroke, shape)
+                    .clickable(enabled = actionsEnabled && !ui.disabled) {
+                        onAction(card, option.label)
+                    }
+                    .padding(horizontal = sp.lg14, vertical = sp.md),
+            ) {
+                OptionRadioDot(checked = checked)
+                Text(
                     text = option.label,
-                    onClick = { onAction(card, option.label) },
-                    size = AppButtonSize.Small,
-                    tone = AppButtonTone.Primary,
-                    modifier = Modifier.fillMaxWidth(),
+                    style = MaterialTheme.typography.bodyMedium,
+                    fontWeight = if (checked) FontWeight.SemiBold else FontWeight.Normal,
+                    color = MaterialTheme.colorScheme.onSurface,
+                    maxLines = 2,
+                    overflow = TextOverflow.Ellipsis,
+                    modifier = Modifier.weight(1f),
                 )
-            } else {
-                AppOutlinedButton(
-                    text = option.label,
-                    onClick = { onAction(card, option.label) },
-                    size = AppButtonSize.Small,
-                    tone = AppButtonTone.Neutral,
-                    modifier = Modifier.fillMaxWidth(),
-                )
+                if (option.recommended && !checked) {
+                    Text(
+                        text = stringResource(Res.string.card_option_recommended),
+                        style = MaterialTheme.typography.labelSmall,
+                        fontWeight = FontWeight.SemiBold,
+                        color = MaterialTheme.accents.agentAccentText,
+                        modifier = Modifier
+                            .background(
+                                MaterialTheme.accents.agentAccent.copy(alpha = 0.12f),
+                                RoundedCornerShape(sp.sm6),
+                            )
+                            .padding(horizontal = sp.sm, vertical = sp.xxs),
+                    )
+                }
             }
+        }
+    }
+}
+
+/** 单选行的 radio 圆点：Body 外圈，选中时 sm 实芯，颜色随选中态走 agentAccent。 */
+@Composable
+private fun OptionRadioDot(checked: Boolean) {
+    val sp = LocalAppSpacing.current
+    val ringColor =
+        if (checked) MaterialTheme.accents.agentAccent
+        else MaterialTheme.colorScheme.outline.copy(alpha = 0.4f)
+    val radioBorder = BorderStroke(sp.xxs, ringColor)
+    Box(
+        modifier = Modifier
+            .size(com.kapp.tidings.ui.theme.IconSizes.Body)
+            .border(radioBorder, CircleShape),
+        contentAlignment = Alignment.Center,
+    ) {
+        if (checked) {
+            Box(
+                modifier = Modifier
+                    .size(sp.sm)
+                    .background(MaterialTheme.accents.agentAccent, CircleShape),
+            )
         }
     }
 }

@@ -1769,6 +1769,8 @@
     <!-- 审批锁三态的后两态（§5.3）：本机乐观置灰后的等待说明，与宿主判定后的全员提示。 -->
     <string name="card_pending_confirm">已提交，等待宿主确认</string>
     <string name="card_decided_by">已由 %1$s 处理</string>
+    <!-- 选项块的推荐角标：选型是「选择」不是「动作」，推荐用文字说明而不用实心按钮抢主动作的地位。 -->
+    <string name="card_option_recommended">推荐</string>
     <string name="card_expired">已过期</string>
     <string name="card_waiting_host">等待机主处理</string>
     <string name="card_details_show">展开明细</string>
