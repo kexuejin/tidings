@@ -32,6 +32,12 @@ val mirrorFirst =
 dependencyResolutionManagement {
     repositoriesMode.set(RepositoriesMode.FAIL_ON_PROJECT_REPOS)
     repositories {
+        // luciola 本地验证：luciola 仓库 scripts/publish-maven-local.sh 之后，
+        // 设 LUCIOLA_LOCAL=1 让本仓优先解析 ~/.m2 里的 luciola-android/jvm
+        //（含未发布的 Rust 修复）。默认关闭 —— 不污染正常构建。
+        if (System.getenv("LUCIOLA_LOCAL") == "1") {
+            mavenLocal()
+        }
         if (mirrorFirst) {
             maven { url = uri("https://maven.aliyun.com/repository/google") }
             maven { url = uri("https://maven.aliyun.com/repository/public") }
