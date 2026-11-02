@@ -952,6 +952,9 @@ internal class DesktopExtension(
                     // 1. 编排器的登记簿 —— 发卡的那一刻就知道 patch 在哪（工单卡只此一条有效）；
                     // 2. 动作帧带的会话（插件转发路径，上游常常给 null）；
                     // 3. 控制面按会话台账反查卡片所属会话（历史路径，工单卡恒为 null）。
+                    // 合流驱动（Phase 4 任务 1）：编排器登记簿优先 —— 工单卡发卡那一刻
+                    // 就登记了（工作区, patch），git apply 只有真正跑完且退出码为 0
+                    // 才会有 Applied，decidedBy 合流卡只允许在 Applied 上发。
                     val ref = workerOrchestrator?.patchRefForCard(cardId)
                         ?: sessionId?.takeIf { it.isNotBlank() }
                             ?.let { sid ->
@@ -960,8 +963,11 @@ internal class DesktopExtension(
                                 }
                             }
                         ?: created.latestPatchRefForCard(cardId)
-                    val outcome = when (ref) {
-                        null -> DesktopPatchMerge.Outcome.Conflict("no sandbox patch recorded for card " + cardId)
+                    val outcome = when {
+                        ref == null ->
+                            DesktopPatchMerge.Outcome.Conflict("no sandbox patch recorded for card " + cardId)
+                        workerOrchestrator?.hasTicketForCard(cardId) == true ->
+                            workerOrchestrator.mergePatchByCard(cardId)
                         else -> DesktopPatchMerge.apply(patchPath = ref.patchPath, workspacePath = ref.workspacePath)
                     }
                     when (outcome) {
@@ -1115,6 +1121,20 @@ internal class DesktopExtension(
                         println("[RELAY-INVOKE] direction-ask had nothing pending (card $cardId)")
                         flipStaleChainCard(cardId, agentId)
                     }
+                } else if (actionId.startsWith("reject-revision")) {
+                    // 打回反向注水（Phase 4 任务 2）：反馈文本以 `reject-revision|<文本>`
+                    // 编码进 actionId（编码侧在 composeApp 卡片层），由编排器拆包注入
+                    // 下一轮自愈提示词。接不住（工单已收尾/不能重跑）时如实翻面，
+                    // 不假装接下了反馈。
+                    val rejected = workerOrchestrator?.rejectRevisionByCard(cardId, actionId) == true
+                    println(
+                        if (rejected) {
+                            "[RELAY-INVOKE] reject-revision consumed as hard constraint by $decidedBy (card $cardId)"
+                        } else {
+                            "[RELAY-INVOKE] reject-revision had nothing to revise (card $cardId)"
+                        },
+                    )
+                    if (!rejected) flipStaleChainCard(cardId, agentId)
                 } else if (actionId == "retry") {
                     // 受阻卡的 [重试]：由编排器把这张工单的开发/自愈循环重跑一遍。
                     // 必须排在 `followUpByCard` 之前 —— 否则 `retry` 会被当成一句用户

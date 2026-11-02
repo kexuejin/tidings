@@ -8,6 +8,7 @@ import com.kapp.tidings.agent.ChainStage
 import com.kapp.tidings.agent.ControlPlane
 import com.kapp.tidings.agent.SandboxPatchRef
 import com.kapp.tidings.agent.StageChain
+import com.kapp.tidings.core.nowMillis
 import com.kapp.tidings.core.protocol.ConvId
 import com.kapp.tidings.domain.RelayController
 import com.kapp.tidings.domain.RelayUiState
@@ -54,6 +55,9 @@ internal class DesktopWorkerOrchestrator(
         val patchPath: String? = null,
     )
 
+    /** Fail-Loud 检查项载荷：崩了就要给得出 observation 与可下钻的 drawer。 */
+    data class StageChainFailure(val observation: String, val drawer: String?)
+
     data class ActiveTicket(
         val ticketId: String,
         val convId: String,
@@ -82,6 +86,14 @@ internal class DesktopWorkerOrchestrator(
          * 「Refined prototype ready」，什么都没重试）。
          */
         @Volatile var devPrompt: String? = null,
+        /**
+         * 打回卡片上用户写的反馈文本（[RevisionFeedback] 解出来的）。
+         *
+         * 只为一件事存在：[retryByCard] 重跑自愈循环时，把它作为**硬约束前置**进
+         * 下一轮提示词（[WorkerPrompt.build]）—— 打回必须能变成下一轮的验收标准，
+         * 而不是一句聊过就丢的话。
+         */
+        @Volatile var userConstraints: String? = null,
         /** 终局一次性完成（成功/受阻/退单/中止/原型待选）；后续再 complete 是无操作。 */
         val done: CompletableDeferred<TicketOutcome> = CompletableDeferred(),
     )
@@ -385,6 +397,7 @@ internal class DesktopWorkerOrchestrator(
                     revCounter = active.rev,
                     defaultAgent = active.agentKey,
                     devPrompt = prompt,
+                    initialConstraints = active.userConstraints,
                 )
             } catch (e: CancellationException) {
                 active.done.complete(TicketOutcome("aborted", null, "aborted", null))
@@ -395,6 +408,80 @@ internal class DesktopWorkerOrchestrator(
             active.done.complete(outcome)
         }
         return true
+    }
+
+    /**
+     * 打回反向注水（Phase 4 任务 2）：打回卡上用户写的反馈文本，作为硬约束前置进
+     * 下一轮自愈提示词，重启沙箱重跑。
+     *
+     * 动作帧只有一个 actionId 字符串槽，反馈以 `[RevisionFeedback.PREFIX]<文本>`
+     * 编码进 actionId（编码侧在 composeApp 卡片层，两侧测试各钉一份）。拆出来的文本
+     * 存进 [ActiveTicket.userConstraints]，随后的重跑把每一轮提示词都用它前置 ——
+     * 打回不再是死胡同：人的判断变成下一轮的验收标准。
+     *
+     * 只有**活着且能重跑**的工单接得住打回：与 [retryByCard] 同判据（blocked 才有
+     * 可重跑的循环），否则返回 false 由调用方如实翻面，不假装接下了反馈。
+     */
+    internal fun rejectRevisionByCard(cardId: String, actionId: String): Boolean {
+        val feedback = RevisionFeedback.feedbackOf(actionId) ?: return false
+        val tid = cardId.removePrefix("chain-")
+        val active = activeTickets[tid] ?: activeTickets.values.firstOrNull { it.ticketId == tid } ?: return false
+        if (active.stage != "blocked") return false
+        val prompt = active.devPrompt ?: return false
+        active.userConstraints = feedback
+        active.stage = "working"
+        scope.launch {
+            publishTicketCard(
+                groupId = active.groupId,
+                ticketId = active.ticketId,
+                rev = active.rev.incrementAndGet(),
+                state = "working",
+                title = active.title,
+                banner = "Revising with your feedback as hard constraints: " + feedback.take(80),
+                percent = 40,
+                roleName = active.role,
+                agentId = active.agentKey,
+            )
+            val outcome = try {
+                runDevelopmentAndHealLoop(
+                    ticket = active,
+                    convId = active.convId,
+                    groupId = active.groupId,
+                    ticketId = active.ticketId,
+                    title = active.title,
+                    repoPath = active.repoPath,
+                    revCounter = active.rev,
+                    defaultAgent = active.agentKey,
+                    devPrompt = prompt,
+                    initialConstraints = feedback,
+                )
+            } catch (e: CancellationException) {
+                active.done.complete(TicketOutcome("aborted", null, "aborted", null))
+                throw e
+            } catch (t: Throwable) {
+                TicketOutcome("error", null, t.message ?: (t::class.simpleName ?: "revision failed"), null)
+            }
+            active.done.complete(outcome)
+        }
+        return true
+    }
+
+    /**
+     * 审批合流驱动（Phase 4 任务 1）：合并类动作的唯一宿主入口。
+     *
+     * 硬约束（计划书 §九.1 物理合流防伪造）：`decidedBy` 合流卡的落定**不可由前端
+     * 伪造** —— 只有 [DesktopPatchMerge.apply] 真的跑完 `git apply` 且子进程退出码
+     * 为 0（返回 [DesktopPatchMerge.Outcome.Applied]），调用方才允许下发 rev+1 的
+     * decidedBy 翻面卡；冲突/缺账如实返回 Conflict，调用方发失败卡，**不许**把
+     * 冲突包装成已合并。
+     *
+     * 登记簿优先：工单卡在发 review_ready 的那一刻就登记了（工作区, patch），
+     * 不靠会话台账反推（工单卡从不写台账，反查恒为 null —— 真机实锤过的缺陷）。
+     */
+    internal fun mergePatchByCard(cardId: String): DesktopPatchMerge.Outcome {
+        val ref = patchRefForCard(cardId)
+            ?: return DesktopPatchMerge.Outcome.Conflict("no sandbox patch recorded for card " + cardId)
+        return DesktopPatchMerge.apply(patchPath = ref.patchPath, workspacePath = ref.workspacePath)
     }
 
     internal fun followUpByCard(cardId: String, text: String): Boolean {
@@ -637,7 +724,33 @@ internal class DesktopWorkerOrchestrator(
                 done.complete(TicketOutcome("aborted", null, "aborted", null))
                 throw e
             } catch (t: Throwable) {
-                done.complete(TicketOutcome("error", null, t.message ?: (t::class.simpleName ?: "task failed"), null))
+                // Fail-Loud（任务 5）：执行体抛了 = 工单既没成功也没被收尾 —— 立刻把
+                // state=failed 红卡发出去（stderr 尾部进抽屉），严禁让卡挂在 running。
+                // 先 complete 终局、后发卡：invoke 桥不等网络，等它的是人。
+                val drawer = CrashReport.drawerOf(t)
+                val failedJson = ticketCardJson(
+                    ticketId = ticketId,
+                    rev = revCounter.incrementAndGet(),
+                    state = "failed",
+                    title = title,
+                    banner = "Worker crashed: " + (t.message ?: (t::class.simpleName ?: "crash")),
+                    percent = 40,
+                    roleName = ticket.role,
+                )
+                scope.launch {
+                    publishCardJson(
+                        groupId,
+                        OrchestratorCards.withFailureCheck(
+                            runCatching {
+                                kotlinx.serialization.json.Json.parseToJsonElement(failedJson) as kotlinx.serialization.json.JsonObject
+                            }.getOrDefault(kotlinx.serialization.json.JsonObject(emptyMap())),
+                            observation = t.message ?: (t::class.simpleName ?: "crash"),
+                            drawer = drawer,
+                        ).toString(),
+                        defaultAgent,
+                    )
+                }
+                done.complete(TicketOutcome("failed", null, t.message ?: (t::class.simpleName ?: "task failed"), failedJson))
                 throw t
             }
             done.complete(outcome)
@@ -697,6 +810,9 @@ internal class DesktopWorkerOrchestrator(
      * 点将交互的意义就在这几秒里，掐得太紧它就只剩装饰。 */
     private companion object {
         const val TEAM_COUNTDOWN_MS = 8_000L
+
+        /** 看门狗轮询周期：判定的粒度上限（真判定用注入时钟，周期只影响响应延迟）。 */
+        const val WATCHDOG_POLL_MS = 1_000L
     }
 
     /**
@@ -1008,6 +1124,8 @@ internal class DesktopWorkerOrchestrator(
         revCounter: AtomicInteger,
         defaultAgent: String,
         devPrompt: String,
+        /** 打回注水（任务 2）：上一轮被退回时用户写的硬约束，进**每一轮**提示词前置。 */
+        initialConstraints: String? = null,
     ): TicketOutcome {
         val host = planeProvider()
             ?: return TicketOutcome("error", null, "control plane unavailable", null)
@@ -1024,8 +1142,7 @@ internal class DesktopWorkerOrchestrator(
             agentId = defaultAgent,
         )
 
-        val containedPrompt = "You are working strictly inside the current workspace repository directory. " +
-            "Do NOT inspect, search, or read files outside this repository directory.\n\n" + devPrompt
+        val containedPrompt = WorkerPrompt.build(devPrompt, initialConstraints)
 
         val maxHealRounds = 3
         var healRound = 0
@@ -1042,48 +1159,126 @@ internal class DesktopWorkerOrchestrator(
             healRound++
             patchPath = null
             said = StringBuilder()
-            val (_, status, error) = host.executeCliTask(
-                agentKey = defaultAgent,
-                prompt = currentPrompt,
-                wsPath = repoPath,
-                requestedSessionId = null,
-                // 会话标题用工单标题：prompt 首行是系统前导（containment preamble），
-                // 从 prompt 截标题就会把整句英文 plumbing 摆上 divider。
-                sessionTitle = title,
-                onArtifact = { path, name, _, _, _ -> if (name == "patch.diff") patchPath = path },
-                onEvent = { eventType, _, summary, body ->
-                    // **只累「人话」。** 其余事件的 body 都不是给人读的：
-                    // `card` 是卡片 JSON（原样贴进卡面就是把 `{"cardId":…}` 摊给用户）、
-                    // `artifact` 是路径/SHA 对账、`tool.started` 是调用参数、
-                    // `error` 是英文诊断。从前用的是黑名单（只排 finished/heartbeat/
-                    // artifact），于是最后落进摘要的总是那张卡片 JSON。
-                    if (eventType == "thought.delta" || eventType == "token.delta") {
-                        val chunk = body ?: summary
-                        if (!chunk.isNullOrBlank()) said.append(chunk)
+            // 每轮一套新鲜的看门狗与心跳：租约从本轮第一次事件重新起算。
+            val watchdog = SandboxIdleWatchdog(clock = { nowMillis() })
+            val emitter = HeartbeatEmitter()
+            var lastTool: String? = null
+            var watchdogJob: Job? = null
+            // 熔断标志（任务 4）：FORCE_KILL 档把它立起来，executeCliTask 返回后本工单
+            // 不再走普通失败路径 —— 发 state=timeout 卡并把该轮如实记为看门狗止损。
+            var circuitBroken = false
+            try {
+                watchdogJob = scope.launch {
+                    while (true) {
+                        delay(WATCHDOG_POLL_MS)
+                        when (watchdog.poll()) {
+                            SandboxIdleWatchdog.Verdict.OBSERVE -> Unit
+                            SandboxIdleWatchdog.Verdict.TERMINATE -> {
+                                // 死人开关第一档：先 SIGTERM（沙箱 abort 自带
+                                // TERM → 宽限 → SIGKILL 的树级升级）。此刻起再次有
+                                // 输出仍会把租约复位（feed），进程自己缓过来不算事故。
+                                val killed = runCatching { host.abortRunningSandboxes() }.getOrDefault(0)
+                                println(
+                                    "[ORCHESTRATOR] watchdog idle lease tripped (ticket " + ticketId +
+                                        ", round " + healRound + "): sandboxes terminated=" + killed,
+                                )
+                            }
+                            SandboxIdleWatchdog.Verdict.FORCE_KILL -> {
+                                // 熔断（任务 4）：租约与宽限都过了还没推进 —— 发
+                                // state=timeout 卡（释放 worktree/文件锁已由沙箱 abort
+                                // 的无痕清理承担），工单如实收尾，绝不挂在 running。
+                                circuitBroken = true
+                                runCatching { host.abortRunningSandboxes() }
+                                println("[ORCHESTRATOR] watchdog circuit breaker tripped (ticket " + ticketId + ")")
+                                val timeoutJson = OrchestratorCards.timeoutCardJson(
+                                    ticketId = ticketId,
+                                    rev = revCounter.incrementAndGet(),
+                                    title = title,
+                                    banner = "Watchdog: no worker output for " +
+                                        (watchdog.idleTimeoutMs / 1000) + "s — sandbox killed, " +
+                                        "worktree released. Retry to run it again.",
+                                    roleName = ticket.role,
+                                )
+                                if (groupId != null) {
+                                    publishCardJson(groupId, timeoutJson, defaultAgent)
+                                }
+                                break
+                            }
+                        }
                     }
-                },
-            )
-            if (status == "finished" && patchPath != null) {
-                executionError = null
-                break
-            }
-            val roundError = error
-                ?: (if (patchPath == null) "No patch produced by worker" else "Execution ended in $status")
-            executionError = roundError
-            roundErrors += roundError
-            if (healRound < maxHealRounds) {
-                publishTicketCard(
-                    groupId = groupId,
-                    ticketId = ticketId,
-                    rev = revCounter.incrementAndGet(),
-                    state = "working",
-                    title = title,
-                    banner = "Heal loop $healRound/$maxHealRounds: fixing issues ($executionError)...",
-                    percent = 40 + healRound * 15,
-                    roleName = ticket.role,
-                    agentId = defaultAgent,
+                }
+                val (_, status, error) = host.executeCliTask(
+                    agentKey = defaultAgent,
+                    prompt = currentPrompt,
+                    wsPath = repoPath,
+                    requestedSessionId = null,
+                    // 会话标题用工单标题：prompt 首行是系统前导（containment preamble），
+                    // 从 prompt 截标题就会把整句英文 plumbing 摆上 divider。
+                    sessionTitle = title,
+                    onArtifact = { path, name, _, _, _ -> if (name == "patch.diff") patchPath = path },
+                    onEvent = { eventType, _, summary, body ->
+                        // 生命迹象：驱动事件 = 子进程输出管道来了新字节。看门狗 feed 在
+                        // **每一个**事件上发生 —— 它判的是 I/O 空闲，不是事件语义。
+                        watchdog.feed()
+                        // 心跳探针（任务 3）：tool.started 携带当前子动作；发射器内部
+                        // 节流（无变化不发 + 最小间隔），返回 null 就不发帧。
+                        if (eventType == "tool.started") {
+                            lastTool = summary ?: lastTool
+                            val beat = emitter.note(summary, body?.take(120))
+                            if (beat != null && groupId != null) {
+                                val beatJson = OrchestratorCards.heartbeatCardJson(
+                                    ticketId = ticketId,
+                                    rev = revCounter.incrementAndGet(),
+                                    title = title,
+                                    roleName = ticket.role,
+                                    beat = beat,
+                                )
+                                scope.launch { publishCardJson(groupId, beatJson, defaultAgent) }
+                            }
+                        }
+                        // **只累「人话」。** 其余事件的 body 都不是给人读的：
+                        // `card` 是卡片 JSON（原样贴进卡面就是把 `{"cardId":…}` 摊给用户）、
+                        // `artifact` 是路径/SHA 对账、`tool.started` 是调用参数、
+                        // `error` 是英文诊断。从前用的是黑名单（只排 finished/heartbeat/
+                        // artifact），于是最后落进摘要的总是那张卡片 JSON。
+                        if (eventType == "thought.delta" || eventType == "token.delta") {
+                            val chunk = body ?: summary
+                            if (!chunk.isNullOrBlank()) said.append(chunk)
+                        }
+                    },
                 )
-                currentPrompt = "Previous attempt failed: $executionError. Please inspect tests and workspace, fix all issues, and ensure npm test passes."
+                if (circuitBroken) {
+                    // 看门狗熔断后的该轮：不是普通失败。超时卡已经发过（FORCE_KILL 档），
+                    // 这里只把工单如实收尾 —— 阻塞态 + 看门狗因由，下一轮提示词不再硬跑。
+                    executionError = "watchdog: no worker output for " + (watchdog.idleTimeoutMs / 1000) +
+                        "s — process killed, worktree released"
+                    roundErrors += executionError
+                    break
+                }
+                if (status == "finished" && patchPath != null) {
+                    executionError = null
+                    break
+                }
+                val roundError = error
+                    ?: (if (patchPath == null) "No patch produced by worker" else "Execution ended in $status")
+                executionError = roundError
+                roundErrors += roundError
+                if (healRound < maxHealRounds) {
+                    publishTicketCard(
+                        groupId = groupId,
+                        ticketId = ticketId,
+                        rev = revCounter.incrementAndGet(),
+                        state = "working",
+                        title = title,
+                        banner = "Heal loop $healRound/$maxHealRounds: fixing issues ($executionError)...",
+                        percent = 40 + healRound * 15,
+                        roleName = ticket.role,
+                        agentId = defaultAgent,
+                    )
+                    currentPrompt = "Previous attempt failed: $executionError. Please inspect tests and workspace, fix all issues, and ensure npm test passes."
+                }
+            } finally {
+                watchdogJob?.cancel()
             }
         }
 
@@ -1093,6 +1288,9 @@ internal class DesktopWorkerOrchestrator(
             // 只报末轮会让人去查「为什么没交产物」，而真正的原因是第一轮就挂了。
             val blockedBanner = HealReport.bannerOf(roundErrors, maxHealRounds)
                 ?: "Handed back: exceeded max heal rounds ($maxHealRounds) — $executionError"
+            // Fail-Loud（Phase 4 任务 5）：崩溃不是终局横幅一句话的事 —— 子进程非 0
+            // 退出的现场（驱动事件里攒下的输出尾部）必须进 checks 抽屉，让人能下钻
+            // 看 stderr，而不是对着一句 "cli exited with code 1" 猜。
             val blockedJson = publishTicketCard(
                 groupId = groupId,
                 ticketId = ticketId,
@@ -1103,6 +1301,10 @@ internal class DesktopWorkerOrchestrator(
                 percent = 40,
                 roleName = ticket.role,
                 agentId = defaultAgent,
+                failure = StageChainFailure(
+                    observation = executionError,
+                    drawer = CrashReport.drawerOf(said.toString()) ?: CrashReport.drawerOf(executionError),
+                ),
             )
             return TicketOutcome("blocked", null, blockedBanner, blockedJson)
         }
@@ -1207,6 +1409,8 @@ internal class DesktopWorkerOrchestrator(
         stageRows: List<Pair<String, String>>? = null,
         /** 与 [stageRows] 平行的承办人名单（roster），一棒一个。 */
         assignees: List<String> = emptyList(),
+        /** Fail-Loud 现场（非空 = 卡上多一条带 observation/drawer 的 failed 检查项）。 */
+        failure: StageChainFailure? = null,
     ): String? {
         if (groupId == null) return null
         val progress = ChainProgress(
@@ -1223,7 +1427,12 @@ internal class DesktopWorkerOrchestrator(
             artifacts = artifacts,
             diff = diff,
         )
-        val json = StageChain.cardJsonOf(progress)
+        val baseCard: kotlinx.serialization.json.JsonObject = StageChain.cardOf(progress)
+        val json: String = if (failure == null) {
+            StageChain.cardJsonOf(progress)
+        } else {
+            OrchestratorCards.withFailureCheck(baseCard, failure.observation, failure.drawer).toString()
+        }
         publishCardJson(groupId, json, agentId)
         return json
     }
