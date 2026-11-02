@@ -1113,8 +1113,27 @@ claude done / codex done        +261 −0 / 2 个文件
 新增 `AbortSignalsTest.exactSignalIsTheWholeMessage` / `suffixedOrPaddedTextIsNotExact`
 （2 条，守住「整条相等才算」这条线）。
 
-**读数**：`:app:jvmTest` **773 tests / 0 fail**（108 suites）；
+**读数**：`:app:jvmTest` **775 tests / 0 fail**（109 suites；773 + 接收侧 2 条）；
 `:desktopApp:test` **240 tests / 0 fail**（48 suites，238 → 240 是上面那 2 条）。
+
+#### 其他设备端：接收侧的判据（原来只有代码，没有判据）
+
+用户那句问话的后半截是「包括其他设备端」。发送侧（本机点合并）与接收侧（别人点合并）
+是两条路径：前者 `broadcastBoardCard` 先落库再发帧；后者走 `handleOnInbound` 的
+**入站拦截**，按 `cardId` 找槽位、按 `rev` 判新旧。这条拦截一直是对的，但**没有判据**
+—— 读代码能确认，跑测试确认不了。
+
+新增 `BoardCardRemoteFlipTest`（2 条），钉住两条不变量：
+
+| 不变量 | 破了会怎样 |
+|---|---|
+| 同 `cardId` ⇒ **原位替换** | 一个任务在群里变成两张卡 |
+| `rev` 不更大 ⇒ **丢弃**（连追加一起丢） | 网络乱序/重放时旧帧把 `merged` 盖回 `review_ready`，用户以为补丁又没了；若只跳替换、落到追加路径，则像「又发了一次合并请求」 |
+
+第二条用探针反证过：把 `if (rev > existingRev)` 临时改成 `if (true || …)`，
+`aStaleFrameDoesNotRollTheCardBack` 立刻变红，报
+`旧帧不能把状态盖回去（乱序/重放时状态只许前进） expected:<[merged]> but was:<[review_ready]>`；
+改回即绿。
 
 #### 顺带记清 D6 还没修
 
