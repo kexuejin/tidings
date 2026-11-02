@@ -2,11 +2,19 @@
 
 package com.kapp.tidings.agent
 
+import com.kapp.tidings.core.protocol.Limits
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.async
+import kotlinx.coroutines.awaitAll
+import kotlinx.coroutines.coroutineScope
+import kotlinx.coroutines.sync.Semaphore
+import kotlinx.coroutines.sync.withPermit
 import kotlinx.serialization.json.JsonArray
 import kotlinx.serialization.json.JsonElement
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.JsonPrimitive
 import kotlinx.serialization.json.add
+import kotlinx.serialization.json.booleanOrNull
 import kotlinx.serialization.json.buildJsonArray
 import kotlinx.serialization.json.buildJsonObject
 import kotlinx.serialization.json.contentOrNull
@@ -45,6 +53,14 @@ data class ChainStage(
     val agentKey: String,
     /** 本棒要干的活。业务指令，不含交接仪式（交接由 [StageChain.promptOf] 统一拼）。 */
     val instruction: String,
+    /**
+     * Supervisor 拆解标记：这棒要求独立 worktree 沙箱、可与相邻的隔离棒并行开工。
+     *
+     * 它是**调度属性**，不是传输协议字段 —— 不碰帧白名单；进卡 JSON 时走宽松读取
+     * （[StageChain.requiresIsolationOf]），老卡没有这个键就是 false，零影响。
+     * 连续多根 true 的棒由 [StageChainRunner] 并行分发，非隔离棒维持顺序依赖链。
+     */
+    val requiresIsolation: Boolean = false,
 )
 
 /** 一棒的起点事实：上一棒停在哪、它说了什么、产物指针在哪。 */
@@ -98,6 +114,20 @@ data class ChainProgress(
      * 不能因为加字段而逐个翻新。
      */
     val assignees: List<String> = emptyList(),
+    /**
+     * Reviewer 审计结论（合流卡专用）：每棒两条（语法规范/白名单键）+ 卡级一条（帧预算）。
+     * 形状与手机端 parseAgentCard 的 checks[] 契约一字不差 —— status 用棒级词表
+     * （done/failed/pending），SKIP 借 pending 承载并在观察语里写明原因（缺输入不是通过）。
+     */
+    val checks: List<ChainCheck> = emptyList(),
+)
+
+/** 合流卡上的一条审计结论（与手机端 checks[] 解析契约同形）。 */
+data class ChainCheck(
+    val id: String,
+    val label: String,
+    val status: String,
+    val observation: String? = null,
 )
 
 object StageChain {
@@ -109,6 +139,26 @@ object StageChain {
     const val TRUNCATION_MARKER = " …（上游摘要已截断）"
 
     /**
+     * 隔离棒并行分发的并发上限：防一张派单一口气开满宿主 CPU。可测 ——
+     * [StageChainRunner] 允许注入更小的值来钉住上限语义。
+     */
+    const val PARALLEL_MAX = 4
+
+    /**
+     * 派单文本里的隔离标记：命中的棒要求独立沙箱。写在任务书任何位置都认、并从任务书里
+     * 摘掉 —— 标记只归调度，不混进交给棒的任务书。
+     */
+    val ISOLATION_MARKER = Regex("""\[iso(lated)?\]""", RegexOption.IGNORE_CASE)
+
+    /**
+     * 卡片 items 的宽松读取：requiresIsolation 缺失、畸形、非布尔一律 false ——
+     * 老卡零影响。这是宿主装配侧从卡片读拆解标记的唯一入口（帧白名单不收这个键，
+     * 它只活在已经解出的卡 JSON 里）。
+     */
+    fun requiresIsolationOf(item: JsonObject?): Boolean =
+        (item?.get("requiresIsolation") as? JsonPrimitive)?.booleanOrNull ?: false
+
+    /**
      * 拼一棒的 prompt。
      *
      * **只吃 [StageSeed]，不吃上一棒的原始输出** —— 这是 §7.7 唯一真正的约束，
@@ -116,6 +166,9 @@ object StageChain {
      */
     fun promptOf(stage: ChainStage, seed: StageSeed): String = buildString {
         appendLine("你是一条多智能体责任链上的「${stage.role}」这一棒。只做本棒的事，不要越到下一棒。")
+        if (stage.requiresIsolation) {
+            appendLine("- 本棒标记了隔离执行：全部改动只能落在本棒的独立 worktree 沙箱里，绝不写宿主工作树。")
+        }
         appendLine()
         appendLine("## 起点")
         appendLine("- 仓库（就是当前工作目录）：" + seed.repoPath)
@@ -187,6 +240,18 @@ object StageChain {
                 })
             }
         })
+        if (progress.checks.isNotEmpty()) {
+            put("checks", buildJsonArray {
+                progress.checks.forEach { check ->
+                    add(buildJsonObject {
+                        put("id", check.id)
+                        put("label", check.label)
+                        put("status", check.status)
+                        check.observation?.takeIf { it.isNotBlank() }?.let { put("observation", it) }
+                    })
+                }
+            })
+        }
         progress.banner?.let { text ->
             putJsonObject("banner") {
                 put("text", text)
@@ -377,11 +442,28 @@ object StageChain {
         val rolePattern = Regex("""^([^\s:()\uff1a]+)(?:\(([^()]+)\))?[:\uff1a]\s*(.+)$""")
         val matched = lines.mapNotNull { line ->
             val match = rolePattern.find(line) ?: return@mapNotNull null
-            val role = match.groupValues[1].trim()
+            // 标记可以贴在棒名上（开发[iso]: …）也可以落在任务书里（… [iso] …），
+            // 两处都认、都摘掉 —— 派单人写哪边都不该改变语义。
+            val rawRole = match.groupValues[1].trim()
+            val isolatedInRole = ISOLATION_MARKER.containsMatchIn(rawRole)
+            val role = if (isolatedInRole) {
+                rawRole.replace(ISOLATION_MARKER, " ").replace(Regex("\\s+"), " ").trim()
+            } else {
+                rawRole
+            }
             val explicitKey = match.groupValues[2].trim().takeIf { it.isNotEmpty() }
-            val instruction = match.groupValues[3].trim()
+            val rawInstruction = match.groupValues[3].trim()
+            val isolatedInInstruction = ISOLATION_MARKER.containsMatchIn(rawInstruction)
+            val isolated = isolatedInRole || isolatedInInstruction
+            // 标记从任务书里摘掉（只在真带了标记时才重排空白，老文本一字不动）。
+            val instruction = if (isolatedInInstruction) {
+                rawInstruction.replace(ISOLATION_MARKER, " ").replace(Regex("\\s+"), " ").trim()
+            } else {
+                rawInstruction
+            }
             if (role.isEmpty() || instruction.isEmpty()) null
-            else ChainStage(role = role, agentKey = explicitKey ?: defaultKey, instruction = instruction)
+            else ChainStage(role = role, agentKey = explicitKey ?: defaultKey,
+                instruction = instruction, requiresIsolation = isolated)
         }
         return if (matched.size >= 2) matched else emptyList()
     }
@@ -537,6 +619,13 @@ class StageChainRunner(
      */
     private val land: suspend (repoPath: String, run: StageRun, message: String) -> String?,
     private val report: suspend (ChainProgress) -> Unit = {},
+    /**
+     * Reviewer 白名单键审计的取值域清单（宿主装配注入）。null = 宿主没有清单可对照
+     * ⇒ 该判据如实 SKIP（缺输入不是通过，但也不冒充失败）。
+     */
+    private val valueDomains: List<ReviewerAudit.ValueDomain>? = null,
+    /** 隔离棒并行分发的并发上限（防一张派单开满宿主 CPU）；测试注入更小值钉住语义。 */
+    private val parallelLimit: Int = StageChain.PARALLEL_MAX,
 ) {
 
     suspend fun run(
@@ -561,14 +650,86 @@ class StageChainRunner(
         var prevSummary: String? = null
         var prevArtifacts: List<String> = emptyList()
         val done = mutableListOf<StageRun>()
+        // 审计要按棒对账（哪根棒的 patch 犯了哪条判据），执行完的棒与棒定义成对留存。
+        val executed = mutableListOf<Pair<ChainStage, StageRun>>()
 
-        for ((index, stage) in stages.withIndex()) {
+        var index = 0
+        while (index < stages.size) {
+            if (stages[index].requiresIsolation) {
+                // —— 隔离组：连续多根 requiresIsolation=true 的棒 ——
+                // 同一基线并行开工（每根棒由驱动侧的 worktree 沙箱各给一个实例），
+                // 全部完成才按棒序落盘、才进下一棒。非隔离棒的顺序依赖链不动。
+                var end = index
+                while (end < stages.size && stages[end].requiresIsolation) end++
+                val group = index until end
+                group.forEach { i -> statuses[i] = stages[i].role to "running" }
+                report(ChainProgress(chainId, ++rev, "executing", title,
+                    if (group.count() == 1) stages[index].role else null, statuses.toList(),
+                    percentOf(index, stages.size),
+                    if (group.count() == 1) {
+                        stages[index].role + " 开跑（第 " + (index + 1) + "/" + stages.size + " 棒）"
+                    } else {
+                        "第 " + (index + 1) + "–" + end + " 棒（隔离组 " + group.count() + " 根）并行开跑"
+                    }))
+
+                val permits = Semaphore(parallelLimit.coerceAtLeast(1))
+                val seed = StageSeed(cursor, repoPath, prevSummary, prevArtifacts)
+                // async 默认继承 runBlocking 的单线程事件循环：不真正让出就退化成
+                // 顺序执行（峰值=1、区间相离的假并行）。显式上 Default：隔离棒的执行
+                // 本来就是另一条工作线程上的事，测试与生产同一条代码路径。
+                val runs: List<StageRun> = coroutineScope {
+                    group.map { i ->
+                        async(Dispatchers.Default) {
+                            permits.withPermit {
+                                runStage(stages[i], StageChain.promptOf(stages[i], seed), repoPath)
+                            }
+                        }
+                    }.awaitAll()
+                }
+                runs.forEachIndexed { k, r ->
+                    val i = group.first + k
+                    statuses[i] = stages[i].role to (if (r.ok) "done" else "failed")
+                }
+                executed += group.map { stages[it] }.zip(runs)
+                // 全部完成才判停：任一棒失败 ⇒ 整组不落盘、不进下一棒。部分合入比不合入
+                // 更难对账（「哪半个改动是谁的」变成悬案），fail-stop 保持整组原子。
+                val firstFailure = runs.indexOfFirst { !it.ok }
+                if (firstFailure >= 0) {
+                    val failIndex = group.first + firstFailure
+                    report(ChainProgress(chainId, ++rev, "blocked", title, stages[failIndex].role,
+                        statuses.toList(), percentOf(failIndex, stages.size),
+                        "第 " + (failIndex + 1) + " 棒失败，链条已停：" + (runs[firstFailure].error ?: "原因未报")))
+                    done += runs
+                    return done
+                }
+                // 按棒序串行落盘：宿主仓的 git 是共享面，不能并发 apply。
+                group.forEachIndexed { k, i ->
+                    val stage = stages[i]
+                    val run = runs[k]
+                    val summary = StageChain.summarize(run.summary)
+                    val sha = land(repoPath, run.copy(summary = summary),
+                        commitMessageOf(chainId, i, stages.size, stage, summary))
+                    done += run.copy(summary = summary, sha = sha)
+                    if (sha != null) cursor = sha
+                    report(ChainProgress(chainId, ++rev, "executing", title, stage.role, statuses.toList(),
+                        percentOf(i + 1, stages.size),
+                        stage.role + " 完成" + (if (sha == null) "（无改动）" else "（提交 " + sha.take(8) + "）")))
+                }
+                prevSummary = runs.mapNotNull { StageChain.summarize(it.summary) }.joinToString("；")
+                prevArtifacts = runs.mapNotNull { it.patchPath }
+                index = end
+                continue
+            }
+
+            // —— 非隔离棒：维持原顺序依赖链 ——
+            val stage = stages[index]
             statuses[index] = stage.role to "running"
             report(ChainProgress(chainId, ++rev, "executing", title, stage.role, statuses.toList(),
                 percentOf(index, stages.size), stage.role + " 开跑（第 " + (index + 1) + "/" + stages.size + " 棒）"))
 
             val prompt = StageChain.promptOf(stage, StageSeed(cursor, repoPath, prevSummary, prevArtifacts))
             val run = runStage(stage, prompt, repoPath)
+            executed += stage to run
             if (!run.ok) {
                 // 停机而不是跳过：一棒失败还继续跑，产出的「全绿」是假的。
                 statuses[index] = stage.role to "failed"
@@ -588,10 +749,50 @@ class StageChainRunner(
             report(ChainProgress(chainId, ++rev, "executing", title, stage.role, statuses.toList(),
                 percentOf(index + 1, stages.size),
                 stage.role + " 完成" + (if (sha == null) "（无改动）" else "（提交 " + sha.take(8) + "）")))
+            index += 1
         }
 
-        report(ChainProgress(chainId, ++rev, "review_ready", title, stages.last().role, statuses.toList(),
-            100, "全部 " + stages.size + " 棒完成，等待机主终审"))
+        // —— Reviewer 三项审计：全部执行棒完成、验收棒合流前（fail-closed）——
+        // a) 语法规范 + b) 白名单键按棒判定；c) 帧预算对**合流卡整体**判定。
+        val auditChecks = ReviewerAudit.checksFor(executed, valueDomains)
+        val readyBanner = "全部 " + stages.size + " 棒完成，等待机主终审"
+        // 量测自指：checks[] 里写下的量值本身会改变卡的字节数 —— 迭代到量值稳定
+        // （位数不变即收敛），让「合流卡实测 N B」里的 N 就是发出的那张卡自己的字节数，
+        // 不存在「量的是一张卡、发的是另一张」。
+        var measured = 0
+        var readyJson = ""
+        repeat(3) {
+            readyJson = StageChain.cardJsonOf(
+                ChainProgress(chainId, rev + 1, "review_ready", title, stages.last().role,
+                    statuses.toList(), 100, readyBanner,
+                    checks = auditChecks + ReviewerAudit.budgetCheck(measured)),
+            )
+            measured = readyJson.toByteArray(Charsets.UTF_8).size
+        }
+        val budgetFailed = ChainCheck("budget", "帧预算 ≤ " + Limits.CARD_BYTES + " B", ReviewerAudit.FAILED,
+            ReviewerAudit.budgetFailureOf(readyJson) ?: "")
+        val failedCheck = if (budgetFailed.observation!!.isNotEmpty()) budgetFailed
+            else auditChecks.firstOrNull { it.status == ReviewerAudit.FAILED }
+        if (failedCheck != null) {
+            val full = ChainProgress(chainId, rev + 1, "blocked", title, stages.last().role,
+                statuses.toList(), 100, "审计未通过，停止合流：" + failedCheck.observation.orEmpty(),
+                checks = auditChecks + budgetFailed)
+            if (StageChain.cardOf(full).toString().toByteArray(Charsets.UTF_8).size <= Limits.CARD_BYTES) {
+                rev++
+                report(full)
+            } else {
+                // 卡本体已经超预算（典型：棒名或棒数把看板撑爆）：完整 blocked 卡对端会
+                // 整帧拒收。发一张最小卡如实说「看板承载不下」—— 比静默丢卡强。
+                rev++
+                report(ChainProgress(chainId, rev, "blocked", title, null,
+                    listOf("合并看板" to "blocked"), 100,
+                    "审计未通过（合流卡超出帧预算，完整看板无法入卡）——已停止合流"))
+            }
+            return done
+        }
+        rev++
+        report(ChainProgress(chainId, rev, "review_ready", title, stages.last().role,
+            statuses.toList(), 100, readyBanner, checks = auditChecks + ReviewerAudit.budgetCheck(measured)))
         return done
     }
 

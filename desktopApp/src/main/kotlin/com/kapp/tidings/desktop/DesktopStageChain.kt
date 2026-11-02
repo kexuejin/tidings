@@ -6,6 +6,7 @@ import com.kapp.tidings.agent.AgentChainDispatcher
 import com.kapp.tidings.agent.ChainProgress
 import com.kapp.tidings.agent.ChainStage
 import com.kapp.tidings.agent.ControlPlane
+import com.kapp.tidings.agent.ReviewerAudit
 import com.kapp.tidings.agent.StageChainRunner
 import com.kapp.tidings.agent.StageRun
 import com.kapp.tidings.domain.RelayController
@@ -72,17 +73,24 @@ internal object DesktopStageChain {
         var rev = 0
         val statuses = stages.map { it.role to "pending" }.toMutableList()
 
+        var pendingChecks: List<com.kapp.tidings.agent.ChainCheck> = emptyList()
+
         suspend fun publish(state: String, banner: String?, current: String? = null, percent: Int = 0) {
             if (groupId == null) return
             runCatching {
                 controller.broadcastChainCard(
                     groupId = groupId,
                     agentId = CHAIN_AGENT_ID,
+                    // Reviewer 审计结论随卡透传（checks[] 契约，宽松解析）：非合流卡
+                    // pendingChecks 恒空、卡面零变化；合流卡/blocked 卡带全量审计项。
                     cardJson = com.kapp.tidings.agent.StageChain.cardJsonOf(
-                        ChainProgress(chainId, ++rev, state, title, current, statuses.toList(), percent, banner),
+                        ChainProgress(chainId, ++rev, state, title, current, statuses.toList(),
+                            percent, banner, checks = pendingChecks),
                     ),
                 )
             }.onFailure { t -> println("[CHAIN] " + chainId + " card publish failed: " + t.message) }
+            // 每张卡发出后清空：审计项只属于触发它的那一张卡（一卡一事实）。
+            pendingChecks = emptyList()
         }
 
         val dirty = git(repo, "status", "--porcelain")?.trim().orEmpty()
@@ -101,9 +109,31 @@ internal object DesktopStageChain {
             headSha = { repoPath -> git(repoPath, "rev-parse", "HEAD")?.trim() },
             runStage = { stage, prompt, repoPath -> runOneStage(host, stage, prompt, repoPath) },
             land = { repoPath, run, message -> landStage(repoPath, run, message) },
+            // Reviewer 白名单键审计的取值域清单：从 core 协议取值域对象装配（§九.1——
+            // 取值域只能有一份定义，宿主引用它们而不是抄一份）。审计对 patch 中出现的
+            // 键/值按清单核对；清单没覆盖的载荷形状如实 SKIP。
+            valueDomains = listOf(
+                ReviewerAudit.ValueDomain(
+                    payload = "agent-ack",
+                    keys = setOf("kind", "cardId", "actionId"),
+                    valueOf = mapOf("kind" to com.kapp.tidings.core.protocol.AgentAckKinds.VALUES),
+                ),
+                ReviewerAudit.ValueDomain(
+                    payload = "grant",
+                    keys = setOf("access", "scope"),
+                    valueOf = mapOf("scope" to com.kapp.tidings.core.protocol.AgentGrantScopes.VALUES),
+                ),
+                ReviewerAudit.ValueDomain(
+                    payload = "exec-policy",
+                    keys = setOf("policy"),
+                    valueOf = mapOf("policy" to com.kapp.tidings.core.protocol.AgentExecPolicies.VALUES),
+                ),
+            ),
             report = { progress ->
                 statuses.clear()
                 statuses.addAll(progress.stages)
+                // 合流卡 / 审计 blocked 卡上带着 checks[]：先存、随紧随其后的 publish 透传。
+                pendingChecks = progress.checks
                 publish(progress.state, progress.banner, progress.currentRole, progress.percent)
                 // L1 会话免审的自动验讫（§八.2）：验收棒判 review_ready 且本会话免审时，
                 // 逐棒检查低危判据 —— 全部低危（单测/文档/日志类）就自动合流，不再逐次
