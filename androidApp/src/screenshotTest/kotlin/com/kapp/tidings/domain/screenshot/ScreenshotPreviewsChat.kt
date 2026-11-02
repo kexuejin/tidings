@@ -664,6 +664,66 @@ private fun ChatGroupInfoPhonePreview() {
 }
 
 /**
+ * `chat-group-info-agents` —— OBS-1 的定性帧：群里有入驻智能体时，群信息面板长什么样。
+ *
+ * 原有 `chat-group-info` 帧的夹具一条 `virtualAgents` 都没有，于是「群里有入驻智能体」
+ * 这个状态从来没进过任何一张图——真机读数「入驻智能体 (1) 有计数没有行」与代码现状之间
+ * 没有可判定的证据。本帧夹具带一条 `virtualAgents` 声明，让 agent 行真的进图：
+ * 帧上读得到该行 ⇒ 定性为「内容在、折叠/滚动使然」；读不到 ⇒ 渲染缺陷，按帧修。
+ */
+@PreviewTest
+@Preview(name = "chat-group-info-agents", widthDp = 393, heightDp = 852, showBackground = true, locale = "zh-rCN")
+@Composable
+private fun ChatGroupInfoAgentsPhonePreview() {
+    val groupState = desktopPreviewGroupState().let { st ->
+        val agents = listOf(
+            com.kapp.tidings.core.protocol.VirtualAgentMember(
+                agentId = "codex",
+                hostNodeId = st.settings.nodeId,
+                name = "codex",
+            ),
+        )
+        st.copy(
+            settings = st.settings.copy(
+                groups = st.settings.groups.map { gm -> gm.copy(virtualAgents = agents) },
+            ),
+        )
+    }
+    val group = groupState.settings.groups.first()
+    BareScreen { inner ->
+        ChatShell("conversations", groupState) { shell ->
+            androidx.compose.foundation.layout.Box(modifier = shell) {
+                ChatScreen(
+                    data = ChatScreenState(
+                        state = groupState,
+                        peerId = groupConvId,
+                        cacheDir = previewCacheDir,
+                    ),
+                    actions = chatPreviewActions(
+                        onSendPk = { _, _, _ -> },
+                        onSendVoice = { _, _, _ -> },
+                    ),
+                    chrome = ChatScreenChrome(
+                        modifier = inner,
+                    )
+                )
+            }
+            GroupInfoDialog(
+                group = group,
+                selfNodeId = groupState.settings.nodeId,
+                peers = groupState.peers,
+                memberOnlineCount = 2,
+                onDismiss = {},
+                onAddMembers = {},
+                onRemoveMember = {},
+                onUpdateMeta = { _, _, _ -> },
+                onLeaveGroup = {},
+            )
+        }
+    }
+}
+
+/**
  * `m-insets` —— 适配对照与诊断。
  *
  * 原型 `m14-insets.png` 是**四张卡的整页**（目标 banner / 旧版真机症状 / 新版现状 /

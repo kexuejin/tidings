@@ -380,7 +380,7 @@
           "accentGradientEnd": {
             "sites": 1,
             "status": "enforced",
-            "first": "composeApp/src/commonMain/kotlin/com/kapp/tidings/feature/chat/AgentCards.kt:1743"
+            "first": "composeApp/src/commonMain/kotlin/com/kapp/tidings/feature/chat/AgentCards.kt:1817"
           },
           "agentAccent": {
             "sites": 11,
@@ -412,7 +412,7 @@
             "status": "pending"
           },
           "error": {
-            "sites": 51,
+            "sites": 52,
             "status": "enforced",
             "first": "composeApp/src/commonMain/kotlin/com/kapp/tidings/ui/desktop/DesktopChrome.kt:341"
           },
@@ -472,12 +472,12 @@
             "first": "composeApp/src/commonMain/kotlin/com/kapp/tidings/ui/desktop/DesktopConversationsPane.kt:552"
           },
           "onSurface": {
-            "sites": 81,
+            "sites": 84,
             "status": "enforced",
             "first": "composeApp/src/commonMain/kotlin/com/kapp/tidings/ui/desktop/DesktopChrome.kt:546"
           },
           "onSurfaceVariant": {
-            "sites": 438,
+            "sites": 444,
             "status": "enforced",
             "first": "composeApp/src/commonMain/kotlin/com/kapp/tidings/ui/AppStates.kt:94"
           },
@@ -491,7 +491,7 @@
             "first": "composeApp/src/commonMain/kotlin/com/kapp/tidings/feature/agents/AgentApprovalCards.kt:236"
           },
           "online": {
-            "sites": 18,
+            "sites": 19,
             "status": "enforced",
             "first": "composeApp/src/commonMain/kotlin/com/kapp/tidings/ui/desktop/DesktopNodesPane.kt:395"
           },
@@ -511,7 +511,7 @@
             "first": "composeApp/src/commonMain/kotlin/com/kapp/tidings/ui/desktop/DesktopChatPane.kt:329"
           },
           "primary": {
-            "sites": 119,
+            "sites": 120,
             "status": "enforced",
             "first": "composeApp/src/commonMain/kotlin/com/kapp/tidings/ui/AppStates.kt:47"
           },
@@ -535,7 +535,7 @@
             "first": "composeApp/src/commonMain/kotlin/com/kapp/tidings/ui/desktop/CabinetPane.kt:302"
           },
           "surface": {
-            "sites": 115,
+            "sites": 116,
             "status": "enforced",
             "first": "composeApp/src/commonMain/kotlin/com/kapp/tidings/App.kt:186"
           },
@@ -597,7 +597,7 @@
           "warn": {
             "sites": 5,
             "status": "enforced",
-            "first": "composeApp/src/commonMain/kotlin/com/kapp/tidings/feature/chat/AgentCards.kt:1466"
+            "first": "composeApp/src/commonMain/kotlin/com/kapp/tidings/feature/chat/AgentCards.kt:1540"
           }
         },
         "typography": {
@@ -607,12 +607,12 @@
             "first": "composeApp/src/commonMain/kotlin/com/kapp/tidings/ui/components/MessageComposer.kt:494"
           },
           "bodyMedium": {
-            "sites": 110,
+            "sites": 111,
             "status": "enforced",
             "first": "composeApp/src/commonMain/kotlin/com/kapp/tidings/ui/AppStates.kt:93"
           },
           "bodySmall": {
-            "sites": 159,
+            "sites": 160,
             "status": "enforced",
             "first": "composeApp/src/commonMain/kotlin/com/kapp/tidings/ui/desktop/CabinetPane.kt:312"
           },
@@ -637,7 +637,7 @@
             "first": "composeApp/src/commonMain/kotlin/com/kapp/tidings/ui/SectionCard.kt:87"
           },
           "labelSmall": {
-            "sites": 273,
+            "sites": 278,
             "status": "enforced",
             "first": "composeApp/src/commonMain/kotlin/com/kapp/tidings/ui/desktop/CabinetPane.kt:276"
           },
@@ -652,14 +652,14 @@
             "first": "composeApp/src/commonMain/kotlin/com/kapp/tidings/ui/AppStates.kt:85"
           },
           "titleSmall": {
-            "sites": 32,
+            "sites": 33,
             "status": "enforced",
             "first": "composeApp/src/commonMain/kotlin/com/kapp/tidings/ui/desktop/DesktopConversationsPane.kt:377"
           }
         },
         "spacing": {
           "lg": {
-            "sites": 90,
+            "sites": 91,
             "status": "enforced",
             "first": "composeApp/src/commonMain/kotlin/com/kapp/tidings/App.kt:864"
           },
@@ -669,7 +669,7 @@
             "first": "composeApp/src/commonMain/kotlin/com/kapp/tidings/ui/desktop/DesktopConversationWidgets.kt:231"
           },
           "md": {
-            "sites": 83,
+            "sites": 87,
             "status": "enforced",
             "first": "composeApp/src/commonMain/kotlin/com/kapp/tidings/ui/AppStates.kt:79"
           },
@@ -709,7 +709,7 @@
             "first": "composeApp/src/commonMain/kotlin/com/kapp/tidings/ui/desktop/DesktopTransferLogPane.kt:104"
           },
           "sm": {
-            "sites": 111,
+            "sites": 113,
             "status": "enforced",
             "first": "composeApp/src/commonMain/kotlin/com/kapp/tidings/App.kt:865"
           },
@@ -734,7 +734,7 @@
             "first": "composeApp/src/commonMain/kotlin/com/kapp/tidings/feature/cabinet/PeerCabinetView.kt:138"
           },
           "xxs": {
-            "sites": 37,
+            "sites": 38,
             "status": "enforced",
             "first": "composeApp/src/commonMain/kotlin/com/kapp/tidings/ui/AppStates.kt:133"
           },
@@ -753,10 +753,10 @@
           "extraSmall": {
             "sites": 4,
             "status": "enforced",
-            "first": "composeApp/src/commonMain/kotlin/com/kapp/tidings/feature/chat/AgentCards.kt:1012"
+            "first": "composeApp/src/commonMain/kotlin/com/kapp/tidings/feature/chat/AgentCards.kt:1073"
           },
           "large": {
-            "sites": 12,
+            "sites": 13,
             "status": "enforced",
             "first": "composeApp/src/commonMain/kotlin/com/kapp/tidings/ui/components/MessageComposer.kt:786"
           },
@@ -895,7 +895,7 @@
         "elevation": 6,
         "iconSizes": 34,
         "dimension": 144,
-        "spacing": 136
+        "spacing": 137
       },
       "shapeSemantics": {
         "bubble": {
@@ -911,7 +911,7 @@
           "scaleSlot": "large",
           "mode": "raw",
           "rawSites": 3,
-          "slotSites": 12,
+          "slotSites": 13,
           "circleShapeSites": 0
         },
         "control": {
@@ -1125,7 +1125,9 @@
           "long_text"
         ],
         "previews": [
-          "GroupInfoDialogPhonePreview"
+          "GroupInfoDialogPhonePreview",
+          "ChatGroupInfoPhonePreview",
+          "ChatGroupInfoAgentsPhonePreview"
         ],
         "expectGroups": [
           "colors",

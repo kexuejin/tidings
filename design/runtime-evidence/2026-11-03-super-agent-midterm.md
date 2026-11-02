@@ -1,0 +1,53 @@
+# Super-Agent 中长期落地（§4.2 + 衔接项）· 验收台账
+
+> goal-2c6d273c 的证据台账。文字入库；截图不入库。
+
+## 1. D-NEW-1/2/3 核对结论（本轮只核对不改码）
+
+| 缺陷 | 闭合位置 | 判据 |
+|---|---|---|
+| D-NEW-1 宿主重启后旧卡按钮静默丢弃 | `0882ddad`（`BoardCardFlip.stale` + `DesktopExtension` 滞留翻面 + `BoardCardFlipTest` 34 行） | 宿主不再认得的卡动作 → 如实翻 `aborted`（保留标题/diff、摘按钮、横幅解释），gated on hasTicketForCard |
+| D-NEW-2 工单活跃期列表滚不上去 | `ChatScreen.kt` reverseLayout 双翻重构（f634c783 链） | 「跟随只该在本来在底部时生效」由 `shouldFollowLatest(isNearBottom, …)` 保留；「何时该滚」的三轮修补被从根上取消（索引 0 即最新） |
+| D-NEW-3 合并卡增删数展示两遍 | `0882ddad` 渲染侧 + `SandboxedCliDriver` summary 只放文件数 | 渲染层 `+N −N` 彩色等宽一处承担计数；summary 行不再追加（AgentCards 注释钉死口径） |
+
+## 2. 包⑥ 自愈反哺最小形态（`70b113ec`）
+
+- 判定件 `PitfallLedger`（desktopApp）：仓库内 `.tidings/pitfalls.jsonl`，人可读可编辑；损坏行跳过；条目 {source, pattern, rule, createdAt}。
+- 匹配注入：`selectFor(标题+派单原文)` 按关键词计分；**针对性条目优先、恒匹配垫底**（万金油规约不挤精准规约）；上限注入；单条正文截断。
+- 接线：`rejectRevisionByCard` 把人的打回意见追加进账本（pattern 留空，人可后补）；`runDevelopmentAndHealLoop` 组装提示词时账本命中条目与用户反馈合并，经 `WorkerPrompt` 硬约束前置。
+- 反向验证：摘 `score > 0` 过滤 ⇒ `selectMatchesByKeywordCountAndBreaksTiesByRecency` 红；恢复全绿。6 用例；`:desktopApp:test` 281 条绿。
+- heal 成功轮的经验记录（source=heal）留待真机轮接——需要真实运行数据才有可信 pattern，不造假数据。
+
+## 3. 包③ 分级授权引擎（`27445412`）
+
+**L1 会话免审闭环**：手机 `CardSessionExemptRow` 点选 → `session-exempt|<cardId>` 单槽编码动作（与打回同款前缀契约，编码/解码纯函数单测钉死）→ 宿主按 agent 最近会话解会话键（动作帧无 sessionId，与 merge-patch 反查同纪律）→ `SessionExemptLedger` 落表（`session-exempts.json` 0600、键=(会话,agentKey)、5min 租约、坏文件=空表 fail-closed）→ `DesktopStageChain` 验收棒 `review_ready` + 免审命中 + 全棒低危（`LowRiskReviewer`：黑名单永远赢白名单，两层都不命中=拦，fail-closed）⇒ 自动 `merged`；任一棒非低危照常等 1-Click。
+
+**L3 高危租约屏障**：`HighRiskLease` 判定件（词表三类：破坏性删除/配置重置/网络穿透；邻近整词匹配，`rm -rfx` 不误伤、多 token 词必须相邻）+ `LeaseBarrier` 三态（60s TTL 含端点、时钟回拨判 EXPIRED）；宿主动作分发前置闸——卡 `cmd` 高危时必须有 `expiresAt`（=签发+TTL）且按时到达，否则拒绝并 `flipStale` 如实翻面（晚来的同意不放行）。闸的守卫测试 3 条（源码级，GuardSourceScan 剥注释），反向验证：`classify` 旁路 ⇒ 守卫红，恢复绿。
+
+**测试**：队友 35 例（编码/激活判据/台账 TTL/低危判据/租约边界/夹具开关）+ Lead 守卫 3 例；反向验证 12+ 处先红后绿；`composeApp`/`desktopApp`/`agentNode` 三模块全绿。
+
+## 4. 包② S4-4 中途死亡窗口（`27445412` 同笔）
+
+`MockExternalPlugin.hangMs` 开关（env `TIDINGS_MOCK_PLUGIN_HANG_MS`，默认 0 行为不变，负值/乱值回落）让插件停在接单后半途；`MidExecutionDeathWindowTest` 三例：挂住期零事件（静默被钉住）、拔掉必 Error 事件 + onConnectionLost 真实触发、开关口径。等待全走 Await 轮询探针。后续真机轮用长任务真 agent 时，看门狗的 TERMINATE/FORCE_KILL 有了可注入的故障注入手段。
+
+## 5. 包⑤ P2P 大产物直投（`435339dc`）
+
+- 预算纯函数与协议拒绝边界**同尺**（严格大于）：正好 24KiB 卡内放得下、超 1B 直投；`CARD_BYTES` 引 `Limits` 本体不抄数。
+- 投递走现成入口（`sendAgentArtifacts` purpose=artifact → TransferManager → TransferClient/FileChannelRouter），patch 本体走既有 `deliverPatchBundle` 不重发（防对端双报价）；直投只补 report.json/task.log。
+- 卡片 artifacts[] 自描述：intent 稳定键（渲染端查双语词条）、delivered 只写真实直投事实；composeApp 预览路由（md/diff/txt/json+mime 兜底，其余如实不可预览）+ 全屏窗（Diff 复用 `agentCardHunkLinesOf`）；ChatScreen 只给同会话同名+Completed 的落盘路径（无孤立路径展示）。
+- 测试 27 条；反向验证三处摘红（路由分支/阈值边界/intent 组装）。
+
+## 6. 包④ Supervisor 三权分立最小闭环（`d00c4eb8`）
+
+- `ChainStage.requiresIsolation`（缺键/非布尔全回 false；老调用零翻新）+ `[iso]` 文本标记（双位识别、解析老文本一字不动）。
+- 并行：连续隔离棒成组，`Semaphore(4)` + `async(Dispatchers.Default)`（runBlocking 继承单线程退化假并行——实测修正）；全组完成按棒序串行 land（git 不并发）；组内失败整组不落盘。
+- Reviewer 审计三判据以 checks[] 挂合流卡：语法规范/CJK 最小复制（只审 + 行，权威源 tools 门禁）、白名单键对照协议取值域清单（`AgentAckKinds`/`AgentGrantScopes`/`AgentExecPolicies` VALUES 装配——取值域单一权威源）、帧预算自指量测；缺清单如实 SKIP；任一 failed ⇒ blocked 不自动合流。
+- 测试 26 条；红→绿 6 处（实现缺陷 2 + 测试自伤 4）；`valueDomains` 装配由 Lead 完成（`DesktopStageChain`）。
+
+## 7. 包⑦ OBS-1 群信息面板「入驻智能体 (1)」定性（新帧 `ChatGroupInfoAgentsPhonePreview`）
+
+- 新帧夹具带一条 `virtualAgents`（codex, single），393dp 视口渲染：**「入驻智能体 (1)」标题下 agent 行清晰可见**（头像座 + codex + 智能体徽标 + @codex + 授权管理入口），见渲染图 `androidApp/build/outputs/screenshotTest-results/preview/debug/rendered/.../ChatGroupInfoAgentsPhonePreview_chat-group-info-agents_*.png`（构建产物，不入库；截图不入库纪律）。
+- **定性：内容在、渲染正常**。真机「有计数没有行」的两种可能 remain：① 560dp 视口需滚动（本帧 393dp 已整段可见，560dp 更宽不可能更少）；② 真机那个群的 `group.info` 里 `virtualAgents` 声明为空/未同步——按"真机重进群信息页复测 + dump group.info"走，不是渲染缺陷。
+- 天然对照组：旧帧 `chat-group-info`（夹具无 virtualAgents）无 agent 行 ⇒ 「无声明 ⇒ 无行」方向已由既有帧钉住；渲染侧反向验证以两帧对照承载。
+- 登记：`componentSpecs.previews`（GroupInfoDialog 组件）+ spec 重投影（生成计数 +1 spacing/slotSites）；设计四门绿（specDrift/previewPairing/dupFrame/stateSlot）。
+- 参考图重录：`updateDebugScreenshotTest`（v2 卡片族因产物 intent 行 UI 变化一并重录，属包⑤的预期视觉变化）。
