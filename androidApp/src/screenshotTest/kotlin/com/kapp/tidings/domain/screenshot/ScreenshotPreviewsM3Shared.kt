@@ -1469,6 +1469,140 @@ private fun PinnedApprovalFocusDeskPreview() {
     }
 }
 
+// ── Acceptance 升级（Phase 2/3）：工牌 / 检查清单 / Hunk 视窗 / 打回抽屉 ──
+//
+// 这批帧钉的是四件新渲染能力的**两种外壳形态**（手机 393 / 桌面 720 列宽，同一份
+// AgentCardBubble 的参数通路）：夹具仍走生产解析器，字段是升级计划 §三 的样例载荷。
+
+/** Acceptance 卡夹具：bot 工牌 + chips + checks（带耗时/观察/日志）+ hunk diff + 打回动作。 */
+private fun acceptanceCardOf(withDrawerLog: Boolean = true) = parseAgentCard(buildJsonObject {
+    put("cardId", "task-patch-nodeoutbound")
+    put("rev", 2)
+    put("type", "approval")
+    put("title", "代码审核与产物合流 · NodeOutbound")
+    put("state", "review_ready")
+    putJsonObject("bot") {
+        put("name", "Claude Code")
+        put("avatar", "⚡")
+        put("branch", "worktree: #patch-ready")
+        put("bdot", "run")
+    }
+    putJsonArray("chips") {
+        add(buildJsonObject { put("text", "+42 / −7 lines"); put("tone", "pri") })
+    }
+    putJsonObject("banner") {
+        put("tone", "success")
+        put("text", "沙箱内单元测试已全部通过，patch.diff 与执行产物已就绪")
+    }
+    putJsonArray("checks") {
+        add(buildJsonObject {
+            put("id", "c1"); put("label", "帧预算契约核验"); put("status", "done"); put("time", "0.6s")
+        })
+        add(buildJsonObject {
+            put("id", "c2"); put("label", "回归测试校验"); put("status", "running"); put("time", "1.4s")
+            put("observation", "丢包 30% 时重连超时未收敛")
+            if (withDrawerLog) {
+                put("drawer", "AssertionError: expected 32000 but was 800\n    at NodeOutboundTest.clamp")
+            }
+        })
+    }
+    putJsonObject("diff") {
+        put("path", "core/transport/NodeOutbound.kt")
+        put("additions", 42); put("deletions", 7)
+        put("note", "严格遵循帧预算契约，TCP 群文本走 32 KiB 上限")
+        putJsonArray("hunk") {
+            add("@@ -45,7 +45,8 @@ fun clampGroupText(payload: String): String {")
+            add("-    if (payload.length > 800) return payload.take(800)")
+            add("+    val maxBytes = Limits.GROUP_TEXT_BYTES")
+            add("+    return CodecMsg.clampUtf8(payload, maxBytes)")
+            add("     }")
+            add(" ")
+            add("     fun sendGroup(payload: String) {")
+            add("+        checkUtf8Budget(payload, maxBytes)")
+            add("         channel.write(payload)")
+        }
+    }
+    putJsonArray("actions") {
+        add(buildJsonObject { put("actionId", "reject-revision"); put("label", "打回修改…"); put("style", "secondary") })
+        add(buildJsonObject { put("actionId", "merge-patch"); put("label", "批准并合并补丁"); put("approval", true); put("style", "primary") })
+    }
+})!!
+
+/** S20 · Acceptance 卡整体形态（手机）：工牌 + 检查清单 + Hunk 视窗同卡。 */
+@PreviewTest
+@Preview(name = "v2-card-p20-acceptance", widthDp = 393, heightDp = 852, showBackground = true, locale = "zh-rCN")
+@Composable
+private fun V2CardAcceptancePhonePreview() {
+    AppTheme(darkTheme = false) {
+        Surface(color = MaterialTheme.colorScheme.surface, modifier = Modifier.fillMaxSize()) {
+            Box(Modifier.padding(12.dp)) {
+                AgentCardBubble(
+                    card = acceptanceCardOf(),
+                    pendingActions = emptySet(),
+                    onAction = { _, _ -> },
+                )
+            }
+        }
+    }
+}
+
+/** S20 桌面：同一份 Acceptance 卡在 720 列宽（改一处两端都变的证据链的一环）。 */
+@PreviewTest
+@Preview(name = "desk-v2-card-p20-acceptance", widthDp = 1280, heightDp = 800, showBackground = true, locale = "zh-rCN")
+@Composable
+private fun V2CardAcceptanceDeskPreview() {
+    AppTheme(darkTheme = false) {
+        Surface(color = MaterialTheme.colorScheme.surface, modifier = Modifier.fillMaxSize()) {
+            Box(Modifier.padding(16.dp)) {
+                AgentCardBubble(
+                    card = acceptanceCardOf(),
+                    pendingActions = emptySet(),
+                    onAction = { _, _ -> },
+                    modifier = Modifier.width(DeskCardWidth),
+                )
+            }
+        }
+    }
+}
+
+/** S21 · 打回反馈抽屉展开态（手机）：4 芯片 + 输入框 + 提交按钮，乐观锁落在提交上。 */
+@PreviewTest
+@Preview(name = "v2-card-p21-revision-drawer", widthDp = 393, heightDp = 852, showBackground = true, locale = "zh-rCN")
+@Composable
+private fun V2CardRevisionDrawerPhonePreview() {
+    AppTheme(darkTheme = false) {
+        Surface(color = MaterialTheme.colorScheme.surface, modifier = Modifier.fillMaxSize()) {
+            Box(Modifier.padding(12.dp)) {
+                AgentCardBubble(
+                    // 乐观置灰走 pendingActions 通路：提交已点击过一次的锁态如实上帧。
+                    card = acceptanceCardOf(withDrawerLog = false),
+                    pendingActions = setOf("task-patch-nodeoutbound|reject-revision"),
+                    onAction = { _, _ -> },
+                )
+            }
+        }
+    }
+}
+
+/** S21 桌面：打回抽屉 720 列宽。 */
+@PreviewTest
+@Preview(name = "desk-v2-card-p21-revision-drawer", widthDp = 1280, heightDp = 800, showBackground = true, locale = "zh-rCN")
+@Composable
+private fun V2CardRevisionDrawerDeskPreview() {
+    AppTheme(darkTheme = false) {
+        Surface(color = MaterialTheme.colorScheme.surface, modifier = Modifier.fillMaxSize()) {
+            Box(Modifier.padding(16.dp)) {
+                AgentCardBubble(
+                    card = acceptanceCardOf(withDrawerLog = false),
+                    pendingActions = setOf("task-patch-nodeoutbound|reject-revision"),
+                    onAction = { _, _ -> },
+                    modifier = Modifier.width(DeskCardWidth),
+                )
+            }
+        }
+    }
+}
+
 /** P19 · 反向多选卡（手机，ask_question §7.9）：推荐实心 + 其余描边，拇指一点。 */
 @PreviewTest
 @Preview(name = "v2-card-p19-ask-question", widthDp = 393, heightDp = 852, showBackground = true, locale = "zh-rCN")

@@ -2,11 +2,17 @@
 
 package com.kapp.tidings.feature.chat
 
+import androidx.compose.animation.core.RepeatMode
+import androidx.compose.animation.core.animateFloat
+import androidx.compose.animation.core.infiniteRepeatable
+import androidx.compose.animation.core.rememberInfiniteTransition
+import androidx.compose.animation.core.tween
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.layout.width
 import androidx.compose.ui.draw.clip
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -20,6 +26,7 @@ import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Icon
+import org.jetbrains.compose.resources.StringResource
 import org.jetbrains.compose.resources.painterResource
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
@@ -34,6 +41,7 @@ import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Brush
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.Path
 import androidx.compose.ui.graphics.StrokeCap
 import androidx.compose.ui.graphics.StrokeJoin
@@ -58,6 +66,21 @@ import com.kapp.tidings.generated.resources.ic_refresh
 import com.kapp.tidings.generated.resources.ic_info
 import com.kapp.tidings.generated.resources.ic_warn
 import com.kapp.tidings.generated.resources.ic_close
+import com.kapp.tidings.generated.resources.ic_chev
+import com.kapp.tidings.generated.resources.ic_chevd
+import com.kapp.tidings.generated.resources.card_check_drawer_close
+import com.kapp.tidings.generated.resources.card_check_drawer_open
+import com.kapp.tidings.generated.resources.card_check_time_format
+import com.kapp.tidings.generated.resources.card_diff_collapse_code
+import com.kapp.tidings.generated.resources.card_diff_expand_code
+import com.kapp.tidings.generated.resources.card_revision_chip_compat
+import com.kapp.tidings.generated.resources.card_revision_chip_contrast
+import com.kapp.tidings.generated.resources.card_revision_chip_perf
+import com.kapp.tidings.generated.resources.card_revision_chip_test
+import com.kapp.tidings.generated.resources.card_revision_hint
+import com.kapp.tidings.generated.resources.card_revision_submit
+import com.kapp.tidings.generated.resources.card_session_exempt
+import com.kapp.tidings.generated.resources.card_session_exempt_active
 import com.kapp.tidings.generated.resources.card_decided_by
 import com.kapp.tidings.generated.resources.card_details_hide
 import com.kapp.tidings.generated.resources.card_details_show
@@ -679,6 +702,94 @@ private const val CARD_ARTIFACT_NAME_MAX_LINES = 1
 /** 摘要超过这个字符数才给「展开」入口：短摘要配一个展开按钮是骗点击。 */
 private const val CARD_DIFF_SUMMARY_EXPAND_OVER = 48
 
+// ── Acceptance 渲染策略（升级计划 Phase 2 的纯函数层）───────────────────
+//
+// 与上面的策略层同一条纪律：只吃入参、不读时钟、不碰 Compose —— 判据抽成数据，
+// 帧只是它的投影，单测用合成输入钉死。
+
+/** Hunk 视窗默认只露的行数；超出的部分进「展开」，收起态不截断成 0 行。 */
+const val CARD_HUNK_COLLAPSED_LINES = 6
+
+/** 打回动作的 actionId 前缀：反馈文本以它编码（见 [rejectRevisionActionIdOf]）。 */
+const val SYSTEM_ACTION_REJECT_REVISION = "reject-revision"
+
+/** 会话免审开关的 subAction id（分级免审；L1 会话免审的中期形态 §4.2）。 */
+const val SYSTEM_ACTION_SESSION_EXEMPT = "session-exempt"
+
+/**
+ * 打回动作与反馈文本的**单槽编码**：`reject-revision|<文本>`。
+ *
+ * 为什么挤进一个字符串：动作通路 [CardActionUi] 之下只有 actionId 一个字符串槽 ——
+ * 域层 `handleCardAction` 的签名与 invoke 帧白名单都只认 actionId（帧预算与
+ * 严格白名单是协议事实，渲染层不扩）。 Phase 4 的宿主编排器按前缀拆开，
+ * 竖线后面的文本进下一轮自愈的前置约束。
+ *
+ * 编码侧是纯函数、解码侧在宿主（Phase 4）：竖线替换在**这里**做而不是宿主做，
+ * 否则「文本里带竖线」会成为两端各猜一次的歧义。
+ */
+fun rejectRevisionActionIdOf(feedbackText: String): String {
+    val cleaned = feedbackText.trim()
+    if (cleaned.isEmpty()) return SYSTEM_ACTION_REJECT_REVISION
+    return "$SYSTEM_ACTION_REJECT_REVISION|${cleaned.replace("|", "/")}"
+}
+
+/** 见 [rejectRevisionActionIdOf]：非打回前缀原样返回 null，空反馈返回空串。 */
+fun feedbackTextOf(actionId: String): String? =
+    actionId.removePrefix("$SYSTEM_ACTION_REJECT_REVISION|")
+        .takeIf { actionId != it }
+
+/**
+ * Hunk 行的解析结果：行号（上下文行从 hunk 头 `@@ -a,b +c,d @@` 推演）、
+ * 增删极性。解析不了行号（hunk 头缺失或行序被插件截乱）⇒ [number] = null，
+ * 行照样渲染 —— 少一个 gutter 数字比整段不画诚实。
+ */
+data class AgentCardHunkLine(
+    val text: String,
+    val kind: AgentCardHunkKind,
+    val number: Int?,
+)
+
+enum class AgentCardHunkKind { Add, Del, Context, HunkHead }
+
+/**
+ * 把插件的原始 hunk 行翻成带行号的渲染行（升级计划 Phase 2 要点 3：等宽右对齐行号 +
+ * 新增绿 / 删除红微底）。
+ *
+ * 行号**只从 hunk 头推演**：`@@ -10,7 +10,8 @@` 给出旧起新起两列，代码取新侧；
+ * 每遇一行按极性推进（上下文两侧同进，删除不动新侧光标）。头缺失或行序被截乱时
+ * 尾行可能对不上真实行号 —— 那是插件侧截断的事，渲染端不猜第二遍：
+ * 推演不出的行 [AgentCardHunkLine.number] 为 null，gutter 留空。
+ */
+fun agentCardHunkLinesOf(hunk: List<String>): List<AgentCardHunkLine> {
+    val out = mutableListOf<AgentCardHunkLine>()
+    var newSide: Int? = null
+    for (raw in hunk) {
+        val kind = when {
+            raw.startsWith("+++") || raw.startsWith("---") -> AgentCardHunkKind.HunkHead
+            raw.startsWith("@@") -> {
+                // `@@ -45,7 +45,8 @@ …`：新侧起点取第二个范围的起始行。
+                newSide = Regex("@\\s*-(\\d+)(?:,\\d+)?\\s+\\+(\\d+)")
+                    .find(raw)?.groupValues?.get(2)?.toIntOrNull()
+                AgentCardHunkKind.HunkHead
+            }
+            raw.startsWith("+") -> AgentCardHunkKind.Add
+            raw.startsWith("-") -> AgentCardHunkKind.Del
+            else -> AgentCardHunkKind.Context
+        }
+        // 上下文与新增行各占新侧一个行号并推进光标；删除行只存在于旧侧，
+        // 不动新侧光标也不领号 —— 这与 `git diff` 的行号语义一致。
+        val number = when (kind) {
+            AgentCardHunkKind.HunkHead, AgentCardHunkKind.Del -> null
+            AgentCardHunkKind.Context, AgentCardHunkKind.Add -> newSide
+        }
+        if (kind == AgentCardHunkKind.Context || kind == AgentCardHunkKind.Add) {
+            newSide = newSide?.plus(1)
+        }
+        out += AgentCardHunkLine(text = raw, kind = kind, number = number)
+    }
+    return out
+}
+
 // ── 审批锁三态（§5.3）────────────────────────────────────────────────────
 
 enum class CardActionLock {
@@ -762,6 +873,9 @@ fun AgentCardBubble(
             modifier = Modifier.fillMaxWidth().padding(horizontal = 18.dp, vertical = 16.dp),
             verticalArrangement = Arrangement.spacedBy(12.dp),
         ) {
+            // 数字员工工牌（升级计划 Phase 2 要点 1）：avatar + 角色名 + worktree 分支
+            // 芯片 + 呼吸微动效点。bot 缺席 = 老插件没给，整块不画（不是每个卡都有承办人）。
+            card.bot?.let { CardHeaderRow(it) }
             // 头行：上栏元信息（type 徽标 + 状态胶囊 + rev 游标）+ 独立主标题。
             if (card.type != null || card.title != null || card.rev > 0 || plan.showExpiredTag) {
                 Column(verticalArrangement = Arrangement.spacedBy(sp.xs)) {
@@ -799,10 +913,16 @@ fun AgentCardBubble(
             }
             card.banner?.let { CardBannerRow(it) }
             card.progress?.let { CardProgressRow(it) }
-            if (card.steps.isNotEmpty()) {
+            // Acceptance 检查清单（升级计划 Phase 2 要点 2）：新式卡走 checks（带单项耗时 /
+            // 观察结论 / 日志抽屉），老卡继续走 StepList。两者都画会把同一批步骤说两遍 ——
+            // 解析侧 checks 本就由 items 回退而来，有 checks 时 steps 是它的影子。
+            if (card.checks.isNotEmpty() && card.steps.isEmpty()) {
+                CardChecksColumn(card.checks)
+            } else if (card.steps.isNotEmpty()) {
                 CardStepListColumn(card.steps)
             }
             card.diff?.let { CardDiffViewerRow(it) }
+            card.diff?.takeIf { it.hunk.isNotEmpty() }?.let { CardDiffHunkViewer(it) }
             if (card.artifacts.isNotEmpty()) {
                 CardArtifactRows(card.artifacts)
             }
@@ -839,10 +959,461 @@ fun AgentCardBubble(
                 )
             }
             if (plan.showActions) {
-                CardButtonGroupRow(card, pendingActions, plan.actionsEnabled, onAction!!)
+                // 打回动作的就地展开（升级计划 Phase 2 要点 4）：reject 按钮被点时
+                // **不直接派发**，先开反馈抽屉 —— 打回是要带话的，空手打回等于只说了
+                // 「不行」。抽屉里提交才真正派发（带 feedbackText 编码的 actionId）。
+                var revisionDrawerOpen by remember(card.cardId, card.rev) { mutableStateOf(false) }
+                val hasReject = card.actions.any { it.actionId == SYSTEM_ACTION_REJECT_REVISION }
+                Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                    CardButtonGroupRow(
+                        card = card,
+                        pendingActions = pendingActions,
+                        actionsEnabled = plan.actionsEnabled,
+                        onAction = { c, actionId ->
+                            if (actionId == SYSTEM_ACTION_REJECT_REVISION) {
+                                revisionDrawerOpen = !revisionDrawerOpen
+                            } else {
+                                onAction!!(c, actionId)
+                            }
+                        },
+                    )
+                    if (hasReject && revisionDrawerOpen) {
+                        CardRevisionDrawer(card, pendingActions, plan.actionsEnabled, onAction!!)
+                    }
+                }
             }
+            // 会话免审行：宿主在 subActions 里给了这条语义才画（数据到不了的字段不画）。
+            CardSessionExemptRow(card)
         }
     }
+}
+
+/**
+ * 数字员工工牌头行（升级计划 Phase 2 要点 1，原型 `.acard .hd`）。
+ *
+ * avatar 用**字母座**而不是位图：`avatar` 字段在载荷里是 emoji/短代号（原型里是
+ * 🤖/⚡），按文本画进圆角座即可，图片解码与远端拉取都不属于卡片渲染的职责。
+ * 呼吸微动效点（`.bdot`）只在 `run` 档动：done/fail/warn 是终态事实，动效属于
+ * 「正在发生」，不属于「已经发生」。
+ */
+@Composable
+internal fun CardHeaderRow(bot: AgentCardBot, modifier: Modifier = Modifier) {
+    val sp = LocalAppSpacing.current
+    Row(
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(sp.sm),
+        modifier = modifier.fillMaxWidth(),
+    ) {
+        // .hd .bot-badge 的字母座：agent 紫微底 + 角色名首字（图形级 3:1 用 agentAccent）。
+        // 圆角 6px 属档外值（原型 .bot-badge 6px）：按 ShapeRoles 表头裁决就近归并 extraSmall。
+        Box(
+            modifier = Modifier
+                .size(com.kapp.tidings.ui.theme.IconSizes.Title)
+                .background(MaterialTheme.accents.agentAccentContainer, MaterialTheme.shapes.extraSmall),
+            contentAlignment = Alignment.Center,
+        ) {
+            Text(
+                text = bot.avatar?.takeIf { it.isNotBlank() }
+                    ?: bot.name.take(1).uppercase(),
+                style = MaterialTheme.typography.labelMedium,
+                fontWeight = FontWeight.SemiBold,
+                color = MaterialTheme.accents.agentAccentText,
+            )
+        }
+        Text(
+            text = bot.name,
+            style = MaterialTheme.typography.labelLarge,
+            fontWeight = FontWeight.SemiBold,
+            color = MaterialTheme.colorScheme.onSurface,
+            maxLines = 1,
+            overflow = TextOverflow.Ellipsis,
+            modifier = Modifier.weight(1f, fill = false),
+        )
+        CardBreathDot(bdot = bot.bdot)
+        bot.branch?.let { branch ->
+            // .hd .wk-chip：等宽 11px surface-2 底 —— worktree 分支是机器事实，不做语义着色。
+            Text(
+                text = branch,
+                style = MaterialTheme.typography.labelSmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                fontFamily = FontFamily.Monospace,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
+                modifier = Modifier
+                    .background(SurfaceTiers.Raised, MaterialTheme.shapes.extraSmall)
+                    .padding(horizontal = sp.sm6, vertical = 2.dp)
+                    .semantics { contentDescription = branch },
+            )
+        }
+    }
+}
+
+/**
+ * 呼吸微动效点（原型 `.bdot`：7px 圆点，run 档 1.8s 呼吸）。
+ *
+ * alpha 在 0.4f~1.0f 循环（升级计划 Phase 2 要点 1 给定区间）；档位色逐字对齐原型：
+ * run=primary、done=online、fail=error、warn=onSecondaryContainer（`--on-queued-c`）。
+ * 未知档位按中性画 —— 多一个未知值不该让工牌消失（宽容解析的同一条口径）。
+ */
+@Composable
+private fun CardBreathDot(bdot: String?, modifier: Modifier = Modifier) {
+    val sp = LocalAppSpacing.current
+    val baseColor = when (bdot) {
+        "run" -> MaterialTheme.colorScheme.primary
+        "done" -> MaterialTheme.accents.online
+        "fail" -> MaterialTheme.colorScheme.error
+        "warn" -> MaterialTheme.colorScheme.onSecondaryContainer
+        else -> MaterialTheme.colorScheme.onSurfaceVariant
+    }
+    val alpha: Float = if (bdot == "run") {
+        val infinite = rememberInfiniteTransition(label = "card-bdot")
+        val breath by infinite.animateFloat(
+            initialValue = 0.4f,
+            targetValue = 1.0f,
+            animationSpec = infiniteRepeatable(
+                animation = tween(durationMillis = 900),
+                repeatMode = RepeatMode.Reverse,
+            ),
+            label = "card-bdot-alpha",
+        )
+        breath
+    } else {
+        1f
+    }
+    // 点径 7px 是档外值：落 6dp 间距档（sm6），与单选圆点 .size(sp.sm) 同一条
+    // 「小元素吃间距档」的既有先例。
+    Box(
+        modifier = modifier
+            .size(sp.sm6)
+            .background(baseColor.copy(alpha = alpha), CircleShape),
+    )
+}
+
+/**
+ * Acceptance 检查清单（升级计划 Phase 2 要点 2，原型 `.acard .checks`）：
+ * 状态指示 + 等宽单项耗时 + 一行观察结论；带日志（drawer）的行可点开日志抽屉。
+ *
+ * 展开态是**行内本地状态**：卡片体是插件定义的只读投影，抽屉不改变任何协议事实，
+ * 所以不进模型、不进 pendingActions —— 会话切换即重建，与本组件「不存状态」的
+ * 既有纪律一致。
+ */
+@Composable
+private fun CardChecksColumn(checks: List<AgentCardCheck>) {
+    val sp = LocalAppSpacing.current
+    Column(
+        verticalArrangement = Arrangement.spacedBy(sp.sm6),
+        modifier = Modifier.padding(vertical = 2.dp),
+    ) {
+        checks.forEach { check ->
+            CardCheckRow(check)
+        }
+    }
+}
+
+@Composable
+private fun CardCheckRow(check: AgentCardCheck) {
+    val sp = LocalAppSpacing.current
+    var drawerOpen by remember(check.id) { mutableStateOf(check.open) }
+    val statusLabel = when (check.status) {
+        AgentCardStepStatus.Done -> stringResource(Res.string.card_status_done)
+        AgentCardStepStatus.Running -> stringResource(Res.string.card_status_running)
+        AgentCardStepStatus.Pending -> stringResource(Res.string.card_status_pending)
+        AgentCardStepStatus.Failed -> stringResource(Res.string.card_status_failed)
+        AgentCardStepStatus.Blocked -> stringResource(Res.string.card_status_blocked)
+    }
+    val clickable = check.drawer != null
+    Column(
+        modifier = Modifier
+            .fillMaxWidth()
+            // 原型 .chk 10px：档外值就近归并 shapes.small（CardNeutralTag 同一裁决）。
+            .background(SurfaceTiers.Raised, MaterialTheme.shapes.small)
+            .let { m ->
+                if (clickable) {
+                    m.clickable { drawerOpen = !drawerOpen }
+                } else {
+                    m
+                }
+            }
+            .padding(horizontal = sp.md10, vertical = sp.sm6)
+            .semantics { contentDescription = statusLabel },
+    ) {
+        Row(
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(sp.sm),
+        ) {
+            StepStatusIcon(check.status)
+            Text(
+                text = check.label,
+                style = MaterialTheme.typography.bodySmall,
+                fontWeight = if (check.status == AgentCardStepStatus.Running) FontWeight.SemiBold else FontWeight.Normal,
+                color = if (check.status == AgentCardStepStatus.Running) {
+                    MaterialTheme.colorScheme.primary
+                } else {
+                    MaterialTheme.colorScheme.onSurface
+                },
+                maxLines = CARD_STEP_LABEL_MAX_LINES,
+                overflow = TextOverflow.Ellipsis,
+                modifier = Modifier.weight(1f),
+            )
+            check.time?.let { time ->
+                // .chk-meta：等宽耗时标签 —— 机器事实用等宽字，与 hunk/分支芯片同一条口径。
+                Text(
+                    text = stringResource(Res.string.card_check_time_format, time),
+                    style = MaterialTheme.typography.labelSmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    fontFamily = FontFamily.Monospace,
+                )
+            }
+            if (clickable) {
+                Icon(
+                    painter = painterResource(if (drawerOpen) Res.drawable.ic_chevd else Res.drawable.ic_chev),
+                    contentDescription = stringResource(
+                        if (drawerOpen) Res.string.card_check_drawer_close else Res.string.card_check_drawer_open,
+                    ),
+                    tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                    modifier = Modifier.size(com.kapp.tidings.ui.theme.IconSizes.Inline),
+                )
+            }
+        }
+        check.observation?.let { observation ->
+            // 双层文本契约的第一层：一行人类可读的观察结论（第二层是下面的日志抽屉）。
+            Text(
+                text = observation,
+                style = MaterialTheme.typography.labelSmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
+                modifier = Modifier.padding(top = 2.dp),
+            )
+        }
+        if (clickable && drawerOpen) {
+            // .chk-drawer：等宽日志堆栈，pre-wrap 语义 —— 行数不设限的是插件给的现场，
+            // 超长在载荷侧就该被截断（帧预算归协议管，渲染层不再猜一遍）。
+            Text(
+                text = check.drawer.orEmpty(),
+                style = MaterialTheme.typography.labelSmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                fontFamily = FontFamily.Monospace,
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(top = sp.sm6),
+            )
+        }
+    }
+}
+
+/**
+ * Diff Hunk 代码视窗（升级计划 Phase 2 要点 3，原型 `.df-hunk`）：等宽行号右对齐、
+ * 新增绿微底 12%、删除红微底 12%；默认只露 [CARD_HUNK_COLLAPSED_LINES] 行，
+ * 超出给「展开/收起」。
+ *
+ * 行号与极性全部来自 [agentCardHunkLinesOf] 的推演 —— 渲染层不再各写一遍规则。
+ */
+@Composable
+private fun CardDiffHunkViewer(diff: AgentCardDiff) {
+    var expanded by remember(diff.hunk) { mutableStateOf(diff.open) }
+    val lines = remember(diff.hunk) { agentCardHunkLinesOf(diff.hunk) }
+    val expandable = lines.size > CARD_HUNK_COLLAPSED_LINES
+    val visible = if (expandable && !expanded) lines.take(CARD_HUNK_COLLAPSED_LINES) else lines
+    Column(
+        modifier = Modifier
+            .fillMaxWidth()
+            // 原型 .df-hunk 8px 圆角：shapes.small 逐字同值。
+            .background(SurfaceTiers.Inset, MaterialTheme.shapes.small)
+            .padding(vertical = 4.dp),
+        verticalArrangement = Arrangement.spacedBy(1.dp),
+    ) {
+        visible.forEach { line ->
+            CardHunkLineRow(line)
+        }
+        if (expandable) {
+            // .dftoggle：文字开关（primary 11px 600），不用实心按钮 —— 代码视窗的
+            // 主角是代码，展开入口退后一档。
+            Text(
+                text = stringResource(
+                    if (expanded) Res.string.card_diff_collapse_code else Res.string.card_diff_expand_code,
+                ),
+                style = MaterialTheme.typography.labelSmall,
+                fontWeight = FontWeight.SemiBold,
+                color = MaterialTheme.colorScheme.primary,
+                modifier = Modifier
+                    .clickable { expanded = !expanded }
+                    .padding(horizontal = 8.dp, vertical = 4.dp),
+            )
+        }
+    }
+}
+
+@Composable
+private fun CardHunkLineRow(line: AgentCardHunkLine) {
+    val sp = LocalAppSpacing.current
+    val (bg, fg) = when (line.kind) {
+        AgentCardHunkKind.Add ->
+            MaterialTheme.accents.online.copy(alpha = 0.12f) to MaterialTheme.accents.online
+        AgentCardHunkKind.Del ->
+            MaterialTheme.colorScheme.error.copy(alpha = 0.12f) to MaterialTheme.colorScheme.error
+        AgentCardHunkKind.HunkHead ->
+            Color.Transparent to MaterialTheme.colorScheme.onSurfaceVariant
+        AgentCardHunkKind.Context ->
+            Color.Transparent to MaterialTheme.colorScheme.onSurface
+    }
+    Row(
+        verticalAlignment = Alignment.Top,
+        modifier = Modifier
+            .fillMaxWidth()
+            .background(bg)
+            .padding(horizontal = 8.dp),
+    ) {
+        Text(
+            text = line.number?.toString() ?: "",
+            style = MaterialTheme.typography.labelSmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+            fontFamily = FontFamily.Monospace,
+            textAlign = TextAlign.End,
+            // gutter 24px（原型 .ln）：两枚在档间距拼出（md10 + lg14），不引新档。
+            modifier = Modifier.width(sp.md10 + sp.lg14),
+        )
+        Text(
+            text = line.text,
+            style = MaterialTheme.typography.labelSmall,
+            color = fg,
+            fontFamily = FontFamily.Monospace,
+            modifier = Modifier
+                .weight(1f)
+                .padding(start = 8.dp),
+        )
+    }
+}
+
+/**
+ * 就地打回反馈抽屉（升级计划 Phase 2 要点 4，原型 `.rev-drawer`）：点「打回」就地
+ * 展开，4 枚高频芯片 + 输入框 + 提交。
+ *
+ * 芯片是**快捷短语**不是互斥选项：点一下把短语追加进输入框（可继续编辑、可多选），
+ * 与原型 `.qchip` 的行为一致。提交走 [rejectRevisionActionIdOf] 把反馈编码进
+ * actionId（动作通路只有一个字符串槽，见那个函数的 KDoc），乐观置灰与防重
+ * 沿用 [cardActionUiOf] 的三态 —— 打回也是一次决策，不该享受豁免。
+ *
+ * [expanded] 由调用方持有：抽屉的开合跟随按钮的锁态，本组件不自持。
+ */
+@Composable
+private fun CardRevisionDrawer(
+    card: AgentCardUi,
+    pendingActions: Set<String>,
+    actionsEnabled: Boolean,
+    onAction: (card: AgentCardUi, actionId: String) -> Unit,
+) {
+    val sp = LocalAppSpacing.current
+    var feedback by remember(card.cardId) { mutableStateOf("") }
+    val ui = cardActionUiOf(card, pendingActions, SYSTEM_ACTION_REJECT_REVISION)
+    val enabled = actionsEnabled && !ui.disabled
+    val submitted = ui.lock != CardActionLock.Editable
+    Column(
+        verticalArrangement = Arrangement.spacedBy(sp.sm),
+        modifier = Modifier
+            .fillMaxWidth()
+            // 原型 .rev-drawer 10px 圆角 + 红 18% 细边：圆角就近归并 shapes.small。
+            .background(SurfaceTiers.Raised, MaterialTheme.shapes.small)
+            .border(1.dp, MaterialTheme.colorScheme.error.copy(alpha = 0.18f), MaterialTheme.shapes.small)
+            .padding(horizontal = sp.md10, vertical = sp.md10),
+    ) {
+        Row(
+            horizontalArrangement = Arrangement.spacedBy(sp.sm6),
+            modifier = Modifier.fillMaxWidth(),
+        ) {
+            RevisionChip(Res.string.card_revision_chip_test, enabled) { feedback = feedback.appendChip(it) }
+            RevisionChip(Res.string.card_revision_chip_contrast, enabled) { feedback = feedback.appendChip(it) }
+            RevisionChip(Res.string.card_revision_chip_compat, enabled) { feedback = feedback.appendChip(it) }
+            RevisionChip(Res.string.card_revision_chip_perf, enabled) { feedback = feedback.appendChip(it) }
+        }
+        // 输入框：无边框药丸（.rev-inp 的 surface 底 + 细边），与 MessageComposer 的
+        // 「输入框自带容器」分工一致 —— 这里画的是抽屉自己的行内输入。
+        androidx.compose.foundation.text.BasicTextField(
+            value = feedback,
+            onValueChange = { feedback = it },
+            enabled = enabled,
+            textStyle = MaterialTheme.typography.bodySmall.copy(
+                color = MaterialTheme.colorScheme.onSurface,
+            ),
+            decorationBox = { inner ->
+                Box(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .background(MaterialTheme.colorScheme.surface, MaterialTheme.shapes.small)
+                        .border(1.dp, MaterialTheme.colorScheme.outline.copy(alpha = 0.12f), MaterialTheme.shapes.small)
+                        .padding(horizontal = sp.md10, vertical = sp.sm6),
+                ) {
+                    if (feedback.isEmpty()) {
+                        Text(
+                            text = stringResource(Res.string.card_revision_hint),
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis,
+                        )
+                    }
+                    inner()
+                }
+            },
+            modifier = Modifier.fillMaxWidth(),
+        )
+        AppButton(
+            text = stringResource(
+                if (submitted) Res.string.card_pending_confirm else Res.string.card_revision_submit,
+            ),
+            onClick = {
+                onAction(card, rejectRevisionActionIdOf(feedback))
+            },
+            enabled = enabled,
+            size = AppButtonSize.Small,
+            tone = AppButtonTone.Danger,
+            modifier = Modifier.fillMaxWidth(),
+        )
+    }
+}
+
+/** 芯片追加的接缝：第一条前不留；接缝用 ASCII 而不是任何一语的标点（双语共用一份）。 */
+private fun String.appendChip(chip: String): String =
+    if (isBlank()) chip else "$this + $chip"
+
+@Composable
+private fun RevisionChip(labelRes: StringResource, enabled: Boolean, onClick: (label: String) -> Unit) {
+    val sp = LocalAppSpacing.current
+    val label = stringResource(labelRes)
+    Text(
+        text = label,
+        style = MaterialTheme.typography.labelSmall,
+        color = MaterialTheme.colorScheme.onSurfaceVariant,
+        modifier = Modifier
+            .background(MaterialTheme.colorScheme.surface, MaterialTheme.shapes.extraSmall)
+            .border(1.dp, MaterialTheme.colorScheme.outline.copy(alpha = 0.08f), MaterialTheme.shapes.extraSmall)
+            .clickable(enabled = enabled) { onClick(label) }
+            .padding(horizontal = sp.sm, vertical = 2.dp),
+    )
+}
+
+/**
+ * 会话免审的一行开关（升级计划 §4.2 分级免审的 UI 侧；L1 会话免审）。
+ *
+ * 它是 subAction 语义的落点：宿主没给这条 subAction 的卡不画（数据到不了的字段
+ * 不画，与 ButtonGroup 的 sub-row 同一条纪律）。当前会话已免审时如实换文案 ——
+ * 「免审进行中」是事实不是动作，再画可点开关就是骗点击。
+ */
+@Composable
+private fun CardSessionExemptRow(card: AgentCardUi, modifier: Modifier = Modifier) {
+    val exemptActive = card.subActions.any { it.actionId == SYSTEM_ACTION_SESSION_EXEMPT && it.style == "active" }
+    val exemptOffered = card.subActions.any { it.actionId == SYSTEM_ACTION_SESSION_EXEMPT }
+    if (!exemptOffered) return
+    Text(
+        text = stringResource(
+            if (exemptActive) Res.string.card_session_exempt_active else Res.string.card_session_exempt,
+        ),
+        style = MaterialTheme.typography.labelMedium,
+        color = MaterialTheme.colorScheme.onSecondaryContainer,
+        modifier = modifier
+            .background(MaterialTheme.colorScheme.secondaryContainer, MaterialTheme.shapes.small)
+            .padding(horizontal = 12.dp, vertical = 8.dp),
+    )
 }
 
 /**
@@ -871,7 +1442,8 @@ private fun CardTypeTag(type: String) {
             painter = painterResource(iconRes),
             contentDescription = null,
             tint = MaterialTheme.accents.agentAccentText,
-            modifier = Modifier.size(12.dp),
+            // 12dp 与间距档 md 同值：改吃 token（视觉零变化）。
+            modifier = Modifier.size(sp.md),
         )
         Text(
             text = label,
@@ -1013,7 +1585,7 @@ private fun CardBannerRow(banner: AgentCardBanner) {
                 painter = painterResource(iconRes),
                 contentDescription = null,
                 tint = contentColor,
-                modifier = Modifier.size(16.dp),
+                modifier = Modifier.size(com.kapp.tidings.ui.theme.IconSizes.Label),
             )
             Text(
                 text = banner.text,
@@ -1151,10 +1723,11 @@ private fun CardProgressRow(progress: Int) {
             .semantics { contentDescription = label },
     ) {
         // .pg .bar（relay.html:536-537）：6px 轨、圆角 10、底 = --surface-3（Inset 档）。
+        // 轨高 6dp 与间距档 sm6 同值：改吃 token（视觉零变化）。
         Surface(
             shape = RoundedCornerShape(10.dp),
             color = SurfaceTiers.Inset,
-            modifier = Modifier.weight(1f).height(6.dp),
+            modifier = Modifier.weight(1f).height(sp.sm6),
         ) {
             Box(Modifier.fillMaxWidth()) {
                 // .pg .bar i：填充 = primary → #8B5CF6 的 90° 渐变（升级稿给定的唯一
@@ -1162,7 +1735,7 @@ private fun CardProgressRow(progress: Int) {
                 Box(
                     modifier = Modifier
                         .fillMaxWidth(progress / 100f)
-                        .height(6.dp)
+                        .height(sp.sm6)
                         .background(
                             Brush.horizontalGradient(
                                 listOf(
@@ -1213,7 +1786,7 @@ private fun StepStatusIcon(status: AgentCardStepStatus) {
     val insetColor = SurfaceTiers.Inset
     val surfaceVariantColor = MaterialTheme.colorScheme.onSurfaceVariant
 
-    Canvas(modifier = Modifier.size(16.dp)) {
+    Canvas(modifier = Modifier.size(com.kapp.tidings.ui.theme.IconSizes.Label)) {
         val radius = size.minDimension / 2f
         val center = Offset(size.width / 2f, size.height / 2f)
 
@@ -1350,7 +1923,8 @@ private fun CardStepRow(step: AgentCardStep) {
         horizontalArrangement = Arrangement.spacedBy(sp.md10),
         modifier = Modifier
             .fillMaxWidth()
-            .clip(RoundedCornerShape(8.dp))
+            // 8dp 圆角与 shapes.small 同值：改吃 token（视觉零变化，欠债 -1）。
+            .clip(MaterialTheme.shapes.small)
             .padding(horizontal = 8.dp, vertical = 5.dp)
             .semantics { contentDescription = statusLabel },
     ) {
@@ -1412,7 +1986,7 @@ private fun CardDiffViewerRow(diff: AgentCardDiff) {
                 painter = painterResource(Res.drawable.ic_terminal),
                 contentDescription = null,
                 tint = MaterialTheme.colorScheme.onSurfaceVariant,
-                modifier = Modifier.size(14.dp),
+                modifier = Modifier.size(com.kapp.tidings.ui.theme.IconSizes.Inline),
             )
             if (diff.path != null) {
                 Text(
@@ -1509,7 +2083,7 @@ private fun CardArtifactRows(artifacts: List<AgentCardArtifact>) {
                         painter = painterResource(Res.drawable.ic_file),
                         contentDescription = null,
                         tint = MaterialTheme.colorScheme.primary,
-                        modifier = Modifier.size(16.dp),
+                        modifier = Modifier.size(com.kapp.tidings.ui.theme.IconSizes.Label),
                     )
                 }
                 Column(Modifier.weight(1f)) {

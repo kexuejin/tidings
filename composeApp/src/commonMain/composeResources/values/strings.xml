@@ -1792,6 +1792,24 @@
     <!-- 执行状态横幅在正文为空时的兜底（帧由没有 UI 文案桥的壳发出时才会用到）。 -->
     <string name="agent_state_banner_failed">执行未完成</string>
 
+    <!-- 升级计划 Phase 2/3：Acceptance 检查清单、Diff Hunk 视窗与打回反馈抽屉。
+         检查项的耗时由插件给的字符串直接展示（card_check_time 只做「读作」拼装）；
+         打回抽屉的芯片是给用户的快捷短语，选了会填进输入框可继续编辑。 -->
+    <string name="card_check_time_format">耗时 %1$s</string>
+    <string name="card_check_drawer_open">展开日志</string>
+    <string name="card_check_drawer_close">收起日志</string>
+    <string name="card_diff_expand_code">展开代码</string>
+    <string name="card_diff_collapse_code">收起代码</string>
+    <string name="card_revision_hint">说说哪里要改，提交后作为下一轮修改的硬约束</string>
+    <string name="card_revision_submit">提交打回</string>
+    <string name="card_revision_chip_test">补充单测</string>
+    <string name="card_revision_chip_contrast">调整对比度</string>
+    <string name="card_revision_chip_compat">兼容性</string>
+    <string name="card_revision_chip_perf">性能</string>
+    <!-- 会话免审的两个状态（分级免审，升级计划中期 §4.2）：未开启给入口语义，开启后如实告知。 -->
+    <string name="card_session_exempt">本会话免审</string>
+    <string name="card_session_exempt_active">本会话已免审</string>
+
     <!-- 上下文唤起胶囊（方案 §5.2） -->
     <string name="capsule_entity_team">团队</string>
     <string name="capsule_default_ws">默认</string>

@@ -1618,6 +1618,25 @@
     <string name="agent_action_denied_notice">%1$s is not allowed to drive %2$s — the action did not run</string>
     <string name="agent_state_banner_failed">Not executed</string>
 
+    <!-- Upgrade plan Phase 2/3: acceptance checks, diff hunk viewer and revision drawer.
+         Per-check time comes straight from the plugin string (card_check_time only frames it);
+         revision chips are quick phrases for the user — picking one fills the input for editing. -->
+    <string name="card_check_time_format">took %1$s</string>
+    <string name="card_check_drawer_open">Show log</string>
+    <string name="card_check_drawer_close">Hide log</string>
+    <string name="card_diff_expand_code">Show code</string>
+    <string name="card_diff_collapse_code">Hide code</string>
+    <string name="card_revision_hint">Describe what to change; it becomes a hard constraint for the next round</string>
+    <string name="card_revision_submit">Send back</string>
+    <string name="card_revision_chip_test">Add tests</string>
+    <string name="card_revision_chip_contrast">Fix contrast</string>
+    <string name="card_revision_chip_compat">Compatibility</string>
+    <string name="card_revision_chip_perf">Performance</string>
+    <!-- Session-exempt two states (tiered authorization): closed offers the entry semantics,
+         open states the fact honestly. -->
+    <string name="card_session_exempt">Exempt this session</string>
+    <string name="card_session_exempt_active">Session exempt active</string>
+
     <!-- Context capsule (plan §5.2) -->
     <string name="capsule_entity_team">Team</string>
     <string name="capsule_default_ws">Default</string>
