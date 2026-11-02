@@ -3,6 +3,7 @@
 package com.kapp.tidings.core.transport
 
 import kotlinx.coroutines.delay
+import com.kapp.tidings.core.testutil.awaitTrue
 import kotlinx.coroutines.runBlocking
 import kotlin.test.Test
 import kotlin.test.assertTrue
@@ -65,16 +66,12 @@ class UdpTransportPumpDeathTest {
 
             // 自愈路径就是 restart()（等价 stop+start）——它必须把泵救活。
             t.restart()
-            // 绑定新端口/内核记账需要一点点时间；轮询而不是死等固定时长。
-            var ok = false
-            repeat(50) {
-                if (t.send(byteArrayOf(0x01), "127.0.0.1", t.boundPort)) {
-                    ok = true
-                    return@repeat
-                }
-                delay(100)
-            }
-            assertTrue(ok, "restart 之后发送必须恢复（自愈闭环）")
+            // 绑定新端口/内核记账需要一点点时间：轮询「发送恢复」这个确定事件，
+            // 不用固定 delay 赌内核记账完成（等待策略统一走 testutil.awaitTrue）。
+            awaitTrue(
+                "restart 之后发送必须恢复（自愈闭环）",
+                timeoutMs = 30_000,
+            ) { t.send(byteArrayOf(0x01), "127.0.0.1", t.boundPort) }
         } finally {
             t.stop()
         }
