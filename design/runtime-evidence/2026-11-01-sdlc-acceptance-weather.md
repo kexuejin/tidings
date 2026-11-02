@@ -1255,3 +1255,45 @@ git。「移动端本地校验后点击合并」现在成立的部分是「手�
 `:app:jvmTest` **776 / 0 fail**（110 suites）、`:desktopApp:test` **251 / 0 fail**（51 suites）、
 `:agentNode:test` **301 / 1 skipped / 0 fail**（41 suites，skip 的是需要 `TIDINGS_REAL_CLI=1`
 的真 CLI 用例）。五条门禁全绿（`envDependentTestGate` 扫 490 个测试文件，A/B 类 0 个）。
+
+## 14. 真 CLI 全链路真机验收 · 2026-11-02 17:00–18:30（host9→host11）
+
+环境：宿主 = /Applications/Tidings.app（含 3656d9e1 D4/D6 + b68ee01a refine 产物快照），
+真 codex exec → opencode-go 网关（deepseek-v4.1-flash）；手机 Pixel 6 实机操作（adb）。
+所有 CLI 调用均为真沙箱真模型，无 stub。
+
+### 14.1 已验证通过
+
+| 环节 | 证据 |
+| --- | --- |
+| 派单受理 | 手机 `@codex-e2e Design a minimal weather app prototype…` → 宿主 DB 15s 落行 → 受理卡「进行中 20%」 |
+| 原型真出 | codex exec ~7min → prototype.html 63.8KB **真投到手机**（"已接收/打开/分享"）→ 卡片「待确认 50%」三方案 |
+| 手机端产物可交互 | 手机 Chrome 渲染 Morrow 原型：7 天预报、C°↔F° 切换 24°C→75°F 实测生效 |
+| 追问 refine | 点 Layout B（宿主日志 `consumed as follow-up`）→ codex refine → **b68ee01a 修复验证**：56.7KB 新产物再次真投递，卡上产物行还在（修复前会消失） |
+| Approve → dev | 点 Approve & Develop → 卡翻「进行中 40% Executing worker sandbox…」→ codex dev 轮 16 文件 +1051 −55 |
+| 阶段 B 合流 | 卡「待合并 100%」→ patch.diff 47.5KB 真投手机 → 点「合并此补丁」→ `patch merged into workspace … next sandbox base=d64aa77`（D5 滚动基线）→ 卡「已合并 100% Changes merged into workspace」 |
+| 合流产物是真的 | `~/weather-relay` 工作树 13 改 3 增；`npm test` **87/87 pass** |
+| stop 打断 | 群发 `@codex-e2e stop`（执行中）→ `[sandbox] abort t-7: killed 2/2 pid(s) in 64ms` → 卡「已停止 / Aborted by user request」（红 X，不是失败） |
+
+### 14.2 本轮新发现（未修）
+
+- **D-NEW-1 宿主重启后工单内存态丢失，卡按钮静默丢弃**：host 重启后点旧卡按钮，
+  宿主 `[RELAY-INVOKE] card action … has no local plugin (dropped)`，手机却已显示
+  「已由 Pixel 6 处理」——「点了有反应（本机）但什么都没发生（宿主）」，比无痕更误导。
+  缓解：重启后用文本重新派单（本轮即如此）；根治要工单态持久化或如实回执。
+- **D-NEW-2 工单活跃期间手机列表滚不上去**：进行中/待合并阶段连续 swipe 列表纹丝不动
+  （怀疑收到底部跟随与卡片 rev 刷新互相拉扯），卡底部「停止」按钮不可达 →
+  用户只能靠 stop 关键词。需复现 + 修（跟随策略只该在「本来就在底部」时生效）。
+- **D-NEW-3 合并卡增删数展示两遍**：`weather-relay +1051 −55` 与 `16 个文件 +1051 −55`
+  重复；与已修的「第 N 版徽标重复」同族，取一处即可。
+- 备注：手机存储接近满，patch.diff 出现「传输失败：写入本机磁盘失败」→ app 的
+  可续传/继续/取消失败 UI 表现正确，属环境问题非缺陷。
+- 阶段 C（报障自愈）本轮未覆盖：真实 CLI 全程零失败，没有自然触发自愈的机会；
+  需要故障注入（如让 CLI 产物缺测试）才能验，留待下一轮。
+
+### 14.3 结论
+
+阶段 A（原型→追问→refine→产物真投递）与阶段 B（Approve→dev→合并→仓测试通过）
+在真机 + 真 CLI 上**完整走通**，全程卡片/消息对真实用户可读；stop 打断语义正确。
+遗留：D-NEW-1/2/3 与 §13 的 D4/D6 已修项之外的历史项（§6.3 离线 bundle、原型三选项
+硬编码假选项文案）。

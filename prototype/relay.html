@@ -511,18 +511,45 @@ button.c[aria-pressed="true"]{background:#B7E4C7;border-color:#B7E4C7;color:#1B4
 
 /* ---------- 会话内 Agent 交互卡片（现代精致工作台卡片风）----------
    去除了生硬的表格分割线与大色块横幅，采用温润的微渐变背景与呼吸感留白。
-   具有现代协作工具（Linear / Raycast / Claude）的精致工卡质感。 */
+   具有现代协作工具（Linear / Raycast / Claude / LobeHub）的精致工卡质感。 */
+@keyframes pulse-dot {
+  0%, 100% { transform: scale(0.95); opacity: 0.7; box-shadow: 0 0 0 0 rgba(107,78,230,.5); }
+  50% { transform: scale(1.15); opacity: 1; box-shadow: 0 0 0 4px rgba(107,78,230,.18); }
+}
+@keyframes shimmer-bar {
+  0% { background-position: -200% 0; }
+  100% { background-position: 200% 0; }
+}
 .acard{background:var(--surface);border:1px solid rgba(0,0,0,.08);border-radius:16px;
   box-shadow:0 3px 12px rgba(0,0,0,.03), 0 1px 3px rgba(0,0,0,.02);
   width:100%;max-width:min(100%, 680px);overflow:hidden;margin:6px 0;
   display:flex;flex-direction:column;gap:12px;padding:16px 18px}
-/* 头部排版：不再是硬色块标题栏，而是第一行文字排版 */
+/* 头部工牌排版：数字员工 Avatar + 名字 + 呼吸指示灯 + 耗时/状态标签 */
 .acard .hd{display:flex;align-items:center;gap:8px;padding:0}
-.acard .hd .type-pill{font-size:11px;font-weight:600;padding:2px 8px;border-radius:6px;
-  background:rgba(107,78,230,.09);color:var(--agent-t);letter-spacing:.02em}
+.acard .hd .bot-badge{display:inline-flex;align-items:center;gap:5px;font-size:11px;font-weight:600;
+  padding:2px 8px;border-radius:6px;background:rgba(107,78,230,.09);color:var(--agent-t);letter-spacing:.02em}
+.acard .hd .bdot{width:7px;height:7px;border-radius:50%;display:inline-block;flex:none}
+.acard .hd .bdot.run{background:var(--primary);animation:pulse-dot 1.8s infinite ease-in-out}
+.acard .hd .bdot.done{background:var(--online)}
+.acard .hd .bdot.fail{background:var(--error)}
+.acard .hd .bdot.warn{background:var(--on-queued-c)}
 .acard .hd .tt{flex:1;min-width:0;font-size:14px;font-weight:600;color:var(--on);
   overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.acard .hd .wk-chip{flex:none;font-size:11px;padding:1.5px 6px;border-radius:5px;background:var(--surface-2);color:var(--on-2);font-family:var(--font-mono)}
 .acard .hd .rv{flex:none;font-size:11px;color:var(--on-2);opacity:.7;font-family:var(--font-mono)}
+/* 影响范围与上下文元信息标签行 */
+.acard .mchips{display:flex;flex-wrap:wrap;gap:6px;padding:1px 0}
+.acard .mchip{display:inline-flex;align-items:center;gap:4px;font-size:11px;padding:2px 7px;
+  border-radius:6px;background:var(--surface-2);color:var(--on-2);font-weight:500}
+.acard .mchip.pri{background:rgba(107,78,230,.08);color:var(--agent-t);font-weight:600}
+.acard .mchip.ok{background:rgba(16,185,129,.1);color:var(--online)}
+.acard .mchip.warn{background:rgba(245,158,11,.1);color:var(--on-queued-c)}
+.acard .mchip.err{background:rgba(239,68,68,.1);color:var(--error)}
+/* 业务上下文与意图说明框 */
+.acard .ctx-box{padding:8px 12px;background:var(--surface-2);border-radius:8px;font-size:11px;
+  line-height:1.55;color:var(--on);border-left:3px solid var(--primary)}
+.acard .cmd-box{padding:8px 12px;background:var(--surface-3);border-radius:8px;font-family:var(--font-mono);
+  font-size:11px;color:var(--on);line-height:1.5;overflow-x:auto}
 /* 横幅：精致微型提示框，带柔和圆角与图标指示 */
 .acard .bn{padding:10px 14px;font-size:12px;line-height:1.5;word-break:break-word;
   border-radius:10px;display:flex;align-items:flex-start;gap:8px;background:var(--surface-2)}
@@ -531,10 +558,11 @@ button.c[aria-pressed="true"]{background:#B7E4C7;border-color:#B7E4C7;color:#1B4
 .acard .bn.warn{background:rgba(245,158,11,.08);color:var(--on-queued-c)}
 .acard .bn.danger{background:rgba(239,68,68,.08);color:var(--error)}
 .acard .bn .bnic{flex:none;font-size:13px;line-height:1.4}
-/* 进度条：圆角柔和细轨 */
+/* 进度条：圆角柔和细轨 + 流光 */
 .acard .pg{display:flex;align-items:center;gap:10px;padding:2px 0}
 .acard .pg .bar{flex:1;height:6px;border-radius:10px;background:var(--surface-3);overflow:hidden}
 .acard .pg .bar i{display:block;height:100%;background:linear-gradient(90deg, var(--primary), #8B5CF6);border-radius:10px}
+.acard .pg.active .bar i{background:linear-gradient(90deg, var(--primary), #8B5CF6, var(--primary));background-size:200% 100%;animation:shimmer-bar 2.4s infinite linear}
 .acard .pg .pc{flex:none;font-size:12px;font-weight:600;color:var(--primary);
   font-variant-numeric:tabular-nums;font-family:var(--font-mono)}
 /* 步骤列表：微型任务小清单，无生硬虚线切割 */
@@ -553,15 +581,39 @@ button.c[aria-pressed="true"]{background:#B7E4C7;border-color:#B7E4C7;color:#1B4
 .acard .st.run .lb{font-weight:600;color:var(--primary)}
 .acard .st .asg{flex:none;font-size:11px;padding:1.5px 7px;border-radius:6px;
   background:var(--surface-2);color:var(--on-2);border:1px solid rgba(0,0,0,.04)}
-/* Diff 视窗：现代代码视窗小卡 */
+/* ---------- LobeHub Acceptance Checks 清单与下钻抽屉 ---------- */
+.acard .checks{display:flex;flex-direction:column;gap:6px;padding:2px 0}
+.acard .chk{background:var(--surface-2);border:1px solid rgba(0,0,0,.05);border-radius:10px;overflow:hidden;transition:all .15s}
+.acard .chk.fail{border-color:rgba(239,68,68,.25)}
+.acard .chk-head{display:flex;align-items:center;gap:8px;padding:7px 10px;cursor:pointer;font-size:12px}
+.acard .chk-head:hover{background:rgba(0,0,0,.02)}
+.acard .chk-ic{flex:none;width:16px;height:16px;border-radius:50%;display:grid;place-items:center;font-size:11px;font-weight:700}
+.acard .chk.pass .chk-ic{color:var(--online);background:rgba(16,185,129,.12)}
+.acard .chk.fail .chk-ic{color:var(--error);background:rgba(239,68,68,.12)}
+.acard .chk.run .chk-ic{color:#fff;background:var(--primary);animation:pulse-dot 1.8s infinite ease-in-out}
+.acard .chk-tt{flex:1;min-width:0;color:var(--on);font-weight:500;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.acard .chk-meta{flex:none;font-size:11px;color:var(--on-2);font-family:var(--font-mono)}
+.acard .chk-arrow{flex:none;font-size:10px;color:var(--on-2);transition:transform .2s}
+.acard .chk.open .chk-arrow{transform:rotate(90deg)}
+.acard .chk-drawer{display:none;padding:8px 12px;background:rgba(0,0,0,.04);border-top:1px solid rgba(0,0,0,.05);font-family:var(--font-mono);font-size:11px;color:var(--on-2);line-height:1.55;white-space:pre-wrap;word-break:break-all}
+.acard .chk.open .chk-drawer{display:block}
+/* Diff 视窗：现代代码视窗小卡 + 可下钻 Hunk */
 .acard .df{padding:10px 12px;background:var(--surface-2);border:1px solid rgba(0,0,0,.05);
   border-radius:10px;font-family:var(--font-mono);font-size:12px}
 .acard .df .dfhead{display:flex;align-items:center;justify-content:space-between;gap:8px}
 .acard .df .pt{color:var(--on);font-weight:500;word-break:break-all}
-.acard .df .diff-stat{flex:none;display:inline-flex;gap:4px;font-size:11px}
+.acard .df .diff-stat{flex:none;display:inline-flex;align-items:center;gap:6px;font-size:11px}
 .acard .df .add{color:var(--online);font-weight:600} .acard .df .del{color:var(--error);font-weight:600}
+.acard .df .dftoggle{background:none;border:none;cursor:pointer;color:var(--primary);font-size:11px;padding:2px 4px;font-weight:600}
 .acard .df .note{font-size:11px;color:var(--on-2);margin-top:6px;line-height:1.45;word-break:break-word}
-/* 产物条目：文件小胶囊 */
+.acard .df-hunk{display:none;margin-top:8px;padding:6px 0;background:var(--surface-3);border-radius:8px;font-size:11px;line-height:1.6;overflow-x:auto}
+.acard .df.open .df-hunk{display:block}
+.acard .df-hunk .hl{display:flex;padding:1px 8px;margin:0;font-family:var(--font-mono)}
+.acard .df-hunk .hl .ln{flex:none;width:24px;color:var(--on-2);opacity:.45;font-size:10px;user-select:none;text-align:right;margin-right:8px}
+.acard .df-hunk .hl .code{flex:1;white-space:pre}
+.acard .df-hunk .hl.add{background:rgba(16,185,129,.12);color:var(--online)}
+.acard .df-hunk .hl.del{background:rgba(239,68,68,.12);color:var(--error)}
+/* 产物条目：文件小胶囊 + 快速动作 */
 .acard .art{display:flex;align-items:center;gap:10px;padding:10px 12px;background:var(--surface-2);
   border-radius:10px;border:1px solid rgba(0,0,0,.05)}
 .acard .art .art-ic{flex:none;width:28px;height:28px;border-radius:6px;background:rgba(107,78,230,.1);
@@ -570,13 +622,26 @@ button.c[aria-pressed="true"]{background:#B7E4C7;border-color:#B7E4C7;color:#1B4
 .acard .art .nm{flex:1;min-width:0;font-size:13px;color:var(--on);font-weight:600;
   overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 .acard .art .mt{flex:none;font-size:11px;color:var(--on-2);font-family:var(--font-mono)}
-/* 操作区域：按钮与说明融为一体 */
+.acard .art .art-act{flex:none;font-size:11px;padding:3px 8px;border-radius:6px;background:rgba(107,78,230,.09);color:var(--primary);border:none;cursor:pointer;font-weight:600}
+.acard .art .art-act:hover{background:var(--primary);color:#fff}
+/* ---------- 操作区域与打回反馈槽（LobeHub 决策闭环） ---------- */
 .acard .acts{display:flex;flex-direction:column;gap:8px;padding-top:4px}
 .acard .acts .pri-row{display:flex;gap:10px}
 .acard .acts .pri-row .btn{flex:1;justify-content:center;border-radius:9px;padding:7px 12px}
+.acard .acts .pri-row .btn.reject{border-color:rgba(239,68,68,.25);color:var(--error)}
+.acard .acts .pri-row .btn.reject:hover{background:rgba(239,68,68,.06)}
 .acard .acts .sub-row{display:flex;justify-content:center;gap:16px;padding-top:2px}
 .acard .acts .sub-row button{font-size:11px;color:var(--on-2);background:none;border:none;cursor:pointer;padding:2px 4px}
 .acard .acts .sub-row button:hover{color:var(--primary);text-decoration:underline}
+/* 就地打回抽屉 */
+.acard .rev-drawer{display:none;flex-direction:column;gap:8px;padding:10px 12px;background:var(--surface-2);border:1px solid rgba(239,68,68,.18);border-radius:10px;margin-top:2px}
+.acard .rev-drawer.open{display:flex}
+.acard .rev-drawer .qchips{display:flex;flex-wrap:wrap;gap:6px}
+.acard .rev-drawer .qchip{font-size:11px;padding:2.5px 8px;border-radius:6px;background:var(--surface);border:1px solid rgba(0,0,0,.08);color:var(--on-2);cursor:pointer;transition:all .15s}
+.acard .rev-drawer .qchip:hover{border-color:var(--primary);color:var(--primary)}
+.acard .rev-drawer .rev-row{display:flex;gap:8px}
+.acard .rev-drawer .rev-inp{flex:1;border:1px solid rgba(0,0,0,.12);background:var(--surface);border-radius:8px;padding:6px 10px;font-size:12px;color:var(--on);outline:none}
+.acard .rev-drawer .rev-inp:focus{border-color:var(--primary)}
 .acard .decided{padding:8px 12px;font-size:12px;color:var(--on-2);background:var(--surface-2);
   border-radius:8px;display:flex;align-items:center}
 .acard .decided .apst{margin-right:8px}
@@ -2086,40 +2151,130 @@ const MSGS_AGENT = [
   {mine:true, text:'ci-runner 现在还离线，这条它自己排着，等上线会补发。'},
   {mine:true, text:'这条草稿超过 800 字节，会自动改走 TCP 兜底通道。'},
   {ini:'AI', c:'#6B4EE6', sender:'teahouse-mobile',
-   card:{type:'task-board', title:'重构网络传输层', rev:3, progress:70,
-     steps:[{label:'协议定义更新', status:'done', assignee:'@architect'},
-            {label:'核心通道编写 · 正在跑测试', status:'run', assignee:'@coder'},
-            {label:'回归测试校验', status:'pend', assignee:'@tester'}],
-     actions:[{label:'暂停任务'},{label:'查看调用明细'}]}},
+   card:{type:'task-board', title:'重构网络传输层 · 自愈验证中', rev:3, progress:75,
+     bot:{name:'Codex', avatar:'🤖'}, bdot:'run', branch:'worktree: #feat-transport',
+     chips:[
+       {text:'🎯 弱网抗抖动与丢包自愈', tone:'pri'},
+       {text:'⚡ 模块: :core:transport', tone:''},
+       {text:'🔄 状态: Heal Loop 2/3', tone:'warn'}
+     ],
+     context:'<b>执行意图</b>：修复移动端在 Wi-Fi/蜂窝频繁切换下的 TCP 假死与乱序丢包。引入快速探测探针并在沙箱内执行多轮容灾注入测试。',
+     banner:{tone:'info', text:'沙箱内正在运行第 2 轮自愈循环，正在验证丢包重试边界用例...'},
+     checks:[
+       {label:'跨平台多端编译对齐 (:core & :app)', status:'pass', time:'1.4s',
+        observation:'JVM 与 iOS 两端编译完全通过，无符号导出漂移。'},
+       {label:'协议黄金向量回归 (1509 passed, 0 failed)', status:'pass', time:'3.2s',
+        observation:'16 档历史协议帧序列化 100% 逐字节对齐。'},
+       {label:'极端弱网丢包自愈断言 (触发 Heal Loop 2/3)', status:'fail', time:'1.1s', open:true,
+        observation:'第 1 轮断言未通过：丢包率达 30% 时重连超时未收敛。已自动携带诊断日志进入第 2 轮自愈修复...',
+        drawer:'TransportSelfHealTest > packetLossRetry() FAILED\n  AssertionError: expected <2> retries, received <0>\n  at TransportSelfHealTest.kt:42\n  at TransportTestRunner.run(:118)'}
+     ],
+     actions:[{label:'打回修改...', reject:true}, {label:'暂停任务'}]}},
   {ini:'AI', c:'#6B4EE6', sender:'teahouse-mobile',
-   card:{type:'approval', title:'需要审批 · git push', rev:1,
-     banner:{tone:'danger', text:'即将推送 3 个提交到 origin/main'},
-     diff:{path:'core/src/commonMain/…/NodeOutbound.kt', add:42, del:7,
-           note:'发送侧预算改为三处同源'},
-     actions:[{label:'拒绝'},{label:'批准', pri:true}],
-     subActions:[{label:'本次会话免审'},{label:'始终允许此工具'}]}},
+   card:{type:'approval', title:'代码审核与产物合流 · NodeOutbound.kt', rev:1,
+     bot:{name:'Claude Code', avatar:'⚡'}, bdot:'done', branch:'worktree: #patch-ready',
+     chips:[
+       {text:'🎯 修复长文本丢帧', tone:'pri'},
+       {text:'⚡ 范围: :core:transport · +42/−7 行', tone:''},
+       {text:'🛡️ 门禁: 6项全绿', tone:'ok'},
+       {text:'🟢 风险评级: 低 (无破坏性变更)', tone:'ok'}
+     ],
+     context:'<b>根因与修复方案</b>：原逻辑硬编码了 800B 上限，导致群长消息在发送端被截断丢帧。本次严格对齐帧预算契约，将 TCP 群文本上限规范至 32 KiB 并统一三处同源截断边界。',
+     banner:{tone:'done', text:'沙箱内单元测试与架构门禁已全部通过，patch.diff 与执行产物已随卡直投本机，等待机主批准合流。'},
+     checks:[
+       {label:'帧预算契约核验 (整帧上限 ≤ 64 KiB, 群文本 ≤ 32 KiB)', status:'pass', time:'0.6s',
+        observation:'针对 10KB/24KB/32KB 阶梯负载执行发包验证，接收侧成功落库零丢帧。'},
+       {label:'白名单字段严格对齐 (零未声明额外键)', status:'pass', time:'0.9s',
+        observation:'CodecMsg.GROUP_TEXT_KEYS 白名单校验通过，旧版节点解码安全。'},
+       {label:'架构门禁与汉字字面量守卫 (cjkLiteralGate)', status:'pass', time:'1.2s',
+        observation:'生产代码零硬编码字符串，领域层零 Compose 依赖。'}
+     ],
+     diff:{path:'core/transport/NodeOutbound.kt', add:42, del:7,
+           note:'发送侧预算收归三处同源，修复群文本 32 KiB 溢出丢帧缺陷', open:true,
+           hunk:[
+             '@@ -45,7 +45,8 @@ fun clampGroupText(payload: String): String {',
+             '-    // 旧实现：硬编码 800B 上限（导致群长消息被静默截断丢弃）',
+             '-    if (payload.length > 800) return payload.take(800)',
+             '+    // 严格遵循帧预算契约：TCP 群文本走 32 KiB 上限',
+             '+    val maxBytes = Limits.GROUP_TEXT_BYTES // 32768',
+             '+    return CodecMsg.clampUtf8(payload, maxBytes)'
+           ]},
+     artifact:{name:'patch.diff', meta:'3.4 KB · 离线 P2P 补丁文件已交付'},
+     actions:[{label:'打回修改...', reject:true}, {label:'⚡ 批准并合并补丁', pri:true}],
+     subActions:[{label:'本次会话免审'},{label:'查看完整验收报告'}]}},
   {ini:'AI', c:'#6B4EE6', sender:'teahouse-mobile',
-   card:{type:'approval', title:'需要审批 · 删除构建目录', rev:2,
-     banner:{tone:'danger', text:'rm -rf build/（高危命令）'},
-     decided:{ok:false, label:'已拒绝', by:'已由 Alice 拒绝 · 14:32'}}},
+   card:{type:'approval', title:'高危命令审批 · 清理构建目录', rev:2,
+     bot:{name:'Codex', avatar:'🤖'}, bdot:'fail',
+     chips:[
+       {text:'⚠️ 高危敏感操作', tone:'err'},
+       {text:'🎯 目标: 根目录清理', tone:''},
+       {text:'🛡️ 宿主安全守卫: 拦截', tone:'warn'}
+     ],
+     cmd:'$ rm -rf /Volumes/Kapp/source/teahouse-mobile/build/',
+     context:'<b>风险预警与阻断说明</b>：Agent 检测到依赖冲突试图删除根构建目录。宿主安全探针拦截：此操作会强行销毁当前正在运行的 Gradle Daemon 套接字与本地未落盘构建缓存。<br/><b>安全替代方案</b>：推荐改用针对子模块的 <code>./gradlew :core:clean</code>。',
+     banner:{tone:'danger', text:'rm -rf build/（已拦截并阻止执行，高危级全量清理操作）'},
+     decided:{ok:false, label:'已打回', by:'已由 Alice 打回 · 附指导规则「请勿删除本地构建缓存，改用 cleanTask」 · 14:32'}}},
   {ini:'AI', c:'#6B4EE6', sender:'teahouse-mobile',
-   card:{type:'approval', title:'需要审批 · 修改 CI 配置', rev:1,
-     banner:{tone:'warn', text:'审批请求已过期（5 分钟未处理）'},
-     expired:'未处理 · 请求于 14:20 失效'}},
+   card:{type:'approval', title:'安全审批 · 修改 CI 门禁矩阵', rev:1,
+     bot:{name:'Gemini', avatar:'🛡️'}, bdot:'warn',
+     chips:[
+       {text:'⏳ 审批请求已失效', tone:'warn'},
+       {text:'⚡ 文件: .github/workflows/ci.yml', tone:''},
+       {text:'⏱️ 租约时长: 5 分钟', tone:''}
+     ],
+     context:'<b>变更说明</b>：Agent 请求在 CI 流程中跳过 <code>:testStabilityGate</code> 以缩短发版等待。安全策略规定：核心门禁豁免属于高权限敏感操作，必须经由机主在 5 分钟内显式二次签名确认。',
+     banner:{tone:'warn', text:'审批请求已过期（超 5 分钟未处理，系统已自动按 Fail-Closed 策略安全回滚，无残留影响）'},
+     expired:'未处理 · 请求于 14:20 失效 · 变更已自动放弃'}},
   {ini:'AI', c:'#6B4EE6', sender:'teahouse-mobile',
-   card:{type:'timeout', title:'GPU 回归 · 子任务超时中断', rev:1,
-     banner:{tone:'danger', text:'远程算力节点失联超过 3 分钟，租约已到期'},
-     actions:[{label:'降级为本地执行'},{label:'重试', pri:true}]}},
+   card:{type:'timeout', title:'GPU 算力回归 · 远程节点超时中断', rev:1,
+     bot:{name:'Codex', avatar:'🤖'}, bdot:'fail',
+     chips:[
+       {text:'⚠️ 算力节点失联', tone:'err'},
+       {text:'📍 节点: gpu-cluster-node-04', tone:''},
+       {text:'💾 进度: 85% 已本地持久化', tone:'ok'}
+     ],
+     context:'<b>故障诊断</b>：在执行多模态嵌入回归第 85/100 批次时，远端 GPU 算力节点心跳中断超过 180 秒。<br/><b>断点保护</b>：已持久化前 85 项断点至本地沙箱，耗时已结算，可选择使用本地 CPU 兜底跑完剩余 15 项。',
+     banner:{tone:'danger', text:'远程算力节点失联超过 3 分钟，租约已到期（前 85% 验证断点已保护）'},
+     actions:[{label:'降级为本地 CPU 执行'},{label:'重试远程节点', pri:true}]}},
   {ini:'AI', c:'#6B4EE6', sender:'teahouse-mobile',
-   card:{type:'result', title:'重构网络传输层 · 完成', rev:4,
-     banner:{tone:'done', text:'1509 项测试全部通过'},
-     artifact:{name:'refactor-report.md', meta:'18 KB · text/markdown'}}},
+   card:{type:'result', title:'重构网络传输层 · 终期交付验收报告', rev:4,
+     bot:{name:'Codex', avatar:'🤖'}, bdot:'done',
+     chips:[
+       {text:'🏆 全量验收通过', tone:'ok'},
+       {text:'⏱️ 迭代周期: 3 轮 Heal Loop', tone:''},
+       {text:'⚡ 最终结论: 合流就绪', tone:'pri'}
+     ],
+     context:'<b>交付总结</b>：网络传输层抗抖动与 32 KiB 帧预算加固已完成全部自愈验证。经多平台交叉验证，无内存泄漏与死锁隐患。',
+     banner:{tone:'done', text:'全量验收通过：1509 项单测 + 6 项架构门禁全部合格，补丁已成功合入。'},
+     checks:[
+       {label:'单元测试与回归测试集 (1509/1509 全部通过)', status:'pass', time:'4.1s',
+        observation:'覆盖 6 个模块，全量断言通过。'},
+       {label:'高并发稳定性测试 (testStabilityGate 连跑 3 轮)', status:'pass', time:'12.8s',
+        observation:'无死锁，无饿死，三轮测试稳定全绿。'},
+       {label:'架构门禁守卫 (:app 零 Compose 依赖)', status:'pass', time:'1.2s',
+        observation:'领域层与表现层边界清晰。'}
+     ],
+     artifact:{name:'acceptance-report.md', meta:'18 KB · Markdown 完整交付报告'}}},
   {ini:'AI', c:'#6B4EE6', sender:'teahouse-mobile',
-   card:{type:'status', title:'任务状态', rev:1,
-     banner:{tone:'info', text:'插件离线，动作未执行（可稍后重试）'}}},
+   card:{type:'status', title:'任务状态 · 插件探活', rev:1,
+     bot:{name:'Codex', avatar:'🤖'}, bdot:'warn',
+     chips:[
+       {text:'🔌 插件连接状态', tone:'warn'},
+       {text:'📍 插件: github-action-runner', tone:''},
+       {text:'🔄 重试队列: 待发中', tone:''}
+     ],
+     context:'<b>环境状态说明</b>：本地探活检测到 GitHub 插件守护进程暂时处于离线挂起态。调度器已将当前未发出的 2 项触发动作安全压入离线等待队列。',
+     banner:{tone:'info', text:'插件离线，动作未执行（已压入离线重试队列，连通后自动重放）'}}},
   {ini:'AI', c:'#6B4EE6', sender:'teahouse-mobile',
-   card:{type:'approval', title:'需要审批 · 清理发布分支', rev:1,
-     banner:{tone:'danger', text:'即将删除远端分支 release/1.4'},
+   card:{type:'approval', title:'分支清理审批 · 删除远端临时分支', rev:1,
+     bot:{name:'Claude Code', avatar:'⚡'}, bdot:'warn',
+     chips:[
+       {text:'⚠️ 分支销毁操作', tone:'warn'},
+       {text:'📍 目标: release/1.4-temp', tone:''},
+       {text:'👤 发起: 自动流水线', tone:''}
+     ],
+     context:'<b>操作说明</b>：发布已完成归档，流水线申请删除临时集成分支 <code>origin/release/1.4-temp</code>。此操作不可逆，需要机主确认该分支上的改动已全部合入主干。',
+     banner:{tone:'danger', text:'即将从远端 Git 仓库永久删除分支 release/1.4-temp'},
      wait:'等待机主处理'}},
   {notice:'RecalledBySelf'},
 ];
@@ -3466,37 +3621,242 @@ function fileCard(f){
       ${acts.length?`<div class="frow">${acts.join('')}</div>`:''}
     </div></div>`;
 }
-/* 会话内 Agent 交互卡片（设计稿 v2 §3 注册表）：卡 = 块组合，type 只是徽标文案 ——
-   渲染是宽容的（有什么块画什么块），与 AgentCards.kt 的 parseAgentCard 同一哲学。
-   decided / expired / wait 三种终态互斥地占按钮组的位置。 */
+function toggleChkDrawer(el){ el.closest('.chk').classList.toggle('open'); }
+function toggleDfHunk(el){ el.closest('.df').classList.toggle('open'); }
+function toggleRevision(btn){
+  const card = btn.closest('.acard');
+  const d = card.querySelector('.rev-drawer');
+  if(d) d.classList.toggle('open');
+}
+function quickFillRev(chip, text){
+  const card = chip.closest('.acard');
+  const inp = card.querySelector('.rev-inp');
+  if(inp){ inp.value = text; inp.focus(); }
+}
+function submitRevision(btn){
+  const card = btn.closest('.acard');
+  const inp = card.querySelector('.rev-inp');
+  const val = inp ? inp.value.trim() : '';
+  if(!val) return;
+  const d = card.querySelector('.rev-drawer');
+  if(d) d.classList.remove('open');
+  const bdot = card.querySelector('.bdot');
+  if(bdot) { bdot.className = 'bdot run'; }
+  const tt = card.querySelector('.hd .tt');
+  if(tt && !tt.innerText.includes('修复')) { tt.innerText += ' · 修复反馈中'; }
+  const bn = card.querySelector('.bn');
+  if(bn) { bn.className = 'bn info'; bn.innerHTML = `<span class="bnic">ℹ</span><div style="flex:1">已收到打回要求：「${val}」，正在启动沙箱自愈循环重试...</div>`; }
+  inp.value = '';
+  showToast('已向 Agent 注入修改约束并启动自愈循环');
+}
+function acceptPatch(btn){
+  const card = btn.closest('.acard');
+  if(!card) return;
+  btn.disabled = true;
+  btn.innerText = '正在合流...';
+  setTimeout(()=>{
+    const bdot = card.querySelector('.bdot');
+    if(bdot) bdot.className = 'bdot done';
+    const bn = card.querySelector('.bn');
+    if(bn) {
+      bn.className = 'bn done';
+      bn.innerHTML = '<span class="bnic">✓</span><div style="flex:1">代码补丁已成功合流至宿主分支 · 单元测试与门禁核验通过</div>';
+    }
+    const acts = card.querySelector('.acts');
+    if(acts) {
+      acts.innerHTML = '<div class="decided"><span class="apst ok">已合并</span> 已由 Alice (机主) 批准合流 · 耗时 4m12s · rev 2</div>';
+    }
+    showToast('⚡ 补丁 patch.diff 已安全合流至主分支');
+  }, 350);
+}
+function toggleSessionExempt(btn){
+  showToast('🛡️ 本会话已开启免审（后续微补丁将由宿主沙箱自动合流）');
+  btn.innerText = '✓ 本会话免审已生效';
+  btn.style.opacity = '0.7';
+}
+function showToast(msg){
+  let t = document.getElementById('proto-toast');
+  if(!t){
+    t = document.createElement('div');
+    t.id = 'proto-toast';
+    t.style.cssText = 'position:fixed;bottom:24px;left:50%;transform:translateX(-50%);background:rgba(20,20,24,0.92);color:#fff;font-size:12px;font-weight:600;padding:8px 16px;border-radius:20px;box-shadow:0 8px 24px rgba(0,0,0,0.25);z-index:9999;pointer-events:none;transition:opacity 0.25s,transform 0.25s;backdrop-filter:blur(8px);display:flex;align-items:center;gap:8px;';
+    document.body.appendChild(t);
+  }
+  t.innerHTML = msg;
+  t.style.opacity = '1';
+  t.style.transform = 'translateX(-50%) translateY(0)';
+  clearTimeout(t._timer);
+  t._timer = setTimeout(()=>{
+    t.style.opacity = '0';
+    t.style.transform = 'translateX(-50%) translateY(8px)';
+  }, 2200);
+}
+function previewArtifact(name){
+  let modal = document.getElementById('artifact-modal');
+  if(!modal){
+    modal = document.createElement('div');
+    modal.id = 'artifact-modal';
+    modal.className = 'dialog pickz';
+    modal.innerHTML = `
+      <div class="dlg" style="max-width:540px;width:90%;background:var(--surface);border-radius:14px;padding:18px;border:1px solid var(--outline);box-shadow:0 12px 32px rgba(0,0,0,0.2)">
+        <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:12px">
+          <div style="font-size:14px;font-weight:700" id="art-title">交付产物真预览</div>
+          <button class="btn sm" onclick="document.getElementById('artifact-modal').classList.remove('on')" style="padding:2px 8px">关闭</button>
+        </div>
+        <div id="art-body" style="font-family:var(--font-mono);font-size:11px;background:var(--surface-3);padding:12px;border-radius:8px;max-height:280px;overflow-y:auto;white-space:pre-wrap;line-height:1.55"></div>
+      </div>
+    `;
+    modal.onclick = (e)=>{ if(e.target === modal) modal.classList.remove('on'); };
+    document.body.appendChild(modal);
+  }
+  const title = document.getElementById('art-title');
+  const body = document.getElementById('art-body');
+  title.innerText = '沙箱产物交付 · ' + name;
+  if(name && name.endsWith('.diff')){
+    body.innerText = `diff --git a/core/transport/NodeOutbound.kt b/core/transport/NodeOutbound.kt
+index e69de29..b68ee01 100644
+--- a/core/transport/NodeOutbound.kt
++++ b/core/transport/NodeOutbound.kt
+@@ -45,7 +45,8 @@ fun clampGroupText(payload: String): String {
+-    if (payload.length > 800) return payload.take(800)
++    val maxBytes = Limits.GROUP_TEXT_BYTES // 32768
++    return CodecMsg.clampUtf8(payload, maxBytes)
+ }
+// Verified by TransportFrameBudgetTest (100% passed)`;
+  } else {
+    body.innerText = `# Acceptance Report: Network Transport Hardening
+- Golden Vector Parity: 1509/1509 passed
+- Frame Budget: All group text clamped strictly to 32 KiB
+- Heal Loop Count: 1 (Self-healed)
+- Verdict: ACCEPTED FOR MERGE`;
+  }
+  modal.classList.add('on');
+}
+
+/* 会话内 Agent 交互卡片（现代工卡 + LobeHub Acceptance 验收范式）：
+   1. 工牌排版：数字员工 Avatar + 名字 + 呼吸状态灯 + 耗时/分支锚点
+   2. Acceptance Checks：可独立核验、带耗时、支持终端日志抽屉下钻
+   3. 代码 Diff 视窗：带红绿对比行，直观呈现真实 hunk
+   4. 决策闭环：高饱和通过按钮 + 就地打回快捷输入槽 */
 function agentCard(c){
   const TONE_IC = {info:'ℹ', done:'✓', warn:'⚠', danger:'✕'};
   const ST = {done:['✓','done'], run:['▶','run'], pend:['','pend'], fail:['✕','fail'], blk:['⏸','blk']};
+  
+  // 头部工牌：Agent 身份 + 呼吸状态灯 + 分支锚点 + rev
+  const botBadge = c.bot ? `<span class="bot-badge">${c.bot.avatar||'🤖'} ${c.bot.name}</span>` : `<span class="type-pill">${c.type}</span>`;
+  const bdotCls = c.bdot || (c.progress!=null && c.progress<100 ? 'run' : (c.decided&&!c.decided.ok ? 'fail' : 'done'));
+  const bdot = `<span class="bdot ${bdotCls}"></span>`;
+  const wk = c.branch ? `<span class="wk-chip">${c.branch}</span>` : '';
   const hd = `<div class="hd">
-    <span class="type-pill">${c.type}</span>
+    ${botBadge}
+    ${bdot}
     <span class="tt">${c.title}</span>
+    ${wk}
     <span class="rv">rev ${c.rev}</span>
   </div>`;
+  
   const bn = c.banner ? `<div class="bn ${c.banner.tone||''}"><span class="bnic">${TONE_IC[c.banner.tone]||'ℹ'}</span><div style="flex:1">${c.banner.text}</div></div>` : '';
-  const pg = c.progress!=null ? `<div class="pg"><span class="bar"><i style="width:${c.progress}%"></i></span><span class="pc">${c.progress}%</span></div>` : '';
-  const steps = (c.steps||[]).map(s=>{const g=ST[s.status]||ST.pend;
-    return `<div class="st ${g[1]}"><span class="ic">${g[0]}</span><span class="lb">${s.label}</span>${s.assignee?`<span class="asg">${s.assignee}</span>`:''}</div>`}).join('');
-  const df = c.diff ? `<div class="df">
-    <div class="dfhead"><span class="pt">${c.diff.path}</span><span class="diff-stat"><span class="add">+${c.diff.add||0}</span><span class="del">−${c.diff.del||0}</span></span></div>
-    ${c.diff.note?`<div class="note">${c.diff.note}</div>`:''}
-  </div>` : '';
+  const chipsHtml = (c.chips && c.chips.length) ?
+    `<div class="mchips">${c.chips.map(ch=>`<span class="mchip ${ch.tone||''}">${ch.text}</span>`).join('')}</div>` : '';
+  const ctxHtml = c.context ? `<div class="ctx-box">${c.context}</div>` : '';
+  const cmdHtml = c.cmd ? `<div class="cmd-box">${c.cmd}</div>` : '';
+  const pg = c.progress!=null ? `<div class="pg ${c.progress<100?'active':''}"><span class="bar"><i style="width:${c.progress}%"></i></span><span class="pc">${c.progress}%</span></div>` : '';
+  
+  // Checks 检查清单（LobeHub Acceptance 范式）
+  let checksHtml = '';
+  if (c.checks && c.checks.length) {
+    checksHtml = `<div class="checks">${c.checks.map((chk)=>{
+      const isFail = chk.status === 'fail';
+      const isPass = chk.status === 'pass';
+      const isRun = chk.status === 'run';
+      const icStr = isPass ? '✓' : (isFail ? '✕' : (isRun ? '▶' : '·'));
+      const hasDrawer = chk.drawer || chk.observation;
+      return `<div class="chk ${chk.status||'pend'} ${chk.open?'open':''}">
+        <div class="chk-head" ${hasDrawer?`onclick="toggleChkDrawer(this)"`:''}>
+          <span class="chk-ic">${icStr}</span>
+          <span class="chk-tt">${chk.label}</span>
+          ${chk.time ? `<span class="chk-meta">${chk.time}</span>` : ''}
+          ${hasDrawer ? `<span class="chk-arrow">▶</span>` : ''}
+        </div>
+        ${hasDrawer ? `<div class="chk-drawer">${chk.drawer || chk.observation}</div>` : ''}
+      </div>`;
+    }).join('')}</div>`;
+  } else if (c.steps && c.steps.length) {
+    checksHtml = `<div class="sts">${c.steps.map(s=>{
+      const g = ST[s.status]||ST.pend;
+      return `<div class="st ${g[1]}"><span class="ic">${g[0]}</span><span class="lb">${s.label}</span>${s.assignee?`<span class="asg">${s.assignee}</span>`:''}</div>`;
+    }).join('')}</div>`;
+  }
+  
+  // Diff 视窗与 Hunk 代码预览
+  let df = '';
+  if (c.diff) {
+    const hasHunk = c.diff.hunk && c.diff.hunk.length;
+    df = `<div class="df ${c.diff.open?'open':''}">
+      <div class="dfhead">
+        <span class="pt">${c.diff.path}</span>
+        <span class="diff-stat">
+          <span class="add">+${c.diff.add||0}</span><span class="del">−${c.diff.del||0}</span>
+          ${hasHunk ? `<button class="dftoggle" onclick="toggleDfHunk(this)">${c.diff.open?'收起代码':'展开代码'}</button>` : ''}
+        </span>
+      </div>
+      ${c.diff.note?`<div class="note">${c.diff.note}</div>`:''}
+      ${hasHunk ? `<div class="df-hunk">${c.diff.hunk.map((l, idx)=>{
+        const cls = l.startsWith('+') ? 'add' : (l.startsWith('-') ? 'del' : '');
+        return `<div class="hl ${cls}"><span class="ln">${idx+1}</span><span class="code">${l.replace(/</g,'&lt;').replace(/>/g,'&gt;')}</span></div>`;
+      }).join('')}</div>` : ''}
+    </div>`;
+  }
+  
+  // 产物条目
   const art = c.artifact ? `<div class="art">
     <span class="art-ic">${ic('file')}</span>
     <div style="flex:1;min-width:0"><div class="nm">${c.artifact.name}</div><div class="mt">${c.artifact.meta}</div></div>
+    <button class="art-act" onclick="previewArtifact('${c.artifact.name}')">预览</button>
   </div>` : '';
-  const tail = c.decided ? `<div class="decided"><span class="apst ${c.decided.ok?'ok':'no'}">${c.decided.label}</span>${c.decided.by}</div>`
-    : c.expired ? `<div class="decided"><span class="apst exp">已过期</span>${c.expired}</div>`
-    : c.wait ? `<div class="wait">${c.wait}</div>`
-    : (c.actions&&c.actions.length) ? `<div class="acts">
-        <div class="pri-row">${c.actions.map(a=>`<button class="btn sm${a.pri?' pri':''}">${a.label}</button>`).join('')}</div>
-        ${c.subActions&&c.subActions.length ? `<div class="sub-row">${c.subActions.map(s=>`<button type="button">${s.label}</button>`).join('')}</div>` : ''}
-      </div>` : '';
-  return hd + bn + pg + (steps?`<div class="sts">${steps}</div>`:'') + df + art + tail;
+  
+  // 决策按钮与快捷打回槽
+  let actsHtml = '';
+  if (c.decided) {
+    actsHtml = `<div class="decided"><span class="apst ${c.decided.ok?'ok':'no'}">${c.decided.label}</span>${c.decided.by}</div>`;
+  } else if (c.expired) {
+    actsHtml = `<div class="decided"><span class="apst exp">已过期</span>${c.expired}</div>`;
+  } else if (c.wait) {
+    actsHtml = `<div class="wait">${c.wait}</div>`;
+  } else if (c.actions && c.actions.length) {
+    const buttons = c.actions.map(a=>{
+      if (a.reject) {
+        return `<button class="btn sm reject" onclick="toggleRevision(this)">${a.label}</button>`;
+      }
+      return `<button class="btn sm${a.pri?' pri':''}" onclick="${a.pri?'acceptPatch(this)':'alert(\'动作已触发\')'}">${a.label}</button>`;
+    }).join('');
+    
+    const subButtons = (c.subActions&&c.subActions.length) ?
+      `<div class="sub-row">${c.subActions.map(s=>`<button type="button" onclick="${s.label.includes('免审')?'toggleSessionExempt(this)':`previewArtifact('${c.artifact?c.artifact.name:'patch.diff'}')`}">${s.label}</button>`).join('')}</div>` : '';
+    
+    // 快捷打回抽屉
+    const revDrawer = `<div class="rev-drawer">
+      <div style="font-size:11px;color:var(--on-2);font-weight:600">指出修改意见（自动作为约束规则注入下轮自愈）：</div>
+      <div class="qchips">
+        <span class="qchip" onclick="quickFillRev(this,'补充极端网络丢包重试单测')">+ 补充单测</span>
+        <span class="qchip" onclick="quickFillRev(this,'暗色模式文字对比度不达标')">+ 调整对比度</span>
+        <span class="qchip" onclick="quickFillRev(this,'请保持旧版本字段向后兼容')">+ 保证向后兼容</span>
+        <span class="qchip" onclick="quickFillRev(this,'优化锁竞争，避免主线程阻塞')">+ 性能优化</span>
+      </div>
+      <div class="rev-row">
+        <input class="rev-inp" type="text" placeholder="输入修改要求或点击上方标签..." />
+        <button class="btn sm pri" onclick="submitRevision(this)">提交修改</button>
+      </div>
+    </div>`;
+    
+    actsHtml = `<div class="acts">
+      <div class="pri-row">${buttons}</div>
+      ${subButtons}
+      ${revDrawer}
+    </div>`;
+  }
+  
+  return hd + chipsHtml + bn + ctxHtml + cmdHtml + pg + checksHtml + df + art + actsHtml;
 }
 /** 一条消息。m.notice → 系统提示行；m.file → 文件气泡；m.card → Agent 交互卡片（不带 .bub 壳，与 ChatScreen 同构）；否则文字气泡。 */
 function msg(m){
