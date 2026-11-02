@@ -57,8 +57,12 @@ class OrchestratorPhase4WiringTest {
             "反馈要存进工单，重跑时随行",
         )
         assertTrue(
-            orchestrator.contains("WorkerPrompt.build(devPrompt, initialConstraints)"),
+            orchestrator.contains("WorkerPrompt.build(devPrompt, "),
             "自愈提示词必须经 WorkerPrompt 组装：硬约束前置，不是附录",
+        )
+        assertTrue(
+            orchestrator.contains("PitfallLedger.selectFor(") && orchestrator.contains("combinedConstraints"),
+            "反哺注入：仓库避坑账本的命中规约要与用户约束合并后一起前置（PitfallLedger）",
         )
         assertTrue(
             orchestrator.contains("initialConstraints: String? = null"),

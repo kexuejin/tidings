@@ -430,6 +430,14 @@ internal class DesktopWorkerOrchestrator(
         val prompt = active.devPrompt ?: return false
         active.userConstraints = feedback
         active.stage = "working"
+        // 反哺（§4.3.2 最小形态）：人的打回意见沉淀进仓库避坑账本 —— pattern 留空
+        //（恒匹配、垫底层），后续同仓派单都会带上这条约束；pattern 由人按需补精准。
+        runCatching {
+            PitfallLedger.append(
+                File(active.repoPath),
+                PitfallLedger.Pitfall(source = "reject", pattern = "", rule = feedback, createdAt = System.currentTimeMillis()),
+            )
+        }
         scope.launch {
             publishTicketCard(
                 groupId = active.groupId,
@@ -1142,7 +1150,18 @@ internal class DesktopWorkerOrchestrator(
             agentId = defaultAgent,
         )
 
-        val containedPrompt = WorkerPrompt.build(devPrompt, initialConstraints)
+        // 反哺注入（§4.3.2）：仓库账本里与这单 scope 命中的规约，拼在用户反馈之前 ——
+        // 账本条目是「这仓的长期事实」，用户反馈是「这单的临时要求」。
+        val ledgerBlock = runCatching {
+            PitfallLedger.promptBlockFor(
+                PitfallLedger.selectFor(
+                    File(repoPath),
+                    (title + "\n" + devPrompt).lowercase(),
+                ),
+            )
+        }.getOrNull()
+        val combinedConstraints = listOfNotNull(initialConstraints, ledgerBlock).joinToString("\n\n")
+        val containedPrompt = WorkerPrompt.build(devPrompt, combinedConstraints)
 
         val maxHealRounds = 3
         var healRound = 0
