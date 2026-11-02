@@ -562,10 +562,35 @@ codex 上游仍不可达（确定性失败），本轮验证全部走失败路�
 
 ### 13.0 装置：确定性桩 CLI，验的是链路不是模型
 
-本机没有任何可用的真 agent CLI：`codex exec` 50 秒零输出（上游不可达）、`claude`
-未登录、`agy` 502、`gemini` 解释器坏（`/opt/homebrew/opt/node/bin/node` 不存在）。
-本轮改用 `TIDINGS_CODEX_CLI=/tmp/sdlc/stub-codex`：一个与 `codex exec --json` 同形的
-`sh` 桩（`thread.started` / `item.completed` / `turn.completed`），按 prompt 分支产出确定产物。
+本机没有任何可用的真 agent CLI。**逐条实测**（2026-11-02 13:12–13:20 复核，命令与输出见下），
+四类阻塞原因不同，不能笼统写成「不可用」：
+
+| CLI | 版本 | 实测结论 | 判据 |
+|---|---|---|---|
+| `codex` | 0.145.0 | **未登录 + 上游不可达**（网络这层先失败） | `codex login status` → `Not logged in`（exit 1），无 `~/.codex/auth.json`；`codex exec` 打出会话头后连续 `failed to connect to websocket: IO error: tls handshake eof, url: wss://api.openai.com/v1/responses`，`Reconnecting… 1..5/5` 后 `Falling back from WebSockets to HTTPS transport` |
+| `claude` | 2.1.212 | **仅未登录**（网络是通的） | `claude -p …` → `Not logged in · Please run /login`；`~/.claude.json` 里 `oauthAccount=None`、`primaryApiKey=None`，无 `~/.claude/.credentials.json`；`https://api.anthropic.com/v1/models` → **401**（TLS 0.36s，可达） |
+| `agy` | 1.4.12 | **上游 502** | `agy -p …` → `error: Eligibility check failed: Post "https://daily-cloudcode-pa.googleapis.com/v1internal:loadCodeAssist": Bad Gateway` |
+| `gemini` | — | **解释器缺失** | `exec` 直接 `ENOENT`（shebang 指向不存在的 node），连 `--version` 都起不来 |
+| `opencode` | 2.2.5 | **同一张网** | 能起，`run` 走 `gpt-5.4`，同样卡在 OpenAI 侧，只反复打 `> build · gpt-5.4` |
+
+两个**必须写清楚**的点（第一次记录时写错了，这里更正）：
+
+1. **`codex` 不是「零输出」**。它会打出会话头（`model: gpt-5.6-sol` / `provider: openai` /
+   `sandbox: read-only`）和 5 次 TLS 重试错误，只是**永远拿不到模型回复**。
+   上一次记录成「50 秒零输出」是因为只看了 stdout、没接 stderr —— 这正是
+   「静默失败被当成卡死」的经典误判，记录里不能这么写。
+2. **不是 WorkBuddy 沙箱、也不是本机代理在拦**。`api.openai.com` 在**关掉沙箱**、
+   **清空 `HTTP(S)_PROXY`** 直连的情况下仍是 `000`（连续三次），而同一时刻
+   `www.baidu.com` → 200、`api.anthropic.com` → 401。所以是**出口到 OpenAI 这一段被切断**，
+   换环境跑不会好。
+
+推论（对后续复验有用）：`claude` 只差一次 `/login` —— 它的上游是通的，
+登进去就能跑真模型；`codex` 则要同时解决「登录」和「到 api.openai.com 的通路」。
+
+本轮因此改用桩：`TIDINGS_CODEX_CLI=design/runtime-evidence/tools/stub-codex.sh` —— 一个与
+`codex exec --json` 同形的 `sh` 桩（`thread.started` / `item.completed` / `turn.completed`），
+按 prompt 分支产出确定产物；分支清单与「为什么每个分支长这样」写在脚本头注释里。
+配套 `tools/run-with-timeout.py`（macOS 自带没有 `timeout`，验收脚本要在干净机器上能直接跑）。
 
 **这条要写死：本节验证的是「派单 → 沙箱 → 产物 → 卡片 → 合流」这条编排链路与交互，
 不是模型能力。** 桩能产出的东西（`prototype.html`、`src/aqi.js`、`normalizeQuery` 修复）
