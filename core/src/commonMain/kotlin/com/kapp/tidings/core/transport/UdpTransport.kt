@@ -70,6 +70,23 @@ class UdpTransport(
     private var socket: BoundDatagramSocket? = null
     private var pump: Job? = null
 
+    /**
+     * 收包泵是否还活着（task-29 的第二种死法，2026-11-02 真机确认）。
+     *
+     * 第一处修复管的是「socket 发不出去」——发送结果回传，presence 连续 0 交付就重建。
+     * 但真机上还有**另一种静默死法**：网络切换（AP 重启/Wi-Fi 抖动）后 ktor 的
+     * `bound.incoming` 通道**不抛异常地正常结束**，`for` 循环体面退出 —— socket 依然绑定、
+     * 依然发得出去，可**收包永远停了**。表现：对端发来的消息本端收到并回了 ack，本端
+     * 自己却永远等不到任何 ack（重试到天荒地老）；内核 UDP 计数器照常增长、NoPorts 不动，
+     * 唯一症状是「双方都说对方不回话」。现有的「发送失败自愈」对此**永不触发**。
+     *
+     * 桥接方案：泵退出（无论哪条路径）就把 `pumpAlive` 置 false，[send] 据此如实返回
+     * false —— 「收不了包的 transport 就是坏的」，让既有的「连续 0 交付 ⇒ [restart]」
+     * 自愈路径接管，不需要新的监督者。
+     */
+    @Volatile
+    private var pumpAlive: Boolean = false
+
     private val _incoming = MutableSharedFlow<ReceivedDatagram>(extraBufferCapacity = 256)
 
     /** 入站报文流。必须在 [start] 之前订阅，否则早期报文会被丢进 extraBufferCapacity。 */
@@ -97,6 +114,9 @@ class UdpTransport(
         selector = sel
         scope = runScope
         socket = bound
+        // 先置活再起泵：send() 的门禁不依赖协程调度器的首次执行（否则 start 之后
+        // 到泵真正跑起来之前有个 send 恒 false 的窗口，presence 会白白记一轮死轮）。
+        pumpAlive = true
         boundPort = (bound.localAddress as? InetSocketAddress)?.port ?: port
         pump = runScope.launch {
             try {
@@ -107,6 +127,11 @@ class UdpTransport(
                 }
             } catch (_: ClosedReceiveChannelException) {
                 // 正常关闭路径。
+            } finally {
+                // 泵退出的**全部**路径都算「收包已死」：通道正常结束（task-29 的静默死法）、
+                // 异常、取消（stop）。置 false 之后 [send] 会如实返回 false，由
+                // Discovery 的「连续 0 交付 ⇒ restart」自愈路径重建整个 transport。
+                pumpAlive = false
             }
         }
     }
@@ -120,6 +145,13 @@ class UdpTransport(
      */
     override suspend fun send(bytes: ByteArray, host: String, port: Int): Boolean {
         val s = socket ?: return false
+        // 收包泵已死 ⇒ 整个 transport 判死（能发不能收的 UDP 通道对协议毫无用处：
+        // 发出去的每一条都在等 ack，而 ack 永远进不来）。如实返回 false，
+        // 让上层（Discovery 的 presence 自愈 / Messenger 的队列语义）按「没交出去」处理。
+        if (!pumpAlive) {
+            lastSendError = "receive-pump-dead: incoming channel ended, transport needs restart"
+            return false
+        }
         // 地址族守卫：v4 绑定的 socket 发 v6 目标（或反过来），Ktor 的错误**异步**落在
         // 通道上——本次 send 仍返回 true，错误在下一次 send 才炸出来。多端点序列
         // （队列自愈「先试当前地址、再试候选」）于是被第一个坏端点毒化：第二个端点的
@@ -183,5 +215,10 @@ class UdpTransport(
     override suspend fun restart() {
         stop()
         start()
+    }
+
+    /** 仅测试用：模拟「通道静默结束、socket 还在」的死泵状态（task-29 第二死法）。 */
+    internal fun markReceivePumpDeadForTest() {
+        pumpAlive = false
     }
 }
