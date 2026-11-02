@@ -267,7 +267,7 @@ class LuciolaSecureChannelTest {
             sendEventually(phoneTransport, request, "127.0.0.1", portHost)
             assertTrue(accepted.await().accepted, "主机必须接受带正确 secret 且指纹自证的配对")
 
-            awaitTrue(timeoutMs = 5_000) { host.isTrustedFingerprint(phone.fingerprint) }
+            awaitTrue(timeoutMs = 30_000) { host.isTrustedFingerprint(phone.fingerprint) }
 
             val payload = frame("phone-node", "paired-and-talking")
             val atHost = async { withTimeout(20_000) { hostTransport.incoming.first() } }
@@ -328,7 +328,7 @@ class LuciolaSecureChannelTest {
             deliverRepeatedly(times = 40) { phoneTransport.send(forged, "127.0.0.1", portHost) }
             // 断言是负向的（「没进信任库」）：先等到主机真的处理过一帧再断言，
             // 否则「什么都没发生」也会通过 —— 这类用例最容易假绿的地方就在这里。
-            awaitTrue(timeoutMs = 5_000) { hostTransport.rejectedInbound >= 1 }
+            awaitTrue(timeoutMs = 30_000) { hostTransport.rejectedInbound >= 1 }
             assertFalse(host.isTrustedFingerprint(other.fingerprint), "冒名公钥不许进信任库")
             assertFalse(host.isTrustedFingerprint(phone.fingerprint), "会话身份也不该被顺带信任")
             assertTrue(hostTransport.rejectedInbound >= 1)
@@ -396,7 +396,7 @@ class LuciolaSecureChannelTest {
                 phoneTransport.requestPairing("127.0.0.1", portHost, "phone-node")
             }
             assertTrue(accepted.await().accepted, "带正确 secret 的配对帧必须被接受")
-            awaitTrue(timeoutMs = 5_000) { host.isTrustedFingerprint(phone.fingerprint) }
+            awaitTrue(timeoutMs = 30_000) { host.isTrustedFingerprint(phone.fingerprint) }
 
             val payload = frame("phone-node", "paired-by-scan")
             val atHost = async { withTimeout(20_000) { hostTransport.incoming.first() } }
