@@ -98,6 +98,10 @@ import com.kapp.tidings.generated.resources.card_status_merged
 import com.kapp.tidings.generated.resources.card_status_pending
 import com.kapp.tidings.generated.resources.card_status_prototype
 import com.kapp.tidings.generated.resources.card_status_running
+import com.kapp.tidings.generated.resources.card_artifact_intent_patch_full
+import com.kapp.tidings.generated.resources.card_artifact_intent_prototype
+import com.kapp.tidings.generated.resources.card_artifact_intent_run_log
+import com.kapp.tidings.generated.resources.card_artifact_intent_test_report
 import com.kapp.tidings.generated.resources.card_status_review_ready
 import com.kapp.tidings.generated.resources.card_type_task_board
 import com.kapp.tidings.generated.resources.card_type_diff_review
@@ -200,11 +204,18 @@ data class AgentCardDiff(
 /**
  * 产物元数据（对齐 `agent-artifact`）：**只描述不传二进制** ——
  * 文件本体走 file-msg 那条通路，卡片里放的是「有这么个东西」。
+ *
+ * 自描述契约（升级计划 §7.4）：[intent] 是发出方给的**稳定键**（如 `patch-full`），
+ * 人话由渲染端按键查词条 —— 键跨语言稳定，词条才可本地化；[delivered] 是发出方
+ * 声明的**直投事实**（完整文件已随卡经 P2P 文件通路投出）。缺省 = 旧卡没带这些键，
+ * 照旧渲染，不画意图行、不画「可预览」的承诺。
  */
 data class AgentCardArtifact(
     val name: String,
     val bytes: Long? = null,
     val mime: String? = null,
+    val intent: String? = null,
+    val delivered: Boolean? = null,
 )
 
 /**
@@ -414,6 +425,8 @@ fun parseAgentCard(json: JsonObject?): AgentCardUi? {
                 name = name,
                 bytes = obj.long("bytes"),
                 mime = obj.str("mime")?.takeIf { it.isNotBlank() },
+                intent = obj.str("intent")?.takeIf { it.isNotBlank() },
+                delivered = obj.boolean("delivered"),
             )
         },
         expiresAt = json.long("expiresAt"),
@@ -889,6 +902,10 @@ fun AgentCardBubble(
     eligibility: CardActionEligibility = CardActionEligibility.Actionable,
     now: Long = 0L,
     modifier: Modifier = Modifier,
+    /** 产物条目 → 消息流里同卡关联的已落盘文件路径；null = 本壳解析不出（预览不画）。 */
+    artifactSavedPathFor: ((AgentCardArtifact) -> String?)? = null,
+    /** 点开产物预览。null = 本壳没有预览通路，入口整块不画。 */
+    onPreviewArtifact: ((AgentCardArtifact, String) -> Unit)? = null,
 ) {
     val sp = LocalAppSpacing.current
     val plan = cardRenderPlanOf(
@@ -962,7 +979,11 @@ fun AgentCardBubble(
             card.diff?.let { CardDiffViewerRow(it) }
             card.diff?.takeIf { it.hunk.isNotEmpty() }?.let { CardDiffHunkViewer(it) }
             if (card.artifacts.isNotEmpty()) {
-                CardArtifactRows(card.artifacts)
+                CardArtifactRows(
+                    artifacts = card.artifacts,
+                    savedPathFor = { artifact -> artifactSavedPathFor?.invoke(artifact) },
+                    onPreviewArtifact = onPreviewArtifact,
+                )
             }
             if (card.options.isNotEmpty()) {
                 CardOptionListRows(card, pendingActions, plan.actionsEnabled, onAction)
@@ -2111,11 +2132,28 @@ private fun CardDiffViewerRow(diff: AgentCardDiff) {
 /**
  * 原子 6/6 · ArtifactList：升级稿「文件小胶囊」（relay.html:565-572）—— surface-2 底
  * + 圆角 10 + 细边框 + 28×28 图标座（agent 紫 10% 底、ic_file 16px）+ nm 13/600 + mt mono。
+ *
+ * 自描述契约的落点（升级计划 §7.4）：条目可带**意图行**（稳定键 → 本地词条）与
+ * **预览入口**。入口只画「真的能打开」的：渲染种类可渲染 + 发出方声明 delivered +
+ * 消息流里找到同 id 关联的已落盘文件（savedPathFor）—— 三个条件缺一个就
+ * 退回纯元数据行，暂态（未投递）如实给一句解释而不是一颗死按钮。
+ *
+ * onPreviewArtifact 是可空槽：null = 这个壳还没有预览通路（预览窗整块不画），
+ * 与动作槽的同名纪律一致 —— 按下去没反应的按钮比没有更糟。
  */
 @Composable
-private fun CardArtifactRows(artifacts: List<AgentCardArtifact>) {
+private fun CardArtifactRows(
+    artifacts: List<AgentCardArtifact>,
+    savedPathFor: (AgentCardArtifact) -> String?,
+    onPreviewArtifact: ((AgentCardArtifact, String) -> Unit)?,
+) {
     Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
         artifacts.forEach { artifact ->
+            val kind = ArtifactPreview.kindOf(artifact.name, artifact.mime)
+            val savedPath = savedPathFor(artifact)
+            val previewable = ArtifactPreview.canPreview(artifact, kind, savedPath)
+            val blockedReason = ArtifactPreview.blockedReasonOf(artifact, kind, savedPath)
+            var previewOpen by remember(artifact.name) { mutableStateOf(false) }
             Row(
                 verticalAlignment = Alignment.CenterVertically,
                 horizontalArrangement = Arrangement.spacedBy(10.dp),
@@ -2123,6 +2161,13 @@ private fun CardArtifactRows(artifacts: List<AgentCardArtifact>) {
                     .fillMaxWidth()
                     .border(1.dp, MaterialTheme.colorScheme.outline.copy(alpha = 0.05f), RoundedCornerShape(10.dp))
                     .background(SurfaceTiers.Raised, RoundedCornerShape(10.dp))
+                    .then(
+                        if (previewable && onPreviewArtifact != null) {
+                            Modifier.clickable { previewOpen = true }
+                        } else {
+                            Modifier
+                        },
+                    )
                     .padding(horizontal = 12.dp, vertical = 10.dp),
             ) {
                 // .art .art-ic：28×28 图标座（agent 紫 10% 底 + primary 图标）。
@@ -2145,7 +2190,11 @@ private fun CardArtifactRows(artifacts: List<AgentCardArtifact>) {
                         text = artifact.name,
                         style = MaterialTheme.typography.bodyMedium,
                         fontWeight = FontWeight.SemiBold,
-                        color = MaterialTheme.colorScheme.onSurface,
+                        color = if (previewable && onPreviewArtifact != null) {
+                            MaterialTheme.colorScheme.primary
+                        } else {
+                            MaterialTheme.colorScheme.onSurface
+                        },
                         maxLines = CARD_ARTIFACT_NAME_MAX_LINES,
                         overflow = TextOverflow.Ellipsis,
                     )
@@ -2159,10 +2208,47 @@ private fun CardArtifactRows(artifacts: List<AgentCardArtifact>) {
                             maxLines = 1,
                         )
                     }
+                    // 意图行（§7.4 人类可读意图）：键在词条里查，查不到不画 ——
+                    // 编一个通用词等于给不知道是什么的文件编故事。
+                    artifact.intent?.let { key ->
+                        artifactIntentLabel(key)?.let { label ->
+                            Text(
+                                text = label,
+                                style = MaterialTheme.typography.labelSmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                maxLines = 1,
+                                overflow = TextOverflow.Ellipsis,
+                            )
+                        }
+                    }
+                    // 暂态解释：文件还没投到本机时，一句「为什么看不了」胜过沉默。
+                    if (!previewable && blockedReason != null) {
+                        ArtifactPreviewBlockedReason(blockedReason)
+                    }
                 }
+            }
+            if (previewOpen && savedPath != null) {
+                ArtifactPreviewDialog(
+                    artifact = artifact,
+                    savedPath = savedPath,
+                    onDismiss = { previewOpen = false },
+                )
             }
         }
     }
+}
+
+/**
+ * 意图键 → 本地词条（双语进 strings，键跨语言稳定）。未登记的键返回 null：
+ * 发出方给了一个本端不认识的键，不画比猜一个更诚实。
+ */
+@Composable
+private fun artifactIntentLabel(intentKey: String): String? = when (intentKey) {
+    "patch-full" -> stringResource(Res.string.card_artifact_intent_patch_full)
+    "test-report" -> stringResource(Res.string.card_artifact_intent_test_report)
+    "run-log" -> stringResource(Res.string.card_artifact_intent_run_log)
+    "prototype" -> stringResource(Res.string.card_artifact_intent_prototype)
+    else -> null
 }
 
 /**

@@ -1799,6 +1799,16 @@
     <string name="card_check_drawer_open">展开日志</string>
     <string name="card_check_drawer_close">收起日志</string>
     <string name="card_diff_expand_code">展开代码</string>
+    <string name="card_artifact_preview_kind_markdown">Markdown 预览</string>
+    <string name="card_artifact_preview_kind_diff">Diff 预览</string>
+    <string name="card_artifact_preview_kind_text">文本预览</string>
+    <string name="card_artifact_preview_close">关闭预览</string>
+    <string name="card_artifact_preview_failed">文件读不到或超出预览上限，无法渲染</string>
+    <string name="card_artifact_preview_not_delivered">完整文件尚未投递到本设备，暂不可预览</string>
+    <string name="card_artifact_intent_patch_full">完整补丁，供审阅合并</string>
+    <string name="card_artifact_intent_test_report">结构化测试报告</string>
+    <string name="card_artifact_intent_run_log">运行日志全文</string>
+    <string name="card_artifact_intent_prototype">可交互网页原型</string>
     <string name="card_diff_collapse_code">收起代码</string>
     <string name="card_revision_hint">说说哪里要改，提交后作为下一轮修改的硬约束</string>
     <string name="card_revision_submit">提交打回</string>

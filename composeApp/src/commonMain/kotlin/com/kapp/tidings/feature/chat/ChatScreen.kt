@@ -1135,6 +1135,12 @@ fun ChatScreen(
                                 AgentCardBubble(
                                     card = cardOutcome.card,
                                     pendingActions = pendingCardActions,
+                                    // 产物预览（升级计划 §4.2-3）：同 cardId 的文件行里
+                                    // 找「同名字 + 已落盘」的那份 —— 找不到入口不画，
+                                    // 不做孤立路径展示。
+                                    artifactSavedPathFor = { artifact ->
+                                        artifactSavedPathOf(messages, cardOutcome.card.cardId, artifact.name)
+                                    },
                                     // 会话里已经有一份时钟（屏幕协助卡在用同一个）：
                                     // 过期子态跟着它走，组件自己不读表 —— 可测、可截帧。
                                     now = now,
@@ -1876,6 +1882,32 @@ private fun hasMoreSessionsLocal(state: RelayUiState, peerId: String, wsId: Stri
  */
 internal fun sessionIdOf(message: MessageUi): String? = message.agentSessionId
 
+/**
+ * 产物预览的文件行解析（升级计划 §4.2-3）：消息流里与卡同 id 关联的**已落盘**文件。
+ *
+ * 关联判据是「同会话 + 同名文件」：宿主直投与发卡在协议上是两条消息（file-msg 与
+ * 群文本），没有共享 id，能对上的唯一事实就是文件名。找到**收完**（Completed、
+ * savedPaths 非空）的那行才返回路径 —— 还在传的文件给了路径也读不到全文。
+ * 找不到返回 null：入口不画，不做孤立路径展示。
+ */
+internal fun artifactSavedPathOf(
+    messages: List<MessageUi>,
+    cardId: String,
+    artifactName: String,
+): String? {
+    if (artifactName.isBlank()) return null
+    // 卡必须真的在这条会话的消息流里：找不到卡 = 文件行无从归属，入口不画。
+    val hasCard = messages.any { message ->
+        (message.card ?: message.cardPayload)?.get("cardId")?.toString()?.contains(cardId) == true
+    }
+    if (!hasCard) return null
+    return messages.firstOrNull { message ->
+        val file = message.file ?: return@firstOrNull false
+        file.name == artifactName &&
+            file.state == com.kapp.tidings.domain.model.TransferState.Completed &&
+            file.savedPaths.isNotEmpty()
+    }?.file?.savedPaths?.firstOrNull()
+}
 internal fun sessionTransitionIds(messages: List<MessageUi>): Set<String> {
     val transitions = mutableSetOf<String>()
     var lastSessionId: String? = null

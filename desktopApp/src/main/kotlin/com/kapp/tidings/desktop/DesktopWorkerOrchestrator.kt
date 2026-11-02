@@ -1071,6 +1071,53 @@ internal class DesktopWorkerOrchestrator(
     }
 
     /**
+     * P2P 大产物直投（升级计划 §4.2-3）：把**超过卡内预算**的完整产物经既有
+     * 免确认文件通路（purpose=artifact）投到群里，返回**真实发起直投**的文件名集合。
+     *
+     * ## 与 deliverPatchBundle 的分工
+     *
+     * 补丁本体由 deliverPatchBundle 恒投（6.3 的那一跳）—— 这里不重发它，
+     * 否则对端收到两份同名报价；这里补的是收割目录里其余的大产物
+     * （report.json / task.log）。两种走的是同一条传输通路，谁也没有新造协议。
+     *
+     * 返回值喂给卡面 artifacts 条目的 delivered 标记：报价没发起的文件如实标
+     * false —— delivered 写投递事实，不是愿望。
+     */
+    private fun deliverOversizedArtifacts(groupId: String?, patchPath: String?): Set<String> {
+        if (groupId == null || patchPath == null) return emptySet()
+        val dir = File(patchPath).parentFile ?: return emptySet()
+        val requests = listOf("report.json", "task.log")
+            .map { ArtifactPipe.requestFor(File(dir, it)) }
+            .filterNotNull()
+            // 0 B 产物不投也不占 delivered：空文件对审阅没有增量。
+            .filter { it.bytes > 0L }
+        if (requests.isEmpty()) return emptySet()
+        // 直投的意义就是不把全文塞进卡；这里量的是自描述条目本身 ——
+        // 它远小于全文，但预算校验仍必须真的跑一遍（发送侧不生产注定被拒的帧）。
+        val metaBytes = ArtifactPipe.requestsCardBytes(requests)
+        if (metaBytes > ArtifactPipe.CARD_BYTES) {
+            println("[ORCHESTRATOR] artifact pipe meta exceeds card budget: " + metaBytes)
+            return emptySet()
+        }
+        val delivered = runCatching {
+            controller.sendAgentArtifacts(
+                ConvId.group(groupId),
+                requests.map { r ->
+                    com.kapp.tidings.core.transport.LocalFile(path = r.path, name = r.name, size = r.bytes)
+                },
+            )
+        }.onFailure { t ->
+            println("[ORCHESTRATOR] artifact pipe delivery threw: " + t.message)
+        }.getOrDefault(false)
+        if (!delivered) {
+            println("[ORCHESTRATOR] artifact pipe NOT dispatched — files stay on the host")
+            return emptySet()
+        }
+        println("[ORCHESTRATOR] artifact pipe dispatched " + requests.size + " file(s) to group " + groupId)
+        return requests.map { it.name }.toSet()
+    }
+
+    /**
      * 把 `patch.diff` 真的送到群里（§6.3 离线 P2P bundle）。
      *
      * ## 为什么必须有这一跳
@@ -1353,7 +1400,13 @@ internal class DesktopWorkerOrchestrator(
         }
         // §6.3 离线 bundle：补丁随卡一起走 P2P 文件通道，手机上能真的把 diff 打开看。
         // 先发文件、后发卡 —— 卡到的时候那一行产物已经点得开了。
-        deliverPatchBundle(groupId, ticketId, patchPath)
+        // P2P 大产物直投（升级计划 §4.2-3）：收割目录里其余的大产物（结构化报告 /
+        // 运行日志）经同一文件通路投群；补丁本体的投递事实取自上一跳的返回值。
+        // 卡面条目据此写 delivered —— 没投出去的产物不许谎报已送达。
+        val pipedNames = buildSet {
+            if (deliverPatchBundle(groupId, ticketId, patchPath)) add("patch.diff")
+            addAll(deliverOversizedArtifacts(groupId, patchPath))
+        }
         val reviewJson = publishTicketCard(
             groupId = groupId,
             ticketId = ticketId,
@@ -1366,6 +1419,9 @@ internal class DesktopWorkerOrchestrator(
             agentId = defaultAgent,
             artifacts = artifactsList,
             diff = diff,
+            // 自描述契约（§7.4）：intent/delivered 只在 review_ready 终态卡上出现，
+            // 其余调用点不传，卡形状一字不变。
+            selfDescribeDelivered = pipedNames,
         )
         return TicketOutcome("review_ready", summary, null, reviewJson, patchPath)
     }
@@ -1430,6 +1486,12 @@ internal class DesktopWorkerOrchestrator(
         assignees: List<String> = emptyList(),
         /** Fail-Loud 现场（非空 = 卡上多一条带 observation/drawer 的 failed 检查项）。 */
         failure: StageChainFailure? = null,
+        /**
+         * 真实发起过 P2P 直投的产物名集合（升级计划 §4.2-3 / §7.4）。
+         * 非空 = artifacts 条目升级为自描述（补 intent 与 delivered）；
+         * 缺省 = 卡形状一字不变 —— 只有 review_ready 终态卡传它。
+         */
+        selfDescribeDelivered: Set<String> = emptySet(),
     ): String? {
         if (groupId == null) return null
         val progress = ChainProgress(
@@ -1447,10 +1509,21 @@ internal class DesktopWorkerOrchestrator(
             diff = diff,
         )
         val baseCard: kotlinx.serialization.json.JsonObject = StageChain.cardOf(progress)
-        val json: String = if (failure == null) {
-            StageChain.cardJsonOf(progress)
+        val card: kotlinx.serialization.json.JsonObject = if (selfDescribeDelivered.isEmpty()) {
+            baseCard
         } else {
-            OrchestratorCards.withFailureCheck(baseCard, failure.observation, failure.drawer).toString()
+            ArtifactPipe.upgradeArtifactsSelfDescribing(baseCard, selfDescribeDelivered)
+        }
+        val json: String = if (failure == null) {
+            card.toString()
+        } else {
+            OrchestratorCards.withFailureCheck(card, failure.observation, failure.drawer).toString()
+        }
+        // 发送侧预算闸门（与 OrchestratorCards.guarded 同一口径）：自描述条目变大后
+        // 整卡仍不得超 24 KiB —— 超了在这里响，而不是在对端静默拒收时才被发现。
+        val bytes = com.kapp.tidings.core.protocol.Codec.utf8ByteLength(json)
+        check(bytes <= com.kapp.tidings.core.protocol.Limits.CARD_BYTES) {
+            "worker card exceeds CARD_BYTES after self-describing artifacts: " + bytes
         }
         publishCardJson(groupId, json, agentId)
         return json

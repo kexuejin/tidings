@@ -1625,6 +1625,16 @@
     <string name="card_check_drawer_open">Show log</string>
     <string name="card_check_drawer_close">Hide log</string>
     <string name="card_diff_expand_code">Show code</string>
+    <string name="card_artifact_preview_kind_markdown">Markdown preview</string>
+    <string name="card_artifact_preview_kind_diff">Diff preview</string>
+    <string name="card_artifact_preview_kind_text">Text preview</string>
+    <string name="card_artifact_preview_close">Close preview</string>
+    <string name="card_artifact_preview_failed">File is unreadable or exceeds the preview limit; it cannot be rendered.</string>
+    <string name="card_artifact_preview_not_delivered">The full file has not been delivered to this device yet; preview is unavailable.</string>
+    <string name="card_artifact_intent_patch_full">Full patch for review and merge</string>
+    <string name="card_artifact_intent_test_report">Structured test report</string>
+    <string name="card_artifact_intent_run_log">Full run log</string>
+    <string name="card_artifact_intent_prototype">Interactive web prototype</string>
     <string name="card_diff_collapse_code">Hide code</string>
     <string name="card_revision_hint">Describe what to change; it becomes a hard constraint for the next round</string>
     <string name="card_revision_submit">Send back</string>
