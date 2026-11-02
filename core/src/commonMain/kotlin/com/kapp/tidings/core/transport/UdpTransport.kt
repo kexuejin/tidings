@@ -71,7 +71,7 @@ class UdpTransport(
     private var pump: Job? = null
 
     /**
-     * 收包泵是否还活着（task-29 的第二种死法，2026-11-02 真机确认）。
+     * 收包泵是否还活着（task-29 的第二种死法，真机确认）。
      *
      * 第一处修复管的是「socket 发不出去」——发送结果回传，presence 连续 0 交付就重建。
      * 但真机上还有**另一种静默死法**：网络切换（AP 重启/Wi-Fi 抖动）后 ktor 的

@@ -18,7 +18,6 @@ import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
-import androidx.compose.foundation.layout.offset
 import com.kapp.tidings.ui.components.NavCountBadge
 import androidx.compose.foundation.selection.selectableGroup
 import androidx.compose.material3.Badge
@@ -37,7 +36,6 @@ import androidx.compose.ui.unit.dp
 
 import com.kapp.tidings.domain.RelayUiState
 import com.kapp.tidings.ui.components.TitleBarDivider
-import com.kapp.tidings.ui.components.badgeCountText
 import com.kapp.tidings.ui.theme.IconSizes
 import com.kapp.tidings.ui.theme.LocalAppSpacing
 import com.kapp.tidings.ui.theme.accents

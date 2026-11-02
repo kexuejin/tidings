@@ -47,13 +47,11 @@ import androidx.compose.ui.unit.dp
 
 import com.kapp.tidings.domain.RelayUiState
 import com.kapp.tidings.ui.components.TitleBarDivider
-import com.kapp.tidings.ui.components.relativeTime
 import com.kapp.tidings.ui.theme.IconSizes
 import com.kapp.tidings.ui.theme.LocalAppSpacing
 import com.kapp.tidings.ui.theme.RelayElevations
 import com.kapp.tidings.generated.resources.Res
 import com.kapp.tidings.generated.resources.action_clear_search
-import com.kapp.tidings.generated.resources.common_offline
 import com.kapp.tidings.generated.resources.desktop_app_title
 import com.kapp.tidings.generated.resources.desktop_menu_new_conversation
 import com.kapp.tidings.generated.resources.desktop_title_agents
