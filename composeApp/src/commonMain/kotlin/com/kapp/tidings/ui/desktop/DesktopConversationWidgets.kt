@@ -270,7 +270,7 @@ public fun ConversationSidebar(
                 // 用的仍是 `.emptyd{flex:1;min-height:0;display:flex;flex-direction:column;
                 // align-items:center;justify-content:center;…}`（`:772`），`padding:22px 14px`；
                 // 按钮是 `.btn.sm` 带一颗 `ic('close')`（✕）。d10-nomatch 截图也是居中。
-                // 不沿用共用 `EmptyState`（`app/relay/ui/AppStates.kt:23` → `MessageState` `:87`）：
+                // 不沿用共用 `EmptyState`（`ui/AppStates.kt`，它内部转调 `MessageState`）：
                 // 它按 `fillMaxWidth()` 顶对齐排、按钮也没有图标口子，而它是全 app 共用的
                 // （动它会把手机端多屏空态一起挪走）。写法与 d-filesempty 那支
                 // （`DesktopFilesPane.kt:205-245`）、d-search-empty 那支

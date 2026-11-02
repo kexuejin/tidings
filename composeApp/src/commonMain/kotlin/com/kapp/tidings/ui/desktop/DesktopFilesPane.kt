@@ -209,7 +209,7 @@ public fun FilesPane(
             // 空态在**剩余空间里两轴居中**：原型 `.emptyd{flex:1;min-height:0;display:flex;
             // flex-direction:column;align-items:center;justify-content:center;padding:34px 40px;
             // text-align:center}`（`prototype/relay.html:772-775`），`d09-filesempty` 截图也是居中。
-            // 不沿用共用 `EmptyState`（`app/relay/ui/AppStates.kt:23` → `MessageState:87`）：
+            // 不沿用共用 `EmptyState`（`ui/AppStates.kt`，它内部转调 `MessageState`）：
             // 它按 `fillMaxWidth()` 顶对齐排、没有 textAlign 口子，传 `fillMaxSize()` 只占高度、
             // 内容仍贴左上；而它是全 app 共用的，动它会把手机端多屏空态一起挪走。
             // 写法与 d-search-empty 那支（`DesktopGlobalSearchPanel 的结果区`）一致。
