@@ -802,9 +802,9 @@ function normalizeQuery(cityQuery) {
 | D1 | 合并必然失败 `no sandbox patch recorded for card …` | 工单卡不写会话台账，`latestPatchRefForCard` 恒空 | 已修（`patchByCard` 登记） |
 | D2 | 合并成功但卡不翻面，且无日志 | 群号靠扫本地消息反推，失败即静默 `return` | 已修（`groupByCard` + 留痕） |
 | D3 | `Retry` 要么无反应、要么变成原型微调 | 宿主无 `retry` 分支，落到 `followUpByCard` 当文本 | 已修（`retryByCard`） |
-| D4 | 交回横幅只报最后一轮原因 | `executionError` 每轮覆盖，首轮 `cli exit=1` 被末轮 `No patch` 覆盖 | 未修（记录） |
+| D4 | 交回横幅只报最后一轮原因 | `executionError` 每轮覆盖，首轮 `cli exit=1` 被末轮 `No patch` 覆盖 | **已修**（`HealReport.bannerOf`，见 13.17） |
 | D5 | 合并后的改动不进 git 历史，下一轮沙箱看不到 | `DesktopPatchMerge.apply` 只 `git apply` 到工作区，不 `add`/`commit`；worktree 从 HEAD 建 | **已修**（`MergeBaseRef` 滚动基线，见 13.13） |
-| D6 | 翻面卡 `items[0].status` 仍是 `review_ready` | 只覆盖了 `state`，没同步阶段项 | 未修（记录，UI 读 `state`，不影响显示；详见 13.16 末） |
+| D6 | 翻面卡 `items[0].status` 仍是 `review_ready` | 卡级 `state` 被直接塞进棒级 `items[].status`，两套词表混用 | **已修**（`stageStatusOf` + `itemsAfterMerge`，见 13.17） |
 | D7 | 宿主仓已 `git apply`、卡不翻面 | `host.runtime ?: return` 挡在落库**之前** | **已修**（先落库再发帧，见 13.16） |
 | D8 | 发 `stop` 但本机没活在跑 ⇒ 静默变聊天 | 消费条件不满足就 `false`，没人回执 | **已修**（`AbortSignals.isExact` + notice 行，见 13.16） |
 
@@ -1141,3 +1141,117 @@ D6（翻面卡 `items[0].status` 仍是 `review_ready`）**仍在**。它不影�
 `state`；但 `items[]` 是阶段清单，卡片详情展开时那一行会自相矛盾（`state=merged` 而
 阶段项写着 `review_ready`）。归到「下一步一起做」，不塞进这一轮 —— 这一轮只修
 「界面完全不说话」的两处。
+
+### 13.17 收尾三件：D6 两套词表 / D4 首因 / §6.3 补丁真的上了路
+
+#### D6 的根因不是「翻面忘了同步」，是**一个字段装了两套词表**
+
+`ticketCardJson` / `publishTicketCard` 一直写的是
+
+```kotlin
+stages = listOf(roleName to state)
+```
+
+—— 把**卡级** `state` 直接当**棒级** `item.status`。两套词表根本不是一回事：
+
+| 词表 | 取值 | 说的是什么 |
+|---|---|---|
+| 卡级 `state` | `executing` / `working` / `prototype` / `review_ready` / `merged` / `blocked` / `aborted` | 这张卡此刻处于哪一步 |
+| 棒级 `items[].status` | `pending` / `running` / `done` / `failed` / `blocked` | 这一棒跑成什么样 |
+
+混用的后果有两层，都不报错：
+
+1. `prototype` / `executing` / `merged` / `aborted` **不在**棒级词表里，
+   `parseAgentCard` 一律退成 `Pending` —— 卡上写着「在做原型」，唯一那一步却显示「未开始」；
+2. 翻面成 `merged` 之后 `state=merged` + `item=review_ready` **自相矛盾**（这就是 D6）。
+   渲染层把 `review_ready` 也画成已完成，所以肉眼看不出来 —— 但落库的卡是矛盾的。
+
+更麻烦的是：`StageChainTest` 里有一条测试**把这个错钉成了规矩**
+（`theCardDeclaresItsOwnStateInsteadOfLettingTheClientGuess`，断言「items 里的 status 与顶层
+state 必须一致」）。它的初衷是对的（客户端不该反推状态），落点错了 —— 正确的落点是
+「state 单独一个字段，客户端读它」，不是「两处必须同值」。
+
+修法：
+
+- 新增 `StageChain.stageStatusOf(state)`：显式翻译（`executing/working/prototype/queued →
+  running`、`review_ready/merged/done → done`、`blocked → blocked`、`aborted → failed`）。
+  中止映射到 `failed` 是**唯一不说谎**的选项：这棒确实没跑完，写成 `pending` 会让它看起来
+  还能接着跑；
+- 新增 `StageChain.itemsAfterMerge(items)`：翻面时把还在等合流的棒推进到 `done`。
+  **只动 `review_ready`** —— `pending`（没跑）与 `failed`（跑挂了）不许被写成完成，
+  那是把没发生的事写成发生过。落过库的旧卡只能在这一刻被洗干净；
+- 测试改成钉**翻译**：逐档断言映射，并反向钉住「`stageStatusOf` 的输出不许落在棒级词表外」
+  —— 谁再照抄一次 state，这条就红。
+
+顺带把翻面构造从 lambda 里抽成纯函数 `BoardCardFlip.merged/blocked`（原来那段逻辑
+**没法被测**，而它恰恰是「用户点完按钮看到什么」的唯一出处）。抽出来之后还发现并修了
+同一处的另一个毛病：**受阻卡也是从零 build 的**，冲突时 `diff` 明细整块消失 ——
+而冲突时用户最想看的正是「哪几行没合上」。现在受阻卡同样在原卡上改，并清掉
+`decidedBy` / `decidedActionId`（否则按钮还是禁用态，这张卡就没法「处理掉冲突再点一次」）。
+
+#### D4 首因：两个原因指向两种修法，丢掉一个就是把人带偏
+
+自愈循环每轮算一次 `executionError`，从前只有一个 `var`。真机上首轮是 `cli exit=1`
+（模型侧根本没跑起来），末轮是 `No patch produced by worker`（跑起来了但没交东西）。
+横幅只留末轮那句 ⇒ 看横幅的人去查「为什么没交产物」，而真实原因是第一轮就挂了。
+
+新增 `HealReport.bannerOf(rounds, maxRounds)`，三条判据：**首因必须在**（带轮次）、
+**重复不重复说**（三轮同一句只写一遍）、**轮次可核对**：
+
+```
+Handed back: exceeded max heal rounds (3) — round 1: cli exit=1; round 2: No patch produced by worker
+```
+
+#### §6.3 补丁真的上了路（这一条原本只有「卡上写着」，没有「文件走了」）
+
+审阅卡的 `artifacts` 行一直写着「patch.diff，N 字节」，而文件**从没离开过宿主本机** ——
+补丁躺在沙箱收割目录里，手机上那一行只是一段描述。计划书 §6.3 的判据是
+「通过 Tidings 本地 P2P 文件传输通道直接投递至移动端」，在此之前这句话没有落点。
+
+补了两处：
+
+1. **投递**：派单成功路径在发布审阅卡**之前**调 `deliverPatchBundle` ——
+   `purpose=artifact`（免确认，要不要合并是卡上的决策）、先发文件后发卡（卡到的时候
+   那一行已经点得开了）、失败只记日志不改卡（`patch.diff` 这行在宿主上是事实，
+   而且它只是元数据不是按钮）；
+2. **可观测**：`handleSendFiles` / `sendAgentArtifacts` 改为返回 `Boolean` ——
+   **报价是否真的发起**。从前它们返回 `Unit`，调用方只能写
+   `runCatching { … }.isSuccess`，而节点没起时内部是 `warn + return`，不抛异常 ⇒
+   **假的成功**。现在 `false` 就是「根本没发」（节点没起 / 群不认识 / 文件超限）。
+
+判据是 `OfflinePatchBundleTest`：两个真 `RelayController`、真 UDP/TCP 回环，
+三层断言缺一不可 ——
+
+1. **发起**：`sendAgentArtifacts` 返回 true（不是被提前 return 掉）；
+2. **到达**：对端会话里出现 `patch.diff` 的文件卡，且走到 `Completed`；
+3. **字节一致**：`savedPaths` 指向的文件内容与发送侧**逐字相同**
+   （样本特意带换行、`+/−` 行与中文注释 —— 纯 ASCII 单行测不出编码/换行被改写）。
+
+实测读数：
+
+```
+[luciola] accept-in transfer=0b506205 known=true push=false files=1
+[offline-bundle] patch.diff 211 B 经 P2P 落盘到 …/b/downloads/patch.diff/patch.diff（全程无外部服务）
+```
+
+**这句要说清，不能假装计划书字面成立**：合并仍然在**宿主**执行 —— 仓库在宿主，手机上没有
+git。「移动端本地校验后点击合并」现在成立的部分是「手机上能真的打开那份 diff 再决定」，
+不成立的部分是「手机自己 `git apply`」。要做到后者，手机得有一份仓库副本和一个 git 实现，
+那是另一个量级的决定，不塞进这一轮。
+
+#### 装置上的一个坑（值得记）
+
+新加的双节点用例跑在整包同一个 JVM 里（`maxParallelForks` 默认 1，串行）。
+`stop()` 是**异步**的：不等它落地就退出，后面的双节点用例会抢到一个「刚被释放」的端口，
+症状是那边 `start()` 之后 `phase` 永远不到 `Running` —— 而失败信息是
+`等了 30000ms 仍未发生：B 起来`，看起来像产品缺陷。
+
+实测：加了这个用例，整包连续 2 轮全红（每次都是同一个用例）；把新用例移走就绿；
+在 `finally` 里补「等 phase 离开 Running」之后连续 2 轮全绿。**结论：跨用例的端口争夺
+要由占用方负责收尾，不能让下一个用例去赌。**
+
+#### 读数
+
+`:app:jvmTest` **776 / 0 fail**（110 suites）、`:desktopApp:test` **251 / 0 fail**（51 suites）、
+`:agentNode:test` **301 / 1 skipped / 0 fail**（41 suites，skip 的是需要 `TIDINGS_REAL_CLI=1`
+的真 CLI 用例）。五条门禁全绿（`envDependentTestGate` 扫 490 个测试文件，A/B 类 0 个）。

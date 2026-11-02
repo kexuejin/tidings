@@ -79,34 +79,42 @@ suspend fun handlePickFiles(): List<LocalFile> {
 }
 
 
+/**
+ * 发起一次文件投递。
+ *
+ * @return **报价真的发起了**才为 true。每个提前返回的分支都是 false —— 调用方
+ *   （例如产物投递）需要能区分「发出去了」与「根本没发」（节点没起、群不认识、文件太多），
+ *   否则只能报一个假的成功。注意 true 只代表**已交给传输层**，送达与否由传输事件回报。
+ */
 fun handleSendFiles(
     peerId: String,
     files: List<LocalFile>,
     isFolder: Boolean = false,
     folderRootName: String? = null,
     purpose: String? = null,
-) {
-    if (files.isEmpty()) return
+): Boolean {
+    if (files.isEmpty()) return false
     // **先判数量、给出具体数。** 传输层超限时只 `return null`，界面只会看到「这张传不出去」，
     // 说不出原因 —— 拖进一个几千文件的目录时，用户最需要知道的正是「有多少、上限多少」。
     if (files.size > FileTransfer.MAX_FILES_PER_TRANSFER) {
         host.warn(BannerMessage.TooManyFiles(files.size, FileTransfer.MAX_FILES_PER_TRANSFER))
-        return
+        return false
     }
     val groupId = ConvId.groupIdOf(peerId)
     if (groupId != null) {
         val meta = host._state.value.settings.groups.firstOrNull { it.groupId == groupId }
         if (meta == null) {
             host.warn(BannerMessage.GroupUnknown)
-            return
+            return false
         }
         if (!meta.hasMember(host._state.value.selfNodeId)) {
             host.warn(BannerMessage.GroupLeft)
-            return
+            return false
         }
     }
-    val rt = host.runtime ?: run { host.warn(BannerMessage.NodeNotStarted); return }
+    val rt = host.runtime ?: run { host.warn(BannerMessage.NodeNotStarted); return false }
     host.scope.launch { handleOfferFiles(rt, peerId, files, isFolder, folderRootName, purpose) }
+    return true
 }
 
 

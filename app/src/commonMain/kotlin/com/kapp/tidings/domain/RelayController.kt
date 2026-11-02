@@ -771,14 +771,26 @@ class RelayController(
         files: List<LocalFile>,
         isFolder: Boolean,
         folderRootName: String?,
-    ) = transfersCtl.handleSendFiles(peerId, files, isFolder, folderRootName)
+    ) {
+        transfersCtl.handleSendFiles(peerId, files, isFolder, folderRootName)
+    }
 
     /**
      * agent 任务的产物投递：purpose=artifact。与 [sendFiles] 的差别只在免确认 ——
      * 要不要合并是任务卡上的决策，文件本身是随附资料，不该再要一次「接收/拒绝」。
+     *
+     * @return 报价是否真的发起（false = 节点没起 / 群不认识 / 文件太多）。
+     *   调用方据此决定卡上「有产物」这行该不该写 —— 从前这里恒返回成功，
+     *   于是「patch 只躺在宿主本机、手机那头什么都没有」也能报成投递成功。
      */
-    fun sendAgentArtifacts(peerId: String, files: List<LocalFile>) =
-        transfersCtl.handleSendFiles(peerId, files, isFolder = false, folderRootName = null, purpose = com.kapp.tidings.core.protocol.FilePurpose.ARTIFACT)
+    fun sendAgentArtifacts(peerId: String, files: List<LocalFile>): Boolean =
+        transfersCtl.handleSendFiles(
+            peerId,
+            files,
+            isFolder = false,
+            folderRootName = null,
+            purpose = com.kapp.tidings.core.protocol.FilePurpose.ARTIFACT,
+        )
     override fun acceptTransfer(transferId: String) = transfersCtl.handleAcceptTransfer(transferId)
     override fun declineTransfer(transferId: String) = transfersCtl.handleDeclineTransfer(transferId)
     override fun cancelTransfer(transferId: String) = transfersCtl.handleCancelTransfer(transferId)
