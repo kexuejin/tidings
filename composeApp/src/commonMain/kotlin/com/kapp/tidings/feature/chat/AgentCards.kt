@@ -139,11 +139,39 @@ data class AgentCardStep(
     val assignee: String? = null,
 )
 
+/** 单项验收检查（LobeHub Acceptance 契约）。包含单项耗时、观察结论与日志堆栈。 */
+data class AgentCardCheck(
+    val id: String,
+    val label: String,
+    val status: AgentCardStepStatus,
+    val time: String? = null,
+    val observation: String? = null,
+    val drawer: String? = null,
+    val open: Boolean = false,
+)
+
+/** 数字员工身份工牌元信息。 */
+data class AgentCardBot(
+    val name: String,
+    val avatar: String? = null,
+    val branch: String? = null,
+    val bdot: String? = null,
+)
+
+/** 影响面与目标标签。 */
+data class AgentCardChip(
+    val text: String,
+    val tone: String? = null,
+)
+
 data class AgentCardDiff(
     val path: String? = null,
     val summary: String? = null,
     val additions: Int? = null,
     val deletions: Int? = null,
+    val note: String? = null,
+    val hunk: List<String> = emptyList(),
+    val open: Boolean = false,
 )
 
 /**
@@ -218,6 +246,15 @@ data class AgentCardUi(
      * 该由发出方说了算，不该让渲染层猜。
      */
     val state: String? = null,
+    val bot: AgentCardBot? = null,
+    val chips: List<AgentCardChip> = emptyList(),
+    val context: String? = null,
+    val cmd: String? = null,
+    val checks: List<AgentCardCheck> = emptyList(),
+    val subActions: List<AgentCardAction> = emptyList(),
+
+    /** 宿主最近一次心跳的墙钟毫秒（§六.1）。前端据此渲染「N 秒前心跳」，缺省 = 无心跳信息。 */
+    val lastBeatTs: Long? = null,
 )
 
 /** 宽容解析：未知字段忽略、未知状态退档；身份键（cardId/rev）缺失整卡作废。 */
@@ -225,17 +262,28 @@ fun parseAgentCard(json: JsonObject?): AgentCardUi? {
     if (json == null) return null
     val cardId = json.str("cardId")?.takeIf { it.isNotBlank() } ?: return null
     val rev = json.int("rev") ?: return null
-    return AgentCardUi(
-        cardId = cardId,
-        rev = rev,
-        type = json.str("type")?.takeIf { it.isNotBlank() },
-        title = json.str("title")?.takeIf { it.isNotBlank() },
-        state = json.str("state")?.takeIf { it.isNotBlank() },
-        progress = json.int("progress")?.coerceIn(0, 100),
-        steps = json.array("items").mapNotNull { el ->
+    val rawSteps = json.array("items").mapNotNull { el ->
+        val obj = el as? JsonObject ?: return@mapNotNull null
+        val label = obj.str("label")?.takeIf { it.isNotBlank() } ?: return@mapNotNull null
+        AgentCardStep(
+            id = obj.str("id") ?: label,
+            label = label,
+            status = when (obj.str("status")) {
+                "done", "review_ready" -> AgentCardStepStatus.Done
+                "running", "working" -> AgentCardStepStatus.Running
+                "failed", "error" -> AgentCardStepStatus.Failed
+                "blocked" -> AgentCardStepStatus.Blocked
+                else -> AgentCardStepStatus.Pending
+            },
+            assignee = obj.str("assignee")?.takeIf { it.isNotBlank() },
+        )
+    }
+    val rawChecks = json.array("checks")
+    val checks = if (rawChecks.isNotEmpty()) {
+        rawChecks.mapNotNull { el ->
             val obj = el as? JsonObject ?: return@mapNotNull null
             val label = obj.str("label")?.takeIf { it.isNotBlank() } ?: return@mapNotNull null
-            AgentCardStep(
+            AgentCardCheck(
                 id = obj.str("id") ?: label,
                 label = label,
                 status = when (obj.str("status")) {
@@ -245,15 +293,60 @@ fun parseAgentCard(json: JsonObject?): AgentCardUi? {
                     "blocked" -> AgentCardStepStatus.Blocked
                     else -> AgentCardStepStatus.Pending
                 },
-                assignee = obj.str("assignee")?.takeIf { it.isNotBlank() },
+                time = obj.str("time")?.takeIf { it.isNotBlank() },
+                observation = obj.str("observation")?.takeIf { it.isNotBlank() },
+                drawer = obj.str("drawer")?.takeIf { it.isNotBlank() },
+                open = obj.boolean("open") == true,
+            )
+        }
+    } else {
+        rawSteps.map { s ->
+            AgentCardCheck(
+                id = s.id,
+                label = s.label,
+                status = s.status,
+                observation = s.assignee,
+            )
+        }
+    }
+    return AgentCardUi(
+        cardId = cardId,
+        rev = rev,
+        type = json.str("type")?.takeIf { it.isNotBlank() },
+        title = json.str("title")?.takeIf { it.isNotBlank() },
+        state = json.str("state")?.takeIf { it.isNotBlank() },
+        progress = json.int("progress")?.coerceIn(0, 100),
+        steps = rawSteps,
+        checks = checks,
+        bot = (json["bot"] as? JsonObject)?.let { b ->
+            b.str("name")?.takeIf { it.isNotBlank() }?.let { name ->
+                AgentCardBot(
+                    name = name,
+                    avatar = b.str("avatar")?.takeIf { it.isNotBlank() },
+                    branch = b.str("branch")?.takeIf { it.isNotBlank() },
+                    bdot = b.str("bdot")?.takeIf { it.isNotBlank() },
+                )
+            }
+        },
+        chips = json.array("chips").mapNotNull { el ->
+            val obj = el as? JsonObject ?: return@mapNotNull null
+            val text = obj.str("text")?.takeIf { it.isNotBlank() } ?: return@mapNotNull null
+            AgentCardChip(
+                text = text,
+                tone = obj.str("tone")?.takeIf { it.isNotBlank() },
             )
         },
+        context = json.str("context")?.takeIf { it.isNotBlank() },
+        cmd = json.str("cmd")?.takeIf { it.isNotBlank() },
         diff = (json["diff"] as? JsonObject)?.let { d ->
             AgentCardDiff(
                 path = d.str("path")?.takeIf { it.isNotBlank() },
                 summary = d.str("summary")?.takeIf { it.isNotBlank() },
                 additions = d.int("additions"),
                 deletions = d.int("deletions"),
+                note = d.str("note")?.takeIf { it.isNotBlank() },
+                hunk = (d["hunk"] as? JsonArray)?.mapNotNull { (it as? JsonPrimitive)?.content } ?: emptyList(),
+                open = d.boolean("open") == true,
             )
         },
         banner = (json["banner"] as? JsonObject)?.let { b ->
@@ -279,6 +372,16 @@ fun parseAgentCard(json: JsonObject?): AgentCardUi? {
                 approval = obj.boolean("approval") == true,
             )
         },
+        subActions = json.array("subActions").mapNotNull { el ->
+            val obj = el as? JsonObject ?: return@mapNotNull null
+            val actionId = obj.str("actionId")?.takeIf { it.isNotBlank() } ?: return@mapNotNull null
+            AgentCardAction(
+                actionId = actionId,
+                label = obj.str("label")?.takeIf { it.isNotBlank() } ?: actionId,
+                style = obj.str("style")?.takeIf { it.isNotBlank() },
+                approval = obj.boolean("approval") == true,
+            )
+        },
         decidedBy = json.str("decidedBy")?.takeIf { it.isNotBlank() },
         decidedActionId = json.str("decidedActionId")?.takeIf { it.isNotBlank() },
         artifacts = json.array("artifacts").mapNotNull { el ->
@@ -291,6 +394,7 @@ fun parseAgentCard(json: JsonObject?): AgentCardUi? {
             )
         },
         expiresAt = json.long("expiresAt"),
+        lastBeatTs = json.long("lastBeatTs"),
         options = json.array("options").mapNotNull { el ->
             val obj = el as? JsonObject ?: return@mapNotNull null
             val label = obj.str("label")?.takeIf { it.isNotBlank() } ?: return@mapNotNull null

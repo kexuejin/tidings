@@ -237,4 +237,148 @@ class AgentCardRenderTest {
         assertFalse(card.actions[0].approval, "style=secondary 的暂停任务不是审批")
         assertTrue(card.actions[1].approval)
     }
+
+    // ── LobeHub Acceptance 契约解析（Phase 1）─────────────────────────────
+
+    @Test
+    fun parsesChecksAndFallsBackToItems() {
+        val withChecksJson = Json.parseToJsonElement(
+            """{
+                "cardId":"task-check",
+                "rev":1,
+                "checks":[
+                    {"id":"c1","label":"Frame budget check","status":"done","time":"0.6s","observation":"under 64 KiB"},
+                    {"id":"c2","label":"Unit tests","status":"running","drawer":"Stacktrace at line 42","open":true}
+                ]
+            }""",
+        ) as JsonObject
+        val cardWithChecks = assertNotNull(parseAgentCard(withChecksJson))
+        assertEquals(2, cardWithChecks.checks.size)
+        assertEquals("0.6s", cardWithChecks.checks[0].time)
+        assertEquals("under 64 KiB", cardWithChecks.checks[0].observation)
+        assertEquals(AgentCardStepStatus.Done, cardWithChecks.checks[0].status)
+        assertEquals("Stacktrace at line 42", cardWithChecks.checks[1].drawer)
+        assertTrue(cardWithChecks.checks[1].open)
+        assertEquals(AgentCardStepStatus.Running, cardWithChecks.checks[1].status)
+
+        // items 回退到 checks
+        val withItemsJson = Json.parseToJsonElement(
+            """{
+                "cardId":"task-legacy",
+                "rev":1,
+                "items":[
+                    {"id":"1","label":"Legacy step","status":"done","assignee":"@worker"}
+                ]
+            }""",
+        ) as JsonObject
+        val cardWithItems = assertNotNull(parseAgentCard(withItemsJson))
+        assertEquals(1, cardWithItems.checks.size)
+        assertEquals("Legacy step", cardWithItems.checks[0].label)
+        assertEquals("@worker", cardWithItems.checks[0].observation)
+        assertEquals(AgentCardStepStatus.Done, cardWithItems.checks[0].status)
+    }
+
+    @Test
+    fun parsesBotChipsContextCmdDiffHunkAndSubActions() {
+        val json = Json.parseToJsonElement(
+            """{
+                "cardId":"task-full",
+                "rev":2,
+                "bot":{"name":"Claude Code","avatar":"bolt","branch":"worktree: #feat-1","bdot":"run"},
+                "chips":[
+                    {"text":"+42 / −7 lines","tone":"pri"},
+                    {"text":"zero breaking","tone":"ok"}
+                ],
+                "context":"Optimize frame budget and guard against packet overflow",
+                "cmd":"rm -rf build/",
+                "diff":{
+                    "path":"core/transport/NodeOutbound.kt",
+                    "additions":42,
+                    "deletions":7,
+                    "note":"Under 32 KiB budget",
+                    "hunk":["@@ -45,7 +45,8 @@","-old line","+new line"],
+                    "open":true
+                },
+                "subActions":[
+                    {"actionId":"session-exempt","label":"Session Exempt"}
+                ]
+            }""",
+        ) as JsonObject
+        val card = assertNotNull(parseAgentCard(json))
+        assertNotNull(card.bot)
+        assertEquals("Claude Code", card.bot?.name)
+        assertEquals("bolt", card.bot?.avatar)
+        assertEquals("worktree: #feat-1", card.bot?.branch)
+        assertEquals("run", card.bot?.bdot)
+
+        assertEquals(2, card.chips.size)
+        assertEquals("+42 / −7 lines", card.chips[0].text)
+        assertEquals("pri", card.chips[0].tone)
+        assertEquals("zero breaking", card.chips[1].text)
+        assertEquals("ok", card.chips[1].tone)
+
+        assertEquals("Optimize frame budget and guard against packet overflow", card.context)
+        assertEquals("rm -rf build/", card.cmd)
+
+        assertNotNull(card.diff)
+        assertEquals("core/transport/NodeOutbound.kt", card.diff?.path)
+        assertEquals(42, card.diff?.additions)
+        assertEquals(7, card.diff?.deletions)
+        assertEquals("Under 32 KiB budget", card.diff?.note)
+        assertEquals(listOf("@@ -45,7 +45,8 @@", "-old line", "+new line"), card.diff?.hunk)
+        assertTrue(card.diff?.open == true)
+
+        assertEquals(1, card.subActions.size)
+        assertEquals("session-exempt", card.subActions[0].actionId)
+        assertEquals("Session Exempt", card.subActions[0].label)
+    }
+
+    @Test
+    fun malformedNestedStructuresNeverThrow() {
+        // 计划 §三.1：卡片体是插件定义的，任何嵌套结构畸形都必须安全回退，
+        // 不许抛异常把消息流渲染炸掉 —— 未知形状的卡宁可显示成最朴素的卡。
+        fun raw(s: String): JsonObject = Json.parseToJsonElement(s) as JsonObject
+
+        // bot 畸形：name 缺失 → 整个 bot 丢弃（有 avatar 没 name 不是工牌）
+        val badBot = parseAgentCard(raw("""{"cardId":"b1","rev":1,"bot":{"avatar":"x"}}"""))
+        assertEquals(null, badBot?.bot)
+
+        // bot 畸形：整块是数组而不是对象 → 忽略
+        val botArray = parseAgentCard(raw("""{"cardId":"b2","rev":1,"bot":["x"]}"""))
+        assertEquals(null, botArray?.bot)
+
+        // chips 畸形：元素缺 text → 单条丢弃；整块是标量 → 空清单
+        val badChips = parseAgentCard(raw("""{"cardId":"c1","rev":1,"chips":[{"tone":"pri"}]}"""))
+        assertEquals(0, badChips?.chips?.size)
+        val scalarChips = parseAgentCard(raw("""{"cardId":"c2","rev":1,"chips":"x"}"""))
+        assertEquals(0, scalarChips?.chips?.size)
+
+        // diff 畸形：hunk 元素混入对象 → 只留原始行；整块是数组 → diff 丢弃
+        val mixedHunk = parseAgentCard(
+            raw("""{"cardId":"d1","rev":1,"diff":{"path":"a.kt","hunk":["-a",{"x":1},"+b"]}}"""),
+        )
+        assertEquals(listOf("-a", "+b"), mixedHunk?.diff?.hunk)
+        val diffArray = parseAgentCard(raw("""{"cardId":"d2","rev":1,"diff":["x"]}"""))
+        assertEquals(null, diffArray?.diff)
+
+        // checks 畸形：元素缺 label → 单条丢弃；items 元素不是对象 → 忽略
+        val badChecks = parseAgentCard(raw("""{"cardId":"e1","rev":1,"checks":[{"id":"c1"}]}"""))
+        assertEquals(0, badChecks?.checks?.size)
+        val badItems = parseAgentCard(raw("""{"cardId":"e2","rev":1,"items":["x",{}]}"""))
+        assertEquals(0, badItems?.steps?.size)
+        assertEquals(0, badItems?.checks?.size)
+
+        // 顶层是数组 / 数字 / 字符串：不是对象 → 不是一张卡
+        for (s in listOf("""["x"]""", """42""", """"card"""")) {
+            val el = Json.parseToJsonElement(s)
+            val r = parseAgentCard(el as? JsonObject)
+            assertEquals(null, r)
+        }
+
+        // lastBeatTs 畸形：负值如实保留（前端自己判断过期），非数字 → null
+        val beat = parseAgentCard(raw("""{"cardId":"f1","rev":1,"lastBeatTs":1700000000000}"""))
+        assertEquals(1700000000000L, beat?.lastBeatTs)
+        val badBeat = parseAgentCard(raw("""{"cardId":"f2","rev":1,"lastBeatTs":"soon"}"""))
+        assertEquals(null, badBeat?.lastBeatTs)
+    }
 }
