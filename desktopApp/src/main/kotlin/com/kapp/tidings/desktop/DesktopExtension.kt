@@ -555,6 +555,11 @@ internal class DesktopExtension(
         )
         try {
             createdPlane = created
+            // 工单编排器：文本路由（onAgentPrompt）与 invoke 执行桥（下方 CLI 分支）
+            // 的**共同**执行入口 —— 真机 `@agent` 派单帧走后者，两者必须落进同一个
+            // 编排器，工单卡/原型立项/追问唤醒/自愈退单才在两条路上都存在。
+            val workerOrchestrator = DesktopWorkerOrchestrator({ createdPlane }, controller, scope)
+            this.workerOrchestrator = workerOrchestrator
             // 责任链执行体（`POST /v1/agent/chain`）：接上 CLI 沙箱、宿主仓 git 与群卡片广播。
             // 在 `created` 之后装配 —— 执行体要用 `created.executeCliTask`（同一个实例，
             // 否则链跑的会话与面板看到的台账是两份）。
@@ -792,49 +797,51 @@ internal class DesktopExtension(
                     }
                     // E1：插件优先，**CLI 驱动兜底** —— @antigravity/@claude/@codex 这类
                     // 没有插件进程的 agent 走 DriverRegistry 的本机子进程驱动（沙箱
-                    // 语义在驱动内）。两路共享台账与产物回调（ControlPlane 内部）。
+                    // 语义在驱动内）。
+                    //
+                    // CLI 派单**交给编排器**，不再直调 executeCliTask：真机 `@agent` 帧
+                    // 全走本执行器，直调会把编排器的工单卡、阶段 A 原型立项、追问唤醒、
+                    // 自愈退单整段绕过去 —— 能力写在编排器里，真机那条路上却不存在。
+                    // `handlePromptAwait` 是请求-响应形状（await 工单终局），与 invoke
+                    // 的语义正好对上；落盘落哪个仓由编排器按群绑定确定性解析。
                     if (created.pluginForAgent(request.agentId) == null &&
                         created.resolveCliDriver(request.agentId) != null
                     ) {
-                        val cliArtifacts = mutableListOf<Triple<String, String, Long>>()
-                        val workerCardCli = java.util.concurrent.atomic.AtomicReference<String?>(null)
-                        var cliSummary: String? = null
-                        var cliError: String? = null
-                        val (cliSessionId, cliStatus, cliError0) = created.executeCliTask(
-                            request.agentId, request.prompt, wsPath, null,
-                            sessionTitle = sessionTitleFor(request.prompt),
-                            onArtifact = { path, name, bytes, _, _ -> cliArtifacts.add(Triple(path, name, bytes)) },
-                        ) { eventType, _, summary, body ->
-                            when (eventType) {
-                                "card" -> {
-                                    workerCardCli.set(body)
-                                    // **立刻上群**，不要攒到 done 随结果一起回去。
-                                    // invoke 是请求-响应，`done(summary, card)` 要等任务整个
-                                    // 结束才发得出去 —— 于是「派单到结论」之间群里一片空白：
-                                    // 派了活，屏幕上连一张本轮任务卡都没有，用户只能
-                                    // 盯着自己发的那条消息猜它在不在跑。驱动现在会在 run 之前
-                                    // 先发一张受理卡（同 cardId、rev=1），这条广播让它在派单后
-                                    // 一两秒内可见；终态卡（rev=2）随后原位替换同一张。
-                                    publishCardNow(request.groupId, request.agentId, body)
-                                }
-                                "finished" -> cliSummary = summary
-                                "error" -> cliError = summary
+                        val group = request.groupId?.takeIf { it.isNotBlank() }
+                            ?: return com.kapp.tidings.domain.AgentInvokeExecution(
+                                status = com.kapp.tidings.core.protocol.CodecInvoke.InvokeResultStates.ERROR,
+                                error = "cli dispatch requires a group-bound workspace (no group on the invoke frame)",
+                            )
+                        val outcome = workerOrchestrator.handlePromptAwait(
+                            convId = com.kapp.tidings.core.protocol.ConvId.group(group),
+                            senderPeerId = self,
+                            prompt = request.prompt,
+                            replyToId = null,
+                            agentKey = request.agentId,
+                        )
+                        // 产物投群（patch.diff）：终局带路径就投 —— 投递失败不改写状态，
+                        // 工单卡（含产物条目）照常上群，可从 report.json 对账。
+                        outcome.patchPath?.let { patchPath ->
+                            val patchFile = java.io.File(patchPath)
+                            if (patchFile.isFile) {
+                                deliverCliArtifacts(
+                                    listOf(Triple(patchPath, patchFile.name, patchFile.length())),
+                                    group,
+                                )
                             }
                         }
-                        if (cliStatus == "error") {
-                            // **带上卡片**：中止/失败时驱动已经发了一张收尾卡（state=aborted
-                            // 或 blocked），把它随结果带回去，派单处就不会再补一条「没有完成
-                            // 这次任务」的横幅 —— 用户按了停止，看到「已取消」就够了，不需要
-                            // 再被告知一次「它没干完」（那件事他已经知道了）。
-                            return com.kapp.tidings.domain.AgentInvokeExecution.withCard(
+                        return if (outcome.error != null) {
+                            // 受阻/中止/退单：**带终局卡**回 —— 派单处看到有卡就不再补
+                            // 「没干完」横幅：用户按了停，看到「已取消」就够了。
+                            com.kapp.tidings.domain.AgentInvokeExecution.withCard(
                                 status = com.kapp.tidings.core.protocol.CodecInvoke.InvokeResultStates.ERROR,
-                                summary = cliSummary,
-                                error = cliError ?: cliError0 ?: "cli task ended in error",
-                                cardJsonText = workerCardCli.get(),
+                                summary = outcome.summary,
+                                error = outcome.error,
+                                cardJsonText = outcome.cardJson,
                             )
+                        } else {
+                            com.kapp.tidings.domain.AgentInvokeExecution.done(outcome.summary, outcome.cardJson)
                         }
-                        deliverCliArtifacts(cliArtifacts, request.groupId)
-                        return com.kapp.tidings.domain.AgentInvokeExecution.done(cliSummary, workerCardCli.get())
                     }
                     val entry = created.pluginForAgent(request.agentId)
                         ?: return com.kapp.tidings.domain.AgentInvokeExecution(
@@ -956,8 +963,40 @@ internal class DesktopExtension(
                         else -> DesktopPatchMerge.apply(patchPath = ref.patchPath, workspacePath = ref.workspacePath)
                     }
                     when (outcome) {
-                        is DesktopPatchMerge.Outcome.Applied ->
+                        is DesktopPatchMerge.Outcome.Applied -> {
                             println("[RELAY-INVOKE] patch merged into workspace by " + decidedBy + " (card " + cardId + ")")
+                            val appliedGroupId = controller.state.value.messages.values
+                                .asSequence()
+                                .flatten()
+                                .lastOrNull { row ->
+                                    (row.renderCard?.get("cardId") as? JsonPrimitive)?.contentOrNull == cardId
+                                }?.peerId?.let(com.kapp.tidings.core.protocol.ConvId::groupIdOf)
+                            val mergedCard = buildJsonObject {
+                                put("cardId", JsonPrimitive(cardId))
+                                put("rev", JsonPrimitive(1))
+                                put("type", JsonPrimitive("diff-review"))
+                                put("state", JsonPrimitive("merged"))
+                                put("title", JsonPrimitive("Patch applied"))
+                                putJsonObject("banner") {
+                                    put("text", JsonPrimitive("Changes merged into workspace"))
+                                    put("tone", JsonPrimitive("success"))
+                                }
+                            }.toString()
+                            if (appliedGroupId != null) {
+                                publishCardNow(appliedGroupId, agentId, mergedCard)
+                            }
+                            val sid = ref?.sessionId
+                            if (sid != null) {
+                                sessions?.recordEvent(
+                                    nodeId = runtime.profile.nodeId,
+                                    sessionId = sid,
+                                    cursor = System.currentTimeMillis(),
+                                    eventType = "merge-result",
+                                    summary = "applied",
+                                    body = "Patch merged successfully by $decidedBy",
+                                )
+                            }
+                        }
                         is DesktopPatchMerge.Outcome.Conflict -> {
                             println("[RELAY-INVOKE] patch merge FAILED (card " + cardId + "): " + outcome.detail)
                             // **失败必须回到卡上。** 判定的那一刻手机已经把卡标成「已由
@@ -1072,8 +1111,7 @@ internal class DesktopExtension(
             // 代价（如实记在这里）：**没装 dsh-tidings 的宿主，@agent 将得不到任何回复**。
             // 那比回一句「我没有运行时」诚实 —— 后者让用户以为 agent 收到了却干不了活。
             // DSH Super-Agent alignment: single worker direct dispatch, follow-up wake-up, immediate abort
-            val workerOrchestrator = DesktopWorkerOrchestrator({ createdPlane }, controller, scope)
-            this.workerOrchestrator = workerOrchestrator
+            // （workerOrchestrator 在本 try 块开头创建 —— invoke 执行桥与文本路由共用同一实例。）
             controller.onAgentPrompt = { convId, senderPeerId, prompt, replyToId ->
                 workerOrchestrator.handlePrompt(convId, senderPeerId, prompt, replyToId)
             }

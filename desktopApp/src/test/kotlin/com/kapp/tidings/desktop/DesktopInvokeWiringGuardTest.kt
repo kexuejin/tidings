@@ -95,11 +95,21 @@ class DesktopInvokeWiringGuardTest {
             source.contains("node does not hold tag"),
             "接收侧没有持标签校验 —— 不持标签的节点不该接活（防御门）",
         )
-        // E1：CLI 驱动执行桥 —— @antigravity/@claude/@codex 的本机子进程通路。
+        // E1 + 编排器归位：CLI 驱动执行桥 —— @antigravity/@claude/@codex 的本机子进程通路。
+        // 执行体必须把 CLI 派单交给编排器（handlePromptAwait），不许直调 executeCliTask：
+        // 真机 `@agent` 帧全走 invoke，直调会让工单卡/原型立项/追问唤醒/自愈退单
+        // 在真机路径上整段消失 —— 「单测全绿、现场不存在」的旧形状。
         assertTrue(
-            source.contains("created.resolveCliDriver(request.agentId) != null") &&
-                source.contains("created.executeCliTask("),
+            source.contains("created.resolveCliDriver(request.agentId) != null"),
             "CLI 驱动回退没接 —— @antigravity 派单永远 no-plugin（E2E 幕 2 起全黑）",
+        )
+        assertTrue(
+            source.contains("workerOrchestrator.handlePromptAwait("),
+            "CLI 派单必须交给编排器（handlePromptAwait）—— 绕过编排器的执行体是旧形状",
+        )
+        assertTrue(
+            !source.contains("created.executeCliTask("),
+            "invoke 执行器不得直调 executeCliTask —— 那会绕过工单编排器",
         )
         assertTrue(
             source.contains("cliDrivers = driverRegistry"),

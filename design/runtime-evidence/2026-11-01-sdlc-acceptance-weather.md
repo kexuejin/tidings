@@ -503,3 +503,39 @@ fire-and-forget。两条候选：
 3. **`@` 菜单里第一项是「@所有人」**：自动化按空格就会选中它，消息变成无 `agentIntent`
    的群广播（18:26:01 那条 `@所有人 build a weather page` 即此）。真人点选不会犯，
    但它把一个「点错一项就等于没派单、也没有任何提示」的坑留在了主路径上。
+
+## 11. §9.9 挂起项闭环：invoke 执行桥交给编排器（不再绕过）
+
+§9.9 判定「阶段 A 原型在真机上没触发」的根因后，留下的「下一轮第一件事」现已落地：
+**invoke 执行器的 CLI 分支不再直调 `executeCliTask`，改为交给 `DesktopWorkerOrchestrator.handlePromptAwait`。**
+
+### 改动（desktopApp 两个文件 + 守卫）
+
+1. **`DesktopWorkerOrchestrator` 新增可等待终局**：
+   - `TicketOutcome(state, summary, error, cardJson, patchPath)` —— 工单的首个终局
+     （`review_ready` / `blocked` / `aborted` / `prototype` 待选 / `error`），带终局卡
+     JSON 文本与沙箱 patch 路径；
+   - `ActiveTicket.done: CompletableDeferred<TicketOutcome>`，全部终局点一次性 complete；
+   - `handlePromptAwait(convId, sender, prompt, replyTo, agentKey)`：与 `handlePrompt`
+     同判据同顺序（打断 → 受阻追问唤醒 → 新派单），差异只在「await 终局」；
+   - `abortIfRequested` 改为先**同步**把「带卡中止」终局写进 `done`（卡片由纯函数
+     `ticketCardJson` 预构建，不走网络），再取消协程 —— 顺序反过来，await 方会先
+     收到无卡兜底，域层会在用户自己按了停之后又补一条「没干完」横幅；
+   - 派单帧带 `agentId` 时随帧走（`agentKey`），不再写死 codex。
+2. **`DesktopExtension` invoke 执行器 CLI 分支重写**：解析到 CLI 驱动即调
+   `workerOrchestrator.handlePromptAwait`，await 到终局后：patch.diff 投群
+   （`deliverCliArtifacts`）、`error != null` 走 `withCard(ERROR)`、否则
+   `done(summary, card)`。帧上无群 id 时如实回 ERROR（CLI 派单必须有群绑定仓）。
+   编排器实例提前到装配开头创建，`onAgentPrompt` 与执行桥共用同一实例。
+   **dsh 插件分支（`executePluginTask`）不动** —— 自治桥模型与工单编排是两回事。
+3. **守卫更新**（`DesktopInvokeWiringGuardTest`）：正向钉
+   `workerOrchestrator.handlePromptAwait(` 必须出现在执行器装配里，反向禁
+   `created.executeCliTask(` 回潮 —— 按源码扫描锚死「不许再绕过」。
+
+### 真机收益（下一步复验清单）
+
+真机 `@agent` 派单从此与文本路由同权：工单卡（working/review_ready 原位刷新）、
+阶段 A 原型立项（mockup 意图 → prototype 卡 + 选项）、受阻工单追问唤醒、
+最多 3 轮自愈 + 退单、群绑定确定性落仓 —— 这些能力第一次在真机派单路径上**存在**，
+不再是「只有单测、真机进不去的路」。待真机复验三条：原型派单触发、追问唤醒、
+自愈退单（§9.7.3 的口径缺口由此收口）。

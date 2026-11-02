@@ -15,6 +15,7 @@ import java.util.concurrent.ConcurrentHashMap
 import java.util.concurrent.TimeUnit
 import java.util.concurrent.atomic.AtomicInteger
 import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.CoroutineStart
 import kotlinx.coroutines.Job
@@ -32,6 +33,21 @@ internal class DesktopWorkerOrchestrator(
     private val controller: RelayController,
     private val scope: CoroutineScope,
 ) {
+    /**
+     * 工单的**可等待终局**：invoke 执行桥（真机 `@agent` 派单）await 它拿到请求-响应
+     * 语义的结果，而群里的可见面仍由工单卡承担。
+     *
+     * `cardJson` 是终态工单卡的 JSON 文本 —— 等待方把它随结果带回域层（有卡就不补
+     * 「没干完」横幅）；`patchPath` 是沙箱产物 patch.diff 的本机路径，供执行桥投群。
+     */
+    data class TicketOutcome(
+        val state: String,
+        val summary: String?,
+        val error: String?,
+        val cardJson: String?,
+        val patchPath: String? = null,
+    )
+
     data class ActiveTicket(
         val ticketId: String,
         val convId: String,
@@ -41,10 +57,19 @@ internal class DesktopWorkerOrchestrator(
         val repoPath: String,
         @Volatile var stage: String,
         val rev: AtomicInteger = AtomicInteger(0),
+        val role: String = "Worker",
         @Volatile var onFollowUp: (suspend (String) -> Unit)? = null,
+        /** 终局一次性完成（成功/受阻/退单/中止/原型待选）；后续再 complete 是无操作。 */
+        val done: CompletableDeferred<TicketOutcome> = CompletableDeferred(),
     )
 
     private val activeTickets = ConcurrentHashMap<String, ActiveTicket>()
+
+    fun activeTicketsForConv(convId: String): List<ActiveTicket> =
+        activeTickets.values.filter { it.convId == convId }
+
+    fun activeTicketForConv(convId: String): ActiveTicket? =
+        activeTickets.values.filter { it.convId == convId }.maxByOrNull { it.ticketId }
 
     fun isAbortSignal(text: String): Boolean = AbortSignals.matches(text)
 
@@ -73,14 +98,13 @@ internal class DesktopWorkerOrchestrator(
      * 不经过网络的路径 —— 卡片的发布才走网络，排在取消之后。
      */
     internal fun abortIfRequested(convId: String, text: String): Boolean {
-        val active = activeTickets[convId] ?: return false
         if (!isAbortSignal(text)) return false
-        active.stage = "aborted"
-        activeTickets.remove(convId)
-        active.job.cancel(CancellationException("aborted by user: " + text.trim()))
-        scope.launch {
-            publishTicketCard(
-                groupId = active.groupId,
+        val targets = activeTicketsForConv(convId)
+        if (targets.isEmpty()) return false
+        for (active in targets) {
+            active.stage = "aborted"
+            activeTickets.remove(active.ticketId)
+            val abortedJson = ticketCardJson(
                 ticketId = active.ticketId,
                 rev = active.rev.incrementAndGet(),
                 state = "aborted",
@@ -88,6 +112,9 @@ internal class DesktopWorkerOrchestrator(
                 banner = "Aborted by user request",
                 percent = 0,
             )
+            active.done.complete(TicketOutcome("aborted", null, "Aborted by user request", abortedJson))
+            active.job.cancel(CancellationException("aborted by user: " + text.trim()))
+            scope.launch { publishCardJson(active.groupId, abortedJson) }
         }
         return true
     }
@@ -96,7 +123,75 @@ internal class DesktopWorkerOrchestrator(
      * 群内活跃工单的追问与微调唤醒（测试方案阶段 A 原型确认与追问唤醒）。
      */
     internal fun followUpIfActive(convId: String, text: String): Boolean {
-        val active = activeTickets[convId] ?: return false
+        val active = activeTicketsForConv(convId).firstOrNull { it.stage in setOf("blocked", "prototype") } ?: return false
+        val handler = active.onFollowUp ?: return false
+        val trimmed = stripMentions(text)
+        if (trimmed.isBlank()) return false
+        scope.launch {
+            active.stage = "working"
+            publishTicketCard(
+                groupId = active.groupId,
+                ticketId = active.ticketId,
+                rev = active.rev.incrementAndGet(),
+                state = "working",
+                title = active.title,
+                banner = "Resumed: processing follow-up",
+                percent = 50,
+                roleName = active.role,
+            )
+            handler.invoke(trimmed)
+        }
+        return true
+    }
+
+    /**
+     * 移动端点击「Approve & Develop」原型确认按钮。
+     */
+    internal fun approvePrototype(convId: String): Boolean {
+        val active = activeTicketsForConv(convId).firstOrNull { it.stage == "prototype" } ?: return false
+        val handler = active.onFollowUp ?: return false
+        scope.launch {
+            active.stage = "working"
+            publishTicketCard(
+                groupId = active.groupId,
+                ticketId = active.ticketId,
+                rev = active.rev.incrementAndGet(),
+                state = "working",
+                title = active.title,
+                banner = "Prototype approved: initializing implementation & tests...",
+                percent = 30,
+                roleName = active.role,
+            )
+            handler.invoke("APPROVE_AND_DEVELOP")
+        }
+        return true
+    }
+
+    internal fun approvePrototypeByCard(cardId: String): Boolean {
+        val tid = cardId.removePrefix("chain-")
+        val active = activeTickets[tid] ?: activeTickets.values.firstOrNull { it.ticketId == tid } ?: return false
+        if (active.stage != "prototype") return false
+        val handler = active.onFollowUp ?: return false
+        scope.launch {
+            active.stage = "working"
+            publishTicketCard(
+                groupId = active.groupId,
+                ticketId = active.ticketId,
+                rev = active.rev.incrementAndGet(),
+                state = "working",
+                title = active.title,
+                banner = "Prototype approved: initializing implementation & tests...",
+                percent = 30,
+                roleName = active.role,
+            )
+            handler.invoke("APPROVE_AND_DEVELOP")
+        }
+        return true
+    }
+
+    internal fun followUpByCard(cardId: String, text: String): Boolean {
+        val tid = cardId.removePrefix("chain-")
+        val active = activeTickets[tid] ?: activeTickets.values.firstOrNull { it.ticketId == tid } ?: return false
         if (active.stage !in setOf("blocked", "prototype")) return false
         val handler = active.onFollowUp ?: return false
         val trimmed = stripMentions(text)
@@ -111,45 +206,11 @@ internal class DesktopWorkerOrchestrator(
                 title = active.title,
                 banner = "Resumed: processing follow-up",
                 percent = 50,
+                roleName = active.role,
             )
             handler.invoke(trimmed)
         }
         return true
-    }
-
-    /**
-     * 移动端点击「Approve & Develop」原型确认按钮。
-     */
-    internal fun approvePrototype(convId: String): Boolean {
-        val active = activeTickets[convId] ?: return false
-        if (active.stage != "prototype") return false
-        val handler = active.onFollowUp ?: return false
-        scope.launch {
-            active.stage = "working"
-            publishTicketCard(
-                groupId = active.groupId,
-                ticketId = active.ticketId,
-                rev = active.rev.incrementAndGet(),
-                state = "working",
-                title = active.title,
-                banner = "Prototype approved: initializing implementation & tests...",
-                percent = 30,
-            )
-            handler.invoke("APPROVE_AND_DEVELOP")
-        }
-        return true
-    }
-
-    internal fun approvePrototypeByCard(cardId: String): Boolean {
-        val tid = cardId.removePrefix("chain-")
-        val active = activeTickets.values.firstOrNull { it.ticketId == tid } ?: return false
-        return approvePrototype(active.convId)
-    }
-
-    internal fun followUpByCard(cardId: String, text: String): Boolean {
-        val tid = cardId.removePrefix("chain-")
-        val active = activeTickets.values.firstOrNull { it.ticketId == tid } ?: return false
-        return followUpIfActive(active.convId, text)
     }
 
     suspend fun handlePrompt(
@@ -159,7 +220,7 @@ internal class DesktopWorkerOrchestrator(
         replyToId: String?,
     ) {
         val groupId = ConvId.groupIdOf(convId)
-        val active = activeTickets[convId]
+        val active = activeTicketForConv(convId)
 
         // 1. Direct Abort signal（第二道防线：`@codex 停` 这类「既是 prompt 又是打断」
         //    的消息由入站前移判定拦下；万一有别的入口直接调到这里，这里再拦一次）。
@@ -181,6 +242,7 @@ internal class DesktopWorkerOrchestrator(
                     title = active.title,
                     banner = "Resumed: processing follow-up",
                     percent = 50,
+                    roleName = active.role,
                 )
                 handler.invoke(prompt)
                 return
@@ -195,6 +257,63 @@ internal class DesktopWorkerOrchestrator(
             // DSH core philosophy: single worker end-to-end closed loop
             dispatchSingleWorker(convId, groupId, prompt)
         }
+    }
+
+    /**
+     * invoke 执行桥的**可等待入口**：真机 `@agent` 派单帧带 `agentIntent`，域层走
+     * `invokeExecutor.execute`（请求-响应），不走 `onAgentPrompt` 的文本路由 ——
+     * 这曾经是阶段 A 原型 / 追问唤醒 / 自愈退单在真机上「单测全绿、现场不存在」的
+     * 根因：能力都写在编排器里，而真机那条路直调 `executeCliTask` 绕过了它。
+     *
+     * 现在执行桥交给这里。三个分支与 [handlePrompt] 同判据、同顺序：
+     *
+     * 1. **打断**：`abortIfRequested` 已同步把终局（带卡）写进 `done`，await 即得；
+     * 2. **受阻工单追问**：唤醒后续跑，等待方拿到「Resumed」回执 —— 真正的结论
+     *    由后续工单卡承担（这时 invoke 的语义只是「你的话送到工单了」）；
+     * 3. **新派单**：建工单并 await 终局（成功/受阻/退单/中止/原型待选）。
+     *
+     * `agentKey` 来自派单帧的 `agentId`（codex/claude/antigravity…），不再写死 codex。
+     */
+    suspend fun handlePromptAwait(
+        convId: String,
+        senderPeerId: String,
+        prompt: String,
+        replyToId: String?,
+        agentKey: String?,
+    ): TicketOutcome {
+        val groupId = ConvId.groupIdOf(convId)
+        val active = activeTicketForConv(convId)
+
+        if (active != null && isAbortSignal(prompt)) {
+            abortIfRequested(convId, prompt)
+            return active.done.await()
+        }
+
+        if (active != null && active.stage == "blocked") {
+            val handler = active.onFollowUp
+            if (handler != null) {
+                active.stage = "working"
+                val json = ticketCardJson(
+                    ticketId = active.ticketId,
+                    rev = active.rev.incrementAndGet(),
+                    state = "working",
+                    title = active.title,
+                    banner = "Resumed: processing follow-up",
+                    percent = 50,
+                )
+                scope.launch { publishCardJson(active.groupId, json) }
+                scope.launch { handler.invoke(prompt) }
+                return TicketOutcome("working", "Resumed: processing follow-up", null, json)
+            }
+        }
+
+        val stages = StageChain.parseStages(prompt)
+        if (stages.size >= 2) {
+            // 多角色链有自己的卡与生命周期（ChainDispatcher），这里只回受理。
+            dispatchMultiRoleChain(convId, groupId, prompt, stages)
+            return TicketOutcome("accepted", prompt.lineSequence().firstOrNull()?.trim()?.take(60), null, null)
+        }
+        return dispatchSingleWorker(convId, groupId, prompt, agentKey).await()
     }
 
     private fun dispatchMultiRoleChain(
@@ -220,31 +339,38 @@ internal class DesktopWorkerOrchestrator(
         convId: String,
         groupId: String?,
         prompt: String,
-    ) {
-        val host = planeProvider() ?: return
+        agentKey: String? = null,
+    ): CompletableDeferred<TicketOutcome> {
+        val host = planeProvider()
+            ?: return CompletableDeferred(TicketOutcome("error", null, "control plane unavailable", null))
         val repoPath = resolveWorkspacePath(groupId)
 
         val ticketId = "t" + System.currentTimeMillis().toString(36)
         val title = prompt.lineSequence().firstOrNull()?.trim()?.take(60) ?: "Task $ticketId"
+        val done = CompletableDeferred<TicketOutcome>()
 
         // Hand-back if repo is invalid or missing
         if (repoPath == null || !isGitRepo(repoPath)) {
-            scope.launch {
-                publishTicketCard(
-                    groupId = groupId,
+            val handedBack = TicketOutcome(
+                state = "blocked",
+                summary = null,
+                error = "Handed back: no git workspace bound to group",
+                cardJson = ticketCardJson(
                     ticketId = ticketId,
                     rev = 1,
                     state = "blocked",
                     title = title,
                     banner = "Handed back: no git workspace bound to group",
                     percent = 0,
-                )
-            }
-            return
+                ),
+            )
+            scope.launch { publishCardJson(groupId, handedBack.cardJson) }
+            return CompletableDeferred(handedBack)
         }
 
         val revCounter = AtomicInteger(1)
-        val defaultAgent = "codex"
+        // 派单帧带 agentId 时随帧走（codex/claude/antigravity…）；文本路由没带 → codex。
+        val defaultAgent = agentKey?.takeIf { it.isNotBlank() } ?: "codex"
         val isProto = isPrototypeIntent(prompt)
 
         lateinit var ticket: ActiveTicket
@@ -258,109 +384,52 @@ internal class DesktopWorkerOrchestrator(
         // 原型分支之所以没暴露，是因为它先 `executeCliTask` 挂起，给了赋值一个窗口 —— 这是
         // **靠运气**，不是靠结构。改成 LAZY 后由这里显式 `start()`，顺序由代码保证。
         val job = scope.launch(start = CoroutineStart.LAZY) {
-            if (isProto) {
-                // ==================== STAGE A: PROTOCOL PROTOTYPE FLOW ====================
-                publishTicketCard(
-                    groupId = groupId,
-                    ticketId = ticketId,
-                    rev = revCounter.get(),
-                    state = "working",
-                    title = title,
-                    banner = "Generating interactive prototype (prototype.html)...",
-                    percent = 20,
-                )
-
-                val protoPrompt = "You are designing an interactive single-file prototype HTML for the requested concept. " +
-                    "Generate a self-contained prototype.html file with embedded styles and scripts in the workspace root. " +
-                    "Do NOT inspect or read files outside the repository.\n\n" + prompt
-
-                var protoCreated = false
-                host.executeCliTask(
-                    agentKey = defaultAgent,
-                    prompt = protoPrompt,
-                    wsPath = repoPath,
-                    requestedSessionId = null,
-                    sessionTitle = title,
-                    onArtifact = { _, name, _, _, _ -> if (name.contains("prototype") || name.endsWith(".html") || name == "patch.diff") protoCreated = true },
-                    onEvent = { _, _, _, _ -> },
-                )
-
-                ticket.stage = "prototype"
-                val protoOptions = listOf(
-                    "Layout A (Minimalist)" to true,
-                    "Layout B (Capsule Cards)" to false,
-                    "Layout C (Compact Table)" to false,
-                )
-                val protoArtifacts = listOf("prototype.html" to 4096L)
-
-                publishTicketCard(
-                    groupId = groupId,
-                    ticketId = ticketId,
-                    rev = revCounter.incrementAndGet(),
-                    state = "prototype",
-                    title = title,
-                    banner = "Interactive prototype ready. Select layout or reply to adjust.",
-                    percent = 50,
-                    options = protoOptions,
-                    artifacts = protoArtifacts,
-                )
-
-                // Wire onFollowUp callback to handle refinements or approval
-                ticket.onFollowUp = { followUpText ->
-                    if (followUpText == "APPROVE_AND_DEVELOP") {
-                        ticket.stage = "working"
-                        runDevelopmentAndHealLoop(
-                            ticket = ticket,
-                            convId = convId,
-                            groupId = groupId,
-                            ticketId = ticketId,
-                            title = title,
-                            repoPath = repoPath,
-                            revCounter = revCounter,
-                            defaultAgent = defaultAgent,
-                            devPrompt = "Prototype confirmed! Implement the full features and test suite for: $prompt",
-                        )
-                    } else {
-                        ticket.stage = "working"
-                        val refinePrompt = "Refine the prototype.html in workspace according to this user feedback: $followUpText. " +
-                            "Keep it self-contained in prototype.html."
-                        host.executeCliTask(
-                            agentKey = defaultAgent,
-                            prompt = refinePrompt,
-                            wsPath = repoPath,
-                            requestedSessionId = null,
-                            sessionTitle = title,
-                            onArtifact = { _, _, _, _, _ -> },
-                            onEvent = { _, _, _, _ -> },
-                        )
-                        ticket.stage = "prototype"
-                        publishTicketCard(
-                            groupId = groupId,
-                            ticketId = ticketId,
-                            rev = revCounter.incrementAndGet(),
-                            state = "prototype",
-                            title = title,
-                            banner = "Refined prototype ready. Select layout or reply to adjust.",
-                            percent = 60,
-                            options = protoOptions,
-                            artifacts = protoArtifacts,
-                        )
-                    }
+            val outcome: TicketOutcome = try {
+                if (isProto) {
+                    runPrototypeFlow(
+                        ticket = ticket,
+                        convId = convId,
+                        groupId = groupId,
+                        ticketId = ticketId,
+                        title = title,
+                        repoPath = repoPath,
+                        revCounter = revCounter,
+                        defaultAgent = defaultAgent,
+                        prompt = prompt,
+                        host = host,
+                    )
+                } else {
+                    // ==================== STAGE B & C: DEV / BUGFIX FLOW WITH HEAL LOOP ====================
+                    runDevelopmentAndHealLoop(
+                        ticket = ticket,
+                        convId = convId,
+                        groupId = groupId,
+                        ticketId = ticketId,
+                        title = title,
+                        repoPath = repoPath,
+                        revCounter = revCounter,
+                        defaultAgent = defaultAgent,
+                        devPrompt = prompt,
+                    )
                 }
-            } else {
-                // ==================== STAGE B & C: DEV / BUGFIX FLOW WITH HEAL LOOP ====================
-                runDevelopmentAndHealLoop(
-                    ticket = ticket,
-                    convId = convId,
-                    groupId = groupId,
-                    ticketId = ticketId,
-                    title = title,
-                    repoPath = repoPath,
-                    revCounter = revCounter,
-                    defaultAgent = defaultAgent,
-                    devPrompt = prompt,
-                )
+            } catch (e: CancellationException) {
+                // abortIfRequested 已把「带卡中止」的终局写进 done（先 complete 者赢）；
+                // 这里补无卡兜底，防工单被别的路取消时 invoke 桥的 await 挂死。
+                done.complete(TicketOutcome("aborted", null, "aborted", null))
+                throw e
+            } catch (t: Throwable) {
+                done.complete(TicketOutcome("error", null, t.message ?: (t::class.simpleName ?: "task failed"), null))
+                throw t
             }
+            done.complete(outcome)
+        }
+
+        val roleName = when (defaultAgent.lowercase()) {
+            "codex" -> "Codex"
+            "claude" -> "Claude"
+            "antigravity", "agy" -> "Antigravity"
+            "gemini" -> "Gemini"
+            else -> defaultAgent.replaceFirstChar { if (it.isLowerCase()) it.titlecase() else it.toString() }
         }
 
         ticket = ActiveTicket(
@@ -372,11 +441,126 @@ internal class DesktopWorkerOrchestrator(
             repoPath = repoPath,
             stage = "working",
             rev = revCounter,
+            role = roleName,
+            done = done,
         )
-        activeTickets[convId] = ticket
+        activeTickets[ticketId] = ticket
         // 先入表再起跑：打断信号（`abortIfRequested`）按 convId 找活跃工单，
         // 起跑之后、入表之前的那一瞬间发来的「停」会找不到工单而被当成普通消息。
         job.start()
+        return done
+    }
+
+    /**
+     * 阶段 A（原型立项）执行体：出原型卡、接追问回调，终局是「原型卡待选」——
+     * 后续的确认/微调在 `onFollowUp` 里续跑，不再改写这个终局。
+     */
+    private suspend fun runPrototypeFlow(
+        ticket: ActiveTicket,
+        convId: String,
+        groupId: String?,
+        ticketId: String,
+        title: String,
+        repoPath: String,
+        revCounter: AtomicInteger,
+        defaultAgent: String,
+        prompt: String,
+        host: ControlPlane,
+    ): TicketOutcome {
+        // ==================== STAGE A: PROTOCOL PROTOTYPE FLOW ====================
+        publishTicketCard(
+            groupId = groupId,
+            ticketId = ticketId,
+            rev = revCounter.get(),
+            state = "working",
+            title = title,
+            banner = "Generating interactive prototype (prototype.html)...",
+            percent = 20,
+        )
+
+        val protoPrompt = "You are designing an interactive single-file prototype HTML for the requested concept. " +
+            "Generate a self-contained prototype.html file with embedded styles and scripts in the workspace root. " +
+            "Do NOT inspect or read files outside the repository.\n\n" + prompt
+
+        var protoCreated = false
+        host.executeCliTask(
+            agentKey = defaultAgent,
+            prompt = protoPrompt,
+            wsPath = repoPath,
+            requestedSessionId = null,
+            sessionTitle = title,
+            onArtifact = { _, name, _, _, _ -> if (name.contains("prototype") || name.endsWith(".html") || name == "patch.diff") protoCreated = true },
+            onEvent = { _, _, _, _ -> },
+        )
+
+        ticket.stage = "prototype"
+        val protoOptions = listOf(
+            "Layout A (Minimalist)" to true,
+            "Layout B (Capsule Cards)" to false,
+            "Layout C (Compact Table)" to false,
+        )
+        val protoArtifacts = listOf("prototype.html" to 4096L)
+
+        val protoJson = publishTicketCard(
+            groupId = groupId,
+            ticketId = ticketId,
+            rev = revCounter.incrementAndGet(),
+            state = "prototype",
+            title = title,
+            banner = "Interactive prototype ready. Select layout or reply to adjust.",
+            percent = 50,
+            options = protoOptions,
+            artifacts = protoArtifacts,
+        )
+
+        // Wire onFollowUp callback to handle refinements or approval
+        ticket.onFollowUp = { followUpText ->
+            if (followUpText == "APPROVE_AND_DEVELOP") {
+                ticket.stage = "working"
+                runDevelopmentAndHealLoop(
+                    ticket = ticket,
+                    convId = convId,
+                    groupId = groupId,
+                    ticketId = ticketId,
+                    title = title,
+                    repoPath = repoPath,
+                    revCounter = revCounter,
+                    defaultAgent = defaultAgent,
+                    devPrompt = "Prototype confirmed! Implement the full features and test suite for: $prompt",
+                )
+            } else {
+                ticket.stage = "working"
+                val refinePrompt = "Refine the prototype.html in workspace according to this user feedback: $followUpText. " +
+                    "Keep it self-contained in prototype.html."
+                host.executeCliTask(
+                    agentKey = defaultAgent,
+                    prompt = refinePrompt,
+                    wsPath = repoPath,
+                    requestedSessionId = null,
+                    sessionTitle = title,
+                    onArtifact = { _, _, _, _, _ -> },
+                    onEvent = { _, _, _, _ -> },
+                )
+                ticket.stage = "prototype"
+                publishTicketCard(
+                    groupId = groupId,
+                    ticketId = ticketId,
+                    rev = revCounter.incrementAndGet(),
+                    state = "prototype",
+                    title = title,
+                    banner = "Refined prototype ready. Select layout or reply to adjust.",
+                    percent = 60,
+                    options = protoOptions,
+                    artifacts = protoArtifacts,
+                )
+            }
+        }
+        return TicketOutcome(
+            state = "prototype",
+            summary = "Interactive prototype ready. Select layout or reply to adjust.",
+            error = null,
+            cardJson = protoJson,
+        )
     }
 
     private suspend fun runDevelopmentAndHealLoop(
@@ -389,8 +573,9 @@ internal class DesktopWorkerOrchestrator(
         revCounter: AtomicInteger,
         defaultAgent: String,
         devPrompt: String,
-    ) {
-        val host = planeProvider() ?: return
+    ): TicketOutcome {
+        val host = planeProvider()
+            ?: return TicketOutcome("error", null, "control plane unavailable", null)
 
         publishTicketCard(
             groupId = groupId,
@@ -459,20 +644,21 @@ internal class DesktopWorkerOrchestrator(
 
         if (executionError != null) {
             ticket.stage = "blocked"
-            publishTicketCard(
+            val blockedBanner = "Handed back: exceeded max heal rounds ($maxHealRounds) \u2014 $executionError"
+            val blockedJson = publishTicketCard(
                 groupId = groupId,
                 ticketId = ticketId,
                 rev = revCounter.incrementAndGet(),
                 state = "blocked",
                 title = title,
-                banner = "Handed back: exceeded max heal rounds ($maxHealRounds) \u2014 $executionError",
+                banner = blockedBanner,
                 percent = 40,
             )
-            return
+            return TicketOutcome("blocked", null, blockedBanner, blockedJson)
         }
 
         // Success -> review_ready card (sandbox isolated, host repo remains clean until user reviews and merges)
-        activeTickets.remove(convId)
+        activeTickets.remove(ticket.ticketId)
         val harvest = patchPath?.let { StageChain.parseHarvest(File(it), File(repoPath).name) }
         val diff = harvest?.first
         val patchBytes = harvest?.second ?: 0L
@@ -484,7 +670,7 @@ internal class DesktopWorkerOrchestrator(
         }
         // 取**尾部**再压：结论在最后，开头多是「我先看看仓库」这类过程话。
         val summary = StageChain.summarize(said.toString().takeLast(600)) ?: defaultSummary
-        publishTicketCard(
+        val reviewJson = publishTicketCard(
             groupId = groupId,
             ticketId = ticketId,
             rev = revCounter.incrementAndGet(),
@@ -495,6 +681,44 @@ internal class DesktopWorkerOrchestrator(
             artifacts = artifactsList,
             diff = diff,
         )
+        return TicketOutcome("review_ready", summary, null, reviewJson, patchPath)
+    }
+
+    /**
+     * 简版工单卡的**纯构建**（不落网络）。打断（`abortIfRequested`）与追问唤醒要把
+     * 终局**先**递给 await 中的 invoke 桥、卡随终局一起走 —— 那两个点不能先发网络。
+     */
+    private fun ticketCardJson(
+        ticketId: String,
+        rev: Int,
+        state: String,
+        title: String,
+        banner: String?,
+        percent: Int,
+    ): String = StageChain.cardJsonOf(
+        ChainProgress(
+            chainId = ticketId,
+            rev = rev,
+            state = state,
+            title = title,
+            currentRole = "Worker",
+            stages = listOf("Worker" to state),
+            percent = percent,
+            banner = banner,
+        ),
+    )
+
+    private suspend fun publishCardJson(groupId: String?, json: String?) {
+        if (groupId == null || json == null) return
+        runCatching {
+            controller.broadcastChainCard(
+                groupId = groupId,
+                agentId = "tidings-worker",
+                cardJson = json,
+            )
+        }.onFailure { t ->
+            println("[ORCHESTRATOR] card publish failed: " + t.message)
+        }
     }
 
     private suspend fun publishTicketCard(
@@ -505,6 +729,7 @@ internal class DesktopWorkerOrchestrator(
         title: String,
         banner: String?,
         percent: Int,
+        roleName: String = "Worker",
         options: List<Pair<String, Boolean>> = emptyList(),
         artifacts: List<Pair<String, Long>> = emptyList(),
         diff: ChainDiff? = null,
@@ -515,8 +740,8 @@ internal class DesktopWorkerOrchestrator(
             rev = rev,
             state = state,
             title = title,
-            currentRole = "Worker",
-            stages = listOf("Worker" to state),
+            currentRole = roleName,
+            stages = listOf(roleName to state),
             percent = percent,
             banner = banner,
             options = options,
@@ -524,15 +749,7 @@ internal class DesktopWorkerOrchestrator(
             diff = diff,
         )
         val json = StageChain.cardJsonOf(progress)
-        runCatching {
-            controller.broadcastChainCard(
-                groupId = groupId,
-                agentId = "tidings-worker",
-                cardJson = json,
-            )
-        }.onFailure { t ->
-            println("[ORCHESTRATOR] card publish failed: " + t.message)
-        }
+        publishCardJson(groupId, json)
         return json
     }
 
