@@ -109,4 +109,37 @@ class DesktopWorkerOrchestratorTest {
             "不许再用「本机第一个工作区」兜底：Map 顺序不定，同一群会落到不同仓",
         )
     }
+
+    /**
+     * 工单卡必须挂**真实驱动键**。
+     *
+     * 真机事故：广播卡写死 `agentId="tidings-worker"`，用户点卡上的 Approve，
+     * 动作帧按卡片的 agentId 过 `AgentExecAuthorizer` —— 假名过不了授权，
+     * 卡片永远停在「已提交，等待宿主确认」，群里只回一条
+     * `agent_action_denied_notice`（「没有权限驱动 [tidings-worker]」）。
+     * 卡面的 `currentRole` 同理：写死 "Worker" 时用户看不出这张卡是谁干的。
+     */
+    @Test
+    fun ticketCardsCarryTheRealAgentKey() {
+        val source = listOf(
+            File("src/main/kotlin/com/kapp/tidings/desktop/DesktopWorkerOrchestrator.kt"),
+            File("desktopApp/src/main/kotlin/com/kapp/tidings/desktop/DesktopWorkerOrchestrator.kt"),
+        ).firstOrNull { it.isFile }
+        assertTrue(source != null, "DesktopWorkerOrchestrator.kt not found")
+        val text = source.readText()
+
+        assertFalse(
+            text.contains("\"tidings-worker\""),
+            "卡片广播不许写死 tidings-worker：假名过不了 AgentExecAuthorizer，" +
+                "卡上的 Approve 动作会被「没有权限驱动」拒绝",
+        )
+        assertTrue(
+            text.contains("val agentKey: String") && text.contains("agentKey = defaultAgent"),
+            "ActiveTicket 必须持有随帧的 agentKey，并传入广播身份",
+        )
+        assertFalse(
+            text.contains("currentRole = \"Worker\""),
+            "卡面角色不许写死 Worker：currentRole 应来自 roleNameOf(agentKey)",
+        )
+    }
 }

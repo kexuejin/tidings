@@ -58,6 +58,13 @@ internal class DesktopWorkerOrchestrator(
         @Volatile var stage: String,
         val rev: AtomicInteger = AtomicInteger(0),
         val role: String = "Worker",
+        /**
+         * 这张卡的**驱动键**（codex/claude/antigravity…），广播与授权共用它。
+         * 曾经写死 `tidings-worker`：卡面看不出是谁干的还在其次 —— 用户点卡上
+         * 的 Approve，动作帧按卡片的 agentId 过 `AgentExecAuthorizer`，假名
+         * 过不了授权，「已提交，等待宿主确认」永远等不来执行（真机实锤）。
+         */
+        val agentKey: String = "codex",
         @Volatile var onFollowUp: (suspend (String) -> Unit)? = null,
         /** 终局一次性完成（成功/受阻/退单/中止/原型待选）；后续再 complete 是无操作。 */
         val done: CompletableDeferred<TicketOutcome> = CompletableDeferred(),
@@ -111,10 +118,11 @@ internal class DesktopWorkerOrchestrator(
                 title = active.title,
                 banner = "Aborted by user request",
                 percent = 0,
+                roleName = active.role,
             )
             active.done.complete(TicketOutcome("aborted", null, "Aborted by user request", abortedJson))
             active.job.cancel(CancellationException("aborted by user: " + text.trim()))
-            scope.launch { publishCardJson(active.groupId, abortedJson) }
+            scope.launch { publishCardJson(active.groupId, abortedJson, active.agentKey) }
         }
         return true
     }
@@ -138,6 +146,7 @@ internal class DesktopWorkerOrchestrator(
                 banner = "Resumed: processing follow-up",
                 percent = 50,
                 roleName = active.role,
+                agentId = active.agentKey,
             )
             handler.invoke(trimmed)
         }
@@ -161,6 +170,7 @@ internal class DesktopWorkerOrchestrator(
                 banner = "Prototype approved: initializing implementation & tests...",
                 percent = 30,
                 roleName = active.role,
+                agentId = active.agentKey,
             )
             handler.invoke("APPROVE_AND_DEVELOP")
         }
@@ -183,6 +193,7 @@ internal class DesktopWorkerOrchestrator(
                 banner = "Prototype approved: initializing implementation & tests...",
                 percent = 30,
                 roleName = active.role,
+                agentId = active.agentKey,
             )
             handler.invoke("APPROVE_AND_DEVELOP")
         }
@@ -207,6 +218,7 @@ internal class DesktopWorkerOrchestrator(
                 banner = "Resumed: processing follow-up",
                 percent = 50,
                 roleName = active.role,
+                agentId = active.agentKey,
             )
             handler.invoke(trimmed)
         }
@@ -243,6 +255,7 @@ internal class DesktopWorkerOrchestrator(
                     banner = "Resumed: processing follow-up",
                     percent = 50,
                     roleName = active.role,
+                    agentId = active.agentKey,
                 )
                 handler.invoke(prompt)
                 return
@@ -300,8 +313,9 @@ internal class DesktopWorkerOrchestrator(
                     title = active.title,
                     banner = "Resumed: processing follow-up",
                     percent = 50,
+                    roleName = active.role,
                 )
-                scope.launch { publishCardJson(active.groupId, json) }
+                scope.launch { publishCardJson(active.groupId, json, active.agentKey) }
                 scope.launch { handler.invoke(prompt) }
                 return TicketOutcome("working", "Resumed: processing follow-up", null, json)
             }
@@ -349,6 +363,10 @@ internal class DesktopWorkerOrchestrator(
         val title = prompt.lineSequence().firstOrNull()?.trim()?.take(60) ?: "Task $ticketId"
         val done = CompletableDeferred<TicketOutcome>()
 
+        // 派单帧带 agentId 时随帧走（codex/claude/antigravity…）；文本路由没带 → codex。
+        // 提前到 handback 之前：退单卡也要挂真名（广播身份与授权都认这个键）。
+        val defaultAgent = agentKey?.takeIf { it.isNotBlank() } ?: "codex"
+
         // Hand-back if repo is invalid or missing
         if (repoPath == null || !isGitRepo(repoPath)) {
             val handedBack = TicketOutcome(
@@ -362,15 +380,14 @@ internal class DesktopWorkerOrchestrator(
                     title = title,
                     banner = "Handed back: no git workspace bound to group",
                     percent = 0,
+                    roleName = roleNameOf(defaultAgent),
                 ),
             )
-            scope.launch { publishCardJson(groupId, handedBack.cardJson) }
+            scope.launch { publishCardJson(groupId, handedBack.cardJson, defaultAgent) }
             return CompletableDeferred(handedBack)
         }
 
         val revCounter = AtomicInteger(1)
-        // 派单帧带 agentId 时随帧走（codex/claude/antigravity…）；文本路由没带 → codex。
-        val defaultAgent = agentKey?.takeIf { it.isNotBlank() } ?: "codex"
         val isProto = isPrototypeIntent(prompt)
 
         lateinit var ticket: ActiveTicket
@@ -424,14 +441,6 @@ internal class DesktopWorkerOrchestrator(
             done.complete(outcome)
         }
 
-        val roleName = when (defaultAgent.lowercase()) {
-            "codex" -> "Codex"
-            "claude" -> "Claude"
-            "antigravity", "agy" -> "Antigravity"
-            "gemini" -> "Gemini"
-            else -> defaultAgent.replaceFirstChar { if (it.isLowerCase()) it.titlecase() else it.toString() }
-        }
-
         ticket = ActiveTicket(
             ticketId = ticketId,
             convId = convId,
@@ -441,7 +450,8 @@ internal class DesktopWorkerOrchestrator(
             repoPath = repoPath,
             stage = "working",
             rev = revCounter,
-            role = roleName,
+            role = roleNameOf(defaultAgent),
+            agentKey = defaultAgent,
             done = done,
         )
         activeTickets[ticketId] = ticket
@@ -476,6 +486,8 @@ internal class DesktopWorkerOrchestrator(
             title = title,
             banner = "Generating interactive prototype (prototype.html)...",
             percent = 20,
+            roleName = ticket.role,
+            agentId = defaultAgent,
         )
 
         val protoPrompt = "You are designing an interactive single-file prototype HTML for the requested concept. " +
@@ -509,6 +521,8 @@ internal class DesktopWorkerOrchestrator(
             title = title,
             banner = "Interactive prototype ready. Select layout or reply to adjust.",
             percent = 50,
+            roleName = ticket.role,
+            agentId = defaultAgent,
             options = protoOptions,
             artifacts = protoArtifacts,
         )
@@ -550,6 +564,8 @@ internal class DesktopWorkerOrchestrator(
                     title = title,
                     banner = "Refined prototype ready. Select layout or reply to adjust.",
                     percent = 60,
+                    roleName = ticket.role,
+                    agentId = defaultAgent,
                     options = protoOptions,
                     artifacts = protoArtifacts,
                 )
@@ -585,6 +601,8 @@ internal class DesktopWorkerOrchestrator(
             title = title,
             banner = "Executing worker sandbox in isolated worktree...",
             percent = 40,
+            roleName = ticket.role,
+            agentId = defaultAgent,
         )
 
         val containedPrompt = "You are working strictly inside the current workspace repository directory. " +
@@ -637,6 +655,8 @@ internal class DesktopWorkerOrchestrator(
                     title = title,
                     banner = "Heal loop $healRound/$maxHealRounds: fixing issues ($executionError)...",
                     percent = 40 + healRound * 15,
+                    roleName = ticket.role,
+                    agentId = defaultAgent,
                 )
                 currentPrompt = "Previous attempt failed: $executionError. Please inspect tests and workspace, fix all issues, and ensure npm test passes."
             }
@@ -653,6 +673,8 @@ internal class DesktopWorkerOrchestrator(
                 title = title,
                 banner = blockedBanner,
                 percent = 40,
+                roleName = ticket.role,
+                agentId = defaultAgent,
             )
             return TicketOutcome("blocked", null, blockedBanner, blockedJson)
         }
@@ -678,6 +700,8 @@ internal class DesktopWorkerOrchestrator(
             title = title,
             banner = summary,
             percent = 100,
+            roleName = ticket.role,
+            agentId = defaultAgent,
             artifacts = artifactsList,
             diff = diff,
         )
@@ -695,25 +719,26 @@ internal class DesktopWorkerOrchestrator(
         title: String,
         banner: String?,
         percent: Int,
+        roleName: String = "Worker",
     ): String = StageChain.cardJsonOf(
         ChainProgress(
             chainId = ticketId,
             rev = rev,
             state = state,
             title = title,
-            currentRole = "Worker",
-            stages = listOf("Worker" to state),
+            currentRole = roleName,
+            stages = listOf(roleName to state),
             percent = percent,
             banner = banner,
         ),
     )
 
-    private suspend fun publishCardJson(groupId: String?, json: String?) {
+    private suspend fun publishCardJson(groupId: String?, json: String?, agentId: String) {
         if (groupId == null || json == null) return
         runCatching {
             controller.broadcastChainCard(
                 groupId = groupId,
-                agentId = "tidings-worker",
+                agentId = agentId,
                 cardJson = json,
             )
         }.onFailure { t ->
@@ -730,6 +755,7 @@ internal class DesktopWorkerOrchestrator(
         banner: String?,
         percent: Int,
         roleName: String = "Worker",
+        agentId: String = "codex",
         options: List<Pair<String, Boolean>> = emptyList(),
         artifacts: List<Pair<String, Long>> = emptyList(),
         diff: ChainDiff? = null,
@@ -749,7 +775,7 @@ internal class DesktopWorkerOrchestrator(
             diff = diff,
         )
         val json = StageChain.cardJsonOf(progress)
-        publishCardJson(groupId, json)
+        publishCardJson(groupId, json, agentId)
         return json
     }
 
@@ -777,6 +803,15 @@ internal class DesktopWorkerOrchestrator(
 
     private fun isGitRepo(path: String): Boolean =
         git(path, "rev-parse", "--git-dir") != null
+
+    /** 驱动键 → 卡面上的角色显示名（`currentRole`/`stages` 用）。 */
+    private fun roleNameOf(agentKey: String): String = when (agentKey.lowercase()) {
+        "codex" -> "Codex"
+        "claude" -> "Claude"
+        "antigravity", "agy" -> "Antigravity"
+        "gemini" -> "Gemini"
+        else -> agentKey.replaceFirstChar { if (it.isLowerCase()) it.titlecase() else it.toString() }
+    }
 
     private fun git(repoPath: String, vararg args: String): String? = runCatching {
         val proc = ProcessBuilder(listOf("git", "-C", repoPath) + args.toList())
