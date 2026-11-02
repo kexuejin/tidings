@@ -803,6 +803,7 @@ internal class DesktopWorkerOrchestrator(
             println("[ORCHESTRATOR] prototype artifact write failed: " + out.absolutePath)
             return emptyList()
         }
+        // 报价没发起（节点没起 / 群不认识）也算投递失败 —— 卡上不许留一行打不开的产物。
         val delivered = runCatching {
             controller.sendAgentArtifacts(
                 ConvId.group(groupId),
@@ -816,8 +817,60 @@ internal class DesktopWorkerOrchestrator(
             )
         }.onFailure { t ->
             println("[ORCHESTRATOR] prototype artifact delivery failed: " + t.message)
-        }.isSuccess
+        }.getOrDefault(false)
         return if (delivered) listOf("prototype.html" to out.length()) else emptyList()
+    }
+
+    /**
+     * 把 `patch.diff` 真的送到群里（§6.3 离线 P2P bundle）。
+     *
+     * ## 为什么必须有这一跳
+     *
+     * 审阅卡上一直写着「产物：patch.diff，N 字节」，而文件**从没离开过宿主本机** ——
+     * 补丁躺在沙箱收割目录里，手机上那一行只是一段描述。§6.3 要的正是「通过 Tidings
+     * 本地 P2P 文件传输通道直接投递至移动端」：不经过任何外部托管，审查的人在手机上
+     * 就能把这份 diff 打开看。
+     *
+     * ## 纪律
+     *
+     * - 走 `purpose=artifact`（免确认）：要不要合并是卡上的决策，文件本身是随附资料；
+     * - 失败只记日志、**不改卡**：`patch.diff` 这一行在宿主上是事实（文件确实存在），
+     *   而且它只是元数据、不是按钮，不会变成一颗点不动的假按钮；
+     * - 不阻塞派单：报价是异步的，这里只等「有没有交给传输层」。
+     */
+    private fun deliverPatchBundle(groupId: String?, ticketId: String, patchPath: String?): Boolean {
+        if (groupId == null || patchPath == null) return false
+        val file = File(patchPath)
+        if (!file.isFile) {
+            println("[ORCHESTRATOR] patch bundle missing on disk (card chain-" + ticketId + "): " + patchPath)
+            return false
+        }
+        val dispatched = runCatching {
+            controller.sendAgentArtifacts(
+                ConvId.group(groupId),
+                listOf(
+                    com.kapp.tidings.core.transport.LocalFile(
+                        path = file.absolutePath,
+                        name = "patch.diff",
+                        size = file.length(),
+                    ),
+                ),
+            )
+        }.onFailure { t ->
+            println("[ORCHESTRATOR] patch bundle delivery threw (card chain-" + ticketId + "): " + t.message)
+        }.getOrDefault(false)
+        if (dispatched) {
+            println(
+                "[ORCHESTRATOR] patch bundle dispatched to group " + groupId +
+                    " (card chain-" + ticketId + ", " + file.length() + " B)",
+            )
+        } else {
+            println(
+                "[ORCHESTRATOR] patch bundle NOT dispatched — it stays on the host " +
+                    "(card chain-" + ticketId + ")",
+            )
+        }
+        return dispatched
     }
 
     private suspend fun runDevelopmentAndHealLoop(
@@ -856,6 +909,9 @@ internal class DesktopWorkerOrchestrator(
         // CLI **自己说的话**（token/思考增量拼起来）。卡面摘要只能从这里来。
         var said = StringBuilder()
         var executionError: String? = null
+        // 每轮的原因都留着：末轮那句常常是「没交产物」，而首轮那句才是「模型根本没跑起来」。
+        // 只留末轮会把看横幅的人带偏（D4，见 [HealReport]）。
+        val roundErrors = mutableListOf<String>()
 
         while (healRound < maxHealRounds) {
             healRound++
@@ -886,7 +942,10 @@ internal class DesktopWorkerOrchestrator(
                 executionError = null
                 break
             }
-            executionError = error ?: (if (patchPath == null) "No patch produced by worker" else "Execution ended in $status")
+            val roundError = error
+                ?: (if (patchPath == null) "No patch produced by worker" else "Execution ended in $status")
+            executionError = roundError
+            roundErrors += roundError
             if (healRound < maxHealRounds) {
                 publishTicketCard(
                     groupId = groupId,
@@ -905,7 +964,10 @@ internal class DesktopWorkerOrchestrator(
 
         if (executionError != null) {
             ticket.stage = "blocked"
-            val blockedBanner = "Handed back: exceeded max heal rounds ($maxHealRounds) \u2014 $executionError"
+            // 首因 + 末因都给出来（重复的只写一遍）：这两句指向的修法完全不同，
+            // 只报末轮会让人去查「为什么没交产物」，而真正的原因是第一轮就挂了。
+            val blockedBanner = HealReport.bannerOf(roundErrors, maxHealRounds)
+                ?: "Handed back: exceeded max heal rounds ($maxHealRounds) — $executionError"
             val blockedJson = publishTicketCard(
                 groupId = groupId,
                 ticketId = ticketId,
@@ -943,6 +1005,9 @@ internal class DesktopWorkerOrchestrator(
             )
             if (groupId != null) groupByCard["chain-" + ticketId] = groupId
         }
+        // §6.3 离线 bundle：补丁随卡一起走 P2P 文件通道，手机上能真的把 diff 打开看。
+        // 先发文件、后发卡 —— 卡到的时候那一行产物已经点得开了。
+        deliverPatchBundle(groupId, ticketId, patchPath)
         val reviewJson = publishTicketCard(
             groupId = groupId,
             ticketId = ticketId,
@@ -978,7 +1043,10 @@ internal class DesktopWorkerOrchestrator(
             state = state,
             title = title,
             currentRole = roleName,
-            stages = listOf(roleName to state),
+            // 阶段项的状态要**翻译**成棒级词表，不能把卡级 state 直接塞进去 ——
+            // `review_ready`/`merged`/`prototype` 这些词不在 items 的词表里，
+            // 渲染层会一律退成「未开始」（见 `StageChain.stageStatusOf`）。
+            stages = listOf(roleName to StageChain.stageStatusOf(state)),
             percent = percent,
             banner = banner,
         ),
@@ -1018,7 +1086,7 @@ internal class DesktopWorkerOrchestrator(
             state = state,
             title = title,
             currentRole = roleName,
-            stages = listOf(roleName to state),
+            stages = listOf(roleName to StageChain.stageStatusOf(state)),
             percent = percent,
             banner = banner,
             options = options,

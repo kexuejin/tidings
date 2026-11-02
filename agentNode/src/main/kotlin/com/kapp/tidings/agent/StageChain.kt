@@ -9,6 +9,7 @@ import kotlinx.serialization.json.JsonPrimitive
 import kotlinx.serialization.json.add
 import kotlinx.serialization.json.buildJsonArray
 import kotlinx.serialization.json.buildJsonObject
+import kotlinx.serialization.json.contentOrNull
 import kotlinx.serialization.json.put
 import kotlinx.serialization.json.putJsonObject
 
@@ -285,6 +286,57 @@ object StageChain {
         "blocked", "aborted" -> "error"
         "review_ready" -> "success"
         else -> "info"
+    }
+
+    /**
+     * 卡片 `state` → 阶段项 `status` 的**翻译**。两套词表，别混用。
+     *
+     * - `state` 说的是**这张卡此刻处于哪一步**，它的词表里装着 `review_ready` / `merged` /
+     *   `aborted` 这类**卡级**终态；
+     * - `items[].status` 说的是**这一棒跑成什么样**，词表只有 `pending` / `running` /
+     *   `done` / `failed` / `blocked`（渲染层 `parseAgentCard` 就按这五个词认）。
+     *
+     * 从前单棒工单卡直接把 state 塞进 item.status（`stages = listOf(role to state)`），
+     * 于是：
+     *
+     * - `prototype` / `executing` / `merged` / `aborted` 这四个词**不在** item 词表里，
+     *   渲染层一律退成 `pending` —— 卡上写着「在做原型」，唯一那一步却显示「未开始」；
+     * - 翻面成 `merged` 之后，卡变成 `state=merged` + `item=review_ready`，**自相矛盾**
+     *   （D6）。翻面只改 state、不动 items，矛盾就一直留在落库的卡里。
+     *
+     * 所以翻译要显式写出来：卡级状态说「等合流」，棒级状态说「这棒做完了」。
+     */
+    fun stageStatusOf(state: String): String = when (state) {
+        // 还在干：棒在跑。
+        "executing", "working", "prototype", "queued" -> "running"
+        // 棒已经交活了 —— 无论后面等的是合流、是原型确认，还是已经合进去。
+        "review_ready", "merged", "done" -> "done"
+        "blocked" -> "blocked"
+        // 中止没有自己的棒级词：这棒确实没跑完，`failed` 是唯一不说谎的选项
+        // （写成 `pending` 会让它看起来还能接着跑）。
+        "aborted" -> "failed"
+        else -> "pending"
+    }
+
+    /**
+     * 翻面成 `merged` 时把阶段项一起推进：还在「等合流」的棒，合流之后就是 `done`。
+     *
+     * **只动 `review_ready`**。`pending`（没跑）与 `failed`（跑挂了）都不许被改成 `done`
+     * —— 那是把没发生的事写成发生过，比状态陈旧更糟。
+     *
+     * 为什么翻面这里还要再洗一遍：`stageStatusOf` 管的是**新发**的卡，而落过库的旧卡
+     * 里可能已经躺着 `review_ready` 的阶段项；翻面是它最后一次被改写的机会。
+     */
+    fun itemsAfterMerge(items: JsonElement?): JsonElement? {
+        val array = items as? JsonArray ?: return items
+        return JsonArray(
+            array.map { element ->
+                val obj = element as? JsonObject ?: return@map element
+                val status = (obj["status"] as? JsonPrimitive)?.contentOrNull
+                if (status != "review_ready") return@map element
+                JsonObject(obj + ("status" to JsonPrimitive("done")))
+            },
+        )
     }
 
     /**

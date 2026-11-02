@@ -995,37 +995,11 @@ internal class DesktopExtension(
                                 // 从前这里静默跳过，卡面永远停在「待合并」。
                                 println("[RELAY-INVOKE] merged card has no group to publish to (card " + cardId + ")")
                             }
-                            val base = appliedRow?.renderCard as? JsonObject
-                            val mergedCard = buildJsonObject {
-                                // **在原卡上改，不另造一张。** 用户点的是这张卡上的按钮，
-                                // 翻面之后应该还是它：标题、进度、diff 明细（`+115 −0 / 2 个文件`）
-                                // 都留着，只把状态换成「已合并」。从前这里从零 build 一张
-                                // `{type=diff-review, title="Patch applied"}`，翻面瞬间 diff
-                                // 整块消失 —— 用户看不出「合进去的到底是哪几行」。
-                                base?.forEach { (k, v) ->
-                                    if (k != "state" && k != "rev" && k != "banner" &&
-                                        k != "title" && k != "actions"
-                                    ) {
-                                        put(k, v)
-                                    }
-                                }
-                                put("cardId", JsonPrimitive(cardId))
-                                // rev 交给 broadcastBoardCard 自己补（不比既有大时 +1）。
-                                put("rev", JsonPrimitive(1))
-                                if (base?.get("type") == null) put("type", JsonPrimitive("diff-review"))
-                                put("state", JsonPrimitive("merged"))
-                                put(
-                                    "title",
-                                    JsonPrimitive(
-                                        (base?.get("title") as? JsonPrimitive)?.contentOrNull
-                                            ?: "Patch applied",
-                                    ),
-                                )
-                                putJsonObject("banner") {
-                                    put("text", JsonPrimitive("Changes merged into workspace"))
-                                    put("tone", JsonPrimitive("success"))
-                                }
-                            }.toString()
+                            val base = appliedRow?.renderCard
+                            // **在原卡上改，不另造一张。** 用户点的是这张卡上的按钮，翻面之后
+                            // 应该还是它：标题、进度、diff 明细（`+115 −0 / 2 个文件`）、阶段项
+                            // 都留着，只把状态换成「已合并」。细节与判据见 [BoardCardFlip]。
+                            val mergedCard = BoardCardFlip.merged(cardId, base).toString()
                             if (appliedGroupId != null) {
                                 publishCardNow(appliedGroupId, agentId, mergedCard)
                             }
@@ -1048,37 +1022,28 @@ internal class DesktopExtension(
                             // 文件时才发现没合上。把同一张卡改成「受阻」并给出下一步，
                             // 比任何日志都管用。
                             val hint = DesktopPatchMerge.hintFor(outcome.detail)
-                            val conflictCard = buildJsonObject {
-                                put("cardId", JsonPrimitive(cardId))
-                                // rev 给 1 即可：broadcastBoardCard 发现不比既有大时会 +1。
-                                put("rev", JsonPrimitive(1))
-                                put("type", JsonPrimitive("diff-review"))
-                                put("state", JsonPrimitive("blocked"))
-                                put("title", JsonPrimitive("没能合并这次改动"))
-                                putJsonObject("banner") {
-                                    put("text", JsonPrimitive(hint))
-                                    put("tone", JsonPrimitive("error"))
+                            // 与合并成功同一条纪律：**在原卡上改**。冲突时用户最想看的
+                            // 就是「哪几行没合上」，从零 build 一张只剩标题和横幅的卡，
+                            // 等于把唯一的线索扔掉（细节见 [BoardCardFlip.blocked]）。
+                            val conflictRow = controller.state.value.messages.values
+                                .asSequence()
+                                .flatten()
+                                .lastOrNull { row ->
+                                    (row.renderCard?.get("cardId") as? JsonPrimitive)?.contentOrNull == cardId
                                 }
-                                // 合并按钮留着：用户处理掉冲突就能再点一次（这张新卡不带
-                                // decidedActionId，按钮回到可点状态）。
-                                put("actions", buildJsonArray {
-                                    add(buildJsonObject {
-                                        put("actionId", JsonPrimitive("merge-patch"))
-                                        put("label", JsonPrimitive("merge-patch"))
-                                    })
-                                })
-                            }.toString()
+                            val conflictCard = BoardCardFlip.blocked(
+                                cardId = cardId,
+                                base = conflictRow?.renderCard,
+                                hint = hint,
+                                title = "没能合并这次改动",
+                            ).toString()
                             // 失败卡回到**这张卡所在的会话**：动作帧（op=action）不带
                             // groupId，但卡片消息就落在本机 —— 按 cardId 反查会话键，
                             // 那是权威答案。此前按工作区名去猜群（groupsForSession），
                             // 派单群 ≠ 工作区同名群时失败卡会发到别的群，点合并的人
                             // 永远看不到「没能合并」。
-                            val conflictGroupId = controller.state.value.messages.values
-                                .asSequence()
-                                .flatten()
-                                .lastOrNull { row ->
-                                    (row.renderCard?.get("cardId") as? JsonPrimitive)?.contentOrNull == cardId
-                                }?.peerId?.let(com.kapp.tidings.core.protocol.ConvId::groupIdOf)
+                            val conflictGroupId = conflictRow?.peerId
+                                ?.let(com.kapp.tidings.core.protocol.ConvId::groupIdOf)
                             if (conflictGroupId == null) {
                                 println("[RELAY-INVOKE] merge conflict has no group to report on (card " + cardId + ")")
                             } else {

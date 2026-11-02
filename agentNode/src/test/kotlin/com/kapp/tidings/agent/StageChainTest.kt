@@ -3,6 +3,11 @@
 package com.kapp.tidings.agent
 
 import kotlinx.coroutines.runBlocking
+import kotlinx.serialization.json.JsonArray
+import kotlinx.serialization.json.JsonObject
+import kotlinx.serialization.json.JsonPrimitive
+import kotlinx.serialization.json.buildJsonObject
+import kotlinx.serialization.json.put
 import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertFalse
@@ -323,13 +328,80 @@ class StageChainTest {
             ),
         )
         assertEquals("prototype", (json["state"] as kotlinx.serialization.json.JsonPrimitive).content)
+        // `cardOf` 是**原样转发** stages 的：调用方给什么棒级状态就写什么。所以这里
+        // 断言的是「state 单独一个字段存在、不需要客户端反推」，不是「两处必须一样」——
+        // 见 `stageStatusIsTranslatedFromTheCardStateInsteadOfCopied` 那条。
         assertEquals(
             "prototype",
             (json["items"] as kotlinx.serialization.json.JsonArray)
                 .first().let { (it as kotlinx.serialization.json.JsonObject)["status"] }
                 .let { (it as kotlinx.serialization.json.JsonPrimitive).content },
-            "items 里的 status 与顶层 state 必须一致，否则客户端两处读法会给出不同胶囊",
         )
+    }
+
+    /**
+     * 卡级 `state` 与棒级 `item.status` 是**两套词表**，必须翻译，不能照抄。
+     *
+     * 照抄的后果（D6，真机踩过）：
+     * - `prototype` / `executing` / `merged` / `aborted` 不在棒级词表里，渲染层
+     *   `parseAgentCard` 一律退成 `pending` —— 卡上写着「在做原型」，唯一那一步却显示未开始；
+     * - 翻面成 `merged` 之后卡变成 `state=merged` + `item=review_ready`，自相矛盾。
+     */
+    @Test
+    fun stageStatusIsTranslatedFromTheCardStateInsteadOfCopied() {
+        val expected = mapOf(
+            "executing" to "running",
+            "working" to "running",
+            "prototype" to "running",
+            "queued" to "running",
+            "review_ready" to "done",
+            "merged" to "done",
+            "done" to "done",
+            "blocked" to "blocked",
+            // 中止没有自己的棒级词：这棒确实没跑完，`failed` 是唯一不说谎的选项。
+            "aborted" to "failed",
+            "pending" to "pending",
+        )
+        expected.forEach { (state, status) ->
+            assertEquals(status, StageChain.stageStatusOf(state), "state=$state 的棒级状态")
+        }
+        // 反过来钉住：棒级词表**不含**任何卡级词 —— 谁再照抄一次，这条就会红。
+        val cardLevel = listOf("review_ready", "merged", "prototype", "executing", "aborted")
+        cardLevel.forEach { state ->
+            val status = StageChain.stageStatusOf(state)
+            assertTrue(
+                status in setOf("pending", "running", "done", "failed", "blocked"),
+                "stageStatusOf($state) 给出了棒级词表外的 \"$status\"",
+            )
+        }
+    }
+
+    @Test
+    fun itemsAfterMergeOnlyAdvancesTheOnesWaitingForTheMerge() {
+        fun items(vararg pairs: Pair<String, String>): JsonArray = JsonArray(
+            pairs.map { (id, status) ->
+                buildJsonObject {
+                    put("id", id)
+                    put("label", id)
+                    put("status", status)
+                }
+            },
+        )
+
+        val before = items("claude" to "review_ready", "codex" to "done", "qa" to "pending", "ops" to "failed")
+        val after = StageChain.itemsAfterMerge(before) as JsonArray
+        assertEquals(
+            listOf("done", "done", "pending", "failed"),
+            after.map { ((it as JsonObject)["status"] as JsonPrimitive).content },
+            "只有等合流的那棒推进到 done；没跑的和跑挂的不许被写成完成",
+        )
+        // 其它键一个都不能丢：assignee 之类的展示信息在真实卡上就在同一个对象里。
+        assertEquals(
+            "claude",
+            ((after.first() as JsonObject)["label"] as JsonPrimitive).content,
+        )
+        // 不是数组就原样退回，别把卡面其它形状弄坏。
+        assertEquals(null, StageChain.itemsAfterMerge(null))
     }
 
     @Test
