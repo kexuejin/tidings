@@ -720,6 +720,21 @@ internal class DesktopWorkerOrchestrator(
     }
 
     /**
+     * 宿主还认不认这张卡的工单。为「点了没反应」的如实回执服务：动作帧到达时
+     * 工单可能已经不在表里 —— 宿主**重启**（内存态清空）或工单**早已收尾**
+     * （终态落卡后即移出）。两种情况下宿主都不可能再为这个按钮做任何事，
+     * 调用方（DesktopExtension）要据此把滞留卡翻成失效，而不是静默丢掉。
+     *
+     * 注意与各 `*ByCard` 的 false 区分：那些 false 可能只是**时序竞争**
+     * （倒计时恰好抢先开工、stage 不匹配），工单还活着，真实状态卡马上就到，
+     * 此时翻「失效」反而是说谎。只有这里返回 false 才代表宿主彻底无能为力。
+     */
+    internal fun hasTicketForCard(cardId: String): Boolean {
+        val tid = cardId.removePrefix("chain-")
+        return activeTickets.containsKey(tid) || activeTickets.values.any { it.ticketId == tid }
+    }
+
+    /**
      * 点将卡上的「取消」：撤销尚未开工的工单。
      *
      * 与 `abortIfRequested` 的分工：那是「活干到一半被叫停」（摘进程树）；这里工单
@@ -798,11 +813,11 @@ internal class DesktopWorkerOrchestrator(
         )
 
         ticket.stage = "prototype"
-        val protoOptions = listOf(
-            "Layout A (Minimalist)" to true,
-            "Layout B (Capsule Cards)" to false,
-            "Layout C (Compact Table)" to false,
-        )
+        // 选项区**不展示假选项**：CLI 真实产出的是一份 prototype.html，不存在
+        // 「Layout A/B/C」三种布局 —— 从前这里硬编码三个选项名，用户点「Layout B」
+        // 实际是把它当反馈文本喂回微调，卡面承诺与真实通路对不上。真实通路只有
+        // 两条：回复文本微调、Approve 开发（按钮在卡上）。选型交互只在方向确认卡
+        // （askPrototypeDirection）里出现 —— 那里的选项来自用户派单原文，是真的。
         // 产物**只能是真交付过的那份**：从沙箱 patch 抽出 prototype.html → 落盘 → 投群，
         // 卡上字节数取落盘文件的真实长度。抽不出来就一个都不宣称 —— 从前这里写死
         // `("prototype.html" to 4096L)`，卡上永远有一行点不动的产物，真机上是死链。
@@ -814,11 +829,10 @@ internal class DesktopWorkerOrchestrator(
             rev = revCounter.incrementAndGet(),
             state = "prototype",
             title = title,
-            banner = "Interactive prototype ready. Select layout or reply to adjust.",
+            banner = "Interactive prototype ready. Reply to adjust it, or approve to start development.",
             percent = 50,
             roleName = ticket.role,
             agentId = defaultAgent,
-            options = protoOptions,
             artifacts = protoArtifacts,
         )
 
@@ -864,18 +878,17 @@ internal class DesktopWorkerOrchestrator(
                     rev = revCounter.incrementAndGet(),
                     state = "prototype",
                     title = title,
-                    banner = "Refined prototype ready. Select layout or reply to adjust.",
+                    banner = "Refined prototype ready. Reply to adjust it further, or approve to start development.",
                     percent = 60,
                     roleName = ticket.role,
                     agentId = defaultAgent,
-                    options = protoOptions,
                     artifacts = refinedArtifacts,
                 )
             }
         }
         return TicketOutcome(
             state = "prototype",
-            summary = "Interactive prototype ready. Select layout or reply to adjust.",
+            summary = "Interactive prototype ready. Reply to adjust it, or approve to start development.",
             error = null,
             cardJson = protoJson,
         )

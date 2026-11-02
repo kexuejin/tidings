@@ -135,4 +135,38 @@ class BoardCardFlipTest {
         assertEquals(1, actions.size)
         assertEquals("merge-patch", ((actions.first() as JsonObject)["actionId"] as JsonPrimitive).content)
     }
+
+    /** D-NEW-1：宿主不再认得的滞留卡，点了按钮之后要如实翻面，而不是挂着假状态。 */
+    @Test
+    fun staleKeepsTheFactsButStopsAcceptingActions() {
+        val base = reviewCard().let { card ->
+            buildJsonObject {
+                card.forEach { (k, v) -> put(k, v) }
+                put("expiresAt", 9999999999L)
+            }
+        }
+        val flipped = BoardCardFlip.stale(
+            cardId = "chain-t1",
+            base = base,
+            hint = "该工单已结束或宿主已重启，此操作未生效",
+        )
+
+        assertEquals("aborted", flipped.str("state"), "手机端词表里这是「已停止」")
+        assertEquals("chain-t1", flipped.str("cardId"), "还是这张卡，不许另发新卡")
+        assertEquals("teahouse-mobile 改好了，等你合并", flipped.str("title"), "标题留着，用户靠它认卡")
+        assertEquals("261", flipped.obj("diff")?.get("additions")?.let { (it as JsonPrimitive).content })
+        assertNull(flipped["actions"], "这张卡不会再接受任何动作")
+        assertNull(flipped["expiresAt"], "过期标记随翻面清掉，别跟失效横幅打架")
+        assertEquals("该工单已结束或宿主已重启，此操作未生效", flipped.obj("banner")?.str("text"))
+        assertEquals("1", flipped.str("rev"), "rev 交给 broadcastBoardCard 补")
+    }
+
+    @Test
+    fun staleStillWorksWhenTheOriginalCardIsGone() {
+        val flipped = BoardCardFlip.stale("chain-t9", null, "hint")
+        assertEquals("chain-t9", flipped.str("cardId"))
+        assertEquals("aborted", flipped.str("state"))
+        assertEquals("diff-review", flipped.str("type"))
+        assertNull(flipped["actions"])
+    }
 }

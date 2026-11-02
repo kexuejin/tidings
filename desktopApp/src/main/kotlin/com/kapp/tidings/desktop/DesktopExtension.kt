@@ -1075,6 +1075,9 @@ internal class DesktopExtension(
                             // 没有在跑的沙箱：这张卡已经结束了，动作来晚了。如实记下来，
                             // 不要静默 —— 否则「点了没反应」又要被当成缺陷重查一遍。
                             println("[RELAY-INVOKE] abort had nothing to stop (card " + cardId + ")")
+                            // 编排器也不认得这张卡（重启丢态/早已收尾）时，把滞留卡如实
+                            // 翻面；工单还活着就只留日志，真实状态卡马上就到。
+                            flipStaleChainCard(cardId, agentId)
                         }
                     }
                 } else if (actionId == "start-task") {
@@ -1087,6 +1090,7 @@ internal class DesktopExtension(
                             "[RELAY-INVOKE] start-task had nothing to start (card $cardId)"
                         },
                     )
+                    if (!started) flipStaleChainCard(cardId, agentId)
                 } else if (actionId == "cancel-task") {
                     // 团队点将卡的「取消」：撤销尚未开工的工单（无进程可摘，不走 abort 桥）。
                     val cancelled = workerOrchestrator?.cancelByCard(cardId) == true
@@ -1097,6 +1101,7 @@ internal class DesktopExtension(
                             "[RELAY-INVOKE] cancel-task had nothing to cancel (card $cardId)"
                         },
                     )
+                    if (!cancelled) flipStaleChainCard(cardId, agentId)
                 } else if (actionId == "approve-prototype") {
                     workerOrchestrator?.approvePrototypeByCard(cardId)
                 } else if (actionId == "refine-pending" || actionId == "dispatch-pending") {
@@ -1108,6 +1113,7 @@ internal class DesktopExtension(
                         println("[RELAY-INVOKE] direction-ask resolved: $actionId by $decidedBy (card $cardId)")
                     } else {
                         println("[RELAY-INVOKE] direction-ask had nothing pending (card $cardId)")
+                        flipStaleChainCard(cardId, agentId)
                     }
                 } else if (actionId == "retry") {
                     // 受阻卡的 [重试]：由编排器把这张工单的开发/自愈循环重跑一遍。
@@ -1122,12 +1128,16 @@ internal class DesktopExtension(
                             "[RELAY-INVOKE] retry had nothing to restart (card $cardId)"
                         },
                     )
+                    if (!restarted) flipStaleChainCard(cardId, agentId)
                 } else if (workerOrchestrator?.followUpByCard(cardId, actionId) == true) {
                     println("[RELAY-INVOKE] card action \"$actionId\" consumed as follow-up by $decidedBy")
                 } else {
                     val entry = created.pluginForAgent(agentId)
                 if (entry == null) {
                     println("[RELAY-INVOKE] card action " + actionId + " for agent " + agentId + " has no local plugin (dropped)")
+                    // 工单卡的按钮落到这里 = 宿主已不认得这张卡（重启丢态/早已收尾）。
+                    // 与其静默 drop 让手机挂着「已处理」的假象，不如把卡如实翻面。
+                    flipStaleChainCard(cardId, agentId)
                 } else {
                     val sid = sessionId?.takeIf { it.isNotBlank() }
                         ?: created.latestSessionForAgent(agentId)?.sessionId
@@ -1391,6 +1401,42 @@ internal class DesktopExtension(
                     println("[RELAY-INVOKE] card broadcast failed: " + (t.message ?: t::class.simpleName))
                 }
         }
+    }
+
+    /**
+     * 滞留工单卡的如实翻面（D-NEW-1）。
+     *
+     * 动作帧到达时，工单可能已经不在编排器登记簿里 —— 宿主**重启**丢了内存态，
+     * 或工单**早已收尾**被移出。这时宿主不可能再为这个按钮做任何事，但手机上
+     * 那张卡还挂着按钮和进行中的状态：点了毫无反应，却显示「已由 <设备> 处理」，
+     * 比无反应更误导（真机实锤：旧点将卡的「取消」点着，宿主日志里只有一行
+     * nothing-to-cancel，卡面纹丝不动）。
+     *
+     * 处理：按 cardId 反查本机消息行拿到会话（与合并冲突卡同一条权威路径），
+     * 用 [BoardCardFlip.stale] 在**原卡**上翻成「已停止」并摘掉按钮，横幅说明原因。
+     * **只在编排器确实不认得这张卡时才翻** —— 各动作分支自己的 false 可能只是
+     * 时序竞争（倒计时抢先开工），真实状态卡马上就到，翻「失效」反而是说谎。
+     */
+    private fun flipStaleChainCard(cardId: String, agentId: String) {
+        if (!cardId.startsWith("chain-")) return
+        if (workerOrchestrator?.hasTicketForCard(cardId) == true) return
+        val row = controller.state.value.messages.values
+            .asSequence()
+            .flatten()
+            .lastOrNull { (it.renderCard?.get("cardId") as? JsonPrimitive)?.contentOrNull == cardId }
+        val groupId = row?.peerId
+            ?.let(com.kapp.tidings.core.protocol.ConvId::groupIdOf)
+        if (groupId == null) {
+            println("[RELAY-INVOKE] stale card action has no conversation to flip on (card " + cardId + ")")
+            return
+        }
+        val staleCard = BoardCardFlip.stale(
+            cardId = cardId,
+            base = row.renderCard,
+            hint = "该工单已结束或宿主已重启，此操作未生效",
+        ).toString()
+        publishCardNow(groupId, agentId, staleCard)
+        println("[RELAY-INVOKE] stale card flipped to aborted (card " + cardId + ")")
     }
 
     private fun groupsForSession(

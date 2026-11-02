@@ -61,7 +61,6 @@ import com.kapp.tidings.generated.resources.ic_close
 import com.kapp.tidings.generated.resources.card_decided_by
 import com.kapp.tidings.generated.resources.card_details_hide
 import com.kapp.tidings.generated.resources.card_details_show
-import com.kapp.tidings.generated.resources.card_diff_summary
 import com.kapp.tidings.generated.resources.card_expired
 import com.kapp.tidings.generated.resources.card_option_recommended
 import com.kapp.tidings.generated.resources.card_action_abort
@@ -1354,8 +1353,11 @@ private fun CardDiffViewerRow(diff: AgentCardDiff) {
             }
         }
         if (summary != null) {
+            // 只放摘要文本（宿主侧本就只给「N 个文件」）：`+N −N` 已由上面头部行的
+            // 彩色等宽文字承担（D-NEW-3）—— `card_diff_summary` 格式串曾把计数再追加
+            // 一遍，同一张卡上出现两组增删数，用户会当成两个不同的统计。
             Text(
-                text = stringResource(Res.string.card_diff_summary, summary, diff.additions ?: 0, diff.deletions ?: 0),
+                text = summary,
                 style = MaterialTheme.typography.labelSmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
                 maxLines = if (expanded) Int.MAX_VALUE else CARD_DIFF_SUMMARY_MAX_LINES,

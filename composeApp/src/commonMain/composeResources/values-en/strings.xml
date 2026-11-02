@@ -1596,7 +1596,6 @@
     <string name="card_type_approval">Approval</string>
     <string name="card_type_ask_question">Decision</string>
     <string name="card_progress_label">%1$d% progress</string>
-    <string name="card_diff_summary">%1$s +%2$d −%3$d</string>
     <string name="card_pending_confirm">Submitted, waiting for the host to confirm</string>
     <string name="card_decided_by">Decided by %1$s</string>
     <string name="card_option_recommended">Recommended</string>

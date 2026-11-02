@@ -83,12 +83,37 @@ internal object BoardCardFlip {
             })
         }
 
+    /**
+     * 滞留卡如实翻面：宿主已经**不认得**这张卡的工单（宿主重启丢了内存态，或工单
+     * 早已收尾被移出表），可卡还在手机上挂着按钮和进行中的状态 —— 点了之后宿主
+     * 一个字节都没动，手机却显示「已由 <设备> 处理」。比无反应更误导（D-NEW-1）。
+     *
+     * 与 [blocked] 同一条纪律：在原卡上改，保留用户还需要看的事实（标题、产物、
+     * diff 明细）；翻成 `aborted`（手机端词表是「已停止」）并**丢掉 actions**
+     * —— 这张卡不会再接受任何动作了。
+     */
+    fun stale(cardId: String, base: JsonObject?, hint: String): JsonObject = buildJsonObject {
+        copyWithout(base, DROPPED_ON_STALE)
+        put("cardId", JsonPrimitive(cardId))
+        put("rev", JsonPrimitive(1))
+        if (base?.get("type") == null) put("type", JsonPrimitive("diff-review"))
+        put("state", JsonPrimitive("aborted"))
+        putJsonObject("banner") {
+            put("text", JsonPrimitive(hint))
+            put("tone", JsonPrimitive("info"))
+        }
+    }
+
     /** 合并成功后要重写的键；`items` 单独处理（见下）。 */
     private val DROPPED_ON_MERGED = setOf("state", "rev", "banner", "title", "actions")
 
     /** 合并失败除了上面那几个，还要让按钮回到可点状态。 */
     private val DROPPED_ON_BLOCKED =
         DROPPED_ON_MERGED + setOf("decidedBy", "decidedActionId")
+
+    /** 滞留翻面：标题保留原样（用户靠它认卡），只换状态、横幅并摘掉按钮。 */
+    private val DROPPED_ON_STALE =
+        (DROPPED_ON_BLOCKED - setOf("title")) + setOf("expiresAt")
 
     /**
      * 把原卡上「不属于本次翻面」的键抄过来。
