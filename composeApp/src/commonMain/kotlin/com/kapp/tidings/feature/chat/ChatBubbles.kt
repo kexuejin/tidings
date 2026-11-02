@@ -3,6 +3,7 @@
 package com.kapp.tidings.feature.chat
 
 import com.kapp.tidings.generated.resources.chat_agent_request_grant
+import com.kapp.tidings.generated.resources.chat_abort_no_task
 import androidx.compose.animation.animateColorAsState
 import androidx.compose.animation.core.tween
 import androidx.compose.foundation.Image
@@ -894,6 +895,8 @@ private fun noticeText(
             NoticeKind.AgentDelegatedByTag -> Res.string.chat_agent_delegated_by_tag
             NoticeKind.GroupRenamed -> Res.string.chat_group_renamed
             NoticeKind.RemovedFromGroup -> Res.string.chat_group_removed
+            // 发了「停」但本机没在跑：从前完全静默，用户以为停了（真机踩过）。
+            NoticeKind.AbortNoRunningTask -> Res.string.chat_abort_no_task
         },
     )
 }

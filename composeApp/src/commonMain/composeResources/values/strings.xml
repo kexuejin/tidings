@@ -215,6 +215,8 @@
     <string name="chat_group_member_removed">%1$s将%2$s移出群聊</string>
     <string name="chat_group_renamed">群名改了</string>
     <string name="chat_group_removed">你已被移出这个群</string>
+    <!-- 发了「停」但本机没有在跑的活。必须说出来：静默等于让用户以为叫停了。 -->
+    <string name="chat_abort_no_task">当前没有在跑的任务，无需停止</string>
     <!-- 群头部的两个数。分母是成员总数（含自己），分子是不含自己的在线人数 ——
          「0/5 人在线」读起来是对的，「1/5」在只有自己在线时也不该出现。 -->
     <string name="chat_group_online">%1$d/%2$d 人在线</string>

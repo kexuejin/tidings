@@ -804,7 +804,9 @@ function normalizeQuery(cityQuery) {
 | D3 | `Retry` 要么无反应、要么变成原型微调 | 宿主无 `retry` 分支，落到 `followUpByCard` 当文本 | 已修（`retryByCard`） |
 | D4 | 交回横幅只报最后一轮原因 | `executionError` 每轮覆盖，首轮 `cli exit=1` 被末轮 `No patch` 覆盖 | 未修（记录） |
 | D5 | 合并后的改动不进 git 历史，下一轮沙箱看不到 | `DesktopPatchMerge.apply` 只 `git apply` 到工作区，不 `add`/`commit`；worktree 从 HEAD 建 | **已修**（`MergeBaseRef` 滚动基线，见 13.13） |
-| D6 | 翻面卡 `items[0].status` 仍是 `review_ready` | 只覆盖了 `state`，没同步阶段项 | 未修（记录，UI 读 `state`，不影响显示） |
+| D6 | 翻面卡 `items[0].status` 仍是 `review_ready` | 只覆盖了 `state`，没同步阶段项 | 未修（记录，UI 读 `state`，不影响显示；详见 13.16 末） |
+| D7 | 宿主仓已 `git apply`、卡不翻面 | `host.runtime ?: return` 挡在落库**之前** | **已修**（先落库再发帧，见 13.16） |
+| D8 | 发 `stop` 但本机没活在跑 ⇒ 静默变聊天 | 消费条件不满足就 `false`，没人回执 | **已修**（`AbortSignals.isExact` + notice 行，见 13.16） |
 
 D5 值得单独说一句：`git apply` 之后宿主仓是 `M src/services/weatherService.js` +
 若干 `??` 未跟踪文件，**HEAD 没动**。于是下一张工单的沙箱（`git worktree add` 自 HEAD）
@@ -1042,3 +1044,81 @@ opencode  PASS  rc=0  proof.txt=CLI_OK
   改完扫描 0 命中，`:composeApp:compileKotlinJvm` 通过。
 - 五条门禁现在**全绿**（`construction-trace` / `stale-comment-ref` 都是
   「OK —— 无新增（基线 0 条）」）。
+
+### 13.16 真机截图上的两个「界面不说话」：卡不翻面 + `stop` 被吞
+
+用户拿真机截图问了两件事，都不是新功能，是**同一类毛病**：状态变了，界面没说。
+
+**现象（截图原样）**：一张 `task-board` 卡停在
+
+```
+teahouse-mobile 改好了，等你合并
+已发出 · 等待远端处理
+claude done / codex done        +261 −0 / 2 个文件
+[ 合并此补丁 ]
+```
+
+下面紧跟一条用户自己打的聊天气泡 `stop`，没有任何回应。
+
+#### D7 卡片「先发帧、后落库」，运行时没挂就整条丢
+
+`broadcastBoardCard` 里 `host.runtime ?: return` 挡在**落库之前**，于是「宿主仓已经
+`git apply` 成功、卡却不翻面」只在控制台留一行 `[CARD] dropped: no runtime attached`。
+更糟的是这一行说的「dropped」是**谎**：卡连本地都没写，用户这边看到的是卡永远停在
+「待合并」，而工作树其实已经改了 —— 截图里的 `+261 −0` 是真的合进去了。
+
+判据本来就有，只是写反了：**这张卡属于本机用户，本机必须看得见**；运行时（P2P 传输）
+没挂只该影响**别人**看不看得见。改成先 `handleAppendMessage` / `handleReplaceMessage`
+落库、再取 runtime 发帧，取不到就只记一句
+`[CARD] persisted locally, not broadcast: no runtime attached (card …)`。
+
+证明（不是「看起来对」）：临时在 `val title = …` 之后插一行
+`host.runtime ?: return // TEMP-PROBE`，`BoardCardLocalPersistenceTest` 的两条同时
+变红 —— `同 cardId 必须原位替换，不许新增行 expected:<1> but was:<0>`；去掉探针恢复绿。
+
+新增 `app/src/jvmTest/.../BoardCardLocalPersistenceTest.kt`（2 条）：
+
+1. `aCardLandsLocallyEvenWithoutARuntimeAttached` —— 没有 runtime，卡仍进本地时间线；
+2. `flippingACardReplacesTheSameRowInsteadOfAppending` —— 同 cardId 二次下发是**原位替换**
+   （`rev` 变 `2`），不是追加一行。
+
+第 2 条写的时候踩了个真坑：断言 `card.state` 拿到的是 `review_ready`，而新状态在
+`cardPayload` 里。`MessageUi.card` 是**首帧锚点**、`cardPayload` 才是最新帧，
+渲染走 `renderCard = cardPayload ?: card`。测试改成读 `renderCard`，并把这个陷阱写在
+用例注释里 —— 否则下一个人会以为是翻面没生效。
+
+#### D8 `stop` 命中但本机没活在跑 ⇒ 静默
+
+`stop` 是**按钮之前**的打断通路（`AbortSignals`，关键词 `stop/abort/cancel/停/取消`）。
+`onAgentAbort` 的消费条件是「命中关键词 **且** 本机确实有活在跑」，否则 `false`（当普通
+消息放过）。截图那一轮卡已经是 `review_ready`（活早跑完了），于是那条 `stop` 被谁都不
+消费，**变成一句普通聊天**，用户以为自己叫停了。
+
+修法分两半，关键是**不能拿 `matches` 去回执**：
+
+| 函数 | 回答的问题 | 判据 |
+|---|---|---|
+| `AbortSignals.matches` | 要不要**当作**打断处理 | `== ` 或 `startsWith`（宁可误拦不可漏拦） |
+| `AbortSignals.isExact` | 这**明确**是一句打断指令吗 | 去提及、小写后 `==` |
+
+因为 `取消订单`、`停止符` 这类正常话会以关键词开头 —— 给它们弹「无需停止」既误导又吵闹。
+所以只有 `isExact` 命中才回执，且回执走 **notice 行**（`NoticeKind.AbortNoRunningTask`，
+系统解释，不是任何人说的话），文案 `chat_abort_no_task`：
+「当前没有在跑的任务，无需停止」/「Nothing is running right now — nothing to stop」。
+
+`groupsCtl` 是 `internal`（跨模块不可见），而「系统要解释一件事」恰恰是壳层最需要的
+通路 ⇒ 新增公开门面 `RelayController.postNotice(convId, kind)`，桌面壳调它，不去开
+`internal` 的口子。
+
+新增 `AbortSignalsTest.exactSignalIsTheWholeMessage` / `suffixedOrPaddedTextIsNotExact`
+（2 条，守住「整条相等才算」这条线）。
+
+**读数**：`:app:jvmTest` **773 tests / 0 fail**（108 suites）；
+`:desktopApp:test` **240 tests / 0 fail**（48 suites，238 → 240 是上面那 2 条）。
+
+#### 顺带记清 D6 还没修
+
+D6（翻面卡 `items[0].status` 仍是 `review_ready`）**仍在**。它不影响显示，因为界面读的是
+`state`；但 `items[]` 是阶段清单，卡片详情展开时那一行会自相矛盾（`state=merged` 而
+阶段项写着 `review_ready`）。归到「下一步一起做」，不塞进这一轮 —— 这一轮只修
+「界面完全不说话」的两处。

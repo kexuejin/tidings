@@ -1192,7 +1192,12 @@ internal class DesktopExtension(
             //    七分钟后仍在跑。进程摘掉的路径不经过协程，所以它才是「停」的确定性那一半。
             //
             // 消费条件：命中关键词，且**本机确实有活在跑**（有工单，或有沙箱任务）。
-            // 否则「停」就是一句普通的话（没派单时它不该被吞）。
+            //
+            // 没有活在跑时，从前一律 `false`（当普通消息放过）—— 于是用户打完 `stop`
+            // 看到的是一条自己发的聊天气泡，任务该跑还在跑、或者压根没跑，界面一句话
+            // 都不说（真机截图里就是这样：卡已经是「待合并」，用户又打了一条 `stop`）。
+            // 现在：**整条就是关键词**时回一条系统提示并消费掉，不再静默；
+            // `取消订单` 这类以关键词开头的正常话仍然照常放行（`isExact` 的判据）。
             controller.onAgentAbort = { convId, text ->
                 val planeNow = createdPlane
                 if (!workerOrchestrator.isAbortSignal(text)) {
@@ -1201,6 +1206,12 @@ internal class DesktopExtension(
                     val hadTicket = workerOrchestrator.abortIfRequested(convId, text)
                     if (hadTicket || planeNow.hasRunningSandboxes()) {
                         scope.launch { planeNow.abortRunningSandboxes() }
+                        true
+                    } else if (workerOrchestrator.isExactAbortSignal(text)) {
+                        controller.postNotice(
+                            convId,
+                            com.kapp.tidings.domain.model.NoticeKind.AbortNoRunningTask,
+                        )
                         true
                     } else {
                         false

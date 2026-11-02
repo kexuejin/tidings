@@ -67,6 +67,7 @@ import com.kapp.tidings.domain.model.MdnsServiceUi
 import com.kapp.tidings.domain.model.MessageUi
 import com.kapp.tidings.domain.model.NetworkUi
 import com.kapp.tidings.domain.model.NodePhase
+import com.kapp.tidings.domain.model.NoticeKind
 import com.kapp.tidings.domain.model.PeerUi
 import com.kapp.tidings.core.protocol.AgentExecAuthorizer
 import com.kapp.tidings.core.protocol.mentionedVirtualAgent
@@ -1035,6 +1036,15 @@ class RelayController(
         }
         invokeCtl.broadcastBoardCard(groupId, agentId, card)
     }
+
+    /**
+     * 在会话里落一条**系统提示行**（不是聊天气泡）。
+     *
+     * 给壳层用的公开入口：`groupsCtl` 是 `internal`（跨模块不可见），而「系统要解释
+     * 一件事」这条通路恰恰是壳层最需要的 —— 例如用户发了 `stop` 但本机没有在跑的活，
+     * 桌面壳要能说一句「当前没有在跑的任务」，而不是静默（真机踩过）。
+     */
+    fun postNotice(convId: String, kind: NoticeKind) = groupsCtl.handleNotice(convId, kind)
 
     fun recordLocalWorkspace(
         wsId: String,

@@ -128,6 +128,9 @@ internal class DesktopWorkerOrchestrator(
 
     fun isAbortSignal(text: String): Boolean = AbortSignals.matches(text)
 
+    /** 整条就是打断指令（`stop` / `停`…），不是「以它开头的正常话」。 */
+    fun isExactAbortSignal(text: String): Boolean = AbortSignals.isExact(text)
+
     fun isPrototypeIntent(prompt: String): Boolean {
         val lower = prompt.lowercase()
         return lower.contains("\u539f\u578b") || lower.contains("prototype") || lower.contains("mockup")
@@ -1107,5 +1110,21 @@ internal object AbortSignals {
         val trimmed = stripMentions(text).lowercase()
         if (trimmed.isEmpty()) return false
         return keywords.any { trimmed == it || trimmed.startsWith(it) }
+    }
+
+    /**
+     * 整条**就是**关键词（去提及、小写后相等）。
+     *
+     * 与 [matches] 的分工：`matches` 回答「要不要当作打断处理」（所以 `取消订单` 也算，
+     * 宁可误拦不可漏拦）；`isExact` 回答「这**明确**是一句打断指令吗」——
+     * 只有它才配得到「当前没有在跑的任务」这条回执。
+     *
+     * 为什么不能拿 `matches` 去回执：`取消订单`、`停止符` 这类正常话会以关键词开头，
+     * 给它们弹一句「无需停止」既误导又吵闹。整条相等时，用户的意思没有第二种解释。
+     */
+    fun isExact(text: String): Boolean {
+        val trimmed = stripMentions(text).lowercase()
+        if (trimmed.isEmpty()) return false
+        return keywords.any { trimmed == it }
     }
 }

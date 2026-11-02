@@ -787,10 +787,6 @@ internal class RelayControllerAgentInvokeComponent(private val host: RelayContro
             )
             return
         }
-        val rt = host.runtime ?: run {
-            println("[CARD] dropped: no runtime attached")
-            return
-        }
         val title = card.strField("title").orEmpty().ifBlank { card.strField("cardId").orEmpty() }
         if (title.isBlank()) {
             println("[CARD] dropped: card has neither title nor cardId")
@@ -843,6 +839,19 @@ internal class RelayControllerAgentInvokeComponent(private val host: RelayContro
                     cardPayload = finalCard,
                 ),
             )
+        }
+        // **先落库、再发帧**（与 `broadcastAgentState` 同一条纪律）。
+        //
+        // 从前 runtime 的判空挡在落库之前，于是「宿主仓已经 `git apply` 成功、卡却不翻面」
+        // 只剩一行 `[CARD] dropped: no runtime attached` —— 用户看到的是卡永远停在
+        // 「待合并」，而工作树其实已经改了。运行时（P2P 传输）没挂只该影响**别人**
+        // 看不看得见；这张卡属于本机用户，本机必须看得见。
+        val rt = host.runtime ?: run {
+            println(
+                "[CARD] persisted locally, not broadcast: no runtime attached (card " +
+                    cardId + ")",
+            )
+            return
         }
         runCatching {
             rt.sendGroupText(

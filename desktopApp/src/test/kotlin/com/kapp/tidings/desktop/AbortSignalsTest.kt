@@ -68,6 +68,35 @@ class AbortSignalsTest {
     }
 
     /**
+     * [AbortSignals.isExact] 的判据：**整条就是关键词**才算「明确指令」。
+     *
+     * 它决定要不要回一句「当前没有在跑的任务」。拿 `matches` 去回执会把
+     * 「取消订单」这种正常话也顶一句「无需停止」—— 既误导又吵。
+     */
+    @Test
+    fun exactSignalIsTheWholeMessage() {
+        listOf("stop", "STOP", "Stop", "abort", "cancel", "\u505c", "\u53d6\u6d88").forEach {
+            assertTrue(AbortSignals.isExact(it), "\"$it\" 整条就是关键词，必须算明确指令")
+        }
+        // 去提及之后仍然成立（`@codex 停` 与裸 `停` 是同一个意图）。
+        listOf("@codex-e2e \u505c", "@a @b stop", "  stop  ").forEach {
+            assertTrue(AbortSignals.isExact(it), "\"$it\" 去提及后就是关键词")
+        }
+    }
+
+    @Test
+    fun suffixedOrPaddedTextIsNotExact() {
+        // 这些仍然 `matches`（宁可误拦不可漏拦），但不该得到「无需停止」的回执。
+        listOf("\u505c\u4e00\u4e0b", "stop it", "cancel that", "\u53d6\u6d88\u8ba2\u5355").forEach {
+            assertTrue(AbortSignals.matches(it), "\"$it\" 仍要命中（打断判定不变）")
+            assertFalse(AbortSignals.isExact(it), "\"$it\" 不是「整条就是关键词」，不该回执")
+        }
+        listOf("", "   ", "@codex-e2e").forEach {
+            assertFalse(AbortSignals.isExact(it), "\"$it\" 不是指令")
+        }
+    }
+
+    /**
      * 「停」必须落到**进程**上，不能只翻卡片。
      *
      * 真机实测（2026-11-01 16:04）：卡片已经 `Aborted by user request`，而同一沙箱里的

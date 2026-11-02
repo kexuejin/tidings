@@ -177,6 +177,7 @@
     <string name="chat_group_member_removed">%1$s removed %2$s from the group</string>
     <string name="chat_group_renamed">Group renamed</string>
     <string name="chat_group_removed">You have been removed from this group</string>
+    <string name="chat_abort_no_task">Nothing is running right now — nothing to stop</string>
     <!-- 群头部的两个数。分母是成员总数（含自己），分子是不含自己的在线人数 ——
          「0/5 人在线」读起来是对的，「1/5」在只有自己在线时也不该出现。 -->
     <string name="chat_group_online">%1$d/%2$d online</string>
