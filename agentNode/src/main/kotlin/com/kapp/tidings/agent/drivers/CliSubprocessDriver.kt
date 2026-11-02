@@ -140,11 +140,15 @@ class CliSubprocessDriver(
     private fun mapLine(line: String): DriverEvent? = CliLineEventMapper.map(line)
 
     companion object {
-        fun claude(cliPath: String): CliSubprocessDriver = CliSubprocessDriver(
+        fun claude(
+            cliPath: String,
+            envOverrides: Map<String, String> = emptyMap(),
+        ): CliSubprocessDriver = CliSubprocessDriver(
             driverId = "claude-cli",
             displayName = "Claude Code (CLI)",
             cliPath = cliPath,
             argSpec = { prompt -> listOf("-p", prompt, "--output-format", "stream-json", "--verbose") },
+            envOverrides = envOverrides,
         )
 
         /**
@@ -178,11 +182,15 @@ class CliSubprocessDriver(
             }
         }
 
-        fun codex(cliPath: String): CliSubprocessDriver = CliSubprocessDriver(
+        fun codex(
+            cliPath: String,
+            envOverrides: Map<String, String> = emptyMap(),
+        ): CliSubprocessDriver = CliSubprocessDriver(
             driverId = "codex-cli",
             displayName = "Codex (CLI)",
             cliPath = cliPath,
             argSpec = { prompt -> codexArgs(prompt) },
+            envOverrides = envOverrides,
         )
     }
 }
@@ -193,6 +201,10 @@ class CliSubprocessDriver(
  *
  * [sandbox] 非空（T-3b）= 每个 CLI 装配成 [SandboxedCliDriver]（Git Worktree 沙箱 +
  * diff 产物）；null = 裸 [CliSubprocessDriver]（T-3a 语义，既有测试的确定形状）。
+ *
+ * [env] 是**凭证来源**（默认宿主进程环境）：每个 CLI 只拿到 [CliProviderEnv] 白名单里
+ * 属于它的那几只变量。沙箱把 `HOME` 换成隔离目录，登录态因此看不见 —— 不注入的话
+ * 真 CLI 在沙箱里永远「装是装了，一跑就没凭证」。测试注入合成 env，结论与本机无关。
  */
 fun cliDriverRegistrations(
     resolveClaude: () -> String? = { CliDiscovery.resolveClaudeCli() },
@@ -200,21 +212,47 @@ fun cliDriverRegistrations(
     resolveAgy: () -> String? = { CliDiscovery.resolveAgyCli() },
     hint: (String) -> Unit = { println(it) },
     sandbox: WorktreeSandboxExecutor? = null,
+    env: Map<String, String> = System.getenv(),
 ): List<AgentDriver> {
     val drivers = mutableListOf<AgentDriver>()
+
+    /**
+     * 「注入了什么」只报**变量名** —— 打印值等于把 key 抄进日志。
+     * 空集不打印：没配自定义上游是常态，不需要一行噪声。
+     */
+    fun announce(driverId: String, injected: Map<String, String>) {
+        CliProviderEnv.describe(injected)?.let { names ->
+            hint("[drivers] $driverId ← provider env: $names (values stay in the child process)")
+        }
+    }
+
     val claude = resolveClaude()
     if (claude != null) {
+        val providerEnv = CliProviderEnv.forClaude(env)
+        announce("claude-cli", providerEnv)
         drivers.add(
             if (sandbox != null) {
                 SandboxedCliDriver(
                     driverId = "claude-cli",
                     displayName = "Claude Code (CLI)",
                     cliPath = claude,
-                    argSpec = { prompt -> listOf("-p", prompt, "--output-format", "stream-json", "--verbose") },
+                    // `--permission-mode bypassPermissions`：headless（`-p`）下没有人能点
+                    // 「允许」，默认权限模式会把每一次写文件都拒掉 —— 派单永远「跑完了但
+                    // 没有交付物」。与 agy 的 `--dangerously-skip-permissions` 同一条理由：
+                    // 写操作只落在**一次性 worktree**（宿主仓零接触，收割后无痕清理），
+                    // 人的守门点是合流审查（merge-patch）。**裸路径不加** —— 那里的工作区
+                    // 是机主自己的仓，不该被静默放开。
+                    argSpec = { prompt ->
+                        listOf(
+                            "-p", prompt, "--output-format", "stream-json", "--verbose",
+                            "--permission-mode", "bypassPermissions",
+                        )
+                    },
                     sandbox = sandbox,
+                    envOverrides = providerEnv,
                 )
             } else {
-                CliSubprocessDriver.claude(claude)
+                CliSubprocessDriver.claude(claude, providerEnv)
             },
         )
     } else {
@@ -225,6 +263,8 @@ fun cliDriverRegistrations(
     }
     val codex = resolveCodex()
     if (codex != null) {
+        val providerEnv = CliProviderEnv.forCodex(env)
+        announce("codex-cli", providerEnv)
         drivers.add(
             if (sandbox != null) {
                 SandboxedCliDriver(
@@ -233,9 +273,10 @@ fun cliDriverRegistrations(
                     cliPath = codex,
                     argSpec = { prompt -> CliSubprocessDriver.codexArgs(prompt) },
                     sandbox = sandbox,
+                    envOverrides = providerEnv,
                 )
             } else {
-                CliSubprocessDriver.codex(codex)
+                CliSubprocessDriver.codex(codex, providerEnv)
             },
         )
     } else {
@@ -246,6 +287,9 @@ fun cliDriverRegistrations(
     }
     val agy = resolveAgy()
     if (agy != null) {
+        // agy 走 Google 登录态，没有可配的自定义上游 ⇒ 白名单为空，注入为空。
+        val providerEnv = CliProviderEnv.forAgy(env)
+        announce("agy-cli", providerEnv)
         drivers.add(
             if (sandbox != null) {
                 SandboxedCliDriver(
@@ -268,6 +312,7 @@ fun cliDriverRegistrations(
                         )
                     },
                     sandbox = sandbox,
+                    envOverrides = providerEnv,
                 )
             } else {
                 CliSubprocessDriver(
@@ -275,6 +320,7 @@ fun cliDriverRegistrations(
                     displayName = "Antigravity (agy CLI)",
                     cliPath = agy,
                     argSpec = { prompt -> listOf("-p", prompt, "--output-format", "stream-json") },
+                    envOverrides = providerEnv,
                 )
             },
         )

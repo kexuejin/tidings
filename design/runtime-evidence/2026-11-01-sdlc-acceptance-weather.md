@@ -815,9 +815,10 @@ into host repo」字面成立，但「合进去的改动成为后续迭代的起
 ### 13.11 未覆盖
 
 - **§6.3 离线 P2P bundle**：本轮未做（需要断网/改网卡，会打断同机其它验证）。
-- **真 agent CLI 全链路**：本机无可用 CLI（见 13.0），只能用桩。等上游可达后需再跑一遍，
-  重点看真模型的产物是否也能被 `extractFileFromPatch` 抽出来（目前只认「新文件」或
-  「单 hunk 且从第 1 行开始」两种形状）。
+- ~~**真 agent CLI 全链路**~~ → **已覆盖（2026-11-02 14:35，见 §13.15）**：网关打通 +
+  `PWD` 修正 + 凭证注入之后，真 claude 在沙箱里跑完了 A/B 两轮，B 轮在合并基线上
+  读到了 A 轮的产物。`extractFileFromPatch` 的形状限制仍成立（两轮都是「新文件」形状），
+  但「真模型产物能被抽出来」这条不再只是推断。
 
 ### 13.12 计划书事实校准（`docs/TEST-PLAN-APP-LIFECYCLE-WEATHER.md`）
 
@@ -959,3 +960,81 @@ opencode  PASS  rc=0  proof.txt=CLI_OK
 「真模型产物能否被 `extractFileFromPatch` 抽出来」这条 §13.11 的未覆盖项现在**可以真跑**。
 沙箱侧 `PWD` 已修（见上），`opencode` 写错目录这条阻塞已消除 —— A/B/C 真链路复跑
 只剩「把 `tools/real-cli-smoke.py` 的配方接进 `SandboxedCliDriver` 的装配」这一步。
+
+### 13.15 真 CLI 进沙箱：凭证白名单 + 权限旗标 + A/B 两轮实测
+
+§13.14 把网关打通之后，真链路还差两步才真的能跑 —— 都是「沙箱的隔离挡住了 CLI 自己
+的凭证」这一类问题。
+
+**第一步：凭证从哪来。** 沙箱把 `HOME` 换成隔离目录（`prepareSandboxHome`，为的是不把
+`.ssh` / `.workbuddy` 递给子进程），于是 CLI 在 `~/.claude`、Keychain 里的登录态**看不见了**。
+把真 `HOME` 放回去是错的（那就等于取消隔离），正路是**显式注入**：新增
+`CliProviderEnv`，按 CLI 分白名单搬运。
+
+| CLI | 注入的变量 | 为什么是这几只 |
+|---|---|---|
+| claude | `ANTHROPIC_BASE_URL` / `ANTHROPIC_API_KEY` / `ANTHROPIC_AUTH_TOKEN` / `ANTHROPIC_MODEL` / `ANTHROPIC_SMALL_FAST_MODEL` / `ANTHROPIC_CUSTOM_HEADERS` | Anthropic 兼容面的全部上游开关（含网关要求的 `x-opencode-session`） |
+| codex | `CODEX_HOME` / `OPENCODE_API_KEY` | 上游写在 `$CODEX_HOME/config.toml` 的 `model_providers` 里，key 走 `env_key` 指向的那只 |
+| opencode | `OPENCODE_API_KEY` / `OPENCODE_BASE_URL` / `OPENCODE_CONFIG` | 自定义 provider 走 config 文件 + 环境里的 key |
+| agy | （空） | 走 Google 登录态，没有可配的上游 —— 显式留空，不是「顺手全塞」 |
+
+三条纪律：**白名单不是全量环境**（`AWS_SECRET_*`/`PATH`/`HOME` 一概不带）、**值只进子进程
+环境**（提示行只报变量名，见 `CliProviderEnv.describe`）、**空集是合法值**（没配上游时
+行为与注入前逐字一致）。装配处新增 `env` 参数（默认 `System.getenv()`），沙箱与裸两条
+分支都带上；测试注入合成 env，结论与本机无关。
+
+**第二步：headless 没人点「允许」。** 装配里 claude 原本只有
+`-p … --output-format stream-json --verbose`，默认权限模式会把每一次写文件都拒掉 ——
+派单永远「跑完了但没有交付物」。沙箱分支补 `--permission-mode bypassPermissions`，
+理由与 agy 的 `--dangerously-skip-permissions` 同一条：写操作只落在**一次性 worktree**
+（宿主仓零接触，收割后无痕清理），人的守门点是合流审查（merge-patch）。
+**裸路径不加** —— 那里的工作区是机主自己的仓。
+
+**A/B 两轮实测**（`RealCliChainEvidenceTest`，默认跳过，`TIDINGS_REAL_CLI=1` 才跑）：
+
+```
+[drivers] claude-cli ← provider env: ANTHROPIC_API_KEY, ANTHROPIC_BASE_URL,
+          ANTHROPIC_CUSTOM_HEADERS, ANTHROPIC_MODEL, ANTHROPIC_SMALL_FAST_MODEL
+          (values stay in the child process)
+[sandbox] harvest t-1-45c01944: +1 -0 in 1 file(s), patch=118 B
+[sandbox] task t-2-faa55b86 starts from merged base 54348ab6d9321d32e24d2175917d5cfd359ac277
+[sandbox] harvest t-2-faa55b86: +2 -0 in 1 file(s), patch=126 B
+[real-cli] A/B 两轮通过：B 轮在合并基线上读到了 A 轮的 a.txt，且只交付自己的改动
+```
+
+判据两条，都是「真模型 + 真沙箱」下的：
+
+1. **B 轮看得见 A 轮**：B 的补丁里含 `ALPHA`（它读的 `a.txt` 是 A 轮写、合并、进快照的）；
+2. **B 轮只交付自己**：补丁里**没有** `diff --git a/a.txt` —— 说明 harvest 是相对开工
+   基线 diff 的，不是把上一轮重打一遍（D5 的判据在真模型下再验一次）。
+
+耗时 21.8 s 两轮（`deepseek-v4.1-flash`）；凭证只在子进程环境里，不落盘。
+
+**四个坑（都实测踩过）**：
+
+1. **Gradle 不把环境变量当 test 任务的输入**。改了 `TIDINGS_REAL_CLI` / `ANTHROPIC_*`
+   再跑，任务被判 UP-TO-DATE，拿到的是**上一次**的结果 —— 表现为「明明设了却 skipped」。
+   要 `--rerun-tasks`（或 `--no-daemon` + 确保真的重跑）。
+2. **跳过要如实**。默认路径早先写成「打一行日志然后 `return`」，报告里是一个绿点 ——
+   那一轮什么都没验，这就是「为没发生的活报完成」。改成
+   `AssumptionViolatedException`，报告里如实显示 skipped 并带上原因。
+3. **凭证只能从宿主进程环境来**。`--no-daemon` 时单次 daemon 继承客户端环境；常驻
+   daemon 有它自己启动时的环境 —— 这也是坑 1 的另一面。
+4. **测试里 stub 掉 resolver 会打印误导性提示**（`codex CLI not found`），那是用例
+   自己传的 `resolveCodex = { null }`，不是发现逻辑坏了。
+
+**读数**：`:agentNode:test` **299 tests / 1 skipped / 0 fail**（41 suites，170 s）——
+299 = 287 + 白名单纯函数 9 + 装配端到端 2 + 真链路 1（默认 skipped）；
+`:desktopApp:test` **238 tests / 0 fail**（48 suites，5.5 s）。
+
+**门禁现状（如实记）**：
+
+- `envDependentTestGate` / `cjkLiteralGate` / `domainComposeFreeGate`：通过。
+- `staleCommentRefGate`：**本轮修好**。它在 HEAD 上本来就是红的 —— 两处注释写着
+  `app/relay/ui/AppStates.kt:23 → MessageState:87`，而 `EmptyState` 早已搬到
+  `ui/AppStates.kt`，那个行号落在空行上。改成符号名（`ui/AppStates.kt`，内部转调
+  `MessageState`），不写行号。用 HEAD 的临时 worktree 复核过：修之前 HEAD 同样 2 条红。
+- `constructionTraceGate`：**仍红，且与本轮无关**（HEAD 的临时 worktree 同样 11 条）。
+  命中是 10 条 `2026-11-01 产品级语汇裁决` 注释里的 ISO 日期 + 1 条内网地址，都在
+  composeApp 的桌面 UI 文件里。门禁建议的改法是「留结论、去掉日期，缺陷史进 ADR」——
+  那是一次文档策略决定（要不要为这些裁决补 ADR），不属于本轮范围，留给机主定。

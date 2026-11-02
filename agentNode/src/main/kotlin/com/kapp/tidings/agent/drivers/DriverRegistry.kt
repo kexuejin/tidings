@@ -92,9 +92,10 @@ class DriverRegistry(private val acl: DriverCapabilityAcl = DriverCapabilityAcl(
         fun withCliDrivers(
             acl: DriverCapabilityAcl = DriverCapabilityAcl(),
             sandbox: WorktreeSandboxExecutor? = null,
+            env: Map<String, String> = System.getenv(),
         ): DriverRegistry =
             DriverRegistry(acl).also { registry ->
-                for (driver in cliDriverRegistrations(sandbox = sandbox)) {
+                for (driver in cliDriverRegistrations(sandbox = sandbox, env = env)) {
                     registry.register(driver)
                 }
             }
