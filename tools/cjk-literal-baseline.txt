@@ -2,8 +2,8 @@
 #
 # 格式: <允许条数>\t<相对仓库根的路径>
 # 重新生成: ./gradlew :cjkLiteralGateBaseline
-# 生成时机: HEAD=ed83f6be (dirty), scope=app/src/commonMain,app/src/androidMain,app/src/iosMain,app/src/jvmMain,app/src/jvmSharedMain,composeApp/src/commonMain,composeApp/src/androidMain,composeApp/src/iosMain,composeApp/src/jvmMain,desktopApp/src/main,cli/src/main
-# 命中总数: 118（文件数 19）
+# 生成时机: HEAD=8d2077d8 (dirty), scope=app/src/commonMain,app/src/androidMain,app/src/iosMain,app/src/jvmMain,app/src/jvmSharedMain,composeApp/src/commonMain,composeApp/src/androidMain,composeApp/src/iosMain,composeApp/src/jvmMain,desktopApp/src/main,cli/src/main
+# 命中总数: 128（文件数 19）
 #
 4	app/src/commonMain/kotlin/com/kapp/tidings/platform/PlatformContracts.kt
 9	composeApp/src/androidMain/kotlin/com/kapp/tidings/platform/AndroidMdnsAdvertiser.kt
@@ -22,5 +22,5 @@
 4	desktopApp/src/main/kotlin/com/kapp/tidings/desktop/DesktopPlatform.kt
 9	desktopApp/src/main/kotlin/com/kapp/tidings/desktop/DesktopServices.kt
 27	desktopApp/src/main/kotlin/com/kapp/tidings/desktop/DesktopWindow.kt
-5	desktopApp/src/main/kotlin/com/kapp/tidings/desktop/DesktopWorkerOrchestrator.kt
+15	desktopApp/src/main/kotlin/com/kapp/tidings/desktop/DesktopWorkerOrchestrator.kt
 6	desktopApp/src/main/kotlin/com/kapp/tidings/desktop/Main.kt

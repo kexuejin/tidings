@@ -284,6 +284,31 @@ class StageChainTest {
         assertTrue(json.contains("text/html"), "Must specify html mime")
     }
 
+    @Test
+    fun aProposedCardOffersStartAndCancelWithoutAnApprovalGate() {
+        // 团队点将卡（文档 §二 Proposed 态）：倒计时到点自动开工，所以「立即执行」
+        // 不许挂 approval —— 那会把开始干活变成又一道等人点头的手续。
+        val card = StageChain.cardOf(progress("proposed"))
+        val json = card.toString()
+        assertTrue(json.contains("\"actionId\":\"start-task\""), "点将卡必须有立即执行：$json")
+        assertTrue(json.contains("\"actionId\":\"cancel-task\""), "点将卡必须有取消：$json")
+        assertFalse(json.contains("\"approval\":true"), "点将不是审批门，不许挂 approval 标记")
+    }
+
+    @Test
+    fun assigneesLandOnTheirOwnStageRow() {
+        // roster 的承办人要与棒位对齐：手机端按 items[i].assignee 渲染小徽标，
+        // 错位的承办人等于把活记到别人头上。
+        val p = progress("proposed").copy(assignees = listOf("Codex（本机）"))
+        val items = StageChain.cardOf(p)["items"].toString()
+        assertTrue(items.contains("\"assignee\":\"Codex（本机）\""), "承办人要进 items：$items")
+        // 短一截 = 尾棒不标，不是把最后一个名字发给每一棒。
+        val partial = progress("proposed").copy(assignees = listOf("Codex", "Claude"))
+        val partialJson = StageChain.cardOf(partial)["items"].toString()
+        assertTrue(partialJson.contains("Codex") && partialJson.contains("Claude"))
+        assertFalse(partialJson.substringAfter("Claude").contains("assignee"), "缺位承办人不得回填")
+    }
+
     // ---------------------------------------------------------------- 自然语言解析
 
     @Test

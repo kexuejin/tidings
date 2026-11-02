@@ -32,12 +32,8 @@ import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.runBlocking
 import com.kapp.tidings.core.protocol.AgentSenderId
-import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.JsonPrimitive
 import kotlinx.serialization.json.contentOrNull
-import kotlinx.serialization.json.buildJsonArray
-import kotlinx.serialization.json.buildJsonObject
-import kotlinx.serialization.json.putJsonObject
 
 /**
  * 桌面版的「扩展装配」：让 agent 与 UI 活在同一个进程里。
@@ -1081,6 +1077,26 @@ internal class DesktopExtension(
                             println("[RELAY-INVOKE] abort had nothing to stop (card " + cardId + ")")
                         }
                     }
+                } else if (actionId == "start-task") {
+                    // 团队点将卡的「立即执行」：把倒计时中的工单提前开跑。
+                    val started = workerOrchestrator?.startByCard(cardId) == true
+                    println(
+                        if (started) {
+                            "[RELAY-INVOKE] proposed team confirmed by $decidedBy, task started (card $cardId)"
+                        } else {
+                            "[RELAY-INVOKE] start-task had nothing to start (card $cardId)"
+                        },
+                    )
+                } else if (actionId == "cancel-task") {
+                    // 团队点将卡的「取消」：撤销尚未开工的工单（无进程可摘，不走 abort 桥）。
+                    val cancelled = workerOrchestrator?.cancelByCard(cardId) == true
+                    println(
+                        if (cancelled) {
+                            "[RELAY-INVOKE] proposed team cancelled by $decidedBy (card $cardId)"
+                        } else {
+                            "[RELAY-INVOKE] cancel-task had nothing to cancel (card $cardId)"
+                        },
+                    )
                 } else if (actionId == "approve-prototype") {
                     workerOrchestrator?.approvePrototypeByCard(cardId)
                 } else if (actionId == "refine-pending" || actionId == "dispatch-pending") {

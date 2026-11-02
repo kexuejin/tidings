@@ -88,6 +88,16 @@ data class ChainProgress(
     val options: List<Pair<String, Boolean>> = emptyList(),
     val artifacts: List<Pair<String, Long>> = emptyList(),
     val diff: ChainDiff? = null,
+    /**
+     * 每一棒的**承办人**（与 [stages] 平行；短一截或缺位 = 该棒不标）。
+     *
+     * 文档 §3.5 的 roster 三元组（role/assignee/status）里，status 由 [stages] 承担，
+     * assignee 落在这里。手机端 `parseAgentCard` 一直认 `items[].assignee`（渲染成
+     * 步骤行内的小徽标），此前宿主从来不填 —— 卡上永远只有棒名，看不出是谁干。
+     * 排在参数表末尾：[StageChainRunner] 与 DesktopStageChain 的既有位置参数调用
+     * 不能因为加字段而逐个翻新。
+     */
+    val assignees: List<String> = emptyList(),
 )
 
 object StageChain {
@@ -166,11 +176,14 @@ object StageChain {
         put("title", progress.title)
         put("progress", progress.percent)
         put("items", buildJsonArray {
-            progress.stages.forEach { (role, status) ->
+            progress.stages.forEachIndexed { index, (role, status) ->
                 add(buildJsonObject {
                     put("id", role)
                     put("label", role)
                     put("status", status)
+                    progress.assignees.getOrNull(index)
+                        ?.takeIf { it.isNotBlank() }
+                        ?.let { put("assignee", it) }
                 })
             }
         })
@@ -224,6 +237,20 @@ object StageChain {
                     put("actionId", "approve-prototype")
                     put("label", "Approve & Develop")
                     put("approval", true)
+                })
+            })
+        } else if (progress.state == "proposed") {
+            // 团队点将卡（文档 §二 Proposed 态 / §3.5 卡片状态 1）：roster 已就位，
+            // 人可以提前开工或撤销 —— 但**不是审批门**，倒计时到点自动开工。
+            // 不写 approval=true：那会把「开始干活」变成又一道等待人点头的手续。
+            put("actions", buildJsonArray {
+                add(buildJsonObject {
+                    put("actionId", "start-task")
+                    put("label", "立即执行")
+                })
+                add(buildJsonObject {
+                    put("actionId", "cancel-task")
+                    put("label", "取消")
                 })
             })
         } else if (progress.state == "blocked") {

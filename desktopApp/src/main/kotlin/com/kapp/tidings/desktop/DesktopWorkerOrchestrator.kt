@@ -20,6 +20,7 @@ import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.CoroutineStart
 import kotlinx.coroutines.Job
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import kotlinx.serialization.json.JsonPrimitive
 import kotlinx.serialization.json.buildJsonArray
@@ -190,10 +191,20 @@ internal class DesktopWorkerOrchestrator(
      *   所以不猜：发**方向确认卡**，把决定权还给用户，见 [askPrototypeDirection]。
      */
     internal fun followUpIfActive(convId: String, text: String): Boolean {
-        val active = activeTicketsForConv(convId).firstOrNull { it.stage in setOf("blocked", "prototype") } ?: return false
-        val handler = active.onFollowUp ?: return false
+        val active = activeTicketsForConv(convId).firstOrNull {
+            it.stage in setOf("blocked", "prototype", "proposed")
+        } ?: return false
         val trimmed = stripMentions(text)
         if (trimmed.isBlank()) return false
+        // 点将期（还没开工）来的正文：不算追问也不算微调 —— 工单一件事都没做，
+        // 没有「调整」的语境。按新派单处理：撤掉这张未开工的工单，正文走完整
+        // 派单路由（返回 false 让调用方继续分发）。不撤销就派新单的话，3 秒倒计时
+        // 到点旧工单照样开跑，群里会出现两张并行抢沙箱的卡。
+        if (active.stage == "proposed") {
+            cancelByCard("chain-" + active.ticketId, "Superseded by a new message")
+            return false
+        }
+        val handler = active.onFollowUp ?: return false
         scope.launch {
             if (active.stage == "prototype") {
                 askPrototypeDirection(active, trimmed)
@@ -506,6 +517,12 @@ internal class DesktopWorkerOrchestrator(
             }
         }
 
+        // 点将期的正文 = 新派单（与 followUpIfActive 同判据）：先撤销倒计时中的工单，
+        // 否则 3 秒到点旧单照跑，群里出现两张并行抢沙箱的卡。
+        if (active != null && active.stage == "proposed") {
+            cancelByCard("chain-" + active.ticketId, "Superseded by a new message")
+        }
+
         val stages = StageChain.parseStages(prompt)
         if (stages.size >= 2) {
             // 多角色链有自己的卡与生命周期（ChainDispatcher），这里只回受理。
@@ -633,7 +650,7 @@ internal class DesktopWorkerOrchestrator(
             job = job,
             title = title,
             repoPath = repoPath,
-            stage = "working",
+            stage = "proposed",
             rev = revCounter,
             role = roleNameOf(defaultAgent),
             agentKey = defaultAgent,
@@ -643,8 +660,91 @@ internal class DesktopWorkerOrchestrator(
         activeTickets[ticketId] = ticket
         // 先入表再起跑：打断信号（`abortIfRequested`）按 convId 找活跃工单，
         // 起跑之后、入表之前的那一瞬间发来的「停」会找不到工单而被当成普通消息。
-        job.start()
+
+        // ==================== 团队点将（文档 §二 Proposed 态）====================
+        // 派单不再无声地直接开跑：先亮出「谁来干、分几步」—— roster 每一棒挂着承办人，
+        // 倒计时到点自动开工（文档 §五「极简注意力」：不强制人等，倒计时不是审批门），
+        // 卡上的「立即执行 / 取消」只是把这两个时刻握到人手里。
+        val assignee = ticket.role + "（本机）"
+        val plan = if (isProto) {
+            listOf("原型设计", "开发实现", "测试验收")
+        } else {
+            listOf("编码实现", "自愈验证", "终审合并")
+        }
+        scope.launch {
+            publishTicketCard(
+                groupId = groupId,
+                ticketId = ticketId,
+                rev = revCounter.get(),
+                state = "proposed",
+                title = title,
+                banner = "团队已就位：" + ticket.role + " 主理，" + TEAM_COUNTDOWN_MS / 1000 +
+                    " 秒后自动开工；也可立即执行或取消",
+                percent = 0,
+                roleName = ticket.role,
+                agentId = defaultAgent,
+                stageRows = plan.map { it to "pending" },
+                assignees = plan.map { assignee },
+            )
+            delay(TEAM_COUNTDOWN_MS)
+            startProposedTicket(ticket)
+        }
         return done
+    }
+
+    /** 点将卡的自动开工等待（§二 Proposed → Executing 的「倒计时结束」）。
+     * 文档示例是 3s，真机实测不够人读完三行 roster 并把手挪到按钮上 ——
+     * 点将交互的意义就在这几秒里，掐得太紧它就只剩装饰。 */
+    private companion object {
+        const val TEAM_COUNTDOWN_MS = 8_000L
+    }
+
+    /**
+     * 把处于点将期的工单**真正开跑**（LAZY 协程的显式 start）。
+     *
+     * 双保险幂等：`stage` 判据挡住已开工/已撤销的重复调用；就算并发双双过了判据，
+     * `job.start()` 对同一协程也只有第一次生效 —— 倒计时到点与用户点「立即执行」
+     * 撞在同一拍也不会跑两遍。
+     */
+    private fun startProposedTicket(active: ActiveTicket): Boolean {
+        if (active.stage != "proposed") return false
+        active.stage = "working"
+        return active.job.start()
+    }
+
+    /** 点将卡上的「立即执行」：提前开工。没有处于点将期的工单时如实返回 false。 */
+    internal fun startByCard(cardId: String): Boolean {
+        val tid = cardId.removePrefix("chain-")
+        val active = activeTickets[tid] ?: activeTickets.values.firstOrNull { it.ticketId == tid } ?: return false
+        return startProposedTicket(active)
+    }
+
+    /**
+     * 点将卡上的「取消」：撤销尚未开工的工单。
+     *
+     * 与 `abortIfRequested` 的分工：那是「活干到一半被叫停」（摘进程树）；这里工单
+     * 还没起跑，只需取消 LAZY 协程、补一张「已取消」卡。写了理由参数：点卡取消与
+     * 「点将期发了新消息」的卡面文案不同，后者不该让人以为是谁按了取消。
+     */
+    internal fun cancelByCard(cardId: String, reason: String = "Cancelled before start"): Boolean {
+        val tid = cardId.removePrefix("chain-")
+        val active = activeTickets[tid] ?: activeTickets.values.firstOrNull { it.ticketId == tid } ?: return false
+        if (active.stage != "proposed") return false
+        active.stage = "aborted"
+        activeTickets.remove(tid)
+        val cancelledJson = ticketCardJson(
+            ticketId = active.ticketId,
+            rev = active.rev.incrementAndGet(),
+            state = "aborted",
+            title = active.title,
+            banner = reason,
+            percent = 0,
+            roleName = active.role,
+        )
+        active.done.complete(TicketOutcome("aborted", null, reason, cancelledJson))
+        active.job.cancel(CancellationException(reason))
+        scope.launch { publishCardJson(active.groupId, cancelledJson, active.agentKey) }
+        return true
     }
 
     /**
@@ -667,7 +767,9 @@ internal class DesktopWorkerOrchestrator(
         publishTicketCard(
             groupId = groupId,
             ticketId = ticketId,
-            rev = revCounter.get(),
+            // rev 1 是团队点将卡（dispatchSingleWorker 发的 proposed）；这里第一张
+            // working 卡必须是 rev 2 —— rev 倒退的卡会被手机端折叠规则丢弃。
+            rev = revCounter.incrementAndGet(),
             state = "working",
             title = title,
             banner = "Generating interactive prototype (prototype.html)...",
@@ -1088,6 +1190,10 @@ internal class DesktopWorkerOrchestrator(
         options: List<Pair<String, Boolean>> = emptyList(),
         artifacts: List<Pair<String, Long>> = emptyList(),
         diff: ChainDiff? = null,
+        /** 缺省 = 单棒（[roleName] 一行）；团队点将卡传完整计划，见 [dispatchSingleWorker]。 */
+        stageRows: List<Pair<String, String>>? = null,
+        /** 与 [stageRows] 平行的承办人名单（roster），一棒一个。 */
+        assignees: List<String> = emptyList(),
     ): String? {
         if (groupId == null) return null
         val progress = ChainProgress(
@@ -1096,7 +1202,8 @@ internal class DesktopWorkerOrchestrator(
             state = state,
             title = title,
             currentRole = roleName,
-            stages = listOf(roleName to StageChain.stageStatusOf(state)),
+            stages = stageRows ?: listOf(roleName to StageChain.stageStatusOf(state)),
+            assignees = assignees,
             percent = percent,
             banner = banner,
             options = options,

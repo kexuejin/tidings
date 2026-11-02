@@ -173,4 +173,62 @@ class DesktopWorkerOrchestratorTest {
             "followUpIfActive 的 prototype 分支必须改道方向确认卡，不许直接 handler.invoke(trimmed)",
         )
     }
+
+    /**
+     * 派单必须经过**团队点将**（文档 §二 Proposed 态 / §3.5 卡片状态 1）。
+     *
+     * 此前派单无声地直接开跑：手机上第一张卡就是 working，看不出谁来干、分几步。
+     * 现在派单先发 proposed 卡（roster 每棒挂承办人），倒计时自动开工；
+     * 卡上的立即执行/取消由宿主接线（startByCard/cancelByCard）。
+     */
+    @Test
+    fun dispatchShowsTeamRosterBeforeRunning() {
+        val source = listOf(
+            File("src/main/kotlin/com/kapp/tidings/desktop/DesktopWorkerOrchestrator.kt"),
+            File("desktopApp/src/main/kotlin/com/kapp/tidings/desktop/DesktopWorkerOrchestrator.kt"),
+        ).firstOrNull { it.isFile }
+        assertTrue(source != null, "DesktopWorkerOrchestrator.kt not found")
+        val text = source.readText()
+
+        assertTrue(
+            text.contains("state = \"proposed\""),
+            "派单必须先发 proposed 点将卡，不许无声直跑",
+        )
+        assertTrue(
+            text.contains("assignees = plan.map { assignee }"),
+            "点将卡的每一棒都要挂承办人（roster），不能只有棒名",
+        )
+        assertTrue(
+            text.contains("startProposedTicket(ticket)"),
+            "倒计时到点必须自动开工（极简注意力：点将不是审批门）",
+        )
+        assertTrue(
+            text.contains("internal fun startByCard(") && text.contains("internal fun cancelByCard("),
+            "卡上的立即执行/取消必须有宿主落地（startByCard/cancelByCard）",
+        )
+        assertTrue(
+            text.contains("Superseded by a new message"),
+            "点将期来的正文按新派单处理：旧工单要先撤销，不许两张卡并行抢沙箱",
+        )
+    }
+
+    /** 点将卡的两个动作 id 必须在宿主侧接线（没有落点的按钮比没有更糟）。 */
+    @Test
+    fun proposedCardActionsAreWiredInExtension() {
+        val source = listOf(
+            File("src/main/kotlin/com/kapp/tidings/desktop/DesktopExtension.kt"),
+            File("desktopApp/src/main/kotlin/com/kapp/tidings/desktop/DesktopExtension.kt"),
+        ).firstOrNull { it.isFile }
+        assertTrue(source != null, "DesktopExtension.kt not found")
+        val text = source.readText()
+
+        assertTrue(
+            text.contains("\"start-task\"") && text.contains("startByCard(cardId)"),
+            "start-task 动作必须接到 workerOrchestrator.startByCard",
+        )
+        assertTrue(
+            text.contains("\"cancel-task\"") && text.contains("cancelByCard(cardId)"),
+            "cancel-task 动作必须接到 workerOrchestrator.cancelByCard",
+        )
+    }
 }
