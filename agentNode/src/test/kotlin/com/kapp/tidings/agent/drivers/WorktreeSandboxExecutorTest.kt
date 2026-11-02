@@ -351,6 +351,126 @@ class WorktreeSandboxExecutorTest {
         }
     }
 
+    // ── 7.5 滚动基线（D5）：合并只改工作树，下一轮沙箱必须看得见 ─────────────
+
+    /**
+     * D5 的回归用例：合并（`git apply`）不提交，HEAD 不动；如果沙箱仍自 HEAD 建，
+     * 下一轮任务就看不见上一轮合进去的代码（A/B/C 三轮各自独立、基线不累计）。
+     *
+     * 这里模拟「合并后打快照」，再让沙箱任务去读那个未提交的新文件：
+     * 读得到 = 站在上一轮肩膀上；harvest 只含本任务新增的行 = 补丁是相对快照的，
+     * 不是把整份合并结果重新打一遍。
+     */
+    @Test
+    fun nextTaskStartsFromTheMergedSnapshotNotFromHead() = runBlocking {
+        val root = tempDir()
+        val host = tempDir()
+        gitRepo(host)
+        // 合并的产物：一个**未提交、未跟踪**的新文件（阶段 B 的 src/aqi.js 就是这个形状）。
+        File(host, "merged.txt").writeText("from stage B\n")
+        val snap = MergeBaseRef.snapshot(host)
+        assertTrue(snap != null, "合并后必须能打出滚动基线快照")
+        assertEquals(MergeBaseRef.REF, MergeBaseRef.baseFor(host), "HEAD 未动时应以快照为起点")
+
+        val cli = script(
+            root,
+            "cli",
+            """
+            if [ -f merged.txt ]; then
+              printf 'task line\n' >> merged.txt
+              exit 0
+            fi
+            exit 7
+            """.trimIndent(),
+        )
+        val outcome = executor(root).run(
+            taskId = "t-d5",
+            hostRepo = host.absolutePath,
+            command = listOf(cli),
+            env = emptyMap(),
+            onLine = {},
+        )
+        assertTrue(
+            outcome is WorktreeSandboxExecutor.Outcome.Finished,
+            "任务应看得到合并基线上的文件；自 HEAD 建会 exit 7，实际 $outcome",
+        )
+        val harvest = requireNotNull((outcome as WorktreeSandboxExecutor.Outcome.Finished).harvest)
+        assertEquals(1, harvest.filesChanged, "相对快照只有 merged.txt 一处改动")
+        assertEquals(1, harvest.additions, "补丁只该含本任务追加的 1 行，而不是整份合并结果")
+        // 隔离仍在：任务写的是它自己的 worktree，宿主工作树原样。
+        assertEquals("from stage B\n", File(host, "merged.txt").readText())
+    }
+
+    /**
+     * 收割的基线是**开工时解析好的 sha**，不是 `HEAD`。CLI 若在沙箱里自己 commit，
+     * `HEAD` 就前移了，`git diff HEAD` 会把它的活读成「没有改动」—— 整轮任务白干。
+     */
+    @Test
+    fun harvestSurvivesACliThatCommitsItsOwnWork() = runBlocking {
+        val root = tempDir()
+        val host = tempDir()
+        gitRepo(host)
+        val cli = script(
+            root,
+            "cli",
+            """
+            printf 'committed by cli\n' >> seed.txt
+            git -c user.email=t@t.invalid -c user.name=t commit -am "cli commit" >/dev/null 2>&1
+            exit 0
+            """.trimIndent(),
+        )
+        val outcome = executor(root).run(
+            taskId = "t-cli-commit",
+            hostRepo = host.absolutePath,
+            command = listOf(cli),
+            env = emptyMap(),
+            onLine = {},
+        )
+        assertTrue(outcome is WorktreeSandboxExecutor.Outcome.Finished, "实际 $outcome")
+        val harvest = requireNotNull((outcome as WorktreeSandboxExecutor.Outcome.Finished).harvest) {
+            "CLI 自己 commit 过也必须收得到补丁（git diff HEAD 会把它的活读成没有改动）"
+        }
+        assertEquals(1, harvest.filesChanged, "seed.txt 一处")
+        assertEquals(1, harvest.additions, "只该有 CLI 追加的那 1 行")
+    }
+
+    /**
+     * PWD 必须指到 worktree，而不是宿主目录。
+     *
+     * `ProcessBuilder.directory()` 只改真实 cwd，**不动继承来的 PWD**。opencode 解析
+     * 工作区读的是 `$PWD`（不是 getcwd）—— 实测它把 proof.txt 写进了宿主仓库根，
+     * worktree 里空空如也。
+     *
+     * 观察点用 `/usr/bin/env` 而不是 shell 脚本：POSIX shell 会拿 getcwd 校验并**重写**
+     * PWD，用它来测等于自证（不修也能过）。`env` 打出来的是进程拿到的那份原始环境。
+     */
+    @Test
+    fun theChildSeesPwdPointingAtTheWorktreeNotTheHost() = runBlocking {
+        val root = tempDir()
+        val host = tempDir()
+        gitRepo(host)
+        // onLine 在读线程上被调用，普通 list 不可靠。
+        val lines = java.util.concurrent.CopyOnWriteArrayList<String>()
+        val outcome = executor(root).run(
+            taskId = "t-pwd",
+            hostRepo = host.absolutePath,
+            command = listOf("/usr/bin/env"),
+            env = emptyMap(),
+            onLine = { lines += it },
+        )
+        assertTrue(outcome is WorktreeSandboxExecutor.Outcome.Finished, "/usr/bin/env 退出码 0：$outcome")
+        val pwd = lines.firstOrNull { it.startsWith("PWD=") }
+            ?: error("/usr/bin/env 的输出里没有 PWD，无法判定")
+        // absolutePath 而不是 canonicalPath：worktree 是按 absolutePath 传下去的，
+        // canonicalPath 在 macOS 上会把 /var → /private/var，两边对不上。
+        val expected = File(root, "t-pwd").absolutePath
+        assertEquals(
+            "PWD=$expected",
+            pwd,
+            "子进程的 PWD 必须是 worktree —— 否则按 \$PWD 解析工作区的 CLI 会把产物写到宿主目录",
+        )
+    }
+
     // ── 8. 派单止损（挂住的 CLI 不许无限期占着 worktree）────────────────────
 
     /**

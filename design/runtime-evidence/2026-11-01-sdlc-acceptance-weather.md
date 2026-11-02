@@ -596,6 +596,13 @@ codex 上游仍不可达（确定性失败），本轮验证全部走失败路�
 不是模型能力。** 桩能产出的东西（`prototype.html`、`src/aqi.js`、`normalizeQuery` 修复）
 都是预先写好的，不构成「真 agent 干成了活」的证据。
 
+> **13:40 更正（本节的阻塞已解除）**：上面「不可用」是**默认上游**的结论。
+> 三家 CLI 都支持自定义 base URL；换成 opencode-go 网关
+> （`https://opencode.ai/zen/go/v1`，同时提供 OpenAI `/chat/completions`、`/responses`
+> 与 Anthropic `/messages`）后，`claude` / `codex` / `opencode` 都能用
+> `deepseek-v4.1-flash` 跑通，且都能真实改文件。配方与实测见 §13.14；
+> 复跑用 `tools/real-cli-smoke.py`（密钥只从 `OPENCODE_API_KEY` 读，不落盘）。
+
 ### 13.1 阶段 A：原型立项在真机上第一次完整走通
 
 `@codex-final prototype` → 沙箱 `t-1-29c8dcce`（`+50 −1445`，1 文件，patch 51697 B）。
@@ -796,14 +803,14 @@ function normalizeQuery(cityQuery) {
 | D2 | 合并成功但卡不翻面，且无日志 | 群号靠扫本地消息反推，失败即静默 `return` | 已修（`groupByCard` + 留痕） |
 | D3 | `Retry` 要么无反应、要么变成原型微调 | 宿主无 `retry` 分支，落到 `followUpByCard` 当文本 | 已修（`retryByCard`） |
 | D4 | 交回横幅只报最后一轮原因 | `executionError` 每轮覆盖，首轮 `cli exit=1` 被末轮 `No patch` 覆盖 | 未修（记录） |
-| D5 | 合并后的改动不进 git 历史，下一轮沙箱看不到 | `DesktopPatchMerge.apply` 只 `git apply` 到工作区，不 `add`/`commit`；worktree 从 HEAD 建 | 未修（记录，需产品决策） |
+| D5 | 合并后的改动不进 git 历史，下一轮沙箱看不到 | `DesktopPatchMerge.apply` 只 `git apply` 到工作区，不 `add`/`commit`；worktree 从 HEAD 建 | **已修**（`MergeBaseRef` 滚动基线，见 13.13） |
 | D6 | 翻面卡 `items[0].status` 仍是 `review_ready` | 只覆盖了 `state`，没同步阶段项 | 未修（记录，UI 读 `state`，不影响显示） |
 
 D5 值得单独说一句：`git apply` 之后宿主仓是 `M src/services/weatherService.js` +
 若干 `??` 未跟踪文件，**HEAD 没动**。于是下一张工单的沙箱（`git worktree add` 自 HEAD）
 看不到上一轮合进去的代码 —— 本轮 AQI 的 `+92 −0` 与城市修复的 `+31 −1` 各自独立、
 互不可见，`npm test` 的基线也一直是 71 而不是累计值。计划里写的「atomic `git apply`
-into host repo」字面成立，但「合进去的改动成为后续迭代的起点」不成立。
+into host repo」字面成立，但「合进去的改动成为后续迭代的起点」不成立。修复见 13.13。
 
 ### 13.11 未覆盖
 
@@ -820,3 +827,135 @@ into host repo」字面成立，但「合进去的改动成为后续迭代的起
 | 城市归一化在 `src/provider.js` 的 `normalizeCityQuery` | 在 **`src/services/weatherService.js:16` 的 `normalizeQuery`** |
 | 仓库结构含 `src/aqi.js` | 基线**没有**，AQI 是阶段 B 新增的 |
 | `prototype.html` 是产物 | 基线**已被 git 跟踪**（`prototype.html` 在仓里），阶段 A 是覆盖写 |
+
+### 13.13 D5 修复：合并后的工作树成为下一轮的基线（滚动基线）
+
+**根因复述**：合流只 `git apply` 到宿主工作树，**不 add / 不 commit**（提交是机主的
+下一步）。HEAD 停在原地 ⇒ `git worktree add` 自 HEAD 建 ⇒ 下一轮任务看不见上一轮
+合进去的代码。
+
+**做法**（`MergeBaseRef`，`agentNode/.../drivers/MergeBaseRef.kt`）：
+
+1. 合并成功后，用**一次性索引**把当前工作树打成一份快照提交：
+   `GIT_INDEX_FILE=<tmp> read-tree HEAD` → `add -A` → `write-tree` →
+   `commit-tree <tree> -p HEAD`，再 `update-ref refs/tidings/base <sha>`。
+   全程**只新增对象**：不动机主 HEAD、不动分支、不动真实索引/暂存区。
+2. 沙箱建 worktree 时起点从隐式 HEAD 改成 `MergeBaseRef.baseFor(hostRepo)`：
+   快照有效 ⇒ `refs/tidings/base`；否则 ⇒ `HEAD`。起点**立刻解析成不可变 sha**
+   再交给 `worktree add`：并发工单里另一条链合并会推进 ref，若 harvest 时再读 ref，
+   就会拿「别人的新基线」去 diff 自己的工作树 —— 补丁里凭空出现一段回退。
+3. 「有效」的判据是**快照的父提交 == 当前 HEAD**。机主后来自己 commit 了，
+   HEAD 前移、父提交对不上 ⇒ 自动回落到 HEAD —— 不拿一份旧树去盖住机主的新提交。
+
+**为什么不是「合并时顺手 commit」**：那会把编排器的提交塞进机主的线性历史，
+`git log` 从此混入机器提交；机主想 rebase / squash 时还要先认出哪些是它的。
+快照放在 `refs/tidings/` 下，`git branch` 列表里看不到，`git gc` 也不会回收它
+（有引用，不是悬空对象）。
+
+**补丁形状因此变成「相对上一轮合并」**：worktree 的 HEAD = 快照，harvest 的
+`git diff <base sha>` 只含本任务的改动 —— 不是把上一轮已合并的内容重新打一遍。
+基线用**开工时定下的 sha** 而不是 `HEAD`：CLI 若在沙箱里自己 commit，`HEAD` 会前移，
+`git diff HEAD` 会把它的活读成「没有改动」。
+下一份 patch 落到宿主工作树时，基线正好是上一轮合并后的状态，`--check` 能干净通过。
+
+**验证**（真 git，全绿）：
+
+| 用例 | 钉住的事实 |
+|---|---|
+| `WorktreeSandboxExecutorTest.nextTaskStartsFromTheMergedSnapshotNotFromHead` | 未提交的合并产物（`merged.txt`）在下一轮沙箱里读得到；harvest 只 +1 行（相对快照，不是重打） |
+| `WorktreeSandboxExecutorTest.harvestSurvivesACliThatCommitsItsOwnWork` | CLI 在沙箱里自己 commit 后，收割仍相对开工 sha（`git diff HEAD` 会把它的活读成零改动） |
+| `DesktopPatchMergeTest.mergedNewFileLandsInTheRollingBase` | 未跟踪的新文件（`src/aqi.js` 形状）也进快照 |
+| `DesktopPatchMergeTest.mergedWorkBecomesTheBaseForTheNextTask` | 端到端：合并 A → 沙箱看得见 A → 合并 B → 宿主仓同时有 A/B，快照含两轮全部改动 |
+| `DesktopPatchMergeTest.baseFallsBackToHeadOnceTheHumanCommits` | 机主 commit 后 HEAD 前移 ⇒ 回落到 HEAD |
+| `DesktopPatchMergeTest.snapshotLeavesHeadAndTheRealIndexAlone` | 快照不动机主 HEAD、真实索引/工作树状态逐字不变 |
+| `DesktopPatchMergeTest.conflictingPatchLeavesTheWorkspaceUntouched` | 冲突不推进基线（ref 仍为空） |
+
+模块级读数：`:agentNode:test` **287 tests / 0 fail**（38 suites，129 s）、
+`:desktopApp:test` **238 tests / 0 fail**（48 suites，5.5 s）。宿主日志新增一行
+`next sandbox base=<sha>`，是「下一轮真的站在上一轮肩膀上」的外部证据。
+（287 = D5 修复前的 285 + 后文 §13.14 的两条 `PWD` 用例。）
+
+**关于「DSH super agent 有没有现成方案」**：本机 `~/.dsh` 的顶层与 `bin/` 下没有
+worktree / 合并策略的规范可抄（只有运行态、会话与启动脚本）。同类 agent harness 的
+常见做法就是「每个 worktree 从**最新的集成基线**拉起，而不是固定 HEAD」—— 即本轮
+实现的滚动基线；差别只在快照放哪儿（ref / tag / 独立集成分支）。这里选
+`refs/tidings/base` 是因为它对机主完全隐形、又不会被 gc。
+
+### 13.14 真 CLI 解封：三家都走 opencode-go（自定义 base URL + model）
+
+§13.0 的「本机没有可用真 CLI」只在**默认上游**下成立。实测三家都支持自定义
+base URL，统一指向 opencode-go 后全部可用。
+
+**网关能力**（`GET /models` 实测）：
+
+- `deepseek-v4.1-flash`：context 1,000,000 / output 384,000，`tools=true`，
+  `reasoning.effort = low|high|max`；计费 `$0.15 / $0.6` per 1M（工作日高峰 ×2）。
+- 同时提供三条兼容面：OpenAI `/chat/completions`、OpenAI `/responses`、
+  Anthropic `/messages`。
+- **每个请求都必须带 `x-opencode-session: <任意非空>`**，否则 400
+  `MissingSessionID`。Anthropic 面只认 `x-api-key`；用 `Authorization: Bearer`
+  会 401 `Go requires a credential`。
+
+**三家配方**（均已实测 `PONG` + 真实写文件）：
+
+| CLI | 关键配置 | 启动 |
+|---|---|---|
+| `claude` 2.1.212 | `ANTHROPIC_BASE_URL=https://opencode.ai/zen/go`（**不带 `/v1`**，SDK 自己拼 `/v1/messages`）、`ANTHROPIC_API_KEY`、`ANTHROPIC_MODEL=deepseek-v4.1-flash`、`ANTHROPIC_SMALL_FAST_MODEL` 同值、`ANTHROPIC_CUSTOM_HEADERS="x-opencode-session: claude-code"` | `claude -p "<prompt>" --permission-mode bypassPermissions` |
+| `codex` 0.145.0 | `$CODEX_HOME/config.toml`：`model`、`model_provider`、`[model_providers.opencode-go]` 的 `base_url` / `env_key=OPENCODE_API_KEY` / `wire_api="responses"` / `http_headers` | `codex exec --skip-git-repo-check -s danger-full-access "<prompt>"` |
+| `opencode` 2.2.5 | `OPENCODE_CONFIG` 指向自定义 provider：`package=@ai-sdk/openai-compatible`、`settings.baseURL`、`settings.apiKey="{env:OPENCODE_API_KEY}"`、`headers`、`models` | `opencode run --standalone --auto -m opencode-go/deepseek-v4.1-flash "<prompt>"` |
+
+**两个不明显的坑（都实测踩过）**：
+
+1. **codex 0.145 移除了 `wire_api = "chat"`**：填 chat 会直接
+   `Error loading config.toml: wire_api = "chat" is no longer supported`。
+   网关有 `/responses`，所以填 `responses` 即可。
+2. **opencode 用 `$PWD` 解析工作区，不是进程 cwd**。`ProcessBuilder.directory()`
+   / `subprocess(cwd=…)` 都不会改 `$PWD`，于是它把文件写到父进程的项目根
+   （首次冒烟真把 `proof.txt` 写进了本仓，已删）。必须显式
+   `PWD=<worktree>`；另外 `run` 要带 `--standalone`，否则后台常驻服务缓存旧配置，
+   自定义 provider 报 `Model unavailable`。
+
+**沙箱侧的 `PWD` 已修**（2026-11-02 14:10）：这条坑不只是冒烟脚本的事 —— 编排链
+真正拉起 CLI 的两处都只设了 `ProcessBuilder.directory()`，继承来的 `PWD` 仍指向
+宿主目录，于是 opencode 在真流水线里同样会把产物写到宿主仓根。两处都补了
+`pb.environment()["PWD"] = <工作区绝对路径>`（先设、后灌 env，显式注入的 `PWD`
+仍然赢）：
+
+| 位置 | 用途 |
+|---|---|
+| `WorktreeSandbox.kt` 的 `ProcessBuilder(command).directory(worktree)` | 沙箱派单（A/B/C 全链路走这条） |
+| `CliSubprocessDriver.kt` 的 `pb.directory(it)` | 裸 CLI 会话 |
+
+各配一条回归用例，且都**验过不修就红**：
+
+- `WorktreeSandboxExecutorTest.theChildSeesPwdPointingAtTheWorktreeNotTheHost`
+- `CliSubprocessEnvInjectionTest.pwdFollowsTheWorkspaceInsteadOfTheHostDirectory`
+
+两条都用 `/usr/bin/env` / `python3` 读**原始环境**，不用 `/bin/sh`：POSIX shell
+启动时会拿 getcwd 校验并**重写** `PWD`，用 shell 探针等于自证（不修也能过）。
+摘掉修复后的实测失败值正是宿主目录：
+
+```
+expected:<PWD=/var/folders/…/wt-sandbox-test…/t-pwd> but was:<PWD=/Volumes/Kapp/source/teahouse-mobile>
+```
+
+**实测**（`tools/real-cli-smoke.py`，2026-11-02 13:40–13:50）：
+
+```
+# chat
+claude    PASS  rc=0  reply=PONG
+codex     PASS  rc=0  reply=PONG
+opencode  PASS  rc=0  reply=PONG
+全部通过（3/3）
+
+# agentic（临时 git 仓里创建 proof.txt）
+claude    PASS  rc=0  proof.txt=CLI_OK
+codex     PASS  rc=0  proof.txt=CLI_OK
+opencode  PASS  rc=0  proof.txt=CLI_OK
+全部通过（3/3）
+```
+
+**对后续复验的影响**：§13.1–13.13 的桩跑仍然有效（它验的是编排链路），但
+「真模型产物能否被 `extractFileFromPatch` 抽出来」这条 §13.11 的未覆盖项现在**可以真跑**。
+沙箱侧 `PWD` 已修（见上），`opencode` 写错目录这条阻塞已消除 —— A/B/C 真链路复跑
+只剩「把 `tools/real-cli-smoke.py` 的配方接进 `SandboxedCliDriver` 的装配」这一步。

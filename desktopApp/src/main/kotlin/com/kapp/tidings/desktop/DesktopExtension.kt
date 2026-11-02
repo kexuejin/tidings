@@ -970,7 +970,17 @@ internal class DesktopExtension(
                     }
                     when (outcome) {
                         is DesktopPatchMerge.Outcome.Applied -> {
-                            println("[RELAY-INVOKE] patch merged into workspace by " + decidedBy + " (card " + cardId + ")")
+                            // 滚动基线（D5）：合并只改工作树、不提交，下一轮沙箱自 HEAD
+                            // 建起就看不见这批改动。快照 sha 落到日志，是「下一轮真的
+                            // 站在上一轮肩膀上」的唯一外部证据。
+                            println(
+                                "[RELAY-INVOKE] patch merged into workspace by " + decidedBy +
+                                    " (card " + cardId + ")" +
+                                    (
+                                        outcome.baseSnapshot?.let { "; next sandbox base=" + it }
+                                            ?: "; base snapshot unavailable — next sandbox starts from HEAD"
+                                        ),
+                            )
                             val appliedRow = controller.state.value.messages.values
                                 .asSequence()
                                 .flatten()

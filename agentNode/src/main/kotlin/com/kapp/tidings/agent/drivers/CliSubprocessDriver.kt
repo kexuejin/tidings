@@ -82,7 +82,12 @@ class CliSubprocessDriver(
         try {
             val exitCode = withContext(Dispatchers.IO) {
                 val pb = ProcessBuilder(listOf(cliPath) + argSpec(prompt))
-                File(wsPath).takeIf { it.isDirectory }?.let { pb.directory(it) }
+                File(wsPath).takeIf { it.isDirectory }?.let {
+                    pb.directory(it)
+                    // 同 WorktreeSandbox：`directory()` 不改继承来的 PWD，而 opencode
+                    // 是按 `$PWD` 解析工作区的（否则产物写到宿主目录去）。
+                    pb.environment()["PWD"] = it.absolutePath
+                }
                 // T-3a：模型凭证注入（节点本地 → 子进程环境）。值绝不进日志/台账/报文。
                 // PATH 必须先补齐：GUI 启动的宿主只有最小 PATH，脚本型 CLI 会因为找不到
                 // 解释器直接 127（见 CliDiscovery.childPath）。envOverrides 在其后覆盖，

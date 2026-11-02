@@ -2,6 +2,7 @@
 
 package com.kapp.tidings.desktop
 
+import com.kapp.tidings.agent.drivers.MergeBaseRef
 import java.io.File
 
 /**
@@ -18,12 +19,26 @@ import java.io.File
  * 写成半途而废的样子（apply 失败时 git 自身也不留部分写入，但 --check 让「能不
  * 能合」成为先答的事实）。返回值两态：Ok（已写入）或 Conflict（带 git 的 stderr
  * 尾巴）—— 调用方据此把结果如实告知用户，绝不把冲突包装成成功。
+ *
+ * ## 合并后打滚动基线（D5）
+ *
+ * `git apply` 只改工作树，**不 add / 不 commit**（提交是机主的下一步）。若不额外
+ * 记录，下一张工单的沙箱自 HEAD 建起，就看不到这一轮合进去的代码。所以 apply
+ * 成功后立刻把当前工作树打成一份快照提交（[MergeBaseRef]），后续沙箱以它为起点；
+ * 全程不动 HEAD、不动真实索引。快照打不出来时合并**仍然算成功**，只是下一轮
+ * 回落到 HEAD —— 调用方会把这件事记进日志。
  */
 object DesktopPatchMerge {
 
     sealed interface Outcome {
-        /** 已应用到宿主工作树（未提交 —— 提交是机主的下一步，不是沙箱代办）。 */
-        data object Applied : Outcome
+        /**
+         * 已应用到宿主工作树（未提交 —— 提交是机主的下一步，不是沙箱代办）。
+         *
+         * [baseSnapshot] 是合并后工作树的快照提交 sha（D5 滚动基线），后续沙箱以它
+         * 为起点；为 null = 快照没打出来（不是 git 仓 / 无首个提交 / git 缺身份），
+         * 下一轮回落到 HEAD。
+         */
+        data class Applied(val baseSnapshot: String?) : Outcome
 
         /** 干跑就失败（上下文对不上 / 补丁已应用过）：宿主仓零变化。 */
         data class Conflict(val detail: String) : Outcome
@@ -45,7 +60,7 @@ object DesktopPatchMerge {
             // git apply 的原子性保证宿主仓不会停在半途。
             return Outcome.Conflict(apply.stderr.takeLast(400).trim().ifEmpty { "git apply failed" })
         }
-        return Outcome.Applied
+        return Outcome.Applied(MergeBaseRef.snapshot(workspace))
     }
 
     /**

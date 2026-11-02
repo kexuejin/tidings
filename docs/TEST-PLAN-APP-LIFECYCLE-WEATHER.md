@@ -149,13 +149,14 @@
 - **底层链条验证**：
   1. 移动端发出 `card_action` 载荷（`actionId = "merge-patch"`，`cardId = "..."`）；
   2. 宿主端 `DesktopExtension.onHostCardAction` 拦截动作，通过 `latestPatchRefForCard` 找到对应补丁；
-  3. 触发原子合流命令：在宿主主仓库执行 `git apply --check` $\rightarrow$ `git apply`；
+  3. 触发原子合流命令：在宿主主仓库执行 `git apply --check` $\rightarrow$ `git apply`；随后把合并后的工作树打成滚动基线快照（`refs/tidings/base`，不动 HEAD/索引），供下一张工单的沙箱起步（D5）；
   4. 自动销毁临时 Worktree 目录与分支，释放磁盘；
   5. **卡片原位闭环更新**：协同群内原位卡片状态由 `review_ready` 翻为 **`merged`**，横幅显示绿色成功文本 `Changes merged into workspace`，宿主台账落盘 `merge-result (applied)` 审计记录。
 
 ### 4.3 验收判定标准
 - [ ] 宿主主目录在未点击 `[合并此补丁]` 前，`git status` 绝对干净，不包含新代码；
 - [ ] 点击 `[合并此补丁]` 后，宿主主仓库自动完成变更落盘，且本地再次运行 `npm test`，通过数提升且全绿；
+- [ ] 合并成功后，下一张工单的沙箱以**合并后的工作树**为起点（宿主日志 `next sandbox base=<sha>`），上一轮的代码与测试对下一轮可见（D5）；
 - [ ] 群内卡片原位更新为 `merged`，无残留悬空按钮；
 - [ ] 宿主临时 Worktree 目录被干净清除，无残留僵尸进程。
 

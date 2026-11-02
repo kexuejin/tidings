@@ -123,11 +123,24 @@ class WorktreeSandboxExecutor(
         val worktree = File(sandboxRoot, taskId)
         val artifactsDir = File(File(sandboxRoot, ARTIFACTS_DIR), taskId).apply { mkdirs() }
         hostRepos[taskId] = hostRepo
+        // 起点是「上一轮合并后的工作树快照」，不是写死的 HEAD（D5）。合并只
+        // `git apply` 不 commit，HEAD 永远停在机主最后一次提交上；若沙箱自 HEAD
+        // 建，本轮任务就看不到上一轮合进去的代码，A/B/C 三轮各干各的、基线不累计。
+        // MergeBaseRef 在机主自己提交过之后会自动回落到 HEAD（快照已过时）。
+        val baseRef = MergeBaseRef.baseFor(File(hostRepo))
+        // 立刻解析成**不可变 sha**：并发工单里另一条链合并会推进 `refs/tidings/base`；
+        // 若 harvest 时再读 ref，就会拿「别人的新基线」去 diff 自己的工作树 ——
+        // 补丁里凭空出现一段回退。sha 一旦定下就与后续 ref 前移无关。
+        val base = git.run(
+            listOf("rev-parse", "--verify", "--quiet", baseRef),
+            cwd = File(hostRepo),
+        ).stdout.trim().ifEmpty { baseRef }
+        if (baseRef != "HEAD") println("[sandbox] task $taskId starts from merged base $base")
         try {
             // worktree add：hostRepo 不是 git 仓 / 分支已存在 / 路径被占都会在这里炸，
             // stderr 尾巴随 Failed 上去 —— 大声失败，不静默回退到裸跑。
             var createdResult = git.run(
-                listOf("worktree", "add", "-b", branchOf(taskId), worktree.absolutePath),
+                listOf("worktree", "add", "-b", branchOf(taskId), worktree.absolutePath, base),
                 cwd = File(hostRepo),
             )
             if (!createdResult.ok && createdResult.stderr.contains("already")) {
@@ -141,7 +154,7 @@ class WorktreeSandboxExecutor(
                 git.run(listOf("worktree", "prune"), cwd = File(hostRepo))
                 git.run(listOf("branch", "-D", branchOf(taskId)), cwd = File(hostRepo))
                 createdResult = git.run(
-                    listOf("worktree", "add", "-b", branchOf(taskId), worktree.absolutePath),
+                    listOf("worktree", "add", "-b", branchOf(taskId), worktree.absolutePath, base),
                     cwd = File(hostRepo),
                 )
             }
@@ -159,6 +172,11 @@ class WorktreeSandboxExecutor(
             val timedOut = java.util.concurrent.atomic.AtomicBoolean(false)
             val exitCode = withContext(Dispatchers.IO) {
                 val pb = ProcessBuilder(command).directory(worktree)
+                // PWD 必须跟着改：`directory()` 只改真实 cwd，继承来的 PWD 仍指向宿主目录。
+                // opencode 解析工作区读的是 `$PWD` 而不是 getcwd —— 不补这一行，它会
+                // 把产物写进宿主仓库根（实测：proof.txt 落在 repo 根，worktree 里空）。
+                // 先设、后 env.forEach，显式注入的 PWD 仍然赢。
+                pb.environment()["PWD"] = worktree.absolutePath
                 env.forEach { (k, v) -> pb.environment()[k] = v }
                 // 同 CliSubprocessDriver：GUI 启动的宿主只有最小 PATH，脚本型 CLI
                 // （`#!/usr/bin/env node`）会找不到解释器 → 127。env 显式给了 PATH 就不动它。
@@ -282,7 +300,7 @@ class WorktreeSandboxExecutor(
                     Outcome.Aborted("task aborted (SIGTERM/SIGKILL)")
                 }
                 exitCode == 0 -> {
-                    val harvest = harvestAndWrite(taskId, worktree, artifactsDir, logFile, started)
+                    val harvest = harvestAndWrite(taskId, worktree, artifactsDir, logFile, started, base)
                     cleanupTask(taskId)
                     Outcome.Finished(harvest)
                 }
@@ -428,26 +446,34 @@ class WorktreeSandboxExecutor(
     private fun taskLog(taskId: String): File =
         File(File(sandboxRoot, ARTIFACTS_DIR), taskId).resolve("task.log")
 
-    /** `git diff HEAD` 提纯成 patch + report（两个文件 + 结构化摘要），写到产物目录。 */
+    /**
+     * `git diff <base>` 提纯成 patch + report（两个文件 + 结构化摘要），写到产物目录。
+     *
+     * 基线是**开工时解析好的不可变 sha**，不是 `HEAD`：CLI 在沙箱里自己 commit 过，
+     * `HEAD` 就前移了，`git diff HEAD` 会把它的活读成「没有改动」；并发合并推进
+     * `refs/tidings/base` 时，读 ref 又会拿别人的新基线来 diff。用固定的 sha，
+     * 两种情形都只回答一个问题：**这次任务相对它的起点改了什么**。
+     */
     private fun harvestAndWrite(
         taskId: String,
         worktree: File,
         artifactsDir: File,
         logFile: File,
         started: Long,
+        baseCommit: String,
     ): Harvest? {
         // CLI 新建的文件是 untracked —— 裸 `git diff` 看不见它们。worktree 是一次性
         // 工作面，先把一切 stage 进临时索引再取 stat 与 diff（两处都要在 add 之后，
         // 先 stat 后 add 会把统计读成全零 —— 提纯返回 null 的假空）。
         val add = git.run(listOf("add", "-A"), cwd = worktree)
-        val stat = git.run(listOf("diff", "--stat", "HEAD"), cwd = worktree)
-        val patch = git.run(listOf("diff", "HEAD"), cwd = worktree)
+        val stat = git.run(listOf("diff", "--stat", baseCommit), cwd = worktree)
+        val patch = git.run(listOf("diff", baseCommit), cwd = worktree)
         if (!patch.ok) {
             // 这两条 null 分支原先**一行都不打** —— 「没有交付物」与「收割失败」在外部
             // 完全同形，一次 16 分钟的真实执行因此无法归因（幕 4 实测踩到）。
             note(
                 logFile,
-                "[sandbox] harvest $taskId: git diff HEAD failed exit=" + patch.exitCode +
+                "[sandbox] harvest $taskId: git diff $baseCommit failed exit=" + patch.exitCode +
                     " stderr=" + patch.stderr.takeLast(300).replace("\n", " "),
             )
             return null // 没有可 diff 的基线 = 没有交付物，如实为空（不是失败）。
