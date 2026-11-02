@@ -51,3 +51,24 @@
 - 天然对照组：旧帧 `chat-group-info`（夹具无 virtualAgents）无 agent 行 ⇒ 「无声明 ⇒ 无行」方向已由既有帧钉住；渲染侧反向验证以两帧对照承载。
 - 登记：`componentSpecs.previews`（GroupInfoDialog 组件）+ spec 重投影（生成计数 +1 spacing/slotSites）；设计四门绿（specDrift/previewPairing/dupFrame/stateSlot）。
 - 参考图重录：`updateDebugScreenshotTest`（v2 卡片族因产物 intent 行 UI 变化一并重录，属包⑤的预期视觉变化）。
+
+## 8. 包⑧ 最终阶段验收读数
+
+- **七模块串行全量**（隔离 worktree `midterm-verify` @ `60661390`，`--rerun-tasks` 74 tasks）：
+  第一轮红 1（`pairFrameClaimingSomeoneElsesKeyIsRejected` 5s 超时，单跑恒绿）→ 预算提到 30s（`bd0ea1bd`）；
+  第二轮红 2（`aMisaddressedChannelFrameGetsAnHonestNoExecutorBack` / `agentSessionsAndEventsArePersistedAcrossRestart`）与
+  第三轮各轮换一条 —— **既有 ：app 轮换债**（出自 M7-T2 `69e13c61` 等本轮之前的提交；两轮改面不含 agent 会话注册表与通道回执），
+  非本轮引入。两条各 30s 预算下仍轮换 ⇒ 不是等待窗口，是**真竞态**（`RelayControllerAgentComponent` 的注册表/回执并发形状），
+  按纪律不放宽断言，专项调查留待下一轮（含此前已知的 NudgeNotificationTest 族）。
+- **:testStabilityGate 3 轮**（core+app）：R1 红 `crossPeerSameSessionIdIsolationAndDeduplication`、R2 绿、R3 红
+  `aMisaddressedChannelFrameGetsAnHonestNoExecutorBack` —— 与上同族，记账为已知债升级（新增 2 条轮换成员），不阻塞收口。
+- **各包本地全绿读数**（交付时实测）：③授权 `:composeApp:jvmTest :desktopApp:test` 绿 + 26 例新增；
+  ②S4-4 `:agentNode:test` 331 例 0 失败；⑤直投 `:composeApp:jvmTest :desktopApp:test` 绿 + 27 例新增；
+  ④Supervisor `:agentNode:test :desktopApp:test` 绿 + 26 例新增（`--rerun-tasks` 复跑过）；unused-imports / 痕迹 / cjk / stale / env 门禁各交付点全绿。
+- **遗留**：OBS-2（锁屏 FGS 崩溃）需真机复现+logcat 定位，本 goal 内未动；:app 轮换族专项（见上）。
+
+## 9. 结论
+
+四包交付物（③分级授权 / ⑤P2P 直投 / ④Supervisor / ⑥反哺 + ②S4-4 铺路 + ①D-NEW 核对 + OBS-1 定性）全部落地并各自带红→绿验证；
+最终串行全量的红均为**既有轮换债**（非本轮改动面），已记账升级不掩盖。goal-2c6d273c 的可判定项全部达成；
+OBS-2 与 :app 轮换专项是下轮的入口。
