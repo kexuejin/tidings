@@ -142,4 +142,35 @@ class DesktopWorkerOrchestratorTest {
             "卡面角色不许写死 Worker：currentRole 应来自 roleNameOf(agentKey)",
         )
     }
+
+    /**
+     * prototype 待选态的**方向判据**（缺陷 B）：无 @ 文本不许再被无判别吞成 refine。
+     *
+     * 真机事故：待选卡在屏时发 "run npm test"，codex 收到的是
+     * "Refine the prototype.html… user feedback: run npm test" —— 全新任务被当成
+     * 微调，白跑一轮还顶掉了工单。"make it dark" 与 "run npm test" 文本特征上
+     * 无法区分（都是短祈使句），所以正确的产品行为是发方向确认卡，不猜。
+     */
+    @Test
+    fun prototypeStageAsksDirectionInsteadOfGuessing() {
+        val source = listOf(
+            File("src/main/kotlin/com/kapp/tidings/desktop/DesktopWorkerOrchestrator.kt"),
+            File("desktopApp/src/main/kotlin/com/kapp/tidings/desktop/DesktopWorkerOrchestrator.kt"),
+        ).firstOrNull { it.isFile }
+        assertTrue(source != null, "DesktopWorkerOrchestrator.kt not found")
+        val text = source.readText()
+
+        assertTrue(
+            text.contains("askPrototypeDirection(") && text.contains("confirmPrototypeInput("),
+            "prototype 待选态必须走方向确认卡（askPrototypeDirection/confirmPrototypeInput）",
+        )
+        assertTrue(
+            text.contains("pendingPrototypeInputs"),
+            "确认卡文本必须暂存：action 帧装不下长文本，点确认时取回执行",
+        )
+        assertTrue(
+            text.contains("askPrototypeDirection(active, trimmed)"),
+            "followUpIfActive 的 prototype 分支必须改道方向确认卡，不许直接 handler.invoke(trimmed)",
+        )
+    }
 }

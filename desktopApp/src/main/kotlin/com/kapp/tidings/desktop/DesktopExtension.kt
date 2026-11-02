@@ -1074,6 +1074,16 @@ internal class DesktopExtension(
                     }
                 } else if (actionId == "approve-prototype") {
                     workerOrchestrator?.approvePrototypeByCard(cardId)
+                } else if (actionId == "refine-pending" || actionId == "dispatch-pending") {
+                    // 方向确认卡（缺陷 B 的判据）：prototype 待选期来的无 @ 文本被暂存，
+                    // 由用户在这里裁决去向。落空（pending 已被消费/工单已结束）要留痕，
+                    // 否则「点了没反应」又要被当成缺陷重查一遍。
+                    val confirmed = workerOrchestrator?.confirmPrototypeInput(cardId, actionId == "dispatch-pending") == true
+                    if (confirmed) {
+                        println("[RELAY-INVOKE] direction-ask resolved: $actionId by $decidedBy (card $cardId)")
+                    } else {
+                        println("[RELAY-INVOKE] direction-ask had nothing pending (card $cardId)")
+                    }
                 } else if (workerOrchestrator?.followUpByCard(cardId, actionId) == true) {
                     println("[RELAY-INVOKE] card action \"$actionId\" consumed as follow-up by $decidedBy")
                 } else {

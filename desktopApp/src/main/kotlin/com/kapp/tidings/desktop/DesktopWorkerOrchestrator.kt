@@ -20,6 +20,10 @@ import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.CoroutineStart
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.launch
+import kotlinx.serialization.json.JsonPrimitive
+import kotlinx.serialization.json.buildJsonArray
+import kotlinx.serialization.json.buildJsonObject
+import kotlinx.serialization.json.putJsonObject
 
 /**
  * Host-side worker and ticket orchestrator implementing DSH core principles:
@@ -111,6 +115,7 @@ internal class DesktopWorkerOrchestrator(
         for (active in targets) {
             active.stage = "aborted"
             activeTickets.remove(active.ticketId)
+            pendingPrototypeInputs.remove(active.ticketId)
             val abortedJson = ticketCardJson(
                 ticketId = active.ticketId,
                 rev = active.rev.incrementAndGet(),
@@ -129,6 +134,13 @@ internal class DesktopWorkerOrchestrator(
 
     /**
      * 群内活跃工单的追问与微调唤醒（测试方案阶段 A 原型确认与追问唤醒）。
+     *
+     * **方向判据**（缺陷 B 的产品裁决）：两种等待态的语义不同 ——
+     * - `blocked`：工单挂起等输入，任何无 @ 文本都按唤醒直通（现状保留）；
+     * - `prototype`：待选卡已交付，这时来的无 @ 文本可能是微调（"make it dark"）
+     *   也可能是全新任务（"run npm test"）—— 文本特征上无法区分（真机两者都
+     *   是短祈使句），猜错的代价是一次 5 分钟的白跑加一个被顶掉的工单。
+     *   所以不猜：发**方向确认卡**，把决定权还给用户，见 [askPrototypeDirection]。
      */
     internal fun followUpIfActive(convId: String, text: String): Boolean {
         val active = activeTicketsForConv(convId).firstOrNull { it.stage in setOf("blocked", "prototype") } ?: return false
@@ -136,19 +148,105 @@ internal class DesktopWorkerOrchestrator(
         val trimmed = stripMentions(text)
         if (trimmed.isBlank()) return false
         scope.launch {
-            active.stage = "working"
-            publishTicketCard(
-                groupId = active.groupId,
-                ticketId = active.ticketId,
-                rev = active.rev.incrementAndGet(),
-                state = "working",
-                title = active.title,
-                banner = "Resumed: processing follow-up",
-                percent = 50,
-                roleName = active.role,
-                agentId = active.agentKey,
+            if (active.stage == "prototype") {
+                askPrototypeDirection(active, trimmed)
+            } else {
+                active.stage = "working"
+                publishTicketCard(
+                    groupId = active.groupId,
+                    ticketId = active.ticketId,
+                    rev = active.rev.incrementAndGet(),
+                    state = "working",
+                    title = active.title,
+                    banner = "Resumed: processing follow-up",
+                    percent = 50,
+                    roleName = active.role,
+                    agentId = active.agentKey,
+                )
+                handler.invoke(trimmed)
+            }
+        }
+        return true
+    }
+
+    /** 待用户裁决去向的 prototype 输入（键 = ticketId）。见 [followUpIfActive] 的判据。 */
+    private data class PendingPrototypeInput(val text: String)
+
+    private val pendingPrototypeInputs = ConcurrentHashMap<String, PendingPrototypeInput>()
+
+    /**
+     * 发「这是调整原型，还是新任务？」的确认卡。
+     *
+     * 独立 cardId（`chain-<ticketId>-ask`），不顶掉屏上的待选卡；文本暂存在
+     * [pendingPrototypeInputs]，action 帧只有 actionId 装不下长文本，点确认时
+     * 再取回执行（[confirmPrototypeInput]）。
+     */
+    private suspend fun askPrototypeDirection(active: ActiveTicket, text: String) {
+        pendingPrototypeInputs[active.ticketId] = PendingPrototypeInput(text)
+        val excerpt = text.take(80) + if (text.length > 80) "…" else ""
+        // ChainProgress 没有动作字段（卡上的 actions 一直是手工构建的，如 diff-review
+        // 冲突卡），方向确认卡同款：独立 cardId（`chain-<ticketId>-ask`），不顶掉屏上的
+        // 待选卡。两个动作各接一个明确去向 —— options 是「回给 agent 的预设文本」，
+        // 装不下「去向」语义，所以这里必须走 action 帧。
+        val askJson = buildJsonObject {
+            put("cardId", JsonPrimitive("chain-" + active.ticketId + "-ask"))
+            put("rev", JsonPrimitive(1))
+            put("type", JsonPrimitive("direction-ask"))
+            put("state", JsonPrimitive("blocked"))
+            put("title", JsonPrimitive(active.title))
+            put("progress", JsonPrimitive(60))
+            putJsonObject("banner") {
+                put("text", JsonPrimitive("「" + excerpt + "」— 是调整这个原型，还是一个新任务？"))
+                put("tone", JsonPrimitive("info"))
+            }
+            put("actions", buildJsonArray {
+                add(buildJsonObject {
+                    put("actionId", JsonPrimitive("refine-pending"))
+                    put("label", JsonPrimitive("作为调整发送"))
+                })
+                add(buildJsonObject {
+                    put("actionId", JsonPrimitive("dispatch-pending"))
+                    put("label", JsonPrimitive("派为新任务"))
+                })
+            })
+        }
+        publishCardJson(active.groupId, askJson.toString(), active.agentKey)
+    }
+
+    /**
+     * 方向确认卡上的按钮落地。`cardId` 形如 `chain-<ticketId>-ask`。
+     *
+     * - 派为新任务：旧原型工单就地收尾（等选布局的等待已无意义），文本走完整派单
+     *   路由（是否原型意图由 [isPrototypeIntent] 重新判，不继承旧工单）；
+     * - 作为调整：回到原 refine 路径（working 卡 + onFollowUp）。
+     */
+    internal fun confirmPrototypeInput(cardId: String, asNewTask: Boolean): Boolean {
+        val tid = cardId.removePrefix("chain-").removeSuffix("-ask")
+        val pending = pendingPrototypeInputs.remove(tid) ?: return false
+        val active = activeTickets[tid] ?: return false
+        if (asNewTask) {
+            active.stage = "superseded"
+            activeTickets.remove(tid)
+            active.done.complete(
+                TicketOutcome("aborted", null, "superseded: input was dispatched as a new task", null),
             )
-            handler.invoke(trimmed)
+            dispatchSingleWorker(active.convId, active.groupId, pending.text, active.agentKey)
+        } else {
+            active.stage = "working"
+            scope.launch {
+                publishTicketCard(
+                    groupId = active.groupId,
+                    ticketId = active.ticketId,
+                    rev = active.rev.incrementAndGet(),
+                    state = "working",
+                    title = active.title,
+                    banner = "Resumed: processing follow-up",
+                    percent = 50,
+                    roleName = active.role,
+                    agentId = active.agentKey,
+                )
+                active.onFollowUp?.invoke(pending.text)
+            }
         }
         return true
     }
