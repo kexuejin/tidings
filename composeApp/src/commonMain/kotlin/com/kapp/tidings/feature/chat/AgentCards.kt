@@ -65,7 +65,6 @@ import com.kapp.tidings.generated.resources.card_action_abort
 import com.kapp.tidings.generated.resources.card_action_merge_patch
 import com.kapp.tidings.generated.resources.card_pending_confirm
 import com.kapp.tidings.generated.resources.card_progress_label
-import com.kapp.tidings.generated.resources.card_rev_tag
 import com.kapp.tidings.generated.resources.card_status_aborted
 import com.kapp.tidings.generated.resources.card_status_blocked
 import com.kapp.tidings.generated.resources.card_status_done

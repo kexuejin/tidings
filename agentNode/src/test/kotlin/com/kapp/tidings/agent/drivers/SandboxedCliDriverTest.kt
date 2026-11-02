@@ -213,18 +213,19 @@ class SandboxedCliDriverTest {
                 driver.executeTask(session.sessionId, "long task") { queue.put(it) }
             }
             // 等受理卡出现（它必须在任务真正开跑时就发出来）。
-            val deadline = System.currentTimeMillis() + 20_000
             var sawWorking = false
-            while (System.currentTimeMillis() < deadline && !sawWorking) {
-                val ev = queue.poll(200, java.util.concurrent.TimeUnit.MILLISECONDS) ?: continue
+            repeat(100) {
+                if (sawWorking) return@repeat
+                val ev = queue.poll(200, java.util.concurrent.TimeUnit.MILLISECONDS)
                 if (ev is DriverEvent.Card && ev.cardJson.contains("\"state\":\"working\"")) sawWorking = true
             }
             assertTrue(sawWorking, "任务开始就必须有受理卡，否则执行期间用户看到的是空白")
             // 受理卡比沙箱登记更早（卡先发、worktree 后建），要等真的跑起来再中止 ——
             // 否则测的是「空跑一次 abortAll」，什么也没证明。
-            val runDeadline = System.currentTimeMillis() + 20_000
-            while (System.currentTimeMillis() < runDeadline && driver.runningCount() == 0) {
+            var waitRounds = 0
+            while (waitRounds < 400 && driver.runningCount() == 0) {
                 Thread.sleep(50)
+                waitRounds++
             }
             assertEquals(1, driver.runningCount(), "沙箱任务已登记在跑")
             assertEquals(1, driver.abortAll(), "一个在跑的沙箱任务被摘掉")

@@ -1635,7 +1635,6 @@
     <string name="group_auth_team_members">%1$d members</string>
     <string name="group_auth_badge_self">Declared here</string>
     <string name="group_auth_entry">Authorization</string>
-    <string name="card_rev_tag">Rev %1$d</string>
 
     <string name="chat_caps_label">Capabilities: %1$s</string>
 

@@ -1811,7 +1811,6 @@
     <string name="group_auth_team_members">%1$d 名组员</string>
     <string name="group_auth_badge_self">本机声明</string>
     <string name="group_auth_entry">授权管理</string>
-    <string name="card_rev_tag">第 %1$d 版</string>
 
     <string name="chat_caps_label">支持特性：%1$s</string>
 
