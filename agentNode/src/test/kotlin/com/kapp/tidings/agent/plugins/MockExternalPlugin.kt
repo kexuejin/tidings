@@ -46,6 +46,17 @@ class MockExternalPlugin(
         Default.echoScript(prompt)
     }
 
+    /**
+     * 接单后**停在执行中途**的时长（毫秒）；0 = 现行为不变（默认）。
+     *
+     * 为什么要有它：中途死亡验收需要一个「接了单但迟迟不给完」的现场 —— 插件接单后
+     * 停在半途（不回任何事件），宿主的看门狗/中止序在此期间真实触发。挂住期间
+     * `received` 已记下 task/execute（接单事实可断言），事件流一个字节都没回
+     * （「没来得及完成」可断言）；被 [stop] 拔掉时半途的应答随服务器一起消失。
+     * 值可以经环境变量注入（夹具复用不改编译单元），负值/乱值一律按 0 读。
+     */
+    var hangMs: Long = Default.hangMsFromEnv()
+
     /** task/execute 的 HTTP 状态码（默认 200；模拟插件内部错误时改它）。 */
     var executeStatus: Int = 200
 
@@ -116,7 +127,12 @@ class MockExternalPlugin(
             when {
                 path == "/healthz" -> reply(exchange, 200, "{\"ok\":true}")
                 path == "/session/open" -> reply(exchange, 200, sessionOpenReply(obj))
-                path == "/task/execute" -> replyStreaming(exchange, executeStatus, executeScript(sessionIdOf(obj), promptOf(obj)))
+                path == "/task/execute" -> {
+                    // 挂住发生在「接单已记录、事件流未回」的窗口内 —— 正是中途死亡验收
+                    // 要抓的现场。stop() 关服务器会让这次应答半途夭折（客户端收到断连）。
+                    hangMs.takeIf { it > 0 }?.let { Thread.sleep(it) }
+                    replyStreaming(exchange, executeStatus, executeScript(sessionIdOf(obj), promptOf(obj)))
+                }
                 path == "/task/action" -> reply(exchange, 200, "{\"ok\":true}")
                 path == "/task/queryProgress" -> reply(exchange, 200, queryProgressReply ?: "null")
                 else -> reply(exchange, 404, "{\"error\":\"not-found\"}")
@@ -166,6 +182,19 @@ class MockExternalPlugin(
 
     /** 夹具共享的默认值（清单与回声脚本 —— 与 examples 的 echo 插件逐键同形）。 */
     object Default {
+
+        /**
+         * 挂住时长的 env 来源（[MockExternalPlugin.hangMs] 的默认值）。认不出的值一律
+         * 回落 0（现行为不变）—— 一个配置笔误不许把夹具变成永远挂死。
+         */
+        fun hangMsFromEnv(env: Map<String, String> = System.getenv()): Long {
+            val raw = env[HANG_ENV]?.trim()?.toLongOrNull()
+            return raw?.takeIf { it > 0 } ?: 0L
+        }
+
+        /** 挂住时长的显式 env 名（毫秒）。 */
+        const val HANG_ENV = "TIDINGS_MOCK_PLUGIN_HANG_MS"
+
         fun echoTeamManifest(): JsonObject = buildJsonObject {
             put("pluginId", "echo-team")
             put("name", "Echo Team")

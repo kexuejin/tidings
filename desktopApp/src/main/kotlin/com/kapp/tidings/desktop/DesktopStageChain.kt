@@ -47,12 +47,14 @@ internal object DesktopStageChain {
         plane: () -> ControlPlane?,
         controller: RelayController,
         scope: CoroutineScope,
+        /** L1 会话免审的查表器（桌面装配注入）：null = 没有台账，照常逐次审批。 */
+        sessionExemptOf: ((sessionId: String) -> Boolean)? = null,
     ): AgentChainDispatcher = AgentChainDispatcher { groupId, repoPath, title, stages ->
         val host = plane() ?: return@AgentChainDispatcher null
         val repo = repoPath?.takeIf { it.isNotBlank() } ?: return@AgentChainDispatcher null
         if (!isGitRepo(repo)) return@AgentChainDispatcher null
         val chainId = "c" + System.currentTimeMillis().toString(36)
-        scope.launch { runCatching { runChain(host, controller, chainId, groupId, repo, title, stages) }
+        scope.launch { runCatching { runChain(host, controller, chainId, groupId, repo, title, stages, sessionExemptOf) }
             .onFailure { t -> println("[CHAIN] " + chainId + " aborted: " + (t.message ?: t::class.simpleName)) } }
         chainId
     }
@@ -65,6 +67,7 @@ internal object DesktopStageChain {
         repo: String,
         title: String,
         stages: List<ChainStage>,
+        sessionExemptOf: ((sessionId: String) -> Boolean)? = null,
     ) {
         var rev = 0
         val statuses = stages.map { it.role to "pending" }.toMutableList()
@@ -102,6 +105,19 @@ internal object DesktopStageChain {
                 statuses.clear()
                 statuses.addAll(progress.stages)
                 publish(progress.state, progress.banner, progress.currentRole, progress.percent)
+                // L1 会话免审的自动验讫（§八.2）：验收棒判 review_ready 且本会话免审时，
+                // 逐棒检查低危判据 —— 全部低危（单测/文档/日志类）就自动合流，不再逐次
+                // 弹审批。高危词一律不走免审（LowRiskReviewer 黑名单赢），判定是纯函数、
+                // 两侧测试各钉一份。任何一棒不是低危 ⇒ 照常等机主 1-Click（fail-closed）。
+                if (progress.state == "review_ready" && sessionExemptOf?.invoke(chainId) == true) {
+                    val allLow = stages.all { stage ->
+                        LowRiskReviewer.isLowRisk(riskLevel = null, summaryOrCommand = stage.instruction + " " + stage.role)
+                    }
+                    if (allLow) {
+                        println("[CHAIN] " + chainId + " session exempt: low-risk stages auto-merged by reviewer")
+                        publish("merged", "Session exempt: low-risk chain auto-merged by reviewer")
+                    }
+                }
             },
         )
 

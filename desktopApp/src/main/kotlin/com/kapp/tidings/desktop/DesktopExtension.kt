@@ -33,6 +33,7 @@ import kotlinx.coroutines.launch
 import kotlinx.coroutines.runBlocking
 import com.kapp.tidings.core.protocol.AgentSenderId
 import kotlinx.serialization.json.JsonPrimitive
+import kotlinx.serialization.json.longOrNull
 import kotlinx.serialization.json.contentOrNull
 
 /**
@@ -111,6 +112,17 @@ internal class DesktopExtension(
     private var pluginHost: com.kapp.tidings.agent.plugins.PluginHost? = null
 
     private var workerOrchestrator: DesktopWorkerOrchestrator? = null
+
+    /**
+     * L1 会话免审的**宿主侧台账**（§4.2 分级免审；落盘 `session-exempts.json`）。
+     *
+     * 写入方：手机卡片上的「本会话免审」（`session-exempt|<cardId>` 动作，见
+     * [onHostCardAction] 的免审分支）。读取方：后续低危动作的自动验讫（[LowRiskReviewer]
+     * 判低危 + 本表命中 ⇒ 不再逐次弹审批）。键是 (会话键, agentKey)，带过期租约 ——
+     * 会话粒度不是无限期。与 [toolApprovalStore] 分表的理由：那张表按 tool 名跨会话，
+     * 这张按会话粒度带租约，撤一口不相干。
+     */
+    private var sessionExemptLedger: SessionExemptLedger? = null
 
     /**
      * 「这一轮只有思考、没有正文」时的**替代正文**。
@@ -465,6 +477,12 @@ internal class DesktopExtension(
         )
         tagStore.load()
         grantStore = grants
+        // L1 会话免审台账：与授权三桥同生命周期（attach 建、detach 清）。文件名不与
+        // 既有台账冲突；读写锁与落盘在 store 自己那一层，这里只装配。
+        val sessionExempts = SessionExemptLedger(
+            java.io.File(controller.dataDirectory, "session-exempts.json"),
+        )
+        sessionExemptLedger = sessionExempts
         val execPolicies = AgentExecPolicyStore(
             java.io.File(controller.dataDirectory, "agent-exec-policies.json"),
         )
@@ -560,7 +578,14 @@ internal class DesktopExtension(
             // 责任链执行体（`POST /v1/agent/chain`）：接上 CLI 沙箱、宿主仓 git 与群卡片广播。
             // 在 `created` 之后装配 —— 执行体要用 `created.executeCliTask`（同一个实例，
             // 否则链跑的会话与面板看到的台账是两份）。
-            created.chainDispatcher = DesktopStageChain.dispatcher({ createdPlane }, controller, scope)
+            created.chainDispatcher = DesktopStageChain.dispatcher(
+                { createdPlane },
+                controller,
+                scope,
+                // L1 会话免审（§4.2）查表器：链验收棒 review_ready 时按会话键查免审台账，
+                // 命中且各棒低危 ⇒ Reviewer 自动合流（DesktopStageChain 内只信这条回路的结论）。
+                sessionExemptOf = { sid -> sessionExempts.isExempt(sid, agentKey = null, now = System.currentTimeMillis()) },
+            )
             created.start()
             inboundJob = created.observeInbound(scope)
             plane = created
@@ -947,7 +972,46 @@ internal class DesktopExtension(
                 // 上游那一跳传进来的 sessionId 恒为 null。从前判据写成 `sessionId != null`，
                 // 于是合并分支在真机上永远进不去（实测卡面提示已处理，宿主仓零提交）。
                 // 现在 null 就按卡片回台账里找会话。
-                if (actionId == "merge-patch") {
+                // L3 高危租约屏障（§九.2）：卡 payload 带 cmd 且词表判高危的动作，
+                // 必须在签发租约（expiresAt = 签发 + TTL）内被机主点掉。过期才到的审批
+                // fail-closed 拒绝并如实翻面 —— 「晚来的同意」不能变成放行。没有 expiresAt
+                // 的高危卡同样拒绝（签发方没给租约 = 没有可放行的时限证据）。
+                var highRiskBlocked = false
+                runCatching {
+                    val cmdRow = controller.state.value.messages.values
+                        .asSequence()
+                        .flatten()
+                        .lastOrNull { row ->
+                            (row.renderCard?.get("cardId") as? JsonPrimitive)?.contentOrNull == cardId
+                        }
+                    val cardJson = cmdRow?.renderCard
+                    val cmd = (cardJson?.get("cmd") as? JsonPrimitive)?.contentOrNull
+                    if (cmd != null && HighRiskCommands.classify(cmd) == HighRiskCommands.Verdict.HIGH_RISK) {
+                        val expiresAt = (cardJson?.get("expiresAt") as? JsonPrimitive)?.longOrNull
+                        // 租约口径：签发时刻 = expiresAt − TTL（卡上只带截止时刻这一个事实）。
+                        val verdict = if (expiresAt == null) {
+                            LeaseBarrier.Verdict.EXPIRED
+                        } else {
+                            LeaseBarrier.evaluate(
+                                LeaseToken(
+                                    leaseId = cardId,
+                                    command = cmd,
+                                    issuedAtMs = expiresAt - LeaseBarrier.DEFAULT_TTL_MS,
+                                    ttlMs = LeaseBarrier.DEFAULT_TTL_MS,
+                                ),
+                                arrivedAtMs = System.currentTimeMillis(),
+                            )
+                        }
+                        if (verdict != LeaseBarrier.Verdict.GRANTED) {
+                            println("[RELAY-INVOKE] high-risk lease " + verdict + " (card " + cardId + ", cmd masked)")
+                            flipStaleChainCard(cardId, agentId)
+                            highRiskBlocked = true
+                        }
+                    }
+                }
+                if (highRiskBlocked) {
+                    // 闸住的动作不再进任何后续分支：没有可放行的租约，就一个分支都不给。
+                } else if (actionId == "merge-patch") {
                     // 三条判据，从「谁最清楚」排到「谁最兜底」：
                     // 1. 编排器的登记簿 —— 发卡的那一刻就知道 patch 在哪（工单卡只此一条有效）；
                     // 2. 动作帧带的会话（插件转发路径，上游常常给 null）；
@@ -1084,6 +1148,35 @@ internal class DesktopExtension(
                             // 编排器也不认得这张卡（重启丢态/早已收尾）时，把滞留卡如实
                             // 翻面；工单还活着就只留日志，真实状态卡马上就到。
                             flipStaleChainCard(cardId, agentId)
+                        }
+                    }
+                } else if (com.kapp.tidings.feature.chat.isSessionExemptAction(actionId)) {
+                    // L1 会话免审（§4.2 / §八.2）：手机卡上勾选「本会话免审」→ 宿主台账落一条
+                    // （会话粒度 + 过期租约）→ 此后该会话的低危动作由 Reviewer 判据自动验讫，
+                    // 不再逐次弹审批。动作串只有 cardId 一个槽，会话键按 agent 最近会话解析
+                    // （动作帧 op=action 不带 sessionId，与 merge-patch 反查同一条兜底纪律）。
+                    val cardId0 = com.kapp.tidings.feature.chat.sessionExemptCardIdOf(actionId) ?: cardId
+                    val agentKey0 = created.latestSessionForAgent(agentId)?.let { it.agentId ?: it.agentKind } ?: agentId
+                    val sessionKey0 = created.latestSessionForAgent(agentId)?.sessionId
+                    if (sessionKey0.isNullOrBlank()) {
+                        // 没有会话可挂：免审无处落，如实翻面并记日志 —— 不编一个键把
+                        // 「不知道哪个会话」记成「全部会话」（那等于全放行）。
+                        println("[RELAY-INVOKE] session-exempt has no session for agent " + agentId + " (card " + cardId0 + ")")
+                        flipStaleChainCard(cardId0, agentId)
+                    } else {
+                        val ok = sessionExemptLedger?.grant(
+                            sessionKey = sessionKey0,
+                            agentKey = agentKey0,
+                            grantedBy = decidedBy,
+                            at = System.currentTimeMillis(),
+                        ) == true
+                        if (ok) {
+                            println(
+                                "[RELAY-INVOKE] session exempt granted by " + decidedBy +
+                                    " (card " + cardId0 + ", session " + sessionKey0 + ", agent " + agentKey0 + ")",
+                            )
+                        } else {
+                            println("[RELAY-INVOKE] session-exempt rejected empty keys (card " + cardId0 + ")")
                         }
                     }
                 } else if (actionId == "start-task") {
@@ -1253,6 +1346,7 @@ internal class DesktopExtension(
 
     private fun detach() {
         workerOrchestrator = null
+        sessionExemptLedger = null
         controller.onLocalSessionPageRequest = null
         controller.onAgentPrompt = null
         controller.onAgentAbort = null

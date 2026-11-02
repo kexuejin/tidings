@@ -739,6 +739,44 @@ fun feedbackTextOf(actionId: String): String? =
         .takeIf { actionId != it }
 
 /**
+ * 会话免审动作与所属卡的**单槽编码**：`session-exempt|<cardId>`（reject-revision| 同款前缀式）。
+ *
+ * 为什么把 cardId 编进动作串：免审是**会话粒度**的决定，但动作通路（[CardActionUi] 之下
+ * 只有 actionId 一个字符串槽）与域层 `handleCardAction` 的签名只认 actionId —— 宿主必须
+ * 能凭动作帧找回「免审的是哪张卡」，才能定位会话、把原卡翻成「已免审」。编码侧是纯函数、
+ * 解码侧在宿主（桌面端同名镜像），两侧格式由各自的测试钉住 —— 改一侧必须同步另一侧。
+ */
+fun sessionExemptActionIdOf(cardId: String): String {
+    val cleaned = cardId.trim()
+    if (cleaned.isEmpty()) return SYSTEM_ACTION_SESSION_EXEMPT
+    return "$SYSTEM_ACTION_SESSION_EXEMPT|" + cleaned
+}
+
+/** 见 [sessionExemptActionIdOf]：非免审前缀或空 cardId 返回 null（维持既有路由）。 */
+fun sessionExemptCardIdOf(actionId: String): String? =
+    actionId.takeIf { it.startsWith("$SYSTEM_ACTION_SESSION_EXEMPT|") }
+        ?.removePrefix("$SYSTEM_ACTION_SESSION_EXEMPT|")
+        ?.trim()
+        ?.takeIf { it.isNotEmpty() }
+
+/** 该动作串是不是会话免审动作（前缀判定，不做解码）。 */
+fun isSessionExemptAction(actionId: String): Boolean =
+    actionId.startsWith("$SYSTEM_ACTION_SESSION_EXEMPT|")
+
+/**
+ * 这张卡的会话免审**此刻**是否已生效（纯函数）：
+ * 宿主回放的 subActions 带 `style=active` 是已生效的事实；本机动作已在路上
+ * （pendingActions 命中 `cardId|<免审动作串>`）算进行中 —— 两种都按「已免审」渲染，
+ * 开启态文案走 `card_session_exempt_active`。判定只吃入参，测试用合成输入钉死。
+ */
+fun isSessionExemptActive(card: AgentCardUi, pendingActions: Set<String>): Boolean {
+    val offered = card.subActions.firstOrNull { it.actionId == SYSTEM_ACTION_SESSION_EXEMPT }
+        ?: return false
+    if (offered.style == "active") return true
+    return card.cardId + "|" + sessionExemptActionIdOf(card.cardId) in pendingActions
+}
+
+/**
  * Hunk 行的解析结果：行号（上下文行从 hunk 头 `@@ -a,b +c,d @@` 推演）、
  * 增删极性。解析不了行号（hunk 头缺失或行序被插件截乱）⇒ [number] = null，
  * 行照样渲染 —— 少一个 gutter 数字比整段不画诚实。
@@ -983,7 +1021,9 @@ fun AgentCardBubble(
                 }
             }
             // 会话免审行：宿主在 subActions 里给了这条语义才画（数据到不了的字段不画）。
-            CardSessionExemptRow(card)
+            // 点击把 SYSTEM_ACTION_SESSION_EXEMPT|<cardId> 发进同一个动作通路；
+            // 过期/无资格/无通路都不给点（与按钮组同一套纪律）。
+            CardSessionExemptRow(card, pendingActions, plan.actionsEnabled, onAction)
         }
     }
 }
@@ -1396,14 +1436,26 @@ private fun RevisionChip(labelRes: StringResource, enabled: Boolean, onClick: (l
  * 会话免审的一行开关（升级计划 §4.2 分级免审的 UI 侧；L1 会话免审）。
  *
  * 它是 subAction 语义的落点：宿主没给这条 subAction 的卡不画（数据到不了的字段
- * 不画，与 ButtonGroup 的 sub-row 同一条纪律）。当前会话已免审时如实换文案 ——
- * 「免审进行中」是事实不是动作，再画可点开关就是骗点击。
+ * 不画，与 ButtonGroup 的 sub-row 同一条纪律）。未生效时点击把免审动作发进同一个
+ * 动作通路（单槽编码见 [sessionExemptActionIdOf]）；已生效后换文案并摘掉点击 ——
+ * 「已免审」是事实不是动作，再画可点开关就是骗点击。
  */
 @Composable
-private fun CardSessionExemptRow(card: AgentCardUi, modifier: Modifier = Modifier) {
-    val exemptActive = card.subActions.any { it.actionId == SYSTEM_ACTION_SESSION_EXEMPT && it.style == "active" }
+private fun CardSessionExemptRow(
+    card: AgentCardUi,
+    pendingActions: Set<String>,
+    enabled: Boolean,
+    onAction: ((card: AgentCardUi, actionId: String) -> Unit)?,
+    modifier: Modifier = Modifier,
+) {
+    // 判定走纯函数（[isSessionExemptActive]）：宿主回放 style=active 与本机动作在途都算
+    // 已生效 —— 开启态是事实不是动作，可点开关就此消失，只留一行状态。
+    val exemptActive = isSessionExemptActive(card, pendingActions)
     val exemptOffered = card.subActions.any { it.actionId == SYSTEM_ACTION_SESSION_EXEMPT }
     if (!exemptOffered) return
+    // 动作通路与资格缺一不可：没有通路（onAction == null）或当前无资格（ReadOnly，
+    // renderPlan 已把按钮组整块收掉）时只画状态行 —— 按下去没反应的开关比没有更糟。
+    val dispatchable = onAction != null && enabled && !exemptActive
     Text(
         text = stringResource(
             if (exemptActive) Res.string.card_session_exempt_active else Res.string.card_session_exempt,
@@ -1412,6 +1464,7 @@ private fun CardSessionExemptRow(card: AgentCardUi, modifier: Modifier = Modifie
         color = MaterialTheme.colorScheme.onSecondaryContainer,
         modifier = modifier
             .background(MaterialTheme.colorScheme.secondaryContainer, MaterialTheme.shapes.small)
+            .clickable(enabled = dispatchable) { onAction!!(card, sessionExemptActionIdOf(card.cardId)) }
             .padding(horizontal = 12.dp, vertical = 8.dp),
     )
 }
