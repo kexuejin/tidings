@@ -1,7 +1,7 @@
 {
-  "generatedAt": "511d0c0c8aec",
+  "generatedAt": "4d9544e2c58c",
   "note": "逐屏差集棘轮：每个键的差集只许变小。--check 报「新增的值」。",
-  "reason": "squash 合并对账：main 侧 aa6341bc 移除自造药丸（radius4/spacing1 字面量）与分支基线（含该字面量覆盖）两条棘轮独立演进，合并后代码态需重投影基线",
+  "reason": "原型 v2 权威源换代:super-agent 卡片升级(计划书 Phase 0)冻结的新 relay.html 全重排了卡片与若干屏的视觉值;旧基线记于旧原型 sha 511d0c0c,两边不可比。重投影以新原型为准建立新棘轮底,后续只许变小;代码侧未适配的既有屏(15/17/20 字号族等)是历史上已判定的漂移,不是本轮引入。",
   "rowCount": 70,
   "signature": {
     "d-agentdetail|__error__": [
@@ -112,6 +112,7 @@
       "24"
     ],
     "d-chat|radius|code": [
+      "4",
       "6",
       "7",
       "10",
@@ -129,7 +130,6 @@
       "48"
     ],
     "d-chat|spacing|proto": [
-      "1",
       "13",
       "30"
     ],
@@ -285,6 +285,7 @@
       "24"
     ],
     "d-groupcreate|radius|code": [
+      "4",
       "6",
       "7",
       "8",
@@ -315,6 +316,7 @@
       "700"
     ],
     "d-histsearch|radius|code": [
+      "4",
       "6",
       "10",
       "11",
@@ -329,7 +331,6 @@
       "48"
     ],
     "d-histsearch|spacing|proto": [
-      "1",
       "13",
       "15"
     ],
@@ -464,10 +465,12 @@
       "17"
     ],
     "d-resume|font-size|proto": [
+      "10",
       "13"
     ],
     "d-resume|radius|proto": [
       "2",
+      "5",
       "6",
       "8",
       "10",
@@ -479,6 +482,7 @@
     "d-resume|spacing|proto": [
       "1",
       "1.5",
+      "2.5",
       "3",
       "11",
       "13",
@@ -796,7 +800,6 @@
       "22"
     ],
     "m-chat-group|radius|proto": [
-      "4",
       "13",
       "20"
     ],
@@ -808,7 +811,6 @@
       "48"
     ],
     "m-chat-group|spacing|proto": [
-      "1",
       "13",
       "30"
     ],
@@ -826,7 +828,6 @@
       "22"
     ],
     "m-chat-solo|radius|proto": [
-      "4",
       "13",
       "20"
     ],
@@ -838,7 +839,6 @@
       "48"
     ],
     "m-chat-solo|spacing|proto": [
-      "1",
       "13",
       "30"
     ],
@@ -856,7 +856,6 @@
       "22"
     ],
     "m-chat|radius|proto": [
-      "4",
       "13",
       "20"
     ],
@@ -868,7 +867,6 @@
       "48"
     ],
     "m-chat|spacing|proto": [
-      "1",
       "13",
       "30"
     ],
@@ -880,6 +878,7 @@
       "20"
     ],
     "m-folderin|font-size|proto": [
+      "10",
       "13"
     ],
     "m-folderin|radius|code": [
@@ -888,6 +887,7 @@
     ],
     "m-folderin|radius|proto": [
       "2",
+      "5",
       "13"
     ],
     "m-folderin|spacing|code": [
@@ -897,7 +897,9 @@
       "48"
     ],
     "m-folderin|spacing|proto": [
+      "1",
       "1.5",
+      "2.5",
       "7"
     ],
     "m-groupcreate|font-size|code": [
@@ -997,6 +999,7 @@
       "400"
     ],
     "m-histdate|radius|code": [
+      "4",
       "6",
       "10",
       "16",
@@ -1008,6 +1011,7 @@
       "28"
     ],
     "m-histdate|spacing|code": [
+      "1",
       "1.5",
       "4",
       "18",
@@ -1298,6 +1302,7 @@
       "20"
     ],
     "m-screencard|font-size|proto": [
+      "10",
       "13"
     ],
     "m-screencard|radius|code": [
@@ -1307,6 +1312,7 @@
     "m-screencard|radius|proto": [
       "2",
       "4",
+      "5",
       "13"
     ],
     "m-screencard|spacing|code": [
@@ -1317,6 +1323,7 @@
     "m-screencard|spacing|proto": [
       "1",
       "1.5",
+      "2.5",
       "7"
     ],
     "m-sendfolder|font-size|code": [
@@ -1327,6 +1334,7 @@
       "20"
     ],
     "m-sendfolder|font-size|proto": [
+      "10",
       "13"
     ],
     "m-sendfolder|radius|code": [
@@ -1335,6 +1343,7 @@
     ],
     "m-sendfolder|radius|proto": [
       "2",
+      "5",
       "13"
     ],
     "m-sendfolder|spacing|code": [
@@ -1344,7 +1353,9 @@
       "48"
     ],
     "m-sendfolder|spacing|proto": [
+      "1",
       "1.5",
+      "2.5",
       "7"
     ],
     "m-set-appear|font-size|code": [
