@@ -539,3 +539,18 @@ fire-and-forget。两条候选：
 最多 3 轮自愈 + 退单、群绑定确定性落仓 —— 这些能力第一次在真机派单路径上**存在**，
 不再是「只有单测、真机进不去的路」。待真机复验三条：原型派单触发、追问唤醒、
 自愈退单（§9.7.3 的口径缺口由此收口）。
+
+## 12. 缺陷 A/B 修复复跑（次日 11:00-11:18）
+
+新包宿主（工单卡真 agentKey + prototype 方向判据）+ Pixel 6 + e2e-final 群复跑。
+codex 上游仍不可达（确定性失败），本轮验证全部走失败路径 —— 恰好覆盖自愈循环。
+
+1. **方向判据（缺陷 B）**：待选卡在屏时发无 @ `run npm test`，手机出
+   `direction-ask` 确认卡（是调整原型还是新任务，两个 action 按钮），
+   待选卡原位保留 —— 不再被吞成 refine。
+2. **卡片真名（缺陷 A）**：点「派为新任务」，action 帧过 AgentExecAuthorizer
+   （宿主日志 `direction-ask resolved: dispatch-pending`），无 denied 横幅，
+   新 dev 沙箱启动（containment 前导进 codex）；卡面角色显示 Codex。
+3. **自愈循环畅通（观察 C 推翻）**：Heal loop 1/3 卡到手机、round-2/3 沙箱依次创建、
+   3 轮后 `Handed back: exceeded max heal rounds (3)` 退单卡到手机。
+   昨日「working 卡未达手机」判为宿主重启后队列重放洪流的瞬态窗口，非结构性阻塞。
