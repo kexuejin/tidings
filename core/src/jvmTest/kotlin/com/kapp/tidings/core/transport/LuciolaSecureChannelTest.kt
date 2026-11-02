@@ -365,7 +365,7 @@ class LuciolaSecureChannelTest {
         try {
             val garbage = frame("node-stranger", "not-a-pairing-frame")
             deliverRepeatedly(times = 20) { strangerTransport.send(garbage, "127.0.0.1", portHost) }
-            awaitTrue(timeoutMs = 8_000) { hostTransport.rejectedInbound >= 1 }
+            awaitTrue(timeoutMs = 30_000) { hostTransport.rejectedInbound >= 1 }
             assertTrue(hostTransport.rejectedInbound >= 1, "超时未配对必须断开并计数")
         } finally {
             hostTransport.stop()

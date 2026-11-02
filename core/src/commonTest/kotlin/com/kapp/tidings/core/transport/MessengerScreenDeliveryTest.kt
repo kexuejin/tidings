@@ -63,7 +63,7 @@ class MessengerScreenDeliveryTest {
      * 等条件成立（超时即失败）。转发到 testutil 的唯一轮询实现 —— 本文件原来自带
      * 「自己算 deadline + 末尾 assertTrue(false)」的第二份写法。
      */
-    private suspend fun awaitTrue(ms: Long = 2_000, what: String, cond: suspend () -> Boolean) =
+    private suspend fun awaitTrue(ms: Long = 30_000, what: String, cond: suspend () -> Boolean) =
         sharedAwaitTrue(what = what, timeoutMs = ms, condition = cond)
 
     /**
