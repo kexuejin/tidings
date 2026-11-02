@@ -721,7 +721,7 @@ public fun DesktopComposer(
                         val showKeyHints = maxWidth >= ComposerRoomyWidth
                         // 超限时这里说的是「发不出去」，不是「换条路」—— 两件事在手机上是分开说的，
                         // 桌面上也必须分开：hint() 对 Over 返回 null，就是这条判据。
-                        // 产品级语汇裁决（2026-11-01）：局域网直连是常态，常态不提示 ——
+                        // 产品级语汇裁决（ADR-022）：局域网直连是常态，常态不提示 ——
                         // UDP 档只印草稿大小；改走 TCP（例外路径）才带路由说明；超限红字。
                         val routeHint = mode.hint()
                         Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.fillMaxWidth()) {
@@ -900,7 +900,7 @@ public fun EmojiPanel(onPick: (String) -> Unit) {
  * 返回 null 不是「还没算出来」，而是一个判据：调用点看到 null 就该说
  * 「超出单条上限（%d 字节），请分两条发。」，而不是继续说路线。
  *
- * 2026-11-01 产品级语汇裁决：UDP（局域网直连）是常态、不再单独成句 ——
+ * 产品级语汇裁决（ADR-022）：UDP（局域网直连）是常态、不再单独成句 ——
  * 常态提示只由调用点用 [Res.string.desktop_composer_draft_short] 印草稿大小；
  * 这里只剩 TCP（例外路径）与 Over（发不出去）两个「值得说话」的状态。
  */

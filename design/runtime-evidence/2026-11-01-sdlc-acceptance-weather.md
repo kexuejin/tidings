@@ -1034,7 +1034,11 @@ opencode  PASS  rc=0  proof.txt=CLI_OK
   `app/relay/ui/AppStates.kt:23 → MessageState:87`，而 `EmptyState` 早已搬到
   `ui/AppStates.kt`，那个行号落在空行上。改成符号名（`ui/AppStates.kt`，内部转调
   `MessageState`），不写行号。用 HEAD 的临时 worktree 复核过：修之前 HEAD 同样 2 条红。
-- `constructionTraceGate`：**仍红，且与本轮无关**（HEAD 的临时 worktree 同样 11 条）。
-  命中是 10 条 `2026-11-01 产品级语汇裁决` 注释里的 ISO 日期 + 1 条内网地址，都在
-  composeApp 的桌面 UI 文件里。门禁建议的改法是「留结论、去掉日期，缺陷史进 ADR」——
-  那是一次文档策略决定（要不要为这些裁决补 ADR），不属于本轮范围，留给机主定。
+- `constructionTraceGate`：**本轮修好**（14:40）。HEAD 上 11 条，全是同一批
+  「产品级语汇裁决」注释留下的施工痕迹：10 条 ISO 日期 + 1 条内网地址
+  （`192.168.1.1:49213`）。按门禁自己的建议处置 —— 结论留下、日期去掉，缺陷史
+  进 `docs/adr/` 的 **ADR-022**（「界面只回答人此刻需要知道什么」，含六个落点与
+  「为什么不能改回去」）；11 处注释改为引用 `ADR-022`，内网地址换成 `<IP>:<端口>` 形状。
+  改完扫描 0 命中，`:composeApp:compileKotlinJvm` 通过。
+- 五条门禁现在**全绿**（`construction-trace` / `stale-comment-ref` 都是
+  「OK —— 无新增（基线 0 条）」）。

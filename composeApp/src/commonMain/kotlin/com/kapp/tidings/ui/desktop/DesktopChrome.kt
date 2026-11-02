@@ -95,7 +95,7 @@ public fun DesktopTitleBar(state: RelayUiState, view: DesktopView, selectedPeerI
         view == DesktopView.Cabinet -> stringResource(Res.string.desktop_view_cabinet)
         view == DesktopView.Nodes -> stringResource(Res.string.nodes_subtitle_short, state.peers.size, state.onlineCount)
         view == DesktopView.Agents -> stringResource(Res.string.desktop_title_agents)
-        // 2026-11-01 产品级语汇裁决：标题栏是「这一页是什么」的语境 —— 与上面节点视图
+        // 产品级语汇裁决（ADR-022）：标题栏是「这一页是什么」的语境 —— 与上面节点视图
         // 不印 selfNodeId 的 B13 判据同源，`ip:port` 是诊断语汇，语境在详情栏与节点页。
         // 头部副标只回答「对方现在在不在线」（peerPresenceLine）。
         peer != null -> peerPresenceLine(peer, now)

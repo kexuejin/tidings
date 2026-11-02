@@ -265,7 +265,7 @@ fun ConversationsScreen(
                     totalUnread + (if (showWorkspaces) workspaceUnits.pendingTotal else 0),
                 )
             } else {
-                // 排序说明句（「，按最近一条消息排」）已退场（2026-11-01 产品级语汇裁决）：
+                // 排序说明句（「，按最近一条消息排」）已退场（ADR-022 产品级语汇裁决）：
                 // 给用户解释排序算法是工具语汇，列表自己会证明它怎么排。
                 val withWorkspaces = showWorkspaces && workspaceUnits.totalUnits > 0
                 if (withWorkspaces) {

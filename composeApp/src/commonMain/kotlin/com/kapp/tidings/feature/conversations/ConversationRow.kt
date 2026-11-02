@@ -588,7 +588,7 @@ internal fun ConversationRow(
                 }
             }
             if (row.pendingCount > 0) {
-                // 「N 待发」文字已退场（2026-11-01 产品级语汇裁决）：发送队列计数是
+                // 「N 待发」文字已退场（ADR-022 产品级语汇裁决）：发送队列计数是
                 // 工程语汇，列表页只回答「有没有没发出去的」——一颗时钟图标，语义与
                 // 气泡上的 pending 状态同源（ic_clock_pending）。精确条数点开会话看得到。
                 Icon(

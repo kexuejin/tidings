@@ -544,7 +544,7 @@ public fun DesktopChatHeader(
                     // T-1c 头部信息价值（私聊）：在场行（在线 · 最后在线）之外，把能力
                     // token（peer.caps，如 ag1/tw1）接在行尾 —— 「这台机器能干什么」
                     // 在头部可读，不用下钻节点详情。caps 码是协议 token，原样展示。
-                    // 地址不再进头部（2026-11-01 产品级语汇裁决）：IP:端口是诊断语汇，
+                    // 地址不再进头部（ADR-022 产品级语汇裁决）：IP:端口是诊断语汇，
                     // 详情栏与节点页才是它的语境 —— 头部用 peerPresenceLine。
                     val privateLine = peerPresenceLine(peer, now).let { base ->
                         if (peer.caps.isNotEmpty()) base + " · " + stringResource(Res.string.chat_caps_section) + " " + peer.caps.joinToString(" ") else base
