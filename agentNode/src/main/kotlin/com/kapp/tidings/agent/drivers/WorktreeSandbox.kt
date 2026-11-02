@@ -14,6 +14,7 @@ import kotlinx.coroutines.ensureActive
 import kotlinx.coroutines.withContext
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.JsonPrimitive
+import kotlinx.serialization.json.buildJsonArray
 import kotlinx.serialization.json.buildJsonObject
 
 /**
@@ -507,6 +508,13 @@ class WorktreeSandboxExecutor(
             )
         }
         val patchFile = File(artifactsDir, "patch.diff").apply { writeText(patch.stdout) }
+        // 被修改文件的**全文快照**：diff 对改动文件只带 hunk，离开工作树就拼不回整份
+        // 文件（extractFileFromPatch 因此只认新文件/单 hunk 两种形状）。而 refine 类任务
+        // 恰恰改的是已存在的产物（第二轮的 prototype.html），抽不出来 = 编排器宣称
+        // 「改好了」但用户手里没有可打开的东西（真机 refine 轮实测踩到）。
+        // 收割时工作树还活着 —— 这里把改动文件的全文按原相对路径存进 files/，
+        // 沙箱无痕清理之后调用方仍拿得到整份新文件。
+        val snapshots = snapshotModifiedFiles(taskId, worktree, artifactsDir, patch.stdout, logFile)
         val reportFile = File(artifactsDir, "report.json")
         val report: JsonObject = buildJsonObject {
             put("taskId", JsonPrimitive(taskId))
@@ -520,6 +528,9 @@ class WorktreeSandboxExecutor(
             put("patchSha256", JsonPrimitive(sha256Hex(patchFile)))
             put("logPath", JsonPrimitive(logFile.absolutePath))
             put("logSha256", JsonPrimitive(sha256Hex(logFile)))
+            if (snapshots.isNotEmpty()) {
+                put("snapshots", buildJsonArray { snapshots.forEach { add(JsonPrimitive(it)) } })
+            }
         }
         reportFile.writeText(report.toString())
         note(logFile, "[sandbox] harvest $taskId: +$adds -$dels in $files file(s), patch=${patchFile.length()} B")
@@ -534,6 +545,100 @@ class WorktreeSandboxExecutor(
             logPath = logFile,
         )
     }
+
+    /**
+     * 把 patch 里**被修改**（非新建）的文件全文快照进 `<artifactsDir>/files/<相对路径>`。
+     *
+     * 只快照 `--- a/<path>` + `+++ b/<path>` 成对出现的修改目标：新建文件（`--- /dev/null`）
+     * 由 `StageChain.extractFileFromPatch` 从 `+` 行整份还原，不需要占磁盘。快照的前提是
+     * 工作树里该文件真实存在 —— CLI 删掉的文件不出快照（交付语义里它就是没了）。
+     *
+     * 防线：路径逐条过 [safeWorktreeFile]，单文件超过 [SNAPSHOT_MAX_BYTES] 跳过、
+     * 总数到 [SNAPSHOT_MAX_FILES] 截停 —— 快照是给产物投递兜底的，不是备份整个仓库。
+     *
+     * @return 快照成功的相对路径清单（与 files/ 下落盘一一对应）。
+     */
+    private fun snapshotModifiedFiles(
+        taskId: String,
+        worktree: File,
+        artifactsDir: File,
+        patch: String,
+        logFile: File,
+    ): List<String> {
+        val saved = mutableListOf<String>()
+        for (rel in modifiedPathsFromPatch(patch)) {
+            if (saved.size >= SNAPSHOT_MAX_FILES) break
+            val src = safeWorktreeFile(worktree, rel) ?: continue
+            if (!src.isFile) continue
+            if (src.length() > SNAPSHOT_MAX_BYTES) {
+                note(logFile, "[sandbox] harvest $taskId: snapshot skipped (too large): $rel")
+                continue
+            }
+            val dst = File(File(artifactsDir, "files"), rel)
+            runCatching {
+                dst.parentFile?.mkdirs()
+                src.copyTo(dst, overwrite = true)
+            }.onSuccess {
+                saved.add(rel)
+            }.onFailure { t ->
+                note(logFile, "[sandbox] harvest $taskId: snapshot copy failed: $rel (${t.message})")
+            }
+        }
+        if (saved.isNotEmpty()) {
+            note(logFile, "[sandbox] harvest $taskId: snapshot ${saved.size} modified file(s): $saved")
+        }
+        return saved
+    }
+
+    /**
+     * 从 unified diff 文本里解析**被修改**（非新建）文件的目标路径清单。
+     *
+     * 逐 `diff --git` 段落判：`--- /dev/null` = 新建（跳过）；`+++ b/<path>` 才是本任务
+     * 改过的既有文件。同一文件多 hunk 只记一次。
+     */
+    internal fun modifiedPathsFromPatch(patch: String): List<String> {
+        val out = LinkedHashSet<String>()
+        var oldSide: String? = null
+        var sawHeader = false
+        for (raw in patch.lineSequence()) {
+            when {
+                raw.startsWith("diff --git ") -> {
+                    if (sawHeader) {
+                        oldSide?.let { out.add(it) }
+                        oldSide = null
+                        sawHeader = false
+                    }
+                }
+                raw.startsWith("--- ") && !sawHeader -> {
+                    val p = raw.removePrefix("--- ").trim()
+                    oldSide = if (p == "/dev/null") null else p.removePrefix("a/").removePrefix("./")
+                }
+                raw.startsWith("+++ ") && !sawHeader -> {
+                    val p = raw.removePrefix("+++ ").trim().removePrefix("b/")
+                    // --- /dev/null 的新文件不进快照（extractFileFromPatch 能整份还原）。
+                    if (oldSide != null && p == oldSide) out.add(p)
+                    oldSide = null
+                    sawHeader = true
+                }
+            }
+        }
+        if (sawHeader) oldSide?.let { out.add(it) }
+        return out.filter { it.isNotBlank() && it != "/dev/null" }
+    }
+
+    /** 快照的路径安全检查：拒绝绝对路径与 `..` 穿越，落点必须还在工作树内。 */
+    private fun safeWorktreeFile(worktree: File, rel: String): File? {
+        if (rel.isBlank() || rel.startsWith("/")) return null
+        val root = worktree.canonicalFile
+        val f = File(root, rel).canonicalFile
+        return if (f.path.startsWith(root.path + File.separator)) f else null
+    }
+
+    /** 单文件快照上限：prototype.html 量级是几十 KB，2 MB 已是宽余量。 */
+    val SNAPSHOT_MAX_BYTES: Long = 2L * 1024L * 1024L
+
+    /** 单任务快照文件数上限：防一个跑飞的任务把产物目录写爆。 */
+    val SNAPSHOT_MAX_FILES = 20
 
     /**
      * 进程树 SIGTERM → 至多 3s → SIGKILL（D-024 的中止序；挂起版，供显式 abort 走）。

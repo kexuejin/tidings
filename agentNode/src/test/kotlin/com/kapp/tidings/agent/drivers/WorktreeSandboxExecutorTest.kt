@@ -159,6 +159,69 @@ class WorktreeSandboxExecutorTest {
         assertTrue(artifacts.isDirectory, "产物目录在沙箱外存活")
     }
 
+    // ── 2b. 修改型任务的全文快照 ─────────────────────────────────────────────
+
+    /**
+     * refine 轮的形态：CLI 改的是**已存在**的产物文件，diff 是多 hunk 修改 ——
+     * 从 patch 拼不回整份文件（StageChain.extractFileFromPatch 按设计拒绝残缺重构）。
+     * 收割时必须把改动文件的全文快照进 `files/`，沙箱无痕清理后调用方（编排器的
+     * 产物投递）才有真全文可交 —— 否则「Refined prototype ready」这句话在手机上
+     * 没有任何可打开的东西（真机 refine 轮实测踩到）。
+     */
+    @Test
+    fun modifiedFileIsSnapshottedInFullForRefineDelivery() = runBlocking {
+        val root = tempDir()
+        val host = tempDir()
+        gitRepo(host)
+        // 基线里放一份既有产物（refine 改的就是它，不是新文件）。
+        File(host, "prototype.html").writeText("<html>v1 line1\nv1 line2\nv1 line3\n")
+        runGit(host, "add", ".")
+        runGit(host, "commit", "-m", "baseline with prototype")
+        val cli = script(root, "cli", """
+            printf 'v2 line1\nv2 line2\nv2 line3\nv2 line4\n' > prototype.html
+            exit 0
+        """.trimIndent())
+        val exe = executor(root)
+        val outcome = exe.run(
+            taskId = "t2b",
+            hostRepo = host.absolutePath,
+            command = listOf(cli),
+            env = emptyMap(),
+            onLine = {},
+        )
+        outcome as WorktreeSandboxExecutor.Outcome.Finished
+        val harvest = requireNotNull(outcome.harvest) { "有改动的任务必有 harvest" }
+        val patchText = harvest.patchPath.readText()
+        assertTrue(patchText.contains("--- a/prototype.html"), "改动型 diff 的旧侧是既有文件")
+        assertFalse(patchText.contains("--- /dev/null"), "本用例没有新建文件")
+        // 快照：files/prototype.html 存在、是**修改后的全文**（4 行 v2），
+        // 且 patch.diff 里只有 hunk —— 没有快照的话谁也拼不出这 4 行。
+        val snapshot = File(harvest.patchPath.parentFile, "files/prototype.html")
+        assertTrue(snapshot.isFile, "被修改文件必须有全文快照")
+        assertEquals("v2 line1\nv2 line2\nv2 line3\nv2 line4\n", snapshot.readText(), "快照是工作树里的全文")
+        val reportText = harvest.reportPath.readText()
+        assertTrue(reportText.contains("snapshots") && reportText.contains("prototype.html"), "report 记录快照清单")
+        // 新建文件不进快照（diff 的 + 行就是全文，extractFileFromPatch 能还原）——
+        // 同任务里再写一个新文件，快照清单里不该出现它。
+        val root2 = tempDir()
+        val host2 = tempDir()
+        gitRepo(host2)
+        val cli2 = script(root2, "cli", """
+            printf 'brand\n' > new-file.txt
+            exit 0
+        """.trimIndent())
+        val outcome2 = exe.run(
+            taskId = "t2c",
+            hostRepo = host2.absolutePath,
+            command = listOf(cli2),
+            env = emptyMap(),
+            onLine = {},
+        )
+        outcome2 as WorktreeSandboxExecutor.Outcome.Finished
+        val harvest2 = requireNotNull(outcome2.harvest)
+        assertFalse(File(harvest2.patchPath.parentFile, "files/new-file.txt").exists(), "新建文件不占快照（diff 可整份还原）")
+    }
+
     // ── 3. 诚信：非 0 退出 ───────────────────────────────────────────────────
 
     @Test

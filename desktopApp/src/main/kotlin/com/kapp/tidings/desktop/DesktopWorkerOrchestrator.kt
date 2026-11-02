@@ -783,10 +783,15 @@ internal class DesktopWorkerOrchestrator(
      * 原型产物的**真交付**：沙箱 patch → `prototype.html` 实体 → 投群 → 返回卡上该写的清单。
      *
      * 沙箱跑完就无痕清理，所以「沙箱里生成过 prototype.html」不等于「用户拿得到」。
-     * 这一跳把补丁里的新侧抽出来落成宿主侧文件、按 artifact 免确认投给群里，
-     * 卡片产物行才指向一个**真能打开**的东西。
+     * 这一跳把产物全文落成宿主侧文件、按 artifact 免确认投给群里，卡片产物行才指向
+     * 一个**真能打开**的东西。
      *
-     * 任何一步不成立（没有补丁 / 补丁里没有这个文件 / 投递失败）都返回空清单 ——
+     * 全文有两个来源，按优先级：
+     * 1. **快照** `<patchDir>/files/prototype.html` —— 收割时工作树还活着，改动文件
+     *    （refine 轮的形态）整份存过；这是唯一能覆盖「多 hunk 修改」的来源；
+     * 2. **diff 新侧** —— 新文件（首轮 prototype）由 `extractFileFromPatch` 整份还原。
+     *
+     * 任何一步不成立（没有补丁 / 两路都取不到全文 / 投递失败）都返回空清单 ——
      * 宁可不宣称，也不要在卡上留一行点不动的产物。
      */
     private suspend fun deliverPrototypeArtifact(
@@ -795,7 +800,12 @@ internal class DesktopWorkerOrchestrator(
         patchPath: String?,
     ): List<Pair<String, Long>> {
         if (groupId == null || patchPath == null) return emptyList()
-        val html = StageChain.extractFileFromPatch(File(patchPath), "prototype.html") ?: return emptyList()
+        val patchFile = File(patchPath)
+        val snapshot = File(patchFile.parentFile, "files/prototype.html")
+        val html = when {
+            snapshot.isFile -> runCatching { snapshot.readText() }.getOrNull()
+            else -> null
+        } ?: StageChain.extractFileFromPatch(patchFile, "prototype.html") ?: return emptyList()
         val dir = File(File(System.getProperty("java.io.tmpdir"), "tidings-artifacts"), ticketId)
         val out = File(dir.apply { mkdirs() }, "prototype.html")
         val written = runCatching { out.writeText(html) }.isSuccess
