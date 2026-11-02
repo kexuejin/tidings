@@ -1304,26 +1304,29 @@ private fun CardDiffViewerRow(diff: AgentCardDiff) {
                 Spacer(Modifier.weight(1f))
             }
             if (diff.additions != null || diff.deletions != null) {
+                // **`+N / −N` 是纯彩色等宽文字，不是药丸**。
+                //
+                // 原型 `.acard .df .diff-stat{display:inline-flex;gap:4px;font-size:11px}` +
+                // `.add{color:var(--online);font-weight:600}` / `.del{color:var(--error);font-weight:600}`
+                // （prototype/relay.html:561-562）：只有颜色与字重，没有底色、没有圆角、没有内边距。
+                // 代码这里曾经自己加了一层「淡色药丸」（0.12 透明底色 + 4dp 圆角 + 5/1dp 内边距），
+                // 于是逐屏取值差集在 5 屏（m-histdate / d-chat / d-histsearch / d-groupcreate /
+                // 及其共享切片）同时长出「只代码 4」的圆角与「只代码 1」的间距 —— 那不是原型有的档，
+                // 是这一处自造的。字重也照原型收成 600（原来是 700）。
                 Row(horizontalArrangement = Arrangement.spacedBy(4.dp)) {
                     Text(
                         text = "+${diff.additions ?: 0}",
                         style = MaterialTheme.typography.labelSmall,
-                        fontWeight = FontWeight.Bold,
+                        fontWeight = FontWeight.SemiBold,
                         color = MaterialTheme.accents.online,
                         fontFamily = FontFamily.Monospace,
-                        modifier = Modifier
-                            .background(MaterialTheme.accents.online.copy(alpha = 0.12f), RoundedCornerShape(4.dp))
-                            .padding(horizontal = 5.dp, vertical = 1.dp),
                     )
                     Text(
                         text = "−${diff.deletions ?: 0}",
                         style = MaterialTheme.typography.labelSmall,
-                        fontWeight = FontWeight.Bold,
+                        fontWeight = FontWeight.SemiBold,
                         color = MaterialTheme.colorScheme.error,
                         fontFamily = FontFamily.Monospace,
-                        modifier = Modifier
-                            .background(MaterialTheme.colorScheme.error.copy(alpha = 0.12f), RoundedCornerShape(4.dp))
-                            .padding(horizontal = 5.dp, vertical = 1.dp),
                     )
                 }
             }

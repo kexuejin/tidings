@@ -404,7 +404,7 @@
           "accentGradientEnd": {
             "sites": 1,
             "status": "enforced",
-            "first": "composeApp/src/commonMain/kotlin/com/kapp/tidings/feature/chat/AgentCards.kt:1046"
+            "first": "composeApp/src/commonMain/kotlin/com/kapp/tidings/feature/chat/AgentCards.kt:1045"
           },
           "agentAccent": {
             "sites": 5,
@@ -436,7 +436,7 @@
             "status": "pending"
           },
           "error": {
-            "sites": 49,
+            "sites": 48,
             "status": "enforced",
             "first": "composeApp/src/commonMain/kotlin/com/kapp/tidings/ui/desktop/DesktopChrome.kt:348"
           },
@@ -515,7 +515,7 @@
             "first": "composeApp/src/commonMain/kotlin/com/kapp/tidings/feature/agents/AgentApprovalCards.kt:236"
           },
           "online": {
-            "sites": 15,
+            "sites": 14,
             "status": "enforced",
             "first": "composeApp/src/commonMain/kotlin/com/kapp/tidings/ui/desktop/DesktopNodesPane.kt:395"
           },
@@ -621,14 +621,14 @@
           "warn": {
             "sites": 5,
             "status": "enforced",
-            "first": "composeApp/src/commonMain/kotlin/com/kapp/tidings/feature/chat/AgentCards.kt:787"
+            "first": "composeApp/src/commonMain/kotlin/com/kapp/tidings/feature/chat/AgentCards.kt:786"
           }
         },
         "typography": {
           "bodyLarge": {
             "sites": 7,
             "status": "enforced",
-            "first": "composeApp/src/commonMain/kotlin/com/kapp/tidings/ui/components/MessageComposer.kt:489"
+            "first": "composeApp/src/commonMain/kotlin/com/kapp/tidings/ui/components/MessageComposer.kt:495"
           },
           "bodyMedium": {
             "sites": 109,
@@ -788,7 +788,7 @@
           "extraLarge": {
             "sites": 1,
             "status": "enforced",
-            "first": "composeApp/src/commonMain/kotlin/com/kapp/tidings/ui/components/MessageComposer.kt:721"
+            "first": "composeApp/src/commonMain/kotlin/com/kapp/tidings/ui/components/MessageComposer.kt:727"
           },
           "extraSmall": {
             "sites": 0,
@@ -797,7 +797,7 @@
           "large": {
             "sites": 12,
             "status": "enforced",
-            "first": "composeApp/src/commonMain/kotlin/com/kapp/tidings/ui/components/MessageComposer.kt:776"
+            "first": "composeApp/src/commonMain/kotlin/com/kapp/tidings/ui/components/MessageComposer.kt:782"
           },
           "medium": {
             "sites": 61,
@@ -900,7 +900,7 @@
           "8": 17,
           "6": 16,
           "12": 21,
-          "4": 12,
+          "4": 10,
           "22": 2,
           "5": 3,
           "20": 2,
@@ -928,13 +928,13 @@
         "note": "offScale = 没有任何 M3 槽位能表达的半径，这些点只能靠字面量写出来，是「看着不精致」最直接的一类证据。"
       },
       "debt": {
-        "shape": 89,
+        "shape": 87,
         "typography": 5,
         "color": 13,
         "elevation": 6,
         "iconSizes": 38,
         "dimension": 144,
-        "spacing": 127
+        "spacing": 123
       },
       "shapeSemantics": {
         "bubble": {
