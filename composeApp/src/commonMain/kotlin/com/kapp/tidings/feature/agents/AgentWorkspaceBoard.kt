@@ -181,7 +181,6 @@ internal fun WorkspaceBoardView(
                 // 会话 = 全部 units 的 sessionCount 之和（未归属会话也是会话）。
                 val deviceTotal = units.groups.size
                 val agentTotal = units.groups.sumOf { group -> group.agentSections().size }
-                val sessionTotal = units.groups.sumOf { group -> group.units.sumOf { it.sessionCount } }
                 // 空屏只印「0 个工作区」（原型 screenAgentsEmpty relay.html:4564 写死这一句）：
                 // 四个零排一行是噪音，而「一个都没上报」这件事本身已经由下面的警告条说清了。
                 val summary = if (units.isEmpty) {
@@ -192,7 +191,6 @@ internal fun WorkspaceBoardView(
                         deviceTotal,
                         agentTotal,
                         units.workspaceCount,
-                        sessionTotal,
                     )
                 }
                 Text(

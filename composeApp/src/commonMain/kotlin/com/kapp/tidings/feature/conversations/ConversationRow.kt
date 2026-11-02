@@ -47,6 +47,7 @@ import com.kapp.tidings.ui.components.StatusDot
 import com.kapp.tidings.ui.components.badgeCountText
 import com.kapp.tidings.ui.components.relativeTime
 import com.kapp.tidings.ui.theme.LocalAppSpacing
+import com.kapp.tidings.generated.resources.ic_clock_pending
 import com.kapp.tidings.ui.theme.LocalCardShape
 import com.kapp.tidings.ui.theme.relayCardShadow
 import org.jetbrains.compose.resources.stringResource
@@ -587,11 +588,14 @@ internal fun ConversationRow(
                 }
             }
             if (row.pendingCount > 0) {
-                Text(
-                    // 待发条数是用户可见文案，走资源而不是内联中文。
-                    text = stringResource(Res.string.conv_pending_count, row.pendingCount),
-                    style = MaterialTheme.typography.labelSmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                // 「N 待发」文字已退场（2026-11-01 产品级语汇裁决）：发送队列计数是
+                // 工程语汇，列表页只回答「有没有没发出去的」——一颗时钟图标，语义与
+                // 气泡上的 pending 状态同源（ic_clock_pending）。精确条数点开会话看得到。
+                Icon(
+                    painter = painterResource(Res.drawable.ic_clock_pending),
+                    contentDescription = stringResource(Res.string.conv_pending_count, row.pendingCount),
+                    tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                    modifier = Modifier.size(IconSizes.Inline),
                 )
             }
         }

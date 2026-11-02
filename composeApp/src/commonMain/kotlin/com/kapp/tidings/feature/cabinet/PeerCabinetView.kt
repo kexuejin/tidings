@@ -347,6 +347,7 @@ internal fun PeerCabinetView(
                         EmptyState(
                             title = stringResource(Res.string.cabinet_empty_dir),
                             message = stringResource(Res.string.cabinet_empty_dir_hint),
+                            icon = painterResource(Res.drawable.ic_folder),
                             modifier = Modifier.fillMaxWidth(),
                         )
                     }

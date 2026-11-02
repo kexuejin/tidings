@@ -73,3 +73,27 @@
   reason: "Compose 的 `shadow()` 只产出单层 Material 阴影，要复刻两层得自绘（`drawBehind` + 两次模糊），代价与收益不匹配；用原型色把"色调"对齐，层次差一层。所以口径是**近似对齐**，不是"已对齐原型" —— 之前计划里写成"已对齐"是措辞过宽，已改。"
   approved_by: "kexuejin（本仓立场：原型是设计权威，但平台绘制能力允许近似时如实记账）"
   date: 2026-10-20
+- kind: deviation
+  dimension: 空态/图形头
+  where: "桌面未选中会话空态（ui/desktop/DesktopConversationsPane.kt 的 DesktopNoSelectionEmpty）"
+  design: "原型 .emptyd（prototype/relay.html:772）只有标题+两行灰字，没有图形锚点"
+  actual: "补上与共享 EmptyState 同一颗 EmptyGlyph（64dp 软色圆底 + 28dp 主色 ic_chat_bubble）置于文字上方，间距 md"
+  reason: "用户第二轮审计点名「孤字悬在大片空白」是 demo 感来源；共享空态（AppStates.kt EmptyState）已在此前批次统一升级为居中+图形头，桌面壳这张若不跟进会造成同一产品两套空态语言。圆底图标是既有 sprite 字形，不新增资产。"
+  approved_by: "kexuejin（2026-11-01 指令：消除 demo 感、统一空态体系）"
+  date: 2026-11-01
+- kind: deviation
+  dimension: 字号/气泡正文
+  where: "聊天气泡正文（ChatBubbles.kt 纯文本 + MarkdownMessage.kt 基准）"
+  design: "原型默认 --fs-bub:14px（prototype/relay.html:58）"
+  actual: "气泡正文 bodyMedium(14sp) → bodyLarge(16sp)，纯文本与 Markdown 同步"
+  reason: "聊天是主界面，14sp 对话正文偏小（iMessage/WeChat 17、Telegram 15~16）；原型自带 font-lg 档就是 16px（relay.html:1617），16 在原型设计空间内。产品级裁决（2026-11-01 用户点名「文字大小也有影响」）。"
+  approved_by: "kexuejin（2026-11-01）"
+  date: 2026-11-01
+- kind: deviation
+  dimension: 布局/气泡 meta 行
+  where: "聊天气泡内时间行与投递标记（ChatBubbles.kt）"
+  design: "原型气泡不含时间与状态（1256 行自陈「气泡只装话」，状态行整套删除）"
+  actual: "时间行右对齐、投递勾/时钟与时间同行收进气泡内；文字气泡不再在页边漂浮投递图标（文件/图片/PK 卡保留气泡外标记）"
+  reason: "时间行本就是代码侧补的元素，摆法不受原型锁定；此前左对齐独占一行+页边漂浮图标是「demo 感」来源，按成熟 IM（Telegram）惯例收拢。"
+  approved_by: "kexuejin（2026-11-01）"
+  date: 2026-11-01

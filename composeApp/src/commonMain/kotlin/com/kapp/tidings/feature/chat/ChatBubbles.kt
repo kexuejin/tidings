@@ -530,20 +530,39 @@ internal fun MessageBubble(
                         if (renderMarkdown) {
                             MarkdownMessage(message.text)
                         } else {
-                            Text(text = linkifyPlainText(message.text), style = MaterialTheme.typography.bodyMedium)
+                            // 气泡正文 16sp（bodyLarge）：聊天是主界面，14sp 的对话正文
+                            // 是「demo 感」来源之一（iMessage/WeChat 17、Telegram 15~16）。
+                            // 原型默认 --fs-bub:14px，但自带 font-lg 档就是 16px
+                            // （relay.html:1617），16 在原型的设计空间内；偏差已登记。
+                            Text(text = linkifyPlainText(message.text), style = MaterialTheme.typography.bodyLarge)
                         }
                     }
                 }
                 if (!isCustomCard) {
+                    // meta 行**右对齐**、投递标记与时间同行：成熟 IM（Telegram）的摆法。
+                    // 此前时间是左对齐独占一行、勾/时钟漂浮在气泡外的页边上 ——
+                    // 一条消息占两行高、页面边缘挂着无锚点的小图标，是「demo 感」的来源。
+                    // 产品级裁决（2026-11-01）：时间行本来就是代码侧补的（原型自陈
+                    // 「气泡只装话」，1256 行），摆法不受原型锁定，按成熟产品惯例收。
                     Row(
-                        modifier = Modifier.padding(top = sp.xs),
-                        horizontalArrangement = Arrangement.spacedBy(sp.sm),
+                        modifier = Modifier
+                            .padding(top = sp.xs)
+                            .fillMaxWidth(),
+                        horizontalArrangement = Arrangement.spacedBy(sp.sm, Alignment.End),
                         verticalAlignment = Alignment.CenterVertically,
                     ) {
                         val metaColor = if (message.mine) {
                             MaterialTheme.colorScheme.onPrimaryContainer.copy(alpha = 0.75f)
                         } else {
                             MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.8f)
+                        }
+                        if (message.mine && message.delivery == DeliveryState.Failed && onRetry != null) {
+                            AppTextButton(
+                                text = stringResource(Res.string.chat_delivery_resend),
+                                size = AppButtonSize.Compact,
+                                tone = AppButtonTone.Danger,
+                                onClick = { onRetry(message.text) },
+                            )
                         }
                         Text(
                             text = formatClock(message.at),
@@ -553,15 +572,9 @@ internal fun MessageBubble(
                         if (message.mine) {
                             DeliveryCheckmark(
                                 delivery = message.delivery,
+                                isFileCompleted = false,
+                                // 与时间同色：meta 行内所有标记同一灰度档，比默认 primary 更收敛。
                                 tint = metaColor,
-                            )
-                        }
-                        if (message.mine && message.delivery == DeliveryState.Failed && onRetry != null) {
-                            AppTextButton(
-                                text = stringResource(Res.string.chat_delivery_resend),
-                                size = AppButtonSize.Compact,
-                                tone = AppButtonTone.Danger,
-                                onClick = { onRetry(message.text) },
                             )
                         }
                     }

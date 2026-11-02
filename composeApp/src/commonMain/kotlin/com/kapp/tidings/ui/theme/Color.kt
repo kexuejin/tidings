@@ -153,10 +153,13 @@ val RelayDarkColors = darkColorScheme(
     outlineVariant = Color(0x17FFFFFF),
     // 与浅色一侧同理：这一组不写就漏回 Material 基线的紫。深色阶梯是
     // background #121413 → surface（D10 抬档后 #232625）→ surfaceVariant #2A2C2B。
+    // 阶梯必须随 surface 单调递增（lowest 除外）：此前 surfaceContainer(#222423)
+    // 比 containerLow(=surface #232625) 还暗一档，用它的面（状态栏等）比卡面更黑，
+    // 深色下「卡与页糊成一片」它也有一份。
     surfaceContainerLowest = Color(0xFF161817),
-    surfaceContainerLow = RelayDarkSurface,
-    surfaceContainer = Color(0xFF222423),
-    surfaceContainerHigh = Color(0xFF262827),
+    surfaceContainerLow = Color(0xFF252726),
+    surfaceContainer = Color(0xFF262827),
+    surfaceContainerHigh = Color(0xFF282A29),
     surfaceContainerHighest = RelayDarkSurfaceVariant,
     surfaceDim = RelayDarkBackground,
     surfaceBright = Color(0xFF353837),

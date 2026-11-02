@@ -56,9 +56,6 @@ import com.kapp.tidings.generated.resources.action_clear_search
 import com.kapp.tidings.generated.resources.common_offline
 import com.kapp.tidings.generated.resources.desktop_app_title
 import com.kapp.tidings.generated.resources.desktop_menu_new_conversation
-import com.kapp.tidings.generated.resources.desktop_peer_connected
-import com.kapp.tidings.generated.resources.desktop_peer_header
-import com.kapp.tidings.generated.resources.desktop_peer_last_seen
 import com.kapp.tidings.generated.resources.desktop_title_agents
 import com.kapp.tidings.generated.resources.desktop_title_files
 import com.kapp.tidings.generated.resources.desktop_toolbar_import
@@ -98,12 +95,10 @@ public fun DesktopTitleBar(state: RelayUiState, view: DesktopView, selectedPeerI
         view == DesktopView.Cabinet -> stringResource(Res.string.desktop_view_cabinet)
         view == DesktopView.Nodes -> stringResource(Res.string.nodes_subtitle_short, state.peers.size, state.onlineCount)
         view == DesktopView.Agents -> stringResource(Res.string.desktop_title_agents)
-        peer != null -> stringResource(
-            Res.string.desktop_peer_header,
-            "${peer.ip.ifBlank { peer.host }}:${peer.udpPort}",
-            if (peer.online) stringResource(Res.string.desktop_peer_connected) else stringResource(Res.string.common_offline),
-            stringResource(Res.string.desktop_peer_last_seen, relativeTime(peer.lastSeenAt, now)),
-        )
+        // 2026-11-01 产品级语汇裁决：标题栏是「这一页是什么」的语境 —— 与上面节点视图
+        // 不印 selfNodeId 的 B13 判据同源，`ip:port` 是诊断语汇，语境在详情栏与节点页。
+        // 头部副标只回答「对方现在在不在线」（peerPresenceLine）。
+        peer != null -> peerPresenceLine(peer, now)
         else -> null
     }
     Surface(color = MaterialTheme.colorScheme.surface) {

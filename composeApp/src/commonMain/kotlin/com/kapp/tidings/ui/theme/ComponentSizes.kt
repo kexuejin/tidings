@@ -25,4 +25,11 @@ import androidx.compose.ui.unit.dp
 object ComponentSizes {
     /** 气泡内头像边长（原型 `.msg .mav` 26px）。跟随行文字的缩进也必须是这个值。 */
     val MessageAvatar: Dp = 26.dp
+
+    /**
+     * 空态图形头的圆底直径（`AppStates.EmptyGlyph`）。圆底/图标是「元素自身多大」，
+     * 属于组件尺寸而不是间距；收进这里让空态头的两处尺寸（圆底 + 内嵌图标）
+     * 有同一份口径可引。
+     */
+    val EmptyGlyphCircle: Dp = 64.dp
 }

@@ -30,7 +30,7 @@ import com.mikepenz.markdown.m3.markdownTypography
  * - 代码块与行内代码的底色不覆盖：库的默认值本来就是从 `MaterialTheme.colorScheme`
  *   读的，覆盖成别的槽等于在气泡里另发明一套「第几级容器」。
  *
- * 字号也跟气泡对齐：正文是 `bodyMedium`（与原来的纯文本一致），标题收成 title 档
+ * 字号也跟气泡对齐：正文基准与纯文本气泡同档（现 bodyLarge 16sp），标题收成 title 档
  * 而不是库默认的 display 档 —— 聊天气泡里一行 36sp 的标题会把整屏吃掉。
  */
 @Composable
@@ -39,7 +39,9 @@ internal fun MarkdownMessage(
     modifier: Modifier = Modifier,
 ) {
     val type = MaterialTheme.typography
-    val body = type.bodyMedium
+    // 基准与纯文本气泡同档（bodyLarge 16sp，见 ChatBubbles 的偏差登记）；
+    // 标题档不改，相对层级不变。
+    val body = type.bodyLarge
     val colors = markdownColor(
         text = LocalContentColor.current,
         dividerColor = MaterialTheme.colorScheme.outlineVariant,

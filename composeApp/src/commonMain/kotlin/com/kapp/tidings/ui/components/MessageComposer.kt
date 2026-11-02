@@ -63,7 +63,6 @@ import com.kapp.tidings.generated.resources.chat_byte_over
 import com.kapp.tidings.generated.resources.chat_composer_hint
 import com.kapp.tidings.generated.resources.chat_emoji
 import com.kapp.tidings.generated.resources.chat_route_tcp
-import com.kapp.tidings.generated.resources.chat_route_udp
 import com.kapp.tidings.generated.resources.chat_send
 import com.kapp.tidings.generated.resources.ic_send
 import com.kapp.tidings.generated.resources.chat_mention_all
@@ -640,42 +639,47 @@ public fun MessageComposer(
                     filled = true,
                 )
             }
-            // 计数行**常显**（原型 `.composer .hintline`）：草稿为空时它写「0 / 800 字节」，
-            // 说的不是"你打了 0 个字"，而是"这条消息最多能有多长、会走哪条路" —— 那两条
-            // 上限是这一屏的规则，不该等用户先打几个字才告诉他。
-            Row(
-                verticalAlignment = Alignment.CenterVertically,
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .padding(start = LocalAppSpacing.current.sm6, end = LocalAppSpacing.current.xxs, top = LocalAppSpacing.current.xs),
-            ) {
-                Text(
-                    text = if (overLimit) {
-                        stringResource(Res.string.chat_byte_over, Protocol.TEXT_TCP_LIMIT)
-                    } else {
-                        stringResource(
-                            Res.string.chat_byte_hint,
-                            bytes,
-                            if (onUdp) Protocol.TEXT_UDP_LIMIT else Protocol.TEXT_TCP_LIMIT,
+            // 产品级语汇裁决（2026-11-01）：常态不提示，异常才说话。
+            // - 计数「N / M 字符」过半才出现（上限规则在用户接近时才相关；超限红字永远出现）；
+            // - 路由提示只在**例外路径**（改走 TCP）出现 —— 局域网直连是常态，
+            //   常态路线不再常驻主界面（chat_route_udp 键随之退场）。
+            // 外部传入的 [hintTrailing]（群聊媒体提示等功能性文案）不受此裁决影响。
+            val byteLimit = if (onUdp) Protocol.TEXT_UDP_LIMIT else Protocol.TEXT_TCP_LIMIT
+            val showCounter = overLimit || bytes * 2 >= byteLimit
+            val showTrailing = !overLimit && (hintTrailing != null || !onUdp)
+            if (showCounter || showTrailing) {
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(start = LocalAppSpacing.current.sm6, end = LocalAppSpacing.current.xxs, top = LocalAppSpacing.current.xs),
+                ) {
+                    if (showCounter) {
+                        Text(
+                            text = if (overLimit) {
+                                stringResource(Res.string.chat_byte_over, Protocol.TEXT_TCP_LIMIT)
+                            } else {
+                                stringResource(Res.string.chat_byte_hint, bytes, byteLimit)
+                            },
+                            style = MaterialTheme.typography.labelSmall,
+                            color = if (overLimit) {
+                                MaterialTheme.colorScheme.error
+                            } else {
+                                MaterialTheme.colorScheme.onSurfaceVariant
+                            },
                         )
-                    },
-                    style = MaterialTheme.typography.labelSmall,
-                    color = if (overLimit) {
-                        MaterialTheme.colorScheme.error
-                    } else {
-                        MaterialTheme.colorScheme.onSurfaceVariant
-                    },
-                )
-                if (!overLimit) {
-                    Spacer(Modifier.weight(1f))
-                    Spacer(Modifier.width(LocalAppSpacing.current.sm))
-                    Text(
-                        text = hintTrailing ?: stringResource(
-                            if (onUdp) Res.string.chat_route_udp else Res.string.chat_route_tcp,
-                        ),
-                        style = MaterialTheme.typography.labelSmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    )
+                    }
+                    if (showTrailing) {
+                        Spacer(Modifier.weight(1f))
+                        if (showCounter) {
+                            Spacer(Modifier.width(LocalAppSpacing.current.sm))
+                        }
+                        Text(
+                            text = hintTrailing ?: stringResource(Res.string.chat_route_tcp),
+                            style = MaterialTheme.typography.labelSmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        )
+                    }
                 }
             }
 

@@ -36,6 +36,7 @@ import com.kapp.tidings.domain.WorkspaceUnitUi
 import com.kapp.tidings.domain.inboxWorkspaceUnits
 import com.kapp.tidings.core.nowMillis
 import com.kapp.tidings.generated.resources.Res
+import com.kapp.tidings.generated.resources.ic_chat_bubble
 import com.kapp.tidings.generated.resources.conv_empty_action
 import com.kapp.tidings.generated.resources.conv_empty_failed_message
 import com.kapp.tidings.generated.resources.conv_empty_failed_title
@@ -55,8 +56,6 @@ import com.kapp.tidings.generated.resources.conv_filter_workspaces
 import com.kapp.tidings.generated.resources.conv_subtitle_summary
 import com.kapp.tidings.generated.resources.conv_subtitle_summary_ws
 import com.kapp.tidings.generated.resources.conv_subtitle_unread
-import com.kapp.tidings.generated.resources.conv_subtitle_recent_suffix
-import com.kapp.tidings.generated.resources.conv_subtitle_recent_suffix_ws
 import com.kapp.tidings.generated.resources.conv_search_hint_global
 import com.kapp.tidings.generated.resources.ic_search
 import com.kapp.tidings.generated.resources.ic_more
@@ -68,6 +67,7 @@ import com.kapp.tidings.ui.components.TopBarIconAction
 import com.kapp.tidings.ui.components.bannerText
 import com.kapp.tidings.ui.EmptyState
 import com.kapp.tidings.ui.LoadingState
+import org.jetbrains.compose.resources.painterResource
 import org.jetbrains.compose.resources.stringResource
 import com.kapp.tidings.domain.model.NodePhase
 
@@ -265,8 +265,10 @@ fun ConversationsScreen(
                     totalUnread + (if (showWorkspaces) workspaceUnits.pendingTotal else 0),
                 )
             } else {
+                // 排序说明句（「，按最近一条消息排」）已退场（2026-11-01 产品级语汇裁决）：
+                // 给用户解释排序算法是工具语汇，列表自己会证明它怎么排。
                 val withWorkspaces = showWorkspaces && workspaceUnits.totalUnits > 0
-                val summary = if (withWorkspaces) {
+                if (withWorkspaces) {
                     stringResource(
                         Res.string.conv_subtitle_summary_ws,
                         conversations.size,
@@ -276,12 +278,6 @@ fun ConversationsScreen(
                 } else {
                     stringResource(Res.string.conv_subtitle_summary, conversations.size, totalUnread)
                 }
-                val suffix = if (withWorkspaces) {
-                    stringResource(Res.string.conv_subtitle_recent_suffix_ws)
-                } else {
-                    stringResource(Res.string.conv_subtitle_recent_suffix)
-                }
-                summary + suffix
             },
             actions = {
                 // 全局搜索入口。原型顶栏是「🔍 然后 ⋮」两颗，且 🔍 在左；
@@ -443,6 +439,7 @@ fun ConversationsScreen(
                 message = stringResource(Res.string.conv_empty_message),
                 actionLabel = stringResource(Res.string.conv_empty_action),
                 onAction = onGoToPairing,
+                icon = painterResource(Res.drawable.ic_chat_bubble),
                 modifier = Modifier.fillMaxWidth(),
             )
 

@@ -20,6 +20,7 @@ import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.selection.selectableGroup
 import androidx.compose.material3.Badge
 import androidx.compose.material3.BadgedBox
@@ -311,14 +312,7 @@ private fun NavRailButton(
 @Composable
 private fun NavIcon(item: AppNavItem, badgeCount: Int) {
     BadgedBox(
-        badge = {
-            if (badgeCount > 0) {
-                Badge(
-                    containerColor = MaterialTheme.accents.badge,
-                    contentColor = MaterialTheme.accents.onBadge,
-                ) { Text(badgeCountText(badgeCount)) }
-            }
-        },
+        badge = { if (badgeCount > 0) { NavCountBadge(badgeCount) } },
     ) {
         Icon(
             painter = painterResource(item.icon),

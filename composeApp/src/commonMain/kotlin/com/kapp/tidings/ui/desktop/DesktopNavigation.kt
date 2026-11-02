@@ -18,6 +18,8 @@ import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.layout.offset
+import com.kapp.tidings.ui.components.NavCountBadge
 import androidx.compose.foundation.selection.selectableGroup
 import androidx.compose.material3.Badge
 import androidx.compose.material3.BadgedBox
@@ -244,14 +246,7 @@ private fun NavIconWithBadge(
     badge: Int,
 ) {
     BadgedBox(
-        badge = {
-            if (badge > 0) {
-                Badge(
-                    containerColor = MaterialTheme.accents.badge,
-                    contentColor = MaterialTheme.accents.onBadge,
-                ) { Text(badgeCountText(badge)) }
-            }
-        },
+        badge = { if (badge > 0) { NavCountBadge(badge) } },
     ) {
         Icon(icon, contentDescription = null, modifier = Modifier.size(IconSizes.Body), tint = tint)
     }

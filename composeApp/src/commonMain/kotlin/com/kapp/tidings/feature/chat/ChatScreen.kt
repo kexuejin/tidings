@@ -97,6 +97,7 @@ import com.kapp.tidings.generated.resources.common_profile_unavailable
 import com.kapp.tidings.generated.resources.chat_voice_record
 import com.kapp.tidings.generated.resources.hist_search_title
 import com.kapp.tidings.generated.resources.ic_attachment
+import com.kapp.tidings.generated.resources.ic_chat_bubble
 import com.kapp.tidings.generated.resources.ic_image
 import com.kapp.tidings.generated.resources.ic_mic
 import com.kapp.tidings.generated.resources.ic_nudge
@@ -225,6 +226,7 @@ fun ChatScreen(
             // 没会话时下一步就是去配对，所以这条空状态要给出口而不是让用户自己找页签。
             actionLabel = onFindPeers?.let { stringResource(Res.string.action_find_nodes) },
             onAction = onFindPeers,
+            icon = painterResource(Res.drawable.ic_chat_bubble),
             modifier = modifier.fillMaxSize(),
         )
         return
@@ -1017,6 +1019,7 @@ fun ChatScreen(
                     message = stringResource(Res.string.chat_empty_message),
                     actionLabel = if (focusComposer) stringResource(Res.string.chat_first_message) else null,
                     onAction = if (focusComposer) ({ composerFocus.requestFocus() }) else null,
+                    icon = painterResource(Res.drawable.ic_chat_bubble),
                     modifier = Modifier.fillMaxWidth().align(Alignment.Center),
                 )
             } else {

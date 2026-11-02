@@ -41,6 +41,7 @@ import com.kapp.tidings.ui.components.AppTextButton
 import com.kapp.tidings.feature.conversations.ConversationFailedEmptyState
 import com.kapp.tidings.ui.components.relativeTime
 import com.kapp.tidings.generated.resources.Res
+import com.kapp.tidings.generated.resources.ic_chat_bubble
 import com.kapp.tidings.generated.resources.action_clear_search
 import com.kapp.tidings.generated.resources.common_offline
 import com.kapp.tidings.generated.resources.conv_loading
@@ -59,6 +60,7 @@ import com.kapp.tidings.generated.resources.desktop_view_conversations
 import com.kapp.tidings.generated.resources.workspace_group_label
 import com.kapp.tidings.generated.resources.ic_close
 import com.kapp.tidings.generated.resources.ic_groups
+import org.jetbrains.compose.resources.painterResource
 import org.jetbrains.compose.resources.stringResource
 
 import com.kapp.tidings.ui.theme.LocalAppSpacing
@@ -76,6 +78,23 @@ public fun peerHeaderLine(peer: PeerUi, now: Long): String {
     return listOf(address, if (peer.online) stringResource(Res.string.desktop_peer_connected) else stringResource(Res.string.common_offline), seen)
         .filter { it.isNotBlank() }
         .joinToString(" · ")
+}
+
+/**
+ * 聊天头部的**在场行**：连接状态 · 最后在线，**不带地址**。
+ *
+ * 2026-11-01 产品级语汇裁决：标题栏/聊天头部回答的是「对方现在在不在线」，
+ * `192.168.1.1:49213` 是诊断语汇，语境在详情栏（[peerHeaderLine]）与节点页——
+ * 与 DesktopTitleBar 的 B13 判据同源（身份/地址只在合法语境出现）。
+ * 右侧「详情」栏仍用 [peerHeaderLine] 印完整三段。
+ */
+@Composable
+public fun peerPresenceLine(peer: PeerUi, now: Long): String {
+    val seen = if (peer.lastSeenAt > 0L) stringResource(Res.string.desktop_peer_last_seen, relativeTime(peer.lastSeenAt, now)) else ""
+    return listOf(
+        if (peer.online) stringResource(Res.string.desktop_peer_connected) else stringResource(Res.string.common_offline),
+        seen,
+    ).filter { it.isNotBlank() }.joinToString(" · ")
 }
 
 /**
@@ -310,6 +329,7 @@ public fun ConversationSidebar(
                     message = stringResource(Res.string.desktop_conv_empty_hint),
                     actionLabel = stringResource(Res.string.desktop_conv_go_pairing),
                     onAction = onGoToPairing,
+                    icon = painterResource(Res.drawable.ic_chat_bubble),
                     modifier = Modifier.fillMaxSize(),
                 )
             }

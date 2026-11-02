@@ -31,6 +31,8 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import com.kapp.tidings.domain.RelayUiState
+import org.jetbrains.compose.resources.painterResource
+import com.kapp.tidings.generated.resources.ic_terminal
 import com.kapp.tidings.generated.resources.Res
 import com.kapp.tidings.generated.resources.action_back
 import com.kapp.tidings.generated.resources.agent_event_dir_in
@@ -255,6 +257,7 @@ internal fun SessionDetailView(
                 EmptyState(
                     title = stringResource(Res.string.agent_sessions_empty),
                     message = stringResource(Res.string.agent_sessions_memory_note),
+                    icon = painterResource(Res.drawable.ic_terminal),
                     modifier = Modifier.fillMaxWidth(),
                 )
             } else {

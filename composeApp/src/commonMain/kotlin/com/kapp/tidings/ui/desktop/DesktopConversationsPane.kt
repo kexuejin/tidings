@@ -43,6 +43,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
+import org.jetbrains.compose.resources.painterResource
 import androidx.compose.ui.text.SpanStyle
 import androidx.compose.ui.text.buildAnnotatedString
 import androidx.compose.ui.text.font.FontWeight
@@ -61,10 +62,12 @@ import com.kapp.tidings.ui.components.WorkspaceGroupCreateDialog
 import com.kapp.tidings.ui.components.WorkspaceQrDialog
 import com.kapp.tidings.generated.resources.chat_no_selection_message
 import com.kapp.tidings.generated.resources.chat_no_selection_title
+import com.kapp.tidings.generated.resources.ic_chat_bubble
 import com.kapp.tidings.generated.resources.workspace_group_default_name
 import com.kapp.tidings.core.qr.QrEncoder
 import com.kapp.tidings.feature.chat.ChatScreen
 import com.kapp.tidings.ui.ContentWidths
+import com.kapp.tidings.ui.EmptyGlyph
 import com.kapp.tidings.ui.EmptyState
 import com.kapp.tidings.ui.components.QrCodeView
 import com.kapp.tidings.generated.resources.Res
@@ -732,6 +735,11 @@ private fun OnboardingEntryCard(
  *   覆盖成 `margin-top:14px` → `labelSmall`(11sp) + `onSurfaceVariant` + `Spacer(lg14)`(14dp)。
  *   文案 `r2_shell_nosel_hint` 只在原型里有（原型注释自陈是「提案」），
  *   它说的拖放能力桌面上确实存在（`desktopApp/.../DesktopHosting.kt` 装了 AWT `DropTarget`）。
+ *
+ * 第二轮审计补一笔（已登记 fidelity-deviations.yaml）：原型 `.emptyd` 没有
+ * 图形头，但「标题+两行灰字悬在大片空白里」正是用户点名的 demo 感来源；
+ * 补上与共享 [EmptyState] 同一颗 [EmptyGlyph]（64dp 软色圆底 + 28dp 主色图标），
+ * 主题是聊天，用 `ic_chat_bubble`，与 ChatScreen / 会话列表空态同字形。
  */
 @Composable
 internal fun DesktopNoSelectionEmpty(modifier: Modifier = Modifier) {
@@ -743,6 +751,8 @@ internal fun DesktopNoSelectionEmpty(modifier: Modifier = Modifier) {
                 .padding(horizontal = sp.xl),
             horizontalAlignment = Alignment.CenterHorizontally,
         ) {
+            EmptyGlyph(painterResource(Res.drawable.ic_chat_bubble))
+            Spacer(Modifier.height(sp.md))
             Text(
                 text = stringResource(Res.string.chat_no_selection_title),
                 style = MaterialTheme.typography.titleMedium,

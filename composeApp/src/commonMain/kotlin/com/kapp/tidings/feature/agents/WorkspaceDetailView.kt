@@ -318,6 +318,7 @@ fun WorkspaceDetailView(
                     message = stringResource(Res.string.workspace_detail_empty_body),
                     actionLabel = stringResource(Res.string.workspace_detail_empty_back),
                     onAction = onBack,
+                    icon = painterResource(Res.drawable.ic_terminal),
                     modifier = Modifier.fillMaxWidth(),
                 )
                 return@Column

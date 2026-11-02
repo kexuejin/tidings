@@ -73,9 +73,9 @@
     <string name="chat_more_actions">More actions</string>
     <string name="chat_byte_hint">%1$d / %2$d characters</string>
     <string name="chat_byte_over">Exceeds message limit (%1$d characters). Please split into multiple messages.</string>
-    <!-- 输入栏状态行的右半边：这条草稿实际会走哪条路。手机上没法像桌面那样把两条路摆成两个模式，
-         所以要说清楚"现在这样发出去是什么后果"，而不是只给一个字节数。 -->
-    <string name="chat_route_udp">Direct on this network</string>
+    <!-- 输入栏状态行的右半边：只在**例外路径**才说话（2026-11-01 产品级语汇裁决：
+         局域网直连是常态，常态不提示；改走 TCP 才是用户值得知道的异常）。
+         chat_route_udp 随之退场 —— 常态路线不再占主界面一行。 -->
     <string name="chat_route_tcp">Exceeds unicast limit, falling back to TCP</string>
     <string name="chat_delivery_sending">Sending</string>
     <string name="chat_delivery_sent">Delivered</string>
@@ -108,8 +108,8 @@
     <string name="chat_group_media_hint">Only online members can receive images/files</string>
     <string name="chat_folder_limit_hint">Up to 2,000 files at a time</string>
 
-    <string name="conv_subtitle_recent_suffix">, sorted by most recent message</string>
-    <string name="conv_subtitle_recent_suffix_ws">, sorted by recent activity</string>
+    <!-- Sorting-explainer suffixes retired 2026-11-01 (product-grade copy ruling):
+         explaining the sort algorithm to users is tool vocabulary. -->
     <string name="conv_subtitle_unread">%1$d conversations unread · %2$d messages</string>
     <string name="conv_menu_new_session">New conversation (go to pairing)</string>
     <string name="conv_menu_only_unread">Unread only</string>
@@ -357,7 +357,7 @@
     <string name="disc_manual_online">Online</string>
     <string name="disc_manual_offline">Offline</string>
     <string name="disc_manual_unreachable">Unreachable</string>
-    <string name="disc_cleanup_unreachable">Clean up unreachable (%1$d)</string>
+    <string name="disc_cleanup_unreachable">Clear unresponsive (%1$d)</string>
     <string name="disc_cleanup_none">No nodes need cleanup.</string>
     <string name="disc_cleanup_done">Cleaned up %1$d unreachable nodes.</string>
     <string name="banner_camera_denied">Camera permission denied. Please grant permission in system settings.</string>
@@ -382,8 +382,9 @@
     <string name="agent_count_items">%1$s items</string>
     <!-- Prototype wsCardHTML shows "online · ~/src/… · TCP 17879"; there is no path field in the
          protocol, so this line carries the two parts it can, from real values. -->
-    <!-- Board header summary; prototype relay.html:4208-4211. -->
-    <string name="workspace_board_subtitle">%1$d devices · %2$d agents · %3$d spaces · %4$d chats</string>
+    <!-- Board header summary; prototype relay.html:4208-4211. Copy-cleanup ruling drops
+         the "chats" count (tool vocabulary, not what a user scans for). -->
+    <string name="workspace_board_subtitle">%1$d devices · %2$d agents · %3$d workspaces</string>
     <string name="workspace_bar_switch">Switch Workspace</string>
     <string name="workspace_new_segment">New Segment</string>
     <string name="workspace_branch_label">Branch</string>
@@ -392,9 +393,9 @@
     <!-- Empty state (prototype relay.html:4563-4579): warn banner + "Agent (0)" head + card body + "check nodes" row.
          No wire key in the copy: prototype relay.html:4562 forbids printing `ag1`. -->
     <string name="agent_empty_title">No Agent has reported yet</string>
-    <string name="agent_empty_message">The peer must run a version with Agent capability and be connected; its workspaces will show up here.</string>
+    <string name="agent_empty_message">A peer's workspaces will show up here once it is online and running an Agent.</string>
     <string name="agent_empty_section">Agent (0)</string>
-    <string name="agent_empty_card">No device has reported an Agent or workspace yet. Check the Nodes page to confirm the peer is online; once an Agent announces a workspace, cards grow here automatically.</string>
+    <string name="agent_empty_card">No device has reported an Agent or workspace yet. Cards will appear here automatically once a peer comes online.</string>
     <string name="agent_empty_exit_title">Check the Nodes page</string>
     <string name="agent_empty_exit_body">Confirm the peer is online, then come back</string>
     <string name="agent_offline_title">Agent Offline</string>
@@ -876,7 +877,9 @@
     <!-- Sub-title of the Workspaces view. The prototype's tsub() has no branch for d-agents
          (it falls back to the nodes line); this one says what the screen is actually about. -->
     <string name="desktop_title_agents">Workspaces and sessions reported</string>
-    <string name="desktop_peer_header">%1$s · %2$s · %3$s</string>
+    <!-- desktop_peer_header (address · status · last seen) retired 2026-11-01 (product-grade
+         copy ruling): title bars print presence only via peerPresenceLine; the address lives
+         in the inspector pane and the nodes screen. -->
     <string name="desktop_peer_connected">Connected</string>
     <string name="desktop_peer_last_seen">Last seen %1$s</string>
 
@@ -888,7 +891,7 @@
     <!-- 状态栏。第一条里是两个空格，和 desktopApp 原型一致，别顺手收成一个。 -->
     <string name="desktop_status_connected">Connected to %1$d nodes</string>
     <string name="desktop_status_waiting">Not connected · Waiting for peers</string>
-    <string name="desktop_status_local">Local %1$s · %2$s</string>
+    <string name="desktop_status_local">Local · %1$s</string>
     <string name="desktop_status_pending">Pending %1$d</string>
     <string name="desktop_status_pairing_link">Pairing Link</string>
     <!-- 和 nodes_state_* 不是同一套：桌面上 Running 报的是「已连接」（状态栏已经在数节点），
@@ -905,13 +908,14 @@
     <string name="desktop_composer_resize">Drag to resize input area</string>
     <!-- 原型的工具行这里是「端到端加密」+ 盾牌（prototype/desktop/index.html:712），
          但协议层没有加密：线格式是明文 JSON（ARCHITECTURE.md:744/860，golden vector 就是明文），
-         全仓零加密实现。盾牌与这句话都是原型的 mock 遗留，已改成如实描述传输路径。
-         「局域网直连」只说真的：不经服务器、同一局域网内点对点。 -->
+         全仓零加密实现。盾牌与这句话都是原型的 mock 遗留；e2e/tcp_split 两个键已无消费，
+         2026-11-01 随产品级语汇裁决一并退场（常态路线不提示）。 -->
     <string name="desktop_composer_placeholder">Write something…</string>
+    <!-- 2026-11-01 产品级语汇裁决：局域网直连是常态，常态不提示 —— UDP 档只印草稿大小，
+         改走 TCP（例外路径）才带路由说明。desktop_composer_route_udp 随之退场。 -->
+    <string name="desktop_composer_draft_short">Draft %1$d / %2$d B</string>
     <string name="desktop_composer_draft">Draft %1$d / %2$d B · %3$s</string>
     <string name="desktop_composer_send_hint">Send · Shift+Enter for newline</string>
-    <string name="desktop_composer_emoji_note">Emoji measured in UTF-8 · mostly 4 bytes</string>
-    <string name="desktop_composer_route_udp">Direct on this network</string>
     <string name="desktop_composer_route_tcp">Auto TCP fallback</string>
 
     <!-- 会话列表 -->
@@ -935,7 +939,7 @@
     <string name="r2_shell_empty_scan_title">Scan to connect a phone</string>
     <string name="r2_shell_empty_scan_sub">Install Tidings on the phone and scan this code to pair</string>
     <string name="r2_shell_empty_drop_title">Drop a file in</string>
-    <string name="r2_shell_empty_drop_sub">Send it to another device of yours first to prove the link</string>
+    <string name="r2_shell_empty_drop_sub">Try it between two of your own devices first</string>
     <string name="r2_shell_empty_agent_title">This computer runs an Agent</string>
     <string name="r2_shell_empty_agent_sub">It is already receiving files; open it for status and logs</string>
     <string name="r2_shell_empty_footline">Devices with “Allow discovery” on in your LAN appear here automatically</string>
@@ -1100,7 +1104,7 @@
     <string name="cabinet_crumbs_root">Cabinet</string>
     <string name="cabinet_crumbs_up">Up</string>
     <string name="cabinet_footer_selected">%1$s selected · %2$s</string>
-    <string name="cabinet_footer_unselected_hint">Tap a file to select it; tap a folder to open it</string>
+    <string name="cabinet_footer_unselected_hint">No file selected</string>
     <string name="cabinet_download_count">Download %1$s</string>
     <string name="cabinet_side_title">Cabinet</string>
     <string name="cabinet_banner_dir_updated">Shared folder updated</string>

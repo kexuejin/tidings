@@ -87,11 +87,10 @@ import com.kapp.tidings.generated.resources.chat_send
 import com.kapp.tidings.generated.resources.chat_toolbar_capture
 import com.kapp.tidings.generated.resources.common_unknown_member
 import com.kapp.tidings.generated.resources.desktop_composer_draft
-import com.kapp.tidings.generated.resources.desktop_composer_emoji_note
+import com.kapp.tidings.generated.resources.desktop_composer_draft_short
 import com.kapp.tidings.generated.resources.desktop_composer_placeholder
 import com.kapp.tidings.generated.resources.desktop_composer_resize
 import com.kapp.tidings.generated.resources.desktop_composer_route_tcp
-import com.kapp.tidings.generated.resources.desktop_composer_route_udp
 import com.kapp.tidings.generated.resources.desktop_composer_send_hint
 import com.kapp.tidings.generated.resources.hist_search_title
 import com.kapp.tidings.generated.resources.ic_attachment
@@ -722,15 +721,17 @@ public fun DesktopComposer(
                         val showKeyHints = maxWidth >= ComposerRoomyWidth
                         // 超限时这里说的是「发不出去」，不是「换条路」—— 两件事在手机上是分开说的，
                         // 桌面上也必须分开：hint() 对 Over 返回 null，就是这条判据。
+                        // 产品级语汇裁决（2026-11-01）：局域网直连是常态，常态不提示 ——
+                        // UDP 档只印草稿大小；改走 TCP（例外路径）才带路由说明；超限红字。
                         val routeHint = mode.hint()
                         Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.fillMaxWidth()) {
                             // 草稿行必须是**加权**的那一个：Row 先量非加权子项，
                             // 不加权时一条超限长草稿会把发送按钮挤成 0 宽（曾经如此）。
                             Text(
-                                if (routeHint == null) {
-                                    stringResource(Res.string.chat_byte_over, Protocol.TEXT_TCP_LIMIT)
-                                } else {
-                                    stringResource(Res.string.desktop_composer_draft, bytes, Protocol.TEXT_UDP_LIMIT, stringResource(routeHint))
+                                when (mode) {
+                                    ComposeByteMode.Udp -> stringResource(Res.string.desktop_composer_draft_short, bytes, Protocol.TEXT_UDP_LIMIT)
+                                    ComposeByteMode.Tcp -> stringResource(Res.string.desktop_composer_draft, bytes, Protocol.TEXT_UDP_LIMIT, stringResource(routeHint!!))
+                                    ComposeByteMode.Over -> stringResource(Res.string.chat_byte_over, Protocol.TEXT_TCP_LIMIT)
                                 },
                                 style = MaterialTheme.typography.labelSmall,
                                 color = if (mode.overLimit) MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.onSurfaceVariant,
@@ -889,14 +890,6 @@ public fun EmojiPanel(onPick: (String) -> Unit) {
                     repeat(8 - row.size) { Spacer(Modifier.weight(1f)) }
                 }
             }
-            Text(
-                stringResource(Res.string.desktop_composer_emoji_note),
-                style = MaterialTheme.typography.labelSmall,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-                maxLines = 1,
-                overflow = TextOverflow.Ellipsis,
-                modifier = Modifier.padding(start = LocalAppSpacing.current.xxs, end = LocalAppSpacing.current.xxs, top = LocalAppSpacing.current.xs),
-            )
         }
     }
 }
@@ -906,9 +899,13 @@ public fun EmojiPanel(onPick: (String) -> Unit) {
  *
  * 返回 null 不是「还没算出来」，而是一个判据：调用点看到 null 就该说
  * 「超出单条上限（%d 字节），请分两条发。」，而不是继续说路线。
+ *
+ * 2026-11-01 产品级语汇裁决：UDP（局域网直连）是常态、不再单独成句 ——
+ * 常态提示只由调用点用 [Res.string.desktop_composer_draft_short] 印草稿大小；
+ * 这里只剩 TCP（例外路径）与 Over（发不出去）两个「值得说话」的状态。
  */
 public fun ComposeByteMode.hint(): StringResource? = when (this) {
-    ComposeByteMode.Udp -> Res.string.desktop_composer_route_udp
+    ComposeByteMode.Udp -> null
     ComposeByteMode.Tcp -> Res.string.desktop_composer_route_tcp
     ComposeByteMode.Over -> null
 }

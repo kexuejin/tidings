@@ -44,7 +44,7 @@ from typing import Dict, Iterable, List, Optional, Tuple
 EXPECTED_SPACING = 17  # 2026-10-15 G2 裁决 A：奇数节奏档 oxs3/oxs5/osm7/osm9/olg11/olg13（11→17）
 EXPECTED_SHAPE = 5
 EXPECTED_ELEVATION = 3
-EXPECTED_TYPOGRAPHY = 15
+EXPECTED_TYPOGRAPHY = 11  # display 三档 + headlineLarge 零消费已删；存活槽位见 AppTheme.kt 字阶口径注释
 EXPECTED_COLORS_LIGHT_MIN = 20
 EXPECTED_COLORS_DARK_MIN = 20
 # G2 裁决 B/C 新增两组语义 token。缺文件时读数为空（老仓不受影响），但**存在却读漏

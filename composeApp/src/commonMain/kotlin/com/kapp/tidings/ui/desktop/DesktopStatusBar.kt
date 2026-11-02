@@ -115,7 +115,10 @@ public fun DesktopStatusBar(
             // 在 Compact 直接隐藏，而不是让它把整行挤到折行。
             if (!compact) {
                 Text(
-                    stringResource(Res.string.desktop_status_local, state.settings.nodeId.take(8), state.settings.nick),
+                    // 只印昵称不印节点 ID 前缀：协议标识对普通用户无事可做（诊断包里查
+                    // 得到全量），26px 常驻栏里放它是 dev plumbing 上脸（茶话间基准同理：
+                    // 用户要的是「这是谁的机器」，不是这台机器的协议地址）。
+                    stringResource(Res.string.desktop_status_local, state.settings.nick),
                     style = MaterialTheme.typography.labelSmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                     maxLines = 1,

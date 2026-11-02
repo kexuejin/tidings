@@ -44,6 +44,7 @@ import androidx.compose.foundation.clickable
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.layout.heightIn
+import androidx.compose.foundation.layout.wrapContentSize
 import com.kapp.tidings.feature.chat.localDayKey
 import com.kapp.tidings.generated.resources.chat_day_divider_yesterday
 import com.kapp.tidings.generated.resources.chat_forward_title
@@ -778,6 +779,41 @@ fun badgeCountText(count: Int): String =
 
 /** 徽标还能容得下的最大数字，再大就退化成「99+」。 */
 private const val BADGE_MAX = 99
+
+/**
+ * 导航页签的**紧凑计数徽标**：16dp 高的小药丸，10sp 文字。
+ *
+ * 为什么不用 M3 `Badge`：它的默认尺寸（20dp 高、12sp 文字、随内容横向生长）
+ * 是按「压在 40dp 级别的图标」设计的；压到 22–24dp 的导航图标上，「99+」的
+ * 徽标会比图标本体还宽（预览实测），把图标整个吃掉。这里收成
+ * 「高 16 / 字 10 / 内边距 4」—— 徽标可以**盖住**图标的右上角，但不该比图标还大。
+ * 底色仍取 `accents.badge` / `onBadge`（M3 默认 error/白只有 4.17:1）。
+ *
+ * 移动端底栏（`CompactScaffold.NavIcon`）与桌面竖导/底导
+ * （`DesktopNavigation.NavIconWithBadge`）共用这一颗：两条导航的徽标必须
+ * 同一形态，否则同一台设备两个导航系统气质不同。
+ */
+@Composable
+fun NavCountBadge(count: Int) {
+    Box(
+        // 横向内边距取 spacing.xs（4dp）；高度不设 min——10sp 文字 + lineHeight 12
+        // 自身就有 ~16dp 的自然高度，再压 min 反而把药丸撑成方块。
+        modifier = Modifier
+            .background(MaterialTheme.accents.badge, RoundedCornerShape(percent = 50))
+            .padding(horizontal = LocalAppSpacing.current.xs)
+            .wrapContentSize(),
+        contentAlignment = Alignment.Center,
+    ) {
+        // 字号走 labelSmall（11sp）：M3 Badge 的 12sp 是「40dp 级图标」的配重，
+        // 导航 22–24dp 图标上用 11sp 才不会喧宾夺主；再小的手写字面量会进
+        // 逐屏差集（原型侧没有对应字号档）。
+        Text(
+            text = badgeCountText(count),
+            style = MaterialTheme.typography.labelSmall,
+            color = MaterialTheme.accents.onBadge,
+        )
+    }
+}
 
 /**
  * 转发目标选择对话框。列出当前可用会话（单聊好友与群聊），点击后触发 [onSelectTarget]。

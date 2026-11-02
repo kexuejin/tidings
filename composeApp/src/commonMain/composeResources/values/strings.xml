@@ -76,9 +76,9 @@
     <string name="chat_more_actions">更多功能</string>
     <string name="chat_byte_hint">%1$d / %2$d 字符</string>
     <string name="chat_byte_over">超出单条上限（%1$d 字符），请分两条发。</string>
-    <!-- 输入栏状态行的右半边：这条草稿实际会走哪条路。手机上没法像桌面那样把两条路摆成两个模式，
-         所以要说清楚"现在这样发出去是什么后果"，而不是只给一个大小。 -->
-    <string name="chat_route_udp">局域网直连</string>
+    <!-- 输入栏状态行的右半边：只在**例外路径**才说话（2026-11-01 产品级语汇裁决：
+         局域网直连是常态，常态不提示；改走 TCP 才是用户值得知道的异常）。
+         chat_route_udp 随之退场 —— 常态路线不再占主界面一行。 -->
     <string name="chat_route_tcp">超出单播上限，自动改走 TCP</string>
     <string name="chat_delivery_sending">发送中</string>
     <string name="chat_delivery_sent">已送达</string>
@@ -117,14 +117,8 @@
     <string name="chat_folder_limit_hint">一次最多 2,000 个文件</string>
 
     <!-- 会话列表（m-home-recent / m-home-unread）。副标是一整句，不是两段拼接。 -->
-    <!--
-      两条结尾分岔，判据是**下面那段「工作区」画不画**：
-      - 只有会话一条轴：排的是"最后一条消息"，说"按最近一条消息排"才是真的。
-      - 有了工作区段：一屏里两种东西各按各的活动时间，说"按最近活动排"。
-      合成一条会给没有工作区段的屏（预览、未读轴）写一句它做不到的话。
-    -->
-    <string name="conv_subtitle_recent_suffix">，按最近一条消息排</string>
-    <string name="conv_subtitle_recent_suffix_ws">，按最近活动排</string>
+    <!-- 排序说明句（「，按最近一条消息排」）已随 2026-11-01 产品级语汇裁决退场：
+         给用户解释排序算法是工具语汇，列表自己会证明它怎么排。 -->
     <string name="conv_subtitle_unread">%1$d 个会话有未读 · 共 %2$d 条</string>
     <string name="conv_menu_new_session">新建会话（去配对节点）</string>
     <string name="conv_menu_only_unread">只看有未读的</string>
@@ -430,7 +424,7 @@
     <string name="disc_manual_online">在线</string>
     <string name="disc_manual_offline">离线</string>
     <string name="disc_manual_unreachable">没有回应</string>
-    <string name="disc_cleanup_unreachable">清理没有回应的（%1$d）</string>
+    <string name="disc_cleanup_unreachable">清理无回应（%1$d）</string>
     <string name="disc_cleanup_none">没有需要清理的节点。</string>
     <string name="disc_cleanup_done">已清理 %1$d 个没有回应的节点。</string>
     <string name="banner_camera_denied">相机权限被拒绝，请在系统设置里开启后重试。</string>
@@ -472,8 +466,8 @@
     <!-- 原型 wsCardHTML 可见行是「在线 · ~/src/… · TCP 17879」；path 在协议里没有字段，
          这一行按真值只画它能画的两段（在线/离线 + TCP 端口）。TCP 是原样保留的协议词。 -->
     <!-- 页头汇总。原型 relay.html:4208-4211 的 sub =「N 台设备 · N 个 Agent · N 个工作区 · N 个会话[ · N 项待审批]」；
-         代码此前只在有待批时印后半句，设备/Agent/工作区/会话四个数一个都没有。 -->
-    <string name="workspace_board_subtitle">%1$d 台设备 · %2$d Agent · %3$d 工作区 · %4$d 会话</string>
+         文案清洗裁决（2026-11-01）去掉「· 会话」段 —— 数会话是工具语汇，普通用户扫一眼要的是前三个数。 -->
+    <string name="workspace_board_subtitle">%1$d 台设备 · %2$d Agent · %3$d 工作区</string>
     <string name="workspace_bar_switch">切换工作区</string>
     <string name="workspace_new_segment">开启新分段</string>
     <string name="workspace_branch_label">分支</string>
@@ -484,9 +478,9 @@
     <!-- 空态（原型 relay.html:4563-4579 screenAgentsEmpty）：警告条 +「Agent（0）」段头 + 卡内说明 +「去看看节点」行。
          文案**不印 wire 键**：原型 relay.html:4562 注释写死「不印 `ag1` 这种 wire 键（R2）」。 -->
     <string name="agent_empty_title">还没有任何 Agent 上报</string>
-    <string name="agent_empty_message">对端要跑着带 Agent 能力的版本、并且连上，它的工作区才会出现在这里。</string>
+    <string name="agent_empty_message">对方在线并运行 Agent 后，它的工作区会出现在这里。</string>
     <string name="agent_empty_section">Agent（0）</string>
-    <string name="agent_empty_card">还没有任何设备上报 Agent 与工作区。先去「节点」确认对方在线；Agent 一旦宣告了工作区，这里会自动长出卡片，不用手动加。</string>
+    <string name="agent_empty_card">还没有设备上报 Agent 与工作区。对方在线后，卡片会自动出现在这里。</string>
     <string name="agent_empty_exit_title">去看看节点</string>
     <string name="agent_empty_exit_body">确认对方在线，再回来看这里</string>
     <string name="agent_offline_title">Agent 离线</string>
@@ -1018,7 +1012,9 @@
     <!-- 工作区视图的标题栏副标题。原型 d-agents 的 tsub() 没有这一支（回落成了节点那句），
          这里补一句真的：这一屏看的就是「哪些工作区、各有几个会话在动」。 -->
     <string name="desktop_title_agents">已上报的工作区与会话</string>
-    <string name="desktop_peer_header">%1$s · %2$s · %3$s</string>
+    <!-- desktop_peer_header（地址 · 状态 · 最后在线三段）已随 2026-11-01 产品级语汇裁决
+         退场：标题栏/聊天头部只印在场（peerPresenceLine 用 desktop_peer_connected /
+         desktop_peer_last_seen 拼接），地址留在详情栏与节点页的合法语境。 -->
     <string name="desktop_peer_connected">已连接</string>
     <string name="desktop_peer_last_seen">最后在线 %1$s</string>
 
@@ -1030,7 +1026,9 @@
     <!-- 状态栏。第一条里是两个空格，和 desktopApp 原型一致，别顺手收成一个。 -->
     <string name="desktop_status_connected">已连接  %1$d 个节点</string>
     <string name="desktop_status_waiting">未连接任何节点 · 正在等待设备</string>
-    <string name="desktop_status_local">本机 %1$s · %2$s</string>
+    <!-- 状态栏只留昵称：节点 ID 前 8 位是协议标识，普通用户对它无事可做
+         （诊断包导出里查得到全量），印在 26px 常驻栏里就是 dev plumbing 上脸。 -->
+    <string name="desktop_status_local">本机 · %1$s</string>
     <string name="desktop_status_pending">待补发 %1$d</string>
     <string name="desktop_status_pairing_link">配对链接</string>
     <!-- 和 nodes_state_* 不是同一套：桌面上 Running 报的是「已连接」（状态栏已经在数节点），
@@ -1050,10 +1048,12 @@
          全仓零加密实现。盾牌与这句话都是原型的 mock 遗留，已改成如实描述传输路径。
          「局域网直连」只说真的：不经服务器、同一局域网内点对点。 -->
     <string name="desktop_composer_placeholder">写点什么…</string>
+    <!-- 2026-11-01 产品级语汇裁决：局域网直连是常态，常态不提示 —— UDP 档只印草稿大小，
+         改走 TCP（例外路径）才带路由说明。desktop_composer_route_udp 与孤儿键
+         desktop_composer_e2e / desktop_composer_tcp_split 随之退场。 -->
+    <string name="desktop_composer_draft_short">草稿 %1$d / %2$d B</string>
     <string name="desktop_composer_draft">草稿 %1$d / %2$d B · %3$s</string>
     <string name="desktop_composer_send_hint">发送 · Shift+Enter 换行</string>
-    <string name="desktop_composer_emoji_note">表情按 UTF-8 计 · 多数占 4 字符容量</string>
-    <string name="desktop_composer_route_udp">局域网直连</string>
     <string name="desktop_composer_route_tcp">自动改走 TCP</string>
 
     <!-- 会话列表 -->
@@ -1078,7 +1078,7 @@
     <string name="r2_shell_empty_scan_title">扫码连接手机</string>
     <string name="r2_shell_empty_scan_sub">手机装好捎话后扫这个码，配对就完成了</string>
     <string name="r2_shell_empty_drop_title">拖文件进来</string>
-    <string name="r2_shell_empty_drop_sub">先发给自己另一台设备，跑通链路再说</string>
+    <string name="r2_shell_empty_drop_sub">先发给自己另一台设备试一条</string>
     <string name="r2_shell_empty_agent_title">本机已在跑 Agent</string>
     <string name="r2_shell_empty_agent_sub">这台电脑已经在收文件了，点这里看状态与日志</string>
     <string name="r2_shell_empty_footline">局域网内开启「允许被发现」的设备会自动出现在这里</string>
@@ -1243,7 +1243,7 @@
     <string name="cabinet_crumbs_up">返回上级</string>
     <string name="cabinet_footer_selected">已选 %1$s 项 · %2$s</string>
     <!-- 手势如实描述：行体单击=文件选中/文件夹进入，勾选框单独可点。 -->
-    <string name="cabinet_footer_unselected_hint">点击文件选中，点击文件夹进入</string>
+    <string name="cabinet_footer_unselected_hint">未选中文件</string>
     <string name="cabinet_download_count">下载 %1$s 项</string>
     <string name="cabinet_side_title">文件柜</string>
     <string name="cabinet_banner_dir_updated">已更新共享目录</string>
