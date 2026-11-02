@@ -82,6 +82,31 @@ class DesktopInvokeWiringGuardTest {
             source.contains("latestPatchRefForCard("),
             "合流没有按卡片找回 patch（latestPatchRefForCard）—— 动作帧不带会话，合并分支永远进不去",
         )
+        // **工单卡的补丁只能由编排器自己记的账找回。** `latestPatchRefForCard` 走的是
+        // 会话台账反查（找一条 type=card 且 body 含 cardId 的事件），而工单卡是
+        // `broadcastChainCard` 直接广播的、从不写台账 ⇒ 对工单卡恒为 null。
+        // 2026-11-02 真机实测：点「合并此补丁」得到
+        // `no sandbox patch recorded for card chain-tmvyqfi84`，宿主仓零字节变化。
+        assertTrue(
+            source.contains("patchRefForCard("),
+            "合流没有先问编排器要补丁（patchRefForCard）—— 工单卡不写会话台账，按会话反查恒为空，合并必失败",
+        )
+        // 合并成功后要把同一张卡翻成「已合并」。群号从前靠扫本地消息反推，扫不到就
+        // 静默跳过 —— 合并落地、仓已改、卡面停在「待合并」，且一行日志都没有。
+        assertTrue(
+            source.contains("groupForCard(") && source.contains("merged card has no group to publish to"),
+            "翻面卡没有确定性的群来源，或发不出去时不留痕 —— 合并成功而卡面不翻面",
+        )
+        // 受阻卡上的 [重试]：卡里画了 actionId=retry，宿主就必须有分支接它，而且
+        // 必须排在 `followUpByCard` **之前**（否则 retry 会被当成一句用户微调）。
+        assertTrue(
+            source.contains("actionId == \"retry\"") && source.contains("retryByCard("),
+            "重试按钮没有落点 —— 真机上要么被插件转发丢掉，要么被当成一句微调",
+        )
+        assertTrue(
+            source.indexOf("actionId == \"retry\"") < source.indexOf("followUpByCard(cardId, actionId)"),
+            "retry 分支排在 followUpByCard 之后 —— actionId 会被当成用户文本喂进原型闭包",
+        )
         // T-G2 标签路由：两桥装配 + 接收侧持标签校验（缺一整条链就黑）。
         assertTrue(
             source.contains("controller.peerTagRouter = ") && source.contains("controller.channelDispatch = "),

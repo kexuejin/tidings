@@ -1587,6 +1587,8 @@
     <string name="card_status_blocked">Blocked</string>
     <string name="card_status_review_ready">Review Ready</string>
     <string name="card_status_aborted">Stopped</string>
+    <string name="card_status_prototype">Awaiting Choice</string>
+    <string name="card_status_merged">Merged</string>
     <string name="card_type_task_board">Task Board</string>
     <string name="card_type_diff_review">Code Review</string>
     <string name="card_type_prototype">Prototype</string>

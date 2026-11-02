@@ -158,6 +158,10 @@ object StageChain {
         put("cardId", "chain-" + progress.chainId)
         put("rev", progress.rev)
         put("type", "task-board")
+        // **把状态写进卡里**，不让客户端去反推。反推只能看「有没有某个动作 / 进度到没到
+        // 100」—— 于是「原型待选」被推成「待合并」、「已合并」推成什么都没有。
+        // 状态是发出方唯一知道的事实，就该由发出方声明。
+        put("state", progress.state)
         put("title", progress.title)
         put("progress", progress.percent)
         put("items", buildJsonArray {
@@ -312,6 +316,77 @@ object StageChain {
      * 跨模块只传字符串 —— 解析交给同样依赖齐备的域层。
      */
     fun cardJsonOf(progress: ChainProgress): String = cardOf(progress).toString()
+
+    /**
+     * 从沙箱的 `patch.diff` 里抽出**某个文件的完整新侧内容**。
+     *
+     * ## 为什么需要
+     *
+     * 沙箱只把改动交出来（patch.diff），任务跑完 worktree 就被无痕清理 —— 沙箱里那个
+     * `prototype.html` 在宿主侧从来没有过实体文件。而阶段 A 的验收要求卡上有**能打开的
+     * 原型产物**：卡上写一行「prototype.html 4 KB」但既没有文件也没有投递，是把
+     * 「有个东西」当成了「你拿得到」。真机上它的形态就是一行点不动的文字。
+     *
+     * ## 为什么只认「完整」的那两种形状
+     *
+     * unified diff 对**改过的文件**只带变化的 hunk，上下文之外的内容不在补丁里。拿它拼
+     * 出来的文件是**残缺的**，而残缺的 HTML 打开是白屏 —— 那比没有产物更糟（用户会以为
+     * 原型坏了）。所以只接受两种能还原整份文件的形状：
+     *
+     * 1. **新文件**（`--- /dev/null`）：`+` 行就是全文；
+     * 2. **单 hunk 且从第 1 行开始**：一个从 `-1` 起的 hunk 一直延伸到文件尾，新侧即全文。
+     *
+     * 其余情况返回 null —— 调用方据此**不宣称**产物，而不是给个编出来的字节数。
+     */
+    fun extractFileFromPatch(patchFile: java.io.File, path: String): String? {
+        if (!patchFile.exists() || patchFile.length() == 0L) return null
+        val wanted = path.trim().removePrefix("./")
+        val out = StringBuilder()
+        var inTarget = false
+        var sawHeader = false
+        var isNewFile = false
+        var hunkCount = 0
+        var startsAtLineOne = false
+        // 目标段落结束时才算「完整不完整」：补丁里通常有多个文件，用最后一节的状态
+        // 去判定目标文件，会把「新文件」判成不完整（第一节之后跟着别的文件就重置了）。
+        var targetComplete = false
+        fun closeSection() {
+            if (inTarget) targetComplete = isNewFile || (hunkCount == 1 && startsAtLineOne)
+        }
+        patchFile.forEachLine { line ->
+            if (line.startsWith("diff --git ")) {
+                closeSection()
+                inTarget = false
+                sawHeader = false
+                isNewFile = false
+                hunkCount = 0
+                startsAtLineOne = false
+            } else if (!sawHeader && (line.startsWith("--- ") || line.startsWith("+++ "))) {
+                if (line.startsWith("--- ") && line.removePrefix("--- ").trim() == "/dev/null") {
+                    isNewFile = true
+                }
+                if (line.startsWith("+++ ")) {
+                    val target = line.removePrefix("+++ ").trim().removePrefix("b/")
+                    inTarget = target == wanted
+                    sawHeader = true
+                }
+            } else if (inTarget && line.startsWith("@@")) {
+                hunkCount++
+                // `@@ -1,N +1,M @@`：从第 1 行开始 = 这个 hunk 覆盖到文件尾。
+                if (hunkCount == 1) startsAtLineOne = line.removePrefix("@@").trim().startsWith("-1,")
+            } else if (inTarget && hunkCount > 0) {
+                when {
+                    line.startsWith("+") -> out.append(line.substring(1)).append('\n')
+                    // 上下文行同样属于新侧；漏掉它们，改过的文件会被抽成「只剩新增的几行」。
+                    line.startsWith(" ") -> out.append(line.substring(1)).append('\n')
+                    // `-` 行是旧侧；`\ No newline at end of file` 是标记不是内容。
+                    else -> Unit
+                }
+            }
+        }
+        closeSection()
+        return out.toString().takeIf { targetComplete && it.isNotEmpty() }
+    }
 
     /**
      * 解析沙箱产物目录里的 report.json 或 patch.diff，提纯用于卡片展示的 Diff 与字节大小。

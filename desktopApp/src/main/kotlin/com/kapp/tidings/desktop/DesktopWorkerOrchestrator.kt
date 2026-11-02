@@ -6,6 +6,7 @@ import com.kapp.tidings.agent.ChainDiff
 import com.kapp.tidings.agent.ChainProgress
 import com.kapp.tidings.agent.ChainStage
 import com.kapp.tidings.agent.ControlPlane
+import com.kapp.tidings.agent.SandboxPatchRef
 import com.kapp.tidings.agent.StageChain
 import com.kapp.tidings.core.protocol.ConvId
 import com.kapp.tidings.domain.RelayController
@@ -70,11 +71,54 @@ internal class DesktopWorkerOrchestrator(
          */
         val agentKey: String = "codex",
         @Volatile var onFollowUp: (suspend (String) -> Unit)? = null,
+        /**
+         * 这张工单**当初要做什么**（用户原话，未经 containment 前导包装）。
+         *
+         * 只为一件事存在：受阻卡上的 [Retry] 要能把它重跑一遍。没有它，
+         * `retry` 这个 actionId 在宿主没有分支可落 —— 真机实测两种错法：
+         * 开发卡上被当成「转发给插件」丢掉（`card action retry ... has no local plugin`），
+         * 原型卡上落进 `onFollowUp` 被当成一句**微调**（点 Retry 出来的是
+         * 「Refined prototype ready」，什么都没重试）。
+         */
+        @Volatile var devPrompt: String? = null,
         /** 终局一次性完成（成功/受阻/退单/中止/原型待选）；后续再 complete 是无操作。 */
         val done: CompletableDeferred<TicketOutcome> = CompletableDeferred(),
     )
 
     private val activeTickets = ConcurrentHashMap<String, ActiveTicket>()
+
+    /**
+     * 「卡片 → 沙箱补丁」登记簿：合并按钮只带 `cardId`，宿主必须能凭它找回这次沙箱的
+     * （工作区, patch 路径）。
+     *
+     * 为什么不能只靠 `ControlPlane.latestPatchRefForCard`：那条路是**会话台账**反查 ——
+     * 先找「事件里有一条 type=card 且 body 含 cardId」的会话，再取该会话的 patch 产物。
+     * 但工单卡是 `controller.broadcastChainCard` 直接广播出去的，从不写任何会话台账，
+     * 于是对工单卡恒为 null。真机实测：点「合并此补丁」得到
+     * `no sandbox patch recorded for card chain-tmvyqfi84`，宿主仓一个字节都没变，
+     * `merged` 终态因此从未在设备上出现过。
+     *
+     * 谁发布卡片谁登记补丁：编排器在发 review_ready 卡的那一刻就知道 patch 路径，
+     * 这一跳不该再靠别处反推。
+     */
+    private val patchByCard = ConcurrentHashMap<String, SandboxPatchRef>()
+
+    /**
+     * 卡片 → 群：合并成功后要把**同一张卡**翻成「已合并」，得知道往哪个群发。
+     *
+     * 从前是靠扫 `controller.state.messages` 反推（找 cardId 相同的行，取 peerId 解群号）。
+     * 扫不到时 `appliedGroupId` 为 null，`publishCardNow` 首行就 `return` —— 合并成功、
+     * 宿主仓已改、手机上却停在「待合并」，而且**一行日志都没有**。真机实测：
+     * `patch merged into workspace by …` 之后什么都没有，卡面还是待合并。
+     * 群号在派单时就是已知的，不该事后反推。
+     */
+    private val groupByCard = ConcurrentHashMap<String, String>()
+
+    /** 合并分支的第一判据：编排器自己记的账（见 [patchByCard]）。 */
+    fun patchRefForCard(cardId: String): SandboxPatchRef? = patchByCard[cardId]
+
+    /** 合并成功后翻面卡该发到哪个群（见 [groupByCard]）。 */
+    fun groupForCard(cardId: String): String? = groupByCard[cardId]
 
     fun activeTicketsForConv(convId: String): List<ActiveTicket> =
         activeTickets.values.filter { it.convId == convId }
@@ -298,6 +342,47 @@ internal class DesktopWorkerOrchestrator(
         return true
     }
 
+    /**
+     * 受阻卡上的 [Retry]：在**同一张卡**上把开发/自愈循环重跑一遍。
+     *
+     * 为什么要专门一条：`retry` 是 `StageChain` 自己写进卡里的 actionId，客户端照发，
+     * 但宿主此前没有任何分支接它 —— 真机实测两种错法，都不是「重试」：
+     *  · 开发卡：落进通用插件转发，`card action retry ... has no local plugin (dropped)`，
+     *    点了毫无反应；
+     *  · 原型卡：落进 `followUpByCard`，`retry` 被当成一句**微调**喂给原型闭包，
+     *    卡面回的是「Refined prototype ready」。
+     * 卡上画了这个按钮，就必须有一条真能重跑的路径。
+     */
+    internal fun retryByCard(cardId: String): Boolean {
+        val tid = cardId.removePrefix("chain-")
+        val active = activeTickets[tid] ?: activeTickets.values.firstOrNull { it.ticketId == tid } ?: return false
+        if (active.stage != "blocked") return false
+        val prompt = active.devPrompt ?: return false
+        active.stage = "working"
+        scope.launch {
+            val outcome = try {
+                runDevelopmentAndHealLoop(
+                    ticket = active,
+                    convId = active.convId,
+                    groupId = active.groupId,
+                    ticketId = active.ticketId,
+                    title = active.title,
+                    repoPath = active.repoPath,
+                    revCounter = active.rev,
+                    defaultAgent = active.agentKey,
+                    devPrompt = prompt,
+                )
+            } catch (e: CancellationException) {
+                active.done.complete(TicketOutcome("aborted", null, "aborted", null))
+                throw e
+            } catch (t: Throwable) {
+                TicketOutcome("error", null, t.message ?: (t::class.simpleName ?: "retry failed"), null)
+            }
+            active.done.complete(outcome)
+        }
+        return true
+    }
+
     internal fun followUpByCard(cardId: String, text: String): Boolean {
         val tid = cardId.removePrefix("chain-")
         val active = activeTickets[tid] ?: activeTickets.values.firstOrNull { it.ticketId == tid } ?: return false
@@ -328,8 +413,7 @@ internal class DesktopWorkerOrchestrator(
         senderPeerId: String,
         prompt: String,
         replyToId: String?,
-    ) {
-        val groupId = ConvId.groupIdOf(convId)
+    ) {        val groupId = ConvId.groupIdOf(convId)
         val active = activeTicketForConv(convId)
 
         // 1. Direct Abort signal（第二道防线：`@codex 停` 这类「既是 prompt 又是打断」
@@ -550,6 +634,7 @@ internal class DesktopWorkerOrchestrator(
             rev = revCounter,
             role = roleNameOf(defaultAgent),
             agentKey = defaultAgent,
+            devPrompt = prompt,
             done = done,
         )
         activeTickets[ticketId] = ticket
@@ -593,13 +678,17 @@ internal class DesktopWorkerOrchestrator(
             "Do NOT inspect or read files outside the repository.\n\n" + prompt
 
         var protoCreated = false
+        var protoPatch: String? = null
         host.executeCliTask(
             agentKey = defaultAgent,
             prompt = protoPrompt,
             wsPath = repoPath,
             requestedSessionId = null,
             sessionTitle = title,
-            onArtifact = { _, name, _, _, _ -> if (name.contains("prototype") || name.endsWith(".html") || name == "patch.diff") protoCreated = true },
+            onArtifact = { path, name, _, _, _ ->
+                if (name == "patch.diff") protoPatch = path
+                if (name.contains("prototype") || name.endsWith(".html") || name == "patch.diff") protoCreated = true
+            },
             onEvent = { _, _, _, _ -> },
         )
 
@@ -609,7 +698,10 @@ internal class DesktopWorkerOrchestrator(
             "Layout B (Capsule Cards)" to false,
             "Layout C (Compact Table)" to false,
         )
-        val protoArtifacts = listOf("prototype.html" to 4096L)
+        // 产物**只能是真交付过的那份**：从沙箱 patch 抽出 prototype.html → 落盘 → 投群，
+        // 卡上字节数取落盘文件的真实长度。抽不出来就一个都不宣称 —— 从前这里写死
+        // `("prototype.html" to 4096L)`，卡上永远有一行点不动的产物，真机上是死链。
+        val protoArtifacts = deliverPrototypeArtifact(groupId, ticketId, protoPatch)
 
         val protoJson = publishTicketCard(
             groupId = groupId,
@@ -629,6 +721,10 @@ internal class DesktopWorkerOrchestrator(
         ticket.onFollowUp = { followUpText ->
             if (followUpText == "APPROVE_AND_DEVELOP") {
                 ticket.stage = "working"
+                val approvedPrompt = "Prototype confirmed! Implement the full features and test suite for: $prompt"
+                // 立项之后这张卡「要做的事」变了：从「画原型」变成「照原型实现」。
+                // Retry 重放的必须是后者，否则点重试等于把原型再画一遍。
+                ticket.devPrompt = approvedPrompt
                 runDevelopmentAndHealLoop(
                     ticket = ticket,
                     convId = convId,
@@ -638,22 +734,25 @@ internal class DesktopWorkerOrchestrator(
                     repoPath = repoPath,
                     revCounter = revCounter,
                     defaultAgent = defaultAgent,
-                    devPrompt = "Prototype confirmed! Implement the full features and test suite for: $prompt",
+                    devPrompt = approvedPrompt,
                 )
             } else {
                 ticket.stage = "working"
                 val refinePrompt = "Refine the prototype.html in workspace according to this user feedback: $followUpText. " +
                     "Keep it self-contained in prototype.html."
+                var refinePatch: String? = null
                 host.executeCliTask(
                     agentKey = defaultAgent,
                     prompt = refinePrompt,
                     wsPath = repoPath,
                     requestedSessionId = null,
                     sessionTitle = title,
-                    onArtifact = { _, _, _, _, _ -> },
+                    onArtifact = { path, name, _, _, _ -> if (name == "patch.diff") refinePatch = path },
                     onEvent = { _, _, _, _ -> },
                 )
                 ticket.stage = "prototype"
+                // 微调后的产物同样要真投一次：否则「改好了」这句话在手机上没有任何可打开的东西。
+                val refinedArtifacts = deliverPrototypeArtifact(groupId, ticketId, refinePatch)
                 publishTicketCard(
                     groupId = groupId,
                     ticketId = ticketId,
@@ -665,7 +764,7 @@ internal class DesktopWorkerOrchestrator(
                     roleName = ticket.role,
                     agentId = defaultAgent,
                     options = protoOptions,
-                    artifacts = protoArtifacts,
+                    artifacts = refinedArtifacts,
                 )
             }
         }
@@ -675,6 +774,47 @@ internal class DesktopWorkerOrchestrator(
             error = null,
             cardJson = protoJson,
         )
+    }
+
+    /**
+     * 原型产物的**真交付**：沙箱 patch → `prototype.html` 实体 → 投群 → 返回卡上该写的清单。
+     *
+     * 沙箱跑完就无痕清理，所以「沙箱里生成过 prototype.html」不等于「用户拿得到」。
+     * 这一跳把补丁里的新侧抽出来落成宿主侧文件、按 artifact 免确认投给群里，
+     * 卡片产物行才指向一个**真能打开**的东西。
+     *
+     * 任何一步不成立（没有补丁 / 补丁里没有这个文件 / 投递失败）都返回空清单 ——
+     * 宁可不宣称，也不要在卡上留一行点不动的产物。
+     */
+    private suspend fun deliverPrototypeArtifact(
+        groupId: String?,
+        ticketId: String,
+        patchPath: String?,
+    ): List<Pair<String, Long>> {
+        if (groupId == null || patchPath == null) return emptyList()
+        val html = StageChain.extractFileFromPatch(File(patchPath), "prototype.html") ?: return emptyList()
+        val dir = File(File(System.getProperty("java.io.tmpdir"), "tidings-artifacts"), ticketId)
+        val out = File(dir.apply { mkdirs() }, "prototype.html")
+        val written = runCatching { out.writeText(html) }.isSuccess
+        if (!written) {
+            println("[ORCHESTRATOR] prototype artifact write failed: " + out.absolutePath)
+            return emptyList()
+        }
+        val delivered = runCatching {
+            controller.sendAgentArtifacts(
+                ConvId.group(groupId),
+                listOf(
+                    com.kapp.tidings.core.transport.LocalFile(
+                        path = out.absolutePath,
+                        name = "prototype.html",
+                        size = out.length(),
+                    ),
+                ),
+            )
+        }.onFailure { t ->
+            println("[ORCHESTRATOR] prototype artifact delivery failed: " + t.message)
+        }.isSuccess
+        return if (delivered) listOf("prototype.html" to out.length()) else emptyList()
     }
 
     private suspend fun runDevelopmentAndHealLoop(
@@ -790,6 +930,16 @@ internal class DesktopWorkerOrchestrator(
         }
         // 取**尾部**再压：结论在最后，开头多是「我先看看仓库」这类过程话。
         val summary = StageChain.summarize(said.toString().takeLast(600)) ?: defaultSummary
+        // **发布之前登记**：手机可能在卡片到达的同一秒就点了「合并此补丁」，
+        // 先发后登记会漏掉这一拍（动作帧到了、账还没记上 ⇒ 又一次「no sandbox patch」）。
+        if (patchPath != null) {
+            patchByCard["chain-" + ticketId] = SandboxPatchRef(
+                sessionId = "",
+                workspacePath = repoPath,
+                patchPath = patchPath,
+            )
+            if (groupId != null) groupByCard["chain-" + ticketId] = groupId
+        }
         val reviewJson = publishTicketCard(
             groupId = groupId,
             ticketId = ticketId,

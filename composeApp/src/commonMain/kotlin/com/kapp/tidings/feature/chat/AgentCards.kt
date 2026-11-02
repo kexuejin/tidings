@@ -69,7 +69,9 @@ import com.kapp.tidings.generated.resources.card_status_aborted
 import com.kapp.tidings.generated.resources.card_status_blocked
 import com.kapp.tidings.generated.resources.card_status_done
 import com.kapp.tidings.generated.resources.card_status_failed
+import com.kapp.tidings.generated.resources.card_status_merged
 import com.kapp.tidings.generated.resources.card_status_pending
+import com.kapp.tidings.generated.resources.card_status_prototype
 import com.kapp.tidings.generated.resources.card_status_running
 import com.kapp.tidings.generated.resources.card_status_review_ready
 import com.kapp.tidings.generated.resources.card_type_task_board
@@ -791,6 +793,21 @@ private fun CardStateTag(card: AgentCardUi) {
             MaterialTheme.accents.warn.copy(alpha = 0.12f),
             MaterialTheme.colorScheme.onSecondaryContainer,
         )
+        // 阶段 A 的待选卡：它既不是「受阻」也不是「待合并」—— 它在等人选方案。
+        // 从前没有这一档，于是落到下面的「有 approve-prototype 动作 ⇒ 待合并」兜底，
+        // 真机上「原型待选」被标成「待合并」，用户以为可以合并一个还不存在的改动。
+        "prototype" -> Triple(
+            stringResource(Res.string.card_status_prototype),
+            MaterialTheme.accents.agentAccent.copy(alpha = 0.12f),
+            MaterialTheme.accents.agentAccentText,
+        )
+        // 合流成功的终态（测试方案 §4.3 的判据）：以前这个 state 不在映射里，卡上
+        // 干脆没有胶囊 —— 「合并成功了没有」只能靠横幅那句话去猜。
+        "merged" -> Triple(
+            stringResource(Res.string.card_status_merged),
+            MaterialTheme.accents.online.copy(alpha = 0.12f),
+            MaterialTheme.accents.online,
+        )
         "review_ready" -> Triple(
             stringResource(Res.string.card_status_review_ready),
             MaterialTheme.accents.online.copy(alpha = 0.12f),
@@ -812,7 +829,9 @@ private fun CardStateTag(card: AgentCardUi) {
             )
         card.actions.any { it.actionId == "approve-prototype" } ->
             Triple(
-                stringResource(Res.string.card_status_review_ready),
+                // 老卡（发出方还没声明 state）的兜底：有「Approve & Develop」就是在等选方案，
+                // 不是「待合并」—— 待合并说的是「有补丁可以合」，这里连补丁都还没有。
+                stringResource(Res.string.card_status_prototype),
                 MaterialTheme.accents.agentAccent.copy(alpha = 0.12f),
                 MaterialTheme.accents.agentAccentText,
             )

@@ -307,4 +307,111 @@ class StageChainTest {
         val normal = "请帮我修改一下登录界面的文案并提交 PR"
         assertEquals(0, StageChain.parseStages(normal).size)
     }
+
+    // ---------------------------------------------------------------- 原型产物抽取
+
+    @Test
+    fun theCardDeclaresItsOwnStateInsteadOfLettingTheClientGuess() {
+        val json = StageChain.cardOf(
+            ChainProgress(
+                chainId = "t1",
+                rev = 2,
+                state = "prototype",
+                title = "原型",
+                stages = listOf("Codex" to "prototype"),
+                percent = 50,
+            ),
+        )
+        assertEquals("prototype", (json["state"] as kotlinx.serialization.json.JsonPrimitive).content)
+        assertEquals(
+            "prototype",
+            (json["items"] as kotlinx.serialization.json.JsonArray)
+                .first().let { (it as kotlinx.serialization.json.JsonObject)["status"] }
+                .let { (it as kotlinx.serialization.json.JsonPrimitive).content },
+            "items 里的 status 与顶层 state 必须一致，否则客户端两处读法会给出不同胶囊",
+        )
+    }
+
+    @Test
+    fun extractFileFromPatchRebuildsTheNewSideOfANewFile() {
+        val patch = kotlin.io.path.createTempFile("proto", ".diff").toFile()
+        patch.deleteOnExit()
+        patch.writeText(
+            """
+            diff --git a/prototype.html b/prototype.html
+            new file mode 100644
+            index 0000000..1111111
+            --- /dev/null
+            +++ b/prototype.html
+            @@ -0,0 +1,3 @@
+            +<html>
+            +<body>hi</body>
+            +</html>
+            diff --git a/other.txt b/other.txt
+            --- a/other.txt
+            +++ b/other.txt
+            @@ -1 +1 @@
+            -old
+            +new
+            """.trimIndent() + "\n",
+        )
+        val html = StageChain.extractFileFromPatch(patch, "prototype.html")
+        assertEquals("<html>\n<body>hi</body>\n</html>\n", html, "新文件要按 + 行原样还原，且不能把别的文件混进来")
+    }
+
+    @Test
+    fun extractFileFromPatchKeepsContextLinesOfAModifiedFile() {
+        val patch = kotlin.io.path.createTempFile("proto-mod", ".diff").toFile()
+        patch.deleteOnExit()
+        patch.writeText(
+            """
+            diff --git a/prototype.html b/prototype.html
+            --- a/prototype.html
+            +++ b/prototype.html
+            @@ -1,2 +1,2 @@
+             <html>
+            -<body>light</body>
+            +<body>dark</body>
+             </html>
+            """.trimIndent() + "\n",
+        )
+        val html = StageChain.extractFileFromPatch(patch, "prototype.html")
+        assertEquals(
+            "<html>\n<body>dark</body>\n</html>\n",
+            html,
+            "上下文行属于新侧：只取 + 行会把改过的文件抽成残缺片段",
+        )
+    }
+
+    @Test
+    fun extractFileFromPatchReturnsNullWhenTheFileIsNotInThePatch() {
+        val patch = kotlin.io.path.createTempFile("proto-none", ".diff").toFile()
+        patch.deleteOnExit()
+        patch.writeText("diff --git a/x.txt b/x.txt\n--- a/x.txt\n+++ b/x.txt\n@@ -1 +1 @@\n-a\n+b\n")
+        assertEquals(null, StageChain.extractFileFromPatch(patch, "prototype.html"), "抽不到就是抽不到，不能返回空串让调用方以为拿到了")
+    }
+
+    @Test
+    fun extractFileFromPatchRefusesAPartialEditItCannotRebuild() {
+        val patch = kotlin.io.path.createTempFile("proto-partial", ".diff").toFile()
+        patch.deleteOnExit()
+        // 只改中间一行：hunk 从第 40 行开始，上下文之外的内容不在补丁里。
+        patch.writeText(
+            """
+            diff --git a/prototype.html b/prototype.html
+            --- a/prototype.html
+            +++ b/prototype.html
+            @@ -40,3 +40,3 @@
+             <div class="a">
+            -<span>light</span>
+            +<span>dark</span>
+             </div>
+            """.trimIndent() + "\n",
+        )
+        assertEquals(
+            null,
+            StageChain.extractFileFromPatch(patch, "prototype.html"),
+            "改过的文件只带 hunk：拼出来的 HTML 是残缺的，打开就白屏 —— 宁可不宣称产物",
+        )
+    }
 }

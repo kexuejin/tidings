@@ -32,6 +32,7 @@ import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.runBlocking
 import com.kapp.tidings.core.protocol.AgentSenderId
+import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.JsonPrimitive
 import kotlinx.serialization.json.contentOrNull
 import kotlinx.serialization.json.buildJsonArray
@@ -951,12 +952,17 @@ internal class DesktopExtension(
                 // 于是合并分支在真机上永远进不去（实测卡面提示已处理，宿主仓零提交）。
                 // 现在 null 就按卡片回台账里找会话。
                 if (actionId == "merge-patch") {
-                    val ref = sessionId?.takeIf { it.isNotBlank() }
-                        ?.let { sid ->
-                            created.latestPatchRefFor(sid)?.let { (ws, patch) ->
-                                com.kapp.tidings.agent.SandboxPatchRef(sid, ws, patch)
+                    // 三条判据，从「谁最清楚」排到「谁最兜底」：
+                    // 1. 编排器的登记簿 —— 发卡的那一刻就知道 patch 在哪（工单卡只此一条有效）；
+                    // 2. 动作帧带的会话（插件转发路径，上游常常给 null）；
+                    // 3. 控制面按会话台账反查卡片所属会话（历史路径，工单卡恒为 null）。
+                    val ref = workerOrchestrator?.patchRefForCard(cardId)
+                        ?: sessionId?.takeIf { it.isNotBlank() }
+                            ?.let { sid ->
+                                created.latestPatchRefFor(sid)?.let { (ws, patch) ->
+                                    com.kapp.tidings.agent.SandboxPatchRef(sid, ws, patch)
+                                }
                             }
-                        }
                         ?: created.latestPatchRefForCard(cardId)
                     val outcome = when (ref) {
                         null -> DesktopPatchMerge.Outcome.Conflict("no sandbox patch recorded for card " + cardId)
@@ -965,18 +971,46 @@ internal class DesktopExtension(
                     when (outcome) {
                         is DesktopPatchMerge.Outcome.Applied -> {
                             println("[RELAY-INVOKE] patch merged into workspace by " + decidedBy + " (card " + cardId + ")")
-                            val appliedGroupId = controller.state.value.messages.values
+                            val appliedRow = controller.state.value.messages.values
                                 .asSequence()
                                 .flatten()
                                 .lastOrNull { row ->
                                     (row.renderCard?.get("cardId") as? JsonPrimitive)?.contentOrNull == cardId
-                                }?.peerId?.let(com.kapp.tidings.core.protocol.ConvId::groupIdOf)
+                                }
+                            val appliedGroupId = workerOrchestrator?.groupForCard(cardId)
+                                ?: appliedRow?.peerId
+                                    ?.let(com.kapp.tidings.core.protocol.ConvId::groupIdOf)
+                            if (appliedGroupId == null) {
+                                // 合并已经落地、仓已经改了，卡却发不出去 —— 必须留痕。
+                                // 从前这里静默跳过，卡面永远停在「待合并」。
+                                println("[RELAY-INVOKE] merged card has no group to publish to (card " + cardId + ")")
+                            }
+                            val base = appliedRow?.renderCard as? JsonObject
                             val mergedCard = buildJsonObject {
+                                // **在原卡上改，不另造一张。** 用户点的是这张卡上的按钮，
+                                // 翻面之后应该还是它：标题、进度、diff 明细（`+115 −0 / 2 个文件`）
+                                // 都留着，只把状态换成「已合并」。从前这里从零 build 一张
+                                // `{type=diff-review, title="Patch applied"}`，翻面瞬间 diff
+                                // 整块消失 —— 用户看不出「合进去的到底是哪几行」。
+                                base?.forEach { (k, v) ->
+                                    if (k != "state" && k != "rev" && k != "banner" &&
+                                        k != "title" && k != "actions"
+                                    ) {
+                                        put(k, v)
+                                    }
+                                }
                                 put("cardId", JsonPrimitive(cardId))
+                                // rev 交给 broadcastBoardCard 自己补（不比既有大时 +1）。
                                 put("rev", JsonPrimitive(1))
-                                put("type", JsonPrimitive("diff-review"))
+                                if (base?.get("type") == null) put("type", JsonPrimitive("diff-review"))
                                 put("state", JsonPrimitive("merged"))
-                                put("title", JsonPrimitive("Patch applied"))
+                                put(
+                                    "title",
+                                    JsonPrimitive(
+                                        (base?.get("title") as? JsonPrimitive)?.contentOrNull
+                                            ?: "Patch applied",
+                                    ),
+                                )
                                 putJsonObject("banner") {
                                     put("text", JsonPrimitive("Changes merged into workspace"))
                                     put("tone", JsonPrimitive("success"))
@@ -1084,6 +1118,19 @@ internal class DesktopExtension(
                     } else {
                         println("[RELAY-INVOKE] direction-ask had nothing pending (card $cardId)")
                     }
+                } else if (actionId == "retry") {
+                    // 受阻卡的 [重试]：由编排器把这张工单的开发/自愈循环重跑一遍。
+                    // 必须排在 `followUpByCard` 之前 —— 否则 `retry` 会被当成一句用户
+                    // 文本喂进原型闭包（真机实测：点 Retry 出来的是「Refined prototype ready」），
+                    // 或者落到插件转发被丢掉（`card action retry ... has no local plugin`）。
+                    val restarted = workerOrchestrator?.retryByCard(cardId) == true
+                    println(
+                        if (restarted) {
+                            "[RELAY-INVOKE] retry restarted the dev loop (card $cardId)"
+                        } else {
+                            "[RELAY-INVOKE] retry had nothing to restart (card $cardId)"
+                        },
+                    )
                 } else if (workerOrchestrator?.followUpByCard(cardId, actionId) == true) {
                     println("[RELAY-INVOKE] card action \"$actionId\" consumed as follow-up by $decidedBy")
                 } else {

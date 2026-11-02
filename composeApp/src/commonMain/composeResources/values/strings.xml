@@ -1754,6 +1754,8 @@
     <string name="card_status_blocked">受阻</string>
     <string name="card_status_review_ready">待合并</string>
     <string name="card_status_aborted">已停止</string>
+    <string name="card_status_prototype">待确认</string>
+    <string name="card_status_merged">已合并</string>
     <string name="card_type_task_board">工单任务</string>
     <string name="card_type_diff_review">代码审查</string>
     <string name="card_type_prototype">原型方案</string>

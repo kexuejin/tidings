@@ -554,3 +554,244 @@ codex 上游仍不可达（确定性失败），本轮验证全部走失败路�
 3. **自愈循环畅通（观察 C 推翻）**：Heal loop 1/3 卡到手机、round-2/3 沙箱依次创建、
    3 轮后 `Handed back: exceeded max heal rounds (3)` 退单卡到手机。
    昨日「working 卡未达手机」判为宿主重启后队列重放洪流的瞬态窗口，非结构性阻塞。
+
+## 13. 阶段 A/B/C 全线上机 + `merged` 终态首次出现（2026-11-02 11:55–12:25）
+
+§12 结尾留的三条「待真机复验」（原型派单触发、追问唤醒、自愈退单）本轮全部补上，
+并把 §5 里那条**最大口径缺口**（`merged` 终态从未在设备上出现过）收口。
+
+### 13.0 装置：确定性桩 CLI，验的是链路不是模型
+
+本机没有任何可用的真 agent CLI：`codex exec` 50 秒零输出（上游不可达）、`claude`
+未登录、`agy` 502、`gemini` 解释器坏（`/opt/homebrew/opt/node/bin/node` 不存在）。
+本轮改用 `TIDINGS_CODEX_CLI=/tmp/sdlc/stub-codex`：一个与 `codex exec --json` 同形的
+`sh` 桩（`thread.started` / `item.completed` / `turn.completed`），按 prompt 分支产出确定产物。
+
+**这条要写死：本节验证的是「派单 → 沙箱 → 产物 → 卡片 → 合流」这条编排链路与交互，
+不是模型能力。** 桩能产出的东西（`prototype.html`、`src/aqi.js`、`normalizeQuery` 修复）
+都是预先写好的，不构成「真 agent 干成了活」的证据。
+
+### 13.1 阶段 A：原型立项在真机上第一次完整走通
+
+`@codex-final prototype` → 沙箱 `t-1-29c8dcce`（`+50 −1445`，1 文件，patch 51697 B）。
+
+卡片 `chain-tmvyq8swf` **只有一行**（单卡槽 T-2d 生效），`rev 3`，卡片 JSON：
+
+```json
+{"cardId":"chain-tmvyq8swf","rev":3,"type":"task-board","state":"prototype",
+ "title":"prototype","progress":50,
+ "items":[{"id":"Codex","label":"Codex","status":"prototype"}],
+ "banner":{"text":"Interactive prototype ready. Select layout or reply to adjust.","tone":"info"},
+ "options":[{"label":"Layout A (Minimalist)","recommended":true},
+            {"label":"Layout B (Capsule Cards)","recommended":false},
+            {"label":"Layout C (Compact Table)","recommended":false}],
+ "artifacts":[{"name":"prototype.html","bytes":2599,"mime":"text/html"}],
+ "actions":[{"actionId":"approve-prototype","label":"Approve & Develop","approval":true}]}
+```
+
+本轮修掉的两处（都在 §12 之后）：
+
+- **`state` 由卡片自己声明**（`StageChain.cardOf` 新增 `state` 字段）。此前客户端只能靠
+  `actions` 里有没有 `approve-prototype` 反推状态，于是原型待选卡被标成**待合并**。
+  真机复验：新包下同一张卡标签是 **待确认**。
+- **产物是真交付的那一份**。从前 `deliverPrototypeArtifact` 未实现时卡上写死
+  `("prototype.html" to 4096L)`，那行点不动。现在卡上 `bytes=2599` 等于落盘文件真实长度，
+  群里同时出现一张**真传输卡**：`prototype.html · 2 KB · 已接收 · 已存到 …/prototype.html`，
+  带「打开 / 分享」。
+
+### 13.2 追问微调：无 @ 文本唤醒同一张工单
+
+待选卡在屏时发无 @ `make it dark` → `direction-ask` 卡
+`chain-…-ask`（`state=blocked`，横幅「「make it dark」— 是调整这个原型，还是一个新任务？」，
+两个 action）→ 点「作为调整发送」→ 原卡 `rev 4`「Resumed: processing follow-up」
+→ refine 沙箱 `t-2-567089de` → `rev 5`「Refined prototype ready」，产物字节数同步更新。
+`direction-ask resolved: dispatch-pending` 与「作为调整发送」两条分支本轮都走过。
+
+### 13.3 立项转开发 → `review_ready`
+
+点 `Approve & Develop` → `approvePrototypeByCard` → dev 循环（prompt 前缀
+`Prototype confirmed! Implement the full features and test suite for: prototype`）
+→ 沙箱 `t-7-f42d8705`（`+115 −0`，2 文件，patch 3879 B）→ 卡 `chain-tmvyqfi84`
+`rev 5`：
+
+```json
+{"cardId":"chain-tmvyqfi84","rev":5,"state":"review_ready","progress":100,
+ "banner":{"text":"2 个文件","tone":"success"},
+ "artifacts":[{"name":"patch.diff","bytes":3879,"mime":"text/x-diff"}],
+ "diff":{"path":"ws-clean","summary":"2 个文件","additions":115,"deletions":0},
+ "actions":[{"actionId":"merge-patch","label":"Merge","approval":true}]}
+```
+
+### 13.4 `merged` 终态：两个阻断缺陷，都不是 UI 问题
+
+点「合并此补丁」得到：
+
+```
+[RELAY-INVOKE] patch merge FAILED (card chain-tmvyqfi84): no sandbox patch recorded for card chain-tmvyqfi84
+[RELAY-INVOKE] patch merge has no session to record on (card chain-tmvyqfi84)
+```
+
+宿主仓 `git status` 干净、`src/utils/` 里没有 `uvIndex.js` —— **一个字节都没变**。
+这就是 `merged` 从未出现的直接原因，拆开是两个独立缺陷：
+
+**D1 工单卡不写会话台账，按会话反查补丁恒为空。**
+`ControlPlane.latestPatchRefForCard` 的判据是「找一个会话，它的事件里有一条 `type=card`
+且 body 含 cardId」，再取该会话的 patch 产物。但工单卡是
+`controller.broadcastChainCard` → `broadcastBoardCard` **直接广播**的，从不写任何会话台账
+⇒ 对工单卡恒为 null。§12 里 `c7945fa4` 加的 `latestPatchRefForCard` 兜底因此形同虚设。
+
+修法（谁发布卡片谁登记补丁）：`DesktopWorkerOrchestrator` 增加
+`patchByCard: ConcurrentHashMap<String, SandboxPatchRef>`，在**发布 review_ready 卡之前**
+登记（先发后登记会漏掉「卡片到达同一秒用户就点合并」这一拍）；`onHostCardAction` 的
+`merge-patch` 分支第一判据改为 `workerOrchestrator.patchRefForCard(cardId)`，
+原有的 `latestPatchRefFor(sessionId)` / `latestPatchRefForCard(cardId)` 保留为兜底。
+
+**D2 翻面卡靠扫本地消息反推群号，扫不到就静默不发。**
+合并成功后要往群里发同一张卡的 `state=merged` 版本，群号是从
+`controller.state.messages` 里找 cardId 相同的行、再 `peerId → ConvId.groupIdOf` 反推的。
+反推失败时 `appliedGroupId` 为 null，`publishCardNow` 首行 `return` ——
+合并成功、仓已改、手机停在「待合并」，**一行日志都没有**。真机实测正是如此。
+
+修法：编排器同时登记 `groupByCard`（群号派单时就是已知的），
+`appliedGroupId = workerOrchestrator.groupForCard(cardId) ?: <原有反推>`，
+且反推也失败时打 `merged card has no group to publish to`。
+
+**另外把翻面卡改成「在原卡上改」**：从前从零 build 一张
+`{type=diff-review, title="Patch applied"}`，翻面瞬间 diff 明细整块消失，
+用户看不出合进去的是哪几行。现在保留原卡的 `type/items/progress/artifacts/diff/title`，
+只覆盖 `state/rev/banner` 并删掉 `actions`。
+
+修后真机（阶段 C 那一次）卡面：
+
+```
+工单任务 · 已合并
+fix beijing uppercase lookup
+Changes merged into workspace
+进展 100%   Codex
+ws-clean +31 −1 · 2 个文件 +31 −1
+patch.diff · text/x-diff · 1.9 KB
+已由 e4bd7b99-… 处理          ← 按钮消失
+```
+
+手机库里同一行（单卡槽原位替换）：
+
+```json
+{"cardId":"chain-tmvyqxzmr","rev":6,"state":"merged","title":"fix beijing uppercase lookup",
+ "banner":{"text":"Changes merged into workspace","tone":"success"},
+ "progress":100,"diff":{"path":"ws-clean","summary":"2 个文件","additions":31,"deletions":1},
+ "artifacts":[{"name":"patch.diff","bytes":1989,"mime":"text/x-diff"}],
+ "decidedBy":"e4bd7b99-6eb9-4278-a679-edde214909e9","decidedActionId":"merge-patch"}
+```
+
+`rev` 是 6 而不是 1：`broadcastBoardCard` 发现传入 rev 不大于既有值时自己 +1，
+所以翻面卡不会因为 rev 回退被客户端的 T-2d 规则丢掉。
+
+### 13.5 阶段 B：1→N 特性迭代（AQI 面板）
+
+`@codex-final add aqi panel with tests` → 沙箱 `t-1-1a5b72af`（`+92 −0`，2 文件，
+`src/aqi.js` + `test/aqi.test.js`）→ `review_ready`（待合并、`2 个文件 +92 −0`、
+`patch.diff 3.5 KB`）→ 点合并 → `patch merged into workspace`，宿主仓出现
+`?? src/aqi.js` / `?? test/aqi.test.js`。
+
+### 13.6 阶段 C：缺陷自愈（BEIJING 大写查不到）
+
+`@codex-final fix beijing uppercase lookup` → 沙箱 `t-1-063b577b`（`+31 −1`，2 文件，
+patch 1989 B）→ 全量回归 **74 pass / 0 fail / 305 ms** → `review_ready`
+（`+31 −1`、`patch.diff 1.9 KB`）→ 合并 → 宿主仓：
+
+```js
+function normalizeQuery(cityQuery) {
+  // 归一化：NFKC（全角空格/全角字母）→ trim → 小写。
+  if (typeof cityQuery !== 'string') return '';
+  return cityQuery.normalize('NFKC').trim().toLowerCase();
+}
+```
+
+`M src/services/weatherService.js` + `?? test/cityQuery.test.js`，卡面 `已合并`（见 13.4）。
+
+在**合并过的宿主仓**里再跑一次全量（计划 §阶段 B 第 3 条的判据「通过数提升且全绿」）：
+
+```
+# tests 79   # pass 79   # fail 0   # duration_ms 276
+```
+
+71（基线）+ 5（AQI）+ 3（城市）＝ 79，工作区为 `M src/services/weatherService.js` +
+三个未跟踪新文件。**但 HEAD 没动** —— 这一条见 13.10 的 D5。
+
+### 13.7 §6.1 硬打断：两次实测
+
+| 次数 | 判据 | 宿主自测 | 进程树 | 产物 |
+|---|---|---|---|---|
+| 1 | 发 `stop` → 进程消失 | `killed 2/2 pid(s) in 59ms` | `sh` + `sleep` 全灭 | `slow-drill.txt` 未生成 |
+| 1 | 端到端（含 adb 往返） | 90 ms | — | — |
+| 2 | 收尾遗留工单 | `killed 2/2 pid(s) in 54ms` | 同上 | — |
+
+宿主日志：`[sandbox] abort t-2-a635ef88: entered at …, destroying process tree`。
+卡面：`已停止` / `Aborted by user request` / `进展 0%`，与 500 ms 预算相比余量充足。
+
+### 13.8 §6.2 三轮自愈交回 + `Retry` 的真落点
+
+`@codex-final failing drill`（桩永远不产出补丁）跑满三轮：
+`t-3`（`task failed: cli exit=1`，未走到 harvest）+ `t-4` + `t-5`（均
+`nothing to harvest`）→ 卡 `chain-tmvyr1ibx` `rev 7` `state=blocked`，
+横幅 `Handed back: exceeded max heal rounds (3) — No patch produced by worker`，`进展 40%`。
+
+**D3 `retry` 这个 actionId 宿主没有分支。** `StageChain` 往受阻卡里写
+`actionId=retry`，客户端照发，但 `onHostCardAction` 没有 `retry` 分支，于是落到
+`followUpByCard(cardId, actionId)` —— 把**机器 id 当用户文本**喂进去。真机两种错法：
+
+- 开发卡：`card action retry for agent codex has no local plugin (dropped)`，点了毫无反应；
+- 原型卡：`retry` 被原型闭包当成一句微调，卡面回「Refined prototype ready」
+  （沙箱 `t-5-3818639d` `+61 −1447`，什么都没重试）。
+
+修法：`ActiveTicket` 增加 `devPrompt`（立项后改写成
+`Prototype confirmed! …`，让重试重放的是「照原型实现」而不是「再画一遍原型」）；
+新增 `retryByCard(cardId)` 在同一张卡上重跑 `runDevelopmentAndHealLoop`；
+`onHostCardAction` 增加 `retry` 分支并**排在 `followUpByCard` 之前**。
+真机复验：点 Retry → `retry restarted the dev loop (card chain-tmvyr5ss1)`，
+新沙箱 `t-4-1e140629` 立刻起来，再跑满三轮后再次交回。
+
+### 13.9 §6.4 双工单并发
+
+同一群里连发 `slow drill` 与 `quick drill`，两条链各自独立：
+
+| cardId | rev | state | title | progress |
+|---|---|---|---|---|
+| `chain-tmvyr7fcg` | 2 | `working` | slow drill | 40 |
+| `chain-tmvyr7n9m` | 4 | `review_ready` | quick drill | 100 |
+
+`slow drill` 的桩进程仍在 `sleep 120` 时，`quick drill` 已经独立跑完并出 `review_ready`
+卡 —— 两条工单的卡片、沙箱、补丁互不干扰（`quick drill` 的 patch 为 `+17 −0`）。
+
+### 13.10 本轮新增缺陷清单
+
+| 编号 | 现象 | 根因 | 状态 |
+|---|---|---|---|
+| D1 | 合并必然失败 `no sandbox patch recorded for card …` | 工单卡不写会话台账，`latestPatchRefForCard` 恒空 | 已修（`patchByCard` 登记） |
+| D2 | 合并成功但卡不翻面，且无日志 | 群号靠扫本地消息反推，失败即静默 `return` | 已修（`groupByCard` + 留痕） |
+| D3 | `Retry` 要么无反应、要么变成原型微调 | 宿主无 `retry` 分支，落到 `followUpByCard` 当文本 | 已修（`retryByCard`） |
+| D4 | 交回横幅只报最后一轮原因 | `executionError` 每轮覆盖，首轮 `cli exit=1` 被末轮 `No patch` 覆盖 | 未修（记录） |
+| D5 | 合并后的改动不进 git 历史，下一轮沙箱看不到 | `DesktopPatchMerge.apply` 只 `git apply` 到工作区，不 `add`/`commit`；worktree 从 HEAD 建 | 未修（记录，需产品决策） |
+| D6 | 翻面卡 `items[0].status` 仍是 `review_ready` | 只覆盖了 `state`，没同步阶段项 | 未修（记录，UI 读 `state`，不影响显示） |
+
+D5 值得单独说一句：`git apply` 之后宿主仓是 `M src/services/weatherService.js` +
+若干 `??` 未跟踪文件，**HEAD 没动**。于是下一张工单的沙箱（`git worktree add` 自 HEAD）
+看不到上一轮合进去的代码 —— 本轮 AQI 的 `+92 −0` 与城市修复的 `+31 −1` 各自独立、
+互不可见，`npm test` 的基线也一直是 71 而不是累计值。计划里写的「atomic `git apply`
+into host repo」字面成立，但「合进去的改动成为后续迭代的起点」不成立。
+
+### 13.11 未覆盖
+
+- **§6.3 离线 P2P bundle**：本轮未做（需要断网/改网卡，会打断同机其它验证）。
+- **真 agent CLI 全链路**：本机无可用 CLI（见 13.0），只能用桩。等上游可达后需再跑一遍，
+  重点看真模型的产物是否也能被 `extractFileFromPatch` 抽出来（目前只认「新文件」或
+  「单 hunk 且从第 1 行开始」两种形状）。
+
+### 13.12 计划书事实校准（`docs/TEST-PLAN-APP-LIFECYCLE-WEATHER.md`）
+
+| 计划里写的 | 实测 |
+|---|---|
+| `npm test` = 72 tests / 238 ms | **71 tests / 243 ms**（`478f060` 干净检出；多次运行 243–267 ms） |
+| 城市归一化在 `src/provider.js` 的 `normalizeCityQuery` | 在 **`src/services/weatherService.js:16` 的 `normalizeQuery`** |
+| 仓库结构含 `src/aqi.js` | 基线**没有**，AQI 是阶段 B 新增的 |
+| `prototype.html` 是产物 | 基线**已被 git 跟踪**（`prototype.html` 在仓里），阶段 A 是覆盖写 |
