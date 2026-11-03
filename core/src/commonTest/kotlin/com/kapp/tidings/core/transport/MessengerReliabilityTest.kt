@@ -21,6 +21,8 @@ import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.cancel
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.flow.first
+import kotlinx.coroutines.flow.onSubscription
 import kotlinx.coroutines.runBlocking
 import kotlinx.coroutines.withTimeout
 import kotlin.test.Test
@@ -517,9 +519,14 @@ class MessengerReliabilityTest {
         messenger.start(scope)
         val gate = kotlinx.coroutines.CompletableDeferred<Unit>()
         // 慢订阅者：拿到第一帧就卡住（模拟处理慢），后续帧只能进交接管道。
+        val collectorStarted = kotlinx.coroutines.CompletableDeferred<Unit>()
         val slowCollector = scope.launch {
-            messenger.incoming.collect { gate.await() }
+            messenger.incoming
+                .onSubscription { collectorStarted.complete(Unit) }
+                .collect { gate.await() }
         }
+        // 确定事件：订阅真的挂上了再灌帧（无订阅者时 tryEmit 恒 true，会让钉子失去判别力）。
+        withTimeout(10_000) { collectorStarted.await() }
         try {
             repeat(130) { i ->
                 val env = makeEnvelope(
@@ -537,10 +544,9 @@ class MessengerReliabilityTest {
                     kotlinx.coroutines.delay(25)
                 }
             }
-            assertEquals(
-                129,
-                ackIds.size,
-                "1 帧被订阅者取走 + 128 帧进缓冲 = 129 帧拿 ACK（实际 " + ackIds.size + "）",
+            assertTrue(
+                ackIds.size in 128..129,
+                "搬运成功的帧数取 128 或 129（慢订阅读者可能已取走 0/1 帧），实际 " + ackIds.size,
             )
             assertFalse(
                 ackIds.contains("flood-129"),
