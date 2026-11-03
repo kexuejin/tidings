@@ -26,6 +26,7 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.cancel
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.launch
 import kotlinx.coroutines.runBlocking
 import com.kapp.tidings.domain.model.AgentEventUi
 import com.kapp.tidings.domain.model.AgentSessionKey
@@ -120,7 +121,7 @@ class RelayControllerAgentSessionTest {
         // 的 A 类信号），并且让同一测试两次运行的输入不同。唯一的必要性在进程内，
         // 每个用例各自建 controller/store，固定值就够。
         val sessionId = "s-test-main"
-        val sessionOutcome = agentRuntime.sendAgentSession(
+        suspend fun announceMainSession(): SendOutcome = agentRuntime.sendAgentSession(
             peerId = clientNodeId,
             sessionId = sessionId,
             alias = "Code Reviewer",
@@ -129,13 +130,24 @@ class RelayControllerAgentSessionTest {
             title = "审查 PR #42",
             startedAt = nowMillis(),
         )
-        assertEquals(SendOutcome.SENT, sessionOutcome, "会话宣告帧应收到客户端 ACK")
+        assertEquals(SendOutcome.SENT, announceMainSession(), "会话宣告帧应收到客户端 ACK")
 
-        // 客户端状态机应更新 agentSessions
+        // 客户端状态机应更新 agentSessions。宣告按**重发**节奏重投（新信封 id、同一
+        // sessionId，与真实宿主宣告丢失后的重发同形），感知一到立即停：可靠回执只证明
+        // 传输层收到，接收侧一次交接丢失时下一次重投仍能把判据带回来。
         val sessionKey = AgentSessionKey(agentNodeId, sessionId)
+        var announceSendFailed = false
+        val announceRedrive = launch {
+            while (!controller.state.value.agentSessions.containsKey(sessionKey)) {
+                if (announceMainSession() != SendOutcome.SENT) announceSendFailed = true
+                delay(REDRIVE_PACE_MS)
+            }
+        }
         awaitUntil("客户端感知 agent-session") {
             controller.state.value.agentSessions.containsKey(sessionKey)
         }
+        announceRedrive.cancel()
+        assertFalse(announceSendFailed, "每次会话宣告重发都应拿到传输层 ACK")
         val sessionUi = controller.state.value.agentSessions[sessionKey]!!
         assertEquals("Code Reviewer", sessionUi.alias)
         assertEquals("gemini", sessionUi.agentKind)
@@ -147,38 +159,36 @@ class RelayControllerAgentSessionTest {
         // ==========================================
         // 步骤 2：Agent 发送结构化事件流（agent-event）
         // ==========================================
-        val e1 = agentRuntime.sendAgentEvent(
-            peerId = clientNodeId,
-            sessionId = sessionId,
-            cursor = 10L,
-            eventType = "session.started",
-            summary = "开始代码静态分析",
-        )
-        assertEquals(SendOutcome.SENT, e1)
-
-        val e2 = agentRuntime.sendAgentEvent(
-            peerId = clientNodeId,
-            sessionId = sessionId,
-            cursor = 20L,
-            eventType = "tool.started",
-            summary = "执行 linter",
-            ref = "tool-ktlint",
-        )
-        assertEquals(SendOutcome.SENT, e2)
-
-        val e3 = agentRuntime.sendAgentEvent(
-            peerId = clientNodeId,
-            sessionId = sessionId,
-            cursor = 30L,
-            eventType = "tool.finished",
-            summary = "检查通过，0 错误",
-        )
-        assertEquals(SendOutcome.SENT, e3)
+        // 事件重投**带着原 cursor**：接收侧按 cursor 去重，重投幂等（与断线重连后
+        // 从头补发的形状一致）。判定事件是「客户端按序收齐」，不是某一次单发。
+        suspend fun sendEarlyEvents(): Boolean =
+            agentRuntime.sendAgentEvent(
+                peerId = clientNodeId, sessionId = sessionId, cursor = 10L,
+                eventType = "session.started", summary = "开始代码静态分析",
+            ) == SendOutcome.SENT &&
+            agentRuntime.sendAgentEvent(
+                peerId = clientNodeId, sessionId = sessionId, cursor = 20L,
+                eventType = "tool.started", summary = "执行 linter", ref = "tool-ktlint",
+            ) == SendOutcome.SENT &&
+            agentRuntime.sendAgentEvent(
+                peerId = clientNodeId, sessionId = sessionId, cursor = 30L,
+                eventType = "tool.finished", summary = "检查通过，0 错误",
+            ) == SendOutcome.SENT
+        assertTrue(sendEarlyEvents(), "事件帧应收到客户端 ACK")
 
         // 验证客户端正确按 cursor 收集事件
+        var earlyEventSendFailed = false
+        val earlyEventsRedrive = launch {
+            while (controller.state.value.agentEventsOf(agentNodeId, sessionId).size < 3) {
+                if (!sendEarlyEvents()) earlyEventSendFailed = true
+                delay(REDRIVE_PACE_MS)
+            }
+        }
         awaitUntil("客户端收到前三条事件") {
             controller.state.value.agentEventsOf(agentNodeId, sessionId).size == 3
         }
+        earlyEventsRedrive.cancel()
+        assertFalse(earlyEventSendFailed, "每次事件重发都应拿到传输层 ACK")
         val initialEvents = controller.state.value.agentEventsOf(agentNodeId, sessionId)
         assertEquals(listOf(10L, 20L, 30L), initialEvents.map { it.cursor })
         assertEquals("tool.started", initialEvents[1].eventType)
@@ -187,13 +197,24 @@ class RelayControllerAgentSessionTest {
         // ==========================================
         // 步骤 3：乱序到达与重复游标自愈验证
         // ==========================================
-        // 先发 cursor 50，再发 cursor 40
-        agentRuntime.sendAgentEvent(clientNodeId, sessionId, cursor = 50L, eventType = "artifact.ready", summary = "报告就绪")
-        agentRuntime.sendAgentEvent(clientNodeId, sessionId, cursor = 40L, eventType = "report.generating", summary = "汇总结论")
+        // 先发 cursor 50，再发 cursor 40（重投幂等，同步骤 2 的纪律）
+        suspend fun sendReorderEvents(): Boolean =
+            agentRuntime.sendAgentEvent(clientNodeId, sessionId, cursor = 50L, eventType = "artifact.ready", summary = "报告就绪") == SendOutcome.SENT &&
+            agentRuntime.sendAgentEvent(clientNodeId, sessionId, cursor = 40L, eventType = "report.generating", summary = "汇总结论") == SendOutcome.SENT
+        assertTrue(sendReorderEvents(), "乱序事件帧应收到客户端 ACK")
 
+        var reorderSendFailed = false
+        val reorderRedrive = launch {
+            while (controller.state.value.agentEventsOf(agentNodeId, sessionId).size < 5) {
+                if (!sendReorderEvents()) reorderSendFailed = true
+                delay(REDRIVE_PACE_MS)
+            }
+        }
         awaitUntil("收到乱序事件后重新排序") {
             controller.state.value.agentEventsOf(agentNodeId, sessionId).size == 5
         }
+        reorderRedrive.cancel()
+        assertFalse(reorderSendFailed, "每次乱序事件重发都应拿到传输层 ACK")
         val sortedEvents = controller.state.value.agentEventsOf(agentNodeId, sessionId)
         assertEquals(listOf(10L, 20L, 30L, 40L, 50L), sortedEvents.map { it.cursor }, "事件流必须按 cursor 升序排列")
 
@@ -201,10 +222,21 @@ class RelayControllerAgentSessionTest {
         // 并等它落地 —— 同一来源、同一条通道是 FIFO，60 到了就意味着 20 那帧已经处理过；
         // 此刻去数，重复帧若进了表就一定看得见（AGENTS §4：别用固定 delay 赌时间）。
         agentRuntime.sendAgentEvent(clientNodeId, sessionId, cursor = 20L, eventType = "tool.started", summary = "重复帧")
-        agentRuntime.sendAgentEvent(clientNodeId, sessionId, cursor = 60L, eventType = "tool.finished", summary = "后续帧")
+        // 60 的到达同样是确定事件判定；单发丢失时按同 cursor 重投（幂等）。
+        var lateSendFailed = false
+        val lateRedrive = launch {
+            while (controller.state.value.agentEventsOf(agentNodeId, sessionId).size < 6) {
+                if (agentRuntime.sendAgentEvent(clientNodeId, sessionId, cursor = 60L, eventType = "tool.finished", summary = "后续帧") != SendOutcome.SENT) {
+                    lateSendFailed = true
+                }
+                delay(REDRIVE_PACE_MS)
+            }
+        }
         awaitUntil("后续帧 60 落地（证明重复帧 20 已被处理）") {
             controller.state.value.agentEventsOf(agentNodeId, sessionId).size == 6
         }
+        lateRedrive.cancel()
+        assertFalse(lateSendFailed, "每次后续帧重发都应拿到传输层 ACK")
         assertEquals(
             listOf(10L, 20L, 30L, 40L, 50L, 60L),
             controller.state.value.agentEventsOf(agentNodeId, sessionId).map { it.cursor },
@@ -231,17 +263,27 @@ class RelayControllerAgentSessionTest {
         // ==========================================
         // 步骤 5：Agent 更新会话状态为 done
         // ==========================================
-        val updateOutcome = agentRuntime.sendAgentSession(
+        suspend fun announceDone(): SendOutcome = agentRuntime.sendAgentSession(
             peerId = clientNodeId,
             sessionId = sessionId,
             state = "done",
             // 其余字段省略，协议要求保留上一次的值
         )
-        assertEquals(SendOutcome.SENT, updateOutcome)
+        assertEquals(SendOutcome.SENT, announceDone())
 
+        // 与步骤 1 同一条纪律：状态更新帧重投到**确定事件**（state=done 被感知）为止。
+        var updateSendFailed = false
+        val updateRedrive = launch {
+            while (controller.state.value.agentSessions[sessionKey]?.state != "done") {
+                if (announceDone() != SendOutcome.SENT) updateSendFailed = true
+                delay(REDRIVE_PACE_MS)
+            }
+        }
         awaitUntil("客户端收到会话更新") {
             controller.state.value.agentSessions[sessionKey]?.state == "done"
         }
+        updateRedrive.cancel()
+        assertFalse(updateSendFailed, "每次状态更新重发都应拿到传输层 ACK")
         val updatedSession = controller.state.value.agentSessions[sessionKey]!!
         assertEquals("done", updatedSession.state)
         assertEquals("Code Reviewer", updatedSession.alias, "状态更新不应冲掉原有 alias")
@@ -252,11 +294,23 @@ class RelayControllerAgentSessionTest {
         // ==========================================
         val orphanSessionId = "s-orphan-999"
         val orphanKey = AgentSessionKey(agentNodeId, orphanSessionId)
-        agentRuntime.sendAgentEvent(clientNodeId, orphanSessionId, cursor = 1L, eventType = "log.notice", summary = "后台日志")
+        // 孤儿事件 cursor=1 重投幂等（接收侧 cursor 去重；占位会话只建一次）。
+        suspend fun sendOrphanEvent(): Boolean =
+            agentRuntime.sendAgentEvent(clientNodeId, orphanSessionId, cursor = 1L, eventType = "log.notice", summary = "后台日志") == SendOutcome.SENT
+        assertTrue(sendOrphanEvent(), "孤儿事件帧应收到客户端 ACK")
 
+        var orphanSendFailed = false
+        val orphanRedrive = launch {
+            while (controller.state.value.agentSessions[orphanKey] == null) {
+                if (!sendOrphanEvent()) orphanSendFailed = true
+                delay(REDRIVE_PACE_MS)
+            }
+        }
         awaitUntil("孤儿事件生成 announced=false 的占位会话") {
             controller.state.value.agentSessions[orphanKey] != null
         }
+        orphanRedrive.cancel()
+        assertFalse(orphanSendFailed, "每次孤儿事件重发都应拿到传输层 ACK")
         val orphanSession = controller.state.value.agentSessions[orphanKey]!!
         assertFalse(orphanSession.announced, "未收到会话宣告的占位会话 announced 必须为 false")
         assertEquals(1, controller.state.value.agentEventsOf(agentNodeId, orphanSessionId).size)
@@ -394,8 +448,7 @@ class RelayControllerAgentSessionTest {
 
             val sharedSessionId = "s-shared-collision"
 
-            // 两 peer 分别宣告同一 sessionId
-            val outA = agentRuntime.sendAgentSession(
+            suspend fun announceA(): SendOutcome = agentRuntime.sendAgentSession(
                 peerId = clientNodeId,
                 sessionId = sharedSessionId,
                 alias = "Agent A Session",
@@ -403,7 +456,7 @@ class RelayControllerAgentSessionTest {
                 title = "Work A",
                 startedAt = 1000L,
             )
-            val outB = agentRuntime2.sendAgentSession(
+            suspend fun announceB(): SendOutcome = agentRuntime2.sendAgentSession(
                 peerId = clientNodeId,
                 sessionId = sharedSessionId,
                 alias = "Agent B Session",
@@ -411,16 +464,36 @@ class RelayControllerAgentSessionTest {
                 title = "Work B",
                 startedAt = 2000L,
             )
-            assertEquals(SendOutcome.SENT, outA)
-            assertEquals(SendOutcome.SENT, outB)
+            // 两 peer 分别宣告同一 sessionId；宣告重投到「两行都在」这一确定事件为止
+            //（与真实宿主宣告丢失后的重发同形，见步骤 1 的注释）。
+            assertEquals(SendOutcome.SENT, announceA())
+            assertEquals(SendOutcome.SENT, announceB())
 
             val keyA = AgentSessionKey(agentNodeId, sharedSessionId)
             val keyB = AgentSessionKey(agentNodeId2, sharedSessionId)
 
+            var announceFailed = false
+            val announceRedrive = launch {
+                while (!(controller.state.value.agentSessions.containsKey(keyA) &&
+                        controller.state.value.agentSessions.containsKey(keyB))
+                ) {
+                    if (controller.state.value.agentSessions.containsKey(keyA)) {
+                        if (announceB() != SendOutcome.SENT) announceFailed = true
+                    } else if (controller.state.value.agentSessions.containsKey(keyB)) {
+                        if (announceA() != SendOutcome.SENT) announceFailed = true
+                    } else {
+                        if (announceA() != SendOutcome.SENT) announceFailed = true
+                        if (announceB() != SendOutcome.SENT) announceFailed = true
+                    }
+                    delay(REDRIVE_PACE_MS)
+                }
+            }
             awaitUntil("客户端同时感知两节点的同名会话") {
                 controller.state.value.agentSessions.containsKey(keyA) &&
                     controller.state.value.agentSessions.containsKey(keyB)
             }
+            announceRedrive.cancel()
+            assertFalse(announceFailed, "每次宣告重发都应拿到传输层 ACK")
 
             val sessA = controller.state.value.agentSessions[keyA]!!
             val sessB = controller.state.value.agentSessions[keyB]!!
@@ -429,17 +502,37 @@ class RelayControllerAgentSessionTest {
             assertEquals("Agent B Session", sessB.alias)
             assertEquals("Work B", sessB.title)
 
-            // 两 peer 发送事件：包含相同的 cursor=1L
-            agentRuntime.sendAgentEvent(clientNodeId, sharedSessionId, cursor = 1L, eventType = "step.a1", summary = "A step 1")
-            agentRuntime.sendAgentEvent(clientNodeId, sharedSessionId, cursor = 2L, eventType = "step.a2", summary = "A step 2")
+            // 两 peer 发送事件：包含相同的 cursor=1L。事件重投**带着原 cursor**：接收侧
+            // 按 cursor 去重（mergeAgentEvent），重投是幂等的 —— 与真实宿主断线重连后
+            // 从头补发的形状一致。
+            suspend fun sendEventsA(): Boolean =
+                agentRuntime.sendAgentEvent(clientNodeId, sharedSessionId, cursor = 1L, eventType = "step.a1", summary = "A step 1") == SendOutcome.SENT &&
+                agentRuntime.sendAgentEvent(clientNodeId, sharedSessionId, cursor = 2L, eventType = "step.a2", summary = "A step 2") == SendOutcome.SENT
+            suspend fun sendEventsB(): Boolean =
+                agentRuntime2.sendAgentEvent(clientNodeId, sharedSessionId, cursor = 1L, eventType = "step.b1", summary = "B step 1") == SendOutcome.SENT &&
+                agentRuntime2.sendAgentEvent(clientNodeId, sharedSessionId, cursor = 3L, eventType = "step.b3", summary = "B step 3") == SendOutcome.SENT
+            assertTrue(sendEventsA() && sendEventsB(), "事件帧应收到客户端 ACK")
 
-            agentRuntime2.sendAgentEvent(clientNodeId, sharedSessionId, cursor = 1L, eventType = "step.b1", summary = "B step 1")
-            agentRuntime2.sendAgentEvent(clientNodeId, sharedSessionId, cursor = 3L, eventType = "step.b3", summary = "B step 3")
-
+            var eventSendFailed = false
+            val eventsRedrive = launch {
+                while (!(controller.state.value.agentEventsOf(agentNodeId, sharedSessionId).size == 2 &&
+                        controller.state.value.agentEventsOf(agentNodeId2, sharedSessionId).size == 2)
+                ) {
+                    if (controller.state.value.agentEventsOf(agentNodeId, sharedSessionId).size < 2) {
+                        if (!sendEventsA()) eventSendFailed = true
+                    }
+                    if (controller.state.value.agentEventsOf(agentNodeId2, sharedSessionId).size < 2) {
+                        if (!sendEventsB()) eventSendFailed = true
+                    }
+                    delay(REDRIVE_PACE_MS)
+                }
+            }
             awaitUntil("两端各自的事件全部送达") {
                 controller.state.value.agentEventsOf(agentNodeId, sharedSessionId).size == 2 &&
                     controller.state.value.agentEventsOf(agentNodeId2, sharedSessionId).size == 2
             }
+            eventsRedrive.cancel()
+            assertFalse(eventSendFailed, "每次事件重发都应拿到传输层 ACK")
 
             // 验证：事件流严格隔离，没有交错；相同 cursor=1L 没有因为去重逻辑而丢弃另一 peer 的事件
             val eventsA = controller.state.value.agentEventsOf(agentNodeId, sharedSessionId)
@@ -688,5 +781,11 @@ class RelayControllerAgentSessionTest {
 
     private companion object {
         const val TIMEOUT_MS = 10_000L
+
+        /**
+         * 事件帧/宣告帧的重投节奏：与可靠发送的首档 ACK 退避同量级；只影响重试密度，
+         * 不是判定依据 —— 判定一律是「状态被感知」这个确定事件（见各 awaitUntil）。
+         */
+        const val REDRIVE_PACE_MS = 1_000L
     }
 }

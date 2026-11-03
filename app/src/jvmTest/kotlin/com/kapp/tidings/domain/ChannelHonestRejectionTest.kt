@@ -3,6 +3,7 @@
 package com.kapp.tidings.domain
 
 import com.kapp.tidings.core.protocol.Codec
+import com.kapp.tidings.core.protocol.Envelope
 import com.kapp.tidings.core.protocol.MsgTypes
 import com.kapp.tidings.core.protocol.Profile
 import com.kapp.tidings.core.protocol.makeEnvelope
@@ -19,9 +20,11 @@ import kotlin.test.AfterTest
 import kotlin.test.BeforeTest
 import kotlin.test.Test
 import kotlin.test.assertEquals
+import kotlin.test.assertFalse
 import kotlin.test.assertTrue
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.cancel
 import kotlinx.coroutines.launch
@@ -105,23 +108,37 @@ class ChannelHonestRejectionTest {
             MsgTypes.CAP_AGENT_CHANNEL in MsgTypes.MOBILE_CAPS,
             "前置：手机声明 agc1（D-017）；不声明这条帧根本到不了",
         )
-        val envelope = makeEnvelope(
+        fun assignEnvelope(): Envelope = makeEnvelope(
             MsgTypes.AGENT_CHANNEL,
             agentNodeId,
             Codec.wireJson.parseToJsonElement(
                 "{\"channelId\":\"ch-1\",\"op\":\"assign\",\"fromAgent\":\"caller-agent\",\"toAgent\":\"worker-agent\",\"task\":\"do things\",\"deadlineMs\":60000}",
             ),
         )
-        assertTrue(
-            agentRuntime.sendReliableNoQueue(clientNodeId, envelope),
-            "手机声明了 agc1 ⇒ 帧出门并拿到 ACK",
-        )
-        // 手机侧的回帧：no-executor、回指同一 channelId。
+        // 回执是唯一判据（确定事件）。委派帧本身按**重新委派**的节奏重投（新信封 id、
+        // 同一 channelId，与真实宿主在租约超时后的重派同形），回执一到立即停 —— 既有
+        // 单发路径被回执 ACK 之前的一次接收侧交接丢失时，下一次重投仍能把判据带回来。
+        var anySendFailed = false
+        val redrive = launch {
+            while (received.isEmpty()) {
+                if (!agentRuntime.sendReliableNoQueue(clientNodeId, assignEnvelope())) {
+                    anySendFailed = true
+                }
+                delay(REDRIVE_PACE_MS)
+            }
+        }
         awaitUntil("手机对误指名委派回 no-executor 回执") { received.isNotEmpty() }
+        redrive.cancel()
+        assertFalse(anySendFailed, "每次委派重投都应拿到传输层 ACK")
         val back: JsonObject = received.first()
         assertEquals("ch-1", back["channelId"]?.jsonPrimitive?.content, "回执回指同一 channelId")
         assertEquals("no-executor", back["status"]?.jsonPrimitive?.content, "手机没有执行器 ⇒ 如实说 no-executor")
         assertEquals("false", back["ok"]?.jsonPrimitive?.content)
+    }
+
+    private companion object {
+        /** 重投节奏：与可靠发送的首档 ACK 退避同量级；只影响重试密度，不是判定依据。 */
+        const val REDRIVE_PACE_MS = 1_000L
     }
 }
 
