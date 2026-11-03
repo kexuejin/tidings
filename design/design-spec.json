@@ -734,7 +734,7 @@
             "first": "composeApp/src/commonMain/kotlin/com/kapp/tidings/feature/cabinet/PeerCabinetView.kt:138"
           },
           "xxs": {
-            "sites": 38,
+            "sites": 39,
             "status": "enforced",
             "first": "composeApp/src/commonMain/kotlin/com/kapp/tidings/ui/AppStates.kt:133"
           },
@@ -895,7 +895,7 @@
         "elevation": 6,
         "iconSizes": 34,
         "dimension": 144,
-        "spacing": 137
+        "spacing": 136
       },
       "shapeSemantics": {
         "bubble": {
