@@ -14,6 +14,9 @@ import kotlinx.coroutines.launch
 import kotlinx.serialization.json.Json
 import kotlin.concurrent.Volatile
 
+/** 本产品在 luciola 发现层的 `Profile.product` 标签；同时作为允许列表的唯一成员。 */
+private const val PRODUCT = "tidings"
+
 /**
  * 阶段二:luciola 发现引擎(JVM 桌面宿主;Android 在阶段三接入)。
  *
@@ -88,11 +91,15 @@ class LuciolaDiscoveryEngine(
         val adapter = UniffiEngineAdapter(
             sessionName = self.nick,
             discoveryPort = udpPort.toUShort(),
-            product = "tidings",
+            product = PRODUCT,
             extra = json.encodeToString(Profile.serializer(), self),
             nodeId = engineNodeId ?: self.nodeId,
             tcpPort = channelTcpPort?.toUShort(),
             publicKey = publicKey,
+            // 只认本产品的信标：同机的其它 luciola 产品（如 firefly）若共用发现端口，
+            // 以前会被当成 peer，然后按它档案里的 tcpPort 去拨 —— 对端因此被挤占/超时。
+            // 过滤放在引擎层，比在 applyPeer 里逐个丢更早、也更省心跳。
+            productFilter = listOf(PRODUCT),
         ).also { this.adapter = it }
         adapter.start { event ->
             when (event) {
