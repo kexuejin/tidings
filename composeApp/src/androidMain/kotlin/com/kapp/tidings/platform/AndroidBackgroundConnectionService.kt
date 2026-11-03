@@ -33,12 +33,20 @@ internal class AndroidBackgroundConnectionService(
     override suspend fun setEnabled(enabled: Boolean) {
         val cls = serviceClass ?: return
         if (!enabled) {
+            // 关掉时连"等进前台的那一次"一起撤销：用户已经说了不要。
+            ConnectionKeepAliveGate.clearPendingStart()
             ConnectionKeepAliveGate.stop(context, cls)
             return
         }
         val (channel, title, body) = notificationTexts()
         // 后台启动前台服务在 Android 12+ 会被拒（抛异常）。这里吞掉而不是崩：
         // 拉不起来就不该有常驻通知，isEnabled() 会如实回报 false。
+        //
+        // 启动期从后台触发（进程被 am start / 自启拉起）时这次请求会被系统拒 ——
+        // 异常虽然被兜住不崩了，但保活也就没起来。[ConnectionKeepAliveGate.start]
+        // 会把被拒的那次登记下来，等进程真的进前台（壳层在获得窗口焦点时调
+        // promote）再原样重发：用户开着开关，常驻通知进前台后就位，
+        // 而不是悄悄缺席一整个后台期。
         runCatching { ConnectionKeepAliveGate.start(context, cls, channel, title, body) }
     }
 

@@ -33,6 +33,7 @@ import com.kapp.tidings.domain.RelayController
 import com.kapp.tidings.platform.AndroidNotificationIntent
 import com.kapp.tidings.platform.AndroidScreenShareBridge
 import com.kapp.tidings.platform.AndroidSaveDirectoryPicker
+import com.kapp.tidings.platform.ConnectionKeepAliveGate
 import com.kapp.tidings.ui.components.ExternalPairingConfirmDialog
 
 /**
@@ -212,6 +213,21 @@ class MainActivity : ComponentActivity() {
     override fun onDestroy() {
         super.onDestroy()
         runCatching { unregisterReceiver(qrInjectionReceiver) }
+    }
+
+    /**
+     * 锁屏/后台被拉起时（am start、自启、通知），节点启动路径上的保活前台服务起不来
+     * （Android 12+ 的后台启动限制）：进程此刻虽在栈顶，屏却是灭的，系统不认它是前台。
+     * 那次启动被兜住后登记在 [ConnectionKeepAliveGate]，等这里 —— 活到 resumed 且
+     * 窗口真正获焦 —— 再原样重发。这是「先有界面，再有牌子」的顺序，不是新开关：
+     * 用户开着「后台保持连接」，解锁进应用那一刻常驻通知就该出现。
+     */
+    override fun onWindowFocusChanged(hasFocus: Boolean) {
+        super.onWindowFocusChanged(hasFocus)
+        if (hasFocus) {
+            // 重发仍带着 runCatching 兜底：此刻仍被拒（不该发生）就留登记等下一次。
+            ConnectionKeepAliveGate.promote(this)
+        }
     }
 
     /**
