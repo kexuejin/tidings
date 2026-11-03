@@ -238,7 +238,7 @@ private fun PlainPreviewBody(body: String) {
                 color = MaterialTheme.colorScheme.onSurface,
                 modifier = Modifier
                     .fillMaxWidth()
-                    .padding(horizontal = LocalAppSpacing.current.md, vertical = 1.dp),
+                    .padding(horizontal = LocalAppSpacing.current.md, vertical = LocalAppSpacing.current.xxs),
             )
         }
     }
