@@ -21,7 +21,7 @@ class GroupMetaPathWarningTest {
     @Test
     fun absolutePosixPathsAreDetected() {
         // 真机现场的原值。
-        assertTrue(looksLikeLocalPath("/Volumes/Kapp/source/teahouse-mobile"))
+        assertTrue(looksLikeLocalPath("/Volumes/demo/workspace"))
         assertTrue(looksLikeLocalPath("配置见 /Users/someone/work/app 里的说明"))
         assertTrue(looksLikeLocalPath("`/private/var/tmp/x`"))
     }
