@@ -593,6 +593,111 @@ class MessengerReliabilityTest {
             scope.cancel()
         }
     }
+
+    /** 记录 transport 实际收到的帧；不回 ACK（模拟 gossip 接收侧不参与可靠 ACK）。 */
+    private class RecordingTransport : DatagramTransport {
+        val sent = java.util.Collections.synchronizedList(mutableListOf<ByteArray>())
+        override val incoming = kotlinx.coroutines.flow.MutableSharedFlow<ReceivedDatagram>(replay = 8)
+        override val boundPort: Int = 1
+        override suspend fun start() {}
+        override fun stop() {}
+        override suspend fun restart() {}
+        override suspend fun send(bytes: ByteArray, host: String, port: Int): Boolean {
+            sent.add(bytes)
+            return true
+        }
+    }
+
+    @Test
+    fun gossipFramesDoNotWaitForAck() = runBlocking {
+        // scan-ranges 由 Discovery 的 gossip 通道消费，接收侧永不在 Messenger 的可靠
+        // 分支里回 ACK。旧实现走 `sendAwaitAck`，每 5s 等满退避再判失败；配合
+        // flushQueue 的 markOffline，会周期性把对端打成离线（2026-11-03 真机）。
+        val scope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
+        val transport = RecordingTransport()
+        val registry = PeerRegistry("self-node")
+        registry.touch("peer-1", "127.0.0.1", 17878, testProfile("peer-1"), profileTs = 1000L, confirmed = true)
+        val messenger = Messenger(
+            transport = transport,
+            registry = registry,
+            selfNodeId = "self-node",
+            queueStore = InMemoryQueueStore(),
+            dedupStore = InMemoryDedupStore(),
+            timings = Timings(ackRetrySchedule = listOf(5_000L), tcpAckTimeout = 5_000L),
+        )
+        messenger.start(scope)
+        val env = makeEnvelope(MsgTypes.SCAN_RANGES, "self-node", JsonObject(emptyMap()))
+        val started = nowMillis()
+        val ok = messenger.sendReliableNoQueue("peer-1", env)
+        val elapsed = nowMillis() - started
+        assertTrue(ok, "gossip frame must be handed to the transport")
+        assertTrue(transport.sent.isNotEmpty(), "gossip frame must reach the transport")
+        assertTrue(elapsed < 500, "gossip must not wait for ACK, took ${elapsed}ms")
+        assertTrue(registry.get("peer-1")!!.online, "gossip send must not flip the peer offline")
+        messenger.stop()
+        scope.cancel()
+    }
+
+    @Test
+    fun largeFrameInTransportModeUsesTransportNotPlaintextTcp() = runBlocking {
+        // luciola 加密信道可承载 8MB 帧；`preferTransport` 时大帧必须走 transport。
+        // 旧实现 >800B 一律回退 17879 明文 TCP —— luciola 模式下对端没有那个监听器，
+        // 队列头的第一帧大消息会把整条队列永久堵住（2026-11-03 真机）。
+        val scope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
+        val transport = RecordingTransport()
+        val registry = PeerRegistry("self-node")
+        registry.touch("peer-1", "127.0.0.1", 17878, testProfile("peer-1"), profileTs = 1000L, confirmed = true)
+        val mockTcp = MockTcpFallback().apply { shouldSucceed = true }
+        val messenger = Messenger(
+            transport = transport,
+            registry = registry,
+            selfNodeId = "self-node",
+            queueStore = InMemoryQueueStore(),
+            dedupStore = InMemoryDedupStore(),
+            timings = Timings(ackRetrySchedule = listOf(50L), tcpAckTimeout = 100L),
+            tcpFallback = mockTcp,
+            preferTransport = true,
+        )
+        messenger.start(scope)
+        val big = makeEnvelope(MsgTypes.MSG, "self-node", Codec.textPayload("x".repeat(3_000)))
+        val job = scope.launch { messenger.sendReliableNoQueue("peer-1", big) }
+        awaitUntil("transport receives the large frame") { transport.sent.isNotEmpty() }
+        assertTrue(transport.sent.first().size > Protocol.UDP_MAX_PAYLOAD, "frame must exceed the UDP budget")
+        assertEquals(0, mockTcp.calls, "transport mode must not fall back to plaintext TCP")
+        job.cancel()
+        messenger.stop()
+        scope.cancel()
+    }
+
+    @Test
+    fun reliableFrameOverUdpBudgetIsDeliveredAndAcked() = runBlocking {
+        // luciola 加密信道是**流式信道**（单帧上限 8MB），入站解码不能按 UDP 的 800B 卡：
+        // 旧实现 `Messenger.onDatagram` 用 `Codec.decode` 解 6KB 的 group/agent-event
+        // → 静默丢帧、不回 ACK；发送侧只看到 acked=false，队列头被永久堵住
+        // （2026-11-03 真机：6410B 的 agent-event 卡住 125 条积压）。
+        val scope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
+        val transport = RecordingTransport()
+        val messenger = Messenger(
+            transport = transport,
+            registry = PeerRegistry("self-node"),
+            selfNodeId = "self-node",
+            queueStore = InMemoryQueueStore(),
+            dedupStore = InMemoryDedupStore(),
+        )
+        messenger.start(scope)
+        val big = makeEnvelope(MsgTypes.MSG, "peer-1", Codec.textPayload("x".repeat(2_000)))
+        val bytes = Codec.encodeToBytes(big)
+        assertTrue(bytes.size > Protocol.UDP_MAX_PAYLOAD, "test frame must exceed the UDP budget")
+        transport.incoming.tryEmit(ReceivedDatagram(bytes, "192.168.2.22", 17878))
+        awaitUntil("ack for the frame that exceeds the UDP budget") {
+            transport.sent.any { ackedBytes ->
+                val env = (runCatching { Codec.decode(ackedBytes) }.getOrNull() as? DecodeResult.Ok)?.env
+                env != null && env.type == MsgTypes.ACK && env.payload.toString().contains(big.id)
+            }
+        }
+        messenger.stop()
+        scope.cancel()
+    }
 }
 
 

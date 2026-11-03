@@ -275,3 +275,46 @@ socket 还开着不代表它还能说话。
 `DesktopComposer` 两处 / `DesktopConversationWidgets` / `MessageComposer` /
 `ChatBubbles` / `ConversationRow` / `ConversationsScreen` / `Spacing`），
 且都**不再带日期** —— 一条结论不该看起来像「有时效的临时决定」。
+
+## ADR-023 加密信道的帧上限不是 UDP 的 800B，且 gossip 不能等 ACK
+
+**症状**（2026-11-03 真机）：两端 `[xport] ... connected/detail=sha256:...` 都正常、
+`in trusted=true`，但 `[send] ... acked=false` 持续刷屏；宿主 `online` 被周期翻成
+`false`，待发队列从 47 涨到 125 条、`left` 永不下降。手机侧只能看到 `scan-ranges`
+（557B）帧，没有任何 `group`/`agent-event` 帧进入 Messenger。
+
+**根因**（四个叠在一起，缺一条都不会好）
+
+1. `SecureChannelTransport.senderOf` 用 `Codec.decode`（UDP 的 800B 上限）解
+   加密信道的入站帧。luciola 信道是**流式**的（单帧 8MB），6KB 的
+   `group`/`agent-event` 被判成坏帧 → 在进 Messenger 之前静默丢弃、不回 ACK。
+2. `Messenger.onDatagram` 又用 `Codec.decode` 解一次 —— 即使 transport 放行，
+   帧还是会在这里第二次被丢掉。入站解码必须「先 UDP、失败再 TCP」。
+3. 大帧（>800B）走 `sendViaTcp` 回退 **17879 明文 TCP**。luciola 模式下对端根本
+   没有 17879 监听器，于是**队列头的第一条大消息把整条队列永久堵死**。
+   加密信道能承载 8MB 帧，`preferTransport` 时大帧必须走 transport。
+4. `scan-ranges` 这类 gossip 用 `sendReliableNoQueue` 发送，内部走
+   `sendAwaitAck` 等 UDP ACK；但接收端由 Discovery 的 gossip 通道消费，
+   **永远不在 Messenger 的可靠分支里回 ACK**。每 5s 一次失败 + `flushQueue`
+   失败时 `markOffline`，把对端周期性打成离线，进而拖死整个队列。
+
+**修复**
+
+- `SecureChannelTransport.senderOf` 与 `Messenger.onDatagram` 都接受 TCP 上限
+  （`Codec.decodeTcp`；后者保留「先 UDP 再 TCP」以不放松 legacy 通道的校验）。
+- `preferTransport == true`（luciola 模式）时，大帧不再回退明文 TCP，直接走
+  transport（`sendUserMessage` / `sendReliableNoQueue` / `flushQueue` 三处）。
+- `sendReliableNoQueue` 对**非 RELIABLE 类型**改为 `sendBestEffort`：gossip 本来
+  就不该等 ACK。
+
+**验证**：真机 A/B 同一对设备，修复前手机只收到 `scan-ranges`、宿主 `acked=false`；
+修复后 125 条积压一次排空（`[flush] from=125 left=0`），`acked=true` 122 条、
+`acked=false` 0 条，6410B 的 `agent-event` 与 1099B 的 `group` 都在 10–27ms 内 ACK；
+手机发群消息 `acked=true in=39ms` 且宿主 `[msg] inbound len=16`。回归钉子：
+`gossipFramesDoNotWaitForAck` / `largeFrameInTransportModeUsesTransportNotPlaintextTcp` /
+`reliableFrameOverUdpBudgetIsDeliveredAndAcked`。
+
+**为什么不能改回去**：这四处单独看都「更保守」（按 UDP 上限卡更安全、大帧走 TCP
+更传统、gossip 也等 ACK 更可靠），但它们在流式信道上分别造成**静默丢帧、队列
+永久堵塞、把在线对端打成离线**。判据不是「哪种更严格」，而是「接收端到底在哪一条
+路径上回 ACK」——ACK 语义只存在于 `MsgTypes.RELIABLE`，流式信道不是 UDP。

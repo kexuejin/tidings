@@ -185,7 +185,14 @@ class Messenger(
     }
 
     private suspend fun onDatagram(datagram: ReceivedDatagram) {
-        val decoded = Codec.decode(datagram.bytes)
+        // 入站解码必须同时接受两种上限：legacy UDP 通道按 800B 校验，而 luciola
+        // 加密信道是流式信道（单帧 8MB）。只用 `Codec.decode`（UDP）时，6KB 的
+        // group / agent-event 会在 transport 之后、Messenger 之前被静默丢掉 ——
+        // 现象正是「对端收到了帧、却永远不回 ACK」（真机：6410B 帧）。
+        val decoded = when (val udp = Codec.decode(datagram.bytes)) {
+            is DecodeResult.Ok -> udp
+            else -> Codec.decodeTcp(datagram.bytes)
+        }
         if (decoded !is DecodeResult.Ok) return
         val envelope = decoded.env
         if (envelope.from == selfNodeId) return
@@ -225,9 +232,24 @@ class Messenger(
             // 投屏信令必须来自已握手的原地址：地址不符就整帧不作答（连 ACK 都不回，
             // 对端的重试会自己停下来），也不能先 `touch` 把不可信来源变成当前地址。
             val known = registry.get(envelope.from)
-            if (known == null || known.ip != datagram.host) return
+            if (known == null || known.ip != datagram.host) {
+                // 诊断：屏帧来自非握手地址时整帧不作答（连 ACK 都不回）。没有这行时，
+                // 真机上只能看到发送侧 acked=false，分不清「没到」与「到了被丢」。
+                println(
+                    "[reliable] drop screen from=" + envelope.from.take(8) +
+                        " src=" + datagram.host + " known=" + (known?.ip ?: "null"),
+                )
+                return
+            }
         } else if (registry.get(envelope.from) != null) {
             if (registry.touch(envelope.from, datagram.host, datagram.port, null, envelope.ts) == null) {
+                // 诊断：地址漂移/资料被拒时 touch 返回 null —— 旧实现静默 return、不回 ACK。
+                val known = registry.get(envelope.from)
+                println(
+                    "[reliable] drop addr-mismatch from=" + envelope.from.take(8) +
+                        " src=" + datagram.host + ":" + datagram.port +
+                        " known=" + (known?.ip ?: "null") + ":" + (known?.udpPort ?: -1),
+                )
                 return
             }
         }
@@ -467,7 +489,10 @@ class Messenger(
         val redialMs = linkTry.redialMs
         val tcpSkipped = linkTry.tcpSkipped
         val tcpAllowed = tcpSkipped == null
-        val ok = if (bytes.size > Protocol.UDP_MAX_PAYLOAD) {
+        // luciola 加密信道可承载 8MB 帧：`preferTransport` 时大帧也走 transport，
+        // 不能再回退 17879 明文 TCP —— luciola 模式下对端根本没有那个监听器，
+        // 大消息会永远卡在队列头（真机：5070B 的 group 帧把整条队列堵死）。
+        val ok = if (bytes.size > Protocol.UDP_MAX_PAYLOAD && !preferTransport) {
             if (!tcpAllowed) {
                 false
             } else {
@@ -551,6 +576,13 @@ class Messenger(
         // task-64：**与 [sendUserMessage] 同一条链路判定**（链路优先 + 半死时重拨）。
         // 为什么必须一致：**报价走的正是这条**（宿主把 `sendReliableQuick` 接到这里）——
         // 只在消息那条路上做重拨，报价就还是回退 17879（蜂窝上实测不可达）。
+        // 非可靠类型（scan-ranges 等 gossip）**不能走 ACK 等待**：接收端由 Discovery
+        // 的 gossip 通道消费，从来不在 Messenger 的可靠分支里回 ACK。等它只会每 5s
+        // 失败一次并把发送侧拖慢（真机读数）。尽力而为发一次即可。
+        if (envelope.type !in MsgTypes.RELIABLE) {
+            sendBestEffort(peerId, envelope)
+            return true
+        }
         val started = nowMillis()
         val linkTry = tryLinkFirst(peerId, envelope, started)
         linkTry.sent?.let { sent ->
@@ -560,7 +592,7 @@ class Messenger(
         val bytes = Codec.encodeToBytes(envelope)
         val attempts = ArrayList<ReliableEndpointAttempt>()
         val allowTcp = linkTry.tcpSkipped == null
-        val ok = if (bytes.size > Protocol.UDP_MAX_PAYLOAD) {
+        val ok = if (bytes.size > Protocol.UDP_MAX_PAYLOAD && !preferTransport) {
             if (allowTcp) sendViaTcp(peerId, envelope) else false
         } else {
             sendAwaitAck(peerId, envelope, bytes, attempts, quick = quick, allowTcpFallback = allowTcp)
@@ -683,10 +715,15 @@ class Messenger(
             )
             // 逐端点留痕：真机上「消息其实到了、本地却判失败」只有这一行能区分
             // 「没发出去」「发出去没人回 ACK」「ACK 回来了但没认出来」三种成因。
+            // 诊断：`record.online` 是进入本函数时读到的快照；再读一次 registry，区分
+            // 「对端真离线」与「我们拿的是旧快照」—— 后者会让一条消息只走 quick schedule。
+            val live = registry.get(peerId)
             println(
                 "[send] peer=${peerId.take(8)} id=${envelope.id.take(8)} " +
                     "ep=${endpoint.host}:${endpoint.port} acked=$acked " +
-                    "in=${nowMillis() - t0}ms online=${record.online} schedule=$schedule",
+                    "type=${envelope.type} size=${bytes.size} " +
+                    "in=${nowMillis() - t0}ms online=${record.online} " +
+                    "regOnline=${live?.online} regEp=${live?.ip}:${live?.udpPort} schedule=$schedule",
             )
             if (acked) {
                 registry.setActiveEndpoint(peerId, endpoint.host, endpoint.port)
@@ -812,7 +849,7 @@ class Messenger(
                 val link = linkDownlink
                 val ok = if (link != null && link.isConnected(peerId) && link.send(peerId, envelope)) {
                     true
-                } else if (bytes.size > Protocol.UDP_MAX_PAYLOAD) {
+                } else if (bytes.size > Protocol.UDP_MAX_PAYLOAD && !preferTransport) {
                     sendViaTcp(peerId, envelope)
                 } else {
                     sendAwaitAck(

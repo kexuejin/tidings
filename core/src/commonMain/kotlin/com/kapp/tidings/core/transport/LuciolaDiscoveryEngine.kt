@@ -176,7 +176,14 @@ class LuciolaDiscoveryEngine(
         } else {
             advertisedPort ?: peer.udpPort
         }
-        registry.touch(profile.nodeId, peer.ip, sendPort, profile, confirmed = true)
+        val touched = registry.touch(profile.nodeId, peer.ip, sendPort, profile, confirmed = true)
+        if (touched == null) {
+            // 诊断：地址漂移/资料被拒时 touch 返回 null，registry 保持旧记录（可能离线）。
+            println(
+                "[luciola] registry rejected peer=" + profile.nodeId.take(8) +
+                    " at " + peer.ip + ":" + sendPort,
+            )
+        }
     }
 
     private fun onLuciolaLost(luciolaNodeId: String) {

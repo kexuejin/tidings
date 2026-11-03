@@ -398,12 +398,20 @@ class SecureChannelTransport(
         if (conn) {
             val s0 = kotlin.time.TimeSource.Monotonic.markNow()
             val r = runCatching { inbound!!.send(bytes) }.getOrDefault(false)
+
             probeRecord(connUs, s0.elapsedNow().inWholeMicroseconds)
             return r
         }
-        val session = runCatching { channelFor(host, port, key) }.getOrNull() ?: return false
+        val session = runCatching { channelFor(host, port, key) }.getOrNull()
+        if (session == null) {
+            // 诊断：未配对（pin 查不到）时 channelFor 会抛异常，旧实现 getOrNull 后静默
+            // 返回 false —— 发送侧只看到 acked=false，分不清「没人听」与「我们拒绝发」。
+            println("[xport] send refused key=" + key + " (no session / unpaired)")
+            return false
+        }
         val s1 = kotlin.time.TimeSource.Monotonic.markNow()
         val r = runCatching { session.send(bytes) }.getOrDefault(false)
+        if (!r) println("[xport] out send failed key=" + key + " connected=" + session.isConnected() + " len=" + bytes.size)
         probeRecord(connUs, s1.elapsedNow().inWholeMicroseconds)
         return r
     }
@@ -418,6 +426,7 @@ class SecureChannelTransport(
                     object : SecureSessionListener {
                         override fun onState(state: String, detail: String?) {
                             recordState("out", key, state, detail)
+                            println("[xport] out " + key + " state=" + state + " detail=" + detail)
                             if (state == "connected") {
                                 // 扫码后立刻发出的配对帧可能早于握手完成:连上就补发一次。
                                 pendingPairing.remove(key)?.let { queued ->
@@ -455,9 +464,15 @@ class SecureChannelTransport(
         }
 
     private fun senderOf(message: ByteArray): String? {
-        val decoded = Codec.decode(message)
+        // **必须用 TCP 的上限解码**：luciola 加密信道是流式信道，单帧上限 8MB，
+        // 不是 UDP 的 800B。用 `Codec.decode`（UDP 那套）解 6KB 的 group/agent-event
+        // 会返回坏帧 → 这一帧在进 Messenger 之前就被静默丢掉（不回 ACK），
+        // 发送侧只看到 acked=false（真机：6410B 的 agent-event 把
+        // 107 条积压的队列头堵死）。
+        val decoded = Codec.decodeTcp(message)
         return (decoded as? DecodeResult.Ok)?.env?.from
     }
+
 
     private inner class InboundListener(private val session: SecureSession) : SecureSessionListener {
         @Volatile
@@ -472,10 +487,12 @@ class SecureChannelTransport(
 
         override fun onState(state: String, detail: String?) {
             recordState("listen", "", state, detail)
+            println("[xport] in state=" + state + " detail=" + detail)
             when (state) {
                 "connected" -> {
                     sessionFingerprint = detail
                     trusted = detail != null && isTrustedFingerprint(detail)
+                    println("[xport] in trusted=" + trusted + " fp=" + detail + " pairing=" + (pairing != null))
                     if (!trusted) {
                         if (pairing?.expectedPairSecret() == null) {
                             rejectedInbound += 1
@@ -506,7 +523,11 @@ class SecureChannelTransport(
                 return
             }
             // 未通过信任手续的对端,一帧业务数据都不许进入应用层。
-            if (!trusted) return
+            if (!trusted) {
+                // 诊断：未信任时整帧丢弃、不回 ACK；旧实现没有任何日志（发送侧只看到 acked=false）。
+                println("[xport] in DROP untrusted fp=" + peerFingerprint + " len=" + message.size)
+                return
+            }
             // 二进制数据帧(文件/投屏)没有 Envelope:优先用 Rust 引擎在握手里
             // 确权过的 peerFingerprint(luciola 0.6.0 起逐帧携带)反查端点,再退
             // 会话级缓存与 socket 真实来源 —— 不再依赖会话状态机时序的启发式。
@@ -526,7 +547,7 @@ class SecureChannelTransport(
                 // 没有 registry 记录就无法把帧交上去(也回不了 ACK)。默认只计数,
                 // 每 25 次打一行 —— 真机上"配对成功但消息一直发送中"就是这一条。
                 val n = unattributedDrops.incrementAndGet()
-                if (n % 25 == 1) println("[luciola] drop frame: no endpoint for " + from + " (total=" + n + ")")
+                if (n == 1 || n % 25 == 0) println("[luciola] drop frame: no endpoint for " + from + " (total=" + n + ")")
                 return
             }
             inboundByEndpoint[endpointKey(endpoint.host, endpoint.port)] = session
