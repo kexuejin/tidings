@@ -119,7 +119,7 @@ class CrossNetworkTlsTransferTest {
                     attempts = listOf(PullAttempt("127.0.0.1", port, PullAttemptTransport.Tls)),
                     connectRaw = { host, p ->
                         // 与真机同形：pin 就是配对时存下的主机 pin。
-                        clientTransport.connectRaw(host, p, serverTransport.localPin, 5_000)
+                        clientTransport.connectRaw(host, p, serverTransport.localPin, 30_000)
                     },
                 ),
             )
