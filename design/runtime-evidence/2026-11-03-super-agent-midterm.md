@@ -96,3 +96,35 @@ OBS-2 与 :app 轮换专项是下轮的入口。
 - **core 的 ACK-before-delivery 生产缺陷**：`Messenger.handleReliable` 先回 ACK 再 tryEmit、交接无失败隔离——根治方向（ACK 只在帧进入接收管道后回，或 pump 加失败重投）需动 core 传输协议语义，另开任务。
 - CME 单次现场无堆栈（7+3 轮未复现），未定位，记账。
 - NudgeNotificationTest 族不在本轮范围，未动。
+
+## 11. 传输层根治：ACK 后置（goal-dc521ac3，`1823a6b9`）
+
+**根因**：`Messenger.handleReliable` 无条件先回 ACK 再 `_incoming.tryEmit`，而 tryEmit 在交接管道满时返回 false 且被忽略。对端拿到 ACK 停止重传、本端帧被静默挤掉 —— 「拿到 ACK 但永远没投递」正是 §3 第 8 种形态的生产源（轮换族插桩证据：assign 帧 acked=true in=1ms 但 handleOnAgentChannel 全程未执行）。
+
+**修法**：
+- UDP：去重提前（重复帧仍回 ACK 停重传，不重投）→ 先 tryEmit → 成功才回 ACK；进不了管道就不回，对端可靠重传接管（最多多一次重复投递，去重表挡住）。
+- TCP：`acceptTcpMessage` 同纪律 —— 进不了交接管道返回 false，调用方不回 `msg-ack`。
+- 第二级交接：`_inbound` 缓冲 256→1024，挤掉时 `handOffDropped` 计数 + 日志（messageStore 已先落，离线回放不丢；只暴露实时订阅者侧丢失，不静默）。
+
+**兼容后果**：帧格式与 golden vectors 零变化；行为变化只在「接收侧交接失败」异常路径（谎报 ACK+丢帧 → 暂缓 ACK+重传）。两端无需同版本升级：老端维持旧行为，新端对老端重传照常 ACK。
+
+**验证**：新钉子 `ackIsWithheldWhenHandOffBufferIsFull`（慢订阅读者灌满 128 容量，断言 ACK 数 128..129 且第 130 帧无 ACK）；反向验证把 ACK 挪回 tryEmit 之前 ⇒ 红（130 ACK），恢复绿；连跑 3 轮绿。钉子本身的边界（慢订阅读者取走 0/1 帧）已容忍为 128..129，旧顺序恒 130 仍被区分。
+
+## 12. 轮换族收敛（本 goal 附带的稳定性修复）
+
+| 红点 | 处置 |
+|---|---|
+| `StageChainIsolationTest.twoIsolatedStagesOverlapInTime` | 墙钟窗口是赌调度——改会合屏障（真并行双方到达；串行第一棒超时红）；cap 对照改「并发峰值 ≥ 2」 |
+| `MessengerReliabilityTest` 新钉子 | 慢订阅读者 0/1 帧边界容忍为 128..129（旧顺序 130 仍被区分）；订阅用 onSubscription 确定性同步 |
+| `CrossNetworkTlsTransferTest` | TLS 握手连接预算 5s→30s（满载挤压） |
+| `DiscoveryProfileRefreshTest` | 替身数据竞态：采集协程写 seen、测试线程遍历 ⇒ CME；换 CopyOnWriteArrayList |
+| `OfflinePatchBundleTest` | 双节点启动/发现等待 30s→60s（观测预算） |
+
+`:testStabilityGate` 3/3 全绿（8m42s）。
+
+## 13. 推送自检（AGENTS §7.0，人审记录）
+
+- ① 隐私形态：`git diff origin/main..HEAD` 84 行命中逐条过目——全部为夹具 UUID / 毫秒时间戳 / 占位 IP（`192.168.2.22` 属 docs/privacy-scan §4 有意保留的家网段）/ 占位用户名（`/Users/someone`）/ 正则与常量。真问题 1 处已修：路径检测自测样例写了真实工作目录（`532ff0d3` 换成占位路径）。
+- ② 提交邮箱：`ke xuejin <168250+kexuejin@users.noreply.github.com>` / `kexuejin <…@users.noreply.github.com>`——全部 noreply。
+- ③ ignored-but-tracked：无。
+- ④ mavenLocal/SNAPSHOT：`settings.gradle.kts` 唯一命中是 `LUCIOLA_LOCAL=1` 门控的 luciola 本地验证块（默认关闭；公共仓坐标照常解析，不构成 mavenLocal-only 依赖）。
