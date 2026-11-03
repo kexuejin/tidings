@@ -39,7 +39,6 @@ import com.kapp.tidings.generated.resources.card_artifact_preview_kind_markdown
 import com.kapp.tidings.generated.resources.card_artifact_preview_kind_text
 import com.kapp.tidings.generated.resources.card_artifact_preview_not_delivered
 import com.kapp.tidings.generated.resources.ic_close
-import androidx.compose.ui.unit.dp
 import com.kapp.tidings.ui.components.AppIconButton
 import com.kapp.tidings.ui.theme.LocalAppSpacing
 import com.kapp.tidings.ui.theme.accents
