@@ -4,6 +4,8 @@ package com.kapp.tidings.agent
 
 import java.util.concurrent.ConcurrentHashMap
 import kotlinx.coroutines.runBlocking
+import kotlinx.coroutines.withTimeout
+import kotlinx.coroutines.withTimeoutOrNull
 import kotlinx.serialization.json.buildJsonObject
 import kotlinx.serialization.json.put
 import kotlin.test.Test
@@ -95,28 +97,32 @@ class StageChainIsolationTest {
 
     // ------------------------------------------------ 并行分发：事件序，不赌时长
 
-    /** 单调时戳区间相交 = 真并发；串行执行区间必然相离。 */
+    /**
+     * 并行证明用**会合屏障**，不赌墙钟窗口：两棒都走到屏障才放行。
+     * 真并行 ⇒ 甲到达后挂起（await），调度器让乙跑 ⇒ 乙到达 ⇒ 双方同时放行；
+     * 串行 ⇒ 甲永远等不到乙 ⇒ 超时 ⇒ 红（这正是「不并行」的正确判定）。
+     */
     @Test
     fun twoIsolatedStagesOverlapInTime() = runBlocking {
-        val windows = ConcurrentHashMap<String, Pair<Long, Long>>()
+        val arrived = java.util.concurrent.atomic.AtomicInteger(0)
+        val bothIn = kotlinx.coroutines.CompletableDeferred<Unit>()
+        val order = java.util.Collections.synchronizedList(mutableListOf<String>())
         val runner = StageChainRunner(
             headSha = { "base" },
             runStage = { stage, _, _ ->
-                val start = System.nanoTime()
-                kotlinx.coroutines.yield()
-                windows[stage.role] = start to System.nanoTime()
+                if (stage.requiresIsolation) {
+                    if (arrived.incrementAndGet() == 2) bothIn.complete(Unit)
+                    withTimeout(10_000) { bothIn.await() }
+                }
+                order.add(stage.role)
                 StageRun(ok = true, summary = stage.role + " 完成")
             },
             land = { _, _, _ -> "sha" },
         )
         val out = runner.run("iso", "/tmp/repo", "并行链", listOf(isoStage("甲"), isoStage("乙"), plainStage("验收")))
         assertEquals(3, out.size)
-        val (aStart, aEnd) = windows.getValue("甲")
-        val (bStart, bEnd) = windows.getValue("乙")
-        assertTrue(aStart < bEnd && bStart < aEnd,
-            "两根隔离棒的时间窗必须重叠（串行必然相离）：甲=" + aStart + ".." + aEnd + " 乙=" + bStart + ".." + bEnd)
-        val (_, cStart) = windows.getValue("验收")
-        assertTrue(cStart >= maxOf(aEnd, bEnd), "非隔离棒要等隔离组全部完成才开跑")
+        assertEquals(2, arrived.get(), "两根隔离棒都必须走到屏障（串行时只有一根会到达）")
+        assertEquals("验收", order.last(), "非隔离棒要等隔离组全部完成才开跑")
     }
 
     /**
@@ -141,25 +147,32 @@ class StageChainIsolationTest {
         )
     }
 
-    /** 用独立 runner 以 [limit] 跑一组隔离棒，回答是否存在窗口相交的对。 */
+    /**
+     * 用独立 runner 以 [limit] 跑一组隔离棒，回答**是否达到过预期的并发峰值**。
+     * 计数在每棒入口自增、退场自减；每棒在入口等到峰值出现或超时（超时只说明
+     * 这一棒没等到，不影响事实记录）。上限 1 时峰值最多 1，结构上到不了 2。
+     */
     private suspend fun groupWindowsOverlap(roles: List<String>, limit: Int): Boolean {
-        val windows = ConcurrentHashMap<String, Pair<Long, Long>>()
+        val active = java.util.concurrent.atomic.AtomicInteger(0)
+        val peak = java.util.concurrent.atomic.AtomicInteger(0)
+        // 并发的最小可信证据是「同时有 2 棒在跑」：cap≥2 时能达到，cap=1 结构上到不了。
+        val expected = 2
         val probe = StageChainRunner(
             headSha = { "base" },
-            runStage = { stage, _, _ ->
-                val start = System.nanoTime()
-                kotlinx.coroutines.yield()
-                windows[stage.role] = start to System.nanoTime()
+            runStage = { _, _, _ ->
+                val now = active.incrementAndGet()
+                peak.updateAndGet { prev -> maxOf(prev, now) }
+                withTimeoutOrNull(2_000) {
+                    while (active.get() < expected) kotlinx.coroutines.delay(5)
+                }
+                active.decrementAndGet()
                 StageRun(ok = true, summary = "ok")
             },
             land = { _, _, _ -> "sha" },
             parallelLimit = limit,
         )
         probe.run("probe", "/tmp/repo", "t", roles.map { isoStage(it) })
-        return roles.flatMap { a -> roles.map { b -> a to b } }.any { (a, b) ->
-            a != b && windows.getValue(a).first < windows.getValue(b).second &&
-                windows.getValue(b).first < windows.getValue(a).second
-        }
+        return peak.get() >= expected
     }
 
     /** 失败即停整组：组内任一棒失败 ⇒ 全组不落盘、后续棒不开跑。 */
