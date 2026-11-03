@@ -110,9 +110,25 @@ class Messenger(
      * 打开本开关后,链路不再是第一选择(仍保留为失败回退),数据面才真正落在信道上。
      */
     private val preferTransport: Boolean = false,
+    /**
+     * 一级交接缓冲容量（[incoming]）。默认 1024，与 [NodeRuntime] 的 `_inbound` 对齐。
+     *
+     * 做成参数只为**可判定**：钉子用一个小容量（灌满成本低）证明「满了就不回 ACK」，
+     * 生产用大容量吸收重启补投 / 群扇出的洪峰。
+     */
+    private val incomingCapacity: Int = 1024,
 ) {
 
-    private val _incoming = MutableSharedFlow<Envelope>(extraBufferCapacity = 128)
+    /**
+     * 一级交接缓冲。**必须与 [NodeRuntime] 的 `_inbound`（1024）同一量级**。
+     *
+     * 真机现场：ACK 后置之后，接收侧「缓冲满 ⇒ 不回 ACK」。洪峰
+     * （重启补投 / 群扇出）下单条订阅者稍慢就把 128 灌满，于是**每一条**新帧都被
+     * withhold，对端在退避里反复重传也进不了管道 —— 表现为两端 TCP 都 ESTABLISHED、
+     * 却一条 `acked=true` 都没有。旧行为「先 ACK 再 tryEmit」看不出这个楔死，
+     * 因为它拿谎报 ACK 换来了表面通畅，而丢的帧没人知道。
+     */
+    private val _incoming = MutableSharedFlow<Envelope>(extraBufferCapacity = incomingCapacity)
     val incoming: SharedFlow<Envelope> = _incoming
 
     private val _status = MutableSharedFlow<MessageStatus>(extraBufferCapacity = 128)
@@ -215,10 +231,8 @@ class Messenger(
                 return
             }
         }
-        // 去重提前：重复帧也要回 ACK（对端在等它停手），但不重复投递。
-        val duplicate = dedupStore.has(envelope.id, envelope.from)
-        if (!duplicate) dedupStore.add(envelope.id, envelope.from, nowMillis())
-        if (duplicate) {
+        // 去重：重复帧也要回 ACK（对端在等它停手），但不重复投递。
+        if (dedupStore.has(envelope.id, envelope.from)) {
             sendAck(envelope, datagram)
             return
         }
@@ -231,6 +245,9 @@ class Messenger(
             println("[reliable] hand-off buffer full, withholding ack for " + envelope.id)
             return
         }
+        // **去重只在投递成功之后记**。先记后投会在投递失败时留下「已见过、从未投递」
+        // 的鬼条目：重传被判重复 ⇒ 直接 ACK ⇒ 静默丢帧（真机楔死现场）。
+        dedupStore.add(envelope.id, envelope.from, nowMillis())
         sendAck(envelope, datagram)
     }
 
@@ -258,14 +275,14 @@ class Messenger(
         if (envelope.from == selfNodeId) return false
         val known = registry.get(envelope.from)
         if (known != null && known.ip != remoteAddress) return false
-        val duplicate = dedupStore.has(envelope.id, envelope.from)
-        if (!duplicate) dedupStore.add(envelope.id, envelope.from, nowMillis())
-        if (duplicate) return true
+        if (dedupStore.has(envelope.id, envelope.from)) return true
         // 与 UDP 路径同一纪律：进不了交接管道就不回 msg-ack，对端重传接管。
         if (!_incoming.tryEmit(envelope)) {
             println("[reliable] tcp hand-off buffer full, withholding msg-ack for " + envelope.id)
             return false
         }
+        // 与 UDP 路径同一纪律：投递成功之后才记去重，否则重传会被判重复而静默丢帧。
+        dedupStore.add(envelope.id, envelope.from, nowMillis())
         return true
     }
 

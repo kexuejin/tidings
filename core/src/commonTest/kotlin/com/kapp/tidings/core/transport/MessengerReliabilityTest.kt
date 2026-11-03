@@ -476,12 +476,19 @@ class MessengerReliabilityTest {
         }
     }
     /**
-     * §3 第 8 种形态的根治钉子：**ACK 只在帧成功进入交接管道之后回**。
+     * §3 第 8 种形态的根治钉子：**ACK 只在帧成功进入交接管道之后回**，且**去重只在投递
+     * 成功之后记**。
      *
-     * 场景是真实的：订阅者处理慢（拿到第 1 帧后卡住），交接管道（容量 128）被后续帧
-     * 灌满，第 130 帧 tryEmit 返回 false。修复前这一帧照样先回了 ACK（对端据此停止
-     * 重传），帧本身被静默挤掉 —— 「拿到 ACK 但永远没投递」；修复后不发 ACK，对端的
-     * 可靠重传自然接管。
+     * 场景是真实的：订阅者处理慢（拿到第 1 帧后卡住），交接管道被后续帧灌满，下一帧
+     * tryEmit 返回 false。修复前的两个 bug 叠在一起：这一帧照样先回了 ACK（对端据此停止
+     * 重传）、并且被提前写进去重表 —— 于是对端重传时被判「重复」→ 只回 ACK、永不投递
+     * （2026-11-03 真机楔死现场：两端 ESTABLISHED、一条 acked=true 都没有）。
+     *
+     * 两条断言都是**正事件**，不靠猜时间：
+     * 1. 确定边界后（订阅者已取走第 1 帧并卡住、管道为空）灌满管道：等「一定被接下的
+     *    1 + capacity 帧」全部 ACK，再用有界窗口确认被拒帧没有被谎报 ACK；
+     * 2. 排空后**重传被拒的那一帧**：它必须在应用层真的出现（delivered）并拿到 ACK ——
+     *    修复前它已进去重表，重传只会被判重复、投递为零。
      *
      * 注：无订阅者时 SharedFlow 的 tryEmit 恒 returns true（值被丢弃但报成功），所以
      * 钉子必须带一个**慢订阅者**才有判别力 —— 这也说明「有没有订阅者」不能作为
@@ -491,6 +498,7 @@ class MessengerReliabilityTest {
     fun ackIsWithheldWhenHandOffBufferIsFull() = runBlocking {
         val scope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
         val ackIds = java.util.Collections.synchronizedList(mutableListOf<String>())
+        val delivered = java.util.Collections.synchronizedList(mutableListOf<String>())
         val inbound = kotlinx.coroutines.flow.MutableSharedFlow<ReceivedDatagram>(replay = 1024)
         val fake = object : DatagramTransport {
             override val incoming: kotlinx.coroutines.flow.SharedFlow<ReceivedDatagram> = inbound
@@ -507,49 +515,77 @@ class MessengerReliabilityTest {
                 return true
             }
         }
+        // 小容量：灌满成本低（生产默认 1024）。边界只影响跑得多快，不影响判据 ——
+        // 修复后的正确性不再依赖「缓冲到底多大」，否则只是把楔死点往后挪。
+        val handOffCapacity = 16
         val messenger = Messenger(
             transport = fake,
             registry = PeerRegistry("self-node"),
             selfNodeId = "self-node",
             queueStore = InMemoryQueueStore(),
             dedupStore = InMemoryDedupStore(),
+            incomingCapacity = handOffCapacity,
         )
         messenger.start(scope)
         val gate = kotlinx.coroutines.CompletableDeferred<Unit>()
-        // 慢订阅者：拿到第一帧就卡住（模拟处理慢），后续帧只能进交接管道。
         val collectorStarted = kotlinx.coroutines.CompletableDeferred<Unit>()
+        val firstFrameTaken = kotlinx.coroutines.CompletableDeferred<Unit>()
+        // 慢订阅者：取走第 1 帧后卡住（模拟处理慢），后续帧只能进交接管道。
         val slowCollector = scope.launch {
             messenger.incoming
                 .onSubscription { collectorStarted.complete(Unit) }
-                .collect { gate.await() }
+                .collect { envelope ->
+                    delivered.add(envelope.id)
+                    if (delivered.size == 1) {
+                        firstFrameTaken.complete(Unit)
+                        gate.await()
+                    }
+                }
         }
         // 确定事件：订阅真的挂上了再灌帧（无订阅者时 tryEmit 恒 true，会让钉子失去判别力）。
         withTimeout(10_000) { collectorStarted.await() }
+        val send = { index: Int, id: String ->
+            val env = makeEnvelope(
+                MsgTypes.MSG,
+                "peer-1",
+                Codec.textPayload("fill the hand-off buffer " + index),
+                id = id,
+            )
+            inbound.tryEmit(ReceivedDatagram(Codec.encodeToBytes(env), "127.0.0.1", 50000 + index))
+        }
         try {
-            repeat(130) { i ->
-                val env = makeEnvelope(
-                    MsgTypes.MSG,
-                    "peer-1",
-                    Codec.textPayload("fill the hand-off buffer " + i),
-                    id = "flood-" + i,
-                )
-                inbound.tryEmit(ReceivedDatagram(Codec.encodeToBytes(env), "127.0.0.1", 50000 + i))
+            // 确定边界：订阅者确实取走第 1 帧并卡住，此时管道为空。
+            send(0, "fill-0")
+            withTimeout(10_000) { firstFrameTaken.await() }
+            // 管道空之后：capacity 帧进缓冲（都会被接下），随后 2 帧必被拒。
+            repeat(handOffCapacity) { send(it + 1, "fill-" + (it + 1)) }
+            send(handOffCapacity + 1, "withheld-0")
+            send(handOffCapacity + 2, "withheld-1")
+            // 确定事件：1 + capacity 帧一定被接下；等它们全部 ACK。
+            awaitUntil("accepted frames are acked") { ackIds.size >= 1 + handOffCapacity }
+            // 有界窗口：修复前被拒的两帧会谎报 ACK（数量涨到 1 + capacity + 2）。
+            var quietTicks = 0
+            while (quietTicks < 20) {
+                delay(10)
+                quietTicks = if (ackIds.size == 1 + handOffCapacity) quietTicks + 1 else 0
             }
-            // 确定事件：109? 不 —— 1 帧被订阅者取走 + 128 帧进缓冲 = 129 帧能拿到 ACK。
-            withTimeout(30_000) {
-                while (ackIds.isEmpty() || ackIds.size < 129) {
-                    if (ackIds.size >= 129) break
-                    kotlinx.coroutines.delay(25)
-                }
-            }
-            assertTrue(
-                ackIds.size in 128..129,
-                "搬运成功的帧数取 128 或 129（慢订阅读者可能已取走 0/1 帧），实际 " + ackIds.size,
+            assertEquals(
+                1 + handOffCapacity,
+                ackIds.size,
+                "只有被接下的 1 + capacity 帧允许回 ACK；被拒帧谎报会让对端停止重传",
             )
             assertFalse(
-                ackIds.contains("flood-129"),
-                "交接管道满后的第 130 帧不许拿到 ACK（谎报收到 ⇒ 对端停止重传而本端没投递）",
+                ackIds.contains("withheld-0"),
+                "交接管道满后被拒的帧不许拿到 ACK（谎报收到 ⇒ 对端停止重传而本端没投递）",
             )
+            // 排空后重传（模拟对端的可靠重传）：修复前它已进去重表 → 判重 → 只 ACK 不投递。
+            gate.complete(Unit)
+            awaitUntil("buffered frames drained") { delivered.size >= 1 + handOffCapacity }
+            assertEquals(1 + handOffCapacity, delivered.size, "被拒的两帧在第一轮不许进应用层")
+            send(handOffCapacity + 3, "withheld-0")
+            awaitUntil("withheld frame is delivered after a retry") {
+                delivered.contains("withheld-0") && ackIds.contains("withheld-0")
+            }
         } finally {
             gate.complete(Unit)
             slowCollector.cancel()
