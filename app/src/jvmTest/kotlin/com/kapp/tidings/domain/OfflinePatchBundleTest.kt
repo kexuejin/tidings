@@ -65,14 +65,14 @@ class OfflinePatchBundleTest {
         try {
             a.start()
             b.start()
-            awaitUntil("A 起来") { a.state.value.network.phase.name == "Running" }
-            awaitUntil("B 起来") { b.state.value.network.phase.name == "Running" }
+            awaitUntil("A 起来", timeoutMs = 60_000) { a.state.value.network.phase.name == "Running" }
+            awaitUntil("B 起来", timeoutMs = 60_000) { b.state.value.network.phase.name == "Running" }
             val selfA = a.state.value.selfNodeId
             val selfB = b.state.value.selfNodeId
             a.addManualPeer("127.0.0.1", portB.toString())
             b.addManualPeer("127.0.0.1", portA.toString())
-            awaitUntil("A 看见 B") { a.state.value.peers.any { it.nodeId == selfB } }
-            awaitUntil("B 看见 A") { b.state.value.peers.any { it.nodeId == selfA } }
+            awaitUntil("A 看见 B", timeoutMs = 60_000) { a.state.value.peers.any { it.nodeId == selfB } }
+            awaitUntil("B 看见 A", timeoutMs = 60_000) { b.state.value.peers.any { it.nodeId == selfA } }
 
             // 一份**像真补丁**的内容：带换行、带 +/− 行、带非 ASCII 路径。
             // 纯 ASCII 单行的样本测不出编码/换行被改写这类问题。

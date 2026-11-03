@@ -410,7 +410,8 @@ class DiscoveryProfileRefreshTest {
         )
         discovery.start(scope)
 
-        val seen = mutableListOf<Envelope>()
+        // 采集协程（Default 线程）写、测试线程读——普通 ArrayList 的遍历会撞 CME（实测轮换红）。
+        val seen = java.util.concurrent.CopyOnWriteArrayList<Envelope>()
         val watcher = scope.launch(start = CoroutineStart.UNDISPATCHED) {
             peerSide.incoming.collect { datagram ->
                 val decoded = Codec.decode(datagram.bytes)
