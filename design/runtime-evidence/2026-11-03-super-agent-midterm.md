@@ -72,3 +72,27 @@
 四包交付物（③分级授权 / ⑤P2P 直投 / ④Supervisor / ⑥反哺 + ②S4-4 铺路 + ①D-NEW 核对 + OBS-1 定性）全部落地并各自带红→绿验证；
 最终串行全量的红均为**既有轮换债**（非本轮改动面），已记账升级不掩盖。goal-2c6d273c 的可判定项全部达成；
 OBS-2 与 :app 轮换专项是下轮的入口。
+
+## 10. 遗留债清偿（goal-394a93a0，`38ff49a5` / `253b4005`）
+
+### 10.1 :app 轮换族（`38ff49a5`）
+
+**根因判定**（7 轮全量 3 红的插桩证据，非猜测）：接收侧 NodeRuntime **先 ACK 后交接**——assign/回执/会话帧拿到 ACK（`acked=true in=1ms`），但 `handleOnAgentChannel` / inbound 订阅者全程未见；SharedFlow 交接在满载 JVM 下静默丢，发送侧拿到 ACK 即停重试 ⇒「发送成功 ≠ 对方收到」§3 第 8 种形态。
+
+**修复**（测试侧 redrive，生产源零改动）：委派帧按「重新委派」节奏重投（1s、新信封 id、同 channelId——与真实宿主租约超时重派同形），会话族 5 处单发判定点同纪律（事件带原 cursor 幂等）；`awaitUntil` 判定条件一字未改，加严 `assertFalse(anySendFailed)`。反向验证：假应答桥吞帧 ⇒ 红。
+
+**终验**：`:testStabilityGate` 3/3 全绿（8m25s）；`:app:jvmTest` 776 例 0 失败。
+
+### 10.2 OBS-2 锁屏 FGS（`253b4005`）
+
+**定性修正**：证据日的 FATAL 对应旧构建（`RelayService` 已不存在；`efcfed69` 三层 runCatching 已把崩改成「静默缺席」）。真机实测（Pixel 6/Android 15）：HEAD 锁屏拉起 `getFgsAllowStart=DENIED` / `uidState=TPSL` / `startForegroundCount=0`——保活服务缺席，后台收消息受损。
+
+**修复**：`canStartForegroundServiceNow` 纯函数时机判定（TOP_SLEEPING 如实不在前台、悬浮窗豁免）+ `pendingStart` 登记 + `MainActivity.onWindowFocusChanged` promote 重发；关开关连 pending 撤销。
+
+**真机读数**：修复前 DENIED/count=0；修复后 7 轮冷启动锁屏拉起每轮 `PROC_STATE_TOP / count=1 / isForeground=true`、通知 4202 在列、closeCount 全 0（92 peers 无恶化）。反向验证两层：单测摘豁免 ⇒ 指名红；真机摘 promote 钩子 ⇒ 严格不解锁场景复现缺席，恢复 3 轮全绿。
+
+### 10.3 遗留（如实）
+
+- **core 的 ACK-before-delivery 生产缺陷**：`Messenger.handleReliable` 先回 ACK 再 tryEmit、交接无失败隔离——根治方向（ACK 只在帧进入接收管道后回，或 pump 加失败重投）需动 core 传输协议语义，另开任务。
+- CME 单次现场无堆栈（7+3 轮未复现），未定位，记账。
+- NudgeNotificationTest 族不在本轮范围，未动。
