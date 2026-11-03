@@ -454,7 +454,9 @@ class NodeRuntime(
     )
 
 
-    private val _inbound = MutableSharedFlow<Envelope>(extraBufferCapacity = 256)
+    private val _inbound = MutableSharedFlow<Envelope>(extraBufferCapacity = 1024)
+        /** 实时交接挤掉计数（诊断字段）：丢的是实时订阅者那一跳，messageStore 已先落。 */
+        val handOffDropped = java.util.concurrent.atomic.AtomicLong(0)
 
     /** 已通过校验、已去重的入站消息（`msg` 帧）。UI 与 agentNode 都从这里取。 */
     val inbound: SharedFlow<Envelope> = _inbound
@@ -1207,7 +1209,13 @@ class NodeRuntime(
                     )
                 }
                 if (envelope.type == MsgTypes.FILE_CTL) transfer?.onEnvelope(envelope)
-                _inbound.tryEmit(envelope)
+                if (!_inbound.tryEmit(envelope)) {
+                    // 实时订阅者侧的交接挤掉：messageStore 已先落（离线回放不丢），
+                    // 但这条帧不会到达本会话的实时订阅者。如实计数暴露，不静默 ——
+                    // 「交接挤掉」与「帧没到」在外部同形，诊断字段是唯一区分。
+                    handOffDropped.incrementAndGet()
+                    println("[inbound] hand-off buffer full, dropped " + envelope.id)
+                }
             }
         }
         // 绑 TCP 端口要放在订阅之后：端口一开，桌面端就可能连进来拉文件。

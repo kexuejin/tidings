@@ -3,7 +3,12 @@
 package com.kapp.tidings.core.transport
 
 import com.kapp.tidings.core.nowMillis
+import com.kapp.tidings.core.testutil.awaitTrue
+import kotlinx.serialization.json.JsonObject
+import kotlinx.serialization.json.JsonPrimitive
+import kotlinx.serialization.json.contentOrNull
 import com.kapp.tidings.core.protocol.Codec
+import com.kapp.tidings.core.protocol.DecodeResult
 import com.kapp.tidings.core.protocol.Envelope
 import com.kapp.tidings.core.protocol.MsgTypes
 import com.kapp.tidings.core.protocol.Profile
@@ -14,6 +19,7 @@ import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.cancel
+import kotlinx.coroutines.launch
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.runBlocking
 import kotlinx.coroutines.withTimeout
@@ -469,4 +475,86 @@ class MessengerReliabilityTest {
             while (!condition()) delay(10)
         }
     }
+    /**
+     * §3 第 8 种形态的根治钉子：**ACK 只在帧成功进入交接管道之后回**。
+     *
+     * 场景是真实的：订阅者处理慢（拿到第 1 帧后卡住），交接管道（容量 128）被后续帧
+     * 灌满，第 130 帧 tryEmit 返回 false。修复前这一帧照样先回了 ACK（对端据此停止
+     * 重传），帧本身被静默挤掉 —— 「拿到 ACK 但永远没投递」；修复后不发 ACK，对端的
+     * 可靠重传自然接管。
+     *
+     * 注：无订阅者时 SharedFlow 的 tryEmit 恒 returns true（值被丢弃但报成功），所以
+     * 钉子必须带一个**慢订阅者**才有判别力 —— 这也说明「有没有订阅者」不能作为
+     * 交接成功的判据。
+     */
+    @Test
+    fun ackIsWithheldWhenHandOffBufferIsFull() = runBlocking {
+        val scope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
+        val ackIds = java.util.Collections.synchronizedList(mutableListOf<String>())
+        val inbound = kotlinx.coroutines.flow.MutableSharedFlow<ReceivedDatagram>(replay = 1024)
+        val fake = object : DatagramTransport {
+            override val incoming: kotlinx.coroutines.flow.SharedFlow<ReceivedDatagram> = inbound
+            override val boundPort: Int = 1
+            override suspend fun start() {}
+            override fun stop() {}
+            override suspend fun restart() {}
+            override suspend fun send(bytes: ByteArray, host: String, port: Int): Boolean {
+                val env = (runCatching { Codec.decode(bytes) }.getOrNull() as? DecodeResult.Ok)?.env
+                if (env?.type == MsgTypes.ACK) {
+                    val ackFor = (env.payload as? JsonObject)?.get("ackFor") as? JsonPrimitive
+                    ackFor?.contentOrNull?.let { ackIds.add(it) }
+                }
+                return true
+            }
+        }
+        val messenger = Messenger(
+            transport = fake,
+            registry = PeerRegistry("self-node"),
+            selfNodeId = "self-node",
+            queueStore = InMemoryQueueStore(),
+            dedupStore = InMemoryDedupStore(),
+        )
+        messenger.start(scope)
+        val gate = kotlinx.coroutines.CompletableDeferred<Unit>()
+        // 慢订阅者：拿到第一帧就卡住（模拟处理慢），后续帧只能进交接管道。
+        val slowCollector = scope.launch {
+            messenger.incoming.collect { gate.await() }
+        }
+        try {
+            repeat(130) { i ->
+                val env = makeEnvelope(
+                    MsgTypes.MSG,
+                    "peer-1",
+                    Codec.textPayload("fill the hand-off buffer " + i),
+                    id = "flood-" + i,
+                )
+                inbound.tryEmit(ReceivedDatagram(Codec.encodeToBytes(env), "127.0.0.1", 50000 + i))
+            }
+            // 确定事件：109? 不 —— 1 帧被订阅者取走 + 128 帧进缓冲 = 129 帧能拿到 ACK。
+            withTimeout(30_000) {
+                while (ackIds.isEmpty() || ackIds.size < 129) {
+                    if (ackIds.size >= 129) break
+                    kotlinx.coroutines.delay(25)
+                }
+            }
+            assertEquals(
+                129,
+                ackIds.size,
+                "1 帧被订阅者取走 + 128 帧进缓冲 = 129 帧拿 ACK（实际 " + ackIds.size + "）",
+            )
+            assertFalse(
+                ackIds.contains("flood-129"),
+                "交接管道满后的第 130 帧不许拿到 ACK（谎报收到 ⇒ 对端停止重传而本端没投递）",
+            )
+        } finally {
+            gate.complete(Unit)
+            slowCollector.cancel()
+            messenger.stop()
+            scope.cancel()
+        }
+    }
 }
+
+
+
+

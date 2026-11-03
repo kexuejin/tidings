@@ -215,6 +215,26 @@ class Messenger(
                 return
             }
         }
+        // 去重提前：重复帧也要回 ACK（对端在等它停手），但不重复投递。
+        val duplicate = dedupStore.has(envelope.id, envelope.from)
+        if (!duplicate) dedupStore.add(envelope.id, envelope.from, nowMillis())
+        if (duplicate) {
+            sendAck(envelope, datagram)
+            return
+        }
+        // **ACK 只在帧成功进入交接管道之后回**（§3 第 8 种形态的根治）：
+        // 从前是「无条件先回 ACK 再 tryEmit」——tryEmit 在缓冲满时返回 false 被忽略，
+        // 于是「对端拿到 ACK 停止重试」与「本端永远没投出去」同时成立。发送侧只认 ACK，
+        // 帧就永远丢了。现在：进不了管道就不回 ACK，对端的可靠重传自然接管 —— 宁可
+        // 多收一次重复帧（去重表挡着），不可谎报收到。
+        if (!_incoming.tryEmit(envelope)) {
+            println("[reliable] hand-off buffer full, withholding ack for " + envelope.id)
+            return
+        }
+        sendAck(envelope, datagram)
+    }
+
+    private suspend fun sendAck(envelope: Envelope, datagram: ReceivedDatagram) {
         val ack = makeEnvelope(
             MsgTypes.ACK,
             selfNodeId,
@@ -223,9 +243,6 @@ class Messenger(
         runCatching {
             transport.send(Codec.encodeToBytes(ack), datagram.host, datagram.port)
         }
-        if (dedupStore.has(envelope.id, envelope.from)) return
-        dedupStore.add(envelope.id, envelope.from, nowMillis())
-        _incoming.tryEmit(envelope)
     }
 
     /**
@@ -241,9 +258,14 @@ class Messenger(
         if (envelope.from == selfNodeId) return false
         val known = registry.get(envelope.from)
         if (known != null && known.ip != remoteAddress) return false
-        if (dedupStore.has(envelope.id, envelope.from)) return true
-        dedupStore.add(envelope.id, envelope.from, nowMillis())
-        _incoming.tryEmit(envelope)
+        val duplicate = dedupStore.has(envelope.id, envelope.from)
+        if (!duplicate) dedupStore.add(envelope.id, envelope.from, nowMillis())
+        if (duplicate) return true
+        // 与 UDP 路径同一纪律：进不了交接管道就不回 msg-ack，对端重传接管。
+        if (!_incoming.tryEmit(envelope)) {
+            println("[reliable] tcp hand-off buffer full, withholding msg-ack for " + envelope.id)
+            return false
+        }
         return true
     }
 
