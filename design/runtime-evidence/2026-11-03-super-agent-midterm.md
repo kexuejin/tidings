@@ -128,3 +128,9 @@ OBS-2 与 :app 轮换专项是下轮的入口。
 - ② 提交邮箱：`ke xuejin <168250+kexuejin@users.noreply.github.com>` / `kexuejin <…@users.noreply.github.com>`——全部 noreply。
 - ③ ignored-but-tracked：无。
 - ④ mavenLocal/SNAPSHOT：`settings.gradle.kts` 唯一命中是 `LUCIOLA_LOCAL=1` 门控的 luciola 本地验证块（默认关闭；公共仓坐标照常解析，不构成 mavenLocal-only 依赖）。
+
+## 14. 推送回执（S6-4）
+
+`git push origin main` → `3325d158..31337183  main -> main`，退出码 0；推送后 `git rev-list --count origin/main..HEAD` = **0**（本地与远端一致）。自检四命令读数见 §13。
+
+推送覆盖的两轮升级（本仓当日累计）：super-agent 卡片升级短期计划 Phase 0–5 + 中期 §4.2 三块 + 遗留债（轮换族、OBS-1/2）+ 传输层 ACK 后置根治。当前工作树仅剩另一会话的图标资源在途改动（未纳入本批）。
