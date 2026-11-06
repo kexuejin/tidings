@@ -1,0 +1,4 @@
+# 施工痕迹（日期/型号/内网地址/本机路径/决议号/内部文件/时间戳）棘轮基线
+# 格式: <相对路径>\t<允许的条数>
+# 生成时机: HEAD=d4f29f5
+# 生成命令: python3 tools/construction-trace.py --write

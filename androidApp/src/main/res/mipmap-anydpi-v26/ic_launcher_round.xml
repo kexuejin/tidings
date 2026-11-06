@@ -1,0 +1,11 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  自适应图标（API 26+）。
+  背景层用品牌绿 #2D6A4F，前景层只画「捎」字（见 drawable/ic_launcher_foreground.xml）。
+  两层分开的原因：系统会按厂商的圆形/方形/水滴形模板裁前景层，
+  把背景画进前景层的那份资产在圆角模板下会露出一圈方角。
+-->
+<adaptive-icon xmlns:android="http://schemas.android.com/apk/res/android">
+    <background android:drawable="@drawable/ic_launcher_bg_gradient" />
+    <foreground android:drawable="@drawable/ic_launcher_foreground" />
+</adaptive-icon>
