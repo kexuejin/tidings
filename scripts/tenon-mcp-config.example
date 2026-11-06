@@ -1,0 +1,12 @@
+{
+  "_comment": "榫卯 Tenon MCP Server（形态 C）注册示例。拷进 ~/.gemini/config/mcp_config.json 的 mcpServers 段，SCRIPT_PATH 换成 tenon-mcp-server.py 的绝对路径。宿主 Tenon 桌面端需在跑（控制面 127.0.0.1:8788）；凭证同 hook 脚本（TENON_PLUGIN_TOKEN 或 0600 受控文件）。",
+  "mcpServers": {
+    "tenon": {
+      "command": "python3",
+      "args": ["SCRIPT_PATH"],
+      "env": {
+        "TENON_HOST_URL": "http://127.0.0.1:8788"
+      }
+    }
+  }
+}

@@ -1,0 +1,225 @@
+// SPDX-License-Identifier: GPL-3.0-only
+
+package com.kapp.tenon.ui.desktop
+
+import org.jetbrains.compose.resources.painterResource
+import androidx.compose.foundation.background
+import androidx.compose.foundation.clickable
+import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.material3.Card
+import androidx.compose.material3.Icon
+import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.Surface
+import androidx.compose.material3.Text
+import androidx.compose.runtime.Composable
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.setValue
+import androidx.compose.ui.Alignment
+import androidx.compose.ui.Modifier
+import androidx.compose.ui.unit.dp
+import com.kapp.tenon.ui.theme.LocalAppSpacing
+import com.kapp.tenon.domain.pairingPayloadForAddresses
+
+import com.kapp.tenon.domain.NodeSlice
+import com.kapp.tenon.domain.SettingsSlice
+import com.kapp.tenon.domain.ChatSlice
+import com.kapp.tenon.domain.totalPending
+import com.kapp.tenon.ui.components.StatusDot
+import com.kapp.tenon.ui.theme.RelayElevations
+import com.kapp.tenon.generated.resources.Res
+import com.kapp.tenon.generated.resources.desktop_phase_failed
+import com.kapp.tenon.generated.resources.desktop_phase_running
+import com.kapp.tenon.generated.resources.desktop_phase_starting
+import com.kapp.tenon.generated.resources.desktop_status_connected
+import com.kapp.tenon.generated.resources.desktop_status_local
+import com.kapp.tenon.generated.resources.desktop_status_pairing_link
+import com.kapp.tenon.generated.resources.desktop_status_pending
+import com.kapp.tenon.generated.resources.desktop_status_waiting
+import com.kapp.tenon.generated.resources.chat_group_id_copied
+import com.kapp.tenon.generated.resources.node_state_stopped
+import com.kapp.tenon.generated.resources.ic_link
+import com.kapp.tenon.domain.model.NodePhase
+import org.jetbrains.compose.resources.StringResource
+import org.jetbrains.compose.resources.stringResource
+
+// ------------------------------------------------------------------ 状态栏
+
+@Composable
+public fun DesktopStatusBar(
+    view: DesktopView,
+    sizeClass: DesktopWindowSizeClass,
+    actions: DesktopShellActions,
+    /** 复制回执是否亮着（壳持有状态并 2 秒自清）。 */
+    copyReceiptActive: Boolean = false,
+    /** 状态栏自己的复制动作（配对链接）完成时通知壳亮回执。 */
+    onCopied: () -> Unit = {},
+    /** Phase 4 订阅面切片：默认值由 [state] 投影，预览/旧路径行为不变。 */
+    nodeSlice: NodeSlice,
+    settingsSlice: SettingsSlice,
+    chatSlice: ChatSlice,
+) {
+    val phaseColor = when (nodeSlice.network.phase) {
+        NodePhase.Running -> MaterialTheme.colorScheme.primary
+        NodePhase.Starting -> MaterialTheme.colorScheme.tertiary
+        NodePhase.Failed -> MaterialTheme.colorScheme.error
+        NodePhase.Stopped -> MaterialTheme.colorScheme.onSurfaceVariant
+    }
+    val compact = sizeClass == DesktopWindowSizeClass.Compact
+    // 配对链接要从**自己**的地址与端口拼，而这两样都不在 `nodeSlice.peers` 里：
+    // `PeerRegistry` 的设计契约就是为了拒绝记录自己。
+    // 早先这里用的是 `state.peer(settingsSlice.settings.nodeId)`，恒为 null ⇒ 「配对链接」这颗按钮
+    // **在生产里从来没画出来过**（原型 `prototype/relay.html:2611-2622` 的 `dstatusbar()` 有它）。
+    // 现照仓里同一份取法改写：`DesktopConversationsPane` 的首启空态、
+    // `feature/nodes/NodeDetail.kt`、`feature/settings/SettingsHomeScreen.kt` 都是这么取的。
+    // 端口取真正绑上的那个；`boundUdpPort == 0`（网络还没起来）时退回设置里配的那个
+    // —— `feature/nodes/NodeDetail.kt` 里有个同款 `Int.ifZero`，现在它是 internal 的，
+    // 这里仍然把同一个表达式写开（桌面状态栏与节点详情不是一个特性包）。
+    val selfPort = nodeSlice.network.boundUdpPort.takeIf { it != 0 } ?: settingsSlice.settings.udpPort
+    // 配对链接用**全部候选**（lan_v4 / lan_v6 / public_v6）：只印一个 IPv4 时，手机换到
+    // 移动网就只剩"手动填地址"一条路。仍走权威构造器：它判类型、给 IPv6 加方括号、丢掉
+    // link-local，并且**一个可用地址都没有时返回 null** —— 那时宁可不给这颗按钮，
+    // 也不让用户复制走一条 `relay://:0`。
+    val pairingLink = pairingPayloadForAddresses(
+        nodeId = settingsSlice.settings.nodeId,
+        nick = settingsSlice.settings.nick,
+        // 用「宣告」那份：含隧道地址。本地那份刻意过滤 utun/feth/tailscale，
+        // 拿它生成链接会让「换到别的网络（或走 Tailscale）的手机」只能手动填地址。
+        addresses = nodeSlice.network.advertisedAddresses,
+        port = selfPort,
+        // task-86：复制链接这条路也要带 pin —— 公网目标要求 pin != null（fail-closed）。
+        tlsPin = nodeSlice.network.selfTlsPin,
+    )
+    Surface(color = MaterialTheme.colorScheme.surfaceContainer, tonalElevation = RelayElevations.Card) {
+        Row(
+            Modifier.fillMaxWidth().height(DesktopMetrics.STATUSBAR_PX.dp).padding(horizontal = LocalAppSpacing.current.md),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(LocalAppSpacing.current.md10),
+        ) {
+            StatusDot(nodeSlice.network.isRunning && nodeSlice.peers.count { it.online } > 0, 8.dp, phaseColor)
+            // 一个节点都没连上时不能说「已连接 0 个节点」—— 那是纸面上就自相矛盾的话
+            // （原型 README:90-92 专门点了这一条：「不能写已连接 4 个节点」）。
+            // 但「正在等待设备」只对"网络在跑、只是没人来"成立：网络本身没起来时
+            // 该报的是那个失败原因，而不是一句让人以为一切正常的等待语。
+            Text(
+                when {
+                    nodeSlice.peers.count { it.online } > 0 -> stringResource(Res.string.desktop_status_connected, nodeSlice.peers.count { it.online })
+                    nodeSlice.network.isRunning -> stringResource(Res.string.desktop_status_waiting)
+                    else -> stringResource(phaseLabel(nodeSlice.network.phase))
+                },
+                style = MaterialTheme.typography.labelSmall,
+                maxLines = 1,
+                softWrap = false,
+            )
+            // 原型 README:78-80：状态栏永不换行，「本机 …」这条长描述（.sbl）
+            // 在 Compact 直接隐藏，而不是让它把整行挤到折行。
+            if (!compact) {
+                Text(
+                    // 只印昵称不印节点 ID 前缀：协议标识对普通用户无事可做（诊断包里查
+                    // 得到全量），26px 常驻栏里放它是 dev plumbing 上脸（茶话间基准同理：
+                    // 用户要的是「这是谁的机器」，不是这台机器的协议地址）。
+                    stringResource(Res.string.desktop_status_local, settingsSlice.settings.nick),
+                    style = MaterialTheme.typography.labelSmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    maxLines = 1,
+                    softWrap = false,
+                )
+            }
+            if (totalPending(chatSlice) > 0) {
+                // 与 DesktopConversationsPane 的排队徽标同一个理由：排队色是
+                // secondaryContainer/onSecondaryContainer，tertiaryContainer 本 App 没赋值。
+                Text(
+                    stringResource(Res.string.desktop_status_pending, totalPending(chatSlice)),
+                    style = MaterialTheme.typography.labelSmall,
+                    color = MaterialTheme.colorScheme.onSecondaryContainer,
+                    maxLines = 1,
+                    softWrap = false,
+                    modifier = Modifier
+                        .background(MaterialTheme.colorScheme.secondaryContainer, RoundedCornerShape(4.dp))
+                        .padding(horizontal = 5.dp),
+                )
+            }
+            Spacer(Modifier.weight(1f))
+            // V2 精简：端口与控制面整段摘除 —— 它们是诊断包导出里就有的结构化字段，
+            // 印在每个窗口的 26px 里换不来任何动作（观测项的重复）。真要看端口：
+            // 设置 · 连接 / 诊断包。曾经为这段维护的「不能从 nodeSlice.peers 找自己」、
+            // 「controlPlaneLabel 别拼两次」两条注释随分支一起退场。
+            if (pairingLink != null) {
+                StatusBarAction(stringResource(Res.string.desktop_status_pairing_link), painterResource(Res.drawable.ic_link), compact) {
+                    actions.onCopyPairingLink(pairingLink)
+                    onCopied()
+                }
+            }
+            // 诊断包动作随 V2 归并进系统菜单（同一条 + ⌘ 快捷键可达）：双入口重复；
+            // 配对链接没有第二入口，照原型 .r 保留。
+            // 复制回执（壳持有，2 秒自清）：一次复制发一条系统通知太重、还会进通知中心；
+            // 行内小字足够，且随界面语言走（复用「已复制」既有文案，不新增 key）。
+            if (copyReceiptActive) {
+                Text(
+                    stringResource(Res.string.chat_group_id_copied),
+                    style = MaterialTheme.typography.labelSmall,
+                    color = MaterialTheme.colorScheme.primary,
+                    maxLines = 1,
+                )
+            }
+        }
+    }
+}
+
+/**
+ * 状态栏右侧动作。
+ *
+ * Compact 下只留图标（原型 README:79-80「右侧动作在窄窗收成纯图标」）：状态栏高度固定，
+ * 三个带文字的按钮在 560px 宽下必然互相挤压，而图标至少还能靠 tooltip/无障碍读出来。
+ *
+ * 形参类型是 `Painter` 而不是 `ImageVector`：图标一套化后调用方传的是
+ * `painterResource(Res.drawable.ic_link)`（原型 stroke 资源），不是 Material 字形。
+ * 这里保留 `Painter` 这个**两族共有的上层类型**，是为了让"图标即数据"的位置既能收
+ * 资源、也能在过渡期收 ImageVector，而不是把调用点绑死在某一族上。
+ */
+@Composable
+public fun StatusBarAction(
+    label: String,
+    icon: androidx.compose.ui.graphics.painter.Painter,
+    compact: Boolean,
+    onClick: () -> Unit,
+) {
+    Row(
+        Modifier
+            .clickable(onClick = onClick)
+            .background(MaterialTheme.colorScheme.surfaceContainerHighest, RoundedCornerShape(LocalAppSpacing.current.sm6))
+            .padding(horizontal = if (compact) LocalAppSpacing.current.sm6 else LocalAppSpacing.current.sm, vertical = 3.dp),
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(5.dp),
+    ) {
+        Icon(
+            icon,
+            // 收成图标后文字没了，语义只能靠 contentDescription 保住。
+            contentDescription = if (compact) label else null,
+            tint = MaterialTheme.colorScheme.onSurfaceVariant,
+            modifier = Modifier.size(13.dp),
+        )
+        if (!compact) {
+            Text(
+                label,
+                style = MaterialTheme.typography.labelSmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                maxLines = 1,
+                softWrap = false,
+            )
+        }
+    }
+}
+
+public fun phaseLabel(phase: NodePhase): StringResource = when (phase) {
+    NodePhase.Stopped -> Res.string.node_state_stopped
+    NodePhase.Starting -> Res.string.desktop_phase_starting
+    NodePhase.Running -> Res.string.desktop_phase_running
+    NodePhase.Failed -> Res.string.desktop_phase_failed
+}

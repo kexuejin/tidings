@@ -1,0 +1,75 @@
+-- 会话排序：AgentSessionEntity 获得 `host_updated_at` 列 —— 宿主侧那条会话的**活动时刻**
+-- （`agent-session` 尾键 `updatedAt` = `max(createdAt, lastPromptAt)`，与 DSH 自己的会话列表同口径）。
+--
+-- 为什么加列而不是复用已有的 `updated_at`：那一列是**本端最后一次收到该会话帧的时刻**。
+-- 历史分页一页 20 条走同一个 TCP tick 到达，它全落在同一毫秒 —— 排序因此退化成到达顺序，
+-- 手机上显示成"最近创建的"甚至随机序，而用户在 DSH 里看到的是活动倒序
+-- （原话「跟 dsh 上显示的不一样，不是最新的」）。语义不同的两件事不能挤在一列里。
+--
+-- 为什么是「补建 + 重建」而不是 `ALTER TABLE … ADD COLUMN`：与 `4.sqm` 同一条纪律，理由逐字相同 ——
+--  1. v1 → v5 链上 `4.sqm` 已经补建过这张表，但**任何**早于本版的路径都可能碰上
+--     "表还不存在"（本文件自己要先能独立跑：`6.sqm` 之后的链若被截断重放，先补建最稳）；
+--  2. 「表已是最新但 user_version=0」的桌面库重跑本文件时，`ALTER` 会撞 `duplicate column name`，
+--     用户开不了 App。重建天然幂等：新列在旧形状上不存在 → 补 NULL；已经存在 → 原样搬；
+--  3. 重建（`create new + INSERT…SELECT 点名列 + drop + rename`）是所有 SQLite 版本都支持的写法，
+--     `DROP COLUMN` 不是（要求 ≥ 3.35，Android 框架 SQLite 不保证）。
+--
+-- 搬移只点名**十三个历史列**，新列一律置 NULL：源表是 13 列还是 14 列都不会因列数不匹配而失败
+-- （幂等的代价：极端情形「14 列 + 未盖章」的库重跑会把这个新列洗成 NULL —— 可自愈，
+-- 下一次 `agent-session` 宣告就原样填回，而十三列的真实数据一行不丢）。
+--
+-- 谁真的会跑它：Android（AndroidSqliteDriver）与 iOS（NativeSqliteDriver）由驱动做版本检查并逐级
+-- migrate；桌面（DatabaseDriverFactory.jvm.kt）走建表/迁移/盖三步。没有这个文件的老库少一列，
+-- 而 `selectAllAgentSessions` 是 `SELECT *`、生成的映射按列名取值 —— 症状是打开库那一刻
+-- `no such column: host_updated_at`。
+
+-- (1) 补建：按**第 5 版的形状**（含四个 D1/D6 列、不含新列）建出来；已经有的库是 no-op。
+CREATE TABLE IF NOT EXISTS AgentSessionEntity (
+    node_id TEXT NOT NULL,
+    session_id TEXT NOT NULL,
+    alias TEXT,
+    agent_kind TEXT,
+    state TEXT,
+    title TEXT,
+    started_at INTEGER,
+    updated_at INTEGER NOT NULL,
+    announced INTEGER NOT NULL,
+    agent_id TEXT,
+    ws_id TEXT,
+    ws_title TEXT,
+    ws_path TEXT,
+    PRIMARY KEY (node_id, session_id)
+);
+
+-- (2) 幂等重建：新形状 = 十三个历史列 + 一个可空新列（与 RelayDatabase.sq 的 CREATE 逐列一致）。
+CREATE TABLE AgentSessionEntity_new (
+    node_id TEXT NOT NULL,
+    session_id TEXT NOT NULL,
+    alias TEXT,
+    agent_kind TEXT,
+    state TEXT,
+    title TEXT,
+    started_at INTEGER,
+    updated_at INTEGER NOT NULL,
+    announced INTEGER NOT NULL,
+    agent_id TEXT,
+    ws_id TEXT,
+    ws_title TEXT,
+    ws_path TEXT,
+    host_updated_at INTEGER,
+    PRIMARY KEY (node_id, session_id)
+);
+
+INSERT INTO AgentSessionEntity_new (
+    node_id, session_id, alias, agent_kind, state, title, started_at, updated_at, announced,
+    agent_id, ws_id, ws_title, ws_path
+)
+SELECT node_id, session_id, alias, agent_kind, state, title, started_at, updated_at, announced,
+    agent_id, ws_id, ws_title, ws_path
+FROM AgentSessionEntity;
+
+DROP INDEX IF EXISTS idx_agent_session_node;
+DROP TABLE AgentSessionEntity;
+ALTER TABLE AgentSessionEntity_new RENAME TO AgentSessionEntity;
+
+CREATE INDEX IF NOT EXISTS idx_agent_session_node ON AgentSessionEntity(node_id);

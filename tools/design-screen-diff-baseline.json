@@ -1,0 +1,1518 @@
+{
+  "generatedAt": "2e6b651f8f8b",
+  "note": "逐屏差集棘轮：每个键的差集只许变小。--check 报「新增的值」。",
+  "reason": "sync baseline with frozen prototype after commit history rebuild",
+  "rowCount": 70,
+  "signature": {
+    "d-agentdetail|__error__": [
+      "落点不存在：**待建**（2026-10-13 原型新增提案；代码侧本轮未适配）"
+    ],
+    "d-agents|font-size|code": [
+      "15",
+      "17",
+      "20"
+    ],
+    "d-agents|font-size|proto": [
+      "16"
+    ],
+    "d-agents|radius|code": [
+      "4",
+      "8"
+    ],
+    "d-agents|radius|proto": [
+      "20",
+      "999"
+    ],
+    "d-agents|spacing|proto": [
+      "1",
+      "1.5",
+      "3",
+      "7",
+      "11",
+      "13",
+      "30"
+    ],
+    "d-cabinet|font-size|code": [
+      "17"
+    ],
+    "d-cabinet|font-weight|code": [
+      "700"
+    ],
+    "d-cabinet|radius|proto": [
+      "9"
+    ],
+    "d-cabinet|spacing|proto": [
+      "1",
+      "13"
+    ],
+    "d-capture-tools|font-weight|proto": [
+      "600"
+    ],
+    "d-capture-tools|radius|proto": [
+      "2"
+    ],
+    "d-capture-tools|spacing|code": [
+      "6",
+      "12"
+    ],
+    "d-capture-tools|spacing|proto": [
+      "7",
+      "8",
+      "11",
+      "32"
+    ],
+    "d-capture|font-weight|proto": [
+      "600"
+    ],
+    "d-capture|radius|proto": [
+      "2"
+    ],
+    "d-capture|spacing|code": [
+      "6",
+      "12"
+    ],
+    "d-capture|spacing|proto": [
+      "7",
+      "8",
+      "11",
+      "32"
+    ],
+    "d-chat-group|font-size|code": [
+      "15",
+      "17",
+      "18",
+      "20"
+    ],
+    "d-chat-group|font-weight|code": [
+      "700"
+    ],
+    "d-chat-group|radius|code": [
+      "6",
+      "11"
+    ],
+    "d-chat-group|spacing|code": [
+      "2",
+      "4",
+      "12",
+      "14",
+      "16",
+      "24",
+      "32"
+    ],
+    "d-chat-group|spacing|proto": [
+      "1",
+      "11",
+      "13"
+    ],
+    "d-chat|font-size|code": [
+      "15",
+      "17",
+      "18"
+    ],
+    "d-chat|radius|code": [
+      "2",
+      "4",
+      "6",
+      "10",
+      "11",
+      "16",
+      "22"
+    ],
+    "d-chat|radius|proto": [
+      "20"
+    ],
+    "d-chat|spacing|code": [
+      "2",
+      "18",
+      "48"
+    ],
+    "d-chat|spacing|proto": [
+      "13",
+      "30"
+    ],
+    "d-drop|font-size|code": [
+      "17"
+    ],
+    "d-drop|font-size|proto": [
+      "11",
+      "14",
+      "16"
+    ],
+    "d-drop|font-weight|proto": [
+      "400",
+      "500",
+      "600"
+    ],
+    "d-drop|radius|code": [
+      "14"
+    ],
+    "d-drop|radius|proto": [
+      "9",
+      "12",
+      "20"
+    ],
+    "d-drop|spacing|proto": [
+      "1",
+      "4",
+      "5",
+      "7",
+      "8",
+      "9",
+      "10",
+      "11",
+      "12",
+      "13",
+      "14",
+      "16",
+      "30"
+    ],
+    "d-emoji|font-size|code": [
+      "17"
+    ],
+    "d-emoji|radius|code": [
+      "10",
+      "11",
+      "22"
+    ],
+    "d-emoji|spacing|code": [
+      "2",
+      "4",
+      "12",
+      "14",
+      "16",
+      "24",
+      "48"
+    ],
+    "d-emoji|spacing|proto": [
+      "1",
+      "3",
+      "7",
+      "11",
+      "13"
+    ],
+    "d-empty|font-size|code": [
+      "15",
+      "17",
+      "18",
+      "20"
+    ],
+    "d-empty|radius|code": [
+      "6",
+      "8"
+    ],
+    "d-empty|spacing|code": [
+      "2",
+      "4",
+      "6",
+      "8",
+      "10",
+      "16",
+      "24",
+      "32"
+    ],
+    "d-empty|spacing|proto": [
+      "34",
+      "40"
+    ],
+    "d-filesempty|font-size|code": [
+      "17"
+    ],
+    "d-filesempty|font-size|proto": [
+      "16"
+    ],
+    "d-filesempty|spacing|code": [
+      "2",
+      "4",
+      "10",
+      "16",
+      "24"
+    ],
+    "d-filesempty|spacing|proto": [
+      "11",
+      "34",
+      "40"
+    ],
+    "d-files|font-size|code": [
+      "17"
+    ],
+    "d-files|font-weight|code": [
+      "700"
+    ],
+    "d-files|radius|proto": [
+      "999"
+    ],
+    "d-files|spacing|code": [
+      "2",
+      "24"
+    ],
+    "d-files|spacing|proto": [
+      "1",
+      "11",
+      "13"
+    ],
+    "d-folder|font-size|code": [
+      "17"
+    ],
+    "d-folder|font-weight|code": [
+      "700"
+    ],
+    "d-folder|spacing|code": [
+      "2",
+      "24"
+    ],
+    "d-folder|spacing|proto": [
+      "1",
+      "11",
+      "13"
+    ],
+    "d-groupcreate|font-size|code": [
+      "15",
+      "17",
+      "18"
+    ],
+    "d-groupcreate|radius|code": [
+      "2",
+      "4",
+      "6",
+      "8",
+      "10",
+      "11",
+      "16",
+      "22"
+    ],
+    "d-groupcreate|spacing|code": [
+      "2",
+      "18",
+      "48"
+    ],
+    "d-groupcreate|spacing|proto": [
+      "13",
+      "30"
+    ],
+    "d-histsearch|font-size|code": [
+      "15",
+      "17",
+      "18"
+    ],
+    "d-histsearch|font-weight|code": [
+      "400",
+      "700"
+    ],
+    "d-histsearch|radius|code": [
+      "2",
+      "4",
+      "6",
+      "10",
+      "11",
+      "16",
+      "22"
+    ],
+    "d-histsearch|radius|proto": [
+      "7"
+    ],
+    "d-histsearch|spacing|code": [
+      "1.5",
+      "18",
+      "24",
+      "48"
+    ],
+    "d-histsearch|spacing|proto": [
+      "13",
+      "15"
+    ],
+    "d-home-more|font-size|code": [
+      "15",
+      "17"
+    ],
+    "d-home-more|font-size|proto": [
+      "16"
+    ],
+    "d-home-more|font-weight|code": [
+      "700"
+    ],
+    "d-home-more|radius|code": [
+      "4",
+      "6",
+      "16"
+    ],
+    "d-home-more|spacing|code": [
+      "2",
+      "4",
+      "12",
+      "14",
+      "16",
+      "24"
+    ],
+    "d-home-more|spacing|proto": [
+      "1",
+      "3",
+      "11",
+      "13"
+    ],
+    "d-nodes|font-size|proto": [
+      "16",
+      "24"
+    ],
+    "d-nodes|radius|proto": [
+      "999"
+    ],
+    "d-nodes|spacing|code": [
+      "4"
+    ],
+    "d-nodes|spacing|proto": [
+      "1",
+      "1.5",
+      "3",
+      "7",
+      "11",
+      "13"
+    ],
+    "d-nomatch|font-size|code": [
+      "14",
+      "15",
+      "17",
+      "18",
+      "20"
+    ],
+    "d-nomatch|radius|code": [
+      "6",
+      "8",
+      "11",
+      "12"
+    ],
+    "d-nomatch|spacing|code": [
+      "2",
+      "4",
+      "8",
+      "10",
+      "12",
+      "14",
+      "16",
+      "24",
+      "32"
+    ],
+    "d-nomatch|spacing|proto": [
+      "11",
+      "13",
+      "34",
+      "40"
+    ],
+    "d-nosel|font-size|code": [
+      "15",
+      "17",
+      "18",
+      "20"
+    ],
+    "d-nosel|radius|code": [
+      "6",
+      "11"
+    ],
+    "d-nosel|spacing|code": [
+      "2",
+      "4",
+      "12",
+      "14",
+      "16",
+      "24",
+      "32"
+    ],
+    "d-nosel|spacing|proto": [
+      "1",
+      "11",
+      "13",
+      "34",
+      "40"
+    ],
+    "d-reqscreen|font-size|code": [
+      "14",
+      "17",
+      "18"
+    ],
+    "d-reqscreen|font-weight|proto": [
+      "700"
+    ],
+    "d-reqscreen|radius|code": [
+      "6",
+      "8",
+      "10",
+      "16"
+    ],
+    "d-reqscreen|radius|proto": [
+      "0",
+      "28"
+    ],
+    "d-reqscreen|spacing|code": [
+      "2",
+      "4",
+      "24"
+    ],
+    "d-reqscreen|spacing|proto": [
+      "7",
+      "11"
+    ],
+    "d-resume|font-size|code": [
+      "17"
+    ],
+    "d-resume|font-size|proto": [
+      "10",
+      "13"
+    ],
+    "d-resume|radius|proto": [
+      "2",
+      "5",
+      "6",
+      "8",
+      "10",
+      "16"
+    ],
+    "d-resume|spacing|code": [
+      "24"
+    ],
+    "d-resume|spacing|proto": [
+      "1",
+      "1.5",
+      "2.5",
+      "3",
+      "11",
+      "13",
+      "18"
+    ],
+    "d-search-empty|font-size|code": [
+      "15",
+      "17",
+      "18",
+      "20"
+    ],
+    "d-search-empty|font-size|proto": [
+      "24"
+    ],
+    "d-search-empty|radius|code": [
+      "6",
+      "8",
+      "11"
+    ],
+    "d-search-empty|spacing|code": [
+      "4",
+      "14",
+      "24",
+      "32"
+    ],
+    "d-search|font-size|code": [
+      "15",
+      "17",
+      "18",
+      "20"
+    ],
+    "d-search|font-size|proto": [
+      "24"
+    ],
+    "d-search|radius|code": [
+      "6",
+      "8",
+      "11"
+    ],
+    "d-search|spacing|code": [
+      "4",
+      "14",
+      "24",
+      "32"
+    ],
+    "d-settings-data|font-size|code": [
+      "14",
+      "15",
+      "20"
+    ],
+    "d-settings-data|font-weight|code": [
+      "700"
+    ],
+    "d-settings-data|radius|proto": [
+      "8"
+    ],
+    "d-settings-data|spacing|code": [
+      "2",
+      "48"
+    ],
+    "d-settings-data|spacing|proto": [
+      "1",
+      "1.5",
+      "7",
+      "13"
+    ],
+    "d-settings-desk|font-weight|proto": [
+      "500"
+    ],
+    "d-settings-desk|radius|proto": [
+      "9",
+      "999"
+    ],
+    "d-settings-desk|spacing|code": [
+      "2"
+    ],
+    "d-settings-desk|spacing|proto": [
+      "1.5",
+      "3",
+      "5",
+      "10",
+      "12",
+      "16"
+    ],
+    "d-settings-ime|radius|proto": [
+      "8"
+    ],
+    "d-settings-ime|spacing|proto": [
+      "1",
+      "4"
+    ],
+    "d-settings|font-size|code": [
+      "15",
+      "20"
+    ],
+    "d-settings|font-size|proto": [
+      "16",
+      "24"
+    ],
+    "d-settings|spacing|code": [
+      "48"
+    ],
+    "d-settings|spacing|proto": [
+      "1.5",
+      "3",
+      "7",
+      "11"
+    ],
+    "d-sharescreen|font-size|code": [
+      "14",
+      "16",
+      "17",
+      "18"
+    ],
+    "d-sharescreen|radius|code": [
+      "6",
+      "10",
+      "16"
+    ],
+    "d-sharescreen|spacing|code": [
+      "2",
+      "4",
+      "16",
+      "24"
+    ],
+    "d-sharescreen|spacing|proto": [
+      "7",
+      "11"
+    ],
+    "d-tray|font-weight|code": [
+      "500"
+    ],
+    "d-tray|font-weight|proto": [
+      "700"
+    ],
+    "d-tray|radius|code": [
+      "9",
+      "12"
+    ],
+    "d-tray|radius|proto": [
+      "5",
+      "7",
+      "8",
+      "11",
+      "15"
+    ],
+    "d-tray|spacing|code": [
+      "2",
+      "8",
+      "10",
+      "16"
+    ],
+    "d-tray|spacing|proto": [
+      "1",
+      "7",
+      "24"
+    ],
+    "d-viewscreen|font-size|code": [
+      "14",
+      "16",
+      "17",
+      "18"
+    ],
+    "d-viewscreen|radius|code": [
+      "6",
+      "10",
+      "16"
+    ],
+    "d-viewscreen|spacing|code": [
+      "2",
+      "4",
+      "8",
+      "12",
+      "16",
+      "24"
+    ],
+    "d-viewscreen|spacing|proto": [
+      "7",
+      "11",
+      "13"
+    ],
+    "d-workspacedetail|__error__": [
+      "落点不存在：**待建**（2026-10-13 原型新增提案；代码侧本轮未适配）"
+    ],
+    "m-addnode-fill|font-size|code": [
+      "20"
+    ],
+    "m-addnode-fill|font-size|proto": [
+      "16",
+      "24"
+    ],
+    "m-addnode-fill|radius|code": [
+      "10"
+    ],
+    "m-addnode-fill|radius|proto": [
+      "0",
+      "2",
+      "8",
+      "16",
+      "28"
+    ],
+    "m-addnode-fill|spacing|code": [
+      "1",
+      "24",
+      "32",
+      "48"
+    ],
+    "m-addnode-fill|spacing|proto": [
+      "1.5",
+      "11"
+    ],
+    "m-addnode|font-size|code": [
+      "20"
+    ],
+    "m-addnode|font-size|proto": [
+      "16",
+      "24"
+    ],
+    "m-addnode|radius|code": [
+      "10"
+    ],
+    "m-addnode|radius|proto": [
+      "0",
+      "2",
+      "8",
+      "16",
+      "28"
+    ],
+    "m-addnode|spacing|code": [
+      "1",
+      "24",
+      "32",
+      "48"
+    ],
+    "m-addnode|spacing|proto": [
+      "1.5",
+      "11"
+    ],
+    "m-agentdetail|__error__": [
+      "落点不存在：**待建**（2026-10-13 原型新增提案；代码侧本轮未适配）"
+    ],
+    "m-agents-empty|__error__": [
+      "落点不存在：**待建**（2026-10-13 原型新增提案；代码侧本轮未适配）"
+    ],
+    "m-agents|font-size|code": [
+      "15",
+      "17",
+      "20"
+    ],
+    "m-agents|font-size|proto": [
+      "13",
+      "16",
+      "24"
+    ],
+    "m-agents|font-weight|proto": [
+      "400"
+    ],
+    "m-agents|radius|code": [
+      "4",
+      "8"
+    ],
+    "m-agents|radius|proto": [
+      "14",
+      "999"
+    ],
+    "m-agents|spacing|code": [
+      "24"
+    ],
+    "m-agents|spacing|proto": [
+      "1.5",
+      "11",
+      "13"
+    ],
+    "m-cabinet-peer|font-size|code": [
+      "17",
+      "20"
+    ],
+    "m-cabinet-peer|font-size|proto": [
+      "24"
+    ],
+    "m-cabinet-peer|spacing|code": [
+      "24"
+    ],
+    "m-cabinet|font-size|code": [
+      "15",
+      "17",
+      "20"
+    ],
+    "m-cabinet|font-size|proto": [
+      "24"
+    ],
+    "m-cabinet|radius|code": [
+      "20"
+    ],
+    "m-cabinet|spacing|code": [
+      "4"
+    ],
+    "m-chat-group|font-size|code": [
+      "15",
+      "17",
+      "18"
+    ],
+    "m-chat-group|font-size|proto": [
+      "24"
+    ],
+    "m-chat-group|radius|code": [
+      "2",
+      "8",
+      "10",
+      "11",
+      "22"
+    ],
+    "m-chat-group|radius|proto": [
+      "13",
+      "20"
+    ],
+    "m-chat-group|spacing|code": [
+      "7",
+      "11",
+      "48"
+    ],
+    "m-chat-group|spacing|proto": [
+      "13",
+      "30"
+    ],
+    "m-chat-solo|font-size|code": [
+      "15",
+      "17",
+      "18"
+    ],
+    "m-chat-solo|font-size|proto": [
+      "24"
+    ],
+    "m-chat-solo|radius|code": [
+      "2",
+      "8",
+      "10",
+      "11",
+      "22"
+    ],
+    "m-chat-solo|radius|proto": [
+      "13",
+      "20"
+    ],
+    "m-chat-solo|spacing|code": [
+      "7",
+      "11",
+      "48"
+    ],
+    "m-chat-solo|spacing|proto": [
+      "13",
+      "30"
+    ],
+    "m-chat|font-size|code": [
+      "15",
+      "17",
+      "18"
+    ],
+    "m-chat|font-size|proto": [
+      "24"
+    ],
+    "m-chat|radius|code": [
+      "2",
+      "8",
+      "10",
+      "11",
+      "22"
+    ],
+    "m-chat|radius|proto": [
+      "13",
+      "20"
+    ],
+    "m-chat|spacing|code": [
+      "7",
+      "11",
+      "48"
+    ],
+    "m-chat|spacing|proto": [
+      "13",
+      "30"
+    ],
+    "m-folderin|font-size|code": [
+      "16",
+      "17"
+    ],
+    "m-folderin|font-size|proto": [
+      "10",
+      "13",
+      "24"
+    ],
+    "m-folderin|font-weight|proto": [
+      "700"
+    ],
+    "m-folderin|radius|code": [
+      "11",
+      "22"
+    ],
+    "m-folderin|radius|proto": [
+      "2",
+      "5",
+      "6",
+      "13",
+      "16"
+    ],
+    "m-folderin|spacing|code": [
+      "24",
+      "48"
+    ],
+    "m-folderin|spacing|proto": [
+      "1",
+      "1.5",
+      "2.5",
+      "3",
+      "7",
+      "13",
+      "18"
+    ],
+    "m-groupcreate|font-size|code": [
+      "17",
+      "20"
+    ],
+    "m-groupcreate|font-size|proto": [
+      "24"
+    ],
+    "m-groupcreate|radius|code": [
+      "9"
+    ],
+    "m-groupcreate|radius|proto": [
+      "16"
+    ],
+    "m-groupcreate|spacing|code": [
+      "1",
+      "48"
+    ],
+    "m-groupcreate|spacing|proto": [
+      "11",
+      "13"
+    ],
+    "m-groupinfo|font-size|code": [
+      "15",
+      "17"
+    ],
+    "m-groupinfo|font-size|proto": [
+      "16",
+      "24"
+    ],
+    "m-groupinfo|radius|code": [
+      "4",
+      "7",
+      "8",
+      "20"
+    ],
+    "m-groupinfo|radius|proto": [
+      "16"
+    ],
+    "m-groupinfo|spacing|code": [
+      "1"
+    ],
+    "m-groupinfo|spacing|proto": [
+      "1.5",
+      "16"
+    ],
+    "m-gsearch-empty|font-size|code": [
+      "15"
+    ],
+    "m-gsearch-empty|font-size|proto": [
+      "24"
+    ],
+    "m-gsearch-empty|font-weight|proto": [
+      "400"
+    ],
+    "m-gsearch-empty|radius|code": [
+      "8",
+      "10"
+    ],
+    "m-gsearch-empty|spacing|code": [
+      "3",
+      "24"
+    ],
+    "m-gsearch-empty|spacing|proto": [
+      "29",
+      "32"
+    ],
+    "m-gsearch|font-size|code": [
+      "15"
+    ],
+    "m-gsearch|font-size|proto": [
+      "24"
+    ],
+    "m-gsearch|font-weight|proto": [
+      "400"
+    ],
+    "m-gsearch|radius|code": [
+      "8",
+      "10"
+    ],
+    "m-gsearch|spacing|code": [
+      "3",
+      "24"
+    ],
+    "m-gsearch|spacing|proto": [
+      "29",
+      "32"
+    ],
+    "m-histdate|font-size|code": [
+      "15",
+      "17",
+      "18"
+    ],
+    "m-histdate|font-size|proto": [
+      "24"
+    ],
+    "m-histdate|font-weight|code": [
+      "400"
+    ],
+    "m-histdate|radius|code": [
+      "4",
+      "6",
+      "10",
+      "16",
+      "22"
+    ],
+    "m-histdate|radius|proto": [
+      "0",
+      "7",
+      "13",
+      "28"
+    ],
+    "m-histdate|spacing|code": [
+      "1",
+      "1.5",
+      "4",
+      "18",
+      "24",
+      "48"
+    ],
+    "m-histsearch|font-size|code": [
+      "15",
+      "17"
+    ],
+    "m-histsearch|font-size|proto": [
+      "24"
+    ],
+    "m-histsearch|font-weight|code": [
+      "400"
+    ],
+    "m-histsearch|font-weight|proto": [
+      "500"
+    ],
+    "m-histsearch|radius|code": [
+      "2",
+      "6"
+    ],
+    "m-histsearch|radius|proto": [
+      "13"
+    ],
+    "m-histsearch|spacing|code": [
+      "4"
+    ],
+    "m-home-more|font-size|code": [
+      "15",
+      "17",
+      "20"
+    ],
+    "m-home-more|font-size|proto": [
+      "24"
+    ],
+    "m-home-more|font-weight|code": [
+      "400"
+    ],
+    "m-home-more|radius|code": [
+      "4"
+    ],
+    "m-home-more|radius|proto": [
+      "8",
+      "16"
+    ],
+    "m-home-more|spacing|code": [
+      "1",
+      "3",
+      "7",
+      "24",
+      "48"
+    ],
+    "m-home-more|spacing|proto": [
+      "11"
+    ],
+    "m-home-recent|font-size|code": [
+      "15",
+      "17",
+      "20"
+    ],
+    "m-home-recent|font-size|proto": [
+      "24"
+    ],
+    "m-home-recent|font-weight|code": [
+      "400"
+    ],
+    "m-home-recent|radius|code": [
+      "4"
+    ],
+    "m-home-recent|radius|proto": [
+      "16"
+    ],
+    "m-home-recent|spacing|code": [
+      "1",
+      "3",
+      "7",
+      "24",
+      "48"
+    ],
+    "m-home-recent|spacing|proto": [
+      "11"
+    ],
+    "m-home-unread|font-size|code": [
+      "15",
+      "17",
+      "20"
+    ],
+    "m-home-unread|font-size|proto": [
+      "24"
+    ],
+    "m-home-unread|font-weight|code": [
+      "400"
+    ],
+    "m-home-unread|radius|code": [
+      "4"
+    ],
+    "m-home-unread|radius|proto": [
+      "16"
+    ],
+    "m-home-unread|spacing|code": [
+      "1",
+      "3",
+      "7",
+      "9",
+      "24",
+      "48"
+    ],
+    "m-home-unread|spacing|proto": [
+      "11"
+    ],
+    "m-insets|font-size|code": [
+      "17"
+    ],
+    "m-insets|font-size|proto": [
+      "24"
+    ],
+    "m-insets|font-weight|proto": [
+      "500"
+    ],
+    "m-insets|radius|code": [
+      "20"
+    ],
+    "m-insets|radius|proto": [
+      "16"
+    ],
+    "m-insets|spacing|proto": [
+      "2"
+    ],
+    "m-msgmenu|font-size|code": [
+      "17"
+    ],
+    "m-msgmenu|font-size|proto": [
+      "24"
+    ],
+    "m-msgmenu|font-weight|proto": [
+      "400",
+      "700"
+    ],
+    "m-msgmenu|radius|code": [
+      "10",
+      "11",
+      "22"
+    ],
+    "m-msgmenu|radius|proto": [
+      "4",
+      "13",
+      "20"
+    ],
+    "m-msgmenu|spacing|code": [
+      "48"
+    ],
+    "m-msgmenu|spacing|proto": [
+      "1",
+      "1.5",
+      "11",
+      "13",
+      "30"
+    ],
+    "m-myqr|font-size|code": [
+      "20"
+    ],
+    "m-myqr|font-size|proto": [
+      "16",
+      "24"
+    ],
+    "m-myqr|radius|code": [
+      "10"
+    ],
+    "m-myqr|radius|proto": [
+      "0",
+      "2",
+      "16",
+      "28"
+    ],
+    "m-myqr|spacing|code": [
+      "1",
+      "3",
+      "24",
+      "32",
+      "48"
+    ],
+    "m-myqr|spacing|proto": [
+      "1.5",
+      "11"
+    ],
+    "m-nodedetail|font-size|code": [
+      "20"
+    ],
+    "m-nodedetail|font-size|proto": [
+      "16",
+      "24"
+    ],
+    "m-nodedetail|radius|code": [
+      "10"
+    ],
+    "m-nodedetail|radius|proto": [
+      "16"
+    ],
+    "m-nodedetail|spacing|code": [
+      "1",
+      "3",
+      "24",
+      "32",
+      "48"
+    ],
+    "m-nodedetail|spacing|proto": [
+      "1.5",
+      "11"
+    ],
+    "m-nodes-empty|font-size|code": [
+      "17",
+      "20"
+    ],
+    "m-nodes-empty|font-size|proto": [
+      "16",
+      "24"
+    ],
+    "m-nodes-empty|font-weight|code": [
+      "400"
+    ],
+    "m-nodes-empty|radius|code": [
+      "8",
+      "10",
+      "20"
+    ],
+    "m-nodes-empty|radius|proto": [
+      "16"
+    ],
+    "m-nodes-empty|spacing|code": [
+      "1",
+      "1.5",
+      "3",
+      "7",
+      "32"
+    ],
+    "m-nodes-empty|spacing|proto": [
+      "11"
+    ],
+    "m-nodes|font-size|code": [
+      "17",
+      "20"
+    ],
+    "m-nodes|font-size|proto": [
+      "16",
+      "24"
+    ],
+    "m-nodes|font-weight|code": [
+      "400"
+    ],
+    "m-nodes|radius|code": [
+      "8",
+      "10",
+      "20"
+    ],
+    "m-nodes|radius|proto": [
+      "16"
+    ],
+    "m-nodes|spacing|code": [
+      "1",
+      "3",
+      "7",
+      "9",
+      "24",
+      "32",
+      "48"
+    ],
+    "m-nodes|spacing|proto": [
+      "11"
+    ],
+    "m-screencard|font-size|code": [
+      "16",
+      "17"
+    ],
+    "m-screencard|font-size|proto": [
+      "10",
+      "13",
+      "24"
+    ],
+    "m-screencard|font-weight|proto": [
+      "700"
+    ],
+    "m-screencard|radius|code": [
+      "11",
+      "22"
+    ],
+    "m-screencard|radius|proto": [
+      "2",
+      "4",
+      "5",
+      "6",
+      "13",
+      "16"
+    ],
+    "m-screencard|spacing|code": [
+      "24",
+      "48"
+    ],
+    "m-screencard|spacing|proto": [
+      "1",
+      "1.5",
+      "2.5",
+      "3",
+      "7",
+      "11",
+      "13",
+      "18"
+    ],
+    "m-sendfolder|font-size|code": [
+      "16",
+      "17"
+    ],
+    "m-sendfolder|font-size|proto": [
+      "10",
+      "13",
+      "24"
+    ],
+    "m-sendfolder|font-weight|proto": [
+      "700"
+    ],
+    "m-sendfolder|radius|code": [
+      "11",
+      "22"
+    ],
+    "m-sendfolder|radius|proto": [
+      "2",
+      "5",
+      "6",
+      "13",
+      "16"
+    ],
+    "m-sendfolder|spacing|code": [
+      "24",
+      "48"
+    ],
+    "m-sendfolder|spacing|proto": [
+      "1",
+      "1.5",
+      "2.5",
+      "3",
+      "7",
+      "18"
+    ],
+    "m-set-appear|font-size|code": [
+      "20"
+    ],
+    "m-set-appear|font-size|proto": [
+      "24"
+    ],
+    "m-set-appear|radius|proto": [
+      "16"
+    ],
+    "m-set-appear|spacing|code": [
+      "48"
+    ],
+    "m-set-appear|spacing|proto": [
+      "2",
+      "8"
+    ],
+    "m-set-avatar|font-size|code": [
+      "16",
+      "20"
+    ],
+    "m-set-avatar|font-size|proto": [
+      "24"
+    ],
+    "m-set-avatar|radius|proto": [
+      "16"
+    ],
+    "m-set-avatar|spacing|code": [
+      "4",
+      "48"
+    ],
+    "m-set-avatar|spacing|proto": [
+      "11"
+    ],
+    "m-set-caps|font-size|code": [
+      "15",
+      "20"
+    ],
+    "m-set-caps|font-size|proto": [
+      "24"
+    ],
+    "m-set-caps|font-weight|proto": [
+      "500"
+    ],
+    "m-set-caps|radius|proto": [
+      "13",
+      "16"
+    ],
+    "m-set-caps|spacing|code": [
+      "3",
+      "4",
+      "48"
+    ],
+    "m-set-caps|spacing|proto": [
+      "1.5",
+      "11"
+    ],
+    "m-set-conn|font-size|code": [
+      "15",
+      "20"
+    ],
+    "m-set-conn|font-size|proto": [
+      "16",
+      "24"
+    ],
+    "m-set-conn|radius|code": [
+      "8"
+    ],
+    "m-set-conn|radius|proto": [
+      "16"
+    ],
+    "m-set-conn|spacing|code": [
+      "48"
+    ],
+    "m-set-data|font-size|code": [
+      "14",
+      "15",
+      "20"
+    ],
+    "m-set-data|font-size|proto": [
+      "24"
+    ],
+    "m-set-data|radius|proto": [
+      "13",
+      "16"
+    ],
+    "m-set-data|spacing|code": [
+      "3",
+      "48"
+    ],
+    "m-set-data|spacing|proto": [
+      "1.5",
+      "11"
+    ],
+    "m-set-diag|font-size|code": [
+      "20"
+    ],
+    "m-set-diag|font-size|proto": [
+      "24"
+    ],
+    "m-set-diag|spacing|code": [
+      "3",
+      "4",
+      "48"
+    ],
+    "m-set-diag|spacing|proto": [
+      "2",
+      "13"
+    ],
+    "m-set-notify|font-size|code": [
+      "15",
+      "20"
+    ],
+    "m-set-notify|font-size|proto": [
+      "24"
+    ],
+    "m-set-notify|radius|proto": [
+      "13",
+      "16"
+    ],
+    "m-set-notify|spacing|code": [
+      "3",
+      "4",
+      "48"
+    ],
+    "m-set-notify|spacing|proto": [
+      "11"
+    ],
+    "m-set-profile|font-size|code": [
+      "15",
+      "17",
+      "20"
+    ],
+    "m-set-profile|font-size|proto": [
+      "16",
+      "24"
+    ],
+    "m-set-profile|radius|proto": [
+      "8",
+      "16"
+    ],
+    "m-set-profile|spacing|code": [
+      "48"
+    ],
+    "m-set-profile|spacing|proto": [
+      "1.5",
+      "11"
+    ],
+    "m-settings|font-size|code": [
+      "15",
+      "20"
+    ],
+    "m-settings|font-size|proto": [
+      "24"
+    ],
+    "m-settings|radius|proto": [
+      "0",
+      "16"
+    ],
+    "m-settings|spacing|code": [
+      "48"
+    ],
+    "m-settings|spacing|proto": [
+      "2",
+      "13"
+    ],
+    "m-workspacedetail|__error__": [
+      "落点不存在：**待建**（2026-10-13 原型新增提案；代码侧本轮未适配）"
+    ]
+  }
+}

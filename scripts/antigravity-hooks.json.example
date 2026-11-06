@@ -1,0 +1,17 @@
+{
+  "_comment": "Antigravity hooks.json 示例（形态 B）。拷进 ~/.gemini/config/hooks.json（全局）或工作区 .agents/hooks.json，把 SCRIPT_PATH 换成 antigravity-tenon-hook.py 的绝对路径。脚本从 stdin JSON 的 event_name 认事件；你的 Antigravity 版本若用别的事件名（如 PreInvocation → PreModelCall），按实际名字加键即可 —— 脚本对大小写与下划线变体都宽容。",
+  "hooks": {
+    "SessionStart": [
+      { "command": "python3 SCRIPT_PATH" }
+    ],
+    "SessionStop": [
+      { "command": "python3 SCRIPT_PATH" }
+    ],
+    "PreToolUse": [
+      { "command": "python3 SCRIPT_PATH" }
+    ],
+    "PreInvocation": [
+      { "command": "python3 SCRIPT_PATH" }
+    ]
+  }
+}

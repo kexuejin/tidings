@@ -1,0 +1,17 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  FileProvider 能签发的目录清单。
+
+  **只放真正需要的这一个**：收到的文件默认落在 `Context.getFilesDir()/relay/downloads`
+  （见 `AndroidFilePicker.FALLBACK_DIR`，`AndroidFilePicker.kt:266`），所以这里只有一条
+  `files-path`。加 `<external-path>`/`<root-path>` 会让整个外部存储都能以本应用的名义
+  被别的应用读到 —— 那正是 FileProvider 存在要堵的漏洞。
+
+  这个目录之外的路径（用户在"另存为"里挑了自己的目录）不会被签发；
+  `AndroidReceivedFileActions.contentUri` 会如实放弃并写日志，而不是放宽这里。
+-->
+<paths>
+    <files-path
+        name="relay_downloads"
+        path="relay/downloads/" />
+</paths>

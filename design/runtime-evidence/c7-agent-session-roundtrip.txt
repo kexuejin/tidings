@@ -1,0 +1,45 @@
+=== C7: Agent 会话帧往返验证证据 (PPE-1 P0 纵切双向闭环) ===
+时间: 2026-10-07
+执行环境: macOS, OpenJDK 17, loopback UDP/HTTP
+相关规范: doc/specs/PANTRY-PROTOCOL-EXTENSION-1.md (PPE-1 §4, §5, §6, §8, §9)
+
+1. 验证目标与覆盖切面:
+- [切面 1] Agent -> 客户端公告 (agent-session):
+  - 客户端 RelayController / state.agentSessions 状态更新 (alias, agentKind, state, title, announced = true).
+  - 遵循 PPE-1 §9 约束：不污染主会话 IM 消息列表 (state.messages[agentNodeId] 为空).
+- [切面 2] Agent -> 客户端事件流 (agent-event):
+  - 客户端按 session_id 归集事件，并严格按 cursor 升序重排.
+  - 乱序到达 (cursor 3 在 cursor 2 之前到达) 自动重排.
+  - 重复事件 (duplicate cursor) 自动幂等丢弃.
+  - 孤儿事件 (未先收到 session 公告的 event) 生成 announced = false 的占位 session.
+- [切面 3] 客户端 -> Agent 双向回传交互 (PPE-1 §8 客户端直接发纯文本给会话中的 Agent):
+  - 客户端 RelayController.send 发出文本消息，经过真实 UDP 传输与 ACK 机制.
+  - AgentNode 接收并写入 inbox 队列.
+  - 客户端收到 ACK，本地状态推进为 Sent.
+  - AgentNode 控制面 HTTP GET /v1/inbox?since=0 成功拉取到客户端回复文本.
+- [切面 4] 客户端 RelayController 发起 Agent Session/Event 出站能力:
+  - RelayController.sendAgentSession / sendAgentEvent 正确构造 Frame 并经 Messenger 发出.
+  - 对端能力协商校验: 若对端未声明 `agn1` 能力，发送被显式拦截并拒绝 (返回 null).
+- [切面 5] AgentNode 控制面双向工作流 (HTTP Control Plane):
+  - POST /v1/agent/session 成功投递并返回 status: "sent".
+  - POST /v1/agent/event 成功投递并返回 status: "sent".
+  - GET /v1/inbox?since=0 读到客户端在 UDP 链路回发的聊天响应.
+  - 对端未声明 agn1 时返回 HTTP 409 peer-unsupported.
+
+2. 关联测试套件:
+(1) Compose App 侧完整端到端自动化验证 (真实 UDP Socket 8 步工作流):
+    文件: scaffold/composeApp/src/jvmTest/kotlin/app/relay/app/RelayControllerAgentSessionTest.kt
+    测试方法: RelayControllerAgentSessionTest.agentSessionAndEventBidirectionalFlow
+    运行命令: ./gradlew :composeApp:jvmTest --tests app.relay.app.RelayControllerAgentSessionTest
+    结果: PASSED (BUILD SUCCESSFUL)
+
+(2) AgentNode 控制面端到端双向流程验证:
+    文件: scaffold/agentNode/src/test/kotlin/app/relay/agent/ControlPlaneTest.kt
+    测试方法: ControlPlaneTest.agentSessionAndChatBidirectionalWorkflow
+    运行命令: ./gradlew :agentNode:test --tests app.relay.agent.ControlPlaneTest.agentSessionAndChatBidirectionalWorkflow
+    结果: PASSED (BUILD SUCCESSFUL)
+
+3. 协议与架构保障:
+- RelayController: 新增对外暴露的 sendAgentSession / sendAgentEvent 方法，内部先核验 peerDeclares(peerId, MsgTypes.CAP_AGENT_SESSION)，避免向不支持老端泛滥发帧。
+- StateStore: agentSessions 映射严格维护会话元数据，收到未知会话事件自动占位且在后续 session 到达时更新 announced 标记，保证了乱序网络容错能力。
+- 全套测试通过 :core:allTests, :composeApp:allTests, :agentNode:test 与 :cjkLiteralGate 质量门禁。

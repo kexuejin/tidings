@@ -1,0 +1,112 @@
+入站去重落盘与队列剪枝：真进程端到端验收（README TODO ②）
+================================================================
+
+日期    2026-10-07
+装置    Mac mini（demo-mac-97.local），JDK 21，本仓库构建出来的 agentNode
+被测二进制  scaffold/agentNode/build/install/agentNode/bin/agentNode
+           （lib/agentNode.jar 时间戳 2026-10-07 17:27，构建自含本次改动的源码）
+被测进程    一个独立的 agentNode 实例，端口与数据目录都与用户自己那个（17891/8788）
+           和常驻证据节点（17893/8799）错开，验收完已全部停掉并清理数据目录。
+
+为什么拿 agentNode 当装置
+------------------------
+它和手机端走的是同一个 NodeRuntime / Messenger / DedupStore 链路，只是宿主不同；
+而且它的消息表是 InMemoryMessageStore（Main.kt 没传 messageStore），所以「重启后
+内存消息表一定是空的」这件事是确定的 —— 这正好把「这一帧到底有没有被投递」变成
+一个可以逐次读出来的数字，不必依赖界面。
+
+
+要回答的问题
+------------
+README TODO ② 原文：出站排队与历史消息都已落盘可恢复，但去重用的是 InMemoryDedupStore
+（全仓没有落盘实现），**重启后对方重放同一帧会被当成新消息再收一次**。
+
+要回答的是三件事：
+  Q1  重启前收到的帧，重启后重放，还会不会被投递？（这是那条 TODO 本身）
+  Q2  如果不会，能不能证明是「去重日志起了作用」而不是别的原因恰好吞了那一帧？
+  Q3  接上去重日志之后，这个日志会不会只长不缩？（NodeRuntime.prune() 在本轮之前
+      全仓没有任何生产调用点 —— 只落盘不剪枝就是造一个只增不减的文件）
+
+
+方法
+----
+探针脚本 /tmp/dedup-probe.py：
+  - send(id, text)：直接往节点 UDP 口发一帧手写的 msg 信封
+      {"v":1,"type":"msg","id":<id>,"from":"aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee",
+       "ts":<now>,"payload":{"kind":"text","text":<text>}}
+    不经过控制面 —— 控制面每次 /v1/send 都会生成新 id，证明不了"重放同一帧"。
+  - inbox()：GET /v1/inbox?since=0&limit=50，数 messages 数组的长度。
+
+固定帧 id X = 11111111-2222-4333-8444-555555555555
+对照帧 id Y = 99999999-8888-4777-8666-555555555555
+
+
+判读
+----
+
+【装置 A：干净数据目录，第一次启动】（udp 17894 / http 8798 / data-dir /tmp/relay-dedup-e2e）
+
+  发 X                         → ROW_COUNT: 1
+  再发一次 X（同一次运行内）   → ROW_COUNT: 1        ← 内存去重，本来就有
+  dedup.log 内容（1 行）：
+    1791365272360	aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee	11111111-2222-4333-8444-555555555555
+                                                 ↑ 制表符分隔：收到时刻 / peerId / msgId
+
+【装置 B：同一个数据目录，把进程重启】
+
+  重启后先读一次 inbox        → ROW_COUNT: 0        ← 消息表是内存的，重启即空（这是装置前提，不是结论）
+  重放 X                      → ROW_COUNT: 0        ← ★ Q1 的答案：被挡住了，没有当成新消息收下
+  发一个新 id Y               → ROW_COUNT: 1        ← 对照：投递通路本身是通的，0 不是"什么都收不到"
+
+  重启后 dedup.log（2 行，X 与 Y 都在，各自只出现一次）：
+    1791365272360	aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee	11111111-2222-4333-8444-555555555555
+    1791365287043	aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee	99999999-8888-4777-8666-555555555555
+
+【装置 C：反例 —— 同一个数据目录、同一个二进制、同一帧，只是把 dedup.log 删掉再启动】
+
+  重放 X                      → ROW_COUNT: 1        ← ★ Q2 的答案
+  dedup.log 被重新建出来（1 行，就是这次重放）：
+    1791365330097	aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee	11111111-2222-4333-8444-555555555555
+
+  B 与 C 只差一个文件：有日志 → 0，没日志 → 1。同一份二进制、同一帧、同一端口、
+  同一台机器，所以"重启后重放被挡住"这件事只能是那份日志造成的。
+
+【装置 D：剪枝真的会跑，而且会落到盘上】（udp 17896 / http 8797 / data-dir /tmp/relay-prune-e2e2）
+
+  手工种一份日志，两行，只差时间戳：
+    1791275397088	...	00000000-0000-4000-8000-000000000001   ← 25 小时前（超过 dedupTtl = 24h）
+    1791365337088	...	00000000-0000-4000-8000-000000000002   ← 60 秒前（没到期）
+
+  启动节点后逐秒看行数：
+    T0 = 17:29:57 种子（2 行）
+    +2s 17:29:59 行数=1
+    +4s 17:30:01 行数=1
+    +6s 17:30:03 行数=1
+    +8s 17:30:05 行数=1
+    +10s 17:30:07 行数=1
+    T1 = 17:30:07 启动后：
+      1791365337088	aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee	00000000-0000-4000-8000-000000000002
+
+  过期那行没了、没到期那行还在 —— 剪枝不是"整份清空"。这是 ★ Q3 的答案：
+  日志会被剪，而且剪的是内存与磁盘两份（`FileDedupStore.prune` 里 `dropped > 0` 就重写文件）。
+
+  为什么 2 秒内就发生了：周期循环写成「先剪一次，再 delay(PRUNE_INTERVAL_MS)」，
+  所以启动时立刻有一次剪枝，之后每 10 分钟一次。agentNode 与 RelayController 两处
+  是同一个形状。
+
+
+仍未覆盖
+--------
+1. 手机端（RelayController）那条周期循环没有在真机上跑过。它在同一份源码里、与
+   agentNode 是同一个形状（`withContext(ioDispatcher) { rt.prune() }` + 10 分钟 delay），
+   但"照抄的形状"不是证据 —— 真机要跑到 10 分钟后那一次才看得见，本轮没等。
+   已经覆盖的是：`GatedDedupStore` 的开关语义（6 条单测）、`FileDedupStore` 本身的
+   读写与剪枝（12 条单测 × jvm + iosSimulatorArm64）、`MessageUi.afterPruned` 的折算规则。
+2. 「队列项被剪掉 → 消息卡变红『发送失败』」这半只有单测（`afterPruned`），
+   没有在界面上眼见为实：要看到它得让一条消息真的排满 7 天，或者每对端超过 200 条。
+   单测钉住的是折算规则本身，`onPruned` 的接线（按 msgId 找卡片、`publish()`、
+   `persistThreads()`）是读码确认的，不是跑出来的。
+3. 帧 id 带 `\t` / 换行 / 反斜杠的转义只有单测（`forgedLineFromAHostileIdCannotSurviveAReload`、
+   `idsWithTabsAndBackslashesRoundTripExactly`），没有用真实 UDP 报文打过。
+4. iOS 侧 `openRandomAccess` 的写入路径只由 `:core:iosSimulatorArm64Test` 覆盖，
+   没有在 iOS 模拟器里真跑过 agentNode（iOS 上没有 agentNode）。

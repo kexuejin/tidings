@@ -1,0 +1,169 @@
+# 真丢包下的 TCP 重传正确性 · 已设计、未执行（2026-10-04 21:23）
+
+状态：**未执行。** 阻塞点是这台机器拿不到 `NET_ADMIN`，不是方案没想清楚。
+下面先把勘查结果和测试设计都定下来，换台机器或拿到权限就能直接跑。
+
+---
+
+## 一、为什么本机做不到
+
+真丢包必须作用在 IP 层——把 TCP 段丢掉、让内核走 RTO 重传。
+用户态代理做不到这件事：`ws-relay-probe.py` / `net-shim.py` / 任何
+"在字节流里挖个洞" 的中间层，丢的都是**应用已经交出去的字节**，
+洞不会被填回去，那测的是"数据永久丢失时应用怎么办"，不是"TCP 重传是否正确"。
+`--stall-ms` 只是把写入卡住，不产生任何丢包。
+
+要动 IP 层只有三条路，本机逐条验过：
+
+    [2026-10-04 21:23:07] Darwin <你的主机名>.local 25.6.0 … arm64
+
+    --- 三个可能的抓手，各自实际报什么 ---
+    sudo -n true : bash: /usr/bin/sudo: Operation not permitted      ← 沙箱拒执行，不是缺密码
+    pfctl -s info: pfctl: /dev/pf: Permission denied                  ← 要 root
+    docker socket: $HOME/.docker/run/docker.sock 不存在（守护进程未启动）
+
+    --- 其它 Linux 运行环境 ---
+    colima 无 / limactl 无 / multipass 无 / podman 无 /
+    qemu-system-aarch64 无 / orbctl 无 / vagrant 无
+    brew 相关 formula（toxiproxy/slirp/tuntap）已安装数: 0
+
+- **`sudo` 那行要说准**：报的是 `Operation not permitted`（EPERM，沙箱不让执行这个二进制），
+  **不是** "sudo 要密码"。所以「给个密码就能做」这个说法是错的——权限问题在更外面一层。
+- **`pfctl` 本来是最优解**：`pf` 的 `match ... randomization N` 能按概率丢包，
+  不需要 VM、不需要 Linux。但它要 root。
+- **Docker Desktop 装了但没启动**：`/Applications/Docker.app` 在，
+  daemon socket 不存在。启动后即可用容器里的 `tc netem`——这是本机最省事的一条路。
+
+### 一条要提前说清的话：别拿 toxiproxy 顶替
+
+toxiproxy / 类似工具是**应用层**代理，它"丢包"实现为掐连接或注入延迟，
+TCP 段一个都没丢，**TCP 重传根本没发生**。用它跑出来的结果不能算这项验证通过。
+
+---
+
+## 二、拿不到 NET_ADMIN 时不要降级成"看起来像"的测试
+
+常见的伪替代，以及它们各自会骗到什么：
+
+| 伪替代 | 它实际测的是 | 会怎么骗人 |
+|---|---|---|
+| `--stall-ms`（net-shim） | 应用抗卡顿 | 不产生丢包，重传没发生 |
+| 代理掐连接 | 断线重连 | 是"断"，不是"丢" |
+| 代理挖字节洞再晚点补上 | 应用能扛住乱序延迟 | 重传由代理代替了内核，**主动权不在 TCP** |
+| 降码率 / 压缩测试数据 | 负载高低 | 丢包率归零 |
+
+判据只有一条：**丢包必须由内核产生，且能拿出丢包计数器的读数。**
+拿不出计数器的"没发现损坏"就是没测。
+
+---
+
+## 三、测试设计（已定好，可直接执行）
+
+### 拓扑
+
+    容器(Linux, --cap-add NET_ADMIN)  ──tc netem loss──▶  Docker VM 网桥  ──▶  宿主机
+      ├─ ws-relay-probe.py  (字节级，探 /v1/pipe)
+      └─ 回显服务器 18961 ◀── agentNode 一次性实例(ws 8796, 一次性 token, 错开端口)
+
+关键点：**netem 装在容器 eth0 上，而容器到 `host.docker.internal` 的流量也要走 eth0**，
+所以容器↔宿主机这一段是真的过了有丢包的链路，不是回环假象。
+
+### 宿主机侧准备
+
+```bash
+cd <仓库路径>/scaffold/agentNode
+
+# ① 回显服务器（逐字节原样回送），绑 0.0.0.0 才能被容器够到
+python3 - <<'PY' &
+import socket, threading
+srv = socket.socket(); srv.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+srv.bind(("0.0.0.0", 18961)); srv.listen(8)
+def handle(c):
+    try:
+        while True:
+            b = c.recv(65536)
+            if not b: break
+            c.sendall(b)
+    except OSError: pass
+    finally: c.close()
+while True:
+    c, _ = srv.accept(); threading.Thread(target=handle, args=(c,), daemon=True).start()
+PY
+
+# ② agentNode 一次性实例：一 token、错开端口，绝不碰真实凭据与在跑的 51670
+TOKEN=pktloss-test-$$ ; echo "$TOKEN" > /tmp/relay-verify/pktloss-token
+./run-agent-node.sh --data-dir /tmp/relay-agent-pktloss --udp-port 17896 \
+    --http-port 8796 --ws-port 8795 --ws-target 127.0.0.1:18961 \
+    --token "$TOKEN" &
+```
+
+### 容器侧执行
+
+```bash
+# 起容器并把工具带进去
+docker run -d --name relay-pktloss --cap-add NET_ADMIN \
+  -v <仓库路径>/scaffold/agentNode/tools:/tools:ro \
+  alpine:3.20 sleep infinity
+docker exec relay-pktloss apk add --no-cache python3 iproute2
+docker exec -w /tools relay-pktloss env RELAY_AGENT_TOKEN="$TOKEN" sh -c '
+  # ① 先装 100% 丢包，确认量具真的会把链路掐断（否则下面全是空跑）
+  tc qdisc add dev eth0 root netem loss 100%
+  ping -c 2 -W 2 172.17.0.1 | tail -2        # 期望 0 成功
+  tc -s qdisc show dev eth0 | grep -E "Sent|dropped"   # 期望 dropped > 0
+  # ② 换成真实丢包率，再加一点抖动/乱序，贴近移动网络
+  tc qdisc del dev eth0 root
+  tc qdisc add dev eth0 root netem loss 5% delay 60ms 40ms reorder 2% 50% duplicate 0.1%
+  # ③ 字节级复验，判读比 SHA-256
+  python3 ws-relay-probe.py "ws://host.docker.internal:8795/v1/pipe" \
+      --payload /tmp/big.bin --sha256 --timeout 180
+'
+```
+
+### 判读口径（四条都满足才算通过）
+
+1. **`dropped > 0`，且 `dropped/sent` 与配置值同量级。** 这是唯一的地面真相。
+   `dropped == 0` 时后面三条结论一律作废——那说明没丢过包，"没发现损坏"不构成任何证据。
+2. **上下行 SHA-256 完全相同。** 不是字节数相等——截断到块边界恰好等长、
+   分帧错位成等长垃圾，都会让「上行 == 下行字节数」成立而内容已错。
+   至少跑 512 KiB 与 4 MiB 两档（4 MiB 跨过 1 MiB framing bug 的分界）。
+3. **吞吐没有塌。** 记录墙钟时间与有效吞吐，和 `cross-net-01-latency-shim.txt`
+   的同档位基线比。TCP 正常重传应当只是变慢，不是卡死；卡死说明 RTO 退避或连接被弃。
+4. **不要设过高的丢包率。** 5% 起，必要时到 10%。>20% 时 TCP 本来就会频繁重传甚至超时，
+   测出来的"损坏"分不清是网络还是应用；5–10% 已经足够暴露分帧与重组的边界问题。
+
+### 补一条更值钱的：真丢包 + 公网通路
+
+字节级（`/v1/pipe` + 回显）验的是"数据对不对"；
+再把探针改成拨公网 `wss://<你的公网域名>/relay-ws/v1/dgram`，
+容器里同样挂 netem，验的是**真丢包下整条链路会不会自己断**——
+这一条比字节级更能暴露问题，因为 Cloudflare + tunnelmux 各自都有自己的超时，
+丢包会让这些超时与 TCP 的 RTO 互相干扰。
+
+```bash
+docker exec -w /tools relay-pktloss env RELAY_AGENT_TOKEN="$TOKEN" sh -c '
+  python3 ws-soak.py "wss://<你的公网域名>/relay-ws/v1/dgram" \
+      --minutes 10 --ping-every 30 --read-timeout 25
+'
+```
+
+---
+
+## 四、解除阻塞的三种方式（按省事程度）
+
+| 方式 | 要什么 | 代价 |
+|---|---|---|
+| 启动 Docker Desktop | 在这台机器上 `open -a Docker` 并等 daemon 起来 | VM 占一份内存/CPU，与在跑的 Teahouse + tunnelmux + cloudflared 并存。**本轮用户明确暂不处理** |
+| 一台 Linux VPS | 机器 + ssh 入口 | 要把回显服务与 agentNode 一次性实例一起部署过去（可复用「跨出口」那项需要的同一个入口，两项一起做） |
+| macOS 的 pf | 在界面上授权 sudo 执行 | 不用起 VM，pf 的 randomization 直接做概率丢包；但要动系统级网络规则，改错有断网风险，建议先把 pfctl 规则写好再 load |
+
+三条路都拿到之后，本文的第三节可以直接照抄执行。
+
+---
+
+## 五、状态
+
+- 本项**未执行**，上面是勘查结果与测试设计，不是结论。
+- 跨网链路其余六项的凭据见 `cross-net-0{1,2,3}-*.txt`；
+  那三项外部条件待验项见 `scaffold/agentNode/tools/CROSS-NET-RUNBOOK.md`。
+- 交付回来后：结论落盘到本文件（追加"执行"一节），
+  并从待办清单里划掉这一条。

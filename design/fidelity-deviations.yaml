@@ -1,0 +1,99 @@
+#   note3: "**影响面与触发**：`AgentApprovalsSection` 被工作区看板（`feature/agents/AgentWorkspaceBoard.kt:371`）与会话详情（`feature/agents/AgentSessionDetail.kt:158`）共用；全量重录后只有 **2 张帧被改写**（`AgentsApprovalsQueuePhonePreview` 与 `ScreenshotPreviewsR2RemoteKt/R2DeskAgentsWindowPreview_r2-desk-agents-rich_66ee34d2_0.png`）。触发者是用户 2026-10-15 复看：「审批的卡片样式不对吧，太占地方了」—— 与原型那段注释是同一句判断。"
+#   approved_by: <人>
+#   date: 2026-10-15
+
+# ── G2 档位一次裁决（2026-10-15，「渲染真值逐槽位差集」批次）──────────────
+# 分母换轨：此前账本用 CSS 声明种数数「≥30 处=事实档位」，每种声明只数一次，
+# 5px 的 2488 处**渲染用量**根本不存在于那张表里。本轮起用 prototype/layout 的
+# 渲染整数档槽位数（tools/design-render-truth.py --offladder-md / --headline）。
+# 裁决入口：docs/plans/2026-10-15-relay-offladder-adjudication.md（39 值按组），
+# 用户在 GUI 选择「全部按推荐」= 对 A/B/C/D 四组推荐项的授权（ask_user_question
+# 记录在案，2026-10-15）。撤销时删行并重记基线。
+- kind: expand-token
+  dimension: 间距/gap
+  where: "维度:间距/gap"
+  design: "整数档 3/5/7/9/11/13 共 7074 处渲染槽位（rhythm 组：gap/padT/padB 为主；档外大户 5×2488、9×1378、3×1358、7×908、11×467、13×436）"
+  actual: "AppSpacing 11→17 档：新增 oxs3/oxs5/osm7/osm9/olg11/olg13（命名沿用 sm6/md10/lg14 先例=相邻语义名+数值）"
+  reason: "裁决 A：与 2026-10-09 裁决 #1-3 同一规矩（≥30 处且落两档之间=事实档位），但分母换成渲染用数后才把六个值全捞出来；snap 到偶数档会让 17 处已在跑的 9dp 等既成写法被改动（census 列），且同选择器邻档合流、层次消失。"
+  approved_by: "kexuejin（GUI 裁决 2026-10-15：全部按推荐）"
+  date: 2026-10-15
+- kind: expand-token
+  dimension: 圆角
+  where: "维度:圆角"
+  design: "9×1980（.fi2×504/.mav×444/.sm×436 等 8 个头像族）、11×672（620 处集中 .ri 行卡一族）、7×660（.hsdays×420 日期格族）"
+  actual: "新增 ShapeRoles.kt 三档：Avatar=9 / ListCard=11 / DayCell=7（M3 Shapes 五槽装不下语义角色，接线先例=IconSizes.kt）；2/6/5/13/20 等小项按裁决随并排截图就近归并，本轮不扩"
+  reason: "裁决 B：按**家族**聚合补语义角色，不逐值扩档——radius 11 与 radius 9 的家族集中度差一个数量级（620/672 vs 铺 8 族），逐值扩会重蹈 25 种取值灌档位的老路。"
+  approved_by: "kexuejin（GUI 裁决 2026-10-15：全部按推荐）"
+  date: 2026-10-15
+- kind: expand-token
+  dimension: 字重
+  where: "维度:字重"
+  design: "700×514 处（.mav×111/.tt×93/.dot×88/.ell×83：名字与条目标题的强调层）"
+  actual: "新增 TextWeights.kt：Emphasis=FontWeight.Bold(700)。M3 Typography 只有 15 个固定角色且已上线角色不许改权重（会动 shipped 观感），强调层走独立命名 token，接线先例=IconSizes.kt"
+  reason: "裁决 C：补 bold 落点而不是把现有角色改粗——后者等于静默重排已上线字阶。"
+  approved_by: "kexuejin（GUI 裁决 2026-10-15：全部按推荐）"
+  date: 2026-10-15
+- kind: converge-design
+  dimension: 字重
+  where: "维度:字重"
+  design: "900×30（.title 一处族）→ 并入 700；650×2 孤立半档 → 并入 600"
+  actual: "未改原型（改写与重拍随下一批原型侧动作一起做）"
+  reason: "裁决 D 之字重部分：900/650 是用量<50 的孤立档，不配新角色。"
+  approved_by: "kexuejin（GUI 裁决 2026-10-15：全部按推荐）"
+  date: 2026-10-15
+- kind: converge-design
+  dimension: 间距/gap
+  where: "维度:间距/gap"
+  design: "D 组 683 处：spacing 1px×481（.t2/.sidelist 描边补偿族，margin-top 为主）、20×39（.nav）、29/34/40/54/102/135/279/412 等 rare 值；font-size 13×91/21/23/25"
+  actual: "1px 族改 offset/描边表达（不进节奏档）；rare 值就近 snap；font-size 13 随字阶批裁（.kv/.v 键值行），21/23/25 为演示层孤值"
+  reason: "裁决 D 全部：不靠扩档解决；snap 与 offset 表达按 census 的既有字面量数改（多为 0-8 处，代价可控）。"
+  approved_by: "kexuejin（GUI 裁决 2026-10-15：全部按推荐）"
+  date: 2026-10-15
+- kind: deviation
+  dimension: 断点/tier
+  where: "prototype/relay.html:652"
+  design: "桌面外壳五段：窗口内一条 26px 自绘菜单栏（.menubar，文件/编辑/视图/窗口/帮助共 16 条）+ 标题栏 40 + 工具栏 46 + 状态栏 26，chrome 预算 138px"
+  actual: "菜单栏整条移除，改由系统菜单栏承载（Compose MenuBar：macOS 进屏幕顶部、Win/Linux 进窗口菜单），只留 6 条（新建会话/导入文件/设置/截图/诊断包/退出）；chrome 预算 138→112px"
+  reason: "用户 2026-10-18 裁决「改成系统菜单栏」。16 条里没有一条是独占能力（设置×3、视图与左侧竖导重复、主题在设置里、刷新各页都有、诊断包在状态栏、退出有标题栏✕/托盘/⌘Q、截图在输入栏、复制本机 ID 在节点页、导入文件与新建会话在工具栏），它唯一的价值是当快捷键的说明书，而快捷键由 DesktopShell 的键盘处理独立驱动。原型自己就把这 26px 标成「macOS 系统菜单栏（mac 上由系统提供；Win/Linux 上同一份 Compose 菜单落在 .titlebar）」（prototype/relay.html:651），代码此前把这段示意当成了窗口内的一行。"
+  approved_by: "kexuejin（用户 2026-10-18 裁决：改成系统菜单栏，经 Lead 转述）"
+  date: 2026-10-18
+- kind: deviation
+  dimension: 间距/gap
+  where: "会话行之间（feature/conversations/ConversationRow.kt 的 ConversationListDivider）"
+  design: "原型 .sidelist{gap:1px} + .li{border-radius:12px}，**行与行之间没有分割线**（prototype/relay.html:730/734），靠 .li:hover 与 .li[aria-selected] 分层"
+  actual: "新增一条**内缩**分割线：HorizontalDivider，内缩 xxxl(48dp) 到文字左沿，颜色 outlineVariant，两侧壳（手机 ConversationsScreen / 桌面 DesktopConversationWidgets）共用同一个组件与同一个内缩量"
+  reason: "用户 2026-10-20 复看「分割线应该是需要的吧」。先删除后加回，判断依据变了：原型那段是 Web 列表写法（滚动区短、鼠标随手可见、靠 hover 分层），而桌面这一列窄、行多、要长时间扫读，一条极淡的内缩线能把行的基线立住。**内缩而非通栏**是因为行本身是 12dp 圆角，通栏线会顶到圆角上、像把行切成两半；内缩到文字左沿与文字对齐，是 macOS/iOS 列表分隔的常规做法。这条值(48)在原型里不存在，属**有意偏离**，不是量具误报。"
+  approved_by: "kexuejin（用户 2026-10-20 复看：分割线应该是需要的）"
+  date: 2026-10-20
+- kind: deviation
+  dimension: 材质/阴影
+  where: "ui/theme/CardShadow.kt 的 relayCardShadow"
+  design: "原型 `.card{box-shadow:var(--shadow)}`，而 `--shadow` 是**两层**：`0 1px 2px rgba(16,24,20,.05), 0 8px 24px rgba(16,24,20,.06)`（prototype/relay.html:52）"
+  actual: "Compose 的 `Modifier.shadow(elevation = 8.dp, ambientColor/spotColor = accents.cardShadow)` —— **单层 elevation + 原型色**，不是两层 box-shadow"
+  reason: "Compose 的 `shadow()` 只产出单层 Material 阴影，要复刻两层得自绘（`drawBehind` + 两次模糊），代价与收益不匹配；用原型色把"色调"对齐，层次差一层。所以口径是**近似对齐**，不是"已对齐原型" —— 之前计划里写成"已对齐"是措辞过宽，已改。"
+  approved_by: "kexuejin（本仓立场：原型是设计权威，但平台绘制能力允许近似时如实记账）"
+  date: 2026-10-20
+- kind: deviation
+  dimension: 空态/图形头
+  where: "桌面未选中会话空态（ui/desktop/DesktopConversationsPane.kt 的 DesktopNoSelectionEmpty）"
+  design: "原型 .emptyd（prototype/relay.html:772）只有标题+两行灰字，没有图形锚点"
+  actual: "补上与共享 EmptyState 同一颗 EmptyGlyph（64dp 软色圆底 + 28dp 主色 ic_chat_bubble）置于文字上方，间距 md"
+  reason: "用户第二轮审计点名「孤字悬在大片空白」是 demo 感来源；共享空态（AppStates.kt EmptyState）已在此前批次统一升级为居中+图形头，桌面壳这张若不跟进会造成同一产品两套空态语言。圆底图标是既有 sprite 字形，不新增资产。"
+  approved_by: "kexuejin（2026-11-01 指令：消除 demo 感、统一空态体系）"
+  date: 2026-11-01
+- kind: deviation
+  dimension: 字号/气泡正文
+  where: "聊天气泡正文（ChatBubbles.kt 纯文本 + MarkdownMessage.kt 基准）"
+  design: "原型默认 --fs-bub:14px（prototype/relay.html:58）"
+  actual: "气泡正文 bodyMedium(14sp) → bodyLarge(16sp)，纯文本与 Markdown 同步"
+  reason: "聊天是主界面，14sp 对话正文偏小（iMessage/WeChat 17、Telegram 15~16）；原型自带 font-lg 档就是 16px（relay.html:1617），16 在原型设计空间内。产品级裁决（2026-11-01 用户点名「文字大小也有影响」）。"
+  approved_by: "kexuejin（2026-11-01）"
+  date: 2026-11-01
+- kind: deviation
+  dimension: 布局/气泡 meta 行
+  where: "聊天气泡内时间行与投递标记（ChatBubbles.kt）"
+  design: "原型气泡不含时间与状态（1256 行自陈「气泡只装话」，状态行整套删除）"
+  actual: "时间行右对齐、投递勾/时钟与时间同行收进气泡内；文字气泡不再在页边漂浮投递图标（文件/图片/PK 卡保留气泡外标记）"
+  reason: "时间行本就是代码侧补的元素，摆法不受原型锁定；此前左对齐独占一行+页边漂浮图标是「demo 感」来源，按成熟 IM（Telegram）惯例收拢。"
+  approved_by: "kexuejin（2026-11-01）"
+  date: 2026-11-01

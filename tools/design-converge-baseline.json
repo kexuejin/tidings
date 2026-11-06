@@ -1,0 +1,36 @@
+{
+  "source": {
+    "path": "prototype/relay.html",
+    "sha256": "534b750fb2ef"
+  },
+  "dimensions": {
+    "spacing": {
+      "distinct": 38,
+      "afterDistinct": 18,
+      "variable": 4,
+      "review": 6,
+      "special": 6
+    },
+    "radius": {
+      "distinct": 24,
+      "afterDistinct": 5,
+      "variable": 5,
+      "review": 6,
+      "special": 2
+    },
+    "font-size": {
+      "distinct": 17,
+      "afterDistinct": 5,
+      "variable": 7,
+      "review": 2,
+      "special": 3
+    },
+    "font-weight": {
+      "distinct": 4,
+      "afterDistinct": 3,
+      "variable": 0,
+      "review": 1,
+      "special": 0
+    }
+  }
+}

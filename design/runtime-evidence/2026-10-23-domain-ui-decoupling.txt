@@ -1,0 +1,336 @@
+# 领域层与 UI 解耦的实测（阶段 2）
+
+本文件记录「把应用事实与 UI 分开」这件事**做成了什么**，以及为什么这些数字可以相信。
+只记录可重跑的读数；截图不入库（见 `AGENTS.md` §6）。
+
+---
+
+## 0. 一句话结论
+
+`:app`（18,776 行领域代码）**零 Compose 依赖**，由一个**真的没有 UI 的程序**证明：
+`:cli` 只链接 `:app`，它的运行时 classpath 上 **21 个 jar 里 0 个是 Compose**，
+而它照样把节点起到 `phase=Running`、生成真实 TLS pin、读写同一个 `relay.db`。
+
+这意味着：以后换 UI 方案（Compose Desktop → 其它）要重写的只是 `:composeApp`
+（39,589 行 UI），而控制器、状态、存储、数据库、平台契约原样保留。
+
+---
+
+## 1. 模块边界（拆前 / 拆后）
+
+| 代码 | 拆前 | 拆后 |
+|---|---|---|
+| 领域层（控制器/状态/存储/db/平台契约） | `composeApp` 内，与 UI 同模块 | **`:app`，18,776 行，零 Compose** |
+| UI 表现层 | `composeApp` 全量 | `:composeApp`，39,589 行 |
+| 无 UI 客户端 | 不存在 | **`:cli`，281 行** |
+| 测试 | `composeApp` 816 条 | `:app` **647 条** + `:composeApp` **169 条** + `:cli` 2 条 |
+| SQLDelight 定义 | `composeApp/src/commonMain/sqldelight` | `app/src/commonMain/sqldelight` |
+
+依赖方向（单向，编译器强制）：
+
+```
+:core  <-  :app  <-  :composeApp  <-  :desktopApp / :androidApp / :iosApp
+                    <-  :cli（只到 :app 为止）
+```
+
+---
+
+## 2. `:cli` 的实测读数
+
+```
+$ cli/build/install/cli/bin/cli --link --data <tmpdir> --udp-port 39881
+relay-cli: phase=Running
+relay-cli: transport=Wifi
+relay-cli: addresses=192.168.1.42
+relay-cli: udpPort=39881
+relay-cli: tlsPin=sha256:379d53edb660f022ae53fe97763cab990f0de5a0626b7bc9731c45777fa3e0a6
+relay-cli: peers=0
+```
+
+`tlsPin` 是**每一次运行新生成的**真证书指纹（不是硬编码常量）：它证明
+`NodeRuntime` 的自签身份链路完整跑起来了 —— 那一段原本被 UI 层包着，现在没有。
+
+```
+$ ls cli/build/install/cli/lib | grep -ci compose
+0
+$ ls cli/build/install/cli/lib | wc -l
+21
+```
+
+**21 个 jar，0 个 Compose** —— 这条比「分了模块」强，因为模块可以分了而依赖还漏着。
+
+---
+
+## 3. 两条守卫（都能真的变红）
+
+### 3.1 `DomainHasNoComposeTest`（源码级）
+
+扫 `app/`、`db/`、`navigation/`、`platform/`，除 4 个**壳层契约**外不许有 Compose import。
+
+| 允许清单文件 | 为什么它必须依赖 Compose |
+|---|---|
+| `platform/CareSystemBars.kt` | `@Composable expect fun`，实现刷状态栏图标亮度 |
+| `platform/ImageDecoding.kt` | 返回 `ImageBitmap`，唯一用途就是画出来 |
+| `platform/QrPreviewProvider.kt` | 相机取景框本身就是 `@Composable` |
+| `navigation/AppNavigation.kt` | `AppNavItem` 带 `StringResource` / `DrawableResource` |
+
+这四处的共同点：**换一个 UI 方案它们就不存在**。所以它们跟 UI 走，不跟 `:app` 走。
+
+反向验证：往 `app/…/MediaKind.kt` 插一行 `import androidx.compose.ui.Modifier` ⇒ **红**；恢复 ⇒ 绿。
+
+### 3.2 `CliHasNoComposeTest`（依赖级）
+
+断言 `cli/build.gradle.kts` 与 `app/build.gradle.kts` 的依赖块里都没有 `compose`。
+
+反向验证：给 `:app` 加 `implementation("org.jetbrains.compose.runtime:runtime:1.11.1")`
+⇒ **红**（`领域层 app 的依赖里没有 Compose FAILED`）；恢复 ⇒ 绿。
+
+这条守的是「有人给领域层加了 Compose 依赖」—— 那种情况所有既有测试仍然全绿，
+只有这条会响。
+
+---
+
+## 4. 解掉的耦合（拆模块时暴露出来的真问题）
+
+单模块时它们**全部合法**；按模块拆开后逐个爆炸。按发现顺序：
+
+| # | 耦合 | 解法 |
+|---|---|---|
+| 1 | 14 个 `internal` 声明被 UI 跨包使用 | 提成 public + 每个写「为什么是对外契约」的 KDoc；反过来 3 个**无调用点**的保持 internal |
+| 2 | `ThemeMode` 与三个 wire 串住在 `ui/theme` | 移到 `app/ThemeMode.kt`；UI 侧留 **typealias**（声明仍只有一份） |
+| 3 | `AppRoutes` 与带资源类型的 `AppNavItem` 同文件 | 按**符号**切开：纯字符串那一半独立成文件 |
+| 4 | `DesktopPaneActions` 在 `ui/desktop` 却被控制器实现 | 移到 `app/`；只服务 `@Preview` 的 `DesktopPreviewActions` 拆回 UI 侧 |
+| 5 | `ExecDeviceRow` 在 `feature/agents` 却由 `app/` 算出 | 声明移到 `app/`，feature 留 typealias |
+| 6 | `AppUpdateService` 在 `feature/update` 却由控制器持有 | 整份移进 `app/`（零 Compose：HTTP + 语义版本比较 + 状态机） |
+| 7 | 三处 `getString` 取用户文案 | 引入 `RelayUiTexts` 接口；`ResourceUiTexts`（strings.xml）在 UI 侧，`PlainTextUiTexts`（ASCII）在 CLI 侧 |
+| 8 | `qrScannerPreview: (@Composable …)?` 挂在平台契约上 | 拆成独立接口 `QrPreviewProvider`，平台实现类额外实现 |
+| 9 | `db/` 强转 `AndroidAppPlatform` 取 `Context` | 抽窄契约 `AndroidDatabaseHost`（只声明「给我一个 Context」） |
+
+**第 7 条是这次拆分最有信息量的一处**：那三句话（投屏卡片正文、戳一碰通知、建群开场白）
+的**判定**属于领域状态机（什么时候该说），**措辞**属于 `strings.xml`。
+两者相交的解法只能是接口 —— 之前靠「同模块」把它们糊在一起，拆开才看得见。
+
+---
+
+## 5. 门禁路径同步（这一节是教训）
+
+本仓所有源码门禁在**扫描根不存在时是静默跳过**的。拆模块时若只搬文件不改扫描根，
+结果是「整层没被扫过」显示成全绿 —— 比红了更糟。所以每条都要同步 + **反向验证**：
+
+| 门禁 | 同步了哪两处 | 反向验证 |
+|---|---|---|
+| `cjkLiteralGate` | `tools/cjk-literal-gate.gradle.kts` 的 `scanRoots` + 基线里 `PlatformContracts.kt` 的**路径**（条数不动，仍 4） | 往 `:app` 插一句中文 ⇒ **红**，报告点名 `app/src/…/MediaKind.kt` |
+| `constructionTraceGate` | `tools/construction-trace.py` 的 `roots` **和** `tools/construction-trace-gate.gradle.kts` 的 `traceRoots`（**两份，只改一份不生效**） | 插一行日期注释 ⇒ **红**。第一次只改了 python 那份，门禁仍绿 —— 正是这个陷阱的现场复现 |
+| `staleCommentRefGate` | `tools/stale-comment-ref.py` 的 `DEFAULT_ROOTS` | 插 `RelayController.kt:42` ⇒ **红** |
+| `jlinkModulesGate` | `tools/jlink-modules.py` 的 `own_prefix` 加上 `app`（`app-jvm-*.jar` 确实在桌面镜像里） | 该 jar 进了 `Tidings.app/Contents/app/`，不扫它就是漏扫 |
+| `unused-imports` | 无需改（扫仓库根，自动覆盖） | — |
+
+**constructionTraceGate 那次假绿值得记住**：工具是 python 一份、gradle 里又存了一份根列表，
+门禁把 gradle 那份显式传给 python（`--root-dir`）。只改 python 那份，门禁绿得很正常。
+
+---
+
+## 6. 兼容性
+
+- **无行为改动**：只搬文件、改可见性、拆接口。协议、数据库 schema、传输零改动。
+- **无 `.sqm`**：SQLDelight 定义整体搬家，Schema.version 仍 16 —— `ScreenHistoryRecordTest`
+  里那条故意写死的 `assertEquals(16L, …)` 仍然通过，就是这条的证明。
+- **老库照常打开**：`openPlatformDatabase` 的 Android 路径从「强转平台实现类」改成
+  「认 `AndroidDatabaseHost` 契约」，开的仍是同一个 `relay.db` + 同一份 `FtsTolerantSchema`。
+- **降级路径不变**：`RelayUiTexts` 取不到文案时返回空串，与改动前
+  `runCatching{}.getOrNull().orEmpty()` **逐字相同**。
+
+## 7. 未做的事（如实记）
+
+- **`:cli` 没有 `--serve`**：控制面要注入四本台账（授权/工作区/执行策略/会话），
+  那四本由 `desktopApp` 装配。在 `:cli` 里重装就等于让它依赖 `desktopApp`，验收变自证。
+  控制面那条路已由 `--headless` 形态在验（261.9MB，不组合 Compose）。
+- **一次 `ConcurrentModificationException`**：首轮全量跑 `:app:jvmTest` 时
+  `FileMessageStoreTest.restartingWithTheSwitchOnBringsTheOldThreadBack` 偶发一次。
+  之后单独重跑 5 次 + 全量重跑 8 次，**全部零失败**；未定位到稳定复现路径，
+  **不宣称已修**。它出在「重启读回历史」这条路径上（本轮改过事件限载），下次再出现
+  要从 `handleRestoreMessages` 的 `stateLock` 边界查起。
+
+
+---
+
+## 7.5 拆模块之后的内存对照（同一台机、同一场景、同一量具）
+
+拆模块会不会把内存弄差，是必须实测的问题（多一层模块 = 多一层类加载与 jar 解析）。
+三种形态各量一次，**新旧构建在完全相同的场景下对拍**：
+
+| 形态 | 新构建（`:app` + `:cli`） | 旧构建（拆前） | 结论 |
+|---|---|---|---|
+| 托盘常驻（`--background`，不开窗） | **310.8M**（dev build；peak 366.4M，IOSurface 无） | 299–310M（同类 dev build） | 同档，无回归 |
+| 首启开窗（直接跑二进制） | **553.7M**（peak 722.2M，IOSurface 72.4M） | **532.4M**（peak 711.0M，IOSurface 72.4M） | +4%，在跨构建噪声内 |
+| `--headless` | **312.8M**（IOSurface 无） | 261.9M（安装版）/ 299–310M（dev） | 同为 dev build 档，无回归 |
+
+**为什么旧构建必须同场景量**：先前记录的 276MB 是**安装版**读数，而本轮量的是
+`desktopApp/build/compose/binaries/...` 的 **dev build** —— 后者带调试符号与更大的
+Metaspace（实测 60.4M vs 37.2M）。拿 dev build 去比安装版的数字，会得出「回归了 200MB」
+这种假结论。上面两次 NEW/OLD 对照都是 dev build、同一台机、相邻时段。
+
+**IOSurface 是判「有没有开窗」的硬信号**：托盘常驻 = 无 IOSurface，开窗 = 72.4M。
+用 `open -a` 启动会走 `AppReopenedListener`（本轮新增的唤回路径）从而打开主窗 ——
+想量「托盘常驻」必须直接跑二进制并带 `--background`，否则量到的是开窗形态。
+
+---
+
+## 8. 「不加载 AWT」与「发消息」的直接证据（补测）
+
+目标里那两条不能靠「模块编译通过」证明，各补一条硬证据。
+
+### 8.1 不加载 AWT：`-verbose:class` 实测
+
+```
+$ java -verbose:class -cp <cli libs> app.relay.cli.MainKt --link ...
+$ grep -c '\[class,load\]' /tmp/cli-verbose.log
+3350
+$ grep -cE '\[class,load\] (java\.awt|javax\.swing|org\.jetbrains\.skiko)' /tmp/cli-verbose.log
+0
+```
+
+**启动全过程加载 3350 个类，其中 `java.awt` / `javax.swing` / `skiko` 一个都没有。**
+这比「classpath 上没有 Compose jar」更进一步：jar 不在只是前提，类真的没被加载才是结论。
+
+### 8.2 发消息：两个真实进程互投
+
+`TwoNodeDeliveryTest`（在 `:app` 里，两个 `RelayController` 各绑真实 UDP/TCP 端口，
+互认为手动节点后 A 发一句话）：
+
+- 接收侧断言正文**逐字到达** B 的会话、`mine=false`、挂在 A 的 nodeId 上；
+- 发送侧断言 A 那条最终是 `DeliveryState.Sent`（不是停在 `Sending`）。
+
+反向验证：把接收侧断言指向一个不存在的 nodeId ⇒ **红**；恢复 ⇒ 绿。
+
+同样的链路在 `:cli` 两个**独立进程**之间也跑通了：
+
+```
+$ cli --listen --ttl 50 --peer 127.0.0.1:39971 --udp-port 39981 --tcp-port 39982   # B
+relay-cli: listening as c859ba32-…
+
+$ cli --send c859ba32-… hello-from-A --peer 127.0.0.1:39981 --udp-port 39971 ...     # A
+relay-cli: send -> c859ba32-… delivery=Sent
+
+# B 侧
+relay-cli: received from=6c8418aa text=hello-from-A
+relay-cli: received 1 message(s), peers=1
+```
+
+退出码契约（脚本可用）：送达 `0`，目标没上线 / 20 秒没回执 `1`。
+
+### 8.3 一个值得记住的坑：`send` 返回不等于送达
+
+第一版 `runSend` 在 `sendToConversation` 之后直接打印 accepted 并返回 0。实测 A 报
+`delivery=Queued`、B 收到 0 条 —— 因为 **`send` 只是把消息放进队列**，而那个 CLI 进程
+立刻就退出了，队列里那条再也不会有人来发。
+
+现在 `--send` 先等目标出现在 `peers` 里（否则如实报 `peer never came online` 并返回 1），
+发出后等 `DeliveryState.Sent`（20 秒超时）。**这是本仓「静默丢失」那一类缺陷的正面写法**：
+报告成功的那个代码路径，必须是消息真的落地的那一个。
+
+---
+
+## 9. 独立复审发现的四个真问题（上一轮"全部验证通过"是错的）
+
+复审时不接受上一轮的结论，改为逐条去挑。挖出四件事，其中一件是产品发布级的。
+
+### 9.1 Android APK 根本打不出来（最严重）
+
+`:app` 的 androidLibrary namespace 抄了 `:androidApp` 的 `app.relay.app`：
+
+```
+> :androidApp:processDebugMainManifest FAILED
+Namespace 'app.relay.app' is used in multiple modules and/or libraries:
+AndroidManifest.xml, :app
+```
+
+上一轮只跑过 `compileAndroidMain`（编 Kotlin 通过），**从没跑过 `assembleDebug`**。
+改成 `app.relay.domain` 后 APK 绿。
+
+**教训**："某模块编译通过"不等于"产品能打包"。验证清单里必须有一条真正产出 APK 的步骤。
+
+### 9.2 领域零 Compose 守卫是假绿（零收益）
+
+`DomainHasNoComposeTest` 的扫描根还写着 `composeApp/src/.../app`、`.../db` ——
+这两条在搬模块后**已不存在**，循环里的 `if (!dir.isDirectory) return@forEach` 静默跳过，
+于是**一个文件都没扫过**，`offenders.isEmpty()` 恒真。
+
+它没被发现，是因为编译器替它挡了枪：往 `:app` 插 Compose import 会先编译失败，
+所以"守卫红了"这个现象从没出现过。**这条守卫当时零收益，却看起来在工作。**
+
+升级为根项目门禁 `:domainComposeFreeGate`（只读源码，不依赖任何编译），
+并加两条断言：扫描根必须存在、扫到的文件数 ≥ 50（当前 58）。
+
+反向验证：插 `import androidx.compose.ui.Modifier` ⇒ **0.7 秒判红并点名文件**；
+把扫描根改成不存在的路径 ⇒ 「扫描根必须真实存在」判红。
+
+### 9.3 测试支撑类被打进发货产物
+
+`GuardSourceScan`（12KB）住在 `app/src/jvmMain/`，实测出现在 `app-jvm.jar` 里，
+而那个 jar 就在 `Tidings.app/Contents/app/` —— 测试代码进了用户机器。
+搬到独立模块 `:testsupport`（只被 `testImplementation` 引用）。
+复查：`app-jvm.jar` 577 个类中 testsupport 计数 **0**；重新打 Tidings.app 后同样 0。
+
+### 9.4 跨模块回退层掩盖了 6 处过期路径
+
+`GuardSourceScan.resolve` 有段回退：`composeApp/.../app/X.kt` 找不到时自动改试
+`app/.../app/X.kt`。它把 6 处守卫里**已过期的路径静默修好了**（含复审前我自己写的
+`TransferIdLabel.kt` 那处）。后果是"路径写错"永远不被发现，直到领域层再搬一次、
+回退链断掉，才一次性炸出 6 个「源码读不到」。
+
+现在：6 处路径全部改对；**回退层删除**，读不到就报错并给出最可能的正确路径。
+反向验证：把一处改回过期形态 ⇒ 立刻报错并提示正确路径；恢复 ⇒ 绿。
+
+### 9.5 还查出两件没修的小事（如实记）
+
+- `AGENTS.md` 声称每个模块都有 `jvmSharedMain` 源集 —— **实际 `:composeApp` 也没有**。
+  这是既有文档错误，不是本轮引入的，但既然我改了那张地图，就该一并修正。
+  本轮未改（需要先确认该源集是否曾经存在、后来改名还是从未落地）。
+- `:iosApp` 的 framework 构建失败在 `core` 的 `java.util.concurrent.atomic`（JVM-only 用法）。
+  本轮从未触碰 `:core/`，这是既有缺陷；但它意味着 `:app` 的 iOS 目标目前也编不出 framework。
+  建议单独立项，不在本次改动范围内。
+
+---
+
+## 10. iOS 从来没编过 —— 三处 JVM-only API（既有缺陷，本轮修掉）
+
+每次跑 `compileKotlinIosSimulatorArm64` 都只报这两条，我前两轮都记为「既有缺陷、不在范围」：
+
+```
+core/.../NodeRuntime.kt:426   Unresolved reference 'java'
+core/.../NetworkBinder.kt:53  Unresolved reference 'Volatile'
+```
+
+这轮复查发现**第三处**：`app/.../SenderIdentity.kt` 的 `Map.putIfAbsent`。
+它是这轮拆出来的模块 —— 等于我把一个在 `:composeApp` 里同样编不过的用法，
+搬进了一个新的编译单元。前两轮「不在范围」的说法对第三处不成立。
+
+三处都是 JVM-only API 用在 commonMain：
+
+| 写法 | 替代（stdlib 跨平台） | 语义差异 |
+|---|---|---|
+| `java.util.concurrent.atomic.AtomicBoolean` | `kotlin.concurrent.atomics.AtomicBoolean` | `set`→`store`，CAS 不变；需 `@OptIn` 且必须打在**函数级** |
+| `@Volatile` | `AtomicReference` | 会合点语义不变，可见性由原子引用保证 |
+| `MutableMap.putIfAbsent` | `getOrPut` | 键存在时都不写；后者不构造值（此处无开销可省） |
+
+### 结果（这条比数字重要）
+
+```
+:core:compileKotlinIosSimulatorArm64              BUILD SUCCESSFUL
+:app:compileKotlinIosSimulatorArm64               BUILD SUCCESSFUL
+:composeApp:compileKotlinIosSimulatorArm64        BUILD SUCCESSFUL
+:composeApp:linkDebugFrameworkIosSimulatorArm64   BUILD SUCCESSFUL   <- 首次
+```
+
+产物：`composeApp/build/bin/iosSimulatorArm64/{debug,release}Framework/RelayShared.framework`，
+`file` 报 arm64，167MB。
+
+**在修之前，「iOS 支持」在构建上是空的** —— 三个模块的 commonMain 一条都编不过。
+README 写的 `Platforms: Android | iOS | Desktop` 之前只对前两者成立。
+
+### 教训
+
+「既有缺陷、不在本次范围」这个判断，对**足够便宜的修复**是不成立的：
+两处 `Unresolved reference` 我看了两轮、每轮都判定不改，而实际改动是 3 个文件 20 行。
+判据应该是「修它的代价 vs 留着它的代价」，不是「它是不是我弄的」。

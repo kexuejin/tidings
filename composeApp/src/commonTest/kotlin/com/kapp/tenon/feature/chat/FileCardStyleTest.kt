@@ -1,0 +1,199 @@
+// SPDX-License-Identifier: GPL-3.0-only
+
+package com.kapp.tenon.feature.chat
+
+import androidx.compose.foundation.shape.CornerBasedShape
+import androidx.compose.ui.geometry.Size
+import androidx.compose.ui.graphics.Shape
+import androidx.compose.ui.unit.Density
+import com.kapp.tenon.domain.model.FileCardUi
+import com.kapp.tenon.domain.model.TransferState
+import com.kapp.tenon.ui.theme.RelayShapes
+import kotlin.test.Test
+import kotlin.test.assertEquals
+import kotlin.test.assertFalse
+import kotlin.test.assertTrue
+
+/**
+ * 文件消息卡片的**行为判据**（task-71）。
+ *
+ * 卡片长什么样要靠截图门禁，但「哪个按钮该出现」「路径怎么显示」是**判据**，
+ * 不该只活在布局代码里 —— 这里把两件事钉住：
+ *
+ *  1. **长路径从中间省略**：完整路径是应用内部实现细节，折行会压住卡片；
+ *     但「已存到」这个事实陈述不能丢，所以省略必须**显式**（`…`）且保留文件名那一段；
+ *  2. **进度态不出「接收」**：正在接收时再给一个「接收」按钮，用户会以为点了能重来。
+ */
+class FileCardStyleTest {
+
+    private fun card(state: TransferState, mine: Boolean = false) = FileCardUi(
+        transferId = "t1",
+        name = "q1.bin",
+        size = 3_000_000L,
+        mine = mine,
+        state = state,
+    )
+
+    @Test
+    fun aLongImplementationPathIsElidedButKeepsItsTail() {
+        val shown = elidePathTail("/data/user/0/com.kapp.tenon/files/relay/downloads/q1.bin")
+        assertTrue(shown.startsWith("…"), "省略必须显式标记，不能看起来像完整路径：$shown")
+        assertTrue(shown.endsWith("q1.bin"), "文件名那一段必须留着，它是用户唯一要看的：$shown")
+        assertTrue(shown.length <= 34, "上限就是卡片里那一行的宽度：$shown")
+        assertTrue(shown.contains("/"), "至少留一段目录，否则用户不知道它在哪个子目录：$shown")
+    }
+
+    @Test
+    fun aShortPathIsShownAsIs() {
+        assertEquals("q1.bin", elidePathTail("q1.bin"), "短路径不该被加上省略号")
+    }
+
+    @Test
+    fun theElidedTailStartsAtAPathBoundaryWhenItCan() {
+        assertTrue(
+            elidePathTail("/data/user/0/com.kapp.tenon/files/relay/downloads/q1.bin").startsWith("…/"),
+            "优先从 / 起，读起来才像一段路径",
+        )
+    }
+
+    @Test
+    fun anAutoAcceptedImageShowsNoAcceptButton() {
+        // 2026-10-27 模拟器实测：小图在协议层已被自动接收（字节落地、sha256 一致），
+        // 界面却还画着「接收 / 拒绝」—— 因为判据没看 autoAccepted。
+        // 这条钉住的是「结论由 core 给、界面只管照做」：卡片带着 autoAccepted 时不出按钮。
+        val card = FileCardUi(
+            transferId = "t-auto",
+            name = "ios1m.png",
+            size = 1_048_576L,
+            mine = false,
+            state = TransferState.Offered,
+            autoAccepted = true,
+        )
+        assertFalse(
+            fileCardShowsAccept(card),
+            "已自动接收的图片不该再让用户点「接收」",
+        )
+    }
+
+    @Test
+    fun acceptIsOnlyOfferedForAnInboundOffer() {
+        assertTrue(fileCardShowsAccept(card(TransferState.Offered, mine = false)))
+        assertFalse(
+            fileCardShowsAccept(card(TransferState.Offered, mine = true)),
+            "自己发出去的出价在等对方点，本端不该给「接收」",
+        )
+    }
+
+    @Test
+    fun anInProgressTransferNeverOffersAccept() {
+        for (state in listOf(
+            TransferState.Active,
+            TransferState.Completed,
+            TransferState.Failed,
+            TransferState.Declined,
+        )) {
+            assertFalse(fileCardShowsAccept(card(state, mine = false)), "$state 不许出现「接收」按钮")
+        }
+    }
+
+    /**
+     * 把圆角形状读回四个角的 px 值（Density 1 ⇒ 1dp = 1px），好让下面两条
+     * 判据能在纯 JVM 单测里比较，而不必依赖截图门禁。
+     */
+    private fun Shape.radii(): List<Float> {
+        assertTrue(this is CornerBasedShape, "气泡形状必须是圆角矩形：$this")
+        val size = Size(100f, 100f)
+        val density = Density(1f)
+        return listOf(
+            topStart.toPx(size, density),
+            topEnd.toPx(size, density),
+            bottomEnd.toPx(size, density),
+            bottomStart.toPx(size, density),
+        )
+    }
+
+    @Test
+    fun aCustomCardBubbleUsesExactlyTheShapeOfTheCardItWraps() {
+        // M3 Surface 在 modifier 链末尾无条件 .clip(shape)：外层气泡透明、无边框，
+        // 却仍会把内层卡片的描边裁成自己的形状。真机上外层 8/16dp 的文字气泡
+        // 圆角把内层 12dp 文件卡的三个圆角弧线裁掉，只剩左上角是圆的、另外
+        // 三个角是互不相接的横竖短线。自定义卡的外层必须逐字沿用卡片形状。
+        for (mine in listOf(false, true)) {
+            for (prev in listOf(false, true)) {
+                for (next in listOf(false, true)) {
+                    val shape = chatBubbleShape(
+                        isCustomCard = true,
+                        mine = mine,
+                        hasPrevSender = prev,
+                        hasNextSender = next,
+                    )
+                    assertTrue(
+                        shape === RelayShapes.medium,
+                        "自定义卡外层形状必须与内层卡片一致，mine=$mine prev=$prev next=$next",
+                    )
+                }
+            }
+        }
+    }
+
+    @Test
+    fun textBubblesStillKeepTheirSenderGroupedRadii() {
+        // 上面那条只改自定义卡；文字气泡的非对称圆角（含连续发件编组）必须原样保留。
+        assertEquals(
+            listOf(6f, 18f, 18f, 18f),
+            chatBubbleShape(false, mine = false, hasPrevSender = false, hasNextSender = false).radii(),
+            "入站首条：topStart=6 其余 18",
+        )
+        assertEquals(
+            listOf(6f, 18f, 18f, 6f),
+            chatBubbleShape(false, mine = false, hasPrevSender = true, hasNextSender = true).radii(),
+            "入站连续消息：上下 start 都收成 6",
+        )
+        assertEquals(
+            listOf(18f, 6f, 18f, 18f),
+            chatBubbleShape(false, mine = true, hasPrevSender = false, hasNextSender = false).radii(),
+            "出站首条：topEnd=6 其余 18",
+        )
+    }
+
+    @Test
+    fun aQuotedCardInACustomCardBubbleSharesTheParentClipShape() {
+        // 自定义卡的 bubblePad=0、引用卡 fillMaxWidth() ⇒ 两层四边齐平。
+        // 外层 12dp 的 clip 会把内层 8dp 的圆角弧整段切掉（第二处「断角」），
+        // 所以引用卡必须与外层**同一形状对象**，而不是「数值上接近」。
+        assertEquals(
+            listOf(8f, 8f, 8f, 8f),
+            RelayShapes.small.radii(),
+            "文字气泡里的引用卡仍是 8dp",
+        )
+        assertEquals(
+            listOf(12f, 12f, 12f, 12f),
+            RelayShapes.medium.radii(),
+            "自定义卡的裁剪路径是 12dp —— 与 8dp 不同，不能混用",
+        )
+        for (mine in listOf(false, true)) {
+            for (prev in listOf(false, true)) {
+                for (next in listOf(false, true)) {
+                    val parent = chatBubbleShape(
+                        isCustomCard = true,
+                        mine = mine,
+                        hasPrevSender = prev,
+                        hasNextSender = next,
+                    )
+                    assertTrue(
+                        quotedCardShape(isCustomCard = true) === parent,
+                        "自定义卡里的引用卡形状必须与外层裁剪重合，mine=$mine prev=$prev next=$next",
+                    )
+                }
+            }
+        }
+    }
+
+    @Test
+    fun aQuotedCardInATextBubbleKeepsItsOwnSmallerRadius() {
+        // 文字气泡有 12/8dp 内边距，引用卡缩进得够深、不会被外层切到，
+        // 别为了「统一」把它的 8dp 也抬成 12dp（那会改掉原型的引用卡观感）。
+        assertTrue(quotedCardShape(isCustomCard = false) === RelayShapes.small)
+        assertEquals(listOf(8f, 8f, 8f, 8f), quotedCardShape(isCustomCard = false).radii())
+    }
+}

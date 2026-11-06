@@ -1,0 +1,2619 @@
+// SPDX-License-Identifier: GPL-3.0-only
+
+package com.kapp.tenon.domain
+
+import com.kapp.tenon.core.fs.deleteFile
+import com.kapp.tenon.core.fs.makeDirectories
+import com.kapp.tenon.core.fs.openRandomAccess
+import com.kapp.tenon.core.fs.pathJoin
+import com.kapp.tenon.core.fs.use
+import com.kapp.tenon.core.ioDispatcher
+import com.kapp.tenon.core.nowMillis
+import com.kapp.tenon.core.protocol.ConvId
+import com.kapp.tenon.domain.recovery.NoPlatformRecovery
+import com.kapp.tenon.domain.recovery.PlatformRecoveryStore
+import com.kapp.tenon.domain.recovery.RecoveryService
+import com.kapp.tenon.domain.recovery.RecoveryPendingPeers
+import com.kapp.tenon.core.protocol.DEFAULT_TIMINGS
+import com.kapp.tenon.core.protocol.AgentChannelPayload
+import com.kapp.tenon.core.protocol.Envelope
+import com.kapp.tenon.core.protocol.MsgKinds
+import com.kapp.tenon.core.protocol.AGENT_SENDER_PREFIX
+import com.kapp.tenon.core.protocol.MsgTypes
+import com.kapp.tenon.core.protocol.Protocol
+import com.kapp.tenon.core.protocol.Timings
+import com.kapp.tenon.core.session.NodeRuntime
+import com.kapp.tenon.core.persist.PersistStores
+import com.kapp.tenon.core.transport.DedupStore
+import com.kapp.tenon.core.transport.LocalFile
+import com.kapp.tenon.core.transport.ManualPeer
+import com.kapp.tenon.core.transport.MessageStatusKinds
+import com.kapp.tenon.core.transport.PartFile
+import com.kapp.tenon.core.crypto.TlsPin
+import com.kapp.tenon.core.transport.PeerEndpoint
+import com.kapp.tenon.core.transport.SYNTHETIC_NICK_PREFIX
+import com.kapp.tenon.core.transport.PeerEvent
+import com.kapp.tenon.core.transport.PeerRecord
+import com.kapp.tenon.core.transport.SendOutcome
+import com.kapp.tenon.core.transport.TransferEvent
+import com.kapp.tenon.core.transport.dedupLogPath
+import com.kapp.tenon.core.transport.linkDiagnosticsJson
+import com.kapp.tenon.platform.AppPlatform
+import com.kapp.tenon.platform.CameraUnavailableException
+import com.kapp.tenon.platform.NetworkSnapshot
+import com.kapp.tenon.platform.ReceivedFileActions
+// DesktopPaneActions 现在在同一个包（领域侧）：它是外壳动作面，不属于某一屏。
+import kotlin.coroutines.cancellation.CancellationException
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Job
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.isActive
+import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.update
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.sync.Mutex
+import kotlinx.coroutines.withContext
+import kotlinx.serialization.json.JsonArray
+import kotlinx.serialization.json.JsonObject
+import kotlinx.serialization.json.JsonPrimitive
+
+/** 版本号会作为协议 `Profile.ver` 发给对端（≤16 字符）。 */
+// 更新检查器现在住在同一个包（领域侧）：它零 Compose，而消费它的是控制器。
+// ExecDeviceRow 现在住在同一个包（领域侧）：它由 execDeviceRows() 算出来。
+import com.kapp.tenon.domain.model.AgentApprovalDecision
+import com.kapp.tenon.domain.model.DeliveryState
+import com.kapp.tenon.domain.model.MdnsServiceUi
+import com.kapp.tenon.domain.model.MessageUi
+import com.kapp.tenon.domain.model.NoticeDetail
+import com.kapp.tenon.domain.model.NetworkUi
+import com.kapp.tenon.domain.model.NodePhase
+import com.kapp.tenon.domain.model.NoticeKind
+import com.kapp.tenon.domain.model.PeerUi
+import com.kapp.tenon.core.protocol.AgentExecAuthorizer
+import com.kapp.tenon.core.protocol.mentionedVirtualAgent
+
+const val APP_VERSION: String = "relay-0.1.0"
+
+/**
+ * 一条**外部来源**配对载荷的只读预览（task-54）。
+ *
+ * 字段就是确认框要如实说出来的事实：
+ * - [nodeId] / [nick]：这条内容会让本机与**谁**配对（解析得出才有值）；
+ * - [hasPin]：载荷里**真的**带了一枚 TLS pin 吗 —— 只有 true 时确认框才允许说
+ *   「并固定它的密钥」。带不带是两件事，文案不许比事实更确定；
+ * - [address]：这条内容指向的地址（`host:port` 或中继 url）—— 载荷里没有昵称/ID 时，
+ *   确认框至少能说出「要与哪一条地址配对」，而不是一句含糊的"某个节点"；
+ * - [kind]：`lan-peer` / `remote-relay`；null = 解析不出（确认框如实说解析不出）。
+ */
+data class ExternalPairingPreview(
+    val nodeId: String?,
+    val nick: String?,
+    val address: String?,
+    val hasPin: Boolean,
+    val kind: String?,
+)
+
+/**
+ * 只读解析：把一条外部配对载荷翻译成确认框要展示的事实。
+ *
+ * ## 硬纪律：只读、无副作用、**不得落盘**
+ *
+ * 它只调 [parseQr]（纯函数），**不建节点、不写候选池、不存 pin、不改设置**。
+ * 唯一有副作用的那条路是 [RelayController.handleQrCodeAsync]（新增/改写手动节点、写候选池、
+ * 落对端 pin），只有用户在确认框上点「允许」之后才允许走它。
+ *
+ * 抽成顶层纯函数（而不是只做控制器方法）是为了能被单测直接钉住 —— 外部来源的信任建立
+ * 是安全边界，判据要有一处可测的实现。
+ */
+// public 而不是 internal：宿主 `androidApp` 的单测（另一个 Gradle 模块）要直接钉它 ——
+// 外部来源的信任建立是安全边界，判据必须有一处**跨模块可测**的实现。
+public fun parseExternalPairingPreview(
+    raw: String,
+    myAddresses: List<String>,
+): ExternalPairingPreview? = when (val parsed = parseQr(raw, myAddresses = myAddresses)) {
+    is ParsedQr.LanPeer -> ExternalPairingPreview(
+        nodeId = parsed.nodeId,
+        nick = parsed.nick,
+        address = parsed.host + ":" + parsed.port,
+        hasPin = !parsed.tlsPin.isNullOrBlank(),
+        kind = "lan-peer",
+    )
+
+    is ParsedQr.RemoteRelay -> ExternalPairingPreview(
+        nodeId = parsed.nodeId,
+        nick = parsed.nick,
+        address = parsed.url,
+        // 中继载荷不带对端 pin：这里**必须**是 false，否则确认框会凭空承诺固定密钥。
+        hasPin = false,
+        kind = "remote-relay",
+    )
+
+    null -> null
+}
+
+/**
+ * 一条「在跟 agent 说」的消息该由谁执行（见 `RelayController.agentPromptRoute`）。
+ *
+ * 顶层类型而不是 companion 里的嵌套类：它就是三个调用点与 UI 共同判定的结论，
+ * 不该只能写成 `RelayController.xxx`；而且嵌套在 companion 里时外部引用不到。
+ *
+ * `None` 携带原因（[NoWakeReason]）：「未唤醒」与「叫了没人应」是两个状态 ——
+ * 前者按记录条件记 `NO_WAKE` 诊断（见 `RelayController.logNoWakeIfNeeded`），后者不记。
+ * 两种成因曾混在同一个不携带信息的返回值里，「未唤醒记诊断」与「叫了没人应不记」
+ * 这两条纪律都无从下手（编排规范 §7.1 / §7.2）。
+ */
+sealed class AgentPromptRoute {
+    /** 没有任何执行器接下这条消息；[reason] 说明为什么。 */
+    data class None(val reason: NoWakeReason) : AgentPromptRoute()
+
+    /** agent 在本机，调用本机的执行器。 */
+    data object Local : AgentPromptRoute()
+
+    /** agent 在别的宿主上；群消息已按协议送达它，本机不执行、也不代答。 */
+    data object Remote : AgentPromptRoute()
+}
+
+/** [AgentPromptRoute.None] 的原因。 */
+enum class NoWakeReason {
+    /** 群里没有 `@` 点名、也不是在回复 agent 的那条 —— 真正的「未唤醒」。 */
+    NotAddressed,
+
+    /** 在跟 agent 说话，但本机与远端都没有执行器在场 —— 「叫了没人应」。 */
+    NoAgentPresent,
+}
+
+/**
+ * 把 [NodeRuntime] 接到 Compose 上的唯一状态持有者与门面协调器（Facade Coordinator）。
+ *
+ * 核心领域逻辑已模块化解耦到专用领域组件：
+ * - 群组协议与成员管理：[RelayControllerGroups.kt]
+ * - 文件传输与分片管理：[RelayControllerTransfers.kt]
+ * - 消息流、去重与撤回：[RelayControllerMessages.kt]
+ * - 设置持久化与远程中继：[RelayControllerSettings.kt]
+ * - Agent 智能体通信：[RelayControllerAgent.kt]
+ */
+class RelayController(
+    /**
+     * 本机的平台能力。
+     *
+     * **对外可见**：界面层要读它（例如 `ui/QrPreviewSlot` 判"这台设备画不画得出取景框"）。
+     * 它是契约类型 [AppPlatform] 而不是某个平台的实现类 —— 界面拿到的仍是抽象。
+     */
+    val platform: AppPlatform,
+    internal val store: SettingsStore,
+    /**
+     * 控制器的协程作用域。
+     *
+     * **对外可见**：界面要在"用户点了一下"的回调里起一个短任务（例如要下一页 agent
+     * 会话）。那几个回调不是 suspend，界面需要一个作用域；用自己那一个会让任务随
+     * 组合销毁而被取消，而请求本身不该被取消。
+     *
+     * 生命周期与控制器一致（不是与某一屏一致）—— 这正是它住在这里的理由。
+     */
+    val scope: CoroutineScope,
+    // 真实构建版本优先；壳拿不到（null）才回退常量 —— 绝不让常量冒充版本号（见 AppPlatform.appVersion 的 KDoc）。
+    val version: String = platform.appVersion ?: APP_VERSION,
+    internal val messageStore: MessageStore = InMemoryMessageStore(),
+    internal val agentStore: AgentStore = InMemoryAgentStore(),
+    private val timings: Timings = DEFAULT_TIMINGS,
+    internal var updateChecker: AppUpdateChecker = DefaultAppUpdateChecker(platform),
+    /**
+     * 这个宿主是否**承载 agent 节点**（设计文档 §2 方案 A，2026-10-14 用户裁决）。
+     *
+     * true 只有桌面端：它有系统托盘、能开机自启、关窗只是隐藏 —— 是机器上最天然的
+     * 常驻者，所以由它来当那个「让本机 AI 上线」的节点（固定回环 8788 + 广播 `ag1`）。
+     *
+     * false 是手机与该仓库的所有测试：手机不承载 AI 会话，声明 `ag1` 会骗对端
+     * （对方把会话帧推过来，我们只 ACK、业务层丢弃）。
+     *
+     * 默认 false ⇒ 既有行为一字不变；桌面端在 `Main` 里显式传 true。
+     */
+    private val advertiseAgent: Boolean = false,
+    /**
+     * L0 平台存活存储（iOS 钥匙串 / Android 公共 Downloads）。桌面与所有测试宿主
+     * 不传（= [NoPlatformRecovery]），行为与从前逐字节一致。
+     *
+     * 收养**决策**在 [_state] 初始化里（settings 不存在才收养，Q10 裁决）；
+     * 这个参数只提供存取。备份的定时刷新在 [start] 里做（身份稳定后写一次）。
+     */
+    val platformRecovery: PlatformRecoveryStore = NoPlatformRecovery,
+) : DesktopPaneActions {
+
+    // dataDirectory 与 persist 提到 _state **之前**：L0 收养（若有）要在 settings
+    // 首次加载前摸到 pins 与钥匙目录 —— 恢复先于 firstRun（身份恢复方案 §9.2）。
+    // persist 用 lazy 只是给「声明顺序早于 dataDirectory」留一条安全缝，实际访问仍是单次。
+    val dataDirectory: String = platform.dataDirectory.dataDirectory()
+
+    private val persist: PersistStores by lazy { PersistStores.under(dataDirectory) }
+
+    /** 身份恢复服务：组装载荷 / 落钥匙 / 写信任根。L1 与 L0 收养共用这一层。 */
+    internal val recovery = RecoveryService(
+        linkIdentityDir = pathJoin(dataDirectory, "link-identity"),
+        pins = persist.peerPins,
+    )
+
+    /**
+     * L2 待拉取历史的对端（方案 §6.3 / Q11）。**落盘**（`stores/recovery-pending.json`）：
+     * 只在内存里的话，「收养完成 → 进程在 drain 前被杀」之后，下次启动 settings 已存在、
+     * 不再收养、集合为空 —— 这次恢复的历史拉取静默丢失。变更经 [markRecoveryPullPending]
+     * 与 drain 的移除写回盘上。空集 = 没有恢复在途，启动路径零开销。
+     *
+     * **它是不可变集合上的原子读改写**（`MutableStateFlow<Set<String>>`），不再借
+     * [RelayCoreState] 那把阻塞锁：这份集合与消息/传输表毫无关系，借锁只是历史巧合，
+     * 而借锁的两处还在**持锁期间写文件**（违反「持锁不得 IO」的既有约束）。
+     * 换成 StateFlow 之后：更新走 `update { }`（原子）、落盘在锁外、读写都不必阻塞。
+     */
+    internal val pendingRecoveryPeers: MutableStateFlow<Set<String>> =
+        MutableStateFlow(RecoveryPendingPeers.load(dataDirectory))
+
+    internal val _state: MutableStateFlow<RelayUiState> = MutableStateFlow(
+        // 首次运行的默认设备名按**宿主**给（2026-10-14 修真机撞名）：桌面端与手机是同一份
+        // 模型的两个宿主，默认名不同。`advertiseAgent` 就是区分它们的那个标志（见它的 KDoc）。
+        RelayUiState(
+            settings = run {
+                // L0 收养（Q10 收养规则）：settings 文件不在（重装 / 新机首启）且平台
+                // 存活存储（钥匙串 / 公共 Downloads）里有身份包 ⇒ 先收养再正常加载。
+                // **已有 settings 就绝不收养**：同步层里的身份包可能属于账号下另一台
+                // 设备，覆盖本机身份 = 静默克隆。收养写 settings + 钥匙 + pins，
+                // 所以这个钩子就是"恢复先于 firstRun"的落点。
+                val existing = store.load()
+                if (existing == null) {
+                    platformRecovery.load()?.let { payload ->
+                        recovery.adoptForFreshInstall(payload, store, platform)
+                        // L2：收养完成 ⇒ 信任根里的对端都是待拉历史的一方（Q11：全量重发+去重）。
+                        pendingRecoveryPeers.update { it + payload.peerPins.map { pin -> pin.nodeId } }
+                        RecoveryPendingPeers.save(dataDirectory, pendingRecoveryPeers.value)
+                    }
+                }
+                (existing ?: store.load() ?: RelaySettings.firstRun()).let { raw ->
+                // 一次性迁移（真机反馈 #2）：老库没有 persistMessagesDecided 这一位，
+                // 而旧文件里"从没设过"与"显式关掉"是同一串字节 —— 按"从没设过"补成开启。
+                // 只认这一位，所以跑过一次就再也不会重来（详见 migrateRelaySettings 的 KDoc）。
+                val loaded = migrateRelaySettings(raw)
+                // 两个宿主各自的默认名在这里补齐（2026-10-14 修真机撞名）。
+                //
+                // 为什么不能只在 `firstRun()` 里给：**已经建过 settings.json 的老库**不会走
+                // 那条路，而它们的 nick 可能正是那个共享默认值（桌面端就是这样：文件里
+                // nick 为 null，于是它顶着「我的手机」上局域网，与真手机撞名）。
+                //
+                // 只在**空**的时候补：用户改过的名字永远优先（这是显示名，不是身份）。
+                //
+                // 默认名从平台上取（见 `AppPlatform.deviceDefaultNick`）：那是一句要本地化
+                // 的文案，属于平台层；写在这份共享代码里就只能所有宿主共用一个词，
+                // 而那正是这次撞名的来源。
+                val fallback = platform.deviceDefaultNick.ifBlank { platform.deviceInfo.hostName() }
+                val next = if (platform.isDefaultNick(loaded.nick)) loaded.copy(nick = fallback) else loaded
+                // 迁移与补默认名都必须落盘：不写的话下次启动读到还是同一份老文件，
+                // "一次性"就变成每次启动都重来一遍。
+                if (next != raw) store.save(next)
+                next
+                }
+            },
+        ),
+    )
+    val state: StateFlow<RelayUiState> = _state.asStateFlow()
+
+    /**
+     * Phase 4 订阅面切片（设计与迁移计划见蓝图 §4.4，实现见 [RelayStateSlices]）。
+     *
+     * 界面按需订阅这些切片，而不是整个 [state]：改 agent 表不会让会话面/节点面/传输面的
+     * 订阅者拿到新值。切片是 [state] 的**纯投影** —— 不是第二份存储，也没有第二个写入方；
+     * 单一事实源仍是 [RelayCoreState] 里的表与 [_state]。
+     *
+     * 注意：本类内部的**逻辑读取**继续用 [state]（领域判据读单一事实源是对的）；
+     * 切片只服务界面订阅。
+     *
+     * **惰性创建**：`stateIn` 会在传入 scope 上挂子协程（等订阅者）。若在构造时就建好，
+     * 任何「`runBlocking { controller() }`」形态的宿主/测试都会永远卡在等子协程上
+     * （实测：全量 :app:jvmTest 挂死 10 分钟，栈落在 runBlocking joinBlocking）。
+     * 惰性之后，不订阅切片的调用方不受影响；订阅方（界面）第一次取切片时才创建。
+     */
+    private val stateSlices by lazy { RelayStateSlices(state, scope) }
+    val chatFlow: StateFlow<ChatSlice> get() = stateSlices.chat
+    val agentFlow: StateFlow<AgentSlice> get() = stateSlices.agent
+    val nodeFlow: StateFlow<NodeSlice> get() = stateSlices.node
+    val transferFlow: StateFlow<TransferSlice> get() = stateSlices.transfer
+    val settingsFlow: StateFlow<SettingsSlice> get() = stateSlices.settings
+    val chromeFlow: StateFlow<ChromeSlice> get() = stateSlices.chrome
+    val avatarFlow: StateFlow<AvatarSlice> get() = stateSlices.avatar
+
+    /**
+     * 手机侧长连接诊断文件的路径（task-34）：`<dataDir>/diag/link.json`。
+     *
+     * 为什么需要它：**拨号发生在手机**，而 `/v1/peers` 是宿主侧的控制面 —— 手机为什么没拨、
+     * 拨了为什么连不上，在宿主那边永远看不到（宿主只会显示 skipReason=peer-has-no-lnk1，
+     * 因为按设计只有宿主声明 lnk1）。这个文件只读、只在本机应用私有目录、不含任何凭据，
+     * 供 `adb shell run-as com.kapp.tenon cat files/relay/diag/link.json` 读取。
+     */
+    val linkDiagnosticsPath: String get() = pathJoin(dataDirectory, "diag", "link.json")
+    val cacheDirectory: String = platform.dataDirectory.cacheDirectory()
+
+    fun activeRuntime(): NodeRuntime? = runtime
+
+    internal var runtime: NodeRuntime? = null
+    internal var jobs = mutableListOf<Job>()
+    var onLocalSessionPageRequest: ((peerId: String, wsId: String, offset: Long, limit: Long?) -> Boolean)? = null
+    var onAgentPrompt: (suspend (convId: String, senderPeerId: String, prompt: String, replyToId: String?) -> Unit)? = null
+
+    /**
+     * **打断桥**（测试方案 §6.1 的落点，真机实测 FAIL 后补的缝）。
+     *
+     * 为什么不能复用 [onAgentPrompt]：「停」/「取消」既没有 @ 任何人，也不是在回复
+     * agent 发的那条 —— `agentPromptRoute` 按定义不会把它判成 prompt，于是当时长在
+     * `handlePrompt` 里的打断分支**永远进不去**。真机现场：手机发「停」，宿主日志明明
+     * 打了 `[msg] inbound ... len=4`，3 秒后 codex 照跑，只能人工 kill。
+     *
+     * 所以判据前移到**入站文本**：每一条文本先问「这是不是打断」，命中就吞掉，
+     * 不再往下走路由。返回 `true` = 已消费（调用方应当 return，不派单）。
+     *
+     * **必须是同步返回**：写成 suspend 就只能 `launch` 出去，那和「晚一点再判断」
+     * 没区别 —— 同一条消息的派单分支会先跑。真正的取消由实现方**同步**发出
+     * （500ms 断言看的是进程死没死，不是网络回执）。
+     */
+    var onAgentAbort: ((convId: String, text: String) -> Boolean)? = null
+
+    /**
+     * 群内活跃工单的追问与微调桥（测试方案阶段 A 原型确认与追问唤醒）。
+     *
+     * 当群内有工单处于 prototype 或 blocked 等待决策状态时，用户在群内的
+     * 回复直接作为该工单的补充上下文消费，返回 true 拦截正常派单路由。
+     */
+    var onAgentFollowUp: ((convId: String, senderPeerId: String, text: String) -> Boolean)? = null
+
+    /**
+     * 群模板配置拦截桥（编排规范 §16.6 入口 A；§15 第 12 条裁决）：
+     * 「以后本群默认组队：X 开发，Y 审核」是**固定句式的显式命令**，与 `onAgentAbort`
+     * 同链 —— 挂在入站文本上、唤醒判据之前（句式命中即消费）。实现落在宿主
+     * （`DesktopExtension`：句式解析 → 归一 / 异厂商校验 → `DelegationTeamStore.save`
+     * → 可见回执）。返回 `true` = 已消费；`false` = 句式不匹配，照常走路由（零行为变更）。
+     */
+    var onDelegationTeamConfig: ((convId: String, text: String) -> Boolean)? = null
+
+    /**
+     * 快捷指令拦截桥（编排规范 §9.2；§15 第 13 条裁决）：
+     * `/status` `/diff` `/test` 是显式命令，不需要 `@` —— 与打断桥同链、唤醒判据之前。
+     * 实现（宿主）用 `parseQuickAction` 全词匹配：命中 → 交 `QuickActionPort` 并消费；
+     * 未命中 → 返回 false，原样落回唤醒判据（零行为变更）。`/stop` 不在此桥 ——
+     * 它由链条更前面的打断桥消费（AbortSignals 词表已含 `/stop`），四条指令同一语义：
+     * 显式命令不过唤醒判据。
+     */
+    var onQuickAction: ((convId: String, text: String) -> Boolean)? = null
+
+    /**
+     * 诊断日志桥（编排规范 §7.2）：`:app` 不依赖编排层的
+     * `RelayLog`，而未唤醒的消息根本到不了编排层 —— `NO_WAKE` 只能在路由点**就地**发出，
+     * 经这座桥进宿主的日志环（诊断包从 `recentLogLines` 出「最近日志」节）。
+     * 宿主注入 `RelayLog`-backed 实现，`:cli` 注入 stdout；手机端不注入（null = 不记，
+     * 零成本）。这是「编排层一律走 RelayLog」的唯一注入例外 —— 桥的宿主端实现仍落在
+     * `RelayLog`，不另起第二套日志。
+     */
+    var diagnosticLogSink: ((tag: String, message: String) -> Unit)? = null
+
+    /**
+     * **领域层要「一句话」的唯一出口**（见 [RelayUiTexts] 的 KDoc）。
+     *
+     * 为什么需要桥：这些话住在 composeResources 的 `strings.xml` 里，取它要
+     * `org.jetbrains.compose.resources.getString` —— 直接 import 会把 Compose 拖进
+     * 领域层，于是「要不要落一条投屏记录 / 要不要发一条通知」这些**领域判据**
+     * 会依赖 UI 框架存在。按模块拆开后那就是循环依赖。
+     *
+     * 没装桥时用 [NoUiTexts]（每个方法返回空串），不崩溃、也不自己编中文。
+     */
+    var uiTexts: RelayUiTexts = NoUiTexts
+
+    /**
+     * 取投屏卡片的正文。`runCatching` 是有意的：「取不到文案」与「记录本身无效」
+     * 是两件事，前者不该让后者一起消失。
+     */
+    internal suspend fun screenCardTextOf(record: com.kapp.tenon.domain.model.ScreenRecordUi): String =
+        runCatching { uiTexts.screenCardText(record) }.getOrNull().orEmpty()
+    /**
+     * **执行名单的宿主侧桥**：读写「谁能用这个 agent 干活」。
+     *
+     * 为什么需要桥：台账（`AgentGrantStore`）在 desktopApp，控制器在 composeApp ——
+     * 后者拿不到前者。手机壳不接这个桥（`null`），因为它连的是别人的机器，
+     * 那里的台账是对方的主权，我配不了。
+     *
+     * 三个回调都是**同步**的：台账读写是内存操作 + 一次文件落盘，不需要协程，
+     * 而界面要在点击的这一帧就看到结果（异步会让勾选框闪一下再回来）。
+     */
+    var onExecDevices: ((agentKey: String?) -> List<ExecDeviceRow>?)? = null
+    var onSetExecDeviceAllowed: ((agentKey: String, nodeId: String, allowed: Boolean) -> Unit)? = null
+
+    // ------------------------------------------------ M4 跨端派单的壳层桥（规格 §6.2/§6.3）
+    //
+    // 五个桥都是 `invokeCtl` 里对应字段的公开转发：执行器与授权台账住在壳层
+    // （desktopApp 的 ControlPlane / AgentGrantStore），领域层拿不到 —— 与
+    // `onAgentPrompt` / `onExecDevices` 同一条接缝纪律。没装桥时行为是**诚实的
+    // 降级**：入站派单答一帧 no-executor 拒绝、授权走 fail-closed，绝不沉默。
+    // 手机壳不装执行桥（它不是插件宿主），但可装授权台账桥（它有自己的台账）。
+
+    /** 执行器桥：谁装了它，谁就是能承接派单的宿主。null = 本机没有执行器。 */
+    var invokeExecutor: AgentInvokeExecutor?
+        get() = invokeCtl.executor
+        set(value) { invokeCtl.executor = value }
+
+    /** 目标插件在线状态（S4-4b）：null = 状态拿不到，域层照旧派单（租约兜底）。 */
+    var invokePluginPresenceOf: ((agentId: String) -> String?)?
+        get() = invokeCtl.pluginPresenceOf
+        set(value) { invokeCtl.pluginPresenceOf = value }
+
+    /** 可信设备判据：`(agentId, nodeId) → 是否已批准执行`。null = 没有台账可用。 */
+    var invokeGrantAllows: ((agentId: String, nodeId: String) -> Boolean)?
+        get() = invokeCtl.grantAllows
+        set(value) { invokeCtl.grantAllows = value }
+
+    /** 每个 agent 的执行范围（[AgentExecPolicies] 取值）；null = 缺省最严档。 */
+    var invokeExecPolicyOf: ((agentId: String) -> String?)?
+        get() = invokeCtl.execPolicyOf
+        set(value) { invokeCtl.execPolicyOf = value }
+
+    /** 未授权派单的机主裁决入口：记录申请 + 通知机主（复用 grants）。 */
+    var invokeRecordGrantRequest: ((nodeId: String, agentId: String?, reason: String) -> Unit)?
+        get() = invokeCtl.recordGrantRequest
+        set(value) { invokeCtl.recordGrantRequest = value }
+
+    /** 宿主侧卡片动作出口：`(agentId, sessionId?, cardId, actionId, decidedBy)` → 插件。 */
+    var onHostCardAction: ((agentId: String, sessionId: String?, cardId: String, actionId: String, decidedBy: String) -> Unit)?
+        get() = invokeCtl.onHostCardAction
+        set(value) { invokeCtl.onHostCardAction = value }
+
+    /** 标签路由桥（T-G2 ③）：tag → 承接节点 id（null = 无匹配，调用方走失败横幅）。 */
+    var peerTagRouter: ((tag: String) -> String?)?
+        get() = invokeCtl.peerTagRouter
+        set(value) { invokeCtl.peerTagRouter = value }
+
+    /** 标签委派桥（T-G2 ③）：把 agent-channel 帧发到选定节点。 */
+    var channelDispatch: ((nodeId: String, channelId: String, tag: String, task: String, deadlineMs: Long) -> Unit)?
+        get() = invokeCtl.channelDispatch
+        set(value) { invokeCtl.channelDispatch = value }
+
+    /** M7-T2：入站 Channel 委派的承接桥（授权 + 分流），转发到 invokeCtl。 */
+    var channelOrchestrator: ((payload: AgentChannelPayload, fromNode: String) -> Boolean)?
+        get() = invokeCtl.channelOrchestrator
+        set(value) { invokeCtl.channelOrchestrator = value }
+
+    /**
+     * 控制器持有的可变会话表。搬出本类是为了让「这张表归谁」写在类型上，
+     * 而不是一个 `internal` 字段 + 全靠约定的纪律。
+     *
+     * [RelayCoreState.lock] 是这里**唯一**的并发护栏（38 处引用，跨 6 个分片）；
+     * 它同时保护 [stateLock] 这个名字的历史调用点。
+     */
+    internal val core = RelayCoreState()
+    internal val writer = RelayStateWriter(core, _state)
+    internal val stateLock: StateLock get() = core.lock
+
+    /**
+     * 节点域服务：网段探测族、头像/资料族、设置与远程中继族都收口在这里。
+     *
+     * 与 [agentDomain] 同一形状：三族只拿到 [NodeDomainHost] 那一条窄缝，
+     * 碰不到消息表、传输表或其它分片。主类继续以同名成员暴露它们（门面不变）。
+     *
+     * 节点生命周期/发现/配对仍在本类 —— 那是门面本身，搬它是一次整类边界评审。
+     */
+    internal val nodeDomain = NodeDomainService(this)
+    /**
+     * 传输域服务：文件传输族、共享柜族、投屏族都收口在这里。
+     *
+     * 与 [nodeDomain] 同一形状：三族只拿到 [TransferDomainHost] 那一条窄缝。
+     * 该接口仍显式暴露 [RelayCoreState] 与 [StateLock]（传输表与聊天表同住、共用一把锁）——
+     * 这是 Phase 3 第三步「按点替换 StateLock」要清掉的已知耦合，不在这一步假装没有。
+     */
+    internal val transferDomain = TransferDomainService(this)
+    internal val pkCtl: RelayControllerPkComponent get() = conversationDomain.pk
+    internal val avatarCtl: RelayControllerAvatarComponent get() = nodeDomain.avatar
+    internal val screenHistoryCtl: RelayControllerScreenHistoryComponent get() = conversationDomain.screenHistory
+    internal val cidrCtl: RelayControllerCidrComponent get() = nodeDomain.cidr
+    internal val screenCtl: RelayControllerScreenComponent get() = transferDomain.screen
+    /**
+     * 智能体域服务：会话/事件/审批族与跨端派单族都收口在这里。
+     *
+     * 主类仍是唯一公开门面（`:orchestration` 与 UI 直接连它），但两族只拿到
+     * [AgentDomainHost] 那一条窄缝 —— 它们碰不到消息表、传输表或其它分片。
+     */
+    internal val agentDomain = AgentDomainService(this)
+    /**
+     * 会话域服务：消息本体族、群族、小游戏卡族、投屏记录族都收口在这里。
+     *
+     * 它是四个域里唯一**入站总分发处**：一个信封进来先由消息分片按类型分发。跨域分发
+     * 只走 [ConversationDomainHost] 上的端口（`agent` / `transfer` / `node`），分片拿不到
+     * 别的域的组件类型。该接口仍显式暴露 [RelayCoreState] 与 [StateLock]（消息/群/传输表
+     * 同住、共用一把锁）—— 与 [transferDomain] 同一笔 Phase 3 第三步的欠账。
+     *
+     * 依赖注入顺序：会话域的端口要转发到另外三个域的服务，所以它必须最后构造。
+     */
+    internal val conversationDomain =
+        ConversationDomainService(this, agentDomain, transferDomain, nodeDomain)
+    internal val agentCtl: RelayControllerAgentComponent get() = agentDomain.agent
+    /** 跨端派单网道（M4）：租约、执行门禁、看板卡广播与审批防重都住在这一族。 */
+    internal val invokeCtl: RelayControllerAgentInvokeComponent get() = agentDomain.invoke
+    internal val cabinetCtl: RelayControllerCabinetComponent get() = transferDomain.cabinet
+    internal val groupsCtl: RelayControllerGroupsComponent get() = conversationDomain.groups
+    internal val settingsCtl: RelayControllerSettingsComponent get() = nodeDomain.settings
+    internal val transfersCtl: RelayControllerTransfersComponent get() = transferDomain.transfers
+    internal val messagesCtl: RelayControllerMessagesComponent get() = conversationDomain.messages
+
+    // ---- 横切操作（实现在 RelayControllerOps.kt，被 Groups / Transfers / Cidr / Cabinet 共用）----
+    internal fun persist(settings: RelaySettings) = handlePersist(settings)
+    fun appendMessage(message: MessageUi, incoming: Boolean = false) = handleAppendMessage(message, incoming)
+    internal fun replaceMessage(peerId: String, message: MessageUi) = handleReplaceMessage(peerId, message)
+    internal fun persistThreads() = handlePersistThreads()
+
+    var persistMessages: Boolean = _state.value.settings.persistMessages
+    internal val dedupStore: DedupStore = GatedDedupStore(dedupLogPath(dataDirectory)) { persistMessages }
+
+    /**
+     * core 三个存储契约的落盘实现，路径在 `<dataDir>/stores/` 下。
+     *
+     * 单独一个字段而不是就地 new 两个 store：这两个对象在构造时就会把日志读进内存，
+     * 构造两次等于白读一遍文件，而「读两遍」在文件正在被写时读到的是两个不同的快照。
+     * （声明移到了 _state 之前并改为 lazy —— 身份恢复的 L0 收养要在 settings 首次
+     * 加载前用到 pins，见类头部那段说明。）
+     */
+
+        /**
+     * **这个对端是否已经等了超过 [graceMs]。**
+     *
+     * 判据取队列里**最旧**的那一条 —— 那才是「我第一次为它排队」的时刻。
+     * 用 `pendingAll()` 而不是 `listByPeer()`：后者已经是按 peer 过滤的，但这里要的正是
+     * 「这个 peer 最早什么时候开始积压」，两者等价，用 listByPeer 更直接。
+     *
+     * 队列里一条都没有 ⇒ 从没为它排过队 ⇒ **不超过**（首次投递正是这个形态）。
+     */
+    private fun hasWaitedBeyond(peerId: String, graceMs: Long): Boolean {
+        val oldest = runCatching {
+            persist.queue.listByPeer(peerId).minOfOrNull { it.created }
+        }.getOrNull() ?: return false
+        return nowMillis() - oldest > graceMs
+    }
+/**
+     * **清掉「目标设备已消失」的待发条目。**
+     *
+     * 队列原先只有 `prune`（按时间 + 每 peer 条数），拦不住真机上的一类积压：目标节点早就
+     * 不存在了，但条目不满 TTL、也没超过每 peer 上限 —— 于是它永远留在队列里，每次启动
+     * 都被重扫一遍。真机读数（2026-10-22）：`pending: 476`，其中 201 条的目标 `05607a4e`
+     * 既不在 `peers`、也不在 `known-peers` 里。
+     *
+     * 判据是**两个条件的合取**：超过 TTL **且** 目标不在「已知对端」里。
+     *  - 只看时间会删掉「只是长期离线」的设备的消息 —— 它回来时那条本该还在；
+     *  - 只看「不在已知里」会删掉「刚配对、还没见过面」的对端 —— 那是合法待发。
+     *
+     * 「已知对端」= known-peers 名录 ∪ 当前 peers ∪ 本机自己（自己发给自己是合法的）。
+     * known-peers 是**落盘的**，所以重启后那台只是离线的设备仍然算「已知」。
+     */
+    internal fun pruneVanishedQueuedMessages() {
+        val st = _state.value
+        val known = persist.knownPeers.load().mapNotNull { it.profile.nodeId.takeIf { id -> id.isNotBlank() } }.toSet() +
+            st.peers.map { it.nodeId } +
+            st.selfNodeId
+        runCatching {
+            persist.queue.pruneVanishedPeers(
+                now = nowMillis(),
+                ttl = Timings().queueTtl,
+                knownPeer = { id -> id in known },
+            )
+        }
+    }
+
+    val themeMode: String get() = _state.value.settings.themeMode
+    internal var messagesRestored: Boolean = false
+    internal val persistMutex = Mutex()
+
+    internal var remoteRelayClient: RemoteRelayClient? = null
+    internal var remotePollingJob: Job? = null
+    internal var lastRemoteSeq: Long = 0L
+    internal var localSeq: Int = 0
+
+    /**
+     * 中继是不是**真的活着**（[RemoteRelayClient.checkHealth] 的结果）。
+     *
+     * 为什么必须有它：原来 [refreshPeers] 只要配置了中继就无条件塞一条 online = true
+     * 的 PeerUi，而唯一的判活函数 checkHealth() 全仓无人调用 —— 中继挂了界面上照样
+     * 显示「在线」，用户以为消息能到。真机验证（2026-10-18）把这条记成「假在线」。
+     * 写入方是中继轮询协程，读取方是 [refreshPeers]，所以与 [lastRemoteSeq] 同款裸 var。
+     */
+    internal var remoteRelayHealthy: Boolean = false
+
+    // ------------------------------------------------------------------ 委托动作：设置
+    fun updatePersistMessages(enabled: Boolean) = settingsCtl.handleUpdatePersistMessages(enabled)
+    fun updateExperimentalLuciola(enabled: Boolean) = settingsCtl.handleUpdateExperimentalLuciola(enabled)
+    fun updateThemeMode(wire: String) = settingsCtl.handleUpdateThemeMode(wire)
+    fun updateWaitFrameCapability(enabled: Boolean) = settingsCtl.handleUpdateWaitFrameCapability(enabled)
+    fun updateRecordMessageCapability(enabled: Boolean) = settingsCtl.handleUpdateRecordMessageCapability(enabled)
+    fun updateNotifyAgentMessages(enabled: Boolean) = settingsCtl.handleUpdateNotifyAgentMessages(enabled)
+    fun updateNotifyMentionOnly(enabled: Boolean) = settingsCtl.handleUpdateNotifyMentionOnly(enabled)
+    fun updateNotifyQuietHours(enabled: Boolean) = settingsCtl.handleUpdateNotifyQuietHours(enabled)
+    fun updateKeepConnectionAlive(enabled: Boolean) = settingsCtl.handleUpdateKeepConnectionAlive(enabled)
+
+    /** 置顶 / 取消置顶一个会话（纯本机偏好）。 */
+    override fun togglePinnedConv(convId: String) = settingsCtl.handleTogglePinnedConv(convId)
+
+    /** 静音 / 取消静音一个会话（消息照收，只是不再通知）。 */
+    override fun toggleMutedConv(convId: String) = settingsCtl.handleToggleMutedConv(convId)
+
+    /** 删掉一个会话（只删本机：消息、未读、置顶/静音标记）。不动协议、不通知对方。 */
+    override fun deleteConversation(convId: String) = settingsCtl.handleDeleteConversation(convId)
+
+    /**
+     * 本平台有没有「后台保持连接」这条能力（设置页据此决定画不画那个开关）。
+     *
+     * 桌面端与 iOS 的进程模型不需要它 → false，设置页不画 —— 与"能力不存在就不画入口"
+     * 同一条规矩（一个按下去没反应的开关比没有更糟）。
+     */
+    val backgroundConnectionSupported: Boolean
+        get() = platform.backgroundConnection?.isSupported == true
+
+    fun saveProfile(nick: String, company: String, dept: String, team: String, avatar: Int) =
+        settingsCtl.handleSaveProfile(nick, company, dept, team, avatar)
+
+    /**
+     * 保存**本机**给某个节点起的备注（节点备注规范）。
+     *
+     * 与 [saveProfile] 的关键差别：备注**不进协议**、不升 `profileRev`、不重启节点。
+     * 传空串 = 删掉这条备注。详见 `settingsCtl.handleSetPeerRemark` 的 KDoc。
+     */
+    override fun setPeerRemark(nodeId: String, remark: String) = settingsCtl.handleSetPeerRemark(nodeId, remark)
+
+    /**
+     * 「上传头像」页的选图 / 移除。**只动本机**，不宣告、不上网（见 `avatarCtl.handlePickAvatar` 的 KDoc）。
+     *
+     * 这两个是 `RelayControllerAvatar.kt` 里 `internal` 实现的公开门面：`:desktopApp` 是独立
+     * Gradle 模块，`internal` 跨不过去，而桌面身份页的头像分段控件第三档要落到同一屏
+     * （原型 `screenDSettings()` 的 `${avSeg()}`，`prototype/relay.html:5263`）。
+     */
+    fun pickAvatar() = avatarCtl.handlePickAvatar()
+
+    /** 清掉刚选中但还没保存的那张图。 */
+    fun removePickedAvatar() = avatarCtl.handleRemovePickedAvatar()
+
+    fun savePorts(rawUdp: String, rawTcp: String) = settingsCtl.handleSavePorts(rawUdp, rawTcp)
+    fun setRemoteRelay(url: String, token: String, nodeId: String? = null, nick: String? = null) =
+        settingsCtl.handleSetRemoteRelay(url, token, nodeId, nick)
+    fun clearRemoteRelay() = settingsCtl.handleClearRemoteRelay()
+    fun clearSettingsNote() = _state.update { it.copy(settingsNote = null) }
+
+    // ------------------------------------------------------------------ 委托动作：消息与聊天
+    fun send(peerId: String, text: String) = messagesCtl.handleSend(peerId, text)
+    override fun sendToConversation(convId: String, text: String, replyTo: String?) {
+        val groupId = ConvId.groupIdOf(convId)
+        if (groupId != null) {
+            sendToGroup(groupId, text, replyTo = replyTo)
+        } else {
+            send(convId, text)
+        }
+    }
+
+    /**
+     * 带意图的发送（方案 §4.2）：上下文唤起胶囊（§5.2）选中目标后，正文与
+     * `agentIntent` **一帧**发出 —— 没有「先发消息、再调一次派单」的两步时序。
+     *
+     * 与 [sendToConversation] 分开而不是加默认参：这个签名只给聊天页的
+     * `ChatScreenActions.onSendWithIntent` 走，普通发送别被意图参数淹着。
+     * 群会话键走 `sendToGroup`（意图只定义在群文本上）；单聊忽略意图 ——
+     * `agentIntent` 不是 1:1 文本的键，塞进去会被白名单整帧拒收（AGENTS §3）。
+     */
+    override fun sendToConversation(convId: String, text: String, replyTo: String?, agentIntent: JsonObject?) {
+        val groupId = ConvId.groupIdOf(convId)
+        if (groupId != null) {
+            sendToGroup(groupId, text, replyTo = replyTo, agentIntent = agentIntent)
+        } else {
+            // 单聊没有意图键：静默降级为普通发送会吞掉用户的选择 —— 大声失败？
+            // 不。胶囊只出现在群会话里（见 AgentContextCapsule 的唤起判据），
+            // 这里到不了；防御式忽略并照常发送，比在输入路径上抛异常诚实。
+            send(convId, text)
+        }
+    }
+    fun sendToGroup(
+        groupId: String,
+        text: String,
+        mentions: List<String>? = null,
+        replyTo: String? = null,
+        agentIntent: JsonObject? = null,
+    ) = groupsCtl.handleSendToGroup(groupId, text, mentions, replyTo, agentIntent)
+    override fun sendPk(convId: String, game: String, value: String) = pkCtl.handleSendPk(convId, game, value)
+    override fun forwardMessage(message: MessageUi, targetConvId: String) {
+        val body = message.text.ifBlank { message.file?.name.orEmpty() }
+        if (body.isBlank()) return
+        sendToConversation(targetConvId, body)
+        info(BannerMessage.ForwardSuccess)
+    }
+    override fun recall(message: MessageUi) = messagesCtl.handleRecall(message)
+
+    /**
+     * 失败气泡上的「重发」：按**原消息 id** 重放（core 的 `replayOutgoing`），不是再发一条。
+     * 换 id 重发在收端就是另一条消息 —— 真机现场同一句话在桌面库里两个 id。
+     */
+    override fun retryMessage(message: MessageUi) = messagesCtl.handleRetryMessage(message)
+    override fun nudge(peerId: String) = messagesCtl.handleNudge(peerId)
+    override fun clearMessages(convId: String) = messagesCtl.handleClearMessages(convId)
+
+    /** 只删本机这一条（不动协议、不通知对方）；见 `handleDeleteMessage` 的 KDoc。 */
+    override fun deleteMessage(convId: String, messageId: String) =
+        messagesCtl.handleDeleteMessage(convId, messageId)
+    fun clearAllMessages() = messagesCtl.handleClearAllMessages()
+
+    /**
+     * 向上翻页：把更早的一页读进内存（UI 在会话滚动到顶部时调）。
+     *
+     * 读不到更多时什么都不发生 —— 不要据此在界面上谎报「还有更多」。
+     */
+    override fun loadOlderMessages(convId: String) = messagesCtl.handleLoadOlderMessages(convId)
+
+    override fun searchHistoricalMessages(query: String, limit: Long): List<MessageSearchResult> =
+        messageStore.search(query, limit)
+    override fun searchGlobal(query: String): GlobalSearchResult = messagesCtl.handleSearchGlobalInternal(query)
+
+    /** 带筛选范围的全局检索（见 `GlobalSearchScope`）：不要的段直接不查。 */
+    fun searchGlobal(query: String, scope: GlobalSearchScope): GlobalSearchResult =
+        messagesCtl.handleSearchGlobalInternal(query, scope)
+    override fun searchInConversation(
+        convId: String,
+        query: String,
+        filter: HistorySearchFilter,
+        limit: Long,
+    ): List<MessageSearchResult> = messagesCtl.handleSearchInConversationInternal(convId, query, filter, limit)
+    internal fun onInbound(envelope: Envelope) {
+        // M7-T2（cap agc1）：Channel 两帧的归宿是委派网道（编排器 / 诚实拒绝 / 结果台账），
+        // 不是聊天流 —— 与 agent-invoke 同一条「在 CHAT_INBOUND_TYPES 之前接走」的纪律。
+        if (envelope.type == MsgTypes.AGENT_CHANNEL) {
+            invokeCtl.handleOnAgentChannel(envelope)
+            return
+        }
+        if (envelope.type == MsgTypes.AGENT_CHANNEL_RESULT) {
+            invokeCtl.handleOnAgentChannelResult(envelope)
+            return
+        }
+        messagesCtl.handleOnInbound(envelope)
+    }
+
+    /**
+     * M7-T2：发起方收到 `agent-channel-result` 的**最小记账** —— 结果进发起会话流
+     * （result 帧是 P2P 回执，会话键就是回执方的 nodeId；channelId 是关联键）。
+     *
+     * 为什么是最小的：发起侧的看板卡 / 会话时间线聚合是 M7 后续切片的 UI 交付物；
+     * 这一步只保证「回执到了、被如实记下、用户看得见」—— 绝不静默吞（那是
+     * UNHANDLED 时代的行为，D-016 后半步要消灭的就是它）。状态词直接透传
+     * `InvokeResultStates`（done/denied/no-executor/no-plugin/timeout/error），
+     * 不在本层再翻译一层。
+     */
+    /** 同一 channelId 的结果只落**第一条**（T-G10：发送侧重投安全的前提 ——
+     *  首赢语义与动作台账同族；重放/重投的重复帧不再复制群流消息）。 */
+    private val seenChannelResults = LockedSet<String>()
+
+    internal fun onChannelResultObserved(
+        envelope: Envelope,
+        channelId: String,
+        ok: Boolean,
+        status: String,
+        summary: String?,
+        error: String?,
+    ) {
+        if (!seenChannelResults.add(channelId)) return
+        val detail = listOfNotNull(summary, error).joinToString(" · ")
+        val text = if (detail.isEmpty()) {
+            "channel " + channelId + " -> " + status
+        } else {
+            "channel " + channelId + " -> " + status + " (" + detail + ")"
+        }
+        handleAppendMessage(
+            MessageUi(
+                id = envelope.id,
+                peerId = envelope.from,
+                mine = false,
+                text = text,
+                at = envelope.ts,
+                delivery = null,
+            ),
+            incoming = true,
+        )
+    }
+
+    // ------------------------------------------------------------------ 委托动作：群组
+    override fun createGroup(name: String, memberIds: List<String>, description: String): String? = groupsCtl.handleCreateGroup(name, memberIds, description)
+
+    /** 工作区群：允许 0 个其它设备 + 把该工作区的 agent 声明进群（见 [handleCreateWorkspaceGroup]）。 */
+    override fun createWorkspaceGroup(
+        name: String,
+        wsId: String?,
+        memberIds: List<String>,
+        description: String,
+    ): String? = groupsCtl.handleCreateWorkspaceGroup(name, wsId, memberIds, description)
+    override fun addGroupMembers(groupId: String, newMemberIds: List<String>) = groupsCtl.handleAddGroupMembers(groupId, newMemberIds)
+    override fun removeGroupMember(groupId: String, memberId: String) = groupsCtl.handleRemoveGroupMember(groupId, memberId)
+    override fun leaveGroup(groupId: String) = groupsCtl.handleLeaveGroup(groupId)
+
+    /** 群主解散群：广播全员移出后删本机元数据（见 [handleDissolveGroup]）。 */
+    override fun dissolveGroup(groupId: String) = groupsCtl.handleDissolveGroup(groupId)
+    override fun updateGroupMeta(groupId: String, description: String?, announce: String?) =
+        groupsCtl.handleUpdateGroupMeta(groupId, description, announce)
+    /** 执行名单：**转给宿主侧桥**；没接（手机壳）就返回 null，界面不画配置区。 */
+    override fun execDevicesOf(agentKey: String?): List<ExecDeviceRow>? = onExecDevices?.invoke(agentKey)
+
+    override fun setExecDeviceAllowed(agentKey: String, nodeId: String, allowed: Boolean) {
+        onSetExecDeviceAllowed?.invoke(agentKey, nodeId, allowed) ?: return
+        // WP-A0/B1：执行名单的行数据经 `onExecDevices` 桥来自宿主侧存储，不在 state 里。
+        // 只 publish 不够 —— 恒等 commit 的相等新值会被 StateFlow 吞掉，重组不发生，
+        // 勾选框停在旧值（overhaul-plan 诊断 B1）。推一档 externalStoreTick 让值真的变
+        // ⇒ 下一帧重组重新拉桥 ⇒ ≤1 帧回显。手机壳没桥，原样 no-op。
+        writer.publishExternalChange()
+    }
+
+    override fun setGroupAgentWorkspaces(groupId: String, wsIds: List<String>) =
+        groupsCtl.run { handleSetGroupAgentWorkspaces(groupId, wsIds) }
+    /**
+     * 打开某条会话时把它标为已读。
+     *
+     * ⚠ 它**不记录"当前选中的是谁"** —— 那件事是 [setVisibleConversation] 管的。
+     * 所以这个名字指的是调用点在做的事（用户点了某条会话），不是这个方法做的全部事。
+     * 别把它当"标为已读"的通用入口用：批量标已读是 [markAllRead]。
+     */
+    override fun selectConversation(convId: String) {
+        stateLock.withLock { core.unread[convId] = 0 }
+        publish()
+    }
+
+    /**
+     * 「全部标为已读」（原型 `screenHomeMore` 的第 5 项，`prototype/relay.html:2861`）。
+     *
+     * 以前 `App.kt` 是 `conversations.forEach { selectConversation(it.convId) }` 凑出来的：
+     * 效果上对（[selectConversation] 顺手清零 core.unread），但那是**借了别人的副作用** ——
+     * 一个叫 `selectConversation` 的方法被当批量标已读用，后来人只会以为
+     * `onMarkAllRead` 是把所有会话都选中了。这个仓库反复抓的就是这类
+     * 「名字看着对、语义在别处」，所以这里给它一个说得出名字的入口。
+     */
+    fun markAllRead() {
+        stateLock.withLock { core.unread.keys.toList().forEach { core.unread[it] = 0 } }
+        publish()
+    }
+
+    override fun setVisibleConversation(convId: String?) {
+        core.visibleConversationId = convId
+        if (convId != null && (core.unread[convId] ?: 0) > 0) {
+            stateLock.withLock { core.unread[convId] = 0 }
+            publish()
+        }
+    }
+
+    // ------------------------------------------------------------------ 委托动作：文件传输
+    override fun pickAndSendFiles(peerId: String) = transfersCtl.handlePickAndSendFiles(peerId)
+    override suspend fun pickFiles(): List<LocalFile> = transfersCtl.handlePickFiles()
+    /**
+     * 把本地文件发给对端 / 群。
+     *
+     * [isFolder] 为真时这一批被当成**一个文件夹**（对端按相对路径还原目录树，界面显示文件夹角标）。
+     * 传目录进来之前必须先由调用方展开成文件列表 —— 这一层不认识文件系统。
+     */
+    override fun sendFiles(
+        peerId: String,
+        files: List<LocalFile>,
+        isFolder: Boolean,
+        folderRootName: String?,
+    ) {
+        transfersCtl.handleSendFiles(peerId, files, isFolder, folderRootName)
+    }
+
+    /**
+     * agent 任务的产物投递：purpose=artifact。与 [sendFiles] 的差别只在免确认 ——
+     * 要不要合并是任务卡上的决策，文件本身是随附资料，不该再要一次「接收/拒绝」。
+     *
+     * @return 报价是否真的发起（false = 节点没起 / 群不认识 / 文件太多）。
+     *   调用方据此决定卡上「有产物」这行该不该写 —— 从前这里恒返回成功，
+     *   于是「patch 只躺在宿主本机、手机那头什么都没有」也能报成投递成功。
+     */
+    fun sendAgentArtifacts(peerId: String, files: List<LocalFile>): Boolean =
+        transfersCtl.handleSendFiles(
+            peerId,
+            files,
+            isFolder = false,
+            folderRootName = null,
+            purpose = com.kapp.tenon.core.protocol.FilePurpose.ARTIFACT,
+        )
+    override fun acceptTransfer(transferId: String) = transfersCtl.handleAcceptTransfer(transferId)
+    override fun declineTransfer(transferId: String) = transfersCtl.handleDeclineTransfer(transferId)
+    override fun cancelTransfer(transferId: String) = transfersCtl.handleCancelTransfer(transferId)
+    override fun resumeTransfer(transferId: String) = transfersCtl.handleResumeTransfer(transferId)
+    override fun clearTransferLogs() = transfersCtl.handleClearTransferLogs()
+    fun discardPartial(path: String) = transfersCtl.handleDiscardPartial(path)
+    fun leftoverParts(): List<PartFile> = transfersCtl.handleLeftoverParts()
+    fun clearLeftoverParts(): Int = transfersCtl.handleClearLeftoverParts()
+    internal fun onTransfer(event: TransferEvent) = transfersCtl.handleOnTransfer(event)
+
+    // ------------------------------------------------------------------ 委托动作：共享文件柜 (Cabinet)
+    override fun setShareRoot(path: String?) = cabinetCtl.handleSetShareRoot(path)
+    override fun pickShareRoot() = cabinetCtl.handlePickShareRoot()
+    override fun setShareMode(mode: String) = cabinetCtl.handleSetShareMode(mode)
+    override fun setShareGrant(nodeId: String, mode: String) = cabinetCtl.handleSetShareGrant(nodeId, mode)
+    override fun removeShareGrant(nodeId: String) = cabinetCtl.handleRemoveShareGrant(nodeId)
+    override fun selectCabinetPeer(nodeId: String?) = cabinetCtl.handleSelectCabinetPeer(nodeId)
+    override fun loadCabinetPath(path: String) = cabinetCtl.handleLoadCabinetPath(path)
+
+    /**
+     * 「加载更多」：按当前行数当 offset 再拉一页并**追加**（服务端已按 offset 分页）。
+     *
+     * 已经进了 `DesktopPaneActions`：两栏模式的文件柜在桌面壳里也要这颗按钮，
+     * 而那个壳只认 `DesktopPaneActions`。接口默认空实现 = 没有该入口的壳不画按钮。
+     */
+    override fun loadMoreCabinetEntries() = cabinetCtl.handleLoadMoreCabinetEntries()
+    override fun toggleCabinetSelection(name: String) = cabinetCtl.handleToggleCabinetSelection(name)
+    override fun clearCabinetSelection() = cabinetCtl.handleClearCabinetSelection()
+    override fun downloadCabinetEntries(names: List<String>) =
+        cabinetCtl.handleDownloadCabinetEntries(names)
+    override fun uploadToCabinet(peerId: String) = cabinetCtl.handleUploadToCabinet(peerId)
+    override fun setCabinetViewMode(mode: String) = cabinetCtl.handleSetCabinetViewMode(mode)
+
+    // ------------------------------------------------------------------ 委托动作：CIDR 网段探测与同步
+    override fun addScanRange(cidr: String) = cidrCtl.handleAddScanRange(cidr)
+    override fun removeScanRange(cidr: String) = cidrCtl.handleRemoveScanRange(cidr)
+    override fun triggerCidrScan(cidr: String?) = cidrCtl.handleTriggerCidrScan(cidr)
+
+    /** 取消正在进行的网段探测（设置页扫描中那颗「取消」）。 */
+    fun cancelCidrScan() = cidrCtl.handleCancelCidrScan()
+
+    // ------------------------------------------------------------------ 委托动作：屏幕截取
+    override fun triggerScreenCapture(targetConvId: String?) {
+        val sc = platform.screenCapture
+        if (sc == null || !sc.isSupported()) {
+            warn(BannerMessage.CaptureUnavailable)
+            return
+        }
+        val convId = targetConvId ?: core.visibleConversationId
+        sc.startCapture { filePath ->
+            if (filePath == null) {
+                // 截图没有产出结果：覆盖窗里点了取消，或写盘失败 —— 服务两条路径都回 `null`，
+                // 生产者分不出也不必分（文案只说"已取消"，见 `BannerMessage.CaptureCanceled`）。
+                //
+                // 以前这里什么都不做，于是用户点完截图、点掉覆盖窗，界面上零反馈：
+                // 既没有成功消息也没有取消回执，看起来就像按钮根本没接上。
+                //
+                // `convId == null`（没有目标会话可发）**保持静默**：那是"截图成功但没处发"，
+                // 是另一个决策（要不要提示、提示什么），本轮不动。
+                info(BannerMessage.CaptureCanceled)
+            } else if (convId != null) {
+                val f = com.kapp.tenon.core.transport.LocalFile(
+                    path = filePath,
+                    name = filePath.substringAfterLast(if (filePath.contains("/")) "/" else "\\"),
+                    size = com.kapp.tenon.core.fs.fileSize(filePath) ?: 0L,
+                )
+                sendFiles(convId, listOf(f))
+            }
+        }
+    }
+
+    override fun sendVoice(peerId: String, filePath: String) {
+        val f = com.kapp.tenon.core.transport.LocalFile(
+            path = filePath,
+            name = filePath.substringAfterLast(if (filePath.contains("/")) "/" else "\\"),
+            size = com.kapp.tenon.core.fs.fileSize(filePath) ?: 0L,
+        )
+        sendFiles(peerId, listOf(f))
+    }
+
+    // ------------------------------------------------------------------ 委托动作：屏幕协助 (Remote View)
+    override fun requestScreenView(peerId: String) = screenCtl.handleRequestScreenView(peerId)
+    override fun respondScreenView(accept: Boolean) = screenCtl.handleRespondScreenView(accept)
+    override fun setScreenViewMode(mode: com.kapp.tenon.core.protocol.ScreenMode) = screenCtl.handleSetScreenViewMode(mode)
+    override fun stopScreenView() = screenCtl.handleStopScreenView()
+
+    // ------------------------------------------------------------------ 委托动作：智能体 (Agent)
+    @Suppress("LongParameterList")
+    suspend fun sendAgentSession(
+        peerId: String,
+        sessionId: String,
+        alias: String? = null,
+        agentKind: String? = null,
+        state: String? = null,
+        title: String? = null,
+        startedAt: Long? = null,
+        agentId: String? = null,
+        wsId: String? = null,
+        wsTitle: String? = null,
+        wsPath: String? = null,
+    ): SendOutcome? = agentCtl.handleSendAgentSession(
+        peerId, sessionId, alias, agentKind, state, title, startedAt,
+        agentId, wsId, wsTitle, wsPath,
+    )
+
+    /**
+     * 中断对端上的一次 agent 运行（PPE-1 §6.6）。null = 对端没有 agent 能力或本机节点未运行。
+     */
+    /** 撤销本会话的「免审」授权（由会话详情入口触发）。 */
+    override fun revokeSessionApproval(sessionId: String) = agentCtl.handleRevokeSessionApproval(sessionId)
+
+    override suspend fun cancelAgentRun(
+        peerId: String,
+        sessionId: String,
+        runId: String?,
+        reason: String?,
+    ): SendOutcome? = agentCtl.handleCancelAgentRun(peerId, sessionId, runId, reason)
+
+    suspend fun sendAgentEvent(
+        peerId: String,
+        sessionId: String,
+        cursor: Long,
+        eventType: String,
+        summary: String? = null,
+        body: String? = null,
+        ref: String? = null,
+    ): SendOutcome? = agentCtl.handleSendAgentEvent(peerId, sessionId, cursor, eventType, summary, body, ref)
+
+    /**
+     * 向宿主申请"让我看你的 agent"（PPE-1 增补 D7）。
+     *
+     * `agentKey` = `agentId ?? agentKind`，null = 申请**整台设备**（父稿 §3.3 的 scope=all）。
+     * 返回 null 有两种含义且必须分得开：没有运行时（节点根本没起来）、对端没声明 `ag1`；
+     * 调用方据此决定文案（见 `AgentGrantCard` 的失败分支）。
+     */
+    suspend fun sendAgentGrantRequest(
+        peerId: String,
+        agentKey: String? = null,
+        reason: String? = null,
+        wsId: String? = null,
+        access: String? = null,
+    ): SendOutcome? = agentCtl.handleSendGrantRequest(peerId, agentKey, reason, wsId, access)
+
+    /**
+     * **这条消息 @ 到了某个 agent、但发送者没有执行权时，返回那个 agent 名。**
+     *
+     * 判据与执行路径同源：命中（`mentionedVirtualAgent`）与授权（`AgentExecAuthorizer`）
+     * 都复用落地判据那几份，不另写一遍 —— 否则「提示说没权」与「其实有权」会各说各话。
+     *
+     * 放在这里而不是某个组件里，是因为**两个组件都要用它**：
+     *  · 接收侧（宿主）：这台设备 @ 了我但没权，我该说一句；
+     *  · 发送侧（本人）：我的 @ 不会被它执行，我更该说一句（否则我自己永远看不到）。
+     */
+    internal fun unathorizedAgentMention(text: String, groupId: String, senderId: String?): String? {
+        val meta = _state.value.settings.groups.firstOrNull { it.groupId == groupId } ?: return null
+        val agents = meta.virtualAgents.orEmpty()
+        if (agents.isEmpty()) return null
+        val tokens = agents.flatMap { a -> listOfNotNull(a.name, a.agentId).filter { it.isNotBlank() } }
+        val hit = meta.mentionedVirtualAgent(text, tokens) ?: return null
+        // **`selfNodeId` 必须传「执行方」（= agent 宿主），不能传自己。**
+        //
+        
+        // `AgentExecAuthorizer` 的第一档是「本机用户免问」：`sender == selfNodeId` ⇒ 直接放行。
+        // 发送侧如果把自己的 nodeId 当成 self，同一个人既是发送者又是「本机用户」⇒ 永远有权 ⇒
+        // **提示永远不出现**。那正是这个判定最初写错时在真机上的表现。
+        //
+        // 真正该问的是「**那台宿主**会不会执行我」，所以 self 传宿主的 nodeId。
+        //
+        // **授权台账与执行路径必须是同一个事实源**（M4）：装配了台账桥（桌面）时，
+        // 这里消费的就是执行时消费的那一份 —— 否则会出现「执行桥放行并跑了任务、
+        // 这条提示却说没权」的自相矛盾（真机现场：卡片与「没有执行」同屏出现）。
+        // 没装配桥（手机等）时保持 null = 只按宿主用户判，fail-closed 方向不变。
+        val verdict = AgentExecAuthorizer.authorize(
+            senderId = senderId,
+            group = meta,
+            grantAllows = { node -> invokeCtl.grantAllows?.invoke(hit.agentId, node) == true },
+            policy = invokeCtl.execPolicyOf?.invoke(hit.agentId),
+            selfNodeId = hit.hostNodeId,
+        )
+        if (AgentExecAuthorizer.run { verdict.permitsExecution() }) return null
+        return hit.name?.takeIf { it.isNotBlank() } ?: hit.agentId
+    }
+
+
+
+    /**
+     * 向宿主要一页该工作区的历史会话（PPE-1 增补 D8）。
+     *
+     * 「打开工作区时同步」的入口（用户裁决）：`offset` 传本地已知条数即可，
+     * `limit` 交给宿主自定（它才知道一帧装得下几条）。返回 false = 没发出去
+     * （对端不声明 `agp1`、或节点没起来）—— 调用方据此决定画不画「加载更多」。
+     */
+    override fun requestAgentSessionPage(
+        peerId: String,
+        wsId: String,
+        offset: Long,
+        limit: Long?,
+    ) {
+        scope.launch {
+            agentCtl.handleRequestSessionPage(peerId, wsId, offset, limit)
+        }
+    }
+
+    suspend fun fetchAgentSessionPage(
+        peerId: String,
+        wsId: String,
+        offset: Long,
+        limit: Long? = null,
+    ): Boolean = agentCtl.handleRequestSessionPage(peerId, wsId, offset, limit)
+
+
+    override fun respondApproval(approvalId: String, allow: Boolean) = agentCtl.handleRespondApproval(approvalId, allow)
+    override fun respondApproval(approvalId: String, allow: Boolean, allowSession: Boolean) =
+        agentCtl.handleRespondApproval(approvalId, allow, allowSession)
+    override fun respondApproval(approvalId: String, decision: AgentApprovalDecision) =
+        agentCtl.handleRespondApproval(approvalId, decision)
+    override fun cancelAgentTask(taskId: String) = agentCtl.handleCancelAgentTask(taskId)
+
+    /**
+     * 卡片动作的**两壳同源入口**（M4 任务 5，§7.3-2）。参数接原语 —— 壳的卡片模型
+     * （AgentCardUi）不进域层；转发与原子记账见 invokeCtl.handleCardAction。
+     */
+    override fun handleCardAction(groupId: String, cardId: String, cardRev: Int, actionId: String) =
+        invokeCtl.handleCardAction(groupId, cardId, cardRev, actionId)
+    /**
+     * 跨端派单的公开入口（M4）：Leader 把子任务派给 [agentId] 的宿主。
+     * ControlPlane 的 `/v1/agent/invoke` 路由与超时卡的「重试」都走它。
+     */
+    fun dispatchCrossHostInvoke(
+        groupId: String,
+        agentId: String,
+        prompt: String,
+        wsId: String? = null,
+        deadlineMs: Long = RelayControllerAgentInvokeComponent.DEFAULT_INVOKE_DEADLINE_MS,
+    ): String? = invokeCtl.dispatchCrossHostInvoke(groupId, agentId, prompt, wsId, deadlineMs)
+
+    /**
+     * 责任链的进度卡（一链一卡，rev 递增）走**与看板卡同一条**广播路径。
+     *
+     * 为什么必须复用而不是另写一条发送：T-2d 的原位替换（同 cardId 在本机落库重写 +
+     * 远端入站拦截对称替换）只在 [RelayControllerAgentInvokeComponent.broadcastBoardCard]
+     * 里实现过一份。另写一份就是「同一个语义两套实现」，先分叉，再以其中一套的 bug 收场。
+     *
+     * 收 **JSON 字符串**而不是 `JsonObject`：调用方在 `desktopApp`，那个模块的主源集
+     * 没有 `kotlinx.serialization.json` 的编译期依赖。解析放在这里（本模块依赖齐备），
+     * 跨模块只传字符串；解析不了就如实打日志，不静默丢帧。
+     */
+    suspend fun broadcastChainCard(groupId: String, agentId: String, cardJson: String) {
+        val card = runCatching {
+            kotlinx.serialization.json.Json.parseToJsonElement(cardJson) as JsonObject
+        }.getOrNull()
+        if (card == null) {
+            println("[CHAIN] chain card json is not an object, dropped: " + cardJson.take(120))
+            return
+        }
+        invokeCtl.broadcastBoardCard(groupId, agentId, card)
+    }
+
+    /**
+     * 在会话里落一条**系统提示行**（不是聊天气泡）。
+     *
+     * 给壳层用的公开入口：`groupsCtl` 是 `internal`（跨模块不可见），而「系统要解释
+     * 一件事」这条通路恰恰是壳层最需要的 —— 例如用户发了 `stop` 但本机没有在跑的活，
+     * 桌面壳要能说一句「当前没有在跑的任务」，而不是静默（真机踩过）。
+     */
+    fun postNotice(convId: String, kind: NoticeKind) = groupsCtl.handleNotice(convId, kind)
+
+    /** 带细节的系统提示行（§16.6 入口 A 的模板确认 / 拒绝回执等）。 */
+    fun postNotice(convId: String, kind: NoticeKind, detail: NoticeDetail?) =
+        groupsCtl.handleNotice(convId, kind, detail)
+
+    fun recordLocalWorkspace(
+        wsId: String,
+        wsTitle: String?,
+        wsPath: String?,
+        agentKey: String?,
+        agentKind: String?,
+        online: Boolean? = null,
+        sessionCount: Long? = null,
+        order: Long? = null,
+        at: Long = com.kapp.tenon.core.nowMillis(),
+    ) = agentCtl.handleRecordLocalWorkspace(wsId, wsTitle, wsPath, agentKey, agentKind, online, sessionCount, order, at)
+
+    fun recordLocalSession(
+        sessionId: String,
+        alias: String? = null,
+        agentKind: String? = null,
+        state: String? = null,
+        title: String? = null,
+        startedAt: Long? = null,
+        agentId: String? = null,
+        wsId: String? = null,
+        wsTitle: String? = null,
+        wsPath: String? = null,
+        updatedAt: Long? = null,
+    ) = agentCtl.handleRecordLocalSession(
+        sessionId, alias, agentKind, state, title, startedAt,
+        agentId, wsId, wsTitle, wsPath, updatedAt,
+    )
+
+    fun recordLocalEvent(
+        nodeId: String,
+        sessionId: String,
+        cursor: Long,
+        eventType: String,
+        summary: String? = null,
+        body: String? = null,
+        ref: String? = null,
+        at: Long = com.kapp.tenon.core.nowMillis(),
+    ) = agentCtl.handleRecordLocalEvent(nodeId, sessionId, cursor, eventType, summary, body, ref, at)
+
+    /** 这个群有没有 agent 声明（「工作区群」的声明式判据；子串猜测已随债#2 删除）。 */
+    fun groupHasDeclaredAgents(groupId: String): Boolean = groupsCtl.groupHasDeclaredAgents(groupId)
+
+    // ------------------------------------------------------------------ 生命周期
+    fun start() {
+        if (runtime != null) {
+            if (_state.value.restarting) _state.update { it.copy(restarting = false) }
+            return
+        }
+        if (_state.value.network.phase == NodePhase.Starting) return
+        val restored = messagesCtl.handleRestoreMessages()
+        agentCtl.handleRestoreAgentData()
+        // 审批防重台账（M4 §7.3-2）从落库卡片行回填：重启不能把「已由 X 处理」忘掉，
+        // 否则宿主重启后同一条审批会被再判一次。
+        invokeCtl.rebuildActionLedger()
+        groupsCtl.handleSyncWorkspaceGroups()
+        // var：caps 指纹比对可能 bump profileRev（见下方 withCapsFingerprint 一段），
+        // bump 后的这份要落盘并供本次启动全程使用。
+        var settings = _state.value.settings
+        for (group in settings.groups) core.groupNeeds.noteKnown(group.groupId, group.rev)
+        _state.update { it.copy(network = it.network.copy(phase = NodePhase.Starting, failure = null)) }
+
+        // 「后台保持连接」在每次节点启动时按设置**重新对齐**一次：
+        // 这是"应用启动后重新把保活拉起来"的唯一入口（进程被杀过、服务跟着没了，
+        // 下一次启动必须自己回来）。关掉时 setEnabled(false) 只是 stopService，
+        // 不会把没在跑的服务拉起来（见 ConnectionKeepAliveGate.stop 的注释）。
+        // 这里只在真的启动了节点的那条路上执行 —— start() 提前 return 的两支不碰它。
+        scope.launch { platform.backgroundConnection?.setEnabled(settings.keepConnectionAlive) }
+
+        val isShareSupported = platform.screenSharing?.isShareSupported() == true
+        var profile = settings.toProfile(
+            host = platform.deviceInfo.hostName(),
+            ver = version,
+            remoteView = true,
+            remoteShare = isShareSupported,
+            // 承载 agent 节点的宿主（桌面端）在此广播 `ag1`；手机端恒 false。
+            advertiseAgent = advertiseAgent,
+        )
+        // 实验:luciola 传输。**两件齐了才切** —— 只给加密信道不给发现,或有发现没
+        // 加密信道,都比 legacy 更糟;缺一件就整体退回 legacy。
+        // 设置项是**唯一**的用户开关（实验信道默认关）；关着时连工厂都不建,
+        // 出码点拿不到 luciola 段 ⇒ 二维码一字不变。
+        val luciolaHost = platform.luciolaHost.takeIf { settings.experimentalLuciola }
+        luciolaHost?.configure(profile, settings.udpPort)
+        val luciolaTransport = luciolaHost?.transportFactory()
+        val luciolaDiscovery = luciolaHost?.discoveryFactory()
+        // 发现引擎的 extra 必须用运行时 selfProfile(含 luciolaPort):工厂构造时的静态
+        // profile 没有那个字段,对端会拿发现临时端口来拨号(真机实测拨错)。
+        val luciolaMode = luciolaTransport != null && luciolaDiscovery != null
+        // 画面信道：独立一条 luciola 会话，端口取「发现端口 + 10」——
+        // 刻意避开 legacy 的三兄弟（+1 tcp、+2 tls、+3/+2 跨网文件与投屏），
+        // 也避开 17879/17881/17882（luciola 模式下这三个不许再出现在 lsof 里）。
+        val screenChannelPort = if (luciolaMode && isShareSupported) (settings.udpPort + 10).takeIf { it in 1..65535 } else null
+        val screenChannelHostFactory = luciolaHost?.screenChannelHostFactory(scope, screenChannelPort)
+        // 对外最终声明的那组 caps。fch1/scr1 **不再声明**（D-018 分级声明，task-10 实锤：
+        // luciola-on 桌面广播超限被对端拒收）：本端数据面可用性是**本地事实**，
+        // 协商判据（FileChannelNegotiation / ScreenChannelNegotiation）在收发路径上
+        // 用它 × 对端 caps —— 不再经广播面。
+
+        // caps 指纹联动 profileRev：caps 会随实验开关/平台能力变，却不经过任何"改资料"
+        // 的入口 —— 不 bump 的话对端永远拿着旧 caps 行事（真机死锁现场见
+        // TransferManager.scheduleChannelStallFallback 的 KDoc）。必须在构建对外 profile
+        // **之前**完成：profileRev 要进 profile，晚了这一拍对端看到的还是旧 rev。
+        val capsAligned = settings.withCapsFingerprint(
+            settings.caps(
+                remoteView = true,
+                remoteShare = isShareSupported,
+                advertiseAgent = advertiseAgent,
+                // D-017 修订：桌面（advertiseAgent）不声明 agc1 —— caps 预算 16/16 满额，
+                // 且桌面↔桌面网道今天没有消费者；手机声明（误指名回诚实拒绝）。
+                channelCapable = !advertiseAgent,
+            ),
+        )
+        if (capsAligned != settings) {
+            settings = capsAligned
+            handlePersist(settings)
+        }
+
+        profile = settings.toProfile(
+            host = platform.deviceInfo.hostName(),
+            ver = version,
+            remoteView = true,
+            remoteShare = isShareSupported,
+            advertiseAgent = advertiseAgent,
+            channelCapable = !advertiseAgent,
+        )
+        if (luciolaMode) {
+            luciolaHost?.configure(profile, settings.udpPort)
+        }
+        val rt = NodeRuntime(
+            profile = profile,
+            udpPort = settings.udpPort,
+            manualPeers = settings.manualPeers.map { ManualPeer(it.host, it.port) },
+            tcpPort = settings.tcpPort,
+            downloadDir = { pathJoin(dataDirectory, "downloads") },
+            // K2：自签身份的落盘目录 + 本机当前地址（进证书 SAN）。
+            linkIdentityDir = { pathJoin(dataDirectory, "link-identity") },
+            localAddresses = { _state.value.network.localAddresses },
+            // 宣告地址与上面那份**不是同一个列表**（见 NodeRuntime 的 KDoc）：
+            // 上面那份刻意过滤隧道网卡（广播/同网段判断用），这份含它们（单播告知用）。
+            advertisedAddresses = { _state.value.network.advertisedAddresses },
+            // 子网广播：受限广播在 TUN 环境下会被代理的 `/1` 路由接走，子网广播抢不走。
+            // 平台没提供（Android/iOS 尚未接）时为空 —— 行为与改动前一字不差。
+            subnetBroadcasts = { platform.subnetBroadcastAddresses() },
+            // **入队闸门**：只对「这台设备是否还可能回来」说不。
+            //
+            // 判据刻意**宽**：known-peers（落盘的名录，包含只是离线的设备）、当场 peers、
+            // 本机自己、以及「它在某个群的成员表里」—— 任一条命中就允许排队。最后那条是
+            // 给「群主拉进来的第三台设备」留的：那种对端还没握过手，消息该留着等它。
+            //
+            // 只有**四者都不在**时才拒绝。那正是真机上的情形：`05607a4e` 早已不是任何
+            // 活着的设备，却还留在 `deepseek-harness 协同群` 的成员表里 —— 每一轮群广播
+            // 都给它添一条，永远发不出去、也永远新鲜到碰不到 TTL。
+            acceptQueueFor = { peerId ->
+                val st = _state.value
+                // **四个「确定还活着 / 曾经活着」的来源** —— 命中任一就直接允许，与时效无关。
+                val certainlyKnown = peerId == st.selfNodeId ||
+                    st.peers.any { it.nodeId == peerId } ||
+                    persist.knownPeers.load().any { it.profile.nodeId == peerId }
+                // **只剩「在群成员表里」这一个理由时，只给首次投递留一个宽限窗口。**
+                //
+                // 群成员表是**协议事实**（谁在这个群），不是「这台设备还活着」的证据。
+                // 真机上 `05607a4e` 早已不在 peers、也不在 known-peers，却还留在
+                // `deepseek-harness 协同群` 的成员表里 —— 每一轮群广播都给它添一条，
+                // 永远发不出去、也永远新鲜到碰不到 TTL（最新一条只有十几分钟）。
+                //
+                // 但也不能一律拒：**群主刚拉进来、还没握过手的第三台设备**只满足这一条，
+                // 它的第一条消息必须留着等它。所以给 24 小时：窗口内允许排队，
+                // 过了窗口就认为「这台设备不会来了」，不再为它积压。
+                certainlyKnown || (
+                    st.settings.groups.any { peerId in it.members } &&
+                        !hasWaitedBeyond(peerId, FIRST_DELIVERY_GRACE_MS)
+                    )
+            },
+            // 三个存储契约都用落盘实现：离线待发队列与会话历史跨重启，
+            // 去重表本来就落盘（见 dedupStore）。内存版只留给测试与预览。
+            queueStore = persist.queue,
+            dedupStore = dedupStore,
+            messageStore = persist.messages,
+            // 陈旧身份修剪的保留名单：群成员必须认领（离线队列还要为他们留着位）。
+            // 手动节点是**地址**便条（ManualPeerEntry 只有 host:port，没有 nodeId），
+            // 不在此列 —— 被剪的旧身份再出现时发现流程原样学回来，地址便条不受影响。
+            keepNode = { nodeId -> _state.value.settings.groups.any { nodeId in it.members } },
+            // 实验:luciola 传输与发现（两件都非空才生效,见上面 luciolaMode）。
+            messengerTransportFactory = luciolaTransport.takeIf { luciolaMode },
+            extraDiscoveryFactory = luciolaDiscovery.takeIf { luciolaMode },
+            // 文件字节走加密信道（fch1）：**只有**实验信道启用时才建路由器。
+            // 关着 = null ⇒ TransferManager 照旧拨号拉取，行为一字不变。
+            fileChannelEnabled = luciolaMode,
+            screenChannelHostFactory = screenChannelHostFactory,
+            screenChannelPort = screenChannelPort?.takeIf { screenChannelHostFactory != null },
+            // 配对码里那一池候选地址（按 nodeId 存）：换网之后发送/心跳的兜底。
+            peerEndpointStore = persist.peerEndpoints,
+            // 配对码里那枚 tlsPin：K2 公网长连接的信任根（没它就不建公网连接）。
+            peerPinStore = persist.peerPins,
+            // 「已知对端」名录（task-80 ①）：重启后**身份**还在（以离线态），
+            // 否则节点表里那台 Mac 只剩 node-a1b2c3d4 这种合成名（真机缺陷）。
+            knownPeerStore = persist.knownPeers,
+            timings = timings,
+            onOpenScreen = { socket, open, remoteAddress, read, write ->
+                screenCtl.handleOnIncomingScreenSocket(socket, open, remoteAddress, read, write)
+            },
+            // 跨网 TLS 监听（tlsPort + 2）的首帧投屏交接 —— 与明文路同一套协议与校验,
+            // 区别只在底下那条流是 TLS 解密过的（设计文档 cross-network-file-screen 选项 B）。
+            onOpenScreenWire = { open, wire ->
+                screenCtl.handleOnIncomingScreenWire(open, wire, remoteAddress = "tls")
+            },
+        )
+        // K1：长连接**恒开**（不再是用户设置）。见 RelaySettings.linkDownlink 的 KDoc：
+        // 关掉它不是"回滚到可用状态"，而是"不拨号" —— 移动网 / NAT 下就是永远连不上。
+        // 长连接**不再是用户开关**（见 RelaySettings.linkDownlink 的 KDoc）：
+        // 关掉它等于"只等对端连入"，在移动网 / NAT 下就是"永远连不上"。
+        // 安全边界在 LinkClient.linkTargets（公网必须 TLS + pin），与这里无关。
+        rt.linkEnabled = true
+
+        scope.launch {
+            try {
+                rt.start(scope)
+            } catch (t: Throwable) {
+                _state.update {
+                    it.copy(
+                        network = it.network.copy(
+                            phase = NodePhase.Failed,
+                            failure = bindFailureMessage(settings.udpPort, t),
+                        ),
+                        restarting = false,
+                    )
+                }
+                return@launch
+            }
+            runtime = rt
+            // L0 保活：身份稳定后把「当前身份 + 信任根摘要」刷进平台存活存储（幂等）。
+            // 只在有实现时做（桌面/测试是 NoPlatformRecovery，no-op）；失败不致命 ——
+            // 备份是尽力而为，L1 永远是兜底，不能让备份写失败把节点启动掀翻。
+            if (platformRecovery !== NoPlatformRecovery) {
+                scope.launch {
+                    runCatching {
+                        recovery.currentPayload(settings.nodeId)?.let { platformRecovery.save(it) }
+                    }
+                }
+            }
+            // L2 触发：恢复在途时逐对端要历史（ACK 不到就保留，下次启动再试）。
+            if (pendingRecoveryPeers.value.isNotEmpty()) {
+                scope.launch { drainRecoveryPull() }
+            }
+            val snapshot = platform.networkMonitor.snapshot()
+            _state.update {
+                it.copy(
+                    network = NetworkUi(
+                        phase = NodePhase.Running,
+                        transport = snapshot.transport,
+                        localAddresses = snapshot.localAddresses,
+                        // 宣告地址与上面那份不是同一个列表（见 NetworkSnapshot 的 KDoc）：
+                        // 上面刻意过滤隧道网卡（广播/同网段判断用），这份含它们（单播告知用）。
+                        advertisedAddresses = snapshot.advertisedAddresses,
+                        vpnActive = snapshot.vpnActive,
+                        boundUdpPort = rt.boundPort,
+                        // 印码要用（task-86）：主机必须把本机 pin 交给手机，否则公网目标建不出来。
+                        selfTlsPin = rt.localTlsPin(),
+                        // 实验 luciola:二维码里的公钥/配对密钥(没开就是 null ⇒ legacy 码)。
+                        luciolaQr = luciolaHost?.pairingInfo(),
+                        // 诊断页要看的读数（与 pin 同一档：本机身份的只读事实）。
+                        selfCertNotAfterMillis = rt.localCertNotAfterMillis(),
+                        failure = null,
+                    ),
+                    restarting = false,
+                )
+            }
+            observe(rt)
+            // 租约巡检（M4 §7.3-1）：跨端派单的 deadline 到期翻 Timeout。挂进 jobs，
+            // stop 随之取消 —— 节点都停了，租约没有存在的意义。
+            invokeCtl.startLeaseTicker()
+            // 手机侧诊断出口（task-34）：每 5 秒把同一批 link* 字段落成 JSON 文件。
+            // 只读、本机、无凭据；不监听端口、不进协议（约束：不要开放到局域网）。
+            jobs += scope.launch {
+                while (isActive) {
+                    writeLinkDiagnostics()
+                    delay(5_000)
+                }
+            }
+            restored.join()
+            // 屏幕协助历史卡：先做启动卫生（把上次没走完的会话标成 interrupted），
+            // 再开始订阅相位变化。顺序不能反 —— 反了的话，卫生那一步写进去的
+            // "已结束"会盖掉观察者刚写进去的"进行中"。
+            screenHistoryCtl.handleInterruptUnfinishedScreenRecords()
+            jobs += screenHistoryCtl.handleObserveScreenRecords()
+            messagesCtl.handleRestoreQueuedFrom(rt)
+            handshake()
+            startMdns(rt.boundPort)
+            requestNotificationPermission()
+            core.networkCancel = platform.networkMonitor.observe { onNetworkChanged(it) }
+            val remoteConfig = settings.remoteRelay
+            if (remoteConfig != null && remoteConfig.enabled) {
+                settingsCtl.handleStartRemoteRelay(remoteConfig)
+            }
+        }
+    }
+
+    suspend fun stop(leaving: Boolean = true) {
+        jobs.forEach { it.cancel() }
+        jobs.clear()
+        settingsCtl.handleStopRemoteRelay()
+        stopMdns()
+        core.networkCancel?.invoke()
+        core.networkCancel = null
+        if (leaving) runCatching { runtime?.announceExit() }
+        runtime?.stop()
+        runtime = null
+        _state.update {
+            it.copy(
+                network = it.network.copy(phase = NodePhase.Stopped, boundUdpPort = 0),
+                restarting = if (leaving) false else it.restarting,
+            )
+        }
+    }
+
+    suspend fun restart() {
+        stop(leaving = false)
+        start()
+    }
+
+    override fun requestRestart() {
+        _state.update { it.copy(restarting = true) }
+        scope.launch { restart() }
+    }
+
+    fun checkForUpdates() {
+        scope.launch {
+            _state.update {
+                it.copy(updateState = it.updateState.copy(status = UpdateCheckStatus.Checking, errorMessage = null))
+            }
+            try {
+                val info = updateChecker.check(version)
+                val status = if (info.hasUpdate) {
+                    UpdateCheckStatus.UpdateAvailable
+                } else {
+                    UpdateCheckStatus.UpToDate
+                }
+                _state.update {
+                    it.copy(
+                        updateState = UpdateCheckState(
+                            status = status,
+                            info = info,
+                            errorMessage = null,
+                        )
+                    )
+                }
+            } catch (t: Throwable) {
+                _state.update {
+                    it.copy(
+                        updateState = UpdateCheckState(
+                            status = UpdateCheckStatus.Error,
+                            info = null,
+                            errorMessage = t.message ?: "error",
+                        )
+                    )
+                }
+            }
+        }
+    }
+
+    fun openUpdateUrl() {
+        val url = _state.value.updateState.info?.downloadUrl
+        if (!url.isNullOrBlank()) {
+            platform.urlOpener?.openUrl(url)
+        }
+    }
+
+    /**
+     * 把长连接诊断写成本机 JSON（task-34）。任何异常都吞掉 —— 诊断绝不能影响连接本身。
+     */
+    private fun writeLinkDiagnostics() {
+        val rt = runtime ?: return
+        runCatching {
+            val text = linkDiagnosticsJson(
+                selfNodeId = rt.nodeId,
+                linkEnabled = rt.linkEnabled,
+                snapshot = rt.linkSnapshot(),
+                peers = rt.peerList(),
+                now = nowMillis(),
+            )
+            val directory = pathJoin(dataDirectory, "diag")
+            makeDirectories(directory)
+            // 整份重写：先删再建（append 句柄 + unlink 的坑见 FileStores.rewriteLog 的 KDoc）。
+            deleteFile(linkDiagnosticsPath)
+            openRandomAccess(linkDiagnosticsPath, forWrite = true).use { file ->
+                val bytes = text.encodeToByteArray()
+                file.append(bytes, bytes.size)
+            }
+        }
+    }
+
+    private fun onNetworkChanged(snapshot: NetworkSnapshot) {
+        _state.update {
+            it.copy(
+                network = it.network.copy(
+                    transport = snapshot.transport,
+                    localAddresses = snapshot.localAddresses,
+                    advertisedAddresses = snapshot.advertisedAddresses,
+                    vpnActive = snapshot.vpnActive,
+                ),
+            )
+        }
+        val rt = runtime ?: return
+        // K3 ①：网络一变就**立刻**重拨长连接（清掉 1s→60s 的退避）+ 排空一次离线队列；
+        // UDP 那条重播照旧。两件事都必须做：前者铺路、后者把积压的消息真的送出去。
+        rt.requestLinkReconnectNow()
+        scope.launch { runCatching { rt.announce() } }
+    }
+
+    private fun observe(rt: NodeRuntime) {
+        jobs += scope.launch {
+            rt.peers.collect { event ->
+                if (event is PeerEvent.Updated) {
+                    refreshPeers()
+                    cidrCtl.handleShareScanRangesToPeer(event.record.profile.nodeId)
+                    val hash = event.record.profile.avatarHash
+                    if (!hash.isNullOrBlank()) {
+                        avatarCtl.handleFetchAvatarIfNeeded(event.record.profile.nodeId, hash)
+                    }
+                }
+            }
+        }
+        jobs += scope.launch {
+            rt.inbound.collect { envelope -> onInbound(envelope) }
+        }
+        jobs += scope.launch {
+            rt.status.collect { status ->
+                val current = stateLock.withLock {
+                    core.threads[status.peerId]?.firstOrNull { it.id == status.msgId }
+                } ?: return@collect
+                // **三态，不是两态**。写成 `if (sent) Sent else Queued` 时，
+                // `failed`（队列项解码失败被删，见 Messenger.flushQueue）会被静默读成
+                // Queued —— 一条永远发不出去的消息继续显示「已排队」，而「重发」按钮
+                // 只在 Failed 上出现，用户没有任何出路。这一档与 prune 是同一个结论，
+                // 所以复用同一条判据（[afterPruned]：只对 Queued 有权改判）。
+                val next = when (status.status) {
+                    MessageStatusKinds.SENT -> current.copy(delivery = DeliveryState.Sent)
+                    MessageStatusKinds.FAILED -> current.afterPruned()
+                    else -> current.copy(delivery = DeliveryState.Queued)
+                }
+                handleReplaceMessage(status.peerId, next)
+                messagesCtl.handleSyncPending(rt)
+                publish()
+            }
+        }
+        jobs += scope.launch {
+            rt.transfers.collect { event -> onTransfer(event) }
+        }
+        jobs += scope.launch {
+            while (true) {
+                refreshPeers()
+                messagesCtl.handleSyncPending(rt)
+                delay(PEER_POLL_MS)
+            }
+        }
+        jobs += scope.launch {
+            // **先做一次「目标设备已消失」的清理**，再进周期循环：真机上启动时队列里躺着
+            // 201 条发不出去的帧（目标 `05607a4e` 早就不存在），它们不满 TTL、也没超每 peer
+            // 上限，`prune` 永远不会碰它们。
+            runCatching { pruneVanishedQueuedMessages() }
+            while (true) {
+                val pruned = withContext(ioDispatcher) {
+                    runCatching { rt.prune() }.getOrDefault(emptyList())
+                }
+                // 周期里也清一次：运行中也可能有对端被永久移除。
+                runCatching { pruneVanishedQueuedMessages() }
+                messagesCtl.handleOnPruned(pruned)
+                agentCtl.handlePruneAgentSessions()
+                delay(PRUNE_INTERVAL_MS)
+            }
+        }
+    }
+
+    fun handshake() {
+        val rt = runtime ?: return
+        val peers = _state.value.settings.manualPeers
+        // 先对一遍账：节点表里已经有真名的，就把便条上的合成名换掉。
+        // 这一趟必须**不依赖用户再扫一次码** —— 改名原来只发生在「重新配对且地址变了」
+        // 那条路上，于是配对当天写下的 `node-a1b2c3d4` 会一直留着（真机红米就是）。
+        val renamed = manualPeersWithRealNames(peers, rt.peerList())
+        if (renamed != peers) handlePersist(_state.value.settings.copy(manualPeers = renamed))
+        scope.launch {
+            if (peers.isEmpty()) return@launch
+            for (peer in peers) {
+                runCatching { rt.announceTo(peer.host, peer.port) }
+            }
+        }
+    }
+
+    // ------------------------------------------------------------------ mDNS 与节点发现
+    private suspend fun startMdns(udpPort: Int) {
+        val settings = _state.value.settings
+        runCatching { platform.localNetworkGate.ensureAccess() }
+        val label = mdnsServiceLabel(settings.nick, settings.nodeId)
+        core.selfMdnsLabel = label
+        val advertised = runCatching { platform.mdnsAdvertiser.start(label, udpPort) }.getOrDefault(false)
+        _state.update { it.copy(network = it.network.copy(mdnsAdvertised = advertised)) }
+        startMdnsBrowsing()
+    }
+
+    private fun startMdnsBrowsing() {
+        val browser = platform.mdnsBrowser
+        browser.startBrowsing(
+            onServiceFound = { serviceName, host, port ->
+                if (serviceName == core.selfMdnsLabel) return@startBrowsing
+                core.mdnsServices[serviceName] = MdnsServiceUi(serviceName, host, port)
+                _state.update { it.copy(mdnsServices = core.mdnsServices.values.toList()) }
+            },
+            onServiceLost = { serviceName ->
+                core.mdnsServices.remove(serviceName)
+                _state.update { it.copy(mdnsServices = core.mdnsServices.values.toList()) }
+            },
+        )
+    }
+
+    private fun stopMdns() {
+        runCatching { platform.mdnsAdvertiser.stop() }
+        platform.mdnsBrowser.stopBrowsing()
+        core.mdnsServices.clear()
+        core.selfMdnsLabel = null
+        _state.update {
+            it.copy(mdnsServices = emptyList(), network = it.network.copy(mdnsAdvertised = null))
+        }
+    }
+
+    suspend fun scanQrCode(): Boolean {
+        val access = runCatching { platform.cameraGate.ensureAccess() }
+        val granted = access.getOrNull() ?: run {
+            warn(
+                access.exceptionOrNull()?.messageOrNull()?.let(BannerMessage::ScanFailed)
+                    ?: BannerMessage.UnknownError,
+            )
+            return false
+        }
+        if (!granted) {
+            warn(BannerMessage.CameraPermissionDenied)
+            return false
+        }
+        val result = try {
+            platform.qrScanner.scan()
+        } catch (cancelled: CancellationException) {
+            throw cancelled
+        } catch (failure: Throwable) {
+            warn(
+                when (failure) {
+                    is CameraUnavailableException -> BannerMessage.CameraUnavailable
+                    else -> failure.messageOrNull()?.let(BannerMessage::ScanFailed)
+                        ?: BannerMessage.UnknownError
+                },
+            )
+            return false
+        } ?: return false
+        return handleQrCode(result)
+    }
+
+    suspend fun importQrImage(): Boolean {
+        val picked = try {
+            platform.filePicker.pick()
+        } catch (cancelled: CancellationException) {
+            throw cancelled
+        } catch (failure: Throwable) {
+            warn(
+                failure.messageOrNull()?.let(BannerMessage::PickFailed) ?: BannerMessage.UnknownError,
+            )
+            return false
+        } ?: return false
+
+        val content = try {
+            platform.qrScanner.scanImage(picked.path)
+        } catch (cancelled: CancellationException) {
+            throw cancelled
+        } catch (failure: Throwable) {
+            warn(
+                failure.messageOrNull()?.let(BannerMessage::ScanFailed) ?: BannerMessage.UnknownError,
+            )
+            return false
+        } ?: run {
+            warn(BannerMessage.NoQrInImage)
+            return false
+        }
+
+        return handleQrCode(content)
+    }
+
+    fun handleQrCodeAsync(raw: String) {
+        scope.launch {
+            handleQrCode(raw)
+        }
+    }
+
+    /**
+     * 确认框用的只读预览（task-54）：见顶层 [parseExternalPairingPreview] 的纪律。
+     *
+     * 这里只多给一样东西 —— 本机当前地址表（多候选码要按它决定先打哪个候选）。
+     * 除此之外与那个纯函数逐字同源，**没有任何副作用**。
+     */
+    fun previewExternalPairing(raw: String): ExternalPairingPreview? =
+        parseExternalPairingPreview(raw, _state.value.network.localAddresses)
+
+    internal suspend fun handleQrCode(raw: String): Boolean {
+        // 本机地址表只用来决定"多候选码里先打哪个"（同网段优先 lan、跨网选 public_v6）；
+        // 单地址码与手填那条路不看它。
+        when (val parsed = parseQr(raw, myAddresses = _state.value.network.localAddresses)) {
+            is ParsedQr.LanPeer -> {
+                val peerName = parsed.nick ?: parsed.nodeId?.let { SYNTHETIC_NICK_PREFIX + it.take(8) }
+                // 同一个 nodeId 重新配对：**更新它那一条的地址**，而不是新增一行 / 只报
+                // 「已经在列表里」。nodeId 才是身份 —— peerId、群成员、会话与消息都挂在它
+                // 上面；manualPeers 只是「这个身份上次是从哪个地址找到的」的通讯录，
+                // 地址变了（比如从局域网 IPv6 换成公网 IPv6）就该原地改。
+                val known = parsed.nodeId?.let { id ->
+                    runtime?.peerList()?.firstOrNull { it.profile.nodeId == id }
+                }
+                val rewritten = known?.let { record ->
+                    manualPeersWithUpdatedAddress(
+                        entries = _state.value.settings.manualPeers,
+                        oldHost = record.ip,
+                        oldPort = record.udpPort,
+                        newHost = parsed.host,
+                        newPort = parsed.port,
+                        // 顺手把合成名换成对端声明的真名（见该函数的 KDoc）。
+                        newName = record.profile.nick,
+                    )
+                }
+                if (rewritten == null) {
+                    addNamedManualPeer(parsed.host, parsed.port.toString(), peerName)
+                } else if (rewritten != _state.value.settings.manualPeers) {
+                    handlePersist(_state.value.settings.copy(manualPeers = rewritten))
+                }
+                // 候选池 + TLS pin 存进 core（都按 nodeId）：换网之后发送/心跳按序兜底，
+                // 公网长连接则靠这枚 pin 做证书固定（K2）。
+                parsed.nodeId?.let { nodeId ->
+                    runtime?.setPeerEndpoints(nodeId, parsed.candidates.map { PeerEndpoint(it.host, it.port) })
+                    // 只存**能解析**的 pin：乱格式直接丢弃（少一枚安全声明，不让配对失败）。
+                    val parsedPin = TlsPin.parse(parsed.tlsPin)?.wire
+                    parsedPin?.let { pin -> runtime?.setPeerPin(nodeId, pin) }
+                    // task-86（真机）：给这个 nodeId 一条**可拨的最小档案**。
+                    // 二维码是主机→手机单向的 ⇒ 手机只知道地址与 pin；而长连接的拨号目标
+                    // 要求「有 profile 且声明 lnk1」⇒ 不补这一条，手机 linkTargets 恒为空、
+                    // 一个目标都拨不出去（真机 `linkEnabled=true` 但 `linkTotal=0`），
+                    // 而主机因 peer-has-no-lnk1 也不拨 ⇒ 双方都不拨、永远「没有回应」。
+                    runtime?.rememberPairedPeer(
+                        nodeId = nodeId,
+                        nick = parsed.nick,
+                        host = parsed.host,
+                        udpPort = parsed.port,
+                        tlsPin = parsedPin,
+                    )
+                }
+                // luciola 段：把扫码得到的 Ed25519 公钥 + 配对密钥钉进宿主信任库。
+                // 传输面读工厂实时状态，不需要重启节点；失败必须让用户看见（不能静默）。
+                parsed.luciola?.let { info ->
+                    val host = platform.luciolaHost
+                    val ok = host != null && host.pairPeer(parsed.host, parsed.port, info)
+                    if (!ok) {
+                        warn(BannerMessage.ScanFailed("luciola-pair-rejected"))
+                    } else {
+                        // 记住 pin/secret 只是"愿意信它";还要把自证发过去,主机才放行本机。
+                        // 配对帧里的 nodeId 必须是**本机**(发送方)的;拿扫码结果里的对端 id
+                        // 会把主机的信任库记成本机 id(真机实测过一次,entry 全是自己的 id)。
+                        runtime?.let { rt ->
+                            scope.launch {
+                                runCatching { rt.requestLuciolaPairing(parsed.host, parsed.port) }
+                            }
+                        }
+                    }
+                }
+                for (candidate in parsed.candidates) {
+                    if (candidate.host != parsed.host || candidate.port != parsed.port) {
+                        runtime?.let { rt -> scope.launch { runCatching { rt.announceTo(candidate.host, candidate.port) } } }
+                    }
+                }
+                return true
+            }
+            is ParsedQr.RemoteRelay -> {
+                if (!parsed.lan.isNullOrBlank()) {
+                    val lanParsed = parseQrPayload(parsed.lan)
+                    if (lanParsed != null) {
+                        addManualPeer(lanParsed.first, lanParsed.second.toString())
+                    }
+                }
+                setRemoteRelay(
+                    url = parsed.url,
+                    token = parsed.token,
+                    nodeId = parsed.nodeId,
+                    nick = parsed.nick,
+                )
+                return true
+            }
+            null -> {
+                warn(BannerMessage.InvalidQrCode)
+                return false
+            }
+        }
+    }
+
+    // 相机取景框这个可空槽的界面侧出口见 [com.kapp.tenon.ui.qrScannerPreviewUi]：
+    // 它返回的是 Compose 类型，挂在控制器上会让领域层 import androidx.compose
+    // （实测过 —— 那正是"领域层零 Compose"这条不变量最先破的地方）。
+
+    override val receivedFileActions: ReceivedFileActions? = platform.receivedFileActions
+
+    /** M7-T3 2b：产物校验的按需实测桥（平台读下载目录；null = 本平台无法实测）。 */
+    override val artifactDigestOf: (suspend (fileName: String) -> String?)? = platform.artifactDigestOf
+
+    internal fun requestNotificationPermission() {
+        scope.launch {
+            val granted = platform.pushNotificationHandler.requestPermission()
+            if (!granted) warn(BannerMessage.NotificationPermissionDenied)
+        }
+    }
+
+    internal fun showNotification(title: String, body: String, focusPeerId: String? = null) {
+        platform.pushNotificationHandler.showNotification(title, body, focusPeerId)
+    }
+
+    /**
+     * K1 长连接开关（设置页「数据与存储」）。
+     *
+     * 关掉 = 立即断开现有连接、回到今天的 UDP+TCP+队列 —— 这就是回滚开关，不需要重启。
+     */
+    /**
+     * **已废弃**：长连接不再是用户设置（见 [com.kapp.tenon.domain.RelaySettings.linkDownlink] 的 KDoc）。
+     *
+     * 保留空实现只为二进制兼容（旧界面/测试若还调它，也不该让应用崩）。新代码不要调它 ——
+     * `NodeRuntime.linkEnabled` 恒为 true。
+     */
+    @Deprecated("Link is always enabled; this toggle is not user-facing")
+    fun updateLinkDownlink(enabled: Boolean) {
+        runtime?.linkEnabled = true
+    }
+
+    override fun addManualPeer(rawHost: String, rawPort: String) =
+        addNamedManualPeer(rawHost, rawPort, null)
+
+    /**
+     * 带名字的手动节点 —— `m-addnode-fill` 的「名字（可选）」框走这条。
+     *
+     * 名字**只存在本机**（落在 [ManualPeerEntry.name]），不进 wire：对端握手后显示的是它
+     * 自己的昵称，而本机这一行显示的是"我给它起的名字"，用来区分同一台机器的多个地址
+     * （`192.168.1.77:17878` 这种串没人记得住是哪台）。
+     *
+     * [rawName] 为空/全空白 = 不起名，行为与 [addManualPeer] 完全一致（行标题回落
+     * `host:port`），旧存档也读得出来 —— 这个形参是后加的，语义必须是"可选"。
+     */
+    fun addNamedManualPeer(rawHost: String, rawPort: String, rawName: String?) {
+        val split = splitHostPort(rawHost, rawPort)
+        if (split == null) {
+            warn(BannerMessage.InvalidHost)
+            return
+        }
+        val host = split.first
+        if (host.isEmpty()) {
+            warn(BannerMessage.EmptyHost)
+            return
+        }
+        if (!isPlausibleHost(host)) {
+            warn(BannerMessage.InvalidHost)
+            return
+        }
+        val port = split.second.ifEmpty { Protocol.DEFAULT_UDP_PORT.toString() }.toIntOrNull()
+        if (port == null || port !in 1..65535) {
+            warn(BannerMessage.InvalidPort)
+            return
+        }
+        val settings = _state.value.settings
+        if (settings.manualPeers.any { it.host == host && it.port == port }) {
+            warn(BannerMessage.DuplicatePeer)
+            return
+        }
+        val name = rawName?.trim()?.takeIf { it.isNotEmpty() }
+        val next = settings.copy(manualPeers = settings.manualPeers + ManualPeerEntry(host, port, name))
+        handlePersist(next)
+        runtime?.let { rt -> scope.launch { runCatching { rt.announceTo(host, port) } } }
+        _state.update { it.copy(banner = BannerUi(BannerMessage.Handshaking("$host:$port"), BannerTone.Info)) }
+        expireHandshakingBanner("$host:$port")
+    }
+
+    /**
+     * 握手提示的**时限**：过了 [CONNECT_ATTEMPT_TIMEOUT_MS] 还挂在页面上，就会与弹层里
+     * 那句「对方 3 秒内没回应」同屏互斥 —— 一半说"正在等回应"、一半说"没回应"。
+     *
+     * 只清**同一条**提示（[handshakingBannerStillPending]）：用户这 3 秒里点了别的东西、
+     * 页面已经换了新横幅，那条是别人的，不能顺手抹掉。
+     */
+    private fun expireHandshakingBanner(target: String) {
+        scope.launch {
+            delay(CONNECT_ATTEMPT_TIMEOUT_MS)
+            _state.update { st ->
+                if (handshakingBannerStillPending(st.banner, target)) st.copy(banner = null) else st
+            }
+        }
+    }
+
+    override fun removeManualPeer(entry: ManualPeerEntry) {
+        val settings = _state.value.settings
+        // 回执里的名字与详情页菜单项同一个来源（[manualPeerDisplayName]）：横幅说
+        // 「已移除 X」、按钮写「移除「X」」，两处指的不是同一个名字时用户没法确认删对了。
+        // 删完立刻置横幅：这一行确实从列表上消失了，但「消失」本身不解释任何事。
+        val name = manualPeerDisplayName(entry, _state.value.peers)
+        handlePersist(settings.copy(manualPeers = manualPeersWithout(settings.manualPeers, entry)))
+        info(BannerMessage.PeerRemoved(name))
+    }
+
+    /**
+     * 「移除节点」的统一入口：手动地址删记录，发现的节点删身份记忆。
+     *
+     * 为什么要一个统一入口：界面只有一颗按钮（详情页的「移除「名字」」），但它面前
+     * 混着两种行。让界面去判断「这行是什么」，等于把领域规则抄一份到 UI；这里按
+     * [NodeRemoval] 分派，界面只负责把「这一行是什么」如实说出来。
+     */
+    override fun removeNode(removal: NodeRemoval) {
+        when (removal) {
+            is NodeRemoval.ManualAddress -> removeManualPeer(removal.entry)
+            is NodeRemoval.DiscoveredNode -> {
+                val rt = runtime
+                if (rt == null) {
+                    warn(BannerMessage.NodeNotStarted)
+                    return
+                }
+                val name = _state.value.peerDomain(removal.nodeId)?.displayName ?: removal.nodeId
+                if (rt.forgetPeer(removal.nodeId)) {
+                    info(BannerMessage.PeerForgotten(name))
+                }
+                refreshPeers()
+                publish()
+            }
+        }
+    }
+
+    /**
+     * 「重连」一条**已保存但当前不通**的手动地址。
+     *
+     * 为什么需要它：mDNS 发现行会被「双表判重」滤掉（同一个地址不该出现两次），
+     * 于是"手动存过、当时没接通、之后对端开机并在广播"的用户只剩一行红色的
+     * 「没有回应」—— 而那一行**没有**任何能点回连接的动作用（`addManualPeer` 会判重复）。
+     * 这条入口就是那唯一的一步：对目标地址重发一次 entry，并把"在等它回应"如实挂出来。
+     *
+     * 与 `handshake()` 的区别：那个只在启动时对**全部**手动地址广播一轮；这个只针对
+     * 用户刚点的那一条，并且带可见反馈（否则点完像什么都没发生）。
+     */
+    override fun reconnectManualPeer(entry: ManualPeerEntry) {
+        val rt = runtime
+        if (rt == null) {
+            warn(BannerMessage.NodeNotStarted)
+            return
+        }
+        scope.launch { runCatching { rt.announceTo(entry.host, entry.port) } }
+        val target = "${entry.host}:${entry.port}"
+        _state.update { it.copy(banner = BannerUi(BannerMessage.Handshaking(target), BannerTone.Info)) }
+        // 与首次添加同一条时限：过了窗口还挂着"在等它回应"，就会和界面上的失败说明打架。
+        expireHandshakingBanner(target)
+    }
+
+    override fun removeUnreachableManualPeers() {
+        val settings = _state.value.settings
+        val dead = manualPeerStatuses(settings.manualPeers, _state.value.peers)
+            .filter { it.unreachable }
+            .map { it.entry }
+        if (dead.isEmpty()) {
+            warn(BannerMessage.NoUnreachablePeers)
+            return
+        }
+        handlePersist(settings.copy(manualPeers = settings.manualPeers.filterNot { it in dead }))
+        _state.update { it.copy(banner = BannerUi(BannerMessage.UnreachablePeersRemoved(dead.size), BannerTone.Info)) }
+    }
+
+    fun selectPeer(nodeId: String) {
+        stateLock.withLock { core.unread[nodeId] = 0 }
+        publish()
+    }
+
+    override fun dismissBanner() = _state.update { it.copy(banner = null) }
+
+    fun requestFocus(peerId: String) {
+        _state.update { it.copy(focusRequest = peerId) }
+    }
+
+    fun consumeFocusRequest() {
+        _state.update { it.copy(focusRequest = null) }
+    }
+
+    override fun refreshPeers() {
+        val rt = runtime
+        val records: List<PeerRecord> = rt?.peerList() ?: emptyList()
+        val peers = records.map { it.toUi() }.toMutableList()
+        // 中继节点：**在线与否取健康检查的结果**，不是"配置了就在线"（见 remoteRelayHealthy）。
+        // 判据抽成纯函数 remoteRelayPeer 是为了能被单测钉住。
+        remoteRelayPeer(_state.value.settings.remoteRelay, remoteRelayHealthy)?.let { relayPeer ->
+            if (peers.none { it.nodeId == relayPeer.nodeId }) peers.add(relayPeer)
+        }
+        // 本机备注在这一层贴上去，而不是让 `PeerRecord.toUi()` 去读设置：
+        // 备注的权威源是 `RelaySettings.peerRemarks`，节点记录里根本没有这个字段
+        // （它不进协议 —— 见 `PeerUi.remark` 的 KDoc）。贴在这一层还有一个好处：
+        // 上面那条中继节点、以及以后任何新来源的 PeerUi 都自动带上备注。
+        val remarks = _state.value.settings.peerRemarks
+        if (remarks.isNotEmpty()) {
+            for (i in peers.indices) {
+                val r = remarks[peers[i].nodeId].orEmpty()
+                if (r.isNotEmpty()) peers[i] = peers[i].copy(remark = r)
+            }
+        }
+        // 快照必须在锁内取：轮询协程在这里遍历 core.threads，而 messagesCtl.handleAppendMessage/messagesCtl.handleRestoreMessages
+        // 可能在别的 worker 上改它的结构（这就是 refreshPeers 崩溃的现场）。
+        val snapshot = stateLock.withLock {
+            Triple(
+                core.threads.mapValues { (_, list) -> list.toList() },
+                core.unread.toMap(),
+                core.pending.toMap(),
+            )
+        }
+        _state.update {
+            it.copy(
+                peers = peers,
+                messages = snapshot.first,
+                unreadByPeer = snapshot.second,
+                pendingByPeer = snapshot.third,
+            )
+        }
+    }
+
+    /** 推一次状态。改表之后唯一的通知方式（见 [RelayStateWriter]）。 */
+    internal fun publish() = writer.publish()
+
+    internal fun warn(message: BannerMessage) = _state.update { it.copy(banner = BannerUi(message, BannerTone.Warn)) }
+    internal fun info(message: BannerMessage) = _state.update { it.copy(banner = BannerUi(message, BannerTone.Info)) }
+
+    fun localMessageId(): String {
+        localSeq++
+        return "local-$localSeq-${nowMillis()}"
+    }
+
+    internal fun completedJob(): Job = Job().apply { complete() }
+
+    companion object {
+        internal const val PEER_POLL_MS = 2_000L
+        internal const val PRUNE_INTERVAL_MS = 10 * 60 * 1000L
+        internal const val MAX_AGENT_EVENTS = 200
+
+        internal val CHAT_INBOUND_TYPES: Set<String> = setOf(MsgTypes.MSG)
+
+        internal fun textOf(envelope: Envelope): String? {
+            val payload = envelope.payload as? JsonObject ?: return null
+            val kind = (payload["kind"] as? JsonPrimitive)?.takeIf { it.isString }?.content ?: MsgKinds.TEXT
+            if (kind != MsgKinds.TEXT && kind != MsgKinds.GROUP_TEXT) return null
+            return (payload["text"] as? JsonPrimitive)?.takeIf { it.isString }?.content
+        }
+
+        internal fun groupIdOf(envelope: Envelope): String? {
+            if (!isGroupText(envelope)) return null
+            val payload = envelope.payload as? JsonObject ?: return null
+            return (payload["groupId"] as? JsonPrimitive)?.takeIf { it.isString }?.content
+        }
+
+        /**
+         * 群消息**真正的说话者**（可选键 `senderId`）；没有就返回 null，调用方退回 [Envelope.from]。
+         *
+         * 为什么需要：`from` 永远是**发送这台设备**，而设备可能在代别人说话 —— DSH 的 agent
+         * 事件由桌面端转发到群里。不读这个键，手机端就会把 agent 说的话显示成「桌面端发的」，
+         * 而桌面端自己按 `agent:<kind>` 落库 ⇒ 同一个群两端发送者不一致（真机缺陷）。
+         *
+         * 宽松解析：非字符串/空串一律当没带（旧端与坏帧都不该让发送者变成空）。
+         */
+        internal fun groupSenderIdOf(envelope: Envelope): String? {
+            if (!isGroupText(envelope)) return null
+            val payload = envelope.payload as? JsonObject ?: return null
+            return (payload["senderId"] as? JsonPrimitive)
+                ?.takeIf { it.isString }
+                ?.content
+                ?.trim()
+                ?.ifBlank { null }
+        }
+
+        internal fun replyToOf(envelope: Envelope): String? {
+            if (!isGroupText(envelope)) return null
+            val payload = envelope.payload as? JsonObject ?: return null
+            return (payload["replyTo"] as? JsonPrimitive)?.takeIf { it.isString }?.content?.ifBlank { null }
+        }
+
+        internal fun mentionsSelf(envelope: Envelope, selfNodeId: String): Boolean {
+            if (!isGroupText(envelope)) return false
+            val payload = envelope.payload as? JsonObject ?: return false
+            val mentions = payload["mentions"] as? JsonArray ?: return false
+            return mentions.any { item ->
+                val id = (item as? JsonPrimitive)?.takeIf { it.isString }?.content
+                id == selfNodeId || id == MENTION_ALL
+            }
+        }
+
+        internal const val MENTION_ALL: String = "@all"
+
+        /**
+         * 点名正则：`@<kind>`，case-insensitive，词边界。
+         *
+         * kind 来自**解析器**（`SenderIdentity.mentionToken` 与它同源），所以「@ 候选里
+         * 插的名字」与「触发判据认的名字」不可能分叉 —— 这里每多写一个别名，就等于多一种
+         * 「@ 了却叫不醒」的形态。
+         */
+        private fun agentMentionRegex(agentKinds: Set<String>): Regex? {
+            // 每个 kind 都要**同时**认两种写法：
+            //
+            // 1. 裸 kind（`@dsh`）—— 老形态、以及 agent 没有绑定 workspace 的情况；
+            // 2. `kind-workspace`（`@dsh-teahouse`）—— `SenderIdentity.mentionToken` 现在
+            //    产出的形态（它走 `AgentMemberName.token(agentKind, workspaceName)`）。
+            //
+            // 只认第 1 种会让「@ 插入的名字」与「正则认的名字」分叉 —— 那就是本仓反复
+            // 出现过的「@ 了却叫不醒」。
+            val kinds = agentKinds
+                .mapNotNull { it.trim().lowercase().takeIf { k -> k.isNotEmpty() } }
+                .distinct()
+            if (kinds.isEmpty()) return null
+            val alternatives = kinds.flatMap { k ->
+                val escaped = Regex.escape(k)
+                // `-` 必须紧跟：`@dsh-teahouse` 算，`@dshx` **不算**。
+                // 用 `(?:-[a-z0-9-]+)?` 而不是 `[a-z0-9-]*` —— 后者会把 `@dshx`
+                // 的 `x` 也吃进去，词边界就破了（既有测试钉着这条）。
+                listOf(escaped + "(?:-[a-z0-9-]+)?", escaped)
+            }.distinct()
+            // 尾部不用 `\b`：`-` 是非单词字符，`\b` 在它后面不成立，会让
+            // `@dsh-teahouse` 被 `@dsh` 那一支提前匹配。用否定前瞻锁定 token 边界。
+            // 尾部否定前瞻要同时排掉 `_`：它虽是单词字符，但不在我们的 token 字符集里，
+            // 漏掉它会让 `@dsh_extra` 被当成 `@dsh`（旧行为是**不**匹配，有测试钉着）。
+            return Regex("(?i)@(?:" + alternatives.joinToString("|") + ")(?![a-z0-9_-])")
+        }
+
+        /**
+         * 这条文本有没有点名这个会话里的某个 agent。
+         *
+         * [agentKinds] 来自**声明**（`agentKindsByHost()` / 群成员解析），没有默认值 ——
+         * 债#6 之后本仓不认任何内置种类：没声明就没有可点名的对象。
+         */
+        fun isMentioningAgent(
+            text: String,
+            agentKinds: Set<String>,
+        ): Boolean {
+            val regex = agentMentionRegex(agentKinds) ?: return false
+            return text.contains(regex)
+        }
+
+        /**
+         * 这条文本**点了谁的名**（认知研讨流要按点名的顺序逐个唤醒，规格 1.2）。
+         *
+         * 与 [isMentioningAgent] 共用同一个正则构造器 —— 两处各写一份的症状是
+         * 「判真却找不出是谁」，那会让讨论流要么不唤醒（丢回合）要么唤醒错人（抢答）。
+         * 返回的是**归一后的小写键**，与 `AgentProfiles.normalizeKey` 的口径一致。
+         */
+        fun mentionedAgentKeys(
+            text: String,
+            agentKinds: Set<String>,
+        ): List<String> {
+            val kinds = agentKinds
+                .mapNotNull { it.trim().lowercase().takeIf { k -> k.isNotEmpty() } }
+                .distinct()
+                .sorted()
+            return kinds.filter { kind ->
+                agentMentionRegex(setOf(kind))?.containsMatchIn(text) == true
+            }
+        }
+
+        /** 这条消息是不是 agent 说的（`senderId` 形如 `agent:<host>:<id>`）。 */
+        fun isAgentAuthored(message: MessageUi?): Boolean =
+            message?.senderId?.startsWith(AGENT_SENDER_PREFIX) == true
+
+        /**
+         * 这条消息要不要触发**宿主侧**的 agent 执行？
+         *
+         * 判据是「**这条消息是不是在跟 agent 说话**」，不是「会话是什么类型」：
+         *
+         * - **1:1**（`groupId == null`）：**每条都触发**。点进这个会话本身就是在指名 agent，
+         *   而且没有第三方旁观 —— 误触发的代价最低，再要求一个 `@dsh` 只是摩擦。
+         * - **群**：`@dsh` 点名；**工作区群**里「回复 agent 那条」也算 —— 接话不必再 @ 一遍。
+         * - **普通群**：只有 `@dsh`。
+         *
+         * ## 为什么不再「工作区群里每条都触发」
+         *
+         * 触发之后跑的是**宿主本地的执行能力**（默认驱动 `NativeRelayDriver`：`bash` /
+         * 文件读写 / 代码搜索，受 ACL 约束）。工作区群恰恰是**人最多**的那个频道 ——
+         * 让任何人的任意一句话都拉起它，等于把最宽的能力面挂在最公开的地方。
+         * 真机实测：一条不带 @ 的群消息，1 秒后 `agent:native` 就回了一条。
+         *
+         * **判据只有这一份**：三个触发点（收方 / 本机发方 / 群发方）都调它，
+         * 任何一处都不许自己重写一遍条件。
+         */
+        fun shouldTriggerAgent(
+            text: String,
+            groupId: String?,
+            isWorkspaceGroup: Boolean,
+            repliedToIsAgent: Boolean,
+            agentKinds: Set<String>,
+        ): Boolean {
+            if (groupId == null) return true
+            if (isMentioningAgent(text, agentKinds)) return true
+            return isWorkspaceGroup && repliedToIsAgent
+        }
+
+        /**
+         * 这条在跟 agent 说的消息，**该由谁执行**。
+         *
+         * - [AgentPromptRoute.Local]：这个会话里的 agent 就在本机，调用本机的执行器；
+         * - [AgentPromptRoute.Remote]：agent 在**别的宿主**上。群消息已经按协议送达那台
+         *   设备，本机**不做任何执行、也不代替它回话**。注意这里**不**承诺「远端已经
+         *   开始执行」：真正唤醒宿主上的 DSH 需要宿主侧的 prompt 注入桥，那不在本协议里
+         *   （本轮已单列为产品级缺口），所以 UI 文案只能说「消息已送达」，不能说「已交给
+         *   agent 执行」；
+         * - [AgentPromptRoute.None]：没有该执行的对象。[NoWakeReason] 区分「未唤醒」
+         *   （[NoWakeReason.NotAddressed]）与「叫了没人应」（[NoWakeReason.NoAgentPresent]）。
+         *
+         * 为什么不引入「两边都跑」这一档：同一个群里两个同名 agent 同时回话，用户分不清
+         * 哪条算数；而本机驱动是**降级执行能力**（bash / 文件读写），让它和真 agent 抢答
+         * 恰恰就是「@dsh 却收到本地 mock」的那次事故。所以远端 agent 在场时本机让路。
+         *
+         * **判据本身仍只有一份**（[shouldTriggerAgent]）；这里多回答的是「谁执行」，
+         * 不是「要不要叫醒」。
+         */
+        fun agentPromptRoute(
+            text: String,
+            groupId: String?,
+            isWorkspaceGroup: Boolean,
+            repliedToIsAgent: Boolean,
+            localAgentPresent: Boolean,
+            remoteAgentPresent: Boolean,
+            agentKinds: Set<String>,
+        ): AgentPromptRoute {
+            if (!shouldTriggerAgent(text, groupId, isWorkspaceGroup, repliedToIsAgent, agentKinds)) {
+                return AgentPromptRoute.None(NoWakeReason.NotAddressed)
+            }
+            return when {
+                // 远端 agent 在场 ⇒ 本机让路（哪怕本机也有 agent）。
+                remoteAgentPresent -> AgentPromptRoute.Remote
+                localAgentPresent -> AgentPromptRoute.Local
+                else -> AgentPromptRoute.None(NoWakeReason.NoAgentPresent)
+            }
+        }
+
+        /**
+         * `NO_WAKE` 诊断（编排规范 §7.2 记录条件）：未唤醒 **且**
+         * 会话确有 agent 在场（本机或远端）。两条排除：「叫了没人应」不记 —— 它是
+         * [NoWakeReason.NoAgentPresent]，另一个状态；agentless 群的闲聊不记 —— 纯噪声。
+         * 三个触发点都调它：判据只有这一份，将来第 4 个触发点漏掉它，接线守卫会红。
+         */
+        fun logNoWakeIfNeeded(
+            sink: ((tag: String, message: String) -> Unit)?,
+            route: AgentPromptRoute,
+            localAgentPresent: Boolean,
+            remoteAgentPresent: Boolean,
+            groupId: String?,
+        ) {
+            if ((route as? AgentPromptRoute.None)?.reason != NoWakeReason.NotAddressed) return
+            if (!localAgentPresent && !remoteAgentPresent) return
+            sink?.invoke(NO_WAKE_LOG_TAG, "groupId=$groupId")
+        }
+
+        /** `NO_WAKE` 诊断的 tag：与规范命名逐字一致（不含方括号，`RelayLog` 约定），排障脚本按它抓。 */
+        const val NO_WAKE_LOG_TAG: String = "NO_WAKE"
+
+        /**
+         * 去掉 @dsh mention，**其余文本原样保留**，并归一化空白。
+         *
+         * 归一化只收**空格与制表符**（不收换行）：删掉 mention 会在原位置留下双空格
+         * （"Hey @dsh what…" 变成 "Hey  what…"），那是这个函数该收拾的，不该由调用方或测试替它擦。
+         * 也**不**剥 mention 之外的前缀 —— "Hey" 可能是用户有意写的。
+         */
+        fun extractAgentPrompt(
+            text: String,
+            agentKinds: Set<String>,
+        ): String {
+            val regex = agentMentionRegex(agentKinds)
+                ?: return text.trim().ifBlank { text }
+            return text.replace(regex, "")
+                .replace(Regex("[ \t]+"), " ")
+                .trim()
+                .ifBlank { text }
+        }
+
+        internal fun isGroupText(envelope: Envelope): Boolean =
+            envelope.type == MsgTypes.MSG && msgKindOf(envelope) == MsgKinds.GROUP_TEXT
+
+        internal fun isPlausibleHost(host: String): Boolean {
+            if (host.isEmpty() || host.length > 253) return false
+            if (host.any { it.isWhitespace() }) return false
+            return host.any { it.isLetterOrDigit() }
+        }
+
+        /**
+         * 把「地址 + 端口」两个输入框解析成 (host, port)。
+         *
+         * **对外可见**：节点页的"添加"表单要在**按下之前**就判出"这串不是地址"，
+         * 而不是先发一轮再报错。判据只能有一份 —— 界面各写一遍解析，就会出现
+         * "表单说合法、控制器说非法"这种自相矛盾。
+         */
+        fun splitHostPort(rawHost: String, rawPort: String): Pair<String, String>? {
+            val host = rawHost.trim()
+            val port = rawPort.trim()
+
+            // 1. 方括号 IPv6: [240e:...]:17878 或 [240e:...]
+            if (host.startsWith("[")) {
+                val closeBracket = host.indexOf(']')
+                if (closeBracket <= 1) return null
+                val cleanHost = host.substring(1, closeBracket).trim()
+                val rest = host.substring(closeBracket + 1).trim()
+                if (rest.startsWith(":")) {
+                    val suffix = rest.removePrefix(":").trim()
+                    if (suffix.toIntOrNull()?.let { it in 1..65535 } != true) return null
+                    if (port.isNotEmpty() && port != suffix) return null
+                    return cleanHost to suffix
+                } else if (rest.isEmpty()) {
+                    return cleanHost to port
+                } else {
+                    return null
+                }
+            }
+
+            // 2. IPv4 或 主机名: host:port 或 裸 host
+            val colon = host.indexOf(':')
+            if (colon < 0 || host.indexOf(':', colon + 1) >= 0) return host to port
+            val suffix = host.substring(colon + 1)
+            if (suffix.toIntOrNull()?.let { it in 1..65535 } != true) return null
+            if (port.isNotEmpty() && port != suffix) return null
+            return host.substring(0, colon) to suffix
+        }
+
+        internal fun bindFailureMessage(port: Int, error: Throwable): BannerMessage =
+            BannerMessage.BindFailed(port, error.messageOrNull())
+    }
+
+/**
+ * **从「@ 了但没有执行权」那一行提示直接申请授权。**
+ *
+ * 为什么需要这一层，而不是让 UI 直接调 `sendAgentGrantRequest`：
+ *
+ * 1. 那个是 `suspend` 的，而 notice 行的按钮回调是同步的；
+ * 2. **参数要从那条 notice 的事实里推**，不该让每个调用点各自拼一遍：
+ *    · peerId = agent 宿主的 nodeId（授权是向**那台设备**申请的）；
+ *    · agentKey = 该 agent 的 `agentId`，缺省退化成申请整台设备；
+ *    · wsId = 声明里绑的工作区。
+ *
+ * 三样都从 `virtualAgents` 里按 agent 名反查 —— 与提示文案显示的是同一个条目，
+ * 所以「提示说 A 没权」和「向 A 的宿主申请」不会指错对象。
+ *
+ * 找不到条目时**静默返回**：那是「这个群没有声明这个 agent」，按钮本来也不该出现；
+ * 而 notice 行只在有声明时才会画按钮，所以这条分支不会吞掉用户的动作。
+ */
+override fun requestAgentGrantFromNotice(groupId: String, agentName: String) {
+    val meta = _state.value.settings.groups.firstOrNull { it.groupId == groupId } ?: return
+    val declared = meta.virtualAgents.orEmpty().firstOrNull { it.name == agentName } ?: return
+    val hostNodeId = declared.hostNodeId?.takeIf { it.isNotBlank() } ?: return
+    scope.launch {
+        sendAgentGrantRequest(
+            peerId = hostNodeId,
+            agentKey = declared.agentId?.takeIf { it.isNotBlank() },
+            wsId = declared.defaultWsId,
+        )
+    }
+}
+}
+
+
+private fun PeerRecord.toUi(): PeerUi = PeerUi(
+    nodeId = profile.nodeId,
+    nick = profile.nick,
+    company = profile.company,
+    dept = profile.dept,
+    team = profile.team,
+    avatar = profile.avatar,
+    avatarHash = profile.avatarHash,
+    host = profile.host,
+    ip = ip,
+    udpPort = udpPort,
+    platform = profile.platform,
+    tcpPort = profile.tcpPort,
+    caps = profile.caps,
+    online = online,
+    lastSeenAt = lastSeen,
+)
+
+internal fun Throwable.messageOrNull(): String? = message?.takeIf { it.isNotBlank() }
+
+/**
+ * 中继节点该长什么样 —— 抽成纯函数，好让「在线与否」这条判据被单测钉住。
+ *
+ * online 取**健康检查的结果**，不是「配置了就在线」：中继是另一台机器上的服务，它挂了
+ * 的时候这里必须如实说离线（真机反馈的「假在线」）。没配 / 没 nodeId ⇒ null（不注入）。
+ */
+internal fun remoteRelayPeer(config: RemoteRelayConfig?, healthy: Boolean): PeerUi? {
+    if (config == null || !config.enabled) return null
+    val nodeId = config.nodeId ?: return null
+    return PeerUi(
+        nodeId = nodeId,
+        nick = config.nick ?: "Remote Tidings",
+        host = config.url,
+        ip = config.url,
+        online = healthy,
+        caps = listOf(MsgTypes.CAP_AGENT),
+    )
+}
+/**
+ * 重新配对同一个 nodeId 时，把它在通讯录里的**那一条地址**原地改掉。
+ *
+ * 为什么不新增一条：nodeId 才是身份，[ManualPeerEntry] 只是「这个身份上次是从哪个地址
+ * 找到的」。地址变了就更新那一行，否则同一个设备会在节点列表里留下 `192.168.x.x:17878`、
+ * `[2408:...]:17878` 两行 —— 而群成员表、会话、消息都只认 nodeId 一份，用户却以为有两台机器。
+ *
+ * @param oldHost/oldPort 这个身份**当前**被采纳的地址（来自 registry，不是通讯录自己猜的）。
+ * @return 改过之后的新列表；没有与 (oldHost, oldPort) 对应的条目时返回 null（调用方走新增）。
+ *   地址本来就一致时返回**原列表**（调用方据此跳过落盘）。
+ */
+internal fun manualPeersWithUpdatedAddress(
+    entries: List<ManualPeerEntry>,
+    oldHost: String,
+    oldPort: Int,
+    newHost: String,
+    newPort: Int,
+    /**
+     * 对端**自己声明的**昵称（可选）。
+     *
+     * 为什么要在改地址时顺手换名字：便条上的名字是「我给这条地址起的」——
+     * 早先配对时对端还没在二维码里带昵称，于是写进去的是合成名 `node-a1b2c3d4`。
+     * 那个名字只在「还没握上手」时顶替 `host:port` 显示，可一旦对端换了地址、
+     * 这条便条被改写，合成名就跟着一直留着 —— 真机红米的 `manualPeers[0].name`
+     * 就是 `node-a1b2c3d4`，而它明明已经认识对方叫 `mac-mini`。
+     *
+     * 只换**空的或合成名**：用户自己起的便条（原型里的「老周的旧笔记本」）不许被覆盖。
+     */
+    newName: String? = null,
+): List<ManualPeerEntry>? {
+    val index = entries.indexOfFirst { it.host == oldHost && it.port == oldPort }
+    if (index < 0) return null
+    val current = entries[index]
+    val renamed = if (newName != null && shouldReplacePeerLabel(current.name, newName)) {
+        current.copy(name = newName)
+    } else {
+        current
+    }
+    if (oldHost == newHost && oldPort == newPort) {
+        // 地址没变也要能改名：地址换了才改，合成名就永远留在没换过地址的那些便条上。
+        return if (renamed === current) entries else entries.toMutableList().also { it[index] = renamed }
+    }
+    val updated = entries.toMutableList()
+    updated[index] = renamed.copy(host = newHost, port = newPort)
+    return updated
+}
+
+/**
+ * 用**对端声明的昵称**顶掉便条上的合成名（`node-<8 位>`）。
+ *
+ * 与 [manualPeersWithUpdatedAddress] 的分工：那个管「地址变了，那一行原地改写」，
+ * 这个管「地址没变，但我知道它叫什么了」。两个都要有 —— 只有前者时，用户不重新配对
+ * 就永远看不到真名。
+ */
+internal fun manualPeersWithRealNames(
+    entries: List<ManualPeerEntry>,
+    records: List<com.kapp.tenon.core.transport.PeerRecord>,
+): List<ManualPeerEntry> {
+    var out = entries
+    for (r in records) {
+        val next = manualPeersWithUpdatedAddress(
+            entries = out,
+            oldHost = r.ip,
+            oldPort = r.udpPort,
+            newHost = r.ip,
+            newPort = r.udpPort,
+            newName = r.profile.nick,
+        ) ?: continue
+        out = next
+    }
+    return out
+}
+
+/**
+ * 便条上的名字该不该换成对端声明的昵称。
+ *
+ * 只有**没名字**或**合成名**（`node-<8 位>`）才换 —— 用户自己起的便条不动，
+ * 那是他的东西，不是对端的身份。
+ */
+internal fun shouldReplacePeerLabel(stored: String?, real: String): Boolean {
+    val target = real.trim()
+    if (target.isEmpty()) return false
+    if (target.startsWith(SYNTHETIC_NICK_PREFIX)) return false
+    val current = stored?.trim().orEmpty()
+    return current.isEmpty() || current.startsWith(SYNTHETIC_NICK_PREFIX)
+}
+
+/**
+ * **首次投递宽限窗口**：一个「只在群成员表里、从未被真的见过」的对端，最多为它留 24 小时。
+ *
+ * 为什么需要窗口而不是一刀切：群主刚拉进来、还没握过手的设备只满足「在成员表里」这一条，
+ * 它的第一条消息必须留着等它；但真机上 `05607a4e` 这种早就消失的设备也满足同一条 ——
+ * 区别只在**等了多久**。
+ *
+ * 24 小时是取舍：一天内没出现的对端，那条消息对用户来说已经过期了。
+ */
+private const val FIRST_DELIVERY_GRACE_MS: Long = 24L * 3_600_000
+
+/**
+ * 一次「连接」尝试的等回执窗口（毫秒）。
+ *
+ * **一份常量、两个消费点**：弹层的超时红字与握手提示的自动过期。两边各写一个 3_200 时，
+ * 「红字已经出现、提示还挂着」就只是概率问题；共用一个数，两句话在同一拍退场。
+ */
+public const val CONNECT_ATTEMPT_TIMEOUT_MS: Long = 3_200L
+
+/**
+ * 窗口结束时，这条握手提示还该不该留在页面上（纯函数，单测钉住）。
+ *
+ * 判据只认**同一个目标**：这 3 秒里冒出来的别的提示（保存失败、清理结果…）是别人的事，
+ * 过期任务顺手抹掉它就成了「谁的提示都可能被上一拍的动作删掉」。
+ */
+public fun handshakingBannerStillPending(banner: BannerUi?, target: String): Boolean =
+    banner?.message == BannerMessage.Handshaking(target)
+
+/**
+ * 从手动地址表里摘掉一条。
+ *
+ * 判据是**整条 entry**（host + port + name），不是 host：同一台机器的两个端口是两条记录，
+ * 只按 host 过滤会一次删两条；按整条相等只摘掉用户真正点的那一条。
+ */
+public fun manualPeersWithout(
+    entries: List<ManualPeerEntry>,
+    removed: ManualPeerEntry,
+): List<ManualPeerEntry> = entries.filterNot { it == removed }
+
+/**
+ * 一条手动地址在界面上的显示名 —— 与 `nodes_menu_remove` 的参数**同一个来源**。
+ *
+ * 规则只有这一条：握过手的（节点表里有它）用对端的显示名；没有的用用户起的名字，
+ * 再没有就回落 `host:port`。移除回执必须拿它，否则横幅说的名字和按钮上说的不是同一个，
+ * 用户分不清删掉的是哪一条（列表里可能同时挂着同一台机器的两个地址）。
+ */
+public fun manualPeerDisplayName(entry: ManualPeerEntry, peers: List<PeerUi>): String {
+    val matched = manualPeerStatuses(listOf(entry), peers).firstOrNull()?.nodeId
+        ?.let { id -> peers.firstOrNull { it.nodeId == id } }
+    return matched?.displayName
+        ?: entry.name?.takeIf { it.isNotBlank() }
+        ?: "${entry.host}:${entry.port}"
+}

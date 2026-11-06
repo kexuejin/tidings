@@ -1,0 +1,14 @@
+-- 声明式卡片与执行状态落库（Group-Agent 方案 §4.3 / §5.3，T8）。
+--
+-- MessageEntity 新增两列：
+--   card        — 协议 `card` 键的 JSON 原文（声明式卡片负载）。**不进 FTS**：
+--                 结构化数据进全文索引只会命中 JSON 碎片（与 notice_detail 同一纪律）。
+--   agent_state — 协议 `agentState`（四态枚举，validateMsg 已限值）。
+--
+-- 落库语义：本迁移只补列、**不回填** —— 老行本来就没有卡片，NULL 与「这条没有卡片」同义。
+-- 注意：卡片更新的现行语义是**原位刷新**（同 cardId、rev>existingRev 的新帧替换旧行，
+-- 见 18.sqm / D-026 与 RelayControllerMessagesComponent 的 rev 判据），不是早期方案
+-- §5.3 说的「以新消息进流」——写新代码时以原位刷新为准。
+-- 迁移自包含：ALTER TABLE 只依赖 MessageEntity 存在（1.sqm 起就有）。
+ALTER TABLE MessageEntity ADD COLUMN card_json TEXT;
+ALTER TABLE MessageEntity ADD COLUMN agent_state TEXT;

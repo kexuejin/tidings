@@ -1,0 +1,40 @@
+{
+  "instrument": "106a411b7590",
+  "dimensions": {
+    "字号": {
+      "designKinds": 19,
+      "codeTokens": 15
+    },
+    "间距/gap": {
+      "designKinds": 135,
+      "codeTokens": 11
+    },
+    "圆角": {
+      "designKinds": 23,
+      "codeTokens": 5
+    },
+    "字重": {
+      "designKinds": 4,
+      "codeTokens": 3
+    },
+    "尺寸定值": {
+      "designKinds": 66,
+      "codeTokens": 0
+    },
+    "图标": {
+      "designKinds": 64,
+      "codeTokens": 12
+    },
+    "断点/tier": {
+      "designKinds": 10,
+      "codeTokens": null
+    }
+  },
+  "deviations": 14,
+  "regressions": [
+    "设计侧扩宽：字号 取值种类 18 → 19（设计侧只许收敛；扩宽只可能来自原型被改，须说明改的是哪一屏哪条 CSS）",
+    "设计侧扩宽：间距/gap 取值种类 133 → 135（设计侧只许收敛；扩宽只可能来自原型被改，须说明改的是哪一屏哪条 CSS）",
+    "设计侧扩宽：图标 取值种类 63 → 64（设计侧只许收敛；扩宽只可能来自原型被改，须说明改的是哪一屏哪条 CSS）"
+  ],
+  "regressionReason": "2026-10-12 22:18 重投影（原型第三次改写，已冻结于 sha8c1076aa19a6，385276 B，mtime 21:02:58）。三条设计侧扩宽逐条归因：\n\n一、字号 取值种类 18 → 19（+1）\n新增 13px = 原型新增 .ws-head{...font-size:13px;font-weight:600;color:var(--on)}（工作区看板的新小节头，第三轮改版引入）。属原型第三轮改版的真实扩宽。\n\n二、间距/gap 取值种类 133 → 135（+2）\n新增值来自同一批 agent 族 CSS。用户此前已把大档收敛（20/26 收到 16/24），本轮又为新工作区看板补了档位，净 +2。\n\n三、图标 取值种类 63 → 64（+1）\n原型新增一枚图标档位。\n\n四、同批已吸收的旧条目\n尺寸定值 65 → 66 那条已在上一轮 --write-baseline 时带 reason 记入基线（新增 72px ×2 = prototype/relay.html:301 .av.xl{width:72px;height:72px}，节点详情页大头像本体）。本轮不再重复。\n\n五、关键取证（为什么这四条只可能来自原型侧）\nfl.measure_design(Path('.'), '<稿>', fl.SHOT_TABLE) 对 6a88267fcdef 与当前 8c1076aa19a6 给出完全相同的 19/135/64/23/66 ⇒ 这四条扩宽全部发生在 6a88267fcdef 之前的版本漂移里，第三轮改版（6a88 → 8c10）本身没有再扩。三版实测：bak-4db0aab24222 → fontSize 29/spacing 134/sizeLiteral 65/radius 25；bak-9bcd1158ee1c → 19/132/65/24；6a88267fcdef 与当前 → 19/135/66/23。\n\n六、纪律声明\n- 设计侧只许收敛，任何扩宽必须由人签 approved_by；本次把扩宽如实记进基线并留下逐条归因，不是「拿 --write-baseline 把扩宽无声吸收」。第五十洞补的守卫（baseline_regressions + --reason）已在上一轮落地并在本次再次生效。\n- 原型历史安全网：prototype/history/relay-8c1076aa.html 与 prototype/history/relay-6a88267fcdef.html。"
+}

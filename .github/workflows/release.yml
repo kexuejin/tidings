@@ -1,0 +1,245 @@
+# SPDX-License-Identifier: GPL-3.0-only
+#
+# 多平台安装包自动构建与 GitHub Release 发布工作流。
+#
+# 覆盖平台：
+#   - Android:  APK (signed with the shared release keystore injected from repo
+#               secrets; the build fails rather than falling back to a debug key)
+#   - macOS:    DMG (Compose Desktop standalone runtime, URL Schemes, custom ICNS)
+#   - Windows:  MSI (Compose Desktop native Windows installer)
+#   - Linux:    DEB (Compose Desktop Debian/Ubuntu package)
+
+name: release
+
+on:
+  push:
+    tags:
+      - 'v*'
+  workflow_dispatch:
+    inputs:
+      tag_name:
+        description: 'Release Tag (e.g. v0.1.0)'
+        required: true
+        default: 'v0.1.0'
+      draft:
+        description: 'Create as Draft Release'
+        type: boolean
+        default: false
+
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
+
+permissions:
+  contents: write
+
+jobs:
+  build-android:
+    name: Build Android APK
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "21"
+
+      - uses: android-actions/setup-android@v3
+        with:
+          packages: "platforms;android-36 build-tools;36.1.0"
+
+      - uses: gradle/actions/setup-gradle@v4
+
+      # 正式签名从 repo secrets 注入 —— 与本地 keystore.properties 指向的是
+      # 同一把密钥库。密钥库放哪、怎么备份是仓库之外的部署事实,不写进本仓。
+      # 缺任何一项都直接红,绝不回退 debug 签名:"release 产物带着某个 runner
+      # 现生成的 debug key 静默发布出去"正是这套流程要消灭的缺陷形态。
+      - name: Materialize release signing config
+        env:
+          RELAY_KEYSTORE_BASE64: ${{ secrets.ANDROID_KEYSTORE_BASE64 }}
+          RELAY_STORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
+          RELAY_KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
+          RELAY_KEY_PASSWORD: ${{ secrets.ANDROID_KEY_PASSWORD }}
+        run: |
+          for var in RELAY_KEYSTORE_BASE64 RELAY_STORE_PASSWORD RELAY_KEY_ALIAS RELAY_KEY_PASSWORD; do
+            if [ -z "${!var}" ]; then
+              echo "::error::Release signing secret missing: $var. Configure ANDROID_KEYSTORE_BASE64 / ANDROID_KEYSTORE_PASSWORD / ANDROID_KEY_ALIAS / ANDROID_KEY_PASSWORD."
+              exit 1
+            fi
+          done
+          printf '%s' "$RELAY_KEYSTORE_BASE64" | base64 --decode > "$RUNNER_TEMP/relay-release.jks"
+          {
+            echo "storeFile=$RUNNER_TEMP/relay-release.jks"
+            echo "storePassword=$RELAY_STORE_PASSWORD"
+            echo "keyAlias=$RELAY_KEY_ALIAS"
+            echo "keyPassword=$RELAY_KEY_PASSWORD"
+          } > keystore.properties
+
+      - name: Build Android Release APK
+        run: |
+          chmod +x ./gradlew
+          ./gradlew :androidApp:assembleRelease --no-build-cache
+
+      - name: Stage Android APK
+        run: |
+          mkdir -p dist
+          cp androidApp/build/outputs/apk/release/androidApp-release.apk dist/relay-android.apk
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: dist-android
+          path: dist/relay-android.apk
+          retention-days: 1
+
+  build-macos:
+    name: Build macOS DMG
+    runs-on: macos-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "21"
+
+      - uses: gradle/actions/setup-gradle@v4
+
+      - name: Package macOS DMG
+        run: |
+          chmod +x ./gradlew
+          ./gradlew :desktopApp:packageDmg --no-build-cache
+
+      - name: Stage macOS DMG
+        run: |
+          mkdir -p dist
+          cp desktopApp/build/compose/binaries/main/dmg/*.dmg dist/relay-macos.dmg
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: dist-macos
+          path: dist/relay-macos.dmg
+          retention-days: 1
+
+  build-windows:
+    name: Build Windows MSI
+    runs-on: windows-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "21"
+
+      - uses: gradle/actions/setup-gradle@v4
+
+      - name: Add WiX Toolset to PATH
+        shell: pwsh
+        run: |
+          $wixPath = (Get-ChildItem "C:\Program Files (x86)\WiX Toolset v*" -ErrorAction SilentlyContinue | Select-Object -First 1).FullName
+          if ($wixPath) {
+            Write-Host "Found WiX at $wixPath\bin"
+            echo "$wixPath\bin" >> $env:GITHUB_PATH
+          } else {
+            Write-Host "WiX Toolset directory not found in Program Files (x86)"
+          }
+
+      - name: Package Windows MSI
+        shell: bash
+        run: |
+          ./gradlew :desktopApp:packageMsi --no-build-cache -Pcompose.desktop.verbose=true --stacktrace
+
+      - name: Dump jpackage logs on failure
+        if: failure()
+        shell: bash
+        run: |
+          find desktopApp/build/compose/logs -type f -name "*.txt" -exec cat {} + || true
+
+      - name: Stage Windows MSI
+        shell: bash
+        run: |
+          mkdir -p dist
+          cp desktopApp/build/compose/binaries/main/msi/*.msi dist/relay-windows.msi
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: dist-windows
+          path: dist/relay-windows.msi
+          retention-days: 1
+
+  build-linux:
+    name: Build Linux DEB
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "21"
+
+      - uses: gradle/actions/setup-gradle@v4
+
+      - name: Package Linux DEB
+        run: |
+          chmod +x ./gradlew
+          ./gradlew :desktopApp:packageDeb --no-build-cache
+
+      - name: Stage Linux DEB
+        run: |
+          mkdir -p dist
+          cp desktopApp/build/compose/binaries/main/deb/*.deb dist/relay-linux.deb
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: dist-linux
+          path: dist/relay-linux.deb
+          retention-days: 1
+
+  publish:
+    name: Publish GitHub Release
+    needs: [build-android, build-macos, build-windows, build-linux]
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Download all platform artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: artifacts
+
+      - name: Collect and inspect release assets
+        run: |
+          mkdir -p release-assets
+          cp artifacts/dist-android/relay-android.apk release-assets/
+          cp artifacts/dist-macos/relay-macos.dmg release-assets/
+          cp artifacts/dist-windows/relay-windows.msi release-assets/
+          cp artifacts/dist-linux/relay-linux.deb release-assets/
+          ls -lh release-assets/
+
+      - name: Create GitHub Release
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          TAG="${{ github.event.inputs.tag_name || github.ref_name }}"
+          IS_DRAFT="${{ github.event.inputs.draft || 'false' }}"
+          
+          FLAGS="--title \"捎话 (Tidings) ${TAG}\" --generate-notes"
+          if [ "$IS_DRAFT" = "true" ]; then
+            FLAGS="$FLAGS --draft"
+          fi
+          
+          # If the release/tag already exists, update/upload assets; otherwise create it
+          if gh release view "$TAG" >/dev/null 2>&1; then
+            echo "Release $TAG exists, uploading assets..."
+            gh release upload "$TAG" release-assets/* --clobber
+          else
+            echo "Creating new release $TAG..."
+            eval gh release create "$TAG" release-assets/* $FLAGS
+          fi

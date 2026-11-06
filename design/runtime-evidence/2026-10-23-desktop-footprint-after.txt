@@ -1,0 +1,132 @@
+捎话 Tidings 桌面端内存：阶段 0 与阶段 1 的实测读数
+生成日期：2026-10-23
+量具：tools/measure-desktop-footprint.sh（--pid 附着模式）
+方案：docs/plans/2026-10-23-desktop-memory-and-ui-decoupling.md
+
+本文件只写**实测**读数。没实证的不编：每行都注明实例数、是否 GC 后、当时负载。
+
+------------------------------------------------------------------
+1. 环境
+------------------------------------------------------------------
+芯片        : Apple Silicon（arm64）
+系统        : macOS 26.7.2（25G330）
+JVM         : openjdk 21.0.8（Homebrew）
+产物        : /Applications/Tidings.app（桌面端 jpackage 产物，190MB）
+启动方式    : Tidings.app/Contents/MacOS/Tidings --background（托盘常驻）
+
+读数口径（三者一起看，别只报一个）：
+  Physical footprint   macOS 真正压给机器的量（含 GPU / IOSurface）
+  RSS                  含共享页与文件缓存，只适合同机同产物横向比
+  堆 committed         GC.heap_info 的 young+old，不含 Metaspace 与堆外
+
+------------------------------------------------------------------
+2. 阶段 0a：JVM 参数（唯一真正的杠杆是 -Xms）
+------------------------------------------------------------------
+单实例、jcmd GC.run 之后、load average 3.0 上下。
+
+  参数                                                      footprint
+  ------------------------------------------------------------------
+  -Xmx768m（出厂）                                          453~462M
+  -Xmx512m                                                  468M
+  -Xmx384m                                                  458M
+  -Xms96m  -Xmx768m                                         380M
+  -Xms32m  -Xmx384m -XX:MaxNewSize=32m                      364~373M
+  -Xms32m  -Xmx256m -XX:MaxNewSize=32m                      369M
+
+结论：只改 -Xmx 一分不省；加 -Xms 立刻省约 80M；Xmx 再压到 256m 无收益。
+根因：JVM 默认初始堆 = 物理内存/64（这台 24GB => 384MB），启动即提交，活对象仅 ~50M。
+
+采用值（desktopApp/build.gradle.kts）：
+  -Xms96m -Xmx384m -XX:MaxNewSize=32m -XX:+UseSerialGC -Xss512k -XX:MaxMetaspaceSize=128m
+实测该组合：footprint 373.4M / old gen committed 92,864K / jstat 稳态 YGC 不涨 /
+/healthz 正常。
+
+------------------------------------------------------------------
+3. 阶段 0b：主窗懒建（托盘常驻时不再创建 Window）
+------------------------------------------------------------------
+同一组 JVM 参数、--background 启动后**不打开主窗**、单实例、GC 后：
+
+  改动前（Window 常驻，visible=false）
+    footprint 331M   IOSurface 36.6M（vmmap 里有该区域）
+  改动后（Window 根本不创建）
+    footprint 299~310M   IOSurface **0**（vmmap 里没有该区域）
+
+装到 /Applications 后的同一形态实测：276.4M / peak 349.8M / IOSurface 0 / healthz 正常。
+
+「按需建窗」是**真的按需**（不是一直藏着）：关闭主窗后再触发一次建窗
+（open -a 不带参数，见 §4），同一进程：
+    建窗前 326.9M / IOSurface 0  →  建窗后 521.5M / IOSurface 1
+
+（注意：开窗后的 521.5M 是单点读数，不是稳定水位 —— 见 §6。）
+
+------------------------------------------------------------------
+4. 阶段 0c：单实例锁 + 意图转交
+------------------------------------------------------------------
+同一数据目录同时起第二个实例时的实测（装好的 /Applications 产物）：
+    second-exit=0
+    log: relay: another instance is running; forwarding launch intent and exiting.
+    第一个实例全程存活（instances 始终为 1）
+
+意图转交必须能表达「我要看见窗口」，否则第二个进程正确退出、第一个进程什么都不发生
+（实测过：缺这一环时 open -a 前后 footprint 278.4M → 279.2M、IOSurface 仍为 0，
+用户看到的就是「点了没反应」）。两条转交通道各自实测：
+
+  旧式二次启动（直接再跑可执行文件，转交 relay://show-main）：
+    299.3M/IOSurface 0  →  478.3M/IOSurface 1
+  系统 reopen（open -a 不带参数 / 程序坞单击，走 AppReopenedListener）：
+    326.9M/IOSurface 0  →  521.5M/IOSurface 1
+
+------------------------------------------------------------------
+5. 阶段 1：agent 事件按会话限载（恢复路径补 cap）
+------------------------------------------------------------------
+同一份本地库（AgentEventEntity 57,644 行 / 79 个会话）：
+  cap 之前 堆直方图 AgentEventUi 57,972 个 / 3.24MB，byte[] 355,097 个 / 32.8MB
+  cap 之后 堆直方图 AgentEventUi 不再进入前 5 名，byte[] 111,772 个 / 12.2MB
+
+       [B 的实例数        改前 355,097  → 改后 111,772
+       [B 的总字节         改前 32.8MB   → 改后 12.2MB
+       String 实例数       改前 354,093  → 改后 110,669
+       AgentEventUi        改前 57,972   → 改后 ≤ 200/会话（79×200 = 15,800 上限）
+
+进程 footprint（托盘常驻、GC 后、含 0a 与 0b 两项改动）：
+    308.5M（peak 373.9M，RSS 458,848KB，IOSurface 0）
+
+------------------------------------------------------------------
+6. 阶段 0d：守护形态（--headless，不组合任何 Compose）
+------------------------------------------------------------------
+同一个可执行文件带 --headless 启动：只起运行时 + 控制面，**不进入 Compose 的
+application 循环**（判别点在 application 之前，否则 Skia 已经加载，读数就不纯了）。
+
+  单实例、GC 后：
+    footprint        261.9M（未 GC 时 302.9M，peak 333.8M）
+    IOSurface        **无该区域**（vmmap 里 0 行）
+    mapped file      12.2M（有界面形态是 60M 量级 —— 少了全部 Compose/Skiko jar）
+    Metaspace used   30.1M
+    /healthz        正常；/v1/inbox?since= 正常返回真实信封
+
+这对「UI 是不是只是观察者」是一个**可执行的判据**：去掉 UI 之后进程照样收发消息、
+控制面照样应答。但它也说明一件事 —— 守护形态相对「托盘常驻但不开窗」只再省约 40M
+（308.5M → 261.9M），因为托盘常驻形态此时**也没有创建窗口**。两进程方案的收益，
+主要不在"没有 UI"，而在"UI 是一个可以退出的独立进程"。
+
+------------------------------------------------------------------
+7. 未实证的项（写在这里，免得下次被当成读数引用）
+------------------------------------------------------------------
+- **打开主窗后的稳定水位**：见到的单点是 478M / 521M，都是窗口刚建出来后不久取的。
+  要报这个数需要一次空载、单实例、开窗后稳定 60s 的采样。
+- **两进程形态**（守护 + 按需 UI 客户端）：尚未实现，所以没有读数。
+  阶段的可行性判据（--headless 的 261.9M）已经有了。
+
+------------------------------------------------------------------
+7. 复现
+------------------------------------------------------------------
+  # 托盘常驻（不开窗）
+  /Applications/Tidings.app/Contents/MacOS/Tidings --background &
+  tools/measure-desktop-footprint.sh --pid <pid> --samples 3 --interval 5 --force-gc
+
+  # 堆里谁在占地方
+  jcmd <pid> GC.class_histogram | head -10
+
+看数之前先确认：
+  pgrep -fc 'Tidings.app/Contents/MacOS/Tidings'   # 必须是 1；>1 的读数会被两个实例污染
+  uptime                                       # 负载要一起报
