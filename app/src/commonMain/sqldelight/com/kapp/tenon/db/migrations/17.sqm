@@ -1,0 +1,12 @@
+-- M7-T3：`agent-artifact` 的端到端完整性凭据落库（决策包 §2.3-7 / §2.5）。
+--
+-- AgentArtifactEntity 新增两列（cap `agf1` 门控的 wire 增量键，MessageTypes.CAP_AGENT_ARTIFACT_VERIFIED）：
+--   sha256  — 发送方对产物文件**实测**的哈希（64 个小写 hex，isSha256Hex 校验）。
+--             没有它，「重启后重拉无法校验」—— 下载校验与落库绑定为同一决议（§2.5）。
+--   summary — 一行人话（AGENT_SUMMARY=200，卡片标题槽的量），进产物卡片的展示。
+--
+-- 落库语义：只补列、**不回填** —— 老行两列 NULL 与「发送方没报（旧端帧）」同义，
+-- 语义是「没报」而不是「空串」。迁移自包含：ALTER TABLE 只依赖 AgentArtifactEntity
+-- 存在（建表在主 .sq，任何到达版本 17 的库上都有）。
+ALTER TABLE AgentArtifactEntity ADD COLUMN sha256 TEXT;
+ALTER TABLE AgentArtifactEntity ADD COLUMN summary TEXT;

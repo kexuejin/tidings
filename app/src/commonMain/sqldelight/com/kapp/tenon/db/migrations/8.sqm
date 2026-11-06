@@ -1,0 +1,65 @@
+-- 工作区顺序：AgentWorkspaceEntity 获得 `host_order` 一列 —— DSH 注册表里那份**用户可手工拖动**
+-- 的工作区顺序（0 起，越小越靠前）。
+--
+-- 为什么加列（真机反馈「工作区的排序跟 DSH 不一样」）：DSH 的工作区分组顺序不是"最近活动"，
+-- 而是一份持久台账（官方 `workspaceRegistry.list()`，KDoc 自称 "Synchronous workspace projection
+-- in durable registry order"，顺序由 `packages/api/workspace-controller/src/commands.ts` 的
+-- `insertBefore` 让用户手工调整）。手机此前只能用两把与它无关的尺子（待办数 / 最近活动）。
+--
+-- 为什么不能只靠"帧到达的先后"：这张表的读取是 `selectAllAgentWorkspaces ORDER BY updated_at DESC`
+-- —— 重启或任何一次重读都会把到达序打乱，而顺序是宿主的事实，必须跟帧一起落到盘上。
+--
+-- 为什么是「补建 + 重建」而不是 `ALTER TABLE … ADD COLUMN`：与 `4.sqm` / `6.sqm` / `7.sqm` 同一条纪律，
+-- 理由逐字相同 ——
+--  1. v1 之后的任何早于本版的迁移路径都可能碰上"表还不存在"（`2.sqm` 才建它），
+--     `ALTER` 直接 `no such table`；
+--  2. 「表已是最新但 user_version=0」的桌面库重跑本文件时，`ALTER` 会撞 `duplicate column name`，
+--     用户开不了 App。重建天然幂等：新列在旧形状上不存在 → 补 NULL；已经存在 → 原样搬；
+--  3. 重建（`create new + INSERT…SELECT 点名列 + drop + rename`）是所有 SQLite 版本都支持的写法，
+--     `DROP COLUMN` 不是（要求 ≥ 3.35，Android 框架 SQLite 不保证）。
+--
+-- 搬移只点名**十个历史列**（第 7 版的形状），新列置 NULL = 「还没听宿主说过顺序」——
+-- 不是 0：把"不知道"写成"排第一个"正是会把用户拖过的顺序整个打乱的那种错。
+
+-- (1) 补建：按**第 7 版的形状**（不含 host_order）建出来；已经有的库是 no-op。
+CREATE TABLE IF NOT EXISTS AgentWorkspaceEntity (
+    node_id TEXT NOT NULL,
+    agent_key TEXT,
+    agent_id TEXT,
+    ws_id TEXT NOT NULL,
+    ws_title TEXT,
+    ws_path TEXT,
+    agent_kind TEXT,
+    online INTEGER,
+    session_count INTEGER,
+    updated_at INTEGER NOT NULL,
+    PRIMARY KEY (node_id, ws_id)
+);
+
+-- (2) 幂等重建：新形状 = 十个历史列 + 一个可空新列（与 RelayDatabase.sq 的 CREATE 逐列一致）。
+CREATE TABLE AgentWorkspaceEntity_new (
+    node_id TEXT NOT NULL,
+    agent_key TEXT,
+    agent_id TEXT,
+    ws_id TEXT NOT NULL,
+    ws_title TEXT,
+    ws_path TEXT,
+    agent_kind TEXT,
+    online INTEGER,
+    session_count INTEGER,
+    host_order INTEGER,
+    updated_at INTEGER NOT NULL,
+    PRIMARY KEY (node_id, ws_id)
+);
+
+INSERT INTO AgentWorkspaceEntity_new (
+    node_id, agent_key, agent_id, ws_id, ws_title, ws_path, agent_kind, online, session_count, updated_at
+)
+SELECT node_id, agent_key, agent_id, ws_id, ws_title, ws_path, agent_kind, online, session_count, updated_at
+FROM AgentWorkspaceEntity;
+
+DROP INDEX IF EXISTS idx_agent_workspace_node;
+DROP TABLE AgentWorkspaceEntity;
+ALTER TABLE AgentWorkspaceEntity_new RENAME TO AgentWorkspaceEntity;
+
+CREATE INDEX IF NOT EXISTS idx_agent_workspace_node ON AgentWorkspaceEntity(node_id);

@@ -1,0 +1,10 @@
+-- 看板卡 rev 台账：每张看板卡在本机广播到过的最高 rev。
+-- 背景（root cause #3 真机记账）：广播侧 rev 延续只看内存里的卡片槽位
+-- （启动恢复的 200 条窗口 + 恢复完成的时机），重启后卡片行落在窗口之外时，传入的低
+-- rev 原样放行，手机端只认严格递增 ⇒ 低 rev 帧被当旧帧静默丢弃。
+-- 自包含：不假设任何既有表（老库/迁移夹具都可能没有前面某些对象）。
+CREATE TABLE IF NOT EXISTS BoardCardRev (
+    card_id TEXT NOT NULL PRIMARY KEY,
+    last_rev INTEGER NOT NULL,
+    updated_at INTEGER NOT NULL
+);
