@@ -150,9 +150,16 @@ fun GlobalSearchScreen(
     }
 
     val sp = LocalAppSpacing.current
+    // 整屏底色必须是 `background`，不是 `surface`。这一屏是**整屏替换会话列表**
+    // （组合根 App.kt 的 mobileContent 里 globalSearchOpen 分支，底导仍在），原型
+    // `screenGSearch()` 只画 `.topbar.gs` + `.scroll > .pad`，自己不铺底色，透出
+    // `.app{background:var(--bg)}`（relay.html:709）；参考帧 m-gsearch.png 与
+    // m-home-recent.png 的产品区同是 #FAFAF8。
+    // 曾经写成 surface：真机实测点搜索后整屏从 #FAFAF8 跳成 #FFFFFF（深色下
+    // 从 #121413 跳成 #232625，更扎眼），属于「切一下背景就变」的静默缺陷。
     Surface(
         modifier = modifier.fillMaxSize(),
-        color = MaterialTheme.colorScheme.surface,
+        color = MaterialTheme.colorScheme.background,
     ) {
         Column(Modifier.fillMaxSize()) {
             SearchTopBar(
