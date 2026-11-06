@@ -330,7 +330,18 @@ fun ConversationsScreen(
         TitleBarDivider()
 
         chromeSlice.banner?.let {
-            AppBanner(it, onDismissBanner, Modifier.padding(horizontal = LocalAppSpacing.current.lg, vertical = LocalAppSpacing.current.sm))
+            // 顶距 14 = 原型 `.pad{padding:14px 16px 16px}`（relay.html:780）；底距 14 =
+            // 原型横幅的内联 `margin-bottom:14px`（screenAgents 同款手法）。
+            AppBanner(
+                it,
+                onDismissBanner,
+                Modifier.padding(
+                    start = LocalAppSpacing.current.lg,
+                    top = LocalAppSpacing.current.lg14,
+                    end = LocalAppSpacing.current.lg,
+                    bottom = LocalAppSpacing.current.lg14,
+                ),
+            )
         }
 
         // 未读轴上**整条不画**待发横幅：原型 `m01c-home-unread` 里没有它。
@@ -369,7 +380,14 @@ fun ConversationsScreen(
             modifier = Modifier
                 .fillMaxWidth()
                 .horizontalScroll(filterScroll)
-                .padding(horizontal = LocalAppSpacing.current.lg, vertical = LocalAppSpacing.current.xs),
+                // 顶距 14 = 原型 `.pad` 的顶（无横幅时筛选条是顶栏后的第一块，此前只有
+                // xs=4，直接贴住 TitleBarDivider）；底距 xs 保留给 chip 的触控空间。
+                .padding(
+                    start = LocalAppSpacing.current.lg,
+                    top = LocalAppSpacing.current.lg14,
+                    end = LocalAppSpacing.current.lg,
+                    bottom = LocalAppSpacing.current.xs,
+                ),
             horizontalArrangement = Arrangement.spacedBy(LocalAppSpacing.current.sm),
             verticalAlignment = Alignment.CenterVertically,
         ) {

@@ -297,7 +297,14 @@ fun AgentConsoleScreen(
                     .fillMaxWidth()
                     .centerCapped(ContentWidths.Pane)
                     .verticalScroll(rememberScrollState())
-                    .padding(horizontal = LocalAppSpacing.current.lg),
+                    // 顶距 14：原型 `.pad{padding:14px 16px 16px}`（relay.html:780）——
+                    // 此前纵向为 0，首块（警告条）直接顶在 TitleBarDivider 上，
+                    // 真机上分隔线与横幅之间的缝只剩 ~3dp。
+                    .padding(
+                        start = LocalAppSpacing.current.lg,
+                        top = LocalAppSpacing.current.lg14,
+                        end = LocalAppSpacing.current.lg,
+                    ),
                 verticalArrangement = Arrangement.spacedBy(LocalAppSpacing.current.md),
             ) {
                 WorkspaceBoardView(
