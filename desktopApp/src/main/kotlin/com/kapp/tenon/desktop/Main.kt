@@ -371,7 +371,7 @@ private fun handleExternalOpen(raw: String) {
     // 工作目录；把它们当节点地址加进去会凭空造出假节点。
 }
 /**
- * **验收用**：`TIDINGS_SCREEN_VIEW=<对端 nodeId>` 时，启动后自动向该对端发起一次
+ * **验收用**：`TENON_SCREEN_VIEW=<对端 nodeId>` 时，启动后自动向该对端发起一次
  * 屏幕协助（Viewer 侧），并把每 10s 的 `[screen] rx` 读数打出来。
  *
  * 为什么要在生产代码里留这个入口：goal 第 (4) 步的判据是「真机连续 5 分钟帧率/延迟
@@ -379,14 +379,14 @@ private fun handleExternalOpen(raw: String) {
  * `handleRequestScreenView` 路径（不新写一条测试专用流程），所以量出来的数就是用户
  * 点「看屏幕」时的数。默认不生效：不给环境变量就一行都不跑。
  *
- * 配套：`TIDINGS_SCREEN_VIEW_SECONDS`（默认 300）到时自动收起，进程照常驻留。
+ * 配套：`TENON_SCREEN_VIEW_SECONDS`（默认 300）到时自动收起，进程照常驻留。
  */
 private fun startScreenViewProbeIfRequested(
     controller: RelayController,
     scope: CoroutineScope,
 ) {
-    val peerId = System.getenv("TIDINGS_SCREEN_VIEW")?.trim()?.takeIf { it.isNotEmpty() } ?: return
-    val seconds = System.getenv("TIDINGS_SCREEN_VIEW_SECONDS")?.toLongOrNull() ?: 300L
+    val peerId = System.getenv("TENON_SCREEN_VIEW")?.trim()?.takeIf { it.isNotEmpty() } ?: return
+    val seconds = System.getenv("TENON_SCREEN_VIEW_SECONDS")?.toLongOrNull() ?: 300L
     scope.launch {
         // 等对端上线：启动瞬间 peers 还是空的（发现要几百毫秒）。
         val deadline = System.currentTimeMillis() + 60_000
@@ -404,7 +404,7 @@ private fun startScreenViewProbeIfRequested(
     }
 }
 /**
- * **验收用**：`TIDINGS_SCREEN_AUTO_ACCEPT=1` 时，本机作为**共享方**收到屏幕协助请求
+ * **验收用**：`TENON_SCREEN_AUTO_ACCEPT=1` 时，本机作为**共享方**收到屏幕协助请求
  * 就自动同意（等价于用户点「开始共享」）。
  *
  * 为什么要它：真机验收里「手机看桌面屏幕」这条链路的**共享方是桌面**，而桌面的同意
@@ -416,7 +416,7 @@ private fun startScreenAutoAcceptIfRequested(
     controller: RelayController,
     scope: CoroutineScope,
 ) {
-    val flag = System.getenv("TIDINGS_SCREEN_AUTO_ACCEPT")?.trim()
+    val flag = System.getenv("TENON_SCREEN_AUTO_ACCEPT")?.trim()
     if (flag != "1" && !flag.equals("true", ignoreCase = true)) return
     scope.launch {
         controller.state.collect { st ->

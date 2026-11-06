@@ -69,7 +69,7 @@ class SandboxIdleWatchdog(
         const val KILL_GRACE_MS = 5_000L
 
         /** 空闲租约的显式覆盖 env 名（毫秒）。 */
-        const val ENV_IDLE_TIMEOUT_MS = "TIDINGS_WATCHDOG_IDLE_MS"
+        const val ENV_IDLE_TIMEOUT_MS = "TENON_WATCHDOG_IDLE_MS"
 
         /**
          * 从 env 解析空闲租约。认不出的值一律回落默认：负数、乱写都不许变成

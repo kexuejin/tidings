@@ -60,7 +60,7 @@ class CliProviderEnvWiringTest {
             """
             printf '{"type":"text","text":"probe"}\n'
             printf '%s\n' "${'$'}ANTHROPIC_BASE_URL" > envprobe.txt
-            printf '%s\n' "${'$'}{TIDINGS_PROBE_SECRET_NOT_ALLOWLISTED-unset}" > envprobe-secret.txt
+            printf '%s\n' "${'$'}{TENON_PROBE_SECRET_NOT_ALLOWLISTED-unset}" > envprobe-secret.txt
             exit 0
             """.trimIndent(),
         )
@@ -76,7 +76,7 @@ class CliProviderEnvWiringTest {
             env = mapOf(
                 "ANTHROPIC_BASE_URL" to "https://gw.example/v1",
                 "ANTHROPIC_API_KEY" to "sk-must-not-appear-anywhere",
-                "TIDINGS_PROBE_SECRET_NOT_ALLOWLISTED" to "must-not-reach-child",
+                "TENON_PROBE_SECRET_NOT_ALLOWLISTED" to "must-not-reach-child",
             ),
         )
         assertEquals(1, drivers.size, "只发现 claude，就该只装配一个驱动")

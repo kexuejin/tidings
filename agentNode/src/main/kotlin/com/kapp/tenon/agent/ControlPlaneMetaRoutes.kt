@@ -256,7 +256,7 @@ internal fun ControlPlane.helpJson(): JsonObject = buildJsonObject {
         add(
             JsonPrimitive(
                 "POST /v1/plugin/register   {\"manifest\":{…§2.2…},\"httpPort\":<1..65535>}   " +
-                    "插件入驻（强制 TIDINGS_PLUGIN_TOKEN；回环 IPC 基座，M2 宿主网关）",
+                    "插件入驻（强制 TENON_PLUGIN_TOKEN；回环 IPC 基座，M2 宿主网关）",
             ),
         )
         add(JsonPrimitive("POST /v1/plugin/unregister   {\"pluginId\":\"…\"}   插件注销（同 token 门）"))

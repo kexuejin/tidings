@@ -18,7 +18,7 @@ if [ ${#TASKS[@]} -eq 0 ]; then
 fi
 
 EXTRA_OPTS=()
-if [ -z "${TIDINGS_LUCIOLA_NATIVE+x}" ]; then
+if [ -z "${TENON_LUCIOLA_NATIVE+x}" ]; then
   EXTRA_OPTS+=("-PluciolaNativeDir=")
 fi
 

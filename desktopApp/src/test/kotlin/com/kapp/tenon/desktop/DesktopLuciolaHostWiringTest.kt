@@ -12,7 +12,7 @@ import kotlin.test.assertTrue
  *
  * 真机现场（验证轮抓到）：`DesktopLuciolaHost` 连同 env 门/seed/配对/三个工厂全都在，
  * 单测也全绿 —— 但 `DesktopAppPlatform` 没有覆写 `luciolaHost`，接口默认 null，
- * 于是 `TIDINGS_LUCIOLA=1` 进了进程、seed 也落了盘，luciolaMode 仍恒 false，
+ * 于是 `TENON_LUCIOLA=1` 进了进程、seed 也落了盘，luciolaMode 仍恒 false，
  * 桌面端永远进不了加密数据面。这条守卫钉住「平台必须提供宿主」这一件事；
  * env/开关的门控行为由 [DesktopLuciolaHostTest] 负责。
  */
@@ -27,7 +27,7 @@ class DesktopLuciolaHostWiringTest {
 
     @Test
     fun wiringDoesNotChangeDefaultGate() {
-        // 测试进程没有 TIDINGS_LUCIOLA ⇒ enabled=false ⇒ configure() 必须是 no-op：
+        // 测试进程没有 TENON_LUCIOLA ⇒ enabled=false ⇒ configure() 必须是 no-op：
         // 接线之后，没开 env 的桌面行为必须与从前逐字一致（工厂不建、身份不碰盘）。
         val dir = kotlin.io.path.createTempDirectory("relay-wiring").toString()
         val host = DesktopLuciolaHost(dataDirectory = { dir }, enabled = false)

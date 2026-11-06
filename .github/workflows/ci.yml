@@ -15,7 +15,7 @@
 # 对账命令：grep -n 'Gate\|jvmTest\|cli:test' AGENTS.md README.md .github/workflows/ci.yml
 #
 # 依赖 luciola 原生库的用例（:core:jvmTest 里 8 个类）**没有原生库时自动跳过**：
-# 走 LuciolaNativeGuard，没配 TIDINGS_LUCIOLA_NATIVE 就 Assume 跳过并打印指引，
+# 走 LuciolaNativeGuard，没配 TENON_LUCIOLA_NATIVE 就 Assume 跳过并打印指引，
 # 不会把「这台机器没装引擎」伪装成代码失败；配了却用不了则会响亮失败。
 #
 # 截图门禁（:androidApp:validateDebugScreenshotTest）**不在 CI 里跑**：参考图按 .gitignore 里

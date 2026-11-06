@@ -33,8 +33,8 @@ import time
 import urllib.error
 import urllib.request
 
-HOST = os.environ.get("TIDINGS_HOST_URL", "http://127.0.0.1:8788").rstrip("/")
-TOKEN = os.environ.get("TIDINGS_PLUGIN_TOKEN", "")
+HOST = os.environ.get("TENON_HOST_URL", "http://127.0.0.1:8788").rstrip("/")
+TOKEN = os.environ.get("TENON_PLUGIN_TOKEN", "")
 WORKSPACE = os.environ.get("E2E_WORKSPACE", os.path.expanduser("~/e2e-weather-app"))
 GROUP_ID = os.environ.get("E2E_GROUP", "e2e-weather")
 GATE_TIMEOUT = int(os.environ.get("E2E_GATE_TIMEOUT", "600"))

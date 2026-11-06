@@ -292,8 +292,8 @@ class PluginHost(
     companion object {
         const val MANIFEST_FILE: String = "manifest.json"
         const val PID_FILE: String = "process.pid"
-        const val ENV_CONTROL_URL: String = "TIDINGS_CONTROL_URL"
-        const val ENV_PLUGIN_TOKEN: String = "TIDINGS_PLUGIN_TOKEN"
+        const val ENV_CONTROL_URL: String = "TENON_CONTROL_URL"
+        const val ENV_PLUGIN_TOKEN: String = "TENON_PLUGIN_TOKEN"
 
         /** 子进程输出落点：插件目录旁一份（数据目录里的运行产物，不进版本库）。 */
         const val PROCESS_LOG_FILE: String = "process.log"

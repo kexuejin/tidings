@@ -13,10 +13,10 @@ Antigravity 接入设计（形态 B，RFC §3.2/§4）的宿主侧脚本：挂�
 
 ## 安装（一次性）
 
-1. 宿主跑着 Tidings 桌面端（控制面 127.0.0.1:8788）。
+1. 宿主跑着 Tenon (榫卯) 桌面端（控制面 127.0.0.1:8788）。
 2. `hooks.json` 里每个事件挂本脚本（示例见 scripts/antigravity-hooks.json.example）；
    脚本自己从 stdin 的 JSON 里认 `event_name`，不用为每个事件配不同参数。
-3. 凭证（二选一）：环境变量 `TIDINGS_PLUGIN_TOKEN`，或与插件同一条 0600 受控文件
+3. 凭证（二选一）：环境变量 `TENON_PLUGIN_TOKEN`，或与插件同一条 0600 受控文件
    （宿主数据目录 `plugins/plugin-token`）。
 4. 手机端配对在线。PreToolUse 的审批卡会推到手机；PreInvocation 的注入池由
    `POST /v1/agent/hook/inject-feed` 投喂（conversationId 或 wsPath 寻池）。
@@ -34,20 +34,18 @@ import sys
 import urllib.error
 import urllib.request
 
-HOST_URL = (os.environ.get("TENON_HOST_URL") or os.environ.get("TIDINGS_HOST_URL") or "http://127.0.0.1:8788").rstrip("/")
-TIMEOUT_SECONDS = float(os.environ.get("TENON_HOOK_TIMEOUT") or os.environ.get("TIDINGS_HOOK_TIMEOUT") or "90")
+HOST_URL = os.environ.get("TENON_HOST_URL", "http://127.0.0.1:8788").rstrip("/")
+TIMEOUT_SECONDS = float(os.environ.get("TENON_HOOK_TIMEOUT", "90"))
 
 
 def bearer() -> str:
     """插件同款凭证：env 优先，缺省读宿主数据目录的 0600 受控文件。"""
-    token = os.environ.get("TENON_PLUGIN_TOKEN") or os.environ.get("TIDINGS_PLUGIN_TOKEN")
+    token = os.environ.get("TENON_PLUGIN_TOKEN")
     if token:
         return token.strip()
     for candidate in (
         os.path.expanduser("~/.tenon/plugins/plugin-token"),
         os.path.expanduser("~/Library/Application Support/榫卯 Tenon/plugins/plugin-token"),
-        os.path.expanduser("~/.tenon/plugins/plugin-token"),
-        os.path.expanduser("~/Library/Application Support/捎话 Tidings/plugins/plugin-token"),
     ):
         try:
             with open(candidate, "r", encoding="utf-8") as fh:

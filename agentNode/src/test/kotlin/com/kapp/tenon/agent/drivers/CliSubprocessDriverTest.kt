@@ -128,12 +128,12 @@ class CliSubprocessDriverTest {
         assertEquals("workspace-write", CliSubprocessDriver.codexSandboxMode(emptyMap()))
         assertEquals(
             "danger-full-access",
-            CliSubprocessDriver.codexSandboxMode(mapOf("TIDINGS_CODEX_SANDBOX" to "danger-full-access")),
+            CliSubprocessDriver.codexSandboxMode(mapOf("TENON_CODEX_SANDBOX" to "danger-full-access")),
             "嵌不进沙箱的宿主需要一个显式逃生口",
         )
         assertEquals(
             "workspace-write",
-            CliSubprocessDriver.codexSandboxMode(mapOf("TIDINGS_CODEX_SANDBOX" to "yes-please")),
+            CliSubprocessDriver.codexSandboxMode(mapOf("TENON_CODEX_SANDBOX" to "yes-please")),
             "认不出的值不许静默放开权限",
         )
     }

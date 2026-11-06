@@ -20,24 +20,24 @@ import java.io.File
 object CliDiscovery {
 
     /** 显式指定 Claude Code 可执行文件的 env 名。 */
-    const val ENV_CLAUDE_CLI = "TIDINGS_CLAUDE_CLI"
+    const val ENV_CLAUDE_CLI = "TENON_CLAUDE_CLI"
 
     /** 显式指定 Codex 可执行文件的 env 名。 */
-    const val ENV_CODEX_CLI = "TIDINGS_CODEX_CLI"
+    const val ENV_CODEX_CLI = "TENON_CODEX_CLI"
 
     const val CLAUDE_BIN = "claude"
     const val CODEX_BIN = "codex"
 
     /** Antigravity CLI（形态 A）：Google 登录态继承，无 Key 可配。 */
-    const val ENV_AGY_CLI = "TIDINGS_AGY_CLI"
+    const val ENV_AGY_CLI = "TENON_AGY_CLI"
     const val AGY_BIN = "agy"
 
     /** opencode CLI：配置文件走 `OPENCODE_CONFIG`（见 [OpenCodeConfig]）。 */
-    const val ENV_OPENCODE_CLI = "TIDINGS_OPENCODE_CLI"
+    const val ENV_OPENCODE_CLI = "TENON_OPENCODE_CLI"
     const val OPENCODE_BIN = "opencode"
 
     /** DeepSeek Harness CLI：key 走 `~/.dsh/.credentials.yaml`（见 [DshCredentials]）。 */
-    const val ENV_DSH_CLI = "TIDINGS_DSH_CLI"
+    const val ENV_DSH_CLI = "TENON_DSH_CLI"
     const val DSH_BIN = "dsh"
 
     fun resolveClaudeCli(

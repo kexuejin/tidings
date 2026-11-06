@@ -5,6 +5,7 @@ import com.kapp.tenon.core.protocol.Profile
 import com.kapp.tenon.core.protocol.newId
 import com.kapp.tenon.core.transport.DiscoveryEngine
 import com.kapp.tenon.core.transport.PeerRegistry
+import com.kapp.tenon.core.transport.UdpTransport
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.cancel
@@ -26,12 +27,13 @@ class NodeRuntimeExtraDiscoveryFactoryTest {
         var started = false
         var stopped = false
         var announcements = 0
+        val directedDials = mutableListOf<Pair<String, Int>>()
         fun seenRegistry(): PeerRegistry = registry
 
         override fun start(scope: CoroutineScope) { started = true }
         override fun stop() { stopped = true }
         override suspend fun announce() { announcements += 1 }
-        override suspend fun announceTo(host: String, port: Int) {}
+        override suspend fun announceTo(host: String, port: Int) { directedDials += host to port }
         override suspend fun announceExit() {}
     }
 
@@ -67,5 +69,34 @@ class NodeRuntimeExtraDiscoveryFactoryTest {
             scope.cancel()
             assertTrue(fake?.stopped == true, "stop 必须把工厂产出的引擎也收掉")
         }
+    }
+
+    /**
+     * luciola 模式下主 discovery 是 no-op 哑实现：定向宣告若只转发给它，扫码 / 填地址 /
+     * 按 IP 解析对端之后两端就永远互发现不了，对端信标里的完整 profile 进不了 registry，
+     * 节点表会一直停在 `node-xxxx` 合成名上 —— 而消息因为走配对密钥直拨仍然畅通，
+     * 看起来只是「显示问题」。真机复验：把名字改回合成名后等 75 秒不恢复。
+     */
+    @Test
+    fun directedAnnounceReachesExtraDiscoveryInLuciolaMode() = runBlocking {
+        val profile = Profile.mobile(
+            nodeId = newId(), nick = "directed-dial", host = "localhost", tcpPort = 0, ver = "test",
+        )
+        var fake: FakeDiscovery? = null
+        val runtime = NodeRuntime(
+            profile = profile,
+            udpPort = 0,
+            tcpPort = 0,
+            messengerTransportFactory = { _ -> UdpTransport(0, "127.0.0.1") },
+            extraDiscoveryFactory = { registry, _ ->
+                FakeDiscovery(registry).also { fake = it }
+            },
+        )
+        runtime.announceTo("127.0.0.2", 17878)
+        assertEquals(
+            listOf("127.0.0.2" to 17878), fake!!.directedDials,
+            "luciola 模式下 announceTo 必须转发给 extraDiscovery，否则定向宣告静默丢失",
+        )
+        runtime.stop()
     }
 }

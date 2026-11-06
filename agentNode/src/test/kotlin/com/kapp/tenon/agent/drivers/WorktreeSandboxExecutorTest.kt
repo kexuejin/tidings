@@ -602,12 +602,12 @@ class WorktreeSandboxExecutorTest {
     fun timeoutEnvFallsBackToTheDefaultOnJunkInsteadOfKillingImmediately() {
         val default = WorktreeSandboxExecutor.DEFAULT_TIMEOUT_MS
         assertEquals(default, WorktreeSandboxExecutor.timeoutMsOf(emptyMap()))
-        assertEquals(60_000L, WorktreeSandboxExecutor.timeoutMsOf(mapOf("TIDINGS_SANDBOX_TIMEOUT_MS" to "60000")))
+        assertEquals(60_000L, WorktreeSandboxExecutor.timeoutMsOf(mapOf("TENON_SANDBOX_TIMEOUT_MS" to "60000")))
         for (junk in listOf("0", "-1", "", "  ", "soon", "1e9")) {
             assertEquals(
                 default,
-                WorktreeSandboxExecutor.timeoutMsOf(mapOf("TIDINGS_SANDBOX_TIMEOUT_MS" to junk)),
-                "TIDINGS_SANDBOX_TIMEOUT_MS=<$junk> 必须回落默认，不能变成立刻杀",
+                WorktreeSandboxExecutor.timeoutMsOf(mapOf("TENON_SANDBOX_TIMEOUT_MS" to junk)),
+                "TENON_SANDBOX_TIMEOUT_MS=<$junk> 必须回落默认，不能变成立刻杀",
             )
         }
     }

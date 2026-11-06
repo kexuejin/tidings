@@ -295,7 +295,7 @@ tasks.withType<Test>().configureEach {
 // 开发验收用:真实进程(./gradlew :desktopApp:run)也能加载 luciola 原生库。
 // 正式发行把库复制进 resources/native(见 copyLuciolaNative),运行时自动找到。
 tasks.withType<JavaExec>().configureEach {
-    System.getenv("TIDINGS_LUCIOLA_NATIVE")?.takeIf { it.isNotBlank() }?.let {
+    System.getenv("TENON_LUCIOLA_NATIVE")?.takeIf { it.isNotBlank() }?.let {
         systemProperty("jna.library.path", it)
     }
 }
@@ -304,7 +304,7 @@ tasks.withType<JavaExec>().configureEach {
  * 把 luciola 的 uniffi 原生库复制进 app resources —— jpackage 会把它打进安装包,
  * 运行时 [DesktopLuciolaHost] 从 compose.application.resources.dir/native 加载。
  *
- * 来源优先级:TIDINGS_LUCIOLA_NATIVE 环境变量 → 本机 Rust 构建产物(开发机)。
+ * 来源优先级:TENON_LUCIOLA_NATIVE 环境变量 → 本机 Rust 构建产物(开发机)。
  * 正式发版应改为从 luciola 的发布构件取并校验 sha256(待 Android 发布形态一起做)。
  */
 private val luciolaLibNames = listOf(
@@ -314,12 +314,12 @@ private val luciolaLibNames = listOf(
 /**
  * 原生库目录解析（与 :core 同一套规则，**不写死个人绝对路径**）：
  * 显式 env / -P → 仓库兄弟目录 ../RustBuild/cargo-target/{release,debug} → $HOME/RustBuild/cargo-target/{release,debug}
- * 找不到返回 null；打包任务据 null 给出明确的 `Set TIDINGS_LUCIOLA_NATIVE` 指引。
+ * 找不到返回 null；打包任务据 null 给出明确的 `Set TENON_LUCIOLA_NATIVE` 指引。
  */
 fun desktopLuciolaNativeDir(): File? {
     fun hasLib(dir: File) = luciolaLibNames.any { File(dir, it).isFile }
     val explicit = (findProperty("luciolaNativeDir") as String?)
-        ?: System.getenv("TIDINGS_LUCIOLA_NATIVE")
+        ?: System.getenv("TENON_LUCIOLA_NATIVE")
     if (explicit != null && explicit.isBlank()) return null
     if (explicit != null) {
         val dir = File(explicit)
@@ -357,7 +357,7 @@ val copyLuciolaNative by tasks.registering(Copy::class) {
         if (libs.isNullOrEmpty()) {
             throw GradleException(
                 "luciola native library missing under ${dir}. " +
-                    "Set TIDINGS_LUCIOLA_NATIVE=<cargo-target/release 或 debug> (or -PluciolaNativeDir=…) " +
+                    "Set TENON_LUCIOLA_NATIVE=<cargo-target/release 或 debug> (or -PluciolaNativeDir=…) " +
                     "before packaging —— 不带库的安装包会在用户机器上启动即崩。",
             )
         }
@@ -371,7 +371,7 @@ val copyLuciolaNative by tasks.registering(Copy::class) {
  * 而 `gradle/libs.versions.toml` 钉的是 `luciola-jvm 0.9.0`；71 项 UniFFI checksum
  * 有 10 项对不上，用户装完只要在 luciola 模式启动就
  * `UniFFI API checksum mismatch` 崩在类初始化。当时靠运行时
- * `TIDINGS_LUCIOLA_NATIVE` 覆盖才绕过去 —— 这不是修复，只是本机逃逸口。
+ * `TENON_LUCIOLA_NATIVE` 覆盖才绕过去 —— 这不是修复，只是本机逃逸口。
  *
  * 现在由 `tools/verify-luciola-native.py` 从 `runtimeClasspath` 上的 bindings jar 读出
  * 期望 checksum，逐项调用待打包 dylib 的导出函数比对；不一致直接让打包失败。
@@ -394,7 +394,7 @@ val verifyLuciolaNative by tasks.registering(Exec::class) {
         if (!have) {
             println(
                 "[luciola-native] SKIP：resources/common/native 没有 native 库（不入库的机器产物）。" +
-                    "这不是通过 —— 契约没有验；要验：设 TIDINGS_LUCIOLA_NATIVE 后重跑 copyLuciolaNative。",
+                    "这不是通过 —— 契约没有验；要验：设 TENON_LUCIOLA_NATIVE 后重跑 copyLuciolaNative。",
             )
         }
         have
@@ -407,7 +407,7 @@ val verifyLuciolaNative by tasks.registering(Exec::class) {
         )
         val lib = luciolaLibNames.map { File(nativeDir, it) }.firstOrNull { it.isFile }
             ?: throw GradleException(
-                "resources/common/native 里没有 native 库；先设 TIDINGS_LUCIOLA_NATIVE 再跑 copyLuciolaNative",
+                "resources/common/native 里没有 native 库；先设 TENON_LUCIOLA_NATIVE 再跑 copyLuciolaNative",
             )
         commandLine(
             "python3", script.absolutePath,

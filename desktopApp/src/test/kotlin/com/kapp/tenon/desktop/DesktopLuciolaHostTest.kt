@@ -45,7 +45,7 @@ class DesktopLuciolaHostTest {
             false
         }
         org.junit.Assume.assumeTrue(
-            "跳过 luciola 真引擎用例：未解析到原生库目录或版本不匹配。设置 TIDINGS_LUCIOLA_NATIVE=<cargo-target/release 或 debug> 后重跑。",
+            "跳过 luciola 真引擎用例：未解析到原生库目录或版本不匹配。设置 TENON_LUCIOLA_NATIVE=<cargo-target/release 或 debug> 后重跑。",
             available,
         )
     }

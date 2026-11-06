@@ -260,7 +260,7 @@ fun ControlPlane.latestPatchRefForCard(cardId: String): SandboxPatchRef? {
 }
 
 /**
- * `POST /v1/agent/hook/card` —— MCP `tidings_send_group_card` 的宿主落点：
+ * `POST /v1/agent/hook/card` —— MCP `tenon_send_group_card` 的宿主落点：
  * 卡片 JSON 落 hook 会话的台账（type=card，与插件卡片同一渲染管线），随
  * 会话分页到手机。**归属即会话**：没有活跃 hook 会话 = 404，不替它造一个
  * （卡片挂错会话比发不出去更难排查）。

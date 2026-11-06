@@ -23,7 +23,7 @@ import kotlinx.coroutines.runBlocking
  *
  * 它要花真钱、真网络、真模型时间（两轮 × 数十秒），而且结论取决于「本机装没装
  * claude + 有没有配上游」—— 那正是 `envDependentTestGate` 要挡的东西。所以它
- * 只在 `TIDINGS_REAL_CLI=1` 时执行，其余情况打一行跳过原因就返回；CI 的确定性
+ * 只在 `TENON_REAL_CLI=1` 时执行，其余情况打一行跳过原因就返回；CI 的确定性
  * 不受影响。
  *
  * ## 怎么跑
@@ -33,7 +33,7 @@ import kotlinx.coroutines.runBlocking
  * ANTHROPIC_API_KEY=... ANTHROPIC_MODEL=deepseek-v4.1-flash \
  * ANTHROPIC_SMALL_FAST_MODEL=deepseek-v4.1-flash \
  * ANTHROPIC_CUSTOM_HEADERS="x-opencode-session: claude-code" \
- * TIDINGS_REAL_CLI=1 \
+ * TENON_REAL_CLI=1 \
  *   ./gradlew :agentNode:test --tests "*RealCliChainEvidenceTest*" --info
  * ```
  *
@@ -43,7 +43,7 @@ import kotlinx.coroutines.runBlocking
 class RealCliChainEvidenceTest {
 
     /** 显式开关：不给就是跳过，绝不让「本机状态」决定测试结论。 */
-    private val enabled: Boolean = System.getenv("TIDINGS_REAL_CLI") == "1"
+    private val enabled: Boolean = System.getenv("TENON_REAL_CLI") == "1"
 
     private fun tempDir(): File = Files.createTempDirectory("real-cli-chain").toFile()
 
@@ -88,7 +88,7 @@ class RealCliChainEvidenceTest {
             // 而这一轮什么都没验 —— 那就是「为没发生的活报完成」。
             // assumption 让它如实显示为 skipped，并带上跳过原因。
             throw org.junit.AssumptionViolatedException(
-                "需要 TIDINGS_REAL_CLI=1 且本机能找到 claude CLI（enabled=$enabled, cli=$cli）",
+                "需要 TENON_REAL_CLI=1 且本机能找到 claude CLI（enabled=$enabled, cli=$cli）",
             )
         }
         val root = tempDir()

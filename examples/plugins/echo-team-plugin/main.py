@@ -6,7 +6,7 @@
 
   1. 在回环上起自己的 IPC 服务器（healthz / session/open / task/execute /
      task/action / task/queryProgress）；
-  2. 带 TIDINGS_PLUGIN_TOKEN 向宿主控制面 POST /v1/plugin/register 注册
+  2. 带 TENON_PLUGIN_TOKEN 向宿主控制面 POST /v1/plugin/register 注册
      （manifest.json 原样上报 + 自己的端口）；
   3. 收到派单后回一条**流式 NDJSON** 事件流（思考 → 正文 → 卡片 → 完成），
      卡片就是方案 §4.3 的声明式 JSON。
@@ -43,12 +43,12 @@ def load_manifest():
 def find_token():
     """token 的三种来源，按优先级（方案 §2.3）。
 
-    1. 环境变量 TIDINGS_PLUGIN_TOKEN（托管模式：宿主拉起子进程时注入）；
+    1. 环境变量 TENON_PLUGIN_TOKEN（托管模式：宿主拉起子进程时注入）；
     2. 插件目录旁的 token 文件（守护进程自带配置的一种形态）；
     3. 宿主数据目录下的受控文件 plugins/plugin-token（守护进程模式的默认来源，
        桌面端保证它存在且 0600）。
     """
-    env = os.environ.get("TIDINGS_PLUGIN_TOKEN")
+    env = os.environ.get("TENON_PLUGIN_TOKEN")
     if env:
         return env
     sibling = os.path.join(HERE, "plugin-token")
@@ -59,9 +59,9 @@ def find_token():
             return token
     home = os.path.expanduser("~")
     candidates = [
-        os.path.join(home, "Library", "Application Support", "捎话 Tidings", "plugins", "plugin-token"),
+        os.path.join(home, "Library", "Application Support", "榫卯 Tenon", "plugins", "plugin-token"),
         os.path.join(os.environ.get("XDG_DATA_HOME", os.path.join(home, ".local", "share")),
-                     "捎话 Tidings", "plugins", "plugin-token"),
+                     "tenon", "plugins", "plugin-token"),
     ]
     for path in candidates:
         if os.path.isfile(path):
@@ -73,7 +73,7 @@ def find_token():
 
 
 def control_url():
-    return os.environ.get("TIDINGS_CONTROL_URL", "http://127.0.0.1:8788").rstrip("/")
+    return os.environ.get("TENON_CONTROL_URL", "http://127.0.0.1:8788").rstrip("/")
 
 
 # ---------------------------------------------------------------- 注册
@@ -285,10 +285,10 @@ def main():
     token = find_token()
     if not token:
         # fail-closed：没有 token 就不去敲门 —— 宿主反正会拒（§2.3 强制校验）。
-        print("[echo-team-plugin] no token found (TIDINGS_PLUGIN_TOKEN / plugin-token file); cannot register", flush=True)
+        print("[echo-team-plugin] no token found (TENON_PLUGIN_TOKEN / plugin-token file); cannot register", flush=True)
         return 2
 
-    port = int(os.environ.get("TIDINGS_PLUGIN_PORT", "0"))
+    port = int(os.environ.get("TENON_PLUGIN_PORT", "0"))
     server = ThreadingHTTPServer(("127.0.0.1", port), IpcHandler)
     server.daemon_threads = True
     bound_port = server.server_address[1]

@@ -714,7 +714,7 @@ class WorktreeSandboxExecutor(
 
     companion object {
         /** 沙箱根目录的显式覆盖 env 名（AGENTS §2.7-2：显式 env → 公共约定目录）。 */
-        const val ENV_SANDBOX_ROOT = "TIDINGS_SANDBOX_ROOT"
+        const val ENV_SANDBOX_ROOT = "TENON_SANDBOX_ROOT"
 
         /** 沙箱根的公共约定位置（D-024 明文：/tmp/tenon-ws）。 */
         const val DEFAULT_ROOT = "/tmp/tenon-ws"
@@ -737,7 +737,7 @@ class WorktreeSandboxExecutor(
         const val ABORT_RESCAN_MS = 100L
 
         /** 派单止损的 env 名（毫秒）。显式覆盖优先于默认值。 */
-        const val ENV_TIMEOUT_MS = "TIDINGS_SANDBOX_TIMEOUT_MS"
+        const val ENV_TIMEOUT_MS = "TENON_SANDBOX_TIMEOUT_MS"
 
         /**
          * 派单墙钟上限，默认 30 分钟。

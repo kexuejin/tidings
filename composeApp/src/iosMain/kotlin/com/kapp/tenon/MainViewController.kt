@@ -46,7 +46,7 @@ private val controller: RelayController by lazy {
 }
 
 /**
- * 验收用：`TIDINGS_SCREEN_VIEW=<对端 nodeId>` 时，启动后自动向该对端发起一次
+ * 验收用：`TENON_SCREEN_VIEW=<对端 nodeId>` 时，启动后自动向该对端发起一次
  * 屏幕协助（Viewer 侧）。
  */
 private fun startScreenViewProbeIfRequested(
@@ -54,8 +54,8 @@ private fun startScreenViewProbeIfRequested(
     scope: CoroutineScope,
 ) {
     val env = platform.Foundation.NSProcessInfo.processInfo.environment
-    val peerId = (env["TIDINGS_SCREEN_VIEW"] as? String)?.trim()?.takeIf { it.isNotEmpty() } ?: return
-    val seconds = (env["TIDINGS_SCREEN_VIEW_SECONDS"] as? String)?.toLongOrNull() ?: 30L
+    val peerId = (env["TENON_SCREEN_VIEW"] as? String)?.trim()?.takeIf { it.isNotEmpty() } ?: return
+    val seconds = (env["TENON_SCREEN_VIEW_SECONDS"] as? String)?.toLongOrNull() ?: 30L
     scope.launch {
         val deadline = com.kapp.tenon.core.nowMillis() + 60_000
         while (com.kapp.tenon.core.nowMillis() < deadline) {

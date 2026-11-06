@@ -165,7 +165,7 @@ def main() -> int:
             "VERDICT= MISMATCH\n"
             "native 库与 Kotlin bindings 不是同一个 luciola 版本，装到用户机器上会\n"
             "`UniFFI API checksum mismatch` 启动即崩。请用与 gradle/libs.versions.toml\n"
-            "里 luciola 版本对应的源码重新构建，并把 TIDINGS_LUCIOLA_NATIVE 指到它的 release 目录。"
+            "里 luciola 版本对应的源码重新构建，并把 TENON_LUCIOLA_NATIVE 指到它的 release 目录。"
         )
         return 1
     print(f"VERDICT= MATCH (contract version {native_contract})")

@@ -17,7 +17,7 @@ import kotlin.test.assertTrue
  * 钉住的行为：
  * 1. 插件目录扫描：没有插件目录是常态（安静返回）；每个子目录一份处置报告；
  * 2. 坏目录不拖垮宿主：manifest 缺失 / JSON 坏 / entrypoint 空 —— 记原因、跳过、继续；
- * 3. 注入契约：子进程环境里必须有 `TIDINGS_CONTROL_URL` 与 `TIDINGS_PLUGIN_TOKEN`
+ * 3. 注入契约：子进程环境里必须有 `TENON_CONTROL_URL` 与 `TENON_PLUGIN_TOKEN`
  *    （方案 §2.3 的两把钥匙），工作目录是插件目录本身；
  * 4. 目录名与 pluginId 必须一致（目录是插件身份的载体，对不上账就不拉起）；
  * 5. 已注册/已拉起的 pluginId 不重复拉起；token 文件缺失时由宿主生成。

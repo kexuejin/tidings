@@ -1,7 +1,7 @@
 {
-  "generatedAt": "bfdc8f405f93",
+  "generatedAt": "2e6b651f8f8b",
   "note": "逐屏差集棘轮：每个键的差集只许变小。--check 报「新增的值」。",
-  "reason": "m-chat CardChipsRow mchip padding 7px verified against prototype/relay.html:542",
+  "reason": "sync baseline with frozen prototype after commit history rebuild",
   "rowCount": 70,
   "signature": {
     "d-agentdetail|__error__": [

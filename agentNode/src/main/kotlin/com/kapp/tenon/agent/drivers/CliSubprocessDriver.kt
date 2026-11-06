@@ -194,12 +194,12 @@ class CliSubprocessDriver(
          * 装置、或被别的沙箱包着启动），codex 再套一层会拿到
          * `sandbox-exec: sandbox_apply: Operation not permitted`，于是它退化成一个连
          * 自己 worktree 都写不了的只读会话 —— 派单永远是「跑完但没交付物」。
-         * 这种情况下把 `TIDINGS_CODEX_SANDBOX=danger-full-access` 显式打开，隔离边界
+         * 这种情况下把 `TENON_CODEX_SANDBOX=danger-full-access` 显式打开，隔离边界
          * 只剩本仓的一次性 worktree（一次性分支 + 收割后无痕清理）。
          * 认不出的值一律回落默认，不猜、不静默放开。
          */
         fun codexSandboxMode(env: Map<String, String> = System.getenv()): String {
-            val raw = env["TIDINGS_CODEX_SANDBOX"]?.trim()
+            val raw = env["TENON_CODEX_SANDBOX"]?.trim()
             return when (raw) {
                 "read-only", "workspace-write", "danger-full-access" -> raw
                 else -> "workspace-write"
@@ -414,7 +414,7 @@ fun cliDriverRegistrations(
         DshCredentials.resolve(env)?.let { providerEnv[DshCredentials.ENV_KEY] = it }
         // dsh 内部的 bash 工具还有**一层自己的沙箱**（SANDBOX_UNAVAILABLE：macOS 上要
         // sandbox-exec；宿主在嵌套环境里 sandbox-exec 不可用 ⇒ 每条命令都被它拒）。
-        // 与 TIDINGS_CODEX_SANDBOX=danger-full-access 同一条纪律：写操作只落在
+        // 与 TENON_CODEX_SANDBOX=danger-full-access 同一条纪律：写操作只落在
         // 一次性 worktree（我们的沙箱就是隔离面），内层不再要求后端。
         providerEnv.putIfAbsent("DSH_PERMISSION_MODE", "danger-full-access")
         announce(DriverKeys.cliDriverId("dsh"), providerEnv)

@@ -10,7 +10,7 @@ import java.io.File
  * 存在的理由（一次真实的 CI 事故）：构建脚本曾经把 `jna.library.path` 默认成作者本机的
  * 绝对路径。别人 clone 之后，那不是「构建失败」——配置阶段一声不响，跑用例时才在
  * `UniffiEngineAdapter(...)` 的类初始化里抛 `UnsatisfiedLinkError` / `ExceptionInInitializerError`。
- * 症状是红的，根因是环境，而且**报错里没有一个字告诉你「去设 TIDINGS_LUCIOLA_NATIVE」**。
+ * 症状是红的，根因是环境，而且**报错里没有一个字告诉你「去设 TENON_LUCIOLA_NATIVE」**。
  *
  * 所以这里把两件事分开，与仓库的「没验到 ≠ 验坏了」同口径：
  *  - **没配**（`tidings.luciola.nativeDir` 为空）⇒ 跳过，并把「怎么配」打印出来；
@@ -45,7 +45,7 @@ object LuciolaNativeGuard {
         if (configuredDir == null) {
             Assume.assumeTrue(
                 "跳过 luciola 真引擎用例：未解析到原生库目录。" +
-                    "设置 TIDINGS_LUCIOLA_NATIVE=<cargo-target/release 或 debug> 后重跑。",
+                    "设置 TENON_LUCIOLA_NATIVE=<cargo-target/release 或 debug> 后重跑。",
                 false,
             )
             return

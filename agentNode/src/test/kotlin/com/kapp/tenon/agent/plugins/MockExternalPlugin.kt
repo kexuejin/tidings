@@ -193,7 +193,7 @@ class MockExternalPlugin(
         }
 
         /** 挂住时长的显式 env 名（毫秒）。 */
-        const val HANG_ENV = "TIDINGS_MOCK_PLUGIN_HANG_MS"
+        const val HANG_ENV = "TENON_MOCK_PLUGIN_HANG_MS"
 
         fun echoTeamManifest(): JsonObject = buildJsonObject {
             put("pluginId", "echo-team")

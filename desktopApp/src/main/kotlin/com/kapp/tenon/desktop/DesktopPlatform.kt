@@ -83,7 +83,7 @@ class DesktopAppPlatform(
     override val screenSharing: com.kapp.tenon.platform.ScreenSharingService = com.kapp.tenon.desktop.capture.DesktopScreenSharingService(),
     /**
      * 实验 luciola 宿主。**必须接线**而不是吃接口默认的 null：
-     * [DesktopLuciolaHost] 自带双重门控（env `TIDINGS_LUCIOLA=1` + 设置里「luciola 加密信道」
+     * [DesktopLuciolaHost] 自带双重门控（env `TENON_LUCIOLA=1` + 设置里「luciola 加密信道」
      * 开关），接线本身不改变任何默认行为 —— 但不接的话整个类就是死代码，桌面端**永远**
      * 进不了加密数据面（真机验证轮抓到：env 已进进程、seed 已落盘，luciolaMode 却恒 false，
      * 文件信道随之两端互等）。

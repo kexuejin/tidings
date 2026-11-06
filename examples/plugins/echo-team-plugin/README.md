@@ -39,7 +39,7 @@
 └── main.py
 ```
 
-- 宿主启动插件子进程时注入 `TIDINGS_CONTROL_URL` 与 `TIDINGS_PLUGIN_TOKEN`；
+- 宿主启动插件子进程时注入 `TENON_CONTROL_URL` 与 `TENON_PLUGIN_TOKEN`；
 - 插件就绪后自己 `POST /v1/plugin/register` 入驻；
 - `kill` 插件进程 ⇒ 宿主在下一个探测周期把它翻成**离线**，主程序不受影响；
   重启插件（同 pluginId 重注册）⇒ 台账条目被替换、状态回到 online。
@@ -50,12 +50,12 @@
 
 ```bash
 # a. 环境变量（托管模式的同一把 token）
-TIDINGS_PLUGIN_TOKEN=<token> python3 main.py
+TENON_PLUGIN_TOKEN=<token> python3 main.py
 
 # b. 插件目录旁放一个 plugin-token 文件（内容 = token）
 
 # c. 什么都不做：插件去读宿主数据目录下 0600 的
-#    ~/Library/Application Support/捎话 Tidings/plugins/plugin-token
+#    ~/Library/Application Support/榫卯 Tenon/plugins/plugin-token
 #    （桌面端启动时保证它存在；Linux 走 XDG_DATA_HOME 同名路径）
 ```
 
@@ -78,7 +78,7 @@ TIDINGS_PLUGIN_TOKEN=<token> python3 main.py
 
 ## 注册失败的常见原因（都如实打在插件 stdout）
 
-- `register rejected: HTTP 401` —— token 不对（env 与宿主的 `TIDINGS_PLUGIN_TOKEN` 不是同一把）；
+- `register rejected: HTTP 401` —— token 不对（env 与宿主的 `TENON_PLUGIN_TOKEN` 不是同一把）；
 - `HTTP 400 … over the 21 char budget` —— manifest 里的 agentId slug 化后超预算，
   换个短名（发送侧不变量：超限的 senderId 会被整帧拒收）;
 - `no token found` —— 三种来源都没找到；模式一不会有这种情况（宿主会注入）。

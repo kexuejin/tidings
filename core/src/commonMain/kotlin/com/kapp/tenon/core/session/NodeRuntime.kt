@@ -1450,9 +1450,18 @@ class NodeRuntime(
         }
     }
 
-    /** 只向一个地址握手 —— 手机端主路径（知道电脑 IP 即可建立双向在线）。 */
-    suspend fun announceTo(host: String, port: Int = Protocol.DEFAULT_UDP_PORT) =
+    /**
+     * 只向一个地址握手 —— 手机端主路径（知道电脑 IP 即可建立双向在线）。
+     *
+     * luciola 模式下 [discovery] 是 no-op 哑实现，**必须同时转发给 [resolvedExtraDiscovery]**：
+     * 定向宣告（扫码 / 填地址 / 按 IP 解析对端）走的是这一条，漏了它，对端信标里的
+     * 完整 profile 永远进不了 registry —— 节点表会一直停在 `node-xxxx` 合成名上，
+     * 而消息数据面因为按配对密钥直拨仍然畅通，症状极像「只是显示问题」。
+     */
+    suspend fun announceTo(host: String, port: Int = Protocol.DEFAULT_UDP_PORT) {
         discovery.announceTo(host, port)
+        resolvedExtraDiscovery?.announceTo(host, port)
+    }
 
     /**
      * 告别：广播 `exit`，让对端立刻把我们标成离线，而不是等 presence 超时。
@@ -1778,7 +1787,10 @@ class NodeRuntime(
         // 同一串 IP 上）。真机现场（验证轮抓到）：按 IP 投文件被解析到一条陈旧 nodeId，
         // offer 发进虚空；正确做法是先向地址要一次**当前**身份，再退回离线记录 ——
         // 排队语义由发送侧的离线队列承接，这里不把"记录离线"当成解析的终点。
-        discovery.announceTo(host, port ?: Protocol.DEFAULT_UDP_PORT)
+        val targetPort = port ?: Protocol.DEFAULT_UDP_PORT
+        discovery.announceTo(host, targetPort)
+        // 同 [announceTo]：luciola 模式下只有 extraDiscovery 真的会定向拨号。
+        resolvedExtraDiscovery?.announceTo(host, targetPort)
         val live = withTimeoutOrNull(timeoutMs) {
             var found: PeerRecord? = null
             while (found == null) {

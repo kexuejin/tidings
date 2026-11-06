@@ -98,7 +98,7 @@ kotlin {
 // ## 原生库定位：**不写死任何个人绝对路径**
 //
 // 解析顺序（先到先得）：
-//   ① `-PluciolaNativeDir=<dir>` 或环境变量 `TIDINGS_LUCIOLA_NATIVE`（显式指定：CI / 发版 / 非常规布局）
+//   ① `-PluciolaNativeDir=<dir>` 或环境变量 `TENON_LUCIOLA_NATIVE`（显式指定：CI / 发版 / 非常规布局）
 //   ② 仓库根的兄弟目录 `../RustBuild/cargo-target/{release,debug}`（本机开发常见布局）
 //   ③ `$HOME/RustBuild/cargo-target/{release,debug}`
 //
@@ -116,7 +116,7 @@ fun resolveLuciolaNativeDir(): File? {
     //    显式配置了却找不到库 ⇒ 仍然返回该目录（让用例**响亮地失败**，而不是静默跳过）：
     //    「我明明配了」和「我没配」必须能区分开。
     val explicit = (findProperty("luciolaNativeDir") as String?)
-        ?: System.getenv("TIDINGS_LUCIOLA_NATIVE")
+        ?: System.getenv("TENON_LUCIOLA_NATIVE")
     // 注意区分「没设」与「设成空」：没设 ⇒ 走约定目录；显式设成空 ⇒ 就是没有（CI 用它稳定跳过）。
     if (explicit != null && explicit.isBlank()) return null
     if (explicit != null) {
@@ -143,7 +143,7 @@ val luciolaNativeDir: File? = resolveLuciolaNativeDir()
 if (luciolaNativeDir == null) {
     logger.warn(
         ":core luciola 原生库未找到 —— 依赖真引擎的用例将被跳过（不是失败）。" +
-            "要跑它们：TIDINGS_LUCIOLA_NATIVE=<cargo-target/release 或 debug> ./gradlew :core:jvmTest",
+            "要跑它们：TENON_LUCIOLA_NATIVE=<cargo-target/release 或 debug> ./gradlew :core:jvmTest",
     )
 }
 

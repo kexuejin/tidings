@@ -16,7 +16,7 @@ Antigravity 接入设计（RFC §3.3）：让 Antigravity（或任何 MCP 宿主
       }
     }
 
-## 四个工具（RFC §3.3 清单，支持 tenon_* 与 tidings_* 别名）
+## 四个工具（RFC §3.3 清单，支持 tenon_* 规范命名）
 
 - `tenon_fetch_node_capabilities`：当前局域网在线算力节点与能力标签
   （`GET /v1/peers` 的 MCP 包装）；
@@ -38,7 +38,7 @@ import sys
 import urllib.error
 import urllib.request
 
-HOST_URL = (os.environ.get("TENON_HOST_URL") or os.environ.get("TIDINGS_HOST_URL") or "http://127.0.0.1:8788").rstrip("/")
+HOST_URL = os.environ.get("TENON_HOST_URL", "http://127.0.0.1:8788").rstrip("/")
 SERVER_NAME = "tenon"
 SERVER_VERSION = "1.0.0"
 
@@ -112,7 +112,7 @@ TOOLS = [
 
 
 def bearer() -> str:
-    token = os.environ.get("TENON_PLUGIN_TOKEN") or os.environ.get("TIDINGS_PLUGIN_TOKEN")
+    token = os.environ.get("TENON_PLUGIN_TOKEN")
     if token:
         return token.strip()
     for candidate in (
@@ -192,16 +192,10 @@ def tool_ask_question(args: dict) -> dict:
 
 
 HANDLERS = {
-    # 规范名称
     "tenon_fetch_node_capabilities": tool_fetch_capabilities,
     "tenon_request_human_approval": tool_request_approval,
     "tenon_send_group_card": tool_send_card,
     "tenon_ask_question": tool_ask_question,
-    # 向下兼容别名
-    "tidings_fetch_node_capabilities": tool_fetch_capabilities,
-    "tidings_request_human_approval": tool_request_approval,
-    "tidings_send_group_card": tool_send_card,
-    "tidings_ask_question": tool_ask_question,
 }
 
 

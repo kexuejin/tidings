@@ -14,7 +14,7 @@ import java.nio.file.attribute.PosixFilePermissions
  *
  * ## token 的两个来源（按优先级）
  *
- * 1. **环境变量 `TIDINGS_PLUGIN_TOKEN`**（托管模式）：宿主拉起插件子进程时注入，
+ * 1. **环境变量 `TENON_PLUGIN_TOKEN`**（托管模式）：宿主拉起插件子进程时注入，
  *    宿主自己读同一个变量比对 —— 两边天然一致。
  * 2. **数据目录下的受控文件 `plugins/plugin-token`**（守护进程模式）：宿主保证它存在
  *    （[ensureTokenFile]，缺失时生成 64 位十六进制并收紧到 0600），独立启动的插件进程
@@ -57,7 +57,7 @@ class PluginTokenGate private constructor(
     }
 
     companion object {
-        const val ENV_VAR: String = "TIDINGS_PLUGIN_TOKEN"
+        const val ENV_VAR: String = "TENON_PLUGIN_TOKEN"
         const val TOKEN_FILE_NAME: String = "plugin-token"
 
         /** 测试与显式装配用：直接给一个 token（null/空 = 未配置）。 */

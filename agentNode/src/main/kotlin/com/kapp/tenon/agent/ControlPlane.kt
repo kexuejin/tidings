@@ -142,7 +142,7 @@ class ControlPlane(
     val plugins: PluginRegistry = PluginRegistry(),
     /**
      * 插件注册的 token 门闸（**强制**，方案 §2.3）。默认来源 = 环境变量
-     * `TIDINGS_PLUGIN_TOKEN`，其次数据目录下 0600 的 `plugins/plugin-token`；
+     * `TENON_PLUGIN_TOKEN`，其次数据目录下 0600 的 `plugins/plugin-token`；
      * 两者都没有时注册端点整体关闸（fail-closed）。它与控制面自身的 [token] 是
      * 两把不同的锁：插件注册只认插件 token，其余路由只认 [token]。
      */
@@ -233,7 +233,7 @@ class ControlPlane(
     /**
      * 是否注册仅开发可用的路由（默认关：生产路径不该有它）。 */
     internal val devRoutesEnabled: Boolean =
-        System.getenv("TIDINGS_DEV_ROUTES")?.let { it == "1" || it.equals("true", ignoreCase = true) } == true
+        System.getenv("TENON_DEV_ROUTES")?.let { it == "1" || it.equals("true", ignoreCase = true) } == true
 
     /** 解析失败（3 秒握手没等到）的短期记忆：key = "to[:port]"，value = 到期时刻。 */
     internal val resolveFailures = java.util.concurrent.ConcurrentHashMap<String, Long>()
@@ -480,7 +480,7 @@ class ControlPlane(
                 path == "/v1/send-file" && method == "POST" -> sendFile(exchange)
                 path == "/v1/transfers" && method == "GET" -> transfers(exchange)
                 path == "/v1/nudge" && method == "POST" -> nudge(exchange)
-                // 仅开发可用（TIDINGS_DEV_ROUTES=1）：在没有相机/触控的环境（iOS 模拟器、
+                // 仅开发可用（TENON_DEV_ROUTES=1）：在没有相机/触控的环境（iOS 模拟器、
                 // 集成测试）里完成「扫码后向对端发配对自证」这一步。前提是 pin 与
                 // pairingSecrets 已由扫码流程写进宿主状态 —— 它只负责发帧，不建立信任。
                 path == "/v1/dev/pair" && method == "POST" && devRoutesEnabled -> devPair(exchange)

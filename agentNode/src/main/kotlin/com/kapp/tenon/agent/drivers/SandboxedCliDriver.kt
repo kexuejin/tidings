@@ -185,7 +185,7 @@ class SandboxedCliDriver(
                 onEvent(
                     DriverEvent.Error(
                         "task timed out in sandbox after ${outcome.timeoutMs}ms — process tree killed, " +
-                            "worktree cleaned (raise TIDINGS_SANDBOX_TIMEOUT_MS for genuinely long tasks)",
+                            "worktree cleaned (raise TENON_SANDBOX_TIMEOUT_MS for genuinely long tasks)",
                     ),
                 )
             }

@@ -34,7 +34,7 @@ import kotlinx.serialization.json.putJsonArray
 // ------------------------------------------------------------ 插件注册（M2 宿主网关）
 //
 // 方案 §2.3：`POST /v1/plugin/register` 是插件的唯一入驻口，**强制**校验
-// TIDINGS_PLUGIN_TOKEN（没有它，本机任意进程都能自我入驻并领到任务与工作区授权）。
+// TENON_PLUGIN_TOKEN（没有它，本机任意进程都能自我入驻并领到任务与工作区授权）。
 // 注册通过后插件条目进 [plugins]，宿主按 baseUrl 主动探测 healthz 维护在线状态。
 
 /** 插件注册/注销共用的 token 门：没配（关闸）与不匹配（拒绝）是两个不同的答案。 */
@@ -45,7 +45,7 @@ private fun ControlPlane.pluginTokenGuard(exchange: HttpExchange): Boolean {
             503,
             errorJson(
                 "plugin-token-unconfigured",
-                "plugin registration is disabled: set TIDINGS_PLUGIN_TOKEN or ensure the " +
+                "plugin registration is disabled: set TENON_PLUGIN_TOKEN or ensure the " +
                     "plugins/plugin-token file under the host data dir (fail-closed by design)",
             ),
         )
@@ -58,8 +58,8 @@ private fun ControlPlane.pluginTokenGuard(exchange: HttpExchange): Boolean {
             401,
             errorJson(
                 "unauthorized",
-                "plugin registration requires a token: Authorization: Bearer <TIDINGS_PLUGIN_TOKEN> " +
-                    "or X-Tidings-Token header",
+                "plugin registration requires a token: Authorization: Bearer <TENON_PLUGIN_TOKEN> " +
+                    "or X-Tenon-Token header",
             ),
         )
         return false
