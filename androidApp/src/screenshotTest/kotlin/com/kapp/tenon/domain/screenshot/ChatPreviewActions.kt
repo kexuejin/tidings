@@ -35,6 +35,8 @@ internal fun chatPreviewActions(
     onCancelTransfer: ((String) -> Unit)? = null,
     onRequestScreenView: ((String) -> Unit)? = null,
     onResumeTransfer: ((String) -> Unit)? = null,
+    /** 工作区协同群帧（m-chat-workspace）要用：不传 = 进度条没有「⏹ 全局打断」，画的是假图。 */
+    onCancelAgentRun: ((peerId: String, sessionId: String, runId: String) -> Unit)? = null,
 ): ChatScreenActions = ChatScreenActions(
     onSend = { _, _, _ -> },
     onOpenAgentConsole = {},
@@ -49,4 +51,5 @@ internal fun chatPreviewActions(
     onCancelTransfer = onCancelTransfer,
     onRequestScreenView = onRequestScreenView,
     onResumeTransfer = onResumeTransfer,
+    onCancelAgentRun = onCancelAgentRun,
 )

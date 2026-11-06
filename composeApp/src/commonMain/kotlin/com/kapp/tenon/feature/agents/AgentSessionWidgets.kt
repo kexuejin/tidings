@@ -63,6 +63,7 @@ import com.kapp.tenon.ui.components.ThinkingBlock
 import com.kapp.tenon.ui.components.formatClock
 import com.kapp.tenon.ui.components.relativeTime
 import com.kapp.tenon.ui.theme.LocalAppSpacing
+import com.kapp.tenon.ui.theme.accents
 import com.kapp.tenon.ui.theme.RelayElevations
 import org.jetbrains.compose.resources.painterResource
 import org.jetbrains.compose.resources.stringResource
@@ -465,17 +466,19 @@ private fun AgentSessionPickRow(
                 overflow = TextOverflow.Ellipsis,
                 modifier = Modifier.weight(1f),
             )
-            // 待审批角标（有才画）
+            // 待审批角标（有才画）。形状与取色对齐原型 `.tag.pend`（999px 药丸 +
+            // 实心 --badge/--on-badge，relay.html:360）—— 6.dp 方角 + errorContainer
+            // 是和 WorkspaceUnitCard.PendingPill 各写一套的残留，2026-11-07 归一。
             if (pendingCount > 0) {
                 Surface(
-                    color = MaterialTheme.colorScheme.errorContainer,
-                    shape = RoundedCornerShape(6.dp),
+                    color = MaterialTheme.accents.badge,
+                    contentColor = MaterialTheme.accents.onBadge,
+                    shape = RoundedCornerShape(percent = 50),
                 ) {
                     Text(
                         text = stringResource(Res.string.agent_session_pending_count, pendingCount),
                         style = MaterialTheme.typography.labelSmall,
                         fontWeight = FontWeight.SemiBold,
-                        color = MaterialTheme.colorScheme.onErrorContainer,
                         modifier = Modifier.padding(horizontal = LocalAppSpacing.current.sm6, vertical = LocalAppSpacing.current.xxs),
                     )
                 }
@@ -545,18 +548,18 @@ internal fun AgentSessionBar(
             overflow = TextOverflow.Ellipsis,
             modifier = Modifier.weight(1f),
         )
-        // 待审批角标（有才画）
+        // 待审批角标（有才画）—— `.tag.pend` 药丸口径，见上一处同名的归一注记。
         if (pendingCount > 0) {
             Surface(
-                color = MaterialTheme.colorScheme.errorContainer,
-                shape = RoundedCornerShape(6.dp),
+                color = MaterialTheme.accents.badge,
+                contentColor = MaterialTheme.accents.onBadge,
+                shape = RoundedCornerShape(percent = 50),
             ) {
                 Text(
                     text = stringResource(Res.string.agent_session_pending_count, pendingCount),
                     style = MaterialTheme.typography.labelSmall,
                     fontWeight = FontWeight.SemiBold,
-                    color = MaterialTheme.colorScheme.onErrorContainer,
-                    modifier = Modifier.padding(horizontal = LocalAppSpacing.current.sm6, vertical = 1.5.dp),
+                    modifier = Modifier.padding(horizontal = LocalAppSpacing.current.sm6, vertical = LocalAppSpacing.current.xxs),
                 )
             }
         }

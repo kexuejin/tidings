@@ -39,6 +39,7 @@ import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.Path
 import androidx.compose.ui.graphics.drawscope.Stroke
+import androidx.compose.ui.graphics.toArgb
 import androidx.compose.ui.graphics.toComposeImageBitmap
 import androidx.compose.ui.input.key.Key
 import androidx.compose.ui.input.key.KeyEventType
@@ -147,7 +148,9 @@ fun CaptureOverlayView(
 
         val strokeScale = (crop.scaleX + crop.scaleY) / 2f
         val strokeWidth = max(2f, 3f * strokeScale)
-        g2.color = java.awt.Color(0x2D, 0x6A, 0x4F) // RelayPrimary
+        // RelayPrimary 经 toArgb 取 AWT 色（与 DesktopServices 托盘同一做法）；
+        // 手抄 (0x2D,0x6A,0x4F) 是第二份真相，主题改值时这里不会跟。
+        g2.color = java.awt.Color(RelayPrimary.toArgb())
         g2.stroke = BasicStroke(strokeWidth, BasicStroke.CAP_ROUND, BasicStroke.JOIN_ROUND)
 
         for (ann in annotations) {

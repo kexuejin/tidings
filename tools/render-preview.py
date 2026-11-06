@@ -50,6 +50,9 @@ import re
 import subprocess
 import sys
 
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+import ktcomments  # noqa: E402  唯一注释剥离实现
+
 REPO = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 SRC_DIRS = [
     "androidApp/src/screenshotTest/kotlin",
@@ -112,10 +115,10 @@ def refs_for_class(cls: str) -> list:
 # ---- 渲染前置自检：Res.* 扩展属性的 import 与声明 ----
 
 RES_USAGE_RE = re.compile(r"\bRes\.(string|drawable|plurals|array|font)\.([A-Za-z_]\w*)")
-RES_IMPORT_RE = re.compile(r"^import\s+app\.relay\.generated\.resources\.([A-Za-z_]\w*)", re.M)
-RES_WILDCARD_RE = re.compile(r"^import\s+app\.relay\.generated\.resources\.\*", re.M)
-BLOCK_COMMENT_RE = re.compile(r"/\*.*?\*/", re.S)
-LINE_COMMENT_RE = re.compile(r"//[^\n]*")
+# 2026-11-07：包名随品牌升级 tidings→tenon 改为 `com.kapp.tenon.generated.resources`
+# （此前还停在 `app.relay.*`，rebrand 之后本自检对每个用 Res.* 的生产文件都误报缺 import）。
+RES_IMPORT_RE = re.compile(r"^import\s+com\.kapp\.tenon\.generated\.resources\.([A-Za-z_]\w*)", re.M)
+RES_WILDCARD_RE = re.compile(r"^import\s+com\.kapp\.tenon\.generated\.resources\.\*", re.M)
 RES_SRC_GLOBS = [
     "composeApp/src/*/kotlin",
     "core/src/*/kotlin",
@@ -124,8 +127,12 @@ RES_ROOT = "composeApp/src/commonMain/composeResources"
 
 
 def strip_comments(src: str) -> str:
-    src = BLOCK_COMMENT_RE.sub(lambda m: "\n" * m.group(0).count("\n"), src)
-    return LINE_COMMENT_RE.sub("", src)
+    """委托 `ktcomments.py`（全仓唯一一份，字符串感知）。
+
+    2026-11-07 前这里是「先正则剥块注释」：行注释里的 `arrayOf("*/*")`（DesktopComposer.kt）
+    会让块注释提前开点吞掉约 280 行真实代码，本文件据此做的 Res.* import 自检会漏报。
+    """
+    return ktcomments.strip_comments(src)
 
 
 def declared_resources() -> set:
@@ -152,6 +159,13 @@ def res_precheck() -> list:
     rows = []
     for pattern in RES_SRC_GLOBS:
         for path in sorted(glob.glob(os.path.join(REPO, pattern, "**", "*.kt"), recursive=True)):
+            # 本自检守的是 `:composeApp:compileAndroidMain`（下方报错文案的口径）——
+            # 测试源集不进那次编译，而且守卫测试常把 `Res.string.X` 当**锚点字符串**
+            # 传给断言助手（字符串内容按 ktcomments 契约原样保留），扫进去全是误报。
+            if any(seg in path for seg in ("/jvmTest/", "/commonTest/", "/androidTest/")):
+                continue
+            if os.path.basename(path).endswith("Test.kt"):
+                continue
             src = strip_comments(open(path, encoding="utf-8").read())
             used = {}
             for i, line in enumerate(src.splitlines(), 1):

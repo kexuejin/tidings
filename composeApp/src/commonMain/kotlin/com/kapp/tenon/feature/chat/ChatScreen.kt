@@ -184,6 +184,7 @@ fun ChatScreen(
     val initialEmojiOpen = chrome.initialEmojiOpen
     val initialHistorySearch = chrome.initialHistorySearch
     val initialScreenRequestConfirmOpen = chrome.initialScreenRequestConfirmOpen
+    val initialMoreOpen = chrome.initialMoreOpen
     /** null = 用内置输入栏；非 null = 桌面壳自己提供的输入卡片。 */
     val composerSlot: (@Composable (ComposerSlotArgs) -> Unit)? = chrome.composerSlot
     val sp = LocalAppSpacing.current
@@ -1109,6 +1110,7 @@ fun ChatScreen(
                 readOnlyReason = if (leftGroup) stringResource(Res.string.chat_group_readonly_left) else null,
                 focusRequester = composerFocus,
                 initialEmojiOpen = initialEmojiOpen,
+                initialMoreOpen = initialMoreOpen,
                 // 与桌面输入卡片（composerSlot）共用同一个出口：草稿复位、外部草稿表
                 // 清空、引用态清空、replyId 传递四件事都在 submitMessage 里一起发生。
                 onSend = { submitMessage(draft, replyingToMessage?.id) },

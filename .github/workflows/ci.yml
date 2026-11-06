@@ -134,6 +134,14 @@ jobs:
       - name: 逐屏调色板对账
         run: python3 tools/check-design-palette.py --strict
 
+      # 上面那条只判「画出来的像素是不是这套色板」。CSS 里 `var(--x)` 指向一个
+      # 没定义过的变量时，浏览器整条属性作废、页面照常渲染 —— 没画出来的颜色
+      # 一个像素都不会进直方图。2026-11-06 实测原型有 4 个死变量共 9 处消费
+      # （文件卡背景、输入区芯片边框、工作区横条分隔线、弹窗小字），以及深色
+      # 主题漏覆盖的 :root 颜色变量，都只能从 CSS 文本层判。
+      - name: 原型稿 · CSS 变量语义（死引用 / 深色漏覆盖）
+        run: python3 tools/check-design-palette.py --css-vars
+
       # Kotlin 编译器不为未使用的 import 报警告（只有 IDE 灰掉），所以搬运/拆分
       # 留下的死 import 没有任何门禁看得见 —— 本仓真积过 711 条。这条补上。
       - name: 未使用的 import

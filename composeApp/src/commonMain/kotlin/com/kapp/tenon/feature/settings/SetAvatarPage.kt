@@ -17,7 +17,6 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
-import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
@@ -91,6 +90,7 @@ import com.kapp.tenon.ui.components.TitleBarDivider
 import com.kapp.tenon.ui.components.formatAvatarByteCount
 import com.kapp.tenon.ui.theme.LocalAppSpacing
 import com.kapp.tenon.ui.theme.RelayAvatarGradientFrom
+import com.kapp.tenon.ui.theme.ShapeRoles
 import com.kapp.tenon.ui.theme.RelayAvatarGradientMid
 import com.kapp.tenon.ui.theme.RelayAvatarGradientTo
 import org.jetbrains.compose.resources.DrawableResource
@@ -500,7 +500,7 @@ private fun StepRow(
         Box(
             modifier = Modifier
                 .size(30.dp)
-                .clip(RoundedCornerShape(9.dp))
+                .clip(ShapeRoles.Avatar)
                 .background(MaterialTheme.colorScheme.surfaceVariant),
             contentAlignment = Alignment.Center,
         ) {

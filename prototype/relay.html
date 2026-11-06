@@ -1327,8 +1327,8 @@ body[data-bare="1"] .win{border-radius:0;box-shadow:none}
 .filecard .fi{width:34px;height:34px;border-radius:9px;background:var(--primary-c);color:var(--on-primary-c);
   display:grid;place-items:center;flex:none;overflow:hidden}
 .filecard .fi.code{background:var(--agent-c);color:var(--agent-t)}
-.filecard .fi.archive{background:var(--secondary-c);color:var(--on-secondary-c)}
-.filecard .fi.audio{background:var(--secondary-c);color:var(--on-secondary-c)}
+.filecard .fi.archive{background:var(--queued-c);color:var(--on-queued-c)}
+.filecard .fi.audio{background:var(--queued-c);color:var(--on-queued-c)}
 .filecard .fi.warn{background:rgba(245,158,11,.16);color:#f59e0b}
 .win .filecard .fi{width:32px;height:32px}
 .filecard .fi svg{width:18px;height:18px}
@@ -1367,7 +1367,7 @@ body[data-bare="1"] .win{border-radius:0;box-shadow:none}
 /* §9 快捷指令芯片行（常驻，仅群聊；桌面关）。命令文本是字面量不本地化，图标复用既有符号。
    取值：高 28 / 圆角 14 / 字号 12 / 水平内边距 10 / 元素间距 8 —— 代码侧 ChatScreen→MessageComposer.quickActions 按同值消费。 */
 .composer .qrow{display:flex;gap:8px;margin-bottom:8px}
-.composer .qchip{display:inline-flex;align-items:center;gap:4px;height:28px;padding:0 10px;border-radius:12px;border:1px solid var(--border);background:var(--surface);color:var(--on-2);font-size:12px;cursor:pointer}
+.composer .qchip{display:inline-flex;align-items:center;gap:4px;height:28px;padding:0 10px;border-radius:12px;border:1px solid var(--outline);background:var(--surface);color:var(--on-2);font-size:12px;cursor:pointer}
 .composer .qchip svg{width:14px;height:14px}
 /* 输入区能力排：
    表情 · PK · 窗口震动 · 截图 · 图片 · 文件 · 文件夹，历史搜索吊在最右侧。
@@ -4173,13 +4173,13 @@ function screenMChatWorkspace(){
       [{icon:'info', label:'群信息与成员', to:'m-groupinfo'}], true, 'chat',
       headAv('协', '#3F6FA8'),
       '<span class="tag agent">工作区协同</span><span class="tag ok">3人在线</span>')}
-  <div style="background:var(--surface-2);border-bottom:1px solid var(--border);padding:6px 12px;font-size:12px;display:flex;align-items:center;justify-content:space-between">
+  <div style="background:var(--surface-2);border-bottom:1px solid var(--hair);padding:6px 12px;font-size:12px;display:flex;align-items:center;justify-content:space-between">
     <div style="display:flex;align-items:center;gap:6px;color:var(--primary);font-weight:600">
       <span>${ic('refresh')} Codex 正在执行重构任务...</span>
     </div>
     <button class="btn sm danger" style="padding:2px 8px;font-size:11px">⏹ 全局打断</button>
   </div>
-  <div style="background:var(--surface-3);border-bottom:1px solid var(--border);padding:6px 12px;font-size:11px;color:var(--on-2);display:flex;align-items:center;gap:6px">
+  <div style="background:var(--surface-3);border-bottom:1px solid var(--hair);padding:6px 12px;font-size:11px;color:var(--on-2);display:flex;align-items:center;gap:6px">
     <span>🌙 宿主设备睡眠/离线中 · 命令已安全排队挂起，待宿主唤醒后自动断点续传</span>
   </div>
   <div class="scroll"><div class="msgs">${msgsOf(MSGS_GROUP)}</div></div>
@@ -4918,9 +4918,9 @@ function createWsModalHTML(w, open){
           </div>
         </div>
 
-        <div style="text-align:center;color:var(--on-3);font-size:12px;margin:8px 0;position:relative">
+        <div style="text-align:center;color:var(--on-2);font-size:12px;margin:8px 0;position:relative">
           <span style="background:var(--surface);padding:0 8px;position:relative;z-index:1">或关联本地全新目录</span>
-          <div style="position:absolute;top:50%;left:0;right:0;height:1px;background:var(--border);z-index:0"></div>
+          <div style="position:absolute;top:50%;left:0;right:0;height:1px;background:var(--hair);z-index:0"></div>
         </div>
 
         <div class="grphead">关联本地新目录</div>
@@ -7655,6 +7655,13 @@ if (Q.get('grantqr') === '1') openGrantQrModal();
 if (Q.get('createws') === '1') openCreateWsModal();
 /* 钩子开着时把菜单也展开，截图里才看得到菜单内容。 */
 if (amQ) document.querySelectorAll('.hdmore').forEach(x => x.classList.add('on'));
+
+/* 首次渲染。2026-11-07 修复：这行在某次旧编辑中丢失（bacb7530 之前），此后
+   shoot-relay 每一帧都拍到空 stage —— dump-layout 走 iframe 注入不受影响，
+   manifest 的 sha 门禁只绑「拍没拍」、绑不了「拍到了内容」，8KB 空白页照样过，
+   11-06 的全量空白截图就是这么被固化成 manifest 的。上面的参数块注释
+   「必须在首次 render() 之前生效」说的就是这个调用 —— 丢了它，那段约定全部悬空。 */
+go(curScreen);
 </script>
 </body>
 </html>

@@ -160,6 +160,7 @@ open Tenon.xcodeproj
           :designTokenUsageGate :designStateSlotGate :designLocaleParityGate \
           :jlinkModulesGate --continue
 python3 tools/unused-imports.py --check
+python3 tools/check-design-palette.py --css-vars
 ```
 
 动了 UI / 设计 token / 截图夹具，还要跑设计契约门禁：`designScreenDiffGate`、`designIconGate`、`designConvergeGate`、`designFormPairingGate`、`designPreviewPairingGate`、`designDupFrameGate`、`designDpDebtGate`。

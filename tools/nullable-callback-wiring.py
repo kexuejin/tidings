@@ -42,6 +42,9 @@ import re
 import sys
 import pathlib
 
+sys.path.insert(0, str(pathlib.Path(__file__).resolve().parent))
+import ktcomments  # noqa: E402  唯一注释剥离实现（字符串感知，见模块头）
+
 ROOTS = ["composeApp/src", "desktopApp/src/main"]
 SKIP_FUNS = {"remember", "derivedStateOf", "LaunchedEffect", "key"}
 
@@ -96,9 +99,12 @@ def read(path: pathlib.Path) -> str:
 
 
 def strip_comments(src: str) -> str:
-    src = re.sub(r"/\*.*?\*/", "", src, flags=re.S)
-    src = re.sub(r"//[^\n]*", "", src)
-    return src
+    """委托 `ktcomments.py`（全仓唯一一份）。
+
+    2026-11-07 前这里是「先正则剥块注释」的两遍实现：行注释里的 `arrayOf("*/*")`
+    会让块注释提前开点吞掉后续真实代码，守卫会因此漏判。
+    """
+    return ktcomments.strip_comments(src)
 
 
 def function_signature(txt: str, fn: str):

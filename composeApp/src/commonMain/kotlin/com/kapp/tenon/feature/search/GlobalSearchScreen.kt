@@ -280,6 +280,12 @@ private fun SearchTopBar(
     Row(
         modifier = Modifier
             .fillMaxWidth()
+            // `.topbar.gs` 继承 `.topbar{background:var(--surface)}`：顶栏是抬起的白面，
+            // 下面的结果区才透出 `--bg`。此前这一行没铺色，进搜索后顶部直接落到
+            // `background` 上 —— 与其它页的顶栏差一档（深色下一整条色带）。
+            // 根 Surface 用 background 是对的（整屏替换列表，见本文件上方注释），
+            // 要补的是**顶栏自己**这层面，不是把整屏改回 surface。
+            .background(MaterialTheme.colorScheme.surface)
             .padding(horizontal = sp.md, vertical = sp.sm),
         verticalAlignment = Alignment.CenterVertically,
         horizontalArrangement = Arrangement.spacedBy(sp.sm),

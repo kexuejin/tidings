@@ -1116,10 +1116,13 @@ fun RelayApp(
                         )
                         // 设置覆盖层。平板形态没有独立设置窗口可开，就地盖一整屏，
                         // 返回键由上面 tabletSettingsOpen 那处的 BackKeyHandler 接管。
+                        // 根背景与手机/桌面设置同走 background：设置里的分组卡是 surface，
+                        // 盖一层 surface 会让整页和卡片同色、只剩描边（手机 SettingsHomeScreen
+                        // 的根是 CompactScaffold 默认 background）。
                         if (tabletSettingsOpen) {
                             Surface(
                                 modifier = Modifier.fillMaxSize(),
-                                color = MaterialTheme.colorScheme.surface,
+                                color = MaterialTheme.colorScheme.background,
                             ) {
                                 settingsContent(Modifier.fillMaxSize())
                             }

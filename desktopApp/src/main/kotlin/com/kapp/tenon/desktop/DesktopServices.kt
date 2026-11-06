@@ -11,6 +11,7 @@ import java.awt.SystemTray
 import java.awt.TrayIcon
 import java.awt.image.BufferedImage
 import com.kapp.tenon.ui.theme.RelayPrimary
+import com.kapp.tenon.ui.theme.RelayError
 import com.kapp.tenon.ui.theme.RelayLightColors
 import java.io.File
 import java.time.Instant
@@ -122,7 +123,9 @@ internal object DesktopNotifications {
         g.color = Color(RelayLightColors.primaryContainer.toArgb(), true)
         g.fillOval(4, 4, size - 8, size - 8)
         if (hasUnread) {
-            g.color = Color(0xFFE53935.toInt())
+            // RelayError（#E63946）：0xFFE53935 是 error 的第二份真相，差一个色号 ——
+            // 同一次重绘里底板已经走了 RelayPrimary.toArgb()，点没有理由抄字面量。
+            g.color = Color(RelayError.toArgb(), true)
             g.fillOval(size - 6, 0, 6, 6)
         }
         g.dispose()

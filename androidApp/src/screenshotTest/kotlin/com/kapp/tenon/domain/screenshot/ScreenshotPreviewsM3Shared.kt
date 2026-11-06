@@ -43,6 +43,8 @@ import com.kapp.tenon.feature.chat.cardRowOutcome
 import com.kapp.tenon.feature.chat.latestRevCardMessageIds
 import com.kapp.tenon.feature.chat.parseAgentCard
 import com.kapp.tenon.ui.components.SetGroupAgentWorkspacesDialog
+import com.kapp.tenon.ui.components.WorkspaceGroupCreateDialog
+import com.kapp.tenon.ui.components.WorkspaceQrDialog
 import com.kapp.tenon.ui.theme.AppTheme
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.add
@@ -332,6 +334,79 @@ private fun GroupAuthReadonlyPhonePreview() {
                 wsTitleOf = { null },
                 onDismiss = {},
                 onSave = null,
+            )
+        }
+    }
+}
+
+// ── 关联工作区建群 / 直通码（m-createws · d-createws · d-grantqr）──────────
+//
+// 2026-11-07 补帧：这三屏此前**台账无行、全稿无帧** —— 对话框组件早就存在
+// （`WorkspaceGroupCreateDialog` / `WorkspaceQrDialog`），缺的只是证据。
+// 夹具复用授权面板那组 `previewPanelWorkspaces()`，保证同一份工作区数据
+// 在「授权 / 建群 / 直通码」三张帧里说的是同一件事。
+
+/** `m-createws`：关联工作区建群（手机档）。 */
+@PreviewTest
+@Preview(name = "m3-workspace-group-create", widthDp = 393, heightDp = 852, showBackground = true, locale = "zh-rCN")
+@Composable
+private fun WorkspaceGroupCreatePhonePreview() {
+    AppTheme(darkTheme = false) {
+        Surface(color = MaterialTheme.colorScheme.surface, modifier = Modifier.fillMaxSize()) {
+            WorkspaceGroupCreateDialog(
+                workspaces = previewPanelWorkspaces(),
+                onDismiss = {},
+                onOpenChat = {},
+                onShowQr = {},
+                onQuickCreate = { _, _ -> },
+                onCreateNew = { _, _, _ -> },
+            )
+        }
+    }
+}
+
+/** `d-createws`：关联工作区建群（桌面档，1280×800 与 d-wsgrant 桌面帧同尺寸）。 */
+@PreviewTest
+@Preview(name = "desk-m3-workspace-group-create", widthDp = 1280, heightDp = 800, showBackground = true, locale = "zh-rCN")
+@Composable
+private fun WorkspaceGroupCreateDeskPreview() {
+    AppTheme(darkTheme = false) {
+        Surface(color = MaterialTheme.colorScheme.surface, modifier = Modifier.fillMaxSize()) {
+            WorkspaceGroupCreateDialog(
+                workspaces = previewPanelWorkspaces(),
+                onDismiss = {},
+                onOpenChat = {},
+                onShowQr = {},
+                onQuickCreate = { _, _ -> },
+                onCreateNew = { _, _, _ -> },
+            )
+        }
+    }
+}
+
+/**
+ * `d-grantqr`：工作区直通码（桌面档）。
+ *
+ * `tlsPin` / `nick` 必须给（task-86 纪律：公网拨号 fail-closed，不印 pin 手机建不出
+ * TLS 目标；不印 nick 对方节点表就是合成名）—— 装饰性参数留空的帧会掩盖
+ * 「预算装不下 pin」这类真实缺陷。
+ */
+@PreviewTest
+@Preview(name = "desk-m3-workspace-qr", widthDp = 1280, heightDp = 800, showBackground = true, locale = "zh-rCN")
+@Composable
+private fun WorkspaceQrDeskPreview() {
+    val ws = previewPanelWorkspaces().first()
+    AppTheme(darkTheme = false) {
+        Surface(color = MaterialTheme.colorScheme.surface, modifier = Modifier.fillMaxSize()) {
+            WorkspaceQrDialog(
+                wsTitle = ws.wsTitle ?: ws.wsId,
+                wsId = ws.wsId,
+                wsPath = ws.wsPath,
+                host = "192.168.1.10",
+                port = 49213,
+                onDismiss = {},
+                tlsPin = "PREVIEW-TLS-PIN-43-BYTES-ABCD1234567890ABCDEF",
+                nick = "预览主机",
             )
         }
     }

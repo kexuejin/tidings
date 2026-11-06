@@ -188,19 +188,18 @@ internal fun ChatHeader(
                 "error" -> stringResource(Res.string.agent_session_state_error)
                 else -> stringResource(Res.string.agent_session_state_idle)
             }
-            buildString {
-                if (workspaceName != null) {
-                    append(workspaceName)
-                    append(" · ")
+            // 副标题只放「工作区 · 会话 · 状态」。在线/离线在标题行的 titleTrailing 已有
+            // （StatusDot + 文字），这里再放一份就是同一语义说两遍 —— Agent 会话头部会
+            // 连读出「在线 / 在线」两行（原型 m03-chat 的副标题是 IP:端口·TCP·能力，
+            // 也没有第二份在线态）。两段都没有时副标题回退到在线态，保证不空。
+            listOf(
+                workspaceName,
+                sessionName?.let { "$sessionName · $sessionState" },
+            ).filterNotNull().joinToString(" · ")
+                .ifEmpty {
+                    if (peer.online) stringResource(Res.string.common_online)
+                    else stringResource(Res.string.common_offline)
                 }
-                if (sessionName != null) {
-                    append(sessionName)
-                    append(" · ")
-                    append(sessionState)
-                    append(" · ")
-                }
-                append(if (peer.online) stringResource(Res.string.common_online) else stringResource(Res.string.common_offline))
-            }
         } else {
             buildString {
                 if (restored) {

@@ -9,6 +9,7 @@ import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.material3.DropdownMenu
@@ -29,6 +30,7 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.em
@@ -77,6 +79,14 @@ fun LargeTitleBar(
     modifier: Modifier = Modifier,
     subtitle: String? = null,
     onBack: (() -> Unit)? = null,
+    /**
+     * `onBack` 那颗按钮的图标。默认是与原型 `i-back` 同源的 `ic_arrow_back`；
+     * 传别的值只该用于「语义不是返回」的场合 —— 文件柜桌面 Compact 档最左那颗是
+     * 「回列表」（`ic_list`），画成返回箭头等于让两条不同的导航动作共用一个字形。
+     */
+    navigationIcon: DrawableResource? = null,
+    /** 换图标时也要换读屏文案；默认沿用 [Res.string.action_back]。 */
+    navigationIconDescription: String? = null,
     actions: @Composable () -> Unit = {},
     contentMaxWidth: Dp? = null,
 ) {
@@ -96,6 +106,11 @@ fun LargeTitleBar(
                         Modifier.fillMaxWidth()
                     },
                 )
+                // 顶栏高度只由**有没有动作按钮**决定是不对的：动作按钮包在 48dp 触控框里，
+                // 标题+副标题那列只有约 44dp，于是「设置 / 文件柜」比「消息 / 节点 /
+                // 工作区」矮 4dp（真机 1080×2400 上白色色带分别止于 y=279 / y=290）。
+                // 钉一个 48dp 下限，五页标题栏才真的是同一条。
+                .heightIn(min = sp.xxxl)
                 .padding(horizontal = sp.lg),
             verticalAlignment = Alignment.CenterVertically,
         ) {
@@ -103,8 +118,8 @@ fun LargeTitleBar(
                 // 可点目标必须读得出来：给 null 的后果是读屏软件只会念"按钮"，
                 // 用户不知道它做什么（装饰性图标才该用 null，见同文件下游那几颗）。
                 AppIconButton(
-                    icon = Res.drawable.ic_arrow_back,
-                    contentDescription = stringResource(Res.string.action_back),
+                    icon = navigationIcon ?: Res.drawable.ic_arrow_back,
+                    contentDescription = navigationIconDescription ?: stringResource(Res.string.action_back),
                     onClick = onBack,
                 )
             }
@@ -126,6 +141,12 @@ fun LargeTitleBar(
                         text = subtitle,
                         style = MaterialTheme.typography.labelSmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        // 原型 `.topbar .sub` 是 white-space:nowrap + text-overflow:ellipsis：
+                        // 副标题永远一行。不钉的话工作区那句「N 台设备 · N 个 Agent ·
+                        // N 个工作区 · N 项待审批」在窄屏折成两行，把这一页的顶栏撑得
+                        // 比其它四个页签高一截 —— 又是「标题栏不一样」。
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis,
                     )
                 }
             }

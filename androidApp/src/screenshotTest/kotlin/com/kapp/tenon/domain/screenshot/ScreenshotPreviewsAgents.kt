@@ -23,6 +23,8 @@ import com.kapp.tenon.domain.RelaySettings
 import com.kapp.tenon.domain.RelayUiState
 import com.kapp.tenon.domain.model.ScanProgressUi
 import com.kapp.tenon.domain.model.ScreenSessionUiState
+import com.kapp.tenon.domain.model.WorkspaceKey
+import com.kapp.tenon.domain.model.WorkspaceUi
 import com.kapp.tenon.domain.navBadges
 import com.kapp.tenon.core.protocol.ScreenEndReasons
 import com.kapp.tenon.core.protocol.ScreenMode
@@ -487,6 +489,76 @@ private fun DialogBackdrop(content: @Composable () -> Unit) {
         Surface(color = MaterialTheme.colorScheme.surface, modifier = Modifier.fillMaxSize()) {
             content()
         }
+    }
+}
+
+/**
+ * `m-workspacedetail` —— 工作区详情（手机档）。
+ *
+ * 2026-11-07 补帧：原型 2026-10-13 提案时台账记「待建」，但代码侧
+ * `WorkspaceDetailView`（经 `AgentConsoleScreen` 的 `detailWsId` 分支，`:202`）
+ * 早已落地 —— 缺的只是证据。夹具在 `agentsRichState()` 上补一条
+ * `agent-workspace` 宣告 + 一条带 `wsId` 的会话，走的就是生产那支。
+ */
+@PreviewTest
+@Preview(name = "agents-workspace-detail", widthDp = 393, heightDp = 852, showBackground = true, locale = "zh-rCN")
+@Composable
+private fun WorkspaceDetailPhonePreview() {
+    val state = agentsRichState().let { st ->
+        val ws = WorkspaceUi(
+            peerId = teahouseAgent.nodeId,
+            agentKey = teahouseAgent.nodeId,
+            wsId = "ws-teahouse",
+            wsTitle = "teahouse-mobile",
+            wsPath = "/srv/teahouse-mobile",
+            agentKind = "DSH",
+            online = true,
+            sessionCount = 1,
+            at = at(20),
+        )
+        st.copy(
+            agentWorkspaces = st.agentWorkspaces + (
+                WorkspaceKey(peerId = ws.peerId, agentKey = ws.agentKey, wsId = ws.wsId) to ws
+                ),
+            agentSessions = st.agentSessions + (
+                AgentSessionKey(ws.peerId, "sess-ws-1") to AgentSessionUi(
+                    peerId = ws.peerId,
+                    sessionId = "sess-ws-1",
+                    alias = "refactor runner",
+                    agentKind = "DSH",
+                    state = "busy",
+                    title = "把 runner 拆成八条臂，逐臂跑门禁",
+                    startedAt = at(4),
+                    updatedAt = at(24),
+                    agentId = teahouseAgent.nodeId,
+                    wsId = ws.wsId,
+                    wsTitle = ws.wsTitle,
+                    wsPath = ws.wsPath,
+                )
+                ),
+        )
+    }
+    AgentsPhoneShell(state) { inner ->
+        AgentConsoleScreen(chatSlice = previewSlicesOf(state).chat,settingsSlice = previewSlicesOf(state).settings,nodeSlice = previewSlicesOf(state).node,agentSlice = previewSlicesOf(state).agent,
+            selectedAgentId = teahouseAgent.nodeId,
+            onSelectAgent = {},
+            onOpenChat = { _, _ -> },
+            onFindNodes = {},
+            onRefresh = {},
+            onRespondApproval = { _, _ -> },
+            onCancelTask = {},
+            onBackToBoard = {},
+            // 按生产调用点武装（App.kt 的 AgentConsoleScreen 调用 / AgentsPhonePreview 同清单）：
+            // 可空闸门不传 = 依赖它的那一支根本不渲染，截图证据里就没有它。
+            onOpenWorkspaceDetail = { _, _ -> },
+            onLeaveWorkspaceDetail = {},
+            onLeaveSessionDetail = {},
+            onOpenSessionDetail = { _, _ -> },
+            onLoadWorkspaceSessions = { _, _ -> },
+            onCreateWorkspaceGroup = {},
+            detailWsId = "ws-teahouse",
+            modifier = inner,
+        )
     }
 }
 

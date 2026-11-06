@@ -19,3 +19,8 @@ print("抽出 %d 个 script 块，%d 字符" % (len(blocks), len(js)))
 PY
 node --check /tmp/relay-check.js
 echo "relay.html 语法 OK"
+
+# CSS 颜色变量语义：var(--x) 指向没定义过的变量不会报错，只会让那条 background /
+# border / color 静默作废。截图门禁只查画出来的像素，照不到「没画出来的颜色」。
+# 判据复用已跟踪的调色板工具，不在原型目录里另养一份。
+python3 ../tools/check-design-palette.py --css-vars --root ..

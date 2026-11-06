@@ -736,6 +736,141 @@ private fun ChatGroupInfoAgentsPhonePreview() {
 }
 
 /**
+ * `m-chat-more` —— 聊天·更多功能（➕ 面板展开态）。
+ *
+ * 原型是聊天屏 + 底部展开的能力网格（`screenChatMore` 走 `moreOpen=true`）。
+ * 代码真身 = `MessageComposer` 的 `initialMoreOpen`；`ChatScreenChrome.initialMoreOpen`
+ * 是本轮补的截图接缝 —— 面板挂在屏内 `remember` 后面，静态帧点不到，
+ * 先例 = `initialHistorySearch` / `SessionDetailView.initialPicking`。
+ * 2026-11-07 前这一屏没有任何帧（台账也没行）。
+ */
+@PreviewTest
+@Preview(name = "chat-more-open", widthDp = 393, heightDp = 852, showBackground = true, locale = "zh-rCN")
+@Composable
+private fun ChatMoreOpenPhonePreview() {
+    BareScreen { inner ->
+        ChatShell("conversations", chatBase) { shell ->
+            androidx.compose.foundation.layout.Box(modifier = shell) {
+                ChatScreen(
+                    data = ChatScreenState(
+                        chatSlice = previewSlicesOf(chatBase).chat,
+                        agentSlice = previewSlicesOf(chatBase).agent,
+                        nodeSlice = previewSlicesOf(chatBase).node,
+                        settingsSlice = previewSlicesOf(chatBase).settings,
+                        chromeSlice = previewSlicesOf(chatBase).chrome,
+                        peerId = linId,
+                        cacheDir = previewCacheDir,),
+                    actions = chatPreviewActions(onAttachFile = {}, onRecallMessage = {}, onNudge = {}),
+                    chrome = ChatScreenChrome(
+                        modifier = inner,
+                        initialMoreOpen = true,
+                    )
+                )
+            }
+        }
+    }
+}
+
+/**
+ * `m-chat-group-more` —— 群聊·更多功能（➕ 面板展开态，群夹具）。
+ *
+ * 与上一帧同一接缝，换成群会话：群里的能力网格比私聊多（截图/文件之外还有
+ * 群信息入口等），这一帧钉的是群形态下面板的实际项数与排布。
+ */
+@PreviewTest
+@Preview(name = "chat-group-more-open", widthDp = 393, heightDp = 852, showBackground = true, locale = "zh-rCN")
+@Composable
+private fun ChatGroupMoreOpenPhonePreview() {
+    val groupState = desktopPreviewGroupState()
+    BareScreen { inner ->
+        ChatShell("conversations", groupState) { shell ->
+            androidx.compose.foundation.layout.Box(modifier = shell) {
+                ChatScreen(
+                    data = ChatScreenState(
+                        chatSlice = previewSlicesOf(groupState).chat,
+                        agentSlice = previewSlicesOf(groupState).agent,
+                        nodeSlice = previewSlicesOf(groupState).node,
+                        settingsSlice = previewSlicesOf(groupState).settings,
+                        chromeSlice = previewSlicesOf(groupState).chrome,
+                        peerId = groupConvId,
+                        cacheDir = previewCacheDir,),
+                    actions = chatPreviewActions(onAttachFile = {}, onRecallMessage = {}, onNudge = {}),
+                    chrome = ChatScreenChrome(
+                        modifier = inner,
+                        initialMoreOpen = true,
+                    )
+                )
+            }
+        }
+    }
+}
+
+/**
+ * `m-chat-workspace` —— 工作区协同群聊（带执行感知与审批门控）。
+ *
+ * 原型两道感知横幅：执行中互斥条（`GroupProgressBar` + ⏹ 全局打断）与
+ * 宿主休眠柔性提示条（排队挂起）。夹具同时成立两件事：
+ * - `virtualAgents.hostNodeId` 与进行中 `agentRuns` 的 `peerId` 都指向**老周**
+ *   （夹具里离线的那位）⇒ 进度条与休眠横幅的判据同时满足；
+ * - `onCancelAgentRun` 必须传 —— 不传 = 进度条没有打断按钮，画的是假图
+ *   （`chatPreviewActions` 本轮为它补了透传槽）。
+ */
+@PreviewTest
+@Preview(name = "chat-workspace-run", widthDp = 393, heightDp = 852, showBackground = true, locale = "zh-rCN")
+@Composable
+private fun ChatWorkspaceRunPhonePreview() {
+    val groupState = desktopPreviewGroupState().let { st ->
+        val agents = listOf(
+            com.kapp.tenon.core.protocol.VirtualAgentMember(
+                agentId = "codex",
+                hostNodeId = zhouId,
+                name = "codex",
+            ),
+        )
+        val runKey = com.kapp.tenon.domain.model.AgentRunKey(peerId = zhouId, runId = "run-preview-1")
+        val run = com.kapp.tenon.domain.model.AgentRunUi(
+            runId = "run-preview-1",
+            sessionId = "sess-preview-1",
+            peerId = zhouId,
+            state = "running",
+            at = 0L,
+            updatedAt = 0L,
+        )
+        st.copy(
+            settings = st.settings.copy(
+                groups = st.settings.groups.map { gm -> gm.copy(virtualAgents = agents) },
+            ),
+            agentRuns = st.agentRuns + (runKey to run),
+        )
+    }
+    BareScreen { inner ->
+        ChatShell("conversations", groupState) { shell ->
+            androidx.compose.foundation.layout.Box(modifier = shell) {
+                ChatScreen(
+                    data = ChatScreenState(
+                        chatSlice = previewSlicesOf(groupState).chat,
+                        agentSlice = previewSlicesOf(groupState).agent,
+                        nodeSlice = previewSlicesOf(groupState).node,
+                        settingsSlice = previewSlicesOf(groupState).settings,
+                        chromeSlice = previewSlicesOf(groupState).chrome,
+                        peerId = groupConvId,
+                        cacheDir = previewCacheDir,),
+                    actions = chatPreviewActions(
+                        onAttachFile = {},
+                        onRecallMessage = {},
+                        onNudge = {},
+                        onCancelAgentRun = { _, _, _ -> },
+                    ),
+                    chrome = ChatScreenChrome(
+                        modifier = inner,
+                    )
+                )
+            }
+        }
+    }
+}
+
+/**
  * `m-insets` —— 适配对照与诊断。
  *
  * 原型 `m14-insets.png` 是**四张卡的整页**（目标 banner / 旧版真机症状 / 新版现状 /

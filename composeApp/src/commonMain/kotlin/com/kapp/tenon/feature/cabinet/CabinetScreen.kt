@@ -55,6 +55,8 @@ import com.kapp.tenon.ui.components.AppButtonSize
 import com.kapp.tenon.ui.components.AppButtonTone
 import com.kapp.tenon.ui.components.AppIconButton
 import com.kapp.tenon.ui.components.AppOutlinedButton
+import com.kapp.tenon.ui.components.LargeTitleBar
+import com.kapp.tenon.ui.components.TitleBarDivider
 import com.kapp.tenon.ui.components.RelayDialog
 import com.kapp.tenon.ui.components.RelayDialogButton
 import com.kapp.tenon.ui.components.formatBytes
@@ -375,51 +377,52 @@ internal fun MineCabinetView(
         )
     }
 
-    LazyColumn(
-        modifier.fillMaxSize()
-            // 宽屏收列（审计 §5.2）：1440 下这一列会拉满整幅，一行文字超过舒适阅读宽度。
-            // 720 是列表型界面共用的上限（[ContentWidths.Pane]，出处原型 `:631 .entrygrid`）。
-            // 收列写在 padding 之外，于是 720 是外框、688 是内容宽。
-            .centerCapped(ContentWidths.Pane)
-            // 原型 `.pad{padding:14px 16px 16px}`（`prototype/relay.html:556`）—— 顶 14、其余 16。
-            .padding(start = LocalAppSpacing.current.lg, top = LocalAppSpacing.current.lg14, end = LocalAppSpacing.current.lg, bottom = LocalAppSpacing.current.lg),
-        // 卡片间距：原型是内联 `style="height:10px"`（不在 CSS 里，差集工具扫不到），
-        // 不是 14。四张卡各隔 10px。
-        verticalArrangement = Arrangement.spacedBy(LocalAppSpacing.current.md10),
-    ) {
-        // 顶部大标题。原型 `topbar('文件柜', '正在共享 · 同事按下面的权限访问', …)` **不带图标**：
-        // 标题 24px/700（`.topbar h1`）、副标题 11px（`.topbar .sub`）。
-        // 原实现多画了一个 28dp 的 hdd 图标，标题压成 22sp、副标题 12sp —— 三处都对不上。
-        item {
-            Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
-                if (onBack != null) {
-                    AppIconButton(
-                        icon = Res.drawable.ic_list,
-                        contentDescription = stringResource(Res.string.desktop_action_list),
-                        onClick = onBack,
-                    )
-                    Spacer(Modifier.width(LocalAppSpacing.current.md))
-                }
-                Column(Modifier.weight(1f)) {
-                    Text(
-                        stringResource(Res.string.cabinet_mine_title),
-                        style = MaterialTheme.typography.headlineSmall,
-                        fontWeight = FontWeight.Bold,
-                    )
-                    Text(
-                        if (hasRoot) stringResource(Res.string.cabinet_mine_subtitle_active) else stringResource(Res.string.cabinet_mine_subtitle_inactive),
-                        style = MaterialTheme.typography.labelSmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    )
-                }
+    // 顶栏必须是**整幅宽的 surface 面 + 一条 hairline**，与消息 / 节点 / 设置三页共用
+    // [LargeTitleBar]。此前标题画在 LazyColumn 的第一个 item 里，直接铺在页面底色
+    // `background` 上：浅色只差 #FFFFFF→#FAFAF8（2/255，看着"发灰"），深色是
+    // #232625→#121413（17/255，一整条色带），真机上就是「这个 tab 的背景和别的
+    // tab 不一样、标题栏也不一样」。原型 m11b-cabinet 的 `.topbar` 用 `--surface`、
+    // 下面的 `.pad` 才透出 `--bg`；同包的 [PeerCabinetView] 本来就是这么画的。
+    // 标题留在滚动列表里还会跟着内容滚走，也是与其它四页不一致的一处。
+    Column(modifier.fillMaxSize()) {
+        LargeTitleBar(
+            title = stringResource(Res.string.cabinet_mine_title),
+            subtitle = if (hasRoot) {
+                stringResource(Res.string.cabinet_mine_subtitle_active)
+            } else {
+                stringResource(Res.string.cabinet_mine_subtitle_inactive)
+            },
+            onBack = onBack,
+            // 桌面 Compact 档这颗是「回列表」不是「返回上一页」，字形随语义走。
+            navigationIcon = if (onBack != null) Res.drawable.ic_list else null,
+            navigationIconDescription = if (onBack != null) stringResource(Res.string.desktop_action_list) else null,
+            actions = {
                 if (hasRoot) {
                     AppOutlinedButton(
                         text = stringResource(Res.string.cabinet_stop_share),
                         onClick = { confirmStopShare = true },
                     )
                 }
-            }
-        }
+            },
+            contentMaxWidth = ContentWidths.Pane,
+        )
+        TitleBarDivider()
+
+        LazyColumn(
+            Modifier
+                .weight(1f)
+                .fillMaxWidth()
+                // 宽屏收列（审计 §5.2）：1440 下这一列会拉满整幅，一行文字超过舒适阅读宽度。
+                // 720 是列表型界面共用的上限（[ContentWidths.Pane]，出处原型 `:631 .entrygrid`）。
+                // 收列写在 padding 之外，于是 720 是外框、688 是内容宽。顶栏内容用同一个
+                // 上限收，两者才对得齐。
+                .centerCapped(ContentWidths.Pane)
+                // 原型 `.pad{padding:14px 16px 16px}`（`prototype/relay.html:556`）—— 顶 14、其余 16。
+                .padding(start = LocalAppSpacing.current.lg, top = LocalAppSpacing.current.lg14, end = LocalAppSpacing.current.lg, bottom = LocalAppSpacing.current.lg),
+            // 卡片间距：原型是内联 `style="height:10px"`（不在 CSS 里，差集工具扫不到），
+            // 不是 14。四张卡各隔 10px。
+            verticalArrangement = Arrangement.spacedBy(LocalAppSpacing.current.md10),
+        ) {
 
         // 同事的文件柜入口栏
         if (peers.isNotEmpty()) {
@@ -711,6 +714,7 @@ internal fun MineCabinetView(
                     }
                 }
             }
+        }
         }
     }
 }

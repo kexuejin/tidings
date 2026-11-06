@@ -319,7 +319,10 @@ private fun WorkspaceItemCard(
 ) {
     val sp = LocalAppSpacing.current
     Surface(
-        color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f),
+        // 半透明 surfaceVariant(0.5) 叠在白卡上会调出 #F7F7F4 —— 一个色板说不出
+        // 出处的档（check-design-palette --strict 因此红了三张帧）。M3 的
+        // surfaceContainer(#F6F5F0) 与它逐通道只差 1，且是声明档。
+        color = MaterialTheme.colorScheme.surfaceContainer,
         shape = RelayShapes.small,
         border = androidx.compose.foundation.BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant),
         modifier = Modifier.fillMaxWidth(),

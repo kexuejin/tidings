@@ -58,6 +58,7 @@
           :designTokenUsageGate :designStateSlotGate :designLocaleParityGate \
           :jlinkModulesGate --continue
 python3 tools/unused-imports.py --check
+python3 tools/check-design-palette.py --css-vars
 ```
 
 - **加 `--continue`**：不加的话第一个红就停，你看到的「绿」可能只是没跑到。
@@ -92,6 +93,7 @@ python3 tools/unused-imports.py --check
 | `testStabilityGate` | 同一套测试连跑 N 轮（默认 3），任何一轮红即失败。抓的是「每 3 轮红 1 次」那类竞态 | 先看红在哪几条 → 修测试替身的线程安全（`InMemoryQueueStore` / `InMemoryDedupStore` / `InMemoryMessageStore` 都已改 `MutableStateFlow`），**不要放宽断言** |
 | `jlinkModulesGate` | 桌面 jlink 的模块清单与依赖一致 | 更新 `build.gradle.kts` 的模块列表 |
 | `tools/unused-imports.py --check` | 没有未使用的 import | 删掉 |
+| `tools/check-design-palette.py --css-vars` | 原型 `var(--x)` 不许指向没定义过、也没兜底的变量；`:root` 颜色变量不许在 `html[data-theme="dark"]` 漏覆盖。**画出来的像素查不到「没画出来的颜色」** | 改成语义相同的已定义变量；确属两态同值的颜色变量才进 `DARK_OVERRIDE_ALLOWED` 并写理由 |
 
 **基线是棘轮（只许降不许升）**。`*Baseline` 任务会重写基线文件 —— 只在「确实该新增、且有人
 评审过」时用，并在提交信息里写清理由。**为了让门禁变绿而重刷基线是本仓明确禁止的。**

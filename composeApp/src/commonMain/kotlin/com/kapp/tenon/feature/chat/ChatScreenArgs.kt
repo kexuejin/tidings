@@ -468,4 +468,12 @@ data class ChatScreenChrome(
     val initialEmojiOpen: Boolean = false,
     val initialHistorySearch: Boolean = false,
     val initialScreenRequestConfirmOpen: Boolean = false,
+    /**
+     * 「➕ 更多功能」面板的初态（原型 `m-chat-more` / `m-chat-group-more`）。
+     *
+     * 生产一律默认关（点「+」才展开）；这个口子是给截图门禁的 —— 面板挂在
+     * `MessageComposer` 屏内 `remember` 后面，静态帧点不到。先例 =
+     * [initialHistorySearch] 与 `SessionDetailView.initialPicking`。
+     */
+    val initialMoreOpen: Boolean = false,
 )
