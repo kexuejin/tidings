@@ -1,0 +1,346 @@
+捎话 Tidings 桌面端内存占用测量证据
+生成日期：2026-10-23
+量具：tools/measure-desktop-footprint.sh（本仓新增，sha256 976e097559e8217efc54bd7775db1b54f552a6f020e7b911de344762942b5ad3）
+
+------------------------------------------------------------------
+1. 环境（读数只在这个环境下成立）
+------------------------------------------------------------------
+芯片        : Apple Silicon（uname -m = arm64）
+系统        : macOS 26.7.2（build 25G330）
+JVM         : openjdk 21.0.8（Homebrew，/opt/homebrew/opt/openjdk@21）
+              系统没有 /usr/libexec/java_home 注册的 JDK，jcmd / vmmap 必须显式给路径
+jcmd        : /opt/homebrew/opt/openjdk@21/bin/jcmd
+vmmap       : /usr/bin/vmmap（macOS 自带）
+shell       : /bin/bash 3.2.57（macOS 自带 bash；脚本按 3.2 写，不依赖 bash 4+ 特性）
+仓库版本    : 4686366（脚本与证据都还在未提交的工作区里）
+
+被测产物
+  bundle    : /Applications/Tidings.app（app.relay.desktop，version 1.0.0）
+  指纹      : Contents/app 下全部 jar 拼接后 sha256 =
+              cb02bc370da044261fd5b845f4135c1609b51991d88d8a69f24b905519a85b9d
+              脚本在采样前后各算一次并比对，本批两次一致
+  JVM 参数  : 出厂参数，未改
+              -Xmx768m -XX:+UseSerialGC -Xss512k -XX:MaxMetaspaceSize=192m
+              -Dcompose.application.resources.dir=$APPDIR/resources
+              -Dcompose.application.configure.swing.globals=true
+              -Dskiko.library.path=$APPDIR -Xdock:name=捎话 Tidings
+  启动方式  : /Applications/Tidings.app/Contents/MacOS/Tidings --background（托盘常驻）
+
+------------------------------------------------------------------
+2. 采样条件（本仓最容易被误读的部分）
+------------------------------------------------------------------
+实例数      : 本次取证**只起过 1 个 Tidings 实例**，起完测量、测完立即 kill。
+              采样全程「同类实例数」= 1（脚本在每个采样点按可执行文件路径精确匹配重复
+              计数一次，并把最大值写进汇总）。两批取证（第 3、4 节）各自收尾之后，
+              本机 Tidings 实例数都回到 0。
+              为什么要写这条：桌面端多开时它们抢同一个端口与同一份数据目录，读数会互相
+              污染，而单看某一个 pid 的 footprint 完全看不出来。
+              注意：本机是多会话共用的，取证结束后可能有别的会话又起了实例。
+              判断某一份证据是否可信，看的应是它自己汇总里的「采样期间同类实例」。
+              本文件收录的两批都是 1。
+系统负载    : 采样时 load average 3.65–3.77（同机还有 Gradle/JVM 在跑）。
+              这是本批读数的方差来源，见第 5 节。
+采样参数    : --samples 3 --interval 5 --force-gc 0（不执行 GC.run，纯只读观测）
+观测方式    : --pid 附着模式（attach）：脚本不启动也不终止被测进程；唯一那个实例由
+              取证命令自己拉起、测完自己 kill。
+
+口径（三行必须一起看，单独看任何一行都会被误读）
+  Physical footprint : vmmap -summary 的 macOS 口径，含 GPU / IOSurface 映射。
+                       这是「这台机器被压了多少」，也是产品对外该报的数。
+  RSS                : ps -o rss=，含共享页与文件缓存；只适合同机同产物横向比，
+                       不适合跨机器或跨版本比较。
+  堆 committed       : jcmd GC.heap_info 里 young + old 的 total，**不含** Metaspace、
+                       也不含堆外。-Xmx768m 下它恒为 371.3M（young 115.3M + old 256.0M），
+                       这表达的是「预留了多少」，不是「用了多少」。
+
+------------------------------------------------------------------
+3. 单实例 3 样本（正式读数）
+------------------------------------------------------------------
+命令：
+  /Applications/Tidings.app/Contents/MacOS/Tidings --background &     # 只起这一个
+  tools/measure-desktop-footprint.sh --pid <pid> --samples 3 --interval 5 \
+      --jdk /opt/homebrew/opt/openjdk@21/bin --out <file>
+
+读数：
+  样本 #1  footprint 586.5M  峰值 759.5M  RSS 650.2M  堆 371.3M
+  样本 #2  footprint 516.7M  峰值 759.5M  RSS 641.4M  堆 371.3M
+  样本 #3  footprint 511.4M  峰值 759.5M  RSS 641.9M  堆 371.3M
+
+完整原始输出：
+
+==================================================================
+ 桌面端内存测量 — measure-desktop-footprint.sh
+==================================================================
+时间      : 2026-10-23 12:09:52 +0800
+主机      : arm64 / macOS 26.7.2（build 25G330）
+JVM       : openjdk version "21.0.8" 2025-07-15（/opt/homebrew/opt/openjdk@21/bin/java）
+jcmd      : /opt/homebrew/opt/openjdk@21/bin/jcmd
+vmmap     : /usr/bin/vmmap
+系统负载  : load average 3.65 3.71 3.77
+模式      : attach（--pid 42107；不启动也不终止被测进程）
+参数      : --samples 3 --interval 5s --warmup 5s --force-gc 0 --attach-retries 3
+
+被测命令行: /Applications/Tidings.app/Contents/MacOS/Tidings --background
+同类实例  : 1 个（按可执行文件路径 /Applications/Tidings.app/Contents/MacOS/Tidings 精确匹配；>1 表示有别的实例在跑，读数可能互相污染）
+产物标识 : app.relay.desktop / version 1.0.0
+JVM 参数 : -Djpackage.app-version=1.0.0 -Dcompose.application.resources.dir=$APPDIR/resources -Dcompose.application.configure.swing.globals=true -Xmx768m -XX:+UseSerialGC -Xss512k -XX:MaxMetaspaceSize=192m -Dskiko.library.path=$APPDIR -Xdock:name=捎话 Tidings 
+产物指纹 : Contents/app 下全部 jar 拼接后的 sha256 = cb02bc370da044261fd5b845f4135c1609b51991d88d8a69f24b905519a85b9d（重新构建会变，据此判断读数是否可比）
+开始采样 : pid=42107，共 3 个点，间隔 5s
+
+[样本 1/3] pid=42107  t=+0s
+  Physical footprint:         586.5M
+  Physical footprint (peak):  759.5M
+  RSS      : 665760 KB（650.2M；ps -o rss=，含共享页）
+  |  def new generation   total 118080K, used 14574K [0x0000000325000000, 0x000000032d020000, 0x0000000335000000)
+  |  tenured generation   total 262144K, used 59150K [0x0000000335000000, 0x0000000345000000, 0x0000000355000000)
+  |  Metaspace       used 59129K, committed 59968K, reserved 229376K
+  堆 committed: 371.3M（young 115.3M + old 256.0M），Metaspace 58.6M
+  IOSurface: IOSurface                         36.6M    36.5M    36.5M       0K       0K    36.5M       0K        8 
+  VM_ALLOCATE: VM_ALLOCATE                        1.2G   347.6M   347.6M       0K       0K       0K       0K      969 
+  同类实例数: 1（采样点当时的瞬时读数，>1 提示本组不可比）
+
+[样本 2/3] pid=42107  t=+5s
+  Physical footprint:         516.7M
+  Physical footprint (peak):  759.5M
+  RSS      : 656832 KB（641.4M；ps -o rss=，含共享页）
+  |  def new generation   total 118080K, used 78991K [0x0000000325000000, 0x000000032d020000, 0x0000000335000000)
+  |  tenured generation   total 262144K, used 59150K [0x0000000335000000, 0x0000000345000000, 0x0000000355000000)
+  |  Metaspace       used 60114K, committed 61056K, reserved 229376K
+  堆 committed: 371.3M（young 115.3M + old 256.0M），Metaspace 59.6M
+  IOSurface: IOSurface                         36.6M    36.5M    36.5M       0K       0K    36.5M       0K        8 
+  VM_ALLOCATE: VM_ALLOCATE                        1.2G   349.9M   349.9M       0K       0K       0K       0K      987 
+  同类实例数: 1（采样点当时的瞬时读数，>1 提示本组不可比）
+
+[样本 3/3] pid=42107  t=+10s
+  Physical footprint:         511.4M
+  Physical footprint (peak):  759.5M
+  RSS      : 657264 KB（641.9M；ps -o rss=，含共享页）
+  |  def new generation   total 118080K, used 81604K [0x0000000325000000, 0x000000032d020000, 0x0000000335000000)
+  |  tenured generation   total 262144K, used 59150K [0x0000000335000000, 0x0000000345000000, 0x0000000355000000)
+  |  Metaspace       used 60274K, committed 61248K, reserved 229376K
+  堆 committed: 371.3M（young 115.3M + old 256.0M），Metaspace 59.8M
+  IOSurface: IOSurface                         36.6M    36.5M    36.5M       0K       0K    36.5M       0K        8 
+  VM_ALLOCATE: VM_ALLOCATE                        1.2G   351.0M   351.0M       0K       0K       0K       0K      991 
+  同类实例数: 1（采样点当时的瞬时读数，>1 提示本组不可比）
+
+
+---------------- 汇总 ----------------
+样本数              : 3（请求 3）
+Physical footprint  : 首 586.5M / 末 511.4M / 峰值 759.5M（vmmap -summary，含 GPU/IOSurface）
+RSS                 : 首 650.2M / 末 641.9M（ps -o rss=，含共享页）
+堆 committed        : 首 371.3M / 末 371.3M（GC.heap_info young+old，不含 Metaspace）
+逐样本 footprint    :
+  #1  footprint=586.5M  峰值=759.5M  RSS=650.2M  堆=371.3M
+  #2  footprint=516.7M  峰值=759.5M  RSS=641.4M  堆=371.3M
+  #3  footprint=511.4M  峰值=759.5M  RSS=641.9M  堆=371.3M
+产物指纹一致        : 采样前后同为 cb02bc370da044261fd5b845f4135c1609b51991d88d8a69f24b905519a85b9d（读数属于同一个二进制）
+采样期间同类实例    : 最多 1 个（>1 的样本读数不可与其他实例的读数直接比较）
+vmmap 不可用次数    : 0
+jcmd attach 失败次数: 0（按行记 attach-failed，未中断测量）
+进程状态            : 采样期间存活
+被测 pid            : 42107
+--------------------------------------
+输出已写入: /tmp/ZA-A.txt
+
+
+------------------------------------------------------------------
+4. 「进程退出」这条路径的实测证据
+------------------------------------------------------------------
+为什么要测这条：进程在采样中途消失时，最容易出现的坏量具行为是**照常输出空值或上一帧
+的残影**，让报告看起来「有数」。本脚本必须在发现进程消失的当下停止、明确报「进程已退出」、
+并以非 0 退出码结束（本脚本用 6），而不是把空字符串当读数写进汇总。
+
+复现方法（完整命令见下）：起唯一实例 → 用 --pid 附着 → 采样中途把它 kill 掉。
+  /Applications/Tidings.app/Contents/MacOS/Tidings --background &     # 唯一实例
+  ( sleep 8; kill -TERM <pid> ) &                                 # 让它在采样中途死掉
+  tools/measure-desktop-footprint.sh --pid <pid> --samples 4 --interval 5 ...
+实测退出码：6（脚本约定：采样过程中目标进程消失）
+
+完整原始输出（注意：第 3 个样本点处脚本没有输出任何空读数，而是直接停止并说明原因）：
+
+==================================================================
+ 桌面端内存测量 — measure-desktop-footprint.sh
+==================================================================
+时间      : 2026-10-23 12:10:23 +0800
+主机      : arm64 / macOS 26.7.2（build 25G330）
+JVM       : openjdk version "21.0.8" 2025-07-15（/opt/homebrew/opt/openjdk@21/bin/java）
+jcmd      : /opt/homebrew/opt/openjdk@21/bin/jcmd
+vmmap     : /usr/bin/vmmap
+系统负载  : load average 3.51 3.68 3.75
+模式      : attach（--pid 42809；不启动也不终止被测进程）
+参数      : --samples 4 --interval 5s --warmup 5s --force-gc 0 --attach-retries 3
+
+被测命令行: /Applications/Tidings.app/Contents/MacOS/Tidings --background
+同类实例  : 1 个（按可执行文件路径 /Applications/Tidings.app/Contents/MacOS/Tidings 精确匹配；>1 表示有别的实例在跑，读数可能互相污染）
+产物标识 : app.relay.desktop / version 1.0.0
+JVM 参数 : -Djpackage.app-version=1.0.0 -Dcompose.application.resources.dir=$APPDIR/resources -Dcompose.application.configure.swing.globals=true -Xmx768m -XX:+UseSerialGC -Xss512k -XX:MaxMetaspaceSize=192m -Dskiko.library.path=$APPDIR -Xdock:name=捎话 Tidings 
+产物指纹 : Contents/app 下全部 jar 拼接后的 sha256 = cb02bc370da044261fd5b845f4135c1609b51991d88d8a69f24b905519a85b9d（重新构建会变，据此判断读数是否可比）
+开始采样 : pid=42809，共 4 个点，间隔 5s
+
+[样本 1/4] pid=42809  t=+0s
+  Physical footprint:         575.0M
+  Physical footprint (peak):  743.3M
+  RSS      : 649616 KB（634.4M；ps -o rss=，含共享页）
+  |  def new generation   total 118080K, used 96354K [0x000000057a800000, 0x0000000582810000, 0x000000058a800000)
+  |  tenured generation   total 262144K, used 147926K [0x000000058a800000, 0x000000059a800000, 0x00000005aa800000)
+  |  Metaspace       used 58445K, committed 59392K, reserved 229376K
+  堆 committed: 371.3M（young 115.3M + old 256.0M），Metaspace 58.0M
+  IOSurface: IOSurface                         36.6M    36.5M    36.5M       0K       0K    36.5M       0K        8 
+  VM_ALLOCATE: VM_ALLOCATE                        1.2G   339.7M   339.7M    1424K       0K       0K       0K      948 
+  同类实例数: 1（采样点当时的瞬时读数，>1 提示本组不可比）
+
+[样本 2/4] pid=42809  t=+5s
+  Physical footprint:         577.3M
+  Physical footprint (peak):  743.3M
+  RSS      : 644480 KB（629.4M；ps -o rss=，含共享页）
+  |  def new generation   total 118080K, used 23524K [0x000000057a800000, 0x0000000582810000, 0x000000058a800000)
+  |  tenured generation   total 262144K, used 62055K [0x000000058a800000, 0x000000059a800000, 0x00000005aa800000)
+  |  Metaspace       used 59202K, committed 60096K, reserved 229376K
+  堆 committed: 371.3M（young 115.3M + old 256.0M），Metaspace 58.7M
+  IOSurface: IOSurface                         36.6M    36.5M    36.4M     128K       0K    36.5M       0K        8 
+  VM_ALLOCATE: VM_ALLOCATE                        1.2G   342.4M   342.4M    1504K       0K       0K       0K      972 
+  同类实例数: 1（采样点当时的瞬时读数，>1 提示本组不可比）
+
+
+[样本 3/4] 进程已退出：pid=42809 在采样间隔内消失（用户退出 / 崩溃 / 被 kill）
+  立即停止采样，不输出空读数。已完成的样本数：2
+
+---------------- 汇总 ----------------
+样本数              : 2（请求 4）
+Physical footprint  : 首 575.0M / 末 577.3M / 峰值 743.3M（vmmap -summary，含 GPU/IOSurface）
+RSS                 : 首 634.4M / 末 629.4M（ps -o rss=，含共享页）
+堆 committed        : 首 371.3M / 末 371.3M（GC.heap_info young+old，不含 Metaspace）
+逐样本 footprint    :
+  #1  footprint=575.0M  峰值=743.3M  RSS=634.4M  堆=371.3M
+  #2  footprint=577.3M  峰值=743.3M  RSS=629.4M  堆=371.3M
+产物指纹一致        : 采样前后同为 cb02bc370da044261fd5b845f4135c1609b51991d88d8a69f24b905519a85b9d（读数属于同一个二进制）
+采样期间同类实例    : 最多 1 个（>1 的样本读数不可与其他实例的读数直接比较）
+vmmap 不可用次数    : 0
+jcmd attach 失败次数: 0（按行记 attach-failed，未中断测量）
+进程状态            : 进程已退出（process exited）—— 采样在第 2 个样本后停止
+被测 pid            : 42809
+--------------------------------------
+输出已写入: /tmp/ZC-C.txt
+
+
+------------------------------------------------------------------
+5. 读数方差：为什么必须连负载一起报
+------------------------------------------------------------------
+同一份产物、同一份数据、同一组 JVM 参数，Physical footprint 不是常数。本次与同批实测：
+  * 本证据第 3 节（load ≈ 3.7）：586.5M / 516.7M / 511.4M，组内跨度 75.1M
+  * 同机并发构建（Gradle / jpackage）在跑时，同一产物单点读数见过 422M–620M 的跨度
+    （并发期间一组 3 样本实测 488.3M / 427.2M / 422.0M；另一组 611.3M / 542.3M / 537.9M）
+  * 差值主要落在 VM_ALLOCATE（进程内 GPU/图形映射）与 IOSurface 区域上；
+    GC 堆 committed 始终是 371.3M。也就是说这不是脚本量错了，是这块内存在动。
+
+结论：
+  (a) 报读数必须同时给出样本数、间隔、系统负载与产物指纹，否则无法复现；
+  (b) 不要拿两次不同负载下的单点值互相比较，也不要从一组样本里挑最小的那个当结论。
+
+------------------------------------------------------------------
+6. 量具自身的验证（三个坑的实测证据）
+------------------------------------------------------------------
+坑 1 · jcmd attach 抖动
+  真实现象（本机多次遇到）：jcmd 偶发
+    com.sun.tools.attach.AttachNotSupportedException: Unable to open socket file
+    ... target process doesn't respond within 10500ms or HotSpot VM not loaded
+  这不是被测进程坏了，是 JVM attach 的正常抖动。脚本重试 3 次，仍失败就只记一行
+  attach-failed 并继续采其他指标，不中断整次测量、不输出空值冒充读数。
+  下面这段用桩 jcmd（原样吐出真实报错文本）复现该路径的完整输出 ——
+  注意 footprint / RSS / IOSurface 照常给出，只有堆的三行记成 n/a：
+
+==================================================================
+ 桌面端内存测量 — measure-desktop-footprint.sh
+==================================================================
+时间      : 2026-10-23 12:08:42 +0800
+主机      : arm64 / macOS 26.7.2（build 25G330）
+JVM       : openjdk version "21.0.8" 2025-07-15（/opt/homebrew/opt/openjdk@21/bin/java）
+jcmd      : /tmp/fakejdk/bin/jcmd
+vmmap     : /usr/bin/vmmap
+系统负载  : load average 2.80 3.49 3.69
+模式      : attach（--pid 40932；不启动也不终止被测进程）
+参数      : --samples 2 --interval 2s --warmup 5s --force-gc 0 --attach-retries 3
+
+被测命令行: /Applications/Tidings.app/Contents/MacOS/Tidings --background
+同类实例  : 1 个（按可执行文件路径 /Applications/Tidings.app/Contents/MacOS/Tidings 精确匹配；>1 表示有别的实例在跑，读数可能互相污染）
+产物标识 : app.relay.desktop / version 1.0.0
+JVM 参数 : -Djpackage.app-version=1.0.0 -Dcompose.application.resources.dir=$APPDIR/resources -Dcompose.application.configure.swing.globals=true -Xmx768m -XX:+UseSerialGC -Xss512k -XX:MaxMetaspaceSize=192m -Dskiko.library.path=$APPDIR -Xdock:name=捎话 Tidings 
+产物指纹 : Contents/app 下全部 jar 拼接后的 sha256 = cb02bc370da044261fd5b845f4135c1609b51991d88d8a69f24b905519a85b9d（重新构建会变，据此判断读数是否可比）
+开始采样 : pid=40932，共 2 个点，间隔 2s
+
+[样本 1/2] pid=40932  t=+0s
+  Physical footprint:         575.2M
+  Physical footprint (peak):  740.1M
+  RSS      : 653696 KB（638.4M；ps -o rss=，含共享页）
+  jcmd     : attach-failed（pid=40932，重试 3 次仍失败：java.io.IOException: Started process does not respond）
+  def new / tenured / Metaspace: n/a（attach-failed）
+  IOSurface: IOSurface                         36.6M    36.5M    36.5M       0K       0K    36.5M       0K        9 
+  VM_ALLOCATE: VM_ALLOCATE                        1.2G   337.1M   337.1M       0K       0K       0K       0K      968 
+  同类实例数: 1（采样点当时的瞬时读数，>1 提示本组不可比）
+
+[样本 2/2] pid=40932  t=+2s
+  Physical footprint:         576.1M
+  Physical footprint (peak):  740.1M
+  RSS      : 650080 KB（634.8M；ps -o rss=，含共享页）
+  jcmd     : attach-failed（pid=40932，重试 3 次仍失败：java.io.IOException: Started process does not respond）
+  def new / tenured / Metaspace: n/a（attach-failed）
+  IOSurface: IOSurface                         36.6M    36.5M    36.5M       0K       0K    36.5M       0K        9 
+  VM_ALLOCATE: VM_ALLOCATE                        1.2G   338.3M   338.3M       0K       0K       0K       0K      979 
+  同类实例数: 1（采样点当时的瞬时读数，>1 提示本组不可比）
+
+
+---------------- 汇总 ----------------
+样本数              : 2（请求 2）
+Physical footprint  : 首 575.2M / 末 576.1M / 峰值 740.1M（vmmap -summary，含 GPU/IOSurface）
+RSS                 : 首 638.4M / 末 634.8M（ps -o rss=，含共享页）
+堆 committed        : 首 n/a / 末 n/a（GC.heap_info young+old，不含 Metaspace）
+逐样本 footprint    :
+  #1  footprint=575.2M  峰值=740.1M  RSS=638.4M  堆=n/a
+  #2  footprint=576.1M  峰值=740.1M  RSS=634.8M  堆=n/a
+产物指纹一致        : 采样前后同为 cb02bc370da044261fd5b845f4135c1609b51991d88d8a69f24b905519a85b9d（读数属于同一个二进制）
+采样期间同类实例    : 最多 1 个（>1 的样本读数不可与其他实例的读数直接比较）
+vmmap 不可用次数    : 0
+jcmd attach 失败次数: 2（按行记 attach-failed，未中断测量）
+进程状态            : 采样期间存活
+被测 pid            : 40932
+--------------------------------------
+输出已写入: /tmp/W-D.txt
+
+
+坑 2 · 进程消失
+  见第 4 节：脚本在发现目标 pid 不在的当下停止，报「进程已退出」，退出码 6，
+  汇总里写「采样在第 N 个样本后停止」，并保留已采到的样本（不倒退、不补空值）。
+
+坑 3 · vmmap 不可用
+  本次取证没有触发（vmmap 全程可用，汇总里「vmmap 不可用次数 : 0」）。
+  代码行为：vmmap 非 0 退出时只记一行，footprint 记 n/a，继续采 RSS 与堆，
+  让整次测量仍然可用。这条路径未在本机实证，所以这里只写行为、不写读数。
+
+另修掉的两个真实边角（都已实测）：
+  * 僵尸进程：ps -p 对 Z 状态进程仍然成功，但读数是上一瞬间的残影。判活改为排除 Z 状态；
+    读不到 RSS 时给 n/a 而不是 0。
+  * SIGPIPE：被 head / grep -m1 之类下游关掉 stdout 时 bash 会收到 SIGPIPE 直接退出，
+    EXIT 陷阱不跑 ⇒ 自己拉起的进程会残留。现在显式接住 PIPE，并让收尾先清理临时文件
+    再 emit；实测「管道截断之后」实例数与临时文件都回到 0。
+
+------------------------------------------------------------------
+7. 错误路径：不存在的 --app 必须非 0 退出
+------------------------------------------------------------------
+命令：
+  tools/measure-desktop-footprint.sh --app /Applications/NoSuchRelay.app --samples 1 --interval 1
+输出（stderr）：
+  measure-desktop-footprint.sh: 错误：--app 路径不存在：/Applications/NoSuchRelay.app
+退出码：2
+
+另测互斥模式冲突（--app 与 --pid 同时给）：
+  measure-desktop-footprint.sh: 错误：--app 与 --pid 只能二选一（现在两个都给了）
+  退出码：2
+
+------------------------------------------------------------------
+8. 复用到本机其它 KMP/CMP 产品
+------------------------------------------------------------------
+脚本不写死本机个人路径（没有 /Users/ 前缀、没有硬编码 JDK 路径）：JDK 按
+--jdk → JAVA_HOME → PATH → /opt/homebrew/opt/openjdk* 依次查找；临时日志走 ${TMPDIR:-/tmp}。
+换产品只需改两处：--app 指向那个 .app（或 jar / 裸可执行文件），--out 指向该产品的证据文件。
+自动拉起模式（--app）保留可用；本次取证为了不污染同机其它会话的读数，特意改用
+--pid 附着 + 只起一个实例，并在测完立即收尾。

@@ -1,0 +1,92 @@
+# R2 桌面截图报错 —— Main 调度器缺失：修前/修后同一支探针的实测对照
+
+日期：2026-10-13
+责任人：W5（`w5-remoteview`）
+缺陷：用户报「测试桌面端截图报错」。真因 = `Dispatchers.Main` 在桌面 JVM 上无人认领。
+
+## 0. 结论（一句话）
+
+`./gradlew :desktopApp:printRuntimeClasspath` 里本来**没有** `kotlinx-coroutines-swing`，
+于是 `Dispatchers.Main` 解析成 `kotlinx.coroutines.internal.MissingMainCoroutineDispatcher`，
+第一次真正派发就抛 `IllegalStateException: Module with the Main dispatcher is missing…`。
+在 `scaffold/desktopApp/build.gradle.kts` 加上与 core 同号的 `kotlinx-coroutines-swing`
+（版本取 `libs.versions.kotlinx.coroutines.get()`，不写死）后，同一支探针解析成
+`kotlinx.coroutines.swing.Swing` 且 `isDispatchNeeded` 返回 `true`。
+
+## 1. 修前读数（Lead 实测，我复核同一口径）
+
+```
+$ ./gradlew :desktopApp:printRuntimeClasspath | grep -c coroutines-swing
+0
+```
+
+`scaffold/desktopApp/src/main/kotlin/app/relay/desktop/capture/DesktopScreenCaptureService.kt`
+（修前 `:52`、修后 `:57`）里的 `scope.launch(Dispatchers.Main) { … }` 是首个派发点，
+调用它就直接炸：抛出的就是下面探针 B 打印的那句原文。
+
+## 2. 修后读数
+
+```
+$ ./gradlew :desktopApp:printRuntimeClasspath --console=plain -q | grep -o "kotlinx-coroutines-[a-z]*" | sort | uniq -c
+   2 kotlinx-coroutines-core
+   2 kotlinx-coroutines-swing
+```
+
+（`2` 不是"两个 jar"：输出里同一 artifact 的 jar 路径与文件名各命中一次。）
+
+## 3. 同一支探针的 A/B 对照（可重跑）
+
+探针源码 `/tmp/r2probe/MainDispatcherProbe.java`（本次会话内生成，内容见下），
+**A 与 B 用同一份 classpath**，唯一差别是 B 把 `coroutines-swing` 的 jar 从串里滤掉 ——
+所以这是"只差这一项依赖"的对照，不是两次不同构建。
+
+```java
+public class MainDispatcherProbe {
+    public static void main(String[] args) {
+        kotlinx.coroutines.CoroutineDispatcher d =
+            (kotlinx.coroutines.CoroutineDispatcher) kotlinx.coroutines.Dispatchers.getMain();
+        System.out.println("Dispatchers.getMain() -> " + d.getClass().getName());
+        try {
+            System.out.println("isDispatchNeeded(null) -> " + d.isDispatchNeeded(null));
+        } catch (Throwable t) {
+            System.out.println("isDispatchNeeded(null) THREW: " + t.getClass().getName() + ": " + t.getMessage());
+        }
+    }
+}
+```
+
+复现命令（`scaffold/` 下）：
+
+```
+JAVA_HOME=/opt/homebrew/opt/openjdk@21 ./gradlew :desktopApp:printRuntimeClasspath --console=plain -q > /tmp/r2-rtcp.txt
+CP=$(sed 's/^RUNTIME_CP=//' /tmp/r2-rtcp.txt)
+$JAVA_HOME/bin/javac -cp "$CP" -d /tmp/r2probe /tmp/r2probe/MainDispatcherProbe.java
+# A = 修后
+$JAVA_HOME/bin/java -cp "/tmp/r2probe:$CP" MainDispatcherProbe
+# B = 修前（同一串，只滤掉 coroutines-swing）
+CP_NOSWING=$(python3 -c "parts=[p for p in open('/tmp/r2-rtcp.txt').read().strip().replace('RUNTIME_CP=','').split(':') if p]; print(':'.join(p for p in parts if 'coroutines-swing' not in p))")
+$JAVA_HOME/bin/java -cp "/tmp/r2probe:$CP_NOSWING" MainDispatcherProbe
+```
+
+### 实测输出（逐字）
+
+```
+=== PROBE A: 修后（当前 runtime classpath，含 coroutines-swing）===
+Dispatchers.getMain() -> kotlinx.coroutines.swing.Swing
+isDispatchNeeded(null) -> true
+=== PROBE B: 修前（同一 classpath 里滤掉 coroutines-swing 的 jar）===
+Dispatchers.getMain() -> kotlinx.coroutines.internal.MissingMainCoroutineDispatcher
+isDispatchNeeded(null) THREW: java.lang.IllegalStateException: Module with the Main dispatcher is missing. Add dependency providing the Main dispatcher, e.g. 'kotlinx-coroutines-android' and ensure it has the same version as 'kotlinx-coroutines-core'
+```
+
+修前那句 `IllegalStateException` 与用户报的报错**逐字一致** —— 这就是那条缺陷。
+
+## 4. 边界（这批读数**不能**证明什么）
+
+- 这里证明的是"派发器解析正确、`isDispatchNeeded` 不再抛"，**不是**"截图流程端到端成功"。
+- 真正的端到端证据必须在**打包后的 `.app`** 上点一次截图（`:desktopApp:run` 走宿主全量模块，
+  与发行版 classpath 不同，不算证据）—— 见同目录 `r2-desktop-capture-app-roundtrip.txt`（待补，依赖打包）。
+- 另两处修复的读数：`captureState` 改 `by mutableStateOf(null)` 后覆盖窗能重画（静态可证：
+  生产者写它就是触发重组的写入点）、取消路径横幅 `banner_capture_canceled`（静态可证：
+  `RelayController.kt` 回调 → `BannerMessage.CaptureCanceled` → `Common.kt bannerText()` → 资源键），
+  两者的**运行时**表现同样落在上面那份 `.app` 证据里。

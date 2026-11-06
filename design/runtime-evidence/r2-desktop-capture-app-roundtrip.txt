@@ -1,0 +1,139 @@
+R2 桌面截图三件修复 —— 打包产物 .app 端到端取证
+======================================================================
+日期：2026-10-12 08:30–09:20 CST
+作者：W5（teammate w5-remoteview）
+产物：scaffold/desktopApp/build/compose/binaries/main/app/捎话 Tidings.app
+      （.app mtime 2026-10-12 07:52:45；由 W6 用
+       java … -p scaffold :desktopApp:createDistributable 打出，BUILD SUCCESSFUL in 1m 3s）
+结论摘要：修复 ①（Main dispatcher）与 ②（captureState 重组⇒覆盖窗出现）**已证实**；
+         修复 ③（取消横幅）**只证到代码路径与字符串，屏上像素未取证**。
+         **【2026-10-12 12:00 更新】修复 ③ 已在打包产物上取证 —— 见
+         r2-desktop-capture-esc-roundtrip.txt 第 3 节 E4（横幅「截图已取消」+「关闭」）。**
+         另发现一处 d-capture 真缺口（见第 5 节），落点不在 W5 写域；
+         该缺口（工具条只在有选区时画 + Esc 不生效）已由 W5 在 R2 修掉，
+         新证据同样在 r2-desktop-capture-esc-roundtrip.txt。
+
+1. 怎么做的（手段）
+----------------------------------------------------------------------
+本机无 cliclick、/usr/bin/python3 无 Quartz 模块，故自建 5 个 Swift 小工具（均在 /tmp）：
+  /tmp/winlist.swift          CGWindowListCopyWindowInfo，列指定进程的 id/name/layer/alpha/onscreen/bounds
+  /tmp/avg.swift  png x y w h 区域平均 RGB
+  /tmp/ratio.swift base cur   48×27 网格比值图（. ≥0.85 未变暗 / o 0.6–0.85 / # ≤0.6 变暗）
+  /tmp/click.swift x y        CGEvent 合成真实左键按下+抬起
+  /tmp/drag.swift x1 y1 x2 y2 CGEvent 合成真实拖拽（12 步、每步 60ms）
+  /tmp/key.swift vk [cmd|shift|alt]  CGEvent 合成按键（vk 13=W、53=Esc）
+
+启动（不装 /Applications，直接跑产物里的可执行文件）：
+  "$APP/Contents/MacOS/捎话 Tidings" > /tmp/r2-app.log 2>&1 &
+主窗口几何：CGWindowList 报 (X=48, Y=78, W=1100, H=720)；screencapture 全屏 1920×1080，1 dp = 1 px。
+
+触发截图的三条路径（都试过，前两条在 08:33 那次成功）：
+  (a) composer 工具条第 3 颗剪刀图标 —— ui/desktop/DesktopComposer.kt:262
+      ToolIcon(painterResource(Res.drawable.ic_scissors), stringResource(Res.string.chat_toolbar_capture))
+      { controller.triggerScreenCapture(peer.nodeId) }
+      屏幕坐标：窗口 (48,78) 内 1:1 截图 /tmp/appwin-1to1.png 量得剪刀在窗内 (460,549) ⇒ 屏幕 (508,627)
+  (b) 自绘菜单栏「编辑」→「截图」—— ui/desktop/DesktopChrome.kt:127（label = chat_toolbar_capture）
+      1:1 截图 /tmp/menu-1to1.png（crop 48,78,420,340）量得「编辑」在屏幕 (118,123)、
+      「截图」条目在屏幕 (113,285)（该项右侧标注 ⌘⇧A）
+  (c) 快捷键 ⌘⇧A —— ui/desktop/DesktopShortcuts.kt:31/:50/:79
+      desktopShortcutFor(key,isPrimary,isShift,isAlt) 的 isShift 分支里 "a" -> ScreenCapture
+      派发点 ui/desktop/DesktopShell.kt:325-327
+动作链：app/RelayController.kt:249 triggerScreenCapture(targetConvId) → platform.screenCapture
+      → DesktopScreenCaptureService.startCapture { onCaptureWindowToggle(false) → delay(180)
+         → Robot().createScreenCapture(screenBounds) → captureState = CaptureState(...) }
+
+2. 期望看到什么
+----------------------------------------------------------------------
+  E1 修复①：Dispatchers.getMain() 解析出真实 Main 调度器（不是 MissingMainCoroutineDispatcher），
+     并且 .app 启动后**不再**出现用户报的 IllegalStateException。
+  E2 修复②：点一次截图后，出现一块全屏覆盖窗（alwaysOnTop ⇒ layer 3），
+     屏幕内容整体变暗 45%（CaptureOverlayView.kt:293 drawRect(Color.Black.copy(alpha=0.45f))）。
+  E3 修复②延伸：拖出选区并确认，能落一个真实 PNG 并发给对端（证明捕获+导出+回调整链活着）。
+  E4 修复③：取消（× 或 Esc）后主窗口回来，顶部横幅显示「截图已取消」。
+
+3. 实际看到什么
+----------------------------------------------------------------------
+E1 已证实。W6 用同一份 printRuntimeClasspath 做 A/B（另见 r2-desktop-capture-main-dispatcher.txt）：
+   修后 Dispatchers.getMain() -> kotlinx.coroutines.swing.Swing，isDispatchNeeded(null) -> true；
+   把 coroutines-swing jar 滤掉后 -> kotlinx.coroutines.internal.MissingMainCoroutineDispatcher，
+   并抛 java.lang.IllegalStateException: Module with the Main dispatcher is missing. Add dependency
+   providing the Main dispatcher, e.g. 'kotlinx-coroutines-android' and ensure it has the same version
+   as 'kotlinx-coroutines-core'（与用户报的报错逐字一致）。
+   产物内核对：Contents/app/kotlinx-coroutines-swing-1.11.0-*.jar 在包里。
+   .app 运行日志 /tmp/r2-app.log 全程只有 3 行 SLF4J(W) NOP + 1 行 IMKCFRunLoopWakeUpReliable
+   + 1 行 TSM AdjustCapsLockLED，**0 条 IllegalStateException**
+   （命令 grep -icE "IllegalStateException" /tmp/r2-app.log → 0）。
+
+E2 已证实（08:33 那次）。/tmp/winlist.swift 输出出现：
+   id=134349 name=Capture layer=3 alpha=1.0 onscreen=true bounds=["X":0,"Y":0,"Width":1920,"Height":1080]
+   （alwaysOnTop ⇒ layer 3；主窗口同时 onscreen=false，因为 startCapture 先
+    onCaptureWindowToggle(false)「隐藏主窗口防穿帮」／DesktopWindow.kt:376 侧读 captureState）
+   像素测量（固定区域 1400,850,80×80）：
+     修复前基准 /tmp/r2-app-b.png  = 39.0 / 45.0 / 47.0
+     覆盖窗起来后 /tmp/r2-overlay-1.png = 21.5 / 24.5 / 26.0
+     比值 0.544–0.553 ≈ 1 − 0.45 ⇒ 与 alpha=0.45f 的全屏遮罩一致。
+   注：我最初"看图没看出变暗"，是肉眼错觉；判变暗/变色必须量像素。
+   另注：修复前 captureState 是普通 var（DesktopScreenCaptureService.kt:42），Composition 读它不会
+   重组 ⇒ 这块窗口**不可能**出现。这就是修复②被证实的判别点。
+
+E3 已证实。在覆盖窗上拖出选区（/tmp/drag.swift 700 400 1200 800）后，app 内出现消息：
+     「已发出 1 个文件 (screenshot_1791765418916.png)。」
+     + 文件气泡 screenshot_1791765418916.png 750 KB 已发出，等对方接收 08:36
+   对应代码路径：CaptureOverlayView.onConfirm → CaptureExportHelper.saveToTempFile(edited, cacheDirProvider())
+   （DesktopScreenCaptureService.kt:78；落 <defaultCacheDir>/screenshots/screenshot_<millis>.png，
+     Main.kt:42 defaultCacheDir / Main.kt:45 cacheDirProvider）→ completionCallback(path)
+   → RelayController 发文件。
+   750 KB 的真图 ⇒ macOS 屏幕录制权限已授（否则是空/黑图）。
+
+E4 **未取证（只证到代码与字符串）**。
+   取消路径的代码：closeCapture()（captureState = null + onCaptureWindowToggle(true)）
+   → completionCallback(null) → RelayController 分支 info(BannerMessage.CaptureCanceled)。
+   字符串：W6 在产物内 zh/en 两份 .cvr 各解出 banner_capture_canceled → 「截图已取消」/「Screenshot canceled」。
+   我实测到过一次"覆盖窗消失、进程存活、日志无异常"，但**没有在屏上抓到那条横幅**：
+   覆盖窗期间主窗口被隐藏，恢复与横幅出现只在一瞬，我拍到的下一帧已经没有横幅。
+   因此本节只写"代码路径与字符串就位、行为未见反例"，不写"已验收"。
+
+4. 失败与已知副作用（如实记录）
+----------------------------------------------------------------------
+F1 焦点被抢：本机其他应用（Edge/DSH GUI、WorkBuddy 等）会在命令序列中途抢到前台，
+   于是「先点菜单、隔 0.6s 再点条目」这类跨秒序列会打到别的窗口上。
+   实测多次出现：frontmost 检查通过 → 点击 → 覆盖窗却没有出现（点落到别的 app）。
+   结论：这类合成事件取证只在**单次点击、且点击前 0.3s 内确认 frontmost** 时才可信。
+F2 坐标错读：第一次把菜单项位置读错（用缩放图换算），点在条目之间的空隙，点了三、四轮才发现。
+   改用 screencapture -R 的 **1:1 crop** 再量，坐标才稳定。
+F3 **严重副作用（如实上报）**：我用 /tmp/key.swift 13 cmd 想取消覆盖窗时，
+   当时最前的 app 是 Edge（DSH Web GUI），那一发 ⌘W 关掉了用户浏览器的一个标签页
+   （原标签「…RelayPanel…」）。此后不再在未核实 frontmost 的情况下投任何带修饰键的全局键。
+F4 我启动的实例后来退出了：pgrep 无进程、/tmp/r2-app.log 停在 5 行且无异常，
+   ~/Library/Logs/DiagnosticReports 里**没有**它的崩溃报告 ⇒ 是正常退出（很可能是 F3 那发 ⌘W
+   或窗口关闭请求走到了应用的退出路径），不是崩溃。无法归因到截图流程。
+F5 Esc 取消无效（不是环境问题，是代码问题，见第 5 节）。
+
+5. 顺带发现的 d-capture / d-capture-tools 真缺口（★ 建议单独立项）
+----------------------------------------------------------------------
+现象：点一次截图后，初始态屏幕上**只有一层 45% 黑遮罩**，没有浮动工具条、没有提示文案、
+      没有「取消」按钮；按 Esc 也不取消（实测 3 次：System Events 与 CGEvent 53 都不触发），
+      只能 ⌘W（关窗请求 → Window(onCloseRequest = capture.onCancel)，DesktopWindow.kt:355-404）或强退。
+对比原型：prototype/screenshots/relay/d28-capture.png 与 d29-capture-tools.png 的初始态
+      **都有**浮动工具条（scissors/arrow/text/mosaic/…/×/copy/✓ + 640×480 尺寸标签 + 取消）
+      与「拖框选区域 · Esc 取消」提示。
+根因（源码）：
+  · desktopApp/src/main/kotlin/app/relay/desktop/capture/CaptureOverlayView.kt:337
+      if (sel != null && sel.width > 20f && sel.height > 20f && !isDraggingSelection) { 工具条 }
+    ⇒ 没有选区就没有工具条，也就没有「取消」按钮（工具条体 :347-455；onCancel 按钮 :423-433）；
+  · 同文件 :196-211 把 Key.Escape 收在 Box.onPreviewKeyEvent 上，而该 Box 没有可聚焦子节点，
+    焦点不在它身上时按键被丢 —— 这就是 Esc 无效的原因。
+修点也在 CaptureOverlayView.kt（desktopApp 模块），**不在 W5 的 R2 写域**，需 Lead 裁决/授权。
+补充：Layoutlib 到不了 AWT/JWindow，这正是 d-capture / d-capture-tools 走宿主轨（只能人工并排签收）的原因。
+工具条定位函数（可作为改后验收的几何依据）：
+  desktopApp/.../capture/CaptureGeometry.kt placeCaptureToolbar(selection, toolbar=CaptureSize(400f,44f),
+  viewport, margin=8f, gap=8f)：优先选区下方 sel.y+sel.height+8，放不下翻到上方，再不行夹在 margin 内；
+  mapCaptureRectToImage(rect, viewport, image) 用 X/Y 独立换算消 Retina 误差。
+
+6. 复核命令（供 verifier 复现）
+----------------------------------------------------------------------
+  ls -l "scaffold/desktopApp/build/compose/binaries/main/app/捎话 Tidings.app/Contents/app/" | grep coroutines-swing
+  unzip -p "<app>/Contents/app/desktopApp-*.jar" app/relay/desktop/capture/DesktopScreenCaptureService.class | strings | grep -c captureState
+  grep -icE "IllegalStateException" /tmp/r2-app.log        # 期望 0
+  swift /tmp/winlist.swift | grep -i capture               # 期望在截图期间出现 layer=3 的全屏窗
+  swift /tmp/avg.swift <before.png> 1400 850 80 80        # 与覆盖窗期间同点比值 ≈ 0.55

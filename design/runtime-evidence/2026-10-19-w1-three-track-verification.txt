@@ -1,0 +1,598 @@
+捎话 Tidings · W1 三轨（task-1/task-2/task-3）独立验证报告
+验证者：verifier（task-4，未参与实现）  基准：HEAD 8645403（2026-10-19 21:54）
+方法：不跑 gradle（Lead 串行执行）。全部结论来自只读命令 + 我自己写的剥注释/词法器复现脚本
+      （/tmp/verifier-baseline/*.py），并用 `git archive HEAD` 的改动前快照做反向验证。
+
+====================================================================
+1. 独立跑绿的静态量具
+====================================================================
+- 资源键对账（我自己扫 1059 个 Res.string 引用）：values/ 与 values-en/ 各 1179 键、逐键相等，
+  缺失 0。编译面的"缺 key"风险已清零（此前 set_clear_history_confirm_body 缺失，已补）。
+- GuardSourceScan.stripComments：与我的独立词法器在 297 个生产 .kt 上**逐字节相同**，
+  7 类模式 0 处分歧 ⇒ "守卫被自己的注释绊倒"这条假绿形态确实被防住了。
+  （我第一版词法器在 `${...}` 内嵌字符串与 raw string 上失步，实现者那版是对的。）
+- 源码级守卫复现（HEAD 内容 vs 当前内容）：A-1/A-2/A-3/A-5 的 8 条子判据在 HEAD 上全红、
+  在当前全绿（见 §3 表）。
+- 死按钮：`onClick\s*=\s*\{\s*\}` 活代码命中 3 处，全部在白名单且理由成立；
+  `onClick = { }` 精确串 0 处（HEAD 为 2：CabinetScreen:370 + CabinetPane:438）。
+- 设置首页 CJK 字面量：我自己按字面量区域数 = **0**（HEAD 为 20）。
+  基线文件改动只有一行（删掉 SettingsHomeScreen.kt 的 20），其它文件计数一处未动；138 → 118。
+- python 门禁：construction-trace / stale-comment-ref / design-spec-project / design-token-usage /
+  design-state-slot / design-locale-parity / unused-imports 全绿；design-dp-debt --check 逐字一致。
+- 记分板：--self-test 10/10；--check 退出码 0；--dead-buttons 只列 3 条白名单；
+  uuid 2→0、take(8) 40→36、死按钮 3→0、test.gate_private/group/file/fanout 均 1。
+
+====================================================================
+2. task-1（发送时序 D-1..D-4 + task-5）
+====================================================================
+D-1 群聊乐观插入（sendGroupTextOptimistic）
+  判据：RelayControllerGroupSendOptimisticTest 用 CompletableDeferred 闸门把发送卡住，
+        在**放行前**断言气泡已在、id 以 local- 开头、delivery=Sending、且只有一条；
+        放行后断言仍只有一条且 id 换真实值。
+  反向：把 append 移回 await 之后 → 放行前线程为空 → awaitMessage 5s 超时 → 红。
+  已核对：终态恒 Sent 与旧实现一致（旧代码无条件 delivery=Sent），不是新引入的假状态。
+D-2 文件卡乐观插入（handleOfferFilesWith / insert+commit+fail）
+  判据：闸门式出现断言 + progressAfterCommitUpdatesTheSameCard（进度事件必须更新原卡，
+        不能另插一张）+ 失败转 Failed 不消失 + 群分支一卡多成员登记。
+  反向：commit 里漏掉 transferMessages[tId] → 进度用例看到 2 张卡 → 红。
+  已核对：insertOptimisticTransferCard 在 stateLock.withLock 内再取 handleAppendMessage 的锁；
+        StateLock 明确可重入（ReentrantLock / NSRecursiveLock），**不会死锁**。
+  行为变化：新增 files.isEmpty() 早返回；新增 targets.distinct() 去重（未测）。
+D-3 群扇出并发 + 有界（sendGroupTextFanOut + 10s 预算）
+  判据：everyMemberStartsBeforeAnyOfThemReturns 断言并发峰值=3（串行实现峰值恒 1，
+        且 live<3 的轮询会超时）→ 不赌墙钟；membersPastTheBudgetAreRequeuedInsteadOfLost
+        断言超预算成员被**重新入队**（防静默丢失）；sentRequiresEveryMember 保语义；
+        solo 群 0 次投递且回 SENT。
+  反向：把函数体换回串行 for → peak=1 → 红；删掉 requeue → requeued 为空 → 红。
+  已核对作用域：async 建在 coroutineScope 块里、**不在** withTimeoutOrNull 里，
+        所以预算到点只取消 await 块、不取消在飞任务 → unfinished 能正确识别 → requeue 生效。
+  已核对：Messenger.requeue 以 "peerId|msgId" 幂等，重复入队安全；重放同一条信封。
+  说明：测试只保证"超预算者被重新入队"，不保证 requeue/cancel 两个循环的顺序
+        （unfinished 先物化，换序仍绿）；但把 cancel 移到 filter 之前会红。
+D-4 重启收尾：RelayControllerOptimisticRestoreTest 走真实落盘→新控制器→handleRestoreMessages。
+  注意：toRestored 的 Sending→Failed 分支在 HEAD 就已有（59d6fd7），这是回归护栏而非新修。
+task-5 私聊闸门：RelayControllerSendOptimisticTest 新增 privateBubbleAppearsBeforeSendReturns
+  （闸门式）与失败收尾；此前该文件三个方法全是 toRestored ⇒ 记分板 test.gate_private 曾为 0，
+  现在为 1。我此前报的"私聊假绿"已闭环。
+
+====================================================================
+3. task-3（A-1..A-5）反向验证总表（我在 HEAD 快照上机械复现）
+====================================================================
+项 | 旧行为 | HEAD 复现 | 当前 | 守它的测试
+A-1a 死按钮 | 3 处非白名单空 onClick | 红 | 0 | DeadButtonGuardTest.noNewDeadButtonHandlersInProductionSources
+A-1b 文件柜「打开」 | emptyOnClick=true、无 onOpenShareRoot | 红 | 绿 | DeadButtonGuardTest.cabinetOpenButtonIsGatedOnARealAction
+A-2 now 基准 | now: Long = 0L、App.kt 不传 | 红 | 绿 | DeadButtonGuardTest.cabinetRelativeTimeUsesARealClock
+A-3 清空全部 | onClick 直调 onClearHistory、无确认框 | 红 | 绿 | ClearAllConfirmationGuardTest（3 例）
+A-5 诊断自检 | enabled = onRunSelfCheck 恒灰 | 红 | 绿 | DeadButtonGuardTest.diagSelfCheckButtonIsOnlyDrawnWhenItCanRun
+A-6 设置首页 CJK | 20 处字面量 | 红 | 0 | :cjkLiteralGate + 我自己的字面量计数
+
+逐条读代码确认的补充：
+- 白名单三条理由**成立**：ImageViewerDialog 是 indication=null 的点击穿透层；
+  ChatBubbles 是 combinedClickable 的"只认长按"；ConversationsOverflowItems 是 enabled=false
+  的菜单项（M3 仍要求 onClick）。
+- WorkspaceGroupCreateDialog 的「浏览」按钮**已删除**（不是接上）：路径输入框还在、
+  import 已移除（无死 import）、workspace_create_group_browse 键在 values 与 values-en 各留 1 条
+  ⇒ locale parity 不受影响。键现在是孤儿（无引用），可留可删。
+- A-1 桌面接线**正确**：DesktopWindow / DesktopPeerWindow 都传
+  `shareRoot?.let { root -> { openShareRoot(root) } }`，shareRoot 取 settings.shareRoot 且
+  空白视为空；openShareRoot 打开的就是传入路径（与 openDownloadsFolder 是**两个目录**），
+  目录不存在先建（避免文件管理器静默失败）；手机端 App.kt 不传 ⇒ 不画。✓
+- A-5 的最终形态：两个宿主都传 null ⇒ 按钮永不画，只在原位显示 set_diag_selfcheck_unavailable。
+  这符合"null = 不画"，但 A-5 的原判据（enabled 不再恒 false）现在**空真**。建议最终报告写明
+  这是"移除入口 + 如实说明"，不是"接上动作"。
+
+====================================================================
+4. task-2（A-4/A-6/A-8/B-2/B-3）
+====================================================================
+A-4：declaredCapabilityCodes 纯函数 + 首页读真实开关；SettingsHomeCapabilitiesTest 4 例
+  （纯函数 + 源码守卫，反向：改回 "tw1 · mrec1" → 红）。设计上避免了
+  "senderName(unknown)==未知成员"那种同义反复（该写法在本仓不可行：RelayUiState.kt 不在
+  CJK 基线里，硬编码中文会被 :cjkLiteralGate 判红）。
+A-6：设置首页 20 → 0（我独立数 0）；所有文案进 values/values-en 且逐键对齐。
+A-8：GroupInfoDialog 成员行去 UUID（text = "$id 活代码 2 → 0）、状态归头像 StatusDot、
+  副行 = memberOrgPath（company·dept·team，全空则不画）、缺名兜底 common_unknown_member。
+  GroupMemberRowLeakGuardTest 有 3 例纯函数 + 1 例源码守卫；反向：改回 text = "$id 或
+  id.take(8) 或 common_online → 红。
+B-2：debouncedGlobalSearch 抽成纯函数，GlobalSearchDebounceTest 用 runTest + 虚拟时间
+  （不赌真实 delay）；反向：删 delay → searched 变 ["协","协议"] → 红。
+  **截图接缝保住了**：initialQuery 非空时 remember(initialQuery) 当帧算 Done，且
+  LaunchedEffect 里 query == initialQuery 直接 return ⇒ 不会把截图帧翻成"正在搜索"。
+B-3：RemoteViewErrorDialog 532 行 dismissOnBackPress = true；同文件 false 只剩 2 处（120/167）。
+  RemoteViewErrorBackGuardTest 两例（该开的开、该拦的拦）；反向：改回 false → 两条都红。
+
+====================================================================
+5. 缺口与建议（我不动手，交 Lead 裁决）
+====================================================================
+G1 D 轨的测试直接调 helper（sendGroupTextOptimistic / handleOfferFilesWith /
+   sendGroupTextFanOut），**没有一条守生产入口接线**。若有人把 handleSendToGroup 改回直调
+   rt.sendGroupText，全部群测试仍绿而用户可见的缺陷回归。建议补一条源码级守卫：
+   handleSendToGroup 的函数体里必须出现 sendGroupTextOptimistic(（GuardSourceScan 已具备）。
+G2 B-2 同理：只测 debouncedGlobalSearch，未守 GlobalSearchScreen 真的用它。建议同型守卫。
+G3 GroupMemberRowLeakGuardTest 自带一套简易剥注释（indexOf("//")，不处理字符串内 //），
+   与 GuardSourceScan 重复且更弱。当前文件无该情况，建议统一改用 GuardSourceScan。
+G4 DeadButtonGuardTest 仍保留 knownDeadButtons 欠账项（WorkspaceGroupCreateDialog），
+   而该按钮已删除 ⇒ 建议删掉这条条目（Lead 已要求真 0）。
+G5 RemoteViewErrorBackGuardTest 用 take(500) 窗口（当前断言距函数头 326 字符）——脆弱，
+   建议改用 GuardSourceScan.bracedBlockAfter。
+G6 记分板 4 条 proxy 指标对本轮实现给 0（群聊/文件/扇出），不是实现错而是代理失效：
+   sendGroupTextOptimistic 含子串 sendGroupText 且先于 helper 内 append；文件路径已不再调用
+   handleUpsertTransferCard。已标 [代理] 且不参与棘轮（正确），但别用它们签收。
+
+====================================================================
+6. 截图门禁归因（重点：对 Lead 结论的纠正）
+====================================================================
+已核实：
+- 参考图目录 androidApp/src/screenshotTestDebug/reference 共 **225 张**，最新 mtime 为
+  2026-10-19 08:xx ⇒ **没有人在 22:xx 重录**（另有 242 张 22:xx 的 PNG 在 build 产物目录里，
+  是本次 validate 渲染出的 actual，不是参考图）。HEAD = 2026-10-19 21:54。
+- 13 张失败帧的参考图 mtime 全部 ≤ 10-19 08:xx。
+
+纠正：
+- `SettingsMoreSubpage.kt` **不存在**（git 不认、磁盘也没有）。3 张 SettingsMore* 帧渲染的是
+  `SettingsDataSubpage.kt`（我们改过）。
+- **"6 张归我们 / 7 张早已红"这个划分无法由时间链证实**，而且我找到了反例：
+  DeskEmptyExpanded 的参考图（10-18 17:23）里**本来就没有** 26px 自绘菜单栏，而 cd53881
+  （10-19 18:32）才 `- DesktopMenuBar(` ⇒ "菜单栏移除 ⇒ 所有 Desk 帧早已红"这条推断不成立。
+- 能确定的是：18:32 那批外部提交（cd53881 DesktopShell +232/−42、c0e409e GroupInfoDialog +131、
+  59d6fd7 ChatBubbles/ChatScreen、b10c02b 预览文件本身）都晚于**所有**参考图 ⇒ 参考集相对 HEAD
+  已经陈旧。因此**不能**用"某帧渲染了我们改过的文件"就判它归我们。
+- 结论：**这 6 张红不能当作"我们的 UI 真的渲染出来了"的证据**。要拿这个证据，唯一严谨做法是
+  在 HEAD-only 树上跑一次截图门禁并对比失败集合。我跑不了 gradle；请 Lead 决定是否花这个成本。
+  建议继续**不要**重录参考图（Lead 的理由成立：会把外部在途 UI 一起烘进基线）。
+
+====================================================================
+7. 需要 Lead 串行执行的 gradle 清单（我无法执行）
+====================================================================
+# 认 GRADLE_EXIT 数字，不认任何管道/job 的 exit code
+./gradlew :composeApp:compileKotlinJvm > /tmp/v-compile.txt 2>&1; echo GRADLE_EXIT=$?; tail -40 /tmp/v-compile.txt
+./gradlew :core:jvmTest :composeApp:jvmTest :composeApp:testAndroidHostTest :agentNode:test :desktopApp:test --continue > /tmp/v-tests.txt 2>&1; echo GRADLE_EXIT=$?; tail -60 /tmp/v-tests.txt
+./gradlew :cjkLiteralGate :constructionTraceGate :staleCommentRefGate :designSpecDrift :designTokenUsageGate :designStateSlotGate :designLocaleParityGate :jlinkModulesGate :designDpDebtGate --continue > /tmp/v-gates.txt 2>&1; echo GRADLE_EXIT=$?; tail -60 /tmp/v-gates.txt
+# 截图（预期红，见 §6）：:androidApp:validateDebugScreenshotTest
+# 若红：先看失败帧名是否落在我们的 6 个改动点上，再按 §6 的方法在 HEAD 快照上复核。
+
+====================================================================
+8. 我不确定 / 已知局限
+====================================================================
+- 截图归因（§6）：我只有 mtime + commit 证据，且已找到一个反例；最终需要 HEAD-only 跑一次。
+- 群扇出 requeue/cancel 的 KDoc 因果叙述比测试实际保证的更强（见 §2 D-3 说明）。
+- distinct() 去重、预算路径的返回时延，无测试。
+- 我自己的 CJK 复现脚本是近似词法器（未建模 :cjkLiteralGate 的排除清单，曾把
+  PreviewState.kt 误报成"新文件"）；对目标文件 SettingsHomeScreen.kt 我用的是**字面量区域**
+  计数（0），可信。全仓总数不应当作门禁判据。
+
+====================================================================
+9. 最终结论（task-4，三轨 task-1/2/3 全部 complete 后重跑）
+====================================================================
+结论：**静态面可收**。三轨的全部改动都通过了我的独立静态复核；剩余风险不在代码，而在
+两件我做不了的事（gradle 执行 + HEAD-only 截图复核）。
+
+重跑时间点：task-1 rev3 / task-2 rev3 / task-3 rev5 / task-5 rev3 均 completed。
+本次复跑结果：
+- 资源键：1059 引用 / 0 缺失 / values=values-en=1179。
+- 源码守卫复现：A-1a/A-1b/A-2/A-3/A-5 八条子判据当前全绿（HEAD 快照上全红）。
+- GuardSourceScan.stripComments 与独立词法器：297 文件、0 分歧。
+- 记分板 --check 退出 0：uuid 0、take(8) 36、死按钮 0、设置首页 CJK 0、
+  test.gate_private/group/file/fanout 全 1。
+- 死按钮活代码 3 处（全白名单）；SettingsHomeScreen CJK 字面量 0。
+- python 门禁 8 项退出码全 0（construction / stale-comment / spec-drift / token-usage /
+  state-slot / locale-parity / unused-imports / dp-debt）。
+
+**收的前提（必须由 Lead 串行执行）**：
+1. `:composeApp:compileKotlinJvm` 绿（我静态证明资源键齐全，但编译还需真跑）。
+2. 五个模块的测试 + 八条门禁真跑绿（认 GRADLE_EXIT，不认管道 exit）。
+3. 截图 6 张红**不作为**"我们的 UI 渲染了"的证据（§6）；若需要这个证据，必须在 HEAD-only
+   快照上再跑一次 validateDebugScreenshotTest 做差集。
+
+**已知未闭环（已由 Lead 建 task-6/task-7 跟踪，不阻塞三轨本身）**：
+- G1 D 轨生产入口接线无守卫（task-6）
+- G2 B-2 界面接线无守卫（task-7）
+- G3/G5 两份更弱的剥注释实现与 take(500) 脆弱窗口（task-7）
+- G4 DeadButtonGuardTest 的 knownDeadButtons 欠账条目待删
+- G6 记分板 4 条 proxy 指标本轮给 0（代理失效，已标 [代理]，不作签收）
+
+**符号名来回的完整记录（Lead 记）——两次观察各自都对，因为中间真的改过名**
+
+这个函数名在本波次里改过一次；而本波次**全部改动未提交**，所以 `git grep HEAD` 与全仓 grep
+都只能看到**改名之后**的状态。**未提交的工作树没有历史** —— 这是本节的真正教训。
+
+- **task-6 之前**：工作树里是 `internal suspend fun fanOutGroupEnvelope(`，测试 import 同名。
+  （独立验证者读 D-3 diff 时看到的就是这个，他的提醒在当时是对的。）
+- **task-6 期间**：统一改名为 `sendGroupTextFanOut`，`NodeOutbound.kt` 与
+  `GroupFanOutConcurrencyTest.kt` 同步更新。
+- **最终态**：`sendGroupTextFanOut`（定义 + 3 处引用）；`fanOutGroupEnvelope` 全仓 0 命中；
+  task-6 的三条守卫匹配最终名，已验绿。
+
+**过程中的两个错误都留档：**
+1. 验证者提醒"实际叫 `fanOutGroupEnvelope`" —— 在他观察的那一刻正确，但**不是最终态**。
+2. Lead 据此改了 task-6 描述，随后 grep 发现当时的名字已是 `sendGroupTextFanOut`，于是把描述改回，
+   并写下"验证者判断是错的" —— **这条更正本身又错了**：它拿"当前快照"去否定"另一时刻的观察"。
+
+教训：判断"某个名字存不存在"必须先说清**在哪个时刻**。在多人并发改同一份未提交代码时，
+任何"实测"都只是一个快照，不是事实。守卫断言一个不存在的名字会写成"找不到就跳过"的空转 —— 那是永远绿。
+
+
+================================================================================
+§10 Lead 附记：截图门禁的严格归因（HEAD-only 差集实验）
+================================================================================
+
+【为什么必须做这个实验】
+§6 里我（Lead）曾用"参考图 mtime 早于 HEAD ⇒ 某些帧不归我们"来划分，并把 6 张红读成
+"我们的 UI 确实渲染了"。独立验证者**否证了这个推论**，并给了反例（DeskEmpty 的参考图里
+本来就没有 26px 菜单栏，而那条菜单栏是更晚的提交才删的）；他还指出 SettingsMoreSubpage.kt
+根本不存在，那 3 帧渲染的是 SettingsDataSubpage.kt —— 我们改过的文件。
+**他是对的。** 时间链只能证明"参考集相对 HEAD 陈旧"，不能证明"某帧归谁"。
+
+【实验】
+把 HEAD 单独取出来跑同一道门禁，做失败帧集合的差集：
+    git archive HEAD | tar -x -C /tmp/head-shot
+    cp -R androidApp/src/screenshotTestDebug/reference /tmp/head-shot/androidApp/src/screenshotTestDebug/
+    cd /tmp/head-shot && ./gradlew :androidApp:validateDebugScreenshotTest
+参考图是 gitignored 的本地产物，必须单独拷进去（225 张），否则失败原因是"缺参考图"而不是像素差。
+
+【结果（帧级）】
+HEAD-only 失败 12 帧：chat-transfer-failed, chat-transfer-resume, desk-empty-expanded,
+  desk-empty-pane-expanded, desk-settings-data-dark, r2-empty-shell, settings-conn-keepalive,
+  settings-conn-phone, settings-more-loading, settings-more-long-text, settings-more-storage,
+  settings-restarting
+当前树失败 17 帧 = 上面 12 帧 + 下面 5 帧
+
+**只在当前树失败（= 归本轮改动）的 5 帧，与改动项一一对应：**
+  - cabinet-mine-phone            → A-1/A-2（CabinetScreen 的「打开」按钮 + now）
+  - desk-cabinet-mine-expanded    → A-1/A-2（CabinetPane 同构）
+  - chat-group-info               → A-8（群成员行：去 UUID + 在线圆点 + 组织路径）
+  - dialog-group-info             → A-8（同一改动，对话框另一张帧）
+  - settings-more-diag            → A-5（自检按钮无真实动作 ⇒ 不画）
+**没有一帧从红变绿**（本轮没有"修好某张帧"）。
+
+【结论】
+1. 这 5 帧是"我们的 UI 真的渲染出来了"的**严格证据**（差集法，不是时间链推断）。
+2. 另外 12 帧在 HEAD 上就已经红 ⇒ **参考集相对 HEAD 陈旧**，不归本轮。它们需要在一个
+   一致快照上由人看 diff 后重录，**本轮不重录**（重录会把另一个会话在途的、未评审的 UI
+   一起烘进基线）。
+3. A-3（清空全部确认框）的那张帧 desk-settings-data-dark 在 HEAD 上就红 ⇒ **它不能作为
+   A-3 的证据**；A-3 的证据是守卫测试 + 反向验证（见 §3）。
+4. 教训：**"某帧渲染了我改过的文件"不等于"这帧归我"**。集合差集才是判据。
+
+====================================================================
+10. 追加：task-6 接线守卫的独立复核（我完成 task-4 后补验）
+====================================================================
+OptimisticWiringGuardTest 三条断言，我用自己的脚本在 HEAD 快照与当前树上机械复现：
+  T1 handleSendToGroup → optimisticAt=-1/directAt=705 (HEAD, RED) → 679/741 (当前, green)
+  T2 handleOfferFiles  → slice 内两个标记都找不到 (HEAD, RED) → 92/200 (当前, green)
+  T3 sendGroupText     → 无 sendGroupTextFanOut 且仍有 for (member in (HEAD, RED) → 有/无 (当前, green)
+⇒ 三条都能判红，不是空转守卫。
+
+另核实：实现者把 `fanOutGroupEnvelope` 统一改名为 `sendGroupTextFanOut`，NodeOutbound.kt 与
+GroupFanOutConcurrencyTest.kt 同步更新，全仓已无 `fanOutGroupEnvelope` 残留引用（KDoc 也已同步）。
+这是对 task-6 描述里那个名字的正确处置 —— 我原先提醒的"按字面找不到符号"没有发生。
+
+task-7（B-2 接线守卫 / 统一剥注释 / 去掉 take(500)）在我写这一节时**尚未落地**：
+GroupMemberRowLeakGuardTest 与 RemoteViewErrorBackGuardTest 仍各自带 `indexOf("//")` 版 liveCode，
+RemoteViewErrorBackGuardTest:24 仍是 `take(500)`，search 目录下也还没有接线守卫。
+落地后需要一次复验（同一套方法：HEAD 快照判红 + 当前判绿）。
+
+
+====================================================================
+11. 追加：task-7 复验 + 命名史更正 + 冻结风险（verifier）
+====================================================================
+task-7 三条，我用同一套方法（HEAD 快照判红 / 当前判绿）机械复现：
+- B-2 接线守卫（GlobalSearchDebounceTest.theScreenActuallyDebouncesInsteadOfSearchingOnEveryKeystroke）
+  HEAD：callWithLiveQuery=False、directSearches=1、hasInitialSeam=False → RED
+  当前：callWithLiveQuery=True、directSearches=1、hasInitialSeam=True → green
+  ⇒ 实现者自曝的那个假绿（contains(debouncedGlobalSearch() ) 被 helper 定义本身满足）确实修好了：
+    现在要求的是调用点 debouncedGlobalSearch(query，helper 定义（形参 rawQuery）不再能满足它。
+- B-3：take(500) 已删除（grep = 0），改用 GuardSourceScan.bracedBlockAfter。
+  HEAD：errorCardTrue=False、falseCount=3 → RED；当前：True、2 → green。
+- 三份弱剥注释已统一：GroupMemberRowLeakGuardTest / SettingsHomeCapabilitiesTest /
+  RemoteViewErrorBackGuardTest 都改用 GuardSourceScan；feature/ 下已无本地 fun liveCode / fun source(。
+- task-6 守卫在当前生产源码上仍绿：T1=679/741、T2=92/200、T3 有 sendGroupTextFanOut 且无串行 for。
+
+命名史更正（针对本文件 §10 之前 Lead 写的「更正」段）：
+那段说「验证者的判断是错的，fanOutGroupEnvelope 全仓 0 命中」。这个更正本身不准确，因为
+本波次改动全部未提交，git grep HEAD 与全仓 grep 都只能反映改名之后的状态：
+- 我读 D-3 diff 时（task-6 之前），工作树里确实是 internal suspend fun fanOutGroupEnvelope(
+  且 GroupFanOutConcurrencyTest.kt 里是 import app.relay.core.session.fanOutGroupEnvelope；
+- task-6 落地后 grep 变成 internal suspend fun sendGroupTextFanOut(，测试的 import 同步改名。
+⇒ 两次观察各自都正确，中间发生了一次改名。结论不变（最终名字统一、守卫匹配），但「验证者错了」
+  这个归因应改成「改名发生在 task-6 期间；未提交状态下不能靠 HEAD grep 断代」。
+
+冻结风险（新发现，请 Lead 决策）：
+RelayControllerGroupsComponent.kt（task-1 写域）与 RelayControllerMessagesComponent.kt（task-5 写域）
+里存在未提交的 RelayController.shouldTriggerAgent / isAgentAuthored 调用点，
+而这两个符号的定义在 HEAD 里就有（RelayController.kt:1305/1328）、AgentTriggerRuleTest.kt 也在 HEAD 里；
+HEAD 上这两个文件的触发判据是旧的 isMentioningDsh(body) || isWs。
+⇒ 这是另一个会话在途的触发器重构，混进了我们两个写域的文件里。它不影响 task-6 守卫（已验绿），
+  但 W1 提交按路径提交这两个文件时会把外部未评审改动一起带走。请 Lead 决定怎么切。
+
+====================================================================
+12. task-9：J-0（按钮族 + 可点原语 + 迁移样板）独立验证
+====================================================================
+方法：读代码 + 原型逐数核对 + 在 /tmp/j0（git archive HEAD 覆盖 J-0 文件）上做反向验证，不修改仓库任何文件。
+
+【1 尺寸是否照原型量】基础档全部对得上（我逐条核到源码）：
+  原型 --pad-btn:9px 14px ↔ osm9=9dp / lg14=14dp ✓；--fs-btn:14px ↔ labelLarge=14sp/Medium ✓
+  .btn.sm{padding:6px 10px;font-size:12px} ↔ sm6/md10 + labelMedium=12sp ✓；--r-ctl:12px ↔ RelayShapes.medium=12dp ✓
+  .btn svg{width:16px} ↔ IconSizes.Label=16dp ✓；.btn{gap:6px} ↔ sm6 ✓
+  四处没对上的：
+  (a) .btn.sm{gap:5px} —— 小档图文间距原型是 5px，组件两档都用 6dp；
+  (b) .win{--fs-btn:12px; --pad-btn:7px 12px} —— 桌面窗口里的标准档是 12px/7×12，组件没建模；
+  (c) .win .btn.sm{padding:5px 9px;font-size:11px;border-radius:9px} —— 桌面小档同样没建模；
+  (d) .ibtn{width:34px;height:34px} —— 原型图标按钮 34×34，AppIconButton 是 48dp（无障碍动机，KDoc 只说了 48，没说 34）。
+  .btn.pri/.danger-o 的 font-weight:600 没跟，KDoc 已明写理由 ✓（诚实）。
+
+【2 迁移忠实度】3 处 onClick/enabled/modifier 都保留 ✓。但 4 处外观都变了，不只是第 4 处：
+  参考图（SettingsMoreStoragePhonePreview，J-0 之前）里「清理」「清空」都是药丸形，
+  而 AppOutlinedButton 把 shape 钉成 RelayShapes.medium(12dp) ⇒ 形状从 pill → 12dp 圆角矩形，
+  同时 contentPadding 从 M3 默认 24dp 水平 → 14dp。方向都朝原型（.btn{border-radius:var(--r-ctl)}），
+  但任务描述只点了第 4 处的边框，低估了视觉范围。
+  第 4 处的边框 alpha0.4 → 不透明 error：原型 .btn.danger-o{border-color:var(--error)} 就是不透明，
+  所以这是改对了，不是视觉回归。containerColor=errorContainer 与迁移前一致（未变坏）；
+  但原型 .danger-o 是 background:transparent ⇒ 粉底是迁移前就有的偏差，这次被固化进 Danger 档。
+  建议：这是组件层唯一一次能决定 Danger 长相的机会，确认要跟仓库现状（粉底）还是跟原型（透明底+红边）。
+
+【3 componentSpecs 证据】design-spec-project --check OK（9 个规格）；design-token-usage --check OK（spacing 17/17，欠债同基线）。
+  我独立 grep 了 16 条 requiredTokens：每一条都能在 AppButtons.kt 的活代码里找到证据行 ✓
+  （labelLarge:99、labelMedium:100、lg14:107、osm9:108、md10:112、sm6:113/136、xxxl:275、
+   shape.medium:163/200/242、primary:171、onPrimary:172、error:166/212/235/269、onError:167、
+   onErrorContainer:193、onSurface:194、outline:214、onSurfaceVariant:271）。
+  iconSizes：读 tools/design_contract.py 的 _COMPONENT_PROBES 确认没有 iconSizes 探针（只有 colors/
+  typography/spacing/shape/elevation）⇒ 声明了必判无证据行，所以「如实记录工具缺口」这个理由成立。
+  但正确处置应是给探针加 iconSizes（design-token-usage 已在量 iconSizes 6/6，探针很好加），
+  而不是永久不声明 —— 否则这个组件永远不受「必须用 IconSizes」的约束。
+  重要缺口：把 AppButtons 或 PressableSurface 的 componentSpec 删掉，design-spec-project --check 仍然
+  绿（报 8 个组件规格）。也就是说这份契约是自愿的：requiredTokens 的牙齿只在声明存在时有效。
+  建议加棘轮（规格 id 集合只增不减）或「ui/components/ 下超过 N 行的文件必须有规格」。
+
+【4 记分板可信度】ui.button_call_sites=153，我独立数四个模式也是 153 ✓。但：
+  (a) exclude 是 endswith(ui/components/AppButtons.kt)：第二个包装文件 MyButtons.kt 会被计数 ⇒
+      指标变差（假红，不是假绿）；真正的洞在反方向 —— 以后往 AppButtons.kt 里再加 M3 原语永远不被计数。
+  (b) 更大的洞：正则只覆盖 Button/OutlinedButton/IconButton/TextButton。仓库已经在用
+      FilledIconButton（VoiceRecordDialog、MessageComposer）、FilledTonalButton（PkPalette）、FilterChip
+      （HistorySearchOverlay ×4、FilterPill）—— 全部不计入。所以 157 → 0 可以靠改写成
+      FilledTonalButton/FilledIconButton 达成，而一个真实迁移都没做。
+  (c) ui.press_feedback 数 graphicsLayer|animateFloatAsState：4 处命中全在 PressableSurface.kt 自己，
+      其中 2 处还是 import 行。而 PressableSurface 全仓 0 个调用点、AppButtons 也不用它 ⇒
+      指标「按压缩放 4」表达的是「原语存在」，不是「界面上有按压反馈」。同理 fb.haptic 0→4 也是原语自身的
+      HapticFeedbackType/LocalHapticFeedback/performHapticFeedback 三行。两者都是假绿。
+  (d) 注释里写这两个词不会变绿 ✓（grep_count 默认走 read_code → strip_comments，我验过）。
+  (e) --self-test 10/10、--check 退出 0 ✓。
+
+【5 反向验证】/tmp/j0 基线全绿（spec/token/scoreboard 都 0），然后：
+  把 lg14→14.dp、osm9→9.dp 两颗 token 改成裸字面量 ⇒ design-spec-project --check EXIT=1，
+  打印「声明必须绑定 spacing.lg14 / osm9 但没有任何证据行」以及 debt.spacing 提交=120 代码=122。✓ 能判红。
+  但 design-token-usage --check 仍是 0：它的基线 debt.spacing 是 136，实测 122 ≤ 136（有 16 分余量）。
+  ⇒ 这条门禁对本例是弱网；真正有牙齿的是 designSpecDrift 的 requiredTokens 证据检查。
+  删掉 componentSpec：没有任何门禁变红（见 §12-3）。
+
+【6 三个判断题】
+  (a) indication=null vs 47 个仍有水波纹的文件：今天不存在两种反馈割裂，因为 PressableSurface
+      一个用户可见调用点都没有；割裂风险在采用之后。若采用，建议把「按钮=水波纹 / 表面=缩放」
+      定为一条明写的语言（并给桌面补 pointerHoverIcon），而不是各文件随手选。
+  (b) HapticFeedbackType.TextHandleMove 语义上是拖文本手柄，拿来做轻触是常见 workaround 但语义错；
+      新版 Compose 有 KeyboardTap，建议优先用它，否则在 KDoc 写明这是本版本最轻的一档。
+      当前 haptic 默认 false ⇒ 实际上一次都没触发。
+  (c) 用 spacing.xxxl(48dp) 表达触控目标是语义错位：spacing 是元素之间的间隙，控件尺寸是另一件事；
+      它把间距梯子和控件尺寸耦合起来（改 48 这个间距档会静默改掉所有图标按钮的命中区）。
+      建议建 TouchTargets/ControlSizes token 组（本仓 IconSizes 已是先例）。
+
+【额外发现】
+  - 4 个变体里只有 AppOutlinedButton 有调用点（4 处，全在 SettingsDataSubpage）；AppButton/AppTextButton/
+    AppIconButton 0 调用点；PressableSurface 0 调用点。
+  - 组件族没有任何 preview 帧（componentSpecs 的 previews 都是空）⇒ 新组件层的视觉完全没有截图覆盖。
+    已迁的 4 颗按钮本身被 SettingsData* 的旧帧覆盖，但 tone/size/图标布局等变体没有任何证据。
+
+【结论】J-0 的组件层设计是站得住的（尺寸有原型来源、token 规范、requiredTokens 真能判红、第 4 处边框改对了）。
+  但三件事必须记账：① PressableSurface / 触感两条指标是假绿（原语自身计数，0 采用）；
+  ② componentSpecs 是自愿契约，删掉无人拦；③ 按钮迁移分母漏了 FilledTonal/FilledIcon/FilterChip 一族。
+  另建议补一张组件族 preview 帧、并给 PressableSurface 一个真实调用点，否则「按压缩放 4」不应作为进度。
+
+====================================================================
+13. task-12：J-0d 波次一（57 处按钮迁移）独立验证
+====================================================================
+方法：机械比对（38 个改动文件的 ±属性行）+ 原型逐条核对 + 只读 grep/脚本；未改任何文件、未跑 gradle。
+
+【1 行为守恒】57 处 App*Button 调用点（我独立计数 = 57，与实现者一致）。
+  对 38 个改动 .kt 做 ±行属性比对：**没有一处 enabled / Modifier.weight / onClick 表达式在迁移中丢失或被改成常量**。
+  被脚本标出的 5 处全部是**更早波次**的既有改动，不是本轮：
+  CabinetScreen 空 onClick→openShareRoot（A-1）、SettingsDataSubpage 直调→确认框（A-3）、
+  SettingsDiagSubpage enabled/onClick（A-5）、WorkspaceGroupCreateDialog 删掉第 4 颗死按钮。
+  被丢弃的样式属性（colors/border/shape/contentPadding/style）逐类看过：都是「族接管」的合理丢弃；
+  两处带自定义色的都已正确映射 —— RemoteViewSessionDialog 的两颗 error 实心按钮 → AppButton(tone=Danger)（error/onError，逐值等价）。
+
+【2 尺寸档的原型依据】抽了 6 处，三处「没把握」的判定：
+  ✓ AgentApprovalCards「取消任务」→ Small：原型审批行 .appr .rt 的两颗是 `btn sm out` / `btn sm pri`（:2223），同行小档成立。
+  ✓ WorkspaceDetailView「申请授权」→ Neutral Small：原型 :6335-6336 是 `btn sm` / `btn sm pri`，逐档对上。
+  ⚠ SettingsConnectionSubpage：**tone 对、variant 不对** —— 原型 :5091-5092 是两颗 `.btn sm`（有 1px outline 描边），
+    迁移用的是 **AppTextButton**（无边框）；「全部立即探测」原型 :5098 是 `.btn sm`（中性描边），迁移是 AppButton（实心主色）。
+    **但这两处 HEAD 就是 TextButton / Button** ⇒ 属迁移前既有偏差，不是本轮引入；注释只解释了档位，没解释为什么不是 outlined。
+
+【3 对话框动作条：实现者推翻指令是**对的**】
+  原型里对话框动作条是**混的**，不是单一规则：
+  - 通用/设置类对话框（.cardfoot / 建群对话框）：`:4975` `btn pri`、`:5060` `btn`、`:5196` `btn`、`:6583` `btn pri`、`:6601` `btn`、
+    `:3564-3565` `btn`+`btn pri`、`:3620-3621` `btn`+`btn pri` ⇒ **`.btn`（Medium）**；
+  - 代理/扫码类对话框：`:3592-3593`、`:4219-4220`、`:4252/4260`、`:4271-4273`、`:4110-4111` ⇒ `.btn sm`。
+  RelayDialogButton 服务的正是前一类的通用动作条（32 个调用点，含 agent 对话框的「关闭」），**Medium 有原型依据**；
+  所以「对话框动作条一律 Small」这条指令本身不成立，实现者不照做是正确的。
+
+【4 designScreenDiffGate 重基线：是「值搬了位置」，不是「值丢了」—— 但有一处措辞不准】
+  我解析了基线的前后两个 JSON 并分类：
+  新增：只有 `m-groupcreate|spacing|proto`、`m-groupinfo|spacing|proto`、`m-insets|spacing|proto` 各 += [9,14]（**全是 |proto**）。
+  删除：`d-settings-data|radius|proto`、`m-set-data|radius|proto` 各 -= [12]（差集**变小**，是改善）。
+  新键：`m-insets|font-weight|proto`。
+  **|code 方向的新增 = 0** ⇒ 没有任何「代码写出原型里没有的值」的迹象，这是最关键的反向信号。
+  + AppButtons.kt 的 lg14(:126)、osm9(:127)、labelLarge(:118)、labelMedium(:119) 证据行都在，requiredTokens 覆盖它们，
+    :designSpecDrift 逐条校验通过。⇒ 「间距 9/14 从屏层移到组件层」**成立**。
+  ⚠ 但 font-weight **600 不是搬走，是放弃**：AppButtons.kt 没有任何显式 fontWeight（labelLarge/labelMedium 的 Medium=500），
+    而迁移前 RelayDialogButton(primary) 写的是 SemiBold(600)。所以 reason 里「值没有丢」对 600 不准确；
+    应改成「600 是已记录的刻意偏离（族不为一颗按钮新增字重档）」。这不是隐瞒（KDoc 写了），但基线理由要写准。
+
+【5 删除 dangerOutlinedColors】全仓（含 desktopApp）**0 引用** ✓。
+  组件族 Danger 现在是 `containerColor = Color.Transparent` + 不透明 error 边框 = 原型 `.danger-o{background:transparent;border-color:var(--error)}`。
+  迁移前的 `dangerOutlinedColors()` 是 errorContainer（粉底）⇒ 「清空聊天记录」那颗确实从**粉底**变成**透明底+红边**。
+  判断：**朝原型，且语义更对**（破坏性动作通常是被降级的次要动作，填充色会与主行动抢注意力；强调应由确认框承担）。
+  另核实：RelayDialogButton(danger) 迁移前本来就是 Color.Transparent ⇒ 那一路**没有变化**，语义变化只波及原 dangerOutlinedColors 的调用点。
+
+【额外发现】
+  - **AppIconButton 仍然 0 调用点**。它改用了 PressableSurface（代码层），但自己无人调用 ⇒
+    PressableSurface 的用户可见采用点仍是 **0**（记分板如实报 0，这一点是诚实的）。
+    根因：AppIconButton 内部写 `modifier.size(spacing.xxxl)`，**调用方再传 size 也压不过它**，所以顶栏/行内那些 28dp/36dp 图标按钮无法迁移；
+    迁移后 in-scope 文件里仍剩 8 颗裸 IconButton（AgentSessionDetail ×2、WorkspaceDetailView ×4、NodeSheets ×1、RemoteView ×1）。
+    建议：AppIconButton 改成 `defaultMinSize(48.dp)` 或让 size 可传，否则这个变体永远空转。
+  - 实现者说的「4 处族缺能力没迁」**属实**：overlay 色调 = RemoteViewSessionDialog:291（contentColor=White）；
+    跟随容器色 = RemoteView:341（白色 20% 底 + 圆）；ImageVector ×2 = VoiceRecordDialog:179/:207（Icons.Outlined.PlayArrow）。
+  - 新预览帧 ComponentsButtonsPhonePreview 存在且是**绿主题**（我读了 PNG：深绿实心、Danger 透明底红边、文本按钮绿/红），
+    但 `componentSpecs.AppButtons.previews` 仍是 `[]` ⇒ 规格没有声明自己那张帧，建议补上（否则规格与帧无法互相校验）。
+  - KDoc 的「四处刻意没建模」我逐条核过：`.btn.sm{gap:5px}`、`.win` 标准档、`.win .btn.sm`、`.ibtn 34×34`，理由都写了（34→48 是无障碍偏离）。✓
+  - 门禁/量具复跑：designSpecDrift / tokenUsage / stateSlot / localeParity / construction / staleComment / dpDebt / unused-imports 全 0；
+    记分板 --check 退出 0：裸按钮 165→109、已迁 57、内联 typography 654、规格 9、按压采用点 0、真实触感 0。
+
+【结论】**J-0d 波次一可以收**。57 处迁移在行为上守恒（无 enabled/weight/onClick 丢失），档位选择有原型依据，
+  推翻「Small」指令的判定是对的，重基线是「值搬了位置」而非「值丢了」，Danger 改透明底朝原型且语义更对。
+  三条需要记进下一轮（都不阻塞本波次）：
+  ① 基线 reason 里「值没有丢」对 font-weight 600 不准确，应改成「已记录的刻意偏离」；
+  ② AppIconButton 因固定 48dp 无法被采用（0 调用点、8 颗裸 IconButton 迁不动），PressableSurface 的采用点因此仍是 0；
+  ③ componentSpecs.AppButtons.previews 为空，没声明那张新帧。
+  另：SettingsConnectionSubpage 的两处 variant 与原型不一致，但**迁移前就是这样**，属既有欠账（可另立一条）。
+
+====================================================================
+14. task-13：会话行合并 / 去分割线 / 按 .li 收口（F-2 前半）独立验证
+====================================================================
+方法：读代码 + 原型逐条核对（relay.html:734 .li）+ **解码 PNG 实测行高**（Pillow 不可用，自写 zlib 解码）；
+      未改任何文件、未跑 gradle。
+
+【1 只剩一份实现】✓
+  `grep -rn 'fun ConversationRow'` = 1 处（feature/conversations/ConversationRow.kt:62）。
+  两个调用点：手机 ConversationsScreen.kt:406、桌面 DesktopConversationWidgets.kt:284（import 了共享行并传 selected）。
+  桌面那条路径经 ConversationSidebar → 共享行，**没有被别的分支绕过**（DesktopConversationsPane 本身没改，它是调用方）。
+
+【2 行为守恒】✓ 但三处要记账
+  字段全在：title / KindBadge / preview / time(仅 lastMessageAt>0) / unread 徽标 / pendingCount / 在线点(群不画) / 群成员数。
+  群成员数**没有丢**：从「预览 · 2/5 人在线」变成单独一行 —— 这恰好是原型 .li .t3（:741 起）的结构，
+    新帧里能看到「1/3 人在线」独立成行。所以是**有意统一，不是丢信息**。✓
+  记账①：pendingCount 的视觉权重降级 —— 桌面旧版是 secondaryContainer 实心胶囊（4dp 圆角 + onSecondaryContainer），
+    新版是 onSurfaceVariant 纯文字无底。信息在，强调没了。
+  记账②：无预览文案从 desktop_conv_no_preview「还没聊过」改成 conv_no_messages「还没聊过，打个招呼」（与手机统一）。
+  记账③：标题字阶 —— 手机旧版本来就是 bodyLarge(16sp)，桌面旧版是 bodyMedium(14sp)，合并取了 16 ⇒ **桌面标题 14→16**；
+    而原型 .t1{font-size:14px}。所以这是偏离原型 2sp（手机侧是既有偏离）。
+  **新发现（本轮范围外但可见）**：同一屏里 WorkspaceFeedRow 仍是旧卡片样式（Surface + LocalCardShape + relayCardShadow + 48dp 图标），
+    而会话行已是 12dp 扁平行 ⇒ 手机会话列表在「显示工作区」时会**同屏混两种行样式**。建议下一轮跟进。
+
+【3 分割线】✓ 删对了，但选中态有两个问题
+  (a) 分组成立：12dp 圆角 + 行距（桌面 2dp；手机列表是 8dp，属不同容器，可接受）。原型 .sidelist{gap:1px} + .li{border-radius:12px}、无分割线 ✓。
+  (b) **选中态对比度太低**（我按真实色值算了 WCAG 对比度）：outlineVariant 在暗色是 0x17FFFFFF(9% 白)、亮色是 0x12000000(7% 黑)；
+      描边对 surface 的对比度 **暗色 ≈1.4:1、亮色 ≈1.17:1**；而选中底色 surface 对列表底色 background 在**亮色只有 1.02:1**（#FFFFFF vs #FAFAF8）。
+      ⇒ 亮色主题下选中态**几乎不可见**；桌面旧版是 primaryContainer 实心绿底，一眼可见。这是朝原型但可感知性明显下降。
+      建议保留原型结构但加强一档（如 outline 而不是 outlineVariant，或叠一层 surfaceVariant 淡底）。
+  (c) **代码级缺陷**：`drawBehind { drawRoundRect(color = ring, style = Stroke(1.dp.toPx())) }` **没有传 cornerRadius**，
+      而 DrawScope.drawRoundRect 的 cornerRadius 默认是 CornerRadius.Zero ⇒ 画出来是**方角**描边，再被外层 clip(shapes.medium) 裁掉四角。
+      修法：cornerRadius = CornerRadius(<12dp 的 px>)。这条与对比度问题是两件事，叠加起来让选中态更弱。
+
+【4 min-height 48 vs 52：48 完全没生效，52 也不是差异来源】
+  我解码了新帧（1032px / 393dp，2.626 px/dp）实测：头像**正好 32.0dp**（与 .li .av 的 32px 一致 ✓）；
+  标题行间距（暗色文字带）= **83.0dp / 65.1dp**，即行高约 **81dp（群，三行）/ 63dp（私聊，两行）**。
+  ⇒ 两档都远大于 48，defaultMinSize(48) **从不生效**；补一个 52 的 token 同样不会生效（63 > 52）。
+  ⇒ 但和原型比确实高了 ~11dp，来源不是 min-height，而是：① 标题用 bodyLarge 16sp/lineHeight 24（原型 .t1 14px）；
+     ② 标题行里挂了 KindBadge（把该行撑得比 24 高）；③ 右列 time/badge/pending 用 spacedBy(8dp)，原型 .li .rt{gap:3px}。
+  建议：**不要**为这个补 48/52 token（补了也是空转）；先把 .t1 收到 14sp/20、.rt 间距收到 3–4dp，
+     那时 52 的 min-height 才会自然成为生效值，也才值得给它一个 token。
+
+【5 designScreenDiffGate 第二次重基线：**诚实，7/9 确实是 .li 的 padding**】
+  原型第 734 行逐字：.li{display:flex;gap:10px;align-items:center;padding:7px 9px;border-radius:12px;cursor:pointer;min-height:52px}。
+  且 .li 在原型里真的被各屏用：grep -c 'class=li' = 10，其中 :3278 就是 screenHomeRecent 的行模板。
+  基线前后分类：
+    新增 |code：m-groupcreate += ['7']、m-home-more += ['7']、m-home-recent += ['7']、m-home-unread += ['7','9']；
+    新增 |proto：m-groupcreate/m-home-* 的 14；m-groupinfo、m-insets 的 14/9；
+    删除 |proto：m-home-recent/m-home-more 各 -= ['9']、d-settings-data/m-set-data 的 radius 12（改善）。
+  ⇒ 新增的 7/9 **全部等于 .li 规则里的 padding**，没有一个是原型不存在的值 ⇒ 不是凭空写，**理由成立**。
+  ⚠ 但这是**结构性代价**：diff 工具不认识「共享组件 CSS 属于哪些屏」，于是共享行一改就要重记一次基线，
+    棘轮的意义会被反复重记慢慢磨掉。建议给工具加一张「共享规则 → 屏」的映射（或把 .li 声明过的 token 从 |code 侧抵消），
+    让 7/9 自动对消，而不是每次都靠 reason 解释。
+  design-screen-diff --check 现在 EXIT=0（「本轮改进 0 组」，与重记一致）。
+
+【结论】**可以收**，5 条里 4 条通过（单实现/信息守恒/去线/基线诚实），1 条需要改：
+  ① 选中态**亮色下几乎不可见**（1.02:1 底 + 1.17:1 边），且 drawRoundRect 漏 cornerRadius 导致方角被裁 —— 这两条建议修；
+  ② min-height 48 是空转，不要为它补 token；真正的差额在标题字阶与右列间距；
+  ③ 记账：pendingCount 强调降级、桌面标题 14→16、WorkspaceFeedRow 仍是旧卡片（同屏混样式）、无预览文案换词。
+
+====================================================================
+15. task-14：五项优化收口复核（①容器合并 ②文件柜 ③节点模型 ④按钮 ⑤视觉层）
+====================================================================
+方法：调用点+grep 判真假共享；对照 git show HEAD 旧实现判行为守恒；原型逐条核数值；
+      用 importlib 直接改工具全局跑 SHARED_COMPONENT_FILES 实验；解 PNG 量对比度。未改文件、未跑 gradle。
+
+【① 会话列表容器合并】能收
+  ConversationListPanel 两个壳都调：DesktopConversationWidgets.kt:283 与 ConversationsScreen.kt:398；
+  ConversationRow( 只在 ConversationListPanel.kt:68 被调（与声称一致）。
+  桌面「搜到的消息」那段走 trailingContent 插槽 —— 符合 AGENTS §2.6「整块不同用插槽」的判据。
+  行距统一 sp.xxs(2dp)（原来手机是 8dp），与 .sidelist{gap:1px} 对齐。
+
+【② 文件柜合并】能收
+  MineCabinetView 双壳调用：CabinetPane.kt:141 / CabinetScreen.kt:172；PeerCabinetView：CabinetPane.kt:156 / CabinetScreen.kt:160。
+  被删的三个实现确认 0 残留：MineCabinetPanel=0、PeerCabinetBrowser=0、CabinetSelectionBox=0。
+  CabinetPane.kt 实测 **799 → 302 行**（Lead 说 819→302；HEAD 实测是 799，**差 20 行，口径请核对**；方向确认）。
+  行为：两壳传的能力集一致，桌面只多 onBack；onOpenShareRoot 桌面传真实动作、手机传 null（此前裁决已落地）。
+
+【③ 节点模型统一】能收
+  NodeEntry 类型已删除（全仓 word-boundary 只剩 1 处注释提到它）。
+  两壳都构造同一个 NodeListItem（DesktopNodesPane:272-310 / NodesScreen:220-258）；NodeDetailBody 双壳调用：DesktopNodesPane:511 / NodesScreen:284。
+  DesktopNodesPane.kt **905 → 601 行** ✓。
+  行为守恒逐条核过：
+  - lastSeenText→lastSeenAt：HEAD 是 if (peer.online || lastSeenAt<=0) 刚刚 else relativeTime 存成字符串，
+    现在是渲染点用同一个条件现算 ⇒ 语义完全一致；手动条目 HEAD 存 null → 刚刚，现在 lastSeenAt=0 → 刚刚 ✓。
+  - remark 来源：HEAD 桌面板直接查 state.settings.peerRemarks[id]；现在读 peer.remark，
+    而 PeerUi.remark 的权威源仍是 RelaySettings.peerRemarks（NodeUi.kt:71-72 + RelayController:1215-1218）⇒ 只是换了读取路径，没有换事实来源 ✓。
+  - 遗留不对称（HEAD 就有，不是本轮引入）：手机 port 用 udpPort.ifZero(settings.udpPort)，桌面直接用 peer.udpPort。记账即可。
+
+【④ 裸按钮迁移】能收，但「不该硬迁」对约 3–4 处过宽
+  记分板：裸按钮分母 **165 → 66**、已迁 **90**；我自己按调用点数到 67（差 1 是「按行数 vs 按出现次数」的计数差）。
+  算术自洽：165−66=99 处消失 = 90 迁走 + **9 处随被删的重复实现一起消失**（①②③ 合并的副产物），不是漏记。
+  剩余按族：IconButton 29 / OutlinedButton 11 / Button 9 / TextButton 9 / FilterChip 6 / FilledIconButton 2 / FilledTonalButton 1。
+  真缺口（核实成立）：
+   - 图标按钮自定义尺寸 24/28/34/36/40dp —— 族里 AppIconButton 只有 defaultMinSize(48)，做不出更小；
+   - 行内动作 contentPadding 8×2 / 10×4，比族里 Small(10×6) 还小一档 —— 缺 Compact 档；
+   - ImageVector 图标（MessageComposer 303 / VoiceRecordDialog 207）——族只收 DrawableResource；
+   - FilledIconButton / FilledTonalButton / FilterChip —— 族没有这些变体；
+   - overlay 色调（RemoteView 291 contentColor=White、341 白 20% 底色圆）。
+  但「不该硬迁」对这几处不成立：HistorySearchOverlay:803/809（OutlinedButton/Button + weight(1f)，809 的 colors 就是 primary=默认值）、
+    DesktopFilesPane:245（painterResource 图标，可用 leadingIcon = if (filtering) null else …）、VoiceRecordDialog:179（朴素 Button）。
+    建议：要么迁掉，要么把口径改成「这几处可迁但未迁」，别并入「族能力缺口」。
+
+【⑤ W3 视觉层】能收（三档映射逐个数值核对正确；一处措辞要改）
+  原型 :38 亮色：--surface:#FFFFFF / --surface-2:#F0EFE9 / --surface-3:#E4E9E7；:73 暗色：#1E201F / #2A2C2B / #2B3331。
+  代码：Base=colorScheme.surface(#FFFFFF/#1E201F) ✓；Raised=surfaceVariant(#F0EFE9/#2A2C2B) ✓；Inset=accents.surface3(#E4E9E7/#2B3331) ✓。
+  三者全部逐值相等。而被否掉的 surfaceContainerHigh = #F3F2EC，grep 原型 0 命中 ⇒ Lead 的自我更正正确。
+  材质轴：两个配色都把 surfaceTint 钉成 surface ⇒ M3 tonalElevation 是恒等变换（不会偷偷染色）✓；
+    原型 .card{…box-shadow:var(--shadow)} 无 border ✓；RelayElevations 1/3/6 用于 tonal/card/shadowElevation。
+    ⚠ 一处措辞：relayCardShadow 实现是 shadow(elevation=8.dp, ambient/spot=accents.cardShadow) —— 是单层 elevation + 原型色，
+    原型是两层 box-shadow(0 1px 2px + 0 8px 24px)。应写「近似对齐」而不是「已对齐」，并记进 fidelity-deviations。
+  字阶：11/15 采用，未采用的四个是 displayLarge/Medium/Small + headlineLarge —— 展示级字号，移动端本就不该用 ⇒ 「无缺口」成立。
+
+【⑥ 记分板/量具】能收
+  duplicate_composable_count() = 同名 fun 同时出现在 /ui/desktop/ 与非 desktop 的处数；定义干净、不是为变绿改的口径；值 **7 → 0** ✓。
+  --self-test **10/10**；python 侧 9 条门禁全 0（spec/token/stateslot/locale/screendiff/dpdebt/construction/stalecomment/unused-imports）；
+  资源键 1061 引用 / 0 缺失 / values=values-en=1188。
+
+【⑦ SHARED_COMPONENT_FILES 机制】能收 —— 机制是真的，不是刷基线
+  实验（importlib 直接改模块全局，未改仓库文件）：
+   对照（默认 5 个条目）：--all --check → main() 返回 0（287 组，685 个差，基线 293 组，改进 41 组）；
+   实验（SHARED_COMPONENT_FILES = ()）：main() 返回 **1**，**25 组差集比基线更大** —— 且全是 |proto 方向：
+     d-cabinet|spacing += [2,3,5,7,9,11,14]、d-cabinet|radius += [5,12]、d-nodes|font-size += [11,16]、d-empty|spacing += [9]、
+     d-nosel/d-nomatch|spacing += [3,5,7,9]、d-transferlog|radius += [9]、m-addnode|font-size += [16] …
+  ⇒ 清空它门禁就红：这些值确实是靠共享组件归属被算进来的，机制在做事。
+  更关键的是它结构上不可能掩盖回归：merge_shared_values(cv,sv,pv) 只做 cv |= (sv & pv) —— 只并「原型里也有的值」，
+    因此永远无法制造 |code 方向的新增（那才是真偏离）。这条不是经验，是集合运算性质。
+  （自我更正：我第一次实验只调 main() 没取返回值，误读成「闸门恒绿」；工具是 sys.exit(main())，返回码正确。是我的实验壳错了。）
+
+【前一轮缺陷的落地情况】
+  ✓ drawRoundRect 的 cornerRadius 已修（CornerRadius(radius,radius)），注释点名是我发现的代码级缺陷；
+  ✓ 选中环从 outlineVariant 改成 outline（亮 1.17→约 1.5:1，暗 1.31→约 1.5:1）—— 有改善，但仍偏低，属「原型本就极淡」的取舍，记账即可；
+  ✗ **WorkspaceFeedRow 仍是旧卡片样式**（Surface+LocalCardShape+relayCardShadow+48dp 圆图标+16/12 padding），
+    而 ConversationRow 已是 12dp 扁平行；现在两者同处 ConversationListPanel ⇒ 两个壳的会话列表都会混两种行样式。
+    这是 F-2 后半的遗留，建议下一轮统一（否则「一个元素一处定义」在列表项这一层只做了一半）。
+
+【总结论】**五项都能收**（①②③⑤⑥⑦ 通过；④ 方向正确但对 3–4 处的「不该硬迁」口径过宽）。
+  收之前建议只改三处表述/跟一条尾巴：
+  1. ④ 把 HistorySearchOverlay 803/809、DesktopFilesPane 245、VoiceRecordDialog 179 迁掉，或改口径为「可迁未迁」；
+  2. ⑤ 把 relayCardShadow 的「已对齐原型」改成「近似（单层 elevation vs 原型两层阴影）」；
+  3. ② 核对 819 与实测 799 的口径差；
+  4. 尾巴：WorkspaceFeedRow 未与 ConversationRow 同化（两壳列表混样式）。

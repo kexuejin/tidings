@@ -1,0 +1,22 @@
+# iOS 消息落盘 · 磁盘实况（2026-10-04 17:1x CST）
+容器: $HOME/Library/Developer/CoreSimulator/Devices/00000000-FEF7-409D-AE33-803A77C62376/data/Containers/Data/Application/0C5D6D2B-8A47-495C-B7F4-B81B467F7120
+文件: Library/Application Support/relay/messages.json
+
+threads: 1
+peerId: 2819d147-f6bc-4ca5-8b07-0cae144eb618   messages: 8
+   {"mine": true, "text": "iOS-persist-1610", "at": 1791101786152, "delivery": "Sent"}
+   {"mine": false, "text": "端口参与匹配后的复验", "at": 1791101926556}
+   {"mine": false, "text": "不该投给 17878 的节点", "at": 1791101926570}
+   {"mine": false, "text": "矩阵1 精确端口", "at": 1791102187198}
+   {"mine": false, "text": "矩阵3 无端口", "at": 1791102190247}
+   {"mine": false, "text": "矩阵4b nodeId 直投", "at": 1791102222685}
+   {"mine": false, "text": "桌面收到了吗", "at": 1791102260491}
+   {"mine": false, "text": "公网 HTTP 复验", "at": 1791102391462}
+
+# 偏好设置（注意：manualPeers 至今没有落盘）
+{
+  "relay.settings.json" => "{
+    "nodeId": "d7542019-ddbb-40bd-8e14-4e32ed63bd02",
+    "persistMessages": true
+}"
+}
