@@ -480,23 +480,8 @@
     <!-- 实际上限是 MAX_AVATAR_BYTES = 32 KiB（落盘那张的闸）；20 MiB/8192 是「源图编码」那一步的闸，
          那一步尚未实现，不写。 -->
     <string name="set_avatar_pick_hint">Pick a local image via the system file picker. Current limit: file size ≤ 32 KiB — shrink larger images in your gallery app first.</string>
-    <string name="set_avatar_step1_title">Pick a local image</string>
-    <string name="set_avatar_step1_desc">One entry point: “Upload Image” → the system file picker.</string>
-    <string name="set_avatar_step2_title">Hash it</string>
-    <string name="set_avatar_step2_desc">The sha256 is computed on this device the moment the image is picked; the profile carries only that hash — the image body never goes online.</string>
-    <string name="set_avatar_step3_title">Stays on this device</string>
-    <string name="set_avatar_step3_desc">The image body never goes online; there is no cropping and no re-encoding today.</string>
-    <string name="set_avatar_step4_title">Save the profile</string>
-    <string name="set_avatar_step4_desc">“Save profile” writes the profile fields; the picked image does not sync with the profile yet (see below).</string>
-    <string name="set_avatar_steps_hint">This is what the page actually does today: pick an image, hash it, save the profile fields — all on this device. Cross-device sync of the image itself (cropping, re-encoding, on-demand fetch) is not implemented yet; that is the goal, not the current state.</string>
-    <string name="set_avatar_hash_empty">No image picked yet</string>
     <!-- %1$d 是保存后的资料版本（profileRev）。 -->
     <string name="set_avatar_saved_inline">Saved; the profile rev is now v%1$d. The picked image is not saved with the profile yet.</string>
-    <string name="set_avatar_hash_title">Only these 64 hex digits go over the wire</string>
-    <string name="set_avatar_hash_hint">The image body &lt;b&gt;never goes online&lt;/b&gt;; only this one hash travels with the profile. The peer sends avatar{op:"get"} on demand to fetch it — the images nobody could keep up with on a LAN never enter anyone’s bandwidth. The 32 KiB limit serves the same purpose: keeping the base64 envelope safely below one TCP control frame (64 KiB).</string>
-    <string name="set_avatar_protocol_title">Saving works, but this image doesn't sync yet</string>
-    <string name="set_avatar_protocol_lead">Custom avatar network sync is not yet enabled.</string>
-    <string name="set_avatar_protocol_body">Custom avatar exchange (the av1 capability) requires on-demand fetch, caching, and framed chunk transfer. The current version prioritizes instant synchronization via preset avatars and initials; custom avatar network roaming will be enabled in a future release.</string>
     <string name="set_avatar_save">Save Profile</string>
     <string name="r2_set_avatar_mode_icon">Icon avatar</string>
     <string name="r2_set_avatar_mode_initial">Initials</string>

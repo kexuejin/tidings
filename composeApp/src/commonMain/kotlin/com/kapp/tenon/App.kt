@@ -722,7 +722,6 @@ fun RelayApp(
                         // 于是 `SetAvatarPage` 在生产里不可达，成了孤儿页。
                         SETTINGS_PAGE_AVATAR -> SetAvatarPage(
                             settingsSlice = settingsSlice,
-                            avatarSlice = avatarSlice,
                             pickedAvatarBytes = avatarSlice.pickedAvatarBytes,
                             onPickFromAlbum = controller::pickAvatar,
                             onRemovePicked = controller::removePickedAvatar,

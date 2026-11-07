@@ -18,10 +18,6 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.verticalScroll
-import androidx.compose.material3.Card
-import androidx.compose.material3.CardDefaults
-import androidx.compose.material3.HorizontalDivider
-import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
@@ -37,47 +33,26 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.semantics.Role
-import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.kapp.tenon.domain.SettingsSlice
-import com.kapp.tenon.domain.AvatarSlice
 import com.kapp.tenon.domain.RelayUiState
 import com.kapp.tenon.generated.resources.Res
 import com.kapp.tenon.generated.resources.common_remove
 import com.kapp.tenon.generated.resources.ic_image
-import com.kapp.tenon.generated.resources.ic_lock
-import com.kapp.tenon.generated.resources.ic_key
-import com.kapp.tenon.generated.resources.ic_save
-import com.kapp.tenon.generated.resources.ic_warn
 import com.kapp.tenon.generated.resources.set_avatar_card_pick
 import com.kapp.tenon.generated.resources.set_avatar_change
 import com.kapp.tenon.generated.resources.set_avatar_file_size
-import com.kapp.tenon.generated.resources.set_avatar_hash_empty
-import com.kapp.tenon.generated.resources.set_avatar_hash_hint
-import com.kapp.tenon.generated.resources.set_avatar_hash_title
 import com.kapp.tenon.generated.resources.set_avatar_none_picked
 import com.kapp.tenon.generated.resources.set_avatar_page_subtitle
 import com.kapp.tenon.generated.resources.set_avatar_page_title
 import com.kapp.tenon.generated.resources.set_avatar_pick_hint
 import com.kapp.tenon.generated.resources.set_avatar_picked_label
-import com.kapp.tenon.generated.resources.set_avatar_protocol_body
-import com.kapp.tenon.generated.resources.set_avatar_protocol_lead
-import com.kapp.tenon.generated.resources.set_avatar_protocol_title
 import com.kapp.tenon.generated.resources.set_avatar_reselect
 import com.kapp.tenon.generated.resources.set_avatar_save
 import com.kapp.tenon.generated.resources.set_avatar_saved_inline
-import com.kapp.tenon.generated.resources.set_avatar_step1_desc
-import com.kapp.tenon.generated.resources.set_avatar_step1_title
-import com.kapp.tenon.generated.resources.set_avatar_step2_desc
-import com.kapp.tenon.generated.resources.set_avatar_step2_title
-import com.kapp.tenon.generated.resources.set_avatar_step3_desc
-import com.kapp.tenon.generated.resources.set_avatar_step3_title
-import com.kapp.tenon.generated.resources.set_avatar_step4_desc
-import com.kapp.tenon.generated.resources.set_avatar_step4_title
-import com.kapp.tenon.generated.resources.set_avatar_steps_hint
 import com.kapp.tenon.generated.resources.set_invalid_nick
 import com.kapp.tenon.ui.ContentWidths
 import com.kapp.tenon.ui.SectionCard
@@ -90,13 +65,9 @@ import com.kapp.tenon.ui.components.TitleBarDivider
 import com.kapp.tenon.ui.components.formatAvatarByteCount
 import com.kapp.tenon.ui.theme.LocalAppSpacing
 import com.kapp.tenon.ui.theme.RelayAvatarGradientFrom
-import com.kapp.tenon.ui.theme.ShapeRoles
 import com.kapp.tenon.ui.theme.RelayAvatarGradientMid
 import com.kapp.tenon.ui.theme.RelayAvatarGradientTo
-import org.jetbrains.compose.resources.DrawableResource
-import org.jetbrains.compose.resources.painterResource
 import org.jetbrains.compose.resources.stringResource
-import com.kapp.tenon.ui.theme.relayCardShadow
 
 /**
  * 设置 · 上传头像（独立页）。
@@ -136,7 +107,6 @@ public fun SetAvatarPage(
     modifier: Modifier = Modifier,
     /** Phase 4 订阅面切片（蓝图 §4.4）：默认值由 [state] 投影，未迁移/预览路径行为不变。 */
     settingsSlice: SettingsSlice,
-    avatarSlice: AvatarSlice,
 ) {
     val sp = LocalAppSpacing.current
     val settings = settingsSlice.settings
@@ -173,14 +143,6 @@ public fun SetAvatarPage(
                 onRemove = onRemovePicked,
             )
 
-            // ②/③/④ 四段步骤卡
-            StepsCard()
-
-            // ⑤ 线上只走这 64 个十六进制
-            HashCard(settingsSlice = settingsSlice, avatarSlice = avatarSlice)
-
-            // ⑥ 保存生效、但头像图本身还不上网（协议侧的 tt）
-            ProtocolStatusCard()
         }
 
         // 底部「保存档案」按钮 —— 原型没有这一行，是为了让宿主真正按下「写真档」
@@ -392,252 +354,6 @@ private fun PickedPreview(size: androidx.compose.ui.unit.Dp, bytes: ByteArray?) 
 }
 
 /* ===== ②/③/④ 步骤卡 ===== */
-
-/**
- * 「四段现状」步骤卡：每一步 `.avstep` 由左到右是序号圆 + 图标方 + 文案两行，
- * step 之间用 1dp `outlineVariant` 发丝环隔开（原型 `.avstep+.avstep{border-top:1px solid var(--hair)}`）。
- * 末尾再附一条「以上是这一页现在的真实流程…」的 hint。
- *
- * 四段说的都是**现状**（选图 / 算哈希 / 只存本机 / 保存档案字段）；原型的「裁方 →
- * 编码 webp → 宣告」是未实现的目标态，不进这四段 —— 目标态与现状混排，
- * 用户就分不清哪句是承诺哪句是事实。
- */
-@Composable
-private fun StepsCard() {
-    val sp = LocalAppSpacing.current
-
-    // 原型 `.card > .padc`：这一张卡**没有标题**，而 [SectionCard] 的 `title` 是必填且
-    // 总画一行标题（空串也会留一行 + 一段 bottom padding）。所以这里直接用 Card 复刻
-    // SectionCard 的视觉（surface 底 + 自绘 `--shadow` 投影 + `shapes.medium`），
-    // 自己管内边距，避免那行空标题把步骤卡的留白撑歪。
-    Card(
-        modifier = Modifier
-            .fillMaxWidth()
-            .relayCardShadow(shape = MaterialTheme.shapes.medium),
-        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
-        elevation = CardDefaults.cardElevation(defaultElevation = 0.dp),
-        shape = MaterialTheme.shapes.medium,
-    ) {
-        // 内边距收紧到 `sp.md`，对齐原型 `.card > .padc`（SectionCard 用的是 `sp.lg`）。
-        Column(modifier = Modifier.padding(horizontal = sp.md, vertical = sp.md)) {
-            StepRow(
-                index = 1,
-                icon = Res.drawable.ic_image,
-                title = stringResource(Res.string.set_avatar_step1_title),
-                desc = stringResource(Res.string.set_avatar_step1_desc),
-                showDivider = false,
-            )
-            StepRow(
-                index = 2,
-                icon = Res.drawable.ic_key,
-                title = stringResource(Res.string.set_avatar_step2_title),
-                desc = stringResource(Res.string.set_avatar_step2_desc),
-                showDivider = true,
-            )
-            StepRow(
-                index = 3,
-                icon = Res.drawable.ic_lock,
-                title = stringResource(Res.string.set_avatar_step3_title),
-                desc = stringResource(Res.string.set_avatar_step3_desc),
-                showDivider = true,
-            )
-            StepRow(
-                index = 4,
-                icon = Res.drawable.ic_save,
-                title = stringResource(Res.string.set_avatar_step4_title),
-                desc = stringResource(Res.string.set_avatar_step4_desc),
-                showDivider = true,
-            )
-            Spacer(Modifier.height(sp.md))
-            HintText(
-                html = stringResource(Res.string.set_avatar_steps_hint),
-            )
-        }
-    }
-}
-
-/** `.avstep`：序号 19dp 圆 + 30dp 圆角方图标 + 两行文案。 */
-@Composable
-private fun StepRow(
-    index: Int,
-    icon: DrawableResource,
-    title: String,
-    desc: String,
-    showDivider: Boolean,
-) {
-    val sp = LocalAppSpacing.current
-    if (showDivider) {
-        // 原型 `.avstep+.avstep{border-top:1px solid var(--hair)}`：这条线就在两行之间，
-        // 上下没有额外留白，留白全在 `.avstep{padding:11px 2px 12px}` 里。
-        HorizontalDivider(
-            thickness = 1.dp,
-            color = MaterialTheme.colorScheme.outlineVariant,
-        )
-    }
-    Row(
-        modifier = Modifier
-            .fillMaxWidth()
-            .padding(vertical = sp.md),
-        verticalAlignment = Alignment.Top,
-        horizontalArrangement = Arrangement.spacedBy(sp.md),
-    ) {
-        // 序号圆：`.asn{width:19px;height:19px;border-radius:50%;background:var(--primary-c);color:#fff;font-size:11px}`
-        Box(
-            modifier = Modifier
-                .size(19.dp)
-                .clip(CircleShape)
-                .background(MaterialTheme.colorScheme.primaryContainer),
-            contentAlignment = Alignment.Center,
-        ) {
-            Text(
-                text = index.toString(),
-                style = MaterialTheme.typography.labelSmall,
-                color = MaterialTheme.colorScheme.onPrimaryContainer,
-                fontWeight = FontWeight.SemiBold,
-            )
-        }
-        // 图标方：`.asi{width:30px;height:30px;border-radius:9px;background:var(--surface-2)}`
-        Box(
-            modifier = Modifier
-                .size(30.dp)
-                .clip(ShapeRoles.Avatar)
-                .background(MaterialTheme.colorScheme.surfaceVariant),
-            contentAlignment = Alignment.Center,
-        ) {
-            Icon(
-                painter = painterResource(icon),
-                contentDescription = null,
-                tint = MaterialTheme.colorScheme.onSurfaceVariant,
-                modifier = Modifier.size(16.dp),
-            )
-        }
-        // 文案两行：`.asb .t1{14/600}` + `.asb .t2{11/--on-2/1.5}`
-        Column(
-            modifier = Modifier.weight(1f),
-            verticalArrangement = Arrangement.spacedBy(sp.xs / 2),
-        ) {
-            Text(
-                text = title,
-                style = MaterialTheme.typography.bodyMedium,
-                fontWeight = FontWeight.SemiBold,
-            )
-            Text(
-                text = desc,
-                style = MaterialTheme.typography.labelSmall,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-                lineHeight = 16.sp,
-            )
-        }
-    }
-}
-
-/* ===== ⑤ 哈希卡 ===== */
-
-/**
- * 「线上只走这 64 个十六进制」卡：`.kv` 两行（profile.avatarHash / profileRev）+ 一段 hint。
- *
- * 两个值都是**真读数**：
- * - `profile.avatarHash` = 控制器在选中那一刻真算出来的 sha256
- *   （`RelayUiState.pickedAvatarHash`，截前 8 位显示）；还没选图就明说「尚未选图」，
- *   不再编一个 `3f9c1b…e1a7` 出来。
- * - `profileRev` = 当前档案版本。保存后版本由控制器 +1（见 [avatarSaveFeedback]），
- *   这一卡不预支那个「+1」。
- *
- * **注意这里没有「四个 mini 头像 + 设置」那一排。** 早先一版把它画在卡里，是把原型的
- * **底导航**（`.dnav`：消息 / 文件柜 / 节点 / Agent / 设置，`relay.html:2637 dnav()`）
- * 误读成了页面内容 —— 截图 `prototype/screenshots/relay/m13a2-set-avatar.png` 底部那一排
- * 就是底导航，`screenSetAvatar()`（`relay.html:3734`）正文里根本没有这一行。
- * 底导航属于外壳 chrome，由截图夹具的 `Screen(...)`（`androidApp/src/screenshotTest/kotlin/ScreenshotPreviewsExtra.kt` →
- * `CompactScaffold`）负责画，不该出现在页面 body 里。
- */
-@Composable
-private fun HashCard(settingsSlice: SettingsSlice, avatarSlice: AvatarSlice) {
-    val sp = LocalAppSpacing.current
-    val pickedHash = avatarSlice.pickedAvatarHash
-
-    SectionCard(
-        title = stringResource(Res.string.set_avatar_hash_title),
-        icon = Res.drawable.ic_key,
-        trailing = null,
-    ) {
-        KvRow(
-            key = "profile.avatarHash",
-            value = pickedHash?.let { it.take(8) + "…" } ?: stringResource(Res.string.set_avatar_hash_empty),
-        )
-        KvRow("profileRev", settingsSlice.settings.profileRev.toString())
-        Spacer(Modifier.height(sp.sm6))
-        HintText(
-            html = stringResource(Res.string.set_avatar_hash_hint),
-        )
-    }
-}
-
-/** `.kv` 一行：键名 `onSurfaceVariant` + 值（哈希用 mono 字体）。 */
-@Composable
-private fun KvRow(key: String, value: String) {
-    val sp = LocalAppSpacing.current
-    val isHash = value.contains("…") || value.length > 8
-    Row(
-        modifier = Modifier
-            .fillMaxWidth()
-            .padding(vertical = sp.xs),
-        verticalAlignment = Alignment.CenterVertically,
-    ) {
-        Text(
-            text = key,
-            style = MaterialTheme.typography.bodyMedium,
-            color = MaterialTheme.colorScheme.onSurface,
-            modifier = Modifier.weight(1f),
-        )
-        Text(
-            text = value,
-            style = if (isHash) {
-                MaterialTheme.typography.bodyMedium.copy(fontFamily = FontFamily.Monospace)
-            } else {
-                MaterialTheme.typography.bodyMedium
-            },
-            color = MaterialTheme.colorScheme.onSurfaceVariant,
-        )
-    }
-}
-
-/* ===== ⑥ 协议侧 tt 卡 ===== */
-
-/**
- * 原型第 4 张卡的协议段：**保存本身是生效的**（写资料字段并回 `profileRev`，
- * 见 [SaveProfileBar] 的行内回执），还不上网的是**头像图本身** ——
- * 图片同步链路尚未实现（`MsgTypes.UNHANDLED` 还写着 `AVATAR`）。
- * 这一屏是「**保存通了、图片同步没通**」的钉子：标题不许再说「点保存不会生效」，
- * 那是同一屏里被下面那行回执当场打脸的谎。
- */
-@Composable
-private fun ProtocolStatusCard() {
-    val sp = LocalAppSpacing.current
-
-    SectionCard(
-        title = stringResource(Res.string.set_avatar_protocol_title),
-        icon = Res.drawable.ic_warn,
-        trailing = null,
-    ) {
-        // 原型这一段是 `.padc > .tt` 的纯文本（`prototype/relay.html:3789`）：
-        // 没有内层卡、没有底色、没有圆角、也没有额外内边距 —— 卡自己的 `.padc` 已经给过留白。
-        Column {
-            Text(
-                text = stringResource(Res.string.set_avatar_protocol_lead),
-                style = MaterialTheme.typography.bodyMedium,
-                fontWeight = FontWeight.SemiBold,
-                color = MaterialTheme.colorScheme.onSurface,
-            )
-            Spacer(Modifier.height(sp.xs))
-            Text(
-                text = stringResource(Res.string.set_avatar_protocol_body),
-                style = MaterialTheme.typography.labelSmall,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-                lineHeight = 16.sp,
-            )
-        }
-    }
-}
 
 /* ===== 底部保存栏 ===== */
 
