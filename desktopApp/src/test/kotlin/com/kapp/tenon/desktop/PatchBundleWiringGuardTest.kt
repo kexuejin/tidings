@@ -32,7 +32,8 @@ class PatchBundleWiringGuardTest {
     @Test
     fun theReviewPathActuallyDispatchesThePatchBundle() {
         assertTrue(
-            orchestrator.contains("deliverPatchBundle(groupId, ticketId, patchPath)"),
+            orchestrator.contains("deliverPatchBundle(targetId, ticketId, patchPath)") ||
+                orchestrator.contains("deliverPatchBundle(groupId, ticketId, patchPath)"),
             "审阅卡发布前没有投递 patch.diff —— 卡片宣称的产物永远到不了对端（§6.3 断链）",
         )
         assertTrue(

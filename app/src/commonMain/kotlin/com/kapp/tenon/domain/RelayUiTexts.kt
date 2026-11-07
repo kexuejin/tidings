@@ -91,6 +91,17 @@ interface RelayUiTexts {
     suspend fun agentNotCompletedNotice(agentName: String): String
 
     /**
+     * 派单走向终局失败时的一句话（哪一单、哪个 agent、为什么）。
+     *
+     * 触发面：[com.kapp.tenon.domain.model.NoticeKind.AgentDispatchFailed] 的群流版本
+     * （群意图路径与工单派单路径共用同一个发布入口）。1:1 的 notice 由界面按结构化
+     * `NoticeDetail` 翻文案，不经过这里；群文本没有结构化槽位，所以必须在这里成句。
+     *
+     * 取不到文案返回空串 —— 调用方会退回既有的「没做成 / 接不了」文案，不编中文。
+     */
+    suspend fun dispatchFailedNotice(title: String, agentName: String, reason: String): String = ""
+
+    /**
      * 「这个人没有资格驱动这个 agent」的群流横幅（设计稿 v2 §4.8）。
      *
      * 触发面：卡片动作到了宿主，但点击者过不了 `AgentExecAuthorizer`。

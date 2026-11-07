@@ -45,11 +45,9 @@ import com.kapp.tenon.domain.senderContext
 import com.kapp.tenon.domain.RelayUiState
 import com.kapp.tenon.domain.isPendingApproval
 import com.kapp.tenon.domain.mayDecideApproval
-import com.kapp.tenon.domain.pendingApprovalCount
 import com.kapp.tenon.core.nowMillis
 import com.kapp.tenon.core.transport.LocalFile
 import com.kapp.tenon.generated.resources.Res
-import com.kapp.tenon.feature.agents.AgentSessionBar
 import com.kapp.tenon.ui.components.AppBanner
 import com.kapp.tenon.core.protocol.ConvId
 import com.kapp.tenon.generated.resources.chat_qa_diff
@@ -144,6 +142,7 @@ fun ChatScreen(
     val cacheDir = data.cacheDir
     val onSend = actions.onSend
     val onSendWithIntent = actions.onSendWithIntent
+    val onDispatchToWorkspace = actions.onDispatchToWorkspace
     val onOpenAgentConsole = actions.onOpenAgentConsole
     val onDismissBanner = actions.onDismissBanner
     val onAttachFile = actions.onAttachFile
@@ -427,6 +426,11 @@ fun ChatScreen(
 
     // **发送的唯一出口**：手机内置输入栏与桌面输入卡片（composerSlot）共用这一个函数。
     //
+    // 药丸的本地选中态声明在 submitMessage **之前**：派单入参（1:1 药丸触发的
+    // dispatchDirectInvoke）要在发送函数里读它。
+    var localActiveWsId by remember(peerId, data.wsId) {
+        mutableStateOf(data.wsId)
+    }
     // 四件事必须一起发生，漏一件都是一条独立的真机缺陷：
     // ① 复位本地草稿；② 清外部草稿表（否则已发出的正文会在切回来时「复活」进输入框，
     // 见 [notifyDraftCleared]）；③ 清引用态（否则发完引用条还挂着，下一条又变成"回复"）；
@@ -452,6 +456,19 @@ fun ChatScreen(
                 onSendWithIntent(peer.nodeId, body, replyId, intentSelection.toIntentJson())
             } else {
                 onSend(peer.nodeId, body, replyId)
+            }
+        }
+        // 1:1 药丸派单（任务级显式绑定，蓝图 §4.2）：文本帧照发（气泡留档，桌面侧对
+        // 1:1 纯文本不再默认派单），工单走 invoke 通路显式携带 agentKind + wsId——
+        // 两条路各司其职不双派。agentId 用工作区自报的 agentKind（DSH/codex…），
+        // 它正是 CLI 驱动键的族名（driverIdAliases 按 `-` 前头部归一）。
+        if (group == null && body.isNotBlank()) {
+            val selWsId = localActiveWsId
+                ?: agentSlice.agentWorkspaces.values.firstOrNull { it.peerId == peer.nodeId }?.wsId
+            val ws = selWsId?.let { id -> agentSlice.agentWorkspaces.values.firstOrNull { it.wsId == id } }
+            val kind = ws?.agentKind?.trim()?.takeIf { it.isNotEmpty() }
+            if (ws != null && kind != null) {
+                onDispatchToWorkspace?.invoke(ws.peerId, kind, body, ws.wsId)
             }
         }
         if (filesToSend.isNotEmpty()) {
@@ -491,7 +508,13 @@ fun ChatScreen(
             pathMatch || idMatch || titleMatch
         }
     }
-    val effectiveWsId = data.wsId ?: matchedWs?.wsId
+    val availableWorkspaces = remember(peer.nodeId, group, agentSlice.agentWorkspaces) {
+        if (group != null) emptyList()
+        else agentSlice.agentWorkspaces.values.filter { it.peerId == peer.nodeId }
+    }
+    val effectiveWsId = if (group != null) (data.wsId ?: matchedWs?.wsId) else (localActiveWsId ?: availableWorkspaces.firstOrNull()?.wsId)
+    val showWorkspacePickerState = remember(peerId) { mutableStateOf(false) }
+    var showWorkspacePicker by showWorkspacePickerState
     val showSessionPickerState = remember(peerId, effectiveWsId) { mutableStateOf(false) }
     var showSessionPicker by showSessionPickerState
     // 目标选择 Bottom Sheet（§5.2）的开合。跟会话走：切走即关（remember(peerId)）。
@@ -510,9 +533,10 @@ fun ChatScreen(
     BackHandler(
         enabled = forwardingMessage != null || previewingImagePath != null ||
             showClearConfirm || showCloseAndClearConfirm || showGroupInfo || showVoiceRecord || showPkPicker ||
-            showHistorySearch || showSessionPicker || showTaskPicker,
+            showHistorySearch || showSessionPicker || showTaskPicker || showWorkspacePicker,
     ) {
         when {
+            showWorkspacePicker -> showWorkspacePicker = false
             forwardingMessage != null -> forwardingMessage = null
             previewingImagePath != null -> previewingImagePath = null
             showClearConfirm -> showClearConfirm = false
@@ -678,8 +702,12 @@ fun ChatScreen(
                 workspaceName = effectiveWsId?.let { ws ->
                     agentSlice.agentWorkspaces.values
                         .firstOrNull { it.wsId == ws }
-                        ?.wsTitle
+                        ?.wsTitle ?: ws
                 },
+                workspaceCount = availableWorkspaces.size,
+                onOpenWorkspacePicker = if (group == null && availableWorkspaces.size > 1) {
+                    { showWorkspacePicker = true }
+                } else null,
                 onOpenAgentConsole = onOpenAgentConsole ?: {},
                 onBack = onBack,
                 restored = restored,
@@ -701,30 +729,8 @@ fun ChatScreen(
                 // 点了先开确认框，确认后才真的清（见 ClearConversationDialog）。
                 onClearMessages = onClearMessages?.let { { showClearConfirm = true } },
                 onCloseAndClearConversation = onCloseAndClearConversation?.let { { showCloseAndClearConfirm = true } },
-                onOpenSessionPicker = if (group == null && peer.isAgent) ({ showSessionPicker = true }) else null,
-                // 「切换会话」的资格与选择器列表必须同集合：这里传的就是下面
-                // `agentSessions` 那份（已 visible 过滤 + 已按 wsId 收窄）。
-                // 头部自己按 peerId 再数一次时，节点有 2 条可见会话分属两个工作区
-                // 会让按钮画得出来、点开只有 1 行。
+                onOpenSessionPicker = null,
                 visibleSessionCount = agentSessions.size,
-            )
-            HorizontalDivider()
-        }
-
-        // Agent 会话切换条（原型 `.swbar`）：仅在 1对1 Agent 私聊时显示；协同群聊中彻底移除
-        if (group == null && peer.isAgent && (agentSessions.isNotEmpty() || archivedSessions.isNotEmpty())) {
-            // 与看板/选择器同一把尺子：过期的不算待批（领域层唯一入口）。
-            val sessionPendingCount = remember(agentSlice.agentApprovals, agentSessions) {
-                activeSession?.sessionId?.let { sid ->
-                    pendingApprovalCount(agentSlice.agentApprovals.values, nowMillis(), sessionId = sid)
-                } ?: 0
-            }
-            AgentSessionBar(
-                sessions = if (archivedSessions.isNotEmpty()) agentSessions + archivedSessions else agentSessions,
-                // 与头部、选择器共用同一个「当前会话」（见 activeSession 的说明）。
-                activeSession = activeSession,
-                pendingCount = sessionPendingCount,
-                onClick = { showSessionPicker = true },
             )
             HorizontalDivider()
         }
@@ -878,19 +884,6 @@ fun ChatScreen(
             queuedCount = sessionQueuedCount,
             now = data.now,
         )
-
-        // 目标胶囊（方案 §5.2）：只在唤起时出现（平时 100% 纯净 —— 常驻目标条已废除）。
-        // 长在共享 ChatScreen 里，手机与桌面天然同源（AGENTS §2.6）。
-        val boundCapsule = capsuleState
-        if (group != null && boundCapsule.agent != null) {
-            AgentContextCapsule(
-                agent = boundCapsule.agent,
-                selection = boundCapsule.selection,
-                onExpand = { showTaskPicker = true },
-                onDismiss = { capsuleState = capsuleOnDismiss(capsuleState) },
-                modifier = Modifier.padding(horizontal = sp.lg14, vertical = sp.xs),
-            )
-        }
 
         if (composerSlot != null) {
             // 草稿仍由 ChatScreen 持有（remember(peerId)），所以切换会话时桌面输入卡片也不会串内容。
@@ -1155,4 +1148,16 @@ fun ChatScreen(
         showSessionPickerState = showSessionPickerState,
         capsuleStateState = capsuleStateState,
     )
+
+    if (showWorkspacePicker && availableWorkspaces.isNotEmpty()) {
+        WorkspacePickerSheet(
+            workspaces = availableWorkspaces,
+            activeWsId = effectiveWsId,
+            onSelect = { selectedWsId ->
+                localActiveWsId = selectedWsId
+                actions.onSelectWorkspace?.invoke(selectedWsId)
+            },
+            onDismiss = { showWorkspacePicker = false },
+        )
+    }
 }

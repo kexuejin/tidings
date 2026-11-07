@@ -109,6 +109,11 @@ data class ChatScreenActions(
      */
     val onSendWithIntent: ((targetId: String, text: String, replyTo: String?, agentIntent: JsonObject) -> Unit)? = null,
     /**
+     * 1:1 药丸派单（任务级显式绑定，蓝图 §4.2）：文本帧之外另走的 invoke 通路——
+     * 显式携带目标宿主、agentKind 与工作区。null = 壳没接派单通路（退回纯文本）。
+     */
+    val onDispatchToWorkspace: ((peerId: String, agentId: String, prompt: String, wsId: String) -> Unit)? = null,
+    /**
      * 失败气泡上的「重发」。
      *
      * 与 [onSend] 分开是必须的：`onSend(targetId, 原文本, null)` 会生成**新信封 id**，
@@ -219,6 +224,8 @@ data class ChatScreenActions(
      * null = 不画这个浮层（预览、非 agent 对端不走这条路）。
      */
     val onSelectAgentSession: ((sessionId: String) -> Unit)? = null,
+    /** 1:1 私聊顶栏项目药丸切换工作区回调；null = 不支持切换。 */
+    val onSelectWorkspace: ((wsId: String) -> Unit)? = null,
     /**
      * 「清空本会话聊天记录」—— 只清**本机**这个会话的历史，对方不受影响。
      *

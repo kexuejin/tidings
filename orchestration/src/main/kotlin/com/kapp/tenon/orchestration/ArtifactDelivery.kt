@@ -25,18 +25,25 @@ internal class ArtifactDelivery(
     private val tickets: () -> DesktopWorkerOrchestrator?,
 ) {
 
-    /** 产物投递（T-G1/E1 共用）：本机文件 → 派单来源的群（扇出在域层）。 */
+    /** 产物投递（T-G1/E1 共用）：本机文件 → 派单来源的群或对端（扇出在域层）。 */
     internal fun deliverCliArtifacts(
         artifacts: List<Triple<String, String, Long>>,
         deliverGroupId: String?,
     ) {
-        if (deliverGroupId == null) return
+        if (deliverGroupId.isNullOrBlank()) return
+        val peerId = if (com.kapp.tenon.core.protocol.ConvId.isGroup(deliverGroupId)) {
+            deliverGroupId
+        } else if (controller.state.value.settings.groups.any { it.groupId == deliverGroupId }) {
+            com.kapp.tenon.core.protocol.ConvId.group(deliverGroupId)
+        } else {
+            deliverGroupId
+        }
         artifacts.forEach { (path, name, bytes) ->
             runCatching {
                 // purpose=artifact：对端免确认收下。任务卡才是决策面，「接收/拒绝」
                 // 对随附的补丁/报告是一个多余的决策点（产物双路问题的另一半）。
                 controller.sendAgentArtifacts(
-                    com.kapp.tenon.core.protocol.ConvId.group(deliverGroupId),
+                    peerId,
                     listOf(com.kapp.tenon.core.transport.LocalFile(path = path, name = name, size = bytes)),
                 )
             }.onFailure { t ->
@@ -46,7 +53,7 @@ internal class ArtifactDelivery(
     }
 
     /**
-     * 把驱动刚发的一张卡**立刻**推进群，不占用 invoke 的返回值通道。
+     * 把驱动刚发的一张卡**立刻**推进群或对端，不占用 invoke 的返回值通道。
      *
      * 为什么不是等 `done(summary, card)`：那条路要等任务完全结束。执行中的状态
      * 只有在执行中发出去才有意义。域层的 `broadcastBoardCard` 负责「同 cardId
@@ -55,10 +62,10 @@ internal class ArtifactDelivery(
      * 投不出去不吞：广播失败只影响「看不看得见」，任务本身照跑，但必须留痕 ——
      * 否则下次又会以「卡片没出现」的形式重新查一遍。
      */
-    internal fun publishCardNow(groupId: String?, agentId: String, cardJson: String?) {
-        if (groupId.isNullOrBlank() || cardJson.isNullOrBlank()) return
+    internal fun publishCardNow(targetId: String?, agentId: String, cardJson: String?) {
+        if (targetId.isNullOrBlank() || cardJson.isNullOrBlank()) return
         scope.launch {
-            runCatching { controller.broadcastChainCard(groupId, agentId, cardJson) }
+            runCatching { controller.broadcastChainCard(targetId, agentId, cardJson) }
                 .onFailure { t ->
                     RelayLog.info("RELAY-INVOKE", "card broadcast failed: " + (t.message ?: t::class.simpleName))
                 }

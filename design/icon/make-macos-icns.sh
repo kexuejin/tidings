@@ -17,7 +17,7 @@
 #      不留边的话本应用图标在 Dock 里会比邻座明显大一圈。再叠一层标准投影。
 #   3. 出 icns —— sips 生成 iconset 需要的 10 个尺寸，iconutil 打包。
 #
-# 中间产物 `Tidings.iconset/` 是可重生成的，已在 `.gitignore` 里忽略；仓库里只留
+# 中间产物 `Tenon.iconset/` 是可重生成的，已在 `.gitignore` 里忽略；仓库里只留
 # `relay-macos-1024.png`（主图，便于比对与重生成）与 `Tenon.icns`（交付物）。
 #
 # 依赖：macOS 自带 `sips` / `iconutil`，以及 ImageMagick 7（`magick`）。
@@ -28,7 +28,7 @@ cd "$(dirname "$0")"
 
 SRC=icon-1024.png              # 满幅方形源图（圆角外为米白底）
 MASTER=relay-macos-1024.png    # 抠底 + 上栅格 + 投影后的主图
-ICONSET=Tidings.iconset          # 中间产物，.gitignore 已忽略
+ICONSET=Tenon.iconset          # 中间产物，.gitignore 已忽略
 ICNS=Tenon.icns                # 交付物
 
 CREAM='#FFFEF8'                # icon-1024.png 圆角外的底色

@@ -71,7 +71,7 @@
 - **`:app`**：领域层。包含控制器（`RelayController` 及其分片）、UI 状态模型、设置/消息/Agent 存储、SQLDelight 库定义与平台契约。**零 Compose 依赖**：应用事实（「要不要落一条投屏记录」「这台设备有没有相机」「投屏该写成哪句话」）都在这里判定，措辞与像素留在 `:composeApp`。换一套 UI 方案时这一层原样复用。
   - 三条边界由两条可执行判据守着：`DomainHasNoComposeTest`（源码级：领域包不许 `import androidx.compose.*`）与 `:cli`（运行时：只链接 `:app` 的程序 classpath 上 0 个 Compose jar）。
 - **`:composeApp`**：UI 表现层。包含会话列表、聊天视窗、节点发现、Agent 看板、设置面板及多端自适应布局。它**依赖** `:app`，不再包含领域逻辑。
-- **`:cli`**：无 UI 的 Tidings 客户端。不是产品功能，而是「领域层真的能脱离 UI 运行」的**可执行验收物**：它起控制器、发消息、读收件箱，且只链接 `:app`。
+- **`:cli`**：无 UI 的 榫卯 (Tenon) 客户端。不是产品功能，而是「领域层真的能脱离 UI 运行」的**可执行验收物**：它起控制器、发消息、读收件箱，且只链接 `:app`。
 - **`:agentNode`**：Agent 控制面组件。提供本地回环 HTTP API（JDK 内置 HttpServer），供 AI 代理或本地脚本调度与交互。在桌面形态下作为库被 `desktopApp` 同进程引用。
 - **`:agent-contract`**：驱动层**纯接口模块**。声明一次 agent 会话的生命周期契约（开启 / 执行 / 回执 / 进度）、驱动向上层报告的事件七型（其中 `Artifact` 是进程内事件、不进协议帧）、能力清单与驱动键归一。它没有任何实现、IO 与 UI，依赖方向单向：`:agentNode` 依赖它；编排层与「没有 UI 的验收物」只依赖契约即可拿到驱动面。
 - **`:orchestration`**：Agent 编排层。包含工单编排（派单 / 跟进 / 中止 / 退单）、责任链执行体（一链一 worktree、棒间交接靠提交）、自愈循环、台账治理（会话免审 / 踩坑 / 盲区 / 健康度 / 高危租约）、卡片补丁以及 agent 事件胶水（控制面挂载、群流回填、卡片翻面）。**零 UI** —— 它从 `:desktopApp` 下沉而来，壳层只负责装配（注入 controller / scope / 诊断端口），编排本身可被 `:cli` 的测试直接驱动；需要一句用户文案时走 `RelayUiTexts` 桥，需要诊断落点时走注入的 `liveEventSink`。
@@ -118,7 +118,7 @@
 └── commonTest     自适应布局断点、UI 状态派生与跨层守卫测试
 
 :cli
-└── main           无 UI 的 Tidings 客户端（起控制器 / 发消息 / 读收件箱），零 Compose
+└── main           无 UI 的 榫卯 (Tenon) 客户端（起控制器 / 发消息 / 读收件箱），零 Compose
 
 :agentNode
 ├── jvmMain        ControlPlane 本地 HTTP 路由定义与 Token 鉴权
@@ -275,7 +275,7 @@ data class Envelope(
 插件是**独立进程**（Python / Node / 任意可执行），主包内不含任何具体 Agent 的业务代码：
 
 - **目录约定**：`<数据目录>/plugins/<pluginId>/`（目录名必须等于 `pluginId`，对不上账不拉起）；清单 `manifest.json` 声明身份、leader、组员、能力与授权工作区（`allowedWorkspaces` / `defaultWsId`；**本机绝对路径不进协议**，只广播 wsId 与标题）。
-- **两种接入**：托管子进程（`PluginHost` 扫描目录并拉起，注入 `TIDINGS_PLUGIN_TOKEN`）；独立守护进程自注册（token 来自插件自身配置或宿主数据目录 0600 受控文件）。两种都必须持 token——`PluginTokenGate` 在两处来源皆缺时 503 整体关闸，防本机任意进程自我入驻。
+- **两种接入**：托管子进程（`PluginHost` 扫描目录并拉起，注入 `TENON_PLUGIN_TOKEN`）；独立守护进程自注册（token 来自插件自身配置或宿主数据目录 0600 受控文件）。两种都必须持 token——`PluginTokenGate` 在两处来源皆缺时 503 整体关闸，防本机任意进程自我入驻。
 - **端点**：`POST /v1/plugin/register` / `unregister`、`POST /v1/plugin/task`（派单事件流）、`POST /v1/plugin/action`（卡片动作回传）。派单/操作路由按**回环信任**（与 `/v1/send` 同一模型）；设备侧授权仍走 `/v1/agent/*` 的 grants 判据。
 - **`ExternalPluginDriver`**：主包内唯一的通用插件驱动（`AgentDriver` 的实现之一），只经回环 HTTP 转发 `openSession` / `executeTask`（流式）/ `handleAction` / `queryProgress`，零业务代码；能力清单读 manifest，能力 ACL 由宿主在驱动外层把关、不透传给插件。
 - **参考插件**：`examples/plugins/echo-team-plugin/`（Python 标准库，零第三方依赖）。
@@ -289,7 +289,7 @@ data class Envelope(
 全量 patch 与原始输出各落 `patch.diff` / `task.log`，绝不内联进信令；diff-review 卡只带
 统计摘要（预算永不触碰 `CARD_BYTES`）。中止（外部 abort 或租约超时的协程取消）= 进程树
 SIGTERM → 3s → SIGKILL + worktree/分支**无痕清理**；产物目录在沙箱外存活。非 git 的工作区
-**大声失败**（无静默降级到裸跑的档位）；沙箱根 = `TIDINGS_SANDBOX_ROOT` env 覆盖 →
+**大声失败**（无静默降级到裸跑的档位）；沙箱根 = `TENON_SANDBOX_ROOT` env 覆盖 →
 `/tmp/tenon-ws` 公共约定。
 
 ---

@@ -49,11 +49,11 @@ Wi-Fi 省电模式下能否收到、TCP 直连、托盘/深链/多窗口、通�
 
 - 产物统一放 `~/Downloads/relay-build-<date>/`；**报告前核对 sha256**。
 - APK：`adb -s <serial> install -r -d <apk>`。
-- 桌面端：`osascript -e 'quit app "Tidings"'` → 替换 `/Applications/Tidings.app` → **重注册** → `open -a`：
+- 桌面端：`osascript -e 'quit app "Tenon"' || osascript -e 'quit app "Tidings"'` → 替换 `/Applications/Tenon.app` → **重注册** → `open -a`：
 
   ```bash
   /System/Library/Frameworks/CoreServices.framework/Frameworks/LaunchServices.framework/Support/lsregister \
-    -f -R -trusted /Applications/Tidings.app && killall Finder
+    -f -R -trusted /Applications/Tenon.app && killall Finder
   ```
 
   **为什么必须重注册**：LaunchServices 按 `CFBundleIdentifier` 索引图标缓存，直接替换 bundle
@@ -88,7 +88,7 @@ Wi-Fi 省电模式下能否收到、TCP 直连、托盘/深链/多窗口、通�
   记着 `dumpsys notification` 里 `channel=relay_messages_v2`、`android.title=String (证据节点)`、
   正文是消息全文，以及会话行、会话页与 `files/relay/messages.json`。
   **「拒绝一次」那半条已在 2026-10-07 补跑**（`pm revoke POST_NOTIFICATIONS` → 发送 →
-  `dumpsys` 里 0 条通知、`messages.json` 里 1 条、`pidof app.relay` 仍在、logcat 有
+  `dumpsys` 里 0 条通知、`messages.json` 里 1 条、`pidof com.kapp.tenon.debug` 仍在、logcat 有
   `W AndroidPushNotification: 通知未发出：通知权限未授予（系统设置里可改）`）：不弹、不崩、
   也不静默吞掉。连同三个通知开关（Agent 开关 / 静默时段）与戳一碰的真机判读，见
   `design/runtime-evidence/notify-android-policy.txt`。
@@ -843,7 +843,7 @@ Wi-Fi 省电模式下能否收到、TCP 直连、托盘/深链/多窗口、通�
 > 也不监听 —— 夹具广播的 `entry` 没人解，读到的是「握手建不起来」而不是功能缺陷。跑之前先在设置里
 > 关掉加密数据面并**重启节点**（端口账见 `scripts/e2e/README.md` §2.1）；加密数据面自己的验收在 A21。
 
-**跑前跑后各对一次** `adb -s SERIAL-TEST-01 shell dumpsys package app.relay | grep lastUpdateTime`：
+**跑前跑后各对一次** `adb -s SERIAL-TEST-01 shell dumpsys package com.kapp.tenon.debug | grep lastUpdateTime`：
 不一致说明中途被重装了 APK（`install -r` 会杀掉应用），这一轮读数作废。
 
 **九夹具同轮全绿（2026-10-10 全量套件 run11，`/tmp/e2e-all-run11.log`，`run_all EXIT=0`）**：
@@ -1073,7 +1073,7 @@ messaging **PASS 38**（`/tmp/messaging-run14.log`），全量套件 **run11 9/9
 - 状态：**真机发文件未跑**（这是本轮明确留白的验收项）。
 
 ### N5 外部来源配对必须二次确认 —— 真机已跑（2026-10-18）
-- 步骤：`adb shell am broadcast -a app.relay.TEST_INJECT_QR --es qr relay://<ip>:<port>`，再 `am start -a android.intent.action.VIEW -d relay://<ip>:<port>`。
+- 步骤：`adb shell am broadcast -a com.kapp.tenon.TEST_INJECT_QR --es qr relay://<ip>:<port>`，再 `am start -a android.intent.action.VIEW -d relay://<ip>:<port>`。
 - 期望：出现确认框；**点「取消」后 `settings.json` 的 `manualPeers` 不变**；再注入并点「允许」才出现新节点。
 - 证据：task-54 真机逐条验证；e2e 里是 `scripts/e2e/e2e_workspace_collaboration.py` 的 `qr-pairing-confirmed`（脚本**真的点**确认框，不用后门）。
 
@@ -1288,3 +1288,32 @@ Layer 4 仿真覆盖，真机环节为桌面自派 + 手机 `@agent` 回路（M5
 **L2（对端拉回）**：恢复完成后，恢复方向在线的旧对端发 `recovery-req`；
 判据 = 对端会话里历史条目按消息 id 幂等回来（同批重发不重复），旧版本对端
 （不认识帧）时恢复方 5 秒窗口内放弃且**离线队列必须为空**。
+
+## A26 · Agent 卡片三型交互闭环（2026-11-07 新增）
+
+宿主（`./gradlew :desktopApp:run`，与手机同一 luciola 链路）驱动真实卡片，手机依次判读。
+前置：手机已被授权（桌面「捎话 → 授权」，或 `PUT /v1/agent/grants` 的
+`grantReply` 推帧；**scope=类别 / access=档位是两个维度**）。
+
+**① 审批卡（approval）**：
+- `POST /v1/agent/hook/approval`（`{"tool":…,"summary":…,"riskLevel":"L2","diff":…}`）
+  —— 它**长轮询挂起**，等手机点按；
+- rw 档的设备看到的是「只读（无权审批）」（§7.5 权限矩阵：rw 不在内）；
+  owner（或开了委托审批的 admin）看到**拒绝 / 批准 / 本会话免审 / 此工具始终允许**
+  四颗按钮 + 语义说明；
+- 点「批准」⇒ 长轮询解挂 `{decision:"allow", reason:"approved", approvalId:"hook-…"}`；
+  点「此工具始终允许」⇒ 宿主免批表（`agent-tool-approvals.json`）落一条
+  `(nodeId, tool)` 规则，**下一次同工具请求秒回 `allow, matched an always-allow rule`**；
+- 5 分钟超时：到点未处置的卡片自动回收（真机自证：卡片数 3→2）。
+
+**② 决策卡（ask_question）**：
+- 卡只走**群路径**或已宣告会话的事件流（`no-group-bound` 时沉默不猜，task-59
+  防串群裁决）——1:1 场景先建群，或 `hook/session` 宣告后经事件流投卡；
+- 点选选项 ⇒ `POST` 返回 `{"status":"answered","answer":<选项>,"decidedBy":…}`。
+
+**③ 免批表回收**：桌面「设置 → 可信设备 → 免批规则」逐条撤销（`revokeExactly`）。
+
+**判据**：每一步对端台账与卡片状态**同帧一致**；「未确认 ≠ 已执行」不破。
+**证据**：`design/runtime-evidence/upgrade-baseline-20261107.txt`（【13】【14】）、
+截图 `~/Downloads/relay-build-20261107/baseline/`（b06–b18，浅色 + 深色）。
+已知未遍历：Agent 控制台的会话切换器（▾）在真机上的入口路径（本轮黑盒超时）。

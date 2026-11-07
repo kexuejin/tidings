@@ -50,6 +50,18 @@ class SandboxedCliDriver(
     private val sandbox: WorktreeSandboxExecutor,
     private val envOverrides: Map<String, String> = emptyMap(),
     private val newSessionId: () -> String = { java.util.UUID.randomUUID().toString() },
+    /** 瞬时失败判别与重试档位：与 [CliSubprocessDriver] 同一默认（provider 断流/5xx 白名单）。 */
+    private val transientOf: (exitCode: Int, output: String) -> Boolean =
+        CliSubprocessDriver::defaultTransientOf,
+    private val maxExtraAttempts: Int = CliSubprocessDriver.DEFAULT_MAX_EXTRA_ATTEMPTS,
+    private val retryBackoff: suspend (attempt: Int) -> Unit = { attempt ->
+        kotlinx.coroutines.delay(
+            if (attempt <= 1) CliSubprocessDriver.DEFAULT_BACKOFF_FIRST_MS
+            else CliSubprocessDriver.DEFAULT_BACKOFF_NEXT_MS,
+        )
+    },
+    /** 断点续跑形态（dsh 有）：重试跳以续跑参数重放，从上一跳断点继续。 */
+    private val resumeSpec: CliResumeSpec? = null,
 ) : AgentDriver {
 
     /** 裸路径的委托对象（同一 CLI 身份、无沙箱）。 */
@@ -60,6 +72,10 @@ class SandboxedCliDriver(
         argSpec = argSpec,
         envOverrides = envOverrides,
         newSessionId = newSessionId,
+        transientOf = transientOf,
+        maxExtraAttempts = maxExtraAttempts,
+        retryBackoff = retryBackoff,
+        resumeSpec = resumeSpec,
     )
 
     /** sessionId → wsPath（会话内的每次任务都从这同一个宿主仓开沙箱）。 */
@@ -125,70 +141,101 @@ class SandboxedCliDriver(
         // 它会做什么」，所以这张卡必须在 run 之前发，且与终态卡**同 cardId**（原位刷新
         // ⇒ 一次任务恒一张卡，rev 从 1 走到 2）。
         onEvent(DriverEvent.Card(runningCardJson(taskId, wsPath)))
-        val outcome = sandbox.run(
-            taskId = taskId,
-            hostRepo = wsPath,
-            command = listOf(cliPath) + argSpec(prompt),
-            env = envOverrides,
-            onLine = { line -> CliLineEventMapper.map(line)?.let { onEvent(it) } },
-        )
-        when (outcome) {
-            is WorktreeSandboxExecutor.Outcome.Finished -> {
-                val harvest = outcome.harvest
-                if (harvest != null) {
-                    // 产物事件先于卡片：桥收到后把文件投进群，卡片紧随其后说明这是什么。
-                    // 只发 patch.diff —— report.json 本身就是摘要（随卡与台账走），
-                    // 而 Harvest 里没有它的 SHA（硬凑一个 log 的哈希是假元数据）。
+        var resumedCliSessionId: String? = null
+        val totalAttempts = 1 + maxExtraAttempts.coerceAtLeast(0)
+        for (attempt in 1..totalAttempts) {
+            // 近邻判别的输出累积：瞬时判别与续跑 id 都从这里取（CLI 输出量有限，全量可承受）。
+            val outputTail = StringBuilder()
+            val attemptArgs = if (attempt > 1 && resumeSpec != null && resumedCliSessionId != null) {
+                resumeSpec.args(resumedCliSessionId!!, prompt)
+            } else {
+                argSpec(prompt)
+            }
+            val outcome = sandbox.run(
+                taskId = taskId,
+                hostRepo = wsPath,
+                command = listOf(cliPath) + attemptArgs,
+                env = envOverrides,
+                onLine = { line ->
+                    outputTail.append(line).append('\n')
+                    if (resumedCliSessionId == null) {
+                        resumeSpec?.sessionIdFromLine?.invoke(line)?.let { resumedCliSessionId = it }
+                    }
+                    CliLineEventMapper.map(line)?.let { onEvent(it) }
+                },
+            )
+            when (outcome) {
+                is WorktreeSandboxExecutor.Outcome.Finished -> {
+                    val harvest = outcome.harvest
+                    if (harvest != null) {
+                        // 产物事件先于卡片：桥收到后把文件投进群，卡片紧随其后说明这是什么。
+                        // 只发 patch.diff —— report.json 本身就是摘要（随卡与台账走），
+                        // 而 Harvest 里没有它的 SHA（硬凑一个 log 的哈希是假元数据）。
+                        onEvent(
+                            DriverEvent.Artifact(
+                                path = harvest.patchPath.absolutePath,
+                                name = "patch.diff",
+                                bytes = harvest.patchPath.length(),
+                                mime = "text/x-diff",
+                                sha256 = harvest.patchSha256,
+                            ),
+                        )
+                        onEvent(DriverEvent.Card(diffCardJson(taskId, wsPath, harvest)))
+                    }
+                    onEvent(DriverEvent.Finished())
+                    return
+                }
+                is WorktreeSandboxExecutor.Outcome.Failed -> {
+                    // 沙箱失败不带退出码，按「跑过但非零」判（spawn 失败才有代位 <0 形态）。
+                    if (!transientOf(1, outputTail.toString()) || attempt == totalAttempts) {
+                        // 失败也必须把受理卡收尾。否则那张「正在处理」会一直挂着 ——
+                        // 一个永远转圈的进行中，比没有卡更糟：它让人等一个不会来的结果。
+                        val ledger = if (attempt > 1) {
+                            outcome.message + " — gave up after " + attempt +
+                                " attempts (transient retry exhausted)"
+                        } else {
+                            outcome.message
+                        }
+                        onEvent(DriverEvent.Card(endCardJson(taskId, wsPath, STATE_BLOCKED, ledger)))
+                        onEvent(DriverEvent.Error(ledger))
+                        return
+                    }
+                }
+                is WorktreeSandboxExecutor.Outcome.Aborted -> {
+                    // **中止不是失败**。用户按了停止，事实是「他让它停，它停了」——
+                    // 报成 Error 会让手机端弹一句「没有完成这次任务」，把人做的决定
+                    // 说成机器的故障。
                     onEvent(
-                        DriverEvent.Artifact(
-                            path = harvest.patchPath.absolutePath,
-                            name = "patch.diff",
-                            bytes = harvest.patchPath.length(),
-                            mime = "text/x-diff",
-                            sha256 = harvest.patchSha256,
+                        DriverEvent.Card(
+                            endCardJson(taskId, wsPath, STATE_ABORTED, "已停止，这次改动没有保留"),
                         ),
                     )
-                    onEvent(DriverEvent.Card(diffCardJson(taskId, wsPath, harvest)))
+                    onEvent(DriverEvent.Error("task aborted by user request"))
+                    return
                 }
-                onEvent(DriverEvent.Finished())
-            }
-            is WorktreeSandboxExecutor.Outcome.Failed -> {
-                // 失败也必须把受理卡收尾。否则那张「正在处理」会一直挂着 ——
-                // 一个永远转圈的进行中，比没有卡更糟：它让人等一个不会来的结果。
-                onEvent(DriverEvent.Card(endCardJson(taskId, wsPath, STATE_BLOCKED, outcome.message)))
-                onEvent(DriverEvent.Error(outcome.message))
-            }
-            is WorktreeSandboxExecutor.Outcome.Aborted -> {
-                // **中止不是失败**。用户按了停止，事实是「他让它停，它停了」——
-                // 报成 Error 会让手机端弹一句「没有完成这次任务」，把人做的决定
-                // 说成机器的故障。
-                onEvent(
-                    DriverEvent.Card(
-                        endCardJson(taskId, wsPath, STATE_ABORTED, "已停止，这次改动没有保留"),
-                    ),
-                )
-                onEvent(DriverEvent.Error("task aborted by user request"))
-            }
-            is WorktreeSandboxExecutor.Outcome.TimedOut -> {
-                // 超时对用户就是一条失败：讲清发生了什么（跑了多久、已收场），
-                // 不给「还在跑」的错觉 —— 那条工作树此刻已经清理干净了。
-                onEvent(
-                    DriverEvent.Card(
-                        endCardJson(
-                            taskId,
-                            wsPath,
-                            STATE_BLOCKED,
-                            "执行超过 ${outcome.timeoutMs} ms，已停止；工作树已清理。",
+                is WorktreeSandboxExecutor.Outcome.TimedOut -> {
+                    // 超时不是瞬时：任务真的跑不动预算，重试只会再烧一整份时长 ——
+                    // 如实终局，讲清发生了什么（跑了多久、已收场），不给「还在跑」的错觉。
+                    onEvent(
+                        DriverEvent.Card(
+                            endCardJson(
+                                taskId,
+                                wsPath,
+                                STATE_BLOCKED,
+                                "执行超过 ${outcome.timeoutMs} ms，已停止；工作树已清理。",
+                            ),
                         ),
-                    ),
-                )
-                onEvent(
-                    DriverEvent.Error(
-                        "task timed out in sandbox after ${outcome.timeoutMs}ms — process tree killed, " +
-                            "worktree cleaned (raise TENON_SANDBOX_TIMEOUT_MS for genuinely long tasks)",
-                    ),
-                )
+                    )
+                    onEvent(
+                        DriverEvent.Error(
+                            "task timed out in sandbox after ${outcome.timeoutMs}ms — process tree killed, " +
+                                "worktree cleaned (raise TENON_SANDBOX_TIMEOUT_MS for genuinely long tasks)",
+                        ),
+                    )
+                    return
+                }
             }
+            retryBackoff(attempt)
         }
     }
 

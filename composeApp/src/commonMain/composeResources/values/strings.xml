@@ -199,6 +199,10 @@
     <!-- 无权限者 @ 了 agent：说明为什么没执行，并给一个申请入口。%1$s = agent 名。 -->
     <string name="chat_agent_not_authorized">%1$s 没有执行：你不在它的授权名单里</string>
     <string name="chat_agent_delegated_by_tag">%1$s 本机接不了，任务已按标签 %2$s 委派给远端节点</string>
+    <!-- 派单终局失败：哪一单、谁失败、为什么。%1$s = 工单标题，%2$s = agent，%3$s = 原因。 -->
+    <string name="chat_agent_dispatch_failed">「%1$s」由 %2$s 执行失败：%3$s</string>
+    <!-- 细节缺失时的中性兜底（老库 / 手工构造的记录），不显示半截占位符。 -->
+    <string name="chat_agent_dispatch_failed_bare">工单执行失败</string>
     <string name="chat_agent_request_grant">申请授权</string>
     <string name="chat_group_members_changed">群成员有变化</string>
     <!--
@@ -476,6 +480,8 @@
          文案清洗裁决（2026-11-01）去掉「· 会话」段 —— 数会话是工具语汇，普通用户扫一眼要的是前三个数。 -->
     <string name="workspace_board_subtitle">%1$d 台设备 · %2$d Agent · %3$d 工作区</string>
     <string name="workspace_bar_switch">切换工作区</string>
+    <string name="workspace_picker_sheet_title">选择工作区</string>
+    <string name="chat_workspace_switched_notice">已切换当前工作区至 %1$s</string>
     <string name="workspace_new_segment">开启新分段</string>
     <string name="workspace_branch_label">分支</string>
     <string name="workspace_unassigned">未归属工作区</string>
@@ -1879,7 +1885,7 @@
     <string name="desktop_power_saver_on">已切到省电后台档：心跳与扫描放慢 %1$s 倍</string>
     <string name="desktop_power_saver_off">已回到默认心跳频率</string>
     <string name="desktop_notification_file">收到一个文件</string>
-    <string name="desktop_diag_title">捎话 Tidings 诊断包</string>
+    <string name="desktop_diag_title">榫卯 Tenon 诊断包</string>
     <string name="desktop_diag_generated_at">生成时间: %1$s</string>
     <string name="desktop_diag_section_settings">== 设置 ==</string>
     <string name="desktop_diag_section_network">== 网络 ==</string>
@@ -1911,7 +1917,7 @@
     <string name="desktop_login_delete_failed">删除自启注册文件失败：%1$s</string>
     <string name="desktop_login_write_failed">写入自启注册文件失败：%1$s</string>
     <string name="desktop_login_reg_failed">reg 命令失败：%1$s</string>
-    <string name="desktop_login_entry_name">捎话 Tidings</string>
+    <string name="desktop_login_entry_name">榫卯 Tenon</string>
     <string name="desktop_login_entry_comment">局域网直连的消息与文件传输</string>
     <string name="desktop_scan_unsupported_hint">桌面版不做摄像头扫码，请用「手动填地址」；节点码就是地址本身</string>
     <string name="desktop_scan_unsupported">桌面版不做摄像头扫码，请用「手动填地址」</string>
@@ -1920,8 +1926,8 @@
     <string name="desktop_drop_release_current">松手即发给当前会话</string>
     <string name="desktop_drop_release_to">松手即发给 %1$s</string>
     <string name="desktop_drop_validate_hint">也会按上面的规则校验后落盘</string>
-    <string name="desktop_peer_window_title">%1$s · 捎话</string>
-    <string name="desktop_brand_short">捎话</string>
+    <string name="desktop_peer_window_title">%1$s · 榫卯</string>
+    <string name="desktop_brand_short">榫卯</string>
     <string name="desktop_link_added_peer">已从链接添加节点 %1$s</string>
-    <string name="desktop_msg_file_unsupported">捎话消息文件：本期只打开主窗，格式尚未定义</string>
+    <string name="desktop_msg_file_unsupported">榫卯消息文件：本期只打开主窗，格式尚未定义</string>
 </resources>

@@ -2,6 +2,7 @@
 
 package com.kapp.tenon.feature.chat
 
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxWidth
@@ -16,6 +17,8 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.Dp
 import com.kapp.tenon.domain.RelayUiState
 import com.kapp.tenon.domain.SenderIdentityContext
@@ -24,9 +27,10 @@ import com.kapp.tenon.core.protocol.GroupMeta
 import com.kapp.tenon.generated.resources.Res
 import com.kapp.tenon.ui.components.AppIconButton
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.outlined.SwapHoriz
+import androidx.compose.material.icons.filled.ArrowDropDown
 import com.kapp.tenon.ui.components.ChatIbtnIconSize
 import com.kapp.tenon.ui.components.ChatIbtnSize
+import com.kapp.tenon.ui.theme.IconSizes
 import com.kapp.tenon.ui.components.KindBadge
 import com.kapp.tenon.ui.components.StatusDot
 import com.kapp.tenon.ui.components.ScreenRequestConfirmDialog
@@ -44,7 +48,6 @@ import com.kapp.tenon.generated.resources.agent_session_state_busy
 import com.kapp.tenon.generated.resources.agent_session_state_done
 import com.kapp.tenon.generated.resources.agent_session_state_error
 import com.kapp.tenon.generated.resources.agent_session_state_idle
-import com.kapp.tenon.generated.resources.agent_session_switch_title
 import com.kapp.tenon.generated.resources.agent_session_untitled
 import com.kapp.tenon.generated.resources.chat_group_info_title
 import com.kapp.tenon.generated.resources.chat_group_members
@@ -53,6 +56,7 @@ import com.kapp.tenon.generated.resources.chat_clear_local_action
 import com.kapp.tenon.generated.resources.chat_close_and_clear_action
 import com.kapp.tenon.generated.resources.chat_more_actions
 import com.kapp.tenon.generated.resources.ic_close
+import com.kapp.tenon.generated.resources.ic_folder
 import com.kapp.tenon.generated.resources.chat_nudge
 import com.kapp.tenon.generated.resources.chat_restored_offline
 import com.kapp.tenon.generated.resources.common_offline
@@ -65,6 +69,7 @@ import com.kapp.tenon.generated.resources.ic_screen_share
 import com.kapp.tenon.generated.resources.ic_search
 import com.kapp.tenon.generated.resources.ic_trash
 import com.kapp.tenon.generated.resources.screen_remote_view_action
+import com.kapp.tenon.generated.resources.workspace_bar_switch
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.setValue
 
@@ -121,6 +126,10 @@ internal fun ChatHeader(
      * 副标题展示工作区名称，明确当前对话所属的项目上下文。
      */
     workspaceName: String? = null,
+    /** 当前宿主关联的工作区总数；大于 1 且有 picker 时药丸可点击弹出选择器。 */
+    workspaceCount: Int = 1,
+    /** 点击顶栏项目药丸时的回调；null = 不可点。 */
+    onOpenWorkspacePicker: (() -> Unit)? = null,
     /**
      * 当前会话（已按工作区收窄）。null = 这一屏没有会话可显示。
      *
@@ -236,29 +245,50 @@ internal fun ChatHeader(
                     )
                 }
             },
+            secondaryContent = if (group == null && workspaceName != null) {
+                {
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(sp.xs),
+                        modifier = Modifier
+                            .then(
+                                if (onOpenWorkspacePicker != null && workspaceCount > 1) {
+                                    Modifier
+                                        .clip(MaterialTheme.shapes.extraSmall)
+                                        .clickable { onOpenWorkspacePicker() }
+                                } else {
+                                    Modifier
+                                }
+                            ),
+                    ) {
+                        Icon(
+                            painter = painterResource(Res.drawable.ic_folder),
+                            contentDescription = null,
+                            tint = MaterialTheme.colorScheme.primary,
+                            modifier = Modifier.size(IconSizes.Badge),
+                        )
+                        Text(
+                            text = workspaceName,
+                            style = MaterialTheme.typography.labelSmall,
+                            color = MaterialTheme.colorScheme.primary,
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis,
+                        )
+                        if (onOpenWorkspacePicker != null && workspaceCount > 1) {
+                            Icon(
+                                imageVector = Icons.Default.ArrowDropDown,
+                                contentDescription = stringResource(Res.string.workspace_bar_switch),
+                                tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                                modifier = Modifier.size(IconSizes.Inline),
+                            )
+                        }
+                    }
+                }
+            } else null,
         )
         // 顶栏动作：移动端为保证对端标题、身份标签与状态有充裕宽度展示不被截断，
         // 全部动作统一收进「⋯」更多菜单中，避免常驻多个图标挤压标题。
         val actions = mutableListOf<ChatHeaderAction>()
-        if (group == null && peerIsAgent && onOpenSessionPicker != null) {
-            // 数的是**这一屏可见**的会话：① 子代理/空壳会话不算（否则一个只有 1 条
-            // 真实会话的节点也会长出这颗按钮，点开却全是该藏的行）；② 必须是**本工作区**
-            // 的那几条（否则按钮画得出来、点开只有 1 行）。两者都由调用方在同一集合上
-            // 算好 —— 见 [visibleSessionCount] 的 KDoc。
-            if ((visibleSessionCount ?: 0) > 1) {
-                actions += ChatHeaderAction(
-                    label = stringResource(Res.string.agent_session_switch_title),
-                    onClick = onOpenSessionPicker,
-                ) { size ->
-                    Icon(
-                        imageVector = Icons.Outlined.SwapHoriz,
-                        contentDescription = stringResource(Res.string.agent_session_switch_title),
-                        tint = MaterialTheme.colorScheme.onSurface,
-                        modifier = Modifier.size(size),
-                    )
-                }
-            }
-        }
         if (group != null && onOpenGroupInfo != null) {
             actions += ChatHeaderAction(
                 label = stringResource(Res.string.chat_group_info_title),

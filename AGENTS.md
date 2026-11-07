@@ -23,7 +23,7 @@
 | `:core` | 协议定义、编解码、传输通道、离线队列、会话编排、持久化。**跨平台共享内核** |
 | **`:app`** | **领域层**：控制器、UI 状态、存储、数据库（含 SQLDelight 定义）、平台契约。**零 Compose 依赖** —— 换 UI 方案时原样复用。`:domainComposeFreeGate` 与 `:cli` 共同守着这条边界 |
 | `:composeApp` | UI 表现层（会话/聊天/节点/Agent 看板/设置/自适应布局）。依赖 `:app`，不含领域逻辑 |
-| `:cli` | **没有 UI** 的 Tidings 客户端。不是产品功能，是「领域层真的能脱离 UI」的**可执行验收物**：只链接 `:app`，classpath 上 0 个 Compose jar，`-verbose:class` 实测 AWT/Swing/Skiko 加载数为 0 |
+| `:cli` | **没有 UI** 的 榫卯 (Tenon) 客户端。不是产品功能，是「领域层真的能脱离 UI」的**可执行验收物**：只链接 `:app`，classpath 上 0 个 Compose jar，`-verbose:class` 实测 AWT/Swing/Skiko 加载数为 0 |
 | `:testsupport` | 源码级守卫测试共用的读盘工具（`GuardSourceScan`）。**只被 `testImplementation` 引用** —— 它曾住在 `:app` 的 main 源集，实测被打进了 `app-jvm.jar` |
 | `:agentNode` | Agent 控制面：本地回环 HTTP API（JDK 内置 HttpServer），桌面形态下被 `desktopApp` 同进程引用 |
 | `:agent-contract` | 驱动层**纯接口**：会话制契约、事件七型（`Artifact` 是进程内事件、不进协议帧）、驱动键归一。编排层与 `:cli` 因此只依赖契约，不必拖进控制面 |

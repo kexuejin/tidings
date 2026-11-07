@@ -81,6 +81,8 @@ import com.kapp.tenon.generated.resources.chat_forward
 import com.kapp.tenon.generated.resources.chat_group_members_changed
 import com.kapp.tenon.generated.resources.chat_group_member_removed
 import com.kapp.tenon.generated.resources.chat_agent_delegated_by_tag
+import com.kapp.tenon.generated.resources.chat_agent_dispatch_failed
+import com.kapp.tenon.generated.resources.chat_agent_dispatch_failed_bare
 import com.kapp.tenon.generated.resources.chat_agent_not_authorized
 import com.kapp.tenon.generated.resources.chat_group_member_added
 import com.kapp.tenon.generated.resources.chat_image
@@ -887,6 +889,16 @@ private fun noticeText(
             return stringResource(Res.string.chat_agent_delegated_by_tag, agentName, routing)
         }
     }
+    if (kind == NoticeKind.AgentDispatchFailed) {
+        // 派单失败要回答「哪一单、谁、为什么」；三件缺一件就退回中性兜底，
+        // 不显示半截占位符（与上面 AgentNotAuthorized 同一条纪律）。
+        val title = detail?.title?.takeIf { it.isNotBlank() }
+        val agentName = detail?.actor?.takeIf { it.isNotBlank() }
+        val reason = detail?.reason?.takeIf { it.isNotBlank() }
+        if (title != null && agentName != null && reason != null) {
+            return stringResource(Res.string.chat_agent_dispatch_failed, title, agentName, reason)
+        }
+    }
     return stringResource(
         when (kind) {
             NoticeKind.RecalledByPeer -> Res.string.chat_recall_peer
@@ -897,6 +909,8 @@ private fun noticeText(
             // @ 到了 agent 但没有执行权：如实说是「没执行」，不给用户留悬念。
             NoticeKind.AgentNotAuthorized -> Res.string.chat_agent_not_authorized
             NoticeKind.AgentDelegatedByTag -> Res.string.chat_agent_delegated_by_tag
+            // 派单终局失败：结构化细节缺失时退回中性一句，不静默。
+            NoticeKind.AgentDispatchFailed -> Res.string.chat_agent_dispatch_failed_bare
             NoticeKind.GroupRenamed -> Res.string.chat_group_renamed
             NoticeKind.RemovedFromGroup -> Res.string.chat_group_removed
             // 发了「停」但本机没在跑：从前完全静默，用户以为停了（真机踩过）。

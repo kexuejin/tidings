@@ -54,8 +54,8 @@ class TagBoardGuardTest {
         // 降级动作走的是与租约降级同一条本机执行通路（不写第二份执行器）：
         // 卡片动作域不自己执行，经端口回到派单侧的唯一入口 `executeLocallyAndBroadcast`。
         assertTrue(
-            body.contains("port.runLocallyAndBroadcast(") && body.contains("executeLocallyAndBroadcast("),
-            "标签降级没有复用 executeLocallyAndBroadcast —— 两份本机执行迟早漂",
+            body.contains("port.runLocallyAndMark(") && body.contains("executeLocallyAndMark("),
+            "标签降级没有复用 executeLocallyAndMark —— 两份本机执行迟早漂",
         )
         // 横幅照旧（不点卡的人也有回声；S4-4 的「点了没反应」纪律）。
         assertTrue(

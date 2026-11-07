@@ -61,9 +61,11 @@ class SettingsHonestyTest {
             text.contains("12 → 13"),
             "头像页又写死了假 profileRev —— 那个 +1 还没发生，不许预支。",
         )
-        assertTrue(
+        // 哈希卡已随「批注不是页面」的裁决整卡移除：页面不再展示任何哈希读数。
+        // 将来若要恢复展示，必须走真实 state 键（pickedAvatarHash），不许编造。
+        assertFalse(
             text.contains("pickedAvatarHash"),
-            "哈希卡必须读真实的 pickedAvatarHash。",
+            "头像页不该再出现哈希读数 —— 哈希卡已随裁决移除；要恢复必须走真实 state 键。",
         )
         assertTrue(
             text.contains("formatAvatarByteCount(pickedAvatarBytes.size)"),
@@ -362,23 +364,20 @@ class SettingsHonestyTest {
     fun avatarPageHasAProductionEntryInBothShells() {
         val app = GuardSourceScan.stripComments(GuardSourceScan.read(appFile))
         val hosting = GuardSourceScan.stripComments(GuardSourceScan.read(desktopHosting))
-        val homeText = GuardSourceScan.stripComments(GuardSourceScan.read(home))
 
+        // 设置首页的「头像」行已随「同一扇门开两处」的裁决整行移除；两端的唯一生产入口
+        // 是资料编辑页头像分段第三档（onOpenAvatarPage）—— 守卫改钉这条真实通路。
         assertTrue(
             app.contains("settingsPage = SETTINGS_PAGE_AVATAR"),
             "手机壳没有任何一处把 settingsPage 写成 SETTINGS_PAGE_AVATAR —— 头像页在生产里不可达",
         )
         assertTrue(
-            homeText.contains("onOpenPage?.invoke(SETTINGS_PAGE_AVATAR)"),
-            "设置首页没有「头像」入口行 —— 上传头像页又只能靠资料页第三档到达（手机上基本没人找得到）",
+            app.contains("onOpenAvatarPage = { settingsPage = SETTINGS_PAGE_AVATAR }"),
+            "手机壳的资料页第三档没接头像页路由 —— 页面又成孤儿",
         )
         assertTrue(
-            homeText.contains("r2_set_profile_avatar_label"),
-            "「头像」入口行必须用头像自己的标题键，不能另造一套说法",
-        )
-        assertTrue(
-            hosting.contains("showAvatarPage = true"),
-            "桌面壳的 showAvatarPage 只有 false 赋值 —— 头像页在桌面上永远打不开",
+            hosting.contains("onOpenAvatarPage = { showAvatarPage = true }"),
+            "桌面壳的资料页第三档没接 showAvatarPage —— 头像页在桌面上永远打不开",
         )
         assertFalse(
             app.contains("onOpenAvatarPage = controller::pickAvatar"),
@@ -401,10 +400,9 @@ class SettingsHonestyTest {
     }
 
     /**
-     * 头像页的协议卡标题不许再说「点保存不会生效」。
-     *
-     * 同一屏底部的保存栏会当场打出「已保存，资料版本 v…」（[avatarSaveFeedback] 钉的就是
-     * 这条路径），标题与它自相矛盾。真实边界是**这张图还不上网**，不是保存不生效。
+     * 协议状态卡已随「批注不是页面」的裁决整卡移除（连同「保存会生效 / Saving works」
+     * 那套标题文案）。守卫退守反方向：那套会自相矛盾的文案（「点保存不会生效」——
+     * 同屏的保存回执当场打脸，[avatarSaveFeedback] 钉的就是这条路径）不许回来。
      */
     @Test
     fun avatarProtocolTitleNoLongerSaysSavingDoesNothing() {
@@ -417,14 +415,6 @@ class SettingsHonestyTest {
         assertFalse(
             en.contains("does nothing yet"),
             "英文协议卡标题又写 saving does nothing —— 保存是生效的，不生效的是图片同步",
-        )
-        assertTrue(
-            zh.contains("保存会生效"),
-            "中文标题必须明说保存生效（保存的是资料字段），边界是图片还不上网",
-        )
-        assertTrue(
-            en.contains("Saving works"),
-            "英文标题必须明说 saving works，边界是图片还不上网",
         )
     }
 }

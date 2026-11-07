@@ -93,6 +93,12 @@ jobs:
       - name: 装 ImageMagick（调色板对账要用 magick）
         run: sudo apt-get install -y imagemagick
 
+      # compileSdk 37 的平台件：runner 镜像的预装清单更新滞后于 SDK 发布，
+      # 缺了它 :androidApp:checkDebugAarMetadata / 编译就是一条环境假红。
+      # 幂等：已装则 no-op。markdown-renderer 0.42+ 的 AAR 硬要求 minCompileSdk=37。
+      - name: 装 Android SDK Platform 37（compileSdk 37 编译要用）
+        run: yes | "$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" "platforms;android-37.0" > /dev/null
+
       - uses: gradle/actions/setup-gradle@v4
 
       - name: 门禁任务链（七条 + 设计契约三条）

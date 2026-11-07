@@ -66,6 +66,7 @@ internal fun ChatHeaderContent(
     narrow: Boolean = false,
     modifier: Modifier = Modifier,
     titleTrailing: @Composable RowScope.() -> Unit = {},
+    secondaryContent: (@Composable () -> Unit)? = null,
 ) {
     val sp = LocalAppSpacing.current
     Row(
@@ -122,7 +123,9 @@ internal fun ChatHeaderContent(
                 )
                 titleTrailing()
             }
-            if (secondaryText != null) {
+            if (secondaryContent != null) {
+                secondaryContent()
+            } else if (secondaryText != null) {
                 Text(
                     text = secondaryText,
                     style = if (density == ChatHeaderDensity.Phone) {

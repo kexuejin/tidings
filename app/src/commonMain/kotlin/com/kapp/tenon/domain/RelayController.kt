@@ -1148,6 +1148,20 @@ class RelayController(
     ): String? = invokeCtl.dispatchCrossHostInvoke(groupId, agentId, prompt, wsId, deadlineMs)
 
     /**
+     * **1:1 直派**（无群容器）：跳过群席位查找，显式指定目标宿主、agent 与工作区。
+     * 单聊里对着某个宿主派一单、指名工作区，走这条——租约照记（状态镜像给 UI），
+     * 反馈面是租约本身；群路径的看板卡在这条路上没有落点，也不广播。
+     * ControlPlane 的跨端派单与后续的 1:1 派单 UI 都走它。
+     */
+    fun dispatchDirectInvoke(
+        peerId: String?,
+        agentId: String,
+        prompt: String,
+        wsId: String? = null,
+        deadlineMs: Long = RelayControllerAgentInvokeComponent.DEFAULT_INVOKE_DEADLINE_MS,
+    ): String? = invokeCtl.dispatchDirectInvoke(peerId, agentId, prompt, wsId, deadlineMs)
+
+    /**
      * 责任链的进度卡（一链一卡，rev 递增）走**与看板卡同一条**广播路径。
      *
      * 为什么必须复用而不是另写一条发送：T-2d 的原位替换（同 cardId 在本机落库重写 +
@@ -1181,6 +1195,35 @@ class RelayController(
     /** 带细节的系统提示行（§16.6 入口 A 的模板确认 / 拒绝回执等）。 */
     fun postNotice(convId: String, kind: NoticeKind, detail: NoticeDetail?) =
         groupsCtl.handleNotice(convId, kind, detail)
+
+    /**
+     * **派单终局失败的公开发布入口**：群意图路径与工单路径共用这一处判据。
+     *
+     * 群聊保持 `agentState=failed` 群文本（全群可见）；1:1 落
+     * [NoticeKind.AgentDispatchFailed] 系统提示行（1:1 文本协议没有 `agentState` 键）。
+     * 调用方只描述事实（哪一单、谁、为什么），「发到哪、发成什么形状」不在调用方分叉。
+     *
+     * @param dispatchId 同一次派单只公告一次的去重键（外壳信封 id / 工单号）
+     * @param title 工单标题 / 工单号；null = 群意图路径没有工单
+     * @param reason 一句话原因（本入口按 `Limits.AGENT_NOTE` 截断）
+     */
+    fun announceDispatchFailure(
+        convId: String,
+        agentKey: String,
+        agentName: String,
+        dispatchId: String?,
+        title: String?,
+        reason: String?,
+        unavailable: Boolean,
+    ) = invokeCtl.announceDispatchFailure(
+        convId = convId,
+        agentKey = agentKey,
+        agentName = agentName,
+        dispatchId = dispatchId,
+        title = title,
+        reason = reason,
+        unavailable = unavailable,
+    )
 
     fun recordLocalWorkspace(
         wsId: String,

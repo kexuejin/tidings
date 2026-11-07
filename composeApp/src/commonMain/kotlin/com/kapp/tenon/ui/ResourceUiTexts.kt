@@ -32,6 +32,7 @@ import com.kapp.tenon.generated.resources.agent_action_denied_notice
 import com.kapp.tenon.generated.resources.agent_not_completed_notice
 import com.kapp.tenon.generated.resources.agent_unavailable_notice
 import com.kapp.tenon.generated.resources.chat_nudge_peer
+import com.kapp.tenon.generated.resources.chat_agent_dispatch_failed
 import com.kapp.tenon.generated.resources.workspace_group_initial_greeting
 import com.kapp.tenon.generated.resources.workspace_group_session_brief
 import com.kapp.tenon.generated.resources.workspace_group_session_busy
@@ -95,6 +96,11 @@ internal object ResourceUiTexts : RelayUiTexts {
 
     override suspend fun agentNotCompletedNotice(agentName: String): String =
         runCatching { getString(Res.string.agent_not_completed_notice, agentName) }.getOrNull().orEmpty()
+
+    override suspend fun dispatchFailedNotice(title: String, agentName: String, reason: String): String =
+        runCatching {
+            getString(Res.string.chat_agent_dispatch_failed, title, agentName, reason)
+        }.getOrNull().orEmpty()
 
     override suspend fun agentActionDeniedNotice(actor: String, agentName: String): String =
         runCatching { getString(Res.string.agent_action_denied_notice, actor, agentName) }.getOrNull().orEmpty()

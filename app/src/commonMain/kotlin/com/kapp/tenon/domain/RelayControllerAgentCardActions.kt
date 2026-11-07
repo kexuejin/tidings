@@ -78,15 +78,16 @@ internal class RelayControllerAgentCardActions(
         /** 重派一次任务（登记租约 + 发帧 / 本机执行），卡片由被派方另行翻面。 */
         fun dispatchTaskToAgent(groupId: String, agentId: String, prompt: String, wsId: String?)
 
-        /** 降级本机执行，终态翻租约并广播结果卡。 */
-        suspend fun runLocallyAndBroadcast(
+        /** 1:1 直派重派（无群容器）：目标与 agent 显式给定，租约状态走镜像。 */
+        fun dispatchDirectInvoke(peerId: String?, agentId: String, prompt: String, wsId: String?)
+
+        /** 降级本机执行，终态翻租约；有群则广播结果卡，1:1 只翻镜像。 */
+        suspend fun runLocallyAndMark(
             invokeId: String,
-            groupId: String,
             agentId: String,
-            seat: VirtualAgentMember,
             prompt: String,
             wsId: String?,
-            requester: String,
+            cardGroupId: String?,
         )
 
         /** 以 agent 署名发一条执行状态群文本。 */
@@ -149,14 +150,16 @@ internal class RelayControllerAgentCardActions(
      */
     internal suspend fun broadcastBoardCard(groupId: String, agentId: String, card: JsonObject) {
         val st = host.state.value
-        // 每一条早退都要留痕。这里从前是四个静默 `return`：宿主判定「这张卡发不出去」
-        // 时既不上群也不报警，调用方看到的是「函数正常返回」—— 「合并失败却什么都没
-        // 发生」就是这么查不出来的。
-        val meta = st.settings.groups.firstOrNull { it.groupId == groupId } ?: run {
-            println("[CARD] dropped: group " + groupId + " not in settings")
-            return
-        }
-        if (st.selfNodeId !in meta.members) {
+        val isGroup = ConvId.isGroup(groupId) || st.settings.groups.any { it.groupId == groupId }
+        val rawGroupId = ConvId.groupIdOf(groupId) ?: groupId
+        val meta = if (isGroup) {
+            st.settings.groups.firstOrNull { it.groupId == rawGroupId } ?: run {
+                println("[CARD] dropped: group " + groupId + " not in settings")
+                return
+            }
+        } else null
+
+        if (meta != null && st.selfNodeId !in meta.members) {
             println(
                 "[CARD] dropped: self " + st.selfNodeId + " is not a member of " + groupId +
                     " (members=" + meta.members.joinToString(",") + ")",
@@ -169,6 +172,7 @@ internal class RelayControllerAgentCardActions(
             return
         }
         val envelopeId = newId()
+        val convKey = if (meta != null) ConvId.group(meta.groupId) else groupId
         // T-2d 单卡槽（§6.2 / 不变量 3）：本机广播的 rev 推进帧，**本机的落库**也走
         // 原位替换 —— 找同 cardId 的既有槽位，同 id 重写（card 首帧原文不动、
         // cardPayload = 最新），不是追加新行。远端成员的替换由他们的入站拦截
@@ -180,7 +184,7 @@ internal class RelayControllerAgentCardActions(
         val finalCard = cardBroadcastMutex.withLock {
             val now = host.state.value
             val existingSlot = cardId?.let { id ->
-                now.messages[ConvId.group(groupId)].orEmpty().lastOrNull { row ->
+                now.messages[convKey].orEmpty().lastOrNull { row ->
                     (row.renderCard?.get("cardId") as? JsonPrimitive)?.contentOrNull == id
                 }
             }
@@ -212,12 +216,12 @@ internal class RelayControllerAgentCardActions(
             if (cardId == null || existingSlot == null) {
                 // 首帧：本机落库 id 与线上信封 id **同一个** —— 补发与去重按信封 id 对账
                 // （同帧同 id 是既有判据，拆开就丢掉这层对账）。
-                val lastAt = now.messages[ConvId.group(groupId)].orEmpty().lastOrNull()?.at ?: 0L
+                val lastAt = now.messages[convKey].orEmpty().lastOrNull()?.at ?: 0L
                 val effectiveAt = maxOf(nowMillis(), lastAt + 1L)
                 host.handleAppendMessage(
                     MessageUi(
                         id = envelopeId,
-                        peerId = ConvId.group(groupId),
+                        peerId = convKey,
                         mine = false,
                         text = title,
                         at = effectiveAt,
@@ -251,42 +255,37 @@ internal class RelayControllerAgentCardActions(
             out
         }
         // **先落库、再发帧**（与 `broadcastAgentState` 同一条纪律）。
-        //
-        // 从前 runtime 的判空挡在落库之前，于是「宿主仓已经 `git apply` 成功、卡却不翻面」
-        // 只剩一行 `[CARD] dropped: no runtime attached` —— 用户看到的是卡永远停在
-        // 「待合并」，而工作树其实已经改了。运行时（P2P 传输）没挂只该影响**别人**
-        // 看不看得见；这张卡属于本机用户，本机必须看得见。
-        // **发送侧必须留痕**（P0，卡片进展评审）：此前这里的
-        // `runCatching` 没有任何 onFailure —— 卡超 24KiB 预算（`sendGroupText` 的 require）
-        // 或传输异常整段静默，宿主「先落库」所以自己看卡是新的，对端却永远停在 rev1，
-        // 全程一行失败日志都没有。三行观测一次说清：发了什么、多大、成没成。
-        val rt = host.runtime ?: run {
-            println(
-                "[CARD] persisted locally, not broadcast: no runtime attached (card " +
-                    cardId + ")",
-            )
-            return
-        }
-        runCatching {
-            println(
-                "[CARD] broadcast card=" + cardId + " rev=" +
-                    (finalCard["rev"] as? kotlinx.serialization.json.JsonPrimitive)?.content +
-                    " bytes=" + finalCard.toString().encodeToByteArray().size,
-            )
-            rt.sendGroupText(
-                text = title,
-                groupId = groupId,
-                groupRev = meta.rev,
-                members = meta.members,
-                senderId = AgentSenderId.of(st.selfNodeId, agentId),
-                envelopeId = envelopeId,
-                card = finalCard,
-            )
-        }.onFailure { t ->
-            println(
-                "[CARD] broadcast FAILED card=" + cardId + " : " +
-                    (t.message ?: t::class.simpleName),
-            )
+        if (meta != null) {
+            val rt = host.runtime ?: run {
+                println(
+                    "[CARD] persisted locally, not broadcast: no runtime attached (card " +
+                        cardId + ")",
+                )
+                return
+            }
+            runCatching {
+                println(
+                    "[CARD] broadcast card=" + cardId + " rev=" +
+                        (finalCard["rev"] as? kotlinx.serialization.json.JsonPrimitive)?.content +
+                        " bytes=" + finalCard.toString().encodeToByteArray().size,
+                )
+                rt.sendGroupText(
+                    text = title,
+                    groupId = meta.groupId,
+                    groupRev = meta.rev,
+                    members = meta.members,
+                    senderId = AgentSenderId.of(st.selfNodeId, agentId),
+                    envelopeId = envelopeId,
+                    card = finalCard,
+                )
+            }.onFailure { t ->
+                println(
+                    "[CARD] broadcast FAILED card=" + cardId + " : " +
+                        (t.message ?: t::class.simpleName),
+                )
+            }
+        } else {
+            println("[CARD] 1:1 direct card persisted locally (conv=" + convKey + " card=" + cardId + ")")
         }
     }
 
@@ -392,14 +391,12 @@ internal class RelayControllerAgentCardActions(
                 if (board != null) {
                     broadcastDecision(cardId, actionId, groupId, agentId, decidedBy)
                     host.scope.launch {
-                        port.runLocallyAndBroadcast(
+                        port.runLocallyAndMark(
                             invokeId = cardId + "-local",
-                            groupId = board.groupId,
                             agentId = board.agentId,
-                            seat = board.seat,
                             prompt = board.task,
                             wsId = board.wsId,
-                            requester = decidedBy,
+                            cardGroupId = board.groupId,
                         )
                     }
                     return
@@ -409,7 +406,13 @@ internal class RelayControllerAgentCardActions(
                 val lease = port.leaseTable.snapshot().firstOrNull { boardCardIdOf(it.invokeId) == cardId }
                 if (lease != null) {
                     broadcastDecision(cardId, actionId, groupId, agentId, decidedBy)
-                    port.dispatchTaskToAgent(lease.groupId, lease.agentId, lease.prompt, lease.wsId)
+                    val group = lease.groupId
+                    if (group != null) {
+                        port.dispatchTaskToAgent(group, lease.agentId, lease.prompt, lease.wsId)
+                    } else {
+                        // 1:1 直派的租约：重派回原目标，不经过群席位。
+                        port.dispatchDirectInvoke(lease.targetNode, lease.agentId, lease.prompt, lease.wsId)
+                    }
                     return
                 }
             }
@@ -418,14 +421,12 @@ internal class RelayControllerAgentCardActions(
                 if (lease != null) {
                     broadcastDecision(cardId, actionId, groupId, agentId, decidedBy)
                     host.scope.launch {
-                        port.runLocallyAndBroadcast(
+                        port.runLocallyAndMark(
                             invokeId = lease.invokeId + "-local",
-                            groupId = lease.groupId,
                             agentId = lease.agentId,
-                            seat = VirtualAgentMember(agentId = lease.agentId, hostNodeId = host.state.value.selfNodeId, name = lease.agentName),
                             prompt = lease.prompt,
                             wsId = lease.wsId,
-                            requester = decidedBy,
+                            cardGroupId = lease.groupId,
                         )
                     }
                     return

@@ -10,6 +10,7 @@ import kotlin.test.AfterTest
 import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertNotNull
+import kotlin.test.assertNull
 import kotlin.test.assertTrue
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Job
@@ -408,6 +409,49 @@ class TwoNodeAgentInvokeTest {
 
     private fun JsonObject.strOf(key: String): String? =
         (this[key] as? JsonPrimitive)?.takeIf { it !is kotlinx.serialization.json.JsonNull }?.content
+
+
+    @Test
+    fun directInvokeCarriesWsIdWithoutGroupContainer() = runBlocking {
+        val (leader, host, _) = hostedGroup()
+        try {
+            // 宿主执行器：捕获整份请求（「到达」的执行证据），回一份成功摘要。
+            val captured = java.util.concurrent.atomic.AtomicReference<AgentInvokeTaskRequest?>(null)
+            host.invokeExecutor = object : com.kapp.tenon.domain.AgentInvokeExecutor {
+                override suspend fun execute(request: AgentInvokeTaskRequest): AgentInvokeExecution {
+                    captured.set(request)
+                    return AgentInvokeExecution.done(summary = "direct ok", cardJsonText = null)
+                }
+            }
+            val hostNodeId = host.state.value.selfNodeId
+
+            // 1:1 直派：不经过群席位，目标 / agent / 工作区全部显式。
+            val invokeId = leader.dispatchDirectInvoke(
+                peerId = hostNodeId, agentId = "dsh", prompt = "fix-the-pill-dispatch",
+                wsId = "ws-teahouse", deadlineMs = 30_000L,
+            )
+            assertNotNull(invokeId, "1:1 直派不依赖群席位 ⇒ 必须受理")
+
+            // 跨端到达 + 结果回传：租约翻 Done（无群容器，反馈面是租约镜像本身）。
+            awaitUntil("租约翻 Done") {
+                leader.state.value.agentInvokes[invokeId]?.state == InvokeLeaseStates.DONE
+            }
+            val request = captured.get()
+            assertNotNull(request, "宿主执行器必须收到任务（到达的执行证据）")
+            assertEquals("fix-the-pill-dispatch", request.prompt, "prompt 逐字到达")
+            assertEquals(
+                "ws-teahouse", request.wsId,
+                "wsId 必须随帧跨端到达——任务级绑定的运输段（工单 C 的最后一公里）",
+            )
+            assertNull(request.groupId, "1:1 直派不携带群容器")
+            val lease = leader.state.value.agentInvokes[invokeId]!!
+            assertEquals("direct ok", lease.summary, "摘要随结果帧回传")
+            assertNull(lease.groupId, "1:1 租约没有群容器值")
+        } finally {
+            leader.stop()
+            host.stop()
+        }
+    }
 
     private fun JsonObject.intOf(key: String): Int? = strOf(key)?.toIntOrNull()
 

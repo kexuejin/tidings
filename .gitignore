@@ -57,10 +57,11 @@ androidApp/src/screenshotTest*/reference/
 /design/runtime-evidence/**/*.webp
 
 # ---- 应用图标中间产物 ------------------------------------------------
-# design/icon/Tidings.iconset/ 是 `design/icon/make-macos-icns.sh` 跑一遍就会
+# design/icon/Tenon.iconset/ 是 `design/icon/make-macos-icns.sh` 跑一遍就会
 # 重新生成的 10 个尺寸 PNG（1024 主图 + 各档 @1x/@2x），只服务于 iconutil。
-# 仓库里只留两个文件：relay-macos-1024.png（主图）与 Tidings.icns（交付物，
+# 仓库里只留两个文件：relay-macos-1024.png（主图）与 Tenon.icns（交付物，
 # 被 desktopApp/build.gradle.kts 的 macOS { iconFile } 引用）。
+/design/icon/Tenon.iconset/
 /design/icon/Tidings.iconset/
 # design/icon/preview/ 是图标方案比选的过程稿：v1/v2/v3 三代、每代 5 个候选，
 # 每个都有 svg + 渲染 png。与 /design/preview/ 同属"设计期比选素材"，

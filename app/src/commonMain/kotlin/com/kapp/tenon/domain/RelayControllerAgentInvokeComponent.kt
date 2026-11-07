@@ -9,7 +9,6 @@ import com.kapp.tenon.core.protocol.AgentSenderId
 import com.kapp.tenon.core.protocol.ConvId
 import com.kapp.tenon.core.protocol.Envelope
 import com.kapp.tenon.core.protocol.Limits
-import com.kapp.tenon.core.protocol.VirtualAgentMember
 import com.kapp.tenon.core.protocol.newId
 import com.kapp.tenon.domain.model.MessageUi
 import com.kapp.tenon.domain.model.NoticeDetail
@@ -224,6 +223,15 @@ internal class RelayControllerAgentInvokeComponent(private val host: AgentDomain
         wsId: String?,
         deadlineMs: Long = DEFAULT_INVOKE_DEADLINE_MS,
     ): String? = leases.dispatchCrossHostInvoke(groupId, agentId, prompt, wsId, deadlineMs)
+
+    /** 1:1 直派（无群容器）：跳过席位查找，显式目标 + agent + 工作区。见 [RelayControllerAgentInvokeLeases]。 */
+    fun dispatchDirectInvoke(
+        peerId: String?,
+        agentId: String,
+        prompt: String,
+        wsId: String?,
+        deadlineMs: Long = DEFAULT_INVOKE_DEADLINE_MS,
+    ): String? = leases.dispatchDirectInvoke(peerId, agentId, prompt, wsId, deadlineMs)
     /** 入站结果帧（B → A）：租约落终态 + Leader 拼看板卡上群 —— 见 [RelayControllerAgentInvokeLeases]。 */
     fun handleOnAgentInvokeResult(envelope: Envelope) = leases.handleOnAgentInvokeResult(envelope)
 
@@ -266,7 +274,37 @@ internal class RelayControllerAgentInvokeComponent(private val host: AgentDomain
             return
         }
         val meta = groupId?.let { g -> host.state.value.settings.groups.firstOrNull { it.groupId == g } }
-        if (meta == null || requestedBy !in meta.members) {
+        if (meta == null) {
+            // **1:1 直派**（dispatchDirectInvoke 发来，无群容器）：授权走节点级信任——
+            // 发起方必须对本宿主持有执行授权（grantAllows 与群路径同一个桥，判据收窄为
+            // 节点维度）；agentId 由发起方显式给定，本机不查席位——执行桥自行解析
+            // （插件优先、CLI 驱动兜底）。群成员身份门槛在这里不适用：没有群可查。
+            if (grantAllows?.invoke(agentId, requestedBy) != true) {
+                recordGrantRequest?.invoke(requestedBy, agentId, "direct invoke")
+                reply(false, com.kapp.tenon.core.protocol.CodecInvoke.InvokeResultStates.DENIED, error = "direct invoke not granted for this node")
+                return
+            }
+            val directExecutor = executor
+            if (directExecutor == null) {
+                reply(false, com.kapp.tenon.core.protocol.CodecInvoke.InvokeResultStates.NO_EXECUTOR)
+                return
+            }
+            val directOutcome = try {
+                directExecutor.execute(AgentInvokeTaskRequest(agentId = agentId, prompt = prompt, wsId = wsId, groupId = null))
+            } catch (t: Throwable) {
+                reply(false, com.kapp.tenon.core.protocol.CodecInvoke.InvokeResultStates.ERROR, error = (t.message ?: "executor failed").take(Limits.AGENT_NOTE))
+                return
+            }
+            reply(
+                ok = directOutcome.status == com.kapp.tenon.core.protocol.CodecInvoke.InvokeResultStates.DONE,
+                status = directOutcome.status,
+                summary = directOutcome.summary,
+                error = directOutcome.error,
+                card = directOutcome.card,
+            )
+            return
+        }
+        if (requestedBy !in meta.members) {
             // 授权的前置门槛是成员身份（AgentExecAuthorizer 同一条）：不是群成员的请求一律拒。
             reply(false, com.kapp.tenon.core.protocol.CodecInvoke.InvokeResultStates.DENIED, error = "not a member of the group")
             return
@@ -529,6 +567,59 @@ internal class RelayControllerAgentInvokeComponent(private val host: AgentDomain
     private val announcedDispatches = LockedSet<String>()
 
     /**
+     * 群意图路径的旧入口：签名与调用点保持不变，判据转发到 [announceDispatchFailure]。
+     *
+     * 工单路径也从同一个入口落会话 —— 「派单失败要说话」这件事只有一条实现，
+     * 下次再改不会出现「群聊说、1:1 不说」的分叉。
+     */
+    private fun announceAgentGaveUp(
+        groupId: String,
+        agentId: String,
+        agentName: String,
+        dispatchId: String?,
+        unavailable: Boolean,
+    ) {
+        announceDispatchFailure(
+            convId = ConvId.group(groupId),
+            agentKey = agentId,
+            agentName = agentName,
+            dispatchId = dispatchId,
+            title = null,
+            reason = null,
+            unavailable = unavailable,
+        )
+    }
+
+    /**
+     * **派单终局失败的唯一发布入口**（群意图路径与工单路径共用）。
+     *
+     * - 群聊：保持既有 `agentState=failed` 群文本（全群可见，见 [broadcastAgentGaveUp]）。
+     * - 1:1：落一条 [NoticeKind.AgentDispatchFailed] 系统提示行 —— 1:1 文本协议没有
+     *   `agentState` 键，notice 是壳层既有的「系统解释」形状（与 `AgentNotAuthorized`
+     *   同一条本地通路），不新造协议帧。
+     *
+     * @param title 工单标题 / 工单号（调用方截断）；null = 群意图路径没有工单
+     * @param reason 一句话原因（调用方按 `Limits.AGENT_NOTE` 截断）
+     */
+    internal fun announceDispatchFailure(
+        convId: String,
+        agentKey: String,
+        agentName: String,
+        dispatchId: String?,
+        title: String?,
+        reason: String?,
+        unavailable: Boolean,
+    ) {
+        val groupId = ConvId.groupIdOf(convId)
+            ?: convId.takeIf { id -> host.state.value.settings.groups.any { it.groupId == id } }
+        if (groupId != null) {
+            broadcastAgentGaveUp(groupId, agentKey, agentName, dispatchId, unavailable, title, reason)
+        } else {
+            postDirectDispatchFailure(convId, agentKey, title, reason, dispatchId)
+        }
+    }
+
+    /**
      * 把「这次没做成」播进群流：`agentState=failed` 的 agent 署名群文本。
      *
      * 为什么是群文本而不是本地 notice：notice 是**纯本地数据、不进协议**（见
@@ -540,26 +631,78 @@ internal class RelayControllerAgentInvokeComponent(private val host: AgentDomain
      *
      * @param unavailable true = 本机根本没有执行器；false = 有执行器但没做成
      */
-    private fun announceAgentGaveUp(
+    private fun broadcastAgentGaveUp(
         groupId: String,
         agentId: String,
         agentName: String,
         dispatchId: String?,
         unavailable: Boolean,
+        title: String?,
+        reason: String?,
     ) {
         // 没有 dispatchId 的调用点（老测试/内部直调）按内容去重，至少不会连发两条。
-        val key = dispatchId ?: ("$groupId|$agentId|$agentName|$unavailable")
+        val key = dispatchId
+            ?: ("$groupId|$agentId|$agentName|$unavailable|${title.orEmpty()}|${reason.orEmpty()}")
         if (!announcedDispatches.add(key)) return
         host.scope.launch {
-            val text = runCatching {
-                if (unavailable) host.uiTexts.agentUnavailableNotice(agentName)
-                else host.uiTexts.agentNotCompletedNotice(agentName)
-            }.getOrNull().orEmpty()
+            // 工单路径带标题与原因 ⇒ 用一句能回答「哪一单、谁、为什么」的话；
+            // 群意图路径没有工单（title/reason 都是 null）⇒ 保持原有两句措辞。
+            val detailed = if (!title.isNullOrBlank() || !reason.isNullOrBlank()) {
+                runCatching {
+                    host.uiTexts.dispatchFailedNotice(
+                        title.orEmpty().trim().take(60),
+                        agentName,
+                        reason.orEmpty().trim().take(Limits.AGENT_NOTE),
+                    )
+                }.getOrNull().orEmpty()
+            } else {
+                ""
+            }
+            val text = detailed.ifEmpty {
+                runCatching {
+                    if (unavailable) host.uiTexts.agentUnavailableNotice(agentName)
+                    else host.uiTexts.agentNotCompletedNotice(agentName)
+                }.getOrNull().orEmpty()
+            }
             // 文案取不到也照落库：**帧本身**（agentState=failed）就是那条事实，
             // 界面层会在正文为空时补一句本地兜底（见 `AgentStateBannerRow`）。
             // 线上那一份则要求非空（协议对群文本 `text` 的判据），见 broadcastAgentState。
             broadcastAgentState(groupId, agentId, AGENT_STATE_FAILED, text)
         }
+    }
+
+    /**
+     * 1:1 的失败落点：一条本地系统提示行。
+     *
+     * `NoticeDetail` 带齐「哪一单、谁失败、为什么」，文案由壳层按资源翻；领域层不拼中文
+     * （`cjkLiteralGate` 与多语言对账同一条纪律）。
+     */
+    private fun postDirectDispatchFailure(
+        convId: String,
+        agentKey: String,
+        title: String?,
+        reason: String?,
+        dispatchId: String?,
+    ) {
+        val safeTitle = title?.trim()?.take(60).orEmpty()
+        val safeReason = reason?.trim()?.take(Limits.AGENT_NOTE).orEmpty()
+        val key = dispatchId ?: ("$convId|$agentKey|$safeTitle|$safeReason")
+        if (!announcedDispatches.add(key)) return
+        host.handleAppendMessage(
+            MessageUi(
+                id = host.localMessageId(),
+                peerId = convId,
+                mine = false,
+                text = "",
+                at = nowMillis(),
+                notice = NoticeKind.AgentDispatchFailed,
+                noticeDetail = NoticeDetail(
+                    actor = agentKey,
+                    title = safeTitle,
+                    reason = safeReason,
+                ),
+            ),
+        )
     }
 
     /**
@@ -678,16 +821,18 @@ internal class RelayControllerAgentInvokeComponent(private val host: AgentDomain
             dispatchCrossHostInvoke(groupId, agentId, prompt, wsId)
         }
 
-        override suspend fun runLocallyAndBroadcast(
+        override fun dispatchDirectInvoke(peerId: String?, agentId: String, prompt: String, wsId: String?) {
+            leases.dispatchDirectInvoke(peerId, agentId, prompt, wsId)
+        }
+
+        override suspend fun runLocallyAndMark(
             invokeId: String,
-            groupId: String,
             agentId: String,
-            seat: VirtualAgentMember,
             prompt: String,
             wsId: String?,
-            requester: String,
+            cardGroupId: String?,
         ) {
-            leases.executeLocallyAndBroadcast(invokeId, groupId, agentId, seat, prompt, wsId, requester)
+            leases.executeLocallyAndMark(invokeId, agentId, prompt, wsId, cardGroupId)
         }
 
         override suspend fun publishAgentState(groupId: String, agentId: String, state: String, text: String) {

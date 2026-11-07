@@ -170,6 +170,10 @@
     <string name="banner_group_no_permission">Only the group owner or admins can remove members.</string>
     <string name="chat_agent_not_authorized">%1$s did not run: you are not on its authorization list</string>
     <string name="chat_agent_delegated_by_tag">%1$s cannot run it locally; the task was dispatched by tag %2$s to a remote node</string>
+    <!-- Dispatch failed: which task, which agent, why. %1$s = task title, %2$s = agent, %3$s = reason. -->
+    <string name="chat_agent_dispatch_failed">"%1$s" failed on %2$s: %3$s</string>
+    <!-- Neutral fallback when the detail is missing; never show half a placeholder. -->
+    <string name="chat_agent_dispatch_failed_bare">Task failed</string>
     <string name="chat_agent_request_grant">Request access</string>
     <string name="chat_group_members_changed">Group members updated</string>
     <string name="common_name_list_separator">, </string>
@@ -392,6 +396,8 @@
          the "chats" count (tool vocabulary, not what a user scans for). -->
     <string name="workspace_board_subtitle">%1$d devices · %2$d agents · %3$d workspaces</string>
     <string name="workspace_bar_switch">Switch Workspace</string>
+    <string name="workspace_picker_sheet_title">Select Workspace</string>
+    <string name="chat_workspace_switched_notice">Switched active workspace to %1$s</string>
     <string name="workspace_new_segment">New Segment</string>
     <string name="workspace_branch_label">Branch</string>
     <string name="workspace_unassigned">Unassigned Workspace</string>
@@ -1705,7 +1711,7 @@
     <string name="desktop_power_saver_on">Switched to power-saving mode: heartbeat and scanning slowed %1$s×</string>
     <string name="desktop_power_saver_off">Back to the default heartbeat rate</string>
     <string name="desktop_notification_file">Received a file</string>
-    <string name="desktop_diag_title">Tidings diagnostics</string>
+    <string name="desktop_diag_title">Tenon diagnostics</string>
     <string name="desktop_diag_generated_at">Generated: %1$s</string>
     <string name="desktop_diag_section_settings">== Settings ==</string>
     <string name="desktop_diag_section_network">== Network ==</string>
@@ -1737,7 +1743,7 @@
     <string name="desktop_login_delete_failed">Failed to delete the autostart entry: %1$s</string>
     <string name="desktop_login_write_failed">Failed to write the autostart entry: %1$s</string>
     <string name="desktop_login_reg_failed">reg command failed: %1$s</string>
-    <string name="desktop_login_entry_name">Tidings</string>
+    <string name="desktop_login_entry_name">Tenon</string>
     <string name="desktop_login_entry_comment">Direct messaging and file transfer over the local network</string>
     <string name="desktop_scan_unsupported_hint">The desktop build has no camera scanner — use \"Enter address\"; the node code is the address itself</string>
     <string name="desktop_scan_unsupported">The desktop build has no camera scanner — use \"Enter address\"</string>
@@ -1746,8 +1752,8 @@
     <string name="desktop_drop_release_current">Release to send to the current chat</string>
     <string name="desktop_drop_release_to">Release to send to %1$s</string>
     <string name="desktop_drop_validate_hint">Files are validated by the same rules before saving</string>
-    <string name="desktop_peer_window_title">%1$s · Tidings</string>
-    <string name="desktop_brand_short">Tidings</string>
+    <string name="desktop_peer_window_title">%1$s · Tenon</string>
+    <string name="desktop_brand_short">Tenon</string>
     <string name="desktop_link_added_peer">Node added from link: %1$s</string>
-    <string name="desktop_msg_file_unsupported">Tidings message files are not supported yet — this opens the main window only</string>
+    <string name="desktop_msg_file_unsupported">Tenon message files are not supported yet — this opens the main window only</string>
 </resources>

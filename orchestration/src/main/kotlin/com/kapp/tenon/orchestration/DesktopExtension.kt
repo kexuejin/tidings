@@ -677,30 +677,33 @@ class DesktopExtension(
                     // 全走本执行器，直调会把编排器的工单卡、阶段 A 原型立项、追问唤醒、
                     // 自愈退单整段绕过去 —— 能力写在编排器里，真机那条路上却不存在。
                     // `handlePromptAwait` 是请求-响应形状（await 工单终局），与 invoke
-                    // 的语义正好对上；落盘落哪个仓由编排器按群绑定确定性解析。
+                    // 的语义正好对上；租约的 `wsId`（任务级显式绑定）原样穿透，
+                    // 编排器按「显式 wsId > 群绑定 > 单工作区」次序解析，解析不出就退单。
                     if (created.pluginForAgent(request.agentId) == null &&
                         created.resolveCliDriver(request.agentId) != null
                     ) {
                         val group = request.groupId?.takeIf { it.isNotBlank() }
-                            ?: return com.kapp.tenon.domain.AgentInvokeExecution(
-                                status = com.kapp.tenon.core.protocol.CodecInvoke.InvokeResultStates.ERROR,
-                                error = "cli dispatch requires a group-bound workspace (no group on the invoke frame)",
-                            )
+                        val targetConvId = if (group != null) {
+                            com.kapp.tenon.core.protocol.ConvId.group(group)
+                        } else {
+                            request.wsId?.takeIf { it.isNotBlank() } ?: ("agent:" + request.agentId)
+                        }
                         val outcome = workerOrchestrator.handlePromptAwait(
-                            convId = com.kapp.tenon.core.protocol.ConvId.group(group),
+                            convId = targetConvId,
                             senderPeerId = self,
                             prompt = request.prompt,
                             replyToId = null,
                             agentKey = request.agentId,
+                            wsId = request.wsId,
                         )
-                        // 产物投群（patch.diff）：终局带路径就投 —— 投递失败不改写状态，
-                        // 工单卡（含产物条目）照常上群，可从 report.json 对账。
+                        // 产物投群或对端（patch.diff）：终局带路径就投 —— 投递失败不改写状态，
+                        // 工单卡（含产物条目）照常上屏，可从 report.json 对账。
                         outcome.patchPath?.let { patchPath ->
                             val patchFile = java.io.File(patchPath)
                             if (patchFile.isFile) {
                                 artifactDelivery.deliverCliArtifacts(
                                     listOf(Triple(patchPath, patchFile.name, patchFile.length())),
-                                    group,
+                                    targetConvId,
                                 )
                             }
                         }

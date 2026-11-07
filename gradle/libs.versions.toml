@@ -1,11 +1,11 @@
 [versions]
 luciola = "0.9.0"
 agp = "9.4.1"
-android-compileSdk = "36"
+android-compileSdk = "37"
 android-buildToolsVersion = "36.1.0"
 android-minSdk = "24"
 kotlin = "2.4.0"
-compose-multiplatform = "1.11.1"
+compose-multiplatform = "1.12.2"
 # 官方自适应布局（Compose Multiplatform 版），稳定版 1.2.0。
 # 不用 1.3.0-rc01：它要求 Compose 1.10.0 与 window-core 1.5.0，本仓库暂不升级。
 compose-material3-adaptive = "1.2.0"
@@ -23,19 +23,15 @@ mlkit-barcode = "17.3.0"
 # 所有依赖只用公开 Maven 坐标，不引入任何私有仓库构件。
 kotlinx-coroutines = "1.11.0"
 kotlinx-serialization = "1.11.0"
-ktor = "3.3.1"
+ktor = "3.6.1"
 sqldelight = "2.0.2"
 # 聊天消息的富文本渲染（agent 回复本来就是 Markdown）。见 feature/chat/MarkdownMessage.kt。
 #
-# **为什么钉 0.41.0 而不是最新**：从 0.42.0 起这个库的 AAR 声明 `minCompileSdk=37`，
-# 而本仓库 compileSdk 是 36 —— 装上红在 `:androidApp:checkDebugAarMetadata`（不是编译错，
-# 是 AAR 元数据检查），本机 SDK 也还没有 android-37 可装。0.41.0 是最后一个 `minCompileSdk=36` 的版本。
-#
-# 升级条件（两条一起满足再动这个号）：
-#   ① compileSdk 升到 37；
-#   ② Compose 那条线也对齐 —— 0.44.0 起上游的 android 运行面会声明 compose.foundation:1.12.x，
-#      而本仓库没有 resolutionStrategy/force 钉版本，会静默把 Compose 栈抬到 1.12（编译面却停在 1.11）。
-markdown-renderer = "0.41.0"
+# 0.42.0 起这个库的 AAR 声明 `minCompileSdk=37`，0.44.0 起上游 android 运行面声明
+# compose.foundation:1.12.x —— 两条约束现在都满足（compileSdk=37 + CMP 1.12.2），
+# 三者必须**同链升降**：compileSdk 或 CMP 单独回退，这里就得跟着回退 0.41.0。
+# 本仓库没有 resolutionStrategy/force 钉版本，CMP 的运行面版本靠这条链对齐。
+markdown-renderer = "0.44.0"
 
 [libraries]
 luciola = { module = "io.github.kexuejin:luciola-jvm", version.ref = "luciola" }

@@ -2,7 +2,7 @@
 
 ## 1. Threat Model & Trust Boundaries
 
-Tidings (`捎话`) is a decentralized peer-to-peer messaging, file-transfer, screen-sharing and
+Tenon (`榫卯`) is a decentralized peer-to-peer messaging, file-transfer, screen-sharing and
 agent protocol. It runs on a **local network** *and* **directly across the public internet**
 (public IPv6), with two distinct transport-security tiers. There is still no centralized
 authentication authority, directory server, or cloud signaling gateway.
@@ -136,7 +136,7 @@ destructive action: conservative, never implicit.
 
 ## 3. Reporting a Vulnerability
 
-We take the security of Tidings seriously. If you discover a security vulnerability, please do **NOT** open a public issue.
+We take the security of Tenon seriously. If you discover a security vulnerability, please do **NOT** open a public issue.
 
 Instead, please report the vulnerability privately:
 1. **GitHub Private Vulnerability Reporting**: Use the "Report a vulnerability" button in the **Security** tab of the GitHub repository.
@@ -204,7 +204,7 @@ We will acknowledge receipt within 48 hours and work with you on validation and 
 入驻。注册是一道**能力门**：入驻意味着领到任务（派单路由会打到插件）、能向会话
 台账回写事件与卡片、能被宿主点查进度 —— 所以注册**强制**校验 token，这不是可选项：
 
-- **token 来源两处**（方案 §2.3）：托管模式由宿主经环境变量 `TIDINGS_PLUGIN_TOKEN`
+- **token 来源两处**（方案 §2.3）：托管模式由宿主经环境变量 `TENON_PLUGIN_TOKEN`
   注入子进程；守护进程模式读宿主数据目录下 `plugins/plugin-token`（桌面端启动时
   保证存在，缺失即生成 64 位十六进制并收紧到 **0600**）或插件自身配置。两处都没有
   ⇒ 注册端点整体关闸（**503 fail-closed**），不存在「没配 token 就放行」的降级路径。

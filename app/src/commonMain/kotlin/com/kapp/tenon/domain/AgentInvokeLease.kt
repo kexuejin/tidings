@@ -19,7 +19,8 @@ object InvokeLeaseStates {
 /** 一条跨端派单的租约（发起方视角）。落进 [RelayUiState.agentInvokes]，界面与测试都能读。 */
 data class AgentInvokeLease(
     val invokeId: String,
-    val groupId: String,
+    /** null = 1:1 直派（无群容器）：租约状态走镜像，看板卡没有落点也不广播。 */
+    val groupId: String?,
     val agentId: String,
     val agentName: String,
     val targetNode: String,
@@ -48,7 +49,7 @@ internal class AgentInvokeLeaseTable(private val now: () -> Long) {
 
     fun register(
         invokeId: String,
-        groupId: String,
+        groupId: String?,
         agentId: String,
         agentName: String,
         targetNode: String,

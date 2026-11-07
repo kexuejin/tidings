@@ -5,7 +5,6 @@ package com.kapp.tenon.domain
 import com.kapp.tenon.core.nowMillis
 import com.kapp.tenon.core.protocol.Envelope
 import com.kapp.tenon.core.protocol.Limits
-import com.kapp.tenon.core.protocol.VirtualAgentMember
 import com.kapp.tenon.core.protocol.newId
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.isActive
@@ -82,7 +81,7 @@ internal class RelayControllerAgentInvokeLeases(
             leases.register(invokeId, groupId, agentId, seat.name, self, prompt, wsId, deadlineMs)
             mirrorLeases()
             host.scope.launch {
-                executeLocallyAndBroadcast(invokeId, groupId, agentId, seat, prompt, wsId, requester = self)
+                executeLocallyAndMark(invokeId, agentId, prompt, wsId, cardGroupId = groupId)
             }
             return invokeId
         }
@@ -126,34 +125,36 @@ internal class RelayControllerAgentInvokeLeases(
         if (envelope.from != lease.targetNode) return
         mirrorLeases()
         host.scope.launch {
-            broadcastCard(
-                lease.groupId,
-                lease.agentId,
-                buildInvokeBoardCard(
-                    invokeId = lease.invokeId,
-                    prompt = lease.prompt,
-                    agentName = lease.agentName,
-                    state = lease.state,
-                    timeoutTitle = timeoutTitleOf(lease),
-                    retryLabel = retryLabel(),
-                    fallbackLabel = fallbackLabel(),
-                    summary = summary,
-                    error = error,
-                    workerCard = workerCard,
-                ),
-            )
+            // 1:1 直派（groupId == null）没有群卡落点：结果翻租约镜像即可。
+            lease.groupId?.let { group ->
+                broadcastCard(
+                    group,
+                    lease.agentId,
+                    buildInvokeBoardCard(
+                        invokeId = lease.invokeId,
+                        prompt = lease.prompt,
+                        agentName = lease.agentName,
+                        state = lease.state,
+                        timeoutTitle = timeoutTitleOf(lease),
+                        retryLabel = retryLabel(),
+                        fallbackLabel = fallbackLabel(),
+                        summary = summary,
+                        error = error,
+                        workerCard = workerCard,
+                    ),
+                )
+            }
         }
     }
 
     /** 本机执行（派单目标 = 自己，以及卡片上的「降级本机」）：终态翻租约、卡片进群。 */
-    internal suspend fun executeLocallyAndBroadcast(
+    internal suspend fun executeLocallyAndMark(
         invokeId: String,
-        groupId: String,
         agentId: String,
-        seat: VirtualAgentMember,
         prompt: String,
         wsId: String?,
-        requester: String,
+        /** 看板卡的落点群；null = 1:1 直派，没有群卡落点，反馈面是租约镜像本身。 */
+        cardGroupId: String?,
     ) {
         val ex = executorOf()
         if (ex == null) {
@@ -162,7 +163,7 @@ internal class RelayControllerAgentInvokeLeases(
             return
         }
         val outcome = try {
-            ex.execute(AgentInvokeTaskRequest(agentId = agentId, prompt = prompt, wsId = wsId, groupId = groupId))
+            ex.execute(AgentInvokeTaskRequest(agentId = agentId, prompt = prompt, wsId = wsId, groupId = cardGroupId))
         } catch (t: Throwable) {
             leases.markFailed(
                 invokeId, com.kapp.tenon.core.protocol.CodecInvoke.InvokeResultStates.ERROR, null,
@@ -175,7 +176,56 @@ internal class RelayControllerAgentInvokeLeases(
         if (done) leases.markDone(invokeId, outcome.summary, outcome.error)
         else leases.markFailed(invokeId, outcome.status, outcome.summary, outcome.error)
         mirrorLeases()
-        outcome.card?.let { broadcastCard(groupId, agentId, it) }
+        outcome.card?.let { card -> cardGroupId?.let { broadcastCard(it, agentId, card) } }
+    }
+
+    /**
+     * **1:1 直派**（无群容器）：目标与 agent 都显式给定，跳过群席位查找。
+     *
+     * 与 [dispatchCrossHostInvoke] 的分工：那条路绑定群（席位解析 + 看板卡上群）；
+     * 这条路服务「跟某个宿主的单聊里派一单、指名工作区」的形态——租约照记（超时、
+     * 镜像、终态翻转全都在），只是没有群卡广播的落点，反馈面是租约镜像本身。
+     *
+     * @return invokeId；null = 没有运行时（未连网），派不出去如实返回。
+     */
+    fun dispatchDirectInvoke(
+        peerId: String?,
+        agentId: String,
+        prompt: String,
+        wsId: String?,
+        deadlineMs: Long = RelayControllerAgentInvokeComponent.DEFAULT_INVOKE_DEADLINE_MS,
+    ): String? {
+        val st = host.state.value
+        val self = st.selfNodeId
+        val target = peerId?.takeIf { it.isNotBlank() } ?: self
+        // 本机执行不碰网道；跨端必须有运行时（没连网就派不出去，如实返回 null）。
+        val runtime = host.runtime ?: return null
+        val invokeId = newId()
+        leases.register(
+            invokeId = invokeId, groupId = null, agentId = agentId, agentName = agentId,
+            targetNode = target, prompt = prompt, wsId = wsId, deadlineMs = deadlineMs,
+        )
+        mirrorLeases()
+        host.scope.launch {
+            if (target == self) {
+                executeLocallyAndMark(invokeId, agentId, prompt, wsId, cardGroupId = null)
+            } else {
+                runCatching {
+                    runtime.sendAgentInvoke(
+                        peerId = target,
+                        invokeId = invokeId,
+                        op = com.kapp.tenon.core.protocol.CodecInvoke.InvokeOps.TASK,
+                        agentId = agentId,
+                        requestedBy = self,
+                        deadlineMs = deadlineMs,
+                        prompt = prompt,
+                        groupId = null,
+                        wsId = wsId,
+                    )
+                }
+            }
+        }
+        return invokeId
     }
 
     // ---------------------------------------------------------------- 租约 ticker（§7.3-1）
@@ -195,22 +245,25 @@ internal class RelayControllerAgentInvokeLeases(
         if (flipped.isEmpty()) return
         mirrorLeases()
         for (lease in flipped) {
-            broadcastCard(
-                lease.groupId,
-                lease.agentId,
-                buildInvokeBoardCard(
-                    invokeId = lease.invokeId,
-                    prompt = lease.prompt,
-                    agentName = lease.agentName,
-                    state = InvokeLeaseStates.TIMEOUT,
-                    timeoutTitle = timeoutTitleOf(lease),
-                    retryLabel = retryLabel(),
-                    fallbackLabel = fallbackLabel(),
-                    summary = null,
-                    error = null,
-                    workerCard = null,
-                ),
-            )
+            // 1:1 直派（groupId == null）超时只翻租约镜像，没有群卡可上。
+            lease.groupId?.let { group ->
+                broadcastCard(
+                    group,
+                    lease.agentId,
+                    buildInvokeBoardCard(
+                        invokeId = lease.invokeId,
+                        prompt = lease.prompt,
+                        agentName = lease.agentName,
+                        state = InvokeLeaseStates.TIMEOUT,
+                        timeoutTitle = timeoutTitleOf(lease),
+                        retryLabel = retryLabel(),
+                        fallbackLabel = fallbackLabel(),
+                        summary = null,
+                        error = null,
+                        workerCard = null,
+                    ),
+                )
+            }
         }
         leases.pruneTerminalOlderThan(LEASE_TTL_MS)
     }

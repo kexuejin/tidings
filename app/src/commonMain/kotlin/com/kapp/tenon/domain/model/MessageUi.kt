@@ -144,9 +144,21 @@ data class NoticeDetail(
      * 字节不变（字段追加，encodeDefaults=false 不产出 null）。
      */
     val detail: String? = null,
+    /**
+     * 派单失败那条通知里的**哪一单**（工单标题 / 工单号，调用方已截断）。
+     *
+     * 只服务 [NoticeKind.AgentDispatchFailed]：失败说明必须回答「哪一单、谁失败、
+     * 为什么」三件事，缺一件用户就得自己去台账里翻。可空默认 null —— 其它通知的
+     * 序列化字节不变（字段追加，encodeDefaults=false 不产出 null）。
+     */
+    val title: String? = null,
+    /** 派单失败的一句话原因（调用方按 `Limits.AGENT_NOTE` 截断）。 */
+    val reason: String? = null,
 ) {
     /** 没有任何可展示的细节 ⇒ 渲染端退回那句中性文案。 */
-    val isEmpty: Boolean get() = actor == null && added.isEmpty() && removed.isEmpty() && detail == null
+    val isEmpty: Boolean
+        get() = actor == null && added.isEmpty() && removed.isEmpty() && detail == null &&
+            title == null && reason == null
 }
 
 /**
@@ -183,6 +195,20 @@ enum class NoticeKind {
      * detail 携带「标签 → 目标节点前缀」，用户看得见任务去了哪台机器。
      */
     AgentDelegatedByTag,
+
+    /**
+     * **工单派单后走向终局失败，宿主把结论落回会话。**
+     *
+     * 为什么必须有这一档：派单失败原先只写进工单会话台账（`state=error` / `state=blocked`），
+     * 聊天流里一条都没有 —— 用户看到的是「消息发出去了，然后什么都没发生」。而系统其实
+     * 知道是哪一单、哪个 agent、什么原因；这三件事要一起说出来（见 [NoticeDetail.title] /
+     * [NoticeDetail.actor] / [NoticeDetail.reason]）。
+     *
+     * 与 [AgentNotAuthorized] 同类：它是**系统的解释**，不是任何人说的话，走 notice 行。
+     * 群意图路径已有的失败横幅（`agentState=failed` 群文本）是另一条网络可见通路；
+     * 两条路共用同一个发布入口，避免「一处说、一处不说」再次分叉。
+     */
+    AgentDispatchFailed,
 
     /** 群名改了。 */
     GroupRenamed,

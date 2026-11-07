@@ -4,6 +4,8 @@ package com.kapp.tenon.agent.plugins
 
 import java.io.File
 import java.io.IOException
+import java.util.concurrent.ConcurrentHashMap
+import java.util.concurrent.TimeUnit
 
 /**
  * 托管模式插件宿主（方案 §2.3 模式一）：扫描插件目录、读清单、拉起子进程并注入
@@ -35,6 +37,11 @@ class PluginHost(
     private val searchDirectories: List<String>? = null,
     /** 插件状态管理器：跟踪启用/禁用状态；null = 全部启用。 */
     private val stateManager: PluginStateManager? = null,
+    /**
+     * 「秒退」观察窗口：进程在这段时间内退出即写一条宿主侧诊断。
+     * 测试可缩短它，避免用固定等待赌观察器跑完。
+     */
+    private val immediateExitWindowMillis: Long = IMMEDIATE_EXIT_WINDOW_MS,
 ) {
 
     /** 一个插件目录的处理结果：`pluginId` 来自 manifest（解析失败时为 null）。 */
@@ -46,7 +53,13 @@ class PluginHost(
         val reason: String? = null,
     )
 
-    private val processes = mutableListOf<Pair<String, Process>>()
+    private class ManagedProcess(val pluginId: String, val process: Process) {
+        /** 宿主主动停机（用户禁用 / 应用退出）：此时退出是预期行为，不该记成秒退。 */
+        @Volatile var stopRequested: Boolean = false
+    }
+
+    private val processes = mutableListOf<ManagedProcess>()
+    private val exitObservers = ConcurrentHashMap.newKeySet<Thread>()
 
     /** 插件目录：<数据目录>/plugins/（与 token 受控文件同处，方案 §2.1）。 */
     fun pluginsDirectory(): File = File(dataDirectory, "plugins")
@@ -141,13 +154,16 @@ class PluginHost(
         }
         val logFile = File(pluginDir, PROCESS_LOG_FILE)
         return try {
+            val startedAtNanos = System.nanoTime()
             val process = spawner(resolved, pluginDir, env, logFile)
-            synchronized(processes) { processes += pluginId to process }
+            val managedProcess = ManagedProcess(pluginId, process)
+            synchronized(processes) { processes += managedProcess }
             seenIds += pluginId
             managed += pluginId
             runCatching {
                 File(pluginDir, PID_FILE).writeText(process.pid().toString())
             }
+            runCatching { watchForImmediateExit(managedProcess, pluginDir, startedAtNanos) }
             SpawnReport(pluginDir.name, pluginId, resolved, started = true)
         } catch (t: Throwable) {
             val reason = "spawn failed: " + (t.message ?: t::class.simpleName)
@@ -160,17 +176,18 @@ class PluginHost(
     fun stop() {
         val snapshot = synchronized(processes) { processes.toList() }
         processes.clear()
-        snapshot.forEach { (pluginId, process) ->
+        snapshot.forEach { managed ->
+            managed.stopRequested = true
             runCatching {
-                val dir = File(pluginsDirectory(), pluginId)
+                val dir = File(pluginsDirectory(), managed.pluginId)
                 File(dir, PID_FILE).delete()
             }
-            runCatching { process.destroy() }
+            runCatching { managed.process.destroy() }
         }
-        snapshot.forEach { (_, process) ->
+        snapshot.forEach { managed ->
             runCatching {
-                if (process.isAlive && !process.waitFor(3, java.util.concurrent.TimeUnit.SECONDS)) {
-                    process.destroyForcibly()
+                if (managed.process.isAlive && !managed.process.waitFor(3, TimeUnit.SECONDS)) {
+                    managed.process.destroyForcibly()
                 }
             }
         }
@@ -205,22 +222,23 @@ class PluginHost(
     }
 
     /** 本宿主当前拉起着的插件 id（诊断读数）。 */
-    fun managedPluginIdsSnapshot(): List<String> = synchronized(processes) { processes.map { it.first } }
+    fun managedPluginIdsSnapshot(): List<String> = synchronized(processes) { processes.map { it.pluginId } }
 
     /** 单个插件停机（用户在界面点击禁用时）。 */
     fun stopPlugin(pluginId: String): Boolean {
         val target = synchronized(processes) {
-            val idx = processes.indexOfFirst { it.first == pluginId }
+            val idx = processes.indexOfFirst { it.pluginId == pluginId }
             if (idx >= 0) processes.removeAt(idx) else null
         } ?: return false
+        target.stopRequested = true
         runCatching {
             val dir = File(pluginsDirectory(), pluginId)
             File(dir, PID_FILE).delete()
         }
-        runCatching { target.second.destroy() }
+        runCatching { target.process.destroy() }
         runCatching {
-            if (target.second.isAlive && !target.second.waitFor(2, java.util.concurrent.TimeUnit.SECONDS)) {
-                target.second.destroyForcibly()
+            if (target.process.isAlive && !target.process.waitFor(2, TimeUnit.SECONDS)) {
+                target.process.destroyForcibly()
             }
         }
         plugins.markOffline(pluginId, "stopped by user")
@@ -240,7 +258,7 @@ class PluginHost(
     }
 
     private val managedPluginIds: Set<String>
-        get() = synchronized(processes) { processes.map { it.first }.toSet() }
+        get() = synchronized(processes) { processes.map { it.pluginId }.toSet() }
 
     // ---------------------------------------------------------------- 可执行文件解析
 
@@ -280,6 +298,65 @@ class PluginHost(
         return (fromPath + listOf("/usr/local/bin", "/opt/homebrew/bin", "/usr/bin", "/bin")).distinct()
     }
 
+    /**
+     * 观察刚拉起的进程是否「秒退」：窗口内退出就向插件目录的 `process.log` 追加一行
+     * 宿主侧诊断（退出码 + 耗时 + 指向 entrypoint）。正常长驻进程在窗口结束后安静退出
+     * 观察，不产生任何日志 —— 否则每次启动都多一行噪音。
+     *
+     * 观察在 daemon 线程里做，[start] 不为任何一个插件阻塞。宿主主动停机的进程
+     * （[stop] / [stopPlugin]）已标记 [ManagedProcess.stopRequested]，退出是预期行为，
+     * 不记秒退。
+     */
+    private fun watchForImmediateExit(managed: ManagedProcess, pluginDir: File, startedAtNanos: Long) {
+        val thread = Thread({
+            try {
+                if (!managed.process.waitFor(immediateExitWindowMillis, TimeUnit.MILLISECONDS)) {
+                    return@Thread
+                }
+                if (managed.stopRequested) return@Thread
+                val elapsedMillis = TimeUnit.NANOSECONDS.toMillis(System.nanoTime() - startedAtNanos)
+                val exitCode = runCatching { managed.process.exitValue() }.getOrNull()
+                appendProcessLog(
+                    pluginDir,
+                    "plugin process exited immediately (exit=" + (exitCode?.toString() ?: "unknown") +
+                        ") after " + elapsedMillis + "ms — entrypoint may need arguments; edit " +
+                        MANIFEST_FILE + " entrypoint",
+                )
+            } catch (_: InterruptedException) {
+                Thread.currentThread().interrupt()
+            } catch (_: Throwable) {
+                // 诊断观察永远不能反过来拖垮宿主。
+            } finally {
+                exitObservers.remove(Thread.currentThread())
+            }
+        }, "plugin-exit-watch-" + pluginDir.name)
+        thread.isDaemon = true
+        exitObservers += thread
+        try {
+            thread.start()
+        } catch (t: Throwable) {
+            exitObservers -= thread
+            throw t
+        }
+    }
+
+    /**
+     * 等当前所有秒退观察器收敛（测试用：断言「没有诊断行」前必须先确定观察器真的跑过）。
+     * 返回 false = 超时仍有观察器在等，通常是宿主正在观察一个长驻进程。
+     */
+    internal fun awaitExitObservers(timeoutMillis: Long): Boolean {
+        val deadline = System.nanoTime() + TimeUnit.MILLISECONDS.toNanos(timeoutMillis)
+        while (true) {
+            val pending = exitObservers.toList()
+            if (pending.isEmpty()) return true
+            pending.forEach { observer ->
+                val remainingNanos = deadline - System.nanoTime()
+                if (remainingNanos <= 0) return false
+                observer.join(maxOf(1L, TimeUnit.NANOSECONDS.toMillis(remainingNanos)))
+            }
+        }
+    }
+
     /** 拉起失败的原因落进插件目录的 process.log —— 图形界面上唯一可诊断的地方。 */
     private fun appendProcessLog(pluginDir: File, line: String) {
         runCatching {
@@ -297,6 +374,9 @@ class PluginHost(
 
         /** 子进程输出落点：插件目录旁一份（数据目录里的运行产物，不进版本库）。 */
         const val PROCESS_LOG_FILE: String = "process.log"
+
+        /** 拉起后多久内退出算「秒退」——只影响诊断，不影响进程生命周期。 */
+        const val IMMEDIATE_EXIT_WINDOW_MS: Long = 5_000L
 
         private fun defaultSpawner(command: List<String>, workDir: File, env: Map<String, String>, logFile: File): Process {
             val builder = ProcessBuilder(command).directory(workDir).redirectErrorStream(true)

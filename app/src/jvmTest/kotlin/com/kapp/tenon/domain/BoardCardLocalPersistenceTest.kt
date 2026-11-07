@@ -200,4 +200,27 @@ class BoardCardLocalPersistenceTest {
         )
         after.stop()
     }
+
+    @Test
+    fun aCardLandsLocallyIn1to1ConversationEvenWithoutGroup() = runBlocking {
+        val host = controller()
+        val peerId = "peer-1to1-agent-host"
+
+        host.invokeCtl.broadcastBoardCard(peerId, "codex", cardOf("ticket-101", 1, "working"))
+
+        val convMessages = host.state.value.messages[peerId].orEmpty()
+        assertEquals(1, convMessages.size, "1:1 对话中广播卡片必须直接落入该 peer 的消息列表")
+        val card = assertNotNull(convMessages.single().renderCard, "落库的是卡片帧")
+        assertEquals("ticket-101", (card["cardId"] as? JsonPrimitive)?.content)
+        assertEquals("working", (card["state"] as? JsonPrimitive)?.content)
+
+        // 翻面原位替换测试
+        host.invokeCtl.broadcastBoardCard(peerId, "codex", cardOf("ticket-101", 1, "review_ready"))
+        val updatedMessages = host.state.value.messages[peerId].orEmpty()
+        assertEquals(1, updatedMessages.size, "1:1 卡片翻面必须原位替换，不许新增行")
+        val updatedCard = assertNotNull(updatedMessages.single().renderCard)
+        assertEquals("review_ready", (updatedCard["state"] as? JsonPrimitive)?.content)
+        assertEquals("2", (updatedCard["rev"] as? JsonPrimitive)?.content)
+        host.stop()
+    }
 }

@@ -6,7 +6,19 @@ import com.kapp.tenon.core.nowMillis
 import java.io.File
 import java.util.concurrent.ConcurrentHashMap
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.withContext
+
+/**
+ * 断点续跑形态：从 CLI 自己的输出里捕获它这次的会话 id，重试时以**续跑参数**重放，
+ * 让重试从上一跳的断点继续而不是从零再读一遍上下文。null = 该 CLI 无此能力（重试从头跑）。
+ */
+data class CliResumeSpec(
+    /** 从一行原始输出里解析 CLI 侧会话 id；解析不出返回 null（继续等后面的行）。 */
+    val sessionIdFromLine: (line: String) -> String?,
+    /** 重试跳的完整启动参数（含续跑标记与 prompt）。 */
+    val args: (cliSessionId: String, prompt: String) -> List<String>,
+)
 
 /**
  * CLI 子进程驱动（M7-T1）：把用户**已登录**的 Claude Code / Codex CLI 拉起为 agent，
@@ -44,6 +56,19 @@ class CliSubprocessDriver(
      * ProcessBuilder.environment() —— 值只进子进程环境，绝不进日志/台账/报文。
      */
     private val envOverrides: Map<String, String> = emptyMap(),
+    /**
+     * 瞬时失败判别：`exitCode < 0` 表示进程没起来（spawn 失败）。默认按 provider
+     * 断流 / HTTP 5xx 标记的**白名单**判 —— 配额耗尽这类确定性失败不在名单里，绝不重试。
+     */
+    private val transientOf: (exitCode: Int, output: String) -> Boolean = ::defaultTransientOf,
+    /** 瞬时失败时的追加尝试上限（不含首跳）。 */
+    private val maxExtraAttempts: Int = DEFAULT_MAX_EXTRA_ATTEMPTS,
+    /** 重试退避（可注入：测试传零延迟，不许用真实 sleep 赌时序）。 */
+    private val retryBackoff: suspend (attempt: Int) -> Unit = { attempt ->
+        delay(if (attempt <= 1) DEFAULT_BACKOFF_FIRST_MS else DEFAULT_BACKOFF_NEXT_MS)
+    },
+    /** 断点续跑形态（dsh 有、其余 CLI 暂无）：重试跳以续跑参数重放。 */
+    private val resumeSpec: CliResumeSpec? = null,
 ) : AgentDriver {
 
     /** sessionId → wsPath（空串 = 无工作区上下文，合法）。 */
@@ -79,50 +104,86 @@ class CliSubprocessDriver(
             onEvent(DriverEvent.Error("unknown session \"$sessionId\" — call openSession first"))
             return
         }
-        try {
-            val exitCode = withContext(Dispatchers.IO) {
-                val pb = ProcessBuilder(listOf(cliPath) + argSpec(prompt))
-                File(wsPath).takeIf { it.isDirectory }?.let {
-                    pb.directory(it)
-                    // 同 WorktreeSandbox：`directory()` 不改继承来的 PWD，而 opencode
-                    // 是按 `$PWD` 解析工作区的（否则产物写到宿主目录去）。
-                    pb.environment()["PWD"] = it.absolutePath
-                }
-                // T-3a：模型凭证注入（节点本地 → 子进程环境）。值绝不进日志/台账/报文。
-                // PATH 必须先补齐：GUI 启动的宿主只有最小 PATH，脚本型 CLI 会因为找不到
-                // 解释器直接 127（见 CliDiscovery.childPath）。envOverrides 在其后覆盖，
-                // 显式注入仍然赢。
-                pb.environment()["PATH"] = CliDiscovery.childPath(pb.environment())
-                envOverrides.forEach { (key, value) -> pb.environment()[key] = value }
-                // stderr 合并进 stdout：认不出的行会被 mapLine 如实跳过，同时避免双流对拷的死锁。
-                pb.redirectErrorStream(true)
-                // 子进程的 stdin **在内核层**接 /dev/null：会读 stdin 的 CLI 会一直等 EOF，
-                // codex 就是这种形态（`codex exec` 支持管道喂 prompt），只打一行
-                // 「Reading additional input from stdin...」就再无下文：连会话都不建、
-                // 占着 worktree 不放。prompt 已经在 argv 里，无需 stdin。
-                //
-                // 用 `Redirect.from(/dev/null)` 而不是启动后 `outputStream.close()`：
-                // 后者在真机上**没兜住**（责任链首棒曾在此路径长期挂起
-                // 零输出，杀掉才刷出那行提示）。关流给出的是"我们不再写"，不等于子进程
-                // 立刻读到 EOF；/dev/null 从打开那一刻就是 EOF，与 JDK 的缓冲实现无关。
-                // 注：这条**只能真机验**——Gradle 测试进程给子进程的 stdin 已经是 EOF，
-                // 单测复现不出这个挂起。
-                pb.redirectInput(ProcessBuilder.Redirect.from(java.io.File("/dev/null")))
-                val proc = pb.start()
-                proc.inputStream.bufferedReader().useLines { lines ->
-                    for (line in lines) {
-                        mapLine(line)?.let { onEvent(it) }
-                    }
-                }
-                proc.waitFor()
-            }
-            if (exitCode == 0) {
-                onEvent(DriverEvent.Finished())
+        var resumedCliSessionId: String? = null
+        val totalAttempts = 1 + maxExtraAttempts.coerceAtLeast(0)
+        var lastFailure: String? = null
+        for (attempt in 1..totalAttempts) {
+            // 近邻判别的输出累积：瞬时判别与续跑 id 都从这里取（CLI 输出量有限，全量可承受）。
+            val outputTail = StringBuilder()
+            val attemptArgs = if (attempt > 1 && resumeSpec != null && resumedCliSessionId != null) {
+                resumeSpec.args(resumedCliSessionId!!, prompt)
             } else {
-                onEvent(DriverEvent.Error("cli exited with code $exitCode"))
+                argSpec(prompt)
             }
-        } catch (e: Exception) {
-            onEvent(DriverEvent.Error("cli subprocess failed: ${e.message ?: e::class.simpleName}"))
+            var exitCode = SPAWN_FAILED_EXIT
+            try {
+                exitCode = withContext(Dispatchers.IO) {
+                    val pb = ProcessBuilder(listOf(cliPath) + attemptArgs)
+                    File(wsPath).takeIf { it.isDirectory }?.let {
+                        pb.directory(it)
+                        // 同 WorktreeSandbox：`directory()` 不改继承来的 PWD，而 opencode
+                        // 是按 `$PWD` 解析工作区的（否则产物写到宿主目录去）。
+                        pb.environment()["PWD"] = it.absolutePath
+                    }
+                    // T-3a：模型凭证注入（节点本地 → 子进程环境）。值绝不进日志/台账/报文。
+                    // PATH 必须先补齐：GUI 启动的宿主只有最小 PATH，脚本型 CLI 会因为找不到
+                    // 解释器直接 127（见 CliDiscovery.childPath）。envOverrides 在其后覆盖，
+                    // 显式注入仍然赢。
+                    pb.environment()["PATH"] = CliDiscovery.childPath(pb.environment())
+                    envOverrides.forEach { (key, value) -> pb.environment()[key] = value }
+                    // stderr 合并进 stdout：认不出的行会被 mapLine 如实跳过，同时避免双流对拷的死锁。
+                    pb.redirectErrorStream(true)
+                    // 子进程的 stdin **在内核层**接 /dev/null：会读 stdin 的 CLI 会一直等 EOF，
+                    // codex 就是这种形态（`codex exec` 支持管道喂 prompt），只打一行
+                    // 「Reading additional input from stdin...」就再无下文：连会话都不建、
+                    // 占着 worktree 不放。prompt 已经在 argv 里，无需 stdin。
+                    //
+                    // 用 `Redirect.from(/dev/null)` 而不是启动后 `outputStream.close()`：
+                    // 后者在真机上**没兜住**（责任链首棒曾在此路径长期挂起
+                    // 零输出，杀掉才刷出那行提示）。关流给出的是"我们不再写"，不等于子进程
+                    // 立刻读到 EOF；/dev/null 从打开那一刻就是 EOF，与 JDK 的缓冲实现无关。
+                    // 注：这条**只能真机验**——Gradle 测试进程给子进程的 stdin 已经是 EOF，
+                    // 单测复现不出这个挂起。
+                    pb.redirectInput(ProcessBuilder.Redirect.from(java.io.File("/dev/null")))
+                    val proc = pb.start()
+                    proc.inputStream.bufferedReader().useLines { lines ->
+                        for (line in lines) {
+                            outputTail.append(line).append('\n')
+                            if (resumedCliSessionId == null) {
+                                resumeSpec?.sessionIdFromLine?.invoke(line)?.let { resumedCliSessionId = it }
+                            }
+                            mapLine(line)?.let { onEvent(it) }
+                        }
+                    }
+                    proc.waitFor()
+                }
+                if (exitCode == 0) {
+                    onEvent(DriverEvent.Finished())
+                    return
+                }
+                lastFailure = "cli exited with code $exitCode"
+                if (!transientOf(exitCode, outputTail.toString())) {
+                    // 非瞬时（业务失败 / 配额耗尽 / 输出没有瞬时标记）：一次终局，绝不重试。
+                    onEvent(DriverEvent.Error(lastFailure!!))
+                    return
+                }
+            } catch (e: Exception) {
+                lastFailure = "cli subprocess failed: ${e.message ?: e::class.simpleName}"
+                if (!transientOf(SPAWN_FAILED_EXIT, outputTail.toString())) {
+                    onEvent(DriverEvent.Error(lastFailure!!))
+                    return
+                }
+            }
+            if (attempt == totalAttempts) {
+                onEvent(
+                    DriverEvent.Error(
+                        lastFailure + " — gave up after " + totalAttempts +
+                            " attempts (transient retry exhausted)",
+                    ),
+                )
+                return
+            }
+            retryBackoff(attempt)
         }
     }
 
@@ -140,6 +201,48 @@ class CliSubprocessDriver(
     private fun mapLine(line: String): DriverEvent? = CliLineEventMapper.map(line)
 
     companion object {
+        /**
+         * 瞬时失败的输出标记**白名单**：provider 断流与 HTTP 5xx 形态。
+         * 配额耗尽（`QUOTA` / `Insufficient Balance`）是确定性失败，**不在名单里** ——
+         * 没余额时重试只会三连败，还把每一次都真金白银地打上游一遍。
+         */
+        internal val TRANSIENT_OUTPUT_MARKERS = listOf(
+            "STREAM_CLOSED",
+            "Internal Server Error",
+            "overloaded",
+            "rate limit",
+        )
+
+        internal const val DEFAULT_MAX_EXTRA_ATTEMPTS = 2
+        internal const val DEFAULT_BACKOFF_FIRST_MS = 1_000L
+        internal const val DEFAULT_BACKOFF_NEXT_MS = 3_000L
+
+        /** spawn 失败（进程没起来）在判别里的代位退出码。 */
+        internal const val SPAWN_FAILED_EXIT = -1
+
+        /** 瞬时判别的默认实现：spawn 失败恒判瞬时；其余按输出标记白名单。 */
+        fun defaultTransientOf(exitCode: Int, output: String): Boolean =
+            if (exitCode < 0) {
+                true
+            } else {
+                TRANSIENT_OUTPUT_MARKERS.any { output.contains(it, ignoreCase = true) }
+            }
+
+        /**
+         * dsh headless 的断点续跑形态：NDJSON 首个事件是
+         * `{"type":"session","sessionId":…}`；重试跳以 `--session-id` 重放。
+         */
+        val DSH_RESUME = CliResumeSpec(
+            sessionIdFromLine = { line -> RESUME_SESSION_LINE.find(line)?.groupValues?.getOrNull(1) },
+            args = { cliSessionId, prompt -> dshResumeArgs(cliSessionId, prompt) },
+        )
+
+        fun dshResumeArgs(cliSessionId: String, prompt: String): List<String> =
+            listOf("--profile", "headless", "--json", "--session-id", cliSessionId, prompt)
+
+        private val RESUME_SESSION_LINE =
+            Regex("\"type\"\\s*:\\s*\"session\".*?\"sessionId\"\\s*:\\s*\"([^\"]+)\"")
+
         fun claude(
             cliPath: String,
             envOverrides: Map<String, String> = emptyMap(),
@@ -433,6 +536,7 @@ fun cliDriverRegistrations(
                     argSpec = { prompt -> CliSubprocessDriver.dshArgs(prompt) },
                     sandbox = sandbox,
                     envOverrides = providerEnv,
+                    resumeSpec = CliSubprocessDriver.DSH_RESUME,
                 )
             } else {
                 CliSubprocessDriver(
@@ -441,6 +545,7 @@ fun cliDriverRegistrations(
                     cliPath = dsh,
                     argSpec = { prompt -> CliSubprocessDriver.dshArgs(prompt) },
                     envOverrides = providerEnv,
+                    resumeSpec = CliSubprocessDriver.DSH_RESUME,
                 )
             },
         )

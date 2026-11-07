@@ -130,7 +130,9 @@ class DesktopWorkerOrchestrator(
         @Volatile var steeringUsed: Boolean = false,
         /** 终局一次性完成（成功/受阻/退单/中止/原型待选）；后续再 complete 是无操作。 */
         val done: CompletableDeferred<TicketOutcome> = CompletableDeferred(),
-    )
+    ) {
+        val targetConvId: String get() = groupId ?: convId
+    }
 
     private val activeTickets = ConcurrentHashMap<String, ActiveTicket>()
 
@@ -221,7 +223,7 @@ class DesktopWorkerOrchestrator(
             )
             active.done.complete(TicketOutcome("aborted", null, "Aborted by user request", abortedJson))
             active.job.cancel(CancellationException("aborted by user: " + text.trim()))
-            scope.launch { publishCardJson(active.groupId, abortedJson, active.agentKey) }
+            scope.launch { publishCardJson(active.targetConvId, abortedJson, active.agentKey) }
         }
         return true
     }
@@ -257,7 +259,7 @@ class DesktopWorkerOrchestrator(
             } else {
                 active.stage = "working"
                 publishTicketCard(
-                    groupId = active.groupId,
+                    groupId = active.targetConvId,
                     ticketId = active.ticketId,
                     rev = active.rev.incrementAndGet(),
                     state = "working",
@@ -319,7 +321,7 @@ class DesktopWorkerOrchestrator(
                 })
             })
         }
-        publishCardJson(active.groupId, askJson.toString(), active.agentKey)
+        publishCardJson(active.targetConvId, askJson.toString(), active.agentKey)
     }
 
     /**
@@ -344,7 +346,7 @@ class DesktopWorkerOrchestrator(
             active.stage = "working"
             scope.launch {
                 publishTicketCard(
-                    groupId = active.groupId,
+                    groupId = active.targetConvId,
                     ticketId = active.ticketId,
                     rev = active.rev.incrementAndGet(),
                     state = "working",
@@ -369,7 +371,7 @@ class DesktopWorkerOrchestrator(
         scope.launch {
             active.stage = "working"
             publishTicketCard(
-                groupId = active.groupId,
+                groupId = active.targetConvId,
                 ticketId = active.ticketId,
                 rev = active.rev.incrementAndGet(),
                 state = "working",
@@ -392,7 +394,7 @@ class DesktopWorkerOrchestrator(
         scope.launch {
             active.stage = "working"
             publishTicketCard(
-                groupId = active.groupId,
+                groupId = active.targetConvId,
                 ticketId = active.ticketId,
                 rev = active.rev.incrementAndGet(),
                 state = "working",
@@ -482,7 +484,7 @@ class DesktopWorkerOrchestrator(
         }
         scope.launch {
             publishTicketCard(
-                groupId = active.groupId,
+                groupId = active.targetConvId,
                 ticketId = active.ticketId,
                 rev = active.rev.incrementAndGet(),
                 state = "working",
@@ -530,7 +532,7 @@ class DesktopWorkerOrchestrator(
         active.done.complete(TicketOutcome("aborted", null, "Human abandoned; worktree kept", null))
         scope.launch {
             publishTicketCard(
-                groupId = active.groupId,
+                groupId = active.targetConvId,
                 ticketId = active.ticketId,
                 rev = active.rev.incrementAndGet(),
                 state = "aborted",
@@ -572,7 +574,7 @@ class DesktopWorkerOrchestrator(
         scope.launch {
             active.stage = "working"
             publishTicketCard(
-                groupId = active.groupId,
+                groupId = active.targetConvId,
                 ticketId = active.ticketId,
                 rev = active.rev.incrementAndGet(),
                 state = "working",
@@ -592,6 +594,7 @@ class DesktopWorkerOrchestrator(
         senderPeerId: String,
         prompt: String,
         replyToId: String?,
+        wsId: String? = null,
     ) {        val groupId = ConvId.groupIdOf(convId)
         val active = activeTicketForConv(convId)
 
@@ -650,10 +653,14 @@ class DesktopWorkerOrchestrator(
         val stages = StageChain.parseStages(prompt)
         if (stages.size >= 2) {
             dispatchMultiRoleChain(convId, groupId, prompt, stages)
-        } else {
-            // DSH core philosophy: single worker end-to-end closed loop
-            dispatchSingleWorker(convId, groupId, prompt)
+        } else if (groupId != null) {
+            // 群路径保留既有兜底（群绑定解析有据）。
+            dispatchSingleWorker(convId, groupId, prompt, wsId = wsId)
         }
+        // 1:1 纯文本到此为止（决议矩阵蓝图 §4.2 的 PlainChat 分支）：普通聊天不派单——
+        // 派单走药丸触发的 dispatchDirectInvoke（invoke 通路显式携带 agentKind+wsId）。
+        // 从前的「1:1 纯文本默认落 codex」在多工作区宿主上必然退单，工单卡还会派进
+        // 不可见的伪会话——移除默认派单就是本次行为变更的全部内容（守卫钉住）。
     }
 
     /**
@@ -677,6 +684,7 @@ class DesktopWorkerOrchestrator(
         prompt: String,
         replyToId: String?,
         agentKey: String?,
+        wsId: String? = null,
     ): TicketOutcome {
         val groupId = ConvId.groupIdOf(convId)
         val active = activeTicketForConv(convId)
@@ -699,7 +707,7 @@ class DesktopWorkerOrchestrator(
                     percent = 50,
                     roleName = active.role,
                 )
-                scope.launch { publishCardJson(active.groupId, json, active.agentKey) }
+                scope.launch { publishCardJson(active.targetConvId, json, active.agentKey) }
                 scope.launch { handler.invoke(prompt) }
                 return TicketOutcome("working", "Resumed: processing follow-up", null, json)
             }
@@ -736,7 +744,7 @@ class DesktopWorkerOrchestrator(
             return TicketOutcome("accepted", prompt.lineSequence().firstOrNull()?.trim()?.take(60), null, null)
         }
 
-        return dispatchSingleWorker(convId, groupId, prompt, agentKey).await()
+        return dispatchSingleWorker(convId, groupId, prompt, agentKey, wsId).await()
     }
 
     /**
@@ -1146,23 +1154,55 @@ class DesktopWorkerOrchestrator(
         return json
     }
 
+    /**
+     * 工单终局失败落会话的唯一出口：这里只描述事实（哪一单、谁、为什么），
+     * 「发成群文本还是 1:1 系统提示」由 [RelayController.announceDispatchFailure]
+     * 判 —— 与群意图路径共用同一个发布入口，避免两条路径再次各说各话。
+     */
+    private fun announceTerminalFailure(
+        convId: String,
+        agentKey: String,
+        title: String,
+        ticketId: String,
+        outcome: TicketOutcome,
+    ) {
+        if (outcome.state !in TERMINAL_FAILURE_STATES) return
+        controller.announceDispatchFailure(
+            convId = convId,
+            agentKey = agentKey,
+            agentName = roleNameOf(agentKey),
+            dispatchId = ticketId,
+            title = title,
+            reason = (outcome.error ?: outcome.summary).orEmpty(),
+            unavailable = false,
+        )
+    }
+
     private fun dispatchSingleWorker(
         convId: String,
         groupId: String?,
         prompt: String,
         agentKey: String? = null,
+        wsId: String? = null,
     ): CompletableDeferred<TicketOutcome> {
-        val host = planeProvider()
-            ?: return CompletableDeferred(TicketOutcome("error", null, "control plane unavailable", null))
-        val repoPath = resolveWorkspacePath(groupId)
-
         val ticketId = "t" + System.currentTimeMillis().toString(36)
         val title = prompt.lineSequence().firstOrNull()?.trim()?.take(60) ?: "Task $ticketId"
-        val done = CompletableDeferred<TicketOutcome>()
 
         // 派单帧带 agentId 时随帧走（codex/claude/antigravity…）；文本路由没带 → codex。
         // 提前到 handback 之前：退单卡也要挂真名（广播身份与授权都认这个键）。
         val defaultAgent = agentKey?.takeIf { it.isNotBlank() } ?: "codex"
+
+        val host = planeProvider()
+            ?: run {
+                // 控制面都没起来 = 这一单派不出去；没有工单卡可发，但会话里必须有一句
+                // 「为什么」，不能让调用方只拿到一个永远不 complete 的 deferred。
+                val unavailable = TicketOutcome("error", null, "control plane unavailable", null)
+                announceTerminalFailure(convId, defaultAgent, title, ticketId, unavailable)
+                return CompletableDeferred(unavailable)
+            }
+        val repoPath = resolveWorkspacePath(groupId, wsId)
+
+        val done = CompletableDeferred<TicketOutcome>()
 
         // Hand-back if repo is invalid or missing
         if (repoPath == null || !isGitRepo(repoPath)) {
@@ -1185,7 +1225,8 @@ class DesktopWorkerOrchestrator(
                     roleName = roleNameOf(defaultAgent),
                 ),
             )
-            scope.launch { publishCardJson(groupId, handedBack.cardJson, defaultAgent) }
+            scope.launch { publishCardJson(groupId ?: convId, handedBack.cardJson, defaultAgent) }
+            announceTerminalFailure(convId, defaultAgent, title, ticketId, handedBack)
             return CompletableDeferred(handedBack)
         }
 
@@ -1252,7 +1293,7 @@ class DesktopWorkerOrchestrator(
                 )
                 scope.launch {
                     publishCardJson(
-                        groupId,
+                        groupId ?: convId,
                         OrchestratorCards.withFailureCheck(
                             runCatching {
                                 kotlinx.serialization.json.Json.parseToJsonElement(failedJson) as kotlinx.serialization.json.JsonObject
@@ -1263,9 +1304,17 @@ class DesktopWorkerOrchestrator(
                         defaultAgent,
                     )
                 }
-                done.complete(TicketOutcome("failed", null, t.message ?: (t::class.simpleName ?: "task failed"), failedJson))
+                val failedOutcome = TicketOutcome(
+                    "failed",
+                    null,
+                    t.message ?: (t::class.simpleName ?: "task failed"),
+                    failedJson,
+                )
+                announceTerminalFailure(convId, defaultAgent, title, ticketId, failedOutcome)
+                done.complete(failedOutcome)
                 throw t
             }
+            announceTerminalFailure(convId, defaultAgent, title, ticketId, outcome)
             done.complete(outcome)
         }
 
@@ -1295,7 +1344,7 @@ class DesktopWorkerOrchestrator(
             val assignee = controller.uiTexts.localAssignee(ticket.role)
             val plan = controller.uiTexts.stageRoles(isProto)
             publishTicketCard(
-                groupId = groupId,
+                groupId = groupId ?: convId,
                 ticketId = ticketId,
                 rev = revCounter.get(),
                 state = "proposed",
@@ -1340,6 +1389,12 @@ class DesktopWorkerOrchestrator(
 
         /** 待确认提议的上限（讨论高频，不封顶就是只涨不落的内存表）。 */
         const val MAX_PROPOSALS: Int = 32
+
+        /**
+         * 工单终局失败的三档。`aborted` 是用户主动叫停（卡已经回了「已停止」），
+         * 不该再补一条失败通知；`review_ready` / `prototype` 是成功路径。
+         */
+        val TERMINAL_FAILURE_STATES: Set<String> = setOf("blocked", "failed", "error")
     }
 
     /**
@@ -1409,7 +1464,7 @@ class DesktopWorkerOrchestrator(
         )
         active.done.complete(TicketOutcome("aborted", null, reason, cancelledJson))
         active.job.cancel(CancellationException(reason))
-        scope.launch { publishCardJson(active.groupId, cancelledJson, active.agentKey) }
+        scope.launch { publishCardJson(active.targetConvId, cancelledJson, active.agentKey) }
         return true
     }
 
@@ -1441,7 +1496,7 @@ class DesktopWorkerOrchestrator(
         )
         active.done.complete(TicketOutcome("aborted", null, reason, abortedJson))
         active.job.cancel(CancellationException("aborted by card action: " + cardId))
-        scope.launch { publishCardJson(active.groupId, abortedJson, active.agentKey) }
+        scope.launch { publishCardJson(active.targetConvId, abortedJson, active.agentKey) }
         return true
     }
 
@@ -1461,9 +1516,10 @@ class DesktopWorkerOrchestrator(
         prompt: String,
         host: ControlPlane,
     ): TicketOutcome {
+        val targetId = groupId ?: convId
         // ==================== STAGE A: PROTOCOL PROTOTYPE FLOW ====================
         publishTicketCard(
-            groupId = groupId,
+            groupId = targetId,
             ticketId = ticketId,
             // rev 1 是团队点将卡（dispatchSingleWorker 发的 proposed）；这里第一张
             // working 卡必须是 rev 2 —— rev 倒退的卡会被手机端折叠规则丢弃。
@@ -1504,10 +1560,10 @@ class DesktopWorkerOrchestrator(
         // 产物**只能是真交付过的那份**：从沙箱 patch 抽出 prototype.html → 落盘 → 投群，
         // 卡上字节数取落盘文件的真实长度。抽不出来就一个都不宣称 —— 从前这里写死
         // `("prototype.html" to 4096L)`，卡上永远有一行点不动的产物，真机上是死链。
-        val protoArtifacts = deliverPrototypeArtifact(groupId, ticketId, protoPatch)
+        val protoArtifacts = deliverPrototypeArtifact(targetId, ticketId, protoPatch)
 
         val protoJson = publishTicketCard(
-            groupId = groupId,
+            groupId = targetId,
             ticketId = ticketId,
             rev = revCounter.incrementAndGet(),
             state = "prototype",
@@ -1554,9 +1610,9 @@ class DesktopWorkerOrchestrator(
                 )
                 ticket.stage = "prototype"
                 // 微调后的产物同样要真投一次：否则「改好了」这句话在手机上没有任何可打开的东西。
-                val refinedArtifacts = deliverPrototypeArtifact(groupId, ticketId, refinePatch)
+                val refinedArtifacts = deliverPrototypeArtifact(targetId, ticketId, refinePatch)
                 publishTicketCard(
-                    groupId = groupId,
+                    groupId = targetId,
                     ticketId = ticketId,
                     rev = revCounter.incrementAndGet(),
                     state = "prototype",
@@ -1577,8 +1633,13 @@ class DesktopWorkerOrchestrator(
         )
     }
 
+    private fun toConvPeerId(target: String): String =
+        if (ConvId.isGroup(target)) target
+        else if (controller.state.value.settings.groups.any { it.groupId == target }) ConvId.group(target)
+        else target
+
     /**
-     * 原型产物的**真交付**：沙箱 patch → `prototype.html` 实体 → 投群 → 返回卡上该写的清单。
+     * 原型产物的**真交付**：沙箱 patch → `prototype.html` 实体 → 投群/投对端 → 返回卡上该写的清单。
      *
      * 沙箱跑完就无痕清理，所以「沙箱里生成过 prototype.html」不等于「用户拿得到」。
      * 这一跳把产物全文落成宿主侧文件、按 artifact 免确认投给群里，卡片产物行才指向
@@ -1593,11 +1654,11 @@ class DesktopWorkerOrchestrator(
      * 宁可不宣称，也不要在卡上留一行点不动的产物。
      */
     private suspend fun deliverPrototypeArtifact(
-        groupId: String?,
+        targetId: String?,
         ticketId: String,
         patchPath: String?,
     ): List<Pair<String, Long>> {
-        if (groupId == null || patchPath == null) return emptyList()
+        if (targetId == null || patchPath == null) return emptyList()
         val patchFile = File(patchPath)
         val snapshot = File(patchFile.parentFile, "files/prototype.html")
         val html = when {
@@ -1611,10 +1672,10 @@ class DesktopWorkerOrchestrator(
             RelayLog.info("ORCHESTRATOR", "prototype artifact write failed: " + out.absolutePath)
             return emptyList()
         }
-        // 报价没发起（节点没起 / 群不认识）也算投递失败 —— 卡上不许留一行打不开的产物。
+        val peerId = toConvPeerId(targetId)
         val delivered = runCatching {
             controller.sendAgentArtifacts(
-                ConvId.group(groupId),
+                peerId,
                 listOf(
                     com.kapp.tenon.core.transport.LocalFile(
                         path = out.absolutePath,
@@ -1642,8 +1703,8 @@ class DesktopWorkerOrchestrator(
      * 返回值喂给卡面 artifacts 条目的 delivered 标记：报价没发起的文件如实标
      * false —— delivered 写投递事实，不是愿望。
      */
-    private fun deliverOversizedArtifacts(groupId: String?, patchPath: String?): Set<String> {
-        if (groupId == null || patchPath == null) return emptySet()
+    private fun deliverOversizedArtifacts(targetId: String?, patchPath: String?): Set<String> {
+        if (targetId == null || patchPath == null) return emptySet()
         val dir = File(patchPath).parentFile ?: return emptySet()
         val requests = listOf("report.json", "task.log")
             .map { ArtifactPipe.requestFor(File(dir, it)) }
@@ -1658,9 +1719,10 @@ class DesktopWorkerOrchestrator(
             RelayLog.info("ORCHESTRATOR", "artifact pipe meta exceeds card budget: " + metaBytes)
             return emptySet()
         }
+        val peerId = toConvPeerId(targetId)
         val delivered = runCatching {
             controller.sendAgentArtifacts(
-                ConvId.group(groupId),
+                peerId,
                 requests.map { r ->
                     com.kapp.tenon.core.transport.LocalFile(path = r.path, name = r.name, size = r.bytes)
                 },
@@ -1672,7 +1734,7 @@ class DesktopWorkerOrchestrator(
             RelayLog.info("ORCHESTRATOR", "artifact pipe NOT dispatched — files stay on the host")
             return emptySet()
         }
-        RelayLog.info("ORCHESTRATOR", "artifact pipe dispatched " + requests.size + " file(s) to group " + groupId)
+        RelayLog.info("ORCHESTRATOR", "artifact pipe dispatched " + requests.size + " file(s) to " + targetId)
         return requests.map { it.name }.toSet()
     }
 
@@ -1693,16 +1755,17 @@ class DesktopWorkerOrchestrator(
      *   而且它只是元数据、不是按钮，不会变成一颗点不动的假按钮；
      * - 不阻塞派单：报价是异步的，这里只等「有没有交给传输层」。
      */
-    private fun deliverPatchBundle(groupId: String?, ticketId: String, patchPath: String?): Boolean {
-        if (groupId == null || patchPath == null) return false
+    private fun deliverPatchBundle(targetId: String?, ticketId: String, patchPath: String?): Boolean {
+        if (targetId == null || patchPath == null) return false
         val file = File(patchPath)
         if (!file.isFile) {
             RelayLog.info("ORCHESTRATOR", "patch bundle missing on disk (card chain-" + ticketId + "): " + patchPath)
             return false
         }
+        val peerId = toConvPeerId(targetId)
         val dispatched = runCatching {
             controller.sendAgentArtifacts(
-                ConvId.group(groupId),
+                peerId,
                 listOf(
                     com.kapp.tenon.core.transport.LocalFile(
                         path = file.absolutePath,
@@ -1716,7 +1779,7 @@ class DesktopWorkerOrchestrator(
         }.getOrDefault(false)
         if (dispatched) {
             RelayLog.info("ORCHESTRATOR",
-                "patch bundle dispatched to group " + groupId +
+                "patch bundle dispatched to " + targetId +
                     " (card chain-" + ticketId + ", " + file.length() + " B)",
             )
         } else {
@@ -1745,9 +1808,10 @@ class DesktopWorkerOrchestrator(
     ): TicketOutcome {
         val host = planeProvider()
             ?: return TicketOutcome("error", null, "control plane unavailable", null)
+        val targetId = groupId ?: convId
 
         publishTicketCard(
-            groupId = groupId,
+            groupId = targetId,
             ticketId = ticketId,
             rev = revCounter.incrementAndGet(),
             state = "working",
@@ -1828,9 +1892,7 @@ class DesktopWorkerOrchestrator(
                                         "worktree released. Retry to run it again.",
                                     roleName = ticket.role,
                                 )
-                                if (groupId != null) {
-                                    publishCardJson(groupId, timeoutJson, defaultAgent)
-                                }
+                                publishCardJson(targetId, timeoutJson, defaultAgent)
                                 break
                             }
                         }
@@ -1854,7 +1916,7 @@ class DesktopWorkerOrchestrator(
                         if (eventType == "tool.started") {
                             lastTool = summary ?: lastTool
                             val beat = emitter.note(summary, body?.take(120))
-                            if (beat != null && groupId != null) {
+                            if (beat != null) {
                                 val beatJson = OrchestratorCards.heartbeatCardJson(
                                     ticketId = ticketId,
                                     rev = revCounter.incrementAndGet(),
@@ -1862,7 +1924,7 @@ class DesktopWorkerOrchestrator(
                                     roleName = ticket.role,
                                     beat = beat,
                                 )
-                                scope.launch { publishCardJson(groupId, beatJson, defaultAgent) }
+                                scope.launch { publishCardJson(targetId, beatJson, defaultAgent) }
                             }
                         }
                         // **只累「人话」。** 其余事件的 body 都不是给人读的：
@@ -1920,7 +1982,7 @@ class DesktopWorkerOrchestrator(
                 roundErrors += roundError
                 if (healRound < maxHealRounds) {
                     publishTicketCard(
-                        groupId = groupId,
+                        groupId = targetId,
                         ticketId = ticketId,
                         rev = revCounter.incrementAndGet(),
                         state = "working",
@@ -1951,7 +2013,7 @@ class DesktopWorkerOrchestrator(
             // 退出的现场（驱动事件里攒下的输出尾部）必须进 checks 抽屉，让人能下钻
             // 看 stderr，而不是对着一句 "cli exited with code 1" 猜。
             val blockedJson = publishTicketCard(
-                groupId = groupId,
+                groupId = targetId,
                 ticketId = ticketId,
                 rev = revCounter.incrementAndGet(),
                 state = "blocked",
@@ -2001,7 +2063,7 @@ class DesktopWorkerOrchestrator(
                 workspacePath = repoPath,
                 patchPath = patchPath,
             )
-            if (groupId != null) groupByCard["chain-" + ticketId] = groupId
+            groupByCard["chain-" + ticketId] = targetId
         }
         // §6.3 离线 bundle：补丁随卡一起走 P2P 文件通道，手机上能真的把 diff 打开看。
         // 先发文件、后发卡 —— 卡到的时候那一行产物已经点得开了。
@@ -2009,11 +2071,11 @@ class DesktopWorkerOrchestrator(
         // 运行日志）经同一文件通路投群；补丁本体的投递事实取自上一跳的返回值。
         // 卡面条目据此写 delivered —— 没投出去的产物不许谎报已送达。
         val pipedNames = buildSet {
-            if (deliverPatchBundle(groupId, ticketId, patchPath)) add("patch.diff")
-            addAll(deliverOversizedArtifacts(groupId, patchPath))
+            if (deliverPatchBundle(targetId, ticketId, patchPath)) add("patch.diff")
+            addAll(deliverOversizedArtifacts(targetId, patchPath))
         }
         val reviewJson = publishTicketCard(
-            groupId = groupId,
+            groupId = targetId,
             ticketId = ticketId,
             rev = revCounter.incrementAndGet(),
             state = "review_ready",
@@ -2067,11 +2129,11 @@ class DesktopWorkerOrchestrator(
         ),
     )
 
-    private suspend fun publishCardJson(groupId: String?, json: String?, agentId: String) {
-        if (groupId == null || json == null) return
+    private suspend fun publishCardJson(targetId: String?, json: String?, agentId: String) {
+        if (targetId == null || json == null) return
         runCatching {
             controller.broadcastChainCard(
-                groupId = groupId,
+                groupId = targetId,
                 agentId = agentId,
                 cardJson = json,
             )
@@ -2173,13 +2235,30 @@ class DesktopWorkerOrchestrator(
      * 补丁卡都齐），错的是"改哪个仓"，而往别人的仓库里写字是不可撤销的那类错。
      * 兜底的语义从来不是"猜一个仓"，是"没有就退单"。
      */
-    private fun resolveWorkspacePath(groupId: String?): String? {
-        if (groupId == null) return null
+    fun resolveWorkspacePath(groupId: String?, wsId: String? = null): String? {
         val state = controller.state.value
-        val declared = state.workspaceOfGroup(groupId)
-        val legacy = state.agentWorkspaces.values.firstOrNull { it.wsId == groupId }
-        val path = (declared ?: legacy)?.wsPath?.takeIf { it.isNotBlank() } ?: return null
-        return path.takeIf { isGitRepo(it) }
+        // 1. 显式指定的 wsId（例如 1:1 对话挂接的项目指针）
+        if (wsId != null) {
+            val ws = state.agentWorkspaces.values.firstOrNull { it.wsId == wsId }
+            val path = ws?.wsPath?.takeIf { it.isNotBlank() }
+            if (path != null && isGitRepo(path)) return path
+        }
+        // 2. 群绑定的工作区
+        if (groupId != null) {
+            val declared = state.workspaceOfGroup(groupId)
+            val legacy = state.agentWorkspaces.values.firstOrNull { it.wsId == groupId }
+            val path = (declared ?: legacy)?.wsPath?.takeIf { it.isNotBlank() }
+            if (path != null && isGitRepo(path)) return path
+        }
+        // 3. 宿主仅绑定 1 个工作区时自然推导（1:1 直连场景自动锁定）
+        val localWorkspaces = state.agentWorkspaces.values.filter {
+            it.peerId == state.selfNodeId && !it.wsPath.isNullOrBlank()
+        }
+        if (localWorkspaces.size == 1) {
+            val path = localWorkspaces.first().wsPath
+            if (path != null && isGitRepo(path)) return path
+        }
+        return null
     }
 
     /**
