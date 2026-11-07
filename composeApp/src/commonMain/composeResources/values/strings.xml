@@ -402,7 +402,7 @@
     <string name="nodes_my_qr_payload">载荷</string>
     <!-- 复制那串载荷的动作；那串字没法手抄，只展示不给复制，"抄给他"就是空话。 -->
     <string name="nodes_my_qr_copy">复制载荷</string>
-    <string name="nodes_my_qr_payload_hint">相机坏了、码太远扫不清时，把上面这串字抄给他，一样能加。</string>
+    <string name="nodes_my_qr_payload_hint">相机坏了、码太远扫不清时，点右侧复制，把这串字发给他，一样能加。</string>
     <!-- 填地址段的可选名字：原型的手动节点（ci-runner / 老周的旧笔记本）是有名字的。 -->
     <string name="nodes_manual_name">名字（可选）</string>
     <string name="nodes_manual_name_hint">只在这台设备上显示。对方握手后，列表里显示的是它自己的昵称。</string>
@@ -705,7 +705,7 @@
     <string name="set_conn_qr_payload">载荷</string>
     <string name="set_conn_qr_no_address">节点还没拿到本机地址，现在印不出二维码。等节点跑起来、有了地址再回来看这张卡。</string>
     <string name="set_conn_qr_too_long">本机地址太长，印不成二维码。请让对方手动填地址与端口。</string>
-    <string name="set_conn_qr_fallback">相机坏了、码太远扫不清时，把上面这串字抄给对方，一样能加。</string>
+    <string name="set_conn_qr_fallback">相机坏了、码太远扫不清时，点右侧复制，把这串字发给对方，一样能加。</string>
 
     <!-- 设置：屏2 通知、外观、能力、数据与诊断 -->
     <string name="set_more_notif_title">通知</string>

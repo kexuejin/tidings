@@ -310,7 +310,7 @@
     <string name="nodes_my_qr_payload">Payload</string>
     <!-- Copy action for the payload line: nobody can hand-copy that string. -->
     <string name="nodes_my_qr_copy">Copy payload</string>
-    <string name="nodes_my_qr_payload_hint">If the camera is broken or the code is too far to scan, copy the line above to the other side — that works just as well.</string>
+    <string name="nodes_my_qr_payload_hint">If the camera is broken or the code is too far to scan, tap copy on the right and send the string over — that works just as well.</string>
     <string name="nodes_manual_name">Name (optional)</string>
     <string name="nodes_manual_name_hint">Shown on this device only. After the handshake, the list shows the other side's own nickname.</string>
 
@@ -607,7 +607,7 @@
     <string name="set_conn_qr_payload">Payload</string>
     <string name="set_conn_qr_no_address">The node has no local address yet, so no QR code can be printed. Come back to this card once the node is running.</string>
     <string name="set_conn_qr_too_long">The local address is too long to fit a QR code. Ask the other side to enter the address and port manually.</string>
-    <string name="set_conn_qr_fallback">If the camera is broken or the code is too far to scan, read the string above to the other side — it works just as well.</string>
+    <string name="set_conn_qr_fallback">If the camera is broken or the code is too far to scan, tap copy on the right and send the string over — it works just as well.</string>
 
     <!-- 设置：屏2 通知、外观、能力、数据与诊断 -->
     <string name="set_more_notif_title">Notifications</string>

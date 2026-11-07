@@ -42,7 +42,6 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalClipboardManager
 import androidx.compose.ui.text.AnnotatedString
-import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
@@ -941,9 +940,10 @@ fun MyQrSheet(
                         textAlign = TextAlign.Center,
                         modifier = Modifier.fillMaxWidth(),
                     )
-                    // 「载荷」一行：左边标签、右边等宽原文，中间一条分隔线（原型是一条 kv）。
-                    // 行尾一颗复制动作：那串字长得没法手抄（URL + pin + nodeId），
-                    // 只展示不给复制，"相机坏了就抄这串字"就是一句空话。
+                    // 「载荷」一行：标签 + 行尾复制动作（原型是一条 kv：relay://IP:port 的
+                    // 年代，原文一行可读所以展示；如今载荷是多候选 JSON——对人眼没有
+                    // 可读性，展示 5 行密文是噪音。真机 2026-11-07 用户标注「没必要显示
+                    // 内容」）。兜底工作流 = 点复制 → 粘给对方，内容本身不上面板。
                     HorizontalDivider(Modifier.padding(top = sp.lg))
                     val clipboard = LocalClipboardManager.current
                     var payloadCopied by remember { mutableStateOf(false) }
@@ -963,14 +963,7 @@ fun MyQrSheet(
                             style = MaterialTheme.typography.labelSmall,
                             color = MaterialTheme.colorScheme.onSurfaceVariant,
                         )
-                        Text(
-                            text = payload,
-                            style = MaterialTheme.typography.bodySmall,
-                            fontFamily = FontFamily.Monospace,
-                            maxLines = 3,
-                            overflow = TextOverflow.Ellipsis,
-                            modifier = Modifier.weight(1f).padding(horizontal = sp.sm),
-                        )
+                        Spacer(Modifier.weight(1f))
                         AppIconButton(
                             icon = Res.drawable.ic_copy,
                             contentDescription = stringResource(Res.string.nodes_my_qr_copy),
