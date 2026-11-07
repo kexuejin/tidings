@@ -402,7 +402,7 @@
     <string name="nodes_my_qr_payload">载荷</string>
     <!-- 复制那串载荷的动作；那串字没法手抄，只展示不给复制，"抄给他"就是空话。 -->
     <string name="nodes_my_qr_copy">复制载荷</string>
-    <string name="nodes_my_qr_payload_hint">相机坏了、码太远扫不清时，把上面这串字抄给他，一样能加。</string>
+    <string name="nodes_my_qr_payload_hint">相机坏了、码太远扫不清时，点右侧复制，把这串字发给他，一样能加。</string>
     <!-- 填地址段的可选名字：原型的手动节点（ci-runner / 老周的旧笔记本）是有名字的。 -->
     <string name="nodes_manual_name">名字（可选）</string>
     <string name="nodes_manual_name_hint">只在这台设备上显示。对方握手后，列表里显示的是它自己的昵称。</string>
@@ -588,23 +588,8 @@
     <!-- 实际上限是 MAX_AVATAR_BYTES = 32 KiB（落盘那张的闸）；20 MiB/8192 是「源图编码」那一步的闸，
          那一步尚未实现，不写。 -->
     <string name="set_avatar_pick_hint">支持从系统文件选择器选取本地图片作为头像。当前上限：文件大小 ≤ 32 KiB；更大的图请先在系统相册里缩小。</string>
-    <string name="set_avatar_step1_title">选一张本地图</string>
-    <string name="set_avatar_step1_desc">一个入口：「上传图片」→ 系统文件选择框。</string>
-    <string name="set_avatar_step2_title">计算哈希</string>
-    <string name="set_avatar_step2_desc">选中那一刻就在本机算出 sha256；档案里只带这一个哈希，图片正文不上网。</string>
-    <string name="set_avatar_step3_title">只存本机</string>
-    <string name="set_avatar_step3_desc">图片正文不上网；当前没有裁剪，也没有格式转换。</string>
-    <string name="set_avatar_step4_title">保存档案</string>
-    <string name="set_avatar_step4_desc">「保存档案」写入昵称等资料字段；刚选的这张图暂不随档案同步（见下方说明）。</string>
-    <string name="set_avatar_steps_hint">以上是这一页现在的真实流程：选图、算哈希、保存资料字段，全部在本机完成。图片本身的跨设备同步（裁剪、转码、按需拉取）还没有实现 —— 那是目标态，不是现状。</string>
-    <string name="set_avatar_hash_empty">尚未选图</string>
     <!-- %1$d 是保存后的资料版本（profileRev）。 -->
     <string name="set_avatar_saved_inline">已保存，资料版本 v%1$d；刚选的这张图还没有随档案保存。</string>
-    <string name="set_avatar_hash_title">线上只走这 64 个十六进制</string>
-    <string name="set_avatar_hash_hint">图片正文&lt;b&gt;不上网&lt;/b&gt;，只有这一个哈希跟着档案走。对端收到后按需发 avatar{op:"get"} 才来取 ——局域网里谁都看不过来的那些图，不进任何人的带宽。32 KiB 这个上限也是为了这个：让 base64 信封稳稳低于一个 TCP 控制帧（64 KiB）。</string>
-    <string name="set_avatar_protocol_title">保存会生效，但这张图还不上网</string>
-    <string name="set_avatar_protocol_lead">自定义头像网络传输尚未启用。</string>
-    <string name="set_avatar_protocol_body">自定义头像（av1 能力位）涉及按需拉取、缓存与分块传输链路。当前版本优先保证基于资料预设头像与首字头像的即时同步；自定义头像漫游将在后续版本开放。</string>
     <string name="set_avatar_save">保存档案</string>
     <!-- 头像分段控件 `.seg` 三档（原型 prototype/relay.html:2149-2156 avSeg()）。 -->
     <string name="r2_set_avatar_mode_icon">图标头像</string>
@@ -705,7 +690,7 @@
     <string name="set_conn_qr_payload">载荷</string>
     <string name="set_conn_qr_no_address">节点还没拿到本机地址，现在印不出二维码。等节点跑起来、有了地址再回来看这张卡。</string>
     <string name="set_conn_qr_too_long">本机地址太长，印不成二维码。请让对方手动填地址与端口。</string>
-    <string name="set_conn_qr_fallback">相机坏了、码太远扫不清时，把上面这串字抄给对方，一样能加。</string>
+    <string name="set_conn_qr_fallback">相机坏了、码太远扫不清时，点右侧复制，把这串字发给对方，一样能加。</string>
 
     <!-- 设置：屏2 通知、外观、能力、数据与诊断 -->
     <string name="set_more_notif_title">通知</string>
@@ -1633,7 +1618,6 @@
     <string name="workspace_create_group_quick_btn">一键建群 / 共享</string>
     <string name="workspace_create_group_or_new">或关联本地全新目录</string>
     <string name="workspace_create_group_new_title">关联本地新目录</string>
-    <string name="workspace_create_group_agent_label">驻群智能体</string>
     <string name="workspace_create_group_name_label">群聊名称 (自动联动)</string>
     <string name="workspace_create_group_sync_devices">自动同步到我的移动设备 (免扫码)</string>
     <string name="workspace_create_group_confirm">立即创建协同群</string>
@@ -1647,7 +1631,6 @@
     <string name="workspace_role_no_delegated_approval">仅协同管理 (无代批权限)</string>
     <string name="agent_host_sleeping_banner">宿主设备睡眠/离线中 · 命令已安全排队挂起，待宿主唤醒后自动断点续传</string>
     <string name="agent_interrupt_btn">⏹ 全局打断</string>
-    <string name="workspace_default_resident_agent">🤖 DSH (默认本地执行助理)</string>
     <string name="workspace_member_section_humans">协同人类成员 (%1$d)</string>
     <string name="workspace_member_section_agents">入驻智能体 (%1$d)</string>
     <string name="workspace_no_title_banner">这个工作区没有名字。对端只上报了它的标识 %1$s，没有上报名字 —— 我们不用那串标识冒充名字，等它补上。</string>

@@ -127,3 +127,6 @@ link-pub.spki
 # design/runtime-evidence/（那是入库的）；docs/ 下这两份是干活时的草稿。
 /docs/runtime-evidence/
 /docs/research/
+
+# ZCode 会话工作目录（agent 会话的可视化/任务工件，同 .workbuddy 一类）
+/.zcode/

@@ -325,9 +325,6 @@ fun SettingsConnectionSubpage(
                             textAlign = TextAlign.Center,
                             modifier = Modifier.fillMaxWidth().padding(top = LocalAppSpacing.current.md),
                         )
-                        // 载荷行：那串字长得没法手抄（URL + pin + nodeId），不给复制的话
-                        // 「相机坏了就抄这串字」就是一句空话。行内复制 + 短暂的「已复制」回执
-                        // （与节点页弹层的同一套范式）。多行展示：单行省略会让中段 pin 根本读不到。
                         val clipboard = LocalClipboardManager.current
                         var payloadCopied by remember { mutableStateOf(false) }
                         // 行内反馈自清：2 秒足够看清「已复制」，又不至于一直挂着两份文案。
@@ -337,11 +334,12 @@ fun SettingsConnectionSubpage(
                                 payloadCopied = false
                             }
                         }
+                        // 载荷行：标签 + 行尾复制（与节点页「我的二维码」同一套）。原始
+                        // 多候选 JSON 对人眼没有可读性，不上面板（真机
+                        // 用户标注）；兜底工作流 = 点复制 → 粘给对方。
                         KvRow(
                             label = stringResource(Res.string.set_conn_qr_payload),
-                            value = qrPayload,
-                            mono = true,
-                            valueMaxLines = Int.MAX_VALUE,
+                            value = "",
                         ) {
                             AppIconButton(
                                 icon = Res.drawable.ic_copy,

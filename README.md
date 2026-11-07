@@ -35,7 +35,7 @@
    - 桌面端（macOS / Linux / Windows）：宽屏自适应双栏交互、托盘常驻守护、按需建窗、同进程承载控制面。
 5. **五大内置 CLI Agent 与本地控制面（Agent Node & Control Plane）**：
    - 内置主流开发智能体驱动（Claude Code、Codex、agy、dsh、opencode），基于 Git Worktree 沙箱物理隔离与凭据安全挂载，开箱即用；
-   - 提供本地回环 HTTP API（Ktor，默认 `127.0.0.1:8788`），集成标准 Model Context Protocol（MCP）服务（`scripts/tenon-mcp-server.py`）。
+   - 提供本地回环 HTTP API（默认 `127.0.0.1:8788`），集成标准 Model Context Protocol（MCP）服务（`scripts/tenon-mcp-server.py`）。
 6. **声明式编排与自治执行（Orchestration Engine）**：
    - 工单流水线、责任链执行体（`StageChain`）、自愈纠偏循环、多棒审查（Multi-stick review）、限流冷却与熔断保护。
 
@@ -77,7 +77,7 @@
 ├── cli/                           # 领域层脱离 UI 的可执行验收物（纯 JVM 终端客户端，0 Compose 依赖）
 ├── agent-contract/                # Agent 驱动层纯接口契约：会话制契约、能力描述符、事件七型定义
 ├── orchestration/                 # Agent 编排层：工单责任链、多棒审查、自愈循环、卡片补丁、事件胶水
-├── agentNode/                     # Agent 控制面：本地回环 HTTP API (Ktor)、内置驱动池、插件状态管理
+├── agentNode/                     # Agent 控制面：本地回环 HTTP API、内置驱动池、插件状态管理
 ├── desktopApp/                    # 桌面端入口：托盘常驻、按需建窗、同进程承载控制面（Tenon.app）
 ├── androidApp/                    # Android 原生宿主壳工程与截图比对门禁测试
 ├── iosApp/                        # iOS Xcode 壳工程（由 XcodeGen 根据 project.yml 生成）
@@ -160,6 +160,7 @@ open Tenon.xcodeproj
           :designTokenUsageGate :designStateSlotGate :designLocaleParityGate \
           :jlinkModulesGate --continue
 python3 tools/unused-imports.py --check
+python3 tools/check-design-palette.py --css-vars
 ```
 
 动了 UI / 设计 token / 截图夹具，还要跑设计契约门禁：`designScreenDiffGate`、`designIconGate`、`designConvergeGate`、`designFormPairingGate`、`designPreviewPairingGate`、`designDupFrameGate`、`designDpDebtGate`。

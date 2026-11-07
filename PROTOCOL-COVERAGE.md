@@ -146,13 +146,12 @@
 
 **声明的（`MsgTypes.MOBILE_CAPS` 常量 + `RelaySettings.caps()` 按平台能力追加）**：
 `tw1`（传输排队/wait 帧）、`mrec1`（媒体撤回）、`agn1`（agent 会话帧）、`tbl1`（表格图片文字视图）
-是常量里固定的四位；`rv1`/`rvs1`（投屏，见 §5 与 `ACCEPTANCE.md` 的 A17）与
-`shr1`（共享文件柜，由 `isShareEnabled()` 决定）由 `RelaySettings.caps(remoteView, remoteShare)`
-（`composeApp/.../RelaySettings.kt:203-214`）动态追加。`ag1`（身份）只有 agent 节点声明。
+是常量里固定的四位；`rv1`/`rvs1`（投屏，见 §5 与 `ACCEPTANCE.md` 的 A17）由
+`RelaySettings.caps(remoteView, remoteShare)` 动态追加。`ag1`（身份）只有 agent 节点声明。
 `tw1`/`mrec1` 各有一个设置开关，关掉即从 caps 里移除。
-**实测**：手机实际广播的 caps 是
-`["tw1","mrec1","agn1","tbl1","rv1","rvs1","shr1"]` —— 注意 **`av1` 不在其中**
-（自定义头像至今不声明，见下面的不声明列表）。
+**实测**：手机实际广播的 caps 曾是
+`["tw1","mrec1","agn1","tbl1","rv1","rvs1","shr1"]`；`shr1` 其后**停止声明**（裁决见 §五与
+下面的不声明注）。注意 **`av1` 从未在其中**（自定义头像至今不声明，见下面的不声明列表）。
 
 `tbl1` 的**发送侧**也已支持：`POST /v1/send-file` 接受 `tableText`，并且按协议只向声明了 `tbl1`
 的对端附带它（对端没声明回 409 `peer-unsupported`）。
@@ -180,12 +179,12 @@
 `fd1`（**只读不声明**：读对端的 `fd1` 决定要不要在 `offer` 后补 `file-ctl direct`，
 自己不承诺免确认写存储）、`age1`（agent 事件流批量投递/游标续读，PPE-1 P1.5）。
 
-> `shr1` **不在**这份「不声明」名单里：它的声明条件是「共享目录已配置」
-> （`RelaySettings.isShareEnabled()`，`RelaySettings.kt:195-200`），配了就会随 profile 广播出去。但**协议侧只有壳**（见 §三）——
-> 这是当前「声明了却没有对应实现」的一处已知不对等，列在 §五。
+> `shr1` **已进**这份「不声明」名单（裁决：协议侧只有壳 —— 入站 `share` 帧业务层丢弃、本端从不发
+> `share:list`，宣告即假承诺）。`isShareEnabled()`/`shareRoot` 保留，只管本机柜面的本地上传记录，
+> 不再影响广播。此前「声明了却没有对应实现」的不对等就此消除（原列于 §五）。
 
 **投屏已从「不声明」移出**：`rv1`/`rvs1` 现在**都广播**（实现已落地并双向验收通过，见 §5 的投屏行与 `ACCEPTANCE.md` 的 A17）。实测手机 caps 为
-`["tw1","mrec1","agn1","tbl1","rv1","rvs1","shr1"]`。声明与实现的联动点是
+`["tw1","mrec1","agn1","tbl1","rv1","rvs1"]`（`shr1` 已停止广播，见上）。声明与实现的联动点是
 `RelaySettings.caps(remoteView, remoteShare)`（`composeApp/.../RelaySettings.kt:203-214`）：
 只有投屏受支持时才追加这两位。
 
@@ -205,7 +204,7 @@
 裁剪版）、`agi1`（M4 跨端派单网道：手机要能点宿主插件卡片上的按钮，被误指名派单时
 也应答一帧诚实的 `no-executor` 拒绝，见 `PROTOCOL-EXTENSION.md` §6.13）。
 
-> **守卫**：core 侧有一条台账测试钉住「每个 cap 常数要么被 profile 清单声明、要么在台账里带**理由**豁免（`fd1` 只读 / `ams1` 预埋 / `shr1`·`rv1`·`rvs1`·`av1` 由壳按条件声明）」，另有源码级守卫断言新加的 cap 必须同步进台账：
+> **守卫**：core 侧有一条台账测试钉住「每个 cap 常数要么被 profile 清单声明、要么在台账里带**理由**豁免（`fd1` 只读 / `ams1` 预埋 / `shr1` 停止声明 / `rv1`·`rvs1`·`av1` 由壳按条件声明）」，另有源码级守卫断言新加的 cap 必须同步进台账：
 > `core/src/commonTest/kotlin/com/kapp/tenon/core/protocol/CapabilityDeclarationTest.kt` 与 `core/src/jvmTest/.../CapabilityDeclarationSourceTest.kt`。
 
 ## 五、还没做的（明确列出来，不含糊）
@@ -213,7 +212,7 @@
 | 项 | 现状 | 说明 |
 |---|---|---|
 | 内联预览与大图查看 | 图片与语音已有内联预览，**图片点击放大全屏查看已支持**（`ImageViewerDialog` 支持居中缩放、保存/分享导出）；**视频没有**（落回文件卡） | 视频需要解码器与首帧抽取，暂不引入大体积依赖 |
-| 共享文件柜的协议侧（`shr1`） | **只有壳**：配置了共享目录就会宣告 `shr1`，但入站 `share` 帧在业务层被 `CHAT_INBOUND_TYPES` 丢弃（只回传输层 ACK）、本端从不发 `share:list`、界面条目是 mock、下载只弹横幅 | 桌面全功能节点支持该能力；本端要补齐浏览/拉取/权限校验才有意义。**当前是「声明了却没有实现」的一处不对等**（由 `e2e_share.py` 的壳契约断言钉住，见 §三） |
+| 共享文件柜的协议侧（`shr1`） | **已停止声明**（裁决：补齐浏览/拉取/权限校验之前，宣告即假承诺）：入站 `share` 帧仍在业务层被 `CHAT_INBOUND_TYPES` 丢弃（只回传输层 ACK）、本端从不发 `share:list`、`isShareEnabled()` 只管本机柜面的本地上传记录 | 桌面全功能节点支持该能力；哪天本端补齐了协议侧，再恢复声明。`e2e_share.py` 的断言已改判为「`shr1` 永不出现」（见 §三） |
 | 群文件（群图 / 群文件发送） | **已全面打通**：群文本、群图片与群文件收发均已实现，发送侧支持逐成员扇出广播、首个传输卡片归集至群会话、收端按 `groupId` 归集，UI 层附件入口与撤回完全可用 | 底层 `NodeRuntime.offerFiles` 支持透传 `groupId`/`groupRev`，`RelayControllerTransfers` 负责扇出与状态同步 |
 | 群管理的其余部分 | 已做：建群、群列表/成员、群会话、按群归位、发言人署名、`op:info`/`op:need` 同步、角色矩阵（只有群主与管理员能改群，普通成员只能只增不减地邀请） | 未做：管理密码路径（`adminSecretHash`/`adminHint` 只透传）、群头像、群简介/公告编辑、owner/admin 的完整 RBAC 界面、离组重邀的按步重放。手机端没有群管理界面，把 `canApplyRemoteInfo` 那 130 行全搬过来，大半分支永远走不到 |
 | 投屏接线（`rv1`/`rvs1`） | **已全面落地并双向验收通过**：`screen` 四个 op 逐字校验（`sessionId` 必须 UUIDv4、`accept` 的 `token` 必须 32 位小写 hex），TCP 四个帧与裸 JPEG 数据面全通；手机既能当 Sharer（MediaProjection 采集）也能当 Viewer（全屏渲染器 + 画质下拉）。实测广播 `rv1` 与 `rvs1` | 验收步骤见 `ACCEPTANCE.md` 的 A17。**已知未做**：桌面端 GUI 没有「发起投屏」入口（只能应答入站邀请），`permission-denied` 这条 reason 至今没有生产代码路径（失败一律发 `capture-failed`） |

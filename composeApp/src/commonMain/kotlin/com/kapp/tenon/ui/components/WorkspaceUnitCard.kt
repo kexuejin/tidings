@@ -9,7 +9,6 @@ import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
-import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
@@ -42,6 +41,7 @@ import com.kapp.tenon.generated.resources.workspace_no_sessions
 import com.kapp.tenon.generated.resources.workspace_sessions_not_synced
 import com.kapp.tenon.generated.resources.workspace_latest_activity_format
 import com.kapp.tenon.ui.theme.IconSizes
+import com.kapp.tenon.ui.theme.accents
 import com.kapp.tenon.ui.theme.LocalAppSpacing
 import com.kapp.tenon.ui.theme.LocalCardShape
 import com.kapp.tenon.domain.model.PeerUi
@@ -379,23 +379,6 @@ internal fun SessionStateLabel(state: String) {
     Text(text = label, style = MaterialTheme.typography.labelSmall, color = color)
 }
 
-/** 中性徽标（「未上报工作区」这类"还缺哪一层"的说明）。 */
-@Composable
-internal fun MutedTag(text: String) {
-    val sp = LocalAppSpacing.current
-    Surface(
-        color = MaterialTheme.colorScheme.surfaceVariant,
-        contentColor = MaterialTheme.colorScheme.onSurfaceVariant,
-        shape = CircleShape,
-    ) {
-        Text(
-            text = text,
-            style = MaterialTheme.typography.labelSmall,
-            fontWeight = FontWeight.SemiBold,
-            modifier = Modifier.padding(horizontal = sp.sm6, vertical = sp.xxs),
-        )
-    }
-}
 
 /**
  * 待审批药丸。
@@ -411,8 +394,11 @@ internal fun MutedTag(text: String) {
 internal fun PendingPill(text: String) {
     val sp = LocalAppSpacing.current
     Surface(
-        color = MaterialTheme.colorScheme.errorContainer,
-        contentColor = MaterialTheme.colorScheme.onErrorContainer,
+        // 取色对齐原型 `.tag.pend`（实心 --badge/--on-badge，relay.html:360）：
+        // errorContainer 是浅粉底深粉字，原型那颗是实心红——「待批」是全行唯一
+        // 的强警示，就该是实心档。与 AgentSessionWidgets 的两颗同批归一。
+        color = MaterialTheme.accents.badge,
+        contentColor = MaterialTheme.accents.onBadge,
         shape = RoundedCornerShape(percent = 50),
     ) {
         Text(

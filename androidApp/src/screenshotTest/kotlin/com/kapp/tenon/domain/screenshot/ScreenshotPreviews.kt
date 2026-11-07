@@ -930,7 +930,7 @@ private fun SetAvatarPagePreview() {
         // 是**底导航 chrome**（`.dnav`），不是页面内容 —— 必须由外壳画。
         // 页面 body 里再画一遍就是把外壳当内容（早先那版正是这么错的）。
         Screen("settings", badges = navBadges(previewSlicesOf(normalState).chat, previewSlicesOf(normalState).agent, previewSlicesOf(normalState).node, previewSlicesOf(normalState).settings)) { inner ->
-            SetAvatarPage(avatarSlice = previewSlicesOf(normalState).avatar,settingsSlice = previewSlicesOf(normalState).settings,
+            SetAvatarPage(settingsSlice = previewSlicesOf(normalState).settings,
                 onSaveProfile = { _, _, _, _, _ -> },
                 // 原型 `screenSetAvatar`（`prototype/relay.html:3741`）逐字
                 // `topbar('上传头像','选一张图 → 裁方 → 哈希 → 宣告','','m-set-profile','set')`
@@ -956,7 +956,7 @@ private fun SetAvatarPagePreview() {
 private fun SetAvatarPageDarkPreview() {
     AppTheme(darkTheme = true) {
         Screen("settings", badges = navBadges(previewSlicesOf(normalState).chat, previewSlicesOf(normalState).agent, previewSlicesOf(normalState).node, previewSlicesOf(normalState).settings)) { inner ->
-            SetAvatarPage(avatarSlice = previewSlicesOf(normalState).avatar,settingsSlice = previewSlicesOf(normalState).settings,
+            SetAvatarPage(settingsSlice = previewSlicesOf(normalState).settings,
                 onSaveProfile = { _, _, _, _, _ -> },
                 // 原型 `screenSetAvatar`（`prototype/relay.html:3741`）逐字
                 // `topbar('上传头像','选一张图 → 裁方 → 哈希 → 宣告','','m-set-profile','set')`

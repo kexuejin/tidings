@@ -644,6 +644,8 @@ Wi-Fi 省电模式下能否收到、TCP 直连、托盘/深链/多窗口、通�
   键名以标准实现为准（文档里的 `grp1` 在实现里叫 `gr1`；文档里的 `img1` 在实现里不存在）。
 - **投屏（`rv1`/`rvs1`）现在都声明、也都做了 ✅ 已跑（2026-10-09，Pixel 6 真机）**：
   实测手机广播 `["tw1","mrec1","agn1","tbl1","rv1","rvs1","shr1"]` —— `rv1` 与 `rvs1` 都在。
+  （`shr1` 其后已停止广播：协议侧只有壳，宣告即假承诺，见 `PROTOCOL-COVERAGE.md` §五 ——
+  上一行的「一律不声明」名单从此对 `shr1` 也成立。）
   `screen` 不再是「只回 ACK」，双向验收见 A17，原始读数见
   [`design/runtime-evidence/screen-mirroring-android.txt`](design/runtime-evidence/screen-mirroring-android.txt)。
 - **表格图（`tbl1`）✅ 已跑（2026-10-07，Pixel 6 真机）**：桌面端发一张带表格的图片，

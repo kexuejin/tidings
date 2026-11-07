@@ -264,7 +264,9 @@ fun AvatarPicker(
                                 modifier = Modifier
                                     .size(LocalAppSpacing.current.sm)
                                     .clip(CircleShape)
-                                    .background(Color.White),
+                                    // 选中点跟随底色判墨（foregroundOn）：固定白色在
+                                    // 杏黄/橄榄这类浅底上不可见——与首字模式同一判据。
+                                    .background(AvatarPalette.foregroundOn(color.bg)),
                             )
                         }
                     }

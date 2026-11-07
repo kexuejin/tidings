@@ -68,8 +68,11 @@ import com.kapp.tenon.generated.resources.workspace_board_starting
 import com.kapp.tenon.generated.resources.workspace_board_starting_hint
 import com.kapp.tenon.generated.resources.workspace_board_subtitle
 import com.kapp.tenon.generated.resources.workspace_create_group_title
+import com.kapp.tenon.ui.ContentWidths
 import com.kapp.tenon.ui.components.AppButton
 import com.kapp.tenon.ui.components.AppButtonSize
+import com.kapp.tenon.ui.components.LargeTitleBar
+import com.kapp.tenon.ui.components.TitleBarDivider
 import com.kapp.tenon.ui.theme.LocalAppSpacing
 import com.kapp.tenon.ui.theme.LocalCardShape
 import org.jetbrains.compose.resources.painterResource
@@ -118,11 +121,79 @@ import com.kapp.tenon.domain.model.AgentApprovalDecision
  * `onSelectAgent` 只在**有会话要选中**时才用：进聊天页后聊天页要停在那条会话上。
  * 它是「选中哪个 agent」，不是「切换视图」。
  */
+/**
+ * 工作区页签的顶栏：与消息 / 文件柜 / 节点 / 设置共用 [LargeTitleBar]。
+ *
+ * 此前这一行画在 [AgentConsoleScreen] 带横向 padding 的滚动内容列里，标题直接
+ * 铺在 `background` 上 —— 浅色只差 #FFFFFF→#FAFAF8，深色却差 #232625→#121413
+ * 一整条带；而且它会跟着内容滚走、没有 hairline。原型 m11-agents 的 `.topbar`
+ * 用 `--surface`，下面的内容才透出 `--bg`。现在把顶栏提到滚动容器**外面**，
+ * 底色铺满整幅、内容按 [ContentWidths.Pane] 收列。
+ *
+ * 副标题口径仍在派生层（[inboxWorkspaceUnits] / [pendingApprovalCount]），
+ * 与看板正文的计数是同一把尺子，不在顶栏另算一套。
+ */
+@Composable
+internal fun WorkspaceBoardTitleBar(
+    now: Long,
+    onRefresh: (() -> Unit)?,
+    onCreateWorkspaceGroup: (() -> Unit)?,
+    agentSlice: AgentSlice,
+    nodeSlice: NodeSlice,
+    settingsSlice: SettingsSlice,
+) {
+    val units = inboxWorkspaceUnits(agentSlice, nodeSlice, settingsSlice, limit = Int.MAX_VALUE)
+    val totalPending = pendingApprovalCount(agentSlice.agentApprovals.values, now)
+    // 页头汇总（原型 relay.html:4208-4211 的 `sub`）：四个数总是印，
+    // 待审批只在真的有的时候接在后面。设备 = groups.size；Agent = 各设备
+    // agentSections().size 之和（不是 group.agentCount，真机报过「0 个 Agent」
+    // 而下面明明画着 agent 段）；工作区 = units.workspaceCount（排除未归属行）。
+    val deviceTotal = units.groups.size
+    val agentTotal = units.groups.sumOf { group -> group.agentSections().size }
+    val summary = if (units.isEmpty) {
+        stringResource(Res.string.agent_empty_subtitle, units.workspaceCount)
+    } else {
+        stringResource(
+            Res.string.workspace_board_subtitle,
+            deviceTotal,
+            agentTotal,
+            units.workspaceCount,
+        )
+    }
+    LargeTitleBar(
+        title = stringResource(Res.string.agent_title),
+        subtitle = if (totalPending > 0) {
+            summary + " · " + stringResource(Res.string.agent_subtitle_pending, totalPending)
+        } else {
+            summary
+        },
+        contentMaxWidth = ContentWidths.Pane,
+        actions = {
+            onCreateWorkspaceGroup?.let { createWs ->
+                // 原型顶栏这颗是 `.btn sm pri`（relay.html:6314）：顶栏密排位置。
+                AppButton(
+                    text = stringResource(Res.string.workspace_create_group_title),
+                    onClick = createWs,
+                    size = AppButtonSize.Small,
+                    leadingIcon = Res.drawable.ic_plus,
+                )
+            }
+            if (onRefresh != null) {
+                TopBarIconAction(
+                    icon = Res.drawable.ic_refresh,
+                    contentDescription = stringResource(Res.string.desktop_action_refresh),
+                    onClick = onRefresh,
+                )
+            }
+        },
+    )
+    TitleBarDivider()
+}
+
 @Composable
 internal fun WorkspaceBoardView(
     agents: List<PeerUi>,
     selectedAgent: PeerUi?,
-    showHeader: Boolean,
     now: Long,
     onSelectAgent: (String) -> Unit,
     onOpenWorkspace: (peerId: String, wsId: String?, sessionId: String?) -> Unit,
@@ -140,7 +211,6 @@ internal fun WorkspaceBoardView(
     onRespondApproval: ((approvalId: String, allow: Boolean) -> Unit)?,
     /** 三参处置（「本会话免审」）：null 时退回 [onRespondApproval]，不画免审按钮。 */
     onRespondChoice: ((approvalId: String, decision: AgentApprovalDecision) -> Unit)? = null,
-    onCreateWorkspaceGroup: (() -> Unit)? = null,
     /** Phase 4 订阅面切片（蓝图 §4.4）：默认值由 [state] 投影，未迁移/预览路径行为不变。 */
     agentSlice: AgentSlice,
     nodeSlice: NodeSlice,
@@ -162,87 +232,8 @@ internal fun WorkspaceBoardView(
     // （pending 且未过期）。分段的 pill、会话切换条、选择器也走它 —— 一个数只有一个来源。
     val totalPending = pendingApprovalCount(agentSlice.agentApprovals.values, now)
 
-    if (showHeader) {
-        Row(
-            modifier = Modifier
-                .fillMaxWidth()
-                .padding(top = LocalAppSpacing.current.md),
-            verticalAlignment = Alignment.CenterVertically,
-            horizontalArrangement = Arrangement.SpaceBetween,
-        ) {
-            Column(modifier = Modifier.weight(1f)) {
-                Text(
-                    text = stringResource(Res.string.agent_title),
-                    style = MaterialTheme.typography.headlineSmall,
-                    fontWeight = FontWeight.SemiBold,
-                )
-                // 页头汇总（原型 relay.html:4208-4211 的 `sub`）：四个数**总是**印，
-                // 待审批只在真的有的时候接在后面。此前只在待批时印后半句，于是屏上
-                // 既看不到「几台设备 / 几个 Agent / 几个工作区 / 几个会话」，也无法
-                // 判断「0 个工作区」到底是真没有还是没加载。
-                //
-                // 口径与组头一致（一把尺子）：设备 = groups.size；Agent = 各设备
-                // agentSections().size 之和（**不是** group.agentCount —— 理由见 BoardGroupHead：
-                // 真机上 group.agentCount 报过「0 个 Agent」而下面明明画着 agent 段）；
-                // 工作区 = units.workspaceCount（排除未归属行，父稿 §2.2）；
-                // 会话 = 全部 units 的 sessionCount 之和（未归属会话也是会话）。
-                val deviceTotal = units.groups.size
-                val agentTotal = units.groups.sumOf { group -> group.agentSections().size }
-                // 空屏只印「0 个工作区」（原型 screenAgentsEmpty relay.html:4564 写死这一句）：
-                // 四个零排一行是噪音，而「一个都没上报」这件事本身已经由下面的警告条说清了。
-                val summary = if (units.isEmpty) {
-                    stringResource(Res.string.agent_empty_subtitle, units.workspaceCount)
-                } else {
-                    stringResource(
-                        Res.string.workspace_board_subtitle,
-                        deviceTotal,
-                        agentTotal,
-                        units.workspaceCount,
-                    )
-                }
-                Text(
-                    text = if (totalPending > 0) {
-                        summary + " · " + stringResource(Res.string.agent_subtitle_pending, totalPending)
-                    } else {
-                        summary
-                    },
-                    // 顶栏副标题 = 原型 `.topbar .sub`（prototype/relay.html:578-579）：
-                    // 11px（= labelSmall）、on-2（= onSurfaceVariant）、margin-top 2px、
-                    // **nowrap + 省略号**。此前写 bodyMedium（14sp）且不设 maxLines，
-                    // 于是这一行在 393dp 下折成两行（实测副标题墨迹占 y134..220 两行），
-                    // 而原型永远一行（:578 的 white-space:nowrap + text-overflow:ellipsis）。
-                    style = MaterialTheme.typography.labelSmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    maxLines = 1,
-                    overflow = TextOverflow.Ellipsis,
-                    modifier = Modifier.padding(top = LocalAppSpacing.current.xxs),
-                )
-            }
-            Row(
-                verticalAlignment = Alignment.CenterVertically,
-                horizontalArrangement = Arrangement.spacedBy(LocalAppSpacing.current.xs),
-            ) {
-                onCreateWorkspaceGroup?.let { createWs ->
-                    // 原型顶栏这颗是 `.btn sm pri`（`prototype/relay.html:6314`）：顶栏密排位置。
-                    // 原来那套 8×4 内边距 / 8dp 圆角 / 13dp 图标是就地手写的覆盖，
-                    // 迁到按钮族后由小档统一（10×6 / 12dp 圆角 / 16dp 图标）。
-                    AppButton(
-                        text = stringResource(Res.string.workspace_create_group_title),
-                        onClick = createWs,
-                        size = AppButtonSize.Small,
-                        leadingIcon = Res.drawable.ic_plus,
-                    )
-                }
-                if (onRefresh != null) {
-                    TopBarIconAction(
-                        icon = Res.drawable.ic_refresh,
-                        contentDescription = stringResource(Res.string.desktop_action_refresh),
-                        onClick = onRefresh,
-                    )
-                }
-            }
-        }
-    }
+    // 页头已提到 [WorkspaceBoardTitleBar]：它必须画在滚动容器之外、铺满整幅宽的
+    // `surface` 面上。这里只剩看板正文，滚动时标题栏不再跟着走。
 
     // 空态判据用**派生**的结果而不是 agents.isEmpty：一个 ag1 节点都没有时两者同真，
     // 而「有 agent 但一条会话、一个工作区都没宣告过」时派生仍会给出一行降级行

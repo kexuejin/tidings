@@ -150,9 +150,16 @@ fun GlobalSearchScreen(
     }
 
     val sp = LocalAppSpacing.current
+    // 整屏底色必须是 `background`，不是 `surface`。这一屏是**整屏替换会话列表**
+    // （组合根 App.kt 的 mobileContent 里 globalSearchOpen 分支，底导仍在），原型
+    // `screenGSearch()` 只画 `.topbar.gs` + `.scroll > .pad`，自己不铺底色，透出
+    // `.app{background:var(--bg)}`（relay.html:709）；参考帧 m-gsearch.png 与
+    // m-home-recent.png 的产品区同是 #FAFAF8。
+    // 曾经写成 surface：真机实测点搜索后整屏从 #FAFAF8 跳成 #FFFFFF（深色下
+    // 从 #121413 跳成 #232625，更扎眼），属于「切一下背景就变」的静默缺陷。
     Surface(
         modifier = modifier.fillMaxSize(),
-        color = MaterialTheme.colorScheme.surface,
+        color = MaterialTheme.colorScheme.background,
     ) {
         Column(Modifier.fillMaxSize()) {
             SearchTopBar(
@@ -273,6 +280,12 @@ private fun SearchTopBar(
     Row(
         modifier = Modifier
             .fillMaxWidth()
+            // `.topbar.gs` 继承 `.topbar{background:var(--surface)}`：顶栏是抬起的白面，
+            // 下面的结果区才透出 `--bg`。此前这一行没铺色，进搜索后顶部直接落到
+            // `background` 上 —— 与其它页的顶栏差一档（深色下一整条色带）。
+            // 根 Surface 用 background 是对的（整屏替换列表，见本文件上方注释），
+            // 要补的是**顶栏自己**这层面，不是把整屏改回 surface。
+            .background(MaterialTheme.colorScheme.surface)
             .padding(horizontal = sp.md, vertical = sp.sm),
         verticalAlignment = Alignment.CenterVertically,
         horizontalArrangement = Arrangement.spacedBy(sp.sm),

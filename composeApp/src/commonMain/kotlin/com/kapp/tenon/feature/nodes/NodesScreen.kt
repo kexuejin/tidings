@@ -346,7 +346,13 @@ fun NodesScreen(
                 modifier = Modifier
                     .weight(1f)
                     .verticalScroll(rememberScrollState())
-                    .padding(horizontal = LocalAppSpacing.current.lg),
+                    // 顶距 14：原型 `.pad{padding:14px 16px 16px}`（relay.html:780，
+                    // screenNodes 同用这一层）。此前纵向为 0，首块贴住顶栏分隔线。
+                    .padding(
+                        start = LocalAppSpacing.current.lg,
+                        top = LocalAppSpacing.current.lg14,
+                        end = LocalAppSpacing.current.lg,
+                    ),
                 // 卡间距 10dp：原型这一页的每张卡之间是内联 `<div style="height:10px"></div>`
                 // （`prototype/relay.html` 的 `screenNodes()`，与 `screenCabinetMine()` 同一个手法），
                 // 不是页面级的 14dp 行距。上一版取 `lg14` 让整页比原型松一档，

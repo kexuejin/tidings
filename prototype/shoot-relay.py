@@ -359,6 +359,27 @@ def shoot(name, size, screen, theme, w, h, extra="", scale=2):
              and os.path.getmtime(dest) >= t0 - 1)
     if not fresh:
         return "FAIL  %s（没写出新图）" % name, None
+    # 空白帧检测（2026-11-07）：「写出了新图」≠「拍到了内容」。boot 渲染调用丢失后，
+    # 每一帧都是背景色的空 PNG（实测 8.5KB、全帧单一色），sha 门禁照常入库 ——
+    # 空白就这样被固化成 manifest 的「正常」。判据 = 直方图最大色占比 ≥99.5%
+    # （真帧的背景也压不住顶栏/卡片/分割线：实测 m01-home 主色占比 ~49%）。
+    # magick 缺席（退出码非 0）时跳过本检测 —— 空白检测是锦上添花，别让它挡住
+    # 没装 ImageMagick 的机器重拍（sha 门禁仍会盯住字节变化）。
+    hist = subprocess.run(["magick", dest, "-format", "%c", "histogram:info:-"],
+                          capture_output=True, text=True)
+    if hist.returncode == 0 and hist.stdout.strip():
+        top = 0
+        total = 0
+        for line in hist.stdout.splitlines():
+            head = line.strip().split(":", 1)[0].strip()
+            if head.isdigit():
+                cnt = int(head)
+                total += cnt
+                top = max(top, cnt)
+        share = (top / total) if total else 0.0
+        if share >= 0.995:
+            return ("FAIL  %s（疑似空白帧：最大色占比 %.1f%% —— 页面没渲染出内容，"
+                    "先查 relay.html 的 boot 渲染调用与代理/服务器）" % (name, share * 100)), None
     with open(dest, "rb") as fh:
         png_sha = hashlib.sha256(fh.read()).hexdigest()
     return "ok    %-24s %8d bytes" % (name + ".png", os.path.getsize(dest)), png_sha

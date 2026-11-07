@@ -53,6 +53,8 @@ import sys
 HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, HERE)
 
+import ktcomments  # noqa: E402  唯一注释剥离实现（字符串感知，见模块头）
+
 CODE_ROOT = "."
 DESIGN_SOURCES = ["prototype/relay.html"]
 LEDGER_REL = "docs/plans/2026-10-10-relay-screen-pairing-ledger.md"
@@ -1297,11 +1299,6 @@ def _button_weight_matched(proto_weight, slices, tokens):
     return float(label["weight"]) in proto_weight
 
 
-BLOCK_COMMENT = re.compile(r"/\*.*?\*/", re.S)
-# `//` 前必须是行首或空白：`"https://…"` 这种字符串里的 `//` 不能被当成注释起点。
-LINE_COMMENT = re.compile(r"(?m)(?:^|\s)//[^\n]*")
-
-
 def strip_comments(src):
     """去掉 Kotlin 注释。
 
@@ -1310,8 +1307,13 @@ def strip_comments(src):
     （本仓 28dp）」来解释为什么必须显式给 20dp —— 量具就真的把 28 记进了
     `m-groupcreate`/`d-groupcreate` 的圆角集合，两行各多一条「只代码 28」。
     **作者在注释里写清原委是对的，量具该学会不读注释。**
+
+    实现委托 `ktcomments.py`（全仓唯一一份，字符串感知）。2026-11-07 前这里是
+    「先正则剥块注释」的两遍实现：行注释里的 `arrayOf("*/*")` 会让块注释提前开点，
+    吞掉约 280 行真实代码；且旧实现把块注释整段删掉、行号不保（本工具只按切片取值，
+    不受行号影响，但统一走同一份实现免得下一个量具再踩）。
     """
-    return LINE_COMMENT.sub("", BLOCK_COMMENT.sub("", src))
+    return ktcomments.strip_comments(src)
 
 
 def code_values(slices, tokens):
@@ -1560,7 +1562,7 @@ def render(result):
                    f"`{'win' if row['form'] == 'desktop' else 'root'}`）")
         out.append(f"- 代码落点 `{row['landing']}`" +
                    (f" → 跟进 `{', '.join(os.path.basename(f) for f in row['files'][1:])}`"
-                    if len(row["files"]) > 1 else ""))
+                    if len(row.get("files") or []) > 1 else ""))
         out.append("")
         out.append("| 维度 | 原型 | 代码 | 只在原型 | 只在代码 |")
         out.append("|---|---|---|---|---|")

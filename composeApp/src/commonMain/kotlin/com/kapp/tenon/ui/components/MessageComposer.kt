@@ -20,6 +20,7 @@ import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.text.KeyboardActions
 import androidx.compose.foundation.text.KeyboardOptions
@@ -774,6 +775,9 @@ public fun MessageComposer(
  * 采用 4 列网格展示所有可用能力（发文件、图片、PK、窗口震动、语音、历史搜索等）。
  * 每项由一个大图标卡片和单行标签组成，点击触发后自动收起面板。
  */
+/** 更多面板的固定高（原型 `.composer .more-panel{--more-h:170px}`，relay.html:1359）。 */
+private val ComposerPanelHeight = 170.dp
+
 @Composable
 internal fun ComposerMorePanel(
     items: List<ComposerCapability>,
@@ -785,10 +789,17 @@ internal fun ComposerMorePanel(
     Surface(
         shape = MaterialTheme.shapes.extraLarge,
         color = MaterialTheme.colorScheme.surfaceVariant,
-        modifier = modifier.fillMaxWidth(),
+        modifier = modifier
+            .fillMaxWidth()
+            // 固定高 = 原型 `.composer .more-panel{--more-h:170px;height:var(--more-h)}`
+            // （relay.html:1359，注释：2 行槽位；条目与提示语都不许撑高它）。
+            // 此前随内容塌缩——只有 3 项时面板矮半截，与表情面板（托盘不塌缩）
+            // 切换时整个输入区跳变（真机用户标注）。
+            .height(ComposerPanelHeight),
     ) {
         Column(
             modifier = Modifier
+                .verticalScroll(rememberScrollState())
                 .padding(horizontal = LocalAppSpacing.current.sm, vertical = LocalAppSpacing.current.md),
         ) {
             if (hint != null) {

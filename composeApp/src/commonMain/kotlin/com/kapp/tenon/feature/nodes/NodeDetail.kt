@@ -51,6 +51,7 @@ import com.kapp.tenon.generated.resources.nodes_remove_confirm_body
 import com.kapp.tenon.generated.resources.nodes_forget_confirm_body
 import com.kapp.tenon.generated.resources.nodes_remove_confirm_title
 import com.kapp.tenon.ui.components.AppButton
+import com.kapp.tenon.ui.components.MutedTag
 import com.kapp.tenon.ui.components.AppButtonSize
 import com.kapp.tenon.ui.components.AppButtonTone
 import com.kapp.tenon.ui.components.AppOutlinedButton
@@ -491,24 +492,6 @@ internal fun NodeStatePill(presence: NodePresence) {
             style = MaterialTheme.typography.labelSmall,
             fontWeight = FontWeight.SemiBold,
             modifier = Modifier.padding(horizontal = sp.sm, vertical = sp.xxs),
-        )
-    }
-}
-
-/** `.tag.muted{background:var(--surface-2);color:var(--on-2)}`（`prototype/relay.html:310`）。 */
-@Composable
-private fun MutedTag(text: String) {
-    val sp = LocalAppSpacing.current
-    Surface(
-        color = MaterialTheme.colorScheme.surfaceVariant,
-        contentColor = MaterialTheme.colorScheme.onSurfaceVariant,
-        shape = CircleShape,
-    ) {
-        Text(
-            text = text,
-            style = MaterialTheme.typography.labelSmall,
-            fontWeight = FontWeight.SemiBold,
-            modifier = Modifier.padding(horizontal = sp.sm6, vertical = sp.xxs),
         )
     }
 }

@@ -10,7 +10,8 @@ import com.kapp.tenon.domain.LuciolaQrInfo
 import kotlinx.coroutines.CoroutineScope
 
 /**
- * 实验:luciola 传输宿主（JVM 桌面）。Android/iOS 暂不实现 —— 契约默认 null 即 legacy。
+ * luciola 传输宿主契约。三端各有实现（桌面 JVM / Android / iOS，见各壳的 *LuciolaHost）；
+ * 壳没接（默认 null）即整条走 legacy。
  *
  * 三个都在**宿主侧**：共享层不该知道 luciola 的 UNIFFI 绑定与密钥落盘方式。
  * 传输与发现必须**同时**给：只给一半（有加密信道却没有发现，或反之）比 legacy 还糟，

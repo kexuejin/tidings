@@ -1187,7 +1187,6 @@ internal fun DesktopSettingsPane(
                             if (showAvatarPage) {
                                 SetAvatarPage(
                                     settingsSlice = settingsSlice,
- avatarSlice = avatarSlice,
                                     pickedAvatarBytes = avatarSlice.pickedAvatarBytes,
                                     onPickFromAlbum = controller::pickAvatar,
                                     onRemovePicked = controller::removePickedAvatar,

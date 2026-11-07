@@ -723,7 +723,7 @@ private fun CardNeutralTag(text: String) {
         color = MaterialTheme.colorScheme.onSurfaceVariant,
         modifier = Modifier
             .background(SurfaceTiers.Raised, MaterialTheme.shapes.small)
-            .padding(horizontal = sp.sm, vertical = 1.5.dp),
+            .padding(horizontal = sp.sm, vertical = sp.xxs),
     )
 }
 
@@ -1120,7 +1120,7 @@ private fun CardStepRow(step: AgentCardStep) {
                     modifier = Modifier
                         .border(1.dp, MaterialTheme.colorScheme.outline.copy(alpha = 0.04f), RoundedCornerShape(6.dp))
                         .background(SurfaceTiers.Raised, RoundedCornerShape(6.dp))
-                        .padding(horizontal = sp.osm7, vertical = 1.5.dp),
+                        .padding(horizontal = sp.osm7, vertical = sp.xxs),
                 )
             }
         }

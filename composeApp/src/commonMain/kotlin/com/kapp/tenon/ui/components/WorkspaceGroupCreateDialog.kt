@@ -45,7 +45,6 @@ import com.kapp.tenon.generated.resources.ic_folder
 import com.kapp.tenon.generated.resources.ic_plus
 import com.kapp.tenon.generated.resources.ic_qr_code_scanner
 import com.kapp.tenon.generated.resources.workspace_agent_section_sessions
-import com.kapp.tenon.generated.resources.workspace_create_group_agent_label
 import com.kapp.tenon.generated.resources.workspace_create_group_confirm
 import com.kapp.tenon.generated.resources.workspace_create_group_dedup_hint
 import com.kapp.tenon.generated.resources.workspace_create_group_enter_chat
@@ -60,7 +59,6 @@ import com.kapp.tenon.generated.resources.workspace_create_group_quick_title
 import com.kapp.tenon.generated.resources.workspace_create_group_share_qr
 import com.kapp.tenon.generated.resources.workspace_create_group_sync_devices
 import com.kapp.tenon.generated.resources.workspace_create_group_title
-import com.kapp.tenon.generated.resources.workspace_default_resident_agent
 import com.kapp.tenon.generated.resources.workspace_group_prompt_body
 import com.kapp.tenon.generated.resources.workspace_group_prompt_create
 import com.kapp.tenon.generated.resources.workspace_group_prompt_skip
@@ -117,7 +115,10 @@ public fun WorkspaceGroupCreateDialog(
                 verticalArrangement = Arrangement.spacedBy(sp.md),
             ) {
                 item {
-                    // 分支 B：已有工作区快速建群
+                    // 分支 B：已有工作区快速建群。原型 `.grphead` 是左右两个 span
+                    // （relay.html:4121-4124），各占一行；左侧 weight(1f) 单行省略、
+                    // 右侧单行 —— 此前两个 Text 都不约束宽度，窄屏/大字下右侧
+                    // 「防重绑定」会从中间断成两截。
                     Row(
                         modifier = Modifier.fillMaxWidth(),
                         horizontalArrangement = Arrangement.SpaceBetween,
@@ -128,11 +129,16 @@ public fun WorkspaceGroupCreateDialog(
                             style = MaterialTheme.typography.labelMedium,
                             fontWeight = FontWeight.Bold,
                             color = MaterialTheme.colorScheme.primary,
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis,
+                            modifier = Modifier.weight(1f),
                         )
                         Text(
                             text = stringResource(Res.string.workspace_create_group_dedup_hint),
                             style = MaterialTheme.typography.labelSmall,
                             color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            maxLines = 1,
+                            modifier = Modifier.padding(start = LocalAppSpacing.current.sm),
                         )
                     }
                 }
@@ -230,22 +236,11 @@ public fun WorkspaceGroupCreateDialog(
                             modifier = Modifier.fillMaxWidth(),
                             horizontalArrangement = Arrangement.spacedBy(sp.sm),
                         ) {
-                            Column(Modifier.weight(1f)) {
-                                Text(
-                                    text = stringResource(Res.string.workspace_create_group_agent_label),
-                                    style = MaterialTheme.typography.labelSmall,
-                                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                                    modifier = Modifier.padding(bottom = LocalAppSpacing.current.xxs),
-                                )
-                                OutlinedTextField(
-                                    value = stringResource(Res.string.workspace_default_resident_agent),
-                                    onValueChange = {},
-                                    readOnly = true,
-                                    singleLine = true,
-                                    textStyle = MaterialTheme.typography.bodySmall,
-                                    modifier = Modifier.fillMaxWidth(),
-                                )
-                            }
+                            // 「驻群智能体」字段整列移除（用户质询「是写死的吗」）：
+                            // 它引用写死的 `workspace_default_resident_agent`（「🤖 DSH (默认本地
+                            // 执行助理)」），而原型 m-createws 的表单里没有这个字段（agent 身份
+                            // 只标在每个工作区卡上），`createWorkspaceGroup` 也不给新群盖 agent
+                            // 戳 —— 字段是纯虚构。群名列回到占满整行。
                             Column(Modifier.weight(1f)) {
                                 Text(
                                     text = stringResource(Res.string.workspace_create_group_name_label),
@@ -319,7 +314,10 @@ private fun WorkspaceItemCard(
 ) {
     val sp = LocalAppSpacing.current
     Surface(
-        color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f),
+        // 半透明 surfaceVariant(0.5) 叠在白卡上会调出 #F7F7F4 —— 一个色板说不出
+        // 出处的档（check-design-palette --strict 因此红了三张帧）。M3 的
+        // surfaceContainer(#F6F5F0) 与它逐通道只差 1，且是声明档。
+        color = MaterialTheme.colorScheme.surfaceContainer,
         shape = RelayShapes.small,
         border = androidx.compose.foundation.BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant),
         modifier = Modifier.fillMaxWidth(),

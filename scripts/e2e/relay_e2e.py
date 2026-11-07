@@ -1107,7 +1107,8 @@ class UdpPeer(object):
                         # 「手机改了档案之后有没有重新广播」的判据永远看不到变化 —— 手机侧
                         # 主动广播走的正是 `entry`（`Discovery.announce()`，Discovery.kt:114-124），
                         # `alive` 只在回应我们的定向 entry 时出现。2026-10-10 全量套件 run3 的
-                        # `r88-shr1-appears-after-share-root-set` 就是这么红的：手机确实广播了
+                        # `r88-shr1-appears-after-share-root-set`（该断言其后已随 shr1 停止声明
+                        # 改判为 `r88-shr1-never-advertised-*`）就是这么红的：手机确实广播了
                         # 一条带 shr1 的 entry（日志里有 `udp<- type=entry from=f6a7b8c9`），
                         # 而夹具没把它当 profile 收下。
                         prof = (env.get("payload") or {}).get("profile")

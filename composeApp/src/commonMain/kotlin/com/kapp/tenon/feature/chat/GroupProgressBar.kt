@@ -23,6 +23,7 @@ import com.kapp.tenon.ui.components.AppButtonSize
 import com.kapp.tenon.ui.components.AppButtonTone
 import com.kapp.tenon.ui.components.AppOutlinedButton
 import com.kapp.tenon.ui.theme.LocalAppSpacing
+import com.kapp.tenon.ui.theme.SurfaceTiers
 import org.jetbrains.compose.resources.stringResource
 
 import com.kapp.tenon.generated.resources.agent_interrupt_btn
@@ -43,7 +44,11 @@ fun GroupProgressBar(
     val taskSummary = activeRun.note?.takeIf { it.isNotBlank() } ?: activeRun.state
 
     Surface(
-        color = MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.6f),
+        // 原型 m-chat-workspace 的执行条 = `background:var(--surface-2)` + primary 字
+        // （screenMChatWorkspace：`color:var(--primary);font-weight:600`）。此前
+        // primaryContainer@0.6 在浅底上调出 #D2EDDA —— 一个色板说不出出处的档，
+        // 且深色下是一块突兀的半透明绿。
+        color = SurfaceTiers.Raised,
         shape = MaterialTheme.shapes.small,
         modifier = modifier.fillMaxWidth(),
     ) {
@@ -62,7 +67,7 @@ fun GroupProgressBar(
             Text(
                 text = stringResource(Res.string.chat_group_progress_working, agentName, taskSummary),
                 style = MaterialTheme.typography.labelSmall,
-                color = MaterialTheme.colorScheme.onPrimaryContainer,
+                color = MaterialTheme.colorScheme.primary,
                 fontWeight = FontWeight.Medium,
                 maxLines = 1,
                 overflow = TextOverflow.Ellipsis,

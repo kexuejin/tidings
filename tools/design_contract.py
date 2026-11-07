@@ -40,6 +40,10 @@ import re
 import sys
 from typing import Dict, Iterable, List, Optional, Tuple
 
+# 同目录唯一注释剥离实现。sys.path 由运行入口保证含 tools/
+# （直接运行本文件或各消费方 `sys.path.insert(0, HERE)` 均已覆盖）。
+import ktcomments
+
 # ── 期望键数（解析不到就报错，防止"少读了一半还是绿的"）────────────
 EXPECTED_SPACING = 17  # 2026-10-15 G2 裁决 A：奇数节奏档 oxs3/oxs5/osm7/osm9/olg11/olg13（11→17）
 EXPECTED_SHAPE = 5
@@ -106,9 +110,6 @@ def _strip(line: str) -> str:
     return line
 
 
-_BLOCK_COMMENT = re.compile(r"/\*.*?\*/", re.S)
-
-
 def strip_comments(text: str) -> str:
     """整段源码去掉注释，**保住行号**（块注释按它占的行数换成空行）。
 
@@ -120,9 +121,14 @@ def strip_comments(text: str) -> str:
 
     反方向更危险：注释里写的 `LocalAppSpacing.current.xl` 会被当成"真的用了这个 token"，
     直接抬高消费率。所以 `scan_usage` / `scan_debt` / `scan_shape_inventory` 都改走这里。
+
+    实现委托 `ktcomments.py`（全仓唯一一份）。2026-11-07 前这里是「先正则剥块注释、
+    再按行剥 `//`」的两遍实现：块注释正则不认识字符串与行注释，`DesktopComposer.kt`
+    行注释里的 `arrayOf("*/*")` 让 `/*` 提前开点，把约 280 行真实代码吞成空白 ——
+    3 处间距字面量对棘轮不可见（症状：同文件独立扫描 4 处、量具只数到 1 处）。
+    `_strip` 仍保留给上文的逐行调用点使用。
     """
-    text = _BLOCK_COMMENT.sub(lambda m: "\n" * m.group(0).count("\n"), text)
-    return "\n".join(_strip(l) for l in text.split("\n"))
+    return ktcomments.strip_comments(text)
 
 
 def iter_code_lines(path: str):

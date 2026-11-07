@@ -553,47 +553,48 @@ class PlatformCapabilityUnavailable(
 ) : UnsupportedOperationException("$capability 在本平台尚未实现：$reason")
 
 /**
- * 未实现能力的原因串。
+ * 「本壳没接这类能力」的原因串。
  *
  * 提成常量而不是每处再写一遍，有两个理由：一是同一件事本来就不该有两个说法；
  * 二是 `:cjkLiteralGate` 按**字面量出现次数**计数（棘轮只许减不许增），
  * 同一句写两遍会被算成两处 —— 而这里真的只需要一处。
  *
- * 下面这些 `Unavailable*` 是所有平台通用的、诚实的"还没做"实现。
+ * 下面这些 `Unavailable*` 是「平台壳没有装配这项能力」的诚实占位：能力本身已在
+ * 协议与领域层实现（文件收发、扫码配对、自动发现都有真实现），缺的是那一侧的装配。
  */
-private const val NOT_IMPLEMENTED_FILE_TRANSFER = "文件收发是 P3，本期未实现"
-private const val NOT_IMPLEMENTED_QR_PAIRING = "扫码配对是 P4，本期未实现"
-private const val NOT_IMPLEMENTED_DISCOVERY = "自动发现是 P4，本期未实现"
+private const val NOT_WIRED_FILE_TRANSFER = "本壳未接文件选择：文件收发已在协议与领域层实现"
+private const val NOT_WIRED_QR_PAIRING = "本壳未接扫码：扫码配对已在有能力平台实现"
+private const val NOT_WIRED_DISCOVERY = "本壳未接发现引擎：自动发现已在有能力平台实现"
 
 object UnavailableFilePicker : FilePicker {
     override suspend fun pick(): PickedFile? =
-        throw PlatformCapabilityUnavailable("FilePicker", NOT_IMPLEMENTED_FILE_TRANSFER)
+        throw PlatformCapabilityUnavailable("FilePicker", NOT_WIRED_FILE_TRANSFER)
 
     override suspend fun pickMultiple(): List<PickedFile> =
-        throw PlatformCapabilityUnavailable("FilePicker", NOT_IMPLEMENTED_FILE_TRANSFER)
+        throw PlatformCapabilityUnavailable("FilePicker", NOT_WIRED_FILE_TRANSFER)
 }
 
 object UnavailableSaveDirectoryPicker : SaveDirectoryPicker {
     override suspend fun pickDirectory(): String? =
-        throw PlatformCapabilityUnavailable("SaveDirectoryPicker", NOT_IMPLEMENTED_FILE_TRANSFER)
+        throw PlatformCapabilityUnavailable("SaveDirectoryPicker", NOT_WIRED_FILE_TRANSFER)
 }
 
 object UnavailableQrScanner : QrScanner {
     override suspend fun scan(): String? =
-        throw PlatformCapabilityUnavailable("QrScanner", NOT_IMPLEMENTED_QR_PAIRING)
+        throw PlatformCapabilityUnavailable("QrScanner", NOT_WIRED_QR_PAIRING)
 
     override suspend fun scanImage(path: String): String? =
-        throw PlatformCapabilityUnavailable("QrScanner", NOT_IMPLEMENTED_QR_PAIRING)
+        throw PlatformCapabilityUnavailable("QrScanner", NOT_WIRED_QR_PAIRING)
 }
 
 object UnavailableCameraGate : CameraGate {
     override suspend fun ensureAccess(): Boolean =
-        throw PlatformCapabilityUnavailable("CameraGate", NOT_IMPLEMENTED_QR_PAIRING)
+        throw PlatformCapabilityUnavailable("CameraGate", NOT_WIRED_QR_PAIRING)
 }
 
 object UnavailableMdnsAdvertiser : MdnsAdvertiser {
     override suspend fun start(serviceName: String, port: Int): Boolean =
-        throw PlatformCapabilityUnavailable("MdnsAdvertiser", NOT_IMPLEMENTED_DISCOVERY)
+        throw PlatformCapabilityUnavailable("MdnsAdvertiser", NOT_WIRED_DISCOVERY)
 
     override fun stop() = Unit
 }

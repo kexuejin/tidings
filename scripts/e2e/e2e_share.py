@@ -14,7 +14,7 @@
 
 R88/R89 是**诚实的负向 / 回归夹具**
 ------------------------------------
-共享文件柜（`share`，cap `shr1`）在 relay 侧**没有实现**。这不是推断，是本夹具逐条核过的：
+共享文件柜（`share`，cap `shr1`）在 relay 侧**没有实现**——裁决后手机也**不再声明** `shr1`。这不是推断，是本夹具逐条核过的：
 
 1. `composeApp/src/commonMain/kotlin/com/kapp/tenon/app/RelayController.kt:739`
    `internal val CHAT_INBOUND_TYPES: Set<String> = setOf(MsgTypes.MSG)` —— 只有 `msg`；
@@ -942,7 +942,7 @@ def cabinet_phase(args, peer, prof, caps):
           % (R.find_ui(text=UI_GRANTS_TITLE, timeout=1.0) is not None and UI_GRANTS_TITLE or "(未渲染)",
              R.find_ui(text=UI_RECENT_TITLE, timeout=1.0) is not None and UI_RECENT_TITLE or "(未渲染)"))
 
-    # 设过根目录之后，手机应当重新广播带 shr1 的 profile。
+    # 裁决后 shr1 永不广播：设过根目录也不该出现（协议侧只有壳，宣告即假承诺）。
     t0 = time.time()
     caps2 = list(caps)
     deadline = time.time() + _budget(args, 20)
@@ -953,14 +953,12 @@ def cabinet_phase(args, peer, prof, caps):
             if c != list(caps):
                 caps2 = c
                 break
-            if R.CAP_SHARE in c:
-                caps2 = c
-                break
         time.sleep(0.5)
-    R.check("r88-shr1-appears-after-share-root-set", R.CAP_SHARE in caps2,
-            "设过共享目录（%.1fs 后读到的 caps=%s）%s %s —— RelaySettings.kt:196-201 "
-            "isShareEnabled() 转真 ⇒ :213 才 add(CAP_SHARE)"
-            % (time.time() - t0, caps2, "含" if R.CAP_SHARE in caps2 else "**仍不含**", R.CAP_SHARE))
+    R.check("r88-shr1-never-advertised-after-share-root-set", R.CAP_SHARE not in caps2,
+            "设过共享目录（%.1fs 后读到的 caps=%s）—— shr1 %s。裁决后 isShareEnabled() "
+            "只管本机柜面配置，不再 add(CAP_SHARE)（PROTOCOL-COVERAGE §五）"
+            % (time.time() - t0, caps2,
+               "**出现了，必须为否**" if R.CAP_SHARE in caps2 else "仍不广播，正确"))
 
     phase("R89 浏览对端文件柜 —— 本机从不发 share:list")
     R.check("r89-phone-never-sent-any-share-frame",
@@ -1255,9 +1253,9 @@ def run(args):
 
         if args.dry_run:
             print("\n[dry-run] 不碰网络、不碰设备：跳过 adb、握手、界面驱动与 UDP sink。")
-            print("[dry-run] 真机将执行：握手(caps 里查 shr1/av1) → 文件柜页"
+            print("[dry-run] 真机将执行：握手(caps 里核验 shr1 永不出现/av1) → 文件柜页"
                   "(未开柜态/三档权限/停止共享/写死的 ~/Documents/Cabinet) → "
-                  "设根目录后等 caps 重新广播出 shr1 → 对端文件柜视图(标题把人数当名字/"
+                  "设根目录后核验 shr1 仍不广播 → 对端文件柜视图(标题把人数当名字/"
                   "共 0 项/只读徽章/无下载入口) → 入站 share:list(有 ACK、无回应) → "
                   "update(有 ACK 被丢)/peers(无 ACK) → 设置页加网段+立即探测"
                   "(进度行 + 本机 :%d 收到 entry) → 入站 scan-ranges 被吸收并回发 → "
@@ -1309,16 +1307,10 @@ def _body(args, peer, sink):
              prof.get("ver"), caps))
 
     phase("caps：共享文件柜与头像的宣告面")
-    shr1_before = R.CAP_SHARE in caps
-    if shr1_before:
-        R.log("caps 里已经有 %s —— 这台设备之前被设过共享目录，"
-              "「默认不宣告 shr1」本次不成立（不判失败、也不当作通过）" % R.CAP_SHARE)
-    else:
-        R.check("r88-shr1-not-advertised-before-share-root", True,
-                "caps=%s 里没有 %s —— RelaySettings.kt:162 shareRoot 默认 null ⇒"
-                " :196-201 isShareEnabled() 为假 ⇒ :213 不加 CAP_SHARE。"
-                "矩阵 §2 索引表把 shr1 记成「条件（isShareEnabled()）」是对的"
-                % (caps, R.CAP_SHARE))
+    R.check("r88-shr1-never-advertised", R.CAP_SHARE not in caps,
+            "caps=%s 里不应有 %s —— 裁决后手机对 shr1 永不广播（协议侧只有壳，"
+            "宣告即假承诺，见 PROTOCOL-COVERAGE §五）"
+            % (caps, R.CAP_SHARE))
     R.check("r92-av1-never-advertised-in-caps", R.CAP_AVATAR not in caps,
             "caps 里没有 %s —— RelaySettings.caps() 对 av1 根本没有分支，"
             "所以「自定义头像」连协议宣告面都不存在（R92 的 UI 入口那一半"

@@ -468,7 +468,10 @@ data class RelaySettings(
         if (channelCapable) add(MsgTypes.CAP_AGENT_CHANNEL)
         if (remoteView) add(MsgTypes.CAP_REMOTE_VIEW)
         if (remoteShare) add(MsgTypes.CAP_REMOTE_SHARE)
-        if (isShareEnabled()) add(MsgTypes.CAP_SHARE)
+        // shr1 停止声明（裁决：共享文件柜协议侧只有壳 —— 入站 share 帧业务层丢弃、
+        // 本端从不发 share:list，宣告即对端眼中的假承诺，见 PROTOCOL-COVERAGE §五）。
+        // isShareEnabled()/shareRoot 保留：它们还管本机柜面的本地上传记录。
+        // 副产物：share 支持的桌面宿主从 caps 16/16 满额释放出一格（D-017 的约束松了一格）。
         if (customAvatar) add(MsgTypes.CAP_AVATAR)
     }
 

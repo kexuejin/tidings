@@ -176,7 +176,7 @@ internal fun ChatHeader(
                 onClick = onBack,
             )
         }
-        val secondaryText = if (group != null) {
+        val secondaryText: String? = if (group != null) {
             stringResource(Res.string.chat_group_members, group.members.size)
         } else if (peerIsAgent && identityContext != null) {
             val sessionName = activeSession?.let {
@@ -188,19 +188,14 @@ internal fun ChatHeader(
                 "error" -> stringResource(Res.string.agent_session_state_error)
                 else -> stringResource(Res.string.agent_session_state_idle)
             }
-            buildString {
-                if (workspaceName != null) {
-                    append(workspaceName)
-                    append(" · ")
-                }
-                if (sessionName != null) {
-                    append(sessionName)
-                    append(" · ")
-                    append(sessionState)
-                    append(" · ")
-                }
-                append(if (peer.online) stringResource(Res.string.common_online) else stringResource(Res.string.common_offline))
-            }
+            // 副标题只放「工作区 · 会话 · 状态」，没有就**不渲染**。在线/离线在标题行的
+            // titleTrailing 已有（StatusDot + 文字）—— 上一版无内容时回退到在线态，
+            // 结果 agent 还没有会话时头部连读两行「在线」（真机用户标注）。
+            // 原型 m03-chat 的副标题是 IP:端口·TCP·能力，也没有第二份在线态。
+            listOf(
+                workspaceName,
+                sessionName?.let { "$sessionName · $sessionState" },
+            ).filterNotNull().joinToString(" · ").ifEmpty { null }
         } else {
             buildString {
                 if (restored) {

@@ -45,6 +45,9 @@
     python3 scaffold/tools/check-design-palette.py                 # 报告
     python3 scaffold/tools/check-design-palette.py --strict        # 有缺陷就非零退出
     python3 scaffold/tools/check-design-palette.py --refs <目录>    # 换一批图查
+    python3 tools/check-design-palette.py --css-vars               # 原型 CSS 变量语义门禁
+
+`--css-vars` 不需要截图也不需要 ImageMagick，读的是 `prototype/relay.html` 本身。
 
 依赖只有 ImageMagick 的 `magick`（`histogram:info:-`），不需要 numpy/PIL；
 ubuntu-latest 自带 imagemagick。
@@ -108,7 +111,14 @@ M3_ROLE = {k: {v.upper(): r for r, v in roles.items()} for k, roles in M3_BASELI
 # 1dp 恰好 0.0512 —— Surface(tonalElevation = 1.dp) 出的 #F4F7F6 就是它。
 ELEVATION_ALPHAS = [round((4.5 * math.log(e + 1) + 2) / 100, 6) for e in (1, 2, 3, 4, 5, 6, 8, 12)]
 STATE_ALPHAS = [0.08, 0.10, 0.16, 0.12, 0.38]
-ALL_ALPHAS = sorted(set(ELEVATION_ALPHAS + STATE_ALPHAS))
+# 原型精确值档（2026-11-07 视觉对齐批入账）：升级稿卡片引擎的提示横幅与 mchip
+# 用的是这三档 alpha（`prototype/relay.html:556-559` 的 .bn.info rgba(107,78,230,.06) /
+# .bn.done rgba(16,185,129,.07) / :530 .tag.agent rgba(107,78,230,.09)、:544 .mchip.pri .08）。
+# 它们不是 Material 状态层公式出来的数，是原型逐值写死的保真档 —— 代码侧
+# （feature/chat/AgentCards.kt 的横幅族）照抄，量具必须认得，否则每张带横幅的
+# 帧都报「说不出出处」。
+PROTO_ALPHAS = [0.06, 0.07, 0.09]
+ALL_ALPHAS = sorted(set(ELEVATION_ALPHAS + STATE_ALPHAS + PROTO_ALPHAS))
 
 # 8 位 ARGB（Compose 的常规写法）与 6 位 RGB 都能读；8 位的 alpha 保留下来 ——
 # 半透明声明色不能丢 alpha（丢了就成了一个不存在的纯色）。
@@ -184,6 +194,10 @@ def derived_palette(declared: dict[str, list[str]]) -> dict[str, str]:
 
     半透明声明色（`#AARRGGBB`）只当 over，且**用它自己的 alpha**（不是 Material 那套档位）：
     它自己不是可渲染像素，叠在不透明底上之后才是。
+
+    **alpha 先量化到 8bit**（2026-11-07）：Skia 合成时 alpha 是 0-255 整数
+    （0.06f → 15/255 = 0.0588），浮点直算与实拍像素会差 1
+    （agentAccent@0.06 over white：浮点 F6F4FE、实拍 F6F5FE）。
     """
     out: dict[str, str] = {}
     colors = list(declared)
@@ -194,6 +208,7 @@ def derived_palette(declared: dict[str, list[str]]) -> dict[str, str]:
             if over == base:
                 continue
             for a in alphas:
+                a = round(a * 255) / 255  # 与 Skia 的 8bit alpha 同步
                 out.setdefault(blend(over, base, a), f"{over} @{a:.4g} over {base}")
     return out
 
@@ -290,6 +305,89 @@ def scan_role_fallbacks(root: Path, assigned: set[str]) -> list[tuple[str, int, 
     ]
 
 
+# ---------------------------------------------------------------------------
+# 原型 CSS 变量语义（`--css-vars`）
+#
+# `var(--x)` 指向一个从没定义过的变量时，浏览器**不报错、不画边框/背景**：那条
+# 属性整条作废，页面照常渲染。2026-11-06 实测 4 个死变量共 9 处消费
+# （--secondary-c / --on-secondary-c / --border / --on-3），症状是「卡片、分隔线、
+# 小字莫名其妙不见了」。截图调色板只检查**画出来的像素**，照不到没画出来的颜色；
+# `check-render.mjs` 查的是渲染函数与 symbol，也不查 CSS 变量。所以这一层必须在
+# CSS 文本上判。同理，`:root` 的颜色变量若没在 html[data-theme="dark"] 覆盖，
+# 切深色时会继续用浅色值（局部不跟随主题）。
+# ---------------------------------------------------------------------------
+
+# `:root` 里刻意两态同值的颜色变量，逐条写理由（白名单不是垃圾桶）。
+DARK_OVERRIDE_ALLOWED = {
+    "--chrome-bg",  # 系统窗口 chrome 底色，两态都刻意近黑，不属于主题色
+}
+CSS_COLOR_VALUE = re.compile(r"#[0-9a-fA-F]{3,8}\b|rgba?\(")
+
+
+def css_rule_block(src: str, selector: str) -> str:
+    """按花括号平衡取出 selector 的声明块，不引 CSS 解析库。"""
+    at = src.index(selector)
+    opened = src.index("{", at)
+    depth = 0
+    for i in range(opened, len(src)):
+        if src[i] == "{":
+            depth += 1
+        elif src[i] == "}":
+            depth -= 1
+            if depth == 0:
+                return src[opened + 1:i]
+    raise ValueError("CSS 规则没有闭合：%s" % selector)
+
+
+def check_css_vars(root: Path) -> int:
+    html_file = root / "prototype" / "relay.html"
+    html = html_file.read_text(encoding="utf-8")
+    lines = html.splitlines()
+
+    defined = set(re.findall(r"(--[\w-]+)\s*:", html))
+    # `var(--x, fallback)` 有兜底，不算死引用；只看没有兜底的那一支。
+    refs = list(re.finditer(r"var\(\s*(--[\w-]+)\s*([,)])", html))
+    dead: dict[str, int] = {}
+    for m in refs:
+        name, tail = m.group(1), m.group(2)
+        if tail == "," or name in defined:
+            continue
+        dead[name] = dead.get(name, 0) + 1
+
+    light = css_rule_block(html, ":root{")
+    dark = css_rule_block(html, 'html[data-theme="dark"]{')
+    light_colors = {
+        name
+        for name, value in re.findall(r"(--[\w-]+)\s*:\s*([^;]+);", light)
+        if CSS_COLOR_VALUE.search(value)
+    }
+    dark_names = set(re.findall(r"(--[\w-]+)\s*:", dark))
+    missing_dark = sorted(light_colors - dark_names - DARK_OVERRIDE_ALLOWED)
+
+    # 行内硬编码色只盘点不判红：历史色值要逐条评审，先把分母亮出来。
+    inline_hard = re.findall(r'style="[^"]*?(#[0-9a-fA-F]{3,8}\b|rgba?\([^)]*\))', html)
+
+    print(f"[css-vars] {html_file.relative_to(root)}：定义 {len(defined)} 个变量，"
+          f"var() 引用 {len(refs)} 处（带兜底 {sum(1 for m in refs if m.group(2) == ',')} 处）")
+    print(f"[css-vars] :root 颜色变量 {len(light_colors)} 个 / 深色覆盖 "
+          f"{len(light_colors & dark_names)} 个 / 白名单 {len(light_colors & DARK_OVERRIDE_ALLOWED)} 个")
+    print(f"[css-vars] 行内硬编码色 {len(inline_hard)} 处（仅盘点）")
+
+    if dead:
+        print("FAIL：指向从未定义、且没有兜底的变量（属性整条作废，浏览器不报错）")
+        for name, n in sorted(dead.items()):
+            first = next((i + 1 for i, line in enumerate(lines) if "var(" + name in line), 0)
+            print(f"    {name:24s} {n:2d} 处  首次 relay.html:{first}")
+        return 1
+    if missing_dark:
+        print('FAIL：:root 的颜色变量在 html[data-theme="dark"] 里没有覆盖（切深色仍用浅色值）')
+        for name in missing_dark:
+            print(f"    {name}")
+        return 1
+    print("OK：原型 CSS 变量无死引用、深色无漏覆盖")
+    return 0
+
+
 def main() -> int:
     ap = argparse.ArgumentParser()
     ap.add_argument("--root", default=None)
@@ -301,9 +399,16 @@ def main() -> int:
     ap.add_argument("--min-coverage", type=float, default=0.5, help="低于这个占比的颜色忽略（%%）")
     ap.add_argument("--strict", action="store_true", help="有缺陷就非零退出")
     ap.add_argument("--quiet", action="store_true", help="只打汇总")
+    ap.add_argument(
+        "--css-vars",
+        action="store_true",
+        help="只跑原型 CSS 变量语义门禁（不需要参考图/ImageMagick；死引用或深色漏覆盖即非零）",
+    )
     args = ap.parse_args()
 
     root = Path(args.root).resolve() if args.root else repo_root()
+    if args.css_vars:
+        return check_css_vars(root)
     declared = load_declared(root)
     derived = derived_palette(declared)
     accepted = load_accepted(root)

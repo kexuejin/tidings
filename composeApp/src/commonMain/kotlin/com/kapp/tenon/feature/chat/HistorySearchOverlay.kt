@@ -939,7 +939,9 @@ internal fun CalendarGrid(
                         modifier = Modifier
                             .weight(1f)
                             .height(32.dp)
-                            .clip(RoundedCornerShape(6.dp))
+                            // `.hsdays` 日期格（原型 radius 7×660）—— ShapeRoles.DayCell
+                            // 声明的出处就是本文件这一族，此前手写 6.dp 与角色差 1dp。
+                            .clip(ShapeRoles.DayCell)
                             .background(bg)
                             .then(
                                 if (selectable) {

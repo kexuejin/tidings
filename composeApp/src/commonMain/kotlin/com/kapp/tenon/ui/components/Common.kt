@@ -271,7 +271,33 @@ fun KindBadge(isAgent: Boolean) {
             color = foreground,
             style = MaterialTheme.typography.labelSmall,
             fontWeight = FontWeight.SemiBold,
-            modifier = Modifier.padding(horizontal = sp.sm6, vertical = 1.5.dp),
+            // 纵向口径 = sp.xxs(2)（ConversationRow.PinnedTag 批次定档：原型 1.5px
+            // 统一 snap 到 2dp，残留的 1.5.dp 字面量随批归一）。
+            modifier = Modifier.padding(horizontal = sp.sm6, vertical = sp.xxs),
+        )
+    }
+}
+
+/**
+ * 中性徽标（「未上报工作区」这类"还缺哪一层"的说明）。
+ *
+ * `.tag.muted{background:var(--surface-2);color:var(--on-2)}`（`prototype/relay.html:310`）。
+ * 原先 WorkspaceUnitCard 与 NodeDetail 各有一份逐字相同的 private 实现（全屏视觉
+ * 对齐批次合并）—— 同一个元素两份定义，改一处漏一处。
+ */
+@Composable
+internal fun MutedTag(text: String) {
+    val sp = LocalAppSpacing.current
+    Surface(
+        color = MaterialTheme.colorScheme.surfaceVariant,
+        contentColor = MaterialTheme.colorScheme.onSurfaceVariant,
+        shape = CircleShape,
+    ) {
+        Text(
+            text = text,
+            style = MaterialTheme.typography.labelSmall,
+            fontWeight = FontWeight.SemiBold,
+            modifier = Modifier.padding(horizontal = sp.sm6, vertical = sp.xxs),
         )
     }
 }

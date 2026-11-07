@@ -6,6 +6,7 @@ import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.rememberScrollState
@@ -275,23 +276,45 @@ fun AgentConsoleScreen(
             modifier = modifier,
         )
     } else {
-        Column(
-            modifier = modifier
-                .fillMaxSize()
-                .centerCapped(ContentWidths.Pane)
-                .verticalScroll(rememberScrollState())
-                .padding(horizontal = LocalAppSpacing.current.lg),
-            verticalArrangement = Arrangement.spacedBy(LocalAppSpacing.current.md),
-        ) {
-            WorkspaceBoardView(
-                                agentSlice = agentSlice,
-                nodeSlice = nodeSlice,
-                settingsSlice = settingsSlice,
+        // 顶栏在滚动列**之外**：整幅宽的 `surface` 面 + hairline，与另外四个页签
+        // 同一个 [WorkspaceBoardTitleBar] / [LargeTitleBar]。此前标题画在这个带横向
+        // padding 的滚动列里，铺的是页面底色 `background`，于是这一页顶部和别的页签
+        // 差一整条色带（深色 #232625→#121413），切 tab 时肉眼就是「跳色」。
+        Column(modifier.fillMaxSize()) {
+            if (showHeader) {
+                WorkspaceBoardTitleBar(
+                    now = now,
+                    onRefresh = onRefresh,
+                    onCreateWorkspaceGroup = onCreateWorkspaceGroup,
+                    agentSlice = agentSlice,
+                    nodeSlice = nodeSlice,
+                    settingsSlice = settingsSlice,
+                )
+            }
+            Column(
+                modifier = Modifier
+                    .weight(1f)
+                    .fillMaxWidth()
+                    .centerCapped(ContentWidths.Pane)
+                    .verticalScroll(rememberScrollState())
+                    // 顶距 14：原型 `.pad{padding:14px 16px 16px}`（relay.html:780）——
+                    // 此前纵向为 0，首块（警告条）直接顶在 TitleBarDivider 上，
+                    // 真机上分隔线与横幅之间的缝只剩 ~3dp。
+                    .padding(
+                        start = LocalAppSpacing.current.lg,
+                        top = LocalAppSpacing.current.lg14,
+                        end = LocalAppSpacing.current.lg,
+                    ),
+                verticalArrangement = Arrangement.spacedBy(LocalAppSpacing.current.md),
+            ) {
+                WorkspaceBoardView(
+                    agentSlice = agentSlice,
+                    nodeSlice = nodeSlice,
+                    settingsSlice = settingsSlice,
 
-                agents = agents,
-                selectedAgent = selected,
-                showHeader = showHeader,
-                now = now,
+                    agents = agents,
+                    selectedAgent = selected,
+                    now = now,
                 onSelectAgent = onSelectAgent,
                 onOpenWorkspace = { peerId, wsId, sessionId ->
                     onSelectAgent(peerId)
@@ -317,12 +340,12 @@ fun AgentConsoleScreen(
                 onRefresh = onRefresh,
                 onRespondApproval = onRespondApproval,
                 onRespondChoice = onRespondChoice,
-                onCreateWorkspaceGroup = onCreateWorkspaceGroup,
-            )
+                )
 
-            // 底部留白：原先是空 `Column(padding(bottom)) {}` —— 空组合件当间距用，
-            // 读代码的人会以为那里少了内容。Spacer 表达的就是间距本身。
-            Spacer(Modifier.height(LocalAppSpacing.current.xl))
+                // 底部留白：原先是空 `Column(padding(bottom)) {}` —— 空组合件当间距用，
+                // 读代码的人会以为那里少了内容。Spacer 表达的就是间距本身。
+                Spacer(Modifier.height(LocalAppSpacing.current.xl))
+            }
         }
     }
 }

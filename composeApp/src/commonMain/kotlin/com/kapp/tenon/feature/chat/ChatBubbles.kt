@@ -46,8 +46,6 @@ import androidx.compose.ui.hapticfeedback.HapticFeedbackType
 import androidx.compose.ui.platform.LocalHapticFeedback
 import androidx.compose.ui.platform.LocalClipboardManager
 import androidx.compose.foundation.shape.RoundedCornerShape
-import androidx.compose.foundation.BorderStroke
-import androidx.compose.foundation.border
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.shape.CircleShape
@@ -67,7 +65,6 @@ import com.kapp.tenon.platform.ReceivedFileActions
 import com.kapp.tenon.ui.components.PkCardView
 import com.kapp.tenon.ui.components.PeerAvatar
 import com.kapp.tenon.ui.components.ThinkingBlock
-import com.kapp.tenon.ui.components.formatClock
 import com.kapp.tenon.ui.theme.IconSizes
 import com.kapp.tenon.ui.theme.LocalAppSpacing
 import org.jetbrains.compose.resources.painterResource
@@ -357,7 +354,7 @@ internal fun MessageBubble(
     } else if (message.mine) {
         MaterialTheme.colorScheme.primaryContainer
     } else {
-        MaterialTheme.colorScheme.surface
+        MaterialTheme.colorScheme.surfaceVariant
     }
     var menuOpen by remember { mutableStateOf(false) }
     // 「删除本机这条」是破坏性动作：先立确认框（与列表删除同一规矩）。
@@ -365,8 +362,8 @@ internal fun MessageBubble(
     // 长按菜单的触感确认（HapticFeedbackType.LongPress）：气泡的长按是唯一入口，
     // 没有触感时用户分不清「按住了」与「按了个寂寞」—— 尤其菜单弹出有延迟的时候。
     val haptics = LocalHapticFeedback.current
-    val bubbleBorder: BorderStroke? = null
-
+    // 气泡无边框（设计裁决，与其他 IM 对齐）：分离靠色块对比 —— 收到的
+    // 气泡是 surface-2，比聊天区背景深一档；发丝边 retired（原型 .bub 同步去掉）。
     val bubbleShape = chatBubbleShape(isCustomCard, message.mine, hasPrevSender, hasNextSender)
 
     val highlightColor by animateColorAsState(
@@ -423,7 +420,6 @@ internal fun MessageBubble(
             Surface(
                 color = bubbleColor,
                 shape = bubbleShape,
-                border = bubbleBorder,
                 modifier = Modifier
                     .bubbleMaxWidthForText(
                         availableWidth = this@BoxWithConstraints.maxWidth,
@@ -444,14 +440,6 @@ internal fun MessageBubble(
                 } else {
                     PaddingValues(horizontal = sp.lg14, vertical = sp.md10)
                 }
-                val isSingleLineShortText = !isCustomCard &&
-                    !renderMarkdown &&
-                    quotedMessage == null &&
-                    message.reasoning.isNullOrBlank() &&
-                    message.text.isNotBlank() &&
-                    !message.text.contains('\n') &&
-                    message.text.length <= 16 &&
-                    !(message.mine && message.delivery == DeliveryState.Failed)
 
                 Column(Modifier.padding(bubblePad)) {
                 // 被引用的源消息卡片：点击可跳至原消息
@@ -537,39 +525,7 @@ internal fun MessageBubble(
                             modifier = Modifier.padding(bottom = sp.xs),
                         )
                     }
-                    val metaColor = if (message.mine) {
-                        MaterialTheme.colorScheme.onPrimaryContainer.copy(alpha = 0.75f)
-                    } else {
-                        MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.8f)
-                    }
-
-                    if (isSingleLineShortText) {
-                        // 短文本单行内联时间戳与状态（Telegram 式）：
-                        // 避免单行短消息（"好的"、"收到"）在底部被独立时间行强行撑高一倍，极致轻巧。
-                        Row(
-                            verticalAlignment = Alignment.Bottom,
-                            horizontalArrangement = Arrangement.spacedBy(sp.sm),
-                        ) {
-                            Text(text = linkifyPlainText(message.text), style = MaterialTheme.typography.bodyLarge)
-                            Row(
-                                verticalAlignment = Alignment.CenterVertically,
-                                horizontalArrangement = Arrangement.spacedBy(sp.xs),
-                            ) {
-                                Text(
-                                    text = formatClock(message.at),
-                                    style = MaterialTheme.typography.labelSmall,
-                                    color = metaColor,
-                                )
-                                if (message.mine) {
-                                    DeliveryCheckmark(
-                                        delivery = message.delivery,
-                                        isFileCompleted = false,
-                                        tint = metaColor,
-                                    )
-                                }
-                            }
-                        }
-                    } else if (message.text.isNotBlank()) {
+                    if (message.text.isNotBlank()) {
                         if (renderMarkdown) {
                             MarkdownMessage(message.text)
                         } else {
@@ -581,42 +537,19 @@ internal fun MessageBubble(
                         }
                     }
                 }
-                if (!isCustomCard && !isSingleLineShortText) {
-                    // meta 行**右对齐**、投递标记与时间同行：成熟 IM（Telegram）的摆法。
-                    // 采用 align(Alignment.End) 而不是 fillMaxWidth()，避免中短文本在多行时被强行撑满最大宽度。
+                if (!isCustomCard && message.mine && message.delivery == DeliveryState.Failed && onRetry != null) {
                     Row(
                         modifier = Modifier
                             .padding(top = sp.xs)
                             .align(Alignment.End),
-                        horizontalArrangement = Arrangement.spacedBy(sp.sm, Alignment.End),
                         verticalAlignment = Alignment.CenterVertically,
                     ) {
-                        val metaColor = if (message.mine) {
-                            MaterialTheme.colorScheme.onPrimaryContainer.copy(alpha = 0.75f)
-                        } else {
-                            MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.8f)
-                        }
-                        if (message.mine && message.delivery == DeliveryState.Failed && onRetry != null) {
-                            AppTextButton(
-                                text = stringResource(Res.string.chat_delivery_resend),
-                                size = AppButtonSize.Compact,
-                                tone = AppButtonTone.Danger,
-                                onClick = { onRetry(message.text) },
-                            )
-                        }
-                        Text(
-                            text = formatClock(message.at),
-                            style = MaterialTheme.typography.labelSmall,
-                            color = metaColor,
+                        AppTextButton(
+                            text = stringResource(Res.string.chat_delivery_resend),
+                            size = AppButtonSize.Compact,
+                            tone = AppButtonTone.Danger,
+                            onClick = { onRetry(message.text) },
                         )
-                        if (message.mine) {
-                            DeliveryCheckmark(
-                                delivery = message.delivery,
-                                isFileCompleted = false,
-                                // 与时间同色：meta 行内所有标记同一灰度档，比默认 primary 更收敛。
-                                tint = metaColor,
-                            )
-                        }
                     }
                 }
             }

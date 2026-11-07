@@ -54,8 +54,11 @@ internal fun ChatHeaderContent(
     isGroup: Boolean,
     /** 桌面头像右下角的在场点；null = 不画（手机不画头像点、群也不画）。 */
     avatarOnline: Boolean?,
-    /** 副行文案。两端各自的取舍（会话名/工作区/成员数/能力 token）在调用方算好。 */
-    secondaryText: String,
+    /** 副行文案。两端各自的取舍（会话名/工作区/成员数/能力 token）在调用方算好。
+     *  null = 这一头没有要说的话，整行不渲染 —— 别拿在线态之类标题行已有的
+     *  信息来填（titleTrailing 的 StatusDot + 文案已经说了在不在，再写一遍
+     *  就是两行重复的「在线」，真机确认过）。 */
+    secondaryText: String?,
     density: ChatHeaderDensity,
     avatar: Int? = null,
     avatarBytes: ByteArray? = null,
@@ -119,17 +122,19 @@ internal fun ChatHeaderContent(
                 )
                 titleTrailing()
             }
-            Text(
-                text = secondaryText,
-                style = if (density == ChatHeaderDensity.Phone) {
-                    MaterialTheme.typography.labelSmall
-                } else {
-                    MaterialTheme.typography.bodySmall
-                },
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-                maxLines = if (density == ChatHeaderDensity.Desktop && narrow) 2 else 1,
-                overflow = TextOverflow.Ellipsis,
-            )
+            if (secondaryText != null) {
+                Text(
+                    text = secondaryText,
+                    style = if (density == ChatHeaderDensity.Phone) {
+                        MaterialTheme.typography.labelSmall
+                    } else {
+                        MaterialTheme.typography.bodySmall
+                    },
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    maxLines = if (density == ChatHeaderDensity.Desktop && narrow) 2 else 1,
+                    overflow = TextOverflow.Ellipsis,
+                )
+            }
         }
     }
 }

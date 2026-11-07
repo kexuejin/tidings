@@ -69,7 +69,8 @@ internal object CapabilityInventory {
         MsgTypes.CAP_MSG_AGENT_SESSION to
             "预埋：阶段 C1 未实现，本端既不声明也不解析（见 docs/plans/2026-10-12-relay-agent-session-scheme.md）",
         MsgTypes.CAP_SHARE to
-            "由壳按开关条件声明（RelaySettings.caps 的 isShareEnabled）",
+            "停止声明（裁决：共享文件柜协议侧只有壳，宣告即假承诺 —— 见 PROTOCOL-COVERAGE §五；"
+                + "isShareEnabled 仍管本机柜面配置，本端对 shr1 永不广播）",
         MsgTypes.CAP_REMOTE_VIEW to
             "由壳按平台能力条件声明（isShareSupported）",
         MsgTypes.CAP_REMOTE_SHARE to

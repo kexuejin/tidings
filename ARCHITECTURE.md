@@ -72,7 +72,7 @@
   - 三条边界由两条可执行判据守着：`DomainHasNoComposeTest`（源码级：领域包不许 `import androidx.compose.*`）与 `:cli`（运行时：只链接 `:app` 的程序 classpath 上 0 个 Compose jar）。
 - **`:composeApp`**：UI 表现层。包含会话列表、聊天视窗、节点发现、Agent 看板、设置面板及多端自适应布局。它**依赖** `:app`，不再包含领域逻辑。
 - **`:cli`**：无 UI 的 Tidings 客户端。不是产品功能，而是「领域层真的能脱离 UI 运行」的**可执行验收物**：它起控制器、发消息、读收件箱，且只链接 `:app`。
-- **`:agentNode`**：Agent 控制面组件。提供本地回环 HTTP API（Ktor Server），供 AI 代理或本地脚本调度与交互。在桌面形态下作为库被 `desktopApp` 同进程引用。
+- **`:agentNode`**：Agent 控制面组件。提供本地回环 HTTP API（JDK 内置 HttpServer），供 AI 代理或本地脚本调度与交互。在桌面形态下作为库被 `desktopApp` 同进程引用。
 - **`:agent-contract`**：驱动层**纯接口模块**。声明一次 agent 会话的生命周期契约（开启 / 执行 / 回执 / 进度）、驱动向上层报告的事件七型（其中 `Artifact` 是进程内事件、不进协议帧）、能力清单与驱动键归一。它没有任何实现、IO 与 UI，依赖方向单向：`:agentNode` 依赖它；编排层与「没有 UI 的验收物」只依赖契约即可拿到驱动面。
 - **`:orchestration`**：Agent 编排层。包含工单编排（派单 / 跟进 / 中止 / 退单）、责任链执行体（一链一 worktree、棒间交接靠提交）、自愈循环、台账治理（会话免审 / 踩坑 / 盲区 / 健康度 / 高危租约）、卡片补丁以及 agent 事件胶水（控制面挂载、群流回填、卡片翻面）。**零 UI** —— 它从 `:desktopApp` 下沉而来，壳层只负责装配（注入 controller / scope / 诊断端口），编排本身可被 `:cli` 的测试直接驱动；需要一句用户文案时走 `RelayUiTexts` 桥，需要诊断落点时走注入的 `liveEventSink`。
 - **`:androidApp`**：Android 原生壳工程。配置 `MainActivity`、CameraX 扫码、前台服务（后台消息接收）及 SAF 文件契约。

@@ -34,7 +34,7 @@
    - Desktop (macOS / Linux / Windows): Wide-screen dual-pane navigation, tray daemon, on-demand window creation.
 5. **Builtin 5 CLI Agents & Control Plane (`:agentNode`)**:
    - Out-of-the-box support for Claude Code, Codex, agy, dsh, and opencode with Git Worktree sandbox isolation and credential mounting.
-   - Loopback HTTP API (Ktor, default `127.0.0.1:8788`) and standard Model Context Protocol (MCP) tool server (`scripts/tenon-mcp-server.py`).
+   - Loopback HTTP API (default `127.0.0.1:8788`) and standard Model Context Protocol (MCP) tool server (`scripts/tenon-mcp-server.py`).
 6. **Declarative Orchestration & Autonomous Execution (`:orchestration`)**:
    - Stage chain pipeline (`StageChain`), autonomous healing loops, multi-stick reviews, rate limiting, and circuit breaking.
 

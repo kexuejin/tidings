@@ -174,15 +174,10 @@ public fun WorkspaceQrDialog(
                         textAlign = TextAlign.Center,
                     )
                 }
-                if (payload != null) {
-                    Text(
-                        text = payload,
-                        style = MaterialTheme.typography.labelSmall.copy(fontFamily = FontFamily.Monospace),
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                        maxLines = 1,
-                        overflow = TextOverflow.Ellipsis,
-                    )
-                }
+                // 载荷原文**不上面板**（同类裁决：节点页/设置页的载荷行已改为
+                // 只留复制动作）——多候选 JSON 对人眼没有可读性，且这个对话框没有复制
+                // 入口（对方扫码即可，工作区授权没有「手抄载荷」的通路），一行截断的
+                // 密文是纯噪音。payload 仍参与码图生成，只是不展示。
             }
         },
         confirmButton = {
