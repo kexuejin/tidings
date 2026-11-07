@@ -43,12 +43,9 @@ import com.kapp.tenon.generated.resources.desk_nav_group_appear
 import com.kapp.tenon.generated.resources.desk_nav_group_conn
 import com.kapp.tenon.generated.resources.desk_nav_group_data
 import com.kapp.tenon.generated.resources.ic_chev
-import com.kapp.tenon.generated.resources.ic_image
 import com.kapp.tenon.generated.resources.ic_refresh
-import com.kapp.tenon.generated.resources.r2_set_profile_avatar_label
 import com.kapp.tenon.generated.resources.r2_set_profile_rev_chip
 import com.kapp.tenon.generated.resources.set_appear_subtitle
-import com.kapp.tenon.generated.resources.set_avatar_page_subtitle
 import com.kapp.tenon.generated.resources.set_caps_none
 import com.kapp.tenon.generated.resources.set_caps_peer_visible
 import com.kapp.tenon.generated.resources.set_caps_title
@@ -242,21 +239,12 @@ internal fun SettingsHomeScreen(
                 }
             }
 
-            // 分组 2：外观与能力
+            // 分组 2：外观与能力。「头像」行整行移除（2026-11-07 用户裁决）：顶部
+            // 资料卡 → 资料编辑页的头像分段控件第三档「上传图片」就是头像修改的
+            // 入口，设置首页不必再开一扇重复的门。SETTINGS_PAGE_AVATAR 路由保留
+            // （资料页的 onOpenAvatarPage 仍走它），SetAvatarPage 不因此变孤儿。
             SettingsGroupBlock(title = stringResource(Res.string.desk_nav_group_appear)) {
                 Column {
-                    // 「头像」这一行是上传头像页在**设置首页**的门。此前 `SETTINGS_PAGE_AVATAR`
-                    // 这条路由分支有、却全仓没有一个写入点：资料页分段控件第三档被接成
-                    // `controller::pickAvatar`（选图，不换页），于是那一页 259 行的诚实化
-                    // 只在截图帧里存在。标题/副标题复用资料页与头像页自己的键，不另造说法。
-                    SettingsNavRow(
-                        icon = Res.drawable.ic_image,
-                        title = stringResource(Res.string.r2_set_profile_avatar_label),
-                        sub = stringResource(Res.string.set_avatar_page_subtitle),
-                        valText = null,
-                        onClick = { onOpenPage?.invoke(SETTINGS_PAGE_AVATAR) },
-                    )
-                    HorizontalDivider(modifier = Modifier.padding(horizontal = LocalAppSpacing.current.lg))
                     SettingsNavRow(
                         icon = Icons.Outlined.DarkMode,
                         title = stringResource(Res.string.set_more_appearance_title),
