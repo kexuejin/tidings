@@ -1479,7 +1479,6 @@
     <string name="workspace_create_group_quick_btn">Create &amp; Share</string>
     <string name="workspace_create_group_or_new">Or link a new local directory</string>
     <string name="workspace_create_group_new_title">Link Local Directory</string>
-    <string name="workspace_create_group_agent_label">Resident Bot</string>
     <string name="workspace_create_group_name_label">Group Name</string>
     <string name="workspace_create_group_sync_devices">Auto-sync to my devices (no QR needed)</string>
     <string name="workspace_create_group_confirm">Create Collaboration Group</string>
@@ -1493,7 +1492,6 @@
     <string name="workspace_role_no_delegated_approval">Admin only (No delegated approval)</string>
     <string name="agent_host_sleeping_banner">Host device is sleeping/offline · Commands safely queued, resuming on wake</string>
     <string name="agent_interrupt_btn">⏹ Global Interrupt</string>
-    <string name="workspace_default_resident_agent">🤖 DSH (Default Host Agent)</string>
     <string name="workspace_member_section_humans">Human Members (%1$d)</string>
     <string name="workspace_member_section_agents">Resident Bots (%1$d)</string>
     <string name="workspace_qr_dialog_desc">Scan this direct QR with Tenon on mobile to pair node and authorize workspace access. One-time credential, valid for 15 minutes.</string>

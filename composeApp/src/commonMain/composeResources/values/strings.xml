@@ -1633,7 +1633,6 @@
     <string name="workspace_create_group_quick_btn">一键建群 / 共享</string>
     <string name="workspace_create_group_or_new">或关联本地全新目录</string>
     <string name="workspace_create_group_new_title">关联本地新目录</string>
-    <string name="workspace_create_group_agent_label">驻群智能体</string>
     <string name="workspace_create_group_name_label">群聊名称 (自动联动)</string>
     <string name="workspace_create_group_sync_devices">自动同步到我的移动设备 (免扫码)</string>
     <string name="workspace_create_group_confirm">立即创建协同群</string>
@@ -1647,7 +1646,6 @@
     <string name="workspace_role_no_delegated_approval">仅协同管理 (无代批权限)</string>
     <string name="agent_host_sleeping_banner">宿主设备睡眠/离线中 · 命令已安全排队挂起，待宿主唤醒后自动断点续传</string>
     <string name="agent_interrupt_btn">⏹ 全局打断</string>
-    <string name="workspace_default_resident_agent">🤖 DSH (默认本地执行助理)</string>
     <string name="workspace_member_section_humans">协同人类成员 (%1$d)</string>
     <string name="workspace_member_section_agents">入驻智能体 (%1$d)</string>
     <string name="workspace_no_title_banner">这个工作区没有名字。对端只上报了它的标识 %1$s，没有上报名字 —— 我们不用那串标识冒充名字，等它补上。</string>
