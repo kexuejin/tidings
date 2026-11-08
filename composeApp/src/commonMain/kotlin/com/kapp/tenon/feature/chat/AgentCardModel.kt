@@ -122,6 +122,8 @@ data class AgentCardUi(
     val type: String? = null,
     val title: String? = null,
     val progress: Int? = null,
+    /** 执行中卡的已用秒数（规格二的 `(45s)`）；null = 不展示（终态卡/无计时）。 */
+    val elapsedSec: Long? = null,
     val steps: List<AgentCardStep> = emptyList(),
     val diff: AgentCardDiff? = null,
     val banner: AgentCardBanner? = null,

@@ -361,10 +361,11 @@ object Codec {
         groupId: String? = null,
         groupRev: Int? = null,
         wsId: String? = null,
+        convId: String? = null,
         at: Long? = null,
     ) = CodecInvoke.agentInvokePayload(
         invokeId, op, agentId, requestedBy, deadlineMs, prompt, actionId, cardId, cardRev,
-        decidedBy, sessionId, groupId, groupRev, wsId, at,
+        decidedBy, sessionId, groupId, groupRev, wsId, convId = convId, at = at,
     )
 
     fun agentInvokeResultPayload(

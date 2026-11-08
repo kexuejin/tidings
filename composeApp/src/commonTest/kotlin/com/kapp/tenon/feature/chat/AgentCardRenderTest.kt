@@ -89,6 +89,7 @@ class AgentCardRenderTest {
         assertEquals(3, card.rev)
         assertEquals("重构网络传输层", card.title)
         assertEquals(70, card.progress)
+        assertNull(card.elapsedSec, "样例卡没有耗时段，解析不得编造")
         assertEquals(3, card.steps.size)
         assertEquals(AgentCardStepStatus.Done, card.steps[0].status)
         assertEquals(AgentCardStepStatus.Running, card.steps[1].status)

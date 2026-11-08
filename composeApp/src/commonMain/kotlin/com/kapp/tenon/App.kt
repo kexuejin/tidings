@@ -432,8 +432,8 @@ fun RelayApp(
                             // 1:1 药丸派单（任务级显式绑定）：invoke 通路显式携带
                             // 目标宿主 + agentKind + 工作区；文本帧照发（气泡留档），
                             // 桌面对 1:1 纯文本不再默认派单——两路不双派。
-                            onDispatchToWorkspace = { peerId, agentId, prompt, wsId ->
-                                controller.dispatchDirectInvoke(peerId, agentId, prompt, wsId)
+                            onDispatchToWorkspace = { peerId, agentId, prompt, wsId, convId ->
+                                controller.dispatchDirectInvoke(peerId, agentId, prompt, wsId, convId)
                             },
                             // 「重发」按原消息 id 重放（core 的 replayOutgoing）：换 id 重发会让
                             // 对端多落一条（真机现场同一句话两个 id）。

@@ -114,6 +114,21 @@ class DesktopWorkerOrchestrator1to1WorkspaceDispatchTest {
     }
 
     @Test
+    fun workingCardsCarryAssigneeRoster() {
+        // 规格二的双角色进度行：items[].assignee 必须落棒（渲染端徽标已就绪）。
+        // 工单卡的承办人名单曾经全仓零传参——执行中卡因此退化成「只有标题」的简化版。
+        val source = orchestratorSource()
+        assertTrue(
+            source.contains("assignees = listOf(active.agentKey)"),
+            "active 工单的 working 卡必须带承办人（active.agentKey）",
+        )
+        assertTrue(
+            source.contains("assignees = listOf(defaultAgent)"),
+            "自愈/原型/终验路径的卡片必须带承办人（defaultAgent）",
+        )
+    }
+
+    @Test
     fun unknownWsIdResolvesToNullAndTriggersHandback() {
         val dispatch = GuardSourceScan.bracedBlockAfter(
             orchestratorSource(),

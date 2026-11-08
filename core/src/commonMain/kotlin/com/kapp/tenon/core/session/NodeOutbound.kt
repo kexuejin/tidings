@@ -901,6 +901,7 @@ internal class NodeOutbound(
         groupId: String? = null,
         groupRev: Int? = null,
         wsId: String? = null,
+        convId: String? = null,
         at: Long? = null,
     ): SendOutcome = messenger.sendUserMessage(
         peerId,
@@ -909,7 +910,7 @@ internal class NodeOutbound(
             selfId(),
             Codec.agentInvokePayload(
                 invokeId, op, agentId, requestedBy, deadlineMs, prompt, actionId, cardId,
-                cardRev, decidedBy, sessionId, groupId, groupRev, wsId, at,
+                cardRev, decidedBy, sessionId, groupId, groupRev, wsId, convId = convId, at = at,
             ),
         ),
     )

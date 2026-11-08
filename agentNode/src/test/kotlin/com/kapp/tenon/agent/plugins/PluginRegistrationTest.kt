@@ -254,6 +254,90 @@ class PluginRegistrationTest {
         }
     }
 
+    /**
+     * 严格解析（提案 §9 阶段一）：未知顶层键显式拒绝，绝不静默丢弃。
+     * 旧解析器 ignoreUnknownKeys=true 时，声明 `triggers` 会「注册成功但永不生效」
+     * ——发送侧一切正常、触发器永远不来，与静默丢帧同一疾病。
+     */
+    @Test
+    fun manifestWithUnknownTopLevelKeyIsRejectedNotSilentlyDropped() {
+        for (unknownKey in listOf("triggers", "permissions")) {
+            MockExternalPlugin().withAutoStop { plugin ->
+                plugin.start()
+                val bad = MockExternalPlugin.Default.echoTeamManifest().let { m ->
+                    buildJsonObject {
+                        m.forEach { (k, v) -> put(k, v) }
+                        put(unknownKey, json.parseToJsonElement("""[{"id":"x"}]"""))
+                    }
+                }
+                val (code, body) = plugin.registerWith(planeBaseUrl, token = token, manifestOverride = bad)
+                assertEquals(400, code, "未知顶层键「" + unknownKey + "」必须拒绝而不是静默忽略：" + body)
+                assertTrue(body.contains("\"unknown-field\""), "应给出专用错误码 unknown-field：" + body)
+                assertTrue(body.contains(unknownKey), "错误信息应点名是哪个键：" + body)
+                assertRegisteredCount(0)
+            }
+        }
+    }
+
+    /** 嵌套未知键走严格解码的 bad-manifest 出口（错误消息里带键名，可定位）。 */
+    @Test
+    fun manifestWithUnknownNestedKeyIsRejected() {
+        MockExternalPlugin().withAutoStop { plugin ->
+            plugin.start()
+            val bad = MockExternalPlugin.Default.echoTeamManifest().let { m ->
+                buildJsonObject {
+                    m.forEach { (k, v) -> if (k != "leader") put(k, v) }
+                    put("leader", buildJsonObject {
+                        put("agentId", "echo-lead")
+                        put("name", "echo-lead")
+                        put("role", "Lead")
+                        put("secretBackdoor", "nope")
+                    })
+                }
+            }
+            val (code, body) = plugin.registerWith(planeBaseUrl, token = token, manifestOverride = bad)
+            assertEquals(400, code, "嵌套未知键必须拒绝：" + body)
+            assertTrue(body.contains("bad-manifest"), "错误码应为 bad-manifest：" + body)
+            assertTrue(body.contains("secretBackdoor"), "错误信息应带键名：" + body)
+            assertRegisteredCount(0)
+        }
+    }
+
+    /**
+     * 验收依据（提案 §9 阶段一）：examples/plugins/echo-team-plugin/manifest.json
+     * 的 10 个顶层键逐键对账，严格模式下仍能正常解析与注册。
+     */
+    @Test
+    fun echoExampleManifestParsesAndRegistersUnderStrictMode() {
+        val echoManifest = buildJsonObject {
+            put("pluginId", "echo-team-plugin")
+            put("name", "Echo Team")
+            put("version", "1.0.0")
+            put("type", "team")
+            put("entrypoint", "python3 main.py")
+            put("leader", buildJsonObject {
+                put("agentId", "echo-lead")
+                put("name", "echo-lead")
+                put("role", "Team Orchestrator")
+            })
+            put("members", json.parseToJsonElement(
+                """[{"agentId":"echo-coder","name":"echo-coder","role":"Engineer"},""" +
+                    """{"agentId":"echo-tester","name":"echo-tester","role":"QA Engineer"}]""",
+            ))
+            put("allowedWorkspaces", json.parseToJsonElement(
+                """[{"wsId":"demo-workspace","title":"Demo Workspace"}]""",
+            ))
+            put("defaultWsId", "demo-workspace")
+            put("capabilities", json.parseToJsonElement("""["task-dag","progress-stream","card"]"""))
+        }
+        MockExternalPlugin(manifest = echoManifest).withAutoStop { plugin ->
+            plugin.start()
+            val (code, body) = plugin.registerWith(planeBaseUrl, token = token)
+            assertEquals(200, code, "examples 的 10 键清单在严格模式下必须照常注册：" + body)
+            assertRegisteredCount(1)
+        }
+    }
+
     @Test
     fun missingHttpPortIsRejected() {
         MockExternalPlugin().withAutoStop { plugin ->

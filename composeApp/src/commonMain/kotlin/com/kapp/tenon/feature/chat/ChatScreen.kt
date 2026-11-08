@@ -23,6 +23,7 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.key
 import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.snapshotFlow
@@ -428,7 +429,10 @@ fun ChatScreen(
     //
     // 药丸的本地选中态声明在 submitMessage **之前**：派单入参（1:1 药丸触发的
     // dispatchDirectInvoke）要在发送函数里读它。
-    var localActiveWsId by remember(peerId, data.wsId) {
+    // 药丸选中按会话**持久**（rememberSaveable）：重进会话/杀进程重开都记得上次选的
+    // 工作区——否则派单指向随哈希漂移（真机实测：切到 teahouse-mobile 后重进会话，
+    // 药丸复位 default-workspace，后面几单全派进了别的仓秒败）。
+    var localActiveWsId by rememberSaveable(peerId) {
         mutableStateOf(data.wsId)
     }
     // 四件事必须一起发生，漏一件都是一条独立的真机缺陷：
@@ -468,7 +472,7 @@ fun ChatScreen(
             val ws = selWsId?.let { id -> agentSlice.agentWorkspaces.values.firstOrNull { it.wsId == id } }
             val kind = ws?.agentKind?.trim()?.takeIf { it.isNotEmpty() }
             if (ws != null && kind != null) {
-                onDispatchToWorkspace?.invoke(ws.peerId, kind, body, ws.wsId)
+                onDispatchToWorkspace?.invoke(ws.peerId, kind, body, ws.wsId, peer.nodeId)
             }
         }
         if (filesToSend.isNotEmpty()) {
@@ -1154,6 +1158,7 @@ fun ChatScreen(
             workspaces = availableWorkspaces,
             activeWsId = effectiveWsId,
             onSelect = { selectedWsId ->
+                localActiveWsId = selectedWsId
                 localActiveWsId = selectedWsId
                 actions.onSelectWorkspace?.invoke(selectedWsId)
             },

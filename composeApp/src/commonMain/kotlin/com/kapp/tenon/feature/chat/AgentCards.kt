@@ -231,7 +231,7 @@ fun AgentCardBubble(
             // 高危命令展示框（原型稿 .cmd-box）
             card.cmd?.let { CardCmdBox(it) }
             card.banner?.let { CardBannerRow(it) }
-            card.progress?.let { CardProgressRow(it) }
+            card.progress?.let { CardProgressRow(it, card.elapsedSec) }
             // Acceptance 检查清单（升级计划 Phase 2 要点 2）：新式卡走 checks（带单项耗时 /
             // 观察结论 / 日志抽屉），老卡继续走 StepList。两者都画会把同一批步骤说两遍 ——
             // 解析侧 checks 本就由 items 回退而来，有 checks 时 steps 是它的影子。
@@ -889,9 +889,10 @@ fun AgentStateBannerRow(state: String, text: String, modifier: Modifier = Modifi
 
 /** 原子 2/5 · Progress（§7.3）：6px 细条 + 等宽百分比（原型 `.pg` 区块）。 */
 @Composable
-private fun CardProgressRow(progress: Int) {
+private fun CardProgressRow(progress: Int, elapsedSec: Long? = null) {
     val sp = LocalAppSpacing.current
     val label = stringResource(Res.string.card_progress_label, progress)
+    val elapsedLabel = elapsedSec?.takeIf { it >= 0 }?.let { "${it}s" }
     Row(
         verticalAlignment = Alignment.CenterVertically,
         horizontalArrangement = Arrangement.spacedBy(sp.md10),
@@ -927,7 +928,7 @@ private fun CardProgressRow(progress: Int) {
         }
         // .pg .pc（relay.html:538-539）：12/600 mono tabular（labelSmall 11 → bodySmall 档带 600）。
         Text(
-            text = label,
+            text = if (elapsedLabel != null) "$label ($elapsedLabel)" else label,
             style = MaterialTheme.typography.labelMedium,
             fontWeight = FontWeight.SemiBold,
             color = MaterialTheme.colorScheme.primary,

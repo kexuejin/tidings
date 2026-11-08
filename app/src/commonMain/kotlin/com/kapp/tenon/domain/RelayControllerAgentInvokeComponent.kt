@@ -230,8 +230,9 @@ internal class RelayControllerAgentInvokeComponent(private val host: AgentDomain
         agentId: String,
         prompt: String,
         wsId: String?,
+        convId: String? = null,
         deadlineMs: Long = DEFAULT_INVOKE_DEADLINE_MS,
-    ): String? = leases.dispatchDirectInvoke(peerId, agentId, prompt, wsId, deadlineMs)
+    ): String? = leases.dispatchDirectInvoke(peerId, agentId, prompt, wsId, convId, deadlineMs)
     /** 入站结果帧（B → A）：租约落终态 + Leader 拼看板卡上群 —— 见 [RelayControllerAgentInvokeLeases]。 */
     fun handleOnAgentInvokeResult(envelope: Envelope) = leases.handleOnAgentInvokeResult(envelope)
 
@@ -281,19 +282,79 @@ internal class RelayControllerAgentInvokeComponent(private val host: AgentDomain
             // （插件优先、CLI 驱动兜底）。群成员身份门槛在这里不适用：没有群可查。
             if (grantAllows?.invoke(agentId, requestedBy) != true) {
                 recordGrantRequest?.invoke(requestedBy, agentId, "direct invoke")
+                announceDispatchFailure(
+                    convId = com.kapp.tenon.core.protocol.ConvId.single(envelope.from),
+                    agentKey = agentId,
+                    agentName = agentId,
+                    dispatchId = invokeId,
+                    title = prompt.take(60),
+                    reason = "direct invoke not granted for this node",
+                    unavailable = true,
+                )
                 reply(false, com.kapp.tenon.core.protocol.CodecInvoke.InvokeResultStates.DENIED, error = "direct invoke not granted for this node")
                 return
             }
+                val inboundConvId = p.strField("convId")?.takeIf { it.isNotBlank() }
             val directExecutor = executor
             if (directExecutor == null) {
+                announceDispatchFailure(
+                    convId = com.kapp.tenon.core.protocol.ConvId.single(envelope.from),
+                    agentKey = agentId,
+                    agentName = agentId,
+                    dispatchId = invokeId,
+                    title = prompt.take(60),
+                    reason = "no local executor",
+                    unavailable = true,
+                )
                 reply(false, com.kapp.tenon.core.protocol.CodecInvoke.InvokeResultStates.NO_EXECUTOR)
                 return
             }
+            // 1:1 反馈面（「只是发送消息」的修复）：受理与终局都落进与发起方的单聊
+            // 会话流——群路径的看板卡在这条路上没有落点，租约镜像之外的可见面就是
+            // 会话本身。受理与答案以 agent 名义发言（AgentSenderId 单一来源），
+            // 失败走同源的 announceDispatchFailure（群/工单/1:1 三条路径一条实现）。
+            val conv1to1 = com.kapp.tenon.core.protocol.ConvId.single(envelope.from)
+            val wsTitle = wsId?.let { id ->
+                host.state.value.agentWorkspaces.values.firstOrNull { it.wsId == id }?.wsTitle
+            }
+            val senderId = com.kapp.tenon.core.protocol.AgentSenderId.of(self, agentId, agentId)
+            host.handleAppendMessage(
+                MessageUi(
+                    id = host.localMessageId(),
+                    peerId = conv1to1,
+                    mine = false,
+                    senderId = senderId,
+                    text = "Ticket accepted: executing in " + (wsTitle ?: "the workspace") + "…",
+                    at = nowMillis(),
+                ),
+            )
             val directOutcome = try {
-                directExecutor.execute(AgentInvokeTaskRequest(agentId = agentId, prompt = prompt, wsId = wsId, groupId = null))
+                directExecutor.execute(AgentInvokeTaskRequest(agentId = agentId, prompt = prompt, wsId = wsId, groupId = null, convId = inboundConvId))
             } catch (t: Throwable) {
                 reply(false, com.kapp.tenon.core.protocol.CodecInvoke.InvokeResultStates.ERROR, error = (t.message ?: "executor failed").take(Limits.AGENT_NOTE))
                 return
+            }
+            if (directOutcome.status == com.kapp.tenon.core.protocol.CodecInvoke.InvokeResultStates.DONE) {
+                host.handleAppendMessage(
+                    MessageUi(
+                        id = host.localMessageId(),
+                        peerId = conv1to1,
+                        mine = false,
+                        senderId = senderId,
+                        text = directOutcome.summary?.takeIf { it.isNotBlank() } ?: "Task finished.",
+                        at = nowMillis(),
+                    ),
+                )
+            } else {
+                announceDispatchFailure(
+                    convId = conv1to1,
+                    agentKey = agentId,
+                    agentName = agentId,
+                    dispatchId = invokeId,
+                    title = prompt.take(60),
+                    reason = directOutcome.error ?: directOutcome.summary,
+                    unavailable = false,
+                )
             }
             reply(
                 ok = directOutcome.status == com.kapp.tenon.core.protocol.CodecInvoke.InvokeResultStates.DONE,

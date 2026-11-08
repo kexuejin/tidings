@@ -66,6 +66,7 @@ fun parseAgentCard(json: JsonObject?): AgentCardUi? {
         title = json.str("title")?.takeIf { it.isNotBlank() },
         state = json.str("state")?.takeIf { it.isNotBlank() },
         progress = json.int("progress")?.coerceIn(0, 100),
+        elapsedSec = (json["elapsedSec"] as? JsonPrimitive)?.content?.toLongOrNull(),
         steps = rawSteps,
         checks = checks,
         bot = (json["bot"] as? JsonObject)?.let { b ->

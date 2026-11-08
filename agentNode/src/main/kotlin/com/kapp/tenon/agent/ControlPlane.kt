@@ -333,6 +333,7 @@ class ControlPlane(
 
     fun stop() {
         plugins.stopMonitoring()
+        sourceWebhooks.dispose()
         server?.stop(0)
         server = null
     }

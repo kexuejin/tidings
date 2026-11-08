@@ -112,7 +112,7 @@ data class ChatScreenActions(
      * 1:1 药丸派单（任务级显式绑定，蓝图 §4.2）：文本帧之外另走的 invoke 通路——
      * 显式携带目标宿主、agentKind 与工作区。null = 壳没接派单通路（退回纯文本）。
      */
-    val onDispatchToWorkspace: ((peerId: String, agentId: String, prompt: String, wsId: String) -> Unit)? = null,
+    val onDispatchToWorkspace: ((peerId: String, agentId: String, prompt: String, wsId: String, convId: String) -> Unit)? = null,
     /**
      * 失败气泡上的「重发」。
      *

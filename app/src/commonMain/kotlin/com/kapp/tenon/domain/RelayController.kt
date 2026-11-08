@@ -1158,8 +1158,9 @@ class RelayController(
         agentId: String,
         prompt: String,
         wsId: String? = null,
+        convId: String? = null,
         deadlineMs: Long = RelayControllerAgentInvokeComponent.DEFAULT_INVOKE_DEADLINE_MS,
-    ): String? = invokeCtl.dispatchDirectInvoke(peerId, agentId, prompt, wsId, deadlineMs)
+    ): String? = invokeCtl.dispatchDirectInvoke(peerId, agentId, prompt, wsId, convId, deadlineMs)
 
     /**
      * 责任链的进度卡（一链一卡，rev 递增）走**与看板卡同一条**广播路径。

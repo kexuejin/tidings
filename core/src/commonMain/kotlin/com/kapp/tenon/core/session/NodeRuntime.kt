@@ -1605,9 +1605,10 @@ class NodeRuntime(
         groupId: String? = null,
         groupRev: Int? = null,
         wsId: String? = null,
+        convId: String? = null,
         at: Long? = null,) = outbound.sendAgentInvoke(
         peerId, invokeId, op, agentId, requestedBy, deadlineMs, prompt, actionId, cardId,
-        cardRev, decidedBy, sessionId, groupId, groupRev, wsId, at,
+        cardRev, decidedBy, sessionId, groupId, groupRev, wsId, convId = convId, at = at,
     )
 
     /** `agent-invoke` 的应答帧（cap `agi1`）。 */

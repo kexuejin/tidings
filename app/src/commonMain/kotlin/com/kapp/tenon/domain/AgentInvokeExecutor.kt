@@ -11,6 +11,8 @@ data class AgentInvokeTaskRequest(
     val prompt: String,
     val wsId: String?,
     val groupId: String?,
+    /** 1:1 直派的回卡会话（发起方的单聊）；null = 群派单（看板卡走群）。 */
+    val convId: String? = null,
 )
 
 /** 执行桥的结果：status 用协议的封闭取值域（[com.kapp.tenon.core.protocol.CodecInvoke.InvokeResultStates]）。 */

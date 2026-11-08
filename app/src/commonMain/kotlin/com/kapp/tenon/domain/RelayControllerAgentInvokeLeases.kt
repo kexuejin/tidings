@@ -193,6 +193,7 @@ internal class RelayControllerAgentInvokeLeases(
         agentId: String,
         prompt: String,
         wsId: String?,
+        convId: String? = null,
         deadlineMs: Long = RelayControllerAgentInvokeComponent.DEFAULT_INVOKE_DEADLINE_MS,
     ): String? {
         val st = host.state.value
@@ -221,6 +222,7 @@ internal class RelayControllerAgentInvokeLeases(
                         prompt = prompt,
                         groupId = null,
                         wsId = wsId,
+                        convId = convId,
                     )
                 }
             }

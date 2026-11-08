@@ -683,11 +683,15 @@ class DesktopExtension(
                         created.resolveCliDriver(request.agentId) != null
                     ) {
                         val group = request.groupId?.takeIf { it.isNotBlank() }
-                        val targetConvId = if (group != null) {
-                            com.kapp.tenon.core.protocol.ConvId.group(group)
-                        } else {
-                            request.wsId?.takeIf { it.isNotBlank() } ?: ("agent:" + request.agentId)
-                        }
+                        // 回卡会话的优先级：1:1 直派显式带的 convId（发起方的单聊）> 群 > 兜底。
+                        // 伪会话兜底（wsId/agent: 前缀）的卡谁也看不见——历史形状，仅剩
+                        // 无 convId 的旧调用触达。
+                        val targetConvId = request.convId?.takeIf { it.isNotBlank() }
+                            ?: if (group != null) {
+                                com.kapp.tenon.core.protocol.ConvId.group(group)
+                            } else {
+                                request.wsId?.takeIf { it.isNotBlank() } ?: ("agent:" + request.agentId)
+                            }
                         val outcome = workerOrchestrator.handlePromptAwait(
                             convId = targetConvId,
                             senderPeerId = self,

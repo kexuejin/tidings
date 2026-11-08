@@ -396,7 +396,13 @@ class PluginHost(
 
 /** manifest.json 文本 → [PluginManifest]（磁盘文件的读取口只有这一个）。 */
 internal object PluginManifestJson {
-    private val json = kotlinx.serialization.json.Json { ignoreUnknownKeys = true }
+    /**
+     * 严格模式：未知键抛错不静默丢弃（与 [PluginRegistration] 同一口径）。三个
+     * 调用点（目录扫描 / zip 安装 / listInstalled）都有各自的优雅降级——解析失败
+     * 会以「跳过 + 落 process.log」「Failure(bad-manifest)」「缺条目」的形状浮出，
+     * 不会静默当有效清单用。
+     */
+    private val json = kotlinx.serialization.json.Json { ignoreUnknownKeys = false }
 
     fun parse(text: String): PluginManifest = json.decodeFromString(PluginManifest.serializer(), text)
 }

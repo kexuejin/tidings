@@ -150,6 +150,11 @@ data class ChainProgress(
     val context: String? = null,
     val target: String? = null,
     val module: String? = null,
+    /**
+     * 执行中卡的**已用秒数**（规格二的 `编码中 (45s)`）：工单创建到本卡的墙钟差，
+     * 由发射方算好，渲染端只负责展示。null = 不标（终态卡/无起始时刻的卡不冒充）。
+     */
+    val elapsedSec: Long? = null,
 )
 
 /** 合流卡上的一条审计结论（与手机端 checks[] 解析契约同形）。 */
@@ -332,6 +337,9 @@ object StageChain {
         put("state", progress.state)
         put("title", progress.title)
         put("progress", progress.percent)
+        // 执行中卡的耗时段（规格二的 `(45s)`）：发射方算好秒数，渲染端只展示。
+        // null 不发射 —— 终态卡与无起始时刻的卡不冒充计时。
+        progress.elapsedSec?.let { put("elapsedSec", it) }
         put("items", buildJsonArray {
             progress.stages.forEachIndexed { index, (role, status) ->
                 add(buildJsonObject {

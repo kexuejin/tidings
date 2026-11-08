@@ -53,7 +53,7 @@ object CodecInvoke {
 
     private val INVOKE_EXPECTED_KEYS = setOf(
         "invokeId", "op", "agentId", "prompt", "actionId", "cardId", "cardRev",
-        "sessionId", "groupId", "groupRev", "wsId", "deadlineMs", "requestedBy", "decidedBy", "at",
+        "sessionId", "groupId", "groupRev", "wsId", "convId", "deadlineMs", "requestedBy", "decidedBy", "at",
     )
     private val RESULT_EXPECTED_KEYS = setOf("invokeId", "ok", "status", "summary", "error", "card", "at")
 
@@ -137,6 +137,7 @@ object CodecInvoke {
         groupId: String? = null,
         groupRev: Int? = null,
         wsId: String? = null,
+        convId: String? = null,
         at: Long? = null,
     ): JsonElement = buildJsonObject {
         put("invokeId", invokeId)
@@ -151,6 +152,8 @@ object CodecInvoke {
         if (groupId != null) put("groupId", groupId)
         if (groupRev != null) put("groupRev", groupRev)
         if (wsId != null) put("wsId", wsId)
+        // 1:1 直派的回卡会话（工单卡原位发回发起方的单聊）：群派单不带（看板卡走群）。
+        if (convId != null) put("convId", convId)
         put("deadlineMs", deadlineMs)
         put("requestedBy", requestedBy)
         if (at != null) put("at", at)

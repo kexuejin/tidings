@@ -10,6 +10,7 @@ import kotlinx.serialization.json.buildJsonObject
 import kotlinx.serialization.json.put
 import kotlin.test.Test
 import kotlin.test.assertEquals
+import kotlin.test.assertNull
 import kotlin.test.assertFalse
 import kotlin.test.assertNotNull
 import kotlin.test.assertTrue
@@ -245,6 +246,17 @@ class StageChainTest {
         percent = percent,
         banner = "开发 开跑",
     )
+
+    @Test
+    fun elapsedSecIsEmittedOnlyWhenPresent() {
+        // 规格二的耗时段（`(45s)`）：发射方算好秒数，卡上才有 elapsedSec；
+        // 终态卡/无起始时刻的卡（null）不发射 —— 不冒充计时。
+        val with = StageChain.cardOf(progress("executing").copy(elapsedSec = 45L))
+        assertEquals("45", with["elapsedSec"]?.toString(), "执行中卡必须带已用秒数")
+
+        val without = StageChain.cardOf(progress("review_ready"))
+        assertNull(without["elapsedSec"], "null 不发射：键缺失 = 不冒充计时")
+    }
 
     @Test
     fun theChainCardUsesExactlyTheFieldNamesThePhoneParses() {

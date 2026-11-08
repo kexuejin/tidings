@@ -97,6 +97,8 @@ class DesktopWorkerOrchestrator(
         val job: Job,
         val title: String,
         val repoPath: String,
+        /** 工单创建时刻：执行中卡的耗时段（规格二的 `编码中 (45s)`）从这里起算。 */
+        val createdAt: Long = nowMillis(),
         @Volatile var stage: String,
         val rev: AtomicInteger = AtomicInteger(0),
         val role: String = "Worker",
@@ -268,6 +270,8 @@ class DesktopWorkerOrchestrator(
                     percent = 50,
                     roleName = active.role,
                     agentId = active.agentKey,
+                assignees = listOf(active.agentKey),
+                startedAt = active.createdAt,
                 )
                 handler.invoke(trimmed)
             }
@@ -355,6 +359,8 @@ class DesktopWorkerOrchestrator(
                     percent = 50,
                     roleName = active.role,
                     agentId = active.agentKey,
+                assignees = listOf(active.agentKey),
+                startedAt = active.createdAt,
                 )
                 active.onFollowUp?.invoke(pending.text)
             }
@@ -380,6 +386,8 @@ class DesktopWorkerOrchestrator(
                 percent = 30,
                 roleName = active.role,
                 agentId = active.agentKey,
+                assignees = listOf(active.agentKey),
+                startedAt = active.createdAt,
             )
             handler.invoke("APPROVE_AND_DEVELOP")
         }
@@ -403,6 +411,8 @@ class DesktopWorkerOrchestrator(
                 percent = 30,
                 roleName = active.role,
                 agentId = active.agentKey,
+                assignees = listOf(active.agentKey),
+                startedAt = active.createdAt,
             )
             handler.invoke("APPROVE_AND_DEVELOP")
         }
@@ -494,6 +504,8 @@ class DesktopWorkerOrchestrator(
                 percent = 40,
                 roleName = active.role,
                 agentId = active.agentKey,
+                assignees = listOf(active.agentKey),
+                startedAt = active.createdAt,
             )
             val outcome = try {
                 runDevelopmentAndHealLoop(
@@ -541,6 +553,8 @@ class DesktopWorkerOrchestrator(
                 percent = 100,
                 roleName = active.role,
                 agentId = active.agentKey,
+                assignees = listOf(active.agentKey),
+                startedAt = active.createdAt,
             )
         }
         return true
@@ -583,6 +597,8 @@ class DesktopWorkerOrchestrator(
                 percent = 50,
                 roleName = active.role,
                 agentId = active.agentKey,
+                assignees = listOf(active.agentKey),
+                startedAt = active.createdAt,
             )
             handler.invoke(trimmed)
         }
@@ -620,6 +636,8 @@ class DesktopWorkerOrchestrator(
                     percent = 50,
                     roleName = active.role,
                     agentId = active.agentKey,
+                assignees = listOf(active.agentKey),
+                startedAt = active.createdAt,
                 )
                 handler.invoke(prompt)
                 return
@@ -1530,6 +1548,8 @@ class DesktopWorkerOrchestrator(
             percent = 20,
             roleName = ticket.role,
             agentId = defaultAgent,
+            assignees = listOf(defaultAgent),
+            startedAt = ticket.createdAt,
         )
 
         val protoPrompt = "You are designing an interactive single-file prototype HTML for the requested concept. " +
@@ -1572,6 +1592,7 @@ class DesktopWorkerOrchestrator(
             percent = 50,
             roleName = ticket.role,
             agentId = defaultAgent,
+            assignees = listOf(defaultAgent),
             artifacts = protoArtifacts,
         )
 
@@ -1621,6 +1642,7 @@ class DesktopWorkerOrchestrator(
                     percent = 60,
                     roleName = ticket.role,
                     agentId = defaultAgent,
+                    assignees = listOf(defaultAgent),
                     artifacts = refinedArtifacts,
                 )
             }
@@ -1820,6 +1842,8 @@ class DesktopWorkerOrchestrator(
             percent = 40,
             roleName = ticket.role,
             agentId = defaultAgent,
+            assignees = listOf(defaultAgent),
+            startedAt = ticket.createdAt,
         )
 
         // 反哺注入（§4.3.2）：仓库账本里与这单 scope 命中的规约，拼在用户反馈之前 ——
@@ -1991,6 +2015,8 @@ class DesktopWorkerOrchestrator(
                         percent = 40 + healRound * 15,
                         roleName = ticket.role,
                         agentId = defaultAgent,
+                        assignees = listOf(defaultAgent),
+                        startedAt = ticket.createdAt,
                     )
                     currentPrompt = "Previous attempt failed: $executionError. Please inspect tests and workspace, fix all issues, and ensure npm test passes."
                 }
@@ -2022,6 +2048,8 @@ class DesktopWorkerOrchestrator(
                 percent = 40,
                 roleName = ticket.role,
                 agentId = defaultAgent,
+                assignees = listOf(defaultAgent),
+                startedAt = ticket.createdAt,
                 failure = StageChainFailure(
                     observation = executionError,
                     drawer = CrashReport.drawerOf(said.toString()) ?: CrashReport.drawerOf(executionError),
@@ -2169,6 +2197,8 @@ class DesktopWorkerOrchestrator(
         selfDescribeDelivered: Set<String> = emptySet(),
         /** 熔断卡专用：数据驱动换上纠偏动作（输入槽 + 放弃保留现场），缺省零变化。 */
         humanSteering: Boolean = false,
+        /** 工单创建时刻：非空时执行中/终态卡都带耗时段（规格二的 `(45s)`/`耗时 1m20s`）。 */
+        startedAt: Long? = null,
     ): String? {
         if (groupId == null) return null
         val progress = ChainProgress(
@@ -2179,6 +2209,7 @@ class DesktopWorkerOrchestrator(
             currentRole = roleName,
             stages = stageRows ?: listOf(roleName to StageChain.stageStatusOf(state)),
             assignees = assignees,
+            elapsedSec = startedAt?.takeIf { it > 0 }?.let { start -> ((nowMillis() - start) / 1000).coerceAtLeast(0) },
             percent = percent,
             banner = banner,
             options = options,

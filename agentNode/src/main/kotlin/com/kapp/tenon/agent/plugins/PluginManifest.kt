@@ -62,7 +62,18 @@ object PluginRegistration {
     const val TYPE_TEAM: String = "team"
     private val TYPES: Set<String> = setOf(TYPE_SINGLE, TYPE_TEAM)
 
-    private val json = Json { ignoreUnknownKeys = true }
+    /**
+     * 严格模式解析器：未知键一律抛错，绝不静默丢弃。旧配置 ignoreUnknownKeys=true
+     * 时，开发者声明 `triggers` 这类尚不支持的字段会「注册成功但永不生效」——
+     * 发送侧一切正常、接收侧什么都没有的清单版翻版（提案 §5 WARNING）。
+     */
+    private val json = Json { ignoreUnknownKeys = false }
+
+    /** 清单顶层合法键 = [PluginManifest] 的字段集。新增字段时这里与 data class 同步改。 */
+    private val KNOWN_TOP_LEVEL_KEYS: Set<String> = setOf(
+        "pluginId", "name", "version", "type", "entrypoint", "leader",
+        "members", "allowedWorkspaces", "defaultWsId", "capabilities",
+    )
 
     sealed interface Verdict {
         /** 注册通过；[agentSenderIds] 是 leader + members 的完整 senderId（host 前缀已带上）。 */
@@ -73,6 +84,20 @@ object PluginRegistration {
     }
 
     fun parse(manifestElement: JsonElement, hostNodeId: String): Verdict {
+        // 顶层未知键前置扫描：给出专用错误码与可操作指引。严格解码也能兜住它
+        // （kotlinx 会抛 unknown key），但那是一条嵌在序列化异常里的长消息——
+        // 开发者配错了字段值得一个一眼能懂的独立错误码。
+        (manifestElement as? kotlinx.serialization.json.JsonObject)?.let { obj ->
+            val unknown = obj.keys.filter { it !in KNOWN_TOP_LEVEL_KEYS }
+            if (unknown.isNotEmpty()) {
+                return Verdict.Rejected(
+                    "unknown-field",
+                    "manifest has unsupported keys: " + unknown.joinToString(", ") +
+                        "; this host version would silently ignore them — remove them or upgrade the host " +
+                        "(declarations that look meaningful but do nothing are worse than rejection)",
+                )
+            }
+        }
         val manifest = runCatching {
             json.decodeFromJsonElement(PluginManifest.serializer(), manifestElement)
         }.getOrElse {

@@ -428,7 +428,7 @@ class TwoNodeAgentInvokeTest {
             // 1:1 直派：不经过群席位，目标 / agent / 工作区全部显式。
             val invokeId = leader.dispatchDirectInvoke(
                 peerId = hostNodeId, agentId = "dsh", prompt = "fix-the-pill-dispatch",
-                wsId = "ws-teahouse", deadlineMs = 30_000L,
+                wsId = "ws-teahouse", convId = hostNodeId, deadlineMs = 30_000L,
             )
             assertNotNull(invokeId, "1:1 直派不依赖群席位 ⇒ 必须受理")
 
@@ -444,6 +444,14 @@ class TwoNodeAgentInvokeTest {
                 "wsId 必须随帧跨端到达——任务级绑定的运输段（工单 C 的最后一公里）",
             )
             assertNull(request.groupId, "1:1 直派不携带群容器")
+            assertEquals(
+                "ws-teahouse", request.wsId,
+                "wsId 必须随帧跨端——任务级绑定的运输段",
+            )
+            assertEquals(
+                hostNodeId, request.convId,
+                "convId 必须随帧跨端——工单卡回 1:1 会话的回程地址",
+            )
             val lease = leader.state.value.agentInvokes[invokeId]!!
             assertEquals("direct ok", lease.summary, "摘要随结果帧回传")
             assertNull(lease.groupId, "1:1 租约没有群容器值")

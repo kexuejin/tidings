@@ -109,6 +109,9 @@ class PluginHostTest {
         try {
             writePlugin(dataDir, "no-manifest", "{}").resolve("manifest.json").delete()
             writePlugin(dataDir, "bad-json", "{ not json")
+            // 未知键（严格解析，C4）：声明 triggers 这类本宿主不支持的字段必须
+            // 被拒收并落 process.log，而不是静默当有效清单拉起。
+            writePlugin(dataDir, "unknown-key", """{"pluginId":"unknown-key","name":"U","entrypoint":"python3 main.py","triggers":[]}""")
             writePlugin(dataDir, "no-entrypoint", manifestJson("no-entrypoint", null))
             writePlugin(dataDir, "blank-entrypoint", manifestJson("blank-entrypoint", "   "))
             writePlugin(dataDir, "name-mismatch", manifestJson("declared-id", "python3 main.py"))
@@ -117,7 +120,7 @@ class PluginHostTest {
             val host = PluginHost(dataDir, { "http://127.0.0.1:8788" }, PluginRegistry(), spawner::spawn)
             val reports = host.start().sortedBy { it.dirName }
 
-            assertEquals(5, reports.size, "五个目录各一份报告")
+            assertEquals(6, reports.size, "六个目录各一份报告")
             assertTrue(reports.none { it.started }, "坏的都不该被拉起：" + reports)
             val reasons = reports.joinToString("\n") { (it.reason ?: "") }
             assertTrue(reasons.contains("no manifest.json"), reasons)
