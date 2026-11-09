@@ -5,7 +5,6 @@ package com.kapp.tenon.domain
 import com.kapp.tenon.core.protocol.GroupNeedTracker
 import com.kapp.tenon.domain.model.MdnsServiceUi
 import com.kapp.tenon.domain.model.MessageUi
-import com.kapp.tenon.domain.model.hasRenderableContent
 import kotlinx.coroutines.flow.update
 import com.kapp.tenon.domain.withLock
 
@@ -136,8 +135,7 @@ internal class RelayStateWriter(
             // 必须立刻反映它，不能让用户看到「消息进来了、列表还停在上一句」。
             val merged = LinkedHashMap<String, ConversationSummaryRow>(state.summaries)
             for ((convId, list) in state.threads) {
-                // 与落库那份（refreshSummary）同一条判据：零正文的事件帧不算「最后一条」。
-                val last = list.lastOrNull { it.hasRenderableContent }
+                val last = list.lastOrNull()
                 if (last == null) {
                     // 空列表 = 这个会话已经没有消息了：摘要不能留着，否则列表多一个空行。
                     merged.remove(convId)

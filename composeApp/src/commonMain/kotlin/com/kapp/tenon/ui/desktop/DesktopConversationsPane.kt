@@ -58,6 +58,7 @@ import com.kapp.tenon.domain.qrCandidatesFor
 import com.kapp.tenon.domain.qrPairingPayloadForAddresses
 import com.kapp.tenon.domain.NodeSlice
 import com.kapp.tenon.domain.SettingsSlice
+import com.kapp.tenon.domain.teamFoldersByConv
 import com.kapp.tenon.domain.AgentSlice
 import com.kapp.tenon.domain.peer
 import com.kapp.tenon.domain.ChatSlice
@@ -183,6 +184,26 @@ public fun ConversationsPane(
     avatarSlice: AvatarSlice,
     chromeSlice: ChromeSlice,
 ) {
+
+    // Team Folder：清单由域层算（teamFoldersByConv），折叠态由这一屏持有 ——
+    // 容器（ConversationListPanel）不持有 UI 状态，它被手机与桌面共用。
+    val teamFolders = remember(settingsSlice.settings.groups, agentSlice.agentSessions) {
+        teamFoldersByConv(
+            groups = settingsSlice.settings.groups,
+            sessions = agentSlice.agentSessions.values.toList(),
+        )
+    }
+    var expandedTeams by remember { mutableStateOf(emptySet<String>()) }
+    val onToggleTeam: (String) -> Unit = { key ->
+        expandedTeams = if (key in expandedTeams) expandedTeams - key else expandedTeams + key
+    }
+    // 点团队成员：写草稿 + 切进该群会话。壳没有草稿能力时整行不可点（而不是点了没反应）。
+    val onMentionMember: ((String, String) -> Unit)? = onDraftChange?.let { write ->
+        { convId, token ->
+            write(convId, "@" + token + " ")
+            onSelect(convId)
+        }
+    }
     var creatingGroup by remember { mutableStateOf(false) }
     var creatingWorkspaceGroup by remember { mutableStateOf(false) }
     var showWsQrFor by remember { mutableStateOf<WorkspaceUi?>(null) }
@@ -353,6 +374,10 @@ public fun ConversationsPane(
             Row(Modifier.fillMaxSize()) {
                 ConversationSidebar(
                     sessions = sessions,
+                    teamFoldersByConv = teamFolders,
+                    expandedTeams = expandedTeams,
+                    onToggleTeam = onToggleTeam,
+                    onMentionMember = onMentionMember,
                     phase = nodeSlice.network.phase,
                     failure = nodeSlice.network.failure,
                     selectedPeerId = selectedPeerId,
@@ -413,6 +438,10 @@ public fun ConversationsPane(
         DesktopWindowSizeClass.Expanded -> Row(Modifier.fillMaxSize()) {
             ConversationSidebar(
                 sessions = sessions,
+                teamFoldersByConv = teamFolders,
+                expandedTeams = expandedTeams,
+                onToggleTeam = onToggleTeam,
+                onMentionMember = onMentionMember,
                 phase = nodeSlice.network.phase,
                 failure = nodeSlice.network.failure,
                 selectedPeerId = selectedPeerId,
@@ -447,6 +476,10 @@ public fun ConversationsPane(
         DesktopWindowSizeClass.Medium -> Row(Modifier.fillMaxSize()) {
             ConversationSidebar(
                 sessions = sessions,
+                teamFoldersByConv = teamFolders,
+                expandedTeams = expandedTeams,
+                onToggleTeam = onToggleTeam,
+                onMentionMember = onMentionMember,
                 phase = nodeSlice.network.phase,
                 failure = nodeSlice.network.failure,
                 selectedPeerId = selectedPeerId,
@@ -486,6 +519,10 @@ public fun ConversationsPane(
                 } else {
                     ConversationSidebar(
                         sessions = sessions,
+                        teamFoldersByConv = teamFolders,
+                        expandedTeams = expandedTeams,
+                        onToggleTeam = onToggleTeam,
+                        onMentionMember = onMentionMember,
                         phase = nodeSlice.network.phase,
                         failure = nodeSlice.network.failure,
                         selectedPeerId = selectedPeerId,

@@ -175,11 +175,9 @@ public fun ChatPane(
                 // 卡片动作真通路（M4 任务 5）：与手机壳同一个域层入口（两壳同源）。
                 // 参数接原语；本机乐观置灰已在 ChatScreen 里先行记账。
                 onCardAction = { convId, card, actionId ->
-                    // **1:1 直派的卡没有群**：`groupIdOf` 对单聊会话返回 null，`?.let` 会把点击
-                    // 整块吞掉 —— 按钮已被乐观置成「已提交，等待宿主确认」，宿主却零入站帧
-                    // （真机 A22 现场：手机点「合并此补丁」，合并永远不发生且没有一行日志）。
-                    // 域层两种会话都查，这里把会话 id 原样传下去即可（群会话仍是纯 groupId）。
-                    controller.handleCardAction(ConvId.groupIdOf(convId) ?: convId, card.cardId, card.rev, actionId)
+                    ConvId.groupIdOf(convId)?.let { groupId ->
+                        controller.handleCardAction(groupId, card.cardId, card.rev, actionId)
+                    }
                 },
                 // 与手机端同一条路：从「@ 了但没执行」那一行直接申请授权。
                 onRequestAgentGrant = { agentName ->

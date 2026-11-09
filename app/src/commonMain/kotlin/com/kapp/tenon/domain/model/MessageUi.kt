@@ -409,30 +409,6 @@ private val INVISIBLE_ONLY = Regex("[\\u200B\\u200C\\u200D\\uFEFF]")
 
 
 /**
- * 这条消息在会话流里**画得出东西**吗？（气泡 / 文件卡 / 卡片 / 通知行 / 思考块）
- *
- * ## 为什么需要它
- *
- * agent 的事件流会推一批**只有结构、没有正文**的帧（工具调用的开始/结束、空增量）。
- * 它们过去照常成了 `MessageEntity` 的一行：界面上是靠 `MessageBubble` 的空气泡防线
- * 挡掉后才看不见，但**列表预览**没有那道防线 —— `refreshSummary` 取"最新一条"，
- * 最新一条正好是空帧时预览就是 null，会话行于是写着「还没聊过，打个招呼」，
- * 哪怕上面躺着上百条真消息（真机 A22 现场：宿主库 `e4bd7b99` 14 条里 11 条是空帧）。
- *
- * 判据只留这一份：写入侧（丢弃）、读回侧（过滤）、摘要（跳过）三处共用，
- * 不许各自写一套"什么算空"。
- */
-val MessageUi.hasRenderableContent: Boolean
-    get() = hasVisibleText(text) ||
-        file != null ||
-        notice != null ||
-        renderCard != null ||
-        pk != null ||
-        screen != null ||
-        !reasoning.isNullOrBlank()
-
-
-/**
  * 屏幕协助历史卡的数据（茶话间 `ScreenHistoryCard.vue` 的 `ScreenRecord`）。
  *
  * 与 `core` 的 [com.kapp.tenon.core.protocol.ScreenSessionState] 是两件事，不能互相替代：

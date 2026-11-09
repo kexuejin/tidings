@@ -3,7 +3,6 @@
 package com.kapp.tenon.ui.desktop
 
 import androidx.compose.foundation.background
-import com.kapp.tenon.domain.pendingApprovalCount
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.hapticfeedback.HapticFeedbackType
 import androidx.compose.ui.platform.LocalHapticFeedback
@@ -82,7 +81,7 @@ import org.jetbrains.compose.resources.stringResource
  * 与聚合版本逐字同义（`messages` 与 `agentApprovals` 都只在各自片里；`unreadByPeer` 属 chat 片）。
  * 壳根拿切片调用，不再让「改节点表/设置」也走到徽标重算。
  */
-public fun desktopNavBadges(chat: ChatSlice, agent: AgentSlice, now: Long = 0L): Map<DesktopView, Int> = buildMap {
+public fun desktopNavBadges(chat: ChatSlice, agent: AgentSlice): Map<DesktopView, Int> = buildMap {
     val unread = chat.unreadByPeer.values.sum()
     if (unread > 0) put(DesktopView.Conversations, unread)
     val awaiting = chat.messages.values.sumOf { thread ->
@@ -92,9 +91,7 @@ public fun desktopNavBadges(chat: ChatSlice, agent: AgentSlice, now: Long = 0L):
         }
     }
     if (awaiting > 0) put(DesktopView.Files, awaiting)
-    // O3：与移动端同一把尺子（pending 且未过期）。now=0 的缺省保持旧读数行为
-    // （expiresAt>0 && now>expiresAt 恒 false ⇒ 不剔），需要剔过期的调用方显式传 now。
-    val pendingApprovals = pendingApprovalCount(agent.agentApprovals.values, now)
+    val pendingApprovals = agent.agentApprovals.values.count { it.status == "pending" }
     if (pendingApprovals > 0) put(DesktopView.Agents, pendingApprovals)
 }
 

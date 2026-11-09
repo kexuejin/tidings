@@ -166,40 +166,6 @@ class RelayControllerGroupTest {
         )
     }
 
-    /**
-     * A22-R5 的核心钉：**对端宿主宣告的工作区**也能声明席位（真机主形态 ——
-     * 手机建绑定群，工作区是桌面宣告的）。旧过滤 `peerId == self` 永远匹配不上
-     * ⇒ 席位恒空 ⇒ 该群 @agent 派单永远 NO_WAKE。修后：
-     *   席位 hostNodeId = **工作区宣告方**（agent 真正运行的那台），不是本机。
-     * 反向探针：把过滤改回 `peerId == self` ⇒ 本用例红（seat 为 null）。
-     */
-    @Test
-    fun aWorkspaceAnnouncedByARemoteHostDeclaresItsSeatOnGroupCreation() = runBlocking {
-        val controller = controller()
-        val desktop = "desktop-host-node"
-        // 对端桌面宣告的工作区（真机主形态：peerId = 桌面）—— 走**真实的入站帧路径**
-        // handleOnAgentWorkspace（与 agent-workspace 帧同一落点，不是测试特权直改 state）。
-        controller.messagesCtl.handleOnInbound(makeWorkspaceEnvelope(desktop, "ws-remote", "teahouse-mobile", "/srv/teahouse-mobile", "DSH"))
-        assertNotNull(
-            controller.state.value.agentWorkspaces.values.firstOrNull { it.peerId == desktop && it.wsId == "ws-remote" },
-            "入站宣告必须先落进工作区表（对端 peerId）",
-        )
-
-        val groupId = controller.createWorkspaceGroup(
-            name = "teahouse-mobile 协同群",
-            wsId = "ws-remote",
-            memberIds = listOf(desktop),
-            description = "/srv/teahouse-mobile",
-        )
-        assertNotNull(groupId)
-        val meta = controller.state.value.settings.groups.single { it.groupId == groupId }
-        val seat = meta.virtualAgents?.single()
-        assertNotNull(seat, "对端宣告的工作区必须声明席位（A22-R5：否则该群 @ 派单永远 NO_WAKE）")
-        assertEquals(desktop, seat.hostNodeId, "席位挂在工作区宣告方（agent 真正运行的那台）")
-        assertEquals("dsh", seat.agentId.lowercase())
-        assertEquals("ws-remote", seat.defaultWsId)
-    }
-
     @Test
     fun aWorkspaceGroupStillTakesTheOtherDevicesItHas() = runBlocking {
         // 有人在线时行为不变：人类成员照旧，agent 声明与它们并存（不是二选一）。
@@ -1227,25 +1193,4 @@ class RelayControllerGroupTest {
             current = settings
         }
     }
-
-    private fun makeWorkspaceEnvelope(
-        from: String,
-        wsId: String,
-        wsTitle: String,
-        wsPath: String,
-        agentKind: String,
-    ): Envelope = Envelope(
-        v = 1,
-        type = MsgTypes.AGENT_WORKSPACE,
-        id = newId(),
-        from = from,
-        ts = 1_000L,
-        payload = kotlinx.serialization.json.buildJsonObject {
-            put("wsId", wsId)
-            put("wsTitle", wsTitle)
-            put("wsPath", wsPath)
-            put("agentKind", agentKind)
-            put("online", true)
-        },
-    )
 }

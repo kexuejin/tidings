@@ -120,19 +120,20 @@ import com.kapp.tenon.ui.components.AppTextButton
 /**
  * 一条消息气泡外层 `Surface` 的形状。
  *
- * ## 自定义卡为什么仍要说「两层必须同形」
+ * ## 自定义卡为什么不能用文字气泡的圆角
  *
- * 文件 / 图片 / PK 这几类卡片自己当气泡（外层 `color = Color.Transparent`、
- * `border = null`，`bubblePad = 0`），圆角一律 `RelayShapes.large`（16dp）——
- * 与文字气泡的 `--r-bubble` 同一个值。但 M3 的 `Surface` 会在 modifier 链末尾
- * **无条件** `.clip(shape)`（material3 1.9.0 `Surface.kt` 的私有 `surface()`），
- * 这个"透明容器"仍然会把子内容裁成自己的形状。
+ * 文件 / 图片 / PK 这三类卡片**自己画边框和底色**：`FileCardView`、
+ * `InlineImagePreview`、`PkCardView` 用的都是 `RelayShapes.medium`（12dp）。
+ * 外层这层 `Surface` 对它们来说只是容器：`color = Color.Transparent`、
+ * `border = null`。但 M3 的 `Surface` 会在 modifier 链末尾**无条件**
+ * `.clip(shape)`（material3 1.9.0 `Surface.kt` 的私有 `surface()`），
+ * 于是这个"透明容器"仍然会把子内容裁成自己的形状。
  *
- * 真机事故：外层沿用文字气泡的 8/16dp 非对称圆角、内层却画 12dp 边框时，
- * 三个 16dp 的角比内层更圆，内层边框的圆角弧线被整段裁掉，只剩互不相接的
- * 横竖短线；唯 topStart（8dp < 12dp）留得住 —— 看上去就是「只有左上角是圆的」。
- * 所以自定义卡的外层必须用**与内层完全相同**的形状对象，让裁剪路径与绘制路径重合。
- * 约束方向是双向的：只改内层不改这里，断角立刻复现（`FileCardStyleTest` 钉住了）。
+ * 真机事故：外层沿用文字气泡的 8/16dp 非对称圆角时，三个 16dp 的角比内层
+ * 12dp 更圆，内层边框的圆角弧线全被裁掉，只剩互不相接的横竖短线；
+ * 唯有 topStart（8dp < 12dp）留得住 —— 看上去就是「只有左上角是圆的，
+ * 另外三个角是直角断口」。所以自定义卡的外层必须用**与内层完全相同**
+ * 的形状，让裁剪路径与描边路径重合。
  *
  * 抽成纯函数是为了能被单测钉住：截图门禁能发现"弧线没了"，但说不清是
  * 哪一层的形状裁掉了另一层。
@@ -143,7 +144,7 @@ internal fun chatBubbleShape(
     hasPrevSender: Boolean,
     hasNextSender: Boolean,
 ): Shape {
-    if (isCustomCard) return RelayShapes.large
+    if (isCustomCard) return RelayShapes.medium
     val topStartRadius = if (!mine) 6.dp else 18.dp
     val topEndRadius = if (mine) 6.dp else 18.dp
     val bottomStartRadius = if (!mine && hasNextSender) 6.dp else 18.dp
@@ -164,7 +165,7 @@ internal fun chatBubbleShape(
  * 它的 8dp 圆角整段落在外层 16dp 裁剪弧之内 ⇒ 保持 `RelayShapes.small`。
  *
  * 但自定义卡（文件 / 图片 / PK）的 `bubblePad` 是 `0.dp`，引用卡又 `fillMaxWidth()`，
- * 四边与外层齐平：外层裁剪 16dp、引用卡自己只有 8dp ⇒ 四个角的弧线被外层切掉，
+ * 四边与外层齐平：外层裁剪 12dp、引用卡自己只有 8dp ⇒ 四个角的弧线被外层切掉，
  * 又是一处「只有某几个角是圆的」。这时引用卡必须**逐字沿用外层形状**，
  * 让裁剪路径与它自己的绘制路径重合。回复一条消息再附上文件即可复现
  * （`ChatMessageList` 对每种内容都传 `quotedMessage`，不限文字）。
@@ -172,7 +173,7 @@ internal fun chatBubbleShape(
  * 同样抽成纯函数，好让单测能钉住「自定义卡里两层形状必须同一对象」。
  */
 internal fun quotedCardShape(isCustomCard: Boolean): Shape =
-    if (isCustomCard) RelayShapes.large else RelayShapes.small
+    if (isCustomCard) RelayShapes.medium else RelayShapes.small
 
 /**
  * 一条消息气泡。

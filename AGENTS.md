@@ -488,6 +488,7 @@ filter-repo 会**顺手删掉 `origin` remote**（防误推），跑完要重新
 | **组件共享的四种接缝与验收** | [design/component-sharing.md](design/component-sharing.md) |
 | 跨网/保活/公开传输的设计与实测 | `docs/cross-network-*.md`、`docs/public-transport-security.md` |
 | Agent 协议（PPE-1） | `docs/PROTOCOL-AGENT-WORKSPACE.md` |
+| 团队折叠（Team Folder）最终方案：形态、裁决、改造量、验收 | `docs/team-folder-final-plan.md` |
 | 真机证据（文字） | `design/runtime-evidence/` |
 | 仓库里哪些真机身份被清掉了、哪些是**有意保留**的 | `docs/privacy-scan-2026-10-29.md`（§4 是「家网段为什么不整体替换」） |
 

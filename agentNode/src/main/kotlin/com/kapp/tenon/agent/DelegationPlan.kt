@@ -182,8 +182,7 @@ object DelegationParser {
     }
 
     /**
-     * 句首的已知 agent 键：`@codex …` / `codex: …` / `codex-cli …`，
-     * 以及群席位全名 `@dsh-<host>-<workspace> …`（按前缀归位到档案键）。
+     * 句首的已知 agent 键：`@codex …` / `codex: …` / `codex-cli …`。
      * 只认紧跟在句首（可带 @）的键 token；返回 归一键 to 其后的指令文本。
      */
     private fun leadingAgentKey(clause: String, availableKeys: Set<String>): Pair<String, String>? {
@@ -196,9 +195,8 @@ object DelegationParser {
             index++
         }
         if (index == start) return null
-        // 席位全名（`@dsh-<host>-<workspace>`）不是档案键：交给 resolveKey 按前缀归位
-        // 到在位的档案键，否则显式点名的委派计划在真机上永远解析不出来。
-        val key = AgentProfiles.resolveKey(clause.substring(start, index), availableKeys) ?: return null
+        val key = AgentProfiles.normalizeKey(clause.substring(start, index)) ?: return null
+        if (key !in availableKeys) return null
         val instruction = clause.substring(index).trim().trimStart(':', '：').trim()
         if (instruction.isEmpty()) return null
         return key to instruction

@@ -19,6 +19,7 @@ import com.kapp.tenon.domain.model.WorkspaceUi
 import com.kapp.tenon.core.nowMillis
 import com.kapp.tenon.core.protocol.AgentQueueOps
 import com.kapp.tenon.core.protocol.AgentRunStates
+import com.kapp.tenon.core.protocol.AgentSessionStates
 import com.kapp.tenon.core.protocol.Envelope
 import com.kapp.tenon.core.protocol.MsgTypes
 import com.kapp.tenon.core.transport.SendOutcome
@@ -1224,11 +1225,13 @@ internal fun healStaleBusySessions(
     val healedList = mutableListOf<AgentSessionUi>()
 
     for ((key, session) in sessions) {
-        if (session.state == "busy") {
+        if (session.state == AgentSessionStates.BUSY) {
             val lastEventAt = events[key].orEmpty().maxOfOrNull { it.at } ?: 0L
             val lastActivity = maxOf(session.sortActivityAt, lastEventAt)
-            if (lastActivity > 0L && (now - lastActivity) > timeoutMs) {
-                val healed = session.copy(state = "idle")
+            // 阈值与比较只有 isStaleBusy 一份：这里曾自己抄了一遍 `(now - lastActivity) > timeoutMs`，
+            // 改门限时漏改一处就会让两屏对"僵死"给出不同答案。
+            if (isStaleBusy(lastActivity, now, timeoutMs)) {
+                val healed = session.copy(state = AgentSessionStates.IDLE)
                 healedSessions[key] = healed
                 healedList.add(healed)
                 continue

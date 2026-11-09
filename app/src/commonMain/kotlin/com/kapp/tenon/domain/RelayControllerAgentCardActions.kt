@@ -285,45 +285,7 @@ internal class RelayControllerAgentCardActions(
                 )
             }
         } else {
-            // **1:1 直派（无群容器）也必须发到发起方。**
-            //
-            // 这里原先只打一行 `persisted locally` 就结束 —— 卡落进了宿主自己的库，
-            // 发起方手机上一条都没有：工单真执行 20.8 s、五帧 rev 全部「落库成功」，
-            // 用户界面一字不变（真机 A22 现场：手机端零入站行）。
-            //
-            // 单聊文本帧在协议层**不做字段白名单**（`CodecMsg.validateMsg` 对非
-            // `group-text` 直接放行），卡片挂同一帧即可；收端
-            // `RelayControllerMessagesComponent` 的 `payload?.get("card")` 不看群/单聊，
-            // 所以这条路不需要新增协议键、也不需要动白名单。
-            //
-            // 信封 id 与本地槽位同一个（与群路径、`broadcastAgentState` 同一条纪律）。
-            val peer = convKey.takeIf { !it.startsWith("agent:") && !it.startsWith("ws-") }
-            val rt = host.runtime
-            if (peer == null || rt == null) {
-                println(
-                    "[CARD] 1:1 card persisted locally, not sent: " +
-                        (if (rt == null) "no runtime" else "conv $convKey is not a peer") +
-                        " (card=" + cardId + ")",
-                )
-            } else {
-                runCatching {
-                    rt.sendDirectText(
-                        peerId = peer,
-                        text = title,
-                        card = finalCard,
-                        envelopeId = envelopeId,
-                        // 卡片动作的回程地址：接收端从 `senderId` 解出宿主 nodeId，
-                        // 才知道「合并/打回」该发回哪台机器。不带 = 按钮是死的。
-                        senderId = AgentSenderId.of(st.selfNodeId, agentId),
-                    )
-                    println("[CARD] 1:1 direct card sent (conv=" + convKey + " card=" + cardId + ")")
-                }.onFailure { t ->
-                    println(
-                        "[CARD] 1:1 direct card send FAILED (conv=" + convKey + " card=" + cardId +
-                            ") : " + (t.message ?: t::class.simpleName),
-                    )
-                }
-            }
+            println("[CARD] 1:1 direct card persisted locally (conv=" + convKey + " card=" + cardId + ")")
         }
     }
 
@@ -337,7 +299,11 @@ internal class RelayControllerAgentCardActions(
     fun handleCardAction(groupId: String, cardId: String, cardRev: Int, actionId: String) {
         val st = host.state.value
         val self = st.selfNodeId
-        val cardRow = cardRowOf(cardId, groupId) ?: return
+        val convId = ConvId.group(groupId)
+        val cardRow = st.messages[convId].orEmpty()
+            .lastOrNull { row ->
+                (row.card?.get("cardId") as? JsonPrimitive)?.contentOrNull == cardId
+            } ?: return
         val (hostNode, agentId) = AgentSenderId.parse(cardRow.senderId) ?: return
         if (hostNode == null || agentId == null) return
         if (hostNode == self) {
@@ -370,19 +336,9 @@ internal class RelayControllerAgentCardActions(
         val cardId = p.strField("cardId") ?: return
         val actionId = p.strField("actionId") ?: return
         val decidedBy = p.strField("decidedBy") ?: return
-        val rawGroupId = p.strField("groupId") ?: return
+        val groupId = p.strField("groupId") ?: return
         // 冒名判定：说「X 批了」的帧必须由 X 自己的节点发出 —— 否则任何人都能替全群批准。
         if (decidedBy != envelope.from) return
-        // **帧里的 groupId 是发起方视角的会话 id**：1:1 时它就是**本机 nodeId**。
-        // 本机拿它当自己的会话键，卡片行永远查不到（`broadcastDecision` 的 `?: return`），
-        // 点击落到「静默丢弃」，而发起方界面上早已是「已提交，等待宿主确认」——
-        // 真机 A22 现场：点「合并此补丁」，宿主 dedup 里有这条帧，什么都没发生。
-        // 真群照旧；不是本机已知的群 ⇒ 归一成「与发起方的 1:1 会话」。
-        val groupId = if (host.state.value.settings.groups.any { it.groupId == rawGroupId }) {
-            rawGroupId
-        } else {
-            com.kapp.tenon.core.protocol.ConvId.single(envelope.from)
-        }
         handleHostCardAction(groupId, agentId, cardId, actionId, decidedBy)
         // 动作帧不需要逐帧回执：全群广播的那张 rev+1 卡就是结果（§7.3-2）。
         run { invokeId }
@@ -497,15 +453,7 @@ internal class RelayControllerAgentCardActions(
     private fun mayDriveCard(groupId: String, agentId: String, decidedBy: String): Boolean {
         val st = host.state.value
         if (decidedBy == st.selfNodeId) return true
-        val meta = st.settings.groups.firstOrNull { it.groupId == groupId }
-        if (meta == null) {
-            // **1:1 直派的卡没有群**：判据与 `handleInvokeTask` 的 1:1 分支同一条 ——
-            // 发起方对本宿主持有该 agent 的执行授权就够（`grantAllows` 收窄到节点维度）。
-            // 群成员身份与席位在这里都不适用：没有群可查。此前这里直接 `return false`，
-            // 于是手机上点「合并此补丁」被宿主判「没有权限」，而 1:1 的拒绝横幅
-            // （`broadcastAgentState` 需要群）又发不出去 —— 点了彻底没反应。
-            return port.grantAllowsNode(agentId, decidedBy)
-        }
+        val meta = st.settings.groups.firstOrNull { it.groupId == groupId } ?: return false
         // **编排器代发的卡没有真实席位**：多棒链的卡署名 `tidings-chain`（DesktopStageChain），
         // 它不在 `virtualAgents` 里。按假名查台账/策略必然双双落空 → 掉进最严档 LIST →
         // 连本可以驱动工作区 agent 的人都被拒（现场：点链卡的「合并此补丁」，
@@ -562,9 +510,12 @@ internal class RelayControllerAgentCardActions(
      */
     private fun broadcastDecision(cardId: String, actionId: String, groupId: String, agentId: String, decidedBy: String) {
         val st = host.state.value
+        val convId = ConvId.group(groupId)
         // T-2d：最新载荷看 renderCard（cardPayload ?: card）—— 原位刷新后 row.card
         // 永远停在首帧 rev，读它会算出重复的 currentRev（rev 永不推进的真 bug 现场）。
-        val latest = cardRowOf(cardId, groupId)?.renderCard ?: return
+        val latest = st.messages[convId].orEmpty()
+            .lastOrNull { row -> (row.renderCard?.get("cardId") as? JsonPrimitive)?.contentOrNull == cardId }
+            ?.renderCard ?: return
         val currentRev = (latest["rev"] as? JsonPrimitive)?.contentOrNull?.toIntOrNull() ?: return
         val meta = st.settings.groups.firstOrNull { it.groupId == groupId }
         val displayName = decidedDisplayName(decidedBy, meta?.memberNicks, st.selfNodeId, st.settings.nick)
@@ -575,20 +526,6 @@ internal class RelayControllerAgentCardActions(
                 ("decidedActionId" to JsonPrimitive(actionId)),
         )
         host.scope.launch { broadcastBoardCard(groupId, agentId, next) }
-    }
-
-    /**
-     * 按 cardId 找卡片行 —— **群会话与 1:1 会话两处都查**。
-     *
-     * 群卡落在 `group:<groupId>`，1:1 直派（`dispatchDirectInvoke`）的卡落在
-     * **与对端的会话**（convKey = 对端 nodeId，没有 `group:` 前缀）。只查前者时，
-     * 1:1 上的每一次卡片动作都走「查不到 ⇒ 静默 return」：手机上按钮已被壳层乐观置成
-     * 「已提交，等待宿主确认」，宿主那边连一行日志都没有，合并永远不发生。
-     */
-    private fun cardRowOf(cardId: String, convKey: String): MessageUi? {
-        val st = host.state.value
-        return (st.messages[ConvId.group(convKey)].orEmpty() + st.messages[convKey].orEmpty())
-            .lastOrNull { row -> (row.renderCard?.get("cardId") as? JsonPrimitive)?.contentOrNull == cardId }
     }
 
     private fun boardCardIdOf(invokeId: String): String = "invoke-" + invokeId

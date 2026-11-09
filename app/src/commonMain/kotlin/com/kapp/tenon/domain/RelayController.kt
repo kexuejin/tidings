@@ -335,22 +335,7 @@ class RelayController(
     internal var runtime: NodeRuntime? = null
     internal var jobs = mutableListOf<Job>()
     var onLocalSessionPageRequest: ((peerId: String, wsId: String, offset: Long, limit: Long?) -> Boolean)? = null
-    /**
-     * 文本路由的派单出口。[prompt] 已经剥掉 `@` 提及，[mentionedAgentKey] 是**原文里
-     * 被点名的那个键**（小写；没有点名 = null，例如工作区群里回复 agent 的接话）。
-     *
-     * 为什么要单独带这一格：编排层的「显式 @ 点名 = 显式派单」豁免判的是**点名事实**，
-     * 而 prompt 里已经没有 `@` 了；让接收方再从剥净的正文里重判一次，等于同一个问题
-     * 问两处、两处必然不一致（真机 D18：群 @ 工单句被改判成只读讨论，工单静默消失）。
-     * 事实由算出 `agentPromptRoute` 的那个路由点给出，与唤醒判据共用同一条正则。
-     */
-    var onAgentPrompt: (suspend (
-        convId: String,
-        senderPeerId: String,
-        prompt: String,
-        replyToId: String?,
-        mentionedAgentKey: String?,
-    ) -> Unit)? = null
+    var onAgentPrompt: (suspend (convId: String, senderPeerId: String, prompt: String, replyToId: String?) -> Unit)? = null
 
     /**
      * **打断桥**（测试方案 §6.1 的落点，真机实测 FAIL 后补的缝）。
@@ -1176,27 +1161,6 @@ class RelayController(
         convId: String? = null,
         deadlineMs: Long = RelayControllerAgentInvokeComponent.DEFAULT_INVOKE_DEADLINE_MS,
     ): String? = invokeCtl.dispatchDirectInvoke(peerId, agentId, prompt, wsId, convId, deadlineMs)
-
-    /**
-     * 记住 1:1 派单药丸**这次选中的工作区**（跨重启）。
-     *
-     * 为什么需要：「这条指令写进哪个仓」不能靠"上次重启后的默认值"。药丸只活在界面态
-     * （`rememberSaveable`）时，App 被系统回收或被划掉，重启后静默回到工作区列表第一个
-     * ——真机现场：重启后的第一单派进了 `china-pass`，当时想派的是 `teahouse-mobile`。
-     * 往别的项目写文件是不可撤销的副作用，不能靠运气。
-     *
-     * **只在真的变了才落盘**：点药丸是会点很多次的动作，每次点都写一遍设置文件既浪费，
-     * 也会让设置文件的修改时间无意义地抖动。
-     *
-     * **不在这里校验 wsId 是否还存在**：校验放在读取端（`DispatchWorkspaceChoice.resolve`）。
-     * 解绑/换机发生在写入**之后** —— 写入时对、读取时错，验证就得放在会错的那一端。
-     */
-    fun rememberDispatchWorkspace(wsId: String) {
-        if (wsId.isBlank()) return
-        val current = _state.value.settings
-        if (current.lastDispatchWsId == wsId) return
-        persist(current.copy(lastDispatchWsId = wsId))
-    }
 
     /**
      * 责任链的进度卡（一链一卡，rev 递增）走**与看板卡同一条**广播路径。

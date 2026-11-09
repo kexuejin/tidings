@@ -612,13 +612,14 @@ data class RelayUiState(
     fun convTitle(convId: String): String {
         groupOfConv(convId)?.name?.let { return it }
         if (!ConvId.isGroup(convId)) {
-            // O1（用户两次独立指出）：列表行必须与**头部同一身份口径** ——
-            // 对端是 agent 宿主时显示 agent 名（头部早已如此）。旧的「恒为设备昵称」
-            // 取舍（防 agent 数据到齐后标题中途换名）就此翻转：漂移只发生在声明首次
-            // 到达的一刻、且与头部同步发生；「同一个会话两个名字」（列表机器名 vs
-            // 头部 agent 名）被用户判为更伤。agent 归属的表达（署名/徽标）不变。
-            // 走 senderContext ⇒ 与头部/署名/@候选同一份解析（§2.4 名字只有一份）。
-            return resolveNodeIdentity(convId, senderContext(convId)).displayName
+            // 1:1 会话标题恒为**对端节点的名字**。这里曾走 resolveSenderIdentity 让
+            // agent 宿主的会话显示 agent 名（"会话就是跟那个 agent 说话"）—— 但 agent
+            // 身份要等 agent 帧/会话数据到齐才解析得出，于是同一个会话的标题会**中途换名**：
+            // 真机现场（验证轮抓到）：demo-mac-97 的会话在 DSH 的消息到达后变成 "dsh"，
+            // 一个会话两个名字。agent 的归属已经由每条消息的署名与会话行上的 Agent 徽标
+            // 表达（§2.4 的单一来源），标题必须稳定 —— 名字随数据到齐而漂移比"不够聪明"
+            // 更伤：用户靠它认会话。
+            peer(convId, sliceNode(), sliceSettings())?.displayName?.let { return it }
         }
         return fallbackTitle(convId)
     }

@@ -6,7 +6,6 @@ import com.kapp.tenon.core.transport.LocalFile
 import com.kapp.tenon.domain.model.TransferState
 import com.kapp.tenon.platform.DataDirectoryProvider
 import com.kapp.tenon.platform.InMemoryAppPlatform
-import com.kapp.tenon.testutil.TestPorts
 import com.kapp.tenon.testutil.awaitUntil
 import java.io.File
 import java.nio.file.Files
@@ -59,8 +58,8 @@ class OfflinePatchBundleTest {
 
     @Test
     fun thePatchTravelsOverTheP2pFileChannelAndLandsByteForByte() = runBlocking {
-        val portA = TestPorts.freeUdpBase()
-        val portB = TestPorts.freeUdpBase()
+        val portA = freePort()
+        val portB = freePort()
         val a = controller("a", udpPort = portA, tcpPort = portA + 1)
         val b = controller("b", udpPort = portB, tcpPort = portB + 1)
         try {
@@ -158,4 +157,5 @@ class OfflinePatchBundleTest {
         )
     }
 
+    private fun freePort(): Int = java.net.ServerSocket(0).use { it.localPort }
 }

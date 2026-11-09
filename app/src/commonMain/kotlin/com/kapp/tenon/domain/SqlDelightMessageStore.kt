@@ -24,7 +24,6 @@ import com.kapp.tenon.domain.model.FileCardUi
 import com.kapp.tenon.domain.model.MessageUi
 import com.kapp.tenon.domain.model.NoticeKind
 import com.kapp.tenon.domain.model.NoticeDetail
-import com.kapp.tenon.domain.model.hasVisibleText
 import com.kapp.tenon.domain.model.parseThinkingContent
 
 /**
@@ -78,19 +77,14 @@ class SqlDelightMessageStore(
             .sortedBy { it.at }
 
     override fun loadSummaries(): List<ConversationSummaryRow> =
-        queries.selectAllConversationSummaries().executeAsList().mapNotNull { row ->
-            // **自愈：预览为 null 的行重算一次。**
-            //
-            // 老库里 agent 事件流的零正文帧占住了"最新一条"，摘要于是写成 preview=null
-            // ——会话列表把它画成「还没聊过，打个招呼」，哪怕上面有上百条真消息。
-            // 只对 null 行重算（正常行零代价），重算后若整个会话没有可见消息，
-            // refreshSummary 会把这行删掉（返回 null 即从列表里消失）。
-            if (row.last_text_preview != null) {
-                row.toSummaryRow()
-            } else {
-                refreshSummary(row.conv_id)
-                queries.selectConversationSummary(row.conv_id).executeAsOneOrNull()?.toSummaryRow()
-            }
+        queries.selectAllConversationSummaries().executeAsList().map { row ->
+            ConversationSummaryRow(
+                convId = row.conv_id,
+                lastMessageId = row.last_message_id,
+                lastTextPreview = row.last_text_preview,
+                lastMessageAt = row.last_message_at,
+                lastMessageIsMine = row.last_message_is_mine == 1L,
+            )
         }
 
     /** 看板卡 rev 台账（root cause #3）：与消息窗口无关，直接读 BoardCardRev 表。 */
@@ -111,10 +105,7 @@ class SqlDelightMessageStore(
      * 一个会话一次查询，代价可以忽略，换来「永远不会不同步」。
      */
     private fun refreshSummary(convId: String) {
-        // 最新一条**看得见**的消息。多取 20 行是为了跳过 agent 事件流留下的零正文行
-        // （判据只有 `hasRenderableContent` 一份，row 侧的映射见 [hasRenderableContent]）。
-        val latest = queries.selectLatestMessageOfConv(convId).executeAsList()
-            .firstOrNull { it.hasRenderableContent() }
+        val latest = queries.selectLatestMessageOfConv(convId).executeAsList().firstOrNull()
         if (latest == null) {
             // 这个会话已经没有消息了：摘要也得跟着消失，否则列表里会留下一个空行。
             queries.deleteConversationSummary(convId)
@@ -155,11 +146,6 @@ class SqlDelightMessageStore(
                 }
                 if (rows.isEmpty()) continue
                 // 与 load() 的老行为一致：组内按时间升序（UI 直接按这个顺序画）。
-                //
-                // **这里不过滤"画不出东西的消息"**：存储层的契约是"忠实记录发生过什么"
-                // （见 FileMessageStoreTest 对排队/失败空正文的断言）。空帧的拦截在
-                // 写入侧（`handleAppendMessage` 的 `hasRenderableContent`），历史空行
-                // 由界面自己的空气泡防线挡掉；摘要另有判据（`selectLatestMessageOfConv`）。
                 result[convId] = rows.map { it.toUi() }.sortedBy { it.at }
             }
             return result
@@ -900,30 +886,6 @@ private fun com.kapp.tenon.db.MessageEntity.toUi(): MessageUi {
 }
 
 /**
- * `ConversationSummary` 表的一行 → 域模型。两处读（全量 / 单条自愈后重读）共用一份映射，
- * 免得"自愈那条"和其它行形状不同（列名漂了只有一处会红）。
- */
-private fun com.kapp.tenon.db.ConversationSummary.toSummaryRow(): ConversationSummaryRow =
-    ConversationSummaryRow(
-        convId = conv_id,
-        lastMessageId = last_message_id,
-        lastTextPreview = last_text_preview,
-        lastMessageAt = last_message_at,
-        lastMessageIsMine = last_message_is_mine == 1L,
-    )
-
-/**
- * `selectLatestMessageOfConv` 的一行在会话流里**画得出东西**吗？
- *
- * 与 `MessageUi.hasRenderableContent` 是同一条判据的 row 侧版本：正文可见（零宽字符不算）
- * 或带着文件卡 / 通知 / 屏幕卡 / 声明卡。agent 事件流的零正文帧两条都不满足 ⇒ 摘要
- * 跳过它们，继续往更早找 —— 否则最新一帧是空的时候，会话列表会写「还没聊过，打个招呼」。
- */
-private fun com.kapp.tenon.db.SelectLatestMessageOfConv.hasRenderableContent(): Boolean =
-    hasVisibleText(text) || file_json != null || notice != null ||
-        screen_json != null || card_json != null || card_payload != null
-
-/**
  * 把「最后一条消息」折算成**会话列表预览**的那一句话 —— 摘要派生的**唯一**入口。
  *
  * 为什么必须是同一个函数：会话列表的预览有两个互为备份的来源 ——
@@ -944,7 +906,8 @@ private fun com.kapp.tenon.db.SelectLatestMessageOfConv.hasRenderableContent(): 
  *    （null = 界面画「还没聊过」。这一格必须能区分「没聊过」与「聊了但没正文」，
  *    所以空串不能折成某句文案 —— 文案归 UI 层）。
  */
-internal fun conversationPreviewOf(text: String, fileName: String?): String? {    val (_, cleaned) = parseThinkingContent(text)
+internal fun conversationPreviewOf(text: String, fileName: String?): String? {
+    val (_, cleaned) = parseThinkingContent(text)
     return cleaned.takeIf { it.isNotBlank() } ?: fileName?.takeIf { it.isNotBlank() }
 }
 

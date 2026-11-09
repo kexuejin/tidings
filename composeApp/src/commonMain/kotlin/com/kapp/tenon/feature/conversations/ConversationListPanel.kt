@@ -13,9 +13,11 @@ import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.lazy.LazyListScope
 import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import com.kapp.tenon.domain.WorkspaceUnitUi
+import com.kapp.tenon.domain.model.TeamFolderUi
 import com.kapp.tenon.platform.PlatformLazyListScrollbar
 import com.kapp.tenon.ui.theme.LocalAppSpacing
 
@@ -100,8 +102,33 @@ internal fun ConversationListPanel(
      * 又拆回两份。默认 false = 手机调用方不传即手机帧零变化。
      */
     dense: Boolean = false,
+    /**
+     * Team Folder：会话键 → 该会话上挂的团队（一个群可挂多个 team，按 manifest 顺序）。
+     *
+     * 空 = 不折叠。默认空是为了让预览、截图夹具与尚未接域的壳保持**零像素变化**。
+     */
+    teamFoldersByConv: Map<String, List<TeamFolderUi>> = emptyMap(),
+    /**
+     * 已展开的组键（见 [teamGroupKey]）。
+     *
+     * 由屏幕级持有 —— 容器是共享组件，`remember` 在这里会让手机与桌面各自记一份折叠态。
+     */
+    expandedTeams: Set<String> = emptySet(),
+    /** 点组头：回调传组键，调用方自行维护 [expandedTeams]。null = 组头只展示、不可折叠。 */
+    onToggleTeam: ((String) -> Unit)? = null,
+    /**
+     * 点团队成员：请壳打开该群会话并预填 `@token`。
+     *
+     * null = 成员行不可点（预览、或壳没有草稿写入口）。预填文本由壳拼 —— 列表不该知道
+     * `@` 后面要加空格这种事。
+     */
+    onMentionMember: ((convId: String, token: String) -> Unit)? = null,
 ) {
     val sp = LocalAppSpacing.current
+    // 折叠只做结构投影，不重排：排序真源仍是 orderInboxFeed / orderConversationList。
+    val rows = remember(feed, teamFoldersByConv, expandedTeams) {
+        foldTeamRows(feed, teamFoldersByConv, expandedTeams)
+    }
     Box(modifier = modifier) {
         LazyColumn(
             state = state,
@@ -111,31 +138,54 @@ internal fun ConversationListPanel(
             // 圆角行看起来像一张张独立的卡，反而与"扁平行 + 分割线"这套分组打架。
             verticalArrangement = Arrangement.spacedBy(sp.xxs),
         ) {
-            itemsIndexed(feed, key = { _, item -> item.key }) { index, item ->
-                when (item) {
-                    is InboxFeedItem.Conversation -> ConversationRow(
-                        row = item.conv,
-                        now = now,
+            itemsIndexed(rows, key = { _, row -> row.key }) { index, row ->
+                when (row) {
+                    is FeedRow.Folder -> TeamFolderHeader(
+                        folder = row.folder,
+                        expanded = row.expanded,
+                        unread = row.unread,
+                        // 折叠态下组头替代会话行，进群只能靠它 —— 所以整行复用 onOpenChat。
                         onOpenChat = onOpenChat,
-                        onTogglePin = onTogglePin?.let { act -> { act(item.conv.convId) } },
-                        onToggleMute = onToggleMute?.let { act -> { act(item.conv.convId) } },
-                        onDeleteConversation = onDeleteConversation?.let { act -> { act(item.conv.convId) } },
-                        onLeaveGroup = onLeaveGroup?.let { act -> { act(item.conv.convId) } },
-                        previewSenderName = previewSenderNameOf?.invoke(item.conv.convId),
-                        draftPreview = draftPreviewOf?.invoke(item.conv.convId),
-                        selected = selectedConvId != null && item.conv.convId == selectedConvId,
-                        dense = dense,
+                        onToggle = onToggleTeam,
                     )
 
-                    is InboxFeedItem.Workspace -> WorkspaceFeedRow(
-                        unit = item.unit,
-                        group = item.group,
-                        now = now,
-                        onOpenWorkspaceUnit = { onOpenWorkspaceUnit?.invoke(it) },
+                    is FeedRow.Member -> TeamMemberRow(
+                        member = row.member,
+                        onClick = onMentionMember?.let { mention ->
+                            { mention(row.convId, row.token) }
+                        },
                     )
+
+                    is FeedRow.Item -> when (val item = row.item) {
+                        is InboxFeedItem.Conversation -> ConversationRow(
+                            row = item.conv,
+                            now = now,
+                            onOpenChat = onOpenChat,
+                            onTogglePin = onTogglePin?.let { act -> { act(item.conv.convId) } },
+                            onToggleMute = onToggleMute?.let { act -> { act(item.conv.convId) } },
+                            onDeleteConversation = onDeleteConversation?.let { act -> { act(item.conv.convId) } },
+                            onLeaveGroup = onLeaveGroup?.let { act -> { act(item.conv.convId) } },
+                            previewSenderName = previewSenderNameOf?.invoke(item.conv.convId),
+                            draftPreview = draftPreviewOf?.invoke(item.conv.convId),
+                            selected = selectedConvId != null && item.conv.convId == selectedConvId,
+                            dense = dense,
+                        )
+
+                        is InboxFeedItem.Workspace -> WorkspaceFeedRow(
+                            unit = item.unit,
+                            group = item.group,
+                            now = now,
+                            onOpenWorkspaceUnit = { onOpenWorkspaceUnit?.invoke(it) },
+                        )
+                    }
                 }
                 // 最后一行下面不画线：列表尾部再挂一条会看起来像"下面还有东西"。
-                if (index != feed.lastIndex) ConversationListDivider()
+                // 同一团队的成员行之间也不画：组内是"一个文件夹里的条目"，画线会把它们
+                // 拆成互不相干的会话行。组头与组内第一行之间保留线（分隔标题与内容）。
+                val next = rows.getOrNull(index + 1)
+                val sameTeamBlock = row is FeedRow.Member && next is FeedRow.Member &&
+                    row.convId == next.convId && row.pluginId == next.pluginId
+                if (!sameTeamBlock && index != rows.lastIndex) ConversationListDivider()
             }
             trailingContent?.invoke(this)
         }

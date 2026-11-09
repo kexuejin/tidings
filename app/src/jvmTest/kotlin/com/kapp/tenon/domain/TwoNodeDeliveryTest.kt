@@ -12,7 +12,6 @@ import kotlin.test.AfterTest
 import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertTrue
-import com.kapp.tenon.testutil.TestPorts
 import com.kapp.tenon.testutil.awaitUntil
 
 /**
@@ -48,8 +47,8 @@ class TwoNodeDeliveryTest {
 
     @Test
     fun `a message really arrives at the other node`() = runBlocking {
-        val portA = TestPorts.freeUdpBase()
-        val portB = TestPorts.freeUdpBase()
+        val portA = freePort()
+        val portB = freePort()
         val a = controller(udpPort = portA, tcpPort = portA + 1)
         val b = controller(udpPort = portB, tcpPort = portB + 1)
         try {
@@ -112,5 +111,8 @@ class TwoNodeDeliveryTest {
             agentStore = InMemoryAgentStore(),
             scope = scope,
         )
+
+    /** 端口 0 由系统分配；这里取一个当前空闲的固定号，够两个实例分开用。 */
+    private fun freePort(): Int = java.net.ServerSocket(0).use { it.localPort }
 
 }

@@ -23,6 +23,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import com.kapp.tenon.core.protocol.VirtualAgentMember
+import com.kapp.tenon.core.protocol.isTeam
 import com.kapp.tenon.domain.model.WorkspaceUi
 import com.kapp.tenon.generated.resources.Res
 import com.kapp.tenon.generated.resources.capsule_entity_team
@@ -146,7 +147,7 @@ fun groupAuthAgentRows(
 ): List<GroupAuthAgentRow> = declaredAgents.map { member ->
     GroupAuthAgentRow(
         name = member.name,
-        isTeam = member.teamMembers.isNotEmpty() || member.entityType == "team",
+        isTeam = member.isTeam,
         teamMemberCount = member.teamMembers.size,
         hostIsSelf = member.hostNodeId == selfNodeId,
         // 默认工作区的标题：先查声明白名单，再问本机工作区表；都查不到就不显示

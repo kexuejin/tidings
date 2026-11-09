@@ -380,12 +380,7 @@ fun handleOnTransfer(event: TransferEvent) {
                     tableTextTruncated = offer.tableTextTruncated == true,
                     isFolder = offer.isFolder,
                 ),
-                // **1:1 也要署名**：原来这里写的是 `if (offer.groupId != null) offer.peerId else null`
-                // —— 群里的文件卡有发送者、单聊里没有任何发送者，界面只能画一个无主头像。
-                // 真机 A22：agent 产出的 patch.diff / report.json 在会话里"看起来没归属"。
-                // 单聊的 offer.peerId 就是那台对端设备，解析器再按它的身份（agent 宿主 ⇒
-                // agent 名）出署名 —— 与头部标题同一口径。
-                senderId = offer.peerId,
+                senderId = if (offer.groupId != null) offer.peerId else null,
             )
             if (offer.purpose == FilePurpose.SHARE_GET) {
                 host.runtime?.acceptTransfer(offer.transferId)

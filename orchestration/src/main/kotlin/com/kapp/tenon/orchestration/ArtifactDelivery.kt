@@ -93,10 +93,8 @@ internal class ArtifactDelivery(
             .asSequence()
             .flatten()
             .lastOrNull { (it.renderCard?.get("cardId") as? JsonPrimitive)?.contentOrNull == cardId }
-        // 会话键取 `peerId` 本身：群是 `group:<id>`、1:1 是对端 nodeId，
-        // `broadcastBoardCard` 两种形状都认。过一手 `groupIdOf` 会把 1:1 折成
-        // null ⇒ 私聊里点了「停止」既不生效也没有任何回执。
         val groupId = row?.peerId
+            ?.let(com.kapp.tenon.core.protocol.ConvId::groupIdOf)
         if (groupId == null) {
             RelayLog.info("RELAY-INVOKE", "stale card action has no conversation to flip on (card " + cardId + ")")
             return

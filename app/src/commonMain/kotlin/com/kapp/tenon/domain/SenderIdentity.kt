@@ -196,22 +196,11 @@ data class SenderIdentityContext(
 data class GroupParticipantRows(
     val agents: List<SenderIdentity>,
     val humans: List<SenderIdentity>,
-    /**
-     * **路由判据要认的全部可点名键**：入驻声明的 agentId、宿主自报的 kind、以及每个
-     * 候选 `@` token 的正文（全部小写）。
-     *
-     * 为什么要并集而不是只留 kind：候选 token 是 `virtualAgents[].name`
-     * （`dsh-<host>-<workspace>`），而 kind 可能是席位 agentId（`dsh-<host>`）；
-     * 手打的 `@dsh` 又来自宿主自报的 kind。三个都从**同一张成员表**派生，却曾经只把
-     * 其中一个交给匹配器 —— 用户按候选打的 `@` 叫不醒 agent（D18）。
-     * 现在「候选给什么」与「匹配器认什么」由这一个集合收口。
-     */
-    val mentionKeys: Set<String> = emptySet(),
 ) {
     /** 这个群里有没有 agent 成员（问题 1 的「agentInvolved」唯一判据）。 */
     val hasAgent: Boolean get() = agents.isNotEmpty()
 
-    /** 群内 agent 的 kind 集合（小写；身份档，不含展示名）。 */
+    /** 触发判据要认的 agent kind 集合（小写，与 [SenderIdentity.mentionToken] 同源）。 */
     val agentKinds: Set<String>
         get() = agents.mapNotNull { it.agentKind?.trim()?.lowercase() }.filter { it.isNotEmpty() }.toSet()
 }
@@ -453,24 +442,10 @@ fun groupParticipantRows(ctx: SenderIdentityContext): GroupParticipantRows {
         .map { resolveNodeIdentity(it, ctx) }
         .sortedWith(compareByDescending<SenderIdentity> { it.isSelf }.thenBy { it.displayName.lowercase() })
     val agents = agentsByIdentity.values.sortedBy { it.displayName.lowercase() }
-    // 候选 token 与触发判据同源：声明键、宿主自报 kind、每个身份的 kind / @ token 正文
-    // 全部进同一个集合，由 agentRouteFactsOf 一次交给匹配器。
-    val mentionKeys = LinkedHashSet<String>()
-    declaredAgents.forEach { declared ->
-        declared.agentId.trim().lowercase().takeIf { it.isNotEmpty() }?.let { mentionKeys.add(it) }
-        ctx.agentKindsByHost[declared.hostNodeId].orEmpty().forEach { kind ->
-            kind.trim().lowercase().takeIf { it.isNotEmpty() }?.let { mentionKeys.add(it) }
-        }
-    }
-    agents.forEach { identity ->
-        identity.agentKind?.trim()?.lowercase()?.takeIf { it.isNotEmpty() }?.let { mentionKeys.add(it) }
-        identity.mentionToken.removePrefix("@").trim().lowercase()
-            .takeIf { it.isNotEmpty() }?.let { mentionKeys.add(it) }
-    }
-    return GroupParticipantRows(agents = agents, humans = humans, mentionKeys = mentionKeys)
+    return GroupParticipantRows(agents = agents, humans = humans)
 }
 
-/** 这个群里有哪些**可点名的键**（触发 / 抽取 prompt 用；小写，含候选 token 正文）。 */
+/** 这个群里有哪些 agent kind（触发 / 抽取 prompt 用；小写）。 */
 
 /** 某个宿主上的**某一个** agent（同一台设备可以有多个）。 */
 
@@ -567,7 +542,7 @@ private fun resolveAgentOfHost(host: String, kind: String, ctx: SenderIdentityCo
     )
 }
 fun agentKindsInGroup(ctx: SenderIdentityContext): Set<String> =
-    groupParticipantRows(ctx).mentionKeys
+    groupParticipantRows(ctx).agentKinds
 
 /**
  * **单聊**里可以被 @ 的对象（群用 [groupParticipantRows]）。

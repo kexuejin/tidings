@@ -36,8 +36,8 @@ import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.unit.dp
 import com.kapp.tenon.domain.SenderIdentity
 import com.kapp.tenon.domain.canRecall
-import com.kapp.tenon.domain.ChatSenderAttribution
 import com.kapp.tenon.domain.resolveNodeIdentity
+import com.kapp.tenon.domain.resolveSenderIdentity
 import com.kapp.tenon.domain.formatRecallRemaining
 import com.kapp.tenon.domain.isRecallUrgent
 import com.kapp.tenon.domain.recallBlockedReason
@@ -282,10 +282,6 @@ internal fun ChatMessageList(
                                 AgentCardBubble(
                                     card = card,
                                     pendingActions = pendingCardActions,
-                                    // D7：decidedBy（拍板节点的 nodeId）走与气泡同一套名字
-                                    // 解析 —— 气泡口径（裸 nodeId = 人）正是这行的口径：
-                                    // 拍板的是"人点了按钮"，不是那台机器上的 agent。
-                                    decidedByCtx = bubbleCtx,
                                     // 产物预览（升级计划 §4.2-3）：同 cardId 的文件行里
                                     // 找「同名字 + 已落盘」的那份 —— 找不到入口不画，
                                     // 不做孤立路径展示。
@@ -358,19 +354,13 @@ internal fun ChatMessageList(
                                 messagesById[replyId]
                             }
                             // 这条消息的发送者身份：署名 / 头像 / Markdown / 长按 @ **共用一份**。
-                            // 判据全部在 `ChatSenderAttribution`（单聊里 agent 以 `agent:<宿主>:<kind>`
-                            // 署名说的话，也必须解析成 agent，而不是"对端那台设备"）。
-                            //
-                            // `identityCtx` 由 `bubbleCtx` 还原：两者只差 `bareNodeIdIsHuman`
-                            //（见 ChatScreen 里的 `bubbleCtx = identityCtx.copy(...)`）。传一份而不是
-                            // 再加形参，是为了不让"同一个上下文两个副本"在调用链上多一处可能走失的地方。
-                            val senderIdentity = ChatSenderAttribution.identityOf(
-                                message = message,
-                                isGroup = group != null,
-                                peerNodeId = peer.nodeId,
-                                identityCtx = bubbleCtx.copy(bareNodeIdIsHuman = false),
-                                bubbleCtx = bubbleCtx,
-                            )
+                            // 群里按 senderId 解析（`agent:<kind>` 才认得出 agent）；
+                            // 私聊的发送者就是会话对端，仍走同一个 `resolveNodeIdentity`。
+                            val senderIdentity = when {
+                                message.mine -> null
+                                group != null -> resolveSenderIdentity(message.senderId, bubbleCtx)
+                                else -> resolveNodeIdentity(peer.nodeId, bubbleCtx)
+                            }
                             MessageBubble(
                                 message = bubbleMessage,
                                 bubbleFraction = bubbleFraction,
@@ -419,12 +409,9 @@ internal fun ChatMessageList(
                                     { peerId?.let { pid -> del(pid, message.id) } }
                                 },
                                 // 群里必须署名：会话键是 `group:<groupId>`，气泡左右只分得出
-                                // "是不是我发的"，分不出"是哪个人发的"。
-                                // 单聊只在**对方是 agent** 时署名（"这句话是 dsh 说的"），
-                                // 人对端不署 —— 会话标题已经写了他是谁。
-                                senderName = if (
-                                    ChatSenderAttribution.showsName(message, group != null, senderIdentity)
-                                ) {
+                                // "是不是我发的"，分不出"是哪个人发的"。私聊恒 null（会话键
+                                // 就是发送者，再署一次名是同一件事的第二个说法）。
+                                senderName = if (group != null && !message.mine) {
                                     senderIdentity?.displayName
                                 } else {
                                     null

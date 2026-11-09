@@ -102,28 +102,13 @@ internal class HostCardActions(
         }
         sessions()?.recordCardAction(cardId, actionId, decidedBy)
         if (actionId == "merge-patch") {
-            // **本机那一行卡片消息是唯一权威的会话来源。** 动作帧（op=action）不带会话，
-            // 宿主重启后编排器登记簿又是空的 —— 只有落库的卡片行两头都在。
-            // 它的 `peerId` 就是会话键本身（群 `group:<id>` / 1:1 对端 nodeId）：
-            // 翻面卡直接拿它当投递目标（`broadcastBoardCard` 两种形状都认），
-            // 别再经一手 `groupIdOf` —— 那对 1:1 恒为 null，正是「合并成功但卡面不翻面」
-            // 与「重启后合不了」的两处共同成因。
-            val actionRow = controller.state.value.messages.values
-                .asSequence()
-                .flatten()
-                .lastOrNull { row ->
-                    (row.renderCard?.get("cardId") as? JsonPrimitive)?.contentOrNull == cardId
-                }
-            // 四条判据，从「谁最清楚」排到「谁最兜底」：
+            // 三条判据，从「谁最清楚」排到「谁最兜底」：
             // 1. 编排器的登记簿 —— 发卡的那一刻就知道 patch 在哪（工单卡只此一条有效）；
             // 2. 动作帧带的会话（插件转发路径，上游常常给 null）；
-            // 3. 控制面按会话台账反查卡片所属会话（历史路径，工单卡恒为 null）；
-            // 4. **磁盘账簿**（[TicketPatchLedger]）—— 宿主重启后前三处全空，
-            //    而补丁文件还在沙箱产物目录里。没有这一条，重启等于把所有待合并的卡报废。
+            // 3. 控制面按会话台账反查卡片所属会话（历史路径，工单卡恒为 null）。
             // 合流驱动（Phase 4 任务 1）：编排器登记簿优先 —— 工单卡发卡那一刻
             // 就登记了（工作区, patch），git apply 只有真正跑完且退出码为 0
             // 才会有 Applied，decidedBy 合流卡只允许在 Applied 上发。
-            val ledgerEntry = TicketPatchLedger.lookup(cardId)
             val ref = tickets()?.patchRefForCard(cardId)
                 ?: sessionId?.takeIf { it.isNotBlank() }
                     ?.let { sid ->
@@ -132,13 +117,6 @@ internal class HostCardActions(
                         }
                     }
                 ?: plane().latestPatchRefForCard(cardId)
-                ?: ledgerEntry?.let { e ->
-                    com.kapp.tenon.agent.SandboxPatchRef(
-                        sessionId = "",
-                        workspacePath = e.workspacePath,
-                        patchPath = e.patchPath,
-                    )
-                }
             val outcome = when {
                 // **链卡先于沙箱登记簿**：链（多棒责任链）的产物是 `chain/<id>`
                 // 分支上的提交，不在沙箱 patch 登记簿里 —— 走沙箱路径必然
@@ -146,28 +124,25 @@ internal class HostCardActions(
                 // 产物按分支合入（[DesktopPatchMerge.applyBranch]），语义与
                 // patch 合并同构：只改工作树、不 commit、冲突零变化。
                 ref == null && cardId.startsWith("chain-") -> {
-                    val branch = "chain/" + cardId.removePrefix("chain-")
-                    // 会话键：登记簿（活着时最准）→ 卡片行 `peerId`（重启后唯一还在的）。
-                    // 两处都是**会话键形状**，群是 `group:<id>`、1:1 是对端 nodeId。
-                    val chainConv = tickets()?.groupForCard(cardId) ?: actionRow?.peerId
-                    // 工作区：群 → 默认工作区（[DesktopWorkerOrchestrator.resolveWorkspacePath]
-                    // 的判据）→ **仓库自己的 refs**（重启兜底，见 workspacePathForChainBranch）。
-                    // 第二段不是锦上添花：登记簿重启即空，而 1:1 会话连 groupId 都没有 ——
-                    // 少了它，重启后点旧卡的「合并」永远得到 `cannot resolve workspace`。
-                    val ws = chainConv
-                        ?.let { com.kapp.tenon.core.protocol.ConvId.groupIdOf(it) ?: it }
-                        ?.let { tickets()?.workspacePathForGroup(it) }
-                        ?: tickets()?.workspacePathForChainBranch(branch)
+                    val chainGroupId = tickets()?.groupForCard(cardId)
+                        ?: controller.state.value.messages.values
+                            .asSequence()
+                            .flatten()
+                            .lastOrNull { row ->
+                                (row.renderCard?.get("cardId") as? JsonPrimitive)?.contentOrNull == cardId
+                            }
+                            ?.peerId
+                            ?.let(com.kapp.tenon.core.protocol.ConvId::groupIdOf)
+                    val ws = chainGroupId?.let { tickets()?.workspacePathForGroup(it) }
                     when {
                         ws == null ->
                             DesktopPatchMerge.Outcome.Conflict(
-                                "cannot resolve workspace for chain card $cardId" +
-                                    " (no local repo has branch $branch)",
+                                "cannot resolve workspace for chain card $cardId",
                             )
                         else -> DesktopPatchMerge.applyBranch(
                             // cardId = `chain-<chainId>`，分支名 = `chain/<chainId>`
                             //（DesktopStageChain 的 branch 约定）—— 别把前缀当掉。
-                            branch = branch,
+                            branch = "chain/" + cardId.removePrefix("chain-"),
                             workspacePath = ws,
                         )
                     }
@@ -197,8 +172,9 @@ internal class HostCardActions(
                         .lastOrNull { row ->
                             (row.renderCard?.get("cardId") as? JsonPrimitive)?.contentOrNull == cardId
                         }
-                    val appliedGroupId = tickets()?.groupForCard(cardId) ?: actionRow?.peerId
-                        ?: ledgerEntry?.convKey?.takeIf { it.isNotBlank() }
+                    val appliedGroupId = tickets()?.groupForCard(cardId)
+                        ?: appliedRow?.peerId
+                            ?.let(com.kapp.tenon.core.protocol.ConvId::groupIdOf)
                     if (appliedGroupId == null) {
                         // 合并已经落地、仓已经改了，卡却发不出去 —— 必须留痕。
                         // 从前这里静默跳过，卡面永远停在「待合并」。
@@ -255,10 +231,8 @@ internal class HostCardActions(
                     // 那是权威答案。此前按工作区名去猜群（groupsForSession），
                     // 派单群 ≠ 工作区同名群时失败卡会发到别的群，点合并的人
                     // 永远看不到「没能合并」。
-                    // 会话键直接取 `peerId`（1:1 的 peerId 就是会话键，经 `groupIdOf`
-                    // 会被折成 null ⇒ 私聊里的受阻卡一个字都发不出去）。
-                    val conflictGroupId = tickets()?.groupForCard(cardId) ?: conflictRow?.peerId
-                        ?: ledgerEntry?.convKey?.takeIf { it.isNotBlank() }
+                    val conflictGroupId = conflictRow?.peerId
+                        ?.let(com.kapp.tenon.core.protocol.ConvId::groupIdOf)
                     if (conflictGroupId == null) {
                         RelayLog.info("RELAY-INVOKE", "merge conflict has no group to report on (card " + cardId + ")")
                     } else {

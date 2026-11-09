@@ -21,6 +21,8 @@ import com.kapp.tenon.domain.RelayUiState
 import com.kapp.tenon.domain.ShareGrantEntry
 import com.kapp.tenon.core.protocol.ConvId
 import com.kapp.tenon.core.protocol.GroupMeta
+import com.kapp.tenon.core.protocol.TeamMemberInfo
+import com.kapp.tenon.core.protocol.VirtualAgentMember
 import com.kapp.tenon.platform.Transport
 import com.kapp.tenon.domain.model.AgentApprovalUi
 import com.kapp.tenon.domain.model.AgentEventUi
@@ -37,6 +39,7 @@ import com.kapp.tenon.domain.model.NetworkUi
 import com.kapp.tenon.domain.model.NodePhase
 import com.kapp.tenon.domain.model.NoticeKind
 import com.kapp.tenon.domain.model.PeerUi
+import com.kapp.tenon.domain.model.teamGroupKey
 import com.kapp.tenon.domain.model.TransferState
 
 /**
@@ -601,6 +604,103 @@ public fun desktopPreviewGroupState(): RelayUiState {
         unreadByPeer = base.unreadByPeer + (convId to 1),
     )
 }
+
+// ── 团队折叠（Team Folder）─────────────────────────────────────────────────
+
+/**
+ * 群 id 与 leader 的 `agentId`。
+ *
+ * leader 的 `agentId` 就是组标识：线格式里 `VirtualAgentMember` **没有** `pluginId`
+ * （只有 agentId / hostNodeId / name / entityType / teamMembers / allowedWorkspaces /
+ * defaultWsId），所以 `TeamFolderUi.pluginId` 存的是 `agentId`，折叠态初值也要用同一个值
+ * 算组键，否则预览里传了展开集合也匹配不上。
+ */
+private const val TEAM_GROUP_ID = "g-20261109-swarm"
+private const val TEAM_LEADER_AGENT_ID = "dsh-9f3c21ab"
+
+/**
+ * 消息列表里带一个**正在跑**的协同团队。
+ *
+ * 这一份假数据钉的是三条取值口径，任何一条写错都会让组头画成"永远空闲"或干脆不出现：
+ *
+ * 1. **会话键必须是 `group:<groupId>`**：`team-*` 不带前缀会被 `ConvId.isGroup` 判成私聊，
+ *    发送侧拿它当 nodeId 找对端 ⇒ 无目标 ⇒ 静默无帧。这里用 `ConvId.group(...)`。
+ * 2. **状态匹配必须同宿主**：`AgentSessionUi.peerId` 要等于 `VirtualAgentMember.hostNodeId`。
+ *    只按 agentKey 匹配时，两台宿主各有一个同名 agent 会互相点亮。
+ * 3. **agentKey 归一到小写**：`AgentSenderId.of` 写 senderId 时会转小写，这里刻意把
+ *    会话侧写成大写 `DSH-9F3C21AB`，好让"没归一 ⇒ 永远 Idle"这条缺陷在预览里就能看出来。
+ *
+ * 团队本身由 `group.teamMembers` 认定为团队（`isTeam`），`entityType` 只是声明。
+ */
+public fun desktopPreviewTeamFolderState(): RelayUiState {
+    val base = desktopPreviewState()
+    val convId = ConvId.group(TEAM_GROUP_ID)
+    return base.copy(
+        settings = base.settings.copy(
+            groups = listOf(
+                GroupMeta(
+                    groupId = TEAM_GROUP_ID,
+                    name = "智能研发团队",
+                    members = listOf(SELF_NODE_ID, PEER_AGENT),
+                    rev = 7,
+                    updatedBy = SELF_NODE_ID,
+                    updatedTs = PREVIEW_NOW - 1_800_000L,
+                    ownerId = SELF_NODE_ID,
+                    virtualAgents = listOf(
+                        VirtualAgentMember(
+                            agentId = TEAM_LEADER_AGENT_ID,
+                            hostNodeId = PEER_AGENT,
+                            name = "devops-swarm",
+                            entityType = "team",
+                            teamMembers = listOf(
+                                TeamMemberInfo(agentId = "dsh-coder-01", name = "coder", role = "编码"),
+                                TeamMemberInfo(agentId = "dsh-review-02", name = "reviewer", role = "审查"),
+                                TeamMemberInfo(agentId = "dsh-test-03", name = "tester", role = "验收"),
+                            ),
+                        ),
+                    ),
+                ),
+            ),
+        ),
+        agentSessions = mapOf(
+            AgentSessionKey(PEER_AGENT, "s-swarm-0001") to AgentSessionUi(
+                peerId = PEER_AGENT,
+                sessionId = "s-swarm-0001",
+                alias = "devops-swarm",
+                agentKind = "dsh",
+                agentId = TEAM_LEADER_AGENT_ID.uppercase(),
+                state = "busy",
+                title = "把团队折叠接进消息列表",
+                startedAt = PREVIEW_NOW - 600_000L,
+                updatedAt = PREVIEW_NOW - 60_000L,
+            ),
+        ),
+        messages = base.messages + (
+            convId to listOf(
+                previewMessage(
+                    convId,
+                    text = "这一版先把折叠态跑通，别的先不动",
+                    at = PREVIEW_NOW - 240_000L,
+                ).copy(senderId = PEER_AGENT),
+                previewMessage(
+                    convId,
+                    mine = true,
+                    text = "收到，组头我按文件夹那版做",
+                    at = PREVIEW_NOW - 180_000L,
+                    delivery = DeliveryState.Sent,
+                ).copy(senderId = SELF_NODE_ID),
+            )
+            ),
+        unreadByPeer = base.unreadByPeer + (convId to 2),
+    )
+}
+
+/**
+ * 折叠态初值的组键：`teamGroupKey(convId, leaderAgentId)` 的公开算法在这里复用，
+ * 而不是在预览里手拼字符串 —— 组键格式改一次就会有第二个地方忘改。
+ */
+public fun desktopPreviewTeamFolderKey(): String =
+    teamGroupKey(ConvId.group(TEAM_GROUP_ID), TEAM_LEADER_AGENT_ID)
 
 // ── 文件柜 ────────────────────────────────────────────────────────────────
 //

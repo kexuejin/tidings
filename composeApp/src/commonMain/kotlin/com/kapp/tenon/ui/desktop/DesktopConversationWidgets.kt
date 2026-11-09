@@ -202,6 +202,12 @@ public fun ConversationSidebar(
      * （截图门禁的对照帧）显式传 false。
      */
     dense: Boolean = true,
+    /** Team Folder 透传（见 `ConversationListPanel` 同名参数）；默认空 = 不折叠。 */
+    teamFoldersByConv: Map<String, List<com.kapp.tenon.domain.model.TeamFolderUi>> = emptyMap(),
+    expandedTeams: Set<String> = emptySet(),
+    onToggleTeam: ((String) -> Unit)? = null,
+    /** 点团队成员：打开群会话并预填 `@token`（见 `ConversationListPanel` 同名参数）。 */
+    onMentionMember: ((convId: String, token: String) -> Unit)? = null,
 ) {
     if (query.isNotBlank() && onSearchGlobal != null) {
         Column(modifier.background(MaterialTheme.colorScheme.surface)) {
@@ -357,6 +363,10 @@ public fun ConversationSidebar(
                 modifier = Modifier.fillMaxSize(),
                 dense = dense,
                 selectedConvId = selectedPeerId,
+                teamFoldersByConv = teamFoldersByConv,
+                expandedTeams = expandedTeams,
+                onToggleTeam = onToggleTeam,
+                onMentionMember = onMentionMember,
                 trailingContent = if (searchResults.isEmpty()) {
                     null
                 } else {

@@ -15,7 +15,6 @@ import com.kapp.tenon.core.transport.DIRECTION_OUT
 import com.kapp.tenon.core.transport.SendOutcome
 import kotlinx.serialization.json.JsonArray
 import kotlinx.serialization.json.JsonObject
-import kotlinx.serialization.json.JsonElement
 import kotlinx.serialization.json.JsonPrimitive
 import kotlinx.serialization.json.buildJsonObject
 import kotlinx.serialization.json.put
@@ -364,35 +363,6 @@ internal class NodeOutbound(
             envelopeJson = envelopeJson,
             at = nowMillis(),
         )
-        return OutgoingText(outcome = outcome, envelopeId = envelope.id, envelopeJson = envelopeJson)
-    }
-    /**
-     * 1:1 直派的**唯一带卡出口**：受理/终局/失败的可见性都走这里 —— 文本 + 可选卡 +
-     * 信封 id（与 invoke 的信封对齐：手机端租约与卡片原位替换按它认亲）+ senderId
-     * （agent 署名；单聊署名判据与头部同一份解析）。
-     *
-     * 与 [sendTextWithEnvelope] 的分工：不落 messageStore（派单的气泡留档由
-     * 域层的 sayToPeer 本机落行负责，这里只管发帧）；限长与单聊文本同一口径
-     * （TCP 4096，发送侧截断 —— 不产出注定被拒的帧）。card 的两种形态：
-     * done ⇒ 执行产出卡；error ⇒ 受阻/中止/退单的终局卡（校验器同规则，见
-     * CodecInvoke.validateInvokeResult）。
-     */
-    suspend fun sendDirectText(
-        peerId: String,
-        text: String,
-        card: JsonObject? = null,
-        envelopeId: String? = null,
-        senderId: String? = null,
-    ): OutgoingText {
-        val clamped = clampDirectText(text)
-        val payload: JsonElement = if (card != null) {
-            Codec.textPayloadWithCard(clamped, card, senderId)
-        } else {
-            Codec.textPayload(clamped, senderId = senderId)
-        }
-        val envelope = makeEnvelope(MsgTypes.MSG, selfId(), payload, id = envelopeId ?: newId())
-        val outcome = messenger.sendUserMessage(peerId, envelope)
-        val envelopeJson = Codec.encode(envelope)
         return OutgoingText(outcome = outcome, envelopeId = envelope.id, envelopeJson = envelopeJson)
     }
 

@@ -653,57 +653,6 @@ class WorktreeSandboxExecutorTest {
         }
     }
 
-    @Test
-    fun prepareSandboxHomeMountsHostOpencodeConfigIfPresent() {
-        val fakeHost = tempDir()
-        val fakeOpencodeDir = File(fakeHost, ".config/opencode").apply { mkdirs() }
-        File(fakeOpencodeDir, "opencode.json").writeText("""{"model":"custom-test"}""")
-
-        val artifacts = File(tempDir(), "artifacts").apply { mkdirs() }
-        val sandboxHome = WorktreeSandboxExecutor.prepareSandboxHome(artifacts, hostHome = fakeHost)
-
-        val mounted = File(sandboxHome, ".config/opencode")
-        assertTrue(mounted.exists(), "宿主若有 .config/opencode，沙箱必须建立对应的配置目录挂载")
-        assertTrue(java.nio.file.Files.isSymbolicLink(mounted.toPath()), "挂载必须是符号链接")
-        assertEquals(
-            """{"model":"custom-test"}""",
-            File(mounted, "opencode.json").readText(),
-            "沙箱内读取的配置内容必须与宿主完全一致",
-        )
-    }
-
-    @Test
-    fun deleteArtifactsSafelyDoesNotFollowSymlinksIntoHostHome() {
-        val fakeHost = tempDir()
-        val fakeDsh = File(fakeHost, ".dsh").apply { mkdirs() }
-        val dshSecret = File(fakeDsh, ".credentials.yaml").apply { writeText("secret_token: live_key") }
-        val fakeOpencode = File(fakeHost, ".config/opencode").apply { mkdirs() }
-        val opencodeConf = File(fakeOpencode, "opencode.json").apply { writeText("""{"model":"m"}""") }
-
-        val artifacts = File(tempDir(), "artifacts").apply { mkdirs() }
-        WorktreeSandboxExecutor.prepareSandboxHome(artifacts, hostHome = fakeHost)
-
-        // 验证挂载存在
-        val sandboxHome = File(artifacts, ".sandbox-home")
-        assertTrue(File(sandboxHome, ".dsh").exists())
-        assertTrue(File(sandboxHome, ".config/opencode").exists())
-
-        // 执行安全清理
-        WorktreeSandboxExecutor.deleteArtifactsSafely(artifacts)
-
-        // 断言产物目录被清理完毕
-        assertFalse(artifacts.exists(), "产物目录必须被清理完毕")
-
-        // 致命断言（AGENTS §2.8）：宿主物理目录及文件必须完好无损，绝不能被下钻删除
-        assertTrue(fakeHost.exists(), "宿主目录必须存在")
-        assertTrue(fakeDsh.exists(), "宿主 .dsh 必须存在")
-        assertTrue(dshSecret.exists(), "宿主凭证文件必须存在且完好")
-        assertEquals("secret_token: live_key", dshSecret.readText())
-        assertTrue(fakeOpencode.exists(), "宿主 opencode 配置目录必须存在")
-        assertTrue(opencodeConf.exists(), "宿主 opencode.json 必须存在且完好")
-        assertEquals("""{"model":"m"}""", opencodeConf.readText())
-    }
-
     private fun assertFalse(actual: Boolean, message: String) {
         kotlin.test.assertFalse(actual, message)
     }

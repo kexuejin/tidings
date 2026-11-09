@@ -219,6 +219,17 @@ data class TeamMemberInfo(
 )
 
 /**
+ * 这个入驻 agent 是不是团队。
+ *
+ * 口径：`entityType == "team"`，**或者** `teamMembers` 非空。后者是事实、前者只是声明 ——
+ * 旧包/手工构造的元数据可能只填了组员清单没填 `entityType`。这条口径原先在
+ * `ChatScreen` 与 `SetGroupAgentWorkspacesDialog` 各写一遍，现在收成一处：三处判定若各写各的，
+ * 会出现"群设置里是团队、列表里不是"这种只在真机上才发现的偏差。
+ */
+val VirtualAgentMember.isTeam: Boolean
+    get() = entityType == "team" || teamMembers.isNotEmpty()
+
+/**
  * 机主授予本群的一个工作区（白名单条目）。
  *
  * **隐私收口：只含 id 与标题，不含路径。** `virtualAgents` 随 `group.info` 广播给全群，

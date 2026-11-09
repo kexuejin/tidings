@@ -128,13 +128,10 @@ fun ScreenHistoryCard(
             // `--bubble-mine:#B7E4C7` = 本仓 `primaryContainer`（与己方气泡同一个 token）。
             MaterialTheme.colorScheme.primaryContainer
         } else {
-            // 对端 `--bubble-peer`（= `surfaceVariant`）：屏幕卡在聊天流里占的就是气泡位，
-            // 底色/圆角必须与文字气泡同口径（`--r-bubble` 16dp、无描边）。
-            // 曾经这里是纯净 `surface` + 12dp：底色与聊天区背景只差一档灰，
-            // 同一屏里反而比文字气泡更"亮"，看起来像另一套卡片。
-            MaterialTheme.colorScheme.surfaceVariant
+            // 现代 IM 气泡：对端纯净 surface 底，贴合聊天流背景
+            MaterialTheme.colorScheme.surface
         },
-        shape = RelayShapes.large,
+        shape = RelayShapes.medium,
         border = null,
         modifier = modifier
             // 原型 `.screencard{width:260px;max-width:100%}`：`widthIn` 在前把可用宽度

@@ -10,6 +10,7 @@ import com.kapp.tenon.domain.model.AgentSessionUi
 import com.kapp.tenon.domain.model.ConversationUi
 import com.kapp.tenon.domain.model.PeerUi
 import com.kapp.tenon.core.nowMillis
+import com.kapp.tenon.core.protocol.AgentSessionStates
 /**
  * 消息页签「工作区」段的取数。
  *
@@ -421,7 +422,7 @@ public fun pickActiveSession(
     val ordered = sessions.sortedByLatestActivity(lastEventAtOf)
     return ordered.firstOrNull { it.sessionId in pendingSessionIds }
         ?: ordered.firstOrNull {
-            it.state == AGENT_STATE_BUSY && !isStaleBusy(it.latestActivityAt(lastEventAtOf(it)), now)
+            it.state == AgentSessionStates.BUSY && !isStaleBusy(it.latestActivityAt(lastEventAtOf(it)), now)
         }
         ?: ordered.first()
 }
@@ -613,8 +614,8 @@ public fun inboxWorkspaceUnits(
                 hostOrder = announcement?.hostOrder,
                 active = active?.let { activeSession ->
                     val lastActivity = activeSession.latestActivityAt(lastEventAtOf(activeSession))
-                    val effectiveState = if (activeSession.state == AGENT_STATE_BUSY && isStaleBusy(lastActivity, referenceNow)) {
-                        "idle"
+                    val effectiveState = if (activeSession.state == AgentSessionStates.BUSY && isStaleBusy(lastActivity, referenceNow)) {
+                        AgentSessionStates.IDLE
                     } else {
                         activeSession.state
                     }
@@ -828,8 +829,7 @@ public fun pendingApprovalCount(
         (sessionIds == null || approval.sessionId in sessionIds)
 }
 
-/** 会话状态里表示「正在干活」的取值（PPE-1 §6.5）。看板挑活跃会话时用的就是它。 */
-private const val AGENT_STATE_BUSY: String = "busy"
+/** 会话状态里表示「正在干活」的取值 —— 单一来源是 [AgentSessionStates.BUSY]（PPE-1 §6.5）。 */
 
 /**
  * 僵死会话超时门限（默认 30 分钟）。

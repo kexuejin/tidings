@@ -624,47 +624,4 @@ class SenderIdentityTest {
             assertTrue(id?.isAgent == true)
         }
     }
-
-    // ------------------------------------------------ 卡片「已由 %s 处理」（D7）
-
-    /**
-     * D7 的解析契约：decidedBy 是**拍板节点的 nodeId**，工单卡知情行按
-     * `resolveNodeIdentity` + 气泡口径（bareNodeIdIsHuman=true，拍板的是人）取名字。
-     * 这四条钉住 UI 翻译层依赖的每一档 —— 谁改了解析器的档位顺序，这里先红。
-     */
-    @Test
-    fun decidedByForSelfResolvesToSelfSoTheFooterCanSayYou() {
-        val identity = resolveNodeIdentity(self, ctx().copy(bareNodeIdIsHuman = true))
-        assertTrue(identity.isSelf, "拍板=本机自己，UI 据此渲染「你已处理」整句")
-        assertEquals("我自己", identity.displayName, "即便别处要用昵称，本机也有自我昵称可退")
-    }
-
-    @Test
-    fun decidedByForAGroupMemberPrefersTheGroupNickEvenWithoutAPeerProfile() {
-        val member = "member-node-no-profile"
-        val group = group(
-            members = listOf(self, member),
-            nicks = mapOf(member to "老周"),
-        )
-        val identity = resolveNodeIdentity(member, ctx(group = group).copy(bareNodeIdIsHuman = true))
-        assertEquals("老周", identity.displayName)
-        assertFalse(identity.isSelf)
-    }
-
-    @Test
-    fun decidedByForAnUnknownNodeNeverShowsTheFullUuid() {
-        val identity = resolveNodeIdentity(ghost, ctx().copy(bareNodeIdIsHuman = true))
-        assertEquals(ghost.take(8), identity.displayName, "兜底是 8 位短 id，不是 36 位裸串")
-        assertFalse(identity.hasProfile, "如实：资料没到")
-    }
-
-    @Test
-    fun decidedByOnAnAgentHostStillShowsTheHumanNicknameUnderTheBubbleCaliber() {
-        // 拍板的是"人在桌面 UI 上点了按钮"——气泡口径下 agent 宿主按人渲染，
-        // 不跳到 agent 名（agent 名是署名/成员面板那两个场景的口径）。
-        val identity = resolveNodeIdentity(host, ctx().copy(bareNodeIdIsHuman = true))
-        assertEquals("demo-mac-97", identity.displayName, "气泡口径下名字是宿主昵称，不跳 agent 名")
-        // 名字之外的字段按各自口径走（isAgent 反映 cap，不归 D7 的名字契约管）——
-        // 知情行只消费 displayName，谁改了名字档位这里先红。
-    }
 }

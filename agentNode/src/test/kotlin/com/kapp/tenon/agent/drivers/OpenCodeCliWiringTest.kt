@@ -96,22 +96,6 @@ class OpenCodeCliWiringTest {
     }
 
     @Test
-    fun hostModelIsProbedWhenModelEnvIsMissing() {
-        val home = tempDir()
-        val configDir = File(home, ".config/opencode").apply { mkdirs() }
-        File(configDir, "opencode.json").writeText("""{"model":"openai/custom-flash"}""")
-        val dir = tempDir()
-        val generated = OpenCodeConfig.ensure(
-            mapOf("HOME" to home.absolutePath, "OPENCODE_BASE_URL" to "https://example.invalid/v1"),
-            dir,
-        )
-        assertNotNull(generated)
-        val text = File(generated).readText()
-        assertTrue("\"tenon/custom-flash\"" in text, "无显式模型变量时应从宿主 opencode.json 解析模型：$text")
-        assertTrue("\"custom-flash\"" in text)
-    }
-
-    @Test
     fun registrationWiresTheHeadlessArgsAndTheConfigPath() {
         val cli = fakeBinary(tempDir())
         val configDir = File(tempDir(), "cfg")

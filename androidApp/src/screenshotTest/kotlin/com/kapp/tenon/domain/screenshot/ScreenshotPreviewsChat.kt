@@ -59,6 +59,8 @@ import com.kapp.tenon.ui.desktop.agentPeer
 import com.kapp.tenon.ui.desktop.desktopPreviewGroupState
 import com.kapp.tenon.ui.desktop.desktopPreviewInboxWorkspaceState
 import com.kapp.tenon.ui.desktop.desktopPreviewState
+import com.kapp.tenon.ui.desktop.desktopPreviewTeamFolderKey
+import com.kapp.tenon.ui.desktop.desktopPreviewTeamFolderState
 import com.kapp.tenon.ui.desktop.linPeer
 import com.kapp.tenon.ui.desktop.previewMessage
 import com.kapp.tenon.ui.desktop.zhouPeer
@@ -228,6 +230,92 @@ private fun ChatHomeRecentWorkspacesPhonePreview() {
             onOpenWorkspaceBoard = {},
             modifier = inner,
             now = PREVIEW_NOW)
+    }
+}
+
+/**
+ * `m-home-recent` 的 Team Folder **折叠态**（本轮新增，原型尚未画）。
+ *
+ * 为什么先出 Compose 帧、而不是先改 `prototype/relay.html`：改原型会让 116 帧的
+ * `source_sha` 全部失效、必须全量重拍，同时新屏必然给 `design-screen-diff` 添新棘轮键，
+ * 而 HEAD 上已有 13 组红（别人的 `code 新增`）—— 此刻重投影会把那 13 组一并洗白。
+ * 所以先用静态帧当可视参照，等那 13 组清偿后再把这一屏写进原型。
+ *
+ * 这一帧要能一眼看出三件事：组头**替代**了会话行（不是额外多一行）、右侧是折叠符号
+ * 而不是进会话的箭头、呼吸点点亮（leader 名下有一条 BUSY 会话，且 agentKey 大小写不归一
+ * 就会退化成 Idle —— 见 `desktopPreviewTeamFolderState`）。
+ */
+@PreviewTest
+@Preview(name = "chat-home-team-folder", widthDp = 393, heightDp = 852, showBackground = true, locale = "zh-rCN")
+@Composable
+private fun ChatHomeTeamFolderPhonePreview() {
+    val state = desktopPreviewTeamFolderState()
+    ChatShell("conversations", state) { inner ->
+        ConversationsScreen(
+            chromeSlice = previewSlicesOf(state).chrome,
+            settingsSlice = previewSlicesOf(state).settings,
+            nodeSlice = previewSlicesOf(state).node,
+            agentSlice = previewSlicesOf(state).agent,
+            chatSlice = previewSlicesOf(state).chat,
+            onOpenChat = {},
+            onCreateGroup = { _, _ -> },
+            onCreateWorkspaceGroup = {},
+            draftPreviewOf = { null },
+            onDraftChange = { _, _ -> },
+            onMarkAllRead = {},
+            onTogglePin = {},
+            onToggleMute = {},
+            onDeleteConversation = {},
+            onLeaveGroup = {},
+            onGoToPairing = {},
+            onDismissBanner = {},
+            onSearchGlobal = {},
+            onOpenWorkspaceUnit = {},
+            onOpenWorkspaceBoard = {},
+            modifier = inner,
+            now = PREVIEW_NOW,
+        )
+    }
+}
+
+/**
+ * 同一份数据的**展开态**：组头下面补回成员行，会话行也补回来。
+ *
+ * 为什么必须另起一帧：`expandedTeams` 是屏内状态，静态帧点不了那颗符号 —— 没有
+ * `initialExpandedTeams` 这个接缝，成员行（首字母圆块 + 名字 + 角色）就是零视觉覆盖，
+ * 而"展开后组内不画分隔线"这条刚修的规则也只有眼睛能验。
+ */
+@PreviewTest
+@Preview(name = "chat-home-team-folder-expanded", widthDp = 393, heightDp = 852, showBackground = true, locale = "zh-rCN")
+@Composable
+private fun ChatHomeTeamFolderExpandedPhonePreview() {
+    val state = desktopPreviewTeamFolderState()
+    ChatShell("conversations", state) { inner ->
+        ConversationsScreen(
+            chromeSlice = previewSlicesOf(state).chrome,
+            settingsSlice = previewSlicesOf(state).settings,
+            nodeSlice = previewSlicesOf(state).node,
+            agentSlice = previewSlicesOf(state).agent,
+            chatSlice = previewSlicesOf(state).chat,
+            onOpenChat = {},
+            onCreateGroup = { _, _ -> },
+            onCreateWorkspaceGroup = {},
+            draftPreviewOf = { null },
+            onDraftChange = { _, _ -> },
+            onMarkAllRead = {},
+            onTogglePin = {},
+            onToggleMute = {},
+            onDeleteConversation = {},
+            onLeaveGroup = {},
+            onGoToPairing = {},
+            onDismissBanner = {},
+            onSearchGlobal = {},
+            onOpenWorkspaceUnit = {},
+            onOpenWorkspaceBoard = {},
+            initialExpandedTeams = setOf(desktopPreviewTeamFolderKey()),
+            modifier = inner,
+            now = PREVIEW_NOW,
+        )
     }
 }
 

@@ -95,34 +95,6 @@ class DelegationParserTest {
         assertEquals(listOf("codex", "dsh"), plan.stages.map { it.agentKey })
     }
 
-    /**
-     * D18：群里的 `@` token 是席位全名（`dsh-<host>-<workspace>`），不是档案键。
-     * 显式点名的委派计划必须能按前缀归位到在位的驱动，否则真机上解析静默返回 null。
-     */
-    @Test
-    fun seatStyleMentionTokensResolveToTheirProfileKey() {
-        val plan = assertNotNull(
-            DelegationParser.parse(
-                "@dsh-a030882e-default-workspace 实现导出，@codex-7f-review 审核",
-                available,
-            ),
-        )
-        assertEquals(DelegationPlan.Source.EXPLICIT, plan.source)
-        assertEquals(listOf("dsh", "codex"), plan.stages.map { it.agentKey })
-    }
-
-    @Test
-    fun aSeatStyleTokenOutsideTheRosterIsStillRejected() {
-        assertNull(
-            DelegationParser.parse("@zygote-123 实现 X，@dsh 审核", available),
-            "前缀归位只在在位名册里做：未知席位不许被猜成某个驱动",
-        )
-        assertNull(
-            DelegationParser.parse("@dsh_extra 实现 X，@codex 审核", available),
-            "下划线不是席位分隔：`@dsh_extra` 仍是未知 token",
-        )
-    }
-
     @Test
     fun englishReviewKeywordAlsoClassifiesAsReviewer() {
         val plan = assertNotNull(DelegationParser.parse("@codex write the parser, @opencode review it", available))

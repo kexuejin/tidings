@@ -126,11 +126,8 @@ class CardShapeContractGuardTest {
     @Test
     fun everyBorderedCardDeclaresItsShape() {
         val hits = scan()
-        // 阈值是「扫描没失效」的哨兵，不是棘轮：从 20 降到 19 是因为文件卡与 PK 卡
-        // 撤掉了自己画的那条发丝边（气泡位不画描边，见 [BubbleCardChromeGuardTest]），
-        // 带边框的卡少了一张。仍要求接近全仓真实命中数 —— 正则失效时会掉到个位数。
         assertTrue(
-            hits.size >= 19,
+            hits.size >= 20,
             "只找到 ${hits.size} 处带边框的卡片 —— 正则/扫描根失效？命中数太少会让下面那条恒真",
         )
         val missing = hits.filter { !it.hasShape }

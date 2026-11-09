@@ -128,6 +128,11 @@
     <string name="conv_delete_and_leave">Delete and leave group</string>
     <string name="conv_row_pinned">Pinned</string>
     <string name="conv_row_more_actions">More actions</string>
+    <string name="team_folder_members">%1$d members</string>
+    <string name="team_folder_expand">Expand team</string>
+    <string name="team_folder_collapse">Collapse team</string>
+    <string name="team_folder_running">Running</string>
+    <string name="team_folder_idle">Idle</string>
     <string name="conv_menu_mark_all_read">Mark all as read</string>
     <string name="conv_menu_sort_recent">Sort: most recent first</string>
     <!-- Workspace section on the conversations tab (the second block of m-home-recent).

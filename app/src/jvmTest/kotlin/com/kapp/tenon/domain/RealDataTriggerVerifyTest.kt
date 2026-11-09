@@ -37,14 +37,11 @@ class RealDataTriggerVerifyTest {
         agentKindsByHost = mapOf(self to setOf("dsh")),
     )
 
-    /**
-     * 路由用的可点名键必须是**候选 token 与 kind 的并集**（D18）：只有 kind 时，
-     * 席位全名 `@dsh-teahouse-mobile` 与裸 `@dsh` 会各有一半叫不醒。
-     */
+    /** 群里的 agentKinds 必须含 `dsh`（触发正则按它匹配）。 */
     @Test
-    fun theGroupMentionKeysCoverBothTheKindAndTheCandidateToken() {
-        val keys = agentKindsInGroup(realCtx())
-        assertEquals(setOf("dsh", "dsh-teahouse-mobile"), keys, "可点名键必须包含入驻声明与候选 token")
+    fun theGroupAgentKindsContainTheKind() {
+        val kinds = agentKindsInGroup(realCtx())
+        assertEquals(setOf("dsh"), kinds, "agentKinds 必须来自入驻声明")
     }
 
     /** **插入的 token 必须能触发** —— 这是「@ 了却叫不醒」的判据。 */

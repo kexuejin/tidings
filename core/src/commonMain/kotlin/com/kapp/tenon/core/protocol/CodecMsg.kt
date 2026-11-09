@@ -175,66 +175,11 @@ object CodecMsg {
         return !o.containsKey("groupRev")
     }
 
-    /**
-     * 单聊文本载荷。
-     *
-     * @param senderId 真正的说话者（`agent:<宿主 nodeId>:<agentId>`）。**单聊同样需要它**：
-     *   1:1 直派的反馈（「Ticket accepted…」/「改动已就绪…」）是宿主上的 agent 说的，
-     *   不带这一格，接收端只看到信封 `from`（那台机器）⇒ 界面上就是「对端设备发的」，
-     *   而宿主自己按 agent 落库 —— 同一句话两端署名不同。真机现场：手机库里这两条
-     *   `sender_id = NULL`，与它们同一轮的工单卡（走 [textPayloadWithCard]）却有署名。
-     *
-     * null 时**逐字节与旧载荷相同**（不写 `senderId` 键）：老端不认这个键，
-     * 而 golden 断言（`CodecTest`）钉的正是「不传就没有」。
-     */
-    fun textPayload(text: String, resend: Boolean? = null, senderId: String? = null): JsonElement {
-        val base = wireJson.encodeToJsonElement(
+    fun textPayload(text: String, resend: Boolean? = null): JsonElement =
+        wireJson.encodeToJsonElement(
             TextMsgPayload.serializer(),
             TextMsgPayload(kind = MsgKinds.TEXT, text = text, resend = resend),
         )
-        if (senderId == null) return base
-        val obj = base as? JsonObject ?: return base
-        return JsonObject(obj + ("senderId" to JsonPrimitive(senderId)))
-    }
-
-    /**
-     * 单聊文本 + 一张声明式卡片（可选）—— **1:1 的卡片落点**。
-     *
-     * ## 为什么单聊也要能带 card
-     *
-     * 群聊有看板卡（`group-text` 的 `card` 键），但 1:1 直派（`dispatchDirectInvoke`，
-     * `groupId == null`）一直没有承载卡片的面：宿主只把卡落进**自己的**库，手机上什么
-     * 都看不到 —— 用户「发了需求 → 任务真跑 20 秒 → 界面一字不变」（真机 A22 现场，
-     * 证据见 `design/runtime-evidence/` 的 1:1 派单实测）。
-     *
-     * ## 为什么不需要动协议白名单
-     *
-     * [validateMsg] 在 `if (kind != MsgKinds.GROUP_TEXT) return true` 处就返回 —— 单聊帧
-     * **不做字段白名单**，多带一个 `card` 不会被对端整帧拒收；接收侧
-     * `RelayControllerMessagesComponent` 的 `payload?.get("card")` 也不分群/单聊。
-     * 所以这里只补发送出口，收端天然认。**改这条早返回之前，先确认 1:1 卡片的收端渲染
-     * 另有出口**，否则老端会从「少看到卡片」退化成「整条消息都收不到」。
-     *
-     * ## 为什么不复用 [TextMsgPayload]
-     *
-     * 那个 @Serializable 只有 kind/text/resend 三个字段，而 `encodeDefaults = false`
-     * 会把等于默认值的字段整键省略 —— 往里加 `card: JsonObject? = null` 后，非空才有值，
-     * 语义上没错但极易被下一个人当成「加了就生效」。这里直接拼 [JsonObject]：键的顺序
-     * 与 [textPayload] 一致（kind/text 在前），`card` 追加在尾部，字节对拍只看新增部分。
-     *
-     * @param card 声明式卡片对象；调用方负责不超过 [Limits.CARD_BYTES]
-     * @param senderId 真正的说话者（`agent:<宿主 nodeId>:<agentId>`）。**卡片动作靠它**：
-     *   接收端用 `AgentSenderId.parse` 从这一格取出宿主，才知道把 `op=action` 发回哪台机器。
-     *   不带 ⇒ 对方的按钮点了无处可发（真机 A22 现场）
-     */
-    fun textPayloadWithCard(text: String, card: JsonObject, senderId: String? = null): JsonObject = JsonObject(
-        buildMap {
-            put("kind", JsonPrimitive(MsgKinds.TEXT))
-            put("text", JsonPrimitive(text))
-            if (senderId != null) put("senderId", JsonPrimitive(senderId))
-            put("card", card)
-        },
-    )
 
     fun groupTextPayload(
         text: String,

@@ -2,7 +2,6 @@
 package com.kapp.tenon.domain
 
 import com.kapp.tenon.platform.InMemoryAppPlatform
-import com.kapp.tenon.testutil.TestPorts
 import com.kapp.tenon.testutil.awaitUntil
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Job
@@ -39,8 +38,8 @@ class GroupDissolvePropagationTest {
 
     @Test
     fun dissolvingAGroupRemovesItOnTheOtherNode() = runBlocking {
-        val portA = TestPorts.freeUdpBase()
-        val portB = TestPorts.freeUdpBase()
+        val portA = freePort()
+        val portB = freePort()
         val a = controller(portA)
         val b = controller(portB)
         try {
@@ -91,8 +90,8 @@ class GroupDissolvePropagationTest {
     fun theDissolveFrameCarriesOnlyTheOwner() = runBlocking {
         // 帧内容本身就是判据：成员表只剩自己，对端才可能判 Removed。
         // 单独一条，是因为「广播了但内容不对」与「根本没广播」在界面上表现一样。
-        val portA = TestPorts.freeUdpBase()
-        val portB = TestPorts.freeUdpBase()
+        val portA = freePort()
+        val portB = freePort()
         val a = controller(portA)
         val b = controller(portB)
         try {
@@ -145,4 +144,5 @@ class GroupDissolvePropagationTest {
             scope = scope,
         )
 
+    private fun freePort(): Int = java.net.ServerSocket(0).use { it.localPort }
 }

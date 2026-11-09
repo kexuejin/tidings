@@ -746,13 +746,11 @@ class RelayUiStateTest {
     }
 
     @Test
-    fun oneToOneTitleMatchesTheHeaderAgentNameOnceAgentDataArrives() {
-        // O1（2026-11-08 用户两次独立指出）：列表行显示设备昵称（demo-mac-97）、
-        // 头部显示 agent 名（dsh）—— 同一个会话两个名字，用户判为不一致。
-        // 旧取舍（标题恒为设备昵称，防数据到齐后中途换名）就此**翻转**：列表与头部
-        // 走同一份身份解析（senderContext ⇒ resolveNodeIdentity），漂移只发生在
-        // 声明首次到达的一刻、且两端同步；名字不一致本身被用户判为更伤。
-        // （反向验证：把 convTitle 换回 peer().displayName 那条路，本用例变红。）
+    fun oneToOneConversationTitleIsStableWhenAgentDataArrives() {
+        // 真机现场（验证轮抓到）：与桌面宿主的 1:1 会话标题先是 demo-mac-97，
+        // DSH 的 agent 消息到达后变成 "dsh" —— 同一个会话两个名字。1:1 标题必须恒为
+        // **对端节点的名字**；agent 归属由每条消息的署名与会话行的 Agent 徽标表达。
+        // （反向验证：把 convTitle 换回 resolveSenderIdentity 那条路，本用例变红。）
         val hostId = "a1b2c3d4-6e74-4a7c-aab1-20a1d1284cd6"
         val withAgentData = RelayUiState(
             peers = listOf(peer(hostId, "demo-mac-97", online = true, caps = listOf(MsgTypes.CAP_AGENT))),
@@ -767,32 +765,7 @@ class RelayUiStateTest {
             ),
         )
 
-        assertEquals("dsh", withAgentData.convTitle(hostId), "列表行与头部同一口径：agent 名")
-    }
-
-    @Test
-    fun conversationListRowMatchesTheHeaderForAgentHostPeers() {
-        // O1 的 projections 侧：conversations() 的 title 与 RelayUiState.convTitle
-        // 同判据 —— agent 宿主对端的列表行 = agent 名（与头部一致）；人 对端 = 昵称
-        //（realPeerRecordReplacesTheFallbackWithoutDuplicating 已钉）。
-        val hostId = "a1b2c3d4-6e74-4a7c-aab1-20a1d1284cd6"
-        val thread = mapOf(
-            hostId to listOf(message("m1", hostId, "Ticket accepted: executing in dsh-probe…", at = 200L)),
-        )
-        val state = RelayUiState(
-            peers = listOf(peer(hostId, "demo-mac-97", online = true, caps = listOf(MsgTypes.CAP_AGENT))),
-            messages = thread,
-            agentSessions = mapOf(
-                AgentSessionKey(peerId = hostId, sessionId = "s-1") to AgentSessionUi(
-                    peerId = hostId,
-                    sessionId = "s-1",
-                    agentKind = "dsh",
-                    state = "busy",
-                    startedAt = 1_000L,
-                ),
-            ),
-        )
-        assertEquals("dsh", state.convs().single().title, "列表行标题 = agent 名（与头部同口径）")
+        assertEquals("demo-mac-97", withAgentData.convTitle(hostId))
     }
 
 

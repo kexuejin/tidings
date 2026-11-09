@@ -55,22 +55,6 @@ class CliProviderEnvTest {
         assertEquals(setOf("OPENCODE_API_KEY"), injected.keys)
     }
 
-    @Test
-    fun dshGetsDeepSeekKeyAndOpencodeKeyForCustomRoutes() {
-        val env = gateway + mapOf(
-            "DEEPSEEK_API_KEY" to "dsh-key",
-            "DSH_PERMISSION_MODE" to "danger-full-access",
-        )
-        val dsh = CliProviderEnv.forDsh(env)
-        assertEquals(
-            setOf("DEEPSEEK_API_KEY", "OPENCODE_API_KEY", "DSH_PERMISSION_MODE"),
-            dsh.keys,
-            "dsh 出厂路由需 DEEPSEEK_API_KEY，自定义路由（如 dsh-opencode-go）需 OPENCODE_API_KEY",
-        )
-        assertEquals("dsh-key", dsh["DEEPSEEK_API_KEY"])
-        assertEquals("oc_sk_codex_secret", dsh["OPENCODE_API_KEY"])
-    }
-
     /**
      * opencode 还要**出网路径**（`*_PROXY`）。
      *

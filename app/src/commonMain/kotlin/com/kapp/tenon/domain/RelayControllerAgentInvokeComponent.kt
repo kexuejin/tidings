@@ -294,6 +294,7 @@ internal class RelayControllerAgentInvokeComponent(private val host: AgentDomain
                 reply(false, com.kapp.tenon.core.protocol.CodecInvoke.InvokeResultStates.DENIED, error = "direct invoke not granted for this node")
                 return
             }
+                val inboundConvId = p.strField("convId")?.takeIf { it.isNotBlank() }
             val directExecutor = executor
             if (directExecutor == null) {
                 announceDispatchFailure(
@@ -317,60 +318,33 @@ internal class RelayControllerAgentInvokeComponent(private val host: AgentDomain
                 host.state.value.agentWorkspaces.values.firstOrNull { it.wsId == id }?.wsTitle
             }
             val senderId = com.kapp.tenon.core.protocol.AgentSenderId.of(self, agentId, agentId)
-
-            /**
-             * 落本机 + **发到发起方**（两件事必须成对）。
-             *
-             * 「只落本机」是上一版的原样：`handleAppendMessage` 只写本端库，
-             * 手机上一条都收不到 —— 用户发了工单、任务真跑完，界面一字不变
-             * （真机 A22 现场：宿主库里躺着 `Ticket accepted…` 与
-             * `改动已就绪…`，手机库同时段零入站行）。
-             *
-             * 信封 id 与本地行 id 同一个（既有纪律：补发/去重/原位替换按 id 对账）；
-             * 发送失败只记日志、不改结论 —— 本端那条事实仍然成立。
-             */
-            suspend fun sayToPeer(text: String) {
-                val msgId = newId()
-                host.handleAppendMessage(
-                    MessageUi(
-                        id = msgId,
-                        peerId = conv1to1,
-                        mine = false,
-                        senderId = senderId,
-                        text = text,
-                        at = nowMillis(),
-                    ),
-                )
-                runCatching { rt.sendDirectText(peerId = envelope.from, text = text, envelopeId = msgId, senderId = senderId) }
-                    .onFailure { t ->
-                        println(
-                            "[INVOKE] 1:1 feedback not delivered (invoke=" + invokeId + "): " +
-                                (t.message ?: t::class.simpleName),
-                        )
-                    }
-            }
-
-            sayToPeer("Ticket accepted: executing in " + (wsTitle ?: "the workspace") + "…")
+            host.handleAppendMessage(
+                MessageUi(
+                    id = host.localMessageId(),
+                    peerId = conv1to1,
+                    mine = false,
+                    senderId = senderId,
+                    text = "Ticket accepted: executing in " + (wsTitle ?: "the workspace") + "…",
+                    at = nowMillis(),
+                ),
+            )
             val directOutcome = try {
-                // **convId 用本端口径**，不是帧里那个：帧里的 `convId` 是发起方视角的
-                // 会话 id（对端 = 本机 nodeId），本机拿它当自己的会话键会把卡片、产物
-                // 全落进「和自己的会话」里 —— 真机现场就是这么丢的
-                // （`[CARD] 1:1 direct card persisted locally (conv=<本机 nodeId>)`）。
-                directExecutor.execute(
-                    AgentInvokeTaskRequest(
-                        agentId = agentId,
-                        prompt = prompt,
-                        wsId = wsId,
-                        groupId = null,
-                        convId = conv1to1,
-                    ),
-                )
+                directExecutor.execute(AgentInvokeTaskRequest(agentId = agentId, prompt = prompt, wsId = wsId, groupId = null, convId = inboundConvId))
             } catch (t: Throwable) {
                 reply(false, com.kapp.tenon.core.protocol.CodecInvoke.InvokeResultStates.ERROR, error = (t.message ?: "executor failed").take(Limits.AGENT_NOTE))
                 return
             }
             if (directOutcome.status == com.kapp.tenon.core.protocol.CodecInvoke.InvokeResultStates.DONE) {
-                sayToPeer(directOutcome.summary?.takeIf { it.isNotBlank() } ?: "Task finished.")
+                host.handleAppendMessage(
+                    MessageUi(
+                        id = host.localMessageId(),
+                        peerId = conv1to1,
+                        mine = false,
+                        senderId = senderId,
+                        text = directOutcome.summary?.takeIf { it.isNotBlank() } ?: "Task finished.",
+                        at = nowMillis(),
+                    ),
+                )
             } else {
                 announceDispatchFailure(
                     convId = conv1to1,
@@ -494,13 +468,6 @@ internal class RelayControllerAgentInvokeComponent(private val host: AgentDomain
                     noticeDetail = NoticeDetail(actor = seat.name),
                 ),
             )
-            // 本地 notice 只有宿主自己看得到（notice 不进协议）。点 @ 的往往是手机，
-            // 光落这一行等于「消息到了、零卡片零横幅」——真机 T5 的全静默就发生在这里。
-            // 补一条 agentState=failed 群文本，让发起端也收到回执；授权判据本身不动。
-            // 群帧全员可见：只有托管该席位的宿主回执，别的宿主不跟着刷屏。
-            if (effectiveHost == self) {
-                announceIntentDispatchDenied(groupId, agentId, seat.name, senderNode, messageId)
-            }
             return
         }
         val ex = executor
@@ -685,43 +652,6 @@ internal class RelayControllerAgentInvokeComponent(private val host: AgentDomain
     }
 
     /**
-     * 群意图派单被**授权门**拒时，给全群（尤其是发起端手机）的回执。
-     *
-     * 为什么不能只落 `AgentNotAuthorized` 本地 notice：`NoticeKind` 的 KDoc 与
-     * [broadcastAgentGaveUp] 都写明了 notice 是纯本地数据、**不进协议** —— 宿主
-     * 自己看得见，手机端一条都收不到。真机 T5 的「消息到了、dedup 增了、零卡片零横幅」
-     * 就卡在这里：授权判据拒绝了，但这句拒绝从没离开过宿主。
-     *
-     * 复用 [announceCardActionDenied] 立下的范式（同一份文案、同一个
-     * `agentState=failed` 通路、按一次尝试去重），不新增协议键、不新增文案；
-     * 授权判据本体（`AgentExecAuthorizer` / 台账 `forExecution`）一字不动 ——
-     * 这里改的是「拒绝说不说得出口」，不是「谁能执行」。
-     */
-    private fun announceIntentDispatchDenied(
-        groupId: String,
-        agentId: String,
-        agentName: String,
-        senderNode: String,
-        messageId: String?,
-    ) {
-        val key = messageId ?: "$groupId|$agentId|$senderNode"
-        if (!deniedIntentDispatches.add(key)) return
-        host.scope.launch {
-            val st = host.state.value
-            val meta = st.settings.groups.firstOrNull { it.groupId == groupId }
-            val actorName = decidedDisplayName(
-                senderNode, meta?.memberNicks, st.selfNodeId, st.settings.nick,
-            )
-            val text = runCatching { host.uiTexts.agentActionDeniedNotice(actorName, agentName) }
-                .getOrNull().orEmpty()
-            broadcastAgentState(groupId, agentId, AGENT_STATE_FAILED, text)
-        }
-    }
-
-    /** 已公告过的「未授权派单尝试」（键 = messageId），防止同一帧被重投后刷屏。 */
-    private val deniedIntentDispatches = LockedSet<String>()
-
-    /**
      * **派单终局失败的唯一发布入口**（群意图路径与工单路径共用）。
      *
      * - 群聊：保持既有 `agentState=failed` 群文本（全群可见，见 [broadcastAgentGaveUp]）。
@@ -834,29 +764,6 @@ internal class RelayControllerAgentInvokeComponent(private val host: AgentDomain
                 ),
             ),
         )
-        // **提示行是纯本地的（`NoticeKind` 不进协议）** —— 只落本机等于发起方手机上
-        // 一个字都没有，「被拒」与「正在跑」在对面完全同形（真机：手机节点
-        // 没被授 agent 级执行权，首次派单回 DENIED，界面零变化）。这里补一帧事实文本：
-        // 哪一单、谁、为什么。文案走与群路径同一个 uiTexts 桥；桥没装（CLI/测试宿主）
-        // 就退回到结构字段拼接，绝不拼中文常量（`cjkLiteralGate` 同一条纪律）。
-        val peer = convId.takeIf { !it.startsWith("agent:") && !it.startsWith("ws-") }
-        if (peer != null) {
-            host.scope.launch {
-                val text = runCatching {
-                    host.uiTexts.dispatchFailedNotice(safeTitle, agentKey, safeReason)
-                }.getOrNull().orEmpty().ifBlank {
-                    listOf(safeTitle, agentKey, safeReason).filter { it.isNotBlank() }.joinToString(" — ")
-                }
-                if (text.isBlank()) return@launch
-                runCatching { host.runtime?.sendDirectText(peerId = peer, text = text) }
-                    .onFailure { t ->
-                        println(
-                            "[INVOKE] 1:1 failure notice not delivered (" + dispatchId + "): " +
-                                (t.message ?: t::class.simpleName),
-                        )
-                    }
-            }
-        }
     }
 
     /**

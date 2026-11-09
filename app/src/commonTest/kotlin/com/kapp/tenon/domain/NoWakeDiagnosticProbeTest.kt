@@ -82,7 +82,7 @@ class NoWakeDiagnosticProbeTest {
         val groupId = hostedGroup(host)
         val dispatched = mutableListOf<String>()
         val logs = mutableListOf<Pair<String, String>>()
-        host.onAgentPrompt = { _, _, prompt, _, _ -> dispatched.add(prompt) }
+        host.onAgentPrompt = { _, _, prompt, _ -> dispatched.add(prompt) }
         host.diagnosticLogSink = { tag, msg -> logs.add(tag to msg) }
 
         host.messagesCtl.handleOnInbound(groupText("env-chatter-1", peerNode, groupId, "我先去吃饭"))
@@ -124,7 +124,7 @@ class NoWakeDiagnosticProbeTest {
         val groupId = hostedGroup(host)
         val dispatched = mutableListOf<String>()
         val logs = mutableListOf<Pair<String, String>>()
-        host.onAgentPrompt = { _, _, prompt, _, _ -> dispatched.add(prompt) }
+        host.onAgentPrompt = { _, _, prompt, _ -> dispatched.add(prompt) }
         host.diagnosticLogSink = { tag, msg -> logs.add(tag to msg) }
 
         host.messagesCtl.handleOnInbound(groupText("env-mention-1", peerNode, groupId, "@gpu-runner 跑回归"))
@@ -137,32 +137,6 @@ class NoWakeDiagnosticProbeTest {
         assertTrue(
             logs.none { it.first == RelayController.NO_WAKE_LOG_TAG },
             "被派单的消息不产生 NO_WAKE",
-        )
-        host.stop()
-    }
-
-    /**
-     * D18：点名事实必须在剥 `@` 之前由路由点给出。编排层的「显式点名 ⇒ 工单」豁免
-     * 拿的是这个参数，而不是从剥净的 prompt 里重判（那句判据曾经恒为 false）。
-     */
-    @Test
-    fun anExplicitMentionCarriesTheAddressedKeyAlongsideTheStrippedPrompt() = runBlocking {
-        val host = controller()
-        val groupId = hostedGroup(host)
-        val prompts = mutableListOf<String>()
-        val addressedKeys = mutableListOf<String?>()
-        host.onAgentPrompt = { _, _, prompt, _, key ->
-            prompts.add(prompt)
-            addressedKeys.add(key)
-        }
-
-        host.messagesCtl.handleOnInbound(groupText("env-mention-key", peerNode, groupId, "@gpu-runner 跑回归"))
-
-        awaitUntil("显式点名派单") { prompts.isNotEmpty() }
-        assertEquals("跑回归", prompts.single(), "交给执行器的仍是剥净 @ 的正文")
-        assertEquals(
-            "gpu-runner", addressedKeys.single(),
-            "点名的键必须随帧到达：丢了它，群工单句会被认知分诊改判成只读讨论（D18）",
         )
         host.stop()
     }

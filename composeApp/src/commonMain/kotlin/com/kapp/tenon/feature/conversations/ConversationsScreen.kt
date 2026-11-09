@@ -42,6 +42,7 @@ import com.kapp.tenon.domain.model.ConversationUi
 import com.kapp.tenon.domain.WorkspaceUnitGroupUi
 import com.kapp.tenon.domain.WorkspaceUnitUi
 import com.kapp.tenon.domain.inboxWorkspaceUnits
+import com.kapp.tenon.domain.teamFoldersByConv
 import com.kapp.tenon.core.nowMillis
 import com.kapp.tenon.generated.resources.Res
 import com.kapp.tenon.generated.resources.ic_chat_bubble
@@ -140,6 +141,12 @@ fun ConversationsScreen(
      */
     draftPreviewOf: ((String) -> String?)? = null,
     /**
+     * 草稿写入口（convId, 文本）。null = 这个壳不写草稿（预览 / 无宿主）。
+     *
+     * 只给「点团队成员预填 `@leader`」用：列表自己不知道 `@` 后面要不要空格。
+     */
+    onDraftChange: ((convId: String, text: String) -> Unit)? = null,
+    /**
      * 建群对话框是否**一开始就打开**，默认关。
      *
      * 与 [initialFilter] 同一个理由：`creating` 是屏内私有状态，没有任何参数能打开它，
@@ -157,6 +164,15 @@ fun ConversationsScreen(
      * 生产调用方一律用默认值。
      */
     initialFilter: String = "all",
+    /**
+     * 团队折叠组里**一开始就展开**的组键集合（`teamGroupKey(convId, leaderAgentId)`），
+     * **只给截图门禁用**。
+     *
+     * 与 [initialFilter] 同一个理由：`expandedTeams` 是屏内状态，静态帧点不了组头右侧那颗
+     * 符号，展开态（成员行 + 角色）就永远录不到 —— 而"展开后会话行补回来、组内不画分隔线"
+     * 正是这一支要钉的规矩。生产调用方一律用默认值（全部折叠）。
+     */
+    initialExpandedTeams: Set<String> = emptySet(),
     /**
      * 「全部标为已读」。null = 这个壳没有这条出口（那一项画成灰的，而不是消失）。
      *
@@ -203,6 +219,25 @@ fun ConversationsScreen(
     settingsSlice: SettingsSlice,
     chromeSlice: ChromeSlice,
 ) {
+    // Team Folder：清单由域层算，折叠态由这一屏持有（容器是无状态的共享组件）。
+    val teamFolders = remember(settingsSlice.settings.groups, agentSlice.agentSessions) {
+        teamFoldersByConv(
+            groups = settingsSlice.settings.groups,
+            sessions = agentSlice.agentSessions.values.toList(),
+        )
+    }
+    var expandedTeams by remember { mutableStateOf(initialExpandedTeams) }
+    val onToggleTeam: (String) -> Unit = { key ->
+        expandedTeams = if (key in expandedTeams) expandedTeams - key else expandedTeams + key
+    }
+    // 点团队成员：写草稿 + 进该群会话；没有草稿入口时成员行不可点。
+    val onMentionMember: ((String, String) -> Unit)? = onDraftChange?.let { write ->
+        { convId, token ->
+            write(convId, "@" + token + " ")
+            onOpenChat(convId)
+        }
+    }
+
     var creating by remember { mutableStateOf(initialCreating) }
     var showMenu by remember { mutableStateOf(false) }
     var filter by remember { mutableStateOf(initialFilter) }
@@ -505,6 +540,10 @@ fun ConversationsScreen(
                     bottom = LocalAppSpacing.current.lg,
                 ),
                 onOpenWorkspaceUnit = onOpenWorkspaceUnit,
+                teamFoldersByConv = teamFolders,
+                expandedTeams = expandedTeams,
+                onToggleTeam = onToggleTeam,
+                onMentionMember = onMentionMember,
             )
         }
     }

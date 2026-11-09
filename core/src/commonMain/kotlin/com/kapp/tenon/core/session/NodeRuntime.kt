@@ -125,39 +125,6 @@ import kotlinx.coroutines.withTimeoutOrNull
  *   —— 默认桌面端监听 `17879`，撞上它不是"收不到文件"而是"投递错人"（见 [tcpBound]）。
  *   绑定结果读 [tcpBound]，不要假设它会成功。
  */
-/**
- * luciola 模式下顶替 legacy Discovery 的哑实现（D12）。
- *
- * **发现动作**全是 no-op（发现由 extraDiscovery(luciola) 承担，NodeRuntime 的其余
- * 代码仍会调这些入口），但 sweep 不能跟着哑：legacy Discovery 的 sweepLoop 是
- * 注册表唯一的 `lastSeen > offlineAfter` 翻面器，哑掉之后对端静默死亡时「在线」
- * 永不翻转，休眠横幅（全部 hostNode 离线才出现）在 Android 上不可达——真机
- * SIGSTOP 宿主 5 分钟，UI 仍「在线」、link.json dialFailures 一路涨（A22 第八轮）。
- * 桌面保留 legacy Discovery 自带 sweep，两端不对称正是从这里开始的。
- * 与 legacy 的 sweepLoop 同判据同节奏（sweepInterval 节奏、offlineAfter 阈值）。
- */
-internal class SweepOnlyDiscoveryEngine(
-    private val registry: PeerRegistry,
-    private val timings: Timings,
-) : DiscoveryEngine {
-    private var sweepJob: Job? = null
-    override fun start(scope: CoroutineScope) {
-        sweepJob = scope.launch {
-            while (isActive) {
-                delay(timings.sweepInterval)
-                registry.sweep(timings.offlineAfter)
-            }
-        }
-    }
-    override fun stop() {
-        sweepJob?.cancel()
-        sweepJob = null
-    }
-    override suspend fun announce() {}
-    override suspend fun announceTo(host: String, port: Int) {}
-    override suspend fun announceExit() {}
-}
-
 class NodeRuntime(
     /**
      * 本节点身份。**可写**，因为 `start()` 会把其中的 `tcpPort` 改写为**真正绑上的**那个端口
@@ -458,7 +425,15 @@ class NodeRuntime(
         // 不再依赖 TOFU 的首次固定 —— 那个有"攻击者抢先声明 nodeId"的首次使用竞态。
         onPeerPin = { nodeId, pin -> setPeerPin(nodeId, pin, PeerRegistry.PIN_SOURCE_PAIRING) },
         subnetBroadcasts = subnetBroadcasts,
-    ) else SweepOnlyDiscoveryEngine(registry, timings)
+    ) else object : DiscoveryEngine {
+        // luciola 模式:发现由 extraDiscovery(luciola)承担,这里给一个哑实现
+        // 兜底——所有动作都是 no-op(NodeRuntime 的其余代码仍会调它们)。
+        override fun start(scope: CoroutineScope) {}
+        override fun stop() {}
+        override suspend fun announce() {}
+        override suspend fun announceTo(host: String, port: Int) {}
+        override suspend fun announceExit() {}
+    }
     internal val messenger = Messenger(
         transport = transport,
         registry = registry,
@@ -1509,18 +1484,6 @@ class NodeRuntime(
         outbound.sendRecoveryData(peerId, batch, more, JsonArray(messages))
 
     suspend fun sendTextWithEnvelope(peerId: String, text: String) = outbound.sendTextWithEnvelope(peerId, text)
-
-    /**
-     * 1:1 带卡片的文本（`dispatchDirectInvoke` 的反馈面）：单聊帧不做字段白名单，
-     * 卡片挂在同一帧上即可到达发起方。详见 [NodeOutbound.sendDirectText]。
-     */
-    suspend fun sendDirectText(
-        peerId: String,
-        text: String,
-        card: JsonObject? = null,
-        envelopeId: String? = null,
-        senderId: String? = null,
-    ) = outbound.sendDirectText(peerId, text, card, envelopeId, senderId)
 
     suspend fun sendRecall(peerId: String,
         targetId: String,
