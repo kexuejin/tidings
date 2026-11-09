@@ -74,4 +74,67 @@ class CliSubprocessEnvInjectionTest {
             "子进程的 PWD 必须是工作区 —— 否则按 \$PWD 解析工作区的 CLI 会把产物写到宿主目录",
         )
     }
+
+    /**
+     * 会话对齐键探针：假 CLI 把子进程环境里的 `TENON_HOOK_SESSION_ID` **原值**打进
+     * text 行，经行映射变成 TokenDelta 收回。
+     *
+     * 判据刻意是「值等于 sessionId」而不是「变量非空」：注入一个错值（比如合成的池键）
+     * 同样能让 `[ -n "$VAR" ]` 退出 0，却对不上派单侧登记的 readOnlyToolPolicies，
+     * 只读的执行前否决照样不生效。
+     *
+     * 反向验证：摘掉 CliSubprocessDriver 里的那次注入 ⇒ 探针读到 `<unset>` ⇒ 下面两条用例红。
+     */
+    private suspend fun probeHookSessionId(
+        envOverrides: Map<String, String> = emptyMap(),
+    ): Pair<String, String> {
+        val events = mutableListOf<DriverEvent>()
+        val driver = CliSubprocessDriver(
+            driverId = "hook-session-probe",
+            displayName = "Hook Session Probe",
+            cliPath = "python3",
+            argSpec = { _ ->
+                listOf(
+                    "-c",
+                    "import os,json;print(json.dumps({'type':'text','text':os.environ.get('" +
+                        DriverKeys.ENV_HOOK_SESSION_ID + "','<unset>')}))",
+                )
+            },
+            envOverrides = envOverrides,
+        )
+        // 空工作区 = 触发式只读通道的形态（executeCliTask 传 wsPath=null 时落到这里）。
+        val handle = driver.openSession("", null)
+        driver.executeTask(handle.sessionId, "probe") { events += it }
+        assertTrue(
+            events.any { it is DriverEvent.Finished },
+            "探针必须正常收尾；否则断言读到的是空串，等于没验。events=" +
+                events.joinToString { it.toString() },
+        )
+        return handle.sessionId to
+            events.filterIsInstance<DriverEvent.TokenDelta>().joinToString("") { it.delta }
+    }
+
+    @Test
+    fun hookSessionIdReachesEveryCliSubprocess() = kotlinx.coroutines.runBlocking {
+        val (sessionId, seen) = probeHookSessionId()
+        assertEquals(
+            sessionId,
+            seen,
+            "TENON_HOOK_SESSION_ID 必须等于派单 sessionId —— 触发通道 wsPath=null 走本裸驱动，" +
+                "漏注入就等于执行前的只读否决整条失效",
+        )
+    }
+
+    @Test
+    fun hostSessionIdWinsOverAnEnvOverrideForTheSameKey() = kotlinx.coroutines.runBlocking {
+        val (sessionId, seen) = probeHookSessionId(
+            mapOf(DriverKeys.ENV_HOOK_SESSION_ID to "spoofed-by-config"),
+        )
+        assertEquals(
+            sessionId,
+            seen,
+            "宿主派单的 sessionId 不许被 envOverrides 盖掉：盖掉后 hook 拿到的键对不上 " +
+                "readOnlyToolPolicies，只读约束静默失效",
+        )
+    }
 }

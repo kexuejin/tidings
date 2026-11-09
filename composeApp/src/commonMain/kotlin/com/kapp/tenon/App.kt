@@ -423,6 +423,10 @@ fun RelayApp(
                                 nav.activeSessionId?.let { peerId ->
                                     nav = nav.openWorkspaceChat(peerId, wsId)
                                 }
+                                // 同时记住"这次派单往哪个仓"：药丸的本地态只活在这一屏，
+                                // App 被回收后重启就没了 —— 那时的默认值会让第一单
+                                // 落进工作区列表第一个仓（真机现场踩过）。
+                                controller.rememberDispatchWorkspace(wsId)
                             },
                             // 胶囊选中的意图随正文一帧发出（方案 §4.2）：域层入口
                             // sendToConversation(convId, text, replyTo, agentIntent)。
@@ -443,9 +447,11 @@ fun RelayApp(
                             // 模型拖进域层（AGENTS §2.6 第四步）；本机乐观置灰在 ChatScreen
                             // 里已先行记账，这里只负责把点击送往宿主。
                             onCardAction = { convId, card, actionId ->
-                                ConvId.groupIdOf(convId)?.let { groupId ->
-                                    controller.handleCardAction(groupId, card.cardId, card.rev, actionId)
-                                }
+                                // **1:1 直派的卡没有群**：`groupIdOf` 对单聊会话返回 null，`?.let` 会把点击
+                                // 整块吞掉 —— 按钮已被乐观置成「已提交，等待宿主确认」，宿主却零入站帧
+                                // （真机 A22 现场：手机点「合并此补丁」，合并永远不发生且没有一行日志）。
+                                // 域层两种会话都查，这里把会话 id 原样传下去即可（群会话仍是纯 groupId）。
+                                controller.handleCardAction(ConvId.groupIdOf(convId) ?: convId, card.cardId, card.rev, actionId)
                             },
                             // 审批三参（含「本会话免审」）：聊天里复用看板那一行，
                             // 判据与看板同源（:core AgentApprovalAuthority），这里只转发意图。

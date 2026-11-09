@@ -89,6 +89,17 @@ def conversation_id(stdin_obj: dict) -> str:
     return str(conv)
 
 
+def hook_session_id() -> "str | None":
+    """宿主派单时注入的 Tenon sessionId（提案 §9 阶段三对齐键）。
+
+    独立跑的 CLI 没有这个环境变量 → None，宿主侧回退到合成 `agy-*` 池键
+    （旧行为不变）；宿主派起的 CLI 带上它，审批卡才归得到派单会话。
+    """
+    value = os.environ.get("TENON_HOOK_SESSION_ID")
+    value = (value or "").strip()
+    return value or None
+
+
 def handle_session_start(stdin_obj: dict) -> dict:
     ws_paths = stdin_obj.get("workspace_paths") or stdin_obj.get("workspacePaths") or []
     if isinstance(ws_paths, str):
@@ -115,13 +126,17 @@ def handle_pre_tool_use(stdin_obj: dict) -> dict:
     tool = stdin_obj.get("tool") or stdin_obj.get("tool_name") or ""
     cmd = stdin_obj.get("cmd") or stdin_obj.get("command") or stdin_obj.get("input") or ""
     summary = (" ".join(str(cmd).split())[:200] if cmd else None) or (str(tool) or None)
-    ok, payload = post("/v1/agent/hook/approval", {
+    approval_payload = {
         "conversationId": conversation_id(stdin_obj),
         "tool": str(tool),
         "summary": summary,
         "riskLevel": "L3",
         "timeoutMs": int(TIMEOUT_SECONDS * 1000),
-    })
+    }
+    hook_session = hook_session_id()
+    if hook_session:
+        approval_payload["sessionId"] = hook_session
+    ok, payload = post("/v1/agent/hook/approval", approval_payload)
     if not ok or not isinstance(payload, dict):
         # fail-closed：审不过就拒 —— 宿主不可达不是放行的理由。
         return {"decision": "deny", "reason": "tenon host unreachable (fail-closed)"}

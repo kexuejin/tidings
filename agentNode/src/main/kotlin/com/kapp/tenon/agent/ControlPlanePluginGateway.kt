@@ -5,8 +5,10 @@ package com.kapp.tenon.agent
 import com.kapp.tenon.agent.drivers.DriverCooldownTracker
 import com.kapp.tenon.agent.drivers.DriverEvent
 import com.kapp.tenon.agent.drivers.ExternalPluginDriver
+import com.kapp.tenon.agent.plugins.PluginManifest
 import com.kapp.tenon.agent.plugins.PluginRegistration
 import com.kapp.tenon.agent.plugins.PluginRegistry
+import com.kapp.tenon.agent.plugins.TriggerTypes
 import com.kapp.tenon.core.protocol.AgentSessionStates
 import com.kapp.tenon.core.protocol.sameAgent
 import com.sun.net.httpserver.HttpExchange
@@ -115,6 +117,13 @@ internal fun ControlPlane.pluginRegister(exchange: HttpExchange) {
         }
     }
     val manifest = accepted.manifest
+    // 触发器的宿主级事实（提案 §5.2）：webhook 密钥必须已配置、回投会话必须
+    // 本机存在。结构判据在 PluginRegistration.validate，这两道在这里——它们
+    // 是宿主状态，不是清单能自证的；缺一道就是「注册收了、触发永不生效」。
+    validateTriggerHostFacts(manifest)?.let { rejected ->
+        respond(exchange, 400, errorJson(rejected.error, rejected.message))
+        return
+    }
     // 端口冲突检查：两个插件不能共用同一条回环 IPC（驱动会互相打穿对方的会话）。
     plugins.findByPort(httpPort.toInt())?.let { existing ->
         if (existing.pluginId != manifest.pluginId) {
@@ -149,6 +158,43 @@ internal fun ControlPlane.pluginRegister(exchange: HttpExchange) {
             )
         },
     )
+}
+
+/**
+ * 触发器的宿主级事实校验（提案 §5.2）：webhook 触发的 sourceId 必须已配密钥
+ * （未配置即拒——与入站 fail-closed 同一条纪律）；targetConvId 必须本机存在，
+ * 且校验器未接线时整体拒绝（fail-closed）。返回 null = 通过。
+ */
+internal fun ControlPlane.validateTriggerHostFacts(manifest: PluginManifest): PluginRegistration.Verdict.Rejected? {
+    if (manifest.triggers.isEmpty()) return null
+    manifest.triggers.forEach { trigger ->
+        if (trigger.type == TriggerTypes.WEBHOOK) {
+            val sourceId = trigger.spec?.sourceId.orEmpty()
+            if (sourceWebhooks.getSecret(sourceId) == null) {
+                return PluginRegistration.Verdict.Rejected(
+                    "secret-not-configured",
+                    "webhook trigger \"" + trigger.id + "\" needs a configured secret for source \"" + sourceId +
+                        "\"; set TENON_WEBHOOK_SECRET_" + sourceId.replace('-', '_').uppercase() +
+                        " (or registerSecret) before registering this plugin",
+                )
+            }
+        }
+        val validator = triggerTargetConvKnown
+            ?: return PluginRegistration.Verdict.Rejected(
+                "target-conv-unverifiable",
+                "host has no conversation validator wired; manifests with triggers cannot be accepted " +
+                    "(fail-closed: an unverifiable targetConvId would send result cards where nobody sees them)",
+            )
+        val convId = trigger.dispatch.targetConvId
+        if (!validator(convId)) {
+            return PluginRegistration.Verdict.Rejected(
+                "unknown-target-conv",
+                "trigger \"" + trigger.id + "\": targetConvId \"" + convId + "\" does not exist on this host; " +
+                    "result cards are delivered via group cards, so only existing group conversations qualify",
+            )
+        }
+    }
+    return null
 }
 
 internal fun ControlPlane.pluginUnregister(exchange: HttpExchange) {
@@ -308,6 +354,8 @@ suspend fun ControlPlane.executePluginTask(
      *  系统前导或 @ 提派 token，当标题就是把 plumbing 摊给用户（真机 divider 出现过
      *  「You are working strictly inside…」），所以**任务路径必须显式传**。 */
     sessionTitle: String? = null,
+    /** Tenon 会话键（提案 §9 阶段三对齐键）：审批卡/回卡按它归会话。 */
+    convId: String? = null,
     /** 任务产物（沙箱 patch 等）的结构化回调：路径只走这里，不进台账帧体。
      *  排在 [onEvent] **前面** —— 既有调用点的尾部 lambda 必须继续绑到 onEvent。 */
     onArtifact: ((path: String, name: String, bytes: Long, mime: String, sha256: String) -> Unit)? = null,
@@ -349,6 +397,9 @@ suspend fun ControlPlane.executePluginTask(
         wsPath = wsPath,
         outbound = true,
     )
+    // 会话对齐键登记（提案 §9 阶段三）：同 executeCliTask——派单侧知道的事实
+    // 必须在这里落账，hook 审批才有会话归属可查。
+    convId?.let { sessions.bindConversation(sessionId, it) }
 
     // 游标按会话续走：台账按游标排序、同游标就地替换 —— 每次派单从 1 重数会把
     // 上一次的事件覆盖掉（测试 PluginDispatchTest.consecutiveDispatches 钉的就是它）。
@@ -453,6 +504,16 @@ suspend fun ControlPlane.executeCliTask(
     /** 会话标题（divider 上显示的那个）。缺省才从 prompt 截取 —— prompt 首行可能是
      *  系统前导或 @ 提派 token，当标题就是把 plumbing 摊给用户，任务路径必须显式传。 */
     sessionTitle: String? = null,
+    /** Tenon 会话键（提案 §9 阶段三对齐键）：审批卡/回卡按它归会话。 */
+    convId: String? = null,
+    /**
+     * 只读通道的**执行前**工具白名单（提案 §7.1 第 3 条）：null = 不设限（普通派单）。
+     *
+     * 登记在这个会话上、由 hook 审批路由读 —— 装了 hook 的 CLI 在工具执行**之前**
+     * 会问一次，那一次才有「拒绝」。没有 hook 的驱动照旧只走事后判负（`tool.started`），
+     * 所以传了它不等于「写盘不可能」，只是把能拦的那部分拦在落地之前。
+     */
+    toolPolicy: ((String?) -> Boolean)? = null,
     onArtifact: ((path: String, name: String, bytes: Long, mime: String, sha256: String) -> Unit)? = null,
     onEvent: (eventType: String, cursor: Long, summary: String?, body: String?) -> Unit,
 ): Triple<String?, String, String?> {
@@ -485,42 +546,76 @@ suspend fun ControlPlane.executeCliTask(
         wsPath = wsPath,
         outbound = true,
     )
+    // 会话对齐键登记（提案 §9 阶段三）：hook 审批带真实 sessionId 来时经
+    // conversationOf 反查，审批卡才有会话归属——派单侧知道的事实必须在这里落账。
+    convId?.let { sessions.bindConversation(sessionId, it) }
+    // 只读通道的执行前判据（§7.1 第 3 条）：**起进程之前**登记 —— 首个 PreToolUse
+    // 到达时这条必须已经在表里，晚一步就等于又退回「事后判负」。`finally` 里必清：
+    // 不清会把「只读」泄漏给同 id 的下一次任务。
+    val readOnly = toolPolicy?.let { ReadOnlyToolPolicy(it) }
+    if (readOnly != null) readOnlyToolPolicies[sessionId] = readOnly
     val cursor = pluginEventCursors.computeIfAbsent(sessionId) { java.util.concurrent.atomic.AtomicLong(0) }
     var endedInError = false
-    driver.executeTask(sessionId, clipped) { event ->
-        val (eventType, summary, body) = when (event) {
-            is com.kapp.tenon.agent.drivers.DriverEvent.ThoughtDelta -> {
-                liveAgentEvents.tryEmit(LiveAgentEvent(runtime.nodeId, sessionId, "thought.delta", event.delta, System.currentTimeMillis()))
-                Triple("thought.delta", null, event.delta)
+    try {
+        driver.executeTask(sessionId, clipped) { event ->
+            val (eventType, summary, body) = when (event) {
+                is com.kapp.tenon.agent.drivers.DriverEvent.ThoughtDelta -> {
+                    liveAgentEvents.tryEmit(LiveAgentEvent(runtime.nodeId, sessionId, "thought.delta", event.delta, System.currentTimeMillis()))
+                    Triple("thought.delta", null, event.delta)
+                }
+                is com.kapp.tenon.agent.drivers.DriverEvent.TokenDelta -> {
+                    liveAgentEvents.tryEmit(LiveAgentEvent(runtime.nodeId, sessionId, "token.delta", event.delta, System.currentTimeMillis()))
+                    Triple("token.delta", null, event.delta)
+                }
+                is com.kapp.tenon.agent.drivers.DriverEvent.ToolCall -> Triple("tool.started", event.tool, event.inputJson)
+                is com.kapp.tenon.agent.drivers.DriverEvent.Card -> Triple("card", null, event.cardJson)
+                is com.kapp.tenon.agent.drivers.DriverEvent.Artifact -> {
+                    onArtifact?.invoke(event.path, event.name, event.bytes, event.mime, event.sha256)
+                    Triple("artifact", event.name, "sha256=" + event.sha256 + " bytes=" + event.bytes + " path=" + event.path)
+                }
+                is com.kapp.tenon.agent.drivers.DriverEvent.Finished -> Triple("finished", event.finishReason, null)
+                // 被动限流感知：与插件通路同一份台账实例，宿主内读写一致。
+                is com.kapp.tenon.agent.drivers.DriverEvent.Error -> {
+                    DriverCooldownTracker.Shared.captureIfRateLimited(agentKey, event.message)
+                    Triple("error", null, event.message)
+                }
             }
-            is com.kapp.tenon.agent.drivers.DriverEvent.TokenDelta -> {
-                liveAgentEvents.tryEmit(LiveAgentEvent(runtime.nodeId, sessionId, "token.delta", event.delta, System.currentTimeMillis()))
-                Triple("token.delta", null, event.delta)
-            }
-            is com.kapp.tenon.agent.drivers.DriverEvent.ToolCall -> Triple("tool.started", event.tool, event.inputJson)
-            is com.kapp.tenon.agent.drivers.DriverEvent.Card -> Triple("card", null, event.cardJson)
-            is com.kapp.tenon.agent.drivers.DriverEvent.Artifact -> {
-                onArtifact?.invoke(event.path, event.name, event.bytes, event.mime, event.sha256)
-                Triple("artifact", event.name, "sha256=" + event.sha256 + " bytes=" + event.bytes + " path=" + event.path)
-            }
-            is com.kapp.tenon.agent.drivers.DriverEvent.Finished -> Triple("finished", event.finishReason, null)
-            // 被动限流感知：与插件通路同一份台账实例，宿主内读写一致。
-            is com.kapp.tenon.agent.drivers.DriverEvent.Error -> {
-                DriverCooldownTracker.Shared.captureIfRateLimited(agentKey, event.message)
-                Triple("error", null, event.message)
-            }
+            val c = cursor.incrementAndGet()
+            sessions.recordEvent(
+                nodeId = runtime.nodeId,
+                sessionId = sessionId,
+                cursor = c,
+                eventType = eventType,
+                summary = summary,
+                body = body,
+            )
+            onEvent(eventType, c, summary, body)
+            if (event is com.kapp.tenon.agent.drivers.DriverEvent.Error) endedInError = true
         }
+    } finally {
+        // 只摘**自己那一条**（两参 remove）：同一 sessionId 若被并发派单两次，
+        // 后来者已经换掉了表里的值，按 key 删会把它的判据一起摘掉。
+        if (readOnly != null) readOnlyToolPolicies.remove(sessionId, readOnly)
+    }
+    // 只读通道的判负（§7.1 第 3 条）：hook 在工具落地**之前**就拒了，越界的调用因此
+    // 没有执行 —— 但「这条只读通道被试图写盘」必须让派单方知道。判负口径与事后那一半
+    // 一致（越界即失败卡），不因为拦住了就当没发生：静默放过会让结果卡看起来一切正常，
+    // 而任务其实跑在一个已经跑偏的指令上。台账里落一条 error，手机侧看到的失败原因
+    // 与结果卡上的是同一句。
+    val readOnlyDenial = readOnly?.deniedTool()
+        ?.let { "read-only channel denied tool \"" + it + "\"; task aborted" }
+    if (readOnlyDenial != null) {
+        endedInError = true
         val c = cursor.incrementAndGet()
         sessions.recordEvent(
             nodeId = runtime.nodeId,
             sessionId = sessionId,
             cursor = c,
-            eventType = eventType,
-            summary = summary,
-            body = body,
+            eventType = "error",
+            summary = null,
+            body = readOnlyDenial,
         )
-        onEvent(eventType, c, summary, body)
-        if (event is com.kapp.tenon.agent.drivers.DriverEvent.Error) endedInError = true
+        onEvent("error", c, null, readOnlyDenial)
     }
     sessions.recordSession(
         nodeId = runtime.nodeId,
@@ -532,7 +627,7 @@ suspend fun ControlPlane.executeCliTask(
         wsPath = wsPath,
         outbound = true,
     )
-    return Triple(sessionId, if (endedInError) "error" else "finished", null)
+    return Triple(sessionId, if (endedInError) "error" else "finished", readOnlyDenial)
 }
 
 /**

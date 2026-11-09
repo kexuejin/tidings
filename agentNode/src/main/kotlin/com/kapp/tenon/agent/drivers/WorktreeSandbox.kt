@@ -171,8 +171,41 @@ class WorktreeSandboxExecutor(
             // 跨上下文可见：赋值发生在 Dispatchers.IO 的工作线程上，判定在与它不同的
             // 线程上做 —— 普通 Boolean 在这里是不可靠的（读方可能永远看不到写）。
             val timedOut = java.util.concurrent.atomic.AtomicBoolean(false)
+            // 单行熔断标记（§8.2）：读线程置位、主循环判定——跨线程可见性同 timedOut。
+            val lineLimitBroken = java.util.concurrent.atomic.AtomicBoolean(false)
+            // 单行熔断「杀根之前」拍下的进程树快照。根一死，proc.descendants() 恒空
+            // （后代被过继给 init），主循环再枚举已经来不及；这份快照让清场按 pid
+            // 收掉那些孤儿。AtomicReference：读线程写、协程线程读。
+            val lineLimitTree = java.util.concurrent.atomic.AtomicReference<Set<Long>>(emptySet())
+            // OS 级轻量沙箱（提案 §9 阶段三，opt-in）：TENON_OS_SANDBOX=strict 时先探活
+            // 再包装；探不过**大声失败**——「要求了隔离却拿到裸跑」比「明确失败」危险
+            // 得多（D-024 同判据，不静默回退）。探活必须在起进程之前：失败的门不该
+            // 先放任务跑一遍再拦。
+            var effectiveCommand = command
+            if (OsSandboxGuard.isStrictRequested(env) || OsSandboxGuard.isStrictRequested(System.getenv())) {
+                when (val probe = OsSandboxGuard.probe()) {
+                    is OsSandboxGuard.ProbeResult.Available -> {
+                        // profileDir 传产物目录，**不传 worktree**：策略文件落在 worktree 里
+                        // 会被 harvest 的 `git add -A` 当成用户改动收进 patch.diff。
+                        effectiveCommand = OsSandboxGuard.wrap(command, probe.kind, profileDir = artifactsDir)
+                    }
+
+                    is OsSandboxGuard.ProbeResult.Unavailable -> {
+                        note(
+                            logFile,
+                            "[sandbox] task $taskId OS sandbox requested but unavailable: " + probe.reason,
+                        )
+                        cleanupTask(taskId)
+                        return Outcome.Failed(
+                            exitCode = -1,
+                            message = "OS sandbox requested (TENON_OS_SANDBOX=strict) but unavailable: " +
+                                probe.reason,
+                        )
+                    }
+                }
+            }
             val exitCode = withContext(Dispatchers.IO) {
-                val pb = ProcessBuilder(command).directory(worktree)
+                val pb = ProcessBuilder(effectiveCommand).directory(worktree)
                 // PWD 必须跟着改：`directory()` 只改真实 cwd，继承来的 PWD 仍指向宿主目录。
                 // opencode 解析工作区读的是 `$PWD` 而不是 getcwd —— 不补这一行，它会
                 // 把产物写进宿主仓库根（实测：proof.txt 落在 repo 根，worktree 里空）。
@@ -206,8 +239,34 @@ class WorktreeSandboxExecutor(
                 val queue = LinkedBlockingQueue<Any?>()
                 val reader = Thread {
                     try {
-                        proc.inputStream.bufferedReader().useLines { lines ->
-                            lines.forEach { queue.put(it) }
+                        val lines = BoundedLineReader(proc.inputStream.bufferedReader())
+                        while (true) {
+                            when (val read = lines.readLine()) {
+                                BoundedLine.Eof -> break
+                                // 单行熔断（§8.2）：超限行不进队列不进日志（旧写法用
+                                // `useLines`，整行已经在堆里了），摘掉进程树并以 Failed
+                                // 收场——响亮失败，不静默跳过。
+                                BoundedLine.TooLong -> {
+                                    lineLimitBroken.set(true)
+                                    // **先拍快照再 SIGTERM 根**：`destroyProcessTree` 靠
+                                    // `proc.descendants()` 枚举后代，而它对已死的根恒空。
+                                    // 旧顺序「先 destroy() 再让主循环枚举」正好把整层
+                                    // 子进程留给 init —— 卡片翻成 Failed，下面的进程还在改
+                                    // worktree。快照在杀根之前落进 [lineLimitTree]，主循环
+                                    // 把它并进待杀 pid 集合（D-024 同款，换了入口）。
+                                    lineLimitTree.set(trackTree(proc))
+                                    note(
+                                        logFile,
+                                        "[sandbox] task $taskId line limit broken: a stdout line over " +
+                                            DriverLineLimits.MAX_LINE_CHARS + " chars; killing process tree",
+                                    )
+                                    // 读线程里只能做非挂起的止损（SIGTERM 根进程）：主循环
+                                    // 还卡在 `proc.waitFor()`，不杀根它就永远回不到清场段落。
+                                    runCatching { proc.destroy() }
+                                    break
+                                }
+                                is BoundedLine.Text -> queue.put(read.value)
+                            }
                         }
                     } finally {
                         queue.put(POISON)
@@ -234,23 +293,25 @@ class WorktreeSandboxExecutor(
                     } finally {
                         // 取消也要等到真死：不等 waitFor 的自然退出 —— 进程树摘掉后
                         // waitFor 才会返回（读线程随 EOF 结束）。
-                        if (proc.isAlive) {
-                            // **超时不写 aborted 标记**：Aborted 的语义是「外部要求中止」
-                            // （宿主 HTTP / 调用方取消），超时是宿主自主止损。混成一档，
-                            // 复盘时会把一次自主止损读成一次人为中断。
-                            if (!timedOut.get()) aborted.add(taskId)
+                        if (proc.isAlive || lineLimitBroken.get()) {
+                            // **超时/单行熔断不写 aborted 标记**：Aborted 的语义是「外部
+                            // 要求中止」（宿主 HTTP / 调用方取消），超时与熔断是宿主自主
+                            // 止损。混成一档，复盘时会把一次自主止损读成一次人为中断。
+                            if (!timedOut.get() && !lineLimitBroken.get()) aborted.add(taskId)
                             // 这里原来只发 SIGTERM 就交还控制权。**取消路径上 SIGKILL 升级
                             // 执行不到**：`ensureActive()` 抛出后异常已经离开 `use{}`，下面
                             // 那段 `forceKill` 被跳过，忽略 SIGTERM 的子进程就此活下来 ——
                             // 与 `abort()` 修掉的是同一个洞，只是换了入口。
+                            // 单行熔断同病：读线程只 SIGTERM 了根进程，子进程要靠这段
+                            // 完整的进程树摘除收场（D-024 同款）。
                             // `NonCancellable`：取消中再调 suspend 会立刻又抛一次。
                             withContext(NonCancellable) {
                                 val t0 = System.currentTimeMillis()
-                                val tree = destroyProcessTree(proc)
+                                val tree = destroyProcessTree(proc, lineLimitTree.get())
                                 val alive = tree.filter { isAlive(it) }
                                 note(
                                     logFile,
-                                    "[sandbox] task $taskId teardown (timedOut=${timedOut.get()}): " +
+                                    "[sandbox] task $taskId teardown (timedOut=${timedOut.get()}, lineLimitBroken=${lineLimitBroken.get()}): " +
                                         "killed ${tree.size - alive.size}/${tree.size} pid(s) in " +
                                         "${System.currentTimeMillis() - t0}ms" +
                                         if (alive.isEmpty()) "" else ", still alive: ${alive.joinToString(",")}",
@@ -280,6 +341,17 @@ class WorktreeSandboxExecutor(
             }
             running.remove(taskId)
             return when {
+                // 单行熔断优先于退出码：任务是被宿主主动终止的（超长行），退出码
+                // 没有信息量——真因在 task.log 的 line-limit-broken 一行里；进程树
+                // 摘除已在 finally 的清场段落完成（D-024 同款）。
+                lineLimitBroken.get() -> {
+                    cleanupTask(taskId)
+                    Outcome.Failed(
+                        exitCode = -1,
+                        message = "a stdout line over " + DriverLineLimits.MAX_LINE_CHARS +
+                            " chars broke the line limit; process tree killed (see task.log)",
+                    )
+                }
                 timedOut.get() -> {
                     // 超时是结局，不是一个说不清的退出码：真因（跑了多久、上限多少、
                     // 已摘进程树）写进 task.log，外部取证只看产物目录也读得到。
@@ -405,26 +477,9 @@ class WorktreeSandboxExecutor(
         return killed
     }
 
-    /**
-     * 产物目录清理：先摘掉指向宿主 HOME 的符号链接，再递归删除。
-     *
-     * prepareSandboxHome 把宿主 .dsh / .codex / .claude / .gemini / .npm 以符号链接
-     * 挂进 .sandbox-home；Kotlin 的 File.deleteRecursively() 会跟随符号链接目录递归，
-     * 直接删会把真实 HOME 下这些目录的内容逐文件清空（翻车现场：
-     * 58ms 内 298 次 unlink + 189 次 rmdir，全部落在真实 HOME 目录下）。
-     * 因此任何 artifactsDir.deleteRecursively() 都必须走这里。
-     */
-    private fun deleteArtifactsSafely(artifactsDir: File) {
-        val sandboxHome = File(artifactsDir, ".sandbox-home")
-        if (sandboxHome.isDirectory) {
-            sandboxHome.listFiles()?.forEach { entry ->
-                if (java.nio.file.Files.isSymbolicLink(entry.toPath())) {
-                    runCatching { java.nio.file.Files.deleteIfExists(entry.toPath()) }
-                }
-            }
-        }
-        runCatching { artifactsDir.deleteRecursively() }
-    }
+    // deleteArtifactsSafely 真身在 companion object：产物清理必须全量清空
+    // .sandbox-home 且不跟随符号链接（AGENTS §2.8）。放进 companion 是为了让回归
+    // 钉子能直接调用，不必为了一个纯文件操作去构造执行器实例。
 
     /** 当前在跑的任务数（「停」要不要消费这条消息，看它）。 */
     fun runningCount(): Int = running.size
@@ -679,9 +734,21 @@ class WorktreeSandboxExecutor(
      * 而它下面起的那层还活着 —— 卡片已经翻 `Aborted`，工作树还在被改。
      *
      * 所以这里先把整棵树的 pid 记下来，之后**按 pid 逐个核对死活**，与根的死活解耦。
+     *
+     * 单行熔断是上面第 2 条的**另一种入口**：读线程为了让 `proc.waitFor()` 返回，
+     * 必须先 SIGTERM 根，而主循环随后才走到这里 —— 那时 `trackTree(proc)` 已经
+     * 枚举不到后代了。[preKilledSnapshot] 就是读线程在杀根之前拍下的那份快照，
+     * 并进来之后同样按 pid 收，不靠祖先是否还活着。
      */
-    private suspend fun destroyProcessTree(proc: Process): List<Long> {
+    private suspend fun destroyProcessTree(
+        proc: Process,
+        /** 根已死之前拍下的后代 pid（单行熔断路径）；空集合 = 正常路径。 */
+        preKilledSnapshot: Set<Long> = emptySet(),
+    ): List<Long> {
         val tracked = trackTree(proc)
+        // 单行熔断时读线程在 SIGTERM 根**之前**拍的快照：此刻再调 trackTree(proc)
+        // 只会拿到根自己的 pid，没有这份快照就等于把整层后代留给 init。
+        tracked += preKilledSnapshot
         tracked.forEach { pid -> aliveHandle(pid)?.destroy() }
         val deadline = clock() + GRACE_MS
         while (clock() < deadline && tracked.any { isAlive(it) }) delay(50)
@@ -817,10 +884,11 @@ class WorktreeSandboxExecutor(
          *
          * 只白名单符号链接必要的工具配置，绝不暴露宿主私有敏感目录。
          */
-        fun prepareSandboxHome(artifactsDir: File): File {
+        fun prepareSandboxHome(
+            artifactsDir: File,
+            hostHome: File = File(System.getProperty("user.home") ?: ""),
+        ): File {
             val sandboxHome = File(artifactsDir, ".sandbox-home").apply { mkdirs() }
-            val userHome = System.getProperty("user.home") ?: return sandboxHome
-            val hostHome = File(userHome)
             if (!hostHome.isDirectory) return sandboxHome
             for (name in SANDBOX_CREDENTIAL_ENTRIES) {
                 val src = File(hostHome, name)
@@ -831,7 +899,80 @@ class WorktreeSandboxExecutor(
                     }
                 }
             }
+            val srcOpencode = File(hostHome, ".config/opencode")
+            if (srcOpencode.exists()) {
+                val dstConfigDir = File(sandboxHome, ".config").apply { mkdirs() }
+                val dstOpencode = File(dstConfigDir, "opencode")
+                if (!dstOpencode.exists()) {
+                    runCatching {
+                        java.nio.file.Files.createSymbolicLink(dstOpencode.toPath(), srcOpencode.toPath())
+                    }
+                }
+            }
             return sandboxHome
+        }
+
+        /**
+         * 产物目录清理：对**整个 artifactsDir** 做一次不跟随符号链接的遍历删除。
+         *
+         * [prepareSandboxHome] 把宿主凭据目录以符号链接挂进 .sandbox-home，其中
+         * `.config/opencode` 这类挂载在**二级目录**下。Kotlin 的
+         * File.deleteRecursively() 会跟随符号链接目录递归，直接删会把真实 HOME 下
+         * 这些目录逐文件清空（AGENTS §2.8 血泪禁令）。因此任何
+         * artifactsDir.deleteRecursively() 都必须走这里。
+         *
+         * **不要补回 `Files.isSymbolicLink()` 顶层判断**：旧写法只扫 `.sandbox-home`
+         * 顶层 `listFiles()`，抓不到二级目录下的软链接挂载，随后那次
+         * deleteRecursively() 照样沿它下钻真实 HOME。这里用不传 FOLLOW_LINKS 的
+         * walkFileTree 对**所有条目**无差别 deleteIfExists：链接本体在遍历中被删，
+         * 遍历又不跟随链接，所以既覆盖顶层也覆盖嵌套，且不会下钻。
+         *
+         * 遍历范围是**整个 artifactsDir** 而不是只清 .sandbox-home：只清前者、末尾
+         * 再来一次 `artifactsDir.deleteRecursively()` 的旧写法，对 .sandbox-home 之外
+         * 的链接毫无防护（任务进程能写产物目录，留一个指向 $HOME 的软链就够了）。
+         */
+        internal fun deleteArtifactsSafely(artifactsDir: File) {
+            val root = artifactsDir.toPath()
+            if (!java.nio.file.Files.exists(root, java.nio.file.LinkOption.NOFOLLOW_LINKS)) return
+            // 整棵树一次 NOFOLLOW 遍历，而不是「先清 .sandbox-home、再 deleteRecursively」。
+            // 旧写法只保证 .sandbox-home 内部不被跟随，**最后那次 deleteRecursively()
+            // 仍然会跟随 artifactsDir 下任何别的链接**（任务进程能写产物目录，它完全可以
+            // 在那里留一个指向 $HOME 的软链）。现在遍历不传 FOLLOW_LINKS：链接在
+            // visitFile 里作为「文件」被删掉本体，遍历不下钻，整个目录树不可能触到宿主。
+            runCatching {
+                java.nio.file.Files.walkFileTree(
+                    root,
+                    object : java.nio.file.SimpleFileVisitor<java.nio.file.Path>() {
+                        override fun visitFile(
+                            file: java.nio.file.Path,
+                            attrs: java.nio.file.attribute.BasicFileAttributes,
+                        ): java.nio.file.FileVisitResult {
+                            java.nio.file.Files.deleteIfExists(file)
+                            return java.nio.file.FileVisitResult.CONTINUE
+                        }
+
+                        override fun visitFileFailed(
+                            file: java.nio.file.Path,
+                            exc: java.io.IOException,
+                        ): java.nio.file.FileVisitResult {
+                            // 读不了（权限/竞态）也要尽力删；删不掉就继续，不中断整棵树。
+                            runCatching { java.nio.file.Files.deleteIfExists(file) }
+                            return java.nio.file.FileVisitResult.CONTINUE
+                        }
+
+                        override fun postVisitDirectory(
+                            dir: java.nio.file.Path,
+                            exc: java.io.IOException?,
+                        ): java.nio.file.FileVisitResult {
+                            java.nio.file.Files.deleteIfExists(dir)
+                            return java.nio.file.FileVisitResult.CONTINUE
+                        }
+                    },
+                )
+            }
+            // 兜底：遍历半途失败时根可能还在。这里只对根做一次 NOFOLLOW 的单条删除，
+            // **绝不**退回 deleteRecursively() —— 那正是会跟随链接的那一个。
+            runCatching { java.nio.file.Files.deleteIfExists(root) }
         }
 
         /**

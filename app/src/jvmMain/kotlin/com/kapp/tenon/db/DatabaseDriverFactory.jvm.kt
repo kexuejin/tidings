@@ -78,7 +78,12 @@ internal fun openDesktopDatabase(
         // 空库（或只建了一半、连消息表都没有的库）：当新库建。
         columns.isEmpty() -> schema.create(driver)
         // 比当前 schema 还新（降级场景）：什么都不做，也别把版本号往回写。
-        current >= schema.version -> return
+        // 但**补建仍要做** —— 「版本号是最新」与「表都在」是两件事（D4 现场正是前者为真、
+        // 后者为假），提前 return 会把这条自愈路也一起跳过。
+        current >= schema.version -> {
+            SchemaSelfHeal.run(driver)
+            return
+        }
         else -> {
             // **盖章库与 unversioned 库走同一张判别表**（D-028 / D-029 修正）：
             // SQLDelight 2.0.2 的段条件 oldVersion <= N 让 migrate(N, ...) 重跑 N.sqm
@@ -98,6 +103,9 @@ internal fun openDesktopDatabase(
             if (from < schema.version) schema.migrate(driver, from, schema.version)
         }
     }
+    // 迁移走完了，再兜一次「说建好了其实不在」的表（D4）。对刚建/刚迁完的库是空操作，
+    // 对"血统把某段跳过"的老库才是真动作。
+    SchemaSelfHeal.run(driver)
     writeUserVersion(driver, schema.version)
 }
 

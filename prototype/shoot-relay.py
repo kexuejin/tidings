@@ -40,6 +40,8 @@ SHOTS = [
     ("m01-home",             "phone",   "m-home-recent",    "light",  445, 904, ""),
     ("m01b-home-more",       "phone",   "m-home-more",      "light",  445, 904, ""),
     ("m01c-home-unread",     "phone",   "m-home-unread",    "light",  445, 904, ""),
+    # 团队折叠（展开态）。折叠态不单独出帧 —— 它就是 m01-home 本身（群挂了团队就有标记）。
+    ("m01d-team-folder",     "phone",   "m-home-team-folder-open", 'light', 445, 904, ""),
     # 全局搜索：顶栏放大镜的落点，三段（联系人 / 聊天记录 / 文件）+ 空态。
     # 它是移动端**唯一**的搜索入口 —— 列表上方那条筛选框（原 m01d-home-search，
     # 带值的搜索态）已随提案删掉，见 relay.html 里 screenHomeRecent 的注释。

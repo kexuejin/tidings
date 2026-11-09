@@ -12,6 +12,8 @@ import java.net.http.HttpResponse
 import java.time.Duration
 import kotlin.test.Test
 import kotlin.test.assertEquals
+import kotlin.test.assertFalse
+import kotlin.test.assertNull
 import kotlin.test.assertTrue
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -79,6 +81,9 @@ class AgentHookBridgeTest {
             sessions = registry,
             grants = AgentGrantStore(java.io.File(grantFile.absolutePath + "." + System.nanoTime())),
             toolApprovals = toolStore,
+            // 空驱动表：只读通道的端到端用例要往里注册一个探针驱动（其余用例不解析
+            // CLI，`resolveCliDriver` 返回 null 的既有结论不变）。
+            cliDrivers = com.kapp.tenon.agent.drivers.DriverRegistry(),
         )
         plane.start()
         // hook 审批的收件人解析按 registry 的在线对端找 —— 先让两侧握手成邻居
@@ -190,6 +195,393 @@ class AgentHookBridgeTest {
         assertTrue(desktopFrames.any { it["type"]?.jsonPrimitive?.content == "agent-approval" }, "审批卡推到了手机")
     }
 
+    /** 对齐键（提案 §9 阶段三）：hook 带真实 sessionId 时，审批帧挂在派单会话上并回带 convId。 */
+    @Test
+    fun hookApprovalHonorsInjectedSessionIdAndReportsConvId() {
+        // 派单侧绑定（executeCliTask/executePluginTask 落账的形状）。
+        registry.bindConversation("sess-real-1", "group:g1")
+        Thread {
+            for (i in 0 until 50) {
+                val frame = desktopFrames.firstOrNull {
+                    it["type"]?.jsonPrimitive?.content == "agent-approval"
+                }
+                if (frame != null) {
+                    val payload = frame["payload"]!!.toJsonObject
+                    if (payload["sessionId"]!!.jsonPrimitive.content == "sess-real-1") {
+                        registry.recordApproval(
+                            nodeId = desktop.profile.nodeId, sessionId = "sess-real-1",
+                            approvalId = payload["approvalId"]!!.jsonPrimitive.content,
+                            expiresAt = Long.MAX_VALUE / 2, status = "approved", outbound = false,
+                        )
+                    }
+                    return@Thread
+                }
+                Thread.sleep(100)
+            }
+        }.start()
+        val (code, body) = post(
+            "/v1/agent/hook/approval",
+            """{"tool":"git push","summary":"对齐键透传","conversationId":"c-9","sessionId":"sess-real-1","timeoutMs":8000}""",
+        )
+        assertEquals(200, code, body)
+        assertEquals("allow", field(obj(body), "decision"), body)
+        assertEquals("group:g1", field(obj(body), "convId"), "响应回带派单侧绑定的会话键：" + body)
+        // 审批帧的 sessionId 是真实会话——不是 agy-c-9 合成池键（手机才能归位审批卡）。
+        val approvalFrame = desktopFrames.first { it["type"]?.jsonPrimitive?.content == "agent-approval" }
+        assertEquals(
+            "sess-real-1",
+            approvalFrame["payload"]!!.toJsonObject["sessionId"]!!.jsonPrimitive.content,
+            "审批帧必须带派单会话（对齐键的意义就在这）",
+        )
+    }
+
+    /**
+     * 反向钉子：**没对账通过**的 sessionId 不许当会话键。
+     *
+     * `sessionId` 是请求体里的字符串，回环上任意进程都能填。旧实现直接拿它当键，
+     * 于是「这条对话正在请求 git push」可以被伪造到别人的会话上 —— 比一张匿名审批卡
+     * 更容易被点通过。现在只认本节点派单出去的会话，其余回退派生键（`agy-<convId>`）。
+     */
+    @Test
+    fun hookApprovalIgnoresASessionIdThisHostNeverDispatched() {
+        val forged = "sess-forged-" + System.nanoTime()
+        Thread {
+            for (i in 0 until 50) {
+                val frame = desktopFrames.firstOrNull {
+                    it["type"]?.jsonPrimitive?.content == "agent-approval"
+                }
+                if (frame != null) {
+                    val payload = frame["payload"]!!.toJsonObject
+                    registry.recordApproval(
+                        nodeId = desktop.profile.nodeId,
+                        sessionId = payload["sessionId"]!!.jsonPrimitive.content,
+                        approvalId = payload["approvalId"]!!.jsonPrimitive.content,
+                        expiresAt = Long.MAX_VALUE / 2, status = "approved", outbound = false,
+                    )
+                    return@Thread
+                }
+                Thread.sleep(100)
+            }
+        }.start()
+        val (code, body) = post(
+            "/v1/agent/hook/approval",
+            """{"tool":"git push","summary":"冒名挂会话","conversationId":"c-7","sessionId":"$forged","timeoutMs":8000}""",
+        )
+        assertEquals(200, code, body)
+        assertEquals("allow", field(obj(body), "decision"), body)
+
+        val frame = desktopFrames.first { it["type"]?.jsonPrimitive?.content == "agent-approval" }
+        assertEquals(
+            "agy-c-7",
+            frame["payload"]!!.toJsonObject["sessionId"]!!.jsonPrimitive.content,
+            "没对账通过的 sessionId 必须被丢掉、回退到派生键（否则任意进程都能冒名挂会话）",
+        )
+        assertTrue(
+            !body.contains("\"convId\""),
+            "没对账通过就不许回带 convId —— 否则等于把「任意字符串 → 某条真实对话」的映射送出去：" + body,
+        )
+    }
+
+    /**
+     * 触发器派单**没有 convId**，但对齐键仍必须生效。
+     *
+     * `executeCliTask(convId = null)` 只 `recordSession(outbound = true)`、不
+     * `bindConversation`。若对账判据只认 `conversationOf`，这类会话会被误判成伪造、
+     * 静默退化回 `agy-*` 池键 —— C13 的对齐键就白做了。
+     */
+    @Test
+    fun hookApprovalAcceptsASessionThisHostDispatchedEvenWithoutConvId() {
+        val ours = "sess-trigger-" + System.nanoTime()
+        registry.recordSession(
+            nodeId = agent.profile.nodeId,
+            sessionId = ours,
+            agentKind = "claude",
+            state = "busy",
+            outbound = true,
+        )
+        Thread {
+            for (i in 0 until 50) {
+                val frame = desktopFrames.firstOrNull {
+                    it["type"]?.jsonPrimitive?.content == "agent-approval"
+                }
+                if (frame != null) {
+                    val payload = frame["payload"]!!.toJsonObject
+                    registry.recordApproval(
+                        nodeId = desktop.profile.nodeId,
+                        sessionId = payload["sessionId"]!!.jsonPrimitive.content,
+                        approvalId = payload["approvalId"]!!.jsonPrimitive.content,
+                        expiresAt = Long.MAX_VALUE / 2, status = "approved", outbound = false,
+                    )
+                    return@Thread
+                }
+                Thread.sleep(100)
+            }
+        }.start()
+        val (code, body) = post(
+            "/v1/agent/hook/approval",
+            """{"tool":"git push","summary":"触发器派单","conversationId":"c-11","sessionId":"$ours","timeoutMs":8000}""",
+        )
+        assertEquals(200, code, body)
+        assertEquals("allow", field(obj(body), "decision"), body)
+
+        val frame = desktopFrames.first { it["type"]?.jsonPrimitive?.content == "agent-approval" }
+        assertEquals(
+            ours,
+            frame["payload"]!!.toJsonObject["sessionId"]!!.jsonPrimitive.content,
+            "本节点派单出去的会话必须被认 —— 触发器任务没有 convId，不能因此退化回 agy-* 池键",
+        )
+        assertTrue(
+            !body.contains("\"convId\""),
+            "这条会话没有绑定会话键，就不该编一个 convId 出来：" + body,
+        )
+    }
+
+    // ---- 只读通道的执行前否决（§7.1 第 3 条）------------------------------------
+    //
+    // 派单侧把白名单登记到 `readOnlyToolPolicies`（键 = 派单会话），hook 审批据此
+    // 在工具落地**之前**拒绝。下面四条各钉一件事：拒绝真的发生、白名单内照旧走审批、
+    // 免批表不许覆盖硬约束、别人的策略不许被冒名借用。
+
+    /** 造一个「本节点派单出去」的会话 + 一条白名单，返回 (sessionId, 判据)。 */
+    private fun readOnlySession(allow: Set<String>): Pair<String, ReadOnlyToolPolicy> {
+        val sid = "sess-readonly-" + System.nanoTime()
+        registry.recordSession(
+            nodeId = agent.profile.nodeId,
+            sessionId = sid,
+            agentKind = "claude",
+            state = "busy",
+            outbound = true,
+        )
+        val policy = ReadOnlyToolPolicy { tool -> tool?.trim()?.lowercase() in allow }
+        plane.readOnlyToolPolicies[sid] = policy
+        return sid to policy
+    }
+
+    /**
+     * 白名单外的工具：**一张卡都不弹**，直接 deny，并把工具记进判据。
+     *
+     * 旧实现只有事后判负 —— `tool.started` 到达时越界调用已经落地。装了 hook 的
+     * CLI 会先问一次，那一次才是能拦住的时机。
+     */
+    @Test
+    fun readOnlyDispatchDeniesANonWhitelistedToolWithoutBotheringThePhone() {
+        val (sid, policy) = readOnlySession(setOf("read_file"))
+        desktopFrames.clear()
+        val (code, body) = post(
+            "/v1/agent/hook/approval",
+            """{"tool":"run_command","summary":"rm -rf build","conversationId":"c-ro","sessionId":"$sid","timeoutMs":5000}""",
+        )
+        assertEquals(200, code, body)
+        assertEquals("deny", field(obj(body), "decision"), body)
+        assertTrue(
+            field(obj(body), "reason")!!.contains("read-only"),
+            "拒绝理由要点明是只读通道（hook 脚本把它转述给模型）：" + body,
+        )
+        assertEquals("true", field(obj(body), "readOnly"))
+        assertTrue(
+            desktopFrames.none { it["type"]?.jsonPrimitive?.content == "agent-approval" },
+            "越界调用不该有「问一下也许能过」的路径 —— 问就是给它机会",
+        )
+        assertEquals("run_command", policy.deniedTool(), "拒绝要记进判据，任务收场时据此判负")
+    }
+
+    /** 白名单内的工具照旧走手机审批：只读 ≠ 免批。 */
+    @Test
+    fun readOnlyDispatchStillAsksThePhoneForAWhitelistedTool() {
+        val (sid, policy) = readOnlySession(setOf("read_file"))
+        desktopFrames.clear()
+        Thread {
+            for (i in 0 until 50) {
+                val frame = desktopFrames.firstOrNull {
+                    it["type"]?.jsonPrimitive?.content == "agent-approval"
+                }
+                if (frame != null) {
+                    val payload = frame["payload"]!!.toJsonObject
+                    registry.recordApproval(
+                        nodeId = desktop.profile.nodeId,
+                        sessionId = payload["sessionId"]!!.jsonPrimitive.content,
+                        approvalId = payload["approvalId"]!!.jsonPrimitive.content,
+                        expiresAt = Long.MAX_VALUE / 2, status = "approved", outbound = false,
+                    )
+                    return@Thread
+                }
+                Thread.sleep(100)
+            }
+        }.start()
+        val (code, body) = post(
+            "/v1/agent/hook/approval",
+            """{"tool":"read_file","summary":"看构建日志","conversationId":"c-ro2","sessionId":"$sid","timeoutMs":8000}""",
+        )
+        assertEquals(200, code, body)
+        assertEquals("allow", field(obj(body), "decision"), body)
+        assertTrue(
+            desktopFrames.any { it["type"]?.jsonPrimitive?.content == "agent-approval" },
+            "白名单内的工具照旧走手机审批（只读约束的是「能不能写」，不是「要不要问」）",
+        )
+        assertNull(policy.deniedTool(), "放行过的调用不留越界记录")
+    }
+
+    /**
+     * 免批表**不许**覆盖只读约束。
+     *
+     * 顺序判据：免批表是机主以前点过的「这个工具以后别再问我」，属于便利；只读是宿主
+     * 对这次派单的硬约束。便利排在硬约束之前时，一次「始终允许 git push」就能让之后
+     * 每个只读触发任务都能推远端 —— 而且没有任何症状（卡不弹，任务报成功）。
+     */
+    @Test
+    fun theReadOnlyVetoOutranksAnAlwaysAllowRule() {
+        val (sid, policy) = readOnlySession(setOf("read_file"))
+        toolStore.remember(desktop.profile.nodeId, "antigravity", "run_command", grantedBy = "test", at = 0L)
+        val (code, body) = post(
+            "/v1/agent/hook/approval",
+            """{"tool":"run_command","summary":"免批表放行过它","conversationId":"c-ro3","sessionId":"$sid","timeoutMs":5000}""",
+        )
+        assertEquals(200, code, body)
+        assertEquals(
+            "deny",
+            field(obj(body), "decision"),
+            "免批表是便利、只读是硬约束：便利不许覆盖硬约束 —— " + body,
+        )
+        assertFalse(body.contains("always-allow"), "走的不是免批短路：" + body)
+        assertEquals("run_command", policy.deniedTool())
+    }
+
+    /**
+     * 没对账通过的 `sessionId` 取不到别人的白名单。
+     *
+     * 判据键是**对账通过**的会话。若拿请求体里的原始字符串去查表，回环上一句伪造的
+     * sessionId 就能借到别人的策略（这里的方向是「借到 deny」，反方向就是借到放行）。
+     */
+    @Test
+    fun anUnknownSessionIdCannotBorrowAnotherSessionsReadOnlyPolicy() {
+        val (owned, policy) = readOnlySession(emptySet()) // 谁都不放行
+        val forged = "sess-forged-ro-" + System.nanoTime()
+        Thread {
+            for (i in 0 until 50) {
+                val frame = desktopFrames.firstOrNull {
+                    it["type"]?.jsonPrimitive?.content == "agent-approval"
+                }
+                if (frame != null) {
+                    val payload = frame["payload"]!!.toJsonObject
+                    registry.recordApproval(
+                        nodeId = desktop.profile.nodeId,
+                        sessionId = payload["sessionId"]!!.jsonPrimitive.content,
+                        approvalId = payload["approvalId"]!!.jsonPrimitive.content,
+                        expiresAt = Long.MAX_VALUE / 2, status = "approved", outbound = false,
+                    )
+                    return@Thread
+                }
+                Thread.sleep(100)
+            }
+        }.start()
+        val (code, body) = post(
+            "/v1/agent/hook/approval",
+            """{"tool":"git push","summary":"冒用别人的白名单","conversationId":"c-ro4","sessionId":"$forged","timeoutMs":8000}""",
+        )
+        assertEquals(200, code, body)
+        assertEquals(
+            "allow",
+            field(obj(body), "decision"),
+            "没对账通过的 sessionId 只能走自己的派生键，取不到 $owned 的策略：" + body,
+        )
+        assertNull(policy.deniedTool(), "别人的策略不许被这次请求改写")
+    }
+
+    /**
+     * 端到端：hook 拒绝 → 任务判负 → 判据随派单清掉。
+     *
+     * 三件事只有连起来才有意义：登记必须在**执行体起来之前**（否则首个 PreToolUse
+     * 到达时表里还没有这一条，等于又退回事后判负）；拒绝必须让派单方看到（结果卡与
+     * 台账同一句）；`finally` 必须清掉（不清就把「只读」泄漏给同 id 的下一次任务）。
+     *
+     * 时序**不用固定 delay 赌**：探针驱动的 `executeTask` 里当场打一次审批请求 ——
+     * 「登记早于执行」于是由构造保证，而不是由测试等出来。若登记晚了一步，审批路由
+     * 查不到策略、这次调用会被放行，用例随即红。
+     */
+    @Test
+    fun aReadOnlyDispatchFailsTheTaskWhenTheHookDeniesATool() = kotlinx.coroutines.runBlocking {
+        val sid = "sess-readonly-e2e-" + System.nanoTime()
+        val probe = HookProbeDriver(sessionId = sid, tool = "run_command")
+        plane.cliDrivers!!.register(probe)
+        assertTrue(
+            plane.resolveCliDriver("ro-probe") != null,
+            "夹具先得解析得到探针驱动，否则 executeCliTask 会在登记判据之前就 return",
+        )
+        val (sessionId, status, error) = plane.executeCliTask(
+            agentKey = "ro-probe", prompt = "summarize the build log", wsPath = null,
+            requestedSessionId = null,
+            toolPolicy = { tool -> tool == "read_file" },
+        ) { _, _, _, _ -> }
+        val approval = probe.approvalBody ?: error("执行体没有发出 PreToolUse 审批")
+        assertEquals("deny", field(obj(approval), "decision"), "执行前的拒绝没生效：" + approval)
+        assertEquals(sid, sessionId)
+        assertEquals("error", status, "越界即判负 —— 拦住了也要判负，口径与事后那一半一致")
+        assertTrue(
+            error != null && error.contains("run_command"),
+            "失败原因要点名越界工具：" + error + " / 事件：" +
+                registry.events(agent.profile.nodeId, sid).map { it.eventType + "=" + it.body },
+        )
+        assertEquals(
+            "error",
+            registry.sessionOrNull(agent.profile.nodeId, sid)?.state,
+            "台账终态也是 error（手机看板读的是它）",
+        )
+        assertTrue(
+            registry.events(agent.profile.nodeId, sid).any {
+                it.eventType == "error" && it.body?.contains("read-only") == true
+            },
+            "台账里要留下失败原因，与结果卡上是同一句",
+        )
+        assertNull(
+            plane.readOnlyToolPolicies[sid],
+            "判据必须随派单清掉，否则会把「只读」泄漏给同 id 的下一次任务",
+        )
+    }
+
+    /**
+     * 探针驱动：会话 id 固定，`executeTask` 里**当场**打一次 PreToolUse 审批。
+     *
+     * 它替掉真 CLI 的「起子进程」，保留本用例真正要验的三段（登记 → 审批路由读到
+     * 判据 → `executeCliTask` 收场判负）。用它而不是真脚本，是为了让「登记早于执行」
+     * 成为**构造性质**：真脚本要靠测试等进程起来，那正是 `AGENTS.md §4` 禁止的
+     * 「用固定 delay 赌同步」。
+     */
+    private inner class HookProbeDriver(
+        private val sessionId: String,
+        private val tool: String,
+    ) : com.kapp.tenon.agent.drivers.AgentDriver {
+
+        override val driverId: String = "ro-probe-cli"
+        override val displayName: String = "read-only probe"
+
+        /** 审批响应的原文（用例据此断言真的被拒）。 */
+        var approvalBody: String? = null
+
+        override suspend fun listCapabilities(): List<com.kapp.tenon.agent.drivers.DriverCapability> = emptyList()
+
+        override suspend fun openSession(
+            wsPath: String,
+            resumeSessionId: String?,
+        ): com.kapp.tenon.agent.drivers.SessionHandle =
+            com.kapp.tenon.agent.drivers.SessionHandle(sessionId = sessionId)
+
+        override suspend fun executeTask(
+            sessionId: String,
+            prompt: String,
+            onEvent: suspend (com.kapp.tenon.agent.drivers.DriverEvent) -> Unit,
+        ) {
+            approvalBody = post(
+                "/v1/agent/hook/approval",
+                """{"tool":"$tool","summary":"rm -rf build","conversationId":"c-ro-e2e","sessionId":"$sessionId","timeoutMs":5000}""",
+            ).second
+            onEvent(com.kapp.tenon.agent.drivers.DriverEvent.Finished())
+        }
+
+        override suspend fun handleAction(sessionId: String, actionId: String, decidedBy: String) = Unit
+
+        override suspend fun queryProgress(sessionId: String): com.kapp.tenon.agent.drivers.TaskProgressSnapshot? = null
+    }
+
     @Test
     fun preToolUseTimesOutToDenyFailClosed() {
         val (code, body) = post(
@@ -298,6 +690,34 @@ class AgentHookBridgeTest {
             "no-such-agent", "x", null, null,
         ) { _, _, _, _ -> }
         assertTrue(sid2 == null && status2 == "error", "未知 agent 如实报错：$error2")
+    }
+
+    /** 派单侧绑定（§9 阶段三）：executeCliTask 带 convId 时，sessionId → 会话键入账。 */
+    @Test
+    fun cliTaskBindsConversationForApprovalAlignment() = kotlinx.coroutines.runBlocking {
+        val cliBin = java.nio.file.Files.createTempDirectory("align-cli").toFile().resolve("agy")
+        cliBin.writeText("#!/bin/sh\nexit 0\n")
+        kotlin.test.assertTrue(cliBin.setExecutable(true))
+        val cliRegistry = com.kapp.tenon.agent.drivers.DriverRegistry().also { r ->
+            r.register(com.kapp.tenon.agent.drivers.CliSubprocessDriver(
+                driverId = "agy-cli", displayName = "Antigravity (agy CLI)",
+                cliPath = cliBin.absolutePath, argSpec = { listOf(it) },
+            ))
+        }
+        val planeWithCli = ControlPlane(
+            agent, httpPort = 0, token = "", sessions = registry,
+            loadProbe = { null }, cliDrivers = cliRegistry,
+        )
+        val (sessionId, status, error) = planeWithCli.executeCliTask(
+            "antigravity", "alignment probe", null, null,
+            convId = "group:g1",
+        ) { _, _, _, _ -> }
+        assertEquals("finished", status, error)
+        assertEquals(
+            "group:g1",
+            registry.conversationOf(sessionId!!),
+            "派单侧的会话键必须入账——hook 审批按它归位",
+        )
     }
 
     @Test

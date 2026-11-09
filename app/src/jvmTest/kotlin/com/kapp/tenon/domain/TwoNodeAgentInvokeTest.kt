@@ -5,11 +5,13 @@ package com.kapp.tenon.domain
 import com.kapp.tenon.core.protocol.AgentSenderId
 import com.kapp.tenon.core.protocol.ConvId
 import com.kapp.tenon.platform.InMemoryAppPlatform
+import com.kapp.tenon.testutil.TestPorts
 import com.kapp.tenon.testutil.awaitUntil
 import kotlin.test.AfterTest
 import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertNotNull
+import kotlin.test.assertNotEquals
 import kotlin.test.assertNull
 import kotlin.test.assertTrue
 import kotlinx.coroutines.CoroutineScope
@@ -344,8 +346,8 @@ class TwoNodeAgentInvokeTest {
      * A 在 B 的可信设备面板里批过执行权（§6.3 GrantedDevice 档的桥）。
      */
     private suspend fun hostedGroup(): Triple<RelayController, RelayController, String> {
-        val portA = freePort()
-        val portB = freePort()
+        val portA = TestPorts.freeUdpBase()
+        val portB = TestPorts.freeUdpBase()
         val leader = controller(portA, portA + 1)
         val host = controller(portB, portB + 1)
         leader.start()
@@ -424,6 +426,7 @@ class TwoNodeAgentInvokeTest {
                 }
             }
             val hostNodeId = host.state.value.selfNodeId
+            val leaderNodeId = leader.state.value.selfNodeId
 
             // 1:1 直派：不经过群席位，目标 / agent / 工作区全部显式。
             val invokeId = leader.dispatchDirectInvoke(
@@ -448,13 +451,60 @@ class TwoNodeAgentInvokeTest {
                 "ws-teahouse", request.wsId,
                 "wsId 必须随帧跨端——任务级绑定的运输段",
             )
+            // **回程地址必须是「本端口径」，不是帧里那个。**
+            //
+            // 帧里的 `convId` 是**发送方视角**的会话 id（在发起方那里，这条 1:1 会话就是
+            // 「对端 = 宿主 nodeId」），宿主的 1:1 会话 id 却是「对端 = 发起方 nodeId」。
+            // 原样透传 = 宿主把工单卡、产物、合流目标全落进**与自己的会话**：
+            // 2026-11-08 真机 A22 现场 `[CARD] 1:1 direct card persisted locally
+            // (conv=<宿主 nodeId>)`，手机端零卡片、`[xfer] state=Failed`。
+            // 这条断言原先写的是 `hostNodeId`，等于把错口径钉成了规格 —— 别再改回去。
             assertEquals(
+                leaderNodeId, request.convId,
+                "convId 必须是本端口径的回程地址（发起方 nodeId），不是帧里那个发送方视角的 id",
+            )
+            assertNotEquals(
                 hostNodeId, request.convId,
-                "convId 必须随帧跨端——工单卡回 1:1 会话的回程地址",
+                "帧里的 convId（= 宿主 nodeId，发送方视角）不得原样透传",
+            )
+            // **发起方必须看得到受理**：落本机不算完成，帧得真发出去。
+            // 1:1 没有群可广播，这张 1:1 会话就是唯一可见面（`sendDirectText`）。
+            awaitUntil("发起方收到受理") {
+                leader.state.value.messages[hostNodeId].orEmpty()
+                    .any { it.text.contains("Ticket accepted") }
+            }
+            // **受理与终局都要带署名。**
+            //
+            // 这两句原来是裸文本：`Codec.textPayload(text, resend)` 根本没有 senderId 形参
+            // （只有带卡片的 `textPayloadWithCard` 有），而 `NodeOutbound` 只在有卡片时才传。
+            // 于是手机上它们被算成"对端**设备**说的话"——一屏消息看起来全是移动端发的
+            // （真机 A22 用户原话）。
+            //
+            // 为什么断言在**帧落库的字段**上，而不是断言界面：渲染层对 `senderId == null`
+            // 的老端帧有一条"按对端身份解析"的兜底，对端恰好是 agent 宿主时也能显示出 `dsh`
+            // —— 兜底猜对不等于发送方说清了。这两条钉的是"发送方自己说了是谁"。
+            val acceptedRow = leader.state.value.messages[hostNodeId].orEmpty()
+                .first { it.text.contains("Ticket accepted") }
+            assertEquals(
+                hostNodeId.lowercase(),
+                AgentSenderId.parse(acceptedRow.senderId)?.first?.lowercase(),
+                "受理帧必须署名到托管它的那台设备 —— 老形状是 senderId = null",
             )
             val lease = leader.state.value.agentInvokes[invokeId]!!
             assertEquals("direct ok", lease.summary, "摘要随结果帧回传")
             assertNull(lease.groupId, "1:1 租约没有群容器值")
+            // 终局同样要到达发起方 —— 只回 result 帧（租约镜像）在手机上是不可见的。
+            awaitUntil("发起方收到终局") {
+                leader.state.value.messages[hostNodeId].orEmpty()
+                    .any { it.text.contains("direct ok") }
+            }
+            val doneRow = leader.state.value.messages[hostNodeId].orEmpty()
+                .first { it.text.contains("direct ok") }
+            assertEquals(
+                hostNodeId.lowercase(),
+                AgentSenderId.parse(doneRow.senderId)?.first?.lowercase(),
+                "终局帧同样要署名 —— 它与受理是同一轮 agent 说话的两句",
+            )
         } finally {
             leader.stop()
             host.stop()
@@ -462,7 +512,4 @@ class TwoNodeAgentInvokeTest {
     }
 
     private fun JsonObject.intOf(key: String): Int? = strOf(key)?.toIntOrNull()
-
-    /** 端口 0 由系统分配；取一个当前空闲的固定号（与 TwoNodeDeliveryTest 同一条纪律）。 */
-    private fun freePort(): Int = java.net.ServerSocket(0).use { it.localPort }
 }

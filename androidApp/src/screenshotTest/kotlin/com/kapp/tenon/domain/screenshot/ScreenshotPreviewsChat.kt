@@ -59,7 +59,7 @@ import com.kapp.tenon.ui.desktop.agentPeer
 import com.kapp.tenon.ui.desktop.desktopPreviewGroupState
 import com.kapp.tenon.ui.desktop.desktopPreviewInboxWorkspaceState
 import com.kapp.tenon.ui.desktop.desktopPreviewState
-import com.kapp.tenon.ui.desktop.desktopPreviewTeamFolderKey
+import com.kapp.tenon.ui.desktop.desktopPreviewTeamFolderConvId
 import com.kapp.tenon.ui.desktop.desktopPreviewTeamFolderState
 import com.kapp.tenon.ui.desktop.linPeer
 import com.kapp.tenon.ui.desktop.previewMessage
@@ -312,7 +312,7 @@ private fun ChatHomeTeamFolderExpandedPhonePreview() {
             onSearchGlobal = {},
             onOpenWorkspaceUnit = {},
             onOpenWorkspaceBoard = {},
-            initialExpandedTeams = setOf(desktopPreviewTeamFolderKey()),
+            initialExpandedTeamConvs = setOf(desktopPreviewTeamFolderConvId()),
             modifier = inner,
             now = PREVIEW_NOW,
         )

@@ -158,6 +158,29 @@ class PluginInstallerTest {
         }
     }
 
+    /** 严格解析（C4）：zip 里声明未知键的清单按 bad-manifest 拒装，不静默入库。 */
+    @Test
+    fun manifestWithUnknownKeyFailsInstall() {
+        val workDir = tempDir()
+        val pluginsDir = File(workDir, "plugins")
+        val zipFile = File(workDir, "unknown-key.zip")
+        try {
+            createZip(zipFile, mapOf(
+                // permissions 自始至终不是本仓的合法键（triggers 自 C9 起已是合法键）。
+                "manifest.json" to
+                    """{"pluginId":"strict-plugin","name":"Strict","entrypoint":"python3 main.py","permissions":{"network":[]}}""",
+            ))
+
+            val result = PluginInstaller.installFromZip(zipFile, pluginsDir)
+            val failure = assertIs<PluginInstallResult.Failure>(result)
+            assertEquals("bad-manifest", failure.error)
+            assertTrue(failure.message.contains("permissions"), "失败信息应点名未知键：" + failure.message)
+            assertFalse(File(pluginsDir, "strict-plugin").exists(), "拒装的插件不许落盘")
+        } finally {
+            workDir.deleteRecursively()
+        }
+    }
+
     @Test
     fun uninstallRemovesDirectory() {
         val workDir = tempDir()

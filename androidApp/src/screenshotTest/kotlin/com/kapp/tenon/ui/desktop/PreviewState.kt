@@ -39,7 +39,6 @@ import com.kapp.tenon.domain.model.NetworkUi
 import com.kapp.tenon.domain.model.NodePhase
 import com.kapp.tenon.domain.model.NoticeKind
 import com.kapp.tenon.domain.model.PeerUi
-import com.kapp.tenon.domain.model.teamGroupKey
 import com.kapp.tenon.domain.model.TransferState
 
 /**
@@ -696,11 +695,12 @@ public fun desktopPreviewTeamFolderState(): RelayUiState {
 }
 
 /**
- * 折叠态初值的组键：`teamGroupKey(convId, leaderAgentId)` 的公开算法在这里复用，
- * 而不是在预览里手拼字符串 —— 组键格式改一次就会有第二个地方忘改。
+ * 折叠态初值要的**会话键**（`group:<groupId>`）。
+ *
+ * 展开状态是会话级的（一行只有一个折叠符号），所以这里给的是 convId，不是"组键"；
+ * 由夹具统一给出，避免预览里手拼 `"group:" + GROUP_ID` 这种第二份格式。
  */
-public fun desktopPreviewTeamFolderKey(): String =
-    teamGroupKey(ConvId.group(TEAM_GROUP_ID), TEAM_LEADER_AGENT_ID)
+public fun desktopPreviewTeamFolderConvId(): String = ConvId.group(TEAM_GROUP_ID)
 
 // ── 文件柜 ────────────────────────────────────────────────────────────────
 //

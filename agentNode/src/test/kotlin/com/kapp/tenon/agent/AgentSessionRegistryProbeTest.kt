@@ -5,6 +5,7 @@ package com.kapp.tenon.agent
 import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertFalse
+import kotlin.test.assertNull
 import kotlin.test.assertTrue
 
 /**
@@ -91,5 +92,48 @@ class AgentSessionRegistryProbeTest {
         val announced = reg.sessions().single()
         assertTrue(announced.announcedIn)
         assertFalse(announced.synthesized, "收到真宣告后不该再是合成会话")
+    }
+
+    /**
+     * F7：对齐键绑定表不能无界。它同时是 `isHostDispatchedSession` 的信任判据，
+     * 旧实现是一张从不回收的 ConcurrentHashMap：宿主每次派单留一条，长跑后既吃
+     * 内存，也让早已结束的 sessionId 永久保着「本节点派单」的身份。
+     */
+    @Test
+    fun conversationBindingsAreBoundedAndOldestFirst() {
+        val reg = AgentSessionRegistry(maxSessions = 3, maxEventsPerSession = 50)
+        repeat(10) { i -> reg.bindConversation("s-$i", "group:$i") }
+
+        val survivors = (0 until 10).mapNotNull { i -> reg.conversationOf("s-$i") }
+        assertEquals(3, survivors.size, "绑定表上限必须与会话台账一致，实际留下 $survivors")
+        assertEquals(listOf("group:7", "group:8", "group:9"), survivors, "淘汰的必须是最早绑定的")
+        assertNull(reg.conversationOf("s-0"), "最老的绑定必须被回收")
+    }
+
+    @Test
+    fun rebindingAnActiveSessionRefreshesItsAge() {
+        val reg = AgentSessionRegistry(maxSessions = 2, maxEventsPerSession = 50)
+        reg.bindConversation("active", "group:active")
+        reg.bindConversation("idle-1", "group:idle-1")
+        reg.bindConversation("active", "group:active") // 重新绑定 = 活动，刷新年龄
+        reg.bindConversation("idle-2", "group:idle-2")
+
+        assertEquals("group:active", reg.conversationOf("active"), "活跃会话不该被当作最老的一条淘汰")
+        assertEquals("group:idle-2", reg.conversationOf("idle-2"))
+        assertNull(reg.conversationOf("idle-1"), "被挤掉的应是最闲的 idle-1")
+    }
+
+    /** 会话行被淘汰时，它的对齐键绑定（信任凭据）必须一起撤，不能比台账活得久。 */
+    @Test
+    fun evictingASessionAlsoRevokesItsConversationBinding() {
+        val reg = AgentSessionRegistry(maxSessions = 1, maxEventsPerSession = 50)
+        reg.bindConversation("old", "group:old")
+        reg.recordSession(nodeId = "peer", sessionId = "old", state = "done", outbound = true, at = 1_000)
+
+        // 顶破 maxSessions：old 是最旧的一行，evictIfNeeded 必须连带清掉绑定。
+        reg.recordSession(nodeId = "peer", sessionId = "new", state = "busy", outbound = true, at = 2_000)
+
+        assertEquals(listOf("new"), reg.sessions().map { it.sessionId })
+        assertNull(reg.conversationOf("old"), "会话台账里都没这行了，绑定不该还被当作信任凭据")
     }
 }

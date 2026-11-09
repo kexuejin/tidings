@@ -339,6 +339,60 @@ class WorktreeSandboxExecutorTest {
         scope.cancel()
     }
 
+    /**
+     * 单行熔断也要收掉**忽略 SIGTERM 的子进程**。
+     *
+     * 与 [abortKillsDescendantsThatIgnoreSigterm] 同缺陷类，但入口不同：读线程为了让
+     * `proc.waitFor()` 返回，必须先 SIGTERM 根；旧实现让主循环在**根死之后**才调
+     * `destroyProcessTree`，而 `proc.descendants()` 那时已恒空（后代被过继给 init）。
+     * 症状：卡片翻成 Failed / 日志写着 "process tree killed"，下面那层还在跑。
+     *
+     * 现在读线程在杀根之前拍快照并交给清场段落，按 pid 收完整棵树。
+     * 假 CLI 用 `exec sleep 120` 收尾，保证根自己不额外留一个前台子进程，
+     * 又不会在快照之前自然退出。
+     */
+    @Test
+    fun lineLimitBreakerKillsDescendantsThatIgnoreSigterm() = runBlocking {
+        val root = tempDir()
+        val host = tempDir()
+        gitRepo(host)
+        val pidFile = File(root, "pids-limit.txt")
+        val overLimit = DriverLineLimits.MAX_LINE_CHARS + 4096
+        val cli = script(
+            root,
+            "cli",
+            "sh -c 'trap \"\" TERM; exec sleep 120' &\n" +
+                "echo \"\$\$ \$!\" > '${pidFile.absolutePath}'\n" +
+                // 一整行超限。BoundedLineReader 会把该行剩余字节读完才返回 TooLong，
+                // 所以必须补一个换行：不带换行时 `exec sleep` 一直占着 stdout，
+                // 读线程会卡在 read() 等 EOF，熔断永远不触发。
+                "head -c $overLimit /dev/zero | tr '\\000' 'x'\n" +
+                "printf '\\n'\n" +
+                "exec sleep 120\n",
+        )
+        val exe = executor(root)
+
+        val outcome = withTimeout(40_000) {
+            exe.run("t7", host.absolutePath, listOf(cli), emptyMap(), {})
+        }
+        assertTrue(
+            outcome is WorktreeSandboxExecutor.Outcome.Failed,
+            "单行熔断的终局是 Failed，实际 $outcome",
+        )
+        assertTrue(
+            outcome.message.contains("line over"),
+            "真因必须写进结局：" + outcome.message,
+        )
+
+        val (rootPid, childPid) = pidFile.readText().trim().split(" ").map { it.toLong() }
+        // 不赌 SIGKILL 的落地时刻：轮询到可观测的「两个 pid 都不在了」为止。
+        withTimeout(8_000) {
+            while (aliveOf(rootPid) || aliveOf(childPid)) delay(50)
+        }
+        assertFalse(aliveOf(childPid), "忽略 SIGTERM 的子进程也必须被收掉 —— 根先死就枚举不到后代是旧实现的洞")
+        assertFalse(aliveOf(rootPid), "根进程必须被杀掉")
+    }
+
     /** pid 还活着吗（进程不存在 / 已退出都算 false，不抛）。 */
     private fun aliveOf(pid: Long): Boolean =
         ProcessHandle.of(pid).map { it.isAlive }.orElse(false)
@@ -651,6 +705,86 @@ class WorktreeSandboxExecutorTest {
                 "凭据挂载清单不许包含敏感目录 $forbidden —— 「能跑通」不能靠暴露宿主私有凭据来换",
             )
         }
+    }
+
+    @Test
+    fun prepareSandboxHomeMountsHostOpencodeConfigIfPresent() {
+        val fakeHost = tempDir()
+        val fakeOpencodeDir = File(fakeHost, ".config/opencode").apply { mkdirs() }
+        File(fakeOpencodeDir, "opencode.json").writeText("""{"model":"custom-test"}""")
+
+        val artifacts = File(tempDir(), "artifacts").apply { mkdirs() }
+        val sandboxHome = WorktreeSandboxExecutor.prepareSandboxHome(artifacts, hostHome = fakeHost)
+
+        val mounted = File(sandboxHome, ".config/opencode")
+        assertTrue(mounted.exists(), "宿主若有 .config/opencode，沙箱必须建立对应的配置目录挂载")
+        assertTrue(java.nio.file.Files.isSymbolicLink(mounted.toPath()), "挂载必须是符号链接")
+        assertEquals(
+            """{"model":"custom-test"}""",
+            File(mounted, "opencode.json").readText(),
+            "沙箱内读取的配置内容必须与宿主完全一致",
+        )
+    }
+
+    /**
+     * AGENTS §2.8 的回归钉子：清理产物目录绝不能沿软链接下钻真实 HOME。
+     *
+     * 同时覆盖顶层 `.dsh` 与**二级目录**下的 `.config/opencode` —— 后者正是旧写法
+     * （只扫顶层 isSymbolicLink）漏掉、随后 deleteRecursively() 沿它掏空宿主目录的
+     * 那个入口。全量清空 .sandbox-home 才是正确解法，别退回顶层扫描。
+     */
+    @Test
+    fun deleteArtifactsSafelyDoesNotFollowSymlinksIntoHostHome() {
+        val fakeHost = tempDir()
+        val fakeDsh = File(fakeHost, ".dsh").apply { mkdirs() }
+        val dshSecret = File(fakeDsh, ".credentials.yaml").apply { writeText("secret_token: live_key") }
+        val fakeOpencode = File(fakeHost, ".config/opencode").apply { mkdirs() }
+        val opencodeConf = File(fakeOpencode, "opencode.json").apply { writeText("""{"model":"m"}""") }
+
+        val artifacts = File(tempDir(), "artifacts").apply { mkdirs() }
+        WorktreeSandboxExecutor.prepareSandboxHome(artifacts, hostHome = fakeHost)
+
+        val sandboxHome = File(artifacts, ".sandbox-home")
+        assertTrue(File(sandboxHome, ".dsh").exists(), "顶层软链接挂载必须先建出来")
+        assertTrue(File(sandboxHome, ".config/opencode").exists(), "二级目录下的软链接挂载必须先建出来")
+
+        WorktreeSandboxExecutor.deleteArtifactsSafely(artifacts)
+
+        assertFalse(artifacts.exists(), "产物目录必须被清理完毕")
+        // 致命断言：宿主物理目录与文件必须完好，绝不许被下钻删除。
+        assertTrue(fakeHost.exists(), "宿主目录必须存在")
+        assertTrue(fakeDsh.exists(), "宿主 .dsh 必须存在")
+        assertTrue(dshSecret.exists(), "宿主凭证文件必须存在且完好")
+        assertEquals("secret_token: live_key", dshSecret.readText())
+        assertTrue(fakeOpencode.exists(), "宿主 opencode 配置目录必须存在")
+        assertTrue(opencodeConf.exists(), "宿主 opencode.json 必须存在且完好")
+        assertEquals("""{"model":"m"}""", opencodeConf.readText())
+    }
+
+    /**
+     * 反向钉子：`.sandbox-home` **之外**的软链接同样不许下钻。
+     *
+     * 上一条用例只证明「.sandbox-home 内部不被跟随」，旧实现（先清 .sandbox-home、
+     * 末尾再来一次 `artifactsDir.deleteRecursively()`）**同样能通过** —— 它对产物
+     * 目录里的其它链接毫无防护。而任务进程本来就能写产物目录，留一个指向 $HOME 的
+     * 软链就够了。这条用例在旧实现下必然红：deleteRecursively() 会沿 `evil` 下钻
+     * 并删掉宿主文件。遍历整棵树（不传 FOLLOW_LINKS）才守得住。
+     */
+    @Test
+    fun deleteArtifactsSafelyDoesNotFollowStraySymlinksOutsideSandboxHome() {
+        val fakeHost = tempDir()
+        val hostSecret = File(fakeHost, "host-secret.txt").apply { writeText("live_key") }
+
+        val artifacts = File(tempDir(), "artifacts").apply { mkdirs() }
+        File(artifacts, "work.txt").writeText("task output")
+        Files.createSymbolicLink(File(artifacts, "evil").toPath(), fakeHost.toPath())
+
+        WorktreeSandboxExecutor.deleteArtifactsSafely(artifacts)
+
+        assertFalse(artifacts.exists(), "产物目录必须被清理完毕")
+        assertTrue(fakeHost.exists(), "宿主目录必须存在")
+        assertTrue(hostSecret.exists(), "宿主文件绝不许被软链接下钻删除")
+        assertEquals("live_key", hostSecret.readText())
     }
 
     private fun assertFalse(actual: Boolean, message: String) {

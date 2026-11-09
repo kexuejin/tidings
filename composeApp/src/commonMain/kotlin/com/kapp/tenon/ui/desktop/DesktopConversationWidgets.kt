@@ -204,7 +204,8 @@ public fun ConversationSidebar(
     dense: Boolean = true,
     /** Team Folder 透传（见 `ConversationListPanel` 同名参数）；默认空 = 不折叠。 */
     teamFoldersByConv: Map<String, List<com.kapp.tenon.domain.model.TeamFolderUi>> = emptyMap(),
-    expandedTeams: Set<String> = emptySet(),
+    /** 已展开的会话键集合（一行一个折叠符号，见 ConversationListPanel 同名参数）。 */
+    expandedTeamConvs: Set<String> = emptySet(),
     onToggleTeam: ((String) -> Unit)? = null,
     /** 点团队成员：打开群会话并预填 `@token`（见 `ConversationListPanel` 同名参数）。 */
     onMentionMember: ((convId: String, token: String) -> Unit)? = null,
@@ -364,7 +365,7 @@ public fun ConversationSidebar(
                 dense = dense,
                 selectedConvId = selectedPeerId,
                 teamFoldersByConv = teamFoldersByConv,
-                expandedTeams = expandedTeams,
+                expandedTeamConvs = expandedTeamConvs,
                 onToggleTeam = onToggleTeam,
                 onMentionMember = onMentionMember,
                 trailingContent = if (searchResults.isEmpty()) {

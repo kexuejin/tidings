@@ -175,13 +175,21 @@ CREATE TABLE IF NOT EXISTS ConversationSummary (
 selectAllConversationSummaries:
 SELECT * FROM ConversationSummary;
 
+selectConversationSummary:
+SELECT * FROM ConversationSummary WHERE conv_id = :convId;
+
 selectLatestMessageOfConv:
 -- file_json 也要取：会话列表预览在正文为空时退回文件名（conversationPreviewOf）。
 -- 只补 SELECT 列、不动表结构 ⇒ 不需要迁移（.sqm 只跟 DDL 走）。
-SELECT id, text, timestamp, mine, file_json FROM MessageEntity
+--
+-- 取 20 行而不是 1 行：agent 事件流会在库里留下一串**零正文**的行，最新一条是空帧时
+-- 「预览」就成了 null，会话列表写「还没聊过，打个招呼」—— 而上面躺着上百条真消息。
+-- 判据（什么算空）在 Kotlin 侧 `hasRenderableContent` 一处，SQL 只负责多给几行备选。
+SELECT id, text, timestamp, mine, file_json, notice, screen_json, card_json, card_payload
+FROM MessageEntity
 WHERE conv_id = :convId
 ORDER BY seq DESC
-LIMIT 1;
+LIMIT 20;
 
 upsertConversationSummary:
 INSERT OR REPLACE INTO ConversationSummary (
@@ -709,5 +717,85 @@ SELECT last_rev FROM BoardCardRev WHERE card_id = ?;
 
 upsertBoardCardRev:
 INSERT OR REPLACE INTO BoardCardRev(card_id, last_rev, updated_at) VALUES (?, ?, ?);
+
+-- 调度任务运行态台账（触发式编排提案 §2.2 / §9 阶段二）：清单（manifest triggers）
+-- 是「声明什么」，这里是「上次什么时候跑、下次什么时候该跑」。调度中枢 Owner 唯一为
+-- 桌面宿主——重启后靠它做 missed-fire 补偿判定；没有这张表，合盖休眠过的宿主每次
+-- 醒来都丢一次触发窗口的记忆，与「rev 延续依赖内存槽位」是同一类缺陷。
+CREATE TABLE SchedulerTaskState (
+    task_id TEXT NOT NULL PRIMARY KEY,          -- pluginId + "/" + trigger.id
+    last_run_at INTEGER,                        -- epoch ms；NULL = 从未跑过
+    next_run_at INTEGER NOT NULL,               -- epoch ms；调度扫描的判据
+    jitter_offset_sec INTEGER NOT NULL,         -- 逐任务固定偏移：同任务同偏移，重启不漂移
+    missed_runs INTEGER NOT NULL DEFAULT 0,     -- 错过而未补跑的窗口数（RUN_ONCE 只补 1 次，余数如实记账）
+    updated_at INTEGER NOT NULL
+);
+
+selectSchedulerTaskStates:
+SELECT * FROM SchedulerTaskState;
+
+upsertSchedulerTaskState:
+INSERT OR REPLACE INTO SchedulerTaskState(task_id, last_run_at, next_run_at, jitter_offset_sec, missed_runs, updated_at)
+VALUES (?, ?, ?, ?, ?, ?);
+
+-- 触发事件队列（持久化 Job Table 的事件半边）：验签 ACK 后由编排侧持久化桥落一行，
+-- 消费完翻终态。持久幂等键是 **(source_id, event_id)** 复合主键：内存幂等表
+-- （SourceWebhookRegistry）的键也是 sourceId + event.id，两层必须用同一个命名空间。
+--
+-- 只用 event_id 当主键时，两个不同 webhook 源各自投递 id 为 "evt-1" 的事件，
+-- 后一条被 INSERT OR IGNORE 静默吞掉：发送方拿到 200，事件却根本不在台账里，
+-- 而且没有任何日志。event.id 是**发送方自己的投递 id**，不同源不共享命名空间；
+-- 路由判据 sourceId 因此必须进主键。
+CREATE TABLE TriggerEvent (
+    event_id TEXT NOT NULL,
+    source_id TEXT NOT NULL,
+    type TEXT NOT NULL,
+    subject TEXT NOT NULL,
+    summary TEXT NOT NULL,
+    detail TEXT NOT NULL,
+    link TEXT,
+    state TEXT NOT NULL,                        -- pending | running | done | failed | skipped（TriggerEventStates 唯一来源）
+    error TEXT,
+    created_at INTEGER NOT NULL,
+    updated_at INTEGER NOT NULL,
+    PRIMARY KEY (source_id, event_id)
+);
+
+CREATE INDEX idx_trigger_event_state ON TriggerEvent(state, created_at);
+
+selectTriggerEventExists:
+SELECT created_at FROM TriggerEvent WHERE source_id = ? AND event_id = ?;
+
+insertTriggerEventIgnore:
+INSERT OR IGNORE INTO TriggerEvent(event_id, source_id, type, subject, summary, detail, link, state, error, created_at, updated_at)
+VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?);
+
+selectPendingTriggerEvents:
+SELECT * FROM TriggerEvent WHERE state = 'pending' ORDER BY created_at LIMIT :limit;
+
+-- 原子认领：只有**行仍然是 pending** 时才翻 running。
+-- 为什么必须带 state 判据：无判据的 UPDATE 对「已被别人认领」的行照样返回成功，
+-- 认领失败在类型上不可观测，两个消费循环就会把同一行各派一次（双派）。
+-- 配合 selectChanges 读回受影响行数（0 = 认领失败），判据才真的能传到调用方。
+claimTriggerEvent:
+UPDATE TriggerEvent SET state = 'running', error = NULL, updated_at = ? WHERE source_id = ? AND event_id = ? AND state = 'pending';
+
+-- 崩溃恢复：上一进程遗留的 running 行（进程被 kill 时来不及翻终态）放回 pending。
+-- 只在 TriggerEventDrain.start() 调一次 —— 此刻本进程不可能有在飞的行，
+-- 所以「running 即遗留」成立；在扫描循环里调用会把真正在跑的行重新派发。
+reclaimRunningTriggerEvents:
+UPDATE TriggerEvent SET state = 'pending', updated_at = ? WHERE state = 'running';
+
+-- 紧跟在 claimTriggerEvent 之后的受影响行数。必须在同一个事务里读：
+-- SerializedAccessDriver 在 newTransaction 期间持锁且同线程复用同一条连接，
+-- changes() 因此读到的就是上面那条 UPDATE 的结果。
+selectChanges:
+SELECT changes();
+
+updateTriggerEventState:
+UPDATE TriggerEvent SET state = ?, error = ?, updated_at = ? WHERE source_id = ? AND event_id = ?;
+
+deleteTriggerEventsTerminalBefore:
+DELETE FROM TriggerEvent WHERE state IN ('done', 'failed', 'skipped') AND updated_at < ?;
 
 

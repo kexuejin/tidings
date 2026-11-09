@@ -92,9 +92,35 @@ class SqlDelightMessageStoreSummaryTest {
     }
 
     @Test
-    fun 空正文又没有文件时预览保持null() {
-        // null 的契约：UI 据此画「还没聊过」。空串不能折成任何文案 ——
-        // 「没聊过」与「聊了但这条没有正文」是两件事。
+    fun 最新一条是空帧时预览退回更早的真消息() {
+        // 真机 A22：agent 事件流在库里留下一串零正文的行，最新一条正好是空帧 ⇒
+        // 旧摘要取"最新一行"得 null ⇒ 会话列表写「还没聊过，打个招呼」，
+        // 而上面躺着上百条真消息。摘要必须跳过画不出东西的行，继续往更早找。
+        store.save(
+            mapOf(
+                "peer-1" to listOf(
+                    MessageUi(id = "r1", peerId = "peer-1", mine = false, text = "改动已就绪：1 个文件（+1 −0）", at = 5_000L),
+                    MessageUi(id = "e1", peerId = "peer-1", mine = false, text = "", at = 5_001L),
+                    MessageUi(id = "e2", peerId = "peer-1", mine = false, text = "", at = 5_002L),
+                ),
+            ),
+        )
+
+        val preview = store.loadSummaries().single().lastTextPreview
+
+        assertEquals(
+            "改动已就绪：1 个文件（+1 −0）",
+            preview,
+            "最新一帧是空帧时预览必须退回更早的真消息，不能落成「还没聊过」",
+        )
+    }
+
+    @Test
+    fun 只有空帧的会话不产生摘要行() {
+        // 「没聊过」与「聊了但每条都没有正文」是两件事：前者由列表的空态文案表达，
+        // 后者不该再往摘要表里写一条 preview=null 的行（那正是「还没聊过」被印在
+        // 有消息的会话上的来源）。写入侧现在也会丢弃空帧（`hasRenderableContent`），
+        // 这里钉的是**老库**：历史空行读回来时摘要仍然不落 null 预览。
         store.save(
             mapOf(
                 "peer-1" to listOf(
@@ -103,6 +129,28 @@ class SqlDelightMessageStoreSummaryTest {
             ),
         )
 
-        assertEquals(null, store.loadSummaries().single().lastTextPreview)
+        assertEquals(0, store.loadSummaries().size, "只有空帧的会话不该有摘要行")
+    }
+
+    @Test
+    fun 历史库里预览为空的摘要行在读取时自愈() {
+        // 老库形态：agent 事件流的零正文帧占住"最新一条"，摘要被写成了 preview=NULL
+        // ⇒ 会话列表画「还没聊过，打个招呼」，而上面有真消息（宿主库里 14 条 11 条空帧）。
+        // 新写入侧已经不再产生这种行，但**已经躺在库里的**必须能自己修好 ——
+        // 否则用户升级后仍然看到那句错误的空态文案，直到那个会话再来一条新消息。
+        store.save(
+            mapOf(
+                "peer-1" to listOf(
+                    MessageUi(id = "r1", peerId = "peer-1", mine = false, text = "真消息", at = 5_000L),
+                ),
+            ),
+        )
+        driver.execute(null, "UPDATE ConversationSummary SET last_text_preview = NULL", 0)
+
+        assertEquals(
+            "真消息",
+            store.loadSummaries().single().lastTextPreview,
+            "预览为空的历史摘要行必须在读的时候重算，不能把「还没聊过」一直挂着",
+        )
     }
 }

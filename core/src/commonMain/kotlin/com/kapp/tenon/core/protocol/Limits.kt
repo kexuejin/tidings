@@ -148,10 +148,12 @@ object Limits {
     const val AGENT_BODY_TCP_LIMIT = 65536
 
     /**
-     * `agent-invoke-result.summary` 的人话摘要上限（UTF-16 码元数）。
+     * `agent-invoke-result.summary` 的人话摘要上限（**UTF-8 字节**，与
+     * `CodecInvoke.validateInvokeResult` 的判法同一口径 —— 按 UTF-16 码元切会
+     * 产出比上限还大的中文串；发送侧钳制见 `NodeOutbound.clampInvokeResultFields`）。
      *
      * 摘要会进发起方拼装的看板卡（§6.1「Leader 是团队唯一对外发言人」），它的去向是
-     * 群文本的正文槽（32 KiB）或卡片标题 —— 2000 字符足够装下一段任务结论，
+     * 群文本的正文槽（32 KiB）或卡片标题 —— 2000 字节足够装下一段任务结论，
      * 又不至于让一帧结果顶爆 64 KiB 整帧硬上限。
      */
     const val AGENT_INVOKE_SUMMARY = 2000

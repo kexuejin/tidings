@@ -84,4 +84,49 @@ class AgentGrantExecutionScopeTest {
         )
         assertTrue(s.allows(peer, agentKey = "anyAgent", requireRw = true, forExecution = true))
     }
+
+    /**
+     * **线上身份的大小写不能决定授权结果**。
+     *
+     * 台账存的是注册时的原样（面板 `@` 到 `DSH` 就存 `DSH`），而卡片动作帧里的
+     * `agentId` 是 `AgentSenderId.parse` 从 `senderId` 反解出来的 —— 写进去时被
+     * `AgentSenderId.of` 小写化成 `agent:<host>:dsh`。按字面比 ⇒ 同一个 agent
+     * 每次动作都被判无权限。
+     *
+     * 真机 A22 现场：手机点「合并此补丁」，帧到了宿主（dedup 有、ACK 已回），
+     * `allows(node, agentKey="dsh", forExecution=true)` 撞上台账的 `DSH` 判假，
+     * 于是走「被拒」分支；而 1:1 的拒绝横幅需要群 ⇒ 也发不出去 ⇒ 点了彻底没反应。
+     */
+    @Test
+    fun aGrantMatchesTheLowercasedWireIdentity() {
+        val s = store()
+        s.setPolicy("byDevice")
+        s.grant(peer, AgentGrantScopes.AGENT, agentKey = "DSH", access = AgentGrantAccess.RW, grantedBy = "me", at = 1L)
+
+        assertTrue(
+            s.allows(peer, agentKey = "dsh", requireRw = true, forExecution = true),
+            "动作帧带回的是小写化后的 agentId，台账里是大写 —— 必须认成同一个身份",
+        )
+        assertTrue(
+            s.allows(peer, agentKey = "DSH", requireRw = true, forExecution = true),
+            "原样大小写当然也要放行",
+        )
+    }
+
+    /** 归一大小写**不等于**放宽作用域：别的 agent 照旧不能借这条授权执行。 */
+    @Test
+    fun caseFoldingDoesNotLeakTheGrantToAnotherAgent() {
+        val s = store()
+        s.setPolicy("byDevice")
+        s.grant(peer, AgentGrantScopes.AGENT, agentKey = "DSH", access = AgentGrantAccess.RW, grantedBy = "me", at = 1L)
+
+        assertFalse(
+            s.allows(peer, agentKey = "codex", requireRw = true, forExecution = true),
+            "授权了 DSH 不等于授权了 codex",
+        )
+        assertFalse(
+            s.allows(peer, agentKey = "dsh-cli", requireRw = true, forExecution = true),
+            "前缀相同但名字不同，不许被当成同一个 agent",
+        )
+    }
 }

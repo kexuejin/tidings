@@ -8,22 +8,25 @@ import kotlin.test.assertEquals
 import kotlin.test.assertTrue
 
 /**
- * Team Folder 接线的单一来源守卫（阶段 1 / C4）。
+ * Team Folder 接线的守卫。
  *
- * 事实前提：桌面 `ConversationSidebar` **复用了** `ConversationListPanel`（把
- * `sessions` 映射成 feed 传进去），所以折叠只有一处实现。这比"两端各写一份"更省，
- * 但也更脆 —— 一旦有人在桌面侧另写一段折叠，手机与桌面就会给出不同分组。
+ * 事实前提有两条：
+ * 1. 桌面 `ConversationSidebar` **复用了** `ConversationListPanel`，所以折叠只有一处实现；
+ * 2. 折叠**不替代会话行** —— 会话行永远是 `ConversationRow`（唯一实现），团队只是行内
+ *    一枚标记 + 行下追加的标签/成员行。
+ *
+ * 第 2 条是本守卫的重点：上一版有一个 `TeamFolderHeader` 替代会话行，结果折叠态丢掉了
+ * 最后一条消息与时间，展开态又把同一条会话画了第二遍。那类退化在单测里不会红
+ * （结构测试只数行数），只能靠源码守卫挡住"再长出一个替代行型"。
  *
  * 判据：
- * 1. `ConversationListPanel` 必须调 `foldTeamRows(`，并且 `itemsIndexed` 吃的是投影后的
- *    `rows`（不是原始 `feed`）；
- * 2. 渲染组件 `TeamFolderRows` 不许自己分组（不含 `foldTeamRows(`）；
- * 3. `ConversationSidebar` 只透传参数（含 `teamFoldersByConv = teamFoldersByConv`），
- *    不许自己折叠；
- * 4. `ConversationRow` 的首参仍是 `row: ConversationUi` —— 成员行不许把假会话塞进来。
- *
- * 反向验证：把 `ConversationListPanel` 的 `itemsIndexed(rows` 改回 `itemsIndexed(feed`，
- * 本用例变红。
+ * 1. `ConversationListPanel` 必须调 `foldTeamRows(`，且 `itemsIndexed` 吃投影后的 `rows`；
+ * 2. 会话行由 `ConversationRow(row = row.item.conv, …)` 画 —— 即**真实会话**，不是造出来的行；
+ * 3. 团队渲染文件里**不许有** `TeamFolderHeader`（替代行型已废除）与 `foldTeamRows(`（不许自己分组）；
+ * 4. 折叠符号只有一个入口：[TeamBadge] 收 `convId` + `onToggle`，且容器把 `onToggleTeam` 传进去；
+ * 5. 两端外壳都从域层算团队清单；桌面四档都透传；
+ * 6. 成员行点击链路完整（行可点 → 容器接 → 两端有草稿入口）；
+ * 7. 折叠态初值接缝与两帧参考图都在。
  */
 class TeamFolderWiringGuardTest {
 
@@ -31,6 +34,8 @@ class TeamFolderWiringGuardTest {
         "composeApp/src/commonMain/kotlin/com/kapp/tenon/feature/conversations/ConversationListPanel.kt"
     private val rowsFile =
         "composeApp/src/commonMain/kotlin/com/kapp/tenon/feature/conversations/TeamFolderRows.kt"
+    private val projection =
+        "composeApp/src/commonMain/kotlin/com/kapp/tenon/feature/conversations/TeamFolderProjection.kt"
     private val sidebar =
         "composeApp/src/commonMain/kotlin/com/kapp/tenon/ui/desktop/DesktopConversationWidgets.kt"
     private val conversationRow =
@@ -54,7 +59,25 @@ class TeamFolderWiringGuardTest {
         )
         assertTrue(
             source.contains("itemsIndexed(rows"),
-            "ConversationListPanel 的列表必须消费投影后的 rows；直接吃 feed 等于跳过折叠",
+            "列表必须消费投影后的 rows；直接吃 feed 等于跳过折叠",
+        )
+    }
+
+    @Test
+    fun sessionRowIsStillTheRealConversation() {
+        val panel = live(listPanel)
+        assertTrue(
+            panel.contains("ConversationRow(") && panel.contains("row.item.conv"),
+            "会话行必须由 ConversationRow 画真实会话（row.item.conv）—— 造一个假行就是上一版的退化",
+        )
+        // 替代行型已废除：谁把它加回来，这里先红。
+        assertTrue(
+            !live(rowsFile).contains("TeamFolderHeader"),
+            "不许再引入替代会话行的组头 —— 它会丢预览与时间，展开态还会重复同一会话",
+        )
+        assertTrue(
+            !live(projection).contains("sessionRowEmitted"),
+            "展开态不再需要'补回会话行'：会话行一直都在",
         )
     }
 
@@ -75,6 +98,10 @@ class TeamFolderWiringGuardTest {
             "ConversationSidebar 必须把 teamFoldersByConv 透传给共享容器",
         )
         assertTrue(
+            source.contains("expandedTeamConvs = expandedTeamConvs"),
+            "展开态也要透传（会话键集合）",
+        )
+        assertTrue(
             !source.contains("foldTeamRows("),
             "ConversationSidebar 不许自己折叠 —— 它复用的是 ConversationListPanel，再写一份就是第二条数据流",
         )
@@ -91,6 +118,27 @@ class TeamFolderWiringGuardTest {
             source.contains("row: ConversationUi"),
             "ConversationRow 的首参必须是真实 ConversationUi —— 成员行不许造假会话塞进来",
         )
+        assertTrue(
+            source.contains("teamSlot: (@Composable RowScope.() -> Unit)?"),
+            "团队标记只能作为会话行的尾部插槽，不能反过来让会话行判断'我是不是团队'",
+        )
+    }
+
+    @Test
+    fun oneTogglePerRow() {
+        val rows = live(rowsFile)
+        assertTrue(
+            rows.contains("convId: String"),
+            "折叠标记收的是**会话键**：一行只有一个开关（多个团队整块展开）",
+        )
+        assertTrue(
+            rows.contains("onToggle: ((String) -> Unit)?"),
+            "折叠入口必须存在；没有它这一行就只能看不能展",
+        )
+        assertTrue(
+            live(listPanel).contains("onToggle = onToggleTeam,"),
+            "容器必须把折叠回调接到标记上",
+        )
     }
 
     @Test
@@ -102,29 +150,13 @@ class TeamFolderWiringGuardTest {
                 path + " 必须从域层算团队清单 —— 只在容器里留默认空参数等于功能没通电",
             )
         }
-        // 桌面四档都要透传；漏一档就会在某个窗口宽度下"组头消失"。
+        // 桌面四档都要透传；漏一档就会在某个窗口宽度下"标记消失"。
         val pane = live(desktopPane)
         assertEquals(
             4,
             Regex("""teamFoldersByConv = teamFolders,""").findAll(pane).count(),
             "桌面 ConversationsPane 的四档 ConversationSidebar 都要透传 teamFolders",
         )
-    }
-
-    @Test
-    fun headerKeepsBothEntryAndToggle() {
-        val rows = live(rowsFile)
-        assertTrue(
-            rows.contains("onOpenChat: ((String) -> Unit)?"),
-            "组头必须有进会话入口 —— 折叠态下组头替代了会话行，没有它这个群就点不进去",
-        )
-        assertTrue(
-            rows.contains("onToggle: ((String) -> Unit)?"),
-            "组头必须有折叠入口（右侧符号的独立热区）",
-        )
-        val panel = live(listPanel)
-        assertTrue(panel.contains("onOpenChat = onOpenChat,"), "容器必须把进会话回调接到组头")
-        assertTrue(panel.contains("onToggle = onToggleTeam,"), "容器必须把折叠回调接到组头")
     }
 
     @Test
@@ -149,12 +181,11 @@ class TeamFolderWiringGuardTest {
 
     @Test
     fun collapsedAndExpandedStatesStayReachableFromFrames() {
-        // 折叠态是屏内 `remember` 状态，静态帧点不了组头右侧那颗符号。没有
-        // `initialExpandedTeams` 这个接缝，展开态（成员行 + 角色 + 会话行补回）
-        // 就是零视觉覆盖 —— 而它正是"组内不画分隔线、展开只补一次会话行"的验处。
+        // 展开态是屏内 `remember` 状态，静态帧点不了行内那颗符号。没有
+        // `initialExpandedTeamConvs` 这个接缝，展开态（团队标签 + 成员行）就是零视觉覆盖。
         assertTrue(
-            live(phoneScreen).contains("mutableStateOf(initialExpandedTeams)"),
-            "expandedTeams 的初值必须来自 initialExpandedTeams，否则展开态永远录不到",
+            live(phoneScreen).contains("mutableStateOf(initialExpandedTeamConvs)"),
+            "expandedTeamConvs 的初值必须来自 initialExpandedTeamConvs，否则展开态永远录不到",
         )
         val frames = live(chatFrames)
         for (name in listOf("chat-home-team-folder", "chat-home-team-folder-expanded")) {

@@ -159,6 +159,43 @@ class SandboxedCliDriverTest {
         )
     }
 
+    /**
+     * 触发式只读通道的完整接线：空工作区 → plain（CliSubprocessDriver）→ 子进程环境
+     * → hook 脚本。假 CLI 把它**实际拿到**的 TENON_HOOK_SESSION_ID 原值打进 text 行。
+     *
+     * 这条用例守的是「委托链」而不是「注入语句」：只在沙箱分支注入的话，沙箱路径照样
+     * 是绿的，唯独触发通道拿不到对齐键 —— 而那正是 P0① 的形状。
+     */
+    @Test
+    fun blankWorkspacePlainPathCarriesTheHookSessionId() {
+        val root = tempDir()
+        val cli = script(
+            root,
+            "cli",
+            """printf '{"type":"text","text":"%s"}\n' "${'$'}{TENON_HOOK_SESSION_ID-UNSET}"; exit 0""",
+        )
+        val sandbox = WorktreeSandboxExecutor(sandboxRoot = root)
+        val driver = SandboxedCliDriver(
+            driverId = "claude-cli",
+            displayName = "Claude Code (CLI)",
+            cliPath = cli,
+            argSpec = { listOf(it) },
+            sandbox = sandbox,
+            newSessionId = { "trigger-session-1" },
+        )
+        val collected = events { queue ->
+            val session = driver.openSession("", null)
+            driver.executeTask(session.sessionId, "read-only trigger") { queue.put(it) }
+        }
+        val seen = collected.filterIsInstance<DriverEvent.TokenDelta>().joinToString("") { it.delta }
+        assertEquals(
+            "trigger-session-1",
+            seen,
+            "触发通道（wsPath=null → plain）的子进程必须拿到宿主派单的 sessionId；拿不到时 " +
+                "hook 不带 sessionId，hookSessionTrusted 为假，执行前只读否决整条被跳过",
+        )
+    }
+
     @Test
     fun nonGitWorkspaceFailsLoudAndNeverRunsTheCli() {
         val root = tempDir()

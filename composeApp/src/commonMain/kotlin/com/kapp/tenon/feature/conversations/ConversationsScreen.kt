@@ -165,14 +165,13 @@ fun ConversationsScreen(
      */
     initialFilter: String = "all",
     /**
-     * 团队折叠组里**一开始就展开**的组键集合（`teamGroupKey(convId, leaderAgentId)`），
-     * **只给截图门禁用**。
+     * 团队折叠里**一开始就展开**的会话键集合（`group:<groupId>`），**只给截图门禁用**。
      *
-     * 与 [initialFilter] 同一个理由：`expandedTeams` 是屏内状态，静态帧点不了组头右侧那颗
-     * 符号，展开态（成员行 + 角色）就永远录不到 —— 而"展开后会话行补回来、组内不画分隔线"
+     * 与 [initialFilter] 同一个理由：`expandedTeamConvs` 是屏内状态，静态帧点不了行内那颗
+     * 折叠符号，展开态（团队标签 + 成员行）就永远录不到 —— 而"展开只补成员、会话行始终在"
      * 正是这一支要钉的规矩。生产调用方一律用默认值（全部折叠）。
      */
-    initialExpandedTeams: Set<String> = emptySet(),
+    initialExpandedTeamConvs: Set<String> = emptySet(),
     /**
      * 「全部标为已读」。null = 这个壳没有这条出口（那一项画成灰的，而不是消失）。
      *
@@ -226,9 +225,14 @@ fun ConversationsScreen(
             sessions = agentSlice.agentSessions.values.toList(),
         )
     }
-    var expandedTeams by remember { mutableStateOf(initialExpandedTeams) }
-    val onToggleTeam: (String) -> Unit = { key ->
-        expandedTeams = if (key in expandedTeams) expandedTeams - key else expandedTeams + key
+    // 展开状态是**会话级**的：一行只有一个折叠符号，一个群挂多个团队时整块一起展开。
+    var expandedTeamConvs by remember { mutableStateOf(initialExpandedTeamConvs) }
+    val onToggleTeam: (String) -> Unit = { convId ->
+        expandedTeamConvs = if (convId in expandedTeamConvs) {
+            expandedTeamConvs - convId
+        } else {
+            expandedTeamConvs + convId
+        }
     }
     // 点团队成员：写草稿 + 进该群会话；没有草稿入口时成员行不可点。
     val onMentionMember: ((String, String) -> Unit)? = onDraftChange?.let { write ->
@@ -541,7 +545,7 @@ fun ConversationsScreen(
                 ),
                 onOpenWorkspaceUnit = onOpenWorkspaceUnit,
                 teamFoldersByConv = teamFolders,
-                expandedTeams = expandedTeams,
+                expandedTeamConvs = expandedTeamConvs,
                 onToggleTeam = onToggleTeam,
                 onMentionMember = onMentionMember,
             )

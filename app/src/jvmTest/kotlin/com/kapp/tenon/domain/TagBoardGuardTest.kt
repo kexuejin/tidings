@@ -64,6 +64,25 @@ class TagBoardGuardTest {
         )
     }
 
+    /**
+     * 兜底卡的 wsId 必须带席位/群绑定回落（真机缺口）：纯文本语法路径的意图不带
+     * wsId，登记成 null ⇒ 「降级为本机执行」时宿主拿不到仓，必退单
+     * 「no git workspace bound to group」。回落链复用 DispatchWorkspaceChoice.resolve
+     * （派单工作区单一来源的既定纪律，不另写一条），且登记口必须用回落后的值。
+     */
+    @Test
+    fun fallbackCardCarriesSeatWorkspaceSoLocalDegradeCanResolveRepo() {
+        val body = live(component)
+        assertTrue(
+            body.contains("DispatchWorkspaceChoice.resolve(seat.defaultWsId, available)"),
+            "兜底卡 wsId 没有席位/群绑定回落 —— 降级本机执行必退单 no git workspace bound to group",
+        )
+        assertTrue(
+            body.contains("rememberTagBoard(cardId, groupId, agentId, seat, tagTask, boardWsId, requiredTag)"),
+            "兜底卡登记没有用回落后的 wsId —— 降级按钮拿到的还是 null",
+        )
+    }
+
     /** T-G5 定向呼叫：显式宿主 = 只有被点名的机器处理（群帧全员可见，执行只有一家）。 */
     @Test
     fun explicitHostIntentIsProcessedOnlyByTheNamedHost() {
@@ -75,6 +94,49 @@ class TagBoardGuardTest {
         assertTrue(
             body.contains("if (explicitHost != null && explicitHost != self) return"),
             "非目标宿主没有让路 —— 每台有同名 agent 的机器都会抢着跑（§2.1 的原始困境）",
+        )
+    }
+
+    /**
+     * 纯文本语法路径（T-G2/D-031）的意图**不带 agentId**（只装 requiredTag）——
+     * 真机现场：接收侧对无 agentId 的意图整链静默 return，而 intentOwnsDispatch
+     * 又挡掉了文本路由 ⇒「require: 打在末尾也零反馈」。接收侧必须按正文 @ 解析目标。
+     */
+    @Test
+    fun plainTextTagIntentResolvesTargetFromMention() {
+        val body = live(component)
+        assertTrue(
+            body.contains("?: messageText?.let { text ->") &&
+                body.contains("takeWhile { !it.isWhitespace() }") &&
+                body.contains("startsWith(token, ignoreCase = true)"),
+            "无 agentId 的意图没有按正文 @ 令牌解析目标席位 —— 纯文本 require: 语法整链静默",
+        )
+    }
+
+    /**
+     * 标签路由必须住在本地执行器判定**之前**：席位宿主装着执行器 ≠ 本机就是
+     * 标签节点。真机现场：标签消费整段住在 ex == null 分支里，宿主有执行器时
+     * require: 被静默忽略、活照跑本机（意图违背）。无宿主门时群里每台无执行器
+     * 的机器还会各挂一张兜底卡 —— 两道门都要在。
+     */
+    @Test
+    fun tagRoutingPrecedesLocalExecutorAndOnlyTheSeatHostActs() {
+        val body = live(component)
+        val tagRoute = body.indexOf("val requiredTag = intent.strField(\"requiredTag\")")
+        // 文件里有两个 `val ex = executor`（前一个是跨机 invoke 应答路径的）——
+        // 意图派单路径的那一个在 requiredTag 之后，取最后一次出现。
+        val executorSplit = body.lastIndexOf("val ex = executor")
+        assertTrue(
+            tagRoute in 0 until executorSplit,
+            "标签路由没有提到本地执行器判定之前 —— 有执行器的宿主会静默忽略 require:",
+        )
+        assertTrue(
+            body.contains("if (effectiveHost != null && effectiveHost != self) return"),
+            "席位宿主门没了 —— 非托管机会抢着派委派/挂兜底卡",
+        )
+        assertTrue(
+            body.contains("if (requiredTag != null && routed != null && routed != self) {"),
+            "委派分支没有排除本机 —— 标签命中的就是本机时会自委派一圈",
         )
     }
 }

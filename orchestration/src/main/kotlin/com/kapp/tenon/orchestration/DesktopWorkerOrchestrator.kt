@@ -33,6 +33,7 @@ import kotlinx.coroutines.CoroutineStart
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
+import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.JsonPrimitive
 import kotlinx.serialization.json.buildJsonArray
 import kotlinx.serialization.json.buildJsonObject
@@ -285,13 +286,14 @@ class DesktopWorkerOrchestrator(
     private val pendingPrototypeInputs = ConcurrentHashMap<String, PendingPrototypeInput>()
 
     /**
-     * 发「这是调整原型，还是新任务？」的确认卡。
+     * 发「这是调整原型，还是新任务？」的确认卡，返回卡 JSON（供 invoke 路径把
+     * 租约以「方向待定」收口 —— 发起方等的是终局，卡片就是这次 invoke 的产出）。
      *
      * 独立 cardId（`chain-<ticketId>-ask`），不顶掉屏上的待选卡；文本暂存在
      * [pendingPrototypeInputs]，action 帧只有 actionId 装不下长文本，点确认时
      * 再取回执行（[confirmPrototypeInput]）。
      */
-    private suspend fun askPrototypeDirection(active: ActiveTicket, text: String) {
+    private suspend fun askPrototypeDirection(active: ActiveTicket, text: String): JsonObject {
         pendingPrototypeInputs[active.ticketId] = PendingPrototypeInput(text)
         val excerpt = text.take(80) + if (text.length > 80) "…" else ""
         // ChainProgress 没有动作字段（卡上的 actions 一直是手工构建的，如 diff-review
@@ -326,6 +328,7 @@ class DesktopWorkerOrchestrator(
             })
         }
         publishCardJson(active.targetConvId, askJson.toString(), active.agentKey)
+        return askJson
     }
 
     /**
@@ -611,7 +614,10 @@ class DesktopWorkerOrchestrator(
         prompt: String,
         replyToId: String?,
         wsId: String? = null,
-    ) {        val groupId = ConvId.groupIdOf(convId)
+        /** 原文被点名的键（小写）；null = 没点名（例如工作区群里回复 agent 的接话）。 */
+        mentionedAgentKey: String? = null,
+    ) {
+        val groupId = ConvId.groupIdOf(convId)
         val active = activeTicketForConv(convId)
 
         // 1. Direct Abort signal（第二道防线：`@codex 停` 这类「既是 prompt 又是打断」
@@ -652,8 +658,14 @@ class DesktopWorkerOrchestrator(
         //
         //    fire-and-forget：讨论要跑外部 CLI（几十秒级），不能把入站管线挂在这里，
         //    否则同一群里后续消息全部排队。
-        if (CognitiveFlow.classify(prompt) == CognitiveFlow.Intent.Discuss) {
-            scope.launch { runDiscussion(convId, groupId, prompt, agentKey = null) }
+        // 显式 @ 点名 = **显式派单指令**（路由表：显式点名 ⇒ 工单）—— 不进讨论。
+        // A22 D18：这里曾用 `isMentioningAgent(prompt, ...)` 重判点名，但 prompt 在域层
+        // 已经被 `extractAgentPrompt` 剥净了 @，那句判据恒为 false —— 群 @ 工单句
+        // （"create …" 不带软动词）被分诊改判成只读讨论，工单静默消失。
+        // 事实改由路由点随帧带过来（[mentionedAgentKey]），不在接收侧重算第二遍。
+        val explicitMention = groupId != null && mentionedAgentKey != null
+        if (!explicitMention && CognitiveFlow.classify(prompt) == CognitiveFlow.Intent.Discuss) {
+            scope.launch { runDiscussion(convId, groupId, prompt, agentKey = null, wsId = wsId) }
             return
         }
 
@@ -664,16 +676,21 @@ class DesktopWorkerOrchestrator(
         if (available != null) {
             val plan = parseDelegation(prompt, available, groupId)
             if (plan != null) {
-                delegateByPlan(convId, groupId, plan, available)
+                delegateByPlan(convId, groupId, plan, available, wsId)
                 return
             }
         }
         val stages = StageChain.parseStages(prompt)
         if (stages.size >= 2) {
-            dispatchMultiRoleChain(convId, groupId, prompt, stages)
+            dispatchMultiRoleChain(convId, groupId, prompt, stages, wsId = wsId)
         } else if (groupId != null) {
-            // 群路径保留既有兜底（群绑定解析有据）。
-            dispatchSingleWorker(convId, groupId, prompt, wsId = wsId)
+            // 群路径保留既有兜底（群绑定解析有据）：点名了谁就把这一棒交给谁。
+            // 从前这里不带 agentKey，恒落 codex —— 席位全名 @ 的单即使走到工单也会派错驱动。
+            // 解析不出（没点名 / 不在位）就传 null，行为与从前逐字一致。
+            val mentionedDriver = mentionedAgentKey?.let {
+                AgentProfiles.resolveKey(it, availableAgentKeys().orEmpty())
+            }
+            dispatchSingleWorker(convId, groupId, prompt, mentionedDriver, wsId = wsId)
         }
         // 1:1 纯文本到此为止（决议矩阵蓝图 §4.2 的 PlainChat 分支）：普通聊天不派单——
         // 派单走药丸触发的 dispatchDirectInvoke（invoke 通路显式携带 agentKind+wsId）。
@@ -687,12 +704,13 @@ class DesktopWorkerOrchestrator(
      * 这曾经是阶段 A 原型 / 追问唤醒 / 自愈退单在真机上「单测全绿、现场不存在」的
      * 根因：能力都写在编排器里，而真机那条路直调 `executeCliTask` 绕过了它。
      *
-     * 现在执行桥交给这里。三个分支与 [handlePrompt] 同判据、同顺序：
+     * 现在执行桥交给这里。四个分支与 [handlePrompt] / [followUpIfActive] 同判据、同顺序：
      *
      * 1. **打断**：`abortIfRequested` 已同步把终局（带卡）写进 `done`，await 即得；
      * 2. **受阻工单追问**：唤醒后续跑，等待方拿到「Resumed」回执 —— 真正的结论
      *    由后续工单卡承担（这时 invoke 的语义只是「你的话送到工单了」）；
-     * 3. **新派单**：建工单并 await 终局（成功/受阻/退单/中止/原型待选）。
+     * 3. **原型待选追问**：出方向确认卡，租约以 done + 方向卡收口（不是新派单）；
+     * 4. **新派单**：建工单并 await 终局（成功/受阻/退单/中止/原型待选）。
      *
      * `agentKey` 来自派单帧的 `agentId`（codex/claude/antigravity…），不再写死 codex。
      */
@@ -731,17 +749,45 @@ class DesktopWorkerOrchestrator(
             }
         }
 
+        // 原型待选期来的正文：**不是新派单** —— 与 [followUpIfActive] 同判据（invoke
+        // 桥的三个分支必须与文本路由对齐）。原型还没定稿，这张正文该走方向确认卡。
+        // 真机现场：这条分支缺失 ⇒ 1:1 药丸派单进原型待选后，同一句
+        // 追问在文本路出了方向卡、在 invoke 路又开了一张全新工单（屏上的
+        // 「Reply to adjust it」与编排器的实际行为相反）；若追问又逢宿主过载，
+        // 新单退单、租约悬空。租约以「方向待定」收口：done + 方向卡，发起方屏上
+        // 的卡片就是这次 invoke 的产出。
+        if (active != null && active.stage == "prototype") {
+            val trimmedPrompt = stripMentions(prompt)
+            if (trimmedPrompt.isNotBlank()) {
+                val askJson = askPrototypeDirection(active, trimmedPrompt)
+                return TicketOutcome(
+                    "prototype",
+                    controller.uiTexts.adjustOrNewTaskPrompt(
+                        trimmedPrompt.take(80) + if (trimmedPrompt.length > 80) "…" else "",
+                    ),
+                    null,
+                    askJson.toString(),
+                )
+            }
+        }
+
         // 点将期的正文 = 新派单（与 followUpIfActive 同判据）：先撤销倒计时中的工单，
         // 否则 3 秒到点旧单照跑，群里出现两张并行抢沙箱的卡。
         if (active != null && active.stage == "proposed") {
             cancelByCard("chain-" + active.ticketId, "Superseded by a new message")
         }
 
-        // 认知研讨流分诊（判据只有 `CognitiveFlow` 一份，与 handlePrompt 同源）：
-        // 只读档**不建工单**，产出是提议开工卡；invoke 桥拿到的就是这张卡的终局回执
-        //（有卡 ⇒ 派单处不再补「没干完」横幅）。
-        if (CognitiveFlow.classify(prompt) == CognitiveFlow.Intent.Discuss) {
-            return runDiscussion(convId, groupId, prompt, agentKey)
+        // 认知研讨流分诊 —— **invoke 桥不参与分诊**（A22 真机立案）：走到这里的每一单
+        // 都是用户在 1:1 里选了工作区、按了发送的**显式派单**，药丸本身就是意图信号；
+        // 文本分诊（"how to" 之类的问句标记）把真实工单重新判成讨论 ⇒ 用户选好仓库
+        // 发出去的需求变成一场只读聊天（真机：长描述句带 "documents how to run" 被
+        // INQUIRY 命中，工单没了）。分诊只属于**普通文本**入口（handlePrompt）——
+        // 那里没有药丸，句子语气是唯一的意图线索。判据仍是 CognitiveFlow 一份。
+        // 显式带 agentKey 的 invoke 单 = 人已经选了工作区/点了那个 agent，句子语气不该
+        // 再把它改判成只读讨论（与文本路由的 mentionedAgentKey 豁免同一条产品口径）。
+        val explicitDispatch = !agentKey.isNullOrBlank()
+        if (groupId != null && CognitiveFlow.classify(prompt) == CognitiveFlow.Intent.Discuss && !explicitDispatch) {
+            return runDiscussion(convId, groupId, prompt, agentKey, wsId)
         }
 
         // 委派计划优先（双挡：显式点名 / 组队自动），过代码门后才轮到旧阶段语法。
@@ -749,7 +795,7 @@ class DesktopWorkerOrchestrator(
         if (available != null) {
             val plan = parseDelegation(prompt, available, groupId)
             if (plan != null) {
-                return delegateByPlanAwait(convId, groupId, plan, available)
+                return delegateByPlanAwait(convId, groupId, plan, available, wsId)
             }
         }
         val stages = StageChain.parseStages(prompt)
@@ -757,12 +803,18 @@ class DesktopWorkerOrchestrator(
         // （`chainDispatcher == null`）或群没绑仓时，链一棒都不会跑、群里连卡都没有，
         // 而调用方拿到一个「已受理」的回执 —— 用户等一张永不到来的卡。
         // 现在派不出去就**回落到单棒**：宁可只用第一棒的 agent 干完，也不能静默吞单。
-        if (stages.size >= 2 && dispatchMultiRoleChain(convId, groupId, prompt, stages)) {
+        if (stages.size >= 2 && dispatchMultiRoleChain(convId, groupId, prompt, stages, wsId = wsId)) {
             // 多角色链有自己的卡与生命周期（ChainDispatcher），这里只回受理。
             return TicketOutcome("accepted", prompt.lineSequence().firstOrNull()?.trim()?.take(60), null, null)
         }
 
-        return dispatchSingleWorker(convId, groupId, prompt, agentKey, wsId).await()
+        // 席位全名（`dsh-<host>-<workspace>`）不是档案键：原样传下去会让 executeCliTask
+        // 报「no cli driver」。裸档案键（含大小写写法）一律原样保留，避免改动既有卡面。
+        val effectiveAgentKey = agentKey?.let { raw ->
+            if (AgentProfiles.normalizeKey(raw) != null) raw
+            else AgentProfiles.resolveKey(raw, availableAgentKeys().orEmpty()) ?: raw
+        }
+        return dispatchSingleWorker(convId, groupId, prompt, effectiveAgentKey, wsId).await()
     }
 
     /**
@@ -780,6 +832,12 @@ class DesktopWorkerOrchestrator(
         val goal: String,
         /** 参与讨论的 agent —— 卡面与日志都要能回答「这方案是谁给的」。 */
         val agents: List<String>,
+        /**
+         * 任务级显式绑定：讨论发生时挂接的工作区指针，开工时随单走。
+         * 提议是工单的前身，绑定跟工单走而不跟会话走——在这里丢掉，
+         * 开工就会退回群绑定/自动推导，1:1 多工作区宿主直接退单。
+         */
+        val wsId: String? = null,
     )
 
     /** 待确认的提议（cardId → 提议）。 */
@@ -802,6 +860,7 @@ class DesktopWorkerOrchestrator(
         groupId: String?,
         prompt: String,
         agentKey: String?,
+        wsId: String? = null,
     ): TicketOutcome {
         val host = planeProvider()
             ?: return TicketOutcome("error", null, "control plane unavailable", null)
@@ -822,6 +881,8 @@ class DesktopWorkerOrchestrator(
                     wsPath = workdir,
                     requestedSessionId = null,
                     sessionTitle = title,
+                    // 会话对齐键（§9 阶段三）：讨论流的 L3 审批卡也归到发起会话。
+                    convId = convId,
                 ) { eventType, _, summary, _ ->
                     if (violated == null && eventType == "tool.started" && !CognitiveFlow.allowsTool(summary)) {
                         violated = summary?.takeIf { it.isNotBlank() } ?: "(unnamed tool)"
@@ -878,7 +939,7 @@ class DesktopWorkerOrchestrator(
             assignees = plan?.stages?.map { it.agentKey }.orEmpty(),
         )
         if (json != null) {
-            proposals[cardId] = Proposal(cardId, convId, groupId, goal, targets)
+            proposals[cardId] = Proposal(cardId, convId, groupId, goal, targets, wsId)
             trimProposals()
         }
         return TicketOutcome("done", "discussion done: " + turns + " rounds with " + targets.joinToString(","), null, json)
@@ -947,7 +1008,7 @@ class DesktopWorkerOrchestrator(
         val available = availableAgentKeys() ?: return false
         val plan = parseDelegation(DISCUSSION_GOAL_PREFIX + proposal.goal, available, proposal.groupId)
             ?: return false
-        scope.launch { delegateByPlan(proposal.convId, proposal.groupId, plan, available) }
+        scope.launch { delegateByPlan(proposal.convId, proposal.groupId, plan, available, proposal.wsId) }
         RelayLog.info(
             "RELAY-INVOKE",
             "proposal started from discussion agents=" + proposal.agents.joinToString(",") + " card=" + cardId,
@@ -987,9 +1048,10 @@ class DesktopWorkerOrchestrator(
         target: String? = null,
         module: String? = null,
         context: String? = null,
+        wsId: String? = null,
     ): Boolean {
         val host = planeProvider() ?: return false
-        val repo = resolveWorkspacePath(groupId) ?: return false
+        val repo = resolveWorkspacePath(groupId, wsId) ?: return false
         val chainDispatcher = host.chainDispatcher ?: return false
         scope.launch {
             chainDispatcher.start(
@@ -1008,8 +1070,11 @@ class DesktopWorkerOrchestrator(
     /**
      * 本机在位的 agent 档案键（已归一）。控制面不在 → null：调用方跳过委派解析，
      * 走既有路径 —— 门不能因为自己拿不到事实而把单拦死。
+     *
+     * `DesktopExtension` 的 invoke 桥也用这一份把群里点名的席位 ID 归位到档案键：
+     * 「哪些驱动在位」不许在装配层再问一遍，否则两处名册迟早分叉。
      */
-    private fun availableAgentKeys(): Set<String>? {
+    internal fun availableAgentKeys(): Set<String>? {
         val host = planeProvider() ?: return null
         return AgentProfiles.knownKeys().filter { host.resolveCliDriver(it) != null }.toSet()
     }
@@ -1081,6 +1146,7 @@ class DesktopWorkerOrchestrator(
         groupId: String?,
         plan: DelegationPlan,
         available: Set<String>,
+        wsId: String? = null,
     ): Boolean {
         val effective = refinedPlan(plan, available)
         return when (val decision = StageChainGate.enforce(
@@ -1088,9 +1154,9 @@ class DesktopWorkerOrchestrator(
             available,
             cooldownRemainingMs = DriverCooldownTracker.Shared::remainingMs,
         )) {
-            is StageChainGate.Decision.Pass -> dispatchPlanStages(convId, groupId, effective, decision.stages)
+            is StageChainGate.Decision.Pass -> dispatchPlanStages(convId, groupId, effective, decision.stages, wsId)
             is StageChainGate.Decision.Downgrade -> {
-                dispatchSingleWorker(convId, groupId, plan.goal, decision.stage.agentKey)
+                dispatchSingleWorker(convId, groupId, plan.goal, decision.stage.agentKey, wsId)
                 true
             }
             is StageChainGate.Decision.Reject -> {
@@ -1106,6 +1172,7 @@ class DesktopWorkerOrchestrator(
         groupId: String?,
         plan: DelegationPlan,
         available: Set<String>,
+        wsId: String? = null,
     ): TicketOutcome {
         val effective = refinedPlan(plan, available)
         return when (val decision = StageChainGate.enforce(
@@ -1114,15 +1181,15 @@ class DesktopWorkerOrchestrator(
             cooldownRemainingMs = DriverCooldownTracker.Shared::remainingMs,
         )) {
             is StageChainGate.Decision.Pass -> {
-                if (dispatchPlanStages(convId, groupId, effective, decision.stages)) {
+                if (dispatchPlanStages(convId, groupId, effective, decision.stages, wsId)) {
                     TicketOutcome("accepted", plan.goal.take(60), null, null)
                 } else {
                     // 链派不出去（没绑仓/没装链执行器）：回落单棒，不静默吞单。
-                    dispatchSingleWorker(convId, groupId, plan.goal, decision.stages.first().agentKey).await()
+                    dispatchSingleWorker(convId, groupId, plan.goal, decision.stages.first().agentKey, wsId).await()
                 }
             }
             is StageChainGate.Decision.Downgrade ->
-                dispatchSingleWorker(convId, groupId, plan.goal, decision.stage.agentKey).await()
+                dispatchSingleWorker(convId, groupId, plan.goal, decision.stage.agentKey, wsId).await()
             is StageChainGate.Decision.Reject -> {
                 val json = publishDelegationRejected(groupId, plan.goal, decision.reason, plan.fromTemplate)
                 TicketOutcome("blocked", "Delegation rejected", decision.reason, json)
@@ -1136,15 +1203,16 @@ class DesktopWorkerOrchestrator(
         groupId: String?,
         plan: DelegationPlan,
         stages: List<ChainStage>,
+        wsId: String? = null,
     ): Boolean {
         if (stages.isEmpty()) return false
         if (stages.size == 1) {
-            dispatchSingleWorker(convId, groupId, plan.goal, stages[0].agentKey)
+            dispatchSingleWorker(convId, groupId, plan.goal, stages[0].agentKey, wsId)
             return true
         }
         return dispatchMultiRoleChain(
             convId, groupId, plan.goal, stages,
-            target = plan.target, module = plan.module, context = plan.context,
+            target = plan.target, module = plan.module, context = plan.context, wsId = wsId,
         )
     }
 
@@ -1564,6 +1632,7 @@ class DesktopWorkerOrchestrator(
             wsPath = repoPath,
             requestedSessionId = null,
             sessionTitle = title,
+            convId = convId,
             onArtifact = { path, name, _, _, _ ->
                 if (name == "patch.diff") protoPatch = path
                 if (name.contains("prototype") || name.endsWith(".html") || name == "patch.diff") protoCreated = true
@@ -1626,6 +1695,7 @@ class DesktopWorkerOrchestrator(
                     wsPath = repoPath,
                     requestedSessionId = null,
                     sessionTitle = title,
+                    convId = convId,
                     onArtifact = { path, name, _, _, _ -> if (name == "patch.diff") refinePatch = path },
                     onEvent = { _, _, _, _ -> },
                 )
@@ -1930,6 +2000,7 @@ class DesktopWorkerOrchestrator(
                     // 会话标题用工单标题：prompt 首行是系统前导（containment preamble），
                     // 从 prompt 截标题就会把整句英文 plumbing 摆上 divider。
                     sessionTitle = title,
+                    convId = convId,
                     onArtifact = { path, name, _, _, _ -> if (name == "patch.diff") patchPath = path },
                     onEvent = { eventType, _, summary, body ->
                         // 生命迹象：驱动事件 = 子进程输出管道来了新字节。看门狗 feed 在
@@ -2092,6 +2163,15 @@ class DesktopWorkerOrchestrator(
                 patchPath = patchPath,
             )
             groupByCard["chain-" + ticketId] = targetId
+            // 同一笔账落到磁盘（[TicketPatchLedger]）：内存表随宿主重启蒸发，
+            // 而补丁文件还在 `/tmp/tenon-ws/artifacts/…` 里 —— 真机现场就是这样
+            // 得到「重启后点合并 = cannot resolve workspace」的。
+            TicketPatchLedger.record(
+                cardId = "chain-" + ticketId,
+                convKey = targetId,
+                workspacePath = repoPath,
+                patchPath = patchPath,
+            )
         }
         // §6.3 离线 bundle：补丁随卡一起走 P2P 文件通道，手机上能真的把 diff 打开看。
         // 先发文件、后发卡 —— 卡到的时候那一行产物已经点得开了。
@@ -2254,11 +2334,16 @@ class DesktopWorkerOrchestrator(
     }
 
     /**
-     * 派单该落在哪个目录。两条判据，都是**确定性**的，都没有就返回 null 由调用方退单。
+     * 派单该落在哪个目录。三条判据，都是**确定性**的，都没有就返回 null 由调用方退单。
      *
      * 1. **群声明的默认工作区**：`virtualAgents[].defaultWsId` 对工作区表做精确 id 匹配
      *    （[RelayUiState.workspaceOfGroup]，产品语义上的"这个群绑了哪个项目"）；
-     * 2. **老装置**：工作区行的 `wsId` 就是群 id（建群时"关联本地目录"那条路径留下的形状）。
+     * 2. **老装置**：工作区行的 `wsId` 就是群 id（建群时"关联本地目录"那条路径留下的形状）；
+     * 2b. **群简介声明的目录**：建群「关联本地目录」会把绝对路径写进 `description`
+     *     （真机台账：poemread / teahouse-mobile 协同群都是）。与已宣告工作区的
+     *     `wsPath` **精确相等**才认 —— 群自己声明过的仓，不是猜。席位没声明
+     *     `defaultWsId` 的群（真机现场：teahouse 协同群的 DSH 席位）就靠这一段，
+     *     否则兜底卡的「降级为本机执行」必退单 `no git workspace bound to group`。
      *
      * 曾经还有第三段兜底「本机第一个工作区」。真机实测中出现过：同一个群连发
      * 两条派单，一条落在 `~/e2e-weather-app`、一条落在 `~/weather-relay` —— 因为
@@ -2268,17 +2353,28 @@ class DesktopWorkerOrchestrator(
      */
     fun resolveWorkspacePath(groupId: String?, wsId: String? = null): String? {
         val state = controller.state.value
-        // 1. 显式指定的 wsId（例如 1:1 对话挂接的项目指针）
+        // 0. 显式指定的 wsId（例如 1:1 对话挂接的项目指针）。未命中 ⇒ **终局退单**：
+        //    这里曾是落穿点——指针无效会掉进群绑定/单工作区推导，单工作区宿主上
+        //    一次指错的派单会静默写进那唯一的仓。显式指针只有两种结局：对的仓，或退单。
         if (wsId != null) {
             val ws = state.agentWorkspaces.values.firstOrNull { it.wsId == wsId }
             val path = ws?.wsPath?.takeIf { it.isNotBlank() }
             if (path != null && isGitRepo(path)) return path
+            return null
         }
-        // 2. 群绑定的工作区
+        // 1. 群绑定的工作区
         if (groupId != null) {
             val declared = state.workspaceOfGroup(groupId)
             val legacy = state.agentWorkspaces.values.firstOrNull { it.wsId == groupId }
             val path = (declared ?: legacy)?.wsPath?.takeIf { it.isNotBlank() }
+            if (path != null && isGitRepo(path)) return path
+        }
+        // 2b. 群简介声明过的目录（判据见 KDoc）：精确匹配本机已宣告工作区的 wsPath。
+        if (groupId != null) {
+            val desc = state.settings.groups
+                .firstOrNull { it.groupId == groupId }?.description?.takeIf { it.isNotBlank() }
+            val declared = desc?.let { d -> state.agentWorkspaces.values.firstOrNull { it.wsPath == d } }
+            val path = declared?.wsPath?.takeIf { it.isNotBlank() }
             if (path != null && isGitRepo(path)) return path
         }
         // 3. 宿主仅绑定 1 个工作区时自然推导（1:1 直连场景自动锁定）
@@ -2300,6 +2396,27 @@ class DesktopWorkerOrchestrator(
      * 那边只需要「这个群绑的是哪个仓」—— 解析判据只有这一份，不另写。
      */
     fun workspacePathForGroup(groupId: String?): String? = resolveWorkspacePath(groupId)
+
+    /**
+     * 链卡合并的**重启兜底**：哪个本地仓真的拥有 `chain/<id>` 分支。
+     *
+     * [workspacePathForGroup] 走的是「群 → 默认工作区」这条产品语义，它的两个依据
+     * （[groupByCard] 登记簿、群绑定表）在宿主重启后一个空、一个对 1:1 会话不成立 ——
+     * 于是出现了「分支就在仓里躺着，宿主却说不知道往哪合」（真机
+     * `cannot resolve workspace for chain card chain-tmw79h7vw`）。
+     *
+     * 判据换成仓库自己的 refs：链的每根棒都提交在 `chain/<id>` 上、worktree 收尾即删，
+     * 分支是唯一存世形态 ⇒ **谁有这条分支，谁就是这条链改过的仓**。候选只取本机
+     * 绑定的工作区（不扫盘），多个仓都有同名分支时返回 null 由调用方如实报受阻 ——
+     * 不猜，同 [resolveWorkspacePath] 删掉「第一个工作区」兜底的理由。
+     */
+    fun workspacePathForChainBranch(branch: String): String? {
+        val state = controller.state.value
+        val candidates = state.agentWorkspaces.values
+            .filter { it.peerId == state.selfNodeId }
+            .mapNotNull { it.wsPath?.takeIf(String::isNotBlank) }
+        return ChainWorkspaceResolve.workspaceOwning(branch, candidates)
+    }
 
     /**
      * §9 `/status` 的「在跑工单」读数：该群第一个未终局工单的标题（点将中或执行中）。

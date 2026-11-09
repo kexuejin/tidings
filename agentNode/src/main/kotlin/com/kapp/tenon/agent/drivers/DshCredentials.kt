@@ -33,6 +33,19 @@ object DshCredentials {
      *
      * 优先级：显式 env > 凭证文件。文件解析失败（无文件 / 无该条目）⇒ null。
      */
+    /**
+     * 装配门槛：有没有**任何** provider 凭证来源。出厂路由认 env 的
+     * [ENV_KEY]；用户自配路由（headless profile 的默认模型覆盖）由
+     * credentials-local 服务读同一份 `~/.dsh/.credentials.yaml`——文件在即视为有源。
+     */
+    fun hasCredentialFile(env: Map<String, String> = System.getenv(), home: String? = null): Boolean {
+        if (resolve(env, home) != null) return true
+        val homeDir = home ?: env["HOME"] ?: return false
+        if (homeDir.isBlank()) return false
+        val file = File(homeDir, CREDENTIALS_FILE)
+        return file.isFile && file.length() > 0L
+    }
+
     fun resolve(env: Map<String, String> = System.getenv(), home: String? = null): String? {
         env[ENV_KEY]?.trim()?.takeIf { it.isNotEmpty() }?.let { return it }
         val homeDir = home ?: env["HOME"] ?: return null

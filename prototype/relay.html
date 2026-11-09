@@ -202,6 +202,12 @@ button.c[aria-pressed="true"]{background:#B7E4C7;border-color:#B7E4C7;color:#1B4
    点直接压在彩色头像上，得有一圈底色把它从头像里裁出来。 */
 .av .p{position:absolute;right:0;bottom:0;width:14px;height:14px;border-radius:50%;
   box-sizing:border-box;border:2px solid var(--surface)}
+/* 插件与智能体圆角方块图标（Squircle，与真人正圆区分） */
+.plg-ico{width:38px;height:38px;border-radius:10px;flex:none;display:grid;place-items:center;
+  color:#fff;font-size:16px;font-weight:700;position:relative}
+.plg-ico svg{width:20px;height:20px}
+.plg-ico .p{position:absolute;right:-2px;bottom:-2px;width:11px;height:11px;border-radius:50%;
+  box-sizing:border-box;border:2px solid var(--surface)}
 .row .bd{flex:1;min-width:0}
 .row .t1{font-size:var(--fs-row1);font-weight:600;display:flex;align-items:center;gap:8px}
 .row .t1 .ell,.krow .t1 .ell{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
@@ -354,6 +360,15 @@ button.c[aria-pressed="true"]{background:#B7E4C7;border-color:#B7E4C7;color:#1B4
 .tag.q{background:var(--queued-c);color:var(--on-queued-c)}
 .tag.err{background:var(--error-c);color:var(--on-error-c)}
 .tag.unread{background:var(--primary);color:var(--on-primary);min-width:18px;text-align:center}
+/* 团队折叠标记：与 Compose `TeamBadge` 同款 —— 药丸即开关（整块可点），
+   运行态用药丸颜色（与 Agent 药丸用 agent 色同一招），空闲中性。
+   `.tav` 的 24/11/600 与代码的 sp.xl(24)/labelSmall(11)/SemiBold(600) 同值，
+   两端取值集合才会对上。 */
+.tag.team{cursor:pointer}
+.tag.team.run{background:var(--primary);color:var(--on-primary)}
+.trow{display:flex;align-items:center;gap:6px;padding:2px 0}
+.tav{width:24px;height:24px;border-radius:50%;background:var(--surface-2);color:var(--on-2);
+     font-size:11px;font-weight:600;display:flex;align-items:center;justify-content:center;flex:none}
 /* 待批徽标：实心红底 + 白字走 --badge/--on-badge 成对 token（:41-44 的设计决定：
    --error 当底色白字只有 4.17:1，深色下 --error 翻浅粉更不可读）。2026-10-14 曾把这里
    改成 background:var(--error);color:#fff —— 那是回归，见 docs/plans/2026-10-15-relay-prototype-review.md P0-1。 */
@@ -1278,10 +1293,11 @@ body[data-bare="1"] .win{border-radius:0;box-shadow:none}
 .rvtgt{margin-left:auto;font-size:11px;color:var(--on-2)}
 .rvstop{margin-left:auto;border:0;border-radius:8px;background:var(--error-c);color:var(--on-error-c);
   height:30px;padding:0 13px;font-size:12px;font-weight:600;cursor:pointer;flex:none}
-/* 聊天流里那条屏幕协助历史卡（ScreenHistoryCard.vue，宽度 260、viewer 用 --bubble-mine） */
-.screencard{width:260px;max-width:100%;background:var(--surface);border:1px solid var(--hair);
-  border-radius:12px;padding:9px 11px;display:flex;gap:9px;align-items:flex-start;margin-top:6px}
-.screencard.active{background:var(--bubble-mine);border-color:transparent}
+/* 聊天流里那条屏幕协助历史卡（ScreenHistoryCard，宽度 260、viewer 用 --bubble-mine）。
+   与文件卡同口径：气泡位 ⇒ --bubble-peer + --r-bubble，无描边。 */
+.screencard{width:260px;max-width:100%;background:var(--bubble-peer);border:0;
+  border-radius:var(--r-bubble);padding:9px 11px;display:flex;gap:9px;align-items:flex-start;margin-top:6px}
+.screencard.active{background:var(--bubble-mine)}
 .screencard .si{width:20px;height:20px;border-radius:6px;flex:none;display:grid;place-items:center;
   background:var(--surface-3);color:var(--on-2)}
 .screencard .si svg{width:14px;height:14px}
@@ -1313,18 +1329,24 @@ body[data-bare="1"] .win{border-radius:0;box-shadow:none}
 .bub{background:var(--bubble-peer);padding:9px 13px;border-radius:var(--r-bubble);
   box-shadow:0 1px 2px rgba(16,24,20,.03);
   font-size:var(--fs-bub);line-height:1.55;white-space:pre-wrap;word-break:break-word;border-top-left-radius:6px}
-/* 纯文件气泡：文件卡自带内边距，外面只留一圈。
+/* 纯文件气泡：文件卡自带内边距与底色，外层不再留一圈。
    white-space 必须收回 normal —— .bub 那句话是给文字气泡保换行用的（pre-wrap），
    而文件卡的 HTML 是缩进排版的，pre-wrap 会把每处缩进都变成真实空白，
-   一张本该 ~118px 高的卡会被撑到 400px。 */
-.bub.bf{padding:5px;white-space:normal}
+   一张本该 ~118px 高的卡会被撑到 400px。
+   padding 归零：文件卡现在自己就是气泡（底色在 .filecard 上），若外层再留 5px，
+   代码侧 `bubblePad = 0` 与原型就对不上，且会露出双层灰边。 */
+.bub.bf{padding:0;white-space:normal}
 .bub.bf .filecard{margin-top:0;min-width:0}
 .msg.me .bub{background:var(--bubble-mine);box-shadow:0 1px 2px rgba(16,24,20,.04);
   border-top-left-radius:var(--r-bubble);border-top-right-radius:6px}
 /* 曾经这里有 .bub.q / .bub.err / .bub.recalled 三套「按投递态给气泡染色」和下面
    .st 那一行状态行。整套删了：气泡只装话，在不在路上是会话顶那句横幅的事。 */
-.filecard{display:flex;gap:10px;align-items:center;padding:9px 10px;background:var(--surface);
-  border:1px solid var(--hair);border-radius:12px;margin-top:6px;min-width:196px;white-space:normal}
+/* 文件卡 = 气泡位：底色 --bubble-peer、圆角 --r-bubble，不画描边。发丝边曾在这里
+   单独活过一轮，与上面「气泡去边框」的裁决冲突 —— 同一屏里文件卡带边、文字气泡不带。 */
+.filecard{display:flex;gap:10px;align-items:center;padding:9px 10px;background:var(--bubble-peer);
+  border:0;border-radius:var(--r-bubble);margin-top:6px;min-width:196px;white-space:normal}
+/* 自己发的文件卡跟己方气泡同底（--bubble-mine），否则同一侧出现两种底色。 */
+.msg.me .filecard{background:var(--bubble-mine)}
 .win .filecard{min-width:210px}
 .filecard .fi{width:34px;height:34px;border-radius:9px;background:var(--primary-c);color:var(--on-primary-c);
   display:grid;place-items:center;flex:none;overflow:hidden}
@@ -2055,7 +2077,18 @@ const GROUPS = [
    creatorId:NID.ka, creatorIp:'192.168.1.31',
    members:[ME.nodeId, NID.ka, NID.lin, NID.huang, NID.build],
    description:'发版窗口、灰度、回滚都在这里说。',
-   announce:'本周五 14:00 冻结代码。'},
+   announce:'本周五 14:00 冻结代码。',
+   /* 团队折叠（Team Folder）：一个群可以挂多个团队，团队对外只有一个 @ token（leader 的 name），
+      组员只在展开态出现、不进群成员表 —— 与 `GroupMeta.VirtualAgentMember` 的口径一致：
+      `agentId` / `hostNodeId` / `name` / `entityType` / `teamMembers`，**没有 pluginId**。 */
+   virtualAgents:[
+     {agentId:'dsh-9f3c21ab', hostNodeId:NID.build, name:'devops-swarm', entityType:'team', running:true,
+      teamMembers:[
+        {agentId:'dsh-coder-01',  name:'coder',    role:'编码'},
+        {agentId:'dsh-review-02', name:'reviewer', role:'审查'},
+        {agentId:'dsh-test-03',   name:'tester',   role:'验收'},
+      ]},
+   ]},
 ];
 const groupOf = gid => GROUPS.find(g => g.groupId === gid);
 const memberOnlineCount = g => g ? g.members.filter(m => m !== ME.nodeId && peerOf(m)?.online).length : 0;
@@ -2072,9 +2105,11 @@ const memberOnlineCount = g => g ? g.members.filter(m => m !== ME.nodeId && peer
    它上面还压着一条 11 小时前的 Lin。这是"排序键只看在线和时间"的直接后果，
    也是提案那一屏要拿来对照的那一对行。 */
 const CONVS = [
-  {convId:'group:pub', title:'项目研发 · 发布值班', isGroup:true, ts:112,
-   preview:'insets 截图已贴',
-   at:'13:08', unread:0, pendingCount:0},
+  /* ts:1 —— 团队刚派完一轮活，所以它排在最前。这不是为了让截图好看：
+     挂了团队的群在真机上本来就该因为"刚有活动"浮到顶部，否则用户永远看不到那枚标记。 */
+  {convId:'group:pub', title:'项目研发 · 发布值班', isGroup:true, ts:1,
+   preview:'@devops-swarm 已派单：insets 截图',
+   at:'14:58', unread:2, pendingCount:0},
   {convId:NID.ka,    title:'老周', isAgent:false, online:true, ts:29,
    preview:'那边周五要验收麻烦你把端口留出来', at:'14:31', unread:2, pendingCount:0},
   {convId:NID.agent, title:'teahouse-mobile', isAgent:true, online:true, ts:8,
@@ -2808,6 +2843,15 @@ const sw   = (on, dis) => `<button class="sw" aria-checked="${on}"${dis?' disabl
 const srow = (title, sub, ctl, dis) =>
   `<div class="krow${dis?' dis':''}"${dis?' style="cursor:default"':''}>
      <div class="bd"><div class="t1">${title}</div>${sub?`<div class="t2">${sub}</div>`:''}</div>${ctl||''}</div>`;
+const plgIco = (bg, iconName, dotTone, letter) => {
+  const p = dotTone ? `<span class="p" style="background:${dotTone}"></span>` : '';
+  const body = iconName ? ic(iconName) : `<span style="font-size:16px;font-weight:700">${letter}</span>`;
+  return `<div class="plg-ico" style="background:${bg}">${body}${p}</div>`;
+};
+const plgRow = (ico, title, sub, ctl, dis) =>
+  `<div class="krow${dis?' dis':''}"${dis?' style="cursor:default"':''}>
+     ${ico}
+     <div class="bd"><div class="t1">${title}</div>${sub?`<div class="t2">${sub}</div>`:''}</div>${ctl||''}</div>`;
 
 /* 会话行的两套写法：移动端是 .row，桌面端左栏是 .li。内容一致，只有壳不同。
 
@@ -2818,8 +2862,21 @@ const srow = (title, sub, ctl, dis) =>
    `onSurfaceVariant`，所以时间与待发共用 `.tm`、未读是那颗实心徽标。
    待发原来漏了 —— 而「消息」那一屏的注解自己写着行里带"2 条排队"（见 `screenHomeRecent`），
    注解承诺、行里没画，这一轮补齐（`pendingCount` 本来就在 `CONVS` 上）。 */
-function convRow(c){
+function convRow(c, teamOpen){
   const g = c.isGroup ? groupOf(c.convId.slice(6)) : null;
+  /* 团队折叠标记：复用既有 `.tag` / `.tm`，**不引入任何新字号/间距/圆角取值** ——
+     量具比的是取值集合，新写一条 CSS 就会给这一屏添新的"只原型"值。 */
+  const team = g && g.virtualAgents && g.virtualAgents[0];
+  /* 药丸即开关：点它折叠/展开（stopPropagation 防止触发行本身的进会话）。
+     运行态用颜色（.run），空闲中性 —— 与 Compose `TeamBadge` 同一裁决。
+     `.tav` 的 24/11/600 与代码的 sp.xl(24)/labelSmall(11)/SemiBold(600) 同值，两端取值集合才对得上。 */
+  const teamPill = team
+    ? `<span class="tag team${team.running?' run':''}" onclick="event.stopPropagation();go('${teamOpen?'m-home-recent':'m-home-team-folder-open'}')">${teamOpen?'\u25be':'\u25b8'} \u56e2\u961f ${team.teamMembers.length}</span>`
+    : '';
+  const teamLines = (team && teamOpen)
+    ? `<div class="tm">@${team.name} \u00b7 ${team.teamMembers.length} \u4e2a\u6210\u5458</div>`
+      + team.teamMembers.map(m=>`<div class="trow"><span class="tav">${m.name.slice(0,1)}</span><span class="tm">${m.name}</span><span class="tm">${m.role}</span></div>`).join('')
+    : '';
   const p = c.isGroup ? null : peerOf(c.convId);
   const av = g
     ? `<div class="av" style="background:#4A7C59">群</div>`
@@ -2829,9 +2886,10 @@ function convRow(c){
     ${av}
     <div class="bd">
       <div class="t1"><span class="ell">${c.title}</span>
-        ${c.isAgent?'<span class="tag agent">Agent</span>':''}</div>
+        ${c.isAgent?'<span class="tag agent">Agent</span>':''}${teamPill}</div>
       <div class="t2">${c.preview||'还没聊过，打个招呼'}</div>
       ${g?`<div class="tgroup">${memberOnlineCount(g)}/${g.members.length} 人在线</div>`:''}
+      ${teamLines}
     </div>
     <div class="rt"><span class="tm">${c.at}</span>
       ${c.unread?`<span class="tag unread">${c.unread}</span>`:''}
@@ -3194,6 +3252,7 @@ const SCREENS = [
   {id:'m-home-recent',    form:'mobile',  label:'消息',              tab:'conversations'},
   {id:'m-home-more',      form:'mobile',  label:'消息·更多菜单',     tab:'conversations'},
   {id:'m-home-unread',    form:'mobile',  label:'消息·按未读过滤',   tab:'conversations'},
+  {id:'m-home-team-folder-open', form:'mobile', label:'消息·团队折叠（展开）', tab:'conversations'},
   {id:'m-gsearch',        form:'mobile',  label:'消息·全局搜索',     tab:'conversations'},
   {id:'m-gsearch-empty',  form:'mobile',  label:'消息·全局搜索·空态', tab:'conversations'},
   {id:'m-sendfolder',     form:'mobile',  label:'发文件夹',          tab:'conversations'},
@@ -3241,6 +3300,7 @@ const SCREENS = [
   {id:'m-set-notify',     form:'mobile',  label:'设置·通知',       tab:'settings'},
   {id:'m-set-appear',     form:'mobile',  label:'设置·外观',       tab:'settings'},
   {id:'m-set-caps',       form:'mobile',  label:'设置·能力声明',   tab:'settings'},
+  {id:'m-set-plugins',    form:'mobile',  label:'设置·插件管理',   tab:'settings'},
   {id:'m-set-data',       form:'mobile',  label:'设置·数据与存储', tab:'settings'},
   {id:'m-set-diag',       form:'mobile',  label:'设置·诊断',       tab:'settings'},
   {id:'m-insets',         form:'mobile',  label:'适配对照',        tab:'conversations'},
@@ -3274,6 +3334,7 @@ const SCREENS = [
   {id:'d-sharescreen',    form:'desktop', label:'同意并选屏（被看方）'},
   {id:'d-viewscreen',     form:'desktop', label:'观看屏幕（查看方）'},
   {id:'d-settings',       form:'desktop', label:'设置窗·身份与连接'},
+  {id:'d-settings-plugins',form:'desktop', label:'设置窗·插件管理'},
   {id:'d-settings-data',  form:'desktop', label:'设置窗·数据与存储'},
   {id:'d-settings-desk',  form:'desktop', label:'设置窗·桌面'},
   {id:'d-settings-ime',   form:'desktop', label:'设置窗·输入法自检'},
@@ -3930,7 +3991,7 @@ const msgsOf = list => list.map(msg).join('');
     全部在首屏。那条框让出来的是 **46px**（框本体 36px + 它底下那条 10px 外边距），
     262 → 216。**别把回收算成 54px**：框与第一行之间那 8px 是 `.rows`
     自己的上边距，不随谁走 —— 这一条上一次就差点写错，实测才发现。 */
-function screenHomeRecent(filter = 'all'){
+function screenHomeRecent(filter = 'all', teamOpen = false){
   const pending = CONVS.reduce((n,c)=>n+c.pendingCount,0);
   const feed = homeFeed(filter);
   const totalWs = inboxWsCount();
@@ -3942,7 +4003,7 @@ function screenHomeRecent(filter = 'all'){
     ${pending?`<div class="banner info" style="margin:0 0 16px">有 ${pending} 条消息还在等对方上线，会自动补发。</div>`:''}
     ${fchips(filter)}
     <div class="rows">
-      ${feed.map(item => item.kind === 'conv' ? convRow(item.data) : inboxWsFeedRow(item.data)).join('')}
+      ${feed.map(item => item.kind === 'conv' ? convRow(item.data, teamOpen) : inboxWsFeedRow(item.data)).join('')}
     </div>
     <div class="annot" style="margin:12px 0 0">
       <b>【混排时间流】工作区与普通会话在同一个列表混排展示。</b>
@@ -3959,6 +4020,12 @@ function screenHomeRecent(filter = 'all'){
    混排一去，「群聊那一节」就不存在了，建群也就没有了"所属的那一节"可贴，
    它必然要换一个家，而页面级动作的天然归属就是顶栏的更多菜单。
    这正是用户那两条直觉的连结点：**不混排，就没法把建群挪到右上角**。 */
+/* 消息·团队折叠（展开态）：与 `m-home-recent` 同一份列表，只是把团队那一行的成员展开。
+   折叠态不需要单独一屏 —— 它就是首页本身（群挂了团队就会看到标记）。
+   这一屏要能一眼看出三件事：会话行**还在**（预览/时间/未读都在）、标记变成 `−`、
+   成员行是缩进的追加内容而不是另一条会话。 */
+function screenHomeTeamFolderOpen(){ return screenHomeRecent('all', true); }
+
 function screenHomeMore(){
   return `${screenHomeRecent('all')}
   <div class="menu" style="top:calc(var(--status) + 56px);right:12px;min-width:190px">
@@ -5494,6 +5561,7 @@ function screenSettingsHome(){
     <div class="setlist">
       ${setEntry('moon','外观','主题','浅色','m-set-appear')}
       ${setEntry('shield','能力声明','对端可见','tw1 · mrec1','m-set-caps')}
+      ${setEntry('grid','插件管理','扩展与智能体','已启用 5 / 已安装 6','m-set-plugins')}
     </div>
 
     <div class="grphead">数据与诊断</div>
@@ -5741,6 +5809,35 @@ function screenSetCaps(){
   </div></div>`;
 }
 
+/* 二级·插件管理。 */
+function screenSetPlugins(){
+  return `${topbar('插件管理','已安装 6 个 · 5 个运行中',[{icon:'plus', label:'安装'}],'m-settings','set')}
+  <div class="scroll"><div class="pad set">
+    <div class="grphead" style="padding-top:0">内置智能体席位 (CLI 驱动)</div>
+    <div class="card">
+      <h3>${ic('bot')} 官方席位<span class="r">底座托管</span></h3>
+      ${plgRow(plgIco('#D97706','terminal','var(--online)'),'Claude Code <span class="tag ok">v1.0.0</span>','端到端架构重构与编码 · <span class="mono">claude</span> · 状态: <span class="tag ok">在线</span>', sw(true))}
+      ${plgRow(plgIco('#1E40AF','bot','var(--online)'),'DeepSeek Harness (dsh) <span class="tag ok">v1.0.0</span>','单测对账与逻辑排雷 · <span class="mono">dsh</span> · 状态: <span class="tag ok">在线</span>', sw(true))}
+      ${plgRow(plgIco('#059669','terminal','var(--online)'),'Codex CLI <span class="tag ok">v1.0.0</span>','代码编写与流水线作业 · <span class="mono">codex</span> · 状态: <span class="tag ok">在线</span>', sw(true))}
+      ${plgRow(plgIco('#4F46E5','shield','var(--online)'),'Antigravity CLI <span class="tag ok">v1.0.0</span>','多智能体自愈巡检 · <span class="mono">agy</span> · 状态: <span class="tag ok">在线</span>', sw(true))}
+      ${plgRow(plgIco('#EA580C','terminal','var(--online)'),'OpenCode CLI <span class="tag ok">v1.0.0</span>','开源模型终端助手 · <span class="mono">opencode</span> · 状态: <span class="tag ok">在线</span>', sw(true))}
+      ${plgRow(plgIco('#64748B','bot','var(--on-2)'),'Echo Mock Agent <span class="tag">v1.0.0</span>','离线回路测试桩 · <span class="mono">echo</span> · 状态: <span class="tag">已停用</span>', sw(false))}
+    </div>
+
+    <div class="grphead">第三方扩展与 MCP 服务</div>
+    <div class="card">
+      <h3>${ic('grid')} 扩展插件<span class="r">独立沙箱</span></h3>
+      ${plgRow(plgIco('#0284C7',null,'var(--online)','邮'),'智能邮件助手 <span class="tag ok">v2.0.0</span>','定时晨报与紧急邮件 Inbound · 进程外 stdio · <span class="tag ok">运行中</span>', sw(true))}
+      <div class="padc" style="padding-top:0;display:flex;gap:8px;justify-content:flex-end">
+        <button class="btn sm">${ic('gear')} 偏好设置</button>
+        <button class="btn sm danger">${ic('trash')} 卸载</button>
+      </div>
+    </div>
+
+    <div class="hint" style="padding:0 4px">内置 CLI 席位由宿主统一派单拉起，第三方插件在独立沙箱中运行并实施硬超时熔断。</div>
+  </div></div>`;
+}
+
 /* 二级·数据与存储。 */
 function screenSetData(){
   return `${topbar('数据与存储','占用、残片与保留策略','','m-settings','set')}
@@ -5849,6 +5946,7 @@ function screenInsets(){
 
 const SCREENFN = {
   'm-home-recent':screenHomeRecent, 'm-home-more':screenHomeMore,
+  'm-home-team-folder-open':screenHomeTeamFolderOpen,
   'm-home-unread':screenHomeUnread,
   'm-gsearch':() => screenGSearch('协议'), 'm-gsearch-empty':() => screenGSearch('捎话', true),
   'm-chat':screenChat, 'm-chat-more':screenChatMore, 'm-chat-solo':() => screenChat(true),
@@ -5864,7 +5962,7 @@ const SCREENFN = {
   'm-set-profile':screenSetProfile, 'm-set-avatar':screenSetAvatar,
   'm-set-conn':screenSetConn,
   'm-set-notify':screenSetNotify, 'm-set-appear':screenSetAppear,
-  'm-set-caps':screenSetCaps, 'm-set-data':screenSetData, 'm-set-diag':screenSetDiag,
+  'm-set-caps':screenSetCaps, 'm-set-plugins':screenSetPlugins, 'm-set-data':screenSetData, 'm-set-diag':screenSetDiag,
   'm-insets':screenInsets,
   'm-cabinet':screenCabinetMine, 'm-cabinet-peer':screenCabinetPeer,
   'm-sendfolder':screenSendFolder, 'm-folderin':screenFolderIn,
@@ -7173,7 +7271,8 @@ const DSET_GROUPS = [
     {id:'notify', icon:'bell', title:'通知'}]},
   {head:'外观与能力', entries:[
     {id:'appear', icon:'moon',   title:'外观'},
-    {id:'caps',   icon:'shield', title:'能力声明'}]},
+    {id:'caps',   icon:'shield', title:'能力声明'},
+    {id:'plugins',icon:'grid',   title:'插件管理', to:'d-settings-plugins'}]},
   {head:'数据与诊断', entries:[
     {id:'data', icon:'folder', title:'数据与存储', to:'d-settings-data'},
     {id:'diag', icon:'info',   title:'诊断'}]},
@@ -7207,7 +7306,7 @@ function dsetPage(sel, body){
    `desktopApp/.../DesktopWindow.kt:478-495`（`DesktopSettingsWindow`，标题就写「捎话 设置」），
    720×560 那对数字在 `ui/desktop/DesktopLayout.kt:128-129`。 */
 function setTitlebar(){
-  return `<div class="titlebar">${traffic()}<span class="wtitle">捎话 设置</span></div>`;
+  return `<div class="titlebar">${traffic()}<span class="wtitle">榫卯 设置</span></div>`;
 }
 
 function screenDSettings(){
@@ -7251,12 +7350,38 @@ function screenDSettings(){
       <span class="mono">m-set-conn</span> 等五屏），所以不重复画第二遍。
       可点的四行 —— 身份与连接 / 数据与存储 / 桌面 / 输入法自检 —— 各有各的详情页。</div>`);
 }
+function screenDSettingsPlugins(){
+  return setTitlebar() + dsetPage('plugins', `
+    <div class="grphead" style="padding-top:0;display:flex;justify-content:space-between;align-items:center">
+      <span>插件管理</span>
+      <button class="btn sm pri">${ic('plus')} 安装插件包</button>
+    </div>
+    <div class="hint" style="margin:0 0 10px">集中管理已安装的智能体驱动与扩展生态。外部插件以独立沙箱运行，崩溃不影响主应用。</div>
+    <div class="card">
+      <h3>${ic('bot')} 内置智能体席位 (6)</h3>
+      ${plgRow(plgIco('#D97706','terminal','var(--online)'),'Claude Code <span class="tag ok">v1.0.0</span>','架构设计与端到端重构 · <span class="mono">claude</span> · 状态: <span class="tag ok">在线 (8788)</span>', sw(true))}
+      ${plgRow(plgIco('#1E40AF','bot','var(--online)'),'DeepSeek Harness <span class="tag ok">v1.0.0</span>','逻辑对账与单测审查 · <span class="mono">dsh</span> · 状态: <span class="tag ok">在线</span>', sw(true))}
+      ${plgRow(plgIco('#059669','terminal','var(--online)'),'Codex CLI <span class="tag ok">v1.0.0</span>','代码生成与流水线实现 · <span class="mono">codex</span> · 状态: <span class="tag ok">在线</span>', sw(true))}
+      ${plgRow(plgIco('#4F46E5','shield','var(--online)'),'Antigravity CLI <span class="tag ok">v1.0.0</span>','工程巡检与跨机编排 · <span class="mono">agy</span> · 状态: <span class="tag ok">在线</span>', sw(true))}
+      ${plgRow(plgIco('#EA580C','terminal','var(--online)'),'OpenCode CLI <span class="tag ok">v1.0.0</span>','开源模型执行体 · <span class="mono">opencode</span> · 状态: <span class="tag ok">在线</span>', sw(true))}
+      ${plgRow(plgIco('#64748B','bot','var(--on-2)'),'Echo Mock Agent <span class="tag">v1.0.0</span>','离线测试回显驱动 · <span class="mono">echo</span> · 状态: <span class="tag">已停用</span>', sw(false))}
+    </div>
+    <div class="card" style="margin-top:12px">
+      <h3>${ic('grid')} 第三方扩展插件 (1)</h3>
+      ${plgRow(plgIco('#0284C7',null,'var(--online)','邮'),'智能邮件协同套件 <span class="tag ok">v2.0.0</span>','定时晨报 + 紧急邮件 Webhook · 进程外 stdio · <span class="tag ok">运行中</span>', sw(true))}
+      <div class="padc" style="display:flex;gap:8px;justify-content:flex-end">
+        <button class="btn sm">${ic('gear')} 偏好设置</button>
+        <button class="btn sm danger">${ic('trash')} 卸载插件</button>
+      </div>
+    </div>
+    <div class="annot" style="margin:12px 0 0">数据源直连控制面 <span class="mono">GET /v1/plugin/states</span>，启停直调 <span class="mono">POST /v1/plugin/toggle</span>。</div>`);
+}
 function screenDSettingsData(){
   return setTitlebar() + dsetPage('data', `
     <div class="grphead" style="padding-top:0">数据与存储</div>
     <div class="card"><div class="padc">
       <div class="kv" style="padding:5px 0"><span class="k">数据目录</span>
-        <span class="v path">~/Library/Application Support/捎话</span></div>
+        <span class="v path">~/Library/Application Support/Tenon</span></div>
       <div class="kv" style="padding:5px 0"><span class="k">占用</span>
         <span class="v">86.2 MB · 其中缓存 12.0 MB</span></div>
       <div class="hint" style="margin-top:6px">「更改目录 / 打开目录」是桌面独有的一条出口
@@ -7432,7 +7557,7 @@ const SCREENFN_D = {
   'd-cabinet':screenDCabinet,
   'd-empty':screenDEmpty, 'd-nosel':screenDNoSel, 'd-filesempty':screenDFilesEmpty,
   'd-nomatch':screenDNoMatch,
-  'd-settings':screenDSettings, 'd-settings-data':screenDSettingsData,
+  'd-settings':screenDSettings, 'd-settings-plugins':screenDSettingsPlugins, 'd-settings-data':screenDSettingsData,
   'd-settings-desk':screenDSettingsDesk,
   'd-settings-ime':screenDSettingsIme,
   'd-tray':screenDTray, 'd-drop':screenDDrop, 'd-emoji':screenDEmoji,

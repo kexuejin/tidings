@@ -76,7 +76,7 @@ object OpenCodeConfig {
             return explicit.takeIf { File(it).isFile }
         }
         val baseUrl = env["OPENCODE_BASE_URL"]?.trim()?.takeIf { it.isNotEmpty() } ?: return null
-        val model = env[ENV_MODEL]?.trim()?.takeIf { it.isNotEmpty() }
+        val model = env[ENV_MODEL]?.trim()?.takeIf { it.isNotEmpty() } ?: probeHostModel(env)
         val text = render(baseUrl = baseUrl, model = model)
 
         val target = File(dir ?: File(System.getProperty("java.io.tmpdir"), "tenon-opencode"), "opencode.json")
@@ -116,4 +116,20 @@ object OpenCodeConfig {
 
     private fun quote(raw: String): String =
         "\"" + raw.replace("\\", "\\\\").replace("\"", "\\\"") + "\""
+
+    /**
+     * 宿主已有配置里的模型探测：当没有显式设置 [ENV_MODEL] 时，优先复用宿主机
+     * `~/.config/opencode/opencode.json` 中已配通的模型（如 `openai/mimo-v2.6-flash`），
+     * 避免生成缺少 `model` 的空指针配置导致 opencode 退化为默认免费模型报错。
+     */
+    internal fun probeHostModel(env: Map<String, String> = System.getenv()): String? {
+        val home = env["HOME"]?.takeIf { it.isNotBlank() } ?: System.getProperty("user.home") ?: return null
+        val configFile = File(home, ".config/opencode/opencode.json")
+        if (!configFile.isFile) return null
+        return runCatching {
+            val text = configFile.readText()
+            val match = Regex("\"model\"\\s*:\\s*\"([^\"]+)\"").find(text)
+            match?.groupValues?.get(1)?.trim()?.takeIf { it.isNotEmpty() }
+        }.getOrNull()
+    }
 }

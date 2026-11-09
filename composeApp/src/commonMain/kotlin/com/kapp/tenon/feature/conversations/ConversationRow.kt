@@ -13,6 +13,7 @@ import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.RowScope
 import androidx.compose.foundation.layout.defaultMinSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
@@ -314,6 +315,15 @@ internal fun ConversationRow(
      */
     dense: Boolean = false,
     /**
+     * 标题行尾部的**可选插槽**（目前唯一使用者：团队折叠标记）。
+     *
+     * 为什么用插槽而不是在这里判断"这是不是团队会话"：会话行不该知道团队这回事 ——
+     * 它只负责画一个会话。团队标记（状态点 + 折叠符号）由调用方提供，会话行只给它一块
+     * 位置（标题、KindBadge、置顶 tag 之后，右列的"时间/未读"之前）。
+     * null = 什么都不画 ⇒ 现有全部调用点零变化。
+     */
+    teamSlot: (@Composable RowScope.() -> Unit)? = null,
+    /**
      * 这个会话的草稿预览（**已经拼好、带「草稿」标记**的最终文案）；null = 没有草稿。
      *
      * 为什么由调用方给而不是在这里查：草稿表活在**壳**里（手机 App.kt、桌面 DesktopShell），
@@ -505,13 +515,21 @@ internal fun ConversationRow(
                     overflow = TextOverflow.Ellipsis,
                     modifier = Modifier.weight(1f, fill = false),
                 )
-                KindBadge(row.isAgent)
+                // 群**不画**这枚 tag：原型 `convRow` 只给 agent 会话挂 `tag agent`，群与人类都不挂
+                // （`prototype/relay.html` 的 `${c.isAgent?'<span class="tag agent">Agent</span>':''}`）。
+                // 以前无条件调用，`isAgent=false` 就落到"同事"分支 —— 于是群会话被标成「同事」，
+                // 而群既不是 Agent 也不是一个人。与团队折叠同屏时更会被读成"这个团队是同事"。
+                if (!row.isGroup) {
+                    KindBadge(row.isAgent)
+                }
                 // 置顶/静音过去只在长按菜单里可见，行上没有任何痕迹 —— 用户钉完一条，
                 // 过两天忘了它为什么一直排在最上面。置顶给一枚行内 tag（位置在标题之后，
                 // 不占右列的"时间/未读"格）；静音不挂 tag，它改的是下面预览那一行的分量。
                 if (row.isPinned) {
                     PinnedTag()
                 }
+                // 团队标记挂在标题行尾部：不与右列的"时间/未读"抢位置，也不影响标题截断。
+                teamSlot?.invoke(this)
             }
             // 「我说的」加前缀：否则用户在列表里看到一句熟悉的话，分不清是哪边说的。
             // 前缀只加在**真有消息**那一档；「还没聊过」那句不是消息，加前缀会说反。

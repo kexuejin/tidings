@@ -155,12 +155,18 @@ def tool_fetch_capabilities(_args: dict) -> dict:
 
 
 def tool_request_approval(args: dict) -> dict:
-    ok, payload = call("POST", "/v1/agent/hook/approval", {
+    approval_payload = {
         "conversationId": args.get("conversationId", ""),
         "tool": args.get("tool"),
         "summary": args.get("summary"),
         "timeoutMs": min(max(int(args.get("timeoutMs", 60000)), 1000), 180000),
-    })
+    }
+    # 宿主派单注入的 Tenon sessionId（提案 §9 阶段三对齐键）：有就透传，
+    # 审批卡归到派单会话；独立跑没有这个 env，宿主回退合成池键（旧行为）。
+    hook_session = (os.environ.get("TENON_HOOK_SESSION_ID") or "").strip()
+    if hook_session:
+        approval_payload["sessionId"] = hook_session
+    ok, payload = call("POST", "/v1/agent/hook/approval", approval_payload)
     if not ok:
         # fail-closed：审批面不可达 = 拒绝，绝不把"联系不上"读成"默认同意"。
         return {"content": [{"type": "text", "text": json.dumps({"decision": "deny", "reason": "host unreachable (fail-closed)"}, ensure_ascii=False)}]}

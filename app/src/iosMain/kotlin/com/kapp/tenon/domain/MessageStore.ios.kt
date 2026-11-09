@@ -154,3 +154,18 @@ actual fun createAgentStore(platform: AppPlatform): AgentStore {
     val driver = com.kapp.tenon.db.createDatabaseDriver(platform)
     return SqlDelightAgentStore(driver)
 }
+
+/**
+ * iOS 的 [SchedulerStore]。
+ *
+ * 这段 actual 曾经缺席：`expect` 声明在 `commonMain`，而 `jvmMain` / `androidMain`
+ * 都补了实现，唯独 `iosMain` 没有 —— `:app:compileKotlinIosSimulatorArm64` 会报
+ * "no actual declaration"，而 CI 从不编 iOS，所以一直没人发现。三端的实现是同一条
+ * 路径：`createDatabaseDriver(platform)` 开同一个库，包成 `RelayDatabase` 再交给
+ * `SqlDelightSchedulerStore`；调度台账因此与聊天记录、Agent 状态共用一个 SQLite 文件，
+ * 迁移由 `RelayDatabase.sq` / `21.sqm` 统一管，不需要为 iOS 单独建表。
+ */
+actual fun createSchedulerStore(platform: AppPlatform): SchedulerStore {
+    val driver = com.kapp.tenon.db.createDatabaseDriver(platform)
+    return SqlDelightSchedulerStore(RelayDatabase(driver))
+}

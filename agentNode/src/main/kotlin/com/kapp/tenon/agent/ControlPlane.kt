@@ -149,6 +149,14 @@ class ControlPlane(
     val pluginTokenGate: PluginTokenGate = PluginTokenGate.fromEnvironment(),
     val sourceWebhooks: SourceWebhookRegistry = SourceWebhookRegistry(),
     /**
+     * 触发器回投会话的存在性校验器（提案 §5.2，宿主级事实）。
+     *
+     * desktopApp/DesktopExtension 装配域层后接上（本机 conversations 判定）；
+     * null = 未接线 ⇒ 含 `triggers` 且带 `targetConvId` 的清单**拒绝注册**
+     * （fail-closed：收下无法验证的回投目标等于把结果卡投进一个没人看见的会话）。
+     */
+    var triggerTargetConvKnown: ((convId: String) -> Boolean)? = null,
+    /**
      * 跨端派单的宿主侧委托（M4）。见 [AgentInvokeDispatcher] 的 KDoc：
      * desktopApp 装配域层后接上；agentNode 单进程保持 null ⇒ 503。
      */
@@ -193,6 +201,23 @@ class ControlPlane(
      * 与台账（AgentSessionRegistry）同生命周期、同量级。
      */
     internal val pluginEventCursors = java.util.concurrent.ConcurrentHashMap<String, java.util.concurrent.atomic.AtomicLong>()
+
+    /**
+     * 只读通道的**执行前**工具白名单（sessionId → 判据），提案 §7.1 第 3 条约束。
+     *
+     * 判据由派单侧（`:orchestration` 的 `TriggerExecutor`）以纯函数传进来 —— 白名单
+     * 本体在 `:app` 的 `CognitiveFlow`，`:agentNode` 不依赖它。见 [ReadOnlyToolPolicy]。
+     *
+     * 为什么要执行前的判据：`tool.started` 事件是「已经开始执行」的通知，不是「请求
+     * 批准」。只靠事件判定，越界的那个调用**已经落地**了，能做的只有事后判负。装了
+     * hook 的 CLI 会先 POST `/v1/agent/hook/approval`，那条路径才有机会拒绝 ——
+     * 判据就挂在这里，由 `ControlPlaneHookRoutes` 的审批路由读。
+     *
+     * 生命周期严格跟着一次派单：`executeCliTask` 起进程**之前**登记、`finally` 里清掉。
+     * 不清就会把「只读」泄漏给同 id 的下一次任务。
+     */
+    internal val readOnlyToolPolicies =
+        java.util.concurrent.ConcurrentHashMap<String, ReadOnlyToolPolicy>()
 
     init {
         // 审批回执的**授权门禁**（fail-closed）：宿主在这里自己装判据，而不是相信客户端。
@@ -333,6 +358,7 @@ class ControlPlane(
 
     fun stop() {
         plugins.stopMonitoring()
+        sourceWebhooks.dispose()
         server?.stop(0)
         server = null
     }

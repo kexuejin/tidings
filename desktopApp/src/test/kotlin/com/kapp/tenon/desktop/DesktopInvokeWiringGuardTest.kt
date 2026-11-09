@@ -5,6 +5,7 @@ package com.kapp.tenon.desktop
 import com.kapp.tenon.testsupport.GuardSourceScan
 import kotlin.test.Test
 import kotlin.test.assertEquals
+import kotlin.test.assertFalse
 import kotlin.test.assertTrue
 
 /**
@@ -140,8 +141,18 @@ class DesktopInvokeWiringGuardTest {
         // 真机 `@agent` 帧全走 invoke，直调会让工单卡/原型立项/追问唤醒/自愈退单
         // 在真机路径上整段消失 —— 「单测全绿、现场不存在」的旧形状。
         assertTrue(
-            source.contains("created.resolveCliDriver(request.agentId) != null"),
-            "CLI 驱动回退没接 —— @antigravity 派单永远 no-plugin（E2E 幕 2 起全黑）",
+            source.contains("created.resolveCliDriver(cliKey) != null") &&
+                source.contains("val cliKey = AgentProfiles.resolveKey("),
+            "CLI 驱动回退没接，或群里点名的席位 ID 没归位到档案键 —— " +
+                "resolveCliDriver 拿到 dsh-a030882e 恒 null，真机派单落 NO_PLUGIN",
+        )
+        assertTrue(
+            source.contains("agentKey = cliKey"),
+            "CLI 派单传给编排器的键必须与 resolveCliDriver 的判据同源",
+        )
+        assertFalse(
+            source.contains("created.resolveCliDriver(request.agentId)"),
+            "不许把未归位的席位 ID 再喂给驱动注册表",
         )
         assertTrue(
             source.contains("workerOrchestrator.handlePromptAwait("),
@@ -175,6 +186,56 @@ class DesktopInvokeWiringGuardTest {
         assertTrue(source.contains("controller.invokeExecPolicyOf = "), "每 agent 执行范围桥必须装上（§6.3）")
         assertTrue(source.contains("controller.invokeRecordGrantRequest = "), "未授权申请桥必须装上（面板要能冒出待批项）")
         assertTrue(source.contains("controller.onHostCardAction = "), "宿主侧卡片动作出口必须装上（§7.3-2 的插件转发段）")
+    }
+
+    @Test
+    fun chainCardMergeSurvivesAHostRestart() {
+        // D6 现场（2026-11-08 真机）：宿主重启后点旧工单卡的「合并此补丁」得到
+        // `patch merge FAILED … cannot resolve workspace for chain card chain-tmw79h7vw`
+        // —— 仓里 `chain/<id>` 分支好端端躺着，宿主却说不知道往哪合。两个成因都不是
+        // 「没接线」，而是**判据只相信内存**：
+        //   a) 工作区来自 `groupForCard`（发卡那一刻的登记簿，重启即空）；
+        //   b) 会话键过了 `ConvId.groupIdOf(peerId)`，对 1:1 恒 null ——
+        //      于是翻面卡/受阻卡也发不出去（`merged card has no group to publish to`）。
+        // 修法是把判据换到磁盘上（仓库自己的 refs）与会话键本身。这两条都是
+        // 「不接就静默坏掉」的类型：编译绿、单跑绿，只有重启后点一下才现形。
+        val source = live()
+        assertTrue(
+            source.contains("ChainWorkspaceResolve.workspaceOwning("),
+            "链卡工作区没有落到「谁拥有 chain/<id> 分支」这条磁盘判据上 —— 重启后合并必失败",
+        )
+        assertTrue(
+            source.contains("?: tickets()?.workspacePathForChainBranch(branch)"),
+            "分支反查没挂在合并分支的兜底位（定义而不调用 = 什么都没修）",
+        )
+        assertTrue(
+            source.contains("val chainConv = tickets()?.groupForCard(cardId) ?: actionRow?.peerId"),
+            "链卡的会话键没退回卡片行 peerId —— 宿主重启后 1:1 链卡连会话都认不出来",
+        )
+        // 翻面 / 受阻两条路都必须用会话键本身，不能过 `groupIdOf`（1:1 会被折成 null）。
+        assertTrue(
+            source.contains("val appliedGroupId = tickets()?.groupForCard(cardId) ?: actionRow?.peerId"),
+            "合并成功的翻面卡没有 1:1 退路 —— 私聊里合并成功，卡面却停在「待合并」",
+        )
+        assertTrue(
+            source.contains("val conflictGroupId = tickets()?.groupForCard(cardId) ?: conflictRow?.peerId"),
+            "受阻卡没有 1:1 退路 —— 私聊里合不上，一个字都回不去",
+        )
+        // **补丁位置也必须有一条磁盘来源。** 真机查证：链卡在这套装置上多数走单棒沙箱，
+        // 仓里根本没有 `chain/*` 分支，产物只有 `/tmp/tenon-ws/artifacts/<taskId>/patch.diff`
+        // —— 分支反查救不了它，能救的只有「发卡时把 patch 路径记到磁盘」。
+        assertTrue(
+            source.contains("TicketPatchLedger.record("),
+            "发卡时没把（卡片 → 补丁路径）落到磁盘 —— 宿主重启后这批卡全部作废",
+        )
+        assertTrue(
+            source.contains("TicketPatchLedger.lookup(cardId)"),
+            "合并前没查磁盘账簿 —— 内存登记簿重启即空，patch 却在盘上躺着",
+        )
+        assertTrue(
+            source.contains("?: ledgerEntry?.convKey"),
+            "翻面/受阻卡的会话键没有账簿退路 —— 卡片行落到恢复窗口之外时卡面不翻",
+        )
     }
 
     @Test

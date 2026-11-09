@@ -193,9 +193,14 @@ public fun ConversationsPane(
             sessions = agentSlice.agentSessions.values.toList(),
         )
     }
-    var expandedTeams by remember { mutableStateOf(emptySet<String>()) }
-    val onToggleTeam: (String) -> Unit = { key ->
-        expandedTeams = if (key in expandedTeams) expandedTeams - key else expandedTeams + key
+    // 展开状态是会话级的（一行一个折叠符号）：一个群挂多个团队时整块一起展开。
+    var expandedTeamConvs by remember { mutableStateOf(emptySet<String>()) }
+    val onToggleTeam: (String) -> Unit = { convId ->
+        expandedTeamConvs = if (convId in expandedTeamConvs) {
+            expandedTeamConvs - convId
+        } else {
+            expandedTeamConvs + convId
+        }
     }
     // 点团队成员：写草稿 + 切进该群会话。壳没有草稿能力时整行不可点（而不是点了没反应）。
     val onMentionMember: ((String, String) -> Unit)? = onDraftChange?.let { write ->
@@ -375,7 +380,7 @@ public fun ConversationsPane(
                 ConversationSidebar(
                     sessions = sessions,
                     teamFoldersByConv = teamFolders,
-                    expandedTeams = expandedTeams,
+                    expandedTeamConvs = expandedTeamConvs,
                     onToggleTeam = onToggleTeam,
                     onMentionMember = onMentionMember,
                     phase = nodeSlice.network.phase,
@@ -439,7 +444,7 @@ public fun ConversationsPane(
             ConversationSidebar(
                 sessions = sessions,
                 teamFoldersByConv = teamFolders,
-                expandedTeams = expandedTeams,
+                expandedTeamConvs = expandedTeamConvs,
                 onToggleTeam = onToggleTeam,
                 onMentionMember = onMentionMember,
                 phase = nodeSlice.network.phase,
@@ -477,7 +482,7 @@ public fun ConversationsPane(
             ConversationSidebar(
                 sessions = sessions,
                 teamFoldersByConv = teamFolders,
-                expandedTeams = expandedTeams,
+                expandedTeamConvs = expandedTeamConvs,
                 onToggleTeam = onToggleTeam,
                 onMentionMember = onMentionMember,
                 phase = nodeSlice.network.phase,
@@ -520,7 +525,7 @@ public fun ConversationsPane(
                     ConversationSidebar(
                         sessions = sessions,
                         teamFoldersByConv = teamFolders,
-                        expandedTeams = expandedTeams,
+                        expandedTeamConvs = expandedTeamConvs,
                         onToggleTeam = onToggleTeam,
                         onMentionMember = onMentionMember,
                         phase = nodeSlice.network.phase,

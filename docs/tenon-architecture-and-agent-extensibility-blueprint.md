@@ -477,6 +477,7 @@ interface AgentDriver {
 - **事件类型**：`ThoughtDelta`、`TokenDelta`、`ToolCall`、`Card`、`Artifact`、`Finished`、`Error`。其中 `Card` 是不透明 JSON，字节预算由宿主在构群帧时把关；`Artifact` 的本机路径只走进程内，**绝不进协议帧**。
 - **四类驱动按同一形状对齐**（均已实现）：`CliSubprocessDriver`、`SandboxedCliDriver`（同一 CLI 引擎的两种执行形态）、`NativeRelayDriver`、`ExternalPluginDriver`。注册、发现与在位探针统一走 `DriverRegistry` / `ControlPlane.resolveCliDriver`。
 - **能力 ACL 不在接口上**：`updateCapabilityAcl` / `isCapabilityAllowed` 落在宿主 `DriverRegistry`（经 `DriverCapabilityAcl`）；内置驱动经构造注入的谓词读宿主状态，`ExternalPluginDriver` 完全不接触 ACL。
+- **主动触发式演进规划（Target Architecture）**：驱动层在会话 `@` 被动触发之外，针对未来定时任务（Cron）与外部事件（Webhook/邮件 Inbound）的主动拉起能力，确立“插件只声明契约、宿主统管时钟调度与削峰”的架构不变量，详见演进提案 [AGENT-TRIGGER-AND-PLUGIN-SPECIFICATION.md](AGENT-TRIGGER-AND-PLUGIN-SPECIFICATION.md)。架构主干基线以 [LLD 2026-11-05](../design/spec/tenon-plugin-extensibility-detailed-spec-2026-11-05.md) 为准。
 
 ### 5.2 岗位档案（`AgentProfiles`）
 岗位档案是**静态声明表**，回答「它是什么」，不回答「它在不在」。当前表里五款引擎：

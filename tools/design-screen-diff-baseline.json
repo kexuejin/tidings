@@ -1,8 +1,8 @@
 {
-  "generatedAt": "a94902dc6178",
+  "generatedAt": "b013591a761d",
   "note": "逐屏差集棘轮：每个键的差集只许变小。--check 报「新增的值」。",
-  "reason": "气泡去边框（设计裁决，与其他 IM 对齐）：原型 .bub 移除发丝边 rgba(0,0,0,.04)，ChatBubbles 同步删除 bubbleBorder；分离改由色块对比承担（surface-2 气泡 vs bg 背景）",
-  "rowCount": 78,
+  "reason": "新增 m-home-team-folder-open 屏（团队折叠展开态）+ 群行团队药丸标记：标记/成员行复用既有类（.tag/.tm/.av，尺寸 24/11/600 与代码 sp.xl/labelSmall/SemiBold 同值），未新增字号/间距/圆角档位；随原型版本前移（08e48f43 → b013591a，含 main 侧重投影后的 403 组基线）",
+  "rowCount": 79,
   "signature": {
     "d-agentdetail|__error__": [
       "落点不存在：**待建**（2026-10-13 原型新增提案；代码侧本轮未适配）"
@@ -116,7 +116,6 @@
       "4",
       "6",
       "10",
-      "11",
       "16"
     ],
     "d-chat|radius|proto": [
@@ -200,14 +199,18 @@
       "30"
     ],
     "d-emoji|font-size|code": [
+      "15",
       "17"
     ],
     "d-emoji|font-size|proto": [
       "16"
     ],
+    "d-emoji|font-weight|code": [
+      "400"
+    ],
     "d-emoji|radius|code": [
-      "10",
-      "11"
+      "4",
+      "10"
     ],
     "d-emoji|spacing|code": [
       "4",
@@ -332,7 +335,6 @@
       "6",
       "8",
       "10",
-      "11",
       "16"
     ],
     "d-groupcreate|spacing|code": [
@@ -359,7 +361,6 @@
       "4",
       "6",
       "10",
-      "11",
       "16"
     ],
     "d-histsearch|spacing|code": [
@@ -857,7 +858,6 @@
       "2",
       "8",
       "10",
-      "11",
       "22",
       "28"
     ],
@@ -886,8 +886,7 @@
     "m-chat-group|radius|code": [
       "2",
       "8",
-      "10",
-      "11"
+      "10"
     ],
     "m-chat-group|radius|proto": [
       "13",
@@ -918,7 +917,6 @@
       "8",
       "9",
       "10",
-      "11",
       "16",
       "22",
       "28"
@@ -951,8 +949,7 @@
     "m-chat-solo|radius|code": [
       "2",
       "8",
-      "10",
-      "11"
+      "10"
     ],
     "m-chat-solo|radius|proto": [
       "13",
@@ -983,8 +980,7 @@
     "m-chat-workspace|radius|code": [
       "2",
       "8",
-      "10",
-      "11"
+      "10"
     ],
     "m-chat-workspace|radius|proto": [
       "13"
@@ -1010,8 +1006,7 @@
     "m-chat|radius|code": [
       "2",
       "8",
-      "10",
-      "11"
+      "10"
     ],
     "m-chat|radius|proto": [
       "13",
@@ -1058,6 +1053,7 @@
       "24"
     ],
     "m-folderin|font-size|code": [
+      "15",
       "17"
     ],
     "m-folderin|font-size|proto": [
@@ -1065,11 +1061,14 @@
       "13",
       "24"
     ],
+    "m-folderin|font-weight|code": [
+      "400"
+    ],
     "m-folderin|font-weight|proto": [
       "700"
     ],
     "m-folderin|radius|code": [
-      "11"
+      "4"
     ],
     "m-folderin|radius|proto": [
       "2",
@@ -1198,6 +1197,7 @@
     ],
     "m-histdate|radius|proto": [
       "0",
+      "11",
       "13",
       "28"
     ],
@@ -1288,6 +1288,24 @@
       "1.5",
       "11"
     ],
+    "m-home-team-folder-open|font-size|code": [
+      "17",
+      "20"
+    ],
+    "m-home-team-folder-open|font-size|proto": [
+      "24"
+    ],
+    "m-home-team-folder-open|radius|proto": [
+      "16"
+    ],
+    "m-home-team-folder-open|spacing|code": [
+      "24",
+      "48"
+    ],
+    "m-home-team-folder-open|spacing|proto": [
+      "1.5",
+      "11"
+    ],
     "m-home-unread|font-size|code": [
       "15",
       "17",
@@ -1336,6 +1354,7 @@
       "2"
     ],
     "m-msgmenu|font-size|code": [
+      "15",
       "17"
     ],
     "m-msgmenu|font-size|proto": [
@@ -1343,15 +1362,12 @@
       "24"
     ],
     "m-msgmenu|font-weight|proto": [
-      "400",
       "700"
     ],
     "m-msgmenu|radius|code": [
-      "10",
-      "11"
+      "10"
     ],
     "m-msgmenu|radius|proto": [
-      "4",
       "13",
       "20"
     ],
@@ -1478,6 +1494,7 @@
       "11"
     ],
     "m-screencard|font-size|code": [
+      "15",
       "17"
     ],
     "m-screencard|font-size|proto": [
@@ -1485,15 +1502,14 @@
       "13",
       "24"
     ],
+    "m-screencard|font-weight|code": [
+      "400"
+    ],
     "m-screencard|font-weight|proto": [
       "700"
     ],
-    "m-screencard|radius|code": [
-      "11"
-    ],
     "m-screencard|radius|proto": [
       "2",
-      "4",
       "5",
       "6",
       "13",
@@ -1515,6 +1531,7 @@
       "18"
     ],
     "m-sendfolder|font-size|code": [
+      "15",
       "17"
     ],
     "m-sendfolder|font-size|proto": [
@@ -1522,11 +1539,14 @@
       "13",
       "24"
     ],
+    "m-sendfolder|font-weight|code": [
+      "400"
+    ],
     "m-sendfolder|font-weight|proto": [
       "700"
     ],
     "m-sendfolder|radius|code": [
-      "11"
+      "4"
     ],
     "m-sendfolder|radius|proto": [
       "2",

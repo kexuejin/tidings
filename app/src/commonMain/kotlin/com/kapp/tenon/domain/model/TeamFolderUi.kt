@@ -36,6 +36,3 @@ data class TeamFolderUi(
      */
     val isRunning: Boolean = false,
 )
-
-/** 折叠投影的组键：`(convId, pluginId)`，与聚合键同一口径。 */
-fun teamGroupKey(convId: String, pluginId: String): String = convId + ":" + pluginId

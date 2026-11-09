@@ -116,10 +116,26 @@ class ExternalPluginDriver(
                         val detail = readError(conn)
                         throw IOException("plugin task/execute failed (" + conn.responseCode + "): " + detail)
                     }
-                    conn.inputStream.bufferedReader(StandardCharsets.UTF_8).useLines { lines ->
-                        for (line in lines) {
-                            if (line.isBlank()) continue
-                            onEvent(parseEventLine(line))
+                    val reader = BoundedLineReader(conn.inputStream.bufferedReader(StandardCharsets.UTF_8))
+                    while (true) {
+                        when (val read = reader.readLine()) {
+                            BoundedLine.Eof -> break
+                            BoundedLine.TooLong -> {
+                                // 单行熔断（§8.2）：超限行不再整行进堆（旧写法用 `useLines`，
+                                // 判据成立时整行已经在堆里）。插件流没有「杀进程」这一手 ——
+                                // 连接由 finally 的 disconnect 关掉，事件通道已如实说失败。
+                                onEvent(
+                                    DriverEvent.Error(
+                                        "plugin \"" + driverId + "\" emitted a line over " +
+                                            DriverLineLimits.MAX_LINE_CHARS + " chars; stream aborted",
+                                    ),
+                                )
+                                break
+                            }
+                            is BoundedLine.Text -> {
+                                if (read.value.isBlank()) continue
+                                onEvent(parseEventLine(read.value))
+                            }
                         }
                     }
                 } finally {

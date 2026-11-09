@@ -186,10 +186,13 @@ public fun PkCardView(
     }
 
     val sp = LocalAppSpacing.current
+    // PK 卡也**自己就是气泡**（`isCustomCard` 分支，外层容器透明 + `bubblePad = 0`）：
+    // 底色/圆角与文字气泡逐值相同 —— `--bubble-peer` + `--r-bubble`，不画描边。
+    // 它与 `FileCardView` 曾是同一段参数的逐字复制（白底 / 0.5dp 发丝边 / 12dp），
+    // 去边框那轮一起漏掉；改一处必须同时改另一处，否则同一会话里两张自定义卡不同语言。
     Surface(
-        shape = RelayShapes.medium,
-        color = MaterialTheme.colorScheme.surface,
-        border = BorderStroke(0.5.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.25f)),
+        shape = RelayShapes.large,
+        color = MaterialTheme.colorScheme.surfaceVariant,
         modifier = modifier.widthIn(min = 160.dp),
     ) {
         Row(

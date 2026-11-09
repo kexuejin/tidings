@@ -109,12 +109,14 @@ internal fun ConversationListPanel(
      */
     teamFoldersByConv: Map<String, List<TeamFolderUi>> = emptyMap(),
     /**
-     * 已展开的组键（见 [teamGroupKey]）。
+     * 已展开的**会话键**集合（`group:<groupId>`）。空 = 全折叠。
      *
+     * 为什么是会话级而不是团队级：一行只有一个折叠符号。一个群挂多个团队时，展开即显示
+     * 全部团队（用标签行区分归属）—— 否则同一行要画两个开关。
      * 由屏幕级持有 —— 容器是共享组件，`remember` 在这里会让手机与桌面各自记一份折叠态。
      */
-    expandedTeams: Set<String> = emptySet(),
-    /** 点组头：回调传组键，调用方自行维护 [expandedTeams]。null = 组头只展示、不可折叠。 */
+    expandedTeamConvs: Set<String> = emptySet(),
+    /** 折叠回调：参数是**会话键**。调用方自行维护 [expandedTeamConvs]。null = 标记只展示。 */
     onToggleTeam: ((String) -> Unit)? = null,
     /**
      * 点团队成员：请壳打开该群会话并预填 `@token`。
@@ -126,8 +128,8 @@ internal fun ConversationListPanel(
 ) {
     val sp = LocalAppSpacing.current
     // 折叠只做结构投影，不重排：排序真源仍是 orderInboxFeed / orderConversationList。
-    val rows = remember(feed, teamFoldersByConv, expandedTeams) {
-        foldTeamRows(feed, teamFoldersByConv, expandedTeams)
+    val rows = remember(feed, teamFoldersByConv, expandedTeamConvs) {
+        foldTeamRows(feed, teamFoldersByConv, expandedTeamConvs)
     }
     Box(modifier = modifier) {
         LazyColumn(
@@ -140,13 +142,37 @@ internal fun ConversationListPanel(
         ) {
             itemsIndexed(rows, key = { _, row -> row.key }) { index, row ->
                 when (row) {
-                    is FeedRow.Folder -> TeamFolderHeader(
-                        folder = row.folder,
-                        expanded = row.expanded,
-                        unread = row.unread,
-                        // 折叠态下组头替代会话行，进群只能靠它 —— 所以整行复用 onOpenChat。
+                    // 会话行永远是**这一行本身**：团队信息只是行内一枚标记，不替代、不复制。
+                    is FeedRow.Session -> ConversationRow(
+                        row = row.item.conv,
+                        now = now,
                         onOpenChat = onOpenChat,
-                        onToggle = onToggleTeam,
+                        onTogglePin = onTogglePin?.let { act -> { act(row.item.conv.convId) } },
+                        onToggleMute = onToggleMute?.let { act -> { act(row.item.conv.convId) } },
+                        onDeleteConversation = onDeleteConversation?.let { act -> { act(row.item.conv.convId) } },
+                        onLeaveGroup = onLeaveGroup?.let { act -> { act(row.item.conv.convId) } },
+                        previewSenderName = previewSenderNameOf?.invoke(row.item.conv.convId),
+                        draftPreview = draftPreviewOf?.invoke(row.item.conv.convId),
+                        selected = selectedConvId != null && row.item.conv.convId == selectedConvId,
+                        dense = dense,
+                        teamSlot = if (row.teams.isEmpty()) {
+                            null
+                        } else {
+                            {
+                                TeamBadge(
+                                    convId = row.item.conv.convId,
+                                    running = row.running,
+                                    expanded = row.expanded,
+                                    memberCount = row.memberCount,
+                                    onToggle = onToggleTeam,
+                                )
+                            }
+                        },
+                    )
+
+                    is FeedRow.TeamLabel -> TeamLabelRow(
+                        token = row.title,
+                        memberCount = row.memberCount,
                     )
 
                     is FeedRow.Member -> TeamMemberRow(
@@ -156,36 +182,19 @@ internal fun ConversationListPanel(
                         },
                     )
 
-                    is FeedRow.Item -> when (val item = row.item) {
-                        is InboxFeedItem.Conversation -> ConversationRow(
-                            row = item.conv,
-                            now = now,
-                            onOpenChat = onOpenChat,
-                            onTogglePin = onTogglePin?.let { act -> { act(item.conv.convId) } },
-                            onToggleMute = onToggleMute?.let { act -> { act(item.conv.convId) } },
-                            onDeleteConversation = onDeleteConversation?.let { act -> { act(item.conv.convId) } },
-                            onLeaveGroup = onLeaveGroup?.let { act -> { act(item.conv.convId) } },
-                            previewSenderName = previewSenderNameOf?.invoke(item.conv.convId),
-                            draftPreview = draftPreviewOf?.invoke(item.conv.convId),
-                            selected = selectedConvId != null && item.conv.convId == selectedConvId,
-                            dense = dense,
-                        )
-
-                        is InboxFeedItem.Workspace -> WorkspaceFeedRow(
-                            unit = item.unit,
-                            group = item.group,
-                            now = now,
-                            onOpenWorkspaceUnit = { onOpenWorkspaceUnit?.invoke(it) },
-                        )
-                    }
+                    is FeedRow.WorkspaceItem -> WorkspaceFeedRow(
+                        unit = row.item.unit,
+                        group = row.item.group,
+                        now = now,
+                        onOpenWorkspaceUnit = { onOpenWorkspaceUnit?.invoke(it) },
+                    )
                 }
                 // 最后一行下面不画线：列表尾部再挂一条会看起来像"下面还有东西"。
-                // 同一团队的成员行之间也不画：组内是"一个文件夹里的条目"，画线会把它们
-                // 拆成互不相干的会话行。组头与组内第一行之间保留线（分隔标题与内容）。
+                // 展开块（团队标签 + 成员行）内部也不画线：它们是同一条会话的下挂内容，
+                // 画线会把它们拆成互不相干的会话行。块的最后一行之后才恢复分割线。
                 val next = rows.getOrNull(index + 1)
-                val sameTeamBlock = row is FeedRow.Member && next is FeedRow.Member &&
-                    row.convId == next.convId && row.pluginId == next.pluginId
-                if (!sameTeamBlock && index != rows.lastIndex) ConversationListDivider()
+                val nextIsBlockBody = next is FeedRow.TeamLabel || next is FeedRow.Member
+                if (!nextIsBlockBody && index != rows.lastIndex) ConversationListDivider()
             }
             trailingContent?.invoke(this)
         }

@@ -32,6 +32,29 @@ import kotlinx.serialization.json.put
 private fun ControlPlane.hookKeyOf(conversationId: String): String = "agy-" + conversationId.trim()
 
 /**
+ * 这个 `sessionId` 是不是**本节点派单出去**的会话？（hook 审批对齐键的对账判据）
+ *
+ * 为什么需要：`sessionId` 来自 hook 请求体，是客户端给的字符串。直接拿它当会话键，
+ * 回环上任意进程都能把审批卡挂到别人的会话上 —— 「这条对话正在请求 git push」比
+ * 「有个匿名审批」更容易被点通过。
+ *
+ * 判据是「本节点知道它」，两条路径任一成立：
+ *  - `conversationOf(sid)` 非空：派单侧 `bindConversation` 绑过（只有 executeCliTask /
+ *    executePluginTask 带 convId 时写），外部进程写不了这条；
+ *  - 台账里 `announcedOut` 为真：只有 `recordSession(outbound = true)` 会置真，那是
+ *    本节点自己发出去的宣告。`ensureSession` 造的占位行两个 announced 都是 false，不算。
+ *
+ * 为什么不用 `findSession(...) != null` 单独判：`ensureSession` 会为「先到事件后到宣告」
+ * 的乱序帧造占位会话，占位行同样能被 findSession 查到 —— 那等于只要往本节点扔过一条
+ * 带该 sessionId 的帧就能冒名，判据就失效了。
+ */
+private fun ControlPlane.isHostDispatchedSession(sessionId: String): Boolean {
+    if (sessions.conversationOf(sessionId) != null) return true
+    val record = sessions.findSession(runtime.nodeId, sessionId) ?: return false
+    return record.announcedOut
+}
+
+/**
  * hook 审批的收件人对端：显式 to 优先；缺省走 [pickHookPeer]（先折叠同端点旧记录，再取确定性）。
  */
 private fun ControlPlane.resolveHookPeer(exchange: HttpExchange, obj: JsonObject): String? {
@@ -102,7 +125,7 @@ internal fun ControlPlane.agentHookSession(exchange: HttpExchange) {
 
 /**
  * `POST /v1/agent/hook/approval` —— PreToolUse 审批（**长轮询**）。
- * 顺序：免批表短路（不打扰）→ 手机审批卡 → 阻塞等 ack → 决定。
+ * 顺序：只读通道否决（硬约束）→ 免批表短路（不打扰）→ 手机审批卡 → 阻塞等 ack → 决定。
  * fail-closed：没有可收审批的对端 / 送达失败 / 超时，一律 `deny`。
  */
 internal fun ControlPlane.agentHookApproval(exchange: HttpExchange) {
@@ -113,6 +136,63 @@ internal fun ControlPlane.agentHookApproval(exchange: HttpExchange) {
     val riskLevel = obj["riskLevel"]?.jsonPrimitive?.contentOrNull
     val diff = obj["diff"]?.jsonPrimitive?.contentOrNull
     val timeoutMs = (numberOrNull(obj["timeoutMs"]) ?: Limits.APPROVAL_TTL_MS.toDouble()).toLong().coerceIn(1_000, 180_000)
+    // 会话对齐键（提案 §9 阶段三）：宿主派起的 CLI 经 TENON_HOOK_SESSION_ID 注入
+    // 真实 sessionId，hook 脚本透传——审批帧因此挂在派单会话上（手机的审批卡
+    // 归位），不再是合成的 agy-* 池键。没有对齐键时维持旧行为。
+    //
+    // 但这个字符串是**请求体里给的**，不是我们验证过的。此前直接拿它当会话键用：
+    // 回环上的任意进程都能把审批卡挂到别人的会话上（「这条对话正在请求 git push」
+    // 比「有个匿名审批」更容易被点通过）。所以先对账：只有**本节点派单出去**的
+    // 会话才认，其余一律回退派生键并记一行日志。
+    //
+    // 判据是「本节点知道它」而不是「它存在」：
+    //  - `conversationOf(sid)` 非空 = 派单侧 `bindConversation` 绑过（executeCliTask /
+    //    executePluginTask 带 convId 时写），回环上的进程写不了这条；
+    //  - 否则看台账里 `announcedOut`：只有 `recordSession(outbound = true)` 会把它置真，
+    //    那是本节点自己发出去的宣告。`ensureSession` 造的占位行是 false，不算数。
+    //
+    // 时机上安全：`executeCliTask` 先 `recordSession` 再 `driver.executeTask`，所以
+    // 首个 PreToolUse 到达时这条账已经落了（`ControlPlanePluginGateway.kt` 里两步相邻）。
+    //
+    // 边界：这只关掉「冒名挂会话」，关不掉「任意本地进程发起一次审批请求」——
+    // 后者仍会弹卡（挂在自己的/池键上），用户仍可拒绝。真正的收紧需要给回环
+    // 控制面加鉴权，不是这一处能解决的。
+    val hookSessionId = obj["sessionId"]?.jsonPrimitiveOrNull()?.contentOrNull?.trim().orEmpty()
+    val hookSessionTrusted = hookSessionId.isNotEmpty() && isHostDispatchedSession(hookSessionId)
+    if (hookSessionId.isNotEmpty() && !hookSessionTrusted) {
+        println(
+            "[hook] approval carries an unknown sessionId (\"" + hookSessionId +
+                "\"); not a session this host dispatched — falling back to the derived key",
+        )
+    }
+    val sessionId = if (hookSessionTrusted) {
+        hookSessionId
+    } else {
+        if (conversationId.isEmpty()) "agy-approval" else hookKeyOf(conversationId)
+    }
+    // 只读通道的**执行前**否决（提案 §7.1 第 3 条约束）。判据由派单侧登记在
+    // `readOnlyToolPolicies` 上，键是**对账通过**的会话 —— 没对账的字符串取不到
+    // 别人的白名单（否则回环上一句伪造的 sessionId 就能拿别人的策略来放行自己）。
+    //
+    // 位置在「免批表」**之前**，这是故意的：免批表是机主以前点过的「这个工具以后
+    // 别再问我」，属于便利；只读是宿主对这次派单的硬约束。便利不该覆盖硬约束 ——
+    // 否则一次「始终允许 git push」就能让之后每个只读触发任务都能推远端。
+    //
+    // 这里只拒绝，不弹卡：越界的调用不该有「问一下也许能过」的路径，问就是给它
+    // 机会。拒绝同时被记进策略（第一个越界工具），任务收场时据此判负。
+    if (hookSessionTrusted) {
+        val policy = readOnlyToolPolicies[hookSessionId]
+        if (policy != null && !policy.admit(tool)) {
+            respond(exchange, 200, buildJsonObject {
+                put("decision", "deny")
+                put("reason", "read-only trigger channel: tool \"" +
+                    (tool?.takeIf { it.isNotBlank() } ?: "(unnamed)") +
+                    "\" is not on the allow-list")
+                put("readOnly", true)
+            })
+            return
+        }
+    }
     val peer = resolveHookPeer(exchange, obj) ?: return
     val agentKey = "antigravity"
     if (tool != null && toolApprovals.isAlwaysApproved(nodeId = peer, agentKey = agentKey, tool = tool)) {
@@ -122,7 +202,6 @@ internal fun ControlPlane.agentHookApproval(exchange: HttpExchange) {
         })
         return
     }
-    val sessionId = if (conversationId.isEmpty()) "agy-approval" else hookKeyOf(conversationId)
     val approvalId = "hook-" + java.util.UUID.randomUUID()
     val expiresAt = System.currentTimeMillis() + timeoutMs
     val choices = defaultApprovalChoices
@@ -163,6 +242,12 @@ internal fun ControlPlane.agentHookApproval(exchange: HttpExchange) {
         put("decision", if (allow) "allow" else "deny")
         put("reason", finalStatus ?: "approval timeout — denied fail-closed")
         put("approvalId", approvalId)
+        // 派单侧绑定的 Tenon 会话键（有对齐键**且对账通过**时非空）：hook 脚本可如实
+        // 转述「这次审批属于哪条对话」。没对账通过时不给 convId —— 否则等于把
+        // 「任意字符串 → 某条真实对话」的映射白送给调用方。
+        hookSessionId.takeIf { hookSessionTrusted }?.let { sid ->
+            sessions.conversationOf(sid)?.let { put("convId", it) }
+        }
     })
 }
 

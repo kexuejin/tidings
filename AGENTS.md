@@ -226,16 +226,32 @@ python3 tools/check-design-palette.py --css-vars
 
 ### 2.8 沙箱与文件系统：符号链接与递归删除绝对隔离（血泪禁令）
 
-**规则**：凡是涉及沙箱产物或临时目录清理，**严禁直接调用标准库的 `File.deleteRecursively()`**。
+**规则**：凡是涉及沙箱产物或临时目录清理，**严禁在未清空 `.sandbox-home` 挂载前直接调用标准库的 `File.deleteRecursively()`**。
 
 - **致命成因**：Kotlin 标准库的 `File.deleteRecursively()` 内部通过 `listFiles()` 遍历，
   遇到目录符号链接（Symlink）时会把软链接当普通目录递归下钻，**逐个 unlink 目标目录里的真实文件**，
   最后才删除软链接本身。沙箱为了让 CLI Agent 读凭据把真实 `$HOME`（`.dsh`、`.claude`、`.codex`、
   `.gemini`、`.npm`）以软链接挂进 `.sandbox-home`，任务中止或超时清理时若直接递归删除，会瞬间
   **掏空宿主机机主的真实 HOME 目录**（2026-11-06 事故：58ms 内 298 次 unlink + 189 次 rmdir 全部落在真实用户目录）。
-- **防御手段**：所有产物清理必须走 `deleteArtifactsSafely()` —— 先用 `Files.isSymbolicLink()` 
-  逐个摘掉（`Files.deleteIfExists()`）软链接本体，确保绝不跟随链接下钻，再清理普通文件；
-  同时严禁任何递归删除操作的物理目标覆盖 `$HOME` 真实根。
+- **防御手段**：所有产物清理必须走 `WorktreeSandboxExecutor.deleteArtifactsSafely()` ——
+  对**整个 `artifactsDir`** 做一次**不传 `FOLLOW_LINKS`** 的 `Files.walkFileTree()`，在
+  `visitFile` / `postVisitDirectory` 中对每个条目调用 `Files.deleteIfExists()`，把链接本体与
+  普通文件一并清空；读不了条目时走 `visitFileFailed` 尽力删、不中断整棵树；末尾**只对根**
+  做一次 `Files.deleteIfExists()`。**任何一步都不许调 `deleteRecursively()`。**
+- **别只清 `.sandbox-home`（第二个陷阱）**：先清 `.sandbox-home`、末尾再来一次
+  `artifactsDir.deleteRecursively()` 的写法，对 `.sandbox-home` **之外**的链接毫无防护 ——
+  任务进程本来就能写产物目录，留一个指向 `$HOME` 的软链就够了。实测把那种写法放回去，
+  `deleteArtifactsSafelyDoesNotFollowStraySymlinksOutsideSandboxHome()` 立刻红
+  （宿主的 `host-secret.txt` 被删）。遍历范围必须是**整棵树**。
+- **嵌套链接陷阱（别退回旧写法）**：早期实现只扫 `.sandbox-home` 的**顶层** `listFiles()` +
+  `Files.isSymbolicLink()` 逐个摘链接；`prepareSandboxHome()` 后来新增了 `.config/opencode` 这类
+  **二级目录下的软链接挂载**，顶层扫描抓不到，`deleteRecursively()` 会沿它下钻到真实 HOME。
+  任何「只摘顶层链接」的写法都是缺陷，别用 `isSymbolicLink()` 白名单替代全量清空。
+  回归钉子：`WorktreeSandboxExecutorTest.deleteArtifactsSafelyDoesNotFollowSymlinksIntoHostHome()`
+  （同时覆盖顶层 `.dsh` 与嵌套 `.config/opencode` 两种挂载），以及
+  `deleteArtifactsSafelyDoesNotFollowStraySymlinksOutsideSandboxHome()`
+  （覆盖 `.sandbox-home` 之外的人造链接）。
+- 严禁任何递归删除操作的物理目标覆盖 `$HOME` 真实根。
 
 ---
 
@@ -489,6 +505,7 @@ filter-repo 会**顺手删掉 `origin` remote**（防误推），跑完要重新
 | 跨网/保活/公开传输的设计与实测 | `docs/cross-network-*.md`、`docs/public-transport-security.md` |
 | Agent 协议（PPE-1） | `docs/PROTOCOL-AGENT-WORKSPACE.md` |
 | 团队折叠（Team Folder）最终方案：形态、裁决、改造量、验收 | `docs/team-folder-final-plan.md` |
+| 团队创建（声明）最终方案：入口、写路径复用、裁决、验收 | `docs/team-creation-final-plan.md` |
 | 真机证据（文字） | `design/runtime-evidence/` |
 | 仓库里哪些真机身份被清掉了、哪些是**有意保留**的 | `docs/privacy-scan-2026-10-29.md`（§4 是「家网段为什么不整体替换」） |
 

@@ -59,12 +59,14 @@ class AgentCardPolicyTest {
 
     @Test
     fun registryCoversTheSevenDesignedTypes() {
-        assertEquals(
-            setOf("task-board", "approval", "result", "status", "timeout", "diff-review", "assignment"),
-            // 升级轮 task-20 新增第 8 类（ask_question，detailed-design §7.9）——
-            // 集合改为「包含七类设计稿 + ask_question」的断言：七类缺席仍然红。
-            CardTypeRegistry.recommended.keys.filter { it != "ask_question" }.toSet(),
-            "设计稿 §3 的七类卡 + 升级稿 ask_question 都要有推荐构成",
+        // 判据是**包含**而不是相等：注册表还登记了发射侧自己的类型
+        // （`team-task-board` / `direction-ask`）。那是另一本账 —— 由
+        // `AgentCardTypeCoverageTest.emittedTypesAreRegistered` 逐项对账。
+        // 这里只问一件事：设计稿画过的类，一个都不许缺席。
+        val designed = setOf("task-board", "approval", "result", "status", "timeout", "diff-review", "assignment")
+        assertTrue(
+            CardTypeRegistry.recommended.keys.containsAll(designed),
+            "设计稿 §3 的七类卡缺席了：${designed - CardTypeRegistry.recommended.keys}",
         )
         assertTrue("ask_question" in CardTypeRegistry.recommended.keys, "升级稿 ask_question 必须在注册表")
         // 抽查两条容易画错的：审批必须有按钮组与警示横幅；状态轻通知**不该**有按钮。

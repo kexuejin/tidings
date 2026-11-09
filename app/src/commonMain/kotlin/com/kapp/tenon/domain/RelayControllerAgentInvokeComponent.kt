@@ -294,7 +294,6 @@ internal class RelayControllerAgentInvokeComponent(private val host: AgentDomain
                 reply(false, com.kapp.tenon.core.protocol.CodecInvoke.InvokeResultStates.DENIED, error = "direct invoke not granted for this node")
                 return
             }
-                val inboundConvId = p.strField("convId")?.takeIf { it.isNotBlank() }
             val directExecutor = executor
             if (directExecutor == null) {
                 announceDispatchFailure(
@@ -318,33 +317,60 @@ internal class RelayControllerAgentInvokeComponent(private val host: AgentDomain
                 host.state.value.agentWorkspaces.values.firstOrNull { it.wsId == id }?.wsTitle
             }
             val senderId = com.kapp.tenon.core.protocol.AgentSenderId.of(self, agentId, agentId)
-            host.handleAppendMessage(
-                MessageUi(
-                    id = host.localMessageId(),
-                    peerId = conv1to1,
-                    mine = false,
-                    senderId = senderId,
-                    text = "Ticket accepted: executing in " + (wsTitle ?: "the workspace") + "…",
-                    at = nowMillis(),
-                ),
-            )
+
+            /**
+             * 落本机 + **发到发起方**（两件事必须成对）。
+             *
+             * 「只落本机」是上一版的原样：`handleAppendMessage` 只写本端库，
+             * 手机上一条都收不到 —— 用户发了工单、任务真跑完，界面一字不变
+             * （真机 A22 现场：宿主库里躺着 `Ticket accepted…` 与
+             * `改动已就绪…`，手机库同时段零入站行）。
+             *
+             * 信封 id 与本地行 id 同一个（既有纪律：补发/去重/原位替换按 id 对账）；
+             * 发送失败只记日志、不改结论 —— 本端那条事实仍然成立。
+             */
+            suspend fun sayToPeer(text: String) {
+                val msgId = newId()
+                host.handleAppendMessage(
+                    MessageUi(
+                        id = msgId,
+                        peerId = conv1to1,
+                        mine = false,
+                        senderId = senderId,
+                        text = text,
+                        at = nowMillis(),
+                    ),
+                )
+                runCatching { rt.sendDirectText(peerId = envelope.from, text = text, envelopeId = msgId, senderId = senderId) }
+                    .onFailure { t ->
+                        println(
+                            "[INVOKE] 1:1 feedback not delivered (invoke=" + invokeId + "): " +
+                                (t.message ?: t::class.simpleName),
+                        )
+                    }
+            }
+
+            sayToPeer("Ticket accepted: executing in " + (wsTitle ?: "the workspace") + "…")
             val directOutcome = try {
-                directExecutor.execute(AgentInvokeTaskRequest(agentId = agentId, prompt = prompt, wsId = wsId, groupId = null, convId = inboundConvId))
+                // **convId 用本端口径**，不是帧里那个：帧里的 `convId` 是发起方视角的
+                // 会话 id（对端 = 本机 nodeId），本机拿它当自己的会话键会把卡片、产物
+                // 全落进「和自己的会话」里 —— 真机现场就是这么丢的
+                // （`[CARD] 1:1 direct card persisted locally (conv=<本机 nodeId>)`）。
+                directExecutor.execute(
+                    AgentInvokeTaskRequest(
+                        agentId = agentId,
+                        prompt = prompt,
+                        wsId = wsId,
+                        groupId = null,
+                        convId = conv1to1,
+                    ),
+                )
             } catch (t: Throwable) {
                 reply(false, com.kapp.tenon.core.protocol.CodecInvoke.InvokeResultStates.ERROR, error = (t.message ?: "executor failed").take(Limits.AGENT_NOTE))
                 return
             }
             if (directOutcome.status == com.kapp.tenon.core.protocol.CodecInvoke.InvokeResultStates.DONE) {
-                host.handleAppendMessage(
-                    MessageUi(
-                        id = host.localMessageId(),
-                        peerId = conv1to1,
-                        mine = false,
-                        senderId = senderId,
-                        text = directOutcome.summary?.takeIf { it.isNotBlank() } ?: "Task finished.",
-                        at = nowMillis(),
-                    ),
-                )
+                sayToPeer(directOutcome.summary?.takeIf { it.isNotBlank() } ?: "Task finished.")
             } else {
                 announceDispatchFailure(
                     convId = conv1to1,
@@ -430,7 +456,6 @@ internal class RelayControllerAgentInvokeComponent(private val host: AgentDomain
         isSeatSyncRetry: Boolean = false,
     ) {
         if (intent == null) return
-        val agentId = intent.strField("agentId")?.takeIf { it.isNotBlank() } ?: return
         val wsId = intent.strField("wsId")?.takeIf { it.isNotBlank() }
         val st = host.state.value
         val meta = st.settings.groups.firstOrNull { it.groupId == groupId }
@@ -439,6 +464,24 @@ internal class RelayControllerAgentInvokeComponent(private val host: AgentDomain
             return
         }
         val self = st.selfNodeId
+        // 目标席位：intent.agentId（胶囊原子意图装好了）优先。**纯文本语法路径
+        // （T-G2/D-031）只装 requiredTag** —— 目标活在正文的 @ 里（"@dsh test require:gpu"），
+        // 拿群席位表解析 @ 令牌。真机现场：修前这里对无 agentId 的意图整链静默
+        // return，而 intentOwnsDispatch 又挡掉了文本路由 ⇒「require: 打在末尾也零
+        // 反馈」，IntentTextSyntax 文档里的示例语法不可达。
+        // 匹配用**前缀**而非全等：@ 候选插入的是短名（@dsh），席位表里是全名
+        // （dsh-a030882e-default-workspace）—— 精确匹配真机必落空。
+        // 两路都落空 ⇒ 不接管（可能没带 mention 的意图另有去处，不猜）。
+        val agentId = intent.strField("agentId")?.takeIf { it.isNotBlank() }
+            ?: messageText?.let { text ->
+                val token = text.substringAfterLast('@', "").takeWhile { !it.isWhitespace() }.trim()
+                if (token.isEmpty()) null else
+                    meta.virtualAgents.orEmpty().firstOrNull { seat ->
+                        seat.agentId.startsWith(token, ignoreCase = true) ||
+                            seat.name.startsWith(token, ignoreCase = true)
+                    }?.agentId
+            }?.takeIf { it.isNotBlank() }
+            ?: return
         // 定向呼叫（T-G5）：显式 hostNodeId = 只有被点名的宿主处理这条意图
         // （群帧全员可见，执行只有一家 —— 否则每台有同名 agent 的机器都抢着跑）。
         val explicitHost = intent.strField("hostNodeId")?.takeIf { it.isNotBlank() }
@@ -449,6 +492,11 @@ internal class RelayControllerAgentInvokeComponent(private val host: AgentDomain
             return
         }
         val effectiveHost = explicitHost ?: seat.hostNodeId
+        // 席位宿主门：本机不是该席位的托管机就不接管 —— 群帧全员可见，执行/挂卡
+        // 只有席位宿主一家。没有这道门，群里的每台无执行器宿主都会各挂一张兜底卡、
+        // 各派一次委派（真机拓扑：群 = 手机 + N 台桌面）。hostNodeId 缺失的老 meta
+        // 不拦（沿用显式 hostNodeId 同款判空口径：解析不出宿主就当作可能是我）。
+        if (effectiveHost != null && effectiveHost != self) return
         val verdict = AgentExecAuthorizer.authorize(
             senderId = senderNode,
             group = meta,
@@ -468,84 +516,105 @@ internal class RelayControllerAgentInvokeComponent(private val host: AgentDomain
                     noticeDetail = NoticeDetail(actor = seat.name),
                 ),
             )
+            // 本地 notice 只有宿主自己看得到（notice 不进协议）。点 @ 的往往是手机，
+            // 光落这一行等于「消息到了、零卡片零横幅」——真机 T5 的全静默就发生在这里。
+            // 补一条 agentState=failed 群文本，让发起端也收到回执；授权判据本身不动。
+            // 群帧全员可见：只有托管该席位的宿主回执，别的宿主不跟着刷屏。
+            if (effectiveHost == self) {
+                announceIntentDispatchDenied(groupId, agentId, seat.name, senderNode, messageId)
+            }
             return
         }
+        // T-2c（发起侧编排接线，D-029）：**标签路由在本地执行器判定之前** ——
+        // requiredTag 是用户的算力意图，「本机装着执行器」≠「本机就是标签节点」。
+        // 修前标签消费整段住在 ex == null 分支里：席位宿主装着执行器时 require:
+        // 被静默忽略、活照跑本机（真机现场：gpu 标签零反馈的另一半）。
+        // tag 来源 = intent.requiredTag（agentIntent 是 JsonObject 开放结构，内部键
+        // 不动群文本白名单）；候选与选择走 PeerTagRouter（已交付 1e774b1a，桥注入）。
+        val requiredTag = intent.strField("requiredTag")?.takeIf { it.isNotBlank() }
+        val routed = if (requiredTag != null) peerTagRouter?.invoke(requiredTag) else null
+        if (requiredTag != null && routed == null) {
+            // R3 兜底卡（T-G4）：指定了标签但无匹配节点 —— 用户要的是「有 gpu 的那台」，
+            // 静默落回本机执行违背意图。挂起成卡，两个动作各自可达（重试路由 /
+            // 降级本机），横幅文案照旧出一条（不点卡的人也有回声）。
+            val tagTask = intent.strField("prompt")
+                ?: messageText?.let {
+                    RelayController.extractAgentPrompt(it, setOfNotNull(seat.agentId.takeIf { t -> t.isNotBlank() }, seat.name))
+                }
+                ?: ""
+            val cardId = "tagboard-" + newId().take(16)
+            // 兜底卡的 wsId（真机缺口）：纯文本语法路径的意图不带 wsId ⇒ 登记成 null，
+            // 「降级为本机执行」时宿主侧只剩群绑定一条推导，群没声明 defaultWsId
+            // 就必退单「no git workspace bound to group」。回落复用
+            // [DispatchWorkspaceChoice.resolve]（派单工作区单一来源，不另写一条链）：
+            // 席位 defaultWsId 仍在本机工作区表里就用它，否则取群席位声明过且本机
+            // 可见的第一个（与 workspaceOfGroup 同一语义）；都没有 ⇒ null，
+            // 宿主如实退单 —— 不猜仓（往别人的仓库写字是不可撤销的那类错）。
+            val boardWsId = wsId ?: run {
+                val declaredWsIds = meta.virtualAgents.orEmpty().mapNotNull { it.defaultWsId }.toSet()
+                val available = st.agentWorkspaces.values.mapNotNull { it.wsId.takeIf { id -> id in declaredWsIds } }
+                DispatchWorkspaceChoice.resolve(seat.defaultWsId, available)
+            }
+            cards.rememberTagBoard(cardId, groupId, agentId, seat, tagTask, boardWsId, requiredTag)
+            host.scope.launch {
+                val bannerTitle = runCatching { host.uiTexts.tagNoMatchTitle(requiredTag) }.getOrNull().orEmpty()
+                runCatching {
+                    // 文案桥空（未装文案壳）= 卡不带 banner（空正文不发帧的既有纪律
+                    // 同族：横幅缺失仍有点题 title 与动作，不算沉默）。
+                    val card = buildJsonObject {
+                        put("cardId", cardId)
+                        put("rev", 1)
+                        put("type", "team-task-board")
+                        put("title", tagTask.take(80))
+                        if (bannerTitle.isNotEmpty()) {
+                            put("banner", buildJsonObject {
+                                put("text", bannerTitle)
+                                put("tone", "warn")
+                            })
+                        }
+                            put("actions", kotlinx.serialization.json.buildJsonArray {
+                                add(buildJsonObject {
+                                    put("actionId", TagBoardActions.RETRY)
+                                    put("label", runCatching { host.uiTexts.invokeActionRetryLabel() }.getOrNull().orEmpty().ifEmpty { "retry" })
+                                    put("style", "secondary")
+                                })
+                                add(buildJsonObject {
+                                    put("actionId", TagBoardActions.FALLBACK_LOCAL)
+                                    put("label", runCatching { host.uiTexts.invokeActionFallbackLabel() }.getOrNull().orEmpty().ifEmpty { "fallback" })
+                                    put("style", "primary")
+                                })
+                            })
+                        }
+                    broadcastBoardCard(groupId, agentId, card)
+                }
+                runCatching { announceAgentGaveUp(groupId, agentId, seat.name, messageId, unavailable = true) }
+            }
+            return
+        }
+        if (requiredTag != null && routed != null && routed != self) {
+            val channelId = "ch-" + newId().take(20)
+            val task = intent.strField("prompt")
+                ?: messageText?.let {
+                    RelayController.extractAgentPrompt(it, setOfNotNull(seat.agentId.takeIf { t -> t.isNotBlank() }, seat.name))
+                }
+                ?: ""
+            channelDispatch?.invoke(routed, channelId, requiredTag, task, DEFAULT_INVOKE_DEADLINE_MS)
+            host.handleAppendMessage(
+                MessageUi(
+                    id = host.localMessageId(),
+                    peerId = ConvId.group(groupId),
+                    mine = false,
+                    text = "",
+                    at = nowMillis(),
+                    notice = NoticeKind.AgentDelegatedByTag,
+                    noticeDetail = NoticeDetail(actor = seat.name, detail = requiredTag + " -> " + routed.take(8)),
+                ),
+            )
+            return
+        }
+        // routed == self：本机持有该标签 ⇒ 落回下面的本机执行路径。
         val ex = executor
         if (ex == null) {
-            // T-2c（发起侧编排接线，D-029）：本机插件接不了活时，**按算力标签把任务委派出去**
-            // （设计 §4.1 流程 A：托管宿主解析所需算力 → 按标签路由到算力节点）。
-            // tag 来源 = intent.requiredTag（agentIntent 是 JsonObject 开放结构，内部键
-            // 不动群文本白名单）；候选与选择走 PeerTagRouter（已交付 1e774b1a，桥注入）。
-            // 没桥 / 没标签 / 无匹配节点 ⇒ 落回既有失败横幅（如实，不静默）。
-            val requiredTag = intent.strField("requiredTag")?.takeIf { it.isNotBlank() }
-            val routed = if (requiredTag != null) peerTagRouter?.invoke(requiredTag) else null
-            if (requiredTag != null && routed == null) {
-                // R3 兜底卡（T-G4）：指定了标签但无匹配节点 —— 用户要的是「有 gpu 的那台」，
-                // 静默落回本机执行违背意图。挂起成卡，两个动作各自可达（重试路由 /
-                // 降级本机），横幅文案照旧出一条（不点卡的人也有回声）。
-                val tagTask = intent.strField("prompt")
-                    ?: messageText?.let {
-                        RelayController.extractAgentPrompt(it, setOfNotNull(seat.agentId.takeIf { t -> t.isNotBlank() }, seat.name))
-                    }
-                    ?: ""
-                val cardId = "tagboard-" + newId().take(16)
-                cards.rememberTagBoard(cardId, groupId, agentId, seat, tagTask, wsId, requiredTag)
-                host.scope.launch {
-                    val bannerTitle = runCatching { host.uiTexts.tagNoMatchTitle(requiredTag) }.getOrNull().orEmpty()
-                    runCatching {
-                        // 文案桥空（未装文案壳）= 卡不带 banner（空正文不发帧的既有纪律
-                        // 同族：横幅缺失仍有点题 title 与动作，不算沉默）。
-                        val card = buildJsonObject {
-                            put("cardId", cardId)
-                            put("rev", 1)
-                            put("type", "team-task-board")
-                            put("title", tagTask.take(80))
-                            if (bannerTitle.isNotEmpty()) {
-                                put("banner", buildJsonObject {
-                                    put("text", bannerTitle)
-                                    put("tone", "warn")
-                                })
-                            }
-                                put("actions", kotlinx.serialization.json.buildJsonArray {
-                                    add(buildJsonObject {
-                                        put("actionId", TagBoardActions.RETRY)
-                                        put("label", runCatching { host.uiTexts.invokeActionRetryLabel() }.getOrNull().orEmpty().ifEmpty { "retry" })
-                                        put("style", "secondary")
-                                    })
-                                    add(buildJsonObject {
-                                        put("actionId", TagBoardActions.FALLBACK_LOCAL)
-                                        put("label", runCatching { host.uiTexts.invokeActionFallbackLabel() }.getOrNull().orEmpty().ifEmpty { "fallback" })
-                                        put("style", "primary")
-                                    })
-                                })
-                            }
-                        broadcastBoardCard(groupId, agentId, card)
-                    }
-                    runCatching { announceAgentGaveUp(groupId, agentId, seat.name, messageId, unavailable = true) }
-                }
-                return
-            }
-            if (requiredTag != null && routed != null) {
-                val channelId = "ch-" + newId().take(20)
-                val task = intent.strField("prompt")
-                    ?: messageText?.let {
-                        RelayController.extractAgentPrompt(it, setOfNotNull(seat.agentId.takeIf { t -> t.isNotBlank() }, seat.name))
-                    }
-                    ?: ""
-                channelDispatch?.invoke(routed, channelId, requiredTag, task, DEFAULT_INVOKE_DEADLINE_MS)
-                host.handleAppendMessage(
-                    MessageUi(
-                        id = host.localMessageId(),
-                        peerId = ConvId.group(groupId),
-                        mine = false,
-                        text = "",
-                        at = nowMillis(),
-                        notice = NoticeKind.AgentDelegatedByTag,
-                        noticeDetail = NoticeDetail(actor = seat.name, detail = requiredTag + " -> " + routed.take(8)),
-                    ),
-                )
-                return
-            }
             // **插件接不了活**（被 kill / 从没注册 / 宿主壳没接桥）：此前这里 `?: return`，
             // 群流里一条都没有 —— 点 @ 的人看到的和「派单成功、任务在跑」一模一样。
             // 设计稿 v2 §5「失败如实」：宿主回一条 agentState=failed 的轻横幅。
@@ -650,6 +719,43 @@ internal class RelayControllerAgentInvokeComponent(private val host: AgentDomain
             unavailable = unavailable,
         )
     }
+
+    /**
+     * 群意图派单被**授权门**拒时，给全群（尤其是发起端手机）的回执。
+     *
+     * 为什么不能只落 `AgentNotAuthorized` 本地 notice：`NoticeKind` 的 KDoc 与
+     * [broadcastAgentGaveUp] 都写明了 notice 是纯本地数据、**不进协议** —— 宿主
+     * 自己看得见，手机端一条都收不到。真机 T5 的「消息到了、dedup 增了、零卡片零横幅」
+     * 就卡在这里：授权判据拒绝了，但这句拒绝从没离开过宿主。
+     *
+     * 复用 [announceCardActionDenied] 立下的范式（同一份文案、同一个
+     * `agentState=failed` 通路、按一次尝试去重），不新增协议键、不新增文案；
+     * 授权判据本体（`AgentExecAuthorizer` / 台账 `forExecution`）一字不动 ——
+     * 这里改的是「拒绝说不说得出口」，不是「谁能执行」。
+     */
+    private fun announceIntentDispatchDenied(
+        groupId: String,
+        agentId: String,
+        agentName: String,
+        senderNode: String,
+        messageId: String?,
+    ) {
+        val key = messageId ?: "$groupId|$agentId|$senderNode"
+        if (!deniedIntentDispatches.add(key)) return
+        host.scope.launch {
+            val st = host.state.value
+            val meta = st.settings.groups.firstOrNull { it.groupId == groupId }
+            val actorName = decidedDisplayName(
+                senderNode, meta?.memberNicks, st.selfNodeId, st.settings.nick,
+            )
+            val text = runCatching { host.uiTexts.agentActionDeniedNotice(actorName, agentName) }
+                .getOrNull().orEmpty()
+            broadcastAgentState(groupId, agentId, AGENT_STATE_FAILED, text)
+        }
+    }
+
+    /** 已公告过的「未授权派单尝试」（键 = messageId），防止同一帧被重投后刷屏。 */
+    private val deniedIntentDispatches = LockedSet<String>()
 
     /**
      * **派单终局失败的唯一发布入口**（群意图路径与工单路径共用）。
@@ -764,6 +870,29 @@ internal class RelayControllerAgentInvokeComponent(private val host: AgentDomain
                 ),
             ),
         )
+        // **提示行是纯本地的（`NoticeKind` 不进协议）** —— 只落本机等于发起方手机上
+        // 一个字都没有，「被拒」与「正在跑」在对面完全同形（真机：手机节点
+        // 没被授 agent 级执行权，首次派单回 DENIED，界面零变化）。这里补一帧事实文本：
+        // 哪一单、谁、为什么。文案走与群路径同一个 uiTexts 桥；桥没装（CLI/测试宿主）
+        // 就退回到结构字段拼接，绝不拼中文常量（`cjkLiteralGate` 同一条纪律）。
+        val peer = convId.takeIf { !it.startsWith("agent:") && !it.startsWith("ws-") }
+        if (peer != null) {
+            host.scope.launch {
+                val text = runCatching {
+                    host.uiTexts.dispatchFailedNotice(safeTitle, agentKey, safeReason)
+                }.getOrNull().orEmpty().ifBlank {
+                    listOf(safeTitle, agentKey, safeReason).filter { it.isNotBlank() }.joinToString(" — ")
+                }
+                if (text.isBlank()) return@launch
+                runCatching { host.runtime?.sendDirectText(peerId = peer, text = text) }
+                    .onFailure { t ->
+                        println(
+                            "[INVOKE] 1:1 failure notice not delivered (" + dispatchId + "): " +
+                                (t.message ?: t::class.simpleName),
+                        )
+                    }
+            }
+        }
     }
 
     /**

@@ -116,7 +116,9 @@ object TicketCardBudget {
             "items" to JsonArray(emptyList()),
             "banner" to buildJsonObject {
                 put("text", "Details externalized to local Artifacts; full board exceeds 5 KiB")
-                put("tone", "warning")
+                // 词表是 `warn`，不是 `warning`。写错不会报错 —— 解析侧 when 落到 else ⇒ Info，
+                // 「这张卡被裁到只剩骨架」的黄条会画成普通信息色，看不出是告警。
+                put("tone", "warn")
             },
         ))
     }

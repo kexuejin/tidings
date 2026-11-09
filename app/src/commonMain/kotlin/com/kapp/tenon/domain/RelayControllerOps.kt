@@ -4,6 +4,7 @@ package com.kapp.tenon.domain
 
 import com.kapp.tenon.domain.model.MessageUi
 import com.kapp.tenon.domain.model.TransferState
+import com.kapp.tenon.domain.model.hasRenderableContent
 import kotlinx.coroutines.flow.update
 import com.kapp.tenon.core.ioDispatcher
 import kotlinx.coroutines.launch
@@ -37,6 +38,13 @@ internal fun RelayController.handlePersist(settings: RelaySettings) {
 
 
 internal fun RelayController.handleAppendMessage(message: MessageUi, incoming: Boolean = false) {
+    // **空帧不进会话流**（判据一处：`hasRenderableContent`）。
+    //
+    // agent 事件流会推只有结构没有正文的帧；它们过去会成一行 MessageEntity ——
+    // 界面靠空气泡防线看不见，但会话列表预览取"最新一条"时会取到它 ⇒ 预览 null
+    // ⇒ 列表写「还没聊过，打个招呼」，而上面明明有上百条真消息（真机 A22）。
+    // 丢弃而不是"插进去让 UI 挡"：库里少一批零正文行，摘要与搜索都不会被它们污染。
+    if (!message.hasRenderableContent) return
     // 可重入：下面的 messagesCtl.handleApplyPendingRecall / refreshPeers / handlePersistThreads 也会取这把锁。
     stateLock.withLock {
         val thread = core.threads.getOrPut(message.peerId) { mutableListOf() }
@@ -109,6 +117,21 @@ internal fun RelayController.replaceMessage(peerId: String, previousId: String, 
     if (message.file != null && message.file.state != TransferState.Active) {
         val emitted = state.value.messages[peerId]?.firstOrNull { it.id == message.id }?.file?.state
         println("[xfer] emitted conv=" + peerId.take(8) + " state=" + emitted)
+    }
+    // **换了 id 就得把旧行删掉。**
+    //
+    // 乐观气泡先用 `local-<n>-<ts>` 落地，发送路径返回后整条换成真实信封 id；内存里是
+    // 一次替换（一条），但库里是**两行** —— `save()` 只做 upsert、不按"快照里没有"反推
+    // 删除（那会把窗口外的历史整批删掉，见 MessageStore.save 的 KDoc）。于是重启后
+    // 同一句话出现两遍，而且两遍都是"我发的"（真机 A22：`local-5-…` 与 `da0f2339` 并存）。
+    // 删除只针对**旧 id 这一行**，语义上就是"这条乐观气泡改名叫真实 id 了"。
+    if (previousId != message.id && persistMessages) {
+        val target = messageStore
+        scope.launch {
+            persistMutex.withLock {
+                withContext(ioDispatcher) { runCatching { target.deleteMessage(previousId) } }
+            }
+        }
     }
     handlePersistThreads()
 }

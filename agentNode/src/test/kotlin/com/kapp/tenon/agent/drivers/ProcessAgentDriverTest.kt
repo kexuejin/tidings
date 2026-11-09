@@ -24,6 +24,9 @@ class ProcessAgentDriverTest {
     ) : Process() {
         @Volatile var killed = false
 
+        /** 最近一次 `waitFor(timeout, unit)` 要的预算（ms）。用来钉「没有在等 300 秒」。 */
+        @Volatile var waitForTimeoutMs: Long? = null
+
         override fun getOutputStream(): OutputStream = OutputStream.nullOutputStream()
         override fun getInputStream(): InputStream = ByteArrayInputStream(stdoutText.toByteArray(StandardCharsets.UTF_8))
         override fun getErrorStream(): InputStream = ByteArrayInputStream(stderrText.toByteArray(StandardCharsets.UTF_8))
@@ -34,6 +37,7 @@ class ProcessAgentDriverTest {
         }
 
         override fun waitFor(timeout: Long, unit: TimeUnit): Boolean {
+            waitForTimeoutMs = unit.toMillis(timeout)
             if (sleepMs > 0) {
                 Thread.sleep(minOf(sleepMs, unit.toMillis(timeout)))
                 return sleepMs <= unit.toMillis(timeout)
@@ -224,6 +228,130 @@ class ProcessAgentDriverTest {
 
             val error = assertIs<DriverEvent.Error>(events.last())
             assertTrue(error.message.contains("timed out after 1s"))
+        }
+    }
+
+    /** 会话对齐键（§9 阶段三）：宿主派起的 CLI 能在 hook 脚本里报出自己的 sessionId。 */
+    @Test
+    fun hookSessionIdEnvIsInjectedForAlignment() {
+        runBlocking {
+            var capturedEnv: Map<String, String>? = null
+            val driver = ProcessAgentDriver(
+                driverId = "env-agent",
+                displayName = "Env",
+                commandTemplate = listOf("agent"),
+                streamFormat = ProcessAgentDriver.FORMAT_TENON_EVENT_STREAM,
+                spawner = { _, _, env ->
+                    capturedEnv = env
+                    MockProcess(stdoutText = "{\"type\":\"end\"}")
+                },
+            )
+            val handle = driver.openSession("/tmp/ws", "sess-env-9")
+            driver.executeTask(handle.sessionId, "run") { }
+            assertEquals(
+                "sess-env-9",
+                capturedEnv?.get(DriverKeys.ENV_HOOK_SESSION_ID),
+                "TENON_HOOK_SESSION_ID 必须注入子进程环境（hook 脚本靠它透传对齐键）",
+            )
+        }
+    }
+
+    /** 单行熔断（§8.2 传输防火墙）：超限行响亮失败并停止消费，不整行进堆。 */
+    @Test
+    fun anOversizedLineCircuitBreaksWithAnErrorEvent() {
+        runBlocking {
+            // 256KiB + 1 字符的单行——没有熔断时它会被 readLine 整行读进宿主堆。
+            val oversized = "x".repeat(DriverLineLimits.MAX_LINE_CHARS + 1)
+            val driver = ProcessAgentDriver(
+                driverId = "flood-agent",
+                displayName = "Flood",
+                commandTemplate = listOf("agent"),
+                streamFormat = ProcessAgentDriver.FORMAT_TENON_EVENT_STREAM,
+                spawner = { _, _, _ -> MockProcess(stdoutText = oversized) },
+            )
+
+            val handle = driver.openSession("/tmp/ws", "sess-flood")
+            val events = mutableListOf<DriverEvent>()
+            driver.executeTask(handle.sessionId, "run") { events.add(it) }
+
+            // 熔断错误先于合成 Finished（进程自然退出后生命周期照常收口）。
+            val error = assertIs<DriverEvent.Error>(events.first())
+            assertTrue(error.message.contains("flood-agent"), "失败信息要点名失控的驱动：" + error.message)
+            assertTrue(
+                error.message.contains(DriverLineLimits.MAX_LINE_CHARS.toString()),
+                "失败信息要给出上限数值：" + error.message,
+            )
+            assertTrue(events.count { it is DriverEvent.Error } == 1, "一次熔断只报一次错")
+        }
+    }
+
+    /**
+     * 反向钉子：超限必须**真的**收场，不能「break 之后等 300 秒」。
+     *
+     * 旧实现的注释写着 "process will be reaped"，实际只 `break` 出读循环，紧接着落到
+     * `waitFor(timeoutSec = 300)` —— 一条超长行换来 **5 分钟静默挂起**，而且进程还活着。
+     * 判据不看耗时（耗时判据在慢机器上会假绿），只看它**向进程要了多长的预算**：
+     * 旧实现是 300_000ms，新实现是杀进程后的 2_000ms 收尸等待。
+     */
+    @Test
+    fun anOversizedLineKillsTheProcessInsteadOfWaitingForTheTimeout() {
+        runBlocking {
+            val oversized = "x".repeat(DriverLineLimits.MAX_LINE_CHARS + 1)
+            lateinit var proc: MockProcess
+            val driver = ProcessAgentDriver(
+                driverId = "flood-agent",
+                displayName = "Flood",
+                commandTemplate = listOf("agent"),
+                streamFormat = ProcessAgentDriver.FORMAT_TENON_EVENT_STREAM,
+                spawner = { _, _, _ -> MockProcess(stdoutText = oversized).also { proc = it } },
+            )
+
+            val handle = driver.openSession("/tmp/ws", "sess-flood-kill")
+            val events = mutableListOf<DriverEvent>()
+            driver.executeTask(handle.sessionId, "run") { events.add(it) }
+
+            assertTrue(proc.killed, "超限必须真的杀进程——旧实现只 break，注释里的 reaped 是假的")
+            assertEquals(
+                2_000L,
+                proc.waitForTimeoutMs,
+                "杀进程后只允许等 2 秒收尸；等到 300 秒就是旧缺陷（一条超长行换来 5 分钟挂起）",
+            )
+            val error = assertIs<DriverEvent.Error>(events.first())
+            assertTrue(error.message.contains("killed"), "失败信息要说明进程已被杀：" + error.message)
+        }
+    }
+
+    /**
+     * stderr 超长行**不**该杀进程：诊断输出不能决定任务生死。
+     *
+     * 但同样不能整行进堆 —— 一个往 stderr 刷 1 GB 单行的进程照样能 OOM 宿主。
+     * 判据：进程不被杀、任务照常 Finished、stderr 里留下一条「已丢弃」的痕迹。
+     */
+    @Test
+    fun anOversizedStderrLineIsDroppedButDoesNotKillTheProcess() {
+        runBlocking {
+            val oversized = "e".repeat(DriverLineLimits.MAX_LINE_CHARS + 1)
+            lateinit var proc: MockProcess
+            val driver = ProcessAgentDriver(
+                driverId = "noisy-agent",
+                displayName = "Noisy",
+                commandTemplate = listOf("agent"),
+                streamFormat = ProcessAgentDriver.FORMAT_TENON_EVENT_STREAM,
+                spawner = { _, _, _ ->
+                    MockProcess(stdoutText = "", stderrText = oversized + "\n", exitCode = 1).also { proc = it }
+                },
+            )
+
+            val handle = driver.openSession("/tmp/ws", "sess-noisy")
+            val events = mutableListOf<DriverEvent>()
+            driver.executeTask(handle.sessionId, "run") { events.add(it) }
+
+            assertTrue(!proc.killed, "stderr 超长只丢内容，不杀进程")
+            val error = assertIs<DriverEvent.Error>(events.last())
+            assertTrue(
+                error.message.contains("dropped"),
+                "stderr 尾部要如实说明那一行被丢弃（而不是装作没发生）：" + error.message,
+            )
         }
     }
 }

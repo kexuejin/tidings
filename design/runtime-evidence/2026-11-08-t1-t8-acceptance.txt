@@ -1,0 +1,744 @@
+统一单聊群聊交互与工作区派单 · T1–T8 全面验收（第八轮）
+========================================================
+日期：2026-11-08 14:28–15:52
+装置：Pixel 6（<device-serial>，com.kapp.tenon.debug，APK lastUpdateTime 14:46:35）
+      + macOS 宿主 /Applications/Tenon.app（重启后 PID 13652，stdout → /private/tmp/tenon-stdout9.log）
+      + 旧构建对端：emulator-5554（2026-11-07 10:07 包，pre-65caa9bd，English UI）
+工作区：teahouse-mobile（ws-e9b18063d183）/ china-pass（ws-3131b40ab6d5）
+装机纪律（ACCEPTANCE §1b）：
+  APK sha256 9aa07e131eb72d7edd53bd87001d12790f65581ec7cb6e377eea94a343197439
+  Tenon 二进制 sha256 b3e722cefa10c9fddd9a51e8fd112128e907ae665d962ccf3609917e65b154fa
+  新符号核验：APK dex 内 DispatchWorkspaceChoice/ChatSenderAttribution/SchemaSelfHeal/
+    hasRenderableContent/lastDispatchWsId 全命中；分发物 orchestration jar 内
+    TicketPatchLedger/ChainWorkspaceResolve 命中；lsregister -f -R -trusted 后重启。
+
+L0 判定（交付口径）
+------------------
+- 8 模块串行 + 10 门禁 + testStabilityGate（3 轮全新 6m6s）+ 2 脚本门禁全绿。
+  说明：8 模块任务对当前树 mostly up-to-date（上一会话已在本树跑过全套；stability 3 轮
+  是全新执行的，覆盖并发面）。
+- design 组初跑红，三处合修后绿（全部按门禁自述流程，非刷基线）：
+  1) designConvergeGate：插件管理原型段 .plg-ico 引入 15px（第 18 种）→ 收敛到同族
+     .av 的 16px 档（CSS 规则 + JS 回退两处）；基线 sha 随源版本重投影
+     （534b750f→d80eef84→08e48f43，--baseline --reason 有记）。
+  2) designDupFrameGate：122 组重复参考图全部是 com/kapp/tidings 旧包名遗留的
+     gitignored 本地产物（现测试源只产 tenon 包）→ 删除 tidings 残树 308 文件，
+     复跑 313 张两两互异。
+  3) designDpDebtGate：账本为生成物，D9–D11 改动后脱钩 → :designDpDebtReport 重生成一致。
+- icon-map 有警示（消费率 86.7%→92.7%，symbol lock 被复用）不拦：属插件管理原型段
+  的增量，留待该段落地时重记基线。
+
+L1 e2e 判定（量具缺口，不是功能失败）
+------------------------------------
+- workspace_collaboration 夹具：协议形状 5 检 + QR 广播注入 + 深链交付 + 外部配对
+  确认框真实点击（闸门生效）全部 [ok]；到 UDP 握手一步死。
+- agent / group / messaging：同样死在握手（peer-handshake / handshake-success）。
+- 根因（四端互证）：luciola 模式下 legacy Discovery 不启动（NodeRuntime.kt:172-176、
+  428-436 哑实现），手机的 17878 只讲 luciola；夹具的明文 entry 静默消失（手机
+  dedup.log 0 命中、peer-endpoints 无新记录、手动 probe 6s 零回包）。桌面端保留
+  legacy 应答（明文 probe 拿到 alive + scan-ranges），故同一夹具打桌面能通、打手机全灭。
+- 处置：夹具 luciola 化列下一轮显式条目；本轮这些环路的覆盖由 L0 网格测试
+  （TwoNodeAgentInvokeTest 双节点真 UDP/TCP）+ T1–T8 真机承担。
+
+T1 项目药丸与单选抽屉 —— ✅ 通过
+--------------------------------
+- 1:1 顶栏药丸「teahouse-mobile」在位；全 UI 树无旧顶栏切换入口与意图胶囊残留。
+- 抽屉标题「选择工作区」，列出 4 个工作区与路径，单选：点 china-pass → 药丸更新 +
+  settings.json lastDispatchWsId=ws-3131b40ab6d5；点回 teahouse-mobile →
+  lastDispatchWsId=ws-e9b18063d183。
+- D8 复验：force-stop → 重启 → 药丸仍是 teahouse-mobile（卸重装 install -r 后仍保持）。
+
+T2 单聊派单全链路（防吞单主判据）—— ✅ 通过（七跳全通）
+------------------------------------------------------
+工单「implement create probe9-20261108.txt PROBE-OK9」（逐字符注入+回读全对）：
+  1. 发送：手机 [send] type=agent-invoke；
+  2. 宿主 [OCGO-BRIDGE] invoke agent=DSH wsId=ws-e9b18063d183
+     convId=25222a45-…（手机视角会话）groupId=null cliDriver=dsh-cli；
+  3. 沙箱真执行：task t-1-9906adea **from merged base 9288f8b9…**（上一单 probe8 合并
+     结果成为新沙箱基 = 合流闭环在自续）→ harvest +1 −0 patch=166 B；
+  4. 卡片到达：手机工单卡 rev 推进、合并按钮在位；
+  5. 产物直投：patch.diff 已接收（downloads 落盘）+ report.json，
+     [xfer] completed ×2 cardFound=true；
+  6. 点「合并此补丁」：宿主 [RELAY-INVOKE] patch merged into workspace by 25222a45-…
+     (card chain-tmw7hhlai); next sandbox base=24ffcb70…；账簿
+     ticket-patches.tsv 新行 chain-tmw7hhlai …/teahouse-mobile …/t-1-9906adea/patch.diff；
+  7. 落盘判据：/workspace/src/teahouse-mobile/probe9-20261108.txt = PROBE-OK9
+     （git status 只 ?? 工作树，不自动提交，与 DesktopPatchMerge 约定一致）；
+     卡面翻「已由 25222a45-… 处理 / Changes merged into workspace / 进展 100%」。
+D9 sender_id 宿主库复验（上轮明说的下次换包复验项）：
+  select sender_id … where text like '%Ticket accepted%' 最新行 =
+  agent:46c23456-6e74-4a7c-aab1-20a1d1284cd6:dsh（15:01:22，本构建落库）——非空、
+  agent: 三段式。落库值署名成立，不再依赖渲染层兜底。
+
+T3 敏感权限就地审批 —— ✅ 通过
+------------------------------
+- 触发：POST /v1/agent/approval {to:<手机>, approvalId:t3-approval-20261108-2,
+  tool:bash, riskLevel:L2}（首次漏 to 字段得 400 bad-request —— 路由校验在位）。
+- 手机渲染审批卡：工具/摘要/拒绝|批准/「此工具始终允许」+ 两种免审范围的解释文案。
+- 点批准 → 手机 AgentApprovalEntity 行 status=approved；宿主
+  GET /v1/agent/sessions?sessionId=t3-session-1 的 approvals[] 同一条
+  status "approved"、updatedAt = 点击时刻。**两端一致，界面与台账没有各说各话。**
+- kind 白名单判据：状态能被推进本身就证明 kind 落在 AgentAckKinds——
+  applyAckToApproval 对未知 kind 返回 UNKNOWN_KIND 且不碰台账。
+- 观察项（O3，不拦）：**已过期的审批仍画「等待你审批工具调用…」横幅**——手机库里
+  5 条 hook-* git push 审批 expiresAt 均已过去数小时，横幅照挂。过期审批应从待办
+  横幅退场或显式标「已过期」。
+
+T4 Diff 审查与翻面持久化 —— ✅ 通过
+----------------------------------
+- diff/合并路径已在 T2 第 5–7 跳走通（patch.diff 打开/分享出口在卡上可见）。
+- 翻面态杀进程重进：am force-stop → 重启 → 重进会话：卡面仍是
+  工单任务/已合并/Changes merged into workspace/进展 100%/已由 25222a45-… 处理；
+  手机 BoardCardRev 有 chain-tmw7hhlai|7（rev 台账真落了盘）。
+
+T5 群聊作战室 —— UI ✅；群绑定派单 ❌（A22 第 5 行仍未闭合，本轮补齐机理）；N>2 受阻
+--------------------------------------------------------------------------------
+- N=2 作战室：标题/成员数/在线数、消息渲染、底部作战条
+  （查看工作区状态/变更统计/跑单元测试/紧急停止）全在位。
+  注：uiautomator dump 对该屏偶发漏报（只回 chrome 节点），以截图为准。
+- 群 @dsh 派单（@dsh create probe10-20261108.txt PROBE-OK10，@ 经提及选择器选入）：
+  宿主 [msg] inbound conv=group:1811f2d5… len=44 → **[NO_WAKE] groupId=1811f2d5…**
+  —— 不派单。机理（比 11-07 的记录更精确了一层）：
+    唤醒门 shouldTriggerAgent → isMentioningAgent(text, agentKinds)，正则
+    (?i)@<kind> 只认**声明过**的 kind（RelayController.kt agentMentionRegex）；而
+    **手机端建的绑定群（新旧都一样）virtualAgents 全空**——本轮新建 china-pass 协同群
+    （e6641fa8）后两端 settings.json 里该群 virtualAgents 仍 NONE；宿主库里历史上有
+    席位的群（a6badc8f 有 DSH 席、e2e 群有 codex 席+defaultWsId）都出自别的建群路径。
+    手机的 @ 选择器可点出 @dsh（数据源=工作区 agent，不是群席位表）⇒
+    **选择器来源 ≠ 群花名册**，正则永远匹配不上 ⇒ 全部 @ 派单落在 NotAddressed。
+    修复方向：建群/进群时按绑定工作区同步席位（seat-sync 对手机路径生效），或让
+    选择器只列群内已声明席位的 agent——两处必须同源。
+- N>2：受阻（见 F1）——手机无法与旧构建节点建交，凑不出第三个可达成员。
+
+T6 宿主离线/睡眠容错 —— 补发 ✅；离线翻面 ✗（新缺陷 D12 立案）
+------------------------------------------------------------
+- 方法：kill -STOP 宿主进程（15:43:19）模拟失联，30/60/100s 三档观测。
+- 队列补发 ✅：失联中手机发 34B 文本 → 宿主 SIGCONT（15:49:30）后 [msg] inbound
+  len=34 到达入库（t6-queue-probe-while-host-sleeping）；全程 closeCount 0；
+  宿主侧 [send] 重试调度 schedule=[1000,2000,4000] 也如期恢复。
+- 离线翻面 ✗ **D12（新立案）**：SIGSTOP 后 5 分钟，手机 1:1 头部仍「在线」绿点、
+  无休眠横幅；link.json online=true / linkConnected=false / dialFailures=8→9 /
+  lastError=hello-rejected。90s（Timings.offlineAfter）翻转在手机上**永不发生**。
+  成因（代码定位）：luciola 模式下 legacy Discovery 被哑实现替换（NodeRuntime.kt:428-436，
+  start() 为空 ⇒ sweepLoop 随之消失），LuciolaDiscoveryEngine 只对 luciola 自己的
+  对端 touch/markOffline，**没有任何路径按 lastSeen>offlineAfter 扫描注册表**。
+  桌面仍跑 legacy Discovery 所以只有单边能看到离线（与 11-08 证据「主机看到手机
+  online=false」同源）。修复方向：把 sweep 提到 NodeRuntime 层或让哑实现/新引擎
+  共用同一把 sweep（判据只有一份）。
+  连带：T6 的休眠横幅（agent_host_sleeping_banner，判据=全部 hostNode 离线）在
+  Android 构建上因此**不可达**；一键打断的入口面也挂在这个横幅/运行态上，本轮无活动
+  任务且横幅不可达，未真机验到（接线由源码守卫 + workspace_collaboration 夹具层覆盖，
+  如实记）。
+
+T7 存量驱动融入 —— ✅ 通过
+-------------------------
+- dsh-cli 驱动全程应答：T2 沙箱 20s 级执行、NDJSON 会话链、终局文本、补丁产出，
+  无一次「发了没回」。
+- 发送者标签唯一（本轮增量口径）：今天新增的 agent 行，宿主与手机都只有
+  agent:46c23456-…:dsh 一种拼写（宿主 4 行 / 手机 10 行）。历史库里的
+  agent:DSH|860 + agent:dsh|1353 双拼写是 §2.4 已立案的旧账，本轮零新增。
+
+T8 新旧互通 —— A5 双向 ✅（逐字节）；群 leg 构造性覆盖；「零 wire 变更」成立
+------------------------------------------------------------------------
+- 旧→新：模拟器（pre-65caa9bd 包）发 862 字符长文（>800B 阈值 ⇒ TCP）→ 宿主
+  MessageEntity 收到 length=862、首尾标记逐字一致（A5T8OLDNODE…END-OF-A5-T8）。
+- 新→旧：宿主 POST /v1/send 865 字符 → 模拟器 messages.log 里 inbound msg 帧的
+  payload.text 与发送串 **equal: True**；旧 UI 完整渲染（截图）。
+- 新增键暴露面核对：本轮工作树对 wire 的全部改动 = textPayload/textPayloadWithCard
+  增加可选 senderId（null 时不写键、逐字节等同旧形状）与 1:1 卡片键；GROUP_TEXT_KEYS
+  **0 行 diff**；golden vectors（EXTENSION_VECTORS / OLD_NODE_EXTENSION_VERDICTS）
+  由 L0 钉住未动。群白名单无新键 ⇒ 旧节点拒帧风险不成立（构造性证明）。
+- 群 leg 未跑活体（旧构建建群 UI 驱动成本超出本轮预算）：如实记，风险由上一条覆盖。
+
+F1 luciola/legacy 不对称（产品口径待决，不是本轮引入）
+----------------------------------------------------
+- 手机（AndroidLuciolaHost enabled=true 默认开）＝全 luciola：legacy 发现应答消失
+  （D12 同根）+ **无法与任何 legacy 节点建交**（模拟器 greeting 明文 entry 零反应，
+  节点页 Unreachable；e2e 夹具同灭）。
+- 桌面（DesktopLuciolaHost 默认关，双门控）＝legacy 发现/传输在位 + 可收 luciola 文件
+  信道（[luciola] accept-in ×3，files=1/1/2）。
+- 后果：A18（跨网/上游基准互通）的旧读数不再代表手机现状——手机连不上 0.61.1 基准端。
+  若口径是「旧对端走桌面桥或必须升级」，PROTOCOL-COVERAGE/SECURITY/ACCEPTANCE 要改口径；
+  若不是，Android 侧要保留 legacy 应答直至阶段三。**废弃要有声：量具、文档、两端对齐
+  三处显式入账。**
+
+回归条目（本轮实测口径）
+----------------------
+- closeCount：**全程 0**（两次换装、宿主重启、SIGSTOP/SIGCONT、链路断连重拨全经历）。
+- A5 长文本 TCP ✅（T8 双向）；A6 离线队列补发 ✅（T6）；A11 键盘与 insets ✅
+  （键盘弹起时顶栏药丸不遮挡——多轮注入截图在案）；A16 群聊 ✅（手机↔宿主；
+  旧节点 leg 见 T8）；A19 Agent 唤醒 ✅（1:1 药丸派单即唤醒通路，T2）；A21 加密
+  数据面 ✅（luciola 文件信道 accept-in 三次，known=true）。
+- A18：受 F1 影响如实降级——手机↔上游基准路径本轮不可达，需按 F1 的产品口径重开。
+- A20 gta1 门控：本轮未跑（需要触发门控的 agent 流），源码守卫在位，如实记。
+
+立案清单（本轮新增/更新）
+----------------------
+| 编号 | 一句话 | 判据 |
+|---|---|---|
+| D12 | Android luciola 化丢掉 offline 翻转：哑 Discovery 无 sweepLoop | SIGSTOP 宿主 5min，UI 仍「在线」，banner 不可达；NodeRuntime.kt:428-436 |
+| A22-R5+ | 手机端建的绑定群不声明席位（新旧都空），@ 选择器来源≠群花名册 ⇒ 一切 @ 派单 NO_WAKE | 新建 china-pass 群 virtualAgents=NONE；群 @dsh → [NO_WAKE] groupId=… |
+| O3 | 过期审批仍画「等待你审批」横幅 | 手机库 5 条 hook-* 审批 expiresAt 已过数小时仍 pending 展示 |
+| F1 | luciola/legacy 两端不对称：手机全 luciola、桌面默认 legacy；夹具与旧对端全灭 | 四端互证读数见 L1/F1 节 |
+| 量具 | e2e 夹具 luciola 化（下一轮显式条目） | 夹具对 luciola 手机握手全灭，对桌面可通 |
+
+探针清理
+--------
+probe5/7/8/9（本轮与前几轮合流产物）待删；probe10 未产生（NO_WAKE 未执行）；
+模拟器上的 192.0.2.22 手动对端留着（Unreachable 状态本身就是 F1 的证据）。
+china-pass 协同群为真机新建的绑定群，保留。
+
+结论
+----
+T1/T2/T3/T4/T7 通过；T2 的七跳与 D9 复验把「发送侧一切正常、接收侧什么都没有」的
+主威胁按到了底（本轮所有「到没到」都以两端库/工作区文件为准，不看气泡与信封 ts）。
+T5 派单与 T6 横幅两处红是**真缺陷**（机理都已定位到行），不反填；T8 的零 wire 声明
+成立。D12/A22-R5/F1/O3 四条立案进下一轮。
+
+
+十二、用户问出的产物可见面问题（15:55–16:05 追加核对）
+------------------------------------------------------
+用户看完手机/桌面截图问三件事：为什么一张 patch.diff 出现多张卡、diff 点「打开」是
+什么、桌面为什么同时有「正在发送 100%」和「发送成功」两张卡。逐条对账：
+
+1. **同一份 patch.diff 走了两条通道**（代码自证「产物双路问题」：
+   ArtifactDelivery.kt deliverCliArtifacts 注释「任务卡才是决策面…产物双路问题的
+   另一半」）。一次派单的产物面 =
+   a) 工单卡内嵌附件（「完整补丁，供审阅合并」+「合并此补丁」按钮）——补丁包路；
+   b) 产物管道（deliverCliArtifacts，purpose=artifact 免确认）直投 report.json +
+      **又一份 patch.diff**。
+   两条路同走 sendAgentArtifacts(FilePurpose.ARTIFACT)。合并动作的补丁取自宿主本地
+   patchPath（TicketPatchLedger），**手机上那份只是审阅副本**，不是合并的数据源。
+   ⇒ 重复本身是**设计如此但值得产品收敛**（审阅副本与原始产物二选一）。
+2. **「打开」显示什么**：AndroidReceivedFileActions.open = ACTION_VIEW + FileProvider
+   + mimeTypeOf(file)。patch.diff 的 mime 是 text/x-diff ⇒ 系统里能处理该类型的
+   应用（通常是文本查看器）打开**原始 unified diff 文本**（几行
+   `diff --git … +PROBE-OK9`），应用内没有内置 diff 渲染器；类型无应用可开时
+   自动退分享面板（AndroidReceivedFileActions.kt:47-51）。
+3. **桌面「正在发送 100%」+「发送成功」两张卡**：不是同一条传输渲染两次——是
+   **两条独立出站传输**（补丁包一份 patch.diff + 产物管道又一份 patch.diff），
+   各自一张出站卡。宿主日志：state=Offered ×3、completed 仅 ×2（dc319bfb/d3a102cd）
+   ⇒ 有一条出站**从未收敛**。机理判断：被卡槽路径消费的那条（手机端把补丁包收进
+   工单卡附件槽、原位替换）不回传输层完成态，桌面那张出站卡就永远停在
+   「正在发送 100%」。真实缺陷，立案 **D13**（修法方向：卡槽消费完成时也要给
+   传输层回执，或补丁包不复用文件传输通道）。
+4. 另一张「传输失败：写入本机磁盘失败」的 patch.diff 卡是**上午 D3 时代的历史遗留**
+   （toConvPeerId 污染那轮 state=Failed ×3 的残卡），目标会话永远不可达，只能手动
+   取消——失败传输常驻可续传是设计，但这张的死因已被修掉，卡会一直在。
+5. 顺带发现（15:58）：宿主恢复后，失联中排队的那条**纯文本**「t6-queue-probe…」
+   被按 1:1 每条触发（shouldTriggerAgent groupId==null 恒 true）拉起 dsh 执行，
+   以「read-only violation: bash」失败落会话——1:1 纯文本=唤醒，行为符合现规格，
+   但「排队补发」与「唤醒执行」两个语义在恢复瞬间叠加，用户观感值得产品确认。
+
+十三、D7 升格：卡面「已由 <nodeId> 处理」——用户独立第二次撞见（16:10）
+----------------------------------------------------------------------
+用户指着 probe9 卡的「已由 25222a45-4b84-4e9a-9870-d13f86b2a8de 处理」问"这个没有
+名字的吗"。两件事比上轮记的更糟/更准：
+
+1. **渲染处没有任何名字解析**（纠正上一轮「昵称来自群成员表，1:1 走 fallback」的
+   归因——不是查了查不到，是压根没查）：AgentCards.kt:258-268 把 card.decidedBy
+   原样塞进 strings.xml:1769 的「已由 %1$s 处理」。decidedBy 是**拍板节点的
+   nodeId**（卡动作帧 recordCardAction 的 decidedBy）。
+2. **这一行说的是用户自己**：25222a45-… = 本机 nodeId（link.json self）——合并就是
+   用户在本机点的。最贴切的显示是「你」，其次是本机昵称「Pixel 6」；
+   裸 nodeId 是三重失真（自己不认得自己 + 不可读 + 像一台陌生设备，正好撞上
+   §2.4「合成名没被真名顶掉」的用户观感）。
+
+修法口径（下一轮）：decidedBy 渲染前过一道统一解析，与 D9 的归属判据同源——
+  等于 self nodeId ⇒ 「你」；否则依次 群 memberNicks → known-peers 昵称 →
+  agent: 三段式的 agent 名 → 都没有才退 nodeId。D7 从「文案口径、功能无碍」
+  升格为正式文案缺陷。
+
+
+十四、修复轮（17:00 收账）：D7 / O3 / D12 已修并真机闭环
+--------------------------------------------------------
+修复顺序按风险从小到大，每条都走「修复→钉子→反向验证→真机复验」。
+D13 本轮只追踪不修（见下）。
+
+D7（decidedBy 零解析）—— ✅ 修
+  修法：AgentCardBubble 增加 decidedByCtx 参数（ChatMessageList 传 bubbleCtx，
+  气泡口径=裸 nodeId 是人），渲染前过 resolveNodeIdentity —— 与消息署名同一套
+  解析（§2.4 一个事实一个来源）：self ⇒ selfNick，别人 ⇒ 昵称/群昵称/档案名，
+  都没有 ⇒ 8 位短 id（比 36 位裸串可读）。解析函数零新增（复用域层）。
+  钉子：SenderIdentityTest +4 例（decidedBy 契约：self/群昵称/未知 8 位兜底/
+  agent 宿主在气泡口径下按昵称）+ DecidedByWiringTest 3 例（源码守卫：解析调用在、
+  ChatMessageList 真传了 ctx、UI 侧不许自带第二套兜底）。
+  反向验证：把渲染改回 raw decided ⇒ theFooterResolvesNamesThroughTheSharedResolver
+  红（1 failed）；复原后绿。
+  真机：重装后 probe9 卡知情行 = 「已由 Pixel 6 处理」（修复前是
+  25222a45-4b84-… 裸串）。截图在案。
+  **环境问题如实记**：曾计划 self 走整句资源「你已处理」（card_decided_by_self），
+  但本机编译环境对**新增**资源键一律 Unresolved reference——生成物在盘上含该键
+  （accessor + cvr 都有）、同文件同形状老键可解析，冷建/清 Gradle 守护/清 Kotlin
+  守护/清 .gradle/--no-build-cache 均复现；注入语法错误到生成文件编译器却不报，
+  说明编译器读的视图与磁盘脱钩。未定案，先落 displayName 方案（等效用户价值），
+  该键已从两份 strings.xml 撤下，待环境恢复再补「你已处理」。
+
+O3（过期审批仍挂「等待你审批」）—— ✅ 修
+  修正归因：那行字不是审批横幅，是**输入提示条**（AgentComposerStatus 的
+  AwaitingApproval 档）；真正的病是 ChatAgentSessionState.sessionHasPendingApproval
+  手写 `status == "pending"`，漏掉过期判据——isPendingApproval 的 KDoc 正是骂这种
+  手写尺子。DesktopNavigation.desktopNavBadges 的徽标计数同病。
+  修法：两处都改走全仓唯一判据（isPendingApproval / pendingApprovalCount）；
+  desktopNavBadges 签名加 now（缺省 0 保持旧读数行为，调用方显式传才剔过期）。
+  钉子：ApprovalPendingRulerGuardTest 2 例（源码守卫：手写尺子不得回来）。
+  真机：重装后 1:1 输入提示条消失（修复前恒挂），5 条过期 hook-* 审批不再驱动它。
+
+D12（luciola 模式丢 offline 翻转）—— ✅ 修
+  修法：哑实现提名为 SweepOnlyDiscoveryEngine(registry, timings)，发现动作仍
+  no-op，但 start() 启动与 legacy sweepLoop 同判据同节奏的 sweep
+  （sweepInterval 节奏、offlineAfter 阈值），stop() 收掉。
+  钉子：LegacyDiscoveryVisibilityTest +2 例（行为级：offlineAfter=200/sweep=20ms
+  下静默对端 5s 内翻离线；反向探针=阈值 Long.MAX_VALUE 时同对端 300ms 内**不**翻
+  —— 翻面确实由阈值驱动）。
+  真机：重装后重演 SIGSTOP：t=100s 时 link.json online=False（修复前恒 True）、
+  头部「离线」、**休眠横幅出现**（宿主设备睡眠/离线中 · 命令已安全排队挂起…）、
+  底部「对方离线，消息会排队」；SIGCONT 12s 后 online=True、横幅消失；
+  全程 closeCount 0。T6 的「一键打断」入口面由此恢复可达（仍未单独验，无活动任务）。
+  注：改动在 core 的并发路径 ⇒ testStabilityGate 随 L0 复跑。
+
+D13（桌面出站卡停「正在发送 100%」）—— 追踪完毕，本轮不修
+  追踪结论：出站侧 Completed 只由 TransferServerEvent.Served 驱动
+  （TransferManager.kt:497-508）——必须收端真来 TCP 拉取。三条 offer 全是
+  purpose=ARTIFACT（autoAcceptsFile 免确认），auto-accept 后
+  「registerOnChannel(等推送) vs push=false 的发端(等拉取)」存在既有的
+  互等死锁形态（TransferManager.kt:934-970 的注释自证同类真身），stall
+  看门狗只救信道登记路径。哪一跳没走完需要 transferId 级追踪（三条 id、
+  两端 accept/channel/pull 日志逐条对），是独立一轮的活。立案不变。
+
+装机（§1b）
+  APK sha256 79e5563425b60bffe3beec164eebdf27043906944638434b4eb05493cfb5303b，
+  lastUpdateTime 16:56:18；SweepOnlyDiscoveryEngine 符号 ×3 在 dex。
+  宿主本轮未换包（三条修复都在手机侧生效；core 变更随下次打包进宿主）。
+
+未提交提醒
+  本轮修复（D7/O3/D12）+ 第八轮验收证据 + DESIGN 三处合修全部在工作树，
+  待评审后按「一件事一条提交」拆分。
+
+
+L0 修复轮复跑（17:00–17:16）
+---------------------------
+- 8 模块串行：**全新执行**绿（6m07s——本轮改动让任务变脏，不是缓存读数）。
+- 10 门禁：envDependentTestGate 初跑红（D12 新测试的字面量 delay 被扫成 B 类
+  「断言前固定 delay 赌时序」）⇒ 改命名常量（POLL_MS 轮询 / ABSENCE_WINDOW_MS
+  缺席断言=15 个 sweep 周期，KDoc 写明不是赌一次时序）⇒ 复扫 A/B=0、门禁绿。
+  constructionTraceGate 在链条里报过一次「1 条新增」，独立复跑为绿——那次是
+  与链条里的 testStabilityGate 并发抢同一构建树的脏读，独立跑为准。
+- design 组绿；**testStabilityGate 3 轮全部通过**（链条里那次红同上，并发脏读，
+  独立复跑为准；D12 触碰 core 并发路径，本门禁必跑——绿）。
+- 脚本门禁（unused-imports / palette）：绿。
+
+
+十五、卡片家族规格扫描（用户指出：测试只见到了工单卡一种）
+--------------------------------------------------------
+用户问"完整一轮没有覆盖原型稿里面的卡片"。对账方法：发射侧逐字读
+`StageChain.cardOf` / `HealSteering` / `DesktopWorkerWatchdog.withFailureCheck` /
+`ArtifactPipe.upgradeArtifactsSelfDescribing`，把**实际会发出的每一种形态**按发射
+JSON 形状喂进手机端 `parseAgentCard`，钉住 UI 模型必须可见的事实。
+
+新钉子：`AgentCardFamilySpecTest`（composeApp，10 形态 × 9 例）
+  proposed（受理：actions start/cancel + labelKey + bdot=run）/ prototype（diff
+  hunks 解析）/ working（elapsedSec 耗时段 + 第 N/M 棒 chip + abort-task +
+  items detail）/ review_ready（自描述产物 intent/delivered/mime + 门禁 chip +
+  bdot=done）/ blocked（受阻 chip + bdot=fail）/ aborted（worktree 保留 banner +
+  bdot=fail）/ 崩溃检查项（observation + drawer 抽屉）/ 熔断卡（纠偏输入槽 +
+  放弃保留现场两个动作）/ decided 知情行 / merged 终态。
+  反向探针：砍掉解析器 elapsedSec 接线 ⇒ working 例红（唯一失败），复原绿。
+  全部卡套件回归（Render/Acceptance/DiffArtifact/Policy/StatusSingleSource +
+  agentNode StageChainTest）：绿。
+
+两笔更正（如实记）：
+1. **F2 误判纠正**：受理卡的「立即执行/取消」**早就有** —— cardOf 尾部的
+   proposed 分支发 start-task/cancel-task（英文兜底 label + labelKey 路由），
+   宿主 HostCardActions 的两个分支、CardActionLabelKeys 的词条路由、
+   strings.xml 的 card_action_start_task/cancel_task 全部现成。本轮曾据此
+   误插一个重复块（label 写成 actionId），当场发现并撤销——重复块会让尾部
+   分支覆盖前者的输出，幸好形状一致未产生用户可见差异，但已撤干净
+   （StageChain.kt 对 HEAD 零 diff）。真正没人用的只是 publishTicketCard 的
+   options 参数（死参数，候选清理项，不是用户可见缺口）。
+   回归钉：StageChainTest +2（proposed 动作形状 + 各状态动作分工不得互串）。
+2. **T5 群 @dsh 的「席位声明缺失」结论不变**，但本轮确认提及正则本身
+   （(?i)@<kind>）与宿主分支都健康，缺口单点在席位声明。
+
+覆盖现状矩阵（形态 → 测试 → 真机）
+  proposed/working/merged/aborted/blocked/崩溃检查/熔断卡/自描述产物/diff/decided：
+  解析+模型层全部有钉（本轮）；真机已见：工单卡三态（T2/T4）、审批卡（T3）、
+  文件卡（T2）、休眠横幅（D12 复验）。真机未见：prototype/blocked/熔断/崩溃卡的
+  现场驱动（各需专门任务场景）——解析已钉，真机驱动列入后续按需。
+
+
+十六、真机驱动剩余卡片形态（18:05–19:15）——D14 立案并修第一段 + 两个次生现象立案
+--------------------------------------------------------------------------------
+驱动过程本身就是一轮验收：prototype 派单抓到 D14（活体静默丢失），heal 场景真机闭环，
+两种新卡片形态上屏。
+
+D14（新立案，§3 家族）：error+card 的 agent-invoke-result 被手机整帧丢弃
+  现场：prototype 派单（prompt 含 "prototype"）→ 宿主意图分诊判为只读研讨 →
+  研讨 agent 用 bash ⇒ [READ_ONLY] violation ⇒ 失败结果回程
+  `[send] … type=agent-invoke-result size=600` ⇒
+  `[flush] drop … reason=undecodable:bad-payload:agent-invoke-result`
+  —— 用户侧零显示（§3「发送侧一切正常、接收侧什么都没有」）。
+  根因：宿主 DesktopExtension.withCard 的契约是「受阻/中止/退单**带终局卡**回
+  —— 派单处看到有卡就不再补横幅」，而 core 校验器 validateInvokeResult 还钉着
+  旧规则「card 只在 done 时存在」—— 两端演进脱钩，宿主发出注定被拒的帧。
+  修法（第一段）：校验器允许 error 结果携带终局卡（denied/no-executor/no-plugin/
+  timeout 仍不带卡：没开工的拒绝没有执行现场）。钉子 AgentInvokeCodecTest +3
+  （error+card 合法 / denied+card 仍拒 / 按 Host 真实形状的 decodeTcp 重放），
+  反向探针红→绿。
+  **真机复验未完成，两个次生现象挡路（各自立案）**：
+  D15 重放循环：讨论型派单的文本/租约被反复重发——7 个 OCGGO 周期，每周期
+    = 文本帧(len=64) + invoke + ask 卡 + READ_ONLY violation，强停 App 后仍继续
+    （队列/租约持久化驱动），直到租约到期自止。首因疑似：首个结果帧被 D14 丢掉
+    后租约无终态 ⇒ 重试机制反复重派（D14 是因，D15 是果——修复后是否仍复现待验）。
+  D16 结果帧缺失：7 个周期里宿主只发出过 1 条结果帧（修复前的 600B）；
+    修复后唯一一次结果（574B，18:47）仍被拒 ⇒ 当时手机包里还有第二个违规值
+    或载荷与模型不符；带诊断插桩的包（18:56）再驱动时，宿主对后续周期**零
+    结果帧发送**（reply 通道疑似空），插桩未获得开火机会。诊断插桩已撤，
+    CodecInvoke 对「error+card 允许」的修复保留（测试钉死）。
+
+真机新见形态（覆盖矩阵更新）
+  prototype 卡：working 态「Generating interactive prototype (prototype.html)…
+  ｜下一步：无需你操作 / 进展 20% (8s)」上屏（截图）；原型任务自迭代完成
+  （+1083 行 mockup，50 KB patch）；「Interactive prototype ready. Reply to
+  adjust it, or approve to start development.」送达。approve-prototype 按钮
+  在 cardOf 尾部 prototype 分支 + JVM 扫描钉住（真机截按钮因滚动锚点未捕获，
+  如实记）。
+  heal 循环：verify FAILED exit=1 (npm test) → heal 修复（t-4 快照
+  package.json +22 −1）→ verify passed in 230ms → 交付 2 个文件 → 合并按钮卡。
+  熔断卡未到（heal 第一轮就修好）——必败场景按需再构造（dsh-probe 已备
+  git 仓 + 必败 test script）。
+  ask 卡（研讨提问）：chain-tmw7oinah-ask 上屏（讨论流长轮询提问）。
+  传输失败复现：patch.diff「传输失败：写入本机磁盘失败」再现一张（D13 族，
+  可续传/继续/取消），同批 report.json 与后续 patch.diff 均成功——偶发，
+  已在案。
+
+观察项 O4：宿主事件循环停顿被 D12 修复首次显形——原型任务重载期间 presence
+  间隙 >90s，sweep 如实把对端翻「离线」+ 横幅出现，随后自恢复（closeCount 0）。
+  这不是 sweep 的缺陷（它在如实报告真实停顿），是宿主重载下 presence 喂不上
+  的性能观察项。
+
+装机（§1b）：三轮换装 16:56 / 18:16 / 19:15，最终 APK sha256
+  9ca84edbe8e0bef8e2fb638406f37abf64857586f5e555351ddb8cf686332028（诊断插桩
+  已撤，CodecInvoke 保留 D14 修复）。
+
+
+十七、O1 收口：会话列表行与头部同一身份口径（19:30）
+----------------------------------------------------
+用户问完「为什么手机显示 dsh、桌面显示 Pixel 6」后要求把这些优化修复。三条里两条是
+设计原则的对称应用（无需改），一条是真不一致 —— O1（§十一.4 观察项）：**列表行**
+显示设备昵称（<host>-97 + Agent 徽章）、**头部**显示 agent 名（dsh）。
+
+先澄清非缺陷的两条（代码核对）：
+  药丸 = 派单指向控件，数据驱动（ChatScreen.kt availableWorkspaces =
+  agentWorkspaces.filter { it.peerId == peer.nodeId }，size>1 才显示）——
+  手机↔桌面会话里桌面宿主宣告了 4 个工作区所以手机有药丸；桌面↔手机会话里
+  手机不宿主工作区所以没有。两端跑同一份共享 ChatScreen
+  （DesktopChatPane:145 调用），无平台分支；桌面与另一台 agent 宿主开 1:1
+  时同样会出现药丸。
+  direction-ask 卡在桌面截图里缺失是**滚动位置**：宿主库已核对该卡落库
+  （chain-tmw7oinah-ask，19:05:22，card_json 完整），桌面聊天走同一份
+  共享 ChatScreen，滚到底即同卡。顺带：这张意图澄清卡（作为调整发送/派为
+  新任务）是卡片家族第 11 种上真机的形态。
+
+O1 修复（取舍翻转，用户两次独立指出）：
+  RelayUiState.convTitle / conversations() 内层 convTitle 两处，1:1 对端是
+  agent 宿主时改走 resolveNodeIdentity（senderContext 同源）⇒ 列表行 =
+  agent 名，与头部一致。旧的「恒为设备昵称」取舍（防 agent 数据到齐后标题
+  中途换名）翻转：漂移只在声明首次到达的一刻、与头部同步；「一个会话两个
+  名字」被用户判为更伤。agent 归属的署名/徽标表达不变。
+  钉子：RelayUiStateTest 旧钉 oneToOneConversationTitleIsStable… **改写**为
+  oneToOneTitleMatchesTheHeaderAgentNameOnceAgentDataArrives（期望 dsh，
+  KDoc 记录取舍翻转缘由）+ 新增 conversationListRowMatchesTheHeader…（projections
+  侧）。反向探针：把 convTitle 恢复 peer().displayName 旧路 ⇒ 新钉红（1 failed），
+  复原绿。
+  无生产调用方的切片版 convTitle（DesktopFilesPane 未被组合）加 KDoc 注记，
+  防两套口径复活。
+  真机：重装后列表行 = 「dsh [Agent]」（截图在案），与头部完全一致；
+  teahouse-mobile 协同群（群名）与 china-pass 协同群不受影响。
+  注：改注释时留过一个日期字面量被 constructionTraceGate 当场抓红 —— 已改
+  通用表述，门禁绿（门禁在「新写注释带日期」这件事上依然有效）。
+
+装机：APK sha256 065f3ac8670acbfae90d2f2d0295c815af77f8a1941d8fa83af1df854aa651e5
+（+ 注释修正后的重建），lastUpdateTime 19:36:37 / 复装 19:4x。
+
+
+十八、真实需求端到端 ×2 轮 + diff 可视化修复 + NodeOutbound 事故与重建（22:30–23:40）
+------------------------------------------------------------------------------------
+用户验收判据升级：真实工作区的真实需求，从发起到验收合并，卡片可读不空话，
+diff 按原型可视化，经得起多轮复现。
+
+**diff 可视化修复（发射侧）**：parseHarvest 此前只填统计（path/summary/+−），
+hunk 恒空 ⇒ 审阅卡只剩「N 个文件」一句 —— 用户的「虚假的一句话」 precisely 命中。
+修法：parseHarvest 从真补丁提取变更行（diff --git 文件头 + @@ + 加减行，
+剔 index/+++ /--- 信封行），预算 60 行 ×200 字符，超出截断并如实标注行数
+（完整内容仍在 patch.diff 附件）。钉子 StageChainTest +2（真补丁 fixture 的
+hunk 提取 + 截断诚实标注），反向探针（hunk 恒空）2 failed ⇒ 复原绿。
+渲染端 CardDiffHunkViewer 原本就绪（折叠/展开 + 行号），只是断粮。
+
+**第一轮（真实需求）**：手机药丸选 teahouse-mobile，派「新增
+docs/acceptance-guide.md，12 行中文 A22 真机验收指南」→
+proposed 卡（含 start-task/cancel-task 动作）→ 8s 自动开工 → working（耗时段）
+→ sandbox +180 −0（9.3 KB patch）→ review_ready 卡**内嵌可视化 diff**：
+文件头 + @@ -0,0 +1,180 @@ + 加行绿显（「# A22 单聊派单闭环 · 真机验收指南」…）
++ 展开代码控件 —— 真内容上屏（截图）。点「合并此补丁」→
+[RELAY-INVOKE] patch merged … next sandbox base=afa07fa5 →
+**docs/acceptance-guide.md 真落工作区**（180 行，内容为真 A22 指南）→
+卡面翻「已由 Pixel 6 处理」（D7 渲染 ✓）。
+
+**第二轮（复现）**：派「在该文件追加 Known limits 一节（3 条中文 bullet）」→
+sandbox +6 −0 → review_ready（889 B）→ 手机 messages.log 证实 rev 8 帧到达、
+hunk 8 行真内容（@@ -178,3 +178,9 @@ + ## 7. Known limits（已知限制）…）→
+点「合并此补丁」→ [RELAY-INVOKE] … (card chain-tmw7z0136) →
+**文件第 7 节真落工作区**（3 条已知限制 bullet 在案）。两轮全链一致 ✓。
+
+**D14 真机验证 ✅**：宿主加 TEMP-D14 载荷日志（发送前打完整 payload）拿到
+真实字节 —— READ_ONLY 失败的结果帧确为 error+card 形态；重派同 prompt 触发
+violation ⇒ 结果帧 error+card（574B 级）被手机**正常接受**（stdout 全程
+0 次 flush drop），失败行「由 DSH 执行失败：read-only violation: bash」上屏。
+TEMP-D14 与 D14DIAG 插桩全部撤除，CodecInvoke 保留修复（测试钉死）。
+
+**D17（新立案）：入站 1:1 卡片的 rev 推进不落库**。两轮同现象：手机
+messages.log 证明 rev 2–8 帧全部到达（inbound 8 条），UI 内存态也渲染了最新
+rev（hunk/翻面在会话内可见），但 MessageEntity 的 card_json 停在 rev 1
+（proposed）——两轮、两张卡、同一现象。后果：杀 App 重进后卡片回退到旧 rev
+（T4 的翻面持久化对新卡失效）。对照：T4（15:05）时 probe9 卡的翻面**曾**
+跨重启持久 —— 15:05 之后入库的回归（嫌疑面：D11 的持久化改动）。
+追查独立一轮。
+
+**NodeOutbound 事故与重建（如实记）**：排查中一次 `git checkout
+NodeOutbound.kt` 把**未提交的 D2 代码**（sendDirectText 等 +52 行）一并回滚。
+抢救链：git stash（旧分支的不相干）/ worktrees（无此文件）/ APFS 快照（仅 OS
+更新）皆空 ⇒ **从 19:14 的编译类字节码重建**（javap 反汇编：签名五参、
+clampDirectText=clampUtf8(text,4096)、payload 分支 textPayloadWithCard/textPayload
+(senderId)、makeEnvelope(id = envelopeId ?: newId())、返回 OutgoingText 三参、
+**不落 messageStore**——气泡留档由域层负责）。重建后 :app :core 全量回归绿
+（DirectTextCard/SenderId/Clamp + TwoNodeAgentInvokeTest 全绿 = 测试即规格的
+一次实战验证）。教训入账：**未提交的工作树上禁用 checkout 单文件回滚**；
+丢源码时编译产物（javap）+ 钉子测试可以完整复原行为。
+
+**D15 收口（归因 D14）**：D14 修复后同场景（4 次真实派单）重放循环**未再
+复现** —— 每单恰好一次执行、一次结果。7 周期循环与「首个结果帧被丢 ⇒ 租约
+无终态 ⇒ 重试」因果链一致，归档为 D14 的果，不再独立追。
+
+**O4 复现**：第二轮 review 期间宿主再次出现 presence 间隙（手机横幅 + 离线
+标记，任务结束后自恢复，closeCount 0）—— 沙箱重载下宿主 presence 喂不上，
+性能观察项维持。
+
+最终装机：手机 9ca84edb（+O1 注释修正重建，字节同 065f3acb）；
+宿主 = 本轮重建（diff 可视化 + 分诊门控 + D14 修复）。
+
+
+十九、D17 撤销：我的诊断漏了 card_payload 列（11-09 晨，过夜自然重启定论）
+--------------------------------------------------------------------------
+D17 的「rev 推进不落库」**不成立**。数据核对（第二轮卡 chain-tmw7z0136）：
+  card_json   = 首帧锚（rev 1 proposed，682 B）—— **T-2d 设计如此**：
+                「card 首帧原文不动、cardPayload 携带最新载荷」
+  card_payload = **rev 10 / merged / hunk 8 行 / +6 −0 / 进展 100**（932 B）——
+                最新载荷完整落库
+  MessageUi.renderCard = cardPayload ?: card（:361，「渲染用载荷 = 原位刷新的
+                最新，从未刷新回退首帧」——分工由这一处收口）
+重启读路径走 cardPayload ⇒ 重启后渲染最新 rev。**过夜自然重启后真机核验**：
+  第二张卡完整保持「工单任务 / 已合并 / Changes merged into workspace /
+  进展 100% / teahouse-mobile +6 −0 / 可视化 diff（+## 7. Known limits
+  （已知限制）… 真内容）/ patch.diff 附件 / 已由 Pixel 6 处理」（截图在案）。
+  会话列表行也保持「dsh [Agent]」（O1 修复跨重启 ✓）。
+D17 撤销，改记一条**诊断方法教训**：判「落库了吗」必须把行的**所有载荷列**
+  （card_json 与 card_payload 是两个锚）都看过再下结论 —— 只看一列就把设计
+  误判成缺陷。原 T-2d 注释（RelayControllerMessagesComponent:558-563）与
+  MessageUi.renderCard 的 KDoc 早已写明分工。
+真实需求端到端的复现性就此闭环：两轮派单-合并 + 过夜重启持久 + O1/翻面/diff
+  可视化全部跨重启保持。
+
+
+二十、feat/delegation-ws-id-threading 分支并入（用户指令）
+--------------------------------------------------------
+分支净新增 = 一个提交 b30266d8（组队与提议派单贯通显式 wsId——显式指针未命中即
+终局退单）；另两提交（23658cea/93dfaceb）已在主线（分支侧为分叉前旧对象）。
+内容：wsId 贯通 讨论→提议→组队/多棒/单棒 全链（Proposal 数据类 +wsId、
+runDiscussion/delegateByPlan(Await)/dispatchMultiRoleChain/dispatchPlanStages
+签名贯通、提议开工按 proposal.wsId 派单）+ **resolveWorkspacePath 显式指针
+未命中即终局退单**（原落穿点：指针无效掉进群绑定/单工作区推导——单工作区宿主上
+一次指错的派单会静默写进那唯一的仓；现在显式指针只有两种结局：对的仓，或退单）。
+
+并入方式：主文件与未提交工作树重叠（直接 merge 会拒），走
+`git diff HEAD...branch > patch && git apply --3way`——两个测试文件干净落上，
+主文件手工逐处并入（两入口贯通、Proposal +wsId、签名链、显式未命中退单；
+与我的「1:1 药丸不分诊」门控共存：runDiscussion 带上 wsId 但 1:1 药丸不再进讨论）。
+验证：:orchestration 全套 --rerun-tasks 绿（含分支带来的
+DesktopWorkerOrchestrator1to1WorkspaceDispatchTest 6 例——贯通三处/invoker 转发/
+未知 wsId ⇒ handback 等、1to1DispatchTest 4 例）；:app :core :orchestration
+--rerun-tasks 全绿（1m58s）。
+
+
+**并入后真机快验（第三轮）**：合并版宿主（PID 522）重派「implement create
+docs/acceptance-guide.md with a closing line noting the wsId threading merge
+verification round」→ wsId=ws-e9b18063d183 照常穿透 → sandbox +4 −0 →
+review 卡照常 → 点「合并此补丁」→ [RELAY-INVOKE] patch merged …
+(card chain-tmw8fbtl4) → 文件尾行
+「> 本轮：**wsId threading merge verification round**」真落工作区。
+贯通 + 退单规则在合并版宿主上行为不变 ✓。一张 artifact-pipe patch.diff
+再演「传输失败」（D13 族第 3 例，同批其余成功）。
+
+
+二十一并入 + 文件卡优化（11-09）
+--------------------------------
+1. **feat/delegation-ws-id-threading 并入**：b30266d8（组队与提议派单贯通显式 wsId +
+   显式指针未命中即终局退单）经 3way 手工并入脏工作树（主文件手工逐处、测试文件
+   3way 干净落上）。:orchestration --rerun-tasks 绿（含分支 1to1 两套 10 例）；
+   :app :core :orchestration --rerun-tasks 全绿（1m58s）。真机第三轮：合并版宿主上
+   全链照常（wsId 穿透 → 执行 → 合并 → 文件尾行「dedupe round」真落工作区）。
+2. **D13 族根因修复（双发摘除）**：真实载荷日志 + 手机 inbound 记录证实
+   patch.diff 报价 ×2 —— invoke 桥（DesktopExtension）在编排器审阅流已投
+   （bundle + oversized pipe）之后又按沙箱收割清单投一遍 ⇒ 两份同路径报价并发写
+   downloads/patch.diff/patch.diff ⇒ 一成功一「写入本机磁盘失败」。
+   修法：摘除 invoke 桥的重复投递（产物投递全归编排器审阅流）；去重轮真机：
+   patch.diff 报价单份、**无传输失败卡**。
+3. **文件卡失败态样式收敛**：失败态此前「失败原因 + 可续传标签 + 继续 + 取消」
+   四件套 —— 「可续传」与「继续」同义重复。改：能力折进状态行
+   （失败原因 · 可续传），动作只留 [继续] [取消]。
+4. **O4 再现**：dedupe 轮 watch 首棒 idle（dsh 停滞）→ 看门狗掐掉重启第二棒 →
+   provider 恢复后第三棒完成。宿主重载 presence 间隙延续（closeCount 0）。
+
+挂账不变：D13 的传输失败历史卡（旧会话残留）、A22-R5 席位声明、O3 整句。
+
+
+二十二、五张原型卡的逐张对账（用户提交原型截图问「都有吗」）
+----------------------------------------------------------
+用户拿 5 张原型卡截图问「测试中从没见过」。逐张对账（代码 + 真机）：
+
+1. **审阅卡**（验收清单 + 可视化 diff + patch.diff 附件 + 打回/批准合并）：
+   发射 ✓ / **真机 ✓（本日）**。验收清单行在 test script 存在时上屏
+   （dsh-probe 派单：✓ DSH / ✓ 验收 orchestrator 两行 + 可视化 diff + 合并按钮，
+   截图在案）。缺口一处：**打回修改按钮** —— 渲染（CardRevisionDrawer 抽屉 +
+   芯片/输入框）与宿主分支（reject-revision| 反向注水）全备，但 review_ready
+   的 actions 不含它：工单成功时已出 activeTickets，「打回」需要重开工单语义
+   （原型形态 vs 生命周期现状的产品口径待定）。熔断卡上的打回抽屉是活的
+   （HealSteering DRAWER_ACTION_ID = reject-revision）。
+2. **高危命令审批卡**（cmd + 租约屏障 + 风险预警/替代方案）：**发射侧缺** ——
+   cmd 字段全仓无发射方；接收侧全备（HostCardActions 高危租约屏障 fail-closed +
+   cmd 渲染盒 + expiresAt 租约）。这是原型有、实现缺的形态：需要把执行审批卡
+   发射接上（driver 危险命令检测 → 卡带 cmd + expiresAt）。列入下一轮。
+3. **降级/重试卡**（租约到期 + 故障诊断 + 降级/重试双动作）：发射 ✓、
+   真机见过（11-07 证据：租约 600s 到期 → 超时卡上群带 [重试]/[降级为本地执行]）。
+   本轮未复现（需 agent 停滞满租约期）。
+4. **终期交付卡**（验收清单 + 交付总结 + acceptance-report.md）：同 1 的清单行 +
+   artifacts 附件 ✓（真机：验收行 + patch.diff 附件）；acceptance-report.md
+   需驱动产出同名产物。
+5. **分支销毁审批卡**：同 2 —— cmd 卡家族，发射侧缺。
+
+结论矩阵：管线完备度（接收/动作/持久化）五张全备；缺口集中在**发射侧两处**
+（cmd 审批卡族无发射方；review_ready 的打回动作需要重开工单语义的产品口径）
+与**触发场景**（清单行需 test script——已示范；租约到期需停滞满期）。
+
+
+二十三、挂账五项的修复与验证轮（11-09）
+----------------------------------------
+1. **O3 整句「你已处理」**：资源生成环境**跨天仍未恢复**（字符串重加 + 引用 ⇒
+   Unresolved 复现；守护 -9 + 缓存清杀 + 冷编译均复现；生成物在盘、同文件老键
+   可解析——非缓存问题，疑似 compose-resources 生成器/编译器版本组合缺陷）。
+   维持 displayName 方案（今晨过夜重启截图已证其在真机生效）。字符串已再撤。
+2. **A22-R5 数据层修复 ✅ 真机验证**：两处根因 ——
+   a) handleCreateWorkspaceGroup 的工作区过滤 `peerId == self`：手机建绑定群时
+      工作区是**对端宣告的**，永远匹配不上 ⇒ 席位恒空。修：按 wsId 匹配任意
+      宿主宣告的行（wsId 唯一无歧义）。
+   b) virtualAgentMemberFor 的 hostNodeId = selfNodeId：席位指到本机，而 agent
+      在对端。修：hostNodeId = ws.peerId（工作区宣告方 = agent 真正运行的那台；
+      桌面自建流程里 ws.peerId == self，两种情形都对）。
+   钉子：RelayControllerGroupTest + aWorkspaceAnnouncedByARemoteHostDeclaresItsSeat
+   （走真实入站帧路径 handleOnInbound，非测试特权直改 state）——反向探针
+   （过滤改回 peerId==self）1 failed ⇒ 复原绿。
+   真机：新建 default-workspace 协同群 ⇒ **席位声明跨端传播**（宿主 settings
+   收到 virtualAgents：agentId=dsh-a030882e / hostNodeId=桌面 / defaultWsId 齐）。
+3. **A22-R5 第二层缺口（新立案 D18）**：席位落库后群 @ 提议**仍 NO_WAKE** ——
+   三种 token（手打 @dsh、选择器裸 @dsh、选择器全名 @dsh-a030882e-default-workspace）
+   全部不唤醒。选择器的候选源与匹配器的 agentKinds 源仍不一致（@ 选择器给裸
+   @dsh 的候选来自 agentKind，匹配器的 kinds 只认席位 agentId 全串）。
+   追查锚点：桌面侧 shouldTriggerAgent 收到的 agentKinds 集合内容（打一行诊断
+   即可二分）。
+4. **D13 根因修复（双发摘除）后的真机验证**：去重轮 + 第三轮（wsId 贯通验证轮）
+   patch.diff 报价单份、无传输失败卡；第三轮合并落盘（文件尾行 dedupe round）。
+   注意：dsh provider 停滞（watchdog idle 掐掉第一棒重启第二棒、第三棒完成）——
+   O4 现象与 provider 不稳并存，非本次改动引入。
+5. **熔断/崩溃卡现场驱动**：被 dsh provider 停滞拖累（第一轮 watchdog 掐棒重启、
+   第三轮跑了 ~8 分钟完成）——必败脚本场景待 provider 稳定窗口再驱动。
+6. **O4**：性能观察项维持（本轮 dedupe 轮再现一次 presence 间隙，自恢复）。
+
+
+二十四、D18 二分结果：提及匹配已通，卡点下移到委派解析（11-09）
+----------------------------------------------------------------
+kinds 诊断（TEMP-D18）二分定案：桌面匹配器实际收到 agentKinds=[dsh-a030882e]、
+席位声明在（与 A22-R5 修复一致）。全名 token 帧（len=104）到达后：
+  [msg] inbound len=104 → TEMP-D18 kinds=[dsh-a030882e] → **无 NO_WAKE**
+  ⇒ shouldTriggerAgent 通过（提及匹配 ✓ —— A22-R5 数据层修复 + 匹配器联动已通）。
+但派单管线在后续静默停住：0 次 OCGO-BRIDGE、无工单卡。卡点 =
+  群 @dsh 提议 route=Local → onAgentPrompt → handlePrompt → 分诊（已加
+  explicitMention 豁免：@点名 = 显式派单指令，不进讨论）→ parseDelegation
+  （"@dsh-a030882e-default-workspace  create …" 对 available={"dsh-a030882e"}）
+  —— 解析或其后的链路静默停住（无异常日志）。D18 改判为「提及匹配已通、
+  委派解析静默停住」，修复定位到 parseDelegation 的显式点名解析分支。
+顺带的匹配器发现：选择器候选含裸 @dsh（来自 agentKind），而匹配器的 kinds
+  只有席位 agentId 全串 ⇒ 裸 token 必不匹配 —— 选择器候选必须只给
+  **匹配器接受的 token**（同一个源），否则用户按候选打的 @ 永远叫不醒。
+TEMP-D18 插桩已撤（源码恢复）。宿主当前部署版含插桩（TEMP 日志有标注），
+下次打包自然替换。
+
+
+二十五、D18 修复后真机 T5 重验：静默拆成四层，派单管线打通（11-09 11:00–11:45）
+----------------------------------------------------------------------
+两端换包：`:androidApp:assembleDebug` + `:desktopApp:packageDistributionForCurrentOS`
+（1m）。宿主旧包 `Tenon.app` 备份到 `/tmp/Tenon.app.bak-20261109-110505`、
+`/tmp/Tenon.app.bak2-*`；手机 `com.kapp.tenon.debug` 重装。宿主以完整 PATH
+（`/opt/homebrew/bin` + managed node）+ stdout 重定向启动，日志 `/tmp/tenon-stdout19.log`
+/ `20.log`。Pixel 6 (25222a45) online / linkConnected=true。
+探针四条，均在 `default-workspace 协同群`（group:ddc9986d…），@ 候选经选择器点入：
+  a/b `@dsh-a030882e-default-workspace create d18-t5-ok/b.txt`
+  c   `… create d18-t5-c.txt`（补授权后）
+  d   `… create d18-t5-d.txt`（cliKey 归位修复后）
+
+第一层（推翻 11-09 晨的 D18 定位）：入站帧**带 agentIntent**
+  `{"agentId":"dsh-a030882e","wsId":"ws-10e08f36c636","mode":"auto"}`。
+  `intentOwnsDispatch` 为真 ⇒ 走 `handleInboundAgentIntent`，**排除** `onAgentPrompt`；
+  D18 修的「点名事实随帧传递 + 分诊豁免」是文本路由支路，真机主路根本没经过它。
+  这也解释了「代码测试全绿、真机仍静默」。无 `[NO_WAKE]` 不能反证唤醒通过：
+  `logNoWakeIfNeeded` 只在 `None(NotAddressed)` 且 agent 在场时才记。
+
+第二层（静默的真身）：意图帧走到授权门被 `AgentExecAuthorizer` 拒 ⇒ 落
+  **两条** `AgentNotAuthorized` 本地行（`local-1-…` / `local-2-…`，见 relay.db
+  seq 12/13/15/16）⇒ return，零卡片。`notice` 是纯本地数据、不进协议，
+  **手机端永远看不见**，所以表现为「全静默」而不是「有拒绝提示」。
+  根因：台账 `scope=agent` 的 agentKey 是 `DSH`，帧里是席位 ID `dsh-a030882e`；
+  `AgentGrantStore.agentKeyMatches` 只做大小写归一；`forExecution=true` 时
+  `scope=all`（手机有 admin）按设计不自动覆盖具体 agent ⇒ 判假。
+  验证：PUT 一条 `scope=agent/agentKey=dsh-a030882e [rw]` 授权后立刻出现
+  `[OCGO-BRIDGE] invoke …` 与 `agent_state=failed` 横幅（11:28，c 探针），
+  手机可见「…没有完成这次任务」。**此授权是绕过缺陷的临时配置，可 revoke**。
+
+第三层：`[OCGO-BRIDGE] … plugin=null cliDriver=null` —— `DesktopExtension` 的
+  `invokeExecutor` 把未归位的席位 ID 直接喂 `created.resolveCliDriver(...)`
+  ⇒ CLI 分支进不去 ⇒ `NO_PLUGIN`。修法：用同一份 `AgentProfiles.resolveKey`
+  与编排器 `availableAgentKeys()`（private→internal，名册不在装配层再问一遍）
+  算出 `cliKey`，喂给 `resolveCliDriver` 与 `handlePromptAwait(agentKey=)`。
+  守卫 `DesktopInvokeWiringGuardTest` 同步加三条断言；反向探针 3 组
+  （cliKey 不归位 / 判据用原键 / 传参用原键）全部按预期变红，源码逐字复原。
+
+第四层（终局读数，d 探针 11:41）：重新打包换宿主后
+  `[OCGO-BRIDGE] invoke agent=dsh-a030882e … cliKey=dsh cliDriver=dsh-cli`
+  ⇒ 编排器出**工单卡** `chain-tmw8ps1vv`（type=task-board, rev=1, state=blocked）；
+  手机同屏可见「工单任务 / 受阻·等你给方向 / 进展 0% / Retry」及
+  `agent_state=failed` 横幅「由 Dsh 执行失败：Handed back: no git workspace
+  bound to group」。**静默彻底消失，变成 fail-loud 且可重试**。
+  剩余受阻是环境数据：`ws-10e08f36c636` 指向
+  `/Users/ci/Documents/deepseek-harness/default-workspace`，目录存在但
+  `git rev-parse` = not a git repository ⇒ `dispatchSingleWorker` 的
+  `isGitRepo(repoPath)` 判假退单。不是派单管线缺陷。
+
+判定：T5 的「群 @ → 派单管线 → 工单卡」已打通，但任务未执行完（工单 blocked），
+  **ACCEPTANCE.md 的 T5 / `@mention` 仍记 ❌，本轮不反填**。要跑满 T5，需把该
+  工作区改绑/初始化为真 git 仓库，或在手机切到已有的 git 工作区
+  （ws-e9b18063d183 → /workspace/src/teahouse-mobile）再派一单。
+
+验证链：`:orchestration:test` + `:desktopApp:test` 定向绿；8 模块 + 10 源码门 +
+  7 设计门 `VERIFY=0`（2m36s）；`unused-imports.py --check` = 0、
+  `check-design-palette.py --css-vars` = 0；重打包 `REPACK=0`；
+  新包 jar 内含 `cliKey` 符号（换包前验过，避免拿旧包读数）。
+

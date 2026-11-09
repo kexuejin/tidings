@@ -1,7 +1,7 @@
-# 捎话 Tidings · 第三方智能体开发接入套件 (Agent Development Kit & Handover Spec)
+# 榫卯 Tenon · 第三方智能体开发接入套件 (Agent Development Kit & Handover Spec)
 
-> **适用对象**：为 Tidings 开发私有智能体、外部插件（Python / Node.js / Rust / Go 等）、CLI 包装器或团队定制 Agent 的第三方开发者与开源社区协作者。  
-> **文档版本**：v1.0.0-ADK (对齐 Tidings M2/M4/M7 插件架构规范)  
+> **适用对象**：为 榫卯 (Tenon) 开发私有智能体、外部插件（Python / Node.js / Rust / Go 等）、CLI 包装器或团队定制 Agent 的第三方开发者与开源社区协作者。  
+> **文档版本**：v1.0.0-ADK (对齐 Tenon 插件架构规范)  
 > **核心原则**：**零侵入、零特权、进程外独立常驻、标准 HTTP/NDJSON 通信、代码不离机、凭证不上网**。
 
 ---
@@ -24,14 +24,14 @@
 
 ## 1. 系统角色与架构拓扑
 
-在 Tidings 局域网协同 IM 中，第三方智能体（Third-party Agent）是一个**运行在机主本地、通过标准本地回环（`127.0.0.1`）与 Tidings 宿主通信的独立进程**。
+在 榫卯 (Tenon) 局域网协同 IM 中，第三方智能体（Third-party Agent）是一个**运行在机主本地、通过标准本地回环（`127.0.0.1`）与 Tenon 宿主通信的独立进程**。
 
 ```
 +---------------------------------------------------------------------------------+
 | 机主物理机 (Host Machine: macOS / Linux / Windows)                                |
 |                                                                                 |
 |  +---------------------------+        注册 & 转发指令 (HTTP IPC)                 |
-|  | Tidings 桌面宿主          | <─────────────────────────────────────────────+  |
+|  | Tenon 桌面宿主            | <─────────────────────────────────────────────+  |
 |  | (:agentNode 控制面)       |                                                |  |
 |  | - 端口: 8848 (默认)       | ────+                                          |  |
 |  +---------------------------+     │ 派单: POST /task/execute                 |  |
@@ -57,7 +57,7 @@
 
 ## 2. 插件元数据清单 (`manifest.json`)
 
-第三方 Agent 根目录下必须提供一份 `manifest.json`，在启动时向 Tidings 宿主注册：
+第三方 Agent 根目录下必须提供一份 `manifest.json`，在启动时向 Tenon 宿主注册：
 
 ```json
 {
@@ -85,7 +85,8 @@
 ### 字段约束规范（发送侧不变量）：
 1. `pluginId`：必须匹配正则 `^[a-z0-9][a-z0-9-]{0,63}$`（纯小写字母、数字和连字符，且不得以连字符开头）；
 2. `leader.agentId`：群内 `@` 的唯一标识，同样遵循 slug 字符集约束，长度不超过 32；
-3. `type`：`"single"`（单兵执行）或 `"team"`（多 Agent 内部协同团队，对外单一窗口统一由 leader 发言）。
+3. `type`：`"single"`（单兵执行）或 `"team"`（多 Agent 内部协同团队，对外单一窗口统一由 leader 发言）；
+4. **未知键显式拒绝（严格解析）**：清单里出现本宿主不认识的键（如规划中的 `triggers` / `permissions`）时，注册以 `unknown-field` 错误码**显式拒绝**，磁盘安装以 `bad-manifest` 拒装。宿主绝不会静默忽略未知字段——一个「注册成功但永不生效」的声明比一条被拒的注册危害大得多。触发器等演进字段在宿主正式支持前不要写入清单（见 [AGENT-TRIGGER-AND-PLUGIN-SPECIFICATION.md](AGENT-TRIGGER-AND-PLUGIN-SPECIFICATION.md)）。
 
 ---
 

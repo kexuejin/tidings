@@ -62,7 +62,7 @@ enum class CardBlock {
  */
 object CardTypeRegistry {
 
-    /** 七类卡的推荐构成（顺序无关，是集合不是序列）。 */
+    /** 各类卡的推荐构成（顺序无关，是集合不是序列）。 */
     val recommended: Map<String, Set<CardBlock>> = mapOf(
         "task-board" to setOf(CardBlock.Progress, CardBlock.StepList, CardBlock.ButtonGroup),
         "approval" to setOf(CardBlock.Banner, CardBlock.DiffViewer, CardBlock.ButtonGroup),
@@ -74,6 +74,13 @@ object CardTypeRegistry {
         "assignment" to setOf(CardBlock.StepList),
         // 反向多选（§7.9）：横幅说问题，选项块给决策 —— 给它按钮之外的块是稀释。
         "ask_question" to setOf(CardBlock.Banner, CardBlock.OptionList),
+        // 手机侧 invoke 卡（`AgentInvokeBoardCard`）：它把组员的 worker 卡**收编**进来
+        // （diff / steps / artifacts 都来自那边），所以这里只列它自有的块 ——
+        // 横幅三个状态分支都写、终点态补 progress=100、只有超时态给两个按钮。
+        "team-task-board" to setOf(CardBlock.Banner, CardBlock.Progress, CardBlock.ButtonGroup),
+        // 求方向卡（`askPrototypeDirection`）：横幅问「调整还是新任务」，两个按钮是唯一出口。
+        // 不走 options —— options 装的是「回给 agent 的预设文本」，装不下「去向」语义。
+        "direction-ask" to setOf(CardBlock.Banner, CardBlock.ButtonGroup),
     )
 
     /** 查建议构成；未知 type（含 null / 空白）返回 null = 没有建议，不是拒绝。 */

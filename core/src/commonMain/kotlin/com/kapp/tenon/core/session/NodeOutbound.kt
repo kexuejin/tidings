@@ -15,6 +15,7 @@ import com.kapp.tenon.core.transport.DIRECTION_OUT
 import com.kapp.tenon.core.transport.SendOutcome
 import kotlinx.serialization.json.JsonArray
 import kotlinx.serialization.json.JsonObject
+import kotlinx.serialization.json.JsonElement
 import kotlinx.serialization.json.JsonPrimitive
 import kotlinx.serialization.json.buildJsonObject
 import kotlinx.serialization.json.put
@@ -363,6 +364,35 @@ internal class NodeOutbound(
             envelopeJson = envelopeJson,
             at = nowMillis(),
         )
+        return OutgoingText(outcome = outcome, envelopeId = envelope.id, envelopeJson = envelopeJson)
+    }
+    /**
+     * 1:1 直派的**唯一带卡出口**：受理/终局/失败的可见性都走这里 —— 文本 + 可选卡 +
+     * 信封 id（与 invoke 的信封对齐：手机端租约与卡片原位替换按它认亲）+ senderId
+     * （agent 署名；单聊署名判据与头部同一份解析）。
+     *
+     * 与 [sendTextWithEnvelope] 的分工：不落 messageStore（派单的气泡留档由
+     * 域层的 sayToPeer 本机落行负责，这里只管发帧）；限长与单聊文本同一口径
+     * （TCP 4096，发送侧截断 —— 不产出注定被拒的帧）。card 的两种形态：
+     * done ⇒ 执行产出卡；error ⇒ 受阻/中止/退单的终局卡（校验器同规则，见
+     * CodecInvoke.validateInvokeResult）。
+     */
+    suspend fun sendDirectText(
+        peerId: String,
+        text: String,
+        card: JsonObject? = null,
+        envelopeId: String? = null,
+        senderId: String? = null,
+    ): OutgoingText {
+        val clamped = clampDirectText(text)
+        val payload: JsonElement = if (card != null) {
+            Codec.textPayloadWithCard(clamped, card, senderId)
+        } else {
+            Codec.textPayload(clamped, senderId = senderId)
+        }
+        val envelope = makeEnvelope(MsgTypes.MSG, selfId(), payload, id = envelopeId ?: newId())
+        val outcome = messenger.sendUserMessage(peerId, envelope)
+        val envelopeJson = Codec.encode(envelope)
         return OutgoingText(outcome = outcome, envelopeId = envelope.id, envelopeJson = envelopeJson)
     }
 
@@ -915,7 +945,16 @@ internal class NodeOutbound(
         ),
     )
 
-    /** `agent-invoke` 的应答帧：结果状态 + 可选的执行产出卡片（由发起方拼看板卡上群）。 */
+    /**
+     * `agent-invoke` 的应答帧：结果状态 + 可选的执行产出卡片（由发起方拼看板卡上群）。
+     *
+     * summary/error **发送侧钳制**（[clampInvokeResultFields]）：编排器的退单横幅
+     * （首因+末因+标签+人助提示）超 `AGENT_NOTE` 就会被对端 `validateInvokeResult`
+     * 整帧拒收 —— 队列重放每轮 decode 失败、整帧删除，发起方永远等不到租约终态
+     * （真机现场：`flush drop … bad-payload:agent-invoke-result, 1712 B`，
+     * 「宿主已结单、手机租约悬空」）。完整横幅不丢：它住在卡片 banner 里，
+     * 卡片按 `CARD_BYTES` 校验，装得下。
+     */
     suspend fun sendAgentInvokeResult(
         peerId: String,
         invokeId: String,
@@ -925,14 +964,17 @@ internal class NodeOutbound(
         error: String? = null,
         card: JsonObject? = null,
         at: Long? = null,
-    ): SendOutcome = messenger.sendUserMessage(
-        peerId,
-        makeEnvelope(
-            MsgTypes.AGENT_INVOKE_RESULT,
-            selfId(),
-            Codec.agentInvokeResultPayload(invokeId, ok, status, summary, error, card, at),
-        ),
-    )
+    ): SendOutcome {
+        val clamped = clampInvokeResultFields(summary, error)
+        return messenger.sendUserMessage(
+            peerId,
+            makeEnvelope(
+                MsgTypes.AGENT_INVOKE_RESULT,
+                selfId(),
+                Codec.agentInvokeResultPayload(invokeId, ok, status, clamped.summary, clamped.error, card, at),
+            ),
+        )
+    }
 
     suspend fun sendAgentRun(
         peerId: String,
@@ -1254,6 +1296,27 @@ internal fun clampGroupText(text: String): String =
  */
 internal fun clampDirectText(text: String): String =
     clampUtf8(text, Protocol.TEXT_TCP_LIMIT) ?: text
+
+/** `agent-invoke-result` 两个文本字段的钳制结果（null 语义原样保留）。 */
+internal data class InvokeResultFields(val summary: String?, val error: String?)
+
+/**
+ * `agent-invoke-result` 的 summary / error **发送侧钳制**（与 [clampDirectText]
+ * 同一条纪律：不产出注定被拒的帧）。
+ *
+ * 接收侧 `CodecInvoke.validateInvokeResult` 对两个字段做的是**字节上限校验**
+ * （summary ≤ `AGENT_INVOKE_SUMMARY`、error ≤ `AGENT_NOTE`），超限 = 整帧
+ * `bad-payload` 拒收。发送侧的 error 常是编排器的退单横幅（多轮原因拼接），
+ * 天然可能超 200 字节 —— 不钳制的后果不是「对方看到截断」，而是**租约终态
+ * 彻底不到**（队列重放同一毒帧 → 每轮 decode 失败 → 整帧删除 → 发起方悬空）。
+ *
+ * [clampUtf8] 自带省略号预算（limit 内含 `…` 3 字节），截点落在码点边界。
+ */
+internal fun clampInvokeResultFields(summary: String?, error: String?): InvokeResultFields =
+    InvokeResultFields(
+        summary = clampUtf8(summary, Limits.AGENT_INVOKE_SUMMARY),
+        error = clampUtf8(error, Limits.AGENT_NOTE),
+    )
 
 /**
  * agent-event body 的**发送侧钳制上限**：`AGENT_BODY_TCP_LIMIT`（= 整帧硬上限）

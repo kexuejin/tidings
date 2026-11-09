@@ -248,14 +248,14 @@ Team Folder 是**现有会话列表的分组视图**，不新增会话类型、�
 | C1 | 已落地 | `ConvIdContractTest`（4 项）：两种键形态、`team-*`/`plugin-*` 不是群键、groupId 可含冒号（`removePrefix` 而非 `split`） |
 | C2 收编 | 已落地 | `healStaleBusySessions` 改调 `isStaleBusy` + `AgentSessionStates`；`InboxWorkspaceUnits` 删除私有 `AGENT_STATE_BUSY`；`StaleBusySingleSourceTest`（7 项，含 4 个行为等价钉子） |
 | C2 门控 | 已落地 | `AgentSessionSendGateTest`（2 项）：已门控入口必须保留门控；`ControlPlaneHookRoutes` / `DesktopExtension` 两处既有未门控点按数量基线只许降不许升 |
-| C3 | 阻塞 | `DispatchWorkspaceChoice.kt` 尚未入库（工作区 untracked、不在 HEAD），守卫待其入库后补 |
+| C3 | 已覆盖（无需新增） | `DispatchWorkspaceChoice.kt` 已入库；守卫 `DispatchWorkspaceMemoryWiringTest`（4 项：落盘、设置字段、药丸与派单同一回退链）已在 main 上，含三条反向探针。**不重复造** |
 | C4 | 已落地（含接线） | `foldTeamRows` + `TeamFolderProjectionTest`（8 项）；`TeamFolderRows` + `ConversationListPanel` 三分支 + 侧栏透传 + `TeamFolderWiringGuardTest`（4 项）；`designScreenDiff` 差异组数与改动前一致（13 组存量） |
 | C4 数据侧 | 已落地 | `teamFoldersByConv`（域层纯函数）+ `TeamFoldersTest`（11 项）：同宿主匹配、agentKey 归一、任一 BUSY 即 Running、无会话即 Idle、多团队保序 |
 | C4 成员 | 已落地 | 成员行点击 → 写 `@<leader> ` 草稿 + 打开群会话；没有 `onDraftChange` 的壳整行不可点；`TeamFolderWiringGuardTest` 断言链路完整 |
 | C4 交互 | 已落地 | 整行点击 = 进群会话，右侧符号 = 折叠（独立热区、不冒泡）；`TeamFolderWiringGuardTest` 断言两个入口都在 |
-| C4 参考帧 | 已落地（替代原型） | 两帧 Compose 参考图 `chat-home-team-folder` / `-expanded`（`ScreenshotPreviewsChat.kt`）+ 新增 `initialExpandedTeams` 截图专用接缝（与 `initialFilter` 同一条先例，生产调用方一律默认折叠）；`TeamFolderWiringGuardTest` 断言两帧与接缝都存在 |
-| C4 未读承接 | 已落地（看图才发现） | 折叠态下组头替代会话行，原先不画未读 ⇒ 该格数字从列表消失，而副标是按全部会话求和（"4 条未读"只数得出 2 条）。`FeedRow.Folder` 增 `unread`、组头复用 `badgeCountText`；`TeamFolderProjectionTest` 增 1 项 |
-| C4 原型 | **延期（有明确条件）** | 改 `prototype/relay.html` 会让 116 帧 `source_sha` 全失效（`shoot-relay.py` 逐帧校验）且新屏必然给 `design-screen-diff` 添新棘轮键；HEAD 上已有 13 组红（`m-sendfolder` 3 / `m-folderin` 3 / `m-screencard` 2 / `d-emoji` 3 / `m-msgmenu` 1 / `m-histdate` 1，全部是别人的），此刻 `--baseline` 重投影会把它们一并洗白。**解锁条件**：13 组清零（`design-screen-diff.py --all --check` 报 0 组）后一次性落，详见 §7.2 |
+| C4 参考帧 | 已落地 | 两帧 Compose 参考图 `chat-home-team-folder` / `-expanded`（`ScreenshotPreviewsChat.kt`）+ `initialExpandedTeamConvs` 截图专用接缝（与 `initialFilter` 同一条先例，生产调用方一律默认折叠）；`TeamFolderWiringGuardTest` 断言两帧与接缝都在 |
+| C4 未读承接 | **已被形态取代** | "组头替代会话行"本身被推翻（丢预览/时间），会话行内嵌后未读天然跟着行走，`FeedRow.Folder.unread` 补丁已删除。教训保留：**列表的基本单位不能被另一种行型替代** |
+| C4 原型 | 已落地（2026-11-09） | 新屏 `m-home-team-folder-open`（展开态；折叠态 = `m01-home` 本身）；117 帧全量重拍；台账已登记（落点点名 `TeamFolderRows.kt`）；基线带理由重投影 **408 组**（原型 sha `08e48f43 → b013591a`）。解锁条件因 main 侧重投影而提前满足 |
 | C4 外壳 | 已落地 | 手机 `ConversationsScreen` 与桌面 `ConversationsPane` 各自 `remember` 计算并持有 `expandedTeams`；桌面四档都透传（守卫按 4 处计数）；容器 `ConversationListPanel` 保持无状态 |
 
 验证：`:core:jvmTest` / `:app:jvmTest` / `:composeApp:jvmTest` 按 `AGENTS.md §1` 串行 `--max-workers=1` 全绿；`cjkLiteralGate` / `constructionTraceGate` / `staleCommentRefGate` / `domainComposeFreeGate` / `envDependentTestGate` 全绿；`tools/unused-imports.py --check` 干净。**未跑** `testStabilityGate` 与七个设计门——本轮没动并发、存储、设计 token、原型与截图夹具。
@@ -279,6 +279,13 @@ Team Folder 是**现有会话列表的分组视图**，不新增会话类型、�
 7. 重投影：`design-screen-diff.py --baseline --reason "新增 m-home-team-folder 折叠态"`，此时 reason 只写这一件，13 组一笔都不许进。
 
 **顺带记录一条本地事实**：`[事实]` `:androidApp:validateDebugScreenshotTest` 在本仓本地**恒红**（315 条全部 `ScreenshotImageNotFoundException`）——参考图没有入库，不是改动引起的。要看图用 `updateDebugScreenshotTest` 渲染到 `build/`，别把它当回归。
+
+**执行结果（2026-11-09）**：清单已走完，两处与预想不同，记录给后来人——
+1. "13 组清零"不是被修掉的，是 main 侧**重投影了基线**（403 组）——门绿了但欠账被记录而非清偿；
+   本轮重投影（408 组）因此不会再吞任何人的红。
+2. `check-contrast` 在 main 上**本来就是红的**（156 处 3.83:1，全在代码 diff 视图 `div.df`）——
+   用 `git stash push -- prototype/relay.html` 切两版对照确认本轮零新增；它的清偿是独立欠账，
+   不在本清单内。
 
 ## 8. 文档状态与引用
 

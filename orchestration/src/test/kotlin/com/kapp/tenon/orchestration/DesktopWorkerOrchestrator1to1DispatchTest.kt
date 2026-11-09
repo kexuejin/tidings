@@ -171,6 +171,36 @@ class DesktopWorkerOrchestrator1to1DispatchTest {
         )
     }
 
+    /**
+     * **invoke 路的追问分支必须与文本路由同判据**（真机现场）：
+     * 原型待选期的正文在 `followUpIfActive`（文本路）出方向确认卡，而
+     * `handlePromptAwait`（invoke 路）缺同一分支 ⇒ 同一句追问在 1:1 双派 ——
+     * 文本路出 `chain-<id>-ask` 方向卡、invoke 路另开一张全新工单（其卡面还写着
+     * 「Reply to adjust it」，与实际行为相反）。手机 1:1 的派单生命周期归 invoke
+     * 通路，这条分支就是它的追问语义。
+     *
+     * 结构钉子：prototype 分支必须存在于 `handlePromptAwait`，且排在 proposed
+     * 撤单分支之前（顺序错了，待选工单会先被当点将期撤掉）。
+     */
+    @Test
+    fun invokeAwaitHandlesPrototypeStageLikeTheTextRoute() {
+        val path = "orchestration/src/main/kotlin/com/kapp/tenon/orchestration/DesktopWorkerOrchestrator.kt"
+        val code = GuardSourceScan.stripComments(GuardSourceScan.read(path))
+        val awaitBody = GuardSourceScan.bracedBlockAfter(code, "suspend fun handlePromptAwait(")
+
+        assertTrue(
+            awaitBody.contains("""active.stage == "prototype"""") && awaitBody.contains("askPrototypeDirection("),
+            "handlePromptAwait 必须处理 prototype 待选工单（出方向确认卡，不是新派单）——" +
+                "1:1 药丸派单的追问走 invoke 通路，缺这条分支就是双派",
+        )
+        val prototypeAt = awaitBody.indexOf("""active.stage == "prototype"""")
+        val proposedAt = awaitBody.indexOf("""active.stage == "proposed"""")
+        assertTrue(
+            prototypeAt in 0 until proposedAt,
+            "prototype 分支必须排在 proposed 撤单之前 —— 顺序反了，待选工单会被先撤掉",
+        )
+    }
+
     @Test
     fun resolveWorkspacePathExplicitWsIdAndAutoLocking() = runBlocking {
         val tempRoot = File(System.getProperty("java.io.tmpdir"), "tenon-test-ws-" + System.nanoTime())
@@ -238,6 +268,93 @@ class DesktopWorkerOrchestrator1to1DispatchTest {
                 repo2.absolutePath,
                 orch.resolveWorkspacePath(groupId = null, wsId = "ws-2"),
                 "多工作区下显式指定 wsId 必须正确解析",
+            )
+
+            controller.stop()
+        } finally {
+            deleteSafely(tempRoot)
+        }
+    }
+
+    /**
+     * **群简介声明的目录是第三条确定性判据**（真机缺口）：席位没声明 `defaultWsId` 的群
+     * （teahouse 协同群的 DSH 席位），兜底卡「降级为本机执行」时 `resolveWorkspacePath`
+     * 只剩单工作区推导，多仓宿主上必退单 `no git workspace bound to group`。
+     * 建群「关联本地目录」会把绝对路径写进 `description` —— 与已宣告工作区的 wsPath
+     * **精确相等**才认，不匹配就如实退单，不猜。
+     */
+    @Test
+    fun resolveWorkspacePathMatchesGroupDescriptionToADeclaredWorkspace() = runBlocking {
+        val tempRoot = File(System.getProperty("java.io.tmpdir"), "tenon-test-ws-" + System.nanoTime())
+        val repo = File(tempRoot, "repo").apply { mkdirs() }
+        ProcessBuilder("git", "init", repo.absolutePath).start().waitFor()
+
+        try {
+            val scope = CoroutineScope(Dispatchers.Default)
+            val groupId = "g-desc-test"
+            val controller = RelayController(
+                platform = InMemoryAppPlatform(),
+                store = InMemorySettingsStore(
+                    RelaySettings.firstRun().copy(
+                        udpPort = 0, tcpPort = 0,
+                        persistMessages = false, persistMessagesDecided = true,
+                        groups = listOf(
+                            com.kapp.tenon.core.protocol.GroupMeta(
+                                groupId = groupId,
+                                name = "协同群",
+                                members = listOf("peer-1"),
+                                rev = 1,
+                                updatedBy = "peer-1",
+                                updatedTs = 1L,
+                                // 席位不带 defaultWsId —— 群绑定推导（判据 1）必然落空。
+                                virtualAgents = listOf(
+                                    com.kapp.tenon.core.protocol.VirtualAgentMember(
+                                        agentId = "DSH",
+                                        hostNodeId = "self",
+                                        name = "dsh-repo",
+                                    ),
+                                ),
+                                description = repo.absolutePath,
+                            ),
+                        ),
+                    ),
+                ),
+                messageStore = InMemoryMessageStore(),
+                agentStore = InMemoryAgentStore(),
+                scope = scope,
+            )
+            val orch = DesktopWorkerOrchestrator(
+                planeProvider = { null },
+                controller = controller,
+                scope = scope,
+            )
+            controller.recordLocalWorkspace(
+                wsId = "ws-repo",
+                wsTitle = "repo",
+                wsPath = repo.absolutePath,
+                agentKey = "codex",
+                agentKind = "codex",
+            )
+            // 再录第二个工作区：关掉「单工作区自然锁定」这条既有兜底，
+            // 下面的阴性对照才能真正考到判据 2b 自己。
+            val other = File(tempRoot, "other").apply { mkdirs() }
+            controller.recordLocalWorkspace(
+                wsId = "ws-other",
+                wsTitle = "other",
+                wsPath = other.absolutePath,
+                agentKey = "codex",
+                agentKind = "codex",
+            )
+
+            assertEquals(
+                repo.absolutePath,
+                orch.resolveWorkspacePath(groupId = groupId, wsId = null),
+                "群简介声明的目录精确命中已宣告工作区时必须解析出该仓（判据 2b）",
+            )
+            // 描述与任何工作区路径都不相等 ⇒ 如实退单（返回 null），不做包含/前缀等模糊匹配。
+            assertNull(
+                orch.resolveWorkspacePath(groupId = "g-never-created", wsId = null),
+                "群不存在（无从读简介）时必须退单 —— 多工作区宿主上没有任何确定性判据可落",
             )
 
             controller.stop()

@@ -139,9 +139,10 @@ fun handleSend(peerId: String, text: String) {
         )
         if (route == AgentPromptRoute.Local) {
             val prompt = RelayController.extractAgentPrompt(body, agentKinds)
+            val mentionedAgentKey = RelayController.mentionedAgentKeys(body, agentKinds).firstOrNull()
             val self = host.state.value.selfNodeId
             host.scope.launch {
-                host.onAgentPrompt?.invoke(peerId, self, prompt, sent.envelopeId)
+                host.onAgentPrompt?.invoke(peerId, self, prompt, sent.envelopeId, mentionedAgentKey)
             }
         }
     }
@@ -637,7 +638,20 @@ fun handleOnInbound(envelope: Envelope) {
             //
             // payload 里的 `senderId` 才是真正说话的那一方（旧端不发 ⇒ 退回 `from`，
             // 与以前完全一致）。形态与桌面端本地落库同一套：真人 = nodeId，agent = `agent:<kind>`。
-            senderId = if (groupId != null) (groupSenderIdOf(envelope) ?: envelope.from) else null,
+            // 1:1 同样要认 `senderId`：agent 以 `agent:<宿主 nodeId>:<agentId>` 署名发来的
+            // 卡片，接收端靠这一格才知道「这张卡的宿主是谁」—— 卡片动作（合并/打回/审批）
+            // 就是靠它决定把 `op=action` 发回哪台机器。此前 1:1 一律置 null，于是手机上
+            // 点「合并此补丁」时 `AgentSenderId.parse(null)` 直接失败，动作无处可发，
+            // 界面却已经乐观置成「已提交，等待宿主确认」（真机 A22 现场）。
+            //
+            // 信任口径与群路径同一条：`senderId` 是帧里的声明，冒充的代价在宿主侧被
+            // `handleInvokeAction` 的「decidedBy 必须等于 envelope.from」挡住 —— 谁声明
+            // 谁承担，1:1 里对方本来也只能代表自己。
+            senderId = if (groupId != null) {
+                (groupSenderIdOf(envelope) ?: envelope.from)
+            } else {
+                payload?.let { stringField(it, "senderId") }
+            },
             // 会话归属：协议字段（旧端不发 ⇒ null ⇒ 分段线按 id 前缀回退，与以前一致）。
             // 有它之后，手机端才画得出桌面端一直有的那条「任务分段线」。
             agentSessionId = payload?.let { stringField(it, "agentSessionId") },
@@ -663,7 +677,11 @@ fun handleOnInbound(envelope: Envelope) {
     // 这里前移到**入站文本**：每条文本先问一句，命中即消费并 return。
     // 放在落库之后：用户仍能看到自己那条「停」，而不是点了没反应。
     if (host.onAgentAbort?.invoke(convId, cleanedText) == true) return
-    if (host.onAgentFollowUp?.invoke(convId, envelope.from, cleanedText) == true) return
+    // 追问桥**只在群**生效。1:1 的派单生命周期归 invoke 通路（药丸帧 +
+    // handlePromptAwait，两路不双派——App.kt 装配处的口径）；文本帧在 1:1 只是
+    // 气泡留档，不该再触发追问/微调，否则同一句追问会出两张卡、invoke 路还会
+    // 再开一张工单（真机现场：chain-tmw8y0umu-ask 与 chain-tmw8z5229 并存）。
+    if (groupId != null && host.onAgentFollowUp?.invoke(convId, envelope.from, cleanedText) == true) return
     // §16.6 入口 A：群模板配置（固定句式的显式命令，同一条前置拦截链）。
     if (host.onDelegationTeamConfig?.invoke(convId, cleanedText) == true) return
     // §9.2 快捷指令（显式命令不需要 @；未命中原样落回唤醒判据）。
@@ -724,8 +742,11 @@ fun handleOnInbound(envelope: Envelope) {
     )
     if (route == AgentPromptRoute.Local && !intentOwnsDispatch) {
         val prompt = RelayController.extractAgentPrompt(cleanedText, routeFacts.agentKinds)
+        // 点名事实必须在剥 @ **之前**从同一份 kinds 里取：prompt 里已经没有 @ 了，
+        // 编排层拿它重判只会得到「没点名」（D18：群工单句被分诊成只读讨论）。
+        val mentionedAgentKey = RelayController.mentionedAgentKeys(cleanedText, routeFacts.agentKinds).firstOrNull()
         host.scope.launch {
-            host.onAgentPrompt?.invoke(convId, envelope.from, prompt, envelope.id)
+            host.onAgentPrompt?.invoke(convId, envelope.from, prompt, envelope.id, mentionedAgentKey)
         }
     }
     // **无权限提示必须独立于路由判定。**

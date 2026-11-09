@@ -107,6 +107,11 @@ class CliSubprocessDriver(
         var resumedCliSessionId: String? = null
         val totalAttempts = 1 + maxExtraAttempts.coerceAtLeast(0)
         var lastFailure: String? = null
+        // 终局错误必须带上 CLI 自己的 stderr 尾巴（`dsh: <code>: <message>` 这类
+        // 故障诊断行）—— 行映射器认不出的行会被如实跳过，但「exit 1」 alone 让
+        // 根因不可见（AGENTS §2.5：诊断要么如实、要么不存在）。只取最后 3 行防刷屏。
+        fun failureWithStderrTail(failure: String, tail: StringBuilder): String =
+            failure + stderrTailOf(tail)
         for (attempt in 1..totalAttempts) {
             // 近邻判别的输出累积：瞬时判别与续跑 id 都从这里取（CLI 输出量有限，全量可承受）。
             val outputTail = StringBuilder()
@@ -116,6 +121,7 @@ class CliSubprocessDriver(
                 argSpec(prompt)
             }
             var exitCode = SPAWN_FAILED_EXIT
+            var lineLimitBroken = false
             try {
                 exitCode = withContext(Dispatchers.IO) {
                     val pb = ProcessBuilder(listOf(cliPath) + attemptArgs)
@@ -131,6 +137,20 @@ class CliSubprocessDriver(
                     // 显式注入仍然赢。
                     pb.environment()["PATH"] = CliDiscovery.childPath(pb.environment())
                     envOverrides.forEach { (key, value) -> pb.environment()[key] = value }
+                    // 会话对齐键（提案 §9 阶段三）：hook 脚本读到它才把 sessionId 透传给
+                    // 审批路由，审批卡与只读策略因此挂在派单会话上。
+                    //
+                    // **所有**子进程都要注入，不能只在 SandboxedCliDriver 的沙箱分支给：
+                    // 触发式只读通道走 wsPath=null，SandboxedCliDriver.executeTask 把它
+                    // 委托给本裸驱动，那里漏这一只变量 ⇒ hook 不带 sessionId ⇒
+                    // hookSessionTrusted 为假 ⇒ 执行前的只读否决整条被跳过。症状是
+                    // 「看起来两层拦截，其实只剩事后判负」。
+                    //
+                    // 放在 envOverrides 之后：宿主派单的 sessionId 是安全判据，不许被配置
+                    // 层的同名变量盖掉（盖掉就等于拿一个对不上 readOnlyToolPolicies 的键
+                    // 去问审批，只读约束静默失效）。与 SandboxedCliDriver、
+                    // ProcessAgentDriver 的「后写者胜」口径一致。
+                    pb.environment()[DriverKeys.ENV_HOOK_SESSION_ID] = sessionId
                     // stderr 合并进 stdout：认不出的行会被 mapLine 如实跳过，同时避免双流对拷的死锁。
                     pb.redirectErrorStream(true)
                     // 子进程的 stdin **在内核层**接 /dev/null：会读 stdin 的 CLI 会一直等 EOF，
@@ -146,16 +166,41 @@ class CliSubprocessDriver(
                     // 单测复现不出这个挂起。
                     pb.redirectInput(ProcessBuilder.Redirect.from(java.io.File("/dev/null")))
                     val proc = pb.start()
-                    proc.inputStream.bufferedReader().useLines { lines ->
-                        for (line in lines) {
-                            outputTail.append(line).append('\n')
-                            if (resumedCliSessionId == null) {
-                                resumeSpec?.sessionIdFromLine?.invoke(line)?.let { resumedCliSessionId = it }
+                    // 有界读取（§8.2）：这个驱动此前**完全没有**行上限，`useLines` 会把
+                    // 一行任意长度的输出整段读进堆。超限行在这里等于「CLI 输出的东西宿主
+                    // 理解不了」，按响亮失败收场，不重试（重试只会再喂一次同样的 prompt）。
+                    val reader = BoundedLineReader(proc.inputStream.bufferedReader())
+                    while (true) {
+                        when (val read = reader.readLine()) {
+                            BoundedLine.Eof -> break
+                            BoundedLine.TooLong -> {
+                                lineLimitBroken = true
+                                runCatching { proc.destroyForcibly() }
+                                break
                             }
-                            mapLine(line)?.let { onEvent(it) }
+                            is BoundedLine.Text -> {
+                                val line = read.value
+                                outputTail.append(line).append('\n')
+                                if (resumedCliSessionId == null) {
+                                    resumeSpec?.sessionIdFromLine?.invoke(line)?.let { resumedCliSessionId = it }
+                                }
+                                mapLine(line)?.let { onEvent(it) }
+                            }
                         }
                     }
+                    if (lineLimitBroken) return@withContext SPAWN_FAILED_EXIT
                     proc.waitFor()
+                }
+                // 只在这里报一次错并收场：若交给下面的 `transientOf` 分支，同一个缺陷
+                // 会被判成「可重试」再喂一次 prompt，并多报一条 Error。
+                if (lineLimitBroken) {
+                    onEvent(
+                        DriverEvent.Error(
+                            "cli \"" + cliPath + "\" emitted a line over " +
+                                DriverLineLimits.MAX_LINE_CHARS + " chars; process killed, not retrying",
+                        ),
+                    )
+                    return
                 }
                 if (exitCode == 0) {
                     onEvent(DriverEvent.Finished())
@@ -164,7 +209,7 @@ class CliSubprocessDriver(
                 lastFailure = "cli exited with code $exitCode"
                 if (!transientOf(exitCode, outputTail.toString())) {
                     // 非瞬时（业务失败 / 配额耗尽 / 输出没有瞬时标记）：一次终局，绝不重试。
-                    onEvent(DriverEvent.Error(lastFailure!!))
+                    onEvent(DriverEvent.Error(failureWithStderrTail(lastFailure!!, outputTail)))
                     return
                 }
             } catch (e: Exception) {
@@ -177,8 +222,11 @@ class CliSubprocessDriver(
             if (attempt == totalAttempts) {
                 onEvent(
                     DriverEvent.Error(
-                        lastFailure + " — gave up after " + totalAttempts +
-                            " attempts (transient retry exhausted)",
+                        failureWithStderrTail(
+                            lastFailure + " — gave up after " + totalAttempts +
+                                " attempts (transient retry exhausted)",
+                            outputTail,
+                        ),
                     ),
                 )
                 return
@@ -212,6 +260,13 @@ class CliSubprocessDriver(
             "overloaded",
             "rate limit",
         )
+
+        /** 终局错误统一携带的 CLI stderr 尾巴（最后 3 行，行内 200 字上限）——根因可见性。 */
+        internal fun stderrTailOf(tail: StringBuilder): String {
+            val lines = tail.lines().filter { it.isNotBlank() }.takeLast(3)
+                .map { it.trim().take(200) }
+            return if (lines.isEmpty()) "" else " ⏎ " + lines.joinToString(" ⏎ ")
+        }
 
         internal const val DEFAULT_MAX_EXTRA_ATTEMPTS = 2
         internal const val DEFAULT_BACKOFF_FIRST_MS = 1_000L
@@ -509,8 +564,11 @@ fun cliDriverRegistrations(
     }
     // dsh（DeepSeek Harness CLI）：headless profile 是标准的一次性形态
     // （`dsh --profile headless --json`，NDJSON 行协议 + 退出码诚信），与 codex exec
-    // 同类。凭证只认 env 的 DEEPSEEK_API_KEY（headless 不读 ~/.dsh 凭证服务，
-    // 实测 MISSING_CREDENTIAL）—— 由 [DshCredentials] 从凭证文件解析后递进子进程。
+    // 同类。凭证两路：出厂路由（deepseek-official）只认 env 的 DEEPSEEK_API_KEY
+    // （headless 不读 ~/.dsh 凭证服务，实测 MISSING_CREDENTIAL）——由 [DshCredentials]
+    // 从凭证文件解析后递进子进程；用户自配路由（如 dsh-opencode-go）走
+    // credentials-local 服务直接读同一份 ~/.dsh/.credentials.yaml（沙箱经 .dsh
+    // 软链同样可见）——所以装配门槛是「文件存在」，具体哪路凭证由 profile 决定。
     val dsh = resolveDsh()
     if (dsh != null) {
         val providerEnv = CliProviderEnv.forDsh(env).toMutableMap()
@@ -521,10 +579,10 @@ fun cliDriverRegistrations(
         // 一次性 worktree（我们的沙箱就是隔离面），内层不再要求后端。
         providerEnv.putIfAbsent("DSH_PERMISSION_MODE", "danger-full-access")
         announce(DriverKeys.cliDriverId("dsh"), providerEnv)
-        if (providerEnv[DshCredentials.ENV_KEY] == null) {
+        if (providerEnv[DshCredentials.ENV_KEY] == null && !DshCredentials.hasCredentialFile(env)) {
             hint(
-                "[drivers] dsh-cli has no DEEPSEEK_API_KEY (neither env nor ~/.dsh/.credentials.yaml); " +
-                    "headless route will fail with MISSING_CREDENTIAL",
+                "[drivers] dsh-cli has no provider credential (no DEEPSEEK_API_KEY env and no " +
+                    "~/.dsh/.credentials.yaml); the headless route will fail without one",
             )
         }
         drivers.add(

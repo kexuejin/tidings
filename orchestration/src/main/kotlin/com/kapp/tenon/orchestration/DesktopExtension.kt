@@ -20,6 +20,7 @@ import com.kapp.tenon.agent.ChannelOrchestrator
 import com.kapp.tenon.agent.ControlPlane
 import com.kapp.tenon.agent.JsonObjectLike
 import com.kapp.tenon.agent.GrantReplyOutcome
+import com.kapp.tenon.agent.plugins.WebhookPersistence
 import com.kapp.tenon.agent.abortRunningSandboxes
 import com.kapp.tenon.agent.executePluginTask
 import com.kapp.tenon.agent.hasRunningSandboxes
@@ -39,6 +40,7 @@ import com.kapp.tenon.domain.parseQuickAction
 import com.kapp.tenon.domain.model.NoticeDetail
 import com.kapp.tenon.domain.model.NoticeKind
 import com.kapp.tenon.core.session.NodeRuntime
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
@@ -89,6 +91,12 @@ class DesktopExtension(
      * 业务：事件照样入台账、照样进群聊，只是没人展示实时缓冲）。
      */
     private val liveEventSink: ((sessionId: String, line: String) -> Unit)? = null,
+    /**
+     * 调度中枢的持久化台账（Job Table）。null = 触发式编排不装配（webhook 保持
+     * no-consumer 拒收）。桌面壳用 `createSchedulerStore(platform)` 提供——与消息
+     * /Agent 库共用同一条驱动。
+     */
+    private val schedulerStore: com.kapp.tenon.domain.SchedulerStore? = null,
 ) {
     private var plane: ControlPlane? = null
 
@@ -139,6 +147,19 @@ class DesktopExtension(
     private var pluginHost: com.kapp.tenon.agent.plugins.PluginHost? = null
 
     private var workerOrchestrator: DesktopWorkerOrchestrator? = null
+
+    // ---- 触发式编排（提案 §9 阶段二）：持久化队列 + 调度中枢 + 只读执行通道 ----
+    // schedulerStore 为 null（未注入 Job Table 台账）时整组不装配：webhook 走
+    // SourceWebhookRegistry 的 no-consumer 503，如实不可用，不装假队列。
+
+    /** 触发路由定义（manifest triggers 注册通过后对账填充）。 */
+    val triggerRegistry = TriggerRegistry()
+
+    private var triggerQueue: TriggerEventDrain? = null
+    private var hostScheduler: DesktopHostScheduler? = null
+
+    /** 触发任务对账指纹：注册清单无变化时每拍零成本。 */
+    private var lastTriggerFingerprint: String? = null
 
     /**
      * L1 会话免审的**宿主侧台账**（§4.2 分级免审；落盘 `session-exempts.json`）。
@@ -240,7 +261,20 @@ class DesktopExtension(
         if (followJob != null) return
         followJob = scope.launch {
             while (isActive) {
-                syncOnce()
+                // **单拍异常隔离**：followJob 不只做触发对账，还负责控制面随运行时
+                // 重挂、入站订阅、工单桥那一整套装配。任何一拍里冒出来的异常（插件
+                // 清单解析、cron 表达式、台账 IO）若直接上抛，整个 followJob 就死了：
+                // 此后运行时重启再也不会重挂控制面，症状是「面板一切正常但 /v1 全空」，
+                // 且没有任何一处会打印「跟随循环已退出」。
+                // 取消必须原样放行——吞掉它会让已取消的协程继续循环。
+                try {
+                    syncOnce()
+                    syncTriggersTick()
+                } catch (c: CancellationException) {
+                    throw c
+                } catch (t: Throwable) {
+                    RelayLog.info("RELAY-EXT", "follow tick failed (isolated; next poll retries): " + t.toString())
+                }
                 delay(FOLLOW_POLL_MS)
             }
             // 协程被取消（窗口退出）时也别把控制面留在监听状态。
@@ -447,6 +481,109 @@ class DesktopExtension(
             inboundJob = created.observeInbound(scope)
             plane = created
             attachedRuntime = runtime
+            // 触发式编排接线（提案 §9 阶段二）：webhook 事件的**唯一**生产消费者是
+            // 这里的持久化桥——listener 只做 ingest（落 Job Table + 踢排水），编排
+            // 流消费走 TriggerEventDrain 的表驱动循环，不走 listeners fan-out。
+            schedulerStore?.let { store ->
+                // 回投目标的存在性校验器（提案 §5.2）：只放行本机 settings 配置过的
+                // 群会话——结果卡走群通道，1:1 的卡不随帧外发（TriggerExecutor KDoc）。
+                created.triggerTargetConvKnown = { convId ->
+                    TriggerAssembly.targetGroupKnown(
+                        convId,
+                        controller.state.value.settings.groups.map { it.groupId },
+                    )
+                }
+                val executor = TriggerExecutor(controller, { createdPlane })
+                val queue = TriggerEventDrain(store, scope)
+                queue.handler = { event ->
+                    val route = triggerRegistry.resolve(event.sourceId)
+                    if (route == null) {
+                        TriggerVerdict.Fail(
+                            "no trigger route registered for source \"" + event.sourceId +
+                                "\" (manifest triggers register it)",
+                        )
+                    } else if (!route.matches(event)) {
+                        // §7.2 filter 前置过滤：纯代码规则未命中 → skipped，0 Token。
+                        TriggerVerdict.Skip("filtered by trigger route rules for \"" + event.sourceId + "\"")
+                    } else {
+                        val fields = TriggerPrompts.eventFields(event)
+                        val outcome = executor.execute(
+                            agentKey = route.agentKey,
+                            title = "trigger:" + event.sourceId,
+                            instruction = TriggerPrompts.interpolate(route.promptTemplate, fields),
+                            sourceId = event.sourceId,
+                            event = event,
+                            targetGroupId = route.targetGroupId,
+                            convId = route.targetGroupId?.let { com.kapp.tenon.core.protocol.ConvId.group(it) },
+                        )
+                        if (outcome.done) TriggerVerdict.Done else TriggerVerdict.Fail(outcome.error ?: "trigger task failed")
+                    }
+                }
+                val scheduler = DesktopHostScheduler(store, scope, executeCronTask = { task ->
+                    val outcome = executor.execute(
+                        agentKey = task.agentKey,
+                        title = "cron:" + task.taskId.substringAfterLast('/'),
+                        instruction = task.prompt,
+                        sourceId = null,
+                        event = null,
+                        targetGroupId = task.targetConvId,
+                        convId = task.targetConvId?.let { com.kapp.tenon.core.protocol.ConvId.group(it) },
+                    )
+                    if (!outcome.done) {
+                        // cron 任务失败已由执行通道回投失败卡；这里再如实打日志，
+                        // 让「调度器派了但执行失败」在宿主侧留痕。
+                        RelayLog.info("RELAY-TRIGGER", "cron task " + task.taskId + " failed: " + (outcome.error ?: "unknown"))
+                    }
+                })
+                // cron 任务目录在阶段三由注册通过的 manifest triggers 填充
+                // （scheduler.registerCronTasks）；阶段二先起引擎。
+                queue.start()
+                scheduler.start()
+                // **ACK 之前的持久化出口**（不注册 listener）：webhook 的 200 现在
+                // 以「这一行真的进了 Job Table」为前提。旧接线把 ingest 放在异步
+                // listener 里，ACK 先回、落盘失败被 runCatching 吞掉、false 被忽略，
+                // 事件可以永久丢失且发送方看到的是成功。
+                //
+                // 三态必须分开：ingest 的 false 同时可能是「重放」与「插入失败」，
+                // 靠 eventExists 区分；进程重启后内存幂等表已失，迟到的重投必须
+                // 算已受理（Duplicate → 200 duplicate=true），否则会被当成落盘失败
+                // 再回一次 503，发送方无限重试。
+                created.sourceWebhooks.durableSink = { sourceId, event ->
+                    val at = System.currentTimeMillis()
+                    val record = com.kapp.tenon.domain.TriggerEventRecord(
+                        eventId = event.id,
+                        sourceId = sourceId,
+                        type = event.type,
+                        subject = event.subject,
+                        summary = event.summary,
+                        detail = event.detail,
+                        link = event.link,
+                        state = com.kapp.tenon.domain.TriggerEventStates.PENDING,
+                        error = null,
+                        createdAt = at,
+                        updatedAt = at,
+                    )
+                    try {
+                        if (queue.ingest(record)) {
+                            WebhookPersistence.Stored
+                        } else if (store.eventExists(sourceId, event.id)) {
+                            WebhookPersistence.Duplicate
+                        } else {
+                            WebhookPersistence.Failed(
+                                "job table refused the insert for " + sourceId + "/" + event.id,
+                            )
+                        }
+                    } catch (t: Throwable) {
+                        WebhookPersistence.Failed(
+                            "job table ingest failed for " + sourceId + "/" + event.id + ": " +
+                                (t.message ?: t.toString()),
+                        )
+                    }
+                }
+                triggerQueue = queue
+                hostScheduler = scheduler
+                lastTriggerFingerprint = null
+            }
             sessions = registry
             // 托管模式插件：目录里有就拉起（token 注入 + 自注册）；坏了如实记录但不上抛。
             runCatching {
@@ -664,6 +801,14 @@ class DesktopExtension(
                     request: com.kapp.tenon.domain.AgentInvokeTaskRequest,
                 ): com.kapp.tenon.domain.AgentInvokeExecution {
                     val self = controller.state.value.selfNodeId
+                    // 群里 @ 的是**席位 ID**（`dsh-a030882e`），驱动注册表认的是
+                    // **档案键**（`dsh`）。不归位 ⇒ resolveCliDriver 恒 null ⇒ CLI 分支
+                    // 整段跳过、直接 NO_PLUGIN，真机上表现为「点了没反应」。
+                    // 在位名册与编排器同源（availableAgentKeys），不在装配层再问一遍。
+                    val cliKey = AgentProfiles.resolveKey(
+                        request.agentId,
+                        workerOrchestrator.availableAgentKeys().orEmpty(),
+                    ) ?: request.agentId
                     // wsId → 路径的解析表只在宿主本机（隐私收口：路径不出宿主）。
                     val wsPath = request.wsId?.trim()?.takeIf { it.isNotEmpty() }?.let { id ->
                         controller.state.value.agentWorkspaces.values
@@ -679,8 +824,16 @@ class DesktopExtension(
                     // `handlePromptAwait` 是请求-响应形状（await 工单终局），与 invoke
                     // 的语义正好对上；租约的 `wsId`（任务级显式绑定）原样穿透，
                     // 编排器按「显式 wsId > 群绑定 > 单工作区」次序解析，解析不出就退单。
+                    RelayLog.info(
+                        "OCGO-BRIDGE",
+                        "invoke agent=" + request.agentId + " wsId=" + request.wsId +
+                            " convId=" + request.convId + " groupId=" + request.groupId +
+                            " plugin=" + created.pluginForAgent(request.agentId)?.pluginId +
+                            " cliKey=" + cliKey +
+                            " cliDriver=" + (created.resolveCliDriver(cliKey)?.driverId ?: "null"),
+                    )
                     if (created.pluginForAgent(request.agentId) == null &&
-                        created.resolveCliDriver(request.agentId) != null
+                        created.resolveCliDriver(cliKey) != null
                     ) {
                         val group = request.groupId?.takeIf { it.isNotBlank() }
                         // 回卡会话的优先级：1:1 直派显式带的 convId（发起方的单聊）> 群 > 兜底。
@@ -697,20 +850,14 @@ class DesktopExtension(
                             senderPeerId = self,
                             prompt = request.prompt,
                             replyToId = null,
-                            agentKey = request.agentId,
+                            agentKey = cliKey,
                             wsId = request.wsId,
                         )
-                        // 产物投群或对端（patch.diff）：终局带路径就投 —— 投递失败不改写状态，
-                        // 工单卡（含产物条目）照常上屏，可从 report.json 对账。
-                        outcome.patchPath?.let { patchPath ->
-                            val patchFile = java.io.File(patchPath)
-                            if (patchFile.isFile) {
-                                artifactDelivery.deliverCliArtifacts(
-                                    listOf(Triple(patchPath, patchFile.name, patchFile.length())),
-                                    targetConvId,
-                                )
-                            }
-                        }
+                        // 产物投递**全部归编排器审阅流**（deliverPatchBundle + 
+                        // deliverOversizedArtifacts，在 handlePromptAwait 内完成）。
+                        // 这里曾经的补丁直投是**双发**：同一份 patch.diff 两份报价并发
+                        // 写对端同一路径（downloads/patch.diff/patch.diff）—— 一次成功、
+                        // 一次「写入本机磁盘失败」（D13 族第 3 例的真身）。摘除后单路投递。
                         return if (outcome.error != null) {
                             // 受阻/中止/退单：**带终局卡**回 —— 派单处看到有卡就不再补
                             // 「没干完」横幅：用户按了停，看到「已取消」就够了。
@@ -854,8 +1001,11 @@ class DesktopExtension(
             // §7.2 诊断日志桥：域层路由点就地发出的 NO_WAKE 等诊断落进 RelayLog 环，
             // 诊断包经 recentLogLines 取「最近日志」节。这是 :app 诊断的唯一出口。
             controller.diagnosticLogSink = { tag, message -> RelayLog.info(tag, message) }
-            controller.onAgentPrompt = { convId, senderPeerId, prompt, replyToId ->
-                workerOrchestrator.handlePrompt(convId, senderPeerId, prompt, replyToId)
+            controller.onAgentPrompt = { convId, senderPeerId, prompt, replyToId, mentionedAgentKey ->
+                workerOrchestrator.handlePrompt(
+                    convId, senderPeerId, prompt, replyToId,
+                    mentionedAgentKey = mentionedAgentKey,
+                )
             }
             // §6.1 打断桥：挂在**入站文本**上，不挂在 onAgentPrompt 上 ——
             // 「停」不是 prompt，挂在后者就永远进不来（真机实测：收到了、没反应）。
@@ -1068,6 +1218,47 @@ class DesktopExtension(
         proc.inputStream.bufferedReader().readText().trim().ifBlank { null }
     }.getOrNull()
 
+    /**
+     * 触发任务对账（提案 §9 阶段三）：注册通过的插件清单 → 调度任务/事件路由。
+     * 指纹去重——注册清单无变化时每拍零成本；插件注销后对账式移除（不残响）。
+     */
+    private fun syncTriggersTick() {
+        val scheduler = hostScheduler ?: return
+        val currentPlane = plane ?: return
+        val manifests = currentPlane.plugins.list().map { it.manifest }.filter { it.triggers.isNotEmpty() }
+        // 指纹用**整份清单的 toString()**，而不是手挑几个字段（判据与理由见
+        // triggerManifestFingerprint 的 KDoc）。
+        val fingerprint = triggerManifestFingerprint(manifests)
+        if (fingerprint == lastTriggerFingerprint) return
+        try {
+            val tasks = TriggerAssembly.fromManifests(manifests)
+            scheduler.syncCronTasks(tasks.cronTasks)
+            // 整表一次换快照：clear()+逐条 register() 之间的空表窗口会让并发消费
+            // 把一条已落盘事件判成「无路由」而永久失败（见 TriggerRegistry KDoc）。
+            val rejected = triggerRegistry.replaceAll(tasks.eventRoutes)
+            rejected.forEach { route ->
+                // 两个插件声明了同一个 sourceId：先注册者胜，冲突必须说出来 ——
+                // 静默覆盖的症状是「我配的触发器有时不生效」，事后查不出来。
+                RelayLog.info(
+                    "RELAY-TRIGGER",
+                    "webhook sourceId collision: \"" + route.sourceId + "\" already claimed by another route; " +
+                        "this one is ignored (first registration wins)",
+                )
+            }
+            RelayLog.info(
+                "RELAY-TRIGGER",
+                "trigger tasks synced: " + tasks.cronTasks.size + " cron, " + tasks.eventRoutes.size + " webhook route(s)",
+            )
+            // **整拍成功才记账**：指纹是「对账成功」的判据，不是「试过了」的判据。
+            // 旧写法在干活之前就写指纹，fromManifests / syncCronTasks 一抛错，
+            // 下一拍因指纹相等直接 return —— 触发器就此永久停在半同步状态。
+            lastTriggerFingerprint = fingerprint
+        } catch (t: Throwable) {
+            lastTriggerFingerprint = null
+            RelayLog.info("RELAY-TRIGGER", "trigger sync tick failed; will retry next poll: " + t.toString())
+        }
+    }
+
     private fun detach() {
         workerOrchestrator = null
         sessionExemptLedger = null
@@ -1085,6 +1276,12 @@ class DesktopExtension(
         // 先停插件（SIGTERM，插件会注销再退）再停控制面：注销要走控制面的 HTTP 路由。
         pluginHost?.stop()
         pluginHost = null
+        // 触发式编排随控制面撤（先停派发循环再停 HTTP——listener 正往队列里 ingest）。
+        triggerQueue?.stop()
+        triggerQueue = null
+        hostScheduler?.stop()
+        hostScheduler = null
+        lastTriggerFingerprint = null
         plane?.stop()
         plane = null
         attachedRuntime = null

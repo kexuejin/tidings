@@ -8,7 +8,6 @@ import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.JsonPrimitive
 import kotlinx.serialization.json.contentOrNull
 import kotlinx.serialization.json.longOrNull
-import java.io.BufferedReader
 import java.io.File
 import java.io.InputStreamReader
 import java.nio.charset.StandardCharsets
@@ -91,7 +90,11 @@ class ProcessAgentDriver(
 
         val workDir = resolveWorkDir(wsPath)
         val resolvedCommand = resolveCommand(prompt, sessionId, wsPath)
-        val processEnv = buildEnvironment()
+        // 会话对齐键（提案 §9 阶段三）：宿主派起的 CLI 在 hook 脚本里能如实报出
+        // 自己的 sessionId——审批路由据此把审批卡归到派单会话。
+        val processEnv = buildEnvironment().toMutableMap().apply {
+            put(DriverKeys.ENV_HOOK_SESSION_ID, sessionId)
+        }
 
         val process = try {
             spawner(resolvedCommand, workDir, processEnv)
@@ -103,13 +106,25 @@ class ProcessAgentDriver(
         runningProcesses[sessionId] = process
         val stderrTail = StringBuilder()
 
-        // 异步排空 stderr，防止子进程缓冲区满导致死锁
+        // 异步排空 stderr，防止子进程缓冲区满导致死锁。
+        //
+        // 这里同样要走有界读取：stderr 只留前 1000 字符，但 `useLines` 会把**整行**
+        // 先读进堆 —— 一个往 stderr 刷 1 GB 单行的失控进程照样能 OOM 宿主。超限行
+        // 只丢内容、不杀进程（诊断输出不该决定任务生死），流保持同步继续排空。
         val errReader = thread(name = "stderr-$driverId-$sessionId", isDaemon = true) {
             runCatching {
-                BufferedReader(InputStreamReader(process.errorStream, StandardCharsets.UTF_8)).useLines { lines ->
-                    for (line in lines) {
-                        if (stderrTail.length < 1000) {
-                            stderrTail.append(line).append('\n')
+                val reader = BoundedLineReader(InputStreamReader(process.errorStream, StandardCharsets.UTF_8))
+                while (true) {
+                    when (val line = reader.readLine()) {
+                        BoundedLine.Eof -> break
+                        BoundedLine.TooLong -> {
+                            if (stderrTail.length < 1000) {
+                                stderrTail.append("[stderr line over ").append(DriverLineLimits.MAX_LINE_CHARS)
+                                    .append(" chars, dropped]\n")
+                            }
+                        }
+                        is BoundedLine.Text -> {
+                            if (stderrTail.length < 1000) stderrTail.append(line.value).append('\n')
                         }
                     }
                 }
@@ -119,15 +134,35 @@ class ProcessAgentDriver(
         var finishedReported = false
 
         try {
-            BufferedReader(InputStreamReader(process.inputStream, StandardCharsets.UTF_8)).useLines { lines ->
-                for (line in lines) {
-                    val event = parseLine(line)
-                    if (event != null) {
-                        if (event is DriverEvent.Finished) {
-                            finishedReported = true
-                        }
-                        onEvent(event)
+            val reader = BoundedLineReader(InputStreamReader(process.inputStream, StandardCharsets.UTF_8))
+            while (true) {
+                val line = when (val read = reader.readLine()) {
+                    BoundedLine.Eof -> break
+                    is BoundedLine.Text -> read.value
+                    BoundedLine.TooLong -> {
+                        // 单行熔断（§8.2 传输防火墙）：超限行**不再整行进堆**（旧写法用
+                        // `useLines`，判据成立时 1 GB 的行已经在堆里了），并且**真的**收场。
+                        //
+                        // 旧实现只 `break` 出循环，注释却写着 "process will be reaped"：
+                        // 进程没被杀，接着落到下面的 `waitFor(timeoutSec)`，于是一条超长行
+                        // 换来 5 分钟的静默挂起（timeoutSec = 300）。这里显式杀掉再返回。
+                        onEvent(
+                            DriverEvent.Error(
+                                "driver \"" + driverId + "\" emitted a line over " +
+                                    DriverLineLimits.MAX_LINE_CHARS + " chars; process killed, task aborted",
+                            ),
+                        )
+                        process.destroy()
+                        if (!process.waitFor(2, TimeUnit.SECONDS)) process.destroyForcibly()
+                        return
                     }
+                }
+                val event = parseLine(line)
+                if (event != null) {
+                    if (event is DriverEvent.Finished) {
+                        finishedReported = true
+                    }
+                    onEvent(event)
                 }
             }
 

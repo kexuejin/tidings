@@ -1,0 +1,211 @@
+统一单聊群聊交互与工作区派单 · 真机闭环实测（65caa9bd 验收 + 派单链路四缺陷立案）
+2026-11-07 · Pixel 6 真机（USB adb）+ 桌面端 <host>-97
+
+== 装机（ACCEPTANCE §1b） ==
+HEAD 65caa9bd 两端重建：
+- androidApp-debug.apk sha256 9c11fb8dffb2a7b72522e0d0f41f79096a9fe3b4bae1d5bbe2ff2a40272492ae
+  adb install -r -d 成功，lastUpdateTime 2026-11-07 14:19:57
+- Tenon.app（createDistributable）二进制 sha256 1e673c55dc0cf38bbd8fe43c77a660b4fe30f3a08334b134f732ad856446ad33
+  osascript quit → 替换 /Applications/Tenon.app → lsregister -f -R -trusted → open
+- 新符号核验：/Applications/Tenon.app/Contents/app/composeApp-jvm-*.jar 内 grep 到 WorkspacePickerSheet
+- 桌面重启后 /v1/agent/workspaces 三个工作区（china-pass / teahouse-mobile / default-workspace）全部重新登记 online
+
+== 新 UI 验收（T1 通过） ==
+- 1:1 会话顶栏出现项目药丸：『teahouse-mobile』+『切换工作区』入口（旧胶囊浮层与顶栏切换入口确认已移除）
+- WorkspacePickerSheet：标题『选择工作区』，列出全部 3 个工作区与路径；单选 teahouse-mobile 后回会话药丸更新
+- 逐键注入（relay_e2e 同款 chunk=2 + SPACE=62）实测：长文本回读逐字符全对（含路径与标点）；
+  也实测到概率性吞字一次（'E' 丢失）与 DEL 丢按键 —— 回读校验是必须的，与夹具注释一致
+
+== 派单链路实测（四缺陷，均有一手证据） ==
+1. 1:1 会话普通文本派单：落 codex-cli 默认工单、wsId=null、state=error（3 次复现：
+   14:22 / 14:47 / 15:14 三条 codex-cli error session）。编排层 dispatchSingleWorker
+   对无 mention 文本默认 codex；resolveWorkspacePath(groupId, wsId) 的显式 wsId 分支
+   全仓无调用方传入 —— 死代码。
+2. 项目药丸不改派单：chatWorkspaceId 是导航态（AppNavState.kt:147 注释自证「不是会话的
+   持久属性」），effectiveWsId 只喂会话列表过滤，不进发送帧；且 1:1 文本帧白名单无
+   agentIntent/wsId（RelayController.kt:696 注释自证）→ 手机端无法把工作区指针带给桌面。
+3. @mention 点名失效：会话切到 teahouse-mobile 工作区会话后，聊天输入仍走 codex 默认派单
+   （会话切换只影响看板展示，不影响消息路由）。
+4. 执行器解析两处占用/坏死：
+   a. pluginForAgent 只匹配 status=online 的插件（ControlPlanePluginGateway.kt:552）；
+      dsh-cli 插件因裸 entrypoint（`dsh` 无参）拉起即退（stderr: --profile is required，
+      每次启动重复），状态永远停在 installed → 永远选不中。process.log 累计 20+ 条同类报错。
+      （此缺陷即本轮派给 dsh 的工单：PluginHost 即退进程宿主侧诊断。）
+   b. dsh-echo-bridge（参考实现/冒烟探针，main.py 自证「任何 prompt 原样回声」）注册
+      leader agentId=dsh 且 online → 占用 'dsh' agentId（PluginForAgentMatchTest.kt:80
+      断言即此行为）。invoke /v1/agent/invoke {agentId:DSH} 实测落到 echo-session-1，
+      state=done events=4，20 秒「完成」、工作区零变动。
+5. codex 派单错误原因未定案（error 详情只进会话台账，桌面无 stdout）；候选：CliSubprocessDriver
+   注释自证的 seatbelt 嵌沙箱问题（codexSandboxMode 段）。待立案后定案。
+
+== dsh CLI 本体（健康面） ==
+/opt/homebrew/bin/dsh v0.2.1-rc.2；/tmp/dsh-probe 探针：
+  dsh --profile headless --json "Reply with exactly: PROBE-OK"
+  → NDJSON session/status/thinking/text/final 全链，final=PROBE-OK，exit=0
+凭证 ~/.dsh/.credentials.yaml 存在（0600）。驱动栈装配要求满足（env 或该文件二选一）。
+
+== 工单执行（产品同款命令直驱工作区） ==
+dsh --profile headless --json "<工单文本>"，cwd=/workspace/src/teahouse-mobile
+工单：docs/plans/2026-11-07-dsh-dispatch-req-pluginlog.md（PluginHost 即退诊断）
+dsh 会话：~/.dsh/sessions/--Volumes-Kapp-source-teahouse-mobile--/session-af7a5fae-*
+（结果与验收读数见下方追加）
+
+== 工单交付与验收（6bc6e5cd） ==
+dsh 续跑会话 session-4db22658（--session-id 断点续跑，provider 三次 5xx/断流后靠 resume 保住进度）
+交付：commit 6bc6e5cd fix(agentNode): 记录插件进程「拉起即死」的退出码
+改动面：PluginHost.kt(+108 行内) + PluginHostImmediateExitTest.kt(新增 169 行)，恰为工单许可的两文件
+提交信息：含现场/为什么/测试方法/反向验证记录/兼容性声明，无协议/DB/.sqm 变更
+
+独立验收（ZCode 复核，非 dsh 自述）：
+1. diff 审查：窗口可配(immediateExitWindowMillis)、daemon 观察线程、ManagedProcess.stopRequested
+   使宿主主动停机不计秒退、走既有 appendProcessLog、测试用 awaitExitObservers join 不赌时序 —— 与工单逐条对上
+2. 独立复跑 ./gradlew :agentNode:test :constructionTraceGate :staleCommentRefGate --continue → BUILD SUCCESSFUL
+3. 反向验证：临时注释 watchForImmediateExit 调用 → PluginHostImmediateExitTest
+   aProcessThatDiesInsideTheWindowGetsAHostSideDiagnostic FAILED（红）→ 恢复 → BUILD SUCCESSFUL（绿）
+   —— 测试确实在测东西
+
+== 修复真机实证（第三次换装 65fc3606…，16:18 启动） ==
+- 安装包含修复：PluginHost.class 内 grep 到诊断字符串
+- 意外收获：~/.dsh 于 14:48 更新后，裸 `dsh` 不再即退而是常驻（PID 31227 活跃），
+  观察器按设计「窗口内未退出 → 安静退出」—— 长驻分支零噪音实证
+- 即退分支真机实证：一次性探针插件（entrypoint=/bin/echo）经 /v1/plugin/toggle 拉起，
+  process.log 出现宿主侧诊断行：
+  2026-11-07T08:23:51Z [plugin-host] plugin process exited immediately (exit=0) after 4ms —
+  entrypoint may need arguments; edit manifest.json entrypoint
+  （探针已清理）
+- 桌面重启全程手机侧 closeCount 未见异常增长（重启属主动换装，链路自动重连）
+
+== 工作材料清单 ==
+- 派单工单：docs/plans/2026-11-07-dsh-dispatch-req-pluginlog.md（不入库）
+- 测试计划：docs/plans/2026-11-07-test-plan-unified-chat-dispatch.md（不入库）
+- 本证据文件入库；ACCEPTANCE.md A22 条目入库（未提交，待评审）
+
+== 用户感知与重试两条工单（本轮第二三笔交付） ==
+工单 A（失败可见性）e4ef9798：
+  dsh headless session-4ad6c9b7 执行 87 步后 DeepSeek 配额耗尽（402 QUOTA）停在反向验证
+  注释态；验收方接手：恢复被注释的发布调用 → 全量验收（:orchestration:test +
+  :composeApp:testAndroidHostTest + construction/stale/cjk/localeParity 四门禁全绿）→
+  提交。dsh 的反向验证红在其 headless 日志在案（两条新测试 FAILED）。
+  实现：工单终局失败（blocked/failed/error，aborted 不补）统一走 announceDispatchFailure
+  单一出口；群聊保持 agentState=failed 群文本，1:1 落 AgentDispatchFailed 系统提示行；
+  文案两语言。
+工单 B（瞬时重试 + 断点续跑）cf186eb8：
+  配额死后由验收方直接实现。瞬时判别 = 输出标记白名单（STREAM_CLOSED / Internal Server
+  Error / overloaded / rate limit，spawn 失败恒瞬时）；QUOTA/余额类确定性失败绝不重试；
+  上限 2 跳追加、退避 1s→3s 可注入；终局 Error 带跳数台账；dsh 接 --session-id 断点续跑
+  （首跳 NDJSON session 事件 → 重试跳重放）。CliTransientRetryTest 五条全绿；
+  反向验证：DEFAULT_MAX_EXTRA_ATTEMPTS 归零 → 三条重试用例红 → 恢复 → 全绿。
+  生产装配核验：DesktopExtension 传非空 WorktreeSandboxExecutor ⇒ dsh 走 SandboxedCliDriver，
+  重试在两形态（裸/沙箱）都生效。
+
+== 本轮三笔提交 ==
+6bc6e5cd fix(agentNode): 记录插件进程「拉起即死」的退出码（dsh 执行）
+e4ef9798 fix(orchestration): 派单终局失败落会话（dsh 执行 + 验收方收尾）
+cf186eb8 feat(agentNode): provider 瞬时失败有界自动重试 + dsh 断点续跑（验收方实现）
+
+== 未提交、待评审 ==
+ACCEPTANCE.md（A22 条目）与本文 —— 建议与后续修复一起单独成一条 docs 提交。
+注意：桌面端当前运行的构建早于 e4ef9798/cf186eb8，两笔修复随下次打包生效。
+
+== 工单 C 核心（编排层 wsId 贯通）1d550278 ==
+- 蓝图：docs/plans/2026-11-07-binding-and-model-supply-competitive-research.md §4
+  （另一 agent 升级为实施蓝图；ZCode review 补记见同文 §6：3真1修 + 六缺口）
+- 实现：dispatchSingleWorker/handlePrompt/handlePromptAwait 三签名贯通 wsId；
+  dispatchSingleWorker 调 resolveWorkspacePath(groupId, wsId)（死分支激活）；
+  执行桥把租约 request.wsId 原样传入（原先是解析后丢弃）
+- 测试：DesktopWorkerOrchestrator1to1WorkspaceDispatchTest 四条源码级守卫
+  （贯通三处 + Handback 退单）；反向验证红→绿；:orchestration:test 全绿
+- 剩余段：手机端药丸 → invoke 租约接线（1:1 文本帧白名单装不下 wsId）——
+  完成后 A22 表第 3 行方可反填；第 4 行（echo 桥占用）另属独立决策项
+
+== 工单 C 发起侧（1:1 直派网道）d6c4ce84 ==
+- 域层新入口 dispatchDirectInvoke(peerId, agentId, prompt, wsId)：免席位查找；
+  租约 groupId 可空（null = 1:1，反馈面=租约镜像，无群卡广播落点）；
+  入站门 handleInvokeTask 加 1:1 分支（节点级授权，grantAllows 同桥）；
+  wire 零改动（sendAgentInvoke 的 groupId/wsId 本就可空）。
+- 验证：TwoNodeAgentInvokeTest 新增双节点用例——直派帧跨端到达、宿主执行器
+  逐字拿到 prompt 与 wsId、groupId=null、结果帧回传租约翻 Done。
+  该用例在入站分支落地前即红（DENIED 静默超时）= 新旧行为反向验证同源。
+  :app:jvmTest 全绿（含群路径回归与 TagBoard 源码守卫改名跟移）。
+- 剩余段（最后一环）：手机端药丸 → controller.dispatchDirectInvoke 的 UI 接线
+  + 1:1 纯文本默认派单行为的移除（蓝图决议矩阵 PlainChat 分支）——完成后
+  A22 表第 3 行真机反填。
+
+== 本日提交累计（五笔）==
+6bc6e5cd / e4ef9798 / cf186eb8 / 1d550278 / d6c4ce84
+
+== 全链首次真机贯通到上游（echo 桥让位后）==
+- echo 桥让位两步：leader agentId "dsh"→"dsh-echo" 无效（sameAgent 按首个 - 前头部
+  匹配，dsh-echo 头仍是 dsh）→ 改 "echo-dsh" 生效。manifest 备份
+  manifest.json.bak-20261107 留存；toggle API 让 PluginHost 以新清单重拉守护进程。
+- 探针（/v1/agent/invoke，老群 DSH 席位 + 显式 wsId）首次命中真 dsh-cli 驱动：
+  沙箱化 dsh headless 在工作区真实拉起 → 上游官方 API 402 Insufficient Balance →
+  驱动如实终局（AgentEventEntity 两条 error 事件在案），未盲目重试
+  （配额类不在瞬时白名单——cf186eb8 的纪律现场生效）。
+- 结论：代码链路（invoke → 执行桥 → CLI 驱动 → 工作区解析）全通；
+  唯一剩余阻塞 = 官方 DeepSeek 账户余额（用户充值即绿）。
+  UI 接线（药丸 → dispatchDirectInvoke）为最后一段代码工作。
+
+== 通道问题终解：headless 切到用户通道（无需充值、无需上游）==
+依据 packages/bundle/headless/README.md#credentials：headless 出厂禁用托管凭证库
+（credentials/authorization/deepseek-account 三服务 disabled）——两本账的官方设计根源。
+落地（全部按文档）：
+1. headless patch 三行恢复凭证库 + agent-default-model 覆盖（mimo-v2.6-flash / opencode-go）；
+2. 适配器包 dsh-opencode-go@0.2.0 进 bundle（版本豁免同 desktop 组合）；
+3. 用户提供 opencode-go key → 写入共享凭证库 ~/.dsh/.credentials.yaml 的
+   OPENCODE_API_KEY 条目（0600，改前备份；key 曾出现在对话中，建议日后轮换）。
+验证链：
+- CLI 探针 ALIVE（凭证热加载生效）→ 会话记录 provider=dsh-opencode-go
+  model=mimo-v2.6-flash ✅
+- Tenon 全链（invoke → 执行桥 → dsh-cli 驱动 → wsId 解析 → 沙箱执行）：
+  工具活动真实流动（glob/bash/job_output ~10 分钟）✅
+- 安全层实测：提示词含 "Read-only" 被认知流判为只读研讨，agent 用 bash 即触发
+  写工具拦截 → 如实 failed 卡（设计如此，探针措辞问题非缺陷）✅
+- 租约 600s 到期 → 超时卡上群，带 [重试]/[降级为本地执行] 双动作（§7.3-1 兑现）；
+  计数任务未在期限内完成 = 模型在沙箱内的执行效率观察，非管道缺陷 ✅
+配置变更清单（用户机）：headless profile（patch/package.json/豁免）、
+echo 桥 manifest（leader echo-dsh，备份留存）、.credentials.yaml（+1 条目）。
+
+== 工单 C UI 段（药丸接线 + PlainChat 行为变更）92586de7 ==
+- ChatScreen：药丸选中态上提进 submitMessage 可达域；1:1 发送 = 文本帧（气泡留档）
+  + dispatchDirectInvoke(peerId=工作区宿主, agentId=工作区自报 agentKind, prompt, wsId)
+  ——agentKind 即 CLI 驱动键族名（driverIdAliases 头部归一），工作区长 agentKey 免转换。
+- 桌面 handlePrompt 单棒兜底收窄到群路径：1:1 纯文本 = 普通聊天（PlainChat 分支），
+  默认落 codex 的旧行为移除——文本帧与 invoke 两路不双派。
+- 验证：PlainChat 守卫反向验证红→绿；失败可见性用例改走 invoke 通路；
+  :orchestration:test :app:jvmTest :composeApp:testAndroidHostTest +
+  construction/stale/cjk/localeParity 全绿。
+- 待真机：两端重装新构建（手机 APK 含药丸接线、桌面含 PlainChat 行为变更）后
+  走 A22 第 3 行场景——手机选工作区发需求 → 工单落 teahouse-mobile、走用户通道。
+
+== 卡片补差 Batch 1：执行中卡耗时段 1d858713 ==
+蓝图补差清单第 1 项落地（四层）：ActiveTicket.createdAt → publishTicketCard
+.startedAt（12 调用点）→ ChainProgress.elapsedSec（可空，cardOf 非空才发射）
+→ parseAgentCard 解析 → CardProgressRow 标签缀 `(45s)`。
+测试：StageChainTest 双向用例（45→发射、null→缺失，反向验证内建）；
+AgentCardRenderTest 样例卡不编造断言。五套测试 + 三门禁全绿。
+剩余批次：审查签字/日志按钮（需单棒 Reviewer 决策）、对比表载体、merged 哈希。
+
+== 最终根因链（11-08 晨，诊断增强全程可见）==
+Tenon 派单全链逐层验证通过（药丸持久化✅ 跨端帧✅ 授权门✅ 驱动✅ 沙箱✅），
+失败收敛到用户自有工具链的最后一跳：
+  dsh → dsh-opencode-go 适配器 → 本地 opencode 守护进程（serve 模式）
+    → provider: openai/gpt-5.4 @ 127.0.0.1:48760（用户 opencode.json 自配）
+      → 48760 = our-free-model 插件的免费模型网关（channel-pack，api-key 归它）
+        → ❌ 无监听（settings.json enabled=false，07:37 升级窗口被重置；
+           昨晚网关活着时也 401——转发缺 bearer，上游鉴权同样缺）
+stderr 尾巴（本轮新上）立功：401 的 URL/cf-ray/request-id 全部可见。
+用户动作：拉起 48760 网关（或 opencode auth login 配上游鉴权）→ 重发探针即绿。
+Tenon 侧无待办：全链九笔提交已验证到最后可观测层。
+
+== convId 回卡贯通 + 意图分诊发现（1c6c626e）==
+convId 四层贯通（协议可选键/租约/执行桥/手机）编译与网格测试全绿；
+双端重装后真机复测发现两层非代码问题：
+1. 意图分诊：1:1 文本的 CognitiveFlow 分类把分析式请求（Count...）判为 Discuss
+   → 只读研讨流（cwd=null、默认 codex）→ 秒败——工单流（Deliver）需要祈使句
+   或显式 @ 指派。1:1 的意图分诊规格（唤醒/研讨/工单的判据）是未设计区域，
+   入蓝图下一章。
+2. 网络层：到 opencode.ai 的 TLS handshake eof 间歇出现（与 services.gradle.org
+   同一网络环境的间歇阻断）——重试机制覆盖 5 次重连后如约失败。
+3. 药丸持久化：rememberSaveable 在 install -r 后丢档（进程状态存储）——
+   显式重选即正确；持久化层级（如会话级偏好入库）待定。

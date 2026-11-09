@@ -32,9 +32,11 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.unit.dp
 import com.kapp.tenon.domain.SenderIdentity
+import com.kapp.tenon.domain.DispatchWorkspaceChoice
 import com.kapp.tenon.domain.directChatMentionTargets
 import com.kapp.tenon.domain.groupParticipantRows
 import com.kapp.tenon.domain.resolveNodeIdentity
+import com.kapp.tenon.domain.ChatSenderAttribution
 import com.kapp.tenon.domain.resolveSenderIdentity
 import com.kapp.tenon.domain.chatPeer
 import com.kapp.tenon.domain.groupOfConv
@@ -347,10 +349,13 @@ fun ChatScreen(
     // 「未知成员」，不把 8 位 hex 的裸 id 当人名印。
     fun quotedSenderNameOf(msg: MessageUi): String? = when {
         msg.mine -> resolveNodeIdentity(settingsSlice.settings.nodeId, bubbleCtx).displayName
-        group != null -> resolveSenderIdentity(msg.senderId, bubbleCtx)
-            ?.takeIf { it.hasProfile }?.displayName
-        else -> resolveNodeIdentity(peer.nodeId, bubbleCtx)
-            .takeIf { it.hasProfile }?.displayName
+        else -> ChatSenderAttribution.identityOf(
+            message = msg,
+            isGroup = group != null,
+            peerNodeId = peer.nodeId,
+            identityCtx = identityCtx,
+            bubbleCtx = bubbleCtx,
+        )?.takeIf { it.hasProfile }?.displayName
     }
     var stagedFiles by remember(peerId, data.initialStagedFiles) { mutableStateOf(data.initialStagedFiles) }
 
@@ -468,8 +473,12 @@ fun ChatScreen(
         // 两条路各司其职不双派。agentId 用工作区自报的 agentKind（DSH/codex…），
         // 它正是 CLI 驱动键的族名（driverIdAliases 按 `-` 前头部归一）。
         if (group == null && body.isNotBlank()) {
-            val selWsId = localActiveWsId
-                ?: agentSlice.agentWorkspaces.values.firstOrNull { it.peerId == peer.nodeId }?.wsId
+            val selWsId = DispatchWorkspaceChoice.resolve(
+                localActiveWsId ?: settingsSlice.settings.lastDispatchWsId,
+                agentSlice.agentWorkspaces.values
+                    .filter { it.peerId == peer.nodeId }
+                    .map { it.wsId },
+            )
             val ws = selWsId?.let { id -> agentSlice.agentWorkspaces.values.firstOrNull { it.wsId == id } }
             val kind = ws?.agentKind?.trim()?.takeIf { it.isNotEmpty() }
             if (ws != null && kind != null) {
@@ -517,7 +526,18 @@ fun ChatScreen(
         if (group != null) emptyList()
         else agentSlice.agentWorkspaces.values.filter { it.peerId == peer.nodeId }
     }
-    val effectiveWsId = if (group != null) (data.wsId ?: matchedWs?.wsId) else (localActiveWsId ?: availableWorkspaces.firstOrNull()?.wsId)
+    // 生效的工作区：**药丸画的就是派单用的那一个**。
+    // 从前这里与 submitMessage 各写一条回退链（本机选中 ?: 列表第一个），
+    // 少写一档就会画出 A 仓、派到 B 仓。回退链现在只有 [DispatchWorkspaceChoice] 一份。
+    // 记住值取自设置（跨重启），但只在它仍在本机列表里时才采纳 —— 解绑/换机后是悬空 id。
+    val effectiveWsId = if (group != null) {
+        data.wsId ?: matchedWs?.wsId
+    } else {
+        DispatchWorkspaceChoice.resolve(
+            localActiveWsId ?: settingsSlice.settings.lastDispatchWsId,
+            availableWorkspaces.map { it.wsId },
+        )
+    }
     val showWorkspacePickerState = remember(peerId) { mutableStateOf(false) }
     var showWorkspacePicker by showWorkspacePickerState
     val showSessionPickerState = remember(peerId, effectiveWsId) { mutableStateOf(false) }
@@ -1159,7 +1179,9 @@ fun ChatScreen(
             workspaces = availableWorkspaces,
             activeWsId = effectiveWsId,
             onSelect = { selectedWsId ->
-                localActiveWsId = selectedWsId
+                // 本地态只负责**这一屏立刻变**；跨重启的记忆由壳写进设置
+                // （`RelaySettings.lastDispatchWsId`），本层不碰持久化 ——
+                // composeApp 里没有存储，硬塞进来就会在桌面壳上变成第二套真相。
                 localActiveWsId = selectedWsId
                 actions.onSelectWorkspace?.invoke(selectedWsId)
             },

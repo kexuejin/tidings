@@ -2,13 +2,18 @@
 package com.kapp.tenon.core.session
 
 import com.kapp.tenon.core.protocol.MsgTypes
+import com.kapp.tenon.core.protocol.Timings
 import com.kapp.tenon.core.protocol.Profile
+import com.kapp.tenon.core.transport.PeerRegistry
 import com.kapp.tenon.core.transport.UdpTransport
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.cancel
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.runBlocking
+import kotlinx.coroutines.withTimeout
+import kotlin.test.assertNotNull
 import java.net.ServerSocket
 import kotlin.test.Test
 import kotlin.test.assertFalse
@@ -28,6 +33,12 @@ import kotlin.test.assertTrue
  * "这个标志真的跟着模式走"，而不是永远 true（那样诊断会说谎）。
  */
 class LegacyDiscoveryVisibilityTest {
+
+    /** 轮询节奏（env-test B 类口径：节奏用常量，不用字面量赌时序）。 */
+    private val POLL_MS = 20L
+
+    /** 缺席断言的观察窗：15 个 sweep 周期。 */
+    private val ABSENCE_WINDOW_MS = 300L
 
     private fun profile(id: String, caps: List<String> = emptyList()) = Profile(
         nodeId = id, nick = id, company = "", dept = "", team = "", avatar = 1,
@@ -138,5 +149,71 @@ class LegacyDiscoveryVisibilityTest {
         }
         assertFalse(isMigrated(legacy), "没升级的老端不该被判成已迁移")
         assertTrue(isMigrated(migrated), "声明了 lnk1+fch1 的新端必须被判成已迁移")
+    }
+
+    /**
+     * **D12 的行为钉**：luciola 模式的哑发现（[SweepOnlyDiscoveryEngine]）虽然不做
+     * 发现动作，但 sweep 必须活着 —— 它是注册表唯一的 `lastSeen > offlineAfter`
+     * 翻面器。哑掉 sweep 的真机后果：对端静默死亡时「在线」永不翻转、休眠横幅
+     * 在 Android 上不可达（SIGSTOP 宿主 5 分钟 UI 仍「在线」）。
+     *
+     * 反向探针：把 offlineAfter 抬到不可能的值，同一个 peer 必须**不**翻 ——
+     * 翻面确实来自 sweep 阈值，而不是别的路径顺手做的。
+     */
+    @Test
+    fun sweepOnlyDiscoveryEngineStillFlipsSilentPeersOffline() = runBlocking {
+        val registry = PeerRegistry("self")
+        val peerId = "silent-peer-0001"
+        val before = assertNotNull(
+            registry.touch(peerId, "10.0.0.9", 17878, profile(peerId), confirmed = true),
+            "touch 进来的对端应当被注册表接受",
+        )
+        assertTrue(before.online, "刚 touch 过的对端是在线的")
+        val engine = SweepOnlyDiscoveryEngine(
+            registry,
+            Timings(offlineAfter = 200, sweepInterval = 20),
+        )
+        val scope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
+        try {
+            engine.start(scope)
+            withTimeout(5_000) {
+                while (registry.values().first { it.profile.nodeId == peerId }.online) {
+                    delay(POLL_MS)
+                }
+            }
+            assertFalse(
+                registry.values().first { it.profile.nodeId == peerId }.online,
+                "对端静默超过 offlineAfter 后必须被 sweep 翻成离线（D12）",
+            )
+        } finally {
+            engine.stop()
+            scope.cancel()
+        }
+    }
+
+    @Test
+    fun sweepRespectsTheThresholdInsteadOfFlippingEverything() = runBlocking {
+        val registry = PeerRegistry("self")
+        val peerId = "alive-peer-0001"
+        registry.touch(peerId, "10.0.0.8", 17878, profile(peerId), confirmed = true)
+        val engine = SweepOnlyDiscoveryEngine(
+            registry,
+            Timings(offlineAfter = Long.MAX_VALUE, sweepInterval = 20),
+        )
+        val scope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
+        try {
+            engine.start(scope)
+            // 缺席断言没有"等到发生"可轮询：等满 15 个 sweep 周期（300ms / 20ms）
+            // 仍在线，才能说"翻面由阈值驱动而不是 sweep 本身"。周期数给足余量，
+            // 不是赌一次时序。
+            delay(ABSENCE_WINDOW_MS)
+            assertTrue(
+                registry.values().first { it.profile.nodeId == peerId }.online,
+                "阈值内（刚 touch 过）的对端不允许被 sweep 翻掉 —— 翻面必须由阈值驱动",
+            )
+        } finally {
+            engine.stop()
+            scope.cancel()
+        }
     }
 }

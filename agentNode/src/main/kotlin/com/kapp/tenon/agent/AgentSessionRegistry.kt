@@ -38,8 +38,10 @@ import java.util.concurrent.ConcurrentLinkedQueue
  * `relay.db` 的职责，不是这里的。
  *
  * 线程安全：控制面用固定线程池（4 线程）处理请求，`runtime.inbound` 又在另一个协程里
- * 投递，两边都会写。故全部字段走 [ConcurrentHashMap]，并按 `(nodeId, sessionId)` 映射到
- * 一条**固定存在**的锁（见 [lockFor]）—— 锁不随会话淘汰而删除，理由见那里的 KDoc。
+ * 投递，两边都会写。故会话/帧台账全部字段走 [ConcurrentHashMap]，并按
+ * `(nodeId, sessionId)` 映射到一条**固定存在**的锁（见 [lockFor]）—— 锁不随会话淘汰
+ * 而删除，理由见那里的 KDoc。唯一例外是 [sessionConversations]：它需要「按绑定先后
+ * 淘汰」的插入序语义，是有界的 `LinkedHashMap` + 专用锁，见 [bindConversation]。
  *
  * @param maxSessions 会话台账上限；超出时淘汰 `updatedAt` 最老的会话，防止长时间运行下无界增长。
  * @param maxEventsPerSession 单会话保留的**每类**帧条数上限（事件、任务、执行、审批、取消各算一份）；
@@ -290,6 +292,46 @@ class AgentSessionRegistry(
      * `state` 变化时不该把 `title` 抹掉）。
      */
     @Suppress("LongParameterList")
+    /**
+     * sessionId → Tenon 会话键（convId）的绑定（提案 §9 阶段三，L3 终审对齐键）。
+     *
+     * 写入方：宿主派单（executeCliTask / executePluginTask 带 convId）——派单侧
+     * 知道「这个会话属于哪条对话」，hook 侧不知道；hook 带着真实 sessionId 来时
+     * 经 [conversationOf] 反查，审批卡才有归属。
+     *
+     * **有界插入序表**：这张表同时是 `isHostDispatchedSession` 的信任判据，旧实现是
+     * 一张没有上限、也从不回收的 `ConcurrentHashMap`——`evictIfNeeded()` 清掉了
+     * sessions/events/queues/... 七张表，唯独漏了它。长时间运行的宿主每次派单都
+     * 留一条，既不释放内存，也让早已结束的 sessionId 永久保持「本节点派单」的可信
+     * 身份。现在按绑定先后淘汰（上限 [maxSessions]），并跟随会话淘汰一起清：
+     * 会话台账里都没这行了，绑定就不该还被当作信任凭据。
+     *
+     * 不用 ConcurrentHashMap 是因为「最老的一条」需要插入序；临界区只有一次 map
+     * 读写，专用的小锁比无界表便宜。
+     */
+    private val conversationLock = Any()
+    private val sessionConversations = LinkedHashMap<String, String>()
+
+    fun bindConversation(sessionId: String, convId: String) {
+        synchronized(conversationLock) {
+            // 重新绑定 = 刷新年龄（活动会话不该被当作最老的一条淘汰）。
+            sessionConversations.remove(sessionId)
+            sessionConversations[sessionId] = convId
+            while (sessionConversations.size > maxSessions) {
+                val oldest = sessionConversations.entries.iterator().next().key
+                sessionConversations.remove(oldest)
+            }
+        }
+    }
+
+    fun conversationOf(sessionId: String): String? =
+        synchronized(conversationLock) { sessionConversations[sessionId] }
+
+    /** 会话被淘汰时同步撤销它的对齐键绑定（信任凭据不残响）。 */
+    private fun evictConversations(sessionIds: Iterable<String>) {
+        synchronized(conversationLock) { sessionIds.forEach { sessionConversations.remove(it) } }
+    }
+
     fun recordSession(
         nodeId: String,
         sessionId: String,
@@ -770,6 +812,8 @@ class AgentSessionRegistry(
             cancels.remove(key)
             artifacts.remove(key)
         }
+        // 第八张表：对齐键绑定也是「本节点派单」的信任凭据，会话行没了它就得一起撤。
+        evictConversations(doomed.map { it.sessionId })
     }
 
     private companion object {

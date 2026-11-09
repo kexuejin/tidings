@@ -155,7 +155,7 @@ class SandboxedCliDriver(
                 taskId = taskId,
                 hostRepo = wsPath,
                 command = listOf(cliPath) + attemptArgs,
-                env = envOverrides,
+                env = envOverrides + mapOf(DriverKeys.ENV_HOOK_SESSION_ID to sessionId),
                 onLine = { line ->
                     outputTail.append(line).append('\n')
                     if (resumedCliSessionId == null) {
@@ -197,7 +197,7 @@ class SandboxedCliDriver(
                             outcome.message
                         }
                         onEvent(DriverEvent.Card(endCardJson(taskId, wsPath, STATE_BLOCKED, ledger)))
-                        onEvent(DriverEvent.Error(ledger))
+                        onEvent(DriverEvent.Error(ledger + CliSubprocessDriver.stderrTailOf(outputTail)))
                         return
                     }
                 }
