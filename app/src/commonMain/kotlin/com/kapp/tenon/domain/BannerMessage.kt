@@ -223,6 +223,34 @@ sealed interface BannerMessage {
     /** 群公告或简介已更新。 */
     data object GroupMetaUpdated : BannerMessage
 
+    /**
+     * 团队编制已保存并广播（团队创建方案 §4.3）。
+     *
+     * 与 [GroupMetaUpdated] 分开：那个说的是「公告/简介」，团队保存有自己的成功语义
+     * （「全群会看到你的团队编制」），共用一条会让用户对着错误的话确认成功。
+     */
+    data object TeamRosterSaved : BannerMessage
+
+    /** 保存团队编制时，目标席位已经不在声明表里（授权面板取消暴露 / 并发变化）。 */
+    data object TeamSeatMissing : BannerMessage
+
+    /**
+     * 团队编制没过校验（组员名与群内 @ token 冲突 / 超预算 / 重复）。
+     *
+     * 正常路径由对话框就地拦截并指出行号 —— 这条是领域层防线（UI 漏拦、或从别的
+     * 入口写进来）时的兜底反馈，不承诺指出具体行。
+     */
+    data object TeamRosterInvalid : BannerMessage
+
+    /**
+     * 元数据没过发送侧预算校验（`CodecGroup.validateGroupMeta`）。
+     *
+     * 这是 bug 防线不是业务分支：写路径在构造元数据时就该保证预算（对话框先过
+     * [TeamRosterInvalid] 的那套校验）。拒收发生在**落库之前** —— 存进去只会让
+     * 下一次广播变成毒帧（framing peer-closed + 队列重放）。
+     */
+    data object GroupMetaRejected : BannerMessage
+
     /** 消息转发成功。 */
     data object ForwardSuccess : BannerMessage
 

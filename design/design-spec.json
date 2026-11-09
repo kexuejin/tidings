@@ -1499,6 +1499,38 @@
         ]
       },
       {
+        "id": "TeamRosterDialog",
+        "file": "composeApp/src/commonMain/kotlin/com/kapp/tenon/ui/components/TeamRosterDialog.kt",
+        "screens": [
+          "chat"
+        ],
+        "states": [
+          "normal",
+          "long_text"
+        ],
+        "previews": [
+          "TeamRosterPhonePreview",
+          "TeamRosterDeskPreview"
+        ],
+        "expectGroups": [
+          "colors",
+          "shape",
+          "typography",
+          "spacing"
+        ],
+        "requiredTokens": [
+          "colors.primaryContainer",
+          "typography.bodyMedium",
+          "typography.labelSmall"
+        ],
+        "stress": [
+          "长组员名",
+          "组员很多(8人上限)",
+          "多席位选择",
+          "无默认工作区引导态"
+        ]
+      },
+      {
         "id": "ChatHeaderContent",
         "file": "composeApp/src/commonMain/kotlin/com/kapp/tenon/feature/chat/ChatHeaderContent.kt",
         "screens": [

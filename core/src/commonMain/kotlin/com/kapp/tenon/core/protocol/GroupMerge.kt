@@ -36,7 +36,14 @@ sealed interface GroupMergeDecision {
  * TS 侧 `groups.ts:519-651` 的 `canApplyRemoteInfo` 有约 130 行权限矩阵，覆盖群主/管理员/
  * 管理密码/`creatorIp` 来源校验/离组重邀的按步重放。本仓实现下面这条**一句话规则**：
  *
- * > **只有群主与管理员能改群；普通成员唯一能做的是"只增不减地邀请新人"。**
+ * > **只有群主与管理员能改群；普通成员唯一能做的是"只增不减地邀请新人"，**
+ * > **以及改写自己宿主（`hostNodeId == updatedBy`）的那条声明。**
+ *
+ * 第二条是 PPE-2 / 团队创建方案 §5.2 的「宿主自声明主权」：声明是自述的展示元数据
+ * （agent/团队/工作区白名单），不授予执行权 —— 允许成员声明"自己机器上的 agent"
+ * 与既有「机主主权」同向；没有它，成员宿主声明自己的席位/团队会被每个对端整帧拒收。
+ * **语义变更的兼容性代价**：旧版本节点的合并逻辑没有这条分支，仍会拒收成员发起的
+ * rev+1 —— 团队声明的可见性依赖组内成员版本一致，见方案 §5.3 的混合版本窗口。
  *
  * 外加三条不变量：`sameManagementIdentity`（谁都改不动建群来源与管理密码身份）、
  * `rev` 严格递增、自己不在新成员表里时按"被移出"处理。
@@ -172,12 +179,69 @@ object GroupMerge {
 
         if (actorIsManager) return GroupMergeDecision.Apply(next)
 
-        // 普通成员：只能邀请新人 —— 只增、不减，且不动名字/头像/简介/公告。
+        // 普通成员：两条路，各只此一条。
+        //
+        // ① 邀请新人 —— 只增、不减，且不动名字/头像/简介/公告（既有规则）。
         val onlyAdded = added.isNotEmpty() && removed.isEmpty() &&
             !nameChanged && !avatarChanged && !textChanged
-        return if (onlyAdded) GroupMergeDecision.Apply(next)
-        else GroupMergeDecision.Reject("member-may-only-invite")
+        if (onlyAdded) return GroupMergeDecision.Apply(next)
+
+        // ② **宿主自声明主权**（PPE-2 / 团队创建方案 §5.2）：只改写 `hostNodeId == 自己`
+        // 的那条声明（含 entityType / teamMembers / 工作区白名单），其余字段一律与本地
+        // 完全一致。
+        //
+        // 以前这里只有 ①，于是成员宿主声明自己的席位/团队（rev+1）会被**每个对端整帧
+        // 拒收**，而发送侧显示已保存 —— 「界面允许、收端拒收」的组合比两者单独存在都糟。
+        // 它也顺带修了存量缺陷：工作区授权（`handleSetGroupAgentWorkspaces`）由普通成员
+        // 保存时走的就是同一条被拒的路。
+        //
+        // 安全边界：声明是**自述的展示元数据**，不授予执行权（执行名单是独立台账）；
+        // 允许成员声明「自己机器上的 agent/团队」与既有「机主主权」一致，且比现状更严
+        // —— 现状是管理员可整份改写别人的声明。
+        if (memberMayRedeclareSelf(current, next, actor)) {
+            return GroupMergeDecision.Apply(next)
+        }
+        return GroupMergeDecision.Reject("member-may-only-invite")
     }
+
+    /**
+     * 普通成员的**自声明主权**判据（方案 §5.2 的规则 1–4）：
+     *
+     * 1. 除 `virtualAgents` 外的所有字段（成员表/群主/管理员/名字/头像/简介/公告）
+     *    必须与本地完全一致 —— 管理身份（creatorIp/creatorId/adminSecretHash/adminHint）
+     *    已在 [sameManagementIdentity] 比过，这里不重复；
+     * 2. `virtualAgents` 的 null 与空列表归一后按**条目多重集合**比较（顺序不敏感）；
+     * 3. `hostNodeId != 发起者` 的每一条声明：两边必须逐字段相同（增、删、改都不行）；
+     * 4. `hostNodeId == 发起者` 的声明：允许增、删、改。
+     */
+    private fun memberMayRedeclareSelf(local: GroupMeta, next: GroupMeta, actor: String): Boolean {
+        val fieldsEqual = local.members == next.members &&
+            (local.ownerId ?: "") == (next.ownerId ?: "") &&
+            (local.adminIds.orEmpty()) == (next.adminIds.orEmpty()) &&
+            local.name == next.name &&
+            (local.avatarHash ?: "") == (next.avatarHash ?: "") &&
+            (local.description ?: "") == (next.description ?: "") &&
+            (local.announce ?: "") == (next.announce ?: "")
+        if (!fieldsEqual) return false
+        // 外来声明的多重集合必须原样：一条不许多、一条不许少、一条不许改。
+        val foreignLeft = local.virtualAgents.orEmpty()
+            .filter { it.hostNodeId != actor }.map(::canonicalDeclaration).sorted()
+        val foreignRight = next.virtualAgents.orEmpty()
+            .filter { it.hostNodeId != actor }.map(::canonicalDeclaration).sorted()
+        return foreignLeft == foreignRight
+    }
+
+    /**
+     * 一条声明的**规范形**：按声明序编码成 JSON 串。
+     *
+     * 编码器 `encodeDefaults = false`：缺省与默认值（`entityType="single"`、空组员清单、
+     * 空白名单、null 的 defaultWsId）编码出**同一个串** —— 规则 2 的「null 与空列表归一」
+     * 在这里免费拿到，不用再手写归一。顺序不敏感由调用方 sort 保证。
+     */
+    private fun canonicalDeclaration(member: VirtualAgentMember): String =
+        declarationCanonicalJson.encodeToString(VirtualAgentMember.serializer(), member)
+
+    private val declarationCanonicalJson = kotlinx.serialization.json.Json { encodeDefaults = false }
 
     /**
      * 对应 TS `sameManagementIdentity`：建群来源（`creatorIp`/`creatorId`）与管理密码身份

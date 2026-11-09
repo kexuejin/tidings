@@ -1683,6 +1683,43 @@
     <string name="group_auth_badge_self">Declared here</string>
     <string name="group_auth_entry">Authorization</string>
 
+    <!-- Team roster (team creation plan §2.2; v1 declaration & display only) -->
+    <string name="team_roster_button">Team Roster</string>
+    <string name="team_roster_dialog_title">Team Roster · %1$s</string>
+    <string name="team_roster_enable_switch">Enable Team Collaboration</string>
+    <string name="team_roster_enable_desc">Leader acts as unified window with internal members.</string>
+    <string name="team_roster_no_ws_warning">Please bind a default workspace in Group Auth before enabling team.</string>
+    <string name="team_roster_seat_label">Seat</string>
+    <string name="team_roster_leader_label">👑 Leader (unified window): %1$s</string>
+    <string name="team_roster_members_section">Roster (preset, editable)</string>
+    <string name="team_roster_member_index">Member %1$d</string>
+    <string name="team_roster_member_name_label">Name (@mention)</string>
+    <string name="team_roster_member_role_label">Role Label</string>
+    <string name="team_roster_add_member">+ Add Member</string>
+    <string name="team_roster_quick_roles">Quick Roles</string>
+    <string name="team_roster_role_code">Coding</string>
+    <string name="team_roster_role_review">Review</string>
+    <string name="team_roster_role_test">Testing</string>
+    <string name="team_roster_role_architect">Architecture</string>
+    <string name="team_roster_role_frontend">Frontend</string>
+    <string name="team_roster_role_backend">Backend</string>
+    <string name="team_roster_role_security">Security</string>
+    <string name="team_roster_max_members">Up to %1$d</string>
+    <string name="team_roster_remove_member">Remove</string>
+    <string name="team_roster_conflict_warning">Name conflicts with @%1$s, please choose another</string>
+    <string name="team_roster_limit_warning">Cannot exceed %1$d characters</string>
+    <string name="team_roster_required_warning">Cannot be empty</string>
+    <string name="team_roster_slug_warning">Only lowercase letters, digits and hyphens</string>
+    <string name="team_roster_duplicate_warning">Duplicated in this team, please choose another</string>
+    <string name="team_roster_disable_note">Once off, group members will no longer see this agent's team roster; @ still points to the agent.</string>
+    <string name="team_roster_member_note">Members are division-of-work labels: no extra group seats, no separate execution.</string>
+    <string name="team_roster_mobile_notice">Execution drivers and models are managed by Desktop host</string>
+    <string name="team_roster_badge">Team (%1$d)</string>
+    <string name="team_roster_saved">Team roster saved and broadcast</string>
+    <string name="team_roster_seat_missing">This agent's seat was just revoked. Reopen Group Auth and try again.</string>
+    <string name="team_roster_invalid">Team roster not saved: a member name conflicts with group @ tokens or exceeds limits.</string>
+    <string name="banner_group_meta_rejected">Change exceeds the single-frame limit and was not saved. Reduce members or shorten names.</string>
+
     <string name="chat_caps_label">Capabilities: %1$s</string>
 
     <string name="desktop_composer_attach">Files…</string>

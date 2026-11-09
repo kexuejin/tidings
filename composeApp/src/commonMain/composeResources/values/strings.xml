@@ -1856,6 +1856,43 @@
     <string name="group_auth_badge_self">本机声明</string>
     <string name="group_auth_entry">授权管理</string>
 
+    <!-- 团队编制（团队创建方案 §2.2；v1 只做声明与展示） -->
+    <string name="team_roster_button">团队编制</string>
+    <string name="team_roster_dialog_title">团队编制 · %1$s</string>
+    <string name="team_roster_enable_switch">开启团队协同模式</string>
+    <string name="team_roster_enable_desc">开启后以领队为统一对外窗口，内部由专职组员分工执行。</string>
+    <string name="team_roster_no_ws_warning">请先在「工作区授权」中绑定默认工作区，再开启团队编制。</string>
+    <string name="team_roster_seat_label">席位</string>
+    <string name="team_roster_leader_label">👑 领队（统一出口）: %1$s</string>
+    <string name="team_roster_members_section">团队阵容（默认预设，可直接改）</string>
+    <string name="team_roster_member_index">组员 %1$d</string>
+    <string name="team_roster_member_name_label">名字 (@标识)</string>
+    <string name="team_roster_member_role_label">角色标签</string>
+    <string name="team_roster_add_member">+ 添加组员</string>
+    <string name="team_roster_quick_roles">快捷角色</string>
+    <string name="team_roster_role_code">编码</string>
+    <string name="team_roster_role_review">审查</string>
+    <string name="team_roster_role_test">测试</string>
+    <string name="team_roster_role_architect">架构</string>
+    <string name="team_roster_role_frontend">前端</string>
+    <string name="team_roster_role_backend">后端</string>
+    <string name="team_roster_role_security">安全</string>
+    <string name="team_roster_max_members">最多 %1$d 人</string>
+    <string name="team_roster_remove_member">删除</string>
+    <string name="team_roster_conflict_warning">与群内成员 @%1$s 冲突，请更换</string>
+    <string name="team_roster_limit_warning">不得超过 %1$d 字符</string>
+    <string name="team_roster_required_warning">不能为空</string>
+    <string name="team_roster_slug_warning">只能用小写字母、数字和连字符</string>
+    <string name="team_roster_duplicate_warning">在团队内重复，请更换</string>
+    <string name="team_roster_disable_note">关闭后，群成员将看不到这个 agent 的团队组员清单；@ 仍然指向该 agent。</string>
+    <string name="team_roster_member_note">组员是团队编制的分工标签：不占群席位，也不会单独执行。</string>
+    <string name="team_roster_mobile_notice">执行驱动与模型由桌面宿主 (Desktop) 托管</string>
+    <string name="team_roster_badge">团队 (%1$d)</string>
+    <string name="team_roster_saved">团队编制已保存并广播</string>
+    <string name="team_roster_seat_missing">这个智能体的席位刚被撤回，请重新打开「工作区授权」后再试。</string>
+    <string name="team_roster_invalid">团队编制没有保存：组员名字与群内 @ 名冲突或超出限制。</string>
+    <string name="banner_group_meta_rejected">这次改动超出了单帧上限，没有保存。请减少组员数量或缩短名称。</string>
+
     <string name="chat_caps_label">支持特性：%1$s</string>
 
     <string name="desktop_composer_attach">文件…</string>

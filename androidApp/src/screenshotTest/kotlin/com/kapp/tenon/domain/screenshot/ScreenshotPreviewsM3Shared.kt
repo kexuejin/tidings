@@ -43,6 +43,7 @@ import com.kapp.tenon.feature.chat.cardRowOutcome
 import com.kapp.tenon.feature.chat.latestRevCardMessageIds
 import com.kapp.tenon.feature.chat.parseAgentCard
 import com.kapp.tenon.ui.components.SetGroupAgentWorkspacesDialog
+import com.kapp.tenon.ui.components.TeamRosterDialog
 import com.kapp.tenon.ui.components.WorkspaceGroupCreateDialog
 import com.kapp.tenon.ui.components.WorkspaceQrDialog
 import com.kapp.tenon.ui.theme.AppTheme
@@ -314,6 +315,45 @@ private fun GroupAuthDeskPreview() {
                 wsTitleOf = { wsId -> previewPanelWorkspaces().firstOrNull { it.wsId == wsId }?.wsTitle },
                 onDismiss = {},
                 onSave = {},
+            )
+        }
+    }
+}
+
+// ── 团队编制：手机帧（名册 + 宿主注解）/ 桌面帧（同一名册，外壳注解不画）─────
+
+@PreviewTest
+@Preview(name = "m3-team-roster", widthDp = 393, heightDp = 852, showBackground = true, locale = "zh-rCN")
+@Composable
+private fun TeamRosterPhonePreview() {
+    AppTheme(darkTheme = false) {
+        Surface(color = MaterialTheme.colorScheme.surface, modifier = Modifier.fillMaxSize()) {
+            TeamRosterDialog(
+                agentName = "dev-lead",
+                seats = previewPanelAgents().filter { it.hostNodeId == "preview-host-self" },
+                initialSeatWsId = "ws-a",
+                takenTokens = setOf("dev-lead", "remote-agent"),
+                onDismiss = {},
+                onSave = { _, _ -> },
+                showHostManagedNotice = true,
+            )
+        }
+    }
+}
+
+@PreviewTest
+@Preview(name = "desk-m3-team-roster", widthDp = 1280, heightDp = 800, showBackground = true, locale = "zh-rCN")
+@Composable
+private fun TeamRosterDeskPreview() {
+    AppTheme(darkTheme = false) {
+        Surface(color = MaterialTheme.colorScheme.surface, modifier = Modifier.fillMaxSize()) {
+            TeamRosterDialog(
+                agentName = "dev-lead",
+                seats = previewPanelAgents().filter { it.hostNodeId == "preview-host-self" },
+                initialSeatWsId = "ws-a",
+                takenTokens = setOf("dev-lead", "remote-agent"),
+                onDismiss = {},
+                onSave = { _, _ -> },
             )
         }
     }

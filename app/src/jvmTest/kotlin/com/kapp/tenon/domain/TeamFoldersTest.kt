@@ -82,7 +82,7 @@ class TeamFoldersTest {
         val groups = listOf(group(agents = listOf(team(entityType = "single"))))
         val folders = teamFoldersByConv(groups, emptyList())[ConvId.group("g1")]
         assertEquals(1, folders?.size)
-        assertEquals("dsh", folders?.first()?.pluginId)
+        assertEquals("host-a:dsh", folders?.first()?.pluginId, "组标识宿主限定（host:agentId）")
         assertEquals(1, folders?.first()?.members?.size)
     }
 
@@ -153,7 +153,30 @@ class TeamFoldersTest {
             ),
         )
         val folders = teamFoldersByConv(groups, emptyList()).getValue(ConvId.group("g1"))
-        assertEquals(listOf("alpha", "beta"), folders.map { it.pluginId })
+        assertEquals(listOf("host-a:alpha", "host-a:beta"), folders.map { it.pluginId }, "组标识宿主限定（host:agentId）")
         assertEquals(listOf("A 团队", "B 团队"), folders.map { it.title })
+    }
+
+    /**
+     * P0-0.4：两台宿主各挂一个**同名** agent（或同 agent 的两个团队席位）时，
+     * 裸 agentId 的组标识相撞 → 折叠投影行 key 相撞 → LazyColumn 直接崩。
+     * 宿主限定后逐条唯一。
+     */
+    @Test
+    fun sameAgentIdOnDifferentHostsProduceDistinctPluginIds() {
+        val groups = listOf(
+            group(
+                agents = listOf(
+                    team(agentId = "dsh", hostNodeId = "host-a", name = "A 的团队"),
+                    team(agentId = "dsh", hostNodeId = "host-b", name = "B 的团队"),
+                ),
+            ),
+        )
+        val folders = teamFoldersByConv(groups, emptyList()).getValue(ConvId.group("g1"))
+        assertEquals(
+            listOf("host-a:dsh", "host-b:dsh"),
+            folders.map { it.pluginId },
+            "跨宿主同 agentId 不得共用组标识 —— 折叠投影拿它拼行 key",
+        )
     }
 }

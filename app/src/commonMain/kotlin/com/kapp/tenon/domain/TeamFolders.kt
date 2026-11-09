@@ -58,8 +58,13 @@ fun teamFoldersByConv(
                 busyByHost[member.hostNodeId.lowercase()]?.contains(agentKey) == true
             TeamFolderUi(
                 convId = convId,
-                // 线格式没有 pluginId，组标识只能取 leader 的 agentId（见 TeamFolderUi 的 KDoc）。
-                pluginId = member.agentId,
+                // **组标识必须宿主限定**（`host:agentId`）：线格式没有 pluginId，裸 agentId
+                // 在「两台宿主各挂一个同名 agent」时会撞——折叠投影拿它拼行 key
+                // （`teamlabel_<conv>_<pluginId>`），撞了就是 LazyColumn
+                // `Key was already used` 直接崩（P0-0.4：phase0 的 key 唯一测试只盖了
+                // 不同 agentId 的情形，没盖跨宿主同名）。校验层已保证同一 (host, agentId)
+                // 至多一条团队（validateGroup），所以宿主限定后逐条唯一。
+                pluginId = member.hostNodeId + ":" + member.agentId,
                 title = member.name,
                 members = member.teamMembers.map {
                     TeamMemberUi(agentId = it.agentId, name = it.name, role = it.role)

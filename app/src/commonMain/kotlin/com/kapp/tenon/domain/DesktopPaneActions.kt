@@ -3,6 +3,7 @@
 
 package com.kapp.tenon.domain
 
+import com.kapp.tenon.core.protocol.TeamMemberDraft
 import com.kapp.tenon.core.transport.SendOutcome
 import com.kapp.tenon.core.transport.LocalFile
 import com.kapp.tenon.domain.ManualPeerEntry
@@ -154,6 +155,15 @@ public interface DesktopPaneActions {
      * `RelayControllerGroupsComponent.setGroupAgentWorkspaces`）。
      */
     fun setGroupAgentWorkspaces(groupId: String, wsIds: List<String>)
+
+    /**
+     * 保存 / 关闭某个席位的团队编制（团队创建方案 §4.3）。
+     *
+     * 与 [setGroupAgentWorkspaces] 同节奏：一次保存 = 一次 rev+1、一次广播，没有
+     * 中间态。[roster] 为 null = 关闭团队（`entityType` 回 single、组员清空）。
+     * 定位键 = `(groupId, defaultWsId)`；席位必须属于本机声明（机主主权）。
+     */
+    fun setGroupTeamDeclaration(groupId: String, defaultWsId: String, roster: List<TeamMemberDraft>?)
 
     /**
      * 算「谁能用这个 agent 干活」的逐设备勾选状态。

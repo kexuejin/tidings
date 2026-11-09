@@ -141,6 +141,10 @@ import com.kapp.tenon.generated.resources.set_invalid_nick
 import com.kapp.tenon.generated.resources.set_ports_saved
 import com.kapp.tenon.generated.resources.set_saved
 import com.kapp.tenon.generated.resources.time_hours_ago
+import com.kapp.tenon.generated.resources.team_roster_saved
+import com.kapp.tenon.generated.resources.team_roster_seat_missing
+import com.kapp.tenon.generated.resources.team_roster_invalid
+import com.kapp.tenon.generated.resources.banner_group_meta_rejected
 import com.kapp.tenon.generated.resources.time_just_now
 import com.kapp.tenon.generated.resources.time_minutes_ago
 import com.kapp.tenon.generated.resources.ic_bot
@@ -399,6 +403,10 @@ fun bannerText(message: BannerMessage): String = when (message) {
     BannerMessage.GroupMemberRemoved -> stringResource(Res.string.banner_group_member_removed)
     BannerMessage.GroupNoPermission -> stringResource(Res.string.banner_group_no_permission)
     BannerMessage.GroupMetaUpdated -> stringResource(Res.string.banner_group_meta_updated)
+    BannerMessage.TeamRosterSaved -> stringResource(Res.string.team_roster_saved)
+    BannerMessage.TeamSeatMissing -> stringResource(Res.string.team_roster_seat_missing)
+    BannerMessage.TeamRosterInvalid -> stringResource(Res.string.team_roster_invalid)
+    BannerMessage.GroupMetaRejected -> stringResource(Res.string.banner_group_meta_rejected)
     BannerMessage.ForwardSuccess -> stringResource(Res.string.chat_forward_success)
     is BannerMessage.RemoteRelayConfigured ->
         stringResource(Res.string.banner_remote_relay_configured, message.name)

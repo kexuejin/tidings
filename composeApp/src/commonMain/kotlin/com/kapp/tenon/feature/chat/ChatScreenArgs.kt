@@ -3,6 +3,7 @@
 package com.kapp.tenon.feature.chat
 
 import kotlinx.serialization.json.JsonObject
+import com.kapp.tenon.core.protocol.TeamMemberDraft
 import com.kapp.tenon.domain.HistorySearchFilter
 import com.kapp.tenon.domain.MessageSearchResult
 import com.kapp.tenon.domain.model.AgentApprovalDecision
@@ -275,6 +276,13 @@ data class ChatScreenGroupActions(
      * 与 `onAddGroupMembers` 是两件事：那个加**人**，这个暴露**本机项目**。
      */
     val onExposeWorkspaces: ((groupId: String, wsIds: List<String>) -> Unit)? = null,
+    /**
+     * 团队编制的保存通路（团队创建方案 §4.3）：`(groupId, defaultWsId, roster)`。
+     *
+     * 与 [onExposeWorkspaces] 同节奏：一次保存 = 一次 rev+1、一次广播；roster 为 null =
+     * 关闭团队。null = 这个壳没有保存通路，群信息里不画「团队编制」按钮。
+     */
+    val onSetTeamRoster: ((groupId: String, defaultWsId: String, roster: List<TeamMemberDraft>?) -> Unit)? = null,
     val onUpdateGroupMeta: ((groupId: String, description: String?, announce: String?) -> Unit)? = null,
     val onLeaveGroup: ((groupId: String) -> Unit)? = null,
     /**

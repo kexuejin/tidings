@@ -10,6 +10,7 @@ import com.kapp.tenon.core.fs.use
 import com.kapp.tenon.core.ioDispatcher
 import com.kapp.tenon.core.nowMillis
 import com.kapp.tenon.core.protocol.ConvId
+import com.kapp.tenon.core.protocol.TeamMemberDraft
 import com.kapp.tenon.domain.recovery.NoPlatformRecovery
 import com.kapp.tenon.domain.recovery.PlatformRecoveryStore
 import com.kapp.tenon.domain.recovery.RecoveryService
@@ -858,6 +859,10 @@ class RelayController(
 
     override fun setGroupAgentWorkspaces(groupId: String, wsIds: List<String>) =
         groupsCtl.run { handleSetGroupAgentWorkspaces(groupId, wsIds) }
+
+    /** 团队编制：保存 / 关闭某席位的团队（见 [handleSetGroupTeamDeclaration]）。 */
+    override fun setGroupTeamDeclaration(groupId: String, defaultWsId: String, roster: List<TeamMemberDraft>?) =
+        groupsCtl.run { handleSetGroupTeamDeclaration(groupId, defaultWsId, roster) }
     /**
      * 打开某条会话时把它标为已读。
      *

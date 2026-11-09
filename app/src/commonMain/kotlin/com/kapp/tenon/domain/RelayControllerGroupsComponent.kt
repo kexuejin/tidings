@@ -28,7 +28,13 @@ import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.JsonPrimitive
 import com.kapp.tenon.core.protocol.AgentSenderId
 import com.kapp.tenon.core.protocol.VirtualAgentMember
+import com.kapp.tenon.core.protocol.declarationFor
 import com.kapp.tenon.core.protocol.AgentMemberName
+import com.kapp.tenon.core.protocol.EntityTypes
+import com.kapp.tenon.core.protocol.TeamMemberDraft
+import com.kapp.tenon.core.protocol.TeamMemberInfo
+import com.kapp.tenon.core.protocol.TeamRosterValidation
+import com.kapp.tenon.core.protocol.isTeam
 
 /**
  * 群聊：建群、入退群、改群资料、发群公告，以及群消息的入站处理。
@@ -295,14 +301,17 @@ private fun handleCreateGroupInternal(
  */
 private fun virtualAgentMemberFor(ws: WorkspaceUi): VirtualAgentMember? {
     val agentId = resolveVirtualAgentKey(null, ws.agentId, ws.agentKind) ?: return null
-    return VirtualAgentMember(
+    // 新席位：previous = null ⇒ declarationFor 按默认值开（单兵、空组员）。
+    // 构造点收口在 declarationFor（见它的 KDoc）——这里不再手写 VirtualAgentMember。
+    // hostNodeId 挂 **agent 真正运行的那台宿主**（A22-R5：工作区宣告方），
+    // 不是本机 —— 手机上建的绑定群，agent 在桌面。本机自建的桌面流程
+    // 里 ws.peerId == self，两种情形下这一行都对。
+    return declarationFor(
         agentId = agentId,
-        // A22-R5：席位挂在 **agent 真正运行的那台宿主**（工作区宣告方），
-        // 不是本机 —— 手机上建的绑定群，agent 在桌面。本机自建的桌面流程
-        // 里 ws.peerId == self，两种情形下这一行都对。
         hostNodeId = ws.peerId,
         name = AgentMemberName.base(ws.agentKind, agentId, ws.wsTitle, ws.wsId),
         defaultWsId = ws.wsId,
+        previous = null,
     )
 }
 
@@ -1009,11 +1018,13 @@ fun RelayController.handleSetGroupAgentWorkspaces(groupId: String, wsIds: List<S
         val base = AgentMemberName.base(ws.agentKind, resolvedAgentId, ws.wsTitle, wsId)
         // 名字冲突范围 = 群内其它声明（本机这条是新建的，不在池里）。
         val taken = current.map { it.name }.toMutableSet()
-        VirtualAgentMember(
+        // 新席位：previous = null ⇒ declarationFor 按默认值开（单兵、空组员）。
+        declarationFor(
             agentId = resolvedAgentId,
             hostNodeId = self,
             name = AgentMemberName.unique(base, taken),
             defaultWsId = wsId,
+            previous = null,
         )
     }
     // 本机声明整体替换为 resolved（含「沿用既有名字」的那些）；外来声明不受影响。
@@ -1024,20 +1035,133 @@ fun RelayController.handleSetGroupAgentWorkspaces(groupId: String, wsIds: List<S
         updatedBy = self,
         updatedTs = nowMillis(),
     )
+    commitGroupMetaUpdate(updated)
+}
+
+/**
+ * 元数据提交的**唯一入口**（团队创建方案 §4.1）：落库 + 逐成员广播。
+ *
+ * ## 为什么必须是唯一入口
+ *
+ * 写元数据的路径各写一遍「persist + 逐成员 sendGroupInfo」，第三份抄本迟早漏掉
+ * 其中的关键步骤（昵称补齐、声明重建、need 游标登记、发送侧预算自检）—— 每一步
+ * 漏了都是真机撞过的事故。工作区授权与团队编制两个入口都只调它；其它五条既有
+ * 写路径（建群/加人/移人/退群/改资料）保持原样，但它们要走收口时迁过来即可。
+ *
+ * 顺序与纪律：
+ * 1. **发送侧预算自检**（§4.5）：编码后走 `CodecGroup.validateGroupMeta` 同一条判据，
+ *    不过就拒收在落库之前 —— 存进去只会让下一次广播变成毒帧（framing peer-closed
+ *    + 队列重放同一帧）。正常路径先过了 [TeamRosterValidation]，这条是 bug 防线。
+ * 2. 落库（handlePersist）。
+ * 3. need 游标登记（`noteKnown`）：我们现在握有这个 rev 的完整元数据（建群路径
+ *    的 KDoc 记过漏登记的下场：每条同 rev 群消息都白跑一个 need 往返）。
+ * 4. 广播：发送前必经 [groupMetaWithNicks]（补昵称 + 重建本机声明 —— 声明重建
+ *    已经带团队字段回填，见 `virtualAgentsFor`）。
+ */
+internal fun RelayController.commitGroupMetaUpdate(updated: GroupMeta) {
+    if (!com.kapp.tenon.core.protocol.CodecGroup.validateGroupMeta(updated)) {
+        warn(BannerMessage.GroupMetaRejected)
+        return
+    }
     handlePersist(
         _state.value.settings.copy(
-            groups = _state.value.settings.groups.map { if (it.groupId == groupId) updated else it },
+            groups = _state.value.settings.groups.map { if (it.groupId == updated.groupId) updated else it },
         ),
     )
-    // 广播新元数据给所有成员（复用既有发送路径，它会补 memberNicks）。
+    core.groupNeeds.noteKnown(updated.groupId, updated.rev)
     // 先在扩展接收者上算好带昵称的那份，再进 launch：lambda 里的 this 不是它。
     val broadcast = groupMetaWithNicks(updated)
+    val self = updated.updatedBy
     scope.launch {
         for (m in updated.members.filter { it != self }) {
             runCatching { runtime?.sendGroupInfo(m, broadcast) }
         }
     }
     publish()
+}
+
+/**
+ * 保存 / 关闭某个席位的团队编制（团队创建方案 §4.3）。
+ *
+ * @param groupId 群 id。
+ * @param defaultWsId 目标席位的默认工作区 id（写入定位键 = `(groupId, defaultWsId)`，
+ *   本机 host 由 selfNodeId 隐含；这里再校验目标声明 `hostNodeId == 本机`）。
+ * @param roster 组员草稿；**null 或空清单 = 关闭团队**（`entityType` 回 single、
+ *   组员清空）—— 与工作区授权同一节奏：一次保存 = 一次 rev+1、一次广播。
+ */
+fun RelayController.handleSetGroupTeamDeclaration(
+    groupId: String,
+    defaultWsId: String,
+    roster: List<TeamMemberDraft>?,
+) {
+    val meta = _state.value.settings.groups.firstOrNull { it.groupId == groupId } ?: run {
+        warn(BannerMessage.GroupUnknown)
+        return
+    }
+    val self = _state.value.selfNodeId
+    // 声明自己的席位是**本机主权**（与工作区授权同一条边界），但要能改元数据就得在群里。
+    if (!meta.hasMember(self)) {
+        warn(BannerMessage.GroupLeft)
+        return
+    }
+    // 定位：席位已撤（授权面板取消暴露）或并发变化时给可读反馈 —— 不猜。
+    val seat = meta.virtualAgents.orEmpty().firstOrNull {
+        it.hostNodeId == self && it.defaultWsId == defaultWsId
+    } ?: run {
+        warn(BannerMessage.TeamSeatMissing)
+        return
+    }
+    // 校验（UI 已就地跑过一次并指出行号；这里是防线）。token 池 = 群内所有可 @ 的
+    // 东西（mentionKeys 口径）+ 其它声明的组员名；被编辑席位自己的旧组员名剔出池
+    // （正在被整体替换），领队自己的 token 留在池里（组员撞领队名 = 影子领队）。
+    val previousMemberNames = seat.teamMembers.flatMap { listOf(it.name, it.name.lowercase()) }.toSet()
+    val tokenPool = buildSet {
+        for (va in meta.virtualAgents.orEmpty()) {
+            add(va.name)
+            add(va.agentId)
+            if (va.hostNodeId != self || va.defaultWsId != defaultWsId) {
+                va.teamMembers.forEach { add(it.name) }
+            }
+        }
+        addAll(groupParticipantRows(_state.value.senderContext(ConvId.group(groupId))).mentionKeys)
+    }
+    val issues = TeamRosterValidation.validate(roster.orEmpty(), tokenPool - previousMemberNames)
+    if (issues.isNotEmpty()) {
+        warn(BannerMessage.TeamRosterInvalid)
+        return
+    }
+    // 关闭语义：null 或空清单都视为关闭。
+    val enabling = !roster.isNullOrEmpty()
+    val next = meta.virtualAgents.orEmpty().map { va ->
+        when {
+            // 目标席位：开 = team + 草稿清单（agentId 沿用草稿原值，编辑保全契约）；
+            // 关 = single + 空清单。name / allowedWorkspaces 原样保留。
+            va.hostNodeId == self && va.defaultWsId == defaultWsId -> va.copy(
+                entityType = if (enabling) EntityTypes.TEAM else EntityTypes.SINGLE,
+                teamMembers = if (enabling) {
+                    roster.orEmpty().map { TeamMemberInfo(agentId = it.agentId, name = it.name, role = it.role) }
+                } else {
+                    emptyList()
+                },
+            )
+            // 同 agent 的其它席位一律清成单兵（§3.1：一个 agent 每群最多一个团队 ——
+            // 写路径保证，收端还有 validateGroup 的同约束兜底）。
+            va.hostNodeId == self && va.agentId == seat.agentId -> va.copy(
+                entityType = EntityTypes.SINGLE,
+                teamMembers = emptyList(),
+            )
+            // 其它宿主、其它 agent：逐字段原样保留。
+            else -> va
+        }
+    }
+    val updated = meta.copy(
+        virtualAgents = next.distinct().ifEmpty { null },
+        rev = meta.rev + 1,
+        updatedBy = self,
+        updatedTs = nowMillis(),
+    )
+    commitGroupMetaUpdate(updated)
+    info(BannerMessage.TeamRosterSaved)
 }
 
 /**
@@ -1133,14 +1257,29 @@ private fun RelayController.virtualAgentsFor(meta: GroupMeta): List<VirtualAgent
     val taken = meta.virtualAgents.orEmpty().map { it.name }.toMutableSet()
     val mine = candidates.map { (key, ws) ->
         val (agentId, wsId) = key
-        val base = AgentMemberName.base(ws.agentKind, agentId, ws.wsTitle, wsId)
-        val name = AgentMemberName.unique(base, taken)
+        // **既有席位必须带着它原来的名字与团队字段一起重建**（F1 的修法）。
+        //
+        // 以前这里无条件重新生成名字（unique 拿全体已声明名字当池，连**自己那条**也在池里
+        // ⇒ base 被自己占用 ⇒ 追 `-2`），并且丢掉 entityType / teamMembers / allowedWorkspaces。
+        // 后者就是「本机落库有团队、广播出去的帧没有」的直接成因：保存团队后任意一次
+        // 广播（补发 / 换网 / 对端上线）都会把团队字段抹掉 —— group 帧不拒收、不报错，
+        // 两端从此各说各话。
+        //
+        // 判据：同 (host, agentId, wsId) 的旧声明存在 ⇒ 名字沿用（@ token 不能漂 ——
+        // 换名等于把别人正在打的 mention 打断），团队与白名单字段由 declarationFor 从
+        // previous 原样带来；新席位才走 unique 起名 + 默认单兵。
+        val previous = meta.virtualAgents.orEmpty().firstOrNull { va ->
+            va.hostNodeId == self && va.agentId == agentId && va.defaultWsId == wsId
+        }
+        val name = previous?.name
+            ?: AgentMemberName.unique(AgentMemberName.base(ws.agentKind, agentId, ws.wsTitle, wsId), taken)
         taken += name
-        VirtualAgentMember(
+        declarationFor(
             agentId = agentId,
             hostNodeId = self,
             name = name,
             defaultWsId = wsId,
+            previous = previous,
         )
     }
     // 合并：本机的声明覆盖**同一 (agentId, wsId)** 的旧声明，其它设备的原样保留。
@@ -1203,6 +1342,16 @@ private val groupMetaSentRev = mutableMapOf<Pair<String, String>, Int>()
 private val groupMetaSentHadAgents = mutableMapOf<Pair<String, String>, Boolean>()
 
 /**
+ * 与 [groupMetaSentHadAgents] 配套：**上次发出去的那份带不带团队**。
+ *
+ * 团队创建方案 §4.2 的第二维：只按「有没有 agents」去重时，同一个 rev 的内容从
+ * 「单兵」升级为「团队」（保存编制后的同 rev 补发场景）会被台账当成「没变」而跳过
+ * —— 对端永远看不到团队。与 `groupMetaSentHadAgents` 同款先例：同 rev 的内容
+ * 升级要能再发一次。
+ */
+private val groupMetaSentHadTeams = mutableMapOf<Pair<String, String>, Boolean>()
+
+/**
  * **同一个 rev 对同一个成员只补发一次。**
  *
  * 抽成纯函数是为了能被单测钉住 —— 这条判据是「补发不会变成无限循环」的**唯一**保障。
@@ -1218,13 +1367,18 @@ internal fun freshRecipients(
     rev: Int,
     /** 这一次要发的那份**带不带** agent 声明。 */
     hasAgents: Boolean,
+    /** 这一次要发的那份**带不带**团队（isTeam 口径；方案 §4.2 的第二去重维）。 */
+    hasTeams: Boolean,
     alreadySent: (String) -> Int? = { member -> groupMetaSentRev[member to groupId] },
     /** 上次发出那份带不带 agent 声明；缺省 false（修复前发出的都不带）。 */
     alreadySentHadAgents: (String) -> Boolean? = { member -> groupMetaSentHadAgents[member to groupId] },
+    /** 上次发出那份带不带团队；缺省 false。 */
+    alreadySentHadTeams: (String) -> Boolean? = { member -> groupMetaSentHadTeams[member to groupId] },
 ): List<String> = targets.filter { member ->
     val sameRev = alreadySent(member) == rev
     val sameAgents = (alreadySentHadAgents(member) ?: false) == hasAgents
-    !(sameRev && sameAgents)
+    val sameTeams = (alreadySentHadTeams(member) ?: false) == hasTeams
+    !(sameRev && sameAgents && sameTeams)
 }
 /**
  * **把本机已知的群元数据发给需要的成员。**
@@ -1256,12 +1410,14 @@ fun RelayController.rebroadcastGroupMeta() {
         val payload = groupMetaWithNicks(group)
         val rev = group.rev
         val hasAgents = !payload.virtualAgents.isNullOrEmpty()
-        val fresh = freshRecipients(targets, group.groupId, rev, hasAgents)
+        val hasTeams = payload.virtualAgents.orEmpty().any { it.isTeam }
+        val fresh = freshRecipients(targets, group.groupId, rev, hasAgents, hasTeams)
         if (fresh.isEmpty()) continue
         // 先记账再发：发失败也算「试过了」，否则一次失败会让它每轮重试 —— 那正是循环的入口。
         for (member in fresh) {
             groupMetaSentRev[member to group.groupId] = rev
             groupMetaSentHadAgents[member to group.groupId] = hasAgents
+            groupMetaSentHadTeams[member to group.groupId] = hasTeams
         }
         scope.launch {
             for (member in fresh) {

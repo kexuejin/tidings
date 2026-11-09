@@ -91,17 +91,100 @@ object CodecGroup {
         if (meta.containsKey("description") && !isStrAllowEmpty(meta["description"], Limits.GROUP_DESCRIPTION)) return false
         if (meta.containsKey("announce") && !isStrAllowEmpty(meta["announce"], Limits.GROUP_ANNOUNCE)) return false
 
+        // virtualAgents（可选，PPE-2）：**已知字段的形状/条数/预算校验** —— 不是字段白名单。
+        //
+        // 以前这里对 `virtualAgents` 完全不校验，坏条目靠解码侧 `mapNotNull` **静默丢弃**：
+        // 一条超长的组员名让整条声明（连同它的宿主归属与团队）消失，发送侧毫无感知
+        // —— AGENTS §3 那类「发送侧一切正常、接收侧什么都没有」。现在越界拒绝整帧
+        // （bad-payload），发送侧能从队列的失败里看到。
+        //
+        // 三条刻意的**不加严**（与 group 帧的既有裁决同源）：
+        // - 不加字段白名单：未知键照旧忽略（`validateGroup` 的 KDoc）；
+        // - `entityType` 的**未知取值**不拒：展示字段不是动作指令，消费方按
+        //   [EntityTypes.normalized] 归一（前向兼容优先）；
+        // - `allowedWorkspaces` 只校验键与长度，不加条数上限（方案 §4.5 的口径；
+        //   它的体量由宿主自己的工作区表决定，与 v1 的团队声明无关）。
+        if (meta.containsKey("virtualAgents")) {
+            val agents = meta["virtualAgents"] as? JsonArray ?: return false
+            if (agents.size > Limits.GROUP_MAX_VIRTUAL_AGENTS) return false
+            var teamMembersTotal = 0
+            val teamSeatKeys = HashSet<Pair<String, String>>()
+            for (item in agents) {
+                val a = item as? JsonObject ?: return false
+                if (!isStr(a["agentId"], Limits.ID)) return false
+                if (!isStr(a["hostNodeId"], Limits.FROM)) return false
+                if (!isStr(a["name"], Limits.NICK)) return false
+                if (a.containsKey("entityType") && !isStr(a["entityType"], Limits.AGENT_KIND)) return false
+                val agentId = (a["agentId"] as JsonPrimitive).content
+                val hostNodeId = (a["hostNodeId"] as JsonPrimitive).content
+                if (a.containsKey("teamMembers")) {
+                    val tms = a["teamMembers"] as? JsonArray ?: return false
+                    if (tms.size > Limits.TEAM_MEMBERS_MAX) return false
+                    teamMembersTotal += tms.size
+                    if (teamMembersTotal > Limits.GROUP_MAX_TEAM_MEMBERS_TOTAL) return false
+                    for (tm in tms) {
+                        val t = tm as? JsonObject ?: return false
+                        if (!isStr(t["agentId"], Limits.ID)) return false
+                        if (!isStr(t["name"], Limits.NICK)) return false
+                        if (!isStr(t["role"], Limits.TEAM_ROLE)) return false
+                    }
+                }
+                // v1 结构约束：同一 (hostNodeId, agentId) 至多一条团队（isTeam 口径 =
+                // entityType=="team" 或组员非空）。防手改帧/旧数据；正常发送侧已保证
+                // （写路径保存某席位时清掉同 agent 其它席位的团队字段）。
+                val entityType = strOrNull(a["entityType"], Limits.AGENT_KIND)
+                val teamMembers = (a["teamMembers"] as? JsonArray).orEmpty()
+                if ((entityType == EntityTypes.TEAM || teamMembers.isNotEmpty()) &&
+                    !teamSeatKeys.add(hostNodeId to agentId)
+                ) {
+                    return false
+                }
+                if (a.containsKey("allowedWorkspaces")) {
+                    val aws = a["allowedWorkspaces"] as? JsonArray ?: return false
+                    for (aw in aws) {
+                        val w = aw as? JsonObject ?: return false
+                        if (!isStr(w["wsId"], Limits.ID)) return false
+                        if (!isStr(w["title"], Limits.GROUP_NAME)) return false
+                        if (w.containsKey("description") &&
+                            !isStrAllowEmpty(w["description"], Limits.GROUP_DESCRIPTION)
+                        ) {
+                            return false
+                        }
+                    }
+                }
+                // defaultWsId：缺省/显式 null 都合法；给了就必须是受限串。
+                val defaultWs = a["defaultWsId"]
+                if (defaultWs != null && defaultWs !is kotlinx.serialization.json.JsonNull &&
+                    !isStr(defaultWs, Limits.ID)
+                ) {
+                    return false
+                }
+            }
+        }
+
         return true
     }
 
     // ------------------------------------------------------------------ 群元数据
 
-    /** `group{op:"info"}`：全量元数据快照。可靠 + 离线入队（"成员回来即知道自己进了群"）。 */
+    /**
+     * `group{op:"info"}`：全量元数据快照。可靠 + 离线入队（"成员回来即知道自己进了群"）。 */
     fun groupInfoPayload(meta: GroupMeta): JsonElement =
         wireJson.encodeToJsonElement(
             GroupInfoPayload.serializer(),
             GroupInfoPayload(op = GroupOps.INFO, group = meta),
         )
+
+    /**
+     * **发送侧**的元数据预算校验：把要广播的 [meta] 编码后走 [validateGroup] 同一条判据。
+     *
+     * 为什么必须有一份发送侧的：`group.info` 没有发送侧 clamp（`Limits` 的 KDoc），
+     * 超预算的帧在收端是 framing **peer-closed**，队列还会重放同一帧 —— 「发送侧不产出
+     * 注定被拒的帧」只能靠发送前自检。写路径（团队声明 / 工作区授权的提交入口）在
+     * `handlePersist` 之前先跑它；写路径与收端从此读同一个数，不存在「两端各写一份上限」。
+     */
+    fun validateGroupMeta(meta: GroupMeta): Boolean =
+        (groupInfoPayload(meta) as? JsonObject)?.let(::validateGroup) == true
 
     /** `group{op:"need"}`：请把 [groupId] 的全量元数据发我。尽力而为，不入离线队列。 */
     fun groupNeedPayload(groupId: String): JsonElement =
@@ -171,8 +254,9 @@ object CodecGroup {
                     agentId = strOrNull(a["agentId"], Limits.ID) ?: return@mapNotNull null,
                     hostNodeId = strOrNull(a["hostNodeId"], Limits.FROM) ?: return@mapNotNull null,
                     name = strOrNull(a["name"], Limits.NICK) ?: return@mapNotNull null,
-                    // 实体形态：缺省按单兵（与 @Serializable 的默认值同口径）。
-                    entityType = strOrNull(a["entityType"], Limits.AGENT_KIND) ?: "single",
+                    // 实体形态：缺省按单兵；未知值**不拒帧**，消费方归一（前向兼容优先，
+                    // 展示字段不是动作指令 —— 判据与理由见 EntityTypes 的 KDoc）。
+                    entityType = EntityTypes.normalized(strOrNull(a["entityType"], Limits.AGENT_KIND)),
                     // 组员与工作区白名单：逐项按形状收，形状不对的那一项丢弃 ——
                     // 一条坏组员不该让整条声明（以及它的宿主归属）消失。
                     teamMembers = (a["teamMembers"] as? JsonArray)?.mapNotNull { tm ->
@@ -180,7 +264,7 @@ object CodecGroup {
                         TeamMemberInfo(
                             agentId = strOrNull(t["agentId"], Limits.ID) ?: return@mapNotNull null,
                             name = strOrNull(t["name"], Limits.NICK) ?: return@mapNotNull null,
-                            role = strOrNull(t["role"], Limits.AGENT_KIND) ?: return@mapNotNull null,
+                            role = strOrNull(t["role"], Limits.TEAM_ROLE) ?: return@mapNotNull null,
                         )
                     }.orEmpty(),
                     // 隐私收口（方案 §3）：白名单条目只有 id/标题/描述 —— 路径即使被人塞进来

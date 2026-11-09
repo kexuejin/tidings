@@ -524,16 +524,19 @@ private fun resolveAgentOfHost(host: String, kind: String, ctx: SenderIdentityCo
     //    **同一个** `dsh-teahouse-mobile`。这是「名字只有一份」在单聊里的落地：
     //    同一个 agent，不管从群进还是从单聊进，看到的都是这个字符串。
     // ③ 都没有（宿主没上报工作区）→ 退回 kind/alias。
-    val declaredName = ctx.group?.virtualAgents
-        ?.firstOrNull { it.hostNodeId == host && it.agentId.equals(k, ignoreCase = true) }
-        ?.name
+    //
+    // 席位定位走 core 的 [representativeSeat]（与撤回按钮的默认席位、团队编制对话框的
+    // 默认选中**同一个函数**）—— 多席位时「行显示名取哪条」不再与别处各取各的。
+    // 身份判据也从「agentId 精确等值（忽略大小写）」放宽为声明侧通用的
+    // `sameAgent` + 名字兜底：声明写 `dsh-029bbbf3`、行身份是 kind `dsh` 时，
+    // 气泡署名那条路（`resolveSenderIdentity`）认得出、这里原来认不出 ——
+    // 同一个 agent 两条路两个名字，正是 §3.5 要收口的判据分叉。
+    val seat = com.kapp.tenon.core.protocol.representativeSeat(ctx.group?.virtualAgents, host, k)
+    val declaredName = seat?.name
         ?.trim()
         ?.takeIf { it.isNotBlank() }
     val generatedName = ctx.agentWorkspaceByHostAndKind[host]?.get(k)?.let { wsId ->
-        val agentId = ctx.group?.virtualAgents
-            ?.firstOrNull { it.hostNodeId == host && it.agentId.equals(k, ignoreCase = true) }
-            ?.agentId
-        AgentMemberName.base(k, agentId ?: k, ctx.workspaceTitles[wsId], wsId)
+        AgentMemberName.base(k, seat?.agentId ?: k, ctx.workspaceTitles[wsId], wsId)
     }
     return base.copy(
         // 身份键必须带 kind：同一个宿主上的两个 agent 不能撞成一行。
@@ -553,17 +556,14 @@ private fun resolveAgentOfHost(host: String, kind: String, ctx: SenderIdentityCo
         // 会拿到同一个值。去重键用的是 agentAlias，继承过来就会把 codex 与 opencode
         // 合并成一行（实测：面板里只剩 codex，`@opencode` 匹配不上）。
         agentAlias = null,
-        // 这个 agent 在群里声明的默认工作区（`virtualAgents` 里按 host + kind 找）。
-        // 找不到就是 null —— 那就是没有绑定 workspace 的 agent，@ 只用 kind。
+        // 这个 agent 在群里声明的默认工作区（代表席位上的那条）。找不到就是 null ——
+        // 那就是没有绑定 workspace 的 agent，@ 只用 kind。
         //
         // **这里要的是工作区的名字，不是它的 id。**
         // 原先直接传 `wsId`，于是 token 被拼成 `@dsh-ws-e9b18063d183` ——
         // 一串内部 id，用户不可能打得出来。`AgentMemberName.token` 期待的是
         // 「agent + workspace 名」（`@dsh-teahouse-mobile`）。
-        workspaceName = ctx.group?.virtualAgents
-            ?.firstOrNull { it.hostNodeId == host && it.agentId.equals(k, ignoreCase = true) }
-            ?.defaultWsId
-            ?.let { wsId -> ctx.workspaceTitles[wsId] },
+        workspaceName = seat?.defaultWsId?.let { wsId -> ctx.workspaceTitles[wsId] },
     )
 }
 fun agentKindsInGroup(ctx: SenderIdentityContext): Set<String> =

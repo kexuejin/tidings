@@ -27,8 +27,10 @@ class GroupMetaRebroadcastDedupeTest {
             groupId = "g-1",
             rev = 7,
             hasAgents = true,
+            hasTeams = false,
             alreadySent = { null },
             alreadySentHadAgents = { null },
+            alreadySentHadTeams = { null },
         )
         assertEquals(listOf("pixel", "redmi"), fresh)
     }
@@ -47,8 +49,10 @@ class GroupMetaRebroadcastDedupeTest {
             groupId = "g-1",
             rev = 7,
             hasAgents = true,                      // 这次带声明
+            hasTeams = false,
             alreadySent = { 7 },                   // 发过 rev 7
             alreadySentHadAgents = { false },      // 但那次不带声明
+            alreadySentHadTeams = { null },
         )
         assertEquals(
             listOf("redmi"),
@@ -65,8 +69,10 @@ class GroupMetaRebroadcastDedupeTest {
             groupId = "g-1",
             rev = 7,
             hasAgents = true,
+            hasTeams = false,
             alreadySent = { 7 },
             alreadySentHadAgents = { true },
+            alreadySentHadTeams = { false },
         )
         assertEquals(emptyList(), fresh)
     }
@@ -80,8 +86,10 @@ class GroupMetaRebroadcastDedupeTest {
             groupId = "g-1",
             rev = 7,
             hasAgents = true,
+            hasTeams = false,
             alreadySent = { sent[it] },
             alreadySentHadAgents = { true },
+            alreadySentHadTeams = { false },
         )
         assertEquals(listOf("redmi"), fresh, "同 rev 同内容重复发就是那个 286 帧循环的入口")
     }
@@ -95,8 +103,10 @@ class GroupMetaRebroadcastDedupeTest {
             groupId = "g-1",
             rev = 8,
             hasAgents = true,
+            hasTeams = false,
             alreadySent = { sent[it] },
             alreadySentHadAgents = { true },
+            alreadySentHadTeams = { false },
         )
         assertEquals(listOf("pixel"), fresh)
     }
@@ -114,14 +124,35 @@ class GroupMetaRebroadcastDedupeTest {
             groupId = group,
             rev = 7,
             hasAgents = true,
+            hasTeams = false,
             // **台账必须按 (对端, 群) 查** —— 写成固定 g-1 就等于没有分群，
             // 那正是这一条要防的漏发。
             alreadySent = { member -> ledger[member to group] },
             alreadySentHadAgents = { true },
+            alreadySentHadTeams = { false },
         )
         assertEquals(listOf("pixel"), fresh("g-1"), "没发过，要发")
         ledger["pixel" to "g-1"] = 7
         assertEquals(emptyList(), fresh("g-1"), "发了同 rev 同内容，不再发")
         assertEquals(listOf("pixel"), fresh("g-2"), "别的群没发过，仍要发")
+    }
+
+    /**
+     * **团队维的第二去重轴**（团队创建方案 §4.2）：同 rev 的内容从「单兵」升级为
+     * 「团队」时也要能补发一次 —— 只看「有没有 agents」会把这场升级当成「没变」。
+     */
+    @Test
+    fun aSameRevUpgradeToTeamIsSentAgain() {
+        val fresh = freshRecipients(
+            targets = listOf("redmi"),
+            groupId = "g-1",
+            rev = 7,
+            hasAgents = true,
+            hasTeams = true,                       // 这次带团队
+            alreadySent = { 7 },                   // 发过 rev 7
+            alreadySentHadAgents = { true },       // 那次也带声明
+            alreadySentHadTeams = { false },       // 但那次不带团队
+        )
+        assertEquals(listOf("redmi"), fresh, "同 rev 单兵→团队必须能补发，否则对端永远看不到团队")
     }
 }

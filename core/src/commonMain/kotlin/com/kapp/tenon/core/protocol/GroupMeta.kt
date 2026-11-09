@@ -200,8 +200,8 @@ data class VirtualAgentMember(
     val hostNodeId: String,
     /** `@` 后面要打的 token；群内唯一。团队的 token 挂在 leader 上。 */
     val name: String,
-    /** `"single"` 单兵（默认）| `"team"` 协同团队。 */
-    val entityType: String = "single",
+    /** `"single"` 单兵（默认）| `"team"` 协同团队。取值域单一定义在 [EntityTypes]。 */
+    val entityType: String = EntityTypes.SINGLE,
     /** 团队组员清单（[entityType] = "team" 时有效）；对外单一窗口，组员不出现在群成员表。 */
     val teamMembers: List<TeamMemberInfo> = emptyList(),
     /** 机主授权本群可访问的工作区白名单。见类 KDoc 的隐私收口：路径不出宿主。 */
@@ -219,15 +219,51 @@ data class TeamMemberInfo(
 )
 
 /**
+ * 构造一条席位声明：**所有** `VirtualAgentMember` 重建/新增的统一入口。
+ *
+ * ## 为什么只许从这里构造
+ *
+ * 广播前本机会重建自己的声明（`virtualAgentsFor`），重建时新建的 `VirtualAgentMember`
+ * 如果只带身份四元组（agentId/hostNodeId/name/defaultWsId），写在席位上的团队字段就在
+ * **下一次广播**被抹掉 —— 本机落库有、发出去的帧没有；group 帧不拒收、不报错，症状是
+ * 「本机看到团队药丸、对端什么都没有」。这是 AGENTS §3 那类静默丢失的元数据版。
+ *
+ * 所以身份字段之外的全部可声明字段（[VirtualAgentMember.entityType] /
+ * [VirtualAgentMember.teamMembers] / [VirtualAgentMember.allowedWorkspaces]）一律从
+ * [previous] 原样带过来；新席位（[previous] 为 null）按默认值开（单兵、空组员、空白名单）。
+ * 「保留」是这个函数的形状保证的 —— 调用方想丢都丢不掉。
+ *
+ * 源码级守卫（`VirtualAgentDeclarationGuardTest`）钉住：生产源码里的
+ * `VirtualAgentMember(...)` 构造点只允许本函数与解码侧。
+ *
+ * @param previous 同席位（host + agentId + defaultWsId 都相同）的既有声明；null = 新席位。
+ */
+fun declarationFor(
+    agentId: String,
+    hostNodeId: String,
+    name: String,
+    defaultWsId: String?,
+    previous: VirtualAgentMember?,
+): VirtualAgentMember = VirtualAgentMember(
+    agentId = agentId,
+    hostNodeId = hostNodeId,
+    name = name,
+    entityType = previous?.entityType ?: EntityTypes.SINGLE,
+    teamMembers = previous?.teamMembers ?: emptyList(),
+    allowedWorkspaces = previous?.allowedWorkspaces ?: emptyList(),
+    defaultWsId = defaultWsId,
+)
+
+/**
  * 这个入驻 agent 是不是团队。
  *
- * 口径：`entityType == "team"`，**或者** `teamMembers` 非空。后者是事实、前者只是声明 ——
+ * 口径：`entityType == [EntityTypes.TEAM]`，**或者** `teamMembers` 非空。后者是事实、前者只是声明 ——
  * 旧包/手工构造的元数据可能只填了组员清单没填 `entityType`。这条口径原先在
  * `ChatScreen` 与 `SetGroupAgentWorkspacesDialog` 各写一遍，现在收成一处：三处判定若各写各的，
  * 会出现"群设置里是团队、列表里不是"这种只在真机上才发现的偏差。
  */
 val VirtualAgentMember.isTeam: Boolean
-    get() = entityType == "team" || teamMembers.isNotEmpty()
+    get() = entityType == EntityTypes.TEAM || teamMembers.isNotEmpty()
 
 /**
  * 机主授予本群的一个工作区（白名单条目）。

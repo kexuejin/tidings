@@ -287,6 +287,21 @@ Team Folder 是**现有会话列表的分组视图**，不新增会话类型、�
    用 `git stash push -- prototype/relay.html` 切两版对照确认本轮零新增；它的清偿是独立欠账，
    不在本清单内。
 
+### 7.3 团队创建（声明）落地进度（`feat/team-folder-phase0`，方案 `docs/team-creation-final-plan.md` §7）
+
+先决项四条与功能两条均已落地（v1 只做**声明与展示**；`@组员` 派单/审查闭环/多模型在 v2，见 `team-execution-final-plan.md`）：
+
+| 块 | 内容 | 落地物 |
+|:--|:--|:--|
+| P0-0.1 值域与声明构造收口 | `EntityTypes` 单一定义；解码未知值归一；三条声明构造路径收口 `declarationFor`（团队字段从 previous 原样带回，既有 @ token 不漂）；`representativeSeat`/`seatsOfAgent` 代表席位单判据（行显示名、撤回按钮、对话框默认选中三处共用） | `core/.../EntityTypes.kt`、`GroupMeta.declarationFor`、`DeclaredAgentLookup`；守卫 `VirtualAgentDeclarationGuardTest`（反向验证过） |
+| P0-0.2 合并主权 | 普通成员只改写 `hostNodeId == 自己` 的声明可过收端权限矩阵（外来声明规范形多重集合比较、其余字段逐字段一致）；**旧端仍拒收成员 rev+1**（兼容性代价见 PROTOCOL-EXTENSION §14.5） | `GroupMerge.memberMayRedeclareSelf` + 测试矩阵（own 增/改/删、foreign 动不得、null/空归一、顺序不敏感；反向验证 4 条变红） |
+| P0-0.3 收端校验与预算 | `validateGroup` 校验 `virtualAgents` 形状/条数/长度/组员预算，越界拒整帧；发送侧 `validateGroupMeta` 同判据；`TeamRosterValidation` core 纯函数（token 池冲突域、结构化问题）；最坏合法帧 42.4 KiB < 64 KiB | `CodecGroup`、`Limits` 四常量、`TeamRosterValidation` + 三个测试文件（上限调大 → 帧预算测试红） |
+| P0-0.4 投影 key | `TeamFolderUi.pluginId` 宿主限定 `"<host>:<agentId>"`——跨宿主同 agentId 不再撞折叠行 key | `TeamFolders.kt` + `TeamFoldersTest` |
+| P0-1 写路径 | `commitGroupMetaUpdate` 提交收口（发送侧预算自检→落库→need 游标→广播）；`handleSetGroupTeamDeclaration`（定位键 `(groupId, defaultWsId)`，关闭=同一函数反向写，同 agent 其它席位清成单兵）；补发台账补 `hasTeams` 维 | `RelayControllerGroupsComponent` + `TeamDeclarationWritePathTest`（14 条，含双节点端到端：成员声明 → 群主 apply；动他人声明 → 拒） |
+| P0-2 UI | 群信息页「团队编制」按钮 +「团队 (N)」徽标；`TeamRosterDialog` 两端共用一份（席位 chip、预设、快捷角色、编辑保全、就地校验、Zero-Workspace Guard、手机壳宿主注解）；三壳接线同挂 | `ui/components/TeamRosterDialog.kt` + 守卫 `TeamRosterWiringGuardTest`（住 :composeApp guards 包）+ 双语 strings + design-spec 条目 + 两帧预览 |
+
+验收判据见方案 §8；真机验法与混合版本限制记在 `ACCEPTANCE.md` §10e。
+
 ## 8. 文档状态与引用
 
 - **裁决：保留本文为独立增量差异表，不并入基线**。理由：本文价值是跨三份基线的差异对账，并入任何一份都会丢掉「谁与谁冲突」的上下文。

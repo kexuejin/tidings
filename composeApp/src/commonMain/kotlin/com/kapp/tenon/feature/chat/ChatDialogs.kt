@@ -129,6 +129,12 @@ internal fun ChatDialogsHost(
                     expose(group.groupId, chosen)
                 }
             },
+            // 团队编制的保存通路（§4.3）：对话框收的是 (defaultWsId, roster)，这里补群 id。
+            // 手机壳画宿主注解（§2.2 双端形态契约）：执行驱动在桌面宿主上托管。
+            onSetTeamRoster = groupActions.onSetTeamRoster?.let { save ->
+                { defaultWsId, roster -> save(group.groupId, defaultWsId, roster) }
+            },
+            showTeamHostManagedNotice = true,
         )
     }
 

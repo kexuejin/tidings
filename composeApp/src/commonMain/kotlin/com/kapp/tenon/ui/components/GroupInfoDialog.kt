@@ -36,7 +36,13 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import com.kapp.tenon.core.protocol.declaredWorkspaceOfSender
+import com.kapp.tenon.core.protocol.representativeSeat
+import com.kapp.tenon.core.protocol.seatsOfAgent
+import com.kapp.tenon.core.protocol.isTeam
+import com.kapp.tenon.core.protocol.AgentSenderId
 import com.kapp.tenon.core.protocol.GroupMeta
+import com.kapp.tenon.core.protocol.TeamMemberDraft
+import com.kapp.tenon.core.protocol.VirtualAgentMember
 import com.kapp.tenon.generated.resources.Res
 import com.kapp.tenon.generated.resources.chat_group_dissolve
 import com.kapp.tenon.generated.resources.chat_group_add_member
@@ -61,6 +67,8 @@ import com.kapp.tenon.generated.resources.common_close
 import com.kapp.tenon.generated.resources.common_profile_unavailable
 import com.kapp.tenon.generated.resources.group_auth_entry
 import com.kapp.tenon.generated.resources.group_member_agent_badge
+import com.kapp.tenon.generated.resources.team_roster_badge
+import com.kapp.tenon.generated.resources.team_roster_button
 import com.kapp.tenon.generated.resources.workspace_member_section_agents
 import com.kapp.tenon.generated.resources.workspace_member_section_humans
 import org.jetbrains.compose.resources.stringResource
@@ -126,6 +134,18 @@ fun GroupInfoDialog(
      * null = 不提供该入口。与 [onAddMembers] 分开：那个是加**人**，这个暴露**本机项目**。
      */
     onExposeWorkspaces: ((List<String>) -> Unit)? = null,
+    /**
+     * 团队编制的保存通路（团队创建方案 §2.1/§4.3）：`(defaultWsId, roster)`。
+     *
+     * null = 这个壳没有保存通路 ⇒ agent 行**不画**「团队编制」按钮（一个按下去
+     * 没反应的按钮比没有更糟，与其它可选入口同一条规矩）。
+     */
+    onSetTeamRoster: ((defaultWsId: String, roster: List<TeamMemberDraft>?) -> Unit)? = null,
+    /**
+     * 手机壳传 true：TeamRosterDialog 底部注解「执行驱动由桌面宿主托管」
+     * （§2.2 双端形态契约 —— 参数化的是外壳差异，名册本体两端共用一份）。
+     */
+    showTeamHostManagedNotice: Boolean = false,
 ) {
     // 名字解析只有一份实现（[groupParticipantRows]）：agent 宿主显示 agent 名（DSH）、
     // 人类按 档案昵称 → 备注 → 群昵称 → 短 id 回落；这里不再自己 `peerMap[id]?.displayName`。
@@ -168,6 +188,8 @@ fun GroupInfoDialog(
     // 撤回**本机** agent 暴露前也要过一道确认：它对全群生效（群里的人立刻 @ 不到它），
     // 与移出人类成员同一档破坏性 —— 过去一按就生效、没有回头路。
     var agentWsToRevoke by remember { mutableStateOf<String?>(null) }
+    // 团队编制对话框的目标（行身份, 该 agent 的本机席位）；null = 关着。
+    var teamRosterFor by remember { mutableStateOf<Pair<SenderIdentity, List<VirtualAgentMember>>?>(null) }
     val isSelfOwner = group.ownerId == selfNodeId || (group.ownerId == null && group.creatorId == selfNodeId)
     /** 本机是否还在这份成员表里。被移出/被解散后为 false —— 见下面那颗按钮的文案分支。 */
     val isSelfMember = group.hasMember(selfNodeId)
@@ -419,6 +441,18 @@ fun GroupInfoDialog(
                     // 宿主成员与"只在消息里说过话"的 agent 由解析器合并去重。
                     items(rows.agents, key = { it.id }) { identity ->
                         val peer = peerMap[identity.id]
+                        // 该 agent 的**本机席位**（团队编制入口的编辑对象）与团队徽标的聚合口径。
+                        // 身份键走 identity 里的 host + kind —— 与 representativeSeat 同一条判据。
+                        val identityHost = AgentSenderId.parse(identity.id)?.first
+                        val identityAgent = identity.agentKind
+                            ?: AgentSenderId.parse(identity.id)?.second
+                        val rowSeats = remember(group, identity.id) {
+                            val host = identityHost
+                            val agent = identityAgent
+                            if (host == null || agent == null) emptyList()
+                            else seatsOfAgent(group.virtualAgents, host, agent)
+                        }
+                        val teamSeat = remember(rowSeats) { rowSeats.firstOrNull { it.isTeam } }
                         GroupMemberRow(
                             identity = identity,
                             online = identity.online == true,
@@ -440,6 +474,15 @@ fun GroupInfoDialog(
                                     MaterialTheme.colorScheme.tertiaryContainer,
                                     MaterialTheme.colorScheme.tertiary,
                                 )
+                                // 「团队 (N)」徽标按该 agent 的席位聚合（§2.1）：任一席位
+                                // isTeam 即显示，N = 那条团队的组员数。
+                                if (teamSeat != null) {
+                                    MemberBadge(
+                                        stringResource(Res.string.team_roster_badge, teamSeat.teamMembers.size),
+                                        MaterialTheme.colorScheme.primaryContainer,
+                                        MaterialTheme.colorScheme.primary,
+                                    )
+                                }
                             },
                             // 「移出」分两种，**不能合成一个按钮**：
                             //
@@ -449,6 +492,16 @@ fun GroupInfoDialog(
                             //    于是**旧 agent 没有任何移除入口**，暴露了就撤不掉。
                             //  · 宿主节点是真正的群成员，移出 = 让群主踢人，走 `onRemoveMember`。
                             trailing = {
+                                // 「团队编制」：只对本机有席位的 agent 画（有保存通道 + 本机
+                                // 席位非空，§2.1）。席位没绑默认工作区的情形由对话框内的
+                                // Zero-Workspace Guard 接管（引导态，开关置灰）。
+                                if (onSetTeamRoster != null && rowSeats.isNotEmpty()) {
+                                    AppTextButton(
+                                        text = stringResource(Res.string.team_roster_button),
+                                        onClick = { teamRosterFor = identity to rowSeats },
+                                        size = AppButtonSize.Small,
+                                    )
+                                }
                                 // 这个 agent 的暴露来自**本机**吗？只有本机才能撤回自己的暴露
                                 // （那是机主主权，与「执行名单」同一方向）。
                                 //
@@ -542,6 +595,45 @@ fun GroupInfoDialog(
             wsTitleOf = { wsId -> localWorkspaces.firstOrNull { it.wsId == wsId }?.wsTitle },
             onDismiss = { showExposeDialog = false },
             onSave = expose,
+        )
+    }
+
+    // 团队编制对话框（§2.2）。目标在 agent 行上选中；默认席位用「代表席位」判据
+    //（与行显示名、撤回按钮同源 —— representativeSeat，§3.5 的单一判据）。
+    // token 池 = 全部声明的名字/agentId + 组员名 + mentionKeys（组员名 v1 不在
+    // mention 池里，但要拦它撞既有 token —— 未来它要成为 token）。
+    val rosterTarget = teamRosterFor
+    val saveTeam = onSetTeamRoster
+    if (rosterTarget != null && saveTeam != null) {
+        val (targetIdentity, targetSeats) = rosterTarget
+        val targetHost = AgentSenderId.parse(targetIdentity.id)?.first
+        val targetAgent = targetIdentity.agentKind ?: AgentSenderId.parse(targetIdentity.id)?.second
+        val repSeatWsId = if (targetHost != null && targetAgent != null) {
+            representativeSeat(group.virtualAgents, targetHost, targetAgent)?.defaultWsId
+        } else {
+            null
+        }
+        val takenTokens = remember(group, ctx) {
+            buildSet {
+                group.virtualAgents.orEmpty().forEach { va ->
+                    add(va.name)
+                    add(va.agentId)
+                    va.teamMembers.forEach { add(it.name) }
+                }
+                addAll(rows.mentionKeys)
+            }.filter { it.isNotBlank() }.toSet()
+        }
+        TeamRosterDialog(
+            agentName = targetIdentity.displayName,
+            seats = targetSeats,
+            initialSeatWsId = repSeatWsId,
+            takenTokens = takenTokens,
+            showHostManagedNotice = showTeamHostManagedNotice,
+            onDismiss = { teamRosterFor = null },
+            onSave = { wsId, roster ->
+                teamRosterFor = null
+                saveTeam(wsId, roster)
+            },
         )
     }
 

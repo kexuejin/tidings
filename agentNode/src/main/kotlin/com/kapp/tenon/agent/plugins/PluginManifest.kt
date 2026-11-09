@@ -29,8 +29,8 @@ data class PluginManifest(
     /** 展示名（群内 @ 的名字走 leader/members 的 name，不是这个）。 */
     val name: String,
     val version: String = "0.0.0",
-    /** `"single"` 单兵 | `"team"` 协同团队（对外单一窗口 = leader）。 */
-    val type: String = "single",
+    /** `"single"` 单兵 | `"team"` 协同团队（对外单一窗口 = leader）。默认值与 [PluginRegistration.TYPE_SINGLE] 同源。 */
+    val type: String = PluginRegistration.TYPE_SINGLE,
     /** 托管模式的启动命令（如 `node ./dist/index.js`）；守护进程模式可不填。 */
     val entrypoint: String? = null,
     /** 团队唯一对外发言人（被 @ 的那个）。必填。 */
@@ -70,8 +70,13 @@ object PluginRegistration {
     /** Jitter 幅度上限（§2.3 常规 ±30s；300s 封顶防荒谬清单）。 */
     const val MAX_JITTER_SECONDS: Int = 300
 
-    const val TYPE_SINGLE: String = "single"
-    const val TYPE_TEAM: String = "team"
+    /**
+     * 与群协议 `VirtualAgentMember.entityType` **同一个值域**：常量本体在 core 的
+     * [com.kapp.tenon.core.protocol.EntityTypes]。之前两边各写一份字面量，正是
+     * AGENTS §3 第 7 种缺陷（取值域多份定义）的形态 —— 插件清单与群声明从此不会各说各话。
+     */
+    const val TYPE_SINGLE: String = com.kapp.tenon.core.protocol.EntityTypes.SINGLE
+    const val TYPE_TEAM: String = com.kapp.tenon.core.protocol.EntityTypes.TEAM
     private val TYPES: Set<String> = setOf(TYPE_SINGLE, TYPE_TEAM)
 
     /**

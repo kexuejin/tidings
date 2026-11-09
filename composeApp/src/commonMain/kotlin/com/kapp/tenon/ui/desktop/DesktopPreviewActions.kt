@@ -3,6 +3,7 @@
 package com.kapp.tenon.ui.desktop
 
 import com.kapp.tenon.domain.DesktopPaneActions
+import com.kapp.tenon.core.protocol.TeamMemberDraft
 import com.kapp.tenon.domain.ManualPeerEntry
 import com.kapp.tenon.domain.model.MessageUi
 import com.kapp.tenon.platform.ReceivedFileActions
@@ -41,6 +42,7 @@ public object DesktopPreviewActions : DesktopPaneActions {
 
     override fun updateGroupMeta(groupId: String, description: String?, announce: String?): Unit = Unit
     override fun setGroupAgentWorkspaces(groupId: String, wsIds: List<String>): Unit = Unit
+    override fun setGroupTeamDeclaration(groupId: String, defaultWsId: String, roster: List<TeamMemberDraft>?): Unit = Unit
 
     /**
      * 预览里建群不做事，但**必须回一个 id**：`DesktopShell` 的会话侧栏拿到 null

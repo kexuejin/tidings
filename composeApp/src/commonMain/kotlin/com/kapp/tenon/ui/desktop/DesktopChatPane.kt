@@ -373,6 +373,10 @@ public fun ChatPane(
                     // 一次成像：chosen 就是**最终集合**（旧实现先撤再增、逐条调用）。
                     controller.setGroupAgentWorkspaces(group.groupId, chosen)
                 },
+                // 团队编制（§4.3）：对话框收 (defaultWsId, roster)，这里补群 id。桌面不特殊化。
+                onSetTeamRoster = { defaultWsId, roster ->
+                    controller.setGroupTeamDeclaration(group.groupId, defaultWsId, roster)
+                },
             )
         }
         if (showClearConfirm) {

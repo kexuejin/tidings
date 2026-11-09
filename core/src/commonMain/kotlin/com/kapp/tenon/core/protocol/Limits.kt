@@ -104,6 +104,29 @@ object Limits {
     const val AGENT_ALIAS = 64
     const val AGENT_KIND = 32
     const val AGENT_STATE = 16
+
+    /**
+     * 团队组员的**角色标签**（团队创建方案 §3.4，v1 新增）。
+     *
+     * 不复用 [AGENT_KIND]：那是驱动类型（dsh/codex…），role 是自由文本角色（编码/审查/测试，
+     * 允许中文）。两者语义不同，合并成一个常量就是在给未来的自己埋「改哪个都不对」的坑。
+     */
+    const val TEAM_ROLE = 32
+
+    /** 一个团队的组员数上限（v1；预设 3–4，8 足够表达分工且控帧）。 */
+    const val TEAM_MEMBERS_MAX = 8
+
+    /**
+     * 一份 `group.info` 里 `virtualAgents` 的声明条数上限（收端约束，v1 新增）。
+     *
+     * 真机单 agent 最多 15 个席位（`dsh-029bbbf3` 有 15 个 ws）；48 留足多 agent。
+     * 与 [GROUP_MAX_TEAM_MEMBERS_TOTAL] 共同把最坏合法帧控制在 64 KiB 内 ——
+     * 两个上限一起调、一起过 `GroupInfoFrameBudgetTest`，不许只改常量。
+     */
+    const val GROUP_MAX_VIRTUAL_AGENTS = 48
+
+    /** 一份 `group.info` 里全部声明的组员**总数**上限（收端约束，v1 新增）。 */
+    const val GROUP_MAX_TEAM_MEMBERS_TOTAL = 64
     const val AGENT_TITLE = 200
     const val AGENT_EVENT_TYPE = 32
 
