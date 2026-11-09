@@ -122,7 +122,13 @@ internal fun ControlPlane.agentHookApproval(exchange: HttpExchange) {
         })
         return
     }
-    val sessionId = if (conversationId.isEmpty()) "agy-approval" else hookKeyOf(conversationId)
+    // 会话对齐键（提案 §9 阶段三）：宿主派起的 CLI 经 TENON_HOOK_SESSION_ID 注入
+    // 真实 sessionId，hook 脚本透传——审批帧因此挂在派单会话上（手机的审批卡
+    // 归位），不再是合成的 agy-* 池键。没有对齐键时维持旧行为。
+    val hookSessionId = obj["sessionId"]?.jsonPrimitiveOrNull()?.contentOrNull?.trim().orEmpty()
+    val sessionId = hookSessionId.ifBlank {
+        if (conversationId.isEmpty()) "agy-approval" else hookKeyOf(conversationId)
+    }
     val approvalId = "hook-" + java.util.UUID.randomUUID()
     val expiresAt = System.currentTimeMillis() + timeoutMs
     val choices = defaultApprovalChoices
@@ -163,6 +169,11 @@ internal fun ControlPlane.agentHookApproval(exchange: HttpExchange) {
         put("decision", if (allow) "allow" else "deny")
         put("reason", finalStatus ?: "approval timeout — denied fail-closed")
         put("approvalId", approvalId)
+        // 派单侧绑定的 Tenon 会话键（有对齐键时非空）：hook 脚本可如实转述
+        // 「这次审批属于哪条对话」。
+        hookSessionId.takeIf { it.isNotBlank() }?.let { sid ->
+            sessions.conversationOf(sid)?.let { put("convId", it) }
+        }
     })
 }
 

@@ -135,12 +135,23 @@ class PluginRegistrationTest {
         assertEquals(expectedFile.absolutePath, created.absolutePath, "受控文件固定落在 <数据目录>/plugins/plugin-token")
         val hex = created.readText().trim()
         assertEquals(64, hex.length, "自动生成的 token 是 64 位十六进制")
-        runCatching {
+        // 只有「文件系统压根不支持 POSIX 权限」才允许跳过，其余一律真断言。
+        //
+        // 旧写法是 `runCatching { assertEquals(...) }` 且不接收结果：断言失败被当成
+        // 普通异常吞掉，这条用例在**任何**机器上都恒绿 —— 等于没写。0600 是这条
+        // 用例存在的一半理由（token 泄漏 = 本机任意进程都能自我入驻），不能靠运气。
+        val posixSupported = created.toPath().fileSystem.supportedFileAttributeViews().contains("posix")
+        if (posixSupported) {
             val perms = Files.getPosixFilePermissions(created.toPath())
             assertEquals(
                 setOf(PosixFilePermission.OWNER_READ, PosixFilePermission.OWNER_WRITE),
                 perms,
-                "受控文件必须 0600（非 POSIX 文件系统上自动跳过这条）",
+                "受控文件必须 0600：token 泄漏等于本机任意进程都能自我入驻",
+            )
+        } else {
+            println(
+                "[skip] 文件系统不支持 POSIX 权限视图，跳过 0600 断言：" +
+                    created.toPath().fileSystem,
             )
         }
         // 指向同一个文件的门闸读到了它：注册放行。

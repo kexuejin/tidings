@@ -265,24 +265,35 @@ class SourceWebhookRegistry(
     }
 
     /**
+     * 幂等表的键：**sourceId + event.id**。
+     *
+     * 旧实现只用 `event.id`：两个不同的 source 各自投递 id 为 `evt-1` 的事件时，
+     * 第二条会被判成「第一条的重放」直接 ACK 掉 —— 一个源静默吞掉另一个源的事件，
+     * 而且回的是 `200 duplicate=true`，发送方完全看不出异常。sourceId 是路由的
+     * 一部分，不是事件内容的一部分，必须进键。
+     */
+    private fun idempotencyKey(sourceId: String, eventId: String): String =
+        sourceId.trim().lowercase() + "\u0000" + eventId
+
+    /**
      * 原子记账：返回 true = 首次受理（应分发），false = 重放投递（不再分发）。
      * 记账发生在受理判定**之前**——调用方若因容量拒收本条，必须调用
      * [forgetEvent] 把这笔账撤掉，否则合法重试会被这张表吞掉。
      * 命中旧账时即时判 TTL 过期（清扫只防御容量，不承担过期语义）。
      */
-    private fun rememberEvent(eventId: String): Boolean {
+    private fun rememberEvent(key: String): Boolean {
         if (seenEvents.size >= SEEN_MAX_ENTRIES) sweepSeenEvents()
         val now = nowMillis()
-        val existing = seenEvents.putIfAbsent(eventId, now) ?: return true
+        val existing = seenEvents.putIfAbsent(key, now) ?: return true
         if (now - existing > SEEN_TTL_MS) {
-            return seenEvents.remove(eventId, existing) && seenEvents.putIfAbsent(eventId, now) == null
+            return seenEvents.remove(key, existing) && seenEvents.putIfAbsent(key, now) == null
         }
         return false
     }
 
     /** 撤账：事件未能真正受理（队列满等）时调用，把重试权还给发送方。 */
-    private fun forgetEvent(eventId: String) {
-        seenEvents.remove(eventId)
+    private fun forgetEvent(key: String) {
+        seenEvents.remove(key)
     }
 
     private fun sweepSeenEvents() {
@@ -353,16 +364,17 @@ class SourceWebhookRegistry(
             return WebhookResult.Rejected(503, "no-consumer", "no listener registered for webhook events")
         }
 
-        // 幂等闸：命中重放直接 ACK（duplicate=true），不再分发。判据是 event.id，
-        // 它来自发送方的投递头 / 载荷 id / body 哈希——三种来源都是「同一次投递同
-        // 一个 id」的确定性形状，UUID 兜底已不存在。
-        if (!rememberEvent(event.id)) {
+        // 幂等闸：命中重放直接 ACK（duplicate=true），不再分发。判据是
+        // **sourceId + event.id**（见 [idempotencyKey]）：event.id 来自发送方的
+        // 投递头 / 载荷 id / body 哈希，不同 source 之间并不共享命名空间。
+        val idemKey = idempotencyKey(sourceId, event.id)
+        if (!rememberEvent(idemKey)) {
             return WebhookResult.Accepted(event, duplicate = true)
         }
 
         // 入队失败（背压到顶）= 本条未受理：撤掉幂等账，把重试权还给发送方。
         if (dispatchChannel.trySend(QueuedEvent(sourceId.trim().lowercase(), event)).isFailure) {
-            forgetEvent(event.id)
+            forgetEvent(idemKey)
             return WebhookResult.Rejected(
                 503,
                 "queue-full",
@@ -375,7 +387,21 @@ class SourceWebhookRegistry(
 }
 
 internal fun ControlPlane.sourceWebhook(exchange: HttpExchange, sourceId: String) {
-    val rawBody = exchange.requestBody.readBytes()
+    // 有界读取，**先于验签**：验签需要完整 body，所以上限必须卡在读取这一步。
+    // 旧写法 `exchange.requestBody.readBytes()` 对长度零限制 —— HttpServer 也不设
+    // 请求体上限，于是一个超大 POST 就是一次不需要密钥的 OOM。
+    val rawBody = readBoundedBody(exchange.requestBody, MAX_WEBHOOK_BODY_BYTES)
+    if (rawBody == null) {
+        respond(
+            exchange,
+            413,
+            errorJson(
+                "payload-too-large",
+                "webhook body exceeds " + MAX_WEBHOOK_BODY_BYTES + " bytes",
+            ),
+        )
+        return
+    }
     val headers = exchange.requestHeaders.toMap()
     val result = sourceWebhooks.handleWebhook(sourceId, headers, rawBody)
     when (result) {
@@ -398,3 +424,36 @@ internal fun ControlPlane.sourceWebhook(exchange: HttpExchange, sourceId: String
     }
 }
 
+/**
+ * 单条 webhook 请求体的上限。
+ *
+ * `HttpExchange.requestBody` 的长度是**没有上限**的，而旧代码直接 `readBytes()`
+ * 整段进堆：一个几百 MB 的 POST 就是一次**不需要认证**的 OOM —— 验签发生在读完
+ * body 之后，所以这条路径连密钥都不需要。
+ *
+ * 8 MiB 对 webhook 事件是宽裕的（GitHub 官方上限 25 MB，但单条事件实际远小于此），
+ * 同时把内存占用钉死。改这个值要连带改 [SourceWebhookRouteTest] 的越界用例。
+ */
+internal const val MAX_WEBHOOK_BODY_BYTES: Int = 8 * 1024 * 1024
+
+/**
+ * 读一个请求体，超过 [limit] 字节返回 null（调用方回 413）。
+ *
+ * 分块读而不是 `readBytes()`：后者先把整段拉进堆再判断长度，判出来的时候
+ * 内存已经付出去了。这里最多持有 limit + 一个缓冲区。
+ *
+ * 不看 `Content-Length`：它可以缺失、可以撒谎，真正的判据只能是「我读到了多少」。
+ */
+internal fun readBoundedBody(input: java.io.InputStream, limit: Int): ByteArray? {
+    val out = java.io.ByteArrayOutputStream(minOf(limit, 64 * 1024))
+    val buf = ByteArray(8 * 1024)
+    var total = 0
+    while (true) {
+        val n = input.read(buf)
+        if (n < 0) break
+        total += n
+        if (total > limit) return null
+        out.write(buf, 0, n)
+    }
+    return out.toByteArray()
+}

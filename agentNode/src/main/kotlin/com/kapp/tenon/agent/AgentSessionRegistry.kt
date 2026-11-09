@@ -290,6 +290,21 @@ class AgentSessionRegistry(
      * `state` 变化时不该把 `title` 抹掉）。
      */
     @Suppress("LongParameterList")
+    /**
+     * sessionId → Tenon 会话键（convId）的绑定（提案 §9 阶段三，L3 终审对齐键）。
+     *
+     * 写入方：宿主派单（executeCliTask / executePluginTask 带 convId）——派单侧
+     * 知道「这个会话属于哪条对话」，hook 侧不知道；hook 带着真实 sessionId 来时
+     * 经 [conversationOf] 反查，审批卡才有归属。
+     */
+    private val sessionConversations = java.util.concurrent.ConcurrentHashMap<String, String>()
+
+    fun bindConversation(sessionId: String, convId: String) {
+        sessionConversations[sessionId] = convId
+    }
+
+    fun conversationOf(sessionId: String): String? = sessionConversations[sessionId]
+
     fun recordSession(
         nodeId: String,
         sessionId: String,

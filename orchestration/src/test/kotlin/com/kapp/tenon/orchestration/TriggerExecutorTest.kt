@@ -2,6 +2,11 @@
 
 package com.kapp.tenon.orchestration
 
+import com.kapp.tenon.agent.plugins.PluginManifest
+import com.kapp.tenon.agent.plugins.PluginTriggerDef
+import com.kapp.tenon.agent.plugins.TriggerDispatch
+import com.kapp.tenon.agent.plugins.TriggerSpec
+import com.kapp.tenon.agent.plugins.TriggerTypes
 import com.kapp.tenon.core.protocol.Limits
 import com.kapp.tenon.domain.CognitiveFlow
 import com.kapp.tenon.domain.InMemoryAgentStore
@@ -20,6 +25,7 @@ import kotlin.test.AfterTest
 import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertFalse
+import kotlin.test.assertNotEquals
 import kotlin.test.assertTrue
 
 /**
@@ -199,5 +205,109 @@ class TriggerRegistryTest {
         assertEquals("codex", registry.resolve("mail")?.agentKey)
         assertEquals("codex", registry.resolve("MAIL")?.agentKey)
         assertEquals(null, registry.resolve("other"))
+    }
+
+    /**
+     * 反向钉子：两个插件声明同一个 sourceId 时，先注册者胜、后来者被拒。
+     *
+     * 旧实现是 `routes[key] = route`：后者**静默**覆盖前者，谁赢取决于清单遍历
+     * 顺序，且没有任何日志。webhook 事件于是被派给一个插件没想到的执行体 ——
+     * 症状是「我配的触发器有时不生效」，事后查不出来。`register` 改成返回
+     * `Boolean` 就是为了让这个冲突在类型上可观测（调用方负责记日志）。
+     */
+    @Test
+    fun duplicateSourceIdKeepsTheFirstRouteAndRejectsTheSecond() {
+        val registry = TriggerRegistry()
+        val first = TriggerEventRoute("mail", "codex", "first prompt", null)
+        val second = TriggerEventRoute("MAIL", "claude", "second prompt", null)
+
+        assertTrue(registry.register(first), "首次注册必须成功")
+        assertFalse(
+            registry.register(second),
+            "同 sourceId（大小写不敏感）的另一条路由必须被拒，而不是静默覆盖",
+        )
+        assertEquals("codex", registry.resolve("mail")?.agentKey, "先注册者胜")
+        assertEquals("first prompt", registry.resolve("mail")?.promptTemplate)
+    }
+
+    /**
+     * 对账式重建每拍都会重放同一批路由，那不是冲突。
+     *
+     * 注意用的是**新建的等值实例**而不是同一个对象：`TriggerAssembly.fromManifests`
+     * 每拍都重新构造路由，如果判据是引用相等，对账就会把每一拍都记成「冲突」，
+     * 日志被自己刷满、而真正的冲突被淹没。
+     */
+    @Test
+    fun reRegisteringAnEqualRouteIsNotAConflict() {
+        val registry = TriggerRegistry()
+        assertTrue(registry.register(TriggerEventRoute("mail", "codex", "p", null)))
+        assertTrue(
+            registry.register(TriggerEventRoute("mail", "codex", "p", null)),
+            "等值路由重复注册算成功（对账重建的常态），否则日志会被自己刷屏",
+        )
+        assertEquals("codex", registry.resolve("mail")?.agentKey)
+    }
+}
+
+/**
+ * 对账指纹（`DesktopExtension.syncTriggersTick` 的去重判据）。
+ *
+ * 旧指纹只取 `pluginId#triggerId:triggerType`，于是「改了清单但触发器没变」——
+ * 改 schedule / prompt / targetConvId 都不改变指纹，对账被跳过，新配置永远不
+ * 生效，而且没有任何日志。下面几条把这个行为逐字段钉住。
+ */
+class TriggerFingerprintTest {
+
+    private fun manifest(
+        pluginId: String = "daily-digest",
+        schedule: String = "0 9 * * *",
+        prompt: String = "summarize",
+        targetConvId: String = "group:g1",
+    ): PluginManifest = PluginManifest(
+        pluginId = pluginId,
+        name = "Daily Digest",
+        triggers = listOf(
+            PluginTriggerDef(
+                id = "cron1",
+                name = "daily",
+                type = TriggerTypes.CRON,
+                spec = TriggerSpec(schedule = schedule),
+                dispatch = TriggerDispatch(prompt = prompt, targetConvId = targetConvId),
+            ),
+        ),
+    )
+
+    private fun fp(vararg manifests: PluginManifest) = triggerManifestFingerprint(manifests.toList())
+
+    @Test
+    fun scheduleChangeChangesTheFingerprint() {
+        assertNotEquals(
+            fp(manifest(schedule = "0 9 * * *")),
+            fp(manifest(schedule = "0 10 * * *")),
+            "改 schedule 必须改变指纹，否则新配置永远不生效（旧实现就漏这一项）",
+        )
+    }
+
+    @Test
+    fun promptAndTargetChangeTheFingerprint() {
+        val base = fp(manifest())
+        assertNotEquals(base, fp(manifest(prompt = "summarize differently")), "改 prompt 必须改变指纹")
+        assertNotEquals(base, fp(manifest(targetConvId = "group:g2")), "改 targetConvId 必须改变指纹")
+    }
+
+    @Test
+    fun identicalManifestsProduceTheSameFingerprint() {
+        assertEquals(fp(manifest()), fp(manifest()), "配置没变就不许白跑对账")
+    }
+
+    @Test
+    fun enumerationOrderDoesNotChangeTheFingerprint() {
+        val a = manifest(pluginId = "alpha")
+        val b = manifest(pluginId = "beta")
+        assertEquals(
+            fp(a, b),
+            fp(b, a),
+            "指纹必须是内容的函数：插件列表来自 map，顺序抖一下不该触发一次对账重建",
+        )
     }
 }

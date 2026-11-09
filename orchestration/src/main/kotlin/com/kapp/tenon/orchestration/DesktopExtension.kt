@@ -150,11 +150,14 @@ class DesktopExtension(
     // schedulerStore 为 null（未注入 Job Table 台账）时整组不装配：webhook 走
     // SourceWebhookRegistry 的 no-consumer 503，如实不可用，不装假队列。
 
-    /** 触发路由定义（manifest triggers 注册通过后由 C10 填充）。 */
+    /** 触发路由定义（manifest triggers 注册通过后对账填充）。 */
     val triggerRegistry = TriggerRegistry()
 
     private var triggerQueue: TriggerEventDrain? = null
     private var hostScheduler: DesktopHostScheduler? = null
+
+    /** 触发任务对账指纹：注册清单无变化时每拍零成本。 */
+    private var lastTriggerFingerprint: String? = null
 
     /**
      * L1 会话免审的**宿主侧台账**（§4.2 分级免审；落盘 `session-exempts.json`）。
@@ -257,6 +260,7 @@ class DesktopExtension(
         followJob = scope.launch {
             while (isActive) {
                 syncOnce()
+                syncTriggersTick()
                 delay(FOLLOW_POLL_MS)
             }
             // 协程被取消（窗口退出）时也别把控制面留在监听状态。
@@ -467,6 +471,14 @@ class DesktopExtension(
             // 这里的持久化桥——listener 只做 ingest（落 Job Table + 踢排水），编排
             // 流消费走 TriggerEventDrain 的表驱动循环，不走 listeners fan-out。
             schedulerStore?.let { store ->
+                // 回投目标的存在性校验器（提案 §5.2）：只放行本机 settings 配置过的
+                // 群会话——结果卡走群通道，1:1 的卡不随帧外发（TriggerExecutor KDoc）。
+                created.triggerTargetConvKnown = { convId ->
+                    TriggerAssembly.targetGroupKnown(
+                        convId,
+                        controller.state.value.settings.groups.map { it.groupId },
+                    )
+                }
                 val executor = TriggerExecutor(controller, { createdPlane })
                 val queue = TriggerEventDrain(store, scope)
                 queue.handler = { event ->
@@ -488,6 +500,7 @@ class DesktopExtension(
                             sourceId = event.sourceId,
                             event = event,
                             targetGroupId = route.targetGroupId,
+                            convId = route.targetGroupId?.let { com.kapp.tenon.core.protocol.ConvId.group(it) },
                         )
                         if (outcome.done) TriggerVerdict.Done else TriggerVerdict.Fail(outcome.error ?: "trigger task failed")
                     }
@@ -500,6 +513,7 @@ class DesktopExtension(
                         sourceId = null,
                         event = null,
                         targetGroupId = task.targetConvId,
+                        convId = task.targetConvId?.let { com.kapp.tenon.core.protocol.ConvId.group(it) },
                     )
                     if (!outcome.done) {
                         // cron 任务失败已由执行通道回投失败卡；这里再如实打日志，
@@ -530,6 +544,7 @@ class DesktopExtension(
                 }
                 triggerQueue = queue
                 hostScheduler = scheduler
+                lastTriggerFingerprint = null
             }
             sessions = registry
             // 托管模式插件：目录里有就拉起（token 注入 + 自注册）；坏了如实记录但不上抛。
@@ -1152,6 +1167,39 @@ class DesktopExtension(
         proc.inputStream.bufferedReader().readText().trim().ifBlank { null }
     }.getOrNull()
 
+    /**
+     * 触发任务对账（提案 §9 阶段三）：注册通过的插件清单 → 调度任务/事件路由。
+     * 指纹去重——注册清单无变化时每拍零成本；插件注销后对账式移除（不残响）。
+     */
+    private fun syncTriggersTick() {
+        val scheduler = hostScheduler ?: return
+        val currentPlane = plane ?: return
+        val manifests = currentPlane.plugins.list().map { it.manifest }.filter { it.triggers.isNotEmpty() }
+        // 指纹用**整份清单的 toString()**，而不是手挑几个字段（判据与理由见
+        // triggerManifestFingerprint 的 KDoc）。
+        val fingerprint = triggerManifestFingerprint(manifests)
+        if (fingerprint == lastTriggerFingerprint) return
+        lastTriggerFingerprint = fingerprint
+        val tasks = TriggerAssembly.fromManifests(manifests)
+        scheduler.syncCronTasks(tasks.cronTasks)
+        triggerRegistry.clear()
+        tasks.eventRoutes.forEach { route ->
+            if (!triggerRegistry.register(route)) {
+                // 两个插件声明了同一个 sourceId：先注册者胜，冲突必须说出来 ——
+                // 静默覆盖的症状是「我配的触发器有时不生效」，事后查不出来。
+                RelayLog.info(
+                    "RELAY-TRIGGER",
+                    "webhook sourceId collision: \"" + route.sourceId + "\" already claimed by another route; " +
+                        "this one is ignored (first registration wins)",
+                )
+            }
+        }
+        RelayLog.info(
+            "RELAY-TRIGGER",
+            "trigger tasks synced: " + tasks.cronTasks.size + " cron, " + tasks.eventRoutes.size + " webhook route(s)",
+        )
+    }
+
     private fun detach() {
         workerOrchestrator = null
         sessionExemptLedger = null
@@ -1174,6 +1222,7 @@ class DesktopExtension(
         triggerQueue = null
         hostScheduler?.stop()
         hostScheduler = null
+        lastTriggerFingerprint = null
         plane?.stop()
         plane = null
         attachedRuntime = null

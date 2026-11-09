@@ -2,12 +2,12 @@
 # (Trigger-Driven Orchestration & Extensible Plugin Architecture Proposal)
 
 > **文档标识**：`PROP-TRIGGER-PLUGIN-2026-11-08`  
-> **文档状态**：**演进提案 (Target Architecture Proposal) / 规划中**  
+> **文档状态**：**三阶段已落地**（feat/agent-trigger-plugin 分支；§0 矩阵与 §9 状态已按实现同步）  
 > **权威基线**：系统插件化主干规范以 [`design/spec/tenon-plugin-extensibility-detailed-spec-2026-11-05.md`](../design/spec/tenon-plugin-extensibility-detailed-spec-2026-11-05.md)（全域插件化 LLD）为准。  
 > **补充定位**：本文专注于补充 LLD 未覆盖的两大关键演进命题：  
 > 1. **去中心化 P2P 拓扑下的单一时钟源（桌面单点调度）与调度中枢架构**；  
 > 2. **MCP 三能力原语（Triggers / Tools / Resources）与 LLD 四能力（Agent / Workflow / Source / Channel）的映射对齐**。  
-> **开发警示**：本文所描述的 `triggers` 字段与中心化 Cron 调度器为**演进目标架构**，在相关代码和测试门禁落地前，严禁将其作为已实现能力向第三方开发者暴露。
+> **开发警示（已更新）**：`triggers` 字段与中心化 Cron 调度器（`DesktopHostScheduler`，Owner=桌面常驻宿主）均已落地。仍须如实告知第三方开发者的边界：触发式任务只走**独立只读执行通道**（零 worktree / 零工单 / 工具白名单）；结果卡只回投**群会话**（1:1 的卡片不随帧外发）；`permissions` 仍是清单不认识的键（严格解析拒收），OS 沙箱为 `TENON_OS_SANDBOX=strict` opt-in。
 
 ---
 
@@ -19,19 +19,19 @@
 |:---|:---|:---|:---|:---|
 | **外部信号摄入** | 6 字段标准化事件模型 | `agent-contract/.../source/StandardSourceEvent.kt` 的 `data class StandardSourceEvent` 定义 `id`, `type`, `subject`, `summary`, `detail`, `link` | **已实现** | 权威对齐，禁止新造第二套事件模型 |
 | **本地 Webhook 入站** | `POST /v1/webhook/<sourceId>` 路由 + HMAC 验签 | `agentNode/.../plugins/SourceWebhookRoute.kt`：`ControlPlane` 的 `/v1/webhook/` 分发分支进入，`object SourceWebhookVerifier.verifyHmacSha256` 做常量时间比较，识别 `x-hub-signature-256` / `x-signature-256` / `x-webhook-signature`。**无独立 `SourceWebhookVerifier.kt` 文件** | **已实现** | 废弃虚构的 `/plugins/.../inbound` 与 `X-Inbound-Signature`，完全复用现有路由 |
-| **Webhook 验签强度** | 未配置密钥即拒收（fail-closed） | `SourceWebhookRegistry.handleWebhook()` 仅在 `getSecret(sourceId) != null` 时验签；否则整段跳过、直接 `Accepted`。密钥来自 `SourceWebhookRegistry.registerSecret()`（生产代码无调用点）或 `TENON_WEBHOOK_SECRET_<SOURCEID>` 环境变量 | **部分实现 / 待修复** | 未配密钥路径当前是 fail-open；目标态必须改成拒收，并在注册 `sourceId` 时校验密钥存在 |
-| **Webhook 幂等性** | 外部 delivery ID 严格去重，网络重试不产生新事件 | `SourceWebhookRegistry.handleWebhook()` 的通用入站分支使用 `UUID.randomUUID()` 兜底 `fallbackId`，重试会生成新 ID 导致重复触发 | **待修复** | 改用 `sha256(rawBody)` 构造确定性幂等键，并按 `event.id` 建去重表 |
-| **Webhook 异步解耦** | 验签后立即 ACK，事件先入异步队列（阶段二换成持久化 Job Table）再派单 | `SourceWebhookRegistry.handleWebhook()` 末尾的 `listeners.forEach` 是**同步** fan-out，无 Job Queue，无编排流消费点 | **待建** | 否则外部服务 5s 超时重试会与模型推理叠加成并发风暴；「无缝复用现有编排流」不成立 |
-| **插件清单解析** | 静态声明与注册校验 (`manifest.json`) | `PluginManifest.kt` 的 `data class PluginManifest`：`type` 仅认 `single` / `team`，必填 `leader`。**两个**解析器均为 `Json { ignoreUnknownKeys = true }`：`PluginManifest.kt` 的 `PluginRegistration.json`（注册入口 `ControlPlane.pluginRegister()`）与 `PluginHost.kt` 的 `PluginManifestJson.json` | **已实现（基座）** | 本文示例严格对齐 `single` + `leader`；`triggers` 列为**增量扩展提案**。落地前必须**同时**改造两个解析器，对未知语义键显式拒绝，禁止静默丢弃 |
-| **进程外驱动** | stdio JSON-Lines 协议通信 | `agentNode/.../drivers/ProcessAgentDriver.kt` 的 `class ProcessAgentDriver`（模块是 **`:agentNode`**，不是 `:orchestration`）实现命令拉起、超时销毁、`useLines` 行式事件映射；**无单行长度上限熔断**，只有 `timeoutSec=300` | **已实现（部分）** | 模块归属与 LLD **§5.2**（`ProcessAgentDriver` 小节，标「位于 `:orchestration`」）不符，代码在 `:agentNode`；单行熔断属阶段三待建 |
-| **中心化时钟调度** | 统一 Cron 解析、Jitter 削峰、Job 队列、幂等派单 | 代码中暂无 Cron 调度引擎、持久化 Job Table、RateLimiter 与 missed-fire（合盖/唤醒）调度器 | **待建 (核心提案)** | 明确定性为演进目标，明确 Owner 为**桌面常驻宿主**单点 |
-| **触发 prompt 分诊链路** | 触发式任务走独立只读执行通道 | `CognitiveFlow.classify(text: String): Intent`（`app/.../domain/CognitiveFlow.kt` 的 `CognitiveFlow.classify()`）只有 `Discuss / Deliver` 两态，无「受限分类」或来源可信度入参；触发 prompt → 分诊的链路**不存在**，§5.1 两句示例 prompt 现状下均判 `Discuss` | **待建** | 零副作用必须靠结构（通道函数体不挂 `WorktreeSandbox` / `DesktopStageChain`），不能靠提示词；见 §7.1 |
-| **卡片目标会话路由** | `targetConvId` 显式指定目标会话 | 该字段在代码与协议帧中均不存在。现有卡片是群消息可选 `card` 字段；动作帧不带 groupId，按 cardId 反查本机消息行所在会话广播，卡面 rev 严格递增且串行分配 | **待建** | 若协议化必须同步解码白名单与编码器（`AGENTS.md §2.2`）、两端同版本；见 §5.2 |
+| **Webhook 验签强度** | 未配置密钥即拒收（fail-closed） | `SourceWebhookRegistry.handleWebhook()` 对 `getSecret(sourceId) == null` 直接回 `403 secret-not-configured`（错误信息给出 `TENON_WEBHOOK_SECRET_<SOURCEID>` 环境变量名）；空白密钥在 `registerSecret()` 当场拒绝；环境变量设成空白视同未配置 | **已修复** | C1 落地，反向验证过（移除门 → 测试红） |
+| **Webhook 幂等性** | 外部 delivery ID 严格去重，网络重试不产生新事件 | 通用分支与 GitHub 缺 delivery 头的兜底均为 `sha256(rawBody)` 确定性 ID（`com.kapp.tenon.core.crypto.sha256Hex`）；`event.id` 内存去重表（TTL 15min / 上限 4096，putIfAbsent 原子判定），重放回 `Accepted(duplicate=true)` 不再分发；队列满拒收时撤账把重试权还给发送方；持久层 `TriggerEvent` 的 `event_id` 主键是重启后的幂等兜底 | **已修复** | C2 落地 + C5 的持久键；内存表是过渡，持久 Job Table 已落地 |
+| **Webhook 异步解耦** | 验签后立即 ACK，事件先入异步队列再派单 | `SourceWebhookRegistry` 自带有界队列（默认 64）+ 限并发派发（默认 2，Semaphore 先占配额再取事件，背压严格等于容量）；队列满 `503 queue-full`；listener 为空 `503 no-consumer`（不收下注定石沉大海的事件）；编排侧消费走 `TriggerEventDrain` 的**表驱动**循环（pending → running → done/failed/skipped，重启恢复），listener 只是持久化桥 | **已建** | C3 + C7 落地；ACK→落库的崩溃窗口毫秒级，由编排 listener 的即时 INSERT 覆盖（如实边界） |
+| **插件清单解析** | 静态声明与注册校验 (`manifest.json`) | 两个解析器（`PluginRegistration.json` 与 `PluginManifestJson.json`）均已 `ignoreUnknownKeys = false` 严格化：顶层未知键前置扫描回 `unknown-field`（点名键名），嵌套未知键走 `bad-manifest`；`triggers` 已是合法键（C9），结构校验 + 宿主级事实两道门（webhook 密钥、targetConvId 群会话存在性，均 fail-closed） | **已实现（triggers 已落地）** | C4 严格化 + C9 triggers；`permissions` 仍是不认识的键——声明即拒收 |
+| **进程外驱动** | stdio JSON-Lines 协议通信 | `agentNode/.../drivers/ProcessAgentDriver.kt` 的 `class ProcessAgentDriver`（模块是 **`:agentNode`**，不是 `:orchestration`）实现命令拉起、超时销毁、`useLines` 行式事件映射；C11 已补 `DriverLineLimits.MAX_LINE_CHARS = 256 KiB` 单行熔断，三处读取循环共用 | **已实现** | 模块归属与 LLD **§5.2**（`ProcessAgentDriver` 小节，标「位于 `:orchestration`」）不符，代码在 `:agentNode`；`timeoutSec = 300` 的进程超时仍在 |
+| **中心化时钟调度** | 统一 Cron 解析、Jitter 削峰、Job 队列、幂等派单 | `DesktopHostScheduler`（`:orchestration`，Owner=桌面宿主单点）：`CronExpression`（`:agentNode`，与清单校验同一份实现）、taskId 哈希派生固定 Jitter、missed-fire（RUN_ONCE 补 1 次 / SKIP 全放弃，missedRuns 如实记账）、Semaphore 工作池（默认 2）；运行态持久化在 `SchedulerTaskState`（21.sqm），重启不丢补偿判据；`TriggerEvent` 队列表落 `:app`（`:agentNode` 物理上不依赖 `:app`） | **已建** | C5 + C6 落地；`fileWatch` 仍为候选形态，解析期显式拒绝 |
+| **触发 prompt 分诊链路** | 触发式任务走独立只读执行通道 | `TriggerExecutor`（`:orchestration`）：函数体不引用 `WorktreeSandbox`/`DesktopStageChain`、不进 `activeTickets`、不调用 `CognitiveFlow.classify()`；CLI 执行 `wsPath=null`（裸驱动零 worktree），插件 leader 经 `pluginForAgent` → `executePluginTask`；写工具拦截走 `CognitiveFlow.allowsTool`（fail-closed）；`TriggerChannelWiringGuardTest` 钉死五条结构不变量 | **已建** | C8 落地；`dispatch.prompt` 不经 classify（§5.2 口径兑现）；宿主整体包 `<untrusted_inbound_data>` |
+| **卡片目标会话路由** | `targetConvId` 显式指定目标会话 | **落地方式修正**：`targetConvId` 是 manifest 的 `dispatch.targetConvId` 字段（注册校验只放行本机已配置的**群**会话）；结果卡经既有 `broadcastChainCard`（rev 串行分配 + cardId 反查广播）投进目标群——**协议帧零新增键**（帧的 groupId 已决定会话归属），两端同版本约束未触发；1:1 会话不支持（现行 1:1 卡只落本机库不随帧外发，投进去=发送侧成功接收侧没有） | **已落地（修正）** | C8 + C10；提案原「协议化」按此修正：不加线上键 |
 | **公网入站拓扑** | 接收公网外部系统推送 | `ControlPlane.start()` 仅监听本地回环 `LOOPBACK` (`127.0.0.1`)，无公网暴露，无 TLS 证书 | **受限拓扑** | 必须经机主可信反代（Cloudflare Tunnel / FRP + TLS）或反向长连接消费，严禁明文直连回环；TLS 双向 pin 落点需明确，见 §6.2 |
-| **安全沙箱隔离** | 网络域名白名单与资源配额 | `permissions.network` 域名白名单当前无操作系统级 cgroup / Network Namespace 拦截执行机制 | **声明式标记** | 仅作审计标记，不承诺已有底层硬隔离；真实阻断待阶段三 OS 沙箱 |
-| **风险挂起与卡片** | 动作分级与移动端终审门禁 | 风险等级为 `L1/L2/L3`（`core/.../protocol/MessageTypes.kt` 的 `object AgentRiskLevels`，外部插件运行时默认兜底为 `L2` 见 `ExternalPluginDriver` 的 `ToolCall` 解析，纯契约默认值见顶层 `DriverEvent.ToolCall.riskLevel`）；`ControlPlaneHookRoutes.kt` 的 `ControlPlane.agentHookApproval()` PreToolUse 审批已实现且 fail-closed，但 `hookKeyOf(conversationId)` 与派单侧 convId/groupId/ticketId **无对齐键**。现有 `WorkflowStatus.SUSPENDED` 只服务 GATE 工单，与 L3 审批无关 | **部分实现** | 不得声称「按风险等级硬拦截已打通」；前置是补会话对齐键 + 端到端钉子测试，见 §7.4 |
-| **超时看门狗** | 硬超时熔断与僵尸进程清理 | `DesktopWorkerWatchdog.kt` 的 `SandboxIdleWatchdog.Companion`：`DEFAULT_IDLE_TIMEOUT_MS = 180_000L`、`KILL_GRACE_MS = 5_000L`；`ExternalPluginDriver.IPC_TIMEOUT_MS` 30s；`LeaseBarrier.DEFAULT_TTL_MS` 60s | **已实现** | 统一引用真实常量名，消除 30s/180s 冲突描述；不存在名为 `TIMEOUT_MS` 的常量 |
-| **沙箱产物清理** | 严禁裸调 `deleteRecursively()` 穿透软链接 | `WorktreeSandboxExecutor.deleteArtifactsSafely()`（`WorktreeSandbox.kt`）用不传 `FOLLOW_LINKS` 的 `Files.walkFileTree` 对 `.sandbox-home` 下**所有条目**无差别 `Files.deleteIfExists()`，再对整个 `artifactsDir` 调 `deleteRecursively()`；**无 `Files.isSymbolicLink()` 判断是有意为之**（见右栏） | **已实现（工作树未提交修复）** | 旧写法只扫顶层 `isSymbolicLink()`，漏掉 `prepareSandboxHome()` 新增的 `.config/opencode` **二级软链接**挂载 ⇒ 会沿它下钻真实 HOME；`AGENTS.md §2.8` 的防御手段措辞已按新实现同步，回归钉子 `WorktreeSandboxExecutorTest.deleteArtifactsSafelyDoesNotFollowSymlinksIntoHostHome()` 已绿（20 tests / 0 failures）。该修复尚未提交，若回滚须同步回退本文与 §2.8；见 §8.2 |
+| **安全沙箱隔离** | 网络域名白名单与资源配额 | `OsSandboxGuard`：`TENON_OS_SANDBOX=strict` opt-in，启用前探活（macOS seatbelt echo / Linux `unshare -n`），探不过**大声失败**不静默回退裸跑；seatbelt profile = `allow default` + `deny network*`（最小侵入）；挂接点 `WorktreeSandboxExecutor.run`（起进程之前） | **opt-in 已落地；域名白名单仍待 permissions 字段** | C12；`permissions` 仍是严格解析拒绝的键，per-plugin 域名白名单需该字段成为数据源后演进；只读触发通道不套 OS 沙箱（它需要网络读） |
+| **风险挂起与卡片** | 动作分级与移动端终审门禁 | `hookKeyOf(conversationId)` 与派单侧的对齐键已补：`DriverKeys.ENV_HOOK_SESSION_ID`（`TENON_HOOK_SESSION_ID`）注入子进程环境 → hook 脚本透传 sessionId → `agentHookApproval` 把审批帧挂在派单会话上并回带 `sessions.bindConversation` 登记的 convId；无对齐键时回退合成 `agy-*` 池键（旧行为） | **对齐键已接** | C13 落地；L3 硬拦截的前提（会话归属）关闭 |
+| **超时看门狗** | 硬超时熔断与僵尸进程清理 | `SandboxIdleWatchdog`（180s/5s）、`ExternalPluginDriver.IPC_TIMEOUT_MS` 30s、`LeaseBarrier.DEFAULT_TTL_MS` 60s（同前）；新增 `DriverLineLimits.MAX_LINE_CHARS = 256 KiB` 单行熔断：`ProcessAgentDriver` / `ExternalPluginDriver` / `WorktreeSandboxExecutor` 三处读取循环共用，超限响亮失败（沙箱路径摘进程树、不静默跳过） | **已实现（补单行熔断）** | C11 落地 |
+| **沙箱产物清理** | 严禁裸调 `deleteRecursively()` 穿透软链接 | `WorktreeSandboxExecutor.deleteArtifactsSafely()`（`WorktreeSandbox.kt`）用不传 `FOLLOW_LINKS` 的 `Files.walkFileTree` 对 `.sandbox-home` 下**所有条目**无差别 `Files.deleteIfExists()`，再对整个 `artifactsDir` 调 `deleteRecursively()`；**无 `Files.isSymbolicLink()` 判断是有意为之**（见右栏） | **已实现（修复已随分支落地）** | 旧写法只扫顶层 `isSymbolicLink()`，漏掉 `prepareSandboxHome()` 新增的 `.config/opencode` **二级软链接**挂载 ⇒ 会沿它下钻真实 HOME；`AGENTS.md §2.8` 的防御手段措辞已按新实现同步，回归钉子 `WorktreeSandboxExecutorTest.deleteArtifactsSafelyDoesNotFollowSymlinksIntoHostHome()` 已随分支入库（同时覆盖顶层 `.dsh` 与嵌套 `.config/opencode`）。该修复与回归钉子已随 `feat/agent-trigger-plugin` 分支落地；若回滚须同步回退本文与 §2.8；见 §8.2 |
 
 ---
 
@@ -118,7 +118,7 @@ flowchart TD
 
 | MCP 三能力原语 | 核心职责 | LLD 四能力映射 ([`LLD §3`](../design/spec/tenon-plugin-extensibility-detailed-spec-2026-11-05.md#三-四大插件能力标准规范)) | 对应代码工程实现与形态 |
 |:---|:---|:---|:---|
-| **Triggers (感官)** | 解决**何时被唤醒**（时钟到期、外部 Webhook、会话 @） | **Source 插件规范** (`LLD §3.3`) | `SourceWebhookRoute` 本地入站（已实现）+ 桌面中心化 Cron 调度器（待建） |
+| **Triggers (感官)** | 解决**何时被唤醒**（时钟到期、外部 Webhook、会话 @） | **Source 插件规范** (`LLD §3.3`) | `SourceWebhookRoute` 本地入站 + 桌面中心化 `DesktopHostScheduler`（均已落地） |
 | **Tools (手脚)** | 解决**具体执行什么操作**（读写文件、跑测试、发邮件） | **Agent 插件规范** (`LLD §3.1`) / **Workflow 插件规范** (`LLD §3.2`) | `ProcessAgentDriver`（`:agentNode`）、`CliSubprocessDriver` 进程外执行 |
 | **Resources (记忆)** | 解决**注入什么只读上下文**（工作区文件、历史工单） | **Agent 插件规范** (`LLD §3.1`) 的 `{workspace}` 占位符；LLD 无独立「工作区契约」小节 | `GroupWorkspaceInfo`（`core/.../GroupMeta.kt` 的 `data class`）与 `PluginManifest.allowedWorkspaces` 白名单 |
 | *(通道扩展)* | 跨端触达、卡片原位打补丁 | **Channel 插件规范** (`LLD §3.4`) | `ChannelBridge` **仅为 LLD 设计节点，代码未实现**；现有卡片动作处理见 `orchestration/.../HostCardActions.kt` |
@@ -161,11 +161,11 @@ flowchart TD
 ## 5. 插件清单规范演进设计 (`manifest.json` Incremental Spec)
 
 > [!WARNING]
-> **现行代码事实与静默丢弃陷阱**：  
-> 1. 当前代码 `data class PluginManifest`（`PluginManifest.kt`）仅包含 `pluginId`, `name`, `version`, `type`, `entrypoint`, `leader`, `members`, `allowedWorkspaces`, `defaultWsId`, `capabilities`；  
-> 2. `PluginRegistration.validate()`（`PluginManifest.kt`）强制校验：`type` 必须为 `"single"` 或 `"team"`（`TYPE_SINGLE` / `TYPE_TEAM`，填 `"external"` 直接报 `bad-type`）；`leader` 字段**必填**（缺少报 `missing-leader`）。**不存在 `PluginRegistration.kt` 这个文件**，`object PluginRegistration` 也定义在 `PluginManifest.kt`；  
-> 3. 两个解析入口 `PluginRegistration.json` 与 `PluginManifestJson.json` **都**使用 `Json { ignoreUnknownKeys = true }`。如果开发者在当前版本直接声明 `triggers`，注册会返回成功，但该字段会被静默丢弃，触发器永远不会生效；  
-> 4. **前置工程要求**：在正式发布触发器功能前，必须**同时**改造这两个解析器，补齐 `triggers` 数据结构，并在不支持时抛出可操作的拒绝错误，严防静默丢失。
+> **现行代码事实（已按三阶段落地同步）**：  
+> 1. `data class PluginManifest`（`PluginManifest.kt`）现含 `triggers: List<PluginTriggerDef>`（`PluginTriggerDef.kt`）；`permissions` 仍不是合法键；  
+> 2. 两个解析入口 `PluginRegistration.json` 与 `PluginManifestJson.json` 均已 `ignoreUnknownKeys = false` **严格化**：顶层未知键回 `unknown-field`（点名键名），嵌套未知键回 `bad-manifest`——**静默丢弃不再存在**；  
+> 3. `triggers` 有两级 fail-closed 校验：结构判据在 `PluginRegistration.validate()`（cron 语法 / 时区 / Jitter 幅度 / webhook sourceId 与签名头 / 占位符 ⊆ 6 字段 / fileWatch 显式拒收），宿主级事实在 `ControlPlanePluginGateway.validateTriggerHostFacts()`（webhook 密钥必须已配、`targetConvId` 必须是本机已配置的群会话，校验器未接线时含 triggers 的清单整体拒绝）；  
+> 4. 触发任务执行走独立只读通道（`TriggerExecutor`），结果卡只回投群会话（§0「卡片目标会话路由」行）。
 
 ### 5.1 增量兼容清单示例 (Incremental Manifest Proposal)
 
@@ -229,22 +229,22 @@ flowchart TD
 
 | 字段 | 必填 | 取值 / 约束 | 状态 |
 |:---|:---|:---|:---|
-| `id` | 是 | 复用 `PLUGIN_ID_PATTERN`：`^[a-z0-9][a-z0-9-]{0,63}$`，同一清单内唯一 | 提案 |
-| `name` | 是 | 非空 | 提案 |
-| `type` | 是 | 枚举 `cron` / `webhook`；`fileWatch` 为候选第三值，未进 §9 路线图前出现即拒 | 提案 |
-| `spec.schedule` | cron 必填 | 5 字段 Cron 表达式；宿主负责解析，**代码当前无 Cron 解析器** | 待建 |
-| `spec.timezone` | 否 | IANA 时区名，默认宿主本地时区；按本地墙钟时间触发，DST 跳变当天交由 `missedFirePolicy` 裁决 | 待建 |
-| `spec.jitterSeconds` | 否 | **幅度**秒数；宿主在 `[-N, +N]` 内为任务分配**固定**偏移（同一任务每天同一偏移，避免逐日漂移），与 §2.3 `±30s` 对齐 | 待建 |
-| `spec.missedFirePolicy` | 否 | `RUN_ONCE`（默认）/ `SKIP`，语义见 §2.2 | 待建 |
-| `spec.sourceId` | webhook 必填 | 对应 `POST /v1/webhook/<sourceId>`；宿主注册时校验密钥已配置，未配置即拒绝（当前实现相反，见 §6.1） | 待修复 |
-| `spec.secretHeader` | 否 | **只能**是 `x-hub-signature-256` / `x-signature-256` / `x-webhook-signature` 三者之一；它不是「注册自定义头」的入口 | 提案（枚举值锁定为现有三头，manifest 字段本身未实现） |
-| `dispatch.prompt` | 是 | `{{...}}` 只允许引用 `StandardSourceEvent` 的 6 字段（`id`, `type`, `subject`, `summary`, `detail`, `link`；无独立 `sender`/`from` 字段）；插值结果由**宿主**整体包进 `<untrusted_inbound_data>`（§7.1）；插值后受 `Limits.AGENT_PROMPT=4096` / `AGENT_TASK_BUDGET=8000` 约束 | 提案 |
-| `dispatch.targetConvId` | 是 | **提案字段，代码与协议帧均不存在** | 待建 |
-| `permissions` | 否 | 声明式审计标记，当前无 OS 级拦截（§0、§9 阶段三） | 声明式 |
+| `id` | 是 | 复用 `PLUGIN_ID_PATTERN`：`^[a-z0-9][a-z0-9-]{0,63}$`，同一清单内唯一 | 已实现 |
+| `name` | 是 | 非空 | 已实现 |
+| `type` | 是 | 枚举 `cron` / `webhook`（`TriggerTypes` 唯一来源）；`fileWatch` 为候选第三值，出现即拒（`bad-trigger-type`） | 已实现 |
+| `spec.schedule` | cron 必填 | 5 字段 Cron 表达式；`CronExpression` 唯一实现（清单校验与调度中枢共用） | 已实现 |
+| `spec.timezone` | 否 | IANA 时区名（注册校验 `ZoneId.of`），默认宿主本地时区；按本地墙钟时间触发，DST 跳变交由 `missedFirePolicy` 裁决 | 已实现 |
+| `spec.jitterSeconds` | 否 | **幅度**秒数（0..300）；taskId 哈希派生固定偏移，重启不漂移，与 §2.3 `±30s` 对齐 | 已实现 |
+| `spec.missedFirePolicy` | 否 | `RUN_ONCE`（默认）/ `SKIP`（`MissedFirePolicies` 唯一来源），语义见 §2.2 | 已实现 |
+| `spec.sourceId` | webhook 必填 | 对应 `POST /v1/webhook/<sourceId>`；宿主注册时校验密钥已配置，未配置即拒绝（fail-closed） | 已实现 |
+| `spec.secretHeader` | 否 | **只能**是 `x-hub-signature-256` / `x-signature-256` / `x-webhook-signature` 三者之一（`TriggerSecretHeaders` 锁定）；它不是「注册自定义头」的入口 | 已实现 |
+| `dispatch.prompt` | 是 | `{{...}}` 只允许引用 `StandardSourceEvent` 的 6 字段（注册校验拒绝其余占位符；未知占位符运行时原样保留不猜语义）；插值结果由**宿主**整体包进 `<untrusted_inbound_data>`（§7.1）；插值后受 `Limits.AGENT_PROMPT=4096` 约束 | 已实现 |
+| `dispatch.targetConvId` | 是 | manifest 字段；注册校验只放行本机已配置的**群**会话，结果卡经既有群卡通道回投（协议帧零新增键） | 已实现（群会话） |
+| `permissions` | 否 | **仍不是合法键**：严格解析拒收。OS 沙箱基建已落地（opt-in），per-plugin 域名白名单待该字段成为数据源后演进（§9 落地修正 2） | 未实现（拒收） |
 
-**触发链路分诊口径**：`dispatch.prompt` **不经过** `CognitiveFlow.classify(text)`。该函数只有 `Discuss / Deliver` 两态，示例中的「检索 / 汇报 / 摘要」不含硬/软派单词，现状下都判 `Discuss`（只读讨论流、不派单不产卡）；且触发 prompt → 分诊的链路根本不存在。触发式任务走独立只读执行通道，零副作用由结构保证，见 §7.1。
+**触发链路分诊口径（已落地）**：`dispatch.prompt` **不经过** `CognitiveFlow.classify(text)`。该函数只有 `Discuss / Deliver` 两态，示例中的「检索 / 汇报 / 摘要」不含硬/软派单词，若走 classify 会判 `Discuss`（只读讨论流、不派单不产卡）；因此 C8 另开**独立只读执行通道**（`TriggerExecutor`）：不经分诊、不挂 worktree、不进工单，零副作用由结构保证并由 `TriggerChannelWiringGuardTest` 钉死，见 §7.1。
 
-**卡片目标会话（待建）**：`targetConvId` 的合法值必须是桌面宿主本机 `MessageEntity` 中**已存在**的会话 ID，注册时校验、不存在即拒绝（fail-closed）；`conv-direct` 只是占位示例，不是协议保留值。现有卡片是群消息的可选 `card` 字段，动作帧不带 groupId，按 cardId 反查本机消息行所在会话广播，卡面 rev 必须严格递增且串行分配。若把 `targetConvId` 协议化，必须同步解码白名单与编码器（`AGENTS.md §2.2`），且两端同版本——旧节点不认识新键会整帧拒收。
+**卡片目标会话（已落地，方式修正）**：`targetConvId` 的合法值必须是桌面宿主本机 `MessageEntity` 中**已存在**的会话 ID，注册时校验、不存在即拒绝（fail-closed）；`conv-direct` 只是占位示例，不是协议保留值。现有卡片是群消息的可选 `card` 字段，动作帧不带 groupId，按 cardId 反查本机消息行所在会话广播，卡面 rev 必须严格递增且串行分配。本轮**未**把 `targetConvId` 协议化：结果卡经既有群卡通道回投，协议帧零新增键，两端同版本约束未触发。若将来协议化，必须同步解码白名单与编码器（`AGENTS.md §2.2`），旧节点不认识新键会整帧拒收。
 
 ---
 
@@ -264,11 +264,11 @@ flowchart TD
      * `detail`: 详情（上限 4000 字符）；
      * `link`: 外部回跳 URL。
 
-> **待修复项（幂等）**：`SourceWebhookRegistry.handleWebhook()` 对非 GitHub 的通用 Webhook 使用 `fallbackId = "wh-" + UUID.randomUUID()`，重试会导致重复触发。若未提供外部 ID，取 `sha256(rawBody)` 构造确定性 ID，并按 `event.id` 建去重表。
+> **已修复（幂等）**：通用分支与 GitHub 缺 delivery 头的兜底均为 `sha256(rawBody)` 确定性 ID；`event.id` 内存去重表（TTL 15min）+ 持久层 `TriggerEvent.event_id` 主键双保险。见 §0「Webhook 幂等性」行。
 
-> **待修复项（fail-open）**：`SourceWebhookRegistry.handleWebhook()` 仅在 `getSecret(sourceId) != null` 时验签；未配密钥则整段跳过，直接返回 `WebhookResult.Accepted`。密钥来源是 `SourceWebhookRegistry.registerSecret()`（生产代码当前无调用点）或环境变量 `TENON_WEBHOOK_SECRET_<SOURCEID>`（示例 `sourceId: "mail"` 对应 `TENON_WEBHOOK_SECRET_MAIL`）。上表的「已实现」只覆盖配了密钥的路径；目标态必须改成未配密钥即拒收。
+> **已修复（fail-closed）**：未配密钥的 sourceId 一律 `403 secret-not-configured`（错误信息给出环境变量名）；空白密钥当场拒绝；空白环境变量视同未配置。密钥来源仍是 `registerSecret()` 与 `TENON_WEBHOOK_SECRET_<SOURCEID>`（示例 `sourceId: "mail"` 对应 `TENON_WEBHOOK_SECRET_MAIL`）。
 
-> **待建项（异步解耦）**：`SourceWebhookRegistry.handleWebhook()` 末尾的 `listeners.forEach` 是同步 fan-out，没有 Job Queue，也没有编排流消费点。触发式任务必须在验签 + 归一后立即回执、把 `StandardSourceEvent` 先入异步队列（阶段二换成持久化 Job Table）再异步派单；否则外部服务的超时重试会与模型推理叠加成并发风暴。所谓「对齐 `StandardSourceEvent` 即可无缝复用编排流」不成立。
+> **已建（异步解耦 + 持久化消费）**：验签后立即 ACK，事件入有界队列（容量 64、并发 2）异步派发；编排侧持久化桥把事件落 `TriggerEvent` 表，`TriggerEventDrain` 表驱动消费（重启恢复）。listener 为空 → `503 no-consumer`，队列满 → `503 queue-full`——不收下注定石沉大海的事件。
 
 ### 6.2 真实公网入站拓扑约束 (AGENTS.md §2.5 对齐)
 
@@ -301,7 +301,7 @@ flowchart TD
 * **军规**：
   * **纯代码前置过滤**：利用插件配置中的规则链（如白名单发件人、关键字正则、阈值比对），在本地代码层执行过滤（耗时 < 1ms，0 Token 成本）；
   * **两段式分析**：只有命中关键规则的事件，才唤醒大模型进行深层语义提取。
-* 规则链的清单字段（`filter`）**尚未定义**，属 §9 阶段三待补；在此之前不得把 §7.2 当作已可配置的现成能力。
+* 规则链**已落地**：`PluginTriggerDef.filter`（`TriggerFilter` 的 `types` / `keywords`，均为白名单语义）经 `TriggerAssembly` 装配成 `TriggerEventRoute.matches()`——type 前缀与 subject/summary 关键词两组是「且」关系，任一为空则该组放行；未命中的事件在消费侧由 `TriggerVerdict.Skip` 如实记为 `skipped`（0 Token、不唤醒模型），不是丢失。空白条目在注册期由 `bad-trigger-filter` 拒绝。发件人白名单、正则与阈值比对仍属后续演进，不得把 §7.2 说成「全形态可配置」。
 
 ### 7.3 严格帧预算与三处同值 (Limits.kt & AGENTS.md §2.2 对齐)
 
@@ -352,13 +352,13 @@ flowchart TD
 ```
 
 1. **进程防火墙（Process Isolation）**：外部插件强制以独立子进程运行，子进程挂死完全不污染宿主 JVM；
-2. **传输防火墙（Stream Isolation）**：`ProcessAgentDriver`（`:agentNode`）基于 `useLines` 逐行解析。**当前没有单行长度上限熔断**，只有 `timeoutSec = 300` 的进程超时与 stderr 尾部截断；单行超限熔断属 §9 阶段三待建，图中「禁全量缓冲」是目标态而非现状；
+2. **传输防火墙（Stream Isolation）**：`ProcessAgentDriver`（`:agentNode`）基于 `useLines` 逐行解析。C11 已补 `DriverLineLimits.MAX_LINE_CHARS = 256 KiB` 单行熔断，`ProcessAgentDriver` / `ExternalPluginDriver` / `WorktreeSandboxExecutor` 三处读取循环共用同一常量，超限行不进队列不进日志、摘进程树并响亮失败；`timeoutSec = 300` 的进程超时与 stderr 尾部截断仍在。图中「禁全量缓冲」已由该熔断兑现；
 3. **时间防火墙（Watchdog & Timeout Constants）**：严格引用真实常量：
    * `SandboxIdleWatchdog.Companion.DEFAULT_IDLE_TIMEOUT_MS = 180_000L`（`DesktopWorkerWatchdog.kt`）；
    * `SandboxIdleWatchdog.Companion.KILL_GRACE_MS = 5_000L`（优雅退出宽限，超时直发 `SIGKILL`）；
    * `ExternalPluginDriver.IPC_TIMEOUT_MS` 的 IPC 上限 30 秒；`LeaseBarrier.DEFAULT_TTL_MS` 的租约 TTL 60 秒；
 4. **空间防火墙（Strict Frame Budget）**：网络帧严格封顶 `Limits.MAX_FRAME_BYTES`（64 KiB）；海量调试日志必须在本地落盘，协议帧仅传输文件路径与摘要指针（指针化路径格式待定义）；
-5. **物理防火墙（Symlink-Safe Unlink）**：产物清理严禁裸调标准库 `File.deleteRecursively()`，必须走 `WorktreeSandboxExecutor.deleteArtifactsSafely()`（`WorktreeSandbox.kt`；**文件名 ≠ 类名**）。真实实现：若 `.sandbox-home` 为目录，用 `Files.walkFileTree`（**不传 `FOLLOW_LINKS`**）遍历，`visitFile` 与 `postVisitDirectory` 对其中每个条目**无差别**调用 `Files.deleteIfExists()`；之后才对整个 `artifactsDir` 调 `deleteRecursively()`。链接本体已在遍历中被删且遍历不跟随链接，因此不会下钻到真实 `$HOME`。**为什么不该补回 `isSymbolicLink()`**：旧实现只扫 `.sandbox-home` 顶层 `listFiles()` + `Files.isSymbolicLink()` 摘链接，而 `prepareSandboxHome()` 新增了 `.config/opencode` 这类**二级目录下的软链接挂载**，顶层扫描抓不到，随后的 `deleteRecursively()` 会沿它下钻到真实 HOME。全量清空才是覆盖嵌套链接的正确做法；`AGENTS.md §2.8` 的防御手段措辞已按此同步，并写死「别退回旧写法」。回归钉子 `WorktreeSandboxExecutorTest.deleteArtifactsSafelyDoesNotFollowSymlinksIntoHostHome()` 同时覆盖顶层 `.dsh` 与嵌套 `.config/opencode`，已跑绿。该修复当前仍在工作树、尚未提交（见 §0）。
+5. **物理防火墙（Symlink-Safe Unlink）**：产物清理严禁裸调标准库 `File.deleteRecursively()`，必须走 `WorktreeSandboxExecutor.deleteArtifactsSafely()`（`WorktreeSandbox.kt`；**文件名 ≠ 类名**）。真实实现：若 `.sandbox-home` 为目录，用 `Files.walkFileTree`（**不传 `FOLLOW_LINKS`**）遍历，`visitFile` 与 `postVisitDirectory` 对其中每个条目**无差别**调用 `Files.deleteIfExists()`；之后才对整个 `artifactsDir` 调 `deleteRecursively()`。链接本体已在遍历中被删且遍历不跟随链接，因此不会下钻到真实 `$HOME`。**为什么不该补回 `isSymbolicLink()`**：旧实现只扫 `.sandbox-home` 顶层 `listFiles()` + `Files.isSymbolicLink()` 摘链接，而 `prepareSandboxHome()` 新增了 `.config/opencode` 这类**二级目录下的软链接挂载**，顶层扫描抓不到，随后的 `deleteRecursively()` 会沿它下钻到真实 HOME。全量清空才是覆盖嵌套链接的正确做法；`AGENTS.md §2.8` 的防御手段措辞已按此同步，并写死「别退回旧写法」。回归钉子 `WorktreeSandboxExecutorTest.deleteArtifactsSafelyDoesNotFollowSymlinksIntoHostHome()` 同时覆盖顶层 `.dsh` 与嵌套 `.config/opencode`，已跑绿。该修复与回归钉子已随 `feat/agent-trigger-plugin` 分支落地（见 §0）。
 
 ---
 
@@ -366,24 +366,31 @@ flowchart TD
 
 为确保系统步步为营、绝不产生“发送侧全绿、接收侧什么都没有”的文档欺骗，触发式插件化架构按以下三阶段分步推进：
 
-### 阶段一：现有能力治理与对账修补（当前基线）
+### 阶段一：现有能力治理与对账修补（✅ 已落地——C1~C4）
 * 规范权威归位至 [`LLD 2026-11-05`](../design/spec/tenon-plugin-extensibility-detailed-spec-2026-11-05.md)；
 * 修 `SourceWebhookRegistry.handleWebhook()` 通用入站分支的 `UUID.randomUUID()`，改用 `sha256(rawBody)` 确定性幂等键并按 `event.id` 去重；
 * 修 `SourceWebhookRegistry.handleWebhook()` 的 fail-open：未配置密钥即拒收，并补 `sourceId` → secret 的配置/校验入口；
 * 修 `SourceWebhookRegistry.handleWebhook()` 的 `listeners.forEach` 同步 fan-out：验签后立即 ACK，先接内存异步队列解耦；持久化 Job Table 在阶段二落地；
 * **同时**改造 `PluginRegistration.json` 与 `PluginManifestJson.json` 两个 `ignoreUnknownKeys` 解析器，对未知语义键显式拒绝并给可操作错误码；在 `PluginRegistrationTest.kt`（现有 15 个用例）补 `triggers` 等未知键的**反向**拒绝用例，并**保持** `registrationWithCorrectTokenRegistersAndLists` 这条正向 200 用例通过——它已存在，不是待补；
 * 改严格模式的**验收依据**：逐键对账 `examples/plugins/echo-team-plugin/manifest.json`，顶层 10 键全在 `PluginManifest`，`leader`/`members` 的 `agentId/name/role` 全在 `TeamMemberInfo`，`allowedWorkspaces` 的 `wsId/title` 全在 `GroupWorkspaceInfo`，**无未知键，严格模式后仍能正常解析与注册**；
-* ~~对账 `AGENTS.md §2.8` 与 `deleteArtifactsSafely()`~~ —— **已关闭**：根因是 `prepareSandboxHome()` 的嵌套软链接挂载，不是规范文字瑕疵；修复（全量清空 `.sandbox-home`）、`§2.8` 措辞同步与回归钉子均已在当前工作树落地，详见 §0、§8.2。本条不再作为待办。
+* ~~对账 `AGENTS.md §2.8` 与 `deleteArtifactsSafely()`~~ —— **已关闭**：根因是 `prepareSandboxHome()` 的嵌套软链接挂载，不是规范文字瑕疵；修复（全量清空 `.sandbox-home`）、`§2.8` 措辞同步与回归钉子均已随 `feat/agent-trigger-plugin` 分支落地，详见 §0、§8.2。本条不再作为待办。
 
-### 阶段二：桌面宿主中心化调度中枢落地
+### 阶段二：桌面宿主中心化调度中枢落地（✅ 已落地——C5~C8）
 * 持久化 Job Table 的 SQLDelight `.sq` 与迁移 `.sqm` 严格归入 `:app` 领域层（`:agentNode` 物理上不依赖 `:app`，不直接持库），由 `:orchestration`（已依赖 `:app`）承接调度持久化状态，桌面宿主调度引擎通过 `:orchestration` 协调调度；
 * 实现 `DesktopHostScheduler`（Jitter 扰动、最大并发 Worker Pool、missed-fire 补偿判定），Owner 唯一为桌面宿主；
 * 触发事件只**对齐 `StandardSourceEvent` 的字段形状**，不复用现有 `listeners` 同步 fan-out；需新增异步消费链路接入编排流；
 * 触发式派单走独立只读执行通道，**不经过** `CognitiveFlow.classify()`，零副作用由结构保证（§7.1）。
 
-### 阶段三：Manifest Triggers 增量解析与沙箱加固
+### 阶段三：Manifest Triggers 增量解析与沙箱加固（✅ 已落地——C9~C13，五条如实修正见下）
 * 在 `PluginManifest.kt` 中正式增量引入 `triggers: List<PluginTriggerDef>`，按 §5.2 校验 Cron 格式、时区、Jitter 幅度、webhook `sourceId` 与密钥存在性；
 * `targetConvId` 协议化：同步解码白名单与编码器、两端同版本，接上 cardId 反查会话广播与 rev 串行分配；
 * 补 `ProcessAgentDriver` 单行长度上限熔断与 §7.2 的 `filter` 规则链字段；`fileWatch` 触发器若要支持，在本阶段一并定义与验收；
 * 接入操作系统级轻量沙箱（macOS `sandbox-exec` / Linux 命名空间），让 `permissions.network` 从声明式标记变成真实阻断；
 * 补 hook `conversationId` → 派单会话的对齐键，打通 §7.4 的 L3 终审链路并钉端到端测试。
+
+> **落地修正（如实）**：
+> 1. **`targetConvId` 未协议化**——结果卡经既有群卡通道（rev 串行分配 + cardId 反查广播）回投目标**群**会话，协议帧零新增键、两端同版本约束未触发（§0 矩阵「卡片目标会话路由」行）；1:1 目标在注册期拒收（现行 1:1 卡只落本机库不随帧外发）。
+> 2. **`permissions.network` 仍是声明式标记**——OS 沙箱基建（opt-in 探活 + seatbelt/unshare 包装 + 网络 deny）已落地于 `WorktreeSandboxExecutor`，但 per-plugin 域名白名单需要清单 `permissions` 字段做数据源；该字段仍是严格解析拒绝的键。只读触发通道不套 OS 沙箱（它需要网络读，约束是工具白名单 + 只读前导）。
+> 3. **`fileWatch` 仍为候选形态**——解析期显式拒绝（`bad-trigger-type`），不进本阶段。
+> 4. **插件执行体补全**——触发任务的 agentKey 解析到 CLI 驱动走 `executeCliTask`，解析不到再按 agentId 匹配在线插件 leader 走 `executePluginTask`（内置席位与外部插件平铺平等，§4）。
+> 5. **`filter` 规则链已落地**——`PluginTriggerDef.filter`（types / keywords）经 `TriggerAssembly` 装配，未命中事件由 `TriggerVerdict.Skip` 记 `skipped`（§7.2）；清单第 3 条里的 `fileWatch` 按修正 3 明确不做，其余部分已兑现。

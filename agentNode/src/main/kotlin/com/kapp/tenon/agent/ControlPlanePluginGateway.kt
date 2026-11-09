@@ -354,6 +354,8 @@ suspend fun ControlPlane.executePluginTask(
      *  系统前导或 @ 提派 token，当标题就是把 plumbing 摊给用户（真机 divider 出现过
      *  「You are working strictly inside…」），所以**任务路径必须显式传**。 */
     sessionTitle: String? = null,
+    /** Tenon 会话键（提案 §9 阶段三对齐键）：审批卡/回卡按它归会话。 */
+    convId: String? = null,
     /** 任务产物（沙箱 patch 等）的结构化回调：路径只走这里，不进台账帧体。
      *  排在 [onEvent] **前面** —— 既有调用点的尾部 lambda 必须继续绑到 onEvent。 */
     onArtifact: ((path: String, name: String, bytes: Long, mime: String, sha256: String) -> Unit)? = null,
@@ -395,6 +397,9 @@ suspend fun ControlPlane.executePluginTask(
         wsPath = wsPath,
         outbound = true,
     )
+    // 会话对齐键登记（提案 §9 阶段三）：同 executeCliTask——派单侧知道的事实
+    // 必须在这里落账，hook 审批才有会话归属可查。
+    convId?.let { sessions.bindConversation(sessionId, it) }
 
     // 游标按会话续走：台账按游标排序、同游标就地替换 —— 每次派单从 1 重数会把
     // 上一次的事件覆盖掉（测试 PluginDispatchTest.consecutiveDispatches 钉的就是它）。
@@ -499,6 +504,8 @@ suspend fun ControlPlane.executeCliTask(
     /** 会话标题（divider 上显示的那个）。缺省才从 prompt 截取 —— prompt 首行可能是
      *  系统前导或 @ 提派 token，当标题就是把 plumbing 摊给用户，任务路径必须显式传。 */
     sessionTitle: String? = null,
+    /** Tenon 会话键（提案 §9 阶段三对齐键）：审批卡/回卡按它归会话。 */
+    convId: String? = null,
     onArtifact: ((path: String, name: String, bytes: Long, mime: String, sha256: String) -> Unit)? = null,
     onEvent: (eventType: String, cursor: Long, summary: String?, body: String?) -> Unit,
 ): Triple<String?, String, String?> {
@@ -531,6 +538,9 @@ suspend fun ControlPlane.executeCliTask(
         wsPath = wsPath,
         outbound = true,
     )
+    // 会话对齐键登记（提案 §9 阶段三）：hook 审批带真实 sessionId 来时经
+    // conversationOf 反查，审批卡才有会话归属——派单侧知道的事实必须在这里落账。
+    convId?.let { sessions.bindConversation(sessionId, it) }
     val cursor = pluginEventCursors.computeIfAbsent(sessionId) { java.util.concurrent.atomic.AtomicLong(0) }
     var endedInError = false
     driver.executeTask(sessionId, clipped) { event ->

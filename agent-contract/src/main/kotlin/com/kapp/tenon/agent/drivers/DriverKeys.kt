@@ -36,6 +36,14 @@ package com.kapp.tenon.agent.drivers
  */
 object DriverKeys {
 
+    /**
+     * 宿主派单时注入子进程的会话对齐键（提案 §9 阶段三）：hook 脚本读到它就把
+     * `sessionId` 透传给 hook 路由，审批卡因此落在派单会话里，而不是合成的
+     * `agy-*` 池键——hook 的 conversationId 与派单侧 convId 之间从此有一条
+     * 可执行的对齐链路。常量住这里：驱动的 env 注入与 hook 路由的解析共用一份。
+     */
+    const val ENV_HOOK_SESSION_ID = "TENON_HOOK_SESSION_ID"
+
     /** 归一后的 Antigravity 档案键。 */
     const val AGY = "agy"
 

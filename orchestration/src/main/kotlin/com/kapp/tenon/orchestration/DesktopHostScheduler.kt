@@ -88,26 +88,45 @@ class DesktopHostScheduler(
     fun registerCronTasks(definitions: List<CronTaskDef>) {
         val now = nowMillis()
         definitions.forEach { task ->
-            val cron = CronExpression.parse(task.schedule)
-            val zone = zoneOf(task)
-            tasks[task.taskId] = task
-            crons[task.taskId] = cron
-            val existing = store.taskRunStates().firstOrNull { it.taskId == task.taskId }
-            if (existing == null) {
-                store.saveTaskRunState(
-                    TaskRunState(
-                        taskId = task.taskId,
-                        lastRunAt = null,
-                        // 从「现在」起算下一个触发点；错过的历史窗口不追（首装语义）。
-                        nextRunAt = cron.nextAfter(now, zone) ?: (now + 86_400_000L),
-                        jitterOffsetSec = jitterOffsetFor(task.taskId, task.jitterSeconds),
-                        missedRuns = 0,
-                        updatedAt = now,
-                    ),
-                )
-            }
-            // 已有运行态（重启 / 重复注册）：原样保留——这正是持久化台账存在的意义。
+            registerOne(task, now)
         }
+    }
+
+    /**
+     * 以给定清单为准对账：新增/刷新注册，清单里已经没有的任务移除（插件注销后
+     * 不残响——否则注销掉的插件的 cron 任务会一直扫表派发）。运行态台账行保留：
+     * missedRuns 是审计史，不是任务注册表。
+     */
+    fun syncCronTasks(definitions: List<CronTaskDef>) {
+        val now = nowMillis()
+        definitions.forEach { registerOne(it, now) }
+        val keep = definitions.map { it.taskId }.toSet()
+        tasks.keys.filter { it !in keep }.forEach { id ->
+            tasks.remove(id)
+            crons.remove(id)
+        }
+    }
+
+    private fun registerOne(task: CronTaskDef, now: Long) {
+        val cron = CronExpression.parse(task.schedule)
+        val zone = zoneOf(task)
+        tasks[task.taskId] = task
+        crons[task.taskId] = cron
+        val existing = store.taskRunStates().firstOrNull { it.taskId == task.taskId }
+        if (existing == null) {
+            store.saveTaskRunState(
+                TaskRunState(
+                    taskId = task.taskId,
+                    lastRunAt = null,
+                    // 从「现在」起算下一个触发点；错过的历史窗口不追（首装语义）。
+                    nextRunAt = cron.nextAfter(now, zone) ?: (now + 86_400_000L),
+                    jitterOffsetSec = jitterOffsetFor(task.taskId, task.jitterSeconds),
+                    missedRuns = 0,
+                    updatedAt = now,
+                ),
+            )
+        }
+        // 已有运行态（重启 / 重复注册）：原样保留——这正是持久化台账存在的意义。
     }
 
     fun start() {

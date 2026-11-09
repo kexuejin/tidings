@@ -23,7 +23,8 @@ import kotlin.test.assertTrue
  * 桌面宿主调度中枢引擎（提案 §2.2 / §2.3）。
  *
  * 判据全部落在「可观测事实」上：派发计数、运行态台账的推进值、并发峰值——
- * 不赌派发协程的时序（latch + 轮询，与 agentNode 的 Await 同一纪律）。
+ * 不赌派发协程的时序：等到确定信号用 [TestAwait.condition]，证明「没有第二条」
+ * 用 [TestAwait.quiet] 的有界观测窗，全模块共用这一份轮询助手。
  */
 class DesktopHostSchedulerTest {
 
@@ -107,13 +108,9 @@ class DesktopHostSchedulerTest {
 
         kotlinx.coroutines.runBlocking { scheduler.scanTick() }
 
-        val awaited = kotlinx.coroutines.runBlocking {
-            kotlinx.coroutines.withTimeout(10_000) {
-                while (dispatches.get() < 1) kotlinx.coroutines.delay(25)
-                dispatches.get()
-            }
-        }
-        assertEquals(1, awaited, "到期任务应恰好派发一次")
+        TestAwait.condition("到期任务被派发") { dispatches.get() >= 1 }
+        TestAwait.quiet("同一触发窗口不许派发第二次") { dispatches.get() > 1 }
+        assertEquals(1, dispatches.get(), "到期任务应恰好派发一次")
 
         val after = store.taskStates.getValue("mail-assistant/morning")
         assertTrue(after.nextRunAt > now, "nextRunAt 必须推进到未来，否则下一拍会重复派发")
@@ -135,17 +132,8 @@ class DesktopHostSchedulerTest {
 
         kotlinx.coroutines.runBlocking { scheduler.scanTick() }
 
-        kotlinx.coroutines.runBlocking {
-            kotlinx.coroutines.withTimeout(10_000) {
-                while (dispatches.get() < 1) kotlinx.coroutines.delay(25)
-            }
-        }
-        kotlinx.coroutines.runBlocking {
-            kotlinx.coroutines.withTimeout(10_000) {
-                while (dispatches.get() > 1) kotlinx.coroutines.delay(25)
-                kotlinx.coroutines.delay(200)
-            }
-        }
+        TestAwait.condition("RUN_ONCE 补跑发生") { dispatches.get() >= 1 }
+        TestAwait.quiet("严禁并发补发") { dispatches.get() > 1 }
         assertEquals(1, dispatches.get(), "RUN_ONCE 无论错过多少窗口只补跑 1 次（严禁并发补发）")
         val after = store.taskStates.getValue("mail-assistant/morning")
         assertEquals(5, after.missedRuns, "6 个到期窗口补跑 1 个，其余 5 个如实记账")
@@ -164,7 +152,7 @@ class DesktopHostSchedulerTest {
         store.saveTaskRunState(initial.copy(nextRunAt = dueAt, jitterOffsetSec = 0))
 
         kotlinx.coroutines.runBlocking { scheduler.scanTick() }
-        Thread.sleep(200)
+        TestAwait.quiet("SKIP 不该派发") { dispatches.get() > 0 }
         assertEquals(0, dispatches.get(), "SKIP 放弃错过的批次，不派发")
 
         val after = store.taskStates.getValue("mail-assistant/morning")
@@ -184,7 +172,7 @@ class DesktopHostSchedulerTest {
         store.saveTaskRunState(initial.copy(nextRunAt = aligned(now + 3600_000)))
 
         kotlinx.coroutines.runBlocking { scheduler.scanTick() }
-        Thread.sleep(200)
+        TestAwait.quiet("未到期任务不许派发") { dispatches.get() > 0 }
         assertEquals(0, dispatches.get(), "未到期的任务不许派发")
         assertEquals(0, store.taskStates.getValue("mail-assistant/morning").missedRuns)
     }
@@ -196,6 +184,7 @@ class DesktopHostSchedulerTest {
         val peak = AtomicInteger(0)
         val release = CountDownLatch(1)
         val started = CountDownLatch(2)
+        val finished = CountDownLatch(4)
 
         val scheduler = DesktopHostScheduler(
             store, scope,
@@ -205,6 +194,7 @@ class DesktopHostSchedulerTest {
                 started.countDown()
                 release.await(15, TimeUnit.SECONDS)
                 inFlight.decrementAndGet()
+                finished.countDown()
             },
             nowMillis = { now },
             workerPoolSize = 2,
@@ -220,16 +210,13 @@ class DesktopHostSchedulerTest {
         kotlinx.coroutines.runBlocking { scheduler.scanTick() }
         // 4 个任务全部到期，工作池只有 2 个许可：前 2 个先跑起来，其余排队。
         assertTrue(started.await(10, TimeUnit.SECONDS), "至少 2 个并发派发应已开始")
-        Thread.sleep(300)
+        TestAwait.quiet("工作池上限外的任务抢到并发", windowMs = 300) { peak.get() > 2 }
         assertEquals(2, peak.get(), "并发峰值必须等于工作池上限 2（多余任务排队而不是同时跑）")
 
         release.countDown()
-        // 释放后全部排空。
-        kotlinx.coroutines.runBlocking {
-            kotlinx.coroutines.withTimeout(15_000) {
-                while (inFlight.get() > 0) kotlinx.coroutines.delay(25)
-            }
-        }
+        // 4 个任务各跑完一次是确定事件，不用「inFlight 恰好为 0」当探针——
+        // 前两个结束、后两个尚未开始的瞬间它也是 0，会假绿。
+        assertTrue(finished.await(15, TimeUnit.SECONDS), "释放后 4 个任务应全部排空")
     }
 
     @Test
@@ -245,5 +232,30 @@ class DesktopHostSchedulerTest {
 
         val kept = store.taskStates.getValue("mail-assistant/morning")
         assertEquals(first, kept, "已有运行态不许被注册覆盖——missed-fire 判据靠它跨重启存活")
+    }
+
+    /** 对账式同步（C10）：清单里已消失的任务不再扫描（插件注销后不残响）。 */
+    @Test
+    fun syncCronTasksRemovesStaleDefinitions() {
+        val store = InMemorySchedulerStore()
+        val dispatches = AtomicInteger(0)
+        val scheduler = DesktopHostScheduler(store, scope, executeCronTask = { dispatches.incrementAndGet() }, nowMillis = { now })
+
+        val a = task(taskId = "mail-assistant/a")
+        val b = task(taskId = "mail-assistant/b")
+        scheduler.registerCronTasks(listOf(a, b))
+        listOf(a, b).forEach { def ->
+            val state = store.taskStates.getValue(def.taskId)
+            store.saveTaskRunState(state.copy(nextRunAt = aligned(now - 60_000)))
+        }
+
+        // 插件注销了任务 b：对账后只剩 a。
+        scheduler.syncCronTasks(listOf(a))
+        kotlinx.coroutines.runBlocking { scheduler.scanTick() }
+
+        TestAwait.condition("保留的任务 a 被派发") { dispatches.get() >= 1 }
+        TestAwait.quiet("被移除的任务 b 不许残响") { dispatches.get() > 1 }
+        assertEquals(1, dispatches.get(), "被移除的任务 b 不许再派发（残响 = 注销失效）")
+        assertTrue(store.taskStates.containsKey("mail-assistant/b"), "运行态台账行保留——missedRuns 是审计史")
     }
 }

@@ -91,7 +91,11 @@ class ProcessAgentDriver(
 
         val workDir = resolveWorkDir(wsPath)
         val resolvedCommand = resolveCommand(prompt, sessionId, wsPath)
-        val processEnv = buildEnvironment()
+        // 会话对齐键（提案 §9 阶段三）：宿主派起的 CLI 在 hook 脚本里能如实报出
+        // 自己的 sessionId——审批路由据此把审批卡归到派单会话。
+        val processEnv = buildEnvironment().toMutableMap().apply {
+            put(DriverKeys.ENV_HOOK_SESSION_ID, sessionId)
+        }
 
         val process = try {
             spawner(resolvedCommand, workDir, processEnv)
@@ -121,6 +125,17 @@ class ProcessAgentDriver(
         try {
             BufferedReader(InputStreamReader(process.inputStream, StandardCharsets.UTF_8)).useLines { lines ->
                 for (line in lines) {
+                    // 单行熔断（§8.2 传输防火墙）：超限即响亮失败并停止消费——
+                    // readLine 对行长零限制，1 GB 的行会整行进堆（OOM 无日志）。
+                    if (line.length > DriverLineLimits.MAX_LINE_CHARS) {
+                        onEvent(
+                            DriverEvent.Error(
+                                "driver \"" + driverId + "\" emitted a line over " +
+                                    DriverLineLimits.MAX_LINE_CHARS + " chars; circuit-broken (process will be reaped)",
+                            ),
+                        )
+                        break
+                    }
                     val event = parseLine(line)
                     if (event != null) {
                         if (event is DriverEvent.Finished) {

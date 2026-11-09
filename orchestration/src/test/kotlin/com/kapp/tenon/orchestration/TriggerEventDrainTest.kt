@@ -84,16 +84,6 @@ class TriggerEventDrainTest {
         updatedAt = createdAt,
     )
 
-    /** 阻塞版轮询（JUnit 是阻塞式）：等到 probe >= size 或超时抛 AssertionError。 */
-    private fun await(size: Int, probe: () -> Int, what: String) {
-        val deadline = System.nanoTime() + 10_000_000_000L
-        while (System.nanoTime() < deadline) {
-            if (probe() >= size) return
-            Thread.sleep(25)
-        }
-        throw AssertionError("10000ms 内没有等到：$what")
-    }
-
     @Test
     fun ingestPersistsAndHandlerConsumesToDone() {
         val store = InMemorySchedulerStore()
@@ -106,7 +96,7 @@ class TriggerEventDrainTest {
         drain.start()
         try {
             assertTrue(drain.ingest(event("evt-1")), "首次入队应成功")
-            await(1, { handled.size }, "handler 恰好消费一次")
+            TestAwait.condition("handler 恰好消费一次") { handled.size >= 1 }
             assertEquals(
                 TriggerEventStates.DONE,
                 store.rows.getValue("evt-1").state,
@@ -130,14 +120,14 @@ class TriggerEventDrainTest {
         try {
             assertTrue(drain.ingest(event("evt-1")))
             assertFalse(drain.ingest(event("evt-1")), "同 id 重放必须被持久幂等键吸收")
-            await(1, { handled.size }, "handler 消费")
-            kotlinx.coroutines.runBlocking {
-                kotlinx.coroutines.withTimeout(2_000) {
-                    while (handled.size > 1) kotlinx.coroutines.delay(25)
-                    kotlinx.coroutines.delay(200)
-                }
-            }
-            assertEquals(1, handled.size, "重放投递不许二次唤醒执行通道")
+            TestAwait.condition("handler 消费") { handled.size >= 1 }
+            // 观测窗用「确定会发生的事件」收口，不用恒真 probe 也不用固定 delay 赌同步：
+            // 再入队一个不同 id 的事件，等它被同一条消费循环处理完。重放若被错误分发，
+            // 它必然与 evt-2 抢同一批 pending，等 evt-2 落地时已无处可藏。
+            assertTrue(drain.ingest(event("evt-2")), "不同 id 的事件应正常入队")
+            TestAwait.condition("观测窗收口：第二个事件被消费") { handled.contains("evt-2") }
+            assertEquals(1, handled.count { it == "evt-1" }, "重放投递不许二次唤醒执行通道")
+            assertEquals(2, handled.size, "两个不同 id 各消费一次，不多不少")
         } finally {
             drain.stop()
         }
@@ -151,13 +141,7 @@ class TriggerEventDrainTest {
         drain.start()
         try {
             drain.ingest(event("evt-err"))
-            kotlinx.coroutines.runBlocking {
-                kotlinx.coroutines.withTimeout(10_000) {
-                    while (store.rows.getValue("evt-err").state != TriggerEventStates.FAILED) {
-                        kotlinx.coroutines.delay(25)
-                    }
-                }
-            }
+            TestAwait.condition("失败翻账") { store.rows.getValue("evt-err").state == TriggerEventStates.FAILED }
             val row = store.rows.getValue("evt-err")
             assertEquals(TriggerEventStates.FAILED, row.state)
             assertEquals("no executor for agent key", row.error, "失败原因必须落账——失败可见性")
@@ -175,13 +159,7 @@ class TriggerEventDrainTest {
         drain.start()
         try {
             drain.ingest(event("evt-throw"))
-            kotlinx.coroutines.runBlocking {
-                kotlinx.coroutines.withTimeout(10_000) {
-                    while (store.rows.getValue("evt-throw").state != TriggerEventStates.FAILED) {
-                        kotlinx.coroutines.delay(25)
-                    }
-                }
-            }
+            TestAwait.condition("异常翻账") { store.rows.getValue("evt-throw").state == TriggerEventStates.FAILED }
             assertTrue(
                 store.rows.getValue("evt-throw").error!!.contains("boom"),
                 "异常信息应进 error 列：" + store.rows.getValue("evt-throw").error,
@@ -208,7 +186,7 @@ class TriggerEventDrainTest {
         }
         drain.start()
         try {
-            await(2, { handled.size }, "两个遗留事件按 created_at 顺序恢复消费")
+            TestAwait.condition("两个遗留事件恢复消费") { handled.size >= 2 }
             assertEquals(listOf("evt-left-1", "evt-left-2"), handled, "先进先出")
         } finally {
             drain.stop()
@@ -223,13 +201,7 @@ class TriggerEventDrainTest {
         drain.start()
         try {
             drain.ingest(event("evt-orphan"))
-            kotlinx.coroutines.runBlocking {
-                kotlinx.coroutines.withTimeout(10_000) {
-                    while (store.rows.getValue("evt-orphan").state != TriggerEventStates.FAILED) {
-                        kotlinx.coroutines.delay(25)
-                    }
-                }
-            }
+            TestAwait.condition("无 handler 如实翻失败") { store.rows.getValue("evt-orphan").state == TriggerEventStates.FAILED }
             assertTrue(
                 store.rows.getValue("evt-orphan").error!!.contains("no trigger handler"),
                 "无 handler 必须如实翻失败而不是无声吞事件：" + store.rows.getValue("evt-orphan").error,

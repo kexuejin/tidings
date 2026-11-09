@@ -4,6 +4,9 @@ package com.kapp.tenon.orchestration
 
 import com.kapp.tenon.agent.ControlPlane
 import com.kapp.tenon.agent.executeCliTask
+import com.kapp.tenon.agent.executePluginTask
+import com.kapp.tenon.agent.pluginForAgent
+import com.kapp.tenon.agent.resolveCliDriver
 import com.kapp.tenon.core.protocol.ConvId
 import com.kapp.tenon.core.protocol.Limits
 import com.kapp.tenon.domain.TriggerEventRecord
@@ -44,21 +47,46 @@ class TriggerExecutor(
     private val planeProvider: () -> ControlPlane?,
 ) {
 
-    /** CLI 任务执行出口：生产 = plane.executeCliTask（wsPath=null）；测试注入 fake。 */
+    /**
+     * 任务执行出口：生产 = 先解析 CLI 驱动（`executeCliTask`），解析不到再按
+     * agentId 匹配插件 leader（`pluginForAgent` → `executePluginTask`，经插件的
+     * HTTP 桥）——内置席位与外部插件两条执行体平铺平等（提案 §4 统一 Tool Schema）；
+     * 都解析不到如实报错。测试注入 fake。两条路径都 `wsPath = null`（零 worktree）。
+     */
     internal var cliRunner: suspend (CliRunRequest) -> CliRunResult = { request ->
         val plane = planeProvider()
         if (plane == null) {
             CliRunResult(sessionId = null, status = "error", error = "control plane not attached")
-        } else {
+        } else if (plane.resolveCliDriver(request.agentKey) != null) {
             val (sessionId, status, error) = plane.executeCliTask(
                 agentKey = request.agentKey,
                 prompt = request.prompt,
                 wsPath = null,
                 requestedSessionId = null,
                 sessionTitle = request.title,
+                convId = request.convId,
                 onEvent = { eventType, _, summary, _ -> request.onEvent(eventType, summary) },
             )
             CliRunResult(sessionId, status, error)
+        } else {
+            val entry = plane.pluginForAgent(request.agentKey)
+            if (entry == null) {
+                CliRunResult(
+                    sessionId = null, status = "error",
+                    error = "no executor for \"" + request.agentKey + "\" (no cli driver, no online plugin leader)",
+                )
+            } else {
+                val (sessionId, status, error) = plane.executePluginTask(
+                    entry = entry,
+                    rawPrompt = request.prompt,
+                    wsPath = null,
+                    requestedSessionId = null,
+                    sessionTitle = request.title,
+                    convId = request.convId,
+                    onEvent = { eventType, _, summary, _ -> request.onEvent(eventType, summary) },
+                )
+                CliRunResult(sessionId, status, error)
+            }
         }
     }
 
@@ -66,6 +94,8 @@ class TriggerExecutor(
         val agentKey: String,
         val prompt: String,
         val title: String,
+        /** Tenon 会话键（§9 阶段三对齐键）：审批卡按它归会话。 */
+        val convId: String?,
         /** (eventType, toolSummary)；消费方在此做只读白名单监控。 */
         val onEvent: (eventType: String, summary: String?) -> Unit,
     )
@@ -91,6 +121,8 @@ class TriggerExecutor(
         sourceId: String?,
         event: TriggerEventRecord?,
         targetGroupId: String?,
+        /** 回投会话的 Tenon 会话键（对齐键）：审批卡/回卡按它归位。 */
+        convId: String? = null,
     ): Outcome {
         val prompt = TriggerPrompts.assemble(instruction, sourceId, event)
         val violated = AtomicReference<String?>(null)
@@ -99,6 +131,7 @@ class TriggerExecutor(
                 agentKey = agentKey,
                 prompt = prompt,
                 title = title,
+                convId = convId,
                 onEvent = { eventType, summary ->
                     // 只读白名单拦截（§7.1 第 3 条约束）：非白名单工具即越界。
                     // 不阻止已启动的那一次调用（与讨论流同口径），但任务立刻翻失败。

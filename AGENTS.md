@@ -226,16 +226,24 @@ python3 tools/check-design-palette.py --css-vars
 
 ### 2.8 沙箱与文件系统：符号链接与递归删除绝对隔离（血泪禁令）
 
-**规则**：凡是涉及沙箱产物或临时目录清理，**严禁直接调用标准库的 `File.deleteRecursively()`**。
+**规则**：凡是涉及沙箱产物或临时目录清理，**严禁在未清空 `.sandbox-home` 挂载前直接调用标准库的 `File.deleteRecursively()`**。
 
 - **致命成因**：Kotlin 标准库的 `File.deleteRecursively()` 内部通过 `listFiles()` 遍历，
   遇到目录符号链接（Symlink）时会把软链接当普通目录递归下钻，**逐个 unlink 目标目录里的真实文件**，
   最后才删除软链接本身。沙箱为了让 CLI Agent 读凭据把真实 `$HOME`（`.dsh`、`.claude`、`.codex`、
   `.gemini`、`.npm`）以软链接挂进 `.sandbox-home`，任务中止或超时清理时若直接递归删除，会瞬间
   **掏空宿主机机主的真实 HOME 目录**（2026-11-06 事故：58ms 内 298 次 unlink + 189 次 rmdir 全部落在真实用户目录）。
-- **防御手段**：所有产物清理必须走 `deleteArtifactsSafely()` —— 先用 `Files.isSymbolicLink()` 
-  逐个摘掉（`Files.deleteIfExists()`）软链接本体，确保绝不跟随链接下钻，再清理普通文件；
-  同时严禁任何递归删除操作的物理目标覆盖 `$HOME` 真实根。
+- **防御手段**：所有产物清理必须走 `WorktreeSandboxExecutor.deleteArtifactsSafely()` ——
+  用**不传 `FOLLOW_LINKS`** 的 `Files.walkFileTree()` 遍历 `.sandbox-home`，在 `visitFile` /
+  `postVisitDirectory` 中对每个条目调用 `Files.deleteIfExists()`，把链接本体与普通文件一并清空；
+  确认挂载已清空后，才对整个 `artifactsDir` 调 `deleteRecursively()`。
+- **嵌套链接陷阱（别退回旧写法）**：早期实现只扫 `.sandbox-home` 的**顶层** `listFiles()` +
+  `Files.isSymbolicLink()` 逐个摘链接；`prepareSandboxHome()` 后来新增了 `.config/opencode` 这类
+  **二级目录下的软链接挂载**，顶层扫描抓不到，`deleteRecursively()` 会沿它下钻到真实 HOME。
+  任何「只摘顶层链接」的写法都是缺陷，别用 `isSymbolicLink()` 白名单替代全量清空。
+  回归钉子：`WorktreeSandboxExecutorTest.deleteArtifactsSafelyDoesNotFollowSymlinksIntoHostHome()`
+  （同时覆盖顶层 `.dsh` 与嵌套 `.config/opencode` 两种挂载）。
+- 严禁任何递归删除操作的物理目标覆盖 `$HOME` 真实根。
 
 ---
 

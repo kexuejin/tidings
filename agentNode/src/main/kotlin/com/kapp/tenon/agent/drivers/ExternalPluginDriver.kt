@@ -119,6 +119,16 @@ class ExternalPluginDriver(
                     conn.inputStream.bufferedReader(StandardCharsets.UTF_8).useLines { lines ->
                         for (line in lines) {
                             if (line.isBlank()) continue
+                            // 单行熔断（§8.2）：插件失控输出超长行时响亮失败，不整行进堆。
+                            if (line.length > DriverLineLimits.MAX_LINE_CHARS) {
+                                onEvent(
+                                    DriverEvent.Error(
+                                        "plugin \"" + driverId + "\" emitted a line over " +
+                                            DriverLineLimits.MAX_LINE_CHARS + " chars; circuit-broken",
+                                    ),
+                                )
+                                break
+                            }
                             onEvent(parseEventLine(line))
                         }
                     }

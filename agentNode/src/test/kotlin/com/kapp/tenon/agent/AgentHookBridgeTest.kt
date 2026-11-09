@@ -190,6 +190,46 @@ class AgentHookBridgeTest {
         assertTrue(desktopFrames.any { it["type"]?.jsonPrimitive?.content == "agent-approval" }, "审批卡推到了手机")
     }
 
+    /** 对齐键（提案 §9 阶段三）：hook 带真实 sessionId 时，审批帧挂在派单会话上并回带 convId。 */
+    @Test
+    fun hookApprovalHonorsInjectedSessionIdAndReportsConvId() {
+        // 派单侧绑定（executeCliTask/executePluginTask 落账的形状）。
+        registry.bindConversation("sess-real-1", "group:g1")
+        Thread {
+            for (i in 0 until 50) {
+                val frame = desktopFrames.firstOrNull {
+                    it["type"]?.jsonPrimitive?.content == "agent-approval"
+                }
+                if (frame != null) {
+                    val payload = frame["payload"]!!.toJsonObject
+                    if (payload["sessionId"]!!.jsonPrimitive.content == "sess-real-1") {
+                        registry.recordApproval(
+                            nodeId = desktop.profile.nodeId, sessionId = "sess-real-1",
+                            approvalId = payload["approvalId"]!!.jsonPrimitive.content,
+                            expiresAt = Long.MAX_VALUE / 2, status = "approved", outbound = false,
+                        )
+                    }
+                    return@Thread
+                }
+                Thread.sleep(100)
+            }
+        }.start()
+        val (code, body) = post(
+            "/v1/agent/hook/approval",
+            """{"tool":"git push","summary":"对齐键透传","conversationId":"c-9","sessionId":"sess-real-1","timeoutMs":8000}""",
+        )
+        assertEquals(200, code, body)
+        assertEquals("allow", field(obj(body), "decision"), body)
+        assertEquals("group:g1", field(obj(body), "convId"), "响应回带派单侧绑定的会话键：" + body)
+        // 审批帧的 sessionId 是真实会话——不是 agy-c-9 合成池键（手机才能归位审批卡）。
+        val approvalFrame = desktopFrames.first { it["type"]?.jsonPrimitive?.content == "agent-approval" }
+        assertEquals(
+            "sess-real-1",
+            approvalFrame["payload"]!!.toJsonObject["sessionId"]!!.jsonPrimitive.content,
+            "审批帧必须带派单会话（对齐键的意义就在这）",
+        )
+    }
+
     @Test
     fun preToolUseTimesOutToDenyFailClosed() {
         val (code, body) = post(
@@ -298,6 +338,34 @@ class AgentHookBridgeTest {
             "no-such-agent", "x", null, null,
         ) { _, _, _, _ -> }
         assertTrue(sid2 == null && status2 == "error", "未知 agent 如实报错：$error2")
+    }
+
+    /** 派单侧绑定（§9 阶段三）：executeCliTask 带 convId 时，sessionId → 会话键入账。 */
+    @Test
+    fun cliTaskBindsConversationForApprovalAlignment() = kotlinx.coroutines.runBlocking {
+        val cliBin = java.nio.file.Files.createTempDirectory("align-cli").toFile().resolve("agy")
+        cliBin.writeText("#!/bin/sh\nexit 0\n")
+        kotlin.test.assertTrue(cliBin.setExecutable(true))
+        val cliRegistry = com.kapp.tenon.agent.drivers.DriverRegistry().also { r ->
+            r.register(com.kapp.tenon.agent.drivers.CliSubprocessDriver(
+                driverId = "agy-cli", displayName = "Antigravity (agy CLI)",
+                cliPath = cliBin.absolutePath, argSpec = { listOf(it) },
+            ))
+        }
+        val planeWithCli = ControlPlane(
+            agent, httpPort = 0, token = "", sessions = registry,
+            loadProbe = { null }, cliDrivers = cliRegistry,
+        )
+        val (sessionId, status, error) = planeWithCli.executeCliTask(
+            "antigravity", "alignment probe", null, null,
+            convId = "group:g1",
+        ) { _, _, _, _ -> }
+        assertEquals("finished", status, error)
+        assertEquals(
+            "group:g1",
+            registry.conversationOf(sessionId!!),
+            "派单侧的会话键必须入账——hook 审批按它归位",
+        )
     }
 
     @Test

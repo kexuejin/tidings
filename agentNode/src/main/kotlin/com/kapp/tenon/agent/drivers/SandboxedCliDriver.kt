@@ -155,7 +155,7 @@ class SandboxedCliDriver(
                 taskId = taskId,
                 hostRepo = wsPath,
                 command = listOf(cliPath) + attemptArgs,
-                env = envOverrides,
+                env = envOverrides + mapOf(DriverKeys.ENV_HOOK_SESSION_ID to sessionId),
                 onLine = { line ->
                     outputTail.append(line).append('\n')
                     if (resumedCliSessionId == null) {

@@ -359,7 +359,17 @@ class SourceWebhookRouteTest {
         val ackMillis = (System.nanoTime() - t0) / 1_000_000
 
         assertIs<WebhookResult.Accepted>(result)
-        assertTrue(started.getCount() > 0 || ackMillis < 10_000, "ACK 不应等待 listener 完成")
+        // 旧断言是 `started.getCount() > 0 || ackMillis < 10_000` —— 恒真：
+        // 只要 ACK 在 10 秒内返回（任何机器都成立），后半句就成立。
+        //
+        // 真正的判据必须能**区分**同步与异步：listener 被 latch 挡住最长 10 秒，
+        // 如果 ACK 等它跑完，这次调用就会耗掉约 10 秒。所以阈值取 5 秒 ——
+        // 它把「解耦」和「同步」分开，而不是给一个谁都能过的上界。
+        assertTrue(
+            ackMillis < 5_000,
+            "ACK 不应等待 listener 完成（实测 " + ackMillis + "ms；listener 会阻塞 10s，" +
+                "同步实现必然接近 10s）",
+        )
         // 确定性判据：listener 尚未跑完时 ACK 已经到手（blocked latch 保证派发未完成）。
         Await.condition("派发已开始（listener 已被调起）", timeoutMs = 10_000L) { started.count == 0L }
         assertTrue(release.count > 0, "ACK 返回时 listener 仍在执行中——两者确已解耦")
@@ -399,5 +409,66 @@ class SourceWebhookRouteTest {
             registry.handleWebhook("mail", headersOf(bodyOf("evt-4")), bodyOf("evt-4")) is WebhookResult.Accepted
         }
         registry.dispose()
+    }
+
+    /**
+     * 幂等键必须按 sourceId 分域：两个不同的源各自投递 id 相同的两条事件，都要被受理。
+     *
+     * 旧实现只拿 `event.id` 当键，于是第二个源的事件被判成「第一个源的重放」，
+     * 直接 `200 duplicate=true` 掉 —— 一个源静默吞掉另一个源的事件，而且回的是
+     * 成功码，发送方完全看不出异常。这条用例在旧实现下必然红。
+     */
+    @Test
+    fun idempotencyIsScopedPerSourceNotJustPerEventId() {
+        val registry = SourceWebhookRegistry()
+        registry.registerSecret("mail", testSecret)
+        registry.registerSecret("calendar", "another-secret-9876")
+
+        val delivered = java.util.concurrent.CopyOnWriteArrayList<String>()
+        registry.addListener { sourceId, event -> delivered += sourceId + "/" + event.id }
+
+        val body = """{"id":"evt-shared","type":"shared.event"}""".toByteArray(Charsets.UTF_8)
+        val mailHeaders = mapOf("x-webhook-signature" to listOf(computeHmacSha256(body, testSecret)))
+        val calHeaders = mapOf("x-webhook-signature" to listOf(computeHmacSha256(body, "another-secret-9876")))
+
+        val first = registry.handleWebhook("mail", mailHeaders, body)
+        assertIs<WebhookResult.Accepted>(first)
+        assertFalse(first.duplicate, "第一次投递不是重放")
+
+        val second = registry.handleWebhook("calendar", calHeaders, body)
+        assertIs<WebhookResult.Accepted>(second)
+        assertFalse(
+            second.duplicate,
+            "同 id 但不同 source 的事件不是重放——旧实现会在这里返回 duplicate=true，" +
+                "等于 calendar 源的事件被静默吞掉",
+        )
+
+        Await.condition("两个源的事件都派发到了 listener", timeoutMs = 10_000L) { delivered.size >= 2 }
+        assertEquals(
+            setOf("mail/evt-shared", "calendar/evt-shared"),
+            delivered.toSet(),
+            "两个源的事件都必须派发，实际：" + delivered,
+        )
+        registry.dispose()
+    }
+
+    /**
+     * 请求体读取必须有界：`readBytes()` 会把整段拉进堆再判断，判出来时内存已经付出去了。
+     *
+     * 直接测 [readBoundedBody]：用 4 KiB 的流 + 1 KiB 上限，确认返回 null 而不是
+     * 「先收下 4 KiB 再拒」。
+     */
+    @Test
+    fun readBoundedBodyRejectsOversizedInput() {
+        val payload = ByteArray(4096) { (it % 251).toByte() }
+        assertEquals(
+            null,
+            readBoundedBody(payload.inputStream(), 1024),
+            "超限必须返回 null（调用方回 413），不是截断后当成合法 body",
+        )
+        assertTrue(
+            readBoundedBody(payload.inputStream(), 4096)!!.contentEquals(payload),
+            "刚好等于上限要原样放行（判据是 > limit，不是 >= limit）",
+        )
     }
 }

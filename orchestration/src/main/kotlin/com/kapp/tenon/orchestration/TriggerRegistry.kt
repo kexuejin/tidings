@@ -43,8 +43,26 @@ data class TriggerEventRoute(
 class TriggerRegistry {
     private val routes = ConcurrentHashMap<String, TriggerEventRoute>()
 
-    fun register(route: TriggerEventRoute) {
-        routes[route.sourceId.trim().lowercase()] = route
+    /**
+     * 注册一条路由。返回 false = 这个 sourceId 已经被**另一条**路由占用，本次未注册。
+     *
+     * 旧实现是 `routes[key] = route`：两个插件声明同一个 sourceId 时，后者**静默**
+     * 覆盖前者，谁赢取决于清单遍历顺序，而且没有任何日志。webhook 事件于是被派给
+     * 一个插件没想到的执行体 —— 症状是「我配的触发器有时不生效」，查不出来。
+     *
+     * 现在先到者胜、冲突有日志（调用方负责记）。同一对象重复注册仍然算成功：
+     * 对账式重建每拍都会重放同一批路由，那不是冲突。
+     */
+    fun register(route: TriggerEventRoute): Boolean {
+        val key = route.sourceId.trim().lowercase()
+        val existing = routes.putIfAbsent(key, route)
+        if (existing == null) return true
+        return existing == route
+    }
+
+    /** 整表清空：对账式重建用（插件注销后路由不残响）。 */
+    fun clear() {
+        routes.clear()
     }
 
     fun resolve(sourceId: String): TriggerEventRoute? =
