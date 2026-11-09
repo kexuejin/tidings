@@ -475,9 +475,6 @@ expect fun createMessageStore(platform: AppPlatform): MessageStore
 /** 平台壳提供 Agent 落盘实现；预览与单元测试用 [InMemoryAgentStore]。 */
 expect fun createAgentStore(platform: AppPlatform): AgentStore
 
-/** 调度中枢台账（Job Table）；与消息/Agent 库共用同一条驱动（按数据目录缓存）。 */
-expect fun createSchedulerStore(platform: AppPlatform): SchedulerStore
-
 /**
  * 从落盘的 JSON 里恢复一条屏幕协助记录。返回 null = 这条记录不可用（按纯文本渲染）。
  *

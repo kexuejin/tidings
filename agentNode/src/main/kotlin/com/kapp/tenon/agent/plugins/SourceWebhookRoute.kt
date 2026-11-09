@@ -4,15 +4,7 @@ package com.kapp.tenon.agent.plugins
 
 import com.kapp.tenon.agent.ControlPlane
 import com.kapp.tenon.agent.source.StandardSourceEvent
-import com.kapp.tenon.core.crypto.sha256Hex
 import com.sun.net.httpserver.HttpExchange
-import kotlinx.coroutines.CoroutineScope
-import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.SupervisorJob
-import kotlinx.coroutines.cancel
-import kotlinx.coroutines.channels.Channel
-import kotlinx.coroutines.launch
-import kotlinx.coroutines.sync.Semaphore
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.buildJsonObject
@@ -21,16 +13,13 @@ import kotlinx.serialization.json.jsonObject
 import kotlinx.serialization.json.jsonPrimitive
 import kotlinx.serialization.json.put
 import java.security.MessageDigest
+import java.util.UUID
 import java.util.concurrent.ConcurrentHashMap
 import javax.crypto.Mac
 import javax.crypto.spec.SecretKeySpec
 
 sealed interface WebhookResult {
-    /**
-     * @param duplicate 同一 event.id 的重放投递（网络重试等）。仍是 200——让发送方
-     *   停止重试；事件不再分发给 listener。
-     */
-    data class Accepted(val event: StandardSourceEvent, val duplicate: Boolean = false) : WebhookResult
+    data class Accepted(val event: StandardSourceEvent) : WebhookResult
     data class Rejected(val statusCode: Int, val errorCode: String, val message: String) : WebhookResult
 }
 
@@ -79,13 +68,12 @@ object SourceEventNormalizer {
     }
 
     fun normalizeGitHub(
-        /** 投递 id；调用方保证非空——缺头的确定性兜底（body 哈希）在 handleWebhook 一处做。 */
-        deliveryId: String,
+        deliveryId: String?,
         eventHeader: String?,
         payload: JsonObject,
     ): StandardSourceEvent {
         val eventType = eventHeader?.trim()?.ifBlank { null } ?: "github.unknown"
-        val id = deliveryId.trim().ifBlank { "gh-unknown" }
+        val id = deliveryId?.trim()?.ifBlank { null } ?: ("gh-" + UUID.randomUUID().toString())
 
         val repoName = payload["repository"]?.jsonObject?.get("full_name")?.jsonPrimitive?.contentOrNull.orEmpty()
 
@@ -170,140 +158,23 @@ object SourceEventNormalizer {
     }
 }
 
-class SourceWebhookRegistry(
-    /** 有界队列容量：溢出即 503，让发送方的重试机制当背压用。 */
-    val queueCapacity: Int = 64,
-    /** 派发并发上限（提案 §2.3 工作池：桌面默认 2~4）。 */
-    val dispatchParallelism: Int = 2,
-    /** 时钟注入：幂等表 TTL 的测试钉子。 */
-    private val nowMillis: () -> Long = System::currentTimeMillis,
-) {
+class SourceWebhookRegistry {
 
     private val secrets = ConcurrentHashMap<String, String>()
-    // listener 带上 sourceId：路由解析（哪个触发器要接这条事件）需要它，而
-    // StandardSourceEvent 的 6 字段权威模型不携带投递来源——在 fan-out 处把
-    // 事实来源一起交出去，比让消费方猜（或给事件模型加字段）都诚实。
-    private val listeners = java.util.concurrent.CopyOnWriteArrayList<(sourceId: String, StandardSourceEvent) -> Unit>()
+    private val listeners = java.util.concurrent.CopyOnWriteArrayList<(StandardSourceEvent) -> Unit>()
 
-    /**
-     * event.id → 首次受理时刻。网络重试是常态：发送方等不到 ACK 会重发同一投递，
-     * 没有这张表，一次外部事件会唤醒宿主两次。内存表是阶段二持久化 Job Table
-     * 落地前的过渡（届时 event_id 主键就是持久幂等键）。
-     */
-    private val seenEvents = ConcurrentHashMap<String, Long>()
-
-    // ---- 异步解耦（提案 §6.1 待建项）：验签后立即 ACK，事件先入有界队列再派发 ----
-    // 队列与消费循环由注册表自带（ControlPlane 的 dispatchScope 初始化晚于本属性，
-    // 注入会导致构造顺序倒置）；dispose() 由宿主 stop() 调用收口。
-    private val dispatchScope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
-    private val dispatchChannel = Channel<QueuedEvent>(queueCapacity)
-    private val dispatchPermits = Semaphore(dispatchParallelism)
-
-    init {
-        dispatchScope.launch {
-            while (true) {
-                // 先占配额再取事件：取出的那一刻起事件要么在派发、要么还在通道里，
-                // 背压严格等于 queueCapacity——不能让「取出待派」绕开有界队列。
-                dispatchPermits.acquire()
-                val queued = dispatchChannel.receive()
-                dispatchScope.launch {
-                    try {
-                        dispatchToListeners(queued.sourceId, queued.event)
-                    } finally {
-                        dispatchPermits.release()
-                    }
-                }
-            }
-        }
-    }
-
-    /** 停机收口：关闭队列并取消消费循环。宿主 stop() 必须调用。 */
-    fun dispose() {
-        dispatchChannel.close()
-        dispatchScope.cancel()
-    }
-
-    /** 队列元素：sourceId 是投递事实的一部分，跟事件一起入队。 */
-    private data class QueuedEvent(val sourceId: String, val event: StandardSourceEvent)
-
-    private fun dispatchToListeners(sourceId: String, event: StandardSourceEvent) {
-        listeners.forEach { runCatching { it(sourceId, event) } }
-    }
-
-    /**
-     * 注册 sourceId → secret 的唯一显式入口。空白密钥在配置这一刻就拒：
-     * 收下空白密钥等于让 fail-closed 门空转——后面每条请求都会以
-     * invalid-signature 退回，而操作者还以为配置成功了。
-     */
     fun registerSecret(sourceId: String, secret: String) {
         val key = sourceId.trim().lowercase()
-        val trimmed = secret.trim()
-        require(key.isNotEmpty()) { "sourceId must not be blank" }
-        require(trimmed.isNotEmpty()) { "secret for \"$key\" must not be blank" }
-        secrets[key] = trimmed
+        secrets[key] = secret.trim()
     }
 
-    /**
-     * 密钥解析：显式注册表优先，环境变量 `TENON_WEBHOOK_SECRET_<SOURCEID>` 兜底
-     * （`-` 归一为 `_` 后大写）。环境变量设成空白视同未配置——半配置状态必须
-     * 落到与「未配置」同一个 fail-closed 出口，不能装作配好了。
-     */
     fun getSecret(sourceId: String): String? {
         val key = sourceId.trim().lowercase()
-        return secrets[key]
-            ?: System.getenv("TENON_WEBHOOK_SECRET_${key.replace('-', '_').uppercase()}")?.takeIf { it.isNotBlank() }
+        return secrets[key] ?: System.getenv("TENON_WEBHOOK_SECRET_${key.replace('-', '_').uppercase()}")
     }
 
-    fun addListener(listener: (sourceId: String, event: StandardSourceEvent) -> Unit) {
+    fun addListener(listener: (StandardSourceEvent) -> Unit) {
         listeners.add(listener)
-    }
-
-    /** 幂等表条目存活时长：覆盖主流 webhook 提供方的重试窗口（GitHub 最长约数小时，此处取保守下限）。 */
-    private companion object {
-        val SEEN_TTL_MS: Long = 15 * 60_000L
-        const val SEEN_MAX_ENTRIES: Int = 4096
-    }
-
-    /**
-     * 幂等表的键：**sourceId + event.id**。
-     *
-     * 旧实现只用 `event.id`：两个不同的 source 各自投递 id 为 `evt-1` 的事件时，
-     * 第二条会被判成「第一条的重放」直接 ACK 掉 —— 一个源静默吞掉另一个源的事件，
-     * 而且回的是 `200 duplicate=true`，发送方完全看不出异常。sourceId 是路由的
-     * 一部分，不是事件内容的一部分，必须进键。
-     */
-    private fun idempotencyKey(sourceId: String, eventId: String): String =
-        sourceId.trim().lowercase() + "\u0000" + eventId
-
-    /**
-     * 原子记账：返回 true = 首次受理（应分发），false = 重放投递（不再分发）。
-     * 记账发生在受理判定**之前**——调用方若因容量拒收本条，必须调用
-     * [forgetEvent] 把这笔账撤掉，否则合法重试会被这张表吞掉。
-     * 命中旧账时即时判 TTL 过期（清扫只防御容量，不承担过期语义）。
-     */
-    private fun rememberEvent(key: String): Boolean {
-        if (seenEvents.size >= SEEN_MAX_ENTRIES) sweepSeenEvents()
-        val now = nowMillis()
-        val existing = seenEvents.putIfAbsent(key, now) ?: return true
-        if (now - existing > SEEN_TTL_MS) {
-            return seenEvents.remove(key, existing) && seenEvents.putIfAbsent(key, now) == null
-        }
-        return false
-    }
-
-    /** 撤账：事件未能真正受理（队列满等）时调用，把重试权还给发送方。 */
-    private fun forgetEvent(key: String) {
-        seenEvents.remove(key)
-    }
-
-    private fun sweepSeenEvents() {
-        val cutoff = nowMillis() - SEEN_TTL_MS
-        seenEvents.entries.removeIf { it.value < cutoff }
-        if (seenEvents.size >= SEEN_MAX_ENTRIES) {
-            // TTL 清完还超限：淘汰最老的一半（正常负载下到不了这里——这是防御线）。
-            val eldest = seenEvents.entries.sortedBy { it.value }.take(seenEvents.size - SEEN_MAX_ENTRIES / 2)
-            eldest.forEach { seenEvents.remove(it.key, it.value) }
-        }
     }
 
     fun handleWebhook(
@@ -311,32 +182,23 @@ class SourceWebhookRegistry(
         headers: Map<String, List<String>>,
         rawBody: ByteArray,
     ): WebhookResult {
-        // fail-closed：没配密钥的 sourceId 一律拒收，不进入解析。旧实现「没密钥就跳过
-        // 验签直接 Accepted」意味着任何知道端口的人都能伪造事件喂进宿主——本地回环
-        // 不是边界（反代/同机进程都在回环上）。密钥来源见 [getSecret]。
         val secret = getSecret(sourceId)
-            ?: return WebhookResult.Rejected(
-                403,
-                "secret-not-configured",
-                "source \"$sourceId\" has no webhook secret configured; set TENON_WEBHOOK_SECRET_" +
-                    sourceId.trim().lowercase().replace('-', '_').uppercase() +
-                    " (or call registerSecret) before posting to it",
-            )
+        if (secret != null) {
+            // Find signature header: x-hub-signature-256 or x-signature-256
+            val signatureHeader = headers.entries.firstOrNull {
+                it.key.equals("x-hub-signature-256", ignoreCase = true) ||
+                    it.key.equals("x-signature-256", ignoreCase = true) ||
+                    it.key.equals("x-webhook-signature", ignoreCase = true)
+            }?.value?.firstOrNull()
 
-        // Find signature header: x-hub-signature-256 or x-signature-256
-        val signatureHeader = headers.entries.firstOrNull {
-            it.key.equals("x-hub-signature-256", ignoreCase = true) ||
-                it.key.equals("x-signature-256", ignoreCase = true) ||
-                it.key.equals("x-webhook-signature", ignoreCase = true)
-        }?.value?.firstOrNull()
+            if (signatureHeader.isNullOrBlank()) {
+                return WebhookResult.Rejected(401, "missing-signature", "Signature header missing")
+            }
 
-        if (signatureHeader.isNullOrBlank()) {
-            return WebhookResult.Rejected(401, "missing-signature", "Signature header missing")
-        }
-
-        val valid = SourceWebhookVerifier.verifyHmacSha256(rawBody, secret, signatureHeader)
-        if (!valid) {
-            return WebhookResult.Rejected(401, "invalid-signature", "HMAC signature verification failed")
+            val valid = SourceWebhookVerifier.verifyHmacSha256(rawBody, secret, signatureHeader)
+            if (!valid) {
+                return WebhookResult.Rejected(401, "invalid-signature", "HMAC signature verification failed")
+            }
         }
 
         val jsonObject = SourceEventNormalizer.parseJsonObject(rawBody)
@@ -346,62 +208,22 @@ class SourceWebhookRegistry(
             sourceId.equals("github", ignoreCase = true) -> {
                 val delivery = headers.entries.firstOrNull { it.key.equals("x-github-delivery", ignoreCase = true) }?.value?.firstOrNull()
                 val eventHeader = headers.entries.firstOrNull { it.key.equals("x-github-event", ignoreCase = true) }?.value?.firstOrNull()
-                // 缺 delivery 头的兜底从 UUID 换成确定性哈希：同一投递体重发两次，
-                // UUID 会造出两个事件（重试即重复触发），sha256 天然幂等。
-                SourceEventNormalizer.normalizeGitHub(delivery ?: ("gh-" + sha256Hex(rawBody)), eventHeader, jsonObject)
+                SourceEventNormalizer.normalizeGitHub(delivery, eventHeader, jsonObject)
             }
 
             else -> {
-                val fallbackId = "wh-" + sha256Hex(rawBody)
+                val fallbackId = "wh-" + UUID.randomUUID().toString()
                 SourceEventNormalizer.normalizeGeneric(fallbackId, jsonObject)
             }
         }
 
-        // 无消费者的诚实出口：listener 空转等于「ACK 了但没人消费」——本仓最贵的
-        // 缺陷形态（发送侧一切正常、接收侧什么都没有）。宁可 503 让发送方重试，
-        // 也不收下注定石沉大海的事件。生产消费者（编排侧持久化桥）由宿主装配。
-        if (listeners.isEmpty()) {
-            return WebhookResult.Rejected(503, "no-consumer", "no listener registered for webhook events")
-        }
-
-        // 幂等闸：命中重放直接 ACK（duplicate=true），不再分发。判据是
-        // **sourceId + event.id**（见 [idempotencyKey]）：event.id 来自发送方的
-        // 投递头 / 载荷 id / body 哈希，不同 source 之间并不共享命名空间。
-        val idemKey = idempotencyKey(sourceId, event.id)
-        if (!rememberEvent(idemKey)) {
-            return WebhookResult.Accepted(event, duplicate = true)
-        }
-
-        // 入队失败（背压到顶）= 本条未受理：撤掉幂等账，把重试权还给发送方。
-        if (dispatchChannel.trySend(QueuedEvent(sourceId.trim().lowercase(), event)).isFailure) {
-            forgetEvent(idemKey)
-            return WebhookResult.Rejected(
-                503,
-                "queue-full",
-                "webhook dispatch queue is full (capacity " + queueCapacity + "); retry later",
-            )
-        }
-
+        listeners.forEach { runCatching { it(event) } }
         return WebhookResult.Accepted(event)
     }
 }
 
 internal fun ControlPlane.sourceWebhook(exchange: HttpExchange, sourceId: String) {
-    // 有界读取，**先于验签**：验签需要完整 body，所以上限必须卡在读取这一步。
-    // 旧写法 `exchange.requestBody.readBytes()` 对长度零限制 —— HttpServer 也不设
-    // 请求体上限，于是一个超大 POST 就是一次不需要密钥的 OOM。
-    val rawBody = readBoundedBody(exchange.requestBody, MAX_WEBHOOK_BODY_BYTES)
-    if (rawBody == null) {
-        respond(
-            exchange,
-            413,
-            errorJson(
-                "payload-too-large",
-                "webhook body exceeds " + MAX_WEBHOOK_BODY_BYTES + " bytes",
-            ),
-        )
-        return
-    }
+    val rawBody = exchange.requestBody.readBytes()
     val headers = exchange.requestHeaders.toMap()
     val result = sourceWebhooks.handleWebhook(sourceId, headers, rawBody)
     when (result) {
@@ -413,8 +235,6 @@ internal fun ControlPlane.sourceWebhook(exchange: HttpExchange, sourceId: String
                     put("ok", true)
                     put("eventId", result.event.id)
                     put("type", result.event.type)
-                    // 重放投递如实标注：发送方的网络重试被幂等闸吸收了，它应该知道。
-                    put("duplicate", result.duplicate)
                 },
             )
         }
@@ -424,36 +244,3 @@ internal fun ControlPlane.sourceWebhook(exchange: HttpExchange, sourceId: String
     }
 }
 
-/**
- * 单条 webhook 请求体的上限。
- *
- * `HttpExchange.requestBody` 的长度是**没有上限**的，而旧代码直接 `readBytes()`
- * 整段进堆：一个几百 MB 的 POST 就是一次**不需要认证**的 OOM —— 验签发生在读完
- * body 之后，所以这条路径连密钥都不需要。
- *
- * 8 MiB 对 webhook 事件是宽裕的（GitHub 官方上限 25 MB，但单条事件实际远小于此），
- * 同时把内存占用钉死。改这个值要连带改 [SourceWebhookRouteTest] 的越界用例。
- */
-internal const val MAX_WEBHOOK_BODY_BYTES: Int = 8 * 1024 * 1024
-
-/**
- * 读一个请求体，超过 [limit] 字节返回 null（调用方回 413）。
- *
- * 分块读而不是 `readBytes()`：后者先把整段拉进堆再判断长度，判出来的时候
- * 内存已经付出去了。这里最多持有 limit + 一个缓冲区。
- *
- * 不看 `Content-Length`：它可以缺失、可以撒谎，真正的判据只能是「我读到了多少」。
- */
-internal fun readBoundedBody(input: java.io.InputStream, limit: Int): ByteArray? {
-    val out = java.io.ByteArrayOutputStream(minOf(limit, 64 * 1024))
-    val buf = ByteArray(8 * 1024)
-    var total = 0
-    while (true) {
-        val n = input.read(buf)
-        if (n < 0) break
-        total += n
-        if (total > limit) return null
-        out.write(buf, 0, n)
-    }
-    return out.toByteArray()
-}

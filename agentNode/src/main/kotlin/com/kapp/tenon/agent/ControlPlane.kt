@@ -149,14 +149,6 @@ class ControlPlane(
     val pluginTokenGate: PluginTokenGate = PluginTokenGate.fromEnvironment(),
     val sourceWebhooks: SourceWebhookRegistry = SourceWebhookRegistry(),
     /**
-     * 触发器回投会话的存在性校验器（提案 §5.2，宿主级事实）。
-     *
-     * desktopApp/DesktopExtension 装配域层后接上（本机 conversations 判定）；
-     * null = 未接线 ⇒ 含 `triggers` 且带 `targetConvId` 的清单**拒绝注册**
-     * （fail-closed：收下无法验证的回投目标等于把结果卡投进一个没人看见的会话）。
-     */
-    var triggerTargetConvKnown: ((convId: String) -> Boolean)? = null,
-    /**
      * 跨端派单的宿主侧委托（M4）。见 [AgentInvokeDispatcher] 的 KDoc：
      * desktopApp 装配域层后接上；agentNode 单进程保持 null ⇒ 503。
      */
@@ -341,7 +333,6 @@ class ControlPlane(
 
     fun stop() {
         plugins.stopMonitoring()
-        sourceWebhooks.dispose()
         server?.stop(0)
         server = null
     }

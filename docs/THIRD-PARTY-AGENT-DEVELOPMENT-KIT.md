@@ -85,8 +85,7 @@
 ### 字段约束规范（发送侧不变量）：
 1. `pluginId`：必须匹配正则 `^[a-z0-9][a-z0-9-]{0,63}$`（纯小写字母、数字和连字符，且不得以连字符开头）；
 2. `leader.agentId`：群内 `@` 的唯一标识，同样遵循 slug 字符集约束，长度不超过 32；
-3. `type`：`"single"`（单兵执行）或 `"team"`（多 Agent 内部协同团队，对外单一窗口统一由 leader 发言）；
-4. **未知键显式拒绝（严格解析）**：清单里出现本宿主不认识的键（如规划中的 `triggers` / `permissions`）时，注册以 `unknown-field` 错误码**显式拒绝**，磁盘安装以 `bad-manifest` 拒装。宿主绝不会静默忽略未知字段——一个「注册成功但永不生效」的声明比一条被拒的注册危害大得多。触发器等演进字段在宿主正式支持前不要写入清单（见 [AGENT-TRIGGER-AND-PLUGIN-SPECIFICATION.md](AGENT-TRIGGER-AND-PLUGIN-SPECIFICATION.md)）。
+3. `type`：`"single"`（单兵执行）或 `"team"`（多 Agent 内部协同团队，对外单一窗口统一由 leader 发言）。
 
 ---
 

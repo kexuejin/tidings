@@ -3,17 +3,12 @@
 package com.kapp.tenon.agent.plugins
 
 import com.kapp.tenon.agent.source.StandardSourceEvent
-import com.kapp.tenon.agent.testutil.Await
-import com.kapp.tenon.core.crypto.sha256Hex
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.jsonObject
-import java.util.concurrent.CountDownLatch
-import java.util.concurrent.TimeUnit
 import javax.crypto.Mac
 import javax.crypto.spec.SecretKeySpec
 import kotlin.test.Test
 import kotlin.test.assertEquals
-import kotlin.test.assertFailsWith
 import kotlin.test.assertFalse
 import kotlin.test.assertIs
 import kotlin.test.assertNotNull
@@ -138,7 +133,7 @@ class SourceWebhookRouteTest {
         registry.registerSecret("github", testSecret)
 
         var capturedEvent: StandardSourceEvent? = null
-        registry.addListener { _, event -> capturedEvent = event }
+        registry.addListener { capturedEvent = it }
 
         val body = """
             {
@@ -163,9 +158,8 @@ class SourceWebhookRouteTest {
         assertIs<WebhookResult.Accepted>(result)
         assertEquals("delivery-123", result.event.id)
         assertEquals("my/repo#5", result.event.subject)
-        // 派发是异步的（C3 起）：ACK 与分发解耦，用轮询等可观测事实，不赌时序。
-        val delivered = Await.value("listener 收到事件") { capturedEvent }
-        assertEquals("delivery-123", delivered.id)
+        assertNotNull(capturedEvent)
+        assertEquals("delivery-123", capturedEvent.id)
     }
 
     @Test
@@ -190,285 +184,5 @@ class SourceWebhookRouteTest {
         assertIs<WebhookResult.Rejected>(resInvalid)
         assertEquals(401, resInvalid.statusCode)
         assertEquals("invalid-signature", resInvalid.errorCode)
-    }
-
-    /** fail-closed（提案 §6.1 待修复项）：没配密钥的 sourceId 一律拒收，绝不进入解析。 */
-    @Test
-    fun unconfiguredSecretIsRejectedFailClosed() {
-        val registry = SourceWebhookRegistry()
-        val body = """{"alert":"critical"}""".toByteArray(Charsets.UTF_8)
-
-        val result = registry.handleWebhook("mail", emptyMap(), body)
-        assertIs<WebhookResult.Rejected>(result)
-        assertEquals(403, result.statusCode)
-        assertEquals("secret-not-configured", result.errorCode)
-        // 错误信息必须可操作：告诉操作者去配哪个环境变量。
-        assertTrue(
-            result.message.contains("TENON_WEBHOOK_SECRET_MAIL"),
-            "拒收信息应给出密钥环境变量名：" + result.message,
-        )
-    }
-
-    /** 半配置不是配置：空白密钥在注册这一刻就拒，不许留一个验签必败的假入口。 */
-    @Test
-    fun blankSecretRegistrationIsRejected() {
-        val registry = SourceWebhookRegistry()
-
-        assertFailsWith<IllegalArgumentException> { registry.registerSecret("mail", "   ") }
-        assertFailsWith<IllegalArgumentException> { registry.registerSecret("mail", "") }
-        assertFailsWith<IllegalArgumentException> { registry.registerSecret("   ", "secret") }
-
-        // 拒绝之后 sourceId 仍处于未配置状态：后续请求走 fail-closed 403。
-        val result = registry.handleWebhook("mail", emptyMap(), "{}".toByteArray(Charsets.UTF_8))
-        assertIs<WebhookResult.Rejected>(result)
-        assertEquals("secret-not-configured", result.errorCode)
-    }
-
-    /** 幂等键（提案 §6.1 待修复项）：无载荷 id 的通用入站，同一 body 必然同一事件 id。 */
-    @Test
-    fun genericWebhookWithoutPayloadIdIsDeterministic() {
-        val registry = SourceWebhookRegistry()
-        registry.registerSecret("mail", testSecret)
-        registry.addListener { _, _ -> /* 无操作消费者：满足 no-consumer 门 */ }
-
-        val body = """{"title":"disk almost full","text":"usage at 97%"}""".toByteArray(Charsets.UTF_8)
-        val headers = mapOf("x-webhook-signature" to listOf(computeHmacSha256(body, testSecret)))
-
-        val first = registry.handleWebhook("mail", headers, body)
-        val second = registry.handleWebhook("mail", headers, body)
-
-        val expectedId = "wh-" + sha256Hex(body)
-        assertIs<WebhookResult.Accepted>(first)
-        assertEquals(expectedId, first.event.id)
-        assertFalse(first.duplicate)
-        assertIs<WebhookResult.Accepted>(second)
-        assertEquals(expectedId, second.event.id, "重试同一 body 不许生成新事件 id（旧实现 UUID 会）")
-        assertTrue(second.duplicate, "第二次投递应被幂等闸吸收并如实标注 duplicate")
-        registry.dispose()
-    }
-
-    /** 幂等闸挡的是分发，不是回执：重放投递 200 但 listener 只收到一次。 */
-    @Test
-    fun duplicateDeliveryDoesNotReTriggerListener() {
-        val registry = SourceWebhookRegistry()
-        registry.registerSecret("mail", testSecret)
-
-        // listener 阻塞在 latch 上：第一次投递派发期间，第二次投递的幂等判定
-        // 与「恰一次分发」都变成确定性的（不赌派发线程的时序）。
-        val started = CountDownLatch(1)
-        val release = CountDownLatch(1)
-        var listenerCalls = 0
-        registry.addListener { _, _ ->
-            started.countDown()
-            release.await(10, TimeUnit.SECONDS)
-            listenerCalls++
-        }
-
-        val body = """{"id":"external-evt-42","type":"mail.inbound","subject":"hi"}"""
-            .toByteArray(Charsets.UTF_8)
-        val headers = mapOf("x-webhook-signature" to listOf(computeHmacSha256(body, testSecret)))
-
-        val first = registry.handleWebhook("mail", headers, body)
-        Await.condition("第一次投递的派发已进入 listener", timeoutMs = 10_000L) { started.count == 0L }
-
-        val second = registry.handleWebhook("mail", headers, body)
-        assertEquals("external-evt-42", (first as WebhookResult.Accepted).event.id, "载荷自带 id 优先于 body 哈希兜底")
-        assertTrue((second as WebhookResult.Accepted).duplicate)
-
-        release.countDown()
-        Await.condition("listener 完成恰好一次回调", timeoutMs = 10_000L) { listenerCalls == 1 }
-        assertEquals(1, listenerCalls, "重放投递不许再次唤醒 listener（重复触发即并发风暴的种子）")
-        registry.dispose()
-    }
-
-    /** GitHub 缺 x-github-delivery 头的兜底同样走确定性哈希（同缺陷类，一并修）。 */
-    @Test
-    fun githubMissingDeliveryHeaderUsesDeterministicId() {
-        val registry = SourceWebhookRegistry()
-        registry.registerSecret("github", testSecret)
-        registry.addListener { _, _ -> }
-
-        val body = """{"action":"opened"}""".toByteArray(Charsets.UTF_8)
-        val headers = mapOf(
-            "x-hub-signature-256" to listOf("sha256=" + computeHmacSha256(body, testSecret)),
-            "x-github-event" to listOf("push"),
-        )
-
-        val first = registry.handleWebhook("github", headers, body)
-        val second = registry.handleWebhook("github", headers, body)
-
-        val expectedId = "gh-" + sha256Hex(body)
-        assertEquals(expectedId, (first as WebhookResult.Accepted).event.id)
-        assertTrue((second as WebhookResult.Accepted).duplicate)
-        registry.dispose()
-    }
-
-    /** 幂等表条目过 TTL 后失效：迟到的合法重投（新事件）不被旧账吞掉。 */
-    @Test
-    fun seenEntriesExpireAfterTtl() {
-        var now = 1_000_000L
-        val registry = SourceWebhookRegistry(nowMillis = { now })
-        registry.registerSecret("mail", testSecret)
-        registry.addListener { _, _ -> }
-
-        val body = """{"id":"evt-ttl","type":"mail.inbound"}""".toByteArray(Charsets.UTF_8)
-        val headers = mapOf("x-webhook-signature" to listOf(computeHmacSha256(body, testSecret)))
-
-        assertTrue((registry.handleWebhook("mail", headers, body) as WebhookResult.Accepted).event.id == "evt-ttl")
-
-        now += 15 * 60_000L + 1 // 越过 TTL
-        val third = registry.handleWebhook("mail", headers, body)
-        assertFalse((third as WebhookResult.Accepted).duplicate, "TTL 过期后同 id 视为新事件重新受理")
-        registry.dispose()
-    }
-
-    /** 异步解耦（提案 §6.1 待建项）：无消费者的诚实出口——503，不收下注定石沉大海的事件。 */
-    @Test
-    fun noListenerIsRejectedNoConsumer() {
-        val registry = SourceWebhookRegistry()
-        registry.registerSecret("mail", testSecret)
-
-        val body = """{"id":"evt-1","type":"mail.inbound"}""".toByteArray(Charsets.UTF_8)
-        val headers = mapOf("x-webhook-signature" to listOf(computeHmacSha256(body, testSecret)))
-
-        val result = registry.handleWebhook("mail", headers, body)
-        assertIs<WebhookResult.Rejected>(result)
-        assertEquals(503, result.statusCode)
-        assertEquals("no-consumer", result.errorCode)
-        registry.dispose()
-    }
-
-    /** ACK 先于执行：验签受理立即返回，事件在后台队列里派发（外部服务不再被推理耗时拖到超时重试）。 */
-    @Test
-    fun ackReturnsBeforeListenerFinishes() {
-        val registry = SourceWebhookRegistry()
-        registry.registerSecret("mail", testSecret)
-
-        val started = CountDownLatch(1)
-        val release = CountDownLatch(1)
-        registry.addListener { _, _ ->
-            started.countDown()
-            release.await(10, TimeUnit.SECONDS)
-        }
-
-        val body = """{"id":"evt-ack","type":"mail.inbound"}""".toByteArray(Charsets.UTF_8)
-        val headers = mapOf("x-webhook-signature" to listOf(computeHmacSha256(body, testSecret)))
-
-        val t0 = System.nanoTime()
-        val result = registry.handleWebhook("mail", headers, body)
-        val ackMillis = (System.nanoTime() - t0) / 1_000_000
-
-        assertIs<WebhookResult.Accepted>(result)
-        // 旧断言是 `started.getCount() > 0 || ackMillis < 10_000` —— 恒真：
-        // 只要 ACK 在 10 秒内返回（任何机器都成立），后半句就成立。
-        //
-        // 真正的判据必须能**区分**同步与异步：listener 被 latch 挡住最长 10 秒，
-        // 如果 ACK 等它跑完，这次调用就会耗掉约 10 秒。所以阈值取 5 秒 ——
-        // 它把「解耦」和「同步」分开，而不是给一个谁都能过的上界。
-        assertTrue(
-            ackMillis < 5_000,
-            "ACK 不应等待 listener 完成（实测 " + ackMillis + "ms；listener 会阻塞 10s，" +
-                "同步实现必然接近 10s）",
-        )
-        // 确定性判据：listener 尚未跑完时 ACK 已经到手（blocked latch 保证派发未完成）。
-        Await.condition("派发已开始（listener 已被调起）", timeoutMs = 10_000L) { started.count == 0L }
-        assertTrue(release.count > 0, "ACK 返回时 listener 仍在执行中——两者确已解耦")
-        release.countDown()
-        registry.dispose()
-    }
-
-    /** 背压（提案 §2.3 工作池）：并发 1 + 容量 1，消费者阻塞时第三条投递 503 queue-full。 */
-    @Test
-    fun queueFullIsRejectedWith503() {
-        val registry = SourceWebhookRegistry(queueCapacity = 1, dispatchParallelism = 1)
-        registry.registerSecret("mail", testSecret)
-
-        val started = CountDownLatch(1)
-        val release = CountDownLatch(1)
-        registry.addListener { _, _ ->
-            started.countDown()
-            release.await(15, TimeUnit.SECONDS)
-        }
-
-        fun bodyOf(id: String) = """{"id":"$id","type":"mail.inbound"}""".toByteArray(Charsets.UTF_8)
-        fun headersOf(body: ByteArray) = mapOf("x-webhook-signature" to listOf(computeHmacSha256(body, testSecret)))
-
-        // 第一条：被消费者取走、permit 占满（listener 阻塞中）。
-        assertIs<WebhookResult.Accepted>(registry.handleWebhook("mail", headersOf(bodyOf("evt-1")), bodyOf("evt-1")))
-        Await.condition("第一条已进入阻塞的 listener", timeoutMs = 10_000L) { started.count == 0L }
-        // 第二条：填满唯一的缓冲位。
-        assertIs<WebhookResult.Accepted>(registry.handleWebhook("mail", headersOf(bodyOf("evt-2")), bodyOf("evt-2")))
-        // 第三条：队列已满——503 让发送方稍后重试，而不是无声吞掉。
-        val third = registry.handleWebhook("mail", headersOf(bodyOf("evt-3")), bodyOf("evt-3"))
-        assertIs<WebhookResult.Rejected>(third)
-        assertEquals(503, third.statusCode)
-        assertEquals("queue-full", third.errorCode)
-
-        release.countDown()
-        Await.condition("积压排空后恢复受理", timeoutMs = 15_000L) {
-            registry.handleWebhook("mail", headersOf(bodyOf("evt-4")), bodyOf("evt-4")) is WebhookResult.Accepted
-        }
-        registry.dispose()
-    }
-
-    /**
-     * 幂等键必须按 sourceId 分域：两个不同的源各自投递 id 相同的两条事件，都要被受理。
-     *
-     * 旧实现只拿 `event.id` 当键，于是第二个源的事件被判成「第一个源的重放」，
-     * 直接 `200 duplicate=true` 掉 —— 一个源静默吞掉另一个源的事件，而且回的是
-     * 成功码，发送方完全看不出异常。这条用例在旧实现下必然红。
-     */
-    @Test
-    fun idempotencyIsScopedPerSourceNotJustPerEventId() {
-        val registry = SourceWebhookRegistry()
-        registry.registerSecret("mail", testSecret)
-        registry.registerSecret("calendar", "another-secret-9876")
-
-        val delivered = java.util.concurrent.CopyOnWriteArrayList<String>()
-        registry.addListener { sourceId, event -> delivered += sourceId + "/" + event.id }
-
-        val body = """{"id":"evt-shared","type":"shared.event"}""".toByteArray(Charsets.UTF_8)
-        val mailHeaders = mapOf("x-webhook-signature" to listOf(computeHmacSha256(body, testSecret)))
-        val calHeaders = mapOf("x-webhook-signature" to listOf(computeHmacSha256(body, "another-secret-9876")))
-
-        val first = registry.handleWebhook("mail", mailHeaders, body)
-        assertIs<WebhookResult.Accepted>(first)
-        assertFalse(first.duplicate, "第一次投递不是重放")
-
-        val second = registry.handleWebhook("calendar", calHeaders, body)
-        assertIs<WebhookResult.Accepted>(second)
-        assertFalse(
-            second.duplicate,
-            "同 id 但不同 source 的事件不是重放——旧实现会在这里返回 duplicate=true，" +
-                "等于 calendar 源的事件被静默吞掉",
-        )
-
-        Await.condition("两个源的事件都派发到了 listener", timeoutMs = 10_000L) { delivered.size >= 2 }
-        assertEquals(
-            setOf("mail/evt-shared", "calendar/evt-shared"),
-            delivered.toSet(),
-            "两个源的事件都必须派发，实际：" + delivered,
-        )
-        registry.dispose()
-    }
-
-    /**
-     * 请求体读取必须有界：`readBytes()` 会把整段拉进堆再判断，判出来时内存已经付出去了。
-     *
-     * 直接测 [readBoundedBody]：用 4 KiB 的流 + 1 KiB 上限，确认返回 null 而不是
-     * 「先收下 4 KiB 再拒」。
-     */
-    @Test
-    fun readBoundedBodyRejectsOversizedInput() {
-        val payload = ByteArray(4096) { (it % 251).toByte() }
-        assertEquals(
-            null,
-            readBoundedBody(payload.inputStream(), 1024),
-            "超限必须返回 null（调用方回 413），不是截断后当成合法 body",
-        )
-        assertTrue(
-            readBoundedBody(payload.inputStream(), 4096)!!.contentEquals(payload),
-            "刚好等于上限要原样放行（判据是 > limit，不是 >= limit）",
-        )
     }
 }

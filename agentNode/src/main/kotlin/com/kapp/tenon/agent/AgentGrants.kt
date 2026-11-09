@@ -239,12 +239,37 @@ class AgentGrantStore(private val file: File) {
             // 它会让新装的 agent 自动继承执行权，用户毫无感知。
             // 详见 `forExecution` 的 KDoc。
             !forExecution || g.isMyDevice
-        AgentGrantScopes.AGENT -> agentKey != null && g.agentKey == agentKey
+        AgentGrantScopes.AGENT -> agentKey != null && agentKeyMatches(g.agentKey, agentKey)
         AgentGrantScopes.WORKSPACE -> {
-            (agentKey == null || g.agentKey == null || g.agentKey == agentKey) &&
+            (agentKey == null || g.agentKey == null || agentKeyMatches(g.agentKey, agentKey)) &&
                 (wsId != null && g.wsId == wsId)
         }
         else -> false
+    }
+
+    /**
+     * agentKey 的比对口径：**大小写不敏感**。
+     *
+     * ## 为什么不能按字面比
+     *
+     * 台账里的 `agentKey` 是**注册时的原样**（面板 `@` 到谁就存谁，现场是 `DSH`），
+     * 而卡片动作帧里的 `agentId` 是从**线上身份**反解出来的 —— `AgentSenderId.of()`
+     * 写进 `senderId` 时会把 agentId 小写化（`agent:<host>:dsh`），对端
+     * `AgentSenderId.parse` 读回来就是 `dsh`。按字面比的结果是：**同一个 agent，
+     * 授权明明在，却每次都被判无权限**。
+     *
+     * 真机 A22 现场：手机点「合并此补丁」，帧确实到了宿主（`dedup.log` 有、TCP ACK 已回），
+     * 宿主 `grants.allows(node, agentKey = "dsh", forExecution = true)` 撞上台账里的
+     * `DSH` 判假 ⇒ 走「被拒」分支 ⇒ 而 1:1 的拒绝横幅要 `broadcastAgentState`（需要群）
+     * ⇒ 也发不出去 ⇒ **点了彻底没反应，宿主一行日志都没有**。
+     *
+     * 方向不变：这只是把「同一个身份」的两种书写认成同一个，不放宽任何作用域、
+     * 不绕过 `access`/`requireRw`/`requireApproval` 的任何一档。agentKey 本就是标识符，
+     * 没有靠大小写区分两个 agent 的用法。
+     */
+    private fun agentKeyMatches(granted: String?, asked: String?): Boolean = when {
+        granted == null || asked == null -> granted == asked
+        else -> granted.equals(asked, ignoreCase = true)
     }
 
     fun setPolicy(next: String): Boolean {

@@ -822,8 +822,6 @@ class DesktopWorkerOrchestrator(
                     wsPath = workdir,
                     requestedSessionId = null,
                     sessionTitle = title,
-                    // 会话对齐键（§9 阶段三）：讨论流的 L3 审批卡也归到发起会话。
-                    convId = convId,
                 ) { eventType, _, summary, _ ->
                     if (violated == null && eventType == "tool.started" && !CognitiveFlow.allowsTool(summary)) {
                         violated = summary?.takeIf { it.isNotBlank() } ?: "(unnamed tool)"
@@ -1566,7 +1564,6 @@ class DesktopWorkerOrchestrator(
             wsPath = repoPath,
             requestedSessionId = null,
             sessionTitle = title,
-            convId = convId,
             onArtifact = { path, name, _, _, _ ->
                 if (name == "patch.diff") protoPatch = path
                 if (name.contains("prototype") || name.endsWith(".html") || name == "patch.diff") protoCreated = true
@@ -1629,7 +1626,6 @@ class DesktopWorkerOrchestrator(
                     wsPath = repoPath,
                     requestedSessionId = null,
                     sessionTitle = title,
-                    convId = convId,
                     onArtifact = { path, name, _, _, _ -> if (name == "patch.diff") refinePatch = path },
                     onEvent = { _, _, _, _ -> },
                 )
@@ -1934,7 +1930,6 @@ class DesktopWorkerOrchestrator(
                     // 会话标题用工单标题：prompt 首行是系统前导（containment preamble），
                     // 从 prompt 截标题就会把整句英文 plumbing 摆上 divider。
                     sessionTitle = title,
-                    convId = convId,
                     onArtifact = { path, name, _, _, _ -> if (name == "patch.diff") patchPath = path },
                     onEvent = { eventType, _, summary, body ->
                         // 生命迹象：驱动事件 = 子进程输出管道来了新字节。看门狗 feed 在

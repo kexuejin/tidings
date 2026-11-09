@@ -221,9 +221,7 @@ class ScreenHistoryRecordTest {
         // AgentGrantRuleEntity 在产品路径上零读写（历史遗留清理），铲表不丢数据。
         // 21 = 20.sqm 之后。20.sqm 只做 CREATE：BoardCardRev（看板卡 rev 台账，
         // root cause #3 —— 重启后广播侧 rev 延续不再依赖 200 条恢复窗口）。
-        // 22 = 21.sqm 之后。21.sqm 只做 CREATE：SchedulerTaskState + TriggerEvent
-        // （调度中枢的持久化 Job Table，两个半边：任务运行态 + 触发事件队列）。
-        assertEquals(22L, RelayDatabase.Schema.version, "迁移文件数 + 1 —— 加一个 .sqm 就得同步改这条")
+        assertEquals(21L, RelayDatabase.Schema.version, "迁移文件数 + 1 —— 加一个 .sqm 就得同步改这条")
 
         val database = RelayDatabase(driver)
         val old = database.relayDatabaseQueries.selectMessagesByConv("peer-1").executeAsList().single()

@@ -1031,33 +1031,6 @@ messaging **PASS 38**（`/tmp/messaging-run14.log`），全量套件 **run11 9/9
 （`saveDirFor` 按 `rootName` 建目录，单文件时就是文件名），同名两次传输会互相覆盖 ——
 改它要动磁盘布局契约，需先定布局语义。
 
-## 5g. 触发式编排与插件分支的静态/单测读数（2026-11-09，HEAD `ccdc5177`，**不是真机验收**）
-
-分支 `feat/agent-trigger-plugin`（ahead 15 / behind 0）跑完 `AGENTS.md §1` 全量清单，
-加了 `--rerun-tasks` 保证九个测试任务真的执行（`97 executed / 97 actionable`，7m44s）：
-**3871 tests / 0 failures / 0 errors / 36 skipped**（663 份 XML，全部由本轮写出）；
-11 条门禁 + `unused-imports.py --check` + `check-design-palette.py --css-vars` 全绿；
-改了并发用例与测试替身，另跑 `:testStabilityGate` 3/3 PASS（6m12s）。
-
-本轮修掉的四个真实红项/债：恒真观测窗探针、`DesktopHostSchedulerTest` 的 12 处 B 类
-固定 `delay`（`envDependentTestGate` 从 B=12 降到 0，**没加白名单**）、分支回退的
-软链接安全清理（恢复 `walkFileTree()` 全量清空 + 两条嵌套挂载回归钉子）、规格文档与
-`AGENTS.md §2.8` 的过时表述。
-
-**证据**：[`design/runtime-evidence/2026-11-09-agent-trigger-plugin-verify.md`](design/runtime-evidence/2026-11-09-agent-trigger-plugin-verify.md)。
-
-**边界（不许反填进上面任何表格）**：本轮没有真手机、真桌面宿主、真网络帧、手机 `run-as`
-落盘、真实 UI 动作；`verifyLuciolaNative` / `verifyPackagedLuciolaNative` 是
-**SKIPPED，日志明说「这不是通过」**；36 条 skipped 含「luciola 原生库未找到」的跳过用例。
-单测绿 ≠ 真机通过，三阶段也不因此变成「已交付」。合并前共有 10 个文件与主工作区未提交
-改动重叠（含 `ACCEPTANCE.md` / `AGENTS.md` / `RelayDatabase.sq` 的 21.sqm → schema 22
-迁移链）。对主工作区脏状态做 `git merge-tree` 干跑后确认：干净 `main` 零冲突，
-**带未提交改动时恰好 4 个冲突**（`WorktreeSandbox.kt`、其测试、规格文档 add/add、
-`THIRD-PARTY-AGENT-DEVELOPMENT-KIT.md` 的产品命名），裁决建议与自动合并的语义风险
-见证据文件 §6。本轮没有 merge / push。
-
----
-
 ## 6. 已知无法在本机验证的项
 
 这一节不是待办，是**证据边界声明**，请勿在对外材料里说成「已验证」：

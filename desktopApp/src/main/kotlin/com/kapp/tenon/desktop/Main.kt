@@ -9,7 +9,6 @@ import com.kapp.tenon.feature.agents.AgentLiveLog
 import com.kapp.tenon.orchestration.DesktopExtension
 import com.kapp.tenon.domain.createAgentStore
 import com.kapp.tenon.domain.createMessageStore
-import com.kapp.tenon.domain.createSchedulerStore
 import com.kapp.tenon.domain.createSettingsStore
 import com.kapp.tenon.core.protocol.DEFAULT_TIMINGS
 import com.kapp.tenon.core.protocol.ScreenPhase
@@ -114,9 +113,6 @@ fun main(args: Array<String>) {
         httpPort = ControlPlane.DEFAULT_HTTP_PORT,
         // 诊断端口由壳注入：编排层不依赖 composeApp，实时缓冲的所有权留在 UI 层。
         liveEventSink = { sessionId, line -> AgentLiveLog.append(sessionId, line) },
-        // 调度中枢的持久化台账（与消息/Agent 库共用同一条驱动）——触发式编排
-        // 的 Owner 是桌面常驻宿主，移动端不装配（提案 §2.2）。
-        schedulerStore = createSchedulerStore(platform),
     )
 
     // 单进程单实例：桌面端不会存在第二个 application，所以文件级引用是安全的。
