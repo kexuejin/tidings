@@ -175,13 +175,21 @@ CREATE TABLE IF NOT EXISTS ConversationSummary (
 selectAllConversationSummaries:
 SELECT * FROM ConversationSummary;
 
+selectConversationSummary:
+SELECT * FROM ConversationSummary WHERE conv_id = :convId;
+
 selectLatestMessageOfConv:
 -- file_json 也要取：会话列表预览在正文为空时退回文件名（conversationPreviewOf）。
 -- 只补 SELECT 列、不动表结构 ⇒ 不需要迁移（.sqm 只跟 DDL 走）。
-SELECT id, text, timestamp, mine, file_json FROM MessageEntity
+--
+-- 取 20 行而不是 1 行：agent 事件流会在库里留下一串**零正文**的行，最新一条是空帧时
+-- 「预览」就成了 null，会话列表写「还没聊过，打个招呼」—— 而上面躺着上百条真消息。
+-- 判据（什么算空）在 Kotlin 侧 `hasRenderableContent` 一处，SQL 只负责多给几行备选。
+SELECT id, text, timestamp, mine, file_json, notice, screen_json, card_json, card_payload
+FROM MessageEntity
 WHERE conv_id = :convId
 ORDER BY seq DESC
-LIMIT 1;
+LIMIT 20;
 
 upsertConversationSummary:
 INSERT OR REPLACE INTO ConversationSummary (

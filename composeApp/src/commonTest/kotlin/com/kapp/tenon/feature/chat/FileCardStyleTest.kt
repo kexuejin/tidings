@@ -115,9 +115,11 @@ class FileCardStyleTest {
     @Test
     fun aCustomCardBubbleUsesExactlyTheShapeOfTheCardItWraps() {
         // M3 Surface 在 modifier 链末尾无条件 .clip(shape)：外层气泡透明、无边框，
-        // 却仍会把内层卡片的描边裁成自己的形状。真机上外层 8/16dp 的文字气泡
+        // 却仍会把内层卡片裁成自己的形状。真机上外层 8/16dp 的文字气泡
         // 圆角把内层 12dp 文件卡的三个圆角弧线裁掉，只剩左上角是圆的、另外
-        // 三个角是互不相接的横竖短线。自定义卡的外层必须逐字沿用卡片形状。
+        // 三个角是互不相接的横竖短线。自定义卡的外层必须逐字沿用卡片形状 ——
+        // 现在内外都是 `--r-bubble`(16dp)，这条约束是双向的：只改内层不改外层，
+        // 断角立刻复现。
         for (mine in listOf(false, true)) {
             for (prev in listOf(false, true)) {
                 for (next in listOf(false, true)) {
@@ -128,7 +130,7 @@ class FileCardStyleTest {
                         hasNextSender = next,
                     )
                     assertTrue(
-                        shape === RelayShapes.medium,
+                        shape === RelayShapes.large,
                         "自定义卡外层形状必须与内层卡片一致，mine=$mine prev=$prev next=$next",
                     )
                 }
@@ -167,9 +169,9 @@ class FileCardStyleTest {
             "文字气泡里的引用卡仍是 8dp",
         )
         assertEquals(
-            listOf(12f, 12f, 12f, 12f),
-            RelayShapes.medium.radii(),
-            "自定义卡的裁剪路径是 12dp —— 与 8dp 不同，不能混用",
+            listOf(16f, 16f, 16f, 16f),
+            RelayShapes.large.radii(),
+            "自定义卡的裁剪路径是 16dp（--r-bubble）—— 与 8dp 不同，不能混用",
         )
         for (mine in listOf(false, true)) {
             for (prev in listOf(false, true)) {

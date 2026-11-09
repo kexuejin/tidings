@@ -103,9 +103,17 @@ object CodecInvoke {
         // ok 与 status 必须自洽：done 才是真，其余全是失败 —— 一帧自相矛盾的结果
         // 比丢帧更糟（发起方会把失败当成功记进看板）。
         if (ok != (status == InvokeResultStates.DONE)) return false
-        // 卡片是执行产出，只在 done 时存在 —— 被拒的派单不该带执行卡片。
+        // 卡片两种合法形态（D14，真机 A22 第八轮抓到的整帧拒收）：
+        //   done   ⇒ 执行产出卡；
+        //   error  ⇒ 受阻/中止/退单的**终局卡**（DesktopExtension.withCard 的契约：
+        //            派单处看到有卡就不再补「没干完」横幅——用户按了停，看到「已取消」
+        //            就够了）。此前的校验只认 done，宿主的 error+card 帧被手机整帧
+        //            丢弃（flush drop … bad-payload:agent-invoke-result, 600 B）——
+        //            「发送侧一切正常、接收侧什么都没有」的 §3 形态。
+        // denied / no-executor / no-plugin / timeout 仍不带卡：那些是"没开工"的拒绝，
+        // 没有执行现场可给。
         if (o.containsKey("card")) {
-            if (status != InvokeResultStates.DONE) return false
+            if (status != InvokeResultStates.DONE && status != InvokeResultStates.ERROR) return false
             val card = o["card"] as? JsonObject ?: return false
             if (utf8ByteLength(card.toString()) > Limits.CARD_BYTES) return false
         }

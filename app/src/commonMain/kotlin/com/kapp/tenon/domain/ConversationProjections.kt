@@ -11,6 +11,7 @@ import com.kapp.tenon.domain.model.AgentSessionUi
 import com.kapp.tenon.domain.model.ConversationUi
 import com.kapp.tenon.domain.model.WorkspaceUi
 import com.kapp.tenon.domain.model.PeerUi
+import com.kapp.tenon.domain.model.hasRenderableContent
 import com.kapp.tenon.domain.model.visibleInDsh
 
 /**
@@ -55,7 +56,9 @@ fun conversations(
     fun convTitle(convId: String): String {
         groupOfConv(convId)?.name?.let { return it }
         if (!ConvId.isGroup(convId)) {
-            peer(convId)?.displayName?.let { return it }
+            // O1：与头部同一身份口径 —— 对端是 agent 宿主时列表行也显示 agent 名
+            //（头部/署名/@候选同一份解析，§2.4 名字只有一份）。
+            return resolveNodeIdentity(convId, senderContext(convId, chat, agent, node, settingsSlice)).displayName
         }
         return (ConvId.groupIdOf(convId) ?: convId).take(8)
     }
@@ -85,7 +88,9 @@ fun conversations(
             val summariesByConv: Map<String, ConversationSummaryRow> =
                 if (conversationSummaries.isEmpty()) {
                     messages.mapNotNull { (convId, list) ->
-                        val last = list.lastOrNull() ?: return@mapNotNull null
+                        // 与落库那份同一条判据：零正文的事件帧不算「最后一条」，
+                        // 否则列表预览会落到它身上（null ⇒ 「还没聊过」）。
+                        val last = list.lastOrNull { it.hasRenderableContent } ?: return@mapNotNull null
                         convId to ConversationSummaryRow(
                             convId = convId,
                             lastMessageId = last.id,
@@ -272,7 +277,15 @@ fun senderContext(
     settingsSlice: SettingsSlice,
 ): SenderIdentityContext = narrowIdentityView(chat, agent, node, settingsSlice).senderContext(convId)
 
-/** 会话显示名（切片版）：与 [RelayUiState.convTitle] 同义。 */
+/**
+ * 会话显示名（切片版）：曾是 [RelayUiState.convTitle] 的同义实现。
+ *
+ * **O1 之后两者不再同义**：生产路径（会话列表 [conversations] / 搜索 / 通知标题）
+ * 走的是带 agent 数据的身份解析（agent 宿主对端显示 agent 名，与头部同口径）；
+ * 本函数没有 agent/chat 切片入参，保持设备昵称口径。当前无生产调用方
+ * （[composeApp] 的 DesktopFilesPane 未被组合）—— 新调用请用带切片的版本，
+ * 别让两套口径复活。
+ */
 fun convTitle(convId: String, node: NodeSlice, settingsSlice: SettingsSlice): String {
     groupOfConv(settingsSlice, convId)?.name?.let { return it }
     if (!ConvId.isGroup(convId)) {

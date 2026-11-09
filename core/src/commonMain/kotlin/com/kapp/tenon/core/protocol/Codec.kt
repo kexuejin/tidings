@@ -95,7 +95,15 @@ object Codec {
 
     fun avatarMissPayload(hash: String) = CodecProfile.avatarMissPayload(hash)
 
-    fun textPayload(text: String, resend: Boolean? = null) = CodecMsg.textPayload(text, resend)
+    fun textPayload(text: String, resend: Boolean? = null, senderId: String? = null) =
+        CodecMsg.textPayload(text, resend, senderId)
+
+    /** 单聊文本 + 卡片（1:1 的无群卡落点）。见 [CodecMsg.textPayloadWithCard]。 */
+    fun textPayloadWithCard(
+        text: String,
+        card: kotlinx.serialization.json.JsonObject,
+        senderId: String? = null,
+    ) = CodecMsg.textPayloadWithCard(text, card, senderId)
 
     fun groupTextPayload(
         text: String,

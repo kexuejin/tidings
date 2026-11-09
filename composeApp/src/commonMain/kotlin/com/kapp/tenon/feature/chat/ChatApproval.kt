@@ -88,11 +88,13 @@ internal fun InlineImagePreview(
     val longest = maxOf(naturalWidth, naturalHeight)
     val scale = if (longest > MAX_PREVIEW_SIDE) MAX_PREVIEW_SIDE / longest else 1f
 
+    // 纯图片消息同样占气泡位（`isCustomCard`）：圆角跟 `--r-bubble`(16dp) 走，
+    // 与外层 `chatBubbleShape(isCustomCard = true)` 同形，否则外层裁剪会切掉内层弧线。
     Surface(
-        shape = RelayShapes.medium,
+        shape = RelayShapes.large,
         modifier = modifier
             .size(naturalWidth * scale, naturalHeight * scale)
-            .clip(RelayShapes.medium)
+            .clip(RelayShapes.large)
             .then(if (onClick != null) Modifier.clickable { onClick() } else Modifier),
     ) {
         Image(

@@ -197,7 +197,7 @@ class SandboxedCliDriver(
                             outcome.message
                         }
                         onEvent(DriverEvent.Card(endCardJson(taskId, wsPath, STATE_BLOCKED, ledger)))
-                        onEvent(DriverEvent.Error(ledger))
+                        onEvent(DriverEvent.Error(ledger + CliSubprocessDriver.stderrTailOf(outputTail)))
                         return
                     }
                 }

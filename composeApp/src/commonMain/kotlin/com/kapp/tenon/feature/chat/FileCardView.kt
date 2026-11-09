@@ -50,8 +50,6 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.StrokeCap
 import androidx.compose.foundation.shape.RoundedCornerShape
-import androidx.compose.foundation.BorderStroke
-import androidx.compose.foundation.border
 import androidx.compose.foundation.layout.width
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
@@ -160,15 +158,26 @@ internal fun FileCardView(
     onImageClick: ((String) -> Unit)? = null,
 ) {
     val sp = LocalAppSpacing.current
-    // 原型 `.filecard{display:flex;gap:10px;align-items:center;padding:9px 10px;
-    // background:var(--surface);border:1px solid var(--hair);border-radius:12px;
-    // min-width:196px}`（`.win .filecard` 是 210）。文件夹走的是同一个 `.filecard`
-    // （`folderCard`），区别只在 `.fi` 里那颗图标 —— 所以「文件夹」这三个字不再另画
-    // 一枚徽章：下面 `.fs` 那行本来就有「N 个文件 · 大小」，徽章是同一件事的第二个说法。
+    // 文件卡**自己就是气泡**：外层容器透明、`bubblePad = 0`（见 `chatBubbleShape`），
+    // 所以这里的底色与圆角必须与文字气泡逐值相同 —— `--bubble-peer` / `--bubble-mine`
+    // + `--r-bubble`（16dp），不画描边。曾经这里是白底 + 0.5dp 发丝边 + 12dp：那套在
+    // 「气泡去边框」裁决时被漏掉（文件卡属于 `isCustomCard`，外层只删了 `bubbleBorder`，
+    // 内层这层自己画的边没人碰），于是同一屏里文件卡带边、文字气泡不带。
+    // 原型 `.filecard` 同步改成 bubble-peer / 无边框 / `var(--r-bubble)`；间距与图标尺寸不变
+    // （`.filecard{display:flex;gap:10px;align-items:center;padding:9px 10px;min-width:196px}`，
+    // `.win .filecard` 是 210）。文件夹走的是同一个 `.filecard`（`folderCard`），区别只在
+    // `.fi` 里那颗图标 —— 所以「文件夹」这三个字不再另画一枚徽章：下面 `.fs` 那行本来就
+    // 有「N 个文件 · 大小」，徽章是同一件事的第二个说法。
     Surface(
-        color = MaterialTheme.colorScheme.surface,
-        shape = RelayShapes.medium,
-        border = BorderStroke(0.5.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.25f)),
+        // 底色按**归属**分，与文字气泡同一套语言：自己的走 `--bubble-mine`（`primaryContainer`），
+        // 对端的走 `--bubble-peer`（`surfaceVariant`）。只给 `surfaceVariant` 会让「我发的文件」
+        // 比「我发的文字」暗一档 —— 同一侧两种底色，比原来的白卡 + 发丝边更不一致。
+        color = if (card.mine) {
+            MaterialTheme.colorScheme.primaryContainer
+        } else {
+            MaterialTheme.colorScheme.surfaceVariant
+        },
+        shape = RelayShapes.large,
         modifier = Modifier.widthIn(min = 196.dp),
     ) {
         Row(
@@ -520,14 +529,23 @@ internal fun FileCardView(
             }
 
             TransferState.Failed -> {
+                // 样式收敛（A22 用户反馈）：失败态此前是「失败原因 + 可续传标签 +
+                // 继续 + 取消」四件套 —— 「可续传」与「继续」说的是同一件事。
+                // 现在能力折进状态行（… · 可续传），动作只留 [继续] [取消] 两个。
+                val reasonText = stringResource(
+                    Res.string.file_state_failed,
+                    // core 给的是**机器码**（socket-error / hash-mismatch / offer-expired…），
+                    // 直接印给用户等于让用户去猜"是我网坏了还是软件坏了"。
+                    // 这里翻译成人话；认不出的码**原样显示**（不吞掉事实，也不编一个说法）。
+                    transferFailureReason(card.reason) ?: stringResource(Res.string.common_unknown),
+                )
+                val resumableHere = !card.mine && onResumeTransfer != null
                 Text(
-                    text = stringResource(
-                        Res.string.file_state_failed,
-                        // core 给的是**机器码**（socket-error / hash-mismatch / offer-expired…），
-                        // 直接印给用户等于让用户去猜"是我网坏了还是软件坏了"。
-                        // 这里翻译成人话；认不出的码**原样显示**（不吞掉事实，也不编一个说法）。
-                        transferFailureReason(card.reason) ?: stringResource(Res.string.common_unknown),
-                    ),
+                    text = if (resumableHere) {
+                        reasonText + " · " + stringResource(Res.string.transfer_resume_hint)
+                    } else {
+                        reasonText
+                    },
                     style = MaterialTheme.typography.labelSmall,
                     color = MaterialTheme.colorScheme.error,
                 )
@@ -547,11 +565,6 @@ internal fun FileCardView(
                         horizontalArrangement = Arrangement.spacedBy(sp.sm),
                         verticalAlignment = Alignment.CenterVertically,
                     ) {
-                        Text(
-                            text = stringResource(Res.string.transfer_resume_hint),
-                            style = MaterialTheme.typography.labelSmall,
-                            color = MaterialTheme.colorScheme.primary,
-                        )
                         AppButton(
                             text = stringResource(Res.string.transfer_action_resume),
                             size = AppButtonSize.Compact,

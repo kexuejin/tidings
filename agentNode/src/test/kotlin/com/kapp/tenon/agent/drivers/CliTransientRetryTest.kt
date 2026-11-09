@@ -124,7 +124,14 @@ class CliTransientRetryTest {
 
         val errors = events.filterIsInstance<DriverEvent.Error>()
         assertEquals(1, errors.size)
-        assertEquals("cli exited with code 1", errors[0].message, "非瞬时失败的 Error 形状与既有逐字一致")
+        assertTrue(
+            errors[0].message.startsWith("cli exited with code 1"),
+            "非瞬时失败的 Error 以退出码开头（实际：${errors[0].message}）",
+        )
+        assertTrue(
+            errors[0].message.contains("fatal: bad configuration"),
+            "终局错误必须携带 CLI 自己的 stderr 尾巴——根因可见性",
+        )
         assertEquals(1, runCount(counter), "非瞬时失败一次终局，不重试")
     }
 

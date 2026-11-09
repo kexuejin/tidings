@@ -5,11 +5,14 @@ package com.kapp.tenon.domain
 import com.kapp.tenon.domain.model.MessageUi
 import com.kapp.tenon.domain.model.TransferState
 import com.kapp.tenon.core.protocol.ConvId
+import com.kapp.tenon.core.transport.IncomingFilePlan
+import com.kapp.tenon.core.transport.IncomingOffer
 import com.kapp.tenon.core.transport.LocalFile
 import com.kapp.tenon.core.transport.TransferEvent
 import com.kapp.tenon.platform.InMemoryAppPlatform
 import kotlin.test.Test
 import kotlin.test.assertEquals
+import kotlin.test.assertFalse
 import kotlin.test.assertTrue
 import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.CoroutineScope
@@ -118,6 +121,104 @@ class RelayControllerFileCardOptimisticTest {
         assertEquals(cards.single().id, controller.core.transferMessages["t-" + lin.take(4)])
         assertEquals(cards.single().id, controller.core.transferMessages["t-" + zhou.take(4)])
     }
+
+    /**
+     * 收到的文件卡**带署名**（真机 A22 第三条用户提问：「文件卡片看起来没归属」）。
+     *
+     * 落卡那一步原来写的是 `senderId = if (offer.groupId != null) offer.peerId else null`
+     * —— 群里有人署名、单聊里谁都不是，界面只能画一张无主卡片。单聊的
+     * `offer.peerId` 就是那台对端设备，是这份 offer 里**唯一**能说明"谁发的"的字段。
+     *
+     * 反向验证：把那一行改回 `if (offer.groupId != null) offer.peerId else null`，
+     * 本条变红（senderId 为 null）。
+     */
+    @Test
+    fun singleChatIncomingFileCardCarriesThePeerAsSender() = runBlocking {
+        val controller = controller()
+        controller.transfersCtl.handleOnTransfer(
+            TransferEvent.Offered(offer("t-in-1", peer = lin, groupId = null)),
+        )
+
+        val card = messagesWith(controller.state.value.toChatSlice(), lin).single { it.file != null }
+        assertFalse(card.mine)
+        assertEquals(lin, card.senderId, "1:1 收到的文件卡必须带发送者，否则界面上是张无主卡片")
+    }
+
+    /**
+     * 群文件卡的署名是**发送者**，不是群 id。
+     *
+     * 这条在改前改后都绿（群分支本来就有 `offer.peerId`）；留着是防"统一成 convId"
+     * 那类改写 —— 群里署成 `group:xxx` 等于换了一种没有归属。
+     */
+    @Test
+    fun groupFileCardAttributesTheSenderNotTheGroupId() = runBlocking {
+        val controller = controller()
+        val groupId = controller.createGroup("上线小组", listOf(lin, zhou))!!
+        controller.transfersCtl.handleOnTransfer(
+            TransferEvent.Offered(offer("t-g-1", peer = lin, groupId = groupId)),
+        )
+
+        val card = messagesWith(controller.state.value.toChatSlice(), ConvId.group(groupId))
+            .single { it.file != null }
+        assertEquals(lin, card.senderId, "群文件卡的署名是发送者，不是群 id")
+    }
+
+    /**
+     * 进度事件先到（offer 事件没收到，例如重启后继续续传）时，卡片也要有归属。
+     *
+     * 这条钉的是"兜底口径"：`Progress` 分支自建 `FileCardUi` 时没有 senderId 可传，
+     * 只能落 null；渲染层对 `senderId == null` 的老端/设备级帧退回"按对端身份解析"，
+     * 于是仍然有名字。任何一侧单独改都会让这条路重新变成无主卡片。
+     */
+    @Test
+    fun progressFirstCardStillResolvesToThePeer() = runBlocking {
+        val controller = controller()
+        controller.transfersCtl.handleOnTransfer(
+            TransferEvent.Progress(
+                transferId = "t-p-1",
+                peerId = lin,
+                fileId = "patch.diff",
+                done = 10,
+                total = 166,
+                incoming = true,
+            ),
+        )
+
+        val card = messagesWith(controller.state.value.toChatSlice(), lin).single { it.file != null }
+        assertEquals(null, card.senderId, "进度兜底路径拿不到发送者，落 null 是已知形态")
+        // 渲染层据此把归属退回"会话对端"（见 ChatSenderAttribution 的第三条判据）。
+        val identity = ChatSenderAttribution.identityOf(
+            message = card,
+            isGroup = false,
+            peerNodeId = lin,
+            identityCtx = SenderIdentityContext(
+                selfNodeId = self,
+                selfNick = "我的手机",
+                peers = emptyList(),
+                group = null,
+            ),
+            bubbleCtx = SenderIdentityContext(
+                selfNodeId = self,
+                selfNick = "我的手机",
+                peers = emptyList(),
+                group = null,
+                bareNodeIdIsHuman = true,
+            ),
+        )
+        assertEquals(lin.take(8), identity?.displayName, "兜底也要落到对端，而不是空署名")
+    }
+
+    private fun offer(transferId: String, peer: String, groupId: String?) = IncomingOffer(
+        transferId = transferId,
+        peerId = peer,
+        rootName = "patch.diff",
+        files = listOf(IncomingFilePlan(fileId = "f-1", relPath = "patch.diff", size = 166L)),
+        totalSize = 166L,
+        purpose = null,
+        msgId = null,
+        expiresAt = null,
+        groupId = groupId,
+    )
 
     private fun file(name: String, size: Long) = LocalFile(path = name, name = name, size = size)
 

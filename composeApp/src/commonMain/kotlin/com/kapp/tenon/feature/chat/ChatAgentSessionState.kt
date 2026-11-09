@@ -4,6 +4,7 @@ package com.kapp.tenon.feature.chat
 
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.remember
+import com.kapp.tenon.domain.isPendingApproval
 import com.kapp.tenon.domain.AgentSlice
 import com.kapp.tenon.domain.SenderIdentity
 import com.kapp.tenon.domain.SenderIdentityContext
@@ -142,9 +143,12 @@ internal fun rememberChatAgentSessionState(
     val activeSessionEvents = remember(agentSlice.agentEvents, activeSession) {
         agentEventsOf(agentSlice, activeSession)
     }
-    val sessionHasPendingApproval = remember(agentSlice.agentApprovals, activeSession, peerNodeId) {
+    val sessionHasPendingApproval = remember(agentSlice.agentApprovals, activeSession, peerNodeId, now) {
         agentSlice.agentApprovals.values.any { approval ->
-            approval.status == "pending" && when {
+            // O3：待批判据必须是全仓唯一的那把尺子（isPendingApproval = pending 且未过期）。
+            // 此前这里手写 status=="pending"，过期审批永远让输入提示条挂在
+            // 「等待你审批工具调用…」—— 手机真机实锤（5 条 hook-* 审批过期数小时仍挂）。
+            isPendingApproval(approval, now) && when {
                 activeSession != null ->
                     approval.peerId == activeSession.peerId && approval.sessionId == activeSession.sessionId
                 else -> approval.peerId == peerNodeId

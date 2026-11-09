@@ -772,6 +772,10 @@ object StageChain {
     /**
      * 解析沙箱产物目录里的 report.json 或 patch.diff，提纯用于卡片展示的 Diff 与字节大小。
      */
+    /** 审阅卡 diff 可视化的行预算：超出的行如实计数（完整内容在 patch.diff 附件）。 */
+    val DIFF_HUNK_MAX_LINES = 60
+    val DIFF_HUNK_LINE_MAX = 200
+
     fun parseHarvest(patchFile: java.io.File, repoName: String? = null): Pair<ChainDiff, Long>? {
         if (!patchFile.exists() || patchFile.length() == 0L) return null
         val reportFile = java.io.File(patchFile.parentFile, "report.json")
@@ -798,12 +802,34 @@ object StageChain {
         // （真机截图上亲眼见过，SandboxedCliDriver 的 diffCardJson 有同一个毛病）。
         // 卡面上给人读的一句话：与驱动侧同一写法（「2 个文件」），不把英文复数后缀露给用户。
         val summaryText = "$files 个文件"
+        // **hunk 必须是真补丁内容**（A22 用户验收判据：diff 是可视化的，不是一句
+        // 「已就绪」的空话）—— 渲染端 CardDiffHunkViewer（原型 .df-hunk）等着这份数据，
+        // 此前 hunk 恒空 ⇒ 审阅卡只剩统计行，用户看不到改了什么。取变更行
+        // （diff --git 文件头 + @@ + 加减行），剔 index/+++ /--- 信封行；超出
+        // 预算截断并如实标注行数 —— 完整内容仍在 patch.diff 附件里。
+        val hunkLines = buildList {
+            var budget = DIFF_HUNK_MAX_LINES
+            var truncated = 0
+            patchFile.useLines { lines ->
+                for (line in lines) {
+                    val keep = line.startsWith("diff --git") || line.startsWith("@@") ||
+                        (line.startsWith("+") && !line.startsWith("+++")) ||
+                        (line.startsWith("-") && !line.startsWith("---"))
+                    if (!keep) continue
+                    if (budget <= 0) { truncated++; continue }
+                    add(line.take(DIFF_HUNK_LINE_MAX))
+                    budget--
+                }
+            }
+            if (truncated > 0) add("… +$truncated more lines (see patch.diff)")
+        }
         return Pair(
             ChainDiff(
                 path = repoName,
                 summary = summaryText,
                 additions = adds,
                 deletions = dels,
+                hunk = hunkLines,
             ),
             patchFile.length(),
         )

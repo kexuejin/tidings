@@ -41,10 +41,18 @@ class CognitiveDiscussionWiringGuardTest {
         assertTrue(first >= 0, "分诊口必须存在（规格 1.1：没带显式派单指令 ⇒ 只读）")
         val delegated = orchestrator.indexOf("val plan = parseDelegation(prompt, available, groupId)")
         assertTrue(delegated > first, "分诊必须排在派单解析之前，否则提问会被当成工单")
-        // 两条入口（文本路由 / invoke 桥）都要分诊：漏一条就是「手机上问一句就开写」。
+        // 两条入口、两种口径（A22 真机改判）：**文本路由**无条件分诊（没有药丸，
+        // 句子语气是唯一意图线索）；**invoke 桥**（1:1 药丸）是用户选了工作区、
+        // 按了发送的显式派单 —— 分诊门控到群路径（groupId != null），1:1 药丸
+        // 单不再被 "how to" 之类的问句标记改判成只读聊天（真机：真实需求被
+        // INQUIRY 命中，工单没了）。
         val occurrences = Regex(Regex.escape("CognitiveFlow.classify(prompt) == CognitiveFlow.Intent.Discuss"))
             .findAll(orchestrator).count()
-        assertTrue(occurrences >= 2, "两条派单入口都要分诊，实际命中 $occurrences 处")
+        assertTrue(occurrences >= 2, "两条派单入口都要有分诊位，实际命中 $occurrences 处")
+        val invokeTriage = orchestrator.indexOf(
+            "groupId != null && CognitiveFlow.classify(prompt) == CognitiveFlow.Intent.Discuss",
+        )
+        assertTrue(invokeTriage > 0, "invoke 桥的分诊必须门控到群路径：1:1 药丸是显式派单，不分诊")
     }
 
     @Test

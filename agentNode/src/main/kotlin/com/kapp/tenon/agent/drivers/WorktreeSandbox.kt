@@ -405,26 +405,7 @@ class WorktreeSandboxExecutor(
         return killed
     }
 
-    /**
-     * 产物目录清理：先摘掉指向宿主 HOME 的符号链接，再递归删除。
-     *
-     * prepareSandboxHome 把宿主 .dsh / .codex / .claude / .gemini / .npm 以符号链接
-     * 挂进 .sandbox-home；Kotlin 的 File.deleteRecursively() 会跟随符号链接目录递归，
-     * 直接删会把真实 HOME 下这些目录的内容逐文件清空（翻车现场：
-     * 58ms 内 298 次 unlink + 189 次 rmdir，全部落在真实 HOME 目录下）。
-     * 因此任何 artifactsDir.deleteRecursively() 都必须走这里。
-     */
-    private fun deleteArtifactsSafely(artifactsDir: File) {
-        val sandboxHome = File(artifactsDir, ".sandbox-home")
-        if (sandboxHome.isDirectory) {
-            sandboxHome.listFiles()?.forEach { entry ->
-                if (java.nio.file.Files.isSymbolicLink(entry.toPath())) {
-                    runCatching { java.nio.file.Files.deleteIfExists(entry.toPath()) }
-                }
-            }
-        }
-        runCatching { artifactsDir.deleteRecursively() }
-    }
+
 
     /** 当前在跑的任务数（「停」要不要消费这条消息，看它）。 */
     fun runningCount(): Int = running.size
@@ -817,10 +798,11 @@ class WorktreeSandboxExecutor(
          *
          * 只白名单符号链接必要的工具配置，绝不暴露宿主私有敏感目录。
          */
-        fun prepareSandboxHome(artifactsDir: File): File {
+        fun prepareSandboxHome(
+            artifactsDir: File,
+            hostHome: File = File(System.getProperty("user.home") ?: ""),
+        ): File {
             val sandboxHome = File(artifactsDir, ".sandbox-home").apply { mkdirs() }
-            val userHome = System.getProperty("user.home") ?: return sandboxHome
-            val hostHome = File(userHome)
             if (!hostHome.isDirectory) return sandboxHome
             for (name in SANDBOX_CREDENTIAL_ENTRIES) {
                 val src = File(hostHome, name)
@@ -831,7 +813,54 @@ class WorktreeSandboxExecutor(
                     }
                 }
             }
+            val srcOpencode = File(hostHome, ".config/opencode")
+            if (srcOpencode.exists()) {
+                val dstConfigDir = File(sandboxHome, ".config").apply { mkdirs() }
+                val dstOpencode = File(dstConfigDir, "opencode")
+                if (!dstOpencode.exists()) {
+                    runCatching {
+                        java.nio.file.Files.createSymbolicLink(dstOpencode.toPath(), srcOpencode.toPath())
+                    }
+                }
+            }
             return sandboxHome
+        }
+
+        /**
+         * 产物目录清理：先摘掉指向宿主 HOME 的符号链接，再递归删除。
+         *
+         * [prepareSandboxHome] 把宿主凭据目录以符号链接挂进 .sandbox-home；
+         * Kotlin 的 File.deleteRecursively() 会跟随符号链接目录递归，
+         * 直接删会把真实 HOME 下这些目录的内容逐文件清空（AGENTS §2.8 血泪禁令）。
+         * 因此任何 artifactsDir.deleteRecursively() 都必须走这里。
+         */
+        internal fun deleteArtifactsSafely(artifactsDir: File) {
+            val sandboxHome = File(artifactsDir, ".sandbox-home")
+            if (sandboxHome.isDirectory) {
+                runCatching {
+                    java.nio.file.Files.walkFileTree(
+                        sandboxHome.toPath(),
+                        object : java.nio.file.SimpleFileVisitor<java.nio.file.Path>() {
+                            override fun visitFile(
+                                file: java.nio.file.Path,
+                                attrs: java.nio.file.attribute.BasicFileAttributes,
+                            ): java.nio.file.FileVisitResult {
+                                java.nio.file.Files.deleteIfExists(file)
+                                return java.nio.file.FileVisitResult.CONTINUE
+                            }
+
+                            override fun postVisitDirectory(
+                                dir: java.nio.file.Path,
+                                exc: java.io.IOException?,
+                            ): java.nio.file.FileVisitResult {
+                                java.nio.file.Files.deleteIfExists(dir)
+                                return java.nio.file.FileVisitResult.CONTINUE
+                            }
+                        },
+                    )
+                }
+            }
+            runCatching { artifactsDir.deleteRecursively() }
         }
 
         /**

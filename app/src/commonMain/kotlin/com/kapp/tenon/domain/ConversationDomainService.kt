@@ -163,8 +163,14 @@ internal interface ConversationDomainHost {
     /** 群内 agent 路由事实（本地/远端 agent 是否在位）。 */
     fun agentRouteFactsOf(groupId: String): GroupAgentRouteFacts
 
-    /** 壳层桥：agent 提示入口（null = 本机没有执行器）。 */
-    val onAgentPrompt: (suspend (convId: String, senderPeerId: String, prompt: String, replyToId: String?) -> Unit)?
+    /** 壳层桥：agent 提示入口（null = 本机没有执行器；末参 = 原文点名的键，未点名则 null）。 */
+    val onAgentPrompt: (suspend (
+        convId: String,
+        senderPeerId: String,
+        prompt: String,
+        replyToId: String?,
+        mentionedAgentKey: String?,
+    ) -> Unit)?
 
     /** 壳层桥：工单追问拦截（返回 true = 已消费）。 */
     val onAgentFollowUp: ((convId: String, senderPeerId: String, text: String) -> Boolean)?
@@ -337,7 +343,13 @@ internal class ConversationDomainService(
 
     override fun agentRouteFactsOf(groupId: String): GroupAgentRouteFacts = host.agentRouteFactsOf(groupId)
 
-    override val onAgentPrompt: (suspend (convId: String, senderPeerId: String, prompt: String, replyToId: String?) -> Unit)?
+    override val onAgentPrompt: (suspend (
+        convId: String,
+        senderPeerId: String,
+        prompt: String,
+        replyToId: String?,
+        mentionedAgentKey: String?,
+    ) -> Unit)?
         get() = host.onAgentPrompt
 
     override val onAgentFollowUp: ((convId: String, senderPeerId: String, text: String) -> Boolean)?

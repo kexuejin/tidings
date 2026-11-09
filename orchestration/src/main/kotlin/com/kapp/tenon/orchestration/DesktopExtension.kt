@@ -664,6 +664,14 @@ class DesktopExtension(
                     request: com.kapp.tenon.domain.AgentInvokeTaskRequest,
                 ): com.kapp.tenon.domain.AgentInvokeExecution {
                     val self = controller.state.value.selfNodeId
+                    // 群里 @ 的是**席位 ID**（`dsh-a030882e`），驱动注册表认的是
+                    // **档案键**（`dsh`）。不归位 ⇒ resolveCliDriver 恒 null ⇒ CLI 分支
+                    // 整段跳过、直接 NO_PLUGIN，真机上表现为「点了没反应」。
+                    // 在位名册与编排器同源（availableAgentKeys），不在装配层再问一遍。
+                    val cliKey = AgentProfiles.resolveKey(
+                        request.agentId,
+                        workerOrchestrator.availableAgentKeys().orEmpty(),
+                    ) ?: request.agentId
                     // wsId → 路径的解析表只在宿主本机（隐私收口：路径不出宿主）。
                     val wsPath = request.wsId?.trim()?.takeIf { it.isNotEmpty() }?.let { id ->
                         controller.state.value.agentWorkspaces.values
@@ -679,8 +687,16 @@ class DesktopExtension(
                     // `handlePromptAwait` 是请求-响应形状（await 工单终局），与 invoke
                     // 的语义正好对上；租约的 `wsId`（任务级显式绑定）原样穿透，
                     // 编排器按「显式 wsId > 群绑定 > 单工作区」次序解析，解析不出就退单。
+                    RelayLog.info(
+                        "OCGO-BRIDGE",
+                        "invoke agent=" + request.agentId + " wsId=" + request.wsId +
+                            " convId=" + request.convId + " groupId=" + request.groupId +
+                            " plugin=" + created.pluginForAgent(request.agentId)?.pluginId +
+                            " cliKey=" + cliKey +
+                            " cliDriver=" + (created.resolveCliDriver(cliKey)?.driverId ?: "null"),
+                    )
                     if (created.pluginForAgent(request.agentId) == null &&
-                        created.resolveCliDriver(request.agentId) != null
+                        created.resolveCliDriver(cliKey) != null
                     ) {
                         val group = request.groupId?.takeIf { it.isNotBlank() }
                         // 回卡会话的优先级：1:1 直派显式带的 convId（发起方的单聊）> 群 > 兜底。
@@ -697,20 +713,14 @@ class DesktopExtension(
                             senderPeerId = self,
                             prompt = request.prompt,
                             replyToId = null,
-                            agentKey = request.agentId,
+                            agentKey = cliKey,
                             wsId = request.wsId,
                         )
-                        // 产物投群或对端（patch.diff）：终局带路径就投 —— 投递失败不改写状态，
-                        // 工单卡（含产物条目）照常上屏，可从 report.json 对账。
-                        outcome.patchPath?.let { patchPath ->
-                            val patchFile = java.io.File(patchPath)
-                            if (patchFile.isFile) {
-                                artifactDelivery.deliverCliArtifacts(
-                                    listOf(Triple(patchPath, patchFile.name, patchFile.length())),
-                                    targetConvId,
-                                )
-                            }
-                        }
+                        // 产物投递**全部归编排器审阅流**（deliverPatchBundle + 
+                        // deliverOversizedArtifacts，在 handlePromptAwait 内完成）。
+                        // 这里曾经的补丁直投是**双发**：同一份 patch.diff 两份报价并发
+                        // 写对端同一路径（downloads/patch.diff/patch.diff）—— 一次成功、
+                        // 一次「写入本机磁盘失败」（D13 族第 3 例的真身）。摘除后单路投递。
                         return if (outcome.error != null) {
                             // 受阻/中止/退单：**带终局卡**回 —— 派单处看到有卡就不再补
                             // 「没干完」横幅：用户按了停，看到「已取消」就够了。
@@ -854,8 +864,11 @@ class DesktopExtension(
             // §7.2 诊断日志桥：域层路由点就地发出的 NO_WAKE 等诊断落进 RelayLog 环，
             // 诊断包经 recentLogLines 取「最近日志」节。这是 :app 诊断的唯一出口。
             controller.diagnosticLogSink = { tag, message -> RelayLog.info(tag, message) }
-            controller.onAgentPrompt = { convId, senderPeerId, prompt, replyToId ->
-                workerOrchestrator.handlePrompt(convId, senderPeerId, prompt, replyToId)
+            controller.onAgentPrompt = { convId, senderPeerId, prompt, replyToId, mentionedAgentKey ->
+                workerOrchestrator.handlePrompt(
+                    convId, senderPeerId, prompt, replyToId,
+                    mentionedAgentKey = mentionedAgentKey,
+                )
             }
             // §6.1 打断桥：挂在**入站文本**上，不挂在 onAgentPrompt 上 ——
             // 「停」不是 prompt，挂在后者就永远进不来（真机实测：收到了、没反应）。

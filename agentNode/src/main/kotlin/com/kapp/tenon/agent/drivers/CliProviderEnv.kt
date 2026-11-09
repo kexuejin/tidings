@@ -90,12 +90,12 @@ object CliProviderEnv {
     private val AGY = emptyList<String>()
 
     /**
-     * dsh（DeepSeek Harness CLI）：headless 路由只认 env 的 `DEEPSEEK_API_KEY`
-     * （实测有 `~/.dsh/.credentials.yaml` 也不读，见 [DshCredentials]）；key 的解析
-     * 在 [DshCredentials]，这里只管「该递哪些变量名」。出网同 opencode：补代理变量。
+     * dsh（DeepSeek Harness CLI）：出厂路由认 env 的 `DEEPSEEK_API_KEY`；自配路由
+     * （如 dsh-opencode-go）认 `OPENCODE_API_KEY`；出网同 opencode：补代理变量。
      */
     private val DSH = listOf(
         "DEEPSEEK_API_KEY",
+        "OPENCODE_API_KEY",
         "DSH_PERMISSION_MODE",
         "HTTPS_PROXY",
         "HTTP_PROXY",

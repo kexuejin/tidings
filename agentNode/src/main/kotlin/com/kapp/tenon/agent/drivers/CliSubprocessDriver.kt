@@ -107,6 +107,11 @@ class CliSubprocessDriver(
         var resumedCliSessionId: String? = null
         val totalAttempts = 1 + maxExtraAttempts.coerceAtLeast(0)
         var lastFailure: String? = null
+        // 终局错误必须带上 CLI 自己的 stderr 尾巴（`dsh: <code>: <message>` 这类
+        // 故障诊断行）—— 行映射器认不出的行会被如实跳过，但「exit 1」 alone 让
+        // 根因不可见（AGENTS §2.5：诊断要么如实、要么不存在）。只取最后 3 行防刷屏。
+        fun failureWithStderrTail(failure: String, tail: StringBuilder): String =
+            failure + stderrTailOf(tail)
         for (attempt in 1..totalAttempts) {
             // 近邻判别的输出累积：瞬时判别与续跑 id 都从这里取（CLI 输出量有限，全量可承受）。
             val outputTail = StringBuilder()
@@ -164,7 +169,7 @@ class CliSubprocessDriver(
                 lastFailure = "cli exited with code $exitCode"
                 if (!transientOf(exitCode, outputTail.toString())) {
                     // 非瞬时（业务失败 / 配额耗尽 / 输出没有瞬时标记）：一次终局，绝不重试。
-                    onEvent(DriverEvent.Error(lastFailure!!))
+                    onEvent(DriverEvent.Error(failureWithStderrTail(lastFailure!!, outputTail)))
                     return
                 }
             } catch (e: Exception) {
@@ -177,8 +182,11 @@ class CliSubprocessDriver(
             if (attempt == totalAttempts) {
                 onEvent(
                     DriverEvent.Error(
-                        lastFailure + " — gave up after " + totalAttempts +
-                            " attempts (transient retry exhausted)",
+                        failureWithStderrTail(
+                            lastFailure + " — gave up after " + totalAttempts +
+                                " attempts (transient retry exhausted)",
+                            outputTail,
+                        ),
                     ),
                 )
                 return
@@ -212,6 +220,13 @@ class CliSubprocessDriver(
             "overloaded",
             "rate limit",
         )
+
+        /** 终局错误统一携带的 CLI stderr 尾巴（最后 3 行，行内 200 字上限）——根因可见性。 */
+        internal fun stderrTailOf(tail: StringBuilder): String {
+            val lines = tail.lines().filter { it.isNotBlank() }.takeLast(3)
+                .map { it.trim().take(200) }
+            return if (lines.isEmpty()) "" else " ⏎ " + lines.joinToString(" ⏎ ")
+        }
 
         internal const val DEFAULT_MAX_EXTRA_ATTEMPTS = 2
         internal const val DEFAULT_BACKOFF_FIRST_MS = 1_000L
@@ -509,8 +524,11 @@ fun cliDriverRegistrations(
     }
     // dsh（DeepSeek Harness CLI）：headless profile 是标准的一次性形态
     // （`dsh --profile headless --json`，NDJSON 行协议 + 退出码诚信），与 codex exec
-    // 同类。凭证只认 env 的 DEEPSEEK_API_KEY（headless 不读 ~/.dsh 凭证服务，
-    // 实测 MISSING_CREDENTIAL）—— 由 [DshCredentials] 从凭证文件解析后递进子进程。
+    // 同类。凭证两路：出厂路由（deepseek-official）只认 env 的 DEEPSEEK_API_KEY
+    // （headless 不读 ~/.dsh 凭证服务，实测 MISSING_CREDENTIAL）——由 [DshCredentials]
+    // 从凭证文件解析后递进子进程；用户自配路由（如 dsh-opencode-go）走
+    // credentials-local 服务直接读同一份 ~/.dsh/.credentials.yaml（沙箱经 .dsh
+    // 软链同样可见）——所以装配门槛是「文件存在」，具体哪路凭证由 profile 决定。
     val dsh = resolveDsh()
     if (dsh != null) {
         val providerEnv = CliProviderEnv.forDsh(env).toMutableMap()
@@ -521,10 +539,10 @@ fun cliDriverRegistrations(
         // 一次性 worktree（我们的沙箱就是隔离面），内层不再要求后端。
         providerEnv.putIfAbsent("DSH_PERMISSION_MODE", "danger-full-access")
         announce(DriverKeys.cliDriverId("dsh"), providerEnv)
-        if (providerEnv[DshCredentials.ENV_KEY] == null) {
+        if (providerEnv[DshCredentials.ENV_KEY] == null && !DshCredentials.hasCredentialFile(env)) {
             hint(
-                "[drivers] dsh-cli has no DEEPSEEK_API_KEY (neither env nor ~/.dsh/.credentials.yaml); " +
-                    "headless route will fail with MISSING_CREDENTIAL",
+                "[drivers] dsh-cli has no provider credential (no DEEPSEEK_API_KEY env and no " +
+                    "~/.dsh/.credentials.yaml); the headless route will fail without one",
             )
         }
         drivers.add(

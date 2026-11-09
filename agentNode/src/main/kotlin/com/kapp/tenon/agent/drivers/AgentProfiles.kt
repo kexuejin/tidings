@@ -58,6 +58,23 @@ object AgentProfiles {
         return DriverKeys.stripCliSuffix(key).takeIf { known.containsKey(it) }
     }
 
+    /**
+     * 把「群里点名的 token」解析成**在位档案键**。
+     *
+     * 群里的 `@` token 有两种形态：裸档案键（`@dsh`）与席位全名
+     * （`@dsh-<host>-<workspace>`，来自 `virtualAgents[].name`）。后者不是档案键，
+     * [normalizeKey] 会返回 null —— 触发判据认得它、执行侧却找不到驱动，症状是
+     * 「@ 了、帧也到了，工单卡永远不出现」。解析只在 [availableKeys]（在位集合）里做，
+     * 前缀命中取最长的一个，绝不猜、绝不回落到第一个：解析不出来就返回 null，
+     * 由调用方走既有默认路径。
+     */
+    fun resolveKey(rawKey: String?, availableKeys: Set<String>): String? {
+        val key = DriverKeys.canonicalKey(rawKey) ?: return null
+        normalizeKey(key)?.takeIf { it in availableKeys }?.let { return it }
+        return availableKeys.filter { key == it || key.startsWith("$it-") }
+            .maxByOrNull { it.length }
+    }
+
     /** 自动组队的干活棒优先序（真机验证过的 dev(codex) 打头）。 */
     private val workerPreference = listOf("codex", "claude", "opencode", "agy", "dsh")
 

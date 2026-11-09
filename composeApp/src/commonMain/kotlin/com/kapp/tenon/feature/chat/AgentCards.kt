@@ -3,6 +3,8 @@
 package com.kapp.tenon.feature.chat
 
 import com.kapp.tenon.domain.SYSTEM_ACTION_SESSION_EXEMPT
+import com.kapp.tenon.domain.SenderIdentityContext
+import com.kapp.tenon.domain.resolveNodeIdentity
 import com.kapp.tenon.domain.sessionExemptActionIdOf
 import androidx.compose.animation.core.RepeatMode
 import androidx.compose.animation.core.animateFloat
@@ -161,6 +163,16 @@ fun AgentCardBubble(
     artifactSavedPathFor: ((AgentCardArtifact) -> String?)? = null,
     /** 点开产物预览。null = 本壳没有预览通路，入口整块不画。 */
     onPreviewArtifact: ((AgentCardArtifact, String) -> Unit)? = null,
+    /**
+     * 「已由 %s 处理」知情行的名字解析上下文（D7）。null = 壳没给，退回 nodeId 原样。
+     *
+     * decidedBy 是**拍板节点的 nodeId**，不是名字 —— 直接印出来的形态是真机实锤过的：
+     * 用户在自己手机上点的合并，卡面却写「已由 25222a45-4b84-… 处理」—— 自己不认得
+     * 自己，还像一台陌生设备（AGENTS §2.4 的用户观感）。解析与消息署名同源
+     * （[resolveNodeIdentity]）：self → 整句「你已处理」，其余走 昵称/群昵称/档案名，
+     * 都没有才退 8 位短 id。给 null 就是没有这个壳的口径，不给假名字。
+     */
+    decidedByCtx: SenderIdentityContext? = null,
 ) {
     val sp = LocalAppSpacing.current
     val plan = cardRenderPlanOf(
@@ -256,9 +268,23 @@ fun AgentCardBubble(
             // 它不是按钮，是「这件事已被谁定了」的事实 —— 就算这个壳没有动作通路
             // （onAction == null），它也照画。
             card.decidedBy?.let { decided ->
+                // D7：decidedBy 是拍板节点的 nodeId，先过一遍与消息署名同源的解析再上屏。
+                // self ⇒ 本机昵称（SenderIdentityContext.selfNick，真机上即设备名称）；
+                // 别人 ⇒ 昵称/群昵称/档案名；解析不出 ⇒ 8 位短 id（resolveNodeIdentity
+                // 的最后一档），仍比 36 位裸 id 可读。ctx 为 null 的壳保持老形态。
+                //
+                // self 整句资源（card_decided_by_self「你已处理」），但本机编译
+                // 环境对**新增**资源键一律 Unresolved（生成物在盘上含该键、编译仍报错，
+                // 冷建/清守护/清 .gradle 均复现；老键同文件同形状可解析）——如实记账，
+                // 先落 displayName 方案，「你已处理」待环境恢复再上（证据 §十三）。
+                val decidedText = if (decidedByCtx != null) {
+                    stringResource(Res.string.card_decided_by, resolveNodeIdentity(decided, decidedByCtx).displayName)
+                } else {
+                    stringResource(Res.string.card_decided_by, decided)
+                }
                 // 升级稿 .decided（relay.html:580-581）：surface-2 底 + r8 + 12 on-2，块化知情行。
                 Text(
-                    text = stringResource(Res.string.card_decided_by, decided),
+                    text = decidedText,
                     style = MaterialTheme.typography.labelMedium,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                     modifier = Modifier

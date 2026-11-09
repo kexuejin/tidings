@@ -135,9 +135,13 @@ fun handleCreateWorkspaceGroup(
     description: String = "",
 ): String? {
     val self = host.state.value.selfNodeId
+    // A22-R5：绑定群创建时的工作区行必须按 wsId 匹配**任意宿主宣告的行** ——
+    // 手机建绑定群时，工作区是对端桌面宣告的（peerId = 对端），此前的
+    // `peerId == self` 过滤永远匹配不上 ⇒ workspace 恒 null ⇒ 席位恒空 ⇒
+    // 该群的 @agent 派单永远 NO_WAKE（真机两轮立案）。wsId 本身唯一，匹配无歧义。
     val workspace = wsId
         ?.takeIf { it.isNotBlank() }
-        ?.let { id -> host.state.value.agentWorkspaces.values.firstOrNull { it.peerId == self && it.wsId == id } }
+        ?.let { id -> host.state.value.agentWorkspaces.values.firstOrNull { it.wsId == id } }
     return handleCreateGroupInternal(
         name = name,
         memberIds = memberIds,
@@ -293,7 +297,10 @@ private fun virtualAgentMemberFor(ws: WorkspaceUi): VirtualAgentMember? {
     val agentId = resolveVirtualAgentKey(null, ws.agentId, ws.agentKind) ?: return null
     return VirtualAgentMember(
         agentId = agentId,
-        hostNodeId = host.state.value.selfNodeId,
+        // A22-R5：席位挂在 **agent 真正运行的那台宿主**（工作区宣告方），
+        // 不是本机 —— 手机上建的绑定群，agent 在桌面。本机自建的桌面流程
+        // 里 ws.peerId == self，两种情形下这一行都对。
+        hostNodeId = ws.peerId,
         name = AgentMemberName.base(ws.agentKind, agentId, ws.wsTitle, ws.wsId),
         defaultWsId = ws.wsId,
     )
@@ -663,9 +670,11 @@ fun handleSendToGroup(
         )
         if (route == AgentPromptRoute.Local) {
             val prompt = RelayController.extractAgentPrompt(body, routeFacts.agentKinds)
+            // 与收方触发点同口径：点名事实从原文取，剥 @ 之后的 prompt 里已经没有它。
+            val mentionedAgentKey = RelayController.mentionedAgentKeys(body, routeFacts.agentKinds).firstOrNull()
             val self = host.state.value.selfNodeId
             host.scope.launch {
-                host.onAgentPrompt?.invoke(ConvId.group(groupId), self, prompt, null)
+                host.onAgentPrompt?.invoke(ConvId.group(groupId), self, prompt, null, mentionedAgentKey)
             }
         }
 
@@ -928,7 +937,7 @@ fun handleNotice(convId: String, kind: NoticeKind, detail: NoticeDetail? = null)
 }
 
 /**
- * 触发路由要的**群内 agent 事实**：有哪些 agent kind、agent 在本机还是远端。
+ * 触发路由要的**群内 agent 事实**：有哪些可点名的键、agent 在本机还是远端。
  *
  * - `localAgentPresent` 要求**本机真的挂了执行器**（`RelayController.onAgentPrompt` 非空）
  *   且本机是这个群的 agent 宿主 —— 只凭"群里有 agent"就在本机跑，正是「@dsh 收到本地
