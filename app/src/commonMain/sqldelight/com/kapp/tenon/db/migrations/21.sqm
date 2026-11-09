@@ -1,0 +1,33 @@
+-- 触发式编排提案 §9 阶段二：桌面宿主调度中枢的持久化 Job Table。
+-- 两张表都只做 CREATE，自包含（不假设任何既有表，老库/迁移夹具都可能没有前面的对象）。
+--
+-- SchedulerTaskState：调度任务运行态台账。清单是「声明什么」，这里是「什么时候跑过 /
+-- 下次什么时候该跑」——调度器重启后的 missed-fire 补偿判定靠它，没有它，合盖休眠
+-- 错过的触发窗口每次开机都会丢记忆。
+--
+-- TriggerEvent：触发事件队列。验签 ACK 后落一行，消费完翻终态；event_id 主键即
+-- 持久幂等键（INSERT OR IGNORE），内存幂等表重启丢失后由它兜底。
+CREATE TABLE IF NOT EXISTS SchedulerTaskState (
+    task_id TEXT NOT NULL PRIMARY KEY,
+    last_run_at INTEGER,
+    next_run_at INTEGER NOT NULL,
+    jitter_offset_sec INTEGER NOT NULL,
+    missed_runs INTEGER NOT NULL DEFAULT 0,
+    updated_at INTEGER NOT NULL
+);
+
+CREATE TABLE IF NOT EXISTS TriggerEvent (
+    event_id TEXT NOT NULL PRIMARY KEY,
+    source_id TEXT NOT NULL,
+    type TEXT NOT NULL,
+    subject TEXT NOT NULL,
+    summary TEXT NOT NULL,
+    detail TEXT NOT NULL,
+    link TEXT,
+    state TEXT NOT NULL,
+    error TEXT,
+    created_at INTEGER NOT NULL,
+    updated_at INTEGER NOT NULL
+);
+
+CREATE INDEX IF NOT EXISTS idx_trigger_event_state ON TriggerEvent(state, created_at);

@@ -2,6 +2,8 @@
 
 package com.kapp.tenon.agent.plugins
 
+import com.kapp.tenon.agent.schedule.CronExpression
+import com.kapp.tenon.agent.schedule.MissedFirePolicies
 import com.kapp.tenon.core.protocol.AgentSenderId
 import com.kapp.tenon.core.protocol.GroupWorkspaceInfo
 import com.kapp.tenon.core.protocol.TeamMemberInfo
@@ -41,6 +43,13 @@ data class PluginManifest(
     val defaultWsId: String? = null,
     /** 能力声明；宿主驱动的 listCapabilities 读这里，不经插件进程。 */
     val capabilities: List<String> = emptyList(),
+    /**
+     * 触发器声明（提案 §5，阶段三增量）。空 = 纯会话驱动插件（向后兼容——旧清单
+     * 不写这个键，严格解析照常通过）。校验见 [PluginRegistration.validate] 的
+     * triggers 分支；宿主级事实（webhook 密钥、回投会话存在性）在注册入口的
+     * host-facts 钩子里校验。
+     */
+    val triggers: List<PluginTriggerDef> = emptyList(),
 )
 
 /**
@@ -58,6 +67,9 @@ object PluginRegistration {
     /** pluginId 同时是数据目录下的目录名：只许小写字母数字与连字符，且不以连字符开头。 */
     val PLUGIN_ID_PATTERN: Regex = Regex("^[a-z0-9][a-z0-9-]{0,63}$")
 
+    /** Jitter 幅度上限（§2.3 常规 ±30s；300s 封顶防荒谬清单）。 */
+    const val MAX_JITTER_SECONDS: Int = 300
+
     const val TYPE_SINGLE: String = "single"
     const val TYPE_TEAM: String = "team"
     private val TYPES: Set<String> = setOf(TYPE_SINGLE, TYPE_TEAM)
@@ -72,7 +84,7 @@ object PluginRegistration {
     /** 清单顶层合法键 = [PluginManifest] 的字段集。新增字段时这里与 data class 同步改。 */
     private val KNOWN_TOP_LEVEL_KEYS: Set<String> = setOf(
         "pluginId", "name", "version", "type", "entrypoint", "leader",
-        "members", "allowedWorkspaces", "defaultWsId", "capabilities",
+        "members", "allowedWorkspaces", "defaultWsId", "capabilities", "triggers",
     )
 
     sealed interface Verdict {
@@ -161,6 +173,135 @@ object PluginRegistration {
         }
         manifest.defaultWsId?.let { d ->
             if (d.isBlank()) return Verdict.Rejected("bad-workspace", "defaultWsId must not be blank when present")
+        }
+        // triggers 校验（提案 §5.2）。结构性判据在这里；宿主级事实（webhook 密钥、
+        // 回投会话存在性）在注册入口的 host-facts 钩子——两道都是 fail-closed。
+        val triggerIds = HashSet<String>()
+        manifest.triggers.forEach { trigger ->
+            if (!PLUGIN_ID_PATTERN.matches(trigger.id)) {
+                return Verdict.Rejected(
+                    "bad-trigger-id",
+                    "trigger id must match " + PLUGIN_ID_PATTERN.pattern + "; got \"" + trigger.id + "\"",
+                )
+            }
+            if (!triggerIds.add(trigger.id)) {
+                return Verdict.Rejected("duplicate-trigger-id", "trigger id \"" + trigger.id + "\" appears twice; ids must be unique within one manifest")
+            }
+            validateTrigger(trigger)?.let { return it }
+        }
+        return null
+    }
+
+    /** 单个 trigger 的结构校验（§5.2 字段约束）；null = 通过。 */
+    private fun validateTrigger(trigger: PluginTriggerDef): Verdict.Rejected? {
+        if (trigger.name.isBlank()) {
+            return Verdict.Rejected("bad-trigger-name", "trigger \"" + trigger.id + "\" needs a non-blank name")
+        }
+        if (trigger.type.equals("fileWatch", ignoreCase = true)) {
+            return Verdict.Rejected(
+                "bad-trigger-type",
+                "trigger \"" + trigger.id + "\": fileWatch is a candidate form, not in the roadmap yet " +
+                    "(it would be silently ignored without this check); declare \"cron\" or \"webhook\"",
+            )
+        }
+        if (trigger.type !in TriggerTypes.VALUES) {
+            return Verdict.Rejected(
+                "bad-trigger-type",
+                "trigger \"" + trigger.id + "\": type must be " + TriggerTypes.VALUES.joinToString(" / ") +
+                    "; got \"" + trigger.type + "\"",
+            )
+        }
+        when (trigger.type) {
+            TriggerTypes.CRON -> {
+                val schedule = trigger.spec?.schedule
+                if (schedule.isNullOrBlank()) {
+                    return Verdict.Rejected(
+                        "bad-trigger-spec",
+                        "cron trigger \"" + trigger.id + "\" needs spec.schedule (5-field cron: minute hour day-of-month month day-of-week)",
+                    )
+                }
+                try {
+                    CronExpression.parse(schedule)
+                } catch (e: IllegalArgumentException) {
+                    return Verdict.Rejected("bad-cron", "trigger \"" + trigger.id + "\": " + e.message)
+                }
+                trigger.spec.timezone?.takeIf { it.isNotBlank() }?.let { tz ->
+                    try {
+                        java.time.ZoneId.of(tz)
+                    } catch (_: Exception) {
+                        return Verdict.Rejected(
+                            "bad-timezone",
+                            "trigger \"" + trigger.id + "\": spec.timezone \"" + tz + "\" is not an IANA zone id",
+                        )
+                    }
+                }
+                trigger.spec.jitterSeconds?.let { j ->
+                    if (j < 0 || j > MAX_JITTER_SECONDS) {
+                        return Verdict.Rejected(
+                            "bad-jitter",
+                            "trigger \"" + trigger.id + "\": spec.jitterSeconds must be in 0.." + MAX_JITTER_SECONDS + "; got " + j,
+                        )
+                    }
+                }
+                trigger.spec.missedFirePolicy?.takeIf { it.isNotBlank() }?.let { p ->
+                    if (!MissedFirePolicies.isKnown(p)) {
+                        return Verdict.Rejected(
+                            "bad-missed-fire-policy",
+                            "trigger \"" + trigger.id + "\": missedFirePolicy must be " +
+                                MissedFirePolicies.VALUES.joinToString(" / ") + "; got \"" + p + "\"",
+                        )
+                    }
+                }
+            }
+
+            TriggerTypes.WEBHOOK -> {
+                val sourceId = trigger.spec?.sourceId
+                if (sourceId.isNullOrBlank() || !PLUGIN_ID_PATTERN.matches(sourceId)) {
+                    return Verdict.Rejected(
+                        "bad-trigger-spec",
+                        "webhook trigger \"" + trigger.id + "\" needs spec.sourceId matching " +
+                            PLUGIN_ID_PATTERN.pattern + " (the <sourceId> of POST /v1/webhook/<sourceId>)",
+                    )
+                }
+                trigger.spec.secretHeader?.takeIf { it.isNotBlank() }?.let { header ->
+                    if (header.lowercase() !in TriggerSecretHeaders.ALLOWED) {
+                        return Verdict.Rejected(
+                            "bad-secret-header",
+                            "trigger \"" + trigger.id + "\": secretHeader must be one of " +
+                                TriggerSecretHeaders.ALLOWED.joinToString(" / ") +
+                                " (it names which signature header the sender uses; it is not a way to register new headers)",
+                        )
+                    }
+                }
+            }
+        }
+        val prompt = trigger.dispatch.prompt
+        if (prompt.isBlank()) {
+            return Verdict.Rejected("bad-trigger-prompt", "trigger \"" + trigger.id + "\" needs a non-blank dispatch.prompt")
+        }
+        TriggerPromptKeys.PLACEHOLDER.findAll(prompt).forEach { match ->
+            val key = match.groupValues[1]
+            if (key !in TriggerPromptKeys.ALLOWED) {
+                return Verdict.Rejected(
+                    "bad-trigger-prompt",
+                    "trigger \"" + trigger.id + "\": placeholder {{" + key + "}} is not allowed; " +
+                        "only the six StandardSourceEvent fields " + TriggerPromptKeys.ALLOWED + " may be referenced",
+                )
+            }
+        }
+        if (trigger.dispatch.targetConvId.isBlank()) {
+            return Verdict.Rejected(
+                "bad-trigger-target",
+                "trigger \"" + trigger.id + "\" needs dispatch.targetConvId (an existing group conversation on this host)",
+            )
+        }
+        trigger.filter?.let { f ->
+            if (f.types.any { it.isBlank() } || f.keywords.any { it.isBlank() }) {
+                return Verdict.Rejected(
+                    "bad-trigger-filter",
+                    "trigger \"" + trigger.id + "\": filter entries must not be blank",
+                )
+            }
         }
         return null
     }

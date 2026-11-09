@@ -180,7 +180,10 @@ class SourceWebhookRegistry(
 ) {
 
     private val secrets = ConcurrentHashMap<String, String>()
-    private val listeners = java.util.concurrent.CopyOnWriteArrayList<(StandardSourceEvent) -> Unit>()
+    // listener 带上 sourceId：路由解析（哪个触发器要接这条事件）需要它，而
+    // StandardSourceEvent 的 6 字段权威模型不携带投递来源——在 fan-out 处把
+    // 事实来源一起交出去，比让消费方猜（或给事件模型加字段）都诚实。
+    private val listeners = java.util.concurrent.CopyOnWriteArrayList<(sourceId: String, StandardSourceEvent) -> Unit>()
 
     /**
      * event.id → 首次受理时刻。网络重试是常态：发送方等不到 ACK 会重发同一投递，
@@ -193,7 +196,7 @@ class SourceWebhookRegistry(
     // 队列与消费循环由注册表自带（ControlPlane 的 dispatchScope 初始化晚于本属性，
     // 注入会导致构造顺序倒置）；dispose() 由宿主 stop() 调用收口。
     private val dispatchScope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
-    private val dispatchChannel = Channel<StandardSourceEvent>(queueCapacity)
+    private val dispatchChannel = Channel<QueuedEvent>(queueCapacity)
     private val dispatchPermits = Semaphore(dispatchParallelism)
 
     init {
@@ -202,10 +205,10 @@ class SourceWebhookRegistry(
                 // 先占配额再取事件：取出的那一刻起事件要么在派发、要么还在通道里，
                 // 背压严格等于 queueCapacity——不能让「取出待派」绕开有界队列。
                 dispatchPermits.acquire()
-                val event = dispatchChannel.receive()
+                val queued = dispatchChannel.receive()
                 dispatchScope.launch {
                     try {
-                        dispatchToListeners(event)
+                        dispatchToListeners(queued.sourceId, queued.event)
                     } finally {
                         dispatchPermits.release()
                     }
@@ -220,8 +223,11 @@ class SourceWebhookRegistry(
         dispatchScope.cancel()
     }
 
-    private fun dispatchToListeners(event: StandardSourceEvent) {
-        listeners.forEach { runCatching { it(event) } }
+    /** 队列元素：sourceId 是投递事实的一部分，跟事件一起入队。 */
+    private data class QueuedEvent(val sourceId: String, val event: StandardSourceEvent)
+
+    private fun dispatchToListeners(sourceId: String, event: StandardSourceEvent) {
+        listeners.forEach { runCatching { it(sourceId, event) } }
     }
 
     /**
@@ -248,7 +254,7 @@ class SourceWebhookRegistry(
             ?: System.getenv("TENON_WEBHOOK_SECRET_${key.replace('-', '_').uppercase()}")?.takeIf { it.isNotBlank() }
     }
 
-    fun addListener(listener: (StandardSourceEvent) -> Unit) {
+    fun addListener(listener: (sourceId: String, event: StandardSourceEvent) -> Unit) {
         listeners.add(listener)
     }
 
@@ -355,7 +361,7 @@ class SourceWebhookRegistry(
         }
 
         // 入队失败（背压到顶）= 本条未受理：撤掉幂等账，把重试权还给发送方。
-        if (dispatchChannel.trySend(event).isFailure) {
+        if (dispatchChannel.trySend(QueuedEvent(sourceId.trim().lowercase(), event)).isFailure) {
             forgetEvent(event.id)
             return WebhookResult.Rejected(
                 503,

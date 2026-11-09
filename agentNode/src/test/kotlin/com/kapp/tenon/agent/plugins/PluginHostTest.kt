@@ -109,9 +109,10 @@ class PluginHostTest {
         try {
             writePlugin(dataDir, "no-manifest", "{}").resolve("manifest.json").delete()
             writePlugin(dataDir, "bad-json", "{ not json")
-            // 未知键（严格解析，C4）：声明 triggers 这类本宿主不支持的字段必须
-            // 被拒收并落 process.log，而不是静默当有效清单拉起。
-            writePlugin(dataDir, "unknown-key", """{"pluginId":"unknown-key","name":"U","entrypoint":"python3 main.py","triggers":[]}""")
+            // 未知键（严格解析，C4）：声明本宿主不认识的字段必须被拒收并落
+            // process.log，而不是静默当有效清单拉起。（triggers 自 C9 起是合法键，
+            // 未知键样本改用 permissions。）
+            writePlugin(dataDir, "unknown-key", """{"pluginId":"unknown-key","name":"U","entrypoint":"python3 main.py","permissions":{"network":[]}}""")
             writePlugin(dataDir, "no-entrypoint", manifestJson("no-entrypoint", null))
             writePlugin(dataDir, "blank-entrypoint", manifestJson("blank-entrypoint", "   "))
             writePlugin(dataDir, "name-mismatch", manifestJson("declared-id", "python3 main.py"))

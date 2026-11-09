@@ -138,7 +138,7 @@ class SourceWebhookRouteTest {
         registry.registerSecret("github", testSecret)
 
         var capturedEvent: StandardSourceEvent? = null
-        registry.addListener { capturedEvent = it }
+        registry.addListener { _, event -> capturedEvent = event }
 
         val body = """
             {
@@ -229,7 +229,7 @@ class SourceWebhookRouteTest {
     fun genericWebhookWithoutPayloadIdIsDeterministic() {
         val registry = SourceWebhookRegistry()
         registry.registerSecret("mail", testSecret)
-        registry.addListener { /* 无操作消费者：满足 no-consumer 门 */ }
+        registry.addListener { _, _ -> /* 无操作消费者：满足 no-consumer 门 */ }
 
         val body = """{"title":"disk almost full","text":"usage at 97%"}""".toByteArray(Charsets.UTF_8)
         val headers = mapOf("x-webhook-signature" to listOf(computeHmacSha256(body, testSecret)))
@@ -258,7 +258,7 @@ class SourceWebhookRouteTest {
         val started = CountDownLatch(1)
         val release = CountDownLatch(1)
         var listenerCalls = 0
-        registry.addListener {
+        registry.addListener { _, _ ->
             started.countDown()
             release.await(10, TimeUnit.SECONDS)
             listenerCalls++
@@ -286,7 +286,7 @@ class SourceWebhookRouteTest {
     fun githubMissingDeliveryHeaderUsesDeterministicId() {
         val registry = SourceWebhookRegistry()
         registry.registerSecret("github", testSecret)
-        registry.addListener { }
+        registry.addListener { _, _ -> }
 
         val body = """{"action":"opened"}""".toByteArray(Charsets.UTF_8)
         val headers = mapOf(
@@ -309,7 +309,7 @@ class SourceWebhookRouteTest {
         var now = 1_000_000L
         val registry = SourceWebhookRegistry(nowMillis = { now })
         registry.registerSecret("mail", testSecret)
-        registry.addListener { }
+        registry.addListener { _, _ -> }
 
         val body = """{"id":"evt-ttl","type":"mail.inbound"}""".toByteArray(Charsets.UTF_8)
         val headers = mapOf("x-webhook-signature" to listOf(computeHmacSha256(body, testSecret)))
@@ -346,7 +346,7 @@ class SourceWebhookRouteTest {
 
         val started = CountDownLatch(1)
         val release = CountDownLatch(1)
-        registry.addListener {
+        registry.addListener { _, _ ->
             started.countDown()
             release.await(10, TimeUnit.SECONDS)
         }
@@ -375,7 +375,7 @@ class SourceWebhookRouteTest {
 
         val started = CountDownLatch(1)
         val release = CountDownLatch(1)
-        registry.addListener {
+        registry.addListener { _, _ ->
             started.countDown()
             release.await(15, TimeUnit.SECONDS)
         }

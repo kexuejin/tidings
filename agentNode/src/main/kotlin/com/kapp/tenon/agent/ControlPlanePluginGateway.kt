@@ -5,8 +5,10 @@ package com.kapp.tenon.agent
 import com.kapp.tenon.agent.drivers.DriverCooldownTracker
 import com.kapp.tenon.agent.drivers.DriverEvent
 import com.kapp.tenon.agent.drivers.ExternalPluginDriver
+import com.kapp.tenon.agent.plugins.PluginManifest
 import com.kapp.tenon.agent.plugins.PluginRegistration
 import com.kapp.tenon.agent.plugins.PluginRegistry
+import com.kapp.tenon.agent.plugins.TriggerTypes
 import com.kapp.tenon.core.protocol.AgentSessionStates
 import com.kapp.tenon.core.protocol.sameAgent
 import com.sun.net.httpserver.HttpExchange
@@ -115,6 +117,13 @@ internal fun ControlPlane.pluginRegister(exchange: HttpExchange) {
         }
     }
     val manifest = accepted.manifest
+    // 触发器的宿主级事实（提案 §5.2）：webhook 密钥必须已配置、回投会话必须
+    // 本机存在。结构判据在 PluginRegistration.validate，这两道在这里——它们
+    // 是宿主状态，不是清单能自证的；缺一道就是「注册收了、触发永不生效」。
+    validateTriggerHostFacts(manifest)?.let { rejected ->
+        respond(exchange, 400, errorJson(rejected.error, rejected.message))
+        return
+    }
     // 端口冲突检查：两个插件不能共用同一条回环 IPC（驱动会互相打穿对方的会话）。
     plugins.findByPort(httpPort.toInt())?.let { existing ->
         if (existing.pluginId != manifest.pluginId) {
@@ -149,6 +158,43 @@ internal fun ControlPlane.pluginRegister(exchange: HttpExchange) {
             )
         },
     )
+}
+
+/**
+ * 触发器的宿主级事实校验（提案 §5.2）：webhook 触发的 sourceId 必须已配密钥
+ * （未配置即拒——与入站 fail-closed 同一条纪律）；targetConvId 必须本机存在，
+ * 且校验器未接线时整体拒绝（fail-closed）。返回 null = 通过。
+ */
+internal fun ControlPlane.validateTriggerHostFacts(manifest: PluginManifest): PluginRegistration.Verdict.Rejected? {
+    if (manifest.triggers.isEmpty()) return null
+    manifest.triggers.forEach { trigger ->
+        if (trigger.type == TriggerTypes.WEBHOOK) {
+            val sourceId = trigger.spec?.sourceId.orEmpty()
+            if (sourceWebhooks.getSecret(sourceId) == null) {
+                return PluginRegistration.Verdict.Rejected(
+                    "secret-not-configured",
+                    "webhook trigger \"" + trigger.id + "\" needs a configured secret for source \"" + sourceId +
+                        "\"; set TENON_WEBHOOK_SECRET_" + sourceId.replace('-', '_').uppercase() +
+                        " (or registerSecret) before registering this plugin",
+                )
+            }
+        }
+        val validator = triggerTargetConvKnown
+            ?: return PluginRegistration.Verdict.Rejected(
+                "target-conv-unverifiable",
+                "host has no conversation validator wired; manifests with triggers cannot be accepted " +
+                    "(fail-closed: an unverifiable targetConvId would send result cards where nobody sees them)",
+            )
+        val convId = trigger.dispatch.targetConvId
+        if (!validator(convId)) {
+            return PluginRegistration.Verdict.Rejected(
+                "unknown-target-conv",
+                "trigger \"" + trigger.id + "\": targetConvId \"" + convId + "\" does not exist on this host; " +
+                    "result cards are delivered via group cards, so only existing group conversations qualify",
+            )
+        }
+    }
+    return null
 }
 
 internal fun ControlPlane.pluginUnregister(exchange: HttpExchange) {

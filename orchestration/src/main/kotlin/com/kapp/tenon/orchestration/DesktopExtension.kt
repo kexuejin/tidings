@@ -89,6 +89,12 @@ class DesktopExtension(
      * 业务：事件照样入台账、照样进群聊，只是没人展示实时缓冲）。
      */
     private val liveEventSink: ((sessionId: String, line: String) -> Unit)? = null,
+    /**
+     * 调度中枢的持久化台账（Job Table）。null = 触发式编排不装配（webhook 保持
+     * no-consumer 拒收）。桌面壳用 `createSchedulerStore(platform)` 提供——与消息
+     * /Agent 库共用同一条驱动。
+     */
+    private val schedulerStore: com.kapp.tenon.domain.SchedulerStore? = null,
 ) {
     private var plane: ControlPlane? = null
 
@@ -139,6 +145,16 @@ class DesktopExtension(
     private var pluginHost: com.kapp.tenon.agent.plugins.PluginHost? = null
 
     private var workerOrchestrator: DesktopWorkerOrchestrator? = null
+
+    // ---- 触发式编排（提案 §9 阶段二）：持久化队列 + 调度中枢 + 只读执行通道 ----
+    // schedulerStore 为 null（未注入 Job Table 台账）时整组不装配：webhook 走
+    // SourceWebhookRegistry 的 no-consumer 503，如实不可用，不装假队列。
+
+    /** 触发路由定义（manifest triggers 注册通过后由 C10 填充）。 */
+    val triggerRegistry = TriggerRegistry()
+
+    private var triggerQueue: TriggerEventDrain? = null
+    private var hostScheduler: DesktopHostScheduler? = null
 
     /**
      * L1 会话免审的**宿主侧台账**（§4.2 分级免审；落盘 `session-exempts.json`）。
@@ -447,6 +463,74 @@ class DesktopExtension(
             inboundJob = created.observeInbound(scope)
             plane = created
             attachedRuntime = runtime
+            // 触发式编排接线（提案 §9 阶段二）：webhook 事件的**唯一**生产消费者是
+            // 这里的持久化桥——listener 只做 ingest（落 Job Table + 踢排水），编排
+            // 流消费走 TriggerEventDrain 的表驱动循环，不走 listeners fan-out。
+            schedulerStore?.let { store ->
+                val executor = TriggerExecutor(controller, { createdPlane })
+                val queue = TriggerEventDrain(store, scope)
+                queue.handler = { event ->
+                    val route = triggerRegistry.resolve(event.sourceId)
+                    if (route == null) {
+                        TriggerVerdict.Fail(
+                            "no trigger route registered for source \"" + event.sourceId +
+                                "\" (manifest triggers register it)",
+                        )
+                    } else if (!route.matches(event)) {
+                        // §7.2 filter 前置过滤：纯代码规则未命中 → skipped，0 Token。
+                        TriggerVerdict.Skip("filtered by trigger route rules for \"" + event.sourceId + "\"")
+                    } else {
+                        val fields = TriggerPrompts.eventFields(event)
+                        val outcome = executor.execute(
+                            agentKey = route.agentKey,
+                            title = "trigger:" + event.sourceId,
+                            instruction = TriggerPrompts.interpolate(route.promptTemplate, fields),
+                            sourceId = event.sourceId,
+                            event = event,
+                            targetGroupId = route.targetGroupId,
+                        )
+                        if (outcome.done) TriggerVerdict.Done else TriggerVerdict.Fail(outcome.error ?: "trigger task failed")
+                    }
+                }
+                val scheduler = DesktopHostScheduler(store, scope, executeCronTask = { task ->
+                    val outcome = executor.execute(
+                        agentKey = task.agentKey,
+                        title = "cron:" + task.taskId.substringAfterLast('/'),
+                        instruction = task.prompt,
+                        sourceId = null,
+                        event = null,
+                        targetGroupId = task.targetConvId,
+                    )
+                    if (!outcome.done) {
+                        // cron 任务失败已由执行通道回投失败卡；这里再如实打日志，
+                        // 让「调度器派了但执行失败」在宿主侧留痕。
+                        RelayLog.info("RELAY-TRIGGER", "cron task " + task.taskId + " failed: " + (outcome.error ?: "unknown"))
+                    }
+                })
+                // cron 任务目录在阶段三由注册通过的 manifest triggers 填充
+                // （scheduler.registerCronTasks）；阶段二先起引擎。
+                queue.start()
+                scheduler.start()
+                created.sourceWebhooks.addListener { sourceId, event ->
+                    queue.ingest(
+                        com.kapp.tenon.domain.TriggerEventRecord(
+                            eventId = event.id,
+                            sourceId = sourceId,
+                            type = event.type,
+                            subject = event.subject,
+                            summary = event.summary,
+                            detail = event.detail,
+                            link = event.link,
+                            state = com.kapp.tenon.domain.TriggerEventStates.PENDING,
+                            error = null,
+                            createdAt = System.currentTimeMillis(),
+                            updatedAt = System.currentTimeMillis(),
+                        ),
+                    )
+                }
+                triggerQueue = queue
+                hostScheduler = scheduler
+            }
             sessions = registry
             // 托管模式插件：目录里有就拉起（token 注入 + 自注册）；坏了如实记录但不上抛。
             runCatching {
@@ -1085,6 +1169,11 @@ class DesktopExtension(
         // 先停插件（SIGTERM，插件会注销再退）再停控制面：注销要走控制面的 HTTP 路由。
         pluginHost?.stop()
         pluginHost = null
+        // 触发式编排随控制面撤（先停派发循环再停 HTTP——listener 正往队列里 ingest）。
+        triggerQueue?.stop()
+        triggerQueue = null
+        hostScheduler?.stop()
+        hostScheduler = null
         plane?.stop()
         plane = null
         attachedRuntime = null

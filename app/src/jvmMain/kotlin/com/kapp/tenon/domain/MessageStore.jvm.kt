@@ -2,6 +2,7 @@
 
 package com.kapp.tenon.domain
 
+import com.kapp.tenon.db.RelayDatabase
 import com.kapp.tenon.db.createDatabaseDriver
 import com.kapp.tenon.platform.AppPlatform
 import java.io.File
@@ -53,4 +54,9 @@ actual fun createMessageStore(platform: AppPlatform): MessageStore {
 actual fun createAgentStore(platform: AppPlatform): AgentStore {
     val driver = createDatabaseDriver(platform)
     return SqlDelightAgentStore(driver)
+}
+
+actual fun createSchedulerStore(platform: AppPlatform): SchedulerStore {
+    val driver = createDatabaseDriver(platform)
+    return SqlDelightSchedulerStore(RelayDatabase(driver))
 }

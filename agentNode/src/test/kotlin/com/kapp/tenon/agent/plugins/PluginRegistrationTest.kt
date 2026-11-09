@@ -50,6 +50,7 @@ class PluginRegistrationTest {
     private lateinit var runtime: NodeRuntime
     private lateinit var plane: ControlPlane
     private val token = "test-plugin-token-0123456789abcdef"
+    private val testWebhookSecret = "webhook-secret-for-triggers-01"
 
     private val json = Json { ignoreUnknownKeys = true }
 
@@ -261,7 +262,9 @@ class PluginRegistrationTest {
      */
     @Test
     fun manifestWithUnknownTopLevelKeyIsRejectedNotSilentlyDropped() {
-        for (unknownKey in listOf("triggers", "permissions")) {
+        // triggers 自 C9 起是合法键（有完整结构与校验），不再属于未知键；
+        // 这里钉的仍是「宿主不认识的键」：permissions。
+        for (unknownKey in listOf("permissions")) {
             MockExternalPlugin().withAutoStop { plugin ->
                 plugin.start()
                 val bad = MockExternalPlugin.Default.echoTeamManifest().let { m ->
@@ -335,6 +338,166 @@ class PluginRegistrationTest {
             val (code, body) = plugin.registerWith(planeBaseUrl, token = token)
             assertEquals(200, code, "examples 的 10 键清单在严格模式下必须照常注册：" + body)
             assertRegisteredCount(1)
+        }
+    }
+
+    // ---- triggers 增量（提案 §5，C9）----
+
+    /** 构造带 triggers 的清单：echo 基线 + triggers 数组。 */
+    private fun manifestWithTriggers(triggersJson: String): JsonObject =
+        MockExternalPlugin.Default.echoTeamManifest().let { m ->
+            buildJsonObject {
+                m.forEach { (k, v) -> put(k, v) }
+                put("triggers", json.parseToJsonElement(triggersJson))
+            }
+        }
+
+    private val validCronTrigger = """{
+        "id": "morning-triage",
+        "name": "每日晨报",
+        "type": "cron",
+        "spec": { "schedule": "0 8 * * 1-5", "timezone": "Asia/Shanghai", "jitterSeconds": 30, "missedFirePolicy": "RUN_ONCE" },
+        "dispatch": { "prompt": "汇总昨日 {{subject}} 类型事件", "targetConvId": "group:g1" }
+    }"""
+
+    private val validWebhookTrigger = """{
+        "id": "urgent-mail",
+        "name": "紧急邮件",
+        "type": "webhook",
+        "spec": { "sourceId": "mail", "secretHeader": "x-webhook-signature" },
+        "dispatch": { "prompt": "邮件主题 {{subject}}，正文 {{summary}}，请给摘要", "targetConvId": "group:g1" }
+    }"""
+
+    @Test
+    fun validTriggerManifestRegisters() {
+        // 宿主级事实先行：webhook 密钥已配、回投会话校验器已接线（DesktopExtension 的真实形状）。
+        plane.sourceWebhooks.registerSecret("mail", testWebhookSecret)
+        plane.triggerTargetConvKnown = { true }
+        MockExternalPlugin().withAutoStop { plugin ->
+            plugin.start()
+            val manifest = manifestWithTriggers("[$validCronTrigger, $validWebhookTrigger]")
+            val (code, body) = plugin.registerWith(planeBaseUrl, token = token, manifestOverride = manifest)
+            assertEquals(200, code, "合法的 cron + webhook 触发清单必须注册通过：" + body)
+            assertRegisteredCount(1)
+        }
+    }
+
+    @Test
+    fun fileWatchTriggerIsRejectedExplicitly() {
+        MockExternalPlugin().withAutoStop { plugin ->
+            plugin.start()
+            // spec 留空对象：未知键（path 之类）会被严格解码先拒（bad-manifest），
+            // 这里钉的是「类型本身」被显式拒收（bad-trigger-type）。
+            val manifest = manifestWithTriggers("""[{
+                "id": "watcher", "name": "目录监控", "type": "fileWatch",
+                "spec": {},
+                "dispatch": { "prompt": "新文件 {{subject}}", "targetConvId": "group:g1" }
+            }]""")
+            val (code, body) = plugin.registerWith(planeBaseUrl, token = token, manifestOverride = manifest)
+            assertEquals(400, code, "fileWatch 是候选形态，出现即显式拒：" + body)
+            assertTrue(body.contains("bad-trigger-type") && body.contains("fileWatch"), body)
+            assertRegisteredCount(0)
+        }
+    }
+
+    @Test
+    fun badCronAndTimezoneAreRejected() {
+        plane.triggerTargetConvKnown = { true }
+        for (pair in listOf(
+            "0 8 * * 99" to "bad-cron", // 字段越界
+            "0 8 *" to "bad-cron", // 字段数不对
+        )) {
+            MockExternalPlugin().withAutoStop { plugin ->
+                plugin.start()
+                val manifest = manifestWithTriggers("""[{
+                    "id": "t-${pair.first.filter { it.isDigit() || it.isLetter() }}", "name": "n", "type": "cron",
+                    "spec": { "schedule": "${pair.first}" },
+                    "dispatch": { "prompt": "p", "targetConvId": "group:g1" }
+                }]""")
+                val (code, body) = plugin.registerWith(planeBaseUrl, token = token, manifestOverride = manifest)
+                assertEquals(400, code, "非法 cron「${pair.first}」必须拒绝：" + body)
+                assertTrue(body.contains(pair.second), body)
+            }
+        }
+        MockExternalPlugin().withAutoStop { plugin ->
+            plugin.start()
+            val manifest = manifestWithTriggers("""[{
+                "id": "tz", "name": "n", "type": "cron",
+                "spec": { "schedule": "0 8 * * *", "timezone": "Mars/Olympus" },
+                "dispatch": { "prompt": "p", "targetConvId": "group:g1" }
+            }]""")
+            val (code, body) = plugin.registerWith(planeBaseUrl, token = token, manifestOverride = manifest)
+            assertEquals(400, code, "未知时区必须拒绝：" + body)
+            assertTrue(body.contains("bad-timezone"), body)
+        }
+    }
+
+    @Test
+    fun webhookTriggerWithoutSecretIsRejectedFailClosed() {
+        plane.triggerTargetConvKnown = { true }
+        // 不注册 "mail" 的密钥
+        MockExternalPlugin().withAutoStop { plugin ->
+            plugin.start()
+            val manifest = manifestWithTriggers("[$validWebhookTrigger]")
+            val (code, body) = plugin.registerWith(planeBaseUrl, token = token, manifestOverride = manifest)
+            assertEquals(400, code, "webhook 触发的 sourceId 未配密钥必须拒绝（§5.2）：注册收了就等于永不生效的触发器")
+            assertTrue(body.contains("secret-not-configured") && body.contains("TENON_WEBHOOK_SECRET_MAIL"), body)
+            assertRegisteredCount(0)
+        }
+    }
+
+    @Test
+    fun unknownTargetConvAndUnwiredValidatorAreRejected() {
+        // 校验器已接线但会话不存在：
+        plane.sourceWebhooks.registerSecret("mail", testWebhookSecret)
+        plane.triggerTargetConvKnown = { false }
+        MockExternalPlugin().withAutoStop { plugin ->
+            plugin.start()
+            val (code, body) = plugin.registerWith(
+                planeBaseUrl, token = token,
+                manifestOverride = manifestWithTriggers("[$validWebhookTrigger]"),
+            )
+            assertEquals(400, code, "回投会话不存在必须拒绝：" + body)
+            assertTrue(body.contains("unknown-target-conv"), body)
+        }
+        // 校验器未接线（DesktopExtension 没起来）：fail-closed 整体拒绝。
+        plane.triggerTargetConvKnown = null
+        MockExternalPlugin().withAutoStop { plugin ->
+            plugin.start()
+            val (code, body) = plugin.registerWith(
+                planeBaseUrl, token = token,
+                manifestOverride = manifestWithTriggers("[$validWebhookTrigger]"),
+            )
+            assertEquals(400, code, "校验器未接线时含 triggers 的清单必须拒绝（fail-closed）：" + body)
+            assertTrue(body.contains("target-conv-unverifiable"), body)
+        }
+    }
+
+    @Test
+    fun unknownPlaceholderInTriggerPromptIsRejected() {
+        plane.triggerTargetConvKnown = { true }
+        MockExternalPlugin().withAutoStop { plugin ->
+            plugin.start()
+            val manifest = manifestWithTriggers("""[{
+                "id": "ph", "name": "n", "type": "cron",
+                "spec": { "schedule": "0 8 * * *" },
+                "dispatch": { "prompt": "发件人 {{sender}} 主题 {{subject}}", "targetConvId": "group:g1" }
+            }]""")
+            val (code, body) = plugin.registerWith(planeBaseUrl, token = token, manifestOverride = manifest)
+            assertEquals(400, code, "占位符只许引用 StandardSourceEvent 的 6 字段：" + body)
+            assertTrue(body.contains("bad-trigger-prompt") && body.contains("{{sender}}"), body)
+        }
+    }
+
+    @Test
+    fun duplicateTriggerIdsAreRejected() {
+        plane.triggerTargetConvKnown = { true }
+        MockExternalPlugin().withAutoStop { plugin ->
+            plugin.start()
+            val manifest = manifestWithTriggers("[$validCronTrigger, $validCronTrigger]")
+            val (code, body) = plugin.registerWith(planeBaseUrl, token = token, manifestOverride = manifest)
+            assertEquals(400, code, "trigger id 必须清单内唯一：" + body)
+            assertTrue(body.contains("duplicate-trigger-id"), body)
         }
     }
 
