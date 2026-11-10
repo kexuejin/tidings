@@ -8,7 +8,7 @@
 //
 // 1. **它会被打进发货产物**。实测 `app-jvm.jar` 里有
 //    `app/relay/testsupport/GuardSourceScan.class`（12KB），而那个 jar 就在
-//    `Tidings.app/Contents/app/` 里 —— 测试代码进了用户机器。
+//    `Tenon.app/Contents/app/` 里 —— 测试代码进了用户机器。
 // 2. 它只能用 `testImplementation` 引用，而 KMP **没有 Gradle 的 `testFixtures`**：
 //    `:app` 的 `jvmTest` 对 `:composeApp` 不可见，反之亦然。
 //

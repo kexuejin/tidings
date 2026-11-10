@@ -20,7 +20,9 @@ import com.kapp.tenon.platform.ReceivedFileActions
 import com.kapp.tenon.ui.ContentWidths
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.unit.Dp
 import com.kapp.tenon.ui.components.MentionTarget
+import com.kapp.tenon.ui.theme.ComponentSizes
 
 /**
  * [ChatScreen] 的四个参数组。
@@ -283,6 +285,11 @@ data class ChatScreenGroupActions(
      * 关闭团队。null = 这个壳没有保存通路，群信息里不画「团队编制」按钮。
      */
     val onSetTeamRoster: ((groupId: String, defaultWsId: String, roster: List<TeamMemberDraft>?) -> Unit)? = null,
+    /**
+     * 团队执行档端口（团队执行方案 §6.3）：TeamRosterDialog 执行配置段的读写通路。
+     * null = 该壳没有执行面（手机等非宿主）⇒ 只读投影（执行配置由席位宿主管理）。
+     */
+    val teamExecutionPort: com.kapp.tenon.domain.TeamExecutionPort? = null,
     val onUpdateGroupMeta: ((groupId: String, description: String?, announce: String?) -> Unit)? = null,
     val onLeaveGroup: ((groupId: String) -> Unit)? = null,
     /**
@@ -456,6 +463,23 @@ data class ChatScreenChrome(
     val modifier: Modifier = Modifier,
     val showHeader: Boolean = true,
     val bubbleFraction: Float = ContentWidths.BUBBLE_FRACTION_PHONE,
+    /**
+     * 群聊气泡内头像边长。手机壳传 [ComponentSizes.MessageAvatarPhone]（32dp），
+     * 桌面壳用默认 [ComponentSizes.MessageAvatar]（26dp，原型 `.msg .mav` 逐值）。
+     *
+     * 为什么进 chrome：头像随**外壳**的密度档变（与会话行的 `dense`、`ChatHeaderDensity`
+     * 同一条接缝），消息内容组件自己不该知道宿主是哪端。气泡头像与折叠占位
+     * Spacer 共用这个值，「必须相等」由同一个常量保证。
+     */
+    val messageAvatarSize: Dp = ComponentSizes.MessageAvatar,
+    /**
+     * 群信息以**整屏页面**呈现（手机壳传 true）还是居中弹窗（桌面壳默认 false）。
+     *
+     * 两种壳共用 [com.kapp.tenon.ui.components.GroupInfoBody] 一份内容；这个开关只
+     * 换外壳。为什么手机要整屏：聊天页本身已是整屏详情，再叠一个 560dp 上限的
+     * 居中框是"手机形态层"的现场缺陷 —— 与设置子页整屏推入是同一个先例。
+     */
+    val groupInfoAsPage: Boolean = false,
     /**
      * 外壳自带的输入卡片（桌面壳用它）。参数打包成 [ComposerSlotArgs]：
      * 桌面输入卡片与手机内置输入栏要接的是**同一份上下文**（草稿、@ 候选、引用条、

@@ -167,10 +167,9 @@ internal fun ControlPlane.peersJson(): JsonObject = buildJsonObject {
                 put("linkLastError", dial?.lastError)
                 put("linkSkipReason", dial?.skipReason)
                 // **可达性判据（goal 第 5 步的共存可见性）**：
-                // luciola 模式下 legacy 发现整体关闭，于是"没升级的老设备"既发现不到
-                // 我们、我们也发现不到它 —— 它只是静静地显示成"离线"，界面上没有任何
-                // 解释。这一格把原因说出来，让运维/用户能一眼分清"设备关机"与
-                // "它还在老传输上、需要我们帮它升级"。
+                // 本机只跑 luciola 发现（legacy 已移除），所以「发现不到」只剩一种解释：
+                // 对端还在老传输上。这一格把原因说出来，让运维/用户能一眼分清
+                // "设备关机"与"它还在老传输上、需要我们帮它升级"。
                 put(
                     "reachability",
                     when {
@@ -179,14 +178,13 @@ internal fun ControlPlane.peersJson(): JsonObject = buildJsonObject {
                         // 被这条判据打成 legacy-peer-invisible —— 而那个对端当时
                         // 正走加密信道传 50MB。caps 为空 = **不知道**，不是"没有"。
                         peer.profile.caps.isEmpty() -> "unknown"
-                        !runtime.legacyDiscoveryActive && !ControlPlane.posesLuciolaCaps(peer.profile) ->
-                            "legacy-peer-invisible"
+                        !ControlPlane.posesLuciolaCaps(peer.profile) -> "legacy-peer-invisible"
                         else -> "ok"
                     },
                 )
-                if (!runtime.legacyDiscoveryActive) {
-                    put("legacyDiscovery", "off")
-                }
+                // 恒 off —— 属性本身已经删了（本机不存在别的形态），但诊断字段保留，
+                // 免得读控制面的人以为它「以前是 on、现在改了」。
+                put("legacyDiscovery", "off")
             }
         }
     }

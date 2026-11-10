@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: GPL-3.0-only
 
-// Tidings 领域层：控制器、状态、存储、数据库、平台契约。
+// Tenon 领域层：控制器、状态、存储、数据库、平台契约。
 //
 // ## 这个模块存在的唯一目的
 //
@@ -110,7 +110,7 @@ kotlin {
             }
         }
         // 源码级守卫共用的读盘工具（独立模块，只被测试引用 —— 它曾经住在 :app 的
-        // main 源集，实测被打进了 app-jvm.jar，也就是会随 Tidings.app 发到用户机器上）。
+        // main 源集，实测被打进了 app-jvm.jar，也就是会随 Tenon.app 发到用户机器上）。
         val jvmTest by getting {
             dependencies {
                 implementation(project(":testsupport"))

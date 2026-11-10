@@ -175,6 +175,7 @@
     <string name="banner_group_member_removed">Member removed. Notifying group.</string>
     <string name="banner_group_no_permission">Only the group owner or admins can remove members.</string>
     <string name="chat_agent_not_authorized">%1$s did not run: you are not on its authorization list</string>
+    <string name="chat_team_mention_ambiguous">Mention one execution target per message (leader or member); please split it up</string>
     <string name="chat_agent_delegated_by_tag">%1$s cannot run it locally; the task was dispatched by tag %2$s to a remote node</string>
     <!-- Dispatch failed: which task, which agent, why. %1$s = task title, %2$s = agent, %3$s = reason. -->
     <string name="chat_agent_dispatch_failed">"%1$s" failed on %2$s: %3$s</string>
@@ -671,8 +672,6 @@
     <string name="r2_set_profile_org">Organization</string>
     <string name="r2_set_profile_rev_chip">Profile v%1$d</string>
     <string name="r2_set_profile_node_chip">Node %1$s</string>
-    <string name="set_luciola_title">luciola encrypted channel</string>
-    <string name="set_luciola_sub">Messages, files and screen sharing all travel over the encrypted channel (on by default). Devices not upgraded to the same version lose automatic discovery; only QR codes and manual addresses remain. Turn it off and restart the node to fall back to the original transport.</string>
     <string name="set_persist_title">Message Persistence</string>
     <string name="set_persist_sub">When disabled, messages stay in memory and are lost on restart</string>
     <!-- 保留天数在此页是一行纯说明（没有可改的开关），不再伪装成设置行。 -->
@@ -1212,6 +1211,7 @@
     <string name="banner_screen_view_ended">Screen session ended (%1$s)</string>
     <string name="banner_agent_ack_send_failed">The decision wasn't delivered, so the request stays pending. Try again shortly.</string>
     <string name="banner_agent_ack_not_confirmed">The peer doesn't send approval receipts (feature off, or it's offline). Your choice is recorded; what actually runs is up to the peer's Agent.</string>
+    <string name="banner_luciola_unavailable">The encrypted channel could not start (incomplete install or a missing system component), so this device can't reach any other device right now.</string>
     <string name="screen_reason_declined">Peer declined</string>
     <string name="screen_reason_busy">Peer is busy</string>
     <string name="screen_reason_unsupported">Screen sharing unsupported</string>
@@ -1704,6 +1704,14 @@
     <string name="team_roster_role_frontend">Frontend</string>
     <string name="team_roster_role_backend">Backend</string>
     <string name="team_roster_role_security">Security</string>
+    <string name="team_exec_config_label">Execution:</string>
+    <string name="team_exec_kind_worker">Worker</string>
+    <string name="team_exec_kind_reviewer">Reviewer</string>
+    <string name="team_exec_pick_driver">Pick driver…</string>
+    <string name="team_exec_no_drivers">No agent driver available on this machine</string>
+    <string name="team_exec_model_default">Default (inherited)</string>
+    <string name="team_exec_readonly_note">Execution is managed by the seat host: %1$s</string>
+    <string name="team_exec_member_note">%1$s (team)</string>
     <string name="team_roster_max_members">Up to %1$d</string>
     <string name="team_roster_remove_member">Remove</string>
     <string name="team_roster_conflict_warning">Name conflicts with @%1$s, please choose another</string>
@@ -1753,6 +1761,7 @@
     <string name="orchestration_patch_hint_file_missing">The patch file is gone; ask the runner to re-run</string>
     <string name="orchestration_patch_hint_workspace_missing">Workspace directory not found; confirm its location</string>
     <string name="orchestration_patch_hint_failed">Patch could not be applied: %1$s</string>
+    <string name="orchestration_stage_handoff_speech">[%1$s] Implementation complete, please cross-review @%2$s.</string>
 
     <!-- Desktop shell copy (ARP-3). Same shape as the existing desktop_* keys. -->
     <string name="desktop_app_title_waiting">Tenon (%1$d)</string>
@@ -1805,4 +1814,9 @@
     <string name="desktop_brand_short">Tenon</string>
     <string name="desktop_link_added_peer">Node added from link: %1$s</string>
     <string name="desktop_msg_file_unsupported">Tenon message files are not supported yet — this opens the main window only</string>
+    <!-- Prototype review entry (stage A human gate). The card action is resolved
+         on-device: the .html is opened by the system browser, never rendered in-app. -->
+    <string name="card_action_open_prototype">Open prototype</string>
+    <string name="card_artifact_preview_kind_html">Web prototype</string>
+    <string name="card_artifact_preview_external_only">Web prototypes open in the system browser; they are not rendered in-app</string>
 </resources>

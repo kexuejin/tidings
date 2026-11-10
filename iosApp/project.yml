@@ -1,4 +1,4 @@
-# XcodeGen spec for the Tidings iOS shell.
+# XcodeGen spec for the Tenon iOS shell.
 #
 # The shell is thin on purpose: it owns the app lifecycle and nothing else.
 # All product state, navigation, and UI live in `composeApp` and arrive as the
@@ -11,14 +11,14 @@
 # `Tenon.xcodeproj` is generated output and is committed so that opening the
 # app does not require XcodeGen; this spec is the source of truth.
 
-name: Tidings
+name: Tenon
 
 options:
   createIntermediateGroups: true
   deploymentTarget:
     iOS: "16.0"
   groupSortPosition: top
-  # 产品自身的默认语言就是中文：`composeResources/values/strings.xml:2` 的 `app_name` 是「捎话」，
+  # 产品自身的默认语言就是中文：`composeResources/values/strings.xml:2` 的 `app_name` 是「榫卯」，
   # 仓库里没有 `values-en`。所以 development region 也声明成 zh-Hans，让 `Info.plist` 里那几处中文
   # （`CFBundleDisplayName`、`NSLocalNetworkUsageDescription`、`NSCameraUsageDescription`）是**开发语言的值**，而不是一份
   # 被硬塞进英文工程的译文。后者正是审计 2026-10-06 §②-22 记的问题：
@@ -31,7 +31,7 @@ options:
   developmentLanguage: zh-Hans
 
 targets:
-  Tidings:
+  Tenon:
     type: application
     platform: iOS
     sources:
@@ -48,7 +48,7 @@ targets:
       - path: Resources
     settings:
       base:
-        PRODUCT_NAME: Tidings
+        PRODUCT_NAME: Tenon
         ASSETCATALOG_COMPILER_APPICON_NAME: AppIcon
         PRODUCT_BUNDLE_IDENTIFIER: com.kapp.tenon
         INFOPLIST_FILE: Info.plist

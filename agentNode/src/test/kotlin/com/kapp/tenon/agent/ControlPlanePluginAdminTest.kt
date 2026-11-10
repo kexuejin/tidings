@@ -31,6 +31,7 @@ import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertFalse
 import kotlin.test.assertTrue
+import com.kapp.tenon.agent.udpTestTransport
 
 class ControlPlanePluginAdminTest {
 
@@ -58,6 +59,7 @@ class ControlPlanePluginAdminTest {
         stateManager = PluginStateManager(tempDir)
 
         agent = NodeRuntime(
+            messengerTransportFactory = udpTestTransport(),
             profile = Profile.mobile(
                 nodeId = newId(),
                 nick = "Admin Test Agent",

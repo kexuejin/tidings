@@ -370,12 +370,29 @@ object StageChain {
             })
         }
         // 数字员工工牌（原型稿卡片头行：bot 名 + worktree 分支 + 呼吸点）。
-        // 名字取第一根棒的承办人键（真卡上 assignee 徽章同源）；分支就是链条工作树
+        // 名字取当值棒的承办人（正在运行的棒，终态取最后一棒，缺省回退首棒）；分支就是链条工作树
         // branch（真机日志同款 `chain/<id>`）；bdot = 卡级状态点，词表与原型一致
         // （run/done/fail）。全部从既有事实派生，没有一份新造的数据。
-        progress.assignees.firstOrNull()?.let { first ->
+        val activeAssignee = run {
+            if (progress.assignees.isEmpty()) return@run null
+            val runningIdx = progress.stages.indexOfFirst { it.second == "running" }
+            if (runningIdx in progress.assignees.indices) {
+                return@run progress.assignees[runningIdx]
+            }
+            if (progress.currentRole != null) {
+                val roleIdx = progress.stages.indexOfFirst { it.first == progress.currentRole }
+                if (roleIdx in progress.assignees.indices) {
+                    return@run progress.assignees[roleIdx]
+                }
+            }
+            if (progress.state in setOf("review_ready", "done", "merged")) {
+                return@run progress.assignees.lastOrNull()
+            }
+            progress.assignees.firstOrNull()
+        }
+        activeAssignee?.let { current ->
             putJsonObject("bot") {
-                put("name", first)
+                put("name", current)
                 put("branch", "chain/" + progress.chainId)
                 put("bdot", when (progress.state) {
                     "review_ready" -> "done"
@@ -495,6 +512,18 @@ object StageChain {
             })
         } else if (progress.state == "prototype") {
             put("actions", buildJsonArray {
+                // 评审入口排在批准之前：阶段 A 的动作是「先看原型、再批准」。
+                // 没有这一颗，用户是在看不到原型的情况下点 Approve & Develop ——
+                // 全生命周期验收里「人审」名义存在、实质空转。
+                //
+                // 它是**客户端本地动作**：真正要打开的文件在本机（产物已按
+                // purpose=artifact 投递），宿主替不了。客户端不许把它派发过来 ——
+                // 认不出的动作会被 HostCardActions 丢掉并顺手把卡翻成 stale。
+                add(buildJsonObject {
+                    put("actionId", "open-prototype")
+                    put("label", "Open in browser")
+                    put("labelKey", "card.action.open_prototype")
+                })
                 add(buildJsonObject {
                     put("actionId", "approve-prototype")
                     put("label", "Approve & Develop")

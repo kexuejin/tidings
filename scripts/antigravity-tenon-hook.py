@@ -1,10 +1,10 @@
 #!/usr/bin/env python3
 # SPDX-License-Identifier: GPL-3.0-only
-"""antigravity-tidings-hook —— Antigravity（App/IDE/agy）↔ Tidings 宿主的 Lifecycle Hooks 桥。
+"""antigravity-tenon-hook —— Antigravity（App/IDE/agy）↔ Tenon 宿主的 Lifecycle Hooks 桥。
 
 Antigravity 接入设计（形态 B，RFC §3.2/§4）的宿主侧脚本：挂在
 `~/.gemini/config/hooks.json`（或工作区 `.agents/hooks.json`）上，把四类生命周期
-事件转发给本机 Tidings 控制面的回环 HTTP API：
+事件转发给本机 Tenon 控制面的回环 HTTP API：
 
 - SessionStart / Stop  →  POST /v1/agent/hook/session   （手机看板「正在运行」）
 - PreToolUse           →  POST /v1/agent/hook/approval  （免批表短路 + 手机双行审批；

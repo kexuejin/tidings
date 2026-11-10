@@ -320,7 +320,7 @@ fun GroupMeta.mentionedVirtualAgent(text: String, tokens: List<String>): Virtual
 /**
  * 正文里有没有出现 `@token`。
  *
- * 判据与 Tidings 侧 `isMentioningAgent` 同一条：`@` 之后按 **case-insensitive** 比，
+ * 判据与 Tenon 侧 `isMentioningAgent` 同一条：`@` 之后按 **case-insensitive** 比，
  * 且要求 token 后面不是标识符字符（避免 `@dsh` 命中 `@dsh2`）。
  *
  * 为什么不在 core 里 import 界面层的实现：那一层在 composeApp，core 不能反向依赖。

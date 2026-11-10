@@ -122,7 +122,7 @@ $ ls cli/build/install/cli/lib | wc -l
 | `cjkLiteralGate` | `tools/cjk-literal-gate.gradle.kts` 的 `scanRoots` + 基线里 `PlatformContracts.kt` 的**路径**（条数不动，仍 4） | 往 `:app` 插一句中文 ⇒ **红**，报告点名 `app/src/…/MediaKind.kt` |
 | `constructionTraceGate` | `tools/construction-trace.py` 的 `roots` **和** `tools/construction-trace-gate.gradle.kts` 的 `traceRoots`（**两份，只改一份不生效**） | 插一行日期注释 ⇒ **红**。第一次只改了 python 那份，门禁仍绿 —— 正是这个陷阱的现场复现 |
 | `staleCommentRefGate` | `tools/stale-comment-ref.py` 的 `DEFAULT_ROOTS` | 插 `RelayController.kt:42` ⇒ **红** |
-| `jlinkModulesGate` | `tools/jlink-modules.py` 的 `own_prefix` 加上 `app`（`app-jvm-*.jar` 确实在桌面镜像里） | 该 jar 进了 `Tidings.app/Contents/app/`，不扫它就是漏扫 |
+| `jlinkModulesGate` | `tools/jlink-modules.py` 的 `own_prefix` 加上 `app`（`app-jvm-*.jar` 确实在桌面镜像里） | 该 jar 进了 `Tenon.app/Contents/app/`，不扫它就是漏扫 |
 | `unused-imports` | 无需改（扫仓库根，自动覆盖） | — |
 
 **constructionTraceGate 那次假绿值得记住**：工具是 python 一份、gradle 里又存了一份根列表，
@@ -268,9 +268,9 @@ AndroidManifest.xml, :app
 ### 9.3 测试支撑类被打进发货产物
 
 `GuardSourceScan`（12KB）住在 `app/src/jvmMain/`，实测出现在 `app-jvm.jar` 里，
-而那个 jar 就在 `Tidings.app/Contents/app/` —— 测试代码进了用户机器。
+而那个 jar 就在 `Tenon.app/Contents/app/` —— 测试代码进了用户机器。
 搬到独立模块 `:testsupport`（只被 `testImplementation` 引用）。
-复查：`app-jvm.jar` 577 个类中 testsupport 计数 **0**；重新打 Tidings.app 后同样 0。
+复查：`app-jvm.jar` 577 个类中 testsupport 计数 **0**；重新打 Tenon.app 后同样 0。
 
 ### 9.4 跨模块回退层掩盖了 6 处过期路径
 

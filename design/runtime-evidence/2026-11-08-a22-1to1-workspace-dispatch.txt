@@ -177,7 +177,7 @@ tail -f /private/tmp/tenon-stdout.log        # [OCGO-BRIDGE] / [sandbox] / [CARD
 ls -la /tmp/tenon-ws/artifacts/t-1-f56c2afb/ # report.json + patch.diff + task.log
 
 # 4) 两端对库（判「到了没」只能对库，不能看气泡）
-sqlite3 "/Users/ci/Library/Application Support/捎话 Tidings/relay.db" \
+sqlite3 "/Users/ci/Library/Application Support/榫卯 Tenon/relay.db" \
   "select id,conv_id,mine,notice,substr(text,1,60),timestamp from MessageEntity order by timestamp desc limit 8;"
 adb -s <device-serial> exec-out run-as com.kapp.tenon.debug cat databases/relay.db > /tmp/m.db
 adb -s <device-serial> exec-out run-as com.kapp.tenon.debug cat databases/relay.db-wal > /tmp/m.db-wal

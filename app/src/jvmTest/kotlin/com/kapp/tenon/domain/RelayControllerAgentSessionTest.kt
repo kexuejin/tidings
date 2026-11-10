@@ -33,6 +33,7 @@ import com.kapp.tenon.domain.model.AgentSessionKey
 import com.kapp.tenon.domain.model.AgentSessionUi
 import com.kapp.tenon.domain.model.DeliveryState
 import com.kapp.tenon.testutil.awaitUntil
+import com.kapp.tenon.domain.udpTestTransport
 
 /**
  * 验证 Agent Session 协议（PPE-1 P0）在客户端控制器与 Agent 节点之间的端到端双向闭环。
@@ -62,9 +63,10 @@ class RelayControllerAgentSessionTest {
 
         // 1. 启动 Agent 节点（声明 ag1 + tw1 + agn1）
         agentRuntime = NodeRuntime(
+            messengerTransportFactory = udpTestTransport(),
             profile = Profile.agent(
                 nodeId = agentNodeId,
-                nick = "Tidings Agent Bot",
+                nick = "Tenon Agent Bot",
                 host = "test-agent-host",
                 ver = "relay-0.1.0",
                 platform = "mac",
@@ -339,6 +341,7 @@ class RelayControllerAgentSessionTest {
         // 步骤 8：向未声明 agn1 的节点发送时的协商防御
         // ==========================================
         val plainRuntime = NodeRuntime(
+            messengerTransportFactory = udpTestTransport(),
             profile = Profile.mobile(
                 nodeId = newId(),
                 nick = "普通老节点",
@@ -351,7 +354,10 @@ class RelayControllerAgentSessionTest {
         )
         plainRuntime.start(scope)
         try {
-            // 让客户端认识该老节点
+            // 让客户端认识该老节点。legacy 广播发现删掉后没有"碰巧听见"这条路了，
+            // 用产品真实存在的手动添加入口（设置里填 host:port）——它现在会真正
+            // 发一帧 ENTRY（`announceTo`），与用户操作同一条路。
+            controller.addManualPeer("127.0.0.1", plainRuntime.boundPort.toString())
             awaitUntil("客户端与老节点握手") {
                 runBlocking { controller.activeRuntime()?.resolvePeerByHost("127.0.0.1", plainRuntime.boundPort) } != null
             }
@@ -428,6 +434,7 @@ class RelayControllerAgentSessionTest {
     fun crossPeerSameSessionIdIsolationAndDeduplication() = runBlocking {
         val agentNodeId2 = "33333333-0000-4000-8000-000000000003"
         val agentRuntime2 = NodeRuntime(
+            messengerTransportFactory = udpTestTransport(),
             profile = Profile.agent(
                 nodeId = agentNodeId2,
                 nick = "Second Agent Bot",

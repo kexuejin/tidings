@@ -38,7 +38,7 @@ dependencies {
     // DesktopExtension 的 merge-patch 分支）。手拼字符串在含引号/换行的错误详情上
     // 会出非法 JSON，那是静默丢卡 —— 不如把序列化放进编译类路径。
     implementation(libs.kotlinx.serialization.json)
-    // 源码级守卫共用的读盘工具（只被测试引用，永不进 Tidings.app —— AGENTS §0）。
+    // 源码级守卫共用的读盘工具（只被测试引用，永不进 Tenon.app —— AGENTS §0）。
     testImplementation(project(":testsupport"))
     implementation(compose.material3)
     implementation(compose.materialIconsExtended)
@@ -83,7 +83,7 @@ val RELAY_MIME = "application/x-relay-message"
 /**
  * macOS 的 URL scheme 声明。
  *
- * `CFBundleTypeRole=Viewer`：捎话只是这个链接的消费者，不是编辑器。
+ * `CFBundleTypeRole=Viewer`：榫卯只是这个链接的消费者，不是编辑器。
  */
 val RELAY_URL_TYPES_XML = """
     <key>CFBundleDisplayName</key>
@@ -206,9 +206,9 @@ compose.desktop {
             macOS {
                 bundleID = "com.kapp.tenon.desktop"
                 // `dockName` **只管运行时的 Dock 名称**，它不会写进 Info.plist ——
-                // 实测打包产物里 `CFBundleName` 仍是 packageName（`Tidings`），
+                // 实测打包产物里 `CFBundleName` 仍是 packageName（`Tenon`），
                 // 而 `CFBundleDisplayName` **一个都没有**（0 处）。后果：程序坞 / 菜单栏 /
-                // 活动监视器显示的是 `Tidings`，不是产品名「捎话 Tidings」。
+                // 活动监视器显示的是 `Tenon`，不是产品名「榫卯 Tenon」。
                 // 所以真正的 bundle 元数据在下面 `infoPlist` 的 `RELAY_URL_TYPES_XML` 里
                 // 显式补了 `CFBundleDisplayName`。两处都留着：一个管运行时、一个管元数据。
                 dockName = "榫卯 Tenon"
@@ -289,7 +289,7 @@ tasks.withType<Test>().configureEach {
         desktopLuciolaNativeDir() != null ->
             systemProperty("jna.library.path", desktopLuciolaNativeDir()!!.absolutePath)
     }
-    systemProperty("tidings.luciola.nativeDir", desktopLuciolaNativeDir()?.absolutePath ?: "")
+    systemProperty("tenon.luciola.nativeDir", desktopLuciolaNativeDir()?.absolutePath ?: "")
 }
 
 // 开发验收用:真实进程(./gradlew :desktopApp:run)也能加载 luciola 原生库。
@@ -421,7 +421,7 @@ val verifyLuciolaNative by tasks.registering(Exec::class) {
  * 打包**之后**再验一次：jpackage 会重签名/裁掉 linker-signed CodeDirectory。
  *
  * 2026-11-05 实测：`resources/common/native` 里是 3,607,120 B / sha 7905b1e7…，
- * 产出的 `Tidings.app/Contents/app/resources/native` 里却是 3,604,288 B / sha 454f964e…
+ * 产出的 `Tenon.app/Contents/app/resources/native` 里却是 3,604,288 B / sha 454f964e…
  * （`codesign -dv` 的 Identifier 从 `libluciola_uniffi.dylib` 变成
  * `libluciola_uniffi-5555…`，CodeDirectory 874 → 219 页）。也就是说「staged 库契约一致」
  * **不等于**「用户装到的那份也一致」——中间这道平台后处理是第二个能改坏二进制的地方。

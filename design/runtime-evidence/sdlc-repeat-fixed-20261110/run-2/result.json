@@ -1,0 +1,564 @@
+{
+  "generated_at": "2026-11-10T04:32:31.700320+00:00",
+  "tier": "headless",
+  "stage": "empty",
+  "anchor": "3792076",
+  "source": "/Users/ci/weather-relay",
+  "run_label": "run-2",
+  "workspace": "/tmp/sdlc-runs/20261110-121345/run-2/ws",
+  "host": "http://127.0.0.1:8788",
+  "agents": [
+    {
+      "key": "dsh",
+      "cli": "dsh",
+      "role": "worker"
+    }
+  ],
+  "base_head": "3792076edace616226404a6b7fd6d31360a2d241",
+  "base_tests": {
+    "rc": 1,
+    "tests": null,
+    "pass": null,
+    "fail": null,
+    "skipped": null,
+    "duration_ms": null,
+    "tail": [
+      "> weather-relay@0.1.0 test",
+      "> node --test test/",
+      "",
+      "",
+      "Could not find 'test/'"
+    ]
+  },
+  "device_commits": [
+    "bootstrap a1: 需求立项",
+    "bootstrap a2: 原型与设计",
+    "bootstrap a3: 代码实现与单测",
+    "merge feature from sandbox",
+    "inject failing test into base",
+    "fix injected defect"
+  ],
+  "created_files": [
+    "docs/SDLC-HARNESS-REQ.md",
+    "src/utils/uvAdvice.js",
+    "test/sdlc-harness-injected.test.js",
+    "test/uvAdvice.test.js"
+  ],
+  "environment": {
+    "python": "3.13.12",
+    "dsh": "/opt/homebrew/bin/dsh",
+    "opencode": "/Users/ci/.opencode/bin/opencode",
+    "adb": "/Users/ci/Library/Android/sdk/platform-tools/adb"
+  },
+  "acts": [
+    {
+      "act_id": "0",
+      "title": "环境体检",
+      "chain": "local",
+      "status": "PASS",
+      "verdicts": [
+        {
+          "name": "control-plane",
+          "ok": true,
+          "detail": "GET /v1/peers -> 200 {'peers': [{'nodeId': '7077a2bb-66a2-476e-98c4-7a88dbc203f3', 'nick': 'sdk_gphon"
+        },
+        {
+          "name": "cli:dsh",
+          "ok": true,
+          "detail": "dsh -> /opt/homebrew/bin/dsh"
+        },
+        {
+          "name": "dsh-credentials",
+          "ok": true,
+          "detail": "/Users/ci/.dsh/.credentials.yaml 存在"
+        },
+        {
+          "name": "workspace-is-git",
+          "ok": true,
+          "detail": "/tmp/sdlc-runs/20261110-121345/run-2/ws"
+        },
+        {
+          "name": "workspace-clean",
+          "ok": true,
+          "detail": "HEAD=3792076edace 脏行=0"
+        },
+        {
+          "name": "anchor-checked-out",
+          "ok": true,
+          "detail": "stage=empty 期望锚点 3792076；实际 3792076edace"
+        },
+        {
+          "name": "stage-files-present",
+          "ok": true,
+          "detail": "期望 ['package.json']；实到 ['package.json']"
+        },
+        {
+          "name": "stage-files-absent",
+          "ok": true,
+          "detail": "本阶段不该有 ['src', 'test', 'docs', 'prototype.html', 'index.html']；实际多出 []"
+        },
+        {
+          "name": "baseline-has-no-implementation",
+          "ok": true,
+          "detail": "stage=empty「还没有实现」即正确基线；npm test rc=1 只作读数，不拿预期红判失败"
+        },
+        {
+          "name": "source-repo-untouched",
+          "ok": true,
+          "detail": "/Users/ci/weather-relay 脏行=0"
+        },
+        {
+          "name": "workspace-is-isolated",
+          "ok": true,
+          "detail": "检出目录 /tmp/sdlc-runs/20261110-121345/run-2/ws ≠ 只读源仓 /Users/ci/weather-relay"
+        },
+        {
+          "name": "artifacts-dir",
+          "ok": true,
+          "detail": "/tmp/tenon-ws/artifacts"
+        }
+      ],
+      "evidence": {
+        "base_head": "3792076edace616226404a6b7fd6d31360a2d241",
+        "base_dirty": [],
+        "base_tests": {
+          "rc": 1,
+          "tests": null,
+          "pass": null,
+          "fail": null,
+          "skipped": null,
+          "duration_ms": null,
+          "tail": [
+            "> weather-relay@0.1.0 test",
+            "> node --test test/",
+            "",
+            "",
+            "Could not find 'test/'"
+          ]
+        }
+      },
+      "seconds": 0.6
+    },
+    {
+      "act_id": "a1",
+      "title": "需求立项（空仓）",
+      "chain": "cli-direct",
+      "status": "PASS",
+      "verdicts": [
+        {
+          "name": "patch-is-real",
+          "ok": true,
+          "detail": "t-20-0ab4fc02 4954B files=['docs/PRD.md'] +81/-0"
+        },
+        {
+          "name": "expected-file-produced",
+          "ok": true,
+          "detail": "期望 docs/PRD.md；实际 ['docs/PRD.md']"
+        },
+        {
+          "name": "prd-has-numbered-ac",
+          "ok": true,
+          "detail": "补丁正文需含 AC1..AC4 可测验收标准"
+        },
+        {
+          "name": "stage-landed",
+          "ok": true,
+          "detail": ""
+        },
+        {
+          "name": "stage-visible-to-next-sandbox",
+          "ok": true,
+          "detail": ""
+        }
+      ],
+      "evidence": {
+        "bootstrap_patch": {
+          "bytes": 4954,
+          "files": [
+            "docs/PRD.md"
+          ],
+          "added": 81,
+          "removed": 0,
+          "has_test": false,
+          "has_impl": false,
+          "mentions_req_doc": false,
+          "mentions_injected_test": false,
+          "body_head": "diff --git a/docs/PRD.md b/docs/PRD.md\nnew file mode 100644\nindex 0000000..b8ba6a0\n--- /dev/null\n+++ b/docs/PRD.md\n@@ -0,0 +1,81 @@\n+# 极简天气预报应用 PRD\n+\n+## 1. 概述\n+\n+一个单页天气应用：用户输入城市后，查看当前温度、未来 7 天预报和空气质量指数（AQI），并在摄氏度与华氏度之间切换。本文只定义用户可见行为与验收口径，不限定技术栈。\n+\n+## 2. 约定\n+\n+- 城市名去除首尾空白后参与查询和缓存；拉丁字母不区分大小写。\n+- 温度默认使用摄氏度（°C），保留 1 位小数，按四舍五入显示。\n+- “未来 7 天”含今天，共 7 个连续自然日；默认时区为 `Asia/Shanghai`。\n+- AQI 为 0–500 的整数，分级：0–50 优、51–100 良、101–150 轻度污染、151–200 中度污染、201–300 重度污染、301–500 严重污染。\n+- 自动化测试使用固定数据 fixture、假时钟和网络请求计数器，不访问真实天气服务。\n+\n+## 3. 功能范围\n+\n+- 城市搜索与加载、成功、空结果、错误状态。\n+- 当前天气：城市、当前温度、天气现象。\n+- 7 天预报：日期、天气现象、最高温、最低"
+        },
+        "artifact": "t-20-0ab4fc02",
+        "prompt": "【执行环境约束，必须遵守】你的当前工作目录（cwd）就是本次任务专用的一次性 git worktree，里面是**本阶段该有的全部文件**——可能只有 package.json，不要假定已经存在 src/ 或 test/，需要什么目录就自己创建。所有文件读写一律使用**相对路径**，只在 cwd 内进行；禁止使用任何绝对路径，禁止访问或写入宿主主仓库目录，禁止 cd 到别处。改动只有留在 cwd 的工作树里才会被收割成补丁；写到别处等于本次任务失败。\n当前是空仓，只有 package.json，docs/ 目录需要你创建。新增 docs/PRD.md：为「极简天气预报应用」写一份**精简**需"
+      },
+      "seconds": 91.52
+    },
+    {
+      "act_id": "a2",
+      "title": "原型与设计",
+      "chain": "cli-direct",
+      "status": "PASS",
+      "verdicts": [
+        {
+          "name": "patch-is-real",
+          "ok": true,
+          "detail": "t-21-82612933 10324B files=['prototype.html'] +196/-0"
+        },
+        {
+          "name": "expected-file-produced",
+          "ok": true,
+          "detail": "期望 prototype.html；实际 ['prototype.html']"
+        },
+        {
+          "name": "prototype-is-interactive-html",
+          "ok": true,
+          "detail": "added=196；需有 <script> 与可执行交互逻辑"
+        },
+        {
+          "name": "stage-landed",
+          "ok": true,
+          "detail": ""
+        },
+        {
+          "name": "stage-visible-to-next-sandbox",
+          "ok": true,
+          "detail": ""
+        }
+      ],
+      "evidence": {
+        "bootstrap_patch": {
+          "bytes": 10324,
+          "files": [
+            "prototype.html"
+          ],
+          "added": 196,
+          "removed": 0,
+          "has_test": false,
+          "has_impl": true,
+          "mentions_req_doc": false,
+          "mentions_injected_test": false,
+          "body_head": "diff --git a/prototype.html b/prototype.html\nnew file mode 100644\nindex 0000000..53744ee\n--- /dev/null\n+++ b/prototype.html\n@@ -0,0 +1,196 @@\n+<!DOCTYPE html>\n+<html lang=\"zh-CN\">\n+<head>\n+<meta charset=\"UTF-8\">\n+<meta name=\"viewport\" content=\"width=device-width, initial-scale=1.0\">\n+<title>天气 · 杭州</title>\n+<style>\n+  :root {\n+    --ink: #14213d;\n+    --muted: #667085;\n+    --card: rgba(255, 255, 255, .82);\n+    --line: rgba(20, 33, 61, .1);\n+    --sky: #dceeff;\n+    --sky-2: #f7e8d3;\n+  }\n+  * { box-sizing: border-box; }\n+  body {\n+    margin: 0;\n+    min-height: 100vh;\n+    display: grid;\n+ "
+        },
+        "artifact": "t-21-82612933",
+        "prompt": "【执行环境约束，必须遵守】你的当前工作目录（cwd）就是本次任务专用的一次性 git worktree，里面是**本阶段该有的全部文件**——可能只有 package.json，不要假定已经存在 src/ 或 test/，需要什么目录就自己创建。所有文件读写一律使用**相对路径**，只在 cwd 内进行；禁止使用任何绝对路径，禁止访问或写入宿主主仓库目录，禁止 cd 到别处。改动只有留在 cwd 的工作树里才会被收割成补丁；写到别处等于本次任务失败。\n新增 prototype.html：单文件可交互天气原型（纯 HTML+CSS+JS，不依赖构建工具）。必须包含当前温度、7 天预报列表、摄氏/"
+      },
+      "seconds": 152.5
+    },
+    {
+      "act_id": "a3",
+      "title": "代码实现与单测",
+      "chain": "cli-direct",
+      "status": "PASS",
+      "verdicts": [
+        {
+          "name": "patch-is-real",
+          "ok": true,
+          "detail": "t-22-c0890889 10402B files=['src/weather.js', 'test/index.js'] +265/-0"
+        },
+        {
+          "name": "impl-and-tests-both-produced",
+          "ok": true,
+          "detail": "files=['src/weather.js', 'test/index.js']"
+        },
+        {
+          "name": "stage-landed",
+          "ok": true,
+          "detail": ""
+        },
+        {
+          "name": "stage-visible-to-next-sandbox",
+          "ok": true,
+          "detail": ""
+        },
+        {
+          "name": "bootstrap-tests-green",
+          "ok": true,
+          "detail": "pass=5 fail=0 skipped=0"
+        }
+      ],
+      "evidence": {
+        "bootstrap_patch": {
+          "bytes": 10402,
+          "files": [
+            "src/weather.js",
+            "test/index.js"
+          ],
+          "added": 265,
+          "removed": 0,
+          "has_test": true,
+          "has_impl": true,
+          "mentions_req_doc": false,
+          "mentions_injected_test": false,
+          "body_head": "diff --git a/src/weather.js b/src/weather.js\nnew file mode 100644\nindex 0000000..12b7aa2\n--- /dev/null\n+++ b/src/weather.js\n@@ -0,0 +1,123 @@\n+const MAX_CITY_LENGTH = 64;\n+const CONTROL_CHARACTERS = /[\\u0000-\\u001f\\u007f]/;\n+const AQI_BANDS = [\n+  [50, \"优\"],\n+  [100, \"良\"],\n+  [150, \"轻度污染\"],\n+  [200, \"中度污染\"],\n+  [300, \"重度污染\"],\n+  [500, \"严重污染\"],\n+];\n+\n+export const CACHE_TTL_MS = 10 * 60 * 1000;\n+export const INVALID_CITY_MESSAGE = \"请输入有效的城市名称（1–64 个字符）\";\n+\n+/** Trim and canonicalise a city name; return null when it is not queryable. */\n+export function normalizeCity(value) {\n+  if (typeof value"
+        },
+        "artifact": "t-22-c0890889",
+        "prompt": "【执行环境约束，必须遵守】你的当前工作目录（cwd）就是本次任务专用的一次性 git worktree，里面是**本阶段该有的全部文件**——可能只有 package.json，不要假定已经存在 src/ 或 test/，需要什么目录就自己创建。所有文件读写一律使用**相对路径**，只在 cwd 内进行；禁止使用任何绝对路径，禁止访问或写入宿主主仓库目录，禁止 cd 到别处。改动只有留在 cwd 的工作树里才会被收割成补丁；写到别处等于本次任务失败。\n实现最小可运行天气应用：在 src/ 下新增至少一个 ESM 模块（package.json 的 type=module，必须用 import/"
+      },
+      "seconds": 284.14
+    },
+    {
+      "act_id": "a4",
+      "title": "从零阶段验收",
+      "chain": "local",
+      "status": "PASS",
+      "verdicts": [
+        {
+          "name": "from-zero-artifacts-complete",
+          "ok": true,
+          "detail": "缺文件=[] src有js=True test有js=True"
+        },
+        {
+          "name": "from-zero-tests-green",
+          "ok": true,
+          "detail": "pass=5 fail=0 skipped=0"
+        },
+        {
+          "name": "three-stages-in-baseline",
+          "ok": true,
+          "detail": "git log 中 harness: bootstrap 提交 3 条"
+        }
+      ],
+      "evidence": {
+        "missing": [],
+        "tests": {
+          "rc": 0,
+          "tests": 5,
+          "pass": 5,
+          "fail": 0,
+          "skipped": 0,
+          "duration_ms": 56.748041,
+          "tail": [
+            "# tests 5",
+            "# suites 0",
+            "# pass 5",
+            "# fail 0",
+            "# cancelled 0",
+            "# skipped 0",
+            "# todo 0",
+            "# duration_ms 56.748041"
+          ]
+        },
+        "bootstrap_commits": [
+          "harness: bootstrap a3: 代码实现与单测",
+          "harness: bootstrap a2: 原型与设计",
+          "harness: bootstrap a1: 需求立项"
+        ]
+      },
+      "seconds": 0.6
+    },
+    {
+      "act_id": "2",
+      "title": "新功能实现",
+      "chain": "cli-direct",
+      "status": "PASS",
+      "verdicts": [
+        {
+          "name": "patch-is-real",
+          "ok": true,
+          "detail": "t-23-531a72ce 1533B files=['src/utils/uvAdvice.js', 'test/uvAdvice.test.js'] +49/-0"
+        },
+        {
+          "name": "feature-files-produced",
+          "ok": true,
+          "detail": "期望 src/utils/uvAdvice.js 与 test/uvAdvice.test.js；实际 ['src/utils/uvAdvice.js', 'test/uvAdvice.test.js']"
+        }
+      ],
+      "evidence": {
+        "agent": "dsh",
+        "artifact": "t-23-531a72ce",
+        "patch": {
+          "bytes": 1533,
+          "files": [
+            "src/utils/uvAdvice.js",
+            "test/uvAdvice.test.js"
+          ],
+          "added": 49,
+          "removed": 0,
+          "has_test": true,
+          "has_impl": true,
+          "mentions_req_doc": false,
+          "mentions_injected_test": false,
+          "body_head": "diff --git a/src/utils/uvAdvice.js b/src/utils/uvAdvice.js\nnew file mode 100644\nindex 0000000..f353b0d\n--- /dev/null\n+++ b/src/utils/uvAdvice.js\n@@ -0,0 +1,11 @@\n+/**\n+ * Return a short advice label for a UV index.\n+ * Valid indexes are finite, non-negative numbers; anything else returns null.\n+ */\n+export function uvAdvice(uv) {\n+  if (typeof uv !== \"number\" || !Number.isFinite(uv) || uv < 0) return null;\n+  if (uv <= 2) return \"弱\";\n+  if (uv <= 5) return \"中等\";\n+  if (uv <= 7) return \"强\";\n+  return \"极强\";\n+}\ndiff --git a/test/uvAdvice.test.js b/test/uvAdvice.test.js\nnew file mode 100644\nindex "
+        },
+        "prompt": "【执行环境约束，必须遵守】你的当前工作目录（cwd）就是本次任务专用的一次性 git worktree，里面是**本阶段该有的全部文件**——可能只有 package.json，不要假定已经存在 src/ 或 test/，需要什么目录就自己创建。所有文件读写一律使用**相对路径**，只在 cwd 内进行；禁止使用任何绝对路径，禁止访问或写入宿主主仓库目录，禁止 cd 到别处。改动只有留在 cwd 的工作树里才会被收割成补丁；写到别处等于本次任务失败。\n本项目是 ESM（package.json type=module），必须用 import/export，不许用 require。新增 src/"
+      },
+      "seconds": 79.27
+    },
+    {
+      "act_id": "3",
+      "title": "审查与合流",
+      "chain": "local",
+      "status": "PASS",
+      "verdicts": [
+        {
+          "name": "apply-patch",
+          "ok": true,
+          "detail": "t-23-531a72ce: ok"
+        },
+        {
+          "name": "worktree-changed",
+          "ok": true,
+          "detail": "新增脏行 ['?? src/utils/', '?? test/uvAdvice.test.js']"
+        },
+        {
+          "name": "post-merge-tests-green",
+          "ok": true,
+          "detail": "pass=5 (基线 None) fail=0"
+        },
+        {
+          "name": "baseline-visible-to-next-sandbox",
+          "ok": true,
+          "detail": ""
+        }
+      ],
+      "evidence": {
+        "patches": [
+          "/tmp/tenon-ws/artifacts/t-23-531a72ce/patch.diff"
+        ],
+        "applied": [
+          "/tmp/tenon-ws/artifacts/t-23-531a72ce/patch.diff"
+        ],
+        "head": "fb1ab673017f0950c7c3c9489e17860c1b5d1f6d",
+        "dirty": [
+          "?? src/utils/",
+          "?? test/uvAdvice.test.js"
+        ],
+        "tests": {
+          "rc": 0,
+          "tests": 5,
+          "pass": 5,
+          "fail": 0,
+          "skipped": 0,
+          "duration_ms": 56.58975,
+          "tail": [
+            "# tests 5",
+            "# suites 0",
+            "# pass 5",
+            "# fail 0",
+            "# cancelled 0",
+            "# skipped 0",
+            "# todo 0",
+            "# duration_ms 56.58975"
+          ]
+        },
+        "device_commits": [
+          "bootstrap a1: 需求立项",
+          "bootstrap a2: 原型与设计",
+          "bootstrap a3: 代码实现与单测",
+          "merge feature from sandbox"
+        ]
+      },
+      "seconds": 0.76
+    },
+    {
+      "act_id": "5",
+      "title": "缺陷定位修复",
+      "chain": "cli-direct",
+      "status": "PASS",
+      "verdicts": [
+        {
+          "name": "patch-is-real",
+          "ok": true,
+          "detail": "t-24-7eb0ba4f 715B files=['src/utils/uvAdvice.js'] +13/-0"
+        },
+        {
+          "name": "injected-test-not-deleted",
+          "ok": true,
+          "detail": "补丁里不许出现对注入测试的删改"
+        },
+        {
+          "name": "feature-impl-changed",
+          "ok": true,
+          "detail": "期望改动 src/utils/uvAdvice.js；实际 ['src/utils/uvAdvice.js']"
+        },
+        {
+          "name": "fix-applied",
+          "ok": true,
+          "detail": ""
+        },
+        {
+          "name": "tests-green-after-fix",
+          "ok": true,
+          "detail": "pass=5 fail=0 (基线 None)"
+        },
+        {
+          "name": "injected-test-now-green",
+          "ok": true,
+          "detail": "node --test test/sdlc-harness-injected.test.js: pass=1 fail=0"
+        },
+        {
+          "name": "fix-committed-to-baseline",
+          "ok": true,
+          "detail": ""
+        }
+      ],
+      "evidence": {
+        "agent": "dsh",
+        "artifact": "t-24-7eb0ba4f",
+        "patch": {
+          "bytes": 715,
+          "files": [
+            "src/utils/uvAdvice.js"
+          ],
+          "added": 13,
+          "removed": 0,
+          "has_test": false,
+          "has_impl": true,
+          "mentions_req_doc": false,
+          "mentions_injected_test": false,
+          "body_head": "diff --git a/src/utils/uvAdvice.js b/src/utils/uvAdvice.js\nindex f353b0d..33f4164 100644\n--- a/src/utils/uvAdvice.js\n+++ b/src/utils/uvAdvice.js\n@@ -9,3 +9,16 @@ export function uvAdvice(uv) {\n   if (uv <= 7) return \"强\";\n   return \"极强\";\n }\n+\n+/**\n+ * Return a UV advice label with a matching protection tip.\n+ * Invalid indexes are handled the same way as uvAdvice and return null.\n+ */\n+export function uvAdviceLabel(uv) {\n+  const level = uvAdvice(uv);\n+  if (level === null) return null;\n+  if (uv <= 2) return `${level} · 无需特别防护`;\n+  if (uv <= 5) return `${level} · 建议适度防护`;\n+  if (uv <= 7) retur"
+        },
+        "prompt": "【执行环境约束，必须遵守】你的当前工作目录（cwd）就是本次任务专用的一次性 git worktree，里面是**本阶段该有的全部文件**——可能只有 package.json，不要假定已经存在 src/ 或 test/，需要什么目录就自己创建。所有文件读写一律使用**相对路径**，只在 cwd 内进行；禁止使用任何绝对路径，禁止访问或写入宿主主仓库目录，禁止 cd 到别处。改动只有留在 cwd 的工作树里才会被收割成补丁；写到别处等于本次任务失败。\n仓库里有一个新加的失败测试 test/sdlc-harness-injected.test.js，先运行 npm test 看失败堆栈，在 sr"
+      },
+      "seconds": 74.68
+    },
+    {
+      "act_id": "6",
+      "title": "收尾验收",
+      "chain": "local",
+      "status": "PASS",
+      "verdicts": [
+        {
+          "name": "final-tests-green",
+          "ok": true,
+          "detail": "pass=5 fail=0 skipped=0 duration=54.841417ms"
+        },
+        {
+          "name": "no-test-count-regression",
+          "ok": true,
+          "detail": "now=5 base=None"
+        },
+        {
+          "name": "no-orphan-cli-process",
+          "ok": true,
+          "detail": "pgrep 命中 0 行"
+        },
+        {
+          "name": "no-failed-acts",
+          "ok": true,
+          "detail": "失败幕 []"
+        }
+      ],
+      "evidence": {
+        "head": "87c84ee19d3f83c81aa387090245911971b82da1",
+        "dirty": [],
+        "tests": {
+          "rc": 0,
+          "tests": 5,
+          "pass": 5,
+          "fail": 0,
+          "skipped": 0,
+          "duration_ms": 54.841417,
+          "tail": [
+            "# tests 5",
+            "# suites 0",
+            "# pass 5",
+            "# fail 0",
+            "# cancelled 0",
+            "# skipped 0",
+            "# todo 0",
+            "# duration_ms 54.841417"
+          ]
+        }
+      },
+      "seconds": 0.6
+    }
+  ]
+}

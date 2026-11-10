@@ -4,7 +4,7 @@
 本地/CI 打包前用：
 
 ```bash
-TIDINGS_LUCIOLA_NATIVE=/path/to/cargo-target/debug ./gradlew :desktopApp:createDistributable
+TENON_LUCIOLA_NATIVE=/path/to/cargo-target/debug ./gradlew :desktopApp:createDistributable
 ```
 
 `copyLuciolaNative` 会把库复制到本目录的 `common/native/`，jpackage 随后打进

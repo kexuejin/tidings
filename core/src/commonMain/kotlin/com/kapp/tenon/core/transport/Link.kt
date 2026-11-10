@@ -890,16 +890,26 @@ class LinkClient(
      * 只按当前地址拨号 ⇒ 一个包都发不出去（Mac 的 17880 一条 ESTABLISHED 都没有）。
      * 候选来源与 Messenger.endpointsFor **同源**：当前地址在前，然后才是候选池。
      *
-     * 端口策略（lead 裁决）：
+     * 端口策略：
      *  · **公网** ⇒ [Profile.tlsPort] + TLS，且**必须有 pin**；没 pin/TLS 就不试
      *    （fail-closed，绝不退回明文）；
-     *  · **私网** ⇒ 明文 tcpPort（K1 的局域网路径继续有效）。
+     *  · **私网 + 老端**（档案没有 [Profile.luciolaPort]）⇒ 明文 tcpPort，K1 局域网路径
+     *    继续有效，行为一字不变；
+     *  · **私网 + luciola 监听端** ⇒ 同样走 TLS。理由不是偏好加密，而是**明文端口根本不
+     *    存在**：信道模式下主机有意不建 17879（`legacyTcpListener=false`），档案里的
+     *    tcpPort 只是协议必填位的占位，照它拨必然 connect-timeout；而 17880 的 TLS
+     *    接受面仍由 `linkTransport.startServer` 起、配对码里的 pin 也还在。真机读数：
+     *    手机连续 85 次拨 `17879` 全超时、`pinSource=pairing`、`linkConnected=false`，
+     *    同时主机 17880 在 LISTEN。旧裁决的「私网明文」前提是那个端口真的在听。
+     *
+     * 只用**对端档案里的既有键**判形态，不新增协议字段、不改 caps、不复活明文监听面。
      */
     private fun linkTargets(record: PeerRecord): List<LinkTarget> {
         val peerId = record.profile.nodeId
         if (MsgTypes.CAP_LINK !in record.profile.caps) return emptyList()
         val pin = registry.pinOf(peerId)
         val tlsPort = record.profile.tlsPort
+        val luciolaPeer = record.profile.luciolaPort != null
         val hosts = LinkedHashSet<String>()
         if (record.ip.isNotBlank()) hosts += record.ip
         for (candidate in registry.candidatesOf(peerId)) {
@@ -910,7 +920,8 @@ class LinkClient(
             // task-53：与复查侧**同一条判据** [IpAddressUtils.isLanAddress] —— 家里 LAN 是
             // GUA-/64（中国宽带最常见）时，只认 isPrivateOrLocal 会让 K1 一个目标都不拨，
             // 等于把 K1 静默关掉。
-            if (IpAddressUtils.isLanAddress(host, localAddresses())) {
+            val lan = IpAddressUtils.isLanAddress(host, localAddresses())
+            if (lan && !luciolaPeer) {
                 out += LinkTarget(peerId, host, record.profile.tcpPort, null, secure = false)
             } else if (transport.isSecure && pin != null && tlsPort != null) {
                 out += LinkTarget(peerId, host, tlsPort, pin, secure = true)
@@ -933,11 +944,11 @@ class LinkClient(
         }
         if (!transport.isSecure) {
             // 与 [linkTargets] 同一判据（task-53），否则诊断会把"没拨"的原因说错。
-            return if (hosts.any { IpAddressUtils.isLanAddress(it, localAddresses()) }) {
-                "no-target"
-            } else {
-                "public-address-needs-tls"
+            val hasLan = hosts.any { IpAddressUtils.isLanAddress(it, localAddresses()) }
+            if (hasLan && record.profile.luciolaPort != null) {
+                return "lan-luciola-needs-tls"
             }
+            return if (hasLan) "no-target" else "public-address-needs-tls"
         }
         if (registry.pinOf(peerId) == null) return "no-pin"
         if (record.profile.tlsPort == null) return "peer-has-no-tls-port"

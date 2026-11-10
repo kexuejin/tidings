@@ -112,7 +112,7 @@ private fun R2EmptyShellPreview() {
  * （`feature/chat/ChatScreen.kt:376-386`）。
  *
  * 与 `prototype/screenshots/relay/d08-nosel.png` 的已知差异：
- * 1. **原型右栏还有第三行 `.hint`**「也可以直接把文件拖进窗口，捎话会问你要发给谁。」
+ * 1. **原型右栏还有第三行 `.hint`**「也可以直接把文件拖进窗口，榫卯会问你要发给谁。」
  *    （`relay.html:5149`，`.hint` 带 `margin-top:14px`）—— 代码**没有这一行**，
  *    而且原型自己在源码注释里就写明「代码里没有这句，**算提案**」
  *    （`relay.html:5142-5144`）。要补的话得改 `feature/chat/ChatScreen.kt:377-384`

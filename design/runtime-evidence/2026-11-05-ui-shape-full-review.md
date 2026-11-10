@@ -97,7 +97,7 @@
 ## 5. 真机与真 luciola 宿主复核
 
 - 装置：Pixel 6 `<device-serial>`（`com.kapp.tenon.debug`，`192.0.2.22`）↔
-  `/Applications/Tidings.app`（`192.0.2.82`，`nodeId 46c23456…`）。
+  `/Applications/Tenon.app`（`192.0.2.82`，`nodeId 46c23456…`）。
   `/healthz` `ok=true`；宿主 TCP LISTEN `17878 / 17880 / 17888`；
   `/v1/peers` 里 Pixel 6 `online=true`、`legacyDiscovery:"off"` —— 仍是真 luciola，
   没有为了看 UI 切回 legacy。

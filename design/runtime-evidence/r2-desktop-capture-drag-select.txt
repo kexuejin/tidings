@@ -3,7 +3,7 @@ R2 桌面截图：拖动无法框选区域 —— 根因、修复与 A/B 实证
 日期：2026-10-12 20:50–21:10 CST
 作者：W5（teammate w5-remoteview）
 用户报告（原话）：「截图的时候, 拖动没有选择,没法选择区域」
-产物：scaffold/desktopApp/build/compose/binaries/main/app/捎话 Tidings.app
+产物：scaffold/desktopApp/build/compose/binaries/main/app/榫卯 Tenon.app
       A/B 的两颗二进制都是我自己用
       python3 scaffold/tools/gradle-locked.py --label … -- env JAVA_HOME=/opt/homebrew/opt/openjdk@21 \
         ./scaffold/gradlew -p scaffold :desktopApp:createDistributable --console=plain
@@ -23,7 +23,7 @@ R2 桌面截图：拖动无法框选区域 —— 根因、修复与 A/B 实证
 · 拖拽：/tmp/drag <x1> <y1> <x2> <y2>（CGEvent：mouseMoved → leftMouseDown → 12×leftMouseDragged →
   leftMouseUp，每步 60ms，投到 .cghidEventTap）。
 · 读数（都不靠肉眼）：
-    /tmp/winlist.swift   列 捎话 进程的窗口（id/name/layer/alpha/onscreen/bounds）——判覆盖窗在不在
+    /tmp/winlist.swift   列 榫卯 进程的窗口（id/name/layer/alpha/onscreen/bounds）——判覆盖窗在不在
     /tmp/avg <png> x y w h   区域平均 RGB ——判遮罩在不在、选区内部有没有被去遮罩
     /tmp/bbox <png> R G B <tol> x0 y0 x1 y1  区域同色包围盒 ——扫 RelayPrimary(45,106,79) 的选区边框
     sips -c <h> <w> --cropOffset <top> <left> + sips -Z  裁切放大 4–6 倍读文字/图标
@@ -53,7 +53,7 @@ R2 桌面截图：拖动无法框选区域 —— 根因、修复与 A/B 实证
        四条绿边组成的矩形、内部文字回到未变暗状态、**工具栏移到选区下方**（屏幕 y≈830，
        即 placeCaptureToolbar 的 sel.y+sel.height+8 语义），按钮仍是 剪刀/箭头/文字/马赛克 │ × 复制 ✓。
   E3 成立：两次 A/B 里 Capture 窗口数投前=投后=1（覆盖窗没被拖拽关掉）；
-       截图文件目录 ~/Library/Caches/捎话 Tidings/screenshots/ 在两次拖拽前后文件数不变。
+       截图文件目录 ~/Library/Caches/榫卯 Tenon/screenshots/ 在两次拖拽前后文件数不变。
 
   同一颗新二进制上的其余三条（本次一并复核）：
   · 初始态提示：屏幕中央逐字读到「拖拽框选区域 · Esc 取消」（裁切 610,520 + 700×40 放大 2 倍）。
@@ -91,11 +91,11 @@ R2 桌面截图：拖动无法框选区域 —— 根因、修复与 A/B 实证
 6. 复核命令
 ----------------------------------------------------------------------
   # 两颗二进制（对照 / 修复）都在同一个路径，重放时先确认 mtime：
-  stat -f '%Sm' -t '%H:%M:%S' "scaffold/desktopApp/build/compose/binaries/main/app/捎话 Tidings.app"
+  stat -f '%Sm' -t '%H:%M:%S' "scaffold/desktopApp/build/compose/binaries/main/app/榫卯 Tenon.app"
   # 起两个实例（本机需要第二个实例当对端，否则没有会话就没有 composer）
-  APP="scaffold/desktopApp/build/compose/binaries/main/app/捎话 Tidings.app"
-  "$APP/Contents/MacOS/捎话 Tidings" > /tmp/a.log 2>&1 & sleep 14
-  "$APP/Contents/MacOS/捎话 Tidings" >> /tmp/a.log 2>&1 & sleep 16
+  APP="scaffold/desktopApp/build/compose/binaries/main/app/榫卯 Tenon.app"
+  "$APP/Contents/MacOS/榫卯 Tenon" > /tmp/a.log 2>&1 & sleep 14
+  "$APP/Contents/MacOS/榫卯 Tenon" >> /tmp/a.log 2>&1 & sleep 16
   # 选中会话 → 点剪刀（坐标按 §5 重量）→ 核实覆盖窗 → 拖拽 → 量像素/绿框 → Esc
   /tmp/gui click <pid> <会话行> ; /tmp/gui click <pid> <剪刀>
   swift /tmp/winlist.swift | grep -c name=Capture          # 期望 1

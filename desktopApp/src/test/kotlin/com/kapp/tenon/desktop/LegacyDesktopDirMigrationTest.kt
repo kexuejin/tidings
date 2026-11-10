@@ -15,7 +15,7 @@ import kotlin.test.assertTrue
  * 「relay.db 出现在新目录且内容不变」这种能区分两种结局的量上，而不是「新目录存在」。
  */
 class LegacyDesktopDirMigrationTest {
-    private fun tempHome(): File = Files.createTempDirectory("tidings-home").toFile()
+    private fun tempHome(): File = Files.createTempDirectory("tenon-home").toFile()
 
     @Test
     fun `老数据目录整体搬到新名字且内容不变`() {

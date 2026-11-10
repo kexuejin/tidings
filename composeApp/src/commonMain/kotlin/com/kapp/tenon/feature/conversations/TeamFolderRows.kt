@@ -24,6 +24,7 @@ import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.unit.dp
 import com.kapp.tenon.domain.model.TeamMemberUi
 import com.kapp.tenon.generated.resources.Res
 import com.kapp.tenon.generated.resources.team_folder_badge
@@ -162,9 +163,12 @@ internal fun TeamMemberRow(
             .padding(start = sp.xl, end = sp.lg14, top = sp.xxs, bottom = sp.xxs),
         verticalAlignment = Alignment.CenterVertically,
     ) {
+        // 28dp：24dp + 12sp 的迷你行在手机上已到可读下限（会话行的手机档头像已提到
+        // 48dp，团队下挂成员行提一档保持缩进层级）。名字同步升 bodyMedium——
+        // 与主行标题同号不同重（Normal vs SemiBold），层级靠字重不靠字号。
         Box(
             modifier = Modifier
-                .size(sp.xl)
+                .size(28.dp)
                 .clip(CircleShape)
                 .background(MaterialTheme.colorScheme.secondaryContainer),
             contentAlignment = Alignment.Center,
@@ -178,7 +182,7 @@ internal fun TeamMemberRow(
         Spacer(Modifier.width(sp.sm6))
         Text(
             text = member.name,
-            style = MaterialTheme.typography.bodySmall,
+            style = MaterialTheme.typography.bodyMedium,
             color = MaterialTheme.colorScheme.onSurface,
         )
         Spacer(Modifier.width(sp.sm6))

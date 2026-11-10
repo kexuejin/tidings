@@ -122,7 +122,7 @@ public fun ImeSmokePane(
             .verticalScroll(rememberScrollState())
             .padding(sp.lg),
     ) {
-        // 原型这一页**没有 24sp 大标题**：窗口标题栏已经写着「捎话 设置」，页内第一行是
+        // 原型这一页**没有 24sp 大标题**：窗口标题栏已经写着「榫卯 设置」，页内第一行是
         // `.grphead`（`prototype/relay.html`：`.win .grphead{padding:12px 3px 5px;font-size:11px;
         // letter-spacing:.06em}`，本屏另加了内联 `padding-top:0`）—— 与「桌面」那一页同款。
         Text(

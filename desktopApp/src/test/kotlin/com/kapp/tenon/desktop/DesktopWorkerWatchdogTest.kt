@@ -241,6 +241,31 @@ class DesktopWorkerWatchdogTest {
         assertEquals("timeout", (timeout["state"] as JsonPrimitive).content, "熔断卡的 state=timeout")
     }
 
+    /**
+     * 心跳 rev 是执行期**替代**整卡的形态：working 态不许丢「停止」出口。
+     *
+     * 真机现场（2026-11-10 证据 §6 O8）：heartbeatCardJson 漏了 actions，
+     * 心跳窗口里的「进行中」卡整卡无按钮，唯一出口退回「在群里打 stop
+     * 关键词、打错一个字就静默无效」。与 StageChain.cardOf 的 working 分支
+     * 同一条纪律（D-NEW-2）。
+     */
+    @Test
+    fun heartbeatWorkingCardKeepsTheAbortExit() {
+        val beat = WorkerHeartbeat(currentTool = "gradle", observation = "test Foo.bar", lastBeatTs = 42L)
+        val heartbeat = Json.parseToJsonElement(
+            OrchestratorCards.heartbeatCardJson("t1", rev = 7, title = "title", roleName = "Codex", beat = beat),
+        ) as JsonObject
+        assertEquals("working", (heartbeat["state"] as JsonPrimitive).content)
+        val actions = heartbeat["actions"] as JsonArray
+        assertEquals(1, actions.size, "心跳卡只挂系统动作，业务动作不在此处")
+        val abort = actions[0] as JsonObject
+        assertEquals(
+            "abort-task",
+            (abort["actionId"] as JsonPrimitive).content,
+            "working 态心跳卡必须带 abort-task（停止）动作",
+        )
+    }
+
     /** 预算闸门：24 KiB 是发送侧不变量，超了在宿主这里响，不靠对端拒收兜底。 */
     @Test
     fun hugeObservationIsClampedAndCardsStayInBudget() {

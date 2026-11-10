@@ -17,6 +17,7 @@ import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertFalse
 import kotlin.test.assertTrue
+import com.kapp.tenon.core.testing.udpTestTransport
 
 /**
  * 残片出口的护栏：`leftoverParts()` 与 `discardPartFile()` 之间那**一层坐标系偏移**。
@@ -127,6 +128,7 @@ class NodeRuntimeLeftoverPartsTest {
     }
 
     private fun newNode(downloadDir: String) = NodeRuntime(
+        messengerTransportFactory = udpTestTransport(),
         profile = Profile.mobile(
             nodeId = newId(),
             nick = "leftover-parts-test",

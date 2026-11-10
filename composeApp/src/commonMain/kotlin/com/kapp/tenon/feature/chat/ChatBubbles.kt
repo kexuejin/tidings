@@ -54,6 +54,7 @@ import androidx.compose.ui.text.LinkAnnotation
 import androidx.compose.ui.text.buildAnnotatedString
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import com.kapp.tenon.domain.MediaKind
 import com.kapp.tenon.domain.mediaKindOf
@@ -83,6 +84,7 @@ import com.kapp.tenon.generated.resources.chat_group_member_removed
 import com.kapp.tenon.generated.resources.chat_agent_delegated_by_tag
 import com.kapp.tenon.generated.resources.chat_agent_dispatch_failed
 import com.kapp.tenon.generated.resources.chat_agent_dispatch_failed_bare
+import com.kapp.tenon.generated.resources.chat_team_mention_ambiguous
 import com.kapp.tenon.generated.resources.chat_agent_not_authorized
 import com.kapp.tenon.generated.resources.chat_group_member_added
 import com.kapp.tenon.generated.resources.chat_image
@@ -269,6 +271,12 @@ internal data class ChatAvatar(val name: String, val avatar: Int?, val isAgent: 
 internal fun MessageBubble(
     message: MessageUi,
     bubbleFraction: Float,
+    /**
+     * 群聊气泡内头像边长。桌面默认 [ComponentSizes.MessageAvatar]（原型 `.msg .mav`
+     * 逐值），手机壳经 `ChatScreenChrome` 传 [ComponentSizes.MessageAvatarPhone]。
+     * 折叠占位 Spacer 用同一个值 —— 头像折叠后文字仍要和上一行对齐。
+     */
+    messageAvatarSize: Dp = ComponentSizes.MessageAvatar,
     onAcceptTransfer: (String) -> Unit,
     onDeclineTransfer: (String) -> Unit,
     onCancelTransfer: ((String) -> Unit)? = null,
@@ -295,7 +303,7 @@ internal fun MessageBubble(
     /** 群消息气泡上方署的发件人名。null = 不署（私聊，或这条是自己发的）。 */
     senderName: String? = null,
     /**
-     * 气泡左侧那颗 26dp 方头像（原型 `.msg .mav`）。null = 不画。
+     * 气泡左侧那颗方头像（边长见 [messageAvatarSize]；原型 `.msg .mav`）。null = 不画。
      *
      * 原型里 `.mav` 只在消息带 `ini` 时出现，而演示数据里**只有别人发的**消息带 `ini`
      * —— 自己发的一条都没有。所以这里也只在非 [MessageUi.mine] 时给值。
@@ -384,7 +392,7 @@ internal fun MessageBubble(
                         PeerAvatar(
                             name = av.name,
                             isAgent = av.isAgent,
-                            size = ComponentSizes.MessageAvatar,
+                            size = messageAvatarSize,
                             avatar = av.avatar,
                             shape = ShapeRoles.Avatar,
                         )
@@ -400,7 +408,7 @@ internal fun MessageBubble(
                     }
                 } else {
                     // 与头像同宽：连续消息折叠头像后，文字仍要与上一行对齐。
-                    Spacer(Modifier.width(ComponentSizes.MessageAvatar))
+                    Spacer(Modifier.width(messageAvatarSize))
                 }
                 Spacer(Modifier.width(sp.sm))
             }
@@ -412,7 +420,9 @@ internal fun MessageBubble(
                 senderName?.let {
                     Text(
                         text = it,
-                        style = MaterialTheme.typography.labelSmall,
+                        // 发送者名是多人群里"这句话是谁说的"的主信息：11sp 的
+                        // labelSmall 是注释字号，主体信息用 12sp 的 bodySmall。
+                        style = MaterialTheme.typography.bodySmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                         modifier = Modifier.padding(start = 3.dp, bottom = 3.dp),
                     )
@@ -910,6 +920,8 @@ private fun noticeText(
             NoticeKind.AgentDelegatedByTag -> Res.string.chat_agent_delegated_by_tag
             // 派单终局失败：结构化细节缺失时退回中性一句，不静默。
             NoticeKind.AgentDispatchFailed -> Res.string.chat_agent_dispatch_failed_bare
+            // 一条消息 @ 了多个执行目标：fail-closed 的可见面（§4.2）。
+            NoticeKind.TeamMentionAmbiguous -> Res.string.chat_team_mention_ambiguous
             NoticeKind.GroupRenamed -> Res.string.chat_group_renamed
             NoticeKind.RemovedFromGroup -> Res.string.chat_group_removed
             // 发了「停」但本机没在跑：从前完全静默，用户以为停了（真机踩过）。

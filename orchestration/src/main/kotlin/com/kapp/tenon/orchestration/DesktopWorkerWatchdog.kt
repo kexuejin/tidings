@@ -225,6 +225,17 @@ object OrchestratorCards {
                     beat.observation?.let { put("observation", JsonPrimitive(it.clamped())) }
                 })
             })
+            // 干到一半的工单必须卡上有「停」（与 StageChain.cardOf 的 working 分支
+            // 同一条纪律）：心跳 rev 是执行期**替代**整卡的形态，漏了 actions，
+            // 用户在心跳窗口里看到的就是一张没有任何按钮的「进行中」——唯一出口
+            // 又退回「在群里打 stop 关键词、打错一个字就静默无效」（真机现场见
+            // runtime-evidence 的 DSH 工作区验证证据 §6 O8：t-3/t-6 卡整程无停止键）。
+            put("actions", buildJsonArray {
+                add(buildJsonObject {
+                    put("actionId", JsonPrimitive("abort-task"))
+                    put("label", JsonPrimitive("abort-task"))
+                })
+            })
             put("lastBeatTs", JsonPrimitive(beat.lastBeatTs))
         }
     }

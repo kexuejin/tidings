@@ -1,0 +1,148 @@
+{
+  "generated_at": "2026-11-10T03:28:12.552936+00:00",
+  "tier": "headless",
+  "stage": "empty",
+  "anchor": "3792076",
+  "source": "/Users/ci/weather-relay",
+  "run_label": "single",
+  "workspace": "/tmp/sdlc-runs/20261110-112309/single/ws",
+  "host": "http://127.0.0.1:8788",
+  "agents": [
+    {
+      "key": "dsh",
+      "cli": "dsh",
+      "role": "worker"
+    }
+  ],
+  "base_head": "3792076edace616226404a6b7fd6d31360a2d241",
+  "base_tests": {
+    "rc": 1,
+    "tests": null,
+    "pass": null,
+    "fail": null,
+    "skipped": null,
+    "duration_ms": null,
+    "tail": [
+      "> weather-relay@0.1.0 test",
+      "> node --test test/",
+      "",
+      "",
+      "Could not find 'test/'"
+    ]
+  },
+  "device_commits": [],
+  "created_files": [],
+  "environment": {
+    "python": "3.13.12",
+    "dsh": "/opt/homebrew/bin/dsh",
+    "opencode": "/Users/ci/.opencode/bin/opencode",
+    "adb": "/Users/ci/Library/Android/sdk/platform-tools/adb"
+  },
+  "acts": [
+    {
+      "act_id": "0",
+      "title": "环境体检",
+      "chain": "local",
+      "status": "PASS",
+      "verdicts": [
+        {
+          "name": "control-plane",
+          "ok": true,
+          "detail": "GET /v1/peers -> 200 {'peers': [{'nodeId': 'b276b562-8cf2-4db0-b6dd-c22bc34a5aef', 'nick': 'E2E夹具', '"
+        },
+        {
+          "name": "cli:dsh",
+          "ok": true,
+          "detail": "dsh -> /opt/homebrew/bin/dsh"
+        },
+        {
+          "name": "dsh-credentials",
+          "ok": true,
+          "detail": "/Users/ci/.dsh/.credentials.yaml 存在"
+        },
+        {
+          "name": "workspace-is-git",
+          "ok": true,
+          "detail": "/tmp/sdlc-runs/20261110-112309/single/ws"
+        },
+        {
+          "name": "workspace-clean",
+          "ok": true,
+          "detail": "HEAD=3792076edace 脏行=0"
+        },
+        {
+          "name": "anchor-checked-out",
+          "ok": true,
+          "detail": "stage=empty 期望锚点 3792076；实际 3792076edace"
+        },
+        {
+          "name": "stage-files-present",
+          "ok": true,
+          "detail": "期望 ['package.json']；实到 ['package.json']"
+        },
+        {
+          "name": "stage-files-absent",
+          "ok": true,
+          "detail": "本阶段不该有 ['src', 'test', 'docs', 'prototype.html', 'index.html']；实际多出 []"
+        },
+        {
+          "name": "baseline-has-no-implementation",
+          "ok": true,
+          "detail": "stage=empty「还没有实现」即正确基线；npm test rc=1 只作读数，不拿预期红判失败"
+        },
+        {
+          "name": "source-repo-untouched",
+          "ok": true,
+          "detail": "/Users/ci/weather-relay 脏行=0"
+        },
+        {
+          "name": "workspace-is-isolated",
+          "ok": true,
+          "detail": "检出目录 /tmp/sdlc-runs/20261110-112309/single/ws ≠ 只读源仓 /Users/ci/weather-relay"
+        },
+        {
+          "name": "artifacts-dir",
+          "ok": true,
+          "detail": "/tmp/tenon-ws/artifacts"
+        }
+      ],
+      "evidence": {
+        "base_head": "3792076edace616226404a6b7fd6d31360a2d241",
+        "base_dirty": [],
+        "base_tests": {
+          "rc": 1,
+          "tests": null,
+          "pass": null,
+          "fail": null,
+          "skipped": null,
+          "duration_ms": null,
+          "tail": [
+            "> weather-relay@0.1.0 test",
+            "> node --test test/",
+            "",
+            "",
+            "Could not find 'test/'"
+          ]
+        }
+      },
+      "seconds": 0.7
+    },
+    {
+      "act_id": "a1",
+      "title": "需求立项（空仓）",
+      "chain": "cli-direct",
+      "status": "FAIL",
+      "verdicts": [
+        {
+          "name": "dispatch-harvest",
+          "ok": false,
+          "detail": "300s 内本次派单没有产出 patch.diff（不是通过，是没跑完）"
+        }
+      ],
+      "evidence": {
+        "error": "300s 内本次派单没有产出 patch.diff（不是通过，是没跑完）"
+      },
+      "seconds": 302.04
+    }
+  ]
+}

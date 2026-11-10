@@ -801,14 +801,23 @@ class TransferManager(
     }
 
     /**
-     * 一次入站 transfer 的落盘目录（`<downloadDir>/<rootName>`，rootName 先过路径净化）。
+     * 一次入站 transfer 的落盘目录。
      *
      * 抽出来给信道接管缝用：host 侧登记时要与 legacy 拨号拉取**写同一个目录**，
      * 否则同一个 transfer 在两条路径下会落到两个地方（用户看到"文件传完了但找不到"）。
+     * 两条路共用这一处判断，也免得"单文件要不要建目录"在两处各写一遍而漂移。
+     *
+     * **单文件直落下载根**（见 [transferNeedsFolder]）：从前 `rootName` 取文件名本身，
+     * 于是单文件恒落在 `<downloadDir>/<文件名>/<文件名>` —— 一个只装着自己的目录。
+     * 真机现场（天气原型）：`downloads/prototype.html/prototype.html`
+     * 是同名第二份，界面「打开」指向无后缀那份（最早的一份），用户看到的是上一轮的
+     * `tinct` 而不是本轮的 `Atmos`。目录套自己不是产品意图，只是 `rootName` 兼职了
+     * 「目录名」与「文件显示名」两个角色。
      */
     internal fun saveDirFor(offer: IncomingOffer): String {
         val root = downloadDir()
         makeDirectories(root)
+        if (!transferNeedsFolder(offer.files, offer.isFolder)) return root
         val safeRoot = sanitizeRelativePath(offer.rootName) ?: offer.transferId
         val saveDir = pathJoin(root, safeRoot)
         makeDirectories(saveDir)
@@ -1121,15 +1130,13 @@ class TransferManager(
             )
             return
         }
-        val root = downloadDir()
-        makeDirectories(root)
-        val safeRoot = sanitizeRelativePath(offer.rootName) ?: offer.transferId
-        val saveDir = pathJoin(root, safeRoot)
-        makeDirectories(saveDir)
+        // 落盘目录**只算一处**：信道接管走 `saveDirFor`，这里若再写一遍同样的几行，
+        // 「单文件要不要建目录」就会在两条路上各说各话（同一个 transfer 在不同信道
+        // 下落到不同地方）。`.part` 清单也挂在它上面，两处必须同一个值。
+        val saveDir = saveDirFor(offer)
 
         val totals = offer.files.associate { it.fileId to it.size }
         val received = mutableMapOf<String, Long>()
-        val saved = mutableListOf<String>()
 
         // 登记这次拉取：`cancelIncoming` 要靠它拿到取消句柄与"该删哪些 `.part`"的清单。
         val cancelRef = PullCancelRef()
@@ -1143,7 +1150,11 @@ class TransferManager(
         val plan = crossNetwork?.plan(offer.peerId, endpoint)
         val attempts = plan?.attempts?.takeIf { it.isNotEmpty() }
         try {
-            (dataPlane ?: LegacyTcpDataPlane()).pull(
+            // 落盘路径**只由数据面回答**：去重改名发生在它内部，`saveDir + relPath` 只是
+            // 「打算用的名字」。在这里再拼一遍，目标已存在时就会报出一个不存在的路径，
+            // 而界面「打开」正是按这个值去开的（真机现场：文件在 `prototype(1).html`，
+            // 点开报「文件不在了」）。
+            val savedPaths = (dataPlane ?: LegacyTcpDataPlane()).pull(
                 PullOptions(
                     host = endpoint.host,
                     port = endpoint.port,
@@ -1173,14 +1184,13 @@ class TransferManager(
                     supportsWait = peerSupportsWait(offer.peerId),
                 ),
             )
-            offer.files.forEach { saved += pathJoin(saveDir, it.relPath) }
             stateLock.withLock { acceptedOffers.remove(offer.transferId) }
             _events.tryEmit(
                 TransferEvent.Completed(
                     transferId = offer.transferId,
                     peerId = offer.peerId,
                     incoming = true,
-                    savedPaths = saved,
+                    savedPaths = savedPaths,
                 ),
             )
         } catch (e: PullException) {

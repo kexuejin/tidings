@@ -1,6 +1,6 @@
 #!/bin/sh
 # 确定性 codex 桩（SDLC 验收用）。用法：
-#   TIDINGS_CODEX_CLI=design/runtime-evidence/tools/stub-codex.sh <宿主可执行文件> --background
+#   TENON_CODEX_CLI=design/runtime-evidence/tools/stub-codex.sh <宿主可执行文件> --background
 #
 # 为什么需要它：本机没有任何可用的真 agent CLI，且四类原因不同（2026-11-02 实测）：
 #   codex 0.145.0 —— 未登录（`codex login status` → Not logged in），且

@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: GPL-3.0-only
 
-// Tidings core：协议 + 传输 + 会话。
+// Tenon core：协议 + 传输 + 会话。
 //
 // 刻意不依赖 Compose：composeApp（手机 UI）与 agentNode（headless JVM）
 // 共用这一份实现，UI 框架不能泄漏进协议层。
@@ -57,7 +57,7 @@ kotlin {
     }
 
     sourceSets {
-        // luciola 发现引擎(JVM/Android;iOS 保留自研)。luciola 仓库 docs/MIGRATION-tidings.md 阶段一。
+        // luciola 发现引擎(JVM/Android;iOS 保留自研)。luciola 仓库迁移阶段一。
         val jvmMain by getting { dependencies { implementation(libs.luciola) } }
         // Android 必须用 AAR 变体:luciola-jvm 只有桌面 dylib,JNA 在 Android 上加载不到;
         // AAR 里带 jniLibs/*.so(见 luciola 仓 verifyNativeLib 的守卫)。
@@ -102,7 +102,7 @@ kotlin {
 //   ② 仓库根的兄弟目录 `../RustBuild/cargo-target/{release,debug}`（本机开发常见布局）
 //   ③ `$HOME/RustBuild/cargo-target/{release,debug}`
 //
-// 找不到就**不设** `jna.library.path`，并把 `tidings.luciola.nativeDir` 置空：真引擎用例由
+// 找不到就**不设** `jna.library.path`，并把 `tenon.luciola.nativeDir` 置空：真引擎用例由
 // `LuciolaNativeGuard` 跳过并打印原因。**不要**退回一条个人路径当默认值 —— 那样别人 clone
 // 后拿到的是一堆 `UnsatisfiedLinkError`，症状看起来像产品缺陷，根因却是配置。
 private val luciolaLibNames = listOf(
@@ -154,7 +154,7 @@ tasks.withType<Test>().configureEach {
         luciolaNativeDir != null -> systemProperty("jna.library.path", luciolaNativeDir.absolutePath)
     }
     // 让用例自己判断「能不能跑真引擎」；空串 = 没有。
-    systemProperty("tidings.luciola.nativeDir", luciolaNativeDir?.absolutePath ?: "")
+    systemProperty("tenon.luciola.nativeDir", luciolaNativeDir?.absolutePath ?: "")
 }
 
 // ## 为什么验收用例要单独一个 JVM
@@ -195,7 +195,7 @@ val jvmAcceptanceTest = tasks.register<Test>("jvmAcceptanceTest") {
         override != null -> systemProperty("jna.library.path", override)
         luciolaNativeDir != null -> systemProperty("jna.library.path", luciolaNativeDir.absolutePath)
     }
-    systemProperty("tidings.luciola.nativeDir", luciolaNativeDir?.absolutePath ?: "")
+    systemProperty("tenon.luciola.nativeDir", luciolaNativeDir?.absolutePath ?: "")
     // 一次只跑一条：这条用例独占端口与磁盘，并行只会互相干扰。
     maxParallelForks = 1
 }

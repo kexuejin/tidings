@@ -23,6 +23,7 @@ package com.kapp.tenon.feature.chat
 
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -35,13 +36,11 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.rememberScrollState
-import androidx.compose.material3.Button
 import androidx.compose.material3.Icon
 import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
-import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -74,7 +73,6 @@ import com.kapp.tenon.generated.resources.file_accept
 import com.kapp.tenon.generated.resources.file_bubble_count
 import com.kapp.tenon.generated.resources.file_decline
 import com.kapp.tenon.generated.resources.file_open
-import com.kapp.tenon.generated.resources.file_saved_to
 import com.kapp.tenon.generated.resources.file_reason_offer_expired
 import com.kapp.tenon.generated.resources.file_reason_peer_offline
 import com.kapp.tenon.generated.resources.file_reason_hash_mismatch
@@ -100,13 +98,14 @@ import com.kapp.tenon.generated.resources.file_state_offered_out
 import com.kapp.tenon.generated.resources.file_table_hide_text
 import com.kapp.tenon.generated.resources.file_table_show_text
 import com.kapp.tenon.generated.resources.file_table_truncated
-import com.kapp.tenon.generated.resources.ic_check_double
 import com.kapp.tenon.generated.resources.ic_close
+import com.kapp.tenon.generated.resources.ic_external
 import com.kapp.tenon.generated.resources.ic_file
 import com.kapp.tenon.generated.resources.ic_folder
 import com.kapp.tenon.generated.resources.ic_image
 import com.kapp.tenon.generated.resources.ic_speaker
 import com.kapp.tenon.generated.resources.ic_terminal
+import com.kapp.tenon.generated.resources.ic_window
 import com.kapp.tenon.generated.resources.r2_chat_folder_progress
 import com.kapp.tenon.generated.resources.r2_chat_folder_receiving
 import com.kapp.tenon.generated.resources.r2_chat_folder_sending
@@ -121,11 +120,13 @@ import com.kapp.tenon.ui.components.AppButton
 import com.kapp.tenon.ui.components.AppButtonSize
 import com.kapp.tenon.ui.components.AppButtonTone
 import com.kapp.tenon.ui.components.AppIconButton
+import com.kapp.tenon.ui.components.AppOutlinedButton
 import com.kapp.tenon.ui.components.AppTextButton
 
+private val WEB_FILE_EXTENSIONS = setOf("html", "htm")
 private val CODE_FILE_EXTENSIONS = setOf(
     "kt", "kts", "rs", "js", "ts", "json", "py", "java", "c", "cpp", "h", "go",
-    "sh", "sql", "diff", "patch", "html", "css", "yaml", "yml", "xml", "toml",
+    "sh", "sql", "diff", "patch", "css", "yaml", "yml", "xml", "toml",
 )
 private val ARCHIVE_FILE_EXTENSIONS = setOf("zip", "tar", "gz", "tgz", "7z", "rar", "bz2")
 
@@ -168,6 +169,8 @@ internal fun FileCardView(
     // `.win .filecard` 是 210）。文件夹走的是同一个 `.filecard`（`folderCard`），区别只在
     // `.fi` 里那颗图标 —— 所以「文件夹」这三个字不再另画一枚徽章：下面 `.fs` 那行本来就
     // 有「N 个文件 · 大小」，徽章是同一件事的第二个说法。
+    val savedPath = card.savedPaths.firstOrNull()
+    val canOpen = card.state == TransferState.Completed && !card.mine && receivedFileActions != null && savedPath != null
     Surface(
         // 底色按**归属**分，与文字气泡同一套语言：自己的走 `--bubble-mine`（`primaryContainer`），
         // 对端的走 `--bubble-peer`（`surfaceVariant`）。只给 `surfaceVariant` 会让「我发的文件」
@@ -178,7 +181,15 @@ internal fun FileCardView(
             MaterialTheme.colorScheme.surfaceVariant
         },
         shape = RelayShapes.large,
-        modifier = Modifier.widthIn(min = 196.dp),
+        modifier = Modifier
+            .widthIn(min = 196.dp)
+            .then(
+                if (canOpen) {
+                    Modifier.clickable { receivedFileActions.open(savedPath) }
+                } else {
+                    Modifier
+                },
+            ),
     ) {
         Row(
             modifier = Modifier.padding(horizontal = sp.md10, vertical = 9.dp),
@@ -187,7 +198,7 @@ internal fun FileCardView(
         ) {
             // `.filecard .fi{width:34px;height:34px;border-radius:9px;background:var(--primary-c);
             // color:var(--on-primary-c)}` + `.fi svg{18px}`。
-            // 语义化区分：代码文件紫调（ic_terminal + agentAccent）、压缩包 teal 调（tertiaryContainer）、
+            // 语义化区分：网页原型（ic_window + secondaryContainer）、代码文件紫调（ic_terminal + agentAccent）、压缩包 teal 调（tertiaryContainer）、
             // 文件夹琥珀调（ic_folder + warn）、音频（ic_speaker + secondaryContainer）、媒体与文档（primaryContainer）。
             val ext = card.name.substringAfterLast('.', "").lowercase()
             val (fiIcon, fiContainer, fiContent) = when {
@@ -195,6 +206,11 @@ internal fun FileCardView(
                     Res.drawable.ic_folder,
                     MaterialTheme.accents.warn.copy(alpha = 0.16f),
                     MaterialTheme.accents.warn,
+                )
+                ext in WEB_FILE_EXTENSIONS -> Triple(
+                    Res.drawable.ic_window,
+                    MaterialTheme.colorScheme.secondaryContainer,
+                    MaterialTheme.colorScheme.onSecondaryContainer,
                 )
                 ext in CODE_FILE_EXTENSIONS -> Triple(
                     Res.drawable.ic_terminal,
@@ -276,6 +292,13 @@ internal fun FileCardView(
             } else if (card.fileCount > 1) {
                 stringResource(Res.string.file_bubble_count, card.fileCount) +
                     " · " + formatBytes(card.size)
+            } else if (card.state == TransferState.Completed) {
+                val stateText = if (card.mine) {
+                    stringResource(Res.string.file_state_sent_success)
+                } else {
+                    stringResource(Res.string.file_state_completed_in)
+                }
+                formatBytes(card.size) + " · " + stateText
             } else {
                 formatBytes(card.size)
             } + card.speedSuffix(),
@@ -421,11 +444,13 @@ internal fun FileCardView(
                     // 「正在发」是唯一一个用户仍然反悔得回来的时刻：撤了就是撤了，
                     // 传到一半的文件留在那里只会让人以为还在跑。
                     if (onCancel != null && card.mine) {
+                        // 破坏性动作 + 贴着传输进度等其它可点物：28dp 的显式 size 把
+                        // 命中区压回了无障碍下限之下，回默认 48dp 档（AppIconButton 的
+                        // "档"就是触控目标）。
                         AppIconButton(
                             icon = Res.drawable.ic_close,
                             contentDescription = stringResource(Res.string.common_cancel),
                             onClick = { onCancel() },
-                            modifier = Modifier.size(28.dp),
                         )
                     }
                 }
@@ -452,70 +477,17 @@ internal fun FileCardView(
                         MediaKind.Other -> Unit
                     }
                 }
-                if (card.mine) {
-                    Row(
-                        verticalAlignment = Alignment.CenterVertically,
-                        horizontalArrangement = Arrangement.spacedBy(sp.xs),
-                        modifier = Modifier.padding(top = sp.xxs),
-                    ) {
-                        Icon(
-                            painter = painterResource(Res.drawable.ic_check_double),
-                            contentDescription = null,
-                            tint = MaterialTheme.colorScheme.primary,
-                            modifier = Modifier.size(IconSizes.Badge),
-                        )
-                        Text(
-                            text = stringResource(Res.string.file_state_sent_success),
-                            style = MaterialTheme.typography.labelSmall,
-                            color = MaterialTheme.colorScheme.primary,
-                            fontWeight = FontWeight.Medium,
-                        )
-                    }
-                } else {
-                    Text(
-                        text = stringResource(Res.string.file_state_completed_in),
-                        style = MaterialTheme.typography.labelSmall,
-                        color = MaterialTheme.colorScheme.primary,
-                    )
-                }
                 val savedPath = card.savedPaths.firstOrNull()
-                savedPath?.let { path ->
-                    // 「已存到 <路径>」是**事实陈述**，必须保留（见 [ReceivedFileActions] 的 KDoc：
-                    // 收下的文件落在应用内部目录，用户没有别的办法知道它在哪）。
-                    // 但完整路径是实现细节（`/data/user/0/com.kapp.tenon/files/relay/downloads/…`）：
-                    // 它一折成两行就把卡片本身压住了，而用户真正要看的是**文件名那一段**。
-                    // 所以这里显示**省略过的**路径（中间用 `…` 标记、保留末尾），并且只占一行；
-                    // 完整路径在「打开 / 分享」交给系统之后仍然可见。
-                    Text(
-                        text = stringResource(Res.string.file_saved_to, elidePathTail(path)),
-                        style = MaterialTheme.typography.labelSmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                        maxLines = 1,
-                        overflow = TextOverflow.Ellipsis,
-                    )
-                }
-                // 收到的文件落在应用内部目录（filesDir/relay/downloads），文件管理器看不见 ——
-                // 没有出口的话，那句"已存到 <路径>"就是一条死路。自己发出去的不给：
-                // 本来就知道存在哪，而且 P0 的缺口专指"收到的拿不到"。
-                if (!card.mine && receivedFileActions != null && savedPath != null) {
+                // 收到的非图片文件在已完成态提供轻量出口，对齐原型 .btn.sm (neutral 描边打开 + 次要分享)
+                if (!card.mine && receivedFileActions != null && savedPath != null && mediaKindOf(card) != MediaKind.Image) {
                     Row(
-                        modifier = Modifier.padding(top = sp.sm),
-                        horizontalArrangement = Arrangement.spacedBy(sp.sm),
+                        modifier = Modifier.padding(top = sp.xs),
+                        horizontalArrangement = Arrangement.spacedBy(sp.xs),
                         verticalAlignment = Alignment.CenterVertically,
                     ) {
-                        // 这里不猜"能不能打开"：按钮只是入口，真正的动作在平台层
-                        // （Android 是 ACTION_VIEW / ACTION_SEND + FileProvider）。
-                        //
-                        // **主次**：「打开」是这张卡的主操作（用户拿到文件后的下一步就是它），
-                        // 给实心 [Button]；「分享」是次要出口，降级成 [TextButton]。
-                        // 两个都是纯文字按钮时看不出该点哪个 —— 这与 Offered 分支的
-                        // 「接收（实心）/ 拒绝（文字）」是同一条规矩。
-                        // 用按钮族的 **Compact 档**（9×5 / labelSmall），不用裸 M3 `Button`：
-                        // M3 的 `Button` 自带 `minHeight = 40dp`，`contentPadding` 只压得动横向，
-                        // 于是这张卡里那行按钮的**背景比文字高一大截**（真机反馈 #5）。
-                        // 同一处「打开/分享」的主次关系不变：主操作实心、次操作文字。
-                        AppButton(
+                        AppOutlinedButton(
                             text = stringResource(Res.string.file_open),
+                            leadingIcon = Res.drawable.ic_external,
                             onClick = { receivedFileActions.open(savedPath) },
                             size = AppButtonSize.Compact,
                         )

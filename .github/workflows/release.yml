@@ -230,7 +230,7 @@ jobs:
           TAG="${{ github.event.inputs.tag_name || github.ref_name }}"
           IS_DRAFT="${{ github.event.inputs.draft || 'false' }}"
           
-          FLAGS="--title \"捎话 (Tidings) ${TAG}\" --generate-notes"
+          FLAGS="--title \"榫卯 (Tenon) ${TAG}\" --generate-notes"
           if [ "$IS_DRAFT" = "true" ]; then
             FLAGS="$FLAGS --draft"
           fi

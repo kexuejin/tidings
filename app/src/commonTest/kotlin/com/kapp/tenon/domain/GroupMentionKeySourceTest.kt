@@ -2,7 +2,9 @@
 
 package com.kapp.tenon.domain
 
+import com.kapp.tenon.core.protocol.EntityTypes
 import com.kapp.tenon.core.protocol.GroupMeta
+import com.kapp.tenon.core.protocol.TeamMemberInfo
 import com.kapp.tenon.core.protocol.VirtualAgentMember
 import kotlin.test.Test
 import kotlin.test.assertEquals
@@ -72,5 +74,60 @@ class GroupMentionKeySourceTest {
         val mentioned = RelayController.mentionedAgentKeys(raw, keys).firstOrNull()
         assertEquals("dsh", mentioned, "点名事实取最短的档案键：执行侧据此直接找得到驱动")
         assertEquals("", RelayController.extractAgentPrompt(raw, keys).substringBefore("create").trim())
+    }
+
+    /** 团队执行方案 P0-0.1：**组员名进 token 池** —— `@coder` 必须与候选同源可匹配。 */
+    @Test
+    fun teamRosterNamesJoinThePoolAndStayMatchable() {
+        val teamSeat = VirtualAgentMember(
+            agentId = "dsh-a030882e",
+            hostNodeId = host,
+            name = "dsh-a030882e-default-workspace",
+            entityType = EntityTypes.TEAM,
+            teamMembers = listOf(
+                TeamMemberInfo("m-coder", "Coder", "编码"),
+                TeamMemberInfo("m-reviewer", "reviewer", "审查"),
+            ),
+            defaultWsId = "ws-1",
+        )
+        val ctx = seatContext().copy(
+            group = seatContext().group!!.copy(
+                virtualAgents = listOf(teamSeat),
+            ),
+        )
+        val rows = groupParticipantRows(ctx)
+        // 池内归一小写（与其它 token 同一条纪律）；组员显示名是大写也照样进池。
+        assertTrue(
+            "coder" in rows.mentionKeys && "reviewer" in rows.mentionKeys,
+            "组员名必须进可 @ 池，否则手打 @coder 永远不触发（「@ 了没反应」的回归形态）：" +
+                rows.mentionKeys,
+        )
+        val keys = agentKindsInGroup(ctx)
+        assertTrue(RelayController.isMentioningAgent("@coder 把登录修了", keys))
+        assertTrue(RelayController.isMentioningAgent("@REVIEWER 审一下", keys), "大小写不敏感")
+        // 组员不占席位：agent 候选行仍然只有席位本身，组员只在池里（对外单一窗口 §5.5）。
+        assertEquals(1, rows.agents.size, "组员不是 agent 候选行 —— 它们不能被单独派单/开会话")
+        assertEquals("@dsh-a030882e-default-workspace", rows.agents.single().mentionToken)
+    }
+
+    /** 单兵席位（无 roster）不给池里添组员 token：没有组员就没有团队 @ 语义。 */
+    @Test
+    fun aSingleSeatWithoutARosterAddsNoMemberTokens() {
+        val existing = seatContext().group!!.virtualAgents.orEmpty().single()
+        val ctx = seatContext().copy(
+            group = seatContext().group!!.copy(
+                virtualAgents = listOf(
+                    existing.copy(
+                        entityType = EntityTypes.SINGLE,
+                        teamMembers = emptyList(),
+                    ),
+                ),
+            ),
+        )
+        val rows = groupParticipantRows(ctx)
+        assertTrue(
+            rows.mentionKeys.none { it in setOf("coder", "reviewer") },
+            "单兵席位不产生组员 token：${rows.mentionKeys}",
+        )
     }
 }

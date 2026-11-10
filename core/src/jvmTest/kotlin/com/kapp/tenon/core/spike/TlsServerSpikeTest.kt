@@ -34,7 +34,7 @@ import kotlin.test.assertTrue
  *
  * task-13 的 P2 前置门槛：**JVM 侧能不能做"服务端 TLS + 自签 IP 证书 + SPKI 固定"**。
  * 结论要可执行，所以这里真的起一个 SSLServerSocket 并完成一次 **双向** 握手
- * （捎话两端都会监听，服务端 TLS 是必需项，不只是客户端）。
+ * （榫卯两端都会监听，服务端 TLS 是必需项，不只是客户端）。
  *
  * 这段代码只存在于 jvmTest，删掉它不影响任何生产路径（见 `docs/spike-kmp-tls.md`）。
  *

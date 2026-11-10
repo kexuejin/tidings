@@ -15,7 +15,7 @@ import kotlin.test.assertTrue
 /**
  * 宿主侧接通附件（task-47）：解析形状 + att1 闸门 + 旧帧不受影响。
  *
- * 真机背景：桥（dsh-tidings）能发结构化附件元数据，但宿主侧原来**没读** obj["attachment"]
+ * 真机背景：桥（dsh-tenon）能发结构化附件元数据，但宿主侧原来**没读** obj["attachment"]
  * ⇒ attachment 被静默丢掉（多键被忽略、不报错也不生效）。
  *
  * 两条判据的方向性比实现更重要：

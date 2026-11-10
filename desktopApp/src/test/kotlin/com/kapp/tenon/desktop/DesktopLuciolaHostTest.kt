@@ -16,7 +16,6 @@ import java.nio.file.Files
 import kotlin.test.assertContentEquals
 import kotlin.test.Test
 import kotlin.test.assertEquals
-import kotlin.test.assertFalse
 import kotlin.test.assertNotNull
 import kotlin.test.assertTrue
 
@@ -31,14 +30,14 @@ class DesktopLuciolaHostTest {
 
     private fun freePort(): Int = ServerSocket(0).use { it.localPort }
 
-    private fun tempDir(): String = Files.createTempDirectory("tidings-luciola").toString()
+    private fun tempDir(): String = Files.createTempDirectory("tenon-luciola").toString()
 
     private fun assumeLuciolaAvailable() {
-        val configuredDir = System.getProperty("tidings.luciola.nativeDir")?.takeIf { it.isNotBlank() }
+        val configuredDir = System.getProperty("tenon.luciola.nativeDir")?.takeIf { it.isNotBlank() }
         val libNames = listOf("libluciola_uniffi.dylib", "libluciola_uniffi.so", "luciola_uniffi.dll")
         val hasFile = configuredDir != null && File(configuredDir).isDirectory && libNames.any { File(configuredDir, it).isFile }
         val available = hasFile && try {
-            val probe = DesktopLuciolaHost({ tempDir() }, enabled = true)
+            val probe = DesktopLuciolaHost({tempDir() })
             probe.configure(profile("probe"), 17878)
             probe.pairingInfo() != null
         } catch (_: Throwable) {
@@ -51,26 +50,16 @@ class DesktopLuciolaHostTest {
     }
 
     @Test
-    fun disabledHostProvidesNothing() {
-        val host = DesktopLuciolaHost({ tempDir() }, enabled = false)
-        host.configure(profile("off"), 17878)
-        assertEquals(null, host.pairingInfo())
-        assertEquals(null, host.transportFactory())
-        assertEquals(null, host.discoveryFactory())
-        assertFalse(host.pairPeer("127.0.0.1", 17878, com.kapp.tenon.domain.LuciolaQrInfo.of(ByteArray(32), ByteArray(16))!!))
-    }
-
-    @Test
     fun identityAndPairSecretSurviveRestart() {
         assumeLuciolaAvailable()
         val dir = tempDir()
-        val first = DesktopLuciolaHost({ dir }, enabled = true)
+        val first = DesktopLuciolaHost({dir })
         first.configure(profile("node-desk"), 17878)
         val info = assertNotNull(first.pairingInfo(), "启用后必须有可印的配对信息")
         assertTrue(File(dir, "luciola/ed25519-seed.hex").exists(), "身份 seed 必须落盘")
         assertTrue(File(dir, "luciola/state.json").exists(), "信任库/密钥必须落盘")
 
-        val second = DesktopLuciolaHost({ dir }, enabled = true)
+        val second = DesktopLuciolaHost({dir })
         second.configure(profile("node-desk"), 17878)
         val again = assertNotNull(second.pairingInfo())
         assertEquals(info.publicKey, again.publicKey, "重启后身份必须一致")
@@ -88,8 +77,8 @@ class DesktopLuciolaHostTest {
         assumeLuciolaAvailable()
         val hostPort = freePort()
         val phonePort = freePort()
-        val host = DesktopLuciolaHost({ tempDir() }, enabled = true).apply { configure(profile("node-host"), hostPort) }
-        val phone = DesktopLuciolaHost({ tempDir() }, enabled = true).apply { configure(profile("node-phone"), phonePort) }
+        val host = DesktopLuciolaHost({tempDir() }).apply { configure(profile("node-host"), hostPort) }
+        val phone = DesktopLuciolaHost({tempDir() }).apply { configure(profile("node-phone"), phonePort) }
 
         val info = assertNotNull(host.pairingInfo())
         assertTrue(phone.pairPeer("127.0.0.1", hostPort, info), "扫码后必须存下主机的 pin 与 secret")
@@ -128,12 +117,12 @@ class DesktopLuciolaHostTest {
     fun scannedHostInfoCanBeStoredAndFactoriesComeOnline() {
         assumeLuciolaAvailable()
         val phoneDir = tempDir()
-        val phone = DesktopLuciolaHost({ phoneDir }, enabled = true)
+        val phone = DesktopLuciolaHost({phoneDir })
         phone.configure(profile("node-phone"), freePort())
         assertTrue(phone.transportFactory() != null && phone.discoveryFactory() != null)
 
         val hostDir = tempDir()
-        val host = DesktopLuciolaHost({ hostDir }, enabled = true)
+        val host = DesktopLuciolaHost({hostDir })
         val hostPort = freePort()
         host.configure(profile("node-host"), hostPort)
         val hostInfo = assertNotNull(host.pairingInfo())
@@ -141,7 +130,7 @@ class DesktopLuciolaHostTest {
         assertTrue(phone.pairPeer("127.0.0.1", hostPort, hostInfo), "扫到主机信息必须能存下")
 
         // 同一目录重启后,配对记录必须还在(pairPeer 成功而不是再次失败)。
-        val revived = DesktopLuciolaHost({ phoneDir }, enabled = true)
+        val revived = DesktopLuciolaHost({phoneDir })
         revived.configure(profile("node-phone"), 17879)
         assertTrue(revived.pairPeer("127.0.0.1", hostPort, hostInfo))
     }

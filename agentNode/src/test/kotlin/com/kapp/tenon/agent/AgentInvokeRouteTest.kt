@@ -23,6 +23,7 @@ import kotlin.test.BeforeTest
 import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertTrue
+import com.kapp.tenon.agent.udpTestTransport
 
 /**
  * `POST /v1/agent/invoke` 的**入口契约**（M4，规格 §6.2）。
@@ -55,9 +56,10 @@ class AgentInvokeRouteTest {
     fun setUp() {
         scope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
         agent = NodeRuntime(
+            messengerTransportFactory = udpTestTransport(),
             profile = Profile.mobile(
                 nodeId = newId(),
-                nick = "Tidings Agent",
+                nick = "Tenon Agent",
                 host = "relay-agent",
                 ver = "relay-test",
             ),

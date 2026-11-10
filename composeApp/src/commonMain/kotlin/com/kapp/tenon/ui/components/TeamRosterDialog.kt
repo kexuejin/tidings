@@ -2,11 +2,16 @@
 
 package com.kapp.tenon.ui.components
 
+import androidx.compose.foundation.background
+import androidx.compose.foundation.clickable
+import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.MaterialTheme
@@ -34,11 +39,15 @@ import com.kapp.tenon.core.protocol.VirtualAgentMember
 import org.jetbrains.compose.resources.StringResource
 import com.kapp.tenon.core.protocol.isTeam
 import com.kapp.tenon.core.protocol.newId
+import com.kapp.tenon.domain.TeamExecutionKindsUi
+import com.kapp.tenon.domain.TeamExecutionMemberUi
+import com.kapp.tenon.domain.TeamExecutionPort
+import com.kapp.tenon.domain.TeamExecutionProfileUi
+import com.kapp.tenon.domain.TeamExecutionSaveResult
 import com.kapp.tenon.generated.resources.Res
 import com.kapp.tenon.generated.resources.common_cancel
 import com.kapp.tenon.generated.resources.group_auth_save
 import com.kapp.tenon.generated.resources.team_roster_add_member
-import com.kapp.tenon.generated.resources.team_roster_badge
 import com.kapp.tenon.generated.resources.team_roster_conflict_warning
 import com.kapp.tenon.generated.resources.team_roster_dialog_title
 import com.kapp.tenon.generated.resources.team_roster_disable_note
@@ -65,6 +74,12 @@ import com.kapp.tenon.generated.resources.team_roster_role_test
 import com.kapp.tenon.generated.resources.team_roster_quick_roles
 import com.kapp.tenon.generated.resources.team_roster_remove_member
 import com.kapp.tenon.generated.resources.team_roster_required_warning
+import com.kapp.tenon.generated.resources.team_exec_config_label
+import com.kapp.tenon.generated.resources.team_exec_kind_reviewer
+import com.kapp.tenon.generated.resources.team_exec_kind_worker
+import com.kapp.tenon.generated.resources.team_exec_model_default
+import com.kapp.tenon.generated.resources.team_exec_no_drivers
+import com.kapp.tenon.generated.resources.team_exec_pick_driver
 import com.kapp.tenon.generated.resources.team_roster_seat_label
 import com.kapp.tenon.generated.resources.team_roster_slug_warning
 import com.kapp.tenon.ui.theme.LocalAppSpacing
@@ -115,6 +130,18 @@ fun TeamRosterDialog(
     onSave: (defaultWsId: String, roster: List<TeamMemberDraft>?) -> Unit,
     /** 手机壳传 true：底部注解「执行驱动由桌面宿主托管」（§2.2 双端形态契约）。 */
     showHostManagedNotice: Boolean = false,
+    /**
+     * 本机 nodeId：执行配置段只对**席位宿主**开放（§7.1 —— 执行配置是宿主本地事实，
+     * 非宿主看到的是只读投影）。
+     */
+    selfNodeId: String? = null,
+    /** 群 id：执行档主键 `(groupId, defaultWsId, leaderAgentId)` 之一（§3.2）。 */
+    groupId: String? = null,
+    /**
+     * 团队执行档端口（§6.3）：null = 该壳没有执行面（手机等非宿主）⇒ 执行配置段
+     * 整段不画（声明编辑不受影响）。
+     */
+    executionPort: TeamExecutionPort? = null,
 ) {
     val sp = LocalAppSpacing.current
     val editableSeats = remember(seats) { seats.filter { it.defaultWsId != null } }
@@ -137,6 +164,42 @@ fun TeamRosterDialog(
     }
     // 校验问题：保存时算一次，就地指出行/字段（§2.3 —— 不允许「存下去再说」）。
     var issues by remember(selectedSeat) { mutableStateOf<List<TeamRosterIssue>>(emptyList()) }
+    // **执行配置段**（§7.1）：仅席位宿主 + 端口在位。初值 = 既有执行档沿同 agentId
+    // 对齐（编辑保全：改名/改角色不重算执行配置）；保存时按 agentId 映射回去。
+    val executionEditable = executionPort != null &&
+        selectedSeat != null && selectedSeat.hostNodeId == selfNodeId &&
+        selectedSeat.defaultWsId != null
+    var execMembers by remember(selectedSeat) {
+        mutableStateOf(
+            if (executionEditable && selectedSeat != null && executionPort != null && groupId != null) {
+                // 既有执行档沿同 agentId 对齐（编辑保全）；没配过 ⇒ 按声明顺序给默认
+                // （第一名 worker、其余 reviewer）＋ 空驱动让宿主显式选。
+                val seat = selectedSeat
+                val seatWsId = seat.defaultWsId
+                val existing = if (seatWsId == null) {
+                    null
+                } else {
+                    executionPort.profileOf(groupId, seatWsId, seat.agentId)
+                }
+                seat.teamMembers.mapIndexed { index, member ->
+                    val prior = existing?.members?.firstOrNull {
+                        it.agentId.trim().lowercase() == member.agentId.trim().lowercase()
+                    }
+                    TeamExecutionMemberUi(
+                        agentId = member.agentId,
+                        kind = prior?.kind
+                            ?: if (index == 0) TeamExecutionKindsUi.WORKER else TeamExecutionKindsUi.REVIEWER,
+                        driverKey = prior?.driverKey ?: "",
+                        models = prior?.models ?: emptyList(),
+                    )
+                }
+            } else {
+                emptyList()
+            },
+        )
+    }
+    var execReasons by remember(selectedSeat) { mutableStateOf<List<String>>(emptyList()) }
+    val driverCatalog = remember(selectedSeat) { executionPort?.driverCatalog().orEmpty() }
 
     RelayDialog(
         onDismissRequest = onDismiss,
@@ -223,6 +286,32 @@ fun TeamRosterDialog(
                                     issues = emptyList()
                                 },
                             )
+                            // **执行配置行**（§7.1，仅席位宿主 + 端口在位时画）：
+                            // kind（执行/审查）+ 驱动下拉（只在位驱动）。模型 P1/P2 才开放，
+                            // P0-A 一律「默认（继承）」。
+                            if (executionEditable && index < execMembers.size) {
+                                ExecutionConfigRow(
+                                    member = execMembers[index],
+                                    drivers = driverCatalog,
+                                    onKindChange = { kind ->
+                                        execMembers = execMembers.updateExecAt(index) { it.copy(kind = kind) }
+                                    },
+                                    onDriverChange = { key ->
+                                        execMembers = execMembers.updateExecAt(index) { it.copy(driverKey = key) }
+                                    },
+                                )
+                            }
+                        }
+                        if (execReasons.isNotEmpty()) {
+                            Column {
+                                execReasons.forEach { reason ->
+                                    Text(
+                                        text = reason,
+                                        style = MaterialTheme.typography.labelSmall,
+                                        color = MaterialTheme.colorScheme.error,
+                                    )
+                                }
+                            }
                         }
                         if (issues.any { it.kind == TeamRosterIssueKind.TOO_MANY }) {
                             Text(
@@ -301,23 +390,56 @@ fun TeamRosterDialog(
                 enabled = seat != null,
                 primary = true,
                 onClick = {
-                    if (seat?.defaultWsId == null) return@RelayDialogButton
-                    if (!enabled) {
-                        onSave(seat.defaultWsId!!, null)
+                    // 保存流程用 if/else 链而非早退标签（onClick 标签在非 inline
+                    // 传递链上会被编译器判 unresolved —— 本仓踩过一次的形态）。
+                    val proceed = if (seat == null) {
+                        false
+                    } else if (!enabled) {
+                        onSave(seat.defaultWsId ?: "", null)
                         onDismiss()
-                        return@RelayDialogButton
-                    }
-                    // 保存前校验（§2.3）：错误就地指出行/字段，不允许存下去再说。
-                    val pool = takenTokens - seat.teamMembers
-                        .flatMap { listOf(it.name, it.name.lowercase()) }.toSet()
-                    val found = TeamRosterValidation.validate(
-                        drafts.map { it.copy(name = it.name.trim(), role = it.role.trim()) },
-                        pool,
-                    )
-                    if (found.isNotEmpty()) {
-                        issues = found
+                        false
                     } else {
-                        onSave(seat.defaultWsId!!, drafts.map { it.copy(name = it.name.trim(), role = it.role.trim()) })
+                        // 保存前校验（§2.3）：错误就地指出行/字段，不允许存下去再说。
+                        val pool = takenTokens - seat.teamMembers
+                            .flatMap { listOf(it.name, it.name.lowercase()) }.toSet()
+                        val found = TeamRosterValidation.validate(
+                            drafts.map { it.copy(name = it.name.trim(), role = it.role.trim()) },
+                            pool,
+                        )
+                        if (found.isNotEmpty()) {
+                            issues = found
+                            false
+                        } else {
+                            // **执行档先写、声明后广播**（§7.1 一条动作：任一步失败整次不保存）。
+                            val seatWsId = seat.defaultWsId
+                            if (executionEditable && executionPort != null && groupId != null &&
+                                seatWsId != null
+                            ) {
+                                val execProfile = TeamExecutionProfileUi(
+                                    groupId = groupId,
+                                    defaultWsId = seatWsId,
+                                    leaderAgentId = seat.agentId,
+                                    members = execMembers,
+                                )
+                                // 档 ⊆ 声明（§3.4.6）：按**保存后的稳定 agentId**对齐。
+                                val declared = drafts.map { it.agentId.trim().lowercase() }.toSet()
+                                when (val verdict = executionPort.save(execProfile, declared)) {
+                                    is TeamExecutionSaveResult.Rejected -> {
+                                        execReasons = verdict.reasons
+                                        false
+                                    }
+                                    TeamExecutionSaveResult.Saved -> true
+                                }
+                            } else {
+                                true
+                            }
+                        }
+                    }
+                    if (proceed) {
+                        val ws = seat?.defaultWsId
+                        if (ws != null) {
+                            onSave(ws, drafts.map { it.copy(name = it.name.trim(), role = it.role.trim()) })
+                        }
                         onDismiss()
                     }
                 },
@@ -440,6 +562,104 @@ private fun MemberDraftRow(
     }
 }
 
+/**
+ * 组员的执行配置行（§7.1）：`(●) 执行 ( ) 审查` + 驱动下拉。
+ * 只在席位宿主 + 端口在位时渲染；模型下拉 P1/P2 才开放，本期固定「默认（继承）」。
+ */
+@Composable
+private fun ExecutionConfigRow(
+    member: TeamExecutionMemberUi,
+    drivers: Set<String>,
+    onKindChange: (String) -> Unit,
+    onDriverChange: (String) -> Unit,
+) {
+    val sp = LocalAppSpacing.current
+    Row(
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(sp.sm6),
+        modifier = Modifier.fillMaxWidth().padding(vertical = sp.xxs),
+    ) {
+        Text(
+            text = stringResource(Res.string.team_exec_config_label),
+            style = MaterialTheme.typography.labelSmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+        )
+        // kind 选择：两个互斥 chip（执行 / 审查）。SegmentedButton 依赖较新 M3，
+        // 这里用既有 chip 形状与选中色 —— 与 SeatSelector 同一套。
+        listOf(
+            TeamExecutionKindsUi.WORKER to stringResource(Res.string.team_exec_kind_worker),
+            TeamExecutionKindsUi.REVIEWER to stringResource(Res.string.team_exec_kind_reviewer),
+        ).forEach { (kind, label) ->
+            val selected = member.kind == kind
+            Surface(
+                shape = MaterialTheme.shapes.small,
+                color = if (selected) {
+                    MaterialTheme.colorScheme.primaryContainer
+                } else {
+                    MaterialTheme.colorScheme.surfaceVariant
+                },
+                onClick = { onKindChange(kind) },
+            ) {
+                Text(
+                    text = label,
+                    style = MaterialTheme.typography.labelSmall,
+                    modifier = Modifier.padding(horizontal = sp.sm6, vertical = sp.xxs),
+                )
+            }
+        }
+        Spacer(Modifier.width(sp.sm6))
+        if (drivers.isEmpty()) {
+            Text(
+                text = stringResource(Res.string.team_exec_no_drivers),
+                style = MaterialTheme.typography.labelSmall,
+                color = MaterialTheme.colorScheme.error,
+            )
+        } else {
+            // 驱动下拉：宿主在位驱动（§7.1 —— "装了没"是当下的事实）。
+            var expanded by remember { mutableStateOf(false) }
+            Box {
+                Surface(
+                    shape = MaterialTheme.shapes.small,
+                    color = MaterialTheme.colorScheme.surfaceVariant,
+                    onClick = { expanded = true },
+                ) {
+                    Text(
+                        text = member.driverKey.ifBlank { stringResource(Res.string.team_exec_pick_driver) },
+                        style = MaterialTheme.typography.labelSmall,
+                        modifier = Modifier.padding(horizontal = sp.sm6, vertical = sp.xxs),
+                    )
+                }
+                if (expanded) {
+                    Column(
+                        modifier = Modifier
+                            .background(MaterialTheme.colorScheme.surface)
+                            .padding(sp.xxs),
+                    ) {
+                        drivers.sorted().forEach { key ->
+                            Text(
+                                text = key,
+                                style = MaterialTheme.typography.labelSmall,
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .clickable {
+                                        onDriverChange(key)
+                                        expanded = false
+                                    }
+                                    .padding(horizontal = sp.sm6, vertical = sp.xxs),
+                            )
+                        }
+                    }
+                }
+            }
+        }
+        Text(
+            text = stringResource(Res.string.team_exec_model_default),
+            style = MaterialTheme.typography.labelSmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+        )
+    }
+}
+
 @Composable
 private fun issueText(issue: TeamRosterIssue): String = when (issue.kind) {
     TeamRosterIssueKind.EMPTY -> stringResource(Res.string.team_roster_required_warning)
@@ -455,6 +675,12 @@ private fun issueText(issue: TeamRosterIssue): String = when (issue.kind) {
 // ---------------------------------------------------------------- 纯函数（可测）
 
 private fun List<TeamMemberDraft>.updateAt(index: Int, transform: (TeamMemberDraft) -> TeamMemberDraft): List<TeamMemberDraft> =
+    mapIndexed { i, d -> if (i == index) transform(d) else d }
+
+// 与上面的 updateAt 在 JVM 层同签名（(List, int, Function1) -> List）—— 平台声明冲突。
+// @JvmName 只改 JVM 方法名，Kotlin 调用点不动。
+@JvmName("updateExecMemberAt")
+private fun List<TeamExecutionMemberUi>.updateExecAt(index: Int, transform: (TeamExecutionMemberUi) -> TeamExecutionMemberUi): List<TeamExecutionMemberUi> =
     mapIndexed { i, d -> if (i == index) transform(d) else d }
 
 /** 新建行的内部 id（§3.2）：`m-<slug>-<4 位随机>`；之后改名不重算。 */

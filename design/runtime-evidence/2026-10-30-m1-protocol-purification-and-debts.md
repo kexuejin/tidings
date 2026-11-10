@@ -47,9 +47,9 @@
 | 产物 | `~/Downloads/relay-build-2026-10-30/androidApp-debug.apk`，sha256 `2e35fa7e2b3c09c5bb5ddd0463c671d1fedffd84b86a918037198f748039646c` |
 | 装机 | `adb install -r -d` → Success（真机一台；设备序列号不入仓库） |
 | **新代码探针** | 拉取设备上的 base.apk，dex 里 grep 到 `handleSetGroupAgentWorkspaces`（T4）与 `agentIntent`（T1/T3）—— **装的是新代码** |
-| 冷启动链路 | `link.json`：74 个 peer，`closeCount` 总和 **0**；桌面 Tidings.app 拉起后 2 个 peer 翻 online，closeCount 仍 **0**（全程无链路抖动） |
+| 冷启动链路 | `link.json`：74 个 peer，`closeCount` 总和 **0**；桌面 Tenon.app 拉起后 2 个 peer 翻 online，closeCount 仍 **0**（全程无链路抖动） |
 | 发一条群消息 | 手机 UI 发送（内容因 `adb input text` 丢字符为 `m1-soke-protocol6`，判据按消息 id 不按内容）：`messages.log` seq 1580 落库（`at` 列），**桌面 relay.db 同 id 收到**（`70fbfae3…`，02:53:43）—— 手机→桌面 编码/发送/接收/落库全链路通 |
-| @ 一次 agent | `@dsh …` 发送成功、桌面 relay.db 落库（02:55:13）；**agent 未在 45s 观察窗内回复** —— 桌面侧 DSH 桥未确认在跑（本轮冒烟只拉起了 Tidings.app）。触发判定与投递已验到宿主落库；agent 回复留待 M2 插件宿主网关接线后复测 |
+| @ 一次 agent | `@dsh …` 发送成功、桌面 relay.db 落库（02:55:13）；**agent 未在 45s 观察窗内回复** —— 桌面侧 DSH 桥未确认在跑（本轮冒烟只拉起了 Tenon.app）。触发判定与投递已验到宿主落库；agent 回复留待 M2 插件宿主网关接线后复测 |
 | 待真机读数 | M5 验收矩阵的 7 条场景读数（卡片原位刷新、审批防重、插件热拔等）—— 依赖 M2–M4 的交付物，M1 不填 |
 
 ## 5. 遗留

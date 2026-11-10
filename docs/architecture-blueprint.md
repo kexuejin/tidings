@@ -1,4 +1,4 @@
-# Tidings（榫卯 Tenon）系统整体架构优化与 Agent 高扩展性演进蓝图
+# Tenon（榫卯 Tenon）系统整体架构优化与 Agent 高扩展性演进蓝图
 
 > **文档标识**：ARCH-BLUEPRINT  
 > **适用范围**：`:core`、`:app`、`:agentNode`、`:composeApp`、`:desktopApp`、`:cli`（以及驱动契约层 `:agent-contract`）  

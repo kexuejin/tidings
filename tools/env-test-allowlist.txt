@@ -11,8 +11,6 @@ core/src/jvmTest/kotlin/com/kapp/tenon/core/transport/ChannelFileTransferE2ETest
 core/src/jvmTest/kotlin/com/kapp/tenon/core/transport/LuciolaChannelThroughputSpikeTest.kt | B | 吞吐压力 Spike 测试，delay 用于排空出站队列
 core/src/jvmTest/kotlin/com/kapp/tenon/core/transport/LuciolaDiscoveryEngineTest.kt | B | 测试真实心跳间隔（300ms 心跳 + 400ms 扫除窗口），delay 推进时钟验证在线保活
 core/src/commonTest/kotlin/com/kapp/tenon/core/protocol/IpAddressTest.kt | A | 255.255.255.255 是纯函数的期望值，不读网卡
-core/src/commonTest/kotlin/com/kapp/tenon/core/transport/DiscoveryTargetsTest.kt | A | 广播地址是构造输入与期望，纯函数
-core/src/commonTest/kotlin/com/kapp/tenon/core/transport/SubnetBroadcastTargetsTest.kt | A | 同上：子网广播地址由 CIDR 算出
 core/src/commonTest/kotlin/com/kapp/tenon/core/transport/UdpTransportBroadcastTest.kt | A | 广播地址正是被测对象（真发送）；时序已改轮询
 core/src/jvmTest/kotlin/com/kapp/tenon/core/transport/LinkCertificateDerTest.kt | A | getByName 只解析字面量 IP（证书 SAN），不查 DNS、不读网卡
 core/src/jvmTest/kotlin/com/kapp/tenon/core/spike/TlsServerSpikeTest.kt | A | 同上：解析证书里的字面量地址
@@ -27,10 +25,10 @@ app/src/commonTest/kotlin/com/kapp/tenon/domain/RelayControllerHelpersTest.kt | 
 core/src/commonTest/kotlin/com/kapp/tenon/core/transport/LinkDialDiagnosticsTest.kt | B | delay 在 withTimeout { while(...) delay(10) } 轮询体内，退出由条件决定，不是盲等
 core/src/commonTest/kotlin/com/kapp/tenon/core/transport/LinkCloseReasonTest.kt | B | delay 在 while(now<deadline) 轮询体内，退出由条件决定，不是盲等
 core/src/commonTest/kotlin/com/kapp/tenon/core/transport/OfferDeliveryAsyncTest.kt | B | delay 在 withTimeout{while(!条件) delay(20)} 轮询体内，退出条件由条件决定；另一处 delay(60_000) 是 fake 发送器的被测输入（由被测的 offerAttemptTimeoutMs=120 切断），不参与断言同步
-core/src/commonTest/kotlin/com/kapp/tenon/core/transport/MessengerReliabilityTest.kt | B | delay 在 withTimeout{while(!条件) delay(10)} 轮询体内，退出条件由条件决定，不是盲等
+core/src/jvmTest/kotlin/com/kapp/tenon/core/transport/MessengerReliabilityTest.kt | B | delay 在 withTimeout{while(!条件) delay(10)} 轮询体内，退出条件由条件决定，不是盲等
 core/src/commonTest/kotlin/com/kapp/tenon/core/transport/LinkAcceptPolicyTest.kt | B | delay(30_000) 在 fake accept 里模拟「空闲但不断」的入站连接，不参与断言同步；可执行替代：awaitCancellation()
-core/src/commonTest/kotlin/com/kapp/tenon/core/session/OutgoingReplayTest.kt | B | 「重放后收端只该有 1 条」判据的固有形态（证明没有第二条必须有静默窗口）；替代方案需协议层序号确认、属生产行为变更，已评估不采纳
-core/src/commonTest/kotlin/com/kapp/tenon/core/transport/NetworkChangeQueueRetryTest.kt | B | 订阅探针的 delay(50) 是**重发间隔**（SharedFlow 无 replay，单发会丢），退出由 seenIds 是否收到决定，不是盲等
+core/src/jvmTest/kotlin/com/kapp/tenon/core/session/OutgoingReplayTest.kt | B | 「重放后收端只该有 1 条」判据的固有形态（证明没有第二条必须有静默窗口）；替代方案需协议层序号确认、属生产行为变更，已评估不采纳
+core/src/jvmTest/kotlin/com/kapp/tenon/core/transport/NetworkChangeQueueRetryTest.kt | B | 订阅探针的 delay(50) 是**重发间隔**（SharedFlow 无 replay，单发会丢），退出由 seenIds 是否收到决定，不是盲等
 
 agentNode/src/test/kotlin/com/kapp/tenon/agent/ChannelOrchestratorTest.kt | B | delay(300) 在 execute 内模拟「一个要跑一会儿的活」= 被测行为本身（transfer 无租约不被掐断的判据），不参与断言同步；断言侧全部用 Channel/CompletableDeferred 因果探针
 

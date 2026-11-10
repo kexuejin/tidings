@@ -15,7 +15,7 @@ import kotlin.test.assertTrue
  * Finder 里双击已运行的 .app、`open -a` 不带参数 —— 这些动作如果只 activate 进程
  * 而不把窗口建出来，用户看到的就是"点了没反应"。
  *
- * 实测过缺这一环的形态：`open -a /Applications/Tidings.app` 前后 footprint
+ * 实测过缺这一环的形态：`open -a /Applications/Tenon.app` 前后 footprint
  * 278.4M → 279.2M、IOSurface 仍为 0，也就是什么都没发生。补上
  * `AppReopenedListener` 之后同一条命令：326.9M/IOSurface 0 → 521.5M/IOSurface 1。
  *

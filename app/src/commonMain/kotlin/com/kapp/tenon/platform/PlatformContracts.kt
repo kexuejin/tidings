@@ -81,12 +81,12 @@ data class NetworkSnapshot(
  *
  * Android 在 Wi-Fi 掉线那一瞬间会给出一个自相矛盾的快照：`activeNetwork` 还在、能力表里
  * 还带着 WIFI/INTERNET，但链路地址已经被清空。真机上验证过：这时 UI 会一直显示
- * 「连接方式 Wifi」而 Tidings 一个包也发不出去，并且**不会自己恢复** —— 拆链路上没有
+ * 「连接方式 Wifi」而 Tenon 一个包也发不出去，并且**不会自己恢复** —— 拆链路上没有
  * 后续回调来纠正它（`snapshot()` 只在 `onAvailable`/`onLost`/`onLinkPropertiesChanged`
  * 里被调用，而这三个都已经过去了）。启动时如果确实没网，`snapshot()` 给的是
  * `Transport.None`，所以这个坑只在"从有网到没网"的过渡里出现。
  *
- * 判据用 [NetworkSnapshot.localAddresses] 而不是 `NET_CAPABILITY_INTERNET`：Tidings 只走
+ * 判据用 [NetworkSnapshot.localAddresses] 而不是 `NET_CAPABILITY_INTERNET`：Tenon 只走
  * IPv4 广播/单播，地址列表为空就是"确实到不了任何人"，此时说「没有网络」不是撒谎，
  * 是唯一诚实的说法（同「不知道就别说话」那条规矩）。有蜂窝在时地址列表非空，不受影响。
  */
@@ -230,7 +230,7 @@ interface MdnsAdvertiser {
 }
 
 /**
- * mDNS 服务浏览器：发现局域网内其他**捎话**节点。
+ * mDNS 服务浏览器：发现局域网内其他**榫卯**节点。
  *
  * 与 [MdnsAdvertiser] 是一对，而且**只能发现自己这一类节点**：未启用 mDNS 的节点不参与
  * mDNS（它靠 UDP 广播 + 手动填 IP，见 `core/transport/Discovery.kt`）。所以"自动发现"
@@ -375,8 +375,8 @@ interface AppPlatform {
      * 落到默认路由 —— 于是被整条接进代理的虚拟口，局域网里一个对端都收不到。
      *
      * 表现极具迷惑性：Tailscale / ZeroTier 照常能用（走 `100.64/10` 这类更具体的路由），
-     * **只有 Tidings 失联**。用户的疑问是「没关之前能正常通过 Tailscale/ZeroTier 访问，
-     * 为什么会对 Tidings 有影响」—— 因为两者走的不是同一条路。
+     * **只有 Tenon 失联**。用户的疑问是「没关之前能正常通过 Tailscale/ZeroTier 访问，
+     * 为什么会对 Tenon 有影响」—— 因为两者走的不是同一条路。
      *
      * 子网广播有直连路由（`192.168.2.0/24`，前缀更长），抢不走。
      *
@@ -421,7 +421,7 @@ interface AppPlatform {
     // 它只有界面会读，领域层从不读 → 拆出去代价很小。见 QrPreviewProvider 的 KDoc。
 
     /**
-     * 轻量 HTTP 客户端（用于访问公网 Tidings 控制面）。
+     * 轻量 HTTP 客户端（用于访问公网 Tenon 控制面）。
      */
     val httpClient: SimpleHttpClient
         get() = UnavailableSimpleHttpClient
@@ -630,53 +630,6 @@ class InMemorySimpleHttpClient(
 
     override suspend fun postJson(url: String, jsonBody: String, headers: Map<String, String>): SimpleHttpResponse =
         handler?.invoke("POST", url, jsonBody, headers) ?: SimpleHttpResponse(200, """{"ok":true,"status":"sent"}""")
-}
-
-/**
- * 测试与 Compose 预览用：不碰真实文件系统与网卡。
- *
- * [mdnsAdvertiser] / [mdnsBrowser] 可注入是有意的：这两个能力曾经"两端都实现、commonMain
- * 一次都不调"，而那种缺陷**只有让测试看到调用发生**才拦得住（见
- * `RelayControllerMdnsTest`）。默认值仍是会抛错的 [UnavailableMdnsAdvertiser]，所以
- * 谁真去启动节点而不给假实现，会立刻知道。
- *
- * [qrScanner] / [cameraGate] 同理可注入：扫码这条路上"什么算失败"（尤其是**取消不算失败**）
- * 只能靠一个假扫描器真的挂起、真的被取消来钉住（见 `RelayControllerScanQrTest`）。
- * 默认值仍是会抛错的 [UnavailableQrScanner] / [UnavailableCameraGate]。
- */
-class InMemoryAppPlatform(
-    override val dataDirectory: DataDirectoryProvider = object : DataDirectoryProvider {
-        override fun dataDirectory(): String = "/tmp/relay-preview"
-        override fun cacheDirectory(): String = "/tmp/relay-preview/cache"
-    },
-    override val networkMonitor: NetworkMonitor = object : NetworkMonitor {
-        override fun rawSnapshot(): NetworkSnapshot = NetworkSnapshot(
-            online = true,
-            transport = Transport.Wifi,
-            localAddresses = listOf("192.168.1.42"),
-            vpnActive = false,
-        )
-    },
-    override val deviceInfo: DeviceInfo = object : DeviceInfo {
-        override fun hostName(): String = "preview-device"
-    },
-    override val localNetworkGate: LocalNetworkGate = object : LocalNetworkGate {
-        override suspend fun ensureAccess(): Boolean = true
-    },
-    override val mdnsAdvertiser: MdnsAdvertiser = UnavailableMdnsAdvertiser,
-    override val mdnsBrowser: MdnsBrowser = UnavailableMdnsBrowser,
-    override val pushNotificationHandler: PushNotificationHandler = UnavailablePushNotificationHandler,
-    override val qrScanner: QrScanner = UnavailableQrScanner,
-    override val cameraGate: CameraGate = UnavailableCameraGate,
-    /**
-     * 可注入是为了能测「从图片导入二维码」那条路 —— 它要真的走一次选图。
-     * 默认值与别处一样，仍是会抛错的 [UnavailableFilePicker]。
-     */
-    override val filePicker: FilePicker = UnavailableFilePicker,
-    override val httpClient: InMemorySimpleHttpClient = InMemorySimpleHttpClient(),
-    override val urlOpener: UrlOpener = InMemoryUrlOpener(),
-) : AppPlatform {
-    override val saveDirectoryPicker: SaveDirectoryPicker = UnavailableSaveDirectoryPicker
 }
 
 class InMemoryUrlOpener(

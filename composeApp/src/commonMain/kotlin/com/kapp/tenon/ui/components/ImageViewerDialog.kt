@@ -170,7 +170,8 @@ fun ImageViewerDialog(
                     ) {
                         IconButton(
                             onClick = { receivedFileActions.share(imagePath) },
-                            modifier = Modifier.size(40.dp),
+                            // 全屏黑底上的角落动作：黑底玻璃钮不挤布局，命中区给足 48dp。
+                            modifier = Modifier.size(48.dp),
                         ) {
                             Text(
                                 text = stringResource(Res.string.file_share),
@@ -189,7 +190,7 @@ fun ImageViewerDialog(
                         icon = Res.drawable.ic_close,
                         contentDescription = stringResource(Res.string.chat_image_preview_close),
                         onClick = onDismiss,
-                        modifier = Modifier.size(40.dp),
+                        modifier = Modifier.size(48.dp),
                     )
                 }
             }

@@ -14,7 +14,9 @@
    传群名会被当 nodeId 解析并失败）。所以群里那一步由**人在手机上做**，脚本只负责
    观测读数 —— 而不是发一个注定失败的请求再报 200。
 2. **守门必须看卡片，不看台账**：`/v1/agent/sessions` 是会话台账，不含群卡片；
-   「已决」落在 `MessageEntity.card_json` 的 `decidedActionId` / `decidedBy` 两个键上。
+   「已决」落在 `MessageEntity` 的 `decidedActionId` / `decidedBy` 两个键上 ——
+   而且是**最新载荷**那一列（`coalesce(card_payload, card_json)`：`card_json` 是
+   首帧锚、永不刷新，只读它会把已决记录几乎全漏掉）。
    Tier A 要证的恰恰是「手机点的那一下」，所以还要校验 `decidedBy` 是手机 nodeId，
    桌面自己点的**不算**通过。
 3. **产物只认本次新增**：沙箱产物目录是累积的（`t-1`/`t-2`/`t-3` 并排），拿「最新
@@ -50,7 +52,7 @@ AGENT_KEY = os.environ.get("E2E_AGENT_KEY", "antigravity")
 # --------------------------------------------------------------------------
 
 def desktop_dir() -> str:
-    """桌面数据目录。macOS 固定为 `~/Library/Application Support/捎话 Tidings`。
+    """桌面数据目录。macOS 默认为 `~/Library/Application Support/榫卯 Tenon`。
 
     允许用 E2E_DESKTOP_DIR 覆盖：headless 栈可能跑在另一份数据目录里，而
     「脚本读的是哪一个库」必须是显式事实，不能靠猜。
@@ -58,7 +60,7 @@ def desktop_dir() -> str:
     override = os.environ.get("E2E_DESKTOP_DIR")
     if override:
         return override
-    return os.path.join(os.path.expanduser("~"), "Library", "Application Support", "捎话 Tidings")
+    return os.path.join(os.path.expanduser("~"), "Library", "Application Support", "榫卯 Tenon")
 
 
 def desktop_db() -> str:
@@ -257,7 +259,7 @@ def act1_workspace() -> bool:
     if not os.path.isdir(os.path.join(WORKSPACE, ".git")):
         os.makedirs(WORKSPACE, exist_ok=True)
         subprocess.run(["git", "init"], cwd=WORKSPACE, check=True)
-        subprocess.run(["git", "config", "user.email", "e2e@tidings.local"], cwd=WORKSPACE, check=True)
+        subprocess.run(["git", "config", "user.email", "e2e@tenon.local"], cwd=WORKSPACE, check=True)
         subprocess.run(["git", "config", "user.name", "E2E"], cwd=WORKSPACE, check=True)
         with open(os.path.join(WORKSPACE, "README.md"), "w") as fh:
             fh.write("# 天气 App（E2E 团队流水线项目）\n")
@@ -326,9 +328,14 @@ def wait_for_new_artifact(before: set, timeout: int = 300):
 # --------------------------------------------------------------------------
 
 def cards_since(conv_id: str, since_ms: int):
+    # 最新载荷（与 sdlc-lifecycle.py 的 LATEST_CARD_SQL 同一条表达式）。
+    #
+    # `card_json` 是首帧锚、永不刷新；`decidedActionId`/`decidedBy` 落在
+    # `card_payload` 上。只读 card_json 会漏掉几乎所有已决记录 —— 2026-11-10
+    # 真机读库实测：decidedActionId 在 card_json 里 4 行、在 card_payload 里 46 行。
     rows = sql_rows(
-        "select timestamp, sender_id, card_json from MessageEntity "
-        "where conv_id = ? and timestamp > ? and card_json is not null "
+        "select timestamp, sender_id, coalesce(card_payload, card_json) from MessageEntity "
+        "where conv_id = ? and timestamp > ? and coalesce(card_payload, card_json) is not null "
         "order by timestamp asc",
         (conv_id, since_ms),
     )

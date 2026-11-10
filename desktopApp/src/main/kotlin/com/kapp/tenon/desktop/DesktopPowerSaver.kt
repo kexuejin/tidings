@@ -12,7 +12,7 @@ import com.kapp.tenon.core.protocol.Timings
  * 桌面端收进托盘后仍是一个常驻进程，空闲时唯一的开销就是周期性的心跳与扫描：
  * `presenceInterval`（广播自己在）、`sweepInterval`（清理离线）、
  * `profileProbeInterval`（补资料）。档位把这些周期整体放慢，
- * 让托盘里的捎话少唤醒几次 CPU 与网卡。
+ * 让托盘里的榫卯少唤醒几次 CPU 与网卡。
  *
  * ## 故意不放慢的东西
  * 只动**空闲**周期，不动与一次真实传输有关的时间参数：

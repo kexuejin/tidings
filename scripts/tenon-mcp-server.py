@@ -118,8 +118,6 @@ def bearer() -> str:
     for candidate in (
         os.path.expanduser("~/.tenon/plugins/plugin-token"),
         os.path.expanduser("~/Library/Application Support/榫卯 Tenon/plugins/plugin-token"),
-        os.path.expanduser("~/.tenon/plugins/plugin-token"),
-        os.path.expanduser("~/Library/Application Support/捎话 Tidings/plugins/plugin-token"),
     ):
         try:
             with open(candidate, "r", encoding="utf-8") as fh:

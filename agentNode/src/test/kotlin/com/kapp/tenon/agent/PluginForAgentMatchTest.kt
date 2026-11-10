@@ -17,6 +17,7 @@ import kotlin.test.BeforeTest
 import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertNull
+import com.kapp.tenon.agent.udpTestTransport
 
 /**
  * [ControlPlane.pluginForAgent] 的身份匹配（M4 执行桥的第一步）。
@@ -41,8 +42,9 @@ class PluginForAgentMatchTest {
     fun setUp() {
         scope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
         agent = NodeRuntime(
+            messengerTransportFactory = udpTestTransport(),
             profile = Profile.mobile(
-                nodeId = newId(), nick = "Tidings Agent", host = "relay-agent", ver = "relay-test",
+                nodeId = newId(), nick = "Tenon Agent", host = "relay-agent", ver = "relay-test",
             ),
             udpPort = 0,
             bindHost = ControlPlane.LOOPBACK,

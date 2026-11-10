@@ -1,6 +1,6 @@
 # 本地 Agent 协同协议扩展规范 v1（PPE-1）
 
-> 目标：在**保持与局域网点对点通信既有帧完全兼容**的前提下，为 捎话 (Tidings) / `agentNode` / 宿主 Agent 插件
+> 目标：在**保持与局域网点对点通信既有帧完全兼容**的前提下，为 榫卯 (Tenon) / `agentNode` / 宿主 Agent 插件
 > 提供 **Agent 会话 · 任务 · 事件 · 审批 · 工作区** 等原生协同语义规范。
 
 ---
@@ -281,7 +281,7 @@
 - 同一 id 是硬约束 —— 两个变体若换 id，同一条话会在群里出现两次，撤回也只能撤其中一份；
 - 队列按 `(peerId, msgId)` 分行，各存**各自那份** JSON；扇出预算到点的重放也用各自那份（不能
   给 legacy 成员塞回带键版本）；
-- 判据**只看 caps**，不看版本号、不拿 `agn1` 当代理：老版 Tidings 节点可能声明了 `agn1` 却不认识这两个键。
+- 判据**只看 caps**，不看版本号、不拿 `agn1` 当代理：老版节点可能声明了 `agn1` 却不认识这两个键。
 
 不做门控的现场后果不是「显示少一点」，而是**桌面端一条都收不到**（发送侧编码成功、本地落库成功、
 `SendOutcome.SENT`）。测试：`GroupTextCapabilityGatingTest`（6 条：模拟上游 7 键白名单、两变体同
@@ -775,7 +775,11 @@ budget 类断言（最坏样本落在 UDP 800 / TCP 4096 内）在
 1. **虚拟群成员**：`GroupMeta` 扩展 `virtualAgents: List<VirtualAgentMember>`（**当前形态**：`agentId`/`hostNodeId`/`name`/`entityType`/`teamMembers`/`allowedWorkspaces`/`defaultWsId`；`wsId`/`role` 已退场；**本机绝对路径不进协议**，只广播 wsId 与标题）。
    - **收端校验与发送侧预算**（团队创建方案 P0-0.3）：`validateGroup` 对 `virtualAgents` 做**形状/条数/逐字段长度/组员预算**校验，越界拒绝整帧（bad-payload）——坏条目不再走解码侧 `mapNotNull` 静默消失。三条刻意的不加严与 group 帧既有裁决同源：不加字段白名单；`entityType` 未知取值不拒帧（展示字段非动作指令，消费方按 core `EntityTypes.normalized` 归一到 `single`）；`allowedWorkspaces` 只校验键与长度。新增预算常量（单一定义在 `Limits`）：`TEAM_ROLE=32`、`TEAM_MEMBERS_MAX=8`、`GROUP_MAX_VIRTUAL_AGENTS=48`、`GROUP_MAX_TEAM_MEMBERS_TOTAL=64`；同一 `(hostNodeId, agentId)` 至多一条团队。发送侧 `CodecGroup.validateGroupMeta`（编码后走同一判据）——**发送侧不产出注定被拒的帧**。
    - **团队编制的生产者**（P0-1）：`handleSetGroupTeamDeclaration`（定位键 `(groupId, defaultWsId)`，本机主权；roster null/空 = 关闭团队）与工作区授权共用提交收口 `commitGroupMetaUpdate`（发送侧预算自检 → 落库 → need 游标登记 → 广播前经 `groupMetaWithNicks` 重建并回填团队字段）。保存时同一 agent 的其它席位一律清成单兵（一 agent 每群最多一个团队，收端校验兜底）。`entityType` 的取值域单一定义在 core `EntityTypes`（agentNode 的 `PluginRegistration.TYPE_*` 引用它）。
-   - **合并语义变更**（P0-0.2，**兼容性代价必须写清**）：`GroupMerge` 新增「宿主自声明主权」分支——普通成员只改写 `hostNodeId == updatedBy` 的声明（除 `virtualAgents` 外其余字段与本地完全一致；外来声明按规范形多重集合比较，增删改都不行）可通过收端权限矩阵。**旧版本节点没有这条分支，仍会拒收成员发起的 rev+1**：团队声明的可见性依赖组内成员版本一致；混合版本窗口内编辑者需是群主/管理员，或等对方升级。这是**语义变更**不是新增字段，不适用「可选键零风险」口径；另有一条已知混合版本行为——旧版本管理员改群资料时会重编码出不含这两个字段的整份元数据，团队声明被静默清空（现状如此，非本次引入）。
+   - **团队执行（v2，`team-execution-final-plan.md`）**：group 帧**无新增键**——组员名
+     （ASCII slug）成为宿主本地可路由的 `@` token，不是协议字段；执行配置（driver/model）
+     只存席位宿主本地 `team-execution.json`，不进群帧。旧发送端发 `@组员` 纯文本时，
+     新宿主仍能从群元数据解析执行；新发送端 + 旧宿主不执行（如实降级）。
+   - **合并语义变更**（P0-0.2，**兼容性代价必须写清**）   - **合并语义变更**（P0-0.2，**兼容性代价必须写清**）：`GroupMerge` 新增「宿主自声明主权」分支——普通成员只改写 `hostNodeId == updatedBy` 的声明（除 `virtualAgents` 外其余字段与本地完全一致；外来声明按规范形多重集合比较，增删改都不行）可通过收端权限矩阵。**旧版本节点没有这条分支，仍会拒收成员发起的 rev+1**：团队声明的可见性依赖组内成员版本一致；混合版本窗口内编辑者需是群主/管理员，或等对方升级。这是**语义变更**不是新增字段，不适用「可选键零风险」口径；另有一条已知混合版本行为——旧版本管理员改群资料时会重编码出不含这两个字段的整份元数据，团队声明被静默清空（现状如此，非本次引入）。
 2. **精确路由**：群聊内遵循 `@Agent` 唤醒或 Chief 编排，未被唤醒时不消耗 Token。
 3. **工作态广播**：群内通过 `GroupProgress` 广播当前正在执行的任务状态。
 

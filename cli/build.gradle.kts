@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: GPL-3.0-only
 
-// `:cli` —— 一个**没有 UI** 的 Tidings 客户端。
+// `:cli` —— 一个**没有 UI** 的 Tenon 客户端。
 //
 // ## 它存在的理由（不是"顺带做个命令行工具"）
 //

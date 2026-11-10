@@ -17,7 +17,7 @@
   免得"群里只有我们俩"掩盖归属判断。
   构建：`:androidApp:installDebug`；iOS 走
   `cd scaffold/iosApp && JAVA_HOME=/opt/homebrew/opt/openjdk@21 RELAY_MAVEN_MIRROR=aliyun \
-     xcodebuild -project Tenon.xcodeproj -scheme Tidings -configuration Debug -sdk iphonesimulator \
+     xcodebuild -project Tenon.xcodeproj -scheme Tenon -configuration Debug -sdk iphonesimulator \
      -destination 'platform=iOS Simulator,id=00000000-FEF7-409D-AE33-803A77C62376' -derivedDataPath build/dd build`
 
 方法

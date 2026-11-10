@@ -33,6 +33,7 @@ import kotlinx.serialization.json.put
 import com.kapp.tenon.domain.model.MessageUi
 import com.kapp.tenon.domain.model.NoticeKind
 import com.kapp.tenon.domain.model.TransferState
+import com.kapp.tenon.domain.udpTestTransport
 
 /**
  * 群这条路上"消息该落在哪个会话、谁的成员表说了算"的判定。
@@ -370,6 +371,7 @@ class RelayControllerGroupTest {
         // `group-need-on-newer-rev` 逮到它：手机 ACK 了 rev=2 的群消息（本地 rev=1）却不回 need。
         val controller = controller()
         val rt = NodeRuntime(
+            messengerTransportFactory = udpTestTransport(),
             profile = Profile.agent(
                 nodeId = self, nick = "我的手机", host = "127.0.0.1",
                 ver = "relay-test", platform = "linux",

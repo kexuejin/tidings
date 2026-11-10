@@ -37,7 +37,7 @@
   ```
 
   如果控制面设了 token，后续每个 `curl` 都加
-  `-H 'Authorization: Bearer <token>'` 或 `-H 'X-Tidings-Token: <token>'`。
+  `-H 'Authorization: Bearer <token>'` 或 `-H 'X-Tenon-Token: <token>'`。
 
 ### 1.2 选一个真工作区
 
@@ -137,10 +137,10 @@ curl -s -X PUT http://127.0.0.1:8788/v1/agent/grants \
   ```
 
 - 桌面库（macOS 默认）在
-  `~/Library/Application Support/捎话 Tidings/relay.db`。要核 rev 台账可以查：
+  `~/Library/Application Support/榫卯 Tenon/relay.db`。要核 rev 台账可以查：
 
   ```bash
-  sqlite3 "$HOME/Library/Application Support/捎话 Tidings/relay.db" \
+  sqlite3 "$HOME/Library/Application Support/榫卯 Tenon/relay.db" \
     "select card_id, last_rev, datetime(updated_at/1000,'unixepoch','localtime')
        from BoardCardRev order by updated_at desc limit 5;"
   ```
@@ -189,3 +189,12 @@ curl -s -X PUT http://127.0.0.1:8788/v1/agent/grants \
 
 > 本轮：**wsId threading merge verification round**（wsId 贯通分支合并后的验证轮）。
 > 本轮：**dedupe round**（去重轮验证）。
+
+## 8-Trigger-channel-real-device-verification
+
+- **webhook 先落盘再 ACK**：验签通过后必须同步写入 `TriggerEvent` 台账，只有返回 `Stored` 或 `Duplicate` 才回 `200`；落盘失败（含 sink 抛错）必须回 `503 persist-failed`，不得用 200 掩盖丢事件。真机上以宿主台账新增一行、发送方收到 200 为准，不能只看「请求成功」。
+- **幂等键必须是复合键**：重启后的重投用 `(source_id, event_id)` 判重，命中 `Duplicate` 仍回 200 且不再派发；不能只按 `event_id`，否则两个源使用同一投递 id 时后到的那条会被静默吞掉。内存幂等账只能在落盘成功之后记。
+- **消费走表驱动、可恢复**：`TriggerEventDrain` 按 `pending → running → done/failed/skipped` 消费，启动时把上一进程遗留的 `running` 放回 `pending`，并用 `claimEvent` 原子认领；验证重启后同一条事件只派发一次，空跑或双派都算失败。
+- **cron 只在桌面宿主调度**：手机端不跑定时器；桌面重启或合盖唤醒后按 `SchedulerTaskState.next_run_at` 补判，`RUN_ONCE` 最多补 1 次，`SKIP` 放弃积压批次但当期自然窗口照常派发，`missed_runs` 应如实增加，严禁把多个错过窗口并发补发。
+- **以台账和结果卡收口**：真机拉 `relay.db` 查 `TriggerEvent` 终态与 `SchedulerTaskState` 的 `last_run_at` / `next_run_at` / `missed_runs`；若启动日志出现 `no such table: TriggerEvent` 或 `no such table: SchedulerTaskState`，先按库迁移与 `SchemaSelfHeal` 处理（迁移未生效时每条 webhook 都落不了库），不要误判成触发器没注册。
+- **`closeCount` 是链路稳定性的唯一判据**：换网、断网重连与冷启动全程必须保持为 **0**；只看「当前在线」或某一刻能连通不算通过，`closeCount` 一旦增长就说明链路抖动，判失败。

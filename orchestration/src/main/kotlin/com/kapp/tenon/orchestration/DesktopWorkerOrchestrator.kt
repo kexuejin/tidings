@@ -5,6 +5,8 @@ package com.kapp.tenon.orchestration
 import com.kapp.tenon.agent.ChainDiff
 import com.kapp.tenon.agent.ChainProgress
 import com.kapp.tenon.agent.ChainStage
+import com.kapp.tenon.core.protocol.AgentExecAuthorizer
+import com.kapp.tenon.core.protocol.seatsMatchingToken
 import com.kapp.tenon.agent.ControlPlane
 import com.kapp.tenon.agent.DelegationParser
 import com.kapp.tenon.agent.DelegationPlan
@@ -20,6 +22,7 @@ import com.kapp.tenon.core.nowMillis
 import com.kapp.tenon.core.protocol.ConvId
 import com.kapp.tenon.domain.CognitiveFlow
 import com.kapp.tenon.domain.RelayController
+import com.kapp.tenon.domain.groupParticipantRows
 import com.kapp.tenon.domain.RelayUiState
 import com.kapp.tenon.domain.TicketRef
 import java.io.File
@@ -71,6 +74,11 @@ class DesktopWorkerOrchestrator(
      * 配置选棒并跳过 planner。null = 没装配（测试与老装置）⇒ 行为与从前逐字一致。
      */
     private val teamStore: DelegationTeamStore? = null,
+    /**
+     * 团队执行档存储（团队执行方案 §3.2，P0-A）：`@组员` 的宿主侧解析与编译靠它。
+     * null = 未装配 ⇒ `@组员` 不进团队分支（行为与从前逐字一致）。
+     */
+    private val teamExecutionStore: TeamExecutionStore? = null,
     private val detailedAutoPlanner: (suspend (goal: String, available: Set<String>) -> PlannerPlan?)? = null,
 ) {
     /**
@@ -105,11 +113,19 @@ class DesktopWorkerOrchestrator(
         val role: String = "Worker",
         /**
          * 这张卡的**驱动键**（codex/claude/antigravity…），广播与授权共用它。
-         * 曾经写死 `tidings-worker`：卡面看不出是谁干的还在其次 —— 用户点卡上
+         * 曾经写死 `tenon-worker`：卡面看不出是谁干的还在其次 —— 用户点卡上
          * 的 Approve，动作帧按卡片的 agentId 过 `AgentExecAuthorizer`，假名
          * 过不了授权，「已提交，等待宿主确认」永远等不来执行（真机实锤）。
          */
         val agentKey: String = "codex",
+        /**
+         * 这张工单派单时用的**显式工作区指针**（1:1 药丸 / 派单帧携带）。
+         * 「方向确认卡 → 派为新任务」那条腿必须原样带回去：1:1 会话没有群绑定
+         * 可推导（groupId=null），多工作区宿主上丢了它就必退单
+         * 「no git workspace bound to group」（真机现场：ask 卡新任务腿在
+         * 药丸明明选着工作区时被退单）。
+         */
+        val wsId: String? = null,
         @Volatile var onFollowUp: (suspend (String) -> Unit)? = null,
         /**
          * 这张工单**当初要做什么**（用户原话，未经 containment 前导包装）。
@@ -348,7 +364,12 @@ class DesktopWorkerOrchestrator(
             active.done.complete(
                 TicketOutcome("aborted", null, "superseded: input was dispatched as a new task", null),
             )
-            dispatchSingleWorker(active.convId, active.groupId, pending.text, active.agentKey)
+            // wsId 必须随腿走：新任务腿继承原工单的显式工作区指针。丢了它，
+            // 1:1（groupId=null）+ 多工作区宿主在 resolveWorkspacePath 里无路可走
+            // （群绑定/简介判据都不适用，单工作区推导又不唯一），必退单
+            // 「no git workspace bound to group」——真机现场见 runtime-evidence
+            // 的 DSH 工作区验证证据 §6 O7（方向确认卡新任务腿在药丸选着工作区时被退单）。
+            dispatchSingleWorker(active.convId, active.groupId, pending.text, active.agentKey, active.wsId)
         } else {
             active.stage = "working"
             scope.launch {
@@ -673,6 +694,41 @@ class DesktopWorkerOrchestrator(
         //    then the legacy explicit stage syntax. Plans must pass the code gate (StageChainGate)
         //    before any chain is started — vendor-independent review is a hard rule, not advice.
         val available = availableAgentKeys()
+
+        // **P0-0.3 文本派单授权收口**：文本 @ 原先只有一条本地 notice（不进协议），
+        // 执行路径根本不看授权 —— 意图路径有授权而文本路径没有，同一句 @ 两条路两种结果。
+        // 团队执行会放大这个洞（一条群消息拉起多驱动链），这里统一收口：
+        // 点名的是**本机托管席位** ⇒ 必须过 AgentExecAuthorizer；未授权 ⇒ 广播 blocked 卡
+        // （拒绝必须全群可见，本地 notice 手机看不到）并止步。
+        if (groupId != null && mentionedAgentKey != null) {
+            val denial = deniedSeatDispatch(groupId, mentionedAgentKey, senderPeerId, prompt)
+            if (denial != null) {
+                publishTeamDispatchBlocked(groupId, prompt, denial)
+                return
+            }
+        }
+
+        // **团队执行分支**（P0-A，§4.3）：点的是组员 token ⇒ 由席位宿主编译责任链。
+        // 两个执行入口（文本路由 / invoke 桥）共用 resolveTeamTarget + compile —— 两条路各说各话
+        // 是本仓已有的分叉形态。非组员 token（领队 / kind）保持既有路径逐字不变。
+        if (groupId != null && mentionedAgentKey != null && teamExecutionStore != null) {
+            when (val teamTarget = resolveTeamTarget(groupId, mentionedAgentKey)) {
+                is TeamExecutionResolver.Target.NotConfigured -> {
+                    // 缺配置不猜（§2）：绝不回落到"默认 codex 单棒"。
+                    publishTeamDispatchBlocked(
+                        groupId, prompt,
+                        teamTarget.reason + " (member @" + mentionedAgentKey + ")",
+                    )
+                    return
+                }
+                is TeamExecutionResolver.Target.Hit -> {
+                    if (runTeamDispatch(convId, groupId, senderPeerId, teamTarget, prompt)) return
+                    return
+                }
+                TeamExecutionResolver.Target.None -> Unit // 非组员 token：既有路径
+            }
+        }
+
         if (available != null) {
             val plan = parseDelegation(prompt, available, groupId)
             if (plan != null) {
@@ -792,6 +848,22 @@ class DesktopWorkerOrchestrator(
 
         // 委派计划优先（双挡：显式点名 / 组队自动），过代码门后才轮到旧阶段语法。
         val available = availableAgentKeys()
+
+        // **团队执行分支**（invoke 桥，§4.3：两个执行入口必须同判据同顺序）。
+        // 注意：invoke 路径的 agentKey 是**席位/驱动键**（药丸选的目标），不是组员 token；
+        // 组员语义只从文本 @ 来 —— 这里只对 mentionedAgentKey 事实上是组员 token 的
+        // 情形生效（runTeamDispatch 内部判），领队派单照旧。
+        // **授权收口**（P0-0.3）：invoke 桥的 agentKey 若点名了本机托管席位，同样过
+        // AgentExecAuthorizer（与文本路由同一份判据）。团队组员语义只从文本 @ 来
+        // （§4.6：agentIntent 不带成员键），团队分发在 [handlePrompt]。
+        if (groupId != null) {
+            val denial = deniedSeatDispatch(groupId, agentKey, senderPeerId, prompt)
+            if (denial != null) {
+                val json = publishTeamDispatchBlocked(groupId, prompt, denial)
+                return TicketOutcome("blocked", "Team dispatch denied", denial, json)
+            }
+        }
+
         if (available != null) {
             val plan = parseDelegation(prompt, available, groupId)
             if (plan != null) {
@@ -1140,6 +1212,147 @@ class DesktopWorkerOrchestrator(
         return DelegationPlan(plan.goal, stages, DelegationPlan.Source.AUTO)
     }
 
+    /**
+     * **团队执行解析**（§4.3）：token → (席位, 组员, 执行档)。只有组员 token 才产生
+     * 非 None 目标；领队 / 宿主自报 kind / 未知 token 恒为 None（既有路径接管）。
+     * 执行档读取失败 / 过期 / 席位没绑工作区 ⇒ NotConfigured（blocked 卡），**绝不**
+     * 返回 None 让调用方落进 codex 兜底。
+     */
+    private fun resolveTeamTarget(
+        groupId: String,
+        mentionedAgentKey: String?,
+    ): TeamExecutionResolver.Target {
+        val store = teamExecutionStore ?: return TeamExecutionResolver.Target.None
+        val st = controller.state.value
+        val group = groupId.let { id -> st.settings.groups.firstOrNull { it.groupId == id } }
+        return TeamExecutionResolver(store).resolve(
+            groupId = groupId,
+            mentionedKey = mentionedAgentKey,
+            group = group,
+            selfNodeId = st.selfNodeId,
+        )
+    }
+
+    /** 本群全部可被 @ 的 token（候选与匹配同源的那一份；组员名已由 P0-0.1 进池）。 */
+    private fun agentKindsOf(groupId: String?): Set<String> {
+        if (groupId == null) return emptySet()
+        val st = controller.state.value
+        val ctx = st.senderContext(ConvId.group(groupId))
+        return groupParticipantRows(ctx).mentionKeys
+    }
+
+    /**
+     * **团队派单执行**（文本路由，§4.3）：授权 → 编译 → 分发/出卡。
+     * 返回 true = 本分支已完全处理（调用方 return）；false = 解析后无目标（理论不可达，
+     * 防御分支）。
+     */
+    private suspend fun runTeamDispatch(
+        convId: String,
+        groupId: String,
+        senderPeerId: String,
+        target: TeamExecutionResolver.Target.Hit,
+        prompt: String,
+    ): Boolean {
+        val st = controller.state.value
+        val group = st.settings.groups.firstOrNull { it.groupId == groupId } ?: return false
+        // **授权（§4.4）**：组员不是权限主体 —— `@coder` 的授权等价于
+        // "发送者对 Leader 席位 agentId 有没有执行权"。判据与意图路径同一份。
+        val verdict = AgentExecAuthorizer.authorize(
+            senderId = senderPeerId,
+            group = group,
+            grantAllows = { node -> controller.invokeGrantAllows?.invoke(target.seat.agentId, node) == true },
+            policy = controller.invokeExecPolicyOf?.invoke(target.seat.agentId),
+            selfNodeId = st.selfNodeId,
+        )
+        if (!with(AgentExecAuthorizer) { verdict.permitsExecution() }) {
+            publishTeamDispatchBlocked(
+                groupId, prompt,
+                "not authorized for seat " + target.seat.name + " (" + verdict + ")",
+            )
+            return true
+        }
+        val profile = target.profile
+        val seatMembers = target.seat.teamMembers
+        val available = availableAgentKeys()
+        // prompt 在域层已经剥净 @（onAgentPrompt 的契约），直接当 goal 用。
+        val goal = prompt
+        return when (val compiled = TeamPlanCompiler.compile(profile, seatMembers, target.member, goal, available)) {
+            is TeamPlanCompiler.Compiled.Rejected -> {
+                publishTeamDispatchBlocked(groupId, prompt, compiled.reason)
+                true
+            }
+            is TeamPlanCompiler.Compiled.Single -> {
+                // 单棒（无 reviewer，或 reviewer 直呼）：§5.3 不经过 StageChainGate。
+                if (available == null) {
+                    publishTeamDispatchBlocked(groupId, prompt, "control plane unavailable")
+                    return true
+                }
+                dispatchSingleWorker(convId, groupId, compiled.instruction, compiled.agentKey, wsId = target.seat.defaultWsId)
+                true
+            }
+            is TeamPlanCompiler.Compiled.Plan -> {
+                // **workspace 显式取席位默认工作区**（§4.3）：不用 resolveWorkspacePath 的
+                // 群级推导 —— 同群多席位时会在错误的仓里跑。
+                val dispatched = delegateByPlan(
+                    convId, groupId, compiled.plan, available ?: emptySet(),
+                    wsId = target.seat.defaultWsId,
+                )
+                if (!dispatched) {
+                    // §5.5：派不出去也要可见 —— delegateByPlan 的 Boolean 原先会被丢掉。
+                    publishTeamDispatchBlocked(groupId, prompt, "chain executor unavailable or no workspace bound")
+                }
+                true
+            }
+        }
+    }
+
+    /**
+     * **文本派单授权收口**（P0-0.3）：点名了**本机托管席位**（领队 token / 席位 agentId）
+     * 时必须过授权；未授权返回可读原因（调用方出 blocked 卡并止步）。
+     * 组员 token / 解析不出席位 / 非群 ⇒ null（既有路径接管 —— 组员的授权在团队分支内做）。
+     */
+    private fun deniedSeatDispatch(
+        groupId: String?,
+        mentionedAgentKey: String?,
+        senderPeerId: String,
+        prompt: String,
+    ): String? {
+        if (groupId == null || mentionedAgentKey.isNullOrBlank()) return null
+        val st = controller.state.value
+        val group = st.settings.groups.firstOrNull { it.groupId == groupId } ?: return null
+        val seat = group.seatsMatchingToken(mentionedAgentKey).singleOrNull() ?: return null
+        if (seat.hostNodeId != st.selfNodeId) return null // 不是本机席位：不归本机拦
+        val verdict = AgentExecAuthorizer.authorize(
+            senderId = senderPeerId,
+            group = group,
+            grantAllows = { node -> controller.invokeGrantAllows?.invoke(seat.agentId, node) == true },
+            policy = controller.invokeExecPolicyOf?.invoke(seat.agentId),
+            selfNodeId = st.selfNodeId,
+        )
+        if (with(AgentExecAuthorizer) { verdict.permitsExecution() }) return null
+        return "not authorized for seat " + seat.name + " (" + verdict + ")"
+    }
+
+    /** 团队派单被拒/未配置的**可见出口**：blocked 卡（全群可见），不许静默吞。 */
+    private suspend fun publishTeamDispatchBlocked(
+        groupId: String?,
+        goal: String,
+        reason: String,
+    ): String? {
+        recordBlindSpot(BlindSpotPatrol.KIND_DELEGATION_REJECTED, goal.take(60), reason.take(200))
+        val json = ticketCardJson(
+            ticketId = "team-" + System.currentTimeMillis().toString(36),
+            rev = 1,
+            state = "blocked",
+            title = goal.take(60),
+            banner = "Team dispatch blocked: " + reason,
+            percent = 0,
+            roleName = "Team",
+        )
+        publishCardJson(groupId, json, "codex")
+        return json
+    }
+
     /** 委派计划的统一出口（文本路由，fire-and-forget）。 */
     private suspend fun delegateByPlan(
         convId: String,
@@ -1415,6 +1628,7 @@ class DesktopWorkerOrchestrator(
             rev = revCounter,
             role = roleNameOf(defaultAgent),
             agentKey = defaultAgent,
+            wsId = wsId,
             devPrompt = prompt,
             done = done,
         )
@@ -1836,7 +2050,7 @@ class DesktopWorkerOrchestrator(
      * ## 为什么必须有这一跳
      *
      * 审阅卡上一直写着「产物：patch.diff，N 字节」，而文件**从没离开过宿主本机** ——
-     * 补丁躺在沙箱收割目录里，手机上那一行只是一段描述。§6.3 要的正是「通过 Tidings
+     * 补丁躺在沙箱收割目录里，手机上那一行只是一段描述。§6.3 要的正是「通过 Tenon
      * 本地 P2P 文件传输通道直接投递至移动端」：不经过任何外部托管，审查的人在手机上
      * 就能把这份 diff 打开看。
      *
@@ -2089,7 +2303,18 @@ class DesktopWorkerOrchestrator(
                         assignees = listOf(defaultAgent),
                         startedAt = ticket.createdAt,
                     )
-                    currentPrompt = "Previous attempt failed: $executionError. Please inspect tests and workspace, fix all issues, and ensure npm test passes."
+                    // 重试提示词按失败类分化（真机观察 O6：问答式任务没有补丁是
+                    // **正常终态**，统一喊「fix all issues and ensure npm test passes」
+                    // 会把模型逼到编造无关改动去凑补丁——真机现场：+33 −2 的卡片
+                    // 词表测试改动与原任务毫无关系）。无 patch 且无验收判负时，
+                    // 明确告诉它「没有文件变更也可以收尾」，不许再拿测试当借口。
+                    currentPrompt = if (patchPath == null && verdict == null) {
+                        "Previous attempt ended without a patch ($executionError). " +
+                            "If the task genuinely needs no file changes, finish with the final answer text and do NOT create or modify files to satisfy a patch requirement. " +
+                            "Otherwise make exactly the change the task asks for."
+                    } else {
+                        "Previous attempt failed: $executionError. Please inspect tests and workspace, fix all issues, and ensure npm test passes."
+                    }
                 }
             } finally {
                 watchdogJob?.cancel()

@@ -1,8 +1,8 @@
 {
-  "generatedAt": "b013591a761d",
+  "generatedAt": "1c63759ec11f",
   "note": "逐屏差集棘轮：每个键的差集只许变小。--check 报「新增的值」。",
-  "reason": "新增 m-home-team-folder-open 屏（团队折叠展开态）+ 群行团队药丸标记：标记/成员行复用既有类（.tag/.tm/.av，尺寸 24/11/600 与代码 sp.xl/labelSmall/SemiBold 同值），未新增字号/间距/圆角档位；随原型版本前移（08e48f43 → b013591a，含 main 侧重投影后的 403 组基线）",
-  "rowCount": 79,
+  "reason": "Rebrand search keyword from 捎话 to 榫卯",
+  "rowCount": 78,
   "signature": {
     "d-agentdetail|__error__": [
       "落点不存在：**待建**（2026-10-13 原型新增提案；代码侧本轮未适配）"
@@ -103,6 +103,7 @@
     ],
     "d-chat-group|spacing|proto": [
       "1",
+      "7",
       "11",
       "13"
     ],
@@ -443,6 +444,7 @@
       "32"
     ],
     "d-nomatch|spacing|proto": [
+      "7",
       "11",
       "13",
       "34",
@@ -470,6 +472,7 @@
     ],
     "d-nosel|spacing|proto": [
       "1",
+      "7",
       "11",
       "13",
       "34",
@@ -1133,8 +1136,7 @@
       "1"
     ],
     "m-groupinfo|spacing|proto": [
-      "1.5",
-      "16"
+      "1.5"
     ],
     "m-gsearch-empty|font-size|code": [
       "15"
@@ -1252,7 +1254,6 @@
     "m-home-more|spacing|code": [
       "1",
       "3",
-      "7",
       "24",
       "48"
     ],
@@ -1280,29 +1281,10 @@
     "m-home-recent|spacing|code": [
       "1",
       "3",
-      "7",
       "24",
       "48"
     ],
     "m-home-recent|spacing|proto": [
-      "1.5",
-      "11"
-    ],
-    "m-home-team-folder-open|font-size|code": [
-      "17",
-      "20"
-    ],
-    "m-home-team-folder-open|font-size|proto": [
-      "24"
-    ],
-    "m-home-team-folder-open|radius|proto": [
-      "16"
-    ],
-    "m-home-team-folder-open|spacing|code": [
-      "24",
-      "48"
-    ],
-    "m-home-team-folder-open|spacing|proto": [
       "1.5",
       "11"
     ],
@@ -1326,8 +1308,6 @@
     "m-home-unread|spacing|code": [
       "1",
       "3",
-      "7",
-      "9",
       "24",
       "48"
     ],

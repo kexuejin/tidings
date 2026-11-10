@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: GPL-3.0-only
 
-// Tidings agent 运行时契约（agent-contract）。
+// Tenon agent 运行时契约（agent-contract）。
 //
 // ## 它是什么
 //

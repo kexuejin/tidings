@@ -59,6 +59,7 @@ import androidx.compose.ui.focus.onFocusChanged
 import androidx.compose.ui.graphics.SolidColor
 import androidx.compose.ui.platform.LocalFocusManager
 import androidx.compose.ui.text.TextRange
+import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.text.input.TextFieldValue
 import androidx.compose.ui.unit.dp
@@ -70,7 +71,10 @@ import com.kapp.tenon.generated.resources.chat_composer_hint
 import com.kapp.tenon.generated.resources.chat_emoji
 import com.kapp.tenon.generated.resources.chat_route_tcp
 import com.kapp.tenon.generated.resources.chat_send
+import com.kapp.tenon.generated.resources.ic_bot
+import com.kapp.tenon.generated.resources.ic_groups
 import com.kapp.tenon.generated.resources.ic_send
+import com.kapp.tenon.generated.resources.ic_user
 import com.kapp.tenon.generated.resources.chat_mention_all
 import com.kapp.tenon.generated.resources.common_unknown_member
 import org.jetbrains.compose.resources.DrawableResource
@@ -79,6 +83,7 @@ import org.jetbrains.compose.resources.painterResource
 import org.jetbrains.compose.resources.stringResource
 
 import com.kapp.tenon.ui.theme.LocalAppSpacing
+import com.kapp.tenon.ui.theme.RelayShapes
 import com.kapp.tenon.domain.model.MessageUi
 
 /**
@@ -229,6 +234,81 @@ internal fun filterMentionTargets(targets: List<MentionTarget>, query: String): 
     } else {
         targets.filter { it.token.removePrefix("@").startsWith(query, ignoreCase = true) }
     }
+
+/**
+ * `@` 联想候选菜单项（手机与桌面共享实现）。
+ */
+@Composable
+internal fun MentionDropdownItems(
+    visibleTargets: List<MentionTarget>,
+    showMentionAll: Boolean,
+    mentionAllToken: String,
+    onSelectMention: (token: String) -> Unit,
+) {
+    val sp = LocalAppSpacing.current
+    if (showMentionAll) {
+        DropdownMenuItem(
+            leadingIcon = {
+                Icon(
+                    painter = painterResource(Res.drawable.ic_groups),
+                    contentDescription = null,
+                    tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                    modifier = Modifier.size(IconSizes.Label),
+                )
+            },
+            text = { Text(mentionAllToken) },
+            onClick = { onSelectMention(mentionAllToken) },
+        )
+    }
+    visibleTargets.forEach { target ->
+        DropdownMenuItem(
+            leadingIcon = {
+                Icon(
+                    painter = painterResource(if (target.isAgent) Res.drawable.ic_bot else Res.drawable.ic_user),
+                    contentDescription = null,
+                    tint = if (target.isAgent) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant,
+                    modifier = Modifier.size(IconSizes.Label),
+                )
+            },
+            text = {
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(sp.xs),
+                ) {
+                    Column(modifier = Modifier.weight(1f, fill = false)) {
+                        Text(
+                            text = target.token,
+                            style = MaterialTheme.typography.bodyMedium,
+                            fontWeight = if (target.isAgent) FontWeight.SemiBold else FontWeight.Normal,
+                        )
+                        target.note?.let { note ->
+                            Text(
+                                text = note,
+                                style = MaterialTheme.typography.labelSmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            )
+                        }
+                    }
+                    if (target.isAgent) {
+                        Surface(
+                            shape = RelayShapes.extraSmall,
+                            color = MaterialTheme.colorScheme.primaryContainer,
+                        ) {
+                            Text(
+                                text = "BOT",
+                                style = MaterialTheme.typography.labelSmall,
+                                color = MaterialTheme.colorScheme.primary,
+                                fontWeight = FontWeight.Bold,
+                                modifier = Modifier.padding(horizontal = sp.xs, vertical = sp.xxs),
+                            )
+                        }
+                    }
+                }
+            },
+            onClick = { onSelectMention(target.token) },
+        )
+    }
+}
 
 /**
  * 移动端输入栏：一条药丸装输入框，右侧一颗圆形发送键，能力入口排在药丸里。
@@ -592,52 +672,23 @@ public fun MessageComposer(
                                     },
                                     modifier = Modifier.heightIn(max = 240.dp),
                                 ) {
-                                    if (showMentionAll) {
-                                        DropdownMenuItem(
-                                            text = { Text(mentionAllToken) },
-                                            onClick = {
-                                                mentionMenuOpen = false
-                                                mentionQuery = null
-                                                val (nextText, nextCursor) = insertMention(
-                                                    text = fieldValue.text,
-                                                    start = fieldValue.selection.min,
-                                                    end = fieldValue.selection.max,
-                                                    token = mentionAllToken,
-                                                )
-                                                fieldValue = TextFieldValue(nextText, TextRange(nextCursor))
-                                                onDraftChange(nextText)
-                                            },
-                                        )
-                                    }
-                                    visibleTargets.forEach { target ->
-                                        DropdownMenuItem(
-                                            text = {
-                                                Column {
-                                                    Text(target.token)
-                                                    // 资料没到时如实说一句；有名字的人不画副行（不制造噪声）。
-                                                    target.note?.let { note ->
-                                                        Text(
-                                                            text = note,
-                                                            style = MaterialTheme.typography.labelSmall,
-                                                            color = MaterialTheme.colorScheme.onSurfaceVariant,
-                                                        )
-                                                    }
-                                                }
-                                            },
-                                            onClick = {
-                                                mentionMenuOpen = false
-                                                mentionQuery = null
-                                                val (nextText, nextCursor) = insertMention(
-                                                    text = fieldValue.text,
-                                                    start = fieldValue.selection.min,
-                                                    end = fieldValue.selection.max,
-                                                    token = target.token,
-                                                )
-                                                fieldValue = TextFieldValue(nextText, TextRange(nextCursor))
-                                                onDraftChange(nextText)
-                                            },
-                                        )
-                                    }
+                                    MentionDropdownItems(
+                                        visibleTargets = visibleTargets,
+                                        showMentionAll = showMentionAll,
+                                        mentionAllToken = mentionAllToken,
+                                        onSelectMention = { token ->
+                                            mentionMenuOpen = false
+                                            mentionQuery = null
+                                            val (nextText, nextCursor) = insertMention(
+                                                text = fieldValue.text,
+                                                start = fieldValue.selection.min,
+                                                end = fieldValue.selection.max,
+                                                token = token,
+                                            )
+                                            fieldValue = TextFieldValue(nextText, TextRange(nextCursor))
+                                            onDraftChange(nextText)
+                                        },
+                                    )
                                 }
                             }
                         }
@@ -656,7 +707,9 @@ public fun MessageComposer(
                                     focusManager.clearFocus()
                                 }
                             },
-                            modifier = Modifier.size(36.dp),
+                            // 不再显式压小：AppIconButton 的"档"就是触控目标（48dp，
+                            // AppButtons.kt 的 KDoc）。表情/更多/发送是输入栏的三个高频
+                            // 动作，36/44 的显式 size 把命中区压回了无障碍下限之下。
                             tone = if (emojiOpen) AppButtonTone.Primary else AppButtonTone.Neutral,
                         )
                     }
@@ -677,7 +730,6 @@ public fun MessageComposer(
                                 focusManager.clearFocus()
                             }
                         },
-                        modifier = Modifier.size(44.dp),
                         tone = if (moreOpen) AppButtonTone.Primary else AppButtonTone.Neutral,
                     )
                 }
@@ -690,7 +742,7 @@ public fun MessageComposer(
                         onSend()
                     },
                     enabled = canSend,
-                    modifier = Modifier.size(44.dp),
+                    // 全应用最高频动作：命中区不压回（默认 48dp 档）。
                     tone = AppButtonTone.Primary,
                     filled = true,
                 )

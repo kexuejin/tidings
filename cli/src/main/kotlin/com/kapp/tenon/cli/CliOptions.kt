@@ -23,7 +23,7 @@ internal class CliOptions(
 ) {
     companion object {
         val USAGE: String = """
-            relay-cli - a Tidings client with no UI.
+            relay-cli - a Tenon client with no UI.
 
             It exists to prove the domain layer is UI-free: this program compiles against
             :app only, so if it builds and runs, no Compose type is reachable from here.

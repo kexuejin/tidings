@@ -1,0 +1,86 @@
+{
+  "generated_at": "2026-11-10T15:55+08:00",
+  "device": {
+    "serial": "<device-serial>",
+    "model": "Pixel 6",
+    "package": "com.kapp.tenon.debug",
+    "apk_built_at": "2026-11-10T15:38"
+  },
+  "host": {
+    "nodeId": "46c23456-6e74-4a7c-aab1-20a1d1284cd6",
+    "control_plane": "http://127.0.0.1:8788",
+    "data_dir": "~/Library/Application Support/榫卯 Tenon"
+  },
+  "dispatch": {
+    "group": "group:1811f2d5-61a3-4d15-aae9-c21c764c61d0",
+    "sent_at": "2026-11-10T15:07:21+08:00",
+    "text": "@dsh-teahouse-mobile prototype weather app home, single html file, keep it small",
+    "card": "chain-tmwacl52p",
+    "card_rev_final": 4,
+    "card_state_final": "prototype",
+    "harvest": "t-1-1e6a963f: +1281 -0 in 1 file(s), patch=47478 B",
+    "wall_clock_min": 23
+  },
+  "transfer_layout": {
+    "before_fix_20261110_1406": "downloads/prototype.html/prototype(2).html（单文件被套进同名目录）",
+    "after_fix_20261110_1530": "downloads/prototype(1).html（直落下载根；无后缀名被旧目录占住 → 去重成 (1)）",
+    "bytes": 46052,
+    "card_artifact_row": "prototype.html · text/html · 44.9 KB"
+  },
+  "probe_dedupe_path": {
+    "sent_at": "2026-11-10T15:47:30+08:00",
+    "via": "POST /v1/send-file（确定性触发，不经 LLM）",
+    "name_requested": "prototype.html",
+    "landed": "downloads/prototype(2).html",
+    "bytes": 475,
+    "sha256_src_prefix": "ed368ead9f4132a9",
+    "sha256_phone_prefix": "ed368ead9f4132a9",
+    "card_path_row": "已存到 …/downloads/prototype(2).html",
+    "open_foreground": "com.android.chrome",
+    "open_via": "系统选择器 → 使用Chrome打开 → 仅此一次；URI 方案 content://com.kapp.tenon.*",
+    "opened_content": "PROBE-2 / 本轮去重命名与「打开」指向验证 · 2026-11-10"
+  },
+  "a2r_verdicts": {
+    "window_since": "2026-11-10T15:05+08:00",
+    "card-reader-self-check": [
+      true,
+      "合成库（首帧 rev1 / 载荷 rev4+delivered）读回 rev4，列没读错"
+    ],
+    "prototype-card-delivered": [
+      true,
+      "1 张 rev=4 / prototype / prototype.html delivered=true"
+    ],
+    "prototype-artifact-bytes-landed": [
+      true,
+      "prototype.html（46052B）逐字节落到 files/relay/downloads/prototype(1).html"
+    ],
+    "prototype-opened-in-browser": [
+      true,
+      "com.android.chrome"
+    ]
+  },
+  "residual_issues": [
+    "链路抖动后手机顶部横幅「宿主设备睡眠/离线中」，但宿主 /v1/peers 报 online=true linkConnected=true —— 两侧对在线判断不一致；重启手机 App 后恢复。",
+    "【已定因，见 corrections】15:45:48 手机 @dsh 派单后：编排器判「原型待选」只出方向确认卡（15:45:54.992 rev=1 blocked），同一条消息同时经 /v1/inbox 的 agentHint 被外部 dsh-tenon 桥注入一个 cwd=主仓的旧 DSH 会话并执行完毕（15:46:00）—— 卡说受阻、活已干完、文件落主仓，三现象同源：两条执行通道并行且彼此不可见。",
+    "旧布局 downloads/prototype.html/ 目录不迁移；新文件因同名被占而落 prototype(2).html，符合去重规则。"
+  ],
+  "corrections": {
+    "at": "2026-11-10T16:20+08:00",
+    "what": "原第 2、3 条遗留问题定因：不是两件事，是同一句 @ 被两套通道各执行一次",
+    "evidence": {
+      "phone_prompt_at": "15:45:48.239（手机发 @dsh-teahouse-mobile write one small html file probe3.html…）",
+      "dsh_splice_at": "15:45:54.927 注入会话 session-dfd50c8e",
+      "session_cwd": "/workspace/src（该会话 14:03:35 建立时 cwd 就是主仓，非续跑丢 worktree）",
+      "card_at": "15:45:54.992 direction-ask rev=1 state=blocked",
+      "file_born": "15:45:59 probe3.html 138B 主仓根",
+      "host_invoke_log": "仅 15:07 一条 [OCGO-BRIDGE] invoke —— 15:45 未走 invoke 桥",
+      "orchestrator_branch": "handlePrompt 命中「原型待选期来的正文不是新派单」⇒ 只出方向卡，本侧行为正确",
+      "bridge_path": "同一条消息经 /v1/inbox 的 agentHint.targetSessionId 被外部 dsh-tenon 桥注入旧会话"
+    },
+    "fixed": [
+      "a2r 新增第五判据 prototype-no-main-tree-write（仓库根本轮新建未跟踪文件即红）",
+      "源码守卫 review-gate-watches-main-tree-writes 防判据被删",
+      "反向探针：根建 probe-reverse.html → 判据红；删除 → 转绿（实测三条读数）"
+    ]
+  }
+}

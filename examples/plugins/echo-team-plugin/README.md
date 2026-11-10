@@ -1,4 +1,4 @@
-# echo-team-plugin —— Tidings 参考插件
+# echo-team-plugin —— Tenon 参考插件
 
 进程外插件的**完整最小实现**：零第三方依赖（Python 3 标准库），收到任何任务都
 原样回声，并回一条含声明式卡片的标准事件流。用途：
@@ -34,7 +34,7 @@
 把整个目录拷进宿主插件目录，桌面端启动时自动扫描、拉起并注入 token：
 
 ```
-~/Library/Application Support/捎话 Tidings/plugins/echo-team-plugin/
+~/Library/Application Support/榫卯 Tenon/plugins/echo-team-plugin/
 ├── manifest.json
 └── main.py
 ```
@@ -64,7 +64,7 @@ TENON_PLUGIN_TOKEN=<token> python3 main.py
 
 ## 手动冒烟（桌面端）
 
-1. 拷贝目录到插件目录（模式一），启动捎话桌面端；
+1. 拷贝目录到插件目录（模式一），启动榫卯桌面端；
 2. 看注册：`curl -s http://127.0.0.1:8788/v1/plugins`（`echo-team-plugin` 应为 `online`）；
 3. 派单：
    ```bash

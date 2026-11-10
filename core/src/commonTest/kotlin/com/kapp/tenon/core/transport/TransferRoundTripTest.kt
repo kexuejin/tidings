@@ -152,6 +152,64 @@ class TransferRoundTripTest {
 
     // ---------------------------------------------------------------- 测试
 
+    /**
+     * 返回值是**真的落到哪**（去重改名后的那个），不是 `saveDir + relPath`。
+     *
+     * 现场（2026-11-10 真机）：同名第二份落在 `downloads/prototype(1).html`，界面按
+     * 「打算用的名字」`prototype.html` 去打开 —— 那是个目录/旧文件，点开报「文件不在了」。
+     * 改名发生在 [PullSession] 内部，所以只有它能回答这个值，且必须与 rename 用同一个。
+     */
+    @Test
+    fun pullReportsTheDedupedPathItActuallyWrote() {
+        val srcDir = createTempDir("relay-src-dedup")
+        val dstDir = createTempDir("relay-dst-dedup")
+        val harness = Harness()
+        try {
+            val payload = patternBytes(4096, 3)
+            val srcPath = pathJoin(srcDir, "prototype.html")
+            writeAll(srcPath, payload)
+            // 目标名已被上一轮产物占住（真机上占位的是同名**目录**，这里用文件同义）
+            writeAll(pathJoin(dstDir, "prototype.html"), "old".encodeToByteArray())
+
+            val lookup = StubLookup(
+                files = mapOf("f1" to OutgoingFile("f1", srcPath, payload.size.toLong())),
+                transferId = "t-dedup",
+            )
+            val port = kotlinx.coroutines.runBlocking { harness.start(lookup) }
+
+            val landed = kotlinx.coroutines.runBlocking {
+                pullTransfer(
+                    PullOptions(
+                        host = "127.0.0.1",
+                        port = port,
+                        selfId = "self-1",
+                        transferId = "t-dedup",
+                        files = listOf(IncomingFilePlan("f1", "prototype.html", payload.size.toLong())),
+                        saveDir = dstDir,
+                        supportsWait = false,
+                    ),
+                )
+            }
+
+            assertEquals(
+                listOf(pathJoin(dstDir, "prototype(1).html")),
+                landed,
+                "返回的必须是去重后的真名，否则「打开」会指到一个不存在的路径",
+            )
+            assertTrue(fileExists(landed.single()), "返回值必须指向真的存在的文件")
+            assertContentEquals(payload, readAll(landed.single()), "返回的文件必须是本次的字节")
+            assertContentEquals(
+                "old".encodeToByteArray(),
+                readAll(pathJoin(dstDir, "prototype.html")),
+                "旧文件不许被覆盖",
+            )
+        } finally {
+            kotlinx.coroutines.runBlocking { harness.stop() }
+            removeRecursively(srcDir)
+            removeRecursively(dstDir)
+        }
+    }
+
     @Test
     fun roundTripTwoFiles() {
         val srcDir = createTempDir("relay-src")
@@ -159,7 +217,7 @@ class TransferRoundTripTest {
         val harness = Harness()
         try {
             val payloadA = patternBytes(300_000, 7)
-            val payloadB = "捎话文件传输".encodeToByteArray()
+            val payloadB = "榫卯文件传输".encodeToByteArray()
             val pathA = pathJoin(srcDir, "photo.jpg")
             val pathB = pathJoin(srcDir, "readme.txt")
             writeAll(pathA, payloadA)
@@ -231,7 +289,7 @@ class TransferRoundTripTest {
         val dstDir = createTempDir("relay-dst")
         val harness = Harness()
         try {
-            val payload = "捎话保留名清洗".encodeToByteArray()
+            val payload = "榫卯保留名清洗".encodeToByteArray()
             val srcPath = pathJoin(srcDir, "plain-name.bin")
             writeAll(srcPath, payload)
 

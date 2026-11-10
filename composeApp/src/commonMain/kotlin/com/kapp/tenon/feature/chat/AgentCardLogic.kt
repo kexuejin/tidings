@@ -232,6 +232,38 @@ const val CARD_HUNK_COLLAPSED_LINES = 6
 const val SYSTEM_ACTION_REJECT_REVISION = "reject-revision"
 
 /**
+ * 「在浏览器打开原型」—— **本地动作**：由客户端自己兑现，不广播给宿主。
+ *
+ * 为什么不是宿主动作：真正要打开的文件在**本机**（产物已按 `purpose=artifact`
+ * 投递到这台设备），宿主替不了这一步；发过去只会被 `HostCardActions` 当成
+ * 「不认识的卡片动作」丢掉并顺手把卡翻成 stale。
+ *
+ * 为什么它必须由卡片发出来而不是只靠产物条目：阶段 A 的人审是「看原型 → 再批准」，
+ * 入口要和「Approve & Develop」在同一组按钮里，否则用户是在看不到原型的情况下盲批。
+ * 画不画由调用方按「这份 .html 此刻是否已落到本机」判（见 `CardButtonGroupRow`
+ * 的 `isActionVisible`）—— 没落到就整颗不画，不留死按钮。
+ */
+const val SYSTEM_ACTION_OPEN_PROTOTYPE = "open-prototype"
+
+/** 这条动作是否由客户端本地兑现（是 ⇒ 不置 pending、不派发给宿主）。 */
+fun isLocalCardAction(actionId: String): Boolean = actionId == SYSTEM_ACTION_OPEN_PROTOTYPE
+
+/**
+ * 卡上网页原型**此刻**的可打开路径（纯函数）。
+ *
+ * 两个条件同时成立才给路径，任一条不成立就是 null：
+ * 1. 卡上确有网页原型条目（[ArtifactPreview.prototypeOf]，按名字/mime 认，不锁文件名）；
+ * 2. 它在消息流里已有同卡关联的**已落盘**文件（`savedPathOf`，进行中的传输不给路径）。
+ *
+ * null 的语义是「这颗按钮和这个入口现在都不该画」—— 它不是错误，是暂态：
+ * 产物按 `purpose=artifact` 自动投递，落盘后下一帧自然出现。
+ */
+fun prototypeSavedPathOf(
+    card: AgentCardUi,
+    savedPathOf: (AgentCardArtifact) -> String?,
+): String? = ArtifactPreview.prototypeOf(card.artifacts)?.let(savedPathOf)
+
+/**
  * 打回动作与反馈文本的**单槽编码**：`reject-revision|<文本>`。
  *
  * 为什么挤进一个字符串：动作通路 [CardActionUi] 之下只有 actionId 一个字符串槽 ——

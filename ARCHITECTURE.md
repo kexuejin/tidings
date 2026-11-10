@@ -214,16 +214,17 @@ data class Envelope(
 
 | 层 | 位置 | 它决定什么 |
 |---|---|---|
-| 平台壳 | `PlatformContracts.luciolaHost`（默认 `null` = 这个壳没接，一切走 legacy） | 装不装这套东西；身份 seed 与信任账本存哪（见 `SECURITY.md`） |
-| 领域层 `:app` | `RelayController` 的启动段 | `luciolaMode`（传输工厂与发现工厂**两件都非空**才算）、档案里的 `luciolaPort`、两个能力位、画面端口 `udpPort + 10`、legacy 监听是否让位 |
-| 运行时 `:core` | `NodeRuntime` 的注入点 | `messengerTransportFactory` / `extraDiscoveryFactory` / `fileChannelEnabled` / `screenChannelHostFactory` + `screenChannelPort` |
+| 平台壳 | `PlatformContracts.luciolaHost` | 提供加密信道宿主；**没接 = 通信不可用**（不再是"一切走 legacy"），界面显示「加密信道未能启动」 |
+| 领域层 `:app` | `RelayController` 的启动段 | 档案里的 `luciolaPort`、两个能力位、画面端口 `udpPort + 10`；装配失败时给 `UnavailableTransport`（发不出收不到，但 App 起得来） |
+| 运行时 `:core` | `NodeRuntime` 的注入点 | `messengerTransportFactory`（**必需**）/ `extraDiscoveryFactory` / `fileChannelEnabled` / `screenChannelHostFactory` + `screenChannelPort` |
 
-- **发现**：给了额外发现引擎，legacy 发现就不启动。这一条同时是默认开之后**最大的产品风险**：未升级的老客户端与本机互相发现不到（不是「发了没收到」，是节点表里根本没有它）。回退只有一条路 —— 关掉开关并**重启节点**。
-- **监听**：`fileChannelEnabled` 为真时**不创建** 17879 明文监听、17881 跨网文件监听与 17882 跨网投屏监听。消息与文件统一走加密信道；画面另开一条独立会话（领域层取 `udpPort + 10`，刻意避开 legacy 那三个口）。
+- **传输**：只有一条路。`messengerTransportFactory` 是必需参数，没有 `?: UdpTransport(...)` 回退 —— 曾经那个回退就是「手机跑安全信道、桌面跑 legacy」的入口（两端各自有开关，谁也不知道对方跑的是哪条）。
+- **发现**：luciola 发现引擎负责信标；`NodeRuntime` 自己的 `SweepOnlyDiscoveryEngine` 只做两件事 —— 按 `offlineAfter` 翻离线、给已知对端发定向 ENTRY 心跳。链路在册（`carrierOf`）时 sweep 不翻面：链路的断开由链路层负责。
+- **监听**：不再创建 17879 明文监听、17881 跨网文件监听与 17882 跨网投屏监听。消息与文件统一走加密信道；画面另开一条独立会话（领域层取 `udpPort + 10`）。
 - **归属**：二进制数据帧没有 `Envelope`，所以对端身份靠握手指纹反查端点，而不是帧里的 `from`。新增一条数据面时，这一点最容易漏。
-- **协商**：两个能力位都由壳按「数据面真的起来了」声明（只有信道可用才声明 `fch1`、只有画面监听真的绑上才声明 `scr1`）；协商不过就整体退回 legacy，不存在「半条路」。
+- **协商**：两个能力位都由壳按「数据面真的起来了」声明（只有信道可用才声明 `fch1`、只有画面监听真的绑上才声明 `scr1`）。
 - **配对与信任**：配对靠二维码里的一次性密钥 + 一条传输层控制帧自证（`PROTOCOL-EXTENSION.md` §15.4）；身份 seed 与信任账本落在平台侧，三端的保护强度不同（`SECURITY.md` 末节）。
-- **开关**：`RelaySettings.experimentalLuciola` **默认开**，改了要重启节点才生效；字段名保留旧名只是为了不丢已落盘的设置。
+- **开关**：**没有**。`RelaySettings.experimentalLuciola` 与桌面的 `TENON_LUCIOLA` 都已删除，字段名只为不丢已落盘的设置而保留，改它不改变任何行为。
 
 ---
 

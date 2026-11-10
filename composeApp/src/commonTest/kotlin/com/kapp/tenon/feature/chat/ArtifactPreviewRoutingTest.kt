@@ -175,7 +175,7 @@ class ArtifactPreviewRoutingTest {
         )
         assertEquals(
             "/saved/patch.diff",
-            artifactSavedPathOf(messages, "chain-t1", "patch.diff"),
+            artifactSavedPathOf(messages, "chain-t1", "patch.diff", 900L),
         )
     }
 
@@ -186,7 +186,7 @@ class ArtifactPreviewRoutingTest {
             messageWithFile("m2", "patch.diff", TransferState.Active, listOf()),
         )
         assertNull(
-            artifactSavedPathOf(messages, "chain-t1", "patch.diff"),
+            artifactSavedPathOf(messages, "chain-t1", "patch.diff", 900L),
             "还在传的文件给了路径也读不到全文：入口不画",
         )
     }
@@ -197,10 +197,10 @@ class ArtifactPreviewRoutingTest {
             messageWithFile("m2", "patch.diff", TransferState.Completed, listOf("/saved/patch.diff")),
         )
         assertNull(
-            artifactSavedPathOf(messages, "chain-t1", "patch.diff"),
+            artifactSavedPathOf(messages, "chain-t1", "patch.diff", 900L),
             "卡不在这条会话里：文件行无从归属，不做孤立路径展示",
         )
-        assertNull(artifactSavedPathOf(emptyList(), "chain-t1", "patch.diff"))
-        assertNull(artifactSavedPathOf(emptyList(), "chain-t1", ""))
+        assertNull(artifactSavedPathOf(emptyList(), "chain-t1", "patch.diff", 900L))
+        assertNull(artifactSavedPathOf(emptyList(), "chain-t1", "", 900L))
     }
 }

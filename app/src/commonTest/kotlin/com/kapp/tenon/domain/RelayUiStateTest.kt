@@ -587,7 +587,7 @@ class RelayUiStateTest {
         assertEquals(3, agentSessionsOf(state.toAgentSlice(), "dev").size, "agentSessionsOf 不该被UI需求带成过滤版")
 
         // 一个工作区**全是空壳**时照旧显示：否则那一行会变成 0 个会话，而"看起来是空"
-        // 比"多一行未命名"更糟（与 dsh-tidings 的 visibleOnPhone 同一取舍）。
+        // 比"多一行未命名"更糟（与 dsh-tenon 的 visibleOnPhone 同一取舍）。
         val onlyShells = RelayUiState(
             peers = listOf(peer("dev", "开发机", online = true, caps = listOf(MsgTypes.CAP_AGENT))),
             agentSessions = listOf(

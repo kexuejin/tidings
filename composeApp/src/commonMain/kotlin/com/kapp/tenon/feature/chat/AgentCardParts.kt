@@ -55,6 +55,7 @@ import com.kapp.tenon.generated.resources.ic_terminal
 import com.kapp.tenon.generated.resources.ic_check_double
 import com.kapp.tenon.generated.resources.ic_refresh
 import com.kapp.tenon.generated.resources.ic_close
+import com.kapp.tenon.generated.resources.ic_link
 import com.kapp.tenon.generated.resources.card_diff_collapse_code
 import com.kapp.tenon.generated.resources.card_diff_expand_code
 import com.kapp.tenon.generated.resources.card_revision_chip_compat
@@ -403,8 +404,14 @@ internal fun CardDiffViewerRow(diff: AgentCardDiff) {
  * 消息流里找到同 id 关联的已落盘文件（savedPathFor）—— 三个条件缺一个就
  * 退回纯元数据行，暂态（未投递）如实给一句解释而不是一颗死按钮。
  *
- * onPreviewArtifact 是可空槽：null = 这个壳还没有预览通路（预览窗整块不画），
- * 与动作槽的同名纪律一致 —— 按下去没反应的按钮比没有更糟。
+ * 两条通路在**这里一次性分流**（`Kind.opensExternally`）：
+ * - Markdown / Diff / 文本 → 本组件弹 [ArtifactPreviewDialog]（端内渲染）；
+ * - 网页原型（Html）→ 调 [onPreviewArtifact] 把落盘路径交给壳的平台出口
+ *   （Android `ACTION_VIEW` + FileProvider / 桌面 `Desktop.open` / iOS Quick Look）。
+ *   端内没有浏览器引擎，按文本渲染源码等于给用户看一堆标签，所以不做。
+ *
+ * onPreviewArtifact 是可空槽：null = 这个壳没有「交给系统打开」的通路（网页原型
+ * 就不画入口），与动作槽的同名纪律一致 —— 按下去没反应的按钮比没有更糟。
  */
 @Composable
 internal fun CardArtifactRows(
@@ -417,7 +424,9 @@ internal fun CardArtifactRows(
         artifacts.forEach { artifact ->
             val kind = ArtifactPreview.kindOf(artifact.name, artifact.mime)
             val savedPath = savedPathFor(artifact)
-            val previewable = ArtifactPreview.canPreview(artifact, kind, savedPath)
+            // 种类可渲染 + 已投递 + 已落盘；外部打开的那一类还要求壳真有平台出口。
+            val previewable = ArtifactPreview.canPreview(artifact, kind, savedPath) &&
+                (!kind.opensExternally || onPreviewArtifact != null)
             val blockedReason = ArtifactPreview.blockedReasonOf(artifact, kind, savedPath)
             var previewOpen by remember(artifact.name) { mutableStateOf(false) }
             Row(
@@ -428,8 +437,15 @@ internal fun CardArtifactRows(
                     .border(1.dp, MaterialTheme.colorScheme.outline.copy(alpha = 0.05f), RoundedCornerShape(10.dp))
                     .background(SurfaceTiers.Raised, RoundedCornerShape(10.dp))
                     .then(
-                        if (previewable && onPreviewArtifact != null) {
-                            Modifier.clickable { previewOpen = true }
+                        if (previewable) {
+                            Modifier.clickable {
+                                if (kind.opensExternally) {
+                                    // 外部打开：路径由 canPreview 保证非空，这里只做一次窄化。
+                                    savedPath?.let { onPreviewArtifact?.invoke(artifact, it) }
+                                } else {
+                                    previewOpen = true
+                                }
+                            }
                         } else {
                             Modifier
                         },
@@ -456,7 +472,7 @@ internal fun CardArtifactRows(
                         text = artifact.name,
                         style = MaterialTheme.typography.bodyMedium,
                         fontWeight = FontWeight.SemiBold,
-                        color = if (previewable && onPreviewArtifact != null) {
+                        color = if (previewable) {
                             MaterialTheme.colorScheme.primary
                         } else {
                             MaterialTheme.colorScheme.onSurface
@@ -522,7 +538,11 @@ private fun artifactIntentLabel(intentKey: String): String? = when (intentKey) {
  * .acts 竖排：.pri-row（btn sm 等分 r9 7×12）+ .sub-row 居中次级文字按钮（11 on-2、
  * 无底无边框）。本仓动作模型暂无 subActions 数据键（载荷 Schema 无此键，
  * detailed-design §2.1）—— sub-row 的样式接缝先不落（数据到不了的字段不画）,
- * 只落 pri-row 的等分布局。审批防重三态判据不变。
+ * 只落 pri-row 的等分布列。审批防重三态判据不变。
+ *
+ * [isActionVisible] 是**本地动作的就地判据**（null = 全部画）：像「在浏览器打开原型」
+ * 这种由客户端自己兑现的动作，文件还没落到本机时画出来就是一颗死按钮 ——
+ * 由调用方按「这份产物此刻能不能打开」把整颗按钮摘掉，而不是画一颗灰的。
  */
 @Composable
 internal fun CardButtonGroupRow(
@@ -530,6 +550,7 @@ internal fun CardButtonGroupRow(
     pendingActions: Set<String>,
     actionsEnabled: Boolean,
     onAction: (card: AgentCardUi, actionId: String) -> Unit,
+    isActionVisible: ((AgentCardAction) -> Boolean)? = null,
 ) {
     val sp = LocalAppSpacing.current
     Column(verticalArrangement = Arrangement.spacedBy(sp.sm)) {
@@ -537,7 +558,7 @@ internal fun CardButtonGroupRow(
             horizontalArrangement = Arrangement.spacedBy(sp.md10),
             modifier = Modifier.fillMaxWidth(),
         ) {
-            card.actions.forEach { action ->
+            card.actions.filter { isActionVisible?.invoke(it) ?: true }.forEach { action ->
                 val ui = cardActionUiOf(card, pendingActions, action.actionId)
                 // 文案优先序（跨端约定）：本端认识的 labelKey → 已知系统动作的端上词条 →
                 // payload 的 label → actionId。旧 payload（只有 label）与旧端（只读 label）
@@ -562,6 +583,7 @@ internal fun CardButtonGroupRow(
                     action.actionId == SYSTEM_ACTION_REJECT_REVISION ||
                         action.actionId.startsWith("$SYSTEM_ACTION_REJECT_REVISION|") -> Res.drawable.ic_close
                     action.actionId == "approve-prototype" -> Res.drawable.ic_check_double
+                    action.actionId == SYSTEM_ACTION_OPEN_PROTOTYPE -> Res.drawable.ic_link
                     action.actionId == "retry" -> Res.drawable.ic_refresh
                     else -> null
                 }

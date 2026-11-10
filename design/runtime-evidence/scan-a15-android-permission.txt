@@ -33,7 +33,7 @@ $ adb shell am force-stop app.relay && adb shell am start -n app.relay/.app.Main
 $ adb shell dumpsys package app.relay | grep "android.permission.CAMERA:"
         android.permission.CAMERA: granted=false, flags=[]
 # 点「打开相机扫码」→ 系统授权框原文：
-#   要允许“捎话”拍摄照片和录制视频吗？
+#   要允许“榫卯”拍摄照片和录制视频吗？
 #   仅在使用该应用时允许 / 仅限这一次 / 不允许
 # 点「仅在使用该应用时允许」后：
 $ adb shell dumpsys package app.relay | grep "android.permission.CAMERA:"
@@ -51,7 +51,7 @@ $ adb shell dumpsys activity activities | grep ResumedActivity
 # —— A15 反例：拒绝授权后的横幅与退路 ——
 $ adb shell pm revoke app.relay android.permission.CAMERA
 # 注意：pm revoke 会**杀掉应用进程**。上一步的点击会落到当时的前台应用上，
-# 必须先用 am start 把捎话拉回来再点。
+# 必须先用 am start 把榫卯拉回来再点。
 $ adb shell am start -n app.relay/.app.MainActivity
 # 节点页 → 右上 + → 「扫码配对」 → 「打开相机扫码」 → 再弹授权框 → 点「不允许」
 # 扫码页原文（逐字）：

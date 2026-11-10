@@ -17,7 +17,7 @@ import kotlin.test.assertEquals
 import kotlin.test.assertTrue
 import org.junit.Before
 
-/** 阶段二验收:luciola 双引擎互发现,registry 收到 Tidings 语义的 Online 事件。 */
+/** 阶段二验收:luciola 双引擎互发现,registry 收到 Tenon 语义的 Online 事件。 */
 class LuciolaDiscoveryEngineTest {
 
     // 每条用例两个独立端口：引擎（发现+信道）与对端适配器各一个。
@@ -60,7 +60,7 @@ class LuciolaDiscoveryEngineTest {
     }
 
     @Test
-    fun directedDialDeliversTidingsProfileToRegistry() = runBlocking {
+    fun directedDialDeliversTenonProfileToRegistry() = runBlocking {
         val json = Json { encodeDefaults = false; ignoreUnknownKeys = true }
         val selfP = profile("t_self", "Self")
         val peerP = profile("t_peer", "Peer")
@@ -68,17 +68,17 @@ class LuciolaDiscoveryEngineTest {
 
         val engine = LuciolaDiscoveryEngine(registry, { selfP }, udpPort = enginePort1, heartbeatJitterMs = 0)
 
-        // 对端:纯 luciola 适配器,extra 携带它的 Tidings Profile。
+        // 对端:纯 luciola 适配器,extra 携带它的 Tenon Profile。
         val peerAdapter = UniffiEngineAdapter(
             sessionName = peerP.nick,
             discoveryPort = peerPort1.toUShort(),
-            product = "tidings",
+            product = "tenon",
             extra = json.encodeToString(Profile.serializer(), peerP),
         )
         peerAdapter.start { }
 
         engine.start(this)
-        // 定向拨号对端(等价 Tidings announceTo):引擎 entry → 对端 alive(带 extra)→ registry touch。
+        // 定向拨号对端(等价 Tenon announceTo):引擎 entry → 对端 alive(带 extra)→ registry touch。
         val ev = awaitPeerEvent(registry, { it is PeerEvent.Online }) {
             engine.announceTo("127.0.0.1", peerPort1)
         }
@@ -109,7 +109,7 @@ class LuciolaDiscoveryEngineTest {
         val peerAdapter = UniffiEngineAdapter(
             sessionName = peerP.nick,
             discoveryPort = peerPort4.toUShort(),
-            product = "tidings",
+            product = "tenon",
             extra = json.encodeToString(Profile.serializer(), peerP),
         )
         peerAdapter.start { }
@@ -145,7 +145,7 @@ class LuciolaDiscoveryEngineTest {
         val peerAdapter = UniffiEngineAdapter(
             sessionName = peerP.nick,
             discoveryPort = peerPort5.toUShort(),
-            product = "tidings",
+            product = "tenon",
             extra = json.encodeToString(Profile.serializer(), peerP),
         )
         peerAdapter.start { }
@@ -171,7 +171,7 @@ class LuciolaDiscoveryEngineTest {
         val peerAdapter = UniffiEngineAdapter(
             sessionName = peerP.nick,
             discoveryPort = peerPort2.toUShort(),
-            product = "tidings",
+            product = "tenon",
             extra = json.encodeToString(Profile.serializer(), peerP),
         )
         peerAdapter.start { }
@@ -207,7 +207,7 @@ class LuciolaDiscoveryEngineTest {
         val peerAdapter = UniffiEngineAdapter(
             sessionName = peerP2.nick,
             discoveryPort = peerPort3.toUShort(),
-            product = "tidings",
+            product = "tenon",
             extra = json.encodeToString(Profile.serializer(), peerP2),
         )
         peerAdapter.start { }

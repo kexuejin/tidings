@@ -6,6 +6,7 @@ import com.kapp.tenon.core.protocol.newId
 import com.kapp.tenon.core.transport.DiscoveryEngine
 import com.kapp.tenon.core.transport.PeerRegistry
 import com.kapp.tenon.core.transport.UdpTransport
+import com.kapp.tenon.core.testing.udpTestTransport
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.cancel
@@ -47,7 +48,7 @@ class NodeRuntimeExtraDiscoveryFactoryTest {
             profile = profile,
             udpPort = 0,
             tcpPort = 0,
-            messengerTransportFactory = null,
+            messengerTransportFactory = udpTestTransport(),
             extraDiscoveryFactory = { registry, _ ->
                 FakeDiscovery(registry).also { fake = it }
             },

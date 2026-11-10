@@ -18,6 +18,7 @@ import com.kapp.tenon.generated.resources.orchestration_stage_impl_3
 import com.kapp.tenon.generated.resources.orchestration_team_ready
 import com.kapp.tenon.generated.resources.orchestration_diff_ready_prompt
 import com.kapp.tenon.generated.resources.orchestration_diff_ready_detail
+import com.kapp.tenon.generated.resources.orchestration_stage_handoff_speech
 import com.kapp.tenon.generated.resources.orchestration_patch_hint_exists
 import com.kapp.tenon.generated.resources.orchestration_patch_hint_mismatch
 import com.kapp.tenon.generated.resources.orchestration_patch_hint_file_missing
@@ -159,4 +160,7 @@ internal object ResourceUiTexts : RelayUiTexts {
         }
         return runCatching { getString(key, detail.take(160)) }.getOrNull().orEmpty()
     }
+
+    override suspend fun stageHandoffSpeech(workerRole: String, reviewerRole: String): String =
+        runCatching { getString(Res.string.orchestration_stage_handoff_speech, workerRole, reviewerRole) }.getOrNull().orEmpty()
 }

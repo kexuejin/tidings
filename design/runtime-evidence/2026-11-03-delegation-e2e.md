@@ -17,8 +17,8 @@
 
 ## 1. 装置
 
-- 宿主：/Applications/Tidings.app（createDistributable 三次重建），启动命令沿用
-  `env -u NODE_OPTIONS -u PYTHONPATH -u BASH_ENV TIDINGS_LUCIOLA=1 … ./Tidings --background`。
+- 宿主：/Applications/Tenon.app（createDistributable 三次重建），启动命令沿用
+  `env -u NODE_OPTIONS -u PYTHONPATH -u BASH_ENV TENON_LUCIOLA=1 … ./Tenon --background`。
 - 手机：adb（<device-serial>），e2e-weather 群（=群 626bed34，绑 `~/weather-relay`，有 `npm test`）。
 - 派单输入：**逐字符** `input text` + 0.4s 间隔、空格走 keyevent 62；`@` 后点候选 + 补空格。
   发送要点：**ENTER 不发送**（只加换行），必须点发送按钮 (990,2195)。

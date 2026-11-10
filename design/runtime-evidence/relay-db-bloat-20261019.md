@@ -1,7 +1,7 @@
 # relay.db 膨胀到 21 GB —— 根因与修复
 
 > 日期：2026-10-19
-> 环境：macOS，桌面端 `~/Library/Application Support/捎话 Tidings/relay.db`
+> 环境：macOS，桌面端 `~/Library/Application Support/榫卯 Tenon/relay.db`
 
 ## 现象
 

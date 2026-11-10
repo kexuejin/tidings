@@ -10,8 +10,8 @@
 | 项 | 值 |
 | --- | --- |
 | 被验代码 | `main` @ `e047f4b3`（会话事件流全新方案），工作树 clean |
-| 部署包 | `/Applications/Tidings.app`（22:48 构建 = HEAD 内容；class 按字节核验含「没能合并这次改动」「sessionTitleFor」） |
-| 宿主 | 23:02 从终端重启，`TIDINGS_CODEX_CLI=/tmp/fake-codex-slow`（确定性桩：24 s 后写 hello.txt + 追加 seed.txt），控制面 :8788 |
+| 部署包 | `/Applications/Tenon.app`（22:48 构建 = HEAD 内容；class 按字节核验含「没能合并这次改动」「sessionTitleFor」） |
+| 宿主 | 23:02 从终端重启，`TENON_CODEX_CLI=/tmp/fake-codex-slow`（确定性桩：24 s 后写 hello.txt + 追加 seed.txt），控制面 :8788 |
 | 工作区 | `/tmp/e2e-final/ws-clean`（全新 git 仓，基线提交 `dbace62`）；`POST /v1/agent/workspace` 宣告 `ws-e2e-final`，手机 ACK（23:03） |
 | 群 | 手机 UI 建群 **e2e-final**（`092332c7-…`，成员 = Pixel 6 + <host>-97，23:06，零历史）；席位 `codex-final`（agentId=codex, defaultWsId=ws-e2e-final）经 settings.json rev2 声明 |
 | 手机 | Pixel 6（`e4bd7b99-…`），com.kapp.tenon.debug，全程 adb 驱动 |

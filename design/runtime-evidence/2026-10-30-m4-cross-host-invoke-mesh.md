@@ -1,10 +1,10 @@
 # M4 · P2P 分布式网格 —— 跨端派单网道读数
 
 - 日期：2026-10-30（M4 收尾轮，接手会话完成）
-- 产物：`~/Downloads/relay-build-2026-10-30-m4/`（`Tidings.app` + `androidApp-debug.apk`，
+- 产物：`~/Downloads/relay-build-2026-10-30-m4/`（`Tenon.app` + `androidApp-debug.apk`，
   sha256 见该目录 `sha256.txt`；桌面最终二进制
   `10d069496fb257665aefb8e3e9ee0bb6485b6cc3215eeab830222ace8da6c504`）
-- 装机核对：桌面替换 `/Applications/Tidings.app` 后按流程 lsregister 重注册；
+- 装机核对：桌面替换 `/Applications/Tenon.app` 后按流程 lsregister 重注册；
   桌面 `agentNode-*.jar` 内 grep 到 `AgentInvokeDispatcher.class`，`app-jvm-*.jar` 内
   `AgentInvokeExecutor` / `AgentInvokeLeaseTable`；手机 APK 解包 dex grep 到
   `dispatchCrossHostInvoke`（10 处）/ `AgentInvokeLease`（17 处）—— 装的是 M4 代码。

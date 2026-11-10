@@ -261,6 +261,15 @@ object Limits {
     /** 派单 prompt 预算（§7.7 上下文裁剪：字符数；超限头尾保留 + 截断标注）。 */
     const val AGENT_TASK_BUDGET: Int = 8_000
 
+    /**
+     * 团队执行档里组员的**模型 id** 上限（团队执行方案 §3.4.4）。
+     * 执行档是宿主本地事实（不进协议），这个上限只管本地文件里模型串的长度。
+     */
+    const val AGENT_MODEL_ID = 64
+
+    /** 团队执行档里一个成员的**主备模型**个数上限（主 + 备 2；P2 消费）。 */
+    const val AGENT_MODELS_MAX = 3
+
     /** 宿主 CPU 拒单阈值（§7.12：>85% 自动拒单避让 —— 接收侧自保门）。 */
     const val HOST_CPU_REJECT: Double = 0.85
 

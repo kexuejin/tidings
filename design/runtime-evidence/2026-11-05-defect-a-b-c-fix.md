@@ -26,7 +26,7 @@
 
 - HEAD：`b9ca96ce 2026-11-05T17:14:34+08:00`（`origin/main..HEAD = 93`，未 push）。
 - 真机：Pixel 6，`<device-serial>`，包 `com.kapp.tenon.debug`。
-- 宿主：`/Applications/Tidings.app`，冷启动**不设** `TIDINGS_LUCIOLA_NATIVE`（用包里自带 dylib）。
+- 宿主：`/Applications/Tenon.app`，冷启动**不设** `TENON_LUCIOLA_NATIVE`（用包里自带 dylib）。
 
 ```
 APK  构建：61,810,057 B  sha256 7072e9c86efa4d3f16c844bac9cb64d37550a58b6ad19e1b7733412de0b6c09a
@@ -287,8 +287,8 @@ run2  :core:compileCommonMainKotlinMetadata FAILED — 133 × Unresolved referen
 run2 的失败**不是本轮引入的**。在纯净 `b9ca96ce` 上开工作树跑同一条任务：
 
 ```
-git worktree add /tmp/tidings-head b9ca96ce
-cd /tmp/tidings-head && ./gradlew :core:compileCommonMainKotlinMetadata
+git worktree add /tmp/tenon-head b9ca96ce
+cd /tmp/tenon-head && ./gradlew :core:compileCommonMainKotlinMetadata
 EXIT=1 / 133 条，前三条与工作树逐字相同
 e: …/LuciolaDiscoveryEngine.kt:6:11 Unresolved reference 'github'.
 ```
@@ -425,15 +425,15 @@ PNG 中 `d01-chat.png` 与 `d02-chat-group.png` 就是这种白页（都是 14,3
 # 1) 产物
 ./gradlew :androidApp:assembleDebug :desktopApp:createDistributable
 adb -s <device-serial> install -r -d androidApp/build/outputs/apk/debug/androidApp-debug.apk
-ditto desktopApp/build/compose/binaries/main/app/Tidings.app /Applications/Tidings.app
+ditto desktopApp/build/compose/binaries/main/app/Tenon.app /Applications/Tenon.app
 python3 tools/verify-luciola-native.py \
-  --dylib /Applications/Tidings.app/Contents/app/resources/native/libluciola_uniffi.dylib \
-  --jar $(find /Applications/Tidings.app/Contents/app -name 'luciola-jvm-*.jar' | head -1)
+  --dylib /Applications/Tenon.app/Contents/app/resources/native/libluciola_uniffi.dylib \
+  --jar $(find /Applications/Tenon.app/Contents/app -name 'luciola-jvm-*.jar' | head -1)
 
-# 2) 宿主（不设 TIDINGS_LUCIOLA_NATIVE ⇒ 用包里 dylib）
-env -u NODE_OPTIONS -u PYTHONPATH -u BASH_ENV -u TIDINGS_LUCIOLA_NATIVE \
-  TIDINGS_LUCIOLA=1 TENON_WEBHOOK_SECRET_E2E_SIGNED=luciola-e2e-hmac-20261105 \
-  /Applications/Tidings.app/Contents/MacOS/Tidings --background
+# 2) 宿主（不设 TENON_LUCIOLA_NATIVE ⇒ 用包里 dylib）
+env -u NODE_OPTIONS -u PYTHONPATH -u BASH_ENV -u TENON_LUCIOLA_NATIVE \
+  TENON_LUCIOLA=1 TENON_WEBHOOK_SECRET_E2E_SIGNED=luciola-e2e-hmac-20261105 \
+  /Applications/Tenon.app/Contents/MacOS/Tenon --background
 
 # 3) 缺陷 A（真手指点接收，看卡面是否原地推进）
 python3 /tmp/e2e-20261105/probe_accept.py 4096 fixA

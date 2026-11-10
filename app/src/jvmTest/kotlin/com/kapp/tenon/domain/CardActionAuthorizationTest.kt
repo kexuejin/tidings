@@ -223,9 +223,9 @@ class CardActionAuthorizationTest {
     /**
      * **编排器代发的卡必须有出口**（真机 2026-11-03，多棒链复验时发现）：
      *
-     * 链卡署名 `tidings-chain`（DesktopStageChain），不是任何真实席位。按假名查
+     * 链卡署名 `tenon-chain`（DesktopStageChain），不是任何真实席位。按假名查
      * 台账/策略双双落空 → 掉进最严档 → 有资格的成员点「合并此补丁」也被拒，
-     * 群里回「没有权限驱动 tidings-chain」，链的产出永远合不进工作区。
+     * 群里回「没有权限驱动 tenon-chain」，链的产出永远合不进工作区。
      *
      * 口径：认不出的 agentId 按**本机托管给这个群**的 agent 判资格（卡是这个群
      * 工作区的产物）；真实席位的行为一字不变（由上面三条用例钉着）。

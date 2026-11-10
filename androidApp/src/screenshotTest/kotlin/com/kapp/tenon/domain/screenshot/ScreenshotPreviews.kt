@@ -147,7 +147,7 @@ private val desktopThread = listOf(
         id = "m1",
         peerId = desktop.nodeId,
         mine = false,
-        text = "手机端连上了吗？我这边捎话已经能看到一个新节点。",
+        text = "手机端连上了吗？我这边榫卯已经能看到一个新节点。",
         at = at(0),
     ),
     MessageUi(
@@ -162,7 +162,7 @@ private val desktopThread = listOf(
         id = "m3",
         peerId = desktop.nodeId,
         mine = true,
-        text = "再发一条试试离线暂存：你现在把捎话关掉，我发完再开。",
+        text = "再发一条试试离线暂存：你现在把榫卯关掉，我发完再开。",
         at = at(5),
         delivery = DeliveryState.Queued,
     ),
@@ -556,7 +556,7 @@ private val discoveryState = RelayUiState(
  * 因为那一套的节点 id 与这里不同，混用会让两边的参考图互相牵制。
  */
 private val cabinetMineSettings = selfSettings.copy(
-    shareRoot = "~/Documents/捎话共享",
+    shareRoot = "~/Documents/榫卯共享",
     shareMode = "read",
     shareGrants = listOf(
         ShareGrantEntry(nodeId = colleague.nodeId, mode = "write"),

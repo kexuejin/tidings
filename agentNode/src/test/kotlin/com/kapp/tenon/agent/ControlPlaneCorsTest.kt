@@ -21,15 +21,16 @@ import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertNull
 import kotlin.test.assertTrue
+import com.kapp.tenon.agent.udpTestTransport
 
 /**
  * `/healthz` 的 CORS 契约。
  *
  * ## 为什么这条要有测试
  *
- * 桌面端设置页里那张「捎话」卡片跑在**浏览器**里，它判断「本机桌面端在不在」的办法
+ * 桌面端设置页里那张「榫卯」卡片跑在**浏览器**里，它判断「本机桌面端在不在」的办法
  * 就是读 `127.0.0.1:<port>/healthz`。那是跨源请求（端口不同），浏览器不给读响应，
- * 除非控制面回一个允许的 Origin —— 没有这几个头，卡片只能显示「未检测到捎话桌面端」，
+ * 除非控制面回一个允许的 Origin —— 没有这几个头，卡片只能显示「未检测到榫卯桌面端」，
  * 而桌面端明明在跑。
  *
  * ## 边界也一并钉住
@@ -52,9 +53,10 @@ class ControlPlaneCorsTest {
     fun setUp() {
         scope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
         agent = NodeRuntime(
+            messengerTransportFactory = udpTestTransport(),
             profile = Profile.mobile(
                 nodeId = newId(),
-                nick = "Tidings Agent",
+                nick = "Tenon Agent",
                 host = "relay-agent",
                 ver = "relay-0.1.0",
             ),

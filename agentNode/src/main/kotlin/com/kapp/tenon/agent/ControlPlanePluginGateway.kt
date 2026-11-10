@@ -73,14 +73,14 @@ private fun ControlPlane.pluginTokenGuard(exchange: HttpExchange): Boolean {
     return true
 }
 
-/** 插件 token 的请求头读取：与 [authorized] 同一份头约定（Bearer / X-Tidings-Token）。 */
+/** 插件 token 的请求头读取：与 [authorized] 同一份头约定（Bearer / X-Tenon-Token）。 */
 private fun ControlPlane.presentedPluginToken(exchange: HttpExchange): String? {
     val bearer = exchange.requestHeaders.getFirst("Authorization")
     if (bearer != null) {
         val value = bearer.removePrefix("Bearer ").trim()
         if (value.isNotEmpty()) return value
     }
-    return exchange.requestHeaders.getFirst("X-Tidings-Token")?.takeIf { it.isNotEmpty() }
+    return exchange.requestHeaders.getFirst("X-Tenon-Token")?.takeIf { it.isNotEmpty() }
 }
 
 internal fun ControlPlane.pluginRegister(exchange: HttpExchange) {

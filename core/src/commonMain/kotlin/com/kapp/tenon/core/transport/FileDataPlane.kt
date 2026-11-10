@@ -15,8 +15,16 @@ package com.kapp.tenon.core.transport
  * 否则就是一次行为重写（那是 risk，不是 progress）。
  */
 interface FileDataPlane {
-    /** 读一个 offer 的全部文件到 [saveDir]；失败抛 [PullException]，取消走 [PullCancelRef]。 */
-    suspend fun pull(opts: PullOptions)
+    /**
+     * 读一个 offer 的全部文件到 [saveDir]；失败抛 [PullException]，取消走 [PullCancelRef]。
+     *
+     * **返回值是「真的落到哪」**：每项都是转正之后的绝对路径，不是 `saveDir + relPath`
+     * 这个**打算**用的路径。两者在目标已存在时就不一样了（[dedupeTargetPath] 会改名成
+     * `name(1).ext`），而调用方按名字去打开时只会认前者 —— 返回打算用的那个，界面上
+     * 「打开」就会指到一个不存在的路径（真机现场：文件明明在 `prototype(1).html`，
+     * 点开报「文件不在了」）。改名发生在实现内部，只有它能如实回答这个值。
+     */
+    suspend fun pull(opts: PullOptions): List<String>
 }
 
 /** 今天的实现：明文 TCP（及跨网 TLS 计划）。行为逐字不变。 */

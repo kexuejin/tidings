@@ -197,28 +197,21 @@ data class RelaySettings(
      */
     val persistMessagesDecided: Boolean = false,
     /**
-     * luciola 加密信道（发现 + 传输整体切换）。**默认开**,开启或关闭都需重启节点。
+     * **历史字段，不再被读取。** luciola 是唯一的传输形态（legacy 已删），没有开关。
      *
-     * ## 为什么默认开（转正证据）
+     * ## 为什么留着这个字段而不删
      *
-     * - 文件传输：50MB 真机 2.89s / 17 MiB/s（修复前 90s），sha256 两端一致；
-     *   回环验收 566ms / 88-105 MiB/s；
-     * - 投屏帧率：正式 5 分钟验收 4.908 vs legacy 4.909 fps = **99.98%**，全程 0 降档；
-     * - 三个 legacy 端口（17879/17881/17882）在真机两端都不再监听；
-     * - 消息/文件/投屏全部走加密信道。
+     * 它只是"已落盘的 settings.json 里有这个键"的占位。删掉字段意味着老文件里那个键
+     * 变成未知键 —— 能不能解出来取决于 `SettingsStore.json` 的 `ignoreUnknownKeys`，
+     * 而这个字段的存在成本是零、误删的后果是一份设置文件读不出来。所以留着，
+     * 但注释写清：**改它不会改变任何行为**。
      *
-     * ## 已知取舍（必须让用户看得见，不能藏）
+     * ## 转正与退役的历史（保留是为了不重犯）
      *
-     * 1. **投屏延迟 1.51×**：55.16ms vs legacy 36.57ms（同条件 5 分钟 A/B）。
-     *    差额来自每次跨 JVM↔Rust 边界的固定开销；传输段（字节搬运）反而比 legacy 更快。
-     *    见投屏专项验收记录文档。
-     * 2. **未升级的老设备会失去自动发现**：开着时 legacy 发现不启动，老版本既发现不到我们、
-     *    我们也发现不到它 —— 它们只会显示成离线。这是本条默认开最大的产品风险。
-     *    **回退路径**：本机设置里关掉这个开关 + 重启节点，即回到 legacy 发现与传输；
-     *    或让那台设备升级到同一版本。
-     *
-     * 字段名保留 `experimentalLuciola` 是为了**不破坏已落盘的设置文件**（改名等于让
-     * 所有老用户的选择丢失）；对用户可见的"实验"字样已从文案里去掉。
+     * - 曾经默认 `false`（实验），靠 `TENON_LUCIOLA=1` + 设置页开关两处门控分别打开；
+     * - 转正为默认 `true` 之后仍有回退路径（关开关 + 重启 ⇒ 回到 legacy 发现与传输）；
+     * - 再后来：**legacy 传输整体删除**，回退路径消失。现在两端只有一条路，
+     *   装配失败会显示「加密信道未能启动」横幅，而不是静默跑明文。
      */
     val experimentalLuciola: Boolean = true,
     /**
@@ -517,7 +510,13 @@ data class RelaySettings(
         nodeId = nodeId,
         nick = nick.take(LIMIT_NICK),
         host = host.take(LIMIT_HOST),
-        tcpPort = tcpPort,
+        // `tcpPort = 0` 是**设置层**「交给系统挑端口」的内部语义，绝不能进对外资料：
+        // `Codec.validateProfile` 要求 1..65535，越界值会让**整帧**被对端拒收
+        // （实测：客户端 entry 送达、对端 `decoded=Rejected`，节点表空、
+        // 没有任何一行告警）。它在 legacy 时代不会漏出去，因为运行时绑完 TCP 会把
+        // 真实端口回写进 profile；luciola 模式不再绑 17879（`legacyTcpListener=false`），
+        // 那条回写不会发生，0 就一路带到线上 —— 所以在这里收口成协议默认端口。
+        tcpPort = tcpPort.takeIf { it in 1..65535 } ?: Protocol.DEFAULT_TCP_PORT,
         // K2：TLS 监听端口在 TCP 端口之上一个（独立端口，不复用 17879 做嗅探 —— task-13 裁决 ③）。
         // 平台不支持 TLS 时（iOS 尚未落地）这个键照样广播，但本机不会绑它，对端连不上会退回原路径。
         tlsPort = tcpPort.takeIf { it in 1..65534 }?.plus(1),

@@ -30,8 +30,8 @@ import com.kapp.tenon.core.transport.DatagramTransport
 import com.kapp.tenon.core.transport.FileChannelRouter
 import com.kapp.tenon.core.transport.FileChannelNegotiation
 import com.kapp.tenon.core.transport.ChunkFileTarget
-import com.kapp.tenon.core.transport.Discovery
 import com.kapp.tenon.core.transport.DiscoveryEngine
+import com.kapp.tenon.core.transport.PresenceIngest
 import com.kapp.tenon.core.transport.SYNTHETIC_NICK_PREFIX
 import com.kapp.tenon.core.transport.InMemoryDedupStore
 import com.kapp.tenon.core.transport.InMemoryMessageStore
@@ -86,7 +86,6 @@ import com.kapp.tenon.core.transport.QueuedMessage
 import com.kapp.tenon.core.transport.SendOutcome
 import com.kapp.tenon.core.transport.StoredMessage
 import com.kapp.tenon.core.transport.TcpFramedChannel
-import com.kapp.tenon.core.transport.UdpTransport
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.SupervisorJob
@@ -99,11 +98,11 @@ import kotlinx.coroutines.launch
 import kotlinx.coroutines.withTimeoutOrNull
 
 /**
- * 一个 Tidings 节点的运行时：把 transport / registry / discovery / messenger / store
+ * 一个 Tenon 节点的运行时：把 transport / registry / discovery / messenger / store
  * 装配成"可直接用"的对象。
  *
  * 这是 `composeApp`（手机 UI）与 `agentNode`（本机常驻 agent 侧节点）**唯一**的共用入口 ——
- * 两边都不直接 new [UdpTransport] / [Messenger]，因为装配顺序（先订阅再 start）与
+ * 两边都不直接 new `UdpTransport` / [Messenger]，因为装配顺序（先订阅再 start）与
  * 存储注入是需要统一保证的。
  *
  * ## 桌面与对端节点互联
@@ -139,23 +138,96 @@ import kotlinx.coroutines.withTimeoutOrNull
 internal class SweepOnlyDiscoveryEngine(
     private val registry: PeerRegistry,
     private val timings: Timings,
+    /**
+     * 定向心跳：给已知节点各发一帧 presence。返回 `(targets, sent)`：
+     * targets = 这一轮**试图**投递的地址数，sent = 真正交出去的包数。
+     *
+     * 为什么必须有它：这个引擎的由来是「发现交给新传输，legacy 不再打局域网广播」，
+     * 但它的 `announce*` 全是空实现 —— 于是**连单播心跳也一起没了**，而
+     * [PeerRegistry.sweep] 照跑。真机读数（2026-11-10 16:4x，Pixel 6 前台、进程活着、
+     * UDP 可达）：`lastSeen` 一路涨到 104.7 秒，宿主把手机判成 `online=false`，
+     * 队列 `left=44` 只涨不降，界面挂「宿主设备睡眠」横幅；只有重启 App（触发一次
+     * announce）才恢复。
+     *
+     * 为什么要区分 targets 与 sent：两者都为 0 是「本机还没有任何对端」的**常态**，
+     * 而 targets>0 且 sent=0 是「socket 发不出任何东西」的**故障**（task-29 的静默
+     * 停摆）—— 只有后者才该触发 [healTransport]。合在一个 Int 里这两种状态无法区分，
+     * 空闲节点会被误判成泵停摆、传输面被反复重启。
+     */
+    private val heartbeat: (suspend () -> Pair<Int, Int>)? = null,
+    /**
+     * 心跳连续多轮「有目标却一个包都没交出去」时重建传输面。
+     *
+     * 这条自愈原来住在 legacy `Discovery.presenceLoop`（task-29：socket 被关/坏之后
+     * `send` 静默失败，没有任何人重建它）；legacy 删除后它跟着搬家到这里 —— 心跳循环
+     * 的下一个主人。null = 不自愈（纯观察的引擎）。
+     */
+    private val healTransport: (suspend () -> Unit)? = null,
+    /**
+     * 该节点此刻是否还有活跃长连接。sweep 拿它做豁免：连着就不因「没收到帧」翻离线。
+     * 真机读数里 `linkConnected=true` 与 `online=false` 同时成立，界面据此说宿主睡眠。
+     */
+    private val stillReachable: (String) -> Boolean = { false },
 ) : DiscoveryEngine {
     private var sweepJob: Job? = null
+    private var heartbeatJob: Job? = null
     override fun start(scope: CoroutineScope) {
         sweepJob = scope.launch {
             while (isActive) {
                 delay(timings.sweepInterval)
-                registry.sweep(timings.offlineAfter)
+                registry.sweep(timings.offlineAfter, stillReachable)
+            }
+        }
+        // 心跳与 sweep 分开起：两者失败的后果不同（心跳漏一轮只是慢 30 秒翻正，
+        // sweep 停摆则「静默死亡永不翻面」），合在一个循环里会让一个异常带走另一个。
+        val beat = heartbeat ?: return
+        val heal = healTransport
+        heartbeatJob = scope.launch {
+            // **启动即发一轮**。等一个 presenceInterval 再发（默认 30 秒）意味着：节点起来
+            // 之后半分钟里对端完全不知道我们回来了 —— 真机上表现为"重连要等一会儿"，
+            // 测试里表现为 `addManualPeer` 之后一直看不见对方。
+            var deadRounds = 0
+            suspend fun runRound() {
+                val (targets, sent) = runCatching { beat() }.getOrDefault(0 to 0)
+                // targets>0 且 sent=0 才算「泵停摆」：targets=0 是空闲节点的常态。
+                deadRounds = if (sent > 0 || targets == 0) 0 else deadRounds + 1
+                // 一轮一行只在**异常**时打：sent=0 说明这一轮一个包都没交出去（收端因此收不到
+                // 心跳、`lastSeen` 会一路涨到 offlineAfter），restart 会短暂关闭接收泵。
+                // 真机上「双方互相判离线」的锯齿只能靠这两行区分「没发」「发不出去」「发出去对方不收」。
+                if (targets > 0 && sent == 0) println("[presence] sent=0 dead=$deadRounds")
+                if (heal != null && deadRounds >= STALLED_ROUNDS_BEFORE_RESTART) {
+                    deadRounds = 0
+                    println("[presence] transport restart (no packet left for 2 rounds)")
+                    runCatching { heal() }
+                }
+            }
+            runRound()
+            while (isActive) {
+                delay(timings.presenceInterval)
+                runRound()
             }
         }
     }
     override fun stop() {
         sweepJob?.cancel()
         sweepJob = null
+        heartbeatJob?.cancel()
+        heartbeatJob = null
     }
     override suspend fun announce() {}
     override suspend fun announceTo(host: String, port: Int) {}
     override suspend fun announceExit() {}
+
+    private companion object {
+        /**
+         * 连续几轮"有目标却一个包都没交出去"就把 transport 重建一次。
+         *
+         * 2 轮 = 2 × presenceInterval（默认 60 秒）：UDP 发送失败是内核层面的，
+         * 不存在"网络不好所以没交出去"，只可能是 socket 已经不可用。
+         * 取 2 而不是 1，是为了不在一次瞬时错误上就重建连接。
+         */
+        const val STALLED_ROUNDS_BEFORE_RESTART = 2
+    }
 }
 
 class NodeRuntime(
@@ -167,7 +239,17 @@ class NodeRuntime(
     udpPort: Int = Protocol.DEFAULT_UDP_PORT,
     bindHost: String = "0.0.0.0",
     private val timings: Timings = DEFAULT_TIMINGS,
-    manualPeers: List<ManualPeer> = emptyList(),
+    /**
+     * 用户手动添加的节点地址（只有 host:port —— 没有 nodeId，是一条**地址便条**）。
+     *
+     * ## 为什么它必须由心跳直接发包
+     *
+     * legacy 发现活着的时候，这些地址由 `Discovery` 的 presence 轮次负责投递；legacy 删掉
+     * 之后如果没人接手，用户填进去的地址就是**一句空话**（他在设置里看到"已添加"，对端
+     * 永远收不到我们的任何帧）。[sendPresenceHeartbeat] 因此单独遍历一遍这份列表：
+     * registry 里的对端按 nodeId 发，手动地址按 host:port 发。
+     */
+    private val manualPeers: List<ManualPeer> = emptyList(),
     private val queueStore: QueueStore = InMemoryQueueStore(),
     private val dedupStore: DedupStore = InMemoryDedupStore(),
     private val messageStore: MessageStore = InMemoryMessageStore(),
@@ -201,15 +283,18 @@ class NodeRuntime(
      */
     private val keepNode: (nodeId: String) -> Boolean = { false },
     /**
-     * 阶段三(合并切):提供时 Messenger 的传输面换成它(认证加密信道)且
-     * legacy Discovery 不启动——发现由 extraDiscovery(luciola)承担。
-     * 不提供 = 完全 legacy(iOS / 未迁移宿主)。
+     * 提供时 Messenger 的传输面换成它（认证加密信道）。**必需** —— 没有默认值，也不许为 null。
+     *
+     * 曾经它的默认值 null 表示「完全 legacy(iOS / 未迁移宿主)」，于是两端各自决定跑哪条路：
+     * 手机（`experimentalLuciola` 默认开）走加密信道、桌面（`TENON_LUCIOLA` 默认关）走明文 UDP，
+     * 消息能通、在线状态却互相骗人。参数类型收成非空 + 无默认值，是为了让「忘了接 luciola」
+     * 变成**编译错误**而不是一条静默降级路径。
      *
      * 是**工厂而不是实例**:luciola 的入站帧要按 `from` 查到对端地址才递得进
      * Messenger,而 registry 由本类自己创建(见 [registry])。宿主传
      * `{ registry -> factory.createTransport(registry) }`。
      */
-    private val messengerTransportFactory: ((PeerRegistry) -> DatagramTransport)? = null,
+    private val messengerTransportFactory: (PeerRegistry) -> DatagramTransport,
     /**
      * 是否启用**信道文件数据面**（`fch1` 协商通过时由宿主传 true）。
      *
@@ -284,7 +369,7 @@ class NodeRuntime(
      * 虚拟口**，局域网里一个对端都收不到。
      *
      * 真机现场：FClash 开 TUN 时 Tailscale / ZeroTier 照常能用（它们走 `100.64/10` 这类
-     * 更具体的路由），**只有 Tidings 失联** —— 红米 8 次拨号全失败、队列堆到 594 条。
+     * 更具体的路由），**只有 Tenon 失联** —— 红米 8 次拨号全失败、队列堆到 594 条。
      *
      * 子网广播有直连路由（`192.168.2.0/24`，前缀更长），抢不走。
      */
@@ -329,10 +414,10 @@ class NodeRuntime(
     // registry 必须先于 transport:luciola 工厂需要它来解析入站帧的对端地址。
     private val registry = PeerRegistry(profile.nodeId)
 
-    // legacy UDP 传输。luciola 模式(messengerTransportFactory != null)下
-    // legacy Discovery 不启动,所以 UdpTransport 只在 factory 为空时创建。
-    private val transport: DatagramTransport =
-        messengerTransportFactory?.invoke(registry) ?: UdpTransport(udpPort, bindHost)
+    // 传输面**只有一条**：luciola 加密信道。曾经这里是
+    // `messengerTransportFactory?.invoke(registry) ?: UdpTransport(...)` —— 那个 `?:` 就是
+    // 「手机跑安全信道、桌面跑 legacy」的入口：两端各自决定，谁也不知道对方跑的是哪条路。
+    private val transport: DatagramTransport = messengerTransportFactory.invoke(registry)
 
     // 额外发现:实例优先,其次工厂(两者都空 = 纯 legacy)。
     private val resolvedExtraDiscovery: DiscoveryEngine? =
@@ -412,13 +497,9 @@ class NodeRuntime(
     private val selfProfile: Profile
         get() = profile.copy(
             tlsPin = linkTransport.localPin?.wire ?: profile.tlsPin,
-            // luciola 模式下把**信道的监听端口**告诉对端:发现引擎上报的端口可能是
-            // 临时端口,不能拿来拨号(真机实测 17878 vs 52213)。
-            luciolaPort = if (messengerTransportFactory != null) {
-                transport.boundPort.takeIf { it > 0 }
-            } else {
-                null
-            },
+            // 把**信道的监听端口**告诉对端:发现引擎上报的端口可能是临时端口,
+            // 不能拿来拨号(真机实测 17878 vs 52213)。只有一条传输形态，所以不再有条件。
+            luciolaPort = transport.boundPort.takeIf { it > 0 },
             // **把本机全部可路由地址带出去**（含 Tailscale / ZeroTier 段）。
             //
             // 对端原先只能从「发现包的源地址」学地址，而广播不跨 VPN 网段 ⇒
@@ -433,32 +514,135 @@ class NodeRuntime(
         )
 
     /**
-     * **本机是否还在跑 legacy 发现**（只读，诊断/共存解释用）。
+     * 发现引擎：**只有** sweep + 定向心跳（发现由 luciola 引擎承担）。
      *
-     * 为什么要把这个暴露出去：开启 luciola 模式后 `legacyDiscoveryEnabled` 变 false，
-     * legacy 发现整体关闭 —— 于是**没升级的老设备既发现不到我们、我们也发现不到它**，
-     * 它只是静静地显示成"离线"。控制面的 peer 诊断靠这个标志区分
-     * "设备关机" 与 "它还在老传输上"。
+     * 曾经这里有一对分支 `if (legacyDiscoveryEnabled) Discovery(...) else SweepOnly...`。
+     * 删掉前一支的同时也删掉了 `legacyDiscoveryActive` 属性 —— 它存在的唯一理由是让控制面
+     * 区分「对端关机」与「对端还在老传输上」，而本机现在**不可能**在老传输上；
+     * 剩下那一半判断（对端有没有 luciola 能力）由 `posesLuciolaCaps(peer)` 直接回答，
+     * 中间夹一个恒 false 的本机标志只会让读代码的人以为还有第二种形态存在。
      */
-    val legacyDiscoveryActive: Boolean get() = legacyDiscoveryEnabled
+    private val discovery: DiscoveryEngine = SweepOnlyDiscoveryEngine(
+        registry, timings,
+        heartbeat = ::sendPresenceHeartbeat,
+        // task-29 的自愈搬家：心跳连续两轮「有目标却一个包都没交出去」时重建传输面。
+        // 原来住 legacy `Discovery.presenceLoop`，legacy 删除后跟着心跳循环一起到这里。
+        healTransport = { transport.restart() },
+        // 延迟求值：engine 在本属性初始化时就构造，而 `messenger.linkDownlink` 要到
+        // `start()` 才被赋值 —— lambda 只在 sweep 那一轮才读，读到的永远是当时的值。
+        //
+        // **判据必须与 `/v1/peers` 同源**：控制面报的 `linkConnected` 来自
+        // `linkSnapshot().carrierOf()`（发起侧 + 接受侧的 carriers 合并），而
+        // `linkDownlink.isConnected()` 只看接受侧的 `links` 表。真机上这两条对同一个
+        // peerId 给出相反结论（2026-11-10 17:3x：接口 `linkConnected=true carrier=plaintext`
+        // 与翻面日志 `link=false` 同时成立，而 `linkCloseCount=0`、`linkDialAttempts=0`
+        // 说明链路根本没断过）。一个对端有两个"在不在"的事实来源，判据就该只有一个。
+        stillReachable = { peerId -> linkSnapshot().carrierOf(peerId) != null },
+    )
 
-    private val legacyDiscoveryEnabled = messengerTransportFactory == null
-    private val discovery: DiscoveryEngine = if (legacyDiscoveryEnabled) Discovery(
-        transport,
-        registry,
-        // task-38：把自己的 TLS pin 随资料带出去（旧端忽略未知键 ⇒ 兼容）。
-        // 用 selfProfile 而不是 profile：pin 来自传输层（身份生成之后才有），不是设置里存的。
-        { selfProfile },
-        timings,
-        manualPeers,
-        // `scan-ranges` 这类 gossip 帧不进可靠通道，只能由发现层递上来（见 `Discovery.onGossip`）。
-        // 直接投 `_inbound`：它**不是**一条聊天记录，不该进 messageStore。
-        onGossip = { _inbound.tryEmit(it) },
-        // task-38：对端资料里带 tlsPin ⇒ **配对时**就把它的 pin 固定下来（来源标 pairing），
-        // 不再依赖 TOFU 的首次固定 —— 那个有"攻击者抢先声明 nodeId"的首次使用竞态。
-        onPeerPin = { nodeId, pin -> setPeerPin(nodeId, pin, PeerRegistry.PIN_SOURCE_PAIRING) },
-        subnetBroadcasts = subnetBroadcasts,
-    ) else SweepOnlyDiscoveryEngine(registry, timings)
+    /**
+     * 定向心跳：给 registry 里每个已知节点各发一帧**带全量资料**的 entry。
+     *
+     * 只发单播，不打局域网广播 —— 发现仍归新传输（这是 [SweepOnlyDiscoveryEngine]
+     * 存在的理由）；这里补的是「我方还活着」这一句，收端据此刷新 `lastSeen`。
+     *
+     * ## 为什么是 ENTRY 而不是 PRESENCE
+     *
+     * 收端对 PRESENCE 是有条件的：`Discovery.handlePresence` 在「本机已把它判成离线」
+     * 或「源地址变了但我们没有它的资料」时会**拒绝**它 —— 而那正是本心跳要救的情形
+     * （对端已经把我们判离线了）。ENTRY 带全量资料，收端 `confirmed = true` 直接采纳
+     * 并把 online 一起翻回来，不依赖任何反向 UDP 路径。
+     *
+     * 这条取舍在 `Discovery.presenceRound` 里已有先例：对候选端点补的就是 ENTRY。
+     *
+     * ## 为什么给**判成离线**的节点也发
+     *
+     * 离线是本地推断，不是事实。真机样本里对端 11 秒前才发过帧、注册表却写着
+     * `online=false`；只给在线节点发，等于让这个错误的推断自我固化。
+     *
+     * @return `(targets, sent)`：**可送达**目标数与真正交出去的包数。
+     *   `targets=0` = 眼下没有能发的对端（空闲或未配对，常态）；`targets>0 && sent=0` =
+     *   有准入却一个包都发不出去（泵停摆，心跳循环据此触发传输面自愈）。
+     *   未配对的历史端点只计入 `skipped`，不算停摆 —— 否则一台只剩离线旧身份的节点
+     *   每两轮就重建一次传输面，把已经连入的会话全断掉。
+     */
+    private suspend fun sendPresenceHeartbeat(): Pair<Int, Int> {
+        // 与 [announceTo] 同一条帧：两处各写一遍 payload 迟早不一致（比如漏掉 luciolaPort）。
+        val bytes = entryBytes()
+        val selfId = profile.nodeId
+        var sent = 0
+        var targets = 0
+        var linked = 0
+        var skipped = 0
+        val failed = mutableListOf<String>()
+        val tried = mutableSetOf<String>()
+        for (record in registry.values()) {
+            val peerId = record.profile.nodeId
+            if (peerId == selfId) continue
+            // **有链路的不发**。理由有两条，缺一条都会让这段代码变成摆设：
+            //  · 语义上：链路活着本身就是「我还活着」的证据，sweep 已按同一条判据豁免它们；
+            //  · 事实上：安全信道的会话键是 `ip:tcpPort`（真机 `dialLastTarget=192.168.2.82:17879`），
+            //    拿 `ip:udpPort` 去 send 只会得到 `send failed connected=false` —— 真机读数里
+            //    12 个目标全部如此，心跳等于一行都没发出去，日志还写着「发了」。
+            if (linkSnapshot().carrierOf(peerId) != null) {
+                linked++
+                continue
+            }
+            if (record.ip.isBlank() || record.udpPort !in 1..65535) continue
+            val address = "${record.ip}:${record.udpPort}"
+            if (!transport.canReach(record.ip, record.udpPort)) {
+                skipped++
+                continue
+            }
+            tried += address
+            targets++
+            if (transport.send(bytes, record.ip, record.udpPort)) sent++ else failed += address
+        }
+        // 手动地址：只有 host:port，进不了 registry（那里按 nodeId 索引），所以按地址直发。
+        // 漏掉这一段 = 用户手动添加的节点从此收不到我们的任何帧（legacy 发现删掉后的空洞）。
+        for (peer in manualPeers) {
+            if (peer.udpPort !in 1..65535 || peer.host.isBlank()) {
+                failed += "manual-invalid:${peer.host}:${peer.udpPort}"
+                continue
+            }
+            val address = "${peer.host}:${peer.udpPort}"
+            if (!transport.canReach(peer.host, peer.udpPort)) {
+                skipped++
+                continue
+            }
+            tried += address
+            targets++
+            if (transport.send(bytes, peer.host, peer.udpPort)) sent++ else failed += address
+        }
+        // 候选端点也要发（task-21 ①）：对端换网后 registry 里那份可能已经不可达，
+        // 而候选池里的新地址（VPN / 运营商）可能是唯一通路。ENTRY 带全量资料，收端
+        // confirmed=true 直接采纳（连 online 一起翻回来），不依赖任何反向路径 ——
+        // 这是「双方互相判离线」死锁的出口。这个原来住 legacy `presenceRound`，
+        // legacy 删除后跟着心跳循环搬家。与已发地址重合的候选跳过（同一帧发两遍只会
+        // 制造重复日志，对协议没有增益）。
+        for ((peerId, endpoints) in registry.allCandidates()) {
+            if (peerId == selfId) continue
+            if (linkSnapshot().carrierOf(peerId) != null) continue
+            for (endpoint in endpoints) {
+                if (endpoint.host.isBlank() || endpoint.port !in 1..65535) continue
+                val key = "${endpoint.host}:${endpoint.port}"
+                if (key in tried) continue
+                if (!transport.canReach(endpoint.host, endpoint.port)) {
+                    skipped++
+                    continue
+                }
+                tried += key
+                targets++
+                if (transport.send(bytes, endpoint.host, endpoint.port)) sent++ else failed += key
+            }
+        }
+        // 只在**没发全**时出声：全发出去是常态，逐轮一行会把日志淹掉；
+        // 而「有目标却一个都没出去」正是心跳变成摆设的样子，必须留下痕迹。
+        if (targets > 0 && sent < targets) {
+            println("[heartbeat] entry targets=$targets sent=$sent linked=$linked skipped=$skipped failed=${failed.take(8)}")
+        }
+        return targets to sent
+    }
     internal val messenger = Messenger(
         transport = transport,
         registry = registry,
@@ -468,7 +652,7 @@ class NodeRuntime(
         timings = timings,
         tcpFallback = tcp,
         acceptQueueFor = acceptQueueFor,
-        preferTransport = messengerTransportFactory != null,
+        preferTransport = true,
     )
     private val outbound = NodeOutbound(
         messenger = messenger,
@@ -920,6 +1104,31 @@ class NodeRuntime(
                 .getOrNull()
         }
 
+        // 入站发现帧的登记器（`entry` / `alive` / `presence` / `profile` / `exit`）。
+        //
+        // legacy `Discovery` 删掉之后，这几类帧的处理必须有人接手：定向心跳
+        // （`sendPresenceHeartbeat`）与手动添加的节点都会发 `entry`，收端如果没人处理，
+        // 它就在 transport 层静默落地 —— 双方节点表里永远没有对方，而日志一片安静。
+        // 这就是 `TwoNode*` 那批用例在本轮改动里集体超时暴露出来的东西。
+        val presenceIngest = PresenceIngest(
+            transport = transport,
+            registry = registry,
+            scope = runScope,
+            timings = timings,
+            selfProfile = { selfProfile },
+            // task-38：对端资料里带 tlsPin ⇒ 配对时就把它的 pin 固定下来（来源标 pairing），
+            // 不再依赖 TOFU 的首次固定 —— 那个有"攻击者抢先声明 nodeId"的首次使用竞态。
+            onPeerPin = { nodeId, pin -> setPeerPin(nodeId, pin, PeerRegistry.PIN_SOURCE_PAIRING) },
+            // `scan-ranges` 这类 gossip 帧不进可靠通道，只能由原始入口递上来。
+            // 直接投 `_inbound`：它**不是**一条聊天记录，不该进 messageStore。
+            onGossip = { envelope -> _inbound.tryEmit(envelope) },
+        )
+        runScope.launch {
+            transport.incoming.collect { datagram ->
+                runCatching { presenceIngest.onDatagram(datagram) }
+            }
+        }
+
         discovery.start(runScope)
         resolvedExtraDiscovery?.start(runScope)
         messenger.start(runScope)
@@ -1274,6 +1483,14 @@ class NodeRuntime(
             }
         }
         transport.start()
+        // **socket 起来之后立刻发一轮心跳。**
+        //
+        // 心跳协程在 `discovery.start` 时就开跑了，而那时 `transport.start()` 还没执行
+        // （它在 start() 的最末尾，因为要先绑 TCP、改写 tcpPort）—— 于是第一轮 `send`
+        // 全部 `socket == null` 失败，日志是 `[heartbeat] entry targets=5 sent=0`。
+        // 之后要等一个 `presenceInterval`（默认 30 秒）才有第二轮：真机上表现为
+        // 「节点起来后半分钟别人才看得见」，测试里表现为握手窗口刚好耗光。
+        runCatching { sendPresenceHeartbeat() }
     }
 
     /**
@@ -1448,6 +1665,14 @@ class NodeRuntime(
     suspend fun announce() {
         discovery.announce()
         resolvedExtraDiscovery?.announce()
+        // **自己必须真的发一轮**。与 [announceTo] 同一条教训：原先只转发给发现引擎，
+        // 而 `discovery`（SweepOnly）的 announce 是 no-op、`extraDiscovery` 是可选的
+        // luciola 信标 —— 换网重播就死在这里：控制面 `onNetworkChanged` 明明调了
+        // announce，线上却一个包都不出去，对端要等满一个心跳周期（30s）才重新看到
+        // 本机（`RelayControllerNetworkTest` 抓住的真回归）。
+        // luciola 世界里「广播」就是定向单播：给全部已知对端与手动地址各发一帧
+        // 带全量资料的 entry，与心跳共用同一条口径。
+        sendPresenceHeartbeat()
     }
 
     /**
@@ -1486,17 +1711,55 @@ class NodeRuntime(
     suspend fun announceTo(host: String, port: Int = Protocol.DEFAULT_UDP_PORT) {
         discovery.announceTo(host, port)
         resolvedExtraDiscovery?.announceTo(host, port)
+        // **自己必须真的发一条 entry。**
+        //
+        // 原先这里只转发给两个发现引擎：`discovery` 是 no-op 哑实现，`extraDiscovery` 是
+        // luciola 信标引擎 —— 它"拨号"而不是"发 entry"，而且可能根本不存在（测试平台、
+        // 还没有原生库的宿主）。结果就是扫码 / 手动填地址之后**一个包都没出去**：
+        // 用户看到"正在等回应"，对端那边什么都没发生（本轮 `TwoNode*` 用例集体超时）。
+        // 定向告知是协议里最基础的一条，不该依赖可选组件。
+        sendEntryTo(host, port)
     }
 
+    /** 造一条带全量资料的 `entry` 帧（心跳与定向宣告共用，两处口径必须一致）。 */
+    private fun entryBytes(): ByteArray {
+        val self = selfProfile
+        return Codec.encodeToBytes(
+            makeEnvelope(MsgTypes.ENTRY, self.nodeId, Codec.profilePayload(self)),
+        )
+    }
+
+    private suspend fun sendEntryTo(host: String, port: Int): Boolean =
+        transport.send(entryBytes(), host, port)
+
     /**
-     * 告别：广播 `exit`，让对端立刻把我们标成离线，而不是等 presence 超时。
+     * 告别：给已知节点与手动地址各发一帧 `exit`，让对端立刻把我们标成离线，
+     * 而不是等 presence 超时（`offlineAfter` 90 秒里发过去的消息全部进排队）。
      *
      * 只在**真的要离开**时调（退出进程 / 主动停节点），不要在 [stop] 里无条件发：
      * `restart()` 会先停后起，发了就是一次"离线→在线"的假抖动。
+     *
+     * 发送面原来住 legacy `Discovery.announceExit`（广播 + 单播）；广播已随 legacy
+     * 删除，单播这一半搬到这里 —— 漏掉它，「退出的一端已经走了、对端还当它在线」
+     * 的老毛病原样回归（`PresenceExitTest` 钉住这条与空载荷的线格式）。
      */
     suspend fun announceExit() {
         discovery.announceExit()
         resolvedExtraDiscovery?.announceExit()
+        // 载荷必须是**空对象**：entry/alive 靠载荷传资料，exit 不传；两端都不读它，
+        // 往里塞东西会让两端的线格式悄悄分叉（TS 侧校验就是 isRecord(payload)）。
+        val bytes = Codec.encodeToBytes(
+            makeEnvelope(MsgTypes.EXIT, profile.nodeId, JsonObject(emptyMap())),
+        )
+        for (record in registry.values()) {
+            if (record.profile.nodeId == profile.nodeId) continue
+            if (record.ip.isBlank() || record.udpPort !in 1..65535) continue
+            transport.send(bytes, record.ip, record.udpPort)
+        }
+        for (peer in manualPeers) {
+            if (peer.udpPort !in 1..65535 || peer.host.isBlank()) continue
+            transport.send(bytes, peer.host, peer.udpPort)
+        }
     }
 
     suspend fun sendText(peerId: String, text: String) = outbound.sendText(peerId, text)
@@ -1826,9 +2089,12 @@ class NodeRuntime(
         // offer 发进虚空；正确做法是先向地址要一次**当前**身份，再退回离线记录 ——
         // 排队语义由发送侧的离线队列承接，这里不把"记录离线"当成解析的终点。
         val targetPort = port ?: Protocol.DEFAULT_UDP_PORT
-        discovery.announceTo(host, targetPort)
-        // 同 [announceTo]：luciola 模式下只有 extraDiscovery 真的会定向拨号。
-        resolvedExtraDiscovery?.announceTo(host, targetPort)
+        // 定向握手**必须真的发一帧 entry**。原先这里只调两个发现引擎的 announceTo：
+        // `discovery`（SweepOnly）是 no-op、`resolvedExtraDiscovery` 是可选的 luciola 信标 ——
+        // 于是一个包都不出去，下面 3 秒窗口里的轮询等一个永远不会来的注册
+        // （agentNode 的 `/v1/send`、`/v1/send-file` 全线 peer-unreachable 就是这条）。
+        // 与 [announceTo] 同一条修复：定向告知是协议里最基础的一条，不依赖可选组件。
+        announceTo(host, targetPort)
         val live = withTimeoutOrNull(timeoutMs) {
             var found: PeerRecord? = null
             while (found == null) {

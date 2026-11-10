@@ -118,6 +118,9 @@ import androidx.compose.material3.DropdownMenuItem
 import com.kapp.tenon.feature.chat.COMPOSER_FOCUS_REQUEST_IDLE
 import com.kapp.tenon.ui.components.MentionTarget
 import com.kapp.tenon.ui.components.filterMentionTargets
+import com.kapp.tenon.generated.resources.ic_groups
+import com.kapp.tenon.generated.resources.ic_bot
+import com.kapp.tenon.generated.resources.ic_user
 import com.kapp.tenon.ui.components.insertMention
 import com.kapp.tenon.ui.components.mentionQueryBeforeCursor
 import com.kapp.tenon.domain.model.MessageUi
@@ -276,6 +279,7 @@ public fun DesktopComposer(
     onAttachFiles: (() -> Unit)? = null,
 ) {
     val density = LocalDensity.current
+    val sp = LocalAppSpacing.current
     var split by remember { mutableStateOf(ComposerSplit(ComposerSplit.DEFAULT_RATIO)) }
     var value by remember(peer.nodeId) {
         mutableStateOf(TextFieldValue(draft, TextRange(draft.length)))
@@ -669,6 +673,14 @@ public fun DesktopComposer(
                         val visibleTargets = filterMentionTargets(mentionTargets, query)
                         if (showMentionAll) {
                             DropdownMenuItem(
+                                leadingIcon = {
+                                    Icon(
+                                        painter = painterResource(Res.drawable.ic_groups),
+                                        contentDescription = null,
+                                        tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                                        modifier = Modifier.size(IconSizes.Label),
+                                    )
+                                },
                                 text = { Text(mentionAllToken) },
                                 onClick = {
                                     mentionMenuOpen = false
@@ -687,16 +699,46 @@ public fun DesktopComposer(
                         }
                         visibleTargets.forEach { target ->
                             DropdownMenuItem(
+                                leadingIcon = {
+                                    Icon(
+                                        painter = painterResource(if (target.isAgent) Res.drawable.ic_bot else Res.drawable.ic_user),
+                                        contentDescription = null,
+                                        tint = if (target.isAgent) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant,
+                                        modifier = Modifier.size(IconSizes.Label),
+                                    )
+                                },
                                 text = {
-                                    Column {
-                                        Text(target.token)
-                                        // 资料没到时如实说一句；有名字的人不画副行（不制造噪声）。
-                                        target.note?.let { note ->
+                                    Row(
+                                        verticalAlignment = Alignment.CenterVertically,
+                                        horizontalArrangement = Arrangement.spacedBy(sp.xs),
+                                    ) {
+                                        Column(modifier = Modifier.weight(1f, fill = false)) {
                                             Text(
-                                                text = note,
-                                                style = MaterialTheme.typography.labelSmall,
-                                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                                text = target.token,
+                                                style = MaterialTheme.typography.bodyMedium,
+                                                fontWeight = if (target.isAgent) FontWeight.SemiBold else FontWeight.Normal,
                                             )
+                                            target.note?.let { note ->
+                                                Text(
+                                                    text = note,
+                                                    style = MaterialTheme.typography.labelSmall,
+                                                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                                )
+                                            }
+                                        }
+                                        if (target.isAgent) {
+                                            Surface(
+                                                shape = RelayShapes.extraSmall,
+                                                color = MaterialTheme.colorScheme.primaryContainer,
+                                            ) {
+                                                Text(
+                                                    text = "BOT",
+                                                    style = MaterialTheme.typography.labelSmall,
+                                                    color = MaterialTheme.colorScheme.primary,
+                                                    fontWeight = FontWeight.Bold,
+                                                    modifier = Modifier.padding(horizontal = sp.xs, vertical = sp.xxs),
+                                                )
+                                            }
                                         }
                                     }
                                 },

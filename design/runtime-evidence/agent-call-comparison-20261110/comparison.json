@@ -1,0 +1,852 @@
+{
+  "generated_at": "2026-11-10T13:15:52",
+  "control_plane_probe": {
+    "reachable": true,
+    "http": 400,
+    "chain-executor": "present",
+    "body": "{\"ok\":false,\"error\":\"bad-request\",\"message\":\"stages 至少要有一棒，且每棒都要 role/agentKey/instruction\"}"
+  },
+  "principles": [
+    "同一任务书",
+    "同一阶段锚点",
+    "同一判据集合"
+  ],
+  "metric_groups": [
+    "effect",
+    "tokens",
+    "context",
+    "cards",
+    "interaction"
+  ],
+  "unmeasurable": {
+    "cost-usd": "无 model/provider 单价表；不允许按估算单价乘出假成本",
+    "heal-rounds": "heal loop 未结构化落盘",
+    "memory-survives-restart": "ActiveTicket / AgentSessionRegistry 纯内存，需重启探针",
+    "memory-hit-rate": "无记忆命中埋点",
+    "human-interaction-events": "卡片动作无客户端回执埋点，真机点击需人工记录"
+  },
+  "runs": [
+    {
+      "scheme": "single",
+      "label": "single/run-1",
+      "status": "measured",
+      "entry": "POST /v1/agent/hook/dispatch",
+      "chain": "cli-direct",
+      "source": "/Users/ci/weather-relay",
+      "enable_when": "控制面 8788 + CLI 驱动注册；复用 sdlc-lifecycle.py 的 --run 产物",
+      "run_dir": "/workspace/src/design/runtime-evidence/sdlc-repeat-fixed-20261110/run-1",
+      "anchor": "3792076",
+      "stage": "empty",
+      "tier": "headless",
+      "result_sha256": "72b35d3bb297e7637756c846b3b1cdad13477e21af9c1bd1c8530dc8077e7358",
+      "metrics": {
+        "acts-pass": {
+          "value": 9,
+          "status": "measured",
+          "unit": "条",
+          "source": "design/runtime-evidence/sdlc-repeat-fixed-20261110/run-1/result.json",
+          "sha256": "72b35d3bb297e7637756c846b3b1cdad13477e21af9c1bd1c8530dc8077e7358",
+          "scope": "",
+          "note": ""
+        },
+        "acts-total": {
+          "value": 9,
+          "status": "measured",
+          "unit": "条",
+          "source": "design/runtime-evidence/sdlc-repeat-fixed-20261110/run-1/result.json",
+          "sha256": "72b35d3bb297e7637756c846b3b1cdad13477e21af9c1bd1c8530dc8077e7358",
+          "scope": "",
+          "note": ""
+        },
+        "duration-sec": {
+          "value": 441.13,
+          "status": "measured",
+          "unit": "秒",
+          "source": "design/runtime-evidence/sdlc-repeat-fixed-20261110/run-1/result.json",
+          "sha256": "72b35d3bb297e7637756c846b3b1cdad13477e21af9c1bd1c8530dc8077e7358",
+          "scope": "",
+          "note": ""
+        },
+        "dispatch-count": {
+          "value": 5,
+          "status": "measured",
+          "unit": "次",
+          "source": "design/runtime-evidence/sdlc-repeat-fixed-20261110/run-1/result.json",
+          "sha256": null,
+          "scope": "",
+          "note": "去重后的 t-* 产物目录数"
+        },
+        "patch-files": {
+          "value": 8,
+          "status": "measured",
+          "unit": "个",
+          "source": "/tmp/tenon-ws/artifacts/t-15-5cf5595e/patch.diff; /tmp/tenon-ws/artifacts/t-16-ebeaef8e/patch.diff",
+          "sha256": null,
+          "scope": "",
+          "note": ""
+        },
+        "patch-added": {
+          "value": 531,
+          "status": "measured",
+          "unit": "行",
+          "source": "/tmp/tenon-ws/artifacts/t-15-5cf5595e/patch.diff; /tmp/tenon-ws/artifacts/t-16-ebeaef8e/patch.diff",
+          "sha256": null,
+          "scope": "",
+          "note": ""
+        },
+        "patch-removed": {
+          "value": 0,
+          "status": "measured",
+          "unit": "行",
+          "source": "/tmp/tenon-ws/artifacts/t-15-5cf5595e/patch.diff; /tmp/tenon-ws/artifacts/t-16-ebeaef8e/patch.diff",
+          "sha256": null,
+          "scope": "",
+          "note": ""
+        },
+        "commits-count": {
+          "value": 6,
+          "status": "measured",
+          "unit": "条",
+          "source": "design/runtime-evidence/sdlc-repeat-fixed-20261110/run-1/result.json",
+          "sha256": "72b35d3bb297e7637756c846b3b1cdad13477e21af9c1bd1c8530dc8077e7358",
+          "scope": "",
+          "note": ""
+        },
+        "prompt-chars-total": {
+          "value": 1500,
+          "status": "measured",
+          "unit": "字符",
+          "source": "design/runtime-evidence/sdlc-repeat-fixed-20261110/run-1/result.json",
+          "sha256": null,
+          "scope": "",
+          "note": ""
+        },
+        "prompt-chars-max": {
+          "value": 300,
+          "status": "measured",
+          "unit": "字符",
+          "source": "design/runtime-evidence/sdlc-repeat-fixed-20261110/run-1/result.json",
+          "sha256": null,
+          "scope": "",
+          "note": ""
+        },
+        "prompt-sha256-list": {
+          "value": [
+            "94e2dec245b46dd3",
+            "14133595510ae1e8",
+            "21307876ac32c656",
+            "b01008ffca5d25fd",
+            "6bdd334639f5472e"
+          ],
+          "status": "measured",
+          "unit": "摘要",
+          "source": "design/runtime-evidence/sdlc-repeat-fixed-20261110/run-1/result.json",
+          "sha256": null,
+          "scope": "",
+          "note": "验三同：任务书没变"
+        },
+        "dispatch-rounds": {
+          "value": 5,
+          "status": "measured",
+          "unit": "次",
+          "source": "design/runtime-evidence/sdlc-repeat-fixed-20261110/run-1/result.json",
+          "sha256": null,
+          "scope": "",
+          "note": ""
+        },
+        "same-card-id-reused": {
+          "value": null,
+          "status": "unavailable",
+          "unit": "",
+          "source": "n/a",
+          "sha256": null,
+          "scope": "",
+          "note": "直驱链无卡片出口；chain 档按同 cardId 的 rev 序列判"
+        },
+        "tests-pass": {
+          "value": null,
+          "status": "measured",
+          "unit": "条",
+          "source": "design/runtime-evidence/sdlc-repeat-fixed-20261110/run-1/result.json",
+          "sha256": null,
+          "scope": "",
+          "note": "基线测试；幕内测试读数见各幕判据"
+        },
+        "tests-fail": {
+          "value": null,
+          "status": "measured",
+          "unit": "条",
+          "source": "design/runtime-evidence/sdlc-repeat-fixed-20261110/run-1/result.json",
+          "sha256": null,
+          "scope": "",
+          "note": ""
+        },
+        "usage-lines": {
+          "value": 59,
+          "status": "measured",
+          "unit": "行",
+          "source": "/tmp/tenon-ws/artifacts/t-15-5cf5595e/task.log; /tmp/tenon-ws/artifacts/t-16-ebeaef8e/task.log; /tmp/tenon-ws/artifacts/t-17-307f309d/task.log ...共 5 份",
+          "sha256": null,
+          "scope": "",
+          "note": "status/step_end 带 usage"
+        },
+        "semantic-rejected-lines": {
+          "value": 0,
+          "status": "measured",
+          "unit": "行",
+          "source": "/tmp/tenon-ws/artifacts/t-15-5cf5595e/task.log; /tmp/tenon-ws/artifacts/t-16-ebeaef8e/task.log; /tmp/tenon-ws/artifacts/t-17-307f309d/task.log ...共 5 份",
+          "sha256": null,
+          "scope": "",
+          "note": "口径不符被丢弃，不参与求和"
+        },
+        "input-tokens": {
+          "value": 66150,
+          "status": "measured",
+          "unit": "token",
+          "source": "/tmp/tenon-ws/artifacts/t-15-5cf5595e/task.log; /tmp/tenon-ws/artifacts/t-16-ebeaef8e/task.log; /tmp/tenon-ws/artifacts/t-17-307f309d/task.log ...共 5 份",
+          "sha256": null,
+          "scope": "",
+          "note": ""
+        },
+        "output-tokens": {
+          "value": 35958,
+          "status": "measured",
+          "unit": "token",
+          "source": "/tmp/tenon-ws/artifacts/t-15-5cf5595e/task.log; /tmp/tenon-ws/artifacts/t-16-ebeaef8e/task.log; /tmp/tenon-ws/artifacts/t-17-307f309d/task.log ...共 5 份",
+          "sha256": null,
+          "scope": "",
+          "note": ""
+        },
+        "billable-tokens": {
+          "value": 102108,
+          "status": "measured",
+          "unit": "token",
+          "source": "/tmp/tenon-ws/artifacts/t-15-5cf5595e/task.log; /tmp/tenon-ws/artifacts/t-16-ebeaef8e/task.log; /tmp/tenon-ws/artifacts/t-17-307f309d/task.log ...共 5 份",
+          "sha256": null,
+          "scope": "",
+          "note": "Σ(input+output)，不含 cacheRead"
+        },
+        "cache-read-tokens": {
+          "value": 606720,
+          "status": "measured",
+          "unit": "token",
+          "source": "/tmp/tenon-ws/artifacts/t-15-5cf5595e/task.log; /tmp/tenon-ws/artifacts/t-16-ebeaef8e/task.log; /tmp/tenon-ws/artifacts/t-17-307f309d/task.log ...共 5 份",
+          "sha256": null,
+          "scope": "",
+          "note": ""
+        },
+        "context-window-tokens": {
+          "value": 708828,
+          "status": "measured",
+          "unit": "token",
+          "source": "/tmp/tenon-ws/artifacts/t-15-5cf5595e/task.log; /tmp/tenon-ws/artifacts/t-16-ebeaef8e/task.log; /tmp/tenon-ws/artifacts/t-17-307f309d/task.log ...共 5 份",
+          "sha256": null,
+          "scope": "",
+          "note": "Σ totalTokens，逐步窗口量之和，不是消耗"
+        },
+        "cache-hit-ratio": {
+          "value": 0.8559,
+          "status": "measured",
+          "unit": "ratio",
+          "source": "/tmp/tenon-ws/artifacts/t-15-5cf5595e/task.log; /tmp/tenon-ws/artifacts/t-16-ebeaef8e/task.log; /tmp/tenon-ws/artifacts/t-17-307f309d/task.log ...共 5 份",
+          "sha256": null,
+          "scope": "",
+          "note": "ΣcacheRead / ΣtotalTokens"
+        },
+        "context-peak-tokens": {
+          "value": 20121,
+          "status": "measured",
+          "unit": "token",
+          "source": "/tmp/tenon-ws/artifacts/t-15-5cf5595e/task.log; /tmp/tenon-ws/artifacts/t-16-ebeaef8e/task.log; /tmp/tenon-ws/artifacts/t-17-307f309d/task.log ...共 5 份",
+          "sha256": null,
+          "scope": "",
+          "note": ""
+        },
+        "context-final-tokens": {
+          "value": 15743,
+          "status": "measured",
+          "unit": "token",
+          "source": "/tmp/tenon-ws/artifacts/t-15-5cf5595e/task.log; /tmp/tenon-ws/artifacts/t-16-ebeaef8e/task.log; /tmp/tenon-ws/artifacts/t-17-307f309d/task.log ...共 5 份",
+          "sha256": null,
+          "scope": "",
+          "note": ""
+        },
+        "step-count": {
+          "value": 59,
+          "status": "measured",
+          "unit": "次",
+          "source": "/tmp/tenon-ws/artifacts/t-15-5cf5595e/task.log; /tmp/tenon-ws/artifacts/t-16-ebeaef8e/task.log; /tmp/tenon-ws/artifacts/t-17-307f309d/task.log ...共 5 份",
+          "sha256": null,
+          "scope": "",
+          "note": ""
+        },
+        "turn-count": {
+          "value": 1,
+          "status": "measured",
+          "unit": "次",
+          "source": "/tmp/tenon-ws/artifacts/t-15-5cf5595e/task.log; /tmp/tenon-ws/artifacts/t-16-ebeaef8e/task.log; /tmp/tenon-ws/artifacts/t-17-307f309d/task.log ...共 5 份",
+          "sha256": null,
+          "scope": "",
+          "note": ""
+        },
+        "cost-usd": {
+          "value": null,
+          "status": "unmeasurable",
+          "unit": "",
+          "source": "n/a",
+          "sha256": null,
+          "scope": "",
+          "note": "无 model/provider 单价表；不允许按估算单价乘出假成本"
+        },
+        "heal-rounds": {
+          "value": null,
+          "status": "unmeasurable",
+          "unit": "",
+          "source": "n/a",
+          "sha256": null,
+          "scope": "",
+          "note": "heal loop 未结构化落盘"
+        },
+        "memory-survives-restart": {
+          "value": null,
+          "status": "unmeasurable",
+          "unit": "",
+          "source": "n/a",
+          "sha256": null,
+          "scope": "",
+          "note": "ActiveTicket / AgentSessionRegistry 纯内存，需重启探针"
+        },
+        "memory-hit-rate": {
+          "value": null,
+          "status": "unmeasurable",
+          "unit": "",
+          "source": "n/a",
+          "sha256": null,
+          "scope": "",
+          "note": "无记忆命中埋点"
+        },
+        "window-message-count": {
+          "value": 0,
+          "status": "measured",
+          "unit": "条",
+          "source": "/Users/ci/Library/Application Support/捎话 Tidings/relay.db",
+          "sha256": "267c5f1b027d14eb0359a0d6880dfee43e5746d78f3eeb4c2e39090afa6bbd7f",
+          "scope": "run 时间窗 [1794283905724, 1794284466854] ms；卡片库本机快照",
+          "note": "反向探针：为 0 则下列卡片读数全部降级"
+        },
+        "whole-db-card-count": {
+          "value": 194,
+          "status": "measured",
+          "unit": "条",
+          "source": "/Users/ci/Library/Application Support/捎话 Tidings/relay.db",
+          "sha256": "267c5f1b027d14eb0359a0d6880dfee43e5746d78f3eeb4c2e39090afa6bbd7f",
+          "scope": "全库快照（非本 run）",
+          "note": ""
+        },
+        "card-rows-in-window": {
+          "value": 0,
+          "status": "unavailable",
+          "unit": "条",
+          "source": "/Users/ci/Library/Application Support/捎话 Tidings/relay.db",
+          "sha256": "267c5f1b027d14eb0359a0d6880dfee43e5746d78f3eeb4c2e39090afa6bbd7f",
+          "scope": "run 时间窗 [1794283905724, 1794284466854] ms；卡片库本机快照",
+          "note": "时间窗内无任何消息：可能是链路本身不写 MessageEntity（直驱链预期），也可能是时间窗错位；两者无法自动区分，故卡片读数标 NA 而非 0"
+        },
+        "card-type-histogram": {
+          "value": {},
+          "status": "unavailable",
+          "unit": "分布",
+          "source": "/Users/ci/Library/Application Support/捎话 Tidings/relay.db",
+          "sha256": "267c5f1b027d14eb0359a0d6880dfee43e5746d78f3eeb4c2e39090afa6bbd7f",
+          "scope": "run 时间窗 [1794283905724, 1794284466854] ms；卡片库本机快照",
+          "note": "时间窗内无任何消息：可能是链路本身不写 MessageEntity（直驱链预期），也可能是时间窗错位；两者无法自动区分，故卡片读数标 NA 而非 0"
+        },
+        "card-rev-max": {
+          "value": 0,
+          "status": "unavailable",
+          "unit": "rev",
+          "source": "/Users/ci/Library/Application Support/捎话 Tidings/relay.db",
+          "sha256": "267c5f1b027d14eb0359a0d6880dfee43e5746d78f3eeb4c2e39090afa6bbd7f",
+          "scope": "run 时间窗 [1794283905724, 1794284466854] ms；卡片库本机快照",
+          "note": "时间窗内无任何消息：可能是链路本身不写 MessageEntity（直驱链预期），也可能是时间窗错位；两者无法自动区分，故卡片读数标 NA 而非 0"
+        },
+        "card-state-sequence": {
+          "value": [],
+          "status": "unavailable",
+          "unit": "序列",
+          "source": "/Users/ci/Library/Application Support/捎话 Tidings/relay.db",
+          "sha256": "267c5f1b027d14eb0359a0d6880dfee43e5746d78f3eeb4c2e39090afa6bbd7f",
+          "scope": "run 时间窗 [1794283905724, 1794284466854] ms；卡片库本机快照",
+          "note": "时间窗内无任何消息：可能是链路本身不写 MessageEntity（直驱链预期），也可能是时间窗错位；两者无法自动区分，故卡片读数标 NA 而非 0"
+        },
+        "card-action-buttons": {
+          "value": 0,
+          "status": "unavailable",
+          "unit": "个",
+          "source": "/Users/ci/Library/Application Support/捎话 Tidings/relay.db",
+          "sha256": "267c5f1b027d14eb0359a0d6880dfee43e5746d78f3eeb4c2e39090afa6bbd7f",
+          "scope": "run 时间窗 [1794283905724, 1794284466854] ms；卡片库本机快照",
+          "note": "时间窗内无任何消息：可能是链路本身不写 MessageEntity（直驱链预期），也可能是时间窗错位；两者无法自动区分，故卡片读数标 NA 而非 0"
+        },
+        "card-artifact-entries": {
+          "value": 0,
+          "status": "unavailable",
+          "unit": "个",
+          "source": "/Users/ci/Library/Application Support/捎话 Tidings/relay.db",
+          "sha256": "267c5f1b027d14eb0359a0d6880dfee43e5746d78f3eeb4c2e39090afa6bbd7f",
+          "scope": "run 时间窗 [1794283905724, 1794284466854] ms；卡片库本机快照",
+          "note": "时间窗内无任何消息：可能是链路本身不写 MessageEntity（直驱链预期），也可能是时间窗错位；两者无法自动区分，故卡片读数标 NA 而非 0"
+        },
+        "agent-state-banners": {
+          "value": 0,
+          "status": "unavailable",
+          "unit": "条",
+          "source": "/Users/ci/Library/Application Support/捎话 Tidings/relay.db",
+          "sha256": "267c5f1b027d14eb0359a0d6880dfee43e5746d78f3eeb4c2e39090afa6bbd7f",
+          "scope": "run 时间窗 [1794283905724, 1794284466854] ms；卡片库本机快照",
+          "note": "时间窗内无任何消息：可能是链路本身不写 MessageEntity（直驱链预期），也可能是时间窗错位；两者无法自动区分，故卡片读数标 NA 而非 0"
+        },
+        "preview-entry-wired": {
+          "value": false,
+          "status": "measured",
+          "unit": "bool",
+          "source": "/workspace/src/composeApp/src/commonMain/kotlin/com/kapp/tenon/feature/chat/ChatMessageList.kt",
+          "sha256": "7fc70a0c530c0ff57dc88f4fd4f7adb31f53be9b670f9be63c30927bcb0fe1df",
+          "scope": "",
+          "note": "false = 产物预览入口整块不画（客户端现状）"
+        },
+        "human-interaction-events": {
+          "value": null,
+          "status": "unmeasurable",
+          "unit": "",
+          "source": "n/a",
+          "sha256": null,
+          "scope": "",
+          "note": "卡片动作无客户端回执埋点，真机点击需人工记录"
+        }
+      }
+    },
+    {
+      "scheme": "single",
+      "label": "single/run-2",
+      "status": "measured",
+      "entry": "POST /v1/agent/hook/dispatch",
+      "chain": "cli-direct",
+      "source": "/Users/ci/weather-relay",
+      "enable_when": "控制面 8788 + CLI 驱动注册；复用 sdlc-lifecycle.py 的 --run 产物",
+      "run_dir": "/workspace/src/design/runtime-evidence/sdlc-repeat-fixed-20261110/run-2",
+      "anchor": "3792076",
+      "stage": "empty",
+      "tier": "headless",
+      "result_sha256": "2986e654e7dc8fbf2de0922b581dbc93e6f5128719eea9f6f807849267b37492",
+      "metrics": {
+        "acts-pass": {
+          "value": 9,
+          "status": "measured",
+          "unit": "条",
+          "source": "design/runtime-evidence/sdlc-repeat-fixed-20261110/run-2/result.json",
+          "sha256": "2986e654e7dc8fbf2de0922b581dbc93e6f5128719eea9f6f807849267b37492",
+          "scope": "",
+          "note": ""
+        },
+        "acts-total": {
+          "value": 9,
+          "status": "measured",
+          "unit": "条",
+          "source": "design/runtime-evidence/sdlc-repeat-fixed-20261110/run-2/result.json",
+          "sha256": "2986e654e7dc8fbf2de0922b581dbc93e6f5128719eea9f6f807849267b37492",
+          "scope": "",
+          "note": ""
+        },
+        "duration-sec": {
+          "value": 684.67,
+          "status": "measured",
+          "unit": "秒",
+          "source": "design/runtime-evidence/sdlc-repeat-fixed-20261110/run-2/result.json",
+          "sha256": "2986e654e7dc8fbf2de0922b581dbc93e6f5128719eea9f6f807849267b37492",
+          "scope": "",
+          "note": ""
+        },
+        "dispatch-count": {
+          "value": 5,
+          "status": "measured",
+          "unit": "次",
+          "source": "design/runtime-evidence/sdlc-repeat-fixed-20261110/run-2/result.json",
+          "sha256": null,
+          "scope": "",
+          "note": "去重后的 t-* 产物目录数"
+        },
+        "patch-files": {
+          "value": 7,
+          "status": "measured",
+          "unit": "个",
+          "source": "/tmp/tenon-ws/artifacts/t-20-0ab4fc02/patch.diff; /tmp/tenon-ws/artifacts/t-21-82612933/patch.diff",
+          "sha256": null,
+          "scope": "",
+          "note": ""
+        },
+        "patch-added": {
+          "value": 604,
+          "status": "measured",
+          "unit": "行",
+          "source": "/tmp/tenon-ws/artifacts/t-20-0ab4fc02/patch.diff; /tmp/tenon-ws/artifacts/t-21-82612933/patch.diff",
+          "sha256": null,
+          "scope": "",
+          "note": ""
+        },
+        "patch-removed": {
+          "value": 0,
+          "status": "measured",
+          "unit": "行",
+          "source": "/tmp/tenon-ws/artifacts/t-20-0ab4fc02/patch.diff; /tmp/tenon-ws/artifacts/t-21-82612933/patch.diff",
+          "sha256": null,
+          "scope": "",
+          "note": ""
+        },
+        "commits-count": {
+          "value": 6,
+          "status": "measured",
+          "unit": "条",
+          "source": "design/runtime-evidence/sdlc-repeat-fixed-20261110/run-2/result.json",
+          "sha256": "2986e654e7dc8fbf2de0922b581dbc93e6f5128719eea9f6f807849267b37492",
+          "scope": "",
+          "note": ""
+        },
+        "prompt-chars-total": {
+          "value": 1500,
+          "status": "measured",
+          "unit": "字符",
+          "source": "design/runtime-evidence/sdlc-repeat-fixed-20261110/run-2/result.json",
+          "sha256": null,
+          "scope": "",
+          "note": ""
+        },
+        "prompt-chars-max": {
+          "value": 300,
+          "status": "measured",
+          "unit": "字符",
+          "source": "design/runtime-evidence/sdlc-repeat-fixed-20261110/run-2/result.json",
+          "sha256": null,
+          "scope": "",
+          "note": ""
+        },
+        "prompt-sha256-list": {
+          "value": [
+            "94e2dec245b46dd3",
+            "14133595510ae1e8",
+            "21307876ac32c656",
+            "b01008ffca5d25fd",
+            "6bdd334639f5472e"
+          ],
+          "status": "measured",
+          "unit": "摘要",
+          "source": "design/runtime-evidence/sdlc-repeat-fixed-20261110/run-2/result.json",
+          "sha256": null,
+          "scope": "",
+          "note": "验三同：任务书没变"
+        },
+        "dispatch-rounds": {
+          "value": 5,
+          "status": "measured",
+          "unit": "次",
+          "source": "design/runtime-evidence/sdlc-repeat-fixed-20261110/run-2/result.json",
+          "sha256": null,
+          "scope": "",
+          "note": ""
+        },
+        "same-card-id-reused": {
+          "value": null,
+          "status": "unavailable",
+          "unit": "",
+          "source": "n/a",
+          "sha256": null,
+          "scope": "",
+          "note": "直驱链无卡片出口；chain 档按同 cardId 的 rev 序列判"
+        },
+        "tests-pass": {
+          "value": null,
+          "status": "measured",
+          "unit": "条",
+          "source": "design/runtime-evidence/sdlc-repeat-fixed-20261110/run-2/result.json",
+          "sha256": null,
+          "scope": "",
+          "note": "基线测试；幕内测试读数见各幕判据"
+        },
+        "tests-fail": {
+          "value": null,
+          "status": "measured",
+          "unit": "条",
+          "source": "design/runtime-evidence/sdlc-repeat-fixed-20261110/run-2/result.json",
+          "sha256": null,
+          "scope": "",
+          "note": ""
+        },
+        "usage-lines": {
+          "value": 71,
+          "status": "measured",
+          "unit": "行",
+          "source": "/tmp/tenon-ws/artifacts/t-20-0ab4fc02/task.log; /tmp/tenon-ws/artifacts/t-21-82612933/task.log; /tmp/tenon-ws/artifacts/t-22-c0890889/task.log ...共 5 份",
+          "sha256": null,
+          "scope": "",
+          "note": "status/step_end 带 usage"
+        },
+        "semantic-rejected-lines": {
+          "value": 0,
+          "status": "measured",
+          "unit": "行",
+          "source": "/tmp/tenon-ws/artifacts/t-20-0ab4fc02/task.log; /tmp/tenon-ws/artifacts/t-21-82612933/task.log; /tmp/tenon-ws/artifacts/t-22-c0890889/task.log ...共 5 份",
+          "sha256": null,
+          "scope": "",
+          "note": "口径不符被丢弃，不参与求和"
+        },
+        "input-tokens": {
+          "value": 152241,
+          "status": "measured",
+          "unit": "token",
+          "source": "/tmp/tenon-ws/artifacts/t-20-0ab4fc02/task.log; /tmp/tenon-ws/artifacts/t-21-82612933/task.log; /tmp/tenon-ws/artifacts/t-22-c0890889/task.log ...共 5 份",
+          "sha256": null,
+          "scope": "",
+          "note": ""
+        },
+        "output-tokens": {
+          "value": 54765,
+          "status": "measured",
+          "unit": "token",
+          "source": "/tmp/tenon-ws/artifacts/t-20-0ab4fc02/task.log; /tmp/tenon-ws/artifacts/t-21-82612933/task.log; /tmp/tenon-ws/artifacts/t-22-c0890889/task.log ...共 5 份",
+          "sha256": null,
+          "scope": "",
+          "note": ""
+        },
+        "billable-tokens": {
+          "value": 207006,
+          "status": "measured",
+          "unit": "token",
+          "source": "/tmp/tenon-ws/artifacts/t-20-0ab4fc02/task.log; /tmp/tenon-ws/artifacts/t-21-82612933/task.log; /tmp/tenon-ws/artifacts/t-22-c0890889/task.log ...共 5 份",
+          "sha256": null,
+          "scope": "",
+          "note": "Σ(input+output)，不含 cacheRead"
+        },
+        "cache-read-tokens": {
+          "value": 1065856,
+          "status": "measured",
+          "unit": "token",
+          "source": "/tmp/tenon-ws/artifacts/t-20-0ab4fc02/task.log; /tmp/tenon-ws/artifacts/t-21-82612933/task.log; /tmp/tenon-ws/artifacts/t-22-c0890889/task.log ...共 5 份",
+          "sha256": null,
+          "scope": "",
+          "note": ""
+        },
+        "context-window-tokens": {
+          "value": 1272862,
+          "status": "measured",
+          "unit": "token",
+          "source": "/tmp/tenon-ws/artifacts/t-20-0ab4fc02/task.log; /tmp/tenon-ws/artifacts/t-21-82612933/task.log; /tmp/tenon-ws/artifacts/t-22-c0890889/task.log ...共 5 份",
+          "sha256": null,
+          "scope": "",
+          "note": "Σ totalTokens，逐步窗口量之和，不是消耗"
+        },
+        "cache-hit-ratio": {
+          "value": 0.8374,
+          "status": "measured",
+          "unit": "ratio",
+          "source": "/tmp/tenon-ws/artifacts/t-20-0ab4fc02/task.log; /tmp/tenon-ws/artifacts/t-21-82612933/task.log; /tmp/tenon-ws/artifacts/t-22-c0890889/task.log ...共 5 份",
+          "sha256": null,
+          "scope": "",
+          "note": "ΣcacheRead / ΣtotalTokens"
+        },
+        "context-peak-tokens": {
+          "value": 37043,
+          "status": "measured",
+          "unit": "token",
+          "source": "/tmp/tenon-ws/artifacts/t-20-0ab4fc02/task.log; /tmp/tenon-ws/artifacts/t-21-82612933/task.log; /tmp/tenon-ws/artifacts/t-22-c0890889/task.log ...共 5 份",
+          "sha256": null,
+          "scope": "",
+          "note": ""
+        },
+        "context-final-tokens": {
+          "value": 15403,
+          "status": "measured",
+          "unit": "token",
+          "source": "/tmp/tenon-ws/artifacts/t-20-0ab4fc02/task.log; /tmp/tenon-ws/artifacts/t-21-82612933/task.log; /tmp/tenon-ws/artifacts/t-22-c0890889/task.log ...共 5 份",
+          "sha256": null,
+          "scope": "",
+          "note": ""
+        },
+        "step-count": {
+          "value": 71,
+          "status": "measured",
+          "unit": "次",
+          "source": "/tmp/tenon-ws/artifacts/t-20-0ab4fc02/task.log; /tmp/tenon-ws/artifacts/t-21-82612933/task.log; /tmp/tenon-ws/artifacts/t-22-c0890889/task.log ...共 5 份",
+          "sha256": null,
+          "scope": "",
+          "note": ""
+        },
+        "turn-count": {
+          "value": 1,
+          "status": "measured",
+          "unit": "次",
+          "source": "/tmp/tenon-ws/artifacts/t-20-0ab4fc02/task.log; /tmp/tenon-ws/artifacts/t-21-82612933/task.log; /tmp/tenon-ws/artifacts/t-22-c0890889/task.log ...共 5 份",
+          "sha256": null,
+          "scope": "",
+          "note": ""
+        },
+        "cost-usd": {
+          "value": null,
+          "status": "unmeasurable",
+          "unit": "",
+          "source": "n/a",
+          "sha256": null,
+          "scope": "",
+          "note": "无 model/provider 单价表；不允许按估算单价乘出假成本"
+        },
+        "heal-rounds": {
+          "value": null,
+          "status": "unmeasurable",
+          "unit": "",
+          "source": "n/a",
+          "sha256": null,
+          "scope": "",
+          "note": "heal loop 未结构化落盘"
+        },
+        "memory-survives-restart": {
+          "value": null,
+          "status": "unmeasurable",
+          "unit": "",
+          "source": "n/a",
+          "sha256": null,
+          "scope": "",
+          "note": "ActiveTicket / AgentSessionRegistry 纯内存，需重启探针"
+        },
+        "memory-hit-rate": {
+          "value": null,
+          "status": "unmeasurable",
+          "unit": "",
+          "source": "n/a",
+          "sha256": null,
+          "scope": "",
+          "note": "无记忆命中埋点"
+        },
+        "window-message-count": {
+          "value": 0,
+          "status": "measured",
+          "unit": "条",
+          "source": "/Users/ci/Library/Application Support/捎话 Tidings/relay.db",
+          "sha256": "267c5f1b027d14eb0359a0d6880dfee43e5746d78f3eeb4c2e39090afa6bbd7f",
+          "scope": "run 时间窗 [1794284347036, 1794285151706] ms；卡片库本机快照",
+          "note": "反向探针：为 0 则下列卡片读数全部降级"
+        },
+        "whole-db-card-count": {
+          "value": 194,
+          "status": "measured",
+          "unit": "条",
+          "source": "/Users/ci/Library/Application Support/捎话 Tidings/relay.db",
+          "sha256": "267c5f1b027d14eb0359a0d6880dfee43e5746d78f3eeb4c2e39090afa6bbd7f",
+          "scope": "全库快照（非本 run）",
+          "note": ""
+        },
+        "card-rows-in-window": {
+          "value": 0,
+          "status": "unavailable",
+          "unit": "条",
+          "source": "/Users/ci/Library/Application Support/捎话 Tidings/relay.db",
+          "sha256": "267c5f1b027d14eb0359a0d6880dfee43e5746d78f3eeb4c2e39090afa6bbd7f",
+          "scope": "run 时间窗 [1794284347036, 1794285151706] ms；卡片库本机快照",
+          "note": "时间窗内无任何消息：可能是链路本身不写 MessageEntity（直驱链预期），也可能是时间窗错位；两者无法自动区分，故卡片读数标 NA 而非 0"
+        },
+        "card-type-histogram": {
+          "value": {},
+          "status": "unavailable",
+          "unit": "分布",
+          "source": "/Users/ci/Library/Application Support/捎话 Tidings/relay.db",
+          "sha256": "267c5f1b027d14eb0359a0d6880dfee43e5746d78f3eeb4c2e39090afa6bbd7f",
+          "scope": "run 时间窗 [1794284347036, 1794285151706] ms；卡片库本机快照",
+          "note": "时间窗内无任何消息：可能是链路本身不写 MessageEntity（直驱链预期），也可能是时间窗错位；两者无法自动区分，故卡片读数标 NA 而非 0"
+        },
+        "card-rev-max": {
+          "value": 0,
+          "status": "unavailable",
+          "unit": "rev",
+          "source": "/Users/ci/Library/Application Support/捎话 Tidings/relay.db",
+          "sha256": "267c5f1b027d14eb0359a0d6880dfee43e5746d78f3eeb4c2e39090afa6bbd7f",
+          "scope": "run 时间窗 [1794284347036, 1794285151706] ms；卡片库本机快照",
+          "note": "时间窗内无任何消息：可能是链路本身不写 MessageEntity（直驱链预期），也可能是时间窗错位；两者无法自动区分，故卡片读数标 NA 而非 0"
+        },
+        "card-state-sequence": {
+          "value": [],
+          "status": "unavailable",
+          "unit": "序列",
+          "source": "/Users/ci/Library/Application Support/捎话 Tidings/relay.db",
+          "sha256": "267c5f1b027d14eb0359a0d6880dfee43e5746d78f3eeb4c2e39090afa6bbd7f",
+          "scope": "run 时间窗 [1794284347036, 1794285151706] ms；卡片库本机快照",
+          "note": "时间窗内无任何消息：可能是链路本身不写 MessageEntity（直驱链预期），也可能是时间窗错位；两者无法自动区分，故卡片读数标 NA 而非 0"
+        },
+        "card-action-buttons": {
+          "value": 0,
+          "status": "unavailable",
+          "unit": "个",
+          "source": "/Users/ci/Library/Application Support/捎话 Tidings/relay.db",
+          "sha256": "267c5f1b027d14eb0359a0d6880dfee43e5746d78f3eeb4c2e39090afa6bbd7f",
+          "scope": "run 时间窗 [1794284347036, 1794285151706] ms；卡片库本机快照",
+          "note": "时间窗内无任何消息：可能是链路本身不写 MessageEntity（直驱链预期），也可能是时间窗错位；两者无法自动区分，故卡片读数标 NA 而非 0"
+        },
+        "card-artifact-entries": {
+          "value": 0,
+          "status": "unavailable",
+          "unit": "个",
+          "source": "/Users/ci/Library/Application Support/捎话 Tidings/relay.db",
+          "sha256": "267c5f1b027d14eb0359a0d6880dfee43e5746d78f3eeb4c2e39090afa6bbd7f",
+          "scope": "run 时间窗 [1794284347036, 1794285151706] ms；卡片库本机快照",
+          "note": "时间窗内无任何消息：可能是链路本身不写 MessageEntity（直驱链预期），也可能是时间窗错位；两者无法自动区分，故卡片读数标 NA 而非 0"
+        },
+        "agent-state-banners": {
+          "value": 0,
+          "status": "unavailable",
+          "unit": "条",
+          "source": "/Users/ci/Library/Application Support/捎话 Tidings/relay.db",
+          "sha256": "267c5f1b027d14eb0359a0d6880dfee43e5746d78f3eeb4c2e39090afa6bbd7f",
+          "scope": "run 时间窗 [1794284347036, 1794285151706] ms；卡片库本机快照",
+          "note": "时间窗内无任何消息：可能是链路本身不写 MessageEntity（直驱链预期），也可能是时间窗错位；两者无法自动区分，故卡片读数标 NA 而非 0"
+        },
+        "preview-entry-wired": {
+          "value": false,
+          "status": "measured",
+          "unit": "bool",
+          "source": "/workspace/src/composeApp/src/commonMain/kotlin/com/kapp/tenon/feature/chat/ChatMessageList.kt",
+          "sha256": "7fc70a0c530c0ff57dc88f4fd4f7adb31f53be9b670f9be63c30927bcb0fe1df",
+          "scope": "",
+          "note": "false = 产物预览入口整块不画（客户端现状）"
+        },
+        "human-interaction-events": {
+          "value": null,
+          "status": "unmeasurable",
+          "unit": "",
+          "source": "n/a",
+          "sha256": null,
+          "scope": "",
+          "note": "卡片动作无客户端回执埋点，真机点击需人工记录"
+        }
+      }
+    },
+    {
+      "scheme": "chain",
+      "label": "chain",
+      "status": "available-not-run",
+      "entry": "POST /v1/agent/chain",
+      "chain": "stage-chain",
+      "source": "agentNode/src/main/kotlin/com/kapp/tenon/agent/ControlPlaneInvokeRoutes.kt:98-150",
+      "enable_when": "桌面宿主装配 chainDispatcher 后真跑 stages，产出 result.json",
+      "reason": "控制面真探测 400（空 stages 校验通过）⇒ chainDispatcher 已装配；本轮未真跑 stages，且尚未与 single 档做等价任务映射，不给差异结论",
+      "metrics": {}
+    },
+    {
+      "scheme": "team",
+      "label": "team",
+      "status": "requires-device",
+      "entry": "POST /v1/agent/invoke",
+      "chain": "orchestrator",
+      "source": "agentNode/src/main/kotlin/com/kapp/tenon/agent/ControlPlaneInvokeRoutes.kt:67-94",
+      "enable_when": "群 + 工作区宿主真入驻席位 + 手机 @ 派单（--tier real）",
+      "reason": "需群 + 席位入驻 + 手机 @ 派单；harness 不自动触发，不假跑",
+      "metrics": {}
+    }
+  ]
+}

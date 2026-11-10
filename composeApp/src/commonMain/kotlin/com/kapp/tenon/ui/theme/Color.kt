@@ -73,7 +73,7 @@ val RelayLightColors = lightColorScheme(
     onSurfaceVariant = RelayLightOnSurfaceVariant,
     outline = RelayLightOutline,
     // M3 的 lightColorScheme() 默认 outlineVariant 是 #CAC4D0 —— 一条紫调发丝线，
-    // 落在 Tidings 这套暖中性色板上会显脏。凡是用发丝分隔线的地方都是默认吃这个值，
+    // 落在 Tenon 这套暖中性色板上会显脏。凡是用发丝分隔线的地方都是默认吃这个值，
     // 所以必须在这里钉死，否则两态都漏回 Material 默认。
     //
     // **语义说明：outlineVariant 对应原型的 --hair，而不是 --surface-3。**

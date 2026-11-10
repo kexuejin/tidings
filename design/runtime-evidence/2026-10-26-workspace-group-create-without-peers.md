@@ -15,10 +15,10 @@
 
 | 项 | 值 |
 |---|---|
-| 桌面产物 | `:desktopApp:createDistributable`（源 = `0b71cf15`），替换 `/Applications/Tidings.app` 后 `lsregister -f -R -trusted` |
-| 新代码判据 | `/Applications/Tidings.app/Contents/app/app-jvm-*.jar` 里 `handleCreateWorkspaceGroup` 出现 **6** 次；`DesktopShellKt` 有 **3** 处 `invokeinterface DesktopPaneActions.createWorkspaceGroup`（`javap`） |
-| 隔离运行 | `TIDINGS_DATA_DIR=/tmp/tidings-verify-data`（真实数据目录的**副本**），`settings.json` 端口改 `27878/27879`，避免与线上实例撞端口 |
-| 真实数据 | **未被写入**：实测结束后 `~/Library/Application Support/捎话 Tidings/settings.json` 的 groups 仍是原来 3 个 |
+| 桌面产物 | `:desktopApp:createDistributable`（源 = `0b71cf15`），替换 `/Applications/Tenon.app` 后 `lsregister -f -R -trusted` |
+| 新代码判据 | `/Applications/Tenon.app/Contents/app/app-jvm-*.jar` 里 `handleCreateWorkspaceGroup` 出现 **6** 次；`DesktopShellKt` 有 **3** 处 `invokeinterface DesktopPaneActions.createWorkspaceGroup`（`javap`） |
+| 隔离运行 | `TENON_DATA_DIR=/tmp/tenon-verify-data`（真实数据目录的**副本**），`settings.json` 端口改 `27878/27879`，避免与线上实例撞端口 |
+| 真实数据 | **未被写入**：实测结束后 `~/Library/Application Support/榫卯 Tenon/settings.json` 的 groups 仍是原来 3 个 |
 | 手机 | Pixel 6 / Android 15，`com.kapp.tenon` release 由本源码构建，`adb install -r -d` 覆盖安装 |
 
 ## 2. 桌面：修复后实测（0 台在线设备）
@@ -113,7 +113,7 @@ git diff --name-only 91bd719a 0b71cf15 | grep -iE 'settings|preview'     → 无
 
 1. **量具踩坑**：第一轮我用 AppleScript 的 `click e` 点 Compose 按钮 —— 它**不触发** onClick，于是得到「新构建仍弹旧横幅」的假阴性；改成 `perform action "AXPress"` 后立刻成功。先证明量具能动，再相信读数。
 2. **手机侧没走到工作区建群**：手机没有工作区宣告（`0 工作区`），且 compact 布局里没有「关联工作区建群」入口（该入口目前只在两栏布局的会话侧栏接线）。本次只证明「手机装了新包、群同步正常」，**不证明**手机侧工作区建群可用。
-3. **旧构建不能靠 `TIDINGS_DATA_DIR` 隔离**：实测旧包（2026-10-25 构建）忽略该变量、直接打开真实数据目录（差点污染用户数据）。原因已查明：该变量由 `970e8e70`（2026-10-26，luciola 批次）才引入，旧包里根本没有这条分支。以后拿旧包做 A/B 必须换设备或先备份库。
+3. **旧构建不能靠 `TENON_DATA_DIR` 隔离**：实测旧包（2026-10-25 构建）忽略该变量、直接打开真实数据目录（差点污染用户数据）。原因已查明：该变量由 `970e8e70`（2026-10-26，luciola 批次）才引入，旧包里根本没有这条分支。以后拿旧包做 A/B 必须换设备或先备份库。
 4. **没测多设备入群**：0 成员时按设计不会发 `group.info`；把成员加进来之后 `virtualAgents` 能否同步给对端，本次未实测。
 
 ## 6. 复现命令
@@ -121,15 +121,15 @@ git diff --name-only 91bd719a 0b71cf15 | grep -iE 'settings|preview'     → 无
 ```bash
 # 1) 构建并替换桌面端（源 = 被测提交）
 ./gradlew :desktopApp:createDistributable
-# 退出旧实例后替换 /Applications/Tidings.app，再注册（否则图标/缓存不刷新）
+# 退出旧实例后替换 /Applications/Tenon.app，再注册（否则图标/缓存不刷新）
 /System/Library/Frameworks/CoreServices.framework/Frameworks/LaunchServices.framework/Support/lsregister \
-  -f -R -trusted /Applications/Tidings.app
+  -f -R -trusted /Applications/Tenon.app
 
 # 2) 隔离数据目录跑一个实例（复制真实数据、改端口）
-cp -R "$HOME/Library/Application Support/捎话 Tidings/." /tmp/tidings-verify-data/
+cp -R "$HOME/Library/Application Support/榫卯 Tenon/." /tmp/tenon-verify-data/
 # settings.json: udpPort=27878, tcpPort=27879
-TIDINGS_DATA_DIR=/tmp/tidings-verify-data \
-  /Applications/Tidings.app/Contents/MacOS/Tidings
+TENON_DATA_DIR=/tmp/tenon-verify-data \
+  /Applications/Tenon.app/Contents/MacOS/Tenon
 
 # 3) 手机：覆盖安装（同包名同签名，数据保留）
 ./gradlew :androidApp:assembleRelease
@@ -144,6 +144,6 @@ adb -s <serial> install -r -d androidApp/build/outputs/apk/release/androidApp-re
 | `/tmp/matrix-forced.log` / `/tmp/matrix-forced2.log` | `--rerun-tasks` 两轮（各 1 例 flake，**不同用例**，单跑均绿） |
 | `/tmp/stability.log` | `:testStabilityGate` 三轮结果（绿） |
 | `/tmp/gates.log` | 18 项门禁逐项输出 |
-| `/tmp/tidings-verify-data/settings.json` | §2 那条群元数据 |
+| `/tmp/tenon-verify-data/settings.json` | §2 那条群元数据 |
 
 （截图不入库：AX 文本读数已足够复现，见 §2。）

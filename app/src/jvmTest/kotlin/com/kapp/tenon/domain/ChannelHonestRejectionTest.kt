@@ -31,6 +31,7 @@ import kotlinx.coroutines.launch
 import kotlinx.coroutines.runBlocking
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.jsonPrimitive
+import com.kapp.tenon.domain.udpTestTransport
 
 /**
  * M7-T2 手机侧的**诚实拒绝**（D-017：MOBILE_CAPS 声明 agc1 的语义兑现）：
@@ -57,6 +58,7 @@ class ChannelHonestRejectionTest {
         scope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
         // 别家的宿主（声明 agc1）：它发委派过来，等手机的回帧。
         agentRuntime = NodeRuntime(
+            messengerTransportFactory = udpTestTransport(),
             profile = Profile.agent(
                 nodeId = agentNodeId, nick = "别家的宿主", host = "test-agent-host",
                 ver = "relay-0.1.0", platform = "mac",

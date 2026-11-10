@@ -302,6 +302,22 @@ Team Folder 是**现有会话列表的分组视图**，不新增会话类型、�
 
 验收判据见方案 §8；真机验法与混合版本限制记在 `ACCEPTANCE.md` §10e。
 
+### 7.4 团队执行（v2 P0-0/P0-A）落地进度（方案 `docs/team-execution-final-plan.md` §8）
+
+| 块 | 内容 | 落地物 |
+|:--|:--|:--|
+| P0-0 token 单源 | 组员名进 mentionKeys；core `resolveTeamMention`/`resolveTeamMemberToken`（长 token/词边界/重名 fail-closed）；`resolvePromptTarget` 统一目标解析（Ambiguous 不执行） | core `TeamMention.kt` + app `TeamPromptRouting.kt` + `TeamPromptRoutingTest` |
+| P0-0 目标宿主路由 | `agentPromptRoute(targetHostIsSelf)`——多宿主群文本 @ 按**目标席位宿主**判（行为变更） | `RelayController.agentPromptRoute` + 五档测试 |
+| P0-0 授权收口 | 编排器入口统一 `AgentExecAuthorizer`（领队直呼与 @组员 同判据），未授权 ⇒ blocked 卡 | `DesktopWorkerOrchestrator.deniedSeatDispatch` + 行为测试 |
+| P0-A store | `team-execution.json`（主键三元组、三态、0600/原子、保存校验 §3.4 全矩阵、remove 生命周期） | `TeamExecutionStore` + `TeamExecutionValidation` |
+| P0-A 编译 | 编制 → [worker]+[reviewers]；reviewer 直呼=纯审查单棒；0 reviewer=单棒+编译期在位检查；fromTemplate+AUTO | `TeamPlanCompiler` + 测试矩阵 |
+| P0-A 分支 | handlePrompt/handlePromptAwait 团队分支（授权→解析→编译→分发/ blocked 卡）；workspace 显式取席位 defaultWsId；派不出去必出卡 | `DesktopWorkerOrchestrator` 团队分支 + `TeamDispatchBehaviorTest` |
+| P0-A UI | TeamRosterDialog 执行配置段（仅宿主）；@ 候选组员；端口 `TeamExecutionPort`（手机 null ⇒ 只读） | `TeamRosterDialog` 执行段 + `DesktopTeamExecutionPort` |
+| P1/P2 | 按成员选模型 / 主备降级：**未做**——§6.2 逐驱动注入必须真机验证后才开下拉 | — |
+
+验收判据见方案 §9；未验项（桌面 UI 动作、旧端对照、输入侧拦截）与 v1 同口径记在
+`ACCEPTANCE.md`。
+
 ## 8. 文档状态与引用
 
 - **裁决：保留本文为独立增量差异表，不并入基线**。理由：本文价值是跨三份基线的差异对账，并入任何一份都会丢掉「谁与谁冲突」的上下文。

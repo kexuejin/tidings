@@ -20,6 +20,7 @@ import kotlin.test.assertFalse
 import kotlin.test.assertNotEquals
 import kotlin.test.assertTrue
 import kotlin.test.fail
+import com.kapp.tenon.core.testing.udpTestTransport
 
 /**
  * `tcpBound` 的护栏。
@@ -111,6 +112,7 @@ class NodeRuntimeTcpBindTest {
      * TCP 端口由每个用例自己决定，因为这里测的就是它。
      */
     private fun newNode(tcpPort: Int) = NodeRuntime(
+        messengerTransportFactory = udpTestTransport(),
         profile = Profile.mobile(
             nodeId = newId(),
             nick = "tcp-bind-test",
@@ -146,6 +148,7 @@ class NodeRuntimeTcpBindTest {
             val tlsPort = ServerSocket(0).use { it.localPort }
             val listener = RecordingCrossNetworkListener()
             val runtime = NodeRuntime(
+                messengerTransportFactory = udpTestTransport(),
                 profile = Profile.mobile(
                     nodeId = newId(),
                     nick = "legacy-listener-gate",
@@ -190,6 +193,7 @@ class NodeRuntimeTcpBindTest {
         val tlsPort = ServerSocket(0).use { it.localPort }
         val listener = RecordingCrossNetworkListener()
         val runtime = NodeRuntime(
+            messengerTransportFactory = udpTestTransport(),
             profile = Profile.mobile(
                 nodeId = newId(),
                 nick = "legacy-listener-control",

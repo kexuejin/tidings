@@ -864,7 +864,7 @@ private object FakeSettingsHost : DesktopSettingsHost {
  * `SettingsMoreLongTextPhonePreview`），桌面宽度（>600dp）的帧一张都没有 —— 桌面形态没有证据。
  *
  * 数字逐字取自原型 `screenDSettingsData()`（`prototype/relay.html:5282-5303`）：数据目录
- * `~/Library/Application Support/捎话`（`:5287`）、占用 `86.2 MB · 其中缓存 12.0 MB`（`:5289`）、
+ * `~/Library/Application Support/榫卯`（`:5287`）、占用 `86.2 MB · 其中缓存 12.0 MB`（`:5289`）、
  * 续传残片 `3 个 · 18.2 MB`（`:5299`）。这三串数与手机那屏**不同**（`screenSetData()`，`:3920`
  * 是 `12.4 MB · 其中缓存 3.1 MB`），所以不能照抄手机帧的夹具。
  *
@@ -888,7 +888,7 @@ private fun DeskSettingsDataPreview() {
             onSelect = {},
         ) {
             SettingsDataSubpage(
-                dataDirectory = "~/Library/Application Support/捎话",
+                dataDirectory = "~/Library/Application Support/榫卯",
                 dataUsageBytes = DESK_DATA_USAGE_BYTES,
                 cacheUsageBytes = DESK_CACHE_USAGE_BYTES,
                 leftoverPartCount = 3,
@@ -899,7 +899,6 @@ private fun DeskSettingsDataPreview() {
                 persistMessagesEnabled = true,
                 onPersistMessagesEnabledChange = {},
                 onClearHistory = {},
-                onExperimentalLuciolaChange = {},
             )
         }
     }

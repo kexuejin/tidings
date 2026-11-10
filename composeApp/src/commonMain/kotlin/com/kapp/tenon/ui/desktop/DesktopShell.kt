@@ -788,7 +788,7 @@ public fun DesktopShell(
             },
     ) {
         // 窗口级标题栏只在 Expanded/Medium 画 —— 窄窗（Compact，< DesktopMetrics.MEDIUM_MIN_PX）
-        // 不画它：右栏自带的 `.dhead` 里已经有身份与复制按钮，再叠一行「捎话 Tidings」就是
+        // 不画它：右栏自带的 `.dhead` 里已经有身份与复制按钮，再叠一行「榫卯 Tenon」就是
         // 同一份信息占掉两行高度。原型见 `prototype/relay.html?size=compact`。
         if (sizeClass != DesktopWindowSizeClass.Compact && chromeMode.showsDesktopChrome) {
             DesktopTitleBar(

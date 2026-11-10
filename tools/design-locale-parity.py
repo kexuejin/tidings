@@ -218,7 +218,7 @@ def cmd_self_test(root):
     expect(bool(CJK_RE.search("我的二维码")), "中文应判为 CJK")
     expect(not CJK_RE.search("My QR Code"), "英文不应判为 CJK")
     expect(bool(CJK_RE.search("OK，done")), "全角逗号应判为 CJK")
-    expect(not CJK_RE.search("Tidings 2.0 (beta)"), "半角括号不应判为 CJK")
+    expect(not CJK_RE.search("Tenon 2.0 (beta)"), "半角括号不应判为 CJK")
 
     # 4. 空串判定
     expect(not "  ".strip(), "空白串应判为空")

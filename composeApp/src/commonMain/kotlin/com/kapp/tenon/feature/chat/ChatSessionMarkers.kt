@@ -93,11 +93,21 @@ internal fun sessionIdOf(message: MessageUi): String? = message.agentSessionId
  * 群文本），没有共享 id，能对上的唯一事实就是文件名。找到**收完**（Completed、
  * savedPaths 非空）的那行才返回路径 —— 还在传的文件给了路径也读不到全文。
  * 找不到返回 null：入口不画，不做孤立路径展示。
+ *
+ * **[sinceAt] 是这条判据的第二个维度，而且不能省。** 同名文件在一条会话里会积累
+ * （同一份原型反复投递就是典型），只按名字取「第一条」会永远命中**上一轮**那份：
+ * 真机现场：卡片写着本轮 48.7 KB 的 `Atmos`，点开的却是上一轮 21 KB 的
+ * `tinct` —— 因为那条文件行排在更前面。所以：
+ *
+ * 1. 优先取**卡首帧之后最早**落盘的那份（这张卡自己投递的那一次）；
+ * 2. 一份都没有（跨端时钟差把卡片时间戳推到投递之后）才退回**最新**那份；
+ * 3. 任何情况下都不退回最旧 —— 那正是这个缺陷本身。
  */
 internal fun artifactSavedPathOf(
     messages: List<MessageUi>,
     cardId: String,
     artifactName: String,
+    sinceAt: Long,
 ): String? {
     if (artifactName.isBlank()) return null
     // 卡必须真的在这条会话的消息流里：找不到卡 = 文件行无从归属，入口不画。
@@ -105,12 +115,15 @@ internal fun artifactSavedPathOf(
         (message.card ?: message.cardPayload)?.get("cardId")?.toString()?.contains(cardId) == true
     }
     if (!hasCard) return null
-    return messages.firstOrNull { message ->
-        val file = message.file ?: return@firstOrNull false
+    val hits = messages.filter { message ->
+        val file = message.file ?: return@filter false
         file.name == artifactName &&
             file.state == com.kapp.tenon.domain.model.TransferState.Completed &&
             file.savedPaths.isNotEmpty()
-    }?.file?.savedPaths?.firstOrNull()
+    }
+    // messages 按 `at` 升序（handleAppendMessage 按时间插位）⇒ first/last 即最早/最新。
+    val own = hits.firstOrNull { it.at >= sinceAt } ?: hits.lastOrNull()
+    return own?.file?.savedPaths?.firstOrNull()
 }
 internal fun sessionTransitionIds(messages: List<MessageUi>): Set<String> {
     val transitions = mutableSetOf<String>()

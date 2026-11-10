@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: GPL-3.0-only
-// Copyright (C) 2026 捎话 Tidings contributors
+// Copyright (C) 2026 榫卯 Tenon contributors
 
 package com.kapp.tenon.desktop
 

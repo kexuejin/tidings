@@ -255,6 +255,13 @@ internal fun ChatHeader(
                                 if (onOpenWorkspacePicker != null && workspaceCount > 1) {
                                     Modifier
                                         .clip(MaterialTheme.shapes.extraSmall)
+                                        // 可点态补纵向命中区：这一行的点击目标原来是
+                                        // 文字一行高（约 16dp），切换工作区又是多工作区
+                                        // 用户的常用动作。给到 ~32dp —— 不上 48dp 是因为
+                                        // 它嵌在头部副行里，48dp 会把头部撑高一倍；这是
+                                        // 流内小目标的折中档，与 IbtnBox 的"视觉小砖 +
+                                        // 48 外框"不是同一处境。
+                                        .padding(vertical = sp.sm6)
                                         .clickable { onOpenWorkspacePicker() }
                                 } else {
                                     Modifier
@@ -269,7 +276,9 @@ internal fun ChatHeader(
                         )
                         Text(
                             text = workspaceName,
-                            style = MaterialTheme.typography.labelSmall,
+                            // 当前项目上下文 + 可点入口，是这一屏要读的关键信息：
+                            // 11sp 的 labelSmall 升 12sp（与头部副行同阶）。
+                            style = MaterialTheme.typography.labelMedium,
                             color = MaterialTheme.colorScheme.primary,
                             maxLines = 1,
                             overflow = TextOverflow.Ellipsis,

@@ -27,8 +27,8 @@
   `ScreenHistoryCard.kt`、`desktopApp/build.gradle.kts`）与三个设计工具，
   新增 `CardShapeContractGuardTest.kt`、`tools/verify-luciola-native.py`。
 - 真机：Pixel 6，`<device-serial>`，包 `com.kapp.tenon.debug`。
-- 宿主：`/Applications/Tidings.app`，冷启动**不设** `TIDINGS_LUCIOLA_NATIVE`
-  （即用包里自带 dylib），`TIDINGS_LUCIOLA=1`。
+- 宿主：`/Applications/Tenon.app`，冷启动**不设** `TENON_LUCIOLA_NATIVE`
+  （即用包里自带 dylib），`TENON_LUCIOLA=1`。
 
 产物双向核对（不是"构建成功"就当装上了）：
 

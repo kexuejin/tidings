@@ -1,7 +1,7 @@
 # Adaptation Report
 
 Generated: 2026-10-03T00:43:41.774461+00:00
-App: Tidings
+App: Tenon
 Platforms: android, ios
 
 ## Summary

@@ -178,6 +178,9 @@ class DesktopExtension(
      */
     private var delegationTeamStore: DelegationTeamStore? = null
 
+    /** 团队执行档存储（团队执行方案 §3.2）：attach 建 / detach 清（与群模板同生命周期）。 */
+    private var teamExecutionStore: TeamExecutionStore? = null
+
     /**
      * agent 事件 → 群聊的全部有状态逻辑（去重键 / 已转发水位 / 在飞占位 / 补发 / 群匹配）。
      *
@@ -350,6 +353,10 @@ class DesktopExtension(
         // §16 群模板存储：delegation-teams.json，与授权三台账同生命周期（attach 建 / detach 清）。
         val delegationTeams = DelegationTeamStore(java.io.File(controller.dataDirectory, "delegation-teams.json"))
         delegationTeamStore = delegationTeams
+        // 团队执行档（团队执行方案 §3.2，P0-A）：team-execution.json，同生命周期。
+        // 宿主本地的执行配置（driver/model）——不进 group 帧、不广播给全群。
+        val teamExecution = TeamExecutionStore(java.io.File(controller.dataDirectory, "team-execution.json"))
+        teamExecutionStore = teamExecution
         // M7-T2（D-016 后半步）：Channel 委派的接收宿主侧编排器。幂等 / 互斥 / 租约 /
         // 结果回执都在编排器内；这里只把「解析 + 执行」接到与 /v1/plugin/task 同源的
         // executePluginTask（两处各写一份迟早漂）。授权门在域层（controller 的
@@ -428,7 +435,7 @@ class DesktopExtension(
             // 「这个群的元数据长什么样」这个事实 —— desktopApp 能读到 composeApp 的
             // settings.groups，agentNode 读不到，所以由这里注入。
             // **桌面端只提供事实**：这个群的元数据。
-            // 「@ 到谁」「谁有权执行」「投给哪个会话」三个判据都在 Tidings 侧
+            // 「@ 到谁」「谁有权执行」「投给哪个会话」三个判据都在 Tenon 侧
             // （core 的判据 + ControlPlane 的台账），桥接侧只消费结论。
             inboxEnricher = object : AgentInboxEnricher {
                 override fun groupMetaOf(payload: JsonObjectLike): GroupMeta? {
@@ -456,7 +463,13 @@ class DesktopExtension(
                 // §16 群模板：挡位 B 命中该群模板时直接采用配置选棒并跳过 planner。
                 teamStore = delegationTeams,
                 detailedAutoPlanner = { goal, available -> PlannerLlm.refinePlan(goal, available) },
+                // 团队执行档：@组员 的宿主侧解析与编译（§4.3）。
+                teamExecutionStore = teamExecution,
             )
+            // 团队执行档端口（§6.3）：UI 读写宿主本地执行配置的唯一通路（手机端为 null ⇒ 只读）。
+            controller.teamExecutionPort = DesktopTeamExecutionPort(teamExecution) {
+                workerOrchestrator.availableAgentKeys()
+            }
             if (blindSpotDir != null) {
                 BlindSpotPatrol.startPatrol(blindSpotDir, scope)
             }
@@ -987,14 +1000,14 @@ class DesktopExtension(
             // 于是用户 @agent 后收到的是那句「本机 native 驱动的兜底」，而活一件没干。
             // 那正是本仓反复出现的「界面在说假话」形态：一个**永远成功但什么都不做**的执行器。
             //
-            // 真正的执行路径是 `dsh-tidings`：它轮询本机 agentNode 的 `/v1/inbox`，
+            // 真正的执行路径是 `dsh-tenon`：它轮询本机 agentNode 的 `/v1/inbox`，
             // 按随行给出的 `agentHint`（addressd / 授权 / targetSessionId）把 prompt
             // 注入宿主上的 DSH 会话。那条路径**与本回调无关** —— 它只看 inbox。
             //
             // 所以这里保持**非 null**（群消息路由要靠 `onAgentPrompt != null` 判「本机有 agent」），
             // 但什么都不做：让既有的 `NativeRelayDriver` 不再产出假回复。
             //
-            // 代价（如实记在这里）：**没装 dsh-tidings 的宿主，@agent 将得不到任何回复**。
+            // 代价（如实记在这里）：**没装 dsh-tenon 的宿主，@agent 将得不到任何回复**。
             // 那比回一句「我没有运行时」诚实 —— 后者让用户以为 agent 收到了却干不了活。
             // DSH Super-Agent alignment: single worker direct dispatch, follow-up wake-up, immediate abort
             // （workerOrchestrator 在本 try 块开头创建 —— invoke 执行桥与文本路由共用同一实例。）
@@ -1071,6 +1084,7 @@ class DesktopExtension(
             controller.onDelegationTeamConfig = null
             controller.onQuickAction = null
             delegationTeamStore = null
+        teamExecutionStore = null
             controller.onExecDevices = null
             controller.onSetExecDeviceAllowed = null
             inboundJob?.cancel()

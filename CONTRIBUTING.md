@@ -68,7 +68,7 @@ relay/
      - `agentNode: handle token authentication in ControlPlane`
      - `composeApp: extract common NodePresence components`
 3. **改完要重启什么**（只影响开发，不影响使用者）:
-   - 桥（`dsh-tidings`）的适配器改动**要重启 DSH 宿主**才生效；热改桥不会生效。
+   - 桥（`dsh-tenon`）的适配器改动**要重启 DSH 宿主**才生效；热改桥不会生效。
 
 4. **协议兼容性保证**:
    - 凡涉及 `PPE-1` 协议扩展与传输层修改，严禁破坏已有的消息信封（Envelope）与握手契约。

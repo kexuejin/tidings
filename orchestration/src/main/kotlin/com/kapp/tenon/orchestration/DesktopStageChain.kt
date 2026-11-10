@@ -140,8 +140,8 @@ object DesktopStageChain {
                     cardJson = com.kapp.tenon.agent.StageChain.cardJsonOf(
                         ChainProgress(chainId, ++rev, state, title, current, statuses.toList(),
                             percent, banner, checks = pendingChecks, details = details,
-                            // 承办人：每棒的驱动键 ——「谁在干」直接可见。
-                            assignees = stages.map { it.agentKey },
+                            // 承办人：每棒的角色名（展示事实，由 cardOf 转工牌名与步骤行徽标）。
+                            assignees = stages.map { it.role },
                             // 产物行（name + bytes，cardOf 已渲染）：本机绝对路径只活在
                             // ArtifactPipe 的投递参数里，绝不进这张卡的 JSON。
                             artifacts = artifacts,
@@ -188,12 +188,24 @@ object DesktopStageChain {
             )
         }
 
+        var handoffSpoken = false
         val runner = StageChainRunner(
             headSha = { repoPath -> git(repoPath, "rev-parse", "HEAD")?.trim() },
             runStage = { stage, prompt, repoPath ->
-                runOneStage(host, controller, groupId, stage, prompt, repoPath, repo) { delivered ->
+                val run = runOneStage(host, controller, groupId, stage, prompt, repoPath, repo) { delivered ->
                     recordArtifacts(delivered)
                 }
+                // 棒间交接发言（P0b）：Worker 棒（首棒）执行完毕且成功，且存在后续审查棒时，
+                // 由 Worker 席位在群内广播 1 条拟人化交棒发言。整条责任链上限 1 条，避免刷屏。
+                if (run.ok && groupId != null && !handoffSpoken && stages.size >= 2 && stage == stages[0]) {
+                    handoffSpoken = true
+                    val nextRole = stages.getOrNull(1)?.role ?: "Reviewer"
+                    val speech = controller.uiTexts.stageHandoffSpeech(stage.role, nextRole)
+                    if (speech.isNotBlank()) {
+                        controller.broadcastAgentSpeech(groupId, stage.agentKey, speech)
+                    }
+                }
+                run
             },
             land = { repoPath, run, message -> landStage(repoPath, run, message) },
             // Reviewer 白名单键审计的取值域清单：从 core 协议取值域对象装配（§九.1——
@@ -337,7 +349,7 @@ object DesktopStageChain {
         // 收割如实为空（worktree 真的一字未改），链却把**旧基线**交给验收棒，
         // 最后出现「开发棒修了 AC5、验收棒验收的是没修的代码」这种假 FAIL。
         //
-        // **P5 之后判据换了**：链现在把 `chain/<id>` 检出在 `/tmp/tidings-chains/<id>`，
+        // **P5 之后判据换了**：链现在把 `chain/<id>` 检出在 `/tmp/tenon-chains/<id>`，
         // 那个工作树**本身就是隔离区**。所以「工作树脏了」不再是越界，而是**它真的干了活**
         // （沙箱又套了一层 worktree，codex 再往上一层写，落点正好是链工作树）。这种改动
         // 直接就地收（见 [landStage] 的无 patch 分支），不判失败。

@@ -372,7 +372,7 @@ private fun buildSummary(
     messages: SanitizedLog,
     entries: List<DiagnosticsEntry>,
 ): String = buildString {
-    appendLine("Tidings mobile diagnostics")
+    appendLine("Tenon mobile diagnostics")
     appendLine("Include the time, steps and expected result. Export from both peers for transfer issues.")
     appendLine("No chat or file content is included. Logs are bounded; see logLimits below.")
     appendLine()

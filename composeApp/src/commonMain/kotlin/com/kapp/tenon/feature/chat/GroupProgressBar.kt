@@ -66,7 +66,9 @@ fun GroupProgressBar(
             )
             Text(
                 text = stringResource(Res.string.chat_group_progress_working, agentName, taskSummary),
-                style = MaterialTheme.typography.labelSmall,
+                // 任务摘要是这条横幅的主要信息（谁在干什么）：11sp 读不全长任务名，
+                // 升 12sp 的 labelMedium。
+                style = MaterialTheme.typography.labelMedium,
                 color = MaterialTheme.colorScheme.primary,
                 fontWeight = FontWeight.Medium,
                 maxLines = 1,

@@ -1,0 +1,371 @@
+{
+  "generated_at": "2026-11-10T02:15:04.324420+00:00",
+  "tier": "headless",
+  "workspace": "/Users/ci/weather-relay",
+  "host": "http://127.0.0.1:8788",
+  "agents": [
+    {
+      "key": "dsh",
+      "cli": "dsh",
+      "role": "worker"
+    }
+  ],
+  "base_head": "b221f7de533359f6d42f6260ed02c3ec3b51574e",
+  "base_tests": {
+    "rc": 0,
+    "tests": 87,
+    "pass": 87,
+    "fail": 0,
+    "skipped": 0,
+    "duration_ms": 341.410417,
+    "tail": [
+      "# tests 87",
+      "# suites 0",
+      "# pass 87",
+      "# fail 0",
+      "# cancelled 0",
+      "# skipped 0",
+      "# todo 0",
+      "# duration_ms 341.410417"
+    ]
+  },
+  "device_commits": [
+    "merge feature from sandbox",
+    "inject failing test into base",
+    "fix injected defect"
+  ],
+  "created_files": [
+    "docs/SDLC-HARNESS-REQ.md",
+    "src/utils/uvAdvice.js",
+    "test/sdlc-harness-injected.test.js",
+    "test/uvAdvice.test.js"
+  ],
+  "environment": {
+    "python": "3.13.12",
+    "dsh": "/opt/homebrew/bin/dsh",
+    "opencode": "/Users/ci/.opencode/bin/opencode",
+    "adb": "/Users/ci/Library/Android/sdk/platform-tools/adb"
+  },
+  "acts": [
+    {
+      "act_id": "0",
+      "title": "环境体检",
+      "chain": "local",
+      "status": "PASS",
+      "verdicts": [
+        {
+          "name": "control-plane",
+          "ok": true,
+          "detail": "GET /v1/peers -> 200 {'peers': [{'nodeId': '7077a2bb-66a2-476e-98c4-7a88dbc203f3', 'nick': 'sdk_gphon"
+        },
+        {
+          "name": "cli:dsh",
+          "ok": true,
+          "detail": "dsh -> /opt/homebrew/bin/dsh"
+        },
+        {
+          "name": "dsh-credentials",
+          "ok": true,
+          "detail": "/Users/ci/.dsh/.credentials.yaml 存在"
+        },
+        {
+          "name": "workspace-is-git",
+          "ok": true,
+          "detail": "/Users/ci/weather-relay"
+        },
+        {
+          "name": "workspace-clean",
+          "ok": true,
+          "detail": "HEAD=b221f7de5333 脏行=0"
+        },
+        {
+          "name": "baseline-tests-green",
+          "ok": true,
+          "detail": "pass=87 fail=0 skipped=0 duration=341.410417ms"
+        },
+        {
+          "name": "artifacts-dir",
+          "ok": true,
+          "detail": "/tmp/tenon-ws/artifacts"
+        }
+      ],
+      "evidence": {
+        "base_head": "b221f7de533359f6d42f6260ed02c3ec3b51574e",
+        "base_dirty": [],
+        "base_tests": {
+          "rc": 0,
+          "tests": 87,
+          "pass": 87,
+          "fail": 0,
+          "skipped": 0,
+          "duration_ms": 341.410417,
+          "tail": [
+            "# tests 87",
+            "# suites 0",
+            "# pass 87",
+            "# fail 0",
+            "# cancelled 0",
+            "# skipped 0",
+            "# todo 0",
+            "# duration_ms 341.410417"
+          ]
+        }
+      },
+      "seconds": 0.97
+    },
+    {
+      "act_id": "1",
+      "title": "需求确认",
+      "chain": "cli-direct",
+      "status": "PASS",
+      "verdicts": [
+        {
+          "name": "patch-is-real",
+          "ok": true,
+          "detail": "t-2-df182e73 17225B files=['docs/SDLC-HARNESS-REQ.md'] +320/-0"
+        },
+        {
+          "name": "requirement-doc-produced",
+          "ok": true,
+          "detail": "期望 docs/SDLC-HARNESS-REQ.md；实际 ['docs/SDLC-HARNESS-REQ.md']"
+        }
+      ],
+      "evidence": {
+        "agent": "dsh",
+        "artifact": "t-2-df182e73",
+        "patch": {
+          "bytes": 17225,
+          "files": [
+            "docs/SDLC-HARNESS-REQ.md"
+          ],
+          "added": 320,
+          "removed": 0,
+          "has_test": false,
+          "has_impl": false,
+          "mentions_req_doc": true,
+          "mentions_injected_test": false,
+          "body_head": "diff --git a/docs/SDLC-HARNESS-REQ.md b/docs/SDLC-HARNESS-REQ.md\nnew file mode 100644\nindex 0000000..17f555b\n--- /dev/null\n+++ b/docs/SDLC-HARNESS-REQ.md\n@@ -0,0 +1,320 @@\n+# 紫外线出行建议 · 需求说明（SDLC-HARNESS-REQ）\n+\n+> 文档类型：特性需求与验收规范  \n+> 特性 ID：FEAT-UV-ADVICE  \n+> 特性名称：紫外线（UV）指数分级与出行建议  \n+> 适用项目：Weather Relay  \n+> 文档版本：v1.0  \n+> 状态：待实现（Ready for Dev）  \n+> 说明：本文件只定义需求、契约与验收标准，不描述具体实现，也不代表该特性已经存在于当前代码中。\n+\n+---\n+\n+## 1. 背景与目标\n+\n+天气应用在展示当前天气后，用户还需要知道「今天的紫外线有多强、出门要注意什么」。本特性在**当前天气看板**中增加「紫外线出行建议」模块：读取当前城市的 UV 指数，给出唯一、确定、可测试的等级和出行建议。\n+\n+目标：\n+\n+1. 用户无需理解 UV 数值，也能一眼看出「弱 / 中等 / 强 / 极强」；\n+2. 每个等级都有明确、可执行的防晒与出"
+        },
+        "prompt": "【执行环境约束，必须遵守】你的当前工作目录（cwd）就是本次任务专用的一次性 git worktree，里面已经是本项目的完整检出（含 .git、src、test、package.json）。所有文件读写一律使用**相对路径**，只在 cwd 内进行；禁止使用任何绝对路径，禁止访问或写入宿主主仓库目录，禁止 cd 到别处。改动只有留在 cwd 的工作树里才会被收割成补丁；写到别处等于本次任务失败。\n新增 docs/SDLC-HARNESS-REQ.md：为「紫外线出行建议」特性写需求说明，必须包含至少 4 条编号的、可用自动化测试验证的验收标准（AC1..AC4），写清 UV 指数分级边界（0"
+      },
+      "seconds": 138.2
+    },
+    {
+      "act_id": "2",
+      "title": "新功能实现",
+      "chain": "cli-direct",
+      "status": "PASS",
+      "verdicts": [
+        {
+          "name": "patch-is-real",
+          "ok": true,
+          "detail": "t-3-bd462bdd 1734B files=['src/utils/uvAdvice.js', 'test/uvAdvice.test.js'] +57/-0"
+        },
+        {
+          "name": "feature-files-produced",
+          "ok": true,
+          "detail": "期望 src/utils/uvAdvice.js 与 test/uvAdvice.test.js；实际 ['src/utils/uvAdvice.js', 'test/uvAdvice.test.js']"
+        }
+      ],
+      "evidence": {
+        "agent": "dsh",
+        "artifact": "t-3-bd462bdd",
+        "patch": {
+          "bytes": 1734,
+          "files": [
+            "src/utils/uvAdvice.js",
+            "test/uvAdvice.test.js"
+          ],
+          "added": 57,
+          "removed": 0,
+          "has_test": true,
+          "has_impl": true,
+          "mentions_req_doc": false,
+          "mentions_injected_test": false,
+          "body_head": "diff --git a/src/utils/uvAdvice.js b/src/utils/uvAdvice.js\nnew file mode 100644\nindex 0000000..e03f669\n--- /dev/null\n+++ b/src/utils/uvAdvice.js\n@@ -0,0 +1,16 @@\n+/**\n+ * 紫外线指数（UV Index）纯逻辑：把数值等级映射为中文建议（零 DOM 依赖）。\n+ *\n+ * 等级区间：\n+ *   0-2 弱 / 3-5 中等 / 6-7 强 / 8 及以上 极强\n+ *\n+ * 非法输入（非数字、非有限数、负数）返回 null，由调用方决定兜底展示。\n+ */\n+export function uvAdvice(uv) {\n+  if (typeof uv !== 'number' || !Number.isFinite(uv) || uv < 0) return null;\n+\n+  if (uv < 3) return '弱';\n+  if (uv < 6) return '中等';\n+  if (uv < 8) return '强';\n+  return '极强';\n+}\ndiff --git a/test/uvAdvice.test.js b/test/uvAdvice.test.js\nnew file m"
+        },
+        "prompt": "【执行环境约束，必须遵守】你的当前工作目录（cwd）就是本次任务专用的一次性 git worktree，里面已经是本项目的完整检出（含 .git、src、test、package.json）。所有文件读写一律使用**相对路径**，只在 cwd 内进行；禁止使用任何绝对路径，禁止访问或写入宿主主仓库目录，禁止 cd 到别处。改动只有留在 cwd 的工作树里才会被收割成补丁；写到别处等于本次任务失败。\n本项目是 ESM（package.json type=module），必须用 import/export，不许用 require。新增 src/utils/uvAdvice.js，导出纯函数 uvA"
+      },
+      "seconds": 48.07
+    },
+    {
+      "act_id": "3",
+      "title": "审查与合流",
+      "chain": "local",
+      "status": "PASS",
+      "verdicts": [
+        {
+          "name": "apply:t-2-df182e73",
+          "ok": true,
+          "detail": "/tmp/tenon-ws/artifacts/t-2-df182e73/patch.diff:9: trailing whitespace.\n> 文档类型：特性需求与验收规范  \n/tmp/tenon-ws/artifacts/t-2-df182e73/patch.diff:10: trailing whitespace.\n> 特性 ID：FEAT-UV-ADVICE  \n/tmp/tenon-ws/artifacts/t-2-df182e73/patch.diff:11: trailing whitespace.\n> 特性名称：紫外线（UV）指数分级与出行建议  \n/tmp/tenon-w"
+        },
+        {
+          "name": "apply:t-3-bd462bdd",
+          "ok": true,
+          "detail": ""
+        },
+        {
+          "name": "worktree-changed",
+          "ok": true,
+          "detail": "新增脏行 ['?? docs/SDLC-HARNESS-REQ.md', '?? src/utils/uvAdvice.js', '?? test/uvAdvice.test.js']"
+        },
+        {
+          "name": "post-merge-tests-green",
+          "ok": true,
+          "detail": "pass=89 (基线 87) fail=0"
+        },
+        {
+          "name": "baseline-visible-to-next-sandbox",
+          "ok": true,
+          "detail": ""
+        }
+      ],
+      "evidence": {
+        "patches": [
+          "/tmp/tenon-ws/artifacts/t-2-df182e73/patch.diff",
+          "/tmp/tenon-ws/artifacts/t-3-bd462bdd/patch.diff"
+        ],
+        "applied": [
+          "/tmp/tenon-ws/artifacts/t-2-df182e73/patch.diff",
+          "/tmp/tenon-ws/artifacts/t-3-bd462bdd/patch.diff"
+        ],
+        "head": "b221f7de533359f6d42f6260ed02c3ec3b51574e",
+        "dirty": [
+          "?? docs/SDLC-HARNESS-REQ.md",
+          "?? src/utils/uvAdvice.js",
+          "?? test/uvAdvice.test.js"
+        ],
+        "tests": {
+          "rc": 0,
+          "tests": 89,
+          "pass": 89,
+          "fail": 0,
+          "skipped": 0,
+          "duration_ms": 387.977875,
+          "tail": [
+            "# tests 89",
+            "# suites 0",
+            "# pass 89",
+            "# fail 0",
+            "# cancelled 0",
+            "# skipped 0",
+            "# todo 0",
+            "# duration_ms 387.977875"
+          ]
+        },
+        "device_commits": [
+          "merge feature from sandbox"
+        ]
+      },
+      "seconds": 1.14
+    },
+    {
+      "act_id": "5",
+      "title": "缺陷定位修复",
+      "chain": "cli-direct",
+      "status": "PASS",
+      "verdicts": [
+        {
+          "name": "patch-is-real",
+          "ok": true,
+          "detail": "t-4-67934a22 954B files=['src/utils/uvAdvice.js'] +16/-0"
+        },
+        {
+          "name": "injected-test-not-deleted",
+          "ok": true,
+          "detail": "补丁里不许出现对注入测试的删改"
+        },
+        {
+          "name": "feature-impl-changed",
+          "ok": true,
+          "detail": "期望改动 src/utils/uvAdvice.js；实际 ['src/utils/uvAdvice.js']"
+        },
+        {
+          "name": "fix-applied",
+          "ok": true,
+          "detail": ""
+        },
+        {
+          "name": "tests-green-after-fix",
+          "ok": true,
+          "detail": "pass=90 fail=0 (基线 87)"
+        },
+        {
+          "name": "fix-committed-to-baseline",
+          "ok": true,
+          "detail": ""
+        }
+      ],
+      "evidence": {
+        "agent": "dsh",
+        "artifact": "t-4-67934a22",
+        "patch": {
+          "bytes": 954,
+          "files": [
+            "src/utils/uvAdvice.js"
+          ],
+          "added": 16,
+          "removed": 0,
+          "has_test": false,
+          "has_impl": true,
+          "mentions_req_doc": false,
+          "mentions_injected_test": false,
+          "body_head": "diff --git a/src/utils/uvAdvice.js b/src/utils/uvAdvice.js\nindex e03f669..4eeba80 100644\n--- a/src/utils/uvAdvice.js\n+++ b/src/utils/uvAdvice.js\n@@ -14,3 +14,19 @@ export function uvAdvice(uv) {\n   if (uv < 8) return '强';\n   return '极强';\n }\n+\n+const UV_ADVICE_LABELS = Object.freeze({\n+  弱: '紫外线弱，无需特别防护，可正常安排户外活动。',\n+  中等: '紫外线中等，外出建议做好防晒防护，正午时段减少暴晒。',\n+  强: '紫外线强，外出需加强防护，并尽量减少正午户外活动。',\n+  极强: '紫外线极强，务必做好全面防护，尽量避免长时间户外活动。',\n+});\n+\n+/**\n+ * 把紫外线指数转换为带防护提示的展示文案。\n+ * 非法输入与 {@link uvAdvice} 保持一致返回 null，由调用方决定兜底展示。\n+ */\n+export function uvAdviceLabel(uv) {\n+  const level = uvAdvice(uv);\n+  return le"
+        },
+        "prompt": "【执行环境约束，必须遵守】你的当前工作目录（cwd）就是本次任务专用的一次性 git worktree，里面已经是本项目的完整检出（含 .git、src、test、package.json）。所有文件读写一律使用**相对路径**，只在 cwd 内进行；禁止使用任何绝对路径，禁止访问或写入宿主主仓库目录，禁止 cd 到别处。改动只有留在 cwd 的工作树里才会被收割成补丁；写到别处等于本次任务失败。\n仓库里有一个新加的失败测试 test/sdlc-harness-injected.test.js，先运行 npm test 看失败堆栈，在 src/utils/uvAdvice.js 里补上测试要求"
+      },
+      "seconds": 113.15
+    },
+    {
+      "act_id": "6",
+      "title": "收尾验收",
+      "chain": "local",
+      "status": "PASS",
+      "verdicts": [
+        {
+          "name": "final-tests-green",
+          "ok": true,
+          "detail": "pass=90 fail=0 skipped=0 duration=377.872583ms"
+        },
+        {
+          "name": "no-test-count-regression",
+          "ok": true,
+          "detail": "now=90 base=87"
+        },
+        {
+          "name": "no-orphan-cli-process",
+          "ok": true,
+          "detail": "pgrep 命中 0 行"
+        },
+        {
+          "name": "no-failed-acts",
+          "ok": true,
+          "detail": "失败幕 []"
+        }
+      ],
+      "evidence": {
+        "head": "1437d00dae9ccd065d9e7a0c8bd63d66470ddcb5",
+        "dirty": [],
+        "tests": {
+          "rc": 0,
+          "tests": 90,
+          "pass": 90,
+          "fail": 0,
+          "skipped": 0,
+          "duration_ms": 377.872583,
+          "tail": [
+            "# tests 90",
+            "# suites 0",
+            "# pass 90",
+            "# fail 0",
+            "# cancelled 0",
+            "# skipped 0",
+            "# todo 0",
+            "# duration_ms 377.872583"
+          ]
+        }
+      },
+      "seconds": 0.98
+    }
+  ]
+}

@@ -51,7 +51,7 @@ def capture_screen(filename):
 def find_target_node():
     peers_info = get_json("/v1/peers")
     if not peers_info or "peers" not in peers_info:
-        raise RuntimeError("No peers found from Tidings server.")
+        raise RuntimeError("No peers found from Tenon server.")
     for p in peers_info["peers"]:
         # Match online mobile peer
         if p.get("online") and ("手机" in p.get("nick", "") or p.get("platform") == "linux"):

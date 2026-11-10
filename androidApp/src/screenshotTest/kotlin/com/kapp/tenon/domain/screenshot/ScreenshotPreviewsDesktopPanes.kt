@@ -324,7 +324,7 @@ private fun DeskConversationsPaneSearchEmptyPreview() {
             sizeClass = DesktopWindowSizeClass.Expanded,
             sessions = desktopPreviewConversations(),
             selectedPeerId = null,
-            query = "捎话",
+            query = "榫卯",
             onClearQuery = {},
             onCopyPeerId = {},
             onOpenInNewWindow = null,
@@ -332,7 +332,7 @@ private fun DeskConversationsPaneSearchEmptyPreview() {
             onGoToPairing = {},
             now = PREVIEW_NOW,
             onCreateGroup = { _, _, _ -> null },
-            initialGlobalSearch = GlobalSearchResult(query = "捎话"))
+            initialGlobalSearch = GlobalSearchResult(query = "榫卯"))
     }
 }
 

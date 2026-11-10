@@ -105,7 +105,7 @@ class PluginTokenGate private constructor(
 }
 
 /**
- * 本机宿主数据目录（桌面端 `~/Library/Application Support/捎话 Tidings/`、Linux 走
+ * 本机宿主数据目录（桌面端 `~/Library/Application Support/榫卯 Tenon/`、Linux 走
  * XDG）。抽出来是因为它原来只有 ControlPlane.defaultGrantFile 一个消费者，插件
  * token 文件需要**同一个目录** —— 数据目录的判据只能有一份，抄第二份迟早漂。
  */
@@ -118,6 +118,6 @@ internal object HostDirs {
         } else {
             System.getenv("XDG_DATA_HOME") ?: "$home/.local/share"
         }
-        return File(base, "捎话 Tidings")
+        return File(base, "榫卯 Tenon")
     }
 }

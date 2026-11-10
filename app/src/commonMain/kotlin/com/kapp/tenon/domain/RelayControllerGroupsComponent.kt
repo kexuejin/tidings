@@ -664,6 +664,15 @@ fun handleSendToGroup(
         // 触发 ≠ 本机执行：远端 agent 在场时这条消息已经按群协议送达那台设备，
         // 本机不跑、也不代替它回话（见 [RelayController.agentPromptRoute]）。
         val routeFacts = host.agentRouteFactsOf(groupId)
+        // **先解析目标，再决定执不执行**（团队执行方案 §4.2）：@ 的是席位还是组员？
+        // 组员 ⇒ 目标宿主就是该席位宿主（targetHostIsSelf 路由，§4.5）。
+        val self = host.state.value.selfNodeId
+        val promptTarget = resolvePromptTarget(body, meta, routeFacts.agentKinds)
+        val targetHostIsSelf = when (promptTarget) {
+            is PromptTarget.Seat -> promptTarget.hostNodeId == self
+            is PromptTarget.Member -> promptTarget.hostNodeId == self
+            else -> null
+        }
         val route = RelayController.agentPromptRoute(
             text = body,
             groupId = groupId,
@@ -672,16 +681,24 @@ fun handleSendToGroup(
             localAgentPresent = routeFacts.localAgentPresent,
             remoteAgentPresent = routeFacts.remoteAgentPresent,
             agentKinds = routeFacts.agentKinds,
+            targetHostIsSelf = targetHostIsSelf,
         )
         // §7.2：未唤醒且群里有 agent ⇒ 记一条 NO_WAKE（判据在 logNoWakeIfNeeded 里）。
         RelayController.logNoWakeIfNeeded(
             host.diagnosticLogSink, route, routeFacts.localAgentPresent, routeFacts.remoteAgentPresent, groupId,
         )
-        if (route == AgentPromptRoute.Local) {
+        // **歧义不执行**（§4.2）：同帧点了多个目标（席位+组员 / 两个组员）⇒ 一句可读的
+        // 提示，绝不按 firstOrNull 的字母序随机挑一个。发送者刚打完这句话，本地提示
+        // 就在 ta 的屏幕上（每个成员的发送侧都跑这一段，各自可见）。
+        if (promptTarget is PromptTarget.Ambiguous) {
+            handleNotice(
+                ConvId.group(groupId),
+                NoticeKind.TeamMentionAmbiguous,
+            )
+        } else if (route == AgentPromptRoute.Local) {
             val prompt = RelayController.extractAgentPrompt(body, routeFacts.agentKinds)
             // 与收方触发点同口径：点名事实从原文取，剥 @ 之后的 prompt 里已经没有它。
             val mentionedAgentKey = RelayController.mentionedAgentKeys(body, routeFacts.agentKinds).firstOrNull()
-            val self = host.state.value.selfNodeId
             host.scope.launch {
                 host.onAgentPrompt?.invoke(ConvId.group(groupId), self, prompt, null, mentionedAgentKey)
             }

@@ -24,7 +24,7 @@ class NativeRelayDriver(
     private val aclAllows: (String) -> Boolean = { true },
 ) : AgentDriver {
     override val driverId: String = "native"
-    override val displayName: String = "Native Tidings Driver"
+    override val displayName: String = "Native Tenon Driver"
 
     override suspend fun listCapabilities(): List<DriverCapability> {
         return listOf(

@@ -24,7 +24,7 @@
 
 ## 1. 环境与装置
 
-- 宿主：`/Applications/Tidings.app`，本轮内**重装一次**（含沙箱修复 `4dab6bbd` 的构建，
+- 宿主：`/Applications/Tenon.app`，本轮内**重装一次**（含沙箱修复 `4dab6bbd` 的构建，
   createDistributable + verifyLuciolaNative/verifyPackagedLuciolaNative **71/0 contract 29**，
   lsregister 重注册）；进程 D7（旧）→ D8（新，00:55 起），日志
   `/tmp/e2e-20261105/luciola-host-D7.log` / `-D8.log`。
@@ -96,9 +96,9 @@
 
 ```bash
 # 宿主（本轮 D8 同口径）
-env -u NODE_OPTIONS -u PYTHONPATH -u BASH_ENV -u TIDINGS_LUCIOLA_NATIVE \
-  TIDINGS_LUCIOLA=1 TENON_WEBHOOK_SECRET_E2E_SIGNED=luciola-e2e-hmac-20261105 \
-  /Applications/Tidings.app/Contents/MacOS/Tidings --background
+env -u NODE_OPTIONS -u PYTHONPATH -u BASH_ENV -u TENON_LUCIOLA_NATIVE \
+  TENON_LUCIOLA=1 TENON_WEBHOOK_SECRET_E2E_SIGNED=luciola-e2e-hmac-20261105 \
+  /Applications/Tenon.app/Contents/MacOS/Tenon --background
 
 # 管线各幕（真机模式守门等真人）
 E2E_AGENT_KEY=antigravity E2E_GROUP=e2e-weather \
@@ -115,7 +115,7 @@ E2E_AGENT_KEY=antigravity E2E_GROUP=e2e-weather \
 
 ### 7.1 凭据谜题自助解开（没等用户答复）
 
-全盘 `find` 找到了 11-02 的正路配置：**`~/.tidings-e2e/codex-home/config.toml`**
+全盘 `find` 找到了 11-02 的正路配置：**`~/.tenon-e2e/codex-home/config.toml`**
 （`model = "deepseek-v4.1-flash"`，`model_provider = "opencode-go"` →
 `https://opencode.ai/zen/go/v1`，`env_key = OPENCODE_API_KEY`）。它引用的 key 就是宿主
 env 里已有的那只（产品 opencode 驱动同源），不需要提取任何新凭据 —— 按

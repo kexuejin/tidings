@@ -279,8 +279,8 @@ class AgentCardTypeCoverageTest {
     /**
      * 原型稿第 5 张：`timeout`「GPU 算力回归 · 远程节点超时中断」(relay.html:2254)。
      *
-     * **重要事实**：发射侧没有 `type="timeout"` 的卡 —— `DesktopWorkerWatchdog.kt:284`
-     * 发的是 `type="task-board"` + `state="timeout"`。原型把它画成独立 type，
+     * **重要事实**：发射侧没有 `type="timeout"` 的卡 —— `DesktopWorkerWatchdog.kt`
+     * 的 `OrchestratorCards.timeoutCardJson` 发的是 `type="task-board"` + `state="timeout"`。原型把它画成独立 type，
      * 代码把它收成工单卡的一个终态。本测试按**代码真实形状**构造（task-board + state=timeout），
      * 这才是手机上会到的那一帧；同时钉住降级/重试两个动作。
      */

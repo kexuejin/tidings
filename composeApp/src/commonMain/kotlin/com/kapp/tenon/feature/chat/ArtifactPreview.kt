@@ -33,8 +33,10 @@ import com.kapp.tenon.core.fs.readFileBytes
 import com.kapp.tenon.core.ioDispatcher
 import com.kapp.tenon.generated.resources.Res
 import com.kapp.tenon.generated.resources.card_artifact_preview_close
+import com.kapp.tenon.generated.resources.card_artifact_preview_external_only
 import com.kapp.tenon.generated.resources.card_artifact_preview_failed
 import com.kapp.tenon.generated.resources.card_artifact_preview_kind_diff
+import com.kapp.tenon.generated.resources.card_artifact_preview_kind_html
 import com.kapp.tenon.generated.resources.card_artifact_preview_kind_markdown
 import com.kapp.tenon.generated.resources.card_artifact_preview_kind_text
 import com.kapp.tenon.generated.resources.card_artifact_preview_not_delivered
@@ -53,17 +55,31 @@ import org.jetbrains.compose.resources.stringResource
  * 不是卡片条目自己 —— 卡片只描述「有这么个东西」，文件本体走 file-msg 那条通路。
  * 渲染种类只有三类：Markdown / Diff / 纯文本。其余类型**如实**显示「不可预览」，
  * 不猜、不假装能打开 —— 与「点不动的按钮比没有更糟」是同一条纪律。
+ *
+ * 唯一的例外是 [Kind.Html]（单文件网页原型）：端内没有浏览器引擎，于是它不属于
+ * 「端内渲染」而属于「**交给系统打开**」—— 词表里认它，`opensExternally` 标出来，
+ * 由壳的平台出口（Android `ACTION_VIEW` + FileProvider / 桌面 `Desktop.open` /
+ * iOS Quick Look）真正打开。认不出种类就仍然什么都不给，不放宽成「猜一个应用」。
  */
 object ArtifactPreview {
 
     /** [readFileBytes] 对预览文档的读取上限。 */
     val MAX_PREVIEW_BYTES: Long = com.kapp.tenon.core.fs.MAX_READ_BYTES
 
-    /** 预览的渲染种类。[None] = 端内不渲染（如实显示不可预览）。 */
-    enum class Kind(val titleRes: StringResource?) {
+    /**
+     * 预览的渲染种类。[None] = 端内不渲染（如实显示不可预览）。
+     *
+     * [opensExternally] 为真的种类**不在端内画正文**，而是把落盘路径交给系统应用 ——
+     * 这两条通路的分歧只在壳里发生一次（`CardArtifactRows` 判这一位），
+     * 不散落到每个调用点。
+     */
+    enum class Kind(val titleRes: StringResource?, val opensExternally: Boolean = false) {
         Markdown(Res.string.card_artifact_preview_kind_markdown),
         Diff(Res.string.card_artifact_preview_kind_diff),
         Text(Res.string.card_artifact_preview_kind_text),
+
+        /** 单文件网页原型：端内不渲染，交给系统浏览器。 */
+        Html(Res.string.card_artifact_preview_kind_html, opensExternally = true),
         None(null),
     }
 
@@ -78,10 +94,14 @@ object ArtifactPreview {
     fun kindOf(name: String, mime: String?): Kind = when {
         name.endsWith(".diff") || name.endsWith(".patch") -> Kind.Diff
         name.endsWith(".md") || name.endsWith(".markdown") -> Kind.Markdown
+        // 网页原型排在纯文本之前：`.html` 属于「交给系统打开」，不是「按文本渲染」
+        // （按文本渲染出来的是源码，用户看到一堆标签只会以为原型坏了）。
+        name.endsWith(".html") || name.endsWith(".htm") -> Kind.Html
         name.endsWith(".txt") || name.endsWith(".log") -> Kind.Text
         name.endsWith(".json") -> Kind.Text
         mime == "text/x-diff" -> Kind.Diff
         mime == "text/markdown" -> Kind.Markdown
+        mime == "text/html" -> Kind.Html
         mime == "text/plain" -> Kind.Text
         else -> Kind.None
     }
@@ -117,6 +137,16 @@ object ArtifactPreview {
         savedPath.isNullOrBlank() -> null // 文件行还没落盘：等它到了入口自然出现。
         else -> null
     }
+
+    /**
+     * 卡上的**网页原型条目**（第一个 `.html` / `.htm`）—— 阶段 A 人审入口的锚点。
+     *
+     * 找的是文件名不是固定名（`prototype.html` / `index.html` / 任何 agent 起的名字都行），
+     * 判据只有一条：端内认它是网页。找不到就返回 null —— 卡上没有原型可打开时，
+     * 「在浏览器打开原型」这颗按钮**整颗不画**（不画一颗点了没反应的）。
+     */
+    fun prototypeOf(artifacts: List<AgentCardArtifact>): AgentCardArtifact? =
+        artifacts.firstOrNull { kindOf(it.name, it.mime) == Kind.Html }
 
     /** 预览窗的标题资源：按种类给（Markdown / Diff / 文本），None 无标题。 */
     fun titleResOf(kind: Kind): StringResource? = kind.titleRes
@@ -178,7 +208,8 @@ fun ArtifactPreviewDialog(
                         }
                         Text(
                             text = artifact.name,
-                            style = MaterialTheme.typography.labelSmall,
+                            // 文件名是预览卡的主体内容：11sp 等宽读不全，升 12sp。
+                            style = MaterialTheme.typography.labelMedium,
                             color = MaterialTheme.colorScheme.onSurfaceVariant,
                             fontFamily = FontFamily.Monospace,
                             maxLines = 1,
@@ -204,6 +235,11 @@ fun ArtifactPreviewDialog(
                             .padding(horizontal = LocalAppSpacing.current.md),
                     )
                     kind == ArtifactPreview.Kind.Diff -> DiffPreviewBody(body)
+                    // 防御性分支：Html 由壳交给系统浏览器打开，正常进不到这个弹窗。
+                    // 万一进来了（旧壳自行弹窗），如实说「该去哪儿看」，不按文本渲染源码。
+                    kind == ArtifactPreview.Kind.Html -> PreviewStatusText(
+                        text = stringResource(Res.string.card_artifact_preview_external_only),
+                    )
                     else -> PlainPreviewBody(body)
                 }
             }

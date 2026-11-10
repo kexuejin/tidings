@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
-"""捎话（relay）真机 e2e 夹具共享库。
+"""榫卯（relay）真机 e2e 夹具共享库。
 
 这是 `scripts/relay-screen-fixture.py`（投屏夹具，已在 Pixel 6 上 PASS）的泛化抽取：
 协议编解码、UDP 握手、TCP 分帧、adb 驱动、读数断言，全部照抄那份夹具的线上形状。
@@ -1579,7 +1579,7 @@ def scroll_list_to_top(max_swipes=24):
     #
     # 2026-10-10 group run13 又栽在**判据本身**上：当时的实现是"每 4 拍取一次签名，
     # 签名不再变就认为到顶"，实测 **2/4 次停在真顶之外**（顶首行是 `kexuejin` 而不是
-    # 真顶的 `Tidings Agent`，目标群行恰在其上方一格 ⇒ `open_chat` 三次都报"列表里没有它"，
+    # 真顶的 `Tenon Agent`，目标群行恰在其上方一格 ⇒ `open_chat` 三次都报"列表里没有它"，
     # `group-chat-opens` + `group-inbound-chat-opened` 一起红）。原因是**长列表滑动有惯性
     # 余量**：内容先被推到最底、签名在第 17/18 拍短暂稳定，判据就提前收手了。
     #

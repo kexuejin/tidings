@@ -680,7 +680,7 @@ private fun V2CardArtifactsPhonePreview() {
                         steps = listOf(Triple("打包", "done", null)),
                         banner = "产物已上传" to "success",
                         artifacts = listOf(
-                            Triple("tidings-0.62.0.apk", 52_428_800L, "application/vnd.android.package-archive"),
+                            Triple("tenon-0.62.0.apk", 52_428_800L, "application/vnd.android.package-archive"),
                             Triple("build-report.html", 1_536L, "text/html"),
                             Triple("checksums.txt", 512L, null),
                         ),
@@ -1262,7 +1262,7 @@ private fun V2CardArtifactsDeskPreview() {
                         steps = listOf(Triple("打包", "done", null)),
                         banner = "产物已上传" to "success",
                         artifacts = listOf(
-                            Triple("tidings-0.62.0.apk", 52_428_800L, "application/vnd.android.package-archive"),
+                            Triple("tenon-0.62.0.apk", 52_428_800L, "application/vnd.android.package-archive"),
                             Triple("build-report.html", 1_536L, "text/html"),
                             Triple("checksums.txt", 512L, null),
                         ),

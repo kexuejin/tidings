@@ -184,7 +184,7 @@ public enum class DesktopSettingsNav(
 }
 
 /**
- * 桌面设置独立窗口标题栏。原型 `setTitlebar()` = `<div class="titlebar">…<span class="wtitle">捎话 设置</span></div>`。
+ * 桌面设置独立窗口标题栏。原型 `setTitlebar()` = `<div class="titlebar">…<span class="wtitle">榫卯 设置</span></div>`。
  */
 @Composable
 public fun DesktopSettingsTitleBar(modifier: Modifier = Modifier) {

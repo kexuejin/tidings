@@ -6,7 +6,7 @@
     <string>$(DEVELOPMENT_LANGUAGE)</string>
     <!-- 本工程是中文优先：`project.yml` 的 `options.developmentLanguage: zh-Hans` 把
          DEVELOPMENT_LANGUAGE 定成 zh-Hans（`composeResources/values/strings.xml:2` 的 app_name
-         就是「捎话」，仓库里没有 values-en）。所以下面这两处中文是**开发语言的值**，不是漏翻。
+         就是「榫卯」，仓库里没有 values-en）。所以下面这两处中文是**开发语言的值**，不是漏翻。
          英文设备拿到的英文在 `Resources/en.lproj/InfoPlist.strings` 里；
          `Resources/zh-Hans.lproj/InfoPlist.strings` 是同一份中文的显式副本。
          这两个键都是可在 InfoPlist.strings 里覆盖的，改任何一份都要保持两处一致。 -->

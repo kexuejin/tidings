@@ -1,6 +1,6 @@
 # iOS 顶部留白证据（iPhone 17 Pro 模拟器 00000000-FEF7-409D-AE33-803A77C62376, iOS 26.x, 1206x2622 @3x）
-# 构建: scaffold/iosApp/build/dd/Build/Products/Debug-iphonesimulator/Tidings.app
-#       构建命令 /tmp/relay-xcode.sh -project Tenon.xcodeproj -scheme Tidings -configuration Debug
+# 构建: scaffold/iosApp/build/dd/Build/Products/Debug-iphonesimulator/Tenon.app
+#       构建命令 /tmp/relay-xcode.sh -project Tenon.xcodeproj -scheme Tenon -configuration Debug
 #                 -sdk iphonesimulator -destination 'id=00000000-...' -derivedDataPath build/dd build
 # 取证时间: 2026-10-07 00:05–00:15
 #
@@ -49,7 +49,7 @@ $ adb shell dumpsys window displays | grep mDisplayCutout=
 
 # —— 复现命令 ——
 # $ xcrun simctl install 00000000-FEF7-409D-AE33-803A77C62376 \
-#     scaffold/iosApp/build/dd/Build/Products/Debug-iphonesimulator/Tidings.app
+#     scaffold/iosApp/build/dd/Build/Products/Debug-iphonesimulator/Tenon.app
 # $ xcrun simctl terminate 00000000-... app.relay; xcrun simctl launch 00000000-... app.relay
 # $ xcrun simctl io 00000000-... screenshot /tmp/sim-03.png
 # $ python3 /tmp/topgap.py /tmp/sim-03.png 20 400 120 4

@@ -40,7 +40,7 @@ JAVA_HOME=/opt/homebrew/opt/openjdk@21 ./gradlew :desktopApp:run
 
 ```
 # 宿主面人工验收证据（macOS 15.x, MacBook Pro M?, 内置屏 3024×1964 @2x）
-# 应用: 捎话桌面端, HEAD <sha>
+# 应用: 榫卯桌面端, HEAD <sha>
 # 取证时间: <ISO8601>
 # 输入法: 系统拼音（macOS 自带）, 版本 <…>
 ```
@@ -219,7 +219,7 @@ JAVA_HOME=/opt/homebrew/opt/openjdk@21 ./gradlew :desktopApp:run
 
 ```
 # 宿主面人工验收证据（macOS 15.6, MacBook Pro 14 M3, 内置屏 @2x）
-# 应用: 捎话桌面端, HEAD dd85a83
+# 应用: 榫卯桌面端, HEAD dd85a83
 # 取证时间: 2026-10-07T10:12:00+08:00
 # 输入法: 系统拼音
 

@@ -316,7 +316,10 @@ class TransferLifecycleTest {
             awaitUntil("offer 挂成待接收") { manager.pendingOffers().size == 1 }
 
             manager.accept("t-run")
-            val part = pathJoin(dir, "a.bin", "a.bin.part")
+            // 单文件直落下载根（`transferNeedsFolder`）：从前这里写的是
+            // `dir/a.bin/a.bin.part` —— 那正是「一个只装着自己的目录」，这个断言等于把
+            // 「文件卡指向被套住的那份」的缺陷一起钉进了单测。
+            val part = pathJoin(dir, "a.bin.part")
             awaitUntil("拉取已开写 .part") { fileExists(part) }
             assertTrue(manager.activeIncomingIds().contains("t-run"), "在途拉取必须可被找到")
 

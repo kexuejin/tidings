@@ -34,6 +34,7 @@ import com.kapp.tenon.ui.components.AdaptiveDiagDialog
 import com.kapp.tenon.ui.components.ForwardTargetDialog
 import com.kapp.tenon.ui.components.GroupCreateDialog
 import com.kapp.tenon.ui.components.GroupInfoDialog
+import com.kapp.tenon.ui.components.GroupInfoPage
 import com.kapp.tenon.ui.components.ImageViewerDialog
 import com.kapp.tenon.ui.components.PkPickerDialog
 import com.kapp.tenon.ui.components.RemoteViewSessionDialog
@@ -108,6 +109,36 @@ private fun GroupInfoDialogPhonePreview() {
             onUpdateMeta = { _, _, _ -> },
         )
     }
+}
+
+/**
+ * 群信息的**手机整屏壳**（[GroupInfoPage]）。夹具数据与 dialog-group-info 同一份
+ * —— 两种外壳、一份内容（GroupInfoBody），这一帧钉的是外壳差异本身：顶栏返回 +
+ * 内容铺满 + 危险动作收在滚动末尾，而不是居中弹窗。手机壳实际走的就是这一形态。
+ *
+ * 四个可空闸门全部武装（「不传 = 假图」纪律，同 ChatWorkspaceRunPhonePreview）：
+ * 不传 onLeaveGroup/onDissolveGroup 页脚的动作区整段不画；不传 onExposeWorkspaces
+ * 「授权入口」不画；不传 onSetTeamRoster agent 行的「团队编制」不画。
+ */
+@PreviewTest
+@Preview(name = "page-group-info", widthDp = 393, heightDp = 852, showBackground = true, locale = "zh-rCN")
+@Composable
+private fun GroupInfoPagePhonePreview() {
+    GroupInfoPage(
+        group = desktopPreviewGroupState().settings.groups.first(),
+        selfNodeId = desktopPreviewState().selfNodeId,
+        peers = listOf(linPeer(), zhouPeer(), agentPeer()),
+        memberOnlineCount = 2,
+        onDismiss = {},
+        onAddMembers = {},
+        onRemoveMember = {},
+        onUpdateMeta = { _, _, _ -> },
+        onLeaveGroup = {},
+        onDissolveGroup = {},
+        onExposeWorkspaces = { _ -> },
+        onSetTeamRoster = { _, _ -> },
+        modifier = Modifier.fillMaxSize(),
+    )
 }
 
 // ── 建群（AlertDialog）───────────────────────────────────────────────────────

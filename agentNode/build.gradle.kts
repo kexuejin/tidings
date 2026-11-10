@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: GPL-3.0-only
 
-// Tidings agentNode：本机常驻的 agent 侧节点 + localhost HTTP 控制面。
+// Tenon agentNode：本机常驻的 agent 侧节点 + localhost HTTP 控制面。
 //
 // JVM only。设计要点：agent 完全不碰 IM 协议 ——
 // Codex / Claude 等 agent 那一侧只 POST 到 127.0.0.1:8788，由承载方用 :core 的

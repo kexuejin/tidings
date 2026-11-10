@@ -360,6 +360,38 @@ class StageChainTest {
     }
 
     @Test
+    fun botNameFollowsActiveRunningStageAndTerminalReviewer() {
+        val stages = listOf("编码" to "done", "审查" to "running")
+        val assignees = listOf("claude", "codex")
+        val runningCard = StageChain.cardOf(
+            ChainProgress(
+                chainId = "c123",
+                rev = 2,
+                state = "executing",
+                title = "两棒责任链",
+                currentRole = "审查",
+                stages = stages,
+                assignees = assignees,
+            ),
+        )
+        val runningBot = assertNotNull(runningCard["bot"])
+        assertTrue(runningBot.toString().contains("\"name\":\"codex\""), "第二棒 running 时工牌跟第二棒: $runningBot")
+
+        val readyCard = StageChain.cardOf(
+            ChainProgress(
+                chainId = "c123",
+                rev = 3,
+                state = "review_ready",
+                title = "两棒责任链",
+                stages = listOf("编码" to "done", "审查" to "done"),
+                assignees = assignees,
+            ),
+        )
+        val readyBot = assertNotNull(readyCard["bot"])
+        assertTrue(readyBot.toString().contains("\"name\":\"codex\""), "review_ready 时工牌跟最终审查棒: $readyBot")
+    }
+
+    @Test
     fun checksCarryTheStageWallClockTime() {
         // 原型稿验收清单的「0.6s」式耗时标签：从 StageRun.elapsedMs 来，
         // 审计两条（语法/白名单）共享该棒的耗时；没量（elapsedMs=null）就不写。
@@ -469,6 +501,15 @@ class StageChainTest {
         val card = StageChain.cardOf(p)
         val json = card.toString()
         assertTrue(json.contains("\"actionId\":\"approve-prototype\""), "Must carry approve-prototype action")
+        // 评审入口：没有它，「Approve & Develop」是在看不到原型的情况下点的（盲批）。
+        assertTrue(
+            json.contains("\"actionId\":\"open-prototype\""),
+            "Must carry the open-prototype review entry alongside the approval: $json",
+        )
+        assertTrue(
+            json.contains("\"labelKey\":\"card.action.open_prototype\""),
+            "Review entry must carry a stable label key (label is only a fallback for old shells)",
+        )
         assertTrue(json.contains("Layout A"), "Must carry layout options")
         assertTrue(json.contains("prototype.html"), "Must carry prototype artifact")
         assertTrue(json.contains("text/html"), "Must specify html mime")

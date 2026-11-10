@@ -26,6 +26,7 @@ import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertNotNull
 import kotlin.test.assertTrue
+import com.kapp.tenon.agent.udpTestTransport
 
 /**
  * 宿主侧派单路径（M2-T3）：`POST /v1/plugin/task` 是宿主把任务交给插件的入口
@@ -53,6 +54,7 @@ class PluginDispatchTest {
     fun setUp() {
         scope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
         runtime = NodeRuntime(
+            messengerTransportFactory = udpTestTransport(),
             profile = Profile.mobile(nodeId = newId(), nick = "Plugin Host", host = "relay-host", ver = "relay-0.1.0"),
             udpPort = 0,
             bindHost = ControlPlane.LOOPBACK,

@@ -75,7 +75,9 @@ internal fun AddGroupMembersDialog(
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                     )
                 } else {
-                    LazyColumn(Modifier.heightIn(max = 240.dp)) {
+                    // 高度上限走比例收口（小屏/横屏）：默认档 240dp。
+                    RelayDialogContentHeight(defaultMaxHeight = 240.dp) { cap ->
+                        LazyColumn(Modifier.heightIn(max = cap)) {
                         items(candidates, key = { it.nodeId }) { peer ->
                             Row(
                                 modifier = Modifier
@@ -104,6 +106,7 @@ internal fun AddGroupMembersDialog(
                                 }
                             }
                         }
+                    }
                     }
                 }
             }

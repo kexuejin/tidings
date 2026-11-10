@@ -1,4 +1,4 @@
-# ADR — 捎话 Tidings 的真机缺陷史
+# ADR — 榫卯 Tenon 的真机缺陷史
 
 这份文档记录**在真机上暴露过、且可能被人"顺手改回去"**的决策。
 每条四段式：**症状 → 根因 → 修复 → 为什么不能改回去**。
@@ -112,7 +112,7 @@ JVM 给 `/127.0.0.1:55106`，iOS Native 给 `InetSocketAddress(127.0.0.1:55106)`
 **根因**：快照里 `activeNetwork` 还在，但地址已清空。
 
 **修复**：判据用 `localAddresses` 而非 `NET_CAPABILITY_INTERNET` ——
-Tidings 只走 IPv4 广播/单播，"能上互联网"与"在局域网"不是一回事。
+Tenon 只走 IPv4 广播/单播，"能上互联网"与"在局域网"不是一回事。
 
 **为什么不能改回去**：`NET_CAPABILITY_INTERNET` 是最自然的写法，
 且在大多数情况下给出正确答案。

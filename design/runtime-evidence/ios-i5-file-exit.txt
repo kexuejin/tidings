@@ -14,10 +14,10 @@ I5 原来的结论是「收得到，取不走」：文件确实落盘（I4 文�
 ----------------------------------------------------------------
 - iPhone 17 Pro 模拟器 `00000000-FEF7-409D-AE33-803A77C62376`（iOS 26.2），bundle `app.relay`。
 - 构建：`cd scaffold/iosApp && export JAVA_HOME=/opt/homebrew/opt/openjdk@21 RELAY_MAVEN_MIRROR=aliyun && \
-  xcodebuild -project Tenon.xcodeproj -scheme Tidings -configuration Debug -sdk iphonesimulator \
+  xcodebuild -project Tenon.xcodeproj -scheme Tenon -configuration Debug -sdk iphonesimulator \
   -destination 'platform=iOS Simulator,id=00000000-FEF7-409D-AE33-803A77C62376' -derivedDataPath build/dd build`
   → `** BUILD SUCCEEDED **`（`XCODE_EXIT=0`）。
-- 装：`xcrun simctl install $U .../Tidings.app`；容器 = `xcrun simctl get_app_container $U app.relay data`
+- 装：`xcrun simctl install $U .../Tenon.app`；容器 = `xcrun simctl get_app_container $U app.relay data`
   → `.../Data/Application/64FF5712-9AA3-4EED-BA4C-5CBAD7315A55`
   （**UUID 每次重装都变，必须现查**；写设置时给错容器是本轮之前踩过的坑）。
 - 发送端：证据节点控制面 `http://127.0.0.1:8799`，`Authorization: Bearer $(cat /tmp/relay-ev-token)`。
@@ -73,7 +73,7 @@ I5 原来的结论是「收得到，取不走」：文件确实落盘（I4 文�
           7e58f635f68874953778950e8a5116d99ea14cce669c008933d6c6d9d613f7f4   5104 字节
 
 **⑤ 「不许抛异常」这条契约成立** —— 点完「分享」和「打开」之后进程还在：
-`pgrep -fl 'Tidings.app/Tidings'` → `8732 .../Bundle/Application/EEE72BCF-.../Tidings.app/Tidings`。
+`pgrep -fl 'Tenon.app/Tenon'` → `8732 .../Bundle/Application/EEE72BCF-.../Tenon.app/Tenon`。
 两个动作都没把应用掀掉（`open` 失败时退到分享面板那条路本轮没造出场景，见下）。
 
 仍未覆盖

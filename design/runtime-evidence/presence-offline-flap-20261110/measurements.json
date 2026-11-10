@@ -1,0 +1,153 @@
+{
+  "generated_at": "2026-11-10T17:15+08:00",
+  "issue": "手机顶部「宿主设备睡眠/离线中」横幅 + 点「接收」不生效（上一轮遗留问题第 1 条）",
+  "device": {
+    "serial": "<device-serial>",
+    "model": "Pixel 6",
+    "package": "com.kapp.tenon.debug",
+    "pid_at_observation": 5804
+  },
+  "host": {
+    "nodeId": "46c23456-6e74-4a7c-aab1-20a1d1284cd6",
+    "control_plane": "http://127.0.0.1:8788",
+    "peer_under_test": "25222a45-4b84-4e9a-9870-d13f86b2a8de"
+  },
+  "before_fix": {
+    "idle_flip_sequence": [
+      {
+        "t": "t+25s",
+        "online": true,
+        "linkConnected": true,
+        "lastSeenAgoS": 9.1
+      },
+      {
+        "t": "t+50s",
+        "online": true,
+        "linkConnected": true,
+        "lastSeenAgoS": 34.2
+      },
+      {
+        "t": "t+75s",
+        "online": true,
+        "linkConnected": true,
+        "lastSeenAgoS": 59.2
+      },
+      {
+        "t": "t+115s",
+        "online": false,
+        "linkConnected": true,
+        "lastSeenAgoS": 104.7
+      }
+    ],
+    "flip_log": [
+      "[sweep] offline 25222a45 idle=92245ms link=false",
+      "[sweep] offline 25222a45 idle=97243ms link=false"
+    ],
+    "queue_never_drains": "[flush] peer=3b53ff10 from=44 left=44（每 20 秒一轮，left 不降）",
+    "offline_threshold_ms": 90000,
+    "presence_interval_ms": 30000
+  },
+  "root_cause": [
+    "PeerRegistry.sweep 只看 lastSeen（应用层帧），linkConnected=true 时也可能翻离线",
+    "启用新传输后装的是 SweepOnlyDiscoveryEngine，它的 announce* 全是空实现 —— presenceInterval 无人消费，空闲不发任何帧",
+    "心跳若发 PRESENCE，收端在「已判我方离线 / 没有我方资料」时会拒绝；必须发带全量资料的 ENTRY"
+  ],
+  "fix": {
+    "files": [
+      "core/src/commonMain/kotlin/com/kapp/tenon/core/transport/PeerRegistry.kt",
+      "core/src/commonMain/kotlin/com/kapp/tenon/core/session/NodeRuntime.kt"
+    ],
+    "summary": [
+      "sweep 增加 stillReachable 豁免（链路活着且空闲 < LINK_EXEMPT_MAX_IDLE_MS=10min 不翻面）",
+      "SweepOnlyDiscoveryEngine 增加 heartbeat / stillReachable 注入点，心跳独立协程",
+      "NodeRuntime.sendPresenceHeartbeat 每 presenceInterval 单播 ENTRY（带全量资料）给每个已知节点",
+      "翻面时打 [sweep] offline <id> idle=<ms> link=<bool>，供事后区分「链路读到 false」与「豁免被上界挡住」"
+    ]
+  },
+  "after_fix": {
+    "unit_tests": "core jvmTest 全量 990 / 0 失败 / 32 skip",
+    "real_device_host_side": {
+      "case_link_alive_no_frames": "ago 涨到 91.4s（>90s 阈值）仍 online=true，无新 [sweep] offline 行 —— 豁免生效（修复前 104.7s 必翻）",
+      "case_link_really_down": "翻面仍有：idle=91561ms link=false / idle=96547ms link=false，事后 ago 回落到 9.5s —— 那一刻链路确实不在，豁免不该救"
+    },
+    "real_device_phone_side": "uiautomator 界面文本无「宿主设备睡眠」横幅；在线计数 1/2 人在线（宿主在线）",
+    "unresolved": "本轮未在真机复现手机屏上的横幅（换网/飞行模式/杀宿主都试过），修复既未被证实也未被证伪。另：sweep 豁免只在 link=true 生效（已验）；SweepOnlyDiscoveryEngine 心跳在当前 legacy 配置下不启用（[heartbeat] 0 行）；presenceRound 补发 ENTRY 未观察到效果。",
+    "verification_status": {
+      "sweep 豁免": "单测 + 真机已验证（link=true 时不翻）",
+      "SweepOnlyDiscoveryEngine ENTRY 心跳": "单测通过；真机未验（当前宿主跑 legacy 模式，该引擎未启用）",
+      "Discovery.presenceRound 给离线节点补发 ENTRY": "单测未覆盖；真机未见效果（翻面原因是链路真断）"
+    }
+  },
+  "missing_guard": "尚无自动化判据守「空闲对端不该被判离线」；建议加 peer-idle-stays-online（真机空闲 120s 后 /v1/peers online 仍为 true，且无该 peer 的新 [sweep] offline 行）",
+  "correction_2026_11_10_1745": {
+    "wrong": "前一版把「翻面」解释成链路每 ~100 秒断一次",
+    "why_wrong": "/v1/peers 同时给出 linkCloseCount=0 / linkDialAttempts=0 / linkLastError=null，且 linkSkipReason=peer-has-no-lnk1 —— 链路从没被本端关过、也从不拨号",
+    "correct": "宿主侧 carrier 是间歇的；presence 是单向的（收了不回），所以宿主对手机的 lastSeen 只能靠手机自己发帧（约 110 秒一次）",
+    "direction_confusion": "用户报的是「手机判宿主离线」（ChatScreen.kt:832-840 读 peer(hostId).online），本轮反复测的是「宿主判手机」（/v1/peers）—— 两格被判据混在一起"
+  },
+  "round3_2026_11_10_1810": {
+    "reproduced": true,
+    "sampling": [
+      {
+        "t": "t+0s",
+        "phone_ui": "1/2 人在线 · 无横幅",
+        "host": "online=true link=true ago=38.3s"
+      },
+      {
+        "t": "t+30s",
+        "phone_ui": "1/2 人在线 · 无横幅",
+        "host": "online=true link=true ago=70.6s"
+      },
+      {
+        "t": "t+60s",
+        "phone_ui": "0/2 人在线 · 横幅出现",
+        "host": "online=false link=true ago=103.0s"
+      },
+      {
+        "t": "t+90s",
+        "phone_ui": "1/2 人在线 · 横幅消失",
+        "host": "online=true link=true ago=30.3s"
+      },
+      {
+        "t": "t+150s",
+        "phone_ui": "0/2 人在线 · 横幅出现",
+        "host": "online=true link=true ago=95.2s"
+      }
+    ],
+    "phone_flip_log": [
+      "[sweep] offline 46c23456 idle=96733ms link=false",
+      "[sweep] offline 46c23456 idle=91711ms link=false"
+    ],
+    "root_cause": {
+      "transport_mismatch": "宿主 [xport] 0 行（legacy） vs 手机 [xport] 满屏（安全信道）",
+      "host_to_phone_dead": "手机跑 SweepOnlyDiscoveryEngine，legacy Discovery 未启动 ⇒ 宿主 presence 无人处理；手机侧 [presence] rx 0 行",
+      "phone_to_host_dead": "心跳走 transport.send(ip, udpPort)，会话键却是 ip:tcpPort(17879) ⇒ [heartbeat] entry targets=12 sent=0，全部 [xport] send failed connected=false",
+      "link_is_alive": "手机 diag/link.json: linkConnected=true carrier=plaintext dialFailures=0 closeCount=0；宿主同源 linkConnected=true",
+      "false_offline_from_cap": "[sweep] offline 46c23456 idle=600106ms link=true —— 上一版 10 分钟上界造出来的假离线"
+    },
+    "fix": {
+      "PeerRegistry.sweep": "有活跃链路不翻面，且去掉 10 分钟上界（链路 Ping/Pong 15s + 关闭回调判死；linkCarriers() 实时读会话表）",
+      "sendPresenceHeartbeat": "跳过已有链路的节点（语义多余 + 键不对必然 send failed），只给无链路老对端发 ENTRY",
+      "Discovery.presenceRound": "给已判离线节点补发 ENTRY（保持）",
+      "diagnostics": "[sweep] offline … link=<bool> / [presence] rejected / [presence] rx unknown / [presence] tx 仅在没发全时"
+    },
+    "verified": {
+      "unit": "PeerSweepLinkExemptionTest 1 + LegacyDiscoveryVisibilityTest 8 = 9 条全绿",
+      "device_after_fix": "手机 [sweep] offline 46c23456 = 0 次（换包前同窗口 2 次）；横幅无；宿主 online=true ago=92.3s 仍在线",
+      "criterion_reverse_probe": "4 档：绿/红/红/绿（链路在册 online=false→红；5s 前翻面→红；400s 前翻面→绿）",
+      "dry_run_guards": 27,
+      "idle_soak_10min": {
+        "window": "18:12:27 → 18:22:59（10.5 分钟空闲，跨过旧上界 600s）",
+        "phone_sweep_offline_lines": 0,
+        "phone_banner": "无",
+        "host_view": "online=true link=true ago=54.2s",
+        "criterion": "peer-idle-stays-online = True（peers=12 flips=0）",
+        "caveat": "未构造出「连续 >600s 完全无帧」的确定性场景；旧版正是在 idle=600106ms 翻的面，本窗口已跨过该量级且 0 翻面"
+      }
+    },
+    "not_verified": [
+      "手机侧 presence 接收仍为 0 行；目前靠链路兜住",
+      "无链路的老对端（panda）源地址漂移导致心跳永远被拒，未修"
+    ]
+  }
+}

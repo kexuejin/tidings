@@ -18,6 +18,8 @@ import androidx.compose.foundation.layout.defaultMinSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.combinedClickable
 import androidx.compose.material3.DropdownMenu
@@ -47,6 +49,7 @@ import com.kapp.tenon.ui.components.PeerAvatar
 import com.kapp.tenon.ui.components.StatusDot
 import com.kapp.tenon.ui.components.badgeCountText
 import com.kapp.tenon.ui.components.relativeTime
+import com.kapp.tenon.ui.theme.ComponentSizes
 import com.kapp.tenon.ui.theme.LocalAppSpacing
 import com.kapp.tenon.generated.resources.ic_clock_pending
 import com.kapp.tenon.ui.theme.LocalCardShape
@@ -100,25 +103,38 @@ import com.kapp.tenon.ui.theme.SurfaceTiers
  *
  * ## 为什么是**内缩**而不是通栏
  *
- * 行已经是 12dp 圆角，通栏线会顶到圆角上，视觉上像把行切成两半。
+ * 行已经是圆角行，通栏线会顶到圆角上，视觉上像把行切成两半。
  * 内缩到**文字左沿**（= 水平内边距 + 头像宽 + 图文间距）之后，线与文字对齐 ——
  * 这是 macOS / iOS 列表分隔的常规做法，也和"圆角行 + 间距"这种分组方式相容。
+ *
+ * ## 内缩量随密度走
+ *
+ * 三个组成部分与 [ConversationRow] 同一密度档取**同一批值**：手机档 `.row` 的
+ * 16（水平内边距）/ 48（[ComponentSizes.RowAvatar]）/ 16（图文间距），桌面密集档
+ * `.winset` 的 8 / 24（[ComponentSizes.RowAvatarDense]）/ 8。头像那一段用组件
+ * 尺寸 token、其余用间距 token，各自单占一个修饰符实参 —— **头像宽度不进间距
+ * 算术**：`designScreenDiffGate` 扫的是「间距语境的实参」，尺寸混进算术就说不清
+ * 是哪一个，那个报警是对的。
  *
  * 厚度不写字面量：\`HorizontalDivider\` 的默认 \`thickness\` 就是 1dp（\`DividerDefaults.Thickness\`），
  * 自己写 \`height(1.dp)\` 只会多一处会漂移的尺寸。
  */
 @Composable
-internal fun ConversationListDivider() {
-    HorizontalDivider(
-        // 内缩量用**一个** token（`xxxl`=48，约等于「水平内边距 9 + 头像 32 + 图文间距 10」的 51）。
-        //
-        // 不要写成 `osm9 + xxl + md10`：那会把**头像宽度**塞进一个间距表达式里，
-        // 而 `:designScreenDiffGate` 扫的是「间距语境的实参」—— 它会在该屏的代码取值集合里
-        // 记下一个间距 32，而原型里没有 `padding:…32…`，于是判成"代码写了原型没有的值"。
-        // 那个报警是对的：**尺寸不是间距**，混在算术里就说不清是哪一个。
-        modifier = Modifier.padding(start = LocalAppSpacing.current.xxxl),
-        color = MaterialTheme.colorScheme.outlineVariant,
-    )
+internal fun ConversationListDivider(dense: Boolean = false) {
+    val sp = LocalAppSpacing.current
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(horizontal = if (dense) sp.sm else sp.lg),
+    ) {
+        Spacer(Modifier.width(if (dense) ComponentSizes.RowAvatarDense else ComponentSizes.RowAvatar))
+        HorizontalDivider(
+            modifier = Modifier
+                .weight(1f)
+                .padding(start = if (dense) sp.sm else sp.lg),
+            color = MaterialTheme.colorScheme.outlineVariant,
+        )
+    }
 }
 
 
@@ -226,16 +242,24 @@ private val MutedPreviewWeight = FontWeight.Normal
 private val ActivePreviewWeight = FontWeight.Medium
 
 /**
- * dense 档的行高下限：40dp（原型 .winset .li 的 min-height:40px，prototype/relay.html:1651）。
+ * 行高下限：regular 72dp / dense 40dp。
  *
- * regular 档沿用 sp.xxxl(48) —— 它是间距 token 棘轮里的既有取值（手机帧零变化），
- * 不因本次改造动它。dense 是新开的取值，进的是**壳的度量**语境：与 DesktopMetrics 的
- * 行高类常量同一性质，用具名常量而不是 40.dp 字面量（token 棘轮只许降）。
- * 头像 24dp = IconSizes 里最接近原型 26px 的组合档 —— 头像尺寸与 IconSizes 棘轮同源，
- * 不在行组件里另开一档。
+ * dense 40 = 原型 `.winset .li` 的 `min-height:40px`（prototype/relay.html:1786）。
+ * regular 72 = 手机档 `.row` 的 `padding:12px 16px`（:187）+ `.row.conv .av` 的
+ * 48px 头像（:199）自然撑出的高度；显式写成下限而不是靠内容撑，是为了让单行
+ * 会话（标题+预览两行）与多行会话（群行三行）在同一根基线上对齐。
+ * 两个都是**壳的度量**类取值：与 DesktopMetrics 的行高类常量同一性质，用具名
+ * 常量而不是 `.dp` 字面量（token 棘轮只许降）。
  */
 private val denseRowMinHeight = 40.dp
-private val denseAvatar = IconSizes.Hero - IconSizes.Badge
+private val regularRowMinHeight = 72.dp
+
+/**
+ * dense 档头像：[ComponentSizes.RowAvatarDense]（24dp，原型 `.winset .li .fi2` 26px
+ * 的最近整档）。不再用 `IconSizes` 档相减拼 —— 那条算式（30−11）算出来是 19，
+ * 与注释声称的 24 从来没对上过。
+ */
+private val denseAvatar = ComponentSizes.RowAvatarDense
 
 
 /**
@@ -311,7 +335,8 @@ internal fun ConversationRow(
      * `.winset .li{min-height:40px;padding:5px 8px;gap:8px}`（:1651）与
      * `.winset .li .t1{font-size:12px}`（:1654）—— 原型注释自己写着「设置窗的左栏
      * 排得比会话列表密」。三处取值：min-height 52→40、padding 9×7→8×5、
-     * 标题 14→12px；头像用最小的 [IconSizes] 档（24dp），图文间距并入同一档。
+     * 标题 14→12px；头像取 [ComponentSizes.RowAvatarDense]（24dp，`.winset .li .fi2`
+     * 26px 的最近整档），图文间距并入同一档。
      */
     dense: Boolean = false,
     /**
@@ -449,10 +474,11 @@ internal fun ConversationRow(
             } else null,
         )
 
-    // 密度分派（原型 .winset .li，见 dense 参数 KDoc）：三处取值、一个布尔，没有第二个行实现。
-    val rowMinHeight = if (dense) denseRowMinHeight else sp.xxxl
-    val avatarSize = if (dense) denseAvatar else sp.xxl
-    val rowGap = if (dense) sp.sm else sp.md10
+    // 密度分派：三处取值、一个布尔，没有第二个行实现。regular 取手机档 `.row`（见
+    // 上面常量与 ComponentSizes 的 KDoc），dense 取桌面密集档 `.winset .li`。
+    val rowMinHeight = if (dense) denseRowMinHeight else regularRowMinHeight
+    val avatarSize = if (dense) denseAvatar else ComponentSizes.RowAvatar
+    val rowGap = if (dense) sp.sm else sp.lg
 
     Box(
         modifier = modifier.defaultMinSize(minHeight = rowMinHeight),
@@ -460,13 +486,15 @@ internal fun ConversationRow(
         Row(
             modifier = Modifier
                 .fillMaxWidth()
-                .padding(horizontal = if (dense) sp.sm else sp.osm9, vertical = if (dense) sp.oxs5 else sp.osm7),
+                .padding(horizontal = if (dense) sp.sm else sp.lg, vertical = if (dense) sp.oxs5 else sp.md),
             verticalAlignment = Alignment.CenterVertically,
             horizontalArrangement = Arrangement.spacedBy(rowGap),
         ) {
-        // 头像 32dp（dense 24dp）+ 圆角 12（原型 `.li .av{width:32px;height:32px;border-radius:12px}`；
-        // 密集档 `.winset .li .fi2` 是 26px，代码取 [IconSizes] 最接近的 24 档）。
-        // 会话行是原型里**唯一**用方形头像的地方。
+        // 头像：手机档 48dp **正圆**（原型手机屏 `.row.conv .av` 继承 `.av` 基类的
+        // `border-radius:50%`），桌面密集档 24dp 圆角方块（`.winset .li .fi2` 是 8px
+        // 圆角的图标块）。此前注释说"会话行是原型里唯一用方形头像的地方"——那是
+        // 桌面侧栏 `.li` 的形状（12px 圆角方块）；同一份原型里手机屏的会话行从来
+        // 都是正圆。合并行时把桌面形状带给了手机，与"头像偏小"是同一次反馈的两面。
         Box {
             PeerAvatar(
                 name = row.title,
@@ -474,23 +502,25 @@ internal fun ConversationRow(
                 size = avatarSize,
                 isGroup = row.isGroup,
                 avatar = row.avatar,
-                shape = MaterialTheme.shapes.medium,
+                shape = if (dense) MaterialTheme.shapes.medium else CircleShape,
             )
             // 群不画那个圆点：它表达的是"这一个对端在不在"，而群是一群人。
             // 硬画的结果是每个群都显示离线（`ConversationUi.online` 对群恒 false），
             // 用户会以为群废了。成员数在下面那行用字说清楚。
             if (!row.isGroup) {
-                // 原型 `.li .av .p{width:10px;height:10px;border:2px solid var(--bg)}`
-                // —— 点外面有一圈底色，把它从头像上"抠"出来。
+                // 点外面有一圈底色，把它从头像上"抠"出来。容器手机档 14dp（原型手机屏
+                // `.av .p{width:14px}` —— 注释原话「一块 14dp 的 surface 垫在点下面」），
+                // dense 沿用 [IconSizes.Badge]：24dp 头像上 14dp 的圈会盖掉一半。
+                val dotBox = if (dense) IconSizes.Badge else IconSizes.Inline
                 Box(
                     modifier = Modifier
                         .align(Alignment.BottomEnd)
-                        .size(IconSizes.Badge)
+                        .size(dotBox)
                         .background(MaterialTheme.colorScheme.background, CircleShape)
                         .padding(sp.xxs),
                     contentAlignment = Alignment.Center,
                 ) {
-                    StatusDot(row.online, size = IconSizes.Badge - sp.xxs - sp.xxs)
+                    StatusDot(row.online, size = dotBox - sp.xxs - sp.xxs)
                 }
             }
         }

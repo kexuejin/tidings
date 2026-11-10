@@ -1,0 +1,60 @@
+{
+  "generated_at": "2026-11-10T06:14:36.646198+00:00",
+  "tier": "real",
+  "stage": "current",
+  "anchor": "",
+  "source": "/Users/ci/weather-relay",
+  "run_label": "single",
+  "workspace": "/Users/ci/weather-relay",
+  "host": "http://127.0.0.1:8788",
+  "agents": [
+    {
+      "key": "dsh",
+      "cli": "dsh",
+      "role": "worker"
+    }
+  ],
+  "base_head": "",
+  "base_tests": {},
+  "device_commits": [],
+  "created_files": [],
+  "environment": {
+    "python": "3.13.12",
+    "dsh": "/opt/homebrew/bin/dsh",
+    "opencode": "/Users/ci/.opencode/bin/opencode",
+    "adb": "/Users/ci/Library/Android/sdk/platform-tools/adb"
+  },
+  "acts": [
+    {
+      "act_id": "a2r",
+      "title": "原型可评审（人审守门）",
+      "chain": "orchestrator",
+      "status": "FAIL",
+      "verdicts": [
+        {
+          "name": "prototype-card-delivered",
+          "ok": false,
+          "detail": "conv=group:1811f2d5-61a3-4d15-aae9-c21c764c61d0 卡片库命中 0 张带已投递网页原型的卡"
+        },
+        {
+          "name": "prototype-preview-entry-tested",
+          "ok": true,
+          "detail": "gradle :composeApp:jvmTest 通过（路由与入口判据）"
+        },
+        {
+          "name": "prototype-opened-in-browser",
+          "ok": false,
+          "detail": "90s 内前台不是浏览器（最后读到：com.kapp.tenon.debug）；超时按失败计，不跳过"
+        }
+      ],
+      "evidence": {
+        "group": "1811f2d5-61a3-4d15-aae9-c21c764c61d0",
+        "cards": 0,
+        "foreground": [
+          "dumpsys activity activities"
+        ]
+      },
+      "seconds": 94.92
+    }
+  ]
+}

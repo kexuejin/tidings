@@ -21,8 +21,8 @@ L0 判定（交付口径）
   1) designConvergeGate：插件管理原型段 .plg-ico 引入 15px（第 18 种）→ 收敛到同族
      .av 的 16px 档（CSS 规则 + JS 回退两处）；基线 sha 随源版本重投影
      （534b750f→d80eef84→08e48f43，--baseline --reason 有记）。
-  2) designDupFrameGate：122 组重复参考图全部是 com/kapp/tidings 旧包名遗留的
-     gitignored 本地产物（现测试源只产 tenon 包）→ 删除 tidings 残树 308 文件，
+  2) designDupFrameGate：122 组重复参考图全部是 com/kapp/tenon 旧包名遗留的
+     gitignored 本地产物（现测试源只产 tenon 包）→ 删除 tenon 残树 308 文件，
      复跑 313 张两两互异。
   3) designDpDebtGate：账本为生成物，D9–D11 改动后脱钩 → :designDpDebtReport 重生成一致。
 - icon-map 有警示（消费率 86.7%→92.7%，symbol lock 被复用）不拦：属插件管理原型段

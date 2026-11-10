@@ -339,4 +339,16 @@ sealed interface BannerMessage {
      * 那个槽位属于**整张目录列表**（浏览失败），一次下载被拒不该把列表顶成错误态。
      */
     data object CabinetDownloadDenied : BannerMessage
+
+    /**
+     * 加密传输**没能装配起来**：平台没接线宿主，或原生库没加载成功。
+     *
+     * 为什么必须报，而不是像以前那样静默跑明文：`experimentalLuciola` 开关与桌面的
+     * `TENON_LUCIOLA` 门都删掉之后，luciola 是**唯一**的传输形态；装配失败意味着这台设备
+     * 无法与任何人通信。用户能做的只有重装/检查安装完整性，所以文案要说「不可用」，
+     * 而不是含糊的「连接失败」—— 后者会把用户引向查网络。
+     *
+     * @param reason `platform` = 平台层没提供宿主（接线缺陷）；`native` = 原生库缺失/版本不符。
+     */
+    data class LuciolaUnavailable(val reason: String) : BannerMessage
 }

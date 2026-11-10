@@ -1,4 +1,4 @@
-/* Tidings — 简体中文，与 `Info.plist` 里的 development language 值逐字一致。
+/* Tenon — 简体中文，与 `Info.plist` 里的 development language 值逐字一致。
  *
  * 看起来是重复：`project.yml` 的 `options.developmentLanguage: zh-Hans` 已经把
  * `Info.plist` 的字面值定成中文，不写这个文件也同样是中文。

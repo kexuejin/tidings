@@ -48,7 +48,7 @@ internal fun JsonElement.jsonPrimitiveOrNull(): JsonPrimitive? =
  * 安全模型（默认按最保守解释）：只绑 `127.0.0.1`，不监听任何外部网卡。默认**不要求**
  * token —— 回环上的进程本来就与你有同等权限，加一个默认 token 只会变成"必须手写配置
  * 文件"（用户明确拒绝过这种形态）。一旦 `--token` 或 `RELAY_AGENT_TOKEN` 提供了值，
- * 则每个请求都必须带 `Authorization: Bearer <token>` 或 `X-Tidings-Token: <token>`。
+ * 则每个请求都必须带 `Authorization: Bearer <token>` 或 `X-Tenon-Token: <token>`。
  *
  * 路由：
  *  - `GET  /`                 用法说明（给人看的）
@@ -117,7 +117,7 @@ class ControlPlane(
     /**
      * `/v1/inbox` 的注入判定附加信息。null = 不提供（纯聊天用途，行为与改动前一致）。
      *
-     * 为什么要由 Tidings 侧注入：判据（`shouldTriggerAgent`）只有一份，它在 composeApp 里、
+     * 为什么要由 Tenon 侧注入：判据（`shouldTriggerAgent`）只有一份，它在 composeApp 里、
      * 依赖 `settings.groups` 与 `agentWorkspaces`，agentNode 拿不到。让桥接侧自己再判一次
      * 会让两边慢慢分叉，最终是「手机上显示已 @、宿主没执行」的静默（AGENTS §2.4）。
      */
@@ -569,7 +569,7 @@ class ControlPlane(
         if (token.isEmpty()) return true
         val bearer = exchange.requestHeaders.getFirst("Authorization")
         if (bearer != null && bearer.removePrefix("Bearer ").trim() == token) return true
-        return exchange.requestHeaders.getFirst("X-Tidings-Token") == token
+        return exchange.requestHeaders.getFirst("X-Tenon-Token") == token
     }
     // ---------------------------------------------------------------- helpers
 
@@ -578,12 +578,12 @@ class ControlPlane(
      *
      * ## 为什么需要它
      *
-     * 桌面端设置页里那张「捎话」卡片跑在浏览器里（DSH 的 Web GUI，端口每次启动都变）。
-     * 它要判断「本机捎话桌面端在不在」，最直接的办法就是问 `127.0.0.1:8788/healthz`。
+     * 桌面端设置页里那张「榫卯」卡片跑在浏览器里（DSH 的 Web GUI，端口每次启动都变）。
+     * 它要判断「本机榫卯桌面端在不在」，最直接的办法就是问 `127.0.0.1:8788/healthz`。
      * 但那是**另一个端口** ⇒ 跨域，浏览器不给读响应，除非我们回一个允许的 Origin。
      *
      * 在这之前，卡片只能绕经 DSH 的插件 RPC；而那条通道在桌面端宿主上挂不起来，
-     * 于是卡片把「我读不到」显示成「未检测到捎话桌面端」—— 桌面端明明在跑。
+     * 于是卡片把「我读不到」显示成「未检测到榫卯桌面端」—— 桌面端明明在跑。
      *
      * ## 边界（这是安全取舍，别放宽）
      *

@@ -65,7 +65,7 @@ adb shell svc power stayon usb；e2e_agent.py --dry-run 自检 27 条全绿。
 
 【10】首案改判：不是业务层静默丢弃，是设备上有两代应用
 手机 DB（databases/relay.db，注意 messages.log 是桌面端产物，手机判落库
-  必须看 DB）全空但宿主拿到 ACK → ps 发现 com.kapp.tidings.debug（旧品牌
+  必须看 DB）全空但宿主拿到 ACK → ps 发现 com.kapp.tenon.debug（旧品牌
   应用，10-26 装、11-05 更新）与 com.kapp.tenon.debug 并存 —— 两代应用共享
   同一 IP 与 17878，宿主 UDP 投递被旧应用抢收并 ACK（trust 账本的
   e4bd7b99、"Pixel 6-e4bd7b" 都是它；/v1/peers 的两条 "Pixel 6" 就是两代）。
@@ -111,7 +111,7 @@ adb shell svc power stayon usb；e2e_agent.py --dry-run 自检 27 条全绿。
   a) 控制面直发的审批是「过路」帧：宿主无挂起台账可关联，ack 对不上账，
      免批表不写。**免批闭环要走 hook/插件路径（带关联 ID）** —— A26 的
      最后一块，下轮补；
-  b) com.kapp.tidings.debug 未卸载（待用户决定）；
+  b) com.kapp.tenon.debug 未卸载（待用户决定）；
   c) Wi-Fi 隔离漂移 —— 稳定测试以「当下探针」为准。
 
 【14】★ A26 卡片闭环：审批关联闭环 ×2 + 免批表闭环 + 深色样张（全 ✅）

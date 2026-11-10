@@ -27,7 +27,7 @@ import kotlinx.coroutines.runBlocking
  *
  * 审阅卡上一直写着「产物：patch.diff，N 字节」，而那个文件**从没离开过宿主本机** ——
  * 补丁躺在沙箱收割目录里，手机上那一行只是一段描述。计划书 §6.3 的判据是
- * 「通过 Tidings 本地 P2P 文件传输通道直接投递至移动端」，在此之前这句话没有落点。
+ * 「通过 Tenon 本地 P2P 文件传输通道直接投递至移动端」，在此之前这句话没有落点。
  *
  * ## 为什么必须用两个真节点
  *
@@ -49,7 +49,7 @@ class OfflinePatchBundleTest {
 
     private val scope = CoroutineScope(Job())
 
-    private val root: File = Files.createTempDirectory("tidings-offline-bundle").toFile()
+    private val root: File = Files.createTempDirectory("tenon-offline-bundle").toFile()
 
     @AfterTest
     fun tearDown() {

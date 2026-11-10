@@ -26,6 +26,7 @@ import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertNotNull
 import kotlin.test.assertTrue
+import com.kapp.tenon.agent.udpTestTransport
 
 /**
  * **Layer 3 · 插件宿主网关回环**（方案 §8）：整条生命周期在**一个进程内**走通 ——
@@ -55,6 +56,7 @@ class Layer3PluginGatewayLoopTest {
     fun setUp() {
         scope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
         runtime = NodeRuntime(
+            messengerTransportFactory = udpTestTransport(),
             profile = Profile.mobile(nodeId = newId(), nick = "Layer3 Host", host = "relay-host", ver = "relay-0.1.0"),
             udpPort = 0,
             bindHost = ControlPlane.LOOPBACK,

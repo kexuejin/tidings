@@ -1,0 +1,116 @@
+{
+  "session": "prototype-review-live-20261110",
+  "phone": "<device-serial>",
+  "group": "group:1811f2d5-61a3-4d15-aae9-c21c764c61d0",
+  "group_name": "teahouse-mobile 协同群",
+  "route": "chain-* (task-board)",
+  "ticket": "chain-tmwaa019b",
+  "sandbox": "/tmp/tenon-ws/t-1-5d697c37",
+  "host_patch": {
+    "path": "/tmp/tenon-ws/artifacts/t-1-5d697c37/patch.diff",
+    "bytes": 52049,
+    "added": 1970,
+    "files": [
+      "prototype.html"
+    ],
+    "sha256": "b5be38ecc7326615976fb3a309f5f9b6c903bffcb5be733f9768b09ff66ab267",
+    "content_marker": "Atmos — a calm, clear weather dashboard"
+  },
+  "phone_files": [
+    {
+      "name": "prototype.html",
+      "bytes": 21356,
+      "content": "tinct — a small color study",
+      "is_this_run": false
+    },
+    {
+      "name": "prototype(1).html",
+      "bytes": 16825,
+      "content": "three-item task checklist",
+      "is_this_run": false
+    },
+    {
+      "name": "prototype(2).html",
+      "bytes": 49934,
+      "content": "Atmos weather dashboard",
+      "is_this_run": true
+    }
+  ],
+  "opened": {
+    "foreground": "com.android.chrome",
+    "is_browser": true,
+    "opened_file": "prototype.html (21356B, wrong one)"
+  },
+  "card_rev": {
+    "table_high_water": 4,
+    "message_card_json_rev": 1,
+    "message_card_payload_rev": 4,
+    "message_card_json_state": "proposed",
+    "message_card_payload_state": "prototype",
+    "message_card_json_has_artifacts": false,
+    "message_card_payload_artifacts": [
+      {
+        "name": "prototype.html",
+        "delivered": true
+      }
+    ],
+    "reading_note": "card_json 是首帧锚（按设计永不刷新），card_payload 才是最新载荷。原始记录只读了 card_json，因此把「按设计的分工」误读成「卡片没落库」。"
+  },
+  "usage": {
+    "inputTokens": 97225,
+    "outputTokens": 64475,
+    "billable": 161700,
+    "cacheReadTokens": 3709824,
+    "cache_hit_pct": 95.8,
+    "context_peak": 98475
+  },
+  "verdicts_a2r": [
+    [
+      "prototype-card-delivered",
+      "FAIL",
+      "card store has 0 delivered html cards"
+    ],
+    [
+      "prototype-preview-entry-tested",
+      "ok",
+      "composeApp jvmTest passed"
+    ],
+    [
+      "prototype-opened-in-browser",
+      "FAIL",
+      "nobody tapped within 90s window"
+    ]
+  ],
+  "main_repo": {
+    "baseline_dirty": 272,
+    "after_dirty": 278,
+    "attributed_to_this_run": false,
+    "reason": "task.log has 0 occurrences of main repo absolute path; prototype/weather/index.html is 652 lines vs patch 1970 lines"
+  },
+  "corrections": {
+    "at": "2026-11-10T14:20+08:00",
+    "defect_two": {
+      "was": "卡片演进不落库（假缺陷）",
+      "is": "判据只读了 card_json 首帧锚；演进落在 card_payload 且完好",
+      "host_db_counts": {
+        "delivered_true_card_json": 0,
+        "delivered_true_card_payload": 32,
+        "decidedActionId_card_json": 4,
+        "decidedActionId_card_payload": 46
+      }
+    },
+    "defect_one": {
+      "root_cause_primary": "artifactSavedPathOf 用 firstOrNull 取整条会话里第一条同名文件行（永远是最旧那份）",
+      "root_cause_secondary": "单文件入站被套进与自己同名的目录：<downloads>/<name>/<name>",
+      "evidence": "prototype(2).html 49934B 的 sha256 与 patch.diff 重建字节完全一致"
+    },
+    "fixed": [
+      "scripts/sdlc-lifecycle.py: cards_since 读 coalesce(card_payload, card_json) + 读侧自检",
+      "scripts/sdlc-compare.py: card_metrics 同一条表达式（rev/state 读数不再恒为 1/proposed）",
+      "scripts/e2e-team-pipeline.py: cards_since 同上（已决记录不再漏 46→4）",
+      "core TransferManager/TransferClient: transferNeedsFolder（单文件直落下载根）",
+      "composeApp artifactSavedPathOf: 加 sinceAt，取卡之后最早投递，绝不取最旧",
+      "a2r 第 4 条判据 prototype-artifact-bytes-landed（sha256 逐字节比对）"
+    ]
+  }
+}

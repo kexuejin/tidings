@@ -97,14 +97,14 @@ object OpenCodeConfig {
         appendLine("  \"provider\": {")
         appendLine("    " + quote(PROVIDER_ID) + ": {")
         appendLine("      \"npm\": " + quote(PROVIDER_NPM) + ",")
-        appendLine("      \"name\": \"Tidings gateway\",")
+        appendLine("      \"name\": \"Tenon gateway\",")
         appendLine("      \"options\": {")
         // 占位而不是值：密钥只走子进程环境，本文件零密文。
         appendLine("        \"apiKey\": \"{env:OPENCODE_API_KEY}\",")
         appendLine("        \"baseURL\": " + quote(baseUrl) + ",")
         appendLine("        \"headers\": { \"" + SESSION_HEADER + "\": \"" + SESSION_HEADER_VALUE + "\" }")
         appendLine("      },")
-        // 自建 provider 必须显式声明模型清单，否则 opencode 认不出 `tidings/<id>`。
+        // 自建 provider 必须显式声明模型清单，否则 opencode 认不出 `tenon/<id>`。
         appendLine(
             "      \"models\": { " + quote(modelId ?: "placeholder") + ": { \"name\": " +
                 quote(modelId ?: "placeholder") + " } }",

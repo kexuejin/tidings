@@ -1,4 +1,4 @@
-# `scripts/e2e/` —— 捎话真机 e2e 夹具
+# `scripts/e2e/` —— 榫卯真机 e2e 夹具
 
 这套夹具回答的问题是单测回答不了的那个：**在真手机 + 真对端这一层，功能是不是真的通了。**
 背景与来由写在 `docs/plans/2026-10-09-relay-e2e-fixture-program.md`；

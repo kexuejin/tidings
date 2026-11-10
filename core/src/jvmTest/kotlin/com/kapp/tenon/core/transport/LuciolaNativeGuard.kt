@@ -13,16 +13,16 @@ import java.io.File
  * 症状是红的，根因是环境，而且**报错里没有一个字告诉你「去设 TENON_LUCIOLA_NATIVE」**。
  *
  * 所以这里把两件事分开，与仓库的「没验到 ≠ 验坏了」同口径：
- *  - **没配**（`tidings.luciola.nativeDir` 为空）⇒ 跳过，并把「怎么配」打印出来；
+ *  - **没配**（`tenon.luciola.nativeDir` 为空）⇒ 跳过，并把「怎么配」打印出来；
  *  - **配了却没有/用不了** ⇒ **失败**（不能因为「配错了」就变成跳过，那等于把配置错误藏起来）。
  *
- * 构建侧（`core/build.gradle.kts`）负责解析目录并写入 `tidings.luciola.nativeDir`。
+ * 构建侧（`core/build.gradle.kts`）负责解析目录并写入 `tenon.luciola.nativeDir`。
  */
 object LuciolaNativeGuard {
 
     /** Gradle 解析到的目录；未解析到时为空串。 */
     private val configuredDir: String? =
-        System.getProperty("tidings.luciola.nativeDir")?.takeIf { it.isNotBlank() }
+        System.getProperty("tenon.luciola.nativeDir")?.takeIf { it.isNotBlank() }
 
     private val libNames = listOf(
         "libluciola_uniffi.dylib", "libluciola_uniffi.so", "luciola_uniffi.dll",

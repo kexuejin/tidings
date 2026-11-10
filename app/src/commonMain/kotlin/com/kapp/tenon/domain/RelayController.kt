@@ -35,7 +35,9 @@ import com.kapp.tenon.core.transport.PeerEndpoint
 import com.kapp.tenon.core.transport.SYNTHETIC_NICK_PREFIX
 import com.kapp.tenon.core.transport.PeerEvent
 import com.kapp.tenon.core.transport.PeerRecord
+import com.kapp.tenon.core.transport.PeerRegistry
 import com.kapp.tenon.core.transport.SendOutcome
+import com.kapp.tenon.core.transport.UnavailableTransport
 import com.kapp.tenon.core.transport.TransferEvent
 import com.kapp.tenon.core.transport.dedupLogPath
 import com.kapp.tenon.core.transport.linkDiagnosticsJson
@@ -635,7 +637,6 @@ class RelayController(
 
     // ------------------------------------------------------------------ 委托动作：设置
     fun updatePersistMessages(enabled: Boolean) = settingsCtl.handleUpdatePersistMessages(enabled)
-    fun updateExperimentalLuciola(enabled: Boolean) = settingsCtl.handleUpdateExperimentalLuciola(enabled)
     fun updateThemeMode(wire: String) = settingsCtl.handleUpdateThemeMode(wire)
     fun updateWaitFrameCapability(enabled: Boolean) = settingsCtl.handleUpdateWaitFrameCapability(enabled)
     fun updateRecordMessageCapability(enabled: Boolean) = settingsCtl.handleUpdateRecordMessageCapability(enabled)
@@ -863,6 +864,11 @@ class RelayController(
     /** 团队编制：保存 / 关闭某席位的团队（见 [handleSetGroupTeamDeclaration]）。 */
     override fun setGroupTeamDeclaration(groupId: String, defaultWsId: String, roster: List<TeamMemberDraft>?) =
         groupsCtl.run { handleSetGroupTeamDeclaration(groupId, defaultWsId, roster) }
+
+    /** 团队执行档端口：invokeCtl 同字段（DesktopExtension 装配 DesktopTeamExecutionPort）。 */
+    override var teamExecutionPort: TeamExecutionPort?
+        get() = invokeCtl.teamExecutionPort
+        set(value) { invokeCtl.teamExecutionPort = value }
     /**
      * 打开某条会话时把它标为已读。
      *
@@ -1226,6 +1232,14 @@ class RelayController(
     }
 
     /**
+     * 以指定 agent 身份向群广播一条发言文本（P0b 拟人化交棒发言等）。
+     * 本地先落库再发帧，senderId 严格为 AgentSenderId.of(selfNodeId, agentId)。
+     */
+    suspend fun broadcastAgentSpeech(groupId: String, agentId: String, text: String) {
+        invokeCtl.broadcastAgentSpeech(groupId, agentId, text)
+    }
+
+    /**
      * 在会话里落一条**系统提示行**（不是聊天气泡）。
      *
      * 给壳层用的公开入口：`groupsCtl` 是 `internal`（跨模块不可见），而「系统要解释
@@ -1345,17 +1359,30 @@ class RelayController(
             // 承载 agent 节点的宿主（桌面端）在此广播 `ag1`；手机端恒 false。
             advertiseAgent = advertiseAgent,
         )
-        // 实验:luciola 传输。**两件齐了才切** —— 只给加密信道不给发现,或有发现没
-        // 加密信道,都比 legacy 更糟;缺一件就整体退回 legacy。
-        // 设置项是**唯一**的用户开关（实验信道默认关）；关着时连工厂都不建,
-        // 出码点拿不到 luciola 段 ⇒ 二维码一字不变。
-        val luciolaHost = platform.luciolaHost.takeIf { settings.experimentalLuciola }
-        luciolaHost?.configure(profile, settings.udpPort)
-        val luciolaTransport = luciolaHost?.transportFactory()
-        val luciolaDiscovery = luciolaHost?.discoveryFactory()
+        // luciola 传输。**没有开关**：这是唯一的传输形态。
+        // 曾经这里是 `takeIf { settings.experimentalLuciola }`，与桌面侧的 `TENON_LUCIOLA`
+        // 各自独立 —— 手机开、桌面没开时，消息能通（都回落明文 UDP），在线状态却互相骗人。
+        // 现在两件（加密信道 + 发现）缺任何一件都不是「退回 legacy」，而是明确的错误：
+        // legacy 传输已从 NodeRuntime 移除。
+        val luciolaHost = platform.luciolaHost
+        // 装配失败（原生库缺失/版本不符）不能把整条启动路径带走：包住它，让下面统一报横幅。
+        // 以前这条路径外面有 legacy 兜底，失败无声无息；现在没有兜底了，失败必须可见。
+        val luciolaConfigured = runCatching { luciolaHost?.configure(profile, settings.udpPort) }.isSuccess
+        val luciolaTransport = if (luciolaConfigured) luciolaHost?.transportFactory() else null
+        val luciolaDiscovery = if (luciolaConfigured) luciolaHost?.discoveryFactory() else null
         // 发现引擎的 extra 必须用运行时 selfProfile(含 luciolaPort):工厂构造时的静态
         // profile 没有那个字段,对端会拿发现临时端口来拨号(真机实测拨错)。
-        val luciolaMode = luciolaTransport != null && luciolaDiscovery != null
+        // 判据只看**传输工厂**：它是必需的那一半。
+        //
+        // 额外发现引擎（luciola 信标）是可选的增强 —— `NodeRuntime` 自带 sweep + 定向心跳，
+        // 入站 entry/alive/presence 由 `PresenceIngest` 登记，所以拿不到信标引擎不等于
+        // 不能通信。曾经的判据是「两件都非空」，那是 legacy 时代的产物：那时没有工厂就
+        // 整条回退明文，缺一半比 legacy 还糟。现在没有回退路径，判据该跟着事实走。
+        val luciolaMode = luciolaTransport != null
+        // 平台没接线 / 原生库没起来 —— 不能再静默跑明文：给它一条用户看得见的横幅。
+        if (!luciolaMode) {
+            warn(BannerMessage.LuciolaUnavailable(if (luciolaHost == null) "platform" else "native"))
+        }
         // 画面信道：独立一条 luciola 会话，端口取「发现端口 + 10」——
         // 刻意避开 legacy 的三兄弟（+1 tcp、+2 tls、+3/+2 跨网文件与投屏），
         // 也避开 17879/17881/17882（luciola 模式下这三个不许再出现在 lsof 里）。
@@ -1393,8 +1420,10 @@ class RelayController(
             advertiseAgent = advertiseAgent,
             channelCapable = !advertiseAgent,
         )
+        // profile 变了要重配（身份/端口不变，但工厂持有 profile 快照）；失败同上，别带走启动。
         if (luciolaMode) {
-            luciolaHost?.configure(profile, settings.udpPort)
+            runCatching { luciolaHost?.configure(profile, settings.udpPort) }
+                .onFailure { warn(BannerMessage.LuciolaUnavailable("native")) }
         }
         val rt = NodeRuntime(
             profile = profile,
@@ -1450,11 +1479,12 @@ class RelayController(
             // 手动节点是**地址**便条（ManualPeerEntry 只有 host:port，没有 nodeId），
             // 不在此列 —— 被剪的旧身份再出现时发现流程原样学回来，地址便条不受影响。
             keepNode = { nodeId -> _state.value.settings.groups.any { nodeId in it.members } },
-            // 实验:luciola 传输与发现（两件都非空才生效,见上面 luciolaMode）。
-            messengerTransportFactory = luciolaTransport.takeIf { luciolaMode },
-            extraDiscoveryFactory = luciolaDiscovery.takeIf { luciolaMode },
-            // 文件字节走加密信道（fch1）：**只有**实验信道启用时才建路由器。
-            // 关着 = null ⇒ TransferManager 照旧拨号拉取，行为一字不变。
+            // luciola 传输与发现。装配失败时给一条**死路**（UnavailableTransport）而不是
+            // legacy 明文：节点照旧起来（历史/设置可用），横幅说明通信不可用。
+            messengerTransportFactory = luciolaTransport
+                ?: { _: PeerRegistry -> UnavailableTransport("luciola-unavailable") },
+            extraDiscoveryFactory = luciolaDiscovery,
+            // 文件字节走加密信道（fch1）：只有加密信道真的起来时才建路由器。
             fileChannelEnabled = luciolaMode,
             screenChannelHostFactory = screenChannelHostFactory,
             screenChannelPort = screenChannelPort?.takeIf { screenChannelHostFactory != null },
@@ -2389,12 +2419,28 @@ class RelayController(
             localAgentPresent: Boolean,
             remoteAgentPresent: Boolean,
             agentKinds: Set<String>,
+            /**
+             * 目标席位宿主**是不是本机**（团队执行方案 §4.5，P0-0.2）：null = 解析不出
+             * 目标（没点名 / 点的是宿主自报 kind / 旧发送端）⇒ 保持既有兜底判据。
+             *
+             * ## 为什么必须按目标判（行为变更）
+             *
+             * 旧判据是"群里存在**别的** agent 宿主 ⇒ 本机让路"——群里有 ≥2 台 agent
+             * 宿主时**任何一台都不执行**文本 @（互相让路）。团队执行依赖文本 @，必须
+             * 改成**按目标席位宿主判**：目标宿主是本机 ⇒ Local（哪怕别的宿主也有 agent）；
+             * 目标在别的宿主 ⇒ Remote（消息已按协议送达那台设备）。
+             */
+            targetHostIsSelf: Boolean? = null,
         ): AgentPromptRoute {
             if (!shouldTriggerAgent(text, groupId, isWorkspaceGroup, repliedToIsAgent, agentKinds)) {
                 return AgentPromptRoute.None(NoWakeReason.NotAddressed)
             }
             return when {
-                // 远端 agent 在场 ⇒ 本机让路（哪怕本机也有 agent）。
+                // 目标席位宿主就是本机 ⇒ 本机执行（§4.5：即使别的宿主也有 agent）。
+                targetHostIsSelf == true -> AgentPromptRoute.Local
+                // 目标在别的宿主 ⇒ 本机让路（消息已按协议送达那台设备）。
+                targetHostIsSelf == false -> AgentPromptRoute.Remote
+                // 无可解析目标：保持既有判据 —— 远端 agent 在场 ⇒ 本机让路。
                 remoteAgentPresent -> AgentPromptRoute.Remote
                 localAgentPresent -> AgentPromptRoute.Local
                 else -> AgentPromptRoute.None(NoWakeReason.NoAgentPresent)
@@ -2555,7 +2601,7 @@ internal fun remoteRelayPeer(config: RemoteRelayConfig?, healthy: Boolean): Peer
     val nodeId = config.nodeId ?: return null
     return PeerUi(
         nodeId = nodeId,
-        nick = config.nick ?: "Remote Tidings",
+        nick = config.nick ?: "Remote Tenon",
         host = config.url,
         ip = config.url,
         online = healthy,

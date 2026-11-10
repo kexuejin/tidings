@@ -8,7 +8,7 @@ import kotlin.test.assertNull
 import kotlin.test.assertTrue
 
 /**
- * luciola 段嵌进现有 Tidings 二维码:老端忽略未知键,新端读得到公钥与配对密钥。
+ * luciola 段嵌进现有 Tenon 二维码:老端忽略未知键,新端读得到公钥与配对密钥。
  *
  * 三条纪律:
  *  - 同一个码双栈(不能为 luciola 另印一张码);

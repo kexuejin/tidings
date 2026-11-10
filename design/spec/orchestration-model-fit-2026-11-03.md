@@ -305,7 +305,7 @@ flowchart TD
 | 台账根 | `DataDirectoryProvider` → `controller.dataDirectory` | `~/.tenon/memory/` / `journal.jsonl` | 平台注入契约：`AndroidPlatform` / `IosPlatform` / 桌面 `Main` 各自实现 |
 | 卡片预算 | `Limits.CARD_BYTES`（24 KiB） | 「TCP 32K / Card 24K 一处 Guard」 | 32 KiB 是群文本、64 KiB 是整帧与 agent-event body，三处口径不同 |
 | 团队模板配置 | `DelegationTeam`（`groupId`, `workerKey`, `reviewerKey`, `updatedAt`） | `slots` / `enabled` / `verifyCriteriaIds` | P1 严格两棒，无多余字段（见 §16.2） |
-| 模板持久化文件 | `delegation-teams.json` 在 `controller.dataDirectory` | `~/.tenon/` / `<repo>/.tidings/` | 宿主全局，零 UI / 零 Compose，0600（见 §16.3） |
+| 模板持久化文件 | `delegation-teams.json` 在 `controller.dataDirectory` | `~/.tenon/` / `<repo>/.tenon/` | 宿主全局，零 UI / 零 Compose，0600（见 §16.3） |
 | 编排解析单源 | `DesktopWorkerOrchestrator.parseDelegation` | 两处各调 `DelegationParser.parse` | 统合文本路由与 invoke 桥，防分叉（见 §16.4） |
 | 模板置位标志 | `DelegationPlan.fromTemplate`（默认 `false`） | `Source.TEMPLATE` | 模板仍属 AUTO，由布尔位标识并触发跳过 planner（见 §16.4） |
 
@@ -775,7 +775,7 @@ data class DelegationTeam(
 1. **落盘位置**：
    文件名 `delegation-teams.json`，落在 `controller.dataDirectory`（平台 `DataDirectoryProvider` 注入的根路径），
    与 `agent-grants.json` / `session-exempts.json` 同生命周期，在 `DesktopExtension.attach` 里装配、`detach` 里释放。
-   禁止硬编码 `~/.tenon/`，也禁止写入工作区仓库内部（`.tidings/`）。
+   禁止硬编码 `~/.tenon/`，也禁止写入工作区仓库内部（`.tenon/`）。
 2. **读写与并发纪律**：
    采用读写锁 + 临时文件 + `renameTo` + 0600 权限写入；
    内存快照按文件 `mtime` 失效，内存字段保证并发读写可见性（`@Volatile`）；

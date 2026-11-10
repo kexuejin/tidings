@@ -1,4 +1,4 @@
-/* Tidings — English overrides for Info.plist.
+/* Tenon — English overrides for Info.plist.
  *
  * `Info.plist` 的字面值是 **development language** 的值，本工程是 zh-Hans
  * （`project.yml` 的 `options.developmentLanguage`），所以那份中文是"原文"而不是"漏翻"。

@@ -187,7 +187,7 @@
 
 ## 4. 群聊结构化卡片渲染协议 (`card`)
 
-为了彻底杜绝代码与长日志刷屏，Tidings 采用 **单卡槽原位刷新系统 `(cardId, rev)`**。
+为了彻底杜绝代码与长日志刷屏，Tenon 采用 **单卡槽原位刷新系统 `(cardId, rev)`**。
 
 当插件推流 `{"type":"card","card":{...}}` 时，`card` 对象需满足以下 Schema：
 
@@ -259,13 +259,13 @@
 
 ## 7. 开箱即用参考实现 (Python Minimal Reference)
 
-这是一个使用 Python 原生内置库实现的**完全零依赖、开箱即用的第三方 Agent 最小骨架**。可以直接运行与 Tidings 宿主联调！
+这是一个使用 Python 原生内置库实现的**完全零依赖、开箱即用的第三方 Agent 最小骨架**。可以直接运行与 Tenon 宿主联调！
 
 ```python
 #!/usr/bin/env python3
 """
-Tidings 最小参考智能体 (Python 3.8+ 零第三方依赖)
-启动命令: python3 tidings_agent_demo.py
+Tenon 最小参考智能体 (Python 3.8+ 零第三方依赖)
+启动命令: python3 tenon_agent_demo.py
 """
 
 import json
@@ -381,7 +381,7 @@ class AgentHandler(BaseHTTPRequestHandler):
 
 if __name__ == "__main__":
     server = HTTPServer(("127.0.0.1", PLUGIN_PORT), AgentHandler)
-    print(f"[*] Tidings 演示智能体已启动，监听在 http://127.0.0.1:{PLUGIN_PORT}")
+    print(f"[*] Tenon 演示智能体已启动，监听在 http://127.0.0.1:{PLUGIN_PORT}")
     print(f"[*] 注册 Payload 请参考: {json.dumps(PLUGIN_MANIFEST, ensure_ascii=False)}")
     try:
         server.serve_forever()
@@ -393,9 +393,9 @@ if __name__ == "__main__":
 
 ## 8. 调试与联调流程
 
-1. **启动插件进程**：在终端运行您的智能体程序（如 `python3 tidings_agent_demo.py`），确认服务监听在 `http://127.0.0.1:9988`；
-2. **向 Tidings 宿主注册**：
-   在宿主机终端向 Tidings 控制面注册该插件：
+1. **启动插件进程**：在终端运行您的智能体程序（如 `python3 tenon_agent_demo.py`），确认服务监听在 `http://127.0.0.1:9988`；
+2. **向 Tenon 宿主注册**：
+   在宿主机终端向 Tenon 控制面注册该插件：
    ```bash
    curl -X POST http://127.0.0.1:8848/v1/plugin/register \
      -H "Content-Type: application/json" \
@@ -417,7 +417,7 @@ if __name__ == "__main__":
      }'
    ```
 3. **群聊内验证**：
-   打开手机端或桌面端 Tidings，在任何绑定了代码工作区的协同群中输入：
+   打开手机端或桌面端 Tenon，在任何绑定了代码工作区的协同群中输入：
    `@DemoAssistant 帮我修复一下 App.kt`；
 4. **观察推流效果**：
    检查群聊流中是否即时渲染出原位卡片，进度从 20% 平滑推进至 100%，并展示 Diff 统计信息！

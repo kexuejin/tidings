@@ -210,7 +210,7 @@ broken 0 / ambiguous 0、`envDependentTestGate` A/B 0、`designSpecDrift` OK。
 | `agentNode/.../WorktreeSandbox.kt` | content | 主工作区 919 行：已有 `walkFileTree` 安全清理 + `prepareSandboxHome(hostHome=...)`，**没有** C11/C12；分支 987 行：同一份安全清理 **+** `DriverLineLimits` 单行熔断 + `OsSandboxGuard` opt-in 包装 | 三方合并，两边功能都要留；`deleteArtifactsSafely` 段两侧本应一致，**不得退回顶层 `isSymbolicLink()` 写法**（§2.8 血泪禁令） |
 | `agentNode/.../WorktreeSandboxExecutorTest.kt` | content | 两侧**都有** `deleteArtifactsSafelyDoesNotFollowSymlinksIntoHostHome` 钉子，只差注释与断言消息措辞（17 行差异） | 保留一条钉子即可，取分支版更明确的断言消息；别把两条重复测试都留下 |
 | `docs/AGENT-TRIGGER-AND-PLUGIN-SPECIFICATION.md` | **add/add** | 主工作区那份是**未跟踪的旧稿**（389 行，状态「演进提案/规划中」）；分支是已提交的新稿（396 行，「三阶段已落地」）。旧稿独有 44 行**全部是过时状态表述**，没有新内容 | 取分支版；旧稿先另存备份再处理，不要直接删（它没进版本库） |
-| `docs/THIRD-PARTY-AGENT-DEVELOPMENT-KIT.md` | content | base 是「捎话 Tidings」；主工作区脏改动把它**改回「榫卯 Tenon」**（产品命名进行中）；分支只加了「未知键显式拒绝（严格解析）」那一段 | 保留主工作区的命名裁决，再把分支新增的那一段手工并进去；别让分支版把命名改动冲掉 |
+| `docs/THIRD-PARTY-AGENT-DEVELOPMENT-KIT.md` | content | base 是「榫卯 Tenon」；主工作区脏改动把它**改回「榫卯 Tenon」**（产品命名进行中）；分支只加了「未知键显式拒绝（严格解析）」那一段 | 保留主工作区的命名裁决，再把分支新增的那一段手工并进去；别让分支版把命名改动冲掉 |
 
 **自动合并成功但不等于语义正确**的 4 个：`SandboxedCliDriver.kt`、`RelayDatabase.sq`、
 `DesktopExtension.kt`、`DesktopWorkerOrchestrator.kt`。其中 `RelayDatabase.sq` 最需要复核：

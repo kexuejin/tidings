@@ -210,6 +210,15 @@ enum class NoticeKind {
      */
     AgentDispatchFailed,
 
+    /**
+     * **一条消息 @ 了多个执行目标**（席位+组员 / 两个组员，团队执行方案 §4.2）。
+     *
+     * 与 [AgentNotAuthorized] 同类：系统的解释，走 notice 行。fail-closed 的可见面
+     * —— 没有它的症状是「消息发出去了，然后什么都没发生」（没有任何宿主执行，
+     * 而每个宿主都以为自己让路是对的）。
+     */
+    TeamMentionAmbiguous,
+
     /** 群名改了。 */
     GroupRenamed,
 

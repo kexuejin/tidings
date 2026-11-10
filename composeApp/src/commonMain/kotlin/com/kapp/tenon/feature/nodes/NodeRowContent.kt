@@ -145,7 +145,9 @@ internal fun NodeRowContent(
                 if (inlinePresence) {
                     Text(
                         text = stateText,
-                        style = MaterialTheme.typography.labelSmall.copy(fontWeight = FontWeight.Normal),
+                        // 在场态（在线/离线/没有回应）是行上要被读到的关键状态：
+                        // 11sp 的 labelSmall 混在标题行右侧会被当成装饰，升 12sp。
+                        style = MaterialTheme.typography.labelMedium.copy(fontWeight = FontWeight.Normal),
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                         maxLines = 1,
                         modifier = Modifier.padding(start = sp.sm),

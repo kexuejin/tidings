@@ -360,6 +360,11 @@ internal class HostCardActions(
                 },
             )
             if (!cancelled) delivery.flipStaleChainCard(cardId, agentId)
+        } else if (actionId == "open-prototype") {
+            // 「在浏览器打开原型」是**客户端本地动作**：要打开的文件在本机，宿主替不了。
+            // 新端根本不会把它派上来；旧端派上来时也不许当成「卡已失效」翻面 ——
+            // 卡还活着，只是这一步不在这里做。如实留痕。
+            RelayLog.info("RELAY-INVOKE", "open-prototype is client-local, ignored on host (card $cardId)")
         } else if (actionId == "approve-prototype") {
             tickets()?.approvePrototypeByCard(cardId)
         } else if (actionId == "refine-pending" || actionId == "dispatch-pending") {

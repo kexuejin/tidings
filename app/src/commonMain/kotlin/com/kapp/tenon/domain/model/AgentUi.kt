@@ -360,7 +360,7 @@ private val RAW_UUID_REGEX = Regex("^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4
  * 官方第二句拿的是「当前会话」身份 —— **手机侧没有这个东西**：一台手机同时看着 N 个节点的
  * 会话，没有任何一条是「当前」。所以这里把「不是当前」换成「**同一工作区里还有别的可见会话**」：
  * 一个工作区全是空壳时照旧把它们显示出来，否则那个工作区整行会变成 0 个会话
- * （「看起来是空」比「多一行未命名」更糟，也与 `dsh-tidings` 的 `visibleOnPhone()` 同一取舍）。
+ * （「看起来是空」比「多一行未命名」更糟，也与 `dsh-tenon` 的 `visibleOnPhone()` 同一取舍）。
  *
  * ## 为什么必须放在**展示层**而不是只拦入库
  *
@@ -376,7 +376,7 @@ fun List<AgentSessionUi>.visibleInDsh(): List<AgentSessionUi> {
         if (session.title?.startsWith("Route this bounded") == true) return@filter false
         if (session.agentKind.equals("DSH", ignoreCase = true) && RAW_UUID_REGEX.matches(session.sessionId)) return@filter false
         if (session.hostBlank != true) return@filter true
-        // 空壳：整组**全是空壳**时才放行（与 dsh-tidings 的 visibleOnPhone 的
+        // 空壳：整组**全是空壳**时才放行（与 dsh-tenon 的 visibleOnPhone 的
         // `siblings.every(other => other.blank)` 逐字同口径）。只要同工作区里还有一条
         // 非空壳（或还没听宿主说过 blank 的）会话，这条空壳就该藏起来。
         byWorkspace[session.wsId].orEmpty().all { it.hostBlank == true }

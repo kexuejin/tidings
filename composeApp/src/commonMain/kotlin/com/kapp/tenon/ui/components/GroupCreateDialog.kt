@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: GPL-3.0-only
-// Copyright (C) 2026 捎话 Tidings contributors
+// Copyright (C) 2026 榫卯 Tenon contributors
 
 package com.kapp.tenon.ui.components
 
@@ -128,7 +128,9 @@ public fun GroupCreateDialog(
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                     )
                 } else {
-                    LazyColumn(Modifier.heightIn(max = 240.dp)) {
+                    // 高度上限走比例收口（小屏/横屏）：默认档 240dp。
+                    RelayDialogContentHeight(defaultMaxHeight = 240.dp) { cap ->
+                        LazyColumn(Modifier.heightIn(max = cap)) {
                         items(rows, key = { it.nodeId }) { peer ->
                             Row(
                                 modifier = Modifier
@@ -180,6 +182,7 @@ public fun GroupCreateDialog(
                                 if (peer.isAgent) KindBadge(isAgent = true)
                             }
                         }
+                    }
                     }
                 }
             }

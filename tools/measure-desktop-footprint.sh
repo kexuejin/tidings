@@ -16,7 +16,7 @@
 # 指纹做对比 —— 中间被换掉了会明确写「产物指纹已变，读数需重跑」。
 #
 # 用法（两种模式二选一）：
-#   tools/measure-desktop-footprint.sh --app /Applications/Tidings.app --samples 3 --interval 5 \
+#   tools/measure-desktop-footprint.sh --app /Applications/Tenon.app --samples 3 --interval 5 \
 #                                      --out design/runtime-evidence/xxx.txt -- --background
 #   tools/measure-desktop-footprint.sh --pid 1234 --samples 3 --interval 5
 #

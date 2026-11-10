@@ -5,6 +5,7 @@ package com.kapp.tenon.feature.chat
 import androidx.compose.runtime.Composable
 import com.kapp.tenon.generated.resources.Res
 import com.kapp.tenon.generated.resources.card_action_cancel_task
+import com.kapp.tenon.generated.resources.card_action_open_prototype
 import com.kapp.tenon.generated.resources.card_action_send_as_adjustment
 import com.kapp.tenon.generated.resources.card_action_send_as_new_task
 import com.kapp.tenon.generated.resources.card_action_start_task
@@ -35,6 +36,7 @@ internal object CardActionLabelKeys {
     val keys: Map<String, StringResource> = mapOf(
         "card.action.start_task" to Res.string.card_action_start_task,
         "card.action.cancel_task" to Res.string.card_action_cancel_task,
+        "card.action.open_prototype" to Res.string.card_action_open_prototype,
         "card.action.send_as_adjustment" to Res.string.card_action_send_as_adjustment,
         "card.action.send_as_new_task" to Res.string.card_action_send_as_new_task,
     )

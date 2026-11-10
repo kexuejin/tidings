@@ -25,7 +25,7 @@ import kotlinx.serialization.json.put
  * 文件即接口（入口 B）：`delegation-teams.json` 落在 `controller.dataDirectory`，
  * 与 `agent-grants.json` / `session-exempts.json` 同生命周期 —— 由 `DesktopExtension.attach`
  * 装配、`detach` 释放。**禁止**写 `~/.tenon/`（破坏 `:orchestration` 零 UI / `:cli`
- * 的可移植性）或工作区仓库内部（`.tidings/`）。
+ * 的可移植性）或工作区仓库内部（`.tenon/`）。
  *
  * ## 三态失败语义（§15 第 8 条裁决：fail-closed 不静默换人）
  *

@@ -13,7 +13,7 @@ jpackage 用 jlink 产出的运行时镜像**只含一组默认模块**，代码
 * 镜像里缺模块时抛的是 `NoClassDefFoundError`，而桌面端**刻意**在
   `DesktopExtension.syncOnce()` 里写了 `catch (t: Throwable)`（控制面是加装能力，
   绑不上不该拖垮整个 UI）——于是异常被吞掉：界面完全正常、UDP 17878 / TCP 17879
-  照常绑定，只有 8788 永远不监听。已实测过一次：装机版 `捎话 Tidings.app` 里
+  照常绑定，只有 8788 永远不监听。已实测过一次：装机版 `Tenon.app` 里
   `jdk.httpserver` 缺失，手机永远看不到这台机器，而所有日志都是干净的。
 
 所以判据不能靠"跑起来试试"，必须直接对**打包产物**做静态核对。
@@ -70,7 +70,7 @@ def resolve_layout(image_dir):
 def discover_image(root):
     """从 createDistributable 的输出根目录里找出那个应用镜像。
 
-    返回 (镜像路径, 错误行列表)。**刻意不把产品名（"捎话 Tidings"）写进判据**：
+    返回 (镜像路径, 错误行列表)。**刻意不把产品名（"Tenon"）写进判据**：
     产品改名是正常操作，门禁不该跟着改名，也不该因此静默失效。
     0 个 ⇒ 报"先打包"；多于 1 个 ⇒ 报出来让人选，不许猜。
     """

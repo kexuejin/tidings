@@ -250,6 +250,9 @@ class Messenger(
      * - `screen` 例外：授权绑定原有地址，不能先 `touch` 把不可信来源变成当前地址。
      */
     private suspend fun handleReliable(envelope: Envelope, datagram: ReceivedDatagram) {
+        // 回包与续期都按「对端监听端口」走，不能按数据报源端口：luciola 的发送 socket
+        // 用临时端口，拿它 touch 会把节点表端口改坏，拿它发 ACK 会 no session / unpaired。
+        val sendPort = sendingPortFor(registry.get(envelope.from)?.profile, datagram.port)
         if (envelope.type == MsgTypes.SCREEN) {
             // 投屏信令必须来自已握手的原地址：地址不符就整帧不作答（连 ACK 都不回，
             // 对端的重试会自己停下来），也不能先 `touch` 把不可信来源变成当前地址。
@@ -264,7 +267,7 @@ class Messenger(
                 return
             }
         } else if (registry.get(envelope.from) != null) {
-            if (registry.touch(envelope.from, datagram.host, datagram.port, null, envelope.ts) == null) {
+            if (registry.touch(envelope.from, datagram.host, sendPort, null, envelope.ts) == null) {
                 // 诊断：地址漂移/资料被拒时 touch 返回 null —— 旧实现静默 return、不回 ACK。
                 val known = registry.get(envelope.from)
                 println(
@@ -277,7 +280,7 @@ class Messenger(
         }
         // 去重：重复帧也要回 ACK（对端在等它停手），但不重复投递。
         if (dedupStore.has(envelope.id, envelope.from)) {
-            sendAck(envelope, datagram)
+            sendAck(envelope, datagram, sendPort)
             return
         }
         // **ACK 只在帧成功进入交接管道之后回**（§3 第 8 种形态的根治）：
@@ -292,17 +295,17 @@ class Messenger(
         // **去重只在投递成功之后记**。先记后投会在投递失败时留下「已见过、从未投递」
         // 的鬼条目：重传被判重复 ⇒ 直接 ACK ⇒ 静默丢帧（真机楔死现场）。
         dedupStore.add(envelope.id, envelope.from, nowMillis())
-        sendAck(envelope, datagram)
+        sendAck(envelope, datagram, sendPort)
     }
 
-    private suspend fun sendAck(envelope: Envelope, datagram: ReceivedDatagram) {
+    private suspend fun sendAck(envelope: Envelope, datagram: ReceivedDatagram, sendPort: Int) {
         val ack = makeEnvelope(
             MsgTypes.ACK,
             selfNodeId,
             Codec.ackPayload(envelope.id),
         )
         runCatching {
-            transport.send(Codec.encodeToBytes(ack), datagram.host, datagram.port)
+            transport.send(Codec.encodeToBytes(ack), datagram.host, sendPort)
         }
     }
 

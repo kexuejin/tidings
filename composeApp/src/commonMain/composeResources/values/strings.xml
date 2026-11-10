@@ -204,6 +204,7 @@
     <string name="banner_group_no_permission">只有群主或管理员有权移出成员。</string>
     <!-- 无权限者 @ 了 agent：说明为什么没执行，并给一个申请入口。%1$s = agent 名。 -->
     <string name="chat_agent_not_authorized">%1$s 没有执行：你不在它的授权名单里</string>
+    <string name="chat_team_mention_ambiguous">一条消息只 @ 一个执行目标（领队或组员）；请拆开发送</string>
     <string name="chat_agent_delegated_by_tag">%1$s 本机接不了，任务已按标签 %2$s 委派给远端节点</string>
     <!-- 派单终局失败：哪一单、谁失败、为什么。%1$s = 工单标题，%2$s = agent，%3$s = 原因。 -->
     <string name="chat_agent_dispatch_failed">「%1$s」由 %2$s 执行失败：%3$s</string>
@@ -550,7 +551,7 @@
     <!--
       分割线上那句标签。**不要说「任务：」。**
 
-      这里显示的是**会话的第一条用户消息**（`dsh-tidings` 的 `titleFrom` 从 `user/message`
+      这里显示的是**会话的第一条用户消息**（`dsh-tenon` 的 `titleFrom` 从 `user/message`
       取第一个文本块，取到即固定、不再随内容更新），不是「当前正在做的任务」。
 
       DSH 自己确实有真正的会话标题（`sessionTitle` service，LLM 生成、可被用户固定），
@@ -789,8 +790,6 @@
     <string name="r2_set_profile_org">组织</string>
     <string name="r2_set_profile_rev_chip">资料 v%1$d</string>
     <string name="r2_set_profile_node_chip">节点 %1$s</string>
-    <string name="set_luciola_title">luciola 加密信道</string>
-    <string name="set_luciola_sub">消息、文件与投屏都走加密信道（默认开启）。与未升级到同一版本的设备会失去自动发现，只认二维码与手动地址；关掉并重启节点即回退到原传输</string>
     <string name="set_persist_title">消息落盘</string>
     <string name="set_persist_sub">关着时历史只在内存，重启即丢</string>
     <!-- 保留天数在此页是一行纯说明（没有可改的开关），不再伪装成设置行。 -->
@@ -992,6 +991,9 @@
     <string name="card_action_cancel_task">取消</string>
     <string name="card_action_send_as_adjustment">作为调整发送</string>
     <string name="card_action_send_as_new_task">派为新任务</string>
+    <!-- 原型评审入口：与「Approve & Develop」同组，先把原型看一遍再批准（否则是盲批）。
+         由客户端本地兑现（交给系统浏览器），不广播给宿主。 -->
+    <string name="card_action_open_prototype">在浏览器打开原型</string>
     <!-- 停止：把「中止」从一句要背下来的咒语（stop/abort/cancel/停/取消）变成卡上的一点。
          喊错一个字就等于没停、而且界面一声不吭 —— 真机 18:47 实测。 -->
     <string name="card_action_abort">停止</string>
@@ -1358,6 +1360,7 @@
     <!-- agent-ack（审批回执）的两条出路。控制器只报事实，文案在这里落地。 -->
     <string name="banner_agent_ack_send_failed">审批结果没有送出，对方没有收到；这条审批仍是待审批，请稍后重试。</string>
     <string name="banner_agent_ack_not_confirmed">对方未开启审批回执（或当前不在线），已按你的选择记录；最终以对方 Agent 的实际执行为准。</string>
+    <string name="banner_luciola_unavailable">加密信道未能启动（安装不完整或系统组件缺失），本机暂时无法与其它设备通信。</string>
     <string name="screen_reason_declined">对方已拒绝</string>
     <string name="screen_reason_busy">对方忙碌中</string>
     <string name="screen_reason_unsupported">不支持屏幕协助</string>
@@ -1813,6 +1816,8 @@
     <string name="card_artifact_preview_kind_markdown">Markdown 预览</string>
     <string name="card_artifact_preview_kind_diff">Diff 预览</string>
     <string name="card_artifact_preview_kind_text">文本预览</string>
+    <string name="card_artifact_preview_kind_html">网页原型</string>
+    <string name="card_artifact_preview_external_only">网页原型在系统浏览器中打开，端内不渲染</string>
     <string name="card_artifact_preview_close">关闭预览</string>
     <string name="card_artifact_preview_failed">文件读不到或超出预览上限，无法渲染</string>
     <string name="card_artifact_preview_not_delivered">完整文件尚未投递到本设备，暂不可预览</string>
@@ -1877,6 +1882,14 @@
     <string name="team_roster_role_frontend">前端</string>
     <string name="team_roster_role_backend">后端</string>
     <string name="team_roster_role_security">安全</string>
+    <string name="team_exec_config_label">执行:</string>
+    <string name="team_exec_kind_worker">执行</string>
+    <string name="team_exec_kind_reviewer">审查</string>
+    <string name="team_exec_pick_driver">选驱动…</string>
+    <string name="team_exec_no_drivers">本机没有可用的 agent 驱动</string>
+    <string name="team_exec_model_default">默认（继承）</string>
+    <string name="team_exec_readonly_note">执行配置由席位宿主管理：%1$s</string>
+    <string name="team_exec_member_note">%1$s（团队）</string>
     <string name="team_roster_max_members">最多 %1$d 人</string>
     <string name="team_roster_remove_member">删除</string>
     <string name="team_roster_conflict_warning">与群内成员 @%1$s 冲突，请更换</string>
@@ -1926,6 +1939,7 @@
     <string name="orchestration_patch_hint_file_missing">补丁文件已经不在了，让执行方重跑一次</string>
     <string name="orchestration_patch_hint_workspace_missing">工作区目录找不到了，确认它还在原位置</string>
     <string name="orchestration_patch_hint_failed">补丁没能应用：%1$s</string>
+    <string name="orchestration_stage_handoff_speech">[%1$s] 已完成实现，请 @%2$s 交叉审查。</string>
 
     <!-- 桌面壳文案（ARP-3）：AWT 对话框、自启注册、诊断包、窗口标题。
          形态与既有 desktop_* 一致；纯 JVM 侧经 DesktopStrings 装入后读取。 -->

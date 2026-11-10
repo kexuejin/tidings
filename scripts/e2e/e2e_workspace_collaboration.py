@@ -152,7 +152,7 @@ def run_checks(args):
         "外部配对确认框被真实点击（闸门生效；不允许用「确认广播」绕过）",
     )
 
-    phase("3. dsh-tidings 桥接适配器与数据契约自检")
+    phase("3. dsh-tenon 桥接适配器与数据契约自检")
     from scripts.bridge.agent_relay_bridge_template import AgentRelayBridge
     bridge = AgentRelayBridge(agent_kind="DSH")
     R.check("bridge-agent-kind", bridge.agent_kind == "DSH", "Bridge 智能体标识初始化正确")

@@ -98,6 +98,7 @@ import com.kapp.tenon.ui.desktop.DesktopShell
 import com.kapp.tenon.ui.desktop.DesktopShellActions
 import com.kapp.tenon.ui.desktop.desktopNavBadges
 import com.kapp.tenon.ui.theme.AppTheme
+import com.kapp.tenon.ui.theme.ComponentSizes
 import com.kapp.tenon.ui.theme.LocalAppSpacing
 import com.kapp.tenon.ui.theme.ThemeMode
 import com.kapp.tenon.domain.model.ConversationUi
@@ -553,6 +554,8 @@ fun RelayApp(
                             onExposeWorkspaces = controller::setGroupAgentWorkspaces,
                             // 团队编制（方案 §4.3）：手机侧同样直连控制器。
                             onSetTeamRoster = controller::setGroupTeamDeclaration,
+                            // 手机端无 DesktopExtension ⇒ 端口为 null ⇒ 执行配置只读投影。
+                            teamExecutionPort = controller.teamExecutionPort,
                             onUpdateGroupMeta = controller::updateGroupMeta,
                             onLeaveGroup = { groupId ->
                                 controller.leaveGroup(groupId)
@@ -577,6 +580,12 @@ fun RelayApp(
                             // 只喂移动端那套壳，所以恒 82% —— 判据不是窗口多宽，推导见
                             // feature/chat/BubbleWidth.kt。
                             bubbleFraction = ContentWidths.BUBBLE_FRACTION_PHONE,
+                            // 手机壳的气泡密度档：群聊气泡头像 32dp（桌面 26）。头像随
+                            // 外壳密度走，与 showHeader/quickActions 同一组外壳决定。
+                            messageAvatarSize = ComponentSizes.MessageAvatarPhone,
+                            // 群信息整屏化（手机形态层）：聊天详情之上推入整屏页，
+                            // 不再叠 560dp 的居中弹窗。桌面壳保持弹窗（默认 false）。
+                            groupInfoAsPage = true,
                             // 草稿按会话记：切走再回来不丢字（见 draftsByConv 的说明）。
                             initialDraft = draftOf(draftsByConv, nav.activeSessionId),
                             onDraftChange = { convId, text ->
@@ -675,7 +684,6 @@ fun RelayApp(
                                 leftoverPartCount = leftoverParts?.size,
                                 leftoverPartBytes = leftoverParts?.sumOf { it.size },
                                 persistMessagesEnabled = controller.persistMessages,
-                                experimentalLuciolaEnabled = settingsSlice.settings.experimentalLuciola,
                             ),
                             actions = SettingsDataActions(
                                 onBack = { settingsPage = null },
@@ -687,7 +695,6 @@ fun RelayApp(
                                     }
                                 },
                                 onPersistMessagesEnabledChange = controller::updatePersistMessages,
-                                onExperimentalLuciolaChange = controller::updateExperimentalLuciola,
                                 // 「跨网通道」开关已移除（长连接恒开）。用户的心智是"哪张网都能
                                 // 无感连上"，不是"我要不要开一条长连接"；而关掉它反而是不拨号。
                                 onClearHistory = controller::clearAllMessages,

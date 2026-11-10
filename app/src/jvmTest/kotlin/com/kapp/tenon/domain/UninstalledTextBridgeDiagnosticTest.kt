@@ -12,6 +12,7 @@ import kotlinx.coroutines.runBlocking
 import kotlin.test.AfterTest
 import kotlin.test.Test
 import kotlin.test.assertEquals
+import com.kapp.tenon.domain.udpTestTransport
 
 /**
  * 「文案桥未装」的可观测判据（[RelayUiTexts] 事故的钉子）。
@@ -55,6 +56,7 @@ class UninstalledTextBridgeDiagnosticTest {
     /** 测试要过的那道闸在 runtime 判空之后；注一个不绑端口的运行时即可。 */
     private fun attachRuntime(host: RelayController) {
         host.runtime = NodeRuntime(
+            messengerTransportFactory = udpTestTransport(),
             profile = Profile.agent(
                 nodeId = host.state.value.selfNodeId,
                 nick = "test-host", host = "127.0.0.1",

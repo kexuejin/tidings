@@ -326,7 +326,7 @@ internal fun ControlPlane.resolveAgentTarget(
                     // 申请是 PPE-1 的 **协议帧**（agent-grant-request，设备 → 宿主），
                     // 不是 HTTP 路由 —— 控制面只对外开 GET/PUT /v1/agent/grants 两条。
                     // 从前这里写"经 POST /v1/agent/grant-request 申请"，那条路由不存在。
-                    "在桌面端「捎话 → 授权」里批准，或让对方重发一次 agent-grant-request 申请" +
+                    "在桌面端「榫卯 → 授权」里批准，或让对方重发一次 agent-grant-request 申请" +
                     "（申请走 PPE-1 协议帧，控制面没有对应的 HTTP 路由）。",
             ),
         )

@@ -105,7 +105,7 @@ class DesktopBackgroundTest {
     @Test
     fun LaunchAgent清单含必要键且逐参数转义() {
         val plist = DesktopLoginItem.launchAgentPlist(
-            listOf("/Applications/捎话 & Tidings.app/Contents/MacOS/relay", "-x"),
+            listOf("/Applications/榫卯 & Tenon.app/Contents/MacOS/relay", "-x"),
         )
         assertTrue(plist.contains("<key>Label</key>"))
         assertTrue(plist.contains("<string>${DesktopLoginItem.MACOS_LABEL}</string>"))
@@ -113,18 +113,18 @@ class DesktopBackgroundTest {
         assertTrue(plist.contains("<true/>"))
         assertTrue(plist.contains("<key>ProgramArguments</key>"))
         // 每个参数各占一个 <string>，路径里的 & 必须已转义。
-        assertTrue(plist.contains("<string>/Applications/捎话 &amp; Tidings.app/Contents/MacOS/relay</string>"))
+        assertTrue(plist.contains("<string>/Applications/榫卯 &amp; Tenon.app/Contents/MacOS/relay</string>"))
         assertTrue(plist.contains("<string>-x</string>"))
-        assertFalse(plist.contains("& Tidings"))
+        assertFalse(plist.contains("& Tenon"))
     }
 
     @Test
     fun Linux桌面项含必要键与转义后的Exec() {
-        val entry = DesktopLoginItem.linuxDesktopEntry(listOf("/opt/捎话 Tidings/relay"))
+        val entry = DesktopLoginItem.linuxDesktopEntry(listOf("/opt/榫卯 Tenon/relay"))
         assertTrue(entry.startsWith("[Desktop Entry]"))
         assertTrue(entry.contains("Type=Application"))
         assertTrue(entry.contains("X-GNOME-Autostart-enabled=true"))
-        assertTrue(entry.contains("Exec=\"/opt/捎话 Tidings/relay\""))
+        assertTrue(entry.contains("Exec=\"/opt/榫卯 Tenon/relay\""))
         assertTrue(entry.contains("Terminal=false"))
     }
 
@@ -137,8 +137,8 @@ class DesktopBackgroundTest {
     @Test
     fun Windows命令行按需加引号() {
         assertEquals(
-            "\"C:\\Program Files\\Tidings\\relay.exe\" -x",
-            DesktopLoginItem.windowsCommandLine(listOf("C:\\Program Files\\Tidings\\relay.exe", "-x")),
+            "\"C:\\Program Files\\Tenon\\relay.exe\" -x",
+            DesktopLoginItem.windowsCommandLine(listOf("C:\\Program Files\\Tenon\\relay.exe", "-x")),
         )
         assertEquals("relay.exe -x", DesktopLoginItem.windowsCommandLine(listOf("relay.exe", "-x")))
     }
@@ -149,10 +149,10 @@ class DesktopBackgroundTest {
     fun 打包后直接用启动器路径() {
         assertEquals(
             listOf(
-                "/Applications/捎话 Tidings.app/Contents/MacOS/捎话 Tidings",
+                "/Applications/榫卯 Tenon.app/Contents/MacOS/榫卯 Tenon",
                 DesktopLoginItem.BACKGROUND_FLAG,
             ),
-            DesktopLoginItem.currentCommand(exe = "/Applications/捎话 Tidings.app/Contents/MacOS/捎话 Tidings", classpath = "ignored"),
+            DesktopLoginItem.currentCommand(exe = "/Applications/榫卯 Tenon.app/Contents/MacOS/榫卯 Tenon", classpath = "ignored"),
         )
     }
 

@@ -22,6 +22,7 @@ import kotlinx.coroutines.cancel
 import kotlinx.coroutines.runBlocking
 import kotlinx.serialization.json.jsonObject
 import kotlinx.serialization.json.jsonPrimitive
+import com.kapp.tenon.agent.udpTestTransport
 
 /**
  * `POST /v1/agent/channel` 的**发起门**判据（M7-T2，决策包 §1.6；反向验证钉子：
@@ -46,13 +47,15 @@ class AgentChannelGateTest {
     fun setUp() {
         scope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
         agent = NodeRuntime(
-            profile = Profile.mobile(nodeId = newId(), nick = "Tidings Agent", host = "relay-agent", ver = "relay-test"),
+            messengerTransportFactory = udpTestTransport(),
+            profile = Profile.mobile(nodeId = newId(), nick = "Tenon Agent", host = "relay-agent", ver = "relay-test"),
             udpPort = 0,
             bindHost = ControlPlane.LOOPBACK,
         )
         // 不声明 agc1 的对端（= MOBILE_CAPS 摘掉 agc1 的老端形状）。
         val withoutAgc1 = MsgTypes.MOBILE_CAPS.filter { it != MsgTypes.CAP_AGENT_CHANNEL }
         oldPeer = NodeRuntime(
+            messengerTransportFactory = udpTestTransport(),
             profile = Profile(
                 nodeId = newId(), nick = "old-peer", company = "", dept = "", team = "",
                 avatar = 0, profileRev = 0, host = "old-host", platform = "linux",

@@ -11,7 +11,7 @@ verify-dsh-workspace-session.py
 - 旧版把 `DSH_SESSION_DIR` 钉死成 `…/4dfa20fe-b078-4876-b019-a5bdd5845e0f`（该目录早已不存在）、
   `sessionId` 写死成 `dsh-real-ws-1`、`alias` 写死成 `dsh-teahouse-debugger`、
   `title` 拼成 `真实DSH: <标题前 24 字>`。它证明的是「协议能传三个常量」，
-  **不是**「真实 DSH 的会话名能落到两端」—— 这正是三面（DSH 面板 / dsh-tidings 面板 / 手机）
+  **不是**「真实 DSH 的会话名能落到两端」—— 这正是三面（DSH 面板 / dsh-tenon 面板 / 手机）
   会话名对不上的原因之一，量具本身把真名丢掉了。
 - 现在：`sessionId` = DSH 会话目录名；`alias` = 真实 `session/title` 派生出的短展示名
   （首行、去首尾空白、`<= 24` 字符，超出加省略号，与面板 `agentHeadline` 的取值口径一致）；

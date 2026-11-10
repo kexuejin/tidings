@@ -1,14 +1,14 @@
 # M2 · 插件宿主网关 —— 桌面真机冒烟读数
 
 - 日期：2026-10-29（M2 收尾轮）
-- 产物：`~/Downloads/relay-build-2026-10-29-m2/Tidings.app`（`createDistributable` 产物）
+- 产物：`~/Downloads/relay-build-2026-10-29-m2/Tenon.app`（`createDistributable` 产物）
 - 可执行文件 sha256：`b9b0928476b267997ccc739f1c3b47b01f83bb9dcb7021d1d6297f597b381466`
-- 装机核对：`/Applications/Tidings.app/Contents/MacOS/Tidings` 与构建产物 sha256 一致；
+- 装机核对：`/Applications/Tenon.app/Contents/MacOS/Tenon` 与构建产物 sha256 一致；
   `agentNode-*.jar` 内 grep 到 M2 新符号（`ExternalPluginDriver` / `PluginHost` /
   `PluginRegistration`），证明装的是新代码（AGENTS §5 纪律）。
-- 装机流程：替换 `/Applications/Tidings.app` 后按 AGENTS §5 走 lsregister 重注册。
+- 装机流程：替换 `/Applications/Tenon.app` 后按 AGENTS §5 走 lsregister 重注册。
 - 插件：`examples/plugins/echo-team-plugin` 拷入数据目录
-  `~/Library/Application Support/捎话 Tidings/plugins/echo-team-plugin/`
+  `~/Library/Application Support/榫卯 Tenon/plugins/echo-team-plugin/`
   （目录名与 manifest 的 pluginId 一致 —— 宿主的入驻判据）。
 
 ## 场景 1 · 托管模式自动拉起与注册

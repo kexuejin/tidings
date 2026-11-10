@@ -1,4 +1,4 @@
-捎话 Tidings 桌面端内存占用测量证据
+榫卯 Tenon 桌面端内存占用测量证据
 生成日期：2026-10-23
 量具：tools/measure-desktop-footprint.sh（本仓新增，sha256 976e097559e8217efc54bd7775db1b54f552a6f020e7b911de344762942b5ad3）
 
@@ -15,7 +15,7 @@ shell       : /bin/bash 3.2.57（macOS 自带 bash；脚本按 3.2 写，不依�
 仓库版本    : 4686366（脚本与证据都还在未提交的工作区里）
 
 被测产物
-  bundle    : /Applications/Tidings.app（app.relay.desktop，version 1.0.0）
+  bundle    : /Applications/Tenon.app（app.relay.desktop，version 1.0.0）
   指纹      : Contents/app 下全部 jar 拼接后 sha256 =
               cb02bc370da044261fd5b845f4135c1609b51991d88d8a69f24b905519a85b9d
               脚本在采样前后各算一次并比对，本批两次一致
@@ -23,16 +23,16 @@ shell       : /bin/bash 3.2.57（macOS 自带 bash；脚本按 3.2 写，不依�
               -Xmx768m -XX:+UseSerialGC -Xss512k -XX:MaxMetaspaceSize=192m
               -Dcompose.application.resources.dir=$APPDIR/resources
               -Dcompose.application.configure.swing.globals=true
-              -Dskiko.library.path=$APPDIR -Xdock:name=捎话 Tidings
-  启动方式  : /Applications/Tidings.app/Contents/MacOS/Tidings --background（托盘常驻）
+              -Dskiko.library.path=$APPDIR -Xdock:name=榫卯 Tenon
+  启动方式  : /Applications/Tenon.app/Contents/MacOS/Tenon --background（托盘常驻）
 
 ------------------------------------------------------------------
 2. 采样条件（本仓最容易被误读的部分）
 ------------------------------------------------------------------
-实例数      : 本次取证**只起过 1 个 Tidings 实例**，起完测量、测完立即 kill。
+实例数      : 本次取证**只起过 1 个 Tenon 实例**，起完测量、测完立即 kill。
               采样全程「同类实例数」= 1（脚本在每个采样点按可执行文件路径精确匹配重复
               计数一次，并把最大值写进汇总）。两批取证（第 3、4 节）各自收尾之后，
-              本机 Tidings 实例数都回到 0。
+              本机 Tenon 实例数都回到 0。
               为什么要写这条：桌面端多开时它们抢同一个端口与同一份数据目录，读数会互相
               污染，而单看某一个 pid 的 footprint 完全看不出来。
               注意：本机是多会话共用的，取证结束后可能有别的会话又起了实例。
@@ -57,7 +57,7 @@ shell       : /bin/bash 3.2.57（macOS 自带 bash；脚本按 3.2 写，不依�
 3. 单实例 3 样本（正式读数）
 ------------------------------------------------------------------
 命令：
-  /Applications/Tidings.app/Contents/MacOS/Tidings --background &     # 只起这一个
+  /Applications/Tenon.app/Contents/MacOS/Tenon --background &     # 只起这一个
   tools/measure-desktop-footprint.sh --pid <pid> --samples 3 --interval 5 \
       --jdk /opt/homebrew/opt/openjdk@21/bin --out <file>
 
@@ -80,10 +80,10 @@ vmmap     : /usr/bin/vmmap
 模式      : attach（--pid 42107；不启动也不终止被测进程）
 参数      : --samples 3 --interval 5s --warmup 5s --force-gc 0 --attach-retries 3
 
-被测命令行: /Applications/Tidings.app/Contents/MacOS/Tidings --background
-同类实例  : 1 个（按可执行文件路径 /Applications/Tidings.app/Contents/MacOS/Tidings 精确匹配；>1 表示有别的实例在跑，读数可能互相污染）
+被测命令行: /Applications/Tenon.app/Contents/MacOS/Tenon --background
+同类实例  : 1 个（按可执行文件路径 /Applications/Tenon.app/Contents/MacOS/Tenon 精确匹配；>1 表示有别的实例在跑，读数可能互相污染）
 产物标识 : app.relay.desktop / version 1.0.0
-JVM 参数 : -Djpackage.app-version=1.0.0 -Dcompose.application.resources.dir=$APPDIR/resources -Dcompose.application.configure.swing.globals=true -Xmx768m -XX:+UseSerialGC -Xss512k -XX:MaxMetaspaceSize=192m -Dskiko.library.path=$APPDIR -Xdock:name=捎话 Tidings 
+JVM 参数 : -Djpackage.app-version=1.0.0 -Dcompose.application.resources.dir=$APPDIR/resources -Dcompose.application.configure.swing.globals=true -Xmx768m -XX:+UseSerialGC -Xss512k -XX:MaxMetaspaceSize=192m -Dskiko.library.path=$APPDIR -Xdock:name=榫卯 Tenon 
 产物指纹 : Contents/app 下全部 jar 拼接后的 sha256 = cb02bc370da044261fd5b845f4135c1609b51991d88d8a69f24b905519a85b9d（重新构建会变，据此判断读数是否可比）
 开始采样 : pid=42107，共 3 个点，间隔 5s
 
@@ -151,7 +151,7 @@ jcmd attach 失败次数: 0（按行记 attach-failed，未中断测量）
 并以非 0 退出码结束（本脚本用 6），而不是把空字符串当读数写进汇总。
 
 复现方法（完整命令见下）：起唯一实例 → 用 --pid 附着 → 采样中途把它 kill 掉。
-  /Applications/Tidings.app/Contents/MacOS/Tidings --background &     # 唯一实例
+  /Applications/Tenon.app/Contents/MacOS/Tenon --background &     # 唯一实例
   ( sleep 8; kill -TERM <pid> ) &                                 # 让它在采样中途死掉
   tools/measure-desktop-footprint.sh --pid <pid> --samples 4 --interval 5 ...
 实测退出码：6（脚本约定：采样过程中目标进程消失）
@@ -170,10 +170,10 @@ vmmap     : /usr/bin/vmmap
 模式      : attach（--pid 42809；不启动也不终止被测进程）
 参数      : --samples 4 --interval 5s --warmup 5s --force-gc 0 --attach-retries 3
 
-被测命令行: /Applications/Tidings.app/Contents/MacOS/Tidings --background
-同类实例  : 1 个（按可执行文件路径 /Applications/Tidings.app/Contents/MacOS/Tidings 精确匹配；>1 表示有别的实例在跑，读数可能互相污染）
+被测命令行: /Applications/Tenon.app/Contents/MacOS/Tenon --background
+同类实例  : 1 个（按可执行文件路径 /Applications/Tenon.app/Contents/MacOS/Tenon 精确匹配；>1 表示有别的实例在跑，读数可能互相污染）
 产物标识 : app.relay.desktop / version 1.0.0
-JVM 参数 : -Djpackage.app-version=1.0.0 -Dcompose.application.resources.dir=$APPDIR/resources -Dcompose.application.configure.swing.globals=true -Xmx768m -XX:+UseSerialGC -Xss512k -XX:MaxMetaspaceSize=192m -Dskiko.library.path=$APPDIR -Xdock:name=捎话 Tidings 
+JVM 参数 : -Djpackage.app-version=1.0.0 -Dcompose.application.resources.dir=$APPDIR/resources -Dcompose.application.configure.swing.globals=true -Xmx768m -XX:+UseSerialGC -Xss512k -XX:MaxMetaspaceSize=192m -Dskiko.library.path=$APPDIR -Xdock:name=榫卯 Tenon 
 产物指纹 : Contents/app 下全部 jar 拼接后的 sha256 = cb02bc370da044261fd5b845f4135c1609b51991d88d8a69f24b905519a85b9d（重新构建会变，据此判断读数是否可比）
 开始采样 : pid=42809，共 4 个点，间隔 5s
 
@@ -261,10 +261,10 @@ vmmap     : /usr/bin/vmmap
 模式      : attach（--pid 40932；不启动也不终止被测进程）
 参数      : --samples 2 --interval 2s --warmup 5s --force-gc 0 --attach-retries 3
 
-被测命令行: /Applications/Tidings.app/Contents/MacOS/Tidings --background
-同类实例  : 1 个（按可执行文件路径 /Applications/Tidings.app/Contents/MacOS/Tidings 精确匹配；>1 表示有别的实例在跑，读数可能互相污染）
+被测命令行: /Applications/Tenon.app/Contents/MacOS/Tenon --background
+同类实例  : 1 个（按可执行文件路径 /Applications/Tenon.app/Contents/MacOS/Tenon 精确匹配；>1 表示有别的实例在跑，读数可能互相污染）
 产物标识 : app.relay.desktop / version 1.0.0
-JVM 参数 : -Djpackage.app-version=1.0.0 -Dcompose.application.resources.dir=$APPDIR/resources -Dcompose.application.configure.swing.globals=true -Xmx768m -XX:+UseSerialGC -Xss512k -XX:MaxMetaspaceSize=192m -Dskiko.library.path=$APPDIR -Xdock:name=捎话 Tidings 
+JVM 参数 : -Djpackage.app-version=1.0.0 -Dcompose.application.resources.dir=$APPDIR/resources -Dcompose.application.configure.swing.globals=true -Xmx768m -XX:+UseSerialGC -Xss512k -XX:MaxMetaspaceSize=192m -Dskiko.library.path=$APPDIR -Xdock:name=榫卯 Tenon 
 产物指纹 : Contents/app 下全部 jar 拼接后的 sha256 = cb02bc370da044261fd5b845f4135c1609b51991d88d8a69f24b905519a85b9d（重新构建会变，据此判断读数是否可比）
 开始采样 : pid=40932，共 2 个点，间隔 2s
 

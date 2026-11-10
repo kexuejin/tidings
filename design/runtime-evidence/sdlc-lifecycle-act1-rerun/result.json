@@ -1,0 +1,141 @@
+{
+  "generated_at": "2026-11-10T01:51:34.368346+00:00",
+  "tier": "headless",
+  "workspace": "/Users/ci/weather-relay",
+  "host": "http://127.0.0.1:8788",
+  "agents": [
+    {
+      "key": "dsh",
+      "cli": "dsh",
+      "role": "worker"
+    }
+  ],
+  "base_head": "b221f7de533359f6d42f6260ed02c3ec3b51574e",
+  "base_tests": {
+    "rc": 0,
+    "tests": 87,
+    "pass": 87,
+    "fail": 0,
+    "skipped": 0,
+    "duration_ms": 412.033417,
+    "tail": [
+      "# tests 87",
+      "# suites 0",
+      "# pass 87",
+      "# fail 0",
+      "# cancelled 0",
+      "# skipped 0",
+      "# todo 0",
+      "# duration_ms 412.033417"
+    ]
+  },
+  "device_commits": [],
+  "created_files": [
+    "docs/SDLC-HARNESS-REQ.md"
+  ],
+  "environment": {
+    "python": "3.13.12",
+    "dsh": "/opt/homebrew/bin/dsh",
+    "opencode": "/Users/ci/.opencode/bin/opencode",
+    "adb": "/Users/ci/Library/Android/sdk/platform-tools/adb"
+  },
+  "acts": [
+    {
+      "act_id": "0",
+      "title": "环境体检",
+      "chain": "local",
+      "status": "PASS",
+      "verdicts": [
+        {
+          "name": "control-plane",
+          "ok": true,
+          "detail": "GET /v1/peers -> 200 {'peers': [{'nodeId': '7077a2bb-66a2-476e-98c4-7a88dbc203f3', 'nick': 'sdk_gphon"
+        },
+        {
+          "name": "cli:dsh",
+          "ok": true,
+          "detail": "dsh -> /opt/homebrew/bin/dsh"
+        },
+        {
+          "name": "dsh-credentials",
+          "ok": true,
+          "detail": "/Users/ci/.dsh/.credentials.yaml 存在"
+        },
+        {
+          "name": "workspace-is-git",
+          "ok": true,
+          "detail": "/Users/ci/weather-relay"
+        },
+        {
+          "name": "workspace-clean",
+          "ok": true,
+          "detail": "HEAD=b221f7de5333 脏行=0"
+        },
+        {
+          "name": "baseline-tests-green",
+          "ok": true,
+          "detail": "pass=87 fail=0 skipped=0 duration=412.033417ms"
+        },
+        {
+          "name": "artifacts-dir",
+          "ok": true,
+          "detail": "/tmp/tenon-ws/artifacts"
+        }
+      ],
+      "evidence": {
+        "base_head": "b221f7de533359f6d42f6260ed02c3ec3b51574e",
+        "base_dirty": [],
+        "base_tests": {
+          "rc": 0,
+          "tests": 87,
+          "pass": 87,
+          "fail": 0,
+          "skipped": 0,
+          "duration_ms": 412.033417,
+          "tail": [
+            "# tests 87",
+            "# suites 0",
+            "# pass 87",
+            "# fail 0",
+            "# cancelled 0",
+            "# skipped 0",
+            "# todo 0",
+            "# duration_ms 412.033417"
+          ]
+        }
+      },
+      "seconds": 1.07
+    },
+    {
+      "act_id": "1",
+      "title": "需求确认",
+      "chain": "cli-direct",
+      "status": "FAIL",
+      "verdicts": [
+        {
+          "name": "agent-produced-artifact",
+          "ok": true,
+          "detail": "dsh 真产出 docs/SDLC-HARNESS-REQ.md 11668B；AC1..AC4 齐全"
+        },
+        {
+          "name": "patch-harvested",
+          "ok": false,
+          "detail": "本次没有 patch.diff；宿主日志 `harvest ... nothing to harvest, patchBytes=0`"
+        },
+        {
+          "name": "sandbox-isolation",
+          "ok": false,
+          "detail": "/v1/agent/hook/dispatch 只收 wsPath、不收 wsId，会话台账 wsId=null；dsh 直接写主工作树，违反「宿主主工作树零污染」。此层须由 orchestrator 链（手机 @ 派单带 wsId）验证，直驱链不得冒充"
+        }
+      ],
+      "evidence": {
+        "agent": "dsh",
+        "no_patch": true,
+        "landed": "docs/SDLC-HARNESS-REQ.md",
+        "bytes": 11668,
+        "verdict": "agent capability OK / isolation NOT OK"
+      },
+      "seconds": 135.2
+    }
+  ]
+}

@@ -11,7 +11,7 @@
 | 被测包 | **`com.kapp.tenon.debug`**（`versionName=0.1.0-debug`），`lastUpdateTime=2026-10-30 09:11:13` |
 | 装机方式 | `adb install -r -d` → Success；产物 `~/Downloads/relay-build-2026-10-30-m5/androidApp-debug.apk`，sha256 `bf290bb0a447…f63` |
 | **新代码符号探针**（回读设备 base.apk 的 dex） | `handleSetGroupAgentWorkspaces` 20 / `agentIntent` 8 / `card_json` 11 / `agent-invoke` 6 / `agi1` 2；**旧符号 0**（`extractSessionId` 0、`hostForKind` 0）⇒ 装的是 M1–M4 之后的代码 |
-| 桌面端 | `/Applications/Tidings.app`，二进制 mtime `2026-10-30 08:02`；jar 侧探针 `card_json` 12 / `handleSetGroupAgentWorkspaces` 27 / `agent-invoke` 6 / `agi1` 1 |
+| 桌面端 | `/Applications/Tenon.app`，二进制 mtime `2026-10-30 08:02`；jar 侧探针 `card_json` 12 / `handleSetGroupAgentWorkspaces` 27 / `agent-invoke` 6 / `agi1` 1 |
 | 两端与 HEAD 的关系 | 08:02 之后只有三个提交（`5e013c3d` cli、`42aa00ef` docs、`58f15ffb` proto），**都不进 Android/桌面产物** ⇒ 两端二进制代码等价 HEAD |
 | 手机节点 | nick `Pixel 6`，nodeId `e4bd7b99…`，profileRev 3 |
 | 桌面节点 | nick `<host>-97`，nodeId `46c23456…`，profileRev 2 |
@@ -25,11 +25,11 @@
 1. **被测包是 `.debug`，不是 `com.kapp.tenon`**。设备上两个包并存：`com.kapp.tenon`
    是 10-26 的日常包（dex 里 `extractSessionId`/`hostForKind`/`workspaceOfGroup` 都还在 ⇒ 前 M1 代码），
    `com.kapp.tenon.debug` 才是被测包。此前「这台机器没装被测包」的结论是**查错了包名**
-   （`pm list packages -3 | grep kapp.tidings` 只命中日常包）。本轮装机前 `dumpsys` 的
+   （`pm list packages -3 | grep kapp.tenon` 只命中日常包）。本轮装机前 `dumpsys` 的
    `lastUpdateTime=2026-10-26` 也印证了这一点。
 2. **插件不会跟着桌面重启自动回来**：`dsh-echo-bridge` 在本轮开工时是 offline
    （`lastError=health probe failed`），原因是 M4 的「热拔」把它 kill 了、而进程不会自愈。
-   重启 Tidings.app 后新实例注册到新端口（63675）回 online。⇒ 矩阵第 4 条不能靠「重启一下」，
+   重启 Tenon.app 后新实例注册到新端口（63675）回 online。⇒ 矩阵第 4 条不能靠「重启一下」，
    要显式等 `offlineAfter`。
 
 ## 1. 第 1 条：手机 @agent 派单 → 桌面插件执行 → 手机收卡片 ✅

@@ -1,8 +1,8 @@
 R2-W5 桌面截图：覆盖窗初始态 + Esc 取消 + 取消横幅 —— 打包产物上的端到端取证
 日期: 2026-10-12 11:11–12:00 CST
-产物: scaffold/desktopApp/build/compose/binaries/main/app/捎话 Tidings.app （mtime 11:11:27，
+产物: scaffold/desktopApp/build/compose/binaries/main/app/榫卯 Tenon.app （mtime 11:11:27，
       `:desktopApp:createDistributable` 经 scaffold/tools/gradle-locked.py，EXIT=0，BUILD SUCCESSFUL in 1m 2s）
-进程: PID 97755（"捎话 Tidings.app/Contents/MacOS/捎话 Tidings"），主窗 id=134821 bounds=(48,78,1100,720)
+进程: PID 97755（"榫卯 Tenon.app/Contents/MacOS/榫卯 Tenon"），主窗 id=134821 bounds=(48,78,1100,720)
 本文件取代 r2-desktop-capture-app-roundtrip.txt 第 3 节里「取消横幅未在屏取证」那句 —— 现在已在屏取证。
 
 ────────────────────────────────────────────────────────────────────────
@@ -64,7 +64,7 @@ E4  ✅ 取消后 0.5s 内抓主窗：顶部出现横幅「截图已取消」+ �
 4.3 本轮失败与弯路（留档，避免下一轮重复）：
     F1 ⌘⇧A 走 postToPid 不触发截图：`/tmp/keypid 97755 0 cmd shift` 打印 posted，
        app 日志同时出现 `IMKCFRunLoopWakeUpReliable`（说明按键到达了进程），但 4s 后仍无 Capture 窗；
-       即使先用 NSRunningApplication 激活、frontmost=捎话 Tidings 之后再投，仍然不触发。
+       即使先用 NSRunningApplication 激活、frontmost=榫卯 Tenon 之后再投，仍然不触发。
        改用 composer 那颗按钮（真实鼠标点击）即可 —— 根因待查，不属本轮写域。
     F2 前两次点击落空：图标中心读偏了约 15px（我按整窗图目测 x=463，按 5 倍放大裁切实measure 是 x=448），
        点到图标之间的空隙。**教训：坐标必须用裁切放大后量，不能整窗目测。**
@@ -84,7 +84,7 @@ E4  ✅ 取消后 0.5s 内抓主窗：顶部出现横幅「截图已取消」+ �
       env JAVA_HOME=/opt/homebrew/opt/openjdk@21 ./scaffold/gradlew -p scaffold \
       :desktopApp:createDistributable --console=plain
   # 起
-  "scaffold/desktopApp/build/compose/binaries/main/app/捎话 Tidings.app/Contents/MacOS/捎话 Tidings" > /tmp/r2-app2.log 2>&1 &
+  "scaffold/desktopApp/build/compose/binaries/main/app/榫卯 Tenon.app/Contents/MacOS/榫卯 Tenon" > /tmp/r2-app2.log 2>&1 &
   # 打开一个会话并点那颗截图按钮（坐标随窗口布局，先 gui shot 量）
   /tmp/gui click <pid> 248 311 ; /tmp/gui click <pid> 496 594
   swift /tmp/winlist.swift | grep Capture          # 期望：name=Capture layer=3 bounds=0,0,1920,1080

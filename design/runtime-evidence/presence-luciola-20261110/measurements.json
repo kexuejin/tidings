@@ -1,0 +1,35 @@
+{
+  "run": "presence-luciola-20261110",
+  "purpose": "双端同为 luciola 后的空闲在线复验（第六判据的前提检查）",
+  "assembly": {
+    "desktop_host": "源码启动 :desktopApp:run --args=--headless，控制面 8788 回环，uptime_ms=130444",
+    "phone": "21:32 编译的 debug 包，重新安装并唤醒到前台",
+    "both_sides_transport": "两端日志均出现 [xport]（安全信道），legacy 分支已不在"
+  },
+  "samples": {
+    "desktop_healthz": {"ok": true, "peers": 30, "online": 1, "pending": 501},
+    "phone_link_json": {
+      "linkTotal": 0,
+      "linked_peers": 0,
+      "peers": 12,
+      "host_online": true,
+      "host_dial_attempts": 21,
+      "host_dial_failures": 21,
+      "host_last_error": "connect-timeout",
+      "host_dial_target_shape": "多个候选地址轮换，端口为链路端口"
+    },
+    "phone_logcat_sweep_offline_last_3000_lines": 0,
+    "phone_banner_host_sleeping": false,
+    "idle_seconds_observed": 130
+  },
+  "verdicts": {
+    "idle_presence_stable": "现象未复现（130s > 90s 阈值，online 未翻、无横幅、无翻面日志）",
+    "peer_idle_stays_online": "不适用（修复后返回 None）：无在册活跃链路，空集不许冒充通过",
+    "link_channel": "未建立：手机拨号 21 连败、宿主心跳大量 no session / unpaired，需另立案"
+  },
+  "guards": {
+    "dry_run_items": 28,
+    "new_guard": "review-gate-idle-requires-live-link",
+    "reverse_probe": "把无链路早退改成恒假后仅该守卫判红，恢复后 28 项全绿"
+  }
+}

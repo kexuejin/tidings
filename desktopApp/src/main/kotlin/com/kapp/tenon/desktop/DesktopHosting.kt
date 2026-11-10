@@ -195,7 +195,7 @@ internal object DesktopUiPrefs {
         }
         props.setProperty(key, value.toString())
         try {
-            file.outputStream().use { props.store(it, "Tidings desktop UI preferences") }
+            file.outputStream().use { props.store(it, "Tenon desktop UI preferences") }
         } catch (_: IOException) {
             // 写不进去只丢这次偏好，不该让消息收发跟着失败。
         }
@@ -563,8 +563,8 @@ internal fun FrameWindowScope.DesktopSystemMenuBar(
             // 退出项**只在非 macOS** 上由我们提供。
             //
             // 真机证据（在 Mac 上用 System Events 读菜单栏）：
-            // 菜单栏四格 = Apple | Tidings（AWT 自带应用菜单：About/Services/Hide/Quit 捎话 Tidings）
-            // | 捎话 Tidings（我们的 Compose MenuBar 应用菜单：设置/诊断包/**退出**）| 文件。
+            // 菜单栏四格 = Apple | Tenon（AWT 自带应用菜单：About/Services/Hide/Quit 榫卯 Tenon）
+            // | 榫卯 Tenon（我们的 Compose MenuBar 应用菜单：设置/诊断包/**退出**）| 文件。
             // 即同一台机器上出现**两个退出项**。AWT 那份是 macOS 应用菜单的强制部分，删不掉；
             // 所以删我们这条，并由 installAwtQuitHandler 把它的行为接到同一条退出路径上
             // （默认策略会绕过 shutdown() 直接退出进程）。
@@ -986,7 +986,7 @@ internal fun FrameWindowScope.DesktopDropTarget(
  *
  * ## 配色为什么在这里重铺一次 theme
  * 本函数在两个调用点都位于 `AppTheme` 之外，环境里的 `MaterialTheme` 是 M3 默认
- * 浅色；直接用它，深色主题下覆盖层会是一张白卡片。显式提供 Tidings 的那两套 scheme，
+ * 浅色；直接用它，深色主题下覆盖层会是一张白卡片。显式提供 Tenon 的那两套 scheme，
  * 深浅两态都不硬编码颜色（项目硬规则：不允许 `Color(0x…)`）。
  *
  * ## 文案

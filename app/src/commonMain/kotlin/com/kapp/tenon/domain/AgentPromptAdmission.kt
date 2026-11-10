@@ -16,7 +16,7 @@ import com.kapp.tenon.core.protocol.AgentGrantPolicies
  *
  * ## 判据的三个维度
  *
- * 1. **消息本身该不该叫醒 agent** —— 判据只有一份：Tidings 侧的 `shouldTriggerAgent`。
+ * 1. **消息本身该不该叫醒 agent** —— 判据只有一份：Tenon 侧的 `shouldTriggerAgent`。
  *    桥接侧**不许重算**（AGENTS §2.4：一个事实一个来源）。重算的后果是两边对「什么算 @」
  *    的理解慢慢分叉，最后出现「手机上显示已 @、宿主没执行」或反过来的静默。
  * 2. **有没有可投递的会话** —— 必须带 `agentSessionId`。没带就**不投**，
@@ -60,7 +60,7 @@ internal object AgentPromptAdmission {
     /**
      * 判定一次注入。
      *
-     * @param addressedToAgent Tidings 侧 `shouldTriggerAgent` 的结果，**原样传入，不重算**。
+     * @param addressedToAgent Tenon 侧 `shouldTriggerAgent` 的结果，**原样传入，不重算**。
      * @param agentSessionId 消息携带的会话归属；null = 没带。
      * @param senderAccess 发送方对**本机 agent** 的访问档；null = 没有任何授权记录。
      */

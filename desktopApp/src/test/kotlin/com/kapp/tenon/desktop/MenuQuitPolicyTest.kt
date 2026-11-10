@@ -10,8 +10,8 @@ import kotlin.test.assertTrue
  * 「退出项只能有一个」的两条判据（task-56）。
  *
  * 真机证据（2026-10-18 23:17，Lead 用 System Events 读 Mac 菜单栏）：
- * 菜单栏四格 = Apple | Tidings（AWT 自带应用菜单，含 Quit 捎话 Tidings）
- * | 捎话 Tidings（我们的 Compose MenuBar 应用菜单，含 退出）| 文件 ⇒ **两个退出项**。
+ * 菜单栏四格 = Apple | Tenon（AWT 自带应用菜单，含 Quit 榫卯 Tenon）
+ * | 榫卯 Tenon（我们的 Compose MenuBar 应用菜单，含 退出）| 文件 ⇒ **两个退出项**。
  *
  * AWT 那份是 macOS 应用菜单的强制部分、删不掉 ⇒ 我们这条在 macOS 上不画；
  * 但它的行为必须与我们的退出路径一致（JDK 默认策略会绕过 shutdown() 直接结束 JVM），

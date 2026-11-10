@@ -23,6 +23,7 @@ import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertFalse
 import kotlin.test.assertTrue
+import com.kapp.tenon.core.testing.udpTestTransport
 
 /**
  * 画面信道在运行时里的**接线**（不是数据面本身）：
@@ -109,6 +110,7 @@ class ScreenChannelWiringTest {
         val peerId = newId()
         val screenPort = freePort()
         val runtime = NodeRuntime(
+            messengerTransportFactory = udpTestTransport(),
             profile = profile("self", MsgTypes.MOBILE_CAPS + MsgTypes.CAP_SCREEN_CHANNEL),
             udpPort = 0,
             tcpPort = 0,
@@ -143,6 +145,7 @@ class ScreenChannelWiringTest {
         val fake = FakeHost()
         val peerId = newId()
         val runtime = NodeRuntime(
+            messengerTransportFactory = udpTestTransport(),
             profile = profile("self", MsgTypes.MOBILE_CAPS + MsgTypes.CAP_SCREEN_CHANNEL),
             udpPort = 0,
             tcpPort = 0,
@@ -179,6 +182,7 @@ class ScreenChannelWiringTest {
         val peerId = newId()
         val screenPort = freePort()
         val runtime = NodeRuntime(
+            messengerTransportFactory = udpTestTransport(),
             profile = profile("self", MsgTypes.MOBILE_CAPS + MsgTypes.CAP_SCREEN_CHANNEL),
             udpPort = 0,
             tcpPort = 0,

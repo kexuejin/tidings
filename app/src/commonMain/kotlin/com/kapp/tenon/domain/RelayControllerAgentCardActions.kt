@@ -506,12 +506,12 @@ internal class RelayControllerAgentCardActions(
             // （`broadcastAgentState` 需要群）又发不出去 —— 点了彻底没反应。
             return port.grantAllowsNode(agentId, decidedBy)
         }
-        // **编排器代发的卡没有真实席位**：多棒链的卡署名 `tidings-chain`（DesktopStageChain），
+        // **编排器代发的卡没有真实席位**：多棒链的卡署名 `tenon-chain`（DesktopStageChain），
         // 它不在 `virtualAgents` 里。按假名查台账/策略必然双双落空 → 掉进最严档 LIST →
         // 连本可以驱动工作区 agent 的人都被拒（现场：点链卡的「合并此补丁」，
-        // 群里回「对端设备没有权限驱动 tidings-chain」，合并永远点不动）。
+        // 群里回「对端设备没有权限驱动 tenon-chain」，合并永远点不动）。
         //
-        // 这与当年工单卡写死 `tidings-worker` 是同一个坑的镜像：那次是卡面写假名被
+        // 这与当年工单卡写死 `tenon-worker` 是同一个坑的镜像：那次是卡面写假名被
         // `AgentExecAuthorizer` 拒，改成了卡挂真实 agentKey；链卡天生没有单一 agent，
         // 所以在**这一侧**兜 —— 认不出的 agentId 按本机托管给这个群的 agent 判资格
         // （卡本身是这个群工作区的产物，谁能驱动工作区 agent 谁就能操作它的卡）。

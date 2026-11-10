@@ -15,7 +15,7 @@ import kotlin.test.assertTrue
  * 「迁移成功」与「什么都没做」。
  */
 class LegacyLoginItemMigrationTest {
-    private fun tempHome(): File = Files.createTempDirectory("tidings-home").toFile()
+    private fun tempHome(): File = Files.createTempDirectory("tenon-home").toFile()
 
     private fun writePlist(home: File, label: String) {
         val agents = File(home, "Library/LaunchAgents").apply { mkdirs() }

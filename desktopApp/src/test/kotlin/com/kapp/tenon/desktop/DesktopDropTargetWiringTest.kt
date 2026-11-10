@@ -74,7 +74,7 @@ class DesktopDropTargetWiringTest {
 
     @Test
     fun 主窗未选会话时把拖放交给目标选择器而不是只弹通知() {
-        // 空态文案承诺「捎话会问你要发给谁」（r2_shell_nosel_hint），旧行为却是
+        // 空态文案承诺「榫卯会问你要发给谁」（r2_shell_nosel_hint），旧行为却是
         // 只弹一条「请先选会话」系统通知 —— 文案在撒谎。守卫钉住补上的行为。
         // 反向验证：把 DesktopWindow 的 onPickTarget 参数删掉，这条立刻红。
         assertTrue(

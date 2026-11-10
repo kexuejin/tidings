@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: GPL-3.0-only
 
-// Tidings 编排层（orchestration）。
+// Tenon 编排层（orchestration）。
 //
 // ## 它是什么
 //

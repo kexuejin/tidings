@@ -15,20 +15,20 @@ import kotlinx.serialization.json.Json
 import kotlin.concurrent.Volatile
 
 /** 本产品在 luciola 发现层的 `Profile.product` 标签；同时作为允许列表的唯一成员。 */
-private const val PRODUCT = "tidings"
+private const val PRODUCT = "tenon"
 
 /**
  * 阶段二:luciola 发现引擎(JVM 桌面宿主;Android 在阶段三接入)。
  *
- * 映射(MIGRATION-tidings.md):
- * - found/updated → extra 反序列化为 Tidings Profile → [PeerRegistry.touch]
+ * 映射:
+ * - found/updated → extra 反序列化为 Tenon Profile → [PeerRegistry.touch]
  *   (confirmed = true:luciola 引擎侧即定向握手语义)——registry 自发
  *   Updated/Online,Messenger 积压补发免费获得触发。
- * - lost → luciola nodeId → Tidings nodeId 映射表 → [PeerRegistry.markOffline]。
+ * - lost → luciola nodeId → Tenon nodeId 映射表 → [PeerRegistry.markOffline]。
  * - announce/announceExit:引擎自治(start 宣告、presence 保活、stop 挥手)。
  * - announceTo(host, port) → [UniffiEngineAdapter.dial](manualPeers 定向重宣告)。
  *
- * 纯 luciola 节点(无 extra)被忽略:不是 Tidings 节点。
+ * 纯 luciola 节点(无 extra)被忽略:不是 Tenon 节点。
  * 监督(看门狗/换网重建)阶段三包 DiscoveryController 时补上。
  */
 class LuciolaDiscoveryEngine(
@@ -67,7 +67,7 @@ class LuciolaDiscoveryEngine(
     // 档案在 **start() 那一刻**取：tlsPin / 地址是运行时才知道的，构造时快照会把它们冻住。
     private var adapter: UniffiEngineAdapter? = null
 
-    // luciola nodeId -> Tidings nodeId(lost 事件只带 luciola 侧 id)
+    // luciola nodeId -> Tenon nodeId(lost 事件只带 luciola 侧 id)
     private val idMap = HashMap<String, String>()
     private val idMapLock = com.kapp.tenon.core.createCoreLock()
 
@@ -160,7 +160,7 @@ class LuciolaDiscoveryEngine(
         val raw = peer.extra ?: return
         val profile = runCatching { json.decodeFromString(Profile.serializer(), raw) }.getOrNull() ?: return
         // **两个 id 都要登记**：引擎在 Found/Updated 里报的是它自己的 nodeId，而 Lost 里
-        // 报的 id 在部分引擎版本里是信标里那个（我们自己的 Tidings nodeId）。只登记前者时，
+        // 报的 id 在部分引擎版本里是信标里那个（我们自己的 Tenon nodeId）。只登记前者时，
         // Lost 查不到映射 ⇒ `onLuciolaLost` 直接 return ⇒ 对端明明下线了，
         // 本端节点表**永远显示在线**（这正是 §3 那类"看起来正常、实际收不到"的形态）。
         idMapLock.withLock {
@@ -170,19 +170,11 @@ class LuciolaDiscoveryEngine(
         if (loggedPeers.add(profile.nodeId)) {
             println("[luciola] discovered " + profile.nodeId + " at " + peer.ip + ":" + peer.udpPort)
         }
-        // 端口优先用档案里的 luciolaPort:发现引擎上报的 udpPort 可能是临时端口,
-        // 而加密信道监听在固定端口(真机实测 52213 vs 17878)。老档案没这个键才回退。
-        //
-        // **这里必须自己校验范围**:这段 JSON 来自 native 引擎的 `peer.extra`,
-        // **不经过** CodecProfile.validateProfile(那条路只覆盖信封里的 profile)。
-        // 越界值若原样进 registry,会被 toUShort() 截断成另一个端口 —— 发不出去、也没有报错。
-        val advertisedPort = profile.luciolaPort
-        val sendPort = if (advertisedPort != null && advertisedPort !in 1..65535) {
-            println("[luciola] ignore out-of-range luciolaPort=" + advertisedPort)
-            peer.udpPort
-        } else {
-            advertisedPort ?: peer.udpPort
-        }
+        // 归一收口在 sendingPortFor（与入站发现帧共用一条）：引擎上报的 udpPort 可能是
+        // 临时端口，而加密信道监听在固定端口。这里的 JSON 来自 native 的 peer.extra，
+        // 不经过 CodecProfile.validateProfile，越界值必须挡下（否则被 toUShort() 截断，
+        // 发不出去也没有报错）。
+        val sendPort = sendingPortFor(profile, peer.udpPort)
         val touched = registry.touch(profile.nodeId, peer.ip, sendPort, profile, confirmed = true)
         if (touched == null) {
             // 诊断：地址漂移/资料被拒时 touch 返回 null，registry 保持旧记录（可能离线）。
@@ -195,12 +187,12 @@ class LuciolaDiscoveryEngine(
 
     private fun onLuciolaLost(luciolaNodeId: String) {
         peersLock.withLock { knownPeers.remove(luciolaNodeId) }
-        val tidingsId = idMapLock.withLock { idMap.remove(luciolaNodeId) }
-        if (tidingsId == null) {
+        val tenonId = idMapLock.withLock { idMap.remove(luciolaNodeId) }
+        if (tenonId == null) {
             // 不许静默 return：那条分支会让"对端下线了但节点表永远在线"变成无声故障。
             println("[luciola] lost event for unknown node id=" + luciolaNodeId + "（未找到映射，节点表不会翻转）")
             return
         }
-        registry.markOffline(tidingsId)
+        registry.markOffline(tenonId)
     }
 }

@@ -36,6 +36,7 @@ import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertNotEquals
 import kotlin.test.assertTrue
+import com.kapp.tenon.agent.udpTestTransport
 
 /**
  * 控制面的进程内端到端测试：**真的**起两个 [NodeRuntime]（一个当 agentNode，一个当
@@ -69,6 +70,7 @@ class ControlPlaneTest {
 
         // 普通桌面节点那一侧：只做协议对端，不起控制面。
         desktop = NodeRuntime(
+            messengerTransportFactory = udpTestTransport(),
             profile = Profile.mobile(
                 nodeId = newId(),
                 nick = "桌面端",
@@ -81,9 +83,10 @@ class ControlPlaneTest {
 
         // agentNode 那一侧。
         agent = NodeRuntime(
+            messengerTransportFactory = udpTestTransport(),
             profile = Profile.mobile(
                 nodeId = newId(),
-                nick = "Tidings Agent",
+                nick = "Tenon Agent",
                 host = "relay-agent",
                 ver = "relay-0.1.0",
             ),
@@ -255,6 +258,36 @@ class ControlPlaneTest {
         }
     }
 
+    @Test
+    fun tokenAcceptsBearerAndTenonHeaderOnly() {
+        val guarded = ControlPlane(agent, httpPort = 0, token = "s3cret-token", sessions = AgentSessionRegistry(), loadProbe = { null })
+        guarded.start()
+        try {
+            val reqTenon = HttpRequest.newBuilder(URI("http://$LOOPBACK:${guarded.boundPort}/healthz"))
+                .header("X-Tenon-Token", "s3cret-token")
+                .GET().build()
+            assertEquals(200, client.send(reqTenon, HttpResponse.BodyHandlers.ofString()).statusCode())
+
+            val reqBearer = HttpRequest.newBuilder(URI("http://$LOOPBACK:${guarded.boundPort}/healthz"))
+                .header("Authorization", "Bearer s3cret-token")
+                .GET().build()
+            assertEquals(200, client.send(reqBearer, HttpResponse.BodyHandlers.ofString()).statusCode())
+
+            // 不再兼容旧头 X-Tidings-Token
+            val reqLegacy = HttpRequest.newBuilder(URI("http://$LOOPBACK:${guarded.boundPort}/healthz"))
+                .header("X-Tidings-Token", "s3cret-token")
+                .GET().build()
+            assertEquals(401, client.send(reqLegacy, HttpResponse.BodyHandlers.ofString()).statusCode())
+
+            val reqWrong = HttpRequest.newBuilder(URI("http://$LOOPBACK:${guarded.boundPort}/healthz"))
+                .header("X-Tenon-Token", "wrong")
+                .GET().build()
+            assertEquals(401, client.send(reqWrong, HttpResponse.BodyHandlers.ofString()).statusCode())
+        } finally {
+            guarded.stop()
+        }
+    }
+
     // ------------------------------------------------------------------ agent 会话帧（PPE-1）
 
     @Test
@@ -412,6 +445,7 @@ class ControlPlaneTest {
     fun aPeerWithoutAgn1IsRefusedWithADowngradePath() {
         // §4 的老节点：caps 里没有 agn1，就是"看不懂 agent 帧"。
         val plain = NodeRuntime(
+            messengerTransportFactory = udpTestTransport(),
             profile = Profile.mobile(
                 nodeId = newId(),
                 nick = "只会文本",
@@ -611,6 +645,7 @@ class ControlPlaneTest {
         // 协议要求发送端只向声明 tbl1 的对端附带这段 TSV。造一个"未声明 tbl1 的老版本对端"：
         // 只声明 tw1，不声明 tbl1。
         val legacy = NodeRuntime(
+            messengerTransportFactory = udpTestTransport(),
             profile = Profile.mobile(
                 nodeId = newId(),
                 nick = "老版本对端",

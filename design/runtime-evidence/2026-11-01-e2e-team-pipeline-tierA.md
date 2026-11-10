@@ -46,7 +46,7 @@
 | # | 形态 | 之后 |
 |---|---|---|
 | 收割静默为空 | `!patch.ok` 与 `parseStat==0` 两条 `return null` 一行日志都不打 ⇒「没有交付物」与「收割失败」在外部完全同形（一轮 16 分钟的真实执行因此无法归因） | 两条分支 + 非零退出各打一行，**并同时 append 进 `task.log`**（GUI/`open` 启动时宿主 stdout 没人接，结论必须跟着产物走） |
-| codex 参数 | `codex exec` **默认 read-only**，连自己 worktree 都写不了（`writing is blocked by read-only sandbox`）⇒ 每次派单「跑完了但没有交付物」 | 参数固定 `exec --json --sandbox workspace-write`；宿主已在 seatbelt 里跑时可显式 `TIDINGS_CODEX_SANDBOX=danger-full-access`（认不出的值一律回落默认） |
+| codex 参数 | `codex exec` **默认 read-only**，连自己 worktree 都写不了（`writing is blocked by read-only sandbox`）⇒ 每次派单「跑完了但没有交付物」 | 参数固定 `exec --json --sandbox workspace-write`；宿主已在 seatbelt 里跑时可显式 `TENON_CODEX_SANDBOX=danger-full-access`（认不出的值一律回落默认） |
 | GUI 启动没 PATH | 从 LaunchServices 拉起的宿主只有最小 PATH，而 codex 是 `#!/usr/bin/env node` 脚本 ⇒ `env: node: No such file or directory`，`cli exit=127`（同一个 codex 从终端起就正常） | `CliDiscovery.childPath()`：宿主 PATH + 发现器约定目录 + nvm/volta/bun 的 bin，注入子进程环境 |
 
 ## 3. 第 2 号发现 · 幕 6 在真机上没有入口
@@ -70,13 +70,13 @@
 
 - **驱动换人**：`agy` 上游 `daily-cloudcode-pa.googleapis.com` 连续 7 小时 502（`Eligibility check failed … Bad Gateway`，裸命令复现），幕 4/5 改由 `codex-cli` 执行。证的是「派单 → 执行 → 收割 → 产物」这条链，不是某个具体厂商。
 - **两次合流是人工预置**：幕 2 的设计、幕 4 的实现都以 `git apply` 落进宿主仓再提交（`3034aab`、`0bfe75a`），因为第 2 号发现那条合并入口不存在；沙箱 worktree 从 `HEAD` 开，不预置的话下一幕根本看不到上一幕的产物。
-- **启动方式有讲究**：宿主必须从**终端**拉起才能跑 codex（GUI 拉起缺 shell 环境）；而宿主自己被 seatbelt 包着时，codex 的 `sandbox-exec` 套不进去，需要那枚 `TIDINGS_CODEX_SANDBOX` 逃生口。
+- **启动方式有讲究**：宿主必须从**终端**拉起才能跑 codex（GUI 拉起缺 shell 环境）；而宿主自己被 seatbelt 包着时，codex 的 `sandbox-exec` 套不进去，需要那枚 `TENON_CODEX_SANDBOX` 逃生口。
 
 ## 5. 复现
 
 ```bash
 # 宿主（终端启动，带逃生口）
-cd /Applications/Tidings.app/Contents/MacOS && TIDINGS_CODEX_SANDBOX=danger-full-access ./Tidings > /tmp/tidings-app.log 2>&1 &
+cd /Applications/Tenon.app/Contents/MacOS && TENON_CODEX_SANDBOX=danger-full-access ./Tenon > /tmp/tenon-app.log 2>&1 &
 
 # 单幕（幕 3 要在手机私聊里点批准；幕 4/5 各 6–10 分钟）
 E2E_AGENT_KEY=codex python3 scripts/e2e-team-pipeline.py --act 4 --tier real
@@ -95,7 +95,7 @@ E2E_AGENT_KEY=codex python3 scripts/e2e-team-pipeline.py --act 4 --tier real
 |---|---|---|
 | `d2f369d2` | 审批回执推进后唤醒长轮询（`applyAckToApproval` 打通知） | `appliedAckWakesTheWaitingLongPoll`：摘掉通知行即红 |
 | `a22fdf04` | 幽灵 peer：抽 `pickHookPeer`，先按 `ip:udpPort` 折叠取 `profileRev` 最大，再取 nodeId 最小 | `HookPeerPickTest` 4 条：摘掉折叠即红 |
-| `a6646b08` | 派单三条阻断：spawn 后关 stdin / codex 固定 `--sandbox workspace-write`（留 `TIDINGS_CODEX_SANDBOX` 逃生口）/ `CliDiscovery.childPath()` 补解释器 PATH；收割路径两处静默 `return null` 改 `note()` | `childPath` 与 `codexSandboxMode` 两条用例；stdin 一条只真机可复现（单测里子进程 stdin 已是 EOF），已在代码注释写明 |
+| `a6646b08` | 派单三条阻断：spawn 后关 stdin / codex 固定 `--sandbox workspace-write`（留 `TENON_CODEX_SANDBOX` 逃生口）/ `CliDiscovery.childPath()` 补解释器 PATH；收割路径两处静默 `return null` 改 `note()` | `childPath` 与 `codexSandboxMode` 两条用例；stdin 一条只真机可复现（单测里子进程 stdin 已是 EOF），已在代码注释写明 |
 | `584f54b5` | E2E 判据改成真机可证的读数（群消息不发只观测、守门看卡片 `decidedBy`、产物只认本次新增、`relay.db-wal` 同读）+ 本文件 | 幕表重跑：判据改完后幕 4/5 仍绿、幕 6 如实红 |
 
 收工读数：`:agentNode:test` 全量绿 2m6s；施工痕迹门禁 17 根 0 命中；`git status` 净。
@@ -107,7 +107,7 @@ E2E_AGENT_KEY=codex python3 scripts/e2e-team-pipeline.py --act 4 --tier real
 
 ## 9. 派单止损（§6 第 3 条的落地）
 
-`WorktreeSandboxExecutor.run` 加了**墙钟**上限：默认 30 min（`TIDINGS_SANDBOX_TIMEOUT_MS` 可覆盖，
+`WorktreeSandboxExecutor.run` 加了**墙钟**上限：默认 30 min（`TENON_SANDBOX_TIMEOUT_MS` 可覆盖，
 认不出的值一律回落默认 —— `0` / 负数 / 乱写不许变成「立刻杀掉」）。超过上限按 D-024 中止序
 摘掉进程树、宽限后 SIGKILL、**等它真死**再清理 worktree，然后回一个新的终局
 `Outcome.TimedOut(timeoutMs)`，并与 `task.log` 里写一行真因。
@@ -126,7 +126,7 @@ E2E_AGENT_KEY=codex python3 scripts/e2e-team-pipeline.py --act 4 --tier real
 ## 10. 幕 6 补测 · 手机派单与点卡合流（推翻 §3）
 
 **驱动方式**：全程 adb 驱动真机（Pixel 6 / `com.kapp.tenon.debug`），未经人手；宿主是
-`open -a /Applications/Tidings.app` 起的 GUI 进程（PID 38550，控制面 `:8788`）。
+`open -a /Applications/Tenon.app` 起的 GUI 进程（PID 38550，控制面 `:8788`）。
 
 ### 10.1 装置准备（不是产品路径）
 
@@ -188,7 +188,7 @@ if (actionId == "merge-patch" && sessionId != null) { … DesktopPatchMerge.appl
 
 ### 10.4 修后复验（09:07:00 → 09:07:44，44 s）
 
-重打包 → 换 `/Applications/Tidings.app`（旧的挪到 `/tmp/Tidings.app.old-20261101-090203`）→
+重打包 → 换 `/Applications/Tenon.app`（旧的挪到 `/tmp/Tenon.app.old-20261101-090203`）→
 重启宿主，然后同一条手机链路重跑一遍（新 cardId `diff-t-1-7ee79fe2`，避开按 `cardId|action`
 幂等的判定台账）：
 

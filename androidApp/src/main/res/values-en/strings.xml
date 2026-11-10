@@ -7,11 +7,11 @@
   AAPT2 看不见 composeResources 里那份（实测症状是构建期直接失败
   `AAPT: error: resource string/app_name … not found.`）。
 
-  英文名与界面里的自称一致：`composeApp/src/commonMain/composeResources/values-en/strings.xml:587`
-  的 `desktop_app_title` 是 `Tidings`（中文侧是 `捎话 Tidings`）。
+  英文名与界面里的自称一致：`composeApp/src/commonMain/composeResources/values-en/strings.xml`
+  的 `desktop_app_title` 是 `Tenon`（中文侧是 `榫卯 Tenon`）。
 
   为什么要有这个文件：没有 `values-en` 时，英文系统上图标下面显示的是中文
-  「捎话」——**构建不失败、门禁不报红、截图照不到**（截图帧全写死
+  「榫卯」——**构建不失败、门禁不报红、截图照不到**（截图帧全写死
   `locale = "zh-rCN"`，且 `design-locale-parity.py` 的扫描根是 composeResources，
   结构上看不到 androidApp 这份 res）。属"少读 = 假绿"。
 -->

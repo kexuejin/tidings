@@ -1,4 +1,4 @@
-捎话 Tidings · W1 三轨（task-1/task-2/task-3）独立验证报告
+榫卯 Tenon · W1 三轨（task-1/task-2/task-3）独立验证报告
 验证者：verifier（task-4，未参与实现）  基准：HEAD 8645403（2026-10-19 21:54）
 方法：不跑 gradle（Lead 串行执行）。全部结论来自只读命令 + 我自己写的剥注释/词法器复现脚本
       （/tmp/verifier-baseline/*.py），并用 `git archive HEAD` 的改动前快照做反向验证。

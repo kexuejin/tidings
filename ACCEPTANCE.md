@@ -49,7 +49,7 @@ Wi-Fi 省电模式下能否收到、TCP 直连、托盘/深链/多窗口、通�
 
 - 产物统一放 `~/Downloads/relay-build-<date>/`；**报告前核对 sha256**。
 - APK：`adb -s <serial> install -r -d <apk>`。
-- 桌面端：`osascript -e 'quit app "Tenon"' || osascript -e 'quit app "Tidings"'` → 替换 `/Applications/Tenon.app` → **重注册** → `open -a`：
+- 桌面端：`osascript -e 'quit app "Tenon"'` → 替换 `/Applications/Tenon.app` → **重注册** → `open -a`：
 
   ```bash
   /System/Library/Frameworks/CoreServices.framework/Frameworks/LaunchServices.framework/Support/lsregister \
@@ -94,7 +94,7 @@ Wi-Fi 省电模式下能否收到、TCP 直连、托盘/深链/多窗口、通�
   `design/runtime-evidence/notify-android-policy.txt`。
 
 ### A3 局域网自动发现（手机 ↔ 手机）
-- 期望：两台手机都开着捎话时，几秒内各自出现在对方的「局域网发现」里。
+- 期望：两台手机都开着榫卯时，几秒内各自出现在对方的「局域网发现」里。
 - 已知未验：手机端**只做发送侧广播**，不声明 `CHANGE_WIFI_MULTICAST_STATE`。
   部分机型在 Wi-Fi 省电模式下会过滤广播帧 ⇒ 本项请**特意锁屏放 2 分钟再打开**复验一次，
   若确实收不到，再回来讨论要不要加 MulticastLock。
@@ -254,8 +254,8 @@ Wi-Fi 省电模式下能否收到、TCP 直连、托盘/深链/多窗口、通�
 - 步骤：设备 A 打开「节点」页停在我的二维码上（A14）；设备 B：
   「节点 → 添加节点 → 扫码配对 → 打开相机扫码」，把 A 的码放进取景框。
 - 期望：
-  1. B 第一次点「打开相机扫码」时弹系统相机授权框（Android 是「允许捎话拍照」，
-     iOS 是「捎话要用相机扫对方屏幕上的配对二维码…」）；
+  1. B 第一次点「打开相机扫码」时弹系统相机授权框（Android 是「允许榫卯拍照」，
+     iOS 是「榫卯要用相机扫对方屏幕上的配对二维码…」）；
   2. 取景框里能看到**真实相机画面**，把 A 的码对准后约 1 秒内自动返回节点页；
   3. B 的节点表里出现 A（地址 = A 屏上那串 `relay://` 里的 host:port），随后能收发消息。
   4. 在取景框上按**系统返回键**（或点左上角 ×）→ 回到节点页，**不是**退出应用。
@@ -263,7 +263,7 @@ Wi-Fi 省电模式下能否收到、TCP 直连、托盘/深链/多窗口、通�
   - 拒绝授权 → 扫码页横幅「相机权限被拒绝，请在系统设置里开启后重试。」+「再试一次」；
   - 相机被别的应用占用 / 模拟器没有相机 → 横幅「这台设备现在给不出相机画面（模拟器没有
     相机，或相机正被别的应用占用）。也可以回节点页用「填地址」把对方加进来。」；
-  - 扫到别的二维码（网址、支付码）→ 横幅「这不是捎话的配对码」；
+  - 扫到别的二维码（网址、支付码）→ 横幅「这不是榫卯的配对码」；
   - 一直扫不到 → 「再试一次」重绑相机；「扫不到？回节点页填地址」是**同等地位**的出路。
 - 已经跑过的（2026-10-07，Pixel 6，见 `design/runtime-evidence/scan-a15-android-permission.txt`）：
   第 1 步的授权框（首次点「打开相机扫码」时 `granted=false` → 弹系统框 → 点允许后 `granted=true`）、
@@ -274,7 +274,7 @@ Wi-Fi 省电模式下能否收到、TCP 直连、托盘/深链/多窗口、通�
   从一张**已有的图片**里读码，不需要相机、也不需要第二块屏幕。Android（Pixel 6）与
   iOS（iPhone 17 Pro 模拟器）都验过：删空「已保存的节点」→ 导入一张编着
   `relay://192.0.2.82:17878` 的图 → 横幅「已向 192.0.2.82:17878 打招呼，等它回应。」，
-  落盘设置里多出那一条；两张反例图分别给出「这个二维码不是捎话的配对码。」与
+  落盘设置里多出那一条；两张反例图分别给出「这个二维码不是榫卯的配对码。」与
   「这张图里没找到二维码。换一张对着码拍的照片，或者直接用相机扫。」。全程命令与原始输出见
   [`design/runtime-evidence/scan-import-image.txt`](design/runtime-evidence/scan-import-image.txt)。
 - **还没跑过的**：第 2 步「取景框里能看到真实相机画面」。截下来的取景区是**全黑**的 ——
@@ -438,7 +438,7 @@ Wi-Fi 省电模式下能否收到、TCP 直连、托盘/深链/多窗口、通�
 
 | 步骤 | 期望（判据） |
 |---|---|
-| 群里发一条带 `senderId` 的 agent 转发消息，群内有**上游茶话间 0.61.2**（或老 Tidings，caps 无 `gta1`） | 它**能显示这条**，且收到的帧只含 `kind/text/groupId/groupRev/mentions/resend/replyTo`；`id` 与声明了 `gta1` 的成员收到的**完全相同**（`ts` 也相同） |
+| 群里发一条带 `senderId` 的 agent 转发消息，群内有**上游茶话间 0.61.2**（caps 无 `gta1`） | 它**能显示这条**，且收到的帧只含 `kind/text/groupId/groupRev/mentions/resend/replyTo`；`id` 与声明了 `gta1` 的成员收到的**完全相同**（`ts` 也相同） |
 | 同一条失败消息连点「重发」5 次 | 对端 `MessageEntity` 只多**一条**，且 `id` 等于本地 `MessageUi.id`；不是每次一个新 id |
 | 关 WiFi、只留蜂窝后点重发 | 15 秒内该对端在 `files/relay/stores/queue.log` 的行数**开始下降**；不降则 `adb logcat` 过滤 `ENETUNREACH` —— 出现即内核没路由（需要 UDP/TCP 绑网，见 `ARCHITECTURE.md`） |
 | 全程 | `files/relay/diag/link.json` 的 `closeCount` 保持 **0**（换网/断网/冷启动） |
@@ -530,7 +530,7 @@ D13（出站卡不收敛）追踪完毕本轮不修：出站 Completed 只由收
 两端不对称（手机全 luciola、桌面默认 legacy）⇒ 手机连不上旧构建节点与上游 0.61.1 基准，
 A18 旧读数不再代表现状，需产品口径后改三份文档。**L0**：8 模块串行 + 10 门禁 +
 stability（3 轮全新）+ design 组全绿；design 组三处合修按门禁自述流程记账
-（.plg-ico 15px→16px 收敛、tidings 残树 308 文件清理、dp-debt 账本重生成）。
+（.plg-ico 15px→16px 收敛、旧残树 308 文件清理、dp-debt 账本重生成）。
 
 #### A22 第 3 行 · 11-08 第二轮的阻塞点位移（已修掉的已划掉，新增四条并列成因）
 
@@ -603,7 +603,7 @@ D6 记的是「重启后合不了」，当时归因为「链卡工作区靠内�
 
 ### I2 本地网络授权弹窗 ⚠️ 模拟器不强制，只能记现状
 - 步骤：首次进「节点」页。
-- 期望：弹「捎话需要在同一个 Wi-Fi 下找到其他设备…」。
+- 期望：弹「榫卯需要在同一个 Wi-Fi 下找到其他设备…」。
 - 反例：**连弹窗都不出现、自动发现永远搜不到任何东西** ——
   说明 `NSLocalNetworkUsageDescription` / `NSBonjourServices` 缺失或被改坏。
 - 本轮：模拟器**不强制**本地网络隐私（Bonjour 注册直接成功），所以弹窗复现不了；
@@ -642,10 +642,14 @@ D6 记的是「重启后合不了」，当时归因为「链卡工作区靠内�
   容器里确实出现 `Library/Application Support/relay/downloads/ios-i4-file.txt/ios-i4-file.txt`，
   67 字节，sha256 `d5ba271c…7aa9`，**与源文件逐字节相同**。
   所以「落在 `downloads`」这句现在有证据了。
-- 多出来的同名一层（`downloads/<文件名>/<文件名>`）**是设计，不是 iOS 缺陷**：每笔传输先按传输名
-  建目录，再按相对路径放文件（`TransferManager.kt:694-698` `saveDir = pathJoin(root, safeRoot)`、
-  `:739` `saved += pathJoin(saveDir, it.relPath)`）；安卓证据里同样是这个嵌套
-  （`c5-android-table-text.txt:42`、`e2e-20-android-open-share.txt:36`）。
+- 多出来的同名一层（`downloads/<文件名>/<文件名>`）**当时被记成「设计」，这一条在
+  2026-11-10 被推翻**：对单文件它就是「一个只装着自己的目录」，同名再传会在里面递增
+  `(1)(2)`，而卡片「打开」按名字取**最旧**那份 ⇒ 用户点开的是上一轮的旧文件
+  （真机现场见 `design/runtime-evidence/prototype-review-live-20261110/FINDING.md`）。
+  现在单文件直落 `downloads/<文件名>`；只有文件夹 / 多文件 / 带子目录的传输才建
+  `<downloads>/<rootName>/`（`TransferManager.saveDirFor` + `transferNeedsFolder`，
+  判据 `core/src/commonTest/.../TransferSaveLayoutTest.kt`）。
+  上面这条 iOS 读数（2026-10-07）是**当时的布局**，保留作为历史记录。
 - 顺带确认：`messages.json` 有内容 ⇒ iOS 的「消息落盘」开关是真的生效的。
 
 ### I5 收到的文件有没有出口 —— **✅ 两个按钮都通过**（出口是本轮补的）
@@ -698,7 +702,8 @@ D6 记的是「重启后合不了」，当时归因为「链卡工作区靠内�
 - 期望与机制同 A7b；这条只记 iOS 这一侧。
 - 图片：证据节点 `POST /v1/send-file {"purpose":"image"}` 发一张 19743 字节的 PNG →
   自动接收 → 卡片上画出缩略图（绿渐变 + 白圆 + `RELAY 06`，与源逐字一致）+
-  「已接收」「已存到 …/downloads/a6-photo.png/a6-photo.png」+「打开」「分享」。
+  「已接收」「已存到 …/downloads/a6-photo.png/a6-photo.png」+「打开」「分享」
+  （2026-10-07 的布局；2026-11-10 起单文件直落 `downloads/a6-photo.png`）。
   容器里落盘副本 sha256 `28b46e64…c991` 与源**逐字节相同**。
 - 语音：同一个控制面发 `{"purpose":"share"}` + `.m4a`（6408 字节）→ 点「接收」后出现
   `Button '播放' {{32,667.33},{58,48}}` → 点它**没有**出现「这台设备放不了这个格式」
@@ -913,12 +918,12 @@ D6 记的是「重启后合不了」，当时归因为「链卡工作区靠内�
 | --- | --- | --- |
 | 1 | 造一个一眼能认出来的文件：`magick -size 240x160 gradient:'#2D6A4F-#95D5B2' -pointsize 22 -fill white -gravity center -annotate 0 'D6b desktop' /tmp/d6b.png` | 文件存在，几 KB |
 | 2 | `curl -s -X POST http://127.0.0.1:8799/v1/send-file -H 'Authorization: Bearer <token>' -d '{"to":"<桌面端 nodeId>","path":"/tmp/d6b.png","name":"d6b.png","purpose":"share"}'` | 返回 `"status":"offered"` 与一个 `transferId`；**收到文件不会自动接受**，这是设计 |
-| 3 | 在桌面端会话里找到那张报价卡，点「接收」 | 卡片从「等你接收」变成「已接收」，并显示「已存到 …/relay/downloads/d6b.png/d6b.png」 |
+| 3 | 在桌面端会话里找到那张报价卡，点「接收」 | 卡片从「等你接收」变成「已接收」，并显示「已存到 …/relay/downloads/d6b.png」（2026-11-10 前是 `downloads/d6b.png/d6b.png`：单文件被套进同名目录，已修） |
 | 4 | 看卡片底部是否出现两个按钮 | **「打开」与「分享」两个 `TextButton` 都在**。只有一个或一个都没有 ⇒ 平台没给出 `receivedFileActions`（`null` 时界面**故意不画**按钮，见 `PlatformContracts.kt`），要回头查 `DesktopPlatform.receivedFileActions` |
 | 5 | 点「打开」 | 系统默认看图应用打开，画面就是那张绿色渐变图、白字 `D6b desktop`。**打不开时它会退到「分享」而不是报错** —— 若直接弹了 Finder，说明这台机器没有该类型的默认应用（`Desktop.open` 抛了），也是契约内的行为，但要记下来 |
 | 6 | 点「分享」 | Finder 打开并**选中** `d6b.png` 本身（`Desktop.browseFileDirectory`）。只打开所在目录、没选中文件 ⇒ 退化到了 `browseDirectory` 那条兜底路径，记下来 |
 | 7 | 两个动作都点完之后 `pgrep -fl 'app.relay.desktop.MainKt'` | 进程仍在。契约写明实现**不许抛异常**，做不到就什么都不发生并自己留痕（桌面没有日志框架，诊断走 `println("relay: …")`，见 `DesktopReceivedFileActions.TAG`） |
-| 8 | 核对落盘副本：`shasum -a 256 /tmp/d6b.png <dataDirectory>/downloads/d6b.png/d6b.png` | 两个 sha256 相同。多一层同名目录是设计（每笔传输先按传输名建目录，见 `TransferManager.kt`） |
+| 8 | 核对落盘副本：`shasum -a 256 /tmp/d6b.png <dataDirectory>/downloads/d6b.png` | 两个 sha256 相同。单文件直落下载根；只有文件夹 / 多文件才按传输名建目录（见 `TransferManager.saveDirFor`）。同名再传会落成 `d6b(1).png`，而卡片「打开」指向**本轮**那份 |
 
 判读要点：
 - 第 4 步是**最容易出问题的一步**：桌面是平板壳与桌面壳共用的一条路
@@ -1007,7 +1012,7 @@ messaging **PASS 38**（`/tmp/messaging-run14.log`），全量套件 **run11 9/9
 ## 5c. 真 luciola 全链路读数（2026-11-05，HEAD `b9ca96ce`）
 
 **不是进程内回环、不是 `--dry-run`、不是只看截图**：Pixel 6 `<device-serial>`
-（`com.kapp.tenon.debug`，`192.0.2.22`）↔ `/Applications/Tidings.app`（`192.0.2.82`），
+（`com.kapp.tenon.debug`，`192.0.2.22`）↔ `/Applications/Tenon.app`（`192.0.2.82`），
 两端都在 luciola 模式；判据取宿主 stdout + 控制面 HTTP + 手机 `run-as` 磁盘文件 + 真实
 `uiautomator dump` / `input tap`。逐项读数、原始日志与复现命令见
 [`2026-11-05-tenon-luciola-head-e2e.md`](design/runtime-evidence/2026-11-05-tenon-luciola-head-e2e.md)。
@@ -1026,7 +1031,7 @@ messaging **PASS 38**（`/tmp/messaging-run14.log`），全量套件 **run11 9/9
 - **控制面不签 PASS**：6 条 FAIL 全部指向 `PluginStateManager` 把状态文件路径建成目录、
   写盘异常被静默吞掉。HTTP 200 与内存即时生效不能替代磁盘 ground truth。
 - 另有两处不掩盖的边界：打包的 `libluciola_uniffi.dylib` 与 0.9.0 绑定的 UniFFI checksum
-  不匹配（`10/71`，本轮用运行时 `TIDINGS_LUCIOLA_NATIVE` 覆盖，全新安装仍会崩）；
+  不匹配（`10/71`，本轮用运行时 `TENON_LUCIOLA_NATIVE` 覆盖，全新安装仍会崩）；
   这台 Mac 的 Mac→LAN 主动发起不通（`errno 65`），宿主外连持续 `retrying`，链路靠手机主动建连。
 - A21 表里 ≥50MB 双向、错误配对密钥、陌生连接 30s 断连、legacy 拉取回退、物理人交互项
   **本轮没跑**，不要拿本节反填 A21 或 §2 的空白项。
@@ -1146,9 +1151,11 @@ messaging **PASS 38**（`/tmp/messaging-run14.log`），全量套件 **run11 9/9
 
 仍未覆盖、不许当成通过：卡片 `Active` 中间态视觉、文件夹/续传/拒收/撤回在 luciola 推送
 路径上的表现、公网 TLS+pin、跨网文件/投屏、群聊文件卡、iOS 全部。
-另有一条**只记录未修**的观察：收到的文件落在 `downloads/<文件名>/<文件名>`
-（`saveDirFor` 按 `rootName` 建目录，单文件时就是文件名），同名两次传输会互相覆盖 ——
-改它要动磁盘布局契约，需先定布局语义。
+~~另有一条**只记录未修**的观察：收到的文件落在 `downloads/<文件名>/<文件名>`~~ ——
+**2026-11-10 已修**（同日真机抓到「点开的是上一轮那份」）：单文件直落下载根，
+`(1)(2)` 去重仍然生效，卡片入口改为「卡之后最早落盘的那一份」而不是「整条会话第一条
+同名文件」。判据：`TransferSaveLayoutTest`（布局）+ `PrototypeReviewEntryTest`（入口解析）
++ a2r 的 `prototype-artifact-bytes-landed`（sha256 逐字节）。
 
 ## 5g. 触发式编排与插件分支的静态/单测读数（2026-11-09，HEAD `ccdc5177`，**不是真机验收**）
 
@@ -1617,25 +1624,32 @@ Layer 4 仿真覆盖，真机环节为桌面自派 + 手机 `@agent` 回路（M5
 
 ---
 
-## 10e. 团队编制（声明与展示）验收（2026-11-10 新增，**代码级 + 单测级，真机待验**）
+## 10e. 团队编制（声明与展示）验收（2026-11-10，**真机已验：夹具 `result PASS 37`**）
 
 > 方案：`docs/team-creation-final-plan.md`（v1 只做声明与展示）。单测与门禁全绿
-> （提交 `2f472faa`…`149ea327`）；本节是**真机怎么验**，不是已验读数。
+> （提交 `2f472faa`…`149ea327`）；真机读数与未验项见
+> [`design/runtime-evidence/2026-11-10-team-roster-realdevice.md`](design/runtime-evidence/2026-11-10-team-roster-realdevice.md)。
+> 验收抓到并当场修复 1 条布局缺陷（徽标窄屏被裁剪，`16d4a0e6`）。
 
-### 领域与广播（单测已钉，真机复核两条）
+### 领域与广播（单测已钉，真机已复核）
 
-- 电脑端建队（群信息页 → 本机 agent 行 → 团队编制 → 开启 → 保存并广播）→
-  手机端收 `group.info`：群信息页 agent 行出「团队 (N)」徽标，会话列表折叠视图
-  出 `团队 N ▸` 药丸，展开见组员标签，点行预填 `@<leader>`。
+- 夹具（`scripts/e2e/e2e_team_roster.py`，普通成员宿主逐 rev 驱动）：
+  **result PASS 37**——主权声明（旧版本会拒收的那条，真机被接受）、群信息「团队 (3)」
+  徽标、会话行「团队 3 ▸」药丸、展开 3 组员+角色、点成员行预填 `@<leader>`、
+  越预算（9 组员）整帧拒收（无回执 + UI 无变化 + 无静默条目）、关闭后徽标/药丸消失、
+  closeCount 全程 0。
 - **看落库时刻，不看信封 ts**（AGENTS §3 的老规矩）；广播产物含团队字段已由
   `TeamDeclarationWritePathTest.theBroadcastProductStillCarriesTeamFields` 钉住
   （反向验证：去掉回填 → 红）。
 
-### 成员宿主（依赖合并主权分支）
 
-- 非群主宿主声明席位 + 团队 → 群主端可见（`GroupMerge` 自声明主权，P0-0.2）。
+
+### 成员宿主（依赖合并主权分支）—— 真机已验
+
+- 非群主宿主声明席位 + 团队 → 群主端可见：**已验**（夹具扮演普通成员宿主逐 rev
+  驱动，真机被接受并渲染，见 §2.2 读数）。
   **组内有旧版本成员时这条会失败**——旧端仍拒收成员发起的 rev+1，属已知混合版本
-  窗口（PROTOCOL-EXTENSION §14.5），不作为缺陷记录。
+  窗口（PROTOCOL-EXTENSION §14.5），不作为缺陷记录（旧端对照需旧构建对端，未验）。
 - 旧版本节点作为**管理员**改群名/资料 → 团队声明被静默清空：现状如此（旧端重编码
   不含未知字段），按已知兼容限制记录，不算新缺陷。
 
@@ -1646,6 +1660,26 @@ Layer 4 仿真覆盖，真机环节为桌面自派 + 手机 `@agent` 回路（M5
 - 超过 8 名组员不可再加；组员名撞群内 `@` token 就地指出冲突对象。
 - 关闭开关 → 一次 rev+1 广播 → 药丸与成员行消失；`@` 仍指向该 agent。
 - 回归：建群/加人/改资料/解散/工作区授权/折叠投影零回归；`closeCount` 不新增抖动。
+
+## 10f. 团队执行（@组员 责任链）验收（2026-11-10 新增，**代码级 + 单测级，真机待验**）
+
+> 方案：`docs/team-execution-final-plan.md` §9。单测与门禁全绿（提交 `db514353`）；
+> P1/P2（按成员选模型 / 主备降级）未做——§6.2 逐驱动注入必须真机验证后才开下拉。
+
+### 真机验法（与 v1 §10e 同一台 Pixel 6 + Mac 宿主）
+
+1. **配置**：电脑端群信息 → 团队编制 → 为组员配执行/审查 + 驱动（对话框执行段，
+   仅席位宿主可编辑）→ 保存（执行档落宿主 `team-execution.json` + 声明 rev+1 广播）。
+2. **触发**：手机（任一成员）发 `@coder 修复登录超时` → 宿主编译 `[coder]+[reviewers]`
+   → 链卡在群内推流（worker → reviewer 串行，审查棒带 VERDICT）。
+3. **闭环**：reviewer REJECT ⇒ 卡回 worker；3 轮 ⇒ blocked（可读原因）。
+4. **reviewer 直呼**：`@reviewer 审查` ⇒ 纯审查单棒（不派 worker）。
+5. **未配置**：删执行档（或换未配置席位）再 `@coder` ⇒ blocked 卡"未配置执行"，
+   **绝不**回落 codex 单棒。
+6. **未授权**：非可信成员 `@coder` ⇒ blocked 卡"not authorized"（无执行）。
+7. **旧端对照**（需旧构建，未验）：旧发送端 `@coder` 纯文本 → 新宿主仍执行
+   （§4.6 关键路径）；新发送端 + 旧宿主不执行。
+8. `closeCount` 全程 0；@领队 行为不变（单 agent 派单）。
 
 ## 7. 单条记录模板
 
@@ -1684,7 +1718,7 @@ Layer 4 仿真覆盖，真机环节为桌面自派 + 手机 `@agent` 回路（M5
 ## A26 · Agent 卡片三型交互闭环（2026-11-07 新增）
 
 宿主（`./gradlew :desktopApp:run`，与手机同一 luciola 链路）驱动真实卡片，手机依次判读。
-前置：手机已被授权（桌面「捎话 → 授权」，或 `PUT /v1/agent/grants` 的
+前置：手机已被授权（桌面「榫卯 → 授权」，或 `PUT /v1/agent/grants` 的
 `grantReply` 推帧；**scope=类别 / access=档位是两个维度**）。
 
 **① 审批卡（approval）**：
@@ -1709,3 +1743,224 @@ Layer 4 仿真覆盖，真机环节为桌面自派 + 手机 `@agent` 回路（M5
 **证据**：`design/runtime-evidence/upgrade-baseline-20261107.txt`（【13】【14】）、
 截图 `~/Downloads/relay-build-20261107/baseline/`（b06–b18，浅色 + 深色）。
 已知未遍历：Agent 控制台的会话切换器（▾）在真机上的入口路径（本轮黑盒超时）。
+
+## A27 · luciola 唯一传输形态 + legacy 物理删除（2026-11-10，用户明确指令）
+
+**指令**：「手机开安全信道、宿主是 legacy ⇒ 都必须是 luciola」「legacy 必须移除」。
+
+**开关层拆除**：桌面 `DesktopLuciolaHost` 恒启用（`TENON_LUCIOLA` 门删除）；手机
+`RelaySettings.experimentalLuciola` 停止被读（字段保留防老 settings.json 未知键报错），
+设置页「加密信道」开关全链删除。`NodeRuntime.messengerTransportFactory` 收成**必需非空参数**——
+「忘了接 luciola」从此是编译错误，不是静默回退明文；装配失败走 `UnavailableTransport` +
+`LuciolaUnavailable` 横幅（reason=platform/native）。`legacyDiscoveryEnabled` 分支与
+legacy 三件套入口全删。
+
+**物理删除**：`core/.../transport/Discovery.kt`（601 行广播发现；`ManualPeer` 抽独立文件）、
+`DiscoveryTargetsTest`、`SubnetBroadcastTargetsTest`。入站发现帧登记（entry/alive/presence/
+profile/exit 的协议事实）由新 `PresenceIngest` 承接；五个 `Discovery*Test` git mv 为
+`Presence*Test`（夹具 `IngestNode`），ReturnPath/SelfHeal 换真实 runtime 判据。
+
+**随删除暴露并修复的五条「没人接手」回归**：
+1. `tcpPort=0` 进对外 profile ⇒ `validateProfile` **整帧拒收**（app 测试 30 条超时的根因；
+   实证 `decoded=Rejected`）。修：`RelaySettings.toProfile` 收口 `?: DEFAULT_TCP_PORT`。
+2. 换网重播死路：`NodeRuntime.announce()` 委托哑引擎 ⇒ 零发包。修：真发一轮定向心跳。
+3. `resolvePeerByHost` 同型（调 `discovery.announceTo` no-op）⇒ agentNode `/v1/send`
+   46 条 peer-unreachable。修：改调 runtime 自己的 `announceTo`。
+4. exit 告别帧无人发送。修：`NodeRuntime.announceExit` 对 registry+manualPeers 各发空载荷 exit。
+5. 候选端点心跳（task-21 ①）与传输自愈（task-29，deadRounds≥2→restart，判据
+   targets>0&&sent=0）从 legacy 搬进 `SweepOnlyDiscoveryEngine` / 心跳循环。
+
+**判据与读数**：`:core:jvmTest` 977 条 / 0 失败 / 32 skip；`:app:jvmTest` 全量绿；
+`:agentNode:test`+`:desktopApp:test`+`:cli:test`+`:orchestration:test` 全量绿；
+`:composeApp:compileKotlinJvm` 通过。已知边界：`UdpTransport` 暂留 main
+（`InMemoryLuciolaHost` 与测试回环传输依赖；删除前置 = 测试侧 luciola 回环，另行任务）；
+真机双端同为安全信道的 `/v1/peers` 复核待下一轮真机窗口。
+
+## A28 · 裸 UDP 传输退居测试层（2026-11-10，接 A27）
+
+**用户令**：「legacy 的代码是不是可以删除了？legacy 的能力 luciola 应该都支持吧。」
+
+**能力对账（删除前先钉住事实）**：legacy 生产路径在 A27 已清零——`Discovery.kt` 删除、
+回退分支删除、`messengerTransportFactory` 必需参数化。luciola 覆盖 legacy 全部能力：
+发现（sweep 翻面 + 定向心跳 + `PresenceIngest` 入站登记）、exit 告别帧、换网重播、
+候选端点投递、传输自愈，均有专属判据测试钉住。
+
+**本轮删除**：`UdpTransport` 类从 `core/commonMain` 退到 `core/jvmSharedMain`
+（生产唯一传输形态是 luciola `SecureChannelTransport`；裸 UDP 只剩三类 JVM/Android
+消费者：CLI 的内存平台、各模块 `udpTestTransport()` 回环夹具、传输行为测试）。
+`ReceivedDatagram` 是协议层公共类型，移入 `DatagramTransport.kt` 留在 commonMain。
+`InMemoryAppPlatform`/`InMemoryLuciolaHost` 同步从 app commonMain 移到 app
+jvmSharedMain（cli 生产在用，不是纯测试夹具）。
+
+**测试随迁（git mv 保历史）**：19 个引用裸 UDP 的 core commonTest 文件 → jvmTest；
+10 个 app commonTest 文件 → jvmTest（`RelayControllerCabinetTest` 与 jvmTest 既有
+文件同名不同类，改名 `RelayControllerCabinetDomainTest`）。commonMain/iosMain 从此
+零代码引用裸 UDP（Android/iOS 变体编译验证通过）。
+
+**过程教训（记入长期记忆）**：git mv 同内容文件后，Kotlin 增量编译会漏编译
+"新位置"的文件——`:core:jvmTest` 一度报 920 条 0 失败的**假绿**（旧 commonTest
+产物还在类路径上）。判据：数 XML 结果文件里迁移类的存在性，不只看任务 exit code。
+touch 文件强制重编后，`--rerun-tasks` 全量复跑恢复真读数。
+
+**判据与读数**：core 977 条 / 0 失败 / 32 skip（与搬迁前逐条一致，零用例丢失）；
+app 968 / 0；agentNode 545 / 0；desktopApp 379 / 0；cli 7 / 0；orchestration 219 / 0；
+`unused-imports.py --check` OK（顺带清掉 4 条遗留 import 与 `set_luciola_*` 孤儿资源）。
+iOS 编译：曾报 `MessageStore.ios.kt:170 Unresolved RelayDatabase`，定位为该文件
+缺 `import com.kapp.tenon.db.RelayDatabase`（jvm/android 同位文件都有，iOS 独缺；
+CI 从不编 iOS 所以长期潜伏）。补 import 后 `compileKotlinIosArm64` 与
+`compileKotlinIosSimulatorArm64` 双双通过。
+
+### A28 收尾复核（本批改动可交判据）
+
+- 九模块全量 `--rerun-tasks --max-workers=1`：core 977 / 0 失败 / 32 skip、app 968 / 0、
+  agentNode 545 / 0、desktopApp 379 / 0、cli 7 / 0、orchestration 219 / 0、
+  agent-contract 19 / 0、composeApp 1215 / 0（jvmTest + testAndroidHostTest）。
+  逐个核对迁移类（`Presence*Test` / `ReturnPathTest` / `TransportSelfHealTest` /
+  `RelayControllerCabinetDomainTest`）在结果 XML 中真实存在，排除 Kotlin IC 假绿。
+- 十门禁全绿。其中两处红按口径修好，未刷任何基线：① 本轮新写的两处代码注释带 ISO 日期
+  ⇒ 去掉日期只留结论；② 三个测试文件 `git mv` 到 `jvmTest` 后
+  `tools/env-test-allowlist.txt` 仍是 `commonTest` 旧路径 ⇒ 三条路径同步，
+  并删掉两条对应已物理删除测试的死条目。
+- `:testStabilityGate` 连跑 3 轮全 PASS；`unused-imports.py --check`、
+  `check-design-palette.py --css-vars`、`sdlc-lifecycle.py --dry-run` 全绿。
+- `:androidApp:assembleDebug` 通过（56,148,407 B），供换包复验。
+- **未做（别当已验）**：桌面宿主仍是旧安装包，双端同为 luciola 的真机复验须在源码宿主
+  或换包后进行；`--tier real` 的 a2r 人审、幕 4 / i1 / i2 仍需手机侧配合。
+
+## A29 · 双端 luciola 空闲在线复验 + 第六判据空集假绿修复（2026-11-10 晚）
+
+**装配**：桌面宿主改用源码 `./gradlew :desktopApp:run --args=--headless`（旧安装包跑 legacy，
+验不了本批改动），手机装 21:32 重编的 debug 包；两端日志均有 `[xport]`。
+控制面在回环 **8788**；17878 是 luciola 传输端口，对它发 HTTP 只会超时（本轮踩过）。
+
+**读数（证据 `design/runtime-evidence/presence-luciola-20261110/`）**：宿主
+`peers=30 / online=1 / uptime=130s`；手机 `linkTotal=0`、活跃链路 0、宿主那条 `online=true`、
+`dialAttempts=21 / dialFailures=21 / connect-timeout`；近 3000 行 logcat 里 `[sweep] offline`
+0 条；界面无「宿主设备睡眠」横幅。**空闲 130s 超过 90s 阈值，旧现象未复现**。
+
+**但不能据此判第六判据通过**：`peer_idle_stays_online()` 原式在「没有任何
+`linkConnected` 对端」时 `hole` 与 `flips` 天然皆空 ⇒ 因为什么都没看见而给绿。
+修法：无在册活跃链路直接返回 `None`（不适用、只记证据），与 `prototype_bytes_landed`
+同口径；`dry-run` 增第 28 项守卫 `review-gate-idle-requires-live-link`，反向探针
+（早退改恒假）仅该守卫判红，恢复后 28 项全绿；修复后真机重跑返回
+「无在册活跃链路（linkTotal=0，peers=12）」。
+
+**新暴露（未定因，另立案）**：双端 luciola 下链路始终建不起来 —— 手机拨号 21 连败、
+目标在多个候选地址间轮换，宿主心跳 `targets=32 sent=2 linked=0`、大量
+`no session / unpaired`。由此「空闲不翻面」的链路豁免可能长期不生效，这次在线稳定靠
+presence 帧通了，不是链路恢复；链路建立路径须单独取证，别把「在线没翻」当链路已恢复。
+
+**边界**：本轮只被动观测、未派单；`--tier real` 的 a2r 人审与幕 4 / i1 / i2 仍需手机侧配合。
+
+## A30 · luciola-only 链路建立失败的端口定因与修复（2026-11-10 深夜）
+
+**接着 A29 的未决立案**：双端 luciola 下链路始终建不起来，手机拨号连续
+`connect-timeout`，宿主心跳 `targets=32 sent=2 linked=0`、满屏
+`no session / unpaired`。证据与逐轮读数见
+`design/runtime-evidence/luciola-sending-port-20261110/`。
+
+### 定因
+
+`ReceivedDatagram.port` 是**发送方源端口**。legacy 时每个节点 UDP socket 绑固定端口，
+源端口就是监听端口；luciola 的会话键是「地址:监听端口」（17878），发送侧用临时端口。
+删 legacy 时只有 `LuciolaDiscoveryEngine` 按 `profile.luciolaPort` 归一，其余入站登记
+路径原样留下：`PresenceIngest` 的当前地址 / 候选池 / alive 回包 / 资料刷新、
+`Messenger` 的可靠帧 `touch` 与 ACK、以及启动时 `knownPeerStore` /
+`peerEndpointStore` 把上一版落盘的临时端口原样装回。于是出站全拨到不存在的端点，
+`pinFor` 查不到会话，`touch` 的 `sameAddress`（含 udpPort）又把在线节点的心跳判成
+地址漂移整帧拒收。这是「同一值两处各写回退链」的又一实例。
+
+### 修复
+
+归一收成 `sendingPortFor(profile, sourcePort)` 一个入口（档案 `luciolaPort` 优先，
+缺失或越界回退源端口，老端行为一字不变），三条路径共用：入站登记、
+候选池读口（`candidatesOf` / `allCandidates`，落盘快照因此写回正确端口）、
+启动恢复（`restoreOffline`）。不动协议字段、不新增可选键、不碰帧预算；
+不逐消费点打补丁。
+
+### 判据与验证
+
+`core/src/jvmTest/.../LuciolaSendingPortTest.kt` 七个用例覆盖节点表 / 候选池 /
+alive 回包 / 资料刷新 / 可靠帧 ACK / 落盘旧候选 / 名录恢复，并各自断言老端不变。
+三次反向探针分别改坏 `sendingPortFor`、`normalizedCandidates`、`restoreOffline`，
+依次 4/5、1/6、1/7 判红，恢复源码后 7/7 绿。
+
+九模块全量 `--max-workers=1` **4336 tests / 0 失败**；11 门禁全绿
+（含 `cjkLiteralGate` 72=72 未刷基线、`:testStabilityGate` 连跑 3 轮全 PASS）、
+`unused-imports` / `check-design-palette` / harness `dry-run` 全绿、
+`:androidApp:assembleDebug` 通过。
+
+### 真机复验
+
+三轮换包 + 重启源码宿主（22:20 / 22:39 / 22:56 包），逐轮暴露下一条历史数据路径，
+逐轮读数见 `measurements.json`。最终装配：**在线对端的当前端点与消息投递端口均为
+`:17878`**，宿主日志出现 `[send] peer=25222a45 ep=192.168.2.22:17878 acked=true
+type=group ... regEp=192.168.2.22:17878`（A29 时一条 `acked=true` 都没有）；
+`[sweep] offline` 0 条、无「宿主设备睡眠」横幅。
+
+**不假装修好的部分**：心跳与拨号里仍有临时端口（宿主 86 处、手机 345 处），
+来自上一版落盘的历史身份与候选端点 —— 它们的 profile 不含 `luciolaPort`
+（该键由运行时 `selfProfile` 补，旧档案 / 扫码合成档案没有），三条归一都依赖它；
+且多数属于离线历史节点、host 常是本机 IP，改对端口也发不出去。清理需要一条
+不依赖 `luciolaPort` 的独立判据（「什么端口算垃圾」是产品判断），本轮未动。
+`linkTotal=0`、拨号仍停在 `:17879` `connect-timeout`，属下面 ① 的 K1 缺口。
+
+### 仍未解（另立案；下面 ①②③ 的拍板处置见 A31）
+
+1. **K1 拨的是被有意关闭的端口**：luciola 模式下 `legacyTcpListener=false`，宿主不绑
+   17879；但 `RelaySettings.toProfile()` 仍广播 `tcpPort=17879` + `lnk1`，
+   手机 K1 私网拨号必然超时 ⇒ `linkConnected` 恒 false。候选：A 契约对齐（不广播
+   lnk1、在线豁免改认 luciola 会话）、B 保留 17879 给 K1 下行、C 只留判据接受 K1 废弃。
+   A 要同步改 `CapabilityAndNotificationSettingsTest` 的断言，B 与「legacy 清零」相悖，
+   都动到既有裁决，**本轮未擅自改**。
+2. **心跳 entry 对未连入的端点仍发不出去**：luciola 的 `transport.send` 要求已配对或
+   已连入的会话，而心跳遍历全部已知节点（含离线历史）逐个发 entry ⇒ `sent` 常为 0。
+   在线稳定靠的是已连入会话上的 presence / 消息帧，不是链路恢复。
+3. **落盘旧身份 / 候选端点里的临时端口不会自愈**：归一依赖 `profile.luciolaPort`，
+   旧档案没有这个键。要清得另立一条不依赖档案的判据，并回答「历史数据里哪些端口
+   算垃圾、会不会误伤自定义端口」，属产品判断，本轮未动。
+4. `--tier real` 的 a2r 人审与幕 4 / i1 / i2 仍需手机侧配合；本轮只被动观测、未派单。
+
+## A31 · 待拍板三项按「让判据认事实」收口（用户授权拍板）
+
+**结论：A/B/C 三条候选都不选。** 取证后确认 K1 不是废弃功能：`lnk1` 至今决定
+`LinkClient` 拨不拨，撤广播会连公网 K2 一起停；复活 17879 与「legacy 清零」相悖；
+「接受废弃」则是把一条能修好的链路判死刑 —— 真机宿主的 **17880 TLS 接受面一直在
+LISTEN**，手机对宿主 `pinSource=pairing`，两个条件都齐。
+
+**定因**：`LinkClient.linkTargets` 的「私网 ⇒ 明文 tcpPort」以 17879 在听为前提，
+而信道模式 `legacyTcpListener=false` 有意不建它；profile 里的 `tcpPort=17879`
+只是 `Codec.validateProfile` 的必填占位。手机连续 229 次拨它全 `connect-timeout`
+⇒ `linkConnected` 恒 false ⇒ sweep 在线豁免与心跳跳过长期不生效，A29 的第六判据
+因此一直「不适用」。
+
+**做了什么**（不动 caps、不加协议字段、不复活明文监听面）：
+
+1. 只用档案里已有的 `luciolaPort` 判形态（Profile KDoc：null = legacy 节点）。
+   私网 + luciola 监听端改走 `tlsPort` + TLS + pairing pin；老端私网明文一字不变；
+   公网原样；缺 pin / 缺 tlsPort 不拨并把 `skipReason` 同步说清。
+2. `DatagramTransport.canReach()`（默认 true）+ `SecureChannelTransport` 覆盖为
+   「入站已接管 ∨ 外拨有会话 ∨ 配对库有 pin」；心跳三处只把可送达端点计入
+   `targets`，其余记 `skipped`。用准入事实过滤，不按端口数字猜，顺带把上一轮
+   遗留的临时端口从心跳出站剔除（落盘数据未清洗）。
+
+**判据**：新增 `LuciolaLanLinkTargetTest` 6 例（反向探针 4/6 判红）、
+`PresenceHeartbeatTargetsTest` 4 例（两次反向探针各 1/4 判红：摘掉心跳过滤、
+安全信道恒 true），恢复后全绿。九模块全量 **4346 tests / 0 失败**；11 门禁全绿
+（`cjkLiteralGate` 72=72 未刷基线）、`:testStabilityGate` 连跑 3 轮 PASS、
+unused-imports / design-palette / harness dry-run 全绿、`:androidApp:assembleDebug` 通过。
+
+**真机复验**（换包 + 重启源码宿主，证据
+`design/runtime-evidence/luciola-lan-link-20261110/`）：手机
+`linkTotal=1 / linkConnected=true`、`dialLastTarget=192.168.2.82:17880`、
+`lastError=null`、`closeCount=0`；宿主心跳 `targets=32 sent=2` →
+`targets=2 sent=0 skipped=28`，启动期一轮 `sent=0 dead=1` 后恢复；
+**8.7 分钟长空闲复验**（宿主 uptime 523s）：`transport restart` 0 次、拨号停在
+4 次、`[sweep] offline` 双端 0 条、无离线横幅。**第六判据
+`peer-idle-stays-online` 首次真正 PASS 并二次复验通过**（`peers=12 flips=0`），
+不再是 A29/A30 的「不适用」，且是在有真实链路前提下给绿、非空集假绿。
+
+**未决**：① 心跳启动期 `targets=2 sent=0` 仍是「有 pin 但对端不监听入站」的
+正常形态，长期占着 targets 时自愈仍可能误判，需把「对端能力」与「本地泵」分开；
+② 落盘历史端点未清洗；③ 档案刷新丢失 `luciolaPort` 的理论回退无专门守卫；
+④ `--tier real` 人审与幕 4 / i1 / i2 仍需手机侧配合（harness 如实标 NA，不冒充通过）。

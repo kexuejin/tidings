@@ -810,7 +810,7 @@ fun WorkspaceDetailView(
                                         icon = Res.drawable.ic_chat_bubble,
                                         contentDescription = stringResource(Res.string.agent_open_chat),
                                         onClick = { onOpenSessionChat(recent.sessionId) },
-                                        modifier = Modifier.size(28.dp),
+                                        // 28dp 的显式 size 把命中区压回下限之下：回默认 48dp 档。
                                         tone = AppButtonTone.Primary,
                                     )
                                 }

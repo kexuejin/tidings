@@ -23,7 +23,6 @@ data class SettingsDataUiState(
     val leftoverPartCount: Int? = null,
     val leftoverPartBytes: Long? = null,
     val persistMessagesEnabled: Boolean = false,
-    val experimentalLuciolaEnabled: Boolean = false,
     val retentionDays: Int = DEFAULT_RETENTION_DAYS,
 )
 
@@ -39,7 +38,6 @@ data class SettingsDataActions(
     val onChangeDataDirectory: (() -> Unit)? = null,
     val onOpenDataDirectory: (() -> Unit)? = null,
     val onPersistMessagesEnabledChange: ((Boolean) -> Unit)? = null,
-    val onExperimentalLuciolaChange: ((Boolean) -> Unit)? = null,
     val onClearHistory: (() -> Unit)? = null,
     val onExportRecoveryBundle: (suspend (String) -> RecoveryExportResult)? = null,
     val onPickBackupFile: (suspend () -> ByteArray?)? = null,

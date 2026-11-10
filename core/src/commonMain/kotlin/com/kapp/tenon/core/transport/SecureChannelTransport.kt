@@ -36,7 +36,7 @@ import uniffi.luciola_uniffi.SecureSessionListener
  *
  * ## 入站帧怎么归到对端(为什么需要 [endpointOf])
  *
- * 信道的回调只给「对端指纹 + 明文帧」,**不给对端 socket 地址**;而 Tidings 的
+ * 信道的回调只给「对端指纹 + 明文帧」,**不给对端 socket 地址**;而 Tenon 的
  * Messenger 用 ReceivedDatagram(host, port) 做两件事:回 ACK、以及
  * `registry.touch(from, host, port)` 的地址一致性校验(已在线节点不接受源地址
  * 漂移 —— 地址不符整帧丢弃)。所以入站帧必须带着**该对端在 registry 里的地址**
@@ -401,6 +401,19 @@ class SecureChannelTransport(
         probeConnUs = 0
         probeSendUs = 0
         probeWindowAt = now
+    }
+
+    /**
+     * 与 [send] **同源**的可送达判据：入站已接管、外拨已有会话、或配对库里有 pin。
+     *
+     * 不猜「端口像不像垃圾」—— 历史落盘的临时端口之所以发不出去，是因为它们没有
+     * 配对凭据，不是因为数字大。用准入事实过滤，自定义端口的老端照样能发。
+     */
+    override fun canReach(host: String, port: Int): Boolean {
+        val key = endpointKey(host, port)
+        return inboundByEndpoint.containsKey(key) ||
+            outbound.containsKey(key) ||
+            runCatching { peerKey(host, port) != null }.getOrDefault(false)
     }
 
     override suspend fun send(bytes: ByteArray, host: String, port: Int): Boolean {

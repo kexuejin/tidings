@@ -84,6 +84,7 @@ import com.kapp.tenon.generated.resources.chat_peer_offline
 import com.kapp.tenon.generated.resources.chat_pk
 import com.kapp.tenon.generated.resources.common_agent
 import com.kapp.tenon.generated.resources.common_profile_unavailable
+import com.kapp.tenon.generated.resources.team_exec_member_note
 import com.kapp.tenon.generated.resources.chat_voice_record
 import com.kapp.tenon.generated.resources.hist_search_title
 import com.kapp.tenon.generated.resources.ic_attachment
@@ -188,6 +189,10 @@ fun ChatScreen(
     val initialHistorySearch = chrome.initialHistorySearch
     val initialScreenRequestConfirmOpen = chrome.initialScreenRequestConfirmOpen
     val initialMoreOpen = chrome.initialMoreOpen
+    // 群聊气泡头像边长（外壳密度档：手机 32 / 桌面 26，见 ChatScreenChrome 的 KDoc）。
+    val messageAvatarSize = chrome.messageAvatarSize
+    // 群信息用**整屏页面**还是弹窗：手机壳 true，桌面壳默认 false（弹窗）。
+    val groupInfoAsPage = chrome.groupInfoAsPage
     /** null = 用内置输入栏；非 null = 桌面壳自己提供的输入卡片。 */
     val composerSlot: (@Composable (ComposerSlotArgs) -> Unit)? = chrome.composerSlot
     val sp = LocalAppSpacing.current
@@ -252,6 +257,31 @@ fun ChatScreen(
             .filter { it.canMention }
     }
     val profileNote = stringResource(Res.string.common_profile_unavailable)
+    // **团队组员候选**（团队执行方案 §7.2）：Leader 席位下追加 `name · role` 条目，
+    // 选中插入 `@name ` —— 与匹配池同源（组员名已由 P0-0.1 进 mentionKeys）。
+    // 手打 `@coder` 同样生效（不强制走候选）。
+    val teamMemberTargets = if (group != null) {
+        group.virtualAgents.orEmpty()
+            .filter { it.isTeam }
+            .flatMap { seat -> seat.teamMembers }
+            .map { member ->
+                val roleLabel = member.role.ifBlank { null }
+                val teamNote = if (roleLabel == null) {
+                    stringResource(Res.string.team_exec_member_note, "")
+                } else {
+                    stringResource(Res.string.team_exec_member_note, roleLabel)
+                }
+                MentionTarget(
+                    token = member.name,
+                    label = member.name,
+                    note = teamNote,
+                    isAgent = true,
+                )
+            }
+            .filter { candidate -> mentionIdentities.none { it.mentionToken == "@" + candidate.token } }
+    } else {
+        emptyList()
+    }
     val mentionTargets = mentionIdentities.map { identity ->
         MentionTarget(
             token = identity.mentionToken,
@@ -259,7 +289,7 @@ fun ChatScreen(
             note = if (identity.needsProfileNote) profileNote else null,
             isAgent = identity.isAgent,
         )
-    }
+    } + teamMemberTargets
     // 群里有没有 agent 成员 —— 问题 1 的口径是**成员级事实**，不是"这是不是工作区群"。
     val groupAgentInvolved = groupRows.hasAgent
 
@@ -694,10 +724,14 @@ fun ChatScreen(
     )
     val isNearBottom = scrollFollow.isNearBottom.value
 
-    Column(
-        modifier
-            .fillMaxSize()
-            .onPreviewKeyEvent { event ->
+    // 根 Box：聊天内容 + 浮层宿主同层。手机壳的群信息是**整屏页面**（GroupInfoPage），
+    // 要以普通布局盖在聊天内容上 —— 宿主若留在 Box 之外，页面只会"排在内容后面"，
+    // 盖不住。弹窗族不受影响（Dialog 是独立窗口，与宿主在组合树里的位置无关）。
+    Box(modifier.fillMaxSize()) {
+        Column(
+            Modifier
+                .fillMaxSize()
+                .onPreviewKeyEvent { event ->
                 if (event.type == KeyEventType.KeyDown && event.key == Key.Escape) {
                     when {
                         forwardingMessage != null -> { forwardingMessage = null; true }
@@ -878,6 +912,7 @@ fun ChatScreen(
                 scrollFollow = scrollFollow,
                 bubbleCtx = bubbleCtx,
                 bubbleFraction = bubbleFraction,
+                messageAvatarSize = messageAvatarSize,
                 composerSlot = composerSlot,
                 composerFocus = composerFocus,
                 requestComposerFocus = ::requestComposerFocus,
@@ -1158,6 +1193,7 @@ fun ChatScreen(
         identityCtx = identityCtx,
         actions = actions,
         groupActions = groupActions,
+        teamExecutionPort = groupActions.teamExecutionPort,
         receivedFileActions = receivedFileActions,
         scrollToMessage = ::scrollToMessage,
         onMentionSender = mentionSender,
@@ -1172,6 +1208,7 @@ fun ChatScreen(
         showTaskPickerState = showTaskPickerState,
         showSessionPickerState = showSessionPickerState,
         capsuleStateState = capsuleStateState,
+        groupInfoAsPage = groupInfoAsPage,
     )
 
     if (showWorkspacePicker && availableWorkspaces.isNotEmpty()) {
@@ -1187,5 +1224,7 @@ fun ChatScreen(
             },
             onDismiss = { showWorkspacePicker = false },
         )
+    }
+    // 根 Box 收口（见函数头的说明：内容 Column + 浮层宿主同层）。
     }
 }

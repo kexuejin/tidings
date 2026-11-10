@@ -25,7 +25,7 @@ internal object LinkCertificateDer {
     private val EXT_KEY_USAGE_SERVER_AUTH = hex("06082b06010505070301")
 
     /** 自签证书的 CN。**不放 nodeId**：身份靠 pin（SPKI），不靠证书里的名字（task-13 裁决）。 */
-    private const val COMMON_NAME = "Tidings"
+    private const val COMMON_NAME = "Tenon"
 
     /**
      * 把地址字符串解析成 SAN 用的字节（IPv4 = 4 字节，IPv6 = 16 字节）；不是 IP 就返回 null。

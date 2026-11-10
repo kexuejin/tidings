@@ -15,9 +15,9 @@ import com.kapp.tenon.domain.model.PeerUi
 internal fun zhouPeer(): PeerUi = PeerUi(
     nodeId = "peer-zhou",
     nick = "老周",
-    company = "捎话",
+    company = "榫卯",
     dept = "后端",
-    team = "Tidings",
+    team = "Tenon",
     avatar = 2,
     host = "studio.local",
     ip = "192.168.1.34",

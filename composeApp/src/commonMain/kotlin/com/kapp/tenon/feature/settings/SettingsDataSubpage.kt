@@ -40,8 +40,6 @@ import com.kapp.tenon.generated.resources.recovery_import_success_title
 import com.kapp.tenon.generated.resources.recovery_password_empty
 import com.kapp.tenon.generated.resources.recovery_password_label
 import com.kapp.tenon.generated.resources.recovery_password_title
-import com.kapp.tenon.generated.resources.set_luciola_sub
-import com.kapp.tenon.generated.resources.set_luciola_title
 import com.kapp.tenon.generated.resources.recovery_export_tail_app_dir
 import com.kapp.tenon.generated.resources.recovery_export_tail_public
 import com.kapp.tenon.generated.resources.recovery_export_tail_public_shared
@@ -130,8 +128,6 @@ fun SettingsDataSubpage(
     onOpenDataDirectory: (() -> Unit)? = null,
     persistMessagesEnabled: Boolean = false,
     onPersistMessagesEnabledChange: ((Boolean) -> Unit)? = null,
-    experimentalLuciolaEnabled: Boolean = false,
-    onExperimentalLuciolaChange: ((Boolean) -> Unit)? = null,
     retentionDays: Int = DEFAULT_RETENTION_DAYS,
     onClearHistory: (() -> Unit)? = null,
     /** L1 导出（口令加密身份包）。null = 本宿主没有接（整张卡不画，与目录出口同一纪律）。 */
@@ -150,7 +146,6 @@ fun SettingsDataSubpage(
             leftoverPartCount = leftoverPartCount,
             leftoverPartBytes = leftoverPartBytes,
             persistMessagesEnabled = persistMessagesEnabled,
-            experimentalLuciolaEnabled = experimentalLuciolaEnabled,
             retentionDays = retentionDays,
         ),
         actions = SettingsDataActions(
@@ -159,7 +154,6 @@ fun SettingsDataSubpage(
             onChangeDataDirectory = onChangeDataDirectory,
             onOpenDataDirectory = onOpenDataDirectory,
             onPersistMessagesEnabledChange = onPersistMessagesEnabledChange,
-            onExperimentalLuciolaChange = onExperimentalLuciolaChange,
             onClearHistory = onClearHistory,
             onExportRecoveryBundle = onExportRecoveryBundle,
             onPickBackupFile = onPickBackupFile,
@@ -185,14 +179,12 @@ fun SettingsDataSubpage(
     val leftoverPartCount = state.leftoverPartCount
     val leftoverPartBytes = state.leftoverPartBytes
     val persistMessagesEnabled = state.persistMessagesEnabled
-    val experimentalLuciolaEnabled = state.experimentalLuciolaEnabled
     val retentionDays = state.retentionDays
     val onBack = actions.onBack
     val onClearLeftoverParts = actions.onClearLeftoverParts
     val onChangeDataDirectory = actions.onChangeDataDirectory
     val onOpenDataDirectory = actions.onOpenDataDirectory
     val onPersistMessagesEnabledChange = actions.onPersistMessagesEnabledChange
-    val onExperimentalLuciolaChange = actions.onExperimentalLuciolaChange
     val onClearHistory = actions.onClearHistory
     val onExportRecoveryBundle = actions.onExportRecoveryBundle
     val onPickBackupFile = actions.onPickBackupFile
@@ -350,21 +342,13 @@ fun SettingsDataSubpage(
                 },
             )
 
-            // luciola 加密信道。**默认关**:延迟判据还没达标，且开启后老版本设备
-            // 会失去自动发现（只认二维码/手动地址）—— 取舍写在文案里，由用户决定。
-            // 开启或关闭都需重启节点生效。
-            var experimentalLuciola by rememberSaveable(experimentalLuciolaEnabled) {
-                mutableStateOf(experimentalLuciolaEnabled)
-            }
-            SettingSwitchRow(
-                title = stringResource(Res.string.set_luciola_title),
-                subtitle = stringResource(Res.string.set_luciola_sub),
-                checked = experimentalLuciola,
-                onCheckedChange = { next ->
-                    experimentalLuciola = next
-                    onExperimentalLuciolaChange?.invoke(next)
-                },
-            )
+            // 「加密信道」开关**已移除**（连同 legacy 传输一起删）。
+            //
+            // 它原先是「实验：luciola 加密信道」，默认关、需要重启生效。删掉的理由不是
+            // "转正了所以默认开"，而是**传输形态不该是一个选项**：开关存在时，手机（默认开）
+            // 与桌面（环境变量默认关）各自决定跑哪条路，于是出现「消息能通、在线状态互相
+            // 骗人」这种谁也说不清的状态。现在只有一条路，关掉它等于关掉全部通信 ——
+            // 那不是设置，是故障。
 
             // 「跨网通道」开关**已移除**：用户的心智是"移动网 / WiFi / 内网都能无感连上"，
             // 不是"我要不要开一条长连接"。而且关掉它并不回滚到可用状态 —— 是**不拨号**，

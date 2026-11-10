@@ -100,7 +100,7 @@ fun handleSend(peerId: String, text: String) {
                     optimistic.copy(delivery = if (success) DeliveryState.Sent else DeliveryState.Failed),
                 )
                 if (!success) {
-                    host.warn(BannerMessage.SendFailed("Tidings send failed"))
+                    host.warn(BannerMessage.SendFailed("Tenon send failed"))
                 }
             }
             return
@@ -727,6 +727,16 @@ fun handleOnInbound(envelope: Envelope) {
             remoteAgentPresent = remote,
         )
     }
+    // **先解析目标，再决定执不执行**（团队执行方案 §4.2/§4.5）：@ 的是席位还是组员？
+    // 组员 ⇒ 目标宿主就是该席位宿主；解析不出目标（宿主自报 kind / 旧发送端）⇒ null
+    // ⇒ agentPromptRoute 保持既有兜底判据。
+    val groupMeta = groupId?.let { host.state.value.settings.groups.firstOrNull { g -> g.groupId == it } }
+    val promptTarget = resolvePromptTarget(cleanedText, groupMeta, routeFacts.agentKinds)
+    val targetHostIsSelf = when (promptTarget) {
+        is PromptTarget.Seat -> promptTarget.hostNodeId == host.state.value.selfNodeId
+        is PromptTarget.Member -> promptTarget.hostNodeId == host.state.value.selfNodeId
+        else -> null
+    }
     val route = RelayController.agentPromptRoute(
         text = cleanedText,
         groupId = groupId,
@@ -735,12 +745,16 @@ fun handleOnInbound(envelope: Envelope) {
         localAgentPresent = routeFacts.localAgentPresent,
         remoteAgentPresent = routeFacts.remoteAgentPresent,
         agentKinds = routeFacts.agentKinds,
+        targetHostIsSelf = targetHostIsSelf,
     )
     // §7.2：未唤醒且群里有 agent ⇒ 记一条 NO_WAKE（判据在 logNoWakeIfNeeded 里）。
     RelayController.logNoWakeIfNeeded(
         host.diagnosticLogSink, route, routeFacts.localAgentPresent, routeFacts.remoteAgentPresent, groupId,
     )
-    if (route == AgentPromptRoute.Local && !intentOwnsDispatch) {
+    // 歧义不执行（§4.2）：发送者自己的屏幕由其发送侧提示（每个成员各自跑 handleSendToGroup）；
+    // 入站侧只保证本机不执行。
+    val ambiguous = promptTarget is PromptTarget.Ambiguous
+    if (route == AgentPromptRoute.Local && !intentOwnsDispatch && !ambiguous) {
         val prompt = RelayController.extractAgentPrompt(cleanedText, routeFacts.agentKinds)
         // 点名事实必须在剥 @ **之前**从同一份 kinds 里取：prompt 里已经没有 @ 了，
         // 编排层拿它重判只会得到「没点名」（D18：群工单句被分诊成只读讨论）。

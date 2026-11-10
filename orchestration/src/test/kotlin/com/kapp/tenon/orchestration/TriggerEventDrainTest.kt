@@ -149,7 +149,9 @@ class TriggerEventDrainTest {
         drain.start()
         try {
             assertTrue(drain.ingest(event("evt-1")), "首次入队应成功")
-            TestAwait.condition("handler 恰好消费一次") { handled.size >= 1 }
+            TestAwait.condition("handler 恰好消费一次且翻账完成") {
+                handled.size >= 1 && store.row("evt-1").state == TriggerEventStates.DONE
+            }
             assertEquals(
                 TriggerEventStates.DONE,
                 store.row("evt-1").state,

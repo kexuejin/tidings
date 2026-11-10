@@ -1060,7 +1060,7 @@ internal fun exportDiagnostics(host: DesktopHost) {
  * 打开收件目录。
  *
  * 目录从 `dataDirectory` 推导（[desktopReceivedFilesDirectory]），与写入方
- * `RelayController` 的 `downloadDir` 同源。这里以前写死 `~/Downloads/捎话`，
+ * `RelayController` 的 `downloadDir` 同源。这里以前写死 `~/Downloads/榫卯`，
  * 而文件落在 `${dataDirectory}/downloads`，所以按钮打开的是空目录（审计 P1-9）。
  */
 internal fun openDownloadsFolder(dataDirectory: String) {

@@ -27,6 +27,7 @@ import kotlinx.coroutines.cancel
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.runBlocking
 import com.kapp.tenon.testutil.awaitUntil
+import com.kapp.tenon.domain.udpTestTransport
 
 /**
  * 审批处置（`respondApproval` → `agent-ack`）的**发送侧诚实性**：
@@ -56,9 +57,10 @@ class RelayControllerApprovalResponseTest {
         scope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
 
         agentRuntime = NodeRuntime(
+            messengerTransportFactory = udpTestTransport(),
             profile = Profile.agent(
                 nodeId = agentNodeId,
-                nick = "Tidings Agent Bot",
+                nick = "Tenon Agent Bot",
                 host = "test-agent-host",
                 ver = "relay-0.1.0",
                 platform = "mac",

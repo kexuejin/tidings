@@ -28,7 +28,7 @@ object RelayControllerOps
 /**
  * [RelayController] 的设置与偏好配置域扩展。
  *
- * 覆盖个人资料、端口、主题、通知免打扰策略、持久化配置与 Remote Tidings 中继通信。
+ * 覆盖个人资料、端口、主题、通知免打扰策略、持久化配置与 Remote Tenon 中继通信。
  */
 internal fun RelayController.handlePersist(settings: RelaySettings) {
     store.save(settings)

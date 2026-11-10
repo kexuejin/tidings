@@ -267,4 +267,57 @@ class DesktopWorkerOrchestratorTest {
             "cancel-task 动作必须接到 workerOrchestrator.cancelByCard",
         )
     }
+
+    /**
+     * 方向确认卡的「派为新任务」腿必须继承原工单的显式工作区指针。
+     *
+     * 真机现场（2026-11-10 证据 §6 O7）：1:1 里原型待选期的追问被裁决为
+     * dispatch-pending 后，新任务腿丢了 wsId —— 1:1 没有 groupId 可推导，
+     * 多工作区宿主的「单工作区自然推导」又不唯一，`resolveWorkspacePath`
+     * 返回 null，必退单「no git workspace bound to group」，而用户的药丸
+     * 明明选着工作区。修复 = ActiveTicket 携带 wsId 并在派单腿原样带回。
+     */
+    @Test
+    fun askCardNewTaskLegKeepsTheExplicitWorkspace() {
+        val source = RepoSource.read("orchestration/src/main/kotlin/com/kapp/tenon/orchestration/DesktopWorkerOrchestrator.kt")
+
+        assertTrue(
+            source.contains("val wsId: String? = null,"),
+            "ActiveTicket 必须携带派单时的显式 wsId（否则 ask 卡新任务腿无从继承）",
+        )
+        assertTrue(
+            source.contains("wsId = wsId,"),
+            "ActiveTicket 构造点必须把 dispatchSingleWorker 的 wsId 存进工单",
+        )
+        assertTrue(
+            source.contains("dispatchSingleWorker(active.convId, active.groupId, pending.text, active.agentKey, active.wsId)"),
+            "confirmPrototypeInput 的派为新任务腿必须把 active.wsId 传下去（丢了必退单 no git workspace bound to group）",
+        )
+    }
+
+    /**
+     * 「无 patch」轮次的重试提示词不许命令「确保 npm test 通过」。
+     *
+     * 真机现场（2026-11-10 证据 §6 O6）：问答式任务没有补丁是正常终态，统一
+     * 喊「fix all issues and ensure npm test passes」会把模型逼到编造无关改动
+     * 去凑补丁（真机抓到 +33 −2 与原任务毫无关系的测试改动）。重试提示词必须
+     * 按「无 patch 且无验收判负」分化，明确允许「只答不改」收尾。
+     */
+    @Test
+    fun patchlessRetryDoesNotDemandTestFixes() {
+        val source = RepoSource.read("orchestration/src/main/kotlin/com/kapp/tenon/orchestration/DesktopWorkerOrchestrator.kt")
+
+        assertTrue(
+            source.contains("Previous attempt ended without a patch"),
+            "无 patch 轮次必须有分化的重试提示词（不许复用「确保测试通过」话术）",
+        )
+        assertTrue(
+            source.contains("do NOT create or modify files to satisfy a patch requirement"),
+            "无 patch 重试必须明确禁止为凑补丁而造文件（O6 的编造通道）",
+        )
+        assertFalse(
+            source.contains("currentPrompt = \"Previous attempt failed:"),
+            "重试提示词不许再是无条件单一代——无 patch 轮次必须走分化分支",
+        )
+    }
 }

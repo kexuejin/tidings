@@ -194,7 +194,7 @@ internal fun ConversationListPanel(
                 // 画线会把它们拆成互不相干的会话行。块的最后一行之后才恢复分割线。
                 val next = rows.getOrNull(index + 1)
                 val nextIsBlockBody = next is FeedRow.TeamLabel || next is FeedRow.Member
-                if (!nextIsBlockBody && index != rows.lastIndex) ConversationListDivider()
+                if (!nextIsBlockBody && index != rows.lastIndex) ConversationListDivider(dense = dense)
             }
             trailingContent?.invoke(this)
         }

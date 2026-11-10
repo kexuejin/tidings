@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: GPL-3.0-only
-// Copyright (C) 2026 捎话 Tidings contributors
+// Copyright (C) 2026 榫卯 Tenon contributors
 
 package com.kapp.tenon.domain.screenshot
 
@@ -132,7 +132,7 @@ private val humanPeer = PeerUi(
 private val teahouseAgent = PeerUi(
     nodeId = "7c3e91b5-1d4a-4f68-9b02-9d1e7c3e91b5",
     nick = "teahouse-mobile",
-    company = "捎话",
+    company = "榫卯",
     dept = "工具链",
     avatar = 0,
     host = "MacBook-Pro",
@@ -148,7 +148,7 @@ private val teahouseAgent = PeerUi(
 private val ciAgent = PeerUi(
     nodeId = "5a1f2b3c-4d5e-4f60-8a71-2b3c4d5e6f70",
     nick = "ci-runner",
-    company = "捎话",
+    company = "榫卯",
     dept = "构建",
     avatar = 0,
     host = "ci.local",
@@ -357,7 +357,7 @@ private fun agentsLoadingState(): RelayUiState = RelayUiState(
  * 真壳：底部导航、徽标都走应用自己的实现，不在预览里重算规则。
  *
  * **必须包 `AppTheme(darkTheme = false)`**：`CompactScaffold` 自己不套主题，漏掉这一层
- * 整帧会落回 Material3 基线调色板（紫 `#6750A4`），而不是 Tidings 主色绿 `#2D6A4F`
+ * 整帧会落回 Material3 基线调色板（紫 `#6750A4`），而不是 Tenon 主色绿 `#2D6A4F`
  * —— 这个错**只有打开图才看得出来**：配对判定与差集都不读颜色。
  */
 @Composable

@@ -16,21 +16,29 @@ import java.security.SecureRandom
 import java.util.Base64
 
 /**
- * 桌面宿主的 luciola 实现。**默认关**:必须显式 TENON_LUCIOLA=1 才启用 ——
- * 开了之后 legacy 发现不再启动,未迁移设备只能靠二维码/手动地址找到本机。
+ * 桌面宿主的 luciola 实现。**恒启用** —— 这里没有开关。
+ *
+ * ## 为什么删掉了 `TENON_LUCIOLA` 门
+ *
+ * 曾经它默认关，只有设了 `TENON_LUCIOLA=1` 才建工厂。而手机侧
+ * （`RelaySettings.experimentalLuciola`）默认**开** —— 两端各自一个开关、彼此不知道对方的
+ * 值，真机上的结果就是「手机跑安全信道、桌面跑 legacy」：消息能通（都回落明文 UDP），
+ * 在线状态却互相骗人（手机按加密链路判在线、桌面按 presence 帧判），排查起来像网络故障。
+ *
+ * 传输形态是**协议事实**，不是两端各自的偏好：一旦可以一端开一端关，就必然出现
+ * 「谁也说不清现在跑的是哪条路」的状态。所以现在恒为 luciola，legacy 传输已从
+ * `NodeRuntime` 移除。
  *
  * 身份 seed 与信任库都落在数据目录的 luciola/ 下(受限文件,不是 SharedPreferences)。
  */
 class DesktopLuciolaHost(
     private val dataDirectory: () -> String,
-    private val enabled: Boolean = envEnabled(),
 ) : LuciolaHost {
     private val lock = Any()
     private var factory: LuciolaTransportFactory? = null
     private var configuredProfile: Profile? = null
 
     override fun configure(profile: Profile, udpPort: Int) {
-        if (!enabled) return
         installNativeLibraryPath()
         synchronized(lock) {
             if (factory != null && configuredProfile == profile) return
@@ -107,9 +115,6 @@ class DesktopLuciolaHost(
                 .joinToString(File.pathSeparator)
             System.setProperty("jna.library.path", path)
         }
-
-        fun envEnabled(): Boolean =
-            System.getenv("TENON_LUCIOLA")?.let { it == "1" || it.equals("true", ignoreCase = true) } == true
 
         private fun readOrCreateSeed(file: File): String {
             if (file.exists()) return file.readText().trim()

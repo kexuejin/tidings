@@ -1,0 +1,75 @@
+{
+  "case": "A31 luciola private-LAN long link + heartbeat stall target",
+  "device": "Pixel 6 (debug) + source-built headless desktop host",
+  "control_plane": "127.0.0.1:8788",
+  "before": {
+    "host_tcp_listeners": [8788, 17878, 17880, 17888],
+    "host_plaintext_17879_listener": false,
+    "phone_link_total": 0,
+    "phone_host_peer": {
+      "online": true,
+      "linkConnected": false,
+      "dialAttempts": 229,
+      "dialFailures": 229,
+      "dialLastTarget": "10.233.138.167:17879",
+      "lastError": "connect-timeout",
+      "pinSource": "pairing"
+    },
+    "host_heartbeat_last": "[heartbeat] entry targets=32 sent=2 linked=0 failed=[172.26.15.180:17878, 172.26.248.211:17878, 192.168.2.82:57715, ...]",
+    "host_heartbeat_lines": 72,
+    "host_send_refused": 2156,
+    "host_acked_true": 109,
+    "peer_idle_stays_online": "不适用（无在册活跃链路）"
+  },
+  "after": {
+    "phone_link_total": 1,
+    "phone_host_peer": {
+      "online": true,
+      "linkConnected": true,
+      "dialAttempts": 4,
+      "dialFailures": 3,
+      "dialLastTarget": "192.168.2.82:17880",
+      "lastError": null,
+      "skipReason": null,
+      "pinSource": "pairing",
+      "closeCount": 0
+    },
+    "host_health": { "ok": true, "online": 1, "uptime_s_sampled": 76 },
+    "host_heartbeat_last": "[heartbeat] entry targets=2 sent=0 linked=0 skipped=28 failed=[192.168.2.22:17878, 192.168.2.22:17878]",
+    "host_transport_restart": 0,
+    "host_presence_sent0_rounds": 1,
+    "host_sweep_offline": 0,
+    "phone_sweep_offline_in_last_5000_logcat_lines": 0,
+    "offline_banner": false,
+    "peer_idle_stays_online": {
+      "verdict": "PASS",
+      "detail": "最近 180s 内无翻面，链路在册的对端全部 online",
+      "peers": 12,
+      "flips": 0
+    },
+    "long_idle_recheck": {
+      "host_uptime_s": 523,
+      "verdict": "PASS (second run)",
+      "peers": 12,
+      "flips": 0,
+      "phone_link_total": 1,
+      "phone_link_connected": true,
+      "phone_dial_last_target": "192.168.2.82:17880",
+      "phone_dial_attempts": 4,
+      "phone_close_count": 0,
+      "phone_sweep_offline": 0,
+      "host_transport_restart": 0,
+      "host_sweep_offline": 0,
+      "offline_banner": false
+    }
+  },
+  "tests": {
+    "full_suite": "4346 tests / 0 failures",
+    "gates": "11 gates green; testStabilityGate 3 rounds PASS; cjkLiteralGate 72=72",
+    "new_guards": {
+      "LuciolaLanLinkTargetTest": "6 tests / 0 failures; reverse probe 4/6 red",
+      "PresenceHeartbeatTargetsTest": "4 tests / 0 failures; two reverse probes 1/4 red each"
+    },
+    "other": "unused-imports OK; design-palette OK; harness dry-run OK; :androidApp:assembleDebug BUILD SUCCESSFUL"
+  }
+}

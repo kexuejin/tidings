@@ -61,6 +61,21 @@ data class IncomingFilePlan(
     val isDir: Boolean = false,
 )
 
+/**
+ * 这次入站传输要不要在下载根下建一个以 `rootName` 命名的**目录**。
+ *
+ * 判据是「文件之间有相对结构」：
+ * - 文件夹传输（`isFolder`）—— 名字本来就是目录名；
+ * - 一个以上文件 —— 平铺到下载根会让同名文件互相去重成 `(1)(2)`，一组文件散开；
+ * - 任一 `relPath` 带 `/` —— 有子目录层级，必须有根。
+ *
+ * 三种都不满足 = **单文件**，直落下载根。从前它被塞进
+ * `<downloadDir>/<文件名>/<文件名>`：一个只装着自己的目录，同名再传就在里面
+ * 递增成 `(1)(2)`，而卡面/「打开」仍指着无后缀的最早那份（真机现场）。
+ */
+internal fun transferNeedsFolder(files: List<IncomingFilePlan>, isFolder: Boolean): Boolean =
+    isFolder || files.count { !it.isDir } > 1 || files.any { it.relPath.contains('/') }
+
 /** 拉取阶段，逐字对齐 TS `PullStage`。 */
 enum class PullStage { Connect, Connected, Prepare, Pull, Receive, Verify, Write, Complete }
 
@@ -205,9 +220,7 @@ class PullException(
  * 读到就写、写完再读，等价于 TS 那套 `socket.pause()` + `stream.once('drain')` 的组合，
  * 因此不需要移植 `resumeSocket()` 那处防死锁补丁。行为（帧序、失败原因、`.part` 去留）保持一致。
  */
-suspend fun pullTransfer(opts: PullOptions) {
-    PullSession(opts).run()
-}
+suspend fun pullTransfer(opts: PullOptions): List<String> = PullSession(opts).run()
 
 /**
  * `.part` 转正时避免覆盖已有文件（F-FILE-3）。
@@ -252,10 +265,13 @@ private class PullSession(private val opts: PullOptions) {
 
     private var stage: PullStage = PullStage.Connect
 
+    /** 真的落到哪：每个文件转正后的绝对路径（去重改名后的那个）。 */
+    private val savedPaths = mutableListOf<String>()
+
     /** 保存根目录。归一化掉重复分隔符和尾斜杠，好做前缀闸。 */
     private val root: String = pathJoin(opts.saveDir).trimEnd('/')
 
-    suspend fun run() {
+    suspend fun run(): List<String> {
         try {
             connect()
 
@@ -267,6 +283,7 @@ private class PullSession(private val opts: PullOptions) {
             // 队列空了：告诉对端这次 transfer 收工（TS 在 next() 里发 finish）。
             writeLock.withLock { writeObject(FinishFrame(type = TcpFrameTypes.FINISH, transferId = opts.transferId)) }
             phase(PullStage.Complete)
+            return savedPaths.toList()
         } finally {
             heartbeatScope.cancel()
             closeSocket()
@@ -524,10 +541,15 @@ private class PullSession(private val opts: PullOptions) {
 
         phase(PullStage.Write)
         val finalPath = finalPathOf(plan)
-        if (!renameFile(finalPath + PART_SUFFIX, dedupeTargetPath(finalPath))) {
+        // **只算一次**：`dedupeTargetPath` 看目标是否已存在决定加 `(1)` 还是 `(2)`。
+        // 先算一次拿来改名、再把同一个值记进返回值；算第二次会看到刚转正的文件，
+        // 于是报出一个多一级后缀的路径（[ChunkFileReceiver] 那边踩过同一个坑）。
+        val targetPath = dedupeTargetPath(finalPath)
+        if (!renameFile(finalPath + PART_SUFFIX, targetPath)) {
             deleteFile(finalPath + PART_SUFFIX)
             fail("write-error")
         }
+        savedPaths += targetPath
     }
 
     // 这两处是为了让 receiveInto 不必再算一遍路径；计算本身很便宜，但重复算容易写歪。

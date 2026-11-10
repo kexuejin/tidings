@@ -2,7 +2,7 @@ R2 桌面截图三件修复 —— 打包产物 .app 端到端取证
 ======================================================================
 日期：2026-10-12 08:30–09:20 CST
 作者：W5（teammate w5-remoteview）
-产物：scaffold/desktopApp/build/compose/binaries/main/app/捎话 Tidings.app
+产物：scaffold/desktopApp/build/compose/binaries/main/app/榫卯 Tenon.app
       （.app mtime 2026-10-12 07:52:45；由 W6 用
        java … -p scaffold :desktopApp:createDistributable 打出，BUILD SUCCESSFUL in 1m 3s）
 结论摘要：修复 ①（Main dispatcher）与 ②（captureState 重组⇒覆盖窗出现）**已证实**；
@@ -24,7 +24,7 @@ R2 桌面截图三件修复 —— 打包产物 .app 端到端取证
   /tmp/key.swift vk [cmd|shift|alt]  CGEvent 合成按键（vk 13=W、53=Esc）
 
 启动（不装 /Applications，直接跑产物里的可执行文件）：
-  "$APP/Contents/MacOS/捎话 Tidings" > /tmp/r2-app.log 2>&1 &
+  "$APP/Contents/MacOS/榫卯 Tenon" > /tmp/r2-app.log 2>&1 &
 主窗口几何：CGWindowList 报 (X=48, Y=78, W=1100, H=720)；screencapture 全屏 1920×1080，1 dp = 1 px。
 
 触发截图的三条路径（都试过，前两条在 08:33 那次成功）：
@@ -132,7 +132,7 @@ F5 Esc 取消无效（不是环境问题，是代码问题，见第 5 节）。
 
 6. 复核命令（供 verifier 复现）
 ----------------------------------------------------------------------
-  ls -l "scaffold/desktopApp/build/compose/binaries/main/app/捎话 Tidings.app/Contents/app/" | grep coroutines-swing
+  ls -l "scaffold/desktopApp/build/compose/binaries/main/app/榫卯 Tenon.app/Contents/app/" | grep coroutines-swing
   unzip -p "<app>/Contents/app/desktopApp-*.jar" app/relay/desktop/capture/DesktopScreenCaptureService.class | strings | grep -c captureState
   grep -icE "IllegalStateException" /tmp/r2-app.log        # 期望 0
   swift /tmp/winlist.swift | grep -i capture               # 期望在截图期间出现 layer=3 的全屏窗

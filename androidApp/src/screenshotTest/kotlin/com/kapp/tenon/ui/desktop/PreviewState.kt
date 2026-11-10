@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: GPL-3.0-only
-// Copyright (C) 2026 捎话 Tidings contributors
+// Copyright (C) 2026 榫卯 Tenon contributors
 
 package com.kapp.tenon.ui.desktop
 
@@ -69,9 +69,9 @@ public fun desktopPreviewState(): RelayUiState = RelayUiState(
     settings = RelaySettings(
         nodeId = SELF_NODE_ID,
         nick = "我的桌面",
-        company = "捎话",
+        company = "榫卯",
         dept = "桌面端",
-        team = "Tidings",
+        team = "Tenon",
         avatar = 0,
         profileRev = 3,
         persistMessages = true,
@@ -91,7 +91,7 @@ public fun desktopPreviewState(): RelayUiState = RelayUiState(
     unreadByPeer = mapOf(PEER_LIN to 2),
     pendingByPeer = mapOf(PEER_ZHOU to 1),
     mdnsServices = listOf(
-        MdnsServiceUi(serviceName = "捎话@living-room", host = "192.168.1.11", port = 49213),
+        MdnsServiceUi(serviceName = "榫卯@living-room", host = "192.168.1.11", port = 49213),
     ),
 )
 
@@ -259,9 +259,9 @@ public fun desktopPreviewFailedState(): RelayUiState = desktopPreviewState().let
 public fun linPeer(): PeerUi = PeerUi(
     nodeId = PEER_LIN,
     nick = "林岚",
-    company = "捎话",
+    company = "榫卯",
     dept = "设计",
-    team = "Tidings",
+    team = "Tenon",
     avatar = 1,
     host = "living-room.local",
     ip = "192.168.1.11",
@@ -275,9 +275,9 @@ public fun linPeer(): PeerUi = PeerUi(
 public fun zhouPeer(): PeerUi = PeerUi(
     nodeId = PEER_ZHOU,
     nick = "老周",
-    company = "捎话",
+    company = "榫卯",
     dept = "后端",
-    team = "Tidings",
+    team = "Tenon",
     avatar = 2,
     host = "studio.local",
     ip = "192.168.1.34",
@@ -399,7 +399,7 @@ public fun sampleFileCard(state: TransferState, done: Long = 0L): FileCardUi = w
         // 的 `DEFAULT_DATA_DIRECTORY`；jvmTest 的 `FileMessageStoreTest` 里也用同一形状）。
         // 旧值 `/Users/demo/Downloads/relay-desktop.dmg` 是 P1-9 审计废掉的桌面旧行为
         // （`desktopApp/src/main/kotlin/com/kapp/tenon/desktop/DesktopWindow.kt` 的 KDoc
-        // 「以前写死 ~/Downloads/捎话」），夹具画它等于把已消失的行为摆回参考图里。
+        // 「以前写死 ~/Downloads/榫卯」），夹具画它等于把已消失的行为摆回参考图里。
         savedPaths = listOf("/data/user/0/com.kapp.tenon/files/downloads/relay-desktop.dmg"),
     )
 
@@ -726,7 +726,7 @@ private fun cabinetEntry(name: String, isDir: Boolean, size: Long, minutesAgo: L
 public fun desktopPreviewCabinetState(): RelayUiState = desktopPreviewState().let { base ->
     base.copy(
         settings = base.settings.copy(
-            shareRoot = "~/Documents/捎话共享",
+            shareRoot = "~/Documents/榫卯共享",
             shareMode = "read",
             shareGrants = listOf(
                 ShareGrantEntry(nodeId = PEER_LIN, mode = "write"),

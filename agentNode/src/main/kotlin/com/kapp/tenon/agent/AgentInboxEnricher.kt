@@ -18,7 +18,7 @@ import com.kapp.tenon.core.protocol.mentionedVirtualAgent
  * |---|---|
  * | 桌面端（实现本接口）| 只提供**事实**：这个群的元数据长什么样 |
  * | [ControlPlane]（消费方）| 用 core 的判据算「@ 到谁」「谁有权执行」 |
- * | `dsh-tidings` | 只消费结论，不重算 |
+ * | `dsh-tenon` | 只消费结论，不重算 |
  *
  * ## 为什么授权判定不在这里做
  *
@@ -63,9 +63,9 @@ data class AgentInboxHint(
     /** 判定所依据的 agent 名字（仅供诊断）。 */
     val agentName: String? = null,
     /**
-     * **投给哪个会话**（Tidings 侧算好，桥接侧直接用）。
+     * **投给哪个会话**（Tenon 侧算好，桥接侧直接用）。
      *
-     * ## 为什么这个判定在 Tidings 侧而不是桥接侧
+     * ## 为什么这个判定在 Tenon 侧而不是桥接侧
      *
      * 「@ 到哪个 agent → 它在哪个工作区 → 该投给哪个会话」是一条**策略**，
      * 与「谁可以执行」同源（都在 core 的 `AgentSessionPick` / `AgentExecAuthorizer`）。
@@ -101,7 +101,7 @@ data class AgentInboxHint(
      *
      * 桥接侧原先只看 `direction !== 'in'` 就跳过 —— 于是**本机用户 @ 自己的 agent
      * 第一条就被跳过**，症状是「消息发出去了、红米也收到了、但 agent 从来不执行」。
-     * 判据放这里（core/Tidings 侧）而不是桥接侧：与 [targetSessionId] 同一条纪律 ——
+     * 判据放这里（core/Tenon 侧）而不是桥接侧：与 [targetSessionId] 同一条纪律 ——
      * 接新 agent 时不该重写一遍策略。
      */
     val senderIsAgent: Boolean = false,

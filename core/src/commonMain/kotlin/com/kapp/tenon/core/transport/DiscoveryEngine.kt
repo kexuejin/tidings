@@ -4,7 +4,7 @@ package com.kapp.tenon.core.transport
 import kotlinx.coroutines.CoroutineScope
 
 /**
- * 发现引擎抽象(迁移缝,luciola 仓库 docs/MIGRATION-tidings.md 阶段二):
+ * 发现引擎抽象:
  * NodeRuntime 只依赖这五个动作;[Discovery] 是自研 legacy 实现(iOS 用),
  * JVM/Android 的 luciola 实现见 LuciolaDiscoveryEngine。
  */

@@ -8,6 +8,7 @@ import kotlin.test.assertEquals
 import kotlin.test.assertFalse
 import kotlinx.coroutines.cancel
 import kotlin.test.assertTrue
+import com.kapp.tenon.agent.udpTestTransport
 
 /** T-G7 自保门的判定纯函数 + 真探针的形状（负载值本身不进断言 —— 机器相关）。 */
 class HostLoadGuardTest {
@@ -36,6 +37,7 @@ class HostLoadGuardTest {
         // **执行器没被碰**（不许先开工再喊累）。
         val scope = kotlinx.coroutines.CoroutineScope(kotlinx.coroutines.SupervisorJob() + kotlinx.coroutines.Dispatchers.Default)
         val agent = com.kapp.tenon.core.session.NodeRuntime(
+            messengerTransportFactory = udpTestTransport(),
             profile = com.kapp.tenon.core.protocol.Profile.mobile(
                 nodeId = com.kapp.tenon.core.protocol.newId(), nick = "宿主", host = "h", ver = "relay-0.1.0",
             ),

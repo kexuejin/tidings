@@ -1,4 +1,4 @@
-# 捎话 Tidings · 动态多智能体团队编排与自愈技术规范 (Dynamic Multi-Agent Team Orchestration & Self-Healing Spec)
+# 榫卯 Tenon · 动态多智能体团队编排与自愈技术规范 (Dynamic Multi-Agent Team Orchestration & Self-Healing Spec)
 
 > **定位与愿景**：面向局域网团队协同场景，解决用户仅需通过自然语言提出需求，系统即可**自动推选任务主理人、动态招募跨机 Agent 团队、流水线执行分工、隔离沙箱编码、自愈异常故障并由手机一键终审**的完整工程落地闭环。
 > 
@@ -143,7 +143,7 @@ Lead 调用 `PeerTagRouter.resolve(requiredTags)` 在当前局域网在线节点
 
 #### 2. 日志脱敏与指针化传输 (No Frame Explosion)
 Worker 在执行构建或跑测时，海量 stdout/stderr 严禁塞入网络帧：
-* 日志在 Worker 本地磁盘落盘为 `.tidings/logs/{taskId}.log`；
+* 日志在 Worker 本地磁盘落盘为 `.tenon/logs/{taskId}.log`；
 * `agent-channel-result` 帧中仅包含末尾 15 行错误摘要与日志文件哈希指针；
 * 桌面端 Inspector 按需通过 `TransferClient`（分块流式传输）拉取完整日志。
 

@@ -3,10 +3,10 @@
 <head>
 <meta charset="utf-8"/>
 <meta name="viewport" content="width=device-width,initial-scale=1"/>
-<title>捎话 Tidings · 合并原型（移动端 + 桌面端）</title>
+<title>榫卯 Tenon · 合并原型（移动端 + 桌面端）</title>
 <style>
 /* ============================================================================
-   捎话 Tidings · 合并原型（v5）
+   榫卯 Tenon · 合并原型（v5）
    ----------------------------------------------------------------------------
    一份文件同时承载「移动端」与「桌面端」两套外壳，共享 token、数据与组件原子。
 
@@ -1794,7 +1794,7 @@ body.font-lg .device .filecard .fs{font-size:14px}
 <body>
 
 <div id="chrome">
-  <b>捎话 Tidings · 合并原型</b>
+  <b>榫卯 Tenon · 合并原型</b>
   <span class="sep"></span>
   <span class="lbl">形态</span>
   <div class="grp" id="cForm"></div>
@@ -3486,7 +3486,7 @@ const floatwin = (cls, inner, title) =>
 function menubar(){
   return `<div class="menubar">
     <span class="applogo">${ic('chat')}</span>
-    <span style="font-weight:700;margin-right:6px">捎话</span>
+    <span style="font-weight:700;margin-right:6px">榫卯</span>
     <span class="mi">文件</span><span class="mi">编辑</span><span class="mi on">视图</span>
     <span class="mi">窗口</span><span class="mi">帮助</span>
     <span class="sp"></span>
@@ -4781,7 +4781,7 @@ function screenNodesEmpty(){
       <div><b>检测到 VPN。</b>局域网广播到不了对端，请在「添加节点」里填对方地址直连。</div></div>
     <div class="grphead">节点（0）</div>
     <div class="card"><div class="padc"><div class="empty" style="padding:22px 12px">
-      <p>还没发现任何节点。同一局域网里的对方也要开着捎话才会被搜到；
+      <p>还没发现任何节点。同一局域网里的对方也要开着榫卯才会被搜到；
         未广播或不同子网的电脑节点，用下面的「填对方地址」把它加进来。</p></div></div></div>
     <div class="krow" onclick="go('m-addnode')">
       <div class="av" style="background:var(--surface-2);color:var(--primary)">${ic('link')}</div>
@@ -4939,7 +4939,7 @@ function grantQrModalHTML(w, open){
         <div class="qrmock" style="margin:12px auto;width:180px;height:180px"></div>
         <div class="t1" style="font-weight:600;margin-bottom:4px">${wsName(w)}</div>
         <div class="t2" style="font-size:12px;color:var(--on-2);line-height:1.5">
-          手机使用「捎话」扫描此二维码，<br>一步自动完成<b>「节点配对 + 工作区读写授权」</b>。
+          手机使用「榫卯」扫描此二维码，<br>一步自动完成<b>「节点配对 + 工作区读写授权」</b>。
         </div>
         <div style="margin-top:8px"><span class="tag ok sm">一次性授权凭证 · 15分钟有效</span></div>
       </div>
@@ -5948,7 +5948,7 @@ const SCREENFN = {
   'm-home-recent':screenHomeRecent, 'm-home-more':screenHomeMore,
   'm-home-team-folder-open':screenHomeTeamFolderOpen,
   'm-home-unread':screenHomeUnread,
-  'm-gsearch':() => screenGSearch('协议'), 'm-gsearch-empty':() => screenGSearch('捎话', true),
+  'm-gsearch':() => screenGSearch('协议'), 'm-gsearch-empty':() => screenGSearch('榫卯', true),
   'm-chat':screenChat, 'm-chat-more':screenChatMore, 'm-chat-solo':() => screenChat(true),
   'm-chat-group':screenChatGroup, 'm-chat-group-more':() => screenChatGroup(true), 'm-groupcreate':screenGroupCreate,
   'm-createws':screenMCreateWs, 'm-chat-workspace':screenMChatWorkspace,
@@ -5971,7 +5971,7 @@ const SCREENFN = {
   /* ===================== P2P 文件传输 · 文件夹 ===================== */
   'd-folder':screenDFolder, 'd-resume':screenDResume, 'd-transferlog':screenDTransferLog,
   /* ===================== 本地历史与全文检索 ===================== */
-  'd-search':()=>screenDSearch('协议'), 'd-search-empty':()=>screenDSearch('捎话', true),
+  'd-search':()=>screenDSearch('协议'), 'd-search-empty':()=>screenDSearch('榫卯', true),
   /* ===================== 截图 / 屏幕协助（桌面独占） ===================== */
   'd-capture':()=>screenDCapture('select'), 'd-capture-tools':()=>screenDCapture('tools'),
   'd-reqscreen':screenDReqScreen, 'd-sharescreen':screenDShareScreen, 'd-viewscreen':screenDViewScreen,
@@ -6814,7 +6814,7 @@ function dwin(view, right, o={}){
   const showToolbar = tier !== 'compact' && o.toolbar !== false;
   const showNav   = tier === 'compact';
   return `
-    ${tabletHost?'':`<div class="titlebar">${traffic()}<span class="wtitle">捎话 Tidings</span>${tsub(v)}${tview(v)}</div>`}
+    ${tabletHost?'':`<div class="titlebar">${traffic()}<span class="wtitle">榫卯 Tenon</span>${tsub(v)}${tview(v)}</div>`}
     <div class="dshella">
     ${showRail ? drawer(v, o.cnts) : ''}
     <div class="dcol">
@@ -6956,7 +6956,7 @@ function screenDFiles(){
       <button class="btn sm">${ic('chat')} 回到会话</button>
     </div>
     <div class="card"><h3>${ic('folder')} 落盘</h3><div class="padc">
-      <div class="path">~/Downloads/捎话/图纸终稿-v4.pdf</div>
+      <div class="path">~/Downloads/榫卯/图纸终稿-v4.pdf</div>
     </div></div>
     <div class="card"><h3>${ic('info')} 传输信息</h3><div class="padc">
       <div class="kv" style="padding:5px 0"><span class="k">来源节点</span><span class="v mono">${NID.lin}</span></div>
@@ -6973,7 +6973,7 @@ function screenDFiles(){
       <b>「说明」那一行</b>是失败原因（<span class="mono">file.reason</span>），完成态没有值就整行不画；
       传输中 / 待接收时下面还会多一条进度条。「来源节点」只给 8 位节点 ID，不是
       「Lin · 192.168.1.18」——文件卡片的数据层里只有 peerId，没有地址。<br>
-      <b>没落盘时</b>这张卡换成一句「还没落盘。传输完成或接收之后才会写入 ~/Downloads/捎话。」。
+      <b>没落盘时</b>这张卡换成一句「还没落盘。传输完成或接收之后才会写入 ~/Downloads/榫卯。」。
     </div>
   </div>`, {side: sideFiles('f1'), view:'files'});
 }
@@ -7195,11 +7195,11 @@ function screenDEmpty(){
   return dwin('chat', `<div class="emptyd">
     <div class="qrmock"></div>
     <div class="big">还没有连接到任何设备</div>
-    <div class="lede">捎话在你自己的局域网里直接传文件，不经过任何服务器。<br>
+    <div class="lede">榫卯在你自己的局域网里直接传文件，不经过任何服务器。<br>
       三件事都能立刻开始：连上一台手机、拖一个文件进来、或者先看看这台电脑自己跑得怎么样。</div>
     <div class="entrygrid">
       <button class="entry"><div class="ei">${ic('qr')}</div><b>扫码连接手机</b>
-        <p>手机装好捎话后扫这个码，配对就完成了</p></button>
+        <p>手机装好榫卯后扫这个码，配对就完成了</p></button>
       <button class="entry"><div class="ei">${ic('drop')}</div><b>拖文件进来</b>
         <p>先发给自己另一台设备，跑通链路再说</p></button>
       <button class="entry"><div class="ei">${ic('bot')}</div><b>本机已在跑 Agent</b>
@@ -7216,7 +7216,7 @@ function screenDNoSel(){
   return dwin('chat', `<div class="emptyd">
     <div class="big">选一个会话</div>
     <div class="lede">选一个人或 Agent，就能开始聊。</div>
-    <div class="hint" style="margin-top:14px">也可以直接把文件拖进窗口，捎话会问你要发给谁。</div>
+    <div class="hint" style="margin-top:14px">也可以直接把文件拖进窗口，榫卯会问你要发给谁。</div>
   </div>`, {side: sideChat(''), view:'chat'});
 }
 /* 文件页空态：**整块**换成 EmptyState（列表和详情都不画），不是「左列表 + 右空态」。
@@ -7232,7 +7232,7 @@ function screenDFilesEmpty(){
   </div>
   <div class="emptyd">
     <div class="big">还没有文件</div>
-    <div class="lede">会话里发送或接收的文件会出现在这里，并落盘到 <span class="mono">~/Downloads/捎话</span>。</div>
+    <div class="lede">会话里发送或接收的文件会出现在这里，并落盘到 <span class="mono">~/Downloads/榫卯</span>。</div>
     <button class="btn" style="margin-top:14px">${ic('folder')} 打开落盘目录</button>
   </div>`, {view:'files', side:false, cnts:{files:0}});
 }
@@ -7303,7 +7303,7 @@ function dsetPage(sel, body){
     <div class="detail"><div class="setbody">${body}</div></div></div>`;
 }
 /* 设置窗是独立窗口，所以它有自己的标题栏 —— 窗口本体见
-   `desktopApp/.../DesktopWindow.kt:478-495`（`DesktopSettingsWindow`，标题就写「捎话 设置」），
+   `desktopApp/.../DesktopWindow.kt:478-495`（`DesktopSettingsWindow`，标题就写「榫卯 设置」），
    720×560 那对数字在 `ui/desktop/DesktopLayout.kt:128-129`。 */
 function setTitlebar(){
   return `<div class="titlebar">${traffic()}<span class="wtitle">榫卯 设置</span></div>`;
@@ -7410,7 +7410,7 @@ function screenDSettingsDesk(){
           代价是别人看到你上线、以及你发现对方，都会更慢。</p></div>
         <button class="sw" aria-checked="false"></button></div>
       <div class="setrow"><div class="tt"><b>开机自启</b>
-        <p>登录时自动在后台启动捎话（收进托盘，不弹窗）。默认关闭 —— 不开的话，
+        <p>登录时自动在后台启动榫卯（收进托盘，不弹窗）。默认关闭 —— 不开的话，
           对方发来的消息要等你手动打开才会补发。</p></div>
         <button class="sw" aria-checked="false"></button></div>
     </div></div>
@@ -7461,11 +7461,11 @@ function screenDSettingsIme(){
 }
 function screenDTray(){
   return `<div class="deskbg">
-    <div class="caption"><b>主窗口已关闭，捎话还在托盘里跑着</b>
+    <div class="caption"><b>主窗口已关闭，榫卯还在托盘里跑着</b>
       托盘图标标题会随状态变化：<kbd>3 条新消息</kbd> / <kbd>收到 1 个文件（12MB）</kbd><br>
       AWT 没有系统气泡通知，所以本期用菜单标题 + 菜单项角标，不做弹窗。</div>
     <div class="traymenu">
-      <div class="thead">捎话 · 正在收文件</div>
+      <div class="thead">榫卯 · 正在收文件</div>
       <div class="ti">${ic('window')} 打开主窗口</div>
       <div class="ti">${ic('plus')} 新建会话<span class="badge">⌘N</span></div>
       <div class="thr"></div>
@@ -7473,9 +7473,9 @@ function screenDTray(){
       <div class="ti">${ic('lan')} 本机 relay-8f2a · 运行中</div>
       <div class="thr"></div>
       <div class="ti">${ic('gear')} 设置…</div>
-      <div class="ti danger">${ic('minus')} 退出捎话</div>
+      <div class="ti danger">${ic('minus')} 退出榫卯</div>
     </div>
-    <div class="trayicon"><span class="tdot"></span>${ic('chat')} 捎话 · 1 个文件待收</div>
+    <div class="trayicon"><span class="tdot"></span>${ic('chat')} 榫卯 · 1 个文件待收</div>
   </div>`;
 }
 function screenDDrop(){

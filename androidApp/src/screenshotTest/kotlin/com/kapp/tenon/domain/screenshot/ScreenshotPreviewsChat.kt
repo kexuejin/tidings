@@ -1243,8 +1243,8 @@ private fun ChatGlobalSearchPhonePreview() {
 /**
  * `m-gsearch-empty` —— 三块都空。
  *
- * 原型 `m01f-gsearch-empty.png`：同一根顶栏（值「捎话」）+ 居中两行
- * 「没有找到「捎话」相关的内容」（粗）+「请检查输入是否有误，或换个关键词」。
+ * 原型 `m01f-gsearch-empty.png`：同一根顶栏（值「榫卯」）+ 居中两行
+ * 「没有找到「榫卯」相关的内容」（粗）+「请检查输入是否有误，或换个关键词」。
  *
  * 这张图钉的是**"空关键词"与"搜了但没命中"不是同一件事**：
  * `GlobalSearchResult.isEmpty` 的 KDoc 明写「空关键词不算空结果 —— 那是"还没开始搜"，
@@ -1256,13 +1256,13 @@ private fun ChatGlobalSearchPhonePreview() {
 private fun ChatGlobalSearchEmptyPhonePreview() {
     ChatShell("conversations", chatBase) { inner ->
         GlobalSearchScreen(
-            onSearch = { _, _ -> GlobalSearchResult(query = "捎话") },
+            onSearch = { _, _ -> GlobalSearchResult(query = "榫卯") },
             onBack = {},
             onOpenChat = {},
             onOpenFile = {},
             modifier = inner,
             now = PREVIEW_NOW,
-            initialQuery = "捎话",
+            initialQuery = "榫卯",
         )
     }
 }

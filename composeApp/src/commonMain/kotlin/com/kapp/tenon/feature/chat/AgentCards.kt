@@ -60,6 +60,8 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.foundation.layout.Spacer
 import com.kapp.tenon.ui.ContentWidths
+import com.kapp.tenon.ui.components.AppButtonSize
+import com.kapp.tenon.ui.components.AppTextButton
 import com.kapp.tenon.domain.model.MessageUi
 import com.kapp.tenon.generated.resources.Res
 import com.kapp.tenon.generated.resources.ic_terminal
@@ -75,6 +77,8 @@ import com.kapp.tenon.generated.resources.ic_chevd
 import com.kapp.tenon.generated.resources.card_check_drawer_close
 import com.kapp.tenon.generated.resources.card_check_drawer_open
 import com.kapp.tenon.generated.resources.card_check_time_format
+import com.kapp.tenon.generated.resources.card_details_hide
+import com.kapp.tenon.generated.resources.card_details_show
 import com.kapp.tenon.generated.resources.card_session_exempt
 import com.kapp.tenon.generated.resources.card_session_exempt_active
 import com.kapp.tenon.generated.resources.card_decided_by
@@ -167,8 +171,18 @@ fun AgentCardBubble(
     modifier: Modifier = Modifier,
     /** 产物条目 → 消息流里同卡关联的已落盘文件路径；null = 本壳解析不出（预览不画）。 */
     artifactSavedPathFor: ((AgentCardArtifact) -> String?)? = null,
-    /** 点开产物预览。null = 本壳没有预览通路，入口整块不画。 */
+    /**
+     * 端内渲染不了、要交给系统打开的产物（网页原型 `.html`）—— 落盘路径交给壳。
+     * null = 本壳没有平台出口（Android `ACTION_VIEW` / 桌面 `Desktop.open` /
+     * iOS Quick Look），该类入口整块不画。Markdown / Diff / 文本不走这里，
+     * 它们由 `ArtifactPreviewDialog` 端内渲染。
+     */
     onPreviewArtifact: ((AgentCardArtifact, String) -> Unit)? = null,
+    /**
+     * 本地动作的可见性判据：返回 false 的动作**整颗不画**（null = 全画）。
+     * 用于「文件还没落到本机时，别画一颗点了没反应的『在浏览器打开原型』」。
+     */
+    isActionVisible: ((AgentCardAction) -> Boolean)? = null,
     /**
      * 「已由 %s 处理」知情行的名字解析上下文（D7）。null = 壳没给，退回 nodeId 原样。
      *
@@ -331,6 +345,7 @@ fun AgentCardBubble(
                                 onAction!!(c, actionId)
                             }
                         },
+                        isActionVisible = isActionVisible,
                     )
                     if (hasReject && revisionDrawerOpen) {
                         CardRevisionDrawer(card, pendingActions, plan.actionsEnabled, onAction!!)
@@ -988,13 +1003,47 @@ private fun CardProgressRow(progress: Int, elapsedSec: Long? = null) {
 @Composable
 private fun CardStepListColumn(steps: List<AgentCardStep>) {
     val sp = LocalAppSpacing.current
-    // 升级稿 .sts{gap:6px;padding:4px 0}（relay.html:541）：微型任务清单，
-    // 无生硬分割线（升级稿注释原话）。
+    if (steps.size <= 4) {
+        Column(
+            verticalArrangement = Arrangement.spacedBy(sp.sm6),
+            modifier = Modifier.padding(vertical = sp.xs),
+        ) {
+            steps.forEach { step -> CardStepRow(step) }
+        }
+        return
+    }
+
+    var expanded by remember { mutableStateOf(false) }
+    val priorityIdx = steps.indexOfFirst {
+        it.status == AgentCardStepStatus.Running ||
+            it.status == AgentCardStepStatus.Failed ||
+            it.status == AgentCardStepStatus.Blocked
+    }
+    val visibleSteps = if (expanded) {
+        steps
+    } else if (priorityIdx >= 0) {
+        val start = (priorityIdx - 1).coerceAtLeast(0)
+        val end = (priorityIdx + 1).coerceAtMost(steps.lastIndex)
+        steps.slice(start..end)
+    } else {
+        steps.takeLast(3)
+    }
+
     Column(
         verticalArrangement = Arrangement.spacedBy(sp.sm6),
         modifier = Modifier.padding(vertical = sp.xs),
     ) {
-        steps.forEach { step -> CardStepRow(step) }
+        visibleSteps.forEach { step -> CardStepRow(step) }
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.End,
+        ) {
+            AppTextButton(
+                text = stringResource(if (expanded) Res.string.card_details_hide else Res.string.card_details_show),
+                onClick = { expanded = !expanded },
+                size = AppButtonSize.Compact,
+            )
+        }
     }
 }
 

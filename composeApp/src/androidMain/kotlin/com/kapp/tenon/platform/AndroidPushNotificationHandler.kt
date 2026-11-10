@@ -32,7 +32,7 @@ import org.jetbrains.compose.resources.getString
  * 现在 [requestPermission] 返回系统弹窗的真实结果（[NotificationManagerCompat.areNotificationsEnabled]），
  * 拿不到就返回 `false`；[showNotification] 发不出去时会写一条 `Log.w`。
  *
- * **渠道文案不再写死在代码里**：渠道名/描述原来硬编码成中文字面量（"捎话消息" /
+ * **渠道文案不再写死在代码里**：渠道名/描述原来硬编码成中文字面量（"榫卯消息" /
  * "来自对端的消息"），非中文系统上也只能看到中文。现在取自 composeResources
  * （`values/strings.xml` 的 `notification_channel_messages*`，见 [refreshChannelLabel]）。
  * 注意渠道名**被系统按 channel id 缓存**：光改文案，老用户看到的还是旧名字，所以这次

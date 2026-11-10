@@ -27,6 +27,7 @@ import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.jsonObject as toJsonObject
 import kotlinx.serialization.json.JsonPrimitive
 import kotlinx.serialization.json.jsonPrimitive
+import com.kapp.tenon.agent.udpTestTransport
 
 /**
  * Antigravity hook 桥（形态 B）四条回环路由的全组用例 —— 沿 [ControlPlaneTest] 的
@@ -58,12 +59,14 @@ class AgentHookBridgeTest {
     fun setUp() {
         scope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
         desktop = com.kapp.tenon.core.session.NodeRuntime(
+            messengerTransportFactory = udpTestTransport(),
             profile = com.kapp.tenon.core.protocol.Profile.mobile(
                 nodeId = com.kapp.tenon.core.protocol.newId(), nick = "手机侧", host = "phone", ver = "0.61.1",
             ),
             udpPort = 0, bindHost = loopback,
         )
         agent = com.kapp.tenon.core.session.NodeRuntime(
+            messengerTransportFactory = udpTestTransport(),
             profile = com.kapp.tenon.core.protocol.Profile.mobile(
                 nodeId = com.kapp.tenon.core.protocol.newId(), nick = "宿主", host = "host", ver = "relay-0.1.0",
             ),

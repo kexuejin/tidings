@@ -28,7 +28,7 @@
 
 ## 4. 包② S4-4 中途死亡窗口（`27445412` 同笔）
 
-`MockExternalPlugin.hangMs` 开关（env `TIDINGS_MOCK_PLUGIN_HANG_MS`，默认 0 行为不变，负值/乱值回落）让插件停在接单后半途；`MidExecutionDeathWindowTest` 三例：挂住期零事件（静默被钉住）、拔掉必 Error 事件 + onConnectionLost 真实触发、开关口径。等待全走 Await 轮询探针。后续真机轮用长任务真 agent 时，看门狗的 TERMINATE/FORCE_KILL 有了可注入的故障注入手段。
+`MockExternalPlugin.hangMs` 开关（env `TENON_MOCK_PLUGIN_HANG_MS`，默认 0 行为不变，负值/乱值回落）让插件停在接单后半途；`MidExecutionDeathWindowTest` 三例：挂住期零事件（静默被钉住）、拔掉必 Error 事件 + onConnectionLost 真实触发、开关口径。等待全走 Await 轮询探针。后续真机轮用长任务真 agent 时，看门狗的 TERMINATE/FORCE_KILL 有了可注入的故障注入手段。
 
 ## 5. 包⑤ P2P 大产物直投（`435339dc`）
 

@@ -461,6 +461,13 @@ fun groupParticipantRows(ctx: SenderIdentityContext): GroupParticipantRows {
         ctx.agentKindsByHost[declared.hostNodeId].orEmpty().forEach { kind ->
             kind.trim().lowercase().takeIf { it.isNotEmpty() }?.let { mentionKeys.add(it) }
         }
+        // **组员名进 token 池**（团队执行方案 §4.2，P0-0.1）：`@coder` 要能触发团队
+        // 执行，匹配器就必须认组员名 —— 候选与匹配同源（GroupMentionKeySourceTest
+        // 钉住）。组员名按声明层纪律已是 ASCII slug 且群内唯一；池内归一小写与
+        // 其它 token 同一条纪律。
+        declared.teamMembers.forEach { member ->
+            member.name.trim().lowercase().takeIf { it.isNotEmpty() }?.let { mentionKeys.add(it) }
+        }
     }
     agents.forEach { identity ->
         identity.agentKind?.trim()?.lowercase()?.takeIf { it.isNotEmpty() }?.let { mentionKeys.add(it) }

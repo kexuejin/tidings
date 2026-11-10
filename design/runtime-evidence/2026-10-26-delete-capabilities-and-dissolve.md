@@ -77,7 +77,7 @@
 
 ## 7. 真机读数
 
-- 桌面：`/Applications/Tidings.app` 已是新构建（`app-jvm` 里 `handleDissolveGroup` 命中 16 次）；
+- 桌面：`/Applications/Tenon.app` 已是新构建（`app-jvm` 里 `handleDissolveGroup` 命中 16 次）；
   实测「工作区 → 关联工作区建群 → 一键建群」，群创建成功、`virtualAgents` 一条。
 - 解散：群信息底部出现**「解散群聊」**（仅群主可见，非群主只看到「退出群聊」），
   确认框正文逐字：「解散后这个群对所有成员都不再存在，无法撤销；本机的聊天记录会保留。」

@@ -21,7 +21,7 @@ import kotlinx.coroutines.runBlocking
 import kotlinx.coroutines.withTimeoutOrNull
 
 /**
- * 一个**没有 UI** 的 Tidings 客户端。
+ * 一个**没有 UI** 的 Tenon 客户端。
  *
  * ## 它不是产品功能，是验收物
  *
@@ -276,4 +276,6 @@ internal object PlainTextUiTexts : RelayUiTexts {
         actor + " is not allowed to drive [" + agentName + "]"
     override suspend fun agentEventThinkingOnlyFallback(): String =
         "thinking only; no answer text"
+    override suspend fun stageHandoffSpeech(workerRole: String, reviewerRole: String): String =
+        "[" + workerRole + "] completed, handover to @" + reviewerRole
 }

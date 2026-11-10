@@ -18,7 +18,7 @@ import java.util.concurrent.CopyOnWriteArrayList
  *
  * 桌面不是「手机上再开一个窗口」，所以这里不复制 Android/iOS 的那些
  * 「权限弹窗 + 沙箱路径」逻辑，而是直接把宿主已有的能力接上：
- *  - 目录：macOS 的 `~/Library/Application Support/捎话 Tidings`；
+ *  - 目录：macOS 的 `~/Library/Application Support/榫卯 Tenon`；
  *  - 网络：枚举 `NetworkInterface` 的 IPv4，得到的是真实网卡地址；
  *  - 文件：AWT `FileDialog`，路径就是可读绝对路径；收到的文件用 AWT `Desktop` 交出去
  *    （打开 = 系统默认应用，分享 = 在文件管理器里定位，见 [DesktopReceivedFileActions]）；
@@ -32,7 +32,7 @@ class DesktopAppPlatform(
     /**
      * 首次运行时的默认设备名 = [DesktopDeviceInfo.hostName]（机器名）。
      *
-     * 为什么桌面端用机器名而不是「桌面端」之类固定词：一台机器上可能同时跑多个捎话
+     * 为什么桌面端用机器名而不是「桌面端」之类固定词：一台机器上可能同时跑多个榫卯
      * 实例（不同 data-dir 做联调），机器名至少让它们在多数情况下可区分；固定一个词
      * 会让所有桌面实例同名，正是真机撞名那条要修的问题。
      *
@@ -82,11 +82,12 @@ class DesktopAppPlatform(
     override val screenCapture: com.kapp.tenon.platform.ScreenCaptureService? = null,
     override val screenSharing: com.kapp.tenon.platform.ScreenSharingService = com.kapp.tenon.desktop.capture.DesktopScreenSharingService(),
     /**
-     * 实验 luciola 宿主。**必须接线**而不是吃接口默认的 null：
-     * [DesktopLuciolaHost] 自带双重门控（env `TENON_LUCIOLA=1` + 设置里「luciola 加密信道」
-     * 开关），接线本身不改变任何默认行为 —— 但不接的话整个类就是死代码，桌面端**永远**
-     * 进不了加密数据面（真机验证轮抓到：env 已进进程、seed 已落盘，luciolaMode 却恒 false，
+     * luciola 宿主。**必须接线**而不是吃接口默认的 null —— 不接的话整个类就是死代码，
+     * 桌面端永远进不了加密数据面（真机验证轮抓到：seed 已落盘，luciolaMode 却恒 false，
      * 文件信道随之两端互等）。
+     *
+     * 现在**没有开关**：`TENON_LUCIOLA` 环境变量门已删。传输形态是协议事实，一端开一端关
+     * 必然造成「手机安全信道 / 桌面 legacy」，消息能通但在线状态互相骗人。
      */
     override val luciolaHost: com.kapp.tenon.platform.LuciolaHost =
         DesktopLuciolaHost(dataDirectory = { dataDirectory.dataDirectory() }),
@@ -155,10 +156,10 @@ internal fun defaultCacheDirectory(): String {
  * 数据目录名（磁盘标识，不是文案）：老用户的库与身份都挂在这个路径下，
  * 跟着语言变会让升级后的实例认不出自己的数据（ARP-3 刻意保留的另两处中文之一）。
  */
-const val DESKTOP_APP_DIR: String = "捎话 Tidings"
+const val DESKTOP_APP_DIR: String = "榫卯 Tenon"
 
 /** 应用改名前的目录名；老用户的库与身份都还挂在它下面，见 [migrateLegacyDesktopDirs]。 */
-internal const val LEGACY_DESKTOP_APP_DIR: String = "捎话 Relay"
+internal const val LEGACY_DESKTOP_APP_DIR: String = "捎话 Tidings"
 
 /**
  * 一次性目录迁移：目录名来自 [DESKTOP_APP_DIR]，改名后若不搬，老用户升级会当自己是
@@ -333,7 +334,7 @@ internal fun localIpv6CandidateAddresses(includeVirtualInterfaces: Boolean = fal
  * 只能落到默认路由 —— 于是被整条接进代理的虚拟口，局域网里一个对端都收不到。
  *
  * 结果极具迷惑性：Tailscale / ZeroTier 照常能用（它们走 `100.64/10` 这类更具体的路由），
- * **只有 Tidings 失联** —— 红米 8 次拨号全失败、队列堆到 594 条；关掉 TUN 后 `ping`
+ * **只有 Tenon 失联** —— 红米 8 次拨号全失败、队列堆到 594 条；关掉 TUN 后 `ping`
  * 立刻恢复 416ms。用户的原话是「没关之前可以正常通过 tailscale/zerotier 访问，
  * 为什么会对 relay 有影响」—— 因为两者走的根本不是同一条路。
  *
@@ -549,7 +550,7 @@ class DesktopMdnsAdvertiser(
     }
 }
 
-/** 浏览 `_relay._udp`：局域网内开启了 mDNS 自动发现的捎话设备会出现在这里。 */
+/** 浏览 `_relay._udp`：局域网内开启了 mDNS 自动发现的榫卯设备会出现在这里。 */
 class DesktopMdnsBrowser(
     private val runner: DnsSdRunner = DesktopDnsSd,
     private val onFound: (String, String, Int) -> Unit = { _, _, _ -> },
@@ -587,7 +588,7 @@ class DesktopMdnsBrowser(
 /**
  * `dns-sd -B` 的输出里，「Add」行是唯一带端口号的完整记录。
  *
- * 只在真的拿到非零端口时才回调，避免把同名的其它服务当成捎话节点。
+ * 只在真的拿到非零端口时才回调，避免把同名的其它服务当成榫卯节点。
  */
 internal fun parseBrowseLine(
     line: String,
@@ -660,7 +661,7 @@ object NoopDnsSdRunner : DnsSdRunner {
  *
  * 必须与写入方 `RelayController` 的 `downloadDir = pathJoin(dataDirectory, "downloads")`
  * 用同一个 `dataDirectory` 推导，而不是各写一份路径字面量：两边一旦分叉，重演的就是
- * P1-9 —— 「打开下载目录」打开的是 `~/Downloads/捎话`，文件却在 data 目录下，
+ * P1-9 —— 「打开下载目录」打开的是 `~/Downloads/榫卯`，文件却在 data 目录下，
  * 用户点开只看到空目录。
  */
 internal fun desktopReceivedFilesDirectory(dataDirectory: String): String =

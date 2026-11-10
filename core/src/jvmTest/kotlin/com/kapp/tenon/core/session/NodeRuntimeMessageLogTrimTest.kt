@@ -11,6 +11,7 @@ import java.nio.file.Files
 import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlinx.coroutines.runBlocking
+import com.kapp.tenon.core.testing.udpTestTransport
 
 /**
  * 周期维护必须**真的**裁剪信封日志。
@@ -29,6 +30,7 @@ class NodeRuntimeMessageLogTrimTest {
         assertEquals(10, store.since("peer-a", 0, 100).size, "先确认真的有 10 条")
 
         val runtime = NodeRuntime(
+            messengerTransportFactory = udpTestTransport(),
             profile = Profile.mobile(
                 nodeId = "trim-test-node",
                 nick = "trim-test",

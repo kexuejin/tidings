@@ -161,7 +161,7 @@ internal fun ControlPlane.inbox(exchange: HttpExchange) {
                                     // 授权结论随行：桥接侧据此决定投不投，并在拒绝时能说出为什么。
                                     put("senderMayExecute", hint.senderMayExecute)
                                     hint.denyReason?.let { put("denyReason", it) }
-                                    // **目标会话**：判定已由 Tidings 侧算好（core 的 AgentSessionPick）。
+                                    // **目标会话**：判定已由 Tenon 侧算好（core 的 AgentSessionPick）。
                                     // 桥接侧直接用它，不用自己再算一遍策略。
                                     hint.targetSessionId?.let { put("targetSessionId", it) }
                                     // **发送者是不是 agent**：桥接侧用它判「回声」，而不是只看方向。

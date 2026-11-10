@@ -40,7 +40,7 @@ import com.kapp.tenon.ui.theme.LocalAppSpacing
  * 再传一堆布尔。
  */
 internal enum class ChatHeaderDensity {
-    /** 手机：头像 36dp 圆角方块，标题 titleSmall。 */
+    /** 手机：头像 40dp 圆角方块，标题 titleSmall。 */
     Phone,
 
     /** 桌面右栏：头像 44dp 正圆 + 右下角在场点，标题 titleMedium。 */
@@ -76,10 +76,14 @@ internal fun ChatHeaderContent(
     ) {
         Box {
             if (density == ChatHeaderDensity.Phone) {
+                // 40dp：原型手机屏 `.topbar.chat .hav` 是 36px，逐像素没错，但作为
+                // 一屏唯一的身份锚点，比主流 IM 头部（40-44dp）小一档 —— 与会话行
+                // 头像偏小是同一类"桌面 Web 密度直接上手机"的偏差，有意偏离原型
+                // 提到 40（会话行已并轨 48 的原型手机档，头部只提一档保持层级差）。
                 PeerAvatar(
                     name = title,
                     isAgent = isAgent,
-                    size = 36.dp,
+                    size = 40.dp,
                     isGroup = isGroup,
                     avatar = avatar,
                     avatarBytes = avatarBytes,
@@ -128,11 +132,9 @@ internal fun ChatHeaderContent(
             } else if (secondaryText != null) {
                 Text(
                     text = secondaryText,
-                    style = if (density == ChatHeaderDensity.Phone) {
-                        MaterialTheme.typography.labelSmall
-                    } else {
-                        MaterialTheme.typography.bodySmall
-                    },
+                    // 副行是"跟谁聊、在不在"这一屏的关键读数：11sp 的 labelSmall 是
+                    // 注释字号，主体信息统一 12sp 的 bodySmall（手机/桌面同阶）。
+                    style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                     maxLines = if (density == ChatHeaderDensity.Desktop && narrow) 2 else 1,
                     overflow = TextOverflow.Ellipsis,

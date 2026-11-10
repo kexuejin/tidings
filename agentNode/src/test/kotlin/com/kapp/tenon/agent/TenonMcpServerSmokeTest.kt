@@ -53,7 +53,7 @@ class TenonMcpServerSmokeTest {
                 )
                 assertEquals(3, replies.size, "notification 不应答，三个请求三个应答：$replies")
                 val init = replies[0]
-                assertTrue(init.contains("\"serverInfo\"") && (init.contains("tenon") || init.contains("tidings")), "initialize 应答带 serverInfo：$init")
+                assertTrue(init.contains("\"serverInfo\"") && init.contains("tenon"), "initialize 应答带 serverInfo：$init")
                 val tools = replies[1]
                 for (expected in listOf(
                     "tenon_fetch_node_capabilities",

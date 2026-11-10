@@ -27,7 +27,7 @@ import kotlinx.serialization.json.longOrNull
  *
  * - **决定在桌面端**（面板 / 人按按钮，经控制面 `PUT /v1/agent/grants` 写进来）；
  * - **执行在这里**：投递前 `allows()` 过滤 —— 只有在宿主进程过滤，"没授权"才等于"没数据"。
- *   `dsh-tidings` 插件只是转发方，不持有台账，也不做决定。
+ *   `dsh-tenon` 插件只是转发方，不持有台账，也不做决定。
  *
  * ## 三档策略
  *
@@ -569,7 +569,7 @@ class AgentGrantStore(private val file: File) {
             val tmp = File(file.absolutePath + ".tmp")
             tmp.writeText(json.toString())
             // 0600：这份文件是**安全策略**（谁能看这台宿主的 agent），不是偏好。
-            // 同机其它用户能写它 = 能给自己发授权。本仓既有纪律（dsh-tidings 的
+            // 同机其它用户能写它 = 能给自己发授权。本仓既有纪律（dsh-tenon 的
             // config-v1.json 同此）；rename 不继承源权限，所以**两个文件都要设**。
             tmp.setReadable(false, false)
             tmp.setReadable(true, true)

@@ -377,6 +377,7 @@ public fun ChatPane(
                 onSetTeamRoster = { defaultWsId, roster ->
                     controller.setGroupTeamDeclaration(group.groupId, defaultWsId, roster)
                 },
+                teamExecutionPort = controller.teamExecutionPort,
             )
         }
         if (showClearConfirm) {

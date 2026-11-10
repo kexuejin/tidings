@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: GPL-3.0-only
-// Copyright (C) 2026 捎话 Tidings contributors
+// Copyright (C) 2026 榫卯 Tenon contributors
 
 package com.kapp.tenon.domain
 
@@ -164,6 +164,14 @@ public interface DesktopPaneActions {
      * 定位键 = `(groupId, defaultWsId)`；席位必须属于本机声明（机主主权）。
      */
     fun setGroupTeamDeclaration(groupId: String, defaultWsId: String, roster: List<TeamMemberDraft>?)
+
+    /**
+     * 团队执行档端口（团队执行方案 §6.3）：TeamRosterDialog 执行配置段的读写通路。
+     * null = 该壳没有执行面（手机等非宿主）⇒ 只读投影（执行配置由席位宿主管理）。
+     * 只有桌面宿主覆写（DesktopExtension 装配 DesktopTeamExecutionPort）。
+     */
+    val teamExecutionPort: TeamExecutionPort?
+        get() = null
 
     /**
      * 算「谁能用这个 agent 干活」的逐设备勾选状态。

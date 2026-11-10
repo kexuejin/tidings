@@ -37,8 +37,9 @@ class TransferChannelStallFallbackTest {
 
     private class RecordingDataPlane : FileDataPlane {
         var calls = 0
-        override suspend fun pull(opts: PullOptions) {
+        override suspend fun pull(opts: PullOptions): List<String> {
             calls++
+            return emptyList()
         }
     }
 

@@ -444,7 +444,9 @@ internal fun MineCabinetView(
                             colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant),
                         ) {
                             Column(Modifier.padding(LocalAppSpacing.current.md10), horizontalAlignment = Alignment.CenterHorizontally) {
-                                PeerAvatar(name = p.nick, isAgent = p.isAgent, size = 32.dp)
+                                // 40dp：手机仅有的快捷卡（桌面文件柜不走这里）。32dp 在卡片里
+                                // 是小图标档，对齐工作区单元卡 UnitAvatar 的 40dp 既有档。
+                                PeerAvatar(name = p.nick, isAgent = p.isAgent, size = 40.dp)
                                 Spacer(Modifier.height(LocalAppSpacing.current.xs))
                                 Text(p.nick, style = MaterialTheme.typography.labelSmall, maxLines = 1, overflow = TextOverflow.Ellipsis)
                             }
@@ -643,7 +645,9 @@ internal fun MineCabinetView(
                             verticalAlignment = Alignment.CenterVertically,
                             horizontalArrangement = Arrangement.spacedBy(LocalAppSpacing.current.sm),
                         ) {
-                            PeerAvatar(name = nick, size = 26.dp)
+                            // 32dp：26dp 是原型 `.cbfrow` 的 Web 密度，配 bodyMedium(14sp)
+                            // 在手机上失衡（同一屏快捷卡是 40dp 的既有档）。有意偏离原型。
+                            PeerAvatar(name = nick, size = 32.dp)
                             Text(nick, style = MaterialTheme.typography.bodyMedium, fontWeight = FontWeight.Medium, modifier = Modifier.weight(1f))
                             Text(
                                 stringResource(
@@ -698,7 +702,8 @@ internal fun MineCabinetView(
                                 verticalAlignment = Alignment.CenterVertically,
                                 horizontalArrangement = Arrangement.spacedBy(LocalAppSpacing.current.md10),
                             ) {
-                                PeerAvatar(name = entry.uploaderNick, size = 26.dp)
+                                // 32dp：26dp 是原型 `.cbfrow` 的 Web 密度，与上面授权行同一档。
+                                PeerAvatar(name = entry.uploaderNick, size = 32.dp)
                                 Text(
                                     stringResource(Res.string.cabinet_recent_row_desc, entry.uploaderNick, entry.fileCount, formatBytes(entry.totalSize)),
                                     style = MaterialTheme.typography.bodyMedium,

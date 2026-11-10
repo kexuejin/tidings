@@ -88,6 +88,7 @@ import com.kapp.tenon.generated.resources.chat_forward_success
 import com.kapp.tenon.generated.resources.banner_remote_relay_cleared
 import com.kapp.tenon.generated.resources.banner_remote_relay_configured
 import com.kapp.tenon.generated.resources.banner_agent_ack_not_confirmed
+import com.kapp.tenon.generated.resources.banner_luciola_unavailable
 import com.kapp.tenon.generated.resources.banner_agent_ack_send_failed
 import com.kapp.tenon.generated.resources.banner_scan_failed
 import com.kapp.tenon.generated.resources.banner_scan_range_added
@@ -440,6 +441,8 @@ fun bannerText(message: BannerMessage): String = when (message) {
         stringResource(Res.string.banner_agent_ack_send_failed)
     BannerMessage.AgentAckUnconfirmed ->
         stringResource(Res.string.banner_agent_ack_not_confirmed)
+    is BannerMessage.LuciolaUnavailable ->
+        stringResource(Res.string.banner_luciola_unavailable)
 }
 
 /**
@@ -931,12 +934,14 @@ fun ForwardTargetDialog(
                         )
                     }
                 } else {
-                    LazyColumn(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .heightIn(max = 320.dp),
-                        verticalArrangement = Arrangement.spacedBy(sp.xs),
-                    ) {
+                    // 高度上限走比例收口（小屏/横屏）：默认档 320dp。
+                    RelayDialogContentHeight(defaultMaxHeight = 320.dp) { cap ->
+                        LazyColumn(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .heightIn(max = cap),
+                            verticalArrangement = Arrangement.spacedBy(sp.xs),
+                        ) {
                         items(filtered, key = { it.convId }) { conv ->
                             Row(
                                 modifier = Modifier
@@ -958,8 +963,9 @@ fun ForwardTargetDialog(
                             }
                         }
                     }
+                        }
+                    }
                 }
-            }
         },
         dismissButton = {
             RelayDialogButton(text = stringResource(Res.string.common_cancel), onClick = onDismiss)

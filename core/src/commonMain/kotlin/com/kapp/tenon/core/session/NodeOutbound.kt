@@ -435,12 +435,12 @@ internal class NodeOutbound(
      *
      * 因此每一份载荷都按**该成员**是否声明了 [MsgTypes.CAP_GROUP_TEXT_ATTRIBUTED] 决定：
      * - 声明了 ⇒ 收全量那份（带 `senderId` 与 agent 扩展键）；
-     * - 没声明（茶话间、老 Tidings 构建）⇒ 收 [GroupTextVariants.plain]，**同一个 id**，
+     * - 没声明（茶话间、老构建）⇒ 收 [GroupTextVariants.plain]，**同一个 id**，
      *   只少这些扩展键；正文、mentions、replyTo、resend 一个不少。
      *
      * 判据只用 caps，**不看 `ver`、也不拿 `agn1` 当代理**：`agn1` 说的是 agent 会话帧，
      * 与群文本白名单毫无关系；版本号是自由字符串，拿它做能力判定等于让每个发送方各维护一份
-     * 版本表。老 Tidings 节点即使有 `agn1`，只要没声明 `gta1` 就按 legacy 发。
+     * 版本表。老节点即使有 `agn1`，只要没声明 `gta1` 就按 legacy 发。
      *
      * 队列按 `(peerId, msgId)` 分行存**各自那份** JSON，所以补发/重放时对 legacy 成员
      * 塞回去的仍是不带扩展键的版本 —— 不会因为"补发时重算了一次"把老端再次整帧拒收。

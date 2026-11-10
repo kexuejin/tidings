@@ -2,16 +2,53 @@
 
 package com.kapp.tenon.feature.chat
 
+import androidx.compose.foundation.BorderStroke
+import androidx.compose.foundation.horizontalScroll
+import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.LocalContentColor
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.Surface
+import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.runtime.setValue
+import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.LocalClipboardManager
+import androidx.compose.ui.text.AnnotatedString
+import androidx.compose.ui.text.TextStyle
+import androidx.compose.ui.text.font.FontFamily
+import androidx.compose.ui.unit.dp
 import com.kapp.tenon.core.protocol.AGENT_SENDER_PREFIX
+import com.kapp.tenon.generated.resources.Res
+import com.kapp.tenon.generated.resources.chat_copy
+import com.kapp.tenon.generated.resources.ic_copy
+import com.kapp.tenon.generated.resources.settings_copy_done
+import com.kapp.tenon.ui.components.AppButtonSize
+import com.kapp.tenon.ui.components.AppTextButton
+import com.kapp.tenon.ui.theme.LocalAppSpacing
+import com.kapp.tenon.ui.theme.RelayShapes
+import com.kapp.tenon.ui.theme.SurfaceTiers
 import com.kapp.tenon.ui.theme.TextWeights
+import com.mikepenz.markdown.compose.components.markdownComponents
+import com.mikepenz.markdown.compose.elements.MarkdownCodeBlock
+import com.mikepenz.markdown.compose.elements.MarkdownCodeFence
 import com.mikepenz.markdown.m3.Markdown
 import com.mikepenz.markdown.m3.markdownColor
 import com.mikepenz.markdown.m3.markdownTypography
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.launch
+import org.jetbrains.compose.resources.stringResource
 
 /**
  * agent 消息正文的 Markdown 渲染。
@@ -63,12 +100,101 @@ internal fun MarkdownMessage(
         h6 = body.copy(fontWeight = TextWeights.Emphasis),
         table = type.bodySmall,
     )
+    val components = remember {
+        markdownComponents(
+            codeFence = { model ->
+                MarkdownCodeFence(
+                    content = model.content,
+                    node = model.node,
+                    style = model.typography.code,
+                    block = { code, language, style ->
+                        CustomCodeBlock(code = code, language = language, style = style)
+                    },
+                )
+            },
+            codeBlock = { model ->
+                MarkdownCodeBlock(
+                    content = model.content,
+                    node = model.node,
+                    style = model.typography.code,
+                    block = { code, language, style ->
+                        CustomCodeBlock(code = code, language = language, style = style)
+                    },
+                )
+            },
+        )
+    }
     Markdown(
         remember(text) { withChatLineBreaks(text) },
         colors = colors,
         typography = typography,
+        components = components,
         modifier = modifier,
     )
+}
+
+@Composable
+private fun CustomCodeBlock(
+    code: String,
+    language: String?,
+    style: TextStyle,
+    modifier: Modifier = Modifier,
+) {
+    val sp = LocalAppSpacing.current
+    val clipboard = LocalClipboardManager.current
+    var copied by remember { mutableStateOf(false) }
+    val scope = rememberCoroutineScope()
+
+    Surface(
+        shape = RelayShapes.medium,
+        color = SurfaceTiers.Raised,
+        border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant),
+        modifier = modifier
+            .fillMaxWidth()
+            .padding(vertical = sp.xs),
+    ) {
+        Column {
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(start = sp.md, end = sp.xs, top = sp.xxs, bottom = sp.xxs),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                Text(
+                    text = (language?.takeIf { it.isNotBlank() } ?: "code").lowercase(),
+                    style = MaterialTheme.typography.labelSmall.copy(fontFamily = FontFamily.Monospace),
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+                AppTextButton(
+                    text = stringResource(if (copied) Res.string.settings_copy_done else Res.string.chat_copy),
+                    leadingIcon = Res.drawable.ic_copy,
+                    onClick = {
+                        clipboard.setText(AnnotatedString(code))
+                        copied = true
+                        scope.launch {
+                            delay(2000L)
+                            copied = false
+                        }
+                    },
+                    size = AppButtonSize.Compact,
+                )
+            }
+            HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
+            Box(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .horizontalScroll(rememberScrollState())
+                    .padding(horizontal = sp.md, vertical = sp.sm),
+            ) {
+                Text(
+                    text = code.trimEnd('\n'),
+                    style = style.copy(fontFamily = FontFamily.Monospace),
+                    color = MaterialTheme.colorScheme.onSurface,
+                )
+            }
+        }
+    }
 }
 
 /**

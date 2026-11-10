@@ -12,7 +12,7 @@
 
 | 项 | 值 |
 |---|---|
-| 桌面 | `/Applications/Tidings.app`（本轮源码构建），真实数据目录；节点 `a1b2c3d4` |
+| 桌面 | `/Applications/Tenon.app`（本轮源码构建），真实数据目录；节点 `a1b2c3d4` |
 | 手机 | Pixel 6 / Android 15，`com.kapp.tenon` release（`adb install -r -d` 覆盖，数据保留） |
 | 驱动 | uiautomator dump（手机）＋ System Events/AXPress（桌面）——**不用截图、不用坐标猜** |
 
@@ -45,7 +45,7 @@
 
 ## 3. 多设备入群：0 成员 → 加人 → agent 同步
 
-1. 先 `am force-stop` 手机，等桌面侧 `online=0`（实测 `tidings_status` 从 `online:1` 变 `online:0`）。
+1. 先 `am force-stop` 手机，等桌面侧 `online=0`（实测 `tenon_status` 从 `online:1` 变 `online:0`）。
 2. 桌面：工作区 → 关联工作区建群 → 一键建群 / 共享 ⇒ 横幅「「care-in-china 协同群」建好了。群里还没有其它设备 —— 对端上线后可从群信息里添加成员。」
 3. 落库读数（`settings.json`）：
    ```json

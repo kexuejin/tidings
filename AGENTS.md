@@ -332,7 +332,7 @@ python3 tools/check-design-palette.py --css-vars
   - `files/relay/stores/messages.log` —— 原始信封（**落库时刻在 `at` 列**，不是信封 `ts`）
   - **会话的真身是 `databases/relay.db`（SQLDelight）**；`files/relay/messages.json` 只是它的
     导出，改它没用（应用会按库重新导出）。手机侧**没有 FTS 表** —— FTS 只在桌面端。
-- 桌面库在 `~/Library/Application Support/捎话 Tidings/`：`relay.db` 是 SQLite，可直接 `sqlite3` 查。
+- 桌面库在 `~/Library/Application Support/榫卯 Tenon/`：`relay.db` 是 SQLite，可直接 `sqlite3` 查。
 - 改手机侧的库要**先 `am force-stop`**，再用 `exec-out run-as cat` 拉、改、`push` 到
   `/data/local/tmp/` 后 `run-as cp` 写回，并删掉 `relay.db-wal` / `relay.db-shm`（否则旧的
   WAL 会把改动盖回去）。
@@ -506,6 +506,8 @@ filter-repo 会**顺手删掉 `origin` remote**（防误推），跑完要重新
 | Agent 协议（PPE-1） | `docs/PROTOCOL-AGENT-WORKSPACE.md` |
 | 团队折叠（Team Folder）最终方案：形态、裁决、改造量、验收 | `docs/team-folder-final-plan.md` |
 | 团队创建（声明）最终方案：入口、写路径复用、裁决、验收 | `docs/team-creation-final-plan.md` |
+| 工作区模型重设计：项目 / 项目目录 / 执行设备三层（D1–D16 裁决、P0–P5 路线、清库重配纪律） | `docs/project-directory-and-execution-site-model.md` |
+| 多席位 / 多群 / 会话工作区一致性修正（C1–C5 细则、反向验证、真机判据） | `docs/seat-workspace-consistency-fix-plan.md` |
 | 真机证据（文字） | `design/runtime-evidence/` |
 | 仓库里哪些真机身份被清掉了、哪些是**有意保留**的 | `docs/privacy-scan-2026-10-29.md`（§4 是「家网段为什么不整体替换」） |
 

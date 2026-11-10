@@ -1,12 +1,12 @@
-=== R2 功能链路验证证据（验收⑥：桌面端 / 移动端 / dsh-tidings / agentNode 真实会话与 session 权限交互） ===
+=== R2 功能链路验证证据（验收⑥：桌面端 / 移动端 / dsh-tenon / agentNode 真实会话与 session 权限交互） ===
 时间: 2026-10-12 21:10–22:00 CST
 执行: Lead（本会话）
 环境:
   - 桌面: macOS 26 (darwin), 内网 IP 192.0.2.82 (en1)
   - 移动: Pixel 6 `SERIAL-TEST-01`, app.relay, IP 192.0.2.22, UDP 17878 / TCP 17879
   - agentNode: 本机常驻 JVM, 控制面 127.0.0.1:8788 (pid 21309)
-  - 打包产物: scaffold/desktopApp/build/compose/binaries/main/app/捎话 Tidings.app
-                scaffold/desktopApp/build/compose/binaries/main/dmg/捎话 Tidings-1.0.0.dmg (129771392 B, 20:31:39)
+  - 打包产物: scaffold/desktopApp/build/compose/binaries/main/app/榫卯 Tenon.app
+                scaffold/desktopApp/build/compose/binaries/main/dmg/榫卯 Tenon-1.0.0.dmg (129771392 B, 20:31:39)
   设备状态口径: `adb devices` = SERIAL-TEST-01  device
 
 --------------------------------------------------------------------
@@ -30,7 +30,7 @@
   {"status":"sent","to":"f6a7b8c9-ede7-4ed1-84a4-4941d21cf81d","toHost":"192.0.2.22","note":"对方已 ACK"}
 期望: 手机「消息」列表出现该文本，且来源显示为 Agent 节点。
 实际（真机无障碍树，消息页）:
-  'Tidings Agent'  'Agent'  'R2功能链路验证 215744'  '1 分钟前'  [未读徽标 1]
+  'Tenon Agent'  'Agent'  'R2功能链路验证 215744'  '1 分钟前'  [未读徽标 1]
 截图旁证: /tmp/m2.png（1080x2400）
 结论: **通过**。文本逐字一致，ACK 与界面同时成立。
 

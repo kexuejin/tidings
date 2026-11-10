@@ -1,5 +1,6 @@
 package com.kapp.tenon.ui.components
 
+import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.MaterialTheme
@@ -7,7 +8,40 @@ import androidx.compose.material3.ProvideTextStyle
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
+
+/**
+ * 弹窗内容区的**高度上限**：可用高度充裕时用调用方的默认档，不足时按可用高度的
+ * 75% 收口。
+ *
+ * 为什么要有这层：固定 `heightIn(max = 560.dp)` 之类的默认档是按竖屏手机 / 桌面
+ * 窗口标定的 —— 小屏手机、横屏、分屏下「默认档 + 标题 + 动作条」会顶出屏幕，而
+ * M3 `AlertDialog` 的 text 槽不会自动裁剪滚动。比例上限让重内容弹窗在任何窗口
+ * 下都能完整放下，且大屏取值与原默认档**完全一致**（零帧变化）。
+ *
+ * 75% 不是精确值：要给标题与动作条留出空间，同时横屏（可用高 ~360dp）下约 270dp
+ * 的列表仍有滚动价值。要在**内容里**拿到可用高度只能在 Dialog 内套
+ * [BoxWithConstraints] —— M3 把窗口高度作为 text 槽的约束传进来，有界；无界
+ * （理论上不会发生）时回退默认档。
+ */
+@Composable
+internal fun RelayDialogContentHeight(
+    modifier: Modifier = Modifier,
+    defaultMaxHeight: Dp,
+    content: @Composable (Dp) -> Unit,
+) {
+    BoxWithConstraints(modifier) {
+        // Dp 的比较运算在 commonMain 里不吃 —— 比较走 Float（value），再包回 Dp。
+        val default = defaultMaxHeight.value
+        val capValue = if (constraints.hasBoundedHeight) {
+            minOf(maxHeight.value * 0.75f, default)
+        } else {
+            default
+        }
+        content(capValue.dp)
+    }
+}
 
 /**
  * 对话框的**共享骨架**（原型 `.dlg`，`prototype/relay.html:1446-1449` + `:1465`）。

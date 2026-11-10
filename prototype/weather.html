@@ -1,0 +1,123 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<meta name="color-scheme" content="light">
+<title>Weather — Hangzhou</title>
+<style>
+  *{box-sizing:border-box}html,body{height:100%}
+  body{margin:0;display:grid;place-items:center;color:#0b1b33;background:linear-gradient(165deg,#dceeff,#beddfb 55%,#f6fbff);font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Helvetica,Arial,sans-serif;-webkit-font-smoothing:antialiased}
+  .app{position:relative;width:100%;min-height:100dvh;padding:26px 22px;display:flex;flex-direction:column;background:radial-gradient(120% 80% at 15% 0%,rgba(255,182,72,.22),transparent 55%),radial-gradient(90% 70% at 85% 8%,rgba(130,185,255,.18),transparent 60%),linear-gradient(165deg,#dceeff,#beddfb 52%,#f6fbff);overflow-x:hidden;overflow-y:auto;scrollbar-width:none}
+  .app::-webkit-scrollbar{display:none}
+  @media(min-width:760px){body{padding:24px}.app{width:410px;min-height:0;height:min(820px,calc(100dvh - 48px));border-radius:44px;box-shadow:0 30px 80px -34px rgba(15,45,90,.45)}}
+  .app::before,.app::after{content:"";position:absolute;border-radius:50%;background:rgba(255,255,255,.3);filter:blur(34px);pointer-events:none}
+  .app::before{width:250px;height:74px;left:-70px;bottom:24%}
+  .app::after{width:210px;height:64px;right:-70px;bottom:10%}
+  .app>*{position:relative;z-index:1}
+  .sky-cloud{position:absolute;width:300px;height:auto;right:-70px;bottom:8%;opacity:.32;filter:blur(1px);pointer-events:none;z-index:0}
+  .sky-cloud.two{width:190px;left:-60px;bottom:20%;opacity:.22}
+  .top{display:flex;align-items:flex-start;justify-content:space-between;gap:12px}
+  h1{margin:0;font-size:20px;letter-spacing:-.02em}
+  .date{margin:4px 0 0;font-size:13px;color:#54657c}
+  .unit{display:flex;padding:3px;border-radius:999px;background:rgba(255,255,255,.62);border:1px solid rgba(255,255,255,.85);backdrop-filter:blur(12px)}
+  .unit button{min-width:46px;min-height:36px;border:0;border-radius:999px;background:none;color:#54657c;font:inherit;font-size:13px;font-weight:650;cursor:pointer;transition:background .18s,color .18s}
+  .unit button[aria-pressed=true]{background:#0b1b33;color:#f6fbff}
+  .hero{display:flex;align-items:center;justify-content:space-between;gap:8px;margin-top:30px}
+  .cond{margin:0;font-size:12px;font-weight:700;letter-spacing:.12em;text-transform:uppercase;color:#54657c}
+  .temp{margin:5px 0 0;font-size:clamp(76px,22vw,100px);line-height:.9;font-weight:250;letter-spacing:-.05em;font-variant-numeric:tabular-nums}
+  .temp small{font-size:.4em;font-weight:300;vertical-align:super;color:#54657c;letter-spacing:0;margin-left:2px}
+  .meta{margin:13px 0 0;font-size:14px;line-height:1.6;color:#54657c}
+  .meta b{color:#0b1b33;font-weight:600}
+  .hero svg{width:clamp(112px,32vw,136px);height:auto;flex:none;filter:drop-shadow(0 12px 24px rgba(30,70,130,.14))}
+  .fc{margin-top:28px;padding:16px;border-radius:24px;background:rgba(255,255,255,.62);border:1px solid rgba(255,255,255,.85);backdrop-filter:blur(20px);box-shadow:0 30px 80px -38px rgba(15,45,90,.42)}
+  .fc h2{margin:0 0 8px;font-size:11px;letter-spacing:.12em;text-transform:uppercase;color:#54657c}
+  .row{display:flex;align-items:center;gap:10px;padding:9px 0}
+  .row+.row{border-top:1px solid rgba(20,50,90,.08)}
+  .day{width:80px;font-size:13.5px;font-weight:650}
+  .day small{display:block;margin-top:2px;font-size:11px;font-weight:500;color:#54657c}
+  .row svg{width:28px;height:28px;flex:none}
+  .label{flex:1;font-size:12.5px;color:#54657c}
+  .hi{font-size:15px;font-weight:650;font-variant-numeric:tabular-nums}
+  .lo{width:38px;text-align:right;font-size:12.5px;color:#54657c;font-variant-numeric:tabular-nums}
+  .foot{margin-top:auto;padding-top:14px;font-size:11px;color:#6b7c93}
+  [data-day]{white-space:nowrap}
+</style>
+</head>
+<body>
+<main class="app">
+  <header class="top">
+    <div>
+      <h1>Hangzhou</h1>
+      <p class="date" id="date"></p>
+    </div>
+    <div class="unit" role="group" aria-label="Temperature unit">
+      <button type="button" data-u="c" aria-pressed="true">°C</button>
+      <button type="button" data-u="f" aria-pressed="false">°F</button>
+    </div>
+  </header>
+
+  <section class="hero" aria-labelledby="cond">
+    <div>
+      <p class="cond" id="cond">Partly cloudy</p>
+      <p class="temp"><span data-c="26" data-bare="1">26</span><small>°</small></p>
+      <p class="meta">Feels like <b data-c="28">28°</b><br>H <b data-c="30">30°</b> · L <b data-c="22">22°</b></p>
+    </div>
+    <svg viewBox="0 0 64 64" aria-hidden="true"><use href="#partly"/></svg>
+  </section>
+
+  <section class="fc" aria-labelledby="fcTitle">
+    <h2 id="fcTitle">3-day forecast</h2>
+    <div class="row"><div class="day" data-day="1">Tomorrow</div><svg aria-hidden="true"><use href="#rain"/></svg><span class="label">Light rain</span><b class="hi" data-c="27">27°</b><span class="lo" data-c="21">21°</span></div>
+    <div class="row"><div class="day" data-day="2">Thu</div><svg aria-hidden="true"><use href="#cloud"/></svg><span class="label">Overcast</span><b class="hi" data-c="26">26°</b><span class="lo" data-c="19">19°</span></div>
+    <div class="row"><div class="day" data-day="3">Fri</div><svg aria-hidden="true"><use href="#sun"/></svg><span class="label">Sunny</span><b class="hi" data-c="29">29°</b><span class="lo" data-c="20">20°</span></div>
+  </section>
+
+  <svg class="sky-cloud" aria-hidden="true"><use href="#cloud"/></svg>
+  <svg class="sky-cloud two" aria-hidden="true"><use href="#cloud"/></svg>
+
+  <p class="foot">Hangzhou, CN · updated just now</p>
+</main>
+
+<svg width="0" height="0" style="position:absolute" aria-hidden="true">
+  <defs>
+    <symbol id="sun" viewBox="0 0 64 64"><circle cx="32" cy="32" r="11" fill="#ffb648"/><path d="M32 6v7M32 51v7M6 32h7M51 32h7M13 13l5 5M46 46l5 5M51 13l-5 5M18 46l-5 5" stroke="#ffb648" stroke-width="3" stroke-linecap="round"/></symbol>
+    <symbol id="cloud" viewBox="0 0 64 64"><path d="M14 45h30a8.2 8.2 0 0 0 1.2-16.3A12.4 12.4 0 0 0 21.2 25 9.8 9.8 0 0 0 14 45Z" fill="#fff" stroke="#cfe0f2" stroke-width="1.2"/></symbol>
+    <symbol id="partly" viewBox="0 0 64 64"><circle cx="39" cy="21" r="8" fill="#ffb648"/><path d="M39 7v4M39 31v4M25 21h4M49 21h4M29 11l3 3M46 28l3 3M49 11l-3 3M32 28l-3 3" stroke="#ffb648" stroke-width="2.4" stroke-linecap="round"/><path d="M15 46h29a8 8 0 0 0 1.2-15.9A12.2 12.2 0 0 0 22 26.2 9.6 9.6 0 0 0 15 46Z" fill="#fff" stroke="#cfe0f2" stroke-width="1.2"/></symbol>
+    <symbol id="rain" viewBox="0 0 64 64"><path d="M15 38h31a8 8 0 0 0 1.2-15.9A12 12 0 0 0 21 18.9 9.5 9.5 0 0 0 15 38Z" fill="#fff" stroke="#cfe0f2" stroke-width="1.2"/><path d="M23 44l-1.5 7M32 44l-1.5 7M41 44l-1.5 7" stroke="#5ea0f0" stroke-width="3" stroke-linecap="round"/></symbol>
+  </defs>
+</svg>
+
+<script>
+  var unit = "c";
+  var dayFmt = new Intl.DateTimeFormat("en-US", { month: "long", day: "numeric" });
+  var shortDay = new Intl.DateTimeFormat("en-US", { weekday: "short" });
+  var now = new Date();
+  document.getElementById("date").textContent = new Intl.DateTimeFormat("en-US", { weekday: "long", month: "long", day: "numeric" }).format(now);
+  document.querySelectorAll("[data-day]").forEach(function (el) {
+    var d = new Date(now.getTime());
+    d.setDate(d.getDate() + Number(el.dataset.day));
+    var label = document.createElement("span");
+    label.textContent = el.dataset.day === "1" ? "Tomorrow" : shortDay.format(d);
+    var sub = document.createElement("small");
+    sub.textContent = dayFmt.format(d);
+    el.textContent = "";
+    el.appendChild(label);
+    el.appendChild(sub);
+  });
+  function temp(c) { return unit === "f" ? Math.round(c * 9 / 5 + 32) : Math.round(c); }
+  function paint() {
+    document.querySelectorAll("[data-c]").forEach(function (el) {
+      el.textContent = temp(Number(el.dataset.c)) + (el.dataset.bare ? "" : "°");
+    });
+    document.querySelectorAll("[data-u]").forEach(function (btn) {
+      btn.setAttribute("aria-pressed", btn.dataset.u === unit ? "true" : "false");
+    });
+  }
+  document.querySelectorAll("[data-u]").forEach(function (btn) {
+    btn.addEventListener("click", function () { unit = btn.dataset.u; paint(); });
+  });
+  paint();
+</script>
+</body>
+</html>

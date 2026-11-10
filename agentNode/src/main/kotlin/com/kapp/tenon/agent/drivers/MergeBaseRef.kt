@@ -75,7 +75,7 @@ object MergeBaseRef {
             val commit = git(
                 workspace,
                 "-c", "user.name=tenon",
-                "-c", "user.email=tidings@localhost",
+                "-c", "user.email=tenon@localhost",
                 "commit-tree", treeSha, "-p", "HEAD", "-m", SNAPSHOT_MESSAGE,
             )
             if (commit.exitCode != 0) return null

@@ -149,6 +149,9 @@ interface RelayUiTexts {
 
     /** 补丁合并失败的一句话指引。[kind] 是分类码，[detail] 是原始 stderr 尾巴。 */
     suspend fun patchMergeHint(kind: String, detail: String): String = detail
+
+    /** 责任链棒间交接发言（P0b）：Worker 交付完毕、移交给 Reviewer 时的群简述。 */
+    suspend fun stageHandoffSpeech(workerRole: String, reviewerRole: String): String = ""
 }
 
 /**

@@ -161,6 +161,9 @@ internal class RelayControllerAgentInvokeComponent(private val host: AgentDomain
      */
     var pluginPresenceOf: ((agentId: String) -> String?)? = null
 
+    /** 团队执行档端口（§6.3）：null = 该壳没有执行面（手机等非宿主）⇒ UI 只读。 */
+    var teamExecutionPort: TeamExecutionPort? = null
+
     /**
      * 授权台账查询（§6.3 的「可信设备」判据）：`(agentKey, nodeId) → 是否已批准`。
      * null = 没有台账可用 ⇒ 只有 agent 宿主用户与群内成员判据兜底（fail-closed 方向）。
@@ -958,6 +961,46 @@ internal class RelayControllerAgentInvokeComponent(private val host: AgentDomain
                 senderId = sender,
                 envelopeId = envelopeId,
                 agentState = state,
+            )
+        }
+    }
+
+    /**
+     * 以 agent 署名发一条拟人化简短发言（P0b：交棒发言等，不带 agentState 状态条）。
+     * 本机落库与线上同帧同 id —— 与 [broadcastAgentState] / [broadcastBoardCard] 同一纪律。
+     */
+    internal suspend fun broadcastAgentSpeech(groupId: String, agentId: String, text: String) {
+        if (text.isBlank()) {
+            noteUninstalledTextBridgeSuppression("agentSpeech:" + agentId)
+            return
+        }
+        val st = host.state.value
+        val meta = st.settings.groups.firstOrNull { it.groupId == groupId } ?: return
+        if (st.selfNodeId !in meta.members) return
+        val sender = AgentSenderId.of(st.selfNodeId, agentId)
+        val envelopeId = newId()
+        // 先落库再发：本端必须先有记录，防两端不一致
+        host.handleAppendMessage(
+            MessageUi(
+                id = envelopeId,
+                peerId = ConvId.group(groupId),
+                mine = false,
+                text = text,
+                at = nowMillis(),
+                delivery = null,
+                senderId = sender,
+            ),
+            incoming = true,
+        )
+        val rt = host.runtime ?: return
+        runCatching {
+            rt.sendGroupText(
+                text = text,
+                groupId = groupId,
+                groupRev = meta.rev,
+                members = meta.members,
+                senderId = sender,
+                envelopeId = envelopeId,
             )
         }
     }

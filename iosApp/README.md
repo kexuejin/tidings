@@ -1,4 +1,4 @@
-# Tidings iOS Shell
+# Tenon iOS Shell
 
 This directory is a minimal SwiftUI shell for the generated KMP app. It is a
 first-class part of the generated app shape, but intentionally project-light:

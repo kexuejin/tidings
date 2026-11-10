@@ -9,11 +9,11 @@
 ## 0. 装置与产物
 
 - 手机:测试手机(`<device-serial>`,Android 15,IP 192.0.2.22,debug 包 com.kapp.tenon.debug)
-- 桌面:Mac(`<host>`,IP 192.0.2.82,/Applications/Tidings.app)
+- 桌面:Mac(`<host>`,IP 192.0.2.82,/Applications/Tenon.app)
 - 构建产物(HEAD = a813c838):
   - APK:~/Downloads/relay-build-2026-10-28/androidApp-debug.apk
     sha256 = cea45ebb02a4d3ed5fb69bf10a96dbedc011eebf69a9b84736519b58c3a10f9a
-  - 桌面:~/Downloads/relay-build-2026-10-28/Tidings.app(Contents/MacOS/Tidings)
+  - 桌面:~/Downloads/relay-build-2026-10-28/Tenon.app(Contents/MacOS/Tenon)
     sha256 = e0303219b76d14a6a2a4d6d200bcf9d64517955e3003deb54a169b3042d22850
 - 新代码证明:HEAD 上 f29b4e15 新增的 `ComponentSizes.MessageAvatar` 在 APK classes2/classes12.dex
   与桌面 composeApp-jvm-95dd6defdb088e944419b35c0994831.jar 中均命中(字节级检索)。
@@ -70,8 +70,8 @@
 - 手机在「工作区 → 工作区详情」点「申请授权」→ 手机横幅「申请已发出,等对端确认。」;
   桌面 `GET /v1/agent/grants` 的 `pending` 出现该申请(nodeId 0a1b2c3d, agentKey dsh-5f607182, wsId ws-60718293a4b5)。
 - **授权未批时发 agent-session/event → 控制面回 `not-granted`**(策略 request,fail-closed,对端无帧):
-  错误信息指路「桌面端捎话 → 授权里批准」。
-- 桌面授权批准入口未找到:菜单栏「捎话 Tidings」只有 设置/诊断包;设置窗「可信设备与配对」是
+  错误信息指路「桌面端榫卯 → 授权里批准」。
+- 桌面授权批准入口未找到:菜单栏「榫卯 Tenon」只有 设置/诊断包;设置窗「可信设备与配对」是
   配对信任(设备级),不是 agent 授权;托盘菜单(AXMenuBarItem)不可脚本化展开。
   这一条按「没做成」记录,不下结论。
 - 正例(会话卡/事件流/游标排序)由 e2e_agent 夹具覆盖(见 §9)。
@@ -84,7 +84,7 @@
 ## 8. 本轮抓到的缺陷与观察(按严重度)
 
 ① **P1 · 默认态文件传输死锁(手机↔桌面)**:两端全新默认安装(luciola 实验信道手机默认开、
-   桌面需 TIDINGS_LUCIOLA=1 才开)时,桌面→手机的图片/文件永远停在「等你接收」、目录建了但 0 字节;
+   桌面需 TENON_LUCIOLA=1 才开)时,桌面→手机的图片/文件永远停在「等你接收」、目录建了但 0 字节;
    手机点「接收」后桌面 `accepted=true` 也不推。手机侧日志 `[luciola] accept … channel=true`(登记信道等推),
    桌面侧 `[luciola] accept-in … push=false`(无信道不推)—— **两端互等**。手机把 luciola 开关关掉重启后
    `[luciola] accept … channel=false` → legacy 拨 17879 拉取,sha256 全对。机制:手机 fileChannel 非空时按
@@ -125,7 +125,7 @@
 
 ## 9b. luciola / A21 加密数据面 —— 手机侧判据全过;桌面侧存在产品缺口
 
-- 桌面:退出后以 `TIDINGS_LUCIOLA=1` 从终端拉起(已用 `ps eww` 确认 env 进入进程),seed 文件存在 ——
+- 桌面:退出后以 `TENON_LUCIOLA=1` 从终端拉起(已用 `ps eww` 确认 env 进入进程),seed 文件存在 ——
   **但 luciolaMode 仍为 false**:`DesktopAppPlatform` **没有覆写 `luciolaHost`**(接口默认 null),
   `DesktopLuciolaHost` 整个类(含 env 门、seed/信任库、配对、三个工厂)是**从未接线的死代码**,
   单测覆盖它,生产路径永远拿不到。P1 级发现:桌面端目前**不存在**开启加密数据面的路径。
@@ -171,7 +171,7 @@
 
 ## 11. 修复后的真机复验(2026-10-29)
 
-产物:~/Downloads/relay-build-2026-10-29/{androidApp-debug.apk, Tidings.app}
+产物:~/Downloads/relay-build-2026-10-29/{androidApp-debug.apk, Tenon.app}
 APK sha256 = 3d3aab53c30f55f9c02a03eb865d0f973718bf48b94ec0a5e5f478a0e9a48a5b
 桌面 sha256 = fed5b03a2915762d670062769a487d70e9e5067fb082c4ac8525bdd9fbdde37d
 新符号证明:APK classes13.dex 与桌面 core-jvm jar 中均命中 `scheduleChannelStallFallback`(本轮修复独有)。

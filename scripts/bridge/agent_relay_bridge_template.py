@@ -1,15 +1,15 @@
 #!/usr/bin/env python3
 """
-Agent-Tidings Bridge Adapter Reference Template (v1.0)
+Agent-Tenon Bridge Adapter Reference Template (v1.0)
 ===================================================
 A lightweight, stateless bridge template demonstrating how any external AI agent
-(e.g., Gemini CLI, Claude Code, custom MCP agent) connects to the Tidings host
+(e.g., Gemini CLI, Claude Code, custom MCP agent) connects to the Tenon host
 control plane via local loopback HTTP (127.0.0.1:8788).
 
 Security Principles ("三不做"):
-1. No auth decisions: Tidings host control plane enforces roles (owner/admin/collab/guest) via allows().
+1. No auth decisions: Tenon host control plane enforces roles (owner/admin/collab/guest) via allows().
 2. No persistent private ledger: Device keys & grants are persisted centrally in agent-grants.json / SQLite.
-3. No direct external networking: Loopback only; Tidings handles encrypted LAN P2P (agn1/ams1).
+3. No direct external networking: Loopback only; Tenon handles encrypted LAN P2P (agn1/ams1).
 """
 
 import argparse
@@ -48,7 +48,7 @@ class AgentRelayBridge:
                 resp_text = resp.read().decode("utf-8")
                 return json.loads(resp_text) if resp_text else {"ok": True}
         except urllib.error.URLError as e:
-            raise ConnectionError(f"Failed to communicate with Tidings host at {url}: {e}")
+            raise ConnectionError(f"Failed to communicate with Tenon host at {url}: {e}")
 
     def _get_json(self, path: str, params: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
         url = f"{self.endpoint}{path}"
@@ -65,7 +65,7 @@ class AgentRelayBridge:
                 resp_text = resp.read().decode("utf-8")
                 return json.loads(resp_text) if resp_text else {}
         except urllib.error.URLError as e:
-            raise ConnectionError(f"Failed to communicate with Tidings host at {url}: {e}")
+            raise ConnectionError(f"Failed to communicate with Tenon host at {url}: {e}")
 
     def get_peers(self) -> List[Dict[str, Any]]:
         """Query currently discovered / connected peers."""
@@ -201,12 +201,12 @@ def run_demo(bridge: AgentRelayBridge, ws_id: str, ws_path: str, ws_title: str, 
         )
         print(f"[{bridge.agent_kind}] Session '{sess_id}' announced: {res2}")
     except ConnectionError as e:
-        print(f"[Warning] Tidings host not reachable ({e}). Running in offline demo mode.")
+        print(f"[Warning] Tenon host not reachable ({e}). Running in offline demo mode.")
 
 
 def main():
-    parser = argparse.ArgumentParser(description="Agent-Tidings Bridge Adapter Reference Template")
-    parser.add_argument("--endpoint", default=DEFAULT_RELAY_ENDPOINT, help="Tidings Desktop loopback URL")
+    parser = argparse.ArgumentParser(description="Agent-Tenon Bridge Adapter Reference Template")
+    parser.add_argument("--endpoint", default=DEFAULT_RELAY_ENDPOINT, help="Tenon Desktop loopback URL")
     parser.add_argument("--agent-kind", default="Gemini", help="Agent identifier (e.g., Gemini, DSH, Claude)")
     parser.add_argument("--ws-id", default="ws-teahouse-mobile", help="Workspace identifier")
     parser.add_argument("--ws-title", default="teahouse-mobile", help="Workspace display title")
@@ -220,7 +220,7 @@ def main():
     if args.demo:
         run_demo(bridge, args.ws_id, args.ws_path, args.ws_title, to=args.to)
     else:
-        print(f"Agent-Tidings Bridge initialized for {args.agent_kind} at {args.endpoint}.")
+        print(f"Agent-Tenon Bridge initialized for {args.agent_kind} at {args.endpoint}.")
         print("Use --demo to test announcement sequence, or import AgentRelayBridge into your agent runner.")
 
 

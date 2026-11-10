@@ -75,8 +75,8 @@ session-1012be43-b  "你是什么模型"                              <null>  DS
 session-692b2f85-9  "原型稿审查Review"                         <null>  DSH  blank=0  seen 21:27:25
 session-b99a8a9e-f  "AI原型稿转代码适配效率优化方案"            <null>  DSH  blank=0  seen 21:27:25
 session-a4101d97-a  "你梳理下整体架构及代码, 这…"                <null>  DSH  blank=0  seen 21:27:30
-session-9195d9d5-7  "dsh-tidings原型稿是否…"                      <null>  DSH  blank=0  seen 21:27:25
-session-72ef49c1-8  "捎话与捎个话取名比较"                       <null>  DSH  blank=0  seen 21:27:25
+session-9195d9d5-7  "dsh-tenon原型稿是否…"                      <null>  DSH  blank=0  seen 21:27:25
+session-72ef49c1-8  "榫卯与捎个话取名比较"                       <null>  DSH  blank=0  seen 21:27:25
 session-53182ef3-1  "目前整体的配色总感觉不太对…"                <null>  DSH  blank=0  seen 21:27:25
 ```
 

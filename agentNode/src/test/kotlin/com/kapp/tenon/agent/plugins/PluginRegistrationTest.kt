@@ -29,6 +29,7 @@ import kotlin.test.BeforeTest
 import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertTrue
+import com.kapp.tenon.agent.udpTestTransport
 
 /**
  * 插件注册契约（方案 §2.2 / §2.3，M2-T2）。
@@ -58,6 +59,7 @@ class PluginRegistrationTest {
     fun setUp() {
         scope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
         runtime = NodeRuntime(
+            messengerTransportFactory = udpTestTransport(),
             profile = Profile.mobile(nodeId = newId(), nick = "Plugin Host", host = "relay-host", ver = "relay-0.1.0"),
             udpPort = 0,
             bindHost = ControlPlane.LOOPBACK,

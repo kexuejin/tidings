@@ -1,0 +1,144 @@
+{
+  "generated_at": "2026-11-10T04:11:08.666993+00:00",
+  "stage": "empty",
+  "repeat": 2,
+  "checks": [
+    {
+      "name": "same-anchor-across-runs",
+      "ok": true,
+      "detail": "锚点集合 ['3792076']"
+    },
+    {
+      "name": "each-run-has-fresh-workspace",
+      "ok": true,
+      "detail": "2/2 个独立路径"
+    },
+    {
+      "name": "identical-verdict-shape",
+      "ok": false,
+      "detail": "判据名集合 2 种"
+    },
+    {
+      "name": "all-runs-green",
+      "ok": false,
+      "detail": "run-1=FAIL / run-2=FAIL"
+    },
+    {
+      "name": "source-repo-still-clean",
+      "ok": true,
+      "detail": "/Users/ci/weather-relay 跑完 2 轮后脏行=0"
+    }
+  ],
+  "runs": [
+    {
+      "label": "run-1",
+      "workspace": "/tmp/sdlc-runs/20261110-114646/run-1/ws",
+      "anchor": "3792076",
+      "green": false,
+      "acts": 9,
+      "seconds": 854.5612261295319,
+      "verdict_names": [
+        "0:control-plane",
+        "0:cli:dsh",
+        "0:dsh-credentials",
+        "0:workspace-is-git",
+        "0:workspace-clean",
+        "0:anchor-checked-out",
+        "0:stage-files-present",
+        "0:stage-files-absent",
+        "0:baseline-has-no-implementation",
+        "0:source-repo-untouched",
+        "0:workspace-is-isolated",
+        "0:artifacts-dir",
+        "a1:patch-is-real",
+        "a1:expected-file-produced",
+        "a1:prd-has-numbered-ac",
+        "a1:stage-landed",
+        "a1:stage-visible-to-next-sandbox",
+        "a2:patch-is-real",
+        "a2:expected-file-produced",
+        "a2:prototype-is-interactive-html",
+        "a2:stage-landed",
+        "a2:stage-visible-to-next-sandbox",
+        "a3:patch-is-real",
+        "a3:impl-and-tests-both-produced",
+        "a3:stage-landed",
+        "a3:stage-visible-to-next-sandbox",
+        "a3:bootstrap-tests-green",
+        "a4:from-zero-artifacts-complete",
+        "a4:from-zero-tests-green",
+        "a4:three-stages-in-baseline",
+        "2:patch-is-real",
+        "2:feature-files-produced",
+        "3:apply:t-10-7f8cb9f9",
+        "3:worktree-changed",
+        "3:post-merge-tests-green",
+        "3:baseline-visible-to-next-sandbox",
+        "5:fault-injection-red",
+        "6:final-tests-green",
+        "6:no-test-count-regression",
+        "6:no-orphan-cli-process",
+        "6:no-failed-acts"
+      ],
+      "failures": [
+        "5",
+        "6"
+      ]
+    },
+    {
+      "label": "run-2",
+      "workspace": "/tmp/sdlc-runs/20261110-114646/run-2/ws",
+      "anchor": "3792076",
+      "green": false,
+      "acts": 9,
+      "seconds": 607.5709638595581,
+      "verdict_names": [
+        "0:control-plane",
+        "0:cli:dsh",
+        "0:dsh-credentials",
+        "0:workspace-is-git",
+        "0:workspace-clean",
+        "0:anchor-checked-out",
+        "0:stage-files-present",
+        "0:stage-files-absent",
+        "0:baseline-has-no-implementation",
+        "0:source-repo-untouched",
+        "0:workspace-is-isolated",
+        "0:artifacts-dir",
+        "a1:patch-is-real",
+        "a1:expected-file-produced",
+        "a1:prd-has-numbered-ac",
+        "a1:stage-landed",
+        "a1:stage-visible-to-next-sandbox",
+        "a2:patch-is-real",
+        "a2:expected-file-produced",
+        "a2:prototype-is-interactive-html",
+        "a2:stage-landed",
+        "a2:stage-visible-to-next-sandbox",
+        "a3:patch-is-real",
+        "a3:impl-and-tests-both-produced",
+        "a3:stage-landed",
+        "a3:stage-visible-to-next-sandbox",
+        "a3:bootstrap-tests-green",
+        "a4:from-zero-artifacts-complete",
+        "a4:from-zero-tests-green",
+        "a4:three-stages-in-baseline",
+        "2:patch-is-real",
+        "2:feature-files-produced",
+        "3:apply:t-14-4d00f21c",
+        "3:worktree-changed",
+        "3:post-merge-tests-green",
+        "3:baseline-visible-to-next-sandbox",
+        "5:fault-injection-red",
+        "6:final-tests-green",
+        "6:no-test-count-regression",
+        "6:no-orphan-cli-process",
+        "6:no-failed-acts"
+      ],
+      "failures": [
+        "5",
+        "6"
+      ]
+    }
+  ]
+}

@@ -28,7 +28,7 @@
 | 与 `e54148d7` 的关系 | `e54148d7..b9ca96ce` 仅 docs 变更，无 `.kt/.kts/.java/.swift/.rs/.py/.sh` 改动；`origin/main..HEAD = 89`，未 push |
 | 手机 | Pixel 6，serial `<device-serial>`，Android 15，包 `com.kapp.tenon.debug`（`RELAY_E2E_PKG`） |
 | 手机 IP / nodeId | `192.0.2.22` / `e4bd7b99…` |
-| 宿主 | `/Applications/Tidings.app`（当前 HEAD 的 `createDistributable` 产物），Mac `192.0.2.82` |
+| 宿主 | `/Applications/Tenon.app`（当前 HEAD 的 `createDistributable` 产物），Mac `192.0.2.82` |
 | 宿主 nodeId / 控制面 | `46c23456-6e74-4a7c-aab1-20a1d1284cd6`，`127.0.0.1:8788`（`/healthz`） |
 | 手机监听端口 | `17878 / 17880 / 17888`，**无 `17879`**（`17879` 是 legacy 明文 TCP 口） |
 | 宿主监听端口 | TCP `17878`（luciola 信道）/ `17880` / `17888` / `127.0.0.1:8788` |
@@ -44,7 +44,7 @@
 ## 2. 真 luciola 宿主是怎么起来的（这一步不写就等于没验证）
 
 桌面宿主有**双开关**：`settings.json` 里 `experimentalLuciola` 默认 `true`（手机侧键缺失即生效），
-但 `DesktopLuciolaHost.envEnabled()` 还要求进程 env `TIDINGS_LUCIOLA=1`。
+但 `DesktopLuciolaHost.envEnabled()` 还要求进程 env `TENON_LUCIOLA=1`。
 第一次按旧配方重启时**漏了这个 env**，宿主实际跑在 legacy（`17879/17880/17881/17882`、
 `/v1/peers` 里 `linkCarrier:"plaintext"`、日志无 `[luciola] host configured`）——
 该轮读数**作废**，没有拿它凑证据。
@@ -54,7 +54,7 @@
 
 - 打包的 `luciola-jvm-0.9.0-71bf9c83…jar` 期望 contract version `29`，内含 71 个 API checksum；
   与 Gradle 缓存里发布的 0.9.0 jar 的常量**完全一致**（不是仓库改过绑定）。
-- `/Applications/Tidings.app/Contents/app/resources/native/libluciola_uniffi.dylib`
+- `/Applications/Tenon.app/Contents/app/resources/native/libluciola_uniffi.dylib`
   （3,796,784 B，sha256 `2a33229ee95b…`）与仓库资源副本
   （3,800,736 B，sha256 `e88e07bfc840…`）都有 `10/71` 项不匹配。
 - 从 luciola 仓库 tag `v0.9.0`（`e4b3327`）离线构建出匹配 dylib：
@@ -65,13 +65,13 @@
 
 ```bash
 env -u NODE_OPTIONS -u PYTHONPATH -u BASH_ENV \
-  TIDINGS_LUCIOLA=1 \
-  TIDINGS_LUCIOLA_NATIVE=/tmp/e2e-20261105/luciola-v090/target/release \
+  TENON_LUCIOLA=1 \
+  TENON_LUCIOLA_NATIVE=/tmp/e2e-20261105/luciola-v090/target/release \
   TENON_WEBHOOK_SECRET_E2E_SIGNED=luciola-e2e-hmac-20261105 \
-  /Applications/Tidings.app/Contents/MacOS/Tidings --background
+  /Applications/Tenon.app/Contents/MacOS/Tenon --background
 ```
 
-`TIDINGS_LUCIOLA_NATIVE` 是**运行时覆盖**；仓库内打包的 dylib 未改动（本轮不改源码）。
+`TENON_LUCIOLA_NATIVE` 是**运行时覆盖**；仓库内打包的 dylib 未改动（本轮不改源码）。
 这构成一个待办：**打包用的 native 资源必须替换为与 0.9.0 绑定匹配的构建**，否则全新安装的用户一开
 luciola 就会崩在 UniFFI 校验上。
 
@@ -197,7 +197,7 @@ P6 清理测试插件                         PASS
 
 ### 6.1 `PluginStateManager`：状态文件路径被当成目录（阻塞控制面验收）
 
-现象：`~/Library/Application Support/捎话 Tidings/plugins-state.json` 是一个**空目录**（`drwxr-xr-x`），
+现象：`~/Library/Application Support/榫卯 Tenon/plugins-state.json` 是一个**空目录**（`drwxr-xr-x`），
 不是 JSON 文件；HTTP 全部 200、内存状态即时生效，重启即丢。
 
 根因链（本轮只读源码，未改）：
@@ -214,7 +214,7 @@ P6 清理测试插件                         PASS
 
 ### 6.2 打包 native 与 0.9.0 绑定的 UniFFI 校验不匹配
 
-见 §2。运行时用 `TIDINGS_LUCIOLA_NATIVE` 绕过，但**全新安装的宿主仍会崩**。
+见 §2。运行时用 `TENON_LUCIOLA_NATIVE` 绕过，但**全新安装的宿主仍会崩**。
 仓库资源副本与 `/Applications` 打包副本都不匹配，需重建替换并加入打包校验。
 
 ### 6.3 这台 Mac 的 LAN 单向不通
@@ -243,7 +243,7 @@ phone → Mac 可达；Mac → `192.0.2.0/24` 主动发起报 `errno 65 No route
 
 - `WorkflowPluginEngine` 在 main sources 里没有 `/v1/workflow/*` 生产接线（本轮未验，非新回归）。
 - 控制面默认 `token = ""`，loopback 路由**设计上 fail-open**；插件注册网关另用
-  `TIDINGS_PLUGIN_TOKEN`，两者不要混判。
+  `TENON_PLUGIN_TOKEN`，两者不要混判。
 
 ---
 

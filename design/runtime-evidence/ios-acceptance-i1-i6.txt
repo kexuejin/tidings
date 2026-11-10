@@ -11,11 +11,11 @@ ACCEPTANCE.md §3「iOS 真机」的 I1–I6 六条，此前全部只有静态�
 ----
 - 模拟器：iPhone 17 Pro，UDID 00000000-FEF7-409D-AE33-803A77C62376，iOS 26.2，Booted。
   （另一个 booted 的是 PigeonVerify 78487176-16EB-4416-B50A-78A5A819C5BB，本轮未用。）
-- 应用：bundle id app.relay，显示名「捎话」。进程名在系统日志里是 app.relay /
-  UIKitApplication:app.relay，不是 Tidings。
+- 应用：bundle id app.relay，显示名「榫卯」。进程名在系统日志里是 app.relay /
+  UIKitApplication:app.relay，不是 Tenon。
 - 构建（约 3 分钟）：
     cd scaffold/iosApp && export JAVA_HOME=/opt/homebrew/opt/openjdk@21 RELAY_MAVEN_MIRROR=aliyun && \
-    xcodebuild -project Tenon.xcodeproj -scheme Tidings -configuration Debug -sdk iphonesimulator \
+    xcodebuild -project Tenon.xcodeproj -scheme Tenon -configuration Debug -sdk iphonesimulator \
       -destination 'platform=iOS Simulator,id=00000000-FEF7-409D-AE33-803A77C62376' \
       -derivedDataPath build/dd build
   RELAY_MAVEN_MIRROR=aliyun 是必需的：project.yml 的 preBuildScript 直接调 ./gradlew
@@ -63,7 +63,7 @@ I1 构建与首启 —— ✅ 通过
 I2 本地网络授权弹窗 —— 模拟器不强制，只记现状（不可复现）
 -----------------------------------------------------------
 Info.plist 两个键都在（plutil -p）：
-  NSLocalNetworkUsageDescription = 「捎话需要在同一个 Wi-Fi 下找到其他设备，才能自动发现并
+  NSLocalNetworkUsageDescription = 「榫卯需要在同一个 Wi-Fi 下找到其他设备，才能自动发现并
     收发消息；不联网时不会有任何流量。」
   NSBonjourServices = [0 => "_relay._udp"]
 代码侧 scaffold/composeApp/src/iosMain/kotlin/app/relay/platform/IosPlatform.kt 的
@@ -279,7 +279,7 @@ HOME 切后台后 settle 3 秒再发，证据节点**收不到 ACK**（无响应
   复测… / 1 分钟前」），然后 `idb ui tap 201 485`。a11y 树里这条横幅确实是一个可点
   `Button`（frame `{x:14,y:445.33,w:374,h:78.67}`，中心 ≈ (201,484.7)），但点了三次
   （(201,485)、(200,505)、(44,495)）都没反应：`xcrun simctl spawn $U launchctl list |
-  grep -i relay` 只剩 `com.apple.certui.relay`，`pgrep -fl 'Tidings.app/Tidings'` 无进程，
+  grep -i relay` 只剩 `com.apple.certui.relay`，`pgrep -fl 'Tenon.app/Tenon'` 无进程，
   截图仍是锁屏/通知中心。结论：`idb` 的 HID 事件到不了 SpringBoard 的锁屏/通知中心那一层，
   模拟器上没法点系统通知（`osascript`/System Events 被 TCC 拒、`simctl` 没有点通知的 API、
   `idb-repl` 报 `Transport became inactive`）。静态看代码通路是通的：delegate 在

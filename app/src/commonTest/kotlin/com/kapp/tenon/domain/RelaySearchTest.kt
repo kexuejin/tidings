@@ -65,9 +65,9 @@ class RelaySearchTest {
 
     @Test
     fun 联系人检索覆盖昵称公司部门团队() {
-        val zhou = peer(nick = "老周", company = "捎话科技", dept = "客户端", team = "协议组")
+        val zhou = peer(nick = "老周", company = "榫卯科技", dept = "客户端", team = "协议组")
 
-        for (q in listOf("老周", "捎话", "客户端", "协议组")) {
+        for (q in listOf("老周", "榫卯", "客户端", "协议组")) {
             assertEquals(1, matchContacts(listOf(zhou), q).size, "「$q」应该搜到老周")
         }
     }
@@ -92,14 +92,14 @@ class RelaySearchTest {
 
     @Test
     fun 联系人段的标题与副标题走displayName与subtitle() {
-        val zhou = peer(nick = "", host = "zhou-pc", ip = "10.0.0.5", company = "捎话", dept = "客户端")
+        val zhou = peer(nick = "", host = "zhou-pc", ip = "10.0.0.5", company = "榫卯", dept = "客户端")
 
         val hit = matchContacts(listOf(zhou), "10.0.0.5").single()
 
         // 昵称为空时 displayName 退回 host —— 绝不显示空标题。
         assertEquals("zhou-pc", hit.title)
         // 有公司部门时 subtitle 是它们，不是 IP。
-        assertEquals("捎话 · 客户端", hit.subtitle)
+        assertEquals("榫卯 · 客户端", hit.subtitle)
     }
 
     @Test
@@ -176,7 +176,7 @@ class RelaySearchTest {
 
     @Test
     fun 三块都空才算空结果而空关键词不算() {
-        val nothing = GlobalSearchResult(query = "捎话")
+        val nothing = GlobalSearchResult(query = "榫卯")
         assertTrue(nothing.isEmpty)
 
         // 空关键词是"还没开始搜"，界面上是初始态不是无结果态，两者文案不同。
@@ -185,7 +185,7 @@ class RelaySearchTest {
         assertTrue(GlobalSearchResult(query = "").isEmpty)
 
         val oneContact = GlobalSearchResult(
-            query = "捎话",
+            query = "榫卯",
             contacts = listOf(
                 GlobalSearchContactHit(nodeId = "n", title = "老周", subtitle = "", isAgent = false, online = true),
             ),

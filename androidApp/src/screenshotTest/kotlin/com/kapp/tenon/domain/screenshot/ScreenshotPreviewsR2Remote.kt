@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: GPL-3.0-only
-// Copyright (C) 2026 捎话 Tidings contributors
+// Copyright (C) 2026 榫卯 Tenon contributors
 
 package com.kapp.tenon.domain.screenshot
 
@@ -98,7 +98,7 @@ private const val R2_GROUP_ID = "tea-house"
 private val r2TeahouseAgent = PeerUi(
     nodeId = R2_TEAHOUSE_ID,
     nick = "teahouse-mobile",
-    company = "捎话",
+    company = "榫卯",
     dept = "研发",
     team = "客户端",
     host = "MacBook-Pro",
@@ -115,7 +115,7 @@ private val r2TeahouseAgent = PeerUi(
 private val r2CiAgent = PeerUi(
     nodeId = R2_CI_ID,
     nick = "ci-runner",
-    company = "捎话",
+    company = "榫卯",
     dept = "研发",
     team = "CI",
     host = "ci-01",

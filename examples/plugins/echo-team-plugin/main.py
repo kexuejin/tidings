@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 # SPDX-License-Identifier: GPL-3.0-only
-"""echo-team 参考插件 —— Tidings 进程外插件的完整最小实现。
+"""echo-team 参考插件 —— Tenon 进程外插件的完整最小实现。
 
 零第三方依赖（只用 Python 标准库），它演示的是**契约**而不是能力：
 

@@ -1,0 +1,81 @@
+{
+  "case": "luciola-only 源端口污染 / 入站登记归一",
+  "setup": {
+    "host": "源码 headless 宿主 ./gradlew :desktopApp:run --args=--headless，控制面 127.0.0.1:8788",
+    "phone": "Pixel 6 / <device-serial> / com.kapp.tenon.debug",
+    "transport": "双端 luciola（两端日志均有 [xport]）",
+    "host_tcp_listen": ["17878", "17880", "17888"],
+    "host_tcp_not_listen": ["17879"],
+    "host_ip": "192.168.2.82",
+    "phone_ip": "192.168.2.73"
+  },
+  "before": {
+    "source": "A29 真机复验与本轮 21:47 logcat / 控制面读数",
+    "host_heartbeat": "targets=32 sent=2 linked=0",
+    "host_send_refused": "30/32 目标为 ip:临时端口（192.168.2.82:5xxxx、:24xxx、2408::/64:17878 等），全部 no session / unpaired",
+    "phone_session": "[xport] out 192.168.2.82:5xxxx state=retrying detail=handshake failed: no candidate address reachable",
+    "phone_link": {
+      "linkTotal": 0,
+      "host_online": true,
+      "dialAttempts": 85,
+      "dialFailures": 85,
+      "dialLastTarget": "10.233.138.167:17879",
+      "lastError": "connect-timeout",
+      "closeCount": 0,
+      "pinSource": "pairing"
+    },
+    "sweep_offline_lines": 0,
+    "banner": "无「宿主设备睡眠」横幅"
+  },
+  "root_cause": {
+    "primary": "PresenceIngest / Messenger 把入站数据报源端口（临时端口）写成对端监听端口；只有 LuciolaDiscoveryEngine 做了 luciolaPort 归一",
+    "secondary_unfixed": "luciola 模式不绑 17879，但 profile 仍广播 tcpPort=17879 + lnk1 ⇒ K1 拨号恒超时"
+  },
+  "after_first_pass": {
+    "note": "只修入站登记路径、尚未在候选池读口归一时的真机读数（22:20 包 + 源码宿主）",
+    "host_send": "[send] peer=25222a45 ep=192.168.2.22:17878 acked=true（10 条，类型含 msg / agent-session / agent-event），regEp 均为 :17878",
+    "new_endpoints": "心跳新增目标全部为 ip:17878（172.26.x / 192.168.2.22 / 127.0.0.1）",
+    "host_heartbeat": "targets=30 sent=0 linked=0（随后 targets=32 sent=2 linked=0）",
+    "remaining_pollution": "宿主仍有 86 条 send refused，目标为 192.168.2.82:57715 / :55715 与 100.66.x:24040 等；手机 logcat 仍有 192.168.2.82:5xxxx 的 no candidate address reachable",
+    "cause": "上一版落盘的候选端点在启动时由 peerEndpointStore.load() 原样装回，修复管不到历史数据",
+    "follow_up": "在读口归一 candidatesOf/allCandidates，落盘快照写回正确端口"
+  },
+  "after_second_pass": {
+    "note": "候选池读口归一后、名录恢复尚未归一时的读数（22:39 包）",
+    "host_heartbeat": "targets=30 sent=0 linked=0，failed 列表仍含 192.168.2.82:57715 / :55715 / :56534",
+    "phone_xport": "len=722 的心跳帧仍发往 192.168.2.82:55051 / 53430 / 65253 / 57178 等，随后 no candidate address reachable",
+    "phone_link": "linkTotal=0、dialLastTarget=fd7a:...:17879、lastError=connect-timeout",
+    "cause": "knownPeerStore 恢复名录时把落盘 udpPort 原样写成 PeerRecord.udpPort；心跳的当前地址那条不经候选池",
+    "follow_up": "restoreOffline 也按档案归一"
+  },
+  "after": {
+    "assembly": "22:56 重编 debug 包 + 源码 headless 宿主（控制面 8788），三次归一全部就位",
+    "host_online_peer": {
+      "send_acked_true": 3,
+      "sample": "[send] peer=25222a45 ep=192.168.2.22:17878 acked=true type=group size=1025 regEp=192.168.2.22:17878",
+      "verdict": "在线对端的当前端点与消息投递端口均为 :17878；A29 时宿主日志里一条 acked=true 都没有"
+    },
+    "host_heartbeat": "targets=30 sent=0 linked=0 / targets=32 sent=2 linked=0",
+    "host_send_refused": 86,
+    "host_ephemeral_port_mentions": 86,
+    "phone_xport_lines": 525,
+    "phone_ephemeral_port_mentions": 345,
+    "phone_no_candidate": 167,
+    "phone_sweep_offline": 0,
+    "banner": "无「宿主设备睡眠」横幅",
+    "phone_link": {
+      "linkTotal": 0,
+      "host_online": true,
+      "dialAttempts": 13,
+      "dialFailures": 13,
+      "dialLastTarget": "10.233.138.167:17879",
+      "lastError": "connect-timeout"
+    },
+    "verdict": "端口归一对在线对端生效（新登记端点全为 :17878、消息 acked=true）；心跳与拨号里仍大量出现临时端口，来源是上一版落盘的历史身份与候选端点——它们的 profile 不含 luciolaPort（该键由运行时 selfProfile 补，旧档案/扫码合成档案没有），三条归一都依赖它，因此历史垃圾数据不会自动清掉。这些端点多数属于离线历史节点，且 host 常是本机 IP，即使改对端口也发不出去。",
+    "still_open": [
+      "落盘旧身份/候选的清理需要一条不依赖 luciolaPort 的独立判据，本轮未做",
+      "K1 拨 17879（宿主 luciola 模式下不监听）⇒ linkConnected 恒 false",
+      "心跳 entry 对未连入/未配对端点一律 no session / unpaired ⇒ sent 常为 0"
+    ]
+  }
+}

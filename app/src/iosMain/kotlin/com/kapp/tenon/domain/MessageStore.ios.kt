@@ -5,6 +5,7 @@
 package com.kapp.tenon.domain
 
 import com.kapp.tenon.core.fs.pathJoin
+import com.kapp.tenon.db.RelayDatabase
 import com.kapp.tenon.platform.AppPlatform
 import kotlinx.cinterop.addressOf
 import kotlinx.cinterop.convert

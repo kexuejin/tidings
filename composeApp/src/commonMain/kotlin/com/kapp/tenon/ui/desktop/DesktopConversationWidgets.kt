@@ -382,14 +382,14 @@ public fun ConversationSidebar(
                                     vertical = LocalAppSpacing.current.sm,
                                 ),
                             )
-                            ConversationListDivider()
+                            ConversationListDivider(dense = dense)
                         }
                         items(searchResults, key = { "desktop_msg_${it.id}" }) { result ->
                             val conv = sessions.firstOrNull { it.convId == result.convId }
                             val title = conv?.title ?: result.peerId
                             DesktopMessageSearchRow(result, title, now, onSelect)
                             // 同一个内缩量：搜索结果与上方的会话行属于同一条列表。
-                            ConversationListDivider()
+                            ConversationListDivider(dense = dense)
                         }
                     }
                 },

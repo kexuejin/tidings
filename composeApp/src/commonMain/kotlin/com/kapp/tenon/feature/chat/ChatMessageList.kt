@@ -33,6 +33,7 @@ import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.focus.FocusRequester
+import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import com.kapp.tenon.domain.SenderIdentity
 import com.kapp.tenon.domain.canRecall
@@ -47,6 +48,7 @@ import com.kapp.tenon.generated.resources.Res
 import com.kapp.tenon.ui.components.DayDivider
 import com.kapp.tenon.ui.components.TimelineSeparator
 import com.kapp.tenon.ui.components.ScreenHistoryCard
+import com.kapp.tenon.ui.theme.ComponentSizes
 import com.kapp.tenon.ui.theme.LocalAppSpacing
 import com.kapp.tenon.ui.EmptyState
 import kotlinx.coroutines.launch
@@ -106,6 +108,8 @@ internal fun ChatMessageList(
     scrollFollow: ChatScrollFollowState,
     bubbleCtx: SenderIdentityContext,
     bubbleFraction: Float,
+    /** 群聊气泡内头像边长（外壳密度档，经 [ChatScreenChrome] 传入）。 */
+    messageAvatarSize: Dp = ComponentSizes.MessageAvatar,
     composerSlot: (@Composable (ComposerSlotArgs) -> Unit)?,
     composerFocus: FocusRequester,
     requestComposerFocus: () -> Unit,
@@ -279,6 +283,14 @@ internal fun ChatMessageList(
                                 modifier = Modifier.fillMaxWidth(),
                                 contentAlignment = if (message.mine) Alignment.CenterEnd else Alignment.CenterStart,
                             ) {
+                                // 产物 → 消息流里同卡关联的已落盘路径。三处判据共用这一份
+                                // （条目入口 / 本地动作可见性 / 本地动作执行），各写一遍
+                                // 迟早各差一个字（本仓最常见的分叉形态）。
+                                // `message.at` = 这张卡在这一侧的时间锚：同名文件可能存了
+                                // 好几轮，只有「卡之后最早落盘的那份」是它自己的投递。
+                                val savedPathOf: (AgentCardArtifact) -> String? = {
+                                    artifactSavedPathOf(messages, card.cardId, it.name, message.at)
+                                }
                                 AgentCardBubble(
                                     card = card,
                                     pendingActions = pendingCardActions,
@@ -289,8 +301,21 @@ internal fun ChatMessageList(
                                     // 产物预览（升级计划 §4.2-3）：同 cardId 的文件行里
                                     // 找「同名字 + 已落盘」的那份 —— 找不到入口不画，
                                     // 不做孤立路径展示。
-                                    artifactSavedPathFor = { artifact ->
-                                        artifactSavedPathOf(messages, card.cardId, artifact.name)
+                                    artifactSavedPathFor = savedPathOf,
+                                    // 端内渲染不了的产物（网页原型 .html）交给平台出口 ——
+                                    // 三端 `ReceivedFileActions` 现成（Android `ACTION_VIEW` +
+                                    // FileProvider / 桌面 `Desktop.open` / iOS Quick Look）。
+                                    // 刻意**不**拼成 `file://` 可点链接：那条路被
+                                    // `ChatReviewLogicTest` 明令禁止（本机文件路径不该成为
+                                    // 文本里的可点目标），这里走的是系统应用打开通路。
+                                    onPreviewArtifact = receivedFileActions?.let { fileActions ->
+                                        { _, path -> fileActions.open(path) }
+                                    },
+                                    // 「在浏览器打开原型」是**本地动作**：产物还没落到本机时
+                                    // 整颗不画（画一颗点了没反应的比没有更糟）。
+                                    isActionVisible = { action ->
+                                        action.actionId != SYSTEM_ACTION_OPEN_PROTOTYPE ||
+                                            prototypeSavedPathOf(card, savedPathOf) != null
                                     },
                                     // 会话里已经有一份时钟（屏幕协助卡在用同一个）：
                                     // 过期子态跟着它走，组件自己不读表 —— 可测、可截帧。
@@ -299,10 +324,22 @@ internal fun ChatMessageList(
                                     // 按钮组整块不画 —— 按下去没反应的按钮比没有更糟。
                                     onAction = actions.onCardAction?.let { dispatch ->
                                         { card: AgentCardUi, actionId: String ->
-                                            // 本机乐观置灰先行（§5.3）：即使动作派发失败，
-                                            // 「我点过了」也是本机事实；宿主判定到达后三态接管。
-                                            pendingCardActions = pendingCardActions + "${card.cardId}|$actionId"
-                                            dispatch(peer.nodeId, card, actionId)
+                                            val localPath = if (isLocalCardAction(actionId)) {
+                                                prototypeSavedPathOf(card, savedPathOf)
+                                            } else {
+                                                null
+                                            }
+                                            if (localPath != null) {
+                                                // 本地兑现：不置 pending（宿主不会回这一帧，
+                                                // 置灰会永久留着），也不派发（宿主没有这条语义，
+                                                // 发过去只会被丢并顺手把卡翻成 stale）。
+                                                receivedFileActions?.open(localPath)
+                                            } else {
+                                                // 本机乐观置灰先行（§5.3）：即使动作派发失败，
+                                                // 「我点过了」也是本机事实；宿主判定到达后三态接管。
+                                                pendingCardActions = pendingCardActions + "${card.cardId}|$actionId"
+                                                dispatch(peer.nodeId, card, actionId)
+                                            }
                                         }
                                     },
                                 )
@@ -374,6 +411,7 @@ internal fun ChatMessageList(
                             MessageBubble(
                                 message = bubbleMessage,
                                 bubbleFraction = bubbleFraction,
+                                messageAvatarSize = messageAvatarSize,
                                 onAcceptTransfer = onAcceptTransfer ?: {},
                                 onDeclineTransfer = onDeclineTransfer ?: {},
                                 onCancelTransfer = onCancelTransfer,

@@ -233,7 +233,7 @@ data class AgentSessionPayload(
      * ## 为什么不复用 `startedAt`
      *
      * `startedAt` 是「这个会话是什么时候开始的」，而 DSH 发出的实时帧填的是**帧发出那一刻**
-     * （`dsh-tidings/src/announce.ts` 的 `sessionFrame(…, { startedAt: Date.now() })`）。
+     * （`dsh-tenon/src/announce.ts` 的 `sessionFrame(…, { startedAt: Date.now() })`）。
      * 拿它当排序键，等于让排序依据与界面文案（`agent_session_started`「开始于 %1$s」）
      * 抢同一个字段、必然有一边说假话。
      *

@@ -5,7 +5,6 @@ package com.kapp.tenon.core.protocol
 import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertNull
-import kotlin.test.assertTrue
 
 /**
  * 「代表席位」单一判据的行为钉子。

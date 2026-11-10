@@ -275,7 +275,7 @@ def _ui_assist_pass(attempt):
 
     **系统授权链的真实形状**（2026-10-10 Pixel 6 / Android 15，`com.android.systemui`，
     探针 `/tmp/probe_consent_screen_mode.py` 逐步 dump 出来的；这一步原来是缺的，
-    viewer 跑 150s 一直卡在「要与"捎话"共享屏幕吗？… 取消 | 下一步」）：
+    viewer 跑 150s 一直卡在「要与"榫卯"共享屏幕吗？… 取消 | 下一步」）：
 
       1. app 内弹窗      「同意共享」（screen_remote_view_consent_accept）
       2. systemui 对话框 `screen_share_permission_dialog`，模式是一个 **Spinner**

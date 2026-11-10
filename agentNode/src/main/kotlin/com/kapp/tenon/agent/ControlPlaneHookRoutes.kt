@@ -19,7 +19,7 @@ import kotlinx.serialization.json.put
 /**
  * hook 桥（外部 agent 工具的会话 / 审批 / 注入 / 卡片 / 派单）。
  *
- * Antigravity（App/IDE/agy）经 `antigravity-tidings-hook` 脚本（stdin/stdout JSON）打到
+ * Antigravity（App/IDE/agy）经 `antigravity-tenon-hook` 脚本（stdin/stdout JSON）打到
  * 这几条回环路由：SessionStart/Stop 宣告会话（手机看板可见）、PreToolUse 走免批表 + 手机
  * 审批（**fail-closed**：联系不上或超时 = deny）、PreInvocation 拉走手机端注入池里的待注入
  * 消息（RFC §4 的 injectSteps 契约）。

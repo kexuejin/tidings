@@ -99,7 +99,7 @@ TS 参考实现（`/tmp/th_asar/out/main/index.js:2826-2831`，`FrameReader` 回
 
 **怎么做的**：先 `relay-screen-fixture.py viewer` 起替身发 `{"op":"request","sessionId":<uuid4>}` →
 手机上弹出「收到屏幕协助邀请 / 夹具桌面 请求查看你的屏幕画面」→ 点「同意共享」→
-Android 弹 MediaProjection 系统对话框「要与"捎话"共享屏幕吗？」→
+Android 弹 MediaProjection 系统对话框「要与"榫卯"共享屏幕吗？」→
 `共享一个应用 ▾` 选 **共享整个屏幕** → 点「共享屏幕」。
 
 **期望看到什么**：邀请能落地、系统授权能走通、替身侧收到 `accept`（带 32 位 hex token）、

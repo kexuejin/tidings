@@ -6,6 +6,7 @@ import androidx.compose.runtime.MutableState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.setValue
 import com.kapp.tenon.core.protocol.GroupMeta
+import com.kapp.tenon.core.protocol.TeamMemberDraft
 import com.kapp.tenon.domain.AgentSlice
 import com.kapp.tenon.domain.ChatSlice
 import com.kapp.tenon.domain.NodeSlice
@@ -28,8 +29,11 @@ import com.kapp.tenon.ui.components.PkPickerDialog
 import com.kapp.tenon.ui.components.VoiceRecordDialog
 import com.kapp.tenon.ui.components.ForwardTargetDialog
 import com.kapp.tenon.ui.components.GroupInfoDialog
+import com.kapp.tenon.ui.components.GroupInfoPage
 import com.kapp.tenon.ui.components.ImageViewerDialog
 import com.kapp.tenon.domain.model.MessageUi
+import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.ui.Modifier
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.setValue
 
@@ -65,6 +69,8 @@ internal fun ChatDialogsHost(
     identityCtx: SenderIdentityContext,
     actions: ChatScreenActions,
     groupActions: ChatScreenGroupActions,
+    /** 团队执行档端口（手机端为 null ⇒ 只读投影；§6.3）。 */
+    teamExecutionPort: com.kapp.tenon.domain.TeamExecutionPort?,
     receivedFileActions: ReceivedFileActions?,
     scrollToMessage: (String) -> Unit,
     onMentionSender: (SenderIdentity) -> Unit,
@@ -79,6 +85,8 @@ internal fun ChatDialogsHost(
     showTaskPickerState: MutableState<Boolean>,
     showSessionPickerState: MutableState<Boolean>,
     capsuleStateState: MutableState<CapsuleState>,
+    /** 群信息用整屏页面（手机）还是弹窗（桌面）—— 外壳决定，见 `ChatScreenChrome` 同名参数。 */
+    groupInfoAsPage: Boolean,
 ) {
     // ChatScreen 顶部的本地解包在早退（peer==null）之后才发生，宿主拿到的一律非空；
     // 这些同名别名让块体逐字保留。
@@ -101,41 +109,78 @@ internal fun ChatDialogsHost(
     var showSessionPicker by showSessionPickerState
     var capsuleState by capsuleStateState
     if (showGroupInfo && group != null) {
-        GroupInfoDialog(
-            group = group,
-            selfNodeId = settingsSlice.settings.nodeId,
-            selfNick = settingsSlice.settings.nick,
-            peers = nodeSlice.peers,
-            memberOnlineCount = memberOnlineCount,
-            onDismiss = { showGroupInfo = false },
-            onAddMembers = groupActions.onAddGroupMembers?.let { add -> { members -> add(group.groupId, members) } },
-            onRemoveMember = groupActions.onRemoveGroupMember?.let { remove -> { member -> remove(group.groupId, member) } },
-            onUpdateMeta = groupActions.onUpdateGroupMeta,
-            onLeaveGroup = groupActions.onLeaveGroup?.let { leave -> { leave(group.groupId) } },
-            onDissolveGroup = groupActions.onDissolveGroup?.let { dissolve -> { dissolve(group.groupId) } },
-            // 成员面板用**和气泡 / @ 候选同一份**上下文：agent 显示 DSH、@ 候选给出 @DSH。
-            identityContext = identityCtx,
-            // 长按成员头像 = 直接 @：插入到编辑器后关掉面板（用户下一步是打字）。
-            onMentionMember = { identity ->
-                showGroupInfo = false
-                mentionSender(identity)
-            },
-            // 「添加智能体」= 暴露**本机项目**（不是加人）。候选取本机 workspace 表。
-            localWorkspaces = agentSlice.agentWorkspaces.values.filter { it.peerId == settingsSlice.settings.nodeId },
-            onExposeWorkspaces = groupActions.onExposeWorkspaces?.let { expose ->
-                { chosen ->
-                    // 一次成像：chosen 就是**最终集合**，收起与暴露在一次调用里完成
-                    // （旧实现先撤再增、逐条调用，每条各发一份元数据，中间态会广播给全群）。
-                    expose(group.groupId, chosen)
-                }
-            },
-            // 团队编制的保存通路（§4.3）：对话框收的是 (defaultWsId, roster)，这里补群 id。
-            // 手机壳画宿主注解（§2.2 双端形态契约）：执行驱动在桌面宿主上托管。
-            onSetTeamRoster = groupActions.onSetTeamRoster?.let { save ->
-                { defaultWsId, roster -> save(group.groupId, defaultWsId, roster) }
-            },
-            showTeamHostManagedNotice = true,
-        )
+        // 两种外壳、一份内容（GroupInfoBody 在组件文件内部）：手机整屏页 / 桌面居中框。
+        // 实参先算成局部量，两壳只挑形态不各抄一遍。
+        //
+        // 成员面板用**和气泡 / @ 候选同一份**上下文：agent 显示 DSH、@ 候选给出 @DSH。
+        val addMembers = groupActions.onAddGroupMembers?.let { add -> { members: List<String> -> add(group.groupId, members) } }
+        val removeMember = groupActions.onRemoveGroupMember?.let { remove -> { member: String -> remove(group.groupId, member) } }
+        val leaveGroup = groupActions.onLeaveGroup?.let { leave -> { leave(group.groupId) } }
+        val dissolveGroup = groupActions.onDissolveGroup?.let { dissolve -> { dissolve(group.groupId) } }
+        // 长按成员头像 = 直接 @：插入到编辑器后关掉面板（用户下一步是打字）。
+        val mentionFromPanel: (SenderIdentity) -> Unit = { identity ->
+            showGroupInfo = false
+            mentionSender(identity)
+        }
+        // 「添加智能体」= 暴露**本机项目**（不是加人）。候选取本机 workspace 表。
+        val exposeWorkspaces = groupActions.onExposeWorkspaces?.let { expose ->
+            { chosen: List<String> ->
+                // 一次成像：chosen 就是**最终集合**，收起与暴露在一次调用里完成
+                // （旧实现先撤再增、逐条调用，每条各发一份元数据，中间态会广播给全群）。
+                expose(group.groupId, chosen)
+            }
+        }
+        // 团队编制的保存通路（§4.3）：对话框收的是 (defaultWsId, roster)，这里补群 id。
+        // 手机壳画宿主注解（§2.2 双端形态契约）：执行驱动在桌面宿主上托管。
+        val setTeamRoster = groupActions.onSetTeamRoster?.let { save ->
+            { defaultWsId: String, roster: List<TeamMemberDraft>? -> save(group.groupId, defaultWsId, roster) }
+        }
+        val localWs = agentSlice.agentWorkspaces.values.filter { it.peerId == settingsSlice.settings.nodeId }
+        if (groupInfoAsPage) {
+            GroupInfoPage(
+                group = group,
+                selfNodeId = settingsSlice.settings.nodeId,
+                selfNick = settingsSlice.settings.nick,
+                peers = nodeSlice.peers,
+                memberOnlineCount = memberOnlineCount,
+                onDismiss = { showGroupInfo = false },
+                onAddMembers = addMembers,
+                onRemoveMember = removeMember,
+                onUpdateMeta = groupActions.onUpdateGroupMeta,
+                onLeaveGroup = leaveGroup,
+                onDissolveGroup = dissolveGroup,
+                identityContext = identityCtx,
+                onMentionMember = mentionFromPanel,
+                localWorkspaces = localWs,
+                onExposeWorkspaces = exposeWorkspaces,
+                onSetTeamRoster = setTeamRoster,
+                showTeamHostManagedNotice = true,
+            // 手机壳默认无执行面（DesktopExtension 只在桌面装配端口）⇒ 只读投影。
+            teamExecutionPort = groupActions.teamExecutionPort,
+                modifier = Modifier.fillMaxSize(),
+            )
+        } else {
+            GroupInfoDialog(
+                group = group,
+                selfNodeId = settingsSlice.settings.nodeId,
+                selfNick = settingsSlice.settings.nick,
+                peers = nodeSlice.peers,
+                memberOnlineCount = memberOnlineCount,
+                onDismiss = { showGroupInfo = false },
+                onAddMembers = addMembers,
+                onRemoveMember = removeMember,
+                onUpdateMeta = groupActions.onUpdateGroupMeta,
+                onLeaveGroup = leaveGroup,
+                onDissolveGroup = dissolveGroup,
+                identityContext = identityCtx,
+                onMentionMember = mentionFromPanel,
+                localWorkspaces = localWs,
+                onExposeWorkspaces = exposeWorkspaces,
+                onSetTeamRoster = setTeamRoster,
+                showTeamHostManagedNotice = true,
+                teamExecutionPort = groupActions.teamExecutionPort,
+            )
+        }
     }
 
     if (showVoiceRecord && cacheDir != null) {

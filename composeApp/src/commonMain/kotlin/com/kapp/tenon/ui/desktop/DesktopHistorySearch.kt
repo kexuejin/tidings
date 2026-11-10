@@ -192,7 +192,7 @@ public fun DesktopHistorySearchDialog(
                             }
                             // `.hsdh .s` 逐字是「teahouse-mobile · 192.168.1.5:17879 · 在线」
                             // （`prototype/relay.html:5013`）= 名字 · 地址:端口 · 在线态；
-                            // 原先用的 `peer.subtitle` 是「捎话 · 设计 · Tidings」那张名片，不是地址。
+                            // 原先用的 `peer.subtitle` 是「榫卯 · 设计 · Tenon」那张名片，不是地址。
                             val host = peer.ip.ifBlank { peer.host }
                             val address = if (peer.udpPort > 0) "$host:${peer.udpPort}" else host
                             Text(

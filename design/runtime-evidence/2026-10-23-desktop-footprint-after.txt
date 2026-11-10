@@ -1,4 +1,4 @@
-捎话 Tidings 桌面端内存：阶段 0 与阶段 1 的实测读数
+榫卯 Tenon 桌面端内存：阶段 0 与阶段 1 的实测读数
 生成日期：2026-10-23
 量具：tools/measure-desktop-footprint.sh（--pid 附着模式）
 方案：docs/plans/2026-10-23-desktop-memory-and-ui-decoupling.md
@@ -11,8 +11,8 @@
 芯片        : Apple Silicon（arm64）
 系统        : macOS 26.7.2（25G330）
 JVM         : openjdk 21.0.8（Homebrew）
-产物        : /Applications/Tidings.app（桌面端 jpackage 产物，190MB）
-启动方式    : Tidings.app/Contents/MacOS/Tidings --background（托盘常驻）
+产物        : /Applications/Tenon.app（桌面端 jpackage 产物，190MB）
+启动方式    : Tenon.app/Contents/MacOS/Tenon --background（托盘常驻）
 
 读数口径（三者一起看，别只报一个）：
   Physical footprint   macOS 真正压给机器的量（含 GPU / IOSurface）
@@ -121,12 +121,12 @@ application 循环**（判别点在 application 之前，否则 Skia 已经加�
 7. 复现
 ------------------------------------------------------------------
   # 托盘常驻（不开窗）
-  /Applications/Tidings.app/Contents/MacOS/Tidings --background &
+  /Applications/Tenon.app/Contents/MacOS/Tenon --background &
   tools/measure-desktop-footprint.sh --pid <pid> --samples 3 --interval 5 --force-gc
 
   # 堆里谁在占地方
   jcmd <pid> GC.class_histogram | head -10
 
 看数之前先确认：
-  pgrep -fc 'Tidings.app/Contents/MacOS/Tidings'   # 必须是 1；>1 的读数会被两个实例污染
+  pgrep -fc 'Tenon.app/Contents/MacOS/Tenon'   # 必须是 1；>1 的读数会被两个实例污染
   uptime                                       # 负载要一起报

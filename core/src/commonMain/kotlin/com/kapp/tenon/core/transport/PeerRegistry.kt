@@ -10,6 +10,26 @@ import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.SharedFlow
 
 /**
+ * 对端的**发送端口**：档案声明的 `luciolaPort` 优先，缺失或越界才回退数据报源端口。
+ *
+ * legacy 时代每个节点的 UDP socket 绑在固定端口上，rinfo 的源端口就是监听端口，
+ * 回包发回去天经地义；luciola 的会话键是「地址:监听端口」，而发送侧用的是临时端口。
+ * 把源端口写进节点表，会让消息、心跳、候选池全部拨到不存在的端点 —— 真机满屏
+ * `no session / unpaired`，拨号侧则是 `no candidate address reachable`。
+ *
+ * 入站登记有好几条路径（发现帧、可靠帧、发现引擎），**必须共用这一条**；
+ * 各写一份回退链迟早只改一处。档案没有这个键的是老端，行为一字不变。
+ */
+internal fun sendingPortFor(profile: Profile?, sourcePort: Int): Int {
+    val declared = profile?.luciolaPort ?: return sourcePort
+    if (declared !in 1..65535) {
+        println("[port] ignore out-of-range luciolaPort=" + declared)
+        return sourcePort
+    }
+    return declared
+}
+
+/**
  * 在线节点表。逐条对齐茶话间 TS 侧 `src/main/net/peer-registry.ts`。
  *
  * 三条规则是从源码读出来的，别凭直觉改：
@@ -187,8 +207,10 @@ class PeerRegistry(private val selfNodeId: String) {
      * 发 Online 事件。用它在启动时恢复历史记录，等于对全世界宣布"这些设备现在都在线"——
      * 而蜂窝下它们可能根本不可达，消息会进一条通不了的队列。
      *
-     * 这里只做"想起来它是谁"：profile、地址、上次露面时间照原样放回，**online = false**、
+     * 这里只做"想起来它是谁"：profile、地址、上次露面时间放回，**online = false**、
      * 不刷新 lastSeen、不发任何事件（启动阶段没有订阅者，发了也没人听）。
+     * 端口按档案归一（[sendingPortFor]）：旧版本可能把临时源端口落进了名录，
+     * 原样恢复会让心跳和消息一开机就拨错，且 `knownPeersSnapshot` 又把它写回盘。
      *
      * 已存在的记录**不覆盖**：启动顺序上 discovery 可能先跑起来并真的收到了某台设备的帧，
      * 那条实时记录比盘上的旧记录新，不能被历史盖掉。
@@ -204,7 +226,7 @@ class PeerRegistry(private val selfNodeId: String) {
         val record = PeerRecord(
             profile = profile,
             ip = ip,
-            udpPort = udpPort,
+            udpPort = sendingPortFor(profile, udpPort),
             lastSeen = lastSeen,
             online = false,
         )
@@ -362,10 +384,27 @@ class PeerRegistry(private val selfNodeId: String) {
     fun allPins(): Map<String, String> = lock.withLock { peerPins.toMap() }
 
     /** 该节点的候选端点（按配对码给的顺序）；没存过就是空表。 */
-    fun candidatesOf(nodeId: String): List<PeerEndpoint> = lock.withLock { candidateEndpoints[nodeId].orEmpty() }
+    fun candidatesOf(nodeId: String): List<PeerEndpoint> = lock.withLock { normalizedCandidates(nodeId) }
 
-    /** 全部节点的候选端点 —— 心跳要把它们都发一份。 */
-    fun allCandidates(): Map<String, List<PeerEndpoint>> = lock.withLock { candidateEndpoints.toMap() }
+    /** 全部节点的候选端点 —— 心跳要把它们都发一份，落盘也走这一份。 */
+    fun allCandidates(): Map<String, List<PeerEndpoint>> = lock.withLock {
+        candidateEndpoints.keys.associateWith { normalizedCandidates(it) }
+    }
+
+    /**
+     * **读口归一**：落盘里可能存着旧版本写下的临时端口，装机后不重写就永远拨错。
+     *
+     * 归一放在读口而不是逐个消费点：心跳、消息重试、发现引擎、落盘快照全都经过这里，
+     * 只写一份判据；且 `allCandidates()` 被持久化时写回的已是正确端口，历史污染自愈。
+     * 名录里还没有这个节点的资料时（启动顺序：候选先于名录恢复）原样返回，
+     * 等资料恢复、下一次读取就归一了 —— 老端档案没有 `luciolaPort`，行为一字不变。
+     */
+    private fun normalizedCandidates(nodeId: String): List<PeerEndpoint> {
+        val profile = peers[nodeId]?.profile
+        return candidateEndpoints[nodeId].orEmpty()
+            .map { it.copy(port = sendingPortFor(profile, it.port)) }
+            .distinct()
+    }
 
     /**
      * 一次**成功的发送**证明了这个端点可达：把它提升为当前地址。
@@ -460,16 +499,34 @@ class PeerRegistry(private val selfNodeId: String) {
         return existed
     }
 
-    /** 心跳超时（protocol §6.2）。返回本次被判定离线的节点。 */
-    fun sweep(offlineAfterMs: Long): List<String> {
+    /**
+     * 心跳超时（protocol §6.2）。返回本次被判定离线的节点。
+     *
+     * @param stillReachable 该节点此刻是否还有**更硬**的存活证据（当前有活跃长连接）。
+     *   返回 true 的节点**不因空闲翻面**：链路的断开由链路层自己负责（`LinkClient` /
+     *   luciola lost 都会 markOffline，`linkCarriers()` 又是实时读会话表、会话一关就没有），
+     *   sweep 再拿「多久没收到帧」插一脚，只会把「有会话但今天没人说话」判成离线。
+     *   真机读数：`[sweep] offline 46c23456 idle=600106ms link=true`
+     *   —— 正是上一版给豁免加的那条 10 分钟上界造出来的假离线。
+     */
+    fun sweep(offlineAfterMs: Long, stillReachable: (String) -> Boolean = { false }): List<String> {
         val now = nowMillis()
         val offlineRecords = mutableListOf<Pair<String, PeerRecord>>()
         lock.withLock {
             for ((nodeId, record) in peers) {
-                if (record.online && now - record.lastSeen > offlineAfterMs) {
-                    record.online = false
-                    offlineRecords += (nodeId to record)
-                }
+                if (!record.online || now - record.lastSeen <= offlineAfterMs) continue
+                // 长连接活着比「最近有没有收到帧」更硬：真机读数里曾出现 `linkConnected=true`
+                // 与 `online=false` 同时成立，界面据此挂
+                // 「宿主设备睡眠」横幅、补发队列停摆。
+                val linked = runCatching { stillReachable(nodeId) }.getOrDefault(false)
+                if (linked) continue
+                // 翻面留痕：真机上「linkConnected=true 却 online=false」正是这一行缺不得的
+                // 场景 —— 事后只能看到两个矛盾读数，分不清是链路读到 false，还是豁免被上界挡住。
+                println(
+                    "[sweep] offline ${nodeId.take(8)} idle=${now - record.lastSeen}ms link=$linked",
+                )
+                record.online = false
+                offlineRecords += (nodeId to record)
             }
         }
         for ((_, record) in offlineRecords) {

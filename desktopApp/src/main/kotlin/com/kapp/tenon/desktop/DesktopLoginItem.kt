@@ -46,7 +46,7 @@ internal object DesktopLoginItem {
      * 自启关掉（ARP-3 里刻意保留的两处中文之一）。用户看到的是 `HKCU\...\Run` 里的
      * 这一项，所以它不能随语言变。
      */
-    const val WINDOWS_VALUE_NAME = "捎话 Tidings"
+    const val WINDOWS_VALUE_NAME = "榫卯 Tenon"
 
     /** Linux autostart 文件名。 */
     const val LINUX_FILE_NAME = "relay-desktop.desktop"
@@ -146,7 +146,7 @@ X-GNOME-Autostart-enabled=true
 
     /**
      * `Exec=` 的转义：freedesktop 规范里双引号内的 `"`、`` ` ``、`$`、`\` 必须反斜杠转义。
-     * 路径含空格很常见（macOS 的 `/Applications/捎话 Tidings.app/...` 就是这样）。
+     * 路径含空格很常见（macOS 的 `/Applications/榫卯 Tenon.app/...` 就是这样）。
      */
     fun execLine(command: List<String>): String = command.joinToString(" ") { arg ->
         "\"" + arg
@@ -287,7 +287,7 @@ X-GNOME-Autostart-enabled=true
 
     /** 改名前的 Windows 自启值名。 */
     /** 改名前的值名（同上：注册表标识，不是文案）。迁移时按它删旧项。 */
-    const val LEGACY_WINDOWS_VALUE_NAME = "捎话 Relay"
+    const val LEGACY_WINDOWS_VALUE_NAME = "捎话 Tidings"
 
     fun legacyMacosEntryPath(homeDir: String): String =
         "$homeDir/Library/LaunchAgents/$LEGACY_MACOS_LABEL.plist"

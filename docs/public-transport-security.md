@@ -48,12 +48,12 @@
 
 ## 2. 参考实现（DS-Bot）逐条对照
 
-| DS-Bot | 做法 | 捎话的差异 / 能否照搬 |
+| DS-Bot | 做法 | 榫卯的差异 / 能否照搬 |
 |---|---|---|
 | `ip-address.js` | IP→DER 字节；IPv6 分类 `fc00::/7`=private、`2000::/3`=global，link-local 丢弃 | 已有 `IpAddressUtils.getIpv6Scope`（task-12 在用），可复用 |
 | `local-certificate.js` | 手写 X.509（EC P-256）；SAN=`iPAddress`，含 127.0.0.1/::1/本机全部地址；**私钥持久化**，证书在"快过期或 SAN 缺当前地址"时用**同一把密钥**重签；`tlsPin=sha256:SPKI` | **可照搬**：DER 拼装是纯字节逻辑，能进 commonMain；密钥持久化保证重签后 pin 不变 |
-| `local-https.js` | 候选排序（公网 v6 > 私网 v6 > v4；docker/tun/utun 扣分）；HTTPS **绑定到所选地址**；URL=`https://[v6]:port` | 排序思路可复用；**捎话是双向的**，不是"手机连主机的单向服务"（见 §4） |
-| 二维码 `{url,code,serverId,tlsPin}` | 手机直连 + 证书固定 | 捎话的 QR 已有 `pin`/`tlsPin` 键与候选池，结构兼容 |
+| `local-https.js` | 候选排序（公网 v6 > 私网 v6 > v4；docker/tun/utun 扣分）；HTTPS **绑定到所选地址**；URL=`https://[v6]:port` | 排序思路可复用；**榫卯是双向的**，不是"手机连主机的单向服务"（见 §4） |
+| 二维码 `{url,code,serverId,tlsPin}` | 手机直连 + 证书固定 | 榫卯的 QR 已有 `pin`/`tlsPin` 键与候选池，结构兼容 |
 
 ## 3. 决策一：证书/pin 放哪一层
 
@@ -86,7 +86,7 @@
 
 ## 4. 信任模型：谁验谁
 
-DS-Bot 是"主机服务、手机连接"的单向模型，**server-auth TLS 就够**。捎话不是：
+DS-Bot 是"主机服务、手机连接"的单向模型，**server-auth TLS 就够**。榫卯不是：
 
 - 两端都会主动发起（`sendGroupText` 逐成员单播、`sendText` 双向）；
 - 文件传输的 `TransferServer` 在**接收方**监听，TLS 角色是**每条连接**决定的，不是每个节点；
@@ -191,7 +191,7 @@ DS-Bot 是"主机服务、手机连接"的单向模型，**server-auth TLS 就�
 - P3：AEAD 开关关闭 = 回到 P2。
 
 **"不做会怎样"（必须写清）**
-- 在**公网直连**（本任务的目标场景）上，今天的捎话是**完全明文**：同一路径上的任何人
+- 在**公网直连**（本任务的目标场景）上，今天的榫卯是**完全明文**：同一路径上的任何人
   可以读走你的消息、文件、屏幕帧与 agent 帧，也可以**篡改或注入**——
   `from` 字段是自称的，ACK 没有认证，除了去重表没有任何防重放/防伪机制。
 - 只做 P1（pin 存下来但不启用）**不改变任何暴露面**：它只是为后续分期留出可验证的接缝。

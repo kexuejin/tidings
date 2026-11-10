@@ -76,7 +76,7 @@ class AgentPromptAdmissionTest {
     /**
      * **消息本来不该叫醒 agent ⇒ 直接拒。**
      *
-     * 判据来自 Tidings 侧 `shouldTriggerAgent`，这里只消费不重算。
+     * 判据来自 Tenon 侧 `shouldTriggerAgent`，这里只消费不重算。
      * 真机事故：一条不带 @ 的群消息拉起过 native 驱动。
      */
     @Test

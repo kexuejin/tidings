@@ -23,7 +23,7 @@ import kotlinx.coroutines.launch
 import kotlinx.coroutines.runBlocking
 
 /**
- * 捎话桌面端入口。
+ * 榫卯桌面端入口。
  *
  * ## 装配顺序是有讲究的
  * 1. 先建平台实现与两个存储（设置 `settings.json`、消息 `messages.json`，都落在
@@ -106,7 +106,7 @@ fun main(args: Array<String>) {
         // 依托系统托盘与常驻能力，固定监听回环 8788 并广播 `ag1`，内嵌承载控制面。
         advertiseAgent = true,
     )
-    // 固定端口 8788：dsh-tidings-bridge 插件的 `baseUrl` 默认就是这个值，两边必须一致。
+    // 固定端口 8788：dsh-tenon-bridge 插件的 `baseUrl` 默认就是这个值，两边必须一致。
     // 传 `ControlPlane.DEFAULT_HTTP_PORT` 而不是字面量 8788 —— 单一定义点。
     val extension = DesktopExtension(
         controller = controller,
@@ -237,7 +237,7 @@ private var controllerRef: RelayController? = null
 private var hostRef: DesktopHost? = null
 
 /**
- * 注册系统级「用捎话打开」回调。
+ * 注册系统级「用榫卯打开」回调。
  *
  * 三种不注册的情形都是正常的，不该让启动失败：无图形环境（headless，例如 CI 里跑
  * 冒烟）、JDK 没实现该动作、系统策略拒绝。注册不上只意味着双击关联不生效，主窗、
@@ -260,7 +260,7 @@ private fun installDesktopOpenHandlers() {
         // 这条**必须**注册：主窗是懒建的（关闭 = 销毁，不是隐藏），所以「窗口没了」
         // 是正常状态，而不是退出。没有这个回调，那些动作只会 activate 进程，
         // 而进程里没有任何人把窗口建出来 —— 用户看到的是「点了没反应」。
-        // 实测：装上产物后 `open -a /Applications/Tidings.app` 前后 footprint 一点没变
+        // 实测：装上产物后 `open -a /Applications/Tenon.app` 前后 footprint 一点没变
         // （278.4M → 279.2M，IOSurface 仍为 0），正是缺这一环。
         if (java.awt.Desktop.isDesktopSupported()) {
             desktop.addAppEventListener(
@@ -268,7 +268,7 @@ private fun installDesktopOpenHandlers() {
             )
         }
     }.onFailure {
-        println("捎话：未注册系统「打开方式」回调（${it.javaClass.simpleName}: ${it.message}），双击关联不可用。")
+        println("榫卯：未注册系统「打开方式」回调（${it.javaClass.simpleName}: ${it.message}），双击关联不可用。")
     }
 }
 
@@ -283,7 +283,7 @@ private fun installDesktopOpenHandlers() {
  *
  * ## 交接口径
  *
- * - `relay://host:port` 与 `.relaymsg` 路径：走系统「用捎话打开」那条既有通路
+ * - `relay://host:port` 与 `.relaymsg` 路径：走系统「用榫卯打开」那条既有通路
  *   （`java.awt.Desktop.setOpenURIHandler / setOpenFileHandler`）交给已运行的实例。
  *   系统会按 `CFBundleURLTypes` / 文件关联找到**那个**实例 —— 这也是它唯一可靠的地方：
  *   我们手上没有已运行实例的 pid（锁文件里那个 pid 是上一次写下的，崩溃后可能是别的

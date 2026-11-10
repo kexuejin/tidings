@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: GPL-3.0-only
-// Copyright (C) 2026 捎话 Tidings contributors
+// Copyright (C) 2026 榫卯 Tenon contributors
 
 package com.kapp.tenon.ui.components
 
@@ -110,10 +110,12 @@ public fun WorkspaceGroupCreateDialog(
             )
         },
         content = {
-            LazyColumn(
-                modifier = Modifier.fillMaxWidth().heightIn(max = 500.dp),
-                verticalArrangement = Arrangement.spacedBy(sp.md),
-            ) {
+            // 高度上限走比例收口：小屏/横屏下 500dp 默认档 + 标题 + 动作条会顶出屏幕。
+            RelayDialogContentHeight(defaultMaxHeight = 500.dp) { cap ->
+                LazyColumn(
+                    modifier = Modifier.fillMaxWidth().heightIn(max = cap),
+                    verticalArrangement = Arrangement.spacedBy(sp.md),
+                ) {
                 item {
                     // 分支 B：已有工作区快速建群。原型 `.grphead` 是左右两个 span
                     // （relay.html:4121-4124），各占一行；左侧 weight(1f) 单行省略、
@@ -271,14 +273,15 @@ public fun WorkspaceGroupCreateDialog(
                                 checked = syncMyDevice,
                                 onCheckedChange = { syncMyDevice = it },
                             )
-                            Text(
-                                text = stringResource(Res.string.workspace_create_group_sync_devices),
-                                style = MaterialTheme.typography.bodySmall,
-                                color = MaterialTheme.colorScheme.onSurfaceVariant,
-                            )
-                        }
+                        Text(
+                            text = stringResource(Res.string.workspace_create_group_sync_devices),
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        )
                     }
                 }
+            }
+        }
             }
         },
         confirmButton = {
