@@ -101,7 +101,7 @@ class TeamDispatchBehaviorTest {
         if (withProfile) {
             val verdict = store.save(
                 TeamExecutionProfile(
-                    groupId = "g-team", defaultWsId = "ws-1", leaderAgentId = "dsh-lead",
+                    groupId = "g-team", dirId = "ws-1", leaderAgentId = "dsh-lead",
                     updatedAt = 0,
                     members = listOf(
                         TeamExecutionMemberSpec("m-coder", TeamExecutionKinds.WORKER, "codex"),
@@ -116,6 +116,8 @@ class TeamDispatchBehaviorTest {
             controller = controller,
             scope = scope,
             teamExecutionStore = store,
+            // D16：执行档键的 dirId 一半 —— 测试档案都落在 dir-1/ws-1 这条指针上。
+            groupDirIdOf = { "ws-1" },
         )
         return Triple(controller, orch, tmp)
     }

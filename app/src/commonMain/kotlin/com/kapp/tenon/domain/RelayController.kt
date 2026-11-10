@@ -858,17 +858,35 @@ class RelayController(
         writer.publishExternalChange()
     }
 
-    override fun setGroupAgentWorkspaces(groupId: String, wsIds: List<String>) =
-        groupsCtl.run { handleSetGroupAgentWorkspaces(groupId, wsIds) }
+    /** 群项目目录指针：设 / 换 / 清（D5；见 [handleSetGroupProjectDirectory]）。 */
+    override fun setGroupProjectDirectory(groupId: String, dirId: String?): Boolean =
+        handleSetGroupProjectDirectory(groupId, dirId)
+
+    /** 加智能体进群（D6 不问目录；见 [handleAddGroupAgent]）。 */
+    override fun addGroupAgent(groupId: String, agentId: String, duty: String?): AddGroupAgentResult =
+        handleAddGroupAgent(groupId, agentId, duty)
+
+    /** 重新解析本机席位的执行投影并广播（「去暴露」；见 [handleRebuildGroupSeatProjections]）。 */
+    override fun rebuildGroupSeatProjections(groupId: String): Boolean =
+        handleRebuildGroupSeatProjections(groupId)
+
+    /** 移除本机席位（撤回入驻；见 [handleRemoveGroupAgent]）。 */
+    override fun removeGroupAgent(groupId: String, agentId: String): Boolean =
+        handleRemoveGroupAgent(groupId, agentId)
 
     /** 团队编制：保存 / 关闭某席位的团队（见 [handleSetGroupTeamDeclaration]）。 */
-    override fun setGroupTeamDeclaration(groupId: String, defaultWsId: String, roster: List<TeamMemberDraft>?) =
-        groupsCtl.run { handleSetGroupTeamDeclaration(groupId, defaultWsId, roster) }
+    override fun setGroupTeamDeclaration(groupId: String, agentId: String, roster: List<TeamMemberDraft>?) =
+        groupsCtl.run { handleSetGroupTeamDeclaration(groupId, agentId, roster) }
 
     /** 团队执行档端口：invokeCtl 同字段（DesktopExtension 装配 DesktopTeamExecutionPort）。 */
     override var teamExecutionPort: TeamExecutionPort?
         get() = invokeCtl.teamExecutionPort
         set(value) { invokeCtl.teamExecutionPort = value }
+
+    /** 项目目录端口：invokeCtl 同字段（DesktopExtension 装配 DesktopHostDirectoryPort）。 */
+    override var hostDirectoryPort: HostDirectoryPort?
+        get() = invokeCtl.hostDirectoryPort
+        set(value) { invokeCtl.hostDirectoryPort = value }
     /**
      * 打开某条会话时把它标为已读。
      *

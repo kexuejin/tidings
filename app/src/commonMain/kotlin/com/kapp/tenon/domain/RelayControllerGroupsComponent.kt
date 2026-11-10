@@ -29,6 +29,7 @@ import kotlinx.serialization.json.JsonPrimitive
 import com.kapp.tenon.core.protocol.AgentSenderId
 import com.kapp.tenon.core.protocol.VirtualAgentMember
 import com.kapp.tenon.core.protocol.declarationFor
+import com.kapp.tenon.core.protocol.AgentDuties
 import com.kapp.tenon.core.protocol.AgentMemberName
 import com.kapp.tenon.core.protocol.EntityTypes
 import com.kapp.tenon.core.protocol.TeamMemberDraft
@@ -292,10 +293,17 @@ private fun handleCreateGroupInternal(
 /**
  * 工作区上的 agent 在群里的那一条声明（`virtualAgents`）。
  *
- * 身份键的兜底顺序与「邀请新智能体入驻」（[RelayController.handleExposeWorkspace]）**同一套**
+ * 身份键的兜底顺序与「入驻」（[RelayController.handleAddGroupAgent]）**同一套**
  * —— 真机数据里工作区的 `agentId` 常为空，只认它会让「建群时把 agent 拉进来」在多数
  * 工作区上静默不生效。名字走 `AgentMemberName.base`，与入驻同源：两处各算一遍，
  * 同一个 agent 在群里就会有两个名字。
+ *
+ * ## 为什么建群路径保留这条内联声明（而入驻由 [RelayController.handleAddGroupAgent] 接管）
+ *
+ * 手机端（无目录端口）快速建群时，工作区可能由**对端**宣告（A22-R5）—— 入驻在
+ * 本机找不到那一行，会静默不生效；这里的内联声明让群里至少还有第二方。桌面壳在
+ * 建群成功后仍会走一遍入驻 + 指针绑定（建群即选项目目录，D14）—— 入驻找到这条
+ * 既有席位就沿用名字、只重写投影，不会产生第二个 @token。
  *
  * @return null = 这个工作区拿不到任何 agent 身份（agentId / agentKind 都没上报）。
  */
@@ -309,7 +317,8 @@ private fun virtualAgentMemberFor(ws: WorkspaceUi): VirtualAgentMember? {
     return declarationFor(
         agentId = agentId,
         hostNodeId = ws.peerId,
-        name = AgentMemberName.base(ws.agentKind, agentId, ws.wsTitle, ws.wsId),
+        // D13：席位名 = kind + 职责，不再含目录（换目录不改名）。新席位默认单兵职责。
+        name = AgentMemberName.base(ws.agentKind, agentId, AgentDuties.DEFAULT_SINGLE),
         defaultWsId = ws.wsId,
         previous = null,
     )
@@ -991,71 +1000,6 @@ internal fun RelayController.agentRouteFactsOf(groupId: String): GroupAgentRoute
 
 
 /**
- * 把**本机**在这个群的 agent 声明集合整体改写为 [wsIds]（类型安全的暴露/收起入口）。
- *
- * ## 为什么是一次成像而不是逐条 toggle
- *
- * 旧的 `handleExposeWorkspace(groupId, wsId?, agentId?)` 一次动一条，界面上「保存」
- * 要么连发 N 次调用（每次 rev+1、每次广播一份元数据），要么自己先算好差集再逐条调 ——
- * 两条路都会把「改到一半」的声明集合广播给全群，而且每条各发一份 `group.info`。
- * 现在调用方交的就是**最终集合**（授权面板的勾选结果），这里一次改写、一次 rev、
- * 一次广播 —— 中间态不存在。
- *
- * ## 主权边界
- *
- * 只改写 `hostNodeId == 本机` 的声明：其它设备声明进来的条目原样保留。
- * 撤回是机主主权，覆盖不到别人。
- *
- * 名字稳定性：已经声明过的工作区沿用**现有名字**（`@` token 不能漂 —— 换名等于把
- * 别人正在打的 mention 打断）；只有新暴露的工作区才走 [AgentMemberName.base] +
- * [AgentMemberName.unique] 生成群内唯一名。
- *
- * @param wsIds 本机要暴露的工作区 id 全集；空列表 = 撤掉本机全部声明。
- */
-fun RelayController.handleSetGroupAgentWorkspaces(groupId: String, wsIds: List<String>) {
-    val meta = _state.value.settings.groups.firstOrNull { it.groupId == groupId } ?: return
-    val self = _state.value.selfNodeId
-    // 暴露自己的机器是**本机主权**，不需要群主/管理员身份；但要能改元数据就得在群里。
-    if (self !in meta.members) return
-    val current = meta.virtualAgents.orEmpty()
-    val chosenIds = wsIds.map { it.trim() }.filter { it.isNotEmpty() }.distinct()
-    // 逐个解析本机工作区行：声明必须挂在本机真实存在的工作区上。
-    val rowsByWsId = _state.value.agentWorkspaces.values
-        .filter { it.peerId == self }
-        .associateBy { it.wsId }
-    val resolved = chosenIds.mapNotNull { wsId ->
-        val existing = current.firstOrNull { it.hostNodeId == self && it.defaultWsId == wsId }
-        if (existing != null) return@mapNotNull existing
-        val ws = rowsByWsId[wsId] ?: return@mapNotNull null
-        // 身份键的兜底规则抽在 core 里（`resolveVirtualAgentKey`），这里只消费：
-        // 工作区自报 agentId > agentKind。真机数据里工作区的 agentId 常为空，
-        // 原先那条「为空就静默放弃」让入驻按钮看起来没用。
-        val resolvedAgentId = resolveVirtualAgentKey(null, ws.agentId, ws.agentKind)
-        if (resolvedAgentId.isNullOrBlank()) return@mapNotNull null
-        val base = AgentMemberName.base(ws.agentKind, resolvedAgentId, ws.wsTitle, wsId)
-        // 名字冲突范围 = 群内其它声明（本机这条是新建的，不在池里）。
-        val taken = current.map { it.name }.toMutableSet()
-        // 新席位：previous = null ⇒ declarationFor 按默认值开（单兵、空组员）。
-        declarationFor(
-            agentId = resolvedAgentId,
-            hostNodeId = self,
-            name = AgentMemberName.unique(base, taken),
-            defaultWsId = wsId,
-            previous = null,
-        )
-    }
-    // 本机声明整体替换为 resolved（含「沿用既有名字」的那些）；外来声明不受影响。
-    val next = current.filterNot { it.hostNodeId == self } + resolved
-    val updated = meta.copy(
-        virtualAgents = next.distinct().ifEmpty { null },
-        rev = meta.rev + 1,
-        updatedBy = self,
-        updatedTs = nowMillis(),
-    )
-    commitGroupMetaUpdate(updated)
-}
-
-/**
  * 元数据提交的**唯一入口**（团队创建方案 §4.1）：落库 + 逐成员广播。
  *
  * ## 为什么必须是唯一入口
@@ -1101,14 +1045,15 @@ internal fun RelayController.commitGroupMetaUpdate(updated: GroupMeta) {
  * 保存 / 关闭某个席位的团队编制（团队创建方案 §4.3）。
  *
  * @param groupId 群 id。
- * @param defaultWsId 目标席位的默认工作区 id（写入定位键 = `(groupId, defaultWsId)`，
- *   本机 host 由 selfNodeId 隐含；这里再校验目标声明 `hostNodeId == 本机`）。
+ * @param agentId 目标席位的 agent 身份（D4：席位定位键 = `(groupId, hostNodeId, agentId)`，
+ *   本机 host 由 selfNodeId 隐含；大小写不敏感匹配）。旧键 `(groupId, defaultWsId)` 已废 ——
+ *   席位未暴露项目目录时 `defaultWsId` 为 null，按它定位永远落空。
  * @param roster 组员草稿；**null 或空清单 = 关闭团队**（`entityType` 回 single、
- *   组员清空）—— 与工作区授权同一节奏：一次保存 = 一次 rev+1、一次广播。
+ *   组员清空）—— 与入驻/撤回同一节奏：一次保存 = 一次 rev+1、一次广播。
  */
 fun RelayController.handleSetGroupTeamDeclaration(
     groupId: String,
-    defaultWsId: String,
+    agentId: String,
     roster: List<TeamMemberDraft>?,
 ) {
     val meta = _state.value.settings.groups.firstOrNull { it.groupId == groupId } ?: run {
@@ -1116,14 +1061,14 @@ fun RelayController.handleSetGroupTeamDeclaration(
         return
     }
     val self = _state.value.selfNodeId
-    // 声明自己的席位是**本机主权**（与工作区授权同一条边界），但要能改元数据就得在群里。
+    // 声明自己的席位是**本机主权**（与入驻/撤回同一条边界），但要能改元数据就得在群里。
     if (!meta.hasMember(self)) {
         warn(BannerMessage.GroupLeft)
         return
     }
-    // 定位：席位已撤（授权面板取消暴露）或并发变化时给可读反馈 —— 不猜。
+    // 定位：席位已撤（面板移除）或并发变化时给可读反馈 —— 不猜。
     val seat = meta.virtualAgents.orEmpty().firstOrNull {
-        it.hostNodeId == self && it.defaultWsId == defaultWsId
+        it.hostNodeId == self && it.agentId.equals(agentId.trim(), ignoreCase = true)
     } ?: run {
         warn(BannerMessage.TeamSeatMissing)
         return
@@ -1136,7 +1081,7 @@ fun RelayController.handleSetGroupTeamDeclaration(
         for (va in meta.virtualAgents.orEmpty()) {
             add(va.name)
             add(va.agentId)
-            if (va.hostNodeId != self || va.defaultWsId != defaultWsId) {
+            if (va.hostNodeId != self || !va.agentId.equals(seat.agentId, ignoreCase = true)) {
                 va.teamMembers.forEach { add(it.name) }
             }
         }
@@ -1150,10 +1095,14 @@ fun RelayController.handleSetGroupTeamDeclaration(
     // 关闭语义：null 或空清单都视为关闭。
     val enabling = !roster.isNullOrEmpty()
     val next = meta.virtualAgents.orEmpty().map { va ->
+        // 目标席位 = 定位到的那一条（host + agentId；旧数据里同 agentId 的第二席位
+        // 靠 defaultWsId 区分 —— validateGroup 的席位键兜着不重）。
+        val isTarget = va.hostNodeId == self && va.agentId.equals(seat.agentId, ignoreCase = true) &&
+            va.defaultWsId == seat.defaultWsId
         when {
             // 目标席位：开 = team + 草稿清单（agentId 沿用草稿原值，编辑保全契约）；
-            // 关 = single + 空清单。name / allowedWorkspaces 原样保留。
-            va.hostNodeId == self && va.defaultWsId == defaultWsId -> va.copy(
+            // 关 = single + 空清单。name / allowedWorkspaces / defaultWsId 原样保留。
+            isTarget -> va.copy(
                 entityType = if (enabling) EntityTypes.TEAM else EntityTypes.SINGLE,
                 teamMembers = if (enabling) {
                     roster.orEmpty().map { TeamMemberInfo(agentId = it.agentId, name = it.name, role = it.role) }
@@ -1162,8 +1111,9 @@ fun RelayController.handleSetGroupTeamDeclaration(
                 },
             )
             // 同 agent 的其它席位一律清成单兵（§3.1：一个 agent 每群最多一个团队 ——
-            // 写路径保证，收端还有 validateGroup 的同约束兜底）。
-            va.hostNodeId == self && va.agentId == seat.agentId -> va.copy(
+            // 写路径保证，收端还有 validateGroup 的同约束兜底；D4 之后新数据里
+            // 一个 agent 只有一条席位，这一支只服务旧数据的收敛）。
+            va.hostNodeId == self && va.agentId.equals(seat.agentId, ignoreCase = true) -> va.copy(
                 entityType = EntityTypes.SINGLE,
                 teamMembers = emptyList(),
             )
@@ -1231,79 +1181,28 @@ internal fun RelayController.groupMetaWithNicks(meta: GroupMeta): GroupMeta {
 }
 
 /**
- * 本机为群里这些 agent 声明的身份（`virtualAgents`）。
+ * 本机为群里这些 agent 声明的身份（`virtualAgents`）—— **P2 之后只携带，不再生成**。
  *
- * 只声明**本机真的在跑**的那些：`agentWorkspaces` 里属于本机 peer 的工作区。
- * 名字优先级 `wsTitle`（宿主给工作区起的名字）> `agentId`；两者都没有就不声明 ——
- * 编一个名字比显示标识符更糟。
+ * ## 为什么自动生成被删除（防复活）
+ *
+ * 旧模型在这里从本机工作区清单为每个 `(agentId, wsId)` 自动铸席位（「15 个 ws =
+ * 15 个可 @ 的对象」），「加 agent = 选目录」正是它喂出来的。新模型（决策稿 D1/D4/D6/D14）：
+ * **席位 = `(groupId, hostNodeId, agentId)`，一个 agent 一个席位**，只由显式流程写入
+ * （入驻流程 / 指针投影重建）；执行点 = 群项目目录解析出的那个 wsId，写入目标不许
+ * per-agent 分叉。把自动生成放回来的每一次尝试，都会在下一次广播把用户没入驻的
+ * 目录悄悄加回群里、把指针投影冲掉 —— 那是静默元数据分叉的形状。
+ *
+ * 投影刷新只走 `handleRebuildGroupSeatProjections`（指针变化 / 重新解析时显式触发）。
  *
  * 返回 null 表示「本机没有要声明的」，调用方据此保持 `meta.virtualAgents` 原样
  * （不覆盖别的设备已经声明进来的）。
  */
 private fun RelayController.virtualAgentsFor(meta: GroupMeta): List<VirtualAgentMember>? {
-    val state = _state.value
-    val self = state.selfNodeId
-    // **按 (agentId, wsId) 逐条声明**：一个 agent 在 15 个项目目录里，就是 15 个可被 @ 的
-    // 对象（真机数据：`dsh-029bbbf3` 有 15 个 ws）。以前 `distinctBy { agentId }` 把它们
-    // 压成一条，于是用户只能 @ 到一个"没有具体项目"的 agent。
-    //
-    // 名字走 AgentMemberName：默认 `<agent>-<workspace>`，群内不冲突（后面再加的自动加序号）。
-    val candidates = state.agentWorkspaces.values
-        .filter { it.peerId == self }
-        .mapNotNull { ws ->
-            // **必须要求 `agentId` 非空 —— 不能用 agentKind 兜底。**
-            //
-            // 一度改成 `resolveVirtualAgentKey(ws.agentId, ws.agentId, ws.agentKind)`，想让
-            // 「agentId 空、agentKind 有值」的工作区也能被声明。真机立刻暴露：本机 25 个
-            // 工作区的 agentKind 都是 `DSH`，于是**一条入驻声明被展开成 25 条**（`va=25`），
-            // 每个工作区各生成一个名字。
-            //
-            // `virtualAgents` 装的是**用户显式入驻**的那几条（`handleExposeWorkspace` 写入），
-            // 不是「本机所有工作区清单」。这里补全它的职责是「把已声明的那几条的最新状态
-            // 带上」，不是替用户去入驻。
-            val agentId = ws.agentId?.trim()?.takeIf { it.isNotBlank() } ?: return@mapNotNull null
-            val wsId = ws.wsId.trim().takeIf { it.isNotBlank() } ?: return@mapNotNull null
-            agentId to wsId to ws
-        }
-        // 按 **(agentId, wsId)** 去重，不是只按 agentId ——
-        // 一个 agent 在多个项目目录里就是多个可 @ 的对象（KDoc 上面那段）。
-        .distinctBy { it.first }
-    if (candidates.isEmpty()) return null
-
-    // 名字冲突的判定范围 = **本群已声明的所有名字**（含别的设备），因为 @ 是群内语法。
-    val taken = meta.virtualAgents.orEmpty().map { it.name }.toMutableSet()
-    val mine = candidates.map { (key, ws) ->
-        val (agentId, wsId) = key
-        // **既有席位必须带着它原来的名字与团队字段一起重建**（F1 的修法）。
-        //
-        // 以前这里无条件重新生成名字（unique 拿全体已声明名字当池，连**自己那条**也在池里
-        // ⇒ base 被自己占用 ⇒ 追 `-2`），并且丢掉 entityType / teamMembers / allowedWorkspaces。
-        // 后者就是「本机落库有团队、广播出去的帧没有」的直接成因：保存团队后任意一次
-        // 广播（补发 / 换网 / 对端上线）都会把团队字段抹掉 —— group 帧不拒收、不报错，
-        // 两端从此各说各话。
-        //
-        // 判据：同 (host, agentId, wsId) 的旧声明存在 ⇒ 名字沿用（@ token 不能漂 ——
-        // 换名等于把别人正在打的 mention 打断），团队与白名单字段由 declarationFor 从
-        // previous 原样带来；新席位才走 unique 起名 + 默认单兵。
-        val previous = meta.virtualAgents.orEmpty().firstOrNull { va ->
-            va.hostNodeId == self && va.agentId == agentId && va.defaultWsId == wsId
-        }
-        val name = previous?.name
-            ?: AgentMemberName.unique(AgentMemberName.base(ws.agentKind, agentId, ws.wsTitle, wsId), taken)
-        taken += name
-        declarationFor(
-            agentId = agentId,
-            hostNodeId = self,
-            name = name,
-            defaultWsId = wsId,
-            previous = previous,
-        )
-    }
-    // 合并：本机的声明覆盖**同一 (agentId, wsId)** 的旧声明，其它设备的原样保留。
-    val kept = meta.virtualAgents.orEmpty().filterNot { va ->
-        va.hostNodeId == self && mine.any { it.agentId == va.agentId && it.defaultWsId == va.defaultWsId }
-    }
-    return kept + mine
+    val self = _state.value.selfNodeId
+    val hasSelfSeats = meta.virtualAgents.orEmpty().any { it.hostNodeId == self }
+    // 有本机席位 → 原样返回（withLocalExtras 判等后不会产生拷贝）；没有 → null。
+    // 两种情形都是「只携带」：广播不再改写任何声明。
+    return if (hasSelfSeats) meta.virtualAgents else null
 }
 
 /*

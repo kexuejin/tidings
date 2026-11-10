@@ -40,6 +40,7 @@ import androidx.compose.ui.unit.dp
 import com.kapp.tenon.domain.RelayController
 import com.kapp.tenon.core.protocol.ConvId
 import com.kapp.tenon.domain.exportDiagnosticsPackage
+import com.kapp.tenon.domain.groupBoundToWorkspace
 import com.kapp.tenon.core.fs.directoryUsageBytes
 import com.kapp.tenon.core.fs.readFileBytes
 import com.kapp.tenon.domain.recovery.exportRecoveryBundle
@@ -57,6 +58,8 @@ import com.kapp.tenon.feature.chat.draftOf
 import com.kapp.tenon.feature.chat.updateDraft
 import com.kapp.tenon.feature.chat.ChatScreenState
 import com.kapp.tenon.feature.chat.DraftsByConvSaver
+import com.kapp.tenon.feature.conversations.createWorkspaceGroupForNewDirectory
+import com.kapp.tenon.feature.conversations.createWorkspaceGroupWithDirectory
 import com.kapp.tenon.feature.conversations.ConversationsScreen
 import com.kapp.tenon.feature.nodes.NodesScreen
 import com.kapp.tenon.feature.scan.ScanScreen
@@ -549,9 +552,14 @@ fun RelayApp(
                         groupActions = ChatScreenGroupActions(
                             onAddGroupMembers = controller::addGroupMembers,
                             onRemoveGroupMember = controller::removeGroupMember,
-                            // 授权面板（方案 §5.1）的保存通路：手机也是「一台机器」，
-                            // 有本机工作区时同样可编辑；没有时面板只读（本机主权不变）。
-                            onExposeWorkspaces = controller::setGroupAgentWorkspaces,
+                            // 授权面板（项目目录决策稿 §4.1/§4.2）的动作通路：手机也是
+                            // 「一台机器」，可入驻自己的 agent、移除自己的席位；没有目录
+                            // 端口（非宿主）时面板对目录只读、按声明投影展示。
+                            onStationAgent = controller::addGroupAgent,
+                            onReparseSeats = controller::rebuildGroupSeatProjections,
+                            onRemoveGroupAgent = controller::removeGroupAgent,
+                            onSetProjectDirectory = controller::setGroupProjectDirectory,
+                            hostDirectoryPort = controller.hostDirectoryPort,
                             // 团队编制（方案 §4.3）：手机侧同样直连控制器。
                             onSetTeamRoster = controller::setGroupTeamDeclaration,
                             // 手机端无 DesktopExtension ⇒ 端口为 null ⇒ 执行配置只读投影。
@@ -962,14 +970,9 @@ fun RelayApp(
                                             onOpenChat = { peerId, wsId ->
                                                 selectedAgentId = peerId
                                                 val ws = agentSlice.agentWorkspaces.values.firstOrNull { it.wsId == wsId }
-                                                val boundGroup = settingsSlice.settings.groups.firstOrNull { g ->
-                                                    // 跨模块读 public 属性要先落成局部量：smart cast 只在同模块内成立。
-                                                    val wsPath = ws?.wsPath
-                                                    val wsTitle = ws?.wsTitle
-                                                    val matchPath = !wsPath.isNullOrBlank() && g.description?.contains(wsPath) == true
-                                                    val matchTitle = !wsTitle.isNullOrBlank() && g.name.contains(wsTitle)
-                                                    matchPath || matchTitle
-                                                }
+                                                // 反查绑定群只认席位声明（groupBoundToWorkspace，单源）；
+                                                // 子串反猜（简介含路径/群名含标题）已删 —— 简介不是绑定。
+                                                val boundGroup = groupBoundToWorkspace(wsId, settingsSlice.settings.groups)
                                                 if (boundGroup != null) {
                                                     openChat(com.kapp.tenon.core.protocol.ConvId.group(boundGroup.groupId))
                                                 } else if (ws != null) {
@@ -1246,8 +1249,10 @@ fun RelayApp(
                             val members = nodeSlice.peers.filter { it.online }.map { it.nodeId }
                             // 工作区群走专用入口：允许此刻一个其它设备都不在线，并把该工作区的
                             // agent 声明进群（普通 createGroup 会判「至少再选一个人」而拒收 ——
-                            // 那张对话框里根本没有可勾的人）。
-                            val gid = controller.createWorkspaceGroup(name, ws.wsId, members, ws.wsPath ?: ws.wsId)
+                            // 那张对话框里根本没有可勾的人）。建群即选项目目录：
+                            // 群建成 → 登记目录 + 设指针 → 入驻（D14；手机端端口为 null
+                            // 时只建群，目录行显示「由宿主授权」，保持现行为）。
+                            val gid = controller.createWorkspaceGroupWithDirectory(name, ws, members)
                             if (gid != null) {
                                 openChat(com.kapp.tenon.core.protocol.ConvId.group(gid))
                             }
@@ -1256,8 +1261,8 @@ fun RelayApp(
                             showCreateWsDialog = false
                             val members = nodeSlice.peers.filter { it.online }.map { it.nodeId }
                             // 「关联本地全新目录」分支：还没有工作区行（wsId = null），
-                            // 群先建出来，设备随后用分享码 / 群信息加进来。
-                            val gid = controller.createWorkspaceGroup(groupName, null, members, path)
+                            // 登记目录 → 群先建出来 → 设指针，设备随后用分享码 / 群信息加进来。
+                            val gid = controller.createWorkspaceGroupForNewDirectory(path, groupName, members, path)
                             if (gid != null) {
                                 openChat(com.kapp.tenon.core.protocol.ConvId.group(gid))
                             }
@@ -1281,7 +1286,8 @@ fun RelayApp(
                             groupPromptFor = null
                             val name = defaultGroupName
                             val members = nodeSlice.peers.filter { it.online }.map { it.nodeId }
-                            val gid = controller.createWorkspaceGroup(name, ws.wsId, members, ws.wsPath ?: ws.wsId)
+                            // 与快速建群同一条口径（建群 → 绑目录 → 入驻；手机端只建群）。
+                            val gid = controller.createWorkspaceGroupWithDirectory(name, ws, members)
                             if (gid != null) {
                                 openChat(com.kapp.tenon.core.protocol.ConvId.group(gid))
                             }

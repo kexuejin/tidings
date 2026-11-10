@@ -36,6 +36,7 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import com.kapp.tenon.domain.groupBoundToWorkspace
 import com.kapp.tenon.domain.model.WorkspaceUi
 import com.kapp.tenon.core.protocol.GroupMeta
 import com.kapp.tenon.generated.resources.Res
@@ -162,14 +163,8 @@ public fun WorkspaceGroupCreateDialog(
                     }
                 } else {
                     items(workspaces, key = { "${it.peerId}:${it.agentKey}:${it.wsId}" }) { ws ->
-                        val boundGroup = groups.firstOrNull { g ->
-                            // 跨模块 public 属性先落成局部量，否则 smart cast 不成立。
-                            val wsPath = ws.wsPath
-                            val wsTitle = ws.wsTitle
-                            val matchPath = !wsPath.isNullOrBlank() && g.description?.contains(wsPath) == true
-                            val matchTitle = !wsTitle.isNullOrBlank() && g.name.contains(wsTitle)
-                            matchPath || matchTitle
-                        }
+                        // 反查绑定群只认席位声明（groupBoundToWorkspace，单源）；子串反猜已删（F2）。
+                        val boundGroup = groupBoundToWorkspace(ws.wsId, groups)
                         WorkspaceItemCard(
                             workspace = ws,
                             boundGroup = boundGroup,

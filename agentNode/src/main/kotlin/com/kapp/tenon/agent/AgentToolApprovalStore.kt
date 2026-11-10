@@ -62,6 +62,12 @@ class AgentToolApprovalStore(private val file: File) {
     data class Rule(
         val nodeId: String,
         val agentKey: String?,
+        /**
+         * 工作区维度（F3/C5，更严档裁决）：**null 只命中 null** —— 授予来源会话
+         * 无 ws 时记 null，只对同样无 ws 的派单生效；不存在「null = 全部工作区」
+         * 的分支。存量的三参旧规则（无 wsId 键）随开发期清库重配消失。
+         */
+        val wsId: String?,
         val tool: String,
         val grantedAt: Long,
         val grantedBy: String?,
@@ -104,19 +110,23 @@ class AgentToolApprovalStore(private val file: File) {
      * `true` = 这台设备、这个 agent、这个 tool 已经免批。三个参数任一为空/空串 ⇒ `false`：
      * 判定缺信息时**只能更严**（问一次比替人批准便宜得多）。
      */
-    fun isAlwaysApproved(nodeId: String, agentKey: String?, tool: String?): Boolean {
+    fun isAlwaysApproved(nodeId: String, agentKey: String?, tool: String?, wsId: String? = null): Boolean {
         val node = nodeId.trim().takeIf { it.isNotEmpty() } ?: return false
         val name = tool?.trim()?.takeIf { it.isNotEmpty() } ?: return false
         val agent = agentKey?.trim()?.takeIf { it.isNotEmpty() }
+        val ws = wsId?.trim()?.takeIf { it.isNotEmpty() }
         return rwLock.read {
             rules.any { r ->
-                r.nodeId == node && r.tool == name && (r.agentKey == null || r.agentKey == agent)
+                r.nodeId == node && r.tool == name &&
+                    (r.agentKey == null || r.agentKey == agent) &&
+                    // **null 只命中 null**（F3 更严档）：ws 维度取自授予来源会话。
+                    r.wsId == ws
             }
         }
     }
 
     /**
-     * 记下一条免批规则（幂等：同 (nodeId, agentKey, tool) 重入只刷新时间与授权人）。
+     * 记下一条免批规则（幂等：同 (nodeId, agentKey, wsId, tool) 重入只刷新时间与授权人）。
      *
      * @return false = 参数不成立（空 tool / 空 nodeId），**什么都没改** ——
      *   不静默写成"通配"，那会把一条无名规则变成全放行。
@@ -127,13 +137,15 @@ class AgentToolApprovalStore(private val file: File) {
         tool: String?,
         grantedBy: String? = null,
         at: Long,
+        wsId: String? = null,
     ): Boolean {
         val node = nodeId.trim().takeIf { it.isNotEmpty() } ?: return false
         val name = tool?.trim()?.takeIf { it.isNotEmpty() } ?: return false
         val agent = agentKey?.trim()?.takeIf { it.isNotEmpty() }
+        val ws = wsId?.trim()?.takeIf { it.isNotEmpty() }
         rwLock.write {
-            rules.removeAll { it.nodeId == node && it.agentKey == agent && it.tool == name }
-            rules += Rule(node, agent, name, at, grantedBy)
+            rules.removeAll { it.nodeId == node && it.agentKey == agent && it.tool == name && it.wsId == ws }
+            rules += Rule(node, agent, ws, name, at, grantedBy)
             trimLocked()
             persistLocked()
         }
@@ -172,11 +184,11 @@ class AgentToolApprovalStore(private val file: File) {
      *
      * 所以面板的逐条撤销走这里；[revoke] 保留原语义给「整批撤」用。
      */
-    fun revokeExactly(nodeId: String, agentKey: String?, tool: String): Int {
+    fun revokeExactly(nodeId: String, agentKey: String?, tool: String, wsId: String? = null): Int {
         var removed = 0
         rwLock.write {
             val doomed = rules.filter {
-                it.nodeId == nodeId && it.agentKey == agentKey && it.tool == tool
+                it.nodeId == nodeId && it.agentKey == agentKey && it.wsId == wsId && it.tool == tool
             }
             removed = doomed.size
             rules.removeAll(doomed.toSet())
@@ -202,6 +214,7 @@ class AgentToolApprovalStore(private val file: File) {
                 Rule(
                     nodeId = nodeId,
                     agentKey = o.str("agentKey")?.takeIf { it.isNotBlank() },
+                    wsId = o.str("wsId")?.takeIf { it.isNotBlank() },
                     tool = tool,
                     grantedAt = (o["grantedAt"] as? JsonPrimitive)?.longOrNull ?: 0L,
                     grantedBy = o.str("grantedBy"),
@@ -219,6 +232,7 @@ class AgentToolApprovalStore(private val file: File) {
                     add(buildJsonObject {
                         put("nodeId", JsonPrimitive(r.nodeId))
                         r.agentKey?.let { put("agentKey", JsonPrimitive(it)) }
+                        r.wsId?.let { put("wsId", JsonPrimitive(it)) }
                         put("tool", JsonPrimitive(r.tool))
                         put("grantedAt", JsonPrimitive(r.grantedAt))
                         r.grantedBy?.let { put("grantedBy", JsonPrimitive(it)) }

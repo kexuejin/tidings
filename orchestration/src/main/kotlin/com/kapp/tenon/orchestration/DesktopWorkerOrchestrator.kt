@@ -79,6 +79,18 @@ class DesktopWorkerOrchestrator(
      * null = 未装配 ⇒ `@组员` 不进团队分支（行为与从前逐字一致）。
      */
     private val teamExecutionStore: TeamExecutionStore? = null,
+    /**
+     * 群 → 项目目录 dirId（D16，执行档主键的一半）。null/缺省 = 没装配 ⇒ 群分支
+     * 按 NotConfigured 退单。装配方给 HostDirectoryStore.pointerOf。
+     */
+    private val groupDirIdOf: (groupId: String) -> String? = { null },
+    /**
+     * 节点级目录白名单（D10/D15）：`(path, requireWrite) -> 是否放行`。**默认 deny**
+     * 在 store 里实现（空白名单 = 全拒）；这里 null = 未装配（测试与老装置），
+     * 行为与从前一致。装配后：未登记的路径一律不许执行 —— fail-closed，
+     * 不回落任何别的目录（回落 = 换一个仓写字，比拒绝更糟）。
+     */
+    private val pathAllowed: ((path: String, requireWrite: Boolean) -> Boolean)? = null,
     private val detailedAutoPlanner: (suspend (goal: String, available: Set<String>) -> PlannerPlan?)? = null,
 ) {
     /**
@@ -1225,7 +1237,7 @@ class DesktopWorkerOrchestrator(
         val store = teamExecutionStore ?: return TeamExecutionResolver.Target.None
         val st = controller.state.value
         val group = groupId.let { id -> st.settings.groups.firstOrNull { it.groupId == id } }
-        return TeamExecutionResolver(store).resolve(
+        return TeamExecutionResolver(store, groupDirIdOf).resolve(
             groupId = groupId,
             mentionedKey = mentionedAgentKey,
             group = group,
@@ -2564,11 +2576,8 @@ class DesktopWorkerOrchestrator(
      * 1. **群声明的默认工作区**：`virtualAgents[].defaultWsId` 对工作区表做精确 id 匹配
      *    （[RelayUiState.workspaceOfGroup]，产品语义上的"这个群绑了哪个项目"）；
      * 2. **老装置**：工作区行的 `wsId` 就是群 id（建群时"关联本地目录"那条路径留下的形状）；
-     * 2b. **群简介声明的目录**：建群「关联本地目录」会把绝对路径写进 `description`
-     *     （真机台账：poemread / teahouse-mobile 协同群都是）。与已宣告工作区的
-     *     `wsPath` **精确相等**才认 —— 群自己声明过的仓，不是猜。席位没声明
-     *     `defaultWsId` 的群（真机现场：teahouse 协同群的 DSH 席位）就靠这一段，
-     *     否则兜底卡的「降级为本机执行」必退单 `no git workspace bound to group`。
+     * 群绑定只有**席位声明**这一条来源（D5/F2）：「群简介里写了路径 = 绑定了目录」
+     * 的 2b 推导已删 —— 简介不是绑定，指针才是；席位投影由指针流程写入。
      *
      * 曾经还有第三段兜底「本机第一个工作区」。真机实测中出现过：同一个群连发
      * 两条派单，一条落在 `~/e2e-weather-app`、一条落在 `~/weather-relay` —— 因为
@@ -2577,6 +2586,14 @@ class DesktopWorkerOrchestrator(
      * 兜底的语义从来不是"猜一个仓"，是"没有就退单"。
      */
     fun resolveWorkspacePath(groupId: String?, wsId: String? = null): String? {
+        val hit = resolveWorkspacePathCandidate(groupId, wsId) ?: return null
+        // **节点级白名单（D10/D15）**：目录没被机主显式放行 ⇒ 终局退单，**不回落**
+        // 任何别的推导 —— 换一个仓写字比「不执行」更不可接受。
+        if (pathAllowed?.invoke(hit, true) == false) return null
+        return hit
+    }
+
+    private fun resolveWorkspacePathCandidate(groupId: String?, wsId: String? = null): String? {
         val state = controller.state.value
         // 0. 显式指定的 wsId（例如 1:1 对话挂接的项目指针）。未命中 ⇒ **终局退单**：
         //    这里曾是落穿点——指针无效会掉进群绑定/单工作区推导，单工作区宿主上
@@ -2592,14 +2609,6 @@ class DesktopWorkerOrchestrator(
             val declared = state.workspaceOfGroup(groupId)
             val legacy = state.agentWorkspaces.values.firstOrNull { it.wsId == groupId }
             val path = (declared ?: legacy)?.wsPath?.takeIf { it.isNotBlank() }
-            if (path != null && isGitRepo(path)) return path
-        }
-        // 2b. 群简介声明过的目录（判据见 KDoc）：精确匹配本机已宣告工作区的 wsPath。
-        if (groupId != null) {
-            val desc = state.settings.groups
-                .firstOrNull { it.groupId == groupId }?.description?.takeIf { it.isNotBlank() }
-            val declared = desc?.let { d -> state.agentWorkspaces.values.firstOrNull { it.wsPath == d } }
-            val path = declared?.wsPath?.takeIf { it.isNotBlank() }
             if (path != null && isGitRepo(path)) return path
         }
         // 3. 宿主仅绑定 1 个工作区时自然推导（1:1 直连场景自动锁定）

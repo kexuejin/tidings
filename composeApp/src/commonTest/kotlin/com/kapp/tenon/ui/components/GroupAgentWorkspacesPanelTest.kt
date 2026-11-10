@@ -2,7 +2,8 @@
 
 package com.kapp.tenon.ui.components
 
-import com.kapp.tenon.core.protocol.GroupWorkspaceInfo
+import com.kapp.tenon.core.protocol.DispatchPreflight
+import com.kapp.tenon.core.protocol.EntityTypes
 import com.kapp.tenon.core.protocol.TeamMemberInfo
 import com.kapp.tenon.core.protocol.VirtualAgentMember
 import com.kapp.tenon.domain.model.WorkspaceUi
@@ -13,16 +14,16 @@ import kotlin.test.assertNull
 import kotlin.test.assertTrue
 
 /**
- * 群设置授权面板（`SetGroupAgentWorkspacesDialog`，方案 §5.1，M3 交付 3）的判据。
+ * 项目目录授权与入驻面板（`SetGroupAgentWorkspacesDialog`，项目目录决策稿 §4.1/§4.2）
+ * 的判据。规格的硬要求，各对应一次「面板说了谎」的现场：
  *
- * 规格的四条硬要求，各对应一次「面板说了谎」的现场：
- * 1. **仅宿主可编辑**：授权决定权在机主（§5.1）—— 非宿主只读；
- * 2. **非宿主不见路径**：路径不进协议（M1-T3 收口），面板是非宿主能看到的唯一
- *    「授权」面 —— 它若把宿主路径印出来，隐私收口就白做了；
- * 3. **保存一次成像**：勾选集合就是最终集合，一次 rev+1（M1-T4 的
- *    `handleSetGroupAgentWorkspaces` 契约），不做逐条 toggle 的中间态广播；
- * 4. **读侧不编**：非宿主的工作区行来自声明投影（`allowedWorkspaces` /
- *    `defaultWsId`），本地没有的标题退 wsId 本身，绝不现编一个名字。
+ * 1. **仅宿主可编辑**：入驻/去暴露/移除/设指针是机主主权 —— 非宿主（无目录端口）
+ *    只读，动作按钮一律不画；
+ * 2. **入驻清单按本机 agent 去**：行来自本机工作区台账（`resolveVirtualAgentKey`
+ *    去重），对上本机席位；同一 agent 多工作区宣告 = 一行（D6）；
+ * 3. **状态三态**：未入驻 / 已解析（席位 + 投影非空）/ 不可执行（席位 + 投影空）；
+ *    目录项的判据口径单源 [DispatchPreflight.evaluate]（§4.3 preflight 四问）；
+ * 4. **不编名字**：已入驻行用席位名（@ token 不漂），未入驻退 agentKind，再退身份键。
  */
 class GroupAgentWorkspacesPanelTest {
 
@@ -31,15 +32,18 @@ class GroupAgentWorkspacesPanelTest {
 
     private fun workspace(
         wsId: String,
+        agentId: String? = "dsh",
+        kind: String? = "DSH",
         title: String? = null,
         path: String? = null,
     ) = WorkspaceUi(
         peerId = self,
-        agentKey = "dsh",
+        agentKey = agentId,
+        agentId = agentId,
         wsId = wsId,
         wsTitle = title,
         wsPath = path,
-        agentKind = "DSH",
+        agentKind = kind,
         online = true,
         sessionCount = null,
         at = 0L,
@@ -47,208 +51,108 @@ class GroupAgentWorkspacesPanelTest {
 
     private fun member(
         host: String,
+        agentId: String,
         name: String,
         defaultWsId: String? = null,
-        allowed: List<GroupWorkspaceInfo> = emptyList(),
         teamMembers: List<TeamMemberInfo> = emptyList(),
     ) = VirtualAgentMember(
-        agentId = name,
+        agentId = agentId,
         hostNodeId = host,
         name = name,
-        entityType = if (teamMembers.isEmpty()) "single" else "team",
+        entityType = if (teamMembers.isEmpty()) EntityTypes.SINGLE else EntityTypes.TEAM,
         teamMembers = teamMembers,
-        allowedWorkspaces = allowed,
+        allowedWorkspaces = emptyList(),
         defaultWsId = defaultWsId,
     )
 
-    // ── 行构造：宿主视角 ─────────────────────────────────────────────────
+    // ── 入驻清单的行集 ───────────────────────────────────────────────────
 
     @Test
-    fun hostRowsCarryPathsAndAuthorization() {
-        val rows = groupAuthWorkspaceRows(
+    fun stationRowsComeFromLocalWorkspacesDedupedByAgentKey() {
+        val rows = groupAgentStationRows(
             localWorkspaces = listOf(
-                workspace("ws-a", title = "Teahouse Mobile", path = "/srv/teahouse-mobile"),
-                workspace("ws-b", title = "Teahouse Backend", path = "/srv/teahouse-backend"),
+                workspace("ws-a", agentId = "dsh", kind = "DSH"),
+                // 同一个 agent 的第二个工作区宣告 = 一行（不是两个可入驻对象）。
+                workspace("ws-b", agentId = "dsh", kind = "DSH"),
+                workspace("ws-c", agentId = null, kind = "opencode"),
             ),
-            declaredAgents = emptyList(),
-            exposedWsIds = setOf("ws-a"),
-            defaultWsId = "ws-a",
-        )
-        assertEquals(listOf("ws-a", "ws-b"), rows.map { it.wsId })
-        assertEquals("/srv/teahouse-mobile", rows[0].path, "宿主自己的路径：面板给机主看（不进协议）")
-        assertTrue(rows[0].authorized)
-        assertTrue(rows[0].isDefault, "群默认落在声明里 defaultWsId 指的那一行")
-        assertTrue(!rows[1].authorized)
-        assertTrue(!rows[1].isDefault)
-    }
-
-    @Test
-    fun hostRowsFallBackTitleToWsIdAndNeverInventOne() {
-        val rows = groupAuthWorkspaceRows(
-            localWorkspaces = listOf(workspace("ws-e9b18063", title = null, path = "/srv/x")),
-            declaredAgents = emptyList(),
-            exposedWsIds = emptySet(),
-            defaultWsId = null,
-        )
-        assertEquals("ws-e9b18063", rows.single().title, "没有标题就退 wsId，不现编一个")
-    }
-
-    // ── 行构造：非宿主（只读）视角 ───────────────────────────────────────
-
-    @Test
-    fun nonHostRowsComeFromDeclarationsWithoutPaths() {
-        val rows = groupAuthWorkspaceRows(
-            localWorkspaces = emptyList(),
             declaredAgents = listOf(
-                member(
-                    host = foreign,
-                    name = "dev-lead",
-                    defaultWsId = "ws-a",
-                    allowed = listOf(
-                        GroupWorkspaceInfo(wsId = "ws-a", title = "Teahouse Mobile"),
-                        GroupWorkspaceInfo(wsId = "ws-b", title = "Teahouse Backend"),
-                    ),
-                ),
-            ),
-            exposedWsIds = setOf("ws-a"),
-            defaultWsId = "ws-a",
-        )
-        assertEquals(listOf("ws-a", "ws-b"), rows.map { it.wsId })
-        assertEquals("Teahouse Mobile", rows[0].title, "标题来自声明（随 group.info 广播）")
-        assertNull(rows[0].path, "非宿主不画路径：路径本来就不进协议")
-        assertNull(rows[1].path)
-        assertTrue(rows[0].authorized)
-        assertTrue(rows[1].authorized, "声明里 allowedWorkspaces 的条目都是授权过的")
-    }
-
-    @Test
-    fun nonHostRowsCoverTheDefaultWsEvenWhenTheWhitelistIsEmpty() {
-        // M1 模型里 allowedWorkspaces 常为空、只有 defaultWsId：读侧把 defaultWsId
-        // 也算进白名单 —— 否则非宿主看到的授权面板是空的，而胶囊却明明能选工作区。
-        val rows = groupAuthWorkspaceRows(
-            localWorkspaces = emptyList(),
-            declaredAgents = listOf(member(host = foreign, name = "dev-lead", defaultWsId = "ws-a")),
-            exposedWsIds = emptySet(),
-            defaultWsId = null,
-        )
-        assertEquals(listOf("ws-a"), rows.map { it.wsId })
-        assertEquals("ws-a", rows.single().title, "声明没带标题（连本机工作区表也没有）：退 wsId")
-        assertTrue(rows.single().authorized, "defaultWsId 本身就是一条授权事实")
-    }
-
-    @Test
-    fun hostRowsUniteLocalWorkspacesWithForeignDeclarations() {
-        // 宿主打开面板：本机工作区可编辑；别的设备声明进来的行也要看得见（只读），
-        // 否则「群里还有谁声明了什么」在这台机器上无迹可寻。
-        val rows = groupAuthWorkspaceRows(
-            localWorkspaces = listOf(workspace("ws-a", title = "Alpha", path = "/srv/alpha")),
-            declaredAgents = listOf(
-                member(host = foreign, name = "remote", defaultWsId = "ws-z"),
-            ),
-            exposedWsIds = setOf("ws-a", "ws-z"),
-            defaultWsId = "ws-a",
-        )
-        assertEquals(listOf("ws-a", "ws-z"), rows.map { it.wsId })
-        assertNull(rows[1].path, "外来声明的路径本机就没有")
-        assertTrue(rows[1].authorized)
-        assertTrue(!rows[1].fromLocalMachine, "外来行不可勾：保存集合只装本机声明")
-        assertTrue(rows[0].fromLocalMachine)
-    }
-
-    // ── agent 行 ─────────────────────────────────────────────────────────
-
-    @Test
-    fun agentRowsShowTeamShapeAndMembership() {
-        val rows = groupAuthAgentRows(
-            declaredAgents = listOf(
-                member(host = self, name = "dev-lead", defaultWsId = "ws-a"),
-                member(
-                    host = foreign,
-                    name = "gpu-team",
-                    defaultWsId = "ws-b",
-                    allowed = listOf(GroupWorkspaceInfo("ws-b", "Backend")),
-                    teamMembers = listOf(
-                        TeamMemberInfo("coder", "coder", "FullStack"),
-                        TeamMemberInfo("tester", "tester", "QA"),
-                        TeamMemberInfo("reviewer", "reviewer", "Review"),
-                    ),
-                ),
+                member(host = self, agentId = "dsh", name = "dsh-coder", defaultWsId = "ws-a"),
             ),
             selfNodeId = self,
-            wsTitleOf = { wsId -> if (wsId == "ws-a") "Alpha" else null },
         )
-        assertEquals(listOf("dev-lead", "gpu-team"), rows.map { it.name })
-        assertTrue(!rows[0].isTeam)
-        assertTrue(rows[0].hostIsSelf)
-        assertEquals("Alpha", rows[0].defaultWsTitle)
-        assertTrue(rows[1].isTeam, "teamMembers 非空就是团队（entityType 只是声明，组员清单是事实）")
-        assertEquals(3, rows[1].teamMemberCount)
-        assertTrue(!rows[1].hostIsSelf)
-        assertEquals("Backend", rows[1].defaultWsTitle, "defaultWsId 在声明白名单里时标题随声明走")
+        assertEquals(listOf("dsh", "opencode"), rows.map { it.agentId }, "按 resolveVirtualAgentKey 去重")
+        assertEquals("dsh-coder", rows[0].displayToken, "已入驻行显示席位名（@ token 不漂）")
+        assertEquals("opencode", rows[1].displayToken, "未入驻行退 agentKind，不编名字")
+        assertTrue(rows[0].stationed)
+        assertTrue(rows[0].resolved, "席位 + defaultWsId 非空 = 已解析")
+        assertFalse(rows[1].stationed)
     }
 
     @Test
-    fun agentRowWithoutWorkspaceTitleFallsBackToNothing() {
-        val rows = groupAuthAgentRows(
-            declaredAgents = listOf(member(host = self, name = "solo", defaultWsId = "ws-unknown")),
-            selfNodeId = self,
-            wsTitleOf = { null },
-        )
-        assertNull(rows.single().defaultWsTitle, "查不到标题就不显示，不把 wsId 当名字编")
-    }
-
-    // ── 保存契约 ─────────────────────────────────────────────────────────
-
-    @Test
-    fun initialCheckedSetMirrorsTheCurrentAuthorization() {
-        // 面板打开时的勾选 = 本机当前声明（exposedWsIds）。保存 = 把勾选集合整体
-        // 交给 handleSetGroupAgentWorkspaces（一次成像），不做差集运算 ——
-        // 差集属于域层：调用方交最终集合，控制器一次 rev+1、一次广播。
-        val rows = groupAuthWorkspaceRows(
-            localWorkspaces = listOf(
-                workspace("ws-a", title = "Alpha"),
-                workspace("ws-b", title = "Beta"),
+    fun seatWithoutResolvedPointerIsUnexposedNotResolved() {
+        val rows = groupAgentStationRows(
+            localWorkspaces = listOf(workspace("ws-a", agentId = "dsh")),
+            declaredAgents = listOf(
+                member(host = self, agentId = "dsh", name = "dsh-assistant", defaultWsId = null),
             ),
-            declaredAgents = emptyList(),
-            exposedWsIds = setOf("ws-b"),
-            defaultWsId = null,
+            selfNodeId = self,
         )
-        assertEquals(setOf("ws-b"), initialCheckedWsIds(rows))
+        val row = rows.single()
+        assertTrue(row.stationed)
+        assertFalse(row.resolved, "席位在、投影空 = 不可执行（未暴露），不是已解析")
+        assertEquals(SeatDirectoryStatus.UNEXPOSED, seatDirectoryStatusOf(row.seat))
     }
 
-    @Test
-    fun emptySelectionIsAValidSave() {
-        // 全不勾 = 撤掉本机全部声明（M1-T4 测试钉过域层这一档）：面板必须允许
-        // 「保存一个空集合」，而不是把保存按钮禁掉 —— 撤回是机主主权。
-        assertEquals(emptySet(), initialCheckedWsIds(emptyList()))
-    }
+    // ── 目录状态口径（preflight 四问的「目录」项，单源）─────────────────
 
     @Test
-    fun groupDefaultFollowsTheFirstDeclaration() {
-        // 群默认的读侧判据：声明表里第一条带 defaultWsId 的声明（与 workspaceOfGroup
-        // 的解析方向一致 —— 精确 id 匹配，一个字符都不猜）。
+    fun directoryStatusFollowsThePreflightAnswer() {
+        // 未入驻不进 preflight（还没有执行点可言）。
+        assertEquals(SeatDirectoryStatus.NOT_STATIONED, seatDirectoryStatusOf(null))
         assertEquals(
-            "ws-b",
-            groupDefaultWsIdOf(
-                listOf(
-                    member(host = self, name = "a", defaultWsId = null),
-                    member(host = foreign, name = "b", defaultWsId = "ws-b"),
-                ),
-            ),
+            SeatDirectoryStatus.RESOLVED,
+            seatDirectoryStatusOf(member(host = self, agentId = "dsh", name = "dsh", defaultWsId = "ws-a")),
         )
-        assertNull(groupDefaultWsIdOf(listOf(member(host = self, name = "a"))), "没有任何声明带默认 ⇒ 没有群默认")
-        assertNull(groupDefaultWsIdOf(emptyList()))
+        assertEquals(
+            SeatDirectoryStatus.UNEXPOSED,
+            seatDirectoryStatusOf(member(host = self, agentId = "dsh", name = "dsh", defaultWsId = null)),
+        )
+        // 判据确实走的 DispatchPreflight：把解析答案直接问一遍，两处必须同答。
+        val answer = DispatchPreflight.evaluate(
+            hostOnline = true,
+            agentPresent = true,
+            directoryResolved = false,
+        ).first { it.key == DispatchPreflight.Key.DIRECTORY_RESOLVED }
+        assertFalse(answer.ok, "未暴露 = 目录一问不 ok（与 seatDirectoryStatusOf 的 UNEXPOSED 同答）")
     }
 
-    // ── 只读态不画保存按钮（M5 真机缺陷的回归判据）──────────────────────
+    // ── 只读语义（非宿主不见动作）───────────────────────────────────────
 
     @Test
-    fun readOnlyPanelHasNoSaveEntry() {
-        // 真机现场：面板已经写了「本机不是这台群的工作区宿主，面板只读」，
-        // 「保存并广播」却照常渲染 —— 明说只读又给保存入口，比不说更糟。
-        // 判据：可编辑 = 有保存通路 **且** 本机有工作区表（不是宿主时后者为空）。
-        assertFalse(groupAuthEditable(hasSaveChannel = true, localWorkspaceCount = 0))
-        assertFalse(groupAuthEditable(hasSaveChannel = false, localWorkspaceCount = 3))
-        assertTrue(groupAuthEditable(hasSaveChannel = true, localWorkspaceCount = 1))
+    fun panelIsEditableOnlyForTheHostWithAnActionChannel() {
+        // 真机现场（M5 的同款缺陷形状）：明说只读又给保存入口，比不说更糟。
+        // 判据：可编辑 = 有目录端口 **且** 有入驻动作通路，缺一不可。
+        assertFalse(groupAuthEditable(hasDirectoryPort = false, hasActionChannel = true), "非宿主（手机）只读")
+        assertFalse(groupAuthEditable(hasDirectoryPort = true, hasActionChannel = false), "预览/截图夹具只读")
+        assertTrue(groupAuthEditable(hasDirectoryPort = true, hasActionChannel = true))
+    }
+
+    @Test
+    fun foreignSeatsStayOutOfTheStationingList() {
+        val rows = groupAgentStationRows(
+            localWorkspaces = listOf(workspace("ws-a", agentId = "dsh")),
+            declaredAgents = listOf(
+                member(host = self, agentId = "dsh", name = "dsh-coder", defaultWsId = "ws-a"),
+                member(host = foreign, agentId = "gemini", name = "gemini-lead", defaultWsId = "ws-z"),
+            ),
+            selfNodeId = self,
+        )
+        assertEquals(listOf("dsh"), rows.map { it.agentId }, "入驻清单只收本机 agent（外来席位单独只读展示）")
+        assertEquals(self, rows.single().seat?.hostNodeId, "对上的席位必须是本机席位")
+        assertNull(
+            rows.firstOrNull { it.agentId == "gemini" },
+            "外来席位不进入驻清单（不可替别人声明/撤回）",
+        )
     }
 }

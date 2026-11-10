@@ -75,13 +75,22 @@ class VirtualAgentDeclarationGuardTest {
             GuardSourceScan.stripComments(core).contains("fun declarationFor("),
             "declarationFor 必须定义在 core（四端共享；app 不该自己再写一份）",
         )
+        // 两条声明构造路径（D6 之后：建群随群的席位 / 入驻新增；广播重建只携带、
+        // 不再构造 —— 自动生成已删）。都必须走 declarationFor ——
+        // 少一处就是少一处团队字段回填。
         val groups = GuardSourceScan.read("app/src/commonMain/kotlin/com/kapp/tenon/domain/RelayControllerGroupsComponent.kt")
-        val live = GuardSourceScan.stripComments(groups)
         assertEquals(
-            3,
-            Regex("declarationFor\\(").findAll(live).count(),
-            "三条声明构造路径（建群席位 / 授权面板新增 / 广播重建）都必须走 declarationFor —— " +
-                "少一处就是少一处团队字段回填",
+            1,
+            Regex("declarationFor\\(").findAll(GuardSourceScan.stripComments(groups)).count(),
+            "建群随群的席位构造必须走 declarationFor（团队字段回填的唯一入口）",
+        )
+        val projectDirectory = GuardSourceScan.read(
+            "app/src/commonMain/kotlin/com/kapp/tenon/domain/RelayControllerProjectDirectoryComponent.kt",
+        )
+        assertEquals(
+            1,
+            Regex("declarationFor\\(").findAll(GuardSourceScan.stripComments(projectDirectory)).count(),
+            "入驻新增的席位构造必须走 declarationFor（旧授权面板的构造点已随勾选流删除）",
         )
     }
 

@@ -284,7 +284,7 @@ class DesktopWorkerOrchestrator1to1DispatchTest {
      * **精确相等**才认，不匹配就如实退单，不猜。
      */
     @Test
-    fun resolveWorkspacePathMatchesGroupDescriptionToADeclaredWorkspace() = runBlocking {
+    fun groupDescriptionIsNoLongerABindingCriterion() = runBlocking {
         val tempRoot = File(System.getProperty("java.io.tmpdir"), "tenon-test-ws-" + System.nanoTime())
         val repo = File(tempRoot, "repo").apply { mkdirs() }
         ProcessBuilder("git", "init", repo.absolutePath).start().waitFor()
@@ -346,15 +346,17 @@ class DesktopWorkerOrchestrator1to1DispatchTest {
                 agentKind = "codex",
             )
 
-            assertEquals(
-                repo.absolutePath,
+            // F2/D5：群简介**不再是绑定判据** —— 即使简介与已宣告工作区的 wsPath 逐字
+            // 相等也不解析（绑定看席位声明/指针投影，不看群简介文案）。席位没带
+            // defaultWsId 的群在这里如实退单；想让它可执行，走指针投影写回声明。
+            assertNull(
                 orch.resolveWorkspacePath(groupId = groupId, wsId = null),
-                "群简介声明的目录精确命中已宣告工作区时必须解析出该仓（判据 2b）",
+                "群简介写的目录不再参与解析（2b 已删，F2）：绑定只认席位声明",
             )
             // 描述与任何工作区路径都不相等 ⇒ 如实退单（返回 null），不做包含/前缀等模糊匹配。
             assertNull(
                 orch.resolveWorkspacePath(groupId = "g-never-created", wsId = null),
-                "群不存在（无从读简介）时必须退单 —— 多工作区宿主上没有任何确定性判据可落",
+                "群不存在（无从读声明）时必须退单 —— 多工作区宿主上没有任何确定性判据可落",
             )
 
             controller.stop()

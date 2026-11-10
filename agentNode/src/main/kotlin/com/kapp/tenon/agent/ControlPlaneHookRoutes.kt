@@ -195,7 +195,13 @@ internal fun ControlPlane.agentHookApproval(exchange: HttpExchange) {
     }
     val peer = resolveHookPeer(exchange, obj) ?: return
     val agentKey = "antigravity"
-    if (tool != null && toolApprovals.isAlwaysApproved(nodeId = peer, agentKey = agentKey, tool = tool)) {
+    if (tool != null && toolApprovals.isAlwaysApproved(
+        nodeId = peer,
+        agentKey = agentKey,
+        // F3（C5）：hook 通道同样按会话工作区查免批（null 只命中 null）。
+        wsId = hookSessionId?.let { sessions.sessionOrNull(peer, it)?.wsId },
+        tool = tool,
+    )) {
         respond(exchange, 200, buildJsonObject {
             put("decision", "allow")
             put("reason", "matched an always-allow rule for tool=$tool")

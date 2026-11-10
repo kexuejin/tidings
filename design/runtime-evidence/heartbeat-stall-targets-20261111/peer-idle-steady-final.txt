@@ -1,0 +1,20 @@
+# peer-idle-stays-online · 第六判据最终包持续稳态复跑（pid 25441，装包后连续运行 8 分钟）
+# sampled at device clock 2026-11-11T01:10:27  (epoch 1794330627)
+
+## diag/link.json（手机 files/relay/diag/link.json，run-as 读取）
+peers=12  online=1  linkConnected=1  linkTotal=1  linkEnabled=True
+updatedAt=1794330626986 -> 2026-11-11T01:10:26.986000（与采样时刻相差 1s，即文件在刷新）
+online peer: address=192.168.2.82 linkConnected=True carrier=tls dialAttempts=1 dialFailures=0 dialLastTarget=192.168.2.82:17880 closeCount=0 pinSource=pairing lastError=None
+
+## 翻面证据（logcat -d -v time -t 8000，时间窗=设备时钟）
+[sweep] offline 行数 = 0
+transport restart 行数 = 0
+
+## 心跳稳态（同一 pid 的 entry 行去重）
+entry 行数 = 21，去重后 3 种：
+  [heartbeat] entry targets=0 sent=0 manual=2 linked=0 skipped=12 failed=[192.168.2.82:17878, 192.168.2.82:17886]
+  [heartbeat] entry targets=1 sent=1 manual=2 linked=0 skipped=12 failed=[192.168.2.82:17886]
+  [heartbeat] entry targets=1 sent=1 manual=2 linked=1 skipped=11 failed=[192.168.2.82:17886]
+
+## 判定：PASS
+依据：最近窗口内 [sweep] offline=0（无翻面）且链路在册对端（1 个）全部 online —— 不是空集假绿（peers=12 里有 11 个本来就未在册链路）。

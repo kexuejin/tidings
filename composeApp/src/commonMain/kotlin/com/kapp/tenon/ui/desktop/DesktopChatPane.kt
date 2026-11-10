@@ -367,15 +367,20 @@ public fun ChatPane(
                 // `groupParticipantRows` 找不到任何 agent，整个「入驻智能体」段落消失。
                 // 真机反馈：同一个群，手机端能看到 agent、桌面端一个都看不到。
                 identityContext = senderContext(ConvId.group(group.groupId), chatSlice, agentSlice, nodeSlice, settingsSlice),
-                // 「添加智能体」= 暴露**本机项目**（与手机端同一份语义）。
+                // 授权面板动作通路（入驻 / 去暴露 / 移除席位 / 设目录指针）。
                 localWorkspaces = agentSlice.agentWorkspaces.values.filter { it.peerId == settingsSlice.settings.nodeId },
-                onExposeWorkspaces = { chosen ->
-                    // 一次成像：chosen 就是**最终集合**（旧实现先撤再增、逐条调用）。
-                    controller.setGroupAgentWorkspaces(group.groupId, chosen)
-                },
-                // 团队编制（§4.3）：对话框收 (defaultWsId, roster)，这里补群 id。桌面不特殊化。
-                onSetTeamRoster = { defaultWsId, roster ->
-                    controller.setGroupTeamDeclaration(group.groupId, defaultWsId, roster)
+                onStationAgent = { agentId, duty -> controller.addGroupAgent(group.groupId, agentId, duty) },
+                onReparseSeats = { controller.rebuildGroupSeatProjections(group.groupId) },
+                onRemoveGroupAgent = { agentId -> controller.removeGroupAgent(group.groupId, agentId) },
+                onSetProjectDirectory = { dirId -> controller.setGroupProjectDirectory(group.groupId, dirId) },
+                hostDirectoryPort = controller.hostDirectoryPort,
+                // 非宿主目录行的声明投影（路径不上屏；宿主行读本机指针，用不到它）。
+                declaredDirectoryTitle = com.kapp.tenon.domain.workspaceOfGroup(
+                    group.groupId, agentSlice, settingsSlice,
+                )?.wsTitle,
+                // 团队编制（§4.3）：对话框收 (agentId, roster)，这里补群 id。桌面不特殊化。
+                onSetTeamRoster = { agentId, roster ->
+                    controller.setGroupTeamDeclaration(group.groupId, agentId, roster)
                 },
                 teamExecutionPort = controller.teamExecutionPort,
             )

@@ -1,0 +1,135 @@
+{
+  "case": "A32 heartbeat stall criterion bound to live sessions + luciolaPort survives profile refresh",
+  "device": "Pixel 6 (debug) + source-built headless desktop host",
+  "control_plane": "127.0.0.1:8788",
+  "before": {
+    "phone_pid": 17260,
+    "phone_transport_restart_timeline": [
+      "00:16:30.369",
+      "00:17:30.493",
+      "00:18:30.586",
+      "00:19:30.672",
+      "00:20:30.749",
+      "00:21:30.874"
+    ],
+    "phone_transport_restart_interval_s": 60,
+    "host_heartbeat_last": "[heartbeat] entry targets=2 sent=0 linked=0 skipped=28 failed=[192.168.2.22:17878, 192.168.2.22:17878]",
+    "host_send_refused_in_previous_round": 2156,
+    "note": "两个 targets 都是「配对库有 pin、对端却不监听入站」，send 必然 false ⇒ 每两轮判定泵停摆"
+  },
+  "after": {
+    "phone_pid": 22443,
+    "host_uptime_s_sampled": 498,
+    "host_heartbeat_last": "[heartbeat] idle linked=0 skipped=30 (pre-1b build; log line now also carries manual=)",
+    "host_heartbeat_counts": {
+      "idle_lines": 1,
+      "entry_lines": 0,
+      "transport_restart": 0,
+      "presence_sent0_rounds": 0,
+      "sweep_offline": 0,
+      "send_refused": 0
+    },
+    "phone_health": {
+      "transport_restart_in_window": 0,
+      "sweep_offline": 0,
+      "linkTotal": 1,
+      "linkConnected": true,
+      "linkCarrier": "tls",
+      "dialAttempts": 1,
+      "dialFailures": 0,
+      "dialLastTarget": "192.168.2.82:17880",
+      "lastError": null,
+      "closeCount": 0,
+      "pinSource": "pairing"
+    },
+    "host_peers": {
+      "total": 30,
+      "online": 1,
+      "online_peer": "Pixel 6 / 25222a45 / linkConnected=true"
+    },
+    "bidirectional_delivery": "host→phone 3 group messages acked=true in 44/54/68 ms",
+    "peer_idle_stays_online": [
+      {
+        "verdict": "PASS",
+        "detail": "最近 180s 内无翻面，链路在册的对端全部 online",
+        "peers": 12,
+        "flips": 0,
+        "host_uptime_s_approx": 120
+      },
+      {
+        "verdict": "PASS (second run)",
+        "detail": "最近 180s 内无翻面，链路在册的对端全部 online",
+        "peers": 12,
+        "flips": 0,
+        "host_uptime_s_approx": 498
+      }
+    ]
+  },
+  "after_final_round2": {
+    "note": "换包到带 ①b（dialable/canReach 拆分 + manual= 日志）的最终版，宿主与手机都重启后连续跑 8 分钟",
+    "host_pid": 39280,
+    "phone_pid": 25441,
+    "host_heartbeat_last": "[heartbeat] idle linked=0 skipped=30 manual=0",
+    "host_heartbeat_counts": {
+      "idle_lines": 1,
+      "transport_restart": 0,
+      "presence_sent0_rounds": 0,
+      "sweep_offline": 0,
+      "send_refused": 0
+    },
+    "host_peers": {
+      "total": 30,
+      "online": 1,
+      "online_peer": "Pixel 6 / 25222a45 / linkConnected=true"
+    },
+    "bidirectional_delivery": "host->phone 3 group messages acked=true in 25/40 ms",
+    "phone_heartbeat_steady": {
+      "entry_lines": 21,
+      "distinct_readings": 3,
+      "steady_reading": "[heartbeat] entry targets=1 sent=1 manual=2 linked=1 skipped=11 failed=[192.168.2.82:17886]",
+      "startup_reading": "[heartbeat] entry targets=0 sent=0 manual=2 linked=0 skipped=12 failed=[192.168.2.82:17878, 192.168.2.82:17886]",
+      "why_it_matters": "手动地址 2 个照拨（manual=2），持续失败的那一个（:17886）不进 targets，targets 恒等于已连上会话数 1 ⇒ 自愈不误判"
+    },
+    "phone_health": {
+      "transport_restart_in_window": 0,
+      "sweep_offline": 0,
+      "linkTotal": 1,
+      "linkConnected": true,
+      "linkCarrier": "tls",
+      "dialAttempts": 1,
+      "dialFailures": 0,
+      "dialLastTarget": "192.168.2.82:17880",
+      "lastError": null,
+      "closeCount": 0,
+      "pinSource": "pairing"
+    },
+    "peer_idle_stays_online": {
+      "verdict": "PASS",
+      "detail": "窗口内 [sweep] offline=0、transport restart=0，链路在册对端全部 online，diag/link.json 在采样前 1s 仍在刷新",
+      "peers": 12,
+      "online": 1,
+      "linkConnected": 1,
+      "evidence": "peer-idle-steady-final.txt"
+    }
+  },
+  "tests": {
+    "full_suite": "9 tasks / 8 modules rerun with --continue --max-workers=1 after clearing test-results (forced re-execution, 14 tasks actually executed, not UP-TO-DATE): core 1001/0 fail/33 skip, app 968/0/0, cli 7/0/0, agent-contract 19/0/0, orchestration 223/0/0, composeApp 1215/0/0 (jvmTest 789 + androidHostTest 426), agentNode 562/0/1, desktopApp 379/0/3 => 4374 tests / 0 failures / 37 skipped. Counts taken from the result XMLs (class existence + case names checked, not just exit code). The 16 skipped in core are LuciolaSecureChannelTest without TENON_LUCIOLA_NATIVE; they pass 16/16 when the absolute path is supplied.",
+    "gates": "cjkLiteralGate 72=72 untouched; constructionTraceGate / staleCommentRefGate / domainComposeFreeGate / envDependentTestGate / designSpecDrift / designTokenUsageGate / designStateSlotGate / designLocaleParityGate green; testStabilityGate 3 rounds PASS (run on the pre-1b code)",
+    "other": "unused-imports OK; design-palette OK; sdlc dry-run 28/28 ok; :androidApp:assembleDebug BUILD SUCCESSFUL",
+    "new_guards": {
+      "PresenceHeartbeatTargetsTest": "5 tests / 0 failures; three reverse probes: (a) pin clause restored -> 1/5 red, (b) manual addresses counted unconditionally -> 1/5 red, (c) first version of (b) was a false green until the wait was widened past the 2-round restart boundary",
+      "LuciolaSendingPortTest": "8 tests; reverse probe (merge removed) 1/8 red; restored 8/8 green",
+      "LuciolaSecureChannelTest.canReachFollowsLiveSessionsNotPairingPins": "real engine 16/16 PASS with TENON_LUCIOLA_NATIVE=<repo>/desktopApp/resources/common/native (absolute path required); reverse probe (pin clause restored) 1/16 red, restored 16/16 green",
+      "TransportSelfHealTest": "3 tests / 0 failures; went red under the first version of the manual-address split (plain-UDP send failure IS a local pump failure) and drove the dialable/canReach split"
+    },
+    "stability": {
+      "gate_core_app_3rounds_0121": "3/3 red, but all from the parallel session's WIP: 2 rounds :app:compileKotlinJvm FAILED (untracked RelayControllerProjectDirectoryComponent.kt, unresolved nowMillis), 1 round ClassNotFoundException while classes were being edited",
+      "core_only_3rounds_loaded": "2 pass / 1 fail; the red was LinkK1Test.thePhoneOpensALinkAndTheHostDownlinksTextOverIt timing out at withTimeout(5_000). That case uses loopback UDP + long-link delivery only and never enters the changed branch (no manual peers configured; send does not read canReach)",
+      "core_only_3rounds_quiet": "3/3 pass after the parallel session stopped for 5 minutes",
+      "linkk1_alone": "6/6 pass",
+      "verdict": "load-sensitive flake, not attributable to this change; NOT reported green and the 5s assertion was NOT widened - left as an open item"
+    },
+    "real_engine_run": "TENON_LUCIOLA_NATIVE=<worktree>/desktopApp/resources/common/native -> :core:jvmTest --tests *LuciolaSecureChannelTest* 16 tests / 0 skipped / 0 failures, three consecutive runs all green. One earlier run had pairFrameClaimingSomeoneElsesKeyIsRejected time out at 30s while a recompile and the previous full suite overlapped; it passes alone and in all three reruns. send does not consult canReach (it goes through channelFor), so this is not a behaviour change of this fix — recorded as a load-sensitive one-off.",
+    "real_engine_pitfall": "relative TENON_LUCIOLA_NATIVE resolves against the gradle daemon cwd (.../daemon/9.8.0/...) and makes all 16 cases FAIL as a misconfiguration, not skip"
+  }
+}

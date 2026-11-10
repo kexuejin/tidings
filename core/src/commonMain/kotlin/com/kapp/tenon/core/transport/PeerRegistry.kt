@@ -30,6 +30,25 @@ internal fun sendingPortFor(profile: Profile?, sourcePort: Int): Int {
 }
 
 /**
+ * 资料刷新时**不许把已经知道的信道端口弄丢**：新档案没带 `luciolaPort` 就沿用旧的那份。
+ *
+ * 为什么要单独一条：`luciolaPort` 不是对端「资料」的一部分，而是**运行时注入**的
+ * （`selfProfile` 从 `transport.boundPort` 取；监听还没绑上时是 -1 ⇒ 整个键被
+ * `encodeDefaults = false` 省略）。任何一帧在绑端口之前发出、或走了一条没经过
+ * `selfProfile` 的路径，都会带 null；而 [PeerRegistry.touch] 是**整份替换**档案 ——
+ * 端口被抹掉之后 [sendingPortFor] 只能回退到数据报**源端口**，而 luciola 的源端口
+ * 是临时端口：节点表、心跳、候选池立刻一起拨错端点，症状与 A30 完全一样
+ * （满屏 `no session / unpaired`），只是成因换成了「知道过的端口被覆盖」。
+ *
+ * 只补这一个键，别的字段不做合并：`screenPort` 的 null 是**真状态**（用户关了文件
+ * 信道），`tlsPin` 的 null 也不能拿来顶替已知 pin —— 那会把信任根糊住。
+ */
+internal fun Profile.keepingKnownChannelPort(known: Profile): Profile {
+    if (luciolaPort != null || known.luciolaPort == null) return this
+    return copy(luciolaPort = known.luciolaPort)
+}
+
+/**
  * 在线节点表。逐条对齐茶话间 TS 侧 `src/main/net/peer-registry.ts`。
  *
  * 三条规则是从源码读出来的，别凭直觉改：
@@ -183,7 +202,7 @@ class PeerRegistry(private val selfNodeId: String) {
                 if (confirmed && sameRevision && profileTs != null && lastTs != null && profileTs <= lastTs) {
                     profileConfirmationOnly.add(nodeId)
                 }
-                existing.profile = profile
+                existing.profile = profile.keepingKnownChannelPort(existing.profile)
                 profileTimes[nodeId] = profileTs ?: now
             }
         }

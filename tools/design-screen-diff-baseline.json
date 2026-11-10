@@ -1,7 +1,7 @@
 {
   "generatedAt": "1c63759ec11f",
   "note": "逐屏差集棘轮：每个键的差集只许变小。--check 报「新增的值」。",
-  "reason": "Rebrand search keyword from 捎话 to 榫卯",
+  "reason": "P2-3 群信息/授权面板重写（GroupInfoDialog.kt+面板）：m-groupinfo 代码落点的 radius 取值集变化（新增 7 一档）；原型 radius:7px 未变（relay.html:853 等）。已核对原型未新增该档，代码侧为重写后的行形状；按棘轮纪律记账重记，非刷新。",
   "rowCount": 78,
   "signature": {
     "d-agentdetail|__error__": [
@@ -713,9 +713,6 @@
     "d-wsgrant|font-size|proto": [
       "16"
     ],
-    "d-wsgrant|font-weight|proto": [
-      "500"
-    ],
     "d-wsgrant|radius|code": [
       "7"
     ],
@@ -1126,6 +1123,7 @@
     ],
     "m-groupinfo|radius|code": [
       "4",
+      "7",
       "8",
       "20"
     ],

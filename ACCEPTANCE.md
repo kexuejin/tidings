@@ -1964,3 +1964,95 @@ unused-imports / design-palette / harness dry-run 全绿、`:androidApp:assemble
 正常形态，长期占着 targets 时自愈仍可能误判，需把「对端能力」与「本地泵」分开；
 ② 落盘历史端点未清洗；③ 档案刷新丢失 `luciolaPort` 的理论回退无专门守卫；
 ④ `--tier real` 人审与幕 4 / i1 / i2 仍需手机侧配合（harness 如实标 NA，不冒充通过）。
+
+## A32 · 心跳停摆判据绑到「已连上的会话」，档案刷新不再丢信道端口
+
+A31 的未决 ①③ 这一轮清掉，② 由 ① 的修法降级为惰性数据。
+
+**定因（①）**：`SecureChannelTransport.canReach` 判的是「入站已接管 ∨ 外拨有会话 ∨
+配对库有 pin」，而 `send` 的成功条件是「有会话且握手完成」—— 判据比它预测的行为
+宽了一格，宽出来的那一格恰好命中所有历史配对身份。于是 `targets=2 / sent=0`
+**长期恒定**，自愈每两轮 `transport.restart()` 一次。真机旧包（pid 17260）在
+00:16:30–00:21:30 连续六次重启，间隔正好 60 秒。
+
+**定因（③）**：`touch` 采纳新档案是整份替换，而 `luciolaPort` 是运行时注入的
+（`selfProfile` 从 `transport.boundPort` 取，绑端口前为 -1 ⇒ 键被省略）。
+一次不带该键的刷新就把已知端口抹掉，`sendingPortFor` 回退到数据报临时源端口 ——
+症状与 A30 同形，成因换成「知道过的端口被覆盖」。
+
+**做了什么**：
+1. `canReach` 只认**已连上的会话**（`isConnected()`）；pin 只说明「可以拨」。
+   `DatagramTransport` 的 KDoc 立规矩：「判据要跟 `send` 的成功条件同宽，不能更宽」，
+   并写明覆盖边界（无会话时 socket 全坏不触发重建）。
+2. `Profile.keepingKnownChannelPort(known)` 收在 `touch` 的采纳分支：新档案缺
+   `luciolaPort` 就沿用旧的。只补这一个键（`screenPort` 的 null 是真状态、
+   `tlsPin` 的 null 不能顶替信任根）。
+3. `[heartbeat] idle linked=… skipped=… manual=…`（60 秒限流）：修完之后 `targets=0`
+   是稳态，这行用来区分「心跳在跑但目标都不可达」与「循环根本没起来」。
+4. 「拨不拨」与「算不算停摆」拆成两个判据：手动地址（用户手填的 host:port）按
+   `DatagramTransport.dialable`（默认 = `canReach`；安全信道 = 「有会话 ∨ 配对库有 pin」）
+   决定拨不拨，是否计入 `targets` 仍看 `canReach`。裸 UDP 上两者恒真 —— `send` 在裸 UDP
+   失败只可能是本机 socket 坏了（task-29 的原始判据，`TransportSelfHealTest` 钉着）；
+   安全信道里没有会话的手动地址只拨不计数（对方不可达 ≠ 本机泵死）。
+   第一版把手动地址整段摘出 `targets`，`TransportSelfHealTest` 立刻判红 —— 口径是被它逼出来的。
+
+**判据**：`PresenceHeartbeatTargetsTest` 5 例 —— 三处反向探针：恢复 pin 分支 ⇒ 1/5 判红、
+手动地址无条件计入 targets ⇒ 1/5 判红（这一条自己先假绿过一次：`await(sends>=2)` 恰在
+第二轮边界就断言，重启还没落地；收紧到「再多跑三轮」才稳定判红）、以及重写的
+`aRealStallStillRestartsTheTransport`（用 `replay=1` 在 `start()` 前塞真实 ENTRY，
+不再拿手动地址凑数）。
+`LuciolaSendingPortTest` 8 例（反向探针摘掉端口保留 ⇒ 1/8 判红）、
+`LuciolaSecureChannelTest` 新增真信道用例（配 `TENON_LUCIOLA_NATIVE` 绝对路径后
+**16/16 PASS**，反向探针 1/16 判红）。
+**core 1001 tests / 0 失败 / 33 skipped**；门禁 10 个全绿（`cjkLiteralGate` 72=72 未刷
+基线、`constructionTraceGate`、`staleCommentRefGate`、`domainComposeFreeGate`、
+`envDependentTestGate`、四个设计门、`jlinkModulesGate`）、unused / palette / dry-run 28 项、
+`:androidApp:assembleDebug` 通过。
+**九模块全量在并行会话的 HostDirectory 特性落地（`e2e54ac0`）之后补跑：4374 tests /
+0 失败 / 37 skipped**（core 1001、app 968、cli 7、agent-contract 19、orchestration 223、
+composeApp 1215、agentNode 562、desktopApp 379）。这一轮**先清掉各模块 `build/test-results`
+强制重跑**（14 个任务真的执行，不是 `UP-TO-DATE` 吃缓存），条数从结果 XML 里数、
+并核对了本轮四个守卫类与用例名确实在册 —— 只信 exit code 会被旧产物骗。
+core 的 33 skipped 里 16 个是真引擎用例（未配 `TENON_LUCIOLA_NATIVE` 时跳过，
+配绝对路径后 16/16 绿，见下）。
+
+**`:testStabilityGate` 没给绿，但不是本次改动的失败面**：01:21 那次（core + app 连跑
+3 轮）3 轮全红 —— 2 轮 `:app:compileKotlinJvm FAILED`（并行会话未跟踪的
+`RelayControllerProjectDirectoryComponent.kt` 里 `nowMillis` 未解析）、1 轮
+`ClassNotFoundException`（类在测试运行中被改）。缩到 `:core:jvmTest` 同等负载连跑 3 轮
+是 **2 绿 1 红**，红的是 `LinkK1Test.thePhoneOpensALinkAndTheHostDownlinksTextOverIt`
+的 `withTimeout(5_000)`；这条只走回环 UDP + 长连接投递，**不进本次改动的任何分支**
+（它没配手动地址，`send` 也不读 `canReach`）。机器安静后同样三轮 **全绿**，
+`LinkK1Test` 单跑 **6/6 绿**。⇒ 负载敏感偶发，如实记为未解，不刷它的 5 秒断言。
+
+**真机复验**（两轮：第一轮验 ①③，第二轮换包验带 ①b 的最终版；证据
+`design/runtime-evidence/heartbeat-stall-targets-20261111/`）：
+- 旧包（pid 17260）`[presence] transport restart` **每 60 秒一次，连续 6 次**。
+- 第一轮新包（pid 22443）同窗口 **0 次**；宿主 uptime ≈ 8 分钟 `[heartbeat] idle
+  skipped=30`（A31 的 `targets=2` 下沉到 `skipped`）、`transport restart` 0、
+  `[presence] sent=0` 0、`[sweep] offline` 0、`send refused` **0**（A31 同窗口 2156）。
+  手机 `linkTotal=1 / carrier=tls / dialAttempts=1 / closeCount=0`，宿主→手机三条群消息
+  `acked=true`（44/54/68ms）。第六判据 `peer-idle-stays-online` 两次 PASS
+  （`peers=12 flips=0`，uptime ≈ 2 分钟与 ≈ 8 分钟）。
+- 第二轮最终包（手机 pid 25441 / 宿主 pid 39280）连续跑 8 分钟：手机 **21 轮心跳里稳态
+  读数逐字相同** —— `[heartbeat] entry targets=1 sent=1 manual=2 linked=1 skipped=11
+  failed=[192.168.2.82:17886]`。这台机器的设置里有 **2 个手填地址**，两个都在拨
+  （`manual=2`），持续失败的那一个不进 `targets` ⇒ `targets` 恒等于已连上会话数 1，
+  自愈不再误判；同一窗口 `transport restart` 0、`[sweep] offline` 0。宿主
+  `[heartbeat] idle linked=0 skipped=30 manual=0`、`send refused` 0、`acked=true` 3 条
+  （25/40ms）、`/v1/peers` 30 条 1 在线。第六判据再跑一次 PASS
+  （`peers=12 / online=1 / linkConnected=1`，`diag/link.json` 在采样前 1 秒仍在刷新，
+  见 `peer-idle-steady-final.txt`）。
+
+**未决**：① 落盘历史端点不清洗 —— 已全部落进 `skipped`，不再驱动拨号或自愈，
+交给既有 7 天修剪与「再出现即学回」；不为它们造「端口像不像垃圾」的新判据。
+② `--tier real` 人审与幕 4 / i1 / i2 仍需手机侧配合（harness 如实标 NA）。
+③ 真引擎用例需显式配 `TENON_LUCIOLA_NATIVE` 的**绝对路径**才跑：仓库里那份在
+`desktopApp/resources/common/native`，但 `build.gradle.kts` 的约定目录只找
+`../RustBuild/cargo-target`；给相对路径会被 gradle daemon 的 cwd 解析成
+`…/daemon/9.8.0/…`，`LuciolaNativeGuard` 判「显式配置了却用不了」⇒ 16 例全红。
+要不要把仓库内那份纳入约定解析顺序，另案决定。
+④ `LinkK1Test` 的 5 秒 `withTimeout` 在整包 core 套件 + 并行编译时会偶发超时
+（同等负载 1/3，单跑 6/6 绿，机器空闲 3/3 绿）。它不是本轮改动的分支，但「每几轮红一次」
+正是稳定性门禁要盯的形态 —— 要么把它改成等到就绪再断言（而不是赌 5 秒），要么查
+长连接首帧在负载下的实际时延，另案处理；本轮**没有放宽断言**来换绿。

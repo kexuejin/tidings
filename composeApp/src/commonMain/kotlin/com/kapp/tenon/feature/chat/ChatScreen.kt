@@ -35,6 +35,8 @@ import com.kapp.tenon.domain.SenderIdentity
 import com.kapp.tenon.domain.DispatchWorkspaceChoice
 import com.kapp.tenon.domain.directChatMentionTargets
 import com.kapp.tenon.domain.groupParticipantRows
+import com.kapp.tenon.domain.mentionCandidateRows
+import com.kapp.tenon.domain.workspaceOfGroup
 import com.kapp.tenon.domain.resolveNodeIdentity
 import com.kapp.tenon.domain.ChatSenderAttribution
 import com.kapp.tenon.domain.resolveSenderIdentity
@@ -247,11 +249,13 @@ fun ChatScreen(
     // `@` 候选：**外壳与内置输入栏共用这一份**。桌面壳的输入卡片也要它 —— 否则
     // 桌面上输 `@` 什么都不弹（真机反馈）。
     // 群与单聊**共用同一条**「谁能被 @」的派生规则，只是来源不同：
-    // 群来自成员表（`groupParticipantRows`），单聊来自对端那台机器上的 agent
-    // （`directChatMentionTargets`）。此前这里是 `else -> emptyList()`，
+    // 群来自成员表（`groupParticipantRows`，过 `mentionCandidateRows` —— F1 UI 配套：
+    // 候选只显示席位全名，裸 agentId/kind token 不进菜单；路由池不动），单聊来自
+    // 对端那台机器上的 agent（`directChatMentionTargets`）。此前这里是 `else -> emptyList()`，
     // 于是**单聊里输 @ 什么都不弹** —— 而单聊正是跟 agent 说话的主场景。
     val mentionIdentities = if (group != null) {
-        (groupRows.agents + groupRows.humans).filter { it.canMention }
+        val candidateRows = remember(groupRows, group) { mentionCandidateRows(groupRows, group) }
+        (candidateRows.agents + candidateRows.humans).filter { it.canMention }
     } else {
         peerId?.let { directChatMentionTargets(it, identityCtx) }.orEmpty()
             .filter { it.canMention }
@@ -538,19 +542,11 @@ fun ChatScreen(
     val showPkPickerState = remember { mutableStateOf(false) }
     var showPkPicker by showPkPickerState
     // 会话切换浮层的开合跟着**工作区**走，不只跟 peerId：列表本身按 effectiveWsId 收窄
+    // 群 → 工作区只有一个来源：席位声明（workspaceOfGroup，与执行同一条推导）。
+    // 不再拿群名/简介子串反猜 —— 那会让「药丸显示的」与「派单执行的」各说各话（F2）；
+    // 没有声明就是未绑定，画未绑定空态，不猜。
     val matchedWs = remember(group, agentSlice.agentWorkspaces) {
-        if (group == null) null
-        else agentSlice.agentWorkspaces.values.firstOrNull { ws ->
-            val desc = group.description.orEmpty()
-            // 跨模块 public 属性先落成局部量，否则 smart cast 不成立。
-            val wsPath = ws.wsPath
-            val wsIdValue = ws.wsId
-            val wsTitle = ws.wsTitle
-            val pathMatch = !wsPath.isNullOrBlank() && (desc.contains(wsPath) || desc == wsPath)
-            val idMatch = !wsIdValue.isNullOrBlank() && (desc.contains(wsIdValue) || desc == wsIdValue)
-            val titleMatch = !wsTitle.isNullOrBlank() && group.name.contains(wsTitle)
-            pathMatch || idMatch || titleMatch
-        }
+        workspaceOfGroup(group?.groupId, agentSlice, settingsSlice)
     }
     val availableWorkspaces = remember(peer.nodeId, group, agentSlice.agentWorkspaces) {
         if (group != null) emptyList()

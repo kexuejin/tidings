@@ -20,6 +20,8 @@ class DesktopTeamExecutionPort(
     private val store: TeamExecutionStore,
     /** 在位驱动键（编排器的 availableAgentKeys 同一份名册；null = 控制面不可用 ⇒ 空名册）。 */
     private val availableDrivers: () -> Set<String>?,
+    /** 群 → 项目目录 dirId（D16 主键的一半）；与 HostDirectoryStore 同一实例。 */
+    private val pointerDirId: (groupId: String) -> String?,
 ) : TeamExecutionPort {
 
     override fun driverCatalog(): Set<String> =
@@ -27,13 +29,13 @@ class DesktopTeamExecutionPort(
 
     override fun profileOf(
         groupId: String,
-        defaultWsId: String,
+        dirId: String,
         leaderAgentId: String,
     ): TeamExecutionProfileUi? =
-        store.profileFor(groupId, defaultWsId, leaderAgentId)?.let { p ->
+        store.profileFor(groupId, dirId, leaderAgentId)?.let { p ->
             TeamExecutionProfileUi(
                 groupId = p.groupId,
-                defaultWsId = p.defaultWsId,
+                dirId = p.dirId,
                 leaderAgentId = p.leaderAgentId,
                 members = p.members.map {
                     TeamExecutionMemberUi(it.agentId, it.kind, it.driverKey, it.models)
@@ -57,9 +59,11 @@ class DesktopTeamExecutionPort(
         is TeamExecutionSaveVerdict.Rejected -> TeamExecutionSaveResult.Rejected(verdict.reasons)
     }
 
+    override fun groupPointerDirId(groupId: String): String? = pointerDirId(groupId)
+
     private fun toSpec(profile: TeamExecutionProfileUi) = TeamExecutionProfile(
         groupId = profile.groupId,
-        defaultWsId = profile.defaultWsId,
+        dirId = profile.dirId,
         leaderAgentId = profile.leaderAgentId,
         updatedAt = 0,
         members = profile.members.map {

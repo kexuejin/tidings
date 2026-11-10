@@ -1,0 +1,2 @@
+11-11 00:21:30.874 17260 17460 I System.out: [presence] transport restart (no packet left for 2 rounds)
+11-11 00:22:25.432 22443 22489 I System.out: [heartbeat] idle linked=0 skipped=15

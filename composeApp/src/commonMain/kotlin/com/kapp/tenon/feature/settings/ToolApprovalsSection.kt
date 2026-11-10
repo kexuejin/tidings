@@ -33,6 +33,7 @@ import com.kapp.tenon.generated.resources.tool_approvals_gone
 import com.kapp.tenon.generated.resources.tool_approvals_revoke
 import com.kapp.tenon.generated.resources.tool_approvals_revoked
 import com.kapp.tenon.generated.resources.tool_approvals_row_meta
+import com.kapp.tenon.generated.resources.tool_approvals_row_ws
 import com.kapp.tenon.generated.resources.tool_approvals_title
 import com.kapp.tenon.generated.resources.tool_approvals_unavailable
 import com.kapp.tenon.ui.components.AppButtonSize
@@ -52,6 +53,8 @@ import org.jetbrains.compose.resources.stringResource
 data class ToolApprovalRow(
     val nodeId: String,
     val agentKey: String?,
+    /** 工作区维度（F3）；null = 无 ws 档（授予来源会话没绑目录），只命中无 ws 派单。 */
+    val wsId: String?,
     val tool: String,
     val grantedAt: Long,
 )
@@ -74,7 +77,7 @@ interface ToolApprovalsSource {
      * 撤掉**这一条**（nodeId + agentKey + tool 逐字匹配），返回真正删掉的条数
      * （0 = 它已经不在了）。不许有「按 nodeId 全撤」的语义 —— 界面上那一行说的是一条。
      */
-    fun revokeExactly(nodeId: String, agentKey: String?, tool: String): Int
+    fun revokeExactly(nodeId: String, agentKey: String?, wsId: String?, tool: String): Int
 
     /** 外部写入通知（对端按「始终允许」时控制面线程写表），返回注销函数。 */
     fun addChangeListener(listener: () -> Unit): () -> Unit
@@ -99,7 +102,7 @@ class ToolApprovalAdmin(private val source: ToolApprovalsSource) {
      * 而界面上那一行说的是「这一条」。
      */
     fun revoke(row: ToolApprovalRow): Int =
-        source.revokeExactly(nodeId = row.nodeId, agentKey = row.agentKey, tool = row.tool)
+        source.revokeExactly(nodeId = row.nodeId, agentKey = row.agentKey, wsId = row.wsId, tool = row.tool)
 }
 
 /**
@@ -223,12 +226,19 @@ fun ToolApprovalsSection(
                             val agentLabel = row.agentKey?.let {
                                 stringResource(Res.string.tool_approvals_agent, it)
                             } ?: stringResource(Res.string.tool_approvals_all_agents)
+                            // F3：规则带工作区维度时如实显示（「始终允许」只在那个目录里免批）。
+                            val wsLabel = row.wsId?.let { ws ->
+                                stringResource(Res.string.tool_approvals_row_ws, ws)
+                            }
                             Text(
-                                text = stringResource(
-                                    Res.string.tool_approvals_row_meta,
-                                    peerLabel(row.nodeId),
-                                    agentLabel,
-                                ),
+                                text = listOf(
+                                    stringResource(
+                                        Res.string.tool_approvals_row_meta,
+                                        peerLabel(row.nodeId),
+                                        agentLabel,
+                                    ),
+                                    wsLabel,
+                                ).filterNotNull().joinToString(" · "),
                                 style = MaterialTheme.typography.labelSmall,
                                 color = MaterialTheme.colorScheme.onSurfaceVariant,
                             )

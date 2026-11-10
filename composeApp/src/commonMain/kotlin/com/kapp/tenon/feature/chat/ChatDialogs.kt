@@ -122,18 +122,27 @@ internal fun ChatDialogsHost(
             showGroupInfo = false
             mentionSender(identity)
         }
-        // 「添加智能体」= 暴露**本机项目**（不是加人）。候选取本机 workspace 表。
-        val exposeWorkspaces = groupActions.onExposeWorkspaces?.let { expose ->
-            { chosen: List<String> ->
-                // 一次成像：chosen 就是**最终集合**，收起与暴露在一次调用里完成
-                // （旧实现先撤再增、逐条调用，每条各发一份元数据，中间态会广播给全群）。
-                expose(group.groupId, chosen)
-            }
+        // 授权管理面板的动作通路：入驻 / 去暴露 / 移除席位 / 设目录指针，全部补群 id。
+        val stationAgent = groupActions.onStationAgent?.let { station ->
+            { agentId: String, duty: String? -> station(group.groupId, agentId, duty) }
         }
-        // 团队编制的保存通路（§4.3）：对话框收的是 (defaultWsId, roster)，这里补群 id。
+        val reparseSeats = groupActions.onReparseSeats?.let { reparse ->
+            { reparse(group.groupId) }
+        }
+        val removeGroupAgent = groupActions.onRemoveGroupAgent?.let { remove ->
+            { agentId: String -> remove(group.groupId, agentId) }
+        }
+        val setProjectDirectory = groupActions.onSetProjectDirectory?.let { setDir ->
+            { dirId: String? -> setDir(group.groupId, dirId) }
+        }
+        // 非宿主的目录行显示值：席位声明投影（workspaceOfGroup 的 wsTitle；路径不上屏）。
+        val declaredDirectoryTitle = com.kapp.tenon.domain.workspaceOfGroup(
+            group.groupId, agentSlice, settingsSlice,
+        )?.wsTitle
+        // 团队编制的保存通路（§4.3）：对话框收的是 (agentId, roster)，这里补群 id。
         // 手机壳画宿主注解（§2.2 双端形态契约）：执行驱动在桌面宿主上托管。
         val setTeamRoster = groupActions.onSetTeamRoster?.let { save ->
-            { defaultWsId: String, roster: List<TeamMemberDraft>? -> save(group.groupId, defaultWsId, roster) }
+            { agentId: String, roster: List<TeamMemberDraft>? -> save(group.groupId, agentId, roster) }
         }
         val localWs = agentSlice.agentWorkspaces.values.filter { it.peerId == settingsSlice.settings.nodeId }
         if (groupInfoAsPage) {
@@ -152,7 +161,12 @@ internal fun ChatDialogsHost(
                 identityContext = identityCtx,
                 onMentionMember = mentionFromPanel,
                 localWorkspaces = localWs,
-                onExposeWorkspaces = exposeWorkspaces,
+                onStationAgent = stationAgent,
+                onReparseSeats = reparseSeats,
+                onRemoveGroupAgent = removeGroupAgent,
+                onSetProjectDirectory = setProjectDirectory,
+                hostDirectoryPort = groupActions.hostDirectoryPort,
+                declaredDirectoryTitle = declaredDirectoryTitle,
                 onSetTeamRoster = setTeamRoster,
                 showTeamHostManagedNotice = true,
             // 手机壳默认无执行面（DesktopExtension 只在桌面装配端口）⇒ 只读投影。
@@ -175,7 +189,12 @@ internal fun ChatDialogsHost(
                 identityContext = identityCtx,
                 onMentionMember = mentionFromPanel,
                 localWorkspaces = localWs,
-                onExposeWorkspaces = exposeWorkspaces,
+                onStationAgent = stationAgent,
+                onReparseSeats = reparseSeats,
+                onRemoveGroupAgent = removeGroupAgent,
+                onSetProjectDirectory = setProjectDirectory,
+                hostDirectoryPort = groupActions.hostDirectoryPort,
+                declaredDirectoryTitle = declaredDirectoryTitle,
                 onSetTeamRoster = setTeamRoster,
                 showTeamHostManagedNotice = true,
                 teamExecutionPort = groupActions.teamExecutionPort,

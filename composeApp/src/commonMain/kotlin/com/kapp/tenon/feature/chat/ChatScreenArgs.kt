@@ -271,25 +271,41 @@ data class ChatScreenGroupActions(
     val onAddGroupMembers: ((groupId: String, memberIds: List<String>) -> Unit)? = null,
     val onRemoveGroupMember: ((groupId: String, memberId: String) -> Unit)? = null,
     /**
-     * 把**本机**在群里的 agent 声明集合整体改写为 [wsIds]（授权面板「保存」的落点）。
+     * 入驻动作通路（D6：入驻不问目录）：`(groupId, agentId, duty)`。
      *
-     * 一次成像：调用方交的是**最终集合**，控制器一次 rev+1、一次广播 —— 撤回是
-     * 机主主权，只覆盖本机自己的声明（见 `DesktopPaneActions.setGroupAgentWorkspaces`）。
-     * 与 `onAddGroupMembers` 是两件事：那个加**人**，这个暴露**本机项目**。
+     * null = 这个壳没有通路（授权面板只读）。与 `onAddGroupMembers` 是两件事：
+     * 那个加**人**，这个入驻**本机智能体**。
      */
-    val onExposeWorkspaces: ((groupId: String, wsIds: List<String>) -> Unit)? = null,
+    val onStationAgent: ((groupId: String, agentId: String, duty: String?) -> Unit)? = null,
     /**
-     * 团队编制的保存通路（团队创建方案 §4.3）：`(groupId, defaultWsId, roster)`。
+     * 重新解析本机席位投影并广播（「去暴露」的落点）。
+     */
+    val onReparseSeats: ((groupId: String) -> Unit)? = null,
+    /**
+     * 移除本机席位（撤回入驻；机主主权，按 agentId 定位）。
+     */
+    val onRemoveGroupAgent: ((groupId: String, agentId: String) -> Unit)? = null,
+    /**
+     * 设 / 清本群项目目录指针（D5，仅宿主）：`(groupId, dirId)`。dirId null = 清除。
+     */
+    val onSetProjectDirectory: ((groupId: String, dirId: String?) -> Unit)? = null,
+    /**
+     * 团队编制的保存通路（团队创建方案 §4.3）：`(groupId, agentId, roster)`。
      *
-     * 与 [onExposeWorkspaces] 同节奏：一次保存 = 一次 rev+1、一次广播；roster 为 null =
+     * 定位键 = 席位身份 `(groupId, hostNodeId, agentId)`（D4）。roster 为 null =
      * 关闭团队。null = 这个壳没有保存通路，群信息里不画「团队编制」按钮。
      */
-    val onSetTeamRoster: ((groupId: String, defaultWsId: String, roster: List<TeamMemberDraft>?) -> Unit)? = null,
+    val onSetTeamRoster: ((groupId: String, agentId: String, roster: List<TeamMemberDraft>?) -> Unit)? = null,
     /**
      * 团队执行档端口（团队执行方案 §6.3）：TeamRosterDialog 执行配置段的读写通路。
      * null = 该壳没有执行面（手机等非宿主）⇒ 只读投影（执行配置由席位宿主管理）。
      */
     val teamExecutionPort: com.kapp.tenon.domain.TeamExecutionPort? = null,
+    /**
+     * 宿主目录端口（项目目录决策稿 §5.1）：null = 本机不是宿主（手机常态）⇒
+     * 群信息的「本项目目录」行只画声明投影。
+     */
+    val hostDirectoryPort: com.kapp.tenon.domain.HostDirectoryPort? = null,
     val onUpdateGroupMeta: ((groupId: String, description: String?, announce: String?) -> Unit)? = null,
     val onLeaveGroup: ((groupId: String) -> Unit)? = null,
     /**

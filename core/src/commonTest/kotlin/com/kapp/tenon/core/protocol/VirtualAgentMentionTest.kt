@@ -126,4 +126,17 @@ class VirtualAgentMentionTest {
         assertNull(m.mentionedVirtualAgent("@dsh2 你好", listOf("dsh")))
         assertNull(m.mentionedVirtualAgent("@dsh_x 你好", listOf("dsh")))
     }
+    // ---- F1（C1）：多席位同 token ⇒ fail-closed，不挑第一个 ----
+
+    @Test
+    fun sameTokenOnTwoSeatsResolvesToNothing() {
+        val seatA = VirtualAgentMember(agentId = "dsh", hostNodeId = "h1", name = "dsh-coder", defaultWsId = "ws-a")
+        val seatB = VirtualAgentMember(agentId = "dsh", hostNodeId = "h1", name = "dsh-coder-2", defaultWsId = "ws-b")
+        val meta = GroupMeta.create(groupId = "g", name = "t", members = emptyList(), selfId = "h1", updatedTs = 1L)
+            .copy(virtualAgents = listOf(seatA, seatB))
+        // 两个席位共享同一个 agentId：裸 `@dsh` 命中两个席位 ⇒ 不投（发送侧同判据）。
+        assertNull(meta.mentionedVirtualAgent("@dsh fix it", listOf("dsh", "dsh-coder", "dsh-coder-2")))
+        // 全名仍然精确命中。
+        assertEquals("ws-a", meta.mentionedVirtualAgent("@dsh-coder fix it", listOf("dsh", "dsh-coder", "dsh-coder-2"))?.defaultWsId)
+    }
 }

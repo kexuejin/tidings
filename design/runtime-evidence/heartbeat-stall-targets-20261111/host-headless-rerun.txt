@@ -1,0 +1,132 @@
+
+> Configure project :core
+:core luciola 原生库未找到 —— 依赖真引擎的用例将被跳过（不是失败）。要跑它们：TENON_LUCIOLA_NATIVE=<cargo-target/release 或 debug> ./gradlew :core:jvmTest
+
+> Task :agent-contract:checkKotlinGradlePluginConfigurationErrors SKIPPED
+> Task :agent-contract:compileKotlin UP-TO-DATE
+> Task :agent-contract:compileJava NO-SOURCE
+> Task :agent-contract:processResources NO-SOURCE
+> Task :agent-contract:classes UP-TO-DATE
+> Task :agent-contract:jar UP-TO-DATE
+> Task :agentNode:checkKotlinGradlePluginConfigurationErrors SKIPPED
+> Task :core:kmpPartiallyResolvedDependenciesChecker
+> Task :core:checkKotlinGradlePluginConfigurationErrors SKIPPED
+> Task :core:compileKotlinJvm UP-TO-DATE
+> Task :core:compileJvmMainJava NO-SOURCE
+> Task :core:jvmProcessResources NO-SOURCE
+> Task :core:processJvmMainResources SKIPPED
+> Task :core:jvmMainClasses UP-TO-DATE
+> Task :core:jvmJar UP-TO-DATE
+> Task :agentNode:compileKotlin UP-TO-DATE
+> Task :agentNode:compileJava NO-SOURCE
+> Task :agentNode:processResources NO-SOURCE
+> Task :agentNode:classes UP-TO-DATE
+> Task :agentNode:jar UP-TO-DATE
+> Task :app:kmpPartiallyResolvedDependenciesChecker
+> Task :app:checkKotlinGradlePluginConfigurationErrors SKIPPED
+> Task :app:generateCommonMainRelayDatabaseInterface UP-TO-DATE
+> Task :app:compileKotlinJvm UP-TO-DATE
+> Task :app:compileJvmMainJava NO-SOURCE
+> Task :app:jvmProcessResources NO-SOURCE
+> Task :app:processJvmMainResources SKIPPED
+> Task :app:jvmMainClasses UP-TO-DATE
+> Task :app:jvmJar UP-TO-DATE
+> Task :composeApp:checkJvmMainComposeLibrariesCompatibility
+> Task :composeApp:kmpPartiallyResolvedDependenciesChecker
+> Task :composeApp:checkKotlinGradlePluginConfigurationErrors SKIPPED
+> Task :composeApp:convertXmlValueResourcesForCommonMain UP-TO-DATE
+> Task :composeApp:copyNonXmlValueResourcesForCommonMain UP-TO-DATE
+> Task :composeApp:prepareComposeResourcesTaskForCommonMain UP-TO-DATE
+> Task :composeApp:generateResourceAccessorsForCommonMain UP-TO-DATE
+> Task :composeApp:convertXmlValueResourcesForJvmMain NO-SOURCE
+> Task :composeApp:copyNonXmlValueResourcesForJvmMain NO-SOURCE
+> Task :composeApp:prepareComposeResourcesTaskForJvmMain NO-SOURCE
+> Task :composeApp:generateResourceAccessorsForJvmMain NO-SOURCE
+> Task :composeApp:generateActualResourceCollectorsForJvmMain UP-TO-DATE
+> Task :composeApp:generateComposeResClass UP-TO-DATE
+> Task :composeApp:generateExpectResourceCollectorsForCommonMain UP-TO-DATE
+> Task :composeApp:compileKotlinJvm UP-TO-DATE
+> Task :composeApp:compileJvmMainJava NO-SOURCE
+> Task :composeApp:assembleJvmMainResources UP-TO-DATE
+> Task :composeApp:jvmProcessResources UP-TO-DATE
+> Task :composeApp:processJvmMainResources SKIPPED
+> Task :composeApp:jvmMainClasses UP-TO-DATE
+> Task :composeApp:jvmJar UP-TO-DATE
+> Task :desktopApp:checkKotlinGradlePluginConfigurationErrors SKIPPED
+> Task :desktopApp:convertXmlValueResourcesForMain NO-SOURCE
+> Task :desktopApp:copyNonXmlValueResourcesForMain NO-SOURCE
+> Task :desktopApp:prepareComposeResourcesTaskForMain NO-SOURCE
+> Task :desktopApp:generateResourceAccessorsForMain NO-SOURCE
+> Task :desktopApp:generateActualResourceCollectorsForMain UP-TO-DATE
+> Task :desktopApp:generateComposeResClass UP-TO-DATE
+> Task :orchestration:checkKotlinGradlePluginConfigurationErrors SKIPPED
+> Task :orchestration:compileKotlin UP-TO-DATE
+> Task :orchestration:compileJava NO-SOURCE
+> Task :orchestration:processResources NO-SOURCE
+> Task :orchestration:classes UP-TO-DATE
+> Task :orchestration:jar UP-TO-DATE
+> Task :desktopApp:compileKotlin UP-TO-DATE
+> Task :desktopApp:compileJava NO-SOURCE
+> Task :desktopApp:assembleMainResources UP-TO-DATE
+> Task :desktopApp:processResources UP-TO-DATE
+> Task :desktopApp:classes UP-TO-DATE
+> Task :desktopApp:jar UP-TO-DATE
+> Task :desktopApp:copyLuciolaNative NO-SOURCE
+
+> Task :desktopApp:verifyLuciolaNative
+dylib    = <worktree>/desktopApp/resources/common/native/libluciola_uniffi.dylib
+sha256   = 7905b1e72cd126f6937e8323246a6b6b503674fd70806fcfc73430f7e4521930
+size     = 3607120
+jar      = <external-volume>/gradle-user-home/caches/modules-2/files-2.1/io.github.kexuejin/luciola-jvm/0.9.0/9b5fa3dcb5b4d3980571c6a73a1e71797397cd69/luciola-jvm-0.9.0.jar
+bindings = 71 项 checksum, contract version 29
+checksums: 71 checked, 0 mismatch
+VERDICT= MATCH (contract version 29)
+
+> Task :desktopApp:prepareAppResources UP-TO-DATE
+
+> Task :desktopApp:run
+SLF4J(W): No SLF4J providers were found.
+SLF4J(W): Defaulting to no-operation (NOP) logger implementation
+SLF4J(W): See https://www.slf4j.org/codes.html#noProviders for further details.
+[luciola] host configured port=17878 fp=sha256:c35a3
+[luciola] host configured port=17878 fp=sha256:c35a3
+relay: headless mode; ui not started. ctrl-c to stop.
+[heartbeat] idle linked=0 skipped=30 manual=0
+[drivers] codex-cli ← provider env: OPENCODE_API_KEY (values stay in the child process)
+[drivers] opencode-cli ← provider env: HTTPS_PROXY, HTTP_PROXY, OPENCODE_API_KEY, OPENCODE_CONFIG, http_proxy, https_proxy (values stay in the child process)
+[drivers] dsh-cli ← provider env: DSH_PERMISSION_MODE, HTTPS_PROXY, HTTP_PROXY, OPENCODE_API_KEY, http_proxy, https_proxy (values stay in the child process)
+[RELAY-PLUGIN] skipped agy-cli: executable "agy" not found in /opt/homebrew/bin : /usr/local/bin : /usr/bin : /bin : /usr/sbin : /sbin (GUI processes get a minimal PATH; use an absolute path in the entrypoint, or install the runtime into one of these directories)
+[RELAY-TRIGGER] trigger tasks synced: 0 cron, 0 webhook route(s)
+[xport] in state=connected detail=sha256:c05016890c9d33fe0485d006fee5276a1d52e4f9baa94f14b91a8f5fd3bf2c16
+[xport] in trusted=true fp=sha256:c05016890c9d33fe0485d006fee5276a1d52e4f9baa94f14b91a8f5fd3bf2c16 pairing=true
+[flush] peer=25222a45 from=0 left=0 in=1ms
+[luciola] discovered 25222a45-4b84-4e9a-9870-d13f86b2a8de at 192.168.2.22:17878
+[flush] peer=25222a45 from=0 left=0 in=0ms
+[flush] peer=25222a45 from=0 left=0 in=0ms
+[flush] peer=25222a45 from=0 left=0 in=1ms
+[send] peer=25222a45 id=a2b26b3e ep=192.168.2.22:17878 acked=true type=group size=718 in=29ms online=true regOnline=true regEp=192.168.2.22:17878 schedule=[1000, 2000, 4000]
+[send] peer=25222a45 id=bd3a3546 ep=192.168.2.22:17878 acked=true type=group size=923 in=25ms online=true regOnline=true regEp=192.168.2.22:17878 schedule=[1000, 2000, 4000]
+[send] peer=25222a45 channel=TRANSPORT
+[send] peer=25222a45 id=b1e80555 ep=192.168.2.22:17878 acked=true type=group size=1025 in=40ms online=true regOnline=true regEp=192.168.2.22:17878 schedule=[1000, 2000, 4000]
+[screen] txprobe n=16 connAvgUs=231 sendAvgUs=253
+[screen] txprobe n=3 connAvgUs=236 sendAvgUs=209
+[screen] txprobe n=7 connAvgUs=199 sendAvgUs=208
+[screen] txprobe n=2 connAvgUs=419 sendAvgUs=264
+[screen] txprobe n=4 connAvgUs=328 sendAvgUs=202
+[screen] txprobe n=4 connAvgUs=222 sendAvgUs=187
+[screen] txprobe n=3 connAvgUs=162 sendAvgUs=1295
+[screen] txprobe n=6 connAvgUs=215 sendAvgUs=235
+[screen] txprobe n=2 connAvgUs=455 sendAvgUs=379
+[screen] txprobe n=5 connAvgUs=158 sendAvgUs=213
+[screen] txprobe n=4 connAvgUs=328 sendAvgUs=229
+[screen] txprobe n=2 connAvgUs=224 sendAvgUs=192
+[screen] txprobe n=7 connAvgUs=509 sendAvgUs=206
+[screen] txprobe n=3 connAvgUs=178 sendAvgUs=142
+[screen] txprobe n=6 connAvgUs=217 sendAvgUs=225
+[screen] txprobe n=3 connAvgUs=222 sendAvgUs=205
+[screen] txprobe n=3 connAvgUs=180 sendAvgUs=210
+[screen] txprobe n=6 connAvgUs=165 sendAvgUs=160
+[screen] txprobe n=2 connAvgUs=383 sendAvgUs=267
+[screen] txprobe n=6 connAvgUs=110 sendAvgUs=158
+[screen] txprobe n=2 connAvgUs=146 sendAvgUs=106
+[screen] txprobe n=2 connAvgUs=131 sendAvgUs=109

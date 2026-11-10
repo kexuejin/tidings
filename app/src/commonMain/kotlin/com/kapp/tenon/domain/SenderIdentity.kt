@@ -174,9 +174,8 @@ data class SenderIdentityContext(
      *
      * 用途：**让单聊和群聊算出同一个名字。**
      *
-     * 群里有 `virtualAgents[].name`（入驻时按 `AgentMemberName.base(kind, agentId, wsTitle, wsId)`
-     * 生成）；单聊没有群元数据，但那个 agent 的会话自己带着 `wsId` ——
-     * 用同一条规则就能算出同一个 `dsh-teahouse-mobile`。
+     * 群里有 `virtualAgents[].name`（入驻时按 D13 规则 `AgentMemberName.base(kind, agentId, duty)`
+     * 生成，如 `dsh-coder`）；单聊没有群元数据，退回 kind —— 不再拼目录进名字。
      *
      * 缺了它，同一个 agent 在群里叫 `dsh-teahouse-mobile`、在单聊里叫 `dsh` ——
      * 又是两个名字，正是要消掉的那种分叉。
@@ -477,6 +476,40 @@ fun groupParticipantRows(ctx: SenderIdentityContext): GroupParticipantRows {
     return GroupParticipantRows(agents = agents, humans = humans, mentionKeys = mentionKeys)
 }
 
+/**
+ * `@` 候选里的 **agent 行过滤**（F1 UI 配套，一致性修订清单裁决 4）：候选菜单只显示
+ * **席位全名** + 组员名 + 人类成员，不再显示裸 `agentId` / kind token。
+ *
+ * ## 判据（与发送侧 fail-closed 判据同向，不是另一套）
+ *
+ * 候选对外广告的 token（`mentionToken` 去掉 `@` 后的正文）若恰好等于某条席位的
+ * `agentId`，**而没有任何席位以它为名字** —— 那这一行展示的就是裸 id，整行不进候选。
+ * 两个方向都不许放宽：
+ *
+ * - **多席位共享 agentId 时**不显示裸 id：`@<agentId>` 会命中多条席位，发送侧判据
+ *   已 fail-closed（`resolvePromptTarget` 判 Ambiguous），候选再展示它就是递刀子；
+ * - **单席位时也不显示**（裁决 4：全名足够）：`@<agentId>` 只在唯一席位时有效，
+ *   那是「兜底打得通」，不是「该展示的名字」。
+ *
+ * 席位名恰好等于 agentId 的（职责留空 ⇒ token = kind，如 `dsh`）**保留** —— 那是
+ * D13 规则生成的全名，不是裸 id。
+ *
+ * **路由池（[GroupParticipantRows.mentionKeys]）不动**：`@agentId` 在唯一席位时仍
+ * 有效（手打不经过候选菜单），判据层已 fail-closed —— 这里只收窄**展示**，不收窄
+ * 触发。人类成员行原样保留。
+ */
+fun mentionCandidateRows(rows: GroupParticipantRows, group: GroupMeta?): GroupParticipantRows {
+    val seats = group?.virtualAgents.orEmpty()
+    if (seats.isEmpty()) return rows
+    val agentIdTokens = seats.map { it.agentId.trim().lowercase() }.filter { it.isNotEmpty() }.toSet()
+    val seatNameTokens = seats.map { it.name.trim().lowercase() }.filter { it.isNotEmpty() }.toSet()
+    val agents = rows.agents.filter { agent ->
+        val token = agent.mentionToken.removePrefix("@").trim().lowercase()
+        !(token.isNotEmpty() && token in agentIdTokens && token !in seatNameTokens)
+    }
+    return rows.copy(agents = agents)
+}
+
 /** 这个群里有哪些**可点名的键**（触发 / 抽取 prompt 用；小写，含候选 token 正文）。 */
 
 /** 某个宿主上的**某一个** agent（同一台设备可以有多个）。 */
@@ -542,9 +575,9 @@ private fun resolveAgentOfHost(host: String, kind: String, ctx: SenderIdentityCo
     val declaredName = seat?.name
         ?.trim()
         ?.takeIf { it.isNotBlank() }
-    val generatedName = ctx.agentWorkspaceByHostAndKind[host]?.get(k)?.let { wsId ->
-        AgentMemberName.base(k, seat?.agentId ?: k, ctx.workspaceTitles[wsId], wsId)
-    }
+    // D13：名字不再含目录。没有群声明可查时退回 kind（`dsh`）—— 与声明侧同一套归一化，
+    // 但不再拼「kind-目录」的旧形态：那是换目录后历史署名割裂的根因。
+    val generatedName = AgentMemberName.base(k, null, null)
     return base.copy(
         // 身份键必须带 kind：同一个宿主上的两个 agent 不能撞成一行。
         id = "agent:$host:$k",

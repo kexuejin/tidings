@@ -3,44 +3,70 @@
 package com.kapp.tenon.core.protocol
 
 /**
- * 群里一个可被 @ 的智能体身份 = **(设备, agent, workspace) 三元组**。
+ * 席位 `@token` 的**职责取值域**（D13）：名字表达分工，不表达物理目录。
  *
- * ## 为什么是三元组
+ * 单一定义、禁止散落 —— 生成入口（[AgentMemberName.base]）与 UI 选择器共同引用这一份；
+ * 各写一份清单就是在制造「键对、值不在白名单」那类分叉。
  *
- * 一台设备可以装多个 agent（`codex` / `opencode` / `dsh`…），不同的 agent 也可能操作
- * **同一个** workspace。所以任何一个单项都不足以定位"用户想 @ 的那个东西"：
+ * 规则（决策稿 D13）：token = `kind + 职责`（`dsh-coder` / `gemini-lead`）；
+ * 职责留空 = 只用 kind（`dsh`）；群内冲突追加序号（`dsh-coder-2`，见 [AgentMemberName.unique]）。
+ * **换目录不改名** —— 目录一变名字就变，历史消息署名的读法就跟着断。
+ */
+object AgentDuties {
+    const val LEAD = "lead"
+    const val CODER = "coder"
+    const val REVIEWER = "reviewer"
+    const val TESTER = "tester"
+    const val ANALYST = "analyst"
+    const val WRITER = "writer"
+    const val OPS = "ops"
+    const val ASSISTANT = "assistant"
+
+    /** 全部合法取值；UI 选择器只准从这里取。 */
+    val ALL = listOf(LEAD, CODER, REVIEWER, TESTER, ANALYST, WRITER, OPS, ASSISTANT)
+
+    /** 单兵席位默认职责。 */
+    const val DEFAULT_SINGLE = ASSISTANT
+
+    /** 团队领队席位默认职责。 */
+    const val DEFAULT_LEADER = LEAD
+
+    /**
+     * 归一化：取值域外的值（含 null/空白）一律回落**单兵默认**。
+     * 不发明第四种拼写 —— 外来数据宁可归一，也不让 `Coder`/`CODER` 变成第二个事实。
+     */
+    fun normalize(raw: String?): String = raw?.trim()?.takeIf { it in ALL } ?: DEFAULT_SINGLE
+}
+
+/**
+ * 群里一个可被 @ 的智能体席位名（D13：`kind + 职责`）。
  *
- * | 只取… | 会撞车的情况 |
- * |---|---|
- * | workspace | 同一目录上跑着 codex 和 opencode |
- * | agent | 一个 agent 在 15 个项目目录里都在（真机数据：`dsh-029bbbf3` 有 15 个 ws） |
- * | 两者 | 两台设备都装了 codex、都开着同名目录（极端但真实：两台机器 clone 同一个仓库） |
+ * ## 名字表达分工，不表达目录
  *
- * 所以暴露单位就是库里 `AgentWorkspaceEntity` 已有的主键，不多不少。
+ * 旧规则 `<agentId>-<wsTitle>` 把物理目录写进了名字：目录一改名/换目录，`@` 习惯与
+ * 历史署名的读法就跟着断（消息的 `senderId` 是稳定的，**显示名是从群声明实时解析的**）。
+ * 新规则 [AgentDuties] 只进名字一次 —— 建席位那一刻；之后换目录、换设备都不改名。
  *
  * ## 名字：默认生成，进群后不许冲突
  *
- * **@ 语法永远只有一级**（`@codex-teahouse`）—— 消歧在**添加那一刻**做完，
- * 不在 @ 的时候才暴露给用户。否则用户得记住"什么时候该写设备名、什么时候不用"，
- * 而且最坏情况（两台设备 + 同名 agent + 同名 ws）根本没有更长的退路。
- *
- * 名字的作用域是**群内**（与 `memberNicks` 同一条纪律）：同一个 workspace 在 A 群叫
- * `codex-teahouse`，在 B 群可以叫别的；本地目录改名不会让群里的名字跟着变。
+ * **@ 语法永远只有一级**（`@dsh-coder`）—— 消歧在**添加那一刻**做完（`unique` 追加序号），
+ * 不在 @ 的时候才暴露给用户。既有席位**沿用现有名字**（`@` token 不能漂）；
+ * 新席位才走本规则。
  */
 object AgentMemberName {
 
     /**
-     * 默认暴露名：`<agent>-<workspace>`，两边都归一化。
+     * 默认席位名：`<kind>-<职责>`，都归一化。
      *
-     * - workspace 缺失（agent 没有绑定目录）时只用 agent 名；
-     * - 归一化规则见 [slug]：小写、空格与下划线转 `-`、只保留字母数字与 `-`。
+     * - kind 取 **agentKind**（`dsh` / `gemini`），不再用逐机实例 id（`dsh-029bbbf3`）——
+     *   那是「在哪台机器的第几份拷贝」，不是「这个数字员工是谁」；
+     * - 职责为空（用户选「通用」）时只用 kind；
+     * - 归一化规则见 [slug]。
      */
-    fun base(agentKind: String?, agentId: String?, wsTitle: String?, wsId: String?): String {
-        val agent = slug(agentId?.takeIf { it.isNotBlank() } ?: agentKind).ifBlank { "agent" }
-        // 名字优先 wsTitle（`teahouse-mobile` 这种用户认得出的），退回 wsId（`ws-e9b18063d183`
-        // 这种内部 id 不该当名字，但比空着好）。
-        val ws = slug(wsTitle?.takeIf { it.isNotBlank() } ?: wsId)
-        return if (ws.isBlank()) agent else "$agent-$ws"
+    fun base(agentKind: String?, agentId: String?, duty: String?): String {
+        val agent = slug(agentKind?.takeIf { it.isNotBlank() } ?: agentId).ifBlank { "agent" }
+        val d = slug(duty)
+        return if (d.isBlank()) agent else "$agent-$d"
     }
 
     /**

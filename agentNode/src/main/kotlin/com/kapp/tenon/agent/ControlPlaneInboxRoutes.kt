@@ -130,6 +130,13 @@ internal fun ControlPlane.inbox(exchange: HttpExchange) {
                                 // 而会话报的是 `dsh-029bbbf3`。两者是同一个 agent 的不同精度，
                                 // 只认其中一个会让「刚入驻的 agent 找不到自己的会话」。
                                 candidates = runCatching {
+                                    // F4（C3，硬保证）：群派单候选**必须归属本群** ——
+                                    // 内存映射丢了就查落盘台账；两边都没有（归属未知）
+                                    // ⇒ 不进候选（fail-closed），绝不回退「全 agent 候选」。
+                                    // 1:1（groupId 为空）不做群过滤，保持既有行为。
+                                    val groupConvId = view.groupId?.let {
+                                        com.kapp.tenon.core.protocol.ConvId.group(it)
+                                    }
                                     sessions.sessions()
                                         .filter { rec ->
                                             !rec.synthesized && sameAgent(
@@ -137,6 +144,13 @@ internal fun ControlPlane.inbox(exchange: HttpExchange) {
                                                 kind = rec.agentKind,
                                                 wanted = grantsAgentKey,
                                             )
+                                        }
+                                        .filter { rec ->
+                                            groupConvId == null || run {
+                                                val bound = sessions.conversationOf(rec.sessionId)
+                                                    ?: conversationLedger.conversationOf(rec.sessionId)
+                                                bound == groupConvId
+                                            }
                                         }
                                         .sortedByDescending { rec -> rec.updatedAt }
                                         .map { rec ->
@@ -168,6 +182,9 @@ internal fun ControlPlane.inbox(exchange: HttpExchange) {
                                     // 本机用户 @ 自己的 agent 时 direction=out，但那不是回声 ——
                                     // 只看方向会让这条消息第一条就被跳过（真机症状）。
                                     put("senderIsAgent", hint.senderIsAgent)
+                                    // F5（C4）：点选被拒的原因（稳定 token，桥接侧消费展示）——
+                                    // 「点了别的工作区的会话」必须说得出为什么没投，不能只显「没反应」。
+                                    hint.requestRejectReason?.let { put("requestRejectReason", it) }
                                 }
                             }
                         }

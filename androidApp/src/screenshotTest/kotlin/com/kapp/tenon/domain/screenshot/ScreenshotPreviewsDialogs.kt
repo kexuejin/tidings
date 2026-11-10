@@ -117,7 +117,7 @@ private fun GroupInfoDialogPhonePreview() {
  * 内容铺满 + 危险动作收在滚动末尾，而不是居中弹窗。手机壳实际走的就是这一形态。
  *
  * 四个可空闸门全部武装（「不传 = 假图」纪律，同 ChatWorkspaceRunPhonePreview）：
- * 不传 onLeaveGroup/onDissolveGroup 页脚的动作区整段不画；不传 onExposeWorkspaces
+ * 不传 onLeaveGroup/onDissolveGroup 页脚的动作区整段不画；不传 onStationAgent
  * 「授权入口」不画；不传 onSetTeamRoster agent 行的「团队编制」不画。
  */
 @PreviewTest
@@ -135,7 +135,10 @@ private fun GroupInfoPagePhonePreview() {
         onUpdateMeta = { _, _, _ -> },
         onLeaveGroup = {},
         onDissolveGroup = {},
-        onExposeWorkspaces = { _ -> },
+        onStationAgent = { _, _ -> },
+        onReparseSeats = {},
+        onRemoveGroupAgent = {},
+        onSetProjectDirectory = {},
         onSetTeamRoster = { _, _ -> },
         modifier = Modifier.fillMaxSize(),
     )

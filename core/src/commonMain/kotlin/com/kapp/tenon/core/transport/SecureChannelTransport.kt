@@ -404,15 +404,41 @@ class SecureChannelTransport(
     }
 
     /**
-     * 与 [send] **同源**的可送达判据：入站已接管、外拨已有会话、或配对库里有 pin。
+     * 与 [send] **同一条准入事实**：这个端点**此刻**真的能交出一帧吗。
      *
-     * 不猜「端口像不像垃圾」—— 历史落盘的临时端口之所以发不出去，是因为它们没有
-     * 配对凭据，不是因为数字大。用准入事实过滤，自定义端口的老端照样能发。
+     * 只认**已经连上的会话**（入站已接管且握手完成 / 外拨会话已连）。配对库里有 pin
+     * 只说明「可以拨」，不等于「已经通」：[send] 在无会话时会走 `channelFor` 拨一次，
+     * 拨不通依旧返回 false。
+     *
+     * ## 为什么 pin 不许算进「可送达」（A31 真机复验的形态）
+     *
+     * 一台节点只要历史配过对，就会留着一批「有 pin、对端却不监听」的端点。把它们算成
+     * 可送达时，心跳每轮稳定数出 `targets=2 / sent=0`，且**永远不变** —— 自愈据此
+     * 每两轮重建一次传输面，而真正发生的事只是「对方收不到单播」。重建传输面会把
+     * 已经连上的会话全部断掉，代价远大于它想修的那个问题。
+     *
+     * 拨号是消息面与链路层的事（`channelFor` / `LinkClient`），presence 不负责建会话。
+     * 不猜「端口像不像垃圾」这条纪律不变：这里不看端口数字，只看有没有会话。
      */
     override fun canReach(host: String, port: Int): Boolean {
         val key = endpointKey(host, port)
-        return inboundByEndpoint.containsKey(key) ||
-            outbound.containsKey(key) ||
+        return isLive(inboundByEndpoint[key]) || isLive(outbound[key])
+    }
+
+    /** 会话句柄存在**且**握手完成。JNA 调用包在 runCatching 里：句柄可能已被库侧回收。 */
+    private fun isLive(session: SecureSession?): Boolean =
+        session != null && runCatching { session.isConnected() }.getOrDefault(false)
+
+    /**
+     * 手动地址的「值得拨一次」判据：**有配对凭据**就能建会话，不必等它先连进来。
+     *
+     * 与 [canReach] 相差的正好是「有 pin 但还没有会话」这一格 —— 对 [send] 它是必然失败，
+     * 对「用户手填的地址」却是唯一能让双方互相认识的时机（移动端不监听，只能我们拨）。
+     * 调用方（心跳的手动地址段）用它决定**拨不拨**，但不把它算进停摆判据。
+     */
+    override fun dialable(host: String, port: Int): Boolean {
+        val key = endpointKey(host, port)
+        return isLive(inboundByEndpoint[key]) || isLive(outbound[key]) ||
             runCatching { peerKey(host, port) != null }.getOrDefault(false)
     }
 

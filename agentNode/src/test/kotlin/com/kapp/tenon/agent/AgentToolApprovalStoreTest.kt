@@ -144,4 +144,40 @@ class AgentToolApprovalStoreTest {
         assertEquals(1, s.revokeExactly("phone-1", agentKey = "dsh-cli", tool = "bash"))
         assertEquals(0, s.snapshot().size)
     }
+    // ---- F3（C5）：免批的工作区维度（更严档：null 只命中 null） ----
+
+    @Test
+    fun alwaysAllowInOneWorkspaceDoesNotLeakToAnother() {
+        val s = store()
+        s.remember(nodeId = "phone-1", agentKey = "dsh-cli", tool = "bash", at = 10L, wsId = "ws-a")
+        assertTrue(s.isAlwaysApproved("phone-1", "dsh-cli", "bash", wsId = "ws-a"), "本工作区命中")
+        assertFalse(
+            s.isAlwaysApproved("phone-1", "dsh-cli", "bash", wsId = "ws-b"),
+            "项目 A 的「始终允许」在项目 B 必须仍然要问（C5 全部意义所在）",
+        )
+        assertFalse(
+            s.isAlwaysApproved("phone-1", "dsh-cli", "bash", wsId = null),
+            "带 ws 的规则不命中无 ws 派单（null 只命中 null）",
+        )
+    }
+
+    @Test
+    fun nullWorkspaceRuleOnlyMatchesNullWorkspaceDispatch() {
+        val s = store()
+        s.remember(nodeId = "phone-1", agentKey = "dsh-cli", tool = "bash", at = 10L, wsId = null)
+        assertTrue(s.isAlwaysApproved("phone-1", "dsh-cli", "bash"), "无 ws 规则命中无 ws 派单")
+        assertFalse(
+            s.isAlwaysApproved("phone-1", "dsh-cli", "bash", wsId = "ws-a"),
+            "无 ws 规则不许跨工作区命中 —— 不存在 null = 全部的分支",
+        )
+    }
+
+    @Test
+    fun revokeExactRequiresWorkspaceDimension() {
+        val s = store()
+        s.remember(nodeId = "phone-1", agentKey = "dsh-cli", tool = "bash", at = 10L, wsId = "ws-a")
+        // 撤错工作区的规则 = 撤不掉（逐字相等）
+        assertEquals(0, s.revokeExactly("phone-1", "dsh-cli", "bash", wsId = "ws-b"))
+        assertEquals(1, s.revokeExactly("phone-1", "dsh-cli", "bash", wsId = "ws-a"))
+    }
 }

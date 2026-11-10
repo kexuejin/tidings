@@ -86,7 +86,7 @@ class CardActionAuthorizationTest {
             wsId = "ws-1", wsTitle = "WS", wsPath = null,
             agentKey = null, agentKind = "gpu-runner", online = true,
         )
-        host.handleSetGroupAgentWorkspaces(groupId, listOf("ws-1"))
+        host.handleAddGroupAgent(groupId, "gpu-runner", null)
         return groupId
     }
 

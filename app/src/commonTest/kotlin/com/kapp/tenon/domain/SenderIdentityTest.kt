@@ -667,4 +667,63 @@ class SenderIdentityTest {
         // 名字之外的字段按各自口径走（isAgent 反映 cap，不归 D7 的名字契约管）——
         // 知情行只消费 displayName，谁改了名字档位这里先红。
     }
+
+    // ---------------------------------------------------------------- @ 候选（F1 UI 配套）
+
+    /**
+     * F1 UI 配套（一致性修订清单裁决 4）：候选只显示**席位全名**，裸 agentId/kind
+     * token 不进候选菜单 —— 多席位时 `@<agentId>` 会命中多条席位（发送侧已
+     * fail-closed），单席位时全名也足够。**路由池不动**：`@agentId` 手打在唯一
+     * 席位时仍有效（mentionKeys 是判据层的事，这里只收窄展示）。
+     */
+    @Test
+    fun mentionCandidatesDropBareAgentIdTokens() {
+        // 名字为空的旧席位：行展示退到 kind（= agentId 的裸形态）=> 不进候选。
+        val nameless = VirtualAgentMember(agentId = "dsh", hostNodeId = host, name = "", defaultWsId = "ws-1")
+        val groupMeta = group(virtualAgents = listOf(nameless))
+        val rows = groupParticipantRows(ctx(group = groupMeta))
+        assertTrue(rows.agents.isNotEmpty(), "前提：声明产出了 agent 行")
+        val filtered = mentionCandidateRows(rows, groupMeta)
+        assertTrue(
+            filtered.agents.none { it.displayName == "dsh" },
+            "裸 agentId 不进候选（单席位也不显示 —— 全名足够）",
+        )
+        assertEquals(rows.humans, filtered.humans, "人类成员行原样保留")
+        assertEquals(rows.mentionKeys, filtered.mentionKeys, "路由池不动：@agentId 判据不变")
+    }
+
+    @Test
+    fun mentionCandidatesKeepSeatNamesEvenWhenTheyEqualTheAgentId() {
+        // 职责留空的席位名 = kind（D13 的 `dsh` 形态）：这是**全名**，不是裸 id —— 保留。
+        val dutyEmpty = VirtualAgentMember(agentId = "dsh", hostNodeId = host, name = "dsh", defaultWsId = "ws-1")
+        val groupMeta = group(virtualAgents = listOf(dutyEmpty))
+        val rows = groupParticipantRows(ctx(group = groupMeta))
+        val filtered = mentionCandidateRows(rows, groupMeta)
+        assertTrue(
+            filtered.agents.any { it.mentionToken == "@dsh" },
+            "席位名恰好等于 agentId 时保留：那是 D13 规则生成的全名",
+        )
+    }
+
+    @Test
+    fun mentionCandidatesKeepTheFullSeatName() {
+        val declared = VirtualAgentMember(agentId = "dsh", hostNodeId = host, name = "dsh-teahouse-mobile", defaultWsId = "ws-1")
+        val groupMeta = group(virtualAgents = listOf(declared))
+        val rows = groupParticipantRows(ctx(group = groupMeta))
+        val filtered = mentionCandidateRows(rows, groupMeta)
+        assertTrue(
+            filtered.agents.any { it.mentionToken == "@dsh-teahouse-mobile" },
+            "席位全名照常进候选",
+        )
+    }
+
+    @Test
+    fun mentionCandidatesPassThroughWhenThereAreNoSeats() {
+        val rows = groupParticipantRows(ctx())
+        assertEquals(
+            rows.agents,
+            mentionCandidateRows(rows, null).agents,
+            "没有席位声明（群为 null）=> 无从判裸 id，原样通过",
+        )
+    }
 }

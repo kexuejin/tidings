@@ -22,7 +22,15 @@ import com.kapp.tenon.core.protocol.resolveTeamMemberToken
  * 悬空校验（§3.5）在这里：执行档的成员必须仍在当前声明里（按 agentId）；
  * 目标组员不在档里 ⇒ 过期。
  */
-class TeamExecutionResolver(private val store: TeamExecutionStore) {
+class TeamExecutionResolver(
+    private val store: TeamExecutionStore,
+    /**
+     * 群 → 项目目录 dirId（D16）。执行档主键里的 wsId 换成了 dirId：wsId 是 agent
+     * 视角的句柄（重宣告会变），dirId 是目录档案的稳定 id。null/空 = 群没设指针
+     * ⇒ NotConfigured（blocked 卡写清原因），**不猜**。
+     */
+    private val dirIdOfGroup: (groupId: String) -> String? = { null },
+) {
 
     sealed interface Target {
         /** 完整命中：席位 + 组员 + 有效执行档。 */
@@ -54,11 +62,11 @@ class TeamExecutionResolver(private val store: TeamExecutionStore) {
                 if (seat.hostNodeId != selfNodeId) {
                     return Target.NotConfigured(seat, "this seat is hosted on another device")
                 }
-                val wsId = seat.defaultWsId?.trim().orEmpty()
-                if (wsId.isEmpty()) {
-                    return Target.NotConfigured(seat, "seat has no default workspace bound")
+                val dirId = dirIdOfGroup(groupId)?.trim().orEmpty()
+                if (dirId.isEmpty()) {
+                    return Target.NotConfigured(seat, "group has no project directory bound")
                 }
-                val profile = store.profileFor(groupId, wsId, seat.agentId) ?: run {
+                val profile = store.profileFor(groupId, dirId, seat.agentId) ?: run {
                     val declared = seat.teamMembers.map { it.agentId }
                     if (declared.isEmpty()) {
                         return Target.NotConfigured(seat, "team has no members declared")

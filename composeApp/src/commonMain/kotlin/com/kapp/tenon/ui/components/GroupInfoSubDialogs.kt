@@ -300,7 +300,7 @@ internal fun EditGroupMetaDialog(
  * 暴露单位是 `(agentId, wsId)` —— 一台设备可以装多个 agent，不同 agent 也可能操作同一个
  * workspace（见 `VirtualAgentMember` 的 KDoc）。这里每一行就是一个可被 @ 的成员。
  *
- * 默认名由 `AgentMemberName.base` 生成（`dsh-teahouse-mobile`），冲突时自动加序号。
+ * 默认名由 `AgentMemberName.base` 生成（`dsh-coder`），冲突时自动加序号。
  * **不给手改入口**（产品决定：默认生成唯一名字，后面再加的不允许冲突）。
  *
  * 上一版这里还有一个 `AddGroupWorkspaceDialog`（同形状、按勾选提交 wsId 列表）——

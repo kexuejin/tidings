@@ -236,7 +236,7 @@ data class TeamMemberInfo(
  * 源码级守卫（`VirtualAgentDeclarationGuardTest`）钉住：生产源码里的
  * `VirtualAgentMember(...)` 构造点只允许本函数与解码侧。
  *
- * @param previous 同席位（host + agentId + defaultWsId 都相同）的既有声明；null = 新席位。
+ * @param previous 同席位（host + agentId 相同；D4 之后 defaultWsId 只是投影）的既有声明；null = 新席位。
  */
 fun declarationFor(
     agentId: String,
@@ -253,6 +253,22 @@ fun declarationFor(
     allowedWorkspaces = previous?.allowedWorkspaces ?: emptyList(),
     defaultWsId = defaultWsId,
 )
+
+/**
+ * 席位**执行投影**更新（项目目录决策稿 D4/D5）：把「群项目目录解析结果」写回席位。
+ *
+ * ## 为什么也要收口成一个函数
+ *
+ * 与 [declarationFor] 同一条纪律的另一半：`defaultWsId` / `allowedWorkspaces` 在新模型里
+ * 是**派生投影**（群指针 → 本机解析），不是用户逐席位手配的声明。写它们的调用点
+ * 只有指针投影重建一处 —— 各写一遍 `copy(defaultWsId = …, allowedWorkspaces = …)`
+ * 就是把「谁是权威」打散。其余可声明字段（名字 / 团队 / 实体形态）本函数**一概不碰**：
+ * 换目录不改名、不拆团队。
+ */
+fun VirtualAgentMember.withPointerProjection(
+    defaultWsId: String?,
+    allowedWorkspaces: List<GroupWorkspaceInfo>,
+): VirtualAgentMember = copy(defaultWsId = defaultWsId, allowedWorkspaces = allowedWorkspaces)
 
 /**
  * 这个入驻 agent 是不是团队。
@@ -312,9 +328,12 @@ fun GroupMeta.mentionedVirtualAgent(text: String, tokens: List<String>): Virtual
     // （见调用方注释：用户直觉打的是 `@dsh`，而 `dsh` 是 agentId 不是 name）。
     // 原先这里只比 `name`，于是 `@dsh` 明明命中了却在最后一步查不到条目、返回 null ⇒
     // `addressedToAgent=false` ⇒ 连 agentHint 都不产生。真机上「@ 了但没反应」有它一份。
-    return agents.firstOrNull {
-        it.name.equals(hit, ignoreCase = true) || it.agentId.equals(hit, ignoreCase = true)
-    }
+    //
+    // **F1（C1，多席位 fail-closed）**：同一 token 映射到 >1 个席位 ⇒ **不投**，
+    // 绝不挑第一个 —— first-match 会把消息静默投进第一个席位的默认目录，那是
+    // 「在错误的项目里跑命令」。席位归属判定走 [seatsMatchingToken]（发送侧
+    // `resolvePromptTarget` 同一份判据），两侧从此同一套答案：歧义 = 不执行。
+    return seatsMatchingToken(hit).singleOrNull()
 }
 
 /**

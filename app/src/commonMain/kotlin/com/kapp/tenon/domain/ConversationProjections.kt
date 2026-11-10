@@ -309,3 +309,21 @@ fun workspaceOfGroup(groupId: String?, agent: AgentSlice, settingsSlice: Setting
 /** 会话绑定的工作区（切片版）：与 [RelayUiState.workspaceOfConv] 同义。 */
 fun workspaceOfConv(convId: String?, agent: AgentSlice, settingsSlice: SettingsSlice): WorkspaceUi? =
     workspaceOfGroup(convId?.let { ConvId.groupIdOf(it) }, agent, settingsSlice)
+
+/**
+ * 反查「哪个群绑定了这个工作区」的**单源判据**（F2）。
+ *
+ * 只认席位声明（`defaultWsId` / `allowedWorkspaces` 白名单），**不读群名与简介**：
+ * 「群简介里写了路径 ⇒ 就是这个目录的群」是子串反猜 —— 简介改成别的话、目录改名、
+ * 或者两个群写了同一段路径，反查就指错群。四处同型启发式（`ChatScreen` /
+ * `DesktopShell` / `App.kt` / `WorkspaceGroupCreateDialog`）全部收口到这一份；
+ * 没有声明 ⇒ 返回 null，调用方走「未绑定」空态，不猜。
+ */
+fun groupBoundToWorkspace(wsId: String?, groups: List<GroupMeta>): GroupMeta? {
+    val id = wsId?.trim()?.takeIf { it.isNotEmpty() } ?: return null
+    return groups.firstOrNull { group ->
+        group.virtualAgents.orEmpty().any { seat ->
+            seat.defaultWsId == id || seat.allowedWorkspaces.any { it.wsId == id }
+        }
+    }
+}

@@ -2,12 +2,6 @@
 
 package com.kapp.tenon.domain
 
-import com.kapp.tenon.core.protocol.Codec
-import com.kapp.tenon.core.protocol.ConvId
-import com.kapp.tenon.core.protocol.MsgTypes
-import com.kapp.tenon.core.protocol.VirtualAgentMember
-import com.kapp.tenon.core.protocol.makeEnvelope
-import com.kapp.tenon.core.nowMillis
 import com.kapp.tenon.platform.InMemoryAppPlatform
 import kotlin.test.Test
 import kotlin.test.assertEquals
@@ -21,14 +15,15 @@ import kotlinx.coroutines.runBlocking
 /**
  * 群与工作区的绑定是**声明**（`virtualAgents` 的 `defaultWsId`），不是子串猜测。
  *
- * 旧实现（债#2）：`workspaceOfGroup` / `isWorkspaceGroup` 拿群简介/群名对工作区路径、
- * id、标题做**子串匹配** —— 简介被人编辑过，绑定就悄悄断了；反过来，简介里恰好
- * 提到路径的普通群会被误判成工作区群。
+ * 旧实现（债#2 / 一致性修订清单 F2）：`workspaceOfGroup` / `isWorkspaceGroup` 拿群简介/
+ * 群名对工作区路径、id、标题做**子串匹配** —— 简介被人编辑过，绑定就悄悄断了；反过来，
+ * 简介里恰好提到路径的普通群会被误判成工作区群。
  *
- * 新判据（方案 §3）：群本身不绑定工作区，**声明进群的 agent 带默认工作区**；
- * 绑定 = 声明里 `defaultWsId` 对工作区表的精确 id 匹配，一个字符都不猜。
- * 暴露/收起的入口收拢为 `setGroupAgentWorkspaces`：一次调用把**本机**的声明集合
- * 整体改写为所选集合 —— 撤回是机主主权，只覆盖本机自己的声明。
+ * 新判据（方案 §3 / 项目目录决策稿 D2）：群本身不绑定工作区，**声明进群的 agent 带默认
+ * 工作区**；绑定 = 声明里 `defaultWsId` 对工作区表的精确 id 匹配，一个字符都不猜。
+ * 声明的写入路径 = 入驻（`handleAddGroupAgent`，D6）与指针投影重建（D5）——
+ * 「勾选 wsIds 一次成像」的旧三参保存流已随项目目录模型删除，其专有用例一并退役；
+ * 入驻/移除/指针的钉子见 `GroupAgentStationingTest`。
  */
 class GroupAgentWorkspacesBindingTest {
 
@@ -137,121 +132,5 @@ class GroupAgentWorkspacesBindingTest {
             controller.groupHasDeclaredAgents(bound),
             "带 agent 声明的群就是工作区群：回复 agent 不必再 @ 一遍",
         )
-    }
-
-    /**
-     * `setGroupAgentWorkspaces` 一次成像：本机声明集合被**整体改写**成所选集合，
-     * 其它设备的声明原样保留，已声明工作区的名字不换（@ 提及的 token 不能漂）。
-     */
-    @Test
-    fun setGroupAgentWorkspacesRewritesThisHostsDeclarationsInOneShot() = runBlocking {
-        val controller = controller()
-        for (ws in listOf("ws-a" to "Alpha", "ws-b" to "Beta")) {
-            controller.recordLocalWorkspace(
-                wsId = ws.first,
-                wsTitle = ws.second,
-                wsPath = "/srv/" + ws.second,
-                agentKey = "dsh",
-                agentKind = "DSH",
-            )
-        }
-        val groupId = assertNotNull(
-            controller.createWorkspaceGroup(name = "协同群", wsId = "ws-a", memberIds = listOf(lin)),
-            "前提：工作区群建出来了",
-        )
-        // 别的设备声明的一条（不可动）：经真实的 group.info 合并进来的（rev+1），
-        // 撤回是机主主权，只覆盖本机自己的声明。
-        val local = controller.state.value.settings.groups.single { it.groupId == groupId }
-        val foreign = VirtualAgentMember(agentId = "remote", hostNodeId = lin, name = "remote-agent", defaultWsId = "ws-z")
-        // 群元数据只认**管理员级**的改写（普通成员只能加人）：外来声明经群主 side
-        // 的 info 快照进来 —— 现实里这就是群主转发/合并后的那一份。
-        val incoming = local.copy(
-            virtualAgents = local.virtualAgents.orEmpty() + foreign,
-            rev = local.rev + 1,
-            updatedBy = self,
-            updatedTs = nowMillis() + 1,
-        )
-        controller.groupsCtl.handleOnGroupInfo(
-            makeEnvelope(MsgTypes.GROUP, self, Codec.groupInfoPayload(incoming)),
-            incoming,
-        )
-        val seeded = controller.state.value.settings.groups.single { it.groupId == groupId }
-        assertTrue(seeded.virtualAgents.orEmpty().contains(foreign), "前提：外来声明已合并进来")
-
-        // 一次调用：选 ws-a + ws-b。
-        controller.setGroupAgentWorkspaces(groupId, listOf("ws-a", "ws-b"))
-        val after = controller.state.value.settings.groups.single { it.groupId == groupId }
-        val mine = after.virtualAgents.orEmpty().filter { it.hostNodeId == self }
-        assertEquals(
-            setOf("ws-a", "ws-b"),
-            mine.mapNotNull { it.defaultWsId }.toSet(),
-            "本机声明必须整体等于所选集合",
-        )
-        assertTrue(
-            after.virtualAgents.orEmpty().contains(foreign),
-            "其它设备的声明原样保留：撤回是机主主权，只覆盖本机",
-        )
-        assertTrue(after.rev > seeded.rev, "元数据改动必须递增 rev，否则对端判 stale")
-
-        // 收窄到只剩 ws-b：ws-a 的声明消失，ws-b 的名字保持（@ token 不漂）。
-        val nameOfB = mine.single { it.defaultWsId == "ws-b" }.name
-        controller.setGroupAgentWorkspaces(groupId, listOf("ws-b"))
-        val narrowed = controller.state.value.settings.groups.single { it.groupId == groupId }
-        assertEquals(
-            setOf("ws-b"),
-            narrowed.virtualAgents.orEmpty().filter { it.hostNodeId == self }.mapNotNull { it.defaultWsId }.toSet(),
-            "收窄后本机只剩 ws-b",
-        )
-        assertEquals(
-            nameOfB,
-            narrowed.virtualAgents.orEmpty().single { it.hostNodeId == self && it.defaultWsId == "ws-b" }.name,
-            "已声明工作区的名字不许换：换了它，别人正在打的 @ 就失效了",
-        )
-        assertTrue(
-            narrowed.virtualAgents.orEmpty().contains(foreign),
-            "外来声明仍在",
-        )
-    }
-
-    /** 撤掉全部所选 = 清空**本机**声明（外来声明仍保留）。 */
-    @Test
-    fun clearingTheSelectionRemovesOnlyThisHostsDeclarations() = runBlocking {
-        val controller = controller()
-        controller.recordLocalWorkspace(
-            wsId = "ws-a",
-            wsTitle = "Alpha",
-            wsPath = "/srv/alpha",
-            agentKey = "dsh",
-            agentKind = "DSH",
-        )
-        val groupId = assertNotNull(
-            controller.createWorkspaceGroup(name = "协同群", wsId = "ws-a", memberIds = listOf(lin)),
-            "前提：工作区群建出来了",
-        )
-        val local = controller.state.value.settings.groups.single { it.groupId == groupId }
-        val foreign = VirtualAgentMember(agentId = "remote", hostNodeId = lin, name = "remote-agent")
-        val incoming = local.copy(
-            virtualAgents = local.virtualAgents.orEmpty() + foreign,
-            rev = local.rev + 1,
-            updatedBy = self,
-            updatedTs = nowMillis() + 1,
-        )
-        controller.groupsCtl.handleOnGroupInfo(
-            makeEnvelope(MsgTypes.GROUP, self, Codec.groupInfoPayload(incoming)),
-            incoming,
-        )
-
-        controller.setGroupAgentWorkspaces(groupId, emptyList())
-
-        val after = controller.state.value.settings.groups.single { it.groupId == groupId }
-        assertTrue(
-            after.virtualAgents.orEmpty().none { it.hostNodeId == self },
-            "清空选择 = 本机声明全撤",
-        )
-        assertTrue(
-            after.virtualAgents.orEmpty().any { it.hostNodeId == lin },
-            "别人的声明仍在",
-        )
-        assertEquals(ConvId.group(groupId), ConvId.group(groupId))
     }
 }

@@ -41,8 +41,18 @@ public object DesktopPreviewActions : DesktopPaneActions {
     override fun forwardMessage(message: MessageUi, targetConvId: String): Unit = Unit
 
     override fun updateGroupMeta(groupId: String, description: String?, announce: String?): Unit = Unit
-    override fun setGroupAgentWorkspaces(groupId: String, wsIds: List<String>): Unit = Unit
-    override fun setGroupTeamDeclaration(groupId: String, defaultWsId: String, roster: List<TeamMemberDraft>?): Unit = Unit
+    // 预览没有宿主目录面：写路径一律如实失败（false / Rejected），UI 据此画只读投影。
+    override fun setGroupProjectDirectory(groupId: String, dirId: String?): Boolean = false
+    override fun addGroupAgent(
+        groupId: String,
+        agentId: String,
+        duty: String?,
+    ): com.kapp.tenon.domain.AddGroupAgentResult = com.kapp.tenon.domain.AddGroupAgentResult.Rejected(
+        com.kapp.tenon.domain.AddGroupAgentResult.Reason.NOT_MEMBER,
+    )
+    override fun rebuildGroupSeatProjections(groupId: String): Boolean = false
+    override fun removeGroupAgent(groupId: String, agentId: String): Boolean = false
+    override fun setGroupTeamDeclaration(groupId: String, agentId: String, roster: List<TeamMemberDraft>?): Unit = Unit
 
     /**
      * 预览里建群不做事，但**必须回一个 id**：`DesktopShell` 的会话侧栏拿到 null

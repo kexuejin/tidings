@@ -47,6 +47,15 @@ object AgentSessionPick {
          * 用户要做的动作不同（前者是去开一个，后者是重新选）。
          */
         data object RequestedSessionGone : Result
+
+        /**
+         * 用户**显式点选**的会话存在，但它**不属于本次绑定的工作区**（F5/C4）。
+         *
+         * requested 分支此前不校验 `wsId`：默认路径严格「不跨工作区借用」，点选却能把
+         * 任务派到别的仓 —— 同一个判据两个答案。收紧档（已裁决）：跨工作区的点选
+         * **不执行**，原因经调用方带给用户（不静默换投，也不静默照跑）。
+         */
+        data object RequestedSessionOutsideWorkspace : Result
     }
 
     /**
@@ -77,6 +86,12 @@ object AgentSessionPick {
         if (requested != null) {
             val hit = candidates.firstOrNull { it.sessionId == requested }
                 ?: return Result.RequestedSessionGone
+            // **F5：点选同样要过工作区校验。** 绑定了工作区时，点选一条别的
+            // 工作区的会话 = 把任务派到非默认仓 —— 与默认路径同一套判据
+            // （不跨工作区借用），没有第二答案。null 绑定（未绑定）不校验：
+            // 未绑定本来就在「不带工作区的会话」里干活。
+            val bound = boundWsId?.trim()?.takeIf { it.isNotEmpty() }
+            if (bound != null && hit.wsId != bound) return Result.RequestedSessionOutsideWorkspace
             return Result.Pick(hit.sessionId)
         }
         if (candidates.isEmpty()) {

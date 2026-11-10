@@ -36,14 +36,15 @@ data class TeamExecutionMemberSpec(
 }
 
 /**
- * 一个席位的团队执行档。主键 = `(groupId, defaultWsId, leaderAgentId)`
- * （§3.2：一个群可以有多支团队；`leaderAgentId` 是声明里的稳定 id，不是显示 token）。
+ * 一个席位的团队执行档。主键 = `(groupId, dirId, leaderAgentId)`（D16：dirId 是
+ * 宿主本机目录档案的稳定 id，**不随 agent 重新宣告 wsId 变化**；`leaderAgentId`
+ * 是声明里的稳定 id，不是显示 token）。
  *
  * **执行配置只存在宿主本地** —— 不进 group 帧、不广播给全群；群声明仍然只带身份与角色。
  */
 data class TeamExecutionProfile(
     val groupId: String,
-    val defaultWsId: String,
+    val dirId: String,
     val leaderAgentId: String,
     val updatedAt: Long,
     val members: List<TeamExecutionMemberSpec>,
@@ -160,10 +161,10 @@ class TeamExecutionStore(
     @Volatile
     private var snapshotLength: Long = INITIAL_LENGTH
 
-    /** 主键定位：一个群多支团队时按 `(defaultWsId, leaderAgentId)` 区分席位。 */
-    fun profileFor(groupId: String, defaultWsId: String, leaderAgentId: String): TeamExecutionProfile? =
+    /** 主键定位：一个群多支团队时按 `(dirId, leaderAgentId)` 区分席位。 */
+    fun profileFor(groupId: String, dirId: String, leaderAgentId: String): TeamExecutionProfile? =
         refreshIfStale().firstOrNull {
-            it.groupId == groupId && it.defaultWsId == defaultWsId && it.leaderAgentId == leaderAgentId
+            it.groupId == groupId && it.dirId == dirId && it.leaderAgentId == leaderAgentId
         }
 
     /**
@@ -187,7 +188,7 @@ class TeamExecutionStore(
         lock.write {
             val teams = refreshIfStale().toMutableList()
             teams.removeAll {
-                it.groupId == normalized.groupId && it.defaultWsId == normalized.defaultWsId &&
+                it.groupId == normalized.groupId && it.dirId == normalized.dirId &&
                     it.leaderAgentId == normalized.leaderAgentId
             }
             teams.add(normalized)
@@ -204,11 +205,11 @@ class TeamExecutionStore(
      * 团队解散（Single 退回）时同步移除该席位的执行档（§3.5）：防止存留无用幽灵记录。
      * 条目不存在是正常情形（返回 false 不代表失败）。
      */
-    fun remove(groupId: String, defaultWsId: String, leaderAgentId: String): Boolean {
+    fun remove(groupId: String, dirId: String, leaderAgentId: String): Boolean {
         return lock.write {
             val teams = refreshIfStale().toMutableList()
             val removed = teams.removeAll {
-                it.groupId == groupId && it.defaultWsId == defaultWsId &&
+                it.groupId == groupId && it.dirId == dirId &&
                     it.leaderAgentId == leaderAgentId
             }
             if (!removed) return@write false
@@ -269,10 +270,10 @@ class TeamExecutionStore(
 
     private fun profileOf(entry: JsonObject): TeamExecutionProfile? {
         val groupId = entry["groupId"]?.jsonPrimitive?.contentOrNull ?: return null
-        val defaultWsId = entry["defaultWsId"]?.jsonPrimitive?.contentOrNull ?: return null
+        val dirId = entry["dirId"]?.jsonPrimitive?.contentOrNull ?: return null
         val leaderAgentId = entry["leaderAgentId"]?.jsonPrimitive?.contentOrNull ?: return null
         val updatedAt = entry["updatedAt"]?.jsonPrimitive?.longOrNull ?: return null
-        if (groupId.isBlank() || defaultWsId.isBlank() || leaderAgentId.isBlank()) return null
+        if (groupId.isBlank() || dirId.isBlank() || leaderAgentId.isBlank()) return null
         val members = runCatching {
             entry["members"]?.jsonArray?.map { m ->
                 val o = m.jsonObject
@@ -285,7 +286,7 @@ class TeamExecutionStore(
             }
         }.getOrElse { return null }
         if (members == null || members.isEmpty()) return null
-        return TeamExecutionProfile(groupId, defaultWsId, leaderAgentId, updatedAt, members)
+        return TeamExecutionProfile(groupId, dirId, leaderAgentId, updatedAt, members)
     }
 
     private fun persistLocked(teams: List<TeamExecutionProfile>): Boolean {
@@ -295,7 +296,7 @@ class TeamExecutionStore(
                 teams.sortedBy { it.groupId + "|" + it.leaderAgentId }.forEach { t ->
                     add(buildJsonObject {
                         put("groupId", t.groupId)
-                        put("defaultWsId", t.defaultWsId)
+                        put("dirId", t.dirId)
                         put("leaderAgentId", t.leaderAgentId)
                         put("updatedAt", t.updatedAt)
                         put("members", buildJsonArray {
@@ -336,7 +337,9 @@ class TeamExecutionStore(
 
     private companion object {
         const val TAG = "TEAM-EXEC"
-        const val SCHEMA_VERSION: Long = 1
+        // v2（D16）：键从 (groupId, defaultWsId, leaderAgentId) 换为 dirId —— 旧 v1 文件
+        // 走上面「schemaVersion 不认识 ⇒ 整份按空」的既有语义（清库口径，不做迁移）。
+        const val SCHEMA_VERSION: Long = 2
         const val INITIAL_MTIME = -1L
         const val INITIAL_LENGTH = -1L
         val MISSING_STAMP: Pair<Long, Long> = 0L to 0L

@@ -52,7 +52,7 @@ class AgentIntentPromptAndGrantBridgeTest {
             wsId = "ws-1", wsTitle = "WS", wsPath = null,
             agentKey = null, agentKind = "gpu-runner", online = true,
         )
-        host.handleSetGroupAgentWorkspaces(groupId, listOf("ws-1"))
+        host.handleAddGroupAgent(groupId, "gpu-runner", null)
         return groupId
     }
 
@@ -147,7 +147,7 @@ class AgentIntentPromptAndGrantBridgeTest {
             wsId = "ws-1", wsTitle = "WS", wsPath = null,
             agentKey = null, agentKind = "gpu-runner", online = true,
         )
-        host.handleSetGroupAgentWorkspaces(groupId, listOf("ws-1"))
+        host.handleAddGroupAgent(groupId, "gpu-runner", null)
         // 重投窗口 2s：轮询等到它发生（awaitUntil 纪律，不睡固定时长）。
         com.kapp.tenon.testutil.awaitUntil("席位迟到仍能执行", timeoutMs = 10_000) { seen.isNotEmpty() }
         assertEquals(
@@ -193,7 +193,7 @@ class AgentIntentPromptAndGrantBridgeTest {
                 wsId = "ws-1", wsTitle = "WS", wsPath = null,
                 agentKey = null, agentKind = "gpu-runner", online = true,
             )
-            host.handleSetGroupAgentWorkspaces(groupId, listOf("ws-1"))
+            host.handleAddGroupAgent(groupId, "gpu-runner", null)
             com.kapp.tenon.testutil.awaitUntil("sender 收到座位") {
                 sender.state.value.settings.groups.firstOrNull { it.groupId == groupId }
                     ?.virtualAgents.orEmpty().isNotEmpty()

@@ -187,6 +187,33 @@ class LuciolaSendingPortTest {
         }
     }
 
+    /**
+     * 资料刷新**不许把已经知道的信道端口弄丢**。
+     *
+     * `luciolaPort` 是**运行时注入**的（`selfProfile` 从 `transport.boundPort` 取），
+     * 不是对端资料的一部分：绑端口之前的帧、或任何一条没走 `selfProfile` 的路径都会带
+     * null，而 `touch` 原来整份替换档案 ⇒ 端口被抹掉 ⇒ 心跳与重试回退到数据报**临时
+     * 源端口**，症状与 A30 同形（满屏 `no session / unpaired`），只是成因换成
+     * 「知道过的端口被覆盖」。守卫只在 `touch` 这一处，因为入站发现帧、可靠帧、发现
+     * 引擎全都经过它。
+     */
+    @Test
+    fun aProfileRefreshWithoutChannelPortKeepsTheKnownOne() {
+        val registry = PeerRegistry("node-b")
+        registry.touch("node-a", "192.0.2.7", 17878, profile("node-a", 17878), 1_000L, confirmed = true)
+        // 对端换网后重发 entry，这一次档案里没有 luciolaPort。
+        registry.touch("node-a", "192.0.2.7", 17878, profile("node-a", null), 2_000L, confirmed = true)
+
+        val refreshed = registry.get("node-a")
+        assertEquals(17878, refreshed?.profile?.luciolaPort, "已知的信道端口被这次刷新抹掉了")
+        assertEquals(17878, refreshed?.udpPort)
+        assertEquals(
+            17878,
+            sendingPortFor(refreshed?.profile, 52213),
+            "端口丢了就只剩临时源端口这条回退链 —— 归一必须仍然拿到 17878",
+        )
+    }
+
     /** 心跳不带资料，端口得从节点表里已存的档案取；补发 entry 也不许拨临时端口。 */
     @Test
     fun presenceRefreshUsesTheKnownProfilePort() = runBlocking {

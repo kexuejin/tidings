@@ -117,11 +117,11 @@ class TeamDeclarationWritePathTest {
         }
     }
 
-    /** 手工铺一个群：本机两个席位（同 agentId）+ 两个外来声明。rev = 4。 */
+    /** 手工铺一个群：本机两个席位（不同 agentId）+ 两个外来声明。rev = 4。 */
     private fun seededGroup(controller: RelayController): GroupMeta {
         val mine = listOf(
             declarationFor("dsh", self, "dsh-ws-a", "ws-a", previous = null),
-            declarationFor("dsh", self, "dsh-ws-b", "ws-b", previous = null),
+            declarationFor("codex", self, "codex-ws-b", "ws-b", previous = null),
         )
         val foreign = listOf(
             VirtualAgentMember(agentId = "codex", hostNodeId = peer, name = "codex-peer", defaultWsId = "ws-peer"),
@@ -158,7 +158,7 @@ class TeamDeclarationWritePathTest {
     fun savingATeamBumpsRevAndWritesTheRosterToTheTargetSeat() {
         val controller = controller()
         seededGroup(controller)
-        controller.handleSetGroupTeamDeclaration("g1", "ws-a", roster)
+        controller.handleSetGroupTeamDeclaration("g1", "dsh", roster)
         val meta = groupOf(controller)
         assertEquals(5, meta.rev, "一次保存 = 一次 rev+1")
         assertEquals(self, meta.updatedBy)
@@ -175,7 +175,24 @@ class TeamDeclarationWritePathTest {
     fun savingToSeatAClearsTheSiblingSeatsOfTheSameAgent() {
         val controller = controller()
         seededGroup(controller)
-        controller.handleSetGroupTeamDeclaration("g1", "ws-a", roster)
+        // 旧数据形态：同 agentId 两条席位（D4 之后一个 agent 一条；写路径仍要收敛旧数据）。
+        val local = groupOf(controller)
+        val siblingSeat = declarationFor("dsh", self, "dsh-ws-b", "ws-b", previous = null)
+        controller.handlePersist(
+            controller.state.value.settings.copy(
+                groups = controller.state.value.settings.groups.map {
+                    if (it.groupId == "g1") {
+                        it.copy(
+                            virtualAgents = it.virtualAgents.orEmpty() + siblingSeat,
+                            rev = it.rev + 1,
+                        )
+                    } else {
+                        it
+                    }
+                },
+            ),
+        )
+        controller.handleSetGroupTeamDeclaration("g1", "dsh", roster)
         val sibling = groupOf(controller).virtualAgents.orEmpty().first { it.defaultWsId == "ws-b" }
         assertEquals(EntityTypes.SINGLE, sibling.entityType, "同 agent 其它席位清成单兵")
         assertTrue(sibling.teamMembers.isEmpty())
@@ -186,7 +203,7 @@ class TeamDeclarationWritePathTest {
     fun foreignDeclarationsAreUntouched() {
         val controller = controller()
         val before = seededGroup(controller)
-        controller.handleSetGroupTeamDeclaration("g1", "ws-a", roster)
+        controller.handleSetGroupTeamDeclaration("g1", "dsh", roster)
         val after = groupOf(controller)
         for (foreign in before.virtualAgents.orEmpty().filter { it.hostNodeId != self }) {
             assertEquals(
@@ -202,25 +219,25 @@ class TeamDeclarationWritePathTest {
     fun closingWithNullRosterRestoresSingle() {
         val controller = controller()
         seededGroup(controller)
-        controller.handleSetGroupTeamDeclaration("g1", "ws-a", roster)
-        controller.handleSetGroupTeamDeclaration("g1", "ws-a", null)
+        controller.handleSetGroupTeamDeclaration("g1", "dsh", roster)
+        controller.handleSetGroupTeamDeclaration("g1", "dsh", null)
         var seat = groupOf(controller).virtualAgents.orEmpty().first { it.defaultWsId == "ws-a" }
         assertEquals(EntityTypes.SINGLE, seat.entityType)
         assertTrue(seat.teamMembers.isEmpty())
         assertEquals(6, groupOf(controller).rev, "关闭也是一次 rev+1 广播")
 
         // 空清单与 null 同语义。
-        controller.handleSetGroupTeamDeclaration("g1", "ws-a", emptyList())
+        controller.handleSetGroupTeamDeclaration("g1", "dsh", emptyList())
         seat = groupOf(controller).virtualAgents.orEmpty().first { it.defaultWsId == "ws-a" }
         assertEquals(EntityTypes.SINGLE, seat.entityType)
     }
 
-    /** 多席位：写的是**选中的那个**（defaultWsId 定位），不是"第一条"。 */
+    /** 多席位：写的是**选中的那个**（agentId 定位，D4），不是"第一条"。 */
     @Test
     fun multiSeatWritesGoToTheSelectedSeat() {
         val controller = controller()
         seededGroup(controller)
-        controller.handleSetGroupTeamDeclaration("g1", "ws-b", listOf(TeamMemberDraft("m-t", "tester", "测试")))
+        controller.handleSetGroupTeamDeclaration("g1", "codex", listOf(TeamMemberDraft("m-t", "tester", "测试")))
         val meta = groupOf(controller)
         assertEquals(EntityTypes.TEAM, meta.virtualAgents.orEmpty().first { it.defaultWsId == "ws-b" }.entityType)
         assertEquals(EntityTypes.SINGLE, meta.virtualAgents.orEmpty().first { it.defaultWsId == "ws-a" }.entityType, "没选的席位不动")
@@ -243,7 +260,7 @@ class TeamDeclarationWritePathTest {
         val controller = controller()
         seededGroup(controller)
         // "codex" 是外来声明的 agentId —— 在 @ token 池里。
-        controller.handleSetGroupTeamDeclaration("g1", "ws-a", listOf(TeamMemberDraft("m-x", "codex", "编码")))
+        controller.handleSetGroupTeamDeclaration("g1", "dsh", listOf(TeamMemberDraft("m-x", "codex", "编码")))
         assertEquals(BannerMessage.TeamRosterInvalid, controller.state.value.banner?.message)
         assertEquals(4, groupOf(controller).rev)
     }
@@ -253,7 +270,7 @@ class TeamDeclarationWritePathTest {
     fun aMemberNameCollidingWithTheLeaderTokenIsRejected() {
         val controller = controller()
         seededGroup(controller)
-        controller.handleSetGroupTeamDeclaration("g1", "ws-a", listOf(TeamMemberDraft("m-x", "dsh-ws-a", "编码")))
+        controller.handleSetGroupTeamDeclaration("g1", "dsh", listOf(TeamMemberDraft("m-x", "dsh-ws-a", "编码")))
         assertEquals(BannerMessage.TeamRosterInvalid, controller.state.value.banner?.message)
         assertEquals(4, groupOf(controller).rev)
     }
@@ -263,10 +280,10 @@ class TeamDeclarationWritePathTest {
     fun reusingTheSeatsOwnPreviousMemberNameIsAllowed() {
         val controller = controller()
         seededGroup(controller)
-        controller.handleSetGroupTeamDeclaration("g1", "ws-a", roster)
+        controller.handleSetGroupTeamDeclaration("g1", "dsh", roster)
         // 第二次保存：沿用同一个组员名（roster 里 coder 已是 ws-a 席位的旧组员）。
         controller.handleSetGroupTeamDeclaration(
-            "g1", "ws-a",
+            "g1", "dsh",
             listOf(TeamMemberDraft("m-coder", "coder", "编码"), TeamMemberDraft("m-new", "tester", "测试")),
         )
         assertEquals(EntityTypes.TEAM, groupOf(controller).virtualAgents.orEmpty().first { it.defaultWsId == "ws-a" }.entityType)
@@ -289,7 +306,7 @@ class TeamDeclarationWritePathTest {
         com.kapp.tenon.testutil.awaitUntil("本机工作区行已恢复（带 agentId）") {
             controller.state.value.agentWorkspaces.values.any { it.peerId == self && it.agentId == "dsh" && it.wsId == "ws-a" }
         }
-        controller.handleSetGroupTeamDeclaration("g1", "ws-a", roster)
+        controller.handleSetGroupTeamDeclaration("g1", "dsh", roster)
         // 广播路径用的就是这一份（commitGroupMetaUpdate → groupMetaWithNicks → sendGroupInfo）。
         val broadcast = controller.groupMetaWithNicks(groupOf(controller))
         val decoded = assertNotNull(
@@ -319,7 +336,7 @@ class TeamDeclarationWritePathTest {
             controller.state.value.agentWorkspaces.values.any { it.peerId == self && it.agentId == "dsh" && it.wsId == "ws-a" }
         }
         val nameBefore = groupOf(controller).virtualAgents.orEmpty().first { it.defaultWsId == "ws-a" }.name
-        controller.handleSetGroupTeamDeclaration("g1", "ws-a", roster)
+        controller.handleSetGroupTeamDeclaration("g1", "dsh", roster)
         val broadcast = controller.groupMetaWithNicks(groupOf(controller))
         assertEquals(
             nameBefore,
@@ -378,23 +395,24 @@ class TeamDeclarationWritePathTest {
                 wsId = "ws-member", wsTitle = "member box", wsPath = null,
                 agentKey = null, agentKind = "dsh", online = true,
             )
-            member.handleSetGroupAgentWorkspaces(groupId, listOf("ws-member"))
+            // 入驻（D6）：席位随群落库（不再经「勾选 wsIds」的旧保存流）。
+            member.handleAddGroupAgent(groupId, "dsh", null)
             awaitUntil("群主收到成员的席位声明") {
                 owner.state.value.settings.groups.firstOrNull { it.groupId == groupId }
-                    ?.virtualAgents.orEmpty().any { it.hostNodeId == memberSelf && it.defaultWsId == "ws-member" }
+                    ?.virtualAgents.orEmpty().any { it.hostNodeId == memberSelf && it.agentId == "dsh" }
             }
             // 成员宿主保存团队编制 → 群主端 apply。
             member.handleSetGroupTeamDeclaration(
-                groupId, "ws-member",
+                groupId, "dsh",
                 listOf(TeamMemberDraft("m-coder", "coder", "编码"), TeamMemberDraft("m-reviewer", "reviewer", "审查")),
             )
             awaitUntil("群主收到团队编制") {
                 val seat = owner.state.value.settings.groups.firstOrNull { it.groupId == groupId }
-                    ?.virtualAgents.orEmpty().firstOrNull { it.hostNodeId == memberSelf && it.defaultWsId == "ws-member" }
+                    ?.virtualAgents.orEmpty().firstOrNull { it.hostNodeId == memberSelf && it.agentId == "dsh" }
                 seat != null && seat.entityType == EntityTypes.TEAM && seat.teamMembers.size == 2
             }
             val seen = owner.state.value.settings.groups.first { it.groupId == groupId }
-                .virtualAgents.orEmpty().first { it.hostNodeId == memberSelf && it.defaultWsId == "ws-member" }
+                .virtualAgents.orEmpty().first { it.hostNodeId == memberSelf && it.agentId == "dsh" }
             assertEquals(listOf("coder", "reviewer"), seen.teamMembers.map { it.name })
         } finally {
             owner.stop()
@@ -413,10 +431,11 @@ class TeamDeclarationWritePathTest {
                 wsId = "ws-owner", wsTitle = "owner box", wsPath = null,
                 agentKey = null, agentKind = "dsh", online = true,
             )
-            owner.handleSetGroupAgentWorkspaces(groupId, listOf("ws-owner"))
+            // 入驻（D6）：席位随群落库。
+            owner.handleAddGroupAgent(groupId, "dsh", null)
             awaitUntil("成员收到群主的席位声明") {
                 member.state.value.settings.groups.firstOrNull { it.groupId == groupId }
-                    ?.virtualAgents.orEmpty().any { it.hostNodeId == ownerSelf && it.defaultWsId == "ws-owner" }
+                    ?.virtualAgents.orEmpty().any { it.hostNodeId == ownerSelf && it.agentId == "dsh" }
             }
             val localAtMember = member.state.value.settings.groups.first { it.groupId == groupId }
             val tampered = localAtMember.copy(

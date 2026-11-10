@@ -34,7 +34,7 @@ data class AppNavItem(
 )
 
 /**
- * 底栏 / 侧栏的四个目的地。
+ * 底栏 / 侧栏的五个目的地。
  *
  * 聊天**不在这里**。设计契约 `design/design-spec.json` 把
  * `screens.chat.adaptive.compact.navigation` 标成 `top_bar_back`（detail 为 none），

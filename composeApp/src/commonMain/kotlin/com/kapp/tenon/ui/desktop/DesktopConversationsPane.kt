@@ -141,6 +141,16 @@ public fun ConversationsPane(
      * 而"没有群"那一节仍要画出来，它是这个按钮唯一的落点。
      */
     onCreateGroup: ((name: String, members: List<String>, description: String) -> String?)? = null,
+    /**
+     * 工作区快速建群 / 关联全新目录的通路（项目目录决策稿 D14：建群即选项目目录）。
+     *
+     * 与 [onCreateGroup] 分开而不是复用：工作区群是「先建出来、再分享码拉设备」，
+     * 普通建群要求「至少再选一个人」—— 同一张对话框的两个分支不能共用那道门。
+     * null = 回落 [onCreateGroup]（旧壳没接新通路时的行为不变，但不设指针）。
+     */
+    onCreateWorkspaceGroup: ((name: String, ws: com.kapp.tenon.domain.model.WorkspaceUi, members: List<String>) -> String?)? = null,
+    /** 关联本地全新目录分支（登记目录 → 建群 → 设指针）。null = 回落 [onCreateGroup]。 */
+    onCreateWorkspaceGroupForNewDirectory: ((path: String, groupName: String, members: List<String>) -> String?)? = null,
     /** 冷启动时预置的全局搜索结果，只给截图门禁用（见 [DesktopShell.initialGlobalSearch]）。 */
     initialGlobalSearch: com.kapp.tenon.domain.GlobalSearchResult? = null,
     /**
@@ -242,7 +252,10 @@ public fun ConversationsPane(
                 creatingWorkspaceGroup = false
                 val name = defaultGroupNameFormat.replace("%s", ws.wsTitle ?: ws.wsId)
                 val members = nodeSlice.peers.filter { it.online }.map { it.nodeId }
-                val gid = onCreateGroup(name, members, ws.wsPath ?: ws.wsId)
+                // 建群即选项目目录（D14）：走壳接的「建群 → 绑目录 → 入驻」通路；
+                // 未接时回落旧入口（不设指针，行为与之前一致）。
+                val gid = onCreateWorkspaceGroup?.invoke(name, ws, members)
+                    ?: onCreateGroup(name, members, ws.wsPath ?: ws.wsId)
                 if (gid != null) {
                     onSelect(com.kapp.tenon.core.protocol.ConvId.group(gid))
                 }
@@ -250,7 +263,9 @@ public fun ConversationsPane(
             onCreateNew = { path, groupName, _ ->
                 creatingWorkspaceGroup = false
                 val members = nodeSlice.peers.filter { it.online }.map { it.nodeId }
-                val gid = onCreateGroup(groupName, members, path)
+                // 关联全新目录：登记 → 建群 → 设指针；未接新通路时回落旧入口。
+                val gid = onCreateWorkspaceGroupForNewDirectory?.invoke(path, groupName, members)
+                    ?: onCreateGroup(groupName, members, path)
                 if (gid != null) {
                     onSelect(com.kapp.tenon.core.protocol.ConvId.group(gid))
                 }

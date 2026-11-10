@@ -26,13 +26,14 @@ internal class StoreToolApprovalsSource(private val store: AgentToolApprovalStor
         ToolApprovalRow(
             nodeId = it.nodeId,
             agentKey = it.agentKey,
+            wsId = it.wsId,
             tool = it.tool,
             grantedAt = it.grantedAt,
         )
     }
 
-    override fun revokeExactly(nodeId: String, agentKey: String?, tool: String): Int =
-        store.revokeExactly(nodeId = nodeId, agentKey = agentKey, tool = tool)
+    override fun revokeExactly(nodeId: String, agentKey: String?, wsId: String?, tool: String): Int =
+        store.revokeExactly(nodeId = nodeId, agentKey = agentKey, wsId = wsId, tool = tool)
 
     override fun addChangeListener(listener: () -> Unit): () -> Unit = store.addChangeListener(listener)
 }

@@ -79,7 +79,7 @@ class TeamExecutionResolverTest {
     )
 
     private fun coderProfile(leaderAgentId: String = "dsh-lead") = TeamExecutionProfile(
-        groupId = "g-team", defaultWsId = "ws-1", leaderAgentId = leaderAgentId,
+        groupId = "g-team", dirId = "ws-1", leaderAgentId = leaderAgentId,
         updatedAt = 0,
         members = listOf(
             TeamExecutionMemberSpec("m-coder", TeamExecutionKinds.WORKER, "codex"),
@@ -92,8 +92,9 @@ class TeamExecutionResolverTest {
         group: GroupMeta?,
         token: String?,
         self: String = selfHost,
+        dirIdOfGroup: ((String) -> String?)? = null,
     ): TeamExecutionResolver.Target =
-        TeamExecutionResolver(store).resolve(
+        TeamExecutionResolver(store, dirIdOfGroup ?: { "ws-1" }).resolve(
             groupId = group?.groupId, mentionedKey = token, group = group, selfNodeId = self,
         )
 
@@ -105,7 +106,7 @@ class TeamExecutionResolverTest {
         val hit = assertIs<TeamExecutionResolver.Target.Hit>(target)
         assertEquals("dsh-lead", hit.seat.agentId, "执行主体是席位（宿主），不是组员单独开会话")
         assertEquals("m-coder", hit.member.agentId)
-        assertEquals("ws-1", hit.profile.defaultWsId)
+        assertEquals("ws-1", hit.profile.dirId)
         assertEquals(2, hit.profile.members.size)
     }
 
@@ -134,13 +135,13 @@ class TeamExecutionResolverTest {
 
     /** 席位没绑默认工作区：团队链需要确定的仓（§4.3 workspace 显式取席位默认）。 */
     @Test
-    fun aSeatWithoutADefaultWorkspaceIsNotConfigured() {
+    fun aGroupWithoutProjectDirectoryIsNotConfigured() {
         val store = memberStore(coderProfile())
-        val target = resolve(store, group(teamSeat(defaultWsId = null)), "coder")
+        val target = resolve(store, group(teamSeat()), "coder", dirIdOfGroup = { null })
         val notConfigured = assertIs<TeamExecutionResolver.Target.NotConfigured>(target)
         assertTrue(
-            "workspace" in notConfigured.reason,
-            "原因要指向没绑工作区：${notConfigured.reason}",
+            "directory" in notConfigured.reason,
+            "原因要指向群没设项目目录：${notConfigured.reason}",
         )
     }
 

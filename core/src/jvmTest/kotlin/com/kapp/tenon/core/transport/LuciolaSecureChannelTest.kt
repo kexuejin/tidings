@@ -493,6 +493,48 @@ class LuciolaSecureChannelTest {
     }
 
     /**
+     * 「可送达」跟着**会话**走，不跟配对库里的 pin 走。
+     *
+     * 心跳用 `canReach` 数「这一轮有几个目标」，并用「有目标却一个包都没交出去」判传输泵
+     * 停摆。若把 pin 当成可送达，一台留着历史配对身份的节点会稳定数出
+     * `targets=N / sent=0`（A31 真机：2/0 恒定）⇒ 每两轮重建一次传输面、把连着的会话
+     * 全断掉。这条用例在真信道上钉两个方向：握手前 false（只有 pin），握手后 true。
+     */
+    @Test
+    fun canReachFollowsLiveSessionsNotPairingPins() = runBlocking {
+        val portHost = freeTcpPort()
+        val portPhone = freeTcpPort()
+        val host = factory(portHost, 60)
+        val phone = factory(portPhone, 61)
+        phone.pairPeer(
+            "127.0.0.1", portHost, host.publicKey,
+            secret = Base64.UrlSafe.decode(host.pairSecretBase64()),
+        )
+        val hostTransport = host.createTransport(registryWith("host-node", "phone-node", "127.0.0.1", portPhone))
+        val phoneTransport = phone.createTransport(registryWith("phone-node", "host-node", "127.0.0.1", portHost))
+        hostTransport.start()
+        phoneTransport.start()
+        try {
+            // 配对库里已经有 pin，但一条会话都还没建 ⇒ 此刻一帧也交不出去。
+            assertFalse(phoneTransport.canReach("127.0.0.1", portHost), "pin 不是可投递的证据")
+
+            pairEventually(phoneTransport, "127.0.0.1", portHost, "phone-node")
+            val payload = frame("host-node", "can-reach-after-handshake")
+            val atPhone = async { withTimeout(20_000) { phoneTransport.incoming.first() } }
+            awaitTrue(timeoutMs = 20_000, pollMs = 100) {
+                if (atPhone.isCompleted) true else { hostTransport.send(payload, "127.0.0.1", portPhone); false }
+            }
+            atPhone.await()
+
+            assertTrue(phoneTransport.canReach("127.0.0.1", portHost), "握手完成后外拨会话可投递")
+            assertTrue(hostTransport.canReach("127.0.0.1", portPhone), "入站接管后回程端点同样可投递")
+        } finally {
+            hostTransport.stop()
+            phoneTransport.stop()
+        }
+    }
+
+    /**
      * 文件/投屏的二进制数据帧没有 Envelope,不能靠帧里的 from 归属 ——
      * 必须靠会话指纹反查 (TrustStore → nodeId → registry 端点) 后才能进业务层。
      */

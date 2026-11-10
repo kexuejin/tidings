@@ -1,0 +1,153 @@
+
+> Configure project :core
+:core luciola 原生库未找到 —— 依赖真引擎的用例将被跳过（不是失败）。要跑它们：TENON_LUCIOLA_NATIVE=<cargo-target/release 或 debug> ./gradlew :core:jvmTest
+
+> Task :agent-contract:checkKotlinGradlePluginConfigurationErrors SKIPPED
+> Task :agent-contract:compileKotlin UP-TO-DATE
+> Task :agent-contract:compileJava NO-SOURCE
+> Task :agent-contract:processResources NO-SOURCE
+> Task :agent-contract:classes UP-TO-DATE
+> Task :agent-contract:jar UP-TO-DATE
+> Task :agentNode:checkKotlinGradlePluginConfigurationErrors SKIPPED
+> Task :core:kmpPartiallyResolvedDependenciesChecker
+> Task :core:checkKotlinGradlePluginConfigurationErrors SKIPPED
+> Task :core:compileKotlinJvm UP-TO-DATE
+> Task :core:compileJvmMainJava NO-SOURCE
+> Task :core:jvmProcessResources NO-SOURCE
+> Task :core:processJvmMainResources SKIPPED
+> Task :core:jvmMainClasses UP-TO-DATE
+> Task :core:jvmJar UP-TO-DATE
+> Task :agentNode:compileKotlin UP-TO-DATE
+> Task :agentNode:compileJava NO-SOURCE
+> Task :agentNode:processResources NO-SOURCE
+> Task :agentNode:classes UP-TO-DATE
+> Task :agentNode:jar UP-TO-DATE
+> Task :app:kmpPartiallyResolvedDependenciesChecker
+> Task :app:checkKotlinGradlePluginConfigurationErrors SKIPPED
+> Task :app:generateCommonMainRelayDatabaseInterface UP-TO-DATE
+> Task :app:compileKotlinJvm UP-TO-DATE
+> Task :app:compileJvmMainJava NO-SOURCE
+> Task :app:jvmProcessResources NO-SOURCE
+> Task :app:processJvmMainResources SKIPPED
+> Task :app:jvmMainClasses UP-TO-DATE
+> Task :app:jvmJar UP-TO-DATE
+> Task :composeApp:checkJvmMainComposeLibrariesCompatibility
+> Task :composeApp:kmpPartiallyResolvedDependenciesChecker
+> Task :composeApp:checkKotlinGradlePluginConfigurationErrors SKIPPED
+> Task :composeApp:convertXmlValueResourcesForCommonMain UP-TO-DATE
+> Task :composeApp:copyNonXmlValueResourcesForCommonMain UP-TO-DATE
+> Task :composeApp:prepareComposeResourcesTaskForCommonMain UP-TO-DATE
+> Task :composeApp:generateResourceAccessorsForCommonMain UP-TO-DATE
+> Task :composeApp:convertXmlValueResourcesForJvmMain NO-SOURCE
+> Task :composeApp:copyNonXmlValueResourcesForJvmMain NO-SOURCE
+> Task :composeApp:prepareComposeResourcesTaskForJvmMain NO-SOURCE
+> Task :composeApp:generateResourceAccessorsForJvmMain NO-SOURCE
+> Task :composeApp:generateActualResourceCollectorsForJvmMain UP-TO-DATE
+> Task :composeApp:generateComposeResClass UP-TO-DATE
+> Task :composeApp:generateExpectResourceCollectorsForCommonMain UP-TO-DATE
+> Task :composeApp:compileKotlinJvm UP-TO-DATE
+> Task :composeApp:compileJvmMainJava NO-SOURCE
+> Task :composeApp:assembleJvmMainResources UP-TO-DATE
+> Task :composeApp:jvmProcessResources UP-TO-DATE
+> Task :composeApp:processJvmMainResources SKIPPED
+> Task :composeApp:jvmMainClasses UP-TO-DATE
+> Task :composeApp:jvmJar UP-TO-DATE
+> Task :desktopApp:checkKotlinGradlePluginConfigurationErrors SKIPPED
+> Task :desktopApp:convertXmlValueResourcesForMain NO-SOURCE
+> Task :desktopApp:copyNonXmlValueResourcesForMain NO-SOURCE
+> Task :desktopApp:prepareComposeResourcesTaskForMain NO-SOURCE
+> Task :desktopApp:generateResourceAccessorsForMain NO-SOURCE
+> Task :desktopApp:generateActualResourceCollectorsForMain UP-TO-DATE
+> Task :desktopApp:generateComposeResClass UP-TO-DATE
+> Task :orchestration:checkKotlinGradlePluginConfigurationErrors SKIPPED
+> Task :orchestration:compileKotlin UP-TO-DATE
+> Task :orchestration:compileJava NO-SOURCE
+> Task :orchestration:processResources NO-SOURCE
+> Task :orchestration:classes UP-TO-DATE
+> Task :orchestration:jar UP-TO-DATE
+> Task :desktopApp:compileKotlin UP-TO-DATE
+> Task :desktopApp:compileJava NO-SOURCE
+> Task :desktopApp:assembleMainResources UP-TO-DATE
+> Task :desktopApp:processResources UP-TO-DATE
+> Task :desktopApp:classes UP-TO-DATE
+> Task :desktopApp:jar UP-TO-DATE
+> Task :desktopApp:copyLuciolaNative NO-SOURCE
+
+> Task :desktopApp:verifyLuciolaNative
+dylib    = <worktree>/desktopApp/resources/common/native/libluciola_uniffi.dylib
+sha256   = 7905b1e72cd126f6937e8323246a6b6b503674fd70806fcfc73430f7e4521930
+size     = 3607120
+jar      = <external-volume>/gradle-user-home/caches/modules-2/files-2.1/io.github.kexuejin/luciola-jvm/0.9.0/9b5fa3dcb5b4d3980571c6a73a1e71797397cd69/luciola-jvm-0.9.0.jar
+bindings = 71 项 checksum, contract version 29
+checksums: 71 checked, 0 mismatch
+VERDICT= MATCH (contract version 29)
+
+> Task :desktopApp:prepareAppResources UP-TO-DATE
+
+> Task :desktopApp:run
+SLF4J(W): No SLF4J providers were found.
+SLF4J(W): Defaulting to no-operation (NOP) logger implementation
+SLF4J(W): See https://www.slf4j.org/codes.html#noProviders for further details.
+[luciola] host configured port=17878 fp=sha256:c35a3
+[luciola] host configured port=17878 fp=sha256:c35a3
+relay: headless mode; ui not started. ctrl-c to stop.
+[heartbeat] idle linked=0 skipped=30
+[drivers] codex-cli ← provider env: OPENCODE_API_KEY (values stay in the child process)
+[drivers] opencode-cli ← provider env: HTTPS_PROXY, HTTP_PROXY, OPENCODE_API_KEY, OPENCODE_CONFIG, http_proxy, https_proxy (values stay in the child process)
+[drivers] dsh-cli ← provider env: DSH_PERMISSION_MODE, HTTPS_PROXY, HTTP_PROXY, OPENCODE_API_KEY, http_proxy, https_proxy (values stay in the child process)
+[luciola] pin lookup 192.168.2.22:17878 registry=25222a45-4b84-4e9a-9870-d13f86b2a8de pinned=true
+[xport] out send failed key=192.168.2.22:17878 connected=false len=557
+[RELAY-PLUGIN] skipped agy-cli: executable "agy" not found in /opt/homebrew/bin : /usr/local/bin : /usr/bin : /bin : /usr/sbin : /sbin (GUI processes get a minimal PATH; use an absolute path in the entrypoint, or install the runtime into one of these directories)
+[xport] out 192.168.2.22:17878 state=connected detail=sha256:c05016890c9d33fe0485d006fee5276a1d52e4f9baa94f14b91a8f5fd3bf2c16
+[RELAY-TRIGGER] trigger tasks synced: 0 cron, 0 webhook route(s)
+[xport] in state=connected detail=sha256:c05016890c9d33fe0485d006fee5276a1d52e4f9baa94f14b91a8f5fd3bf2c16
+[xport] in trusted=true fp=sha256:c05016890c9d33fe0485d006fee5276a1d52e4f9baa94f14b91a8f5fd3bf2c16 pairing=true
+[luciola] discovered 25222a45-4b84-4e9a-9870-d13f86b2a8de at 192.168.2.22:17878
+[flush] peer=25222a45 from=0 left=0 in=0ms
+[flush] peer=25222a45 from=0 left=0 in=0ms
+[flush] peer=25222a45 from=0 left=0 in=0ms
+[send] peer=25222a45 id=3b1c096b ep=192.168.2.22:17878 acked=true type=group size=718 in=44ms online=true regOnline=true regEp=192.168.2.22:17878 schedule=[1000, 2000, 4000]
+[send] peer=25222a45 channel=TRANSPORT
+[send] peer=25222a45 id=9b29f211 ep=192.168.2.22:17878 acked=true type=group size=923 in=54ms online=true regOnline=true regEp=192.168.2.22:17878 schedule=[1000, 2000, 4000]
+[send] peer=25222a45 id=7889593b ep=192.168.2.22:17878 acked=true type=group size=1025 in=68ms online=true regOnline=true regEp=192.168.2.22:17878 schedule=[1000, 2000, 4000]
+[screen] txprobe n=17 connAvgUs=11 sendAvgUs=409
+[screen] txprobe n=3 connAvgUs=2 sendAvgUs=529
+[screen] txprobe n=6 connAvgUs=1 sendAvgUs=274
+[screen] txprobe n=3 connAvgUs=2 sendAvgUs=320
+[screen] txprobe n=4 connAvgUs=8 sendAvgUs=285
+[screen] txprobe n=5 connAvgUs=1 sendAvgUs=343
+[screen] txprobe n=2 connAvgUs=2 sendAvgUs=370
+[screen] txprobe n=5 connAvgUs=1 sendAvgUs=333
+[screen] txprobe n=3 connAvgUs=1 sendAvgUs=318
+[screen] txprobe n=3 connAvgUs=1 sendAvgUs=286
+[screen] txprobe n=6 connAvgUs=1 sendAvgUs=294
+[screen] txprobe n=2 connAvgUs=2 sendAvgUs=331
+[screen] txprobe n=2 connAvgUs=1 sendAvgUs=235
+[screen] txprobe n=6 connAvgUs=1 sendAvgUs=320
+[screen] txprobe n=3 connAvgUs=1 sendAvgUs=263
+[screen] txprobe n=7 connAvgUs=1 sendAvgUs=213
+[screen] txprobe n=2 connAvgUs=3 sendAvgUs=462
+[screen] txprobe n=6 connAvgUs=0 sendAvgUs=168
+[screen] txprobe n=2 connAvgUs=1 sendAvgUs=254
+[screen] txprobe n=3 connAvgUs=0 sendAvgUs=221
+[screen] txprobe n=7 connAvgUs=1 sendAvgUs=247
+[screen] txprobe n=2 connAvgUs=1 sendAvgUs=252
+[screen] txprobe n=5 connAvgUs=1 sendAvgUs=225
+[screen] txprobe n=4 connAvgUs=2 sendAvgUs=405
+[screen] txprobe n=3 connAvgUs=3 sendAvgUs=323
+[screen] txprobe n=6 connAvgUs=1 sendAvgUs=268
+[screen] txprobe n=3 connAvgUs=2 sendAvgUs=329
+[screen] txprobe n=7 connAvgUs=1 sendAvgUs=375
+[screen] txprobe n=2 connAvgUs=8 sendAvgUs=334
+[screen] txprobe n=4 connAvgUs=0 sendAvgUs=204
+[screen] txprobe n=5 connAvgUs=3 sendAvgUs=264
+[screen] txprobe n=3 connAvgUs=1 sendAvgUs=302
+[screen] txprobe n=6 connAvgUs=1 sendAvgUs=382
+[screen] txprobe n=2 connAvgUs=1 sendAvgUs=244
+[screen] txprobe n=4 connAvgUs=1 sendAvgUs=199
+[screen] txprobe n=4 connAvgUs=1 sendAvgUs=243
+[screen] txprobe n=2 connAvgUs=1 sendAvgUs=244
+[screen] txprobe n=5 connAvgUs=1 sendAvgUs=254
+[screen] txprobe n=4 connAvgUs=3 sendAvgUs=386
+[screen] txprobe n=2 connAvgUs=1 sendAvgUs=272
+[screen] txprobe n=6 connAvgUs=1 sendAvgUs=704

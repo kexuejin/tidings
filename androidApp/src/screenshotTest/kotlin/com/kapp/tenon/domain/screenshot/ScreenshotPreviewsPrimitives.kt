@@ -501,8 +501,11 @@ private const val TOOL_APPROVALS_NODE_2 = "n-li00000000004"
 /** 帧用的假免批表：固定行 + 撤销只动内存副本，绝不读挂钟或真文件。 */
 private class FakeToolApprovalsSource(private val rows: MutableList<ToolApprovalRow>) : ToolApprovalsSource {
     override fun snapshotRows(): List<ToolApprovalRow> = rows.sortedByDescending { it.grantedAt }
-    override fun revokeExactly(nodeId: String, agentKey: String?, tool: String): Int {
-        val idx = rows.indexOfFirst { it.nodeId == nodeId && it.agentKey == agentKey && it.tool == tool }
+    override fun revokeExactly(nodeId: String, agentKey: String?, wsId: String?, tool: String): Int {
+        // wsId 只命中 wsId（null 只命中 null）：F3 的更严档，预览假件与真表同一判据。
+        val idx = rows.indexOfFirst {
+            it.nodeId == nodeId && it.agentKey == agentKey && it.wsId == wsId && it.tool == tool
+        }
         return if (idx >= 0) { rows.removeAt(idx); 1 } else 0
     }
     override fun addChangeListener(listener: () -> Unit): () -> Unit = { }
@@ -510,8 +513,8 @@ private class FakeToolApprovalsSource(private val rows: MutableList<ToolApproval
 
 private fun fakeToolApprovalsSource(): ToolApprovalsSource = FakeToolApprovalsSource(
     mutableListOf(
-        ToolApprovalRow(nodeId = TOOL_APPROVALS_NODE_1, agentKey = "dsh-cli", tool = "bash", grantedAt = at(-25)),
-        ToolApprovalRow(nodeId = TOOL_APPROVALS_NODE_2, agentKey = null, tool = "git", grantedAt = at(-5)),
+        ToolApprovalRow(nodeId = TOOL_APPROVALS_NODE_1, agentKey = "dsh-cli", wsId = null, tool = "bash", grantedAt = at(-25)),
+        ToolApprovalRow(nodeId = TOOL_APPROVALS_NODE_2, agentKey = null, wsId = null, tool = "git", grantedAt = at(-5)),
     ),
 )
 

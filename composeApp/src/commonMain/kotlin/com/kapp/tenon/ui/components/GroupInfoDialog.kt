@@ -36,7 +36,6 @@ import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
-import com.kapp.tenon.core.protocol.declaredWorkspaceOfSender
 import com.kapp.tenon.core.protocol.representativeSeat
 import com.kapp.tenon.core.protocol.seatsOfAgent
 import com.kapp.tenon.core.protocol.isTeam
@@ -134,25 +133,33 @@ fun GroupInfoDialog(
      */
     onMentionMember: ((SenderIdentity) -> Unit)? = null,
     /**
-     * 本机可以暴露给这个群的 workspace（每个就是一个可被 @ 的成员）。
+     * 本机可以入驻这个群的 agent（每个就是一条入驻候选）。
      *
-     * 暴露单位是 `(agentId, wsId)`：一台设备可以装多个 agent，不同 agent 也可能
-     * 操作同一个 workspace。空 = 不提供入口（桌面壳/截图夹具）。
+     * 来自本机工作区台账：一台设备可以装多个 agent。空 = 不提供入驻清单（截图夹具）。
      */
     localWorkspaces: List<WorkspaceUi> = emptyList(),
     /**
-     * 「添加智能体」确认后的回调：参数是**要暴露的 wsId 列表**。
+     * 入驻动作通路（D6：入驻不问目录）：`(agentId, duty)`。
      *
-     * null = 不提供该入口。与 [onAddMembers] 分开：那个是加**人**，这个暴露**本机项目**。
+     * null = 不提供该入口（授权面板只读）。与 [onAddMembers] 分开：那个加**人**，
+     * 这个入驻**本机智能体**。
      */
-    onExposeWorkspaces: ((List<String>) -> Unit)? = null,
+    onStationAgent: ((agentId: String, duty: String?) -> Unit)? = null,
     /**
-     * 团队编制的保存通路（团队创建方案 §2.1/§4.3）：`(defaultWsId, roster)`。
-     *
-     * null = 这个壳没有保存通路 ⇒ agent 行**不画**「团队编制」按钮（一个按下去
-     * 没反应的按钮比没有更糟，与其它可选入口同一条规矩）。
+     * 重新解析本机席位的执行投影并广播（「去暴露」的落点）。null = 该壳没有通路。
      */
-    onSetTeamRoster: ((defaultWsId: String, roster: List<TeamMemberDraft>?) -> Unit)? = null,
+    onReparseSeats: (() -> Unit)? = null,
+    /**
+     * 移除本机席位（撤回入驻；机主主权）。null = 该壳没有通路 ⇒ 行内不画「移出」。
+     */
+    onRemoveGroupAgent: ((agentId: String) -> Unit)? = null,
+    /**
+     * 团队编制的保存通路（团队创建方案 §2.1/§4.3）：`(agentId, roster)`。
+     *
+     * 定位键是席位身份 `(groupId, hostNodeId, agentId)`（D4）。null = 这个壳没有保存
+     * 通路 ⇒ agent 行**不画**「团队编制」按钮（一个按下去没反应的按钮比没有更糟）。
+     */
+    onSetTeamRoster: ((agentId: String, roster: List<TeamMemberDraft>?) -> Unit)? = null,
     /**
      * 团队执行档端口（团队执行方案 §6.3）：null = 该壳没有执行面（手机等非宿主）
      * ⇒ TeamRosterDialog 的执行配置段整段不画（声明编辑不受影响）。
@@ -163,6 +170,18 @@ fun GroupInfoDialog(
      * （§2.2 双端形态契约 —— 参数化的是外壳差异，名册本体两端共用一份）。
      */
     showTeamHostManagedNotice: Boolean = false,
+    /**
+     * 宿主目录端口（项目目录决策稿 §5.1）：null = 本机不是宿主（手机常态）⇒
+     * 「本项目目录」行只画声明投影（不画「更换」入口）。
+     */
+    hostDirectoryPort: com.kapp.tenon.domain.HostDirectoryPort? = null,
+    /**
+     * 非宿主的目录行显示值：席位声明投影（`workspaceOfGroup` 的 wsTitle）。
+     * 路径永远不上屏（`group_auth_path_host_only` 语义）。
+     */
+    declaredDirectoryTitle: String? = null,
+    /** 设 / 清本群项目目录指针（D5；宿主壳接，手机壳不画入口）。 */
+    onSetProjectDirectory: ((dirId: String?) -> Unit)? = null,
 ) {
     val isSelfOwner = group.ownerId == selfNodeId || (group.ownerId == null && group.creatorId == selfNodeId)
     /** 本机是否还在这份成员表里。被移出/被解散后为 false —— 见退出按钮的文案分支。 */
@@ -199,10 +218,15 @@ fun GroupInfoDialog(
                     identityContext = identityContext,
                     onMentionMember = onMentionMember,
                     localWorkspaces = localWorkspaces,
-                    onExposeWorkspaces = onExposeWorkspaces,
+                    onStationAgent = onStationAgent,
+                    onReparseSeats = onReparseSeats,
+                    onRemoveGroupAgent = onRemoveGroupAgent,
                     onSetTeamRoster = onSetTeamRoster,
                     showTeamHostManagedNotice = showTeamHostManagedNotice,
                     teamExecutionPort = teamExecutionPort,
+                    hostDirectoryPort = hostDirectoryPort,
+                    declaredDirectoryTitle = declaredDirectoryTitle,
+                    onSetProjectDirectory = onSetProjectDirectory,
                     modifier = Modifier.fillMaxWidth().heightIn(max = cap),
                 )
             }
@@ -300,10 +324,15 @@ public fun GroupInfoPage(
     identityContext: SenderIdentityContext? = null,
     onMentionMember: ((SenderIdentity) -> Unit)? = null,
     localWorkspaces: List<WorkspaceUi> = emptyList(),
-    onExposeWorkspaces: ((List<String>) -> Unit)? = null,
-    onSetTeamRoster: ((defaultWsId: String, roster: List<TeamMemberDraft>?) -> Unit)? = null,
+    onStationAgent: ((agentId: String, duty: String?) -> Unit)? = null,
+    onReparseSeats: (() -> Unit)? = null,
+    onRemoveGroupAgent: ((agentId: String) -> Unit)? = null,
+    onSetTeamRoster: ((agentId: String, roster: List<TeamMemberDraft>?) -> Unit)? = null,
     showTeamHostManagedNotice: Boolean = false,
     teamExecutionPort: com.kapp.tenon.domain.TeamExecutionPort? = null,
+    hostDirectoryPort: com.kapp.tenon.domain.HostDirectoryPort? = null,
+    declaredDirectoryTitle: String? = null,
+    onSetProjectDirectory: ((dirId: String?) -> Unit)? = null,
     modifier: Modifier = Modifier,
 ) {
     val sp = LocalAppSpacing.current
@@ -349,10 +378,15 @@ public fun GroupInfoPage(
                 identityContext = identityContext,
                 onMentionMember = onMentionMember,
                 localWorkspaces = localWorkspaces,
-                onExposeWorkspaces = onExposeWorkspaces,
+                onStationAgent = onStationAgent,
+                onReparseSeats = onReparseSeats,
+                onRemoveGroupAgent = onRemoveGroupAgent,
                 onSetTeamRoster = onSetTeamRoster,
                 showTeamHostManagedNotice = showTeamHostManagedNotice,
                 teamExecutionPort = teamExecutionPort,
+                hostDirectoryPort = hostDirectoryPort,
+                declaredDirectoryTitle = declaredDirectoryTitle,
+                onSetProjectDirectory = onSetProjectDirectory,
                 modifier = Modifier
                     .weight(1f)
                     .fillMaxWidth()
@@ -444,10 +478,15 @@ private fun GroupInfoBody(
     identityContext: SenderIdentityContext?,
     onMentionMember: ((SenderIdentity) -> Unit)?,
     localWorkspaces: List<WorkspaceUi>,
-    onExposeWorkspaces: ((List<String>) -> Unit)?,
-    onSetTeamRoster: ((defaultWsId: String, roster: List<TeamMemberDraft>?) -> Unit)?,
+    onStationAgent: ((agentId: String, duty: String?) -> Unit)?,
+    onReparseSeats: (() -> Unit)?,
+    onRemoveGroupAgent: ((agentId: String) -> Unit)?,
+    onSetTeamRoster: ((agentId: String, roster: List<TeamMemberDraft>?) -> Unit)?,
     showTeamHostManagedNotice: Boolean,
     teamExecutionPort: com.kapp.tenon.domain.TeamExecutionPort?,
+    hostDirectoryPort: com.kapp.tenon.domain.HostDirectoryPort?,
+    declaredDirectoryTitle: String?,
+    onSetProjectDirectory: ((dirId: String?) -> Unit)?,
     modifier: Modifier = Modifier,
     footer: (@Composable () -> Unit)? = null,
 ) {
@@ -482,13 +521,13 @@ private fun GroupInfoBody(
         }
         ?: noneText
 
-    // 「本机 agent 入驻」对话框。与加人分开：那个加**人**，这个暴露**本机项目**。
-    var showExposeDialog by remember { mutableStateOf(false) }
+    // 「授权管理」对话框。与加人分开：那个加**人**，这个是项目目录授权与入驻。
+    var showAuthDialog by remember { mutableStateOf(false) }
     var showEditMetaDialog by remember { mutableStateOf(false) }
     var memberToRemove by remember { mutableStateOf<String?>(null) }
-    // 撤回**本机** agent 暴露前也要过一道确认：它对全群生效（群里的人立刻 @ 不到它），
+    // 撤回**本机** agent 席位前也要过一道确认：它对全群生效（群里的人立刻 @ 不到它），
     // 与移出人类成员同一档破坏性 —— 过去一按就生效、没有回头路。
-    var agentWsToRevoke by remember { mutableStateOf<String?>(null) }
+    var agentToRevoke by remember { mutableStateOf<String?>(null) }
     // 团队编制对话框的目标（行身份, 该 agent 的本机席位）；null = 关着。
     var teamRosterFor by remember { mutableStateOf<Pair<SenderIdentity, List<VirtualAgentMember>>?>(null) }
     var showAddDialog by remember { mutableStateOf(false) }
@@ -570,6 +609,16 @@ private fun GroupInfoBody(
                             Text(text = ann, style = MaterialTheme.typography.bodySmall)
                         }
                     }
+                    // 「本项目目录」行（§4.1）：宿主显示本机指针指向的目录名 +「更换/设置」；
+                    // 非宿主只显示席位声明投影或「由宿主授权」，路径永远不上屏。
+                    // 与授权面板顶部共用 [GroupProjectDirectoryRow] 一份实现（AGENTS §2.6）。
+                    GroupProjectDirectoryRow(
+                        groupId = group.groupId,
+                        hostDirectoryPort = hostDirectoryPort,
+                        declaredTitle = declaredDirectoryTitle,
+                        onSetDirectory = onSetProjectDirectory,
+                        modifier = Modifier.padding(top = LocalAppSpacing.current.xs),
+                    )
                     Row(
                         modifier = Modifier.fillMaxWidth(),
                         horizontalArrangement = Arrangement.SpaceBetween,
@@ -707,18 +756,14 @@ private fun GroupInfoBody(
                         fontWeight = FontWeight.SemiBold,
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                     )
-                    // **这个按钮是「加 agent」，不是「加人」。**
+                    // **这个按钮是「授权管理」，不是「加人」。**
                     //
-                    // 原先它写的文案是「邀请新智能体入驻」，点开却弹出加成员的对话框
-                    // （`showAddDialog`）—— 而真正的暴露入口 `onExposeWorkspaces`
-                    // 从未被渲染过（全文只出现一次，就是声明）。
-                    // 于是「群内加减 agent」这条能力在界面上根本不存在。
-                    // 授权面板（方案 §5.1）的入口：宿主来编辑，别的成员来只读查看
-                    // （「群里授权了哪些目录」本来就是全群可见的声明）。
-                    if (onExposeWorkspaces != null || rows.agents.isNotEmpty()) {
+                    // 入口画不画的判据与旧版同形：有动作通路（可编辑）或群里有 agent
+                    // （非宿主也值得打开看只读投影）。面板本体见 SetGroupAgentWorkspacesDialog。
+                    if (onStationAgent != null || rows.agents.isNotEmpty()) {
                         AppTextButton(
                             text = stringResource(Res.string.group_auth_entry),
-                            onClick = { showExposeDialog = true },
+                            onClick = { showAuthDialog = true },
                             size = AppButtonSize.Small,
                         )
                     }
@@ -742,7 +787,7 @@ private fun GroupInfoBody(
                     else seatsOfAgent(group.virtualAgents, host, agent)
                 }
                 val teamSeat = remember(rowSeats) { rowSeats.firstOrNull { it.isTeam } }
-                // 这个 agent 的暴露来自**本机**吗？只有本机才能撤回自己的暴露
+                // 这个 agent 的席位声明来自**本机**吗？只有本机才能撤回自己的入驻
                 // （那是机主主权，与「执行名单」同一方向）。
                 //
                 // **匹配要比 `id` 里的 host + kind，不能比 `name`。**
@@ -751,12 +796,9 @@ private fun GroupInfoBody(
                 // 记的是 `hostNodeId` + `agentId`/`name`。
                 // 拿 `name`（`dsh-teahouse-mobile`）去比 `id` 永远不等，
                 // 于是「旧 agent 没有移除入口」—— 真机上就是这个症状。
-                // 规则抽在 core 的 `declaredWorkspaceOfSender`（可测；全仓一份实现）。
-                val ownWsId = declaredWorkspaceOfSender(
-                    senderId = identity.id,
-                    declaredAgents = group.virtualAgents,
-                    hostNodeId = selfNodeId,
-                )
+                // 席位定位走 core 的 `seatsOfAgent`（与代表席位同一套判据）；
+                // 撤回按 agentId（D4 的席位身份键）。
+                val ownSeat = rowSeats.firstOrNull { it.hostNodeId == selfNodeId }
                 GroupMemberRow(
                     identity = identity,
                     online = identity.online == true,
@@ -790,10 +832,10 @@ private fun GroupInfoBody(
                     },
                     // 「移出」分两种，**不能合成一个按钮**：
                     //
-                    //  · agent 是 `virtualAgents` 里的一条声明（不是 `group.members` 成员）；
-                    //    移出 = 撤回那条暴露，走 `onExposeWorkspaces`（传不含它的列表）。
-                    //    原先这里要求 `identity.id in group.members` —— agent 永远不满足，
-                    //    于是**旧 agent 没有任何移除入口**，暴露了就撤不掉。
+                    //  · agent 是 `virtualAgents` 里的一条本机席位声明（不是 `group.members`
+                    //    成员）：移出 = 撤回入驻，走 `onRemoveGroupAgent`（按 agentId 摘除，
+                    //    D4 的席位身份键）。原先这里要求 `identity.id in group.members` ——
+                    //    agent 永远不满足，于是**旧 agent 没有任何移除入口**。
                     //  · 宿主节点是真正的群成员，移出 = 让群主踢人，走 `onRemoveMember`。
                     //
                     // 双动作**竖排**：两颗 Small 文字按钮横排时（团队编制 ~68dp + 移出
@@ -813,11 +855,11 @@ private fun GroupInfoBody(
                                 null
                             }
                         val removeEntry: (@Composable () -> Unit)? = when {
-                            ownWsId != null && onExposeWorkspaces != null -> {
+                            ownSeat != null && onRemoveGroupAgent != null -> {
                                 {
                                     AppTextButton(
                                         text = stringResource(Res.string.chat_group_remove_member),
-                                        onClick = { agentWsToRevoke = ownWsId },
+                                        onClick = { agentToRevoke = ownSeat.agentId },
                                         tone = AppButtonTone.Danger,
                                         size = AppButtonSize.Small,
                                     )
@@ -868,27 +910,27 @@ private fun GroupInfoBody(
         }
     }
 
-    // 智能体与工作区授权面板（方案 §5.1，替换 ExposeAgentDialog）。
-    // 宿主可编辑（保存走 handleSetGroupAgentWorkspaces 一次成像）；其它成员只读，
-    // 且路径列显示「仅宿主可见」—— 路径本来就不进协议，非宿主根本没有。
-    val expose = onExposeWorkspaces
-    if (showExposeDialog) {
+    // 授权管理面板（项目目录决策稿 §4.1/§4.2）：顶部本群项目目录 + 本机 agent 入驻清单。
+    // 宿主可编辑（入驻 / 去暴露 / 移除 / 设指针，动作即时成像）；其它成员只读，
+    // 看声明投影 —— 路径本来就不进协议，非宿主根本没有。
+    if (showAuthDialog) {
         SetGroupAgentWorkspacesDialog(
-            declaredAgents = group.virtualAgents.orEmpty(),
-            localWorkspaces = localWorkspaces,
-            exposedWsIds = group.virtualAgents.orEmpty()
-                .filter { it.hostNodeId == selfNodeId }
-                .mapNotNull { it.defaultWsId }
-                .toSet(),
+            group = group,
             selfNodeId = selfNodeId,
-            wsTitleOf = { wsId -> localWorkspaces.firstOrNull { it.wsId == wsId }?.wsTitle },
-            onDismiss = { showExposeDialog = false },
-            onSave = expose,
+            localWorkspaces = localWorkspaces,
+            hostDirectoryPort = hostDirectoryPort,
+            declaredDirectoryTitle = declaredDirectoryTitle,
+            onStation = onStationAgent,
+            onReparse = onReparseSeats,
+            onRemove = onRemoveGroupAgent,
+            onSetDirectory = onSetProjectDirectory,
+            onDismiss = { showAuthDialog = false },
         )
     }
 
     // 团队编制对话框（§2.2）。目标在 agent 行上选中；默认席位用「代表席位」判据
     //（与行显示名、撤回按钮同源 —— representativeSeat，§3.5 的单一判据）。
+    // 选中按 **agentId**（D4 的席位身份键；defaultWsId 只是执行投影，可为 null）。
     // token 池 = 全部声明的名字/agentId + 组员名 + mentionKeys（组员名 v1 不在
     // mention 池里，但要拦它撞既有 token —— 未来它要成为 token）。
     val rosterTarget = teamRosterFor
@@ -897,8 +939,8 @@ private fun GroupInfoBody(
         val (targetIdentity, targetSeats) = rosterTarget
         val targetHost = AgentSenderId.parse(targetIdentity.id)?.first
         val targetAgent = targetIdentity.agentKind ?: AgentSenderId.parse(targetIdentity.id)?.second
-        val repSeatWsId = if (targetHost != null && targetAgent != null) {
-            representativeSeat(group.virtualAgents, targetHost, targetAgent)?.defaultWsId
+        val repSeatAgentId = if (targetHost != null && targetAgent != null) {
+            representativeSeat(group.virtualAgents, targetHost, targetAgent)?.agentId
         } else {
             null
         }
@@ -915,16 +957,16 @@ private fun GroupInfoBody(
         TeamRosterDialog(
             agentName = targetIdentity.displayName,
             seats = targetSeats,
-            initialSeatWsId = repSeatWsId,
+            initialSeatAgentId = repSeatAgentId,
             takenTokens = takenTokens,
             showHostManagedNotice = showTeamHostManagedNotice,
             selfNodeId = selfNodeId,
             groupId = group.groupId,
             executionPort = teamExecutionPort,
             onDismiss = { teamRosterFor = null },
-            onSave = { wsId, roster ->
+            onSave = { agentId, roster ->
                 teamRosterFor = null
-                saveTeam(wsId, roster)
+                saveTeam(agentId, roster)
             },
         )
     }
@@ -958,29 +1000,20 @@ private fun GroupInfoBody(
         )
     }
 
-    // 确认撤回本机 agent 的暴露（与移出成员同款确认框；撤回动作本身与上面那颗
-    // 行内按钮相同：传一份不含它的列表给 onExposeWorkspaces）。
-    val exposeWorkspaces = onExposeWorkspaces
-    val wsToRevoke = agentWsToRevoke
-    if (wsToRevoke != null && exposeWorkspaces != null) {
-        val revoked = rows.agents.firstOrNull { identity ->
-            declaredWorkspaceOfSender(
-                senderId = identity.id,
-                declaredAgents = group.virtualAgents,
-                hostNodeId = selfNodeId,
-            ) == wsToRevoke
+    // 确认撤回本机 agent 的席位（与移出成员同款确认框；撤回动作按 agentId 走
+    // onRemoveGroupAgent —— 席位身份键，见 D4）。
+    val removeAgent = onRemoveGroupAgent
+    val seatToRevoke = agentToRevoke
+    if (seatToRevoke != null && removeAgent != null) {
+        val revoked = group.virtualAgents.orEmpty().firstOrNull {
+            it.hostNodeId == selfNodeId && it.agentId.equals(seatToRevoke, ignoreCase = true)
         }
         ConfirmRemoveMemberDialog(
-            targetNick = revoked?.displayName ?: wsToRevoke,
-            onDismiss = { agentWsToRevoke = null },
+            targetNick = revoked?.name ?: seatToRevoke,
+            onDismiss = { agentToRevoke = null },
             onConfirm = {
-                agentWsToRevoke = null
-                // 撤回 = 传一份**不含它**的列表给同一个回调。
-                val keep = group.virtualAgents.orEmpty()
-                    .filter { it.hostNodeId == selfNodeId }
-                    .mapNotNull { it.defaultWsId }
-                    .filterNot { it == wsToRevoke }
-                exposeWorkspaces(keep)
+                agentToRevoke = null
+                removeAgent(seatToRevoke)
             },
         )
     }

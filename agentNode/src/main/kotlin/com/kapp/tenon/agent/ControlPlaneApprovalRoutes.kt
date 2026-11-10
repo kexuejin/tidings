@@ -70,11 +70,17 @@ internal fun ControlPlane.agentApproval(exchange: HttpExchange) {
     // "帧已经交给传输层"，而这里**什么都没发**。让机器字段说谎，下一个读它的人
     // （或插件）就会以为对端已经知道这件事 —— 本仓在 `已送达 ≠ 对方知道` 上
     // 已经付过一次代价。`autoApproved: true` 给不需要读字符串的调用方。
+    // 一次取出：agentKey 与 wsId 必须来自**同一时刻的同一条会话记录**（两次
+    // sessionOrNull 之间台账可能更新，会拼出「张三的名字 + 李四的工作区」）。
+    val sessionRecord = sessions.sessionOrNull(nodeId, sessionId)
     if (toolApprovals.isAlwaysApproved(
         nodeId = nodeId,
         // 与审批授权判据取同一个字段（`agentId ?: agentKind`）—— 两处取不同的名字，
         // 同一条会话就会在"谁能批"与"免批记给谁"上被判成两个 agent。
-        agentKey = sessions.sessionOrNull(nodeId, sessionId)?.let { it.agentId ?: it.agentKind },
+        agentKey = sessionRecord?.let { it.agentId ?: it.agentKind },
+        // F3（C5）：按**这条会话的工作区**查免批 —— null 只命中 null，跨工作区
+        // 的同 agent 同 tool 仍然要问。
+        wsId = sessionRecord?.wsId,
         tool = tool,
     )) {
         // 台账里记成**已批准**（`outbound = false`：这帧没有出门，是宿主按策略批的）。

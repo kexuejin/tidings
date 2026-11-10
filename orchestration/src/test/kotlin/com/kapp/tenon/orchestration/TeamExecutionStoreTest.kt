@@ -37,7 +37,7 @@ class TeamExecutionStoreTest {
         leader: String = "dsh-lead",
         members: List<TeamExecutionMemberSpec>,
     ): TeamExecutionProfile = TeamExecutionProfile(
-        groupId = groupId, defaultWsId = wsId, leaderAgentId = leader,
+        groupId = groupId, dirId = wsId, leaderAgentId = leader,
         updatedAt = 0, members = members,
     )
 

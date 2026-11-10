@@ -160,4 +160,25 @@ class AgentSessionPickTest {
         )
         assertEquals(Result.RequestedSessionGone, got)
     }
+    // ---- F5（C4）：显式点选也要过工作区校验（收紧档） ----
+
+    @Test
+    fun requestedSessionInAnotherWorkspaceIsRefused() {
+        val candidates = listOf(Candidate("s-a", "ws-a"), Candidate("s-b", "ws-b"))
+        val result = AgentSessionPick.pick(
+            boundWsId = "ws-a",
+            candidates = candidates,
+            requestedSessionId = "s-b",
+        )
+        assertEquals(Result.RequestedSessionOutsideWorkspace, result)
+    }
+
+    @Test
+    fun requestedSessionWithoutBoundWorkspaceStillPicks() {
+        val candidates = listOf(Candidate("s-a", null), Candidate("s-b", "ws-b"))
+        assertEquals(
+            Result.Pick("s-b"),
+            AgentSessionPick.pick(boundWsId = null, candidates = candidates, requestedSessionId = "s-b"),
+        )
+    }
 }

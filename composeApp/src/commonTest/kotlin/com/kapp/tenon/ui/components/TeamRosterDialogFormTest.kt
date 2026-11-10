@@ -126,4 +126,37 @@ class TeamRosterDialogFormTest {
         assertEquals(2, teamBadgeCountOf(listOf(singleSeat, teamSeat)))
         assertNull(teamBadgeCountOf(listOf(singleSeat)), "单兵不画徽标")
     }
+
+    // ---------------------------------------------------------------- 席位选中（D4）
+
+    /**
+     * 席位选中按 **agentId** 定位（D4：席位身份 = (groupId, hostNodeId, agentId)）。
+     * `defaultWsId` 不再参与 —— 未暴露项目目录的席位同样可选中、可编团队。
+     */
+    @Test
+    fun seatSelectionLocatesByAgentIdAndIncludesUnexposedSeats() {
+        val exposed = VirtualAgentMember(agentId = "dsh", hostNodeId = "self", name = "dsh-coder", defaultWsId = "ws-a")
+        val unexposed = VirtualAgentMember(agentId = "codex", hostNodeId = "self", name = "codex-assistant", defaultWsId = null)
+        val seats = listOf(exposed, unexposed)
+        assertEquals("dsh", initialSelectedSeatOf(seats, "dsh")?.agentId)
+        assertEquals(
+            "codex",
+            initialSelectedSeatOf(seats, "codex")?.agentId,
+            "未暴露目录的席位同样可选中（defaultWsId 不再是身份的一半）",
+        )
+        assertEquals(
+            "dsh",
+            initialSelectedSeatOf(seats, "DSH")?.agentId,
+            "agentId 大小写不敏感（声明侧通用口径）",
+        )
+        assertEquals(
+            "dsh",
+            initialSelectedSeatOf(seats, null)?.agentId,
+            "没有初值 ⇒ 取第一条，不猜第二条",
+        )
+        assertNull(initialSelectedSeatOf(emptyList(), "dsh"), "空席位表 ⇒ 引导态")
+        // 选中态定位与初始选中同一套匹配判据（两个入口不许各答各的）。
+        assertEquals("codex", selectedSeatOf(seats, "codex")?.agentId)
+        assertNull(selectedSeatOf(seats, "gone"))
+    }
 }

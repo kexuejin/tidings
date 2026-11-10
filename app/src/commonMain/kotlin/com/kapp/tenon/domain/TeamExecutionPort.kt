@@ -27,13 +27,19 @@ interface TeamExecutionPort {
     fun driverCatalog(): Set<String>
 
     /** 读该席位的执行档；null = 没配过（正常）。 */
-    fun profileOf(groupId: String, defaultWsId: String, leaderAgentId: String): TeamExecutionProfileUi?
+    fun profileOf(groupId: String, dirId: String, leaderAgentId: String): TeamExecutionProfileUi?
 
     /** 校验（保存前预检 + UI 就地指出原因）；与 save 共用同一份规则（§3.4 单源）。 */
     fun validate(profile: TeamExecutionProfileUi, declaredMemberIds: Set<String>): List<String>
 
     /** 保存（同主键覆盖）。Rejected 携带结构化原因，UI 直接展示 —— 不允许"先存着"。 */
     fun save(profile: TeamExecutionProfileUi, declaredMemberIds: Set<String>): TeamExecutionSaveResult
+
+    /**
+     * 群项目目录指针（D16：执行档主键的一半）。null = 群没设目录 / 本机不是宿主 ——
+     * 编制对话框据此置灰保存（执行档挂在一个解析不出来的目录上没有意义）。
+     */
+    fun groupPointerDirId(groupId: String): String? = null
 }
 
 /** 端口侧的执行档成员（UI 编辑形状；与编排层 TeamExecutionMemberSpec 逐字段对齐）。 */
@@ -54,7 +60,7 @@ object TeamExecutionKindsUi {
 
 data class TeamExecutionProfileUi(
     val groupId: String,
-    val defaultWsId: String,
+    val dirId: String,
     val leaderAgentId: String,
     val members: List<TeamExecutionMemberUi>,
 )
@@ -74,9 +80,10 @@ fun initialExecutionProfileUi(
     group: GroupMeta?,
     seat: VirtualAgentMember,
 ): TeamExecutionProfileUi? {
-    val wsId = seat.defaultWsId ?: return null
     if (group == null) return null
-    val existing = port.profileOf(group.groupId, wsId, seat.agentId)
+    // D16：键的一半换成群指针的 dirId —— 没设指针就取不到初值（对话框会置灰）。
+    val dirId = port.groupPointerDirId(group.groupId) ?: return null
+    val existing = port.profileOf(group.groupId, dirId, seat.agentId)
     val declared = seat.teamMembers
     if (declared.isEmpty()) return null
     val members = declared.mapIndexed { index, member ->
@@ -90,7 +97,7 @@ fun initialExecutionProfileUi(
             models = prior?.models ?: emptyList(),
         )
     }
-    return TeamExecutionProfileUi(group.groupId, wsId, seat.agentId, members)
+    return TeamExecutionProfileUi(group.groupId, dirId, seat.agentId, members)
 }
 
 /**

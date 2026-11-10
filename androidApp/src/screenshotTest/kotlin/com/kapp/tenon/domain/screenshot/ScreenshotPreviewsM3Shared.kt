@@ -25,9 +25,14 @@ import androidx.compose.ui.tooling.preview.Preview
 import androidx.compose.ui.unit.dp
 import com.android.tools.screenshot.PreviewTest
 import com.kapp.tenon.core.protocol.AgentRunStates
+import com.kapp.tenon.core.protocol.GroupMeta
 import com.kapp.tenon.core.protocol.GroupWorkspaceInfo
 import com.kapp.tenon.core.protocol.TeamMemberInfo
 import com.kapp.tenon.core.protocol.VirtualAgentMember
+import com.kapp.tenon.domain.HostDirectoryPort
+import com.kapp.tenon.domain.HostDirectorySnapshotUi
+import com.kapp.tenon.domain.HostDirectoryUi
+import com.kapp.tenon.domain.WhitelistUi
 import com.kapp.tenon.domain.model.MessageUi
 import com.kapp.tenon.domain.model.WorkspaceUi
 import com.kapp.tenon.feature.chat.AgentCardBubble
@@ -136,6 +141,7 @@ private fun previewPanelWorkspaces() = listOf(
     WorkspaceUi(
         peerId = "preview-host-self",
         agentKey = "dev-lead",
+        agentId = "dev-lead",
         wsId = "ws-a",
         wsTitle = "Teahouse Mobile",
         wsPath = "/srv/teahouse-mobile",
@@ -147,6 +153,7 @@ private fun previewPanelWorkspaces() = listOf(
     WorkspaceUi(
         peerId = "preview-host-self",
         agentKey = "dev-lead",
+        agentId = "dev-lead",
         wsId = "ws-b",
         wsTitle = "Teahouse Backend",
         wsPath = "/srv/teahouse-backend",
@@ -289,13 +296,16 @@ private fun GroupAuthPhonePreview() {
     AppTheme(darkTheme = false) {
         Surface(color = MaterialTheme.colorScheme.surface, modifier = Modifier.fillMaxSize()) {
             SetGroupAgentWorkspacesDialog(
-                declaredAgents = previewPanelAgents(),
-                localWorkspaces = previewPanelWorkspaces(),
-                exposedWsIds = setOf("ws-a"),
+                group = previewPanelGroup(),
                 selfNodeId = "preview-host-self",
-                wsTitleOf = { wsId -> previewPanelWorkspaces().firstOrNull { it.wsId == wsId }?.wsTitle },
+                localWorkspaces = previewPanelWorkspaces(),
+                hostDirectoryPort = PreviewDirectoryPort(),
+                declaredDirectoryTitle = null,
+                onStation = { _, _ -> },
+                onReparse = {},
+                onRemove = {},
+                onSetDirectory = {},
                 onDismiss = {},
-                onSave = {},
             )
         }
     }
@@ -308,13 +318,16 @@ private fun GroupAuthDeskPreview() {
     AppTheme(darkTheme = false) {
         Surface(color = MaterialTheme.colorScheme.surface, modifier = Modifier.fillMaxSize()) {
             SetGroupAgentWorkspacesDialog(
-                declaredAgents = previewPanelAgents(),
-                localWorkspaces = previewPanelWorkspaces(),
-                exposedWsIds = setOf("ws-a"),
+                group = previewPanelGroup(),
                 selfNodeId = "preview-host-self",
-                wsTitleOf = { wsId -> previewPanelWorkspaces().firstOrNull { it.wsId == wsId }?.wsTitle },
+                localWorkspaces = previewPanelWorkspaces(),
+                hostDirectoryPort = PreviewDirectoryPort(),
+                declaredDirectoryTitle = null,
+                onStation = { _, _ -> },
+                onReparse = {},
+                onRemove = {},
+                onSetDirectory = {},
                 onDismiss = {},
-                onSave = {},
             )
         }
     }
@@ -331,7 +344,7 @@ private fun TeamRosterPhonePreview() {
             TeamRosterDialog(
                 agentName = "dev-lead",
                 seats = previewPanelAgents().filter { it.hostNodeId == "preview-host-self" },
-                initialSeatWsId = "ws-a",
+                initialSeatAgentId = "dev-lead",
                 takenTokens = setOf("dev-lead", "remote-agent"),
                 onDismiss = {},
                 onSave = { _, _ -> },
@@ -350,7 +363,7 @@ private fun TeamRosterDeskPreview() {
             TeamRosterDialog(
                 agentName = "dev-lead",
                 seats = previewPanelAgents().filter { it.hostNodeId == "preview-host-self" },
-                initialSeatWsId = "ws-a",
+                initialSeatAgentId = "dev-lead",
                 takenTokens = setOf("dev-lead", "remote-agent"),
                 onDismiss = {},
                 onSave = { _, _ -> },
@@ -359,7 +372,7 @@ private fun TeamRosterDeskPreview() {
     }
 }
 
-/** 非宿主只读帧：无勾选框、无保存按钮，路径列显示「仅宿主可见」。 */
+/** 非宿主只读帧：无动作按钮，顶部目录行只显示声明投影（路径不上屏）。 */
 @PreviewTest
 @Preview(name = "m3-group-auth-readonly", widthDp = 393, heightDp = 852, showBackground = true, locale = "zh-rCN")
 @Composable
@@ -367,13 +380,16 @@ private fun GroupAuthReadonlyPhonePreview() {
     AppTheme(darkTheme = false) {
         Surface(color = MaterialTheme.colorScheme.surface, modifier = Modifier.fillMaxSize()) {
             SetGroupAgentWorkspacesDialog(
-                declaredAgents = previewPanelAgents(),
-                localWorkspaces = emptyList(),
-                exposedWsIds = emptySet(),
+                group = previewPanelGroup(),
                 selfNodeId = "preview-host-foreign",
-                wsTitleOf = { null },
+                localWorkspaces = emptyList(),
+                hostDirectoryPort = null,
+                declaredDirectoryTitle = "Teahouse Mobile",
+                onStation = null,
+                onReparse = null,
+                onRemove = null,
+                onSetDirectory = null,
                 onDismiss = {},
-                onSave = null,
             )
         }
     }
@@ -1776,4 +1792,35 @@ private fun V2CardAskQuestionDeskPreview() {
             }
         }
     }
+}
+/**
+ * 授权面板帧的群元数据：席位 = [previewPanelAgents]，宿主 = 本机（面板画编辑态的前提）。
+ */
+private fun previewPanelGroup() = GroupMeta(
+    groupId = "preview-group",
+    name = "协同群",
+    members = listOf("preview-host-self"),
+    rev = 1,
+    updatedBy = "preview-host-self",
+    updatedTs = 0L,
+    virtualAgents = previewPanelAgents(),
+)
+
+/**
+ * 预览用目录端口假件：一台已登记目录、已设指针的宿主。快照只读（预览不落盘），
+ * 写路径一律拒绝 —— 预览帧只负责摆出编辑态的样子，不假装保存成功。
+ */
+private class PreviewDirectoryPort : HostDirectoryPort {
+    private val snap = HostDirectorySnapshotUi(
+        directories = listOf(
+            HostDirectoryUi(dirId = "dir-a", path = "/srv/teahouse-mobile", displayName = "Teahouse Mobile", gitRemote = null),
+        ),
+        groupPointers = mapOf("preview-group" to "dir-a"),
+        whitelist = listOf(WhitelistUi(dirId = "dir-a", readOnly = false)),
+    )
+
+    override fun snapshot(): HostDirectorySnapshotUi = snap
+    override fun register(path: String, displayName: String?): HostDirectoryUi? = null
+    override fun setGroupPointer(groupId: String, dirId: String?): Boolean = false
+    override fun setWhitelist(dirId: String, readOnly: Boolean, allowed: Boolean): Boolean = false
 }

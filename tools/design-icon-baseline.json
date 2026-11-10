@@ -1,7 +1,7 @@
 {
  "source": {
   "path": "prototype/relay.html",
-  "sha256": "527058a8a810"
+  "sha256": "1c63759ec11f"
  },
  "symbols": {
   "back": "复用",
@@ -36,6 +36,7 @@
   "lan": "复用",
   "link": "复用",
   "list": "复用",
+  "lock": "复用",
   "minus": "复用",
   "moon": "复用",
   "more": "复用",
@@ -99,7 +100,7 @@
   "lan": "复用",
   "link": "复用",
   "list": "复用",
-  "lock": "未使用",
+  "lock": "复用",
   "minus": "复用",
   "moon": "复用",
   "more": "复用",
@@ -132,19 +133,18 @@
   "box",
   "clock",
   "filter",
-  "lock",
   "sun"
  ],
  "missing": [],
  "codeOnlyVectors": [
   "ic_clock_pending",
-  "ic_lock",
-  "ic_mic"
+  "ic_mic",
+  "ic_plus"
  ],
  "callSites": {
-  "library": 29,
-  "resource": 189,
-  "total": 218,
-  "rate": 0.8669724770642202
+  "library": 21,
+  "resource": 283,
+  "total": 304,
+  "rate": 0.930921052631579
  }
 }

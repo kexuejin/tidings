@@ -148,22 +148,43 @@ public interface DesktopPaneActions {
      */
     fun updateGroupMeta(groupId: String, description: String?, announce: String?)
     /**
-     * 把**本机**在这个群的 agent 声明集合整体改写为 [wsIds]（授权面板「保存」的落点）。
+     * 设 / 换 / 清一个群的项目目录指针（D5：`groupId → dirId`，仅宿主可改）。
      *
-     * 一次成像：调用方交的是**最终集合**，实现一次 rev+1、一次广播，没有中间态。
-     * 主权边界：只覆盖本机自己的声明，其它设备的原样保留（见
-     * `RelayControllerGroupsComponent.setGroupAgentWorkspaces`）。
+     * true = 指针已写、席位投影已重建并广播；false = 本机不是宿主（手机）/ 群不存在 /
+     * dirId 悬空 —— 什么都没改。UI 只准走这一条写路径：指针与投影重建、广播必须
+     * 同一次完成，单独写指针会让席位声明与本机台账各说各话。
      */
-    fun setGroupAgentWorkspaces(groupId: String, wsIds: List<String>)
+    fun setGroupProjectDirectory(groupId: String, dirId: String?): Boolean
+
+    /**
+     * 加智能体进群（D6：不再问目录；席位就地继承群项目目录）。
+     *
+     * [duty] 是席位职责（[com.kapp.tenon.core.protocol.AgentDuties] 取值域，
+     * 域外值归一为单兵默认）。[com.kapp.tenon.domain.AddGroupAgentResult.Rejected]
+     * 携带结构化原因，UI 不猜成败。
+     */
+    fun addGroupAgent(groupId: String, agentId: String, duty: String?): AddGroupAgentResult
+
+    /**
+     * 重新解析本机席位的执行投影并广播（「去暴露」/ agent 刚宣告目录之后）。
+     * 幂等：没有变化就不产生新 rev。false = 没有目录端口（手机）或群不存在。
+     */
+    fun rebuildGroupSeatProjections(groupId: String): Boolean
+
+    /**
+     * 移除本机的一个席位（撤回入驻；D6 的另一半）。主权边界：只覆盖本机自己的
+     * 声明，其它设备的原样保留。false = 群不存在 / 没有这个 agentId 的席位。
+     */
+    fun removeGroupAgent(groupId: String, agentId: String): Boolean
 
     /**
      * 保存 / 关闭某个席位的团队编制（团队创建方案 §4.3）。
      *
-     * 与 [setGroupAgentWorkspaces] 同节奏：一次保存 = 一次 rev+1、一次广播，没有
-     * 中间态。[roster] 为 null = 关闭团队（`entityType` 回 single、组员清空）。
-     * 定位键 = `(groupId, defaultWsId)`；席位必须属于本机声明（机主主权）。
+     * 一次保存 = 一次 rev+1、一次广播，没有中间态。[roster] 为 null = 关闭团队
+     * （`entityType` 回 single、组员清空）。定位键 = `(groupId, hostNodeId, agentId)`
+     * （D4 的席位身份；本机 host 由 selfNodeId 隐含），席位必须属于本机声明（机主主权）。
      */
-    fun setGroupTeamDeclaration(groupId: String, defaultWsId: String, roster: List<TeamMemberDraft>?)
+    fun setGroupTeamDeclaration(groupId: String, agentId: String, roster: List<TeamMemberDraft>?)
 
     /**
      * 团队执行档端口（团队执行方案 §6.3）：TeamRosterDialog 执行配置段的读写通路。
@@ -171,6 +192,15 @@ public interface DesktopPaneActions {
      * 只有桌面宿主覆写（DesktopExtension 装配 DesktopTeamExecutionPort）。
      */
     val teamExecutionPort: TeamExecutionPort?
+        get() = null
+
+    /**
+     * 项目目录端口（项目目录决策稿 §5.1）：目录档案 / 群指针 / 白名单的读写通路。
+     * null = 该壳没有宿主目录面（手机等非宿主）⇒ 只读投影（档案由目录宿主管理，
+     * 手机只能看到群已指向的目录名）。只有桌面宿主覆写
+     * （DesktopExtension 装配 DesktopHostDirectoryPort）。
+     */
+    val hostDirectoryPort: HostDirectoryPort?
         get() = null
 
     /**

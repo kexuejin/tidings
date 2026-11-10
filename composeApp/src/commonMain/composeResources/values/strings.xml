@@ -4,7 +4,7 @@
     <string name="screen_conversations">消息</string>
     <!-- 页签从五项收到四项之后，原来的「发现」和「加入」合成一个「节点」 -->
     <string name="screen_discovery">节点</string>
-    <string name="screen_agents">工作区</string>
+    <string name="screen_agents">智能体</string>
     <string name="screen_settings">设置</string>
     <string name="action_back">返回</string>
     <!-- 空状态上的出口：没会话/没 Agent 时唯一的下一步是去节点页 -->
@@ -43,11 +43,11 @@
     <string name="conv_filter_groups">群聊</string>
     <string name="conv_filter_agents">Agent</string>
     <string name="conv_filter_people">同事</string>
-    <string name="conv_filter_workspaces">工作区</string>
+    <string name="conv_filter_workspaces">项目目录</string>
     <string name="conv_filter_empty_title">这个筛选下没有会话</string>
     <string name="conv_filter_empty_action">看全部</string>
     <string name="conv_subtitle_summary">%1$d 个会话 · %2$d 条未读</string>
-    <string name="conv_subtitle_summary_ws">%1$d 个会话 · %2$d 个工作区 · %3$d 条未读</string>
+    <string name="conv_subtitle_summary_ws">%1$d 个会话 · %2$d 个项目目录 · %3$d 条未读</string>
     <string name="conv_group_name">群名</string>
     <string name="conv_group_members_hint">选成员（自己一定在里面）</string>
     <string name="conv_group_no_peers">节点表里还没有别人。先去「节点」页把对方加进来，才能建群。</string>
@@ -157,16 +157,16 @@
          阶段一（协议还没有 wsId）标题是 Agent 行，阶段二才是工作区行。 -->
     <string name="conv_inbox_ws_pending">待审批 %1$d</string>
     <string name="conv_inbox_ws_group_offline"> · %1$s在线</string>
-    <string name="conv_inbox_ws_row_agent_sessions">%1$d 个会话 · 对端还没宣告过工作区</string>
+    <string name="conv_inbox_ws_row_agent_sessions">%1$d 个会话 · 对端还没宣告过项目目录</string>
     <string name="conv_inbox_ws_row_agent_none">尚未收到会话宣告</string>
     <string name="conv_inbox_ws_row_unassigned">未归属会话</string>
     <!-- 未归属会话行的副行（原型 relay.html:4260 的 .t2，原样）。 -->
-    <string name="conv_inbox_ws_row_unassigned_body">收到了会话，但没收到它属于哪个工作区</string>
+    <string name="conv_inbox_ws_row_unassigned_body">收到了会话，但没收到它属于哪个项目目录</string>
     <!-- 未归属会话那一行的计数（父稿 §2.5：一行计数，**不造卡**）。 -->
     <string name="conv_inbox_ws_row_ws_sessions">%1$s · %2$d 个会话</string>
-    <string name="conv_inbox_ws_row_unnamed">未命名工作区</string>
-    <string name="conv_inbox_ws_row_unnamed_hint">没收到工作区名（不拿路径顶替）</string>
-    <string name="conv_inbox_ws_badge_no_workspace">未上报工作区</string>
+    <string name="conv_inbox_ws_row_unnamed">未命名项目目录</string>
+    <string name="conv_inbox_ws_row_unnamed_hint">没收到项目目录名（不拿路径顶替）</string>
+    <string name="conv_inbox_ws_badge_no_workspace">未上报项目目录</string>
     <string name="conv_inbox_ws_badge_unknown_kind">未上报类型</string>
     <string name="conv_inbox_ws_pending_pill">%1$d 项待批</string>
     <!-- Agent 段（工作区页签的第二层：节点 → Agent → 工作区）。首行是这个 Agent 的身份键。 -->
@@ -229,7 +229,7 @@
     <!-- 发了「停」但本机没有在跑的活。必须说出来：静默等于让用户以为叫停了。 -->
     <string name="chat_abort_no_task">当前没有在跑的任务，无需停止</string>
     <!-- 快捷指令芯片（§9.3）：可见文本 = 命令字面量（/status 等，不本地化），这里是语义朗读文本。 -->
-    <string name="chat_qa_status">查看工作区状态</string>
+    <string name="chat_qa_status">查看项目目录状态</string>
     <string name="chat_qa_diff">变更统计</string>
     <string name="chat_qa_test">跑单元测试</string>
     <string name="chat_qa_stop">紧急停止</string>
@@ -454,14 +454,14 @@
     <string name="banner_no_qr_in_image">这张图里没找到二维码。换一张对着码拍的照片，或者直接用相机扫。</string>
 
     <!-- 工作区看板与会话详情 -->
-    <string name="agent_title">工作区</string>
+    <string name="agent_title">智能体</string>
     <string name="agent_subtitle_pending">%1$d 项待审批</string>
     <string name="workspace_no_sessions">暂无会话</string>
     <!-- 工作区详情的整屏空态：工作区对象不存在且一条会话都没有时。
          此前这一屏只剩一张写着「暂无会话」的小卡，大半屏是空的 —— 空态没有"出路"。 -->
-    <string name="workspace_detail_empty_title">这个工作区还没有任何会话</string>
-    <string name="workspace_detail_empty_body">agent 宿主还没有为它上报会话。等它跑起来、或者先回工作区列表看看别的。</string>
-    <string name="workspace_detail_empty_back">回到工作区列表</string>
+    <string name="workspace_detail_empty_title">这个项目目录还没有任何会话</string>
+    <string name="workspace_detail_empty_body">agent 宿主还没有为它上报会话。等它跑起来、或者先回项目目录列表看看别的。</string>
+    <string name="workspace_detail_empty_back">回到项目目录列表</string>
     <!--
       声明了 N 条会话、但这一屏本地还没拉到任何一条时用的话。
 
@@ -474,7 +474,7 @@
 
       判据：**「没有」与「还没拿到」是两件事，前者可以断言，后者只能如实说。**
     -->
-    <string name="workspace_sessions_not_synced">这里还没同步到会话（服务器报告有 %1$d 个）；点「打开聊天」进这个工作区就会拉出来。</string>
+    <string name="workspace_sessions_not_synced">这里还没同步到会话（服务器报告有 %1$d 个）；点「打开聊天」进这个项目目录就会拉出来。</string>
     <!-- 工作区卡片底部 at-a-glance：把六类型里 board 层没透出的三类（队列/执行/产物）一并露出。
          格式为「X 队列 · Y 执行 · Z 产物」，仅在有数据时显示。 -->
     <string name="workspace_board_queue_format">%1$d 队列</string>
@@ -485,22 +485,22 @@
          这一行按真值只画它能画的两段（在线/离线 + TCP 端口）。TCP 是原样保留的协议词。 -->
     <!-- 页头汇总。原型 relay.html:4208-4211 的 sub =「N 台设备 · N 个 Agent · N 个工作区 · N 个会话[ · N 项待审批]」；
          文案清洗裁决（2026-11-01）去掉「· 会话」段 —— 数会话是工具语汇，普通用户扫一眼要的是前三个数。 -->
-    <string name="workspace_board_subtitle">%1$d 台设备 · %2$d Agent · %3$d 工作区</string>
-    <string name="workspace_bar_switch">切换工作区</string>
-    <string name="workspace_picker_sheet_title">选择工作区</string>
-    <string name="chat_workspace_switched_notice">已切换当前工作区至 %1$s</string>
+    <string name="workspace_board_subtitle">%1$d 台设备 · %2$d Agent · %3$d 项目目录</string>
+    <string name="workspace_bar_switch">切换项目目录</string>
+    <string name="workspace_picker_sheet_title">选择项目目录</string>
+    
     <string name="workspace_new_segment">开启新分段</string>
     <string name="workspace_branch_label">分支</string>
-    <string name="workspace_unassigned">未归属工作区</string>
+    <string name="workspace_unassigned">未归属项目目录</string>
 <!-- 空态页头。原型 screenAgentsEmpty（relay.html:4564）写死「0 个工作区」—— 四个零是噪音，
      空屏只报这一档。 -->
-<string name="agent_empty_subtitle">%1$d 个工作区</string>
+<string name="agent_empty_subtitle">%1$d 个项目目录</string>
     <!-- 空态（原型 relay.html:4563-4579 screenAgentsEmpty）：警告条 +「Agent（0）」段头 + 卡内说明 +「去看看节点」行。
          文案**不印 wire 键**：原型 relay.html:4562 注释写死「不印 `ag1` 这种 wire 键（R2）」。 -->
     <string name="agent_empty_title">还没有任何 Agent 上报</string>
-    <string name="agent_empty_message">对方在线并运行 Agent 后，它的工作区会出现在这里。</string>
+    <string name="agent_empty_message">对方在线并运行 Agent 后，它的项目目录会出现在这里。</string>
     <string name="agent_empty_section">Agent（0）</string>
-    <string name="agent_empty_card">还没有设备上报 Agent 与工作区。对方在线后，卡片会自动出现在这里。</string>
+    <string name="agent_empty_card">还没有设备上报 Agent 与项目目录。对方在线后，卡片会自动出现在这里。</string>
     <string name="agent_empty_exit_title">去看看节点</string>
     <string name="agent_empty_exit_body">确认对方在线，再回来看这里</string>
     <string name="agent_offline_title">Agent 离线</string>
@@ -658,6 +658,7 @@
     <string name="tool_approvals_agent">agent %1$s</string>
     <string name="tool_approvals_all_agents">全部 agent</string>
     <string name="tool_approvals_row_meta">%1$s · %2$s</string>
+    <string name="tool_approvals_row_ws">工作区 %1$s</string>
     <string name="tool_approvals_revoke">撤销</string>
     <string name="tool_approvals_revoked">已撤销 %1$d 条，下一次同工具请求会重新询问</string>
     <string name="tool_approvals_gone">这条规则已经不在了（可能已被撤销过）</string>
@@ -970,12 +971,12 @@
     <string name="desktop_view_nodes">节点</string>
     <!-- 视图名（工作区）：与导航条、View 菜单共用。屏内标题另有 agent_title（也是「工作区」），
          两者词一样但是两个 key —— 改文案时要想清楚是改入口名还是改屏内标题。 -->
-    <string name="desktop_view_agents">工作区</string>
+    <string name="desktop_view_agents">智能体</string>
 
     <!-- 菜单栏、工具栏 -->
     <string name="desktop_menu_new_conversation">新建会话</string>
     <string name="desktop_menu_import_files">导入文件…</string>
-    <string name="desktop_menu_agents">工作区</string>
+    <string name="desktop_menu_agents">智能体</string>
     <string name="desktop_menu_copy_node_id">复制本机 ID</string>
     <string name="desktop_menu_refresh_nodes">刷新节点</string>
     <string name="desktop_menu_diagnostics">诊断包</string>
@@ -1022,7 +1023,7 @@
     <string name="desktop_title_files">已落盘与传输中的文件</string>
     <!-- 工作区视图的标题栏副标题。原型 d-agents 的 tsub() 没有这一支（回落成了节点那句），
          这里补一句真的：这一屏看的就是「哪些工作区、各有几个会话在动」。 -->
-    <string name="desktop_title_agents">已上报的工作区与会话</string>
+    <string name="desktop_title_agents">已上报的项目目录与会话</string>
     <!-- desktop_peer_header（地址 · 状态 · 最后在线三段）已随 2026-11-01 产品级语汇裁决
          退场：标题栏/聊天头部只印在场（peerPresenceLine 用 desktop_peer_connected /
          desktop_peer_last_seen 拼接），地址留在详情栏与节点页的合法语境。 -->
@@ -1578,7 +1579,7 @@
     <string name="agent_approval_risk_l3">L3 高危</string>
     <string name="agent_approval_readonly">只读（无权审批）</string>
     <string name="workspace_host_badge">👑 本机宿主</string>
-    <string name="workspace_remote_badge">🌐 远端工作区</string>
+    <string name="workspace_remote_badge">🌐 远端项目目录</string>
     <string name="workspace_perm_ro">只读 (RO)</string>
     <string name="workspace_perm_rw">读写 (RW)</string>
     <!-- 工作区卡片上的短标签（task-79：从硬编码中文移进来，否则英文界面露中文） -->
@@ -1622,8 +1623,8 @@
     <string name="chat_voice_permission_denied">无法开始录音，请检查麦克风权限</string>
 
     <!-- 协同群与权限进阶（群聊工作区协同体系） -->
-    <string name="workspace_create_group_title">关联工作区建群</string>
-    <string name="workspace_create_group_quick_title">从智能体已有工作区快速建群 (推荐)</string>
+    <string name="workspace_create_group_title">关联项目建群</string>
+    <string name="workspace_create_group_quick_title">从智能体已有项目目录快速建群 (推荐)</string>
     <string name="workspace_create_group_dedup_hint">目录 1:1 防重绑定</string>
     <string name="workspace_create_group_in_group">已在协同群中</string>
     <string name="workspace_group_label">协同群</string>
@@ -1648,19 +1649,20 @@
     <string name="agent_interrupt_btn">⏹ 全局打断</string>
     <string name="workspace_member_section_humans">协同人类成员 (%1$d)</string>
     <string name="workspace_member_section_agents">入驻智能体 (%1$d)</string>
-    <string name="workspace_no_title_banner">这个工作区没有名字。对端只上报了它的标识 %1$s，没有上报名字 —— 我们不用那串标识冒充名字，等它补上。</string>
+    <string name="workspace_no_title_banner">这个项目目录没有名字。对端只上报了它的标识 %1$s，没有上报名字 —— 我们不用那串标识冒充名字，等它补上。</string>
     <string name="workspace_session_warn_no_announce">只收到事件，没收到会话宣告</string>
     <string name="workspace_session_pending_count">⚠️ %1$d 项待审</string>
-    <string name="workspace_qr_dialog_desc">手机使用「榫卯」扫描工作区直通码，自动完成「节点配对 + 工作区授权」。一次性授权凭证 · 15分钟有效。</string>
+    <string name="workspace_qr_dialog_desc">手机使用「榫卯」扫描项目目录直通码，自动完成「节点配对 + 项目目录授权」。一次性授权凭证 · 15分钟有效。</string>
     <string name="workspace_qr_no_address">无法获取本机候选地址，请确保网络已连接并开放端口。</string>
     <string name="pairing_public_ipv6_hint">本机有公网 IPv6 候选：能否直连取决于路由器/主机防火墙是否放行入站，本应用不做打洞、也不代你改网络设置。同网段优先，跨网络时才试公网地址。</string>
-    <string name="workspace_create_group_no_workspaces">暂无已宣告的本地工作区，可在下方直接关联新目录</string>
+    <string name="workspace_create_group_no_workspaces">暂无已宣告的本地项目目录，可在下方直接关联新目录</string>
     <string name="workspace_group_default_name">%1$s 协同群</string>
     <string name="workspace_group_default_name_fallback">协同群</string>
-    <string name="workspace_group_initial_greeting">🤖 [%1$s] 已就绪并入驻当前工作区「%2$s」，协同通道已建立。输入消息或指派任务即可驱动执行。</string>
+    <string name="workspace_group_initial_greeting">🤖 [%1$s] 已就绪并入驻当前项目目录「%2$s」，协同通道已建立。输入消息或指派任务即可驱动执行。</string>
     <string name="workspace_group_session_busy">执行中</string>
     <string name="workspace_group_session_ready">就绪</string>
-    <string name="workspace_group_session_brief">📋 工作区当前会话: 「%1$s」 (%2$s)\n协同通道已连接，工作区事件与进度将实时同步至本群。</string>
+    <string name="workspace_group_session_brief">📋 项目目录当前会话: 「%1$s」 (%2$s)
+协同通道已连接，项目目录事件与进度将实时同步至本群。</string>
     <string name="agent_event_thinking_only_fallback">这一轮只有思考过程，没有正文</string>
 
     <!-- ===== issue 6：工作区三层 IA 重构（workspace-ia, task-4）===== -->
@@ -1674,13 +1676,13 @@
     <!-- 会话详情原来那条宿主控制条（权限 + 直通码）搬到了工作区详情：
          这三句此前是 Kotlin 里的硬编码中文，迁移时按 cjkLiteralGate 的棘轮换成资源。 -->
     <string name="workspace_driver_label">驱动: %1$s</string>
-    <string name="workspace_grant_section_title">当前工作区授权设备及权限</string>
+    <string name="workspace_grant_section_title">当前项目目录授权设备及权限</string>
     <string name="workspace_grant_none">暂无已授权设备（默认按策略管控）</string>
     <!-- issue 7：在某个工作区点「打开聊天」但还没有绑定协同群时的提示。
          此前桌面端会弹「所有工作区」列表对话框 —— 那是错的：用户要处理的是**当前这个**工作区。
          那个列表对话框仍然保留，只能是独立入口（「协同群」按钮）。 -->
-    <string name="workspace_group_prompt_title">这个工作区还没有协同群</string>
-    <string name="workspace_group_prompt_body">「%1$s」还没有绑定协同群。建群后附近在线的设备会一起加入，就能在这个工作区里协同。</string>
+    <string name="workspace_group_prompt_title">这个项目目录还没有协同群</string>
+    <string name="workspace_group_prompt_body">「%1$s」还没有绑定协同群。建群后附近在线的设备会一起加入，就能在这个项目目录里协同。</string>
     <string name="workspace_group_prompt_create">建群并进入</string>
     <string name="workspace_group_prompt_skip">先直接聊天</string>
 
@@ -1697,7 +1699,7 @@
     <string name="workspace_grant_remote_hint">这份清单是本端已知的授权；对端设备上的权限由对端决定。</string>
     <!-- 工作区页的「还没到」态：与「还没有任何 Agent 上报」那个真·空态分开。 -->
     <string name="workspace_board_starting">节点正在启动…</string>
-    <string name="workspace_board_starting_hint">启动完成后，设备和它们的工作区会出现在这里。</string>
+    <string name="workspace_board_starting_hint">启动完成后，设备和它们的项目目录会出现在这里。</string>
     <string name="workspace_board_discovering">正在查找设备…</string>
     <string name="workspace_board_discovering_hint">还没有发现任何对端。确认对方在线；也可以去「节点」页手动填地址。</string>
 
@@ -1743,7 +1745,7 @@
     <string name="agent_approval_revoke_session">恢复逐条审批</string>
     <string name="agent_approval_history_title">审批记录</string>
     <string name="agent_empty_agents_only_title">已收到 Agent</string>
-    <string name="agent_empty_agents_only_message">这台设备上的 Agent 还没有上报任何工作区或会话。</string>
+    <string name="agent_empty_agents_only_message">这台设备上的 Agent 还没有上报任何项目目录或会话。</string>
     <string name="agent_empty_section_n">Agent（%1$d）</string>
     <string name="workspace_grant_unknown_peer">未知成员</string>
     <string name="workspace_grant_state_approved">已批准</string>
@@ -1840,33 +1842,58 @@
     <string name="capsule_entity_team">团队</string>
     <string name="capsule_default_ws">默认</string>
     <string name="capsule_new_task">新任务</string>
-    <string name="capsule_expand_hint">轻点选择工作区与任务</string>
+    <string name="capsule_expand_hint">轻点选择项目目录与任务</string>
     <string name="capsule_dismiss">关闭目标胶囊，保留输入</string>
     <string name="capsule_sheet_title">选择目标</string>
     <string name="capsule_sheet_recent">最近任务</string>
     <string name="capsule_sheet_new_task">发起新任务</string>
-    <string name="capsule_sheet_empty">这个 agent 还没有授权的工作区，轻点「发起新任务」直接派单。</string>
+    <string name="capsule_sheet_empty">这个 agent 还没有授权的项目目录，轻点「发起新任务」直接派单。</string>
 
     <!-- 群设置 · 智能体与工作区授权面板（方案 §5.1，替换 ExposeAgentDialog） -->
-    <string name="group_auth_title">智能体与工作区授权</string>
-    <string name="group_auth_note">授权决定权在机主：勾选哪些工作区，群里就能把任务派到哪些目录。保存后全群同步。</string>
+    <string name="group_auth_title">智能体与项目目录授权</string>
+    <string name="group_auth_note">入驻由机主决定：本机智能体入驻后默认继承本群项目目录；未暴露该目录的席位不可执行。</string>
     <string name="group_auth_agents_section">群内智能体与团队</string>
-    <string name="group_auth_workspaces_section">授权工作区（白名单）</string>
-    <string name="group_auth_readonly_note">本机不是这台群的工作区宿主，面板只读。</string>
+    <string name="group_auth_workspaces_section">授权项目目录（白名单）</string>
+    <string name="group_auth_readonly_note">本机不是这个群的项目目录宿主，面板只读。</string>
     <string name="group_auth_path_host_only">仅宿主可见</string>
-    <string name="group_auth_empty">这台机器上还没有可授权的工作区。</string>
+    <string name="group_auth_empty">这台机器上还没有可授权的项目目录。</string>
     <string name="group_auth_save">保存并广播</string>
     <string name="group_auth_badge_default">默认</string>
     <string name="group_auth_team_members">%1$d 名组员</string>
     <string name="group_auth_badge_self">本机声明</string>
     <string name="group_auth_entry">授权管理</string>
+    <string name="group_auth_stationed_section">本机智能体入驻</string>
+    <string name="group_auth_stationed_empty">本机还没有可入驻的智能体。</string>
+    <string name="group_auth_foreign_section">其它设备声明（只读）</string>
+
+    <!-- 群设置 · 本群项目目录行（项目目录决策稿 §4.1：宿主本机指针 groupId → dirId） -->
+    <string name="group_project_directory_label">本项目目录</string>
+    <string name="group_project_directory_unset">本群还没有项目目录</string>
+    <string name="group_project_directory_change">更换/设置</string>
+    <string name="group_project_directory_picker_title">选择项目目录</string>
+    <string name="group_project_directory_register">登记新目录…</string>
+    <string name="group_project_directory_path_label">本机路径</string>
+    <string name="group_project_directory_clear">清除（不设目录）</string>
+    <string name="group_project_directory_readonly">只读</string>
+    <string name="group_project_directory_invalid_path">路径无效，无法登记</string>
+    <string name="group_project_directory_host_authorized">由宿主授权</string>
+
+    <!-- 执行点状态（项目目录决策稿 §4.3 preflight 四问里的目录项） -->
+    <string name="seat_status_stationed">未入驻</string>
+    <string name="seat_directory_resolved">已解析</string>
+    <string name="seat_directory_unresolved">未解析</string>
+    <string name="seat_not_executable_unexposed">不可执行：未暴露本项目目录</string>
+    <string name="seat_reexpose">去暴露</string>
+    <string name="seat_station_button">入驻</string>
+    <string name="seat_remove_button">移除</string>
+    <string name="seat_duty_label">职责</string>
 
     <!-- 团队编制（团队创建方案 §2.2；v1 只做声明与展示） -->
     <string name="team_roster_button">团队编制</string>
     <string name="team_roster_dialog_title">团队编制 · %1$s</string>
     <string name="team_roster_enable_switch">开启团队协同模式</string>
     <string name="team_roster_enable_desc">开启后以领队为统一对外窗口，内部由专职组员分工执行。</string>
-    <string name="team_roster_no_ws_warning">请先在「工作区授权」中绑定默认工作区，再开启团队编制。</string>
+    <string name="team_roster_no_ws_warning">请先在群设置里选择本群的项目目录，再开启团队编制。</string>
     <string name="team_roster_seat_label">席位</string>
     <string name="team_roster_leader_label">👑 领队（统一出口）: %1$s</string>
     <string name="team_roster_members_section">团队阵容（默认预设，可直接改）</string>
@@ -1902,7 +1929,7 @@
     <string name="team_roster_mobile_notice">执行驱动与模型由桌面宿主 (Desktop) 托管</string>
     <string name="team_roster_badge">团队 (%1$d)</string>
     <string name="team_roster_saved">团队编制已保存并广播</string>
-    <string name="team_roster_seat_missing">这个智能体的席位刚被撤回，请重新打开「工作区授权」后再试。</string>
+    <string name="team_roster_seat_missing">这个智能体的席位刚被撤回，请重新打开「项目目录授权」后再试。</string>
     <string name="team_roster_invalid">团队编制没有保存：组员名字与群内 @ 名冲突或超出限制。</string>
     <string name="banner_group_meta_rejected">这次改动超出了单帧上限，没有保存。请减少组员数量或缩短名称。</string>
 
@@ -1934,10 +1961,10 @@
     <string name="orchestration_team_ready">团队已就位：%1$s 主理，%2$d 秒后自动开工；也可立即执行或取消</string>
     <string name="orchestration_diff_ready_prompt">改动已就绪，等你合并</string>
     <string name="orchestration_diff_ready_detail">改动已就绪：%1$s（+%2$d −%3$d）</string>
-    <string name="orchestration_patch_hint_exists">补丁要新建的文件在工作区里已经有了。先把它挪开或提交，再点一次合并</string>
+    <string name="orchestration_patch_hint_exists">补丁要新建的文件在项目目录里已经有了。先把它挪开或提交，再点一次合并</string>
     <string name="orchestration_patch_hint_mismatch">补丁和当前文件对不上 —— 这些地方可能已经被改过，需要手工对一下</string>
     <string name="orchestration_patch_hint_file_missing">补丁文件已经不在了，让执行方重跑一次</string>
-    <string name="orchestration_patch_hint_workspace_missing">工作区目录找不到了，确认它还在原位置</string>
+    <string name="orchestration_patch_hint_workspace_missing">项目目录找不到了，确认它还在原位置</string>
     <string name="orchestration_patch_hint_failed">补丁没能应用：%1$s</string>
     <string name="orchestration_stage_handoff_speech">[%1$s] 已完成实现，请 @%2$s 交叉审查。</string>
 

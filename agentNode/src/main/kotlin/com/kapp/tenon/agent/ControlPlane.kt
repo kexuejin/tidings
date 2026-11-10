@@ -62,6 +62,10 @@ internal fun JsonElement.jsonPrimitiveOrNull(): JsonPrimitive? =
  *  - `POST /v1/agent/session` `{"to":"…","sessionId":"…","alias":"…","state":"busy"}`（PPE-1 §6.1）
  *  - `POST /v1/agent/event`   `{"to":"…","sessionId":"…","cursor":42,"eventType":"tool.started"}`（§6.2）
  *  - `GET  /v1/inbox?since=`  跨会话增量拉取（`/v1/messages` 为同义路由）
+ *  - `GET  /v1/host/directories`     宿主本地项目目录快照（档案 + 群指针 + 白名单）
+ *  - `POST /v1/host/directories`     `{"path":"…","displayName":"…","gitRemote":"…"}` 登记项目目录（幂等）
+ *  - `POST /v1/host/group-directory` `{"groupId":"…","dirId":"…"}` 设置/清除群项目指针
+ *  - `POST /v1/host/whitelist`       `{"dirId":"…","allowed":true,"readOnly":false}` 放行/收回目录
  *
  * 两条 agent 路由受 §4 约束：**对方没声明 `agn1` 就不发**，返回 409 并建议改用 `/v1/send`。
  *
@@ -112,6 +116,14 @@ class ControlPlane(
      * （`agent-ack.kind = always`）产生，见 [AgentSessionRegistry.approvalPolicy]。
      */
     internal val toolApprovals: AgentToolApprovalStore = AgentToolApprovalStore(defaultToolApprovalFile()),
+    /**
+     * 宿主本地的项目目录档案 + 群指针 + 白名单（`host-directories.json`）。装配方传
+     * **同一实例**（也接到域层的 `HostDirectoryPort`）：面板与 HTTP 路由必须同锁同落盘
+     * （与 [sessions] / [toolApprovals] 同一条「两边必须同一实例」的纪律）。
+     */
+    internal val hostDirectoryStore: HostDirectoryStore = HostDirectoryStore(HostDirectoryStore.defaultFile()),
+    /** F4（C3）：`sessionId → convId` 宿主本地台账（落盘，重启仍在）。 */
+    internal val conversationLedger: SessionConversationLedger = SessionConversationLedger(SessionConversationLedger.defaultFile()),
     /** PPE-1 增补 D8：设备发来的会话分页请求，留给宿主答（见 AgentSessionPageStore 的 KDoc）。 */
     internal val sessionPages: AgentSessionPageStore = AgentSessionPageStore(),
     /**
@@ -232,6 +244,8 @@ class ControlPlane(
                 toolApprovals.remember(
                     nodeId = record.nodeId,
                     agentKey = agentKey,
+                    // F3：免批带授予来源会话的 ws 维度（null 只命中 null）。
+                    wsId = record.sessionId?.let { sessions.sessionOrNull(record.nodeId, it)?.wsId },
                     tool = tool,
                     grantedBy = record.nodeId,
                     at = record.updatedAt,
@@ -262,6 +276,17 @@ class ControlPlane(
 
     /** 解析失败（3 秒握手没等到）的短期记忆：key = "to[:port]"，value = 到期时刻。 */
     internal val resolveFailures = java.util.concurrent.ConcurrentHashMap<String, Long>()
+
+    /**
+     * 项目目录 → agent 工作区的解析器（决策稿 §3.1）。判据只有这一份：执行点问的是它，
+     * 不许各自手写一遍「dirId → wsId」。records 每次现取 [workspaces] 的**本机**行 ——
+     * 工作区台账是当前态视图（随重挂重建），解析器不许持有台账快照。
+     */
+    internal val directoryResolver = ProjectDirectoryResolver(
+        selfNodeId = runtime.nodeId,
+        records = { workspaces.workspaces().filter { it.nodeId == runtime.nodeId } },
+    )
+
 
     /**
      * 插件**没声明** `choices` 时，宿主替它填的那一份：这台宿主能兑现的全部处置。
@@ -538,6 +563,11 @@ class ControlPlane(
                 // 宿主侧派单/操作/点查：插件网关的执行入口（Layer 3 与群聊桥都走这里）。
                 path == "/v1/plugin/task" && method == "POST" -> pluginDispatch(exchange)
                 path == "/v1/plugin/action" && method == "POST" -> pluginAction(exchange)
+                // 宿主本地项目目录（决策稿 §5.1）：目录档案 / 群指针 / 白名单，只服务本机面板。
+                path == "/v1/host/directories" && method == "GET" -> hostDirectories(exchange)
+                path == "/v1/host/directories" && method == "POST" -> hostDirectoryRegister(exchange)
+                path == "/v1/host/group-directory" && method == "POST" -> hostGroupDirectory(exchange)
+                path == "/v1/host/whitelist" && method == "POST" -> hostWhitelist(exchange)
                 // 跨端派单（M4，规格 §6.2）：HTTP 入口只解包，派发委托给域层网道（§6.2 裁决：
                 // 与 /v1/agent/run 的单向宣告帧是两种职责，详见追踪器的路由对账记录）。
                 path == "/v1/agent/invoke" && method == "POST" -> agentInvoke(exchange)
@@ -758,5 +788,12 @@ class ControlPlane(
          */
         internal fun defaultToolApprovalFile(): File =
             File(com.kapp.tenon.agent.plugins.HostDirs.default(), "agent-tool-approvals.json")
+
+        /**
+         * 项目目录档案的默认落点（与 [defaultGrantFile] 同一套规矩：用户数据目录）。
+         * 白名单为空的档案效果是全拒；落在重启即失的目录里等于每次启动都全拒，用户会
+         * 以为设置丢了。**正常路径不经过这里**（桌面端显式传
+         * `dataDirectory/host-directories.json`），默认值只服务于测试与独立 CLI。
+         */
     }
 }

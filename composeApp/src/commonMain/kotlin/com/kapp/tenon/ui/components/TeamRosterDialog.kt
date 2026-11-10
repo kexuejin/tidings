@@ -74,6 +74,8 @@ import com.kapp.tenon.generated.resources.team_roster_role_test
 import com.kapp.tenon.generated.resources.team_roster_quick_roles
 import com.kapp.tenon.generated.resources.team_roster_remove_member
 import com.kapp.tenon.generated.resources.team_roster_required_warning
+import com.kapp.tenon.generated.resources.seat_directory_resolved
+import com.kapp.tenon.generated.resources.seat_directory_unresolved
 import com.kapp.tenon.generated.resources.team_exec_config_label
 import com.kapp.tenon.generated.resources.team_exec_kind_reviewer
 import com.kapp.tenon.generated.resources.team_exec_kind_worker
@@ -106,28 +108,30 @@ import org.jetbrains.compose.resources.stringResource
  *
  * ## 席位与预算
  *
- * - 席位定位键 = `(groupId, defaultWsId)`；多席位时顶部显式选择（§3.5），默认选中
- *   「代表席位」（调用方用 core 的 `representativeSeat` 算好传进来）；
- * - 没绑默认工作区的席位**不在可编辑列表里**（§3.1：不替它猜一个工作区）；
- *   一个可编辑席位都没有时，整个对话框退化为引导态（[team_roster_no_ws_warning]），
- *   开关与保存置灰 —— Zero-Workspace Guard。
+ * - 席位定位键 = `(groupId, hostNodeId, agentId)`（D4 的席位身份；`defaultWsId` 只是
+ *   执行投影，可为 null —— 不再是身份的一半）；多席位时顶部显式选择（§3.5），默认
+ *   选中「代表席位」（调用方用 core 的 `representativeSeat` 算好 agentId 传进来）；
+ * - **所有席位都可编辑**（继承指针后，未暴露目录的席位同样能编团队 —— 执行面另行
+ *   提示）；一个席位都没有时，整个对话框退化为引导态（[team_roster_no_ws_warning]）；
+ * - **Zero-Workspace Guard**：群没设项目目录指针（宿主端口答 null）时保存置灰并
+ *   提示 —— 执行档挂在一个解析不出来的目录上没有意义。
  */
 @Composable
 fun TeamRosterDialog(
     /** 对话框标题里的 agent 显示名（群信息页那一行的名字）。 */
     agentName: String,
-    /** 本机在该群的全部席位（含没绑工作区的；没绑的不进可编辑列表）。 */
+    /** 本机在该群的全部席位（D4：一个 agent 一条；含未暴露目录的）。 */
     seats: List<VirtualAgentMember>,
-    /** 默认选中的席位（调用方按 `representativeSeat` 算）；null = 取第一个可编辑席位。 */
-    initialSeatWsId: String?,
+    /** 默认选中的席位 agentId（调用方按 `representativeSeat` 算）；null = 取第一个席位。 */
+    initialSeatAgentId: String?,
     /** 群内全部可被 @ 的 token（大小写不敏感比较；由调用方从 mentionKeys + 声明汇总）。 */
     takenTokens: Set<String>,
     onDismiss: () -> Unit,
     /**
-     * 保存：`(defaultWsId, roster)`。roster 为 null = 关闭团队。一次保存 = 一次
+     * 保存：`(agentId, roster)`。roster 为 null = 关闭团队。一次保存 = 一次
      * rev+1、一次广播（域层 [com.kapp.tenon.domain.RelayController.handleSetGroupTeamDeclaration]）。
      */
-    onSave: (defaultWsId: String, roster: List<TeamMemberDraft>?) -> Unit,
+    onSave: (agentId: String, roster: List<TeamMemberDraft>?) -> Unit,
     /** 手机壳传 true：底部注解「执行驱动由桌面宿主托管」（§2.2 双端形态契约）。 */
     showHostManagedNotice: Boolean = false,
     /**
@@ -135,7 +139,7 @@ fun TeamRosterDialog(
      * 非宿主看到的是只读投影）。
      */
     selfNodeId: String? = null,
-    /** 群 id：执行档主键 `(groupId, defaultWsId, leaderAgentId)` 之一（§3.2）。 */
+    /** 群 id：执行档主键 `(groupId, dirId, leaderAgentId)` 之一（§3.2）。 */
     groupId: String? = null,
     /**
      * 团队执行档端口（§6.3）：null = 该壳没有执行面（手机等非宿主）⇒ 执行配置段
@@ -144,11 +148,17 @@ fun TeamRosterDialog(
     executionPort: TeamExecutionPort? = null,
 ) {
     val sp = LocalAppSpacing.current
-    val editableSeats = remember(seats) { seats.filter { it.defaultWsId != null } }
-    val initialSeat = editableSeats.firstOrNull { it.defaultWsId == initialSeatWsId }
-        ?: editableSeats.firstOrNull()
-    var selectedWsId by remember(editableSeats) { mutableStateOf(initialSeat?.defaultWsId) }
-    val selectedSeat = editableSeats.firstOrNull { it.defaultWsId == selectedWsId } ?: initialSeat
+    // D4：席位身份不再要求 defaultWsId —— 未暴露目录的席位同样可以编团队。
+    val editableSeats = remember(seats) { seats }
+    val initialSeat = initialSelectedSeatOf(editableSeats, initialSeatAgentId)
+    var selectedAgentId by remember(editableSeats) { mutableStateOf(initialSeat?.agentId) }
+    val selectedSeat = selectedSeatOf(editableSeats, selectedAgentId) ?: initialSeat
+    // **Zero-Workspace Guard**（指针判据只在宿主端口在位时可用）：群没设项目目录
+    // ⇒ 保存置灰 + 提示（执行档主键的一半解析不出来，存了也是死档）。
+    // 手机壳没有端口 —— 指针是宿主本机事实，手机上不据此置灰（投影状态在席位
+    // 选择器上如实展示）。
+    val pointerMissing = executionPort != null && groupId != null &&
+        executionPort.groupPointerDirId(groupId) == null
 
     // 开关初值 = 该席位当前是不是团队；关闭再打开保留已保存的编制。
     var enabled by remember(selectedSeat) { mutableStateOf(selectedSeat?.isTeam == true) }
@@ -166,20 +176,21 @@ fun TeamRosterDialog(
     var issues by remember(selectedSeat) { mutableStateOf<List<TeamRosterIssue>>(emptyList()) }
     // **执行配置段**（§7.1）：仅席位宿主 + 端口在位。初值 = 既有执行档沿同 agentId
     // 对齐（编辑保全：改名/改角色不重算执行配置）；保存时按 agentId 映射回去。
+    // 读档键按 D16 = `(groupId, dirId, leaderAgentId)` —— dirId 来自群指针，
+    // 不再拿席位 wsId 顶数（那是旧键的残留）。
     val executionEditable = executionPort != null &&
-        selectedSeat != null && selectedSeat.hostNodeId == selfNodeId &&
-        selectedSeat.defaultWsId != null
+        selectedSeat != null && selectedSeat.hostNodeId == selfNodeId
     var execMembers by remember(selectedSeat) {
         mutableStateOf(
             if (executionEditable && selectedSeat != null && executionPort != null && groupId != null) {
                 // 既有执行档沿同 agentId 对齐（编辑保全）；没配过 ⇒ 按声明顺序给默认
                 // （第一名 worker、其余 reviewer）＋ 空驱动让宿主显式选。
                 val seat = selectedSeat
-                val seatWsId = seat.defaultWsId
-                val existing = if (seatWsId == null) {
+                val pointerDirId = executionPort.groupPointerDirId(groupId)
+                val existing = if (pointerDirId == null) {
                     null
                 } else {
-                    executionPort.profileOf(groupId, seatWsId, seat.agentId)
+                    executionPort.profileOf(groupId, pointerDirId, seat.agentId)
                 }
                 seat.teamMembers.mapIndexed { index, member ->
                     val prior = existing?.members?.firstOrNull {
@@ -212,7 +223,7 @@ fun TeamRosterDialog(
                 verticalArrangement = Arrangement.spacedBy(sp.sm),
             ) {
                 if (selectedSeat == null) {
-                    // Zero-Workspace Guard：没有可编辑席位 —— 引导去工作区授权，开关置灰。
+                    // Zero-Workspace Guard（无席位）：引导去群设置选项目目录。
                     Text(
                         text = stringResource(Res.string.team_roster_no_ws_warning),
                         style = MaterialTheme.typography.bodySmall,
@@ -223,8 +234,17 @@ fun TeamRosterDialog(
                     if (editableSeats.size > 1) {
                         SeatSelector(
                             seats = editableSeats,
-                            selectedWsId = selectedWsId,
-                            onSelect = { selectedWsId = it },
+                            selectedAgentId = selectedAgentId,
+                            onSelect = { selectedAgentId = it },
+                        )
+                    }
+                    if (pointerMissing) {
+                        // Zero-Workspace Guard（指针）：席位可看，执行档与保存置灰。
+                        Text(
+                            text = stringResource(Res.string.team_roster_no_ws_warning),
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.error,
+                            modifier = Modifier.padding(vertical = sp.xs),
                         )
                     }
                     Row(
@@ -242,7 +262,7 @@ fun TeamRosterDialog(
                                 }
                                 issues = emptyList()
                             },
-                            enabled = true,
+                            enabled = !pointerMissing,
                         )
                         Column {
                             Text(
@@ -387,7 +407,7 @@ fun TeamRosterDialog(
             val seat = selectedSeat
             RelayDialogButton(
                 text = stringResource(Res.string.group_auth_save),
-                enabled = seat != null,
+                enabled = seat != null && !pointerMissing,
                 primary = true,
                 onClick = {
                     // 保存流程用 if/else 链而非早退标签（onClick 标签在非 inline
@@ -395,7 +415,7 @@ fun TeamRosterDialog(
                     val proceed = if (seat == null) {
                         false
                     } else if (!enabled) {
-                        onSave(seat.defaultWsId ?: "", null)
+                        onSave(seat.agentId, null)
                         onDismiss()
                         false
                     } else {
@@ -411,13 +431,15 @@ fun TeamRosterDialog(
                             false
                         } else {
                             // **执行档先写、声明后广播**（§7.1 一条动作：任一步失败整次不保存）。
-                            val seatWsId = seat.defaultWsId
+                            // D16：执行档主键的一半 = 群指针的 dirId（不是席位 wsId）——
+                            // 群没设指针就不落档（对话框保存路径的 fail-closed）。
+                            val pointerDirId = groupId?.let { executionPort?.groupPointerDirId(it) }
                             if (executionEditable && executionPort != null && groupId != null &&
-                                seatWsId != null
+                                pointerDirId != null
                             ) {
                                 val execProfile = TeamExecutionProfileUi(
                                     groupId = groupId,
-                                    defaultWsId = seatWsId,
+                                    dirId = pointerDirId,
                                     leaderAgentId = seat.agentId,
                                     members = execMembers,
                                 )
@@ -436,9 +458,9 @@ fun TeamRosterDialog(
                         }
                     }
                     if (proceed) {
-                        val ws = seat?.defaultWsId
-                        if (ws != null) {
-                            onSave(ws, drafts.map { it.copy(name = it.name.trim(), role = it.role.trim()) })
+                        val agentId = seat?.agentId
+                        if (agentId != null) {
+                            onSave(agentId, drafts.map { it.copy(name = it.name.trim(), role = it.role.trim()) })
                         }
                         onDismiss()
                     }
@@ -455,7 +477,7 @@ fun TeamRosterDialog(
 @Composable
 private fun SeatSelector(
     seats: List<VirtualAgentMember>,
-    selectedWsId: String?,
+    selectedAgentId: String?,
     onSelect: (String) -> Unit,
 ) {
     val sp = LocalAppSpacing.current
@@ -471,8 +493,7 @@ private fun SeatSelector(
             modifier = Modifier.fillMaxWidth().padding(top = sp.xxs),
         ) {
             seats.forEach { seat ->
-                val wsId = seat.defaultWsId ?: return@forEach
-                val selected = wsId == selectedWsId
+                val selected = seat.agentId.equals(selectedAgentId, ignoreCase = true)
                 Surface(
                     shape = MaterialTheme.shapes.small,
                     color = if (selected) {
@@ -480,16 +501,37 @@ private fun SeatSelector(
                     } else {
                         MaterialTheme.colorScheme.surfaceVariant
                     },
-                    onClick = { onSelect(wsId) },
+                    onClick = { onSelect(seat.agentId) },
                 ) {
-                    Text(
-                        // 席位用 @ token 展示（§2.1）—— 那是群里叫得应的名字。
-                        text = "@" + seat.name,
-                        style = MaterialTheme.typography.labelSmall,
-                        maxLines = 1,
-                        overflow = TextOverflow.Ellipsis,
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(sp.xxs),
                         modifier = Modifier.padding(horizontal = sp.sm6, vertical = sp.xxs),
-                    )
+                    ) {
+                        Text(
+                            // 席位用 @ token 展示（§2.1）—— 那是群里叫得应的名字。
+                            text = "@" + seat.name,
+                            style = MaterialTheme.typography.labelSmall,
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis,
+                        )
+                        // 执行点状态：指针继承后席位可能未解析 —— chip 上如实带上
+                        //（与入驻面板同一套状态口径，文案同源 strings.xml）。
+                        Text(
+                            text = if (seat.defaultWsId != null) {
+                                stringResource(Res.string.seat_directory_resolved)
+                            } else {
+                                stringResource(Res.string.seat_directory_unresolved)
+                            },
+                            style = MaterialTheme.typography.labelSmall,
+                            color = if (seat.defaultWsId != null) {
+                                MaterialTheme.colorScheme.onSurfaceVariant
+                            } else {
+                                MaterialTheme.colorScheme.error
+                            },
+                            maxLines = 1,
+                        )
+                    }
                 }
             }
         }
@@ -673,6 +715,24 @@ private fun issueText(issue: TeamRosterIssue): String = when (issue.kind) {
 }
 
 // ---------------------------------------------------------------- 纯函数（可测）
+
+/**
+ * 打开对话框时的**默认选中席位**（D4：按 agentId 定位，大小写不敏感；`defaultWsId`
+ * 不再参与 —— 未暴露目录的席位同样可选中）。找不到就取第一条（不猜第二条）。
+ */
+internal fun initialSelectedSeatOf(
+    seats: List<VirtualAgentMember>,
+    initialSeatAgentId: String?,
+): VirtualAgentMember? =
+    seats.firstOrNull { it.agentId.equals(initialSeatAgentId?.trim(), ignoreCase = true) }
+        ?: seats.firstOrNull()
+
+/** 选中态的席位定位（与 [initialSelectedSeatOf] 同一套匹配判据）。 */
+internal fun selectedSeatOf(
+    seats: List<VirtualAgentMember>,
+    selectedAgentId: String?,
+): VirtualAgentMember? =
+    seats.firstOrNull { it.agentId.equals(selectedAgentId?.trim(), ignoreCase = true) }
 
 private fun List<TeamMemberDraft>.updateAt(index: Int, transform: (TeamMemberDraft) -> TeamMemberDraft): List<TeamMemberDraft> =
     mapIndexed { i, d -> if (i == index) transform(d) else d }

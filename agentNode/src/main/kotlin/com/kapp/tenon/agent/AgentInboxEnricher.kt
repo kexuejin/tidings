@@ -105,6 +105,13 @@ data class AgentInboxHint(
      * 接新 agent 时不该重写一遍策略。
      */
     val senderIsAgent: Boolean = false,
+    /**
+     * 点选被拒的**稳定原因 token**（F5/C4）：`requested-session-outside-workspace`
+     * （点的会话属于另一个工作区）/ `requested-session-gone`（点的会话没了）。
+     * 仅在 requestedSessionId != null 且 targetSessionId == null 时有值 ——
+     * 桥接侧拿它在群里说一句人话，而不是一句「没反应」。
+     */
+    val requestRejectReason: String? = null,
 )
 
 /**
@@ -172,7 +179,28 @@ fun resolveAgentInboxHint(
         candidates = candidates,
         requestedSessionId = requested,
     )
-    val targetSessionId = (picked as? AgentSessionPick.Result.Pick)?.sessionId
+    val targetSessionId: String?
+    val requestRejectReason: String?
+    when (picked) {
+        is AgentSessionPick.Result.Pick -> {
+            targetSessionId = picked.sessionId
+            requestRejectReason = null
+        }
+        AgentSessionPick.Result.RequestedSessionGone -> {
+            // 点选先归一化的值随行（requested），桥接侧能说清「你点的会话没了」。
+            targetSessionId = null
+            requestRejectReason = "requested-session-gone"
+        }
+        AgentSessionPick.Result.RequestedSessionOutsideWorkspace -> {
+            // F5：点的会话属于另一个工作区 —— 不投、不换、说清原因。
+            targetSessionId = null
+            requestRejectReason = "requested-session-outside-workspace"
+        }
+        else -> {
+            targetSessionId = null
+            requestRejectReason = null
+        }
+    }
     // **必须走 `permitsExecution()`，不要在这里另写一遍判据。**
     //
     // 原来写的是「不等于 MemberOnly 且不等于 NotAMember」—— 那是**黑名单**式判断：
@@ -193,5 +221,6 @@ fun resolveAgentInboxHint(
         senderIsAgent = senderId != null && AgentSenderId.parse(senderId) != null,
         denyReason = if (allowed) null else verdict.name,
         targetSessionId = targetSessionId,
+        requestRejectReason = requestRejectReason,
     )
 }

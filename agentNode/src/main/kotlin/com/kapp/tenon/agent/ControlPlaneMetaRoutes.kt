@@ -263,6 +263,30 @@ internal fun ControlPlane.helpJson(): JsonObject = buildJsonObject {
             add(JsonPrimitive("POST /v1/dev/pair      仅开发：向已扫码的对端发起配对自证"))
         }
         add(JsonPrimitive("GET  /v1/messages  （/v1/inbox 的同义路由）"))
+        add(
+            JsonPrimitive(
+                "GET  /v1/host/directories   host-local project directory snapshot " +
+                    "(directories + groupPointers + whitelist)",
+            ),
+        )
+        add(
+            JsonPrimitive(
+                "POST /v1/host/directories   {\"path\":\"…\",\"displayName\":\"…\",\"gitRemote\":\"…\"}   " +
+                    "register a project directory (idempotent; auto-allowlisted read-write)",
+            ),
+        )
+        add(
+            JsonPrimitive(
+                "POST /v1/host/group-directory   {\"groupId\":\"…\",\"dirId\":\"…\"}   " +
+                    "set a group's project pointer (dirId omitted/null clears it)",
+            ),
+        )
+        add(
+            JsonPrimitive(
+                "POST /v1/host/whitelist   {\"dirId\":\"…\",\"allowed\":true,\"readOnly\":false}   " +
+                    "allow / revoke a directory for agents (default deny)",
+            ),
+        )
     }
     putJsonArray("examples") {
         add(JsonPrimitive("curl -s http://127.0.0.1:$boundPort/healthz"))

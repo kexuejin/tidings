@@ -4,7 +4,7 @@
     <string name="screen_conversations">Messages</string>
     <!-- 页签从五项收到四项之后，原来的「发现」和「加入」合成一个「节点」 -->
     <string name="screen_discovery">Nodes</string>
-    <string name="screen_agents">Workspaces</string>
+    <string name="screen_agents">Agents</string>
     <string name="screen_settings">Settings</string>
     <string name="action_back">Back</string>
     <!-- 空状态上的出口：没会话/没 Agent 时唯一的下一步是去节点页 -->
@@ -42,11 +42,11 @@
     <string name="conv_filter_groups">Groups</string>
     <string name="conv_filter_agents">Agent</string>
     <string name="conv_filter_people">Colleagues</string>
-    <string name="conv_filter_workspaces">Workspaces</string>
+    <string name="conv_filter_workspaces">Project directories</string>
     <string name="conv_filter_empty_title">No conversations in this filter</string>
     <string name="conv_filter_empty_action">Show all</string>
     <string name="conv_subtitle_summary">%1$d conversations · %2$d unread</string>
-    <string name="conv_subtitle_summary_ws">%1$d conversations · %2$d workspaces · %3$d unread</string>
+    <string name="conv_subtitle_summary_ws">%1$d conversations · %2$d project directories · %3$d unread</string>
     <string name="conv_group_name">Group name</string>
     <string name="conv_group_members_hint">Select members (you are included automatically)</string>
     <string name="conv_group_no_peers">No other nodes found. Add nodes on the Nodes page before creating a group.</string>
@@ -140,15 +140,15 @@
          Stage one (no wsId on the wire yet) titles Agent rows; stage two titles workspace rows. -->
     <string name="conv_inbox_ws_pending">%1$d awaiting approval</string>
     <string name="conv_inbox_ws_group_offline"> · online %1$s</string>
-    <string name="conv_inbox_ws_row_agent_sessions">%1$d conversations · the peer never announced a workspace</string>
+    <string name="conv_inbox_ws_row_agent_sessions">%1$d conversations · the peer never announced a project directory</string>
     <string name="conv_inbox_ws_row_agent_none">No conversation announced yet</string>
     <string name="conv_inbox_ws_row_unassigned">Unassigned conversations</string>
     <!-- Sub-line of the unassigned row (prototype relay.html:4260 .t2). -->
-    <string name="conv_inbox_ws_row_unassigned_body">got the conversations, not which workspace they belong to</string>
+    <string name="conv_inbox_ws_row_unassigned_body">got the conversations, not which project directory they belong to</string>
     <string name="conv_inbox_ws_row_ws_sessions">%1$s · %2$d conversations</string>
-    <string name="conv_inbox_ws_row_unnamed">Unnamed workspace</string>
-    <string name="conv_inbox_ws_row_unnamed_hint">No workspace name received (we do not fall back to the path)</string>
-    <string name="conv_inbox_ws_badge_no_workspace">No workspace reported</string>
+    <string name="conv_inbox_ws_row_unnamed">Unnamed project directory</string>
+    <string name="conv_inbox_ws_row_unnamed_hint">No project directory name received (we do not fall back to the path)</string>
+    <string name="conv_inbox_ws_badge_no_workspace">No project directory reported</string>
     <string name="conv_inbox_ws_badge_unknown_kind">Type not reported</string>
     <string name="conv_inbox_ws_pending_pill">%1$d to approve</string>
     <string name="workspace_agent_section_sessions">%1$d conversations</string>
@@ -190,7 +190,7 @@
     <string name="chat_group_removed">You have been removed from this group</string>
     <string name="chat_abort_no_task">Nothing is running right now — nothing to stop</string>
     <!-- Quick action chips (spec §9.3): visible text is the command literal; this is the semantics label. -->
-    <string name="chat_qa_status">Show workspace status</string>
+    <string name="chat_qa_status">Show project directory status</string>
     <string name="chat_qa_diff">Change summary</string>
     <string name="chat_qa_test">Run unit tests</string>
     <string name="chat_qa_stop">Emergency stop</string>
@@ -386,13 +386,13 @@
     <string name="banner_no_qr_in_image">No QR code found in the image.</string>
 
     <!-- 工作区看板与会话详情 -->
-    <string name="agent_title">Workspaces</string>
+    <string name="agent_title">Agents</string>
     <string name="agent_subtitle_pending">%1$d approvals waiting</string>
     <string name="workspace_no_sessions">No sessions</string>
-    <string name="workspace_detail_empty_title">This workspace has no sessions yet</string>
-    <string name="workspace_detail_empty_body">The agent host has not reported any sessions for it yet. Wait for it to run, or go back to the workspace list.</string>
-    <string name="workspace_detail_empty_back">Back to workspaces</string>
-    <string name="workspace_sessions_not_synced">Sessions are not synced here yet (the host reports %1$d); opening this workspace pulls them.</string>
+    <string name="workspace_detail_empty_title">This project directory has no sessions yet</string>
+    <string name="workspace_detail_empty_body">The agent host has not reported any sessions for it yet. Wait for it to run, or go back to the project directory list.</string>
+    <string name="workspace_detail_empty_back">Back to project directories</string>
+    <string name="workspace_sessions_not_synced">Sessions are not synced here yet (the host reports %1$d); opening this project directory pulls them.</string>
     <string name="workspace_board_queue_format">%1$d queued</string>
     <string name="workspace_board_runs_format">%1$d running</string>
     <string name="workspace_board_artifacts_format">%1$d artifacts</string>
@@ -401,20 +401,20 @@
          protocol, so this line carries the two parts it can, from real values. -->
     <!-- Board header summary; prototype relay.html:4208-4211. Copy-cleanup ruling drops
          the "chats" count (tool vocabulary, not what a user scans for). -->
-    <string name="workspace_board_subtitle">%1$d devices · %2$d agents · %3$d workspaces</string>
-    <string name="workspace_bar_switch">Switch Workspace</string>
-    <string name="workspace_picker_sheet_title">Select Workspace</string>
-    <string name="chat_workspace_switched_notice">Switched active workspace to %1$s</string>
+    <string name="workspace_board_subtitle">%1$d devices · %2$d agents · %3$d project directories</string>
+    <string name="workspace_bar_switch">Switch project directory</string>
+    <string name="workspace_picker_sheet_title">Select project directory</string>
+    
     <string name="workspace_new_segment">New Segment</string>
     <string name="workspace_branch_label">Branch</string>
-    <string name="workspace_unassigned">Unassigned Workspace</string>
-<string name="agent_empty_subtitle">%1$d workspaces</string>
+    <string name="workspace_unassigned">Unassigned project directory</string>
+<string name="agent_empty_subtitle">%1$d project directories</string>
     <!-- Empty state (prototype relay.html:4563-4579): warn banner + "Agent (0)" head + card body + "check nodes" row.
          No wire key in the copy: prototype relay.html:4562 forbids printing `ag1`. -->
     <string name="agent_empty_title">No Agent has reported yet</string>
-    <string name="agent_empty_message">A peer's workspaces will show up here once it is online and running an Agent.</string>
+    <string name="agent_empty_message">A peer's project directories will show up here once it is online and running an Agent.</string>
     <string name="agent_empty_section">Agent (0)</string>
-    <string name="agent_empty_card">No device has reported an Agent or workspace yet. Cards will appear here automatically once a peer comes online.</string>
+    <string name="agent_empty_card">No device has reported an Agent or project directory yet. Cards will appear here automatically once a peer comes online.</string>
     <string name="agent_empty_exit_title">Check the Nodes page</string>
     <string name="agent_empty_exit_body">Confirm the peer is online, then come back</string>
     <string name="agent_offline_title">Agent Offline</string>
@@ -561,6 +561,7 @@
     <string name="tool_approvals_agent">agent %1$s</string>
     <string name="tool_approvals_all_agents">all agents</string>
     <string name="tool_approvals_row_meta">%1$s · %2$s</string>
+    <string name="tool_approvals_row_ws">Workspace %1$s</string>
     <string name="tool_approvals_revoke">Revoke</string>
     <string name="tool_approvals_revoked">Revoked %1$d rule(s); the next request for that tool will ask again</string>
     <string name="tool_approvals_gone">That rule is already gone (it may have been revoked before)</string>
@@ -836,12 +837,12 @@
     <string name="desktop_view_nodes">Nodes</string>
     <!-- View name (Workspaces): shared by the navigation rail and the View menu. The in-screen
          heading is a separate key (agent_title) and happens to read the same. -->
-    <string name="desktop_view_agents">Workspaces</string>
+    <string name="desktop_view_agents">Agents</string>
 
     <!-- 菜单栏、工具栏 -->
     <string name="desktop_menu_new_conversation">New Conversation</string>
     <string name="desktop_menu_import_files">Import Files…</string>
-    <string name="desktop_menu_agents">Workspaces</string>
+    <string name="desktop_menu_agents">Agents</string>
     <string name="desktop_menu_copy_node_id">Copy Node ID</string>
     <string name="desktop_menu_refresh_nodes">Refresh Nodes</string>
     <string name="desktop_menu_diagnostics">Diagnostics Package</string>
@@ -883,7 +884,7 @@
     <string name="desktop_title_files">Saved and active files</string>
     <!-- Sub-title of the Workspaces view. The prototype's tsub() has no branch for d-agents
          (it falls back to the nodes line); this one says what the screen is actually about. -->
-    <string name="desktop_title_agents">Workspaces and sessions reported</string>
+    <string name="desktop_title_agents">Project directories and sessions reported</string>
     <!-- desktop_peer_header (address · status · last seen) retired 2026-11-01 (product-grade
          copy ruling): title bars print presence only via peerPresenceLine; the address lives
          in the inspector pane and the nodes screen. -->
@@ -1420,7 +1421,7 @@
     <string name="agent_approval_risk_l3">L3 Danger</string>
     <string name="agent_approval_readonly">Read-Only (No Approval Rights)</string>
     <string name="workspace_host_badge">👑 Local Host</string>
-    <string name="workspace_remote_badge">🌐 Remote Workspace</string>
+    <string name="workspace_remote_badge">🌐 Remote project directory</string>
     <string name="workspace_perm_ro">Read-Only (RO)</string>
     <string name="workspace_perm_rw">Read-Write (RW)</string>
     <!-- Short badges on the workspace card (task-79: moved out of hardcoded Chinese).
@@ -1463,8 +1464,8 @@
     <string name="chat_voice_permission_denied">Microphone permission required</string>
 
     <!-- Workspace Group & Permission Governance -->
-    <string name="workspace_create_group_title">Link Workspace to Group</string>
-    <string name="workspace_create_group_quick_title">Quick create from existing workspaces (Recommended)</string>
+    <string name="workspace_create_group_title">Link Project to Group</string>
+    <string name="workspace_create_group_quick_title">Quick create from existing project directories (Recommended)</string>
     <string name="workspace_create_group_dedup_hint">1:1 Path Binding Dedup</string>
     <string name="workspace_create_group_in_group">Already in group</string>
     <!-- 协同群 renders as Team elsewhere (workspace_group_default_name_fallback),
@@ -1491,16 +1492,17 @@
     <string name="agent_interrupt_btn">⏹ Global Interrupt</string>
     <string name="workspace_member_section_humans">Human Members (%1$d)</string>
     <string name="workspace_member_section_agents">Resident Bots (%1$d)</string>
-    <string name="workspace_qr_dialog_desc">Scan this direct QR with Tenon on mobile to pair node and authorize workspace access. One-time credential, valid for 15 minutes.</string>
+    <string name="workspace_qr_dialog_desc">Scan this direct QR with Tenon on mobile to pair node and authorize project directory access. One-time credential, valid for 15 minutes.</string>
     <string name="workspace_qr_no_address">Cannot obtain candidate addresses. Please make sure the network is connected and port is open.</string>
     <string name="pairing_public_ipv6_hint">A public IPv6 candidate is included: whether it works depends on your router/host firewall allowing inbound connections. This app does not punch through NAT or change your network settings. LAN is preferred; the public address is the cross-network fallback.</string>
-    <string name="workspace_create_group_no_workspaces">No declared local workspaces yet. You can bind a new directory below.</string>
+    <string name="workspace_create_group_no_workspaces">No declared local project directories yet. You can bind a new directory below.</string>
     <string name="workspace_group_default_name">%1$s Team</string>
     <string name="workspace_group_default_name_fallback">Team</string>
-    <string name="workspace_group_initial_greeting">🤖 [%1$s] Ready and resident in workspace "%2$s". Collaboration channel established. Send commands or assign tasks to begin.</string>
+    <string name="workspace_group_initial_greeting">🤖 [%1$s] Ready and resident in project directory "%2$s". Collaboration channel established. Send commands or assign tasks to begin.</string>
     <string name="workspace_group_session_busy">Running</string>
     <string name="workspace_group_session_ready">Ready</string>
-    <string name="workspace_group_session_brief">📋 Current workspace session: "%1$s" (%2$s)\nCollaboration channel connected; workspace events and progress will sync to this group in real time.</string>
+    <string name="workspace_group_session_brief">📋 Current project directory session: "%1$s" (%2$s)
+Collaboration channel connected; project directory events and progress will sync to this group in real time.</string>
     <string name="agent_event_thinking_only_fallback">This turn produced only thinking, no answer text</string>
 
     <!-- ===== issue 6: workspace 3-level IA rework (workspace-ia, task-4) ===== -->
@@ -1508,15 +1510,15 @@
     <string name="workspace_recent_session_title">Recent Session</string>
     <string name="workspace_recent_session_open">Open session</string>
     <string name="workspace_driver_label">Driver: %1$s</string>
-    <string name="workspace_grant_section_title">Devices authorized for this workspace</string>
+    <string name="workspace_grant_section_title">Devices authorized for this project directory</string>
     <string name="workspace_grant_none">No authorized devices yet (policy default applies)</string>
-    <string name="workspace_group_prompt_title">No collaboration group for this workspace</string>
-    <string name="workspace_group_prompt_body">“%1$s” is not bound to a collaboration group yet. Create one and nearby online devices can join to collaborate in this workspace.</string>
+    <string name="workspace_group_prompt_title">No collaboration group for this project directory</string>
+    <string name="workspace_group_prompt_body">“%1$s” is not bound to a collaboration group yet. Create one and nearby online devices can join to collaborate in this project directory.</string>
     <string name="workspace_group_prompt_create">Create and enter</string>
     <string name="workspace_group_prompt_skip">Chat without a group</string>
     <!-- issue 6 leftovers: these keys live in values/ but had no English translation,
          so English users silently fell back to Chinese (design-locale-parity gate). -->
-    <string name="workspace_no_title_banner">This workspace has no name. The peer reported only its identifier %1$s, no name — we will not pass that identifier off as a name; waiting for it to fill one in.</string>
+    <string name="workspace_no_title_banner">This project directory has no name. The peer reported only its identifier %1$s, no name — we will not pass that identifier off as a name; waiting for it to fill one in.</string>
     <string name="workspace_session_pending_count">⚠️ %1$d pending</string>
     <string name="workspace_session_warn_no_announce">Only events received, no session announcement</string>
 
@@ -1529,7 +1531,7 @@
     <string name="workspace_grant_request_peer_no_loop">The other device doesn't support access requests (older version or unsupported), so the request wasn't sent.</string>
     <string name="workspace_grant_remote_hint">This list shows the grants known on this device; permissions on the peer are decided by the peer.</string>
     <string name="workspace_board_starting">Starting the node…</string>
-    <string name="workspace_board_starting_hint">Devices and their workspaces will appear here once startup finishes.</string>
+    <string name="workspace_board_starting_hint">Devices and their project directories will appear here once startup finishes.</string>
     <string name="workspace_board_discovering">Looking for devices…</string>
     <string name="workspace_board_discovering_hint">No peer discovered yet. Make sure the other device is online, or add its address on the Nodes page.</string>
 
@@ -1551,7 +1553,6 @@
     <string name="agent_exec_add_title">Add a device</string>
     <string name="agent_exec_add_empty">Every device is already on the list.</string>
 
-
     <string name="chat_history_loading">Loading earlier messages…</string>
     <string name="chat_history_begin">This is the beginning of the conversation</string>
     <string name="hist_date_month_year">%1$d/%2$d</string>
@@ -1572,7 +1573,7 @@
     <string name="agent_approval_revoke_session">Ask again for each request</string>
     <string name="agent_approval_history_title">Approval history</string>
     <string name="agent_empty_agents_only_title">Agent reported</string>
-    <string name="agent_empty_agents_only_message">The Agent on this device has not reported any workspace or session yet.</string>
+    <string name="agent_empty_agents_only_message">The Agent on this device has not reported any project directory or session yet.</string>
     <string name="agent_empty_section_n">Agent (%1$d)</string>
     <string name="workspace_grant_unknown_peer">Unknown member</string>
     <string name="workspace_grant_state_approved">Approved</string>
@@ -1662,33 +1663,58 @@
     <string name="capsule_entity_team">Team</string>
     <string name="capsule_default_ws">Default</string>
     <string name="capsule_new_task">New task</string>
-    <string name="capsule_expand_hint">Tap to choose workspace and task</string>
+    <string name="capsule_expand_hint">Tap to choose project directory and task</string>
     <string name="capsule_dismiss">Dismiss target capsule, keep text</string>
     <string name="capsule_sheet_title">Choose target</string>
     <string name="capsule_sheet_recent">Recent tasks</string>
     <string name="capsule_sheet_new_task">Start a new task</string>
-    <string name="capsule_sheet_empty">No authorized workspace for this agent yet. Tap “Start a new task” to dispatch directly.</string>
+    <string name="capsule_sheet_empty">No authorized project directory for this agent yet. Tap “Start a new task” to dispatch directly.</string>
 
     <!-- Group settings · agent & workspace authorization panel (plan §5.1) -->
-    <string name="group_auth_title">Agents &amp; workspace authorization</string>
-    <string name="group_auth_note">Authorization belongs to the machine owner: checked workspaces are the directories this group can dispatch tasks to. Saving syncs to everyone.</string>
+    <string name="group_auth_title">Agents &amp; project directory authorization</string>
+    <string name="group_auth_note">Stationing belongs to the machine owner: a stationed agent inherits this group\'s project directory; until the directory is exposed, the seat cannot execute.</string>
     <string name="group_auth_agents_section">Agents &amp; teams in this group</string>
-    <string name="group_auth_workspaces_section">Authorized workspaces (whitelist)</string>
-    <string name="group_auth_readonly_note">This device is not the workspace host of this group; the panel is read-only.</string>
+    <string name="group_auth_workspaces_section">Authorized project directories (whitelist)</string>
+    <string name="group_auth_readonly_note">This device is not the project directory host of this group; the panel is read-only.</string>
     <string name="group_auth_path_host_only">Visible to the host only</string>
-    <string name="group_auth_empty">No workspace on this machine to authorize yet.</string>
+    <string name="group_auth_empty">No project directory on this machine to authorize yet.</string>
     <string name="group_auth_save">Save &amp; broadcast</string>
     <string name="group_auth_badge_default">Default</string>
     <string name="group_auth_team_members">%1$d members</string>
     <string name="group_auth_badge_self">Declared here</string>
     <string name="group_auth_entry">Authorization</string>
+    <string name="group_auth_stationed_section">Agents on this device</string>
+    <string name="group_auth_stationed_empty">No agents on this device to station.</string>
+    <string name="group_auth_foreign_section">Declared by other devices (read-only)</string>
+
+    <!-- Group settings · this group's project directory row (project directory plan §4.1) -->
+    <string name="group_project_directory_label">Project directory</string>
+    <string name="group_project_directory_unset">No project directory yet</string>
+    <string name="group_project_directory_change">Change/Set</string>
+    <string name="group_project_directory_picker_title">Choose project directory</string>
+    <string name="group_project_directory_register">Register a new directory…</string>
+    <string name="group_project_directory_path_label">Local path</string>
+    <string name="group_project_directory_clear">Clear (no directory)</string>
+    <string name="group_project_directory_readonly">Read-only</string>
+    <string name="group_project_directory_invalid_path">Invalid path; not registered</string>
+    <string name="group_project_directory_host_authorized">Authorized by the host</string>
+
+    <!-- Execution-point status (the directory item of the preflight four questions) -->
+    <string name="seat_status_stationed">Not stationed</string>
+    <string name="seat_directory_resolved">Resolved</string>
+    <string name="seat_directory_unresolved">Unresolved</string>
+    <string name="seat_not_executable_unexposed">Not executable: project directory not exposed</string>
+    <string name="seat_reexpose">Expose</string>
+    <string name="seat_station_button">Station</string>
+    <string name="seat_remove_button">Remove</string>
+    <string name="seat_duty_label">Duty</string>
 
     <!-- Team roster (team creation plan §2.2; v1 declaration & display only) -->
     <string name="team_roster_button">Team Roster</string>
     <string name="team_roster_dialog_title">Team Roster · %1$s</string>
     <string name="team_roster_enable_switch">Enable Team Collaboration</string>
     <string name="team_roster_enable_desc">Leader acts as unified window with internal members.</string>
-    <string name="team_roster_no_ws_warning">Please bind a default workspace in Group Auth before enabling team.</string>
+    <string name="team_roster_no_ws_warning">Choose this group\'s project directory in group settings before enabling a team.</string>
     <string name="team_roster_seat_label">Seat</string>
     <string name="team_roster_leader_label">👑 Leader (unified window): %1$s</string>
     <string name="team_roster_members_section">Roster (preset, editable)</string>
@@ -1756,10 +1782,10 @@
     <string name="orchestration_team_ready">Team ready: %1$s leads; auto-start in %2$d s, or run/cancel now</string>
     <string name="orchestration_diff_ready_prompt">Changes are ready; awaiting your merge</string>
     <string name="orchestration_diff_ready_detail">Changes ready: %1$s (+%2$d −%3$d)</string>
-    <string name="orchestration_patch_hint_exists">A file the patch creates already exists. Move or commit it, then merge again</string>
+    <string name="orchestration_patch_hint_exists">A file the patch creates already exists in the project directory. Move or commit it, then merge again</string>
     <string name="orchestration_patch_hint_mismatch">Patch does not match current files — review manually</string>
     <string name="orchestration_patch_hint_file_missing">The patch file is gone; ask the runner to re-run</string>
-    <string name="orchestration_patch_hint_workspace_missing">Workspace directory not found; confirm its location</string>
+    <string name="orchestration_patch_hint_workspace_missing">Project directory not found; confirm its location</string>
     <string name="orchestration_patch_hint_failed">Patch could not be applied: %1$s</string>
     <string name="orchestration_stage_handoff_speech">[%1$s] Implementation complete, please cross-review @%2$s.</string>
 

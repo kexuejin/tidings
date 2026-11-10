@@ -2,214 +2,197 @@
 
 package com.kapp.tenon.ui.components
 
+import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
-import androidx.compose.material3.Checkbox
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
-import androidx.compose.runtime.mutableStateMapOf
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
+import com.kapp.tenon.core.protocol.AgentDuties
+import com.kapp.tenon.core.protocol.DispatchPreflight
+import com.kapp.tenon.core.protocol.GroupMeta
 import com.kapp.tenon.core.protocol.VirtualAgentMember
 import com.kapp.tenon.core.protocol.isTeam
+import com.kapp.tenon.core.protocol.resolveVirtualAgentKey
+import com.kapp.tenon.domain.HostDirectoryPort
+import com.kapp.tenon.domain.pointedDirectoryOf
 import com.kapp.tenon.domain.model.WorkspaceUi
 import com.kapp.tenon.generated.resources.Res
 import com.kapp.tenon.generated.resources.capsule_entity_team
 import com.kapp.tenon.generated.resources.common_cancel
-import com.kapp.tenon.generated.resources.group_auth_agents_section
-import com.kapp.tenon.generated.resources.group_auth_badge_default
-import com.kapp.tenon.generated.resources.group_auth_badge_self
-import com.kapp.tenon.generated.resources.group_auth_empty
+import com.kapp.tenon.generated.resources.group_auth_foreign_section
 import com.kapp.tenon.generated.resources.group_auth_note
-import com.kapp.tenon.generated.resources.group_auth_path_host_only
 import com.kapp.tenon.generated.resources.group_auth_readonly_note
-import com.kapp.tenon.generated.resources.group_auth_save
-import com.kapp.tenon.generated.resources.group_auth_team_members
+import com.kapp.tenon.generated.resources.group_auth_stationed_empty
+import com.kapp.tenon.generated.resources.group_auth_stationed_section
 import com.kapp.tenon.generated.resources.group_auth_title
-import com.kapp.tenon.generated.resources.group_auth_workspaces_section
+import com.kapp.tenon.generated.resources.group_project_directory_change
+import com.kapp.tenon.generated.resources.group_project_directory_clear
+import com.kapp.tenon.generated.resources.group_project_directory_host_authorized
+import com.kapp.tenon.generated.resources.group_project_directory_invalid_path
+import com.kapp.tenon.generated.resources.group_project_directory_label
+import com.kapp.tenon.generated.resources.group_project_directory_picker_title
+import com.kapp.tenon.generated.resources.group_project_directory_readonly
+import com.kapp.tenon.generated.resources.group_project_directory_register
+import com.kapp.tenon.generated.resources.group_project_directory_path_label
+import com.kapp.tenon.generated.resources.group_project_directory_unset
+import com.kapp.tenon.generated.resources.seat_directory_resolved
+import com.kapp.tenon.generated.resources.seat_directory_unresolved
+import com.kapp.tenon.generated.resources.seat_duty_label
+import com.kapp.tenon.generated.resources.seat_not_executable_unexposed
+import com.kapp.tenon.generated.resources.seat_reexpose
+import com.kapp.tenon.generated.resources.seat_remove_button
+import com.kapp.tenon.generated.resources.seat_station_button
+import com.kapp.tenon.generated.resources.seat_status_stationed
 import com.kapp.tenon.ui.theme.LocalAppSpacing
 import com.kapp.tenon.ui.theme.ShapeRoles
 import org.jetbrains.compose.resources.stringResource
 
 /**
- * 群设置 · **智能体与工作区授权面板**（方案 §5.1，M3 交付 3，替换 `ExposeAgentDialog`）。
+ * 群设置 · **项目目录授权与智能体入驻面板**（项目目录决策稿 §4.1/§4.2；M3 交付 3 的
+ * 「智能体与工作区授权面板」按新模型改写 —— 勾选白名单的旧三参保存流已删）。
  *
- * ## 授权决定权在机主（§5.1）
+ * ## 三段语义（§4.1）
  *
- * 面板只在**宿主本机**可编辑 —— 宿主 = 本机工作区表有行、且壳接了保存通路
- * （[onSave] 非 null）。其它成员打开同一面板**只读**：他们看的是声明投影
- * （`virtualAgents` 随 group.info 广播的那份），勾选与保存按钮都不画。
+ * 1. **顶部 = 本群项目目录**：与群信息里的目录行共用 [GroupProjectDirectoryRow]
+ *    一份实现（AGENTS §2.6：同一块像素不许两份）；
+ * 2. **中部 = 本机 agent 入驻清单**（D6）：入驻不再问目录 —— 席位就地继承群项目
+ *    目录；未暴露时标「不可执行」，可一键「去暴露」（= 重新解析投影）；
+ * 3. **底部 = 其它设备的声明**（只读）：外来席位看得见、动不了 —— 撤回是机主主权。
  *
- * ## 路径不进协议（M1-T3 收口），也不进这个面板的非宿主视图
+ * ## 编辑权在宿主
  *
- * 宿主自己的行带路径（机主看自己的机器，天经地义）；非宿主的行来自声明投影，
- * **path 恒 null** —— 渲染层据此显示「仅宿主可见」，隐私收口在 UI 上闭环。
+ * 宿主 = 有目录端口（[hostDirectoryPort] 非空）**且**有入驻动作通路（[onStation]
+ * 非 null），判据在 [groupAuthEditable]。其它成员打开同一面板**只读**：看的是声明
+ * 投影（`virtualAgents` 随 group.info 广播的那份），动作按钮一律不画。
  *
- * ## 保存一次成像（M1-T4 契约）
+ * ## 路径不进协议，也不进非宿主的视图
  *
- * [onSave] 收到的是**最终集合**：域层一次 rev+1、一次广播，没有逐条 toggle 的
- * 中间态。空集合合法 = 撤掉本机全部声明（撤回是机主主权，面板不禁用保存）。
+ * 目录选择器只对宿主打开（机主看自己的机器，天经地义）；非宿主只见席位声明投影，
+ * 沿用 `group_auth_path_host_only` 的语义 —— 路径本来就不进协议。
  */
-/** 面板里的一个工作区行。 [path] 为 null = 这台设备看不见路径（非宿主）。 */
-data class GroupAuthWorkspaceRow(
-    val wsId: String,
-    val title: String,
-    val path: String?,
-    val authorized: Boolean,
-    val isDefault: Boolean,
-    /**
-     * 这一行是不是**本机**工作区（宿主的授权对象）。
-     *
-     * 勾选与保存只认本机行：外来声明进保存集合会被域层的工作区表解析丢弃
-     * （`handleSetGroupAgentWorkspaces` 只解析 `peerId == 本机` 的行），但那等于
-     * 让面板产出一批「看起来存了、其实不存在」的勾选 —— 不如从源头就只记本机。
-     */
-    val fromLocalMachine: Boolean,
-)
+/** 入驻清单里的一条本机 agent 行（纯数据；行集由 [groupAgentStationRows] 构造）。 */
+data class GroupAgentStationRow(
+    /** 本机 agent 身份（`resolveVirtualAgentKey` 口径：agentId 兜底 agentKind）。 */
+    val agentId: String,
+    /** 行上展示的 `@` token：已入驻 = 席位名（既有 @token 不漂）；未入驻 = kind/身份键。 */
+    val displayToken: String,
+    /** agent 类型徽标（`DSH`）；未上报时为 null，不编。 */
+    val kind: String?,
+    /** 该 agent 在本群的本机席位；null = 未入驻。 */
+    val seat: VirtualAgentMember?,
+) {
+    val stationed: Boolean get() = seat != null
+    val resolved: Boolean get() = seat?.defaultWsId != null
+}
 
-/** 面板里的一个 agent 行（声明投影；对外单一窗口 —— 组员不出现在群里，只报数目）。 */
-data class GroupAuthAgentRow(
-    val name: String,
-    val isTeam: Boolean,
-    val teamMemberCount: Int,
-    val hostIsSelf: Boolean,
-    val defaultWsTitle: String?,
-)
+/** 席位行的目录状态（决策稿 §4.2 的三态；判据口径见 [seatDirectoryStatusOf]。 */
+internal enum class SeatDirectoryStatus { NOT_STATIONED, RESOLVED, UNEXPOSED }
 
 /**
- * 面板的工作区行。
- *
- * 宿主视角从**本机工作区表**出发（有路径、可勾选）；本机表为空（非宿主）时从
- * **声明投影**出发（`allowedWorkspaces` 并上各成员的 `defaultWsId` —— M1 模型里
- * 白名单常为空而只有默认绑定，读侧把它也算授权事实，否则非宿主看到的面板是空的，
- * 胶囊却明明能选工作区）。宿主的行集 = 本机表 ∪ 外来声明（别人的声明看得见、动不了）。
+ * 席位的「项目目录」一问（决策稿 §4.3 preflight 四问之一）：**口径单源**
+ * [DispatchPreflight.evaluate] —— 这里只取 `DIRECTORY_RESOLVED` 那一问的答案映射成
+ * 三态，不另写第二份判据。席位未入驻不进 preflight（还没有执行点可言）。
  */
-fun groupAuthWorkspaceRows(
+internal fun seatDirectoryStatusOf(seat: VirtualAgentMember?): SeatDirectoryStatus {
+    if (seat == null) return SeatDirectoryStatus.NOT_STATIONED
+    val answer = DispatchPreflight.evaluate(
+        hostOnline = true,
+        agentPresent = true,
+        directoryResolved = seat.defaultWsId != null,
+    ).first { it.key == DispatchPreflight.Key.DIRECTORY_RESOLVED }
+    return if (answer.ok) SeatDirectoryStatus.RESOLVED else SeatDirectoryStatus.UNEXPOSED
+}
+
+/**
+ * 入驻清单的行集：从**本机工作区台账**出发（能入驻的是本机的 agent），按
+ * `resolveVirtualAgentKey` 去重（同一 agent 多个工作区宣告 = 一行），对上本机席位。
+ *
+ * 名字不编：已入驻用席位名（换名 = 把别人正在打的 mention 打断）；未入驻退
+ * agentKind，再退身份键。
+ */
+fun groupAgentStationRows(
     localWorkspaces: List<WorkspaceUi>,
     declaredAgents: List<VirtualAgentMember>,
-    exposedWsIds: Set<String>,
-    defaultWsId: String?,
-    wsTitleFallback: (wsId: String) -> String? = { null },
-): List<GroupAuthWorkspaceRow> {
-    val byWsId = LinkedHashMap<String, GroupAuthWorkspaceRow>()
-    // 1) 本机工作区：机主自己的授权对象（带路径）。
+    selfNodeId: String,
+): List<GroupAgentStationRow> {
+    val byAgentId = LinkedHashMap<String, GroupAgentStationRow>()
     localWorkspaces.forEach { ws ->
-        val wsId = ws.wsId.trim()
-        if (wsId.isEmpty() || wsId in byWsId) return@forEach
-        byWsId[wsId] = GroupAuthWorkspaceRow(
-            wsId = wsId,
-            title = ws.wsTitle?.takeIf { it.isNotBlank() } ?: wsId,
-            path = ws.wsPath?.takeIf { it.isNotBlank() },
-            authorized = wsId in exposedWsIds,
-            isDefault = wsId == defaultWsId,
-            fromLocalMachine = true,
+        val agentId = resolveVirtualAgentKey(null, ws.agentId, ws.agentKind)?.trim().orEmpty()
+        if (agentId.isEmpty()) return@forEach
+        val key = agentId.lowercase()
+        if (key in byAgentId) return@forEach
+        val seat = declaredAgents.firstOrNull {
+            it.hostNodeId == selfNodeId && it.agentId.equals(agentId, ignoreCase = true)
+        }
+        byAgentId[key] = GroupAgentStationRow(
+            agentId = agentId,
+            displayToken = seat?.name?.trim()?.takeIf { it.isNotEmpty() }
+                ?: ws.agentKind?.trim()?.takeIf { it.isNotEmpty() }
+                ?: agentId,
+            kind = ws.agentKind?.trim()?.takeIf { it.isNotEmpty() },
+            seat = seat,
         )
     }
-    // 2) 声明投影：本机表没有的（非宿主的全部、宿主的外来声明）补进来，无路径。
-    declaredAgents.forEach { member ->
-        val entries = member.allowedWorkspaces.map { it.wsId to it.title } +
-            (member.defaultWsId?.let { it to null }?.let { listOf(it) } ?: emptyList())
-        entries.forEach { (wsId, declaredTitle) ->
-            val key = wsId.trim()
-            if (key.isEmpty() || key in byWsId) return@forEach
-            byWsId[key] = GroupAuthWorkspaceRow(
-                wsId = key,
-                title = declaredTitle?.takeIf { it.isNotBlank() }
-                    ?: wsTitleFallback(key)?.takeIf { it.isNotBlank() }
-                    ?: key,
-                path = null,
-                authorized = true, // 声明里的白名单条目 / 默认绑定本身就是授权事实
-                isDefault = key == defaultWsId,
-                fromLocalMachine = false,
-            )
-        }
-    }
-    return byWsId.values.toList()
+    return byAgentId.values.toList()
 }
-
-/** 面板的 agent 行：名字来自声明（@ token 与气泡署名同一份事实），组员只报数目。 */
-fun groupAuthAgentRows(
-    declaredAgents: List<VirtualAgentMember>,
-    selfNodeId: String,
-    wsTitleOf: (wsId: String) -> String?,
-): List<GroupAuthAgentRow> = declaredAgents.map { member ->
-    GroupAuthAgentRow(
-        name = member.name,
-        isTeam = member.isTeam,
-        teamMemberCount = member.teamMembers.size,
-        hostIsSelf = member.hostNodeId == selfNodeId,
-        // 默认工作区的标题：先查声明白名单，再问本机工作区表；都查不到就不显示
-        // —— wsId 是内部 id，不冒充名字（WorkspaceUi.wsTitle 的同一条纪律）。
-        defaultWsTitle = member.defaultWsId?.let { wsId ->
-            member.allowedWorkspaces.firstOrNull { it.wsId == wsId }?.title?.takeIf { it.isNotBlank() }
-                ?: wsTitleOf(wsId)?.takeIf { it.isNotBlank() }
-        },
-    )
-}
-
-/** 群默认工作区：声明表里第一条带 `defaultWsId` 的声明（与 workspaceOfGroup 同一解析方向）。 */
-fun groupDefaultWsIdOf(declaredAgents: List<VirtualAgentMember>): String? =
-    declaredAgents.firstOrNull { it.defaultWsId != null }?.defaultWsId
 
 /**
- * 面板是不是可编辑的 —— 也就是**画不画勾选框与保存按钮**。
+ * 面板是不是可编辑的 —— 也就是**画不画入驻/去暴露/移除这些动作**。
  *
- * **M5 真机抓到的缺陷**：面板已经写了「本机不是这台群的工作区宿主，面板只读」，
- * 「保存并广播」却照常渲染。一个明说只读、又给保存入口的面板比不说更糟：
- * 用户会以为说明写错了，点下去还得担心把宿主的白名单清掉。
- *
- * 判据放在这里而不是内联进 `if`：谁改渲染都得先面对这条函数的测试。
- * 两个条件缺一不可 —— 壳没有保存通路、或本机没有工作区表（不是宿主），都不该可写。
+ * 两个条件缺一不可：没有目录端口（手机等非宿主）谈不上解析与继承；有端口但没有
+ * 动作通路（预览/截图夹具）也不该摆一颗按下去没反应的按钮。
  */
-internal fun groupAuthEditable(hasSaveChannel: Boolean, localWorkspaceCount: Int): Boolean =
-    hasSaveChannel && localWorkspaceCount > 0
-
-/** 面板打开时的勾选集合 = **本机**行的当前授权（外来声明不可勾，进不了保存集合）。 */
-fun initialCheckedWsIds(rows: List<GroupAuthWorkspaceRow>): Set<String> =
-    rows.filter { it.fromLocalMachine && it.authorized }.map { it.wsId }.toSet()
+internal fun groupAuthEditable(hasDirectoryPort: Boolean, hasActionChannel: Boolean): Boolean =
+    hasDirectoryPort && hasActionChannel
 
 @Composable
 fun SetGroupAgentWorkspacesDialog(
-    /** 群里已声明的 agent（读侧唯一来源：`GroupMeta.virtualAgents`）。 */
-    declaredAgents: List<VirtualAgentMember>,
-    /** 本机工作区表（宿主的编辑对象）；空 = 非宿主（或宿主还没登记工作区），面板只读。 */
-    localWorkspaces: List<WorkspaceUi>,
-    /** 本机当前的授权集合（= 本机声明里 defaultWsId 的集合）。 */
-    exposedWsIds: Set<String>,
-    /** 本机自己是谁（判 agent 行的「本机声明」徽标）。 */
+    /** 群元数据（席位声明的唯一读侧来源）。 */
+    group: GroupMeta,
+    /** 本机 nodeId（判席位归属）。 */
     selfNodeId: String,
-    /** 本机工作区 id → 标题（声明没带标题时的兜底；查不到就不显示，不编）。 */
-    wsTitleOf: (wsId: String) -> String?,
+    /** 本机工作区台账（入驻清单的行来源；宿主的编辑对象）。 */
+    localWorkspaces: List<WorkspaceUi>,
+    /** 宿主目录端口；null = 本机不是宿主（手机常态）⇒ 面板只读。 */
+    hostDirectoryPort: HostDirectoryPort?,
+    /** 非宿主顶部目录行用的声明投影标题（`workspaceOfGroup` 的 wsTitle）；不编路径。 */
+    declaredDirectoryTitle: String?,
+    /** 入驻：`(agentId, duty)`。null = 这个壳没有动作通路（按钮不画）。 */
+    onStation: ((agentId: String, duty: String?) -> Unit)?,
+    /** 重新解析本机席位投影（「去暴露」落点）。null 同上。 */
+    onReparse: (() -> Unit)?,
+    /** 移除本机席位（撤回入驻）。null 同上。 */
+    onRemove: ((agentId: String) -> Unit)?,
+    /** 设 / 清本群项目目录指针（D5）。null 同上。 */
+    onSetDirectory: ((dirId: String?) -> Unit)?,
     onDismiss: () -> Unit,
-    /**
-     * 保存 = 把**最终集合**整体交给 `handleSetGroupAgentWorkspaces`（一次成像、
-     * 一次 rev+1 广播）。null = 这个壳没有保存通路 ⇒ 面板只读（勾选与保存按钮不画）。
-     */
-    onSave: ((wsIds: List<String>) -> Unit)? = null,
 ) {
     val sp = LocalAppSpacing.current
-    val editable = groupAuthEditable(onSave != null, localWorkspaces.size)
-    val defaultWsId = groupDefaultWsIdOf(declaredAgents)
-    val rows = groupAuthWorkspaceRows(localWorkspaces, declaredAgents, exposedWsIds, defaultWsId, wsTitleOf)
-    val agentRows = groupAuthAgentRows(declaredAgents, selfNodeId, wsTitleOf)
-    // 初值 = 当前授权；勾/去勾就是加减，保存交最终集合。
-    val checked = remember(rows) {
-        mutableStateMapOf<String, Boolean>().apply {
-            rows.filter { it.fromLocalMachine }.forEach { put(it.wsId, it.authorized) }
-        }
-    }
+    val editable = groupAuthEditable(
+        hasDirectoryPort = hostDirectoryPort != null,
+        hasActionChannel = onStation != null,
+    )
+    val declared = group.virtualAgents.orEmpty()
 
     RelayDialog(
         onDismissRequest = onDismiss,
@@ -242,153 +225,516 @@ fun SetGroupAgentWorkspacesDialog(
                     }
                 }
 
-                // ── 群内 agent 与团队 ───────────────────────────────────
-                if (agentRows.isNotEmpty()) {
-                    Text(
-                        text = stringResource(Res.string.group_auth_agents_section),
-                        style = MaterialTheme.typography.labelMedium,
-                        fontWeight = FontWeight.SemiBold,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                        modifier = Modifier.padding(top = sp.sm6),
-                    )
-                    agentRows.forEach { agent ->
-                        Row(
-                            verticalAlignment = Alignment.CenterVertically,
-                            horizontalArrangement = Arrangement.spacedBy(sp.sm6),
-                            modifier = Modifier.fillMaxWidth().padding(vertical = sp.xxs),
-                        ) {
-                            Text(
-                                text = "@" + agent.name,
-                                style = MaterialTheme.typography.bodyMedium,
-                                maxLines = 1,
-                                overflow = TextOverflow.Ellipsis,
-                                modifier = Modifier.weight(1f, fill = false),
-                            )
-                            if (agent.isTeam) {
-                                RelayTagBadge(stringResource(Res.string.capsule_entity_team))
-                            }
-                            if (agent.isTeam && agent.teamMemberCount > 0) {
-                                Text(
-                                    text = stringResource(Res.string.group_auth_team_members, agent.teamMemberCount),
-                                    style = MaterialTheme.typography.labelSmall,
-                                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                                )
-                            }
-                            if (agent.hostIsSelf) {
-                                RelayTagBadge(stringResource(Res.string.group_auth_badge_self))
-                            }
-                            agent.defaultWsTitle?.let {
-                                Text(
-                                    text = it,
-                                    style = MaterialTheme.typography.labelSmall,
-                                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                                    maxLines = 1,
-                                    overflow = TextOverflow.Ellipsis,
-                                )
-                            }
-                        }
-                    }
-                    HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
-                }
-
-                // ── 工作区白名单 ────────────────────────────────────────
-                Text(
-                    text = stringResource(Res.string.group_auth_workspaces_section),
-                    style = MaterialTheme.typography.labelMedium,
-                    fontWeight = FontWeight.SemiBold,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    modifier = Modifier.padding(top = sp.sm6),
+                // ── 本群项目目录（与群信息行同一份实现）───────────────────
+                GroupProjectDirectoryRow(
+                    groupId = group.groupId,
+                    hostDirectoryPort = hostDirectoryPort,
+                    declaredTitle = declaredDirectoryTitle,
+                    onSetDirectory = onSetDirectory?.takeIf { editable },
                 )
-                if (rows.isEmpty()) {
-                    Text(
-                        text = stringResource(Res.string.group_auth_empty),
-                        style = MaterialTheme.typography.bodyMedium,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                        modifier = Modifier.padding(vertical = sp.md),
+                HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
+
+                if (editable) {
+                    StationingSection(
+                        localWorkspaces = localWorkspaces,
+                        group = group,
+                        selfNodeId = selfNodeId,
+                        onStation = onStation,
+                        onReparse = onReparse,
+                        onRemove = onRemove,
                     )
-                }
-                rows.forEach { row ->
-                    val isChecked = checked[row.wsId] == true
-                    val canToggle = editable && row.fromLocalMachine
-                    Row(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .then(
-                                if (canToggle) {
-                                    Modifier.clickable { checked[row.wsId] = !isChecked }
-                                } else {
-                                    Modifier
-                                },
-                            )
-                            .padding(vertical = sp.xxs),
-                        verticalAlignment = Alignment.CenterVertically,
-                        horizontalArrangement = Arrangement.spacedBy(sp.sm6),
-                    ) {
-                        if (canToggle) {
-                            Checkbox(checked = isChecked, onCheckedChange = { checked[row.wsId] = it })
-                        } else {
-                            // 只读态用勾形符号表达授权事实：画 Checkbox 会暗示可点。
-                            Text(
-                                text = if (row.authorized) "✓" else "—",
-                                style = MaterialTheme.typography.bodyMedium,
-                                color = MaterialTheme.colorScheme.onSurfaceVariant,
-                            )
-                        }
-                        Column(modifier = Modifier.weight(1f)) {
-                            Row(
-                                verticalAlignment = Alignment.CenterVertically,
-                                horizontalArrangement = Arrangement.spacedBy(sp.sm6),
-                            ) {
-                                Text(
-                                    text = row.title,
-                                    style = MaterialTheme.typography.bodyMedium,
-                                    maxLines = 1,
-                                    overflow = TextOverflow.Ellipsis,
-                                )
-                                if (row.isDefault) {
-                                    RelayTagBadge(stringResource(Res.string.group_auth_badge_default))
-                                }
-                            }
-                            Text(
-                                // 路径只在看得见时出现；看不见就是一句如实的话，不是空着。
-                                text = row.path ?: stringResource(Res.string.group_auth_path_host_only),
-                                style = MaterialTheme.typography.labelSmall,
-                                color = MaterialTheme.colorScheme.onSurfaceVariant,
-                                maxLines = 1,
-                                overflow = TextOverflow.Ellipsis,
-                            )
+                    val foreignSeats = declared.filter { it.hostNodeId != selfNodeId }
+                    if (foreignSeats.isNotEmpty()) {
+                        Text(
+                            text = stringResource(Res.string.group_auth_foreign_section),
+                            style = MaterialTheme.typography.labelMedium,
+                            fontWeight = FontWeight.SemiBold,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            modifier = Modifier.padding(top = sp.sm6),
+                        )
+                        foreignSeats.forEach { seat ->
+                            DeclaredAgentRow(seat = seat)
                         }
                     }
+                } else {
+                    // 非宿主只读：声明投影逐条列出（名称 + 执行点状态），没有动作。
+                    if (declared.isEmpty()) {
+                        Text(
+                            text = stringResource(Res.string.group_auth_stationed_empty),
+                            style = MaterialTheme.typography.bodyMedium,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            modifier = Modifier.padding(vertical = sp.md),
+                        )
+                    }
+                    declared.forEach { seat -> DeclaredAgentRow(seat = seat) }
                 }
             }
         },
         confirmButton = {
-            if (editable) {
-                RelayDialogButton(
-                    text = stringResource(Res.string.group_auth_save),
-                    onClick = {
-                        // 一次成像：勾选集合就是最终集合（空集合 = 撤掉本机全部声明）。
-                        onSave?.invoke(checked.filterValues { it }.keys.toList())
-                        onDismiss()
-                    },
-                    primary = true,
-                )
-            } else {
-                RelayDialogButton(
-                    text = stringResource(Res.string.common_cancel),
-                    onClick = onDismiss,
-                )
-            }
-        },
-        dismissButton = {
-            if (editable) {
-                RelayDialogButton(text = stringResource(Res.string.common_cancel), onClick = onDismiss)
-            }
+            RelayDialogButton(
+                text = stringResource(Res.string.common_cancel),
+                onClick = onDismiss,
+            )
         },
     )
 }
 
-/** 面板里的轻量徽标（团队 / 默认 / 本机声明）：同一形状一处定义。 */
+/** 宿主视角的入驻清单段：本机 agent 逐行 + 动作。 */
+@Composable
+private fun StationingSection(
+    localWorkspaces: List<WorkspaceUi>,
+    group: GroupMeta,
+    selfNodeId: String,
+    onStation: ((agentId: String, duty: String?) -> Unit)?,
+    onReparse: (() -> Unit)?,
+    onRemove: ((agentId: String) -> Unit)?,
+) {
+    val sp = LocalAppSpacing.current
+    Text(
+        text = stringResource(Res.string.group_auth_stationed_section),
+        style = MaterialTheme.typography.labelMedium,
+        fontWeight = FontWeight.SemiBold,
+        color = MaterialTheme.colorScheme.onSurfaceVariant,
+        modifier = Modifier.padding(top = sp.sm6),
+    )
+    val rows = remember(localWorkspaces, group.virtualAgents, selfNodeId) {
+        groupAgentStationRows(localWorkspaces, group.virtualAgents.orEmpty(), selfNodeId)
+    }
+    if (rows.isEmpty()) {
+        Text(
+            text = stringResource(Res.string.group_auth_stationed_empty),
+            style = MaterialTheme.typography.bodyMedium,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+            modifier = Modifier.padding(vertical = sp.md),
+        )
+        return
+    }
+    rows.forEach { row ->
+        StationRow(
+            row = row,
+            canStation = onStation != null,
+            canReparse = onReparse != null,
+            canRemove = onRemove != null,
+            onStation = onStation,
+            onReparse = onReparse,
+            onRemove = onRemove,
+        )
+    }
+}
+
+/** 入驻清单的一行：`@token` + 类型/团队徽标 + 执行点状态 + 动作。 */
+@Composable
+private fun StationRow(
+    row: GroupAgentStationRow,
+    canStation: Boolean,
+    canReparse: Boolean,
+    canRemove: Boolean,
+    onStation: ((agentId: String, duty: String?) -> Unit)?,
+    onReparse: (() -> Unit)?,
+    onRemove: ((agentId: String) -> Unit)?,
+) {
+    val sp = LocalAppSpacing.current
+    Row(
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(sp.sm6),
+        modifier = Modifier.fillMaxWidth().padding(vertical = sp.xxs),
+    ) {
+        Column(modifier = Modifier.weight(1f)) {
+            Row(
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(sp.sm6),
+            ) {
+                Text(
+                    text = "@" + row.displayToken,
+                    style = MaterialTheme.typography.bodyMedium,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                    modifier = Modifier.weight(1f, fill = false),
+                )
+                row.kind?.let {
+                    Surface(color = MaterialTheme.colorScheme.surface, shape = ShapeRoles.DayCell) {
+                        Text(
+                            text = it,
+                            style = MaterialTheme.typography.labelSmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            modifier = Modifier.padding(
+                                horizontal = LocalAppSpacing.current.sm6,
+                                vertical = LocalAppSpacing.current.xxs,
+                            ),
+                        )
+                    }
+                }
+                if (row.seat?.isTeam == true) {
+                    RelayTagBadge(stringResource(Res.string.capsule_entity_team))
+                }
+            }
+            Text(
+                text = seatStatusText(row),
+                style = MaterialTheme.typography.labelSmall,
+                color = if (row.stationed && !row.resolved) {
+                    MaterialTheme.colorScheme.error
+                } else {
+                    MaterialTheme.colorScheme.onSurfaceVariant
+                },
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
+            )
+        }
+        // 动作竖排（与群信息 agent 行同一取舍：横排会把名字挤没）。
+        Column(
+            verticalArrangement = Arrangement.spacedBy(sp.xxs),
+            horizontalAlignment = Alignment.End,
+        ) {
+            when {
+                // 未入驻 → 「入驻」+ 职责选择（D13：职责进名字；默认单兵）。
+                !row.stationed && canStation && onStation != null ->
+                    StationDutyPicker(
+                        onStation = { duty -> onStation(row.agentId, duty) },
+                    )
+                // 已入驻未解析 → 「去暴露」（重新解析投影）+「移除」。
+                row.stationed && !row.resolved -> {
+                    if (canReparse && onReparse != null) {
+                        AppTextButton(
+                            text = stringResource(Res.string.seat_reexpose),
+                            onClick = onReparse,
+                            size = AppButtonSize.Small,
+                        )
+                    }
+                    if (canRemove && onRemove != null) {
+                        AppTextButton(
+                            text = stringResource(Res.string.seat_remove_button),
+                            onClick = { onRemove(row.agentId) },
+                            tone = AppButtonTone.Danger,
+                            size = AppButtonSize.Small,
+                        )
+                    }
+                }
+                // 已解析 → 「移除」（撤回入驻）。
+                row.stationed && canRemove && onRemove != null ->
+                    AppTextButton(
+                        text = stringResource(Res.string.seat_remove_button),
+                        onClick = { onRemove(row.agentId) },
+                        tone = AppButtonTone.Danger,
+                        size = AppButtonSize.Small,
+                    )
+            }
+        }
+    }
+}
+
+/** 行上的状态句（按 [seatDirectoryStatusOf] 的三态取 strings.xml 的口径）。 */
+@Composable
+private fun seatStatusText(row: GroupAgentStationRow): String = when (seatDirectoryStatusOf(row.seat)) {
+    SeatDirectoryStatus.NOT_STATIONED -> stringResource(Res.string.seat_status_stationed)
+    SeatDirectoryStatus.RESOLVED -> stringResource(Res.string.seat_directory_resolved)
+    SeatDirectoryStatus.UNEXPOSED -> stringResource(Res.string.seat_not_executable_unexposed)
+}
+
+/**
+ * 入驻时的职责下拉（D13：8 个取值域值显示**原文 slug** —— ASCII token 不翻译，
+ * 取值域单源 [AgentDuties.ALL]，UI 不另抄一份清单）。
+ */
+@Composable
+private fun StationDutyPicker(onStation: (String?) -> Unit) {
+    val sp = LocalAppSpacing.current
+    var expanded by remember { mutableStateOf(false) }
+    var duty by remember { mutableStateOf(AgentDuties.DEFAULT_SINGLE) }
+    Row(
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(sp.sm6),
+    ) {
+        Box {
+            Surface(
+                shape = ShapeRoles.DayCell,
+                color = MaterialTheme.colorScheme.surfaceVariant,
+                onClick = { expanded = true },
+            ) {
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(sp.xxs),
+                    modifier = Modifier.padding(horizontal = sp.sm6, vertical = sp.xxs),
+                ) {
+                    Text(
+                        text = stringResource(Res.string.seat_duty_label),
+                        style = MaterialTheme.typography.labelSmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                    Text(
+                        text = duty,
+                        style = MaterialTheme.typography.labelSmall,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis,
+                    )
+                }
+            }
+            if (expanded) {
+                Column(
+                    modifier = Modifier
+                        .padding(top = sp.xxs)
+                        .background(MaterialTheme.colorScheme.surface)
+                        .padding(sp.xxs),
+                ) {
+                    AgentDuties.ALL.forEach { candidate ->
+                        Text(
+                            text = candidate,
+                            style = MaterialTheme.typography.labelSmall,
+                            color = if (candidate == duty) {
+                                MaterialTheme.colorScheme.primary
+                            } else {
+                                MaterialTheme.colorScheme.onSurface
+                            },
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .clickable {
+                                    duty = candidate
+                                    expanded = false
+                                }
+                                .padding(horizontal = sp.sm6, vertical = sp.xxs),
+                        )
+                    }
+                }
+            }
+        }
+        AppTextButton(
+            text = stringResource(Res.string.seat_station_button),
+            onClick = { onStation(duty) },
+            size = AppButtonSize.Small,
+        )
+    }
+}
+
+/** 只读的声明行（非宿主全列表 / 宿主的外来段）：`@name` + 团队徽标 + 执行点状态。 */
+@Composable
+private fun DeclaredAgentRow(seat: VirtualAgentMember) {
+    val sp = LocalAppSpacing.current
+    Row(
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(sp.sm6),
+        modifier = Modifier.fillMaxWidth().padding(vertical = sp.xxs),
+    ) {
+        Text(
+            text = "@" + seat.name,
+            style = MaterialTheme.typography.bodyMedium,
+            maxLines = 1,
+            overflow = TextOverflow.Ellipsis,
+            modifier = Modifier.weight(1f, fill = false),
+        )
+        if (seat.isTeam) {
+            RelayTagBadge(stringResource(Res.string.capsule_entity_team))
+        }
+        Text(
+            text = when (seatDirectoryStatusOf(seat)) {
+                SeatDirectoryStatus.RESOLVED -> stringResource(Res.string.seat_directory_resolved)
+                else -> stringResource(Res.string.seat_directory_unresolved)
+            },
+            style = MaterialTheme.typography.labelSmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+            maxLines = 1,
+            overflow = TextOverflow.Ellipsis,
+        )
+    }
+}
+
+/**
+ * 「本项目目录」行 —— 群信息卡与入驻面板**共用这一份**（§4.1；AGENTS §2.6）。
+ *
+ * - 宿主（[hostDirectoryPort] 非空且 [onSetDirectory] 非 null）：显示本机指针指向的
+ *   目录名（`pointedDirectoryOf`），未设时如实说「本群还没有项目目录」，右侧给
+ *   「更换/设置」入口（弹 [ProjectDirectoryPickerDialog]）；
+ * - 非宿主：只显示**席位声明投影**（[declaredTitle]，即 `workspaceOfGroup` 的 wsTitle）
+ *   或「由宿主授权」—— **路径永远不上屏**（沿用 `group_auth_path_host_only` 语义）。
+ */
+@Composable
+internal fun GroupProjectDirectoryRow(
+    groupId: String,
+    hostDirectoryPort: HostDirectoryPort?,
+    declaredTitle: String?,
+    onSetDirectory: ((dirId: String?) -> Unit)?,
+    modifier: Modifier = Modifier,
+) {
+    val sp = LocalAppSpacing.current
+    var showPicker by remember { mutableStateOf(false) }
+    val editable = hostDirectoryPort != null && onSetDirectory != null
+    Row(
+        modifier = modifier.fillMaxWidth(),
+        horizontalArrangement = Arrangement.SpaceBetween,
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Column(modifier = Modifier.weight(1f)) {
+            Text(
+                text = stringResource(Res.string.group_project_directory_label),
+                style = MaterialTheme.typography.labelSmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+            val value: String = if (editable) {
+                val pointed = hostDirectoryPort?.snapshot().pointedDirectoryOf(groupId)
+                pointed?.displayName
+                    ?: stringResource(Res.string.group_project_directory_unset)
+            } else {
+                declaredTitle?.trim()?.takeIf { it.isNotEmpty() }
+                    ?: stringResource(Res.string.group_project_directory_host_authorized)
+            }
+            Text(
+                text = value,
+                style = MaterialTheme.typography.bodySmall,
+                maxLines = 2,
+                overflow = TextOverflow.Ellipsis,
+            )
+        }
+        if (editable) {
+            AppTextButton(
+                text = stringResource(Res.string.group_project_directory_change),
+                onClick = { showPicker = true },
+                size = AppButtonSize.Small,
+            )
+        }
+    }
+
+    if (showPicker && hostDirectoryPort != null && onSetDirectory != null) {
+        ProjectDirectoryPickerDialog(
+            port = hostDirectoryPort,
+            onDismiss = { showPicker = false },
+            onPick = { dirId ->
+                showPicker = false
+                onSetDirectory(dirId)
+            },
+        )
+    }
+}
+
+/**
+ * 项目目录选择器（只对宿主打开）：列本机目录台账（名字 + 只读标记 + 路径 ——
+ * 机主看自己的机器）、底部「清除（不设目录）」、「登记新目录…」走
+ * `port.register(path, null)`（幂等；登记即入白名单）。选中即设指针 ——
+ * 写路径在壳层回调（指针 + 投影重建 + 广播必须一次完成）。
+ */
+@Composable
+private fun ProjectDirectoryPickerDialog(
+    port: HostDirectoryPort,
+    onDismiss: () -> Unit,
+    onPick: (String?) -> Unit,
+) {
+    val sp = LocalAppSpacing.current
+    val snapshot = remember { port.snapshot() }
+    var newPath by remember { mutableStateOf("") }
+    var invalidPath by remember { mutableStateOf(false) }
+    RelayDialog(
+        onDismissRequest = onDismiss,
+        title = { Text(stringResource(Res.string.group_project_directory_picker_title)) },
+        content = {
+            Column(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .verticalScroll(rememberScrollState()),
+                verticalArrangement = Arrangement.spacedBy(sp.xs),
+            ) {
+                snapshot?.directories.orEmpty().forEach { dir ->
+                    val readOnly = snapshot?.whitelist.orEmpty()
+                        .firstOrNull { it.dirId == dir.dirId }?.readOnly == true
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .clickable { onPick(dir.dirId) }
+                            .padding(vertical = sp.xxs),
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(sp.sm6),
+                    ) {
+                        Column(modifier = Modifier.weight(1f)) {
+                            Text(
+                                text = dir.displayName,
+                                style = MaterialTheme.typography.bodyMedium,
+                                fontWeight = FontWeight.SemiBold,
+                                maxLines = 1,
+                                overflow = TextOverflow.Ellipsis,
+                            )
+                            Text(
+                                text = dir.path,
+                                style = MaterialTheme.typography.labelSmall.copy(fontFamily = FontFamily.Monospace),
+                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                maxLines = 1,
+                                overflow = TextOverflow.Ellipsis,
+                            )
+                        }
+                        if (readOnly) {
+                            Surface(
+                                color = MaterialTheme.colorScheme.surfaceVariant,
+                                shape = ShapeRoles.DayCell,
+                            ) {
+                                Text(
+                                    text = stringResource(Res.string.group_project_directory_readonly),
+                                    style = MaterialTheme.typography.labelSmall,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                    modifier = Modifier.padding(
+                                        horizontal = LocalAppSpacing.current.sm6,
+                                        vertical = LocalAppSpacing.current.xxs,
+                                    ),
+                                )
+                            }
+                        }
+                    }
+                }
+                HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
+                Text(
+                    text = stringResource(Res.string.group_project_directory_clear),
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = MaterialTheme.colorScheme.error,
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .clickable { onPick(null) }
+                        .padding(vertical = sp.xxs),
+                )
+                HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
+                Column {
+                    Text(
+                        text = stringResource(Res.string.group_project_directory_register),
+                        style = MaterialTheme.typography.labelMedium,
+                        fontWeight = FontWeight.SemiBold,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        modifier = Modifier.padding(bottom = sp.xxs),
+                    )
+                    OutlinedTextField(
+                        value = newPath,
+                        onValueChange = {
+                            newPath = it
+                            invalidPath = false
+                        },
+                        label = { Text(stringResource(Res.string.group_project_directory_path_label)) },
+                        isError = invalidPath,
+                        supportingText = if (invalidPath) {
+                            { Text(stringResource(Res.string.group_project_directory_invalid_path)) }
+                        } else {
+                            null
+                        },
+                        singleLine = true,
+                        textStyle = MaterialTheme.typography.bodySmall.copy(fontFamily = FontFamily.Monospace),
+                        modifier = Modifier.fillMaxWidth(),
+                    )
+                }
+            }
+        },
+        confirmButton = {
+            RelayDialogButton(
+                text = stringResource(Res.string.group_project_directory_register),
+                primary = true,
+                enabled = newPath.isNotBlank(),
+                onClick = {
+                    val registered = port.register(newPath.trim(), null)
+                    if (registered == null) {
+                        // 登记失败（路径无法归一）就地指出，不关窗 —— 不是「已存在」。
+                        invalidPath = true
+                    } else {
+                        onPick(registered.dirId)
+                    }
+                },
+            )
+        },
+        dismissButton = {
+            RelayDialogButton(text = stringResource(Res.string.common_cancel), onClick = onDismiss)
+        },
+    )
+}
+
+/** 面板里的轻量徽标（团队 / 只读）：同一形状一处定义。 */
 @Composable
 private fun RelayTagBadge(text: String) {
     Surface(
@@ -399,7 +745,10 @@ private fun RelayTagBadge(text: String) {
         Text(
             text = text,
             style = MaterialTheme.typography.labelSmall,
-            modifier = Modifier.padding(horizontal = LocalAppSpacing.current.sm6, vertical = LocalAppSpacing.current.xxs),
+            modifier = Modifier.padding(
+                horizontal = LocalAppSpacing.current.sm6,
+                vertical = LocalAppSpacing.current.xxs,
+            ),
         )
     }
 }

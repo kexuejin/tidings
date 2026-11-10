@@ -399,7 +399,11 @@ suspend fun ControlPlane.executePluginTask(
     )
     // 会话对齐键登记（提案 §9 阶段三）：同 executeCliTask——派单侧知道的事实
     // 必须在这里落账，hook 审批才有会话归属可查。
-    convId?.let { sessions.bindConversation(sessionId, it) }
+    convId?.let {
+        sessions.bindConversation(sessionId, it)
+        // F4（C3）：归属写进落盘台账 —— 内存映射会淘汰、重启即失，硬保证靠这里。
+        conversationLedger.record(sessionId, it)
+    }
 
     // 游标按会话续走：台账按游标排序、同游标就地替换 —— 每次派单从 1 重数会把
     // 上一次的事件覆盖掉（测试 PluginDispatchTest.consecutiveDispatches 钉的就是它）。
@@ -548,7 +552,11 @@ suspend fun ControlPlane.executeCliTask(
     )
     // 会话对齐键登记（提案 §9 阶段三）：hook 审批带真实 sessionId 来时经
     // conversationOf 反查，审批卡才有会话归属——派单侧知道的事实必须在这里落账。
-    convId?.let { sessions.bindConversation(sessionId, it) }
+    convId?.let {
+        sessions.bindConversation(sessionId, it)
+        // F4（C3）：归属写进落盘台账 —— 内存映射会淘汰、重启即失，硬保证靠这里。
+        conversationLedger.record(sessionId, it)
+    }
     // 只读通道的执行前判据（§7.1 第 3 条）：**起进程之前**登记 —— 首个 PreToolUse
     // 到达时这条必须已经在表里，晚一步就等于又退回「事后判负」。`finally` 里必清：
     // 不清会把「只读」泄漏给同 id 的下一次任务。

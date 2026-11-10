@@ -164,6 +164,9 @@ internal class RelayControllerAgentInvokeComponent(private val host: AgentDomain
     /** 团队执行档端口（§6.3）：null = 该壳没有执行面（手机等非宿主）⇒ UI 只读。 */
     var teamExecutionPort: TeamExecutionPort? = null
 
+    /** 项目目录端口（决策稿 §5.1）：null = 该壳没有宿主目录面 ⇒ UI 只读投影。 */
+    var hostDirectoryPort: HostDirectoryPort? = null
+
     /**
      * 授权台账查询（§6.3 的「可信设备」判据）：`(agentKey, nodeId) → 是否已批准`。
      * null = 没有台账可用 ⇒ 只有 agent 宿主用户与群内成员判据兜底（fail-closed 方向）。

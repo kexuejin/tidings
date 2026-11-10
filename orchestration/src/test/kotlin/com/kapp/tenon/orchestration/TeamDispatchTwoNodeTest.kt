@@ -184,7 +184,7 @@ class TeamDispatchTwoNodeTest {
         if (withProfile) {
             val verdict = store.save(
                 TeamExecutionProfile(
-                    groupId = groupId, defaultWsId = "ws-1", leaderAgentId = "dsh-lead",
+                    groupId = groupId, dirId = "ws-1", leaderAgentId = "dsh-lead",
                     updatedAt = 0,
                     members = listOf(
                         TeamExecutionMemberSpec("m-coder", TeamExecutionKinds.WORKER, "codex"),
@@ -199,6 +199,8 @@ class TeamDispatchTwoNodeTest {
             controller = controllers[0],
             scope = scope,
             teamExecutionStore = store,
+            // D16：执行档键的 dirId 一半 —— 测试档案都落在 dir-1/ws-1 这条指针上。
+            groupDirIdOf = { "ws-1" },
         )
         controllers[0].onAgentPrompt = { conv, senderPeerId, prompt, replyToId, mentioned ->
             orch.handlePrompt(

@@ -1,0 +1,17 @@
+11-11 00:58:27.063 22443 23882 I System.out: [heartbeat] idle linked=0 skipped=22
+11-11 00:59:27.106 22443 22485 I System.out: [heartbeat] idle linked=0 skipped=22
+11-11 01:00:27.150 22443 22489 I System.out: [heartbeat] idle linked=0 skipped=22
+11-11 01:01:27.186 22443 22485 I System.out: [heartbeat] idle linked=0 skipped=22
+11-11 01:01:55.445 25441 25491 I System.out: [heartbeat] entry targets=0 sent=0 manual=2 linked=0 skipped=12 failed=[192.168.2.82:17878, 192.168.2.82:17886]
+11-11 01:01:55.454 25441 25482 I System.out: [heartbeat] entry targets=1 sent=1 manual=2 linked=0 skipped=12 failed=[192.168.2.82:17886]
+11-11 01:01:56.570 25441 25484 I System.out: [heartbeat] entry targets=1 sent=1 manual=2 linked=1 skipped=11 failed=[192.168.2.82:17886]
+11-11 01:01:56.575 25441 25480 I System.out: [heartbeat] entry targets=1 sent=1 manual=2 linked=1 skipped=11 failed=[192.168.2.82:17886]
+11-11 01:02:25.470 25441 25482 I System.out: [heartbeat] entry targets=1 sent=1 manual=2 linked=1 skipped=11 failed=[192.168.2.82:17886]
+11-11 01:02:55.500 25441 25482 I System.out: [heartbeat] entry targets=1 sent=1 manual=2 linked=1 skipped=11 failed=[192.168.2.82:17886]
+11-11 01:03:25.521 25441 25514 I System.out: [heartbeat] entry targets=1 sent=1 manual=2 linked=1 skipped=11 failed=[192.168.2.82:17886]
+11-11 01:03:55.558 25441 25542 I System.out: [heartbeat] entry targets=1 sent=1 manual=2 linked=1 skipped=11 failed=[192.168.2.82:17886]
+11-11 01:04:25.587 25441 25513 I System.out: [heartbeat] entry targets=1 sent=1 manual=2 linked=1 skipped=11 failed=[192.168.2.82:17886]
+11-11 01:04:55.610 25441 25513 I System.out: [heartbeat] entry targets=1 sent=1 manual=2 linked=1 skipped=11 failed=[192.168.2.82:17886]
+11-11 01:05:25.669 25441 25522 I System.out: [heartbeat] entry targets=1 sent=1 manual=2 linked=1 skipped=11 failed=[192.168.2.82:17886]
+11-11 01:05:55.708 25441 25484 I System.out: [heartbeat] entry targets=1 sent=1 manual=2 linked=1 skipped=11 failed=[192.168.2.82:17886]
+11-11 01:06:25.751 25441 25513 I System.out: [heartbeat] entry targets=1 sent=1 manual=2 linked=1 skipped=11 failed=[192.168.2.82:17886]

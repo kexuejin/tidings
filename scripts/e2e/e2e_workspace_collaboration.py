@@ -231,8 +231,8 @@ def run_checks(args):
                 R.tap_node(back_btn)
                 time.sleep(0.5)
 
-        tab_ws = R.find_ui(text="工作区", bottom=True, timeout=5.0)
-        R.check("ui-found-workspace-tab", tab_ws is not None, "底栏找到「工作区」Tab")
+        tab_ws = R.find_ui(text="智能体", bottom=True, timeout=5.0)
+        R.check("ui-found-workspace-tab", tab_ws is not None, "底栏找到「智能体」Tab")
         if tab_ws:
             R.tap_node(tab_ws)
             time.sleep(1.5)
@@ -240,7 +240,7 @@ def run_checks(args):
         texts = R.ui_texts()
         R.log("工作区看板页文本: %s" % " | ".join(texts[:12]))
         # 检查看板标题与会话数
-        has_board = any("工作区" in t for t in texts)
+        has_board = any("项目目录" in t for t in texts)
         R.check("ui-workspace-board-rendered", has_board, "一级看板 (WorkspaceBoardView) 正常呈现")
 
         # 4.1 点击工作区卡片进入二级详情 (WorkspaceDetailView)
@@ -291,7 +291,7 @@ def run_checks(args):
 
         sess_detail_texts = R.ui_texts()
         R.log("三级会话详情文本: %s" % " | ".join(sess_detail_texts[:14]))
-        in_sess_detail = (any("远端工作区" in t or "当前权限" in t or "聊天消息" in t or "条事件" in t for t in sess_detail_texts)
+        in_sess_detail = (any("远端项目目录" in t or "当前权限" in t or "聊天消息" in t or "条事件" in t for t in sess_detail_texts)
                           and R.find_ui(desc="返回") is not None)
         R.check("ui-entered-session-detail", in_sess_detail, "成功进入三级会话详情 (SessionDetailView)")
 
@@ -314,7 +314,7 @@ def run_checks(args):
             time.sleep(1.5)
 
         texts_back_l1 = R.ui_texts()
-        in_l1_again = any("工作区" in t for t in texts_back_l1) and R.find_ui(desc="返回") is None
+        in_l1_again = any("项目目录" in t for t in texts_back_l1) and R.find_ui(desc="返回") is None
         R.check("ui-back-nav-to-board", in_l1_again, "二级点击返回正确回退到一级看板 (Level 2 -> Level 1)")
 
         # 4.7 确认看板呈现协同入口并可打开聊天
@@ -384,8 +384,8 @@ def run_checks(args):
 
         R.ensure_app_foreground(timeout=5.0)
         msg_texts = R.ui_texts()
-        has_ws_chip = any("工作区" in t for t in msg_texts)
-        R.check("ui-messages-has-workspace-chip", has_ws_chip, "消息列表包含「工作区」筛选芯片")
+        has_ws_chip = any("项目目录" in t for t in msg_texts)
+        R.check("ui-messages-has-workspace-chip", has_ws_chip, "消息列表包含「项目目录」筛选芯片")
 
         phase("8. 状态清理与复位")
         peer.send_exit()

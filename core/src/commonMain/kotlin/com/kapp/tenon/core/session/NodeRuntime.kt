@@ -222,9 +222,15 @@ internal class SweepOnlyDiscoveryEngine(
         /**
          * 连续几轮"有目标却一个包都没交出去"就把 transport 重建一次。
          *
-         * 2 轮 = 2 × presenceInterval（默认 60 秒）：UDP 发送失败是内核层面的，
-         * 不存在"网络不好所以没交出去"，只可能是 socket 已经不可用。
+         * 2 轮 = 2 × presenceInterval（默认 60 秒）：目标本身是 `canReach == true` 的
+         * 端点（有已连上的会话 / 无准入概念的回环），`send` 在这里失败不会是"网络不好"
+         * 这种解释，只可能是本机这一侧写不出去。
          * 取 2 而不是 1，是为了不在一次瞬时错误上就重建连接。
+         *
+         * 判据的**覆盖边界**要清楚：没有会话的端点不计入 targets（它们是 `skipped`），
+         * 所以"一台没有任何会话的节点 socket 全坏"这种情况这里不会触发重建 —— 那时
+         * 也没有东西可投递，重建只会在下一轮把会话又断一次。真正需要救的是"明明有
+         * 会话却发不出去"，这条判据正好盯着它。
          */
         const val STALLED_ROUNDS_BEFORE_RESTART = 2
     }
@@ -248,6 +254,9 @@ class NodeRuntime(
      * 之后如果没人接手，用户填进去的地址就是**一句空话**（他在设置里看到"已添加"，对端
      * 永远收不到我们的任何帧）。[sendPresenceHeartbeat] 因此单独遍历一遍这份列表：
      * registry 里的对端按 nodeId 发，手动地址按 host:port 发。
+     *
+     * 判据用 [DatagramTransport.dialable]（有凭据就拨），是否算作停摆证据仍看
+     * [DatagramTransport.canReach] —— 见 [sendPresenceHeartbeat] 里两个判据的分工。
      */
     private val manualPeers: List<ManualPeer> = emptyList(),
     private val queueStore: QueueStore = InMemoryQueueStore(),
@@ -565,6 +574,10 @@ class NodeRuntime(
      *   有准入却一个包都发不出去（泵停摆，心跳循环据此触发传输面自愈）。
      *   未配对的历史端点只计入 `skipped`，不算停摆 —— 否则一台只剩离线旧身份的节点
      *   每两轮就重建一次传输面，把已经连入的会话全断掉。
+     *   **手动地址**按 [DatagramTransport.dialable] 决定拨不拨，是否计入 targets 仍看
+     *   [DatagramTransport.canReach]：裸 UDP 上两者都恒真（send 失败只可能是本机 socket
+     *   坏了，正是 task-29 的原始判据），安全信道里没有会话的手动地址则只拨不计数 ——
+     *   那是「对方不可达」，不是本机泵死。
      */
     private suspend fun sendPresenceHeartbeat(): Pair<Int, Int> {
         // 与 [announceTo] 同一条帧：两处各写一遍 payload 迟早不一致（比如漏掉 luciolaPort）。
@@ -600,18 +613,27 @@ class NodeRuntime(
         }
         // 手动地址：只有 host:port，进不了 registry（那里按 nodeId 索引），所以按地址直发。
         // 漏掉这一段 = 用户手动添加的节点从此收不到我们的任何帧（legacy 发现删掉后的空洞）。
+        //
+        // 两个判据必须分开，它们回答的是不同问题：
+        // - **拨不拨** ⇒ `dialable`：有配对凭据就值得试一次。用户填地址要的就是「现在没会话
+        //   也拨一下」，用 `canReach` 过滤等于把手动添加关掉（会话一断就再没人拨它）；
+        // - **算不算停摆** ⇒ `canReach`：只有「此刻本该能交付」的端点失败才归本机泵。
+        //   裸 UDP 恒为真（send 失败只可能是 socket 坏了 —— 这是 task-29 的原始判据）；
+        //   安全信道里没有会话的手动地址不算（那是对方不可达，不是本机泵死）。
+        var manualTried = 0
         for (peer in manualPeers) {
             if (peer.udpPort !in 1..65535 || peer.host.isBlank()) {
                 failed += "manual-invalid:${peer.host}:${peer.udpPort}"
                 continue
             }
             val address = "${peer.host}:${peer.udpPort}"
-            if (!transport.canReach(peer.host, peer.udpPort)) {
+            if (!transport.dialable(peer.host, peer.udpPort)) {
                 skipped++
                 continue
             }
             tried += address
-            targets++
+            manualTried++
+            if (transport.canReach(peer.host, peer.udpPort)) targets++
             if (transport.send(bytes, peer.host, peer.udpPort)) sent++ else failed += address
         }
         // 候选端点也要发（task-21 ①）：对端换网后 registry 里那份可能已经不可达，
@@ -638,11 +660,26 @@ class NodeRuntime(
         }
         // 只在**没发全**时出声：全发出去是常态，逐轮一行会把日志淹掉；
         // 而「有目标却一个都没出去」正是心跳变成摆设的样子，必须留下痕迹。
-        if (targets > 0 && sent < targets) {
-            println("[heartbeat] entry targets=$targets sent=$sent linked=$linked skipped=$skipped failed=${failed.take(8)}")
+        if (targets > 0 && sent < targets || failed.isNotEmpty()) {
+            println(
+                "[heartbeat] entry targets=$targets sent=$sent manual=$manualTried" +
+                    " linked=$linked skipped=$skipped failed=${failed.take(8)}",
+            )
+        } else if (targets == 0 && (skipped > 0 || linked > 0 || manualTried > 0)) {
+            // 全是「不可投递」或「走链路」的轮次不发包，但**不能一声不响**：A31 之后
+            // `targets=0` 成了稳态（历史配对端点没有会话），日志里若只剩「什么都没发生」，
+            // 事后分不清是心跳在跑而目标都不可达，还是心跳循环根本没起来。一分钟最多一行。
+            val now = nowMillis()
+            if (now - lastIdleHeartbeatLog >= IDLE_HEARTBEAT_LOG_MS) {
+                lastIdleHeartbeatLog = now
+                println("[heartbeat] idle linked=$linked skipped=$skipped manual=$manualTried")
+            }
         }
         return targets to sent
     }
+
+    /** 上一行 `[heartbeat] idle` 的时间（限流用，避免每轮刷屏）。 */
+    private var lastIdleHeartbeatLog = 0L
     internal val messenger = Messenger(
         transport = transport,
         registry = registry,
@@ -867,6 +904,14 @@ class NodeRuntime(
          * 流程会原样把它学回来。
          */
         const val REGISTRY_PRUNE_MS: Long = 7L * 24 * 60 * 60 * 1000
+
+        /**
+         * `[heartbeat] idle` 的限流窗口（60 秒）。
+         *
+         * 这一行只在**一轮没发任何包**（全是走链路/不可投递的端点）时出现，用来证明
+         * 心跳循环还在跑；比 presenceInterval（默认 30 秒）长一倍，稳态下最多两轮一行。
+         */
+        const val IDLE_HEARTBEAT_LOG_MS: Long = 60_000L
     }
     /**
      * 记下某个节点的**候选端点**（配对码里那一池地址）并落盘。

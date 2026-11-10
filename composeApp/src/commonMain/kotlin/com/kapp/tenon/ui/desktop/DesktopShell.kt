@@ -51,6 +51,7 @@ import com.kapp.tenon.domain.ChromeSlice
 import com.kapp.tenon.domain.TransferSlice
 import com.kapp.tenon.domain.conversations
 import com.kapp.tenon.domain.workspaceOfConv
+import com.kapp.tenon.domain.groupBoundToWorkspace
 import com.kapp.tenon.domain.workspaceOfGroup
 import com.kapp.tenon.domain.RelayUiState
 import com.kapp.tenon.domain.model.WorkspaceUi
@@ -63,6 +64,8 @@ import com.kapp.tenon.feature.chat.draftOf
 import com.kapp.tenon.feature.chat.updateDraft
 import com.kapp.tenon.feature.chat.DraftsByConvSaver
 import com.kapp.tenon.feature.chat.ChatScreen
+import com.kapp.tenon.feature.conversations.createWorkspaceGroupForNewDirectory
+import com.kapp.tenon.feature.conversations.createWorkspaceGroupWithDirectory
 import com.kapp.tenon.ui.components.AppBanner
 import com.kapp.tenon.generated.resources.workspace_group_default_name
 import com.kapp.tenon.ui.components.WorkspaceGroupCreateDialog
@@ -895,6 +898,16 @@ public fun DesktopShell(
                                 }
                                 gid
                             },
+                            // 工作区建群走「建群 → 绑目录 → 入驻」的共享通路（D14），
+                            // 与 Agents 视图那张对话框同一条 helper —— 两处不各写一遍。
+                            onCreateWorkspaceGroup = { name, ws, members ->
+                                controller.createWorkspaceGroupWithDirectory(name, ws, members)
+                            },
+                            onCreateWorkspaceGroupForNewDirectory = { path, groupName, members ->
+                                controller.createWorkspaceGroupForNewDirectory(
+                                    path, groupName, members, path,
+                                )
+                            },
                             // 首启空态第三张卡（"看看工作区"）：切到工作区视图，见 [openAgents]。
                             onOpenAgentConsole = openAgents,
                         )
@@ -964,14 +977,10 @@ public fun DesktopShell(
                                         // 必须同源 —— 否则同一次建群在两端叫两个名字。
                                         val name = groupNameFormat.replace("%s", ws.wsTitle ?: ws.wsId)
                                         val members = nodeSlice.peers.filter { it.online }.map { it.nodeId }
-                                        // 走工作区建群：agent 声明（含 defaultWsId）与群一起落库 ——
-                                        // 绑定是声明，不靠简介子串反猜（债#2）。简介留给展示名，
-                                        // 不写本机路径（真机反馈 #4）。
-                                        val gid = controller.createWorkspaceGroup(
-                                            name = name,
-                                            wsId = ws.wsId,
-                                            memberIds = members,
-                                        )
+                                        // 走工作区建群 + 建群即选项目目录（D14）：群建成 → 登记
+                                        // 目录 + 设指针 → 入驻；agent 声明与群一起落库 —— 绑定是
+                                        // 声明，不靠简介子串反猜（债#2）。简介留给展示名。
+                                        val gid = controller.createWorkspaceGroupWithDirectory(name, ws, members)
                                         if (gid != null) {
                                             val convId = com.kapp.tenon.core.protocol.ConvId.group(gid)
                                             selectedPeerId = convId
@@ -984,12 +993,13 @@ public fun DesktopShell(
                                     onCreateNew = { path, groupName, _ ->
                                         showCreateWsDialog = false
                                         val members = nodeSlice.peers.filter { it.online }.map { it.nodeId }
-                                        // 全新目录还没有工作区行（wsId=null）：群先建出来当协同通道，
-                                        // 工作区行随后接上；此时没有可声明的 agent，与旧行为一致。
-                                        val gid = controller.createWorkspaceGroup(
-                                            name = groupName,
-                                            wsId = null,
-                                            memberIds = members,
+                                        // 全新目录还没有工作区行（wsId=null）：登记目录 → 群先建
+                                        // 出来当协同通道 → 设指针；agent 宣告这条路径之后由
+                                        // 「去暴露 / 重新解析」接上执行点。
+                                        val gid = controller.createWorkspaceGroupForNewDirectory(
+                                            path = path,
+                                            groupName = groupName,
+                                            members = members,
                                             description = path,
                                         )
                                         if (gid != null) {
@@ -1027,14 +1037,8 @@ public fun DesktopShell(
                                 onSelectAgent = { selectedPeerId = it },
                                 onOpenChat = { id, wsId ->
                                     val ws = agentSlice.agentWorkspaces.values.firstOrNull { it.wsId == wsId }
-                                    // 跨模块 public 属性先落成局部量，否则 smart cast 不成立。
-                                    val wsPath = ws?.wsPath
-                                    val wsTitle = ws?.wsTitle
-                                    val boundGroup = settingsSlice.settings.groups.firstOrNull { g ->
-                                        val matchPath = !wsPath.isNullOrBlank() && g.description?.contains(wsPath) == true
-                                        val matchTitle = !wsTitle.isNullOrBlank() && g.name.contains(wsTitle)
-                                        matchPath || matchTitle
-                                    }
+                                    // 反查绑定群只认席位声明（groupBoundToWorkspace，单源）；子串反猜已删（F2）。
+                                    val boundGroup = groupBoundToWorkspace(wsId, settingsSlice.settings.groups)
                                     if (boundGroup != null) {
                                         val groupConvId = com.kapp.tenon.core.protocol.ConvId.group(boundGroup.groupId)
                                         selectedPeerId = groupConvId
@@ -1274,12 +1278,8 @@ public fun DesktopShell(
                     groupCreatePromptFor = null
                     val name = groupNameFormat.replace("%s", ws.wsTitle ?: ws.wsId)
                     val members = nodeSlice.peers.filter { it.online }.map { it.nodeId }
-                    // 走工作区建群：agent 声明与群一起落库（绑定是声明，不靠简介反猜）。
-                    val gid = controller.createWorkspaceGroup(
-                        name = name,
-                        wsId = ws.wsId,
-                        memberIds = members,
-                    )
+                    // 走工作区建群 + 建群即选项目目录（与「快速建群」同一条 helper 口径）。
+                    val gid = controller.createWorkspaceGroupWithDirectory(name, ws, members)
                     if (gid != null) {
                         val convId = com.kapp.tenon.core.protocol.ConvId.group(gid)
                         selectedPeerId = convId

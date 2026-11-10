@@ -13,6 +13,8 @@ import com.kapp.tenon.domain.ExecGrantView
 import com.kapp.tenon.core.protocol.GroupMeta
 import com.kapp.tenon.agent.AgentGrantStore
 import com.kapp.tenon.agent.AgentToolApprovalStore
+import com.kapp.tenon.agent.HostDirectoryStore
+import com.kapp.tenon.agent.resolveGroupDirectoryWsId
 import com.kapp.tenon.agent.AgentSessionRegistry
 import com.kapp.tenon.agent.AgentWorkspaceRegistry
 import com.kapp.tenon.agent.AgentInboxEnricher
@@ -180,6 +182,13 @@ class DesktopExtension(
 
     /** 团队执行档存储（团队执行方案 §3.2）：attach 建 / detach 清（与群模板同生命周期）。 */
     private var teamExecutionStore: TeamExecutionStore? = null
+
+    /**
+     * 宿主本地项目目录档案存储（项目目录决策稿 §3/§5.1，`host-directories.json`）。
+     * attach 建 / detach 清（与团队执行档同生命周期）；同一个实例交给控制面（HTTP 路由）
+     * 与 [DesktopHostDirectoryPort]（域层端口），三处读写落在同一把锁、同一份落盘上。
+     */
+    private var hostDirectoryStore: HostDirectoryStore? = null
 
     /**
      * agent 事件 → 群聊的全部有状态逻辑（去重键 / 已转发水位 / 在飞占位 / 补发 / 群匹配）。
@@ -357,6 +366,10 @@ class DesktopExtension(
         // 宿主本地的执行配置（driver/model）——不进 group 帧、不广播给全群。
         val teamExecution = TeamExecutionStore(java.io.File(controller.dataDirectory, "team-execution.json"))
         teamExecutionStore = teamExecution
+        // 项目目录档案（项目目录决策稿 §3/§5.1）：host-directories.json，同生命周期。
+        // 宿主本地的目录/群指针/白名单 —— 不进协议帧；agent 侧映射在执行点现算。
+        val hostDirs = HostDirectoryStore(java.io.File(controller.dataDirectory, "host-directories.json"))
+        hostDirectoryStore = hostDirs
         // M7-T2（D-016 后半步）：Channel 委派的接收宿主侧编排器。幂等 / 互斥 / 租约 /
         // 结果回执都在编排器内；这里只把「解析 + 执行」接到与 /v1/plugin/task 同源的
         // executePluginTask（两处各写一份迟早漂）。授权门在域层（controller 的
@@ -428,6 +441,7 @@ class DesktopExtension(
             runtime, httpPort, token,
             cliDrivers = driverRegistry,
             sessions = registry, workspaces = workspaces, grants = grants, execPolicies = execPolicies,
+            hostDirectoryStore = hostDirs,
             channelOrchestrator = channelOrchestrator,
             pluginStateManager = stateManager,
             pluginsDir = pluginsDir,
@@ -465,10 +479,28 @@ class DesktopExtension(
                 detailedAutoPlanner = { goal, available -> PlannerLlm.refinePlan(goal, available) },
                 // 团队执行档：@组员 的宿主侧解析与编译（§4.3）。
                 teamExecutionStore = teamExecution,
+                // D16：执行档主键的 dirId 一半 —— 与控制面/端口同一份 HostDirectoryStore。
+                groupDirIdOf = { groupId -> hostDirectoryStore?.pointerOf(groupId) },
+                // D10/D15：节点级目录白名单（默认 deny 在 store 里）。按 path 反查 dirId；
+                // 未登记的路径一律不放行 —— 不回落别的目录。
+                pathAllowed = { path, requireWrite ->
+                    hostDirectoryStore?.let { store ->
+                        store.directories().firstOrNull { it.path == path }?.let {
+                            store.whitelistAllows(it.dirId, requireWrite)
+                        } ?: false
+                    } ?: true
+                },
             )
             // 团队执行档端口（§6.3）：UI 读写宿主本地执行配置的唯一通路（手机端为 null ⇒ 只读）。
-            controller.teamExecutionPort = DesktopTeamExecutionPort(teamExecution) {
-                workerOrchestrator.availableAgentKeys()
+            controller.teamExecutionPort = DesktopTeamExecutionPort(
+                store = teamExecution,
+                availableDrivers = { workerOrchestrator.availableAgentKeys() },
+                pointerDirId = { groupId -> hostDirectoryStore?.pointerOf(groupId) },
+            )
+            // 项目目录端口（决策稿 §5.1）：与上面同一接缝 —— 同一个 store 实例交给
+            // 控制面（HTTP 路由）与这里（域层端口），两处读写落同一份内存与落盘。
+            controller.hostDirectoryPort = DesktopHostDirectoryPort(hostDirs) { groupId, agentKey ->
+                createdPlane.resolveGroupDirectoryWsId(groupId, agentKey)
             }
             if (blindSpotDir != null) {
                 BlindSpotPatrol.startPatrol(blindSpotDir, scope)
@@ -1085,6 +1117,7 @@ class DesktopExtension(
             controller.onQuickAction = null
             delegationTeamStore = null
         teamExecutionStore = null
+        hostDirectoryStore = null
             controller.onExecDevices = null
             controller.onSetExecDeviceAllowed = null
             inboundJob?.cancel()
@@ -1276,6 +1309,7 @@ class DesktopExtension(
     private fun detach() {
         workerOrchestrator = null
         sessionExemptLedger = null
+        hostDirectoryStore = null
         controller.onLocalSessionPageRequest = null
         controller.onAgentPrompt = null
         controller.onAgentAbort = null

@@ -372,7 +372,7 @@ class TwoNodeAgentInvokeTest {
             wsId = "ws-gpu", wsTitle = "GPU box", wsPath = null,
             agentKey = null, agentKind = "gpu-runner", online = true,
         )
-        host.handleSetGroupAgentWorkspaces(groupId, listOf("ws-gpu"))
+        host.handleAddGroupAgent(groupId, "gpu-runner", null)
         awaitUntil("A 收到 agent 座位声明") {
             leader.state.value.settings.groups.first { it.groupId == groupId }
                 .virtualAgents.orEmpty().any { it.agentId == "gpu-runner" && it.hostNodeId == selfB }
