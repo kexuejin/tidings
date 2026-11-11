@@ -366,13 +366,17 @@ fun RelayApp(
                 // 全屏分支就会劫持别的页签。
                 val settingsSubpageOnTop = nav.selectedTabId == AppRoutes.SETTINGS && settingsPage != null
 
-                // 工作区详情与会话详情也要接管返回键：从会话详情回到工作区详情，从工作区详情回到看板
+                // 工作区详情与会话详情也要接管返回键：从会话详情回到工作区详情，从工作区详情回到看板。
+                // Phase B4 加了实体详情层（点卡片的第一落点）：逐层退出 —— 会话详情 ←
+                // 工作区详情 ← 实体详情 ← 看板，判断从最深一层开始。
                 val agentSubpageOnTop = nav.inAgentSubpage && !twoPane
                 BackKeyHandler(enabled = agentSubpageOnTop) {
                     if (nav.inAgentSessionDetail) {
                         nav = nav.leaveAgentSessionDetail()
                     } else if (nav.inAgentWorkspaceDetail) {
                         nav = nav.leaveAgentWorkspaceDetail()
+                    } else if (nav.inAgentEntityDetail) {
+                        nav = nav.leaveAgentDetail()
                     }
                 }
 
@@ -950,6 +954,17 @@ fun RelayApp(
                                             inDetail = nav.inAgentSubpage,
                                             detailWsId = nav.detailWorkspaceId,
                                             detailSessionId = nav.detailAgentSessionId,
+                                            // 智能体实体详情（Phase B4）：点卡片流的第一落点。
+                                            // 宿主与身份键从导航状态来（nav.openAgentDetail 成对写入），
+                                            // 不借 selectedAgentId 反推 —— 那是看板选中的宿主，两个来源
+                                            // 必须分开（同 detailPeerId 的教训）。
+                                            detailEntityHostId = nav.detailAgentEntityHost,
+                                            detailEntityAgentKey = nav.detailAgentEntityKey,
+                                            onOpenAgentDetail = { hostNodeId, agentId ->
+                                                selectedAgentId = hostNodeId
+                                                nav = nav.openAgentDetail(hostNodeId, agentId)
+                                            },
+                                            onLeaveAgentDetail = { nav = nav.leaveAgentDetail() },
                                             onOpenWorkspaceDetail = { peerId, wsId ->
                                                 selectedAgentId = peerId
                                                 nav = nav.openAgentWorkspaceDetail(peerId, wsId)
@@ -1267,6 +1282,10 @@ fun RelayApp(
                                 openChat(com.kapp.tenon.core.protocol.ConvId.group(gid))
                             }
                         },
+                        // 手输绝对路径只属于「宿主有目录端口」的壳：手机没有这条物理能力，
+                        // 画出来就是一个按下去没有落点的输入框。判据取端口本身，
+                        // 不用「是不是桌面」猜（一个事实只有一个来源）。
+                        allowNewDirectory = controller.hostDirectoryPort != null,
                     )
                 }
 

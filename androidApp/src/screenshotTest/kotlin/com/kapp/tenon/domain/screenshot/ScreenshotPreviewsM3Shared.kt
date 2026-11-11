@@ -416,6 +416,8 @@ private fun WorkspaceGroupCreatePhonePreview() {
                 onShowQr = {},
                 onQuickCreate = { _, _ -> },
                 onCreateNew = { _, _, _ -> },
+                // 手机壳没有宿主目录端口：不画分段 Tab，也不画手输绝对路径的表单。
+                allowNewDirectory = false,
             )
         }
     }
@@ -435,6 +437,8 @@ private fun WorkspaceGroupCreateDeskPreview() {
                 onShowQr = {},
                 onQuickCreate = { _, _ -> },
                 onCreateNew = { _, _, _ -> },
+                // 桌面宿主有目录端口：分段 Tab 两支都在。
+                allowNewDirectory = true,
             )
         }
     }

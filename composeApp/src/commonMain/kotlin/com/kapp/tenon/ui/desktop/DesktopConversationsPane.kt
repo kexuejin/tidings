@@ -270,6 +270,8 @@ public fun ConversationsPane(
                     onSelect(com.kapp.tenon.core.protocol.ConvId.group(gid))
                 }
             },
+            // 会话栏这一支同样按宿主目录端口判定，不按「桌面」这个壳名猜。
+            allowNewDirectory = controller.hostDirectoryPort != null,
         )
     }
     showWsQrFor?.let { ws ->

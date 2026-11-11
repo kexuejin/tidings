@@ -211,6 +211,15 @@ internal fun WorkspaceBoardView(
     onRespondApproval: ((approvalId: String, allow: Boolean) -> Unit)?,
     /** 三参处置（「本会话免审」）：null 时退回 [onRespondApproval]，不画免审按钮。 */
     onRespondChoice: ((approvalId: String, decision: AgentApprovalDecision) -> Unit)? = null,
+    /**
+     * 看板要不要画那一段逐条审批卡。桌面 Wide + Agents 时右侧 inspector 已经常驻
+     * 同一批卡，壳会置 false —— 左右两栏各画一遍一模一样的审批卡不是冗余备份，
+     * 是重复渲染。默认 true：手机 / 单栏 / 预览帧保持原形态。
+     *
+     * 置顶的 [PinnedApprovalFocusCard] 不跟着关：它是「N 项待批 → 进聊天」的直达口，
+     * 不是审批卡列表，inspector 里没有对应物，关掉等于平白丢一条通路。
+     */
+    showApprovalQueue: Boolean = true,
     /** Phase 4 订阅面切片（蓝图 §4.4）：默认值由 [state] 投影，未迁移/预览路径行为不变。 */
     agentSlice: AgentSlice,
     nodeSlice: NodeSlice,
@@ -445,7 +454,7 @@ internal fun WorkspaceBoardView(
             modifier = Modifier.padding(bottom = LocalAppSpacing.current.lg14),
         )
     }
-    if (approvalRows.isNotEmpty()) {
+    if (approvalRows.isNotEmpty() && showApprovalQueue) {
         AgentApprovalsSection(
             approvals = approvalRows,
             onRespond = onRespondApproval,

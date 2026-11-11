@@ -370,4 +370,66 @@ class AppNavStateTest {
         assertFalse(after.inAgentSubpage)
         assertNull(after.detailWorkspaceId)
     }
+
+    @Test
+    fun agentEntityDetailOpensLeavesAndLayersUnderWorkspaceDetail() {
+        val fresh = AppNavState()
+        assertFalse(fresh.inAgentEntityDetail)
+        assertFalse(fresh.inAgentSubpage)
+
+        // 点卡片 → 实体详情；同时清掉更深的两层（从看板进入不可能带着旧的下钻）。
+        val open = fresh
+            .openAgentWorkspaceDetail("node-1", "ws-stale")
+            .openAgentSessionDetail("s-stale")
+            .openAgentDetail("node-1", "dsh-029bbbf3")
+        assertTrue(open.inAgentEntityDetail)
+        assertTrue(open.inAgentSubpage)
+        assertEquals("node-1", open.detailAgentEntityHost)
+        assertEquals("dsh-029bbbf3", open.detailAgentEntityKey)
+        assertNull(open.detailWorkspaceId)
+        assertNull(open.detailAgentSessionId)
+
+        // 实体详情内点项目目录行 → 工作区详情：实体层**保留**（返回时落回实体详情）。
+        val intoWs = open.openAgentWorkspaceDetail("node-1", "ws-1")
+        assertTrue(intoWs.inAgentWorkspaceDetail)
+        assertTrue(intoWs.inAgentEntityDetail, "实体层在工作区详情之下常驻（返回层级：ws ← 实体 ← 看板）")
+        val backFromWs = intoWs.leaveAgentWorkspaceDetail()
+        assertTrue(backFromWs.inAgentEntityDetail, "退出工作区详情落回实体详情，不是直接回看板")
+        assertFalse(backFromWs.inAgentWorkspaceDetail)
+
+        // 离开实体详情回看板；已在看板级再离开是 no-op（不造新实例）。
+        val backToBoard = backFromWs.leaveAgentDetail()
+        assertFalse(backToBoard.inAgentEntityDetail)
+        assertFalse(backToBoard.inAgentSubpage)
+        assertTrue(backToBoard.leaveAgentDetail() === backToBoard)
+    }
+
+    @Test
+    fun openingAChatClosesTheEntityDetailLayerToo() {
+        // 与会话/工作区详情同一条互斥纪律：进聊天清掉实体层，否则返回键先弹看不见的那层。
+        val nav = AppNavState().openAgentDetail("node-1", "dsh").openSession(a)
+        assertEquals(a, nav.activeSessionId)
+        assertFalse(nav.inAgentEntityDetail)
+        assertFalse(nav.inAgentSubpage)
+    }
+
+    @Test
+    fun switchingTabsClosesTheEntityDetailLayer() {
+        val nav = AppNavState().openAgentDetail("node-1", "dsh")
+        assertTrue(nav.inAgentEntityDetail)
+        val after = nav.selectTab(AppRoutes.SETTINGS)
+        assertFalse(after.inAgentEntityDetail)
+        assertFalse(after.inAgentSubpage)
+    }
+
+    @Test
+    fun saverRoundtripPreservesTheEntityDetailPair() {
+        val named = AppNavState(detailAgentEntityHost = "node-1", detailAgentEntityKey = "dsh-029bbbf3")
+        assertEquals(named, appNavStateFromSaverValue(named.toSaverValue()))
+        // 身份键 null = 「未上报类型」那一档，不能被存档哨兵吃成「没停在详情里」。
+        val unnamed = AppNavState(detailAgentEntityHost = "node-1", detailAgentEntityKey = null)
+        val restored = appNavStateFromSaverValue(unnamed.toSaverValue())!!
+        assertTrue(restored.inAgentEntityDetail)
+        assertNull(restored.detailAgentEntityKey)
+    }
 }

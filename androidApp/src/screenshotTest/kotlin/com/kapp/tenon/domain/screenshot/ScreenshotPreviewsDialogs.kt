@@ -116,7 +116,7 @@ private fun GroupInfoDialogPhonePreview() {
  * —— 两种外壳、一份内容（GroupInfoBody），这一帧钉的是外壳差异本身：顶栏返回 +
  * 内容铺满 + 危险动作收在滚动末尾，而不是居中弹窗。手机壳实际走的就是这一形态。
  *
- * 四个可空闸门全部武装（「不传 = 假图」纪律，同 ChatWorkspaceRunPhonePreview）：
+ * 五个可空闸门全部武装（「不传 = 假图」纪律，同 ChatWorkspaceRunPhonePreview）：
  * 不传 onLeaveGroup/onDissolveGroup 页脚的动作区整段不画；不传 onStationAgent
  * 「授权入口」不画；不传 onSetTeamRoster agent 行的「团队编制」不画。
  */
@@ -124,8 +124,26 @@ private fun GroupInfoDialogPhonePreview() {
 @Preview(name = "page-group-info", widthDp = 393, heightDp = 852, showBackground = true, locale = "zh-rCN")
 @Composable
 private fun GroupInfoPagePhonePreview() {
+    // 第五个可空闸门（hostDirectoryPort）同样武装：不传 = 「本项目目录」行整段不画 = 假图。
+    // 桩端口给一份目录台账 + 指到本预览群的指针，让该行按「已设置」形态渲染。
+    val previewGroup = desktopPreviewGroupState().settings.groups.first()
+    val previewDirectoryPort = object : com.kapp.tenon.domain.HostDirectoryPort {
+        override fun snapshot() = com.kapp.tenon.domain.HostDirectorySnapshotUi(
+            directories = listOf(
+                com.kapp.tenon.domain.HostDirectoryUi("dir-preview", "/tmp/teahouse-mobile", "teahouse-mobile", null),
+            ),
+            groupPointers = mapOf(previewGroup.groupId to "dir-preview"),
+            whitelist = emptyList(),
+        )
+
+        // 预览是只读图：三个写入口按「面板只读」语义空实现（有返回值即 fail-closed）。
+        override fun register(path: String, displayName: String?): com.kapp.tenon.domain.HostDirectoryUi? = null
+        override fun setGroupPointer(groupId: String, dirId: String?): Boolean = false
+        override fun setWhitelist(dirId: String, readOnly: Boolean, allowed: Boolean): Boolean = false
+    }
     GroupInfoPage(
-        group = desktopPreviewGroupState().settings.groups.first(),
+        group = previewGroup,
+        hostDirectoryPort = previewDirectoryPort,
         selfNodeId = desktopPreviewState().selfNodeId,
         peers = listOf(linPeer(), zhouPeer(), agentPeer()),
         memberOnlineCount = 2,

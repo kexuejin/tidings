@@ -388,6 +388,21 @@
     <!-- 工作区看板与会话详情 -->
     <string name="agent_title">Agents</string>
     <string name="agent_subtitle_pending">%1$d approvals waiting</string>
+    <!-- Agent hub card stream (Phase B): one card per (host, agent) entity. -->
+    <string name="hub_agent_section_title">Agents</string>
+    <string name="hub_agent_role_single">Solo</string>
+    <string name="hub_agent_role_team">Team of %1$d</string>
+    <string name="hub_agent_meta_format">%1$d project directories · serving %2$d groups</string>
+    <!-- Agent detail page (Phase B4): the first stop after tapping a card, full entity view. -->
+    <string name="agent_detail_groups_section_title">Serving groups</string>
+    <string name="agent_detail_workspaces_section_title">Project directories</string>
+    <string name="agent_detail_sessions_section_title">Sessions</string>
+    <string name="agent_detail_members_title">Members</string>
+    <string name="agent_detail_no_groups">Not in any collab group yet</string>
+    <string name="agent_detail_no_workspace">No project directories yet</string>
+    <string name="agent_detail_ws_session_count">%1$d sessions</string>
+    <string name="agent_detail_missing_title">This agent is no longer listed</string>
+    <string name="agent_detail_missing_body">Its seat or workspaces may have been revoked. Go back to the card stream.</string>
     <string name="workspace_no_sessions">No sessions</string>
     <string name="workspace_detail_empty_title">This project directory has no sessions yet</string>
     <string name="workspace_detail_empty_body">The agent host has not reported any sessions for it yet. Wait for it to run, or go back to the project directory list.</string>
@@ -1464,8 +1479,8 @@
     <string name="chat_voice_permission_denied">Microphone permission required</string>
 
     <!-- Workspace Group & Permission Governance -->
-    <string name="workspace_create_group_title">Link Project to Group</string>
-    <string name="workspace_create_group_quick_title">Quick create from existing project directories (Recommended)</string>
+    <string name="workspace_create_group_title">Create Project Collaboration Group</string>
+    <string name="workspace_create_group_quick_title">Project Directories on This Device</string>
     <string name="workspace_create_group_dedup_hint">1:1 Path Binding Dedup</string>
     <string name="workspace_create_group_in_group">Already in group</string>
     <!-- 协同群 renders as Team elsewhere (workspace_group_default_name_fallback),
@@ -1474,9 +1489,10 @@
     <string name="workspace_create_group_local_only">Local only</string>
     <string name="workspace_create_group_enter_chat">Enter Chat</string>
     <string name="workspace_create_group_share_qr">Share QR</string>
-    <string name="workspace_create_group_quick_btn">Create &amp; Share</string>
-    <string name="workspace_create_group_or_new">Or link a new local directory</string>
-    <string name="workspace_create_group_new_title">Link Local Directory</string>
+    <string name="workspace_create_group_quick_btn">Create Group</string>
+    <string name="workspace_create_group_new_title">Link a New Local Directory</string>
+    <string name="workspace_create_group_tab_existing">Project Directories (%1$d)</string>
+    <string name="workspace_create_group_mobile_hint">Project directories are managed by the desktop host</string>
     <string name="workspace_create_group_name_label">Group Name</string>
     <string name="workspace_create_group_sync_devices">Auto-sync to my devices (no QR needed)</string>
     <string name="workspace_create_group_confirm">Create Collaboration Group</string>
@@ -1495,7 +1511,7 @@
     <string name="workspace_qr_dialog_desc">Scan this direct QR with Tenon on mobile to pair node and authorize project directory access. One-time credential, valid for 15 minutes.</string>
     <string name="workspace_qr_no_address">Cannot obtain candidate addresses. Please make sure the network is connected and port is open.</string>
     <string name="pairing_public_ipv6_hint">A public IPv6 candidate is included: whether it works depends on your router/host firewall allowing inbound connections. This app does not punch through NAT or change your network settings. LAN is preferred; the public address is the cross-network fallback.</string>
-    <string name="workspace_create_group_no_workspaces">No declared local project directories yet. You can bind a new directory below.</string>
+    <string name="workspace_create_group_no_workspaces">No declared project directories yet. Link one on the desktop host first.</string>
     <string name="workspace_group_default_name">%1$s Team</string>
     <string name="workspace_group_default_name_fallback">Team</string>
     <string name="workspace_group_initial_greeting">🤖 [%1$s] Ready and resident in project directory "%2$s". Collaboration channel established. Send commands or assign tasks to begin.</string>

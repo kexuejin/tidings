@@ -4,13 +4,17 @@ package com.kapp.tenon.feature.agents
 
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
+import androidx.compose.material3.VerticalDivider
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -19,30 +23,66 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.backhandler.BackHandler
 import com.kapp.tenon.domain.ChatSlice
+import com.kapp.tenon.domain.AgentHubDetailUi
+import com.kapp.tenon.domain.AgentHubUi
 import com.kapp.tenon.domain.AgentSlice
 import com.kapp.tenon.domain.NodeSlice
 import com.kapp.tenon.domain.SettingsSlice
+import com.kapp.tenon.domain.agentHubDetail
 import com.kapp.tenon.domain.agentPeers
 import com.kapp.tenon.domain.visibleAgentSessionsOf
 import com.kapp.tenon.domain.agentEventsOf
 import com.kapp.tenon.domain.isPendingApproval
 import com.kapp.tenon.domain.pickActiveSession
+import com.kapp.tenon.domain.hubAgents
 import com.kapp.tenon.core.nowMillis
+import com.kapp.tenon.generated.resources.Res
+import com.kapp.tenon.generated.resources.action_back
+import com.kapp.tenon.generated.resources.agent_detail_missing_body
+import com.kapp.tenon.generated.resources.agent_detail_missing_title
+import com.kapp.tenon.generated.resources.ic_bot
 import com.kapp.tenon.navigation.resolveAgentSessionId
 import com.kapp.tenon.ui.ContentWidths
+import com.kapp.tenon.ui.EmptyState
 import com.kapp.tenon.ui.centerCapped
 import com.kapp.tenon.ui.theme.LocalAppSpacing
 import com.kapp.tenon.domain.model.AgentApprovalDecision
+import org.jetbrains.compose.resources.painterResource
+import org.jetbrains.compose.resources.stringResource
+
+/**
+ * 智能体页的**壳形态**（Phase B 决策稿 §2 的「桌面两栏」）。
+ *
+ * - [Stacked]（默认）：单列横段 —— 页头之下先卡片流、后治理段，一个滚动列装下。
+ *   手机壳与放不下两栏的窄窗都用它（改前形态）。
+ * - [TwoColumn]：左列卡片流 + 右列治理段。左列在三级链路的**所有层级**常驻，
+ *   点卡 / 点状态行仍走既有回调链驱动右列（不新做导航）；卡片内容与 [Stacked]
+ *   共用同一份（[AgentHubSection]，窄列收起次级信息走密度参数，不另抄一份）。
+ *
+ * [TwoColumn] 只由桌面壳在放得下的档位（Expanded/Wide）传；左列无实体
+ * （`hubAgents` 投影为空）时屏内自动退化回 [Stacked] 的全宽，不画空左列。
+ */
+public enum class AgentHubLayout {
+    Stacked,
+    TwoColumn,
+}
 
 /**
  * 工作区（原 Agent）控制台，对齐 DSH 看板与会话详情台。
  *
- * 三级架构（issue 6，用户裁决）：
+ * 三级架构（issue 6，用户裁决）之上的 Phase B4 实体层：
  * 1. 一级：工作区看板（WorkspaceBoardView）——按设备列工作区，每行展示活跃会话与待审批；
+ *    看板之上还有卡片流的**智能体详情页**（AgentDetailView，Phase B4）：点卡片流的第一
+ *    落点，实体视角整页 —— 治理面从详情内的项目目录行可达，不消失；
  * 2. 二级：工作区操作中心（WorkspaceDetailView）——直通码 / 权限管理 / 最近会话入口，
  *    **不再整段列会话**（会话列表与事件流都归三级）；
  * 3. 三级：会话详情台（SessionDetailView）——沉浸式全屏视图，常驻置顶栏（返回 + 会话名 +
  *    切换会话），下方滚动事件流与审批队列。
+ *
+ * 返回层级：会话详情 ← 工作区详情 ← 实体详情 ← 看板。
+ *
+ * 壳形态见 [AgentHubLayout]：手机单列（决策稿 §2「不引入 560」，正文仍按
+ * [ContentWidths.Pane] 收列）；桌面 Expanded/Wide 两栏（左列卡片流，右列随下钻换内容）。
  */
 @OptIn(androidx.compose.ui.ExperimentalComposeUiApi::class)
 @Composable
@@ -54,17 +94,33 @@ fun AgentConsoleScreen(
     inDetail: Boolean = false,
     detailWsId: String? = null,
     detailSessionId: String? = null,
+    /**
+     * 智能体实体详情（Phase B4）正看着哪个实体：宿主 + 身份键成对非空 = 实体详情层在开。
+     * null = 停在卡片流（看板级）。手机壳从导航状态传进来，桌面壳不传（走本地自驱）。
+     */
+    detailEntityHostId: String? = null,
+    /** 实体的 agent 身份键；null = 「未上报类型」那一档（与卡片的 null 身份键同值）。 */
+    detailEntityAgentKey: String? = null,
     onOpenWorkspaceDetail: ((peerId: String, wsId: String) -> Unit)? = null,
     onLeaveWorkspaceDetail: (() -> Unit)? = null,
     onOpenSessionDetail: ((peerId: String, sessionId: String) -> Unit)? = null,
     onLeaveSessionDetail: (() -> Unit)? = null,
     onBackToBoard: (() -> Unit)? = null,
+    /**
+     * 点卡片流 → **智能体实体详情**（Phase B4 的点卡第一落点，替代直冲工作区详情）。
+     * 手机壳接 `nav.openAgentDetail`；null = 壳没有导航层，屏内自驱（桌面两栏右列切换）。
+     */
+    onOpenAgentDetail: ((hostNodeId: String, agentId: String?) -> Unit)? = null,
+    /** 退出实体详情回看板。手机壳接 `nav.leaveAgentDetail`；null = 屏内自驱。 */
+    onLeaveAgentDetail: (() -> Unit)? = null,
     /** 与 `WorkspaceBoardView` 同签名：wsId 非空 = 要收窄到那个工作区（见那里的 KDoc）。 */
     onOpenChat: (peerId: String, wsId: String?) -> Unit,
     onFindNodes: (() -> Unit)? = null,
     modifier: Modifier = Modifier,
     now: Long = nowMillis(),
     showHeader: Boolean = true,
+    /** 壳形态（见 [AgentHubLayout]）；桌面壳按窗口档位传 [AgentHubLayout.TwoColumn]，手机壳不动。 */
+    layout: AgentHubLayout = AgentHubLayout.Stacked,
     onRespondApproval: ((approvalId: String, allow: Boolean) -> Unit)? = null,
     /**
      * 三参处置（issue「本次免审全链路不可达」）：比 [onRespondApproval] 多一个
@@ -73,6 +129,11 @@ fun AgentConsoleScreen(
      * null 时审批段退回 [onRespondApproval]（不画「本会话免审」按钮）。
      */
     onRespondChoice: ((approvalId: String, decision: AgentApprovalDecision) -> Unit)? = null,
+    /**
+     * 透传给看板的审批队列闸门：桌面宽屏的 inspector 已经常驻同一批审批卡时，
+     * 壳把这里置 false，主屏只保留卡片流。默认 true —— 手机壳与预览帧行为不变。
+     */
+    showBoardApprovalQueue: Boolean = true,
     /** 撤销「本会话免审」（见 SessionDetailView 的同名形参）。 */
     onRevokeSessionApproval: ((sessionId: String) -> Unit)? = null,
     onCancelTask: ((taskId: String) -> Unit)? = null,
@@ -118,183 +179,325 @@ fun AgentConsoleScreen(
     // 内部备选下钻状态：桌面端壳或未接入外层导航时提供自驱下钻支持
     var localDetailSessionId by remember { mutableStateOf<String?>(null) }
     var localDetailWsId by remember { mutableStateOf<String?>(null) }
+    // 实体详情（Phase B4）的本地备选：桌面两栏右列切换上下文用（点卡 → 右列出详情）。
+    var localDetailEntityHost by remember { mutableStateOf<String?>(null) }
+    var localDetailEntityKey by remember { mutableStateOf<String?>(null) }
 
     val effectiveWsId = detailWsId ?: localDetailWsId
     val effectiveSessionId = detailSessionId ?: localDetailSessionId
+    val effectiveEntityHost = detailEntityHostId ?: localDetailEntityHost
+    val effectiveEntityKey = detailEntityAgentKey ?: localDetailEntityKey
+    // 实体详情层在开（成对状态，判据只看宿主格；身份键 null = 「未上报类型」那一档）。
+    val entityDetailActive = effectiveEntityHost != null
 
-    val backEnabled = (localDetailSessionId != null || localDetailWsId != null) &&
-        (onLeaveWorkspaceDetail == null && onLeaveSessionDetail == null)
+    val backEnabled = (localDetailSessionId != null || localDetailWsId != null || localDetailEntityHost != null) &&
+        (onLeaveWorkspaceDetail == null && onLeaveSessionDetail == null && onLeaveAgentDetail == null)
     BackHandler(enabled = backEnabled) {
+        // 逐层退出（会话详情 ← 工作区详情 ← 实体详情 ← 看板）：落到哪层由**还开着的更浅层**
+        // 决定，只有整条链都空了才回看板。
         if (localDetailSessionId != null) {
             localDetailSessionId = null
-            if (localDetailWsId == null) {
+            if (localDetailWsId == null && localDetailEntityHost == null) {
                 onBackToBoard?.invoke()
             }
         } else if (localDetailWsId != null) {
             localDetailWsId = null
+            if (localDetailEntityHost == null) {
+                onBackToBoard?.invoke()
+            }
+        } else if (localDetailEntityHost != null) {
+            localDetailEntityHost = null
+            localDetailEntityKey = null
             onBackToBoard?.invoke()
         }
     }
 
-    // 三级导航：工作区看板 -> 工作区详情 -> 会话详情
-    if (selected != null && effectiveSessionId != null) {
-        val allSessions = visibleAgentSessionsOf(agentSlice, selected.nodeId)
-        val sessions = if (effectiveWsId != null) {
-            allSessions.filter { it.wsId == effectiveWsId }
-        } else {
-            allSessions
+    // 四级链路现在在哪一层：都没下钻 = 看板级。
+    val atBoardLevel = !entityDetailActive &&
+        !(selected != null && (effectiveSessionId != null || effectiveWsId != null))
+
+    // 卡片流投影（Phase B1）。两栏形态下左列在三级链路的**所有层级**常驻，任何层级都要算；
+    // 单列形态只在看板级画 —— 下钻层级不为此多算一次投影（与单列改前一致）。
+    val hubCards: List<AgentHubUi>? = if (layout == AgentHubLayout.TwoColumn || atBoardLevel) {
+        remember(agentSlice, nodeSlice, settingsSlice, now) {
+            hubAgents(agentSlice, nodeSlice, settingsSlice, now)
         }
-        val currentSessionId = resolveAgentSessionId(
-            selectedAgentSessionId ?: effectiveSessionId,
-            sessions.map { it.sessionId },
-        )
-        val activeSession = sessions.firstOrNull { it.sessionId == currentSessionId } ?: sessions.firstOrNull()
-
-        SessionDetailView(
-            peer = selected,
-            sessions = sessions,
-            activeSession = activeSession,
-                        agentSlice = agentSlice,
-            chatSlice = chatSlice,
-            nodeSlice = nodeSlice,
-            settingsSlice = settingsSlice,
-
-            now = now,
-            onBack = {
-                if (onLeaveSessionDetail != null) {
-                    onLeaveSessionDetail()
-                } else {
-                    localDetailSessionId = null
-                    if (localDetailWsId == null) {
-                        onBackToBoard?.invoke()
-                    }
-                }
-            },
-            onSelectSession = { sessionId ->
-                if (onOpenSessionDetail != null) {
-                    onOpenSessionDetail(selected.nodeId, sessionId)
-                } else {
-                    localDetailSessionId = sessionId
-                }
-                onSelectAgentSession(sessionId)
-            },
-            onOpenChat = { sessionPeerId ->
-                activeSession?.let { onSelectAgentSession(it.sessionId) }
-                onOpenChat(sessionPeerId, effectiveWsId)
-            },
-            onRespondApproval = onRespondApproval,
-            onRespondChoice = onRespondChoice,
-            onRevokeSessionApproval = onRevokeSessionApproval,
-            onCancelTask = onCancelTask,
-            modifier = modifier,
-            initialPicking = initialSessionPickerOpen,
-            artifactDigestOf = artifactDigestOf,
-        )
-    } else if (selected != null && effectiveWsId != null) {
-        val allSessions = visibleAgentSessionsOf(agentSlice, selected.nodeId)
-        val sessions = allSessions.filter { it.wsId == effectiveWsId }
-        val workspace = agentSlice.agentWorkspaces.values.firstOrNull { it.wsId == effectiveWsId }
-        // 这个工作区属于哪个 agent —— 执行权限的键就是它（与 store 一致）。
-        val agentKeyForView: String? = workspace?.agentKey
-            ?: sessions.firstOrNull()?.agentId
-            ?: sessions.firstOrNull()?.agentKind
-
-        WorkspaceDetailView(
-            wsId = effectiveWsId,
-            workspace = workspace,
-            peer = selected,
-            sessions = sessions,
-                        agentSlice = agentSlice,
-            nodeSlice = nodeSlice,
-            settingsSlice = settingsSlice,
-
-            now = now,
-            onBack = {
-                if (onLeaveWorkspaceDetail != null) {
-                    onLeaveWorkspaceDetail()
-                } else {
-                    localDetailWsId = null
-                    onBackToBoard?.invoke()
-                }
-            },
-            onOpenSession = { sessionId ->
-                if (onOpenSessionDetail != null) {
-                    onOpenSessionDetail(selected.nodeId, sessionId)
-                } else {
-                    localDetailSessionId = sessionId
-                }
-                onSelectAgentSession(sessionId)
-            },
-            onOpenChat = {
-                // 进聊天前把"要停在哪条会话"记下来。挑法与工作区卡片、会话详情**同源**
-                // （pickActiveSession 是唯一一处规则）：此前这里是第三份手抄的
-                // 「pending → busy → first」，没有 stale-busy 判定、first 也依赖调用方列表顺序，
-                // 于是"从卡片点进来"与"卡片上显示的那条"可以是两条不同的会话。
-                pickActiveSession(
-                    sessions = sessions,
-                    lastEventAtOf = { s -> agentEventsOf(agentSlice, s).maxOfOrNull { it.at } ?: 0L },
-                    // 与看板/角标同一判据（含过期）：否则"打开聊天时停在哪条会话"会优先停在
-                    // 一条其实已经没事可做的会话上（它的审批早过期了）。
-                    pendingSessionIds = agentSlice.agentApprovals.values
-                        .filter { it.peerId == selected.nodeId && isPendingApproval(it, now) }
-                        .map { it.sessionId }
-                        .toSet(),
-                    now = now,
-                )?.let { onSelectAgentSession(it.sessionId) }
-                onOpenChat(selected.nodeId, effectiveWsId)
-            },
-            onOpenSessionChat = { sessionId ->
-                onSelectAgentSession(sessionId)
-                onOpenChat(selected.nodeId, effectiveWsId)
-            },
-            onRespondApproval = onRespondApproval,
-            onRespondChoice = onRespondChoice,
-            onRefresh = onRefresh,
-            // 谁能用这个 agent 干活：逐设备勾选。
-            // 数据由调用方算好（`execDeviceRows`），这里只透传 —— 派生逻辑不该散在壳里。
-            execDevices = execDevicesOf?.invoke(agentKeyForView),
-            onToggleExecDevice = onToggleExecDevice?.let { cb ->
-                { nodeId, checked -> cb(agentKeyForView.orEmpty(), nodeId, checked) }
-            },
-            onAddExecDevice = onAddExecDevice,
-            // 把 (peerId, agentKey, wsId) 在这里绑死，屏内只留"点一下"这件事。
-            // agentKey 取工作区宣告的身份键，拿不到再退到该工作区第一条会话的身份 ——
-            // 与 `grantFor` 的键口径一致（`agentId ?? agentKind`）。
-            onRequestGrant = onRequestGrant?.let { send ->
-                suspend {
-                    send(
-                        selected.nodeId,
-                        workspace?.agentKey
-                            ?: sessions.firstOrNull()?.agentId
-                            ?: sessions.firstOrNull()?.agentKind,
-                        null,
-                        effectiveWsId,
-                        null,
-                    )
-                }
-            },
-            modifier = modifier,
-        )
     } else {
-        // 顶栏在滚动列**之外**：整幅宽的 `surface` 面 + hairline，与另外四个页签
-        // 同一个 [WorkspaceBoardTitleBar] / [LargeTitleBar]。此前标题画在这个带横向
-        // padding 的滚动列里，铺的是页面底色 `background`，于是这一页顶部和别的页签
-        // 差一整条色带（深色 #232625→#121413），切 tab 时肉眼就是「跳色」。
-        Column(modifier.fillMaxSize()) {
-            if (showHeader) {
-                WorkspaceBoardTitleBar(
+        null
+    }
+
+    // 实体详情投影（Phase B4）：与卡片流同一套装配（聚类 / 席位 / 归因都在投影里），
+    // 实体不存在（撤销、或导航层残留了一个已消失的键）= null，正文退成整屏空态。
+    val entityDetail: AgentHubDetailUi? = if (entityDetailActive) {
+        val entityHost = effectiveEntityHost.orEmpty()
+        val entityKey = effectiveEntityKey.orEmpty()
+        remember(entityHost, entityKey, agentSlice, nodeSlice, settingsSlice, now) {
+            agentHubDetail(agentSlice, nodeSlice, settingsSlice, entityHost, entityKey, now)
+        }
+    } else {
+        null
+    }
+
+    // 两栏是否成立：形态开关 + 左列真有实体。左列无实体 ⇒ 退化回单列全宽（不画空左列）。
+    val hubAside = layout == AgentHubLayout.TwoColumn && !hubCards.isNullOrEmpty()
+
+    // 卡片流：**一份内容、一份接线**（AGENTS 组件共享纪律），全宽正文顶端（单列）与
+    // 两栏左列只差密度参数（实参 = compact：true = 两栏左列窄形态，false = 全宽横段）。
+    // 点卡 → 智能体实体详情（Phase B4 的第一落点，决策稿 §4 的卡片动作修订）：治理段
+    // 不再从点卡直进，而是从详情内的项目目录行可达。身份键 null（「未上报类型」）原样
+    // 传给回调 —— 导航状态与投影都按 null 如实记这一档。
+    // [对话] 与状态行的直达保持现状（1:1 与会话详情不经过详情页）。
+    // 两栏左列在详情层级也亮着，所以点卡先离开更深的会话层：单列下卡片只在看板级可见
+    // （那里本地会话层本来就为空，这一步是空操作）；手机壳走外部导航，本地状态同样为空。
+    val hubFlow: @Composable (Boolean) -> Unit = { compact ->
+        AgentHubSection(
+            cards = hubCards.orEmpty(),
+            now = now,
+            compact = compact,
+            onOpenEntity = { card ->
+                localDetailSessionId = null
+                localDetailWsId = null
+                onSelectAgent(card.hostNodeId)
+                if (onOpenAgentDetail != null) {
+                    onOpenAgentDetail(card.hostNodeId, card.agentKey)
+                } else {
+                    localDetailEntityHost = card.hostNodeId
+                    localDetailEntityKey = card.agentKey
+                }
+            },
+            // [对话] → 既有 1:1 入口（wsId 收窄语义与看板行一致）。
+            onOpenChat = { card ->
+                onSelectAgent(card.hostNodeId)
+                onOpenChat(card.hostNodeId, card.primaryWsId)
+            },
+            // 点状态行 → 那条会话详情（既有三级入口），挑法与看板行同源。左列常驻后，从
+            // 工作区详情层级点行要先离开那一层：effectiveWsId 会把会话列表收窄到**旧的**
+            // 工作区，目标会话解析不到。单列下同样因为卡片不可见而是空操作。
+            onOpenRowSession = { hostNodeId, sessionId ->
+                localDetailWsId = null
+                onSelectAgent(hostNodeId)
+                if (onOpenSessionDetail != null) {
+                    onOpenSessionDetail(hostNodeId, sessionId)
+                } else {
+                    localDetailSessionId = sessionId
+                }
+                onSelectAgentSession(sessionId)
+            },
+        )
+    }
+
+    // 主工作台：四级链路（会话详情 ← 工作区详情 ← 实体详情 ← 看板）的**一份**接线。
+    // 两栏右列与全宽回落各传自己的落位修饰符；卡片流画在哪由 [hubAside] 决定 ——
+    // 两栏时正文不画（在左列），全宽时画在正文顶端（单列改前形态）。
+    val workbench: @Composable (Modifier) -> Unit = { area ->
+        if (selected != null && effectiveSessionId != null) {
+            val allSessions = visibleAgentSessionsOf(agentSlice, selected.nodeId)
+            val sessions = if (effectiveWsId != null) {
+                allSessions.filter { it.wsId == effectiveWsId }
+            } else {
+                allSessions
+            }
+            val currentSessionId = resolveAgentSessionId(
+                selectedAgentSessionId ?: effectiveSessionId,
+                sessions.map { it.sessionId },
+            )
+            val activeSession = sessions.firstOrNull { it.sessionId == currentSessionId } ?: sessions.firstOrNull()
+
+            SessionDetailView(
+                peer = selected,
+                sessions = sessions,
+                activeSession = activeSession,
+                agentSlice = agentSlice,
+                chatSlice = chatSlice,
+                nodeSlice = nodeSlice,
+                settingsSlice = settingsSlice,
+                now = now,
+                onBack = {
+                    if (onLeaveSessionDetail != null) {
+                        onLeaveSessionDetail()
+                    } else {
+                        localDetailSessionId = null
+                        // 落回还开着的更浅层（工作区/实体详情）；整条链都空才回看板。
+                        if (localDetailWsId == null && !entityDetailActive) {
+                            onBackToBoard?.invoke()
+                        }
+                    }
+                },
+                onSelectSession = { sessionId ->
+                    if (onOpenSessionDetail != null) {
+                        onOpenSessionDetail(selected.nodeId, sessionId)
+                    } else {
+                        localDetailSessionId = sessionId
+                    }
+                    onSelectAgentSession(sessionId)
+                },
+                onOpenChat = { sessionPeerId ->
+                    activeSession?.let { onSelectAgentSession(it.sessionId) }
+                    onOpenChat(sessionPeerId, effectiveWsId)
+                },
+                onRespondApproval = onRespondApproval,
+                onRespondChoice = onRespondChoice,
+                onRevokeSessionApproval = onRevokeSessionApproval,
+                onCancelTask = onCancelTask,
+                modifier = area,
+                initialPicking = initialSessionPickerOpen,
+                artifactDigestOf = artifactDigestOf,
+            )
+        } else if (selected != null && effectiveWsId != null) {
+            val allSessions = visibleAgentSessionsOf(agentSlice, selected.nodeId)
+            val sessions = allSessions.filter { it.wsId == effectiveWsId }
+            val workspace = agentSlice.agentWorkspaces.values.firstOrNull { it.wsId == effectiveWsId }
+            // 这个工作区属于哪个 agent —— 执行权限的键就是它（与 store 一致）。
+            val agentKeyForView: String? = workspace?.agentKey
+                ?: sessions.firstOrNull()?.agentId
+                ?: sessions.firstOrNull()?.agentKind
+
+            WorkspaceDetailView(
+                wsId = effectiveWsId,
+                workspace = workspace,
+                peer = selected,
+                sessions = sessions,
+                agentSlice = agentSlice,
+                nodeSlice = nodeSlice,
+                settingsSlice = settingsSlice,
+                now = now,
+                onBack = {
+                    if (onLeaveWorkspaceDetail != null) {
+                        onLeaveWorkspaceDetail()
+                    } else {
+                        localDetailWsId = null
+                        // 从实体详情进来的：退回实体详情（层级：会话 ← 工作区 ← 实体 ← 看板）。
+                        if (!entityDetailActive) {
+                            onBackToBoard?.invoke()
+                        }
+                    }
+                },
+                onOpenSession = { sessionId ->
+                    if (onOpenSessionDetail != null) {
+                        onOpenSessionDetail(selected.nodeId, sessionId)
+                    } else {
+                        localDetailSessionId = sessionId
+                    }
+                    onSelectAgentSession(sessionId)
+                },
+                onOpenChat = {
+                    // 进聊天前把"要停在哪条会话"记下来。挑法与工作区卡片、会话详情**同源**
+                    // （pickActiveSession 是唯一一处规则）：此前这里是第三份手抄的
+                    // 「pending → busy → first」，没有 stale-busy 判定、first 也依赖调用方列表顺序，
+                    // 于是"从卡片点进来"与"卡片上显示的那条"可以是两条不同的会话。
+                    pickActiveSession(
+                        sessions = sessions,
+                        lastEventAtOf = { s -> agentEventsOf(agentSlice, s).maxOfOrNull { it.at } ?: 0L },
+                        // 与看板/角标同一判据（含过期）：否则"打开聊天时停在哪条会话"会优先停在
+                        // 一条其实已经没事可做的会话上（它的审批早过期了）。
+                        pendingSessionIds = agentSlice.agentApprovals.values
+                            .filter { it.peerId == selected.nodeId && isPendingApproval(it, now) }
+                            .map { it.sessionId }
+                            .toSet(),
+                        now = now,
+                    )?.let { onSelectAgentSession(it.sessionId) }
+                    onOpenChat(selected.nodeId, effectiveWsId)
+                },
+                onOpenSessionChat = { sessionId ->
+                    onSelectAgentSession(sessionId)
+                    onOpenChat(selected.nodeId, effectiveWsId)
+                },
+                onRespondApproval = onRespondApproval,
+                onRespondChoice = onRespondChoice,
+                onRefresh = onRefresh,
+                // 谁能用这个 agent 干活：逐设备勾选。
+                // 数据由调用方算好（`execDeviceRows`），这里只透传 —— 派生逻辑不该散在壳里。
+                execDevices = execDevicesOf?.invoke(agentKeyForView),
+                onToggleExecDevice = onToggleExecDevice?.let { cb ->
+                    { nodeId, checked -> cb(agentKeyForView.orEmpty(), nodeId, checked) }
+                },
+                onAddExecDevice = onAddExecDevice,
+                // 把 (peerId, agentKey, wsId) 在这里绑死，屏内只留"点一下"这件事。
+                // agentKey 取工作区宣告的身份键，拿不到再退到该工作区第一条会话的身份 ——
+                // 与 `grantFor` 的键口径一致（`agentId ?? agentKind`）。
+                onRequestGrant = onRequestGrant?.let { send ->
+                    suspend {
+                        send(
+                            selected.nodeId,
+                            workspace?.agentKey
+                                ?: sessions.firstOrNull()?.agentId
+                                ?: sessions.firstOrNull()?.agentKind,
+                            null,
+                            effectiveWsId,
+                            null,
+                        )
+                    }
+                },
+                modifier = area,
+            )
+        } else if (entityDetailActive) {
+            // 智能体实体详情（Phase B4）：点卡片的第一落点，内容与手机共用同一份
+            // AgentDetailView（AGENTS §2.6 —— 外壳在这里，内容不抄第二遍）。
+            val detail = entityDetail
+            if (detail != null) {
+                AgentDetailView(
+                    detail = detail,
                     now = now,
-                    onRefresh = onRefresh,
-                    onCreateWorkspaceGroup = onCreateWorkspaceGroup,
+                    onBack = {
+                        if (onLeaveAgentDetail != null) {
+                            onLeaveAgentDetail()
+                        } else {
+                            localDetailEntityHost = null
+                            localDetailEntityKey = null
+                            onBackToBoard?.invoke()
+                        }
+                    },
+                    onOpenWorkspaceDetail = { wsId ->
+                        // 详情内的项目目录行 → 既有工作区详情：接线与看板行同一条
+                        // （外层导航优先，没有导航层的壳走本地状态），会话分页顺带触发。
+                        if (onOpenWorkspaceDetail != null) {
+                            onOpenWorkspaceDetail(effectiveEntityHost.orEmpty(), wsId)
+                        } else {
+                            localDetailWsId = wsId
+                        }
+                        onLoadWorkspaceSessions?.invoke(effectiveEntityHost.orEmpty(), wsId)
+                    },
+                    onOpenSessionDetail = { sessionId ->
+                        if (onOpenSessionDetail != null) {
+                            onOpenSessionDetail(effectiveEntityHost.orEmpty(), sessionId)
+                        } else {
+                            localDetailSessionId = sessionId
+                        }
+                        onSelectAgentSession(sessionId)
+                    },
+                    onRespondApproval = onRespondApproval,
+                    onRespondChoice = onRespondChoice,
                     agentSlice = agentSlice,
                     nodeSlice = nodeSlice,
                     settingsSlice = settingsSlice,
+                    modifier = area,
+                )
+            } else {
+                // 实体已不在编制里（投影 null）：整屏空态 + 出路。不悄悄落回看板 ——
+                // 导航层还停在实体详情上，悄悄换内容会让返回键「按一下没反应」。
+                EmptyState(
+                    title = stringResource(Res.string.agent_detail_missing_title),
+                    message = stringResource(Res.string.agent_detail_missing_body),
+                    actionLabel = stringResource(Res.string.action_back),
+                    onAction = {
+                        if (onLeaveAgentDetail != null) {
+                            onLeaveAgentDetail()
+                        } else {
+                            localDetailEntityHost = null
+                            localDetailEntityKey = null
+                            onBackToBoard?.invoke()
+                        }
+                    },
+                    icon = painterResource(Res.drawable.ic_bot),
+                    modifier = area,
                 )
             }
+        } else {
+            // 看板级正文：滚动列，按 [ContentWidths.Pane] 收列居中（决策稿 §2 的手机口径，
+            // 两栏右列沿用同一把尺）。页头画在外层（单列形态整幅宽、两栏形态横跨两栏之上）。
             Column(
-                modifier = Modifier
-                    .weight(1f)
-                    .fillMaxWidth()
+                modifier = area
+                    .fillMaxSize()
                     .centerCapped(ContentWidths.Pane)
                     .verticalScroll(rememberScrollState())
                     // 顶距 14：原型 `.pad{padding:14px 16px 16px}`（relay.html:780）——
@@ -307,45 +510,99 @@ fun AgentConsoleScreen(
                     ),
                 verticalArrangement = Arrangement.spacedBy(LocalAppSpacing.current.md),
             ) {
+                if (!hubAside) {
+                    // 智能体卡片流（Phase B）：每个 (宿主, agent) 实体一张卡，置顶在治理段之上
+                    // （决策稿 §2「两段一保留」——本页头/看板骨架原样，卡片流是页头之下的一段）。
+                    // 数据全部来自 `hubAgents` 投影（合并 / 排序 / 归因都在那里），这里只画。
+                    hubFlow(false)
+                }
                 WorkspaceBoardView(
                     agentSlice = agentSlice,
                     nodeSlice = nodeSlice,
                     settingsSlice = settingsSlice,
-
                     agents = agents,
                     selectedAgent = selected,
                     now = now,
-                onSelectAgent = onSelectAgent,
-                onOpenWorkspace = { peerId, wsId, sessionId ->
-                    onSelectAgent(peerId)
-                    if (wsId != null && onOpenWorkspaceDetail != null) {
-                        onOpenWorkspaceDetail(peerId, wsId)
-                    } else {
-                        localDetailWsId = wsId
-                    }
-                    if (sessionId != null) {
-                        if (onOpenSessionDetail != null) {
-                            onOpenSessionDetail(peerId, sessionId)
+                    onSelectAgent = onSelectAgent,
+                    onOpenWorkspace = { peerId, wsId, sessionId ->
+                        onSelectAgent(peerId)
+                        if (wsId != null && onOpenWorkspaceDetail != null) {
+                            onOpenWorkspaceDetail(peerId, wsId)
                         } else {
-                            localDetailSessionId = sessionId
+                            localDetailWsId = wsId
                         }
-                        onSelectAgentSession(sessionId)
-                    }
-                    if (wsId != null) {
-                        onLoadWorkspaceSessions?.invoke(peerId, wsId)
-                    }
-                },
-                onOpenChat = onOpenChat,
-                onFindNodes = onFindNodes,
-                onRefresh = onRefresh,
-                onRespondApproval = onRespondApproval,
-                onRespondChoice = onRespondChoice,
+                        if (sessionId != null) {
+                            if (onOpenSessionDetail != null) {
+                                onOpenSessionDetail(peerId, sessionId)
+                            } else {
+                                localDetailSessionId = sessionId
+                            }
+                            onSelectAgentSession(sessionId)
+                        }
+                        if (wsId != null) {
+                            onLoadWorkspaceSessions?.invoke(peerId, wsId)
+                        }
+                    },
+                    onOpenChat = onOpenChat,
+                    onFindNodes = onFindNodes,
+                    onRefresh = onRefresh,
+                    onRespondApproval = onRespondApproval,
+                    onRespondChoice = onRespondChoice,
+                    showApprovalQueue = showBoardApprovalQueue,
                 )
 
                 // 底部留白：原先是空 `Column(padding(bottom)) {}` —— 空组合件当间距用，
                 // 读代码的人会以为那里少了内容。Spacer 表达的就是间距本身。
                 Spacer(Modifier.height(LocalAppSpacing.current.xl))
             }
+        }
+    }
+
+    Column(modifier.fillMaxSize()) {
+        // 页头在滚动列**之外**：整幅宽的 `surface` 面 + hairline，与另外四个页签
+        // 同一个 [WorkspaceBoardTitleBar] / [LargeTitleBar]。此前标题画在这个带横向
+        // padding 的滚动列里，铺的是页面底色 `background`，于是这一页顶部和别的页签
+        // 差一整条色带（深色 #232625→#121413），切 tab 时肉眼就是「跳色」。
+        // 单列形态只在看板级画（下钻详情有自己的置顶栏，改前形态）；两栏随页面常驻
+        // —— 两栏在页头之下，下钻时左列与页头都不消失，只有右列换内容。
+        if (showHeader && (hubAside || atBoardLevel)) {
+            WorkspaceBoardTitleBar(
+                now = now,
+                onRefresh = onRefresh,
+                onCreateWorkspaceGroup = onCreateWorkspaceGroup,
+                agentSlice = agentSlice,
+                nodeSlice = nodeSlice,
+                settingsSlice = settingsSlice,
+            )
+        }
+        if (hubAside) {
+            // 桌面两栏（决策稿 §2）：左列卡片流 + 右列治理段。左列宽度用既有档位
+            // [ContentWidths.Sidebar]（与桌面侧栏 / 文件柜左栏同值），不发明新宽度；
+            // 窄列收起次级信息走密度参数，内容仍是 [AgentHubSection] 这一份。
+            Row(modifier = Modifier.weight(1f).fillMaxWidth()) {
+                Column(
+                    modifier = Modifier
+                        .width(ContentWidths.Sidebar)
+                        .fillMaxHeight()
+                        .verticalScroll(rememberScrollState())
+                        .padding(
+                            start = LocalAppSpacing.current.lg,
+                            top = LocalAppSpacing.current.lg14,
+                            end = LocalAppSpacing.current.lg,
+                        ),
+                    verticalArrangement = Arrangement.spacedBy(LocalAppSpacing.current.md),
+                ) {
+                    // 左列窄形态（实参 = compact）。
+                    hubFlow(true)
+                    // 与全宽正文同一个底部留白（workbench 看板级同款 Spacer）。
+                    Spacer(Modifier.height(LocalAppSpacing.current.xl))
+                }
+                VerticalDivider()
+                // 右列主工作台：既有三级链路原样 —— 点左列卡 / 状态行经既有回调链驱动这里。
+                workbench(Modifier.weight(1f))
+            }
+        } else {
+            workbench(Modifier)
         }
     }
 }

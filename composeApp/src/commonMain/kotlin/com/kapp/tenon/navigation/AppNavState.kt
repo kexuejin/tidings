@@ -75,6 +75,27 @@ data class AppNavState(
      */
     val detailAgentSessionId: String? = null,
     /**
+     * 智能体详情页正看着哪个实体：**宿主 + agent 身份键**（Phase B4，实体键与
+     * `hubAgents` 卡片同口径）；[detailAgentEntityHost] null = 没停在智能体详情里。
+     *
+     * ## 为什么是两格，而不是复用 [detailPeerId]
+     *
+     * `detailPeerId` 是**节点页**的详情（普通节点也有值），App.kt 已有注释禁止拿它当
+     * Agent 档的选中依据 —— 两个页签的「详情」是两件事。实体键还必须成对：
+     * `agentHubDetail(hostNodeId, agentId)` 的两个键缺一不可，拆成两格让「成对写入、
+     * 成对清空」成为 [openAgentDetail] / [leaveAgentDetail] 内部的形状，调用方想拆都拆不掉。
+     *
+     * [detailAgentEntityKey] null = 这个实体没有任何身份上报（「未上报类型」那一档，
+     * 与卡片的 null 身份键同值 —— 不能折成空串：存档格式的 null 哨兵就是空串，
+     * 折过去等于把两档并成「没停在详情里」）。
+     *
+     * 层级：看板 → **实体详情** → 工作区详情 → 会话详情。打开工作区/会话详情**不清**这两格
+     * （返回时落回实体详情）；进聊天（[openSession]）与切页签（[selectTab]）才清。
+     */
+    val detailAgentEntityHost: String? = null,
+    /** 智能体详情页正看着的实体身份键；null = 未上报类型。与 [detailAgentEntityHost] 成对。 */
+    val detailAgentEntityKey: String? = null,
+    /**
      * 聊天页当前收窄在哪个**工作区**（null = 不收窄）。
      *
      * ## 为什么它必须住在导航状态里
@@ -98,8 +119,39 @@ data class AppNavState(
     /** 工作区会话详情（三级）是否正打开。 */
     val inAgentSessionDetail: Boolean get() = detailAgentSessionId != null
 
-    /** 是否处于工作区或会话详情子页中（两屏均对应原型 full:true，全屏无底导）。 */
-    val inAgentSubpage: Boolean get() = inAgentWorkspaceDetail || inAgentSessionDetail
+    /**
+     * 智能体实体详情（点卡片的第一落点，Phase B4）是否正打开。
+     *
+     * 判据只看宿主格：两格由 [openAgentDetail] 成对写入、[leaveAgentDetail] 成对清空，
+     * 身份键 null 本身就是「未上报类型」这一档的合法取值，不表示「没打开」。
+     */
+    val inAgentEntityDetail: Boolean get() = detailAgentEntityHost != null
+
+    /** 是否处于实体/工作区/会话详情子页中（均对应原型 full:true，全屏无底导）。 */
+    val inAgentSubpage: Boolean get() = inAgentEntityDetail || inAgentWorkspaceDetail || inAgentSessionDetail
+
+    /**
+     * 进入某个实体的智能体详情（点卡片流的第一落点，Phase B4）。
+     *
+     * [agentId] null = 该实体没有任何身份上报（与卡片的 null 身份键同值，不折空串）。
+     * 实体详情在层级上高于工作区/会话详情（那是从它再往下的路），所以打开它要清掉
+     * 更深的两层 —— 与 [openAgentWorkspaceDetail] 清会话层是同一条纪律。
+     */
+    fun openAgentDetail(hostNodeId: String, agentId: String?): AppNavState =
+        copy(
+            detailAgentEntityHost = hostNodeId,
+            detailAgentEntityKey = agentId,
+            detailWorkspaceId = null,
+            detailAgentSessionId = null,
+        )
+
+    /** 退出智能体实体详情，回到卡片流（看板级）。 */
+    fun leaveAgentDetail(): AppNavState =
+        if (detailAgentEntityHost == null && detailAgentEntityKey == null) {
+            this
+        } else {
+            copy(detailAgentEntityHost = null, detailAgentEntityKey = null)
+        }
 
     /** 进入某个工作区详情（二级）。 */
     fun openAgentWorkspaceDetail(peerId: String, wsId: String): AppNavState =
@@ -147,8 +199,8 @@ data class AppNavState(
         // 普通进入会话要**清掉工作区收窄**：`chatWorkspaceId` 的语义是「我是从工作区 A
         // 点进来的」，而 `openSession` 是「直接跟这个节点聊」—— 留着上一轮的 wsId 会让
         // 这一屏继续按旧工作区过滤，用户看到的会话列表莫名其妙地少。
-        val detailLayersClear =
-            detailPeerId == null && detailWorkspaceId == null && detailAgentSessionId == null
+        val detailLayersClear = detailPeerId == null && detailWorkspaceId == null &&
+            detailAgentSessionId == null && !inAgentEntityDetail
         return if (activeSessionId == peerId && chatWorkspaceId == null && detailLayersClear) {
             this
         } else {
@@ -158,6 +210,8 @@ data class AppNavState(
                 detailPeerId = null,
                 detailWorkspaceId = null,
                 detailAgentSessionId = null,
+                detailAgentEntityHost = null,
+                detailAgentEntityKey = null,
             )
         }
     }
@@ -179,8 +233,8 @@ data class AppNavState(
      * 弹看不见的详情层（理由详见 [openSession] 的 KDoc）。
      */
     fun openWorkspaceChat(peerId: String, wsId: String): AppNavState {
-        val detailLayersClear =
-            detailPeerId == null && detailWorkspaceId == null && detailAgentSessionId == null
+        val detailLayersClear = detailPeerId == null && detailWorkspaceId == null &&
+            detailAgentSessionId == null && !inAgentEntityDetail
         return if (activeSessionId == peerId && chatWorkspaceId == wsId && detailLayersClear) {
             this
         } else {
@@ -190,6 +244,8 @@ data class AppNavState(
                 detailPeerId = null,
                 detailWorkspaceId = null,
                 detailAgentSessionId = null,
+                detailAgentEntityHost = null,
+                detailAgentEntityKey = null,
             )
         }
     }
@@ -222,6 +278,8 @@ data class AppNavState(
                 detailPeerId = null,
                 detailAgentSessionId = null,
                 detailWorkspaceId = null,
+                detailAgentEntityHost = null,
+                detailAgentEntityKey = null,
             )
         }
 
@@ -253,7 +311,8 @@ data class AppNavState(
      * `commonTest` roundtrip 盯住的映射（规则的主体在纯函数里，[AppNavStateSaver]
      * 只是把它包成 Saver）。顺序即格式：`selectedTabId, activeSessionId,
      * activeAgentSessionId, scanning, detailPeerId, detailWorkspaceId,
-     * detailAgentSessionId, chatWorkspaceId`。
+     * detailAgentSessionId, chatWorkspaceId, detailAgentEntityHost,
+     * detailAgentEntityKey`。
      */
     fun toSaverValue(): List<Any> = listOf(
         selectedTabId,
@@ -264,11 +323,13 @@ data class AppNavState(
         detailWorkspaceId.orSaverNull(),
         detailAgentSessionId.orSaverNull(),
         chatWorkspaceId.orSaverNull(),
+        detailAgentEntityHost.orSaverNull(),
+        detailAgentEntityKey.orSaverNull(),
     )
 }
 
 /** [AppNavState.toSaverValue] 的项数；恢复时项数对不上就放弃（见 [appNavStateFromSaverValue]）。 */
-internal const val APP_NAV_STATE_SAVER_FIELDS = 8
+internal const val APP_NAV_STATE_SAVER_FIELDS = 10
 
 /**
  * 可空 String 在存档里的 null 哨兵。
@@ -299,6 +360,8 @@ internal fun appNavStateFromSaverValue(saved: List<*>): AppNavState? {
     val detailWorkspaceId = saved[5] as? String ?: return null
     val detailAgentSessionId = saved[6] as? String ?: return null
     val chatWorkspaceId = saved[7] as? String ?: return null
+    val detailAgentEntityHost = saved[8] as? String ?: return null
+    val detailAgentEntityKey = saved[9] as? String ?: return null
     return AppNavState(
         selectedTabId = selectedTabId,
         activeSessionId = activeSessionId.saverNullToReal(),
@@ -308,6 +371,8 @@ internal fun appNavStateFromSaverValue(saved: List<*>): AppNavState? {
         detailWorkspaceId = detailWorkspaceId.saverNullToReal(),
         detailAgentSessionId = detailAgentSessionId.saverNullToReal(),
         chatWorkspaceId = chatWorkspaceId.saverNullToReal(),
+        detailAgentEntityHost = detailAgentEntityHost.saverNullToReal(),
+        detailAgentEntityKey = detailAgentEntityKey.saverNullToReal(),
     )
 }
 

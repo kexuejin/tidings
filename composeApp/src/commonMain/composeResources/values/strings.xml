@@ -456,6 +456,25 @@
     <!-- 工作区看板与会话详情 -->
     <string name="agent_title">智能体</string>
     <string name="agent_subtitle_pending">%1$d 项待审批</string>
+    <!-- 智能体卡片流（Phase B）：每个 (宿主, agent) 实体一张卡。角色标签与服务规模是卡片
+         头部的两枚中性标签；待审批行复用 agent_subtitle_pending，最近活动复用
+         workspace_latest_activity_format —— 同一个事实只有一份文案。 -->
+    <string name="hub_agent_section_title">智能体</string>
+    <string name="hub_agent_role_single">单兵</string>
+    <string name="hub_agent_role_team">团队 %1$d 人</string>
+    <string name="hub_agent_meta_format">%1$d 个项目目录 · 服务 %2$d 个群</string>
+    <!-- 智能体详情页（Phase B4）：点卡片的第一落点，实体视角整页。分段标题、空段与
+         会话数各一条；「未暴露」复用 group_project_directory_unset，未命名目录与会话
+         复用 conv_inbox_ws_row_unnamed / agent_session_untitled —— 同一个事实只有一份文案。 -->
+    <string name="agent_detail_groups_section_title">服务群</string>
+    <string name="agent_detail_workspaces_section_title">项目目录</string>
+    <string name="agent_detail_sessions_section_title">会话</string>
+    <string name="agent_detail_members_title">组员</string>
+    <string name="agent_detail_no_groups">还没有入驻任何协同群</string>
+    <string name="agent_detail_no_workspace">名下还没有项目目录</string>
+    <string name="agent_detail_ws_session_count">%1$d 个会话</string>
+    <string name="agent_detail_missing_title">这个智能体已经不在列表里</string>
+    <string name="agent_detail_missing_body">它的席位或工作区可能已经撤销。返回卡片流看看别的。</string>
     <string name="workspace_no_sessions">暂无会话</string>
     <!-- 工作区详情的整屏空态：工作区对象不存在且一条会话都没有时。
          此前这一屏只剩一张写着「暂无会话」的小卡，大半屏是空的 —— 空态没有"出路"。 -->
@@ -1623,17 +1642,18 @@
     <string name="chat_voice_permission_denied">无法开始录音，请检查麦克风权限</string>
 
     <!-- 协同群与权限进阶（群聊工作区协同体系） -->
-    <string name="workspace_create_group_title">关联项目建群</string>
-    <string name="workspace_create_group_quick_title">从智能体已有项目目录快速建群 (推荐)</string>
+    <string name="workspace_create_group_title">创建项目协同群</string>
+    <string name="workspace_create_group_quick_title">本机已有项目目录</string>
     <string name="workspace_create_group_dedup_hint">目录 1:1 防重绑定</string>
     <string name="workspace_create_group_in_group">已在协同群中</string>
     <string name="workspace_group_label">协同群</string>
     <string name="workspace_create_group_local_only">本地单机</string>
     <string name="workspace_create_group_enter_chat">进入群聊</string>
     <string name="workspace_create_group_share_qr">分享码</string>
-    <string name="workspace_create_group_quick_btn">一键建群 / 共享</string>
-    <string name="workspace_create_group_or_new">或关联本地全新目录</string>
+    <string name="workspace_create_group_quick_btn">一键建群</string>
     <string name="workspace_create_group_new_title">关联本地新目录</string>
+    <string name="workspace_create_group_tab_existing">已有项目目录 (%1$d)</string>
+    <string name="workspace_create_group_mobile_hint">项目目录由桌面宿主统一管理</string>
     <string name="workspace_create_group_name_label">群聊名称 (自动联动)</string>
     <string name="workspace_create_group_sync_devices">自动同步到我的移动设备 (免扫码)</string>
     <string name="workspace_create_group_confirm">立即创建协同群</string>
@@ -1655,7 +1675,7 @@
     <string name="workspace_qr_dialog_desc">手机使用「榫卯」扫描项目目录直通码，自动完成「节点配对 + 项目目录授权」。一次性授权凭证 · 15分钟有效。</string>
     <string name="workspace_qr_no_address">无法获取本机候选地址，请确保网络已连接并开放端口。</string>
     <string name="pairing_public_ipv6_hint">本机有公网 IPv6 候选：能否直连取决于路由器/主机防火墙是否放行入站，本应用不做打洞、也不代你改网络设置。同网段优先，跨网络时才试公网地址。</string>
-    <string name="workspace_create_group_no_workspaces">暂无已宣告的本地项目目录，可在下方直接关联新目录</string>
+    <string name="workspace_create_group_no_workspaces">暂无已宣告的项目目录，请先在桌面宿主上关联</string>
     <string name="workspace_group_default_name">%1$s 协同群</string>
     <string name="workspace_group_default_name_fallback">协同群</string>
     <string name="workspace_group_initial_greeting">🤖 [%1$s] 已就绪并入驻当前项目目录「%2$s」，协同通道已建立。输入消息或指派任务即可驱动执行。</string>

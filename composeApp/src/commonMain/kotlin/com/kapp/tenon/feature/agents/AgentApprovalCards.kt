@@ -793,9 +793,12 @@ private fun QueueRow(task: AgentQueueTaskUi, onCancelTask: ((taskId: String) -> 
  *
  * `.card{background:var(--surface);border-radius:var(--r-card);box-shadow:var(--shadow)}`
  * （`:119`）+ `.lst > * + *{border-top:1px solid var(--hair)}`（`:432`）。
+ *
+ * 同包的智能体详情页（`AgentDetailView`）的服务群 / 项目目录 / 会话段复用同一份容器语言
+ * —— 一个界面元素只许有一处定义（AGENTS §2.6），不该在第二个文件里再抄一张「白卡+发丝线」。
  */
 @Composable
-private fun SectionListCard(content: @Composable () -> Unit) {
+internal fun SectionListCard(content: @Composable () -> Unit) {
     val shape = LocalCardShape.current
     Card(
         shape = shape,
@@ -811,7 +814,7 @@ private fun SectionListCard(content: @Composable () -> Unit) {
 
 /** 行间发丝线：原型 `.lst > * + *{border-top:1px solid var(--hair)}`（`prototype/relay.html:432`）。 */
 @Composable
-private fun SectionListDivider() {
+internal fun SectionListDivider() {
     HorizontalDivider(thickness = 1.dp, color = MaterialTheme.colorScheme.outlineVariant)
 }
 

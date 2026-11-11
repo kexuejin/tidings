@@ -419,6 +419,8 @@ Wi-Fi 省电模式下能否收到、TCP 直连、托盘/深链/多窗口、通�
 | 工作区群，**回复 agent 那条** | **触发** |
 | 任意群，正文带 `@dsh` | **触发** |
 
+> 「工作区群」按项目目录模型的新词表读作「绑定项目目录的群」（决策稿 §2.3）；本节 2026-10-19 的实测读数原文保留。
+
 - 判读点：桌面端 `MessageEntity` 里有没有**新的** `agent-reply-*` 行（`sender_id=agent:native`），
   不要看界面。
 - **⚠️ 改后的这四条还没在真机上跑过**（改后的包还没装）—— 单测已覆盖真值表
@@ -472,13 +474,15 @@ Wi-Fi 省电模式下能否收到、TCP 直连、托盘/深链/多窗口、通�
 
 | 步骤 | 判据 | 状态 |
 |---|---|---|
-| 1:1 会话顶栏 | 出现项目药丸（当前工作区名）+「切换工作区」；旧顶栏切换入口与输入框上方意图胶囊**已消失** | ✅ 通过 |
-| 工作区选择抽屉 | 标题「选择工作区」，列出全部已登记工作区与路径，单选后药丸更新 | ✅ 通过 |
-| 1:1 普通文本派单 | 编排层立项并派到**药丸选中的工作区**的 agent | ✅ **通过**（11-08 第三轮，宿主编译含 D1/D2/D5 修复后真机复跑）：`[OCGO-BRIDGE] invoke agent=DSH wsId=ws-e9b18063d183 cliDriver=dsh-cli` → 沙箱 `harvest +1 -0`（patch 166 B）→ 卡片 `chain-tmw79x4l2` 以 rev 1→8 同会话原位推进 → 产物 3 个文件 `[xfer] state=Completed` → 手机点「合并此补丁」→ 宿主 `[RELAY-INVOKE] patch merged into workspace by 25222a45…; next sandbox base=c8dfafb0…` → **工作区真出现 `probe5-20261108.txt`（内容 `PROBE-OK5`）** → 手机卡面翻「已合并」 |
+| 1:1 会话顶栏 | 出现项目药丸（当前项目目录名）+「切换项目目录」；旧顶栏切换入口与输入框上方意图胶囊**已消失** | ✅ 通过 |
+| 项目目录选择抽屉 | 标题「选择项目目录」，列出全部已登记项目目录与路径，单选后药丸更新 | ✅ 通过 |
+| 1:1 普通文本派单 | 编排层立项并派到**药丸选中的项目目录**的 agent | ✅ **通过**（11-08 第三轮，宿主编译含 D1/D2/D5 修复后真机复跑）：`[OCGO-BRIDGE] invoke agent=DSH wsId=ws-e9b18063d183 cliDriver=dsh-cli` → 沙箱 `harvest +1 -0`（patch 166 B）→ 卡片 `chain-tmw79x4l2` 以 rev 1→8 同会话原位推进 → 产物 3 个文件 `[xfer] state=Completed` → 手机点「合并此补丁」→ 宿主 `[RELAY-INVOKE] patch merged into workspace by 25222a45…; next sandbox base=c8dfafb0…` → **工作区真出现 `probe5-20261108.txt`（内容 `PROBE-OK5`）** → 手机卡面翻「已合并」 |
 | `@mention` 点名 | 从原文解析 agentKey 并路由到对应驱动 | ❌ **不通过**：会话切换只改看板展示；`dsh` agentId 在插件层被 dsh-echo-bridge（参考实现）占用，真 dsh-cli 插件因裸 entrypoint 拉起即退、状态永远 `installed`，`pluginForAgent` 只匹配 online ⇒ 选不中 |
-| 工作区协同群派单 | 建群后 `@agent` 意图进席位表并派单 | ⚠️ 部分：关联工作区建群**不自动声明席位**（virtualAgents 为空），意图卡在 seat-sync 重试；老群有 DSH 席位但无 `defaultWsId` ⇒ 不绑仓 |
+| 绑定项目目录的群派单 | 建群后 `@agent` 意图进席位表并派单 | ⚠️ 部分：关联工作区建群**不自动声明席位**（virtualAgents 为空），意图卡在 seat-sync 重试；老群有 DSH 席位但无 `defaultWsId` ⇒ 不绑仓（→ 本行的席位声明绑定判据已由项目目录模型取代，见决策稿 §8 第 1 条） |
 | 跨端派单 API 直派 | `POST /v1/agent/invoke {groupId, agentId, wsId}` 显式带工作区 | ✅ 受理成功（invokeId 返回），但执行体仍落 echo 桥（缺陷 4b 的表现） |
 | dsh CLI 本体 | `dsh --profile headless --json` 在仓内执行工单 | ✅ NDJSON 全链 + exit 0；同款命令直驱工作区完成 PluginHost 即退诊断工单（`6bc6e5cd`，独立验收含反向验证红→绿） |
+
+- 名词口径（2026-11-11 项目目录模型重设计）：本表 UI 名词已按新词表更新（「工作区」→「项目目录」；实际文案为「切换项目目录」/「选择项目目录」，见 `workspace_bar_switch` / `workspace_picker_sheet_title`；原「工作区」页签现名「智能体」）。各轮读数是当时 UI 文案下的实测，原文未改写；`wsId` / `defaultWsId` 等协议事实仍按 `PROTOCOL-AGENT-WORKSPACE.md` 原名。增量验收见文末「工作区模型重设计后的增量验收」。
 
 - 证据：[`2026-11-07-unified-chat-dispatch-loop.txt`](design/runtime-evidence/2026-11-07-unified-chat-dispatch-loop.txt)、
   [`2026-11-08-a22-1to1-workspace-dispatch.txt`](design/runtime-evidence/2026-11-08-a22-1to1-workspace-dispatch.txt)（第二～四轮：D1–D4 成因、D5 根因链、闭环复验与残余 D4/D6/D7 全文读数）、
@@ -491,7 +495,7 @@ Wi-Fi 省电模式下能否收到、TCP 直连、托盘/深链/多窗口、通�
 #### 11-08 第八轮：T1–T8 全面验收（含 L0/L1 判定与新立案）
 
 装机按 §1b（APK `9aa07e13…`、Tenon `b3e722ce…`、新符号核验、lsregister）。
-判定一律看两端库与工作区文件，不看气泡与信封 ts。
+判定一律看两端库与项目目录文件，不看气泡与信封 ts。
 
 | 项 | 判定 | 读数 |
 |---|---|---|
@@ -550,7 +554,7 @@ stability（3 轮全新）+ design 组全绿；design 组三处合修按门禁�
 
 #### A22 第 3 行 · 11-08 第三轮：D1/D2/D3/D5 全部闭合，第 3 行反填为 ✅
 
-上表四条修掉三条、追加一条、并新露两条。判据一律看**落库时刻与工作区文件**，不看信封 ts：
+上表四条修掉三条、追加一条、并新露两条。判据一律看**落库时刻与项目目录文件**，不看信封 ts：
 
 | 编号 | 现状 | 读数 |
 |---|---|---|
@@ -1555,7 +1559,7 @@ Layer 4 仿真覆盖，真机环节为桌面自派 + 手机 `@agent` 回路（M5
 
 真机/本机怎么验「群里派的活没弄脏宿主仓」：
 
-1. **宿主工作树零变化**：群内 `@agent` 派一条带工作区的任务（该宿主装了任一 CLI）；
+1. **宿主工作树零变化**：群内 `@agent` 派一条绑定项目目录的任务（该宿主装了任一 CLI）；
    任务运行期间与结束后，宿主仓 `git status` 恒空、`git worktree list` 只剩主工作树。
    判据：`/tmp/tenon-ws/<taskId>/` 存在过（任务期间），结束后不存在。
 2. **产物可对账**：`/tmp/tenon-ws/artifacts/<taskId>/` 下有 `patch.diff` / `report.json` /
@@ -1564,7 +1568,7 @@ Layer 4 仿真覆盖，真机环节为桌面自派 + 手机 `@agent` 回路（M5
 3. **卡面是摘要**：群流的 diff-review 卡只有统计（文件数 / +A −D），全量 diff 在文件里。
 4. **中止无痕**：租约超时（或宿主中止）后，worktree 目录与 `task-<taskId>` 分支都消失；
    `ps` 里没有残留的 CLI 进程。
-5. **非 git 工作区大声失败**：派单到非 git 目录的工作区 → 群内收到失败横幅（Error 指向
+5. **非 git 项目目录大声失败**：派单到非 git 的项目目录 → 群内收到失败横幅（Error 指向
    沙箱建不出来），**没有**任何「在宿主仓裸跑」的副作用。
 
 本机判据（测试名）：`WorktreeSandboxExecutorTest`（7 用例，反向验证：摘清理/摘校验红）、
@@ -1655,11 +1659,11 @@ Layer 4 仿真覆盖，真机环节为桌面自派 + 手机 `@agent` 回路（M5
 
 ### UI 与回归
 
-- 无默认工作区的席位：对话框引导态（开关置灰），不产出悬空团队。
+- 无默认工作区的席位：对话框引导态（开关置灰），不产出悬空团队。→ 已由项目目录模型取代，见决策稿 §8 第 10 条（加智能体进群不再问目录）。
 - 多席位：顶部 chip 切换，默认选中 = 代表席位；保存写对目标席位。
 - 超过 8 名组员不可再加；组员名撞群内 `@` token 就地指出冲突对象。
 - 关闭开关 → 一次 rev+1 广播 → 药丸与成员行消失；`@` 仍指向该 agent。
-- 回归：建群/加人/改资料/解散/工作区授权/折叠投影零回归；`closeCount` 不新增抖动。
+- 回归：建群/加人/改资料/解散/项目目录授权/折叠投影零回归；`closeCount` 不新增抖动。
 
 ## 10f. 团队执行（@组员 责任链）验收（2026-11-10 新增，**代码级 + 单测级，真机待验**）
 
@@ -2056,3 +2060,23 @@ core 的 33 skipped 里 16 个是真引擎用例（未配 `TENON_LUCIOLA_NATIVE`
 （同等负载 1/3，单跑 6/6 绿，机器空闲 3/3 绿）。它不是本轮改动的分支，但「每几轮红一次」
 正是稳定性门禁要盯的形态 —— 要么把它改成等到就绪再断言（而不是赌 5 秒），要么查
 长连接首帧在负载下的实际时延，另案处理；本轮**没有放宽断言**来换绿。
+
+---
+
+## 工作区模型重设计后的增量验收（2026-11-11 新增）
+
+> 决策稿：`docs/project-directory-and-execution-site-model.md`（D1–D16 与 §8 十三条判据）；
+> 智能体页卡片流与授权面板改造：`docs/agent-hub-phase-b-final-plan.md`。
+
+工作区模型重设计后，用户可见词汇只留「项目 / 项目目录 / 执行设备 / 智能体 / 会话」（决策稿 §2.3
+名词表）；「工作区 / wsId」只保留在**协议与内部模型**语境（`agent-workspace` 帧、`WorkspaceKey`、
+席位 `defaultWsId` / `allowedWorkspaces` 兼容投影——协议名不改，见 `PROTOCOL-AGENT-WORKSPACE.md`）。
+
+**真机增量验收按决策稿 §8 的 13 条逐条跑（此处不复制全文），见决策稿 §8。** 与本文既有条目的衔接：
+
+- 现行 UI 锚点（复跑旧判据时按这个找入口）：第 4 个页签名「智能体」（原「工作区」页签，
+  `screen_agents` / `agent_title`）；群设置有「本项目目录」行（`group_project_directory_label`，
+  仅宿主可改）；授权面板 = 入驻 + 职责（`group_auth_stationed_section`）；1:1 项目药丸文案为
+  「切换项目目录」/「选择项目目录」（`workspace_bar_switch` / `workspace_picker_sheet_title`）。
+- 本文带日期的真机读数（A19 / A22 / 10d / 10e 等）是当时 UI 文案下的实测，历史原文保留；
+  其「当前判据」部分已补新口径，被 §8 取代的旧判据在原条目后标「→ 已由项目目录模型取代」。

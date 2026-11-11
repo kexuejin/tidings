@@ -60,6 +60,7 @@ import com.kapp.tenon.core.transport.LocalFile
 import com.kapp.tenon.feature.agents.AgentApprovalsSection
 import com.kapp.tenon.feature.agents.AgentExecDeviceChecklist
 import com.kapp.tenon.feature.agents.AgentConsoleScreen
+import com.kapp.tenon.feature.agents.AgentHubLayout
 import com.kapp.tenon.feature.chat.draftOf
 import com.kapp.tenon.feature.chat.updateDraft
 import com.kapp.tenon.feature.chat.DraftsByConvSaver
@@ -353,6 +354,10 @@ public fun DesktopShell(
     // 用户正在看的会话直接消失、视图跳回列表。手机壳由 App.kt 的 AppNavStateSaver 负责，
     // 这条壳此前只有草稿表是 Saveable。改动它们之前先看 AppShellSaveableStateGuardTest。
     var view by rememberSaveable(stateSaver = DesktopViewSaver) { mutableStateOf(initialView) }
+
+    // 审批面是否已经由右侧 inspector 常驻。主屏看板据此只画一次：这一条派生同时
+    // 喂给「要不要挂 inspector」和「看板要不要画审批队列」，不许两处各猜一次。
+    val inspectorShowsApprovals = sizeClass.hasInspector && view == DesktopView.Agents
 
     // 深链进来时把用户送到「节点」视图：新加的节点就在那里，留在会话列表会让人
     // 以为链接没生效。
@@ -940,8 +945,15 @@ public fun DesktopShell(
 
                         // 工作区视图：整块就是这个屏幕（内容宽度由 AgentConsoleScreen 自己收列，
                         // 所以旁边还有竖导时也不会顶到边）。页头（"工作区" + 汇总行 + 刷新）
-                        // 由 WorkspaceBoardView 自己画，壳不再叠一行标题 —— 浮层时代那行标题
-                        // 外加一颗关闭按钮，在视图切换器面前已经没有意义了。
+                        // 由屏自己的 WorkspaceBoardTitleBar 画，壳不再叠一行标题 —— 浮层时代
+                        // 那行标题外加一颗关闭按钮，在视图切换器面前已经没有意义了。
+                        //
+                        // 桌面两栏（决策稿 §2）：Expanded/Wide 传 TwoColumn —— 左列卡片流 +
+                        // 右列治理段，点卡走既有回调链驱动右列。Medium/Compact 不传（回落单列
+                        // 横段）：左列 300dp（ContentWidths.Sidebar，本屏没有更窄的既有档位）
+                        // 会把看板正文挤到比手机正文还窄（Medium 最窄窗 664 − 竖导 64 − 300
+                        // ≈ 300）；与 CabinetPane 的三档表同一原则 —— 放不下就退回单列。
+                        // 左列无实体时屏内也会自动退化回单列（见 AgentHubLayout）。
                         DesktopView.Agents -> Column(
                             Modifier.fillMaxSize().background(MaterialTheme.colorScheme.background),
                         ) {
@@ -1012,10 +1024,14 @@ public fun DesktopShell(
                                             openConversation(convId)
                                         }
                                     },
+                                    // 桌面这一支也走能力闸门，不因为「壳叫桌面」就假定目录端口一定在。
+                                    allowNewDirectory = controller.hostDirectoryPort != null,
                                 )
                             }
                             chromeSlice.banner?.let { AppBanner(it, onDismiss = controller::dismissBanner) }
                             AgentConsoleScreen(
+                                // inspector 已常驻同一批审批时，主屏看板不再画第二份。
+                                showBoardApprovalQueue = !inspectorShowsApprovals,
                                 agentSlice = agentSlice,
                                 nodeSlice = nodeSlice,
                                 settingsSlice = settingsSlice,
@@ -1077,6 +1093,11 @@ public fun DesktopShell(
                                 onRefresh = {
                                     controller.refreshPeers()
                                     actions.onRefresh()
+                                },
+                                layout = when (sizeClass) {
+                                    DesktopWindowSizeClass.Expanded, DesktopWindowSizeClass.Wide ->
+                                        AgentHubLayout.TwoColumn
+                                    else -> AgentHubLayout.Stacked
                                 },
                                 modifier = Modifier.fillMaxSize(),
                                 now = now,
@@ -1157,7 +1178,7 @@ public fun DesktopShell(
                     // 常驻第三栏（原来埋在工作区看板 → 详情的两层下钻里）。其余视图
                     // 不挂 inspector —— 节点/文件双栏已含详情（内容重复），会话视图的
                     // 装配在 ConversationsPane 自己的 Wide 分支里（会话信息是「查」型）。
-                    if (sizeClass.hasInspector && view == DesktopView.Agents) {
+                    if (inspectorShowsApprovals) {
                         VerticalDividerLine()
                         DesktopInspectorPane(onCollapse = null) {
                             Column(Modifier.fillMaxWidth()) {

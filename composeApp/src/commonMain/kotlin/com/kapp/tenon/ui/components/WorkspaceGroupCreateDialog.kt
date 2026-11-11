@@ -3,10 +3,8 @@
 
 package com.kapp.tenon.ui.components
 
-import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
-import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxWidth
@@ -15,10 +13,11 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.Checkbox
-import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
+import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Surface
@@ -41,24 +40,23 @@ import com.kapp.tenon.domain.model.WorkspaceUi
 import com.kapp.tenon.core.protocol.GroupMeta
 import com.kapp.tenon.generated.resources.Res
 import com.kapp.tenon.generated.resources.common_cancel
-import com.kapp.tenon.generated.resources.ic_chat_bubble
 import com.kapp.tenon.generated.resources.ic_folder
 import com.kapp.tenon.generated.resources.ic_plus
 import com.kapp.tenon.generated.resources.ic_qr_code_scanner
 import com.kapp.tenon.generated.resources.workspace_agent_section_sessions
 import com.kapp.tenon.generated.resources.workspace_create_group_confirm
 import com.kapp.tenon.generated.resources.workspace_create_group_dedup_hint
-import com.kapp.tenon.generated.resources.workspace_create_group_enter_chat
 import com.kapp.tenon.generated.resources.workspace_create_group_in_group
 import com.kapp.tenon.generated.resources.workspace_create_group_local_only
+import com.kapp.tenon.generated.resources.workspace_create_group_mobile_hint
 import com.kapp.tenon.generated.resources.workspace_create_group_name_label
 import com.kapp.tenon.generated.resources.workspace_create_group_new_title
 import com.kapp.tenon.generated.resources.workspace_create_group_no_workspaces
-import com.kapp.tenon.generated.resources.workspace_create_group_or_new
 import com.kapp.tenon.generated.resources.workspace_create_group_quick_btn
 import com.kapp.tenon.generated.resources.workspace_create_group_quick_title
 import com.kapp.tenon.generated.resources.workspace_create_group_share_qr
 import com.kapp.tenon.generated.resources.workspace_create_group_sync_devices
+import com.kapp.tenon.generated.resources.workspace_create_group_tab_existing
 import com.kapp.tenon.generated.resources.workspace_create_group_title
 import com.kapp.tenon.generated.resources.workspace_group_prompt_body
 import com.kapp.tenon.generated.resources.workspace_group_prompt_create
@@ -72,14 +70,20 @@ import com.kapp.tenon.ui.theme.RelayShapes
 import org.jetbrains.compose.resources.painterResource
 import org.jetbrains.compose.resources.stringResource
 
-/**
- * 关联工作区建群对话框（原型 `prototype/relay.html` 的 `ascreatews` 弹窗）。
- *
- * 遵循极简双分支交互原则：
- * - 90% 场景（分支 B）：已有项目平铺卡片，一键建群 / 共享；已建群的提供防重跳进与分享码。
- * - 10% 场景（分支 A）：全新目录挑选路径，自动联动群名，默认自动同步信任设备。
- */
+/** 分段切换的两支：内容共用一份，只有「有没有本地目录端口」这一处外壳差异。 */
+private enum class CreateGroupTab { Existing, NewDirectory }
 
+/**
+ * 创建项目协同群对话框（原型 `prototype/relay.html` 的 `ascreatews` 弹窗）。
+ *
+ * - 已有项目目录：平铺卡片，整卡可点（已建群进群聊 / 未建群一键建群），右侧不再
+ *   并排压两颗按钮，横向空间还给项目名与路径。
+ * - 关联本地新目录：**只有持有宿主目录端口的壳才画**。手机等非宿主没有这条物理能力，
+ *   让它手输绝对路径只会得到一个按下去也没结果的输入框。
+ *
+ * 桌面用分段 Tab 把两支分开，上下堆叠与「或」分割线就没了；手机连 Tab 都不画。
+ * 两支的卡片与表单只各有一份，差异全部收在 [allowNewDirectory] 这个参数上（AGENTS §2.6）。
+ */
 @Composable
 public fun WorkspaceGroupCreateDialog(
     workspaces: List<WorkspaceUi>,
@@ -89,9 +93,17 @@ public fun WorkspaceGroupCreateDialog(
     onShowQr: (workspace: WorkspaceUi) -> Unit,
     onQuickCreate: (workspace: WorkspaceUi, syncMyDevice: Boolean) -> Unit,
     onCreateNew: (path: String, groupName: String, syncMyDevice: Boolean) -> Unit,
+    /**
+     * 宿主目录端口是否存在。false（手机等非宿主）= 只画已有项目列表 + 一句归属说明，
+     * 不画手输路径的表单，也不画「立即创建」按钮 —— 那是画不出来的能力。
+     * **默认关**：漏传的调用点不会凭空长出一个没有落点的输入。
+     */
+    allowNewDirectory: Boolean = false,
     initialNewPath: String = "",
 ) {
     val sp = LocalAppSpacing.current
+    var selectedTab by remember { mutableStateOf(CreateGroupTab.Existing) }
+    val activeTab = if (allowNewDirectory) selectedTab else CreateGroupTab.Existing
     var newPath by remember { mutableStateOf(initialNewPath) }
     val defaultNameFormat = stringResource(Res.string.workspace_group_default_name, "%s")
     val defaultFallback = stringResource(Res.string.workspace_group_default_name_fallback)
@@ -112,186 +124,124 @@ public fun WorkspaceGroupCreateDialog(
         },
         content = {
             // 高度上限走比例收口：小屏/横屏下 500dp 默认档 + 标题 + 动作条会顶出屏幕。
+            // 整个对话框只保留这一个滚动容器 —— 分段切换之后不再有「列表里再滚一层」。
             RelayDialogContentHeight(defaultMaxHeight = 500.dp) { cap ->
                 LazyColumn(
                     modifier = Modifier.fillMaxWidth().heightIn(max = cap),
                     verticalArrangement = Arrangement.spacedBy(sp.md),
                 ) {
-                item {
-                    // 分支 B：已有工作区快速建群。原型 `.grphead` 是左右两个 span
-                    // （relay.html:4121-4124），各占一行；左侧 weight(1f) 单行省略、
-                    // 右侧单行 —— 此前两个 Text 都不约束宽度，窄屏/大字下右侧
-                    // 「防重绑定」会从中间断成两截。
-                    Row(
-                        modifier = Modifier.fillMaxWidth(),
-                        horizontalArrangement = Arrangement.SpaceBetween,
-                        verticalAlignment = Alignment.CenterVertically,
-                    ) {
-                        Text(
-                            text = stringResource(Res.string.workspace_create_group_quick_title),
-                            style = MaterialTheme.typography.labelMedium,
-                            fontWeight = FontWeight.Bold,
-                            color = MaterialTheme.colorScheme.primary,
-                            maxLines = 1,
-                            overflow = TextOverflow.Ellipsis,
-                            modifier = Modifier.weight(1f),
-                        )
-                        Text(
-                            text = stringResource(Res.string.workspace_create_group_dedup_hint),
-                            style = MaterialTheme.typography.labelSmall,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant,
-                            maxLines = 1,
-                            modifier = Modifier.padding(start = LocalAppSpacing.current.sm),
-                        )
-                    }
-                }
-
-                if (workspaces.isEmpty()) {
-                    item {
-                        Surface(
-                            color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.4f),
-                            shape = RelayShapes.small,
-                            modifier = Modifier.fillMaxWidth(),
-                        ) {
-                            Text(
-                                text = stringResource(Res.string.workspace_create_group_no_workspaces),
-                                style = MaterialTheme.typography.bodySmall,
-                                color = MaterialTheme.colorScheme.onSurfaceVariant,
-                                modifier = Modifier.padding(sp.md),
+                    if (allowNewDirectory) {
+                        item {
+                            CreateGroupTabs(
+                                selected = activeTab,
+                                existingCount = workspaces.size,
+                                onSelect = { selectedTab = it },
                             )
                         }
                     }
-                } else {
-                    items(workspaces, key = { "${it.peerId}:${it.agentKey}:${it.wsId}" }) { ws ->
-                        // 反查绑定群只认席位声明（groupBoundToWorkspace，单源）；子串反猜已删（F2）。
-                        val boundGroup = groupBoundToWorkspace(ws.wsId, groups)
-                        WorkspaceItemCard(
-                            workspace = ws,
-                            boundGroup = boundGroup,
-                            onOpenChat = { boundGroup?.let { onOpenChat(it.groupId) } },
-                            onShowQr = { onShowQr(ws) },
-                            onQuickCreate = { onQuickCreate(ws, syncMyDevice) },
-                        )
-                    }
-                }
-
-                item {
-                    // 分割线：或关联本地全新目录
-                    Box(
-                        modifier = Modifier.fillMaxWidth().padding(vertical = sp.xs),
-                        contentAlignment = Alignment.Center,
-                    ) {
-                        HorizontalDivider(
-                            modifier = Modifier.fillMaxWidth(),
-                            color = MaterialTheme.colorScheme.outlineVariant,
-                        )
-                        Surface(
-                            color = MaterialTheme.colorScheme.surface,
-                            modifier = Modifier.padding(horizontal = sp.sm),
-                        ) {
-                            Text(
-                                text = stringResource(Res.string.workspace_create_group_or_new),
-                                style = MaterialTheme.typography.labelSmall,
-                                color = MaterialTheme.colorScheme.onSurfaceVariant,
-                            )
-                        }
-                    }
-                }
-
-                item {
-                    // 分支 A：全新目录挑路径
-                    Column(
-                        modifier = Modifier.fillMaxWidth(),
-                        verticalArrangement = Arrangement.spacedBy(sp.sm),
-                    ) {
-                        Text(
-                            text = stringResource(Res.string.workspace_create_group_new_title),
-                            style = MaterialTheme.typography.labelMedium,
-                            fontWeight = FontWeight.SemiBold,
-                        )
-                        Row(
-                            modifier = Modifier.fillMaxWidth(),
-                            horizontalArrangement = Arrangement.spacedBy(sp.xs),
-                            verticalAlignment = Alignment.CenterVertically,
-                        ) {
-                            // 这里原先还有一颗「浏览」按钮，点下去什么都不发生（空实现）。
-                            // 本仓的纪律是"有真实动作就接上，没有就整颗不画"：这台设备上的
-                            // 目录选择能力（`SaveDirectoryPicker`）拿不到这条对话框的调用链上
-                            // （三个活调用点里，会话侧栏那一个的 controller 是窄接口
-                            // `DesktopPaneActions`，取不到平台 picker），所以**整颗删掉**，
-                            // 而不是留一颗按下去没反应的按钮。路径仍可手动输入。
-                            OutlinedTextField(
-                                value = newPath,
-                                onValueChange = { newPath = it },
-                                modifier = Modifier.weight(1f),
-                                singleLine = true,
-                                textStyle = MaterialTheme.typography.bodySmall.copy(fontFamily = FontFamily.Monospace),
-                            )
-                        }
-
-                        Row(
-                            modifier = Modifier.fillMaxWidth(),
-                            horizontalArrangement = Arrangement.spacedBy(sp.sm),
-                        ) {
-                            // 「驻群智能体」字段整列移除（用户质询「是写死的吗」）：
-                            // 它引用写死的 `workspace_default_resident_agent`（「🤖 DSH (默认本地
-                            // 执行助理)」），而原型 m-createws 的表单里没有这个字段（agent 身份
-                            // 只标在每个工作区卡上），`createWorkspaceGroup` 也不给新群盖 agent
-                            // 戳 —— 字段是纯虚构。群名列回到占满整行。
-                            Column(Modifier.weight(1f)) {
-                                Text(
-                                    text = stringResource(Res.string.workspace_create_group_name_label),
-                                    style = MaterialTheme.typography.labelSmall,
-                                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                                    modifier = Modifier.padding(bottom = LocalAppSpacing.current.xxs),
-                                )
-                                OutlinedTextField(
-                                    value = groupName,
-                                    onValueChange = { groupName = it },
-                                    singleLine = true,
-                                    textStyle = MaterialTheme.typography.bodySmall,
+                    when (activeTab) {
+                        CreateGroupTab.Existing -> {
+                            item {
+                                // 原型 `.grphead` 是左右两个 span，各占一行；左侧 weight(1f)
+                                // 单行省略、右侧单行 —— 此前两个 Text 都不约束宽度，窄屏/大字下
+                                // 右侧「防重绑定」会从中间断成两截。
+                                Row(
                                     modifier = Modifier.fillMaxWidth(),
-                                )
+                                    horizontalArrangement = Arrangement.SpaceBetween,
+                                    verticalAlignment = Alignment.CenterVertically,
+                                ) {
+                                    Text(
+                                        text = stringResource(Res.string.workspace_create_group_quick_title),
+                                        style = MaterialTheme.typography.labelMedium,
+                                        fontWeight = FontWeight.Bold,
+                                        color = MaterialTheme.colorScheme.primary,
+                                        maxLines = 1,
+                                        overflow = TextOverflow.Ellipsis,
+                                        modifier = Modifier.weight(1f),
+                                    )
+                                    Text(
+                                        text = stringResource(Res.string.workspace_create_group_dedup_hint),
+                                        style = MaterialTheme.typography.labelSmall,
+                                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                        maxLines = 1,
+                                        modifier = Modifier.padding(start = sp.sm),
+                                    )
+                                }
+                            }
+
+                            if (workspaces.isEmpty()) {
+                                item {
+                                    Surface(
+                                        color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.4f),
+                                        shape = RelayShapes.small,
+                                        modifier = Modifier.fillMaxWidth(),
+                                    ) {
+                                        Text(
+                                            text = stringResource(Res.string.workspace_create_group_no_workspaces),
+                                            style = MaterialTheme.typography.bodySmall,
+                                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                            modifier = Modifier.padding(sp.md),
+                                        )
+                                    }
+                                }
+                            } else {
+                                items(workspaces, key = { "${it.peerId}:${it.agentKey}:${it.wsId}" }) { ws ->
+                                    // 反查绑定群只认席位声明（groupBoundToWorkspace，单源）；子串反猜已删。
+                                    val boundGroup = groupBoundToWorkspace(ws.wsId, groups)
+                                    WorkspaceItemCard(
+                                        workspace = ws,
+                                        boundGroup = boundGroup,
+                                        onOpenChat = { boundGroup?.let { onOpenChat(it.groupId) } },
+                                        onShowQr = { onShowQr(ws) },
+                                        onQuickCreate = { onQuickCreate(ws, syncMyDevice) },
+                                    )
+                                }
+                            }
+
+                            if (!allowNewDirectory) {
+                                item {
+                                    Text(
+                                        text = stringResource(Res.string.workspace_create_group_mobile_hint),
+                                        style = MaterialTheme.typography.labelSmall,
+                                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                    )
+                                }
                             }
                         }
 
-                        Row(
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .clip(RoundedCornerShape(6.dp))
-                                .clickable { syncMyDevice = !syncMyDevice }
-                                .padding(vertical = sp.xxs),
-                            verticalAlignment = Alignment.CenterVertically,
-                            horizontalArrangement = Arrangement.spacedBy(sp.xs),
-                        ) {
-                            Checkbox(
-                                checked = syncMyDevice,
-                                onCheckedChange = { syncMyDevice = it },
-                            )
-                        Text(
-                            text = stringResource(Res.string.workspace_create_group_sync_devices),
-                            style = MaterialTheme.typography.bodySmall,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant,
-                        )
+                        CreateGroupTab.NewDirectory -> {
+                            item {
+                                NewDirectoryForm(
+                                    newPath = newPath,
+                                    groupName = groupName,
+                                    syncMyDevice = syncMyDevice,
+                                    onPathChange = { newPath = it },
+                                    onNameChange = { groupName = it },
+                                    onSyncChange = { syncMyDevice = it },
+                                )
+                            }
+                        }
                     }
                 }
             }
-        }
-            }
         },
         confirmButton = {
-            RelayDialogButton(
-                text = stringResource(Res.string.workspace_create_group_confirm),
-                primary = true,
-                enabled = newPath.isNotBlank() && groupName.isNotBlank(),
-                onClick = {
-                    onCreateNew(
-                        newPath.trim(),
-                        groupName.trim(),
-                        syncMyDevice,
-                    )
-                },
-            )
+            // 「立即创建」只属于新目录那一支；停在已有项目列表时，动作在卡片上，
+            // 底部不该摆一颗 enabled=false 却看不出为什么的按钮。
+            if (activeTab == CreateGroupTab.NewDirectory) {
+                RelayDialogButton(
+                    text = stringResource(Res.string.workspace_create_group_confirm),
+                    primary = true,
+                    enabled = newPath.isNotBlank() && groupName.isNotBlank(),
+                    onClick = {
+                        onCreateNew(
+                            newPath.trim(),
+                            groupName.trim(),
+                            syncMyDevice,
+                        )
+                    },
+                )
+            }
         },
         dismissButton = {
             RelayDialogButton(
@@ -300,6 +250,131 @@ public fun WorkspaceGroupCreateDialog(
             )
         },
     )
+}
+
+/** 桌面分段 Tab：两颗共用一份形态，只有选中态不同。 */
+@Composable
+private fun CreateGroupTabs(
+    selected: CreateGroupTab,
+    existingCount: Int,
+    onSelect: (CreateGroupTab) -> Unit,
+) {
+    val sp = LocalAppSpacing.current
+    Row(
+        modifier = Modifier.fillMaxWidth(),
+        horizontalArrangement = Arrangement.spacedBy(sp.xs),
+    ) {
+        CreateGroupTabChip(
+            label = stringResource(Res.string.workspace_create_group_tab_existing, existingCount),
+            selected = selected == CreateGroupTab.Existing,
+            onClick = { onSelect(CreateGroupTab.Existing) },
+            modifier = Modifier.weight(1f),
+        )
+        CreateGroupTabChip(
+            label = stringResource(Res.string.workspace_create_group_new_title),
+            selected = selected == CreateGroupTab.NewDirectory,
+            onClick = { onSelect(CreateGroupTab.NewDirectory) },
+            modifier = Modifier.weight(1f),
+        )
+    }
+}
+
+@Composable
+private fun CreateGroupTabChip(
+    label: String,
+    selected: Boolean,
+    onClick: () -> Unit,
+    modifier: Modifier = Modifier,
+) {
+    val sp = LocalAppSpacing.current
+    // 分段 chip 走「胶囊」语义（CircleShape / 原型 --r-chip:999px），不是 M3 的
+    // extraLarge 槽 —— 后者在规范里是底部弹层 28dp，用在这里会凭空多出一档半径。
+    val shape = CircleShape
+    Surface(
+        color = if (selected) MaterialTheme.colorScheme.primaryContainer
+        else MaterialTheme.colorScheme.surfaceVariant,
+        contentColor = if (selected) MaterialTheme.colorScheme.onPrimaryContainer
+        else MaterialTheme.colorScheme.onSurfaceVariant,
+        shape = shape,
+        modifier = modifier.clip(shape).clickable(onClick = onClick),
+    ) {
+        Text(
+            text = label,
+            style = MaterialTheme.typography.labelMedium,
+            // 未选中沿用 labelMedium 自带的字重；写 FontWeight.Normal 会另起 400 一档，
+            // 本屏原型没有这一档（逐屏差集会把它记成新增的 code-only 值）。
+            fontWeight = if (selected) FontWeight.Bold else null,
+            maxLines = 1,
+            overflow = TextOverflow.Ellipsis,
+            modifier = Modifier.padding(horizontal = sp.sm, vertical = sp.xs),
+        )
+    }
+}
+
+/** 新目录表单：状态由对话框持有，这里只画，方便两支共用同一份校验口径。 */
+@Composable
+private fun NewDirectoryForm(
+    newPath: String,
+    groupName: String,
+    syncMyDevice: Boolean,
+    onPathChange: (String) -> Unit,
+    onNameChange: (String) -> Unit,
+    onSyncChange: (Boolean) -> Unit,
+) {
+    val sp = LocalAppSpacing.current
+    Column(
+        modifier = Modifier.fillMaxWidth(),
+        verticalArrangement = Arrangement.spacedBy(sp.sm),
+    ) {
+        Text(
+            text = stringResource(Res.string.workspace_create_group_new_title),
+            style = MaterialTheme.typography.labelMedium,
+            fontWeight = FontWeight.SemiBold,
+        )
+        // 这里原先还有一颗「浏览」按钮，点下去什么都不发生（空实现）。本仓的纪律是
+        // "有真实动作就接上，没有就整颗不画"，所以整颗删掉而不是留一颗没反应的按钮。
+        OutlinedTextField(
+            value = newPath,
+            onValueChange = onPathChange,
+            modifier = Modifier.fillMaxWidth(),
+            singleLine = true,
+            textStyle = MaterialTheme.typography.bodySmall.copy(fontFamily = FontFamily.Monospace),
+        )
+        Column(Modifier.fillMaxWidth()) {
+            Text(
+                text = stringResource(Res.string.workspace_create_group_name_label),
+                style = MaterialTheme.typography.labelSmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                modifier = Modifier.padding(bottom = sp.xxs),
+            )
+            OutlinedTextField(
+                value = groupName,
+                onValueChange = onNameChange,
+                singleLine = true,
+                textStyle = MaterialTheme.typography.bodySmall,
+                modifier = Modifier.fillMaxWidth(),
+            )
+        }
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .clip(RoundedCornerShape(6.dp))
+                .clickable { onSyncChange(!syncMyDevice) }
+                .padding(vertical = sp.xxs),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(sp.xs),
+        ) {
+            Checkbox(
+                checked = syncMyDevice,
+                onCheckedChange = onSyncChange,
+            )
+            Text(
+                text = stringResource(Res.string.workspace_create_group_sync_devices),
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+        }
+    }
 }
 
 @Composable
@@ -311,14 +386,14 @@ private fun WorkspaceItemCard(
     onQuickCreate: () -> Unit,
 ) {
     val sp = LocalAppSpacing.current
+    // 整卡可点：已绑定的进群聊，未绑定的一键建群。右侧只留一颗轻量动作，
+    // 不再并排两颗按钮把项目名与路径挤成省略号。
+    val cardAction = if (boundGroup != null) onOpenChat else onQuickCreate
     Surface(
-        // 半透明 surfaceVariant(0.5) 叠在白卡上会调出 #F7F7F4 —— 一个色板说不出
-        // 出处的档（check-design-palette --strict 因此红了三张帧）。M3 的
-        // surfaceContainer(#F6F5F0) 与它逐通道只差 1，且是声明档。
         color = MaterialTheme.colorScheme.surfaceContainer,
         shape = RelayShapes.small,
         border = androidx.compose.foundation.BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant),
-        modifier = Modifier.fillMaxWidth(),
+        modifier = Modifier.fillMaxWidth().clip(RelayShapes.small).clickable(onClick = cardAction),
     ) {
         Row(
             modifier = Modifier.fillMaxWidth().padding(sp.sm),
@@ -352,7 +427,7 @@ private fun WorkspaceItemCard(
                                 text = stringResource(Res.string.workspace_create_group_in_group),
                                 style = MaterialTheme.typography.labelSmall.copy(fontSize = 10.sp),
                                 color = MaterialTheme.colorScheme.onPrimaryContainer,
-                                modifier = Modifier.padding(horizontal = LocalAppSpacing.current.xs, vertical = 1.dp),
+                                modifier = Modifier.padding(horizontal = sp.xs, vertical = 1.dp),
                             )
                         }
                     } else {
@@ -364,53 +439,76 @@ private fun WorkspaceItemCard(
                                 text = stringResource(Res.string.workspace_create_group_local_only),
                                 style = MaterialTheme.typography.labelSmall.copy(fontSize = 10.sp),
                                 color = MaterialTheme.colorScheme.onSurfaceVariant,
-                                modifier = Modifier.padding(horizontal = LocalAppSpacing.current.xs, vertical = 1.dp),
+                                modifier = Modifier.padding(horizontal = sp.xs, vertical = 1.dp),
                             )
                         }
                     }
                 }
                 Text(
-                    // 末尾的「N 个会话」复用既有资源（`%1$d 个会话` / `%1$d conversations`）：
-                    // 同一句话在别处已经译过，再写死一份中文就是第二个真源。
+                    // 末尾的「N 个会话」复用既有资源：同一句话在别处已经译过，
+                    // 再写死一份中文就是第二个真源。
                     text = "🤖 ${workspace.agentKind ?: "Agent"} · ${workspace.wsPath ?: workspace.wsId} · " +
                         stringResource(
                             Res.string.workspace_agent_section_sessions,
                             workspace.sessionCount ?: 0,
                         ),
-                    style = MaterialTheme.typography.labelSmall.copy(fontFamily = FontFamily.Monospace, fontSize = MaterialTheme.typography.labelSmall.fontSize),
+                    style = MaterialTheme.typography.labelSmall.copy(
+                        fontFamily = FontFamily.Monospace,
+                        fontSize = MaterialTheme.typography.labelSmall.fontSize,
+                    ),
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                     maxLines = 1,
                     overflow = TextOverflow.Ellipsis,
-                    modifier = Modifier.padding(top = LocalAppSpacing.current.xxs),
+                    modifier = Modifier.padding(top = sp.xxs),
                 )
             }
 
             if (boundGroup != null) {
-                Row(horizontalArrangement = Arrangement.spacedBy(LocalAppSpacing.current.xs)) {
-                    AppButton(
-                        text = stringResource(Res.string.workspace_create_group_enter_chat),
-                        onClick = onOpenChat,
-                        size = AppButtonSize.Small,
-                        leadingIcon = Res.drawable.ic_chat_bubble,
-                    )
-                    AppOutlinedButton(
-                        text = stringResource(Res.string.workspace_create_group_share_qr),
-                        onClick = onShowQr,
-                        size = AppButtonSize.Small,
-                        leadingIcon = Res.drawable.ic_qr_code_scanner,
+                // 分享码退成一颗图标按钮：动作不丢，横向也不再占两颗文字按钮的宽度。
+                IconButton(onClick = onShowQr) {
+                    Icon(
+                        painter = painterResource(Res.drawable.ic_qr_code_scanner),
+                        contentDescription = stringResource(Res.string.workspace_create_group_share_qr),
+                        modifier = Modifier.size(IconSizes.Label),
                     )
                 }
             } else {
-                AppButton(
-                    text = stringResource(Res.string.workspace_create_group_quick_btn),
-                    onClick = onQuickCreate,
-                    size = AppButtonSize.Small,
-                    leadingIcon = Res.drawable.ic_plus,
-                )
+                CreateGroupPill(onClick = onQuickCreate)
             }
         }
     }
 }
+
+/** 未建群卡片右侧的小药丸：形状与配色全走既有 token，不新增尺寸档。 */
+@Composable
+private fun CreateGroupPill(onClick: () -> Unit) {
+    val sp = LocalAppSpacing.current
+    val shape = CircleShape
+    Surface(
+        color = MaterialTheme.colorScheme.primaryContainer,
+        contentColor = MaterialTheme.colorScheme.onPrimaryContainer,
+        shape = shape,
+        modifier = Modifier.clip(shape).clickable(onClick = onClick),
+    ) {
+        Row(
+            modifier = Modifier.padding(horizontal = sp.sm, vertical = sp.xs),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(sp.xs),
+        ) {
+            Icon(
+                painter = painterResource(Res.drawable.ic_plus),
+                contentDescription = null,
+                modifier = Modifier.size(IconSizes.Inline),
+            )
+            Text(
+                text = stringResource(Res.string.workspace_create_group_quick_btn),
+                style = MaterialTheme.typography.labelSmall,
+                maxLines = 1,
+            )
+        }
+    }
+}
+
 /**
  * 工作区没有绑定协同群时的建群提示（issue 7）。
  *

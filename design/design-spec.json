@@ -385,41 +385,41 @@
           "agentAccent": {
             "sites": 13,
             "status": "enforced",
-            "first": "composeApp/src/commonMain/kotlin/com/kapp/tenon/ui/components/Common.kt:215"
+            "first": "composeApp/src/commonMain/kotlin/com/kapp/tenon/ui/components/Common.kt:216"
           },
           "agentAccentContainer": {
             "sites": 4,
             "status": "enforced",
-            "first": "composeApp/src/commonMain/kotlin/com/kapp/tenon/ui/components/Common.kt:209"
+            "first": "composeApp/src/commonMain/kotlin/com/kapp/tenon/ui/components/Common.kt:210"
           },
           "agentAccentText": {
             "sites": 9,
             "status": "enforced",
-            "first": "composeApp/src/commonMain/kotlin/com/kapp/tenon/ui/components/Common.kt:271"
+            "first": "composeApp/src/commonMain/kotlin/com/kapp/tenon/ui/components/Common.kt:272"
           },
           "background": {
             "sites": 13,
             "status": "enforced",
-            "first": "composeApp/src/commonMain/kotlin/com/kapp/tenon/App.kt:1155"
+            "first": "composeApp/src/commonMain/kotlin/com/kapp/tenon/App.kt:1171"
           },
           "badge": {
             "sites": 5,
             "status": "enforced",
-            "first": "composeApp/src/commonMain/kotlin/com/kapp/tenon/ui/components/Common.kt:836"
+            "first": "composeApp/src/commonMain/kotlin/com/kapp/tenon/ui/components/Common.kt:839"
           },
           "cardShadow": {
             "sites": 0,
             "status": "pending"
           },
           "error": {
-            "sites": 61,
+            "sites": 65,
             "status": "enforced",
             "first": "composeApp/src/commonMain/kotlin/com/kapp/tenon/ui/desktop/DesktopChrome.kt:350"
           },
           "errorContainer": {
             "sites": 7,
             "status": "enforced",
-            "first": "composeApp/src/commonMain/kotlin/com/kapp/tenon/ui/components/Common.kt:487"
+            "first": "composeApp/src/commonMain/kotlin/com/kapp/tenon/ui/components/Common.kt:490"
           },
           "inverseOnSurface": {
             "sites": 0,
@@ -440,7 +440,7 @@
           "onBadge": {
             "sites": 5,
             "status": "enforced",
-            "first": "composeApp/src/commonMain/kotlin/com/kapp/tenon/ui/components/Common.kt:847"
+            "first": "composeApp/src/commonMain/kotlin/com/kapp/tenon/ui/components/Common.kt:850"
           },
           "onError": {
             "sites": 4,
@@ -469,15 +469,15 @@
           "onSecondaryContainer": {
             "sites": 27,
             "status": "enforced",
-            "first": "composeApp/src/commonMain/kotlin/com/kapp/tenon/ui/desktop/DesktopConversationsPane.kt:620"
+            "first": "composeApp/src/commonMain/kotlin/com/kapp/tenon/ui/desktop/DesktopConversationsPane.kt:635"
           },
           "onSurface": {
-            "sites": 86,
+            "sites": 87,
             "status": "enforced",
             "first": "composeApp/src/commonMain/kotlin/com/kapp/tenon/ui/desktop/DesktopChrome.kt:555"
           },
           "onSurfaceVariant": {
-            "sites": 463,
+            "sites": 483,
             "status": "enforced",
             "first": "composeApp/src/commonMain/kotlin/com/kapp/tenon/ui/AppStates.kt:94"
           },
@@ -498,7 +498,7 @@
           "outline": {
             "sites": 16,
             "status": "enforced",
-            "first": "composeApp/src/commonMain/kotlin/com/kapp/tenon/ui/desktop/DesktopComposer.kt:388"
+            "first": "composeApp/src/commonMain/kotlin/com/kapp/tenon/ui/desktop/DesktopComposer.kt:392"
           },
           "outlineStrong": {
             "sites": 7,
@@ -506,17 +506,17 @@
             "first": "composeApp/src/commonMain/kotlin/com/kapp/tenon/ui/components/AppButtons.kt:290"
           },
           "outlineVariant": {
-            "sites": 51,
+            "sites": 53,
             "status": "enforced",
             "first": "composeApp/src/commonMain/kotlin/com/kapp/tenon/ui/desktop/DesktopChatPane.kt:350"
           },
           "primary": {
-            "sites": 128,
+            "sites": 135,
             "status": "enforced",
             "first": "composeApp/src/commonMain/kotlin/com/kapp/tenon/ui/AppStates.kt:47"
           },
           "primaryContainer": {
-            "sites": 46,
+            "sites": 47,
             "status": "enforced",
             "first": "composeApp/src/commonMain/kotlin/com/kapp/tenon/ui/desktop/CabinetPane.kt:278"
           },
@@ -535,9 +535,9 @@
             "first": "composeApp/src/commonMain/kotlin/com/kapp/tenon/ui/desktop/CabinetPane.kt:319"
           },
           "surface": {
-            "sites": 115,
+            "sites": 119,
             "status": "enforced",
-            "first": "composeApp/src/commonMain/kotlin/com/kapp/tenon/App.kt:198"
+            "first": "composeApp/src/commonMain/kotlin/com/kapp/tenon/App.kt:201"
           },
           "surface3": {
             "sites": 6,
@@ -580,7 +580,7 @@
             "status": "pending"
           },
           "surfaceVariant": {
-            "sites": 81,
+            "sites": 85,
             "status": "enforced",
             "first": "composeApp/src/commonMain/kotlin/com/kapp/tenon/ui/desktop/CabinetPane.kt:278"
           },
@@ -592,7 +592,7 @@
           "tertiaryContainer": {
             "sites": 4,
             "status": "enforced",
-            "first": "composeApp/src/commonMain/kotlin/com/kapp/tenon/ui/components/GroupInfoDialog.kt:778"
+            "first": "composeApp/src/commonMain/kotlin/com/kapp/tenon/ui/components/GroupInfoDialog.kt:820"
           },
           "warn": {
             "sites": 8,
@@ -604,15 +604,15 @@
           "bodyLarge": {
             "sites": 8,
             "status": "enforced",
-            "first": "composeApp/src/commonMain/kotlin/com/kapp/tenon/ui/components/MessageComposer.kt:631"
+            "first": "composeApp/src/commonMain/kotlin/com/kapp/tenon/ui/components/MessageComposer.kt:630"
           },
           "bodyMedium": {
-            "sites": 111,
+            "sites": 114,
             "status": "enforced",
             "first": "composeApp/src/commonMain/kotlin/com/kapp/tenon/ui/AppStates.kt:93"
           },
           "bodySmall": {
-            "sites": 165,
+            "sites": 172,
             "status": "enforced",
             "first": "composeApp/src/commonMain/kotlin/com/kapp/tenon/ui/desktop/CabinetPane.kt:329"
           },
@@ -627,17 +627,17 @@
             "first": "composeApp/src/commonMain/kotlin/com/kapp/tenon/ui/components/PkPalette.kt:324"
           },
           "labelLarge": {
-            "sites": 22,
+            "sites": 23,
             "status": "enforced",
             "first": "composeApp/src/commonMain/kotlin/com/kapp/tenon/ui/desktop/DesktopChrome.kt:579"
           },
           "labelMedium": {
-            "sites": 57,
+            "sites": 59,
             "status": "enforced",
             "first": "composeApp/src/commonMain/kotlin/com/kapp/tenon/ui/SectionCard.kt:98"
           },
           "labelSmall": {
-            "sites": 288,
+            "sites": 303,
             "status": "enforced",
             "first": "composeApp/src/commonMain/kotlin/com/kapp/tenon/ui/desktop/CabinetPane.kt:293"
           },
@@ -647,29 +647,29 @@
             "first": "composeApp/src/commonMain/kotlin/com/kapp/tenon/ui/components/PkPalette.kt:155"
           },
           "titleMedium": {
-            "sites": 30,
+            "sites": 31,
             "status": "enforced",
             "first": "composeApp/src/commonMain/kotlin/com/kapp/tenon/ui/AppStates.kt:85"
           },
           "titleSmall": {
-            "sites": 34,
+            "sites": 39,
             "status": "enforced",
-            "first": "composeApp/src/commonMain/kotlin/com/kapp/tenon/ui/desktop/DesktopConversationsPane.kt:427"
+            "first": "composeApp/src/commonMain/kotlin/com/kapp/tenon/ui/desktop/DesktopConversationsPane.kt:442"
           }
         },
         "spacing": {
           "lg": {
-            "sites": 94,
+            "sites": 96,
             "status": "enforced",
-            "first": "composeApp/src/commonMain/kotlin/com/kapp/tenon/App.kt:923"
+            "first": "composeApp/src/commonMain/kotlin/com/kapp/tenon/App.kt:933"
           },
           "lg14": {
-            "sites": 49,
+            "sites": 50,
             "status": "enforced",
             "first": "composeApp/src/commonMain/kotlin/com/kapp/tenon/ui/desktop/DesktopConversationWidgets.kt:238"
           },
           "md": {
-            "sites": 86,
+            "sites": 88,
             "status": "enforced",
             "first": "composeApp/src/commonMain/kotlin/com/kapp/tenon/ui/AppStates.kt:79"
           },
@@ -711,20 +711,20 @@
           "sm": {
             "sites": 114,
             "status": "enforced",
-            "first": "composeApp/src/commonMain/kotlin/com/kapp/tenon/App.kt:924"
+            "first": "composeApp/src/commonMain/kotlin/com/kapp/tenon/App.kt:934"
           },
           "sm6": {
-            "sites": 62,
+            "sites": 64,
             "status": "enforced",
             "first": "composeApp/src/commonMain/kotlin/com/kapp/tenon/ui/SectionCard.kt:76"
           },
           "xl": {
-            "sites": 15,
+            "sites": 16,
             "status": "enforced",
             "first": "composeApp/src/commonMain/kotlin/com/kapp/tenon/ui/AppStates.kt:78"
           },
           "xs": {
-            "sites": 93,
+            "sites": 94,
             "status": "enforced",
             "first": "composeApp/src/commonMain/kotlin/com/kapp/tenon/ui/desktop/CabinetPane.kt:314"
           },
@@ -734,7 +734,7 @@
             "first": "composeApp/src/commonMain/kotlin/com/kapp/tenon/feature/cabinet/PeerCabinetView.kt:142"
           },
           "xxs": {
-            "sites": 39,
+            "sites": 41,
             "status": "enforced",
             "first": "composeApp/src/commonMain/kotlin/com/kapp/tenon/ui/AppStates.kt:133"
           },
@@ -748,7 +748,7 @@
           "extraLarge": {
             "sites": 1,
             "status": "enforced",
-            "first": "composeApp/src/commonMain/kotlin/com/kapp/tenon/ui/components/MessageComposer.kt:843"
+            "first": "composeApp/src/commonMain/kotlin/com/kapp/tenon/ui/components/MessageComposer.kt:842"
           },
           "extraSmall": {
             "sites": 5,
@@ -758,10 +758,10 @@
           "large": {
             "sites": 13,
             "status": "enforced",
-            "first": "composeApp/src/commonMain/kotlin/com/kapp/tenon/ui/components/MessageComposer.kt:905"
+            "first": "composeApp/src/commonMain/kotlin/com/kapp/tenon/ui/components/MessageComposer.kt:904"
           },
           "medium": {
-            "sites": 62,
+            "sites": 64,
             "status": "enforced",
             "first": "composeApp/src/commonMain/kotlin/com/kapp/tenon/ui/desktop/DesktopChrome.kt:496"
           },
@@ -773,7 +773,7 @@
         },
         "elevation": {
           "card": {
-            "sites": 25,
+            "sites": 26,
             "status": "enforced",
             "first": "composeApp/src/commonMain/kotlin/com/kapp/tenon/ui/desktop/DesktopNodesPane.kt:611"
           },
@@ -795,7 +795,7 @@
             "first": "composeApp/src/commonMain/kotlin/com/kapp/tenon/ui/components/PkPalette.kt:219"
           },
           "body": {
-            "sites": 10,
+            "sites": 12,
             "status": "enforced",
             "first": "composeApp/src/commonMain/kotlin/com/kapp/tenon/ui/desktop/DesktopFilesPane.kt:581"
           },
@@ -810,7 +810,7 @@
             "first": "composeApp/src/commonMain/kotlin/com/kapp/tenon/ui/SectionCard.kt:74"
           },
           "label": {
-            "sites": 30,
+            "sites": 34,
             "status": "enforced",
             "first": "composeApp/src/commonMain/kotlin/com/kapp/tenon/ui/desktop/DesktopChrome.kt:241"
           },
@@ -827,14 +827,14 @@
             "first": "composeApp/src/commonMain/kotlin/com/kapp/tenon/ui/desktop/DesktopChrome.kt:258"
           },
           "dayCell": {
-            "sites": 4,
+            "sites": 7,
             "status": "enforced",
-            "first": "composeApp/src/commonMain/kotlin/com/kapp/tenon/ui/components/SetGroupAgentWorkspacesDialog.kt:232"
+            "first": "composeApp/src/commonMain/kotlin/com/kapp/tenon/ui/components/SetGroupAgentWorkspacesDialog.kt:215"
           },
           "listCard": {
             "sites": 2,
             "status": "enforced",
-            "first": "composeApp/src/commonMain/kotlin/com/kapp/tenon/ui/desktop/DesktopConversationsPane.kt:755"
+            "first": "composeApp/src/commonMain/kotlin/com/kapp/tenon/ui/desktop/DesktopConversationsPane.kt:770"
           }
         },
         "weights": {
@@ -901,7 +901,7 @@
           "scaleSlot": "medium",
           "mode": "slot",
           "rawSites": 20,
-          "slotSites": 62,
+          "slotSites": 64,
           "circleShapeSites": 0
         },
         "card": {
@@ -917,7 +917,7 @@
           "scaleSlot": "medium",
           "mode": "slot",
           "rawSites": 20,
-          "slotSites": 62,
+          "slotSites": 64,
           "circleShapeSites": 0
         },
         "chip": {
