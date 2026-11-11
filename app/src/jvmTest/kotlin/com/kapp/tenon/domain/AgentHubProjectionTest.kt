@@ -8,6 +8,8 @@ import com.kapp.tenon.core.protocol.MsgTypes
 import com.kapp.tenon.core.protocol.TeamMemberInfo
 import com.kapp.tenon.core.protocol.VirtualAgentMember
 import com.kapp.tenon.domain.model.AgentApprovalUi
+import com.kapp.tenon.domain.model.AgentArtifactKey
+import com.kapp.tenon.domain.model.AgentArtifactUi
 import com.kapp.tenon.domain.model.AgentSessionKey
 import com.kapp.tenon.domain.model.AgentSessionUi
 import com.kapp.tenon.domain.model.PeerUi
@@ -106,6 +108,21 @@ class AgentHubProjectionTest {
         expiresAt = now + 60_000L,
     )
 
+    /** 一件产物元数据（只有元数据，没有二进制 —— 与 `AgentArtifactUi` 同取舍）。 */
+    private fun artifact(
+        peerId: String,
+        sessionId: String,
+        artifactId: String,
+        name: String,
+        at: Long,
+    ) = AgentArtifactUi(
+        artifactId = artifactId,
+        sessionId = sessionId,
+        peerId = peerId,
+        name = name,
+        at = at,
+    )
+
     /** 一个绑定席位的工作区群：席位由 [seats] 给出（构造点在测试里是安全的，守卫只扫生产源码）。 */
     private fun group(groupId: String, name: String, seats: List<VirtualAgentMember>) =
         GroupMeta.create(groupId, name, members = emptyList(), selfId = self, updatedTs = 1L)
@@ -117,6 +134,7 @@ class AgentHubProjectionTest {
         sessions: List<AgentSessionUi> = emptyList(),
         workspaces: List<WorkspaceUi> = emptyList(),
         approvals: List<AgentApprovalUi> = emptyList(),
+        artifacts: List<AgentArtifactUi> = emptyList(),
     ): RelayUiState {
         val settings = RelaySettings.firstRun().copy(nodeId = self, groups = groups)
         return RelayUiState(
@@ -125,6 +143,7 @@ class AgentHubProjectionTest {
             agentSessions = sessions.associate { AgentSessionKey(it.peerId, it.sessionId) to it },
             agentWorkspaces = workspaces.associate { WorkspaceKey(it.peerId, it.agentKey, it.wsId) to it },
             agentApprovals = approvals.associateBy { it.approvalId },
+            agentArtifacts = artifacts.associateBy { AgentArtifactKey(it.peerId, it.artifactId) },
         )
     }
 
@@ -534,5 +553,66 @@ class AgentHubProjectionTest {
             detail.sessions.map { it.sessionId },
             "只留最近活动的 top 若干（上限 = AGENT_HUB_DETAIL_SESSION_LIMIT）",
         )
+    }
+
+    // ---- 最近交付标签（UX 规范 §2.5②）----
+    //
+    // 产物帧自带的是 `peerId` + `sessionId`，**没有 agent 身份**。所以这几条钉的是
+    // 「归因只走会话→聚类那一张表」，而不是产物自己再解析一遍身份。
+
+    @Test
+    fun latestArtifactLandsOnTheOwningCardAndNewestWins() {
+        val s = state(
+            peers = listOf(hostPeer("host-1")),
+            sessions = listOf(
+                session("host-1", "s-1", agentId = "dsh", wsId = "ws-a"),
+                session("host-1", "s-2", agentId = "dsh", wsId = "ws-a"),
+            ),
+            artifacts = listOf(
+                artifact("host-1", "s-1", "a-old", "old.md", at = now - 5_000),
+                artifact("host-1", "s-2", "a-new", "design.html", at = now - 1_000),
+            ),
+        )
+        val card = hubAgentsOf(s).single()
+        val tag = assertNotNull(card.latestArtifact, "名下有产物时卡片必须挂上「最近交付」")
+        assertEquals("design.html", tag.name, "取**最近收到**的那件，不是先到的")
+        assertEquals("s-2", tag.sessionId, "标签指向产物所属的那条会话")
+        assertEquals(now - 1_000, tag.at, "时刻用本端收到的时刻，不是文件名或会话顺序")
+    }
+
+    @Test
+    fun artifactsFromOtherHostsOrInvisibleSessionsNeverAttach() {
+        val s = state(
+            peers = listOf(hostPeer("host-1"), hostPeer("host-2")),
+            sessions = listOf(
+                session("host-1", "s-1", agentId = "dsh"),
+                // 子代理静默会话：visibleInDsh 之外 —— 它的产物不该冒到卡片上。
+                session("host-1", "s-sub", agentId = "dsh", hostOrigin = "subagent"),
+                session("host-2", "s-9", agentId = "dsh"),
+            ),
+            artifacts = listOf(
+                artifact("host-2", "s-9", "a-2", "other-host.html", at = now - 1_000),
+                artifact("host-1", "s-sub", "a-sub", "subagent.md", at = now - 500),
+            ),
+        )
+        val cards = hubAgentsOf(s)
+        assertNull(
+            cards.single { it.hostNodeId == "host-1" }.latestArtifact,
+            "别的宿主的产物、子代理会话里的产物都不该挂到这张卡上",
+        )
+        assertEquals(
+            "other-host.html",
+            cards.single { it.hostNodeId == "host-2" }.latestArtifact?.name,
+            "产物只挂在自己的宿主上",
+        )
+    }
+
+    @Test
+    fun noArtifactsMeansNoTag() {
+        val s = state(
+            peers = listOf(hostPeer("host-1")),
+            sessions = listOf(session("host-1", "s-1", agentId = "dsh")),
+        )
+        assertNull(hubAgentsOf(s).single().latestArtifact, "一件产物都没有时不许编一个标签出来")
     }
 }

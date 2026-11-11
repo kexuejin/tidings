@@ -295,8 +295,12 @@ tasks.withType<Test>().configureEach {
 // 开发验收用:真实进程(./gradlew :desktopApp:run)也能加载 luciola 原生库。
 // 正式发行把库复制进 resources/native(见 copyLuciolaNative),运行时自动找到。
 tasks.withType<JavaExec>().configureEach {
-    System.getenv("TENON_LUCIOLA_NATIVE")?.takeIf { it.isNotBlank() }?.let {
-        systemProperty("jna.library.path", it)
+    System.getenv("TENON_LUCIOLA_NATIVE")?.takeIf { it.isNotBlank() }?.let { raw ->
+        // 同一条基准：相对路径按仓库根解析。这一支是 `./gradlew :desktopApp:run` 走的，
+        // 漏了它就变成"测试能加载引擎、开发进程加载不到"，症状是 run 一启动就
+        // UnsatisfiedLinkError，而 :desktopApp:test 全绿 —— 最难查的那一类。
+        val dir = File(raw).takeIf { it.isAbsolute } ?: project.rootDir.resolve(raw)
+        systemProperty("jna.library.path", dir.absolutePath)
     }
 }
 
@@ -322,7 +326,10 @@ fun desktopLuciolaNativeDir(): File? {
         ?: System.getenv("TENON_LUCIOLA_NATIVE")
     if (explicit != null && explicit.isBlank()) return null
     if (explicit != null) {
-        val dir = File(explicit)
+        // 与 :core 同一条基准：相对路径按**仓库根**解析，不按 Gradle 守护进程的 cwd
+        // （理由见 core/build.gradle.kts 同名处的注释；两处必须同规则，否则
+        // 测试加载的库与打进安装包的库会指向不同目录）。绝对路径原样使用。
+        val dir = File(explicit).takeIf { it.isAbsolute } ?: project.rootDir.resolve(explicit)
         return listOf(dir, File(dir, "release"), File(dir, "debug")).firstOrNull { hasLib(it) } ?: dir
     }
     return listOfNotNull(

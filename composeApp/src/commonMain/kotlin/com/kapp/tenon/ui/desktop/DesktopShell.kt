@@ -67,6 +67,7 @@ import com.kapp.tenon.feature.chat.DraftsByConvSaver
 import com.kapp.tenon.feature.chat.ChatScreen
 import com.kapp.tenon.feature.conversations.createWorkspaceGroupForNewDirectory
 import com.kapp.tenon.feature.conversations.createWorkspaceGroupWithDirectory
+import com.kapp.tenon.feature.conversations.systemDirectoryPicker
 import com.kapp.tenon.ui.components.AppBanner
 import com.kapp.tenon.generated.resources.workspace_group_default_name
 import com.kapp.tenon.ui.components.WorkspaceGroupCreateDialog
@@ -1026,6 +1027,7 @@ public fun DesktopShell(
                                     },
                                     // 桌面这一支也走能力闸门，不因为「壳叫桌面」就假定目录端口一定在。
                                     allowNewDirectory = controller.hostDirectoryPort != null,
+                                    onPickDirectory = controller.systemDirectoryPicker(),
                                 )
                             }
                             chromeSlice.banner?.let { AppBanner(it, onDismiss = controller::dismissBanner) }
@@ -1090,6 +1092,12 @@ public fun DesktopShell(
                                 onRespondChoice = controller::respondApproval,
                                 onCancelTask = controller::cancelAgentTask,
                                 onCreateWorkspaceGroup = { showCreateWsDialog = true },
+                                // §2.6 新手引导卡：点 CTA 直接开**这一个目录**的精简建群弹窗
+                                // （与 issue 7 那条同一支对话框、同一条建群口径）。
+                                // 桌面端几乎不会看到这张卡 —— 候选只认**别人的**在线设备
+                                // （文案说的是「发现局域网可用设备」），本机目录已经直接列在
+                                // 看板上；这条接线是为了手机连桌面时两边行为一致。
+                                onBindFirstProject = { ws -> groupCreatePromptFor = ws },
                                 onRefresh = {
                                     controller.refreshPeers()
                                     actions.onRefresh()
@@ -1109,10 +1117,31 @@ public fun DesktopShell(
                             nodeSlice = nodeSlice,
                             settingsSlice = settingsSlice,
                             chromeSlice = chromeSlice,
+                            agentSlice = agentSlice,
                             controller = controller,
                             now = now,
                             // 宿主给不出（或还没设共享目录）时是 null ⇒ 那颗「打开」不画。
                             onOpenShareRoot = actions.onOpenShareRoot,
+                            // 「智能体产物」段点一行：落到产出它的会话。归因只走
+                            // `groupBoundToWorkspace` 这**一把**尺子（绑群 ⇒ 群会话，否则进这个
+                            // 节点的 1:1），与智能体页的 `onOpenChat` 同一条落点。**故意少了**
+                            // 它那条「没绑群就提示建群」分支：从一件产物出发的意图是"找到产出它的
+                            // 会话"，不是"给这个目录建个群"，横插一张建群弹窗只会挡住路。
+                            onOpenArtifactSession = { peerId, wsId ->
+                                val boundGroup = groupBoundToWorkspace(wsId, settingsSlice.settings.groups)
+                                if (boundGroup != null) {
+                                    val groupConvId = com.kapp.tenon.core.protocol.ConvId.group(boundGroup.groupId)
+                                    selectedPeerId = groupConvId
+                                    view = DesktopView.Conversations
+                                    openConversation(groupConvId)
+                                } else {
+                                    selectedPeerId = peerId
+                                    selectedWsId = wsId
+                                    selectedAgentSessionId = null
+                                    view = DesktopView.Conversations
+                                    openConversation(peerId)
+                                }
+                            },
                         )
 
                         DesktopView.Nodes -> NodesPane(

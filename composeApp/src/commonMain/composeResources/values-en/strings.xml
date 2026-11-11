@@ -40,7 +40,7 @@
     <string name="conv_filter_all">All</string>
     <string name="conv_filter_unread">Unread</string>
     <string name="conv_filter_groups">Groups</string>
-    <string name="conv_filter_agents">Agent</string>
+    <string name="conv_filter_agents">Agents</string>
     <string name="conv_filter_people">Colleagues</string>
     <string name="conv_filter_workspaces">Project directories</string>
     <string name="conv_filter_empty_title">No conversations in this filter</string>
@@ -393,6 +393,9 @@
     <string name="hub_agent_role_single">Solo</string>
     <string name="hub_agent_role_team">Team of %1$d</string>
     <string name="hub_agent_meta_format">%1$d project directories · serving %2$d groups</string>
+    <!-- "Latest delivery" tag at the bottom of an agent card. Facts only: the artifact
+         frame carries no success bit, so this never claims a delivery succeeded. -->
+    <string name="hub_artifact_latest_tag">Latest delivery: %1$s</string>
     <!-- Agent detail page (Phase B4): the first stop after tapping a card, full entity view. -->
     <string name="agent_detail_groups_section_title">Serving groups</string>
     <string name="agent_detail_workspaces_section_title">Project directories</string>
@@ -402,7 +405,7 @@
     <string name="agent_detail_no_workspace">No project directories yet</string>
     <string name="agent_detail_ws_session_count">%1$d sessions</string>
     <string name="agent_detail_missing_title">This agent is no longer listed</string>
-    <string name="agent_detail_missing_body">Its seat or workspaces may have been revoked. Go back to the card stream.</string>
+    <string name="agent_detail_missing_body">Its seat or project directory may have been revoked. Go back to the card stream.</string>
     <string name="workspace_no_sessions">No sessions</string>
     <string name="workspace_detail_empty_title">This project directory has no sessions yet</string>
     <string name="workspace_detail_empty_body">The agent host has not reported any sessions for it yet. Wait for it to run, or go back to the project directory list.</string>
@@ -432,6 +435,13 @@
     <string name="agent_empty_card">No device has reported an Agent or project directory yet. Cards will appear here automatically once a peer comes online.</string>
     <string name="agent_empty_exit_title">Check the Nodes page</string>
     <string name="agent_empty_exit_body">Confirm the peer is online, then come back</string>
+    <!-- Warm onboarding card (UX spec §2.6): shown once project directories exist but none is
+         bound to a group yet. It does NOT replace the empty state — when the empty state holds
+         there is no directory to bind, so the button would be a dead end. -->
+    <string name="agent_onboarding_device_title">Found a device on your network: %1$s (online)</string>
+    <string name="agent_onboarding_device_body">It is ready to give you a digital team</string>
+    <string name="agent_onboarding_bind_target">Directory to link: %1$s</string>
+    <string name="agent_onboarding_bind_cta">Link its first project now</string>
     <string name="agent_offline_title">Agent Offline</string>
     <string name="agent_offline_message">Last seen %1$s. Messages will be queued and sent upon reconnect.</string>
     <string name="agent_messages_title">Chat Messages</string>
@@ -576,7 +586,7 @@
     <string name="tool_approvals_agent">agent %1$s</string>
     <string name="tool_approvals_all_agents">all agents</string>
     <string name="tool_approvals_row_meta">%1$s · %2$s</string>
-    <string name="tool_approvals_row_ws">Workspace %1$s</string>
+    <string name="tool_approvals_row_ws">Project directory %1$s</string>
     <string name="tool_approvals_revoke">Revoke</string>
     <string name="tool_approvals_revoked">Revoked %1$d rule(s); the next request for that tool will ask again</string>
     <string name="tool_approvals_gone">That rule is already gone (it may have been revoked before)</string>
@@ -876,7 +886,9 @@
     <string name="card_action_abort">Stop</string>
     <string name="agent_live_log_title">Live output</string>
     <string name="approval_focus_action">Review Now</string>
-    <string name="approval_focus_subtitle">Involves Git remote pushes and sensitive file edits. Please review promptly.</string>
+    <string name="approval_focus_subtitle">An Agent is waiting for your approval before it continues.</string>
+    <string name="approval_focus_subtitle_detail">%1$s · %2$s</string>
+    <string name="approval_sheet_title">Pending approvals</string>
     <string name="desktop_action_open_downloads">Open Downloads Folder</string>
     <string name="desktop_menu_edit_toggle_theme">Toggle Light or Dark</string>
     <string name="desktop_menu_view_search">Search</string>
@@ -1117,6 +1129,12 @@
     <string name="cabinet_recent_empty">No one has put files into your cabinet yet</string>
     <string name="cabinet_recent_row_desc">%1$s put in %2$d files · %3$s</string>
     <string name="cabinet_recent_hint">New files put into your cabinet by others appear here. Browsing or downloading by others is not recorded.</string>
+    <!-- "Agent deliverables" section in cabinet tab 2 (spec §2.5③, view-only variant):
+         artifacts grouped by project directory; tapping a row returns to the session that
+         produced it. Nothing is moved on disk, so the copy never says "open the file". -->
+    <string name="cabinet_agent_artifacts_title">Agent deliverables</string>
+    <string name="cabinet_agent_artifacts_hint">The file itself lives in the session that produced it — tap a row to go there</string>
+    <string name="cabinet_agent_artifacts_no_ws">Not in a project directory</string>
     <string name="cabinet_peer_title">%1$s\'s Cabinet</string>
     <string name="cabinet_peers_title">Colleagues\' Cabinets</string>
     <string name="cabinet_peer_item_count">%1$s items</string>
@@ -1590,6 +1608,7 @@ Collaboration channel connected; project directory events and progress will sync
     <string name="agent_approval_history_title">Approval history</string>
     <string name="agent_empty_agents_only_title">Agent reported</string>
     <string name="agent_empty_agents_only_message">The Agent on this device has not reported any project directory or session yet.</string>
+    <string name="agent_empty_agents_only_card">An Agent has been reported, but it has not declared any project directory or session yet. Cards will appear here once it starts working.</string>
     <string name="agent_empty_section_n">Agent (%1$d)</string>
     <string name="workspace_grant_unknown_peer">Unknown member</string>
     <string name="workspace_grant_state_approved">Approved</string>
@@ -1798,6 +1817,8 @@ Collaboration channel connected; project directory events and progress will sync
     <string name="orchestration_team_ready">Team ready: %1$s leads; auto-start in %2$d s, or run/cancel now</string>
     <string name="orchestration_diff_ready_prompt">Changes are ready; awaiting your merge</string>
     <string name="orchestration_diff_ready_detail">Changes ready: %1$s (+%2$d −%3$d)</string>
+    <string name="orchestration_answered_no_changes">Finished — no files changed</string>
+    <string name="orchestration_answered_no_changes_detail">Finished — no files changed: %1$s</string>
     <string name="orchestration_patch_hint_exists">A file the patch creates already exists in the project directory. Move or commit it, then merge again</string>
     <string name="orchestration_patch_hint_mismatch">Patch does not match current files — review manually</string>
     <string name="orchestration_patch_hint_file_missing">The patch file is gone; ask the runner to re-run</string>
@@ -1861,4 +1882,6 @@ Collaboration channel connected; project directory events and progress will sync
     <string name="card_action_open_prototype">Open prototype</string>
     <string name="card_artifact_preview_kind_html">Web prototype</string>
     <string name="card_artifact_preview_external_only">Web prototypes open in the system browser; they are not rendered in-app</string>
+    <string name="chat_mention_host_offline">Asleep / offline</string>
+    <string name="chat_offline_host_send_hint">%1$s is currently asleep or offline. The message is queued and will be delivered when the host reconnects.</string>
 </resources>

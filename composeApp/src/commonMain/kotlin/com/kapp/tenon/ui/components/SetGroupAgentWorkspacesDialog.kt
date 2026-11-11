@@ -10,9 +10,12 @@ import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.HorizontalDivider
+import androidx.compose.material3.Icon
+import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Surface
@@ -21,6 +24,7 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -55,6 +59,8 @@ import com.kapp.tenon.generated.resources.group_project_directory_readonly
 import com.kapp.tenon.generated.resources.group_project_directory_register
 import com.kapp.tenon.generated.resources.group_project_directory_path_label
 import com.kapp.tenon.generated.resources.group_project_directory_unset
+import com.kapp.tenon.generated.resources.ic_folder
+import com.kapp.tenon.generated.resources.workspace_create_group_browse
 import com.kapp.tenon.generated.resources.seat_directory_resolved
 import com.kapp.tenon.generated.resources.seat_directory_unresolved
 import com.kapp.tenon.generated.resources.seat_duty_label
@@ -63,8 +69,11 @@ import com.kapp.tenon.generated.resources.seat_reexpose
 import com.kapp.tenon.generated.resources.seat_remove_button
 import com.kapp.tenon.generated.resources.seat_station_button
 import com.kapp.tenon.generated.resources.seat_status_stationed
+import com.kapp.tenon.ui.theme.IconSizes
 import com.kapp.tenon.ui.theme.LocalAppSpacing
 import com.kapp.tenon.ui.theme.ShapeRoles
+import kotlinx.coroutines.launch
+import org.jetbrains.compose.resources.painterResource
 import org.jetbrains.compose.resources.stringResource
 
 /**
@@ -618,6 +627,9 @@ private fun ProjectDirectoryPickerDialog(
     val snapshot = remember { port.snapshot() }
     var newPath by remember { mutableStateOf("") }
     var invalidPath by remember { mutableStateOf(false) }
+    // 系统选目录窗：登记项目目录的另一半 —— 从前只有手输框，macOS 上的绝对路径
+    // 基本打不对，而原生选目录窗早就实现了，只是没有任何界面接它。
+    val scope = rememberCoroutineScope()
     RelayDialog(
         onDismissRequest = onDismiss,
         title = { Text(stringResource(Res.string.group_project_directory_picker_title)) },
@@ -707,6 +719,33 @@ private fun ProjectDirectoryPickerDialog(
                         },
                         singleLine = true,
                         textStyle = MaterialTheme.typography.bodySmall.copy(fontFamily = FontFamily.Monospace),
+                        // 选中的路径直接落进同一个输入框（用户还能改），登记仍走下面那颗
+                        // 「登记」—— 选目录不说话，只回答「哪个目录」。
+                        trailingIcon = if (port.canPickDirectory) {
+                            {
+                                IconButton(
+                                    onClick = {
+                                        scope.launch {
+                                            port.pickDirectory()?.takeIf { it.isNotBlank() }?.let {
+                                                newPath = it
+                                                invalidPath = false
+                                            }
+                                        }
+                                    },
+                                ) {
+                                    Icon(
+                                        painter = painterResource(Res.drawable.ic_folder),
+                                        contentDescription = stringResource(
+                                            // 复用建群表单那颗图标的同一句文案：同一动作不写第二份。
+                                            Res.string.workspace_create_group_browse,
+                                        ),
+                                        modifier = Modifier.size(IconSizes.Label),
+                                    )
+                                }
+                            }
+                        } else {
+                            null
+                        },
                         modifier = Modifier.fillMaxWidth(),
                     )
                 }

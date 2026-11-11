@@ -164,7 +164,7 @@ private fun CabinetPeerSelectedPhonePreview() {
     AppTheme(darkTheme = false) {
         Screen("cabinet", badges = navBadges(previewSlicesOf(cabinetPeerSelectedState).chat, previewSlicesOf(cabinetPeerSelectedState).agent, previewSlicesOf(cabinetPeerSelectedState).node, previewSlicesOf(cabinetPeerSelectedState).settings)) { inner ->
             CabinetScreen(
-                transferSlice = previewSlicesOf(cabinetPeerSelectedState).transfer,
+                transferSlice = previewSlicesOf(cabinetPeerSelectedState).transfer,agentSlice = previewSlicesOf(cabinetPeerSelectedState).agent,
                 nodeSlice = previewSlicesOf(cabinetPeerSelectedState).node,
                 settingsSlice = previewSlicesOf(cabinetPeerSelectedState).settings,
                 chromeSlice = previewSlicesOf(cabinetPeerSelectedState).chrome,

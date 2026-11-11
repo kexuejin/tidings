@@ -5,6 +5,7 @@ package com.kapp.tenon.desktop
 import com.kapp.tenon.desktop.testutil.RepoSource
 import java.io.File
 import kotlin.test.Test
+import kotlin.test.assertEquals
 import kotlin.test.assertFalse
 import kotlin.test.assertTrue
 
@@ -318,6 +319,38 @@ class DesktopWorkerOrchestratorTest {
         assertFalse(
             source.contains("currentPrompt = \"Previous attempt failed:"),
             "重试提示词不许再是无条件单一代——无 patch 轮次必须走分化分支",
+        )
+    }
+
+    /**
+     * 零补丁的只读任务必须**收敛成答案**，不许挂 `blocked`。
+     *
+     * 真机现场（`@dsh-assistant git log -1 --oneline` 这种只读任务）：
+     * 每轮 `nothing to harvest — patchBytes=0` ⇒ 被判「没干活」⇒ 催满三轮，卡停 60%
+     * 不收敛，用户只能手动点「停止」。判据本体在 [PatchlessAnswer]（纯函数，有真值表），
+     * 这条只钉**接线**：判据真被调用、且**在**那句「No patch produced by worker」之前，
+     * 否则那一行永远轮不到它。
+     */
+    @Test
+    fun patchlessTaskConvergesAsAnsweredInsteadOfBlocking() {
+        val source = RepoSource.read("orchestration/src/main/kotlin/com/kapp/tenon/orchestration/DesktopWorkerOrchestrator.kt")
+
+        val convergeAt = source.indexOf("PatchlessAnswer.verdictOf(")
+        val roundErrorAt = source.indexOf("val roundError = when {")
+        assertTrue(convergeAt > 0, "自愈循环必须咨询 PatchlessAnswer —— 否则只读任务还是每轮判失败")
+        assertTrue(
+            roundErrorAt > convergeAt,
+            "收敛判定必须在「No patch produced by worker」之前；" +
+                "放在后面等于永远走不到（那条路就是本轮要修的病）",
+        )
+        assertEquals(
+            1,
+            Regex(Regex.escape("""state = "done",""")).findAll(source).count(),
+            "答完的单只该有一处发 state=done 的卡（多一处就是两条终局路，判据分叉）",
+        )
+        assertTrue(
+            source.contains("answeredNoChangesBanner("),
+            "横幅必须经文案桥取（手机与桌面共用一套措辞），不许在编排层拼中文",
         )
     }
 }

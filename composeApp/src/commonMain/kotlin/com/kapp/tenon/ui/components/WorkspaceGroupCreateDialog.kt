@@ -26,6 +26,7 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -44,6 +45,7 @@ import com.kapp.tenon.generated.resources.ic_folder
 import com.kapp.tenon.generated.resources.ic_plus
 import com.kapp.tenon.generated.resources.ic_qr_code_scanner
 import com.kapp.tenon.generated.resources.workspace_agent_section_sessions
+import com.kapp.tenon.generated.resources.workspace_create_group_browse
 import com.kapp.tenon.generated.resources.workspace_create_group_confirm
 import com.kapp.tenon.generated.resources.workspace_create_group_dedup_hint
 import com.kapp.tenon.generated.resources.workspace_create_group_in_group
@@ -67,6 +69,7 @@ import com.kapp.tenon.generated.resources.workspace_group_default_name_fallback
 import com.kapp.tenon.ui.theme.LocalAppSpacing
 import com.kapp.tenon.ui.theme.IconSizes
 import com.kapp.tenon.ui.theme.RelayShapes
+import kotlinx.coroutines.launch
 import org.jetbrains.compose.resources.painterResource
 import org.jetbrains.compose.resources.stringResource
 
@@ -100,11 +103,20 @@ public fun WorkspaceGroupCreateDialog(
      */
     allowNewDirectory: Boolean = false,
     initialNewPath: String = "",
+    /**
+     * 弹系统目录选择器（壳注入，`HostDirectoryPort.pickDirectory` 的同一实现）。
+     *
+     * null = 这个壳没有原生选目录窗 ⇒ 路径框旁边**不画**「浏览」图标 —— 从前那颗
+     * 按钮点下去什么都不发生，被整颗删掉了；现在有真实动作才画回去。手输仍然保留：
+     * 从 Finder 里复制来的路径、或者远程会话里没有原生窗的场合，都还得能填。
+     */
+    onPickDirectory: (suspend () -> String?)? = null,
 ) {
     val sp = LocalAppSpacing.current
     var selectedTab by remember { mutableStateOf(CreateGroupTab.Existing) }
     val activeTab = if (allowNewDirectory) selectedTab else CreateGroupTab.Existing
     var newPath by remember { mutableStateOf(initialNewPath) }
+    val scope = rememberCoroutineScope()
     val defaultNameFormat = stringResource(Res.string.workspace_group_default_name, "%s")
     val defaultFallback = stringResource(Res.string.workspace_group_default_name_fallback)
     var groupName by remember(newPath) {
@@ -218,6 +230,15 @@ public fun WorkspaceGroupCreateDialog(
                                     onPathChange = { newPath = it },
                                     onNameChange = { groupName = it },
                                     onSyncChange = { syncMyDevice = it },
+                                    onBrowse = onPickDirectory?.let { pick ->
+                                        // 选到的路径**直接落进同一个 newPath**：群名靠
+                                        // remember(newPath) 自动跟着变，不需要第二条推导链。
+                                        {
+                                            scope.launch {
+                                                pick()?.takeIf { it.isNotBlank() }?.let { newPath = it }
+                                            }
+                                        }
+                                    },
                                 )
                             }
                         }
@@ -320,6 +341,8 @@ private fun NewDirectoryForm(
     onPathChange: (String) -> Unit,
     onNameChange: (String) -> Unit,
     onSyncChange: (Boolean) -> Unit,
+    /** 弹系统选目录窗；null = 这个壳弹不出来 ⇒ 框里不画那颗图标。 */
+    onBrowse: (() -> Unit)? = null,
 ) {
     val sp = LocalAppSpacing.current
     Column(
@@ -331,14 +354,26 @@ private fun NewDirectoryForm(
             style = MaterialTheme.typography.labelMedium,
             fontWeight = FontWeight.SemiBold,
         )
-        // 这里原先还有一颗「浏览」按钮，点下去什么都不发生（空实现）。本仓的纪律是
-        // "有真实动作就接上，没有就整颗不画"，所以整颗删掉而不是留一颗没反应的按钮。
+        // 这颗「浏览」原先因为空实现被整颗删掉（本仓纪律：有真实动作才画）。现在接的是
+        // 系统选目录窗 —— 手输框保留，因为从 Finder 复制路径、或远程会话里没有原生窗时
+        // 仍然要能填。选完的路径由调用方写回同一个状态，群名跟着重算。
         OutlinedTextField(
             value = newPath,
             onValueChange = onPathChange,
             modifier = Modifier.fillMaxWidth(),
             singleLine = true,
             textStyle = MaterialTheme.typography.bodySmall.copy(fontFamily = FontFamily.Monospace),
+            trailingIcon = onBrowse?.let { browse ->
+                {
+                    IconButton(onClick = browse) {
+                        Icon(
+                            painter = painterResource(Res.drawable.ic_folder),
+                            contentDescription = stringResource(Res.string.workspace_create_group_browse),
+                            modifier = Modifier.size(IconSizes.Label),
+                        )
+                    }
+                }
+            },
         )
         Column(Modifier.fillMaxWidth()) {
             Text(

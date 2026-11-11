@@ -154,6 +154,18 @@ internal interface ConversationDomainHost {
     /** 这个群是否声明了可执行的 agent（群路由判据）。 */
     fun groupHasDeclaredAgents(groupId: String): Boolean
 
+    /**
+     * 兑现「别处建的群」对本机提的目录请求（UX 规范 §2.6 手机侧；判据本体在
+     * `RelayController.adoptRequestedGroupDirectories`）。
+     *
+     * 为什么走这条缝：群元数据在**本域**落地（`handleApplyGroupMeta`），而目录台账
+     * （`hostDirectoryPort`）在控制器本机 —— 两边都要碰。让群分片直接拿 `RelayController`
+     * 会把整类依赖面重新开放；加一个方法只开放这一件事。
+     *
+     * @return 本次真的补上的群数（本机没有目录端口的壳恒 0）。
+     */
+    fun adoptRequestedGroupDirectories(): Int
+
     /** @ 了本机 agent 但没权限时的那句提示（null = 不需要提示）。 */
     fun unathorizedAgentMention(text: String, groupId: String, senderId: String?): String?
 
@@ -335,6 +347,8 @@ internal class ConversationDomainService(
     override fun requestFocus(peerId: String) = host.requestFocus(peerId)
 
     override fun groupHasDeclaredAgents(groupId: String): Boolean = host.groupHasDeclaredAgents(groupId)
+
+    override fun adoptRequestedGroupDirectories(): Int = host.adoptRequestedGroupDirectories()
 
     override fun unathorizedAgentMention(text: String, groupId: String, senderId: String?): String? =
         host.unathorizedAgentMention(text, groupId, senderId)

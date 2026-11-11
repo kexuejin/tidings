@@ -5,6 +5,7 @@ package com.kapp.tenon.orchestration
 import com.kapp.tenon.agent.HostDirectoryStore
 import java.io.File
 import java.nio.file.Files
+import kotlinx.coroutines.runBlocking
 import kotlin.test.AfterTest
 import kotlin.test.Test
 import kotlin.test.assertEquals
@@ -95,5 +96,36 @@ class DesktopHostDirectoryPortTest {
         assertTrue(entry.readOnly, "只读档逐字段对齐")
         assertTrue(p.setWhitelist(d.dirId, readOnly = false, allowed = false))
         assertTrue(p.snapshot().whitelist.none { it.dirId == d.dirId }, "收回后条目消失")
+    }
+
+    /**
+     * 系统选目录窗的**能力位**：没注入选择器就要如实说「弹不出来」。
+     *
+     * 界面靠这一位决定画不画那颗图标 —— 若它恒 true，无头宿主/测试装配会画出一颗
+     * 点下去什么都不发生的按钮（正是本轮要修的那个形态）。
+     */
+    @Test
+    fun withoutAPickerThePortSaysItCannotPick() = runBlocking {
+        val p = port()
+
+        assertFalse(p.canPickDirectory, "没注入选择器就必须报 false")
+        assertNull(p.pickDirectory(), "没有选择器时调用要回 null，不是抛异常")
+    }
+
+    /** 有选择器：原样转述返回值；用户取消（null）不是失败，不许被吞成空串或异常。 */
+    @Test
+    fun pickerReturnsTheChosenPathAndCancelIsNull() = runBlocking {
+        var answer: String? = "/tmp/某个目录"
+        val p = DesktopHostDirectoryPort(
+            store = HostDirectoryStore(file),
+            directoryPicker = { answer },
+        )
+
+        assertTrue(p.canPickDirectory, "注入了选择器要报 true")
+        assertEquals("/tmp/某个目录", p.pickDirectory(), "选中的绝对路径原样返回")
+
+        answer = null
+        assertNull(p.pickDirectory(), "用户取消 = null（调用方据此保持原输入不变）")
+        assertEquals(0, p.snapshot().directories.size, "选目录本身不登记任何东西")
     }
 }

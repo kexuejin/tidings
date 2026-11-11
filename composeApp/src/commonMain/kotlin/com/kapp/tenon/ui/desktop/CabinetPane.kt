@@ -42,6 +42,7 @@ import com.kapp.tenon.domain.TransferSlice
 import com.kapp.tenon.domain.NodeSlice
 import com.kapp.tenon.domain.SettingsSlice
 import com.kapp.tenon.domain.ChromeSlice
+import com.kapp.tenon.domain.AgentSlice
 import com.kapp.tenon.domain.humanPeers
 import com.kapp.tenon.domain.peer
 import com.kapp.tenon.feature.cabinet.MineCabinetView
@@ -118,11 +119,14 @@ public fun CabinetPane(
      * 不是"点了没反应"）。
      */
     onOpenShareRoot: (() -> Unit)? = null,
+    /** 点「智能体产物」段的一行 → 打开产出它的会话；null = 不画那一段。 */
+    onOpenArtifactSession: ((peerId: String, wsId: String?) -> Unit)? = null,
     /** Phase 4 订阅面切片：默认值由 [state] 投影，预览/旧路径行为不变。 */
     transferSlice: TransferSlice,
     nodeSlice: NodeSlice,
     settingsSlice: SettingsSlice,
     chromeSlice: ChromeSlice,
+    agentSlice: AgentSlice,
 ) {
     val cabinet = transferSlice.cabinet
 
@@ -169,12 +173,14 @@ public fun CabinetPane(
                         MineCabinetView(
                             nodeSlice = nodeSlice,
                             settingsSlice = settingsSlice,
+                            agentSlice = agentSlice,
                             onSetShareRoot = { controller.setShareRoot(it) },
                             onPickShareRoot = { controller.pickShareRoot() },
                             onSetShareMode = { controller.setShareMode(it) },
                             onRemoveShareGrant = { controller.removeShareGrant(it) },
                             onSelectPeer = { controller.selectCabinetPeer(it) },
                             onOpenShareRoot = onOpenShareRoot.takeIf { shouldShowShareRoot(it) },
+                            onOpenArtifactSession = onOpenArtifactSession,
                             onBack = onBack,
                             now = now,
                         )

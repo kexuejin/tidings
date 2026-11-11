@@ -44,6 +44,7 @@ import com.kapp.tenon.ui.theme.LocalAppSpacing
 import com.kapp.tenon.domain.TransferSlice
 import com.kapp.tenon.domain.NodeSlice
 import com.kapp.tenon.domain.SettingsSlice
+import com.kapp.tenon.domain.AgentSlice
 import com.kapp.tenon.domain.ChromeSlice
 import com.kapp.tenon.domain.humanPeers
 import com.kapp.tenon.domain.peer
@@ -176,6 +177,8 @@ public fun CabinetScreen(
      * 什么反馈都看不到。默认 `{}` 只服务截图夹具（banner 恒为 null，画不出来）。
      */
     onDismissBanner: () -> Unit = {},
+    /** 点「智能体产物」段的一行 → 打开产出它的会话；null = 不画那一段。 */
+    onOpenArtifactSession: ((peerId: String, wsId: String?) -> Unit)? = null,
     modifier: Modifier = Modifier,
     now: Long = nowMillis(),
     /** Phase 4 订阅面切片（蓝图 §4.4）：默认值由 [state] 投影，未迁移/预览路径行为不变。 */
@@ -183,6 +186,7 @@ public fun CabinetScreen(
     nodeSlice: NodeSlice,
     settingsSlice: SettingsSlice,
     chromeSlice: ChromeSlice,
+    agentSlice: AgentSlice,
 ) {
     val cabinet = transferSlice.cabinet
 
@@ -218,12 +222,14 @@ public fun CabinetScreen(
             MineCabinetView(
                 nodeSlice = nodeSlice,
                 settingsSlice = settingsSlice,
+                agentSlice = agentSlice,
                 onSetShareRoot = onSetShareRoot,
                 onPickShareRoot = onPickShareRoot,
                 onSetShareMode = onSetShareMode,
                 onRemoveShareGrant = onRemoveShareGrant,
                 onSelectPeer = onSelectPeer,
                 onOpenShareRoot = onOpenShareRoot,
+                onOpenArtifactSession = onOpenArtifactSession,
                 modifier = Modifier.weight(1f),
                 now = now,
             )
@@ -310,11 +316,19 @@ internal fun MineCabinetView(
      * 宽档左栏一直在旁边，传 `null`。
      */
     onBack: (() -> Unit)? = null,
+    /**
+     * 点「智能体产物」段的一行 → 打开产出它的会话。
+     *
+     * `null` = 这个壳没有会话入口，那一段**整段不画**（与 [onOpenShareRoot] 同一条规矩：
+     * 能力缺失 = 不画，不是"点了没反应"）。
+     */
+    onOpenArtifactSession: ((peerId: String, wsId: String?) -> Unit)? = null,
     modifier: Modifier = Modifier,
     now: Long = nowMillis(),
     /** Phase 4 订阅面切片（蓝图 §4.4）：默认值由 [state] 投影，未迁移/预览路径行为不变。 */
     nodeSlice: NodeSlice,
     settingsSlice: SettingsSlice,
+    agentSlice: AgentSlice,
 ) {
     val settings = settingsSlice.settings
     val hasRoot = !settings.shareRoot.isNullOrBlank()
@@ -673,6 +687,18 @@ internal fun MineCabinetView(
                         Text(stringResource(Res.string.cabinet_grants_default_note), style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
                     }
                 }
+            }
+
+            // 智能体产物（UX 规范 §2.5③ 的「只做视图」档）：按项目目录分组列出产物，
+            // 点一行回到产出它的会话。放在「最近有人放进来」之前 —— 前者回答「我的智能体
+            // 给了什么」，后者回答「别人给了什么」，两段同属文件语境，挨着读才顺。
+            item {
+                AgentArtifactsCabinetSection(
+                    agentSlice = agentSlice,
+                    settingsSlice = settingsSlice,
+                    now = now,
+                    onOpenSession = onOpenArtifactSession,
+                )
             }
 
             // 卡片 4: 最近有人放进来。原型行是 `.cbfrow`：

@@ -1100,6 +1100,10 @@ public fun PinnedApprovalFocusCard(
                     text = subtitle,
                     style = MaterialTheme.typography.labelSmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    // 副标现在报的是**真实**的群名与命令（§2.2②），可能很长；
+                    // 一行截断而不是把置顶卡撑成三行、把下面的卡片流顶下去。
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
                 )
             }
             AppButton(

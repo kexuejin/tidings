@@ -68,6 +68,8 @@ import com.kapp.tenon.ui.components.ComposerCapability
 import com.kapp.tenon.ui.components.MentionTarget
 import com.kapp.tenon.ui.components.MessageComposer
 import com.kapp.tenon.ui.components.insertMention
+import com.kapp.tenon.ui.components.offlineMentionTokenIn
+import com.kapp.tenon.ui.theme.IconSizes
 import com.kapp.tenon.ui.theme.LocalAppSpacing
 import com.kapp.tenon.ui.EmptyState
 import kotlinx.coroutines.launch
@@ -83,6 +85,7 @@ import com.kapp.tenon.generated.resources.chat_no_selection_message
 import com.kapp.tenon.generated.resources.chat_no_selection_title
 import com.kapp.tenon.generated.resources.chat_nudge
 import com.kapp.tenon.generated.resources.chat_peer_offline
+import com.kapp.tenon.generated.resources.chat_offline_host_send_hint
 import com.kapp.tenon.generated.resources.chat_pk
 import com.kapp.tenon.generated.resources.common_agent
 import com.kapp.tenon.generated.resources.common_profile_unavailable
@@ -292,8 +295,16 @@ fun ChatScreen(
             label = identity.displayName,
             note = if (identity.needsProfileNote) profileNote else null,
             isAgent = identity.isAgent,
+            // 「休眠 / 离线」只认明确报出来的 false；身份解析器的 online 为 null
+            // 是「不知道」，沉默不等于离线（与 WorkspaceUi.online 的既有消费同一口径）。
+            // 真人候选不标：这条提示说的是「派给智能体宿主的活现在不会开始」。
+            isHostOffline = identity.isAgent && identity.online == false,
         )
     } + teamMemberTargets
+    // 发送侧要用同一份离线事实：token → 显示名，提示里报的是用户认识的那个名字。
+    val offlineMentionByToken = mentionTargets
+        .filter { it.isHostOffline }
+        .associate { it.token to it.label }
     // 群里有没有 agent 成员 —— 问题 1 的口径是**成员级事实**，不是"这是不是工作区群"。
     val groupAgentInvolved = groupRows.hasAgent
 
@@ -455,6 +466,11 @@ fun ChatScreen(
     }
     val capsuleStateState = remember(peerId) { mutableStateOf(CapsuleState.Empty) }
     var capsuleState by capsuleStateState
+    // §2.4 发送侧温暖提示：记的是**被 @ 到的那台离线宿主的名字**，不是布尔。
+    // 按会话重建（切会话即清），下一次编辑草稿也清 —— 一句"上一条的提示"不该
+    // 挂到下一条上。发送出口是唯一写入点，两种输入形态共用（同一个 submitMessage）。
+    var offlineHostName by remember(peerId) { mutableStateOf<String?>(null) }
+
     // 草稿变更的**唯一入口**（手机内置输入栏与桌面输入卡片共用）：赋值之外，
     // 同一步评估胶囊的唤起判据（§5.2）—— 键入合法 @agent 唤起、粘帖不误触发。
     // 分散在两个输入形态里各评一遍，迟早有一处漏。
@@ -462,6 +478,8 @@ fun ChatScreen(
         val previous = draft
         draft = next
         capsuleState = capsuleOnDraftEdit(capsuleState, previous, next, capsuleAgents)
+        // 用户接着打字 = 上一条提示的语境结束了，立刻撤掉，别让它变成常驻横幅。
+        offlineHostName = null
         peerId?.let { onDraftChangeExternal?.invoke(it, next) }
     }
 
@@ -495,6 +513,11 @@ fun ChatScreen(
         // 发送即意图消费完毕：胶囊随之清空（草稿也没了，绑定依据不复存在）。
         val intentSelection = capsuleState.selection
         capsuleState = CapsuleState.Empty
+        // §2.4：派单**照发不拦**（拦下来是替用户改主意），但在发出去的那一刻就把
+        // 「为什么暂时不会有回音」说清楚。命中判据是整词 token，不是子串 ——
+        // `@coder` 不该因为正文里写了 `@coder2` 就弹提示。
+        offlineHostName = offlineMentionTokenIn(body, offlineMentionByToken.keys)
+            ?.let { offlineMentionByToken[it] }
         if (body.isNotBlank() || filesToSend.isEmpty()) {
             if (intentSelection != null && onSendWithIntent != null) {
                 onSendWithIntent(peer.nodeId, body, replyId, intentSelection.toIntentJson())
@@ -940,6 +963,37 @@ fun ChatScreen(
             queuedCount = sessionQueuedCount,
             now = data.now,
         )
+
+        // §2.4 发送侧温暖提示：紧跟状态线、紧贴输入区上方。它**不是**常驻横幅 ——
+        // 只在刚把任务派给一台离线宿主之后出现，下一次编辑草稿就撤。
+        // 与会话内那条「宿主睡眠/离线」常驻横幅分工不同：那条说状态，这条说刚发生的这一下。
+        offlineHostName?.let { hostName ->
+            Surface(
+                color = MaterialTheme.colorScheme.secondaryContainer,
+                shape = MaterialTheme.shapes.small,
+                modifier = Modifier
+                    .padding(horizontal = sp.lg, vertical = sp.xs)
+                    .fillMaxWidth(),
+            ) {
+                Row(
+                    modifier = Modifier.padding(horizontal = sp.md, vertical = sp.xs),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(sp.xs),
+                ) {
+                    Icon(
+                        painter = painterResource(Res.drawable.ic_moon),
+                        contentDescription = null,
+                        tint = MaterialTheme.colorScheme.onSecondaryContainer,
+                        modifier = Modifier.size(IconSizes.Label),
+                    )
+                    Text(
+                        text = stringResource(Res.string.chat_offline_host_send_hint, hostName),
+                        style = MaterialTheme.typography.labelSmall,
+                        color = MaterialTheme.colorScheme.onSecondaryContainer,
+                    )
+                }
+            }
+        }
 
         if (composerSlot != null) {
             // 草稿仍由 ChatScreen 持有（remember(peerId)），所以切换会话时桌面输入卡片也不会串内容。

@@ -76,6 +76,7 @@ import com.kapp.tenon.generated.resources.ic_groups
 import com.kapp.tenon.generated.resources.ic_send
 import com.kapp.tenon.generated.resources.ic_user
 import com.kapp.tenon.generated.resources.chat_mention_all
+import com.kapp.tenon.generated.resources.chat_mention_host_offline
 import com.kapp.tenon.generated.resources.common_unknown_member
 import org.jetbrains.compose.resources.DrawableResource
 import org.jetbrains.compose.resources.StringResource
@@ -143,12 +144,18 @@ internal fun insertEmoji(text: String, start: Int, end: Int, emoji: String): Pai
  * [token] 由**身份解析器**给（agent = `@KIND`，真人 = `@显示名`），输入栏**不自己拼**：
  * 触发判据认的就是 kind，任何在这里另拼一次的写法都会造出「@ 了却叫不醒」。
  * [note] 是候选行的副文案（目前只有「未获取到资料」），null = 不画。
+ *
+ * [isHostOffline] 只由身份解析器明确报出的「离线」推出来；资料里在线态未知（null）
+ * 时**不标**。休眠、断网、关机在节点表里是同一档事实，界面只说「休眠/离线」，
+ * 不替对端断言它为什么不在（UX 规范 §2.4 的如实收窄）。默认 false —— 漏传的
+ * 调用点不会凭空给全体候选标红。
  */
 public data class MentionTarget(
     val token: String,
     val label: String,
     val note: String? = null,
     val isAgent: Boolean = false,
+    val isHostOffline: Boolean = false,
 )
 
 /**
@@ -236,6 +243,23 @@ internal fun filterMentionTargets(targets: List<MentionTarget>, query: String): 
     }
 
 /**
+ * 正文里有没有 **@ 到了宿主离线的席位**，有就返回那个 token。
+ *
+ * 判据是「整词相等」而不是 `body.contains(token)`：候选里同时有 `@coder` 与
+ * `@coder2` 时，前者会命中后者的正文，给一条根本没派给离线宿主的提示。
+ * 去掉行尾常见标点后按空白切词，与 [insertMention] 插入时补的那个空格同一口径。
+ *
+ * 抽成纯函数是为了「提示什么时候该出」不埋在组合体的发送出口里 —— 那一处
+ * 同时管草稿复位、引用清空、意图消费，再加一截正则只会没人敢碰。
+ */
+internal fun offlineMentionTokenIn(body: String, offlineTokens: Set<String>): String? {
+    if (body.isBlank() || offlineTokens.isEmpty()) return null
+    val words = body.split(Regex("""\s+"""))
+        .mapTo(HashSet()) { it.trim().trimEnd(',', '.', ';', ':', '!', '?') }
+    return offlineTokens.firstOrNull { it in words }
+}
+
+/**
  * `@` 联想候选菜单项（手机与桌面共享实现）。
  */
 @Composable
@@ -280,12 +304,33 @@ internal fun MentionDropdownItems(
                             text = target.token,
                             style = MaterialTheme.typography.bodyMedium,
                             fontWeight = if (target.isAgent) FontWeight.SemiBold else FontWeight.Normal,
+                            color = if (target.isHostOffline) {
+                                MaterialTheme.colorScheme.onSurfaceVariant
+                            } else {
+                                MaterialTheme.colorScheme.onSurface
+                            },
                         )
                         target.note?.let { note ->
                             Text(
                                 text = note,
                                 style = MaterialTheme.typography.labelSmall,
                                 color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            )
+                        }
+                    }
+                    // 宿主离线时把「这条派单不会立刻开始」前置到选人这一步：等发出去
+                    // 再让用户从沉默里猜，就是规范里那条「幽灵假死」。徽标与 BOT 徽标
+                    // 同槽、同一套 Surface 形状，不新造一档圆角或尺寸。
+                    if (target.isHostOffline) {
+                        Surface(
+                            shape = RelayShapes.extraSmall,
+                            color = MaterialTheme.colorScheme.errorContainer,
+                        ) {
+                            Text(
+                                text = stringResource(Res.string.chat_mention_host_offline),
+                                style = MaterialTheme.typography.labelSmall,
+                                color = MaterialTheme.colorScheme.onErrorContainer,
+                                modifier = Modifier.padding(horizontal = sp.xs, vertical = sp.xxs),
                             )
                         }
                     }

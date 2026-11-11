@@ -133,8 +133,12 @@ class OrchestratorPhase4WiringTest {
             "崩了就发红卡横幅，严禁静默吞掉挂在 running",
         )
         assertTrue(
-            orchestrator.contains("CrashReport.drawerOf(said.toString())"),
-            "非零退出路径同样把累计输出尾部送进抽屉",
+            // 抽屉要的是**现场尾部**：思考与发言都要进（思考里常有「这仓没有测试脚本」
+            // 这类唯一线索）。卡面横幅相反，只取发言 —— 见 PatchlessAnswer 的取舍。
+            orchestrator.contains(
+                "CrashReport.drawerOf((thought.toString() + \"\\n\" + said.toString())",
+            ),
+            "非零退出路径同样把累计输出尾部（思考 + 发言）送进抽屉",
         )
     }
 

@@ -43,6 +43,30 @@ interface HostDirectoryPort {
      * **不猜**：猜错的后果是命令在错误的项目里跑。与 [snapshot] 读同一份 store 实例。
      */
     fun resolveForGroup(groupId: String, agentKey: String): String? = null
+
+    /**
+     * 这个壳能不能**弹系统目录选择器**（macOS/Windows 的原生选目录窗）。
+     *
+     * ## 为什么这件事属于目录端口
+     *
+     * 「项目目录从哪来」有两个入口：从台账里挑一条，或者**去磁盘上指一个**。后者要弹
+     * 系统窗，而弹窗是壳的能力。把它摆在端口上，是为了让**所有**登记目录的地方
+     * （建群表单、群设置里的「登记新目录」）共用一个判据 —— 从前这条能力挂在
+     * `AppPlatform.saveDirectoryPicker` 上，可它在全仓**零调用点**：三个壳都实现了，
+     * 却没有任何界面接它，用户只能靠手打绝对路径，而 macOS 上的绝对路径基本打不对。
+     *
+     * 默认 false，UI 据此**整颗不画**「浏览」按钮（本仓纪律：画不出来的能力不画，
+     * 而不是画一颗点下去没反应的）。手机端 `hostDirectoryPort` 本身为 null，走不到这里。
+     */
+    val canPickDirectory: Boolean get() = false
+
+    /**
+     * 弹系统目录选择器，返回**绝对路径**；null = 用户取消（或该壳没有这个能力）。
+     *
+     * 取消不是失败：调用方把 null 当成「什么都没发生」，不要清掉已填的路径。
+     * 返回的路径可能带系统相关的大小写/分隔符，登记前一律交给 [register] 归一。
+     */
+    suspend fun pickDirectory(): String? = null
 }
 
 /** 宿主本机的一个项目目录（UI 形状；与存储形状逐字段对齐）。 */

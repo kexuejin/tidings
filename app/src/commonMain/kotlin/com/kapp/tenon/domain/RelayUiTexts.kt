@@ -147,6 +147,19 @@ interface RelayUiTexts {
     /** diff 摘要行（摘要 + 增删统计）。 */
     suspend fun diffReadyDetail(summary: String?, additions: Long, deletions: Long): String = summary.orEmpty()
 
+    /**
+     * 「这单做完了，但一行文件都没改」的横幅 —— 只读 / 问答式任务的**正常终态**。
+     *
+     * 触发面：CLI 自己报 `finished`，却没交补丁（见 `PatchlessAnswer`）。从前这种单被判
+     * 「没干活」，催满三轮后挂 `blocked`「exceeded max heal rounds」—— 对「帮我看下
+     * git log」这类任务，那句「交回」是假警报。横幅必须同时说两件事：结论是什么、
+     * 以及没有文件被改（只说「完成」会让人以为改动已落地）。
+     *
+     * [answer] 是 CLI 自己的结论，可能为空。取不到文案返回空串 —— 调用方退回 ASCII 兜底，
+     * 不编中文。
+     */
+    suspend fun answeredNoChangesBanner(answer: String): String = ""
+
     /** 补丁合并失败的一句话指引。[kind] 是分类码，[detail] 是原始 stderr 尾巴。 */
     suspend fun patchMergeHint(kind: String, detail: String): String = detail
 
@@ -182,5 +195,6 @@ object NoUiTexts : RelayUiTexts {
     override suspend fun teamReadyBanner(role: String, seconds: Long): String = ""
     override suspend fun diffReadyPrompt(): String = ""
     override suspend fun diffReadyDetail(summary: String?, additions: Long, deletions: Long): String = summary.orEmpty()
+    override suspend fun answeredNoChangesBanner(answer: String): String = ""
     override suspend fun patchMergeHint(kind: String, detail: String): String = detail
 }

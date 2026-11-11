@@ -74,6 +74,11 @@ object CliLineEventMapper {
                     null
                 }
             }
+            // dsh 的内心独白：`{"type":"thinking","text":…}`。**必须**认成 ThoughtDelta ——
+            // 落到下面的兜底就会被当成「它说的话」，于是卡面横幅显示的是模型的自我盘算
+            // （真机现场：横幅写着「The user's message is just: git log -1 --oneline…」，
+            // 而用户要的是那一行 commit）。行型取自 task.log 的 `type` 字段。
+            "thinking" -> textOf(obj)?.takeIf { it.isNotBlank() }?.let { DriverEvent.ThoughtDelta(it) }
             else -> textOf(obj)?.takeIf { it.isNotBlank() }?.let { DriverEvent.TokenDelta(it) }
         }
     }

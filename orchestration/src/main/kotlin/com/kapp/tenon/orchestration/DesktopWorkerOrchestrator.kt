@@ -2158,8 +2158,12 @@ class DesktopWorkerOrchestrator(
         var healRound = 0
         var currentPrompt = containedPrompt
         var patchPath: String? = null
-        // CLI **自己说的话**（token/思考增量拼起来）。卡面摘要只能从这里来。
+        // CLI **自己说的话**：只收 `token.delta`（真发言）。卡面摘要只能从这里来。
         var said = StringBuilder()
+        // 思考增量单独收。它**不进**摘要：真机上模型最后一段常常是「任务看起来是只读的，
+        // 所以我该直接给答案」这类内心独白，把它当结论贴到卡面上，用户看到的就是模型
+        // 在自言自语而不是 `git log` 的输出。思考只喂崩溃抽屉（那里要的是现场尾部）。
+        var thought = StringBuilder()
         var executionError: String? = null
         // 每轮的原因都留着：末轮那句常常是「没交产物」，而首轮那句才是「模型根本没跑起来」。
         // 只留末轮会把看横幅的人带偏（D4，见 [HealReport]）。
@@ -2167,11 +2171,19 @@ class DesktopWorkerOrchestrator(
         // 最后一轮验收的完整报告（Acceptance 报告面，Step 5）：review_ready 卡上的
         // 「验收」检查行从这里来 —— 门判过的东西，卡上要看得见。
         var verificationReport: TicketVerification.Report? = null
+        // 只读 / 问答式任务的收敛判据（见 [PatchlessAnswer]）：CLI 自己说 finished、
+        // 却一行没改 —— 有答案就是答案，不再往 blocked 里推。
+        var patchlessRounds = 0
+        var answeredWithoutChanges = false
+        // 最近一次非空发言。收敛时用它当卡面摘要：末轮可能只回一句「没东西要改」，
+        // 而用户要看的结论常常在上一条里。
+        var lastAnswer = ""
 
         while (healRound < maxHealRounds) {
             healRound++
             patchPath = null
             said = StringBuilder()
+            thought = StringBuilder()
             // 每轮一套新鲜的看门狗与心跳：租约从本轮第一次事件重新起算。
             val watchdog = SandboxIdleWatchdog(clock = { nowMillis() })
             val emitter = HeartbeatEmitter()
@@ -2253,7 +2265,14 @@ class DesktopWorkerOrchestrator(
                         // `artifact` 是路径/SHA 对账、`tool.started` 是调用参数、
                         // `error` 是英文诊断。从前用的是黑名单（只排 finished/heartbeat/
                         // artifact），于是最后落进摘要的总是那张卡片 JSON。
-                        if (eventType == "thought.delta" || eventType == "token.delta") {
+                        //
+                        // 思考与发言还要**分开**：「这段任务看起来是只读的，我该直接给答案」
+                        // 是内心独白，不是给用户的结论。真机上模型最后一段正是这句 ——
+                        // 混在一起时卡面横幅就变成了模型的自言自语。
+                        if (eventType == "thought.delta") {
+                            val chunk = body ?: summary
+                            if (!chunk.isNullOrBlank()) thought.append(chunk)
+                        } else if (eventType == "token.delta") {
                             val chunk = body ?: summary
                             if (!chunk.isNullOrBlank()) said.append(chunk)
                         }
@@ -2294,6 +2313,25 @@ class DesktopWorkerOrchestrator(
                     executionError = null
                     break
                 }
+                if (said.isNotBlank()) lastAnswer = said.toString()
+                // **只读任务的出口**（[PatchlessAnswer]）：零补丁不等于没干活。
+                // 从前这里无条件落进「No patch produced by worker」，于是「帮我看下」
+                // 这类单被催满三轮、最后挂 blocked —— 用户看到的是假警报。
+                if (patchPath == null) {
+                    when (PatchlessAnswer.verdictOf(
+                        status = status,
+                        saidSomething = said.isNotBlank(),
+                        patchlessRoundsSoFar = patchlessRounds,
+                        canNudge = healRound < maxHealRounds,
+                    )) {
+                        PatchlessAnswer.Verdict.Nudge -> patchlessRounds++
+                        PatchlessAnswer.Verdict.Answered -> {
+                            answeredWithoutChanges = true
+                            executionError = null
+                            break
+                        }
+                    }
+                }
                 val roundError = when {
                     verdict != null -> verdict.reason
                     else -> error
@@ -2333,6 +2371,19 @@ class DesktopWorkerOrchestrator(
             }
         }
 
+        if (answeredWithoutChanges) {
+            return publishAnsweredWithoutChanges(
+                targetId = targetId,
+                ticketId = ticketId,
+                title = title,
+                rev = revCounter.incrementAndGet(),
+                roleName = ticket.role,
+                agentId = defaultAgent,
+                startedAt = ticket.createdAt,
+                said = lastAnswer,
+            )
+        }
+
         if (executionError != null) {
             ticket.stage = "blocked"
             // 首因 + 末因都给出来（重复的只写一遍）：这两句指向的修法完全不同，
@@ -2360,7 +2411,10 @@ class DesktopWorkerOrchestrator(
                 startedAt = ticket.createdAt,
                 failure = StageChainFailure(
                     observation = executionError,
-                    drawer = CrashReport.drawerOf(said.toString()) ?: CrashReport.drawerOf(executionError),
+                    // 抽屉要的是**现场尾部**，所以这里思考 + 发言都要（卡面横幅只取发言）：
+                    // 真机上失败那一刻能看懂的线索常常在思考里（「这个仓没有测试脚本」）。
+                    drawer = CrashReport.drawerOf((thought.toString() + "\n" + said.toString()).trim())
+                        ?: CrashReport.drawerOf(executionError),
                 ),
                 humanSteering = !ticket.steeringUsed,
             )
@@ -2444,6 +2498,53 @@ class DesktopWorkerOrchestrator(
             selfDescribeDelivered = pipedNames,
         )
         return TicketOutcome("review_ready", summary, null, reviewJson, patchPath)
+    }
+
+    /**
+     * 只读 / 问答式任务的终局卡：**做完了，但一行文件都没改**。
+     *
+     * 为什么不复用 `review_ready`：那张卡的全部意义是「等你合并」—— 零补丁时它既会
+     * 摆出一个点不动的「合并此补丁」，又隐含「有改动可看」，两样都不成立。这里发
+     * `state = "done"` + 进度 100 + 零产物零动作：手机 `CardStateTag` 对没有动作的卡按
+     * `progress == 100` 退成「已完成」，**不必给状态词表加新词**（那份词表两端对账，
+     * 加一个词要同时改解析、文案、资源三处）。
+     *
+     * 横幅必须同时说两件事：结论是什么、以及**没有文件被改**。只说「完成」会让用户
+     * 以为改动已经落地；只说「没改文件」又像是失败。
+     */
+    private suspend fun publishAnsweredWithoutChanges(
+        targetId: String?,
+        ticketId: String,
+        title: String,
+        rev: Int,
+        roleName: String,
+        agentId: String,
+        startedAt: Long?,
+        said: String,
+    ): TicketOutcome {
+        activeTickets.remove(ticketId)
+        val answer = StageChain.summarize(dedupeRepeatedSpeech(said.takeLast(600)))
+        val banner = controller.uiTexts.answeredNoChangesBanner(answer.orEmpty()).ifBlank {
+            if (answer.isNullOrBlank()) {
+                "Finished — no files changed"
+            } else {
+                "Finished — no files changed: $answer"
+            }
+        }
+        val json = publishTicketCard(
+            groupId = targetId,
+            ticketId = ticketId,
+            rev = rev,
+            state = "done",
+            title = title,
+            banner = banner,
+            percent = 100,
+            roleName = roleName,
+            agentId = agentId,
+            assignees = listOf(agentId),
+            startedAt = startedAt,
+        )
+        return TicketOutcome("done", banner, null, json)
     }
 
     /**

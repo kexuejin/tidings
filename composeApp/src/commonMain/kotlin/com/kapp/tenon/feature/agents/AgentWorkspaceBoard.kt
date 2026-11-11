@@ -21,8 +21,11 @@ import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberUpdatedState
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.text.font.FontWeight
@@ -35,14 +38,19 @@ import com.kapp.tenon.domain.peer
 import com.kapp.tenon.domain.RelayUiState
 import com.kapp.tenon.domain.WorkspaceAgentSectionUi
 import com.kapp.tenon.domain.agentSections
+import com.kapp.tenon.domain.groupBoundToWorkspace
+import com.kapp.tenon.domain.hubAgents
 import com.kapp.tenon.domain.inboxWorkspaceUnits
 import com.kapp.tenon.domain.pendingApprovalCount
 import com.kapp.tenon.domain.mayDecideApproval
 import com.kapp.tenon.domain.model.AgentApprovalUi
 import com.kapp.tenon.domain.model.AgentSessionKey
+import com.kapp.tenon.domain.model.WorkspaceUi
+import com.kapp.tenon.domain.firstProjectCandidate
 import com.kapp.tenon.feature.conversations.ConversationFailedEmptyState
 import com.kapp.tenon.feature.conversations.InboxUnitRow
 import com.kapp.tenon.generated.resources.Res
+import com.kapp.tenon.generated.resources.agent_empty_agents_only_card
 import com.kapp.tenon.generated.resources.agent_empty_agents_only_message
 import com.kapp.tenon.generated.resources.agent_empty_agents_only_title
 import com.kapp.tenon.generated.resources.agent_empty_card
@@ -56,6 +64,7 @@ import com.kapp.tenon.generated.resources.agent_empty_title
 import com.kapp.tenon.generated.resources.agent_subtitle_pending
 import com.kapp.tenon.generated.resources.agent_title
 import com.kapp.tenon.generated.resources.approval_focus_subtitle
+import com.kapp.tenon.generated.resources.approval_focus_subtitle_detail
 import com.kapp.tenon.generated.resources.desktop_action_refresh
 import com.kapp.tenon.generated.resources.ic_chev
 import com.kapp.tenon.generated.resources.ic_lan_search
@@ -149,7 +158,10 @@ internal fun WorkspaceBoardTitleBar(
     // agentSections().size 之和（不是 group.agentCount，真机报过「0 个 Agent」
     // 而下面明明画着 agent 段）；工作区 = units.workspaceCount（排除未归属行）。
     val deviceTotal = units.groups.size
-    val agentTotal = units.groups.sumOf { group -> group.agentSections().size }
+    // Agent 数与空态共用**同一把尺子**（卡片流投影）：只数有证据（会话 / 目录 / 席位）
+    // 的实体。修复前这里数 `agentSections()`（只含带目录的），而空态数 `agentPeers.size`
+    // （恒含本机宿主），于是同一屏上「0 Agent」与「Agent（1）」同时出现。
+    val agentTotal = hubAgents(agentSlice, nodeSlice, settingsSlice, now).size
     val summary = if (units.isEmpty) {
         stringResource(Res.string.agent_empty_subtitle, units.workspaceCount)
     } else {
@@ -220,6 +232,22 @@ internal fun WorkspaceBoardView(
      * 不是审批卡列表，inspector 里没有对应物，关掉等于平白丢一条通路。
      */
     showApprovalQueue: Boolean = true,
+    /**
+     * 手机壳：置顶审批卡点「立即审批」时**原地**弹出处置面板，而不是把人甩进聊天页
+     * （UX 规范 §2.2②「迷宫横跳」）。
+     *
+     * 默认 false —— 桌面宽屏的右栏 inspector 已经常驻同一批审批卡，再叠一层面板
+     * 是重复渲染；手机组合根显式置 true。面板本体复用 [AgentApprovalsSection]，
+     * 逐条处置仍只有一份实现。
+     */
+    inPlaceApprovals: Boolean = false,
+    /**
+     * 新手冷启动引导卡（UX 规范 §2.6）的出口：点 CTA → 壳去开「精简建群弹窗」。
+     *
+     * null = 这个壳没有建群入口（或没有对话框可用）⇒ **整张卡不画**。与
+     * `onOpenShareRoot` 同一条规矩：能力缺失 = 不画，不是"点了没反应"。
+     */
+    onBindFirstProject: ((WorkspaceUi) -> Unit)? = null,
     /** Phase 4 订阅面切片（蓝图 §4.4）：默认值由 [state] 投影，未迁移/预览路径行为不变。 */
     agentSlice: AgentSlice,
     nodeSlice: NodeSlice,
@@ -306,7 +334,19 @@ internal fun WorkspaceBoardView(
             // 「一个 agent 都没上报」与「上报了 agent、但还没有可显示的工作区/会话」是两句
             // 不同的话。修复前两者共用后者文案 + 写死的「Agent（0）」：设备明明报了 agent，
             // 屏上却说"还没有任何 Agent 上报" —— 那是把"我这边没收到内容"说成"对方没装"。
-            val anyAgentReported = agents.isNotEmpty()
+            // 「有没有 Agent 上报」的**唯一尺子** = 卡片流投影（hubAgents）。
+            //
+            // 修复前这里是 `agents.isNotEmpty()`，而 `agents` 是 `agentPeers` —— 它会把
+            // **本机宿主**追加进去（只要 `agentWorkspaces` 里有本机的键，哪怕那是一条
+            // 没宣告任何目录的空壳）。于是同一屏上三句话打架：页头「0 Agent」、
+            // 段头「Agent（1）」、卡里「还没有设备上报 Agent」。
+            //
+            // hubAgents 只收有证据（会话 / 目录 / 席位）的实体，没有证据的本机节点不进。
+            // 页头与空态从此共用这一把尺子，三个数不可能再各说各话。
+            val hubAgentCount = remember(agentSlice, nodeSlice, settingsSlice, now) {
+                hubAgents(agentSlice, nodeSlice, settingsSlice, now).size
+            }
+            val anyAgentReported = hubAgentCount > 0
             Column(
                 modifier = Modifier.fillMaxWidth(),
                 verticalArrangement = Arrangement.spacedBy(LocalAppSpacing.current.lg14),
@@ -354,7 +394,7 @@ internal fun WorkspaceBoardView(
                     // 段头的数字取真实值：写死「Agent（0）」会在"报了 2 个 agent 但没有
                     // 可见工作区"时与上方那句同时撒谎。
                     text = if (anyAgentReported) {
-                        stringResource(Res.string.agent_empty_section_n, agents.size)
+                        stringResource(Res.string.agent_empty_section_n, hubAgentCount)
                     } else {
                         stringResource(Res.string.agent_empty_section)
                     },
@@ -370,7 +410,16 @@ internal fun WorkspaceBoardView(
                         .relayCardShadow(),
                 ) {
                     Text(
-                        text = stringResource(Res.string.agent_empty_card),
+                        // 卡内说明必须跟上面的判据一起翻档。修复前它恒是「还没有设备上报
+                        // Agent」—— 于是横幅说「已收到 Agent」、卡里说「没有设备上报」，
+                        // 同一块内容自己反驳自己。
+                        text = stringResource(
+                            if (anyAgentReported) {
+                                Res.string.agent_empty_agents_only_card
+                            } else {
+                                Res.string.agent_empty_card
+                            },
+                        ),
                         style = MaterialTheme.typography.bodyMedium,
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                         modifier = Modifier.padding(LocalAppSpacing.current.lg),
@@ -425,6 +474,23 @@ internal fun WorkspaceBoardView(
         return
     }
 
+    // 新手冷启动引导（UX 规范 §2.6）：**已经有目录、但一个都还没绑群** —— 屏幕列着几个
+    // 目录名，用户不知道下一步是建群。规范原文写的是「未绑定任何项目群」，但照字面做成
+    // "空态替代品"会得到一颗死按钮：空态成立时一个目录都没有（判据是 hasVisibleContent，
+    // 而一条已宣告的目录本身就让它成立），「立即关联第一个项目」无目录可绑。
+    // 判据与三条 fail-closed 都在 [firstProjectCandidate] 里，这里只画。
+    val firstProject = remember(agentSlice, nodeSlice, settingsSlice) {
+        firstProjectCandidate(agentSlice, nodeSlice, settingsSlice)
+    }
+    val bindFirstProject = onBindFirstProject
+    if (firstProject != null && bindFirstProject != null) {
+        FirstProjectCard(
+            first = firstProject,
+            onBind = bindFirstProject,
+            modifier = Modifier.padding(bottom = LocalAppSpacing.current.lg14),
+        )
+    }
+
     // 待处理审批（原型 relay.html 的 `.grphead`「待处理审批 N 项」+ 逐条卡）。
     //
     // **喂给审批段的是「待批 + 本屏刚处置的」**，不是只喂 pending：审批段自己的
@@ -434,27 +500,71 @@ internal fun WorkspaceBoardView(
     // 过期的不画、也不计数（`pendingApprovalCount` 同一判据）。
     val approvalRows = rememberLingeringApprovalRows(agentSlice.agentApprovals.values, now)
 
+    // 原位处置面板的开关（手机壳才可能开；见形参 `inPlaceApprovals` 的 KDoc）。
+    var approvalSheetOpen by remember { mutableStateOf(false) }
+
+    // 归属行：设备 · 项目目录。看板与面板共用**同一份**派生 —— 两处各写一遍迟早
+    // 有一处忘了跟会话表更新。审批段的归属、置顶卡的群名都从这里取。
+    val approvalAttribution: (AgentApprovalUi) -> String? = { appr ->
+        val session = agentSlice.agentSessions[AgentSessionKey(appr.peerId, appr.sessionId)]
+        val agentKey = session?.let { it.agentId ?: it.agentKind }
+        val wsTitle = session?.wsId?.let { ws ->
+            agentSlice.agentWorkspaces.values.firstOrNull { it.wsId == ws }?.wsTitle
+        }
+        val device = peer(appr.peerId, nodeSlice, settingsSlice)?.displayName
+        listOfNotNull(device, wsTitle ?: agentKey)
+            .filter { it.isNotBlank() }
+            .joinToString(" · ")
+            .takeIf { it.isNotBlank() }
+    }
+
     // 待审批**置顶聚焦卡**（task-20；原型 screenAgents 置顶条 relay.html:4692-4701）：
     // 聚合事实 + 立即审批直达。计数用页头同一把尺子（上方 totalPending = 领域层
     // pendingApprovalCount），不在这里数第二遍；这里只做聚焦不处置 —— 不画第二套
-    // 批准/拒绝按钮。副标是内容（哪些操作）按调用方给。
-    // 「立即审批」按原型 4701 行的语义（selConv=agent; go('d-chat')）= 选中**待批项
-    // 所在宿主**的会话并进聊天 —— 目标从审批行的 peerId 来，不是「第一个 agent」。
+    // 批准/拒绝按钮。
+    //
+    // **副标必须是真实事实**：修复前这里是一句写死的「涉及 Git 远程推送与敏感文件修改」——
+    // 真实的待批项可能只是 `rmdir /tmp/cache`，那句话在编造用户没做过的事。现在优先报
+    // 「群名 · 命令/摘要」；归因不了（直通宿主私聊、或目录没绑群）才退回通用文案。
+    //
+    // 「立即审批」的去向分两档：手机壳原地弹处置面板（§2.2②，不再把人甩进聊天页）；
+    // 桌面壳保持原型 4701 行的语义（选中待批项所在宿主并进聊天），因为那边右栏
+    // inspector 已经常驻审批列表，跳转只是换焦点、不是换屏。
     // totalPending 与 lingering 行的 pending 判据同源（isPendingApproval = pending
     // 且未过期），所以 totalPending > 0 时下面的 firstOrNull 必命中。
-    val focusPeerId = approvalRows.firstOrNull { it.status == "pending" }?.peerId
+    val focusApproval = approvalRows.firstOrNull { it.status == "pending" }
+    val focusPeerId = focusApproval?.peerId
     if (totalPending > 0 && focusPeerId != null) {
+        val focusGroupName = focusApproval?.let { appr ->
+            agentSlice.agentSessions[AgentSessionKey(appr.peerId, appr.sessionId)]
+                ?.wsId
+                ?.let { ws -> groupBoundToWorkspace(ws, settingsSlice.settings.groups)?.name }
+        }
+        val focusCommand = focusApproval?.let { appr ->
+            appr.summary?.takeIf { it.isNotBlank() } ?: appr.tool?.takeIf { it.isNotBlank() }
+        }
+        val focusSubtitle = if (focusGroupName != null && focusCommand != null) {
+            stringResource(Res.string.approval_focus_subtitle_detail, focusGroupName, focusCommand)
+        } else {
+            stringResource(Res.string.approval_focus_subtitle)
+        }
         PinnedApprovalFocusCard(
             pendingCount = totalPending,
-            subtitle = stringResource(Res.string.approval_focus_subtitle),
+            subtitle = focusSubtitle,
             onApproveClick = {
-                onSelectAgent(focusPeerId)
-                onOpenChat(focusPeerId, null)
+                if (inPlaceApprovals) {
+                    approvalSheetOpen = true
+                } else {
+                    onSelectAgent(focusPeerId)
+                    onOpenChat(focusPeerId, null)
+                }
             },
             modifier = Modifier.padding(bottom = LocalAppSpacing.current.lg14),
         )
     }
-    if (approvalRows.isNotEmpty() && showApprovalQueue) {
+    // 面板打开时主屏这段队列暂时不画：同一个屏幕上不出现两份一模一样的审批列表
+    // （与 §2.2① 桌面两栏去重同一条理由）。面板关掉立刻回来。
+    if (approvalRows.isNotEmpty() && showApprovalQueue && !approvalSheetOpen) {
         AgentApprovalsSection(
             approvals = approvalRows,
             onRespond = onRespondApproval,
@@ -464,18 +574,19 @@ internal fun WorkspaceBoardView(
             // 而同一个用户在会话详情里看到的却是「只读」。
             isReadOnly = { appr -> !mayDecideApproval(appr, agentSlice, nodeSlice, settingsSlice, now) },
             // 跨设备/跨工作区的平铺清单必须有归属：否则两台设备同时报审批时只能靠 summary 猜。
-            attribution = { appr ->
-                val session = agentSlice.agentSessions[AgentSessionKey(appr.peerId, appr.sessionId)]
-                val agentKey = session?.let { it.agentId ?: it.agentKind }
-                val wsTitle = session?.wsId?.let { ws ->
-                    agentSlice.agentWorkspaces.values.firstOrNull { it.wsId == ws }?.wsTitle
-                }
-                val device = peer(appr.peerId, nodeSlice, settingsSlice)?.displayName
-                listOfNotNull(device, wsTitle ?: agentKey)
-                    .filter { it.isNotBlank() }
-                    .joinToString(" · ")
-                    .takeIf { it.isNotBlank() }
-            },
+            // 与置顶卡、面板共用同一份派生（`approvalAttribution`）。
+            attribution = approvalAttribution,
+        )
+    }
+    if (approvalSheetOpen) {
+        AgentApprovalSheet(
+            approvals = approvalRows,
+            onRespond = onRespondApproval,
+            onRespondChoice = onRespondChoice,
+            // 权限判据不在这里另写一份：与主屏队列、聊天横幅同一处（:core 的唯一判据）。
+            isReadOnly = { appr -> !mayDecideApproval(appr, agentSlice, nodeSlice, settingsSlice, now) },
+            attribution = approvalAttribution,
+            onDismiss = { approvalSheetOpen = false },
         )
     }
 

@@ -21,6 +21,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
+import com.kapp.tenon.domain.AgentHubArtifactUi
 import com.kapp.tenon.domain.AgentHubRowKind
 import com.kapp.tenon.domain.AgentHubStatusRow
 import com.kapp.tenon.domain.AgentHubUi
@@ -33,8 +34,10 @@ import com.kapp.tenon.generated.resources.hub_agent_meta_format
 import com.kapp.tenon.generated.resources.hub_agent_role_single
 import com.kapp.tenon.generated.resources.hub_agent_role_team
 import com.kapp.tenon.generated.resources.hub_agent_section_title
+import com.kapp.tenon.generated.resources.hub_artifact_latest_tag
 import com.kapp.tenon.generated.resources.ic_bot
 import com.kapp.tenon.generated.resources.ic_chat_bubble
+import com.kapp.tenon.generated.resources.ic_file
 import com.kapp.tenon.generated.resources.workspace_latest_activity_format
 import com.kapp.tenon.ui.components.AppButtonSize
 import com.kapp.tenon.ui.components.AppOutlinedButton
@@ -230,7 +233,79 @@ private fun AgentHubCard(
                     HubStatusRow(card = card, row = row, now = now, onOpenSession = onOpenRowSession)
                 }
             }
+
+            // 最近交付（UX 规范 §2.5②）：卡片底部一行。产物只落在消息流里时，
+            // 「它刚给了你什么」在卡上完全看不见 —— 这行就是那个回溯入口。
+            // 壳没给三级入口时照样画（只是不可点）：文件名本身仍是事实。
+            card.latestArtifact?.let { artifact ->
+                HubArtifactTag(
+                    artifact = artifact,
+                    now = now,
+                    onOpen = onOpenRowSession?.let { open ->
+                        { open(card.hostNodeId, artifact.sessionId) }
+                    },
+                )
+            }
         }
+    }
+}
+
+/**
+ * 卡片底部的「最近交付」标签：文件名 + 相对时刻，整行可点。
+ *
+ * ## 只报事实，不断言成败
+ *
+ * `agent-artifact` 帧里没有产物的成败位，所以这行**不写「成功」**：它说的是「最近收到
+ * 一件叫 X 的产物、什么时候收到的」，而不是「这次交付成功了」。
+ *
+ * ## 点击落到会话，不直接拉二进制
+ *
+ * 这里只有元数据（文件名 / 所属会话 / 收到时刻）；产物本体靠 `fileId` 指的那条
+ * `file-msg`，所以点它进**产物所属的那条会话**（产物卡在那里），由既有文件动作去开。
+ * 直接把 `fileId` 当可打开路径是另一种编造。
+ *
+ * ## 为什么保留相对时刻
+ *
+ * 「最近」是个会腐坏的词：卡上已有「最近活动 3 分钟前」，而产物可能是三天前的。
+ * 只写文件名会让两件事看起来同时发生 —— 带上产物自己的时刻才如实。
+ */
+@Composable
+private fun HubArtifactTag(
+    artifact: AgentHubArtifactUi,
+    now: Long,
+    /** null = 壳没有三级入口：标签照画（文件名仍是事实），但不假装可点。 */
+    onOpen: (() -> Unit)?,
+) {
+    val sp = LocalAppSpacing.current
+    val clickable = if (onOpen != null) Modifier.clickable(onClick = onOpen) else Modifier
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .then(clickable)
+            .padding(vertical = sp.xxs),
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(sp.sm6),
+    ) {
+        Icon(
+            painter = painterResource(Res.drawable.ic_file),
+            contentDescription = null,
+            modifier = Modifier.size(IconSizes.Label),
+            tint = MaterialTheme.colorScheme.onSurfaceVariant,
+        )
+        Text(
+            text = stringResource(Res.string.hub_artifact_latest_tag, artifact.name),
+            style = MaterialTheme.typography.labelSmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+            maxLines = 1,
+            overflow = TextOverflow.Ellipsis,
+            modifier = Modifier.weight(1f),
+        )
+        Text(
+            text = relativeTime(artifact.at, now),
+            style = MaterialTheme.typography.labelSmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+            maxLines = 1,
+        )
     }
 }
 

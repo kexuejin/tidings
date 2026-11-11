@@ -124,6 +124,14 @@ class DshCliWiringTest {
         assertEquals("call_1", call.toolCallId)
         // 空 thinking 行不产噪声事件。
         assertNull(CliLineEventMapper.map("""{"type":"thinking","text":""}"""), "空文本不许发空 TokenDelta")
+        // 非空 thinking 是**内心独白**，不是发言：必须成 ThoughtDelta。
+        // 真机现场：兜底路径把它当 TokenDelta，卡面横幅就变成了「The user's message is
+        // just: git log -1 --oneline…」——模型的自言自语顶替了那一行 commit。
+        assertEquals(
+            DriverEvent.ThoughtDelta("The task is to run that command"),
+            CliLineEventMapper.map("""{"type":"thinking","text":"The task is to run that command"}"""),
+            "thinking 不许被当成它说的话（兜底分支吃掉的正是这一行）",
+        )
         // turn_end 的 error reason 要挖出正文 —— 退出码之外唯一的失败原因来源。
         // 原始 CLI 的 message 里带的是真引号（JSON 里转义为 \"），解析后应还原。
         val errLine = """{"type":"status","phase":"turn_end","turn":1,"reason":{"kind":"error","error":{"message":"llm-deepseek: no API key for provider route \"deepseek-official\""}}}"""

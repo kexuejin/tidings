@@ -38,7 +38,7 @@ class AgentBoardContainerGuardTest {
      * `onOpenWorkspace` 调用裹进来。
      */
     private fun focusWiringSlice(boardSource: String): String {
-        val start = boardSource.indexOf("val focusPeerId")
+        val start = boardSource.indexOf("val focusApproval")
         if (start < 0) return ""
         val end = boardSource.indexOf("AgentApprovalsSection(", start)
         return if (end < 0) boardSource.substring(start) else boardSource.substring(start, end)
@@ -118,8 +118,11 @@ class AgentBoardContainerGuardTest {
      * ① 计数走页头同一把尺子（`pendingApprovalCount`，一个数只有一个来源）——
      *    在这里数第二遍（如对 lingering 行再 `.count { }`）= 两把尺子，迟早分叉；
      * ② 直达目标从**待批项所在宿主**来（审批行的 peerId），不是「第一个 agent」；
-     * ③ 「立即审批」按原型语义进**聊天**（`onSelectAgent` + `onOpenChat` 成对），
-     *    不进工作区详情 —— 逐条处置在聊天/审批队列里，不在二级工作区中心。
+     * ③ 「立即审批」分两档（UX 规范 §2.2② 之后）：
+     *    - 桌面壳（`inPlaceApprovals` 默认 false）保持原型语义进**聊天**
+     *      （`onSelectAgent` + `onOpenChat` 成对）；
+     *    - 手机壳（true）**原地**置 `approvalSheetOpen` 弹处置面板，不再把人甩进聊天页。
+     *    两档都不进工作区详情 —— 逐条处置在审批队列/面板里，二级中心不是直达目的地。
      *
      * 为什么只能源码级守：这三条都是调用点选择，行为测试够不到（无 Compose UI
      * 测试基建）；截图帧画不出「点按后去了哪」。
@@ -143,12 +146,16 @@ class AgentBoardContainerGuardTest {
             "聚焦卡计数没有用页头同一把尺子（totalPending = pendingApprovalCount）",
         )
         assertTrue(
-            call.contains("firstOrNull { it.status == \"pending\" }?.peerId"),
+            call.contains("approvalRows.firstOrNull { it.status == \"pending\" }"),
             "直达目标没有从待批项所在宿主派生（审批行的 peerId）",
         )
         assertTrue(
+            call.contains("if (inPlaceApprovals)") && call.contains("approvalSheetOpen = true"),
+            "手机壳没有把「立即审批」改成原地弹处置面板（§2.2②）",
+        )
+        assertTrue(
             call.contains("onSelectAgent(focusPeerId)") && call.contains("onOpenChat(focusPeerId, null)"),
-            "「立即审批」没有按原型语义选中会话并进聊天（onSelectAgent + onOpenChat 成对）",
+            "桌面壳没有保持原型语义选中会话并进聊天（onSelectAgent + onOpenChat 成对）",
         )
         assertFalse(
             call.contains("onOpenWorkspace("),
@@ -156,8 +163,10 @@ class AgentBoardContainerGuardTest {
         )
 
         // 内存变异反向验证（每条判据都要能区分对错）。
+        // 只换「进聊天」那一句：缩进会随分支层次变化，按整段两行替换会随重构失配
+        // （失配时 replace 原样返回 ⇒ 变异没生效 ⇒ 假绿）。
         val brokenChat = board.replace(
-            "onSelectAgent(focusPeerId)\n                onOpenChat(focusPeerId, null)",
+            "onOpenChat(focusPeerId, null)",
             "onOpenWorkspace(focusPeerId, null, null)",
         )
         assertFalse(
@@ -170,12 +179,17 @@ class AgentBoardContainerGuardTest {
             "计数换字面量后判据没报 —— ① 守不住",
         )
         val brokenTarget = board.replace(
-            "firstOrNull { it.status == \"pending\" }?.peerId",
-            "agents.firstOrNull()?.nodeId",
+            "approvalRows.firstOrNull { it.status == \"pending\" }",
+            "agents.firstOrNull()",
         )
         assertFalse(
             wiringHolds(brokenTarget),
             "直达目标换成第一个 agent 后判据没报 —— ② 守不住",
+        )
+        val brokenPanel = board.replace("approvalSheetOpen = true", "")
+        assertFalse(
+            wiringHolds(brokenPanel),
+            "手机壳的原位面板接线被摘掉后判据没报 —— ③ 守不住",
         )
     }
 
@@ -185,7 +199,9 @@ class AgentBoardContainerGuardTest {
         return call.contains("val focusPeerId") &&
             call.contains("PinnedApprovalFocusCard(") &&
             call.contains("pendingCount = totalPending") &&
-            call.contains("firstOrNull { it.status == \"pending\" }?.peerId") &&
+            call.contains("approvalRows.firstOrNull { it.status == \"pending\" }") &&
+            call.contains("if (inPlaceApprovals)") &&
+            call.contains("approvalSheetOpen = true") &&
             call.contains("onSelectAgent(focusPeerId)") &&
             call.contains("onOpenChat(focusPeerId, null)") &&
             !call.contains("onOpenWorkspace(")

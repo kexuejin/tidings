@@ -566,7 +566,7 @@ private fun CabinetEmptyPhonePreview() {
     )
     AppTheme(darkTheme = false) {
         StateSlotScreen(AppRoutes.CABINET, badges = navBadges(previewSlicesOf(state).chat, previewSlicesOf(state).agent, previewSlicesOf(state).node, previewSlicesOf(state).settings)) { inner ->
-            CabinetScreen(chromeSlice = previewSlicesOf(state).chrome,settingsSlice = previewSlicesOf(state).settings,nodeSlice = previewSlicesOf(state).node,transferSlice = previewSlicesOf(state).transfer,
+            CabinetScreen(chromeSlice = previewSlicesOf(state).chrome,settingsSlice = previewSlicesOf(state).settings,nodeSlice = previewSlicesOf(state).node,transferSlice = previewSlicesOf(state).transfer,agentSlice = previewSlicesOf(state).agent,
                 onSetShareRoot = {},
                 onSetShareMode = {},
                 onRemoveShareGrant = {},
@@ -633,7 +633,7 @@ private fun CabinetErrorPhonePreview() {
     )
     AppTheme(darkTheme = false) {
         StateSlotScreen(AppRoutes.CABINET, badges = navBadges(previewSlicesOf(state).chat, previewSlicesOf(state).agent, previewSlicesOf(state).node, previewSlicesOf(state).settings)) { inner ->
-            CabinetScreen(chromeSlice = previewSlicesOf(state).chrome,settingsSlice = previewSlicesOf(state).settings,nodeSlice = previewSlicesOf(state).node,transferSlice = previewSlicesOf(state).transfer,
+            CabinetScreen(chromeSlice = previewSlicesOf(state).chrome,settingsSlice = previewSlicesOf(state).settings,nodeSlice = previewSlicesOf(state).node,transferSlice = previewSlicesOf(state).transfer,agentSlice = previewSlicesOf(state).agent,
                 onSetShareRoot = {},
                 onSetShareMode = {},
                 onRemoveShareGrant = {},

@@ -94,6 +94,9 @@ fun handleSyncWorkspaceGroups() {
     if (changed) {
         host.handlePersist(settings.copy(groups = updated))
     }
+    // 启动补一次（幂等）：群可能是上一次运行里由手机建的，那时宿主还没装配目录端口，
+    // 入站那条路已经走完 —— 不在启动时补，它要等到对方下一次广播才被兑现。
+    host.adoptRequestedGroupDirectories()
 }
 
 /**
@@ -911,6 +914,10 @@ fun handleApplyGroupMeta(local: GroupMeta?, next: GroupMeta, from: String) {
         )
     }
     host.refreshPeers()
+    // 兑现别处（手机）建群时提的目录请求（UX 规范 §2.6 手机侧）：那份 `group.info` 的席位
+    // 声明里已经带着用户点选的 wsId，缺的只是宿主把本机路径找回来、登记、设指针。
+    // 没有目录端口 / 指针已设 / 本机席位多义，都在判据里整群跳过。
+    host.adoptRequestedGroupDirectories()
     if (from.isEmpty()) return
 }
 

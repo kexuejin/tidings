@@ -18,6 +18,8 @@ import com.kapp.tenon.generated.resources.orchestration_stage_impl_3
 import com.kapp.tenon.generated.resources.orchestration_team_ready
 import com.kapp.tenon.generated.resources.orchestration_diff_ready_prompt
 import com.kapp.tenon.generated.resources.orchestration_diff_ready_detail
+import com.kapp.tenon.generated.resources.orchestration_answered_no_changes
+import com.kapp.tenon.generated.resources.orchestration_answered_no_changes_detail
 import com.kapp.tenon.generated.resources.orchestration_stage_handoff_speech
 import com.kapp.tenon.generated.resources.orchestration_patch_hint_exists
 import com.kapp.tenon.generated.resources.orchestration_patch_hint_mismatch
@@ -149,6 +151,14 @@ internal object ResourceUiTexts : RelayUiTexts {
         runCatching {
             getString(Res.string.orchestration_diff_ready_detail, summary.orEmpty(), additions, deletions)
         }.getOrNull().orEmpty()
+
+    override suspend fun answeredNoChangesBanner(answer: String): String = runCatching {
+        if (answer.isBlank()) {
+            getString(Res.string.orchestration_answered_no_changes)
+        } else {
+            getString(Res.string.orchestration_answered_no_changes_detail, answer)
+        }
+    }.getOrNull().orEmpty()
 
     override suspend fun patchMergeHint(kind: String, detail: String): String {
         val key = when (kind) {

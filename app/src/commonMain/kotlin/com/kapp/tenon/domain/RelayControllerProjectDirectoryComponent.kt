@@ -224,3 +224,72 @@ internal fun RelayController.handleRemoveGroupAgent(groupId: String, agentId: St
     )
     return true
 }
+
+/**
+ * 宿主兑现「别处建的群」对它提的**目录请求**（UX 规范 §2.6 手机侧）。
+ *
+ * ## 请求已经发出去了，缺的是兑现的人
+ *
+ * 手机建绑定群时（`handleCreateWorkspaceGroup`）会把席位声明一起放进 `group.info`：
+ * `hostNodeId` = agent 真正运行的那台宿主、`defaultWsId` = 用户在手机上点选的那个目录
+ * （见 `virtualAgentMemberFor`）。**那就是请求本身** —— 零新增协议键，路径一个字都没出宿主
+ * （线上只有 `wsId`）。
+ *
+ * 但指针（`groupId → dirId`）只能写在宿主本机，手机写不了；宿主收到这份声明后此前什么也
+ * 不做，于是群里「本项目目录」永远空着，派单按 `NotConfigured` 退单 ——
+ * `no git workspace bound to group`。真机症状是「手机上建了群、@ 了不动」。
+ *
+ * 所以补的是**兑现**，不是新控制面：宿主在自己的工作区台账里按 `wsId` 找回本机路径
+ * （路径从未过网），登记目录、设指针、重建席位投影，一次做完。
+ *
+ * ## 五条 fail-closed（任何一条不成立就整群跳过，不猜）
+ *
+ * 1. **本机没有目录端口**（手机）⇒ 整段不跑：指针是宿主本机事实。
+ * 2. **指针已经设过** ⇒ 不碰。用户（宿主机主）选过的目录优先，自动逻辑永不覆盖显式选择。
+ * 3. **本机席位提出的 `wsId` 必须唯一**：两个本机席位指向不同目录 ⇒ 分叉已经存在，
+ *    按 D14「写入目标只有一个」不替用户裁决（与解析规则 2「多义不执行」同一条纪律）。
+ * 4. **`wsId` 必须能在本机台账里找回路径**，且该行属于本机（`peerId == self`）。
+ *    别人的工作区行里没有本机可写的目录。
+ * 5. **登记失败就不设指针**：留一个悬空指针比没有指针更糟（执行点会指向查无此目录的 id）。
+ *
+ * ## 边界（写清，别当成它没做）
+ *
+ * - **不新建目录**：手机从不指定路径（§2.1 明确禁止手打绝对路径），所以「新建一个空目录」
+ *   只能在有目录端口的桌面壳做。本函数只把**agent 已经宣告、机器上已经存在**的目录补进台账。
+ * - **可逆**：指针可在群设置里换/清（[handleSetGroupProjectDirectory]）；登记带来的白名单
+ *   条目可在授权面板收回。这不是不可撤销的数据改写。
+ * - 登记留下的痕迹就是 `host-directories.json` 本身（dirId + path + 白名单三行），
+ *   与用户在面板上点一次「关联」写进去的东西逐字相同。
+ *
+ * @return 本次真的补上的群数（幂等：已有关联的群不再计入）。
+ */
+internal fun RelayController.adoptRequestedGroupDirectories(): Int {
+    val port = hostDirectoryPort ?: return 0
+    val self = _state.value.selfNodeId
+    var adopted = 0
+    for (meta in _state.value.settings.groups.toList()) {
+        if (self !in meta.members) continue
+        val snap = port.snapshot() ?: continue
+        // ②：机主已经选过 —— 自动逻辑不覆盖显式选择。
+        if (snap.groupPointers.containsKey(meta.groupId)) continue
+        // ③：本机席位提出的目录必须唯一；0 个 = 没有请求，≥2 个 = 多义，都跳过。
+        val requested = meta.virtualAgents.orEmpty()
+            .filter { it.hostNodeId == self }
+            .mapNotNull { it.defaultWsId?.trim()?.takeIf { id -> id.isNotEmpty() } }
+            .distinct()
+        if (requested.size != 1) continue
+        val wsId = requested.single()
+        // ④：只认本机自己的工作区行；路径从这里取，不从线上取。
+        val ws = _state.value.agentWorkspaces.values
+            .firstOrNull { it.wsId == wsId && it.peerId == self } ?: continue
+        val path = ws.wsPath?.trim()?.takeIf { it.isNotEmpty() } ?: continue
+        val dirId = snap.directories.firstOrNull { it.path == path }?.dirId
+            ?: port.register(path, ws.wsTitle)?.dirId
+            ?: continue
+        // ⑤：设不上指针（悬空 / 群 id 失效）就什么也不算补上。
+        if (!port.setGroupPointer(meta.groupId, dirId)) continue
+        handleRebuildGroupSeatProjections(meta.groupId)
+        adopted++
+    }
+    return adopted
+}

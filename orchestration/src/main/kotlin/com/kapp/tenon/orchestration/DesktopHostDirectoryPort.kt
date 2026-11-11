@@ -24,6 +24,11 @@ class DesktopHostDirectoryPort(
      * 「dirId → wsId」。null（测试装配）= 一律未解析。
      */
     private val resolveGroupWsId: ((groupId: String, agentKey: String) -> String?)? = null,
+    /**
+     * 系统目录选择器（壳注入）。null = 这个装配没有弹窗能力（测试 / 无头宿主），
+     * 端口据此报 [canPickDirectory] = false，UI 就不画「浏览」按钮。
+     */
+    private val directoryPicker: (suspend () -> String?)? = null,
 ) : HostDirectoryPort {
 
     override fun snapshot(): HostDirectorySnapshotUi = HostDirectorySnapshotUi(
@@ -48,4 +53,8 @@ class DesktopHostDirectoryPort(
 
     override fun resolveForGroup(groupId: String, agentKey: String): String? =
         resolveGroupWsId?.invoke(groupId, agentKey)
+
+    override val canPickDirectory: Boolean get() = directoryPicker != null
+
+    override suspend fun pickDirectory(): String? = directoryPicker?.invoke()
 }

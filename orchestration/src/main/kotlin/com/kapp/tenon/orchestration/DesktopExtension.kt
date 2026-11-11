@@ -99,6 +99,15 @@ class DesktopExtension(
      * /Agent 库共用同一条驱动。
      */
     private val schedulerStore: com.kapp.tenon.domain.SchedulerStore? = null,
+    /**
+     * 系统目录选择器（壳注入）：把「登记项目目录」从手打绝对路径变成点一下磁盘。
+     *
+     * 编排层不 import 任何 UI 模块，所以这里只收一个挂起回调；壳在 `Main.kt` 里接到
+     * `platform.saveDirectoryPicker`（macOS/Windows 原生选目录窗）。null = 这个装配
+     * 弹不出窗（无头宿主 / 测试）⇒ `HostDirectoryPort.canPickDirectory` 为 false ⇒
+     * 界面不画「浏览」按钮。
+     */
+    private val directoryPicker: (suspend () -> String?)? = null,
 ) {
     private var plane: ControlPlane? = null
 
@@ -499,9 +508,15 @@ class DesktopExtension(
             )
             // 项目目录端口（决策稿 §5.1）：与上面同一接缝 —— 同一个 store 实例交给
             // 控制面（HTTP 路由）与这里（域层端口），两处读写落同一份内存与落盘。
-            controller.hostDirectoryPort = DesktopHostDirectoryPort(hostDirs) { groupId, agentKey ->
-                createdPlane.resolveGroupDirectoryWsId(groupId, agentKey)
-            }
+            controller.hostDirectoryPort = DesktopHostDirectoryPort(
+                store = hostDirs,
+                resolveGroupWsId = { groupId, agentKey ->
+                    createdPlane.resolveGroupDirectoryWsId(groupId, agentKey)
+                },
+                // 系统选目录窗：与 register 同一条端口 —— 选到的路径紧接着就要被登记，
+                // 两件事分开注入会出现「能选但登记不了」的第二条命。
+                directoryPicker = directoryPicker,
+            )
             if (blindSpotDir != null) {
                 BlindSpotPatrol.startPatrol(blindSpotDir, scope)
             }
@@ -1209,7 +1224,12 @@ class DesktopExtension(
         override fun status(groupId: String?): WorkspaceStatus? {
             val orch = workerOrchestrator ?: return null
             val repo = orch.workspacePathForGroup(groupId) ?: return null
-            val porcelain = gitOut(repo, "status", "--porcelain")?.lines()?.filter { it.isNotBlank() } ?: return null
+            // **空输出是一个合法答案**：`git status --porcelain` 在干净仓库上什么都不打印。
+            // 这里曾经走 [gitOut]（空 ⇒ null），于是"仓库很干净"被念成"这个群没绑工作区" ——
+            // 真机现场：手机建群后 `/status` 回 "no git workspace bound to this group"，
+            // 而同一刻 `host-directories.json` 里指针明明已经落好了。误报会让人去修
+            // 已经正确的绑定链，比沉默更坏。
+            val porcelain = parsePorcelainLines(runGit(repo, "status", "--porcelain") ?: return null)
             return WorkspaceStatus(
                 branch = gitOut(repo, "rev-parse", "--abbrev-ref", "HEAD"),
                 changedFiles = porcelain.count { !it.startsWith("??") },
@@ -1252,8 +1272,13 @@ class DesktopExtension(
         }
     }
 
-    /** git 只读查询：超时 / 非零退出 / 空输出 ⇒ null（调用方如实回执「环境不可用」）。 */
-    private fun gitOut(repo: String, vararg args: String): String? = runCatching {
+    /**
+     * 执行一条只读 git 命令。失败 / 超时 / 非零退出 ⇒ null。
+     *
+     * **空输出原样返回 `""`** —— 它可能是一个合法答案（`status --porcelain` 在干净仓库上
+     * 就是空）。想要"非空才算可用"的调用方自己 [gitOut]。
+     */
+    private fun runGit(repo: String, vararg args: String): String? = runCatching {
         val proc = ProcessBuilder(listOf("git") + args)
             .directory(java.io.File(repo))
             .start()
@@ -1262,8 +1287,12 @@ class DesktopExtension(
             return null
         }
         if (proc.exitValue() != 0) return null
-        proc.inputStream.bufferedReader().readText().trim().ifBlank { null }
+        proc.inputStream.bufferedReader().readText()
     }.getOrNull()
+
+    /** git 只读查询：超时 / 非零退出 / 空输出 ⇒ null（调用方如实回执「环境不可用」）。 */
+    private fun gitOut(repo: String, vararg args: String): String? =
+        runGit(repo, *args)?.trim()?.ifBlank { null }
 
     /**
      * 触发任务对账（提案 §9 阶段三）：注册通过的插件清单 → 调度任务/事件路由。
@@ -1380,3 +1409,16 @@ class DesktopExtension(
         const val NO_WORKER_RECEIPT = "no worker available on this host"
     }
 }
+
+/**
+ * `git status --porcelain` 的输出 → 非空行。
+ *
+ * 抽成独立函数是为了让「干净仓库 = 空列表」这条语义**可测**。它曾经与「命令跑失败」
+ * 共用同一个 `null`（`gitOut` 把空输出也当失败），于是"仓库很干净"被念成"这个群没绑
+ * 工作区"——真机现场两条事实同时成立：`/status` 回 `no git workspace bound to this group`，
+ * 而 `host-directories.json` 里 `groupPointers` 已经指向正确的目录。
+ *
+ * 误报比沉默更坏：它会让人去修一条本来正确的绑定链（本轮真机验证就被它带偏过一次）。
+ */
+internal fun parsePorcelainLines(raw: String): List<String> =
+    raw.lineSequence().filter { it.isNotBlank() }.toList()

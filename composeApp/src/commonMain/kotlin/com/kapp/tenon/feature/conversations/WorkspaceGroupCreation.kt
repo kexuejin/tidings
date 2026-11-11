@@ -24,6 +24,18 @@ import com.kapp.tenon.domain.model.WorkspaceUi
  * 只建群、不设指针 —— 群信息里的目录行显示「由宿主授权」（声明投影），保持现行为。
  */
 /**
+ * 「浏览目录…」的系统选目录回调。
+ *
+ * 判据是 `canPickDirectory` 而**不是**「端口非空」：无头宿主 / 测试装配也有端口，
+ * 但弹不出窗 —— 只判非空就会画出点一下没反应的图标。没有这条能力时返回 null，
+ * 界面据此整颗不画（本仓纪律：画不出来的能力不画）。
+ *
+ * 三处建群入口（手机共享壳、桌面壳、桌面会话栏）共用这一份，避免三份判据各自漂移。
+ */
+internal fun DesktopPaneActions.systemDirectoryPicker(): (suspend () -> String?)? =
+    hostDirectoryPort?.takeIf { it.canPickDirectory }?.let { port -> { port.pickDirectory() } }
+
+/**
  * 分支 B（快速建群）的后半段：群已建成（[groupId]），把 wsId 解析到 dirId 并设指针，
  * 随后把该 agent 入驻。
  *

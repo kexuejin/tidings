@@ -629,7 +629,7 @@ private fun DeskAgentPaneExpandedPreview() {
 @Composable
 private fun DeskCabinetPanePeerPreview() {
     PaneBackdrop {
-        CabinetPane(chromeSlice = previewSlicesOf(desktopPreviewCabinetPeerState()).chrome,settingsSlice = previewSlicesOf(desktopPreviewCabinetPeerState()).settings,nodeSlice = previewSlicesOf(desktopPreviewCabinetPeerState()).node,transferSlice = previewSlicesOf(desktopPreviewCabinetPeerState()).transfer,
+        CabinetPane(chromeSlice = previewSlicesOf(desktopPreviewCabinetPeerState()).chrome,settingsSlice = previewSlicesOf(desktopPreviewCabinetPeerState()).settings,nodeSlice = previewSlicesOf(desktopPreviewCabinetPeerState()).node,transferSlice = previewSlicesOf(desktopPreviewCabinetPeerState()).transfer,agentSlice = previewSlicesOf(desktopPreviewCabinetPeerState()).agent,
             controller = DesktopPreviewActions,
             now = PREVIEW_NOW,
             sizeClass = DesktopWindowSizeClass.Expanded)
@@ -724,6 +724,9 @@ private fun DeskCabinetPanePeerSelectedPreview() {
                     selectedNames = setOf("排期表.ods", "会议纪要.md"),
                 ),
             )).transfer,
+            // 选中集只改 `cabinet`，agent 切片与它无关 ⇒ 直接用未改的 `base`，
+            // 不再把上面那段 `base.copy(...)` 抄第六遍。
+            agentSlice = previewSlicesOf(base).agent,
             controller = DesktopPreviewActions,
             now = PREVIEW_NOW,
             sizeClass = DesktopWindowSizeClass.Expanded)

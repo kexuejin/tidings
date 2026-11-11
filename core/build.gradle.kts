@@ -120,7 +120,14 @@ fun resolveLuciolaNativeDir(): File? {
     // 注意区分「没设」与「设成空」：没设 ⇒ 走约定目录；显式设成空 ⇒ 就是没有（CI 用它稳定跳过）。
     if (explicit != null && explicit.isBlank()) return null
     if (explicit != null) {
-        val dir = File(explicit)
+        // 相对路径按**仓库根**解析，不按 Gradle 守护进程的 cwd。
+        //
+        // 2026-11-11 实测：`-PluciolaNativeDir=desktopApp/resources/common/native` 被解析成
+        // `<gradle-user-home>/daemon/9.8.0/desktopApp/resources/common/native` —— 一个用户
+        // 从没打过的路径，而 `LuciolaNativeGuard` 的失败信息会把它当成"你配的那个目录"
+        // 打印出来。症状指向"路径写错"，真因是解析基准错，排查被引到反方向。
+        // 绝对路径原样使用（`File.resolve` 对绝对入参的处理是平台相关的，不能靠它）。
+        val dir = File(explicit).takeIf { it.isAbsolute } ?: project.rootDir.resolve(explicit)
         return listOf(dir, File(dir, "release"), File(dir, "debug"))
             .firstOrNull { hasLib(it) }
             ?: dir.takeIf { it.isDirectory }

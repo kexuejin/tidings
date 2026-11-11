@@ -8,6 +8,7 @@ import com.kapp.tenon.core.protocol.VirtualAgentMember
 import com.kapp.tenon.core.protocol.isTeam
 import com.kapp.tenon.core.protocol.sameAgent
 import com.kapp.tenon.domain.model.AgentApprovalUi
+import com.kapp.tenon.domain.model.AgentArtifactUi
 import com.kapp.tenon.domain.model.AgentSessionKey
 import com.kapp.tenon.domain.model.AgentSessionUi
 import com.kapp.tenon.domain.model.WorkspaceUi
@@ -81,6 +82,42 @@ public data class AgentHubUi(
     val primaryWsTitle: String?,
     /** 该实体最近一次活动（会话/事件/宣告的最近时刻）；0 = 没有任何活动。排序用。 */
     val lastActivityAt: Long,
+    /**
+     * 该实体名下**最近收到的一件产物**（UX 规范 §2.5②）；null = 还没有任何产物。
+     *
+     * ## 为什么不叫「最近一次成功的交付」
+     *
+     * `agent-artifact` 帧里**没有成败位** —— 只有文件名 / 大小 / 摘要 / 哈希。接收侧没有
+     * 「这次交付成功了」的独立证据，唯一能如实说的是「最近收到过一件产物」。字段名与
+     * 文案都不替协议编一个它没有的语义（与 [AgentHubStatusRow] 不拼句子同一条纪律）。
+     *
+     * ## 归因只有一把尺子
+     *
+     * 走 `sessionClusterBySessionId` —— 与会话、审批**同一张会话→聚类表**。产物自己
+     * 不带 agent 身份（只有 `peerId` + `sessionId`），在这里另写一套 `agentId` 归一会
+     * 让同一个产物在卡片与详情里落到两个实体上。
+     *
+     * 看不见的会话（子代理静默 / 空壳，[visibleInDsh] 之外）里的产物不进这里 ——
+     * 与卡片流「不显示用户看不到的会话」同一条可见性纪律。
+     */
+    val latestArtifact: AgentHubArtifactUi? = null,
+)
+
+/**
+ * 卡片底部「最近交付」标签的原始事实（UX 规范 §2.5②）。
+ *
+ * **只有元数据，没有二进制** —— 与 `AgentArtifactUi` 同一取舍：产物本体靠 `fileId` 指的
+ * 那条 `file-msg`，点标签落到产物所属的会话，不在这里拉文件。
+ *
+ * 文案与措辞归 UI（模型层不出文案）；这里只如实给「叫什么、哪条会话、什么时候收到」。
+ */
+public data class AgentHubArtifactUi(
+    /** 对端给的原文件名（不裁剪、不改写）。 */
+    val name: String,
+    /** 产物所属会话 —— 点标签要落到的那一条。 */
+    val sessionId: String,
+    /** 本端收到这一帧的时刻（标签上的相对时刻与排序都读它）。 */
+    val at: Long,
 )
 
 /** 状态行的档位：决策稿 §4 的 Urgent-First —— P1 审批 > P2 执行中 > P3 最近。 */
@@ -391,6 +428,14 @@ private class HostIndex(
     val sessionClusterBySessionId: Map<String, HubCluster>,
     val hostSessions: List<AgentSessionUi>,
     val hostSeats: List<Pair<VirtualAgentMember, GroupMeta>>,
+    /**
+     * 每个聚类**最近收到**的那件产物（UX 规范 §2.5②）。
+     *
+     * 在这里一次算好而不是出卡时再扫：产物表是全局的（所有宿主），逐卡过滤等于
+     * O(产物 × 实体)；而「哪件产物属于哪个聚类」这件事只依赖会话→聚类表，
+     * 天然是装配期的信息，不是卡片期才有的。
+     */
+    val latestArtifactByCluster: Map<HubCluster, AgentArtifactUi>,
 )
 
 /**
@@ -447,7 +492,22 @@ private fun hostIndexOf(
         }
     }
 
-    return HostIndex(clusters, sessionClusterBySessionId, hostSessions, hostSeats)
+    // ---- 最近一件产物（§2.5②）：归因只走上面那张「会话→聚类」表 ----
+    //
+    // 产物帧自带的是 `peerId` + `sessionId`，**没有 agent 身份**。所以这里不解析 agentId、
+    // 不做第二次 sameAgent 归一 —— 拿会话去查上面刚建好的那张表，与审批归因逐字同一把尺子。
+    // 查不到 = 那条会话不在可见集里（子代理静默 / 空壳）：产物不进卡片，与可见性纪律一致。
+    val latestArtifactByCluster = HashMap<HubCluster, AgentArtifactUi>()
+    agentSlice.agentArtifacts.values
+        .filter { it.peerId == hostNodeId }
+        .forEach { artifact ->
+            val cluster = sessionClusterBySessionId[artifact.sessionId] ?: return@forEach
+            val current = latestArtifactByCluster[cluster]
+            // 「最近」按**本端收到的时刻**（`at`）比，不按文件名或会话顺序猜。
+            if (current == null || artifact.at > current.at) latestArtifactByCluster[cluster] = artifact
+        }
+
+    return HostIndex(clusters, sessionClusterBySessionId, hostSessions, hostSeats, latestArtifactByCluster)
 }
 
 /** 一个实体卡在装配期间的聚类：身份来源 + 名下会话 + 名下宣告。 */
@@ -506,6 +566,8 @@ private class HubEntity(
     val pendingGroupNames: LinkedHashSet<String>,
     /** 每个群的待批数（详情页服务群行用；键 = groupId，只含本实体的群）。 */
     val pendingCountByGroup: Map<String, Int>,
+    /** 本实体名下最近收到的一件产物（§2.5②）；null = 还没有任何产物。 */
+    val latestArtifact: AgentHubArtifactUi?,
 )
 
 /**
@@ -595,6 +657,15 @@ private fun assembleEntity(
         pendingCount = pendingCount,
         pendingGroupNames = pendingGroupNames,
         pendingCountByGroup = pendingCountByGroup,
+        // 产物在装配期已按「会话→聚类」归好类，这里只把那条 `AgentArtifactUi` 收窄成
+        // 卡片要用的三个事实 —— 不做第二次归因，也不在 UI 层再筛一遍。
+        latestArtifact = index.latestArtifactByCluster[cluster]?.let { artifact ->
+            AgentHubArtifactUi(
+                name = artifact.name,
+                sessionId = artifact.sessionId,
+                at = artifact.at,
+            )
+        },
     )
 }
 
@@ -683,6 +754,7 @@ private fun HubEntity.toCard(
         primaryWsId = primary?.wsId,
         primaryWsTitle = primary?.title,
         lastActivityAt = lastActivityAt,
+        latestArtifact = latestArtifact,
     )
 }
 

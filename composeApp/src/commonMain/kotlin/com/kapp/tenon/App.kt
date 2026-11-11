@@ -61,6 +61,7 @@ import com.kapp.tenon.feature.chat.DraftsByConvSaver
 import com.kapp.tenon.feature.conversations.createWorkspaceGroupForNewDirectory
 import com.kapp.tenon.feature.conversations.createWorkspaceGroupWithDirectory
 import com.kapp.tenon.feature.conversations.ConversationsScreen
+import com.kapp.tenon.feature.conversations.systemDirectoryPicker
 import com.kapp.tenon.feature.nodes.NodesScreen
 import com.kapp.tenon.feature.scan.ScanScreen
 import com.kapp.tenon.feature.search.GlobalSearchScreen
@@ -849,6 +850,7 @@ fun RelayApp(
                                         nodeSlice = nodeSlice,
                                         settingsSlice = settingsSlice,
                                         chromeSlice = chromeSlice,
+                                        agentSlice = agentSlice,
                                         onSetShareRoot = controller::setShareRoot,
                                         onSetShareMode = controller::setShareMode,
                                         onRemoveShareGrant = controller::removeShareGrant,
@@ -863,6 +865,23 @@ fun RelayApp(
                                         // 文件柜屏自己挂了 AppBanner（与 ConversationsScreen 同一模式），
                                         // banner 的关闭动作从组合根接进去。
                                         onDismissBanner = controller::dismissBanner,
+                                        // 「智能体产物」段点一行：落到产出它的会话。归因只走
+                                        // `groupBoundToWorkspace` 这**一把**尺子（绑群 ⇒ 群会话，
+                                        // 否则进这个节点的会话并按项目目录收窄），与智能体页的
+                                        // `onOpenChat` 同一条落点。**故意少了**它那条「没绑群就提示
+                                        // 建群」分支：从一件产物出发的意图是"找到产出它的会话"，
+                                        // 不是"给这个目录建个群"，横插一张建群弹窗只会挡住路。
+                                        onOpenArtifactSession = { peerId, wsId ->
+                                            val boundGroup = groupBoundToWorkspace(wsId, settingsSlice.settings.groups)
+                                            if (boundGroup != null) {
+                                                openChat(com.kapp.tenon.core.protocol.ConvId.group(boundGroup.groupId))
+                                            } else {
+                                                nav = wsId?.let { w -> nav.openWorkspaceChat(peerId, w) }
+                                                    ?: nav.openSession(peerId)
+                                                chatUnreadOnEntry = chatSlice.unreadByPeer[peerId] ?: 0
+                                                controller.selectConversation(peerId)
+                                            }
+                                        },
                                         // 「最近上传」的时间列必须有一个真实基准：以前这一行不传
                                         // now，CabinetScreen 的默认值是 0，relativeTime(ts, 0) 的
                                         // delta 恒为负、恒落进"刚刚"那一档 —— 界面在说假话。
@@ -1015,6 +1034,9 @@ fun RelayApp(
                                             // 不出现（issue「本次免审全链路不可达」）。
                                             onRespondChoice = controller::respondApproval,
                                             onCancelTask = controller::cancelAgentTask,
+                                            // §2.2②：手机主页的置顶审批卡原地弹处置面板，
+                                            // 不再把人甩进聊天页去找那张卡。桌面壳不传（默认 false）。
+                                            inPlaceApprovals = true,
                                             // task-10：手机是「客户端」，申请授权只能由组合根接线 ——
                                             // 接口留在 feature/agents，能力从哪儿来在这里给。
                                             onRequestGrant = controller::sendAgentGrantRequest,
@@ -1024,6 +1046,10 @@ fun RelayApp(
                                             // —— 用户报的「手机上没法建工作区群」就是这个。对话框本体
                                             // 在两种布局下是同一个，窄屏上它自己会收成整幅宽弹层。
                                             onCreateWorkspaceGroup = { showCreateWsDialog = true },
+                                            // §2.6 新手引导卡：点 CTA 直接开**这一个目录**的精简建群
+                                            // 弹窗（与 issue 7 那条同一支对话框、同一条建群口径），
+                                            // 一次点选完成「建群 + 绑目录」。
+                                            onBindFirstProject = { ws -> groupPromptFor = ws },
                                             artifactDigestOf = controller.artifactDigestOf,
                                             modifier = Modifier.weight(1f).fillMaxWidth(),
                                         )
@@ -1286,6 +1312,9 @@ fun RelayApp(
                         // 画出来就是一个按下去没有落点的输入框。判据取端口本身，
                         // 不用「是不是桌面」猜（一个事实只有一个来源）。
                         allowNewDirectory = controller.hostDirectoryPort != null,
+                        // 系统选目录窗：有这条能力才给回调（判 canPickDirectory，
+                        // 不是只判端口非空 —— 弹出不来的宿主不画那颗图标）。
+                        onPickDirectory = controller.systemDirectoryPicker(),
                     )
                 }
 

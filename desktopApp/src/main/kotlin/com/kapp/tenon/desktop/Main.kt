@@ -117,6 +117,14 @@ fun main(args: Array<String>) {
         // 调度中枢的持久化台账（与消息/Agent 库共用同一条驱动）——触发式编排
         // 的 Owner 是桌面常驻宿主，移动端不装配（提案 §2.2）。
         schedulerStore = createSchedulerStore(platform),
+        // 「登记项目目录」的系统选目录窗：原生窗属于壳，编排层只收一个挂起回调。
+        // headless（CI / 无图形环境）**弹不出窗**，必须如实报「没有这条能力」——
+        // 否则界面画出那颗图标，点下去是 HeadlessException。
+        directoryPicker = if (HeadlessMode.requested(args.asList())) {
+            null
+        } else {
+            { platform.saveDirectoryPicker.pickDirectory() }
+        },
     )
 
     // 单进程单实例：桌面端不会存在第二个 application，所以文件级引用是安全的。

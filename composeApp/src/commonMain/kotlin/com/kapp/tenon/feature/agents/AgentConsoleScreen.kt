@@ -134,6 +134,12 @@ fun AgentConsoleScreen(
      * 壳把这里置 false，主屏只保留卡片流。默认 true —— 手机壳与预览帧行为不变。
      */
     showBoardApprovalQueue: Boolean = true,
+    /**
+     * 透传给看板的「原位审批面板」开关（UX 规范 §2.2②）：手机壳置 true，
+     * 置顶审批卡点「立即审批」时原地弹出处置面板，不再跳进聊天页。
+     * 桌面壳保持默认 false —— 右栏 inspector 已常驻同一批卡。
+     */
+    inPlaceApprovals: Boolean = false,
     /** 撤销「本会话免审」（见 SessionDetailView 的同名形参）。 */
     onRevokeSessionApproval: ((sessionId: String) -> Unit)? = null,
     onCancelTask: ((taskId: String) -> Unit)? = null,
@@ -148,6 +154,12 @@ fun AgentConsoleScreen(
     /** 「添加设备」的出口。 */
     onAddExecDevice: (() -> Unit)? = null,
     onCreateWorkspaceGroup: (() -> Unit)? = null,
+    /**
+     * 新手冷启动引导卡（UX 规范 §2.6）的出口：点 CTA → 壳开「精简建群弹窗」
+     * （`WorkspaceGroupPromptDialog`），一次点选完成"建群 + 绑目录"。
+     * null = 这个壳没有建群入口 ⇒ 整张卡不画。
+     */
+    onBindFirstProject: ((com.kapp.tenon.domain.model.WorkspaceUi) -> Unit)? = null,
     /** M7-T3 2b：产物校验的按需实测桥（见 SessionDetailView 同名形参）。 */
     artifactDigestOf: (suspend (fileName: String) -> String?)? = null,
     // 只给截图门禁用，见 `SessionDetailView(initialPicking = …)`。
@@ -549,6 +561,8 @@ fun AgentConsoleScreen(
                     onRespondApproval = onRespondApproval,
                     onRespondChoice = onRespondChoice,
                     showApprovalQueue = showBoardApprovalQueue,
+                    inPlaceApprovals = inPlaceApprovals,
+                    onBindFirstProject = onBindFirstProject,
                 )
 
                 // 底部留白：原先是空 `Column(padding(bottom)) {}` —— 空组合件当间距用，

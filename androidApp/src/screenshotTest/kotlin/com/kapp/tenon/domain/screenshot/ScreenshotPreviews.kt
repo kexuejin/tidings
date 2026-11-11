@@ -1279,7 +1279,7 @@ private fun NodesLandscapePreview() {
 private fun CabinetMinePhonePreview() {
     AppTheme(darkTheme = false) {
         Screen("cabinet", badges = navBadges(previewSlicesOf(cabinetMineState).chat, previewSlicesOf(cabinetMineState).agent, previewSlicesOf(cabinetMineState).node, previewSlicesOf(cabinetMineState).settings)) { inner ->
-            CabinetScreen(chromeSlice = previewSlicesOf(cabinetMineState).chrome,settingsSlice = previewSlicesOf(cabinetMineState).settings,nodeSlice = previewSlicesOf(cabinetMineState).node,transferSlice = previewSlicesOf(cabinetMineState).transfer,
+            CabinetScreen(chromeSlice = previewSlicesOf(cabinetMineState).chrome,settingsSlice = previewSlicesOf(cabinetMineState).settings,nodeSlice = previewSlicesOf(cabinetMineState).node,transferSlice = previewSlicesOf(cabinetMineState).transfer,agentSlice = previewSlicesOf(cabinetMineState).agent,
                 onSetShareRoot = {},
                 onSetShareMode = {},
                 onRemoveShareGrant = {},
@@ -1305,7 +1305,7 @@ private fun CabinetMinePhonePreview() {
 private fun CabinetPeerPhonePreview() {
     AppTheme(darkTheme = false) {
         Screen("cabinet", badges = navBadges(previewSlicesOf(cabinetPeerState).chat, previewSlicesOf(cabinetPeerState).agent, previewSlicesOf(cabinetPeerState).node, previewSlicesOf(cabinetPeerState).settings)) { inner ->
-            CabinetScreen(chromeSlice = previewSlicesOf(cabinetPeerState).chrome,settingsSlice = previewSlicesOf(cabinetPeerState).settings,nodeSlice = previewSlicesOf(cabinetPeerState).node,transferSlice = previewSlicesOf(cabinetPeerState).transfer,
+            CabinetScreen(chromeSlice = previewSlicesOf(cabinetPeerState).chrome,settingsSlice = previewSlicesOf(cabinetPeerState).settings,nodeSlice = previewSlicesOf(cabinetPeerState).node,transferSlice = previewSlicesOf(cabinetPeerState).transfer,agentSlice = previewSlicesOf(cabinetPeerState).agent,
                 onSetShareRoot = {},
                 onSetShareMode = {},
                 onRemoveShareGrant = {},
@@ -1330,7 +1330,7 @@ private fun CabinetPeerPhonePreview() {
 private fun CabinetUnsetPhonePreview() {
     AppTheme(darkTheme = false) {
         Screen("cabinet", badges = navBadges(previewSlicesOf(cabinetUnsetState).chat, previewSlicesOf(cabinetUnsetState).agent, previewSlicesOf(cabinetUnsetState).node, previewSlicesOf(cabinetUnsetState).settings)) { inner ->
-            CabinetScreen(chromeSlice = previewSlicesOf(cabinetUnsetState).chrome,settingsSlice = previewSlicesOf(cabinetUnsetState).settings,nodeSlice = previewSlicesOf(cabinetUnsetState).node,transferSlice = previewSlicesOf(cabinetUnsetState).transfer,
+            CabinetScreen(chromeSlice = previewSlicesOf(cabinetUnsetState).chrome,settingsSlice = previewSlicesOf(cabinetUnsetState).settings,nodeSlice = previewSlicesOf(cabinetUnsetState).node,transferSlice = previewSlicesOf(cabinetUnsetState).transfer,agentSlice = previewSlicesOf(cabinetUnsetState).agent,
                 onSetShareRoot = {},
                 onSetShareMode = {},
                 onRemoveShareGrant = {},
@@ -1543,7 +1543,7 @@ private fun ChatComposerFont2xPreview() {
 private fun CabinetPeerFont2xPreview() {
     AppTheme(darkTheme = false) {
         Screen("cabinet", badges = navBadges(previewSlicesOf(cabinetPeerState).chat, previewSlicesOf(cabinetPeerState).agent, previewSlicesOf(cabinetPeerState).node, previewSlicesOf(cabinetPeerState).settings)) { inner ->
-            CabinetScreen(chromeSlice = previewSlicesOf(cabinetPeerState).chrome,settingsSlice = previewSlicesOf(cabinetPeerState).settings,nodeSlice = previewSlicesOf(cabinetPeerState).node,transferSlice = previewSlicesOf(cabinetPeerState).transfer,
+            CabinetScreen(chromeSlice = previewSlicesOf(cabinetPeerState).chrome,settingsSlice = previewSlicesOf(cabinetPeerState).settings,nodeSlice = previewSlicesOf(cabinetPeerState).node,transferSlice = previewSlicesOf(cabinetPeerState).transfer,agentSlice = previewSlicesOf(cabinetPeerState).agent,
                 onSetShareRoot = {},
                 onSetShareMode = {},
                 onRemoveShareGrant = {},
@@ -1616,7 +1616,7 @@ private val cabinetPeerMaxSizeState = cabinetPeerState.copy(
 private fun CabinetPeerMaxSizeFont2xPreview() {
     AppTheme(darkTheme = false) {
         Screen("cabinet", badges = navBadges(previewSlicesOf(cabinetPeerMaxSizeState).chat, previewSlicesOf(cabinetPeerMaxSizeState).agent, previewSlicesOf(cabinetPeerMaxSizeState).node, previewSlicesOf(cabinetPeerMaxSizeState).settings)) { inner ->
-            CabinetScreen(chromeSlice = previewSlicesOf(cabinetPeerMaxSizeState).chrome,settingsSlice = previewSlicesOf(cabinetPeerMaxSizeState).settings,nodeSlice = previewSlicesOf(cabinetPeerMaxSizeState).node,transferSlice = previewSlicesOf(cabinetPeerMaxSizeState).transfer,
+            CabinetScreen(chromeSlice = previewSlicesOf(cabinetPeerMaxSizeState).chrome,settingsSlice = previewSlicesOf(cabinetPeerMaxSizeState).settings,nodeSlice = previewSlicesOf(cabinetPeerMaxSizeState).node,transferSlice = previewSlicesOf(cabinetPeerMaxSizeState).transfer,agentSlice = previewSlicesOf(cabinetPeerMaxSizeState).agent,
                 onSetShareRoot = {},
                 onSetShareMode = {},
                 onRemoveShareGrant = {},

@@ -3,6 +3,7 @@
 package com.kapp.tenon.ui.desktop
 
 import com.kapp.tenon.domain.DesktopPaneActions
+import com.kapp.tenon.feature.conversations.systemDirectoryPicker
 import com.kapp.tenon.core.transport.LocalFile
 
 import androidx.compose.foundation.BorderStroke
@@ -272,6 +273,7 @@ public fun ConversationsPane(
             },
             // 会话栏这一支同样按宿主目录端口判定，不按「桌面」这个壳名猜。
             allowNewDirectory = controller.hostDirectoryPort != null,
+            onPickDirectory = controller.systemDirectoryPicker(),
         )
     }
     showWsQrFor?.let { ws ->
