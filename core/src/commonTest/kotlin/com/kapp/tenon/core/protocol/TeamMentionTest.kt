@@ -126,4 +126,40 @@ class TeamMentionTest {
         assertEquals(1, g.seatsMatchingToken("DSH-LEAD").size, "agentId 大小写不敏感")
         assertTrue(g.seatsMatchingToken("coder").isEmpty(), "组员名不是席位 token")
     }
+
+    /** 触点 8：岗位角色 (role) 及其别名匹配与冲突 fail-closed。 */
+    @Test
+    fun memberMentionResolvesByRoleAndAliases() {
+        val seat = teamSeat(
+            members = listOf(
+                Triple("m-1", "alice", "leader"),
+                Triple("m-2", "bob", "tester"),
+            ),
+        )
+        val g = group(seat)
+        // 按 role 及其别名匹配
+        assertEquals("m-1", assertIs<TeamMention.Hit>(g.resolveTeamMention("@leader 规划一下")).member.agentId)
+        assertEquals("m-1", assertIs<TeamMention.Hit>(g.resolveTeamMention("@lead 规划一下")).member.agentId)
+        assertEquals("m-2", assertIs<TeamMention.Hit>(g.resolveTeamMention("@tester 测一下")).member.agentId)
+        assertEquals("m-2", assertIs<TeamMention.Hit>(g.resolveTeamMention("@qa 测一下")).member.agentId)
+
+        // 姓名优先于角色
+        val nameConflictSeat = teamSeat(
+            members = listOf(
+                Triple("m-named-tester", "tester", "coder"),
+                Triple("m-real-tester", "charlie", "tester"),
+            ),
+        )
+        val gNameWins = group(nameConflictSeat)
+        assertEquals("m-named-tester", assertIs<TeamMention.Hit>(gNameWins.resolveTeamMention("@tester 写代码")).member.agentId)
+
+        // 同角色重复 (>=2 人担任 tester) fail-closed
+        val dupRoleSeat = teamSeat(
+            members = listOf(
+                Triple("m-t1", "t1", "tester"),
+                Triple("m-t2", "t2", "tester"),
+            ),
+        )
+        assertIs<TeamMention.Ambiguous>(group(dupRoleSeat).resolveTeamMention("@tester 测一下"))
+    }
 }

@@ -159,6 +159,15 @@ object CodecGroup {
                 ) {
                     return false
                 }
+                // 团队档案引用与展示名（v3）：可缺省；给了就按形状收。团队名是人看的
+                // 展示串（不进 `@` token 池，可含中文），长度走 Limits.TEAM 与节点资料
+                // 的「团队」字段同一预算。
+                if (a.containsKey("teamId") && !isStr(a["teamId"], Limits.ID)) return false
+                if (a.containsKey("teamName") && !isStr(a["teamName"], Limits.TEAM)) return false
+                // 员工档案引用与名字快照（v4）：与团队同一条纪律 —— 可缺省，给了就按形状收。
+                // 员工名是**展示串**（可含中文，不进 `@` token 池），长度与昵称同一预算。
+                if (a.containsKey("employeeId") && !isStr(a["employeeId"], Limits.ID)) return false
+                if (a.containsKey("employeeName") && !isStr(a["employeeName"], Limits.NICK)) return false
             }
         }
 
@@ -278,6 +287,16 @@ object CodecGroup {
                         )
                     }.orEmpty(),
                     defaultWsId = strOrNull(a["defaultWsId"], Limits.ID),
+                    // 团队档案引用 + 名字快照（v3）：**手写解码，必须逐键补**。
+                    // 这一处漏了就是「发送端有、接收端 null」（见本函数开头那段翻车记录）：
+                    // 症状是手机上团队卡永远退回群名、组员清单为空。
+                    teamId = strOrNull(a["teamId"], Limits.ID),
+                    teamName = strOrNull(a["teamName"], Limits.TEAM),
+                    // 员工档案引用 + 名字快照（v4）：**手写解码，逐键补齐**（见本函数开头）。
+                    // 漏了就是「发送端有、接收端 null」：手机上员工卡退回派生名、
+                    // 别名标注消失、改名在手机侧无效。
+                    employeeId = strOrNull(a["employeeId"], Limits.ID),
+                    employeeName = strOrNull(a["employeeName"], Limits.NICK),
                 )
             }?.takeIf { it.isNotEmpty() },
         )

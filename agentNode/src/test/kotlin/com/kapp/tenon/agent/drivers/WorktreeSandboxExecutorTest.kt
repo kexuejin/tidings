@@ -787,6 +787,34 @@ class WorktreeSandboxExecutorTest {
         assertEquals("live_key", hostSecret.readText())
     }
 
+    @Test
+    fun bootstrapIfGreenfieldInitializesEmptyDirectory() {
+        val emptyDir = tempDir()
+        val bootstrapped = WorktreeSandboxExecutor.bootstrapIfGreenfield(emptyDir)
+        assertTrue(bootstrapped, "greenfield directory must be bootstrapped")
+        assertTrue(File(emptyDir, ".git").isDirectory, ".git directory must exist")
+        assertTrue(File(emptyDir, "README.md").isFile, "README.md must be generated")
+        // Second call is idempotent and returns false because HEAD commit already exists
+        val secondCall = WorktreeSandboxExecutor.bootstrapIfGreenfield(emptyDir)
+        assertFalse(secondCall, "subsequent call must be no-op")
+    }
+
+    @Test
+    fun mcpServerDiscoveryResolvesScriptAndRendersConfig() {
+        val root = tempDir()
+        val scriptDir = File(root, "scripts").apply { mkdirs() }
+        val scriptFile = File(scriptDir, McpServerDiscovery.SCRIPT_NAME).apply { writeText("#!/usr/bin/env python3\n") }
+
+        val resolved = McpServerDiscovery.resolveScript(root)
+        kotlin.test.assertNotNull(resolved)
+        assertEquals(scriptFile.canonicalPath, resolved.canonicalPath)
+
+        val config = McpServerDiscovery.renderClaudeMcpConfig(scriptFile, "http://127.0.0.1:8788")
+        assertTrue("mcpServers" in config)
+        assertTrue("tenon" in config)
+        assertTrue(scriptFile.absolutePath in config)
+    }
+
     private fun assertFalse(actual: Boolean, message: String) {
         kotlin.test.assertFalse(actual, message)
     }

@@ -55,6 +55,25 @@ object BoardCardFlip {
     }
 
     /**
+     * PR 创建成功：卡片翻成 `merged` 并标注 PR 链接。
+     */
+    fun prCreated(cardId: String, base: JsonObject?, prUrl: String): JsonObject = buildJsonObject {
+        copyWithout(base, DROPPED_ON_MERGED, advanceItems = true)
+        put("cardId", JsonPrimitive(cardId))
+        put("rev", JsonPrimitive(1))
+        if (base?.get("type") == null) put("type", JsonPrimitive("diff-review"))
+        put("state", JsonPrimitive("merged"))
+        put(
+            "title",
+            JsonPrimitive((base?.get("title") as? JsonPrimitive)?.contentOrNull ?: "PR Created"),
+        )
+        putJsonObject("banner") {
+            put("text", JsonPrimitive("PR ready: $prUrl"))
+            put("tone", JsonPrimitive("success"))
+        }
+    }
+
+    /**
      * 合并失败：同一张卡翻成 `blocked`，并给出下一步（[hint]）。
      *
      * 与 [merged] 同一条纪律：**在原卡上改**。冲突时用户最想看的就是「哪几行没合上」，

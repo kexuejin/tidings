@@ -182,6 +182,18 @@ fun GroupInfoDialog(
     declaredDirectoryTitle: String? = null,
     /** 设 / 清本群项目目录指针（D5；宿主壳接，手机壳不画入口）。 */
     onSetProjectDirectory: ((dirId: String?) -> Unit)? = null,
+    /**
+     * 本机**团队档案**：授权面板里「添加团队」那一段的候选。
+     *
+     * 空 = 本机没有团队（手机读不到档案）⇒ 整段不画。名册归档案，这里只读名字与人数。
+     */
+    teamProfiles: List<com.kapp.tenon.domain.TeamProfile> = emptyList(),
+    /**
+     * 「把这一整支队伍加进本群」：`(teamId)`。null = 没有档案写通路 ⇒ 段里不画按钮。
+     *
+     * 与 [onStationAgent] 分开：那个加一个人，这个加一支队（领队 + 组员一次到位）。
+     */
+    onAttachTeam: ((teamId: String) -> Unit)? = null,
 ) {
     val isSelfOwner = group.ownerId == selfNodeId || (group.ownerId == null && group.creatorId == selfNodeId)
     /** 本机是否还在这份成员表里。被移出/被解散后为 false —— 见退出按钮的文案分支。 */
@@ -227,6 +239,8 @@ fun GroupInfoDialog(
                     hostDirectoryPort = hostDirectoryPort,
                     declaredDirectoryTitle = declaredDirectoryTitle,
                     onSetProjectDirectory = onSetProjectDirectory,
+                    teamProfiles = teamProfiles,
+                    onAttachTeam = onAttachTeam,
                     modifier = Modifier.fillMaxWidth().heightIn(max = cap),
                 )
             }
@@ -333,6 +347,8 @@ public fun GroupInfoPage(
     hostDirectoryPort: com.kapp.tenon.domain.HostDirectoryPort? = null,
     declaredDirectoryTitle: String? = null,
     onSetProjectDirectory: ((dirId: String?) -> Unit)? = null,
+    teamProfiles: List<com.kapp.tenon.domain.TeamProfile> = emptyList(),
+    onAttachTeam: ((teamId: String) -> Unit)? = null,
     modifier: Modifier = Modifier,
 ) {
     val sp = LocalAppSpacing.current
@@ -387,6 +403,8 @@ public fun GroupInfoPage(
                 hostDirectoryPort = hostDirectoryPort,
                 declaredDirectoryTitle = declaredDirectoryTitle,
                 onSetProjectDirectory = onSetProjectDirectory,
+                teamProfiles = teamProfiles,
+                onAttachTeam = onAttachTeam,
                 modifier = Modifier
                     .weight(1f)
                     .fillMaxWidth()
@@ -487,6 +505,8 @@ private fun GroupInfoBody(
     hostDirectoryPort: com.kapp.tenon.domain.HostDirectoryPort?,
     declaredDirectoryTitle: String?,
     onSetProjectDirectory: ((dirId: String?) -> Unit)?,
+    teamProfiles: List<com.kapp.tenon.domain.TeamProfile>,
+    onAttachTeam: ((teamId: String) -> Unit)?,
     modifier: Modifier = Modifier,
     footer: (@Composable () -> Unit)? = null,
 ) {
@@ -924,6 +944,8 @@ private fun GroupInfoBody(
             onReparse = onReparseSeats,
             onRemove = onRemoveGroupAgent,
             onSetDirectory = onSetProjectDirectory,
+            teamProfiles = teamProfiles,
+            onAttachTeam = onAttachTeam,
             onDismiss = { showAuthDialog = false },
         )
     }

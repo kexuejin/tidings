@@ -123,11 +123,16 @@ import com.kapp.tenon.generated.resources.chat_nudge_failed
 import com.kapp.tenon.generated.resources.chat_nudge_throttled
 import com.kapp.tenon.generated.resources.chat_send_failed
 import com.kapp.tenon.generated.resources.chat_send_too_long
+import com.kapp.tenon.generated.resources.common_name_list_separator
 import com.kapp.tenon.generated.resources.disc_added
 import com.kapp.tenon.generated.resources.disc_cleanup_done
 import com.kapp.tenon.generated.resources.disc_cleanup_none
 import com.kapp.tenon.generated.resources.disc_duplicate
 import com.kapp.tenon.generated.resources.disc_invalid_host
+import com.kapp.tenon.generated.resources.agent_employee_scope_rejected
+import com.kapp.tenon.generated.resources.employee_profile_rejected
+import com.kapp.tenon.generated.resources.employee_profile_saved
+import com.kapp.tenon.generated.resources.employee_profile_saved_aliased
 import com.kapp.tenon.generated.resources.error_unknown
 import com.kapp.tenon.generated.resources.file_offered
 import com.kapp.tenon.generated.resources.file_pick_failed
@@ -144,6 +149,10 @@ import com.kapp.tenon.generated.resources.set_saved
 import com.kapp.tenon.generated.resources.time_hours_ago
 import com.kapp.tenon.generated.resources.team_roster_saved
 import com.kapp.tenon.generated.resources.team_roster_seat_missing
+import com.kapp.tenon.generated.resources.team_profile_managed
+import com.kapp.tenon.generated.resources.team_profile_rejected
+import com.kapp.tenon.generated.resources.team_profile_saved
+import com.kapp.tenon.generated.resources.team_profile_saved_partial
 import com.kapp.tenon.generated.resources.team_roster_invalid
 import com.kapp.tenon.generated.resources.banner_group_meta_rejected
 import com.kapp.tenon.generated.resources.time_just_now
@@ -407,6 +416,31 @@ fun bannerText(message: BannerMessage): String = when (message) {
     BannerMessage.TeamRosterSaved -> stringResource(Res.string.team_roster_saved)
     BannerMessage.TeamSeatMissing -> stringResource(Res.string.team_roster_seat_missing)
     BannerMessage.TeamRosterInvalid -> stringResource(Res.string.team_roster_invalid)
+    BannerMessage.TeamProfileManaged -> stringResource(Res.string.team_profile_managed)
+    is BannerMessage.TeamProfileSaved ->
+        // 失败群数与成功群数分开说：只报成功会把「有一个群没成功」吞掉。
+        if (message.failedGroupCount == 0) {
+            stringResource(Res.string.team_profile_saved, message.name, message.groupCount)
+        } else {
+            stringResource(
+                Res.string.team_profile_saved_partial,
+                message.name,
+                message.groupCount,
+                message.failedGroupCount,
+            )
+        }
+    BannerMessage.TeamProfileRejected -> stringResource(Res.string.team_profile_rejected)
+    is BannerMessage.EmployeeProfileSaved -> if (message.aliasedGroups.isEmpty()) {
+        stringResource(Res.string.employee_profile_saved, message.name)
+    } else {
+        stringResource(
+            Res.string.employee_profile_saved_aliased,
+            message.name,
+            message.aliasedGroups.joinToString(stringResource(Res.string.common_name_list_separator)),
+        )
+    }
+    BannerMessage.EmployeeProfileRejected -> stringResource(Res.string.employee_profile_rejected)
+    BannerMessage.AgentExecPolicyRejected -> stringResource(Res.string.agent_employee_scope_rejected)
     BannerMessage.GroupMetaRejected -> stringResource(Res.string.banner_group_meta_rejected)
     BannerMessage.ForwardSuccess -> stringResource(Res.string.chat_forward_success)
     is BannerMessage.RemoteRelayConfigured ->

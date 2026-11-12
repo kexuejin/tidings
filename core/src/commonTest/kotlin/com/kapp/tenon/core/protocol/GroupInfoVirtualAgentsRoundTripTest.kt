@@ -4,6 +4,7 @@ package com.kapp.tenon.core.protocol
 
 import kotlin.test.Test
 import kotlin.test.assertEquals
+import kotlin.test.assertFalse
 import kotlin.test.assertNotNull
 import kotlin.test.assertNull
 import kotlin.test.assertTrue
@@ -118,6 +119,129 @@ class GroupInfoVirtualAgentsRoundTripTest {
         assertEquals(emptyList(), solo.teamMembers)
         assertEquals(emptyList(), solo.allowedWorkspaces)
         assertNull(solo.defaultWsId)
+    }
+
+    /**
+     * **团队档案引用与团队名必须原样解回来**（B 档：团队名与群名解耦）。
+     *
+     * `teamId` 是宿主本机档案的键，`teamName` 是它的广播快照 —— 两者都只走
+     * `group.info` 的席位数组。解码是手写逐字段，漏一个键的症状是「团队卡退回群名」，
+     * 而线上数据完全正确，所以这里只认解码断言。
+     */
+    @Test
+    fun teamProfileReferenceAndNameSurviveTheRoundTrip() {
+        val original = meta(
+            listOf(
+                VirtualAgentMember(
+                    agentId = "dev-lead",
+                    hostNodeId = "host-a",
+                    name = "dev-lead",
+                    entityType = "team",
+                    teamMembers = listOf(TeamMemberInfo(agentId = "coder", name = "coder", role = "coder")),
+                    teamId = "tm-7f3a",
+                    teamName = "开发团队",
+                    defaultWsId = "ws-mobile",
+                ),
+            ),
+        )
+        val decoded = assertNotNull(Codec.decodeGroupInfo(Codec.groupInfoPayload(original)))
+        val team = assertNotNull(decoded.virtualAgents?.single(), "席位必须解回来")
+        assertEquals("tm-7f3a", team.teamId, "teamId 在解码时丢了 —— 改名一次生效与多群复用全靠它")
+        assertEquals("开发团队", team.teamName, "teamName 在解码时丢了 —— 团队卡会退回群名")
+        assertEquals("ws-mobile", team.defaultWsId, "执行点是每群事实，不能被团队字段挤掉")
+
+        // 缺省：老声明没有这两个键 ⇒ null（不是空串），消费方据此回落群名。
+        val legacy = assertNotNull(
+            Codec.decodeGroupInfo(
+                Codec.groupInfoPayload(
+                    meta(listOf(VirtualAgentMember(agentId = "solo", hostNodeId = "host-a", name = "solo"))),
+                ),
+            ),
+        )
+        val solo = assertNotNull(legacy.virtualAgents?.single())
+        assertNull(solo.teamId, "老声明不该凭空多出一个团队引用")
+        assertNull(solo.teamName)
+    }
+
+    /**
+     * **员工档案引用与员工名必须原样解回来**（员工档案：员工先创建、群只负责添加）。
+     *
+     * `employeeId` 是宿主本机档案的键，`employeeName` 是它的广播快照；席位自己的
+     * `name` 是**本群 @ token**（撞名时可以是别名）。三者关系只有解码后才成立 ——
+     * 漏解 `employeeName` 的症状是「手机上永远以为没有别名」，漏解 `employeeId` 则是
+     * 「非宿主设备根本不知道这个席位有档案」，两者都不会报错。
+     */
+    @Test
+    fun employeeProfileReferenceAndNameSurviveTheRoundTrip() {
+        val original = meta(
+            listOf(
+                VirtualAgentMember(
+                    agentId = "dsh-029bbbf3",
+                    hostNodeId = "host-a",
+                    name = "dsh-coder-2",
+                    employeeId = "emp-7f3a",
+                    employeeName = "前端小王",
+                    defaultWsId = "ws-mobile",
+                ),
+            ),
+        )
+        val decoded = assertNotNull(Codec.decodeGroupInfo(Codec.groupInfoPayload(original)))
+        val seat = assertNotNull(decoded.virtualAgents?.single(), "席位必须解回来")
+        assertEquals("emp-7f3a", seat.employeeId, "employeeId 在解码时丢了 —— 员工档案与席位的关联断掉")
+        assertEquals("前端小王", seat.employeeName, "employeeName 在解码时丢了 —— 别名标注与非宿主侧的员工名会消失")
+        assertEquals("dsh-coder-2", seat.name, "席位名是本群 @ token，不能因为档案名而被改写")
+
+        // 缺省：老声明（与手机端建的席位）没有这两个键 ⇒ null，消费方回落派生名。
+        val legacy = assertNotNull(
+            Codec.decodeGroupInfo(
+                Codec.groupInfoPayload(
+                    meta(listOf(VirtualAgentMember(agentId = "solo", hostNodeId = "host-a", name = "solo"))),
+                ),
+            ),
+        )
+        val solo = assertNotNull(legacy.virtualAgents?.single())
+        assertNull(solo.employeeId, "老声明不该凭空多出一个员工引用")
+        assertNull(solo.employeeName)
+    }
+
+    /** 员工名超预算：发送侧自检拦下（员工名是展示串，与昵称同预算）。 */
+    @Test
+    fun anOversizedEmployeeNameIsRejectedOnTheSendingSide() {
+        val oversized = meta(
+            listOf(
+                VirtualAgentMember(
+                    agentId = "dsh-029bbbf3",
+                    hostNodeId = "host-a",
+                    name = "dsh-coder",
+                    employeeId = "emp-7f3a",
+                    employeeName = "x".repeat(Limits.NICK + 1),
+                ),
+            ),
+        )
+        assertFalse(
+            CodecGroup.validateGroupMeta(oversized),
+            "超长员工名必须在发送侧被拦下 —— 存进去只会让下一次广播变成注定被拒的毒帧",
+        )
+    }
+
+    /** 团队名超预算：**发送侧自检**必须拦住（收端会 framing 断开，不能指望对端宽容）。 */    @Test
+    fun anOversizedTeamNameIsRejectedOnTheSendingSide() {
+        val oversized = meta(
+            listOf(
+                VirtualAgentMember(
+                    agentId = "dev-lead",
+                    hostNodeId = "host-a",
+                    name = "dev-lead",
+                    entityType = "team",
+                    teamMembers = listOf(TeamMemberInfo("coder", "coder", "coder")),
+                    teamName = "x".repeat(Limits.TEAM + 1),
+                ),
+            ),
+        )
+        assertFalse(
+            CodecGroup.validateGroupMeta(oversized),
+            "超长团队名必须在发送侧被拦下 —— 存进去只会让下一次广播变成注定被拒的毒帧",
+        )
     }
 
     /**

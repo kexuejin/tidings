@@ -467,6 +467,11 @@ fun groupParticipantRows(ctx: SenderIdentityContext): GroupParticipantRows {
         declared.teamMembers.forEach { member ->
             member.name.trim().lowercase().takeIf { it.isNotEmpty() }?.let { mentionKeys.add(it) }
         }
+        // **团队名也是可 @ 的 token（整队目标）**：它是展示串（可中文），跟组员 slug
+        // 不是一回事，所以判定仍走 `resolveTeamNameMention`；这里只让它算「被点名」
+        // 且能从 prompt 里被剥掉。带空白的不进池 —— `@` 打不出来（输入法在空格断开）。
+        declared.teamName?.trim()?.takeIf { it.isNotEmpty() && it.none { c -> c.isWhitespace() } }
+            ?.lowercase()?.let { mentionKeys.add(it) }
     }
     agents.forEach { identity ->
         identity.agentKind?.trim()?.lowercase()?.takeIf { it.isNotEmpty() }?.let { mentionKeys.add(it) }

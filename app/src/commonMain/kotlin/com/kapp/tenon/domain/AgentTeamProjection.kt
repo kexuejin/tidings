@@ -42,8 +42,26 @@ public data class AgentTeamUi(
     val leaderAgentId: String,
     /** 领队所在宿主。组员没有 `hostNodeId` —— 它们的执行宿主就是这里（执行事实，非推断）。 */
     val hostNodeId: String,
-    /** 群名（团队对外的那一个窗口）。 */
+    /**
+     * 群名。**不再是团队名**：团队有自己的名字（[teamName]，来自本机团队档案）。
+     *
+     * 这个名字仍要保留：同一支队伍可以进多个群，卡面上「它在这几个群里的哪一个」
+     * 只能靠群名回答；没有它，两张同名团队卡会变成无法区分的一对。
+     */
     val groupName: String,
+    /**
+     * 团队档案键；null = 没有档案（群内直编的旧团队）。
+     *
+     * 有档案时改名/换名册走档案（一次改动对所有引用群生效）；没档案时只能走群内整表替换。
+     */
+    val teamId: String?,
+    /**
+     * 团队自己的名字（档案的广播快照）；null = 没有独立名，卡面回落 [groupName]。
+     *
+     * 消费方**不要自己写 `?:`**：统一走 [teamDisplayName]，否则「档案 → 快照 → 群名」的
+     * 兜底顺序会在不同屏上不一致，同一支队显示成两个名字。
+     */
+    val teamName: String?,
     /** 领队的席位名；空 = 声明里没写。 */
     val leaderName: String,
     /** 成员表：领队在前，其余按声明序。 */
@@ -130,6 +148,8 @@ public fun agentTeams(
                 leaderAgentId = seat.agentId,
                 hostNodeId = seat.hostNodeId,
                 groupName = group.name,
+                teamId = seat.teamId,
+                teamName = seat.teamName?.takeIf { it.isNotBlank() },
                 leaderName = seat.name,
                 members = memberRows,
                 teamSize = 1 + seat.teamMembers.size,

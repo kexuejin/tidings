@@ -1,0 +1,122 @@
+{
+  "generated_at": "2026-11-12T00:10:23.810981+00:00",
+  "tier": "headless",
+  "stage": "current",
+  "anchor": "",
+  "source": "/Users/developer/weather-relay",
+  "run_label": "single",
+  "workspace": "/Users/developer/weather-relay",
+  "host": "http://127.0.0.1:8788",
+  "agents": [
+    {
+      "key": "dsh",
+      "cli": "dsh",
+      "role": "worker"
+    }
+  ],
+  "base_head": "1437d00dae9ccd065d9e7a0c8bd63d66470ddcb5",
+  "base_tests": {
+    "rc": 0,
+    "tests": null,
+    "pass": null,
+    "fail": null,
+    "skipped": null,
+    "duration_ms": null,
+    "tail": [
+      "ℹ tests 90",
+      "ℹ suites 0",
+      "ℹ pass 90",
+      "ℹ fail 0",
+      "ℹ cancelled 0",
+      "ℹ skipped 0",
+      "ℹ todo 0",
+      "ℹ duration_ms 195.282666"
+    ]
+  },
+  "device_commits": [],
+  "created_files": [],
+  "environment": {
+    "python": "3.13.1",
+    "dsh": "/opt/homebrew/bin/dsh",
+    "opencode": "/Users/developer/.opencode/bin/opencode",
+    "adb": "/Users/developer/Library/Android/sdk/platform-tools/adb"
+  },
+  "acts": [
+    {
+      "act_id": "0",
+      "title": "环境体检",
+      "chain": "local",
+      "status": "FAIL",
+      "verdicts": [
+        {
+          "name": "control-plane",
+          "ok": true,
+          "detail": "GET /v1/peers -> 200 {'peers': [{'nodeId': '37e7e9ca-7232-4046-becb-7929af587ef2', 'nick': 'Pixel 6',"
+        },
+        {
+          "name": "cli:dsh",
+          "ok": true,
+          "detail": "dsh -> /opt/homebrew/bin/dsh"
+        },
+        {
+          "name": "dsh-credentials",
+          "ok": true,
+          "detail": "/Users/developer/.dsh/.credentials.yaml 存在"
+        },
+        {
+          "name": "workspace-is-git",
+          "ok": true,
+          "detail": "/Users/developer/weather-relay"
+        },
+        {
+          "name": "workspace-clean",
+          "ok": true,
+          "detail": "HEAD=1437d00dae9c 脏行=0"
+        },
+        {
+          "name": "stage-files-present",
+          "ok": true,
+          "detail": "期望 []；实到 []"
+        },
+        {
+          "name": "stage-files-absent",
+          "ok": true,
+          "detail": "本阶段不该有 []；实际多出 []"
+        },
+        {
+          "name": "baseline-tests-green",
+          "ok": false,
+          "detail": "pass=None fail=None skipped=None duration=Nonems"
+        },
+        {
+          "name": "artifacts-dir",
+          "ok": true,
+          "detail": "/tmp/tenon-ws/artifacts"
+        }
+      ],
+      "evidence": {
+        "base_head": "1437d00dae9ccd065d9e7a0c8bd63d66470ddcb5",
+        "base_dirty": [],
+        "base_tests": {
+          "rc": 0,
+          "tests": null,
+          "pass": null,
+          "fail": null,
+          "skipped": null,
+          "duration_ms": null,
+          "tail": [
+            "ℹ tests 90",
+            "ℹ suites 0",
+            "ℹ pass 90",
+            "ℹ fail 0",
+            "ℹ cancelled 0",
+            "ℹ skipped 0",
+            "ℹ todo 0",
+            "ℹ duration_ms 195.282666"
+          ]
+        }
+      },
+      "seconds": 0.76
+    }
+  ]
+}

@@ -1,0 +1,461 @@
+// SPDX-License-Identifier: GPL-3.0-only
+
+package com.kapp.tenon.domain
+
+import com.kapp.tenon.core.nowMillis
+import com.kapp.tenon.core.protocol.Limits
+import com.kapp.tenon.core.protocol.TeamMemberInfo
+import kotlin.random.Random
+
+/**
+ * 团队档案的**唯一写路径**（B 档：团队有名字、一份名册多群复用、群能整体添加一个团队）。
+ *
+ * ## 为什么档案要单独一条写路径
+ *
+ * [GroupDeclarationCommand] 改的是**一个群**的席位表；档案是**跨群**的一份对象。
+ * 把它硬塞进 `applyDeclaration`（那条命令的 `groupId` / `baseRev` 都是单群语义）只会
+ * 让并发与审计口径同时失真。所以这里分成两层，各守一件事：
+ *
+ * 1. **档案层**（本文件）：名字与名册的唯一真相，`RelaySettings.teamProfiles`；
+ * 2. **席位层**（[GroupDeclarationWritePath]）：每个群一条席位，靠 `AttachTeam` /
+ *    `DetachTeam` 写快照 —— 仍然是**那条**席位写路径，rev 推进、广播、审计一份不多。
+ *
+ * 于是「一次改名」= 一次档案写入 + 每个引用群各一次 `AttachTeam`：
+ * 每个群各自 rev+1、各自广播、各自一行审计。**不是**跨群事务 —— 某群失败不回滚别群，
+ * 结果里如实带 [TeamProfileResult.Applied.failedGroupIds]，下次重建收敛。
+ *
+ * ## 派单不在这条线上
+ *
+ * 派单只认 leader（由它内部协调）或某个组员的 token，**不存在「派给团队」这个目标**。
+ * 本文件不新增任何派单目标类型，`TeamMention` 的解析面一个字都不动。
+ */
+
+/** 谁来改档案（与编制命令同一个 actor 口径：审计与越权判定共用）。 */
+sealed interface TeamProfileCommand {
+
+    val actor: DeclarationActor
+    val origin: DeclarationOrigin
+
+    /**
+     * 建一份档案，并**一次加进若干群**（每群各建/复用一条领队席位）。
+     *
+     * 「群里添加一个团队」= 只给一个 groupId；「建一支开发团队并让它进 A/B 两个群」=
+     * 给两个 —— 同一份名册，两群各自一条席位、各自执行点。
+     *
+     * @param teamId 测试可注入；生产传 null 由本机分配（`tm-…`）。
+     */
+    data class Create(
+        val name: String,
+        val leaderAgentId: String,
+        val members: List<com.kapp.tenon.core.protocol.TeamMemberDraft>,
+        val groupIds: List<String>,
+        val teamId: String? = null,
+        override val actor: DeclarationActor,
+        override val origin: DeclarationOrigin = DeclarationOrigin.AGENT_HUB,
+    ) : TeamProfileCommand
+
+    /**
+     * 改名 / 换名册。改动**对所有引用群同时生效**（每群一次 `AttachTeam` 重建快照）。
+     *
+     * 两个参数都可空，但至少要给一个；`members` 给空表 = 非法（团队至少要有一个组员，
+     * 否则它就是单兵 —— 该走 `DetachTeam` 或 `LeaveSeat`）。
+     */
+    data class Update(
+        val teamId: String,
+        val name: String? = null,
+        val members: List<com.kapp.tenon.core.protocol.TeamMemberDraft>? = null,
+        override val actor: DeclarationActor,
+        override val origin: DeclarationOrigin = DeclarationOrigin.AGENT_HUB,
+    ) : TeamProfileCommand
+
+    /** 把**已有**团队加进更多群（名册不重填）。 */
+    data class AddToGroups(
+        val teamId: String,
+        val groupIds: List<String>,
+        override val actor: DeclarationActor,
+        override val origin: DeclarationOrigin = DeclarationOrigin.AGENT_HUB,
+    ) : TeamProfileCommand
+
+    /** 解散：从所有引用群摘掉团队形态（席位保留成单兵），并删除档案。 */
+    data class Dissolve(
+        val teamId: String,
+        override val actor: DeclarationActor,
+        override val origin: DeclarationOrigin = DeclarationOrigin.AGENT_HUB,
+    ) : TeamProfileCommand
+}
+
+/** 档案命令的结果。`Applied` 的定义是「档案已落盘」；群级失败单独列出，不假装全绿。 */
+sealed interface TeamProfileResult {
+
+    /**
+     * @param groupIds 实际写成功的群（顺序与请求一致）。
+     * @param failedGroupIds 预校验通过但席位写入失败的群（并发/落盘被拒）；空 = 全绿。
+     */
+    data class Applied(
+        val teamId: String,
+        val name: String,
+        val groupIds: List<String>,
+        val failedGroupIds: List<String> = emptyList(),
+    ) : TeamProfileResult
+
+    data class Rejected(val reason: DeclarationRejection) : TeamProfileResult
+}
+
+/** 应用一条档案命令 —— 档案写入的**唯一实现**。 */
+internal fun RelayController.applyTeamProfile(command: TeamProfileCommand): TeamProfileResult {
+    val state = _state.value
+    val self = state.selfNodeId
+    val actorNode = command.actor.actorNodeId
+
+    // agent 发起时：只能代表本机自己的席位（与 applyDeclaration 同一条本机主权）。
+    if (command.actor is DeclarationActor.Agent && actorNode != self) {
+        return TeamProfileResult.Rejected(DeclarationRejection.NOT_MEMBER)
+    }
+
+    val profiles = state.settings.teamProfiles
+    return when (command) {
+        is TeamProfileCommand.Create -> createTeam(self, actorNode, command)
+        is TeamProfileCommand.Update -> updateTeam(self, actorNode, command, profiles)
+        is TeamProfileCommand.AddToGroups -> addTeamToGroups(self, actorNode, command, profiles)
+        is TeamProfileCommand.Dissolve -> dissolveTeam(self, actorNode, command, profiles)
+    }
+}
+
+private fun RelayController.createTeam(
+    self: String,
+    actorNode: String,
+    cmd: TeamProfileCommand.Create,
+): TeamProfileResult {
+    val name = cmd.name.trim()
+    if (name.isEmpty() || name.length > Limits.TEAM) {
+        return TeamProfileResult.Rejected(DeclarationRejection.NAME_INVALID)
+    }
+    val leader = cmd.leaderAgentId.trim()
+    if (leader.isEmpty()) return TeamProfileResult.Rejected(DeclarationRejection.ARGUMENT_INVALID)
+    if (cmd.members.isEmpty()) return TeamProfileResult.Rejected(DeclarationRejection.ARGUMENT_INVALID)
+    val groups = cmd.groupIds.map { it.trim() }.filter { it.isNotEmpty() }.distinct()
+    if (groups.isEmpty()) return TeamProfileResult.Rejected(DeclarationRejection.ARGUMENT_INVALID)
+    val denied = teamTargetGroups(self, actorNode, groups)
+    if (denied != null) return TeamProfileResult.Rejected(denied)
+    // **先全量预校验再落档案**：跨群不是事务，先写档案后校验会让「第一群成功、第二群撞名」
+    // 留下一个改了一半的世界。
+    preflightRoster(groups, leader, cmd.members)?.let {
+        return TeamProfileResult.Rejected(it)
+    }
+
+    val teamId = cmd.teamId?.trim()?.takeIf { it.isNotEmpty() } ?: allocateTeamId()
+    if (_state.value.settings.teamProfiles.any { it.teamId == teamId }) {
+        // 注入的 id 撞了既是测试写错，也说明调用方在乱造键：拒绝而不是覆盖别人的档案。
+        return TeamProfileResult.Rejected(DeclarationRejection.ARGUMENT_INVALID)
+    }
+    val profile = TeamProfile(
+        teamId = teamId,
+        name = name,
+        leaderAgentId = leader,
+        members = cmd.members.map { TeamMemberInfo(it.agentId, it.name, it.role) },
+        rev = 1,
+        updatedTs = nowMillis(),
+    )
+    // 顺序：**先落档案，再逐群挂席位**。反过来（先席位后档案）会让对端先看到一条指向
+    // 不存在档案的引用；而档案先落、席位失败最坏是「这一群还没有这支队伍」，界面可重试。
+    persistTeamProfiles(_state.value.settings.teamProfiles + profile)
+    val (applied, failed) = attachToGroups(self, profile, groups, cmd.actor, cmd.origin, null)
+    return TeamProfileResult.Applied(teamId, name, applied, failed)
+}
+
+private fun RelayController.updateTeam(
+    self: String,
+    actorNode: String,
+    cmd: TeamProfileCommand.Update,
+    profiles: List<TeamProfile>,
+): TeamProfileResult {
+    val profile = profiles.byTeamId(cmd.teamId)
+        ?: return TeamProfileResult.Rejected(DeclarationRejection.TEAM_UNKNOWN)
+    val newName = cmd.name?.trim()
+    if (newName != null && (newName.isEmpty() || newName.length > Limits.TEAM)) {
+        return TeamProfileResult.Rejected(DeclarationRejection.NAME_INVALID)
+    }
+    if (newName == null && cmd.members == null) {
+        return TeamProfileResult.Rejected(DeclarationRejection.ARGUMENT_INVALID)
+    }
+    val members = cmd.members?.map { TeamMemberInfo(it.agentId, it.name, it.role) } ?: profile.members
+    if (members.isEmpty()) return TeamProfileResult.Rejected(DeclarationRejection.ARGUMENT_INVALID)
+    val updated = profile.copy(
+        name = newName ?: profile.name,
+        members = members,
+        rev = profile.rev + 1,
+        updatedTs = nowMillis(),
+    )
+    val groups = groupsReferencing(updated.teamId)
+    val denied = teamTargetGroups(self, actorNode, groups)
+    if (denied != null) return TeamProfileResult.Rejected(denied)
+    preflightRoster(groups, profile.leaderAgentId, updated.rosterDrafts())?.let {
+        return TeamProfileResult.Rejected(it)
+    }
+    // 先档案后席位：与 create 同一顺序 —— 快照重建拿到的永远是这一版的档案。
+    persistTeamProfiles(profiles.map { if (it.teamId == updated.teamId) updated else it })
+    val (applied, failed) = attachToGroups(self, updated, groups, cmd.actor, cmd.origin, null)
+    return TeamProfileResult.Applied(updated.teamId, updated.name, applied, failed)
+}
+
+private fun RelayController.addTeamToGroups(
+    self: String,
+    actorNode: String,
+    cmd: TeamProfileCommand.AddToGroups,
+    profiles: List<TeamProfile>,
+): TeamProfileResult {
+    val profile = profiles.byTeamId(cmd.teamId)
+        ?: return TeamProfileResult.Rejected(DeclarationRejection.TEAM_UNKNOWN)
+    val groups = cmd.groupIds.map { it.trim() }.filter { it.isNotEmpty() }.distinct()
+    if (groups.isEmpty()) return TeamProfileResult.Rejected(DeclarationRejection.ARGUMENT_INVALID)
+    val denied = teamTargetGroups(self, actorNode, groups)
+    if (denied != null) return TeamProfileResult.Rejected(denied)
+    preflightRoster(groups, profile.leaderAgentId, profile.rosterDrafts())?.let {
+        return TeamProfileResult.Rejected(it)
+    }
+    val (applied, failed) = attachToGroups(self, profile, groups, cmd.actor, cmd.origin, null)
+    return TeamProfileResult.Applied(profile.teamId, profile.name, applied, failed)
+}
+
+private fun RelayController.dissolveTeam(
+    self: String,
+    actorNode: String,
+    cmd: TeamProfileCommand.Dissolve,
+    profiles: List<TeamProfile>,
+): TeamProfileResult {
+    val profile = profiles.byTeamId(cmd.teamId)
+        ?: return TeamProfileResult.Rejected(DeclarationRejection.TEAM_UNKNOWN)
+    val groups = groupsReferencing(profile.teamId)
+    val denied = teamTargetGroups(self, actorNode, groups)
+    if (denied != null) return TeamProfileResult.Rejected(denied)
+    // 先摘席位引用，再删档案：反过来的话中间态是「席位指着一份不存在的档案」。
+    val applied = mutableListOf<String>()
+    val failed = mutableListOf<String>()
+    for (groupId in groups) {
+        when (val result = applyDeclaration(GroupDeclarationCommand.DetachTeam(
+            groupId = groupId,
+            agentId = profile.leaderAgentId,
+            actor = cmd.actor,
+            origin = cmd.origin,
+        ))) {
+            is DeclarationResult.Applied -> applied += groupId
+            is DeclarationResult.Rejected -> failed += groupId
+            is DeclarationResult.Conflict -> failed += groupId
+        }
+    }
+    persistTeamProfiles(profiles.filterNot { it.teamId == profile.teamId })
+    return TeamProfileResult.Applied(profile.teamId, profile.name, applied, failed)
+}
+
+// ------------------------------------------------------------------ 界面入口
+
+/**
+ * 界面入口：新建（[teamId] 为 null）或编辑一份**团队档案**，结果用横幅回报。
+ *
+ * ## 编辑为什么是「先 Update 再加群」而不是一条命令
+ *
+ * `Update` 的语义是「这份档案变了」（名字 / 名册），`AddToGroups` 的语义是「这支队
+ * 去了新地方」。合成一条会让「只改名」与「只加群」的拒绝原因混在一个返回值里，
+ * 用户看到「保存失败」却不知道是名字非法还是某个群不让进。分两步则各自如实：
+ * 改名失败 ⇒ 整次不继续（档案没变，加群也无意义）；改名成功但加群失败 ⇒ 横幅
+ * 带出失败群数，档案本身仍是新的。
+ *
+ * ## 为什么群列表只增不减
+ *
+ * 从群里移除一支队伍是**那个群**的决定（`DetachTeam` 是单群席位命令），
+ * 不该从「编辑团队」这一屏顺手完成 —— 那会让「改个名字」有把一个群清空的副作用。
+ *
+ * @param teamId null = 新建；非 null = 编辑该档案（按键定位，不按名字）。
+ * @param groupIds 新建 = 要加入的群（可空 = 只建档）；编辑 = 要**新增**加入的群。
+ */
+public fun RelayController.saveTeamProfileEntry(
+    teamId: String?,
+    name: String,
+    leaderAgentId: String,
+    members: List<com.kapp.tenon.core.protocol.TeamMemberDraft>,
+    groupIds: List<String>,
+    origin: DeclarationOrigin = DeclarationOrigin.AGENT_HUB,
+) {
+    val self = _state.value.selfNodeId
+    val actor = DeclarationActor.Human(self)
+    val result = if (teamId == null) {
+        applyTeamProfile(
+            TeamProfileCommand.Create(
+                name = name,
+                leaderAgentId = leaderAgentId,
+                members = members,
+                groupIds = groupIds,
+                actor = actor,
+                origin = origin,
+            ),
+        )
+    } else {
+        applyTeamProfile(
+            TeamProfileCommand.Update(
+                teamId = teamId,
+                name = name,
+                members = members,
+                actor = actor,
+                origin = origin,
+            ),
+        ).let { updated ->
+            if (updated !is TeamProfileResult.Applied || groupIds.isEmpty()) {
+                updated
+            } else {
+                // 档案已经变了：加群失败不回滚改名（跨群不是事务，见文件头）。
+                when (val added = applyTeamProfile(
+                    TeamProfileCommand.AddToGroups(teamId, groupIds, actor = actor, origin = origin),
+                )) {
+                    is TeamProfileResult.Applied -> updated.copy(
+                        groupIds = updated.groupIds + added.groupIds,
+                        failedGroupIds = updated.failedGroupIds + added.failedGroupIds,
+                    )
+                    is TeamProfileResult.Rejected -> updated.copy(
+                        failedGroupIds = updated.failedGroupIds + groupIds,
+                    )
+                }
+            }
+        }
+    }
+    when (result) {
+        is TeamProfileResult.Applied ->
+            // 有群没写进去就报到警告位：绿色横幅会把「有一个群没成功」盖掉，
+            // 用户下次打开那一群发现队伍不在，却查不到任何痕迹。
+            if (result.failedGroupIds.isEmpty()) {
+                info(BannerMessage.TeamProfileSaved(result.name, result.groupIds.size))
+            } else {
+                warn(
+                    BannerMessage.TeamProfileSaved(
+                        name = result.name,
+                        groupCount = result.groupIds.size,
+                        failedGroupCount = result.failedGroupIds.size,
+                    ),
+                )
+            }
+        is TeamProfileResult.Rejected -> warn(BannerMessage.TeamProfileRejected)
+    }
+}
+
+/**
+ * 界面入口：把**已有**团队整体加进一个群（群信息里「添加团队」的落点）。
+ *
+ * 名册不重填 —— 这正是「群添加可以直接添加一个团队」与「一个个加人」的差别：
+ * 组员随档案过来，群里立刻出现一条团队席位（含领队与全部组员）。
+ */
+public fun RelayController.attachTeamToGroupEntry(
+    teamId: String,
+    groupId: String,
+    origin: DeclarationOrigin = DeclarationOrigin.AGENT_HUB,
+) {
+    val self = _state.value.selfNodeId
+    val result = applyTeamProfile(
+        TeamProfileCommand.AddToGroups(
+            teamId = teamId,
+            groupIds = listOf(groupId),
+            actor = DeclarationActor.Human(self),
+            origin = origin,
+        ),
+    )
+    when (result) {
+        is TeamProfileResult.Applied ->
+            if (result.failedGroupIds.isEmpty()) {
+                info(BannerMessage.TeamProfileSaved(result.name, result.groupIds.size))
+            } else {
+                warn(BannerMessage.TeamProfileSaved(result.name, 0, result.failedGroupIds.size))
+            }
+        is TeamProfileResult.Rejected -> warn(BannerMessage.TeamProfileRejected)
+    }
+}
+
+// ------------------------------------------------------------------ 内部工具
+
+/**
+ * 名册在**每个目标群**都合法吗（撞 token / 超上限 / 名字非法）。
+ *
+ * 复用 [declarationRosterIssue]（与 `planAttachTeam` 同一个池），不另写判据。
+ * 返回第一个不通过的群的拒绝原因，null = 全过。
+ */
+private fun RelayController.preflightRoster(
+    groupIds: List<String>,
+    agentId: String,
+    roster: List<com.kapp.tenon.core.protocol.TeamMemberDraft>,
+): DeclarationRejection? {
+    for (groupId in groupIds) {
+        declarationRosterIssue(groupId, agentId, roster)?.let { return it }
+    }
+    return null
+}
+
+/** 目标群预校验：群存在 + actor 是本机成员。返回 null = 全过。 */
+private fun RelayController.teamTargetGroups(
+    self: String,
+    actorNode: String,
+    groupIds: List<String>,
+): DeclarationRejection? {
+    val groups = _state.value.settings.groups
+    for (groupId in groupIds) {
+        val meta = groups.firstOrNull { it.groupId == groupId }
+            ?: return DeclarationRejection.GROUP_UNKNOWN
+        if (actorNode !in meta.members) return DeclarationRejection.NOT_MEMBER
+        if (self !in meta.members) return DeclarationRejection.NOT_MEMBER
+    }
+    return null
+}
+
+/** 哪些群正在引用这份档案（席位 `teamId` 相等；仅本机席位算数 —— 别人的档案不归我改）。 */
+private fun RelayController.groupsReferencing(teamId: String): List<String> =
+    _state.value.settings.groups
+        .filter { group ->
+            group.virtualAgents.orEmpty().any { it.teamId == teamId }
+        }
+        .map { it.groupId }
+
+/** 逐群挂席位，返回 (成功群, 失败群)。单群失败不影响其它群 —— 跨群不是事务。 */
+private fun RelayController.attachToGroups(
+    self: String,
+    profile: TeamProfile,
+    groupIds: List<String>,
+    actor: DeclarationActor,
+    origin: DeclarationOrigin,
+    baseRev: Int?,
+): Pair<List<String>, List<String>> {
+    val applied = mutableListOf<String>()
+    val failed = mutableListOf<String>()
+    for (groupId in groupIds) {
+        val result = applyDeclaration(
+            GroupDeclarationCommand.AttachTeam(
+                groupId = groupId,
+                agentId = profile.leaderAgentId,
+                teamId = profile.teamId,
+                teamName = profile.name,
+                roster = profile.rosterDrafts(),
+                agentKind = agentKindOf(self, profile.leaderAgentId),
+                baseRev = if (actor is DeclarationActor.Agent) baseRev else null,
+                actor = actor,
+                origin = origin,
+            ),
+        )
+        when (result) {
+            is DeclarationResult.Applied -> applied += groupId
+            is DeclarationResult.Rejected -> failed += groupId
+            is DeclarationResult.Conflict -> failed += groupId
+        }
+    }
+    return applied to failed
+}
+
+/** 本机台账里这个 agent 的 kind（只用于新席位派生默认名；认不出就给 null，不猜）。 */
+internal fun RelayController.agentKindOf(self: String, agentId: String): String? =
+    _state.value.agentWorkspaces.values.firstOrNull {
+        it.peerId == self && it.agentId.equals(agentId.trim(), ignoreCase = true)
+    }?.agentKind
+
+/** 档案落盘：设置里只此一处写 `teamProfiles`（守卫 `TeamProfileBypassGuardTest` 钉住）。 */
+private fun RelayController.persistTeamProfiles(next: List<TeamProfile>) {
+    handlePersist(_state.value.settings.copy(teamProfiles = next))
+    publish()
+}
+
+/** 分配档案键：`tm-` + 时间基 36 进制 + 4 位随机，够本机唯一（不跨机，不需要全局唯一）。 */
+private fun allocateTeamId(): String =
+    "tm-" + nowMillis().toString(36) + "-" + Random.nextInt(0x1000, 0x10000).toString(16)

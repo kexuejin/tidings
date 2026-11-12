@@ -2,8 +2,6 @@
 
 package com.kapp.tenon.domain
 
-import com.kapp.tenon.core.protocol.AgentDuties
-import com.kapp.tenon.core.protocol.AgentMemberName
 import com.kapp.tenon.core.protocol.GroupMeta
 import com.kapp.tenon.core.protocol.GroupWorkspaceInfo
 import com.kapp.tenon.core.protocol.VirtualAgentMember
@@ -44,10 +42,22 @@ sealed interface AddGroupAgentResult {
     /** 席位已写入并广播。[resolvedWsId] = 群项目目录解析出的执行点；null = 未暴露/未设置。 */
     data class Added(val resolvedWsId: String?) : AddGroupAgentResult
 
-    /** 群不存在 / 本机不是成员 / 本机没有这个 agent（按本机工作区台账）/ 指针设置被拒。 */
+    /** 群不存在 / 本机不是成员 / 本机没有这个 agent（按本机工作区台账）/ 写入被拒。 */
     data class Rejected(val reason: Reason) : AddGroupAgentResult
 
-    enum class Reason { GROUP_UNKNOWN, NOT_MEMBER, AGENT_UNKNOWN }
+    enum class Reason {
+        GROUP_UNKNOWN,
+        NOT_MEMBER,
+        AGENT_UNKNOWN,
+
+        /**
+         * 写路径拒收：元数据没过 `validateGroupMeta` 被挡在落盘之前（什么都没改）。
+         *
+         * 与 [AGENT_UNKNOWN] 分开，是因为两者的修法完全不同：一个是「台账里没这个 agent」，
+         * 一个是「这份声明本身会让广播变成毒帧」。混成一个值，界面只能笼统说「失败」。
+         */
+        WRITE_REJECTED,
+    }
 }
 
 /**
@@ -127,9 +137,9 @@ internal fun rebuildSelfSeatsForPointer(
 /**
  * 加智能体进群（D6：**不再出现目录选择**；席位就地继承群项目目录）。
  *
- * - 名字：既有席位沿用（@token 不漂）；新席位走 D13 规则 `kind-职责`
- *   （[duty] 取值域在 [AgentDuties]，域外值归一）。
- * - 解析：群项目目录对该 agent 的 wsId（宿主端）；解析不出 = 允许加入、标「不可执行」。
+ * 本函数只做**入口该做的事**：从本机台账把 `agentId` 归一成身份键、认出 agentKind，
+ * 然后交 [applyDeclaration] —— 校验、rev 推进、落库与广播都在那条唯一写路径里。
+ * 席位名的派生（`kind-职责` + 群内唯一）也在写路径里，这里不再算一遍。
  *
  * @param agentId 本机工作区台账里的 agent 身份（`resolveVirtualAgentKey` 口径，
  *   大小写不敏感匹配）。
@@ -139,12 +149,7 @@ internal fun RelayController.handleAddGroupAgent(
     agentId: String,
     duty: String? = null,
 ): AddGroupAgentResult {
-    val meta = _state.value.settings.groups.firstOrNull { it.groupId == groupId }
-        ?: return AddGroupAgentResult.Rejected(AddGroupAgentResult.Reason.GROUP_UNKNOWN)
     val self = _state.value.selfNodeId
-    if (self !in meta.members) {
-        return AddGroupAgentResult.Rejected(AddGroupAgentResult.Reason.NOT_MEMBER)
-    }
     // 本机必须是这个 agent 的宿主：席位声明的是「我的 agent」，不是别人的
     // （执行授权与解析都在宿主侧，替别人声明 = 两边各说各话）。
     val rows = _state.value.agentWorkspaces.values.filter { it.peerId == self }
@@ -153,46 +158,31 @@ internal fun RelayController.handleAddGroupAgent(
     } ?: return AddGroupAgentResult.Rejected(AddGroupAgentResult.Reason.AGENT_UNKNOWN)
     val canonicalAgentId = resolveVirtualAgentKey(null, row.agentId, row.agentKind) ?: agentId.trim()
 
-    val previous = meta.virtualAgents.orEmpty().firstOrNull {
-        it.hostNodeId == self && it.agentId.equals(canonicalAgentId, ignoreCase = true)
-    }
-    val taken = meta.virtualAgents.orEmpty().map { it.name }.toMutableSet()
-    val name = previous?.name
-        ?: AgentMemberName.unique(
-            AgentMemberName.base(row.agentKind, canonicalAgentId, AgentDuties.normalize(duty)),
-            taken,
-        )
-    val resolvedWsId = hostDirectoryPort?.resolveForGroup(groupId, canonicalAgentId)
-    val seat = declarationFor(
-        agentId = canonicalAgentId,
-        hostNodeId = self,
-        name = name,
-        defaultWsId = resolvedWsId,
-        previous = previous,
-    ).withPointerProjection(
-        defaultWsId = resolvedWsId,
-        allowedWorkspaces = resolvedWsId?.let { wsId ->
-            listOf(
-                GroupWorkspaceInfo(
-                    wsId = wsId,
-                    title = _state.value.agentWorkspaces.values.firstOrNull { it.wsId == wsId }?.wsTitle
-                        ?: hostDirectoryPort?.snapshot().pointedDirectoryOf(groupId)?.displayName
-                        ?: "",
-                ),
-            )
-        } ?: emptyList(),
-    )
-    val next = meta.virtualAgents.orEmpty()
-        .filterNot { it.hostNodeId == self && it.agentId.equals(canonicalAgentId, ignoreCase = true) } + seat
-    commitGroupMetaUpdate(
-        meta.copy(
-            virtualAgents = next.distinct().ifEmpty { null },
-            rev = meta.rev + 1,
-            updatedBy = self,
-            updatedTs = nowMillis(),
+    val result = applyDeclaration(
+        GroupDeclarationCommand.JoinSeat(
+            groupId = groupId,
+            agentId = canonicalAgentId,
+            agentKind = row.agentKind,
+            duty = duty,
+            actor = DeclarationActor.Human(self),
+            origin = DeclarationOrigin.GROUP_INFO,
         ),
     )
-    return AddGroupAgentResult.Added(resolvedWsId)
+    return when (result) {
+        is DeclarationResult.Applied -> AddGroupAgentResult.Added(result.resolvedWsId)
+        is DeclarationResult.Rejected -> AddGroupAgentResult.Rejected(
+            when (result.reason) {
+                DeclarationRejection.GROUP_UNKNOWN -> AddGroupAgentResult.Reason.GROUP_UNKNOWN
+                DeclarationRejection.NOT_MEMBER -> AddGroupAgentResult.Reason.NOT_MEMBER
+                DeclarationRejection.PERSIST_REJECTED -> AddGroupAgentResult.Reason.WRITE_REJECTED
+                else -> AddGroupAgentResult.Reason.AGENT_UNKNOWN
+            },
+        )
+        // 本入口不带 baseRev（界面上没有「我看到的是哪一版」这个输入）⇒ 不可能冲突。
+        is DeclarationResult.Conflict -> AddGroupAgentResult.Rejected(
+            AddGroupAgentResult.Reason.WRITE_REJECTED,
+        )
+    }
 }
 
 /**
@@ -205,24 +195,15 @@ internal fun RelayController.handleAddGroupAgent(
  * @return false = 群不存在 / 本机不是成员 / 本机没有这个 agentId 的席位 —— 什么都没改。
  */
 internal fun RelayController.handleRemoveGroupAgent(groupId: String, agentId: String): Boolean {
-    val meta = _state.value.settings.groups.firstOrNull { it.groupId == groupId } ?: return false
-    val self = _state.value.selfNodeId
-    if (self !in meta.members) return false
-    val seat = meta.virtualAgents.orEmpty().firstOrNull {
-        it.hostNodeId == self && it.agentId.equals(agentId.trim(), ignoreCase = true)
-    } ?: return false
-    val next = meta.virtualAgents.orEmpty().filterNot {
-        it.hostNodeId == self && it.agentId.equals(seat.agentId, ignoreCase = true)
-    }
-    commitGroupMetaUpdate(
-        meta.copy(
-            virtualAgents = next.distinct().ifEmpty { null },
-            rev = meta.rev + 1,
-            updatedBy = self,
-            updatedTs = nowMillis(),
+    val result = applyDeclaration(
+        GroupDeclarationCommand.LeaveSeat(
+            groupId = groupId,
+            agentId = agentId,
+            actor = DeclarationActor.Human(_state.value.selfNodeId),
+            origin = DeclarationOrigin.GROUP_INFO,
         ),
     )
-    return true
+    return result is DeclarationResult.Applied
 }
 
 /**

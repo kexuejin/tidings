@@ -33,10 +33,16 @@
 | **智能体卡片流**（新增，置顶） | 每个「(宿主, agent)」实体一张卡：身份 + 角色（单兵/团队 N 人）+ 服务群数 + Urgent-First 状态行 | §3 投影 `hubAgents` |
 | **智能体详情页**（B4 增补，点卡的第一落点） | 实体视角整页：身份/角色/组员、服务群列表（每群执行点状态 + 本项目目录名）、项目目录行（→ 工作区详情）、待审批处置卡、该 agent 会话流 | §3a 投影 `agentHubDetail` |
 | **工作区治理段**（保留，原三级下钻） | 设备→Agent→项目目录行、待审批卡、授权直通码、会话事件流 | 既有 `AgentWorkspaceBoard` 全套 |
-| 页头/导航 | 名称「智能体」、图标 `ic_terminal`（不变，F4 裁决）、`WorkspaceBoardTitleBar` 骨架不动 | — |
+| 页头/导航 | 名称「智能体」、图标 `ic_terminal`（不变，F4 裁决）；`WorkspaceBoardTitleBar` 组件保留但**只在手机壳画**，桌面壳传 `showHeader = false` 不画 | — |
 
 手机单列（居中限宽回落 `ContentWidths.Pane=720`，**不引入 560**）；桌面两栏：左列卡片流，
 右列沿用现有下钻（`DesktopView.Agents` 内部结构不变）。
+
+桌面两栏**不画页面级页头**：壳顶部已有窗口标题栏 + 工具栏，各 tab 内容区都不画第二条
+`LargeTitleBar`（节点页 / 聊天页在桌面壳都传 `showHeader = false`）。此前智能体页漏传该参数，
+于是在两栏之间多出一条按 `ContentWidths.Pane` 收列居中的大标题，副标题与刷新圆钮都跟着飘在
+中间——双层 chrome，位置错误。刷新由壳的溢出菜单与快捷键承接，建群由正文「绑定首个项目目录」
+与壳的对话框承接，均不依赖页头。手机单列仍画页头，五个首页 tab 共用一条顶栏不变。
 
 ## 3. 统一智能体实体（合并规则，写死）
 
@@ -73,7 +79,7 @@
 - 组件共享（AGENTS §2.6）：卡片**内容**与手机/桌面共用一份；外壳参数化；
   复用 `InboxUnitRow`/`WorkspaceUnitCard`/`AgentApprovalsSection` 的既有形态语言。
 - 门禁预算：`cjkLiteralGate`（新文案进 values*/strings.xml 双语）、`designLocaleParityGate`、
-  `designSpecDrift`（重投影）、`TabChromeConsistencyGuardTest`（`WorkspaceBoardTitleBar` 骨架不动）、
+  `designSpecDrift`（重投影）、`TabChromeConsistencyGuardTest`（组件骨架不动；新增一条壳级守卫：桌面壳 `showHeader = false`、手机壳不显式关）、
   截图重拍（新卡入镜则 `updateDebugScreenshotTest`）。
 - 不动折叠（药丸+展开保留）：消息列表形态与 Hub 是两层，互不替代。
 

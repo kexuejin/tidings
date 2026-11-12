@@ -532,6 +532,9 @@ public fun DesktopShell(
     // 现在三条入口（工具栏 / ⌘N / 系统菜单）表达的是同一件事：面板真的打开。
     // 面板的开合归 `NodesPane` 自己，这里只递增一个意图计数。
     var addNodeRequest by remember { mutableStateOf(0) }
+    // 「登记为员工 / 编辑员工」对话框：null = 关着。存整个实体（名字 / 职责 / 档案键都在里面），
+    // 不存一份拆开的表单快照 —— 表单状态由对话框自己持有，关了就该忘掉。
+    var employeeEditing by remember { mutableStateOf<com.kapp.tenon.domain.AgentHubDetailUi?>(null) }
     val newConversation: () -> Unit = {
         view = DesktopView.Nodes
         addNodeRequest++
@@ -961,8 +964,36 @@ public fun DesktopShell(
                             // 横幅是**窗口级**提示（断线、传输失败…），它跟随当前视图。
                             // 浮层时代由 AgentPane 画，现在这一屏自己画 —— 少了这一行，
                             // 用户在工作区屏就看不到任何横幅了（其它 pane 都各自画了）。
-                            if (showCreateWsDialog) {
-                                val groupNameFormat = org.jetbrains.compose.resources.stringResource(
+                            // 员工档案对话框（登记 / 改名 / 改职责）：桌面壳独占 —— 档案只住宿主机，
+                            // 手机端连写入口都没有，那里的详情页也不画这颗按钮。
+                            employeeEditing?.let { editing ->
+                                com.kapp.tenon.feature.agents.EmployeeEditDialog(
+                                    employeeId = editing.employeeId,
+                                    initialName = editing.employeeName
+                                        ?: editing.displayName.orEmpty(),
+                                    initialDuty = editing.employeeDuty
+                                        ?: com.kapp.tenon.core.protocol.AgentDuties.DEFAULT_SINGLE,
+                                    // 「谁能调用」读宿主策略：读不到（没装桥）就整段不画。
+                                    initialPolicy = editing.agentKey?.let(controller::agentExecPolicyOf),
+                                    onSave = { name, duty, policy ->
+                                        // 位置实参（见 RelayController.saveEmployeeProfile 的注释）。
+                                        controller.saveEmployeeProfile(
+                                            editing.agentKey.orEmpty(),
+                                            editing.employeeId,
+                                            name,
+                                            duty,
+                                        )
+                                        // 档位是**另一个存储**（宿主侧 AgentExecPolicyStore），
+                                        // 与档案分开写：写失败由域层出横幅，界面不猜成败。
+                                        editing.agentKey?.let { key ->
+                                            controller.setAgentExecPolicy(key, policy)
+                                        }
+                                        employeeEditing = null
+                                    },
+                                    onDismiss = { employeeEditing = null },
+                                )
+                            }
+                            if (showCreateWsDialog) {                                val groupNameFormat = org.jetbrains.compose.resources.stringResource(
                                     com.kapp.tenon.generated.resources.Res.string.workspace_group_default_name,
                                     "%s",
                                 )
@@ -1032,6 +1063,12 @@ public fun DesktopShell(
                             }
                             chromeSlice.banner?.let { AppBanner(it, onDismiss = controller::dismissBanner) }
                             AgentConsoleScreen(
+                                // 桌面壳不画页面级大标题栏：窗口标题栏与工具栏已经是这一屏的
+                                // chrome，再叠一条 [WorkspaceBoardTitleBar] 就是双层页头，且它按
+                                // ContentWidths.Pane 收列居中，标题会飘在两栏之间、刷新圆钮孤悬右侧。
+                                // 节点页 / 聊天页同样在桌面壳传 false；手机壳不传，五个首页 tab
+                                // 仍共用那一条顶栏。刷新走壳的溢出菜单与快捷键，建群走本壳的对话框。
+                                showHeader = false,
                                 // inspector 已常驻同一批审批时，主屏看板不再画第二份。
                                 showBoardApprovalQueue = !inspectorShowsApprovals,
                                 agentSlice = agentSlice,
@@ -1096,6 +1133,23 @@ public fun DesktopShell(
                                 // 三参处置（「本会话免审」）：与手机壳同一条，接 controller 的
                                 // 三参重载 —— 此前只接两参，免审按钮永远不出现。
                                 onRespondChoice = controller::respondApproval,
+                                // 详情页的「登记为员工 / 编辑员工」：桌面壳有宿主档案，接这条；
+                                // 手机壳不接（null）⇒ 详情页不画那颗按钮。
+                                onEditEmployee = { detail -> employeeEditing = detail },
+                                // 团队档案（新建 / 改名 / 换名册 / 进更多群）：档案只住宿主机，
+                                // 手机壳不接（null）⇒ 团队视角里不画那两个入口。
+                                onSaveTeam = { teamId, name, leader, members, groupIds ->
+                                    controller.saveTeamProfile(teamId, name, leader, members, groupIds)
+                                },
+                                // 「AI 建队」：生成桥由 DesktopExtension 装配（LLM → 过门 → 回落）；
+                                // 能力位 false（预览 / 未装配）= 不画入口，与 onSaveTeam 同 gate。
+                                onGenerateTeam = if (controller.teamScaffoldAvailable) {
+                                    { need, leaderKeys, defaults ->
+                                        controller.generateTeamScaffold(need, leaderKeys, defaults)
+                                    }
+                                } else {
+                                    null
+                                },
                                 onCancelTask = controller::cancelAgentTask,
                                 onCreateWorkspaceGroup = { showCreateWsDialog = true },
                                 // §2.6 新手引导卡：点 CTA 直接开**这一个目录**的精简建群弹窗

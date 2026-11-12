@@ -30,6 +30,7 @@ import com.kapp.tenon.domain.NodeSlice
 import com.kapp.tenon.domain.SettingsSlice
 import com.kapp.tenon.domain.agentHubDetail
 import com.kapp.tenon.domain.agentPeers
+import com.kapp.tenon.domain.byTeamId
 import com.kapp.tenon.domain.visibleAgentSessionsOf
 import com.kapp.tenon.domain.agentEventsOf
 import com.kapp.tenon.domain.isPendingApproval
@@ -40,6 +41,11 @@ import com.kapp.tenon.generated.resources.Res
 import com.kapp.tenon.generated.resources.action_back
 import com.kapp.tenon.generated.resources.agent_detail_missing_body
 import com.kapp.tenon.generated.resources.agent_detail_missing_title
+import com.kapp.tenon.generated.resources.agent_team_default_name
+import com.kapp.tenon.generated.resources.agent_team_default_role
+import com.kapp.tenon.generated.resources.agent_team_role_coder
+import com.kapp.tenon.generated.resources.agent_team_role_reviewer
+import com.kapp.tenon.generated.resources.agent_team_role_tester
 import com.kapp.tenon.generated.resources.ic_bot
 import com.kapp.tenon.navigation.resolveAgentSessionId
 import com.kapp.tenon.ui.ContentWidths
@@ -155,6 +161,39 @@ fun AgentConsoleScreen(
     inPlaceApprovals: Boolean = false,
     /** 撤销「本会话免审」（见 SessionDetailView 的同名形参）。 */
     onRevokeSessionApproval: ((sessionId: String) -> Unit)? = null,
+    /**
+     * 详情页「登记为员工 / 编辑员工」：把当前实体交出去，由壳打开对话框。
+     *
+     * null = 这个壳没有员工档案面（手机：档案只住宿主机）⇒ 详情页不画按钮。
+     * 只交实体、不交表单状态 —— 对话框的初始值（名字 / 职责）由壳从实体读，
+     * 页面不持有第二份「当前编辑谁」。
+     */
+    onEditEmployee: ((com.kapp.tenon.domain.AgentHubDetailUi) -> Unit)? = null,
+    /**
+     * 保存一份**团队档案**：`(teamId, 名字, 领队, 名册, 要加入的群)`，teamId null = 新建。
+     *
+     * null = 这个壳没有团队档案面（手机：档案只住宿主机）⇒ 团队视角里不画
+     * 「新建团队 / 编辑团队」—— 与员工档案同一条纪律（空实现 + 不画按钮是同一条纪律的两半）。
+     */
+    onSaveTeam: ((
+        teamId: String?,
+        name: String,
+        leaderAgentId: String,
+        members: List<com.kapp.tenon.core.protocol.TeamMemberDraft>,
+        groupIds: List<String>,
+    ) -> Unit)? = null,
+    /**
+     * 「AI 建队」生成桥：`(需求一句话, 领队候选, 本地化缺省) -> 方案`。
+     *
+     * null = 这个壳没有建队助手（手机 / 预览）⇒ 团队视角不画「AI 建队」——
+     * 与 [onSaveTeam] 同一条纪律（空实现 + 不画按钮是同一条纪律的两半）。
+     * 生成只是**预览**；落盘仍走 [onSaveTeam] + 执行档端口（用户确认后）。
+     */
+    onGenerateTeam: (suspend (
+        need: String,
+        leaderKeys: Set<String>,
+        defaults: com.kapp.tenon.domain.TeamScaffoldDefaults,
+    ) -> com.kapp.tenon.domain.TeamScaffoldSpec?)? = null,
     onCancelTask: ((taskId: String) -> Unit)? = null,
     onRefresh: (() -> Unit)? = null,
     /**
@@ -204,6 +243,8 @@ fun AgentConsoleScreen(
     // 执行配置矩阵的开关（只读视图；写仍走群编制）。端口为 null 时这颗开关永远不会被置位
     // —— 入口行本身也不画。
     var execConfigOpen by remember { mutableStateOf(false) }
+    // 「AI 建队」对话框的开关（生成 → 预览 → 确认；确认走 onSaveTeam + 执行档端口）。
+    var aiTeamOpen by remember { mutableStateOf(false) }
 
     // 内部备选下钻状态：桌面端壳或未接入外层导航时提供自驱下钻支持
     var localDetailSessionId by remember { mutableStateOf<String?>(null) }
@@ -211,11 +252,21 @@ fun AgentConsoleScreen(
     // 实体详情（Phase B4）的本地备选：桌面两栏右列切换上下文用（点卡 → 右列出详情）。
     var localDetailEntityHost by remember { mutableStateOf<String?>(null) }
     var localDetailEntityKey by remember { mutableStateOf<String?>(null) }
+    var explicitlyClearedEntity by remember { mutableStateOf(false) }
 
     val effectiveWsId = detailWsId ?: localDetailWsId
     val effectiveSessionId = detailSessionId ?: localDetailSessionId
-    val effectiveEntityHost = detailEntityHostId ?: localDetailEntityHost
-    val effectiveEntityKey = detailEntityAgentKey ?: localDetailEntityKey
+
+    // 卡片流投影（Phase B1）。两栏形态下左列在三级链路的所有层级常驻，任何层级都要算；
+    // 单列形态下实体未下钻时在看板级画。
+    val hubCards: List<AgentHubUi>? = remember(agentSlice, nodeSlice, settingsSlice, now) {
+        hubAgents(agentSlice, nodeSlice, settingsSlice, now)
+    }
+
+    // 桌面两栏主从联动：未主动点选任何实体且未显式关闭时，默认选中第一位智能体进入其工作台
+    val defaultCard = if (layout == AgentHubLayout.TwoColumn && !explicitlyClearedEntity) hubCards?.firstOrNull() else null
+    val effectiveEntityHost = detailEntityHostId ?: localDetailEntityHost ?: defaultCard?.hostNodeId
+    val effectiveEntityKey = detailEntityAgentKey ?: localDetailEntityKey ?: defaultCard?.agentKey
     // 实体详情层在开（成对状态，判据只看宿主格；身份键 null = 「未上报类型」那一档）。
     val entityDetailActive = effectiveEntityHost != null
 
@@ -235,6 +286,7 @@ fun AgentConsoleScreen(
                 onBackToBoard?.invoke()
             }
         } else if (localDetailEntityHost != null) {
+            explicitlyClearedEntity = true
             localDetailEntityHost = null
             localDetailEntityKey = null
             onBackToBoard?.invoke()
@@ -244,16 +296,6 @@ fun AgentConsoleScreen(
     // 四级链路现在在哪一层：都没下钻 = 看板级。
     val atBoardLevel = !entityDetailActive &&
         !(selected != null && (effectiveSessionId != null || effectiveWsId != null))
-
-    // 卡片流投影（Phase B1）。两栏形态下左列在三级链路的**所有层级**常驻，任何层级都要算；
-    // 单列形态只在看板级画 —— 下钻层级不为此多算一次投影（与单列改前一致）。
-    val hubCards: List<AgentHubUi>? = if (layout == AgentHubLayout.TwoColumn || atBoardLevel) {
-        remember(agentSlice, nodeSlice, settingsSlice, now) {
-            hubAgents(agentSlice, nodeSlice, settingsSlice, now)
-        }
-    } else {
-        null
-    }
 
     // 实体详情投影（Phase B4）：与卡片流同一套装配（聚类 / 席位 / 归因都在投影里），
     // 实体不存在（撤销、或导航层残留了一个已消失的键）= null，正文退成整屏空态。
@@ -277,6 +319,10 @@ fun AgentConsoleScreen(
         emptyList()
     }
 
+    // 团队档案对话框的目标（null = 关着）。桌面宿主独占：档案只住本机设置，
+    // 手机端 `onSaveTeam` 为 null ⇒ 团队视角里根本没有那两个入口。
+    var teamEditing by remember { mutableStateOf<TeamEditTarget?>(null) }
+
     // 两栏是否成立：形态开关 + 左列真有实体。左列无实体 ⇒ 退化回单列全宽（不画空左列）。
     val hubAside = layout == AgentHubLayout.TwoColumn && !hubCards.isNullOrEmpty()
 
@@ -294,7 +340,10 @@ fun AgentConsoleScreen(
             teams = hubTeams,
             now = now,
             compact = compact,
+            selectedHostNodeId = effectiveEntityHost,
+            selectedAgentKey = effectiveEntityKey,
             onOpenEntity = { card ->
+                explicitlyClearedEntity = false
                 localDetailSessionId = null
                 localDetailWsId = null
                 onSelectAgent(card.hostNodeId)
@@ -339,6 +388,40 @@ fun AgentConsoleScreen(
             },
             onOpenGroup = onOpenGroup,
             onOpenExecutionConfig = teamExecutionPort?.let { { execConfigOpen = true } },
+            // 建 / 编团队：只有壳给了保存通路才画（手机 null ⇒ 两个入口都不出现）。
+            onCreateTeam = onSaveTeam?.let {
+                {
+                    teamEditing = TeamEditTarget(
+                        profileKey = null,
+                        name = "",
+                        leaderAgentId = null,
+                        members = emptyList(),
+                    )
+                }
+            },
+            onCreateTeamWithAi = onGenerateTeam?.takeIf { onSaveTeam != null }?.let {
+                { aiTeamOpen = true }
+            },
+            onEditTeam = onSaveTeam?.let { save ->
+                { team ->
+                    val profile = settingsSlice.settings.teamProfiles.byTeamId(team.teamId)
+                    teamEditing = TeamEditTarget(
+                        profileKey = team.teamId,
+                        // 档案在就用档案（名册是唯一真相）；档案丢了退回卡上快照 ——
+                        // 退回不等于静默：保存时会按这一份重建档案（文件名与名册以用户眼前所见为准）。
+                        name = profile?.name ?: team.teamName ?: team.groupName,
+                        leaderAgentId = profile?.leaderAgentId ?: team.leaderAgentId,
+                        members = profile?.rosterDrafts()
+                            ?: team.members.filterNot { it.isLeader }.map {
+                                com.kapp.tenon.core.protocol.TeamMemberDraft(
+                                    agentId = it.agentId,
+                                    name = it.name,
+                                    role = it.role,
+                                )
+                            },
+                    )
+                }
+            },
         )
     }
 
@@ -350,6 +433,101 @@ fun AgentConsoleScreen(
             selfNodeId = settingsSlice.settings.nodeId,
             port = execPort,
             onDismiss = { execConfigOpen = false },
+        )
+    }
+
+    // 团队档案对话框（新建 / 改名 / 换名册 / 进更多群）。
+    // 领队候选只取**本机**卡片：别人的 agent 当不了本机团队的领队（执行点在领队宿主）。
+    val editingTeam = teamEditing
+    if (editingTeam != null && onSaveTeam != null) {
+        val self = settingsSlice.settings.nodeId
+        val leaderOptions = hubCards.orEmpty()
+            .filter { it.hostNodeId == self }
+            .mapNotNull { card ->
+                card.agentKey?.let { key ->
+                    TeamLeaderOption(agentKey = key, label = card.displayName ?: card.employeeName ?: key)
+                }
+            }
+        val groupOptions = settingsSlice.settings.groups.map { group ->
+            TeamGroupOption(
+                groupId = group.groupId,
+                name = group.name,
+                joined = editingTeam.profileKey != null &&
+                    group.virtualAgents.orEmpty().any { it.teamId == editingTeam.profileKey },
+            )
+        }
+        TeamProfileDialog(
+            profileKey = editingTeam.profileKey,
+            initialName = editingTeam.name,
+            leaders = leaderOptions,
+            initialLeaderAgentId = editingTeam.leaderAgentId,
+            initialMembers = editingTeam.members,
+            groups = groupOptions,
+            onSave = { name, leader, members, groupIds ->
+                onSaveTeam(editingTeam.profileKey, name, leader, members, groupIds)
+                teamEditing = null
+            },
+            onDismiss = { teamEditing = null },
+        )
+    }
+
+    // 「AI 建队」助手（生成 → 预览 → 确认）：候选与手动建队同源（本机卡片当领队、
+    // 群多选）；确认 = onSaveTeam 建档案 + 执行档端口逐群落执行配置 —— 助手不发明
+    // 第二条写路径，只是替用户把表单填好。
+    val generateTeam = onGenerateTeam
+    if (aiTeamOpen && generateTeam != null && onSaveTeam != null) {
+        val self = settingsSlice.settings.nodeId
+        val leaderOptions = hubCards.orEmpty()
+            .filter { it.hostNodeId == self }
+            .mapNotNull { card ->
+                card.agentKey?.let { key ->
+                    TeamLeaderOption(agentKey = key, label = card.displayName ?: card.employeeName ?: key)
+                }
+            }
+        val groupOptions = settingsSlice.settings.groups.map { group ->
+            TeamGroupOption(groupId = group.groupId, name = group.name, joined = false)
+        }
+        val aiDefaults = com.kapp.tenon.domain.TeamScaffoldDefaults(
+            teamTitle = stringResource(Res.string.agent_team_default_name),
+            role = stringResource(Res.string.agent_team_default_role),
+            roles = listOf(
+                stringResource(Res.string.agent_team_role_coder),
+                stringResource(Res.string.agent_team_role_tester),
+                stringResource(Res.string.agent_team_role_reviewer),
+            ),
+        )
+        val leaderKeys = leaderOptions.map { it.agentKey }.toSet()
+        TeamBuilderDialog(
+            leaders = leaderOptions,
+            groups = groupOptions,
+            onGenerate = { need -> generateTeam(need, leaderKeys, aiDefaults) },
+            onConfirm = { spec, groupIds ->
+                val reasons = mutableListOf<String>()
+                onSaveTeam(null, spec.teamTitle, spec.leaderAgentId, spec.toMemberDrafts(), groupIds)
+                val port = teamExecutionPort
+                if (port != null) {
+                    val declared = spec.members.map { it.agentId }.toSet()
+                    for (groupId in groupIds) {
+                        val dirId = port.groupPointerDirId(groupId) ?: continue
+                        when (
+                            val saved = port.save(
+                                com.kapp.tenon.domain.TeamExecutionProfileUi(
+                                    groupId = groupId,
+                                    dirId = dirId,
+                                    leaderAgentId = spec.leaderAgentId,
+                                    members = spec.toExecutionMembers(),
+                                ),
+                                declared,
+                            )
+                        ) {
+                            is com.kapp.tenon.domain.TeamExecutionSaveResult.Rejected -> reasons += saved.reasons
+                            else -> Unit
+                        }
+                    }
+                }
+                reasons
+            },
+            onDismiss = { aiTeamOpen = false },
         )
     }
 
@@ -509,6 +687,7 @@ fun AgentConsoleScreen(
                         if (onLeaveAgentDetail != null) {
                             onLeaveAgentDetail()
                         } else {
+                            explicitlyClearedEntity = true
                             localDetailEntityHost = null
                             localDetailEntityKey = null
                             onBackToBoard?.invoke()
@@ -537,6 +716,7 @@ fun AgentConsoleScreen(
                     agentSlice = agentSlice,
                     nodeSlice = nodeSlice,
                     settingsSlice = settingsSlice,
+                    onEditEmployee = onEditEmployee?.let { emit -> { emit(detail) } },
                     modifier = area,
                 )
             } else {
@@ -550,6 +730,7 @@ fun AgentConsoleScreen(
                         if (onLeaveAgentDetail != null) {
                             onLeaveAgentDetail()
                         } else {
+                            explicitlyClearedEntity = true
                             localDetailEntityHost = null
                             localDetailEntityKey = null
                             onBackToBoard?.invoke()
@@ -561,7 +742,8 @@ fun AgentConsoleScreen(
             }
         } else {
             // 看板级正文：滚动列，按 [ContentWidths.Pane] 收列居中（决策稿 §2 的手机口径，
-            // 两栏右列沿用同一把尺）。页头画在外层（单列形态整幅宽、两栏形态横跨两栏之上）。
+            // 两栏右列沿用同一把尺）。页头画在外层，由 showHeader 决定这一壳要不要它：
+            // 手机壳画（五个首页 tab 共用一条顶栏），桌面壳不画（窗口标题栏 + 工具栏已是页头）。
             Column(
                 modifier = area
                     .fillMaxSize()
@@ -632,13 +814,18 @@ fun AgentConsoleScreen(
         // 同一个 [WorkspaceBoardTitleBar] / [LargeTitleBar]。此前标题画在这个带横向
         // padding 的滚动列里，铺的是页面底色 `background`，于是这一页顶部和别的页签
         // 差一整条色带（深色 #232625→#121413），切 tab 时肉眼就是「跳色」。
-        // 单列形态只在看板级画（下钻详情有自己的置顶栏，改前形态）；两栏随页面常驻
-        // —— 两栏在页头之下，下钻时左列与页头都不消失，只有右列换内容。
+        //
+        // 这条页头只属于手机壳：桌面壳传 showHeader=false，因为它已经有窗口标题栏
+        // + 工具栏；两栏形态再叠一条按 Pane 收列居中的大标题，会让它飘在左右两栏
+        // 之间、刷新圆钮孤悬右侧，属于双层页头。桌面各 tab 的内容区一律不画页面级
+        // 标题，刷新走壳的溢出菜单与快捷键。
+        // 单列形态只在看板级画（下钻详情有自己的置顶栏，改前形态）；两栏形态下
+        // 左列在页头之下常驻，下钻时只有右列换内容。
         if (showHeader && (hubAside || atBoardLevel)) {
             WorkspaceBoardTitleBar(
                 now = now,
                 onRefresh = onRefresh,
-                onCreateWorkspaceGroup = onCreateWorkspaceGroup,
+                onCreateWorkspaceGroup = if (hubAside) null else onCreateWorkspaceGroup,
                 agentSlice = agentSlice,
                 nodeSlice = nodeSlice,
                 settingsSlice = settingsSlice,

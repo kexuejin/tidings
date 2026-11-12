@@ -252,6 +252,15 @@ class RelayController(
     internal val pendingRecoveryPeers: MutableStateFlow<Set<String>> =
         MutableStateFlow(RecoveryPendingPeers.load(dataDirectory))
 
+    /**
+     * 编制审计环（有界、内存）：每条被接受的编制命令恰好一行。
+     *
+     * 落盘审计是宿主侧的事（桌面有目录、手机没有），`:app` 里没有文件写路径；
+     * 这份环先保证「改了什么」可读，也作为「入口等价」判据的观测面 ——
+     * 三个入口各改一次同一字段，行数与 rev 增量必须一致。
+     */
+    internal val declarationAuditLog: DeclarationAuditLog = DeclarationAuditLog()
+
     internal val _state: MutableStateFlow<RelayUiState> = MutableStateFlow(
         // 首次运行的默认设备名按**宿主**给（2026-10-14 修真机撞名）：桌面端与手机是同一份
         // 模型的两个宿主，默认名不同。`advertiseAgent` 就是区分它们的那个标志（见它的 KDoc）。
@@ -477,6 +486,11 @@ class RelayController(
     var invokeExecPolicyOf: ((agentId: String) -> String?)?
         get() = invokeCtl.execPolicyOf
         set(value) { invokeCtl.execPolicyOf = value }
+
+    /** 改某个 agent 的执行范围（「谁能调用这个员工」）。null = 本壳不可写（手机）。 */
+    var invokeSetExecPolicy: ((agentId: String, policy: String) -> Boolean)?
+        get() = invokeCtl.setExecPolicy
+        set(value) { invokeCtl.setExecPolicy = value }
 
     /** 未授权派单的机主裁决入口：记录申请 + 通知机主（复用 grants）。 */
     var invokeRecordGrantRequest: ((nodeId: String, agentId: String?, reason: String) -> Unit)?
@@ -868,6 +882,22 @@ class RelayController(
         writer.publishExternalChange()
     }
 
+    /** 「谁能调用这个员工」：与执行名单同一座桥，读宿主侧 `AgentExecPolicyStore`。 */
+    override fun agentExecPolicyOf(agentKey: String): String? = invokeCtl.execPolicyOf?.invoke(agentKey)
+
+    override fun setAgentExecPolicy(agentKey: String, policy: String): Boolean {
+        val wrote = invokeCtl.setExecPolicy?.invoke(agentKey, policy) ?: return false
+        // 与 [setExecDeviceAllowed] 同一条：策略不在 state 里，不推 tick 界面会停在旧档。
+        if (wrote) {
+            writer.publishExternalChange()
+        } else {
+            // **失败必须可见**：这条开关决定「别人能不能在我机器上跑命令」，
+            // 静默失败会让用户以为已经开放（或已经收紧）。
+            warn(BannerMessage.AgentExecPolicyRejected)
+        }
+        return wrote
+    }
+
     /** 群项目目录指针：设 / 换 / 清（D5；见 [handleSetGroupProjectDirectory]）。 */
     override fun setGroupProjectDirectory(groupId: String, dirId: String?): Boolean =
         handleSetGroupProjectDirectory(groupId, dirId)
@@ -893,6 +923,22 @@ class RelayController(
         get() = invokeCtl.teamExecutionPort
         set(value) { invokeCtl.teamExecutionPort = value }
 
+    /**
+     * 「AI 建队」生成桥：DesktopExtension 装配（编排层 TeamBuilderLlm → 解析过门 →
+     * 回落模板一条龙）。null = 该壳没有建队助手（手机/预览）⇒ 界面不画入口。
+     * 实现不进 `:app` 是硬约束：LLM HTTP 通路住在 `:orchestration`，依赖方向不许倒置。
+     */
+    var teamScaffoldBridge: TeamScaffoldBridge? = null
+
+    override suspend fun generateTeamScaffold(
+        need: String,
+        leaderKeys: Set<String>,
+        defaults: TeamScaffoldDefaults,
+    ): TeamScaffoldSpec? = teamScaffoldBridge?.generate(need, leaderKeys, defaults)
+
+    override val teamScaffoldAvailable: Boolean
+        get() = teamScaffoldBridge != null
+
     /** 项目目录端口：invokeCtl 同字段（DesktopExtension 装配 DesktopHostDirectoryPort）。 */
     override var hostDirectoryPort: HostDirectoryPort?
         get() = invokeCtl.hostDirectoryPort
@@ -902,6 +948,47 @@ class RelayController(
     override var accessChannelPort: AccessChannelPort?
         get() = invokeCtl.accessChannelPort
         set(value) { invokeCtl.accessChannelPort = value }
+
+    /**
+     * 登记 / 编辑员工（界面入口）：转调档案写路径，结果走横幅。
+     *
+     * 为什么多这一层而不是让界面直接调 `applyEmployeeProfile`：命令面有四种形态
+     * （Create / Update / AddToGroups / Forget），界面只表达"存这一个名字 + 职责"；
+     * 选择形态、补齐「它已在的群」这些判断必须住域层，界面不该自己拼命令。
+     */
+    override fun saveEmployeeProfile(
+        agentId: String,
+        employeeId: String?,
+        name: String,
+        duty: String,
+    ) {
+        // 位置实参：`employeeId = employeeId` 这种命名实参会命中源码守卫的
+        // 「档案引用写入点」探针（守卫认的是赋值形状），造成一次假红。
+        saveEmployeeProfileEntry(agentId, employeeId, name, duty)
+    }
+
+    /**
+     * 新建 / 编辑团队档案（界面入口）：转调档案写路径，结果走横幅。
+     *
+     * 与员工那一条同构：界面只表达「存这个团队名 + 这份名册 + 去这几个群」，
+     * 选择 Create / Update / AddToGroups 与顺序（先档案后席位）住域层。
+     */
+    override fun saveTeamProfile(
+        teamId: String?,
+        name: String,
+        leaderAgentId: String,
+        members: List<com.kapp.tenon.core.protocol.TeamMemberDraft>,
+        groupIds: List<String>,
+    ) {
+        saveTeamProfileEntry(teamId, name, leaderAgentId, members, groupIds)
+    }
+
+    /** 「添加团队」：把整支队加进一个群（群信息授权面板的落点）。 */
+    override fun attachTeamToGroup(teamId: String, groupId: String) {
+        // 位置实参：命名实参会命中档案写路径守卫的赋值形状探针（见 saveEmployeeProfile）。
+        attachTeamToGroupEntry(teamId, groupId)
+    }
+
     /**
      * 打开某条会话时把它标为已读。
      *

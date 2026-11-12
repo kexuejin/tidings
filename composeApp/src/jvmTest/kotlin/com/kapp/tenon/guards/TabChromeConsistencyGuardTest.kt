@@ -247,6 +247,38 @@ class TabChromeConsistencyGuardTest {
         )
     }
 
+    /**
+     * 手机五个 tab 共用一条页面级顶栏；桌面壳的内容区一律不画第二条。
+     *
+     * 桌面壳顶部已有窗口级 `DesktopTitleBar` + 工具栏，`AgentConsoleScreen` 若沿用默认
+     * `showHeader = true`，就会在两栏内容区再叠一条按 `ContentWidths.Pane` 收列居中的
+     * `WorkspaceBoardTitleBar`：大标题飘在左右两栏之间、刷新圆钮孤悬右侧，切 tab 时
+     * 与另外四页的 chrome 形态不一致。节点页 / 聊天页在桌面壳都传 `showHeader = false`，
+     * 智能体页必须跟着走同一条。
+     *
+     * 取**调用实参块**而不是全文 contains：注释里正当写着这个参数名，全文匹配会被自己
+     * 的注释喂饱；而且参数可能挂到别的调用上。手机壳反向断言不许显式关页头 —— 那边
+     * 五个 tab 的一致性仍由上面的规则守着。
+     */
+    @Test
+    fun `desktop shell suppresses page title bar while phone keeps it`() {
+        val desktop = GuardSourceScan.stripComments(
+            GuardSourceScan.read(src + "ui/desktop/DesktopShell.kt"),
+        )
+        val desktopArgs = GuardSourceScan.parenBlockAfter(desktop, "AgentConsoleScreen(")
+        assertTrue(
+            "showHeader = false" in desktopArgs,
+            "桌面壳的 AgentConsoleScreen 调用必须传 showHeader = false：" +
+                "窗口标题栏 + 工具栏已是页头，再画一条就是双层 chrome",
+        )
+        val phone = GuardSourceScan.stripComments(GuardSourceScan.read(src + "App.kt"))
+        val phoneArgs = GuardSourceScan.parenBlockAfter(phone, "AgentConsoleScreen(")
+        assertTrue(
+            "showHeader" !in phoneArgs,
+            "手机壳不许显式关页头：五个首页 tab 共用同一条 topbar + hairline",
+        )
+    }
+
     @Test
     fun `five home tabs share one title bar shape`() {
         val failures = mutableListOf<String>()

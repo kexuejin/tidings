@@ -1,0 +1,356 @@
+{
+  "generated_at": "2026-11-12T00:29:53.892061+00:00",
+  "tier": "headless",
+  "stage": "current",
+  "anchor": "",
+  "source": "/Users/developer/weather-relay",
+  "run_label": "single",
+  "workspace": "/Users/developer/weather-relay",
+  "host": "http://127.0.0.1:8788",
+  "agents": [
+    {
+      "key": "dsh",
+      "cli": "dsh",
+      "role": "worker"
+    }
+  ],
+  "base_head": "1437d00dae9ccd065d9e7a0c8bd63d66470ddcb5",
+  "base_tests": {
+    "rc": 0,
+    "tests": 90,
+    "pass": 90,
+    "fail": 0,
+    "skipped": 0,
+    "duration_ms": 206.449083,
+    "tail": [
+      "ℹ tests 90",
+      "ℹ suites 0",
+      "ℹ pass 90",
+      "ℹ fail 0",
+      "ℹ cancelled 0",
+      "ℹ skipped 0",
+      "ℹ todo 0",
+      "ℹ duration_ms 206.449083"
+    ]
+  },
+  "device_commits": [
+    "merge feature from sandbox"
+  ],
+  "created_files": [
+    "docs/SDLC-HARNESS-REQ.md",
+    "src/utils/uvAdvice.js",
+    "test/sdlc-harness-injected.test.js",
+    "test/uvAdvice.test.js"
+  ],
+  "environment": {
+    "python": "3.13.1",
+    "dsh": "/opt/homebrew/bin/dsh",
+    "opencode": "/Users/developer/.opencode/bin/opencode",
+    "adb": "/Users/developer/Library/Android/sdk/platform-tools/adb"
+  },
+  "acts": [
+    {
+      "act_id": "0",
+      "title": "环境体检",
+      "chain": "local",
+      "status": "PASS",
+      "verdicts": [
+        {
+          "name": "control-plane",
+          "ok": true,
+          "detail": "GET /v1/peers -> 200 {'peers': [{'nodeId': '37e7e9ca-7232-4046-becb-7929af587ef2', 'nick': 'Pixel 6',"
+        },
+        {
+          "name": "cli:dsh",
+          "ok": true,
+          "detail": "dsh -> /opt/homebrew/bin/dsh"
+        },
+        {
+          "name": "dsh-credentials",
+          "ok": true,
+          "detail": "/Users/developer/.dsh/.credentials.yaml 存在"
+        },
+        {
+          "name": "workspace-is-git",
+          "ok": true,
+          "detail": "/Users/developer/weather-relay"
+        },
+        {
+          "name": "workspace-clean",
+          "ok": true,
+          "detail": "HEAD=1437d00dae9c 脏行=0"
+        },
+        {
+          "name": "stage-files-present",
+          "ok": true,
+          "detail": "期望 []；实到 []"
+        },
+        {
+          "name": "stage-files-absent",
+          "ok": true,
+          "detail": "本阶段不该有 []；实际多出 []"
+        },
+        {
+          "name": "baseline-tests-green",
+          "ok": true,
+          "detail": "pass=90 fail=0 skipped=0 duration=206.449083ms"
+        },
+        {
+          "name": "artifacts-dir",
+          "ok": true,
+          "detail": "/tmp/tenon-ws/artifacts"
+        }
+      ],
+      "evidence": {
+        "base_head": "1437d00dae9ccd065d9e7a0c8bd63d66470ddcb5",
+        "base_dirty": [],
+        "base_tests": {
+          "rc": 0,
+          "tests": 90,
+          "pass": 90,
+          "fail": 0,
+          "skipped": 0,
+          "duration_ms": 206.449083,
+          "tail": [
+            "ℹ tests 90",
+            "ℹ suites 0",
+            "ℹ pass 90",
+            "ℹ fail 0",
+            "ℹ cancelled 0",
+            "ℹ skipped 0",
+            "ℹ todo 0",
+            "ℹ duration_ms 206.449083"
+          ]
+        }
+      },
+      "seconds": 0.51
+    },
+    {
+      "act_id": "1",
+      "title": "需求确认",
+      "chain": "cli-direct",
+      "status": "PASS",
+      "verdicts": [
+        {
+          "name": "patch-is-real",
+          "ok": true,
+          "detail": "t-1-35f148a6 2575B files=['docs/SDLC-HARNESS-REQ.md'] +26/-1"
+        },
+        {
+          "name": "requirement-doc-produced",
+          "ok": true,
+          "detail": "期望 docs/SDLC-HARNESS-REQ.md；实际 ['docs/SDLC-HARNESS-REQ.md']"
+        }
+      ],
+      "evidence": {
+        "agent": "dsh",
+        "artifact": "t-1-35f148a6",
+        "patch": {
+          "bytes": 2575,
+          "files": [
+            "docs/SDLC-HARNESS-REQ.md"
+          ],
+          "added": 26,
+          "removed": 1,
+          "has_test": false,
+          "has_impl": false,
+          "mentions_req_doc": true,
+          "mentions_injected_test": false,
+          "body_head": "diff --git a/docs/SDLC-HARNESS-REQ.md b/docs/SDLC-HARNESS-REQ.md\nindex 17f555b..06081d0 100644\n--- a/docs/SDLC-HARNESS-REQ.md\n+++ b/docs/SDLC-HARNESS-REQ.md\n@@ -4,12 +4,27 @@\n > 特性 ID：FEAT-UV-ADVICE  \n > 特性名称：紫外线（UV）指数分级与出行建议  \n > 适用项目：Weather Relay  \n-> 文档版本：v1.0  \n+> 文档版本：v1.1  \n > 状态：待实现（Ready for Dev）  \n > 说明：本文件只定义需求、契约与验收标准，不描述具体实现，也不代表该特性已经存在于当前代码中。\n \n ---\n \n+## 0. 验收标准速览\n+\n+本特性至少有 4 条可自动化验证的验收标准，编号固定为 AC1–AC4；详细判据、测试数据与通过条件见第 6 节。\n+\n+| 编号 | 一句话判据 | 自动化落点 |\n+|---|---|---|\n+| AC1 | UV 指数分级边界精确：`0-2` 弱、`3-5` 中等、`6-7` 强、`8+` 极强，小数不得先取整 | `test/uvAdvice.test.js` 表驱动边界用例 |\n+| AC2 | 四个等级的建议文案"
+        },
+        "prompt": "【执行环境约束，必须遵守】你的当前工作目录（cwd）就是本次任务专用的一次性 git worktree，里面是**本阶段该有的全部文件**——可能只有 package.json，不要假定已经存在 src/ 或 test/，需要什么目录就自己创建。所有文件读写一律使用**相对路径**，只在 cwd 内进行；禁止使用任何绝对路径，禁止访问或写入宿主主仓库目录，禁止 cd 到别处。改动只有留在 cwd 的工作树里才会被收割成补丁；写到别处等于本次任务失败。\n新增 docs/SDLC-HARNESS-REQ.md：为「紫外线出行建议」特性写需求说明，必须包含至少 4 条编号的、可用自动化测试验证的验收"
+      },
+      "seconds": 121.92
+    },
+    {
+      "act_id": "2",
+      "title": "新功能实现",
+      "chain": "cli-direct",
+      "status": "FAIL",
+      "verdicts": [
+        {
+          "name": "dispatch-harvest",
+          "ok": false,
+          "detail": "900s 内本次派单没有产出 patch.diff（不是通过，是没跑完）；会话state=[None, None, None, 'busy', None, None, None, 'busy', 'done', 'done', None, None, None, None]；活dsh进程=0；最近task.log=t-2-6fdae75f（804.3s 前写入）"
+        }
+      ],
+      "evidence": {
+        "error": "900s 内本次派单没有产出 patch.diff（不是通过，是没跑完）；会话state=[None, None, None, 'busy', None, None, None, 'busy', 'done', 'done', None, None, None, None]；活dsh进程=0；最近task.log=t-2-6fdae75f（804.3s 前写入）"
+      },
+      "seconds": 902.4
+    },
+    {
+      "act_id": "3",
+      "title": "审查与合流",
+      "chain": "local",
+      "status": "FAIL",
+      "verdicts": [
+        {
+          "name": "apply-patch",
+          "ok": true,
+          "detail": "t-1-35f148a6: /tmp/tenon-ws/artifacts/t-1-35f148a6/patch.diff:10: trailing whitespace.\n> 文档版本：v1.1  \n/tmp/tenon-ws/artifacts/t-1-35f148a6/patch.diff:47: new blank line at EOF"
+        },
+        {
+          "name": "worktree-changed",
+          "ok": true,
+          "detail": "新增脏行 [' M docs/SDLC-HARNESS-REQ.md']"
+        },
+        {
+          "name": "post-merge-tests-green",
+          "ok": false,
+          "detail": "pass=90 (基线 90) fail=0"
+        },
+        {
+          "name": "baseline-visible-to-next-sandbox",
+          "ok": true,
+          "detail": ""
+        }
+      ],
+      "evidence": {
+        "patches": [
+          "/tmp/tenon-ws/artifacts/t-1-35f148a6/patch.diff"
+        ],
+        "applied": [
+          "/tmp/tenon-ws/artifacts/t-1-35f148a6/patch.diff"
+        ],
+        "head": "1437d00dae9ccd065d9e7a0c8bd63d66470ddcb5",
+        "dirty": [
+          " M docs/SDLC-HARNESS-REQ.md"
+        ],
+        "tests": {
+          "rc": 0,
+          "tests": 90,
+          "pass": 90,
+          "fail": 0,
+          "skipped": 0,
+          "duration_ms": 199.738875,
+          "tail": [
+            "ℹ tests 90",
+            "ℹ suites 0",
+            "ℹ pass 90",
+            "ℹ fail 0",
+            "ℹ cancelled 0",
+            "ℹ skipped 0",
+            "ℹ todo 0",
+            "ℹ duration_ms 199.738875"
+          ]
+        },
+        "device_commits": [
+          "merge feature from sandbox"
+        ]
+      },
+      "seconds": 0.66
+    },
+    {
+      "act_id": "4",
+      "title": "追问续接",
+      "chain": "orchestrator",
+      "status": "NA",
+      "verdicts": [
+        {
+          "name": "not-applicable",
+          "ok": true,
+          "detail": "该链型在 headless tier 不成立，如实标 NA（不报绿）"
+        }
+      ],
+      "evidence": {},
+      "seconds": 0.0
+    },
+    {
+      "act_id": "5",
+      "title": "缺陷定位修复",
+      "chain": "cli-direct",
+      "status": "FAIL",
+      "verdicts": [
+        {
+          "name": "fault-injection-red",
+          "ok": false,
+          "detail": "注入没有造成红灯：{'npm_test': {'rc': 0, 'tests': 90, 'pass': 90, 'fail': 0, 'skipped': 0, 'duration_ms': 222.20775, 'tail': ['ℹ tests 90', 'ℹ suites 0', 'ℹ pass 90', 'ℹ fail 0', 'ℹ cancelled 0', 'ℹ skipped 0', 'ℹ todo 0', 'ℹ duration_ms 222.20775']}, 'injected_probe': {'rc': 0, 'pass': 1, 'fail': 0, 'skipped': 0, 'tail': ['ℹ pass 1', 'ℹ fail 0', 'ℹ cancelled 0', 'ℹ skipped 0', 'ℹ todo 0', 'ℹ duration_ms 69.937792']}}"
+        }
+      ],
+      "evidence": {},
+      "seconds": 0.0
+    },
+    {
+      "act_id": "6",
+      "title": "收尾验收",
+      "chain": "local",
+      "status": "FAIL",
+      "verdicts": [
+        {
+          "name": "final-tests-green",
+          "ok": true,
+          "detail": "pass=90 fail=0 skipped=0 duration=198.063667ms"
+        },
+        {
+          "name": "no-test-count-regression",
+          "ok": true,
+          "detail": "now=90 base=90"
+        },
+        {
+          "name": "no-orphan-cli-process",
+          "ok": true,
+          "detail": "pgrep 命中 0 行"
+        },
+        {
+          "name": "no-failed-acts",
+          "ok": false,
+          "detail": "失败幕 ['2', '3', '5']"
+        }
+      ],
+      "evidence": {
+        "head": "9bab1738ecc3a5833c8e32ad538a84b49cd3e6c8",
+        "dirty": [],
+        "tests": {
+          "rc": 0,
+          "tests": 90,
+          "pass": 90,
+          "fail": 0,
+          "skipped": 0,
+          "duration_ms": 198.063667,
+          "tail": [
+            "ℹ tests 90",
+            "ℹ suites 0",
+            "ℹ pass 90",
+            "ℹ fail 0",
+            "ℹ cancelled 0",
+            "ℹ skipped 0",
+            "ℹ todo 0",
+            "ℹ duration_ms 198.063667"
+          ]
+        }
+      },
+      "seconds": 0.42
+    },
+    {
+      "act_id": "i1",
+      "title": "超纲退单",
+      "chain": "orchestrator",
+      "status": "NA",
+      "verdicts": [
+        {
+          "name": "not-applicable",
+          "ok": true,
+          "detail": "该链型在 headless tier 不成立，如实标 NA（不报绿）"
+        }
+      ],
+      "evidence": {},
+      "seconds": 0.0
+    },
+    {
+      "act_id": "i2",
+      "title": "硬打断",
+      "chain": "orchestrator",
+      "status": "NA",
+      "verdicts": [
+        {
+          "name": "not-applicable",
+          "ok": true,
+          "detail": "该链型在 headless tier 不成立，如实标 NA（不报绿）"
+        }
+      ],
+      "evidence": {},
+      "seconds": 0.0
+    }
+  ]
+}

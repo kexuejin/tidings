@@ -180,6 +180,16 @@ internal class RelayControllerAgentInvokeComponent(private val host: AgentDomain
     var execPolicyOf: ((agentKey: String) -> String?)? = null
 
     /**
+     * 改某个 agent 的执行范围（「谁能调用这个员工」的唯一写入口）。
+     *
+     * 返回 false = 取值非法 / 这台机器上写不进去（宿主侧 store 拒绝）——
+     * 界面要如实报「没改成」，不能静默当成已保存。
+     *
+     * null = 当前壳没有可写的宿主（手机）：**档案只住宿主机**，手机不画这个开关。
+     */
+    var setExecPolicy: ((agentKey: String, policy: String) -> Boolean)? = null
+
+    /**
      * 未授权派单的**机主裁决入口**（复用 grants）：记录申请 + 通知机主。
      * 由 desktopApp 接到 `AgentGrantStore.recordRequest` 与通知上；null = 只回拒绝帧。
      */

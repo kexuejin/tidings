@@ -38,6 +38,16 @@ headless tier 跑前者，orchestrator 专属幕**如实标 N/A，不报绿**。
 4. 跑前要求目标仓工作树干净；默认**不自动回滚**，收尾列出脏文件；显式 `--reset`
    才还原到跑前 HEAD。
 5. 每幕读数、环境元数据、链型、PASS/FAIL/N/A 全部落盘到证据目录。
+6. **幕 0 是分层 doctor，不是平铺判据表**（参照 LobeHub `lh doctor` 的检测纪律）：
+   `runtime → install → credentials → endpoints → scope → execution` 按序走，每项
+   `status / detail / evidence / fix / skipped_by`，上游一失败下游全标 `not run (根因)`，
+   不逐项报派生症状。静态层只负责**归因**：可执行文件、`--version`、安装产物一致性
+   全都在 bundle boot 之前，装得齐不等于跑得起来；权威判据是 `execution` 层真跑
+   一次 CLI，只认 `rc=0` + NDJSON `final`。终端读数与 `doctor.json` 出自同一报告对象。
+7. 默认就跑真任务（本 harness 就是 benchmark 场景，不设「免费模式」）；`--offline`
+   才跳过 execution，但结论是「未验证」而非通过。`--strict` 把安装漂移这类 warn
+   提升为失败；`--json` 把同一报告对象打到 stdout。体检不成立时后续幕标
+   `not run (...)`：既不记通过，也不逐幕伪造失败。
 
 ## 可反复验收：阶段锚点 + 隔离重放
 
@@ -62,8 +72,9 @@ apply+commit 进本轮检出，下一幕的沙箱基线才看得见上一幕成�
 
 ## 跑法
 
-    python3 scripts/sdlc-lifecycle.py --dry-run
-    python3 scripts/sdlc-lifecycle.py --preflight-only
+    python3 scripts/sdlc-lifecycle.py --dry-run             # 纯结构守卫，不碰网络/设备/LLM
+    python3 scripts/sdlc-lifecycle.py --preflight-only      # 分层 doctor，含一次 CLI 真跑
+    python3 scripts/sdlc-lifecycle.py --preflight-only --offline --json   # 静态层 + 机读报告（结论为未验证）
     # 从空仓反复重放完整生命周期（真 dsh，两轮）
     python3 scripts/sdlc-lifecycle.py --stage empty --plan from-zero --repeat 2 --timeout 360
     # 只重放「空仓 → 需求 → 原型」短链，用于快速回归
@@ -74,10 +85,12 @@ apply+commit 进本轮检出，下一幕的沙箱基线才看得见上一幕成�
     # 真机链（orchestrator 幕需要人守门）
     python3 scripts/sdlc-lifecycle.py --tier real --act 4,i1,i2
 
-退出码：0 全绿 / 1 判据失败 / 2 环境或用法错误。
+退出码：0 全绿 / 1 有明确失败项（报根因，不报派生症状）/ 2 未验证（上游短路、
+`--offline` 跳过真跑）或环境用法错误。`--offline` 与 `--strict` 都不许把未验证写成通过。
 """
 
 import argparse
+import glob
 import json
 import os
 import re
@@ -111,6 +124,22 @@ FEATURE_TEST = "test/uvAdvice.test.js"
 # 收尾「无孤儿 CLI 进程」的匹配串必须与 CliSubprocessDriver.dshArgs 对齐，
 # 否则 pgrep 永远命不中 ⇒ 判据恒绿。dry-run 用源码守卫钉住这件事。
 CLI_PATTERN = "dsh --profile headless"
+
+# 前置真跑门：CLI 的可执行文件在、甚至 `--version` 正常，都只发生在 bundle boot 之前。
+# 安装漂移（package.json 与编译产物版本不一致、node_modules 布局被改）时静态判据全绿，
+# 真派单却必然 exit=1。唯一能看见它的观测点是一次真实短任务。
+DSH_SMOKE_PROMPT = "Reply with the single word OK"
+DSH_SMOKE_TIMEOUT = float(os.environ.get("E2E_DSH_SMOKE_TIMEOUT", "45"))
+DSH_SMOKE_COMMAND = "dsh --profile headless --json 'Reply with the single word OK'"
+
+# 分层体检：顺序即依赖顺序，上游失败后下游一律 skip，不再各报一个派生症状。
+# install 层只做安装漂移的**归因读数**（package.json 版本 vs 编译产物时间），
+# 它证明不了能跑 —— ESM/bundle 在静态检查之后才加载，过旧运行时或缺失模块会让
+# 静态层全绿而真跑失败，所以 execution 才是权威层。这段边界随报告一起落盘。
+DOCTOR_LAYERS = ("runtime", "install", "credentials", "endpoints", "scope", "execution")
+DOCTOR_BOUNDARY = ("静态层只归因，execution 真跑才是权威；bundle/ESM 在静态检查之后加载，"
+                   "静态全绿不等于能跑")
+DOCTOR_EXIT = {0: "全绿", 1: "有明确失败项", 2: "未验证（上游短路或 --offline）"}
 
 RUNS_ROOT = os.environ.get("E2E_RUNS_ROOT", "/tmp/sdlc-runs")
 
@@ -192,6 +221,7 @@ class Context:
     run_label: str = ""
     anchor: str = ""
     started_ms: int = 0
+    doctor_report: dict = field(default_factory=dict)
 
 
 # ---------------------------------------------------------------------------
@@ -672,64 +702,341 @@ def foreground_package():
 # 幕
 # ---------------------------------------------------------------------------
 
-def act0_preflight(ctx):
-    v = []
-    code, body = call("GET", "/v1/peers", timeout=5)
-    v.append(Verdict("control-plane", code == 200, f"GET /v1/peers -> {code} {str(body)[:80]}"))
+def cli_dsh_smoke():
+    """真跑一次短任务，证明 CLI 能完成一轮，而不是「文件在」或「能报版本」。
 
+    判据只认 `rc=0` 且 NDJSON 里出现 final 事件；`--version` 读的是 package.json 的
+    version 字段，不触发 boot，明确不许拿来当健康检查。凭证缺失先短路并把原因归到
+    凭证，超时与退出码分开归因，读数自带 evidence 与 fix —— 后续幕才不会各自报一个
+    派生症状。返回 (Verdict, evidence_dict)。
+    """
+    cli = shutil.which("dsh")
+    cred = os.path.expanduser("~/.dsh/.credentials.yaml")
+    probe = DSH_SMOKE_COMMAND
+    if cli is None:
+        return (Verdict("cli-dsh-smoke", False,
+                        "not run (cli:dsh)：dsh 不在 PATH；fix：装好 CLI 或设 TENON_DSH_CLI"),
+                {"reason": "cli-missing", "command": probe})
+    if not os.path.isfile(cred):
+        return (Verdict("cli-dsh-smoke", False,
+                        "not run (dsh-credentials)：凭证缺失，先补凭证再判 CLI；fix：dsh login"),
+                {"reason": "credentials", "command": probe, "credentials": cred})
+
+    t0 = time.time()
+    outcome, rc, out, err = "spawn-error", None, "", ""
+    try:
+        p = subprocess.run([cli, "--profile", "headless", "--json", DSH_SMOKE_PROMPT],
+                           capture_output=True, text=True, timeout=DSH_SMOKE_TIMEOUT)
+        outcome, rc, out, err = "exit", p.returncode, p.stdout or "", p.stderr or ""
+    except subprocess.TimeoutExpired as e:
+        outcome = "timeout"
+        out = e.stdout.decode("utf-8", "replace") if isinstance(e.stdout, bytes) else (e.stdout or "")
+        err = e.stderr.decode("utf-8", "replace") if isinstance(e.stderr, bytes) else (e.stderr or "")
+    except OSError as e:
+        err = str(e)
+    elapsed = round(time.time() - t0, 1)
+    text = out + err
+    has_final = bool(re.search(r'"type"\s*:\s*"final"', out))
+    marker = ""
+    for needle in ("no agent factory registered", "Failed plugins", "ERR_MODULE_NOT_FOUND",
+                   "Cannot find module", "unauthorized", "authentication", "credentials"):
+        if needle.lower() in text.lower():
+            marker = needle
+            break
+    ok = outcome == "exit" and rc == 0 and has_final
+    # 通过时别把上一次失败的启动日志当成本轮证据，也别挂一条无关的修复命令。
+    logs = glob.glob(os.path.expanduser("~/.dsh/logs/startup-*.log"))
+    startup = max(logs, key=os.path.getmtime) if (logs and not ok) else ""
+    fix = "fix：不适用（真跑通过）" if ok else (
+        "fix：恢复 CLI 安装与编译产物一致（pnpm install/build），复核 " + probe)
+    if not ok and outcome == "timeout":
+        fix = "fix：核对凭证/网络/模型端点，或调 E2E_DSH_SMOKE_TIMEOUT 后复核 " + probe
+    if not ok and marker in ("unauthorized", "authentication", "credentials"):
+        fix = "fix：先修凭证（dsh login），不要把凭证故障记成 CLI 故障"
+    detail = (f"{outcome} rc={rc} elapsed={elapsed}s final_event={has_final} "
+              f"marker={marker or 'none'} | evidence: {startup or '~/.dsh/logs'} | {fix}")
+    evidence = {
+        "command": probe, "binary": cli, "outcome": outcome, "rc": rc,
+        "elapsed_s": elapsed, "final_event": has_final, "marker": marker,
+        "startup_log": startup, "fix": fix,
+        "stdout_tail": out[-400:], "stderr_tail": err[-400:],
+    }
+    return Verdict("cli-dsh-smoke", ok, detail), evidence
+
+
+def doctor_check(layer, name, status, detail, evidence=None, fix="", skipped_by=""):
+    """一条检查记录。终端渲染与 doctor.json 都从同一个 list 出，不许两处各写一份。"""
+    return {"layer": layer, "name": name, "status": status, "detail": detail,
+            "evidence": evidence or {}, "fix": fix, "skipped_by": skipped_by}
+
+
+def doctor_runtime(ctx):
+    """静态第一层：可执行文件 + 真实 bundle 入口。只归因，不证明能跑。"""
+    checks = []
     for agent in ctx.agents:
         path = shutil.which(agent.cli)
-        v.append(Verdict(f"cli:{agent.key}", path is not None, f"{agent.cli} -> {path or 'not in PATH'}"))
-    cred = os.path.expanduser("~/.dsh/.credentials.yaml")
-    v.append(Verdict("dsh-credentials", os.path.isfile(cred),
-                     f"{cred} {'存在' if os.path.isfile(cred) else '缺失'}"))
+        checks.append(doctor_check(
+            "runtime", f"cli:{agent.key}", "pass" if path else "fail",
+            f"{agent.cli} -> {path or 'not in PATH'}", {"binary": path},
+            "" if path else "fix：装好 CLI 或设 TENON_DSH_CLI"))
+    cli = shutil.which("dsh")
+    anchor, node_bin, wrapper = "", "", cli or ""
+    if cli:
+        try:
+            with open(cli, encoding="utf-8", errors="replace") as fh:
+                text = fh.read()
+            m = re.search(r"(\S+/apps/cli/lib/bin\.js)", text)
+            anchor = m.group(1) if m else ""
+            n = re.search(r"(\S+/bin/node)\b", text)
+            node_bin = n.group(1) if n else ""
+        except OSError:
+            pass
+    if not any(a.cli == "dsh" for a in ctx.agents):
+        checks.append(doctor_check(
+            "runtime", "bundle-entry", "n/a", "--agent 未含 dsh，CLI 链不在被测范围",
+            {"wrapper": wrapper}, skipped_by="--agent 未含 dsh"))
+    else:
+        ok = bool(anchor) and os.path.isfile(anchor) and (not node_bin or os.access(node_bin, os.X_OK))
+        checks.append(doctor_check(
+            "runtime", "bundle-entry", "pass" if ok else "fail",
+            f"wrapper={wrapper} bundle={anchor or '未解析'} node={node_bin or '未解析'}",
+            {"wrapper": wrapper, "bundle": anchor, "node": node_bin},
+            "" if ok else "fix：核对 dsh 包装脚本指向的入口与 node 是否可执行"))
+    return checks, {"wrapper": wrapper, "bundle": anchor, "node": node_bin}
 
+
+def doctor_install(runtime):
+    """安装漂移归因：package.json 版本 vs 编译产物时间。只读，且只报 warn。
+
+    这一层看得见「源码是 rc.1、lib 产物还停在旧构建」，但看不见 bundle boot 之后
+    的插件激活失败 —— 所以它是线索，不是判据。--strict 才会把 warn 提升为失败。
+    """
+    anchor = runtime.get("bundle", "")
+    if not anchor:
+        return [doctor_check("install", "install-consistency", "n/a",
+                             "无 bundle 锚点，安装一致性不适用",
+                             {"bundle": anchor}, skipped_by="bundle-entry")]
+    # anchor 形如 <root>/apps/cli/lib/bin.js；上溯两级才是 apps/cli（package.json 所在）。
+    cli_dir = os.path.dirname(os.path.dirname(anchor))
+    pkg = os.path.join(cli_dir, "package.json")
+    try:
+        with open(pkg, encoding="utf-8") as fh:
+            version = json.load(fh).get("version", "")
+        pkg_mtime = os.path.getmtime(pkg)
+        bin_mtime = os.path.getmtime(anchor)
+    except (OSError, ValueError, KeyError, AttributeError, TypeError) as e:
+        return [doctor_check("install", "install-consistency", "warn",
+                             f"安装读数不可得：{e}", {"package": pkg, "bundle": anchor},
+                             "fix：确认 CLI 源码仓与编译产物是否同一版本")]
+    drift_days = round((pkg_mtime - bin_mtime) / 86400.0, 2)
+    ev = {"package": pkg, "bundle": anchor, "version": version,
+          "package_mtime": pkg_mtime, "bundle_mtime": bin_mtime,
+          "bundle_lags_days": drift_days}
+    stale = drift_days > 1 or not version
+    return [doctor_check(
+        "install", "install-consistency", "warn" if stale else "pass",
+        f"version={version or '未知'} 编译产物落后 package.json {drift_days} 天"
+        + ("（疑似安装漂移，仅归因）" if stale else ""),
+        ev, "fix：恢复安装与编译产物一致（pnpm install/build），别只信 --version" if stale else "")]
+
+
+def doctor_credentials():
+    cred = os.path.expanduser("~/.dsh/.credentials.yaml")
+    ok = os.path.isfile(cred)
+    return [doctor_check("credentials", "dsh-credentials", "pass" if ok else "fail",
+                         f"{cred} {'存在' if ok else '缺失'}", {"path": cred, "exists": ok},
+                         "" if ok else "fix：先补凭证（dsh login），不要把凭证故障记成 CLI 故障")]
+
+
+def doctor_endpoints():
+    code, body = call("GET", "/v1/peers", timeout=5)
+    checks = [doctor_check("endpoints", "control-plane", "pass" if code == 200 else "fail",
+                           f"GET /v1/peers -> {code} {str(body)[:80]}", {"code": code},
+                           "" if code == 200 else "fix：确认控制面在 8788 且宿主已启动")]
+    hcode, hbody = call("GET", "/healthz", timeout=5)
+    # /healthz 只表宿主存活，字段里没有 CLI 子进程驱动；它挂了是线索不是 CLI 判据。
+    checks.append(doctor_check(
+        "endpoints", "control-plane-healthz", "pass" if hcode == 200 else "warn",
+        f"GET /healthz -> {hcode} {str(hbody)[:120]}",
+        {"code": hcode, "body": str(hbody)[:200]},
+        "" if hcode == 200 else "fix：/healthz 不含 CLI 驱动，不能拿它替代真跑"))
+    return checks
+
+
+def doctor_scope(ctx):
+    """工作区/锚点/基线读数。副作用照旧写回 ctx，后续幕依赖这些字段。"""
+    checks = []
     ws = ctx.args.workspace
     exists = os.path.isdir(os.path.join(ws, ".git"))
-    v.append(Verdict("workspace-is-git", exists, ws))
+    checks.append(doctor_check("scope", "workspace-is-git", "pass" if exists else "fail",
+                               ws, {"workspace": ws},
+                               "" if exists else "fix：--workspace 指向一个 git 仓"))
+    if not exists:
+        return checks
     stage = ctx.args.stage
     anchor, expected, forbidden, has_tests = STAGES[stage]
-    if exists:
-        ctx.base_head, ctx.base_dirty = git_state(ws)
-        v.append(Verdict("workspace-clean", not ctx.base_dirty,
-                         f"HEAD={ctx.base_head[:12]} 脏行={len(ctx.base_dirty)}"))
-        if anchor:
-            v.append(Verdict("anchor-checked-out", ctx.base_head.startswith(anchor),
-                             f"stage={stage} 期望锚点 {anchor}；实际 {ctx.base_head[:12]}"))
-        present = [p for p in expected if os.path.exists(os.path.join(ws, p))]
-        v.append(Verdict("stage-files-present", len(present) == len(expected),
-                         f"期望 {expected}；实到 {present}"))
-        leaked = [p for p in forbidden if os.path.exists(os.path.join(ws, p))]
-        v.append(Verdict("stage-files-absent", not leaked,
-                         f"本阶段不该有 {forbidden}；实际多出 {leaked}"))
-        t = npm_test(ws)
-        ctx.base_tests = t
-        if has_tests:
-            v.append(Verdict("baseline-tests-green",
-                             t["rc"] == 0 and t["fail"] == 0 and (t["pass"] or 0) > 0,
-                             f"pass={t['pass']} fail={t['fail']} skipped={t['skipped']} duration={t['duration_ms']}ms"))
-        else:
-            v.append(Verdict("baseline-has-no-implementation",
-                             not os.path.isdir(os.path.join(ws, "src")),
-                             f"stage={stage}「还没有实现」即正确基线；"
-                             f"npm test rc={t['rc']} 只作读数，不拿预期红判失败"))
-        if stage != "current":
-            _, src_dirty = git_state(ctx.args.source)
-            v.append(Verdict("source-repo-untouched", not src_dirty,
-                             f"{ctx.args.source} 脏行={len(src_dirty)}"))
-            v.append(Verdict("workspace-is-isolated",
-                             os.path.abspath(ws) != os.path.abspath(ctx.args.source),
-                             f"检出目录 {ws} ≠ 只读源仓 {ctx.args.source}"))
-
+    ctx.base_head, ctx.base_dirty = git_state(ws)
+    clean = not ctx.base_dirty
+    checks.append(doctor_check("scope", "workspace-clean", "pass" if clean else "fail",
+                               f"HEAD={ctx.base_head[:12]} 脏行={len(ctx.base_dirty)}",
+                               {"head": ctx.base_head, "dirty": sorted(ctx.base_dirty)},
+                               "" if clean else "fix：先提交或还原目标仓的改动"))
+    if anchor:
+        ok = ctx.base_head.startswith(anchor)
+        checks.append(doctor_check("scope", "anchor-checked-out", "pass" if ok else "fail",
+                                   f"stage={stage} 期望锚点 {anchor}；实际 {ctx.base_head[:12]}",
+                                   {"expected": anchor, "actual": ctx.base_head[:12]},
+                                   "" if ok else "fix：用 --stage 从只读源仓重新检出"))
+    present = [p for p in expected if os.path.exists(os.path.join(ws, p))]
+    checks.append(doctor_check("scope", "stage-files-present",
+                               "pass" if len(present) == len(expected) else "fail",
+                               f"期望 {expected}；实到 {present}",
+                               {"expected": list(expected), "present": present}))
+    leaked = [p for p in forbidden if os.path.exists(os.path.join(ws, p))]
+    checks.append(doctor_check("scope", "stage-files-absent", "pass" if not leaked else "fail",
+                               f"本阶段不该有 {forbidden}；实际多出 {leaked}",
+                               {"leaked": leaked}))
+    t = npm_test(ws)
+    ctx.base_tests = t
+    if has_tests:
+        ok = t["rc"] == 0 and t["fail"] == 0 and (t["pass"] or 0) > 0
+        checks.append(doctor_check(
+            "scope", "baseline-tests-green", "pass" if ok else "fail",
+            f"pass={t['pass']} fail={t['fail']} skipped={t['skipped']} duration={t['duration_ms']}ms", t))
+    else:
+        ok = not os.path.isdir(os.path.join(ws, "src"))
+        checks.append(doctor_check(
+            "scope", "baseline-has-no-implementation", "pass" if ok else "fail",
+            f"stage={stage}「还没有实现」即正确基线；npm test rc={t['rc']} 只作读数，不拿预期红判失败", t))
+    if stage != "current":
+        _, src_dirty = git_state(ctx.args.source)
+        clean_src = not src_dirty
+        checks.append(doctor_check("scope", "source-repo-untouched",
+                                   "pass" if clean_src else "fail",
+                                   f"{ctx.args.source} 脏行={len(src_dirty)}",
+                                   {"source": ctx.args.source, "dirty": sorted(src_dirty)}))
+        isolated = os.path.abspath(ws) != os.path.abspath(ctx.args.source)
+        checks.append(doctor_check("scope", "workspace-is-isolated",
+                                   "pass" if isolated else "fail",
+                                   f"检出目录 {ws} ≠ 只读源仓 {ctx.args.source}"))
     if ctx.args.tier == "real":
         rc, out, _ = run_cmd(["adb", "devices"])
         serials = [ln.split("\t")[0] for ln in out.splitlines()[1:] if "\tdevice" in ln]
-        v.append(Verdict("adb-device", bool(serials), f"在线设备 {serials}"))
-        v.append(Verdict("desktop-db", os.path.isfile(desktop_db()), desktop_db()))
+        checks.append(doctor_check("scope", "adb-device", "pass" if serials else "fail",
+                                   f"在线设备 {serials}", {"serials": serials}))
+        db = desktop_db()
+        checks.append(doctor_check("scope", "desktop-db", "pass" if os.path.isfile(db) else "fail",
+                                   db, {"path": db}))
+    ok = os.path.isdir(ARTIFACTS)
+    checks.append(doctor_check("scope", "artifacts-dir", "pass" if ok else "fail",
+                               ARTIFACTS, {"path": ARTIFACTS},
+                               "" if ok else "fix：确认宿主沙箱产物目录已创建"))
+    return checks
 
-    v.append(Verdict("artifacts-dir", os.path.isdir(ARTIFACTS), ARTIFACTS))
-    return v, {"base_head": ctx.base_head, "base_dirty": sorted(ctx.base_dirty),
-               "base_tests": ctx.base_tests}
+
+def doctor_execution(ctx):
+    """权威层：真跑一次 CLI。`--offline` 跳过但结论必须是「未验证」，绝不记通过。"""
+    name = "cli-dsh-smoke"
+    if not any(a.cli == "dsh" for a in ctx.agents):
+        return [doctor_check("execution", name, "n/a",
+                             "--agent 未含 dsh，CLI 链不在被测范围（不记通过）",
+                             {"agents": [a.cli for a in ctx.agents]},
+                             skipped_by="--agent 未含 dsh")]
+    if ctx.args.offline:
+        return [doctor_check("execution", name, "skip",
+                             "not run (--offline)：真跑被跳过，链路未验证",
+                             {"command": DSH_SMOKE_COMMAND},
+                             "fix：去掉 --offline 后复核 " + DSH_SMOKE_COMMAND, "--offline")]
+    v, ev = cli_dsh_smoke()
+    # cli_dsh_smoke 的 detail 自带一段 fix；这里剥掉它，改由报告对象的 fix 字段
+    # 单独承载，否则终端与 Verdict 各拼一次，同一条修复命令会出现三遍。
+    detail = re.split(r"\s\|\sfix：", v.detail)[0]
+    return [doctor_check("execution", v.name, "pass" if v.ok else "fail",
+                         detail, ev, "" if v.ok else ev.get("fix", ""))]
+
+
+DOCTOR_LAYER_FN = {
+    "runtime": lambda ctx, rt: doctor_runtime(ctx),
+    "install": lambda ctx, rt: (doctor_install(rt), None),
+    "credentials": lambda ctx, rt: (doctor_credentials(), None),
+    "endpoints": lambda ctx, rt: (doctor_endpoints(), None),
+    "scope": lambda ctx, rt: (doctor_scope(ctx), None),
+    "execution": lambda ctx, rt: (doctor_execution(ctx), None),
+}
+
+
+def run_doctor(ctx):
+    """按层顺序跑体检，失败即短路下游；返回 (report, verdicts)。
+
+    终端读数、doctor.json、result.json 全部出自同一个 report 对象。
+    """
+    mode = "offline" if ctx.args.offline else "deep"
+    checks, root_cause, runtime = [], None, {}
+    for layer in DOCTOR_LAYERS:
+        if root_cause:
+            checks.append(doctor_check(
+                layer, "not-run", "skip",
+                f"not run ({root_cause})：本层未执行（不记通过，也不记失败）",
+                {"upstream": root_cause},
+                "fix：先修 " + root_cause, root_cause))
+            continue
+        produced, extra = DOCTOR_LAYER_FN[layer](ctx, runtime)
+        if layer == "runtime":
+            runtime = extra or {}
+        for c in produced:
+            if c["status"] == "warn" and ctx.args.strict:
+                c["status"] = "fail"
+                c["detail"] = "[strict] " + c["detail"]
+            if root_cause:
+                c["status"] = "skip"
+                c["skipped_by"] = root_cause
+                c["detail"] = f"not run ({root_cause})：同层后续项不再判定"
+            checks.append(c)
+            if c["status"] == "fail":
+                root_cause = c["name"]
+    failed = any(c["status"] == "fail" for c in checks)
+    unverified = any(c["status"] == "skip" for c in checks)
+    code = 1 if failed else (2 if unverified else 0)
+    report = {
+        "generated_at": datetime.now(timezone.utc).isoformat(),
+        "mode": mode, "strict": bool(ctx.args.strict),
+        "layers": list(DOCTOR_LAYERS), "checks": checks,
+        "root_cause": root_cause, "exit_code": code,
+        "exit_code_meaning": DOCTOR_EXIT, "boundary": DOCTOR_BOUNDARY,
+    }
+    # 终端与 doctor.json 同源：都遍历 report["checks"]，不另写一份渲染逻辑。
+    print(f"\n=== doctor · mode={mode} strict={bool(ctx.args.strict)} ===", flush=True)
+    for c in report["checks"]:
+        print(f"  [{c['status']:<4}] {c['layer']}/{c['name']} — {c['detail']}", flush=True)
+        if c["fix"]:
+            print("         " + c["fix"], flush=True)
+    print(f"  root_cause={root_cause or 'none'} exit_code={code} ({DOCTOR_EXIT[code]})", flush=True)
+    os.makedirs(ctx.out_dir, exist_ok=True)
+    with open(os.path.join(ctx.out_dir, "doctor.json"), "w", encoding="utf-8") as fh:
+        json.dump(report, fh, ensure_ascii=False, indent=2)
+    verdicts = []
+    for c in checks:
+        if c["status"] == "skip":
+            verdicts.append(Verdict(
+                "not-run", False,
+                f"not run ({c['skipped_by']})：{c['layer']}/{c['name']} 未执行（不记通过，也不记失败）"))
+        elif c["status"] == "n/a":
+            verdicts.append(Verdict(c["name"], True, "[n/a] " + c["detail"] + "（不适用，不参与判定）"))
+        else:
+            detail = ("[warn] " if c["status"] == "warn" else "") + c["detail"]
+            if c["fix"]:
+                detail += " | " + c["fix"]
+            verdicts.append(Verdict(c["name"], c["status"] != "fail", detail))
+    return report, verdicts
+
+
+def act0_preflight(ctx):
+    report, verdicts = run_doctor(ctx)
+    ctx.doctor_report = report
+    smoke = next((c for c in report["checks"] if c["name"] == "cli-dsh-smoke"), {})
+    return verdicts, {"doctor": report, "base_head": ctx.base_head,
+                      "base_dirty": sorted(ctx.base_dirty), "base_tests": ctx.base_tests,
+                      "cli_smoke": smoke}
 
 
 PROMPTS = {
@@ -1260,17 +1567,22 @@ def act_a2_review(ctx):
     group = os.environ.get("E2E_GROUP", "").strip()
     db = desktop_db()
     conv = "group:" + group if group else ""
+    # 窗口锚点是**轮次开始**（run_once 赋值 ctx.started_ms），不是幕开始：
+    # 原型卡在上游幕（a1/a2）期间就可能落库，回看窗必须覆盖整轮。
     since = (ctx.started_ms or int(time.time() * 1000)) - 60_000
     cards = _prototype_cards(conv, since, db) if conv else []
     # 先验读侧：判据红了要能确定「是产品没出卡」，而不是「判据读错了列」。
     # 这一条读错列时必然红，且文案直接指出是读侧问题（2026-11-10 踩过一次）。
     reader_ok, reader_detail = card_reader_self_check()
+
+    def card_verdict_detail() -> str:
+        return (f"conv={conv} 卡片库命中 {len(cards)} 张带已投递网页原型的卡"
+                if conv else "需要 E2E_GROUP 才能定位群会话；不跳过、不猜")
+
+    card_v = Verdict("prototype-card-delivered", bool(cards), card_verdict_detail())
     v = [
         Verdict("card-reader-self-check", reader_ok, reader_detail),
-        Verdict("prototype-card-delivered", bool(cards),
-                (f"conv={conv} 卡片库命中 {len(cards)} 张带已投递网页原型的卡")
-                if conv else
-                "需要 E2E_GROUP 才能定位群会话；不跳过、不猜"),
+        card_v,
     ]
     # 预览入口：真跑客户端路由单测 —— 判的是「.html 认得出、已投递+已落盘才给入口、
     # 网页原型走系统打开」，不是「源码里有个 if」。
@@ -1295,8 +1607,23 @@ def act_a2_review(ctx):
         last = pkg or last
         if pkg in BROWSER_PACKAGES:
             break
+        # 产物卡常在人守门窗口内才落库（宿主广播 → 各端落库有秒级延迟，人点开
+        # 之前卡可能刚到）。一次性快照会把「正在送达的卡」读成「没有卡」——
+        # 2026-11-12 real 档 a2r：六条判据绿、唯独卡片 0 命中，投递发生在读数之后。
+        if conv:
+            fresh = _prototype_cards(conv, since, db)
+            if fresh:
+                cards = fresh
         pkg = ""
         time.sleep(3)
+    if conv:
+        # 浏览器先开、卡后到（或守门窗口极短）时，退出循环再补最后一次读数。
+        fresh = _prototype_cards(conv, since, db)
+        if fresh:
+            cards = fresh
+    # 用最终读数重写卡片判据：ok/detail 都在幕开头算过一次，会停在「投递前」的旧世界。
+    card_v.ok = bool(cards)
+    card_v.detail = card_verdict_detail()
     v.append(Verdict("prototype-opened-in-browser", bool(pkg),
                      ("前台包名 " + pkg) if pkg else
                      str(budget) + "s 内前台不是浏览器（最后读到："
@@ -1527,6 +1854,119 @@ def dry_run(ctx):
     checks.append(("review-gate-idle-requires-live-link",
                    bool(pi_src) and "if not linked:" in pi_src
                    and "linkTotal" in pi_src and "return None, " in pi_src))
+    # 9b) 卡片判据不许是幕开头的一次性快照：产物卡常在人守门窗口内才落库
+    #     （2026-11-12 real 档 a2r：六条判据全绿、唯独卡片 0 命中 —— 投递发生在
+    #     读数之后）。守卫钉住两件事：人守门 while 循环**体内**必须重查卡片库；
+    #     回看窗必须锚在轮次开始（ctx.started_ms 真的在 run_once 里被赋值）。
+    #     两处都不能对整份源码 contains —— 守卫自己的 needle 会自绊倒（假绿，
+    #     2026-11-13 反向验证实测：needle 出现在守卫自身源码里，守卫永远为真）。
+    lines = a2r.splitlines()
+    loop_at = next((i for i, l in enumerate(lines)
+                    if l.strip().startswith("while time.time() < deadline")), None)
+    loop_body = []
+    if loop_at is not None:
+        for l in lines[loop_at + 1:]:
+            if l.strip() and not l.startswith("        "):
+                break
+            loop_body.append(l)
+    checks.append(("review-gate-polls-cards-during-human-window",
+                   loop_at is not None and "_prototype_cards(" in "\n".join(loop_body)))
+    m_run = re.search(r"def run_once\(ctx, order\):(.*?)\n(?=def )", src, re.S)
+    run_once_src = m_run.group(1) if m_run else ""
+    checks.append(("review-gate-window-anchored-to-run-start",
+                   "ctx.started_ms = int(time.time() * 1000)" in run_once_src
+                   and "ctx.started_ms or int(time.time() * 1000)" in a2r))
+    # 10) 前置真跑门：which / --version 都看不到 bundle boot 之后的故障，静态判据
+    #     必然假绿。守卫把「真任务 / final 事件 / 凭证短路 / 超时分层 / 证据+fix /
+    #     失败短路」逐条钉住；同时证明 dry-run 不会去跑它（dry-run 不许碰 LLM）。
+    smoke_name = "cli_dsh_" + "smoke"
+    sm = re.search(r"def " + smoke_name + r"\(\):(.*?)\n(?=def )", src, re.S)
+    sm_src = sm.group(1) if sm else ""
+    ro = re.search(r"def run_once\(ctx, order\):(.*?)\n(?=def )", src, re.S)
+    ro_src = ro.group(1) if ro else ""
+    dr = re.search(r"def dry_run\(ctx\):(.*?)\n(?=def )", src, re.S)
+    dr_src = dr.group(1) if dr else ""
+    checks.append(("cli-smoke-runs-a-real-task",
+                   bool(sm_src) and '"--profile", "headless", "--json"' in sm_src
+                   and "DSH_SMOKE_PROMPT" in sm_src and '"--version"' not in sm_src))
+    checks.append(("cli-smoke-requires-final-event-and-rc-zero",
+                   "ok = outcome == \"exit\" and rc == 0 and has_final" in sm_src
+                   and 're.search(r\'"type"' in sm_src))
+    checks.append(("cli-smoke-short-circuits-on-credentials",
+                   "not run (dsh-credentials)" in sm_src and "os.path.isfile(cred)" in sm_src))
+    checks.append(("cli-smoke-separates-timeout-from-exit",
+                   "TimeoutExpired" in sm_src and 'outcome == "timeout"' in sm_src
+                   and 'outcome == "exit"' in sm_src))
+    checks.append(("cli-smoke-report-carries-evidence-and-fix",
+                   '"fix": fix' in sm_src and '"startup_log"' in sm_src and "fix：" in sm_src))
+    # 按行比对而不是子串：守卫自己的字面量、注释里的同名串都不许冒充真实接线。
+    smoke_call = "cli_dsh_" + "smoke()"
+    checks.append(("cli-smoke-is-wired-into-preflight",
+                   any(ln.strip() == "v, ev = " + smoke_call for ln in src.splitlines())
+                   and '"execution": lambda ctx, rt: (doctor_execution(ctx), None)' in src
+                   and any(ln.strip() == "report, verdicts = run_doctor(ctx)"
+                           for ln in src.splitlines())))
+    checks.append(("dry-run-never-invokes-the-smoke",
+                   bool(dr_src) and (smoke_name + "()") not in dr_src))
+    checks.append(("preflight-failure-marks-downstream-not-run",
+                   'Verdict("not-run", False' in ro_src
+                   and any("rest = order[pos + 1:]" in ln for ln in ro_src.splitlines())))
+    checks.append(("not-run-never-counts-as-green",
+                   'v.name == "not-run"' in src
+                   and any(ln.strip().startswith("elif notrun:") for ln in src.splitlines())
+                   and '"**结论**：" + conclusion' in src))
+    # 11) 分层 doctor：按序、按根因短路、终端与 JSON 同源、退出码分层、静态层只归因。
+    #     这些守卫同样按行/接线比对，注释里的同名串不许冒充真实实现。
+    rd = re.search(r"def run_doctor\(ctx\):(.*?)\n(?=def )", src, re.S)
+    rd_src = rd.group(1) if rd else ""
+    de = re.search(r"def doctor_execution\(ctx\):(.*?)\n(?=def )", src, re.S)
+    de_src = de.group(1) if de else ""
+    di = re.search(r"def doctor_install\(runtime\):(.*?)\n(?=def )", src, re.S)
+    di_src = di.group(1) if di else ""
+    we = re.search(r"def write_evidence\(ctx\):(.*?)\n(?=def )", src, re.S)
+    we_src = we.group(1) if we else ""
+    lf = re.search(r"DOCTOR_LAYER_FN = \{(.*?)\n\}", src, re.S)
+    lf_src = lf.group(1) if lf else ""
+    layers = ("runtime", "install", "credentials", "endpoints", "scope", "execution")
+    checks.append(("doctor-layers-are-ordered",
+                   'DOCTOR_LAYERS = ("runtime", "install", "credentials", "endpoints", '
+                   '"scope", "execution")' in src
+                   and "for layer in DOCTOR_LAYERS:" in rd_src
+                   and all(f'"{x}": lambda' in lf_src for x in layers)))
+    # 按整块比对：run_doctor 里另有一段「同层后续项」也叫 if root_cause，
+    # 只查子串会被它骗过（反向探针实测删掉层短路后守卫仍绿）。
+    checks.append(("doctor-short-circuits-on-first-failure",
+                   '        if root_cause:\n            checks.append(doctor_check(\n'
+                   '                layer, "not-run", "skip",' in rd_src
+                   and "            continue" in rd_src
+                   and 'c["skipped_by"] = root_cause' in rd_src
+                   and 'c["status"] = "skip"' in rd_src
+                   and any(ln.strip().startswith("root_cause = c[") for ln in rd_src.splitlines())))
+    checks.append(("doctor-report-is-single-source",
+                   'for c in report["checks"]:' in rd_src and "json.dump(report," in rd_src
+                   and "json.dumps(ctx.doctor_report" in we_src
+                   and '"doctor": ctx.doctor_report' in we_src))
+    checks.append(("doctor-exit-codes-are-distinct",
+                   "code = 1 if failed else (2 if unverified else 0)" in rd_src
+                   and 'DOCTOR_EXIT = {0:' in src and "DOCTOR_EXIT[code]" in rd_src))
+    checks.append(("doctor-offline-never-reports-green",
+                   "if ctx.args.offline:" in de_src and "not run (--offline)" in de_src
+                   and '"skip"' in de_src and "unverified" in rd_src
+                   and 'ap.add_argument("--offline"' in src))
+    checks.append(("doctor-real-run-is-default",
+                   'mode = "offline" if ctx.args.offline else "deep"' in rd_src
+                   and "v, ev = " + smoke_call in de_src))
+    checks.append(("doctor-warn-promoted-only-by-strict",
+                   'if c["status"] == "warn" and ctx.args.strict:' in rd_src
+                   and 'ap.add_argument("--strict"' in src))
+    checks.append(("doctor-install-is-attribution-only",
+                   '"warn" if stale else "pass"' in di_src and "DOCTOR_BOUNDARY" in src
+                   and "静态层只归因" in src))
+    checks.append(("doctor-root-cause-in-summary",
+                   'root = doctor.get("root_cause")' in we_src and "doctor.json" in rd_src))
+    checks.append(("doctor-exit-code-reaches-main",
+                   "green, code = run_once(ctx, order)" in src
+                   and any(ln.strip() == "return code" for ln in src.splitlines())))
     for name, ok in checks:
         print(f"  [{'ok' if ok else 'FAIL'}] {name}")
     print("\n幕表（链型 / 判据层）：")
@@ -1551,6 +1991,7 @@ def write_evidence(ctx):
         "base_tests": ctx.base_tests,
         "device_commits": ctx.device_commits,
         "created_files": sorted(set(ctx.created_files)),
+        "doctor": ctx.doctor_report,
         "environment": {
             "python": sys.version.split()[0],
             "dsh": shutil.which("dsh"),
@@ -1577,13 +2018,34 @@ def write_evidence(ctx):
         detail = " / ".join(f"{v.name}={'ok' if v.ok else 'FAIL'}" for v in r.verdicts)
         lines.append(f"| {r.act_id} | {r.title} | {r.chain} | {r.status} | {detail or '—'} |")
     failed = [r.act_id for r in ctx.results if r.status == "FAIL"]
-    lines += ["", f"**结论**：{'FAIL 幕 ' + ', '.join(failed) if failed else '全部判据通过'}。",
+    notrun = [r.act_id for r in ctx.results if any(v.name == "not-run" for v in r.verdicts)]
+    doctor = ctx.doctor_report
+    root = doctor.get("root_cause") if doctor else None
+    if failed:
+        conclusion = "FAIL 幕 " + ", ".join(failed)
+        if root:
+            conclusion += "；根因 " + root + "（下游标 not run，不报派生症状）"
+    elif notrun:
+        conclusion = "前置体检未成立，后续 " + ", ".join(notrun) + " 幕未执行（not run，不记通过）"
+    elif doctor and doctor.get("exit_code") == 2:
+        conclusion = "体检未验证完整链路（doctor exit_code=2），不记通过"
+    else:
+        conclusion = "全部判据通过"
+    lines += ["", "**结论**：" + conclusion + "。",
+              "",
+              f"- doctor：`mode={doctor.get('mode', '—')}`，`root_cause={root or 'none'}`，"
+              f"`exit_code={doctor.get('exit_code', '—')}`；报告见 `doctor.json`（与终端读数同源）。"
+              if doctor else "- doctor：本轮未产生分层报告。",
+              f"- 边界：{doctor.get('boundary', '—')}" if doctor else "",
               "",
               "> `cli-direct` 幕只证明「真 agent 真沙箱真补丁」，不证明编排器的工单卡/追问/自愈/合并按钮；",
               "> `orchestrator` 幕在 headless tier 下如实标 NA，两者不得互相冒充。",
               ""]
     with open(os.path.join(ctx.out_dir, "summary.md"), "w", encoding="utf-8") as fh:
         fh.write("\n".join(lines))
+    # --json 打印与 doctor.json 完全相同的对象，不另构造一份；stdout 另有人读日志。
+    if getattr(ctx.args, "json", False) and ctx.doctor_report:
+        print(json.dumps(ctx.doctor_report, ensure_ascii=False, indent=2), flush=True)
     return payload
 
 
@@ -1621,7 +2083,12 @@ def run_once(ctx, order):
     args = ctx.args
     print("=== 轮次 " + ctx.run_label + " stage=" + args.stage
           + " anchor=" + (ctx.anchor or "HEAD") + " ws=" + args.workspace + " ===", flush=True)
-    for k in order:
+    # **整轮时间窗的锚点**：a2r 的卡片/指纹/主树判据都从这里回看。这个字段
+    # 曾经声明后从未赋值，`since = (ctx.started_ms or now) - 60_000` 的兜底让窗口
+    # 塌缩成「幕开始前 60s」—— 上游幕期间投递的卡片全部在窗外，判据红指向一个
+    # 不存在的缺陷（2026-11-12 real 档 a2r 实测复盘：六条判据绿、唯独卡片 0 命中）。
+    ctx.started_ms = int(time.time() * 1000)
+    for pos, k in enumerate(order):
         title, chain, fn = ACTS[k]
         t0 = time.time()
         print("\n=== 幕 " + k + " · " + title + " [" + chain + "] ===", flush=True)
@@ -1657,9 +2124,23 @@ def run_once(ctx, order):
         ctx.results.append(r)
         print("  => 幕 " + k + " " + r.status + " (" + str(r.seconds) + "s)", flush=True)
         if k == "0" and r.status != "PASS":
-            print("\n!!! preflight 不成立 —— 后续幕没有意义，停在这里。", flush=True)
+            # 失败短路：下游幕一律标 not run，不逐幕伪造派生失败，也不许冒充通过。
+            # 判据 ok=False 让证据表里的 not-run 显示成红，但 act 状态保持 NA。
+            blockers = [v.name for v in r.verdicts if not v.ok and v.name != "not-run"]
+            root = ctx.doctor_report.get("root_cause") if ctx.doctor_report else None
+            reason = "not run (" + (root or ",".join(blockers) or "preflight") + ")"
+            rest = order[pos + 1:]
+            for nk in rest:
+                n_title, n_chain, _ = ACTS[nk]
+                ctx.results.append(ActResult(
+                    nk, n_title, n_chain, "NA",
+                    [Verdict("not-run", False,
+                             reason + "：前置体检未成立，本幕未执行（不记通过，也不记失败）")]))
+            print("\n!!! preflight 不成立 —— 后续 " + str(len(rest)) + " 幕标 "
+                  + reason + "，停在这里。", flush=True)
             write_evidence(ctx)
-            return False, 2
+            code = ctx.doctor_report.get("exit_code", 2) if ctx.doctor_report else 2
+            return False, code
 
     write_evidence(ctx)
     _, dirty = git_state(args.workspace)
@@ -1747,6 +2228,12 @@ def main():
     ap.add_argument("--out", default=None, help="证据目录；缺省 design/runtime-evidence/sdlc-lifecycle-<时间戳>")
     ap.add_argument("--preflight-only", action="store_true")
     ap.add_argument("--dry-run", action="store_true")
+    ap.add_argument("--offline", action="store_true",
+                    help="体检跳过 CLI 真跑（结论为未验证，绝不记通过）")
+    ap.add_argument("--strict", action="store_true",
+                    help="把安装漂移等 warn 提升为失败")
+    ap.add_argument("--json", action="store_true",
+                    help="把 doctor 报告对象打到 stdout（与 doctor.json 同源）")
     ap.add_argument("--reset", action="store_true", help="收尾显式还原工作区到跑前 HEAD（会丢弃本次改动）")
     args = ap.parse_args()
     if args.repeat < 1:
@@ -1788,9 +2275,9 @@ def main():
         ctx = Context(args=args, agents=agents, out_dir=run_out,
                       run_label=label, anchor=anchor)
         t0 = time.time()
-        green, _ = run_once(ctx, order)
+        green, code = run_once(ctx, order)
         runs.append({
-            "label": label, "workspace": ws, "anchor": anchor, "green": green,
+            "label": label, "workspace": ws, "anchor": anchor, "green": green, "code": code,
             "acts": len(ctx.results), "seconds": time.time() - t0,
             "verdict_names": [r.act_id + ":" + v.name
                               for r in ctx.results for v in r.verdicts],
@@ -1799,8 +2286,8 @@ def main():
     if args.repeat > 1:
         ok = write_repeat_summary(out_dir, args, runs)
         print("\n=== 反复验收 " + ("PASS" if ok else "FAIL") + " ===", flush=True)
-        return 0 if ok else 1
-    return 0 if runs[0]["green"] else 1
+        return 0 if ok and all(r["code"] == 0 for r in runs) else 1
+    return code
 
 
 if __name__ == "__main__":

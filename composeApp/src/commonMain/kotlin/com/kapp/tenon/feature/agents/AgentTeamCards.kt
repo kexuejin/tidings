@@ -27,6 +27,7 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import com.kapp.tenon.domain.AgentHubUi
 import com.kapp.tenon.domain.AgentTeamUi
+import com.kapp.tenon.domain.teamDisplayName
 import com.kapp.tenon.generated.resources.Res
 import com.kapp.tenon.generated.resources.agent_count_items
 import com.kapp.tenon.generated.resources.agent_subtitle_pending
@@ -36,10 +37,13 @@ import com.kapp.tenon.generated.resources.hub_team_empty
 import com.kapp.tenon.generated.resources.hub_team_leader_format
 import com.kapp.tenon.generated.resources.hub_team_member_no_role
 import com.kapp.tenon.generated.resources.hub_team_member_role_format
+import com.kapp.tenon.generated.resources.agent_team_ai_new
 import com.kapp.tenon.generated.resources.hub_team_open_group
 import com.kapp.tenon.generated.resources.hub_team_size_format
 import com.kapp.tenon.generated.resources.hub_view_employees
 import com.kapp.tenon.generated.resources.hub_view_teams
+import com.kapp.tenon.generated.resources.team_profile_edit
+import com.kapp.tenon.generated.resources.team_profile_new
 import com.kapp.tenon.generated.resources.ic_bot
 import com.kapp.tenon.generated.resources.ic_chev
 import com.kapp.tenon.generated.resources.ic_settings
@@ -47,6 +51,7 @@ import com.kapp.tenon.generated.resources.ic_chat_bubble
 import com.kapp.tenon.generated.resources.workspace_latest_activity_format
 import com.kapp.tenon.ui.components.AppButtonSize
 import com.kapp.tenon.ui.components.AppOutlinedButton
+import com.kapp.tenon.ui.components.AppTextButton
 import com.kapp.tenon.ui.components.MutedTag
 import com.kapp.tenon.ui.components.PendingPill
 import com.kapp.tenon.ui.components.SectionHeader
@@ -97,17 +102,31 @@ internal fun AgentDirectorySection(
      * 独立入口（规范 §4.0 的「一个真源 + 一层覆盖」）。
      */
     onOpenExecutionConfig: (() -> Unit)? = null,
+    /**
+     * 「新建团队」入口：null = 这个壳没有团队档案面（手机：档案只住宿主机）⇒ 整行不画。
+     *
+     * 与执行配置入口同一条纪律：能力缺失就是**不画**，不是画一颗点了没反应的按钮。
+     */
+    onCreateTeam: (() -> Unit)? = null,
+    /** 「AI 建队」入口：null = 这个壳没有建队助手（手机/预览）⇒ 不画。与 onCreateTeam 同 gate。 */
+    onCreateTeamWithAi: (() -> Unit)? = null,
+    /** 团队卡上的「编辑团队」：只有带档案（`teamId != null`）的团队可编 —— 旧团队走群内编制。 */
+    onEditTeam: ((AgentTeamUi) -> Unit)? = null,
     modifier: Modifier = Modifier,
     compact: Boolean = false,
+    /** 当前选中的宿主与身份键（桌面两栏联动高亮）。 */
+    selectedHostNodeId: String? = null,
+    selectedAgentKey: String? = null,
 ) {
     val sp = LocalAppSpacing.current
-    // 只有**存在团队**时才给切换器：一个团队都没有时「团队」那一档永远是空列表，
-    // 给一颗点了什么都没有的按钮与「能力缺失 = 不画」同一条纪律。
+    // 只有**存在团队**（或这个壳能新建团队）时才给切换器：一个团队都没有、又没建队能力时
+    // 「团队」那一档永远是空列表，给一颗点了什么都没有的按钮与「能力缺失 = 不画」同一条纪律。
     var view by rememberSaveable { mutableStateOf(AgentDirectoryView.EMPLOYEES) }
-    val effectiveView = if (teams.isEmpty()) AgentDirectoryView.EMPLOYEES else view
+    val hasTeamView = teams.isNotEmpty() || onCreateTeam != null
+    val effectiveView = if (hasTeamView) view else AgentDirectoryView.EMPLOYEES
 
     Column(modifier = modifier.fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(sp.md)) {
-        if (teams.isNotEmpty()) {
+        if (hasTeamView) {
             Row(
                 modifier = Modifier.fillMaxWidth(),
                 verticalAlignment = Alignment.CenterVertically,
@@ -142,13 +161,18 @@ internal fun AgentDirectorySection(
                 onOpenChat = onOpenChat,
                 onOpenRowSession = onOpenRowSession,
                 compact = compact,
-                showSectionHeader = teams.isEmpty(),
+                showSectionHeader = !hasTeamView,
+                selectedHostNodeId = selectedHostNodeId,
+                selectedAgentKey = selectedAgentKey,
             )
             AgentDirectoryView.TEAMS -> AgentTeamSection(
                 teams = teams,
                 now = now,
                 onOpenTeam = onOpenTeam,
                 onOpenGroup = onOpenGroup,
+                onCreateTeam = onCreateTeam,
+                onEditTeam = onEditTeam,
+                onCreateTeamWithAi = onCreateTeamWithAi,
                 compact = compact,
             )
         }
@@ -233,6 +257,10 @@ internal fun AgentTeamSection(
     now: Long,
     onOpenTeam: ((AgentTeamUi) -> Unit)?,
     onOpenGroup: ((groupId: String) -> Unit)?,
+    onCreateTeam: (() -> Unit)? = null,
+    onEditTeam: ((AgentTeamUi) -> Unit)? = null,
+    /** 「AI 建队」入口：null = 这个壳没有建队助手（手机/预览）⇒ 不画。与 onCreateTeam 同 gate。 */
+    onCreateTeamWithAi: (() -> Unit)? = null,
     modifier: Modifier = Modifier,
     compact: Boolean = false,
 ) {
@@ -241,6 +269,22 @@ internal fun AgentTeamSection(
         SectionHeader(
             text = stringResource(Res.string.hub_view_teams),
             action = {
+                // 「新建团队」与计数并排：团队视角里这是唯一一个建队入口，
+                // 藏在溢出菜单里等于没有（用户找不到就会去群里凑）。
+                if (onCreateTeam != null && !compact) {
+                    AppTextButton(
+                        text = stringResource(Res.string.team_profile_new),
+                        onClick = onCreateTeam,
+                        size = AppButtonSize.Small,
+                    )
+                }
+                if (onCreateTeamWithAi != null && !compact) {
+                    AppTextButton(
+                        text = stringResource(Res.string.agent_team_ai_new),
+                        onClick = onCreateTeamWithAi,
+                        size = AppButtonSize.Small,
+                    )
+                }
                 Text(
                     text = stringResource(Res.string.agent_count_items, formatCount(teams.size.toLong())),
                     style = MaterialTheme.typography.labelLarge,
@@ -255,6 +299,15 @@ internal fun AgentTeamSection(
                 style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
+            if (compact && onCreateTeam != null) {
+                // 两栏左列窄形态放不下 SectionHeader 的动作位：这里补一颗（不是第二份逻辑，
+                // 同一个回调，只是落位在空段里）。
+                AppTextButton(
+                    text = stringResource(Res.string.team_profile_new),
+                    onClick = onCreateTeam,
+                    size = AppButtonSize.Small,
+                )
+            }
             return@Column
         }
         teams.forEach { team ->
@@ -264,6 +317,9 @@ internal fun AgentTeamSection(
                 compact = compact,
                 onOpen = onOpenTeam?.let { open -> { open(team) } },
                 onOpenGroup = onOpenGroup?.let { open -> { open(team.groupId) } },
+                // 只有带档案的团队可编：没有 teamId 的旧团队名册归群声明，改它要去群信息里
+                // 整表替换 —— 在这里给一颗按钮会诱使用户以为改的是同一件事。
+                onEdit = if (team.teamId != null) onEditTeam?.let { edit -> { edit(team) } } else null,
             )
         }
     }
@@ -289,6 +345,7 @@ private fun AgentTeamCard(
     compact: Boolean,
     onOpen: (() -> Unit)?,
     onOpenGroup: (() -> Unit)?,
+    onEdit: (() -> Unit)?,
 ) {
     val sp = LocalAppSpacing.current
     Surface(
@@ -328,7 +385,9 @@ private fun AgentTeamCard(
                     ) {
                         StatusDot(team.online)
                         Text(
-                            text = team.groupName,
+                            // 团队名优先（档案 → 快照 → 群名，统一走 teamDisplayName）：
+                            // 团队有自己的名字之后，群名不该再顶在标题上。
+                            text = teamDisplayName(team.teamName, team.groupName),
                             style = MaterialTheme.typography.titleSmall,
                             fontWeight = FontWeight.SemiBold,
                             maxLines = 1,
@@ -343,7 +402,14 @@ private fun AgentTeamCard(
                     }
                     if (!compact) {
                         Text(
-                            text = stringResource(Res.string.hub_team_leader_format, team.leaderName),
+                            // 有独立团队名时把群名挂在副行：同一支队进了多个群时，
+                            // 群名是唯一能区分「这是哪一张卡」的线索（不做就两张卡同名）。
+                            text = if (team.teamName.isNullOrBlank()) {
+                                stringResource(Res.string.hub_team_leader_format, team.leaderName)
+                            } else {
+                                stringResource(Res.string.hub_team_leader_format, team.leaderName) +
+                                    " · " + team.groupName
+                            },
                             style = MaterialTheme.typography.labelSmall,
                             color = MaterialTheme.colorScheme.onSurfaceVariant,
                             maxLines = 1,
@@ -410,6 +476,15 @@ private fun AgentTeamCard(
                         maxLines = 1,
                         modifier = Modifier.weight(1f),
                     )
+                    // 「编辑团队」落在底行而不是头部：头部已有「打开协同群」那颗主按钮，
+                    // 窄卡上并排两颗会把它挤成一列字（designFormPairingGate 的老教训）。
+                    if (onEdit != null) {
+                        AppTextButton(
+                            text = stringResource(Res.string.team_profile_edit),
+                            onClick = onEdit,
+                            size = AppButtonSize.Small,
+                        )
+                    }
                 }
             }
         }

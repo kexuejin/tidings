@@ -249,4 +249,64 @@ class TeamExecutionResolverTest {
         assertIs<TeamExecutionResolver.Target.None>(resolve(store, null, "coder"), "群为 null（1:1）没有团队语义")
         assertIs<TeamExecutionResolver.Target.None>(resolve(store, group(teamSeat()), "stranger"), "未知 token 不是组员")
     }
+
+    // ------------------------------------------------------------ 整队（@团队名）
+
+    private fun namedSeat(
+        host: String = selfHost,
+        teamId: String? = "team-dev",
+        teamName: String? = "开发团队",
+    ) = teamSeat(host = host).copy(teamId = teamId, teamName = teamName)
+
+    /**
+     * `@开发团队` = 整队接单：执行主体仍是那条席位，编译命中执行档里**唯一的 worker**。
+     *
+     * 为什么不 fan-out 给每个组员：组员没有独立执行体（责任链角色），一人一单会绕过
+     * `[worker] + [reviewer…]` 的既有链、产生 N 份互不相干的卡。
+     */
+    @Test
+    fun aTeamNameResolvesToTheSeatAndItsWorker() {
+        val store = memberStore(coderProfile())
+        val hit = assertIs<TeamExecutionResolver.Target.Hit>(
+            resolve(store, group(namedSeat()), "开发团队"),
+        )
+        assertEquals("dsh-lead", hit.seat.agentId)
+        assertEquals("m-coder", hit.member.agentId, "整队默认落在 worker 那一棒")
+        assertEquals(2, hit.profile.members.size, "reviewer 照既有责任链走，不在这里丢")
+    }
+
+    /**
+     * 整队命中但本机没有这个席位的执行档：出 blocked 卡，**不**回落 codex 兜底。
+     *
+     * （「有档但没有 worker」不是可达输入：`TeamExecutionStore.save` 保存期就拒了，
+     * 那个形状只能来自手改文件；读取期仍由 `profile.worker ?: NotConfigured` 兜住。）
+     */
+    @Test
+    fun aTeamWithoutAnExecutionProfileIsNotConfigured() {
+        val store = memberStore()
+        val denied = assertIs<TeamExecutionResolver.Target.NotConfigured>(
+            resolve(store, group(namedSeat()), "开发团队"),
+        )
+        assertTrue("not configured" in denied.reason, denied.reason)
+    }
+
+    /** 团队名与组员 token 撞名：`@` 会先命中组员，整队打不到 ⇒ 报歧义让用户改名。 */
+    @Test
+    fun aTeamNamedLikeAMemberIsNotConfigured() {
+        val store = memberStore(coderProfile())
+        val denied = assertIs<TeamExecutionResolver.Target.NotConfigured>(
+            resolve(store, group(namedSeat(teamName = "coder")), "coder"),
+        )
+        assertTrue("rename the team" in denied.reason, denied.reason)
+    }
+
+    /** 整队的席位在别的宿主：本机不执行（同 @组员 的判据，不另开一条）。 */
+    @Test
+    fun aTeamHostedElsewhereDoesNotResolveHere() {
+        val store = memberStore(coderProfile())
+        val denied = assertIs<TeamExecutionResolver.Target.NotConfigured>(
+            resolve(store, group(namedSeat(host = otherHost)), "开发团队", self = selfHost),
+        )
+        assertTrue("another device" in denied.reason, denied.reason)
+    }
 }

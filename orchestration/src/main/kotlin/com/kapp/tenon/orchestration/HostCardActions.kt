@@ -74,7 +74,7 @@ internal class HostCardActions(
             val cardJson = cmdRow?.renderCard
             val cmd = (cardJson?.get("cmd") as? JsonPrimitive)?.contentOrNull
             if (cmd != null && HighRiskCommands.classify(cmd) == HighRiskCommands.Verdict.HIGH_RISK) {
-                val expiresAt = (cardJson?.get("expiresAt") as? JsonPrimitive)?.longOrNull
+                val expiresAt = (cardJson.get("expiresAt") as? JsonPrimitive)?.longOrNull
                 // 租约口径：签发时刻 = expiresAt − TTL（卡上只带截止时刻这一个事实）。
                 val verdict = if (expiresAt == null) {
                     LeaseBarrier.Verdict.EXPIRED
@@ -277,6 +277,94 @@ internal class HostCardActions(
                             summary = "conflict",
                             body = outcome.detail,
                         )
+                    }
+                }
+            }
+        } else if (actionId == "create-pr" || actionId == "push-pr") {
+            scope.launch {
+                val actionRow = controller.state.value.messages.values
+                    .asSequence()
+                    .flatten()
+                    .lastOrNull { row ->
+                        (row.renderCard?.get("cardId") as? JsonPrimitive)?.contentOrNull == cardId
+                    }
+                val ledgerEntry = TicketPatchLedger.lookup(cardId)
+                val ref = tickets()?.patchRefForCard(cardId)
+                    ?: sessionId?.takeIf { it.isNotBlank() }
+                        ?.let { sid ->
+                            plane().latestPatchRefFor(sid)?.let { (ws, patch) ->
+                                com.kapp.tenon.agent.SandboxPatchRef(sid, ws, patch)
+                            }
+                        }
+                    ?: plane().latestPatchRefForCard(cardId)
+                    ?: ledgerEntry?.let { e ->
+                        com.kapp.tenon.agent.SandboxPatchRef(
+                            sessionId = "",
+                            workspacePath = e.workspacePath,
+                            patchPath = e.patchPath,
+                        )
+                    }
+
+                val title = (actionRow?.renderCard?.get("title") as? JsonPrimitive)?.contentOrNull
+                    ?: "Tenon Agent Delivery: $cardId"
+
+                val outcome = when {
+                    ref == null && cardId.startsWith("chain-") -> {
+                        val branch = "chain/" + cardId.removePrefix("chain-")
+                        val chainConv = tickets()?.groupForCard(cardId) ?: actionRow?.peerId
+                        val ws = chainConv
+                            ?.let { com.kapp.tenon.core.protocol.ConvId.groupIdOf(it) ?: it }
+                            ?.let { tickets()?.workspacePathForGroup(it) }
+                            ?: tickets()?.workspacePathForChainBranch(branch)
+                        if (ws == null) {
+                            DesktopPatchMerge.PrOutcome.Failed("cannot resolve workspace for chain card $cardId")
+                        } else {
+                            DesktopPatchMerge.pushBranchAndCreatePr(
+                                branch = branch,
+                                workspacePath = ws,
+                                title = title,
+                            )
+                        }
+                    }
+                    ref != null -> {
+                        val branchName = "tenon/pr-" + cardId.replace(Regex("[^a-zA-Z0-9_-]"), "-").take(40)
+                        DesktopPatchMerge.pushPatchAndCreatePr(
+                            patchPath = ref.patchPath,
+                            workspacePath = ref.workspacePath,
+                            branch = branchName,
+                            title = title,
+                        )
+                    }
+                    else -> DesktopPatchMerge.PrOutcome.Failed("no patch or branch found for card $cardId")
+                }
+
+                when (outcome) {
+                    is DesktopPatchMerge.PrOutcome.Created -> {
+                        RelayLog.info("RELAY-INVOKE", "PR created for card $cardId by $decidedBy: ${outcome.prUrl}")
+                        val targetConv = tickets()?.groupForCard(cardId) ?: actionRow?.peerId
+                            ?: ledgerEntry?.convKey?.takeIf { it.isNotBlank() }
+                        if (targetConv != null) {
+                            val prCard = BoardCardFlip.prCreated(
+                                cardId = cardId,
+                                base = actionRow?.renderCard,
+                                prUrl = outcome.prUrl,
+                            ).toString()
+                            delivery.publishCardNow(targetConv, agentId, prCard)
+                        }
+                    }
+                    is DesktopPatchMerge.PrOutcome.Failed -> {
+                        RelayLog.info("RELAY-INVOKE", "PR creation failed for card $cardId: ${outcome.detail}")
+                        val targetConv = tickets()?.groupForCard(cardId) ?: actionRow?.peerId
+                            ?: ledgerEntry?.convKey?.takeIf { it.isNotBlank() }
+                        if (targetConv != null) {
+                            val failCard = BoardCardFlip.blocked(
+                                cardId = cardId,
+                                base = actionRow?.renderCard,
+                                title = "PR Creation Failed",
+                                hint = outcome.detail,
+                            ).toString()
+                            delivery.publishCardNow(targetConv, agentId, failCard)
+                        }
                     }
                 }
             }

@@ -131,7 +131,12 @@ import com.kapp.tenon.domain.model.AgentApprovalDecision
  * 它是「选中哪个 agent」，不是「切换视图」。
  */
 /**
- * 工作区页签的顶栏：与消息 / 文件柜 / 节点 / 设置共用 [LargeTitleBar]。
+ * 工作区页签的顶栏：**手机壳专用**，与消息 / 文件柜 / 节点 / 设置共用 [LargeTitleBar]。
+ *
+ * 桌面壳不画这一条：壳顶部已有窗口标题栏 + 工具栏，内容区再叠一条就是双层 chrome；
+ * 桌面各 tab 一律传 `showHeader = false`，由 [AgentConsoleScreen] 的调用条件挡住。
+ * 手机单列靠它撑起五个首页 tab 共用的顶栏（真机像素复测口径，见
+ * `TabChromeConsistencyGuardTest`）。
  *
  * 此前这一行画在 [AgentConsoleScreen] 带横向 padding 的滚动内容列里，标题直接
  * 铺在 `background` 上 —— 浅色只差 #FFFFFF→#FAFAF8，深色却差 #232625→#121413

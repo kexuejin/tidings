@@ -576,6 +576,10 @@ fun RelayApp(
                             hostDirectoryPort = controller.hostDirectoryPort,
                             // 团队编制（方案 §4.3）：手机侧同样直连控制器。
                             onSetTeamRoster = controller::setGroupTeamDeclaration,
+                            // 「添加团队」：把本机团队档案整体加进本群（一条席位、组员随档案过来）。
+                            onAttachTeam = { groupId, teamId ->
+                                controller.attachTeamToGroup(teamId, groupId)
+                            },
                             // 手机端无 DesktopExtension ⇒ 端口为 null ⇒ 执行配置只读投影。
                             teamExecutionPort = controller.teamExecutionPort,
                             onUpdateGroupMeta = controller::updateGroupMeta,

@@ -90,6 +90,7 @@ import com.kapp.tenon.generated.resources.chat_offline_host_send_hint
 import com.kapp.tenon.generated.resources.chat_pk
 import com.kapp.tenon.generated.resources.common_agent
 import com.kapp.tenon.generated.resources.common_profile_unavailable
+import com.kapp.tenon.generated.resources.hub_view_teams
 import com.kapp.tenon.generated.resources.team_exec_member_note
 import com.kapp.tenon.generated.resources.chat_voice_record
 import com.kapp.tenon.generated.resources.hist_search_title
@@ -291,6 +292,28 @@ fun ChatScreen(
     } else {
         emptyList()
     }
+    // **团队行**（整队）：`@开发团队` 一次点名整支队，不用先 @ 领队。
+    // 团队名是展示串（多为中文），手打成本高 —— 候选不给这一行，这个能力就只有
+    // 记得住名字的人能用。带空白的团队名不进候选（`@` 打不出来，与匹配池同一条）。
+    val teamTargets = if (group != null) {
+        group.virtualAgents.orEmpty()
+            .filter { it.isTeam }
+            .mapNotNull { seat ->
+                seat.teamName?.trim()?.takeIf { it.isNotEmpty() && it.none { c -> c.isWhitespace() } }
+            }
+            .distinctBy { it.lowercase() }
+            .filter { name -> mentionIdentities.none { it.mentionToken == "@" + name } }
+            .map { name ->
+                MentionTarget(
+                    token = name,
+                    label = name,
+                    note = stringResource(Res.string.hub_view_teams),
+                    isAgent = true,
+                )
+            }
+    } else {
+        emptyList()
+    }
     val mentionTargets = mentionIdentities.map { identity ->
         MentionTarget(
             token = identity.mentionToken,
@@ -302,7 +325,7 @@ fun ChatScreen(
             // 真人候选不标：这条提示说的是「派给智能体宿主的活现在不会开始」。
             isHostOffline = identity.isAgent && identity.online == false,
         )
-    } + teamMemberTargets
+    } + teamMemberTargets + teamTargets
     // 发送侧要用同一份离线事实：token → 显示名，提示里报的是用户认识的那个名字。
     val offlineMentionByToken = mentionTargets
         .filter { it.isHostOffline }

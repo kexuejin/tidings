@@ -1,0 +1,296 @@
+{
+  "generated_at": "2026-11-12T07:51:32.424988+00:00",
+  "tier": "real",
+  "stage": "empty",
+  "anchor": "3792076",
+  "source": "/Users/developer/weather-relay",
+  "run_label": "single",
+  "workspace": "/tmp/sdlc-runs/20261112-154036/single/ws",
+  "host": "http://127.0.0.1:8788",
+  "agents": [
+    {
+      "key": "dsh",
+      "cli": "dsh",
+      "role": "worker"
+    }
+  ],
+  "base_head": "3792076edace616226404a6b7fd6d31360a2d241",
+  "base_tests": {
+    "rc": 1,
+    "tests": null,
+    "pass": null,
+    "fail": null,
+    "skipped": null,
+    "duration_ms": null,
+    "tail": [
+      "> weather-relay@0.1.0 test",
+      "> node --test test/",
+      "",
+      "",
+      "Could not find 'test/'"
+    ]
+  },
+  "device_commits": [
+    "bootstrap a1: 需求立项",
+    "bootstrap a2: 原型与设计"
+  ],
+  "created_files": [],
+  "environment": {
+    "python": "3.13.12",
+    "dsh": "/opt/homebrew/bin/dsh",
+    "opencode": "/Users/developer/.opencode/bin/opencode",
+    "adb": "/Users/developer/Library/Android/sdk/platform-tools/adb"
+  },
+  "acts": [
+    {
+      "act_id": "0",
+      "title": "环境体检",
+      "chain": "local",
+      "status": "PASS",
+      "verdicts": [
+        {
+          "name": "control-plane",
+          "ok": true,
+          "detail": "GET /v1/peers -> 200 {'peers': [{'nodeId': '37e7e9ca-7232-4046-becb-7929af587ef2', 'nick': 'Pixel 6',"
+        },
+        {
+          "name": "cli:dsh",
+          "ok": true,
+          "detail": "dsh -> /opt/homebrew/bin/dsh"
+        },
+        {
+          "name": "dsh-credentials",
+          "ok": true,
+          "detail": "/Users/developer/.dsh/.credentials.yaml 存在"
+        },
+        {
+          "name": "workspace-is-git",
+          "ok": true,
+          "detail": "/tmp/sdlc-runs/20261112-154036/single/ws"
+        },
+        {
+          "name": "workspace-clean",
+          "ok": true,
+          "detail": "HEAD=3792076edace 脏行=0"
+        },
+        {
+          "name": "anchor-checked-out",
+          "ok": true,
+          "detail": "stage=empty 期望锚点 3792076；实际 3792076edace"
+        },
+        {
+          "name": "stage-files-present",
+          "ok": true,
+          "detail": "期望 ['package.json']；实到 ['package.json']"
+        },
+        {
+          "name": "stage-files-absent",
+          "ok": true,
+          "detail": "本阶段不该有 ['src', 'test', 'docs', 'prototype.html', 'index.html']；实际多出 []"
+        },
+        {
+          "name": "baseline-has-no-implementation",
+          "ok": true,
+          "detail": "stage=empty「还没有实现」即正确基线；npm test rc=1 只作读数，不拿预期红判失败"
+        },
+        {
+          "name": "source-repo-untouched",
+          "ok": true,
+          "detail": "/Users/developer/weather-relay 脏行=0"
+        },
+        {
+          "name": "workspace-is-isolated",
+          "ok": true,
+          "detail": "检出目录 /tmp/sdlc-runs/20261112-154036/single/ws ≠ 只读源仓 /Users/developer/weather-relay"
+        },
+        {
+          "name": "adb-device",
+          "ok": true,
+          "detail": "在线设备 ['LOCAL-DEV-01', 'emulator-5554']"
+        },
+        {
+          "name": "desktop-db",
+          "ok": true,
+          "detail": "/Users/developer/Library/Application Support/榫卯 Tenon/relay.db"
+        },
+        {
+          "name": "artifacts-dir",
+          "ok": true,
+          "detail": "/tmp/tenon-ws/artifacts"
+        }
+      ],
+      "evidence": {
+        "base_head": "3792076edace616226404a6b7fd6d31360a2d241",
+        "base_dirty": [],
+        "base_tests": {
+          "rc": 1,
+          "tests": null,
+          "pass": null,
+          "fail": null,
+          "skipped": null,
+          "duration_ms": null,
+          "tail": [
+            "> weather-relay@0.1.0 test",
+            "> node --test test/",
+            "",
+            "",
+            "Could not find 'test/'"
+          ]
+        }
+      },
+      "seconds": 0.8
+    },
+    {
+      "act_id": "a1",
+      "title": "需求立项（空仓）",
+      "chain": "cli-direct",
+      "status": "PASS",
+      "verdicts": [
+        {
+          "name": "patch-is-real",
+          "ok": true,
+          "detail": "t-1-a357d16c 5110B files=['docs/PRD.md'] +59/-0"
+        },
+        {
+          "name": "expected-file-produced",
+          "ok": true,
+          "detail": "期望 docs/PRD.md；实际 ['docs/PRD.md']"
+        },
+        {
+          "name": "prd-has-numbered-ac",
+          "ok": true,
+          "detail": "补丁正文需含 AC1..AC4 可测验收标准"
+        },
+        {
+          "name": "stage-landed",
+          "ok": true,
+          "detail": ""
+        },
+        {
+          "name": "stage-visible-to-next-sandbox",
+          "ok": true,
+          "detail": ""
+        }
+      ],
+      "evidence": {
+        "bootstrap_patch": {
+          "bytes": 5110,
+          "files": [
+            "docs/PRD.md"
+          ],
+          "added": 59,
+          "removed": 0,
+          "has_test": false,
+          "has_impl": false,
+          "mentions_req_doc": false,
+          "mentions_injected_test": false,
+          "body_head": "diff --git a/docs/PRD.md b/docs/PRD.md\nnew file mode 100644\nindex 0000000..1eb8001\n--- /dev/null\n+++ b/docs/PRD.md\n@@ -0,0 +1,59 @@\n+# 极简天气预报应用 PRD\n+\n+## 1. 目标与范围\n+\n+提供一个单页天气应用：用户输入城市后，查看当前温度、未来 7 天预报和空气质量指数（AQI），并在摄氏（°C）与华氏（°F）之间切换。\n+\n+本期只做查询与展示，不做账号、历史趋势、地图、通知或天气预警。首次打开默认展示“北京”，默认单位为 °C。\n+\n+## 2. 通用约定\n+\n+- 数据源地址可通过 `WEATHER_API_BASE_URL` 配置，自动化测试以本地桩服务替代真实网络。\n+- 页面须包含：城市输入框、查询按钮、单位切换按钮、当前天气区、7 天预报区、AQI 区、错误提示区和加载提示区。\n+- 所有温度以 °C 作为内部规范值；切换单位只转换展示值，不重新请求数据。\n+- “今天”及预报日期均按被查询城市的当地时区计算。\n+- 当前温度保留 1 位小数；7 天预报的最高/最低温及 AQI 显示为整数。\n+- 上游失败或数据缺失时不得伪造数据（尤其不得把缺失 AQI 显示为 `0`）；页面须给出明确状态。\n+\n+### 自动化测试契约\n+"
+        },
+        "artifact": "t-1-a357d16c",
+        "prompt": "【执行环境约束，必须遵守】你的当前工作目录（cwd）就是本次任务专用的一次性 git worktree，里面是**本阶段该有的全部文件**——可能只有 package.json，不要假定已经存在 src/ 或 test/，需要什么目录就自己创建。所有文件读写一律使用**相对路径**，只在 cwd 内进行；禁止使用任何绝对路径，禁止访问或写入宿主主仓库目录，禁止 cd 到别处。改动只有留在 cwd 的工作树里才会被收割成补丁；写到别处等于本次任务失败。\n当前是空仓，只有 package.json，docs/ 目录需要你创建。新增 docs/PRD.md：为「极简天气预报应用」写一份**精简**需"
+      },
+      "seconds": 100.52
+    },
+    {
+      "act_id": "a2",
+      "title": "原型与设计",
+      "chain": "cli-direct",
+      "status": "PASS",
+      "verdicts": [
+        {
+          "name": "patch-is-real",
+          "ok": true,
+          "detail": "t-3-9168a552 13391B files=['prototype.html'] +199/-0"
+        },
+        {
+          "name": "expected-file-produced",
+          "ok": true,
+          "detail": "期望 prototype.html；实际 ['prototype.html']"
+        },
+        {
+          "name": "prototype-is-interactive-html",
+          "ok": true,
+          "detail": "added=199；需有 <script> 与可执行交互逻辑"
+        },
+        {
+          "name": "stage-landed",
+          "ok": true,
+          "detail": ""
+        },
+        {
+          "name": "stage-visible-to-next-sandbox",
+          "ok": true,
+          "detail": ""
+        }
+      ],
+      "evidence": {
+        "bootstrap_patch": {
+          "bytes": 13391,
+          "files": [
+            "prototype.html"
+          ],
+          "added": 199,
+          "removed": 0,
+          "has_test": false,
+          "has_impl": true,
+          "mentions_req_doc": false,
+          "mentions_injected_test": false,
+          "body_head": "diff --git a/prototype.html b/prototype.html\nnew file mode 100644\nindex 0000000..64a54cd\n--- /dev/null\n+++ b/prototype.html\n@@ -0,0 +1,199 @@\n+<!DOCTYPE html>\n+<html lang=\"zh-CN\">\n+<head>\n+  <meta charset=\"UTF-8\">\n+  <meta name=\"viewport\" content=\"width=device-width, initial-scale=1\">\n+  <title>天气 · 7 天预报原型</title>\n+  <style>\n+    :root { --ink: #14213d; --muted: #6c7a93; --line: #e8edf6; --blue: #2768f5; --soft: #f5f8ff; }\n+    * { box-sizing: border-box; }\n+    body { margin: 0; min-height: 100vh; padding: 32px 18px; display: grid; place-items: center; color: var(--ink);\n+      font-family: "
+        },
+        "artifact": "t-3-9168a552",
+        "prompt": "【执行环境约束，必须遵守】你的当前工作目录（cwd）就是本次任务专用的一次性 git worktree，里面是**本阶段该有的全部文件**——可能只有 package.json，不要假定已经存在 src/ 或 test/，需要什么目录就自己创建。所有文件读写一律使用**相对路径**，只在 cwd 内进行；禁止使用任何绝对路径，禁止访问或写入宿主主仓库目录，禁止 cd 到别处。改动只有留在 cwd 的工作树里才会被收割成补丁；写到别处等于本次任务失败。\n新增 prototype.html：单文件可交互天气原型（纯 HTML+CSS+JS，不依赖构建工具）。必须包含当前温度、7 天预报列表、摄氏/"
+      },
+      "seconds": 322.31
+    },
+    {
+      "act_id": "a2r",
+      "title": "原型可评审（人审守门）",
+      "chain": "orchestrator",
+      "status": "FAIL",
+      "verdicts": [
+        {
+          "name": "card-reader-self-check",
+          "ok": true,
+          "detail": "合成库（首帧 rev1 / 载荷 rev4+delivered）读回 rev4，列没读错"
+        },
+        {
+          "name": "prototype-card-delivered",
+          "ok": false,
+          "detail": "conv=group:082d26aa-71e7-4853-b0c9-602b16afaf5f 卡片库命中 0 张带已投递网页原型的卡"
+        },
+        {
+          "name": "prototype-preview-entry-tested",
+          "ok": true,
+          "detail": "gradle :composeApp:jvmTest 通过（路由与入口判据）"
+        },
+        {
+          "name": "prototype-opened-in-browser",
+          "ok": true,
+          "detail": "前台包名 com.android.chrome"
+        },
+        {
+          "name": "prototype-artifact-bytes-landed",
+          "ok": true,
+          "detail": "prototype.html（13050B）逐字节落到手机：files/relay/downloads/prototype.html"
+        },
+        {
+          "name": "prototype-no-main-tree-write",
+          "ok": true,
+          "detail": "仓库根本轮无新建文件"
+        },
+        {
+          "name": "peer-idle-stays-online",
+          "ok": true,
+          "detail": "最近 180s 内无翻面，链路在册的对端全部 online"
+        }
+      ],
+      "evidence": {
+        "group": "082d26aa-71e7-4853-b0c9-602b16afaf5f",
+        "cards": 0,
+        "foreground": "com.android.chrome",
+        "peer_presence": "peers=1 flips=0"
+      },
+      "seconds": 232.1
+    }
+  ]
+}

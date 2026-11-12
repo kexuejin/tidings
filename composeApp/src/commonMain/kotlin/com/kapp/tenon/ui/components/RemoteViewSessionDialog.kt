@@ -664,7 +664,7 @@ private fun RemoteViewZoomOption(label: String, selected: Boolean, onClick: () -
  * 画面消失，用户需要一个"刚才那扇窗"的连续感（黑底 + 居中卡片）；Sharer 从来没有全屏
  * 窗口，弹一层全黑反而突兀。
  *
- * 原因文案复用 `screenReasonText`（ui/components/Common.kt:347）那套已经本地化的
+ * 原因文案复用 `screenReasonText`（`ui/components/Common.kt` 里的本地化词表）那套已经本地化的
  * 拒绝/结束原因词表，不再另造一套 —— 与横幅 `banner_screen_view_ended` 说同一句话。
  */
 @Composable

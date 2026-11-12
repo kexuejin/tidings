@@ -2,6 +2,7 @@
 
 package com.kapp.tenon.orchestration
 
+import com.kapp.tenon.core.protocol.AgentExecPolicies
 import com.kapp.tenon.core.protocol.ConvId
 import com.kapp.tenon.core.protocol.EntityTypes
 import com.kapp.tenon.core.protocol.GroupMeta
@@ -60,11 +61,12 @@ class TeamDispatchBehaviorTest {
     /** 席位宿主 = **控制器自己的 nodeId**（卡片发布有成员表校验，成员必须包含 self）。 */
     private val sender = "member-node"
 
-    private fun teamSeat(hostNodeId: String) = VirtualAgentMember(
+    private fun teamSeat(hostNodeId: String, teamName: String? = "devteam") = VirtualAgentMember(
         agentId = "dsh-lead",
         hostNodeId = hostNodeId,
         name = "lead-seat",
         entityType = EntityTypes.TEAM,
+        teamName = teamName,
         teamMembers = listOf(
             TeamMemberInfo("m-coder", "coder", "编码"),
             TeamMemberInfo("m-reviewer", "reviewer", "审查"),
@@ -81,7 +83,10 @@ class TeamDispatchBehaviorTest {
     )
 
     /** harness：控制器注入该群的元数据（本机 = 席位宿主），返回 (controller, orchestrator, tmpDir)。 */
-    private fun harness(withProfile: Boolean): Triple<RelayController, DesktopWorkerOrchestrator, File> {
+    private fun harness(
+        withProfile: Boolean,
+        policyOf: ((String) -> String?)? = null,
+    ): Triple<RelayController, DesktopWorkerOrchestrator, File> {
         val scope = CoroutineScope(Dispatchers.Unconfined)
         val base = RelaySettings.firstRun().copy(
             udpPort = 0, tcpPort = 0,
@@ -96,6 +101,7 @@ class TeamDispatchBehaviorTest {
             scope = scope,
         )
         controller.uiTexts = Texts
+        controller.invokeExecPolicyOf = policyOf
         val tmp = Files.createTempDirectory("team-exec-test").toFile()
         val store = TeamExecutionStore(File(tmp, "team-execution.json"))
         if (withProfile) {
@@ -206,6 +212,60 @@ class TeamDispatchBehaviorTest {
             assertTrue(
                 card.toString().contains("not authorized"),
                 "卡面要写明是授权拒绝：$card",
+            )
+        } finally {
+            tmp.deleteRecursively()
+            controller.stop()
+        }
+    }
+
+    /**
+     * **逐成员可见性（mulica 式）**：领队把整队设为「对外开放」，但真正干活的 worker 设为
+     * 「仅自己可用」时，外部成员 `@团队` 必须被授权闸拦下 —— 闸按**执行成员**判，不是按领队。
+     * 若闸按领队（旧逻辑），领队开放 ⇒ 外部直接落到「控制面不可用」卡，授权闸形同虚设。
+     */
+    @Test
+    fun aTeamWithOpenLeaderButOwnerOnlyWorkerBlocksExternalCallerOnTheWorker() = runBlocking {
+        val (controller, orch, tmp) = harness(
+            withProfile = true,
+            policyOf = { id ->
+                if (id == "dsh-lead") AgentExecPolicies.ANY_MEMBER else AgentExecPolicies.LIST
+            },
+        )
+        try {
+            dispatch(orch, mentionedAgentKey = "devteam") // 外部成员 @ 团队名
+            val card = assertNotNull(blockedCard(controller), "外部 @ 团队（worker 仅自己可用）必须出 blocked 卡")
+            assertTrue(
+                card.toString().contains("not authorized"),
+                "卡面要写明是授权拒绝（闸按 worker 生效）： $card ；rows=${debugRows(controller)}",
+            )
+            assertTrue(
+                !card.toString().contains("control plane"),
+                "不能是『控制面不可用』—— 那是已经过了授权才会到的地方：$card",
+            )
+        } finally {
+            tmp.deleteRecursively()
+            controller.stop()
+        }
+    }
+
+    /**
+     * 反例：领队与 worker 都开放时，外部 `@团队` **通过授权闸**，落到一个非「授权拒绝」的卡
+     * （单测里控制面为 null ⇒ 执行档编译期报「driver 不在位」）。证明上一条卡住的是**授权闸**，
+     * 而不是控制面缺失等下游原因。
+     */
+    @Test
+    fun aTeamWithOpenLeaderAndOpenWorkerPassesTheAuthGate() = runBlocking {
+        val (controller, orch, tmp) = harness(
+            withProfile = true,
+            policyOf = { AgentExecPolicies.ANY_MEMBER },
+        )
+        try {
+            dispatch(orch, mentionedAgentKey = "devteam")
+            val card = assertNotNull(blockedCard(controller), "开放团队外部 @ 团队必须出卡")
+            assertTrue(
+                !card.toString().contains("not authorized"),
+                "授权应通过（不含 not authorized）： $card ；rows=${debugRows(controller)}",
             )
         } finally {
             tmp.deleteRecursively()

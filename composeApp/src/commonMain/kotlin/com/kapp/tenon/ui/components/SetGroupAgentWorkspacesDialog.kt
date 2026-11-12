@@ -69,6 +69,11 @@ import com.kapp.tenon.generated.resources.seat_reexpose
 import com.kapp.tenon.generated.resources.seat_remove_button
 import com.kapp.tenon.generated.resources.seat_station_button
 import com.kapp.tenon.generated.resources.seat_status_stationed
+import com.kapp.tenon.generated.resources.hub_team_size_format
+import com.kapp.tenon.generated.resources.team_profile_group_add
+import com.kapp.tenon.generated.resources.team_profile_group_all_present
+import com.kapp.tenon.generated.resources.team_profile_group_section
+import com.kapp.tenon.generated.resources.team_profile_group_section_hint
 import com.kapp.tenon.ui.theme.IconSizes
 import com.kapp.tenon.ui.theme.LocalAppSpacing
 import com.kapp.tenon.ui.theme.ShapeRoles
@@ -194,6 +199,20 @@ fun SetGroupAgentWorkspacesDialog(
     onRemove: ((agentId: String) -> Unit)?,
     /** 设 / 清本群项目目录指针（D5）。null 同上。 */
     onSetDirectory: ((dirId: String?) -> Unit)?,
+    /**
+     * 本机**团队档案**（`RelaySettings.teamProfiles`）：本群可以整体添加的那些队伍。
+     *
+     * 空 = 本机还没有团队（或这个壳读不到档案，例如手机）⇒ 整段不画。
+     * 这里只读名字与人数；名册归档案，面板不改它。
+     */
+    teamProfiles: List<com.kapp.tenon.domain.TeamProfile> = emptyList(),
+    /**
+     * 「把这一整支队伍加进本群」：`(teamId)`。
+     *
+     * null = 这个壳没有档案写通路 ⇒ 段里不画按钮。与 [onStation] 是两件事：
+     * 那个加**一个人**，这个加**一支队**（领队 + 全部组员一次到位）。
+     */
+    onAttachTeam: ((teamId: String) -> Unit)? = null,
     onDismiss: () -> Unit,
 ) {
     val sp = LocalAppSpacing.current
@@ -251,6 +270,13 @@ fun SetGroupAgentWorkspacesDialog(
                         onStation = onStation,
                         onReparse = onReparse,
                         onRemove = onRemove,
+                    )
+                    // 「添加团队」紧跟在入驻清单之后：两者都是「让某个执行体进这个群」，
+                    // 一个加人、一个加队，放在相邻两段用户才不会去群里一个个凑人。
+                    TeamAttachSection(
+                        group = group,
+                        teamProfiles = teamProfiles,
+                        onAttachTeam = onAttachTeam,
                     )
                     val foreignSeats = declared.filter { it.hostNodeId != selfNodeId }
                     if (foreignSeats.isNotEmpty()) {
@@ -773,10 +799,91 @@ private fun ProjectDirectoryPickerDialog(
     )
 }
 
+/**
+ * 「添加团队」段：把**一支已经建好的队伍**整体加进本群。
+ *
+ * ## 为什么是「整体」而不是逐人勾
+ *
+ * 团队档案里已经有领队与名册（`TeamProfile`）。用户要的是「让测试团队进这个群」，
+ * 不是「先加领队、再把它编成队、再把三个组员填一遍」—— 后者是这之前的唯一路径，
+ * 也正是「团队没有独立名字」那个坑的症状。这一段的写路径是 `AttachTeam`：
+ * 一条席位、一次 rev、一次广播，组员随档案过来。
+ *
+ * ## 已经在的为什么不画按钮
+ *
+ * 席位 `teamId == profile.teamId` 就是「这个群已经有这支队伍」。再点一次是空操作，
+ * 画一颗能点但什么都不变的按钮，用户会以为没生效（`DeadButtonGuardTest` 的同族）。
+ *
+ * @param teamProfiles 本机团队档案（空 ⇒ 整段不画：没有可加的东西）。
+ * @param onAttachTeam null = 没有写通路（预览 / 只读壳）⇒ 按钮不画。
+ */
+@Composable
+private fun TeamAttachSection(
+    group: GroupMeta,
+    teamProfiles: List<com.kapp.tenon.domain.TeamProfile>,
+    onAttachTeam: ((teamId: String) -> Unit)?,
+) {
+    val sp = LocalAppSpacing.current
+    if (teamProfiles.isEmpty()) return
+    if (onAttachTeam == null) return
+    val joined = group.virtualAgents.orEmpty().mapNotNull { it.teamId }.toSet()
+    val addable = teamProfiles.filterNot { it.teamId in joined }
+
+    Text(
+        text = stringResource(Res.string.team_profile_group_section),
+        style = MaterialTheme.typography.labelMedium,
+        fontWeight = FontWeight.SemiBold,
+        color = MaterialTheme.colorScheme.onSurfaceVariant,
+        modifier = Modifier.padding(top = sp.sm6),
+    )
+    Text(
+        text = stringResource(Res.string.team_profile_group_section_hint),
+        style = MaterialTheme.typography.labelSmall,
+        color = MaterialTheme.colorScheme.onSurfaceVariant,
+        modifier = Modifier.padding(bottom = sp.xs),
+    )
+    if (addable.isEmpty()) {
+        Text(
+            text = stringResource(Res.string.team_profile_group_all_present),
+            style = MaterialTheme.typography.bodySmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+            modifier = Modifier.padding(vertical = sp.xs),
+        )
+        return
+    }
+    addable.forEach { profile ->
+        Row(
+            modifier = Modifier.fillMaxWidth().padding(vertical = sp.xxs),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(sp.sm6),
+        ) {
+            Column(modifier = Modifier.weight(1f)) {
+                Text(
+                    text = profile.name,
+                    style = MaterialTheme.typography.bodyMedium,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                )
+                Text(
+                    // 人数 = 领队 1 + 组员数（与团队卡同一算法，不另编）。
+                    text = stringResource(Res.string.hub_team_size_format, 1 + profile.members.size),
+                    style = MaterialTheme.typography.labelSmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    maxLines = 1,
+                )
+            }
+            AppTextButton(
+                text = stringResource(Res.string.team_profile_group_add),
+                onClick = { onAttachTeam(profile.teamId) },
+                size = AppButtonSize.Small,
+            )
+        }
+    }
+}
+
 /** 面板里的轻量徽标（团队 / 只读）：同一形状一处定义。 */
 @Composable
-private fun RelayTagBadge(text: String) {
-    Surface(
+private fun RelayTagBadge(text: String) {    Surface(
         shape = ShapeRoles.DayCell,
         color = MaterialTheme.colorScheme.primaryContainer,
         contentColor = MaterialTheme.colorScheme.onPrimaryContainer,

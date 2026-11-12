@@ -135,8 +135,10 @@ class AgentHubProjectionTest {
         workspaces: List<WorkspaceUi> = emptyList(),
         approvals: List<AgentApprovalUi> = emptyList(),
         artifacts: List<AgentArtifactUi> = emptyList(),
+        employees: List<EmployeeProfile> = emptyList(),
     ): RelayUiState {
-        val settings = RelaySettings.firstRun().copy(nodeId = self, groups = groups)
+        val settings = RelaySettings.firstRun()
+            .copy(nodeId = self, groups = groups, employeeProfiles = employees)
         return RelayUiState(
             settings = settings,
             peers = peers,
@@ -231,8 +233,42 @@ class AgentHubProjectionTest {
     }
 
     @Test
-    fun seatServingTwoGroupsCountsTwo() {
+    fun employeeProfileNameWinsOverTheSeatToken() {
+        // 员工档案名是「这个人叫什么」的权威答案；席位 token 只是 `@` 要打的东西。
         val s = state(
+            peers = listOf(hostPeer("host-1")),
+            groups = listOf(group("g-1", "协同群", listOf(seat("DSH", "host-1", name = "dsh-coder")))),
+            sessions = listOf(session("host-1", "s-1", agentId = "dsh-029bbbf3")),
+            employees = listOf(
+                EmployeeProfile(
+                    employeeId = "emp-1",
+                    agentId = "dsh-029bbbf3",
+                    name = "前端小王",
+                    token = "dsh-coder",
+                ),
+            ),
+        )
+        val card = hubAgentsOf(s).single()
+        assertEquals("前端小王", card.displayName, "有档案时显示名取档案名，不是 @ token")
+        assertEquals("emp-1", card.employeeId, "卡片要带档案键 —— 编辑入口靠它定位，不靠会变的名字")
+        assertEquals("前端小王", card.employeeName)
+    }
+
+    @Test
+    fun anUnregisteredAgentKeepsTheSeatToken() {
+        // 没有档案 ⇒ 回落席位 token（老行为不变）；employeeId 为 null，界面据此不给编辑入口。
+        val s = state(
+            peers = listOf(hostPeer("host-1")),
+            groups = listOf(group("g-1", "协同群", listOf(seat("DSH", "host-1", name = "小榫")))),
+        )
+        val card = hubAgentsOf(s).single()
+        assertEquals("小榫", card.displayName)
+        assertNull(card.employeeId, "没档案就不该凭空多出一个键")
+        assertNull(card.employeeName)
+    }
+
+    @Test
+    fun seatServingTwoGroupsCountsTwo() {        val s = state(
             peers = listOf(hostPeer("host-1")),
             groups = listOf(
                 group("g-1", "群一", listOf(seat("DSH", "host-1", name = "小榫"))),

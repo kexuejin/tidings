@@ -24,18 +24,20 @@ class DelegationTemplateWiringGuardTest {
     /** 判据问的是「装配层有没有这条接线」—— 读整包，不跟文件搬家。 */
     private val extension = GuardSourceScan.livePackageOf("orchestration/src/main/kotlin/com/kapp/tenon/orchestration")
 
-    /** §15 第 9 条：命中模板跳过 PlannerLlm —— 省的是每单一次模型调用。 */
+    /** §15 第 9 条：命中模板先过团队 LLM 重排（失败回落编译链），仍不落进通用 PlannerLlm。 */
     @Test
-    fun templatePlansSkipThePlannerBeforeItCanRun() {
-        val shortCircuit = orchestrator.indexOf("if (plan.fromTemplate) return plan")
+    fun templatePlansGoThroughTheTeamRefinerBeforeTheGenericPlanner() {
+        val refineBranch = orchestrator.indexOf("if (plan.fromTemplate) return teamPlanRefiner?.invoke(plan) ?: plan")
         val planner = orchestrator.indexOf("val planner = autoPlanner")
         assertTrue(
-            shortCircuit >= 0,
-            "refinedPlan 必须含 fromTemplate 早退：摘掉它，每个模板单都要白付一次 planner 调用",
+            refineBranch >= 0,
+            "refinedPlan 的 fromTemplate 分支必须先问 teamPlanRefiner、?: 回落编译固定链 —— " +
+                "摘掉 refine 调用，@团队名 永远是名册顺序的固定链（leader 动态编排不存在）",
         )
         assertTrue(
-            shortCircuit < planner,
-            "fromTemplate 早退必须在 autoPlanner 之前 —— 排在后面等于没省（planner 已经跑过了）",
+            refineBranch < planner,
+            "fromTemplate 分支必须在 autoPlanner 之前 —— 模板计划哪怕重排失败也回落编译链，" +
+                "不该再白付一次通用 planner 调用",
         )
     }
 

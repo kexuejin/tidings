@@ -31,9 +31,7 @@ import com.kapp.tenon.core.protocol.VirtualAgentMember
 import com.kapp.tenon.core.protocol.declarationFor
 import com.kapp.tenon.core.protocol.AgentDuties
 import com.kapp.tenon.core.protocol.AgentMemberName
-import com.kapp.tenon.core.protocol.EntityTypes
 import com.kapp.tenon.core.protocol.TeamMemberDraft
-import com.kapp.tenon.core.protocol.TeamMemberInfo
 import com.kapp.tenon.core.protocol.TeamRosterValidation
 import com.kapp.tenon.core.protocol.isTeam
 
@@ -683,6 +681,7 @@ fun handleSendToGroup(
         val targetHostIsSelf = when (promptTarget) {
             is PromptTarget.Seat -> promptTarget.hostNodeId == self
             is PromptTarget.Member -> promptTarget.hostNodeId == self
+            is PromptTarget.Team -> promptTarget.hostNodeId == self
             else -> null
         }
         val route = RelayController.agentPromptRoute(
@@ -1051,10 +1050,13 @@ internal fun RelayController.commitGroupMetaUpdate(updated: GroupMeta) {
 /**
  * 保存 / 关闭某个席位的团队编制（团队创建方案 §4.3）。
  *
+ * **本函数只是入口适配**：把参数翻译成 [GroupDeclarationCommand.SetTeamRoster] 交给
+ * [applyDeclaration]，再把结果映射成横幅。校验（token 池 / 每群一个团队 / 组员上限）、
+ * rev 推进、落库与广播都在那条唯一写路径里 —— 三个入口共用一份，不再各写一遍。
+ *
  * @param groupId 群 id。
- * @param agentId 目标席位的 agent 身份（D4：席位定位键 = `(groupId, hostNodeId, agentId)`，
- *   本机 host 由 selfNodeId 隐含；大小写不敏感匹配）。旧键 `(groupId, defaultWsId)` 已废 ——
- *   席位未暴露项目目录时 `defaultWsId` 为 null，按它定位永远落空。
+ * @param agentId 目标席位的 agent 身份（席位定位键 = `(groupId, hostNodeId, agentId)`，
+ *   本机 host 由 selfNodeId 隐含；大小写不敏感匹配）。
  * @param roster 组员草稿；**null 或空清单 = 关闭团队**（`entityType` 回 single、
  *   组员清空）—— 与入驻/撤回同一节奏：一次保存 = 一次 rev+1、一次广播。
  */
@@ -1063,79 +1065,41 @@ fun RelayController.handleSetGroupTeamDeclaration(
     agentId: String,
     roster: List<TeamMemberDraft>?,
 ) {
-    val meta = _state.value.settings.groups.firstOrNull { it.groupId == groupId } ?: run {
-        warn(BannerMessage.GroupUnknown)
-        return
-    }
-    val self = _state.value.selfNodeId
-    // 声明自己的席位是**本机主权**（与入驻/撤回同一条边界），但要能改元数据就得在群里。
-    if (!meta.hasMember(self)) {
-        warn(BannerMessage.GroupLeft)
-        return
-    }
-    // 定位：席位已撤（面板移除）或并发变化时给可读反馈 —— 不猜。
-    val seat = meta.virtualAgents.orEmpty().firstOrNull {
-        it.hostNodeId == self && it.agentId.equals(agentId.trim(), ignoreCase = true)
-    } ?: run {
-        warn(BannerMessage.TeamSeatMissing)
-        return
-    }
-    // 校验（UI 已就地跑过一次并指出行号；这里是防线）。token 池 = 群内所有可 @ 的
-    // 东西（mentionKeys 口径）+ 其它声明的组员名；被编辑席位自己的旧组员名剔出池
-    // （正在被整体替换），领队自己的 token 留在池里（组员撞领队名 = 影子领队）。
-    val previousMemberNames = seat.teamMembers.flatMap { listOf(it.name, it.name.lowercase()) }.toSet()
-    val tokenPool = buildSet {
-        for (va in meta.virtualAgents.orEmpty()) {
-            add(va.name)
-            add(va.agentId)
-            if (va.hostNodeId != self || !va.agentId.equals(seat.agentId, ignoreCase = true)) {
-                va.teamMembers.forEach { add(it.name) }
-            }
-        }
-        addAll(groupParticipantRows(_state.value.senderContext(ConvId.group(groupId))).mentionKeys)
-    }
-    val issues = TeamRosterValidation.validate(roster.orEmpty(), tokenPool - previousMemberNames)
-    if (issues.isNotEmpty()) {
-        warn(BannerMessage.TeamRosterInvalid)
-        return
-    }
-    // 关闭语义：null 或空清单都视为关闭。
-    val enabling = !roster.isNullOrEmpty()
-    val next = meta.virtualAgents.orEmpty().map { va ->
-        // 目标席位 = 定位到的那一条（host + agentId；旧数据里同 agentId 的第二席位
-        // 靠 defaultWsId 区分 —— validateGroup 的席位键兜着不重）。
-        val isTarget = va.hostNodeId == self && va.agentId.equals(seat.agentId, ignoreCase = true) &&
-            va.defaultWsId == seat.defaultWsId
-        when {
-            // 目标席位：开 = team + 草稿清单（agentId 沿用草稿原值，编辑保全契约）；
-            // 关 = single + 空清单。name / allowedWorkspaces / defaultWsId 原样保留。
-            isTarget -> va.copy(
-                entityType = if (enabling) EntityTypes.TEAM else EntityTypes.SINGLE,
-                teamMembers = if (enabling) {
-                    roster.orEmpty().map { TeamMemberInfo(agentId = it.agentId, name = it.name, role = it.role) }
-                } else {
-                    emptyList()
-                },
-            )
-            // 同 agent 的其它席位一律清成单兵（§3.1：一个 agent 每群最多一个团队 ——
-            // 写路径保证，收端还有 validateGroup 的同约束兜底；D4 之后新数据里
-            // 一个 agent 只有一条席位，这一支只服务旧数据的收敛）。
-            va.hostNodeId == self && va.agentId.equals(seat.agentId, ignoreCase = true) -> va.copy(
-                entityType = EntityTypes.SINGLE,
-                teamMembers = emptyList(),
-            )
-            // 其它宿主、其它 agent：逐字段原样保留。
-            else -> va
-        }
-    }
-    val updated = meta.copy(
-        virtualAgents = next.distinct().ifEmpty { null },
-        rev = meta.rev + 1,
-        updatedBy = self,
-        updatedTs = nowMillis(),
+    val result = applyDeclaration(
+        GroupDeclarationCommand.SetTeamRoster(
+            groupId = groupId,
+            agentId = agentId,
+            roster = roster,
+            actor = DeclarationActor.Human(_state.value.selfNodeId),
+            origin = DeclarationOrigin.GROUP_INFO,
+        ),
     )
-    commitGroupMetaUpdate(updated)
-    info(BannerMessage.TeamRosterSaved)
+    when (result) {
+        is DeclarationResult.Applied -> info(BannerMessage.TeamRosterSaved)
+        is DeclarationResult.Conflict -> warn(BannerMessage.TeamRosterInvalid)
+        is DeclarationResult.Rejected -> when (result.reason) {
+            DeclarationRejection.GROUP_UNKNOWN -> warn(BannerMessage.GroupUnknown)
+            DeclarationRejection.NOT_MEMBER -> warn(BannerMessage.GroupLeft)
+            DeclarationRejection.SEAT_MISSING -> warn(BannerMessage.TeamSeatMissing)
+            DeclarationRejection.ROSTER_INVALID, DeclarationRejection.NAME_INVALID ->
+                warn(BannerMessage.TeamRosterInvalid)
+            // 档案化团队：名册归档案，群内整表替换被拒 —— 必须说出来，否则用户以为保存成功。
+            DeclarationRejection.TEAM_PROFILE_BACKED -> warn(BannerMessage.TeamProfileManaged)
+            // 这条入口不写档案（`SetTeamRoster` 只改本群席位），档案缺失与否与它无关：
+            // 真出现 TEAM_UNKNOWN 是调用方拼错了命令，落横幅只会误导。
+            DeclarationRejection.TEAM_UNKNOWN -> Unit
+            // 员工档案同理：`SetTeamRoster` 不碰员工引用。
+            DeclarationRejection.EMPLOYEE_UNKNOWN,
+            DeclarationRejection.EMPLOYEE_EXISTS,
+            -> Unit
+            // 参数不自洽与落盘被拒：commitGroupMetaUpdate 已经 warn 过（GroupMetaRejected），
+            // 这里不再叠一条 —— 两条横幅会被读成两个故障。
+            DeclarationRejection.ARGUMENT_INVALID,
+            DeclarationRejection.BASE_REV_REQUIRED,
+            DeclarationRejection.PERSIST_REJECTED,
+            -> Unit
+        }
+    }
 }
 
 /**

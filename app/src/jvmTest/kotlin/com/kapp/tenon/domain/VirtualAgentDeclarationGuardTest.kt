@@ -84,13 +84,24 @@ class VirtualAgentDeclarationGuardTest {
             Regex("declarationFor\\(").findAll(GuardSourceScan.stripComments(groups)).count(),
             "建群随群的席位构造必须走 declarationFor（团队字段回填的唯一入口）",
         )
+        // 入驻/编辑的席位构造已随写路径收口搬进 `GroupDeclarationWritePath.kt`：
+        // 那里恰好一处（`planJoinSeat`）。搬走后 ProjectDirectory 里**不该再有**构造点 ——
+        // 出现第二处就是又一条绕过命令的写入路径。
+        val writePath = GuardSourceScan.read(
+            "app/src/commonMain/kotlin/com/kapp/tenon/domain/GroupDeclarationWritePath.kt",
+        )
+        assertEquals(
+            1,
+            Regex("declarationFor\\(").findAll(GuardSourceScan.stripComments(writePath)).count(),
+            "入驻新增的席位构造必须走 declarationFor，且只许在写路径里有一处",
+        )
         val projectDirectory = GuardSourceScan.read(
             "app/src/commonMain/kotlin/com/kapp/tenon/domain/RelayControllerProjectDirectoryComponent.kt",
         )
         assertEquals(
-            1,
+            0,
             Regex("declarationFor\\(").findAll(GuardSourceScan.stripComments(projectDirectory)).count(),
-            "入驻新增的席位构造必须走 declarationFor（旧授权面板的构造点已随勾选流删除）",
+            "入驻已收口到 GroupDeclarationWritePath —— 这里再出现构造点就是旁路",
         )
     }
 

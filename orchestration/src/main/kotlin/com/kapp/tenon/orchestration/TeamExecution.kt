@@ -7,8 +7,10 @@ import com.kapp.tenon.agent.DelegationPlan
 import com.kapp.tenon.core.protocol.GroupMeta
 import com.kapp.tenon.core.protocol.TeamMemberInfo
 import com.kapp.tenon.core.protocol.TeamMention
+import com.kapp.tenon.core.protocol.TeamNameMention
 import com.kapp.tenon.core.protocol.VirtualAgentMember
 import com.kapp.tenon.core.protocol.resolveTeamMemberToken
+import com.kapp.tenon.core.protocol.teamSeatMatchingName
 
 /**
  * `@组员` → (席位, 组员, 执行档) 的宿主侧解析（团队执行方案 §4.3）。
@@ -54,34 +56,35 @@ class TeamExecutionResolver(
         selfNodeId: String,
     ): Target {
         if (groupId == null || mentionedKey.isNullOrBlank() || group == null) return Target.None
+        // **`@团队名`（整队）先判**：团队名是展示串，组员 token 是 ASCII slug，两套词表
+        // 不能混在一个循环里（混了就是「团队叫 coder 时 @ 到组员」）。命中团队的语义是
+        // 「这活整队接」—— 编到执行档唯一那个 worker，其余 reviewer 照既有责任链走。
+        when (val teamMention = group.teamSeatMatchingName(mentionedKey)) {
+            is TeamNameMention.Ambiguous ->
+                return Target.NotConfigured(null, teamNameAmbiguous(mentionedKey))
+            is TeamNameMention.Hit -> {
+                val seat = teamMention.seat
+                val (profile, denial) = profileForSeat(groupId, seat, selfNodeId)
+                if (profile == null) return Target.NotConfigured(seat, denial.orEmpty())
+                val worker = profile.worker
+                    ?: return Target.NotConfigured(seat, "team execution profile has no worker")
+                val member = seat.teamMembers.firstOrNull {
+                    it.agentId.trim().lowercase() == worker.agentId.trim().lowercase()
+                } ?: return Target.NotConfigured(
+                    seat,
+                    "execution profile is stale: worker '" + worker.agentId + "' is not in the roster",
+                )
+                return Target.Hit(seat, member, profile)
+            }
+            null -> Unit
+        }
         when (val hit = group.resolveTeamMemberToken(mentionedKey)) {
             is TeamMention.Ambiguous ->
                 return Target.NotConfigured(null, "member token matches multiple seats (hand-edited meta?)")
             is TeamMention.Hit -> {
                 val seat = hit.seat
-                if (seat.hostNodeId != selfNodeId) {
-                    return Target.NotConfigured(seat, "this seat is hosted on another device")
-                }
-                val dirId = dirIdOfGroup(groupId)?.trim().orEmpty()
-                if (dirId.isEmpty()) {
-                    return Target.NotConfigured(seat, "group has no project directory bound")
-                }
-                val profile = store.profileFor(groupId, dirId, seat.agentId) ?: run {
-                    val declared = seat.teamMembers.map { it.agentId }
-                    if (declared.isEmpty()) {
-                        return Target.NotConfigured(seat, "team has no members declared")
-                    }
-                    return Target.NotConfigured(seat, "team execution is not configured for this seat")
-                }
-                val declaredIds = seat.teamMembers.map { it.agentId.trim().lowercase() }.toSet()
-                val dangling = profile.members.filter { it.agentId.trim().lowercase() !in declaredIds }
-                if (dangling.isNotEmpty()) {
-                    return Target.NotConfigured(
-                        seat,
-                        "execution profile is stale: " + dangling.joinToString(",") { it.agentId } +
-                            " no longer in the roster",
-                    )
-                }
+                val (profile, denial) = profileForSeat(groupId, seat, selfNodeId)
+                if (profile == null) return Target.NotConfigured(seat, denial.orEmpty())
                 val spec = profile.members.firstOrNull {
                     it.agentId.trim().lowercase() == hit.member.agentId.trim().lowercase()
                 } ?: return Target.NotConfigured(
@@ -92,6 +95,45 @@ class TeamExecutionResolver(
             }
             null -> return Target.None
         }
+    }
+
+    private fun teamNameAmbiguous(key: String): String =
+        "team name '" + key + "' matches more than one seat, or collides with a member token; rename the team"
+
+    /**
+     * 席位 → 执行档（含**宿主 / 工作区 / 悬空**三道校验）。第二项非空 = 拒绝原因。
+     *
+     * 抽出来是因为两个入口（`@组员` 与 `@团队名`）必须读同一份档、报同一句原因 ——
+     * 各写一遍的结果是「同一支队，@人时说 A，@队时说 B」。
+     */
+    private fun profileForSeat(
+        groupId: String,
+        seat: VirtualAgentMember,
+        selfNodeId: String,
+    ): Pair<TeamExecutionProfile?, String?> {
+        if (seat.hostNodeId != selfNodeId) {
+            return null to "this seat is hosted on another device"
+        }
+        val dirId = dirIdOfGroup(groupId)?.trim().orEmpty()
+        if (dirId.isEmpty()) {
+            return null to "group has no project directory bound"
+        }
+        val profile = store.profileFor(groupId, dirId, seat.agentId) ?: return null to if (
+            seat.teamMembers.isEmpty()
+        ) {
+            "team has no members declared"
+        } else {
+            "team execution is not configured for this seat"
+        }
+        val declaredIds = seat.teamMembers.map { it.agentId.trim().lowercase() }.toSet()
+        val dangling = profile.members.filter { it.agentId.trim().lowercase() !in declaredIds }
+        if (dangling.isNotEmpty()) {
+            return null to (
+                "execution profile is stale: " + dangling.joinToString(",") { it.agentId } +
+                    " no longer in the roster"
+                )
+        }
+        return profile to null
     }
 }
 

@@ -171,6 +171,11 @@ internal fun ChatDialogsHost(
                 showTeamHostManagedNotice = true,
             // 手机壳默认无执行面（DesktopExtension 只在桌面装配端口）⇒ 只读投影。
             teamExecutionPort = groupActions.teamExecutionPort,
+                // 团队档案住本机设置：手机上有就画（本机自建过团队时），没有则整段不画。
+                teamProfiles = settingsSlice.settings.teamProfiles,
+                onAttachTeam = groupActions.onAttachTeam?.let { attach ->
+                    { teamId -> attach(group.groupId, teamId) }
+                },
                 modifier = Modifier.fillMaxSize(),
             )
         } else {
@@ -198,6 +203,10 @@ internal fun ChatDialogsHost(
                 onSetTeamRoster = setTeamRoster,
                 showTeamHostManagedNotice = true,
                 teamExecutionPort = groupActions.teamExecutionPort,
+                teamProfiles = settingsSlice.settings.teamProfiles,
+                onAttachTeam = groupActions.onAttachTeam?.let { attach ->
+                    { teamId -> attach(group.groupId, teamId) }
+                },
             )
         }
     }

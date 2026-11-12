@@ -35,6 +35,10 @@ import com.kapp.tenon.domain.pendingApprovalCount
 import com.kapp.tenon.domain.primaryAssignment
 import com.kapp.tenon.generated.resources.Res
 import com.kapp.tenon.generated.resources.action_back
+import com.kapp.tenon.generated.resources.agent_employee_edit
+import com.kapp.tenon.generated.resources.agent_employee_register
+import com.kapp.tenon.ui.components.AppButtonSize
+import com.kapp.tenon.ui.components.AppTextButton
 import com.kapp.tenon.generated.resources.agent_detail_assignment_leader
 import com.kapp.tenon.generated.resources.agent_detail_assignment_member
 import com.kapp.tenon.generated.resources.agent_detail_assignments_section_title
@@ -115,6 +119,13 @@ internal fun AgentDetailView(
     agentSlice: AgentSlice,
     nodeSlice: NodeSlice,
     settingsSlice: SettingsSlice,
+    /**
+     * 「登记为员工 / 编辑员工」。null = 这个壳没有员工档案面（手机：档案只住宿主机）⇒ 不画按钮。
+     *
+     * 复用的是同一个回调：对话框按 [AgentHubDetailUi.employeeId] 自己决定是登记还是编辑 ——
+     * 页头不需要知道两种形态的差别，它只负责把「用户点了」这件事交出去。
+     */
+    onEditEmployee: (() -> Unit)? = null,
     modifier: Modifier = Modifier,
 ) {
     val sp = LocalAppSpacing.current
@@ -153,6 +164,21 @@ internal fun AgentDetailView(
                         overflow = TextOverflow.Ellipsis,
                     )
                 }
+            }
+            // 登记 / 编辑员工：只在**有身份键**时画（没有 agentId 就无从登记 —— 点了只会失败），
+            // 且只在壳给了通路时画（手机没有宿主档案，不画一颗按下去没反应的按钮）。
+            if (onEditEmployee != null && detail.agentKey != null) {
+                AppTextButton(
+                    text = stringResource(
+                        if (detail.employeeId == null) {
+                            Res.string.agent_employee_register
+                        } else {
+                            Res.string.agent_employee_edit
+                        },
+                    ),
+                    size = AppButtonSize.Small,
+                    onClick = onEditEmployee,
+                )
             }
         }
 

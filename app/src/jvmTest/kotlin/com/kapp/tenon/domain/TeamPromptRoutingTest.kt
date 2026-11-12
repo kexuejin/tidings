@@ -118,14 +118,16 @@ class TeamPromptRoutingTest {
         targetHostIsSelf: Boolean?,
         localAgentPresent: Boolean,
         remoteAgentPresent: Boolean,
+        text: String = "@coder fix it",
+        agentKinds: Set<String> = setOf("coder", "dsh-lead"),
     ) = RelayController.agentPromptRoute(
-        text = "@coder fix it",
+        text = text,
         groupId = "g1",
         isWorkspaceGroup = true,
         repliedToIsAgent = false,
         localAgentPresent = localAgentPresent,
         remoteAgentPresent = remoteAgentPresent,
-        agentKinds = setOf("coder", "dsh-lead"),
+        agentKinds = agentKinds,
         targetHostIsSelf = targetHostIsSelf,
     )
 
@@ -147,5 +149,66 @@ class TeamPromptRoutingTest {
     @Test
     fun targetElseIsRemoteEvenIfWeHaveLocalAgents() {
         assertEquals(AgentPromptRoute.Remote, route(targetHostIsSelf = false, localAgentPresent = true, remoteAgentPresent = false))
+    }
+
+    // ------------------------------------------------------------ 整队（@团队名）
+
+    private fun namedTeam(
+        host: String = self,
+        agentId: String = "dsh-lead",
+        teamId: String = "team-dev",
+        teamName: String = "开发团队",
+    ) = teamSeat(host = host, agentId = agentId).copy(teamId = teamId, teamName = teamName)
+
+    @Test
+    fun teamNameJoinsTheMentionPool() {
+        val rows = groupParticipantRows(ctx(namedTeam()))
+        assertTrue("开发团队" in rows.mentionKeys, "团队名必须进池（候选=匹配=解析 同一份）：" + rows.mentionKeys)
+    }
+
+    @Test
+    fun aTeamMentionResolvesToTheWholeTeam() {
+        val g = group(namedTeam())
+        val target = resolvePromptTarget("@开发团队 修登录", g, groupParticipantRows(ctx(namedTeam())).mentionKeys)
+        val team = assertIs<PromptTarget.Team>(target)
+        assertEquals("team-dev", team.teamId)
+        assertEquals("开发团队", team.teamName)
+        assertEquals(self, team.hostNodeId, "整队的执行主体是席位宿主")
+    }
+
+    /** 团队名与组员同帧：两个意图，不替人合并（与「一次只 @ 一个目标」同一条）。 */
+    @Test
+    fun aTeamAndAMemberInTheSameMessageAreAmbiguous() {
+        val g = group(namedTeam())
+        val target = resolvePromptTarget(
+            "@开发团队 让 @coder 修登录",
+            g, groupParticipantRows(ctx(namedTeam())).mentionKeys,
+        )
+        assertIs<PromptTarget.Ambiguous>(target)
+    }
+
+    /** 团队名与组员 token 撞名：`@` 永远先命中组员 ⇒ 歧义，提示改名而不是静默选一个。 */
+    @Test
+    fun aTeamNamedLikeAMemberIsAmbiguous() {
+        val g = group(namedTeam(teamName = "coder"))
+        val target = resolvePromptTarget("@coder 修登录", g, groupParticipantRows(ctx(namedTeam(teamName = "coder"))).mentionKeys)
+        assertIs<PromptTarget.Ambiguous>(target)
+    }
+
+    /**
+     * `@团队名` 必须真的**唤醒路由**（不只是解析出目标）。
+     *
+     * 这一条与 [teamNameJoinsTheMentionPool] 是两处依赖：池里没有团队名时
+     * `shouldTriggerAgent` 判 NotAddressed ⇒ `agentPromptRoute` 返回 None ⇒
+     * 「@ 了团队什么都没发生」。目标解析能过、唤醒判据不能过的分叉，
+     * 症状正是本仓最贵的「@ 了没反应」。
+     */
+    @Test
+    fun aTeamNameAloneWakesTheRoute() {
+        val pool = groupParticipantRows(ctx(namedTeam())).mentionKeys
+        assertEquals(
+            AgentPromptRoute.Local,
+            route(text = "@开发团队 修登录", agentKinds = pool, targetHostIsSelf = true, localAgentPresent = true, remoteAgentPresent = false),
+        )
     }
 }

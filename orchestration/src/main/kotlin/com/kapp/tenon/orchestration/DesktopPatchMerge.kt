@@ -45,6 +45,11 @@ object DesktopPatchMerge {
         data class Conflict(val detail: String) : Outcome
     }
 
+    sealed interface PrOutcome {
+        data class Created(val prUrl: String, val branch: String) : PrOutcome
+        data class Failed(val detail: String) : PrOutcome
+    }
+
     fun apply(patchPath: String, workspacePath: String): Outcome {
         val patch = File(patchPath)
         if (!patch.isFile) return Outcome.Conflict("patch file missing: $patchPath")
@@ -105,6 +110,125 @@ object DesktopPatchMerge {
             apply(patch.absolutePath, workspacePath)
         } finally {
             runCatching { patch.delete() }
+        }
+    }
+
+    /**
+     * 将分支推送至远端并创建 PR/MR。
+     */
+    fun pushBranchAndCreatePr(
+        branch: String,
+        workspacePath: String,
+        title: String,
+        body: String = "Created by Tenon Agent.",
+    ): PrOutcome {
+        val workspace = File(workspacePath)
+        if (!workspace.isDirectory) return PrOutcome.Failed("workspace missing: $workspacePath")
+        if (git(workspace, "rev-parse", "--verify", "--quiet", "refs/heads/$branch").exitCode != 0) {
+            return PrOutcome.Failed("branch missing: $branch")
+        }
+        val remotes = git(workspace, "remote").stdout.lines().map { it.trim() }.filter { it.isNotEmpty() }
+        val remote = remotes.firstOrNull { it == "origin" } ?: remotes.firstOrNull()
+            ?: return PrOutcome.Failed("no git remote configured in workspace")
+
+        val push = git(workspace, "push", "-u", remote, branch)
+        if (push.exitCode != 0) {
+            return PrOutcome.Failed("git push failed: " + push.stderr.takeLast(300).trim())
+        }
+
+        val ghProc = runCatching {
+            ProcessBuilder("gh", "pr", "create", "--head", branch, "--title", title, "--body", body)
+                .directory(workspace)
+                .start()
+        }.getOrNull()
+        if (ghProc != null) {
+            val ghOut = ghProc.inputStream.bufferedReader().readText().trim()
+            val ghCode = ghProc.waitFor()
+            if (ghCode == 0 && ghOut.startsWith("http")) {
+                return PrOutcome.Created(prUrl = ghOut, branch = branch)
+            }
+        }
+
+        val glabProc = runCatching {
+            ProcessBuilder("glab", "mr", "create", "--source-branch", branch, "--title", title, "--description", body)
+                .directory(workspace)
+                .start()
+        }.getOrNull()
+        if (glabProc != null) {
+            val glabOut = glabProc.inputStream.bufferedReader().readText().trim()
+            val glabCode = glabProc.waitFor()
+            if (glabCode == 0 && glabOut.startsWith("http")) {
+                return PrOutcome.Created(prUrl = glabOut, branch = branch)
+            }
+        }
+
+        val remoteUrl = git(workspace, "remote", "get-url", remote).stdout.trim()
+        val webUrl = formatCompareUrl(remoteUrl, branch)
+        return PrOutcome.Created(prUrl = webUrl ?: "$remote/$branch", branch = branch)
+    }
+
+    /**
+     * 将独立补丁应用到临时 worktree 并推送到新分支创建 PR。
+     * 宿主当前工作区不发生任何分支切换或文件污染。
+     */
+    fun pushPatchAndCreatePr(
+        patchPath: String,
+        workspacePath: String,
+        branch: String,
+        title: String,
+        body: String = "Created by Tenon Agent.",
+    ): PrOutcome {
+        val patch = File(patchPath)
+        if (!patch.isFile) return PrOutcome.Failed("patch file missing: $patchPath")
+        val workspace = File(workspacePath)
+        if (!workspace.isDirectory) return PrOutcome.Failed("workspace missing: $workspacePath")
+
+        val tempDir = File.createTempFile("tenon-pr-worktree-", "").apply {
+            delete()
+            mkdirs()
+        }
+        return try {
+            val addWorktree = git(workspace, "worktree", "add", "-b", branch, tempDir.absolutePath, "HEAD")
+            if (addWorktree.exitCode != 0) {
+                return PrOutcome.Failed("failed to create temporary worktree for PR: " + addWorktree.stderr.takeLast(300).trim())
+            }
+            val apply = git(tempDir, "apply", patch.absolutePath)
+            if (apply.exitCode != 0) {
+                return PrOutcome.Failed("failed to apply patch in PR worktree: " + apply.stderr.takeLast(300).trim())
+            }
+            git(tempDir, "add", "-A")
+            val commit = git(tempDir, "commit", "-m", title)
+            if (commit.exitCode != 0) {
+                return PrOutcome.Failed("failed to commit patch in PR worktree: " + commit.stderr.takeLast(300).trim())
+            }
+            pushBranchAndCreatePr(branch = branch, workspacePath = workspace.absolutePath, title = title, body = body)
+        } finally {
+            git(workspace, "worktree", "remove", "--force", tempDir.absolutePath)
+            git(workspace, "worktree", "prune")
+            tempDir.deleteRecursively()
+        }
+    }
+
+    internal fun formatCompareUrl(remoteUrl: String, branch: String): String? {
+        val clean = remoteUrl.trim().removeSuffix(".git")
+        return when {
+            clean.contains("github.com") -> {
+                val path = if (clean.startsWith("git@github.com:")) {
+                    clean.removePrefix("git@github.com:")
+                } else {
+                    clean.substringAfter("github.com/").removePrefix("/")
+                }
+                "https://github.com/$path/compare/$branch?expand=1"
+            }
+            clean.contains("gitlab.com") -> {
+                val path = if (clean.startsWith("git@gitlab.com:")) {
+                    clean.removePrefix("git@gitlab.com:")
+                } else {
+                    clean.substringAfter("gitlab.com/").removePrefix("/")
+                }
+                "https://gitlab.com/$path/-/merge_requests/new?merge_request%5Bsource_branch%5D=$branch"
+            }
+            else -> null
         }
     }
 

@@ -296,7 +296,9 @@ class LuciolaSecureChannelTest {
         try {
             val wrong = ByteArray(16) { 0x42 }
             val request = PairingFrame.encodeRequest("phone-node-2", phone.publicKey, wrong)
-            val result = async { timeoutOrNull(10_000) { phoneTransport.pairingResults.first() } }
+            // 30s = 观测预算不是断言（§2.7-6）：拒绝应答要穿过 deliverRepeatedly 的
+            // 40 次重发，满载下实测会超出 10s（testStabilityGate run2 复现，单跑恒绿）。
+            val result = async { timeoutOrNull(30_000) { phoneTransport.pairingResults.first() } }
             deliverRepeatedly(times = 40) { phoneTransport.send(request, "127.0.0.1", portHost) }
             val reply = result.await()
             assertTrue(reply != null && !reply.accepted, "secret 不对必须被拒绝,且要有明说的应答")

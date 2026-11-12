@@ -229,6 +229,8 @@ public fun ChatPane(
                 onAddGroupMembers = controller::addGroupMembers,
                 onRemoveGroupMember = controller::removeGroupMember,
                 onUpdateGroupMeta = controller::updateGroupMeta,
+                // 团队档案（住本机设置）：「添加团队」把整支队一次加进本群。
+                onAttachTeam = { groupId, teamId -> controller.attachTeamToGroup(teamId, groupId) },
                 onLeaveGroup = { groupId ->
                     controller.leaveGroup(groupId)
                     onBack?.invoke()
@@ -386,6 +388,9 @@ public fun ChatPane(
                     controller.setGroupTeamDeclaration(group.groupId, agentId, roster)
                 },
                 teamExecutionPort = controller.teamExecutionPort,
+                // 团队档案（住本机设置）：面板里「添加团队」段的候选与写通路。
+                teamProfiles = settingsSlice.settings.teamProfiles,
+                onAttachTeam = { teamId -> controller.attachTeamToGroup(teamId, group.groupId) },
             )
         }
         if (showClearConfirm) {

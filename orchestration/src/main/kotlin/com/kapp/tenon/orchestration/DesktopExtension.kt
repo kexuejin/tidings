@@ -33,6 +33,7 @@ import com.kapp.tenon.agent.resolveCliDriver
 import com.kapp.tenon.agent.runningSandboxes
 import com.kapp.tenon.agent.sendGrantReply
 import com.kapp.tenon.domain.RelayController
+import com.kapp.tenon.domain.TeamScaffoldBridge
 import com.kapp.tenon.domain.DiffSummary
 import com.kapp.tenon.domain.QuickAction
 import com.kapp.tenon.domain.QuickActionPort
@@ -491,6 +492,9 @@ class DesktopExtension(
                 // §16 群模板：挡位 B 命中该群模板时直接采用配置选棒并跳过 planner。
                 teamStore = delegationTeams,
                 detailedAutoPlanner = { goal, available -> PlannerLlm.refinePlan(goal, available) },
+                // leader 动态编排：@团队名 编译出的固定链先过一次 LLM 重排；
+                // 无 key / 超时 / 门校验不过由 TeamPlanRefiner 自己返回 null，回落编译固定链。
+                teamPlanRefiner = { plan -> TeamPlanRefiner.refine(plan) },
                 // 团队执行档：@组员 的宿主侧解析与编译（§4.3）。
                 teamExecutionStore = teamExecution,
                 // D16：执行档主键的 dirId 一半 —— 与控制面/端口同一份 HostDirectoryStore。
@@ -511,6 +515,14 @@ class DesktopExtension(
                 availableDrivers = { workerOrchestrator.availableAgentKeys() },
                 pointerDirId = { groupId -> hostDirectoryStore?.pointerOf(groupId) },
             )
+            // 「AI 建队」生成桥：LLM → 过门 → 回落模板一条龙（TeamScaffoldGenerator）。
+            // 驱动名册与执行档端口同一份在位事实；领队候选由 UI 传（与 TeamProfileDialog
+            // 同一候选源），桥只负责"给一份可建方案"，落盘仍走用户确认后的 saveTeamProfile。
+            controller.teamScaffoldBridge = TeamScaffoldBridge { need, leaderKeys, defaults ->
+                TeamScaffoldGenerator.generate(need, leaderKeys, defaults) {
+                    workerOrchestrator.availableAgentKeys()
+                }
+            }
             // 项目目录端口（决策稿 §5.1）：与上面同一接缝 —— 同一个 store 实例交给
             // 控制面（HTTP 路由）与这里（域层端口），两处读写落同一份内存与落盘。
             controller.hostDirectoryPort = DesktopHostDirectoryPort(
@@ -1007,6 +1019,9 @@ class DesktopExtension(
                 grants.allows(nodeId, agentKey = agentId, forExecution = true)
             }
             controller.invokeExecPolicyOf = { agentId -> execPolicies.policyOf(agentId) }
+            // 写入口与读入口同一份档：`set` 自己会校验取值（非法取值不改、返回 false），
+            // 界面据返回值报「没改成」，不在这里兜一个「看起来成功」。
+            controller.invokeSetExecPolicy = { agentId, policy -> execPolicies.set(agentId, policy) }
             controller.invokeRecordGrantRequest = { nodeId, agentId, reason ->
                 grants.recordRequest(nodeId, agentId, reason, System.currentTimeMillis())
             }

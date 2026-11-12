@@ -6,7 +6,9 @@ import com.kapp.tenon.agent.ChainDiff
 import com.kapp.tenon.agent.ChainProgress
 import com.kapp.tenon.agent.ChainStage
 import com.kapp.tenon.core.protocol.AgentExecAuthorizer
+import com.kapp.tenon.core.protocol.TeamNameMention
 import com.kapp.tenon.core.protocol.seatsMatchingToken
+import com.kapp.tenon.core.protocol.teamSeatMatchingName
 import com.kapp.tenon.agent.ControlPlane
 import com.kapp.tenon.agent.DelegationParser
 import com.kapp.tenon.agent.DelegationPlan
@@ -92,6 +94,12 @@ class DesktopWorkerOrchestrator(
      */
     private val pathAllowed: ((path: String, requireWrite: Boolean) -> Boolean)? = null,
     private val detailedAutoPlanner: (suspend (goal: String, available: Set<String>) -> PlannerPlan?)? = null,
+    /**
+     * 团队计划的 LLM 重排（leader 动态编排）：只重排 reviewer 顺序与定制各棒指令，
+     * 成员/驱动/模型/链形状不许动，门校验不过或 LLM 不可用 ⇒ 回落编译固定链。
+     * null = 未装配（测试与老装置）⇒ 行为与从前逐字一致。
+     */
+    private val teamPlanRefiner: (suspend (plan: DelegationPlan) -> DelegationPlan?)? = null,
 ) {
     /**
      * 工单的**可等待终局**：invoke 执行桥（真机 `@agent` 派单）await 它拿到请求-响应
@@ -814,7 +822,11 @@ class DesktopWorkerOrchestrator(
         // **团队执行分支**（P0-A，§4.3）：点的是组员 token ⇒ 由席位宿主编译责任链。
         // 两个执行入口（文本路由 / invoke 桥）共用 resolveTeamTarget + compile —— 两条路各说各话
         // 是本仓已有的分叉形态。非组员 token（领队 / kind）保持既有路径逐字不变。
-        if (groupId != null && mentionedAgentKey != null && teamExecutionStore != null) {
+        //
+        // **条件里不再要求 `teamExecutionStore != null`**：`@团队名` 命中而本机没有团队执行面时，
+        // 若直接跳过这一段，团队名会流到下面的 `AgentProfiles.resolveKey`（匹配不上 ⇒ null）
+        // ⇒ `dispatchSingleWorker(null)` 用默认驱动跑一棒。那是「按了整队、跑了个没人配过的底」。
+        if (groupId != null && mentionedAgentKey != null) {
             when (val teamTarget = resolveTeamTarget(groupId, mentionedAgentKey)) {
                 is TeamExecutionResolver.Target.NotConfigured -> {
                     // 缺配置不猜（§2）：绝不回落到"默认 codex 单棒"。
@@ -825,7 +837,8 @@ class DesktopWorkerOrchestrator(
                     return
                 }
                 is TeamExecutionResolver.Target.Hit -> {
-                    if (runTeamDispatch(convId, groupId, senderPeerId, teamTarget, prompt)) return
+                    // 卡面称呼 = 用户打过的那个 token（团队名 / 组员名）。
+                    if (runTeamDispatch(convId, groupId, senderPeerId, teamTarget, prompt, mentionedAgentKey)) return
                     return
                 }
                 TeamExecutionResolver.Target.None -> Unit // 非组员 token：既有路径
@@ -1424,7 +1437,9 @@ class DesktopWorkerOrchestrator(
         // §15 第 9 条：命中群模板 = 人已显式选定团队 ⇒ 短路跳过 PlannerLlm
         //（省 Token 与 20s 延迟，避开 planner 异厂商提示词缺陷）。
         // DelegationTemplateWiringGuardTest 钉住这一行不许被注释或回溯（反向验证已红过一次）。
-        if (plan.fromTemplate) return plan
+        // leader 动态编排：先让 LLM 重排一次（reviewer 顺序 + 各棒指令按需求定制），
+        // 门校验不过 / LLM 不可用 ⇒ ?: 右侧原样回落编译固定链 —— 编译链是保底。
+        if (plan.fromTemplate) return teamPlanRefiner?.invoke(plan) ?: plan
         val detailedPlanner = detailedAutoPlanner
         if (detailedPlanner != null) {
             val detailed = runCatching { detailedPlanner(plan.goal, healthyAgentKeys(available)) }.getOrNull()
@@ -1455,9 +1470,20 @@ class DesktopWorkerOrchestrator(
         groupId: String,
         mentionedAgentKey: String?,
     ): TeamExecutionResolver.Target {
-        val store = teamExecutionStore ?: return TeamExecutionResolver.Target.None
         val st = controller.state.value
         val group = groupId.let { id -> st.settings.groups.firstOrNull { it.groupId == id } }
+        val store = teamExecutionStore
+        if (store == null) {
+            // 没有团队执行面时**只有团队名**要在这里拦：组员 token 的既有行为是 None
+            // （交给既有单 agent 路径），而团队名在那边解析不出任何席位 ——
+            // 交给它只会变成「用默认驱动跑一棒」，必须出 blocked 卡。
+            val isTeamName = group?.teamSeatMatchingName(mentionedAgentKey.orEmpty()) is TeamNameMention.Hit
+            return if (isTeamName) {
+                TeamExecutionResolver.Target.NotConfigured(null, "team dispatch is not available on this host")
+            } else {
+                TeamExecutionResolver.Target.None
+            }
+        }
         return TeamExecutionResolver(store, groupDirIdOf).resolve(
             groupId = groupId,
             mentionedKey = mentionedAgentKey,
@@ -1511,22 +1537,30 @@ class DesktopWorkerOrchestrator(
         senderPeerId: String,
         target: TeamExecutionResolver.Target.Hit,
         prompt: String,
+        /**
+         * 卡面里怎么称呼这个目标：`@团队名` 传团队名、`@组员` 传组员名。
+         * 拒绝文案要报用户打过的那个词，不报内部 token。
+         */
+        targetLabel: String,
     ): Boolean {
         val st = controller.state.value
         val group = st.settings.groups.firstOrNull { it.groupId == groupId } ?: return false
-        // **授权（§4.4）**：组员不是权限主体 —— `@coder` 的授权等价于
-        // "发送者对 Leader 席位 agentId 有没有执行权"。判据与意图路径同一份。
+        // **逐成员授权（§4.4，mulica 式员工可见性）**：真正被调起的是 `target.member`
+        // （`@团队名` 编到执行档唯一的 worker，`@组员` 就是那个组员），授权必须按**它的**
+        // agentId 判，不是按领队席位 agentId。否则「组员各自设了仅自己可用」会整个失效 ——
+        // 领队开放就等同全队开放，与用户要的「每个员工各自决定给谁用」正相反。
+        // 判据与意图路径同一份（[AgentExecAuthorizer]）。
         val verdict = AgentExecAuthorizer.authorize(
             senderId = senderPeerId,
             group = group,
-            grantAllows = { node -> controller.invokeGrantAllows?.invoke(target.seat.agentId, node) == true },
-            policy = controller.invokeExecPolicyOf?.invoke(target.seat.agentId),
+            grantAllows = { node -> controller.invokeGrantAllows?.invoke(target.member.agentId, node) == true },
+            policy = controller.invokeExecPolicyOf?.invoke(target.member.agentId),
             selfNodeId = st.selfNodeId,
         )
         if (!with(AgentExecAuthorizer) { verdict.permitsExecution() }) {
             publishTeamDispatchBlocked(
                 groupId, prompt,
-                "not authorized for seat " + target.seat.name + " (" + verdict + ")",
+                "not authorized for " + targetLabel + " (" + verdict + ")",
             )
             return true
         }
@@ -1583,8 +1617,16 @@ class DesktopWorkerOrchestrator(
         if (groupId == null || mentionedAgentKey.isNullOrBlank()) return null
         val st = controller.state.value
         val group = st.settings.groups.firstOrNull { it.groupId == groupId } ?: return null
-        val seat = group.seatsMatchingToken(mentionedAgentKey).singleOrNull() ?: return null
+        // 团队名（`@开发团队`）不是席位 token：整队的**执行主体**是执行档里的 worker 组员，
+        // 不是领队席位。策略授权在 [runTeamDispatch] 里按 `target.member.agentId` 逐成员判，
+        // 这里若再按领队 seat 早拒，会出现「领队仅自己可用、但 worker 开放」时外部整队调不动
+        // —— 与"每个员工各自决定给谁用"相反。所以团队席位**只做宿主归属判据**，不在这里早拒。
+        val teamSeat = (group.teamSeatMatchingName(mentionedAgentKey) as? TeamNameMention.Hit)?.seat
+        val seat = group.seatsMatchingToken(mentionedAgentKey).singleOrNull() ?: teamSeat ?: return null
         if (seat.hostNodeId != st.selfNodeId) return null // 不是本机席位：不归本机拦
+        if (teamSeat != null) return null // 团队席位：授权下放到逐成员（runTeamDispatch）。
+        // 非团队单席位（`@dsh`）：它走 dispatchSingleWorker，没有逐成员授权环节，
+        // 所以策略授权必须在这里做（否则单席位 @ 完全无闸）。
         val verdict = AgentExecAuthorizer.authorize(
             senderId = senderPeerId,
             group = group,
@@ -1593,7 +1635,14 @@ class DesktopWorkerOrchestrator(
             selfNodeId = st.selfNodeId,
         )
         if (with(AgentExecAuthorizer) { verdict.permitsExecution() }) return null
-        return "not authorized for seat " + seat.name + " (" + verdict + ")"
+        // 卡面全群可见：@ 团队被拒时说的是团队名，不是领队 token —— 用户打的是「开发团队」，
+        // 报 `dsh-lead` 会让人以为点错了对象。
+        val label = if (teamSeat != null) {
+            "team " + (teamSeat.teamName?.trim()?.takeIf { it.isNotEmpty() } ?: teamSeat.name)
+        } else {
+            "seat " + seat.name
+        }
+        return "not authorized for " + label + " (" + verdict + ")"
     }
 
     /** 团队派单被拒/未配置的**可见出口**：blocked 卡（全群可见），不许静默吞。 */
@@ -2461,7 +2510,10 @@ class DesktopWorkerOrchestrator(
             )
         }.getOrNull()
         val combinedConstraints = listOfNotNull(initialConstraints, ledgerBlock).joinToString("\n\n")
+        val recordedPhases = mutableListOf<FlightPhase>()
+        val promptStart = nowMillis()
         val containedPrompt = WorkerPrompt.build(devPrompt, combinedConstraints)
+        recordedPhases.add(FlightPhase("prompt_assembly", (nowMillis() - promptStart).coerceAtLeast(0L), "ok"))
 
         var healRound = 0
         var currentPrompt = containedPrompt
@@ -2538,6 +2590,7 @@ class DesktopWorkerOrchestrator(
                         }
                     }
                 }
+                val execStart = nowMillis()
                 val (cliSessionId, status, error) = host.executeCliTask(
                     agentKey = defaultAgent,
                     prompt = currentPrompt,
@@ -2591,6 +2644,9 @@ class DesktopWorkerOrchestrator(
                     ticket.sessionId = sid
                     ticketSessionIds[ticketId] = sid
                 }
+                val execDuration = (nowMillis() - execStart).coerceAtLeast(0L)
+                val execVerdict = if (error == null && (status == "done" || status == "finished" || patchPath != null)) "ok" else "error"
+                recordedPhases.add(FlightPhase("sandbox_execution_round_$healRound", execDuration, execVerdict))
                 if (circuitBroken) {
                     // 看门狗熔断后的该轮：不是普通失败。超时卡已经发过（FORCE_KILL 档），
                     // 这里只把工单如实收尾 —— 阻塞态 + 看门狗因由，下一轮提示词不再硬跑。
@@ -2606,6 +2662,7 @@ class DesktopWorkerOrchestrator(
                 // 没有这道门时的真机现场：注入一个恒失败的测试后派单，补丁只改了目标文件、
                 // `npm test` 仍红，工单照样翻「待合并」，红灯被原样带进工作区。卡上那根
                 // 「自愈验证」棒显示的是 CLI 自己跑测试的自述，不是编排器的判据。
+                val verifyStart = nowMillis()
                 val verdictReport = if (produced) {
                     val patch = patchPath
                     runCatching { patch?.let { TicketVerification.verifyReport(repoPath, it) } }
@@ -2619,6 +2676,11 @@ class DesktopWorkerOrchestrator(
                         }
                 } else {
                     null
+                }
+                val verifyDuration = (nowMillis() - verifyStart).coerceAtLeast(0L)
+                if (verdictReport != null) {
+                    val verifyVerdict = if (verdictReport.failure == null) "ok" else "failed"
+                    recordedPhases.add(FlightPhase("verification_round_$healRound", verifyDuration, verifyVerdict))
                 }
                 val verdict = verdictReport?.failure
                 if (produced && verdict == null) {

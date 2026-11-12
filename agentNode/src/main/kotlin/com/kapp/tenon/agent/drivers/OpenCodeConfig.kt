@@ -77,7 +77,8 @@ object OpenCodeConfig {
         }
         val baseUrl = env["OPENCODE_BASE_URL"]?.trim()?.takeIf { it.isNotEmpty() } ?: return null
         val model = env[ENV_MODEL]?.trim()?.takeIf { it.isNotEmpty() } ?: probeHostModel(env)
-        val text = render(baseUrl = baseUrl, model = model)
+        val mcpScript = McpServerDiscovery.resolveScript(dir)
+        val text = render(baseUrl = baseUrl, model = model, mcpScript = mcpScript)
 
         val target = File(dir ?: File(System.getProperty("java.io.tmpdir"), "tenon-opencode"), "opencode.json")
         return runCatching {
@@ -88,7 +89,7 @@ object OpenCodeConfig {
     }
 
     /** 配置文本（纯函数，测试直接钉它 —— 尤其是「不许出现密钥值」）。 */
-    fun render(baseUrl: String, model: String?): String = buildString {
+    fun render(baseUrl: String, model: String?, mcpScript: File? = null): String = buildString {
         // 允许写成 `provider/model`，只取后半截：provider 固定是我们自建的那只。
         val modelId = model?.substringAfterLast('/')?.takeIf { it.isNotBlank() }
         appendLine("{")
@@ -110,7 +111,18 @@ object OpenCodeConfig {
                 quote(modelId ?: "placeholder") + " } }",
         )
         appendLine("    }")
-        appendLine("  }")
+        appendLine("  }" + if (mcpScript != null && mcpScript.isFile) "," else "")
+        if (mcpScript != null && mcpScript.isFile) {
+            appendLine("  \"mcp\": {")
+            appendLine("    \"tenon\": {")
+            appendLine("      \"type\": \"local\",")
+            appendLine("      \"command\": [\"python3\", " + quote(mcpScript.absolutePath) + "],")
+            appendLine("      \"environment\": {")
+            appendLine("        \"TENON_HOST_URL\": \"http://127.0.0.1:8788\"")
+            appendLine("      }")
+            appendLine("    }")
+            appendLine("  }")
+        }
         append("}")
     }
 

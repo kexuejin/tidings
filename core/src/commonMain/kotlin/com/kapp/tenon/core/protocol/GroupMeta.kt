@@ -208,6 +208,57 @@ data class VirtualAgentMember(
     val allowedWorkspaces: List<GroupWorkspaceInfo> = emptyList(),
     /** 本群默认绑定的工作区 id；必须是 [allowedWorkspaces] 里的 id，null = 未指定。 */
     val defaultWsId: String? = null,
+    /**
+     * 这条席位引用的**团队档案** id（宿主本机 `RelaySettings.teamProfiles` 的键）。
+     *
+     * ## 为什么需要它（团队名与群名解耦）
+     *
+     * 团队原先没有自己的名字，卡面只能显示群名 —— 于是「团队名 = 群名」成了硬绑定：
+     * 改群名等于改团队名，且一个团队要出现在两个群就得建两个群。
+     * [teamId] 让团队成为**一份档案**：名字与名册住在档案里，席位只持有引用与快照。
+     *
+     * ## 为什么还要 [teamName] / [teamMembers] 快照
+     *
+     * 档案只存在**领队宿主**本机（`:app` 的 `RelaySettings`），不进任何协议帧。
+     * 对端拿不到档案，所以席位必须自带宽播快照，否则「手机上看到团队、但没有名字与组员」。
+     * 快照由宿主的档案写路径统一重建（见 `TeamProfileWritePath`）——**它是一份投影，
+     * 不是第二个可写入口**：任何绕过档案直接改 `teamName`/`teamMembers` 的写法都会在
+     * 下一次重建被覆盖，`GroupDeclarationBypassGuardTest` 在源码层守这条。
+     *
+     * null = 这条席位不是档案化团队（旧数据的单兵/群内直编团队）。
+     */
+    val teamId: String? = null,
+    /** 团队显示名（档案的投影；null = 没有独立名，消费方回落群名）。见 [teamId]。 */
+    val teamName: String? = null,
+    /**
+     * 这条席位引用的**员工档案** id（宿主本机 `RelaySettings.employeeProfiles` 的键）。
+     *
+     * ## 为什么员工也要档案
+     *
+     * 员工原先没有对象：它是「席位 + 工作区行 + 会话」的聚合投影，名字在入驻那一刻
+     * 现场派生（`kind-职责`），并且 `AgentMemberName.unique` 是**按群**去重的 ——
+     * 同一个 agent 进两个群可能叫 `dsh-coder` 与 `dsh-coder-2`。于是「员工叫什么」
+     * 没有一处权威答案，改名只能撤回再入驻（`@` 历史全断）。
+     *
+     * [employeeId] 让员工成为**本机的一份档案**（名字、职责、执行档），群席位只持有引用；
+     * 与团队档案同构（[teamId]）：先建员工，再把它加进群。
+     *
+     * ## 席位名与员工名的关系：允许本群别名
+     *
+     * [name] 是**本群的 `@` token**，[employeeName] 是档案名（跨群一致）。两者可以不同 ——
+     * 撞名时本群给一个别名（`dsh-coder-2`）而不是拒绝入驻；消费方按
+     * 「[employeeName] 与 [name] 是否相同」判断这是不是别名，UI 才需要标注。
+     *
+     * ## 与 [teamId] 的区别
+     *
+     * 团队是「一个 agent 代理一群人」；员工是「这台机器上的这个 agent 本人」。
+     * 因此一条席位可以同时有 [employeeId]（它是谁）与 [teamId]（它以哪支队伍出面）。
+     *
+     * null = 未登记的 agent（旧数据与手机端建的席位）；消费方回落现有的派生名。
+     */
+    val employeeId: String? = null,
+    /** 员工档案名（档案的投影；null 或等于 [name] = 没有别名）。见 [employeeId]。 */
+    val employeeName: String? = null,
 )
 
 /** 团队组员（仅展示与内部调度用；不参与成员判定与权限，越界键由解码侧丢弃）。 */
@@ -229,7 +280,9 @@ data class TeamMemberInfo(
  * 「本机看到团队药丸、对端什么都没有」。这是 AGENTS §3 那类静默丢失的元数据版。
  *
  * 所以身份字段之外的全部可声明字段（[VirtualAgentMember.entityType] /
- * [VirtualAgentMember.teamMembers] / [VirtualAgentMember.allowedWorkspaces]）一律从
+ * [VirtualAgentMember.teamMembers] / [VirtualAgentMember.teamId] /
+ * [VirtualAgentMember.teamName] / [VirtualAgentMember.employeeId] /
+ * [VirtualAgentMember.employeeName] / [VirtualAgentMember.allowedWorkspaces]）一律从
  * [previous] 原样带过来；新席位（[previous] 为 null）按默认值开（单兵、空组员、空白名单）。
  * 「保留」是这个函数的形状保证的 —— 调用方想丢都丢不掉。
  *
@@ -252,6 +305,12 @@ fun declarationFor(
     teamMembers = previous?.teamMembers ?: emptyList(),
     allowedWorkspaces = previous?.allowedWorkspaces ?: emptyList(),
     defaultWsId = defaultWsId,
+    teamId = previous?.teamId,
+    teamName = previous?.teamName,
+    // 员工档案引用与名字快照：与团队同一条纪律 —— 入驻/重建投影**不许顺手丢掉**，
+    // 否则下一次广播会把「这是谁」抹成「未登记 agent」。
+    employeeId = previous?.employeeId,
+    employeeName = previous?.employeeName,
 )
 
 /**

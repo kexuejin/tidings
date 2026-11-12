@@ -192,6 +192,65 @@ public interface DesktopPaneActions {
     fun setGroupTeamDeclaration(groupId: String, agentId: String, roster: List<TeamMemberDraft>?)
 
     /**
+     * 登记 / 编辑一名**员工**（员工先创建、群只负责添加）。
+     *
+     * 只写本机 `RelaySettings.employeeProfiles` + 逐群刷新席位快照；不改身份键
+     * （`agentId` 永远是那个 agent），也不改已经生效的 `@` token。
+     *
+     * @param employeeId null = 登记（这个 agent 还没有档案）；非 null = 编辑该档案。
+     *
+     * 默认空实现：手机没有宿主档案（档案只住宿主机），那一侧的详情页也不画入口 ——
+     * 空实现 + 不画按钮是同一条纪律的两半，不做「点了没反应」的按钮。
+     */
+    fun saveEmployeeProfile(agentId: String, employeeId: String?, name: String, duty: String) = Unit
+
+    /**
+     * 新建 / 编辑一份**团队档案**（团队有名字、一份名册多群复用）。
+     *
+     * @param teamId null = 新建；非 null = 编辑该档案。
+     * @param groupIds 新建 = 要加入的群（至少一个）；编辑 = 要**新增**加入的群（可空）。
+     *
+     * 与 [saveEmployeeProfile] 同一条纪律：默认空实现 = 这个壳没有宿主档案面
+     * （预览 / 手机）⇒ 界面也不画入口，不做「点了没反应」的按钮。
+     */
+    fun saveTeamProfile(
+        teamId: String?,
+        name: String,
+        leaderAgentId: String,
+        members: List<TeamMemberDraft>,
+        groupIds: List<String>,
+    ) = Unit
+
+    /**
+     * 把**整支团队**加进一个群（群信息「添加团队」的落点）：一条席位、组员随档案过来。
+     *
+     * 与 [addGroupAgent] 并列而不是取代：那个加一个人，这个加一支队。
+     */
+    fun attachTeamToGroup(teamId: String, groupId: String) = Unit
+
+    /**
+     * 「AI 建队」：按一句需求生成整份建队方案（队名 + 领队 + 名册 + 逐成员执行建议）。
+     *
+     * 实现住编排层（LLM → 过门 → 回落模板一条龙，见 [TeamScaffoldBridge]），
+     * 默认 null = 这个壳没有建队助手（手机 / 预览）⇒ 界面不画入口 ——
+     * 与 [saveTeamProfile] 同一条纪律：空实现 + 不画按钮是同一条纪律的两半。
+     * 返回非 null 的方案也只是**预览**，落盘仍走用户确认后的 [saveTeamProfile]。
+     */
+    suspend fun generateTeamScaffold(
+        need: String,
+        leaderKeys: Set<String>,
+        defaults: TeamScaffoldDefaults,
+    ): TeamScaffoldSpec? = null
+
+    /**
+     * 「AI 建队」能力位：这个壳装配了生成桥（[generateTeamScaffold] 有真实现）才为 true，
+     * UI 据此决定画不画「AI 建队」入口 —— 与端口类字段的「null = 不画」同一条纪律，
+     * 只是这里是 suspend 方法没有可空的端口对象，用显式旗标表达同一件事。
+     */
+    val teamScaffoldAvailable: Boolean
+        get() = false
+
+    /**
      * 团队执行档端口（团队执行方案 §6.3）：TeamRosterDialog 执行配置段的读写通路。
      * null = 该壳没有执行面（手机等非宿主）⇒ 只读投影（执行配置由席位宿主管理）。
      * 只有桌面宿主覆写（DesktopExtension 装配 DesktopTeamExecutionPort）。
@@ -236,6 +295,23 @@ public interface DesktopPaneActions {
 
     /** 「添加设备」：从候选里挑一个加到名单。默认不提供（手机壳没有台账）。 */
     fun addExecDevice(agentKey: String): Unit = Unit
+
+    /**
+     * 这个员工**开放到什么程度**（[com.kapp.tenon.core.protocol.AgentExecPolicies] 取值）。
+     *
+     * null = 这台壳读不到宿主策略（手机）⇒ UI 不画「谁能调用」那一档。
+     * 缺省未配置时也返回 `list`（最严档），与宿主侧 `AgentExecPolicyStore` 同口径 ——
+     * 界面上要显示「仅我可用」而不是「未知」。
+     */
+    fun agentExecPolicyOf(agentKey: String): String? = null
+
+    /**
+     * 改这个员工的开放程度：`list` = 只有我和已批设备能调用；`anyMember` = 群内成员都能调用。
+     *
+     * @return false = 没改成（手机壳 / 取值非法 / 宿主侧写盘失败）。UI 必须如实提示，
+     *   不许把失败当成功 —— 这条开关决定「别人能不能在我机器上跑命令」。
+     */
+    fun setAgentExecPolicy(agentKey: String, policy: String): Boolean = false
 
     /**
      * 建一个群：一个名字 + 一份成员表。

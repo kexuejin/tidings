@@ -243,6 +243,63 @@ sealed interface BannerMessage {
     data object TeamRosterInvalid : BannerMessage
 
     /**
+     * 这条席位属于一份**团队档案**（`teamId != null`）：名册归档案，群内不能整表替换。
+     *
+     * 必须给可读反馈：「改了没反应」是这套系统里最贵的故障形态（用户会以为保存成功）。
+     * 正确出口是团队档案的改名 / 换名册（一次改动对所有引用群生效）。
+     */
+    data object TeamProfileManaged : BannerMessage
+
+    /**
+     * 团队档案已保存（新建 / 改名 / 换名册 / 加进更多群）。
+     *
+     * @param name 团队自己的名字（不是群名）。
+     * @param groupCount 这次真的写成功的群数；0 = 只建档、还没进任何群。
+     * @param failedGroupCount 预校验通过但席位写入失败的群数；>0 时文案必须说出来
+     *   ——「改了没反应」正是本仓最贵的故障形态。
+     */
+    data class TeamProfileSaved(
+        val name: String,
+        val groupCount: Int,
+        val failedGroupCount: Int = 0,
+    ) : BannerMessage
+
+    /** 团队档案没保存（名字非法 / 名册为空 / 目标群不存在 / 落盘被拒）。 */
+    data object TeamProfileRejected : BannerMessage
+
+    /**
+     * 员工档案已保存（登记 / 改名 / 改职责）。
+     *
+     * 与 [TeamRosterSaved] 分开：一个是「这是谁」，一个是「这支队有谁」，
+     * 共用一条会让用户在错误的语义上确认成功。
+     *
+     * @param aliasedGroups 席位名与档案 token 不一致的群名（本群撞名 ⇒ 别名）。
+     *   非空时文案必须点名 —— 用户在 A 群看到 `@dsh-coder-2` 却查不到原因，
+     *   会以为档案没生效（真实写路径已经落了，只是本群叫了另一个名字）。
+     */
+    data class EmployeeProfileSaved(
+        val name: String,
+        val aliasedGroups: List<String> = emptyList(),
+    ) : BannerMessage
+
+    /**
+     * 员工档案没保存（名字非法 / 这个 agent 已有档案 / 档案不存在 / 落盘被拒）。
+     *
+     * 拒绝原因是结构化的（`DeclarationRejection`），这里只给一条可读兜底 ——
+     * 界面入口已经把能就地拦的都拦了（空名字、未上报身份）。
+     */
+    data object EmployeeProfileRejected : BannerMessage
+
+    /**
+     * 「谁能调用这个员工」没写成功（宿主侧执行范围落盘被拒 / 取值非法）。
+     *
+     * 单独一条而不是复用 [EmployeeProfileRejected]：档案写成功、策略没写成功时，
+     * 说「员工档案没保存」是错的话 —— 用户会去改名字，而真正的问题是这条开关没生效。
+     * 它决定的是「别人能不能在我机器上跑命令」，必须说出来。
+     */
+    data object AgentExecPolicyRejected : BannerMessage
+
+    /**
      * 元数据没过发送侧预算校验（`CodecGroup.validateGroupMeta`）。
      *
      * 这是 bug 防线不是业务分支：写路径在构造元数据时就该保证预算（对话框先过

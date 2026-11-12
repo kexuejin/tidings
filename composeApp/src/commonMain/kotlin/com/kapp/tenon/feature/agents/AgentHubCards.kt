@@ -2,6 +2,7 @@
 
 package com.kapp.tenon.feature.agents
 
+import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -21,6 +22,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.unit.dp
 import com.kapp.tenon.domain.ActivityFreshness
 import com.kapp.tenon.domain.AgentHubArtifactUi
 import com.kapp.tenon.domain.AgentHubRowKind
@@ -102,6 +104,9 @@ internal fun AgentHubSection(
      * 提供 —— 这时再画一遍段头就是同一屏两个标题。默认 true = 独立使用时形态不变。
      */
     showSectionHeader: Boolean = true,
+    /** 当前选中的宿主与身份键（两栏主从联动高亮）。null = 无选中。 */
+    selectedHostNodeId: String? = null,
+    selectedAgentKey: String? = null,
 ) {
     if (cards.isEmpty()) return
     Column(
@@ -125,6 +130,7 @@ internal fun AgentHubSection(
                 card = card,
                 now = now,
                 compact = compact,
+                selected = card.hostNodeId == selectedHostNodeId && card.agentKey == selectedAgentKey,
                 onOpen = { onOpenEntity(card) },
                 onOpenChat = onOpenChat?.let { open -> { open(card) } },
                 onOpenRowSession = onOpenRowSession,
@@ -146,6 +152,7 @@ private fun AgentHubCard(
     now: Long,
     /** 窄列密度：收起头部副行（次级元信息），身份行与状态行保留 —— 见 [AgentHubSection]。 */
     compact: Boolean,
+    selected: Boolean = false,
     onOpen: () -> Unit,
     onOpenChat: (() -> Unit)?,
     onOpenRowSession: ((hostNodeId: String, sessionId: String) -> Unit)?,
@@ -157,6 +164,7 @@ private fun AgentHubCard(
     Surface(
         color = MaterialTheme.colorScheme.surface,
         shape = LocalCardShape.current,
+        border = if (selected) BorderStroke(1.5.dp, MaterialTheme.colorScheme.primary) else null,
         modifier = modifier
             .fillMaxWidth()
             .clickable(onClick = onOpen)

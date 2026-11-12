@@ -299,6 +299,16 @@ data class ChatScreenGroupActions(
      */
     val onSetTeamRoster: ((groupId: String, agentId: String, roster: List<TeamMemberDraft>?) -> Unit)? = null,
     /**
+     * 「把一整支团队加进本群」：`(groupId, teamId)`。
+     *
+     * 与 [onStationAgent] 并列而不是取代：那个入驻**一个人**（逐个加），这个入驻
+     * **一支队**（领队 + 全部组员一次到位）。团队档案住本机设置，名册归档案，
+     * 群这边只产生一条指向它的席位。
+     *
+     * null = 这个壳没有档案写通路 ⇒ 授权面板里不画「添加团队」段。
+     */
+    val onAttachTeam: ((groupId: String, teamId: String) -> Unit)? = null,
+    /**
      * 团队执行档端口（团队执行方案 §6.3）：TeamRosterDialog 执行配置段的读写通路。
      * null = 该壳没有执行面（手机等非宿主）⇒ 只读投影（执行配置由席位宿主管理）。
      */

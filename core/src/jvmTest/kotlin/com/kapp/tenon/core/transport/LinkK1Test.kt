@@ -49,7 +49,9 @@ class LinkK1Test {
         caps = caps,
     )
 
-    private suspend fun awaitTrue(what: String, timeoutMs: Long = 10_000, condition: () -> Boolean) {
+    // 30s = 观测预算不是断言（§2.7-6）：建链/互认各步在全量串行满载下实测会在
+    // 10s 内轮换着红（testStabilityGate run2 复现，单跑恒绿）。上限与 awaitUntil 同款默认值。
+    private suspend fun awaitTrue(what: String, timeoutMs: Long = 30_000, condition: () -> Boolean) {
         withTimeout(timeoutMs) {
             while (!condition()) delay(20)
         }
@@ -111,7 +113,9 @@ class LinkK1Test {
                 Codec.textPayload("走长连接的下行"),
             )
             assertEquals(SendOutcome.SENT, host.messenger.sendUserMessage("phone-node", outgoing))
-            val got = withTimeout(5_000) { received.await() }
+            // 30s = 观测预算不是断言（§2.7-6）：全量串行满载时下行一条文本实测会在
+            // 5s 预算内轮换着红（单跑恒绿）。上限放宽到 awaitUntil 同款默认值。
+            val got = withTimeout(30_000) { received.await() }
             val text = ((got.payload as? JsonObject)?.get("text"))?.jsonPrimitive?.content
             assertEquals("走长连接的下行", text)
             watch.cancel()

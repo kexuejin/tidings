@@ -54,10 +54,19 @@ public data class AgentHubUi(
      */
     val agentKey: String?,
     /**
-     * 显示名：席位名（用户在群里 @ 的那个 token）优先，其次身份键。null = 连身份键都没有，
-     * 由 UI 翻成本地化的「未上报类型」（模型层不出文案）。
+     * 显示名：**员工档案名优先**，其次席位名（用户在群里 @ 的那个 token），最后身份键。
+     * null = 连身份键都没有，由 UI 翻成本地化的「未上报类型」（模型层不出文案）。
      */
     val displayName: String?,
+    /**
+     * 这张卡对应的**员工档案**（本机 `RelaySettings.employeeProfiles` 的键）；null = 未登记的 agent。
+     *
+     * 只在宿主机本机有值 —— 手机读不到档案，只能看席位的 `employeeName` 快照。
+     * 编辑入口（改名 / 改职责）按这个键定位，**不用显示名定位**（名字会变，键不会）。
+     */
+    val employeeId: String? = null,
+    /** 员工档案名（可含中文）；null = 未登记 —— 此时 [displayName] 就是席位 token。 */
+    val employeeName: String? = null,
     /** 是否团队形态（任一匹配席位 `isTeam`；事实口径，声明缺失时 `teamMembers` 非空也算）。 */
     val isTeam: Boolean,
     /** 团队人数 = 领队 1 + 组员数；单兵恒为 0（标签由 [isTeam] 决定，这个数只在团队态有义）。 */
@@ -166,8 +175,18 @@ public data class AgentHubDetailUi(
     val hostName: String?,
     /** 归一后的身份键；null = 没有任何身份上报（「未上报类型」，同 [AgentHubUi.agentKey]）。 */
     val agentKey: String?,
-    /** 显示名（席位名优先）；null = 连身份键都没有，UI 翻译。 */
+    /** 显示名（员工档案名优先，其次席位名）；null = 连身份键都没有，UI 翻译。 */
     val displayName: String?,
+    /**
+     * 员工档案键；null = 这个 agent 还没被登记成员工（宿主本机才有值）。
+     *
+     * 编辑入口按它定位：非 null ⇒ 「编辑员工」，null ⇒ 「登记为员工」。
+     */
+    val employeeId: String? = null,
+    /** 员工档案名（可含中文）；null = 未登记。 */
+    val employeeName: String? = null,
+    /** 员工档案里的职责（归一后的取值域成员）；null = 未登记 —— 编辑对话框的初始值。 */
+    val employeeDuty: String? = null,
     /** 是否团队形态（与卡片同判据）。 */
     val isTeam: Boolean,
     /** 团队人数 = 领队 1 + 组员数；单兵恒为 0。 */
@@ -395,6 +414,9 @@ public fun agentHubDetail(
         hostName = peer(hostNodeId, nodeSlice, settingsSlice)?.displayName,
         agentKey = entity.canonicalKey,
         displayName = entity.displayName,
+        employeeId = entity.employeeId,
+        employeeName = entity.employeeName,
+        employeeDuty = entity.employeeDuty,
         isTeam = entity.isTeam,
         teamSize = entity.teamSize,
         online = hostOnline,
@@ -570,6 +592,11 @@ private class HubEntity(
     /** 本实体落进的群（按 groupId 去重）。 */
     val entityGroups: List<GroupMeta>,
     val displayName: String?,
+    /** 本机员工档案（键 + 名字）；null = 这个 agent 还没被登记成员工。 */
+    val employeeId: String?,
+    val employeeName: String?,
+    /** 档案里的职责（编辑对话框的初始值）；null = 未登记。 */
+    val employeeDuty: String?,
     val isTeam: Boolean,
     val teamSize: Int,
     val wsInfos: LinkedHashMap<String, HubWsInfo>,
@@ -608,7 +635,18 @@ private fun assembleEntity(
         canonicalKey != null && sameAgent(seat.agentId, null, canonicalKey)
     }.map { it.second }.distinctBy { it.groupId }
 
-    val displayName = seats.firstOrNull { it.name.isNotBlank() }?.name ?: canonicalKey
+    // 员工档案：本机有档案就用它的名字（跨群一致），否则回落席位 token（= 入驻时派生的名字）。
+    // 用 sameAgent 匹配而不是精确相等：聚类代表可能取自会话自报（`dsh`），
+    // 而档案键是完整实例 id（`dsh-029bbbf3`）—— 精确比会让同一张卡在"有档案"与"没档案"之间跳。
+    val employee = canonicalKey?.let { key ->
+        settingsSlice.settings.employeeProfiles.firstOrNull { sameAgent(it.agentId, null, key) }
+    }
+    val seatName = seats.firstOrNull { it.name.isNotBlank() }?.name
+    val displayName = if (employee != null) {
+        employeeDisplayName(employee.name, seatName)
+    } else {
+        seatName ?: canonicalKey
+    }
     val isTeam = seats.any { it.isTeam }
     val teamSize = seats.filter { it.isTeam }
         .maxOfOrNull { 1 + it.teamMembers.size } ?: 0
@@ -664,6 +702,9 @@ private fun assembleEntity(
         seats = seats,
         entityGroups = entityGroups,
         displayName = displayName,
+        employeeId = employee?.employeeId,
+        employeeName = employee?.name,
+        employeeDuty = employee?.duty,
         isTeam = isTeam,
         teamSize = teamSize,
         wsInfos = wsInfos,
@@ -758,6 +799,8 @@ private fun HubEntity.toCard(
         hostName = peer(hostNodeId, nodeSlice, settingsSlice)?.displayName,
         agentKey = canonicalKey,
         displayName = displayName,
+        employeeId = employeeId,
+        employeeName = employeeName,
         isTeam = isTeam,
         teamSize = teamSize,
         groupCount = entityGroups.size,

@@ -63,7 +63,11 @@ class LuciolaChannelThroughputSpikeTest {
                 override fun onMessage(message: ByteArray, peerFingerprint: String, remoteAddr: String?) {}
             },
         )
-        withTimeout(15_000) {
+        // 以下两个超时都是观测预算不是断言（§2.7-6）：满载串行跑时连接与
+        // 8MB 发送实测会偶发超预算（testStabilityGate run1 复现，单跑恒绿）。
+        // 断言的是「字节一个不少地到达」（assertEquals(totalBytes, received)），
+        // 不是速度 —— 放宽预算不弱化这条测试。
+        withTimeout(30_000) {
             while (!client.isConnected()) delay(20)
         }
 
@@ -75,7 +79,7 @@ class LuciolaChannelThroughputSpikeTest {
                 delay(1)
             }
         }
-        withTimeout(60_000) { done.await() }
+        withTimeout(120_000) { done.await() }
         val elapsedMs = (System.nanoTime() - started) / 1_000_000
         val mbps = totalBytes.toDouble() / (1024.0 * 1024.0) / (elapsedMs / 1000.0)
         println(

@@ -124,11 +124,15 @@ class WorktreeSandboxExecutor(
         val worktree = File(sandboxRoot, taskId)
         val artifactsDir = File(File(sandboxRoot, ARTIFACTS_DIR), taskId).apply { mkdirs() }
         hostRepos[taskId] = hostRepo
+        val hostDir = File(hostRepo)
+        if (File(hostDir, ".git").isDirectory) {
+            bootstrapIfGreenfield(hostDir, git)
+        }
         // 起点是「上一轮合并后的工作树快照」，不是写死的 HEAD（D5）。合并只
         // `git apply` 不 commit，HEAD 永远停在机主最后一次提交上；若沙箱自 HEAD
         // 建，本轮任务就看不到上一轮合进去的代码，A/B/C 三轮各干各的、基线不累计。
         // MergeBaseRef 在机主自己提交过之后会自动回落到 HEAD（快照已过时）。
-        val baseRef = MergeBaseRef.baseFor(File(hostRepo))
+        val baseRef = MergeBaseRef.baseFor(hostDir)
         // 立刻解析成**不可变 sha**：并发工单里另一条链合并会推进 `refs/tenon/base`；
         // 若 harvest 时再读 ref，就会拿「别人的新基线」去 diff 自己的工作树 ——
         // 补丁里凭空出现一段回退。sha 一旦定下就与后续 ref 前移无关。
@@ -911,7 +915,55 @@ class WorktreeSandboxExecutor(
                     }
                 }
             }
+            val claudeJson = File(sandboxHome, ".claude.json")
+            if (!claudeJson.exists() && !java.nio.file.Files.isSymbolicLink(claudeJson.toPath())) {
+                val mcpScript = McpServerDiscovery.resolveScript()
+                if (mcpScript != null && mcpScript.isFile) {
+                    runCatching {
+                        claudeJson.writeText(McpServerDiscovery.renderClaudeMcpConfig(mcpScript))
+                    }
+                }
+            }
             return sandboxHome
+        }
+
+        /**
+         * 空目录 / 未建仓的「绿场」工作区自愈初始化。
+         *
+         * 当用户绑定的宿主目录尚未执行 git init 或尚无任何提交时，git worktree 无法
+         * 从 HEAD 衍生任务分支。本函数幂等建立首个提交，使沙箱 worktree 可以顺畅建出。
+         */
+        fun bootstrapIfGreenfield(repoDir: File, git: GitRunner = ProcessGitRunner): Boolean {
+            if (!repoDir.exists()) repoDir.mkdirs()
+            if (!repoDir.isDirectory) return false
+            val gitDir = File(repoDir, ".git")
+            var needsCommit = false
+            if (!gitDir.exists()) {
+                val initRes = git.run(listOf("init"), cwd = repoDir)
+                if (!initRes.ok) return false
+                needsCommit = true
+            } else {
+                val revRes = git.run(listOf("rev-parse", "--verify", "--quiet", "HEAD"), cwd = repoDir)
+                if (!revRes.ok || revRes.stdout.isBlank()) {
+                    needsCommit = true
+                }
+            }
+            if (needsCommit) {
+                git.run(listOf("config", "--local", "user.name", "Tenon Agent"), cwd = repoDir)
+                git.run(listOf("config", "--local", "user.email", "tenon-agent@local"), cwd = repoDir)
+                val readme = File(repoDir, "README.md")
+                if (!readme.exists()) {
+                    readme.writeText("# Project\n\nInitialized by Tenon Agent.\n")
+                }
+                val gitignore = File(repoDir, ".gitignore")
+                if (!gitignore.exists()) {
+                    gitignore.writeText(".DS_Store\nbuild/\ntarget/\nnode_modules/\n")
+                }
+                git.run(listOf("add", "-A"), cwd = repoDir)
+                val commitRes = git.run(listOf("commit", "-m", "chore: initialize project repository"), cwd = repoDir)
+                return commitRes.ok
+            }
+            return false
         }
 
         /**

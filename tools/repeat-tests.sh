@@ -25,7 +25,7 @@ fi
 failures=0
 for i in $(seq 1 "$RUNS"); do
   echo "=== run $i/$RUNS: ${TASKS[*]} ==="
-  if ./gradlew "${TASKS[@]}" "${EXTRA_OPTS[@]}" --rerun-tasks --max-workers=1 --console=plain \
+  if ./gradlew "${TASKS[@]}" ${EXTRA_OPTS[@]+"${EXTRA_OPTS[@]}"} --rerun-tasks --max-workers=1 --console=plain \
       > "/tmp/repeat-tests-$i.log" 2>&1; then
     echo "    PASS"
   else

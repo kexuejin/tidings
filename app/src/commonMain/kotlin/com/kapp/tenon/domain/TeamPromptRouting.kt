@@ -6,6 +6,7 @@ import com.kapp.tenon.core.protocol.GroupMeta
 import com.kapp.tenon.core.protocol.TeamMemberInfo
 import com.kapp.tenon.core.protocol.VirtualAgentMember
 import com.kapp.tenon.core.protocol.resolveTeamMemberToken
+import com.kapp.tenon.core.protocol.resolveTeamNameMention
 import com.kapp.tenon.core.protocol.seatsMatchingToken
 
 /**
@@ -42,6 +43,15 @@ sealed interface PromptTarget {
         val hostNodeId: String get() = seat.hostNodeId
     }
 
+    /** 点的是**整支队**（`@<团队名>`）：走团队分支，命中成员由执行档的 worker 决定。 */
+    data class Team(
+        val teamId: String?,
+        val teamName: String,
+        val seat: VirtualAgentMember,
+    ) : PromptTarget {
+        val hostNodeId: String get() = seat.hostNodeId
+    }
+
     /** 同时点了多个目标 / 命中跨席位重名 —— 不执行，提示「一次只 @ 一个目标」。 */
     data object Ambiguous : PromptTarget
 }
@@ -53,7 +63,16 @@ sealed interface PromptTarget {
 fun resolvePromptTarget(text: String, group: GroupMeta?, matchableTokens: Set<String>): PromptTarget {
     if (group == null) return PromptTarget.None
     val mentioned = RelayController.mentionedAgentKeys(text, matchableTokens)
-    if (mentioned.isEmpty()) return PromptTarget.None
+    // **`@团队名` 单判一条**：团队名不在成员 token 池里（它是展示串，可含中文），
+    // 所以不走上面那条命中集合。歧义（同名多队 / 与成员撞名）直接 fail-closed ——
+    // 撞名时 `@` 永远先命中成员，团队名等于打不到，必须让用户改名而不是猜。
+    val teamTarget = when (val teamHit = group.resolveTeamNameMention(text)) {
+        is com.kapp.tenon.core.protocol.TeamNameMention.Ambiguous -> return PromptTarget.Ambiguous
+        is com.kapp.tenon.core.protocol.TeamNameMention.Hit ->
+            PromptTarget.Team(teamHit.teamId, teamHit.teamName, teamHit.seat)
+        null -> null
+    }
+    if (mentioned.isEmpty()) return teamTarget ?: PromptTarget.None
 
     val targets = LinkedHashSet<PromptTarget>()
     for (token in mentioned) {
@@ -72,7 +91,9 @@ fun resolvePromptTarget(text: String, group: GroupMeta?, matchableTokens: Set<St
             else -> return PromptTarget.Ambiguous // 跨席位重名（fail-closed）
         }
     }
-    if (targets.isEmpty()) return PromptTarget.None
+    if (targets.isEmpty()) return teamTarget ?: PromptTarget.None
+    // 团队名与成员同时被点到（「@开发团队 让 @coder 修」）：两个意图，不替人合并。
+    if (teamTarget != null) return PromptTarget.Ambiguous
     // ≥2 个目标（席位+组员混点 / 两个组员 / 跨席位）⇒ 歧义（§4.2：一次只 @ 一个目标）。
     // 同席位的「领队 token + 组员 token」同帧同样歧义 —— 用户意图不明，随机挑一个
     // 就是在替人做决定。

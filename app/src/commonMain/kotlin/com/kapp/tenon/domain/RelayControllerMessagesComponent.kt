@@ -798,6 +798,7 @@ fun handleOnInbound(envelope: Envelope) {
     val targetHostIsSelf = when (promptTarget) {
         is PromptTarget.Seat -> promptTarget.hostNodeId == host.state.value.selfNodeId
         is PromptTarget.Member -> promptTarget.hostNodeId == host.state.value.selfNodeId
+        is PromptTarget.Team -> promptTarget.hostNodeId == host.state.value.selfNodeId
         else -> null
     }
     val route = RelayController.agentPromptRoute(
