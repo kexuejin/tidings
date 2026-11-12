@@ -1039,6 +1039,8 @@ public fun DesktopShell(
                                 settingsSlice = settingsSlice,
                                 chatSlice = chatSlice,
                                 onRevokeSessionApproval = controller::revokeSessionApproval,
+                                // 执行配置矩阵要读宿主本地执行档 —— 端口只在宿主本机非空，手机端自然是 null。
+                                teamExecutionPort = controller.teamExecutionPort,
                                 // 谁能用这个 agent 干活 —— 走 controller 的宿主侧桥。
                                 // 手机壳不接这个桥（null），所以那一侧不画配置区。
                                 // 可空 → 非空：null（壳没有台账）时给空列表，界面据此不画配置区。
@@ -1053,6 +1055,14 @@ public fun DesktopShell(
                                 artifactDigestOf = controller.artifactDigestOf,
                                 selectedAgentId = selectedPeerId,
                                 onSelectAgent = { selectedPeerId = it },
+                                // 团队卡的「打开协同群」：团队是群里的席位，会话键只有
+                                // `ConvId.group(groupId)` 一种取法。
+                                onOpenGroup = { groupId ->
+                                    val convId = com.kapp.tenon.core.protocol.ConvId.group(groupId)
+                                    selectedPeerId = convId
+                                    view = DesktopView.Conversations
+                                    openConversation(convId)
+                                },
                                 onOpenChat = { id, wsId ->
                                     // 反查绑定群只认席位声明（groupBoundToWorkspace，单源）；子串反猜已删（F2）。
                                     val boundGroup = groupBoundToWorkspace(wsId, settingsSlice.settings.groups)

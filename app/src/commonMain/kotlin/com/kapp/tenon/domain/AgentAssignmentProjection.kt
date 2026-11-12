@@ -113,8 +113,22 @@ public fun agentAssignments(
     )
 }
 
-/** 席位声明的 `defaultWsId` → 已宣告目录名（与 `workspaceOfGroup` 同一张表、同一次查找）。 */
-private fun wsTitleOf(agentSlice: AgentSlice, wsId: String?): String? {
+/** 席位声明的 `defaultWsId` → 已宣告目录名（与 `workspaceOfGroup` 同一张表、同一次查找）。 */private fun wsTitleOf(agentSlice: AgentSlice, wsId: String?): String? {
     val id = wsId?.takeIf { it.isNotBlank() } ?: return null
     return agentSlice.agentWorkspaces.values.firstOrNull { it.wsId == id }?.wsTitle
 }
+
+/**
+ * 卡面与详情主名要用的那一条任职。
+ *
+ * ## 为什么只能「推断」
+ *
+ * 规范 §5.1 说默认团队是**入职落点**、记在宿主本地台账里、不进帧。本轮没有落这份台账
+ * （新增持久化是独立一件事，且它只对本机有意义），所以这里给不出权威值。给的是**一条
+ * 明说的推断规则**：领队优先（`isLeader` 那条），其次按 [agentAssignments] 的声明序。
+ *
+ * UI 必须把这条标成「推断」——把推断当权威，用户会以为「在电脑上改过默认团队」这件事
+ * 已经生效了，而它根本没被记住。
+ */
+public fun primaryAssignment(assignments: List<AgentAssignmentUi>): AgentAssignmentUi? =
+    assignments.firstOrNull { it.isLeader } ?: assignments.firstOrNull()

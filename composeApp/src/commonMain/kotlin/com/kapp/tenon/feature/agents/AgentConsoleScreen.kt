@@ -115,6 +115,19 @@ fun AgentConsoleScreen(
     onLeaveAgentDetail: (() -> Unit)? = null,
     /** 与 `WorkspaceBoardView` 同签名：wsId 非空 = 要收窄到那个工作区（见那里的 KDoc）。 */
     onOpenChat: (peerId: String, wsId: String?) -> Unit,
+    /**
+     * 团队卡的「打开协同群」：`groupId` → 那条群会话。
+     *
+     * null = 这个壳没有群会话入口（预览帧 / 无导航层）⇒ 不画那颗按钮，卡片其余内容照画
+     * —— 与 `onBindFirstProject` 同一条纪律：能力缺失就是**不画**，不是「点了没反应」。
+     */
+    onOpenGroup: ((groupId: String) -> Unit)? = null,
+    /**
+     * 团队执行档端口（宿主本机才有）。非 null ⇒ 目录段上方出现「执行配置」入口，
+     * 点开是**只读矩阵**（写入口只有群编制那一处，见 `AgentExecutionConfigDialog`）。
+     * null ⇒ 整行不画（手机 / 预览）。
+     */
+    teamExecutionPort: com.kapp.tenon.domain.TeamExecutionPort? = null,
     onFindNodes: (() -> Unit)? = null,
     modifier: Modifier = Modifier,
     now: Long = nowMillis(),
@@ -188,6 +201,10 @@ fun AgentConsoleScreen(
     val agents = agentPeers(agentSlice, nodeSlice, settingsSlice)
     val selected = agents.firstOrNull { it.nodeId == selectedAgentId } ?: agents.firstOrNull()
 
+    // 执行配置矩阵的开关（只读视图；写仍走群编制）。端口为 null 时这颗开关永远不会被置位
+    // —— 入口行本身也不画。
+    var execConfigOpen by remember { mutableStateOf(false) }
+
     // 内部备选下钻状态：桌面端壳或未接入外层导航时提供自驱下钻支持
     var localDetailSessionId by remember { mutableStateOf<String?>(null) }
     var localDetailWsId by remember { mutableStateOf<String?>(null) }
@@ -250,6 +267,16 @@ fun AgentConsoleScreen(
         null
     }
 
+    // 团队视角投影（不变量 5）：与卡片流**同一份实体装配**（agentTeams 内部就用 hubAgents），
+    // 两处各归一一次身份，就会让同一个人在员工卡与团队卡里变成两个人。
+    val hubTeams: List<com.kapp.tenon.domain.AgentTeamUi> = if (hubCards != null) {
+        remember(agentSlice, nodeSlice, settingsSlice, now) {
+            com.kapp.tenon.domain.agentTeams(agentSlice, nodeSlice, settingsSlice, now)
+        }
+    } else {
+        emptyList()
+    }
+
     // 两栏是否成立：形态开关 + 左列真有实体。左列无实体 ⇒ 退化回单列全宽（不画空左列）。
     val hubAside = layout == AgentHubLayout.TwoColumn && !hubCards.isNullOrEmpty()
 
@@ -262,8 +289,9 @@ fun AgentConsoleScreen(
     // 两栏左列在详情层级也亮着，所以点卡先离开更深的会话层：单列下卡片只在看板级可见
     // （那里本地会话层本来就为空，这一步是空操作）；手机壳走外部导航，本地状态同样为空。
     val hubFlow: @Composable (Boolean) -> Unit = { compact ->
-        AgentHubSection(
-            cards = hubCards.orEmpty(),
+        AgentDirectorySection(
+            employees = hubCards.orEmpty(),
+            teams = hubTeams,
             now = now,
             compact = compact,
             onOpenEntity = { card ->
@@ -295,6 +323,33 @@ fun AgentConsoleScreen(
                 }
                 onSelectAgentSession(sessionId)
             },
+            // 团队卡点卡 → **领队**那张员工详情。团队没有独立实体页可下钻（它不是独立对象，
+            // 协议里没有 teamId），而「这队是谁在带」就落在领队身上 —— 落到它是如实的下钻，
+            // 凭空造一个团队详情实体才是编身份。
+            onOpenTeam = { team ->
+                localDetailSessionId = null
+                localDetailWsId = null
+                onSelectAgent(team.hostNodeId)
+                if (onOpenAgentDetail != null) {
+                    onOpenAgentDetail(team.hostNodeId, team.leaderAgentId)
+                } else {
+                    localDetailEntityHost = team.hostNodeId
+                    localDetailEntityKey = team.leaderAgentId
+                }
+            },
+            onOpenGroup = onOpenGroup,
+            onOpenExecutionConfig = teamExecutionPort?.let { { execConfigOpen = true } },
+        )
+    }
+
+    // 执行配置矩阵（规范 §4.0）：端口在位时才有得画 —— 它是宿主本地事实。
+    val execPort = teamExecutionPort
+    if (execConfigOpen && execPort != null) {
+        AgentExecutionConfigDialog(
+            groups = settingsSlice.settings.groups,
+            selfNodeId = settingsSlice.settings.nodeId,
+            port = execPort,
+            onDismiss = { execConfigOpen = false },
         )
     }
 

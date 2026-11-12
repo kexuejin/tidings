@@ -901,7 +901,7 @@
           "scaleSlot": "medium",
           "mode": "slot",
           "rawSites": 20,
-          "slotSites": 64,
+          "slotSites": 65,
           "circleShapeSites": 0
         },
         "card": {
@@ -917,7 +917,7 @@
           "scaleSlot": "medium",
           "mode": "slot",
           "rawSites": 20,
-          "slotSites": 64,
+          "slotSites": 65,
           "circleShapeSites": 0
         },
         "chip": {

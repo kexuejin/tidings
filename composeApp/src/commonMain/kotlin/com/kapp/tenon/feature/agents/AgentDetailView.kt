@@ -32,9 +32,16 @@ import com.kapp.tenon.domain.SettingsSlice
 import com.kapp.tenon.domain.mayDecideApproval
 import com.kapp.tenon.domain.model.AgentApprovalDecision
 import com.kapp.tenon.domain.pendingApprovalCount
+import com.kapp.tenon.domain.primaryAssignment
 import com.kapp.tenon.generated.resources.Res
 import com.kapp.tenon.generated.resources.action_back
+import com.kapp.tenon.generated.resources.agent_detail_assignment_leader
+import com.kapp.tenon.generated.resources.agent_detail_assignment_member
+import com.kapp.tenon.generated.resources.agent_detail_assignments_section_title
+import com.kapp.tenon.generated.resources.agent_detail_default_team_inferred
+import com.kapp.tenon.generated.resources.agent_detail_default_team_mark
 import com.kapp.tenon.generated.resources.agent_detail_groups_section_title
+import com.kapp.tenon.generated.resources.agent_detail_no_assignments
 import com.kapp.tenon.generated.resources.agent_detail_members_title
 import com.kapp.tenon.generated.resources.agent_detail_no_groups
 import com.kapp.tenon.generated.resources.agent_detail_no_workspace
@@ -157,6 +164,70 @@ internal fun AgentDetailView(
             verticalArrangement = Arrangement.spacedBy(sp.md),
         ) {
             AgentHubIdentityCard(detail = detail)
+
+            // ===== 任职（不变量 5 的归属维：同一人可在多团队，每个团队一份名字/角色）=====
+            SectionHeader(text = stringResource(Res.string.agent_detail_assignments_section_title))
+            if (detail.assignments.isEmpty()) {
+                DetailEmptyNote(stringResource(Res.string.agent_detail_no_assignments))
+            } else {
+                // 「主团队」是**推断值**（领队优先），规范 §5.1 的默认团队台账本轮没落盘。
+                // 所以这一行必须自带「推断」二字：不标的话用户会以为在电脑上改过就生效了。
+                val primary = primaryAssignment(detail.assignments)
+                SectionListCard {
+                    detail.assignments.forEachIndexed { index, assignment ->
+                        if (index > 0) SectionListDivider()
+                        Row(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .padding(horizontal = sp.lg14, vertical = sp.md10),
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(sp.sm6),
+                        ) {
+                            Column(
+                                modifier = Modifier.weight(1f),
+                                verticalArrangement = Arrangement.spacedBy(sp.xxs),
+                            ) {
+                                Row(
+                                    verticalAlignment = Alignment.CenterVertically,
+                                    horizontalArrangement = Arrangement.spacedBy(sp.sm6),
+                                ) {
+                                    Text(
+                                        text = assignment.groupName,
+                                        style = MaterialTheme.typography.titleSmall,
+                                        fontWeight = FontWeight.SemiBold,
+                                        maxLines = 1,
+                                        overflow = TextOverflow.Ellipsis,
+                                        modifier = Modifier.weight(1f, fill = false),
+                                    )
+                                    if (assignment == primary) {
+                                        MutedTag(stringResource(Res.string.agent_detail_default_team_mark))
+                                        Text(
+                                            text = stringResource(Res.string.agent_detail_default_team_inferred),
+                                            style = MaterialTheme.typography.labelSmall,
+                                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                        )
+                                    }
+                                }
+                                Text(
+                                    // 名字与角色都是**本团队**那一份；组员没写角色时补「组员」，
+                                    // 不编一个角色名。
+                                    text = assignment.seatName + " · " + (
+                                        if (assignment.isLeader) {
+                                            stringResource(Res.string.agent_detail_assignment_leader)
+                                        } else {
+                                            assignment.role ?: stringResource(Res.string.agent_detail_assignment_member)
+                                        }
+                                        ),
+                                    style = MaterialTheme.typography.labelSmall,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                    maxLines = 1,
+                                    overflow = TextOverflow.Ellipsis,
+                                )
+                            }
+                        }
+                    }
+                }
+            }
 
             // ===== 服务群（每群：执行点状态 + 该群待批数；如实，未暴露就写未暴露）=====
             SectionHeader(text = stringResource(Res.string.agent_detail_groups_section_title))

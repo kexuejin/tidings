@@ -449,6 +449,17 @@ const val THEME_MODE_DARK = com.kapp.tenon.domain.THEME_MODE_DARK
  * 而合并页时代那一个布尔正是"五张原型页共用一张 Composable"的同一件事。
  */
 const val SETTINGS_PAGE_NOTIFY = "notify"
+
+/**
+ * 「接入与通道」页键（Agent 原生双维度规范 §4.8）。
+ *
+ * 它回答「**谁在跟这台机器说话**」：节点链路、外部桥（`dsh-tenon`）的注入判定、
+ * 配对入口。与「执行配置」（底座能干什么）正交 —— 两件事分开摆是这一页存在的前提。
+ *
+ * 手机端也走这个键：那一页上桥块会如实说「在宿主电脑上，读不到」，而不是画一盏灯。
+ */
+const val SETTINGS_PAGE_ACCESS = "access"
+
 const val SETTINGS_PAGE_APPEAR = "appear"
 const val SETTINGS_PAGE_CAPS = "caps"
 const val SETTINGS_PAGE_DATA = "data"

@@ -452,8 +452,9 @@ class AgentCardTypeCoverageTest {
     // ══════════════════════════════════════════════════════ 二、发射侧真实形态（原型稿未画）
 
     /**
-     * 手机侧 invoke 工单卡：`type="team-task-board"`（`AgentInvokeBoardCard.kt:65`、
-     * `RelayControllerAgentInvokeComponent.kt:534`）。
+     * 手机侧 invoke 工单卡：`type="team-task-board"`（`AgentInvokeBoardCard.kt` 的
+     * `buildInvokeBoardCard` 与 `RelayControllerAgentInvokeComponent` 的
+     * `rememberTagBoard` 两条发射点）。
      *
      * 这个名字与 `task-board` 不是同一类：它把组员的 worker 卡收编进来，自有块只有
      * 横幅（三态都写）、终点态的进度、超时态的两个按钮。注册表与徽标文案都已登记，

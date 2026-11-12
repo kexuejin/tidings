@@ -44,7 +44,10 @@ import com.kapp.tenon.generated.resources.desk_nav_group_conn
 import com.kapp.tenon.generated.resources.desk_nav_group_data
 import com.kapp.tenon.generated.resources.ic_chev
 import com.kapp.tenon.generated.resources.ic_refresh
+import com.kapp.tenon.generated.resources.ic_shield
 import com.kapp.tenon.generated.resources.r2_set_profile_rev_chip
+import com.kapp.tenon.generated.resources.set_access_subtitle
+import com.kapp.tenon.generated.resources.set_access_title
 import com.kapp.tenon.generated.resources.set_appear_subtitle
 import com.kapp.tenon.generated.resources.set_caps_none
 import com.kapp.tenon.generated.resources.set_caps_peer_visible
@@ -217,6 +220,19 @@ internal fun SettingsHomeScreen(
                         sub = stringResource(Res.string.set_conn_subtitle),
                         valText = "UDP ${settings.udpPort}",
                         onClick = onNavigateConnection,
+                    )
+                    HorizontalDivider(modifier = Modifier.padding(horizontal = LocalAppSpacing.current.lg))
+                    // 接入与通道（§4.8）：节点链路 / 外部桥的注入判定 / 配对入口。
+                    // 它排在「连接」之后而不是塞进「数据与诊断」：这一页问的是「谁在跟我说话」，
+                    // 与端口一样属于连接语境；诊断页只回答「这台机器自己的读数」。
+                    SettingsNavRow(
+                        icon = Res.drawable.ic_shield,
+                        title = stringResource(Res.string.set_access_title),
+                        sub = stringResource(Res.string.set_access_subtitle),
+                        // 与诊断页那一行同一个读数（在线节点数）—— 不另编一个指标：
+                        // 这一页的第一块就是「这对节点」。
+                        valText = stringResource(Res.string.set_home_online_nodes, onlinePeerCount),
+                        onClick = { onOpenPage?.invoke(SETTINGS_PAGE_ACCESS) },
                     )
                     HorizontalDivider(modifier = Modifier.padding(horizontal = LocalAppSpacing.current.lg))
                     SettingsNavRow(

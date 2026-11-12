@@ -4,6 +4,7 @@ package com.kapp.tenon.orchestration
 
 import com.kapp.tenon.agent.AgentSessionRegistry
 import com.kapp.tenon.agent.AgentWorkspaceRegistry
+import com.kapp.tenon.core.protocol.EventRouteReasons
 import com.kapp.tenon.core.session.NodeRuntime
 import com.kapp.tenon.domain.RelayController
 import com.kapp.tenon.domain.model.hasVisibleText
@@ -127,7 +128,7 @@ internal class AgentEventForwarder(
         val eventKey = eventDeliveryKey(rec.nodeId, rec.sessionId, rec.cursor)
         val isNew = synchronized(processedEventCursors) { processedEventCursors.add(eventKey) }
         if (!isNew) {
-            logEventRoute(rec.eventType, rec.sessionId, rec.cursor, 0, "duplicate-delivery")
+            logEventRoute(rec.eventType, rec.sessionId, rec.cursor, 0, EventRouteReasons.DUPLICATE_DELIVERY)
             return
         }
 
@@ -206,10 +207,17 @@ internal class AgentEventForwarder(
         // assistant.text 都出现在用户眼前。宁可这条事件不显示，也不要把甲仓库的活
         // 干到乙仓库的群里。finalWsPath / finalWsId / finalWsTitle 仍是上面匹配用的键。
         if (targetGroups.isEmpty()) {
-            logEventRoute(rec.eventType, rec.sessionId, rec.cursor, rec.body?.length ?: 0, "no-conv-bound")
+            logEventRoute(rec.eventType, rec.sessionId, rec.cursor, rec.body?.length ?: 0, EventRouteReasons.NO_CONV_BOUND)
         }
 
-        logEventRoute(rec.eventType, rec.sessionId, rec.cursor, rec.body?.length ?: 0, "dispatch groups=" + targetGroups.size)
+        logEventRoute(
+            rec.eventType,
+            rec.sessionId,
+            rec.cursor,
+            rec.body?.length ?: 0,
+            EventRouteReasons.DISPATCH,
+            detail = "groups=" + targetGroups.size,
+        )
 
         if (targetGroups.isNotEmpty()) {
             // 实时与补发**共用同一个构造**（chatMessageFor）：文案/发送者/思考块不可能漂。
@@ -239,7 +247,7 @@ internal class AgentEventForwarder(
                         agentKind = agentKind,
                     )
                     if (!shouldForwardAgentEventToGroup(isUserAuthoredPrompt = isUserPrompt, alreadyInChat = alreadyInChat)) {
-                        logEventRoute(rec.eventType, rec.sessionId, rec.cursor, finalAnswer.length, "duplicate-in-chat")
+                        logEventRoute(rec.eventType, rec.sessionId, rec.cursor, finalAnswer.length, EventRouteReasons.DUPLICATE_IN_CHAT)
                         continue
                     }
                     val msgId = "agent-ev-${rec.sessionId}-${rec.cursor}"
@@ -332,9 +340,27 @@ internal class AgentEventForwarder(
      *
      * 正文长度是唯一的「内容侧」信息，且是长度不是内容 —— 事件类型 + 会话 + 游标 +
      * 长度 + 原因足够回答「这条为什么没投出去」（今天几次排查都靠这类信息）。
+     *
+     * @param reason **稳定 token**（[EventRouteReasons]），它同时是聚合键。带变量的部分
+     *   必须走 [detail] 而不是拼进 reason：此前 `ambiguous-group hits=2` 与 `hits=3` 被
+     *   算成两个键，于是 `snapshot()` 宣称的「按原因聚合」在**最该聚合的那一档**上失效 ——
+     *   页面上会冒出两行同名不同数的成因。
      */
-    private fun logEventRoute(type: String, sessionId: String, cursor: Long, textLength: Int, reason: String) {
-        val line = eventDiagnosticLine(type, sessionId, cursor, textLength, reason)
+    private fun logEventRoute(
+        type: String,
+        sessionId: String,
+        cursor: Long,
+        textLength: Int,
+        reason: String,
+        detail: String? = null,
+    ) {
+        val line = eventDiagnosticLine(
+            type = type,
+            sessionId = sessionId,
+            cursor = cursor,
+            textLength = textLength,
+            reason = if (detail == null) reason else reason + " " + detail,
+        )
         eventDiagnostics.record(reason, line)
         if (eventDebugEnabled) RelayLog.info("RELAY-EVENT", line)
     }
@@ -395,14 +421,14 @@ internal class AgentEventForwarder(
             val boundGroupId = com.kapp.tenon.core.protocol.ConvId.groupIdOf(boundConv)
             if (boundGroupId == null) {
                 // 台账说这条会话属于某个私聊。事件照常落本地台账，只是不进任何群。
-                logEventRoute("session", sessionId, 0L, 0, "bound-to-1to1")
+                logEventRoute("session", sessionId, 0L, 0, EventRouteReasons.BOUND_TO_1TO1)
                 return emptyList()
             }
             val group = state.settings.groups.firstOrNull { it.groupId == boundGroupId }
             if (group == null) {
                 // 派过单、但那个群已经不在本机名单里（退群/重建）。**不回落第 2 层**：
                 // 回落等于把「A 群的活」按目录猜进 B 群 —— 正是要根除的那条。
-                logEventRoute("session", sessionId, 0L, 0, "bound-group-gone")
+                logEventRoute("session", sessionId, 0L, 0, EventRouteReasons.BOUND_GROUP_GONE)
                 return emptyList()
             }
             return listOf(group)
@@ -418,7 +444,7 @@ internal class AgentEventForwarder(
         // 只在**必须从 state 推断**（调用方三个键全空）时才把歧义当阻断：事件记录自带
         // 的 wsPath/wsId/wsTitle 是权威的，不该被别的设备的同名会话连累。
         if (owners.size > 1 && wsPath.isNullOrBlank() && wsId.isNullOrBlank() && wsTitle.isNullOrBlank()) {
-            logEventRoute("session", sessionId, 0L, 0, "ambiguous-owner")
+            logEventRoute("session", sessionId, 0L, 0, EventRouteReasons.AMBIGUOUS_OWNER)
             return emptyList()
         }
         val path = wsPath?.trim().orEmpty().ifEmpty { owners.firstOrNull()?.first.orEmpty() }
@@ -433,7 +459,14 @@ internal class AgentEventForwarder(
                 (path.isNotEmpty() && group.name.contains(path.substringAfterLast('/')))
         }
         if (matched.size > 1) {
-            logEventRoute("session", sessionId, 0L, 0, "ambiguous-group hits=" + matched.size)
+            logEventRoute(
+                "session",
+                sessionId,
+                0L,
+                0,
+                EventRouteReasons.AMBIGUOUS_GROUP,
+                detail = "hits=" + matched.size,
+            )
             return emptyList()
         }
         return matched

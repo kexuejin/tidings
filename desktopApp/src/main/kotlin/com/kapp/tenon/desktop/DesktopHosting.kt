@@ -91,6 +91,7 @@ import com.kapp.tenon.core.fs.directoryUsageBytes
 import com.kapp.tenon.core.transport.PartFile
 import com.kapp.tenon.ui.components.AppBanner
 import com.kapp.tenon.feature.settings.SettingsAppearSubpage
+import com.kapp.tenon.feature.settings.SettingsAccessChannelSubpage
 import com.kapp.tenon.feature.settings.SettingsCapsSubpage
 import com.kapp.tenon.feature.settings.SettingsDataActions
 import com.kapp.tenon.feature.settings.SettingsDataSubpage
@@ -1241,6 +1242,21 @@ internal fun DesktopSettingsPane(
                                             onRestart = { controller.requestRestart() },
                                             // 网段探测桌面也真的能做（控制器实现现成）：
                                             // 以前不传，页面上那排按钮按下去什么都不发生。
+                                            onBack = null,
+                                        )
+                                    }
+                                    DesktopSettingsNav.AccessChannel -> {
+                                        // 接入与通道（§4.8）：这块只在宿主上有读数 ——
+                                        // `accessChannelPort` 就是宿主注入的那一个。
+                                        SettingsAccessChannelSubpage(
+                                            nodeSlice = nodeSlice,
+                                            settingsSlice = settingsSlice,
+                                            port = controller.accessChannelPort,
+                                            // 配对块的落点：同窗左栏的「信任的设备」，
+                                            // 不是另开一页（同一张 pin 表只有一个入口）。
+                                            onOpenTrustedDevices = {
+                                                selectedNav = DesktopSettingsNav.TrustedDevices
+                                            },
                                             onBack = null,
                                         )
                                     }

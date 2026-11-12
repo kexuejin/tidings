@@ -186,8 +186,11 @@
 | 不变量 1：台账优先 + 三键唯一解 | ✅ | `AgentEventRoutingBehaviorTest`(6)，反向探针：摘台账层 ⇒ 3 红；放宽歧义 ⇒ 1 红 |
 | 不变量 2：点聊天直接进 1:1 | ✅ | `FirstProjectCardGuardTest.openingAChatNeverBlocksOnTheGroupPrompt`，反向探针：shell 里写回 `groupPromptFor` ⇒ 红 |
 | 不变量 3：CLI 伪插件停用 + 存量自愈 | ✅ | `BuiltinPluginSeederTest`(6)，反向探针：`retire` 直接返回空 ⇒ 4 红 |
-| 不变量 4：首屏「最新活动」摘要 + 新鲜度 | ⬜ 未做 | 需要先有员工卡片流（见下一行），摘要位才有落点 |
-| 首屏卡片流 / 团队视图 / 执行配置页 / 员工详情 / 接入与通道页（Compose） | ⬜ 未做 | 见下方「下一轮」 |
+| 不变量 4：首屏「最新活动」摘要 + 新鲜度 | ✅ | `ActivityFreshnessTest`(5) + `agentActivityFreshness`：24h 之外写「最后活动」、对端离线写「离线 · 最后活动」、无活动整句不画；RECENT 行渲染 `AgentHubStatusRow.summary`。反向探针：摘掉 `!online` 分支 ⇒ 红；窗口设成恒 FRESH ⇒ 红 |
+| 团队视图（团队卡 + 员工/团队切换） | ✅ | `agentTeams()` + `AgentTeamProjectionTest`(7)；反向探针：按 `groupId` 去重 ⇒ 「一个群两支队伍」变红；待批归因兜底到第一个群 ⇒ 变红。切换器只在**有团队**时出现 |
+| 员工详情「任职」段 | ✅ | `AgentHubDetailUi.assignments`（复用 `agentAssignments()`，零新规则）；主团队标「推断」——默认团队台账本轮没落盘，见下方 §5.5 |
+| 执行配置页 | ✅（**只读矩阵**） | `executionMatrixRows()` + `ExecutionMatrixProjectionTest`(8)；反向探针：去掉本机过滤 / 在位判据写成「非空即在位」/ `overridden` 恒 false，各变红。写入口仍只有群编制一处（§5.5） |
+| 接入与通道页 | ✅ | `AccessChannelPort`（宿主只读端口）+ `accessChannelUi()` 投影 + `SettingsAccessChannelSubpage`；三类数据：桥的注入判定台账（`InboxInjectionTrace`，控制面唯一写入）、本机信任库的 pin（`NodeRuntime.pinOfPeer`）、事件路由计数（`EventRouterDiagnostics.snapshot()`，转发侧唯一写入）。判据 `AccessChannelProjectionTest`(13)/`InboxInjectionTraceTest`(14)/`AccessChannelHonestyGuardTest`(11)。**桥没有在线灯**（词表里根本没有 `set_access_bridge_online/offline`）；`targetSessionId=null` 逐条给成因（`InboxUnresolved` 五个 token 全覆盖，其中「未绑工作区却没投成」报的是 `no-unbound-session` 而不是 `no-bound-workspace` —— 未绑定本身不是失败原因，用户要做的动作是「去开一个不带目录的会话」而不是「去绑一个目录」）；出站成因同理（`EventRouteReasons.BLOCKING` 五档全覆盖，未知 token 原样显示）。手机端 `accessChannelPort=null` ⇒ 桥块与路由块各留一句「在电脑上，读不到」、配对块整块不画 |
 
 **关于「先改图纸再写 Compose」的一处更正（2026-11-12 实测）**：`design/design-spec.json` 里的
 `tokens` 是**从代码投影**出来的（`design-spec-project.py --write`，门禁用 `--check` 判漂移），
@@ -201,6 +204,40 @@ review diff；`prototype/relay.html` 只在**新增屏 / 新增状态槽**时才
 ② 团队视图切换 + 员工详情「任职」区；③ 设置内「接入与通道」页（桥不装在线灯，读
 `EventRouterDiagnostics.snapshot()` 与 `/v1/inbox` 的 `AgentInboxHint` 统计）。
 三块都要先在 `prototype/relay.html` 加状态槽、补 `@Preview`，再跑 `designStateSlotGate`。
+
+**2026-11-12 第二批落地（本轮）**：① 员工卡片流与团队视图已成型；② 不变量 4 落到 RECENT 行；
+③ 执行配置页落地为**只读矩阵**；④ 接入与通道页落地，数据来自新增的**宿主只读端口**
+（`AccessChannelPort` → `InboxInjectionTrace` + `pinOfPeer`），不改任何协议帧。
+
+接入页那次「宁可先不画」的判断是对的：真正卡住的不是缺一个 Composable，而是**没有一条
+宿主→客户端的读取通路**。补端口的形状与 `TeamExecutionPort` / `HostDirectoryPort` 一致
+（`:app` 定义接口，`:orchestration` 装配实现，手机端为 null ⇒ 只画读得到的那一块）。
+两条经验值得记住：
+
+* **台账必须由写入方持有**（`ControlPlane.inboxTrace` 单实例），端口只读它。壳里另建一份
+  的症状是「桥在干活、页面说没判定过」——守卫 `AccessChannelHonestyGuardTest` 钉住这条。
+  「只此一份」**不靠守卫**：`InboxInjectionTrace` 的构造器是 `internal`，`orchestration`
+  那侧根本造不出第二份 —— 能交给编译器的，就别留在断言里。
+* **「桥没在跑」与「没有 @ 消息」必须分开**：所以除了逐条判定，还要记**取件本身**
+  （`recordPoll()`），否则两种状态在页面上长得一模一样。三档判据（未取件 / 取过但空 / 有判定）
+  收在 `bridgeBlockStateOf()` 这个纯函数里 —— 判据住在 Composable 里就只能靠源码字符串守，
+  格式化或改名即假红；沉到 `:app` 才能直接写单测。
+
+### 5.5 本轮的三个取舍（都是「少写一份实现」而不是「少做一件事」）
+
+1. **执行配置页只读**。规范 §4.0 原写「桌面可写」，但写执行档要连「校验 → 结构化拒绝 → 落盘」
+   三件事，而这三件事已经完整地住在群编制对话框里。在这页再开一套下拉，等于把同一套规则写
+   两遍 —— 本仓为「同一规则两份实现」付过的代价（两处回退链必不一致）比「少一次点击」贵得多。
+   所以这页只摊**生效值**（含「本团队覆盖 / 继承」与「在位 / 不在位」两对标签），底部指路到群编制。
+2. **团队卡点卡落到领队的员工详情**。团队不是独立对象（协议里没有 teamId），没有可下钻的
+   团队实体页；「这队是谁在带」就落在领队那张员工卡上。凭空造一个团队实体才是编身份。
+3. **主团队标「推断」**。默认团队要记本机台账（`(hostNodeId, agentId) → groupId`），本轮没有
+   落这份持久化；`primaryAssignment()` 给的是「领队优先」的明说规则，UI 因此必须标「推断」。
+   把推断当权威，用户会以为改过就生效了。
+
+**一个必须记下的坑**：群**没有项目目录指针**时，`initialExecutionProfileUi` 返回 null。矩阵
+如果照它早退，整支团队会从执行配置页里消失（用户以为席位没了）。正确做法是退回**声明层**
+（`declaredProfileUi`，`driverKey` 恒空 + `editable=false`）——「没法改」不等于「不存在」。
 
 
 `orchestration` 全量 297 例、`:app` 定向 7 例均真执行通过（已清 `test-results`，非 UP-TO-DATE 假绿）。
@@ -375,7 +412,7 @@ deepseek 群
 
 ### 4.8 接入与通道页（设置内）：放「桥」，不放「底座」
 
-这页回答的是「**谁在跟这台机器说话**」，与执行配置正交。三块内容：
+这页回答的是「**谁在跟这台机器说话**」，与执行配置正交。四块内容：
 
 ```
 接入与通道
@@ -384,22 +421,27 @@ deepseek 群
   这台电脑（宿主）        ● 链路在线 · 最近帧 12s 前
   我的手机 · Pixel        ● 链路在线 · 已配对（pin 指纹 AB:CD…）
 
-外部桥 · dsh-tenon
-  状态：最近一次可注入消息 4 分钟前
-  近 20 条：@ 到本机 agent 6 条 · 解析出目标会话 5 条 · 未解析 1 条
+外部桥 · dsh-tenon（入站）
+  最近一次取件 8s 前 · 最近一次可注入消息 4 分钟前
+  窗口最多 20 条 · 已判定 6 条：可注入 5 · 未注入 1
   未解析原因：该 agent 没有绑定会话（targetSessionId=null）
-  [ 如何安装 / 重新检查 ]
+
+事件路由（出站）
+  这个项目目录同时绑了多个群 —— 3 次
+  这条会话没有绑定任何群 —— 1 次
 
 配对
   [ 添加节点 ]  手机端另走「扫码 → 从图片导入二维码」
 ─────────────────────────────────────────────────────────────
 ```
 
-三条纪律：
+四条纪律（前三条是入站方向，第四条是出站方向）：
 
 * **桥不是插件，别给它一个「在线/离线」灯**。`dsh-tenon` 是外部常驻进程，宿主侧**没有**它的心跳（它不注册进 `PluginHost`，也没有 last-poll 记录）。硬画一个绿灯就是假绿。能如实显示的是**最近一次成功注入的时间**与判定统计 —— 数据来自 `/v1/inbox` 每条消息的 `AgentInboxHint`（`addressedToAgent` / `boundWsId` / `targetSessionId`），这是宿主真正持有的事实。
 * **「未解析」必须给原因**：`targetSessionId=null` 的成因是本仓踩过的坑（席位没绑定会话 / 刚入驻找不到自己的会话），只显示计数而不显示原因，用户除了重装什么都做不了。
 * **配对是唯一允许手机写的地方**：`添加节点` 在桌面，`扫码 → 从图片导入二维码` 在手机（`scan_import_image`）。两端都写同一份 pin 表 —— 这条与执行配置无关，别混进同一页的权限模型。
+
+**第四条（出站方向）**：「桥」管**入站**（外部 @ 消息注进既有会话），「事件路由」管**出站**（本地会话的事件该投进哪个群）。两块症状几乎一样（群里什么都没有），成因却住在两个模块（`InboxInjectionTrace` / `EventRouterDiagnostics`），合成一块会让「桥没跑」与「会话没绑群」互相盖住。出站只列**阻断档**（`EventRouteReasons.BLOCKING`），`dispatch` 与两条 `duplicate-*` 是正常路径，混进来只会把真问题淹掉；口径是「除正常路径外一律显示」，不白名单 —— 否则宿主新增的成因会被界面静默丢掉。聚合键必须是**稳定 token**，`hits=N` 这类参数只能进诊断行：拼进键会把同一原因裂成 `hits=2` / `hits=3` 两行。
 
 底座能力（`listCapabilities`）**不在这页**，在执行配置页（4.0）——「这个底座能干什么」属于执行器，「这条通道通不通」属于接入，两件事分开摆。
 

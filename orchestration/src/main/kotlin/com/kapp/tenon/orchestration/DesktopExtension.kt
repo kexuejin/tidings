@@ -522,6 +522,16 @@ class DesktopExtension(
                 // 两件事分开注入会出现「能选但登记不了」的第二条命。
                 directoryPicker = directoryPicker,
             )
+            // 接入面端口（接入与通道页）：桥的注入台账 + 本机信任库的 pin + 事件路由计数。
+            //
+            // `createdPlane` 而不是本地新建一份台账：控制面是唯一写入方，端口只是读它 ——
+            // 两份实例的症状是「桥明明在工作，页面却说从来没判定过」。
+            controller.accessChannelPort = DesktopAccessChannelPort(
+                trace = { createdPlane.inboxTrace },
+                pinLookup = { nodeId -> runtime.pinOfPeer(nodeId) },
+                // 事件转发侧也是同一口径：读它自己的计数，不另记一份。
+                routingLookup = { eventForwarder.eventDiagnostics.snapshot() },
+            )
             if (blindSpotDir != null) {
                 BlindSpotPatrol.startPatrol(blindSpotDir, scope)
             }

@@ -7,6 +7,7 @@ import com.kapp.tenon.core.protocol.AgentExecAuthorizer
 import com.kapp.tenon.core.protocol.AgentExecAuthorizer.permitsExecution
 import com.kapp.tenon.core.protocol.AgentSessionPick
 import com.kapp.tenon.core.protocol.GroupMeta
+import com.kapp.tenon.core.protocol.InboxUnresolved
 import com.kapp.tenon.core.protocol.mentionedVirtualAgent
 
 /**
@@ -189,12 +190,12 @@ fun resolveAgentInboxHint(
         AgentSessionPick.Result.RequestedSessionGone -> {
             // 点选先归一化的值随行（requested），桥接侧能说清「你点的会话没了」。
             targetSessionId = null
-            requestRejectReason = "requested-session-gone"
+            requestRejectReason = InboxUnresolved.REQUESTED_SESSION_GONE
         }
         AgentSessionPick.Result.RequestedSessionOutsideWorkspace -> {
             // F5：点的会话属于另一个工作区 —— 不投、不换、说清原因。
             targetSessionId = null
-            requestRejectReason = "requested-session-outside-workspace"
+            requestRejectReason = InboxUnresolved.REQUESTED_SESSION_OUTSIDE_WORKSPACE
         }
         else -> {
             targetSessionId = null

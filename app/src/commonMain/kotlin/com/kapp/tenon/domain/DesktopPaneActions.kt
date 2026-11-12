@@ -209,6 +209,15 @@ public interface DesktopPaneActions {
         get() = null
 
     /**
+     * 接入面端口（接入与通道页 §4.8）：外部桥的注入判定台账 + 本机信任库的 pin。
+     *
+     * null = 该壳读不到宿主（手机端常态）⇒ 页面**整块不画桥**，而不是画一个「在线」
+     * 绿灯：桥不是插件、宿主没有它的心跳，那盏灯只能是假的。
+     */
+    val accessChannelPort: AccessChannelPort?
+        get() = null
+
+    /**
      * 算「谁能用这个 agent 干活」的逐设备勾选状态。
      *
      * null = 这个壳没有台账（手机连别人的机器：那是对方的主权，我配不了）。

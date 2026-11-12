@@ -127,13 +127,13 @@ class ControlPlane(
     /** PPE-1 增补 D8：设备发来的会话分页请求，留给宿主答（见 AgentSessionPageStore 的 KDoc）。 */
     internal val sessionPages: AgentSessionPageStore = AgentSessionPageStore(),
     /**
-     * `/v1/inbox` 的注入判定附加信息。null = 不提供（纯聊天用途，行为与改动前一致）。
-     *
-     * 为什么要由 Tenon 侧注入：判据（`shouldTriggerAgent`）只有一份，它在 composeApp 里、
-     * 依赖 `settings.groups` 与 `agentWorkspaces`，agentNode 拿不到。让桥接侧自己再判一次
-     * 会让两边慢慢分叉，最终是「手机上显示已 @、宿主没执行」的静默（AGENTS §2.4）。
+     * `/v1/inbox` 的注入判定附加信息。null = 不提供（纯聊天用途）。判据只有一份、住在
+     * composeApp（要 `settings.groups`），agentNode 拿不到 —— 见 [AgentInboxEnricher]。
      */
     internal val inboxEnricher: AgentInboxEnricher? = null,
+    /** 注入判定的**最近读数**（「接入与通道」页唯一数据源）。本控制面独占一份，装配方只读转交界面端口；
+     * 两份实例的症状是「桥在干活、页面说没判定过」。 */
+    val inboxTrace: InboxInjectionTrace = InboxInjectionTrace(),
     /**
      * **每个 agent 各自的执行范围**（key = agentKey）。落盘保存，见 [AgentExecPolicyStore]。
      *

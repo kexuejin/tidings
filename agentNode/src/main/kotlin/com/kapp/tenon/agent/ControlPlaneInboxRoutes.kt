@@ -22,7 +22,11 @@ import kotlinx.serialization.json.putJsonObject
  * 把散在协议帧里的事实拼成「一条会话现在长什么样」：会话行 + 未读 + 队列状态 +
  * 运行时执行面。宿主面板的一次轮询就读这一条。
  *
- * 拼装用 `AgentInboxEnricher` 注入的取值器，没有注入就如实缺省 —— 这条路由**不**写任何台账。
+ * 拼装用 `AgentInboxEnricher` 注入的取值器，没有注入就如实缺省。
+ *
+ * 这条路由会往 [ControlPlane.inboxTrace] 里写两件事：**桥来取过件**（每次请求都记）与
+ * 每条的**注入判定**。「接入与通道」页只读那份台账 —— 它是宿主侧唯一能证明「桥在不在干活」
+ * 的东西（桥不是插件，没有心跳）。除此之外不写任何状态：这个接口是幂等的读。
  */
 
 internal fun ControlPlane.inbox(exchange: HttpExchange) {
@@ -30,6 +34,9 @@ internal fun ControlPlane.inbox(exchange: HttpExchange) {
     val since = query["since"]?.toLongOrNull() ?: 0L
     val limit = (query["limit"]?.toIntOrNull() ?: ControlPlane.DEFAULT_LIMIT).coerceIn(1, ControlPlane.MAX_LIMIT)
     val rows = runtime.inbox(since, limit)
+    // **桥来取过件**这件事本身要记：没有它，「一条可注入消息都没有」与「桥根本没在跑」
+    // 在接入与通道页上长得一模一样（页面只能画一个说不出话的空态）。
+    inboxTrace.recordPoll()
     respond(
         exchange,
         200,
@@ -167,6 +174,9 @@ internal fun ControlPlane.inbox(exchange: HttpExchange) {
                                 requestedSessionId = view.agentSessionId,
                             )
                             if (hint != null) {
+                                // 注入判定的读数（接入与通道页）：只记结论与成因，
+                                // **不记正文、不记会话 id**（诊断台账不进任何用户内容）。
+                                inboxTrace.record(peerId = row.peerId, seq = row.seq, hint = hint)
                                 putJsonObject("agentHint") {
                                     put("addressedToAgent", hint.addressedToAgent)
                                     hint.boundWsId?.let { put("boundWsId", it) }

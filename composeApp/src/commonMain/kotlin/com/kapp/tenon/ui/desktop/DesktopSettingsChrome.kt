@@ -75,6 +75,7 @@ import com.kapp.tenon.generated.resources.desk_settings_title
 import com.kapp.tenon.generated.resources.desk_switch_unavailable
 import com.kapp.tenon.generated.resources.ic_refresh
 import com.kapp.tenon.generated.resources.set_profile_title
+import com.kapp.tenon.generated.resources.set_access_title
 import com.kapp.tenon.generated.resources.set_update_title
 import com.kapp.tenon.ui.theme.LocalAppSpacing
 import com.kapp.tenon.ui.theme.LocalCardShape
@@ -141,6 +142,14 @@ public enum class DesktopSettingsNav(
     Connection(
         "conn", Res.string.desk_nav_connection, GROUP_CONN,
         Res.string.desk_nav_group_conn, Res.drawable.ic_link,
+    ),
+    // 「接入与通道」（Agent 原生双维度规范 §4.8）：节点链路 + 外部桥的注入判定 + 配对入口。
+    // 它排在「连接」之后：连接说的是「这台机器怎么被找到」，接入说的是「谁在跟它说话」。
+    // 图标不用 `ic_shield`：那是上面「信任的设备」那行的，同组相邻两行同图标会被当成同一个入口；
+    // `ic_refresh` 与本页第二块（外部桥的取件读数）同源。
+    AccessChannel(
+        "access", Res.string.set_access_title, GROUP_CONN,
+        Res.string.desk_nav_group_conn, Res.drawable.ic_refresh,
     ),
     Notifications(
         "notify", Res.string.desk_nav_notifications, GROUP_CONN,

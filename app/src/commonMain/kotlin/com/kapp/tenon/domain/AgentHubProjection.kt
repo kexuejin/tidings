@@ -183,6 +183,14 @@ public data class AgentHubDetailUi(
     val teamMembers: List<AgentHubTeamMemberUi>,
     /** 服务群行（每群：席位执行点状态 + 该群待批数）。见 [AgentHubGroupRow]。 */
     val servingGroups: List<AgentHubGroupRow>,
+    /**
+     * **任职**表（不变量 5 的归属维）：每团队一行，带**本团队内**的名字与角色。
+     *
+     * 为什么与 [servingGroups] 不合并：后者是「服务群」（含执行点声明），这里是「身份」；
+     * 同一个人在 A 群叫墨查、在 B 群叫审查员，这条差别只在任职行上看得见。两段回答的
+     * 是两个问题，合成一段必然有一半信息被压平。
+     */
+    val assignments: List<AgentAssignmentUi>,
     /** 项目目录行（宣告 ∪ 会话自报，合成 wsId 不计；最近活动在前）。见 [AgentHubWorkspaceRow]。 */
     val workspaces: List<AgentHubWorkspaceRow>,
     /**
@@ -392,6 +400,12 @@ public fun agentHubDetail(
         online = hostOnline,
         teamMembers = teamMembers,
         servingGroups = servingGroups,
+        assignments = agentAssignments(
+            agentSlice = agentSlice,
+            settingsSlice = settingsSlice,
+            hostNodeId = hostNodeId,
+            agentKey = entity.canonicalKey.orEmpty(),
+        ),
         workspaces = workspaces,
         approvals = entity.attributedApprovals,
         sessions = sessions,

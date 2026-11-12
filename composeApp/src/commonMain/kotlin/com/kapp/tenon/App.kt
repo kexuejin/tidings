@@ -65,6 +65,7 @@ import com.kapp.tenon.feature.conversations.systemDirectoryPicker
 import com.kapp.tenon.feature.nodes.NodesScreen
 import com.kapp.tenon.feature.scan.ScanScreen
 import com.kapp.tenon.feature.search.GlobalSearchScreen
+import com.kapp.tenon.feature.settings.SETTINGS_PAGE_ACCESS
 import com.kapp.tenon.feature.settings.SETTINGS_PAGE_APPEAR
 import com.kapp.tenon.feature.settings.SETTINGS_PAGE_AVATAR
 import com.kapp.tenon.feature.settings.SETTINGS_PAGE_CAPS
@@ -74,6 +75,7 @@ import com.kapp.tenon.feature.settings.SETTINGS_PAGE_NOTIFY
 import com.kapp.tenon.feature.settings.SETTINGS_PAGE_IME
 import com.kapp.tenon.feature.settings.SETTINGS_PAGE_UPDATE
 import com.kapp.tenon.feature.settings.SettingsAppearSubpage
+import com.kapp.tenon.feature.settings.SettingsAccessChannelSubpage
 import com.kapp.tenon.feature.settings.SettingsCapsSubpage
 import com.kapp.tenon.feature.settings.SettingsDataActions
 import com.kapp.tenon.feature.settings.SettingsDataSubpage
@@ -695,6 +697,17 @@ fun RelayApp(
                             onRecordCapabilityEnabledChange = controller::updateRecordMessageCapability,
                         )
 
+                        // 接入与通道（§4.8）：谁在跟这台机器说话。
+                        // 手机上 `accessChannelPort` 为 null（桥在电脑上），页面据此只留一句
+                        // 说明 —— 不画空壳、更不画「桥在线」的绿灯。
+                        SETTINGS_PAGE_ACCESS -> SettingsAccessChannelSubpage(
+                            nodeSlice = nodeSlice,
+                            settingsSlice = settingsSlice,
+                            port = controller.accessChannelPort,
+                            onBack = { settingsPage = null },
+                            modifier = Modifier.fillMaxSize(),
+                        )
+
                         SETTINGS_PAGE_DATA -> SettingsDataSubpage(
                             state = SettingsDataUiState(
                                 dataDirectory = controller.dataDirectory,
@@ -968,6 +981,8 @@ fun RelayApp(
                                             chatSlice = chatSlice,
                                             // 撤销本会话免审（撤销是一次显式动作，与逐条审批入口分开）。
                                             onRevokeSessionApproval = controller::revokeSessionApproval,
+                                            // 执行配置矩阵要读宿主本地执行档 —— 端口只在宿主本机非空，手机端自然是 null。
+                                            teamExecutionPort = controller.teamExecutionPort,
                                             // **不能用** `nav.detailPeerId`：那是**节点页**的详情（普通节点
                                             // 也有值）。用户先在节点页点开一台普通设备、再切到 Agents 页签时，
                                             // 这个 id 会流进来；它不在 `agentPeers` 里时，`AgentConsoleScreen` 的
@@ -991,6 +1006,11 @@ fun RelayApp(
                                                 nav = nav.openAgentDetail(hostNodeId, agentId)
                                             },
                                             onLeaveAgentDetail = { nav = nav.leaveAgentDetail() },
+                                            // 团队卡的「打开协同群」：团队就是群里的那条席位，所以
+                                            // 它的会话键只有一种取法 —— `ConvId.group(groupId)`。
+                                            onOpenGroup = { groupId ->
+                                                openChat(com.kapp.tenon.core.protocol.ConvId.group(groupId))
+                                            },
                                             onOpenWorkspaceDetail = { peerId, wsId ->
                                                 selectedAgentId = peerId
                                                 nav = nav.openAgentWorkspaceDetail(peerId, wsId)

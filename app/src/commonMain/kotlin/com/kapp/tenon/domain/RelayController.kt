@@ -897,6 +897,11 @@ class RelayController(
     override var hostDirectoryPort: HostDirectoryPort?
         get() = invokeCtl.hostDirectoryPort
         set(value) { invokeCtl.hostDirectoryPort = value }
+
+    /** 接入面端口：invokeCtl 同字段（DesktopExtension 装配 DesktopAccessChannelPort）。 */
+    override var accessChannelPort: AccessChannelPort?
+        get() = invokeCtl.accessChannelPort
+        set(value) { invokeCtl.accessChannelPort = value }
     /**
      * 打开某条会话时把它标为已读。
      *

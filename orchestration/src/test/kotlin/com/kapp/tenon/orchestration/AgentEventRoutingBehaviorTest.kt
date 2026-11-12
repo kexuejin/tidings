@@ -3,6 +3,7 @@
 package com.kapp.tenon.orchestration
 
 import com.kapp.tenon.core.protocol.ConvId
+import com.kapp.tenon.core.protocol.EventRouteReasons
 import com.kapp.tenon.domain.InMemoryAgentStore
 import com.kapp.tenon.domain.InMemoryMessageStore
 import com.kapp.tenon.domain.InMemorySettingsStore
@@ -114,9 +115,16 @@ class AgentEventRoutingBehaviorTest {
         val f = forwarder(controller, emptyMap())
         val routed = f.groupsForSession(controller.state.value, "sess-unbound", workspacePath, null, null)
         assertEquals(emptyList(), routed, "一个目录绑两个群时必须阻断 —— 投两份就是串群")
+        val diag = f.eventDiagnostics.snapshot()
         assertTrue(
-            f.eventDiagnostics.snapshot().keys.any { it.startsWith("ambiguous-group") },
-            "阻断必须留下原因（接入与通道页要读这个计数）：" + f.eventDiagnostics.snapshot(),
+            diag.containsKey(EventRouteReasons.AMBIGUOUS_GROUP),
+            "阻断必须留下原因（接入与通道页要读这个计数）：" + diag,
+        )
+        // 参数（hits=N）只进诊断行，**不进聚合键**：否则 hits=2 与 hits=3 会裂成两行
+        // 同名不同数的成因，而页面正好要在这一档上给出「一个目录绑了几个群」。
+        assertTrue(
+            diag.keys.none { it.startsWith(EventRouteReasons.AMBIGUOUS_GROUP + " ") },
+            "参数混进了聚合键，按原因聚合在这最该聚合的一档上失效：" + diag,
         )
     }
 
@@ -138,7 +146,7 @@ class AgentEventRoutingBehaviorTest {
         // 「没匹配上」与「匹配到多个所以拒投」是两件事：这里不该被记成后者。
         // 逐事件的 `no-conv-bound` 由调用点记（它才拿得到事件类型与游标），不在本函数里。
         assertTrue(
-            f.eventDiagnostics.snapshot().keys.none { it.startsWith("ambiguous-group") },
+            f.eventDiagnostics.snapshot().keys.none { it.startsWith(EventRouteReasons.AMBIGUOUS_GROUP) },
             "零命中被误记成歧义：" + f.eventDiagnostics.snapshot(),
         )
     }

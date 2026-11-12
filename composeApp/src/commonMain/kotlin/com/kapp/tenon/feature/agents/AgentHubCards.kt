@@ -21,10 +21,12 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
+import com.kapp.tenon.domain.ActivityFreshness
 import com.kapp.tenon.domain.AgentHubArtifactUi
 import com.kapp.tenon.domain.AgentHubRowKind
 import com.kapp.tenon.domain.AgentHubStatusRow
 import com.kapp.tenon.domain.AgentHubUi
+import com.kapp.tenon.domain.agentActivityFreshness
 import com.kapp.tenon.generated.resources.Res
 import com.kapp.tenon.generated.resources.agent_count_items
 import com.kapp.tenon.generated.resources.agent_subtitle_pending
@@ -33,6 +35,8 @@ import com.kapp.tenon.generated.resources.conv_inbox_ws_open_chat
 import com.kapp.tenon.generated.resources.hub_agent_meta_format
 import com.kapp.tenon.generated.resources.hub_agent_role_single
 import com.kapp.tenon.generated.resources.hub_agent_role_team
+import com.kapp.tenon.generated.resources.hub_activity_last_format
+import com.kapp.tenon.generated.resources.hub_activity_offline_format
 import com.kapp.tenon.generated.resources.hub_agent_section_title
 import com.kapp.tenon.generated.resources.hub_artifact_latest_tag
 import com.kapp.tenon.generated.resources.ic_bot
@@ -91,22 +95,31 @@ internal fun AgentHubSection(
      * 默认 false = 全宽横段的改前形态。
      */
     compact: Boolean = false,
+    /**
+     * 画不画本段自己的段头（「智能体 · N」）。
+     *
+     * 首屏目录把两个视角（员工 / 团队）挂在同一个切换器下，标题与计数由那个切换器
+     * 提供 —— 这时再画一遍段头就是同一屏两个标题。默认 true = 独立使用时形态不变。
+     */
+    showSectionHeader: Boolean = true,
 ) {
     if (cards.isEmpty()) return
     Column(
         modifier = modifier.fillMaxWidth(),
         verticalArrangement = Arrangement.spacedBy(LocalAppSpacing.current.md),
     ) {
-        SectionHeader(
-            text = stringResource(Res.string.hub_agent_section_title),
-            action = {
-                Text(
-                    text = stringResource(Res.string.agent_count_items, formatCount(cards.size.toLong())),
-                    style = MaterialTheme.typography.labelLarge,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                )
-            },
-        )
+        if (showSectionHeader) {
+            SectionHeader(
+                text = stringResource(Res.string.hub_agent_section_title),
+                action = {
+                    Text(
+                        text = stringResource(Res.string.agent_count_items, formatCount(cards.size.toLong())),
+                        style = MaterialTheme.typography.labelLarge,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                },
+            )
+        }
         cards.forEach { card ->
             AgentHubCard(
                 card = card,
@@ -379,16 +392,45 @@ private fun HubStatusRow(
             AgentHubRowKind.RECENT -> {
                 // P3：最近活动 + 空闲/离线态（时刻口径在投影层，照画）。
                 row.state?.let { state -> SessionStateLabel(state) }
-                Text(
-                    text = stringResource(
-                        Res.string.workspace_latest_activity_format,
-                        relativeTime(row.at, now),
-                    ),
-                    style = MaterialTheme.typography.labelSmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    maxLines = 1,
-                    modifier = Modifier.weight(1f),
-                )
+                // **「最新」是一个有条件的断言**（不变量 4）：超过一天就不再叫最新，
+                // 对端离线也不叫 —— 三天前那条活动不是「最新」，它只是「最后一条」。
+                // 三档文案与判据 `agentActivityFreshness` 一一对应，UI 不自带第四档。
+                when (agentActivityFreshness(row.at, now, card.online)) {
+                    ActivityFreshness.FRESH -> Text(
+                        text = stringResource(
+                            Res.string.workspace_latest_activity_format,
+                            relativeTime(row.at, now),
+                        ),
+                        style = MaterialTheme.typography.labelSmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        maxLines = 1,
+                    )
+                    ActivityFreshness.STALE -> Text(
+                        text = stringResource(Res.string.hub_activity_last_format, relativeTime(row.at, now)),
+                        style = MaterialTheme.typography.labelSmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        maxLines = 1,
+                    )
+                    ActivityFreshness.OFFLINE -> Text(
+                        text = stringResource(Res.string.hub_activity_offline_format, relativeTime(row.at, now)),
+                        style = MaterialTheme.typography.labelSmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        maxLines = 1,
+                    )
+                    // 一条活动都没有：整句不画。0 不是「很久以前」，是「没有」。
+                    ActivityFreshness.NONE -> Unit
+                }
+                // 接力摘要（不变量 4 的正文）：投影已给的最近事件文案，一行，不拼句子。
+                row.summary?.let { summary ->
+                    Text(
+                        text = summary,
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis,
+                        modifier = Modifier.weight(1f),
+                    )
+                }
             }
         }
     }

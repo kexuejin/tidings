@@ -466,6 +466,44 @@
     <!-- 卡片底部的「最近交付」标签。措辞只报事实：协议里没有产物的成败位，
          所以这里不写「成功」—— 它说的是「最近收到一件叫 X 的产物」。 -->
     <string name="hub_artifact_latest_tag">最近交付：%1$s</string>
+    <!-- 员工 / 团队两个视角（不变量 5）：同一批声明的两个方向 —— 员工看「它在哪几个团队」，
+         团队看「这队有谁」。切换不是上下两段，所以标题栏就是切换器本身。 -->
+    <string name="hub_view_employees">员工</string>
+    <string name="hub_view_teams">团队</string>
+    <!-- 团队卡：领队与人数都是**本团队**的事实（协议里名字/角色挂在席位上，换团队换一份）。 -->
+    <string name="hub_team_leader_format">领队 %1$s</string>
+    <string name="hub_team_size_format">%1$d 人</string>
+    <string name="hub_team_open_group">打开协同群</string>
+    <string name="hub_team_member_role_format">%1$s · %2$s</string>
+    <string name="hub_team_member_no_role">%1$s</string>
+    <string name="hub_team_empty">还没有团队。群里加了「团队」席位之后这里才会出现。</string>
+    <!-- 「最新活动」的诚实措辞（不变量 4）：24h 之外不叫「最新」，对端离线也不叫。
+         字符串与判定函数 agentActivityFreshness 一一对应，UI 不许自带第三档。 -->
+    <string name="hub_activity_last_format">最后活动 %1$s</string>
+    <string name="hub_activity_offline_format">离线 · 最后活动 %1$s</string>
+    <!-- 员工详情的「任职」段（多对多，每团队一份名字/角色）。 -->
+    <string name="agent_detail_assignments_section_title">任职</string>
+    <string name="agent_detail_no_assignments">还没有入驻任何团队</string>
+    <string name="agent_detail_assignment_leader">领队</string>
+    <string name="agent_detail_assignment_member">组员</string>
+    <string name="agent_detail_default_team_mark">主团队</string>
+    <string name="agent_detail_default_team_inferred">推断</string>
+    <!-- 执行配置（规范 §4.0）：一张「团队 × 员工」的矩阵。入口在智能体页目录卡上方，
+         只有拿得到执行档端口（宿主本机）时才画。 -->
+    <string name="exec_config_entry">执行配置</string>
+    <string name="exec_config_title">执行配置</string>
+    <string name="exec_config_subtitle_format">这台电脑 · %1$d 个底座在位</string>
+    <string name="exec_config_driver_unassigned">未指派</string>
+    <string name="exec_config_model_inherit">模型 继承默认</string>
+    <string name="exec_config_model_format">模型 %1$s</string>
+    <string name="exec_config_overridden">本团队覆盖</string>
+    <string name="exec_config_inherited">继承</string>
+    <string name="exec_config_installed">在位</string>
+    <string name="exec_config_not_installed">不在位</string>
+    <string name="exec_config_readonly_no_dir">本群未设项目目录，只能看</string>
+    <string name="exec_config_edit_hint">换底座 / 换模型请到群信息 → 团队编制。写入口只有那一处，这里不另开一份。</string>
+    <string name="exec_config_empty">这台电脑上还没有可配置的席位</string>
+    <string name="exec_config_member_unnamed">未命名</string>
     <!-- 智能体详情页（Phase B4）：点卡片的第一落点，实体视角整页。分段标题、空段与
          会话数各一条；「未暴露」复用 group_project_directory_unset，未命名目录与会话
          复用 conv_inbox_ws_row_unnamed / agent_session_untitled —— 同一个事实只有一份文案。 -->
@@ -2070,4 +2108,49 @@
     <string name="desktop_msg_file_unsupported">榫卯消息文件：本期只打开主窗，格式尚未定义</string>
     <string name="chat_mention_host_offline">休眠/离线</string>
     <string name="chat_offline_host_send_hint">智能体宿主（%1$s）当前休眠或离线，消息已排队，恢复连接后继续处理</string>
+    <!-- 设置 · 接入与通道页（谁在跟这台机器说话） -->
+    <string name="set_access_title">接入与通道</string>
+    <string name="set_access_subtitle">谁在跟这台机器说话：节点、外部桥、配对</string>
+    <string name="set_access_nodes_card">这对节点</string>
+    <string name="set_access_self_sub">本机 · 监听端口 %1$d</string>
+    <string name="set_access_online">在线</string>
+    <string name="set_access_offline">离线</string>
+    <string name="set_access_last_frame">最近帧 %1$s</string>
+    <string name="set_access_never_frame">从未收到过帧</string>
+    <string name="set_access_paired">已配对 · pin %1$s</string>
+    <string name="set_access_unpaired">未配对 —— 没有 pin，与它之间的帧会被拒</string>
+    <string name="set_access_nodes_empty">还没有别的节点。用二维码或链接把对方加进来。</string>
+    <string name="set_access_bridge_card">外部桥 · dsh-tenon</string>
+    <string name="set_access_bridge_poll">最近一次取件 %1$s</string>
+    <string name="set_access_bridge_never_poll">自本次启动起没取过件 —— 它没在跑，或者地址不对。</string>
+    <string name="set_access_bridge_inject">最近一次可注入消息 %1$s</string>
+    <string name="set_access_bridge_never_inject">判定过的都没有投成：@ 到 agent 的消息没找到可投的会话，或发送者没有执行权。</string>
+    <string name="set_access_bridge_window">窗口最多 %1$d 条 · 已判定 %2$d 条：可注入 %3$d · 未注入 %4$d</string>
+    <string name="set_access_bridge_empty">这台机器还没有判定过任何 @ 到 agent 的消息。</string>
+    <string name="set_access_bridge_note">这里没有在线灯：桥是外部程序，宿主只有在它来取件时才知道它还活着。上面那句如果停在很久以前，它就已经停了。</string>
+    <string name="set_access_bridge_unreadable">桥跑在宿主电脑上，这一块的节点读数不受影响 —— 要看桥的状态，打开桌面端的这一页。</string>
+    <string name="set_access_causes_title">未解析原因</string>
+    <string name="set_access_cause_unknown">原因 %1$s</string>
+    <string name="set_access_cause_sender_not_permitted">发送者没有执行权</string>
+    <string name="set_access_cause_requested_gone">你点的会话已经不在了</string>
+    <string name="set_access_cause_requested_outside">你点的会话属于另一个项目目录</string>
+    <string name="set_access_cause_no_unbound_session">这个智能体还没有能接活的会话 —— 开一个不带项目目录的会话</string>
+    <string name="set_access_cause_no_session">这个项目目录里没有该智能体可投的会话</string>
+    <string name="set_access_pairing_card">配对</string>
+    <string name="set_access_pairing_trusted">信任的设备</string>
+    <string name="set_access_pairing_trusted_sub">批准设备、收回权限、看整张台账</string>
+    <string name="set_access_paired_count">当前节点里有 %1$d 台已配对</string>
+    <string name="set_access_paired_none">这些节点都还没有配对 —— 与它们之间的帧会被拒</string>
+    <string name="set_access_routing_card">事件路由</string>
+    <string name="set_access_routing_unreadable">路由判定同样在宿主电脑上 —— 要看的话，打开桌面端的这一页。</string>
+    <string name="set_access_routing_empty">自本次启动起，没有事件因为找不到群被拦下。</string>
+    <string name="set_access_routing_lead">自本次启动起，这些原因让事件没能进群：</string>
+    <string name="set_access_routing_hint">一个项目目录同时绑多个群时不会自动挑一个 —— 把多余的解绑，或者从目标群里派单。</string>
+    <string name="set_access_route_ambiguous_group">这个项目目录同时绑了多个群</string>
+    <string name="set_access_route_bound_group_gone">派单时的群已经不在本机</string>
+    <string name="set_access_route_no_conv_bound">这条会话没有绑定任何群</string>
+    <string name="set_access_route_ambiguous_owner">同一会话在两台设备上报了不同的项目目录</string>
+    <string name="set_access_route_bound_to_1to1">这条会话是私聊，不进群</string>
+    <string name="set_access_route_unknown">原因 %1$s</string>
+    <string name="set_access_pairing_open">打开</string>
 </resources>
