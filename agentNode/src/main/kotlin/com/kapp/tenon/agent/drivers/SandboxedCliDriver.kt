@@ -46,7 +46,7 @@ class SandboxedCliDriver(
     override val driverId: String,
     override val displayName: String,
     private val cliPath: String,
-    private val argSpec: (prompt: String) -> List<String>,
+    private val argSpec: (prompt: String, model: String?) -> List<String>,
     private val sandbox: WorktreeSandboxExecutor,
     private val envOverrides: Map<String, String> = emptyMap(),
     private val newSessionId: () -> String = { java.util.UUID.randomUUID().toString() },
@@ -62,7 +62,51 @@ class SandboxedCliDriver(
     },
     /** 断点续跑形态（dsh 有）：重试跳以续跑参数重放，从上一跳断点继续。 */
     private val resumeSpec: CliResumeSpec? = null,
+    /** 本次任务的模型（[withModel] 写入）；沙箱与裸路径必须用同一个值，否则「切了沙箱就变默认模型」。 */
+    private val model: String? = null,
+    /** 判「支持不支持按次选模型」的键；裸路径委托实例 id 带 `-plain`，不能用它去查词表。 */
+    private val modelKey: String = driverId,
 ) : AgentDriver {
+
+    /**
+     * 兼容构造：只关心 prompt 的装配处与测试（模型按追加形态拼）。
+     * 生产装配处该用主构造显式定旗标位置，理由见 [CliSubprocessDriver.argSpec]。
+     */
+    constructor(
+        driverId: String,
+        displayName: String,
+        cliPath: String,
+        argSpec: (prompt: String) -> List<String>,
+        sandbox: WorktreeSandboxExecutor,
+        envOverrides: Map<String, String> = emptyMap(),
+        newSessionId: () -> String = { java.util.UUID.randomUUID().toString() },
+        transientOf: (exitCode: Int, output: String) -> Boolean =
+            CliSubprocessDriver::defaultTransientOf,
+        maxExtraAttempts: Int = CliSubprocessDriver.DEFAULT_MAX_EXTRA_ATTEMPTS,
+        retryBackoff: suspend (attempt: Int) -> Unit = { attempt ->
+            kotlinx.coroutines.delay(
+                if (attempt <= 1) CliSubprocessDriver.DEFAULT_BACKOFF_FIRST_MS
+                else CliSubprocessDriver.DEFAULT_BACKOFF_NEXT_MS,
+            )
+        },
+        resumeSpec: CliResumeSpec? = null,
+        model: String? = null,
+        modelKey: String = driverId,
+    ) : this(
+        driverId = driverId,
+        displayName = displayName,
+        cliPath = cliPath,
+        argSpec = { prompt, m -> argSpec(prompt) + DriverModelFlags.flagsFor(driverId, m) },
+        sandbox = sandbox,
+        envOverrides = envOverrides,
+        newSessionId = newSessionId,
+        transientOf = transientOf,
+        maxExtraAttempts = maxExtraAttempts,
+        retryBackoff = retryBackoff,
+        resumeSpec = resumeSpec,
+        model = model,
+        modelKey = modelKey,
+    )
 
     /** 裸路径的委托对象（同一 CLI 身份、无沙箱）。 */
     private val plain = CliSubprocessDriver(
@@ -76,6 +120,8 @@ class SandboxedCliDriver(
         maxExtraAttempts = maxExtraAttempts,
         retryBackoff = retryBackoff,
         resumeSpec = resumeSpec,
+        model = model,
+        modelKey = modelKey,
     )
 
     /** sessionId → wsPath（会话内的每次任务都从这同一个宿主仓开沙箱）。 */
@@ -118,6 +164,28 @@ class SandboxedCliDriver(
     /** 当前在跑的任务数（入站「停」要不要被消费，看它）。 */
     fun runningCount(): Int = sandbox.runningCount()
 
+    /**
+     * 换模型 = 换一个同驱动实例（沙箱执行器、重试档位、env 注入全部沿用）。
+     *
+     * **必须在 openSession 之前调用**：会话表是实例状态，换实例不会带走已开的会话 ——
+     * 派单链路的顺序是「解析驱动 → withModel → openSession → executeTask」，别反过来。
+     */
+    override fun withModel(model: String?): AgentDriver = SandboxedCliDriver(
+        driverId = driverId,
+        displayName = displayName,
+        cliPath = cliPath,
+        argSpec = argSpec,
+        sandbox = sandbox,
+        envOverrides = envOverrides,
+        newSessionId = newSessionId,
+        transientOf = transientOf,
+        maxExtraAttempts = maxExtraAttempts,
+        retryBackoff = retryBackoff,
+        resumeSpec = resumeSpec,
+        model = model,
+        modelKey = modelKey,
+    )
+
     override suspend fun executeTask(
         sessionId: String,
         prompt: String,
@@ -126,6 +194,12 @@ class SandboxedCliDriver(
         val wsPath = sessions[sessionId]
         if (wsPath == null) {
             onEvent(DriverEvent.Error("unknown session \"$sessionId\" — call openSession first"))
+            return
+        }
+        // 在**分流之前**判模型：空工作区会委托给裸路径，两边各判一次不如在这里判一次
+        // ——「沙箱分支不支持、裸分支静默忽略」是本仓最不该有的那种分叉。
+        DriverModelFlags.unsupportedReason(modelKey, model)?.let { reason ->
+            onEvent(DriverEvent.Error(reason))
             return
         }
         if (wsPath.isBlank()) {
@@ -149,7 +223,7 @@ class SandboxedCliDriver(
             val attemptArgs = if (attempt > 1 && resumeSpec != null && resumedCliSessionId != null) {
                 resumeSpec.args(resumedCliSessionId!!, prompt)
             } else {
-                argSpec(prompt)
+                argSpec(prompt, model)
             }
             val outcome = sandbox.run(
                 taskId = taskId,

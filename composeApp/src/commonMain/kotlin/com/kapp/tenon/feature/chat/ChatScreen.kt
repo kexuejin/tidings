@@ -21,6 +21,7 @@ import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.key
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.saveable.rememberSaveable
@@ -233,7 +234,8 @@ fun ChatScreen(
         return
     }
 
-    val messages = messagesWith(chatSlice, peerId)
+    val flowMessages by (data.messageFlow)?.collectAsState(initial = null) ?: remember { mutableStateOf(null) }
+    val messages = flowMessages ?: messagesWith(chatSlice, peerId)
 
     // 身份解析上下文（冒泡署名 / 头像 / Markdown / 群成员面板 / @ 候选 / agentInvolved
     // 共用这一份事实）。判据只在 `SenderIdentity` 里写一次，这里不再各自 `peer()` 一遍。

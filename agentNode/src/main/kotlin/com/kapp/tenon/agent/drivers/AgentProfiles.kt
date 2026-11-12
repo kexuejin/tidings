@@ -38,9 +38,35 @@ object AgentProfiles {
         Profile("dsh", "deepseek", "DeepSeek Harness", Role.BOTH),
     ).associateBy { it.key }
 
-    fun knownKeys(): Set<String> = known.keys
+    /**
+     * 外部插件共用的 vendor。不能用 pluginId 当 vendor：同一厂商的两个插件 ID
+     * 会被误当成「异厂商」，从而绕过 StageChainGate 的独立审核判据。
+     */
+    const val EXTERNAL_PLUGIN_VENDOR: String = "external-plugin"
 
-    fun profileOf(rawKey: String?): Profile? = rawKey?.let { known[normalizeKey(it)] }
+    /** 动态注册的外部插件或自定义扩展驱动档案（线程安全）。 */
+    private val dynamicProfiles = java.util.concurrent.ConcurrentHashMap<String, Profile>()
+
+    /** 动态注册外部或插件驱动档案。 */
+    fun registerProfile(profile: Profile) {
+        val canonical = DriverKeys.canonicalKey(profile.key) ?: profile.key
+        // 内置档案不可被外部插件覆盖（否则可伪造 displayName/vendor/角色）。
+        if (known.containsKey(canonical)) return
+        dynamicProfiles[canonical] = profile
+    }
+
+    /** 移除动态注册的驱动档案。 */
+    fun unregisterProfile(key: String) {
+        val canonical = DriverKeys.canonicalKey(key) ?: key
+        dynamicProfiles.remove(canonical)
+    }
+
+    fun knownKeys(): Set<String> = known.keys + dynamicProfiles.keys
+
+    fun profileOf(rawKey: String?): Profile? {
+        val norm = normalizeKey(rawKey) ?: return null
+        return dynamicProfiles[norm] ?: known[norm]
+    }
 
     fun vendorOf(rawKey: String?): String? = profileOf(rawKey)?.vendor
 
@@ -54,8 +80,10 @@ object AgentProfiles {
      */
     fun normalizeKey(rawKey: String?): String? {
         val key = DriverKeys.canonicalKey(rawKey) ?: return null
-        if (known.containsKey(key)) return key
-        return DriverKeys.stripCliSuffix(key).takeIf { known.containsKey(it) }
+        if (known.containsKey(key) || dynamicProfiles.containsKey(key)) return key
+        val stripped = DriverKeys.stripCliSuffix(key)
+        if (known.containsKey(stripped) || dynamicProfiles.containsKey(stripped)) return stripped
+        return null
     }
 
     /**
@@ -97,7 +125,7 @@ object AgentProfiles {
     fun crossVendorReviewerNames(workerKey: String?, availableKeys: Set<String>): List<String> {
         val workerVendor = vendorOf(workerKey)
         return availableKeys.mapNotNull { key ->
-            val profile = known[key] ?: return@mapNotNull null
+            val profile = profileOf(key) ?: return@mapNotNull null
             profile.displayName.takeIf { profile.vendor != workerVendor }
         }
     }

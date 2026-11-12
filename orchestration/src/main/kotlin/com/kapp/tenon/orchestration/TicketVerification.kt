@@ -75,7 +75,8 @@ object TicketVerification {
         }
     }
 
-    private const val REPLAY_ITEM = "重放补丁"
+    /** 检查项名对编排器可见：飞行记录筛「真验收项」时要用它，别再抄一份字面量（cjkLiteralGate）。 */
+    const val REPLAY_ITEM = "重放补丁"
     private const val TEST_ITEM = "仓库测试"
     private const val VERIFICATION_ROW = "验收"
 
@@ -85,21 +86,50 @@ object TicketVerification {
     /**
      * 这一单该跑什么命令验收；null = 这个仓没有可识别的测试入口（跳过验收）。
      *
-     * 只认 `package.json` 里的 `scripts.test` —— 这是本仓工单真实的验收方式（weather-relay
-     * 的 `npm test`）。其它生态（gradle/maven/pytest）不猜：猜错会把「跑不起来」变成
-     * 一整轮自愈，代价比不验还大。
+     * 优先级策略（只认标准生态入口，不执行仓库内自声明命令）：
+     * 1. 生态入口自适应探活：
+     *    - Node.js: `package.json` 的 `scripts.test`
+     *    - Gradle: `gradlew`
+     *    - Maven: `mvnw`
+     *    - Python: `pytest.ini` / `pyproject.toml`
+     *    - Rust: `Cargo.toml`
+     *    - Go: `go.mod`
+     * 3. 均未命中时返回 null，验收门优雅跳过，交由沙箱内 Tester 自主结果把关。
      */
     fun testCommandFor(repo: File): List<String>? {
+        // 1. Node.js (package.json)
         val manifest = File(repo, "package.json")
-        if (!manifest.isFile) return null
-        val text = runCatching { manifest.readText() }.getOrNull() ?: return null
-        // 不引 JSON 解析依赖：只判「scripts 里有没有 test」这个粗粒度事实。
-        // 漏判的后果是跳过验收（安全侧），误判会拿错命令去跑（危险侧），所以宁粗不细。
-        val scriptsAt = text.indexOf("\"scripts\"")
-        if (scriptsAt < 0) return null
-        val window = text.substring(scriptsAt, minOf(text.length, scriptsAt + 2_000))
-        if (!window.contains("\"test\"")) return null
-        return listOf("npm", "test", "--silent")
+        if (manifest.isFile) {
+            val text = runCatching { manifest.readText() }.getOrNull()
+            if (text != null) {
+                val scriptsAt = text.indexOf("\"scripts\"")
+                if (scriptsAt >= 0) {
+                    val window = text.substring(scriptsAt, minOf(text.length, scriptsAt + 2_000))
+                    if (window.contains("\"test\"")) {
+                        return listOf("npm", "test", "--silent")
+                    }
+                }
+            }
+        }
+
+        // 2. 多语言生态自适应探活
+        if (File(repo, "gradlew").isFile) {
+            return listOf("./gradlew", "test", "-q")
+        }
+        if (File(repo, "mvnw").isFile) {
+            return listOf("./mvnw", "test", "-q")
+        }
+        if (File(repo, "pytest.ini").isFile || File(repo, "pyproject.toml").isFile) {
+            return listOf("pytest", "-q")
+        }
+        if (File(repo, "Cargo.toml").isFile) {
+            return listOf("cargo", "test", "--quiet")
+        }
+        if (File(repo, "go.mod").isFile) {
+            return listOf("go", "test", "./...")
+        }
+
+        return null
     }
 
     /**
@@ -128,7 +158,7 @@ object TicketVerification {
         if (!repo.isDirectory) return skipped("repo missing: $repoPath")
         val patch = File(patchPath)
         if (!patch.isFile) return skipped("patch missing: $patchPath")
-        val cmd = command ?: testCommandFor(repo) ?: return skipped("no test script in ${repo.name}/package.json")
+        val cmd = command ?: testCommandFor(repo) ?: return skipped("no test script in ${repo.name}")
         val base = runCatching { MergeBaseRef.baseFor(repo) }.getOrNull()
             ?: return skipped("no merge base for ${repo.name}")
         val resolved = git(repo, "rev-parse", "--verify", "--quiet", base).stdout.trim()

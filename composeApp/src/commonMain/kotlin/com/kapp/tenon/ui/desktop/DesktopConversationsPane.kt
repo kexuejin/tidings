@@ -432,7 +432,10 @@ public fun ConversationsPane(
                     VerticalDividerLine()
                     DesktopInspectorPane(onCollapse = { inspectorCollapsed = true }) {
                         val peer = peer(selectedPeerId, nodeSlice, settingsSlice)
-                        if (peer == null) {
+                        // 只响应用户显式选中的会话；不再用「全局第一个 busy 会话」兜底：
+                        // 那会把别的群/别的 agent 的日志挂到当前会话旁（跨会话泄漏）。
+                        val liveSessionId = activeSessionId
+                        if (peer == null && liveSessionId == null) {
                             // 没选中不装空态组件：inspector 是「附加信息」，空着比编一段
                             // 「请选择会话」的填料诚实（首启引导屏已在 pane 外层接管）。
                             Box(Modifier.fillMaxSize())
@@ -441,17 +444,25 @@ public fun ConversationsPane(
                                 Modifier.fillMaxWidth().padding(LocalAppSpacing.current.md10),
                                 verticalArrangement = Arrangement.spacedBy(LocalAppSpacing.current.sm6),
                             ) {
-                                Text(
-                                    peer.nick,
-                                    style = MaterialTheme.typography.titleSmall,
-                                    fontWeight = FontWeight.SemiBold,
-                                    color = MaterialTheme.colorScheme.onSurface,
-                                )
-                                Text(
-                                    peerHeaderLine(peer, now),
-                                    style = MaterialTheme.typography.bodySmall,
-                                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                                )
+                                if (peer != null) {
+                                    Text(
+                                        peer.nick,
+                                        style = MaterialTheme.typography.titleSmall,
+                                        fontWeight = FontWeight.SemiBold,
+                                        color = MaterialTheme.colorScheme.onSurface,
+                                    )
+                                    Text(
+                                        peerHeaderLine(peer, now),
+                                        style = MaterialTheme.typography.bodySmall,
+                                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                    )
+                                }
+                                if (liveSessionId != null) {
+                                    com.kapp.tenon.feature.agents.AgentLiveLogPanel(
+                                        sessionId = liveSessionId,
+                                        modifier = Modifier.padding(top = LocalAppSpacing.current.xs),
+                                    )
+                                }
                             }
                         }
                     }

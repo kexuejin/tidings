@@ -400,7 +400,16 @@ def run_checks(args):
 
 def main():
     args = parse_args()
-    run_checks(args)
+    try:
+        run_checks(args)
+    except R.EnvError as e:
+        # 退出码契约（relay_e2e.py 顶部）：环境/用法问题必须是 2，不许以未捕获
+        # 异常的形式退出 1 被记成功能 FAIL。收敛语义与 R.main_wrapper 同源。
+        print("env-error: %s" % e, file=sys.stderr, flush=True)
+        sys.exit(2)
+    except R.FixtureError as e:
+        print("fixture-error: %s" % e, file=sys.stderr, flush=True)
+        sys.exit(2)
     sys.exit(R.report())
 
 

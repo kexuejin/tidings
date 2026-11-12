@@ -52,7 +52,7 @@
 - **机器回执系统行**：纯客户端精准识别回执动作，转化为居中轻量 `.notice` 胶囊呈现，避免无关消息打乱主交互。
 
 ### 2. 多智能体编排与治理
-- **五大内置 CLI Agent 驱动**：开箱支持 Claude Code、Codex、agy、dsh 与 opencode，通过 `BuiltinPluginSeeder` 自动探测环境凭据与安装状态。
+- **五大内置 CLI Agent 驱动**：开箱支持 Claude Code、Codex、agy、dsh 与 opencode；在位与凭据由 `AgentProfiles` 探测，派单时按任务在沙箱里拉起一次（**不是常驻插件**，所以不存在「装了却一直 OFFLINE」）。
 - **工单责任链与状态驱动**：`StageChain` 统一调度任务生命周期，支持分阶段执行、中间产物传递与失败自愈。
 - **多棒连续审查与限流冷却**：线性多棒交叉审查与自动化纠偏，防抖降温冷却机制避免频繁打扰。
 - **项目目录上下文感知与会话分段**：移动端常驻显示绑定项目目录与 Git 分支，支持切换工程目录并触发会话分段（Session Segmentation），物理隔离上下文并大幅节省 Token。

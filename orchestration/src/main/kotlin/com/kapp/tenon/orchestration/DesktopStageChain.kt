@@ -307,6 +307,9 @@ object DesktopStageChain {
             prompt = prompt,
             wsPath = repoPath,
             requestedSessionId = null,
+            // 本棒的模型随棒走（来自执行档 `models.first`）：不传就等于「执行配置里
+            // 选了模型但链上跑的是默认」，正是本仓最贵的那类静默失效。
+            model = stage.model,
             onArtifact = { path, name, _, _, _ -> if (name == "patch.diff") patchPath = path },
             // 只有增量文本是「它说的话」。其余事件的三元组都不是发言：finished 的
             // summary 是 finishReason（正常收工就是 "stop"），tool.started 的 body 是

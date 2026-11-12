@@ -111,6 +111,60 @@ class RelayStateSlicesTest {
         controller.stop()
     }
 
+    @Test
+    fun messageFlowOfEmitsOnlyWhenTargetConversationChanges() = runTest {
+        val controller = controller(backgroundScope)
+        val convAMessages = mutableListOf<List<com.kapp.tenon.domain.model.MessageUi>>()
+        backgroundScope.launch {
+            controller.messageFlowOf("conv-a").collect { convAMessages += it }
+        }
+        runCurrent()
+        assertEquals(1, convAMessages.size, "初值空列表发射一次")
+
+        // 写入 conv-b 的消息，conv-a 的 flow 不发射
+        controller._state.update {
+            it.copy(
+                messages = mapOf(
+                    "conv-b" to listOf(
+                        com.kapp.tenon.domain.model.MessageUi(
+                            id = "m1",
+                            peerId = "conv-b",
+                            mine = false,
+                            text = "hello b",
+                            at = 1000L,
+                            delivery = com.kapp.tenon.domain.model.DeliveryState.Sent,
+                        )
+                    )
+                )
+            )
+        }
+        runCurrent()
+        assertEquals(1, convAMessages.size, "conv-b 变更不触发 conv-a 的独立流发射")
+
+        // 写入 conv-a 的消息，conv-a 的 flow 正常发射
+        controller._state.update {
+            it.copy(
+                messages = it.messages + (
+                    "conv-a" to listOf(
+                        com.kapp.tenon.domain.model.MessageUi(
+                            id = "m2",
+                            peerId = "conv-a",
+                            mine = true,
+                            text = "hello a",
+                            at = 2000L,
+                            delivery = com.kapp.tenon.domain.model.DeliveryState.Sent,
+                        )
+                    )
+                )
+            )
+        }
+        runCurrent()
+        assertEquals(2, convAMessages.size, "conv-a 变更触发独立流发射")
+        assertEquals("m2", convAMessages.last().single().id)
+
+        controller.stop()
+    }
+
     private fun <T> watch(scope: CoroutineScope, flow: StateFlow<T>, sink: MutableList<T>) {
         scope.launch { flow.collect { sink += it } }
     }

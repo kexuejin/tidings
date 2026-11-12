@@ -42,6 +42,15 @@ HOST_URL = os.environ.get("TENON_HOST_URL", "http://127.0.0.1:8788").rstrip("/")
 SERVER_NAME = "tenon"
 SERVER_VERSION = "1.0.0"
 
+# 只读工具的强边界：必须显式注入工作区根；没有就 fail-closed，绝不拿进程 cwd 猜。
+WORKSPACE_ROOT = os.environ.get("TENON_MCP_WORKSPACE", "").strip()
+
+# 这些名字一旦可读，等于把宿主凭据/密钥交给读不可信仓库的模型。
+FORBIDDEN_PATH_PARTS = (
+    "/.tenon/", "/.ssh/", "/.aws/", "/.gnupg/", "/.config/", "/Library/Keychains/",
+    "plugin-token", "credentials", "id_rsa", "id_ed25519", ".env",
+)
+
 TOOLS = [
     {
         "name": "tenon_fetch_node_capabilities",
@@ -106,6 +115,46 @@ TOOLS = [
                 "timeoutMs": {"type": "integer", "description": "Wait budget in ms, 1000..300000, default 180000"},
             },
             "required": ["question", "options"],
+        },
+    },
+    {
+        "name": "tenon_fs_read",
+        "description": "Read file contents within the current project/workspace. Read-only with strict path traversal checks.",
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "path": {"type": "string", "description": "Relative or absolute file path"},
+                "maxBytes": {"type": "integer", "description": "Max bytes to read (default 32768)"},
+            },
+            "required": ["path"],
+        },
+    },
+    {
+        "name": "tenon_git_diff",
+        "description": "Get git diff for the current workspace. Read-only.",
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "cached": {"type": "boolean", "description": "Whether to get staged diff (--cached)"},
+            },
+            "required": [],
+        },
+    },
+    {
+        "name": "tenon_terminal_exec",
+        "description": "Execute a terminal command with host-mediated safety and exit code monitoring. Subject to approval.",
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "command": {
+                    "type": "array",
+                    "items": {"type": "string"},
+                    "description": "Command and arguments, e.g. ['git', 'status']",
+                },
+                "workdir": {"type": "string", "description": "Optional working directory relative to workspace"},
+                "timeoutSec": {"type": "integer", "description": "Command timeout in seconds (default 60)"},
+            },
+            "required": ["command"],
         },
     },
 ]
@@ -195,11 +244,151 @@ def tool_ask_question(args: dict) -> dict:
     return {"content": [{"type": "text", "text": json.dumps(payload, ensure_ascii=False)}]}
 
 
+def _confined_path(path: str) -> str | None:
+    """把请求路径解析到工作区根内；越界/没有根/命中敏感名字一律 None。"""
+    if not WORKSPACE_ROOT or not isinstance(path, str) or not path.strip() or "\x00" in path:
+        return None
+    root = os.path.realpath(WORKSPACE_ROOT)
+    raw = path.strip()
+    candidate = raw if os.path.isabs(raw) else os.path.join(root, raw)
+    resolved = os.path.realpath(candidate)
+    try:
+        inside = os.path.commonpath([root, resolved]) == root
+    except ValueError:
+        return None
+    if not inside:
+        return None
+    probe = "/" + resolved.replace(os.sep, "/").strip("/") + "/"
+    if any(part in probe for part in FORBIDDEN_PATH_PARTS):
+        return None
+    return resolved
+
+
+def tool_fs_read(args: dict) -> dict:
+    try:
+        max_bytes = int(args.get("maxBytes", 32768))
+    except (TypeError, ValueError):
+        max_bytes = 32768
+    max_bytes = max(1, min(max_bytes, 65536))
+    resolved = _confined_path(args.get("path", ""))
+    if resolved is None:
+        return {"isError": True, "content": [{"type": "text", "text": "path rejected: outside workspace or forbidden"}]}
+    if not os.path.isfile(resolved):
+        return {"isError": True, "content": [{"type": "text", "text": f"file not found: {args.get('path', '')}"}]}
+    try:
+        with open(resolved, "r", encoding="utf-8", errors="replace") as fh:
+            data = fh.read(max_bytes)
+        return {"content": [{"type": "text", "text": data}]}
+    except OSError as exc:
+        return {"isError": True, "content": [{"type": "text", "text": f"read error: {exc}"}]}
+
+
+def tool_git_diff(args: dict) -> dict:
+    import subprocess
+    root = os.path.realpath(WORKSPACE_ROOT) if WORKSPACE_ROOT else ""
+    if not root or not os.path.isdir(root):
+        return {"isError": True, "content": [{"type": "text", "text": "workspace root is not set"}]}
+    cmd = ["git", "-C", root, "diff", "--no-ext-diff", "--no-textconv"]
+    if args.get("cached"):
+        cmd.append("--cached")
+    try:
+        res = subprocess.run(cmd, capture_output=True, text=True, timeout=10.0)
+        if res.returncode != 0:
+            return {"isError": True, "content": [{"type": "text", "text": "git diff failed: " + (res.stderr or "").strip()[:4000]}]}
+        output = res.stdout
+        if len(output) > 65536:
+            output = output[:65536] + "\n... [TRUNCATED]"
+        return {"content": [{"type": "text", "text": output}]}
+    except Exception as exc:
+        return {"isError": True, "content": [{"type": "text", "text": f"git diff failed: {exc}"}]}
+
+
+def _approval_decision(resp: dict) -> tuple[bool, str]:
+    """解析 tool_request_approval 的返回；只有明确 allow 才算批准（fail-closed）。"""
+    if not isinstance(resp, dict) or resp.get("isError"):
+        return False, "approval unavailable or errored"
+    for item in resp.get("content") or []:
+        text = item.get("text") if isinstance(item, dict) else None
+        if not isinstance(text, str):
+            continue
+        try:
+            body = json.loads(text)
+        except (TypeError, ValueError):
+            continue
+        if not isinstance(body, dict):
+            continue
+        decision = str(body.get("decision") or body.get("status") or "").strip().lower()
+        if decision in ("allow", "allowed", "approved"):
+            return True, decision
+        return False, str(body.get("reason") or decision or "denied")
+    return False, "approval response malformed (fail-closed)"
+
+
+def tool_terminal_exec(args: dict) -> dict:
+    import subprocess
+    # 宿主中介执行必须有明确工作区；没有 root 时绝不在 MCP 进程 cwd 里执行。
+    if not WORKSPACE_ROOT or not os.path.isdir(WORKSPACE_ROOT):
+        return {"isError": True, "content": [{"type": "text", "text": "workspace root is not configured; terminal exec refused"}]}
+    cmd = args.get("command")
+    if not cmd or not isinstance(cmd, list) or not all(isinstance(c, str) for c in cmd):
+        return {"isError": True, "content": [{"type": "text", "text": "command must be a non-empty string array"}]}
+    root = os.path.realpath(WORKSPACE_ROOT)
+    workdir = args.get("workdir")
+    target_dir = root
+    if workdir:
+        confined = _confined_path(workdir)
+        if not confined or not os.path.isdir(confined):
+            return {"isError": True, "content": [{"type": "text", "text": f"workdir rejected or not a directory: {workdir}"}]}
+        target_dir = confined
+
+    approval_resp = tool_request_approval({
+        "tool": " ".join(cmd),
+        "summary": "terminal/exec: " + " ".join(cmd[:5]),
+        "riskLevel": "high",
+    })
+    allowed, reason = _approval_decision(approval_resp)
+    if not allowed:
+        return {
+            "isError": True,
+            "content": [{"type": "text", "text": "terminal execution denied: " + reason}],
+        }
+
+    try:
+        timeout_sec = min(max(int(args.get("timeoutSec", 60)), 1), 300)
+    except (TypeError, ValueError):
+        timeout_sec = 60
+    try:
+        proc = subprocess.run(
+            cmd,
+            cwd=target_dir,
+            capture_output=True,
+            text=True,
+            timeout=timeout_sec,
+        )
+        return {
+            "content": [{
+                "type": "text",
+                "text": json.dumps({
+                    "exitCode": proc.returncode,
+                    "stdout": (proc.stdout or "")[:32768],
+                    "stderr": (proc.stderr or "")[:16384],
+                }, ensure_ascii=False),
+            }],
+        }
+    except subprocess.TimeoutExpired:
+        return {"isError": True, "content": [{"type": "text", "text": f"command timed out after {timeout_sec}s"}]}
+    except Exception as exc:
+        return {"isError": True, "content": [{"type": "text", "text": f"execution failed: {exc}"}]}
+
+
 HANDLERS = {
     "tenon_fetch_node_capabilities": tool_fetch_capabilities,
     "tenon_request_human_approval": tool_request_approval,
     "tenon_send_group_card": tool_send_card,
     "tenon_ask_question": tool_ask_question,
+    "tenon_fs_read": tool_fs_read,
+    "tenon_git_diff": tool_git_diff,
+    "tenon_terminal_exec": tool_terminal_exec,
 }
 
 
@@ -227,7 +416,11 @@ def dispatch(msg: dict) -> dict | None:
         handler = HANDLERS.get(params.get("name", ""))
         if handler is None:
             return {"jsonrpc": "2.0", "id": msg_id, "error": {"code": -32602, "message": "unknown tool"}}
-        result = handler(params.get("arguments", {}) or {})
+        try:
+            result = handler(params.get("arguments", {}) or {})
+        except Exception as exc:
+            # 工具参数异常不能打崩 stdio 服务：回成工具错误，保持 fail-closed。
+            result = {"isError": True, "content": [{"type": "text", "text": f"tool error: {exc}"}]}
         return {"jsonrpc": "2.0", "id": msg_id, "result": result}
     if msg_id is not None:
         return {"jsonrpc": "2.0", "id": msg_id, "error": {"code": -32601, "message": "method not found: " + method}}

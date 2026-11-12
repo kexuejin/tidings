@@ -385,3 +385,31 @@ fun cardActionUiOf(card: AgentCardUi, pendingActions: Set<String>, actionId: Str
     }
     return CardActionUi(CardActionLock.Editable)
 }
+
+
+// ── Checks 汇总（诚实版）──────────────────────────────────────────────
+/**
+ * 验收检查的汇总事实。**任何非 Done 项都不许显示“全部通过”**：
+ * 线上 SKIP 借 Pending 承载（StageChain/ReviewerAudit 的既定约定），
+ * 把 Pending 说成 passed 会诱导用户在“没验”时点合并。
+ */
+data class AgentCardChecksSummary(
+    val total: Int,
+    val passed: Int,
+    val failed: Int,
+    val blocked: Int,
+    val incomplete: Int,
+)
+
+fun agentCardChecksSummaryOf(checks: List<AgentCardCheck>): AgentCardChecksSummary {
+    val passed = checks.count { it.status == AgentCardStepStatus.Done }
+    val failed = checks.count { it.status == AgentCardStepStatus.Failed }
+    val blocked = checks.count { it.status == AgentCardStepStatus.Blocked }
+    return AgentCardChecksSummary(
+        total = checks.size,
+        passed = passed,
+        failed = failed,
+        blocked = blocked,
+        incomplete = (checks.size - passed - failed - blocked).coerceAtLeast(0),
+    )
+}

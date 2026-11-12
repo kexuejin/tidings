@@ -134,6 +134,11 @@ public interface DesktopPaneActions {
     fun loadOlderMessages(convId: String) = Unit
 
     /**
+     * 单会话消息独立订阅流。默认返回 null，使用全量消息投影。
+     */
+    fun messageFlowOf(convId: String): kotlinx.coroutines.flow.Flow<List<MessageUi>>? = null
+
+    /**
      * 发起 PK 小游戏（猜拳 / 骰子）。
      */
     fun sendPk(convId: String, game: String, value: String)

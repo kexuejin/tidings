@@ -38,7 +38,7 @@ class DesktopTeamExecutionPort(
                 dirId = p.dirId,
                 leaderAgentId = p.leaderAgentId,
                 members = p.members.map {
-                    TeamExecutionMemberUi(it.agentId, it.kind, it.driverKey, it.models)
+                    TeamExecutionMemberUi(it.agentId, it.kind, it.driverKey, it.models, it.customPrompt)
                 },
             )
         }
@@ -67,7 +67,7 @@ class DesktopTeamExecutionPort(
         leaderAgentId = profile.leaderAgentId,
         updatedAt = 0,
         members = profile.members.map {
-            TeamExecutionMemberSpec(it.agentId, it.kind, it.driverKey, it.models)
+            TeamExecutionMemberSpec(it.agentId, it.kind, it.driverKey, it.models, it.customPrompt)
         },
     )
 }

@@ -76,7 +76,7 @@ import com.kapp.tenon.generated.resources.workspace_board_discovering_hint
 import com.kapp.tenon.generated.resources.workspace_board_starting
 import com.kapp.tenon.generated.resources.workspace_board_starting_hint
 import com.kapp.tenon.generated.resources.workspace_board_subtitle
-import com.kapp.tenon.generated.resources.workspace_create_group_title
+import com.kapp.tenon.generated.resources.workspace_board_action_create
 import com.kapp.tenon.ui.ContentWidths
 import com.kapp.tenon.ui.components.AppButton
 import com.kapp.tenon.ui.components.AppButtonSize
@@ -184,7 +184,7 @@ internal fun WorkspaceBoardTitleBar(
             onCreateWorkspaceGroup?.let { createWs ->
                 // 原型顶栏这颗是 `.btn sm pri`（relay.html:6314）：顶栏密排位置。
                 AppButton(
-                    text = stringResource(Res.string.workspace_create_group_title),
+                    text = stringResource(Res.string.workspace_board_action_create),
                     onClick = createWs,
                     size = AppButtonSize.Small,
                     leadingIcon = Res.drawable.ic_plus,

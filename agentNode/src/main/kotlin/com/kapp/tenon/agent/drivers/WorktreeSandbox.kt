@@ -211,6 +211,8 @@ class WorktreeSandboxExecutor(
                 // 把产物写进宿主仓库根（实测：proof.txt 落在 repo 根，worktree 里空）。
                 // 先设、后 env.forEach，显式注入的 PWD 仍然赢。
                 pb.environment()["PWD"] = worktree.absolutePath
+                // 宿主中介 MCP 工具的工作区边界：显式传沙箱 worktree，绝不靠进程 cwd 猜。
+                pb.environment()["TENON_MCP_WORKSPACE"] = worktree.absolutePath
                 env.forEach { (k, v) -> pb.environment()[k] = v }
                 // 同 CliSubprocessDriver：GUI 启动的宿主只有最小 PATH，脚本型 CLI
                 // （`#!/usr/bin/env node`）会找不到解释器 → 127。env 显式给了 PATH 就不动它。
@@ -1008,6 +1010,7 @@ class WorktreeSandboxExecutor(
             }
             return digest.digest().joinToString("") { "%02x".format(it) }
         }
+
     }
 }
 

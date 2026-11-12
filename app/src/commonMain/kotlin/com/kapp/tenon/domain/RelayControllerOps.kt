@@ -66,6 +66,7 @@ internal fun RelayController.handleAppendMessage(message: MessageUi, incoming: B
             core.unread[message.peerId] = (core.unread[message.peerId] ?: 0) + 1
         }
     }
+    messagesCtl.touchActiveConversation(message.peerId)
     messagesCtl.handleApplyPendingRecall(message)
     refreshPeers()
     handlePersistThreads()
@@ -94,6 +95,9 @@ internal fun RelayController.replaceMessage(peerId: String, previousId: String, 
         if (index < 0) return@withLock false
         thread[index] = message
         true
+    }
+    if (found) {
+        messagesCtl.touchActiveConversation(peerId)
     }
     if (!found) {
         // **静默失败是这条链最贵的一种沉默。**

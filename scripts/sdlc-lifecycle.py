@@ -212,14 +212,27 @@ def git_state(ws):
     return (head.strip() if rc == 0 else ""), set(porcelain.splitlines())
 
 
+def test_summary_num(text, key):
+    """node --test 汇总行的两种形态都要认，结论不许依赖机器上的 Node 版本：
+
+    - TAP 老格式：`# pass 90`（TAP 报告器）
+    - spec 报告器（Node 20+ 默认）：`ℹ pass 90`
+    两种都没匹配到才返回 None —— 解析不出来一律当失败，不猜。
+    """
+    m = re.search(r"^#\s*" + key + r"\s+(\d+)", text, re.M)
+    if m:
+        return int(m.group(1))
+    m = re.search(r"^ℹ\s+" + key + r"\s+(\d+)", text, re.M)
+    return int(m.group(1)) if m else None
+
+
 def npm_test(ws, timeout=180):
-    """解析 node --test 的 TAP 汇总行；解析不出来一律当失败，不猜。"""
+    """解析 node --test 的汇总行（TAP 与 spec 两种格式，见 test_summary_num）。"""
     rc, out, err = run_cmd(["npm", "test"], cwd=ws, timeout=timeout)
     text = out + "\n" + err
     def num(key):
-        m = re.search(r"^#\s*" + key + r"\s+(\d+)", text, re.M)
-        return int(m.group(1)) if m else None
-    dur = re.search(r"^#\s*duration_ms\s+([\d.]+)", text, re.M)
+        return test_summary_num(text, key)
+    dur = re.search(r"^[#ℹ]\s*duration_ms\s+([\d.]+)", text, re.M)
     return {
         "rc": rc,
         "tests": num("tests"),
@@ -242,8 +255,7 @@ def injected_test_verdict(ws, rel=INJECTED_TEST):
     text = out + "\n" + err
 
     def num(key):
-        m = re.search(r"^#\s*" + key + r"\s+(\d+)", text, re.M)
-        return int(m.group(1)) if m else None
+        return test_summary_num(text, key)
 
     return {"rc": rc, "pass": num("pass"), "fail": num("fail"),
             "skipped": num("skipped"), "tail": text.strip().splitlines()[-6:]}

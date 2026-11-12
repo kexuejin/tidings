@@ -972,7 +972,12 @@ internal class RelayControllerAgentInvokeComponent(private val host: AgentDomain
      * 以 agent 署名发一条拟人化简短发言（P0b：交棒发言等，不带 agentState 状态条）。
      * 本机落库与线上同帧同 id —— 与 [broadcastAgentState] / [broadcastBoardCard] 同一纪律。
      */
-    internal suspend fun broadcastAgentSpeech(groupId: String, agentId: String, text: String) {
+    internal suspend fun broadcastAgentSpeech(
+        groupId: String,
+        agentId: String,
+        text: String,
+        replyTo: String? = null,
+    ) {
         if (text.isBlank()) {
             noteUninstalledTextBridgeSuppression("agentSpeech:" + agentId)
             return
@@ -992,6 +997,7 @@ internal class RelayControllerAgentInvokeComponent(private val host: AgentDomain
                 at = nowMillis(),
                 delivery = null,
                 senderId = sender,
+                replyTo = replyTo,
             ),
             incoming = true,
         )
@@ -1004,6 +1010,50 @@ internal class RelayControllerAgentInvokeComponent(private val host: AgentDomain
                 members = meta.members,
                 senderId = sender,
                 envelopeId = envelopeId,
+                replyTo = replyTo,
+            )
+        }
+    }
+
+    /**
+     * 1:1 私聊会话中以指定 Agent 身份发言（Q&A 答复等）。
+     * 本机落库 mine=false + senderId，线上走 sendDirectText 署名 senderId，两端一致。
+     */
+    internal suspend fun sendDirectAgentSpeech(
+        convId: String,
+        agentId: String,
+        text: String,
+        replyTo: String? = null,
+    ) {
+        if (text.isBlank()) {
+            noteUninstalledTextBridgeSuppression("agentSpeech:" + agentId)
+            return
+        }
+        val st = host.state.value
+        val peer = convId.takeIf { !it.startsWith("agent:") && !it.startsWith("ws-") && !ConvId.isGroup(it) } ?: return
+        val sender = AgentSenderId.of(st.selfNodeId, agentId)
+        val envelopeId = newId()
+        host.handleAppendMessage(
+            MessageUi(
+                id = envelopeId,
+                peerId = peer,
+                mine = false,
+                text = text,
+                at = nowMillis(),
+                delivery = null,
+                senderId = sender,
+                replyTo = replyTo,
+            ),
+            incoming = true,
+        )
+        val rt = host.runtime ?: return
+        runCatching {
+            rt.sendDirectText(
+                peerId = peer,
+                text = text,
+                envelopeId = envelopeId,
+                senderId = sender,
+                replyTo = replyTo,
             )
         }
     }

@@ -48,6 +48,7 @@ data class TeamExecutionMemberUi(
     val kind: String,
     val driverKey: String,
     val models: List<String> = emptyList(),
+    val customPrompt: String? = null,
 ) {
     val isWorker: Boolean get() = kind == TeamExecutionKindsUi.WORKER
 }
@@ -85,7 +86,29 @@ fun initialExecutionProfileUi(
     val dirId = port.groupPointerDirId(group.groupId) ?: return null
     val existing = port.profileOf(group.groupId, dirId, seat.agentId)
     val declared = seat.teamMembers
-    if (declared.isEmpty()) return null
+    // **单兵席位也要有执行层**（不变量 5）：没有 teamMembers 时从前直接 null ⇒ 单兵
+    // 根本没有「底座/模型」这一层，换底座只能换席位本身（`agentId` 是身份）⇒ 编制与
+    // 目录一起丢。这里给单兵生成一条 worker：`agentId` 仍是席位 slug（身份不随底座变），
+    // `driverKey` 留空等机主显式指派 —— **不猜**（猜错比空着更贵，空着会被保存校验拦下）。
+    if (declared.isEmpty()) {
+        val prior = existing?.members?.firstOrNull {
+            it.agentId.trim().lowercase() == seat.agentId.trim().lowercase()
+        }
+        return TeamExecutionProfileUi(
+            groupId = group.groupId,
+            dirId = dirId,
+            leaderAgentId = seat.agentId,
+            members = listOf(
+                TeamExecutionMemberUi(
+                    agentId = seat.agentId,
+                    kind = TeamExecutionKindsUi.WORKER,
+                    driverKey = prior?.driverKey.orEmpty(),
+                    models = prior?.models ?: emptyList(),
+                    customPrompt = prior?.customPrompt,
+                ),
+            ),
+        )
+    }
     val members = declared.mapIndexed { index, member ->
         val prior = existing?.members?.firstOrNull {
             it.agentId.trim().lowercase() == member.agentId.trim().lowercase()
@@ -120,6 +143,13 @@ fun validateExecutionProfileUi(
     profile.members.forEach { m ->
         if (m.driverKey !in driverCatalog) {
             reasons.add("member " + m.agentId + ": driver not installed (" + m.driverKey + ")")
+        }
+        // 结构前置：本期只消费 `models.first`（没有轮换的消费路径），多值存下来就是
+        // 死数据。**驱动能力校验不在这里**——那份词表在 `DriverModelFlags`
+        // （agent-contract），UI 层再抄一份必然两处漂移；宿主侧
+        // `TeamExecutionValidation` 会在真正落盘前按它拒一次。
+        if (m.models.size > 1) {
+            reasons.add("member " + m.agentId + ": only one model per member is supported (" + m.models.size + ")")
         }
     }
     val declared = declaredMemberIds.map { it.trim().lowercase() }.toSet()

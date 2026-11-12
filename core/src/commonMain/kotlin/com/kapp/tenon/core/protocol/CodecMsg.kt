@@ -187,14 +187,23 @@ object CodecMsg {
      * null 时**逐字节与旧载荷相同**（不写 `senderId` 键）：老端不认这个键，
      * 而 golden 断言（`CodecTest`）钉的正是「不传就没有」。
      */
-    fun textPayload(text: String, resend: Boolean? = null, senderId: String? = null): JsonElement {
+    fun textPayload(
+        text: String,
+        resend: Boolean? = null,
+        senderId: String? = null,
+        replyTo: String? = null,
+    ): JsonElement {
         val base = wireJson.encodeToJsonElement(
             TextMsgPayload.serializer(),
             TextMsgPayload(kind = MsgKinds.TEXT, text = text, resend = resend),
         )
-        if (senderId == null) return base
+        if (senderId == null && replyTo == null) return base
         val obj = base as? JsonObject ?: return base
-        return JsonObject(obj + ("senderId" to JsonPrimitive(senderId)))
+        val extra = buildMap {
+            if (senderId != null) put("senderId", JsonPrimitive(senderId))
+            if (replyTo != null) put("replyTo", JsonPrimitive(replyTo))
+        }
+        return JsonObject(obj + extra)
     }
 
     /**
@@ -227,11 +236,21 @@ object CodecMsg {
      *   接收端用 `AgentSenderId.parse` 从这一格取出宿主，才知道把 `op=action` 发回哪台机器。
      *   不带 ⇒ 对方的按钮点了无处可发（真机 A22 现场）
      */
-    fun textPayloadWithCard(text: String, card: JsonObject, senderId: String? = null): JsonObject = JsonObject(
+    fun textPayloadWithCard(
+        text: String,
+        card: JsonObject,
+        senderId: String? = null,
+        agentSessionId: String? = null,
+        agentSessionTitle: String? = null,
+        replyTo: String? = null,
+    ): JsonObject = JsonObject(
         buildMap {
             put("kind", JsonPrimitive(MsgKinds.TEXT))
             put("text", JsonPrimitive(text))
             if (senderId != null) put("senderId", JsonPrimitive(senderId))
+            if (agentSessionId != null) put("agentSessionId", JsonPrimitive(agentSessionId))
+            if (agentSessionTitle != null) put("agentSessionTitle", JsonPrimitive(agentSessionTitle))
+            if (replyTo != null) put("replyTo", JsonPrimitive(replyTo))
             put("card", card)
         },
     )

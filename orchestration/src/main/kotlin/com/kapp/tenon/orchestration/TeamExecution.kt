@@ -109,7 +109,17 @@ object TeamPlanCompiler {
 
     sealed interface Compiled {
         /** 单棒（无 reviewer，或命中 reviewer 的纯审查任务）：调用方做在位检查后 dispatchSingleWorker。 */
-        data class Single(val agentKey: String, val instruction: String, val reviewOnly: Boolean) : Compiled
+        data class Single(
+            val agentKey: String,
+            val instruction: String,
+            val reviewOnly: Boolean,
+            /**
+             * 本棒的模型（执行档 `models.first`）：null = 跟随驱动默认。
+             * 调用方必须原样传到 `executeCliTask(model = …)` —— 只在这里携带、
+             * 下游不消费，就是又造一份「存了不生效」的死数据。
+             */
+            val model: String? = null,
+        ) : Compiled
 
         /** 多棒责任链：交给 `delegateByPlan`（gate → 链执行器）。 */
         data class Plan(val plan: DelegationPlan) : Compiled
@@ -151,8 +161,9 @@ object TeamPlanCompiler {
             }
             return Compiled.Single(
                 agentKey = hitSpec.driverKey,
-                instruction = reviewInstruction(goal, hitMember.role),
+                instruction = reviewInstruction(goal, hitMember.role, hitSpec.customPrompt),
                 reviewOnly = true,
+                model = hitSpec.models.firstOrNull(),
             )
         }
 
@@ -166,19 +177,28 @@ object TeamPlanCompiler {
             }
             return Compiled.Single(
                 agentKey = worker.driverKey,
-                instruction = goal,
+                instruction = workerInstruction(goal, worker.customPrompt),
                 reviewOnly = false,
+                model = worker.models.firstOrNull(),
             )
         }
         val stages = buildList {
-            add(ChainStage(role = workerStageRole(hitMember), agentKey = worker.driverKey, instruction = goal))
+            add(
+                ChainStage(
+                    role = workerStageRole(hitMember),
+                    agentKey = worker.driverKey,
+                    instruction = workerInstruction(goal, worker.customPrompt),
+                    model = worker.models.firstOrNull(),
+                ),
+            )
             reviewers.forEach { reviewer ->
                 val declaredRole = declaredRoleById[reviewer.agentId.trim().lowercase()]
                 add(
                     ChainStage(
                         role = declaredRole?.ifBlank { null } ?: "reviewer",
                         agentKey = reviewer.driverKey,
-                        instruction = reviewInstruction(goal, declaredRole),
+                        instruction = reviewInstruction(goal, declaredRole, reviewer.customPrompt),
+                        model = reviewer.models.firstOrNull(),
                     ),
                 )
             }
@@ -206,11 +226,32 @@ object TeamPlanCompiler {
      * 审查棒指令：聚焦"对当前工作区/分支的产出做审计"，中文角色标签进提示
      * （"你是审查/测试角色"）；结论行（`VERDICT: PASS|REJECT`）由
      * `DesktopStageChain` 对 i>0 的棒自动追加 —— 编译层**不重复**。
+     *
+     * 优先采纳组员人设自定义提示词 [customPrompt]；未定义时回退至系统默认审查模版。
      */
-    internal fun reviewInstruction(goal: String, roleLabel: String?): String {
+    internal fun reviewInstruction(goal: String, roleLabel: String?, customPrompt: String? = null): String {
         val role = roleLabel?.trim().orEmpty()
         val roleLine = if (role.isEmpty()) "" else "[role: $role] "
-        return roleLine + "Review the current workspace against the goal: " + goal.take(80) +
-            ". Give findings item by item, a problem list, and an explicit final verdict line; do not rewrite the implementation."
+        val custom = customPrompt?.trim().orEmpty()
+        val body = if (custom.isNotEmpty()) {
+            custom + "\nGoal: " + goal.take(80) +
+                ". Give findings item by item, a problem list, and an explicit final verdict line; do not rewrite the implementation."
+        } else {
+            "Review the current workspace against the goal: " + goal.take(80) +
+                ". Give findings item by item, a problem list, and an explicit final verdict line; do not rewrite the implementation."
+        }
+        return roleLine + body
+    }
+
+    /**
+     * 干活棒指令：优先采纳组员自定义人设提示词 [customPrompt] 并拼接目标。
+     */
+    internal fun workerInstruction(goal: String, customPrompt: String? = null): String {
+        val custom = customPrompt?.trim().orEmpty()
+        return if (custom.isNotEmpty()) {
+            custom + "\nGoal: " + goal
+        } else {
+            goal
+        }
     }
 }

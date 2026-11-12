@@ -47,6 +47,14 @@ internal class AgentEventForwarder(
     private val currentRuntime: () -> NodeRuntime?,
     /** 当前挂着的会话台账；未挂为 null。同上。 */
     private val registryRef: () -> AgentSessionRegistry?,
+    /**
+     * **会话 → 会话键**的归属查询（落盘台账，派单侧写）。未挂 / 没有绑定为 null。
+     *
+     * 默认值让「没有台账的装配」退回三键反查：测试与 :cli 不必为了构造一个转发器
+     * 而先准备一份落盘文件。真实宿主在 `DesktopExtension` 里接到
+     * `ControlPlane.conversationOfSession` 上 —— 那条路径是**唯一权威答案**。
+     */
+    private val conversationOf: (String) -> String? = { null },
 ) {
     /**
      * 已处理过的投递键（`(nodeId, sessionId, cursor)`），LRU 2000 条。
@@ -188,7 +196,8 @@ internal class AgentEventForwarder(
             finalWsTitle,
         )
 
-        // 没有绑定群就**不转发**（沉默不猜）。
+        // 没有绑定群就**不转发**（沉默不猜）。原因用规范 §3 不变量 1 的词汇
+        // `no-conv-bound`：台账没记这条会话，三键又没能反查出**唯一**一个群。
         //
         // 这里原来有一段「兜底匹配」：群的名称/描述里带某个仓库名（写死过
         // "deepseek-harness"），或全局只有一个群，就把**任何**工作区的事件塞进去。
@@ -197,7 +206,7 @@ internal class AgentEventForwarder(
         // assistant.text 都出现在用户眼前。宁可这条事件不显示，也不要把甲仓库的活
         // 干到乙仓库的群里。finalWsPath / finalWsId / finalWsTitle 仍是上面匹配用的键。
         if (targetGroups.isEmpty()) {
-            logEventRoute(rec.eventType, rec.sessionId, rec.cursor, rec.body?.length ?: 0, "no-group-bound")
+            logEventRoute(rec.eventType, rec.sessionId, rec.cursor, rec.body?.length ?: 0, "no-conv-bound")
         }
 
         logEventRoute(rec.eventType, rec.sessionId, rec.cursor, rec.body?.length ?: 0, "dispatch groups=" + targetGroups.size)
@@ -356,19 +365,50 @@ internal class AgentEventForwarder(
     /**
      * 事件/会话 → 该投的群。**唯一真源**：实时路由与两个补发都走它。
      *
-     * 三个键（wsPath / wsId / wsTitle）任一命中即算绑定 —— 此前实时用三键、两个补发只用
-     * wsPath ⇒ **靠 wsTitle 绑定的群实时能投、补发静默投不到**（同一条规则两份实现，迟早漂）。
+     * ## 三层判定，逐层收紧
      *
-     * fail-closed：wsPath/wsId/wsTitle 全空、或同一个 sessionId 在不同设备上报出了**不同的
-     * 工作区归属**（跨设备撞 sessionId）时返回空 —— 宁可不投，也不要把甲设备的活投进乙设备的群。
+     * 1. **会话台账**（[conversationOf]）：派单侧在 `executeCliTask` 里写下
+     *    `sessionId → convId`。命中就只投那一个群 —— 这是**根除串群**的那一层：
+     *    在 A 群派的单永远只回 A 群，哪怕同一个目录还绑着 B 群。
+     *    台账指向的群已经不在（退群 / 对方重建）⇒ 阻断，不猜别的群；
+     *    台账指向私聊（键没有 `group:` 前缀）⇒ 不是群的路由问题，直接放弃。
+     * 2. **工作区三键反查**（wsPath / wsId / wsTitle），**只接受唯一解**：
+     *    命中 0 个 ⇒ 没绑定；命中 >1 个 ⇒ 歧义，阻断并记 `ambiguous-group`。
+     *    这一层是给「没经过我们派单的会话」（用户在 DSH 里自己开的）兜底用的。
+     *    多个群绑同一个目录时**不再复制成多份** —— 那正是串群缺陷的形态。
+     * 3. 都没有 ⇒ 不投。
+     *
+     * 三键的三条口径：任一命中即算绑定（此前实时用三键、两个补发只用 wsPath ⇒
+     * 靠 wsTitle 绑定的群实时能投、补发静默投不到）；全空时从 state 推断；
+     * 同一个 sessionId 在不同设备上**报出不同工作区归属**（跨设备撞 sessionId）时阻断。
      */
-    private fun groupsForSession(
+    internal fun groupsForSession(
         state: com.kapp.tenon.domain.RelayUiState,
         sessionId: String,
         wsPath: String?,
         wsId: String?,
         wsTitle: String?,
     ): List<com.kapp.tenon.core.protocol.GroupMeta> {
+        // ---- 第 1 层：台账 ----
+        val boundConv = conversationOf(sessionId)?.trim().orEmpty()
+        if (boundConv.isNotEmpty()) {
+            val boundGroupId = com.kapp.tenon.core.protocol.ConvId.groupIdOf(boundConv)
+            if (boundGroupId == null) {
+                // 台账说这条会话属于某个私聊。事件照常落本地台账，只是不进任何群。
+                logEventRoute("session", sessionId, 0L, 0, "bound-to-1to1")
+                return emptyList()
+            }
+            val group = state.settings.groups.firstOrNull { it.groupId == boundGroupId }
+            if (group == null) {
+                // 派过单、但那个群已经不在本机名单里（退群/重建）。**不回落第 2 层**：
+                // 回落等于把「A 群的活」按目录猜进 B 群 —— 正是要根除的那条。
+                logEventRoute("session", sessionId, 0L, 0, "bound-group-gone")
+                return emptyList()
+            }
+            return listOf(group)
+        }
+
+        // ---- 第 2 层：工作区三键，唯一解 ----
         if (wsPath.isNullOrBlank() && wsId.isNullOrBlank() && wsTitle.isNullOrBlank()) return emptyList()
         val owners = state.agentSessions.values
             .filter { it.sessionId == sessionId }
@@ -385,13 +425,18 @@ internal class AgentEventForwarder(
         val id = wsId?.trim().orEmpty().ifEmpty { owners.firstOrNull()?.second.orEmpty() }
         val title = wsTitle?.trim().orEmpty().ifEmpty { owners.firstOrNull()?.third.orEmpty() }
         if (path.isEmpty() && id.isEmpty() && title.isEmpty()) return emptyList()
-        return state.settings.groups.filter { group ->
+        val matched = state.settings.groups.filter { group ->
             val desc = group.description?.trim().orEmpty()
             (path.isNotEmpty() && desc.contains(path)) ||
                 (id.isNotEmpty() && (desc.contains(id) || group.name.contains(id))) ||
                 (title.isNotEmpty() && group.name.contains(title)) ||
                 (path.isNotEmpty() && group.name.contains(path.substringAfterLast('/')))
         }
+        if (matched.size > 1) {
+            logEventRoute("session", sessionId, 0L, 0, "ambiguous-group hits=" + matched.size)
+            return emptyList()
+        }
+        return matched
     }
 
     /**

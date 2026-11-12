@@ -155,6 +155,7 @@ public fun ChatPane(
                 unreadOnEntry = unreadOnEntry,
                 cacheDir = null,
                 initialStagedFiles = initialStagedFiles,
+                messageFlow = selectedPeerId?.let { id -> remember(id) { controller.messageFlowOf(id) } },
             ),
             actions = ChatScreenActions(
                 onSend = controller::sendToConversation,
@@ -162,7 +163,9 @@ public fun ChatPane(
                 onSendWithIntent = { targetId, text, replyTo, intent ->
                     controller.sendToConversation(targetId, text, replyTo, intent)
                 },
-                onOpenAgentConsole = onSelect,
+                onOpenAgentConsole = { sid ->
+                    if (sid.isNotBlank()) onSelectAgentSession?.invoke(sid)
+                },
                 onSelectAgentSession = onSelectAgentSession,
                 onDismissBanner = controller::dismissBanner,
                 onAttachFile = controller::pickAndSendFiles,

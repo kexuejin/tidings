@@ -4,6 +4,7 @@ package com.kapp.tenon.agent.drivers
 
 import java.io.File
 import java.nio.file.Files
+import com.kapp.tenon.agent.drivers.CliProviderEnv
 import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertFalse
@@ -83,12 +84,17 @@ class RealCliChainEvidenceTest {
     @Test
     fun twoRoundsAccumulateThroughTheRollingBase() = runBlocking {
         val cli = CliDiscovery.resolveClaudeCli()
-        if (!enabled || cli == null) {
+        // 凭证也是外部资源：沙箱把 HOME 换成隔离目录，登录态看不见 —— 不注入
+        // ANTHROPIC_*（见本文件头部的运行命令），真 CLI 装是装了、一跑就没凭证，
+        // 只会在沙箱深处失败而不是如实 skip。门必须把这两件事都问到。
+        val credentials = CliProviderEnv.forClaude()
+        if (!enabled || cli == null || credentials.isEmpty()) {
             // 用 assumption 而不是「return 掉算通过」：后者在报告里是一个绿点，
             // 而这一轮什么都没验 —— 那就是「为没发生的活报完成」。
             // assumption 让它如实显示为 skipped，并带上跳过原因。
             throw org.junit.AssumptionViolatedException(
-                "需要 TENON_REAL_CLI=1 且本机能找到 claude CLI（enabled=$enabled, cli=$cli）",
+                "需要 TENON_REAL_CLI=1、本机能找到 claude CLI 且宿主环境带 ANTHROPIC_* 凭证" +
+                    "（enabled=$enabled, cli=$cli, credentialKeys=${credentials.keys})",
             )
         }
         val root = tempDir()
@@ -98,6 +104,11 @@ class RealCliChainEvidenceTest {
             resolveClaude = { cli },
             resolveCodex = { null },
             resolveAgy = { null },
+            // opencode/dsh 的 resolver 不覆盖的话，装了这两个 CLI 的机器会让注册列表
+            // 长出第二个元素，下面的 .single() 直接崩 —— 门开了才暴露的机器依赖缺陷
+            // （AGENTS.md §2.7：测试结论不许依赖这台机器）。这里只要合成的那一根 claude。
+            resolveOpencode = { null },
+            resolveDsh = { null },
             hint = { println(it) },
             sandbox = WorktreeSandboxExecutor(sandboxRoot = root),
         ).single()

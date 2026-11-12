@@ -135,6 +135,25 @@ interface AgentDriver {
     suspend fun listCapabilities(): List<DriverCapability>
 
     /**
+     * 返回「同一个驱动、本次任务改用 [model]」的实例。
+     *
+     * ## 默认 this 不是懒惰，是事实
+     *
+     * 不是每个驱动都能按次选模型：dsh 的模型写在 profile 的 `agent-default-model` 插件配置里，
+     * 命令行没有旗标；插件驱动用哪个模型由对方进程决定。契约层不能假设「都有」，所以默认
+     * 原样返回。
+     *
+     * ## 但「不支持」不许静默
+     *
+     * 拿到非空 [model] 却只能忽略的驱动，必须在 [executeTask] 里报 [DriverEvent.Error]
+     * （诊断文案取 [DriverModelFlags.unsupportedReason]），**不能跑默认模型还报成功** ——
+     * 那是「配了没生效、两边都不报错」，本仓最贵的一类缺陷。
+     *
+     * @param model 空 / null = 不指定，沿用驱动自己的默认。
+     */
+    fun withModel(model: String?): AgentDriver = this
+
+    /**
      * 开启（或接续）一个会话。返回的 [SessionHandle.sessionId] 是后续三个成员的寻址键。
      * 不支持会话的驱动应当大声失败，而不是编一个空的句柄出来。
      */

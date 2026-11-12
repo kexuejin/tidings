@@ -688,7 +688,7 @@ class WorktreeSandboxExecutorTest {
     @Test
     fun sandboxCredentialEntriesCoverEveryBuiltinCliAndNoSensitiveDir() {
         val entries = WorktreeSandboxExecutor.SANDBOX_CREDENTIAL_ENTRIES
-        // 内置五驱动（BuiltinPluginSeeder）：claude / codex / agy / dsh / opencode。
+        // 内置五驱动（`DriverKeys` / `AgentProfiles`，不是插件）：claude / codex / agy / dsh / opencode。
         // claude 的登录态在 ~/.claude（+ ~/.claude.json），codex 在 ~/.codex，
         // agy 在 ~/.agy，dsh 的 profiles 在 ~/.dsh；opencode 走 provider env（OPENCODE_API_KEY），
         // 不依赖 $HOME 凭据目录 —— 这一条要跟 BuiltinPluginSeeder 的种子清单对齐。

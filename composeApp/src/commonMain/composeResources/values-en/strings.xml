@@ -1498,6 +1498,7 @@
 
     <!-- Workspace Group & Permission Governance -->
     <string name="workspace_create_group_title">Create Project Collaboration Group</string>
+    <string name="workspace_board_action_create">New Project Group</string>
     <string name="workspace_create_group_quick_title">Project Directories on This Device</string>
     <string name="workspace_create_group_dedup_hint">1:1 Path Binding Dedup</string>
     <string name="workspace_create_group_in_group">Already in group</string>
@@ -1669,6 +1670,9 @@ Collaboration channel connected; project directory events and progress will sync
          Per-check time comes straight from the plugin string (card_check_time only frames it);
          revision chips are quick phrases for the user — picking one fills the input for editing. -->
     <string name="card_check_time_format">took %1$s</string>
+    <string name="card_checks_summary_passed">✓ All %1$d checks passed</string>
+    <string name="card_checks_summary_incomplete">● %1$d of %2$d checks not run</string>
+    <string name="card_checks_summary_failed">⚠ %1$d of %2$d checks failed</string>
     <string name="card_check_drawer_open">Show log</string>
     <string name="card_check_drawer_close">Hide log</string>
     <string name="card_diff_expand_code">Show code</string>
@@ -1773,6 +1777,9 @@ Collaboration channel connected; project directory events and progress will sync
     <string name="team_exec_model_default">Default (inherited)</string>
     <string name="team_exec_readonly_note">Execution is managed by the seat host: %1$s</string>
     <string name="team_exec_member_note">%1$s (team)</string>
+    <string name="team_exec_prompt_badge">Persona</string>
+    <string name="team_exec_custom_prompt_placeholder">Custom persona &amp; focus prompt for this member (optional)</string>
+    <string name="team_exec_model_placeholder">Model id (e.g. claude-opus-4-1); blank = driver default</string>
     <string name="team_roster_max_members">Up to %1$d</string>
     <string name="team_roster_remove_member">Remove</string>
     <string name="team_roster_conflict_warning">Name conflicts with @%1$s, please choose another</string>

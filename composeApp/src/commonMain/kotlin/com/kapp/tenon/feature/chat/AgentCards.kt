@@ -37,6 +37,7 @@ import org.jetbrains.compose.resources.painterResource
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -74,6 +75,9 @@ import com.kapp.tenon.generated.resources.ic_warn
 import com.kapp.tenon.generated.resources.ic_close
 import com.kapp.tenon.generated.resources.ic_chev
 import com.kapp.tenon.generated.resources.ic_chevd
+import com.kapp.tenon.generated.resources.card_checks_summary_failed
+import com.kapp.tenon.generated.resources.card_checks_summary_incomplete
+import com.kapp.tenon.generated.resources.card_checks_summary_passed
 import com.kapp.tenon.generated.resources.card_check_drawer_close
 import com.kapp.tenon.generated.resources.card_check_drawer_open
 import com.kapp.tenon.generated.resources.card_check_time_format
@@ -193,6 +197,14 @@ fun AgentCardBubble(
      * 都没有才退 8 位短 id。给 null 就是没有这个壳的口径，不给假名字。
      */
     decidedByCtx: SenderIdentityContext? = null,
+    /**
+     * 该卡绑定的 Agent 会话 ID；点击工牌穿透进入会话详情。
+     */
+    sessionId: String? = null,
+    /**
+     * 工牌点击回调（点击头像/名称进入会话详情）。
+     */
+    onAgentBadgeClick: ((sessionId: String) -> Unit)? = null,
 ) {
     val sp = LocalAppSpacing.current
     val plan = cardRenderPlanOf(
@@ -217,7 +229,7 @@ fun AgentCardBubble(
         ) {
             // 数字员工工牌（升级计划 Phase 2 要点 1）：avatar + 角色名 + worktree 分支
             // 芯片 + 呼吸微动效点。bot 缺席 = 老插件没给，整块不画（不是每个卡都有承办人）。
-            card.bot?.let { CardHeaderRow(it) }
+            card.bot?.let { CardHeaderRow(bot = it, sessionId = sessionId, onAgentBadgeClick = onAgentBadgeClick) }
             // 头行：上栏元信息（type 徽标 + 状态胶囊 + rev 游标）+ 独立主标题。
             if (card.type != null || card.title != null || card.rev > 0 || plan.showExpiredTag) {
                 Column(verticalArrangement = Arrangement.spacedBy(sp.xs)) {
@@ -268,7 +280,7 @@ fun AgentCardBubble(
             // 观察结论 / 日志抽屉），老卡继续走 StepList。两者都画会把同一批步骤说两遍 ——
             // 解析侧 checks 本就由 items 回退而来，有 checks 时 steps 是它的影子。
             if (card.checks.isNotEmpty() && card.steps.isEmpty()) {
-                CardChecksColumn(card.checks)
+                CardChecksColumn(card.checks, card.cardId)
             } else if (card.steps.isNotEmpty()) {
                 CardStepListColumn(card.steps)
             }
@@ -369,8 +381,19 @@ fun AgentCardBubble(
  * 「正在发生」，不属于「已经发生」。
  */
 @Composable
-internal fun CardHeaderRow(bot: AgentCardBot, modifier: Modifier = Modifier) {
+internal fun CardHeaderRow(
+    bot: AgentCardBot,
+    sessionId: String? = null,
+    onAgentBadgeClick: ((sessionId: String) -> Unit)? = null,
+    modifier: Modifier = Modifier,
+) {
     val sp = LocalAppSpacing.current
+    val canClick = onAgentBadgeClick != null && !sessionId.isNullOrBlank()
+    val clickModifier = if (canClick) {
+        Modifier.clickable { onAgentBadgeClick(sessionId) }
+    } else {
+        Modifier
+    }
     Row(
         verticalAlignment = Alignment.CenterVertically,
         horizontalArrangement = Arrangement.spacedBy(sp.sm),
@@ -381,7 +404,8 @@ internal fun CardHeaderRow(bot: AgentCardBot, modifier: Modifier = Modifier) {
         Box(
             modifier = Modifier
                 .size(com.kapp.tenon.ui.theme.IconSizes.Title)
-                .background(MaterialTheme.accents.agentAccentContainer, MaterialTheme.shapes.extraSmall),
+                .background(MaterialTheme.accents.agentAccentContainer, MaterialTheme.shapes.extraSmall)
+                .then(clickModifier),
             contentAlignment = Alignment.Center,
         ) {
             Text(
@@ -399,7 +423,7 @@ internal fun CardHeaderRow(bot: AgentCardBot, modifier: Modifier = Modifier) {
             color = MaterialTheme.colorScheme.onSurface,
             maxLines = 1,
             overflow = TextOverflow.Ellipsis,
-            modifier = Modifier.weight(1f, fill = false),
+            modifier = Modifier.weight(1f, fill = false).then(clickModifier),
         )
         CardBreathDot(bdot = bot.bdot)
         bot.branch?.let { branch ->
@@ -470,14 +494,75 @@ private fun CardBreathDot(bdot: String?, modifier: Modifier = Modifier) {
  * 既有纪律一致。
  */
 @Composable
-private fun CardChecksColumn(checks: List<AgentCardCheck>) {
+private fun CardChecksColumn(checks: List<AgentCardCheck>, cardId: String) {
+    if (checks.isEmpty()) return
     val sp = LocalAppSpacing.current
+    val summary = agentCardChecksSummaryOf(checks)
+    val hasFailures = summary.failed + summary.blocked > 0
+    val hasIncomplete = summary.incomplete > 0
+    val shouldCollapseByDefault = checks.size > 2 && !hasFailures
+    // key 用 cardId：rev 更新（心跳/失败追加）不会把用户刚展开的抽屉收起。
+    var expanded by remember(cardId) { mutableStateOf(!shouldCollapseByDefault) }
+    if (hasFailures) {
+        LaunchedEffect(hasFailures) { expanded = true }
+    }
+
     Column(
         verticalArrangement = Arrangement.spacedBy(sp.sm6),
         modifier = Modifier.padding(vertical = sp.xxs),
     ) {
-        checks.forEach { check ->
-            CardCheckRow(check)
+        if (checks.size > 2) {
+            Surface(
+                shape = MaterialTheme.shapes.small,
+                color = when {
+                    hasFailures -> MaterialTheme.colorScheme.errorContainer.copy(alpha = 0.4f)
+                    hasIncomplete -> SurfaceTiers.Raised
+                    else -> SurfaceTiers.Raised
+                },
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .clickable { expanded = !expanded },
+            ) {
+                Row(
+                    modifier = Modifier.padding(horizontal = sp.md10, vertical = sp.sm6),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                ) {
+                    Text(
+                        text = when {
+                            hasFailures -> stringResource(
+                                Res.string.card_checks_summary_failed,
+                                summary.failed + summary.blocked,
+                                summary.total,
+                            )
+                            hasIncomplete -> stringResource(
+                                Res.string.card_checks_summary_incomplete,
+                                summary.incomplete,
+                                summary.total,
+                            )
+                            else -> stringResource(Res.string.card_checks_summary_passed, summary.total)
+                        },
+                        style = MaterialTheme.typography.labelSmall,
+                        fontWeight = FontWeight.SemiBold,
+                        color = when {
+                            hasFailures -> MaterialTheme.colorScheme.error
+                            hasIncomplete -> MaterialTheme.colorScheme.onSurfaceVariant
+                            else -> MaterialTheme.accents.online
+                        },
+                    )
+                    Icon(
+                        painter = painterResource(if (expanded) Res.drawable.ic_chevd else Res.drawable.ic_chev),
+                        contentDescription = null,
+                        tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                        modifier = Modifier.size(sp.sm),
+                    )
+                }
+            }
+        }
+        if (expanded || checks.size <= 2) {
+            checks.forEach { check ->
+                CardCheckRow(check)
+            }
         }
     }
 }

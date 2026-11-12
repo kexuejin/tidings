@@ -74,3 +74,13 @@ private fun startScreenViewProbeIfRequested(
 fun MainViewController() = ComposeUIViewController {
     RelayApp(controller = controller)
 }
+
+/** iOS 应用切入后台通知：暂停 mDNS 活跃扫描，退火能耗。 */
+fun notifyAppBackgrounded() {
+    controller.onAppBackgrounded()
+}
+
+/** iOS 应用回到前台通知：恢复 mDNS 活跃扫描。 */
+fun notifyAppForegrounded() {
+    controller.onAppForegrounded()
+}

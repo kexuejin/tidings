@@ -60,6 +60,25 @@ class DesktopInspectorContentGuardTest {
         )
     }
 
+    /** 会话视图 inspector 只允许用户显式选中的会话，不能再用「全局第一个 busy」兜底。 */
+    @Test
+    fun conversationsInspectorOnlyMountsExplicitlySelectedLog() {
+        val convPane = live("composeApp/src/commonMain/kotlin/com/kapp/tenon/ui/desktop/DesktopConversationsPane.kt")
+        assertTrue(
+            convPane.contains("AgentLiveLogPanel("),
+            "会话视图 inspector 没有挂 AgentLiveLogPanel（§6.3）",
+        )
+        assertFalse(
+            convPane.contains("state == \"busy\""),
+            "第三栏不许用「全局 busy 会话」兜底：会把别的群的日志挂到当前会话旁",
+        )
+        val msgList = live("composeApp/src/commonMain/kotlin/com/kapp/tenon/feature/chat/ChatMessageList.kt")
+        assertFalse(
+            msgList.contains("?: card.cardId"),
+            "工牌点击不能用 cardId 伪造 sessionId（点击会打到不存在的会话）",
+        )
+    }
+
     /** T-G3：实时输出面板挂在 Agents inspector（不落库的那一半可见性）。 */
     @Test
     fun liveLogPanelIsMountedAndEphemeralEventsAreFiltered() {

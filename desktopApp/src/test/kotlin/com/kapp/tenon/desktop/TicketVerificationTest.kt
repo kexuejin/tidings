@@ -81,6 +81,22 @@ class TicketVerificationTest {
     }
 
     @Test
+    fun theTestCommandSupportsPolyglotDetection() {
+        val repo = tempDir("verify-polyglot")
+
+        // 1. gradlew
+        File(repo, "gradlew").writeText("#!/bin/sh")
+        assertEquals(listOf("./gradlew", "test", "-q"), TicketVerification.testCommandFor(repo))
+        File(repo, "gradlew").delete()
+
+        // 2. pytest.ini
+        File(repo, "pytest.ini").writeText("[pytest]\n")
+        assertEquals(listOf("pytest", "-q"), TicketVerification.testCommandFor(repo))
+        File(repo, "pytest.ini").delete()
+
+    }
+
+    @Test
     fun aGreenSuitePassesAndARedOneIsStoppedWithItsOutput() {
         val repo = tempDir("verify-repo")
         makeRepo(repo)

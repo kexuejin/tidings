@@ -3,6 +3,7 @@
 package com.kapp.tenon.orchestration
 
 import com.kapp.tenon.agent.drivers.AgentProfiles
+import com.kapp.tenon.agent.drivers.DriverModelFlags
 import com.kapp.tenon.core.protocol.Limits
 import java.io.File
 import java.util.concurrent.locks.ReentrantReadWriteLock
@@ -23,14 +24,16 @@ import kotlinx.serialization.json.put
  * 团队执行档的一条成员：编制里的组员 → **宿主本地的执行配置**（团队执行方案 §3.2）。
  *
  * `agentId` 对应线格式里组员的稳定 slug（**编辑保全契约**：声明改名不重算）；
- * `driverKey` 是 [AgentProfiles] 的档案键；`models` 空表 = 继承驱动默认
- * （P1/P2 才消费，P0-A 只存储与校验）。
+ * `driverKey` 是 [AgentProfiles] 的档案键；`models` 首位生效、空表 = 继承驱动默认。
+ * 只消费首位是**有意的**（见 [TeamExecutionValidation]）：没有轮换消费路径就把多值存下来，
+ * 等于让「配了三个模型」变成一句空话。
  */
 data class TeamExecutionMemberSpec(
     val agentId: String,
     val kind: String,
     val driverKey: String,
     val models: List<String> = emptyList(),
+    val customPrompt: String? = null,
 ) {
     val isWorker: Boolean get() = kind == TeamExecutionKinds.WORKER
 }
@@ -104,6 +107,24 @@ object TeamExecutionValidation {
             if (m.models.size > Limits.AGENT_MODELS_MAX) {
                 reasons.add("member " + m.agentId + ": too many models (" + m.models.size + ")")
             }
+            // **存下来就必须生效**：本期只消费 `models.first`（见 `TeamPlanCompiler`
+            // → `ChainStage.model` → `executeCliTask(model=)`）。多值没有轮换/回退的
+            // 消费路径，允许它就等于再造一批「配置里有、跑起来不用」的死数据。
+            if (m.models.size > 1) {
+                reasons.add(
+                    "member " + m.agentId + ": only one model per member is supported " +
+                        "(got " + m.models.size + ")",
+                )
+            }
+            // 驱动能力事实：不支持按次指定模型的驱动（dsh 的模型写在 profile 配置里，
+            // 命令行没有旗标）填了模型必须当场拒 —— 否则用户以为选了模型，实际跑默认。
+            if (m.models.any { it.isNotBlank() } && !DriverModelFlags.supports(m.driverKey)) {
+                reasons.add(
+                    "member " + m.agentId + ": driver '" + m.driverKey +
+                        "' cannot take a model per task (" +
+                        (DriverModelFlags.unsupportedReason(m.driverKey, m.models.first()) ?: "no model flag") + ")",
+                )
+            }
             m.models.forEach { model ->
                 if (model.isBlank() || model.length > Limits.AGENT_MODEL_ID) {
                     reasons.add("member " + m.agentId + ": illegal model id '" + model.take(70) + "'")
@@ -145,6 +166,9 @@ object TeamExecutionValidation {
  * 文件缺失 = 没配过（正常）；损坏 / schemaVersion 未知 / 结构非法 = **整份不可信**
  * （按空处理 + `RelayLog` 留诊断）；成员悬空（声明里删了人）= 读时判过期（§3.5）。
  */
+/** 自定义人设提示词上限（字符）。 */
+private const val MAX_CUSTOM_PROMPT_CHARS = 2000
+
 class TeamExecutionStore(
     private val file: File,
     private val now: () -> Long = System::currentTimeMillis,
@@ -282,7 +306,10 @@ class TeamExecutionStore(
                 val driverKey = o["driverKey"]?.jsonPrimitive?.contentOrNull ?: return null
                 if (AgentProfiles.normalizeKey(driverKey) == null) return null
                 val models = o["models"]?.jsonArray?.map { it.jsonPrimitive.content } ?: emptyList()
-                TeamExecutionMemberSpec(agentId, kind, driverKey, models)
+                // 人设是提示词前置，必须有硬上限：否则一次粘贴就能把任务书挤爆。
+                val customPrompt = o["customPrompt"]?.jsonPrimitive?.contentOrNull
+                    ?.trim()?.take(MAX_CUSTOM_PROMPT_CHARS)?.takeIf { it.isNotEmpty() }
+                TeamExecutionMemberSpec(agentId, kind, driverKey, models, customPrompt)
             }
         }.getOrElse { return null }
         if (members == null || members.isEmpty()) return null
@@ -306,6 +333,7 @@ class TeamExecutionStore(
                                     put("kind", m.kind)
                                     put("driverKey", m.driverKey)
                                     put("models", buildJsonArray { m.models.forEach { add(kotlinx.serialization.json.JsonPrimitive(it)) } })
+                                    m.customPrompt?.take(MAX_CUSTOM_PROMPT_CHARS)?.let { put("customPrompt", it) }
                                 })
                             }
                         })

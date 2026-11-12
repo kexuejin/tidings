@@ -75,6 +75,42 @@ class TenonMcpServerSmokeTest {
     }
 
     @Test
+    fun fsReadFailsClosedWithoutAnExplicitWorkspaceRoot() = runBlocking {
+        withContext(Dispatchers.IO) {
+            withTimeout(60_000) {
+                val replies = runServer(
+                    listOf(
+                        """{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2024-11-05"}}""",
+                        """{"jsonrpc":"2.0","id":2,"method":"tools/call","params":{"name":"tenon_fs_read","arguments":{"path":"/etc/passwd"}}}""",
+                    ),
+                )
+                assertTrue(
+                    replies.last().contains("isError") && replies.last().contains("path rejected"),
+                    "没有显式 TENON_MCP_WORKSPACE 时 fs_read 必须 fail-closed：${replies.last()}",
+                )
+            }
+        }
+    }
+
+    @Test
+    fun terminalExecFailsClosedWithoutWorkspaceRoot() = runBlocking {
+        withContext(Dispatchers.IO) {
+            withTimeout(60_000) {
+                val replies = runServer(
+                    listOf(
+                        """{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2024-11-05"}}""",
+                        """{"jsonrpc":"2.0","id":2,"method":"tools/call","params":{"name":"tenon_terminal_exec","arguments":{"command":["echo","should-not-run"]}}}""",
+                    ),
+                )
+                assertTrue(
+                    replies.last().contains("isError") && replies.last().contains("workspace root is not configured"),
+                    "没有 TENON_MCP_WORKSPACE 时 terminal_exec 必须拒绝执行：${replies.last()}",
+                )
+            }
+        }
+    }
+
+    @Test
     fun unknownToolAnswersJsonRpcError() = runBlocking {
         withContext(Dispatchers.IO) {
             withTimeout(60_000) {

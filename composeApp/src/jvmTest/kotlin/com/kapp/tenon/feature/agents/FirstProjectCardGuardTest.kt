@@ -232,6 +232,46 @@ class FirstProjectCardGuardTest {
         }
     }
 
+    /**
+     * 点「聊天」**直接进 1:1**，不许在路径上拦一张建群弹窗。
+     *
+     * 规范不变量 2：建群是另一件事，它的入口是顶栏「+」与新手卡那两条独立触发
+     * （`onCreateWorkspaceGroup` / `onBindFirstProject`），与「我要跟这个 Agent 说话」无关。
+     *
+     * 正向证据与负向断言同批：先证明**取到了** `onOpenChat` 那段（含跳到会话的调用），
+     * 否则「里面没有 groupPromptFor」在任何空源码上都成立 —— 空集假绿。
+     */
+    @Test
+    fun openingAChatNeverBlocksOnTheGroupPrompt() {
+        val cases = listOf(
+            "手机" to live(phoneRootPath),
+            "桌面" to live(desktopRootPath),
+        )
+        for ((label, src) in cases) {
+            val block = openChatBlock(src)
+            assertTrue(
+                block.contains("openConversation(") || block.contains("openWorkspaceChat("),
+                label + "：没取到 onOpenChat 里进会话那一段（空集假绿的前置证据）",
+            )
+            assertFalse(
+                block.contains("groupPromptFor"),
+                label + "：onOpenChat 又把建群弹窗当前置拦截了 —— 点聊天应该直接说话",
+            )
+            assertFalse(
+                block.contains("groupCreatePromptFor"),
+                label + "：onOpenChat 又把建群弹窗当前置拦截了 —— 点聊天应该直接说话",
+            )
+        }
+    }
+
+    /** `onOpenChat` 到下一个回调参数之间的源码（两个壳的下一参都是 `onLoadWorkspaceSessions`）。 */
+    private fun openChatBlock(src: String): String {
+        val start = src.indexOf("onOpenChat = {")
+        if (start < 0) return ""
+        val end = src.indexOf("onLoadWorkspaceSessions", start)
+        return if (end > start) src.substring(start, end) else src.substring(start)
+    }
+
     @Test
     fun guardIsNotFooledByCommentsOrEmptySources() {
         val zh = GuardSourceScan.read(zhPath)

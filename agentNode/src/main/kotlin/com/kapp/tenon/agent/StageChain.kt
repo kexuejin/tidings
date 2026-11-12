@@ -61,6 +61,13 @@ data class ChainStage(
      * 连续多根 true 的棒由 [StageChainRunner] 并行分发，非隔离棒维持顺序依赖链。
      */
     val requiresIsolation: Boolean = false,
+    /**
+     * 本棒用哪个**模型**（执行档 `models.first`）：null = 跟随驱动自己的默认。
+     *
+     * 与 [requiresIsolation] 同款：**调度属性**，不是传输协议字段 —— 不碰帧白名单，
+     * 也不进卡 JSON；老调用与老卡缺省即 null，零影响。
+     */
+    val model: String? = null,
 )
 
 /** 一棒的起点事实：上一棒停在哪、它说了什么、产物指针在哪。 */
@@ -155,6 +162,8 @@ data class ChainProgress(
      * 由发射方算好，渲染端只负责展示。null = 不标（终态卡/无起始时刻的卡不冒充）。
      */
     val elapsedSec: Long? = null,
+    /** 该工单绑定的 Agent 会话 ID，供工牌点击直接穿透到 Agent 控制台。 */
+    val sessionId: String? = null,
 )
 
 /** 合流卡上的一条审计结论（与手机端 checks[] 解析契约同形）。 */
@@ -330,6 +339,10 @@ object StageChain {
     fun cardOf(progress: ChainProgress): JsonObject = buildJsonObject {
         put("cardId", "chain-" + progress.chainId)
         put("rev", progress.rev)
+        progress.sessionId?.takeIf { it.isNotBlank() }?.let {
+            put("sessionId", it)
+            put("agentSessionId", it)
+        }
         put("type", "task-board")
         // **把状态写进卡里**，不让客户端去反推。反推只能看「有没有某个动作 / 进度到没到
         // 100」—— 于是「原型待选」被推成「待合并」、「已合并」推成什么都没有。

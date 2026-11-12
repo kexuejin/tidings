@@ -85,6 +85,16 @@ interface MessageStore {
      */
     fun loadOlder(convId: String, beforeSeq: Long, limit: Int): List<MessageUi> = emptyList()
 
+    /**
+     * 按消息 id 查一条（跨窗口）。路由判据不能用内存窗口当「消息存在性」：
+     * 窗口 50 条之后，引用旧消息的回复会静默失效。默认实现回退到全量读，
+     * SQLite 实现可覆盖为单行查询。
+     */
+    fun findMessageById(id: String): MessageUi? =
+        id.takeIf { it.isNotBlank() }?.let { wanted ->
+            load().values.asSequence().flatten().firstOrNull { it.id == wanted }
+        }
+
 
     /**
      * 读回全部会话摘要。默认空实现 —— 整份覆盖型存储（内存/iOS JSON）没有这张表，
@@ -180,13 +190,15 @@ interface MessageStore {
 
     companion object {
         /**
-         * 启动时每个会话读进内存的窗口大小。
+         * 启动时每个会话读进内存的窗口大小（§7.5）。
          *
-         * 200 的依据：真机最大会话 6161 条、其余会话都在 300 条以内。200 条足够覆盖
-         * 「打开就被看到的最近几屏」，同时把常驻消息对象从 6656 条压到约 700 条。
-         * 更早的历史由游标（`selectMessagesBefore`）按需翻，不参与启动。
+         * 50 是**产品裁决值**；冷启动收益尚未做真机测量，不要把它写成已证明的结论。
+         * 更早历史通过游标按需上翻；活跃会话 LRU 仍未实现。
          */
-        const val MESSAGE_PAGE_SIZE: Int = 200
+        const val MESSAGE_PAGE_SIZE: Int = 50
+
+        /** 向上翻页的页大小：与启动窗口分开，避免「收窄首屏」连带把翻页粒度也改小。 */
+        const val OLDER_PAGE_SIZE: Int = 200
 
         /**
          * 落盘用的 JSON 配置。

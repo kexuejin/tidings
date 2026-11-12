@@ -210,6 +210,16 @@ class MainActivity : ComponentActivity() {
         handleDeepLink(intent)
     }
 
+    override fun onStop() {
+        super.onStop()
+        (application as? RelayApplication)?.controller?.onAppBackgrounded()
+    }
+
+    override fun onStart() {
+        super.onStart()
+        (application as? RelayApplication)?.controller?.onAppForegrounded()
+    }
+
     override fun onDestroy() {
         super.onDestroy()
         runCatching { unregisterReceiver(qrInjectionReceiver) }

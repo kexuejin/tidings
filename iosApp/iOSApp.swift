@@ -4,6 +4,8 @@ import Foundation
 
 @main
 struct RelayApp: App {
+    @Environment(\.scenePhase) private var scenePhase
+
     /// TLS 自检入口（task-26 ①）：**只按启动参数触发**，不动正常 UI、不加可见按钮。
     ///
     ///   xcrun simctl launch <device> <bundle-id> --relay-tls-selftest
@@ -39,6 +41,16 @@ struct RelayApp: App {
             // 不写底色），由 `SystemBarsInsetGuardTest` 一起守住。
             ComposeAppView()
                 .ignoresSafeArea()
+        }
+        .onChange(of: scenePhase) { newPhase in
+            switch newPhase {
+            case .background:
+                MainViewControllerKt.notifyAppBackgrounded()
+            case .active:
+                MainViewControllerKt.notifyAppForegrounded()
+            default:
+                break
+            }
         }
     }
 }

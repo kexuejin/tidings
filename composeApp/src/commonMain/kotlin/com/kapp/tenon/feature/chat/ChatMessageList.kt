@@ -320,6 +320,10 @@ internal fun ChatMessageList(
                                     // 会话里已经有一份时钟（屏幕协助卡在用同一个）：
                                     // 过期子态跟着它走，组件自己不读表 —— 可测、可截帧。
                                     now = now,
+                                    sessionId = message.agentSessionId,
+                                    onAgentBadgeClick = actions.onOpenAgentConsole?.let { openConsole ->
+                                        { sid -> openConsole(sid) }
+                                    },
                                     // 可空槽：null = 这个壳没有动作通路（跨端派发 M4 才接），
                                     // 按钮组整块不画 —— 按下去没反应的按钮比没有更糟。
                                     onAction = actions.onCardAction?.let { dispatch ->

@@ -378,6 +378,14 @@ internal class HostCardActions(
                 RelayLog.info("RELAY-INVOKE", "direction-ask had nothing pending (card $cardId)")
                 delivery.flipStaleChainCard(cardId, agentId)
             }
+        } else if (actionId == "bootstrap-init" || actionId == "bootstrap-cancel") {
+            val confirmed = tickets()?.confirmBootstrap(cardId, actionId == "bootstrap-init") == true
+            if (confirmed) {
+                RelayLog.info("RELAY-INVOKE", "bootstrap card resolved: $actionId by $decidedBy (card $cardId)")
+            } else {
+                RelayLog.info("RELAY-INVOKE", "bootstrap card had nothing pending (card $cardId)")
+                delivery.flipStaleChainCard(cardId, agentId)
+            }
         } else if (actionId.startsWith("reject-revision")) {
             // 打回反向注水（Phase 4 任务 2）：反馈文本以 `reject-revision|<文本>`
             // 编码进 actionId（编码侧在 composeApp 卡片层），由编排器拆包注入

@@ -68,7 +68,10 @@ object LowRiskReviewer {
      * @param riskLevel 插件自报的风险等级（agent-approval 的 riskLevel 字段）；null = 未自报。
      * @param summaryOrCommand 工具名 / 摘要 / 命令串，任意拼接 —— 词表按片段匹配。
      */
-    fun isLowRisk(riskLevel: String?, summaryOrCommand: String?): Boolean {
+    fun isLowRisk(
+        riskLevel: String?,
+        summaryOrCommand: String?,
+    ): Boolean {
         // 插件显式报了非低危等级：以它为准，摘要再温和也不放。
         val declared = riskLevel?.trim()?.uppercase()
         if (declared != null && declared.isNotEmpty()) {

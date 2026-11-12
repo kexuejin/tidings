@@ -496,6 +496,19 @@ fun ControlPlane.resolveCliDriver(agentKey: String): com.kapp.tenon.agent.driver
 }
 
 /**
+ * **这条会话属于哪个会话键** —— 转发路由的权威答案（规范 §3 不变量 1）。
+ *
+ * 写点就在下面的 [executeCliTask]：派单拿到 `sessionId` 时把 `convId` 一起落账
+ * （内存映射 `AgentSessionRegistry.bindConversation` + 落盘 `conversationLedger`）。
+ * 读点放这里是为了让**写与读挨着**：两处分居两个文件时，改了一边忘另一边就是静默分叉。
+ *
+ * 返回 null = **不知道**：调用方必须 fail-closed（不投），不许回落到
+ * 「按目录名模糊匹配所有群」—— 那正是串群的成因。
+ */
+fun ControlPlane.conversationOfSession(sessionId: String): String? =
+    conversationLedger.conversationOf(sessionId)
+
+/**
  * E1：CLI 驱动任务执行 —— 与 [executePluginTask] 共享同一套事件映射、台账、
  * 实时流与产物回调（两处各写一份迟早漂）。差异只在驱动来源：插件经 HTTP
  * 桥，CLI 是本机子进程（沙箱语义在驱动内）。
@@ -519,9 +532,21 @@ suspend fun ControlPlane.executeCliTask(
      */
     toolPolicy: ((String?) -> Boolean)? = null,
     onArtifact: ((path: String, name: String, bytes: Long, mime: String, sha256: String) -> Unit)? = null,
+    /**
+     * 本次任务的**模型**（执行档 `models.first`）：null = 跟随驱动自己的默认。
+     *
+     * 这里是全仓**唯一的 CLI 执行出口**，所以模型只在这里接一次：链棒与单棒共用，
+     * 上游（`TeamPlanCompiler` → `ChainStage.model` / `Compiled.Single.model` /
+     * `ActiveTicket.model`）只管携带值。驱动不支持按次指定模型时由
+     * [com.kapp.tenon.agent.drivers.AgentDriver.withModel] 的契约**响亮失败**，
+     * 这里不做「静默跑默认」的兜底 —— 那会让「选了模型」变成一句空话。
+     */
+    model: String? = null,
     onEvent: (eventType: String, cursor: Long, summary: String?, body: String?) -> Unit,
 ): Triple<String?, String, String?> {
-    val driver = resolveCliDriver(agentKey)
+    // `withModel` 必须紧跟解析：换模型是换驱动实例（[AgentDriver] 无状态契约），
+    // 而且不支持模型的驱动会在这里就带上拒绝理由。
+    val driver = resolveCliDriver(agentKey)?.withModel(model)
         ?: return Triple(null, "error", "no cli driver for \"$agentKey\"")
     val cpuLoad = loadProbe?.invoke()
     if (com.kapp.tenon.agent.HostLoadGuard.shouldRefuse(cpuLoad)) {

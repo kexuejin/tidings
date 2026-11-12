@@ -1828,7 +1828,10 @@ class NodeRuntime(
         card: JsonObject? = null,
         envelopeId: String? = null,
         senderId: String? = null,
-    ) = outbound.sendDirectText(peerId, text, card, envelopeId, senderId)
+        agentSessionId: String? = null,
+        agentSessionTitle: String? = null,
+        replyTo: String? = null,
+    ) = outbound.sendDirectText(peerId, text, card, envelopeId, senderId, agentSessionId, agentSessionTitle, replyTo)
 
     suspend fun sendRecall(peerId: String,
         targetId: String,

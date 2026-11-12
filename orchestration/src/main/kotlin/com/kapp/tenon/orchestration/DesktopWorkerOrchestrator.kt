@@ -138,6 +138,14 @@ class DesktopWorkerOrchestrator(
          * 药丸明明选着工作区时被退单）。
          */
         val wsId: String? = null,
+        /**
+         * 这一单用哪个**模型**（执行档 `models.first`）：null = 跟随驱动默认。
+         *
+         * 与 [agentKey] 同一来源（团队派单从 `TeamPlanCompiler` 带下来），一路带到
+         * `executeCliTask(model = …)`。单独存一份而不现查执行档：工单跑起来之后
+         * 执行配置可能被改，跑一半换模型比不换更危险。
+         */
+        val model: String? = null,
         @Volatile var onFollowUp: (suspend (String) -> Unit)? = null,
         /**
          * 这张工单**当初要做什么**（用户原话，未经 containment 前导包装）。
@@ -161,11 +169,16 @@ class DesktopWorkerOrchestrator(
         @Volatile var steeringUsed: Boolean = false,
         /** 终局一次性完成（成功/受阻/退单/中止/原型待选）；后续再 complete 是无操作。 */
         val done: CompletableDeferred<TicketOutcome> = CompletableDeferred(),
+        /** 该工单绑定的底层 Agent 执行会话 ID（供工牌穿透使用）。 */
+        @Volatile var sessionId: String? = null,
     ) {
         val targetConvId: String get() = groupId ?: convId
     }
 
     private val activeTickets = ConcurrentHashMap<String, ActiveTicket>()
+
+    /** ticketId → 底层 CLI 会话 id：卡片 JSON/工牌穿透的唯一 producer。 */
+    private val ticketSessionIds = ConcurrentHashMap<String, String>()
 
     /**
      * 「卡片 → 沙箱补丁」登记簿：合并按钮只带 `cardId`，宿主必须能凭它找回这次沙箱的
@@ -269,12 +282,15 @@ class DesktopWorkerOrchestrator(
      *   是短祈使句），猜错的代价是一次 5 分钟的白跑加一个被顶掉的工单。
      *   所以不猜：发**方向确认卡**，把决定权还给用户，见 [askPrototypeDirection]。
      */
-    fun followUpIfActive(convId: String, text: String): Boolean {
+    fun followUpIfActive(convId: String, prompt: String): Boolean {
         val active = activeTicketsForConv(convId).firstOrNull {
-            it.stage in setOf("blocked", "prototype", "proposed")
+            it.stage in setOf("blocked", "prototype", "proposed", "working")
         } ?: return false
-        val trimmed = stripMentions(text)
+        val trimmed = stripMentions(prompt)
         if (trimmed.isBlank()) return false
+        if (active.stage == "working" && !isAbortSignal(prompt)) {
+            return steerActiveTicket(active, trimmed)
+        }
         // 点将期（还没开工）来的正文：不算追问也不算微调 —— 工单一件事都没做，
         // 没有「调整」的语境。按新派单处理：撤掉这张未开工的工单，正文走完整
         // 派单路由（返回 false 让调用方继续分发）。不撤销就派新单的话，3 秒倒计时
@@ -312,6 +328,20 @@ class DesktopWorkerOrchestrator(
     private data class PendingPrototypeInput(val text: String)
 
     private val pendingPrototypeInputs = ConcurrentHashMap<String, PendingPrototypeInput>()
+
+    /** 绿场目录待确认初始化的工单（键 = ticketId）。 */
+    private data class PendingBootstrap(
+        val ticketId: String,
+        val convId: String,
+        val groupId: String?,
+        val prompt: String,
+        val agentKey: String,
+        val wsId: String?,
+        val repoPath: String,
+        val deferred: CompletableDeferred<TicketOutcome>,
+    )
+
+    private val pendingBootstraps = ConcurrentHashMap<String, PendingBootstrap>()
 
     /**
      * 发「这是调整原型，还是新任务？」的确认卡，返回卡 JSON（供 invoke 路径把
@@ -400,6 +430,55 @@ class DesktopWorkerOrchestrator(
                 )
                 active.onFollowUp?.invoke(pending.text)
             }
+        }
+        return true
+    }
+
+    /**
+     * 绿场初始化确认卡上的按钮落地。`cardId` 形如 `chain-<ticketId>-bootstrap`。
+     */
+    fun confirmBootstrap(cardId: String, init: Boolean): Boolean {
+        val tid = cardId.removePrefix("chain-").removeSuffix("-bootstrap")
+        val pending = pendingBootstraps.remove(tid) ?: return false
+        if (init) {
+            val initRes = git(pending.repoPath, "init", "-b", "main")
+                ?: git(pending.repoPath, "init")
+            RelayLog.info("ORCHESTRATOR", "git init on " + pending.repoPath + ": " + initRes)
+            // 没有本地身份时 commit 会失败；先补仓库级身份，再确认 HEAD 真的存在。
+            git(pending.repoPath, "config", "user.email", "agent@tenon.local")
+            git(pending.repoPath, "config", "user.name", "TenonAgent")
+            val commitRes = git(pending.repoPath, "commit", "--allow-empty", "-m", "Initial commit")
+            val hasHead = git(pending.repoPath, "rev-parse", "--verify", "--quiet", "HEAD") != null
+            if (commitRes == null || !hasHead) {
+                RelayLog.info("ORCHESTRATOR", "bootstrap failed on " + pending.repoPath + ": no HEAD after init")
+                pending.deferred.complete(
+                    TicketOutcome(
+                        state = "blocked",
+                        summary = null,
+                        error = "Bootstrap failed: repository has no initial commit",
+                        cardJson = null,
+                    ),
+                )
+                return true
+            }
+            scope.launch {
+                val outcome = dispatchSingleWorker(
+                    convId = pending.convId,
+                    groupId = pending.groupId,
+                    prompt = pending.prompt,
+                    agentKey = pending.agentKey,
+                    wsId = pending.wsId,
+                ).await()
+                pending.deferred.complete(outcome)
+            }
+        } else {
+            val cancelledOutcome = TicketOutcome(
+                state = "aborted",
+                summary = null,
+                error = "Bootstrap cancelled by user",
+                cardJson = null,
+            )
+            pending.deferred.complete(cancelledOutcome)
         }
         return true
     }
@@ -653,11 +732,23 @@ class DesktopWorkerOrchestrator(
         val groupId = ConvId.groupIdOf(convId)
         val active = activeTicketForConv(convId)
 
+        if (replyToId != null && handleCardFollowUpQa(convId, groupId, replyToId, prompt, wsId, mentionedAgentKey)) {
+            return
+        }
+
         // 1. Direct Abort signal（第二道防线：`@codex 停` 这类「既是 prompt 又是打断」
         //    的消息由入站前移判定拦下；万一有别的入口直接调到这里，这里再拦一次）。
         if (active != null && isAbortSignal(prompt)) {
             abortIfRequested(convId, prompt)
             return
+        }
+
+        if (active != null && active.stage == "working") {
+            val trimmedPrompt = stripMentions(prompt)
+            if (trimmedPrompt.isNotBlank()) {
+                steerActiveTicket(active, trimmedPrompt)
+                return
+            }
         }
 
         // 2. Thread Follow-up waking blocked ticket
@@ -793,9 +884,22 @@ class DesktopWorkerOrchestrator(
         val groupId = ConvId.groupIdOf(convId)
         val active = activeTicketForConv(convId)
 
+        if (replyToId != null) {
+            val qaOutcome = handleCardFollowUpQaAwait(convId, groupId, replyToId, prompt, wsId, agentKey)
+            if (qaOutcome != null) return qaOutcome
+        }
+
         if (active != null && isAbortSignal(prompt)) {
             abortIfRequested(convId, prompt)
             return active.done.await()
+        }
+
+        if (active != null && active.stage == "working" && !isAbortSignal(prompt)) {
+            val trimmedPrompt = stripMentions(prompt)
+            if (trimmedPrompt.isNotBlank()) {
+                steerActiveTicket(active, trimmedPrompt)
+                return TicketOutcome("working", "Steering accepted: previous task aborted; redispatching with new instruction", null, null)
+            }
         }
 
         if (active != null && active.stage == "blocked") {
@@ -892,13 +996,10 @@ class DesktopWorkerOrchestrator(
             return TicketOutcome("accepted", prompt.lineSequence().firstOrNull()?.trim()?.take(60), null, null)
         }
 
-        // 席位全名（`dsh-<host>-<workspace>`）不是档案键：原样传下去会让 executeCliTask
-        // 报「no cli driver」。裸档案键（含大小写写法）一律原样保留，避免改动既有卡面。
-        val effectiveAgentKey = agentKey?.let { raw ->
-            if (AgentProfiles.normalizeKey(raw) != null) raw
-            else AgentProfiles.resolveKey(raw, availableAgentKeys().orEmpty()) ?: raw
-        }
-        return dispatchSingleWorker(convId, groupId, prompt, effectiveAgentKey, wsId).await()
+        // **原始键直接交给 dispatchSingleWorker**：归一必须排在「单兵底座覆盖」之后
+        // （覆盖要靠席位 slug 才查得到执行档，归一之后 slug 已经不在了）。归一本体
+        // 留在那里，注释也随它一起搬过去。
+        return dispatchSingleWorker(convId, groupId, prompt, agentKey, wsId).await()
     }
 
     /**
@@ -1080,6 +1181,126 @@ class DesktopWorkerOrchestrator(
         return first.take(120)
     }
 
+    private fun qaWorkdir(wsId: String?, patchRef: String?, groupId: String?): String? {
+        val resolved = resolveWorkspacePath(groupId, wsId)
+        if (resolved != null) return resolved
+        if (patchRef != null) {
+            val file = File(patchRef)
+            if (file.exists() && file.parentFile != null) {
+                return file.parentFile.absolutePath
+            }
+        }
+        return null
+    }
+
+    private suspend fun handleCardFollowUpQa(
+        convId: String,
+        groupId: String?,
+        replyToId: String,
+        prompt: String,
+        wsId: String?,
+        agentKey: String?,
+    ): Boolean {
+        // replyTo 是被引用**消息**的信封 id，不是卡片 id；必须先解出 cardId 再查账簿。
+        val quoted = controller.state.value.messages[convId]?.firstOrNull { it.id == replyToId }
+            ?: controller.findMessageById(replyToId)
+        val cardId = (quoted?.cardPayload ?: quoted?.card)
+            ?.get("cardId")
+            ?.let { (it as? JsonPrimitive)?.content }
+            ?: replyToId
+        val patchRef = patchRefForCard(cardId)?.patchPath ?: TicketPatchLedger.lookup(cardId)?.patchPath
+        if (patchRef == null && !activeTickets.containsKey(cardId.removePrefix("chain-"))) return false
+        val workdir = qaWorkdir(wsId, patchRef, groupId) ?: return false
+
+        val patchContent = if (patchRef != null) {
+            val f = File(patchRef)
+            if (f.exists()) f.readText() else null
+        } else null
+
+        val augmentedPrompt = if (patchContent != null) {
+            "User follow-up question regarding card " + cardId + ":\n" + prompt +
+                "\n\nContext patch:\n" + patchContent.take(6000)
+        } else {
+            "User follow-up question regarding card " + cardId + ":\n" + prompt +
+                "\n\nContext notice: The patch artifact is missing or has been cleaned up. Please answer honestly without inventing fake code diffs."
+        }
+
+        val readOnly = CognitiveFlow.readOnlyPrompt(augmentedPrompt)
+        val targetDriver = agentKey ?: activeTickets[cardId.removePrefix("chain-")]?.agentKey ?: "codex"
+        val host = planeProvider() ?: return false
+        val said = StringBuilder()
+        var violated: String? = null
+        host.executeCliTask(
+            agentKey = targetDriver,
+            prompt = readOnly,
+            wsPath = workdir,
+            requestedSessionId = null,
+            sessionTitle = "Q&A: " + prompt.take(30),
+            convId = convId,
+            // 只读问答必须挂宿主侧工具白名单（执行前拦），prompt 只是请求。
+            toolPolicy = { tool -> CognitiveFlow.allowsTool(tool) },
+        ) { eventType, _, summary, _ ->
+            if (eventType == "token.delta" && summary != null) {
+                said.append(summary)
+            }
+            if (violated == null && eventType == "tool.started" && !CognitiveFlow.allowsTool(summary)) {
+                violated = summary?.takeIf { it.isNotBlank() } ?: "(unnamed tool)"
+            }
+        }
+        if (violated != null) {
+            val breach = "Read-only Q&A aborted: attempted to use a write tool: " + violated
+            if (groupId != null) {
+                controller.broadcastAgentSpeech(groupId, targetDriver, breach, replyToId)
+            } else {
+                controller.sendDirectAgentSpeech(convId, targetDriver, breach, replyToId)
+            }
+            return true
+        }
+        val answer = said.toString().trim()
+        if (answer.isNotBlank()) {
+            if (groupId != null) {
+                controller.broadcastAgentSpeech(groupId, targetDriver, answer, replyToId)
+            } else {
+                controller.sendDirectAgentSpeech(convId, targetDriver, answer, replyToId)
+            }
+        }
+        return true
+    }
+
+    private suspend fun handleCardFollowUpQaAwait(
+        convId: String,
+        groupId: String?,
+        replyToId: String,
+        prompt: String,
+        wsId: String?,
+        agentKey: String?,
+    ): TicketOutcome? {
+        val handled = handleCardFollowUpQa(convId, groupId, replyToId, prompt, wsId, agentKey)
+        return if (handled) {
+            TicketOutcome("done", "Card Q&A completed", null, null)
+        } else {
+            null
+        }
+    }
+
+    private fun steerActiveTicket(active: ActiveTicket, instruction: String): Boolean {
+        if (active.stage != "working") return false
+        val originalPrompt = active.devPrompt ?: active.title
+        if (!abortByCard("chain-" + active.ticketId, "Steered by user request")) return false
+        val combinedPrompt = "User steering instruction (the previous run was stopped and is being restarted): " +
+            instruction + "\n\nOriginal task: " + originalPrompt
+        scope.launch {
+            dispatchSingleWorker(
+                convId = active.convId,
+                groupId = active.groupId,
+                prompt = combinedPrompt,
+                agentKey = active.agentKey,
+                wsId = active.wsId,
+            )
+        }
+        return true
+    }
+
     /**
      * 提议卡上的「开工」：把讨论收口的目标**重新**过一遍模板与代码门。
      *
@@ -1245,6 +1466,32 @@ class DesktopWorkerOrchestrator(
         )
     }
 
+    /**
+     * **单兵席位的底座覆盖**（不变量 5）：单兵席位（`entityType=single`，没有
+     * `teamMembers`）不进团队编译，但它的底座同样该能在执行配置里换。
+     *
+     * 只对一个明确条件生效：**传进来的键不是档案键**（`AgentProfiles.normalizeKey` 为 null）
+     * 而能在群里匹配到本机席位 —— 也就是「按席位 slug 派单」那条路。团队派单传的是
+     * 编译后的 `driverKey`（本来就是档案键），所以不会被这里二次改写。
+     *
+     * 返回 (driverKey, model)；null = 没有覆盖（没配过 / 未指派 / 不是本机席位 / 群没绑目录）——
+     * 一律回落既有解析，**绝不猜**一个底座出来。
+     */
+    private fun seatExecutionOverride(groupId: String?, seatKey: String): Pair<String, String?>? {
+        val store = teamExecutionStore ?: return null
+        val st = controller.state.value
+        val group = st.settings.groups.firstOrNull { it.groupId == groupId } ?: return null
+        val seat = group.seatsMatchingToken(seatKey).singleOrNull() ?: return null
+        if (seat.hostNodeId != st.selfNodeId) return null
+        val dirId = groupDirIdOf(group.groupId)?.trim().orEmpty()
+        if (dirId.isEmpty()) return null
+        val profile = store.profileFor(group.groupId, dirId, seat.agentId) ?: return null
+        val worker = profile.members.firstOrNull { it.isWorker } ?: return null
+        // 空 driverKey = 用户还没指派：保持既有解析（按席位 slug 走），不替人做决定。
+        if (worker.driverKey.isBlank()) return null
+        return worker.driverKey to worker.models.firstOrNull()?.takeIf { it.isNotBlank() }
+    }
+
     /** 本群全部可被 @ 的 token（候选与匹配同源的那一份；组员名已由 P0-0.1 进池）。 */
     private fun agentKindsOf(groupId: String?): Set<String> {
         if (groupId == null) return emptySet()
@@ -1299,7 +1546,11 @@ class DesktopWorkerOrchestrator(
                     publishTeamDispatchBlocked(groupId, prompt, "control plane unavailable")
                     return true
                 }
-                dispatchSingleWorker(convId, groupId, compiled.instruction, compiled.agentKey, wsId = target.seat.defaultWsId)
+                dispatchSingleWorker(
+                    convId, groupId, compiled.instruction, compiled.agentKey,
+                    wsId = target.seat.defaultWsId,
+                    model = compiled.model,
+                )
                 true
             }
             is TeamPlanCompiler.Compiled.Plan -> {
@@ -1495,13 +1746,29 @@ class DesktopWorkerOrchestrator(
         prompt: String,
         agentKey: String? = null,
         wsId: String? = null,
+        /** 执行档带来的模型（`models.first`）：null = 跟随驱动默认。 */
+        model: String? = null,
     ): CompletableDeferred<TicketOutcome> {
         val ticketId = "t" + System.currentTimeMillis().toString(36)
         val title = prompt.lineSequence().firstOrNull()?.trim()?.take(60) ?: "Task $ticketId"
 
         // 派单帧带 agentId 时随帧走（codex/claude/antigravity…）；文本路由没带 → codex。
         // 提前到 handback 之前：退单卡也要挂真名（广播身份与授权都认这个键）。
-        val defaultAgent = agentKey?.takeIf { it.isNotBlank() } ?: "codex"
+        val rawKey = agentKey?.takeIf { it.isNotBlank() }
+        // **单兵底座**（不变量 5）：按席位 slug 派单时，若执行配置里指派过底座就改用它。
+        // 只在「传进来的不是档案键」时查 —— 团队派单传的是 `Compiled.Single.agentKey`
+        // （本来就是 driverKey），不会在这里被二次改写。
+        val seatOverride = rawKey
+            ?.takeIf { AgentProfiles.normalizeKey(it) == null }
+            ?.let { seatExecutionOverride(groupId, it) }
+        // 席位全名（`dsh-<host>-<workspace>`）不是档案键：原样传下去会让 executeCliTask
+        // 报「no cli driver」。裸档案键（含大小写写法）一律原样保留，避免改动既有卡面。
+        // 执行配置指派过底座时以它为准（**先覆盖、后归一**，顺序不能反）。
+        val defaultAgent = seatOverride?.first ?: rawKey?.let { raw ->
+            if (AgentProfiles.normalizeKey(raw) != null) raw
+            else AgentProfiles.resolveKey(raw, availableAgentKeys().orEmpty()) ?: raw
+        } ?: "codex"
+        val effectiveModel = seatOverride?.second ?: model
 
         val host = planeProvider()
             ?: run {
@@ -1517,6 +1784,44 @@ class DesktopWorkerOrchestrator(
 
         // Hand-back if repo is invalid or missing
         if (repoPath == null || !isGitRepo(repoPath)) {
+            val file = repoPath?.let { java.io.File(it) }
+            if (repoPath != null && file != null && file.isDirectory && !isGitRepo(repoPath)) {
+                pendingBootstraps[ticketId] = PendingBootstrap(
+                    ticketId = ticketId,
+                    convId = convId,
+                    groupId = groupId,
+                    prompt = prompt,
+                    agentKey = defaultAgent,
+                    wsId = wsId,
+                    repoPath = repoPath,
+                    deferred = done,
+                )
+                val bootstrapCardJson = buildJsonObject {
+                    put("cardId", JsonPrimitive("chain-" + ticketId + "-bootstrap"))
+                    put("rev", JsonPrimitive(1))
+                    put("type", JsonPrimitive("direction-ask"))
+                    put("state", JsonPrimitive("blocked"))
+                    put("title", JsonPrimitive(title))
+                    put("progress", JsonPrimitive(0))
+                    putJsonObject("banner") {
+                        put("text", JsonPrimitive("Directory is not a git repository. Initialize Git workspace to proceed?"))
+                        put("tone", JsonPrimitive("info"))
+                    }
+                    put("actions", buildJsonArray {
+                        add(buildJsonObject {
+                            put("actionId", JsonPrimitive("bootstrap-init"))
+                            put("label", JsonPrimitive("Initialize Git & Proceed"))
+                            put("approval", JsonPrimitive(true))
+                        })
+                        add(buildJsonObject {
+                            put("actionId", JsonPrimitive("bootstrap-cancel"))
+                            put("label", JsonPrimitive("Cancel"))
+                        })
+                    })
+                }
+                scope.launch { publishCardJson(groupId ?: convId, bootstrapCardJson.toString(), defaultAgent) }
+                return done
+            }
             recordBlindSpot(
                 BlindSpotPatrol.KIND_HANDBACK,
                 title,
@@ -1641,6 +1946,7 @@ class DesktopWorkerOrchestrator(
             role = roleNameOf(defaultAgent),
             agentKey = defaultAgent,
             wsId = wsId,
+            model = effectiveModel,
             devPrompt = prompt,
             done = done,
         )
@@ -1859,6 +2165,7 @@ class DesktopWorkerOrchestrator(
             requestedSessionId = null,
             sessionTitle = title,
             convId = convId,
+            model = ticket.model,
             onArtifact = { path, name, _, _, _ ->
                 if (name == "patch.diff") protoPatch = path
                 if (name.contains("prototype") || name.endsWith(".html") || name == "patch.diff") protoCreated = true
@@ -1922,6 +2229,7 @@ class DesktopWorkerOrchestrator(
                     requestedSessionId = null,
                     sessionTitle = title,
                     convId = convId,
+                    model = ticket.model,
                     onArtifact = { path, name, _, _, _ -> if (name == "patch.diff") refinePatch = path },
                     onEvent = { _, _, _, _ -> },
                 )
@@ -2230,7 +2538,7 @@ class DesktopWorkerOrchestrator(
                         }
                     }
                 }
-                val (_, status, error) = host.executeCliTask(
+                val (cliSessionId, status, error) = host.executeCliTask(
                     agentKey = defaultAgent,
                     prompt = currentPrompt,
                     wsPath = repoPath,
@@ -2239,6 +2547,7 @@ class DesktopWorkerOrchestrator(
                     // 从 prompt 截标题就会把整句英文 plumbing 摆上 divider。
                     sessionTitle = title,
                     convId = convId,
+                    model = ticket.model,
                     onArtifact = { path, name, _, _, _ -> if (name == "patch.diff") patchPath = path },
                     onEvent = { eventType, _, summary, body ->
                         // 生命迹象：驱动事件 = 子进程输出管道来了新字节。看门狗 feed 在
@@ -2278,6 +2587,10 @@ class DesktopWorkerOrchestrator(
                         }
                     },
                 )
+                cliSessionId?.takeIf { it.isNotBlank() }?.let { sid ->
+                    ticket.sessionId = sid
+                    ticketSessionIds[ticketId] = sid
+                }
                 if (circuitBroken) {
                     // 看门狗熔断后的该轮：不是普通失败。超时卡已经发过（FORCE_KILL 档），
                     // 这里只把工单如实收尾 —— 阻塞态 + 看门狗因由，下一轮提示词不再硬跑。
@@ -2337,6 +2650,7 @@ class DesktopWorkerOrchestrator(
                     else -> error
                         ?: (if (patchPath == null) "No patch produced by worker" else "Execution ended in $status")
                 }
+                val distilledError = ErrorDistiller.distill(roundError)
                 executionError = roundError
                 roundErrors += roundError
                 if (healRound < maxHealRounds) {
@@ -2359,11 +2673,11 @@ class DesktopWorkerOrchestrator(
                     // 词表测试改动与原任务毫无关系）。无 patch 且无验收判负时，
                     // 明确告诉它「没有文件变更也可以收尾」，不许再拿测试当借口。
                     currentPrompt = if (patchPath == null && verdict == null) {
-                        "Previous attempt ended without a patch ($executionError). " +
+                        "Previous attempt ended without a patch ($distilledError). " +
                             "If the task genuinely needs no file changes, finish with the final answer text and do NOT create or modify files to satisfy a patch requirement. " +
                             "Otherwise make exactly the change the task asks for."
                     } else {
-                        "Previous attempt failed: $executionError. Please inspect tests and workspace, fix all issues, and ensure npm test passes."
+                        "Previous attempt failed: $distilledError. Please inspect tests and workspace, fix all issues, and ensure all tests pass."
                     }
                 }
             } finally {
@@ -2464,6 +2778,36 @@ class DesktopWorkerOrchestrator(
                 patchPath = patchPath,
             )
         }
+        // 飞行记录：证据只来自真实跑过的验收；崩溃/全跳过写 unknown，绝不填 0 冒充通过。
+        val hostVerified = verificationReport?.items?.any { it.passed && !it.skipped } == true
+        val verifiedCommand = verificationReport?.items
+            ?.firstOrNull { it.passed && !it.skipped && it.name != TicketVerification.REPLAY_ITEM }
+            ?.name
+        FlightRecorder.record(
+            FlightRecord(
+                taskId = ticketId,
+                targetDirectory = File(repoPath).name,
+                metrics = FlightMetrics(
+                    totalDurationMs = (nowMillis() - ticket.createdAt).coerceAtLeast(0L),
+                    selfHealingRounds = (healRound - 1).coerceAtLeast(0),
+                    exitCode = if (hostVerified) 0 else null,
+                    patchSizeBytes = patchBytes,
+                ),
+                phases = listOf(
+                    FlightPhase("execution", (nowMillis() - ticket.createdAt).coerceAtLeast(0L), "ok"),
+                ),
+                hostEvidence = FlightEvidence(
+                    testCommand = verifiedCommand,
+                    finalExitCode = if (hostVerified) 0 else null,
+                    verifiedBy = if (hostVerified) {
+                        FlightRecord.VERIFIED_BY_HOST_PROCESS
+                    } else {
+                        FlightRecord.VERIFIED_BY_AGENT_SELF_REPORT
+                    },
+                ),
+            ),
+            outputDir = File(controller.dataDirectory, "flight-records"),
+        )
         // §6.3 离线 bundle：补丁随卡一起走 P2P 文件通道，手机上能真的把 diff 打开看。
         // 先发文件、后发卡 —— 卡到的时候那一行产物已经点得开了。
         // P2P 大产物直投（升级计划 §4.2-3）：收割目录里其余的大产物（结构化报告 /
@@ -2544,6 +2888,16 @@ class DesktopWorkerOrchestrator(
             assignees = listOf(agentId),
             startedAt = startedAt,
         )
+        if (!answer.isNullOrBlank() && targetId != null) {
+            val isGroup = ConvId.isGroup(targetId)
+            scope.launch {
+                if (isGroup) {
+                    controller.broadcastAgentSpeech(targetId, agentId, answer)
+                } else {
+                    controller.sendDirectAgentSpeech(targetId, agentId, answer)
+                }
+            }
+        }
         return TicketOutcome("done", banner, null, json)
     }
 
@@ -2572,6 +2926,7 @@ class DesktopWorkerOrchestrator(
             stages = listOf(roleName to StageChain.stageStatusOf(state)),
             percent = percent,
             banner = banner,
+            sessionId = ticketSessionIds[ticketId],
         ),
     )
 
@@ -2633,6 +2988,7 @@ class DesktopWorkerOrchestrator(
             options = options,
             artifacts = artifacts,
             diff = diff,
+            sessionId = ticketSessionIds[ticketId],
         )
         val baseCard: kotlinx.serialization.json.JsonObject = StageChain.cardOf(progress)
         val decorated: kotlinx.serialization.json.JsonObject = if (selfDescribeDelivered.isEmpty()) {

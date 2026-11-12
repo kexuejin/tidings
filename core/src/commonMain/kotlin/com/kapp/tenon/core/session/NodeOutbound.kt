@@ -383,12 +383,15 @@ internal class NodeOutbound(
         card: JsonObject? = null,
         envelopeId: String? = null,
         senderId: String? = null,
+        agentSessionId: String? = null,
+        agentSessionTitle: String? = null,
+        replyTo: String? = null,
     ): OutgoingText {
         val clamped = clampDirectText(text)
         val payload: JsonElement = if (card != null) {
-            Codec.textPayloadWithCard(clamped, card, senderId)
+            Codec.textPayloadWithCard(clamped, card, senderId, agentSessionId, agentSessionTitle, replyTo)
         } else {
-            Codec.textPayload(clamped, senderId = senderId)
+            Codec.textPayload(clamped, senderId = senderId, replyTo = replyTo)
         }
         val envelope = makeEnvelope(MsgTypes.MSG, selfId(), payload, id = envelopeId ?: newId())
         val outcome = messenger.sendUserMessage(peerId, envelope)

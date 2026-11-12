@@ -91,6 +91,8 @@ data class ChatScreenState(
     val now: Long = nowMillis(),
     val cacheDir: String? = null,
     val initialStagedFiles: List<LocalFile> = emptyList(),
+    /** 细粒度单会话独立流（Task 2.6）：非空时优先从独立流收集消息，消除跨群重组风暴。 */
+    val messageFlow: kotlinx.coroutines.flow.Flow<List<MessageUi>>? = null,
 )
 
 /**

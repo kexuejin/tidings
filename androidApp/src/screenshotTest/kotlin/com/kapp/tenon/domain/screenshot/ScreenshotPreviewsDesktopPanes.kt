@@ -93,6 +93,7 @@ private fun DeskConversationsWideInspectorPreview() {
             onOpenInNewWindow = null,
             onSelect = {},
             onGoToPairing = {},
+            onSelectAgentSession = {},
             now = PREVIEW_NOW)
     }
 }
@@ -119,6 +120,7 @@ private fun DeskConversationsWideCollapsedPreview() {
             onOpenInNewWindow = null,
             onSelect = {},
             onGoToPairing = {},
+            onSelectAgentSession = {},
             now = PREVIEW_NOW)
     }
 }
@@ -146,6 +148,7 @@ private fun DeskConversationsPaneNoSelectionPreview() {
             onOpenInNewWindow = null,
             onSelect = {},
             onGoToPairing = {},
+            onSelectAgentSession = {},
             now = PREVIEW_NOW)
     }
 }
@@ -185,6 +188,7 @@ private fun DeskConversationsPaneEmptyPreview() {
             onOpenInNewWindow = null,
             onSelect = {},
             onGoToPairing = {},
+            onSelectAgentSession = {},
             now = PREVIEW_NOW)
     }
 }
@@ -213,6 +217,7 @@ private fun DeskConversationsPaneGroupPreview() {
             onOpenInNewWindow = null,
             onSelect = {},
             onGoToPairing = {},
+            onSelectAgentSession = {},
             now = PREVIEW_NOW,
             onCreateGroup = { _, _, _ -> null })
     }
@@ -256,6 +261,7 @@ private fun DeskConversationsPaneGroupRemoteOwnerPreview() {
             onOpenInNewWindow = null,
             onSelect = {},
             onGoToPairing = {},
+            onSelectAgentSession = {},
             now = PREVIEW_NOW,
             onCreateGroup = { _, _, _ -> null })
     }
@@ -295,6 +301,7 @@ private fun DeskConversationsPaneSearchPreview() {
             onOpenInNewWindow = null,
             onSelect = {},
             onGoToPairing = {},
+            onSelectAgentSession = {},
             now = PREVIEW_NOW,
             onCreateGroup = { _, _, _ -> null },
             initialGlobalSearch = DesktopPreviewSearchActions.searchGlobal("协议"))
@@ -330,6 +337,7 @@ private fun DeskConversationsPaneSearchEmptyPreview() {
             onOpenInNewWindow = null,
             onSelect = {},
             onGoToPairing = {},
+            onSelectAgentSession = {},
             now = PREVIEW_NOW,
             onCreateGroup = { _, _, _ -> null },
             initialGlobalSearch = GlobalSearchResult(query = "榫卯"))
@@ -377,6 +385,7 @@ private fun DeskConversationsPaneNoMatchPreview() {
             onOpenInNewWindow = null,
             onSelect = {},
             onGoToPairing = {},
+            onSelectAgentSession = {},
             now = PREVIEW_NOW,
             onCreateGroup = { _, _, _ -> null },
             globalSearchEnabled = false)

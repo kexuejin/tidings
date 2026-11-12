@@ -181,6 +181,10 @@ internal class RelayControllerAgentCardActions(
         //
         // rev 的分配与落库必须落在**同一把锁**里（见 [cardBroadcastMutex]）。
         val cardId = (card["cardId"] as? JsonPrimitive)?.contentOrNull
+        val cardSessionId = (card["sessionId"] as? JsonPrimitive)?.contentOrNull
+            ?: (card["agentSessionId"] as? JsonPrimitive)?.contentOrNull
+        val cardSessionTitle = (card["sessionTitle"] as? JsonPrimitive)?.contentOrNull
+            ?: (card["agentSessionTitle"] as? JsonPrimitive)?.contentOrNull
         val finalCard = cardBroadcastMutex.withLock {
             val now = host.state.value
             val existingSlot = cardId?.let { id ->
@@ -228,6 +232,8 @@ internal class RelayControllerAgentCardActions(
                         delivery = null,
                         senderId = AgentSenderId.of(st.selfNodeId, agentId),
                         card = out,
+                        agentSessionId = cardSessionId,
+                        agentSessionTitle = cardSessionTitle,
                     ),
                     incoming = true,
                 )
@@ -238,6 +244,8 @@ internal class RelayControllerAgentCardActions(
                         text = title,
                         at = maxOf(existingSlot.at, nowMillis()),
                         cardPayload = out,
+                        agentSessionId = cardSessionId ?: existingSlot.agentSessionId,
+                        agentSessionTitle = cardSessionTitle ?: existingSlot.agentSessionTitle,
                     ),
                 )
             }
@@ -277,6 +285,8 @@ internal class RelayControllerAgentCardActions(
                     senderId = AgentSenderId.of(st.selfNodeId, agentId),
                     envelopeId = envelopeId,
                     card = finalCard,
+                    agentSessionId = cardSessionId,
+                    agentSessionTitle = cardSessionTitle,
                 )
             }.onFailure { t ->
                 println(
@@ -315,6 +325,8 @@ internal class RelayControllerAgentCardActions(
                         // 卡片动作的回程地址：接收端从 `senderId` 解出宿主 nodeId，
                         // 才知道「合并/打回」该发回哪台机器。不带 = 按钮是死的。
                         senderId = AgentSenderId.of(st.selfNodeId, agentId),
+                        agentSessionId = cardSessionId,
+                        agentSessionTitle = cardSessionTitle,
                     )
                     println("[CARD] 1:1 direct card sent (conv=" + convKey + " card=" + cardId + ")")
                 }.onFailure { t ->

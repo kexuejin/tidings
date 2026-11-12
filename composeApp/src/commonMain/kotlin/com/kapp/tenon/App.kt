@@ -425,6 +425,7 @@ fun RelayApp(
                             // task-2：进入这一刻的未读（在 openChat / 下钻入口清未读之前采下）。
                             unreadOnEntry = chatUnreadOnEntry,
                             cacheDir = controller.cacheDirectory,
+                            messageFlow = nav.activeSessionId?.let { id -> remember(id) { controller.messageFlowOf(id) } },
                         ),
                         actions = ChatScreenActions(
                             onSend = controller::sendToConversation,
@@ -487,7 +488,13 @@ fun RelayApp(
                             onLoadOlder = {
                                 nav.activeSessionId?.let { controller.loadOlderMessages(it) }
                             },
-                            onOpenAgentConsole = { nav = nav.selectTab(AppRoutes.AGENTS) },
+                            onOpenAgentConsole = { sessionId ->
+                                nav = if (sessionId.isNotBlank()) {
+                                    nav.selectTab(AppRoutes.AGENTS).openAgentSessionDetail(sessionId)
+                                } else {
+                                    nav.selectTab(AppRoutes.AGENTS)
+                                }
+                            },
                             // 打开与 agent 的会话时，向宿主要该工作区**第一页**历史会话
                             // （PPE-1 增补 D8）。用户裁决：
                             //「正常其实用户只有在需要打开这个工作区的时候，同步下会话就好吧」
@@ -1003,21 +1010,22 @@ fun RelayApp(
                                             },
                                             onOpenChat = { peerId, wsId ->
                                                 selectedAgentId = peerId
-                                                val ws = agentSlice.agentWorkspaces.values.firstOrNull { it.wsId == wsId }
                                                 // 反查绑定群只认席位声明（groupBoundToWorkspace，单源）；
                                                 // 子串反猜（简介含路径/群名含标题）已删 —— 简介不是绑定。
                                                 val boundGroup = groupBoundToWorkspace(wsId, settingsSlice.settings.groups)
                                                 if (boundGroup != null) {
                                                     openChat(com.kapp.tenon.core.protocol.ConvId.group(boundGroup.groupId))
-                                                } else if (ws != null) {
-                                                    // issue 7：没有绑定群时**针对这一个工作区**提示建群并进入。
-                                                    // 桌面端此前弹的是「所有工作区」列表（用户要处理的是当前这一行，
-                                                    // 那张列表跟他点的那一行无关）；手机端此前直接进聊天，等于
-                                                    // 根本没给建群这条路。两条壳现在走同一个对话框。
-                                                    groupPromptFor = ws
                                                 } else {
-                                                    // 没有 wsId 的 Agent 行：这台设备上没有"某个工作区"这回事，
-                                                    // 直接进这个节点的会话（与桌面壳同一条）。
+                                                    // **没有绑定群 ⇒ 直接进 1:1，不再前置拦一张建群弹窗。**
+                                                    //
+                                                    // 原样是「先弹 WorkspaceGroupPromptDialog 再进会话」，弹窗里
+                                                    // 才有「不用群，直接聊」的出口 —— 于是每次找 Agent 说句话都要
+                                                    // 先关一个框。即时通讯的直觉是「点了就说话」，建群是另一件事。
+                                                    // 建群入口没有消失：顶栏「+ 创建协同群」（`onCreateWorkspaceGroup`）
+                                                    // 与新手引导卡（`onBindFirstProject`）各自独立触发同一个对话框。
+                                                    //
+                                                    // 没有 wsId 的 Agent 行走 `openSession`：这台设备上不存在
+                                                    // 「某个工作区」，与桌面壳同一条。
                                                     nav = wsId?.let { w -> nav.openWorkspaceChat(peerId, w) }
                                                         ?: nav.openSession(peerId)
                                                     chatUnreadOnEntry = chatSlice.unreadByPeer[peerId] ?: 0

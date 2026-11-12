@@ -47,8 +47,14 @@ class CliSubprocessDriver(
     override val driverId: String,
     override val displayName: String,
     private val cliPath: String,
-    /** 启动参数（prompt 如何交给 CLI）。真 CLI 的参数变更只动装配处一处。 */
-    private val argSpec: (prompt: String) -> List<String>,
+    /**
+     * 启动参数（prompt / model 如何交给 CLI）。真 CLI 的参数变更只动装配处一处。
+     *
+     * 为什么把 `model` 交给这里而不是事后 append：**旗标位置有讲究** —— codex / opencode
+     * 的 prompt 是末尾位置参数，`--model x` 追加到它后面会被当成 prompt 的一部分，
+     * CLI 收不到旗标、也不报错，症状是「配了模型、跑的还是默认模型」。位置由装配处显式定。
+     */
+    private val argSpec: (prompt: String, model: String?) -> List<String>,
     private val newSessionId: () -> String = { java.util.UUID.randomUUID().toString() },
     /**
      * 每次任务注入子进程的**模型凭证环境变量**。
@@ -69,7 +75,52 @@ class CliSubprocessDriver(
     },
     /** 断点续跑形态（dsh 有、其余 CLI 暂无）：重试跳以续跑参数重放。 */
     private val resumeSpec: CliResumeSpec? = null,
+    /** 本次任务的模型（[withModel] 写入；空 = 跟随驱动自己的默认）。 */
+    private val model: String? = null,
+    /**
+     * 判「这个驱动支持不支持按次选模型」时用的键。
+     *
+     * 默认就是 [driverId]，但**派生驱动必须显式传基键**：`SandboxedCliDriver` 的裸路径委托
+     * 实例 id 是 `claude-cli-plain`，拿它去查词表会查不到 ⇒ 一个合法的 claude 模型被判成
+     * 「不支持」并响亮失败。假阴性比静默忽略更好查，但同样不是我们要的。
+     */
+    private val modelKey: String = driverId,
 ) : AgentDriver {
+
+    /**
+     * 兼容构造：只关心 prompt 的装配处与测试（模型按**追加**形态拼）。
+     *
+     * 追加只对「prompt 不是末尾位置参数」的 CLI 安全（claude / agy / dsh）；codex / opencode
+     * 必须用主构造显式定位置。两个构造并存是为了不让 20 多处测试桩跟着改签名 ——
+     * 但生产装配处该用哪个，KDoc 已经写死了。
+     */
+    constructor(
+        driverId: String,
+        displayName: String,
+        cliPath: String,
+        argSpec: (prompt: String) -> List<String>,
+        newSessionId: () -> String = { java.util.UUID.randomUUID().toString() },
+        envOverrides: Map<String, String> = emptyMap(),
+        transientOf: (exitCode: Int, output: String) -> Boolean = ::defaultTransientOf,
+        maxExtraAttempts: Int = DEFAULT_MAX_EXTRA_ATTEMPTS,
+        retryBackoff: suspend (attempt: Int) -> Unit = { attempt ->
+            delay(if (attempt <= 1) DEFAULT_BACKOFF_FIRST_MS else DEFAULT_BACKOFF_NEXT_MS)
+        },
+        resumeSpec: CliResumeSpec? = null,
+        model: String? = null,
+    ) : this(
+        driverId = driverId,
+        displayName = displayName,
+        cliPath = cliPath,
+        argSpec = { prompt, m -> argSpec(prompt) + DriverModelFlags.flagsFor(driverId, m) },
+        newSessionId = newSessionId,
+        envOverrides = envOverrides,
+        transientOf = transientOf,
+        maxExtraAttempts = maxExtraAttempts,
+        retryBackoff = retryBackoff,
+        resumeSpec = resumeSpec,
+        model = model,
+    )
 
     /** sessionId → wsPath（空串 = 无工作区上下文，合法）。 */
     private val sessions = ConcurrentHashMap<String, String>()
@@ -94,6 +145,27 @@ class CliSubprocessDriver(
         )
     }
 
+    /**
+     * 换模型 = 换一个同驱动实例（会话表、重试档位、env 注入全部沿用）。
+     *
+     * 不做成「executeTask 的可选参数」：会话与模型是两件事，模型会随执行配置整条链换，
+     * 而会话 id 是卡的锚点，不能跟着变。
+     */
+    override fun withModel(model: String?): AgentDriver = CliSubprocessDriver(
+        driverId = driverId,
+        displayName = displayName,
+        cliPath = cliPath,
+        argSpec = argSpec,
+        newSessionId = newSessionId,
+        envOverrides = envOverrides,
+        transientOf = transientOf,
+        maxExtraAttempts = maxExtraAttempts,
+        retryBackoff = retryBackoff,
+        resumeSpec = resumeSpec,
+        model = model,
+        modelKey = modelKey,
+    )
+
     override suspend fun executeTask(
         sessionId: String,
         prompt: String,
@@ -102,6 +174,11 @@ class CliSubprocessDriver(
         val wsPath = sessions[sessionId]
         if (wsPath == null) {
             onEvent(DriverEvent.Error("unknown session \"$sessionId\" — call openSession first"))
+            return
+        }
+        // 「配了模型、跑的还是默认模型」是本仓最贵的一类缺陷：不支持就响亮失败，绝不静默忽略。
+        DriverModelFlags.unsupportedReason(modelKey, model)?.let { reason ->
+            onEvent(DriverEvent.Error(reason))
             return
         }
         var resumedCliSessionId: String? = null
@@ -118,7 +195,7 @@ class CliSubprocessDriver(
             val attemptArgs = if (attempt > 1 && resumeSpec != null && resumedCliSessionId != null) {
                 resumeSpec.args(resumedCliSessionId!!, prompt)
             } else {
-                argSpec(prompt)
+                argSpec(prompt, model)
             }
             var exitCode = SPAWN_FAILED_EXIT
             var lineLimitBroken = false
@@ -318,8 +395,14 @@ class CliSubprocessDriver(
          * 没有交付物」。写权限的边界由**本仓的 worktree 沙箱**决定（一次性 worktree +
          * 分支，收割后无痕清理），codex 自己那层再设成只读等于让驱动报废。
          */
-        fun codexArgs(prompt: String, env: Map<String, String> = System.getenv()): List<String> =
-            listOf("exec", "--json", "--sandbox", codexSandboxMode(env), prompt)
+        fun codexArgs(
+            prompt: String,
+            env: Map<String, String> = System.getenv(),
+            model: String? = null,
+        ): List<String> = listOf("exec", "--json", "--sandbox", codexSandboxMode(env)) +
+            // 位置不能挪：prompt 是末尾位置参数（clap 的 trailing var-arg），
+            // `--model x` 追加到它后面会被当成 prompt 的一部分。
+            DriverModelFlags.flagsFor("codex", model) + prompt
 
         /**
          * opencode 的 headless 参数（实测 v2.2.5）。
@@ -331,8 +414,10 @@ class CliSubprocessDriver(
          *   `--permission-mode bypassPermissions` 同一条理由）；
          * - `--format json`：行协议，交给 [CliLineEventMapper] 的 opencode 分支。
          */
-        fun opencodeArgs(prompt: String): List<String> =
-            listOf("run", "--standalone", "--auto", "--format", "json", prompt)
+        fun opencodeArgs(prompt: String, model: String? = null): List<String> =
+            listOf("run", "--standalone", "--auto", "--format", "json") +
+                // 同上：prompt 必须在最后，模型旗标插在它前面。
+                DriverModelFlags.flagsFor("opencode", model) + prompt
 
         /**
          * dsh 的 headless 参数（实测 v0.2.1-rc.2，`dsh --help`）。

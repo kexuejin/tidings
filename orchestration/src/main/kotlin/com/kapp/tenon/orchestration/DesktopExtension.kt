@@ -15,6 +15,7 @@ import com.kapp.tenon.agent.AgentGrantStore
 import com.kapp.tenon.agent.AgentToolApprovalStore
 import com.kapp.tenon.agent.HostDirectoryStore
 import com.kapp.tenon.agent.resolveGroupDirectoryWsId
+import com.kapp.tenon.agent.conversationOfSession
 import com.kapp.tenon.agent.AgentSessionRegistry
 import com.kapp.tenon.agent.AgentWorkspaceRegistry
 import com.kapp.tenon.agent.AgentInboxEnricher
@@ -211,6 +212,10 @@ class DesktopExtension(
         scope = scope,
         currentRuntime = { attachedRuntime },
         registryRef = { sessions },
+        // 会话归属的唯一权威答案（规范 §3 不变量 1）：派单侧 `executeCliTask` 落的
+        // `sessionId → convId` 台账。转发路由靠它避免「按目录名猜群」的串群。
+        // 控制面未挂时为 null ⇒ 转发器退回三键反查（唯一解才算）。
+        conversationOf = { sessionId -> plane?.conversationOfSession(sessionId) },
     )
 
     /** 产物与卡片投递（失败只影响「看不看得见」，不影响活干没干 —— 见类的 KDoc）。 */
@@ -647,7 +652,11 @@ class DesktopExtension(
             sessions = registry
             // 托管模式插件：目录里有就拉起（token 注入 + 自注册）；坏了如实记录但不上抛。
             runCatching {
-                com.kapp.tenon.agent.plugins.BuiltinPluginSeeder.seed(pluginsDir)
+                // 内置 CLI **不再种成常驻插件**（它们按任务拉起）；这里只做存量退役：
+                // 老机器上那 5 份 `cli-*` 清单会在每次启动被拉起并秒退，
+                // 症状是「装了却一直 OFFLINE」。必须在 start() 之前跑。
+                com.kapp.tenon.agent.plugins.BuiltinPluginSeeder.retire(pluginsDir, stateManager)
+                    .forEach { id -> RelayLog.info("RELAY-PLUGIN", "retired builtin pseudo-plugin " + id) }
                 val host = com.kapp.tenon.agent.plugins.PluginHost(
                     dataDirectory = dataDir,
                     controlBaseUrl = { "http://127.0.0.1:" + created.boundPort },

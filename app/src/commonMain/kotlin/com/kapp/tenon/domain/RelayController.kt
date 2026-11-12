@@ -50,6 +50,7 @@ import kotlin.coroutines.cancellation.CancellationException
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.flow.StateFlow
@@ -321,6 +322,15 @@ class RelayController(
     val settingsFlow: StateFlow<SettingsSlice> get() = stateSlices.settings
     val chromeFlow: StateFlow<ChromeSlice> get() = stateSlices.chrome
     val avatarFlow: StateFlow<AvatarSlice> get() = stateSlices.avatar
+
+    /** 单会话消息独立订阅流（Task 2.6 & §7.6 裁决）。 */
+    override fun messageFlowOf(convId: String): Flow<List<MessageUi>> {
+        messagesCtl.ensureThreadLoaded(convId)
+        return stateSlices.messageFlowOf(convId)
+    }
+
+    /** 按消息 id 查一条（路由判据不能只查内存窗口；见 [MessageStore.findMessageById]）。 */
+    fun findMessageById(id: String): MessageUi? = messageStore.findMessageById(id)
 
     /**
      * 手机侧长连接诊断文件的路径（task-34）：`<dataDir>/diag/link.json`。
@@ -1253,8 +1263,16 @@ class RelayController(
      * 以指定 agent 身份向群广播一条发言文本（P0b 拟人化交棒发言等）。
      * 本地先落库再发帧，senderId 严格为 AgentSenderId.of(selfNodeId, agentId)。
      */
-    suspend fun broadcastAgentSpeech(groupId: String, agentId: String, text: String) {
-        invokeCtl.broadcastAgentSpeech(groupId, agentId, text)
+    suspend fun broadcastAgentSpeech(groupId: String, agentId: String, text: String, replyTo: String? = null) {
+        invokeCtl.broadcastAgentSpeech(groupId, agentId, text, replyTo)
+    }
+
+    /**
+     * 以指定 agent 身份在 1:1 私聊会话中发言（Q&A 直答等）。
+     * 本机落库 mine=false + senderId，线上帧走 sendDirectText 署名。
+     */
+    suspend fun sendDirectAgentSpeech(convId: String, agentId: String, text: String, replyTo: String? = null) {
+        invokeCtl.sendDirectAgentSpeech(convId, agentId, text, replyTo)
     }
 
     /**
@@ -1816,7 +1834,12 @@ class RelayController(
         startMdnsBrowsing()
     }
 
+    /** 前后台状态位：内部 restart/换网路径也看它，避免后台被重新拉起。 */
+    private var appForegrounded: Boolean = true
+
     private fun startMdnsBrowsing() {
+        // 后台期间任何内部 restart/换网都不许重新拉起 browser（否则退火被静默取消）。
+        if (!appForegrounded) return
         val browser = platform.mdnsBrowser
         browser.startBrowsing(
             onServiceFound = { serviceName, host, port ->
@@ -1838,6 +1861,28 @@ class RelayController(
         core.selfMdnsLabel = null
         _state.update {
             it.copy(mdnsServices = emptyList(), network = it.network.copy(mdnsAdvertised = null))
+        }
+    }
+
+    /**
+     * 移动端切入后台时的能耗退火（Task 3.5 & §3.5-4 裁决）：
+     * 暂停 mDNS 活跃扫描，避免移动端后台频繁组播探活耗电被系统杀死。
+     */
+    fun onAppBackgrounded() {
+        appForegrounded = false
+        platform.mdnsBrowser.stopBrowsing()
+        // stopBrowsing 之后 lost 回调不会再来；不清表会留下永远「在线」的幽灵设备行。
+        core.mdnsServices.clear()
+        _state.update { it.copy(mdnsServices = emptyList()) }
+    }
+
+    /**
+     * 移动端切回前台时恢复 mDNS 发现。
+     */
+    fun onAppForegrounded() {
+        appForegrounded = true
+        if (runtime != null) {
+            startMdnsBrowsing()
         }
     }
 

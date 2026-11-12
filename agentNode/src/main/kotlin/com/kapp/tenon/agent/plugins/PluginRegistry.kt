@@ -71,11 +71,23 @@ class PluginRegistry(
     fun register(manifest: PluginManifest, baseUrl: String, httpPort: Int, agentSenderIds: List<String>): Entry {
         val entry = Entry(manifest, baseUrl, httpPort, agentSenderIds, System.currentTimeMillis())
         entries[manifest.pluginId] = entry
+        // 动态注册插件 AgentProfile，使插件作为外部独立 Agent 纳入系统档案与异厂商调度
+        com.kapp.tenon.agent.drivers.AgentProfiles.registerProfile(
+            com.kapp.tenon.agent.drivers.AgentProfiles.Profile(
+                key = manifest.pluginId,
+                vendor = com.kapp.tenon.agent.drivers.AgentProfiles.EXTERNAL_PLUGIN_VENDOR,
+                displayName = manifest.name,
+                defaultRole = com.kapp.tenon.agent.drivers.AgentProfiles.Role.BOTH,
+            ),
+        )
         return entry
     }
 
     /** 注销；返回是否真的有这个条目。 */
-    fun unregister(pluginId: String): Boolean = entries.remove(pluginId) != null
+    fun unregister(pluginId: String): Boolean {
+        com.kapp.tenon.agent.drivers.AgentProfiles.unregisterProfile(pluginId)
+        return entries.remove(pluginId) != null
+    }
 
     fun get(pluginId: String): Entry? = entries[pluginId]
 

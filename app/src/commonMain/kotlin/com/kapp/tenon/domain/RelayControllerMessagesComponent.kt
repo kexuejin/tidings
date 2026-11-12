@@ -55,6 +55,68 @@ internal class RelayControllerMessagesComponent(
     internal val host: ConversationDomainHost,
 ) {
 
+    companion object {
+        /** 活跃会话窗口上限；与既有并发测试（6×400）保持一致，LRU 只做上界。 */
+        const val MAX_ACTIVE_CONVERSATIONS = 16
+    }
+
+    private val activeConversationLru = LinkedHashSet<String>()
+
+
+    /**
+     * 维护活跃会话的 LRU 缓存窗口。
+     * 超出上限时将最久未访问且非当前可见会话的 threads 内存列表卸载，
+     * 释放大卡片与 diff 占用的内存；ConversationSummary 摘要持久留存保证列表完整。
+     */
+    internal fun touchActiveConversation(convId: String) {
+        host.stateLock.withLock {
+            activeConversationLru.remove(convId)
+            activeConversationLru.add(convId)
+            if (activeConversationLru.size > MAX_ACTIVE_CONVERSATIONS) {
+                val iterator = activeConversationLru.iterator()
+                while (iterator.hasNext() && activeConversationLru.size > MAX_ACTIVE_CONVERSATIONS) {
+                    val candidate = iterator.next()
+                    if (candidate != host.core.visibleConversationId) {
+                        iterator.remove()
+                        host.core.threads.remove(candidate)
+                    }
+                }
+            }
+        }
+    }
+
+    /**
+     * 按需从持久化库加载会话消息到内存窗口（当被 LRU 卸载后重新访问）。
+     */
+    internal fun ensureThreadLoaded(convId: String) {
+        if (!host.persistMessages) return
+        val needsLoad = host.stateLock.withLock {
+            host.core.threads[convId] == null
+        }
+        if (needsLoad) {
+            host.scope.launch {
+                val recent = withContext(ioDispatcher) {
+                    runCatching {
+                        host.messageStore.loadOlder(convId, Long.MAX_VALUE, MessageStore.OLDER_PAGE_SIZE)
+                    }.getOrNull().orEmpty()
+                }
+                if (recent.isNotEmpty()) {
+                    host.stateLock.withLock {
+                        val thread = host.core.threads.getOrPut(convId) { mutableListOf() }
+                        val known = thread.mapTo(HashSet()) { it.id }
+                        val fresh = recent.filter { it.id !in known }
+                        thread.addAll(fresh)
+                        thread.sortBy { it.at }
+                    }
+                    touchActiveConversation(convId)
+                    host.publish()
+                }
+            }
+        } else {
+            touchActiveConversation(convId)
+        }
+    }
+
 /**
  * [RelayController] 的消息与会话域扩展。
  *
@@ -711,7 +773,8 @@ fun handleOnInbound(envelope: Envelope) {
     // 接话判据：这条是不是在回复 agent 自己发的那条（只有群文本才有 `replyTo`）。
     val replyToId = if (groupId != null) replyToOf(envelope) else null
     val repliedToIsAgent = replyToId != null && RelayController.isAgentAuthored(
-        host.state.value.messages[convId].orEmpty().firstOrNull { it.id == replyToId },
+        host.state.value.messages[convId].orEmpty().firstOrNull { it.id == replyToId }
+            ?: host.messageStore.findMessageById(replyToId),
     )
     // 触发判据（要不要叫 agent）只有一个；这里再问「谁执行」：
     // 远端 agent 在场时本机让路 —— 这条消息已经送达那台设备，本机不替它回话。
@@ -986,7 +1049,7 @@ fun handleLoadOlderMessages(convId: String) {
     host.scope.launch {
         val older = withContext(ioDispatcher) {
             runCatching {
-                target.loadOlder(convId, oldestSeq, MessageStore.MESSAGE_PAGE_SIZE)
+                target.loadOlder(convId, oldestSeq, MessageStore.OLDER_PAGE_SIZE)
             }.getOrNull()
         } ?: return@launch
         if (older.isEmpty()) return@launch

@@ -77,11 +77,14 @@ import com.kapp.tenon.generated.resources.team_roster_required_warning
 import com.kapp.tenon.generated.resources.seat_directory_resolved
 import com.kapp.tenon.generated.resources.seat_directory_unresolved
 import com.kapp.tenon.generated.resources.team_exec_config_label
+import com.kapp.tenon.generated.resources.team_exec_custom_prompt_placeholder
 import com.kapp.tenon.generated.resources.team_exec_kind_reviewer
 import com.kapp.tenon.generated.resources.team_exec_kind_worker
 import com.kapp.tenon.generated.resources.team_exec_model_default
+import com.kapp.tenon.generated.resources.team_exec_model_placeholder
 import com.kapp.tenon.generated.resources.team_exec_no_drivers
 import com.kapp.tenon.generated.resources.team_exec_pick_driver
+import com.kapp.tenon.generated.resources.team_exec_prompt_badge
 import com.kapp.tenon.generated.resources.team_roster_seat_label
 import com.kapp.tenon.generated.resources.team_roster_slug_warning
 import com.kapp.tenon.ui.theme.LocalAppSpacing
@@ -307,8 +310,10 @@ fun TeamRosterDialog(
                                 },
                             )
                             // **执行配置行**（§7.1，仅席位宿主 + 端口在位时画）：
-                            // kind（执行/审查）+ 驱动下拉（只在位驱动）。模型 P1/P2 才开放，
-                            // P0-A 一律「默认（继承）」。
+                            // kind（执行/审查）+ 驱动下拉（只在位驱动）+ 模型 + 人设。
+                            // 模型从本轮起真的可写：`TeamExecutionMemberSpec.models`
+                            // 一路带到 `executeCliTask(model=)`，两条保存期判据
+                            // （驱动不支持 / 多值）会在这里把原因显示出来。
                             if (executionEditable && index < execMembers.size) {
                                 ExecutionConfigRow(
                                     member = execMembers[index],
@@ -318,6 +323,16 @@ fun TeamRosterDialog(
                                     },
                                     onDriverChange = { key ->
                                         execMembers = execMembers.updateExecAt(index) { it.copy(driverKey = key) }
+                                    },
+                                    onModelChange = { model ->
+                                        execMembers = execMembers.updateExecAt(index) {
+                                            it.copy(models = model?.let { m -> listOf(m) } ?: emptyList())
+                                        }
+                                    },
+                                    onPromptChange = { prompt ->
+                                        execMembers = execMembers.updateExecAt(index) {
+                                            it.copy(customPrompt = prompt?.trim()?.take(2000)?.ifBlank { null })
+                                        }
                                     },
                                 )
                             }
@@ -605,8 +620,18 @@ private fun MemberDraftRow(
 }
 
 /**
- * 组员的执行配置行（§7.1）：`(●) 执行 ( ) 审查` + 驱动下拉。
- * 只在席位宿主 + 端口在位时渲染；模型下拉 P1/P2 才开放，本期固定「默认（继承）」。
+ * 组员的执行配置行（§7.1）：`(●) 执行 ( ) 审查` + 驱动下拉 + 模型 + 人设。
+ * 只在席位宿主 + 端口在位时渲染。
+ *
+ * ## 模型为什么是一个自由输入框，而不是下拉
+ *
+ * 本仓**没有**模型目录（各 CLI 的可用模型由厂商账号决定，没有任何一处声明过），
+ * 造一份下拉等于编数据。所以这里只提供「写什么」这一格，合法性交给两道既有判据：
+ * 保存期 `TeamExecutionValidation` 按 [com.kapp.tenon.agent.drivers.DriverModelFlags]
+ * 拒（不支持按次指定模型的驱动 ⇔ 结构化原因），驱动侧 `withModel` 再响亮失败一次。
+ *
+ * 不在 UI 里判「这个驱动支不支持模型」是**刻意的**：那份词表只有一份，
+ * 抄到 Compose 里必然两处漂移（本仓的 `CardVocabularyGuardTest` 就是为这类事立的）。
  */
 @Composable
 private fun ExecutionConfigRow(
@@ -614,91 +639,154 @@ private fun ExecutionConfigRow(
     drivers: Set<String>,
     onKindChange: (String) -> Unit,
     onDriverChange: (String) -> Unit,
+    onPromptChange: (String?) -> Unit,
+    onModelChange: (String?) -> Unit,
 ) {
     val sp = LocalAppSpacing.current
-    Row(
-        verticalAlignment = Alignment.CenterVertically,
-        horizontalArrangement = Arrangement.spacedBy(sp.sm6),
-        modifier = Modifier.fillMaxWidth().padding(vertical = sp.xxs),
-    ) {
-        Text(
-            text = stringResource(Res.string.team_exec_config_label),
-            style = MaterialTheme.typography.labelSmall,
-            color = MaterialTheme.colorScheme.onSurfaceVariant,
-        )
-        // kind 选择：两个互斥 chip（执行 / 审查）。SegmentedButton 依赖较新 M3，
-        // 这里用既有 chip 形状与选中色 —— 与 SeatSelector 同一套。
-        listOf(
-            TeamExecutionKindsUi.WORKER to stringResource(Res.string.team_exec_kind_worker),
-            TeamExecutionKindsUi.REVIEWER to stringResource(Res.string.team_exec_kind_reviewer),
-        ).forEach { (kind, label) ->
-            val selected = member.kind == kind
+    var showPromptInput by remember { mutableStateOf(!member.customPrompt.isNullOrBlank()) }
+    val currentModel = member.models.firstOrNull()
+    var showModelInput by remember { mutableStateOf(!currentModel.isNullOrBlank()) }
+    Column(modifier = Modifier.fillMaxWidth().padding(vertical = sp.xxs)) {
+        Row(
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(sp.sm6),
+            modifier = Modifier.fillMaxWidth(),
+        ) {
+            Text(
+                text = stringResource(Res.string.team_exec_config_label),
+                style = MaterialTheme.typography.labelSmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+            // kind 选择：两个互斥 chip（执行 / 审查）。SegmentedButton 依赖较新 M3，
+            // 这里用既有 chip 形状与选中色 —— 与 SeatSelector 同一套。
+            listOf(
+                TeamExecutionKindsUi.WORKER to stringResource(Res.string.team_exec_kind_worker),
+                TeamExecutionKindsUi.REVIEWER to stringResource(Res.string.team_exec_kind_reviewer),
+            ).forEach { (kind, label) ->
+                val selected = member.kind == kind
+                Surface(
+                    shape = MaterialTheme.shapes.small,
+                    color = if (selected) {
+                        MaterialTheme.colorScheme.primaryContainer
+                    } else {
+                        MaterialTheme.colorScheme.surfaceVariant
+                    },
+                    onClick = { onKindChange(kind) },
+                ) {
+                    Text(
+                        text = label,
+                        style = MaterialTheme.typography.labelSmall,
+                        modifier = Modifier.padding(horizontal = sp.sm6, vertical = sp.xxs),
+                    )
+                }
+            }
+            Spacer(Modifier.width(sp.sm6))
+            if (drivers.isEmpty()) {
+                Text(
+                    text = stringResource(Res.string.team_exec_no_drivers),
+                    style = MaterialTheme.typography.labelSmall,
+                    color = MaterialTheme.colorScheme.error,
+                )
+            } else {
+                // 驱动下拉：宿主在位驱动（§7.1 —— "装了没"是当下的事实）。
+                var expanded by remember { mutableStateOf(false) }
+                Box {
+                    Surface(
+                        shape = MaterialTheme.shapes.small,
+                        color = MaterialTheme.colorScheme.surfaceVariant,
+                        onClick = { expanded = true },
+                    ) {
+                        Text(
+                            text = member.driverKey.ifBlank { stringResource(Res.string.team_exec_pick_driver) },
+                            style = MaterialTheme.typography.labelSmall,
+                            modifier = Modifier.padding(horizontal = sp.sm6, vertical = sp.xxs),
+                        )
+                    }
+                    if (expanded) {
+                        Column(
+                            modifier = Modifier
+                                .background(MaterialTheme.colorScheme.surface)
+                                .padding(sp.xxs),
+                        ) {
+                            drivers.sorted().forEach { key ->
+                                Text(
+                                    text = key,
+                                    style = MaterialTheme.typography.labelSmall,
+                                    modifier = Modifier
+                                        .fillMaxWidth()
+                                        .clickable {
+                                            onDriverChange(key)
+                                            expanded = false
+                                        }
+                                        .padding(horizontal = sp.sm6, vertical = sp.xxs),
+                                )
+                            }
+                        }
+                    }
+                }
+            }
+            // 模型：留空 = 跟随驱动默认（「继承」）；填了就必须真的生效（见 KDoc）。
             Surface(
                 shape = MaterialTheme.shapes.small,
-                color = if (selected) {
-                    MaterialTheme.colorScheme.primaryContainer
+                color = if (showModelInput) {
+                    MaterialTheme.colorScheme.secondaryContainer
                 } else {
                     MaterialTheme.colorScheme.surfaceVariant
                 },
-                onClick = { onKindChange(kind) },
+                onClick = { showModelInput = !showModelInput },
             ) {
                 Text(
-                    text = label,
+                    text = currentModel ?: stringResource(Res.string.team_exec_model_default),
+                    style = MaterialTheme.typography.labelSmall,
+                    modifier = Modifier.padding(horizontal = sp.sm6, vertical = sp.xxs),
+                )
+            }
+            Surface(
+                shape = MaterialTheme.shapes.small,
+                color = if (showPromptInput) {
+                    MaterialTheme.colorScheme.secondaryContainer
+                } else {
+                    MaterialTheme.colorScheme.surfaceVariant
+                },
+                onClick = { showPromptInput = !showPromptInput },
+            ) {
+                Text(
+                    text = stringResource(Res.string.team_exec_prompt_badge),
                     style = MaterialTheme.typography.labelSmall,
                     modifier = Modifier.padding(horizontal = sp.sm6, vertical = sp.xxs),
                 )
             }
         }
-        Spacer(Modifier.width(sp.sm6))
-        if (drivers.isEmpty()) {
-            Text(
-                text = stringResource(Res.string.team_exec_no_drivers),
-                style = MaterialTheme.typography.labelSmall,
-                color = MaterialTheme.colorScheme.error,
-            )
-        } else {
-            // 驱动下拉：宿主在位驱动（§7.1 —— "装了没"是当下的事实）。
-            var expanded by remember { mutableStateOf(false) }
-            Box {
-                Surface(
-                    shape = MaterialTheme.shapes.small,
-                    color = MaterialTheme.colorScheme.surfaceVariant,
-                    onClick = { expanded = true },
-                ) {
+        if (showPromptInput) {
+            OutlinedTextField(
+                value = member.customPrompt.orEmpty(),
+                onValueChange = { onPromptChange(it) },
+                placeholder = {
                     Text(
-                        text = member.driverKey.ifBlank { stringResource(Res.string.team_exec_pick_driver) },
-                        style = MaterialTheme.typography.labelSmall,
-                        modifier = Modifier.padding(horizontal = sp.sm6, vertical = sp.xxs),
+                        text = stringResource(Res.string.team_exec_custom_prompt_placeholder),
+                        style = MaterialTheme.typography.bodySmall,
                     )
-                }
-                if (expanded) {
-                    Column(
-                        modifier = Modifier
-                            .background(MaterialTheme.colorScheme.surface)
-                            .padding(sp.xxs),
-                    ) {
-                        drivers.sorted().forEach { key ->
-                            Text(
-                                text = key,
-                                style = MaterialTheme.typography.labelSmall,
-                                modifier = Modifier
-                                    .fillMaxWidth()
-                                    .clickable {
-                                        onDriverChange(key)
-                                        expanded = false
-                                    }
-                                    .padding(horizontal = sp.sm6, vertical = sp.xxs),
-                            )
-                        }
-                    }
-                }
-            }
+                },
+                modifier = Modifier.fillMaxWidth().padding(top = sp.xs),
+                textStyle = MaterialTheme.typography.bodySmall,
+                maxLines = 3,
+            )
         }
-        Text(
-            text = stringResource(Res.string.team_exec_model_default),
-            style = MaterialTheme.typography.labelSmall,
-            color = MaterialTheme.colorScheme.onSurfaceVariant,
-        )
+        if (showModelInput) {
+            OutlinedTextField(
+                value = currentModel.orEmpty(),
+                onValueChange = { raw -> onModelChange(raw.trim().take(80).ifBlank { null }) },
+                placeholder = {
+                    Text(
+                        text = stringResource(Res.string.team_exec_model_placeholder),
+                        style = MaterialTheme.typography.bodySmall,
+                    )
+                },
+                modifier = Modifier.fillMaxWidth().padding(top = sp.xs),
+                textStyle = MaterialTheme.typography.bodySmall,
+                singleLine = true,
+            )
+        }
     }
 }
 

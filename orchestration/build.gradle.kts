@@ -22,6 +22,7 @@
 // 这条边界由 :domainComposeFreeGate 的扫描根与本模块自己的编译类路径共同守着。
 plugins {
     alias(libs.plugins.kotlinJvm)
+    alias(libs.plugins.kotlinSerialization)
 }
 
 kotlin {

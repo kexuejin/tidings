@@ -125,6 +125,12 @@ class TeamPlanCompilerTest {
 
         val noRole = TeamPlanCompiler.reviewInstruction("修复登录超时", null)
         assertTrue(!noRole.contains("[role:") && !noRole.contains("VERDICT"))
+
+        val customReview = TeamPlanCompiler.reviewInstruction("修复登录超时", "审查", "聚焦 SQL 注入")
+        assertTrue(customReview.startsWith("[role: 审查] 聚焦 SQL 注入\nGoal: 修复登录超时"))
+
+        val customWorker = TeamPlanCompiler.workerInstruction("实现支付功能", "遵循 Google 代码规范")
+        assertEquals("遵循 Google 代码规范\nGoal: 实现支付功能", customWorker)
     }
 
     /** 命中 reviewer：纯审查单棒 —— 不给 worker 派冗余实现任务。 */

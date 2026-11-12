@@ -39,4 +39,23 @@ class AgentProfilesResolveKeyTest {
         assertNull(AgentProfiles.resolveKey(null, roster))
         assertNull(AgentProfiles.resolveKey("dsh", emptySet()), "不在位就不许解析出来")
     }
+
+    @Test
+    fun dynamicRegisteredProfilesResolveAndProvideVendor() {
+        val customProfile = AgentProfiles.Profile(
+            key = "my-custom-agent",
+            vendor = "custom-vendor",
+            displayName = "Custom AI",
+            defaultRole = AgentProfiles.Role.BOTH,
+        )
+        AgentProfiles.registerProfile(customProfile)
+        try {
+            assertEquals("my-custom-agent", AgentProfiles.normalizeKey("my-custom-agent"))
+            assertEquals("custom-vendor", AgentProfiles.vendorOf("my-custom-agent"))
+            assertEquals("my-custom-agent", AgentProfiles.resolveKey("my-custom-agent", setOf("my-custom-agent")))
+        } finally {
+            AgentProfiles.unregisterProfile("my-custom-agent")
+        }
+        assertNull(AgentProfiles.normalizeKey("my-custom-agent"))
+    }
 }

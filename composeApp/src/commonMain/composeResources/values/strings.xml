@@ -67,7 +67,7 @@
     <string name="chat_empty_message">发第一条吧。对方离线也没关系，消息会排队等它上线。</string>
     <string name="chat_first_message">写第一条消息</string>
     <string name="chat_no_selection_title">选一个会话</string>
-    <string name="chat_no_selection_message">选一个人或 Agent，就能开始聊。</string>
+    <string name="chat_no_selection_message">选联系人或智能体，就能开始聊。</string>
     <string name="chat_composer_hint">说点什么…</string>
     <string name="chat_send">发送</string>
     <!-- 表情入口的无障碍朗读文本。两个壳共用一条：桌面浮层和手机托盘的布局不同，
@@ -482,7 +482,7 @@
     <!-- 工作区详情的整屏空态：工作区对象不存在且一条会话都没有时。
          此前这一屏只剩一张写着「暂无会话」的小卡，大半屏是空的 —— 空态没有"出路"。 -->
     <string name="workspace_detail_empty_title">这个项目目录还没有任何会话</string>
-    <string name="workspace_detail_empty_body">agent 宿主还没有为它上报会话。等它跑起来、或者先回项目目录列表看看别的。</string>
+    <string name="workspace_detail_empty_body">智能体宿主还没有为它上报会话。等它跑起来、或者先回项目目录列表看看别的。</string>
     <string name="workspace_detail_empty_back">回到项目目录列表</string>
     <!--
       声明了 N 条会话、但这一屏本地还没拉到任何一条时用的话。
@@ -507,7 +507,7 @@
          这一行按真值只画它能画的两段（在线/离线 + TCP 端口）。TCP 是原样保留的协议词。 -->
     <!-- 页头汇总。原型 relay.html:4208-4211 的 sub =「N 台设备 · N 个 Agent · N 个工作区 · N 个会话[ · N 项待审批]」；
          文案清洗裁决（2026-11-01）去掉「· 会话」段 —— 数会话是工具语汇，普通用户扫一眼要的是前三个数。 -->
-    <string name="workspace_board_subtitle">%1$d 台设备 · %2$d Agent · %3$d 项目目录</string>
+    <string name="workspace_board_subtitle">%1$d 台设备 · %2$d 智能体 · %3$d 项目目录</string>
     <string name="workspace_bar_switch">切换项目目录</string>
     <string name="workspace_picker_sheet_title">选择项目目录</string>
     
@@ -519,10 +519,10 @@
 <string name="agent_empty_subtitle">%1$d 个项目目录</string>
     <!-- 空态（原型 relay.html:4563-4579 screenAgentsEmpty）：警告条 +「Agent（0）」段头 + 卡内说明 +「去看看节点」行。
          文案**不印 wire 键**：原型 relay.html:4562 注释写死「不印 `ag1` 这种 wire 键（R2）」。 -->
-    <string name="agent_empty_title">还没有任何 Agent 上报</string>
-    <string name="agent_empty_message">对方在线并运行 Agent 后，它的项目目录会出现在这里。</string>
-    <string name="agent_empty_section">Agent（0）</string>
-    <string name="agent_empty_card">还没有设备上报 Agent 与项目目录。对方在线后，卡片会自动出现在这里。</string>
+    <string name="agent_empty_title">还没有任何智能体上报</string>
+    <string name="agent_empty_message">对方在线并运行智能体后，它的项目目录会出现在这里。</string>
+    <string name="agent_empty_section">智能体（0）</string>
+    <string name="agent_empty_card">还没有设备上报智能体与项目目录。对方在线后，卡片会自动出现在这里。</string>
     <string name="agent_empty_exit_title">去看看节点</string>
     <string name="agent_empty_exit_body">确认对方在线，再回来看这里</string>
     <!-- 新手冷启动引导卡（UX 规范 §2.6）：已经有项目目录、但一个都还没绑群时出现。
@@ -532,10 +532,10 @@
     <string name="agent_onboarding_device_body">该设备已就绪，随时可以为你分配数字员工团队</string>
     <string name="agent_onboarding_bind_target">将关联目录：%1$s</string>
     <string name="agent_onboarding_bind_cta">立即为它关联第一个项目</string>
-    <string name="agent_offline_title">Agent 离线</string>
+    <string name="agent_offline_title">智能体离线</string>
     <string name="agent_offline_message">它上次在线是 %1$s。消息会排队，等它回来自动补发。</string>
     <string name="agent_messages_title">聊天消息</string>
-    <string name="agent_sessions_empty">还没有会话。等对方设备上的 Agent 开始工作，这里就会出现它的会话。</string>
+    <string name="agent_sessions_empty">还没有会话。等对方设备上的智能体开始工作，这里就会出现它的会话。</string>
     <string name="agent_sessions_memory_note">会话与它的动态都保存在这台设备上，重启应用后仍在。</string>
     <!-- 会话分页（PPE-1 增补 D8）：点开工作区时按需拉历史会话，底部可继续加载。 -->
     <string name="agent_session_load_more">加载更多</string>
@@ -553,10 +553,10 @@
          没有证据时整行不画 —— 见 feature/chat/AgentComposerStatus.kt。 -->
     <!-- 排队中：指令在这个会话的队列里，要等当前这一轮结束才轮到它。 -->
     <string name="chat_composer_status_queued">指令已排队，等这一轮结束就轮到它</string>
-    <string name="chat_composer_status_thinking">Agent 正在思考 / 执行中…</string>
+    <string name="chat_composer_status_thinking">智能体正在思考 / 执行中…</string>
     <string name="chat_composer_status_awaiting_approval">等待你审批工具调用…</string>
-    <string name="chat_composer_status_unresponsive">Agent 已停止响应（最近没有新动作）</string>
-    <string name="chat_composer_status_stopped">Agent 已停止（执行出错）</string>
+    <string name="chat_composer_status_unresponsive">智能体已停止响应（最近没有新动作）</string>
+    <string name="chat_composer_status_stopped">智能体已停止（执行出错）</string>
     <string name="agent_session_meta">%1$s · %2$s</string>
     <string name="agent_session_started">开始于 %1$s</string>
     <string name="agent_session_events_count">%1$d 条事件</string>
@@ -568,11 +568,11 @@
          （DSH 自己在同一处境下也显示「未命名」，见 AgentSessionUi.displayTitle 的 KDoc）。 -->
     <string name="agent_session_untitled">未命名</string>
     <string name="agent_session_show_older">显示更早</string>
-    <string name="agent_events_note">下面是该 Agent 与你的真实聊天消息（一条消息一张卡），不是结构化事件。</string>
-    <string name="agent_timeline_empty">这个 Agent 还没有和你聊过天。</string>
+    <string name="agent_events_note">下面是该智能体与你的真实聊天消息（一条消息一张卡），不是结构化事件。</string>
+    <string name="agent_timeline_empty">这个智能体还没有和你聊过天。</string>
     <string name="agent_open_chat">打开聊天</string>
-    <string name="agent_event_dir_out">我 → Agent</string>
-    <string name="agent_event_dir_in">Agent → 我</string>
+    <string name="agent_event_dir_out">我 → 智能体</string>
+    <string name="agent_event_dir_in">智能体 → 我</string>
     <string name="agent_thought_process">思索过程</string>
     <string name="agent_thought_process_elapsed">思索过程 (%1$s)</string>
     <string name="agent_thought_thinking">思考中…</string>
@@ -685,7 +685,7 @@
     <string name="tool_approvals_empty">还没有免批规则。审批时点「始终允许」会产生一条，并出现在这里。</string>
     <string name="tool_approvals_unavailable">控制面未运行，暂时读不到免批表。</string>
     <string name="tool_approvals_agent">agent %1$s</string>
-    <string name="tool_approvals_all_agents">全部 agent</string>
+    <string name="tool_approvals_all_agents">全部智能体</string>
     <string name="tool_approvals_row_meta">%1$s · %2$s</string>
     <string name="tool_approvals_row_ws">项目目录 %1$s</string>
     <string name="tool_approvals_revoke">撤销</string>
@@ -742,8 +742,8 @@
     <!-- 每页有自己的副标题（原型 screenSetNotify 的 topbar 逐字）。拆分前六段共用
          set_more_subtitle，那是合并页留下的一处偏差。 -->
     <string name="set_notify_subtitle">提醒规则与静默时段</string>
-    <string name="set_more_notif_agent">Agent 消息通知</string>
-    <string name="set_more_notif_agent_sub">Agent 会话有新消息时提醒</string>
+    <string name="set_more_notif_agent">智能体消息通知</string>
+    <string name="set_more_notif_agent_sub">智能体会话有新消息时提醒</string>
     <string name="set_more_notif_mention">仅被 @ 时提醒</string>
     <string name="set_more_notif_mention_sub">其余消息静默进列表</string>
     <string name="set_more_notif_quiet">静默时段</string>
@@ -1054,7 +1054,7 @@
     <string name="desktop_title_files">已落盘与传输中的文件</string>
     <!-- 工作区视图的标题栏副标题。原型 d-agents 的 tsub() 没有这一支（回落成了节点那句），
          这里补一句真的：这一屏看的就是「哪些工作区、各有几个会话在动」。 -->
-    <string name="desktop_title_agents">已上报的项目目录与会话</string>
+    <string name="desktop_title_agents">智能体与项目目录</string>
     <!-- desktop_peer_header（地址 · 状态 · 最后在线三段）已随 2026-11-01 产品级语汇裁决
          退场：标题栏/聊天头部只印在场（peerPresenceLine 用 desktop_peer_connected /
          desktop_peer_last_seen 拼接），地址留在详情栏与节点页的合法语境。 -->
@@ -1122,7 +1122,7 @@
     <string name="r2_shell_empty_scan_sub">手机装好榫卯后扫这个码，配对就完成了</string>
     <string name="r2_shell_empty_drop_title">拖文件进来</string>
     <string name="r2_shell_empty_drop_sub">先发给自己另一台设备试一条</string>
-    <string name="r2_shell_empty_agent_title">本机已在跑 Agent</string>
+    <string name="r2_shell_empty_agent_title">本机已在跑智能体</string>
     <string name="r2_shell_empty_agent_sub">这台电脑已经在收文件了，点这里看状态与日志</string>
     <string name="r2_shell_empty_footline">局域网内开启「允许被发现」的设备会自动出现在这里</string>
     <string name="r2_shell_empty_footline_warn">首次运行如果 macOS 问「允许传入连接」，请选允许</string>
@@ -1190,8 +1190,8 @@
     <string name="desktop_tray_open_main">打开主窗口</string>
     <string name="desktop_tray_received_files">收到的文件</string>
     <string name="desktop_tray_received_files_count">收到的文件（%1$d）</string>
-    <string name="desktop_tray_agent_running">本机 Agent 运行中</string>
-    <string name="desktop_tray_agent_stopped">本机 Agent 未运行</string>
+    <string name="desktop_tray_agent_running">本机智能体运行中</string>
+    <string name="desktop_tray_agent_stopped">本机智能体未运行</string>
     <string name="desktop_tray_open_settings">设置…</string>
     <string name="desktop_tray_quit">退出榫卯</string>
 
@@ -1397,7 +1397,7 @@
     <string name="banner_screen_view_ended">屏幕协助已结束 (%1$s)</string>
     <!-- agent-ack（审批回执）的两条出路。控制器只报事实，文案在这里落地。 -->
     <string name="banner_agent_ack_send_failed">审批结果没有送出，对方没有收到；这条审批仍是待审批，请稍后重试。</string>
-    <string name="banner_agent_ack_not_confirmed">对方未开启审批回执（或当前不在线），已按你的选择记录；最终以对方 Agent 的实际执行为准。</string>
+    <string name="banner_agent_ack_not_confirmed">对方未开启审批回执（或当前不在线），已按你的选择记录；最终以对方智能体的实际执行为准。</string>
     <string name="banner_luciola_unavailable">加密信道未能启动（安装不完整或系统组件缺失），本机暂时无法与其它设备通信。</string>
     <string name="screen_reason_declined">对方已拒绝</string>
     <string name="screen_reason_busy">对方忙碌中</string>
@@ -1608,7 +1608,7 @@
     <!-- L3（高危）的批准不再是按了立即生效：先弹这张确认卡（issue：一键批准无确认无撤销）。 -->
     <string name="agent_approval_confirm_l3_title">确认批准高危操作</string>
     <string name="agent_approval_confirm_l3_body">这条请求要求执行高危操作，批准后将直接放行。</string>
-    <string name="agent_approval_confirm_always_body">确认后，这台设备上的这个 agent 再调用该工具时不再询问。</string>
+    <string name="agent_approval_confirm_always_body">确认后，这台设备上的这个智能体再调用该工具时不再询问。</string>
     <!-- 对端帧里没有声明风险等级时不猜：宁可显示「未分级」，也不替对端宣布它是安全的。 -->
     <string name="agent_approval_risk_unrated">未分级</string>
     <string name="agent_approval_risk_l1">L1 只读</string>
@@ -1661,6 +1661,7 @@
 
     <!-- 协同群与权限进阶（群聊工作区协同体系） -->
     <string name="workspace_create_group_title">创建项目协同群</string>
+    <string name="workspace_board_action_create">新建项目协同</string>
     <string name="workspace_create_group_quick_title">本机已有项目目录</string>
     <string name="workspace_create_group_dedup_hint">目录 1:1 防重绑定</string>
     <string name="workspace_create_group_in_group">已在协同群中</string>
@@ -1731,7 +1732,7 @@
     <string name="workspace_grant_request_pending">已申请，等待对端确认…</string>
     <!-- 返回 null 的三种处境各一句，**不许合并**：合成一句等于替对端说一个它没说过的结论。 -->
     <string name="workspace_grant_request_no_runtime">本机节点还没起来，申请没发出去。稍后再试。</string>
-    <string name="workspace_grant_request_peer_not_agent">对方设备不是 Agent 主机，收不到授权申请。</string>
+    <string name="workspace_grant_request_peer_not_agent">对方设备不是智能体主机，收不到授权申请。</string>
     <string name="workspace_grant_request_peer_no_loop">对方设备不支持授权申请（版本较旧或不支持），这次申请没有发出。</string>
     <!-- 授权清单对话框在**远端**工作区上多的一句说明（本机不画）。 -->
     <string name="workspace_grant_remote_hint">这份清单是本端已知的授权；对端设备上的权限由对端决定。</string>
@@ -1755,7 +1756,7 @@
 
     <!-- 每个 agent 的执行权限：逐设备勾选 -->
     <string name="agent_exec_who_title">谁能让它干活</string>
-    <string name="agent_exec_who_note">只有勾上的设备能在这个 agent 上执行命令。新装的 agent 默认只允许你自己。</string>
+    <string name="agent_exec_who_note">只有勾上的设备能在这个智能体上执行命令。新装的智能体默认只允许你自己。</string>
     <string name="agent_exec_who_empty">还没有可授权的设备。加一台设备后就能在这里勾选。</string>
     <string name="agent_exec_who_trusted_badge">可信</string>
     <string name="agent_exec_who_add">+ 添加设备</string>
@@ -1782,10 +1783,10 @@
     <string name="agent_approval_scope_hint">「本会话免审」只管当前会话；「此工具始终允许」跨会话，只管这一个工具名。</string>
     <string name="agent_approval_revoke_session">恢复逐条审批</string>
     <string name="agent_approval_history_title">审批记录</string>
-    <string name="agent_empty_agents_only_title">已收到 Agent</string>
-    <string name="agent_empty_agents_only_message">这台设备上的 Agent 还没有上报任何项目目录或会话。</string>
-    <string name="agent_empty_agents_only_card">已经收到 Agent，但它还没有宣告任何项目目录或会话；它开始工作后，卡片会自动出现在这里。</string>
-    <string name="agent_empty_section_n">Agent（%1$d）</string>
+    <string name="agent_empty_agents_only_title">已收到智能体</string>
+    <string name="agent_empty_agents_only_message">这台设备上的智能体还没有上报任何项目目录或会话。</string>
+    <string name="agent_empty_agents_only_card">已经收到智能体，但它还没有宣告任何项目目录或会话；它开始工作后，卡片会自动出现在这里。</string>
+    <string name="agent_empty_section_n">智能体（%1$d）</string>
     <string name="workspace_grant_unknown_peer">未知成员</string>
     <string name="workspace_grant_state_approved">已批准</string>
     <string name="workspace_grant_state_denied">已拒绝</string>
@@ -1851,6 +1852,9 @@
          检查项的耗时由插件给的字符串直接展示（card_check_time 只做「读作」拼装）；
          打回抽屉的芯片是给用户的快捷短语，选了会填进输入框可继续编辑。 -->
     <string name="card_check_time_format">耗时 %1$s</string>
+    <string name="card_checks_summary_passed">✓ 全部 %1$d 项验收通过</string>
+    <string name="card_checks_summary_incomplete">● %1$d 项验收未运行，共 %2$d 项</string>
+    <string name="card_checks_summary_failed">⚠ %1$d 项验收未通过，共 %2$d 项</string>
     <string name="card_check_drawer_open">展开日志</string>
     <string name="card_check_drawer_close">收起日志</string>
     <string name="card_diff_expand_code">展开代码</string>
@@ -1886,7 +1890,7 @@
     <string name="capsule_sheet_title">选择目标</string>
     <string name="capsule_sheet_recent">最近任务</string>
     <string name="capsule_sheet_new_task">发起新任务</string>
-    <string name="capsule_sheet_empty">这个 agent 还没有授权的项目目录，轻点「发起新任务」直接派单。</string>
+    <string name="capsule_sheet_empty">这个智能体还没有授权的项目目录，轻点「发起新任务」直接派单。</string>
 
     <!-- 群设置 · 智能体与工作区授权面板（方案 §5.1，替换 ExposeAgentDialog） -->
     <string name="group_auth_title">智能体与项目目录授权</string>
@@ -1952,10 +1956,13 @@
     <string name="team_exec_kind_worker">执行</string>
     <string name="team_exec_kind_reviewer">审查</string>
     <string name="team_exec_pick_driver">选驱动…</string>
-    <string name="team_exec_no_drivers">本机没有可用的 agent 驱动</string>
+    <string name="team_exec_no_drivers">本机没有可用的智能体驱动</string>
     <string name="team_exec_model_default">默认（继承）</string>
     <string name="team_exec_readonly_note">执行配置由席位宿主管理：%1$s</string>
     <string name="team_exec_member_note">%1$s（团队）</string>
+    <string name="team_exec_prompt_badge">人设</string>
+    <string name="team_exec_custom_prompt_placeholder">自定义该成员的人设与审查重点提示词（选填）</string>
+    <string name="team_exec_model_placeholder">模型 id（如 claude-opus-4-1）；留空 = 跟随驱动默认</string>
     <string name="team_roster_max_members">最多 %1$d 人</string>
     <string name="team_roster_remove_member">删除</string>
     <string name="team_roster_conflict_warning">与群内成员 @%1$s 冲突，请更换</string>
@@ -1963,7 +1970,7 @@
     <string name="team_roster_required_warning">不能为空</string>
     <string name="team_roster_slug_warning">只能用小写字母、数字和连字符</string>
     <string name="team_roster_duplicate_warning">在团队内重复，请更换</string>
-    <string name="team_roster_disable_note">关闭后，群成员将看不到这个 agent 的团队组员清单；@ 仍然指向该 agent。</string>
+    <string name="team_roster_disable_note">关闭后，群成员将看不到这个智能体的团队组员清单；@ 仍然指向该智能体。</string>
     <string name="team_roster_member_note">组员是团队编制的分工标签：不占群席位，也不会单独执行。</string>
     <string name="team_roster_mobile_notice">执行驱动与模型由桌面宿主 (Desktop) 托管</string>
     <string name="team_roster_badge">团队 (%1$d)</string>

@@ -85,7 +85,9 @@ object AgentLiveLog {
 @Composable
 fun AgentLiveLogPanel(sessionId: String?, modifier: Modifier = Modifier) {
     if (sessionId == null) return
-    val lines = remember(sessionId) { AgentLiveLog.snapshot(sessionId) }
+    // snapshot 内部读 revision 状态：直接调用才会在 append 后触发重组；
+    // remember(sessionId) 只会把首帧快照钉死，看起来「不实时」。
+    val lines = AgentLiveLog.snapshot(sessionId)
     if (lines.isEmpty()) return
     val scroll = rememberScrollState()
     Column(modifier = modifier.fillMaxWidth()) {

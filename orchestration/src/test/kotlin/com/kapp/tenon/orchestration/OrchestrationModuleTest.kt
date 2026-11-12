@@ -79,5 +79,6 @@ class OrchestrationModuleTest {
         assertTrue(LowRiskReviewer.isLowRisk("L1", "update docs and add a unit test"))
         assertTrue(!LowRiskReviewer.isLowRisk("L1", "rm -rf build"))
         assertTrue(!LowRiskReviewer.isLowRisk(null, "mystery-tool --do-something"))
+
     }
 }

@@ -1054,7 +1054,6 @@ public fun DesktopShell(
                                 selectedAgentId = selectedPeerId,
                                 onSelectAgent = { selectedPeerId = it },
                                 onOpenChat = { id, wsId ->
-                                    val ws = agentSlice.agentWorkspaces.values.firstOrNull { it.wsId == wsId }
                                     // 反查绑定群只认席位声明（groupBoundToWorkspace，单源）；子串反猜已删（F2）。
                                     val boundGroup = groupBoundToWorkspace(wsId, settingsSlice.settings.groups)
                                     if (boundGroup != null) {
@@ -1062,16 +1061,13 @@ public fun DesktopShell(
                                         selectedPeerId = groupConvId
                                         view = DesktopView.Conversations
                                         openConversation(groupConvId)
-                                    } else if (ws != null) {
-                                        // issue 7：这一行是某个具体工作区且没有绑定群 ⇒ **针对它**
-                                        // 提示建群并进入。此前这里是 `id == settingsSlice.settings.nodeId` 时
-                                        // `showCreateWsDialog = true` —— 弹出一张跟这一行无关的
-                                        // 「所有工作区」列表，用户点的那一行在列表里还要自己再找一遍。
-                                        // 那张列表仍然保留，但只能是独立入口（会话栏的「协同群」按钮）。
-                                        groupCreatePromptFor = ws
                                     } else {
-                                        // 没有 wsId 的 Agent 行（或者工作区对象还没到）：直接进这个
-                                        // 节点的会话，与手机壳同一条 —— 不再因为"是本机"就换一条路。
+                                        // 没有绑定群 ⇒ 直接进这个节点的 1:1，不再前置拦建群弹窗。
+                                        //
+                                        // 原样是 `groupCreatePromptFor = ws`：点一行工作区先弹「为这个目录
+                                        // 建个群？」，要进去说话得先关框。建群入口仍在两处独立触发
+                                        // ——「+ 创建项目协同群」（`onCreateWorkspaceGroup`）与新手卡
+                                        // （`onBindFirstProject`），它们与本行无关。
                                         selectedPeerId = id
                                         selectedWsId = wsId
                                         selectedAgentSessionId = null

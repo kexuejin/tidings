@@ -23,6 +23,7 @@ import com.kapp.tenon.domain.model.TransferRecordUi
 import com.kapp.tenon.domain.model.WorkspaceKey
 import com.kapp.tenon.domain.model.WorkspaceUi
 import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.distinctUntilChanged
@@ -218,6 +219,14 @@ internal class RelayStateSlices(
 
     val avatar: StateFlow<AvatarSlice> =
         source.map { it.toAvatarSlice() }.distinctUntilChanged().stateIn(scope, started, source.value.toAvatarSlice())
+
+    /**
+     * 单会话独立订阅流（Task 2.6 & §7.6 裁决）：
+     * 仅当指定会话的消息发生增删或变化时发射，切断跨群更新导致的无谓重组。
+     * 纯投影，与底层单一写入状态源完全共享。
+     */
+    fun messageFlowOf(convId: String): Flow<List<MessageUi>> =
+        chat.map { it.messages[convId].orEmpty() }.distinctUntilChanged()
 
     private companion object {
         /** 订阅者全部离开后上游停多久。与 Compose 里常见的 5s 一致。 */
