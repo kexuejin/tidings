@@ -270,16 +270,22 @@ object TeamPlanCompiler {
      * `DesktopStageChain` 对 i>0 的棒自动追加 —— 编译层**不重复**。
      *
      * 优先采纳组员人设自定义提示词 [customPrompt]；未定义时回退至系统默认审查模版。
+     *
+     * **目标必须全文进审查指令，绝不截断**。任务书不是交接摘要：逐条 AC 那种长需求
+     * 一旦截到前几十字，末尾几条对审查棒就根本不存在，它只能据「无法核验」判
+     * REJECT；回炉后 worker 认为活已干完、零补丁，整条链停摆。交接摘要另走
+     * `MAX_SUMMARY` 预算（那是上一棒说过的话），不能拿来当任务书的替身。
+     * [workerInstruction] 一直用全文，这里必须与它对称。
      */
     internal fun reviewInstruction(goal: String, roleLabel: String?, customPrompt: String? = null): String {
         val role = roleLabel?.trim().orEmpty()
         val roleLine = if (role.isEmpty()) "" else "[role: $role] "
         val custom = customPrompt?.trim().orEmpty()
         val body = if (custom.isNotEmpty()) {
-            custom + "\nGoal: " + goal.take(80) +
+            custom + "\nGoal: " + goal +
                 ". Give findings item by item, a problem list, and an explicit final verdict line; do not rewrite the implementation."
         } else {
-            "Review the current workspace against the goal: " + goal.take(80) +
+            "Review the current workspace against the goal: " + goal +
                 ". Give findings item by item, a problem list, and an explicit final verdict line; do not rewrite the implementation."
         }
         return roleLine + body

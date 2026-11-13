@@ -393,6 +393,7 @@
     <string name="hub_agent_role_single">Solo</string>
     <string name="hub_agent_role_team">Team of %1$d</string>
     <string name="hub_agent_meta_format">%1$d project directories · serving %2$d groups</string>
+    <string name="hub_workstation_format">%1$s (%2$s)</string>
     <!-- "Latest delivery" tag at the bottom of an agent card. Facts only: the artifact
          frame carries no success bit, so this never claims a delivery succeeded. -->
     <string name="hub_artifact_latest_tag">Latest delivery: %1$s</string>
@@ -401,8 +402,7 @@
     <string name="hub_team_leader_format">Lead %1$s</string>
     <string name="hub_team_size_format">%1$d people</string>
     <string name="hub_team_open_group">Open group</string>
-    <string name="hub_team_member_role_format">%1$s · %2$s</string>
-    <string name="hub_team_member_no_role">%1$s</string>
+    <string name="hub_team_place_format">Directory %1$s</string>
     <string name="hub_team_empty">No teams yet. A team appears once a group declares a team seat.</string>
     <string name="hub_activity_last_format">Last active %1$s</string>
     <string name="hub_activity_offline_format">Offline · last active %1$s</string>
@@ -1831,7 +1831,7 @@ Collaboration channel connected; project directory events and progress will sync
     <string name="team_exec_model_placeholder">Model id (e.g. claude-opus-4-1); blank = driver default</string>
     <string name="team_roster_max_members">Up to %1$d</string>
     <string name="team_roster_remove_member">Remove</string>
-    <string name="team_roster_conflict_warning">Name conflicts with @%1$s, please choose another</string>
+    <string name="team_roster_alias_hint">This group already has @%1$s, so the member here will be @%2$s</string>
     <string name="team_roster_limit_warning">Cannot exceed %1$d characters</string>
     <string name="team_roster_required_warning">Cannot be empty</string>
     <string name="team_roster_slug_warning">Only lowercase letters, digits and hyphens</string>
@@ -1846,6 +1846,7 @@ Collaboration channel connected; project directory events and progress will sync
     <string name="team_profile_managed">This team\'s roster is managed by its team profile. Edit the team itself; the change applies to every group it joined.</string>
     <string name="team_profile_saved">Team profile saved: %1$s (%2$d groups)</string>
     <string name="team_profile_saved_partial">Team profile saved: %1$s (%2$d groups; %3$d could not be written, save again to retry)</string>
+    <string name="team_profile_saved_aliased">%1$d of those groups already had a member with that name; the local alias is in effect there (mention it by the alias)</string>
     <string name="team_profile_rejected">Team profile not saved: invalid name, empty roster, or a target group is not writable.</string>
     <string name="team_profile_new">New team</string>
     <string name="team_profile_edit">Edit team</string>

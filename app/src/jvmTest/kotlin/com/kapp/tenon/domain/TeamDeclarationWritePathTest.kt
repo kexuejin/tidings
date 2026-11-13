@@ -254,25 +254,37 @@ class TeamDeclarationWritePathTest {
         assertEquals(4, groupOf(controller).rev, "失败的保存不落库")
     }
 
-    /** 校验失败（撞群内 @ token）：可读反馈，rev 不动 —— 不允许「存下去再说」。 */
+    /**
+     * **结构性错**（这里是 role 为空）在落盘前就拒：rev 不动、横幅如实。
+     *
+     * 撞 token 原本也走这条，现在不算错（见下一条）—— 「别人先占了名字」不是用户的笔误，
+     * 不该让整支团队卡住；用户自己没填的字段才是必须回去改的。
+     */
     @Test
     fun anInvalidRosterIsRejectedBeforePersist() {
         val controller = controller()
         seededGroup(controller)
-        // "codex" 是外来声明的 agentId —— 在 @ token 池里。
-        controller.handleSetGroupTeamDeclaration("g1", "dsh", listOf(TeamMemberDraft("m-x", "codex", "编码")))
+        controller.handleSetGroupTeamDeclaration("g1", "dsh", listOf(TeamMemberDraft("m-x", "coder", "")))
         assertEquals(BannerMessage.TeamRosterInvalid, controller.state.value.banner?.message)
         assertEquals(4, groupOf(controller).rev)
     }
 
-    /** 撞**领队自己的 token** 也不许（影子领队）。 */
+    /**
+     * 组员撞**领队自己的 token**（影子领队）也是别名，不是拒绝：本群改叫 `dsh-ws-a-2`。
+     *
+     * 反向探针：把 `planTeamRoster` 的 `resolveNames` 换回直接落原名，这条会红
+     * （本群会出现两个都能被 `@dsh-ws-a` 命中的东西 = 影子领队）。
+     */
     @Test
-    fun aMemberNameCollidingWithTheLeaderTokenIsRejected() {
+    fun aMemberNameCollidingWithTheLeaderTokenBecomesAnAlias() {
         val controller = controller()
         seededGroup(controller)
         controller.handleSetGroupTeamDeclaration("g1", "dsh", listOf(TeamMemberDraft("m-x", "dsh-ws-a", "编码")))
-        assertEquals(BannerMessage.TeamRosterInvalid, controller.state.value.banner?.message)
-        assertEquals(4, groupOf(controller).rev)
+        assertEquals(BannerMessage.TeamRosterSaved, controller.state.value.banner?.message)
+        val seat = groupOf(controller).virtualAgents.orEmpty().first { it.defaultWsId == "ws-a" }
+        assertEquals(listOf("dsh-ws-a-2"), seat.teamMembers.map { it.name })
+        // 领队席位自己的名字一个字都不许动。
+        assertEquals("dsh-ws-a", seat.name)
     }
 
     /** 沿用被编辑席位自己的旧组员名不算冲突（正在被整体替换）。 */

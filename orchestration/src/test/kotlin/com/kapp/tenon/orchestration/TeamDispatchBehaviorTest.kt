@@ -155,6 +155,40 @@ class TeamDispatchBehaviorTest {
         )
     }
 
+    /** 被拒的团队派单必须留下一条**可批准的申请**（键 = 授权判据用的 m-* agentId）。 */
+    @Test
+    fun deniedTeamDispatchRecordsAnApprovalRequest() = runBlocking {
+        // withProfile=true：NotConfigured（缺配置）是另一条拒绝路，不产生审批申请 ——
+        // 批准救不了没配置。审批回流只挂在**授权拒绝**（MemberOnly）上。
+        val (controller, orch, _) = harness(withProfile = true, policyOf = { null })
+        val recorded = mutableListOf<Triple<String, String?, String>>()
+        controller.invokeRecordGrantRequest = { nodeId, agentKey, reason ->
+            recorded += Triple(nodeId, agentKey, reason)
+        }
+        dispatch(orch, "coder") // @coder → 组员 token → 团队分支 → 授权拒绝（MemberOnly）
+        assertTrue(
+            recorded.isNotEmpty(),
+            "被拒的团队派单必须记一条授权申请（没有它，m-* 编制行永远打不开）",
+        )
+        val (nodeId, agentKey, reason) = recorded.single()
+        assertEquals(sender, nodeId, "申请人是发起派单的手机节点")
+        assertEquals("m-coder", agentKey, "键必须与授权判据同一把（target.member.agentId）")
+        assertTrue("team dispatch" in reason, "原因要能看懂是哪条派单")
+    }
+
+    /** 席位直呼被拒同样要回流（与 1:1 invoke 的被拒口径一致）。 */
+    @Test
+    fun deniedSeatDispatchRecordsAnApprovalRequest() = runBlocking {
+        val (controller, orch, _) = harness(withProfile = false, policyOf = { null })
+        val recorded = mutableListOf<Triple<String, String?, String>>()
+        controller.invokeRecordGrantRequest = { nodeId, agentKey, reason ->
+            recorded += Triple(nodeId, agentKey, reason)
+        }
+        dispatch(orch, "lead-seat") // @领队席位 → deniedSeatDispatch 分支
+        assertTrue(recorded.isNotEmpty(), "席位直呼被拒也要记申请")
+        assertEquals("dsh-lead", recorded.single().second, "键 = 席位 agentId")
+    }
+
     private fun blockedCards(controller: RelayController) =
         controller.state.value.messages[convId()].orEmpty().filter { it.card != null }
 

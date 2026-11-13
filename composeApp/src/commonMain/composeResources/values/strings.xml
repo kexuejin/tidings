@@ -463,6 +463,9 @@
     <string name="hub_agent_role_single">单兵</string>
     <string name="hub_agent_role_team">团队 %1$d 人</string>
     <string name="hub_agent_meta_format">%1$d 个项目目录 · 服务 %2$d 个群</string>
+    <!-- 工位：「用什么驱动 (在哪台机器上)」。驱动名在前 —— 它是「这个人怎么干活」，机器是它的位置。
+         括号用半角：里面装的是主机名（拉丁字符），全角括号会在中英混排里多出两格空隙。 -->
+    <string name="hub_workstation_format">%1$s (%2$s)</string>
     <!-- 卡片底部的「最近交付」标签。措辞只报事实：协议里没有产物的成败位，
          所以这里不写「成功」—— 它说的是「最近收到一件叫 X 的产物」。 -->
     <string name="hub_artifact_latest_tag">最近交付：%1$s</string>
@@ -474,8 +477,8 @@
     <string name="hub_team_leader_format">领队 %1$s</string>
     <string name="hub_team_size_format">%1$d 人</string>
     <string name="hub_team_open_group">打开协同群</string>
-    <string name="hub_team_member_role_format">%1$s · %2$s</string>
-    <string name="hub_team_member_no_role">%1$s</string>
+    <!-- 团队行第三行：这支队在哪个项目目录里干活（席位声明的执行点）。 -->
+    <string name="hub_team_place_format">项目目录 %1$s</string>
     <string name="hub_team_empty">还没有团队。群里加了「团队」席位之后这里才会出现。</string>
     <!-- 「最新活动」的诚实措辞（不变量 4）：24h 之外不叫「最新」，对端离线也不叫。
          字符串与判定函数 agentActivityFreshness 一一对应，UI 不许自带第三档。 -->
@@ -2022,7 +2025,7 @@
     <string name="team_exec_model_placeholder">模型 id（如 claude-opus-4-1）；留空 = 跟随驱动默认</string>
     <string name="team_roster_max_members">最多 %1$d 人</string>
     <string name="team_roster_remove_member">删除</string>
-    <string name="team_roster_conflict_warning">与群内成员 @%1$s 冲突，请更换</string>
+    <string name="team_roster_alias_hint">本群已有 @%1$s，这里的组员将叫 @%2$s</string>
     <string name="team_roster_limit_warning">不得超过 %1$d 字符</string>
     <string name="team_roster_required_warning">不能为空</string>
     <string name="team_roster_slug_warning">只能用小写字母、数字和连字符</string>
@@ -2036,6 +2039,7 @@
     <string name="team_roster_invalid">团队编制没有保存：组员名字与群内 @ 名冲突或超出限制。</string>
     <string name="team_profile_saved">团队档案已保存：%1$s（%2$d 个群）</string>
     <string name="team_profile_saved_partial">团队档案已保存：%1$s（%2$d 个群，%3$d 个群没写进去，可以再存一次）</string>
+    <string name="team_profile_saved_aliased">其中 %1$d 个群已有同名组员，本群按别名生效（@ 要用别名）</string>
     <string name="team_profile_rejected">团队档案没有保存：名字不合法、名册为空，或目标群不可写。</string>
     <string name="team_profile_new">新建团队</string>
     <string name="team_profile_edit">编辑团队</string>

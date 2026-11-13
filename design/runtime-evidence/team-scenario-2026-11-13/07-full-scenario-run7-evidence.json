@@ -1,0 +1,76 @@
+{
+  "capturedAt": "2026-11-13T12:20:00+08:00",
+  "scenario": "建群 → AI 建队 → @团队派真实需求 → 责任链自动执行 → 卡片演进 → 手机合并",
+  "chainId": "chain-cmwegkccd",
+  "groupId": "fa7ae7f5-30e4-47de-a64f-c577e2cda89a",
+  "projectDirectory": "/private/tmp/tenon-scenario/weather-relay-ws",
+  "requirement": "六条 AC 的摄氏/华氏温度互转工具（新增 weather.py / test_weather.py / README.md）",
+  "dispatch": {
+    "channel": "desktop GUI，群聊 @weather-dev，中文全文 1159 B（超 800 B 由产品自动改走 TCP）",
+    "chainStages": ["编码 (codex)", "测试 (claude)", "审查 (claude)"],
+    "stageArtifacts": [
+      {"taskId": "t-1-ae4f740f", "outcome": "finished", "filesChanged": 3, "additions": 114, "durationMs": 232299},
+      {"taskId": "t-1-3c3bc4a7", "kind": "reviewer-test", "patch": 0},
+      {"taskId": "t-1-bb7a355b", "kind": "reviewer-final", "patch": 0}
+    ]
+  },
+  "cardTimeline": [
+    {"rev": 1, "state": "executing", "progress": 0, "banner": "链条开工：3 棒，基线 3792076e"},
+    {"rev": 2, "state": "executing", "progress": 0, "banner": "编码 开跑（第 1/3 棒）"},
+    {"rev": 3, "state": "executing", "progress": 33, "banner": "编码 完成（提交 6d551231）"},
+    {"rev": 4, "state": "executing", "progress": 33, "banner": "测试 开跑（第 2/3 棒）"},
+    {"rev": 5, "state": "executing", "progress": 66, "banner": "测试 完成（无改动）"},
+    {"rev": 6, "state": "executing", "progress": 66, "banner": "审查 开跑（第 3/3 棒）"},
+    {"rev": 7, "state": "executing", "progress": 100, "banner": "审查 完成（无改动）"},
+    {"rev": 8, "state": "review_ready", "progress": 100, "banner": "全部 3 棒完成，等待机主终审｜下一步：等你合并或打回", "actions": [{"actionId": "merge-patch", "label": "Merge", "approval": true}]},
+    {"rev": 9, "state": "review_ready", "progress": 100, "decidedBy": "Pixel 6"},
+    {"rev": 10, "state": "merged", "progress": 100, "banner": "Changes merged into workspace", "decidedBy": "Pixel 6", "decidedActionId": "merge-patch"}
+  ],
+  "cardTimelineInvariants": {
+    "monotonicRev": true,
+    "duplicateFrames": 0,
+    "reviewReadyHeldUntilOwnerClick": true,
+    "fakeMergeAbsent": true
+  },
+  "auditChecks": [
+    {"id": "syntax-1", "status": "pending", "observation": "第 1 棒 是外部工作区（非本仓库生产 Kotlin 源码），本仓库文案/施工痕迹门禁不适用"},
+    {"id": "keys-1", "status": "pending", "observation": "同上"},
+    {"id": "syntax-2/3", "status": "pending", "observation": "无 patch（只读或无改动），无从审"},
+    {"id": "budget", "status": "done", "observation": "合流卡实测 4569 B"}
+  ],
+  "transport": {
+    "carrier": "tls",
+    "online": true,
+    "linkConnected": true,
+    "closeCount": 0,
+    "dialFailures": 0,
+    "closeReason": null
+  },
+  "merge": {
+    "trigger": "手机 adb tap「合并此补丁」（可点击容器中心 540,1259）",
+    "outcome": "DesktopPatchMerge.applyBranch 合入工作树；卡面 rev10 merged；手机显示「已由 Pixel 6 处理」",
+    "workspaceFiles": ["README.md 250 B", "test_weather.py 1763 B", "weather.py 811 B"],
+    "hostCommit": "ae4e788 feat: 温度互转工具（AC1-AC6 实测通过，merged by Pixel 6）",
+    "unittest": "Ran 5 tests OK"
+  },
+  "acceptanceMeasured": {
+    "AC1": "weather.py:7 c_to_f / weather.py:11 f_to_c，类型标注 float，无 IO、无 print（print 仅在 main/usage）",
+    "AC2": "c_to_f(0)=32.0, c_to_f(100)=212.0, c_to_f(-40)=-40.0; f_to_c(32)=0.0, f_to_c(212)=100.0, f_to_c(-40)=-40.0",
+    "AC3": "python3 weather.py 25 C -> 25.0 C = 77.0 F; 77 F -> 77.0 F = 25.0 C",
+    "AC4": "abc C / 25 K / nan C / inf F 全部 exit=2 且 stderr 一行 usage",
+    "AC5": "test_weather.py 5 个方法，python3 -m unittest -v -> Ran 5 tests OK",
+    "AC6": "README.md 含运行示例与 python3 -m unittest -v"
+  },
+  "p0FixedInThisRound": [
+    "审查棒目标截断（TeamExecution.reviewInstruction 的 goal.take(80)）",
+    "回炉反馈只带开头（ReviewPipeline.Advance.BackToWorker 的 200 字头部预算）",
+    "合流审计越界（ReviewerAudit 对外部工作区套本仓库 CJK/施工痕迹门禁）",
+    "假合并（DesktopStageChain 审查全过自行 publish(merged)，未执行 applyBranch）"
+  ],
+  "evidenceFiles": [
+    "04-dsh-cli-availability-probe.json",
+    "05-p0-audit-scope-fix-verification.json",
+    "06-p0-fake-merge-fix-verification.json",
+    "07-full-scenario-run7-evidence.json"
+  ]
+}

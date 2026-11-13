@@ -133,6 +133,53 @@ class TeamPlanCompilerTest {
         assertEquals("遵循 Google 代码规范\nGoal: 实现支付功能", customWorker)
     }
 
+    /**
+     * 反向验证（真机责任链跑出来的 P0）：长目标必须**全文**进每一根审查棒。
+     *
+     * 曾经审查指令写 `goal.take(80)`：worker 棒拿着六条 AC 全量实现，审查棒只看得到
+     * "AC1 新建 we"，末尾的 AC5/AC6 根本不在它的输入里 ⇒ 只能判 REJECT ⇒ 回炉后
+     * worker 认为活已干完、零补丁 ⇒ 整条链停摆。任务书不是摘要，截断必然制造假拒绝。
+     */
+    @Test
+    fun longGoalReachesEveryReviewStageVerbatim() {
+        val goal = listOf(
+            "AC1 新建 weather.py，提供 c_to_f(c) 与 f_to_c(f) 两个纯函数。",
+            "AC2 0C=32F，100C=212F，-40C=-40F 三个边界必须精确。",
+            "AC3 提供 main()，命令行读入一个数字和一个单位，打印一行摘要。",
+            "AC4 非法输入退出码为 2，并向 stderr 打印一行 usage 说明。",
+            "AC5 新建 test_weather.py，用 unittest 覆盖 5 个测试方法。",
+            "AC6 新建 README.md，写清运行示例与 python3 -m unittest -v。",
+        ).joinToString("\n")
+        assertTrue(goal.length > 80, "探针前提：目标必须长过旧的 80 字截断窗口")
+
+        // 编译层：worker + 两根 reviewer，三棒的指令都要带完整任务书。
+        val plan = assertIs<TeamPlanCompiler.Compiled.Plan>(
+            TeamPlanCompiler.compile(
+                profile(coderSpec, reviewerSpec, testerSpec), seatMembers, coderInfo,
+                goal, availableDrivers = setOf("codex", "claude", "dsh"),
+            ),
+        ).plan
+        plan.stages.forEachIndexed { i, stage ->
+            assertTrue(stage.instruction.contains(goal), "第 $i 棒的指令丢了目标全文")
+            assertTrue(stage.instruction.contains("AC6"), "第 $i 棒看不到最后一条验收标准")
+        }
+
+        // 直呼 reviewer 的纯审查单棒路径同样不许截断。
+        val single = assertIs<TeamPlanCompiler.Compiled.Single>(
+            TeamPlanCompiler.compile(
+                profile(coderSpec, reviewerSpec, testerSpec), seatMembers, reviewerInfo,
+                goal, availableDrivers = setOf("codex", "claude", "dsh"),
+            ),
+        )
+        assertTrue(single.instruction.contains("AC6"), "纯审查单棒也要拿到完整任务书")
+
+        // 自定义人设分支与默认模板分支，两条都不能截。
+        assertTrue(TeamPlanCompiler.reviewInstruction(goal, "审查", "逐条核对验收标准").contains("AC6"))
+        assertTrue(TeamPlanCompiler.reviewInstruction(goal, null).contains("AC6"))
+        // 与 worker 棒对称：同一个 goal，两处都必须是全文（不是一处全文一处摘要）。
+        assertTrue(TeamPlanCompiler.workerInstruction(goal).contains("AC6"))
+    }
+
     /** 命中 reviewer：纯审查单棒 —— 不给 worker 派冗余实现任务。 */
     @Test
     fun reviewerMentionCompilesASingleFocusedReviewTask() {

@@ -94,6 +94,39 @@ class TeamNameMentionTest {
         assertEquals(TeamNameMention.Ambiguous, g.resolveTeamNameMention("@开发团队 修"))
     }
 
+    /** 两支不同的队都被点名：`@` 一次只派一个执行主体，不替人挑一支。 */
+    @Test
+    fun twoDifferentTeamsAtOnceAreAmbiguous() {
+        val g = group(
+            seat(agentId = "dsh-a", teamId = "team-a", teamName = "开发团队"),
+            seat(agentId = "dsh-b", teamId = "team-b", teamName = "测试团队"),
+        )
+        assertEquals(
+            TeamNameMention.Ambiguous,
+            g.resolveTeamNameMention("@开发团队 先跑一遍，@测试团队 随后验"),
+        )
+    }
+
+    /** 同一支队被点名两次仍是**一个**目标 —— 数命中次数会把正常用法判成歧义。 */
+    @Test
+    fun theSameTeamMentionedTwiceIsStillOneTarget() {
+        val hit = assertIs<TeamNameMention.Hit>(
+            group(seat()).resolveTeamNameMention("@开发团队 先看登录，@开发团队 再看支付"),
+        )
+        assertEquals("team-dev", hit.teamId)
+    }
+
+    /** 前缀不算第二个目标：`@开发团队二组` 只点名了更长的那支。 */
+    @Test
+    fun aLongerNameDoesNotCountItsPrefixAsASecondTeam() {
+        val g = group(
+            seat(agentId = "dsh-a", teamId = "team-a", teamName = "开发团队"),
+            seat(agentId = "dsh-b", teamId = "team-b", teamName = "开发团队二组"),
+        )
+        val hit = assertIs<TeamNameMention.Hit>(g.resolveTeamNameMention("@开发团队二组 上"))
+        assertEquals("team-b", hit.teamId)
+    }
+
     @Test
     fun noTeamNameMeansNoTeamTarget() {
         assertNull(group(seat(teamName = null)).resolveTeamNameMention("@开发团队 修"))

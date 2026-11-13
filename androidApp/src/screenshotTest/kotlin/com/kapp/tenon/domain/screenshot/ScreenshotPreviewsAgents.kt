@@ -19,6 +19,8 @@ import com.kapp.tenon.domain.model.MessageUi
 import com.kapp.tenon.domain.model.NetworkUi
 import com.kapp.tenon.domain.model.NodePhase
 import com.kapp.tenon.domain.model.PeerUi
+import com.kapp.tenon.domain.AgentWorkstationPort
+import com.kapp.tenon.domain.AgentWorkstationUi
 import com.kapp.tenon.domain.RelaySettings
 import com.kapp.tenon.domain.RelayUiState
 import com.kapp.tenon.domain.model.ScanProgressUi
@@ -434,6 +436,22 @@ private fun AgentsLoadingPhonePreview() {
  * - `onRespondApproval` / `onCancelTask` **传了非 null**：`批准`/`拒绝`/`取消` 按钮
  *   只在回调存在时渲染，传 `null` 拍出来的是一屏"只读"的界面，与安装包里看到的不一样。
  */
+/**
+ * 工位端口的预览替身：只为拍出「驱动名（机器名）」这一行的**形态**。
+ *
+ * 真实取值由宿主执行档回答（`DesktopAgentWorkstationPort`），预览里没有执行档，所以给一个
+ * 确定的演示值 —— 与 `PreviewDirectoryPort`（目录端口替身）同一条取舍：夹具演的是排版，
+ * 不是业务数据。`agentKey` 为空（「未上报类型」那一档）返回 null —— 让「读不到就只写
+ * 宿主名」这一支在别的帧里也能被拍到。
+ */
+internal class PreviewWorkstationPort(
+    private val driverKey: String,
+    private val driverLabel: String,
+) : AgentWorkstationPort {
+    override fun workstationOf(hostNodeId: String, agentKey: String): AgentWorkstationUi? =
+        if (agentKey.isBlank()) null else AgentWorkstationUi(driverKey, driverLabel)
+}
+
 @PreviewTest
 @Preview(name = "agents-approvals-queue", widthDp = 393, heightDp = 852, showBackground = true, locale = "zh-rCN")
 @Composable
@@ -460,6 +478,8 @@ private fun AgentsApprovalsQueuePhonePreview() {
             onLeaveSessionDetail = {},
             onLoadWorkspaceSessions = { _, _ -> },
             onCreateWorkspaceGroup = {},
+            // 工位：名录副行的「驱动名（机器名）」。预览没有执行档，用端口替身演形态。
+            agentWorkstationPort = PreviewWorkstationPort("codex", "Codex"),
             modifier = inner,
             now = PREVIEW_NOW)
     }

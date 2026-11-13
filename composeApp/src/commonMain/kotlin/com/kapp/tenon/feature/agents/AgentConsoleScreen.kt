@@ -134,6 +134,14 @@ fun AgentConsoleScreen(
      * null ⇒ 整行不画（手机 / 预览）。
      */
     teamExecutionPort: com.kapp.tenon.domain.TeamExecutionPort? = null,
+    /**
+     * 员工工位端口（驱动名册 + 执行档）：非 null ⇒ 名录副行写「驱动（宿主名）」，
+     * 例如 `Codex（<host>）`。null ⇒ 只写宿主名（手机读不到本机执行绑定）。
+     *
+     * 与 [teamExecutionPort] **同一实例的执行档**由组合根保证 —— 两者共用一份，
+     * 就不会出现「编制里换了底座、名录还报旧驱动」。
+     */
+    agentWorkstationPort: com.kapp.tenon.domain.AgentWorkstationPort? = null,
     onFindNodes: (() -> Unit)? = null,
     modifier: Modifier = Modifier,
     now: Long = nowMillis(),
@@ -342,6 +350,7 @@ fun AgentConsoleScreen(
             compact = compact,
             selectedHostNodeId = effectiveEntityHost,
             selectedAgentKey = effectiveEntityKey,
+            workstationPort = agentWorkstationPort,
             onOpenEntity = { card ->
                 explicitlyClearedEntity = false
                 localDetailSessionId = null

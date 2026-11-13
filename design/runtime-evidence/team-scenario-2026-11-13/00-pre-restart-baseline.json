@@ -1,0 +1,11 @@
+{
+  "capturedAt": "2026-11-13T09:19:23.020129",
+  "phase": "pre-restart baseline",
+  "health": {
+    "error": "HTTP Error 502: Bad Gateway"
+  },
+  "phone": [],
+  "peers": {
+    "error": "HTTP Error 502: Bad Gateway"
+  }
+}

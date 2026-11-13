@@ -924,6 +924,17 @@ class RelayController(
         set(value) { invokeCtl.teamExecutionPort = value }
 
     /**
+     * 员工工位端口：invokeCtl 同字段（DesktopExtension 装配 DesktopAgentWorkstationPort）。
+     *
+     * 覆写成 `var` 是为了让装配方（DesktopExtension）能赋值；对外接口仍是只读的
+     * [DesktopPaneActions.agentWorkstationPort] —— 工位没有「保存一份工位」这条通路
+     * （写入口是群编制的执行配置）。
+     */
+    override var agentWorkstationPort: AgentWorkstationPort?
+        get() = invokeCtl.agentWorkstationPort
+        set(value) { invokeCtl.agentWorkstationPort = value }
+
+    /**
      * 「AI 建队」生成桥：DesktopExtension 装配（编排层 TeamBuilderLlm → 解析过门 →
      * 回落模板一条龙）。null = 该壳没有建队助手（手机/预览）⇒ 界面不画入口。
      * 实现不进 `:app` 是硬约束：LLM HTTP 通路住在 `:orchestration`，依赖方向不许倒置。

@@ -1,0 +1,62 @@
+{
+  "capturedAt": "2026-11-13T11:52:00+08:00",
+  "defect": "合流审计把本仓库源码门禁套到外部工作区，误判 README 中文标题为硬编码 CJK 文案",
+  "thirdRunSymptom": {
+    "chainId": "chain-cmwef6iy8",
+    "state": "blocked",
+    "rev": 8,
+    "banner": "审计未通过，停止合流：新增行含硬编码 CJK 文案（应进资源文件）：L7 # 温度换算工具"
+  },
+  "rootCause": {
+    "file": "agentNode/src/main/kotlin/com/kapp/tenon/agent/ReviewerAudit.kt",
+    "functions": [
+      "syntaxFailureOf",
+      "whitelistFailureOf",
+      "checksFor"
+    ],
+    "explanation": "两个判据对所有 patch 的 + 行无条件生效，但 tools/ 下的 cjk-literal-gate 与 construction-trace-gate 只扫本仓库生产 Kotlin 源码目录；weather-relay 的 README.md/Python 文件不在这套纪律的适用面内",
+    "misjudgedContent": [
+      "README.md: # 温度换算工具",
+      "weather.py: 中文 docstring"
+    ]
+  },
+  "fix": {
+    "approach": "把门禁的适用范围一并复刻：逐 diff 文件头判定是否本仓库生产 Kotlin 源码（PRODUCTION_SOURCE_PREFIXES + 排除测试源集/Test.kt/PreviewState.kt），只审适用文件的 + 行",
+    "notApplicablePolicy": "不适用时两条 check 如实 SKIP（观察语写明「本仓库文案/施工痕迹门禁不适用」），不冒充 done",
+    "addedApi": "ReviewerAudit.auditAppliesTo(patch)",
+    "unchanged": "裸 diff（无 +++ 头，测试夹具形态）仍按适用处理；真实 patch 逐文件判定"
+  },
+  "verification": {
+    "forward": {
+      "task": ":agentNode:test --tests com.kapp.tenon.agent.ReviewerAuditTest",
+      "tests": 17,
+      "failures": 0
+    },
+    "fullModule": {
+      "task": ":agentNode:test",
+      "classes": 74,
+      "tests": 608,
+      "failures": 0,
+      "skipped": 1
+    },
+    "mutationProbes": [
+      {
+        "mutation": "auditAppliesTo 恒返回 true（恢复旧行为）",
+        "red": [
+          "anExternalWorkspacePatchIsNotAuditedByRepositoryGates",
+          "checksForSkipsHonestlyWhenThePatchIsAnExternalWorkspace"
+        ]
+      },
+      {
+        "mutation": "isProductionKotlin 恒返回 true（去掉逐文件过滤）",
+        "red": [
+          "aMixedPatchOnlyAuditsTheProductionKotlinFile",
+          "anExternalWorkspacePatchIsNotAuditedByRepositoryGates",
+          "checksForSkipsHonestlyWhenThePatchIsAnExternalWorkspace"
+        ],
+        "note": "变红时原样复现真机误伤：新增行含硬编码 CJK 文案（应进资源文件）：L5 # 温度换算工具"
+      }
+    ]
+  },
+  "remainingPreservedJudgement": "本仓库生产 Kotlin 源码的硬编码中文仍被抓（aProductionKotlinPatchStillFailsTheCjkAudit）"
+}

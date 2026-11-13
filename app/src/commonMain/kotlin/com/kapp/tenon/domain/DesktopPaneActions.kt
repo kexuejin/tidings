@@ -259,6 +259,16 @@ public interface DesktopPaneActions {
         get() = null
 
     /**
+     * 员工工位端口：名录副行那句「用什么驱动干活」。
+     *
+     * null = 读不到本机执行绑定（手机等非宿主）⇒ 副行只写宿主名。与 [teamExecutionPort]
+     * 同一形状、**同一份执行档**：换底座只有一处写入口（群编制的执行配置），这里只读。
+     * 只有桌面宿主覆写（DesktopExtension 装配 DesktopAgentWorkstationPort）。
+     */
+    val agentWorkstationPort: AgentWorkstationPort?
+        get() = null
+
+    /**
      * 项目目录端口（项目目录决策稿 §5.1）：目录档案 / 群指针 / 白名单的读写通路。
      * null = 该壳没有宿主目录面（手机等非宿主）⇒ 只读投影（档案由目录宿主管理，
      * 手机只能看到群已指向的目录名）。只有桌面宿主覆写

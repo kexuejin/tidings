@@ -236,16 +236,17 @@ object DesktopStageChain {
                 // 每棒摘要（P1）：透传给 publish，重新打包 ChainProgress 时不再丢。
                 pendingDetails = progress.details
                 publish(progress.state, progress.banner, progress.currentRole, progress.percent, progress.details)
-                // 线性多棒全 PASS ⇒ 自动合流：复用既有单槽广播，不另写一条发送。
+                // 全棒 PASS 只是「审查面通过」，**不等于已合入项目目录**。
+                // 合流是机主的一次点击：`merge-patch` → [DesktopPatchMerge.applyBranch] 把
+                // `chain/<id>` 真正合进工作区，成功后由 [BoardCardFlip.merged] 发带 decidedBy 的
+                // 合并卡。从前这里直接 publish("merged")，卡面说「已合并」而项目目录一行未动 ——
+                // 假绿。现在停在 review_ready 等机主批准，卡上带 merge-patch 动作。
                 if (progress.reviewPassed && progress.state == "review_ready") {
-                    RelayLog.info("CHAIN", chainId + " all reviewers passed: auto-merged")
-                    publish("merged", "All reviewers passed: chain auto-merged")
+                    RelayLog.info("CHAIN", chainId + " all reviewers passed; awaiting owner merge (merge-patch)")
                 }
-                // L1 会话免审的自动验讫（§八.2）：验收棒判 review_ready 且本会话免审时，
-                // 逐棒检查低危判据 —— 全部低危（单测/文档/日志类）就自动合流，不再逐次
-                // 弹审批。高危词一律不走免审（LowRiskReviewer 黑名单赢），判定是纯函数、
-                // 两侧测试各钉一份。任何一棒不是低危 ⇒ 照常等机主 1-Click（fail-closed）。
-                // 已经因全棒 PASS 合流过的链不再走免审，避免同一张卡翻两次 merged。
+                // L1 会话免审（§八.2）：验收棒判 review_ready 且本会话免审时，逐棒检查低危
+                // 判据。全部低危只免除**逐次审批**，不代替机主点合并 —— 同一份 merge-patch
+                // 路径仍然是唯一真合流入口（从前这里也只 publish 一张 merged 卡，同款假绿）。
                 if (progress.state == "review_ready" && !progress.reviewPassed &&
                     sessionExemptOf?.invoke(chainId) == true
                 ) {
@@ -253,8 +254,7 @@ object DesktopStageChain {
                         LowRiskReviewer.isLowRisk(riskLevel = null, summaryOrCommand = stage.instruction + " " + stage.role)
                     }
                     if (allLow) {
-                        RelayLog.info("CHAIN", chainId + " session exempt: low-risk stages auto-merged by reviewer")
-                        publish("merged", "Session exempt: low-risk chain auto-merged by reviewer")
+                        RelayLog.info("CHAIN", chainId + " session exempt: low-risk chain passed; awaiting owner merge")
                     }
                 }
             },

@@ -73,13 +73,42 @@ class ReviewPipeline(private val maxAttempts: Int = DEFAULT_MAX_ATTEMPTS) {
                     "review rejected after " + attempt + " attempts: " + feedback.take(StageChain.MAX_SUMMARY),
                 )
             }
-            return Advance.BackToWorker(attempt + 1, feedback.take(StageChain.MAX_SUMMARY))
+            return Advance.BackToWorker(attempt + 1, reworkInstruction(feedback))
         }
         return if (stageIndex == stageCount - 1) Advance.Merge else Advance.Next(stageIndex + 1)
+    }
+
+    /**
+     * 打回 worker 的**返工指令**：不是棒间交接摘要，不能套 `StageChain.MAX_SUMMARY`
+     * 那 200 字的头部预算。
+     *
+     * 审查发言的形状是「开场核对 → 逐条验证 → 问题清单 → VERDICT」，结论恒在尾部。
+     * 真机上把 REJECT 意见 `take(200)` 之后，worker 只收到「基线核对通过…我只审查」，
+     * 问题清单和结论全没了 ⇒ 它判断「活已干完」⇒ 零补丁 ⇒ 链停摆。摘要可以截，
+     * 返工意见截不得；超长时也要**保留尾部**而不是砍掉最要紧的那一段。
+     *
+     * 前缀是给 worker 的显式语义：「上一棒交接」这个标题会让人把它读成背景资料，
+     * 而返工要求的是逐条修复并产生新改动。
+     */
+    private fun reworkInstruction(raw: String): String {
+        val text = raw.trim()
+        val kept = if (text.length <= MAX_REVIEW_FEEDBACK) {
+            text
+        } else {
+            "…（审查发言前段省略）\n" + text.takeLast(MAX_REVIEW_FEEDBACK)
+        }
+        return REWORK_PREFIX + kept
     }
 
     companion object {
         /** 与单棒工单的自愈上限同数：审查打回最多 3 轮，之后转人工。 */
         const val DEFAULT_MAX_ATTEMPTS: Int = 3
+
+        /** 返工意见的预算：只进 prompt、不进协议帧，不必受卡面摘要的 200 字约束。 */
+        const val MAX_REVIEW_FEEDBACK: Int = 4000
+
+        private const val REWORK_PREFIX =
+            "【审查未通过：本棒是返工】请逐条修复下列审查意见指出的问题，改完必须产生新的文件改动；" +
+                "确实无需改动时，逐条说明为什么。\n"
     }
 }

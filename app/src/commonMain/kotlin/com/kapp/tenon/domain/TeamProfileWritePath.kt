@@ -90,12 +90,16 @@ sealed interface TeamProfileResult {
     /**
      * @param groupIds 实际写成功的群（顺序与请求一致）。
      * @param failedGroupIds 预校验通过但席位写入失败的群（并发/落盘被拒）；空 = 全绿。
+     * @param aliasedGroupIds 用了**本群别名**的群（名册里至少一个组员在本群叫别的名字）。
+     *   与 [failedGroupIds] 分开：别名**不是失败**，是「这个词本群已经被别人占了」；
+     *   用户需要知道的是「我在 A 群 @coder，在 B 群要 @coder-2」，所以要点名到群。
      */
     data class Applied(
         val teamId: String,
         val name: String,
         val groupIds: List<String>,
         val failedGroupIds: List<String> = emptyList(),
+        val aliasedGroupIds: List<String> = emptyList(),
     ) : TeamProfileResult
 
     data class Rejected(val reason: DeclarationRejection) : TeamProfileResult
@@ -139,7 +143,7 @@ private fun RelayController.createTeam(
     if (denied != null) return TeamProfileResult.Rejected(denied)
     // **先全量预校验再落档案**：跨群不是事务，先写档案后校验会让「第一群成功、第二群撞名」
     // 留下一个改了一半的世界。
-    preflightRoster(groups, leader, cmd.members)?.let {
+    preflightRoster(groups, cmd.members)?.let {
         return TeamProfileResult.Rejected(it)
     }
 
@@ -159,8 +163,8 @@ private fun RelayController.createTeam(
     // 顺序：**先落档案，再逐群挂席位**。反过来（先席位后档案）会让对端先看到一条指向
     // 不存在档案的引用；而档案先落、席位失败最坏是「这一群还没有这支队伍」，界面可重试。
     persistTeamProfiles(_state.value.settings.teamProfiles + profile)
-    val (applied, failed) = attachToGroups(self, profile, groups, cmd.actor, cmd.origin, null)
-    return TeamProfileResult.Applied(teamId, name, applied, failed)
+    val outcome = attachToGroups(self, profile, groups, cmd.actor, cmd.origin, null)
+    return TeamProfileResult.Applied(teamId, name, outcome.applied, outcome.failed, outcome.aliased)
 }
 
 private fun RelayController.updateTeam(
@@ -189,13 +193,13 @@ private fun RelayController.updateTeam(
     val groups = groupsReferencing(updated.teamId)
     val denied = teamTargetGroups(self, actorNode, groups)
     if (denied != null) return TeamProfileResult.Rejected(denied)
-    preflightRoster(groups, profile.leaderAgentId, updated.rosterDrafts())?.let {
+    preflightRoster(groups, updated.rosterDrafts())?.let {
         return TeamProfileResult.Rejected(it)
     }
     // 先档案后席位：与 create 同一顺序 —— 快照重建拿到的永远是这一版的档案。
     persistTeamProfiles(profiles.map { if (it.teamId == updated.teamId) updated else it })
-    val (applied, failed) = attachToGroups(self, updated, groups, cmd.actor, cmd.origin, null)
-    return TeamProfileResult.Applied(updated.teamId, updated.name, applied, failed)
+    val outcome = attachToGroups(self, updated, groups, cmd.actor, cmd.origin, null)
+    return TeamProfileResult.Applied(updated.teamId, updated.name, outcome.applied, outcome.failed, outcome.aliased)
 }
 
 private fun RelayController.addTeamToGroups(
@@ -210,11 +214,11 @@ private fun RelayController.addTeamToGroups(
     if (groups.isEmpty()) return TeamProfileResult.Rejected(DeclarationRejection.ARGUMENT_INVALID)
     val denied = teamTargetGroups(self, actorNode, groups)
     if (denied != null) return TeamProfileResult.Rejected(denied)
-    preflightRoster(groups, profile.leaderAgentId, profile.rosterDrafts())?.let {
+    preflightRoster(groups, profile.rosterDrafts())?.let {
         return TeamProfileResult.Rejected(it)
     }
-    val (applied, failed) = attachToGroups(self, profile, groups, cmd.actor, cmd.origin, null)
-    return TeamProfileResult.Applied(profile.teamId, profile.name, applied, failed)
+    val outcome = attachToGroups(self, profile, groups, cmd.actor, cmd.origin, null)
+    return TeamProfileResult.Applied(profile.teamId, profile.name, outcome.applied, outcome.failed, outcome.aliased)
 }
 
 private fun RelayController.dissolveTeam(
@@ -321,14 +325,23 @@ public fun RelayController.saveTeamProfileEntry(
         is TeamProfileResult.Applied ->
             // 有群没写进去就报到警告位：绿色横幅会把「有一个群没成功」盖掉，
             // 用户下次打开那一群发现队伍不在，却查不到任何痕迹。
+            // 本群别名不算失败（席位写进去了），但要带出群数 —— 用户得知道去那一群
+            // 要按别名 @，否则他会以为团队坏了。
             if (result.failedGroupIds.isEmpty()) {
-                info(BannerMessage.TeamProfileSaved(result.name, result.groupIds.size))
+                info(
+                    BannerMessage.TeamProfileSaved(
+                        name = result.name,
+                        groupCount = result.groupIds.size,
+                        aliasedGroupCount = result.aliasedGroupIds.size,
+                    ),
+                )
             } else {
                 warn(
                     BannerMessage.TeamProfileSaved(
                         name = result.name,
                         groupCount = result.groupIds.size,
                         failedGroupCount = result.failedGroupIds.size,
+                        aliasedGroupCount = result.aliasedGroupIds.size,
                     ),
                 )
             }
@@ -359,9 +372,22 @@ public fun RelayController.attachTeamToGroupEntry(
     when (result) {
         is TeamProfileResult.Applied ->
             if (result.failedGroupIds.isEmpty()) {
-                info(BannerMessage.TeamProfileSaved(result.name, result.groupIds.size))
+                info(
+                    BannerMessage.TeamProfileSaved(
+                        name = result.name,
+                        groupCount = result.groupIds.size,
+                        aliasedGroupCount = result.aliasedGroupIds.size,
+                    ),
+                )
             } else {
-                warn(BannerMessage.TeamProfileSaved(result.name, 0, result.failedGroupIds.size))
+                warn(
+                    BannerMessage.TeamProfileSaved(
+                        name = result.name,
+                        groupCount = 0,
+                        failedGroupCount = result.failedGroupIds.size,
+                        aliasedGroupCount = result.aliasedGroupIds.size,
+                    ),
+                )
             }
         is TeamProfileResult.Rejected -> warn(BannerMessage.TeamProfileRejected)
     }
@@ -370,18 +396,18 @@ public fun RelayController.attachTeamToGroupEntry(
 // ------------------------------------------------------------------ 内部工具
 
 /**
- * 名册在**每个目标群**都合法吗（撞 token / 超上限 / 名字非法）。
+ * 名册在**每个目标群**都没有必须改的错吗（空 / 超长 / 非 slug / 名册内重名 / 超员）。
  *
- * 复用 [declarationRosterIssue]（与 `planAttachTeam` 同一个池），不另写判据。
+ * 复用 [declarationRosterIssue]（与 `planAttachTeam` 同一个判据），不另写。
+ * **撞名不在这里拦** —— 那是逐群别名的事，属于正常结果，不是拒绝原因。
  * 返回第一个不通过的群的拒绝原因，null = 全过。
  */
 private fun RelayController.preflightRoster(
     groupIds: List<String>,
-    agentId: String,
     roster: List<com.kapp.tenon.core.protocol.TeamMemberDraft>,
 ): DeclarationRejection? {
     for (groupId in groupIds) {
-        declarationRosterIssue(groupId, agentId, roster)?.let { return it }
+        declarationRosterIssue(groupId, roster)?.let { return it }
     }
     return null
 }
@@ -410,7 +436,14 @@ private fun RelayController.groupsReferencing(teamId: String): List<String> =
         }
         .map { it.groupId }
 
-/** 逐群挂席位，返回 (成功群, 失败群)。单群失败不影响其它群 —— 跨群不是事务。 */
+/** 一次逐群挂席位的结果。三个集合互不重叠，`applied` 之外的两个都要如实回报给用户。 */
+private data class AttachOutcome(
+    val applied: List<String>,
+    val failed: List<String>,
+    val aliased: List<String>,
+)
+
+/** 逐群挂席位。单群失败不影响其它群 —— 跨群不是事务。 */
 private fun RelayController.attachToGroups(
     self: String,
     profile: TeamProfile,
@@ -418,7 +451,7 @@ private fun RelayController.attachToGroups(
     actor: DeclarationActor,
     origin: DeclarationOrigin,
     baseRev: Int?,
-): Pair<List<String>, List<String>> {
+): AttachOutcome {
     val applied = mutableListOf<String>()
     val failed = mutableListOf<String>()
     for (groupId in groupIds) {
@@ -441,7 +474,27 @@ private fun RelayController.attachToGroups(
             is DeclarationResult.Conflict -> failed += groupId
         }
     }
-    return applied to failed
+    return AttachOutcome(applied, failed, aliasedGroupsOf(profile, applied))
+}
+
+/**
+ * 哪些群用了**本群别名**：从**落盘后**的席位读实际名字再和档案比，不看请求参数。
+ *
+ * 口令与 `EmployeeProfileWritePath` 同一条 —— 档案里的名字是「默认名」，席位里的是
+ * 「本群 `@` token」，两者不同**只可能**是因为这个群已经有同名的东西。拿请求参数比
+ * 会把「本来就叫这个」误判成别名；拿落盘结果比才是事实。
+ *
+ * 失败群不参与（它可能压根没写进去）。
+ */
+private fun RelayController.aliasedGroupsOf(profile: TeamProfile, applied: List<String>): List<String> {
+    if (applied.isEmpty()) return emptyList()
+    val canonical = profile.members.map { it.name }.toSet()
+    return applied.filter { groupId ->
+        val meta = _state.value.settings.groups.firstOrNull { it.groupId == groupId } ?: return@filter false
+        val seat = meta.virtualAgents.orEmpty().firstOrNull { it.teamId == profile.teamId }
+            ?: return@filter false
+        seat.teamMembers.map { it.name }.toSet() != canonical
+    }
 }
 
 /** 本机台账里这个 agent 的 kind（只用于新席位派生默认名；认不出就给 null，不猜）。 */

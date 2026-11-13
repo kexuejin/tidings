@@ -1078,6 +1078,9 @@ public fun DesktopShell(
                                 onRevokeSessionApproval = controller::revokeSessionApproval,
                                 // 执行配置矩阵要读宿主本地执行档 —— 端口只在宿主本机非空，手机端自然是 null。
                                 teamExecutionPort = controller.teamExecutionPort,
+                                // 名录副行的工位（驱动 + 机器）：与执行档端口同一份 store，
+                                // 编制里换了底座名录立刻跟着变。
+                                agentWorkstationPort = controller.agentWorkstationPort,
                                 // 谁能用这个 agent 干活 —— 走 controller 的宿主侧桥。
                                 // 手机壳不接这个桥（null），所以那一侧不画配置区。
                                 // 可空 → 非空：null（壳没有台账）时给空列表，界面据此不画配置区。

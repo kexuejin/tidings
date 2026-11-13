@@ -164,6 +164,12 @@ internal class RelayControllerAgentInvokeComponent(private val host: AgentDomain
     /** 团队执行档端口（§6.3）：null = 该壳没有执行面（手机等非宿主）⇒ UI 只读。 */
     var teamExecutionPort: TeamExecutionPort? = null
 
+    /**
+     * 员工工位端口（驱动名册 + 执行档）：null = 读不到本机执行绑定（手机端常态）
+     * ⇒ 名录只画宿主名，不画工具名。
+     */
+    var agentWorkstationPort: AgentWorkstationPort? = null
+
     /** 项目目录端口（决策稿 §5.1）：null = 该壳没有宿主目录面 ⇒ UI 只读投影。 */
     var hostDirectoryPort: HostDirectoryPort? = null
 

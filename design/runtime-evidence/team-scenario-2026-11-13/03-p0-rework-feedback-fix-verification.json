@@ -1,0 +1,37 @@
+{
+  "phase": "P0 回炉反馈截断缺陷 · 定位与修复",
+  "capturedAt": "2026-11-13T11:23:00+08:00",
+  "observedOn": "chain-cmweek07p（P0 目标截断修复后的第一次真实链路）",
+  "symptom": "第 2 棒审查因 AC4 真实缺陷判 REJECT → 回炉第 1 棒 → worker 报告「基线已包含并满足三个目标文件的全部 AC，本棒未改动文件」→ harvest 零补丁 → 卡片 rev8 blocked「cli exited with no output or patch」",
+  "rootCause": {
+    "code": "agentNode/.../ReviewPipeline.kt · advance(REJECT) 用 feedback.take(StageChain.MAX_SUMMARY) 取头 200 字",
+    "whyLethal": "审查发言形状是「开场核对 → 逐条验证 → 问题清单 → VERDICT」，结论恒在尾部。头 200 字只是「基线核对通过：HEAD 与交接一致。我只审查，没有改实现」，既没有 AC4/nan/inf 问题清单，也没有 VERDICT: REJECT，更没有「这是返工」的语义。worker 于是把交接当背景资料，判断活已干完。",
+    "groundTruth": "rev8 卡片 items[1].detail 恰为 200 字且带「…（上游摘要已截断）」，AC4 / nan / VERDICT 全部 False",
+    "notTheCause": "StageChain.promptOf 本身会把 seed.previousSummary 原文写进「## 上一棒交接」；LOG_TAIL_CHARS=2000 与 MAX_SUMMARY=200 的卡面预算各自合理，错在把交接预算套到 REJECT 返工意见上"
+  },
+  "fix": {
+    "file": "agentNode/src/main/kotlin/com/kapp/tenon/agent/ReviewPipeline.kt",
+    "changes": [
+      "REJECT 分支改走 reworkInstruction(feedback)，不再套 200 字头部预算",
+      "新增 MAX_REVIEW_FEEDBACK=4000：只进 prompt、不进协议帧，不受卡面摘要约束",
+      "超长时保留尾部（takeLast）而不是砍掉尾部结论，并标注前段省略",
+      "加显式返工前缀：逐条修复、必须产生新改动、无需改动则逐条说明理由",
+      "Blocked 横幅仍用 200 字预算（横幅本来就会被 banner.take(200) 截，行为不变）"
+    ]
+  },
+  "tests": {
+    "file": "agentNode/src/test/kotlin/com/kapp/tenon/agent/ReviewPipelineTest.kt",
+    "forward": "9 tests / 0 failures",
+    "newCases": [
+      "aRejectKeepsTheProblemListAndVerdictThatLiveAtTheTail",
+      "oversizedReviewFeedbackKeepsTheTailWhereTheVerdictLives",
+      "aRejectPacksItsFeedbackAndReturnsToTheWorker（改为含返工语义断言）"
+    ],
+    "mutationProbe": "把 reworkInstruction(feedback) 改回 feedback.take(StageChain.MAX_SUMMARY) ⇒ 3 条用例报红（返工语义 / AC4 具体修法 / 超长结论），恢复后 9/9 绿"
+  },
+  "reviewerWasRight": {
+    "finding": "AC4 中 float() 接受 nan 与 inf，输入 `nan C` / `inf F` 退出码 0，违反「不是数字则退出码 2」",
+    "suggestedFix": "weather.py 解析后用 math.isfinite 校验",
+    "note": "这是场景任务实现的真实缺陷，不是宿主产品代码缺陷；责任链正确发现并回炉，修复回炉反馈后应由 worker 自行修掉"
+  }
+}

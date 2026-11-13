@@ -447,19 +447,21 @@ private fun GroupMeta.localSeat(selfNodeId: String, agentId: String): VirtualAge
     }
 
 /**
- * **只校验、不落盘**：这份名册放进 [groupId] 会不会撞 token。
+ * **只校验、不落盘**：这份名册放进 [groupId] 有没有**必须改的错**
+ * （空 / 超长 / 非 slug / 名册内重名 / 超员）。
  *
  * 跨群命令（[applyTeamProfile]）必须在**写档案之前**把每个目标群都过一遍 —— 否则
  * 第一群成功、第二群失败时档案已经落盘，用户看到的是「有的群改了、有的没改」，
  * 而档案的名字/名册又是全局的：两个群从此显示两份组员。
  *
- * 复用与 `planAttachTeam` 同一个池构造（`declarationTokenPool`），不另写一份判据。
+ * **撞群里既有 token 不在这里拒**：那是 [TeamRosterValidation.resolveNames] 的事
+ * （就地取本群别名 `coder-2`），与员工档案同一条纪律。所以本函数不需要 token 池 ——
+ * 留着池参数只会让下一个调用方以为「传了池就会拦撞名」。
  *
- * @return null = 通过；非 null = 该群会拒这条名册的原因。
+ * @return null = 通过；非 null = 该群会拒这份名册的原因。
  */
 internal fun RelayController.declarationRosterIssue(
     groupId: String,
-    agentId: String,
     roster: List<TeamMemberDraft>,
 ): DeclarationRejection? {
     val state = _state.value
@@ -467,9 +469,7 @@ internal fun RelayController.declarationRosterIssue(
     val meta = state.settings.groups.firstOrNull { it.groupId == groupId }
         ?: return DeclarationRejection.GROUP_UNKNOWN
     if (!meta.members.contains(self)) return DeclarationRejection.NOT_MEMBER
-    val existing = meta.localSeat(self, agentId)
-    val pool = declarationTokenPool(meta, self, excludeSeat = existing)
-    return if (TeamRosterValidation.validate(roster, pool).isEmpty()) null
+    return if (TeamRosterValidation.validate(roster).isEmpty()) null
     else DeclarationRejection.ROSTER_INVALID
 }
 
@@ -673,7 +673,8 @@ private fun RelayController.planUpdateSeat(
  * 团队编制：整份替换组员清单。
  *
  * 与既有行为逐条对齐（`TeamDeclarationWriteTest` 是这批判据的钉子）：
- * - 名册过 [TeamRosterValidation]（撞 token / 超上限 / 名字不合法都在这里拒）；
+ * - 名册过 [TeamRosterValidation.validate]（空 / 超长 / 非 slug / 名册内重名 / 超员）；
+ * - 撞群里既有 token 就地取**本群别名**（`coder-2`），不减人不拒绝；
  * - 目标席位 `entityType`/`teamMembers` 改，`name`/白名单/`defaultWsId` 原样保留；
  * - 同一 agent 的其它席位收敛成单兵（旧数据的「一个 agent 多个团队」在这里收口）；
  * - null 或空清单 = 关闭。
@@ -690,12 +691,16 @@ private fun RelayController.planTeamRoster(
     if (seat.teamId != null) {
         return DeclarationPlan.Rejected(DeclarationRejection.TEAM_PROFILE_BACKED)
     }
-    val pool = declarationTokenPool(meta, self, excludeSeat = seat)
-    val issues = TeamRosterValidation.validate(cmd.roster.orEmpty(), pool)
-    if (issues.isNotEmpty()) {
+    val roster = cmd.roster.orEmpty()
+    if (TeamRosterValidation.validate(roster).isNotEmpty()) {
         return DeclarationPlan.Rejected(DeclarationRejection.ROSTER_INVALID)
     }
-    val enabling = !cmd.roster.isNullOrEmpty()
+    // 名字的最终形态只由这里决定：UI 只预览，写路径说了算（预览与落盘同一份纯函数）。
+    val names = TeamRosterValidation.resolveNames(
+        roster,
+        declarationTokenPool(meta, self, excludeSeat = seat),
+    )
+    val enabling = roster.isNotEmpty()
     val seats = meta.virtualAgents.orEmpty().map { va ->
         val sameAgent = va.hostNodeId == self && va.agentId.equals(seat.agentId, ignoreCase = true)
         when {
@@ -703,7 +708,7 @@ private fun RelayController.planTeamRoster(
             sameAgent && va.defaultWsId == seat.defaultWsId -> va.copy(
                 entityType = if (enabling) EntityTypes.TEAM else EntityTypes.SINGLE,
                 teamMembers = if (enabling) {
-                    cmd.roster.orEmpty().map { TeamMemberInfo(it.agentId, it.name, it.role) }
+                    roster.mapIndexed { i, m -> TeamMemberInfo(m.agentId, names[i].name, m.role) }
                 } else {
                     emptyList()
                 },
@@ -745,11 +750,16 @@ private fun RelayController.planAttachTeam(
         return DeclarationPlan.Rejected(DeclarationRejection.ARGUMENT_INVALID)
     }
     val existing = meta.localSeat(self, cmd.agentId)
-    // 重建快照时「沿用旧组员名」必须合法：把本席位的旧组员名从池里剔出去。
-    val pool = declarationTokenPool(meta, self, excludeSeat = existing)
-    if (TeamRosterValidation.validate(cmd.roster, pool).isNotEmpty()) {
+    // 名册的「必须改的错」先拦；撞群里既有 token 不算错，就地取别名（见下）。
+    if (TeamRosterValidation.validate(cmd.roster).isNotEmpty()) {
         return DeclarationPlan.Rejected(DeclarationRejection.ROSTER_INVALID)
     }
+    // **同一份档案在不同群可以叫不同名字**：`name` 只是本群 `@` token，身份是 `agentId`。
+    // 池里剔掉本席位的旧组员名（它们正被这份名册整体替换，留着会让「沿用旧名」误判成撞名）。
+    val names = TeamRosterValidation.resolveNames(
+        cmd.roster,
+        declarationTokenPool(meta, self, excludeSeat = existing),
+    )
 
     var resolvedWsId: String? = null
     val seatsBefore = if (existing == null) {
@@ -792,7 +802,7 @@ private fun RelayController.planAttachTeam(
 
     val attached = target.copy(
         entityType = EntityTypes.TEAM,
-        teamMembers = cmd.roster.map { TeamMemberInfo(it.agentId, it.name, it.role) },
+        teamMembers = cmd.roster.mapIndexed { i, m -> TeamMemberInfo(m.agentId, names[i].name, m.role) },
         teamId = teamId,
         teamName = teamName,
     )

@@ -33,8 +33,11 @@ class ReviewPipelineWiringGuardTest {
     fun theHostAssemblyParsesVerdictsAndPublishesTheMerge() {
         assertTrue(desktopChain.contains("review = ReviewPipeline("), "宿主装配必须开启审查流水线")
         assertTrue(desktopChain.contains("ReviewVerdict.parseOf("), "驱动输出要解析出 PASS/REJECT，不能恒 null")
-        assertTrue(desktopChain.contains("progress.reviewPassed"), "全棒 PASS 的合流信号要触发既有 publish(merged)")
-        assertTrue(desktopChain.contains("publish(\"merged\""), "合流必须复用既有单槽广播，不另写一条发送")
+        assertTrue(desktopChain.contains("progress.reviewPassed"), "全棒 PASS 的合流信号要读出来")
+        // 审查通过 ≠ 已合入：合流必须由机主的 merge-patch 真正执行 applyBranch。
+        // 从前这里自行 publish("merged")，卡面翻「已合并」而项目目录一行未动（假绿）。
+        assertFalse(desktopChain.contains("publish(\"merged\""),
+            "审查通过不得自行翻 merged —— 合流只能由 merge-patch 落盘后翻面")
     }
 
     /** 守卫自验证：内存摘线后断言要变红，否则只是字符串摆设。 */

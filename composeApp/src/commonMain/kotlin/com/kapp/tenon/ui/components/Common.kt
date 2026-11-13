@@ -152,6 +152,7 @@ import com.kapp.tenon.generated.resources.team_roster_seat_missing
 import com.kapp.tenon.generated.resources.team_profile_managed
 import com.kapp.tenon.generated.resources.team_profile_rejected
 import com.kapp.tenon.generated.resources.team_profile_saved
+import com.kapp.tenon.generated.resources.team_profile_saved_aliased
 import com.kapp.tenon.generated.resources.team_profile_saved_partial
 import com.kapp.tenon.generated.resources.team_roster_invalid
 import com.kapp.tenon.generated.resources.banner_group_meta_rejected
@@ -417,9 +418,9 @@ fun bannerText(message: BannerMessage): String = when (message) {
     BannerMessage.TeamSeatMissing -> stringResource(Res.string.team_roster_seat_missing)
     BannerMessage.TeamRosterInvalid -> stringResource(Res.string.team_roster_invalid)
     BannerMessage.TeamProfileManaged -> stringResource(Res.string.team_profile_managed)
-    is BannerMessage.TeamProfileSaved ->
+    is BannerMessage.TeamProfileSaved -> {
         // 失败群数与成功群数分开说：只报成功会把「有一个群没成功」吞掉。
-        if (message.failedGroupCount == 0) {
+        val base = if (message.failedGroupCount == 0) {
             stringResource(Res.string.team_profile_saved, message.name, message.groupCount)
         } else {
             stringResource(
@@ -429,6 +430,14 @@ fun bannerText(message: BannerMessage): String = when (message) {
                 message.failedGroupCount,
             )
         }
+        // 别名是**另一件事**：席位写进去了，只是本群已经有同名的东西 —— 用户得知道
+        // 在那些群 @ 要用别名，否则他会按档案里的名字去 @，然后以为团队坏了。
+        if (message.aliasedGroupCount == 0) {
+            base
+        } else {
+            base + "\n" + stringResource(Res.string.team_profile_saved_aliased, message.aliasedGroupCount)
+        }
+    }
     BannerMessage.TeamProfileRejected -> stringResource(Res.string.team_profile_rejected)
     is BannerMessage.EmployeeProfileSaved -> if (message.aliasedGroups.isEmpty()) {
         stringResource(Res.string.employee_profile_saved, message.name)

@@ -1,0 +1,49 @@
+{
+  "capturedAt": "2026-11-13T12:10:00+08:00",
+  "defect": "审查全过时只发布 merged 卡，从未把 chain/<id> 合入用户项目目录（假合并）",
+  "symptom": {
+    "chainId": "chain-cmwefxrub",
+    "cardState": "merged",
+    "cardBanner": "All reviewers passed: chain auto-merged",
+    "projectDirectory": "/private/tmp/tenon-scenario/weather-relay-ws",
+    "projectHead": "3792076 chore: 空仓初始化",
+    "projectStatus": "clean (0 changed files)",
+    "implementationWhere": "只存在于分支 chain/cmwefxrub（b9ac34f），未进入工作区 HEAD",
+    "worktreeAfterRun": "/var/folders/.../tenon-chains/cmwefxrub 已被删除（只剩分支）"
+  },
+  "rootCause": {
+    "file": "orchestration/src/main/kotlin/com/kapp/tenon/orchestration/DesktopStageChain.kt",
+    "lines": "report 回调里的 reviewPassed 分支与 sessionExempt 分支",
+    "explanation": "链在自己的临时 worktree 里 commit（landStage 只做 git apply + commit），审查全过后直接 publish(\"merged\", ...) 翻卡；既没有调用 DesktopPatchMerge.applyBranch，也跳过了机主的 merge-patch 点击。日志还写着 origin untouched。",
+    "correctPathAlreadyExists": "HostCardActions 的 merge-patch 分支已支持链卡：cardId 以 chain- 开头 → branch = chain/<id> → DesktopPatchMerge.applyBranch(branch, workspacePath) 真正合入工作树 → BoardCardFlip.merged(cardId, base) 发带 decidedBy 的合并卡"
+  },
+  "fix": {
+    "approach": "删除两处自行 publish(\"merged\")，审查全过只停在 review_ready（卡面带 merge-patch 动作），合流必须由机主点击触发既有 applyBranch 路径",
+    "changedBehavior": [
+      "reviewPassed && review_ready：仅记录日志，等待机主合并",
+      "sessionExempt 低危链：仅免除逐次审批，不代替机主点合并"
+    ],
+    "kept": "StageChain 仍输出 reviewPassed 信号；review_ready 卡仍带 actionId=merge-patch"
+  },
+  "verification": {
+    "guardTest": {
+      "task": ":orchestration:test --tests com.kapp.tenon.orchestration.ReviewPipelineWiringGuardTest",
+      "tests": 3,
+      "failures": 0
+    },
+    "fullModule": {
+      "task": ":orchestration:test",
+      "classes": 51,
+      "tests": 326,
+      "failures": 0
+    },
+    "mutationProbe": {
+      "mutation": "在 reviewPassed 分支加回 publish(\"merged\", ...)",
+      "red": [
+        "theHostAssemblyParsesVerdictsAndPublishesTheMerge"
+      ],
+      "assertion": "审查通过不得自行翻 merged —— 合流只能由 merge-patch 落盘后翻面"
+    }
+  },
+  "nextRealRun": "chain-cmwegkccd（第七次），期望停在 review_ready，由手机点合并后工作区出现改动且卡面带 decidedBy"
+}

@@ -510,10 +510,18 @@ class DesktopExtension(
                 },
             )
             // 团队执行档端口（§6.3）：UI 读写宿主本地执行配置的唯一通路（手机端为 null ⇒ 只读）。
-            controller.teamExecutionPort = DesktopTeamExecutionPort(
+            val execPort = DesktopTeamExecutionPort(
                 store = teamExecution,
                 availableDrivers = { workerOrchestrator.availableAgentKeys() },
                 pointerDirId = { groupId -> hostDirectoryStore?.pointerOf(groupId) },
+            )
+            controller.teamExecutionPort = execPort
+            // 员工工位端口：名录上那格「用什么工具干活」。与执行档端口**同一实例** ——
+            // 用户在群编制里换了底座，名录必须立刻跟着变；两份 store 会让它一直报旧驱动。
+            controller.agentWorkstationPort = DesktopAgentWorkstationPort(
+                selfNodeId = { controller.state.value.settings.nodeId },
+                groups = { controller.state.value.settings.groups },
+                execution = execPort,
             )
             // 「AI 建队」生成桥：LLM → 过门 → 回落模板一条龙（TeamScaffoldGenerator）。
             // 驱动名册与执行档端口同一份在位事实；领队候选由 UI 传（与 TeamProfileDialog

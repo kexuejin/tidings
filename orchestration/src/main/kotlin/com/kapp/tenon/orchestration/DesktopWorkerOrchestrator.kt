@@ -814,7 +814,8 @@ class DesktopWorkerOrchestrator(
         if (groupId != null && mentionedAgentKey != null) {
             val denial = deniedSeatDispatch(groupId, mentionedAgentKey, senderPeerId, prompt)
             if (denial != null) {
-                publishTeamDispatchBlocked(groupId, prompt, denial)
+                recordApprovalRequest(senderPeerId, denial.agentId, "seat dispatch: " + denial.reason.take(60))
+                publishTeamDispatchBlocked(groupId, prompt, denial.reason, approvalRecorded = true)
                 return
             }
         }
@@ -988,8 +989,9 @@ class DesktopWorkerOrchestrator(
         if (groupId != null) {
             val denial = deniedSeatDispatch(groupId, agentKey, senderPeerId, prompt)
             if (denial != null) {
-                val json = publishTeamDispatchBlocked(groupId, prompt, denial)
-                return TicketOutcome("blocked", "Team dispatch denied", denial, json)
+                recordApprovalRequest(senderPeerId, denial.agentId, "seat dispatch: " + denial.reason.take(60))
+                val json = publishTeamDispatchBlocked(groupId, prompt, denial.reason, approvalRecorded = true)
+                return TicketOutcome("blocked", "Team dispatch denied", denial.reason, json)
             }
         }
 
@@ -1558,9 +1560,19 @@ class DesktopWorkerOrchestrator(
             selfNodeId = st.selfNodeId,
         )
         if (!with(AgentExecAuthorizer) { verdict.permitsExecution() }) {
+            // 审批回流（与 direct/cross-host invoke 同口径）：被拒不进死胡同 ——
+            // 记一条授权申请（键 = 授权判据用的那把 agentId），机主在可信设备面板
+            // 批一次（scope=AGENT），同一目标下一次就能过。没有这条回流，
+            // 「mulica 式逐成员授权」对 AI 建队的 m-* 编制行就是永远打不开的门：
+            // UI 没有按 m-* 写策略的入口，被拒后连申请都不存在。
+            recordApprovalRequest(
+                senderPeerId, target.member.agentId,
+                "team dispatch: " + targetLabel.take(40),
+            )
             publishTeamDispatchBlocked(
                 groupId, prompt,
                 "not authorized for " + targetLabel + " (" + verdict + ")",
+                approvalRecorded = true,
             )
             return true
         }
@@ -1608,12 +1620,15 @@ class DesktopWorkerOrchestrator(
      * 时必须过授权；未授权返回可读原因（调用方出 blocked 卡并止步）。
      * 组员 token / 解析不出席位 / 非群 ⇒ null（既有路径接管 —— 组员的授权在团队分支内做）。
      */
+    /** 席位派单被拒：理由 + 授权判据用的那把 agentId（审批回流按它记申请）。 */
+    private data class SeatDenial(val agentId: String, val reason: String)
+
     private fun deniedSeatDispatch(
         groupId: String?,
         mentionedAgentKey: String?,
         senderPeerId: String,
         prompt: String,
-    ): String? {
+    ): SeatDenial? {
         if (groupId == null || mentionedAgentKey.isNullOrBlank()) return null
         val st = controller.state.value
         val group = st.settings.groups.firstOrNull { it.groupId == groupId } ?: return null
@@ -1642,7 +1657,10 @@ class DesktopWorkerOrchestrator(
         } else {
             "seat " + seat.name
         }
-        return "not authorized for " + label + " (" + verdict + ")"
+        return SeatDenial(
+            agentId = seat.agentId,
+            reason = "not authorized for " + label + " (" + verdict + ")",
+        )
     }
 
     /** 团队派单被拒/未配置的**可见出口**：blocked 卡（全群可见），不许静默吞。 */
@@ -1650,19 +1668,32 @@ class DesktopWorkerOrchestrator(
         groupId: String?,
         goal: String,
         reason: String,
+        /** true = 已落一条授权申请（可信设备面板可见），卡面要说出路而不是只说死。 */
+        approvalRecorded: Boolean = false,
     ): String? {
         recordBlindSpot(BlindSpotPatrol.KIND_DELEGATION_REJECTED, goal.take(60), reason.take(200))
+        val banner = "Team dispatch blocked: " + reason +
+            (if (approvalRecorded) "; approval request recorded for the host owner" else "")
         val json = ticketCardJson(
             ticketId = "team-" + System.currentTimeMillis().toString(36),
             rev = 1,
             state = "blocked",
             title = goal.take(60),
-            banner = "Team dispatch blocked: " + reason,
+            banner = banner,
             percent = 0,
             roleName = "Team",
         )
         publishCardJson(groupId, json, "codex")
         return json
+    }
+
+    /**
+     * 审批回流：被拒的派单给机主留一条**可批准的申请**（`AgentGrantStore.recordRequest`），
+     * 与 1:1 / 跨宿主 invoke 的被拒口径完全一致。批准写 scope=AGENT + 同一把 agentId，
+     * 下一次 `grantAllows` 就命中 —— 拒绝从死胡同变成一次审批的距离。
+     */
+    private fun recordApprovalRequest(nodeId: String, agentId: String, reason: String) {
+        controller.invokeRecordGrantRequest?.invoke(nodeId, agentId, reason)
     }
 
     /** 委派计划的统一出口（文本路由，fire-and-forget）。 */

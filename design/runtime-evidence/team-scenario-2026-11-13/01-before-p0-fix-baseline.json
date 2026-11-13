@@ -1,0 +1,368 @@
+{
+  "capturedAt": "2026-11-13T11:06:52",
+  "phase": "before-P0-fix-restart",
+  "diag/link.json": {
+    "updatedAt": 1794539207269,
+    "self": "6bf50c5e-c85f-4bcd-be38-d8e29513f2ed",
+    "linkEnabled": true,
+    "linkTotal": 1,
+    "peers": [
+      {
+        "nodeId": "37e7e9ca-7232-4046-becb-7929af587ef2",
+        "online": true,
+        "address": "2001:db8:9248:cb44:314e:6d8d:7250:7bd2",
+        "linkConnected": true,
+        "linkCarrier": "tls",
+        "dialAttempts": 0,
+        "dialFailures": 0,
+        "dialLastTarget": null,
+        "lastError": null,
+        "skipReason": "peer-has-no-lnk1",
+        "closeReason": null,
+        "closeCount": 0,
+        "closeDetail": null,
+        "pinSource": "pairing"
+      },
+      {
+        "nodeId": "1de883c7-4bca-4d62-a71c-5d32111656ca",
+        "online": false,
+        "address": "192.168.2.73",
+        "linkConnected": false,
+        "linkCarrier": null,
+        "dialAttempts": 0,
+        "dialFailures": 0,
+        "dialLastTarget": null,
+        "lastError": null,
+        "skipReason": "peer-has-no-lnk1",
+        "closeReason": null,
+        "closeCount": 0,
+        "closeDetail": null,
+        "pinSource": null
+      },
+      {
+        "nodeId": "3b53ff10-eccb-4bd4-9672-1c242b954510",
+        "online": false,
+        "address": "10.233.138.118",
+        "linkConnected": false,
+        "linkCarrier": null,
+        "dialAttempts": 0,
+        "dialFailures": 0,
+        "dialLastTarget": null,
+        "lastError": null,
+        "skipReason": "peer-has-no-lnk1",
+        "closeReason": null,
+        "closeCount": 0,
+        "closeDetail": null,
+        "pinSource": null
+      },
+      {
+        "nodeId": "7077a2bb-66a2-476e-98c4-7a88dbc203f3",
+        "online": false,
+        "address": "127.0.0.1",
+        "linkConnected": false,
+        "linkCarrier": null,
+        "dialAttempts": 0,
+        "dialFailures": 0,
+        "dialLastTarget": null,
+        "lastError": null,
+        "skipReason": "peer-has-no-lnk1",
+        "closeReason": null,
+        "closeCount": 0,
+        "closeDetail": null,
+        "pinSource": null
+      }
+    ]
+  },
+  "settings.json": {
+    "nodeId": "6bf50c5e-c85f-4bcd-be38-d8e29513f2ed",
+    "nick": "<host>-156.local",
+    "profileRev": 1,
+    "capsFingerprint": "f7d290a6e8b604af",
+    "persistMessagesDecided": true,
+    "groups": [
+      {
+        "groupId": "58d493d2-b877-41d9-b1be-1fbbd419e5f9",
+        "name": "teahouse-mobile 协同群",
+        "members": [
+          "37e7e9ca-7232-4046-becb-7929af587ef2"
+        ],
+        "rev": 3,
+        "updatedBy": "37e7e9ca-7232-4046-becb-7929af587ef2",
+        "updatedTs": 1794392214697,
+        "creatorIp": "",
+        "creatorId": "37e7e9ca-7232-4046-becb-7929af587ef2",
+        "ownerId": "37e7e9ca-7232-4046-becb-7929af587ef2",
+        "adminIds": [],
+        "description": "<worktree>",
+        "virtualAgents": [
+          {
+            "agentId": "DSH",
+            "hostNodeId": "6bf50c5e-c85f-4bcd-be38-d8e29513f2ed",
+            "name": "dsh-assistant",
+            "allowedWorkspaces": [
+              {
+                "wsId": "ws-e9b18063d183",
+                "title": "teahouse-mobile"
+              }
+            ],
+            "defaultWsId": "ws-e9b18063d183"
+          }
+        ],
+        "memberNicks": {
+          "37e7e9ca-7232-4046-becb-7929af587ef2": "Pixel 6"
+        }
+      },
+      {
+        "groupId": "082d26aa-71e7-4853-b0c9-602b16afaf5f",
+        "name": "teahouse-mobile 协同群",
+        "members": [
+          "37e7e9ca-7232-4046-becb-7929af587ef2",
+          "6bf50c5e-c85f-4bcd-be38-d8e29513f2ed"
+        ],
+        "rev": 2,
+        "updatedBy": "6bf50c5e-c85f-4bcd-be38-d8e29513f2ed",
+        "updatedTs": 1794392235993,
+        "creatorIp": "",
+        "creatorId": "37e7e9ca-7232-4046-becb-7929af587ef2",
+        "ownerId": "37e7e9ca-7232-4046-becb-7929af587ef2",
+        "adminIds": [],
+        "description": "<worktree>",
+        "virtualAgents": [
+          {
+            "agentId": "dsh-a030882e",
+            "hostNodeId": "6bf50c5e-c85f-4bcd-be38-d8e29513f2ed",
+            "name": "dsh-assistant",
+            "allowedWorkspaces": [
+              {
+                "wsId": "ws-e9b18063d183",
+                "title": "teahouse-mobile"
+              }
+            ],
+            "defaultWsId": "ws-e9b18063d183"
+          }
+        ],
+        "memberNicks": {
+          "37e7e9ca-7232-4046-becb-7929af587ef2": "Pixel 6",
+          "6bf50c5e-c85f-4bcd-be38-d8e29513f2ed": "<host>-156.local"
+        }
+      },
+      {
+        "groupId": "fa7ae7f5-30e4-47de-a64f-c577e2cda89a",
+        "name": "scenario-dev",
+        "members": [
+          "37e7e9ca-7232-4046-becb-7929af587ef2",
+          "6bf50c5e-c85f-4bcd-be38-d8e29513f2ed"
+        ],
+        "rev": 4,
+        "updatedBy": "6bf50c5e-c85f-4bcd-be38-d8e29513f2ed",
+        "updatedTs": 1794536273332,
+        "creatorIp": "",
+        "creatorId": "37e7e9ca-7232-4046-becb-7929af587ef2",
+        "ownerId": "37e7e9ca-7232-4046-becb-7929af587ef2",
+        "adminIds": [],
+        "description": "weather-relay-场景工作区",
+        "virtualAgents": [
+          {
+            "agentId": "dsh-a030882e",
+            "hostNodeId": "6bf50c5e-c85f-4bcd-be38-d8e29513f2ed",
+            "name": "dsh-a030882e-assistant",
+            "entityType": "team",
+            "teamMembers": [
+              {
+                "agentId": "m-weather-re-coder-d958",
+                "name": "weather-re-coder",
+                "role": "编码"
+              },
+              {
+                "agentId": "m-weather-re-tester-df7f",
+                "name": "weather-re-tester",
+                "role": "测试"
+              },
+              {
+                "agentId": "m-weather-re-reviewer-5ed8",
+                "name": "weather-re-reviewer",
+                "role": "审查"
+              }
+            ],
+            "allowedWorkspaces": [
+              {
+                "wsId": "ws-6a6cee6c023e",
+                "title": "weather-relay-场景工作区"
+              }
+            ],
+            "defaultWsId": "ws-6a6cee6c023e",
+            "teamId": "tm-mweatbuo-1a85",
+            "teamName": "weather-dev"
+          }
+        ],
+        "memberNicks": {
+          "37e7e9ca-7232-4046-becb-7929af587ef2": "Pixel 6",
+          "6bf50c5e-c85f-4bcd-be38-d8e29513f2ed": "<host>-156.local"
+        }
+      }
+    ],
+    "teamProfiles": [
+      {
+        "teamId": "tm-mweatbuo-1a85",
+        "name": "weather-dev",
+        "leaderAgentId": "dsh-a030882e",
+        "members": [
+          {
+            "agentId": "m-weather-re-coder-d958",
+            "name": "weather-re-coder",
+            "role": "编码"
+          },
+          {
+            "agentId": "m-weather-re-tester-df7f",
+            "name": "weather-re-tester",
+            "role": "测试"
+          },
+          {
+            "agentId": "m-weather-re-reviewer-5ed8",
+            "name": "weather-re-reviewer",
+            "role": "审查"
+          }
+        ],
+        "rev": 2,
+        "updatedTs": 1794534764082
+      }
+    ],
+    "scanRanges": [
+      {
+        "cidr": "192.168.2.80/30",
+        "addedAt": 1791569177899,
+        "source": "peer",
+        "sourceNodeId": "3b53ff10-eccb-4bd4-9672-1c242b954510",
+        "sourceNick": "panda"
+      },
+      {
+        "cidr": "192.168.2.80/29",
+        "addedAt": 1791570457822,
+        "source": "peer",
+        "sourceNodeId": "3b53ff10-eccb-4bd4-9672-1c242b954510",
+        "sourceNick": "panda"
+      },
+      {
+        "cidr": "10.99.195.0/24",
+        "addedAt": 1791570440041,
+        "source": "peer",
+        "sourceNodeId": "3b53ff10-eccb-4bd4-9672-1c242b954510",
+        "sourceNick": "panda"
+      },
+      {
+        "cidr": "10.99.58.0/24",
+        "addedAt": 1791576045541,
+        "source": "peer",
+        "sourceNodeId": "3b53ff10-eccb-4bd4-9672-1c242b954510",
+        "sourceNick": "panda"
+      },
+      {
+        "cidr": "10.99.96.0/24",
+        "addedAt": 1791580199495,
+        "source": "peer",
+        "sourceNodeId": "3b53ff10-eccb-4bd4-9672-1c242b954510",
+        "sourceNick": "panda"
+      },
+      {
+        "cidr": "10.99.66.0/24",
+        "addedAt": 1791611281363,
+        "source": "peer",
+        "sourceNodeId": "3b53ff10-eccb-4bd4-9672-1c242b954510",
+        "sourceNick": "panda"
+      },
+      {
+        "cidr": "10.99.50.0/24",
+        "addedAt": 1792146514302,
+        "source": "peer",
+        "sourceNodeId": "3b53ff10-eccb-4bd4-9672-1c242b954510",
+        "sourceNick": "panda"
+      },
+      {
+        "cidr": "10.99.30.0/24",
+        "addedAt": 1792148830458,
+        "source": "peer",
+        "sourceNodeId": "3b53ff10-eccb-4bd4-9672-1c242b954510",
+        "sourceNick": "panda"
+      }
+    ]
+  },
+  "host-directories.json": {
+    "schemaVersion": 1,
+    "directories": [
+      {
+        "dirId": "dir-e9b18063d183",
+        "path": "<worktree>",
+        "displayName": "teahouse-mobile"
+      },
+      {
+        "dirId": "dir-6a6cee6c023e",
+        "path": "/private/tmp/tenon-scenario/weather-relay-ws",
+        "displayName": "weather-relay-场景工作区"
+      }
+    ],
+    "groupPointers": {
+      "58d493d2-b877-41d9-b1be-1fbbd419e5f9": "dir-e9b18063d183",
+      "082d26aa-71e7-4853-b0c9-602b16afaf5f": "dir-e9b18063d183",
+      "fa7ae7f5-30e4-47de-a64f-c577e2cda89a": "dir-6a6cee6c023e"
+    },
+    "whitelist": [
+      {
+        "dirId": "dir-e9b18063d183",
+        "readOnly": false
+      },
+      {
+        "dirId": "dir-6a6cee6c023e",
+        "readOnly": false
+      }
+    ]
+  },
+  "team-execution.json": {
+    "schemaVersion": 2,
+    "teams": [
+      {
+        "groupId": "fa7ae7f5-30e4-47de-a64f-c577e2cda89a",
+        "dirId": "dir-6a6cee6c023e",
+        "leaderAgentId": "dsh-a030882e",
+        "updatedAt": 1794533335889,
+        "members": [
+          {
+            "agentId": "m-weather-re-coder-d958",
+            "kind": "worker",
+            "driverKey": "codex",
+            "models": [],
+            "customPrompt": "Investigate the workspace before changing anything. Implement the goal, then run the available build/test commands and fix what they expose. Report what changed and what you verified."
+          },
+          {
+            "agentId": "m-weather-re-tester-df7f",
+            "kind": "reviewer",
+            "driverKey": "claude",
+            "models": [],
+            "customPrompt": "Review the current workspace against the goal. Give findings item by item, a problem list, and an explicit final verdict line. Do not rewrite the implementation."
+          },
+          {
+            "agentId": "m-weather-re-reviewer-5ed8",
+            "kind": "reviewer",
+            "driverKey": "claude",
+            "models": [],
+            "customPrompt": "Review the current workspace against the goal. Give findings item by item, a problem list, and an explicit final verdict line. Do not rewrite the implementation."
+          }
+        ]
+      }
+    ]
+  },
+  "agent-grants.json": {
+    "policy": "request",
+    "grants": [
+      {
+        "nodeId": "37e7e9ca-7232-4046-becb-7929af587ef2",
+        "scope": "all",
+        "access": "rw",
+        "isMyDevice": true,
+        "grantedAt": 1794390963323
+      }
+    ],
+    "requests": []
+  },
+  "cardRows": 11,
+  "maxSeq": 53
+}

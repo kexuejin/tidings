@@ -125,7 +125,9 @@ fun GroupMeta.resolveTeamMemberToken(token: String): TeamMention? {
  *   词边界复用 [mentionsToken] 的 ASCII 判据（中文后直接接内容仍算命中）；
  * - 同名挂多条席位 / 多个 teamId ⇒ [Ambiguous]（不挑一支）；
  * - 团队名同时是某个席位 token 或组员 token ⇒ [Ambiguous]：这时候 `@` 永远先命中
- *   成员，团队名等于**永远打不到**，必须让用户改名，而不是让两套语义抢一个词。
+ *   成员，团队名等于**永远打不到**，必须让用户改名，而不是让两套语义抢一个词；
+ * - **一段文本点了两支不同的队 ⇒ [Ambiguous]**：`@` 的语义是「这次派给谁」，两个队
+ *   是两个执行主体，替人合并成一支就是「另一支队永远不干活」—— 而且没有任何报错。
  */
 sealed interface TeamNameMention {
     /** 命中：[seats] 是该团队在本群的席位（正常恰好一条），[seat] 是取用目标。 */
@@ -144,13 +146,77 @@ sealed interface TeamNameMention {
  *
  * **不用成员 token 池判撞名**：团队名自己也在池里（它就是可 @ 的 token），拿池判会
  * 自己撞自己。撞名判据改成直接问两个成员判定函数 —— 那才是「`@` 会先命中谁」的答案。
+ *
+ * **必须看全部命中，不能只看最长那个**：`@开发团队 让 @测试团队 看看` 里两支不同的队
+ * 都被点名了，取 `firstOrNull` 会静默只派一支 —— 另一支的主机永远收不到活，界面上
+ * 也看不出少了谁。所以先用 [teamNameHits] 数有几支队被点名，>1 直接 fail-closed。
  */
 fun GroupMeta.resolveTeamNameMention(text: String): TeamNameMention? {
     val teams = mentionableTeams()
     if (teams.isEmpty()) return null
-    val hit = teams.keys.sortedByDescending { it.length }
-        .firstOrNull { name -> mentionsToken(text, name) } ?: return null
+    val hits = teamNameHits(teams, text)
+    // 两支及以上的队被同时点名：`@` 一次只能派一个执行主体，不替人挑。
+    if (hits.size > 1) return TeamNameMention.Ambiguous
+    val hit = hits.firstOrNull() ?: return null
     return teamNameVerdict(teams.getValue(hit), hit)
+}
+
+/**
+ * 一段文本里**全部**被点名的团队名（长名优先，重叠区间只算一次）。
+ *
+ * 为什么要去重叠：`@开发团队二组` 同时满足 `mentionsToken(text, "开发团队")` 与
+ * `mentionsToken(text, "开发团队二组")`（中文不是 token 的延续，`@` 后面接中文照样算
+ * 命中）—— 直接数命中数会把一次点名读成两次，把正常用法判成歧义。判据是**位置**：
+ * 更长的名字先占区间，被占住的名字不再计数。
+ */
+internal fun GroupMeta.teamNameHits(text: String): List<String> =
+    teamNameHits(mentionableTeams(), text)
+
+private fun teamNameHits(
+    teams: Map<String, List<VirtualAgentMember>>,
+    text: String,
+): List<String> {
+    if (teams.isEmpty() || text.isEmpty()) return emptyList()
+    // 按字符占位而不是按区间列表求交：名字都是短串，位置数组最直白也最不容易写错。
+    val consumed = BooleanArray(text.length)
+    val hits = mutableListOf<String>()
+    for (name in teams.keys.sortedByDescending { it.length }) {
+        val spans = mentionSpans(text, name).filter { (start, end) ->
+            (start until end).none { consumed[it] }
+        }
+        if (spans.isEmpty()) continue
+        hits += name
+        for ((start, end) in spans) {
+            for (i in start until end) consumed[i] = true
+        }
+    }
+    return hits
+}
+
+/**
+ * `@<token>` 在文本里的全部命中区间（半开，含 `@` 本身）。
+ *
+ * 词边界判据**逐条照抄** [mentionsToken]：`@` 后面是 ASCII 标识符字符 ⇒ 那是另一个
+ * token（`@dsh2` 不是 `@dsh`），继续往后找；否则算命中。两处若各写一套，就会出现
+ * 「单目标判命中、数多目标判不命中」这种自相矛盾。
+ */
+internal fun mentionSpans(text: String, token: String): List<Pair<Int, Int>> {
+    if (token.isBlank()) return emptyList()
+    val needle = "@" + token
+    val out = mutableListOf<Pair<Int, Int>>()
+    var from = 0
+    while (from <= text.length - needle.length) {
+        val at = text.indexOf(needle, from, ignoreCase = true)
+        if (at < 0) break
+        val after = text.getOrNull(at + needle.length)
+        if (after == null || isAsciiIdentChar(after).not()) {
+            out += at to (at + needle.length)
+            from = at + needle.length
+        } else {
+            from = at + 1
+        }
+    }
+    return out
 }
 
 /**

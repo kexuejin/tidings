@@ -384,15 +384,29 @@ class GroupDeclarationCommandTest {
         assertEquals(4, groupOf(controller).rev)
     }
 
+    /**
+     * **撞别的席位 = 本群别名，不是拒绝**（与改写前相反的判据）：`codex-peer` 是群主
+     * 那台机器上的席位名，团队里的 `codex-peer` 在本群只能叫 `codex-peer-2`。
+     *
+     * 反向探针：把 `planTeamRoster` 里的 `resolveNames` 换回 `rejected(ROSTER_INVALID)`，
+     * 这条会红 —— 那正是「别人先占了名字就把整支团队挡在门外」的老行为。
+     */
     @Test
-    fun rosterThatCollidesWithALeaderTokenIsRejectedAndNothingIsWritten() {
+    fun rosterThatCollidesWithAnotherSeatBecomesALocalAlias() {
         val controller = controller().also { seed(it) }
-        val before = groupOf(controller)
         val result = controller.applyDeclaration(
             humanCommand(roster = listOf(TeamMemberDraft(agentId = "m-x", name = "codex-peer", role = "编码"))),
         )
-        assertEquals(DeclarationRejection.ROSTER_INVALID, (result as DeclarationResult.Rejected).reason)
-        assertEquals(before, groupOf(controller))
-        assertNotNull(groupOf(controller).virtualAgents, "被拒之后席位表必须还在")
+        assertTrue(result is DeclarationResult.Applied, "撞名不再是拒绝理由，实际 $result")
+
+        val seat = assertNotNull(
+            groupOf(controller).virtualAgents.orEmpty().firstOrNull { it.agentId == "dsh" },
+            "席位必须还在",
+        )
+        assertEquals(listOf("codex-peer-2"), seat.teamMembers.map { it.name })
+
+        // 别名只改自己那一行，**别人的席位一个字都不许动**。
+        val other = assertNotNull(groupOf(controller).virtualAgents.orEmpty().firstOrNull { it.name == "codex-peer" })
+        assertEquals("codex-peer", other.name)
     }
 }

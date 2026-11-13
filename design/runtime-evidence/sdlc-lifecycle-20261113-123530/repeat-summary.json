@@ -1,0 +1,104 @@
+{
+  "generated_at": "2026-11-13T04:36:00.933490+00:00",
+  "stage": "current",
+  "repeat": 2,
+  "checks": [
+    {
+      "name": "same-anchor-across-runs",
+      "ok": true,
+      "detail": "锚点集合 ['']"
+    },
+    {
+      "name": "each-run-has-fresh-workspace",
+      "ok": false,
+      "detail": "1/2 个独立路径"
+    },
+    {
+      "name": "identical-verdict-shape",
+      "ok": true,
+      "detail": "判据名集合 1 种"
+    },
+    {
+      "name": "all-runs-green",
+      "ok": false,
+      "detail": "run-1=FAIL / run-2=FAIL"
+    },
+    {
+      "name": "source-repo-still-clean",
+      "ok": true,
+      "detail": "~/weather-relay 跑完 2 轮后脏行=0"
+    }
+  ],
+  "runs": [
+    {
+      "label": "run-1",
+      "workspace": "~/weather-relay",
+      "anchor": "",
+      "green": false,
+      "code": 1,
+      "acts": 9,
+      "seconds": 15.488399028778076,
+      "verdict_names": [
+        "0:cli:dsh",
+        "0:bundle-entry",
+        "0:install-consistency",
+        "0:dsh-credentials",
+        "0:control-plane",
+        "0:control-plane-healthz",
+        "0:workspace-is-git",
+        "0:workspace-clean",
+        "0:stage-files-present",
+        "0:stage-files-absent",
+        "0:baseline-tests-green",
+        "0:artifacts-dir",
+        "0:cli-dsh-smoke",
+        "1:not-run",
+        "2:not-run",
+        "3:not-run",
+        "4:not-run",
+        "5:not-run",
+        "6:not-run",
+        "i1:not-run",
+        "i2:not-run"
+      ],
+      "failures": [
+        "0"
+      ]
+    },
+    {
+      "label": "run-2",
+      "workspace": "~/weather-relay",
+      "anchor": "",
+      "green": false,
+      "code": 1,
+      "acts": 9,
+      "seconds": 14.422374963760376,
+      "verdict_names": [
+        "0:cli:dsh",
+        "0:bundle-entry",
+        "0:install-consistency",
+        "0:dsh-credentials",
+        "0:control-plane",
+        "0:control-plane-healthz",
+        "0:workspace-is-git",
+        "0:workspace-clean",
+        "0:stage-files-present",
+        "0:stage-files-absent",
+        "0:baseline-tests-green",
+        "0:artifacts-dir",
+        "0:cli-dsh-smoke",
+        "1:not-run",
+        "2:not-run",
+        "3:not-run",
+        "4:not-run",
+        "5:not-run",
+        "6:not-run",
+        "i1:not-run",
+        "i2:not-run"
+      ],
+      "failures": [
+        "0"
+      ]
+    }
+  ]
+}

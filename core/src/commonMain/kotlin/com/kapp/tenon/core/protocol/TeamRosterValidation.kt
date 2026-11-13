@@ -37,53 +37,73 @@ enum class TeamRosterIssueKind {
     BAD_SLUG,
     /** 团队内重复（大小写不敏感）。 */
     DUPLICATE_IN_TEAM,
-    /** 与群内既有 `@` token 冲突（[TeamRosterIssue.conflictWith] 给出撞上的那个）。 */
-    TAKEN,
     /** 组员数超过上限。 */
     TOO_MANY,
 }
 
-/** 一条结构化的校验问题：哪一行（[index]）/哪个字段/什么问题/跟谁冲突。UI 直接按它定位。 */
+/** 一条结构化的校验问题：哪一行（[index]）/哪个字段/什么问题。UI 直接按它定位。 */
 data class TeamRosterIssue(
     /** 草稿列表里的行号（0 起）；`COUNT` 类问题无行可指，为 -1。 */
     val index: Int,
     val field: TeamRosterField,
     val kind: TeamRosterIssueKind,
-    /** 与谁冲突（TAKEN 时给撞上的既有 token）；其它种类为 null。 */
-    val conflictWith: String? = null,
     /** 长度/数量上限（TOO_LONG / TOO_MANY 时给出）。 */
     val limit: Int? = null,
 )
 
 /**
+ * 一行组员在**本群**最终用的 `@` token。
+ *
+ * [aliasedFrom] 非空 = 这个名字撞上了群内别人的 token，本群改叫 [name]（`coder-2`）。
+ * **这不是错误**，是跟员工档案同一条纪律：档案给默认名，本群撞名就地取别名，
+ * 不让「别人先占了名字」把整支团队卡在门外。
+ */
+data class TeamRosterName(val name: String, val aliasedFrom: String? = null) {
+    /** 这一行是否被本群改了名（UI 据此显示「本群将叫 X」）。 */
+    val isAliased: Boolean get() = aliasedFrom != null
+}
+
+/**
  * 团队编制校验（方案 §4.4）：**core 纯函数**，UI、领域写路径与测试共用同一份。
  *
- * ## 冲突域（修正工作稿 T4 的那条）
+ * ## 两件事，两个函数
  *
- * 一个组员名将来要成为 `@` token，所以它必须避开**群内所有现在就能被 @ 的东西**：
+ * 1. [validate] —— **必须改的错**：空、超长、非 slug、名册内重名、超员。
+ * 2. [resolveNames] —— **本群最终叫什么**：撞上群里别人的 token 就地取别名
+ *    （`coder-2`），与员工档案 [AgentMemberName.unique] 同一条纪律。
+ *
+ * 分开的理由：撞名不是用户的错，是「别人先占了这个词」。以前把它当错误整体拒绝，
+ * 于是「员工先建好、加进群」这件事会卡在一个纯粹由别人占名造成的原因上 ——
+ * 而员工档案那条路一直是自动别名的，同一个产品里两种口径，用户看不懂。
+ *
+ * ## 冲突域（名字要避开的东西）
+ *
+ * 一个组员名将来要成为 `@` token，所以要避开**群内所有现在就能被 @ 的东西**：
  * 既有 `virtualAgents[].name` + `agentId` + 已知 agentKind（`mentionKeys` 的口径），
  * 加上**其它**团队声明的组员名 —— 大小写不敏感。人类昵称（`memberNicks`/`selfNick`）
  * **不是** token，不参与（人类昵称是展示数据，伪造它没有任何 @ 特权）。
  *
  * 池里**不包含**被编辑这条团队自己的既有组员名 —— 那些名字正在被这份草稿整体替换，
  * 留在池里会让「沿用旧名」误报冲突。领队自己的 token（席位 name/agentId/kind）
- * **要留在池里**：组员撞上领队名等于影子领队，必须拦。
+ * **要留在池里**：组员撞上领队名等于影子领队，必须拦（拦法也是别名，不减人）。
  *
- * ## 名字现在就按「未来的 token」收
+ * ## 名册内重名仍然是错
  *
- * v1 不路由 `@组员`，但唯一性现在就保证 —— v2 上线时不必逼任何用户改名
- * （改名等于把别人正在用的名字打断）。中文放 [TeamMemberDraft.role]。
+ * 同一份名册里两行都叫 `coder`：自动改成 `coder` / `coder-2` 会把用户的手误固化成
+ * 两个不同的人，之后派单分不清谁是谁。这一条**必须让用户自己改**，与「撞外人」不同 ——
+ * 外人的名字不是用户能改的，自己的笔误是。
  */
 object TeamRosterValidation {
 
     /**
-     * 校验一份组员草稿。
+     * 校验一份组员草稿（**只报必须改的错**）。
+     *
+     * 没有 token 池参数是**故意的**：撞名不再是错，见 [resolveNames]。留一个用不上的池
+     * 只会让下一个调用方以为「传了池就会拦撞名」。
      *
      * @param roster 要保存的组员草稿（空 = 关闭团队；调用方决定语义，这里空表恒合法）
-     * @param takenTokens 群内所有可被 `@` 的既有 token（大小写不敏感比较）；
-     *   不含 [roster] 自己 —— 见类 KDoc 的冲突域说明。
      */
-    fun validate(roster: List<TeamMemberDraft>, takenTokens: Set<String>): List<TeamRosterIssue> {
+    fun validate(roster: List<TeamMemberDraft>): List<TeamRosterIssue> {
         if (roster.size > Limits.TEAM_MEMBERS_MAX) {
             return listOf(
                 TeamRosterIssue(
@@ -94,12 +114,11 @@ object TeamRosterValidation {
                 ),
             )
         }
-        val takenLower = takenTokens.map { it.trim().lowercase() }.filter { it.isNotEmpty() }.toSet()
         val issues = mutableListOf<TeamRosterIssue>()
         val seenNames = HashMap<String, Int>()   // lowercase name → 首次出现的行号
         val seenAgentIds = HashMap<String, Int>() // lowercase agentId → 首次出现的行号
         roster.forEachIndexed { index, member ->
-            // ---- name：非空、预算内、slug 形状、团队内唯一、群内不撞 token ----
+            // ---- name：非空、预算内、slug 形状、团队内唯一（撞外人另有 resolveNames）----
             val name = member.name.trim()
             when {
                 name.isEmpty() -> issues += TeamRosterIssue(index, TeamRosterField.NAME, TeamRosterIssueKind.EMPTY)
@@ -114,9 +133,6 @@ object TeamRosterValidation {
                 seenNames[nameLower] = index
             } else if (name.isNotEmpty()) {
                 issues += TeamRosterIssue(index, TeamRosterField.NAME, TeamRosterIssueKind.DUPLICATE_IN_TEAM)
-            }
-            if (name.isNotEmpty() && nameLower in takenLower) {
-                issues += TeamRosterIssue(index, TeamRosterField.NAME, TeamRosterIssueKind.TAKEN, conflictWith = nameLower)
             }
 
             // ---- role：非空、预算内（自由文本，允许中文）----
@@ -145,5 +161,28 @@ object TeamRosterValidation {
             }
         }
         return issues
+    }
+
+    /**
+     * 每行组员在**本群**最终会用的 `@` token（顺序与 [roster] 一致）。
+     *
+     * 撞上 [takenTokens] 里已有的词就地取别名（`coder-2`、`coder-3`…），**不拒绝**。
+     * 名册内部的行间冲突不在这里处理 —— 那是 [validate] 的 `DUPLICATE_IN_TEAM`，
+     * 必须由用户改（自动编号会把笔误固化成两个不同的人）。
+     *
+     * 顺序敏感：同一个 base 出现两次时，第二个才会被编号；因此调用方必须传**同一份**
+     * 顺序的草稿，且写席位时按同一顺序落盘 —— 否则「预览叫什么」与「实际叫什么」会分叉。
+     */
+    fun resolveNames(roster: List<TeamMemberDraft>, takenTokens: Set<String>): List<TeamRosterName> {
+        // 池归一成小写：`unique` 是精确比较，池里的大小写混写会让 `Coder` 从 `coder` 底下漏过去。
+        val taken = takenTokens.map { it.trim().lowercase() }.filter { it.isNotEmpty() }.toMutableSet()
+        return roster.map { member ->
+            val base = member.name.trim().lowercase()
+            // 空名 / 形状非法不是这里的事：原样返回，让 validate 的错照常报出去。
+            if (base.isEmpty()) return@map TeamRosterName(member.name.trim())
+            val assigned = AgentMemberName.unique(base, taken)
+            taken += assigned
+            TeamRosterName(assigned, aliasedFrom = base.takeIf { it != assigned })
+        }
     }
 }

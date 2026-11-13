@@ -1,0 +1,444 @@
+{
+  "generated_at": "2026-11-13T04:35:17.497271+00:00",
+  "tier": "headless",
+  "stage": "current",
+  "anchor": "",
+  "source": "~/weather-relay",
+  "run_label": "run-1",
+  "workspace": "~/weather-relay",
+  "host": "http://127.0.0.1:8788",
+  "agents": [
+    {
+      "key": "dsh",
+      "cli": "dsh",
+      "role": "worker"
+    }
+  ],
+  "base_head": "",
+  "base_tests": {},
+  "device_commits": [],
+  "created_files": [],
+  "doctor": {
+    "generated_at": "2026-11-13T04:35:17.471139+00:00",
+    "mode": "deep",
+    "strict": false,
+    "layers": [
+      "runtime",
+      "install",
+      "credentials",
+      "endpoints",
+      "scope",
+      "execution"
+    ],
+    "checks": [
+      {
+        "layer": "runtime",
+        "name": "cli:dsh",
+        "status": "pass",
+        "detail": "dsh -> /opt/homebrew/bin/dsh",
+        "evidence": {
+          "binary": "/opt/homebrew/bin/dsh"
+        },
+        "fix": "",
+        "skipped_by": ""
+      },
+      {
+        "layer": "runtime",
+        "name": "bundle-entry",
+        "status": "pass",
+        "detail": "wrapper=/opt/homebrew/bin/dsh bundle=<dsh-harness>/apps/cli/lib/bin.js node=~/.workbuddy/binaries/node/versions/22.22.2-6/bin/node",
+        "evidence": {
+          "wrapper": "/opt/homebrew/bin/dsh",
+          "bundle": "<dsh-harness>/apps/cli/lib/bin.js",
+          "node": "~/.workbuddy/binaries/node/versions/22.22.2-6/bin/node"
+        },
+        "fix": "",
+        "skipped_by": ""
+      },
+      {
+        "layer": "install",
+        "name": "install-consistency",
+        "status": "warn",
+        "detail": "version=0.2.2-rc.1 编译产物落后 package.json 1.83 天（疑似安装漂移，仅归因）",
+        "evidence": {
+          "package": "<dsh-harness>/apps/cli/package.json",
+          "bundle": "<dsh-harness>/apps/cli/lib/bin.js",
+          "version": "0.2.2-rc.1",
+          "package_mtime": 1794095889.9896681,
+          "bundle_mtime": 1793937349.7381768,
+          "bundle_lags_days": 1.83
+        },
+        "fix": "fix：恢复安装与编译产物一致（pnpm install/build），别只信 --version",
+        "skipped_by": ""
+      },
+      {
+        "layer": "credentials",
+        "name": "dsh-credentials",
+        "status": "pass",
+        "detail": "~/.dsh/.credentials.yaml 存在",
+        "evidence": {
+          "path": "~/.dsh/.credentials.yaml",
+          "exists": true
+        },
+        "fix": "",
+        "skipped_by": ""
+      },
+      {
+        "layer": "endpoints",
+        "name": "control-plane",
+        "status": "fail",
+        "detail": "GET /v1/peers -> 502 {}",
+        "evidence": {
+          "code": 502
+        },
+        "fix": "fix：确认控制面在 8788 且宿主已启动",
+        "skipped_by": ""
+      },
+      {
+        "layer": "endpoints",
+        "name": "control-plane-healthz",
+        "status": "skip",
+        "detail": "not run (control-plane)：同层后续项不再判定",
+        "evidence": {
+          "code": 502,
+          "body": "{}"
+        },
+        "fix": "fix：/healthz 不含 CLI 驱动，不能拿它替代真跑",
+        "skipped_by": "control-plane"
+      },
+      {
+        "layer": "scope",
+        "name": "not-run",
+        "status": "skip",
+        "detail": "not run (control-plane)：本层未执行（不记通过，也不记失败）",
+        "evidence": {
+          "upstream": "control-plane"
+        },
+        "fix": "fix：先修 control-plane",
+        "skipped_by": "control-plane"
+      },
+      {
+        "layer": "execution",
+        "name": "not-run",
+        "status": "skip",
+        "detail": "not run (control-plane)：本层未执行（不记通过，也不记失败）",
+        "evidence": {
+          "upstream": "control-plane"
+        },
+        "fix": "fix：先修 control-plane",
+        "skipped_by": "control-plane"
+      }
+    ],
+    "root_cause": "control-plane",
+    "exit_code": 1,
+    "exit_code_meaning": {
+      "0": "全绿",
+      "1": "有明确失败项",
+      "2": "未验证（上游短路或 --offline）"
+    },
+    "boundary": "静态层只归因，execution 真跑才是权威；bundle/ESM 在静态检查之后加载，静态全绿不等于能跑"
+  },
+  "environment": {
+    "python": "3.13.12",
+    "dsh": "/opt/homebrew/bin/dsh",
+    "opencode": "~/.opencode/bin/opencode",
+    "adb": "~/Library/Android/sdk/platform-tools/adb"
+  },
+  "acts": [
+    {
+      "act_id": "0",
+      "title": "环境体检",
+      "chain": "local",
+      "status": "FAIL",
+      "verdicts": [
+        {
+          "name": "cli:dsh",
+          "ok": true,
+          "detail": "dsh -> /opt/homebrew/bin/dsh"
+        },
+        {
+          "name": "bundle-entry",
+          "ok": true,
+          "detail": "wrapper=/opt/homebrew/bin/dsh bundle=<dsh-harness>/apps/cli/lib/bin.js node=~/.workbuddy/binaries/node/versions/22.22.2-6/bin/node"
+        },
+        {
+          "name": "install-consistency",
+          "ok": true,
+          "detail": "[warn] version=0.2.2-rc.1 编译产物落后 package.json 1.83 天（疑似安装漂移，仅归因） | fix：恢复安装与编译产物一致（pnpm install/build），别只信 --version"
+        },
+        {
+          "name": "dsh-credentials",
+          "ok": true,
+          "detail": "~/.dsh/.credentials.yaml 存在"
+        },
+        {
+          "name": "control-plane",
+          "ok": false,
+          "detail": "GET /v1/peers -> 502 {} | fix：确认控制面在 8788 且宿主已启动"
+        },
+        {
+          "name": "not-run",
+          "ok": false,
+          "detail": "not run (control-plane)：endpoints/control-plane-healthz 未执行（不记通过，也不记失败）"
+        },
+        {
+          "name": "not-run",
+          "ok": false,
+          "detail": "not run (control-plane)：scope/not-run 未执行（不记通过，也不记失败）"
+        },
+        {
+          "name": "not-run",
+          "ok": false,
+          "detail": "not run (control-plane)：execution/not-run 未执行（不记通过，也不记失败）"
+        }
+      ],
+      "evidence": {
+        "doctor": {
+          "generated_at": "2026-11-13T04:35:17.471139+00:00",
+          "mode": "deep",
+          "strict": false,
+          "layers": [
+            "runtime",
+            "install",
+            "credentials",
+            "endpoints",
+            "scope",
+            "execution"
+          ],
+          "checks": [
+            {
+              "layer": "runtime",
+              "name": "cli:dsh",
+              "status": "pass",
+              "detail": "dsh -> /opt/homebrew/bin/dsh",
+              "evidence": {
+                "binary": "/opt/homebrew/bin/dsh"
+              },
+              "fix": "",
+              "skipped_by": ""
+            },
+            {
+              "layer": "runtime",
+              "name": "bundle-entry",
+              "status": "pass",
+              "detail": "wrapper=/opt/homebrew/bin/dsh bundle=<dsh-harness>/apps/cli/lib/bin.js node=~/.workbuddy/binaries/node/versions/22.22.2-6/bin/node",
+              "evidence": {
+                "wrapper": "/opt/homebrew/bin/dsh",
+                "bundle": "<dsh-harness>/apps/cli/lib/bin.js",
+                "node": "~/.workbuddy/binaries/node/versions/22.22.2-6/bin/node"
+              },
+              "fix": "",
+              "skipped_by": ""
+            },
+            {
+              "layer": "install",
+              "name": "install-consistency",
+              "status": "warn",
+              "detail": "version=0.2.2-rc.1 编译产物落后 package.json 1.83 天（疑似安装漂移，仅归因）",
+              "evidence": {
+                "package": "<dsh-harness>/apps/cli/package.json",
+                "bundle": "<dsh-harness>/apps/cli/lib/bin.js",
+                "version": "0.2.2-rc.1",
+                "package_mtime": 1794095889.9896681,
+                "bundle_mtime": 1793937349.7381768,
+                "bundle_lags_days": 1.83
+              },
+              "fix": "fix：恢复安装与编译产物一致（pnpm install/build），别只信 --version",
+              "skipped_by": ""
+            },
+            {
+              "layer": "credentials",
+              "name": "dsh-credentials",
+              "status": "pass",
+              "detail": "~/.dsh/.credentials.yaml 存在",
+              "evidence": {
+                "path": "~/.dsh/.credentials.yaml",
+                "exists": true
+              },
+              "fix": "",
+              "skipped_by": ""
+            },
+            {
+              "layer": "endpoints",
+              "name": "control-plane",
+              "status": "fail",
+              "detail": "GET /v1/peers -> 502 {}",
+              "evidence": {
+                "code": 502
+              },
+              "fix": "fix：确认控制面在 8788 且宿主已启动",
+              "skipped_by": ""
+            },
+            {
+              "layer": "endpoints",
+              "name": "control-plane-healthz",
+              "status": "skip",
+              "detail": "not run (control-plane)：同层后续项不再判定",
+              "evidence": {
+                "code": 502,
+                "body": "{}"
+              },
+              "fix": "fix：/healthz 不含 CLI 驱动，不能拿它替代真跑",
+              "skipped_by": "control-plane"
+            },
+            {
+              "layer": "scope",
+              "name": "not-run",
+              "status": "skip",
+              "detail": "not run (control-plane)：本层未执行（不记通过，也不记失败）",
+              "evidence": {
+                "upstream": "control-plane"
+              },
+              "fix": "fix：先修 control-plane",
+              "skipped_by": "control-plane"
+            },
+            {
+              "layer": "execution",
+              "name": "not-run",
+              "status": "skip",
+              "detail": "not run (control-plane)：本层未执行（不记通过，也不记失败）",
+              "evidence": {
+                "upstream": "control-plane"
+              },
+              "fix": "fix：先修 control-plane",
+              "skipped_by": "control-plane"
+            }
+          ],
+          "root_cause": "control-plane",
+          "exit_code": 1,
+          "exit_code_meaning": {
+            "0": "全绿",
+            "1": "有明确失败项",
+            "2": "未验证（上游短路或 --offline）"
+          },
+          "boundary": "静态层只归因，execution 真跑才是权威；bundle/ESM 在静态检查之后加载，静态全绿不等于能跑"
+        },
+        "base_head": "",
+        "base_dirty": [],
+        "base_tests": {},
+        "cli_smoke": {}
+      },
+      "seconds": 0.05
+    },
+    {
+      "act_id": "1",
+      "title": "需求确认",
+      "chain": "cli-direct",
+      "status": "NA",
+      "verdicts": [
+        {
+          "name": "not-run",
+          "ok": false,
+          "detail": "not run (control-plane)：前置体检未成立，本幕未执行（不记通过，也不记失败）"
+        }
+      ],
+      "evidence": {},
+      "seconds": 0.0
+    },
+    {
+      "act_id": "2",
+      "title": "新功能实现",
+      "chain": "cli-direct",
+      "status": "NA",
+      "verdicts": [
+        {
+          "name": "not-run",
+          "ok": false,
+          "detail": "not run (control-plane)：前置体检未成立，本幕未执行（不记通过，也不记失败）"
+        }
+      ],
+      "evidence": {},
+      "seconds": 0.0
+    },
+    {
+      "act_id": "3",
+      "title": "审查与合流",
+      "chain": "local",
+      "status": "NA",
+      "verdicts": [
+        {
+          "name": "not-run",
+          "ok": false,
+          "detail": "not run (control-plane)：前置体检未成立，本幕未执行（不记通过，也不记失败）"
+        }
+      ],
+      "evidence": {},
+      "seconds": 0.0
+    },
+    {
+      "act_id": "4",
+      "title": "追问续接",
+      "chain": "orchestrator",
+      "status": "NA",
+      "verdicts": [
+        {
+          "name": "not-run",
+          "ok": false,
+          "detail": "not run (control-plane)：前置体检未成立，本幕未执行（不记通过，也不记失败）"
+        }
+      ],
+      "evidence": {},
+      "seconds": 0.0
+    },
+    {
+      "act_id": "5",
+      "title": "缺陷定位修复",
+      "chain": "cli-direct",
+      "status": "NA",
+      "verdicts": [
+        {
+          "name": "not-run",
+          "ok": false,
+          "detail": "not run (control-plane)：前置体检未成立，本幕未执行（不记通过，也不记失败）"
+        }
+      ],
+      "evidence": {},
+      "seconds": 0.0
+    },
+    {
+      "act_id": "6",
+      "title": "收尾验收",
+      "chain": "local",
+      "status": "NA",
+      "verdicts": [
+        {
+          "name": "not-run",
+          "ok": false,
+          "detail": "not run (control-plane)：前置体检未成立，本幕未执行（不记通过，也不记失败）"
+        }
+      ],
+      "evidence": {},
+      "seconds": 0.0
+    },
+    {
+      "act_id": "i1",
+      "title": "超纲退单",
+      "chain": "orchestrator",
+      "status": "NA",
+      "verdicts": [
+        {
+          "name": "not-run",
+          "ok": false,
+          "detail": "not run (control-plane)：前置体检未成立，本幕未执行（不记通过，也不记失败）"
+        }
+      ],
+      "evidence": {},
+      "seconds": 0.0
+    },
+    {
+      "act_id": "i2",
+      "title": "硬打断",
+      "chain": "orchestrator",
+      "status": "NA",
+      "verdicts": [
+        {
+          "name": "not-run",
+          "ok": false,
+          "detail": "not run (control-plane)：前置体检未成立，本幕未执行（不记通过，也不记失败）"
+        }
+      ],
+      "evidence": {},
+      "seconds": 0.0
+    }
+  ]
+}

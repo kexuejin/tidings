@@ -34,6 +34,7 @@ import com.kapp.tenon.core.protocol.TeamMemberDraft
 import com.kapp.tenon.core.protocol.TeamRosterField
 import com.kapp.tenon.core.protocol.TeamRosterIssue
 import com.kapp.tenon.core.protocol.TeamRosterIssueKind
+import com.kapp.tenon.core.protocol.TeamRosterName
 import com.kapp.tenon.core.protocol.TeamRosterValidation
 import com.kapp.tenon.core.protocol.VirtualAgentMember
 import org.jetbrains.compose.resources.StringResource
@@ -48,7 +49,7 @@ import com.kapp.tenon.generated.resources.Res
 import com.kapp.tenon.generated.resources.common_cancel
 import com.kapp.tenon.generated.resources.group_auth_save
 import com.kapp.tenon.generated.resources.team_roster_add_member
-import com.kapp.tenon.generated.resources.team_roster_conflict_warning
+import com.kapp.tenon.generated.resources.team_roster_alias_hint
 import com.kapp.tenon.generated.resources.team_roster_dialog_title
 import com.kapp.tenon.generated.resources.team_roster_disable_note
 import com.kapp.tenon.generated.resources.team_roster_duplicate_warning
@@ -348,6 +349,15 @@ fun TeamRosterDialog(
                                 }
                             }
                         }
+                        // **撞名不是错，是本群别名**：先把「保存后在这里叫什么」摆出来，
+                        // 别让用户按档案里的名字去 @ 一个在本群叫别的名字的人。
+                        val ownTokens = selectedSeat?.teamMembers.orEmpty()
+                            .flatMap { listOf(it.name, it.name.lowercase()) }
+                            .toSet()
+                        val aliased = TeamRosterValidation
+                            .resolveNames(drafts, takenTokens - ownTokens)
+                            .filter { it.isAliased }
+                        RosterAliasNotes(aliased)
                         if (issues.any { it.kind == TeamRosterIssueKind.TOO_MANY }) {
                             Text(
                                 text = stringResource(Res.string.team_roster_max_members, Limits.TEAM_MEMBERS_MAX),
@@ -435,11 +445,10 @@ fun TeamRosterDialog(
                         false
                     } else {
                         // 保存前校验（§2.3）：错误就地指出行/字段，不允许存下去再说。
-                        val pool = takenTokens - seat.teamMembers
-                            .flatMap { listOf(it.name, it.name.lowercase()) }.toSet()
+                        // 撞名不在这里拦 —— 名字的最终形态由写路径的 `resolveNames` 决定，
+                        // 这里只预览（上面的别名提示行），不另写一份判据。
                         val found = TeamRosterValidation.validate(
                             drafts.map { it.copy(name = it.name.trim(), role = it.role.trim()) },
-                            pool,
                         )
                         if (found.isNotEmpty()) {
                             issues = found
@@ -796,10 +805,32 @@ private fun issueText(issue: TeamRosterIssue): String = when (issue.kind) {
     TeamRosterIssueKind.TOO_LONG -> stringResource(Res.string.team_roster_limit_warning, issue.limit ?: 0)
     TeamRosterIssueKind.BAD_SLUG -> stringResource(Res.string.team_roster_slug_warning)
     TeamRosterIssueKind.DUPLICATE_IN_TEAM -> stringResource(Res.string.team_roster_duplicate_warning)
-    TeamRosterIssueKind.TAKEN ->
-        stringResource(Res.string.team_roster_conflict_warning, issue.conflictWith.orEmpty())
     TeamRosterIssueKind.TOO_MANY ->
         stringResource(Res.string.team_roster_max_members, issue.limit ?: Limits.TEAM_MEMBERS_MAX)
+}
+
+/**
+ * 本群别名的提示行（非错误色）：`coder` 在本群已经有别人用了，这里会叫 `coder-2`。
+ *
+ * 用 `for` 而不是 `forEach`：`stringResource` 是 @Composable，只能在 Composable 上下文
+ * 里直接调用，塞进 lambda 会编译不过。
+ */
+@Composable
+private fun RosterAliasNotes(names: List<TeamRosterName>) {
+    if (names.isEmpty()) return
+    Column {
+        for (name in names) {
+            Text(
+                text = stringResource(
+                    Res.string.team_roster_alias_hint,
+                    name.aliasedFrom.orEmpty(),
+                    name.name,
+                ),
+                style = MaterialTheme.typography.labelSmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+        }
+    }
 }
 
 // ---------------------------------------------------------------- 纯函数（可测）

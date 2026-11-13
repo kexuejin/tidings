@@ -1,0 +1,48 @@
+{
+  "phase": "P0 目标截断缺陷 · 修复后真实链路验证",
+  "capturedAt": "2026-11-13T11:18:00+08:00",
+  "defect": {
+    "location": "orchestration/.../TeamExecution.kt · TeamPlanCompiler.reviewInstruction",
+    "before": "审查指令两分支都用 goal.take(80)，workerInstruction 用全文 ⇒ 审查棒只看得到任务书前 80 字",
+    "symptomOnDevice": "第三轮真实链路 chain-cmwediyme：审查棒报告「目标文本在 \"AC1 新建 we\" 处被截断，AC5、AC6 完全缺失，无法核验」⇒ VERDICT: REJECT ⇒ 回炉后 worker 认为活已干完、零补丁 ⇒ 链停摆 blocked",
+    "fix": "去掉两处 take(80)，审查指令与 worker 指令对称，任务书全文进每一根棒",
+    "whyNotHandoffBudget": "StageChain.MAX_SUMMARY=200 折的是「上一棒说过的话」，不是任务书；拿交接摘要当目标必然制造假拒绝"
+  },
+  "tests": {
+    "file": "orchestration/src/test/kotlin/com/kapp/tenon/orchestration/TeamPlanCompilerTest.kt",
+    "case": "longGoalReachesEveryReviewStageVerbatim",
+    "forward": "8 tests / 0 failures",
+    "mutationProbe": "把 goal.take(80) 放回两处 ⇒ 该用例报红，XML failure@message = 「第 1 棒的指令丢了目标全文」；恢复后 8/8 绿",
+    "probeCoverage": "编译后 3 根 stage 的 instruction、纯审查单棒、自定义人设分支、默认模板分支、worker 分支"
+  },
+  "realChainEvidence": {
+    "cardId": "chain-cmweek07p",
+    "goalFile": "/tmp/tenon-scenario/requirement-desktop.txt",
+    "goalBytes": 1160,
+    "goalChars": 574,
+    "desktopComposer": "草稿 1159 / 800 B · 自动改走 TCP（未截断，末尾 AC6 与约束完整可见）",
+    "workerArtifact": "/tmp/tenon-ws/artifacts/t-1-93cbae9f",
+    "workerHarvest": "+121 -0 in 3 file(s), patch=3144 B",
+    "reviewerArtifact": "/tmp/tenon-ws/artifacts/t-1-413f487c",
+    "reviewerStage": "第 2/3 棒「测试」",
+    "reviewerSaw": {
+      "AC1": "通过：c_to_f / f_to_c 均 float，无 IO",
+      "AC2": "通过：0/100/-40 三组边界精确",
+      "AC3": "通过：25.0 C = 77.0 F 格式与退出码 0",
+      "AC4": "不完整：nan/inf 被 float() 接受，退出码 0",
+      "AC5": "通过：test_weather.py 恰好 5 个测试方法，subprocess 验退出码与 usage",
+      "AC6": "通过：README 含运行示例与 python3 -m unittest -v"
+    },
+    "verdict": "REJECT（基于 AC4 的真实实现缺陷，而非「看不到 AC5/AC6」）",
+    "interpretation": "修复前审查棒因目标截断而假拒绝；修复后审查棒逐条核到 AC6，并因真实缺陷回炉 —— 责任链审查语义第一次在真机上成立"
+  },
+  "hostRestart": {
+    "reason": "reviewInstruction 编译进 orchestration.jar，必须重启 JVM 加载新类；运行中编译会覆盖已加载 jar（本轮 NoClassDefFoundError 的旧教训）",
+    "pidBefore": 69896,
+    "pidAfter": 89976,
+    "native": "71 checked / 0 mismatch · MATCH (contract version 29)",
+    "cliEnv": "claude-cli 6 项 / codex-cli CODEX_HOME+OPENCODE_API_KEY / opencode-cli / dsh-cli 均注入",
+    "linkAfterReconnect": "Pixel 6 online=true linkConnected=true linkCarrier=tls closeCount=0 dialFailures=0 pinSource=pairing",
+    "closeCountCaveat": "重启导致链路重连，口径取「重连后全流程期间 delta=0」，不是「进程自安装起从未关闭」"
+  }
+}

@@ -25,7 +25,9 @@ import kotlinx.coroutines.cancel
  *
  * 1. **一份名册多群复用**：同一支队伍进两个群，两群各一条席位、各自执行点，档案只有一份；
  * 2. **改名一次生效**：改档案名字 ⇒ 所有引用群的名字同时变（不是各改各的）；
- * 3. **半途失败不留半张网**：任一目标群的名册会撞 token ⇒ **整体拒绝**，档案与席位都不动。
+ * 3. **半途失败不留半张网**：任一目标群的名册有**结构性错**（空/超长/非 slug/重名）⇒
+ *    整体拒绝，档案与席位都不动；而**撞别人已占的名字不算错** ⇒ 那个群取本群别名，
+ *    团队照常进去（`aliasedGroupIds` 点名叫出来）。
  *
  * 以及两条边界：档案化席位不许被群内整表替换（两个写入口 = 两份名册）；
  * 解散只摘团队形态、不删席位（那个人还在群里、还能被 `@`）。
@@ -222,25 +224,63 @@ class TeamProfileWritePathTest {
 
     // ------------------------------------------------------------ 半途失败不留半张网
 
+    /**
+     * **结构性错仍然整体拒绝**（这条保住了「不留半张网」）。
+     *
+     * 名册空名不是「别人占了我的词」，是用户自己没填 —— 自动编号会把它固化成
+     * 一个叫 `-2` 的人，必须让用户改。
+     */
     @Test
-    fun aTokenCollisionInAnyTargetGroupRejectsTheWholeThing() {
+    fun aStructurallyBrokenRosterRejectsTheWholeThing() {
         val controller = controller().also { seed(it) }
         val g1Rev = groupOf(controller, "g1").rev
 
-        // g3 里已有对端席位叫 `coder`；名册里的名字撞上它。
         val result = controller.applyTeamProfile(
             createCommand(
                 groupIds = listOf("g1", "g3"),
-                members = listOf(TeamMemberDraft(agentId = "m-coder", name = "coder", role = "编码")),
+                members = listOf(TeamMemberDraft(agentId = "m-coder", name = "coder", role = "")),
             ),
         )
-        assertTrue(result is TeamProfileResult.Rejected, "撞 token 必须整体拒绝，实际 $result")
+        assertTrue(result is TeamProfileResult.Rejected, "空的 role 必须整体拒绝，实际 $result")
         assertEquals(DeclarationRejection.ROSTER_INVALID, result.reason)
 
         assertTrue(controller.state.value.settings.teamProfiles.isEmpty(), "拒绝之后不许留下档案")
         assertEquals(g1Rev, groupOf(controller, "g1").rev, "g1 什么都不许改")
         assertNull(seatOf(controller, "g1")?.teamId, "g1 席位不许被挂上档案引用")
         assertTrue(controller.declarationAuditLog.recent().isEmpty(), "没落盘就不许有审计行")
+    }
+
+    /**
+     * **撞名不再是拒绝理由**（与改写前相反的判据）：`g3` 里对端席位已经叫 `coder`，
+     * 团队的 `coder` 在那一群就叫 `coder-2` —— 团队照常进去，只在别名群上前提一句。
+     *
+     * 反向探针：谁把「名册撞 token ⇒ ROSTER_INVALID」加回 `preflightRoster`，
+     * 这条立刻变红（那等于让「别人先占了名字」把整支团队挡在门外）。
+     */
+    @Test
+    fun aTokenCollisionInOneGroupBecomesThatGroupsAliasInsteadOfRejecting() {
+        val controller = controller().also { seed(it) }
+
+        val result = controller.applyTeamProfile(
+            createCommand(
+                groupIds = listOf("g1", "g3"),
+                members = listOf(TeamMemberDraft(agentId = "m-coder", name = "coder", role = "编码")),
+            ),
+        )
+        assertTrue(result is TeamProfileResult.Applied, "撞名不该拒绝整支团队，实际 $result")
+        assertEquals(setOf("g1", "g3"), result.groupIds.toSet(), "两个群都该写进去")
+
+        // 同一份档案、两群两个 `@` token：身份是 agentId，名字只是本群怎么叫它。
+        assertEquals(listOf("coder"), seatOf(controller, "g1")?.teamMembers?.map { it.name })
+        assertEquals(listOf("coder-2"), seatOf(controller, "g3")?.teamMembers?.map { it.name })
+        assertEquals(
+            listOf("coder"),
+            controller.state.value.settings.teamProfiles.single().members.map { it.name },
+            "档案记默认名，别名是群级事实",
+        )
+        // 别名群必须点名 —— 否则用户按档案名去 @，会以为团队坏了。
+        assertEquals(listOf("g3"), result.aliasedGroupIds)
+        assertTrue(result.failedGroupIds.isEmpty(), "别名不是失败")
     }
 
     // ------------------------------------------------------------ 加进更多群

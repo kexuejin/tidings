@@ -16,6 +16,11 @@ import java.io.File
  *   判定核心 —— 这里是给 diff 行做的**最小复制**（patch.diff 是 unified diff 文本，没有
  *   词法上下文可依赖，只能对 `+` 行做保守的字面判定），权威源是仓库根 tools/ 下的两个
  *   门禁脚本；判定口径分歧时以门禁为准。
+ *
+ *   **适用范围同样以门禁为准**：两个门禁只扫本仓库的生产 Kotlin 源码目录（见
+ *   [PRODUCTION_SOURCE_PREFIXES]），所以这份 diff 审计也只对这些文件生效。外部工作区
+ *   （用户在别的仓库派单，例如 Python 项目 + 中文 README）不受本仓库文案纪律约束 ——
+ *   把「README 中文标题」判成硬编码文案属于误伤，不适用时如实 SKIP 而不是假装通过。
  * - **白名单键**：对照宿主注入的取值域清单（[ValueDomain]）。清单由宿主装配侧从协议取值域
  *   对象（`GROUP_TEXT_KEYS` / `AgentAckKinds` 这类「键 + 取值域只能有一份定义」的落点）
  *   生成 —— 本类不背协议事实，背了就会分叉出第二份定义。
@@ -44,6 +49,66 @@ object ReviewerAudit {
     const val SKIP = "pending"
 
     // ---------------------------------------------------------------- a) 语法规范
+
+    /**
+     * 本仓库源码门禁的适用目录（与 tools/ 下两个门禁的前缀表同源）。
+     *
+     * 合流审计只对 Tenon 自己的生产源码施工负责：外部工作区的 README / 脚本 / 任意语言
+     * 文件都不受本仓库「文案进资源文件」纪律约束。
+     */
+    private val PRODUCTION_SOURCE_PREFIXES = listOf(
+        "core/src/",
+        "app/src/",
+        "composeApp/src/",
+        "agentNode/src/",
+        "desktopApp/src/",
+        "androidApp/src/",
+        "cli/src/",
+        "agent-contract/src/",
+        "orchestration/src/",
+    )
+
+    /** 测试源集与截图预览不是生产源码（与门禁的 include 口径一致）。 */
+    private val TEST_SOURCE_MARKERS = listOf(
+        "src/test/", "src/commonTest/", "src/jvmTest/", "src/androidTest/",
+        "src/iosTest/", "src/screenshotTest/",
+    )
+
+    /** diff 文件头 → 该文件是否属于本仓库生产 Kotlin 源码。 */
+    private fun isProductionKotlin(path: String): Boolean {
+        val p = path.trim().removePrefix("a/").removePrefix("b/")
+        if (!p.endsWith(".kt")) return false
+        if (p.endsWith("Test.kt") || p.endsWith("PreviewState.kt")) return false
+        if (TEST_SOURCE_MARKERS.any { p.contains(it) }) return false
+        return PRODUCTION_SOURCE_PREFIXES.any { p.startsWith(it) }
+    }
+
+    /**
+     * 这份 patch 是否落在本仓库生产源码上。
+     *
+     * 没有 `+++` 文件头的裸 diff 按适用处理 —— 那是调用方已裁剪好的源码正文夹具；真实
+     * 的 patch.diff 一定带文件头，逐文件判定。
+     */
+    fun auditAppliesTo(patch: String?): Boolean {
+        if (patch.isNullOrBlank()) return false
+        val headers = patch.lineSequence().filter { it.startsWith("+++ ") }.toList()
+        if (headers.isEmpty()) return true
+        return headers.any { isProductionKotlin(it.removePrefix("+++ ")) }
+    }
+
+    /** 该审的 `+` 正文行（带原始行号）：逐文件头切换适用性，外部文件的行直接跳过。 */
+    private fun auditedPlusLines(patch: String): List<Pair<Int, String>> {
+        val out = mutableListOf<Pair<Int, String>>()
+        var applies = true
+        patch.lineSequence().forEachIndexed { idx, line ->
+            if (line.startsWith("+++ ")) {
+                applies = isProductionKotlin(line.removePrefix("+++ "))
+            } else if (line.startsWith("+")) {
+                if (applies) out += idx to line.removePrefix("+")
+            }
+        }
+        return out
+    }
 
     /**
      * CJK 区段判定（与 CJK 字面量门禁的区段表同源；弯引号刻意不收，同一条注记）。
@@ -84,13 +149,11 @@ object ReviewerAudit {
 
     /**
      * 对一根棒的 patch 做语法规范审计：只看 `+` 正文行（新增内容才是这次施工），跳过
-     * `+++` 文件头。
+     * `+++` 文件头，也跳过不属于本仓库生产源码的文件。
      */
     fun syntaxFailureOf(patch: String?): String? {
-        if (patch.isNullOrBlank()) return null
-        patch.lineSequence().forEachIndexed { idx, line ->
-            if (!line.startsWith("+") || line.startsWith("+++")) return@forEachIndexed
-            val body = line.removePrefix("+")
+        if (patch.isNullOrBlank() || !auditAppliesTo(patch)) return null
+        auditedPlusLines(patch).forEach { (idx, body) ->
             if (containsCjk(body)) {
                 return "新增行含硬编码 CJK 文案（应进资源文件）：L" + (idx + 1) + " " + body.take(40)
             }
@@ -111,12 +174,11 @@ object ReviewerAudit {
      * 早就在用的键不归这一棒管。返回失败观察语；过了返回 null。
      */
     fun whitelistFailureOf(patch: String?, domains: List<ValueDomain>?): String? {
-        if (patch.isNullOrBlank()) return null
+        if (patch.isNullOrBlank() || !auditAppliesTo(patch)) return null
         if (domains.isNullOrEmpty()) return null // 调用方负责在无清单时产出 SKIP 项
         val allKeys = domains.flatMap { it.keys }.toSet()
-        patch.lineSequence().forEachIndexed { idx, line ->
-            if (!line.startsWith("+") || line.startsWith("+++")) return@forEachIndexed
-            KEY_LITERAL.findAll(line).forEach { m ->
+        auditedPlusLines(patch).forEach { (idx, body) ->
+            KEY_LITERAL.findAll(body).forEach { m ->
                 val key = m.groupValues[1]
                 if (key in allKeys) return@forEach
                 if (key in IGNORED_KEY_SHAPES) return@forEach
@@ -169,24 +231,31 @@ object ReviewerAudit {
     ): List<ChainCheck> = executed.flatMapIndexed { i, (stage, run) ->
         val patch = run.patchPath?.let { p -> runCatching { File(p).readText() }.getOrNull() }
         val ordinal = "第 " + (i + 1) + " 棒"
+        val applies = patch != null && auditAppliesTo(patch)
+        val notApplicable = ordinal + " 是外部工作区（非本仓库生产 Kotlin 源码），本仓库文案/施工痕迹门禁不适用"
         // 该棒墙钟耗时（原型稿验收清单的「0.6s」式标签）：机器事实，没量就不写。
         val time = run.elapsedMs?.let { durationLabel(it) }
-        val syntax = if (patch == null) {
-            ChainCheck("syntax-" + (i + 1), "语法规范 · " + stage.role, SKIP, ordinal + " 无 patch（只读或无改动），无从审", time)
-        } else {
-            val fail = syntaxFailureOf(patch)
-            ChainCheck("syntax-" + (i + 1), "语法规范 · " + stage.role,
-                if (fail == null) DONE else FAILED, fail ?: "patch " + patch.length + " B 无 CJK/施工痕迹命中", time)
+        val syntax = when {
+            patch == null -> ChainCheck("syntax-" + (i + 1), "语法规范 · " + stage.role, SKIP,
+                ordinal + " 无 patch（只读或无改动），无从审", time)
+            !applies -> ChainCheck("syntax-" + (i + 1), "语法规范 · " + stage.role, SKIP, notApplicable, time)
+            else -> {
+                val fail = syntaxFailureOf(patch)
+                ChainCheck("syntax-" + (i + 1), "语法规范 · " + stage.role,
+                    if (fail == null) DONE else FAILED, fail ?: "patch " + patch.length + " B 无 CJK/施工痕迹命中", time)
+            }
         }
-        val whitelist = if (patch == null) {
-            ChainCheck("keys-" + (i + 1), "白名单键 · " + stage.role, SKIP, ordinal + " 无 patch（只读或无改动），无从审", time)
-        } else if (domains.isNullOrEmpty()) {
-            ChainCheck("keys-" + (i + 1), "白名单键 · " + stage.role, SKIP,
+        val whitelist = when {
+            patch == null -> ChainCheck("keys-" + (i + 1), "白名单键 · " + stage.role, SKIP,
+                ordinal + " 无 patch（只读或无改动），无从审", time)
+            !applies -> ChainCheck("keys-" + (i + 1), "白名单键 · " + stage.role, SKIP, notApplicable, time)
+            domains.isNullOrEmpty() -> ChainCheck("keys-" + (i + 1), "白名单键 · " + stage.role, SKIP,
                 "宿主未提供取值域清单，跳过对照（缺输入不是通过）", time)
-        } else {
-            val fail = whitelistFailureOf(patch, domains)
-            ChainCheck("keys-" + (i + 1), "白名单键 · " + stage.role,
-                if (fail == null) DONE else FAILED, fail ?: "新增键均在 " + domains.size + " 份清单内", time)
+            else -> {
+                val fail = whitelistFailureOf(patch, domains)
+                ChainCheck("keys-" + (i + 1), "白名单键 · " + stage.role,
+                    if (fail == null) DONE else FAILED, fail ?: "新增键均在 " + domains.size + " 份清单内", time)
+            }
         }
         listOf(syntax, whitelist)
     }

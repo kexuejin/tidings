@@ -1,5 +1,7 @@
 // SPDX-License-Identifier: GPL-3.0-only
 
+import java.io.File
+
 import org.jetbrains.compose.desktop.application.dsl.TargetFormat
 
 plugins {
@@ -348,7 +350,15 @@ val copyLuciolaNative by tasks.registering(Copy::class) {
     // 空串 = 没解析到：不要 `from("")`（那会指向工程目录、扫描一大片），直接不复制，
     // 由下面的 doLast 给出「缺库 + 怎么补」的明确失败。
     val src = luciolaNativeDir.get()
-    if (src.isNotBlank()) {
+    // 源=目标时跳过复制：显式把 TENON_LUCIOLA_NATIVE 指到 resources 自己（例如
+    // 「就用已打包那份」的口径）会让 Copy 先截断输出再读输入，dylib 被清成
+    // 0 字节（2026-11-13 实测，verifyLuciolaNative 以「无法加载」拦下才没进包）。
+    val selfCopy = src.isNotBlank() &&
+        File(src).canonicalPath == project.layout.projectDirectory.dir("resources/common/native").asFile.canonicalPath
+    if (selfCopy) {
+        println("[luciola-native] SKIP copy：源目录就是 resources/common/native 本身（保留现有库）。")
+    }
+    if (src.isNotBlank() && !selfCopy) {
         from(src) {
             include("libluciola_uniffi.dylib", "libluciola_uniffi.so", "luciola_uniffi.dll")
         }

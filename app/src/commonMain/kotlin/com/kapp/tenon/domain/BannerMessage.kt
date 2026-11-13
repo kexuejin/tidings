@@ -257,11 +257,15 @@ sealed interface BannerMessage {
      * @param groupCount 这次真的写成功的群数；0 = 只建档、还没进任何群。
      * @param failedGroupCount 预校验通过但席位写入失败的群数；>0 时文案必须说出来
      *   ——「改了没反应」正是本仓最贵的故障形态。
+     * @param aliasedGroupCount 组员名在本群已被别人占掉、因而取了**本群别名**的群数。
+     *   与 [failedGroupCount] 分开：别名不是失败，但用户必须知道「我在 A 群要 @coder-2」
+     *   —— 否则他会按档案里的名字去 @，然后以为团队坏了。
      */
     data class TeamProfileSaved(
         val name: String,
         val groupCount: Int,
         val failedGroupCount: Int = 0,
+        val aliasedGroupCount: Int = 0,
     ) : BannerMessage
 
     /** 团队档案没保存（名字非法 / 名册为空 / 目标群不存在 / 落盘被拒）。 */

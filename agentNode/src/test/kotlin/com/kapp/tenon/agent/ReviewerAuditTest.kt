@@ -72,6 +72,60 @@ class ReviewerAuditTest {
         assertEquals(null, ReviewerAudit.syntaxFailureOf(patch))
     }
 
+    // ------------------------------------------------ a2) 适用范围（外部工作区不适用）
+
+    private fun diffWith(vararg files: Pair<String, List<String>>): String = buildString {
+        files.forEach { (path, lines) ->
+            appendLine("diff --git a/" + path + " b/" + path)
+            appendLine("--- a/" + path)
+            appendLine("+++ b/" + path)
+            appendLine("@@ -0,0 +1," + lines.size + " @@")
+            lines.forEach { appendLine("+" + it) }
+        }
+    }
+
+    @Test
+    fun anExternalWorkspacePatchIsNotAuditedByRepositoryGates() {
+        // 真机场景：weather-relay 是 Python + 中文 README，属于外部工作区。
+        val patch = diffWith(
+            "weather.py" to listOf("def c_to_f(c):", "    \"\"\"摄氏转华氏\"\"\""),
+            "README.md" to listOf("# 温度换算工具"),
+        )
+        assertEquals(null, ReviewerAudit.syntaxFailureOf(patch))
+        assertTrue(!ReviewerAudit.auditAppliesTo(patch), "外部工作区不应套本仓库文案门禁")
+    }
+
+    @Test
+    fun aProductionKotlinPatchStillFailsTheCjkAudit() {
+        // 反向判据：本仓库生产源码里的硬编码中文必须仍然被抓。
+        val patch = diffWith(
+            "composeApp/src/commonMain/kotlin/com/kapp/tenon/ui/A.kt" to listOf("val t = \"提交成功\""),
+        )
+        val fail = assertNotNull(ReviewerAudit.syntaxFailureOf(patch), "本仓库生产 Kotlin 源码仍要审")
+        assertTrue(fail.contains("CJK"), fail)
+        assertTrue(ReviewerAudit.auditAppliesTo(patch))
+    }
+
+    @Test
+    fun aMixedPatchOnlyAuditsTheProductionKotlinFile() {
+        // 同一 patch 里既有外部 README 又有本仓库源码：只审源码那部分。
+        val patch = diffWith(
+            "README.md" to listOf("# 中文标题不算"),
+            "agentNode/src/main/kotlin/com/kapp/tenon/agent/B.kt" to listOf("val ok = 1"),
+            "agentNode/src/main/kotlin/com/kapp/tenon/agent/C.kt" to listOf("val bad = \"成功\""),
+        )
+        val fail = assertNotNull(ReviewerAudit.syntaxFailureOf(patch))
+        assertTrue(fail.contains("成功"), "命中必须落在源码文件的正文，实际 $fail")
+    }
+
+    @Test
+    fun checksForSkipsHonestlyWhenThePatchIsAnExternalWorkspace() {
+        val patch = diffWith("README.md" to listOf("# 温度换算工具"))
+        val checks = ReviewerAudit.checksFor(executedWithPatch(patch), domains)
+        assertTrue(checks.all { it.status == ReviewerAudit.SKIP }, "不适用必须 SKIP，不许假装 done：" + checks)
+        assertTrue(checks.first().observation!!.contains("不适用"), checks.first().observation!!)
+    }
+
     // ------------------------------------------------ b) 白名单键
 
     private val domains = listOf(

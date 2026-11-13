@@ -1,0 +1,61 @@
+{
+  "capturedAt": "2026-11-13T11:45:22+0800",
+  "question": "dsh CLI 当前是否可用",
+  "verdict": "NOT USABLE on this machine",
+  "binary": {
+    "path": "/opt/homebrew/bin/dsh",
+    "version": "0.2.2-rc.1",
+    "wrapperTarget": "<dsh-harness>/apps/cli/lib/bin.js"
+  },
+  "probe": [
+    {
+      "cwd": "/tmp/tenon-scenario/dsh-probe",
+      "env": "DSH_PERMISSION_MODE=danger-full-access (product-shaped)",
+      "cmd": "dsh --profile headless --json <minimal prompt>",
+      "exit": 1,
+      "stdout": "{\"type\":\"error\",\"message\":\"no agent factory registered (load an agent-loop plugin)\"}"
+    },
+    {
+      "cwd": "$HOME",
+      "env": "no injected vars",
+      "cmd": "dsh --profile headless --json <minimal prompt>",
+      "exit": 1,
+      "stdout": "{\"type\":\"error\",\"message\":\"no agent factory registered (load an agent-loop plugin)\"}"
+    },
+    {
+      "cmd": "dsh --profile headless --dump-config",
+      "exit": 0,
+      "meaning": "profile layer loads; failure is plugin activation"
+    }
+  ],
+  "rootCause": {
+    "scope": "external tool install (deepseek-harness), not Tenon",
+    "missingModules": 28,
+    "examples": [
+      "@deepseek-ai/dsh-brand",
+      "@deepseek-ai/dsh-sandbox",
+      "@deepseek-ai/dsh-scope",
+      "@deepseek-ai/dsh-util-values",
+      "@earendil-works/pi-ai",
+      "ipaddr.js",
+      "dsh-web/lib/typert.host.js"
+    ],
+    "note": "packages/bundle/base/node_modules/@deepseek-ai only has dsh-web; profile config composes fine. Fix requires reinstall/build in <dsh-harness>."
+  },
+  "tenonSide": {
+    "driverRegistration": "[drivers] dsh-cli <- provider env: DSH_PERMISSION_MODE, HTTPS_PROXY, HTTP_PROXY, OPENCODE_API_KEY, http_proxy, https_proxy",
+    "caveat": "registration only checks CLI path + credential file existence; it is not a liveness probe, so the driver list shows dsh-cli while any dispatch through it fails",
+    "teamExecutionDrivers": [
+      "codex (worker)",
+      "claude (reviewer)",
+      "claude (reviewer)"
+    ],
+    "impactOnRun5": "none - no dsh stage in the executed chain"
+  },
+  "artifacts": [
+    "/tmp/tenon-scenario/dsh-probe/dsh-out.txt",
+    "/tmp/tenon-scenario/dsh-probe/dsh-err.txt",
+    "/tmp/tenon-scenario/dsh-probe/home-out.txt",
+    "/tmp/tenon-scenario/dsh-probe/config.txt"
+  ]
+}
