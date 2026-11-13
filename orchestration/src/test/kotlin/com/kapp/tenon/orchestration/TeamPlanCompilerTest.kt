@@ -134,6 +134,62 @@ class TeamPlanCompilerTest {
     }
 
     /**
+     * 测试棒默认指令与审查棒分流（复盘项：提示词雷同）。
+     *
+     * tester 与 reviewer 同为 REVIEWER kind，运行时能区分它们的只有声明里的角色
+     * 标签 —— 同一段文案的后果是测试棒从不执行任何验证，名字叫测试、干的是审查。
+     * 分流后两条既有约束不动：目标逐字（长目标那条钉着）、编译层不出现 `VERDICT`
+     * 字样（结论行由链执行器追加）。
+     */
+    @Test
+    fun testingRoleGetsVerificationInstructionWhileReviewStaysAudit() {
+        val tester = TeamPlanCompiler.reviewInstruction("修复登录超时", "测试")
+        val reviewer = TeamPlanCompiler.reviewInstruction("修复登录超时", "审查")
+        assertTrue(
+            tester.contains("running the available build/test commands"),
+            "测试棒默认要求真的跑命令：$tester",
+        )
+        assertTrue(
+            !reviewer.contains("running the available build/test commands"),
+            "审查棒保持审计口径：$reviewer",
+        )
+        assertTrue(tester.contains("修复登录超时") && reviewer.contains("修复登录超时"), "两档都复述目标全文")
+        assertTrue(!tester.contains("VERDICT") && !reviewer.contains("VERDICT"), "结论行仍由链执行器追加")
+        assertTrue(tester.startsWith("[role: 测试] "), "角色标签照进提示")
+
+        // ASCII 词表同流（标签是用户可改的自由文本，词表要宽）：Tester/QA 分流，
+        // 非测试词不分流。
+        assertTrue(
+            TeamPlanCompiler.reviewInstruction("fix login", "Tester")
+                .contains("running the available build/test commands"),
+        )
+        assertTrue(
+            TeamPlanCompiler.reviewInstruction("fix login", "QA")
+                .contains("running the available build/test commands"),
+        )
+        assertTrue(
+            TeamPlanCompiler.reviewInstruction("fix login", "质检")
+                .contains("running the available build/test commands"),
+            "质检（QC）也是测试棒 —— 词表窄了分流就不发生",
+        )
+        assertTrue(
+            !TeamPlanCompiler.reviewInstruction("fix login", "Coding")
+                .contains("running the available build/test commands"),
+        )
+
+        // 自定义人设仍优先：分流只发生在回落档。
+        val custom = TeamPlanCompiler.reviewInstruction("修复登录超时", "测试", "逐条核对验收标准")
+        assertTrue(!custom.contains("running the available build/test commands"))
+        assertTrue(custom.startsWith("[role: 测试] 逐条核对验收标准\nGoal: 修复登录超时"))
+
+        // 空白标签回落审查档（不是测试档）—— 与角色前缀的空白口径一致。
+        assertTrue(
+            !TeamPlanCompiler.reviewInstruction("修复登录超时", "  ")
+                .contains("running the available build/test commands"),
+        )
+    }
+
+    /**
      * 反向验证（真机责任链跑出来的 P0）：长目标必须**全文**进每一根审查棒。
      *
      * 曾经审查指令写 `goal.take(80)`：worker 棒拿着六条 AC 全量实现，审查棒只看得到
@@ -236,5 +292,53 @@ class TeamPlanCompilerTest {
             TeamPlanCompiler.compile(onlyWorker, listOf(seatMembers[0]), coderInfo, "fix", availableDrivers = null),
         )
         assertTrue(rejected.reason.contains("not installed"), rejected.reason)
+    }
+
+    /**
+     * 能力简报（P3 工具面）要追加到**每一棒**：工单里的审查棒不干活，但它要能判断
+     * 「这一版是不是绕过工具直接改了设置」。只给干活棒等于让审查棒瞎判。
+     *
+     * 反向探针：把 `briefSuffix` 从审查棒的 instruction 上摘掉，这一条会红。
+     */
+    @Test
+    fun theCapabilityBriefReachesEveryStage() {
+        val brief = "本机工具：team.roster.read / team.create / team.update"
+        val compiled = TeamPlanCompiler.compile(
+            profile(coderSpec, reviewerSpec, testerSpec), seatMembers, coderInfo,
+            goal = "fix the login timeout",
+            availableDrivers = setOf("codex", "claude", "dsh"),
+            capabilityBrief = brief,
+        )
+        val plan = assertIs<TeamPlanCompiler.Compiled.Plan>(compiled).plan
+        assertEquals(3, plan.stages.size)
+        plan.stages.forEach { stage ->
+            assertTrue(brief in stage.instruction, "每一棒都要知道有哪些动作可调：" + stage.agentKey)
+        }
+        // 单棒路径同样带（reviewer 直呼 / 无 reviewer 的两条腿）。
+        val single = assertIs<TeamPlanCompiler.Compiled.Single>(
+            TeamPlanCompiler.compile(
+                profile(coderSpec), listOf(seatMembers[0]), coderInfo, "fix",
+                availableDrivers = setOf("codex"), capabilityBrief = brief,
+            ),
+        )
+        assertTrue(brief in single.instruction)
+    }
+
+    /** 没装配档案面（brief = null）时**一个字都不加**：不能让 agent 照着空说明书去调路由。 */
+    @Test
+    fun withoutABriefTheInstructionIsUntouched() {
+        val bare = assertIs<TeamPlanCompiler.Compiled.Single>(
+            TeamPlanCompiler.compile(
+                profile(coderSpec), listOf(seatMembers[0]), coderInfo, "fix",
+                availableDrivers = setOf("codex"),
+            ),
+        )
+        val withBlank = assertIs<TeamPlanCompiler.Compiled.Single>(
+            TeamPlanCompiler.compile(
+                profile(coderSpec), listOf(seatMembers[0]), coderInfo, "fix",
+                availableDrivers = setOf("codex"), capabilityBrief = "   ",
+            ),
+        )
+        assertEquals(bare.instruction, withBlank.instruction, "空白简报不许在指令尾部留空行")
     }
 }

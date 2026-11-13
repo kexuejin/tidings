@@ -64,6 +64,10 @@ object MessageSpecs {
         MessageSpec(type = MsgTypes.AGENT_GRANT, known = true, reliable = true, handled = true, label = MsgTypes.AGENT_GRANT),
         MessageSpec(type = MsgTypes.AGENT_GRANT_LIST, known = true, reliable = true, handled = true, label = MsgTypes.AGENT_GRANT_LIST),
         MessageSpec(type = MsgTypes.AGENT_SESSION_PAGE, known = true, reliable = true, handled = true, label = MsgTypes.AGENT_SESSION_PAGE),
+        // 免批规则读撤（cap atr1）：请求与快照都可靠 —— 请求丢了设备白等；快照丢了
+        // 设备拿着旧表撤一条会被宿主的逐字匹配如实报 0（宁可重传不可错账）。
+        MessageSpec(type = MsgTypes.AGENT_TOOL_RULES_REQUEST, known = true, reliable = true, handled = true, label = MsgTypes.AGENT_TOOL_RULES_REQUEST),
+        MessageSpec(type = MsgTypes.AGENT_TOOL_RULES_LIST, known = true, reliable = true, handled = true, label = MsgTypes.AGENT_TOOL_RULES_LIST),
         MessageSpec(type = MsgTypes.RECOVERY_REQ, known = true, reliable = true, handled = true, label = MsgTypes.RECOVERY_REQ),
         MessageSpec(type = MsgTypes.RECOVERY_DATA, known = true, reliable = true, handled = true, label = MsgTypes.RECOVERY_DATA),
         MessageSpec(type = MsgTypes.AGENT_INVOKE, known = true, reliable = true, handled = true, label = MsgTypes.AGENT_INVOKE),

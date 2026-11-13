@@ -38,6 +38,9 @@ import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import com.kapp.tenon.domain.RelayController
+import com.kapp.tenon.feature.settings.RelayToolApprovalsSource
+import com.kapp.tenon.feature.settings.SETTINGS_PAGE_HOST_AUTH
+import com.kapp.tenon.feature.settings.SettingsHostAuthSubpage
 import com.kapp.tenon.core.protocol.ConvId
 import com.kapp.tenon.domain.exportDiagnosticsPackage
 import com.kapp.tenon.domain.groupBoundToWorkspace
@@ -88,6 +91,7 @@ import com.kapp.tenon.feature.settings.SettingsUpdateSubpage
 import com.kapp.tenon.feature.settings.SettingsScreen
 import com.kapp.tenon.generated.resources.Res
 import com.kapp.tenon.generated.resources.workspace_group_default_name
+import com.kapp.tenon.generated.resources.tool_approvals_send_failed
 import com.kapp.tenon.navigation.AppLayoutMode
 import com.kapp.tenon.navigation.AppNavItems
 import com.kapp.tenon.navigation.AppNavState
@@ -410,6 +414,11 @@ fun RelayApp(
                 // 在这里起一个壳级 scope，把 suspend 调用丢进去。选 rememberCoroutineScope 而
                 // 不是 controller.scope：这条请求的寿命跟随这一屏，离开就取消。
                 val chatScope = rememberCoroutineScope()
+                // 「宿主授权」页的宿主清单：声明了 atr1 的已配对对端（cap 认过 = 握手过）。
+                // 与免批规则 source 工厂同一个谓词来源；0 台时设置行如实显示 0。
+                val hostAuthPeers = nodeSlice.peers
+                    .filter { com.kapp.tenon.core.protocol.MsgTypes.CAP_AGENT_TOOL_RULES in it.caps }
+                    .sortedBy { it.displayName }
 
                 val chatPanel: @Composable (Modifier, Boolean) -> Unit = { panelModifier, showHeader ->
                     ChatScreen(
@@ -714,6 +723,28 @@ fun RelayApp(
                             modifier = Modifier.fillMaxSize(),
                         )
 
+                        // 宿主授权（免批规则读撤，cap atr1）：hosts 与 source 工厂同一谓词
+                        //（cap 门控在工厂里），都从下面那个 hostAuthPeers 出发。
+                        SETTINGS_PAGE_HOST_AUTH -> SettingsHostAuthSubpage(
+                            hosts = hostAuthPeers,
+                            toolApprovalsSourceOf = { hostNodeId ->
+                                val rt = controller.activeRuntime()
+                                if (rt != null &&
+                                    rt.peerDeclares(
+                                        hostNodeId,
+                                        com.kapp.tenon.core.protocol.MsgTypes.CAP_AGENT_TOOL_RULES,
+                                    )
+                                ) {
+                                    RelayToolApprovalsSource(controller, hostNodeId, chatScope)
+                                } else {
+                                    null
+                                }
+                            },
+                            onRequestToolRules = controller::requestToolRules,
+                            onBack = { settingsPage = null },
+                            modifier = Modifier.fillMaxSize(),
+                        )
+
                         SETTINGS_PAGE_DATA -> SettingsDataSubpage(
                             state = SettingsDataUiState(
                                 dataDirectory = controller.dataDirectory,
@@ -799,6 +830,7 @@ fun RelayApp(
                             nodeSlice = nodeSlice,
                             settingsSlice = settingsSlice,
                             chromeSlice = chromeSlice,
+                            hostAuthPeerCount = hostAuthPeers.size,
                             avatarSlice = avatarSlice,
                             dataDirectory = controller.dataDirectory,
                             cacheDirectory = controller.cacheDirectory,
@@ -987,6 +1019,24 @@ fun RelayApp(
                                             chatSlice = chatSlice,
                                             // 撤销本会话免审（撤销是一次显式动作，与逐条审批入口分开）。
                                             onRevokeSessionApproval = controller::revokeSessionApproval,
+                                            // 免批规则读撤（cap atr1）：对端声明才给 source（读不到
+                                            // ≠ 没有规则 —— 不声明 ⇒ 整块不画）；chatScope 只服务
+                                            // 变更通知的收集（离开组合随 dispose 注销）。
+                                            toolApprovalsSourceOf = { hostNodeId ->
+                                                val rt = controller.activeRuntime()
+                                                if (rt != null &&
+                                                    rt.peerDeclares(
+                                                        hostNodeId,
+                                                        com.kapp.tenon.core.protocol.MsgTypes.CAP_AGENT_TOOL_RULES,
+                                                    )
+                                                ) {
+                                                    RelayToolApprovalsSource(controller, hostNodeId, chatScope)
+                                                } else {
+                                                    null
+                                                }
+                                            },
+                                            onRequestToolRules = controller::requestToolRules,
+                                            toolApprovalsFailedNote = stringResource(Res.string.tool_approvals_send_failed),
                                             // 执行配置矩阵要读宿主本地执行档 —— 端口只在宿主本机非空，手机端自然是 null。
                                             teamExecutionPort = controller.teamExecutionPort,
                                             // **不能用** `nav.detailPeerId`：那是**节点页**的详情（普通节点

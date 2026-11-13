@@ -176,7 +176,16 @@ object TeamPlanCompiler {
         hitMember: TeamMemberInfo,
         goal: String,
         availableDrivers: Set<String>?,
+        /**
+         * 追加到**每一棒**指令尾部的本机能力简报（P3 工具面）。null/空白 = 不追加。
+         *
+         * 每一棒都要带：审查棒不干活，但它要判断「这一版有没有按规矩用工具改编制」
+         * （例如绕过工具直接改 settings.json 就是问题）。只给干活棒等于让审查棒瞎判。
+         */
+        capabilityBrief: String? = null,
     ): Compiled {
+        val briefSuffix = capabilityBrief?.trim()?.takeIf { it.isNotEmpty() }
+            ?.let { "\n\n" + it }.orEmpty()
         // 声明里的角色标签（编码/审查/测试…）按 agentId 对齐 —— role 属于群声明
         // （展示事实），执行档只存执行配置（§3.2），两边各管各的。
         val declaredRoleById = declaredMembers.associate {
@@ -203,7 +212,7 @@ object TeamPlanCompiler {
             }
             return Compiled.Single(
                 agentKey = hitSpec.driverKey,
-                instruction = reviewInstruction(goal, hitMember.role, hitSpec.customPrompt),
+                instruction = reviewInstruction(goal, hitMember.role, hitSpec.customPrompt) + briefSuffix,
                 reviewOnly = true,
                 model = hitSpec.models.firstOrNull(),
             )
@@ -219,7 +228,7 @@ object TeamPlanCompiler {
             }
             return Compiled.Single(
                 agentKey = worker.driverKey,
-                instruction = workerInstruction(goal, worker.customPrompt),
+                instruction = workerInstruction(goal, worker.customPrompt) + briefSuffix,
                 reviewOnly = false,
                 model = worker.models.firstOrNull(),
             )
@@ -229,7 +238,7 @@ object TeamPlanCompiler {
                 ChainStage(
                     role = workerStageRole(hitMember),
                     agentKey = worker.driverKey,
-                    instruction = workerInstruction(goal, worker.customPrompt),
+                    instruction = workerInstruction(goal, worker.customPrompt) + briefSuffix,
                     model = worker.models.firstOrNull(),
                 ),
             )
@@ -239,7 +248,7 @@ object TeamPlanCompiler {
                     ChainStage(
                         role = declaredRole?.ifBlank { null } ?: "reviewer",
                         agentKey = reviewer.driverKey,
-                        instruction = reviewInstruction(goal, declaredRole, reviewer.customPrompt),
+                        instruction = reviewInstruction(goal, declaredRole, reviewer.customPrompt) + briefSuffix,
                         model = reviewer.models.firstOrNull(),
                     ),
                 )
@@ -269,7 +278,10 @@ object TeamPlanCompiler {
      * （"你是审查/测试角色"）；结论行（`VERDICT: PASS|REJECT`）由
      * `DesktopStageChain` 对 i>0 的棒自动追加 —— 编译层**不重复**。
      *
-     * 优先采纳组员人设自定义提示词 [customPrompt]；未定义时回退至系统默认审查模版。
+     * 优先采纳组员人设自定义提示词 [customPrompt]；未定义时分两档回落：
+     * 角色标签是**测试**棒 → 执行验证模板（跑命令、以证据说话）；其余 → 系统默认
+     * 审查模版。kind 表达不了这个区分（tester 与 reviewer 同为 REVIEWER ——
+     * 执行档只分干活/审查两档），能区分它们的只有声明里的角色标签。
      *
      * **目标必须全文进审查指令，绝不截断**。任务书不是交接摘要：逐条 AC 那种长需求
      * 一旦截到前几十字，末尾几条对审查棒就根本不存在，它只能据「无法核验」判
@@ -281,15 +293,38 @@ object TeamPlanCompiler {
         val role = roleLabel?.trim().orEmpty()
         val roleLine = if (role.isEmpty()) "" else "[role: $role] "
         val custom = customPrompt?.trim().orEmpty()
+        val ask =
+            ". Give findings item by item, a problem list, and an explicit final verdict line; do not rewrite the implementation."
         val body = if (custom.isNotEmpty()) {
-            custom + "\nGoal: " + goal +
-                ". Give findings item by item, a problem list, and an explicit final verdict line; do not rewrite the implementation."
+            custom + "\nGoal: " + goal + ask
+        } else if (isTestingRole(role)) {
+            "Verify the goal by actually running the available build/test commands against " +
+                "the workspace: " + goal + ask
         } else {
-            "Review the current workspace against the goal: " + goal +
-                ". Give findings item by item, a problem list, and an explicit final verdict line; do not rewrite the implementation."
+            "Review the current workspace against the goal: " + goal + ask
         }
         return roleLine + body
     }
+
+    /**
+     * 声明里的自由文本角色标签是不是「测试」棒。子串匹配是有意的宽口径：标签是
+     * 用户可改的自由文本（测试员 / Testing / QA…），词表窄了分流就不发生 ——
+     * 误伤面（role 恰好含 "test" 的非测试角色）远小于漏配面。
+     */
+    private fun isTestingRole(label: String): Boolean {
+        val lower = label.lowercase()
+        if (TESTING_ROLE_WORDS.any { lower.contains(it) }) return true
+        return label.contains(TESTING_ROLE_ZH) || label.contains(TESTING_ROLE_ZH_QC)
+    }
+
+    /** ASCII 侧的测试角色词（"test" 已覆盖 tester/testing/test-…）。 */
+    private val TESTING_ROLE_WORDS = listOf("test", "qa")
+
+    /** 中文侧的测试角色词 —— 非 UI 文案，进 cjkLiteralGate 基线（理由见基线注）。 */
+    private const val TESTING_ROLE_ZH = "测试"
+
+    /** 同上：质检（QC）也是测试棒 —— 词表窄了分流就不发生，误伤面远小于漏配面。 */
+    private const val TESTING_ROLE_ZH_QC = "质检"
 
     /**
      * 干活棒指令：优先采纳组员自定义人设提示词 [customPrompt] 并拼接目标。

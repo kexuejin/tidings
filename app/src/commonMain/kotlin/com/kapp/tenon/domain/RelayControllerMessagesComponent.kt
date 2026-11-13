@@ -553,6 +553,12 @@ fun handleOnInbound(envelope: Envelope) {
         host.agent.handleOnAgentGrantList(envelope)
         return
     }
+    // 本端增补（cap atr1）：宿主的免批表快照 —— 归宿是 agent 台账（按宿主分键的
+    // slice），不是聊天流。与 grant 两帧同一条「在 CHAT_INBOUND_TYPES 之前接走」的纪律。
+    if (envelope.type == MsgTypes.AGENT_TOOL_RULES_LIST) {
+        host.agent.handleOnAgentToolRulesList(envelope)
+        return
+    }
     // `agent-grant-request` 是**设备 → 宿主**方向的帧：手机端不承载授权决定
     // （父稿 §3.3 的分工表：决定在桌面端、执行在宿主进程），所以这里既不批准也不拒绝。
     // 分支显式写出来而不是让它掉到后面的 `CHAT_INBOUND_TYPES` 里，是为了让"我们知道有这帧、

@@ -1,7 +1,7 @@
 {
-  "generatedAt": "1c63759ec11f",
+  "generatedAt": "f7b00d7091f1",
   "note": "逐屏差集棘轮：每个键的差集只许变小。--check 报「新增的值」。",
-  "reason": "P2-3 群信息/授权面板重写（GroupInfoDialog.kt+面板）：m-groupinfo 代码落点的 radius 取值集变化（新增 7 一档）；原型 radius:7px 未变（relay.html:853 等）。已核对原型未新增该档，代码侧为重写后的行形状；按棘轮纪律记账重记，非刷新。",
+  "reason": "原型注释里过期引用更新为规范表述（渲染值零变化）；基线按清理后指纹重投影",
   "rowCount": 78,
   "signature": {
     "d-agentdetail|__error__": [
@@ -20,13 +20,11 @@
     ],
     "d-agents|radius|proto": [
       "6",
-      "20",
-      "999"
+      "20"
     ],
     "d-agents|spacing|proto": [
       "1",
       "1.5",
-      "2",
       "3",
       "7",
       "11",
@@ -146,9 +144,6 @@
       "4",
       "6",
       "8"
-    ],
-    "d-createws|radius|proto": [
-      "999"
     ],
     "d-createws|spacing|code": [
       "2"
@@ -809,15 +804,13 @@
     ],
     "m-agents|radius|proto": [
       "6",
-      "14",
-      "999"
+      "14"
     ],
     "m-agents|spacing|code": [
       "24"
     ],
     "m-agents|spacing|proto": [
       "1.5",
-      "2",
       "11",
       "13"
     ],
@@ -1039,8 +1032,7 @@
       "8"
     ],
     "m-createws|radius|proto": [
-      "16",
-      "999"
+      "16"
     ],
     "m-createws|spacing|code": [
       "1"

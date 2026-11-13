@@ -499,9 +499,22 @@ data class RelaySettings(
         // 而手机端会永远只看得到活动过的那几条会话。
         add(MsgTypes.CAP_AGENT_SESSION_PAGE)
         add(MsgTypes.CAP_TABLE_TEXT)
-        // task-45：手机能把 agent 事件的附件元数据渲染成卡片 ⇒ 如实声明（顺序跟 MOBILE_CAPS 一致）。
-        // 漏了这一行就是 task-31 那类静默：桥永远只发文本占位，而代码里"明明支持附件"。
-        add(MsgTypes.CAP_ATTACHMENT)
+        // atr1（免批规则读撤）：手机发读/撤请求、收快照帧 —— 事实声明，不是用户偏好。
+        // 漏了这一行就是 lnk1/att1 那类静默：core 的 MOBILE_CAPS 有它、生效清单没有它 ⇒
+        // 对端按能力门控，宿主的快照永远发不过来，免批表在手机上仍然不可见。
+        add(MsgTypes.CAP_AGENT_TOOL_RULES)
+        // att1（附件元数据卡片）：**只在手机档声明**（顺序跟 MOBILE_CAPS 一致）。
+        //
+        // 为什么桌面不声明 —— caps 预算：Limits.CAPS=16 是上游 codec 的硬约束，桌面
+        // 广播档（ag1+lnk1+tw1/mrec1+agn1/agq1/aws1/agr1/agp1/tbl1+atr1+gta1/agi1/agf1
+        // +rv1/rs1）恰好 16/16，atr1 进来必有一项出去。att1 的消费面在**发送侧**
+        // （发送方只向声明者附带附件元数据），而桌面上 agent 事件的主要来源是**本机
+        // 桥/宿主（同进程直投，不过 caps 门控）**—— 桌面自己的附件卡不受影响；唯一
+        // 代价是桌面看**远程宿主**的会话时，那台宿主按 caps 不带附件元数据 ⇒ 退回
+        // 文本占位（外观性降级，窄路径）。这是 D-018 分级声明的同款裁决（fch1/scr1
+        // 当年就是从广播档让位的）；谁把 att1 加回桌面档，:app 的 CapsBroadcastTieringTest
+        // 会红（预算 17 = profile 整份被对端拒收，task-10 的存量自拒同款）。
+        if (!advertiseAgent) add(MsgTypes.CAP_ATTACHMENT)
         // gta1：本端能收发带扩展键（senderId 与 agent 意图/状态/卡片）的群文本。
         // 与 tbl1/att1 同一类事实声明：它决定对端发不发归属键，不是用户偏好；
         // 漏了就是 lnk1/att1 那次静默 —— 手机自己收得到，对端永远不带。

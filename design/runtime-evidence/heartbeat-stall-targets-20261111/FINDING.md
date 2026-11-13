@@ -128,7 +128,7 @@ A31 结尾记账的三条未决里，这一轮清掉第 ① 与第 ③ 条，第
     5 秒断言**，留作未解项。
 - **九模块全量 4374 tests / 0 失败 / 37 skipped**（core 1001、app 968、cli 7、
   agent-contract 19、orchestration 223、composeApp 1215、agentNode 562、desktopApp 379）。
-  这一轮在并行会话的 HostDirectory 特性提交（`e2e54ac0`）之后跑；**先删掉各模块的
+  这一轮在并行会话的 HostDirectory 特性提交（`5a22e57a`）之后跑；**先删掉各模块的
   `build/test-results` 强制重跑**——否则九个 test 任务全部命中 `UP-TO-DATE`，
   「BUILD SUCCESSFUL」只是把上一轮的产物又念了一遍。条数从结果 XML 里数，
   并核对了 `PresenceHeartbeatTargetsTest`(5) / `LuciolaSendingPortTest`(8) /

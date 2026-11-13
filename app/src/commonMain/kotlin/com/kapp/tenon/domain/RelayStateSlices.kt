@@ -13,6 +13,7 @@ import com.kapp.tenon.domain.model.AgentSessionKey
 import com.kapp.tenon.domain.model.AgentSessionUi
 import com.kapp.tenon.domain.model.CabinetUiState
 import com.kapp.tenon.domain.model.GrantUi
+import com.kapp.tenon.domain.model.ToolApprovalRuleUi
 import com.kapp.tenon.domain.model.MdnsServiceUi
 import com.kapp.tenon.domain.model.MessageUi
 import com.kapp.tenon.domain.model.NetworkUi
@@ -68,6 +69,14 @@ data class AgentSlice(
     val agentArtifacts: Map<AgentArtifactKey, AgentArtifactUi> = emptyMap(),
     val agentWorkspaces: Map<WorkspaceKey, WorkspaceUi> = emptyMap(),
     val agentGrants: Map<String, GrantUi> = emptyMap(),
+    /**
+     * 宿主免批表的快照（cap `atr1`），按宿主 nodeId 分键。
+     *
+     * 只存**最近一次收到的快照**（每次全量覆盖，不增量合并）：宿主回了新快照，
+     * 旧的那份就是过时的 —— 增量合并会复活宿主已经撤掉的行。
+     */
+    val toolApprovalRules: Map<String, List<ToolApprovalRuleUi>> = emptyMap(),
+    val toolRulesReadFailed: Set<String> = emptySet(),
     val pendingGrantRequests: Set<String> = emptySet(),
     val sessionPageLoading: Set<String> = emptySet(),
     val sessionPageExhausted: Set<String> = emptySet(),
@@ -142,6 +151,8 @@ fun RelayUiState.toAgentSlice(): AgentSlice = AgentSlice(
     agentArtifacts = agentArtifacts,
     agentWorkspaces = agentWorkspaces,
     agentGrants = agentGrants,
+    toolApprovalRules = toolApprovalRules,
+    toolRulesReadFailed = toolRulesReadFailed,
     pendingGrantRequests = pendingGrantRequests,
     sessionPageLoading = sessionPageLoading,
     sessionPageExhausted = sessionPageExhausted,

@@ -119,6 +119,23 @@ data class RelayUiState(
      */
     val agentGrants: Map<String, GrantUi> = emptyMap(),
     /**
+     * 宿主免批表的最近一份快照（本端增补 cap `atr1`），按宿主 nodeId 分键。
+     *
+     * **整键覆盖**，不增量合并：宿主回了新快照，旧的那份就是过时的 —— 合并会让
+     * 宿主刚撤掉的行复活。本端只在撤销的乐观翻行里改它（发送失败回滚），
+     * 对账来源永远是入站快照。
+     */
+    val toolApprovalRules: Map<String, List<ToolApprovalRuleUi>> = emptyMap(),
+    /**
+     * 最近一次「读免批表」**没送出去**的宿主（本端增补 cap `atr1`）。
+     *
+     * 与 [toolApprovalRules] 的空表是两件事：空表 = 宿主说「一条都没有」；
+     * 在这集合里 = 快照根本没拿到（宿主可能不在线）。混成一个状态，界面就会把
+     * 「读不到」画成「没有规则」（真机走查实锤的首帧撒谎）。
+     * 回到工作区详情会自动重试；快照一到（[handleOnAgentToolRulesList]）即摘除。
+     */
+    val toolRulesReadFailed: Set<String> = emptySet(),
+    /**
      * 本端已发出 `agent-grant-request`、还没等到宿主表态的那些键（[grantKeyOf]）。
      *
      * 单独一格而**不**塞进 [agentGrants]：那张表的每个值都必须是宿主的结论。混进一个

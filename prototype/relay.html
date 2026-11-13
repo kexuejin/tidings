@@ -7783,7 +7783,7 @@ if (Q.get('createws') === '1') openCreateWsModal();
 /* 钩子开着时把菜单也展开，截图里才看得到菜单内容。 */
 if (amQ) document.querySelectorAll('.hdmore').forEach(x => x.classList.add('on'));
 
-/* 首次渲染。2026-11-07 修复：这行在某次旧编辑中丢失（bacb7530 之前），此后
+/* 首次渲染。2026-11-07 修复：这行在某次旧编辑中丢失，此后
    shoot-relay 每一帧都拍到空 stage —— dump-layout 走 iframe 注入不受影响，
    manifest 的 sha 门禁只绑「拍没拍」、绑不了「拍到了内容」，8KB 空白页照样过，
    11-06 的全量空白截图就是这么被固化成 manifest 的。上面的参数块注释

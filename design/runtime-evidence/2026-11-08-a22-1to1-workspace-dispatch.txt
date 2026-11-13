@@ -152,7 +152,7 @@ D4【宿主库缺表】BoardCardRev 不存在，rev 台账恒失败
     但**仍有** WorkspaceBindingEntity / AgentGrantRuleEntity —— 而 19.sqm 正是要 DROP 这两张表。
     ⇒ 19.sqm 与 20.sqm 都没执行，可 user_version 已经是 21 ⇒ 这个 202MB 老库的版本号
       已被旧血统占满，新迁移链判定「已在 21」整体跳过。
-    两个 .sqm 出自同一提交 4a968bf3（storage 重构）。
+    两个 .sqm 出自同一提交 029e174a（storage 重构）。
     影响：RevControllerMessagesComponent:578 / AgentCardActions:203 的 loadBoardCardRev 恒抛、
     被 runCatching 吞成 0（只在 [CARD] 留一行）⇒ 重启后卡片 rev 退化回「窗口外归零」的旧缺陷。
     对照：手机库 user_version 也是 21 但**有** BoardCardRev（全新安装，迁移完整），

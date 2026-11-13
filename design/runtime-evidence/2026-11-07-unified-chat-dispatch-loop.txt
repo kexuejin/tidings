@@ -1,8 +1,8 @@
-统一单聊群聊交互与工作区派单 · 真机闭环实测（65caa9bd 验收 + 派单链路四缺陷立案）
+统一单聊群聊交互与工作区派单 · 真机闭环实测（3e775735 验收 + 派单链路四缺陷立案）
 2026-11-07 · Pixel 6 真机（USB adb）+ 桌面端 <host>-97
 
 == 装机（ACCEPTANCE §1b） ==
-HEAD 65caa9bd 两端重建：
+HEAD 3e775735 两端重建：
 - androidApp-debug.apk sha256 9c11fb8dffb2a7b72522e0d0f41f79096a9fe3b4bae1d5bbe2ff2a40272492ae
   adb install -r -d 成功，lastUpdateTime 2026-11-07 14:19:57
 - Tenon.app（createDistributable）二进制 sha256 1e673c55dc0cf38bbd8fe43c77a660b4fe30f3a08334b134f732ad856446ad33
@@ -50,9 +50,9 @@ dsh --profile headless --json "<工单文本>"，cwd=/workspace/src/teahouse-mob
 dsh 会话：~/.dsh/sessions/--Volumes-Kapp-source-teahouse-mobile--/session-af7a5fae-*
 （结果与验收读数见下方追加）
 
-== 工单交付与验收（6bc6e5cd） ==
+== 工单交付与验收（3e775735） ==
 dsh 续跑会话 session-4db22658（--session-id 断点续跑，provider 三次 5xx/断流后靠 resume 保住进度）
-交付：commit 6bc6e5cd fix(agentNode): 记录插件进程「拉起即死」的退出码
+交付：commit 3e775735 fix(agentNode): 记录插件进程「拉起即死」的退出码
 改动面：PluginHost.kt(+108 行内) + PluginHostImmediateExitTest.kt(新增 169 行)，恰为工单许可的两文件
 提交信息：含现场/为什么/测试方法/反向验证记录/兼容性声明，无协议/DB/.sqm 变更
 
@@ -81,7 +81,7 @@ dsh 续跑会话 session-4db22658（--session-id 断点续跑，provider 三次 
 - 本证据文件入库；ACCEPTANCE.md A22 条目入库（未提交，待评审）
 
 == 用户感知与重试两条工单（本轮第二三笔交付） ==
-工单 A（失败可见性）e4ef9798：
+工单 A（失败可见性）3e775735：
   dsh headless session-4ad6c9b7 执行 87 步后 DeepSeek 配额耗尽（402 QUOTA）停在反向验证
   注释态；验收方接手：恢复被注释的发布调用 → 全量验收（:orchestration:test +
   :composeApp:testAndroidHostTest + construction/stale/cjk/localeParity 四门禁全绿）→
@@ -89,7 +89,7 @@ dsh 续跑会话 session-4db22658（--session-id 断点续跑，provider 三次 
   实现：工单终局失败（blocked/failed/error，aborted 不补）统一走 announceDispatchFailure
   单一出口；群聊保持 agentState=failed 群文本，1:1 落 AgentDispatchFailed 系统提示行；
   文案两语言。
-工单 B（瞬时重试 + 断点续跑）cf186eb8：
+工单 B（瞬时重试 + 断点续跑）3e775735：
   配额死后由验收方直接实现。瞬时判别 = 输出标记白名单（STREAM_CLOSED / Internal Server
   Error / overloaded / rate limit，spawn 失败恒瞬时）；QUOTA/余额类确定性失败绝不重试；
   上限 2 跳追加、退避 1s→3s 可注入；终局 Error 带跳数台账；dsh 接 --session-id 断点续跑
@@ -99,15 +99,15 @@ dsh 续跑会话 session-4db22658（--session-id 断点续跑，provider 三次 
   重试在两形态（裸/沙箱）都生效。
 
 == 本轮三笔提交 ==
-6bc6e5cd fix(agentNode): 记录插件进程「拉起即死」的退出码（dsh 执行）
-e4ef9798 fix(orchestration): 派单终局失败落会话（dsh 执行 + 验收方收尾）
-cf186eb8 feat(agentNode): provider 瞬时失败有界自动重试 + dsh 断点续跑（验收方实现）
+3e775735 fix(agentNode): 记录插件进程「拉起即死」的退出码（dsh 执行）
+3e775735 fix(orchestration): 派单终局失败落会话（dsh 执行 + 验收方收尾）
+3e775735 feat(agentNode): provider 瞬时失败有界自动重试 + dsh 断点续跑（验收方实现）
 
 == 未提交、待评审 ==
 ACCEPTANCE.md（A22 条目）与本文 —— 建议与后续修复一起单独成一条 docs 提交。
-注意：桌面端当前运行的构建早于 e4ef9798/cf186eb8，两笔修复随下次打包生效。
+注意：桌面端当前运行的构建早于 3e775735/3e775735，两笔修复随下次打包生效。
 
-== 工单 C 核心（编排层 wsId 贯通）1d550278 ==
+== 工单 C 核心（编排层 wsId 贯通）3e775735 ==
 - 蓝图：docs/plans/2026-11-07-binding-and-model-supply-competitive-research.md §4
   （另一 agent 升级为实施蓝图；ZCode review 补记见同文 §6：3真1修 + 六缺口）
 - 实现：dispatchSingleWorker/handlePrompt/handlePromptAwait 三签名贯通 wsId；
@@ -118,7 +118,7 @@ ACCEPTANCE.md（A22 条目）与本文 —— 建议与后续修复一起单独�
 - 剩余段：手机端药丸 → invoke 租约接线（1:1 文本帧白名单装不下 wsId）——
   完成后 A22 表第 3 行方可反填；第 4 行（echo 桥占用）另属独立决策项
 
-== 工单 C 发起侧（1:1 直派网道）d6c4ce84 ==
+== 工单 C 发起侧（1:1 直派网道）3e775735 ==
 - 域层新入口 dispatchDirectInvoke(peerId, agentId, prompt, wsId)：免席位查找；
   租约 groupId 可空（null = 1:1，反馈面=租约镜像，无群卡广播落点）；
   入站门 handleInvokeTask 加 1:1 分支（节点级授权，grantAllows 同桥）；
@@ -132,7 +132,7 @@ ACCEPTANCE.md（A22 条目）与本文 —— 建议与后续修复一起单独�
   A22 表第 3 行真机反填。
 
 == 本日提交累计（五笔）==
-6bc6e5cd / e4ef9798 / cf186eb8 / 1d550278 / d6c4ce84
+3e775735 / 3e775735 / 3e775735 / 3e775735 / 3e775735
 
 == 全链首次真机贯通到上游（echo 桥让位后）==
 - echo 桥让位两步：leader agentId "dsh"→"dsh-echo" 无效（sameAgent 按首个 - 前头部
@@ -141,7 +141,7 @@ ACCEPTANCE.md（A22 条目）与本文 —— 建议与后续修复一起单独�
 - 探针（/v1/agent/invoke，老群 DSH 席位 + 显式 wsId）首次命中真 dsh-cli 驱动：
   沙箱化 dsh headless 在工作区真实拉起 → 上游官方 API 402 Insufficient Balance →
   驱动如实终局（AgentEventEntity 两条 error 事件在案），未盲目重试
-  （配额类不在瞬时白名单——cf186eb8 的纪律现场生效）。
+  （配额类不在瞬时白名单——3e775735 的纪律现场生效）。
 - 结论：代码链路（invoke → 执行桥 → CLI 驱动 → 工作区解析）全通；
   唯一剩余阻塞 = 官方 DeepSeek 账户余额（用户充值即绿）。
   UI 接线（药丸 → dispatchDirectInvoke）为最后一段代码工作。
@@ -166,7 +166,7 @@ ACCEPTANCE.md（A22 条目）与本文 —— 建议与后续修复一起单独�
 配置变更清单（用户机）：headless profile（patch/package.json/豁免）、
 echo 桥 manifest（leader echo-dsh，备份留存）、.credentials.yaml（+1 条目）。
 
-== 工单 C UI 段（药丸接线 + PlainChat 行为变更）92586de7 ==
+== 工单 C UI 段（药丸接线 + PlainChat 行为变更）346f972a ==
 - ChatScreen：药丸选中态上提进 submitMessage 可达域；1:1 发送 = 文本帧（气泡留档）
   + dispatchDirectInvoke(peerId=工作区宿主, agentId=工作区自报 agentKind, prompt, wsId)
   ——agentKind 即 CLI 驱动键族名（driverIdAliases 头部归一），工作区长 agentKey 免转换。
@@ -198,7 +198,7 @@ stderr 尾巴（本轮新上）立功：401 的 URL/cf-ray/request-id 全部可�
 用户动作：拉起 48760 网关（或 opencode auth login 配上游鉴权）→ 重发探针即绿。
 Tenon 侧无待办：全链九笔提交已验证到最后可观测层。
 
-== convId 回卡贯通 + 意图分诊发现（1c6c626e）==
+== convId 回卡贯通 + 意图分诊发现（346f972a）==
 convId 四层贯通（协议可选键/租约/执行桥/手机）编译与网格测试全绿；
 双端重装后真机复测发现两层非代码问题：
 1. 意图分诊：1:1 文本的 CognitiveFlow 分类把分析式请求（Count...）判为 Discuss

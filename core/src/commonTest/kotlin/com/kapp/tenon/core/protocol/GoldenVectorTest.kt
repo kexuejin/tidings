@@ -59,7 +59,7 @@ class GoldenVectorTest {
         // 本端实现这两个类型之后，同一批字节的结论不再与 TS 一致，留在 parity 集里就是错的。
         assertEquals(14, GOLDEN_VECTORS.size, "向量数量变了，说明生成脚本或夹具被改动过")
         assertEquals(2, OLD_NODE_EXTENSION_VERDICTS.size, "老节点结论记录被改动过")
-        assertEquals(17, EXTENSION_VECTORS.size, "PPE-1 扩展向量数量变了（M7-T3 +2、M7-T2 +3）")
+        assertEquals(21, EXTENSION_VECTORS.size, "PPE-1 扩展向量数量变了（M7-T3 +2、M7-T2 +3、免批规则读撤 +4）")
     }
 
     @Test
@@ -244,6 +244,44 @@ class GoldenVectorTest {
         assertTyped(
             "agent-grant-list", MsgTypes.AGENT_GRANT_LIST, PEER,
             Codec.agentGrantListPayload(scope = "all", total = 1, at = TS),
+        )
+        // 本端增补（cap atr1）出站字节护栏：键序 = Payloads.kt 声明序。
+        // 读形态（tool 缺席）与撤形态（身份三元组齐全）两档都要钉 —— 一帧两用
+        // 的两副面孔，哪一面的字节漂了都是线上不兼容。
+        assertTyped(
+            "agent-tool-rules-request-read", MsgTypes.AGENT_TOOL_RULES_REQUEST, PEER,
+            Codec.agentToolRulesRequestPayload(at = TS),
+        )
+        assertTyped(
+            "agent-tool-rules-request-revoke", MsgTypes.AGENT_TOOL_RULES_REQUEST, PEER,
+            Codec.agentToolRulesRequestPayload(
+                nodeId = "22222222-2222-4222-8222-222222222222",
+                tool = "bash",
+                agentKey = "dsh-main",
+                wsId = "ws-a1b2c3d4",
+                at = TS,
+            ),
+        )
+        assertTyped(
+            "agent-tool-rules-list", MsgTypes.AGENT_TOOL_RULES_LIST, PEER,
+            Codec.agentToolRulesListPayload(
+                total = 2,
+                rules = listOf(
+                    AgentToolRuleRowPayload(
+                        nodeId = "22222222-2222-4222-8222-222222222222",
+                        tool = "bash",
+                        agentKey = "dsh-main",
+                        wsId = "ws-a1b2c3d4",
+                        grantedAt = TS,
+                        grantedBy = PEER,
+                    ),
+                    AgentToolRuleRowPayload(
+                        nodeId = "33333333-3333-4333-8333-333333333333",
+                        tool = "web_search",
+                    ),
+                ),
+                at = TS,
+            ),
         )
     }
 

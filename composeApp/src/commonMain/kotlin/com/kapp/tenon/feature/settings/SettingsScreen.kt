@@ -108,6 +108,8 @@ fun SettingsScreen(
     nodeSlice: NodeSlice,
     settingsSlice: SettingsSlice,
     chromeSlice: ChromeSlice,
+    /** 声明了 `atr1` 的已配对宿主数（宿主授权行的值列；与该页 source 工厂同一谓词）。 */
+    hostAuthPeerCount: Int = 0,
     avatarSlice: AvatarSlice,
 ) {
     var subpage by rememberSaveable(initialSubpage) { mutableStateOf(initialSubpage) }
@@ -155,6 +157,7 @@ fun SettingsScreen(
                 nodeSlice = nodeSlice,
                 settingsSlice = settingsSlice,
                 chromeSlice = chromeSlice,
+                hostAuthPeerCount = hostAuthPeerCount,
                 onNavigateProfile = { subpage = SUBPAGE_PROFILE },
                 onNavigateConnection = { subpage = SUBPAGE_CONN },
                 onOpenPage = onOpenPage,

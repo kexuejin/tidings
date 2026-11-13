@@ -45,7 +45,7 @@ class MessageSpecsParityTest {
     /** 改造前 UNHANDLED 的 2 项。 */
     private val preRefactorUnhandled = setOf("update", "peers")
 
-    /** 改造前 KNOWN 的 34 项。 */
+    /** 改造前 KNOWN 的 34 项（atr1 两帧是后到的本端增补，不在这份清单里 —— 见下方差集断言）。 */
     private val preRefactorKnown = setOf(
         "entry", "alive", "exit", "presence", "profile", "peers", "scan-ranges", "msg", "ack",
         "file-ctl", "group", "avatar", "update", "share", "screen",
@@ -60,9 +60,9 @@ class MessageSpecsParityTest {
 
     @Test
     fun theFourDerivedSetsKeepTheirLegacySizes() {
-        assertEquals(34, MsgTypes.KNOWN.size)
-        assertEquals(26, MsgTypes.RELIABLE.size)
-        assertEquals(32, MsgTypes.HANDLED.size)
+        assertEquals(36, MsgTypes.KNOWN.size)
+        assertEquals(28, MsgTypes.RELIABLE.size)
+        assertEquals(34, MsgTypes.HANDLED.size)
         assertEquals(2, MsgTypes.UNHANDLED.size)
     }
 
@@ -79,7 +79,7 @@ class MessageSpecsParityTest {
 
     @Test
     fun everySpecTypeIsUniqueAndCoversKnown() {
-        assertEquals(34, MessageSpecs.all.size)
+        assertEquals(36, MessageSpecs.all.size)
         assertEquals(MessageSpecs.all.size, MessageSpecs.all.map { it.type }.toSet().size)
         assertEquals(MessageSpecs.all.size, MessageSpecs.byType.size)
         assertEquals(MsgTypes.KNOWN, MessageSpecs.all.map { it.type }.toSet())
@@ -92,21 +92,35 @@ class MessageSpecsParityTest {
         assertEquals(32, preRefactorHandled.size)
         assertEquals(2, preRefactorUnhandled.size)
 
-        assertEquals(preRefactorKnown, MsgTypes.KNOWN)
-        assertEquals(preRefactorReliable, MsgTypes.RELIABLE)
-        assertEquals(preRefactorHandled, MsgTypes.HANDLED)
+        // 免批规则读撤的两帧（atr1）是改造**之后**的本端增补 —— 改造前清单保持原样，
+        // 集合对比改为「改造前清单 ⊆ 现清单，差集恰好是这两帧」：既有类型一个不许动、
+        // 新增类型必须成对申报，两个方向都钉住。
+        val extensionFrames = setOf("agent-tool-rules-request", "agent-tool-rules-list")
+        assertTrue(MsgTypes.KNOWN.containsAll(preRefactorKnown))
+        assertEquals(extensionFrames, MsgTypes.KNOWN - preRefactorKnown)
+        assertTrue(MsgTypes.RELIABLE.containsAll(preRefactorReliable))
+        assertEquals(extensionFrames, MsgTypes.RELIABLE - preRefactorReliable)
+        assertTrue(MsgTypes.HANDLED.containsAll(preRefactorHandled))
+        assertEquals(extensionFrames, MsgTypes.HANDLED - preRefactorHandled)
         assertEquals(preRefactorUnhandled, MsgTypes.UNHANDLED)
 
         for (spec in MessageSpecs.all) {
             assertEquals(true, spec.known, "${spec.type} known flag")
-            assertEquals(
-                spec.type in preRefactorReliable, spec.reliable,
-                "${spec.type} reliable flag mismatch",
-            )
-            assertEquals(
-                spec.type in preRefactorHandled, spec.handled,
-                "${spec.type} handled flag mismatch",
-            )
+            // 改造前的类型逐字沿用旧 flag；增补的两帧（atr1）自己申报 reliable/handled
+            // —— 它们的申报受上面的差集断言约束（新增必须进 RELIABLE 与 HANDLED）。
+            if (spec.type in preRefactorKnown) {
+                assertEquals(
+                    spec.type in preRefactorReliable, spec.reliable,
+                    "${spec.type} reliable flag mismatch",
+                )
+                assertEquals(
+                    spec.type in preRefactorHandled, spec.handled,
+                    "${spec.type} handled flag mismatch",
+                )
+            } else {
+                assertTrue(spec.reliable, "${spec.type}（增补帧）必须可靠投递")
+                assertTrue(spec.handled, "${spec.type}（增补帧）必须有人处理")
+            }
         }
     }
 }

@@ -39,7 +39,7 @@ class TicketVerificationTest {
 
     private fun makeRepo(dir: File) {
         dir.mkdirs()
-        git(dir, "init")
+        git(dir, "init", "-b", "main")  // 显式定初始分支：runner 的 git 默认还是 master（真机走查抓不到、CI 首跑抓到）
         git(dir, "config", "user.email", "t@t.invalid")
         git(dir, "config", "user.name", "t")
         File(dir, "app.txt").writeText("line1\nline2\nline3\n")

@@ -11,11 +11,11 @@
 |---|---|
 | worktree | `.agents/worktrees/feat/agent-trigger-plugin` |
 | 分支 | `feat/agent-trigger-plugin` |
-| HEAD | `ccdc5177`（`docs(spec): §0 矩阵与 §9 状态按实现同步——三阶段落地对账`） |
-| 相对 `main` | 验证时 ahead 15 / behind 0；`main` HEAD `1c6c626e` |
-| 读数后的提交 | 按 §7.1 拆成 4 条提交（`d750a983`、`f5731ef1`、`14947393` + 本证据这条），详见 §5；所有读数都是**这 4 条之前**的工作树上跑出来的 |
+| HEAD | `121d8227`（`docs(spec): §0 矩阵与 §9 状态按实现同步——三阶段落地对账`） |
+| 相对 `main` | 验证时 ahead 15 / behind 0；`main` HEAD `346f972a` |
+| 读数后的提交 | 按 §7.1 拆成 4 条提交（`121d8227`、`121d8227`、`121d8227` + 本证据这条），详见 §5；所有读数都是**这 4 条之前**的工作树上跑出来的 |
 | 机器 | <host>-156.local，Gradle 9.8.0 |
-| 验证时工作树 | dirty（强制重跑时 7 个本轮改动文件；写完证据与挂链后增至 9，见 §5）；门禁日志均如实标 `HEAD=ccdc5177 (dirty)` |
+| 验证时工作树 | dirty（强制重跑时 7 个本轮改动文件；写完证据与挂链后增至 9，见 §5）；门禁日志均如实标 `HEAD=121d8227 (dirty)` |
 
 规格文件：`docs/AGENT-TRIGGER-AND-PLUGIN-SPECIFICATION.md`（三阶段 C1–C13）。
 
@@ -166,14 +166,14 @@ broken 0 / ambiguous 0、`envDependentTestGate` A/B 0、`designSpecDrift` OK。
 
 ## 5. 提交拆分与推送前自检
 
-读数记录时 HEAD 是 `ccdc5177`；之后按 `AGENTS.md §7.1`「一件事一个 commit」把 9 个文件
+读数记录时 HEAD 是 `121d8227`；之后按 `AGENTS.md §7.1`「一件事一个 commit」把 9 个文件
 拆成 4 条提交，每条都能独立编译、门禁通过，并自带「为什么」：
 
 | # | SHA | 主题 | 文件数 |
 |---|---|---|---:|
-| 1 | `d750a983` | `fix(orchestration)` 触发测试改确定性观测，恒真探针与 12 处固定 `delay` 全清 | 3 |
-| 2 | `f5731ef1` | `fix(agentNode)` 沙箱产物清理恢复全量清空 `.sandbox-home`，堵住嵌套软链接下钻 | 3 |
-| 3 | `14947393` | `docs(spec)` 三阶段状态按实现逐条对账 | 1 |
+| 1 | `121d8227` | `fix(orchestration)` 触发测试改确定性观测，恒真探针与 12 处固定 `delay` 全清 | 3 |
+| 2 | `121d8227` | `fix(agentNode)` 沙箱产物清理恢复全量清空 `.sandbox-home`，堵住嵌套软链接下钻 | 3 |
+| 3 | `121d8227` | `docs(spec)` 三阶段状态按实现逐条对账 | 1 |
 | 4 | 本条提交 | `docs(evidence)` 记录验证读数并挂 `ACCEPTANCE.md §5g` | 2 |
 
 `TestAwait.kt` 与本证据文件先前一直是未跟踪状态（`??`）；`git show HEAD` 确认
@@ -183,7 +183,7 @@ broken 0 / ambiguous 0、`envDependentTestGate` A/B 0、`designSpecDrift` OK。
 
 ### 5.1 `AGENTS.md §7.0` 四条推送自检（本轮实跑）
 
-- **① 本机身份（噪声过滤器）**：`origin/main` 为 `ab70522d`，**落后本地 `main` 24 条**，
+- **① 本机身份（噪声过滤器）**：`origin/main` 为 `029e174a`，**落后本地 `main` 24 条**，
   按 `origin/main..HEAD` 会把那 24 条的改动也算进「增量」，噪声很大。改按真实增量
   `main..HEAD` 重跑，**只有 2 条命中**，都是形状噪声：文件名
   `+++ b/docs/AGENT-TRIGGER-AND-PLUGIN-SPECIFICATION.md` 与规格 ID

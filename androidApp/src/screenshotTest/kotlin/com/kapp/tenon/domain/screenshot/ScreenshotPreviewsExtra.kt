@@ -412,7 +412,17 @@ private fun ExtraScreen(
 private fun AgentsEmptyPhonePreview() {
     AppTheme(darkTheme = false) {
         ExtraScreen(AppRoutes.AGENTS, badges = navBadges(previewSlicesOf(humanOnlyState).chat, previewSlicesOf(humanOnlyState).agent, previewSlicesOf(humanOnlyState).node, previewSlicesOf(humanOnlyState).settings)) { inner ->
-            AgentConsoleScreen(chatSlice = previewSlicesOf(humanOnlyState).chat,settingsSlice = previewSlicesOf(humanOnlyState).settings,nodeSlice = previewSlicesOf(humanOnlyState).node,agentSlice = previewSlicesOf(humanOnlyState).agent,
+            AgentConsoleScreen(
+            // 逐参武装补账（029e174a 引入 execDevicesOf 时漏了这一批）：手机壳 = 生产接线
+            // （App.kt 不传 execDevicesOf —— 逐设备勾选是宿主本机的配置，手机连别人的机器
+            // 没得配），显式 null 把「这一支本来就不该进图」写成一句话，而不是让它看起来
+            // 像漏武装（designPreviewPairingGate 的欠武装判据）。
+            execDevicesOf = null,
+            // 逐参武装（手机壳 = 生产接线：App.kt 传非 null 工厂 + 拉快照出口）——
+            // 夹具不传 = 免批规则那一支不进图，截图证据里就没有它。
+            toolApprovalsSourceOf = { fakeToolApprovalsSource() },
+            onRequestToolRules = {},
+            chatSlice = previewSlicesOf(humanOnlyState).chat,settingsSlice = previewSlicesOf(humanOnlyState).settings,nodeSlice = previewSlicesOf(humanOnlyState).node,agentSlice = previewSlicesOf(humanOnlyState).agent,
                 selectedAgentId = null,
                 onSelectAgent = {},
                 onOpenChat = { _, _ -> },
@@ -462,7 +472,17 @@ private fun AgentsEmptyPhonePreview() {
 private fun AgentsSelectedOfflinePhonePreview() {
     AppTheme(darkTheme = false) {
         ExtraScreen(AppRoutes.AGENTS, badges = navBadges(previewSlicesOf(agentWithOfflineSelectedState).chat, previewSlicesOf(agentWithOfflineSelectedState).agent, previewSlicesOf(agentWithOfflineSelectedState).node, previewSlicesOf(agentWithOfflineSelectedState).settings)) { inner ->
-            AgentConsoleScreen(chatSlice = previewSlicesOf(agentWithOfflineSelectedState).chat,settingsSlice = previewSlicesOf(agentWithOfflineSelectedState).settings,nodeSlice = previewSlicesOf(agentWithOfflineSelectedState).node,agentSlice = previewSlicesOf(agentWithOfflineSelectedState).agent,
+            AgentConsoleScreen(
+            // 逐参武装补账（029e174a 引入 execDevicesOf 时漏了这一批）：手机壳 = 生产接线
+            // （App.kt 不传 execDevicesOf —— 逐设备勾选是宿主本机的配置，手机连别人的机器
+            // 没得配），显式 null 把「这一支本来就不该进图」写成一句话，而不是让它看起来
+            // 像漏武装（designPreviewPairingGate 的欠武装判据）。
+            execDevicesOf = null,
+            // 逐参武装（手机壳 = 生产接线：App.kt 传非 null 工厂 + 拉快照出口）——
+            // 夹具不传 = 免批规则那一支不进图，截图证据里就没有它。
+            toolApprovalsSourceOf = { fakeToolApprovalsSource() },
+            onRequestToolRules = {},
+            chatSlice = previewSlicesOf(agentWithOfflineSelectedState).chat,settingsSlice = previewSlicesOf(agentWithOfflineSelectedState).settings,nodeSlice = previewSlicesOf(agentWithOfflineSelectedState).node,agentSlice = previewSlicesOf(agentWithOfflineSelectedState).agent,
                 selectedAgentId = offlineAgent.nodeId,
                 onSelectAgent = {},
                 onOpenChat = { _, _ -> },
@@ -501,7 +521,17 @@ private fun AgentsSelectedOfflinePhonePreview() {
 private fun AgentsSessionsPhonePreview() {
     AppTheme(darkTheme = false) {
         ExtraScreen(AppRoutes.AGENTS, badges = navBadges(previewSlicesOf(agentWithSessionsState).chat, previewSlicesOf(agentWithSessionsState).agent, previewSlicesOf(agentWithSessionsState).node, previewSlicesOf(agentWithSessionsState).settings)) { inner ->
-            AgentConsoleScreen(chatSlice = previewSlicesOf(agentWithSessionsState).chat,settingsSlice = previewSlicesOf(agentWithSessionsState).settings,nodeSlice = previewSlicesOf(agentWithSessionsState).node,agentSlice = previewSlicesOf(agentWithSessionsState).agent,
+            AgentConsoleScreen(
+            // 逐参武装补账（029e174a 引入 execDevicesOf 时漏了这一批）：手机壳 = 生产接线
+            // （App.kt 不传 execDevicesOf —— 逐设备勾选是宿主本机的配置，手机连别人的机器
+            // 没得配），显式 null 把「这一支本来就不该进图」写成一句话，而不是让它看起来
+            // 像漏武装（designPreviewPairingGate 的欠武装判据）。
+            execDevicesOf = null,
+            // 逐参武装（手机壳 = 生产接线：App.kt 传非 null 工厂 + 拉快照出口）——
+            // 夹具不传 = 免批规则那一支不进图，截图证据里就没有它。
+            toolApprovalsSourceOf = { fakeToolApprovalsSource() },
+            onRequestToolRules = {},
+            chatSlice = previewSlicesOf(agentWithSessionsState).chat,settingsSlice = previewSlicesOf(agentWithSessionsState).settings,nodeSlice = previewSlicesOf(agentWithSessionsState).node,agentSlice = previewSlicesOf(agentWithSessionsState).agent,
                 selectedAgentId = codexAgent.nodeId,
                 onSelectAgent = {},
                 onOpenChat = { _, _ -> },
@@ -605,7 +635,17 @@ private val agentWithoutAliasState = agentWithSessionsState.copy(
 private fun AgentsSessionNoAliasPhonePreview() {
     AppTheme(darkTheme = false) {
         ExtraScreen(AppRoutes.AGENTS, badges = navBadges(previewSlicesOf(agentWithoutAliasState).chat, previewSlicesOf(agentWithoutAliasState).agent, previewSlicesOf(agentWithoutAliasState).node, previewSlicesOf(agentWithoutAliasState).settings)) { inner ->
-            AgentConsoleScreen(chatSlice = previewSlicesOf(agentWithoutAliasState).chat,settingsSlice = previewSlicesOf(agentWithoutAliasState).settings,nodeSlice = previewSlicesOf(agentWithoutAliasState).node,agentSlice = previewSlicesOf(agentWithoutAliasState).agent,
+            AgentConsoleScreen(
+            // 逐参武装补账（029e174a 引入 execDevicesOf 时漏了这一批）：手机壳 = 生产接线
+            // （App.kt 不传 execDevicesOf —— 逐设备勾选是宿主本机的配置，手机连别人的机器
+            // 没得配），显式 null 把「这一支本来就不该进图」写成一句话，而不是让它看起来
+            // 像漏武装（designPreviewPairingGate 的欠武装判据）。
+            execDevicesOf = null,
+            // 逐参武装（手机壳 = 生产接线：App.kt 传非 null 工厂 + 拉快照出口）——
+            // 夹具不传 = 免批规则那一支不进图，截图证据里就没有它。
+            toolApprovalsSourceOf = { fakeToolApprovalsSource() },
+            onRequestToolRules = {},
+            chatSlice = previewSlicesOf(agentWithoutAliasState).chat,settingsSlice = previewSlicesOf(agentWithoutAliasState).settings,nodeSlice = previewSlicesOf(agentWithoutAliasState).node,agentSlice = previewSlicesOf(agentWithoutAliasState).agent,
                 selectedAgentId = codexAgent.nodeId,
                 selectedAgentSessionId = "s-4c1f",
                 onSelectAgent = {},
@@ -665,7 +705,17 @@ private fun AgentsSessionNoAliasPhonePreview() {
 private fun AgentsSessionPickPhonePreview() {
     AppTheme(darkTheme = false) {
         ExtraScreen(AppRoutes.AGENTS, badges = navBadges(previewSlicesOf(agentWithSessionsState).chat, previewSlicesOf(agentWithSessionsState).agent, previewSlicesOf(agentWithSessionsState).node, previewSlicesOf(agentWithSessionsState).settings)) { inner ->
-            AgentConsoleScreen(chatSlice = previewSlicesOf(agentWithSessionsState).chat,settingsSlice = previewSlicesOf(agentWithSessionsState).settings,nodeSlice = previewSlicesOf(agentWithSessionsState).node,agentSlice = previewSlicesOf(agentWithSessionsState).agent,
+            AgentConsoleScreen(
+            // 逐参武装补账（029e174a 引入 execDevicesOf 时漏了这一批）：手机壳 = 生产接线
+            // （App.kt 不传 execDevicesOf —— 逐设备勾选是宿主本机的配置，手机连别人的机器
+            // 没得配），显式 null 把「这一支本来就不该进图」写成一句话，而不是让它看起来
+            // 像漏武装（designPreviewPairingGate 的欠武装判据）。
+            execDevicesOf = null,
+            // 逐参武装（手机壳 = 生产接线：App.kt 传非 null 工厂 + 拉快照出口）——
+            // 夹具不传 = 免批规则那一支不进图，截图证据里就没有它。
+            toolApprovalsSourceOf = { fakeToolApprovalsSource() },
+            onRequestToolRules = {},
+            chatSlice = previewSlicesOf(agentWithSessionsState).chat,settingsSlice = previewSlicesOf(agentWithSessionsState).settings,nodeSlice = previewSlicesOf(agentWithSessionsState).node,agentSlice = previewSlicesOf(agentWithSessionsState).agent,
                 selectedAgentId = codexAgent.nodeId,
                 onSelectAgent = {},
                 onOpenChat = { _, _ -> },
@@ -1979,7 +2029,17 @@ private fun NodesLongTextPhonePreview() {
 private fun AgentsLongTextPhonePreview() {
     AppTheme(darkTheme = false) {
         ExtraScreen(AppRoutes.AGENTS, badges = navBadges(previewSlicesOf(longAgentState).chat, previewSlicesOf(longAgentState).agent, previewSlicesOf(longAgentState).node, previewSlicesOf(longAgentState).settings)) { inner ->
-            AgentConsoleScreen(chatSlice = previewSlicesOf(longAgentState).chat,settingsSlice = previewSlicesOf(longAgentState).settings,nodeSlice = previewSlicesOf(longAgentState).node,agentSlice = previewSlicesOf(longAgentState).agent,
+            AgentConsoleScreen(
+            // 逐参武装补账（029e174a 引入 execDevicesOf 时漏了这一批）：手机壳 = 生产接线
+            // （App.kt 不传 execDevicesOf —— 逐设备勾选是宿主本机的配置，手机连别人的机器
+            // 没得配），显式 null 把「这一支本来就不该进图」写成一句话，而不是让它看起来
+            // 像漏武装（designPreviewPairingGate 的欠武装判据）。
+            execDevicesOf = null,
+            // 逐参武装（手机壳 = 生产接线：App.kt 传非 null 工厂 + 拉快照出口）——
+            // 夹具不传 = 免批规则那一支不进图，截图证据里就没有它。
+            toolApprovalsSourceOf = { fakeToolApprovalsSource() },
+            onRequestToolRules = {},
+            chatSlice = previewSlicesOf(longAgentState).chat,settingsSlice = previewSlicesOf(longAgentState).settings,nodeSlice = previewSlicesOf(longAgentState).node,agentSlice = previewSlicesOf(longAgentState).agent,
                 selectedAgentId = codexAgent.nodeId,
                 onSelectAgent = {},
                 onOpenChat = { _, _ -> },

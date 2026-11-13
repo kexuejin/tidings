@@ -171,6 +171,8 @@ object CodecWire {
             MsgTypes.AGENT_GRANT -> validateAgentGrant(o)
             MsgTypes.AGENT_GRANT_LIST -> validateAgentGrantList(o)
             MsgTypes.AGENT_SESSION_PAGE -> validateAgentSessionPage(o)
+            MsgTypes.AGENT_TOOL_RULES_REQUEST -> CodecAgent.validateAgentToolRulesRequest(o)
+            MsgTypes.AGENT_TOOL_RULES_LIST -> CodecAgent.validateAgentToolRulesList(o)
             MsgTypes.AGENT_INVOKE -> CodecInvoke.validateInvoke(o)
             MsgTypes.AGENT_INVOKE_RESULT -> CodecInvoke.validateInvokeResult(o)
             MsgTypes.AGENT_CHANNEL -> CodecChannel.validateChannel(o)

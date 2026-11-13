@@ -16,7 +16,7 @@ Antigravity 接入设计（RFC §3.3）：让 Antigravity（或任何 MCP 宿主
       }
     }
 
-## 四个工具（RFC §3.3 清单，支持 tenon_* 规范命名）
+## 工具（RFC §3.3 清单，支持 tenon_* 规范命名）
 
 - `tenon_fetch_node_capabilities`：当前局域网在线算力节点与能力标签
   （`GET /v1/peers` 的 MCP 包装）；
@@ -25,6 +25,10 @@ Antigravity 接入设计（RFC §3.3）：让 Antigravity（或任何 MCP 宿主
 - `tenon_send_group_card`：把一张结构化卡落进某个 hook 会话的台账
   （`POST /v1/agent/hook/card`，随会话分页到手机；预算 24 KiB 超限拒绝）；
 - `tenon_ask_question`：向用户手机发起决策卡，直接收集多选回答并恢复执行。
+- `tenon_roster_tools` / `tenon_roster_call`：**读本机工具目录、调其中一个动作**
+  （`GET/POST /v1/agent/tools`）。改员工档案、建队、改名册走这两个 —— 动作表住在宿主
+  （Kotlin 那份 `RosterTools.ALL`），本脚本**不复制一份动作清单**：复制两份必然漂，
+  而漂的那种形态是「说明里写 A、宿主只认 B」的静默 400。
 
 ## 协议
 
@@ -115,6 +119,41 @@ TOOLS = [
                 "timeoutMs": {"type": "integer", "description": "Wait budget in ms, 1000..300000, default 180000"},
             },
             "required": ["question", "options"],
+        },
+    },
+    {
+        "name": "tenon_roster_tools",
+        "description": (
+            "List the roster tools this host exposes (name, arguments, and whether each one needs "
+            "the owner's approval), plus the current authorization tier. Call this FIRST: the tool "
+            "list is owned by the host, so it is the only authoritative source of action names."
+        ),
+        "inputSchema": {"type": "object", "properties": {}, "required": []},
+    },
+    {
+        "name": "tenon_roster_call",
+        "description": (
+            "Call one roster tool on the host (rename an employee, create a team, change a team "
+            "roster, or read teams). Get the action name and its arguments from tenon_roster_tools "
+            "first. Write actions may block while the owner approves on their phone or desktop; "
+            "the host raises that approval card itself, so do not pre-approve it here. A timeout "
+            "counts as a refusal and nothing is written."
+        ),
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "tool": {"type": "string", "description": "Action name from tenon_roster_tools, e.g. team.roster.read"},
+                "args": {
+                    "type": "object",
+                    "description": "Arguments object for that action (shapes come from the catalog)",
+                },
+                "agentKey": {"type": "string", "description": "Optional: which agent is asking (audit only, not auth)"},
+                "timeoutMs": {
+                    "type": "integer",
+                    "description": "Wait budget in ms, 1000..300000, default 120000 (a write waits for the owner)",
+                },
+            },
+            "required": ["tool"],
         },
     },
     {
@@ -381,11 +420,66 @@ def tool_terminal_exec(args: dict) -> dict:
         return {"isError": True, "content": [{"type": "text", "text": f"execution failed: {exc}"}]}
 
 
+def _text_result(payload: dict, is_error: bool = False) -> dict:
+    item = {"type": "text", "text": json.dumps(payload, ensure_ascii=False, indent=2)}
+    return {"isError": True, "content": [item]} if is_error else {"content": [item]}
+
+
+def tool_roster_tools(_args: dict) -> dict:
+    ok, payload = call("GET", "/v1/agent/tools")
+    if not ok:
+        return _text_result(
+            {"error": "host unreachable", "detail": payload, "hint": "is the Tenon control plane running on 8788?"},
+            is_error=True,
+        )
+    return _text_result(payload)
+
+
+def tool_roster_call(args: dict) -> dict:
+    tool_name = (args.get("tool") or "").strip()
+    if not tool_name:
+        return _text_result({"error": "tool is required (see tenon_roster_tools)"}, is_error=True)
+    body = {"tool": tool_name, "args": args.get("args") or {}}
+    agent_key = (args.get("agentKey") or os.environ.get("TENON_AGENT_KEY") or "").strip()
+    if agent_key:
+        body["agentKey"] = agent_key
+    # 派单会话对齐键：有就把审批卡挂到那个会话上（与 tenon_request_human_approval 同一条）。
+    hook_session = (os.environ.get("TENON_HOOK_SESSION_ID") or "").strip()
+    if hook_session:
+        body["sessionId"] = hook_session
+    try:
+        timeout_ms = min(max(int(args.get("timeoutMs", 120000)), 1000), 300000)
+    except (TypeError, ValueError):
+        timeout_ms = 120000
+    # 宿主侧的拒绝（403/404/503）也是「有内容的回执」，不当传输失败处理：
+    # HTTPError 里带着 body，读出来给模型看比一句 "denied" 有用得多。
+    try:
+        req = urllib.request.Request(
+            HOST_URL + "/v1/agent/tools",
+            data=json.dumps(body).encode("utf-8"),
+            headers={"Content-Type": "application/json", "Authorization": "Bearer " + bearer()},
+            method="POST",
+        )
+        with urllib.request.urlopen(req, timeout=(timeout_ms / 1000.0) + 10.0) as resp:
+            raw = resp.read().decode("utf-8")
+            return _text_result(json.loads(raw) if raw.strip() else {})
+    except urllib.error.HTTPError as exc:
+        try:
+            payload = json.loads(exc.read().decode("utf-8"))
+        except (ValueError, OSError):
+            payload = {"error": "http " + str(exc.code)}
+        return _text_result(payload, is_error=True)
+    except (urllib.error.URLError, TimeoutError, OSError) as exc:
+        return _text_result({"error": "host unreachable", "detail": str(exc)}, is_error=True)
+
+
 HANDLERS = {
     "tenon_fetch_node_capabilities": tool_fetch_capabilities,
     "tenon_request_human_approval": tool_request_approval,
     "tenon_send_group_card": tool_send_card,
     "tenon_ask_question": tool_ask_question,
+    "tenon_roster_tools": tool_roster_tools,
+    "tenon_roster_call": tool_roster_call,
     "tenon_fs_read": tool_fs_read,
     "tenon_git_diff": tool_git_diff,
     "tenon_terminal_exec": tool_terminal_exec,

@@ -24,6 +24,7 @@ import androidx.compose.material3.Text
 import com.kapp.tenon.ui.components.AppButtonTone
 import com.kapp.tenon.ui.components.AppIconButton
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -47,6 +48,8 @@ import com.kapp.tenon.domain.model.GrantRequestStatus
 import com.kapp.tenon.domain.model.PeerUi
 import com.kapp.tenon.domain.model.WorkspaceUi
 import com.kapp.tenon.domain.canApproveAgentWork
+import com.kapp.tenon.feature.settings.ToolApprovalsSection
+import com.kapp.tenon.feature.settings.ToolApprovalsSource
 import com.kapp.tenon.domain.isPendingApproval
 import com.kapp.tenon.domain.mayDecideApproval
 import com.kapp.tenon.domain.pendingApprovalCount
@@ -194,6 +197,20 @@ fun WorkspaceDetailView(
      * 与「直通码只在有本机宿主能力时画」同一条规矩）。
      */
     onRequestGrant: (suspend () -> SendOutcome?)? = null,
+    /**
+     * 免批规则（本端增补 cap `atr1`）的读撤缝：null = 这个宿主不提供（对端不声明
+     * `atr1`，或壳没接）⇒ **整块不画** —— 读不到 ≠ 没有规则。手机壳接
+     * `RelayToolApprovalsSource`（帧快照）；桌面已有设置面板那份（宿主 store 直读），
+     * 这里不重复接。
+     */
+    toolApprovalsSource: ToolApprovalsSource? = null,
+    /** 拉一次免批表快照：区块真的画出来时触发一次（每工作区一次，不轮询）。 */
+    onRequestToolRules: (() -> Unit)? = null,
+    /**
+     * 撤销「没撤掉」的壳侧文案（见 ToolApprovalsSection.revokeFailedNote）：手机侧
+     * 的 0 = 帧没发出去（宿主可能不在线），套默认的「那条已经不在了」会撒谎。
+     */
+    toolApprovalsFailedNote: String? = null,
     modifier: Modifier = Modifier,
     /** Phase 4 订阅面切片（蓝图 §4.4）：默认值由 [state] 投影，未迁移/预览路径行为不变。 */
     agentSlice: AgentSlice,
@@ -483,6 +500,37 @@ fun WorkspaceDetailView(
                         devices = execDevices.orEmpty(),
                         onToggle = { nodeId, checked -> onToggleExecDevice?.invoke(nodeId, checked) },
                         onAddDevice = onAddExecDevice?.let { { showAddExecDevice = true } },
+                        modifier = Modifier.padding(
+                            horizontal = LocalAppSpacing.current.lg14,
+                            vertical = LocalAppSpacing.current.md10,
+                        ),
+                    )
+                }
+            }
+
+            // ===== 免批规则（本端增补 cap atr1）：宿主的「以后不再问」清单，读与撤 =====
+            // 与执行设备块同一个「内容共享、接缝参数化」的形状：区块 UI 只有一份
+            // （ToolApprovalsSection），手机接帧快照、桌面接宿主 store（在设置面板，
+            // 不在这里重复接）。source 为 null = 对端不声明 atr1 ⇒ 整块不画
+            // （读不到 ≠ 没有规则，与「控制面没挂上不许画成空表」同一条诚实纪律）。
+            if (toolApprovalsSource != null) {
+                // 进入这一屏拉一次快照：不轮询 —— 撤销后的新快照由宿主的应答帧带回来，
+                // 行的变化经缝的 addChangeListener 反射进区块。
+                LaunchedEffect(wsId) { onRequestToolRules?.invoke() }
+                Card(
+                    modifier = Modifier.fillMaxWidth(),
+                    colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
+                    shape = LocalCardShape.current,
+                    elevation = CardDefaults.cardElevation(defaultElevation = RelayElevations.Card),
+                ) {
+                    ToolApprovalsSection(
+                        source = toolApprovalsSource,
+                        // 行上的 nodeId 是**规则归属的设备**（可以是这台宿主之外的设备），
+                        // 名字从节点表解析，解析不出就给短 id —— 不编名字。
+                        peerLabel = { nodeId ->
+                            peer(nodeId, nodeSlice, settingsSlice)?.displayName ?: nodeId.take(8)
+                        },
+                        revokeFailedNote = toolApprovalsFailedNote,
                         modifier = Modifier.padding(
                             horizontal = LocalAppSpacing.current.lg14,
                             vertical = LocalAppSpacing.current.md10,

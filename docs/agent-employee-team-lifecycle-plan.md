@@ -370,9 +370,57 @@ sealed interface GroupDeclarationCommand {
 （Create / Update / AddToGroups / Dissolve）+ 席位层 `AttachTeam` / `DetachTeam`。
 落地边界：**团队的界面入口（新建 / 改名 / 加群）还没接**，卡片只会在有 `teamName` 时显示独立名。
 
-**P3 · agent 写面**
-`roster` 授权域 + 三个工具动作 + 审批卡 + 审计回执；默认 `request` 档。
-价值：agent 能自己组队，这是「数字员工」与「聊天机器人」的分界线。
+**P3 · agent 写面（已落地）**
+
+工具面（`/v1/agent/tools`）+ `roster` 写档 + 四个动作 + 设置界面 + agent 侧注册：
+
+- `GET /v1/agent/tools` 是目录（动作名、参数表**形状**、当前档位、写面是否装配、用法简报）；
+  `POST /v1/agent/tools` 执行；`GET /v1/agent/tools/employees` 是 `employeeId` 的唯一来源
+  （团队快照走 `team.roster.read`，不另开路由）。
+- 四个动作：
+  - `employee.update`：改名字 / 职责 —— `@` token 与 `agentId` **不在开口之列**
+    （工具面签名里根本没有这两个参数）；
+  - `team.roster.read`：读团队档案（名字 / 领队 / 名册 / **在哪些群**）。带 `groupIds`
+    是因为「这支队在哪些群」决定它能不能被 `@` 到 —— 只回名册等于给一份看不见脚的清单；
+  - `team.create` / `team.update`：建队 / 改名换名册（`groupIds` 可空 = 只建档）。
+    **进群与解散不开放给 agent**：那两件事动的是群里所有人的可见面（席位与 @ token），
+    留给人在界面上一次做完。
+- 三道闸，顺序不能换：动作白名单（400 列可用名）→ 能力在位（503，不假装能读能写）
+  → 目标存在（404，**问机主之前**就拦）→ 授权档（403）。
+  **只读动作不过授权闸**：读不改变世界，每次弹一张卡只会让人把审批点成肌肉记忆。
+- 写档 `RosterWritePolicy`：默认 `request`（每次弹审批卡，复用 hook 那套
+  `sendAgentApproval` + `recordApproval` + 长轮询，**超时 = 拒绝且一个字不写**），
+  `auto` 直接写。**档位只读文件**（`roster-write.json`）：拿到控制面 token 的本地进程
+  也包括 agent 自己，给它一条写路由等于让它给自己放行。
+- **设置界面**：「设置 → 授信设备」页底部「智能体改编制的授权」（`RosterWriteSection`）——
+  两档分别是「每次问我 / 直接执行」，并如实报读盘错误。此前只能改文件，等于**没有开关**。
+  档位取值住 `:core` 的 `RosterWriteTier`（宿主、界面、文件字面量共用一份，抄两份必然漂）。
+- **agent 侧注册与提示词**：`scripts/tenon-mcp-server.py` 新增 `tenon_roster_tools` /
+  `tenon_roster_call`（MCP 宿主的注册面）。**脚本里不复制动作清单** —— 它代理
+  `GET/POST /v1/agent/tools`，动作表只有宿主那一份。派单用的 CLI agent 则在指令尾部拿到
+  `RosterTools.brief()`（与目录同一份），且**只在档案面真的装配时追加**：没装配就一个字不加，
+  免得 agent 照着一份空说明书去调不存在的路由。
+- 拒绝按类分开：工具名/参数 `400`、没有档案面 `503`、目标不存在 `404`、授权没过 `403`、
+  做成 `200`（带前后值；新建团队的 `before` 缺省 = 不含该字段，不拿 after 冒充）。
+- 审计：一条 `[roster-tool]` 行（谁、什么动作、审批 id、前后值 / 团队 rev 与群数）；
+  写本身仍走 `applyEmployeeProfile` / `applyTeamProfile`（`origin = AGENT_TOOL`、
+  `actor = AGENT(本机, agentKey)`）。`applyTeamProfile` 因此放开成 `public` —— 界面入口那组
+  恒 `Human` + 横幅，工具面要的是「显式 actor + 结构化结果」，再包一层只会多一条要跟着改的路径。
+
+判据：
+
+- `RosterToolsTest`（11 条：目录唯一性 / 参数形状 / 缺参 / 域外 duty / 组员三段必填 /
+  `groupIds` 拼错形状不许读成「没给」/ 简报覆盖每个动作 / 档位默认 request 与坏文件）；
+- `RosterToolRouteTest`（11 条：目录带 brief、未知动作 400、无档案面 503（读写都算）、
+  员工/团队 404 都在问机主之前、**只读动作在 request 档也不弹卡**、auto 档写入带前后值、
+  request 档真的发卡且超时即拒、建队卡上写着编制与「不进群」的代价）；
+- `DesktopRosterWritePortTest`（10 条：只走唯一写路径、token/agentId 不动、团队快照带群、
+  建队 / 改名 rev 推进、`UNKNOWN_TEAM` / `ROSTER_INVALID` 分类）；
+- `RosterWriteAdminTest`（5 条：**写盘失败不许把界面切到新档**、域外取值不写、读盘原因可透出）；
+- `TeamPlanCompilerTest`：能力简报进**每一棒**（含审查棒）、`null` 时指令一字不改；
+- 域层顺带补一处同口径：`updateTeam` 在「不在任何群」时也验名册（与 `createTeam` 的空群分支
+  对齐）—— 否则档案里能存下一份撞名名册，等它进群那一刻才被拒
+  （判据 `editingATeamOutsideAnyGroupStillValidatesTheRoster`）。
 
 ## 8. 明确不做
 
@@ -460,7 +508,7 @@ sealed interface GroupDeclarationCommand {
 
 | 入口 | 落点 | 写路径 | 备注 |
 |---|---|---|---|
-| 新建团队 | 智能体页「团队」视角 · 段头「新建团队」 | `saveTeamProfileEntry(null, …)` → `Create` | 至少进一个群（不进群就没有席位，谁都看不到这支队） |
+| 新建团队 | 智能体页「团队」视角 · 段头「新建团队」 | `saveTeamProfileEntry(null, …)` → `Create` | **可以一个群都不进**（2026-11-13 改）：只写档案、不建席位；代价在对话框里如实说（群里与手机看不见、`@` 不到），之后从「添加团队」进群 |
 | 编辑团队 | 团队卡底行「编辑团队」（仅 `teamId != null`） | 先 `Update` 再 `AddToGroups` | 改名对所有引用群生效；群**只增不减**（移出某群是那个群的决定） |
 | 添加团队 | 群信息 → 项目目录授权 → 「添加团队」段 | `attachTeamToGroupEntry` → `AddToGroups` | 一支队一次进群，组员随档案过来 |
 

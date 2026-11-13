@@ -3,7 +3,7 @@
 日期：2026-11-08 14:28–15:52
 装置：Pixel 6（<device-serial>，com.kapp.tenon.debug，APK lastUpdateTime 14:46:35）
       + macOS 宿主 /Applications/Tenon.app（重启后 PID 13652，stdout → /private/tmp/tenon-stdout9.log）
-      + 旧构建对端：emulator-5554（2026-11-07 10:07 包，pre-65caa9bd，English UI）
+      + 旧构建对端：emulator-5554（2026-11-07 10:07 包，pre-3e775735，English UI）
 工作区：teahouse-mobile（ws-e9b18063d183）/ china-pass（ws-3131b40ab6d5）
 装机纪律（ACCEPTANCE §1b）：
   APK sha256 9aa07e131eb72d7edd53bd87001d12790f65581ec7cb6e377eea94a343197439
@@ -140,7 +140,7 @@ T7 存量驱动融入 —— ✅ 通过
 
 T8 新旧互通 —— A5 双向 ✅（逐字节）；群 leg 构造性覆盖；「零 wire 变更」成立
 ------------------------------------------------------------------------
-- 旧→新：模拟器（pre-65caa9bd 包）发 862 字符长文（>800B 阈值 ⇒ TCP）→ 宿主
+- 旧→新：模拟器（pre-3e775735 包）发 862 字符长文（>800B 阈值 ⇒ TCP）→ 宿主
   MessageEntity 收到 length=862、首尾标记逐字一致（A5T8OLDNODE…END-OF-A5-T8）。
 - 新→旧：宿主 POST /v1/send 865 字符 → 模拟器 messages.log 里 inbound msg 帧的
   payload.text 与发送串 **equal: True**；旧 UI 完整渲染（截图）。
@@ -553,7 +553,7 @@ D17 撤销，改记一条**诊断方法教训**：判「落库了吗」必须把
 二十、feat/delegation-ws-id-threading 分支并入（用户指令）
 --------------------------------------------------------
 分支净新增 = 一个提交 b30266d8（组队与提议派单贯通显式 wsId——显式指针未命中即
-终局退单）；另两提交（23658cea/93dfaceb）已在主线（分支侧为分叉前旧对象）。
+终局退单）；另两提交（346f972a/346f972a）已在主线（分支侧为分叉前旧对象）。
 内容：wsId 贯通 讨论→提议→组队/多棒/单棒 全链（Proposal 数据类 +wsId、
 runDiscussion/delegateByPlan(Await)/dispatchMultiRoleChain/dispatchPlanStages
 签名贯通、提议开工按 proposal.wsId 派单）+ **resolveWorkspacePath 显式指针

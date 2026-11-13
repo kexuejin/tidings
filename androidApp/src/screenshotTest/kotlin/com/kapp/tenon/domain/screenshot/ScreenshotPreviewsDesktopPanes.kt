@@ -598,7 +598,19 @@ private fun DeskNodesPaneExpandedPreview() {
 @Composable
 private fun DeskAgentPaneExpandedPreview() {
     PaneBackdrop {
-        AgentConsoleScreen(chatSlice = previewSlicesOf(desktopPreviewState()).chat,settingsSlice = previewSlicesOf(desktopPreviewState()).settings,nodeSlice = previewSlicesOf(desktopPreviewState()).node,agentSlice = previewSlicesOf(desktopPreviewState()).agent,
+        AgentConsoleScreen(
+            // 桌面壳 = 生产接线（DesktopShell 不接免批规则缝：宿主自己在设置面板直读，
+            // 见 RelaySettings.caps 的预算裁决）—— 显式传 null 而不是缺省，把「这一支
+            // 本来就不该进图」写成夹具里的一句话，而不是让它看起来像漏武装。
+            toolApprovalsSourceOf = null,
+            onRequestToolRules = null,
+            // 逐参武装补账：桌面壳生产侧传真数据（DesktopShell: execDevicesOf = controller.execDevicesOf）。
+            execDevicesOf = listOf(
+                com.kapp.tenon.domain.ExecDeviceRow(nodeId = "self-node", label = "本机", trusted = true, checked = true, isSelf = true),
+                com.kapp.tenon.domain.ExecDeviceRow(nodeId = "peer-node-1", label = "老周的茶桌", trusted = true, checked = false, isSelf = false),
+            ),
+            onToggleExecDevice = { _, _ -> },
+            chatSlice = previewSlicesOf(desktopPreviewState()).chat,settingsSlice = previewSlicesOf(desktopPreviewState()).settings,nodeSlice = previewSlicesOf(desktopPreviewState()).node,agentSlice = previewSlicesOf(desktopPreviewState()).agent,
             selectedAgentId = null,
             onSelectAgent = {},
             // 原型 `d06-agents` 画的是**填充态**（待处理审批 3 项 + 任务队列 3 项，各带动作）。

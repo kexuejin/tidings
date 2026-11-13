@@ -36,6 +36,7 @@ import com.kapp.tenon.generated.resources.team_profile_groups_hint
 import com.kapp.tenon.generated.resources.team_profile_groups_in
 import com.kapp.tenon.generated.resources.team_profile_groups_label
 import com.kapp.tenon.generated.resources.team_profile_groups_none
+import com.kapp.tenon.generated.resources.team_profile_groups_optional
 import com.kapp.tenon.generated.resources.team_profile_leader_hint
 import com.kapp.tenon.generated.resources.team_profile_leader_label
 import com.kapp.tenon.generated.resources.team_profile_member_empty
@@ -140,12 +141,13 @@ internal fun TeamProfileDialog(
     var pickedGroups by remember { mutableStateOf(emptySet<String>()) }
 
     val addableGroups = addableTeamGroups(groups)
+    // **不勾群也能保存**（「先建档、后加群」）：没有席位的团队在群里/手机上确实看不见，
+    // 但那是一个**知情选择**，不是非法输入 —— 出路是群信息的「添加团队」。
+    // 界面的责任是说清代价（见下方 `team_profile_groups_optional`），不是把按钮置灰。
     val canSave = name.isNotBlank() &&
         leaderKey != null &&
         members.isNotEmpty() &&
-        members.all { it.name.isNotBlank() } &&
-        // 新建必须至少进一个群：不进群的团队没有席位，谁都看不到它。
-        (profileKey != null || pickedGroups.isNotEmpty())
+        members.all { it.name.isNotBlank() }
 
     RelayDialog(
         onDismissRequest = onDismiss,
@@ -293,6 +295,15 @@ internal fun TeamProfileDialog(
                         style = MaterialTheme.typography.labelSmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                     )
+                    // 新建且一个群都没勾：如实说代价与出路。这不是「不推荐」，是**两个都成立**的
+                    // 选择 —— 先建档的人往往还没决定这支队进哪个群。
+                    if (profileKey == null && pickedGroups.isEmpty()) {
+                        Text(
+                            text = stringResource(Res.string.team_profile_groups_optional),
+                            style = MaterialTheme.typography.labelSmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        )
+                    }
                 }
             }
         },

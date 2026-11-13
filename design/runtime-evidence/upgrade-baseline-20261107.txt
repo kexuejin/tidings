@@ -2,7 +2,7 @@
 ================================================================================
 日期：2026-11-07    设备：Pixel 6（Android 15 / SDK 35，USB）+ 模拟器（冒烟）
 产物：~/Downloads/relay-build-20261107/androidApp-debug.apk（截图同目录 baseline/，不入库）
-基线 HEAD：4976ed3f + a59a3982（桌面编译修复）
+基线 HEAD：029e174a + 029e174a（桌面编译修复）
 注：本文件曾被外部进程清除，10:45 依会话记录完整重建；读数均可复跑。
 
 【0】产物与构建
@@ -33,7 +33,7 @@
 【5】HEAD 桌面模块编译断的（真机方案抓到的第一个真缺陷）
 实际：DesktopHosting.kt 的 SetAvatarPage 调用点仍传已删除的 avatarSlice 参数
   ——「撤批注卡」提交同步了 App.kt 与两处预览调用点，漏了桌面壳。
-结论：已修复并提交（a59a3982），:desktopApp:compileKotlin / :desktopApp:test 绿。
+结论：已修复并提交（029e174a），:desktopApp:compileKotlin / :desktopApp:test 绿。
 教训：Android 截图测试不编桌面模块 —— :desktopApp:test 不可删。
 
 【6】本机 Wi-Fi 开了客户端隔离（环境事实）
@@ -105,7 +105,7 @@ adb shell svc power stayon usb；e2e_agent.py --dry-run 自检 27 条全绿。
     嵌套列表、会话头（Agent 徽章 · 进行中 · 项数徽章）；
   - 审批 #1 在 10:41 到期被自动回收（3 项→2 项）—— 5 分钟超时闭环
     真机自证。
-结论：结案。真机方案全程抓到：桌面编译断裂（a59a3982）、两代应用污染、
+结论：结案。真机方案全程抓到：桌面编译断裂（029e174a）、两代应用污染、
   旧宿主链路缺陷，且产出全部渲染基线。
 遗留（如实）：
   a) 控制面直发的审批是「过路」帧：宿主无挂起台账可关联，ack 对不上账，

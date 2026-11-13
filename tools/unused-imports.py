@@ -77,7 +77,9 @@ def main() -> int:
     total = 0
     for path in sorted(src.rglob("*.kt")):
         parts = path.parts
-        if any(p.startswith(".") or p == "build" for p in parts):
+        # luciola-src：CI 从公共仓 checkout 出来的**另一个仓库**（本仓工作区里没有
+        # 这个目录）—— 它的 import 卫生是 luciola 仓自己的门禁的事，不是本仓的。
+        if any(p.startswith(".") or p in ("build", "luciola-src") for p in parts):
             continue
         text = path.read_text("utf-8")
         dead = unused_in(text)

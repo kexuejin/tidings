@@ -780,7 +780,17 @@ private fun ChatMediaPhonePreview() {
 private fun AgentsPhonePreview() {
     AppTheme(darkTheme = false) {
         Screen("agents") { inner ->
-            AgentConsoleScreen(chatSlice = previewSlicesOf(agentOnlyState).chat,settingsSlice = previewSlicesOf(agentOnlyState).settings,nodeSlice = previewSlicesOf(agentOnlyState).node,agentSlice = previewSlicesOf(agentOnlyState).agent,
+            AgentConsoleScreen(
+            // 逐参武装补账（029e174a 引入 execDevicesOf 时漏了这一批）：手机壳 = 生产接线
+            // （App.kt 不传 execDevicesOf —— 逐设备勾选是宿主本机的配置，手机连别人的机器
+            // 没得配），显式 null 把「这一支本来就不该进图」写成一句话，而不是让它看起来
+            // 像漏武装（designPreviewPairingGate 的欠武装判据）。
+            execDevicesOf = null,
+            // 逐参武装（手机壳 = 生产接线：App.kt 传非 null 工厂 + 拉快照出口）——
+            // 夹具不传 = 免批规则那一支不进图，截图证据里就没有它。
+            toolApprovalsSourceOf = { fakeToolApprovalsSource() },
+            onRequestToolRules = {},
+            chatSlice = previewSlicesOf(agentOnlyState).chat,settingsSlice = previewSlicesOf(agentOnlyState).settings,nodeSlice = previewSlicesOf(agentOnlyState).node,agentSlice = previewSlicesOf(agentOnlyState).agent,
                 selectedAgentId = codexAgent.nodeId,
                 onSelectAgent = {},
                 onOpenChat = { _, _ -> },

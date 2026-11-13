@@ -102,6 +102,33 @@ object MsgTypes {
     const val AGENT_SESSION_PAGE = "agent-session-page"
 
     /**
+     * 本端增补：设备向宿主**读或撤免批规则**（cap `atr1`），设备 → 宿主。
+     *
+     * 免批表（宿主侧 `AgentToolApprovalStore`）此前只有写入口：设备在审批行上按
+     * 「始终允许」，宿主落规则 —— 而设备的界面上既看不见也收不回。一份自己
+     * 看不见、收不回的授权，用户没法对自己的机器负责；手机端尤其如此。
+     *
+     * 一帧两用（键区分，不新增第二张帧）：`tool` 缺席 = 读（宿主回当前快照）；
+     * `tool` 在场 = 撤这一条（与 `nodeId + agentKey + tool + wsId` 逐字匹配）。
+     * **响应不新造帧**：宿主收到后用它已有的兄弟帧 `agent-tool-rules-list`
+     * 就地回全量快照（免批表是节点本地事实， grants 家族的「就地应答」先例，
+     * 不需要 session-page 那套队列/宿主回填）。
+     *
+     * 撤销是**收紧方向**（让宿主重新开始问）：正在等批准的那一条不受影响，
+     * 已经执行完的不会回滚 —— 回执说的是「下一次同工具请求会重新询问」。
+     */
+    const val AGENT_TOOL_RULES_REQUEST = "agent-tool-rules-request"
+
+    /**
+     * 本端增补：宿主把当前免批表**全量快照**回给设备（cap `atr1`），宿主 → 设备。
+     *
+     * 全量不是增量：免批规则按 tool 名记、行数少，总量预算远够；增量对账需要的
+     * 键（rev / 序号）比这帧族本身还重。顺序 = 宿主表的最新优先。撤销后宿主也
+     * 用它回更新后的快照 —— 设备侧只认这一种对账来源，不本地猜测。
+     */
+    const val AGENT_TOOL_RULES_LIST = "agent-tool-rules-list"
+
+    /**
      * M4 跨端派单网道（规格 §6.2「地下铁」）：宿主 A 的 Leader 把子任务派到宿主 B 的
      * 插件（cap `agi1`）。请求-响应式 RPC 走 P2P SecureStream 点对点传输，
      * **不经群聊** —— 主群里一条跨设备交接文本都不产生，全群只看一张汇总看板卡。
@@ -186,6 +213,8 @@ object MsgTypes {
         listOf(
             CAP_MOBILE_TEXT, CAP_MOBILE_RECORD, CAP_AGENT_SESSION, CAP_AGENT_QUEUE, CAP_AGENT_WORKSPACE,
             CAP_AGENT_GRANT, CAP_AGENT_SESSION_PAGE, CAP_TABLE_TEXT,
+            // atr1（免批规则读撤）：手机发读/撤请求、收快照帧 —— 声明与处理同一批改动。
+            CAP_AGENT_TOOL_RULES,
             // task-45：手机能把 agent 事件的附件元数据渲染成卡片 ⇒ 如实声明。
             // 发送方（桥/宿主）据此决定 agent-event 里带不带 attachment；不声明就只发文本占位。
             CAP_ATTACHMENT,
@@ -349,6 +378,21 @@ object MsgTypes {
     const val CAP_AGENT_GRANT = "agr1"
 
     /**
+     * `atr1` = **免批规则读撤能力**（本端增补）。
+     *
+     * 语义：声明方认识两张 tool-rules 帧（`agent-tool-rules-request` /
+     * `agent-tool-rules-list`）。宿主声明它 = 会就地把快照回给设备（免批表就在
+     * 节点里，与 grant 家族同一先例）；设备声明它 = 发得出读/撤请求、解得动
+     * 快照帧 ——「声明 = 不会石沉大海」的同一条纪律（agn1）。
+     *
+     * 为什么单开而不是塞进 `agr1`：`agr1` 说的是「agent 帧按策略过滤」的授权
+     * 回路，免批规则是它的**下游事实**（审批「始终允许」的产物）。老宿主认识
+     * `agr1` 却不认识这两张新帧 —— 塞进旧 cap 会让新设备向老宿主发请求然后
+     * 白等，正好违背声明语义。
+     */
+    const val CAP_AGENT_TOOL_RULES = "atr1"
+
+    /**
      * `agp1` = **agent 会话分页能力**（PPE-1 增补 D8）。
      *
      * 语义：声明方认识 `agent-session-page`（设备向宿主要一页会话清单）。
@@ -431,6 +475,9 @@ object MsgTypes {
             CAP_AGENT, CAP_MOBILE_TEXT, CAP_AGENT_SESSION, CAP_AGENT_QUEUE,
             CAP_AGENT_WORKSPACE, CAP_AGENT_GRANT, CAP_AGENT_SESSION_PAGE, CAP_LINK,
             CAP_GROUP_TEXT_ATTRIBUTED, CAP_AGENT_INVOKE, CAP_AGENT_ARTIFACT_VERIFIED,
+            // atr1（免批规则读撤）：宿主就地应答读/撤请求 —— 免批表在节点里
+            // （ControlPlane.toolApprovals），与 grant 家族同一先例。
+            CAP_AGENT_TOOL_RULES,
             // agc1（M7-T2，D-017）：宿主是 Channel 委派的承接方（编排器 + 插件执行器
             // 都在本进程）——「宣告与记账成对」的记账在这一刻补齐（AgentSessionRegistry
             // KDoc 纪律：声明 agc1 的同一批改动里必须有入站处理与诚实拒绝路径）。

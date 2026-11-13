@@ -62,6 +62,7 @@
 | `aws1` | 工作区身份与宣告帧（D1/D2/D3） | `agent-session` 的四个可选键 + `agent-workspace` 帧（见 `docs/PROTOCOL-AGENT-WORKSPACE.md`） |
 | `agr1` | 授权回路（D7） | 三张 grant 帧；**宿主在投递 agent 帧前按策略过滤** —— 没授权 = 没数据，沉默 ≠ 拒绝 |
 | `agp1` | 会话分页（D8） | `agent-session-page`：设备向宿主要一页历史会话（与 `agn1` 是两个方向的能力） |
+| `atr1` | 免批规则读撤（本端增补） | `agent-tool-rules-request` / `agent-tool-rules-list` 两帧：设备读宿主免批表快照、按身份四元组逐条撤销。免批表是**节点本地事实**（与 grant 家族同一先例，节点就地应答）；撤销是收紧方向（让宿主重新开始问），不设授权闸 |
 | `agi1` | **跨端派单网道**（M4） | `agent-invoke` / `agent-invoke-result` 两帧（§6.13）；action 请求只发给声明了 `agi1` 的宿主；被误指名的对端也会应答一帧诚实的拒绝结果，而不是沉默 |
 | `att1` | agent 事件附件卡片（task-45） | 发送方据此决定要不要在 `agent-event` 里带 `attachment`；**不声明就只发文本占位** |
 | `gta1` | 带扩展键的群文本 | 发送方据此决定群文本带不带 `senderId` / `agentSessionId`+`agentCursor` / `agentIntent` / `agentState` / `card`；**不声明就发同 id 的裁剪版**（只含上游白名单字段，见 §6.10–§6.12） |
@@ -740,6 +741,8 @@ budget 类断言（最坏样本落在 UDP 800 / TCP 4096 内）在
 | `agent-grant` | `agr1` | ~180 B | 静默丢弃 | ✅ | ✅ | ✅ |
 | `agent-grant-list` | `agr1` | ~200 B | 静默丢弃 | ✅ | ✅ | ✅ |
 | `agent-session-page` | `agp1` | ~180 B | 静默丢弃 | ✅ | ✅ | ✅ |
+| `agent-tool-rules-request` | `atr1` | ~130 B（读）/ ~200 B（撤） | 静默丢弃 | ✅ | ✅ | ✅ |
+| `agent-tool-rules-list` | `atr1` | ~250 B + 行×~120 B | 静默丢弃 | ✅ | ✅ | ✅ |
 | `agent-invoke` | `agi1` | ~200 B + prompt | 静默丢弃 | ✅ | ✅ | ✅ |
 | `agent-invoke-result` | `agi1` | ~150 B（+ 卡片 ≤24 KiB） | 静默丢弃 | ✅ | ✅ | ✅ |
 | `avatar` | `av1` | ~100 B~32 KB | 静默丢弃 | ✅ | ✅ | ✅ |

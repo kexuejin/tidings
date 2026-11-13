@@ -375,6 +375,86 @@ class TeamProfileWritePathTest {
         assertEquals(TeamProfileResult.Rejected(DeclarationRejection.ARGUMENT_INVALID), result)
     }
 
+    // ------------------------------------------------ 先建档、后加群（空群是一等输入）
+
+    /**
+     * 不勾任何群也能建档：**只写档案、不建席位**。
+     *
+     * 此前这里以 `ARGUMENT_INVALID` 拒掉，于是「建队」被绑架成「必须先进群」——
+     * 而那个群还得先有本机席位，用户在两个前置之间绕不出来（真机复盘 2026-11-13 待办第一条）。
+     * 代价（群里与手机看不见、`@` 不到）由界面如实说，不由域层拒绝。
+     */
+    @Test
+    fun aTeamCanBeRegisteredBeforeItJoinsAnyGroup() {
+        val controller = controller().also { seed(it) }
+        val result = controller.applyTeamProfile(createCommand(groupIds = emptyList()))
+        assertTrue(result is TeamProfileResult.Applied, "只建档应当成功，实际 $result")
+        assertEquals(emptyList(), result.groupIds, "一个群都没进，成功群列表就是空的")
+        assertTrue(result.failedGroupIds.isEmpty())
+
+        val profile = assertNotNull(
+            controller.state.value.settings.teamProfiles.singleOrNull(),
+            "档案必须落盘 —— 否则「先建档」等于什么都没发生",
+        )
+        assertEquals("开发团队", profile.name)
+        assertEquals(2, profile.members.size)
+        // 席位形态一个字都不该动：g1 里原本就有一条**单兵**席位，空群建档既不该把它
+        // 变成团队，也不该往 g2 里新建一条。
+        assertEquals(EntityTypes.SINGLE, seatOf(controller, "g1")?.entityType, "已有席位不该被改成团队")
+        assertNull(seatOf(controller, "g1")?.teamId)
+        assertNull(seatOf(controller, "g2"), "空群建档不该顺手往别的群里塞席位")
+        assertEquals(4, groupOf(controller, "g1").rev, "群元数据一个字都不该动（seed 就是 4）")
+    }
+
+    /**
+     * 空群建档时**名册本身**仍要过同一份校验 —— 不然会存下一份派不出去的编制。
+     *
+     * 反向探针：把 `groups.isEmpty()` 那一支里的 `TeamRosterValidation.validate` 去掉，
+     * 这条会落成 `Applied`（红）。
+     */
+    @Test
+    fun registeringWithoutGroupsStillValidatesTheRoster() {
+        val controller = controller().also { seed(it) }
+        val blankName = listOf(
+            TeamMemberDraft(agentId = "m-coder", name = "", role = "编码"),
+        )
+        val result = controller.applyTeamProfile(
+            createCommand(groupIds = emptyList(), members = blankName),
+        )
+        assertEquals(TeamProfileResult.Rejected(DeclarationRejection.ROSTER_INVALID), result)
+        assertTrue(controller.state.value.settings.teamProfiles.isEmpty(), "被拒就不该留下档案")
+    }
+
+    /**
+     * 编辑一支**不在任何群**的队伍时，名册同样要过校验 —— 与空群建档同一口径。
+     *
+     * 漏了那一支的症状很晚才出现：档案里存下一份撞名的名册（当时「保存成功」），
+     * 几天后把它加进群的那一刻被 `AttachTeam` 拒掉，而用户早以为改好了。
+     */
+    @Test
+    fun editingATeamOutsideAnyGroupStillValidatesTheRoster() {
+        val controller = controller().also { seed(it) }
+        val created = controller.applyTeamProfile(createCommand(groupIds = emptyList()))
+        assertTrue(created is TeamProfileResult.Applied, "先建档应当成功，实际 $created")
+        val duplicated = listOf(
+            TeamMemberDraft(agentId = "m-1", name = "coder", role = "编码"),
+            TeamMemberDraft(agentId = "m-2", name = "coder", role = "测试"),
+        )
+        val result = controller.applyTeamProfile(
+            TeamProfileCommand.Update(
+                teamId = created.teamId,
+                members = duplicated,
+                actor = DeclarationActor.Human(self),
+            ),
+        )
+        assertEquals(TeamProfileResult.Rejected(DeclarationRejection.ROSTER_INVALID), result)
+        assertEquals(
+            roster.size,
+            controller.state.value.settings.teamProfiles.single().members.size,
+            "被拒就不该改动已有的名册",
+        )
+    }
+
     @Test
     fun anOverlongTeamNameIsRejected() {
         val controller = controller().also { seed(it) }
@@ -409,6 +489,27 @@ class TeamProfileWritePathTest {
         // 横幅如实报**这次真的写下去的群数**：改名重建了 g1，新增写入了 g2 ⇒ 2。
         val banner = assertNotNull(controller.state.value.banner).message
         assertEquals(BannerMessage.TeamProfileSaved("交付团队", 2), banner)
+    }
+
+    /**
+     * 界面入口不勾群：档案照落，横幅带 `groupCount = 0`。
+     *
+     * 横幅这一格不是「0 个群」的读数，而是一种状态（界面翻成「还没进任何群，群里与手机
+     * 都看不到它，之后从群信息的添加团队加进去」）。域层这边只要**别把 0 当成失败**。
+     */
+    @Test
+    fun savingFromTheUiWithoutGroupsReportsTheOrphanState() {
+        val controller = controller().also { seed(it) }
+        controller.saveTeamProfileEntry(null, "开发团队", "dsh", roster, emptyList())
+
+        assertNotNull(
+            controller.state.value.settings.teamProfiles.singleOrNull(),
+            "不勾群也必须落一份档案",
+        )
+        assertEquals(
+            BannerMessage.TeamProfileSaved("开发团队", 0),
+            controller.state.value.banner?.message,
+        )
     }
 
     /**

@@ -80,7 +80,10 @@ class FlightRecordTest {
     @Test
     fun sanitizeAlsoMasksExternalVolumesAndTokens() {
         val sanitized = FlightRecord.sanitize(
-            "at <external-volume>/source/x and /home/other/y with ghp_123456789012345678901234567890123456",
+            // 占位卷名保持 /Volumes 前缀形状：这条测试钉的是「脱敏器真会掩掉外接卷」，
+            // 输入若是掩完之后的形状，脱敏器就无物可脱，断言空转（脚本替换时
+            // replace-text 误伤此处，真机…不，本机跑测试时抓到）。
+            "at /Volumes/<external-volume>/source/x and /home/other/y with ghp_123456789012345678901234567890123456",
             userHome = "/Users/testdeveloper",
         )
         assertFalse(sanitized.contains("<external-volume>"), "外接卷路径也要脱敏")

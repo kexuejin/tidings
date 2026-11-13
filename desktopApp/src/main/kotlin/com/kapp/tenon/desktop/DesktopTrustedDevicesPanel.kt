@@ -243,6 +243,14 @@ internal fun DesktopTrustedDevicesPanel(
      */
     toolApprovalStore: AgentToolApprovalStore? = null,
     /**
+     * agent 写编制的授权档（「每次问我 / 直接执行」）。
+     *
+     * 与 [toolApprovalStore] 同属「我给出去的权限」，所以收回的地方也在同一页：
+     * 免批表回答「某个工具批准过一次还要不要再问」，这一块回答「agent 改档案 /
+     * 建队要不要问」。控制面没起时为 null ⇒ 区块如实说读不到。
+     */
+    rosterWritePolicy: com.kapp.tenon.agent.RosterWritePolicy? = null,
+    /**
      * 把决定回给设备的出口（实现在 DesktopExtension → ControlPlane）。
      *
      * 默认值是 [GrantReplySender.NotWired]（如实报"没发"），所以预览/截图这类不接线的
@@ -673,6 +681,10 @@ internal fun DesktopTrustedDevicesPanel(
                 peer(nId, nodeSlice, settingsSlice)?.displayName ?: nId.take(8)
             },
         )
+
+        // 再下面一块：agent 写编制要不要每次都问。档位默认 request（弹卡），
+        // 此前只能改 `~/.tenon/roster-write.json` —— 等于没有开关。
+        DesktopRosterWriteSection(policy = rosterWritePolicy)
     }
 }
 

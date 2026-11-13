@@ -5,6 +5,7 @@ package com.kapp.tenon.domain
 import com.kapp.tenon.core.nowMillis
 import com.kapp.tenon.core.protocol.Limits
 import com.kapp.tenon.core.protocol.TeamMemberInfo
+import com.kapp.tenon.core.protocol.TeamRosterValidation
 import kotlin.random.Random
 
 /**
@@ -41,6 +42,10 @@ sealed interface TeamProfileCommand {
      *
      * 「群里添加一个团队」= 只给一个 groupId；「建一支开发团队并让它进 A/B 两个群」=
      * 给两个 —— 同一份名册，两群各自一条席位、各自执行点。
+     *
+     * **空表 = 只建档、不进任何群**：这样的团队没有席位，群里与手机上都看不见、`@` 不到
+     * （界面的知情提示由 `TeamProfileDialog` 给）。之后要进群走 `AddToGroups`
+     * ——「群信息 → 添加团队」。
      *
      * @param teamId 测试可注入；生产传 null 由本机分配（`tm-…`）。
      */
@@ -105,8 +110,17 @@ sealed interface TeamProfileResult {
     data class Rejected(val reason: DeclarationRejection) : TeamProfileResult
 }
 
-/** 应用一条档案命令 —— 档案写入的**唯一实现**。 */
-internal fun RelayController.applyTeamProfile(command: TeamProfileCommand): TeamProfileResult {
+/**
+ * 应用一条档案命令 —— 档案写入的**唯一实现**。
+ *
+ * `public` 的理由：工具面（`:orchestration` 的 `DesktopRosterWritePort`）要让 agent 也能建队 / 改名册，
+ * 而它需要 (a) 显式 actor（审计里写「谁改的」而不是恒为人类）与 (b) 结构化返回值（HTTP 回执）。
+ * `saveTeamProfileEntry` 那组是**界面**入口（恒 Human + 横幅），工具面用不了它。
+ *
+ * 再包一层「工具专用入口」只会多一条要跟着改的路径；这里放开可见性，实现仍然只有这一份。
+ * 权限闸不在这一层：能不能写由控制面的 `RosterWritePolicy`（默认每次问机主）决定。
+ */
+public fun RelayController.applyTeamProfile(command: TeamProfileCommand): TeamProfileResult {
     val state = _state.value
     val self = state.selfNodeId
     val actorNode = command.actor.actorNodeId
@@ -138,13 +152,24 @@ private fun RelayController.createTeam(
     if (leader.isEmpty()) return TeamProfileResult.Rejected(DeclarationRejection.ARGUMENT_INVALID)
     if (cmd.members.isEmpty()) return TeamProfileResult.Rejected(DeclarationRejection.ARGUMENT_INVALID)
     val groups = cmd.groupIds.map { it.trim() }.filter { it.isNotEmpty() }.distinct()
-    if (groups.isEmpty()) return TeamProfileResult.Rejected(DeclarationRejection.ARGUMENT_INVALID)
-    val denied = teamTargetGroups(self, actorNode, groups)
-    if (denied != null) return TeamProfileResult.Rejected(denied)
-    // **先全量预校验再落档案**：跨群不是事务，先写档案后校验会让「第一群成功、第二群撞名」
-    // 留下一个改了一半的世界。
-    preflightRoster(groups, cmd.members)?.let {
-        return TeamProfileResult.Rejected(it)
+    // **「先建档、后加群」是一等路径**（与员工档案的 `Create` 同一条口径）：空群 = 只写档案、
+    // 一条席位都不建。此前这里以 `ARGUMENT_INVALID` 拒掉，于是「建队」被绑架成「必须先进群」——
+    // 而先进群又要求群里有本机席位，用户绕不出来（真机复盘的待办第一条）。
+    //
+    // 代价由界面说出来、不由域层悄悄补偿：没有席位的团队在群里与手机上都看不见、`@` 不到，
+    // 之后要进群得从「群信息 → 添加团队」（`AddToGroups`）走。这里只保证**名册本身**合法。
+    if (groups.isEmpty()) {
+        if (TeamRosterValidation.validate(cmd.members).isNotEmpty()) {
+            return TeamProfileResult.Rejected(DeclarationRejection.ROSTER_INVALID)
+        }
+    } else {
+        val denied = teamTargetGroups(self, actorNode, groups)
+        if (denied != null) return TeamProfileResult.Rejected(denied)
+        // **先全量预校验再落档案**：跨群不是事务，先写档案后校验会让「第一群成功、第二群撞名」
+        // 留下一个改了一半的世界。
+        preflightRoster(groups, cmd.members)?.let {
+            return TeamProfileResult.Rejected(it)
+        }
     }
 
     val teamId = cmd.teamId?.trim()?.takeIf { it.isNotEmpty() } ?: allocateTeamId()
@@ -191,10 +216,19 @@ private fun RelayController.updateTeam(
         updatedTs = nowMillis(),
     )
     val groups = groupsReferencing(updated.teamId)
-    val denied = teamTargetGroups(self, actorNode, groups)
-    if (denied != null) return TeamProfileResult.Rejected(denied)
-    preflightRoster(groups, updated.rosterDrafts())?.let {
-        return TeamProfileResult.Rejected(it)
+    if (groups.isEmpty()) {
+        // 与 `createTeam` 的空群分支**同一口径**：不在任何群时也要验一遍名册。
+        // 漏了这一支的症状：档案里存着一份撞名/空名的名册（当时没炸），等它进群那一刻
+        // 被 `AttachTeam` 拒掉 —— 用户改的时候界面说成功，几天后加群才失败。
+        if (TeamRosterValidation.validate(updated.rosterDrafts()).isNotEmpty()) {
+            return TeamProfileResult.Rejected(DeclarationRejection.ROSTER_INVALID)
+        }
+    } else {
+        val denied = teamTargetGroups(self, actorNode, groups)
+        if (denied != null) return TeamProfileResult.Rejected(denied)
+        preflightRoster(groups, updated.rosterDrafts())?.let {
+            return TeamProfileResult.Rejected(it)
+        }
     }
     // 先档案后席位：与 create 同一顺序 —— 快照重建拿到的永远是这一版的档案。
     persistTeamProfiles(profiles.map { if (it.teamId == updated.teamId) updated else it })

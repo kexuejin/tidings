@@ -320,15 +320,23 @@ data class TeamScaffoldDefaults(
 object TeamScaffoldFallback {
 
     /**
-     * 回落模板的内置人设（ASCII —— cjkLiteralGate 不扫测试与回落语义；这两段是
-     * **执行指令**不是 UI 文案，本地化让位可用性）。worker 覆盖「调研→实现→自测
-     * →报告」的阶段化指引；reviewer 保持默认审查模板已覆盖的形状，只加「逐条 +
-     * VERDICT」的硬要求。
+     * 回落模板的内置人设（ASCII —— 这三段是**执行指令**不是 UI 文案，本地化让位
+     * 可用性）。worker 覆盖「调研→实现→自测→报告」的阶段化指引；reviewer 保持
+     * 默认审查模板已覆盖的形状，只加「逐条 + VERDICT」的硬要求；tester 拿的是
+     * **执行验证**文案（跑命令、以证据说话）而不是审查文案 —— 三根棒里它和
+     * reviewer 同为 REVIEWER kind，靠槽位区分，同一段文案会让「测试」棒从不执行
+     * 任何验证，与「审查」棒说同样的话。
      */
     private const val FALLBACK_WORKER_PROMPT =
         "Investigate the workspace before changing anything. Implement the goal, " +
             "then run the available build/test commands and fix what they expose. " +
             "Report what changed and what you verified."
+
+    private const val FALLBACK_TESTER_PROMPT =
+        "Verify the goal by actually running the available build/test commands against " +
+            "the workspace. Execute the checks, report each command you ran and its result " +
+            "as evidence, list any failure item by item, and end with an explicit final " +
+            "verdict line. Do not rewrite the implementation."
 
     private const val FALLBACK_REVIEWER_PROMPT =
         "Review the current workspace against the goal. Give findings item by item, " +
@@ -347,7 +355,7 @@ object TeamScaffoldFallback {
         val base = AgentMemberName.slug(teamTitle).ifBlank { "dev" }
         val labels = defaults.roles.map { it.trim() }.filter { it.isNotEmpty() }
         val taken = mutableSetOf<String>()
-        fun row(slug: String, role: String, driver: String, kind: String): TeamScaffoldSpec.Member {
+        fun row(slug: String, role: String, driver: String, kind: String, prompt: String): TeamScaffoldSpec.Member {
             val unique = AgentMemberName.unique("$base-$slug", taken)
             taken += unique
             return TeamScaffoldSpec.Member(
@@ -358,16 +366,16 @@ object TeamScaffoldFallback {
                 kind = kind,
                 // 回落模板也带内置人设：AI 建队与回落模板的差距在「聪明」，不在
                 // 「有没有人设」—— 没人设的棒只会收到裸 goal（§workerInstruction）。
-                prompt = if (kind == TeamExecutionKindsUi.WORKER) FALLBACK_WORKER_PROMPT else FALLBACK_REVIEWER_PROMPT,
+                prompt = prompt,
             )
         }
         return TeamScaffoldSpec(
             teamTitle = teamTitle,
             leaderAgentId = leaderAgentId,
             members = listOf(
-                row("coder", labels.getOrElse(0) { "coder" }, workerDriver, TeamExecutionKindsUi.WORKER),
-                row("tester", labels.getOrElse(1) { "tester" }, reviewerDriver, TeamExecutionKindsUi.REVIEWER),
-                row("reviewer", labels.getOrElse(2) { "reviewer" }, reviewerDriver, TeamExecutionKindsUi.REVIEWER),
+                row("coder", labels.getOrElse(0) { "coder" }, workerDriver, TeamExecutionKindsUi.WORKER, FALLBACK_WORKER_PROMPT),
+                row("tester", labels.getOrElse(1) { "tester" }, reviewerDriver, TeamExecutionKindsUi.REVIEWER, FALLBACK_TESTER_PROMPT),
+                row("reviewer", labels.getOrElse(2) { "reviewer" }, reviewerDriver, TeamExecutionKindsUi.REVIEWER, FALLBACK_REVIEWER_PROMPT),
             ),
         )
     }

@@ -74,6 +74,10 @@ class CapsBroadcastTieringTest {
             MsgTypes.CAP_AGENT_CHANNEL in phone.caps,
             "手机保留 agc1（D-017 修订：解得动 Channel 帧）",
         )
+        assertTrue(
+            MsgTypes.CAP_ATTACHMENT in phone.caps,
+            "手机保留 att1（附件卡）：att1 只从桌面档让位 —— 手机预算未满，没有理由放弃",
+        )
     }
 
     @Test
@@ -84,5 +88,24 @@ class CapsBroadcastTieringTest {
         )
         // 精确清单钉住：桌面广播 = 身份族 16 项（luciola 两项已移出）—— 数量级变了这条红。
         assertEquals(16, on.caps.size, "桌面广播清单 = 16 项（分级后）")
+    }
+
+    @Test
+    fun desktopBroadcastTradesAttachmentCapForToolRulesCap() {
+        val on = settings().toProfile(
+            host = "mac", ver = "relay-0.1.0", remoteView = true, remoteShare = true,
+            advertiseAgent = true, channelCapable = false,
+        )
+        // 预算裁决（见 RelaySettings.caps 的 att1 注）：桌面 16/16 满额，atr1 进来
+        // att1 让位 —— 桌面自己的事件走同进程直投不受影响，唯一代价是远程会话的
+        // 附件卡退回文本占位。谁把 att1 加回桌面档，上面那条 16 项的钉子会红。
+        assertFalse(
+            MsgTypes.CAP_ATTACHMENT in on.caps,
+            "att1 不在桌面广播档（D-018 分级裁决：预算让位给 atr1）",
+        )
+        assertTrue(
+            MsgTypes.CAP_AGENT_TOOL_RULES in on.caps,
+            "宿主必须声明 atr1 —— 手机的免批表读撤按对端 caps 门控，宿主不声明 = 功能整条死",
+        )
     }
 }

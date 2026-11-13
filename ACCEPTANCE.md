@@ -468,7 +468,7 @@ Wi-Fi 省电模式下能否收到、TCP 直连、托盘/深链/多窗口、通�
   单独记在 §5c 与 [`2026-11-05-tenon-luciola-head-e2e.md`](design/runtime-evidence/2026-11-05-tenon-luciola-head-e2e.md)，
   **不要把 §5c 的通过反填进本表**。
 
-### A22 单聊派单闭环与工作区直聊（2026-11-07 新增，65caa9bd 装机真机跑）
+### A22 单聊派单闭环与工作区直聊（2026-11-07 新增，3e775735 装机真机跑）
 
 手机（Pixel 6）与桌面端同 LAN，两端都装 HEAD 构建后逐条判。
 
@@ -480,7 +480,7 @@ Wi-Fi 省电模式下能否收到、TCP 直连、托盘/深链/多窗口、通�
 | `@mention` 点名 | 从原文解析 agentKey 并路由到对应驱动 | ❌ **不通过**：会话切换只改看板展示；`dsh` agentId 在插件层被 dsh-echo-bridge（参考实现）占用，真 dsh-cli 插件因裸 entrypoint 拉起即退、状态永远 `installed`，`pluginForAgent` 只匹配 online ⇒ 选不中 |
 | 绑定项目目录的群派单 | 建群后 `@agent` 意图进席位表并派单 | ⚠️ 部分：关联工作区建群**不自动声明席位**（virtualAgents 为空），意图卡在 seat-sync 重试；老群有 DSH 席位但无 `defaultWsId` ⇒ 不绑仓（→ 本行的席位声明绑定判据已由项目目录模型取代，见决策稿 §8 第 1 条） |
 | 跨端派单 API 直派 | `POST /v1/agent/invoke {groupId, agentId, wsId}` 显式带工作区 | ✅ 受理成功（invokeId 返回），但执行体仍落 echo 桥（缺陷 4b 的表现） |
-| dsh CLI 本体 | `dsh --profile headless --json` 在仓内执行工单 | ✅ NDJSON 全链 + exit 0；同款命令直驱工作区完成 PluginHost 即退诊断工单（`6bc6e5cd`，独立验收含反向验证红→绿） |
+| dsh CLI 本体 | `dsh --profile headless --json` 在仓内执行工单 | ✅ NDJSON 全链 + exit 0；同款命令直驱工作区完成 PluginHost 即退诊断工单（`3e775735`，独立验收含反向验证红→绿） |
 
 - 名词口径（2026-11-11 项目目录模型重设计）：本表 UI 名词已按新词表更新（「工作区」→「项目目录」；实际文案为「切换项目目录」/「选择项目目录」，见 `workspace_bar_switch` / `workspace_picker_sheet_title`；原「工作区」页签现名「智能体」）。各轮读数是当时 UI 文案下的实测，原文未改写；`wsId` / `defaultWsId` 等协议事实仍按 `PROTOCOL-AGENT-WORKSPACE.md` 原名。增量验收见文末「工作区模型重设计后的增量验收」。
 
@@ -546,7 +546,7 @@ stability（3 轮全新）+ design 组全绿；design 组三处合修按门禁�
 | D1 | 工单卡落**宿主自己的会话**，永不到手机 | `[CARD] 1:1 direct card persisted locally (conv=46c23456…)` —— 46c23456 是宿主 nodeId；手机会话 id 才是它 | `handleInvokeTask` 把帧里的 `convId`（发送方视角）原样透传，未换成 `ConvId.single(envelope.from)`；且 `AgentCardActions:287` 的 `meta==null` 分支**只本地落库不发帧** |
 | D2 | 1:1 受理/终局只写宿主本地库，手机端一字不显 | 宿主库有 `Ticket accepted: executing in teahouse-mobile…` 与 `改动已就绪：1 个文件（+1 −0）`，手机库同时段**零入站行**；result 帧 879 B 已到达手机但 `lease.groupId?.let{}` 对 `null` 直接跳过 | `RelayControllerAgentInvokeLeases:127-147`、`mirrorLeases()` 纯内存 |
 | D3 | patch 只投递、**从不合流** | 工作区无 `probe-20261108.txt`、`git status` 干净；`[xfer] state=Failed ×3` | `DesktopPatchMerge.apply` 全仓只有测试调用；1:1 只走 `deliverPatchBundle`，其 `toConvPeerId(46c23456)` = 自己（被 D1 污染） |
-| D4 | 宿主库 `BoardCardRev` 表缺失，rev 台账恒失败 | `no such table: BoardCardRev` ×5；`user_version=21` 但 19/20.sqm 均未生效（`WorkspaceBindingEntity`/`AgentGrantRuleEntity` 仍在库） | 202MB 老库的版本号被旧血统占满，新迁移链判定「已在 21」整体跳过（两个 .sqm 同出 `4a968bf3`）。手机库同版本号**有**该表 ⇒ 不是代码漏建 |
+| D4 | 宿主库 `BoardCardRev` 表缺失，rev 台账恒失败 | `no such table: BoardCardRev` ×5；`user_version=21` 但 19/20.sqm 均未生效（`WorkspaceBindingEntity`/`AgentGrantRuleEntity` 仍在库） | 202MB 老库的版本号被旧血统占满，新迁移链判定「已在 21」整体跳过（两个 .sqm 同出 `029e174a`）。手机库同版本号**有**该表 ⇒ 不是代码漏建 |
 
 另记一条**非缺陷但需产品口径**：1:1 直派只认节点级 `scope=agent` grant，而手机端没有「授权这台机
 执行该 agent」的入口 —— 首次派单必被 `DENIED`（`agent-grants.json` 的 `requests` 留
@@ -1161,7 +1161,7 @@ messaging **PASS 38**（`/tmp/messaging-run14.log`），全量套件 **run11 9/9
 同名文件」。判据：`TransferSaveLayoutTest`（布局）+ `PrototypeReviewEntryTest`（入口解析）
 + a2r 的 `prototype-artifact-bytes-landed`（sha256 逐字节）。
 
-## 5g. 触发式编排与插件分支的静态/单测读数（2026-11-09，HEAD `ccdc5177`，**不是真机验收**）
+## 5g. 触发式编排与插件分支的静态/单测读数（2026-11-09，HEAD `121d8227`，**不是真机验收**）
 
 分支 `feat/agent-trigger-plugin`（ahead 15 / behind 0）跑完 `AGENTS.md §1` 全量清单，
 加了 `--rerun-tasks` 保证九个测试任务真的执行（`97 executed / 97 actionable`，7m44s）：
@@ -1186,9 +1186,9 @@ messaging **PASS 38**（`/tmp/messaging-run14.log`），全量套件 **run11 9/9
 `THIRD-PARTY-AGENT-DEVELOPMENT-KIT.md` 的产品命名），裁决建议与自动合并的语义风险
 见证据文件 §6。本轮没有 merge / push。
 
-> **复核（2026-11-09 17:20，`main` 已前进到 `a74b303e`）——上一段的「干净 `main` 零冲突」已失效。**
+> **复核（2026-11-09 17:20，`main` 已前进到 `0e8e1fbd`）——上一段的「干净 `main` 零冲突」已失效。**
 >
-> 那是 HEAD `ccdc5177` 时点的读数。此后 `main` 前进 31 条提交（本分支 ahead 28 / behind 31），
+> 那是 HEAD `121d8227` 时点的读数。此后 `main` 前进 31 条提交（本分支 ahead 28 / behind 31），
 > 对**已提交的 HEAD**（不含工作区未提交改动）重跑
 > `git merge-tree --write-tree --messages main HEAD`，得到 **5 个冲突**：
 > `AGENTS.md`、`agentNode/.../drivers/WorktreeSandbox.kt`、
@@ -1198,11 +1198,10 @@ messaging **PASS 38**（`/tmp/messaging-run14.log`），全量套件 **run11 9/9
 > 合并前必须逐条裁决，**不能沿用「零冲突」这个结论**；工作区另有未提交修复，实际合并面比这更大。
 > 本轮仍未 merge / push。
 
-## 5h. 代码评审修复轮（2026-11-09，基线 `2e63e154`，**已提交 6 条 / 未推送**）
+## 5h. 代码评审修复轮（2026-11-09，基线 `121d8227`，**已提交 6 条 / 未推送**）
 
 对 `main..HEAD`（55 文件 / +4960−77）做了一轮整体代码评审，产出 1 个 P0 + 14 个 P1，
-随后逐条修复并落成 6 条提交（`0a7341d6` 沙箱 → `15d4461d` webhook → `c6974f52` token
-断言 → `5ecea2b8` 路由/指纹 → `751aab67` 台账/调度器 → 本条文档）。改动面
+随后逐条修复并落成 6 条提交（改动面
 **21 个文件 `+1171 / −119`**（含 2 个新文件：`CommonMainJvmApiGuardTest.kt` 与本轮证据
 文件）。分支因此在 `main` 之上 **25 条**。
 
@@ -1255,8 +1254,8 @@ Python 检查全绿（`cjkLiteralGate` 与 `envDependentTestGate` 本轮**先红
 
 | 提交 | 修的是什么 | 根因（不是「判据写错了」） |
 |---|---|---|
-| `dfa7a46b` | 行上限改在**读取方式**上生效 | `readLine` / `useLines` 对行长零限制，判据生效时整行已在堆里 |
-| `29b87cbf` | hook 审批的 `sessionId` 先**对账** | 判据是「它存在」，而 `ensureSession` 会给乱序帧造占位行 —— 存在 ≠ 本节点派过 |
+| `26fc0a62` | 行上限改在**读取方式**上生效 | `readLine` / `useLines` 对行长零限制，判据生效时整行已在堆里 |
+| `26fc0a62` | hook 审批的 `sessionId` 先**对账** | 判据是「它存在」，而 `ensureSession` 会给乱序帧造占位行 —— 存在 ≠ 本节点派过 |
 | 本轮 | 只读通道改成**执行前**否决 | 判据挂在 `tool.started` 上，而那是个「已经开始」的通知，没有拒绝这个动作 |
 
 第三条的做法：`TriggerExecutor` 把 `CognitiveFlow.allowsTool` 作为纯函数交给
@@ -1296,9 +1295,9 @@ PreToolUse 是探针驱动发的，不是真 CLI 发的。这条只能真机验�
 
 ---
 
-## 5j. 第三轮评审后的修复（2026-11-09，基线 `b335f483`，**未提交 / 未推送**，不是真机验收）
+## 5j. 第三轮评审后的修复（2026-11-09，基线 `8b6df583`，**未提交 / 未推送**，不是真机验收）
 
-对 `b335f483` 再 review 一轮，找出**两条推翻 §5i 结论的 P0** 与一条静默丢失链：
+对 `8b6df583` 再 review 一轮，找出**两条推翻 §5i 结论的 P0** 与一条静默丢失链：
 
 | 级别 | 缺陷 | 后果 |
 |---|---|---|
@@ -1316,16 +1315,16 @@ PreToolUse 是探针驱动发的，不是真 CLI 发的。这条只能真机验�
 PreToolUse 是探针发的）；`verifyLuciolaNative` / `verifyPackagedLuciolaNative` 仍是 SKIPPED，
 日志明说「这不是通过」。本轮没有 merge / push / 提交。
 
-**合并面变化**：`main` 已到 `a74b303e`，对已提交 HEAD 干跑 `git merge-tree` 为 **5 个冲突**
+**合并面变化**：`main` 已到 `0e8e1fbd`，对已提交 HEAD 干跑 `git merge-tree` 为 **5 个冲突**
 （见 §5g 的复核说明）。
 
 **证据**：[`design/runtime-evidence/2026-11-09-agent-trigger-plugin-review-round3-fixes.md`](design/runtime-evidence/2026-11-09-agent-trigger-plugin-review-round3-fixes.md)。
 
 ---
 
-## 5k. 合并进 main（2026-11-09，`6de4b13e` ← `feat/agent-trigger-plugin`，**未推送**）
+## 5k. 合并进 main（2026-11-09，`0e8e1fbd` ← `feat/agent-trigger-plugin`，**未推送**）
 
-`main` 已前进到 `6de4b13e`（§5j 时是 `a74b303e`，§5g 时是 `ccdc5177`）。以 `6de4b13e`
+`main` 已前进到 `0e8e1fbd`（§5j 时是 `0e8e1fbd`，§5g 时是 `121d8227`）。以 `0e8e1fbd`
 为基准重跑 `git merge-tree`：**5 个冲突**，逐个裁决后并入。
 
 | 冲突 | 裁决 | 依据 |
@@ -1345,7 +1344,7 @@ PreToolUse 是探针发的）；`verifyLuciolaNative` / `verifyPackagedLuciolaNa
 按 D4 立的规矩把两张表纳入 `SchemaSelfHeal`，并补漂移守卫（`21.sqm` 三条语句逐条
 做归一化包含比对）。复现用例在补自愈**之前**是红的（`5 tests completed, 1 failed`）。
 
-读数（本机实跑，合并后 HEAD `cee24e12`）：全量串行强制 `--rerun-tasks`
+读数（本机实跑，合并后 HEAD `0e8e1fbd`）：全量串行强制 `--rerun-tasks`
 → `BUILD SUCCESSFUL 7m51s`（99 executed / 99 actionable）→ 696 份 XML、
 **4115 tests / 0 failures / 0 errors / 36 skipped**（比分支单跑多 170 条，是 main
 这 31 条带进来的）；11 条门禁全绿；`:testStabilityGate` **3/3 PASS**（6m12s）。
@@ -1359,9 +1358,9 @@ PreToolUse 是探针发的）；`verifyLuciolaNative` / `verifyPackagedLuciolaNa
 装了 hook 的真 CLI 在只读派单里被拒仍无真机证据；`verifyLuciolaNative` 仍是 SKIPPED。
 本轮**没有 push**。
 
-### 5k-1. 推送前脱敏（同日，`7b7f1562` 带进来的真实路径）
+### 5k-1. 推送前脱敏（同日，`8b6df583` 带进来的真实路径）
 
-§7.0 ① 的人眼闸门过出来一条真的：main 侧 `7b7f1562` 把**本机绝对路径**写进了 4 个文件
+§7.0 ① 的人眼闸门过出来一条真的：main 侧 `8b6df583` 把**本机绝对路径**写进了 4 个文件
 （16 处）。按 [`docs/privacy-scan-2026-10-29.md`](docs/privacy-scan-2026-10-29.md) §143
 的既定口径替换，不自创写法。下表**不写原值**——把要擦的字符串再抄一遍等于没擦：
 
@@ -1389,7 +1388,7 @@ PreToolUse 是探针发的）；`verifyLuciolaNative` / `verifyPackagedLuciolaNa
 
 **残留（如实说）**：这一步只清了**当前树**与**未推送的增量**。三处残留：
 
-1. `7b7f1562` 的 blob 里仍有路径原值，`git log -S "/Volumes/<卷名>"` 仍能翻到 ——
+1. `8b6df583` 的 blob 里仍有路径原值，`git log -S "/Volumes/<卷名>"` 仍能翻到 ——
    一旦推送就进入公开历史；
 2. 另有 4 份**早已公开**的证据文档各带一处真机内网地址（`192.168.2.x`）
    （`2026-10-30-m5-acceptance-matrix.md`、`2026-11-03-luciola-090-e2e.md`、
@@ -1399,7 +1398,7 @@ PreToolUse 是探针发的）；`verifyLuciolaNative` / `verifyPackagedLuciolaNa
 3. 代码/测试里的 `192.168.2.x` 按 §4 **有意保留**（是 `isLanAddress` 一类判据的输入）。
 
 要彻底清掉 1、2 得按 §7.4 做全历史重写（`git bundle --all` 备份 + 树哈希证明 +
-`--force-with-lease`），而 `7b7f1562` 同时存在于 `feat/team-folder-phase0`，重写会波及
+`--force-with-lease`），而 `8b6df583` 同时存在于 `feat/team-folder-phase0`，重写会波及
 那条线与全部 12 个工作树。**未做，等明确决定。**
 
 ---
@@ -1631,9 +1630,9 @@ Layer 4 仿真覆盖，真机环节为桌面自派 + 手机 `@agent` 回路（M5
 ## 10e. 团队编制（声明与展示）验收（2026-11-10，**真机已验：夹具 `result PASS 37`**）
 
 > 方案：`docs/team-creation-final-plan.md`（v1 只做声明与展示）。单测与门禁全绿
-> （提交 `2f472faa`…`149ea327`）；真机读数与未验项见
+> （提交 `718b11e0`…`718b11e0`）；真机读数与未验项见
 > [`design/runtime-evidence/2026-11-10-team-roster-realdevice.md`](design/runtime-evidence/2026-11-10-team-roster-realdevice.md)。
-> 验收抓到并当场修复 1 条布局缺陷（徽标窄屏被裁剪，`16d4a0e6`）。
+> 验收抓到并当场修复 1 条布局缺陷（徽标窄屏被裁剪，`2d6e5642`）。
 
 ### 领域与广播（单测已钉，真机已复核）
 
@@ -1667,7 +1666,7 @@ Layer 4 仿真覆盖，真机环节为桌面自派 + 手机 `@agent` 回路（M5
 
 ## 10f. 团队执行（@组员 责任链）验收（2026-11-10 新增，**代码级 + 单测级，真机待验**）
 
-> 方案：`docs/team-execution-final-plan.md` §9。单测与门禁全绿（提交 `db514353`）；
+> 方案：`docs/team-execution-final-plan.md` §9。单测与门禁全绿（提交 `2d6e5642`）；
 > P1/P2（按成员选模型 / 主备降级）未做——§6.2 逐驱动注入必须真机验证后才开下拉。
 
 ### 真机验法（与 v1 §10e 同一台 Pixel 6 + Mac 宿主）
@@ -1741,7 +1740,11 @@ Layer 4 仿真覆盖，真机环节为桌面自派 + 手机 `@agent` 回路（M5
   防串群裁决）——1:1 场景先建群，或 `hook/session` 宣告后经事件流投卡；
 - 点选选项 ⇒ `POST` 返回 `{"status":"answered","answer":<选项>,"decidedBy":…}`。
 
-**③ 免批表回收**：桌面「设置 → 可信设备 → 免批规则」逐条撤销（`revokeExactly`）。
+**③ 免批表回收**：桌面「设置 → 可信设备 → 免批规则」逐条撤销（`revokeExactly`）；
+手机端走同一张表的**跨端读撤**（cap `atr1`）：打开宿主的工作区详情 → 「免批规则」区块
+出现宿主整张表（含其它设备的规则，行上带归属设备）→ 点撤销 → 桌面面板同一条规则同步消失
+→ 同工具再来一条请求、手机端重新出现待批卡。对端不声明 `atr1` ⇒ 手机上整块不画
+（读不到 ≠ 没有规则）。
 
 **判据**：每一步对端台账与卡片状态**同帧一致**；「未确认 ≠ 已执行」不破。
 **证据**：`design/runtime-evidence/upgrade-baseline-20261107.txt`（【13】【14】）、
@@ -2012,7 +2015,7 @@ A31 的未决 ①③ 这一轮清掉，② 由 ① 的修法降级为惰性数�
 基线、`constructionTraceGate`、`staleCommentRefGate`、`domainComposeFreeGate`、
 `envDependentTestGate`、四个设计门、`jlinkModulesGate`）、unused / palette / dry-run 28 项、
 `:androidApp:assembleDebug` 通过。
-**九模块全量在并行会话的 HostDirectory 特性落地（`e2e54ac0`）之后补跑：4374 tests /
+**九模块全量在并行会话的 HostDirectory 特性落地（`5a22e57a`）之后补跑：4374 tests /
 0 失败 / 37 skipped**（core 1001、app 968、cli 7、agent-contract 19、orchestration 223、
 composeApp 1215、agentNode 562、desktopApp 379）。这一轮**先清掉各模块 `build/test-results`
 强制重跑**（14 个任务真的执行，不是 `UP-TO-DATE` 吃缓存），条数从结果 XML 里数、

@@ -2,6 +2,7 @@
 
 package com.kapp.tenon.core.protocol
 
+import kotlinx.serialization.json.JsonArray
 import kotlinx.serialization.json.JsonElement
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.JsonPrimitive
@@ -70,6 +71,12 @@ object CodecAgent {
     internal val AGENT_GRANT_EXPECTED_KEYS = setOf("state", "scope", "agentKey", "wsId", "access", "isMyDevice", "delegatedApproval", "at")
     internal val AGENT_GRANT_LIST_EXPECTED_KEYS = setOf("scope", "agentKey", "wsId", "access", "total", "at")
     internal val AGENT_SESSION_PAGE_EXPECTED_KEYS = setOf("wsId", "offset", "limit", "at")
+    // 免批规则读撤（cap atr1）。键序 = `Payloads.kt` 声明序 = 线上键序。
+    // 请求一帧两用：tool 在场 = 撤这一条（nodeId = 规则归属的设备，必填 ——
+    // 显式身份，不做「缺省 = 发起方」的隐式替换），缺席 = 读。
+    internal val AGENT_TOOL_RULES_REQUEST_EXPECTED_KEYS = setOf("nodeId", "tool", "agentKey", "wsId", "at")
+    internal val AGENT_TOOL_RULES_LIST_EXPECTED_KEYS = setOf("total", "rules", "at")
+    internal val AGENT_TOOL_RULES_ROW_EXPECTED_KEYS = setOf("nodeId", "tool", "agentKey", "wsId", "grantedAt", "grantedBy")
     internal val AGENT_ARTIFACT_EXPECTED_KEYS = setOf("sessionId", "artifactId", "fileId", "name", "bytes", "mime", "sha256", "summary")
 
     // --------------------------------------------------------------- agent-* 校验
@@ -313,6 +320,50 @@ object CodecAgent {
         }
         if (o.containsKey("at") && intOf(o["at"]) == null) return false
         return hasOnlyKeys(o, AGENT_GRANT_LIST_EXPECTED_KEYS)
+    }
+
+    /**
+     * 本端增补免批规则读撤两帧（cap `atr1`）。
+     *
+     * 撤销方向的 `tool` 是**身份字段**不是描述字段：拼错一个等于「撤了不存在的一条」，
+     * 宿主的逐字匹配会如实报 0 —— 但一个把字符串写成数字的对端连匹配资格都没有，
+     * codec 直接拒收。`rules` 逐行严格校验（行的键集就是身份，嵌套结构放水 =
+     * 整行语义不存在）。
+     */
+    internal fun validateAgentToolRulesRequest(o: JsonObject): Boolean {
+        if (o.containsKey("tool")) {
+            val tool = (o["tool"] as? JsonPrimitive)?.takeIf { it.isString }?.content ?: return false
+            if (tool.isBlank() || tool.length > Limits.AGENT_TOOL) return false
+            // 撤形态必须带上规则归属的设备：显式身份，不给「缺省 = 发起方」的替换口子。
+            if (!isStr(o["nodeId"], Limits.ID)) return false
+        } else if (o.containsKey("nodeId") && !isStr(o["nodeId"], Limits.ID)) {
+            return false
+        }
+        if (o.containsKey("agentKey") && !isStr(o["agentKey"], Limits.AGENT_GRANT_AGENT_KEY)) return false
+        if (o.containsKey("wsId") && !isStr(o["wsId"], Limits.AGENT_WS_ID)) return false
+        if (o.containsKey("at") && intOf(o["at"]) == null) return false
+        return hasOnlyKeys(o, AGENT_TOOL_RULES_REQUEST_EXPECTED_KEYS)
+    }
+
+    internal fun validateAgentToolRulesList(o: JsonObject): Boolean {
+        if (o.containsKey("total")) {
+            val n = intOf(o["total"]) ?: return false
+            if (n < 0) return false
+        }
+        val rules = o["rules"] as? JsonArray ?: return false
+        rules.forEach { row ->
+            val r = row as? JsonObject ?: return false
+            val tool = (r["tool"] as? JsonPrimitive)?.takeIf { it.isString }?.content ?: return false
+            if (tool.isBlank() || tool.length > Limits.AGENT_TOOL) return false
+            if (!isStr(r["nodeId"], Limits.ID)) return false
+            if (r.containsKey("agentKey") && !isStr(r["agentKey"], Limits.AGENT_GRANT_AGENT_KEY)) return false
+            if (r.containsKey("wsId") && !isStr(r["wsId"], Limits.AGENT_WS_ID)) return false
+            if (r.containsKey("grantedAt") && intOf(r["grantedAt"]) == null) return false
+            if (r.containsKey("grantedBy") && !isStr(r["grantedBy"], Limits.ID)) return false
+            if (!hasOnlyKeys(r, AGENT_TOOL_RULES_ROW_EXPECTED_KEYS)) return false
+        }
+        if (o.containsKey("at") && intOf(o["at"]) == null) return false
+        return hasOnlyKeys(o, AGENT_TOOL_RULES_LIST_EXPECTED_KEYS)
     }
 
     /**
@@ -579,6 +630,28 @@ object CodecAgent {
     ): JsonElement = wireJson.encodeToJsonElement(
         AgentGrantListPayload.serializer(),
         AgentGrantListPayload(scope, agentKey, wsId, access, total, at),
+    )
+
+    /** 本端增补：设备向宿主读/撤免批规则（cap `atr1`）。`tool` 缺席 = 读，在场 = 撤。 */
+    fun agentToolRulesRequestPayload(
+        nodeId: String? = null,
+        tool: String? = null,
+        agentKey: String? = null,
+        wsId: String? = null,
+        at: Long? = null,
+    ): JsonElement = wireJson.encodeToJsonElement(
+        AgentToolRulesRequestPayload.serializer(),
+        AgentToolRulesRequestPayload(nodeId, tool, agentKey, wsId, at),
+    )
+
+    /** 本端增补：宿主把免批表全量快照回给设备（cap `atr1`）。 */
+    fun agentToolRulesListPayload(
+        total: Int? = null,
+        rules: List<AgentToolRuleRowPayload> = emptyList(),
+        at: Long? = null,
+    ): JsonElement = wireJson.encodeToJsonElement(
+        AgentToolRulesListPayload.serializer(),
+        AgentToolRulesListPayload(total, rules, at),
     )
 
     /**

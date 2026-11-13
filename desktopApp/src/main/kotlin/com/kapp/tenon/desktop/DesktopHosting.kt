@@ -1224,6 +1224,9 @@ internal fun DesktopSettingsPane(
                                             // 免批表取控制面上的同一实例（面板读的就是入口判的那张）。
                                             // 控制面没起时它是 null，面板据此显示「暂时读不到」。
                                             toolApprovalStore = host.extension.toolApprovalStore,
+                                            // agent 写编制的档位：与控制面同一实例（另开一个
+                                            // 会让「切到直接执行」只改了界面、判定仍按 request）。
+                                            rosterWritePolicy = host.extension.rosterWritePolicy,
                                             // 面板的每个决定都经这里回给设备（agent-grant 帧）。此前面板够不到
                                             // 发帧能力，只能写本机台账 ⇒ 用户点完手机看不到。
                                             grantReplySender = host.extension::sendGrantReply,

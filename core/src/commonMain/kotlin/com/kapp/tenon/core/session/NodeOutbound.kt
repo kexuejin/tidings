@@ -3,6 +3,7 @@
 package com.kapp.tenon.core.session
 
 import com.kapp.tenon.core.protocol.AgentEventAttachment
+import com.kapp.tenon.core.protocol.AgentToolRuleRowPayload
 import com.kapp.tenon.core.protocol.Codec
 import com.kapp.tenon.core.protocol.Limits
 import com.kapp.tenon.core.protocol.Protocol
@@ -1232,6 +1233,61 @@ internal class NodeOutbound(
             MsgTypes.AGENT_GRANT_LIST,
             selfId(),
             Codec.agentGrantListPayload(scope, agentKey, wsId, access, total, at),
+        ),
+    )
+
+    /**
+     * 读免批规则快照（本端增补，设备 → 宿主，cap `atr1`）。
+     *
+     * 用 [Messenger.sendReliableNoQueue]：读请求**不入队** —— 宿主此刻不在线，
+     * 这个读没有意义，重试由界面再点一次触发（与 agent-session-page 同一条纪律）。
+     */
+    suspend fun sendAgentToolRulesRead(peerId: String, at: Long? = null): Boolean = messenger.sendReliableNoQueue(
+        peerId,
+        makeEnvelope(
+            MsgTypes.AGENT_TOOL_RULES_REQUEST,
+            selfId(),
+            Codec.agentToolRulesRequestPayload(at = at),
+        ),
+    )
+
+    /**
+     * 撤一条免批规则（本端增补，设备 → 宿主，cap `atr1`）。
+     *
+     * 用 [Messenger.sendReliableNoQueue]（不入队）：撤销是对**刚看到的快照**的操作，
+     * 宿主此刻不在线时这个撤无从谈起 —— 如实失败、界面给重试，不把「撤掉」伪装成
+     * "已排队等补投"；也不把发送失败算成「宿主离线」（reliableNoQueue 失败不改
+     * 在线状态，同 agent-workspace 那条注释）。
+     * [nodeId] = 规则归属的设备（显式身份，不做「缺省 = 发起方」的隐式替换），
+     * 宿主对不上时如实回 `total` 不变的快照，不猜。
+     */
+    suspend fun sendAgentToolRulesRevoke(
+        peerId: String,
+        nodeId: String,
+        tool: String,
+        agentKey: String? = null,
+        wsId: String? = null,
+        at: Long? = null,
+    ): Boolean = messenger.sendReliableNoQueue(
+        peerId,
+        makeEnvelope(
+            MsgTypes.AGENT_TOOL_RULES_REQUEST,
+            selfId(),
+            Codec.agentToolRulesRequestPayload(nodeId, tool, agentKey, wsId, at),
+        ),
+    )
+
+    /** 回免批表全量快照（本端增补，宿主 → 设备，cap `atr1`）：新鲜数据不入队。 */
+    suspend fun sendAgentToolRulesList(
+        peerId: String,
+        rules: List<AgentToolRuleRowPayload>,
+        at: Long? = null,
+    ): Boolean = messenger.sendReliableNoQueue(
+        peerId,
+        makeEnvelope(
+            MsgTypes.AGENT_TOOL_RULES_LIST,
+            selfId(),
+            Codec.agentToolRulesListPayload(rules.size, rules, at),
         ),
     )
 

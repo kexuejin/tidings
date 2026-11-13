@@ -100,6 +100,14 @@ class DesktopWorkerOrchestrator(
      * null = 未装配（测试与老装置）⇒ 行为与从前逐字一致。
      */
     private val teamPlanRefiner: (suspend (plan: DelegationPlan) -> DelegationPlan?)? = null,
+    /**
+     * 派单指令尾部的**能力简报**（P3 工具面）：告诉这根棒「本机还提供哪些可以调的动作」。
+     *
+     * 返回 null = 这次不追加（没装配档案面 / headless）—— **不写就是没有**，绝不追加一段
+     * 指向不存在路由的说明（agent 会照着去调，然后拿到 404/503，浪费一轮）。
+     * 内容来自 `RosterTools.brief()`，与 `GET /v1/agent/tools` 同一份，不另写文案。
+     */
+    private val rosterBrief: (() -> String?)? = null,
 ) {
     /**
      * 工单的**可等待终局**：invoke 执行桥（真机 `@agent` 派单）await 它拿到请求-响应
@@ -1581,7 +1589,11 @@ class DesktopWorkerOrchestrator(
         val available = availableAgentKeys()
         // prompt 在域层已经剥净 @（onAgentPrompt 的契约），直接当 goal 用。
         val goal = prompt
-        return when (val compiled = TeamPlanCompiler.compile(profile, seatMembers, target.member, goal, available)) {
+        return when (val compiled = TeamPlanCompiler.compile(
+            profile, seatMembers, target.member, goal, available,
+            // 只在真装配了档案面时追加：否则 agent 会照着一份空说明书去调不存在的动作。
+            capabilityBrief = rosterBrief?.invoke(),
+        )) {
             is TeamPlanCompiler.Compiled.Rejected -> {
                 publishTeamDispatchBlocked(groupId, prompt, compiled.reason)
                 true

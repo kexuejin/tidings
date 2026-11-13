@@ -457,6 +457,8 @@ internal fun AgentTeamSection(
                 action = {
                     // 「新建团队」与计数并排：团队视角里这是唯一一个建队入口，
                     // 藏在溢出菜单里等于没有（用户找不到就会去群里凑）。
+                    // 窄列（桌面两栏左列 268dp）放不下「两颗按钮 + 计数 + 标题」⇒ 动作落到
+                    // 段头**之下**（见下面那行），不是消失。
                     if (!compact) TeamActionButtons(onCreateTeam, onCreateTeamWithAi)
                     Text(
                         text = stringResource(Res.string.agent_count_items, formatCount(teams.size.toLong())),
@@ -465,6 +467,10 @@ internal fun AgentTeamSection(
                     )
                 },
             )
+            // 窄列的第二个落位：段头右侧只放计数，动作独占一行。
+            // 此前这里是把动作整段藏掉（`if (!compact)` 只有一个落位），于是桌面两栏的
+            // 「新建团队 / AI 建队」同时不可达 —— 有团队时也不会走下面那条分支。
+            if (compact) TeamActionButtons(onCreateTeam, onCreateTeamWithAi)
         } else if (teams.isNotEmpty()) {
             // 首屏目录形态：标题与计数已由上方那一行（「团队 · N」+ 切换器）说过，
             // 两支动作落到这里独占一行 —— 段头一被抑制，动作不能跟着消失

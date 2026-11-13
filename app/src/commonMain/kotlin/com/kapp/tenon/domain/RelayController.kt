@@ -67,6 +67,7 @@ import kotlinx.serialization.json.JsonPrimitive
 // 更新检查器现在住在同一个包（领域侧）：它零 Compose，而消费它的是控制器。
 // ExecDeviceRow 现在住在同一个包（领域侧）：它由 execDeviceRows() 算出来。
 import com.kapp.tenon.domain.model.AgentApprovalDecision
+import com.kapp.tenon.domain.model.ToolApprovalRuleUi
 import com.kapp.tenon.domain.model.DeliveryState
 import com.kapp.tenon.domain.model.MdnsServiceUi
 import com.kapp.tenon.domain.model.MessageUi
@@ -1299,6 +1300,21 @@ class RelayController(
     override fun respondApproval(approvalId: String, decision: AgentApprovalDecision) =
         agentCtl.handleRespondApproval(approvalId, decision)
     override fun cancelAgentTask(taskId: String) = agentCtl.handleCancelAgentTask(taskId)
+
+    /**
+     * 向 [peerId] 宿主要一份免批表快照（本端增补 cap `atr1`）。
+     * 快照到了翻 [agentFlow] 的 `toolApprovalRules` —— 界面缝（`ToolApprovalsSource`）
+     * 的读侧从那里取。@return false = 没发出去（对端不声明 `atr1`）：界面对应的处理
+     * 是不画免批规则区块（读不到 ≠ 没有规则）。
+     */
+    fun requestToolRules(peerId: String): Boolean = agentCtl.handleRequestToolRules(peerId)
+
+    /**
+     * 撤一条免批规则（本端增补 cap `atr1`）：乐观翻行 + 发送失败回滚
+     * （判据与取舍见 [RelayControllerAgentComponent.handleRevokeToolRule]）。
+     * @return 1 = 本地行已翻（帧在途）；0 = 没发出去。
+     */
+    fun revokeToolRule(peerId: String, rule: ToolApprovalRuleUi): Int = agentCtl.handleRevokeToolRule(peerId, rule)
 
     /**
      * 卡片动作的**两壳同源入口**（M4 任务 5，§7.3-2）。参数接原语 —— 壳的卡片模型

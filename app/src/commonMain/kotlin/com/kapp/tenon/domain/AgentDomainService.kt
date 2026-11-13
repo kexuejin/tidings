@@ -125,6 +125,7 @@ internal class AgentDomainService(
     fun handleOnAgentWorkspace(envelope: Envelope) = agent.handleOnAgentWorkspace(envelope)
     fun handleOnAgentGrant(envelope: Envelope) = agent.handleOnAgentGrant(envelope)
     fun handleOnAgentGrantList(envelope: Envelope) = agent.handleOnAgentGrantList(envelope)
+    fun handleOnAgentToolRulesList(envelope: Envelope) = agent.handleOnAgentToolRulesList(envelope)
     fun handleOnAgentInvoke(envelope: Envelope) = invoke.handleOnAgentInvoke(envelope)
     fun handleOnAgentInvokeResult(envelope: Envelope) = invoke.handleOnAgentInvokeResult(envelope)
     fun intentExecutorPresent(): Boolean = invoke.intentExecutorPresent()

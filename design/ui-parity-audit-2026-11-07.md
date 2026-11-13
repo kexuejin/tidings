@@ -15,7 +15,7 @@
 
 | # | 事故 | 根因 | 修复 |
 |---|---|---|---|
-| 1 | **116 张原型截图全是空白页**（11-06 23:36 全量重拍入库，manifest 把空白 sha 固化成「正常」） | relay.html 的 boot 首渲染调用在 bacb7530 之前的编辑中丢失；shoot-relay 靠页面自渲染，`dump-layout` 走 iframe 注入所以一直没暴露；sha 门禁只绑「拍没拍」绑不了「拍到了内容」 | 恢复 `go(curScreen)`（relay.html 尾部）+ shoot-relay 加空白帧检测（直方图主色占比 ≥99.5% 判 FAIL）+ 116 帧全量重拍为真实内容 |
+| 1 | **116 张原型截图全是空白页**（11-06 23:36 全量重拍入库，manifest 把空白 sha 固化成「正常」） | relay.html 的 boot 首渲染调用在 029e174a 之前的编辑中丢失；shoot-relay 靠页面自渲染，`dump-layout` 走 iframe 注入所以一直没暴露；sha 门禁只绑「拍没拍」绑不了「拍到了内容」 | 恢复 `go(curScreen)`（relay.html 尾部）+ shoot-relay 加空白帧检测（直方图主色占比 ≥99.5% 判 FAIL）+ 116 帧全量重拍为真实内容 |
 | 2 | **spacing 棘轮少记 3 处**（DesktopComposer.kt:519 行注释里的 `arrayOf("*/*")` 让「先剥块注释」的正则把约 280 行真实代码吞成空白） | `strip_comments` 四份正则副本同病 | 新增 `tools/ktcomments.py`（字符串感知单遍状态机，全仓唯一实现），design_contract / design-screen-diff / render-preview / nullable-callback-wiring 四处收敛；spacing 92→95 与独立扫描对齐 |
 | 3 | **render-preview 自检全量误报**（rebrand 后 Res import 正则停在 `app.relay.*` 旧包名）+ 自检扫进测试源集（守卫测试把 `Res.string.X` 当锚点字符串） | rebrand 漏改 + 扫描范围过宽 | 正则改 `com.kapp.tenon.generated.resources`；扫描排除 jvmTest/commonTest/androidTest |
 | 4 | design-screen-diff `--markdown` 对「落点不存在」行崩溃（缺 `files` 键） | 存量 | `row.get("files")` 守卫 |

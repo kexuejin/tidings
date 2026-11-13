@@ -158,6 +158,7 @@ import com.kapp.tenon.generated.resources.team_profile_managed
 import com.kapp.tenon.generated.resources.team_profile_rejected
 import com.kapp.tenon.generated.resources.team_profile_saved
 import com.kapp.tenon.generated.resources.team_profile_saved_aliased
+import com.kapp.tenon.generated.resources.team_profile_saved_orphan
 import com.kapp.tenon.generated.resources.team_profile_saved_partial
 import com.kapp.tenon.generated.resources.team_roster_invalid
 import com.kapp.tenon.generated.resources.banner_group_meta_rejected
@@ -424,11 +425,14 @@ fun bannerText(message: BannerMessage): String = when (message) {
     BannerMessage.TeamRosterInvalid -> stringResource(Res.string.team_roster_invalid)
     BannerMessage.TeamProfileManaged -> stringResource(Res.string.team_profile_managed)
     is BannerMessage.TeamProfileSaved -> {
-        // 失败群数与成功群数分开说：只报成功会把「有一个群没成功」吞掉。
-        val base = if (message.failedGroupCount == 0) {
-            stringResource(Res.string.team_profile_saved, message.name, message.groupCount)
-        } else {
-            stringResource(
+        // 零群是**一种状态**，不是「0 个群」这种读数：先说清「建了档但谁都还看不见它」，
+        // 再说下一步去哪儿加群。写成「（0 个群）」会让人以为计数坏了。
+        val base = when {
+            message.groupCount == 0 && message.failedGroupCount == 0 ->
+                stringResource(Res.string.team_profile_saved_orphan, message.name)
+            message.failedGroupCount == 0 ->
+                stringResource(Res.string.team_profile_saved, message.name, message.groupCount)
+            else -> stringResource(
                 Res.string.team_profile_saved_partial,
                 message.name,
                 message.groupCount,

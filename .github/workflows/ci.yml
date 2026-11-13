@@ -14,14 +14,24 @@
 # 可执行验收物）和 :domainComposeFreeGate（守那条边界的门禁）长期不在 CI 里跑。
 # 对账命令：grep -n 'Gate\|jvmTest\|cli:test' AGENTS.md README.md .github/workflows/ci.yml
 #
-# 依赖 luciola 原生库的用例（:core:jvmTest 里 8 个类）**没有原生库时自动跳过**：
-# 走 LuciolaNativeGuard，没配 TENON_LUCIOLA_NATIVE 就 Assume 跳过并打印指引，
-# 不会把「这台机器没装引擎」伪装成代码失败；配了却用不了则会响亮失败。
+# 依赖 luciola 原生库的用例（:core:jvmTest 里 8 个类）在 CI 上**真跑**：
+# luciola 钉的是 `0.11.0-local.1`（未发布到 Maven Central，按「稳定后再发布」的自节奏），
+# 依赖解析只在 mavenLocal ⇒ CI 在跑门禁前先从公共仓（github.com/kexuejin/luciola，
+# main 与本仓钉值同源）checkout 源码、现场构建并按需 publish 到 runner 的 ~/.m2
+# （LUCIOLA_LOCAL=1 放行 settings 开关；只发 android/jvm/root —— iOS klib 的
+# cinterop 需要 Apple 工具链，linux 出不了，CI 也不解析 iOS 变体），再用同一份
+# 源码交叉构建 linux .so 交给 TENON_LUCIOLA_NATIVE。同一份源 ⇒ UniFFI checksums
+# 与 bindings 必然对上。本机不受影响：照旧 luciola 仓 publish-maven-local.sh +
+# LUCIOLA_LOCAL=1（本机脚本连 iOS klib 全量发）。
 #
 # 截图门禁（:androidApp:validateDebugScreenshotTest）**不在 CI 里跑**：参考图按 .gitignore 里
 # 「截图测试基准图」那一段
 # 由本机生成、不入库，全新检出上没有参考图，跑了只会报「234 张都是新增」。它是本地门禁，
 # 命令与判据见 AGENTS.md §1。
+# 逐屏对比度（check-contrast）同理**不在 CI 里跑**：量的是 Chrome 渲染的实际像素色，
+# 读数随 Chrome 版本/平台的抗锯齿合成移动 —— 首轮 CI 跑到底实锤：本机 0 处低于 AA，
+# runner 上同一份稿子量出 397 处（4.17:1 的色对本机是过线的）。渲染像素类检查是
+# 本地门禁；CI 保留 css-vars / 图集 manifest / 渲染体检这三条文本层检查。
 # 外加三条注释门禁，都来自 `docs/relay-comment-audit.md` §4 的政策 ——
 # 它们挡的不是代码错，是"注释会悄悄腐坏"这一类：
 #   :cjkLiteralGate            硬编码中文字面量（与 :constructionTraceGate 同构）
@@ -66,21 +76,103 @@ permissions:
 jobs:
   gate:
     runs-on: ubuntu-latest
-    timeout-minutes: 45
+    timeout-minutes: 60
     steps:
       - uses: actions/checkout@v4
 
+      # ── luciola 产物链（依赖解析 + 原生库，见文件头注释）──────────────────
+      # 为什么不是「发 Central 就好了」：版本按「稳定后再发布」的自节奏钉在
+      # -local.1 上（settings.gradle.kts 的守卫会把这一决定变成可读的报错）。
+      # CI 的答案是**源码自足**：公共仓 main 上就有这个版本的源码（build.gradle.kts
+      # 里的 version 与本仓 toml 钉值逐字一致），现场构建不依赖作者本机。
+      - name: Checkout luciola（公共仓源码，与本仓钉的 -local 版本同源）
+        uses: actions/checkout@v4
+        with:
+          repository: kexuejin/luciola
+          ref: main
+          path: luciola-src
+
       # JDK 21 与 README「构建」一节同源（本地是 /opt/homebrew/opt/openjdk@21）。
+      # luciola 的 publish 脚本里要跑 Gradle，所以它必须在 luciola 产物链之前。
       - uses: actions/setup-java@v4
         with:
           distribution: temurin
           java-version: "21"
 
-      # :androidApp:* 需要 Android SDK。版本对齐 gradle/libs.versions.toml：
-      # compileSdk 36、buildToolsVersion 36.1.0。
+      # Android SDK 平台件。版本对齐 gradle/libs.versions.toml：compileSdk 36、
+      # buildToolsVersion 36.1.0。luciola 的 androidLibrary compileSdk 也是 36 ——
+      # publish 步骤同样吃这一步，所以它必须在 luciola 产物链之前。
       - uses: android-actions/setup-android@v3
         with:
           packages: "platforms;android-36 build-tools;36.1.0"
+
+      # gradle 缓存提前到 luciola publish 之前：脚本里的 Gradle 构建
+      # （examples/android-demo → :luciola:publishToMavenLocal）与后面的门禁
+      # 共享同一份 ~/.gradle 缓存。
+      - uses: gradle/actions/setup-gradle@v4
+
+      # cargo registry/bin（含 cargo-ndk）与构建产物缓存。key 里的 v1 是手动
+      # 失效阀（换 NDK/工具链版本时 bump）。target 目录可以安全地跨源复用：
+      # cargo 按指纹重建，陈旧产物只会慢、不会错。
+      - name: Cargo 缓存
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo
+            luciola-src/target
+          key: luciola-cargo-${{ runner.os }}-v1
+          restore-keys: luciola-cargo-${{ runner.os }}-
+
+      # ubuntu-latest 镜像自带 rustup/cargo，但目标三元组不全。
+      #   aarch64-linux-android —— cargo-ndk 出 AAR 内嵌的 arm64 .so；
+      #   host linux .so（后面另建）给 :core:jvmTest 的 8 个真引擎用例。
+      #   iOS 三元组**不装**：CI 不解析 iOS 变体，而带 C 依赖的 crate（ring）在
+      #     linux 上交叉编译 iOS 目标需要 xcrun/Apple SDK —— 首轮 CI 实锤
+      #     （cc-rs: failed to find tool "xcrun"），iOS 产物留给 macOS 本机出。
+      - name: Rust 目标三元组
+        run: rustup target add aarch64-linux-android
+
+      # cargo-ndk：镜像不预装。有缓存时跳过（--locked 固定行为）。
+      - name: 装 cargo-ndk
+        run: command -v cargo-ndk >/dev/null 2>&1 || cargo install cargo-ndk --locked
+
+      # AAR 内嵌 .so 的构建需要 NDK（只有 cargo-ndk 用它；AGP 只打包不编译）。
+      # 版本对齐 luciola 仓脚本要求的 ndk 工作流；sdkmanager 幂等。
+      - name: 装 Android NDK（cargo-ndk 出 arm64 .so 要用）
+        run: yes | "$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" "ndk;27.2.12479018" > /dev/null
+
+      # publish 到 runner 的 ~/.m2：**只发 android/jvm/root 三个 publication**，
+      # 版本 = 0.11.0-local.1，与本仓 toml 钉值逐字一致（不一致会在解析时红，不是静默）。
+      # 为什么不走 publish-maven-local.sh 全量：全量会连 iOS klib 一起发，而 iOS klib
+      # 的 cinterop 需要苹果侧静态库 —— linux 上出不了（见上一步注释）。CI 的任务图
+      # 只解析 android/jvm 变体，iOS 变体留给 macOS 本机发。AAR 内嵌引擎的 sha256
+      # 自校验（脚本第 3 步同款判据）在这里内联保留 —— publish 出来的东西没带
+      # 引擎会被它拦下，不靠自觉。
+      - name: 构建 luciola 并按需 publish 到 runner mavenLocal
+        run: |
+          cd luciola-src
+          RUSTFLAGS="${RUSTFLAGS:-} --cfg aes_armv8 -C target-feature=+aes,+sha2" \
+            cargo ndk -t arm64-v8a -o bindings/luciola-kmp/src/androidMain/jniLibs build --release -p luciola-uniffi
+          cd examples/android-demo
+          ./gradlew :luciola:publishAndroidPublicationToMavenLocal \
+            :luciola:publishJvmPublicationToMavenLocal \
+            :luciola:publishKotlinMultiplatformPublicationToMavenLocal --no-daemon -q
+          cd "$GITHUB_WORKSPACE"
+          VERSION=$(grep -m1 '^version = ' luciola-src/bindings/luciola-kmp/build.gradle.kts | sed 's/.*"\(.*\)".*/\1/')
+          echo "luciola 版本: $VERSION"
+          test -n "$VERSION" || { echo "没解析到版本号"; exit 1; }
+          AAR="$HOME/.m2/repository/io/github/kexuejin/luciola-android/$VERSION/luciola-android-$VERSION.aar"
+          test -f "$AAR" || { echo "publish 未产出 $AAR"; exit 1; }
+          unzip -l "$AAR" | grep -q "jni/arm64-v8a/libluciola_uniffi.so" || { echo "AAR 未内嵌引擎 .so：$AAR"; exit 1; }
+          echo "OK: AAR 含引擎（$VERSION）"
+
+      # 同一份源码出 host linux .so：TENON_LUCIOLA_NATIVE 指过去，
+      # :core:jvmTest 的 8 个真引擎用例在 CI 上真跑（不是跳过）。
+      # resolver（core/build.gradle.kts）对目录本身查 libluciola_uniffi.so ——
+      # cargo 的 release 产物就在这个目录，不用再中转。
+      - name: 构建 linux 引擎库（:core 真引擎用例用）
+        run: cargo build --release -p luciola-uniffi
+        working-directory: luciola-src
 
       # 截图门禁在 Linux 上渲染预览，界面里全是中文。
       # 没有 CJK 字体时 Layoutlib 画出来的是豆腐块，参考图必然对不上 ——
@@ -99,9 +191,15 @@ jobs:
       - name: 装 Android SDK Platform 37（compileSdk 37 编译要用）
         run: yes | "$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" "platforms;android-37.0" > /dev/null
 
-      - uses: gradle/actions/setup-gradle@v4
-
       - name: 门禁任务链（七条 + 设计契约三条）
+        env:
+          # 放行 settings.gradle.kts 的 -local 守卫 + 把 mavenLocal 提到最前
+          #（上面已 publish 出 0.11.0-local.1 的全套产物）。
+          LUCIOLA_LOCAL: "1"
+          # :core:jvmTest 的 8 个真引擎用例用这颗 linux .so（同源构建，
+          # UniFFI checksums 与 bindings 必然一致；LuciolaNativeGuard 显式
+          # 配了却没有库时会响亮失败，不会伪装成跳过）。
+          TENON_LUCIOLA_NATIVE: ${{ github.workspace }}/luciola-src/target/release
         run: |
           chmod +x ./gradlew
           # --no-build-cache：判"干净"就不能吃缓存（README「质量门禁与验证」有说明）。
@@ -167,17 +265,6 @@ jobs:
         # 描述的是过去某一版稿子。纯文本+哈希，不需要浏览器。
         run: python3 prototype/shoot-relay.py --verify-only
 
-      - name: 原型稿 · 逐屏对比度（WCAG AA）
-        # check-contrast 自己起 Chrome（CHROME 环境变量可覆盖路径），
-        # 但要一个 HTTP 服务：--headless 在 file:// + 查询串下会挂住（脚本头注明过）。
-        run: |
-          python3 -m http.server 4173 --bind 127.0.0.1 --directory prototype &
-          SRV=$!
-          trap 'kill $SRV 2>/dev/null || true' EXIT
-          sleep 2
-          CHROME="$(command -v google-chrome-stable || command -v google-chrome || command -v chromium)" \
-            node prototype/check-contrast.mjs
-
       - name: 原型稿 · 锚点核对（稿子里的 Foo.kt:NNN 还指得准吗）
         # 这些锚点是「设计决策 → 代码证据」的链条，漂了就等于证据链断掉。
         # continue-on-error 是**临时的**：现存 53 处漂移是代码侧在途改动欠的账
@@ -194,5 +281,6 @@ jobs:
           retention-days: 7
           path: |
             */build/reports/tests/**
+            */build/test-results/**
             androidApp/build/reports/screenshotTest/**
             build/reports/problems/**

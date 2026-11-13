@@ -1,9 +1,9 @@
 # 第三轮评审后的修复：两个 P0 + 静默丢失链 + P2（2026-11-09）
 
 - **分支**：`feat/agent-trigger-plugin`（worktree `.agents/worktrees/feat/agent-trigger-plugin`）
-- **起点**：HEAD `b335f483`（`main..HEAD` 31 条），**本轮改动全部未提交**
+- **起点**：HEAD `8b6df583`（`main..HEAD` 31 条），**本轮改动全部未提交**
 - **改动面**：26 个已跟踪文件 `+1515 / −192`，另加本文件
-- **性质**：对 `b335f483` 又做了一轮只读评审，找出**两条推翻上一轮结论的 P0** 与一条
+- **性质**：对 `8b6df583` 又做了一轮只读评审，找出**两条推翻上一轮结论的 P0** 与一条
   静默丢失链。上一轮（`2026-11-09-agent-trigger-plugin-review-fixes.md`）把只读通道写成
   「两层拦截：执行前 + 事后」，本轮证明**执行前那一层在真实链路上是空的**。
 
@@ -233,7 +233,7 @@ check-design-palette  OK：原型 CSS 变量无死引用、深色无漏覆盖
 
 ## 8. 合并就绪度（本轮重测）
 
-`main` 已前进到 `a74b303e`（本分支 ahead 28 / behind 31）。对**已提交的 HEAD**
+`main` 已前进到 `0e8e1fbd`（本分支 ahead 28 / behind 31）。对**已提交的 HEAD**
 （不含本轮未提交改动）干跑：
 
 ```
@@ -245,7 +245,7 @@ git merge-tree --write-tree --messages main HEAD   → EXIT=1，5 个冲突
 `docs/AGENT-TRIGGER-AND-PLUGIN-SPECIFICATION.md`（add/add）、
 `docs/THIRD-PARTY-AGENT-DEVELOPMENT-KIT.md`。
 
-`ACCEPTANCE.md §5g` 写的「干净 `main` 零冲突」是 `ccdc5177` 时点的读数，**已过时**，
+`ACCEPTANCE.md §5g` 写的「干净 `main` 零冲突」是 `121d8227` 时点的读数，**已过时**，
 本轮在 §5g 追加了复核说明。迁移号仍不撞（`main` 20.sqm / 断言 21，分支 21.sqm / 断言 22），
 但 `RelayDatabase.sq` 自动合并后必须重跑 schema 版本断言与 `:app:jvmTest`。
 

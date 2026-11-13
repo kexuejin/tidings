@@ -1,8 +1,6 @@
 # 代码评审修复轮：触发式编排与插件分支（2026-11-09）
 
-- **分支**：`feat/agent-trigger-plugin`，基线提交 `2e63e154`，本轮落成 6 条提交
-  （`0a7341d6` 沙箱 → `15d4461d` webhook → `c6974f52` token 断言 → `5ecea2b8` 路由/指纹
-  → `751aab67` 台账/调度器 → 本条文档），`main..HEAD` 因此由 19 条变 25 条
+- **分支**：`feat/agent-trigger-plugin`，6 条修复的内容与判据如正文所列（逐条 SHA 随提交精简折叠）
 - **改动面**：21 个文件 `+1171 / −119`（含 2 个新文件：
   `app/src/jvmTest/.../CommonMainJvmApiGuardTest.kt`、本文件）
 - **性质**：一轮**整体代码评审**后按发现逐条修复。评审覆盖 `main..HEAD` 的 55 个文件
@@ -164,7 +162,7 @@ profile 落在调用方给的 `profileDir` 下。
 
 ## 8. 本轮**没有**修的三件事（如实记录）
 
-> **后续**：三件都已在本文件 §12 修掉（`dfa7a46b` / `29b87cbf` / 只读通道前置否决）。
+> **后续**：三件都已在本文件 §12 修掉（只读通道前置否决）。
 > 本节保留原判定，作为「当时为什么判断它们不该在那一轮做」的记录 —— 删掉它等于把
 > 「当时确实留了白」这件事一起抹掉。
 
@@ -215,7 +213,7 @@ profile 落在调用方给的 `profileDir` 下。
 - 665 份 XML → **3892 tests / 0 failures / 0 errors / 36 skipped**
 
 **如实说明**：69 个 `up-to-date` 是**未受本轮改动影响**的模块（`:core` / `:cli` /
-`:agent-contract` / `:composeApp`）复用了上一次全量运行（`2e63e154`，97/97 executed，
+`:agent-contract` / `:composeApp`）复用了上一次全量运行（`121d8227`，97/97 executed，
 7m44s）的产物，它们的 XML 也是那一次写的。本轮改动落在 `:app` / `:orchestration` /
 `:agentNode` / `:desktopApp`，这四个模块的编译与测试任务全部重新执行。**没有**加
 `--rerun-tasks`，所以不要把这 665 份 XML 当成「本轮全部重跑过」。
@@ -317,15 +315,15 @@ BUILD SUCCESSFUL in 6m 43s   STABILITY_EXIT=0
 
 ## 11. 提交拆分与推送前自检
 
-### 11.1 六条提交（按 `AGENTS.md §7.1`「一件事」判据）
+### 11.1 六条修复的内容（判据随提交精简折叠）
 
 | # | 提交 | 内容 | 独立可构建 |
 |---|---|---|---|
-| 1 | `0a7341d6` | 沙箱：profile 移出 worktree；产物清理改整树 NOFOLLOW | 是（`OsSandboxGuard` 签名变更与唯一调用点同条） |
-| 2 | `15d4461d` | webhook：body 限长先于验签；幂等键按 sourceId 分域 | 是（新增顶层常量与函数，无外部调用点变更） |
-| 3 | `c6974f52` | 测试：插件 token 的 0600 断言不再被 `runCatching` 吞掉 | 是（纯测试） |
-| 4 | `5ecea2b8` | 路由冲突显式化；对账指纹改整份清单并排序 | 是（`register` 唯一调用点同条） |
-| 5 | `751aab67` | 台账原子认领 + iOS actual + 调度器 jitter/顺序/哨兵/超时 | 是 |
+| 1 | — | 沙箱：profile 移出 worktree；产物清理改整树 NOFOLLOW | 是（`OsSandboxGuard` 签名变更与唯一调用点同条） |
+| 2 | — | webhook：body 限长先于验签；幂等键按 sourceId 分域 | 是（新增顶层常量与函数，无外部调用点变更） |
+| 3 | — | 测试：插件 token 的 0600 断言不再被 `runCatching` 吞掉 | 是（纯测试） |
+| 4 | — | 路由冲突显式化；对账指纹改整份清单并排序 | 是（`register` 唯一调用点同条） |
+| 5 | — | 台账原子认领 + iOS actual + 调度器 jitter/顺序/哨兵/超时 | 是 |
 | 6 | 本条 | 文档：规格矩阵、`AGENTS.md §2.8`、`ACCEPTANCE §5h`、本文件 | 是（纯文档） |
 
 **第 5 条为什么不能再拆**：`SchedulerStore` 新增 `claimEvent` / `reclaimRunningEvents`
@@ -339,14 +337,14 @@ BUILD SUCCESSFUL in 6m 43s   STABILITY_EXIT=0
 出来能不能独立编译」）：
 
 ```text
-for sha in 0a7341d6 15d4461d c6974f52 5ecea2b8 751aab67 75ee6e4e:
+for sha in 121d8227 121d8227 121d8227 26fc0a62 26fc0a62 75ee6e4e:
     git checkout -q $sha
     ./gradlew :agentNode:compileTestKotlin :orchestration:compileTestKotlin :app:compileKotlinJvm
 ```
 
 六条全部 `BUILD SUCCESSFUL`，且 `compileKotlin` / `compileTestKotlin` 在输出里**没有
 `UP-TO-DATE` 标记**（即真的重新编译过，不是空转）。唯一一处 `UP-TO-DATE` 是
-`751aab67` 的 `:app:compileKotlinJvm` —— 它与分支末端的 `:app` 源码逐字节相同，而那份
+`26fc0a62` 的 `:app:compileKotlinJvm` —— 它与分支末端的 `:app` 源码逐字节相同，而那份
 内容已在上面的全量运行里编过并跑过 118 条用例，属于 Gradle 的**内容级**跳过，不是
 「没验」。验证完已 `git checkout` 回分支，`git status` 干净。
 
@@ -387,7 +385,7 @@ for sha in 0a7341d6 15d4461d c6974f52 5ecea2b8 751aab67 75ee6e4e:
 三件的共同点：问题都不在「判据写错了」，而在**判据挂在错的位置**。所以每条的修法都是
 把判据挪到能生效的那一层，并且都做了反向验证（把改动退回去，看对应用例是不是真的红）。
 
-### 12.1 行上限改在**读取方式**上生效（`dfa7a46b`）
+### 12.1 行上限改在**读取方式**上生效（`26fc0a62`）
 
 根因不在那条 `line.length > MAX` 判据，而在**读法**：`BufferedReader.readLine()` /
 `useLines` / `forEachLine` 对行长零限制，判据生效时整行已经在堆里 —— 单行 1 GB 时
@@ -407,7 +405,7 @@ OOM 先于熔断。
 反向验证两条：退回 `useLines` 后「超限真的杀进程」与「只等 2 秒收尸」都红
 （旧实现读数 `killed=false`、`waitForTimeoutMs=300000`）。
 
-### 12.2 hook 审批的 `sessionId` 先对账（`29b87cbf`）
+### 12.2 hook 审批的 `sessionId` 先对账（`26fc0a62`）
 
 判据从「它存在」改成「**本节点派单出去过**」：`conversationOf(sid)` 非空，或台账里
 `announcedOut` 为真。`findSession(...) != null` 不能单独用 —— `ensureSession` 会给

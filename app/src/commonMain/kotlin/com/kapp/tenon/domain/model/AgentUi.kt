@@ -577,6 +577,32 @@ data class GrantUi(
 )
 
 /**
+ * 宿主免批表的一行（本端增补 cap `atr1` 快照帧的设备侧投影）。
+ *
+ * 与界面缝的 `ToolApprovalRow`（composeApp `feature/settings`）同形但**不共用**：
+ * 那一份住在 UI 层、不带 `grantedBy`；这一份住域层，快照按宿主分键对账，撤销
+ * 身份的四元组（nodeId + agentKey + wsId + tool）在这里逐字保留 —— 撤销是
+ * 「撤**这一条**」，任何一处模糊都会撤错或撤空。
+ *
+ * 字段语义与线上键一致，原样保留不猜：`nodeId` 是**规则归属的设备**（「始终
+ * 允许」是那台设备按的，规则只免它的问）—— 免批表里可以同时有别的设备的规则，
+ * 手机看到的快照是宿主整张表，不是只有自己的。
+ */
+data class ToolApprovalRuleUi(
+    /** 规则归属的设备。 */
+    val nodeId: String,
+    val tool: String,
+    /** null = 不按 agent 过滤（这一档存在：整 agent 免批）。 */
+    val agentKey: String?,
+    /** null = 无 ws 档（授予来源会话没绑目录，只命中无 ws 派单）。 */
+    val wsId: String?,
+    /** 宿主侧授予时刻；null = 宿主没报（排序兜底到行序）。 */
+    val grantedAt: Long?,
+    /** 谁批的（排查「这条规则哪来的」的唯一线索）。 */
+    val grantedBy: String?,
+)
+
+/**
  * 手机端对一个宿主节点的申请状态（PPE-1 增补 D7）。
  *
  * **四档都必须能被表达**（父稿 §3.3 硬要求）：`NONE` 与 `DENIED` 绝不能合并 ——

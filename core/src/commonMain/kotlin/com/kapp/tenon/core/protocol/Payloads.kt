@@ -546,3 +546,55 @@ data class AgentSessionPagePayload(
     val limit: Long? = null,
     val at: Long? = null,
 )
+
+/**
+ * 本端增补 `agent-tool-rules-request`（cap `atr1`），设备 → 宿主。
+ *
+ * 一帧两用（键区分，不新增第二张帧）：[tool] 缺席 = **读**（宿主回当前免批表
+ * 快照）；[tool] 在场 = **撤这一条**（nodeId + agentKey + tool + wsId 逐字匹配
+ * —— 与界面那一行「说的是一条」同一条纪律，不许有「按 nodeId 全撤」的语义）。
+ * [nodeId] 是**规则归属的设备**（「始终允许」是那台设备按的，规则只免它的问）：
+ * 撤销时必填 —— 显式身份，不做「缺省 = 发起方」的替换（隐式替换会制造
+ * 「撤了不存在的一条还以为撤掉了」的错账）；读形态不携带。
+ * 撤销是收紧方向（让宿主重新开始问），不是放权。
+ */
+@Serializable
+data class AgentToolRulesRequestPayload(
+    val nodeId: String? = null,
+    val tool: String? = null,
+    val agentKey: String? = null,
+    val wsId: String? = null,
+    val at: Long? = null,
+)
+
+/**
+ * 本端增补 `agent-tool-rules-list`（cap `atr1`），宿主 → 设备。
+ *
+ * 一次**全量快照**（不是增量）：免批规则按 tool 名记、行数少，总量预算远够；
+ * 增量对账需要的键（rev / 序号）比这帧族本身还重。顺序 = 宿主表的最新优先。
+ * 行里带 [AgentToolRuleRowPayload.nodeId]（规则归属哪台设备）与
+ * [AgentToolRuleRowPayload.grantedBy]（谁批的）——前者是撤销身份的一半、
+ * 后者是排查「这条规则哪来的」的唯一线索。
+ */
+@Serializable
+data class AgentToolRuleRowPayload(
+    val nodeId: String,
+    val tool: String,
+    val agentKey: String? = null,
+    val wsId: String? = null,
+    val grantedAt: Long? = null,
+    val grantedBy: String? = null,
+)
+
+@Serializable
+data class AgentToolRulesListPayload(
+    val total: Int? = null,
+    /**
+     * **没有默认值**：`encodeDefaults = false` 会把「等于默认值的字段」整个省掉 ——
+     * 空快照（宿主刚撤光）的 `rules` 键消失，接收侧按「缺键 = 坏帧」丢行处理，
+     * 设备端就会**永远拿着上一份非空快照**（§3 的静默丢失家族：发送侧一切正常）。
+     * 必填字段保证空数组也以 `"rules":[]` 上线。
+     */
+    val rules: List<AgentToolRuleRowPayload>,
+    val at: Long? = null,
+)

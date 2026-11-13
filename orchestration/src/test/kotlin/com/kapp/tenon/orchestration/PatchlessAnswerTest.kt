@@ -137,8 +137,8 @@ class PatchlessAnswerTest {
     fun theAnswerIsSaidOnceWithoutItsCodeFence() {
         // dsh 的原始形状：`text` 流与收尾 `final` 行是同一句话，且被 ``` 包住。
         assertEquals(
-            "2e2e10b2 fix: /status 不再误报",
-            dedupeRepeatedSpeech("``` 2e2e10b2 fix: /status 不再误报 `````` 2e2e10b2 fix: /status 不再误报 ```"),
+            "519696a2 fix: /status 不再误报",
+            dedupeRepeatedSpeech("``` 519696a2 fix: /status 不再误报 `````` 519696a2 fix: /status 不再误报 ```"),
             "同一句话说了两遍只留一遍，围栏不是内容",
         )
         assertEquals(
@@ -154,7 +154,7 @@ class PatchlessAnswerTest {
      */
     @Test
     fun aRepeatedTailIsCollapsedButThePreambleStays() {
-        val answer = "That's the last commit: `2e2e10b2 fix: /status`"
+        val answer = "That's the last commit: `519696a2 fix: /status`"
         assertEquals(
             "I'll start by checking the repo state. $answer",
             dedupeRepeatedSpeech("I'll start by checking the repo state. $answer$answer"),

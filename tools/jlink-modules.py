@@ -47,7 +47,12 @@ LAYOUTS = [
     # macOS: <image>/Contents/runtime/Contents/Home/lib/modules + <image>/Contents/app
     (os.path.join("Contents", "runtime", "Contents", "Home", "lib", "modules"),
      os.path.join("Contents", "app")),
-    # Linux / Windows: <image>/runtime/lib/modules + <image>/app
+    # Linux: <image>/lib/runtime/lib/modules + <image>/lib/app —— jpackage 的
+    # app-image 在 Linux 上比 Windows 多一层 lib/（bin/ 与 lib/ 平级）。
+    # CI 首跑实锤：按 Windows 布局找，runner 上报「没有 jpackage 产出的镜像」。
+    (os.path.join("lib", "runtime", "lib", "modules"),
+     os.path.join("lib", "app")),
+    # Windows: <image>/runtime/lib/modules + <image>/app
     (os.path.join("runtime", "lib", "modules"), "app"),
 ]
 

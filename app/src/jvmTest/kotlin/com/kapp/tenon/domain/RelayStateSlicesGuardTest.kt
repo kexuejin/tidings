@@ -35,7 +35,11 @@ class RelayStateSlicesGuardTest {
         "ChatSlice" to listOf("messages", "conversationSummaries", "unreadByPeer", "pendingByPeer"),
         "AgentSlice" to listOf(
             "agentSessions", "agentEvents", "agentApprovals", "agentTasks", "agentRuns", "agentInvokes",
-            "agentArtifacts", "agentWorkspaces", "agentGrants", "pendingGrantRequests",
+            "agentArtifacts", "agentWorkspaces", "agentGrants",
+            // 免批规则快照（cap atr1）：按宿主分键的整表快照，归 agent 面（它跟审批/授权
+            // 同一族的宿主事实）。readFailed 是它的伴生格：读没送出去的宿主，
+            // 界面据此区分「读不到」与「没有规则」（真机走查抓到的首帧撒谎）。
+            "toolApprovalRules", "toolRulesReadFailed", "pendingGrantRequests",
             "sessionPageLoading", "sessionPageExhausted",
         ),
         // selfNodeId（ARP-10）：身份恢复会换值，QR/分享面必须响应式读它 —— 归网络面

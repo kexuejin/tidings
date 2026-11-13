@@ -34,6 +34,7 @@ internal interface ConversationAgentPort {
     fun handleOnAgentWorkspace(envelope: Envelope)
     fun handleOnAgentGrant(envelope: Envelope)
     fun handleOnAgentGrantList(envelope: Envelope)
+    fun handleOnAgentToolRulesList(envelope: Envelope)
     fun handleOnAgentInvoke(envelope: Envelope)
     fun handleOnAgentInvokeResult(envelope: Envelope)
     fun intentExecutorPresent(): Boolean
@@ -259,6 +260,7 @@ internal class ConversationDomainService(
         override fun handleOnAgentWorkspace(envelope: Envelope) = agentDomain.handleOnAgentWorkspace(envelope)
         override fun handleOnAgentGrant(envelope: Envelope) = agentDomain.handleOnAgentGrant(envelope)
         override fun handleOnAgentGrantList(envelope: Envelope) = agentDomain.handleOnAgentGrantList(envelope)
+        override fun handleOnAgentToolRulesList(envelope: Envelope) = agentDomain.handleOnAgentToolRulesList(envelope)
         override fun handleOnAgentInvoke(envelope: Envelope) = agentDomain.handleOnAgentInvoke(envelope)
         override fun handleOnAgentInvokeResult(envelope: Envelope) = agentDomain.handleOnAgentInvokeResult(envelope)
         override fun intentExecutorPresent(): Boolean = agentDomain.intentExecutorPresent()

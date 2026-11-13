@@ -19,6 +19,7 @@ import androidx.compose.material.icons.outlined.Folder
 import androidx.compose.material.icons.outlined.Info
 import androidx.compose.material.icons.outlined.Link
 import androidx.compose.material.icons.outlined.Notifications
+import androidx.compose.material.icons.outlined.VerifiedUser
 import androidx.compose.material.icons.outlined.Security
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
@@ -52,6 +53,9 @@ import com.kapp.tenon.generated.resources.set_appear_subtitle
 import com.kapp.tenon.generated.resources.set_caps_none
 import com.kapp.tenon.generated.resources.set_caps_peer_visible
 import com.kapp.tenon.generated.resources.set_caps_title
+import com.kapp.tenon.generated.resources.set_home_host_auth_count
+import com.kapp.tenon.generated.resources.set_host_auth_desc
+import com.kapp.tenon.generated.resources.set_host_auth_title
 import com.kapp.tenon.generated.resources.set_conn_subtitle
 import com.kapp.tenon.generated.resources.set_conn_title
 import com.kapp.tenon.generated.resources.set_data_dir
@@ -105,6 +109,11 @@ internal fun SettingsHomeScreen(
     nodeSlice: NodeSlice,
     settingsSlice: SettingsSlice,
     chromeSlice: ChromeSlice,
+    /**
+     * 声明了 `atr1` 的已配对宿主数（调用方过滤，与免批规则 source 工厂同一谓词）。
+     * 值列的读数：0 台时点进去也是如实的空态，不藏这一行。
+     */
+    hostAuthPeerCount: Int = 0,
 ) {
     val settings = settingsSlice.settings
     // 「能力声明」这一行读**真实开关**：以前写死 tw1 · mrec1，用户在子页关掉后
@@ -279,6 +288,17 @@ internal fun SettingsHomeScreen(
                         sub = stringResource(Res.string.set_caps_peer_visible),
                         valText = capsText,
                         onClick = { onOpenPage?.invoke(SETTINGS_PAGE_CAPS) },
+                    )
+                    HorizontalDivider(modifier = Modifier.padding(horizontal = LocalAppSpacing.current.lg))
+                    // 宿主授权（免批规则读撤，cap atr1）：补发现性 —— 原先唯一入口在
+                    // 智能体工作区详情里两层深（真机走查的发现）。值列 = 可读宿主数，
+                    // 与「接入与通道」行的在线节点数同一口径（不另编指标）。
+                    SettingsNavRow(
+                        icon = Icons.Outlined.VerifiedUser,
+                        title = stringResource(Res.string.set_host_auth_title),
+                        sub = stringResource(Res.string.set_host_auth_desc),
+                        valText = stringResource(Res.string.set_home_host_auth_count, hostAuthPeerCount),
+                        onClick = { onOpenPage?.invoke(SETTINGS_PAGE_HOST_AUTH) },
                     )
                 }
             }

@@ -266,6 +266,17 @@ fun AgentConsoleScreen(
      * 算「谁能用这个 agent 干活」的逐设备勾选状态；null = 这个壳不提供配置入口
      * （手机连别人的机器时就没得配 —— 那是对方的主权）。
      */
+    /**
+     * 免批规则（本端增补 cap `atr1`）的读撤缝工厂：(宿主 nodeId) → source。
+     * null 工厂或工厂返回 null = 这条路不提供（对端不声明 atr1 / 壳没接）
+     * ⇒ 工作区详情不画免批规则区块（读不到 ≠ 没有规则）。
+     * 手机壳接 `RelayToolApprovalsSource`（帧快照）。
+     */
+    toolApprovalsSourceOf: ((String) -> com.kapp.tenon.feature.settings.ToolApprovalsSource?)? = null,
+    /** 拉一次免批表快照：(宿主 nodeId) -> Unit。与工厂成对（区块画出来时各触发一次）。 */
+    onRequestToolRules: ((String) -> Unit)? = null,
+    /** 撤销「没撤掉」的壳侧文案（透传给工作区详情，见 ToolApprovalsSection.revokeFailedNote）。 */
+    toolApprovalsFailedNote: String? = null,
     execDevicesOf: ((String?) -> List<ExecDeviceRow>)? = null,
     /** 勾选 / 取消某台设备：(agentKey, nodeId, checked) -> Unit。 */
     onToggleExecDevice: ((String, String, Boolean) -> Unit)? = null,
@@ -826,6 +837,11 @@ fun AgentConsoleScreen(
                     { nodeId, checked -> cb(agentKeyForView.orEmpty(), nodeId, checked) }
                 },
                 onAddExecDevice = onAddExecDevice,
+                // 免批规则的读撤：source 工厂按宿主取，撤/读的 peerId 在这里绑死
+                // （selected.nodeId = 这个工作区所属的宿主）—— 屏内只留"画与点"。
+                toolApprovalsSource = toolApprovalsSourceOf?.invoke(selected.nodeId),
+                onRequestToolRules = onRequestToolRules?.let { cb -> { cb(selected.nodeId) } },
+                toolApprovalsFailedNote = toolApprovalsFailedNote,
                 // 把 (peerId, agentKey, wsId) 在这里绑死，屏内只留"点一下"这件事。
                 // agentKey 取工作区宣告的身份键，拿不到再退到该工作区第一条会话的身份 ——
                 // 与 `grantFor` 的键口径一致（`agentId ?? agentKind`）。

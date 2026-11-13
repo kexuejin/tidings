@@ -1,4 +1,4 @@
-# DSH 完整工作区 × 触发通道 × 卡片家族 · 真机验证（main @ `ec9926d4`）
+# DSH 完整工作区 × 触发通道 × 卡片家族 · 真机验证（main @ `0e8e1fbd`）
 
 > 日期：2026-11-09 23:00 – 2026-11-10 00:35
 > 装置：Pixel 6（<device-serial>，com.kapp.tenon.debug）+ macOS 宿主 Tenon.app（同仓 HEAD 构建）
@@ -8,9 +8,9 @@
 
 ## 0. 为什么重装：一次现场抓到的「合并后才成立」缺陷
 
-会话开始时的在装产物（APK 23:44 前构建 / 宿主 18:45 构建）**早于** `cee24e12`
+会话开始时的在装产物（APK 23:44 前构建 / 宿主 18:45 构建）**早于** `0e8e1fbd`
 （20:20 提交）。用旧宿主打开本机桌面库检查：`user_version=21` 且
-`SchedulerTaskState` / `TriggerEvent` **两张表都不存在**——正是 `cee24e12` 修的
+`SchedulerTaskState` / `TriggerEvent` **两张表都不存在**——正是 `0e8e1fbd` 修的
 「老桌面库整段跳过 21.sqm」，在真机库上活体复现。
 
 从 HEAD 重建两端并重装：
@@ -22,7 +22,7 @@
 | 宿主 | /Applications/Tenon.app 由 HEAD dist 替换 + `lsregister -f -R -trusted`，23:13 重启 |
 | 宿主 jar | app-jvm 内 SchemaSelfHeal 自愈符号命中 |
 
-**`cee24e12` 自愈真机验证 ✅**：换包重启后同一桌面库
+**`0e8e1fbd` 自愈真机验证 ✅**：换包重启后同一桌面库
 `user_version 21 → 22`，`SchedulerTaskState` / `TriggerEvent` 两表补齐，
 `[RELAY-TRIGGER] trigger tasks synced` 正常初始化（修复前这条链路面对的是
 no-such-table）。装机纪律见 ACCEPTANCE §1b。
@@ -30,7 +30,7 @@ no-such-table）。装机纪律见 ACCEPTANCE §1b。
 ## 1. L0 完整测试（交付口径）
 
 ```
-=== L0 FULL 2026-11-09 === HEAD=ec9926d4
+=== L0 FULL 2026-11-09 === HEAD=0e8e1fbd
 8 模块测试   BUILD SUCCESSFUL（82 tasks，对当前树 mostly up-to-date——
              上一会话已在本树跑过全套；本轮改动只有文档）
 10 门禁      BUILD SUCCESSFUL（GATES_EXIT=0）
@@ -38,7 +38,7 @@ imports     OK / palette OK
 testStabilityGate  全新执行 3 轮（6m11s，1 task executed）→ STABILITY_EXIT=0
 ```
 
-`cee24e12` 动了存储面，稳定性门禁必跑且为全新执行；8 模块的 up-to-date
+`0e8e1fbd` 动了存储面，稳定性门禁必跑且为全新执行；8 模块的 up-to-date
 读数如实标注，不冒充「又跑了一遍」。
 
 ## 2. DSH 真实 agent 完整工作区（Round A：真实需求多轮）
@@ -113,11 +113,11 @@ teahouse-mobile 协同群）。注册阶段两道 fail-closed 门**如期咬合*
 | 形态 | 本轮读数 |
 |---|---|
 | working | 多单复验（耗时段 + stage chip）；t-6 卡出现**无停止键**的 working 变体（与 23:28 A2 卡带「停止」的形态不同，见 O8） |
-| review_ready | 真内容 diff hunk + 合并此补丁（A1/A2）；**待合并 chip + 「Details externalized to local Artifacts; full board exceeds 5 KiB」预算外置横幅**（t-5，553fb3bc 的 warn 色横幅形态） |
+| review_ready | 真内容 diff hunk + 合并此补丁（A1/A2）；**待合并 chip + 「Details externalized to local Artifacts; full board exceeds 5 KiB」预算外置横幅**（t-5，0e8e1fbd 的 warn 色横幅形态） |
 | merged / decided | A1/A2 两单，知情行「已由 Pixel 6 处理」 |
 | **prototype** | working（`Generating interactive prototype (prototype.html)…｜下一步：无需你操作｜第 1/1 棒·20%`）→ ready（`Interactive prototype ready. Reply to adjust it…` + prototype.html 附件卡 + **Approve & Develop 按钮上屏**——上一轮缺的截图证据本轮补齐）→ 批准后转开发工单 |
-| **ask（方向确认）** | a74b303e 的 1:1 双派追问真机复现：卡内引用我的追问原文「是调整这个原型，还是一个新任务？」+ 作为调整发送/派为新任务 + 已由 Pixel 6 处理 |
-| **blocked** | 「受阻 · 等你给方向」+ **「Handed back: no git workspace bound to group｜下一步：需要你给方向：可重试或补充说明」** + Retry——b0c6e20d（兜底卡补 wsId 回落）的可见退单面 |
+| **ask（方向确认）** | 0e8e1fbd 的 1:1 双派追问真机复现：卡内引用我的追问原文「是调整这个原型，还是一个新任务？」+ 作为调整发送/派为新任务 + 已由 Pixel 6 处理 |
+| **blocked** | 「受阻 · 等你给方向」+ **「Handed back: no git workspace bound to group｜下一步：需要你给方向：可重试或补充说明」** + Retry——0e8e1fbd（兜底卡补 wsId 回落）的可见退单面 |
 | **trigger-result** | 成功（webhook/cron 两条）+ 失败（fail 探针）三种，均落到手机群 |
 | 文件卡 | patch.diff / report.json / prototype.html，打开/分享出口在位 |
 | 审批卡 / 崩溃检查卡 / 熔断卡 / aborted | 未在本轮驱动（审批=T3 已有真机读数；后三者需必败/watchdog 专门场景，解析层由 `AgentCardFamilySpecTest` 钉住） |
@@ -139,7 +139,7 @@ teahouse-mobile 协同群）。注册阶段两道 fail-closed 门**如期咬合*
 |---|---|---|
 | O5 | 冷启动竞态下「宿主睡眠/离线」横幅滞留：宿主恰在恢复窗口时启动 app，链路已 online 但横幅/头部「离线」未即时清除，重进会话后正常 | 23:13 一次；不复现路径待定 |
 | O6 | 交付链对「无 patch 任务」的重试压力诱发模型编造无关改动：问答式派单（要求写 /tmp 计数文件）被分诊进沙箱工单链 → 空收成 → 重试 prompt「Previous attempt failed: No patch produced…」→ dsh 产出 **+33 −2 的卡片词表测试改动**（与原任务无关）。系统兜住了：无 RELAY-INVOKE、工作树零污染、review_ready 卡未被合并 | `/tmp/tenon-ws/artifacts/t-2-a09a8044/patch.diff`；留档不合并 |
-| O7 | 方向确认卡的派单腿未继承 1:1 药丸工作区：Q&A 新任务腿退单「no git workspace bound to group」，而该 1:1 明确选着 teahouse-mobile。退单**可见**（好），但 1:1 有药丸时本不该退 | 需对照 6de4b13e 判据 2b 的解析域 |
+| O7 | 方向确认卡的派单腿未继承 1:1 药丸工作区：Q&A 新任务腿退单「no git workspace bound to group」，而该 1:1 明确选着 teahouse-mobile。退单**可见**（好），但 1:1 有药丸时本不该退 | 需对照 0e8e1fbd 判据 2b 的解析域 |
 | O8 | working 卡的「停止」按钮两形态：A2 卡（23:28）有、t-6 卡（00:24）无（均进行中、均有活进程） | 疑与阶段/动作帧状态相关，待查 |
 
 另外两条如实记：t-6（abort 探针）在我停止尝试期间自然完成，`docs/abort-probe-2.md`
@@ -150,15 +150,15 @@ teahouse-mobile 协同群）。注册阶段两道 fail-closed 门**如期咬合*
 
 - 自愈/审查闭环（verify FAILED → heal）：本轮**未重驱**；git log 确认
   `DesktopStageChain` / `ReviewPipeline` / `HealSteering` 未被触发分支合并触碰
-  （最后提交为 `9de149a4` / `6a9bd334`），11-08 的 heal 真机结论对 main 维持有效。
+  （最后提交为 `029e174a` / `029e174a`），11-08 的 heal 真机结论对 main 维持有效。
 - 熔断卡、崩溃检查卡、aborted 卡的真机构造；审批卡本轮未重验（T3 在案）。
 - webhook 503 两面；公网 TLS+pin；跨网文件；iOS。
 - dsh 执行前只读否决（依赖 dsh 侧 hook，见 §5）。
 
 ## 8. 结论
 
-- `cee24e12` 自愈、`P0②` SKIP 语义、webhook 落盘门控 + 复合幂等键、
-  a74b303e 双派追问、b0c6e20d 可见退单、D7/D14/diff 可视化——本轮全部拿到
+- `0e8e1fbd` 自愈、`P0②` SKIP 语义、webhook 落盘门控 + 复合幂等键、
+  0e8e1fbd 双派追问、0e8e1fbd 可见退单、D7/D14/diff 可视化——本轮全部拿到
   **main 分支的真机读数**。
 - DSH 完整工作区七跳 × 2 轮（创建 + 追加）全通，沙箱基自续成立，失败重试无静默。
 - 卡片家族真机新增 6 种形态（prototype working/ready+approve、ask、blocked、
@@ -279,7 +279,7 @@ teahouse-mobile 协同群）。注册阶段两道 fail-closed 门**如期咬合*
 ## 14. 回归与本轮改动面
 
 ```
-=== L0 REGRESSION 2026-11-10 === HEAD=951ecb2b dirty=O7/O6/O8
+=== L0 REGRESSION 2026-11-10 === HEAD=718b11e0 dirty=O7/O6/O8
 （8 模块 + 10 门禁 + 2 脚本门禁，读数见文末补记；4 文件 +115 −2：
  DesktopWorkerOrchestrator.kt / DesktopWorkerWatchdog.kt + 两条测试文件）
 ```

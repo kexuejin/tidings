@@ -44,6 +44,7 @@ internal object CapabilityInventory {
         "CAP_LINK" to MsgTypes.CAP_LINK,
         "CAP_ATTACHMENT" to MsgTypes.CAP_ATTACHMENT,
         "CAP_GROUP_TEXT_ATTRIBUTED" to MsgTypes.CAP_GROUP_TEXT_ATTRIBUTED,
+        "CAP_AGENT_TOOL_RULES" to MsgTypes.CAP_AGENT_TOOL_RULES,
         "CAP_AGENT_INVOKE" to MsgTypes.CAP_AGENT_INVOKE,
         "CAP_AGENT_CHANNEL" to MsgTypes.CAP_AGENT_CHANNEL,
     )

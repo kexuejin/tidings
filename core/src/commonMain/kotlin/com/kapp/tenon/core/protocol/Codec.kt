@@ -314,6 +314,22 @@ object Codec {
         at: Long? = null,
     ) = CodecAgent.agentSessionPagePayload(wsId, offset, limit, at)
 
+    /** 本端增补：读/撤免批规则的门面透传（cap `atr1`，见 CodecAgent 的同名 builder）。 */
+    fun agentToolRulesRequestPayload(
+        nodeId: String? = null,
+        tool: String? = null,
+        agentKey: String? = null,
+        wsId: String? = null,
+        at: Long? = null,
+    ) = CodecAgent.agentToolRulesRequestPayload(nodeId, tool, agentKey, wsId, at)
+
+    /** 本端增补：免批表全量快照的门面透传（cap `atr1`，见 CodecAgent 的同名 builder）。 */
+    fun agentToolRulesListPayload(
+        total: Int? = null,
+        rules: List<AgentToolRuleRowPayload> = emptyList(),
+        at: Long? = null,
+    ) = CodecAgent.agentToolRulesListPayload(total, rules, at)
+
     fun shareListPayload(reqId: String, path: String = "", offset: Int = 0, snapshotId: String? = null) = CodecShare.shareListPayload(reqId, path, offset, snapshotId)
 
     fun shareListOkPayload(

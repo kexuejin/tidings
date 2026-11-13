@@ -14,6 +14,7 @@ import com.kapp.tenon.domain.model.AgentRunUi
 import com.kapp.tenon.domain.model.AgentSessionKey
 import com.kapp.tenon.domain.model.AgentSessionUi
 import com.kapp.tenon.domain.model.GrantUi
+import com.kapp.tenon.domain.model.ToolApprovalRuleUi
 import com.kapp.tenon.domain.model.WorkspaceKey
 import com.kapp.tenon.domain.model.WorkspaceUi
 import com.kapp.tenon.core.nowMillis
@@ -26,7 +27,10 @@ import com.kapp.tenon.core.transport.SendOutcome
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
+import kotlinx.serialization.json.JsonArray
 import kotlinx.serialization.json.JsonObject
+import kotlinx.serialization.json.jsonPrimitive
+import kotlinx.serialization.json.longOrNull
 
 /**
  * agent 协议帧的入站处理：会话、事件、队列、执行、审批、取消、回执、产物。
@@ -480,6 +484,148 @@ suspend fun handleSendGrantRequest(
         }
     }
     return outcome
+}
+
+/**
+ * 入站 `agent-tool-rules-list`（本端增补 cap `atr1`）：宿主把它的免批表**全量快照**
+ * 回过来（读与撤两种请求的应答都是它）。
+ *
+ * 快照按宿主分键、**整键覆盖**（不增量合并）：免批规则行数少，宿主回的就是当前
+ * 全表；增量合并需要 rev/序号，而快照对账里「宿主刚撤掉的行」必须消失 —— 合并
+ * 会让它复活。`rules` 的行解析与 codec 同一个白名单（这里再核对一遍 nodeId/tool
+ * 是解析必需，不是二次校验 —— 取不到就直接丢行）。
+ *
+ * 撤销的本地翻行**只发生在发送侧**（见 [handleRevokeToolRule]）；快照一到就以它
+ * 为准 —— 它是唯一对账来源，本端不猜。
+ */
+fun handleOnAgentToolRulesList(envelope: Envelope) {
+    // 快照到了 = 读成功：把「没读到」的记账摘掉（重试自愈的那一环）。
+    host.updateAgentState { s -> s.copy(toolRulesReadFailed = s.toolRulesReadFailed - envelope.from) }
+    val payload = envelope.payload as? JsonObject ?: return
+    val rows = payload["rules"] as? JsonArray ?: return
+    val parsed = rows.map { row ->
+        val r = row as? JsonObject ?: return@map null
+        val nodeId = r.strField("nodeId") ?: return@map null
+        val tool = r.strField("tool") ?: return@map null
+        ToolApprovalRuleUi(
+            nodeId = nodeId,
+            tool = tool,
+            agentKey = r.strField("agentKey"),
+            wsId = r.strField("wsId"),
+            grantedAt = r["grantedAt"]?.jsonPrimitive?.longOrNull,
+            grantedBy = r.strField("grantedBy"),
+        )
+    }.filterNotNull()
+    host.updateAgentState { s ->
+        s.copy(toolApprovalRules = s.toolApprovalRules + (envelope.from to parsed))
+    }
+}
+
+/**
+ * 出站：向宿主要一份免批表快照（本端增补 cap `atr1`）。
+ *
+ * 门控查 `atr1`（不是 `agn1`）：对不声明 `atr1` 的旧宿主发这条请求，它既不认识
+ * 也不回 —— 与 `agp1` 同一条注释的理由（core 的 sendReliableNoQueue 失败不改
+ * 在线状态、不入队，代价只是"白等"）。界面的对应处理：对端不声明时**不画**
+ * 免批规则区块（诚实：读不到 ≠ 没有规则）。
+ *
+ * 读请求**不入队**：宿主此刻不在线，这个读没有意义，重试由界面再进一次这个区块
+ * 触发（与 agent-session-page 同一条纪律）。
+ *
+ * @return false = 没发出去（对端不声明 `atr1`、或没有 runtime）。
+ */
+fun handleRequestToolRules(peerId: String): Boolean {
+    val rt = host.runtime ?: return false
+    if (!rt.peerDeclares(peerId, MsgTypes.CAP_AGENT_TOOL_RULES)) return false
+    host.scope.launch {
+        // 读失败必须记账（界面据此画「读不到」而不是「还没有规则」—— 真机走查
+        // 抓到的首帧撒谎）；快照一到即摘（[handleOnAgentToolRulesList]）。
+        val delivered = runCatching {
+            val sender = toolRulesReadSenderForTest
+            if (sender != null) {
+                sender(peerId)
+            } else {
+                rt.sendAgentToolRulesRead(peerId, nowMillis())
+            }
+        }.getOrDefault(false)
+        if (!delivered) {
+            host.updateAgentState { s -> s.copy(toolRulesReadFailed = s.toolRulesReadFailed + peerId) }
+        }
+    }
+    return true
+}
+
+/**
+ * 出站：撤一条免批规则（本端增补 cap `atr1`）。
+ *
+ * ## 乐观翻行 + 发送失败回滚（与 [handleRespondApproval] 同一条纪律）
+ *
+ * 界面缝 `ToolApprovalsSource.revokeExactly` 是同步返回 `Int` 的，而发送是异步的
+ * ——同步翻行、异步发送、失败把**原行**放回去并再通知。为什么不改成「回执先行」：
+ * 那条缝的回执只有 Int 一格，「回执先行」意味着点击之后行**原地不动**直到快照
+ * 回来 —— 与桌面同一份区块的「这一下必须立刻可见」（ToolApprovalsSection 的
+ * onClick 注释）直接冲突。回滚概率低：快照刚从这台宿主来，它在线。
+ *
+ * 撤销帧走 sendReliableNoQueue（不入队）：宿主不在线时这个撤无从谈起 —— 如实
+ * 失败、界面给重试，不把「撤掉」伪装成"已排队等补投"；也不把发送失败算成
+ * 「宿主离线」（reliableNoQueue 失败不改在线状态）。
+ *
+ * 身份四元组逐字下发（nodeId = 规则归属的设备），宿主对不上时快照原样回，
+ * 本地翻掉的行会被那份快照原样摆回来 —— 错账只活一次刷新。
+ *
+ * @return 删掉的行数（0 = 快照里没有这条、或对端不声明 `atr1` / 没有 runtime ——
+ *   没发任何东西，也不翻任何行）。
+ */
+fun handleRevokeToolRule(peerId: String, rule: ToolApprovalRuleUi): Int {
+    val rt = host.runtime ?: return 0
+    if (!rt.peerDeclares(peerId, MsgTypes.CAP_AGENT_TOOL_RULES)) return 0
+    // 乐观翻行按**身份四元组**匹配（快照里的行带 grantedAt/grantedBy，构造的撤销
+    // 请求不带 —— 全对象等值会一个都删不掉）。回滚把删掉的**原行**放回去。
+    val removed = removeToolRuleRows(peerId, rule)
+    if (removed.isEmpty()) return 0
+    host.scope.launch {
+        val delivered = runCatching {
+            val sender = toolRulesRevokeSenderForTest
+            if (sender != null) {
+                sender(peerId, rule)
+            } else {
+                rt.sendAgentToolRulesRevoke(
+                    peerId = peerId,
+                    nodeId = rule.nodeId,
+                    tool = rule.tool,
+                    agentKey = rule.agentKey,
+                    wsId = rule.wsId,
+                    at = nowMillis(),
+                )
+            }
+        }.getOrDefault(false)
+        if (!delivered) restoreToolRuleRows(peerId, removed)
+    }
+    return removed.size
+}
+
+/** 从快照里删掉身份四元组匹配的行，返回删掉的**原行**（回滚要用）。 */
+private fun removeToolRuleRows(peerId: String, rule: ToolApprovalRuleUi): List<ToolApprovalRuleUi> {
+    var removed: List<ToolApprovalRuleUi> = emptyList()
+    host.updateAgentState { s ->
+        val rows = s.toolApprovalRules[peerId] ?: return@updateAgentState s
+        val (hit, rest) = rows.partition {
+            it.nodeId == rule.nodeId && it.tool == rule.tool &&
+                it.agentKey == rule.agentKey && it.wsId == rule.wsId
+        }
+        if (hit.isEmpty()) return@updateAgentState s
+        removed = hit
+        s.copy(toolApprovalRules = s.toolApprovalRules + (peerId to rest))
+    }
+    return removed
+}
+
+/** 回滚：把删掉的原行放回快照（顺序不保 —— 撤销回执只关心行在不在）。 */
+private fun restoreToolRuleRows(peerId: String, removed: List<ToolApprovalRuleUi>) {
+    host.updateAgentState { s ->
+        val rows = s.toolApprovalRules[peerId] ?: return@updateAgentState s
+        s.copy(toolApprovalRules = s.toolApprovalRules + (peerId to (rows + removed)))
+    }
 }
 
 /**
@@ -943,6 +1089,21 @@ fun handleOnAgentArtifact(envelope: Envelope) {
 internal var ackSenderForTest: (suspend (peerId: String, ackOf: String, kind: String) -> Unit)? = null
 
 /**
+ * 测试接缝：替换「发免批撤销帧」的底层调用，null = 生产路径。
+ *
+ * 与 [ackSenderForTest] 同一条理由：`sendReliableNoQueue` 的失败形态真实传输造不出
+ * 稳定的一条（半死链路会吞帧不报错 —— tryLinkFirst 把帧交给已断的通道也返回 true），
+ * 而「发送失败 ⇒ 本地翻行必须回滚」这条不变量不能没有会变红的测试。
+ */
+internal var toolRulesRevokeSenderForTest: (suspend (peerId: String, rule: ToolApprovalRuleUi) -> Boolean)? = null
+
+/**
+ * 测试接缝：替换「发免批读请求」的底层调用，null = 生产路径。理由同
+ * [toolRulesRevokeSenderForTest] —— 真实传输造不出稳定的失败形态。
+ */
+internal var toolRulesReadSenderForTest: (suspend (peerId: String) -> Boolean)? = null
+
+/**
  * 旧的两参 + 免审布尔入口：转发到四态版本，行为与取值一一对应。
  *
  * 保留它是因为「批准 / 拒绝」这两个最常用的动作不该逼调用方去写一个枚举；
@@ -1014,6 +1175,14 @@ fun handleRespondApproval(approvalId: String, decision: AgentApprovalDecision) {
                     kind = kind,
                     at = nowMillis(),
                 )
+            }
+        }
+        // 「始终允许」会在宿主落一条免批规则 —— 手机停在免批规则区块（工作区详情 /
+        // 设置页）时不会自己知道。ack 真正交出去之后顺带重拉一次快照（读失败有
+        // toolRulesReadFailed 记账，不静默）；其余处置不动这张表，不发。
+        .onSuccess { _ ->
+            if (decision == AgentApprovalDecision.ALLOW_ALWAYS) {
+                handleRequestToolRules(approval.peerId)
             }
         }.onFailure { _ ->
             // 处境 2：发送抛错 ⇒ 本地的「已批准/已拒绝」是对端永远不知道的假账。

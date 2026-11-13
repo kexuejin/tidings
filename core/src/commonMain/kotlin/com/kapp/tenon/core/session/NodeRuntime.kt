@@ -5,6 +5,7 @@ package com.kapp.tenon.core.session
 import com.kapp.tenon.core.ioDispatcher
 import com.kapp.tenon.core.nowMillis
 import com.kapp.tenon.core.protocol.AgentEventAttachment
+import com.kapp.tenon.core.protocol.AgentToolRuleRowPayload
 import com.kapp.tenon.core.protocol.Codec
 import com.kapp.tenon.core.protocol.DEFAULT_TIMINGS
 import com.kapp.tenon.core.protocol.Envelope
@@ -2107,6 +2108,24 @@ class NodeRuntime(
         total: Long? = null,
         at: Long? = null,
     ) = outbound.sendAgentGrantList(peerId, scope, agentKey, wsId, access, total, at)
+
+    /** 本端增补：读免批规则快照（设备 → 宿主，cap `atr1`）。不入队 —— 宿主不在线的读没有意义。 */
+    suspend fun sendAgentToolRulesRead(peerId: String, at: Long? = null) =
+        outbound.sendAgentToolRulesRead(peerId, at)
+
+    /** 本端增补：撤一条免批规则（设备 → 宿主，cap `atr1`）。持久意图 —— 宿主不在线就入队。 */
+    suspend fun sendAgentToolRulesRevoke(
+        peerId: String,
+        nodeId: String,
+        tool: String,
+        agentKey: String? = null,
+        wsId: String? = null,
+        at: Long? = null,
+    ) = outbound.sendAgentToolRulesRevoke(peerId, nodeId, tool, agentKey, wsId, at)
+
+    /** 本端增补：回免批表全量快照（宿主 → 设备，cap `atr1`）。 */
+    suspend fun sendAgentToolRulesList(peerId: String, rules: List<AgentToolRuleRowPayload>, at: Long? = null) =
+        outbound.sendAgentToolRulesList(peerId, rules, at)
 
     suspend fun sendAvatarGet(peerId: String, hash: String) = outbound.sendAvatarGet(peerId, hash)
 

@@ -400,7 +400,17 @@ private fun AgentsPhoneShell(
 private fun AgentsLoadingPhonePreview() {
     val state = agentsLoadingState()
     AgentsPhoneShell(state) { inner ->
-        AgentConsoleScreen(chatSlice = previewSlicesOf(state).chat,settingsSlice = previewSlicesOf(state).settings,nodeSlice = previewSlicesOf(state).node,agentSlice = previewSlicesOf(state).agent,
+        AgentConsoleScreen(
+            // 逐参武装补账（029e174a 引入 execDevicesOf 时漏了这一批）：手机壳 = 生产接线
+            // （App.kt 不传 execDevicesOf —— 逐设备勾选是宿主本机的配置，手机连别人的机器
+            // 没得配），显式 null 把「这一支本来就不该进图」写成一句话，而不是让它看起来
+            // 像漏武装（designPreviewPairingGate 的欠武装判据）。
+            execDevicesOf = null,
+            // 逐参武装（手机壳 = 生产接线：App.kt 传非 null 工厂 + 拉快照出口）——
+            // 夹具不传 = 免批规则那一支不进图，截图证据里就没有它。
+            toolApprovalsSourceOf = { fakeToolApprovalsSource() },
+            onRequestToolRules = {},
+            chatSlice = previewSlicesOf(state).chat,settingsSlice = previewSlicesOf(state).settings,nodeSlice = previewSlicesOf(state).node,agentSlice = previewSlicesOf(state).agent,
             selectedAgentId = null,
             onSelectAgent = {},
             onOpenChat = { _, _ -> },
@@ -458,7 +468,17 @@ internal class PreviewWorkstationPort(
 private fun AgentsApprovalsQueuePhonePreview() {
     val state = agentsRichState()
     AgentsPhoneShell(state) { inner ->
-        AgentConsoleScreen(chatSlice = previewSlicesOf(state).chat,settingsSlice = previewSlicesOf(state).settings,nodeSlice = previewSlicesOf(state).node,agentSlice = previewSlicesOf(state).agent,
+        AgentConsoleScreen(
+            // 逐参武装补账（029e174a 引入 execDevicesOf 时漏了这一批）：手机壳 = 生产接线
+            // （App.kt 不传 execDevicesOf —— 逐设备勾选是宿主本机的配置，手机连别人的机器
+            // 没得配），显式 null 把「这一支本来就不该进图」写成一句话，而不是让它看起来
+            // 像漏武装（designPreviewPairingGate 的欠武装判据）。
+            execDevicesOf = null,
+            // 逐参武装（手机壳 = 生产接线：App.kt 传非 null 工厂 + 拉快照出口）——
+            // 夹具不传 = 免批规则那一支不进图，截图证据里就没有它。
+            toolApprovalsSourceOf = { fakeToolApprovalsSource() },
+            onRequestToolRules = {},
+            chatSlice = previewSlicesOf(state).chat,settingsSlice = previewSlicesOf(state).settings,nodeSlice = previewSlicesOf(state).node,agentSlice = previewSlicesOf(state).agent,
             selectedAgentId = teahouseAgent.nodeId,
             onSelectAgent = {},
             // 显式指到 run 会话：默认兜底会取列表第一个，将来夹具长到三个会话时这张图的含义会被静默改掉。
@@ -559,7 +579,17 @@ private fun WorkspaceDetailPhonePreview() {
         )
     }
     AgentsPhoneShell(state) { inner ->
-        AgentConsoleScreen(chatSlice = previewSlicesOf(state).chat,settingsSlice = previewSlicesOf(state).settings,nodeSlice = previewSlicesOf(state).node,agentSlice = previewSlicesOf(state).agent,
+        AgentConsoleScreen(
+            // 逐参武装补账（029e174a 引入 execDevicesOf 时漏了这一批）：手机壳 = 生产接线
+            // （App.kt 不传 execDevicesOf —— 逐设备勾选是宿主本机的配置，手机连别人的机器
+            // 没得配），显式 null 把「这一支本来就不该进图」写成一句话，而不是让它看起来
+            // 像漏武装（designPreviewPairingGate 的欠武装判据）。
+            execDevicesOf = null,
+            // 逐参武装（手机壳 = 生产接线：App.kt 传非 null 工厂 + 拉快照出口）——
+            // 夹具不传 = 免批规则那一支不进图，截图证据里就没有它。
+            toolApprovalsSourceOf = { fakeToolApprovalsSource() },
+            onRequestToolRules = {},
+            chatSlice = previewSlicesOf(state).chat,settingsSlice = previewSlicesOf(state).settings,nodeSlice = previewSlicesOf(state).node,agentSlice = previewSlicesOf(state).agent,
             selectedAgentId = teahouseAgent.nodeId,
             onSelectAgent = {},
             onOpenChat = { _, _ -> },

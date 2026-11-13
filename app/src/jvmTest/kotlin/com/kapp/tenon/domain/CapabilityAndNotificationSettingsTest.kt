@@ -49,15 +49,15 @@ class CapabilityAndNotificationSettingsTest {
     fun theTwoSwitchesNarrowTheDeclaredCapabilities() {
         assertEquals(MsgTypes.MOBILE_CAPS, settings().caps(), "两个都开 = 原来那套 MOBILE_CAPS，顺序都不能变")
         assertEquals(
-            listOf(MsgTypes.CAP_MOBILE_TEXT, MsgTypes.CAP_AGENT_SESSION, MsgTypes.CAP_AGENT_QUEUE, MsgTypes.CAP_AGENT_WORKSPACE, MsgTypes.CAP_AGENT_GRANT, MsgTypes.CAP_AGENT_SESSION_PAGE, MsgTypes.CAP_TABLE_TEXT, MsgTypes.CAP_ATTACHMENT, MsgTypes.CAP_GROUP_TEXT_ATTRIBUTED, MsgTypes.CAP_AGENT_INVOKE, MsgTypes.CAP_AGENT_ARTIFACT_VERIFIED, MsgTypes.CAP_AGENT_CHANNEL),
+            listOf(MsgTypes.CAP_MOBILE_TEXT, MsgTypes.CAP_AGENT_SESSION, MsgTypes.CAP_AGENT_QUEUE, MsgTypes.CAP_AGENT_WORKSPACE, MsgTypes.CAP_AGENT_GRANT, MsgTypes.CAP_AGENT_SESSION_PAGE, MsgTypes.CAP_TABLE_TEXT, MsgTypes.CAP_AGENT_TOOL_RULES, MsgTypes.CAP_ATTACHMENT, MsgTypes.CAP_GROUP_TEXT_ATTRIBUTED, MsgTypes.CAP_AGENT_INVOKE, MsgTypes.CAP_AGENT_ARTIFACT_VERIFIED, MsgTypes.CAP_AGENT_CHANNEL),
             settings(record = false).caps(),
         )
         assertEquals(
-            listOf(MsgTypes.CAP_MOBILE_RECORD, MsgTypes.CAP_AGENT_SESSION, MsgTypes.CAP_AGENT_QUEUE, MsgTypes.CAP_AGENT_WORKSPACE, MsgTypes.CAP_AGENT_GRANT, MsgTypes.CAP_AGENT_SESSION_PAGE, MsgTypes.CAP_TABLE_TEXT, MsgTypes.CAP_ATTACHMENT, MsgTypes.CAP_GROUP_TEXT_ATTRIBUTED, MsgTypes.CAP_AGENT_INVOKE, MsgTypes.CAP_AGENT_ARTIFACT_VERIFIED, MsgTypes.CAP_AGENT_CHANNEL),
+            listOf(MsgTypes.CAP_MOBILE_RECORD, MsgTypes.CAP_AGENT_SESSION, MsgTypes.CAP_AGENT_QUEUE, MsgTypes.CAP_AGENT_WORKSPACE, MsgTypes.CAP_AGENT_GRANT, MsgTypes.CAP_AGENT_SESSION_PAGE, MsgTypes.CAP_TABLE_TEXT, MsgTypes.CAP_AGENT_TOOL_RULES, MsgTypes.CAP_ATTACHMENT, MsgTypes.CAP_GROUP_TEXT_ATTRIBUTED, MsgTypes.CAP_AGENT_INVOKE, MsgTypes.CAP_AGENT_ARTIFACT_VERIFIED, MsgTypes.CAP_AGENT_CHANNEL),
             settings(text = false).caps(),
         )
         assertEquals(
-            listOf(MsgTypes.CAP_AGENT_SESSION, MsgTypes.CAP_AGENT_QUEUE, MsgTypes.CAP_AGENT_WORKSPACE, MsgTypes.CAP_AGENT_GRANT, MsgTypes.CAP_AGENT_SESSION_PAGE, MsgTypes.CAP_TABLE_TEXT, MsgTypes.CAP_ATTACHMENT, MsgTypes.CAP_GROUP_TEXT_ATTRIBUTED, MsgTypes.CAP_AGENT_INVOKE, MsgTypes.CAP_AGENT_ARTIFACT_VERIFIED, MsgTypes.CAP_AGENT_CHANNEL),
+            listOf(MsgTypes.CAP_AGENT_SESSION, MsgTypes.CAP_AGENT_QUEUE, MsgTypes.CAP_AGENT_WORKSPACE, MsgTypes.CAP_AGENT_GRANT, MsgTypes.CAP_AGENT_SESSION_PAGE, MsgTypes.CAP_TABLE_TEXT, MsgTypes.CAP_AGENT_TOOL_RULES, MsgTypes.CAP_ATTACHMENT, MsgTypes.CAP_GROUP_TEXT_ATTRIBUTED, MsgTypes.CAP_AGENT_INVOKE, MsgTypes.CAP_AGENT_ARTIFACT_VERIFIED, MsgTypes.CAP_AGENT_CHANNEL),
             settings(text = false, record = false).caps(),
             "两个开关都关掉也不影响 agn1 / agq1 / aws1 / tbl1 / agi1 / agf1：它们是事实声明，不是用户偏好",
         )
@@ -81,7 +81,7 @@ class CapabilityAndNotificationSettingsTest {
     fun theDeclaredCapabilitiesReachTheProfileThatGetsBroadcast() {
         val profile = settings(text = false).toProfile(host = "192.168.1.44", ver = "relay-0.1.0")
         assertEquals(
-            listOf(MsgTypes.CAP_MOBILE_RECORD, MsgTypes.CAP_AGENT_SESSION, MsgTypes.CAP_AGENT_QUEUE, MsgTypes.CAP_AGENT_WORKSPACE, MsgTypes.CAP_AGENT_GRANT, MsgTypes.CAP_AGENT_SESSION_PAGE, MsgTypes.CAP_TABLE_TEXT, MsgTypes.CAP_ATTACHMENT, MsgTypes.CAP_GROUP_TEXT_ATTRIBUTED, MsgTypes.CAP_AGENT_INVOKE, MsgTypes.CAP_AGENT_ARTIFACT_VERIFIED, MsgTypes.CAP_AGENT_CHANNEL),
+            listOf(MsgTypes.CAP_MOBILE_RECORD, MsgTypes.CAP_AGENT_SESSION, MsgTypes.CAP_AGENT_QUEUE, MsgTypes.CAP_AGENT_WORKSPACE, MsgTypes.CAP_AGENT_GRANT, MsgTypes.CAP_AGENT_SESSION_PAGE, MsgTypes.CAP_TABLE_TEXT, MsgTypes.CAP_AGENT_TOOL_RULES, MsgTypes.CAP_ATTACHMENT, MsgTypes.CAP_GROUP_TEXT_ATTRIBUTED, MsgTypes.CAP_AGENT_INVOKE, MsgTypes.CAP_AGENT_ARTIFACT_VERIFIED, MsgTypes.CAP_AGENT_CHANNEL),
             profile.caps,
         )
         assertEquals("self", profile.nodeId, "收窄 caps 不该顺手改动档案的其它字段")
@@ -116,12 +116,13 @@ class CapabilityAndNotificationSettingsTest {
         val desktop = settings().caps(advertiseAgent = true)
         assertTrue(MsgTypes.CAP_AGENT in desktop, "承载 agent 的宿主必须声明 ag1：$desktop")
         assertEquals(MsgTypes.CAP_AGENT, desktop.first(), "ag1 是身份声明，排在最前（与 agentNode 同序）")
-        // 除 ag1（身份）与 lnk1（下行通道）外与手机端逐项相同：桌面端承载会话与下行，
-        // 但收发文本的能力不因角色而变。
+        // 桌面 = 手机清单 + ag1（身份）+ lnk1（下行通道）− att1（预算让位）：桌面广播档
+        // 16/16 满额，atr1 进来 att1 出去（裁决与代价见 RelaySettings.caps 的 att1 注
+        // —— 桌面自己的事件走同进程直投不受影响，窄路径是远程会话的附件卡退文本占位）。
         assertEquals(
-            listOf(MsgTypes.CAP_AGENT, MsgTypes.CAP_LINK) + mobile,
+            listOf(MsgTypes.CAP_AGENT, MsgTypes.CAP_LINK) + (mobile - MsgTypes.CAP_ATTACHMENT),
             desktop,
-            "除 ag1/lnk1 外必须与手机端逐项一致",
+            "桌面 = 手机清单 + ag1/lnk1 − att1（预算让位裁决）",
         )
     }
 
@@ -237,7 +238,7 @@ class CapabilityAndNotificationSettingsTest {
 
         assertEquals(false, controller.state.value.settings.waitFrameCapability)
         assertEquals(
-            listOf(MsgTypes.CAP_MOBILE_RECORD, MsgTypes.CAP_AGENT_SESSION, MsgTypes.CAP_AGENT_QUEUE, MsgTypes.CAP_AGENT_WORKSPACE, MsgTypes.CAP_AGENT_GRANT, MsgTypes.CAP_AGENT_SESSION_PAGE, MsgTypes.CAP_TABLE_TEXT, MsgTypes.CAP_ATTACHMENT, MsgTypes.CAP_GROUP_TEXT_ATTRIBUTED, MsgTypes.CAP_AGENT_INVOKE, MsgTypes.CAP_AGENT_ARTIFACT_VERIFIED, MsgTypes.CAP_AGENT_CHANNEL),
+            listOf(MsgTypes.CAP_MOBILE_RECORD, MsgTypes.CAP_AGENT_SESSION, MsgTypes.CAP_AGENT_QUEUE, MsgTypes.CAP_AGENT_WORKSPACE, MsgTypes.CAP_AGENT_GRANT, MsgTypes.CAP_AGENT_SESSION_PAGE, MsgTypes.CAP_TABLE_TEXT, MsgTypes.CAP_AGENT_TOOL_RULES, MsgTypes.CAP_ATTACHMENT, MsgTypes.CAP_GROUP_TEXT_ATTRIBUTED, MsgTypes.CAP_AGENT_INVOKE, MsgTypes.CAP_AGENT_ARTIFACT_VERIFIED, MsgTypes.CAP_AGENT_CHANNEL),
             controller.state.value.settings.caps(),
             "重启后广播出去的能力必须还是用户关掉之后的那个（agn1 / agq1 / aws1 / tbl1 / agf1 恒在，与开关无关）",
         )

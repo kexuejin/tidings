@@ -210,6 +210,42 @@ class TeamScaffoldTest {
         )
     }
 
+    /**
+     * tester 棒的人设是**执行验证**文案，不是审查文案。
+     *
+     * tester 与 reviewer 同为 REVIEWER kind，回落模板靠槽位区分：同一段文案的后果是
+     * 「测试」棒从不执行任何验证，与「审查」棒说同样的话 —— 名字叫测试，干的是审查。
+     */
+    @Test
+    fun fallbackTemplateGivesTesterItsOwnVerificationPrompt() {
+        val spec = assertNotNull(
+            TeamScaffoldFallback.template(
+                need = "weather app prototype",
+                leaderAgentId = "dsh",
+                workerDriver = "codex",
+                reviewerDriver = "claude",
+                defaults = TeamScaffoldDefaults(teamTitle = "Team", role = "member"),
+                newAgentId = fixedId,
+            ),
+        )
+        val tester = spec.members.first { it.name.endsWith("-tester") }
+        val reviewer = spec.members.first { it.name.endsWith("-reviewer") }
+        assertTrue(
+            tester.prompt!!.contains("running the available build/test commands"),
+            "tester 人设要求真的跑命令：${tester.prompt}",
+        )
+        assertTrue(
+            tester.prompt != reviewer.prompt,
+            "tester 与 reviewer 的人设不能是同一段（复盘项：提示词雷同）",
+        )
+        assertTrue(
+            reviewer.prompt!!.contains("Review the current workspace"),
+            "reviewer 人设保持审查口径不变：${reviewer.prompt}",
+        )
+        // 两根审查棒都要显式结论行 —— tester 的结论要求不能因为分流而丢。
+        assertTrue(tester.prompt.contains("explicit final verdict line"))
+    }
+
     @Test
     fun garbageOrEmptyRostersAreRejected() {
         assertNull(parse("not json at all"))

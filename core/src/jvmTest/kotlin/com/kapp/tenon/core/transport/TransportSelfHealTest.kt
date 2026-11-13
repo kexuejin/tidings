@@ -115,7 +115,10 @@ class TransportSelfHealTest {
             assertFalse(sender.isRunning, "前提：transport 已停")
             val before = received
             awaitTrue("连续两轮发不出去之后必须重建 transport，心跳重新到达") { received > before }
-            assertTrue(sender.isRunning, "自愈后 transport 必须重新在跑")
+            // received>before 可能被旧 transport 死前的在途包提前满足 ——
+            // isRunning 是终态判据，也要走有界等待（自愈的「连续两轮失败」判定
+            // 在在途包满足上一条的瞬间还没走完；§2.7-6：观测预算不是断言）。
+            awaitTrue("自愈后 transport 必须重新在跑", timeoutMs = 30_000) { sender.isRunning }
         } finally {
             host.stop()
             sender.stop()

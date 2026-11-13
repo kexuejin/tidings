@@ -247,6 +247,19 @@ class DesktopExtension(
         get() = plane?.toolApprovalStore
 
     /**
+     * agent 写编制的授权档（`request` = 每次问机主 / `auto` = 直接执行）。
+     *
+     * 与 [toolApprovalStore] 同一条纪律：直取控制面上的**同一个实例**。档位只有两个读者 ——
+     * 控制面在每次写之前读它、设置页读它并改它；另开一个实例指同一个文件，界面就会在
+     * 「我明明点了直接执行」之后仍被弹卡（另一个实例的内存里还是 request）。
+     *
+     * 控制面没挂上时为 null：设置页据此说「读不到」，而不是画一个看起来是 request 的选项
+     * ——那会让人以为「点了也没用」。
+     */
+    val rosterWritePolicy: com.kapp.tenon.agent.RosterWritePolicy?
+        get() = plane?.rosterWritePolicy
+
+    /**
      * 每个 agent 的执行范围（谁能让它干活）。与 [grantStore] 同一档暴露给 UI ——
      * 两者都是**宿主自己的**台账，面板读写它们就是本机用户在配自己的机器。
      */
@@ -476,6 +489,9 @@ class DesktopExtension(
         )
         try {
             createdPlane = created
+            // P3 工具面：员工档案写面的宿主实现（agent 改名字/职责的唯一通路）。
+            // 档位默认 request（弹卡等人批），所以这里只接“能不能写”，不接“该不该写”。
+            created.rosterWriter = DesktopRosterWritePort(controller)
             // 工单编排器：文本路由（onAgentPrompt）与 invoke 执行桥（下方 CLI 分支）
             // 的**共同**执行入口 —— 真机 `@agent` 派单帧走后者，两者必须落进同一个
             // 编排器，工单卡/原型立项/追问唤醒/自愈退单才在两条路上都存在。
@@ -497,6 +513,11 @@ class DesktopExtension(
                 teamPlanRefiner = { plan -> TeamPlanRefiner.refine(plan) },
                 // 团队执行档：@组员 的宿主侧解析与编译（§4.3）。
                 teamExecutionStore = teamExecution,
+                // P3 工具面：给每一棒的指令尾部追加「本机还能调哪些改编制/改档案的动作」。
+                // 只在档案面真的装配了才给 —— 否则 agent 会照着一份空说明书去调不存在的路由。
+                rosterBrief = {
+                    if (created.rosterWriter != null) com.kapp.tenon.agent.RosterTools.brief() else null
+                },
                 // D16：执行档主键的 dirId 一半 —— 与控制面/端口同一份 HostDirectoryStore。
                 groupDirIdOf = { groupId -> hostDirectoryStore?.pointerOf(groupId) },
                 // D10/D15：节点级目录白名单（默认 deny 在 store 里）。按 path 反查 dirId；

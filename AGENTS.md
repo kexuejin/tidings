@@ -511,14 +511,11 @@ filter-repo 会**顺手删掉 `origin` remote**（防误推），跑完要重新
 | 真机怎么验、每条判据是什么 | [ACCEPTANCE.md](ACCEPTANCE.md) |
 | 提交规范、门禁命令、**重写历史** | [CONTRIBUTING.md](CONTRIBUTING.md) |
 | **组件共享的四种接缝与验收** | [design/component-sharing.md](design/component-sharing.md) |
-| 跨网/保活/公开传输的设计与实测 | `docs/cross-network-*.md`、`docs/public-transport-security.md` |
 | Agent 协议（PPE-1） | `docs/PROTOCOL-AGENT-WORKSPACE.md` |
 | 团队折叠（Team Folder）最终方案：形态、裁决、改造量、验收 | `docs/team-folder-final-plan.md` |
 | 团队创建（声明）最终方案：入口、写路径复用、裁决、验收 | `docs/team-creation-final-plan.md` |
-| 工作区模型重设计：项目 / 项目目录 / 执行设备三层（D1–D16 裁决、P0–P5 路线、清库重配纪律） | `docs/project-directory-and-execution-site-model.md` |
 | 多席位 / 多群 / 会话工作区一致性修正（C1–C5 细则、反向验证、真机判据） | `docs/seat-workspace-consistency-fix-plan.md` |
 | 真机证据（文字） | `design/runtime-evidence/` |
-| 仓库里哪些真机身份被清掉了、哪些是**有意保留**的 | `docs/privacy-scan-2026-10-29.md`（§4 是「家网段为什么不整体替换」） |
 
 ---
 

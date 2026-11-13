@@ -2,8 +2,8 @@
 #
 # 格式: <允许条数>\t<相对仓库根的路径>
 # 重新生成: ./gradlew :cjkLiteralGateBaseline
-# 生成时机: HEAD=a17b0825 (dirty), scope=app/src/commonMain,app/src/androidMain,app/src/iosMain,app/src/jvmMain,app/src/jvmSharedMain,composeApp/src/commonMain,composeApp/src/androidMain,composeApp/src/iosMain,composeApp/src/jvmMain,desktopApp/src/main,cli/src/main,agent-contract/src/main,orchestration/src/main
-# 命中总数: 72（文件数 16）
+# 生成时机: HEAD=3fff552f (dirty), scope=app/src/commonMain,app/src/androidMain,app/src/iosMain,app/src/jvmMain,app/src/jvmSharedMain,composeApp/src/commonMain,composeApp/src/androidMain,composeApp/src/iosMain,composeApp/src/jvmMain,desktopApp/src/main,cli/src/main,agent-contract/src/main,orchestration/src/main
+# 命中总数: 74（文件数 17）
 #
 4	app/src/commonMain/kotlin/com/kapp/tenon/platform/PlatformContracts.kt
 9	composeApp/src/androidMain/kotlin/com/kapp/tenon/platform/AndroidMdnsAdvertiser.kt
@@ -20,4 +20,5 @@
 1	orchestration/src/main/kotlin/com/kapp/tenon/orchestration/HostCardActions.kt
 5	orchestration/src/main/kotlin/com/kapp/tenon/orchestration/PlannerLlm.kt
 12	orchestration/src/main/kotlin/com/kapp/tenon/orchestration/StageChainGate.kt
+2	orchestration/src/main/kotlin/com/kapp/tenon/orchestration/TeamExecution.kt
 3	orchestration/src/main/kotlin/com/kapp/tenon/orchestration/TicketVerification.kt

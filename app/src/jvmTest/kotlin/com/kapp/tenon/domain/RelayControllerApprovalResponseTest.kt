@@ -156,6 +156,34 @@ class RelayControllerApprovalResponseTest {
     }
 
     @Test
+    fun alwaysAllowTriggersToolRulesSnapshotRefresh() = runBlocking {
+        // 「始终允许」会在宿主落一条免批规则 ⇒ ack 交出去之后顺带重拉一次快照
+        // （免批规则区块的停留更新路径，P1-5）。其余处置不动这张表，不发。
+        injectApproval("appr-always")
+        val readRequests = java.util.concurrent.ConcurrentLinkedQueue<String>()
+        val ackGate = kotlinx.coroutines.CompletableDeferred<Unit>()
+        val readGate = kotlinx.coroutines.CompletableDeferred<Unit>()
+        controller.agentCtl.ackSenderForTest = { _, _, _ -> ackGate.complete(Unit) }
+        controller.agentCtl.toolRulesReadSenderForTest = { peerId ->
+            readRequests += peerId
+            readGate.complete(Unit)
+            true
+        }
+        try {
+            controller.respondApproval("appr-always", AgentApprovalDecision.ALLOW_ALWAYS)
+            kotlinx.coroutines.withTimeout(5_000) { ackGate.await() }
+            kotlinx.coroutines.withTimeout(5_000) { readGate.await() }
+            assertEquals(
+                listOf(agentNodeId),
+                readRequests.toList(),
+                "始终允许 ⇒ 向该宿主重拉一次免批表快照",
+            )
+        } finally {
+            controller.agentCtl.toolRulesReadSenderForTest = null
+        }
+    }
+
+    @Test
     fun ackDeliveredKeepsDecisionWithoutBanner() = runBlocking {
         injectApproval("appr-delivered")
         // 「送达之后不许回滚」是一条**否定断言**：过去用 `delay(200)` 等一会儿再说"没回滚"，

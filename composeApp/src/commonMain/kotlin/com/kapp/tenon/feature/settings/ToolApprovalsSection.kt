@@ -12,6 +12,7 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
@@ -29,6 +30,8 @@ import com.kapp.tenon.generated.resources.tool_approvals_agent
 import com.kapp.tenon.generated.resources.tool_approvals_all_agents
 import com.kapp.tenon.generated.resources.tool_approvals_desc
 import com.kapp.tenon.generated.resources.tool_approvals_empty
+import com.kapp.tenon.generated.resources.tool_approvals_loading
+import com.kapp.tenon.generated.resources.tool_approvals_read_failed
 import com.kapp.tenon.generated.resources.tool_approvals_gone
 import com.kapp.tenon.generated.resources.tool_approvals_revoke
 import com.kapp.tenon.generated.resources.tool_approvals_revoked
@@ -81,6 +84,20 @@ interface ToolApprovalsSource {
 
     /** 外部写入通知（对端按「始终允许」时控制面线程写表），返回注销函数。 */
     fun addChangeListener(listener: () -> Unit): () -> Unit
+
+    /**
+     * 快照是否**已经到过**本端。默认 true（桌面同进程直读，表永远在）；
+     * 跨端实现据此区分「确实没有规则」与「快照还没到/没读到」—— 空表文案说前半句，
+     * 读的时候说后半句，两个状态画成同一个就是撒谎（真机现场：进屏先见「还没有
+     * 免批规则」，快照到了才变真）。
+     */
+    fun hasLoadedSnapshot(): Boolean = true
+
+    /**
+     * 最近一次读是否**没送出去**（宿主可能不在线）。默认 false；跨端实现从切片读。
+     * 与 [hasLoadedSnapshot] 成对用：没读到 + 没送出去 = 「读不到，回到这一屏会重试」。
+     */
+    fun lastReadFailed(): Boolean = false
 }
 
 /**
@@ -138,6 +155,14 @@ fun ToolApprovalsSection(
      * 同一帧两次渲染要逐像素相同，挂钟进来今天绿、明天就红（见 PreviewClock）。
      */
     now: Long = nowMillis(),
+    /**
+     * 「没撤掉（removed == 0）」时的壳侧文案；null = 默认那档「那条已经不在了」。
+     *
+     * 为什么给壳留这个口：桌面宿主侧的 0 = 「对端刚撤过 / 文件被换掉」—— 那行
+     * 已经不在了；手机侧的 0 = **撤销帧没发出去**（宿主可能不在线）—— 行还挂着，
+     * 两个 0 语义不同，套同一句会撒谎（§2.5：诊断要么如实、要么不存在）。
+     */
+    revokeFailedNote: String? = null,
 ) {
     val sp = LocalAppSpacing.current
     var epoch by remember { mutableIntStateOf(0) }
@@ -154,6 +179,22 @@ fun ToolApprovalsSection(
 
     val admin = remember(source) { source?.let { ToolApprovalAdmin(it) } }
     val rows = remember(admin, epoch) { admin?.rows().orEmpty() }
+    // 读侧状态与行同一拍刷新（epoch 变化时一起重读）：快照没到过 = 还在读；
+    // 没到过且最近一次读没送出去 = 读不到。两者都不能画成「还没有规则」。
+    val snapshotLoaded = remember(admin, epoch) { source?.hasLoadedSnapshot() ?: true }
+    val readFailed = remember(admin, epoch) { source?.lastReadFailed() ?: false }
+    // 撤过的行**回来了** = 撤销没真的发生（发送失败回滚）。成功回执不能继续挂着 ——
+    // 挂着就是「已撤销 1 条」与眼前那行同时成立的自相矛盾（真机走查抓到）。
+    // 桌面同进程撤销不会回来；跨端回滚与外部重新授权此刻区分不了 ⇒ 如实清空回执
+    // （行还在眼前，说不清楚的时候不说话）。
+    var lastRevokedRow by remember { mutableStateOf<ToolApprovalRow?>(null) }
+    LaunchedEffect(rows) {
+        val r = lastRevokedRow
+        if (r != null && (lastRevoked ?: 0) > 0 && rows.any { it == r }) {
+            lastRevoked = null
+            lastRevokedRow = null
+        }
+    }
 
     Surface(
         color = MaterialTheme.colorScheme.surface,
@@ -180,13 +221,15 @@ fun ToolApprovalsSection(
             )
 
             lastRevoked?.let { removed ->
-                // 两档分开说：删掉了 / 已经不在了。合并成「操作成功」会让第二种情况
-                // （对端刚撤过、或文件被换掉）看起来像"我撤掉了什么"，其实什么都没撤。
+                // 两档分开说：删掉了 / 没撤掉。合并成「操作成功」会让第二种情况
+                // 看起来像"我撤掉了什么"，其实什么都没撤。0 那一档的文案可被壳
+                // 覆盖（手机侧的 0 是"帧没发出去"，不是"已经不在了"）。
+                val failedNote = revokeFailedNote?.takeIf { removed == 0 }
                 Text(
                     text = if (removed > 0) {
                         stringResource(Res.string.tool_approvals_revoked, removed)
                     } else {
-                        stringResource(Res.string.tool_approvals_gone)
+                        failedNote ?: stringResource(Res.string.tool_approvals_gone)
                     },
                     style = MaterialTheme.typography.labelSmall,
                     color = if (removed > 0) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant,
@@ -198,6 +241,20 @@ fun ToolApprovalsSection(
                 // 而真实情况是"读不到"—— 用户会据此以为免批已经被清空。
                 source == null -> Text(
                     text = stringResource(Res.string.tool_approvals_unavailable),
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+
+                // 快照还没到（或没读到）：同样**不许画成空表**。真机现场：进屏的头
+                // 一拍快照没回来，空表文案先说了「还没有免批规则」，半秒后真数据才
+                // 到 —— 先说的那半句是假的。
+                !snapshotLoaded && readFailed -> Text(
+                    text = stringResource(Res.string.tool_approvals_read_failed),
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+                !snapshotLoaded -> Text(
+                    text = stringResource(Res.string.tool_approvals_loading),
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
@@ -253,9 +310,15 @@ fun ToolApprovalsSection(
                             size = AppButtonSize.Small,
                             tone = AppButtonTone.Danger,
                             onClick = {
-                                lastRevoked = admin?.revoke(row)
+                                admin?.let { a ->
+                                    lastRevoked = a.revoke(row)
+                                    if ((lastRevoked ?: 0) > 0) lastRevokedRow = row
+                                }
                                 // 不依赖监听回调刷新：撤销是本页发起的，这一下必须立刻可见
                                 // （监听回调在锁外同步触发，但界面状态更新不该排在它后面）。
+                                // 重复点击不设防的依据：成功的那一拍行已从列表移除（乐观翻行）
+                                // ⇒ 重组后这一行的按钮不存在了，双击窗口只剩一次重组（毫秒级）；
+                                // 失败回滚由 lastRevokedRow 监听如实清回执。
                                 epoch++
                             },
                         )

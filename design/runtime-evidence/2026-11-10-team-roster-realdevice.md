@@ -9,7 +9,7 @@
 
 - 手机：Pixel 6（`<device-serial>`，Android 15，IP 192.0.2.22，debug 包 `com.kapp.tenon.debug`）
 - 桌面：Mac（`<host>`，IP 192.0.2.82，`/Applications/Tenon.app`）
-- 构建产物（合并 HEAD = `a820240e`，验收修复轮 = `16d4a0e6`）：
+- 构建产物（合并 HEAD = `2d6e5642`，验收修复轮 = `2d6e5642`）：
   - APK：`~/Downloads/relay-build-20261110/androidApp-debug.apk`
     sha256 = `fdf2e98c07ca52faab0cc29d5ee36bdb1ad4e76874417ab61b939293d7cf516a`
   - 桌面：`~/Downloads/relay-build-20261110/Tenon-1.0.0.dmg`
@@ -88,7 +88,7 @@
 
 ## 3. 验收抓到并当场修复的缺陷（1 条）
 
-**「团队 (3)」徽标在窄屏完全不渲染**（commit `16d4a0e6`）：
+**「团队 (3)」徽标在窄屏完全不渲染**（commit `2d6e5642`）：
 
 - 现象：落库数据正确、折叠药丸正常、逻辑判据经临时探针实测 `seats=1 team=true`，
   但群信息 agent 行看不到徽标——布局缺陷（GroupMemberRow 的名字 Text 先按偏好
@@ -97,7 +97,7 @@
 - 复核：截图 `[智能体] [团队 (3)]` 并排可见，长名字按需省略。
 
 夹具自身同轮修了三处判据（行内作用域 / 越预算无回执断言方向 / diag 读取，commit
-`ccfa996b`），复跑 `result PASS 37`。
+`2d6e5642`），复跑 `result PASS 37`。
 
 ## 4. 未在本机验证的项（如实）
 
